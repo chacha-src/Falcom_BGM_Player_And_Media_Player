@@ -1151,7 +1151,8 @@ void CProToolsDlg::OnContextMenu(CWnd* pWnd, CPoint point)
 			L"Mid/Side 폭(즉시·모노 해제)", L"Mid/Side 宽度（即时；清除 mono）", L"عرض Mid/Side (مباشر؛ يلغي mono)", L"Ширина Mid/Side (сразу; сброс mono)", L"Mid/Side-Breite (live; Mono aus)",
 			L"Largura Mid/Side (ao vivo; limpa mono)", L"Mid/Side-breedte (live; mono uit)", L"Szerokosc Mid/Side (na zywo; bez mono)", L"Mid/Side genislik (anlik; mono kapat)"));
 	CCustomPopupMenu* subMs = menu.AddSubMenu(
-		LL14(L"相関→M/S", L"Correlation→M/S", L"Correlation→M/S", L"Correlazione→M/S", L"Correlacion→M/S", L"상관→M/S", L"相关→M/S", L"ترابط→M/S", L"Корреляция→M/S", L"Korrelation→M/S", L"Correlacao→M/S", L"Correlatie→M/S", L"Korelacja→M/S", L"Korelasyon→M/S"));
+		LL14(L"相関→M/S", L"Correlation→M/S", L"Correlation→M/S", L"Correlazione→M/S", L"Correlacion→M/S", L"상관→M/S", L"相关→M/S", L"ترابط→M/S", L"Корреляция→M/S", L"Korrelation→M/S", L"Correlacao→M/S", L"Correlatie→M/S", L"Korelacja→M/S", L"Korelasyon→M/S"),
+		LL14(L"相関メーターの傾向から Mid/Side 幅プリセットを適用します。", L"Apply Mid/Side width presets from correlation trends.", L"Appliquer des presets Mid/Side selon la correlation.", L"Applica preset Mid/Side dalla correlazione.", L"Aplicar presets Mid/Side segun la correlacion.", L"상관 추세에 따라 Mid/Side 폭 프리셋을 적용합니다.", L"根据相关趋势应用 Mid/Side 宽度预设。", L"تطبيق إعدادات عرض Mid/Side من اتجاه الترابط.", L"Применять пресеты ширины Mid/Side по корреляции.", L"Mid/Side-Breitenpresets aus Korrelationstrends.", L"Aplicar presets Mid/Side pela correlacao.", L"Pas Mid/Side-breedtepresets toe via correlatie.", L"Stosuj presety szerokosci Mid/Side z korelacji.", L"Korelasyon egiliminden Mid/Side genislik onayarlarini uygula."));
 	if (subMs) {
 		subMs->AddCheck(IDM_PT_MS_NARROW,
 			LL14(L"M/S 狭め (40%)", L"M/S narrow (40%)", L"M/S etroit (40%)", L"M/S stretto (40%)", L"M/S estrecho (40%)", L"M/S 좁게", L"M/S 窄", L"M/S ضيق", L"M/S узко", L"M/S schmal", L"M/S estreito", L"M/S smal", L"M/S wasko", L"M/S dar"),
@@ -1169,22 +1170,50 @@ void CProToolsDlg::OnContextMenu(CWnd* pWnd, CPoint point)
 		LL14(L"ギャップレス", L"Gapless", L"Sans silence", L"Senza gap", L"Sin pausa",
 			L"갭리스", L"无缝", L"بدون فجوة", L"Без паузы", L"Lückenlos",
 			L"Sem intervalo", L"Naadloos", L"Bez przerw", L"Bosluksuz"),
-		savedata.pro_gapless != 0);
+		savedata.pro_gapless != 0,
+		LL14(L"曲間の無音を詰めて継ぎ目なく再生します。", L"Play tracks back-to-back without silence gaps.",
+			L"Enchainer les pistes sans silence entre elles.", L"Riproduci brani senza silenzi tra di essi.",
+			L"Reproducir pistas sin silencios entre ellas.", L"곡 사이 무음을 없애 이어서 재생합니다.",
+			L"去掉曲间静音以无缝衔接播放。", L"تشغيل المقاطع متتالية دون صمت بينها.",
+			L"Воспроизводить треки без пауз между ними.", L"Titel lückenlos ohne Stille dazwischen abspielen.",
+			L"Reproduzir faixas sem silencio entre elas.", L"Tracks naadloos afspelen zonder stilte.",
+			L"Odtwarzaj utwory bez ciszy miedzy nimi.", L"Parcalar arasinda sessizlik olmadan ardisik cal."));
 	menu.AddCheck(IDM_PT_CORR,
 		LL14(L"位相相関メーター", L"Correlation meter", L"Correlometre", L"Misuratore correlazione", L"Medidor correlacion",
 			L"위상 상관 미터", L"相位相关表", L"مقياس الترابط", L"Корреляция", L"Korrelationsmesser",
 			L"Medidor correlacao", L"Correlatiemeter", L"Miernik korelacji", L"Faz korelasyon"),
-		savedata.pro_corr_meter != 0);
+		savedata.pro_corr_meter != 0,
+		LL14(L"ステレオ位相相関を表示します（-1…+1）。", L"Show stereo phase correlation (-1…+1).",
+			L"Afficher la correlation de phase stereo (-1…+1).", L"Mostra la correlazione di fase stereo (-1…+1).",
+			L"Mostrar correlacion de fase estereo (-1…+1).", L"스테레오 위상 상관을 표시합니다(-1…+1).",
+			L"显示立体声相位相关（-1…+1）。", L"عرض ترابط الطور الاستريو (-1…+1).",
+			L"Показывать фазовую корреляцию стерео (-1…+1).", L"Stereo-Phasenkorrelation anzeigen (-1…+1).",
+			L"Mostrar correlacao de fase stereo (-1…+1).", L"Stereo-fasecorrelatie tonen (-1…+1).",
+			L"Pokaz korelacje fazy stereo (-1…+1).", L"Stereo faz korelasyonunu goster (-1…+1)."));
 	menu.AddCheck(IDM_PT_EXPLIMIT,
 		LL14(L"書き出しリミット", L"Export limit", L"Limite export", L"Limite export", L"Limite exportacion",
 			L"내보내기 리밋", L"导出限制", L"حد التصدير", L"Лимит экспорта", L"Exportlimit",
 			L"Limite de exportacao", L"Exportlimiet", L"Limit eksportu", L"Disa aktarma limiti"),
-		savedata.pro_export_limit != 0);
+		savedata.pro_export_limit != 0,
+		LL14(L"書き出し時のレベル上限を適用してクリップを防ぎます。", L"Apply an export level ceiling to help prevent clipping.",
+			L"Appliquer un plafond de niveau a l'export pour eviter le clipping.", L"Applica un tetto di livello in export per evitare clipping.",
+			L"Aplicar un tope de nivel al exportar para evitar clipping.", L"내보내기 레벨 상한을 적용해 클리핑을 막습니다.",
+			L"导出时应用电平上限以防削波。", L"تطبيق سقف مستوى عند التصدير لمنع القص.",
+			L"Применять потолок уровня при экспорте против клиппинга.", L"Pegeldeckel beim Export gegen Clipping anwenden.",
+			L"Aplicar teto de nivel na exportacao para evitar clipping.", L"Niveauplafond bij export toepassen tegen clipping.",
+			L"Stosuj sufit poziomu przy eksporcie przeciw clippingowi.", L"Disa aktarimda seviye tavanini uygula, kirpmayi onle."));
 	menu.AddCheck(IDM_PT_EXPTP,
 		LL14(L"True Peak 制限", L"True Peak limit", L"Limite True Peak", L"Limite True Peak", L"Limite True Peak",
 			L"True Peak 제한", L"True Peak 限制", L"حد True Peak", L"Лимит True Peak", L"True-Peak-Limit",
 			L"Limite True Peak", L"True Peak-limiet", L"Limit True Peak", L"True Peak limiti"),
-		savedata.pro_export_tp != 0);
+		savedata.pro_export_tp != 0,
+		LL14(L"書き出しで True Peak を制限して過大ピークを抑えます。", L"Limit True Peak on export to curb inter-sample peaks.",
+			L"Limiter le True Peak a l'export pour freiner les pics.", L"Limita il True Peak in export per contenere i picchi.",
+			L"Limitar True Peak al exportar para contener picos.", L"내보내기에서 True Peak를 제한해 과도 피크를 줄입니다.",
+			L"导出时限制 True Peak 以抑制过冲峰值。", L"تقييد True Peak عند التصدير لكبح الذروات.",
+			L"Ограничивать True Peak при экспорте от пиков.", L"True Peak beim Export begrenzen gegen Spitzen.",
+			L"Limitar True Peak na exportacao para conter picos.", L"True Peak bij export beperken tegen pieken.",
+			L"Ogranicz True Peak przy eksporcie przeciw szczytom.", L"Disa aktarimda True Peak sinirlayip tepeyi baskila."));
 	if (point.x == -1 && point.y == -1) {
 		CRect rc; GetClientRect(&rc); ClientToScreen(&rc);
 		point = CPoint(rc.left + 8, rc.top + 8);

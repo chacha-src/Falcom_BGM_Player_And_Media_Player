@@ -1365,7 +1365,22 @@ void CScPreviewCtrl::OnRButtonUp(UINT nFlags, CPoint point)
 				? LL14(L"表示する", L"Show", L"Afficher", L"Mostra", L"Mostrar", L"표시", L"显示", L"إظهار",
 					L"Показать", L"Einblenden", L"Mostrar", L"Tonen", L"Pokaż", L"Göster")
 				: LL14(L"非表示にする", L"Hide", L"Masquer", L"Nascondi", L"Ocultar", L"숨기기", L"隐藏", L"إخفاء",
-					L"Скрыть", L"Ausblenden", L"Ocultar", L"Verbergen", L"Ukryj", L"Gizle"));
+					L"Скрыть", L"Ausblenden", L"Ocultar", L"Verbergen", L"Ukryj", L"Gizle"),
+				hidden
+				? LL14(L"このレイヤの映像を再表示（音はそのまま）", L"Show this layer's video again (audio unchanged)",
+					L"Reafficher la video de ce calque (audio inchange)", L"Mostra di nuovo il video del livello (audio invariato)",
+					L"Volver a mostrar el video de esta capa (audio igual)", L"이 레이어 영상을 다시 표시(소리는 그대로)",
+					L"重新显示此层画面（音频不变）", L"إظهار فيديو هذه الطبقة مجدداً (الصوت كما هو)",
+					L"Снова показать видео слоя (звук без изменений)", L"Video dieser Ebene wieder einblenden (Audio gleich)",
+					L"Mostrar de novo o video desta camada (audio igual)", L"Video van deze laag weer tonen (audio ongewijzigd)",
+					L"Pokaz ponownie wideo warstwy (audio bez zmian)", L"Bu katmanin videosunu tekrar goster (ses ayni)")
+				: LL14(L"このレイヤの映像を隠す（音だけ載せたいときに）", L"Hide this layer's video (keep audio if needed)",
+					L"Masquer la video de ce calque (garder l'audio)", L"Nascondi il video del livello (tieni l'audio)",
+					L"Ocultar el video de esta capa (mantener audio)", L"이 레이어 영상을 숨김(소리만 남길 때)",
+					L"隐藏此层画面（需要时可保留音频）", L"إخفاء فيديو هذه الطبقة (مع الإبقاء على الصوت)",
+					L"Скрыть видео слоя (звук можно оставить)", L"Video dieser Ebene ausblenden (Audio behalten)",
+					L"Ocultar o video desta camada (manter audio)", L"Video van deze laag verbergen (audio behouden)",
+					L"Ukryj wideo warstwy (audio mozna zostawic)", L"Bu katmanin videosunu gizle (sesi tut)"));
 			menu.AddSeparator();
 			menu.AddCommand(ID_SC_LAYER_FIT,
 				LL14(L"キャンバスにフィット", L"Fit to canvas", L"Ajuster au canevas", L"Adatta al canvas",
@@ -1381,31 +1396,66 @@ void CScPreviewCtrl::OnRButtonUp(UINT nFlags, CPoint point)
 				LL14(L"50% サイズ", L"50% size", L"Taille 50%", L"Dimensione 50%",
 					L"Tamaño 50%", L"50% 크기", L"50% 大小", L"حجم 50٪",
 					L"Размер 50%", L"50% Größe", L"Tamanho 50%", L"50% grootte",
-					L"Rozmiar 50%", L"%50 boyut"));
+					L"Rozmiar 50%", L"%50 boyut"),
+				LL14(L"選択レイヤをキャンバスの約50%サイズに", L"Scale selected layer to about 50% of the canvas",
+					L"Mettre le calque a environ 50% du canevas", L"Scala il livello a circa il 50% del canvas",
+					L"Escalar la capa a unos 50% del lienzo", L"선택 레이어를 캔버스 약 50% 크기로",
+					L"将所选层缩放到画布约 50%", L"تغيير حجم الطبقة إلى نحو 50٪ من اللوحة",
+					L"Масштаб слоя примерно 50% холста", L"Ebene auf ca. 50% der Fläche skalieren",
+					L"Dimensionar a camada a cerca de 50% da tela", L"Laag schalen naar ongeveer 50% van het canvas",
+					L"Skaluj warstwe do ok. 50% plotna", L"Secili katmani tuvalin yaklasik %50 boyutuna"));
 			menu.AddCommand(ID_SC_LAYER_SCALE100,
 				LL14(L"実寸 (100%)", L"Actual size (100%)", L"Taille réelle (100%)", L"Dimensione reale (100%)",
 					L"Tamaño real (100%)", L"실측 (100%)", L"实际大小 (100%)", L"الحجم الفعلي (100٪)",
 					L"Реальный размер (100%)", L"Originalgröße (100%)", L"Tamanho real (100%)", L"Ware grootte (100%)",
-					L"Rzeczywisty rozmiar (100%)", L"Gerçek boyut (%100)"));
+					L"Rzeczywisty rozmiar (100%)", L"Gerçek boyut (%100)"),
+				LL14(L"選択レイヤを実寸（100%）に戻す", L"Reset selected layer to actual size (100%)",
+					L"Remettre le calque a la taille reelle (100%)", L"Ripristina il livello a dimensione reale (100%)",
+					L"Restablecer la capa a tamano real (100%)", L"선택 레이어를 실측(100%)으로",
+					L"将所选层恢复为实际大小（100%）", L"إعادة الطبقة إلى الحجم الفعلي (100٪)",
+					L"Вернуть слой к реальному размеру (100%)", L"Ebene auf Originalgroesse (100%) setzen",
+					L"Redefinir a camada para tamanho real (100%)", L"Laag terugzetten naar ware grootte (100%)",
+					L"Przywroc warstwe do rzeczywistego rozmiaru (100%)", L"Secili katmani gercek boyuta (%100) al"));
 			menu.AddSeparator();
 			menu.AddCommand(ID_SC_LAYER_ZUP,
 				LL14(L"手前へ (Z+)", L"Bring forward (Z+)", L"Vers l'avant (Z+)", L"Porta avanti (Z+)",
 					L"Traer al frente (Z+)", L"앞으로 (Z+)", L"前移 (Z+)", L"تقديم (Z+)",
 					L"Вперёд (Z+)", L"Nach vorne (Z+)", L"Para frente (Z+)", L"Naar voren (Z+)",
 					L"Do przodu (Z+)", L"Öne getir (Z+)"),
-				NULL, layer > 0);
+				LL14(L"重ね順を1つ手前へ（Zオーダー＋）", L"Bring the layer one step forward (Z-order +)",
+					L"Avancer d'un cran dans l'ordre Z", L"Porta avanti di un passo nell'ordine Z",
+					L"Traer un paso al frente (orden Z +)", L"겹침 순서를 한 단계 앞으로(Z+)",
+					L"将叠放顺序前移一层（Z+）", L"تقديم الطبقة خطوة في ترتيب Z",
+					L"Сдвинуть слой на один шаг вперёд (Z+)", L"Ebene eine Stufe nach vorne (Z+)",
+					L"Trazer a camada um passo a frente (Z+)", L"Laag een stap naar voren (Z+)",
+					L"Przesun warstwe o jeden w przod (Z+)", L"Katmani bir adim one getir (Z+)"),
+				layer > 0);
 			menu.AddCommand(ID_SC_LAYER_ZDOWN,
 				LL14(L"奥へ (Z-)", L"Send back (Z-)", L"Vers l'arrière (Z-)", L"Porta indietro (Z-)",
 					L"Enviar atrás (Z-)", L"뒤로 (Z-)", L"后移 (Z-)", L"تأخير (Z-)",
 					L"Назад (Z-)", L"Nach hinten (Z-)", L"Para trás (Z-)", L"Naar achteren (Z-)",
 					L"Do tyłu (Z-)", L"Geriye gönder (Z-)"),
-				NULL, layer < m_owner->m_layerCnt - 1);
+				LL14(L"重ね順を1つ奥へ（Zオーダー−）", L"Send the layer one step back (Z-order −)",
+					L"Reculer d'un cran dans l'ordre Z", L"Porta indietro di un passo nell'ordine Z",
+					L"Enviar un paso atras (orden Z −)", L"겹침 순서를 한 단계 뒤로(Z−)",
+					L"将叠放顺序后移一层（Z−）", L"تأخير الطبقة خطوة في ترتيب Z",
+					L"Сдвинуть слой на один шаг назад (Z−)", L"Ebene eine Stufe nach hinten (Z−)",
+					L"Enviar a camada um passo para tras (Z−)", L"Laag een stap naar achteren (Z−)",
+					L"Przesun warstwe o jeden w tyl (Z−)", L"Katmani bir adim geriye gonder (Z−)"),
+				layer < m_owner->m_layerCnt - 1);
 			menu.AddSeparator();
 			menu.AddCommand(ID_SC_LAYER_CROP_FULL,
 				LL14(L"切出を解除", L"Clear crop", L"Annuler le rognage", L"Annulla ritaglio",
 					L"Quitar recorte", L"잘라내기 해제", L"清除裁剪", L"إلغاء القص",
 					L"Сбросить вырез", L"Ausschnitt aufheben", L"Limpar recorte", L"Uitsnede wissen",
-					L"Wyczyść wycinek", L"Kırpmayı temizle"));
+					L"Wyczyść wycinek", L"Kırpmayı temizle"),
+				LL14(L"選択レイヤの切出（クロップ）を解除し全体を表示", L"Clear crop on the selected layer and show the full window",
+					L"Annuler le rognage et afficher toute la fenetre", L"Annulla il ritaglio e mostra tutta la finestra",
+					L"Quitar el recorte y mostrar toda la ventana", L"선택 레이어의 잘라내기를 해제하고 전체 표시",
+					L"清除所选层的裁剪并显示整个窗口", L"إلغاء القص وعرض النافذة كاملة",
+					L"Сбросить вырез и показать всё окно", L"Ausschnitt aufheben und ganzes Fenster zeigen",
+					L"Limpar o recorte e mostrar a janela inteira", L"Uitsnede wissen en hele venster tonen",
+					L"Wyczysc wycinek i pokaz cale okno", L"Kirpmayi temizle ve tum pencereyi goster"));
 			menu.AddSeparator();
 			menu.AddCommand(ID_SC_LAYER_TILE,
 				LL14(L"レイヤを整列", L"Tile layers", L"Aligner les calques", L"Allinea livelli",
@@ -1419,7 +1469,14 @@ void CScPreviewCtrl::OnRButtonUp(UINT nFlags, CPoint point)
 				LL14(L"レイヤを削除", L"Remove layer", L"Retirer le calque", L"Rimuovi livello",
 					L"Quitar capa", L"레이어 삭제", L"删除层", L"إزالة الطبقة",
 					L"Удалить слой", L"Ebene entfernen", L"Remover camada", L"Laag verwijderen",
-					L"Usuń warstwę", L"Katmanı kaldır"));
+					L"Usuń warstwę", L"Katmanı kaldır"),
+				LL14(L"このレイヤをリストから削除します", L"Remove this layer from the list",
+					L"Retirer ce calque de la liste", L"Rimuovi questo livello dall'elenco",
+					L"Quitar esta capa de la lista", L"이 레이어를 목록에서 삭제",
+					L"从此列表中删除该层", L"إزالة هذه الطبقة من القائمة",
+					L"Удалить этот слой из списка", L"Diese Ebene aus der Liste entfernen",
+					L"Remover esta camada da lista", L"Deze laag uit de lijst verwijderen",
+					L"Usun te warstwe z listy", L"Bu katmani listeden kaldir"));
 			CPoint sp = point;
 			ClientToScreen(&sp);
 			const UINT cmd = menu.Track(sp, m_owner);
@@ -2089,7 +2146,14 @@ void CScFxWireCtrl::OnRButtonUp(UINT nFlags, CPoint point)
 		LL14(L"このスロットを解除", L"Clear this slot", L"Effacer ce slot", L"Azzera questo slot",
 			L"Borrar esta ranura", L"이 슬롯 해제", L"清除此插槽", L"مسح هذه الفتحة",
 			L"Очистить этот слот", L"Diesen Slot löschen", L"Limpar este slot", L"Deze slot wissen",
-			L"Wyczyść ten slot", L"Bu slotu temizle"));
+			L"Wyczyść ten slot", L"Bu slotu temizle"),
+		LL14(L"このスロットの効果を外し、右側を詰めて並べ替え", L"Clear this slot's effect and shift the ones on the right leftward",
+			L"Effacer l'effet de ce slot et decaler ceux de droite", L"Azzera l'effetto di questo slot e sposta quelli a destra",
+			L"Borrar el efecto de este slot y desplazar los de la derecha", L"이 슬롯 효과를 제거하고 오른쪽을 왼쪽으로 채움",
+			L"清除此插槽效果并将右侧效果左移", L"مسح تأثير هذه الفتحة وإزاحة اليمنى لليسار",
+			L"Очистить эффект слота и сдвинуть правые влево", L"Effekt dieses Slots loeschen und rechte nach links ruecken",
+			L"Limpar o efeito deste slot e deslocar os da direita", L"Effect van dit slot wissen en rechts naar links schuiven",
+			L"Wyczysc efekt tego slotu i przesun prawe w lewo", L"Bu slotun efektini kaldir ve sagdakileri sola kaydir"));
 	menu.AddCommand(ID_SC_FX_DUP_SLOT,
 		LL14(L"この効果を右に複製", L"Duplicate effect to the right", L"Dupliquer à droite", L"Duplica a destra",
 			L"Duplicar a la derecha", L"오른쪽으로 복제", L"向右复制此效果", L"تكرار التأثير يميناً",
@@ -2108,13 +2172,27 @@ void CScFxWireCtrl::OnRButtonUp(UINT nFlags, CPoint point)
 			L"Mover a la izquierda", L"왼쪽으로", L"向左移动", L"تحريك لليسار",
 			L"Влево", L"Nach links", L"Mover para a esquerda", L"Naar links",
 			L"W lewo", L"Sola taşı"),
-		NULL, slot > 0);
+		LL14(L"この効果を1つ左のスロットへ入れ替え（適用順を前へ）", L"Swap this effect one slot left (earlier in the chain)",
+			L"Echanger avec le slot de gauche (plus tot dans la chaine)", L"Scambia con lo slot a sinistra (prima nella catena)",
+			L"Intercambiar con el slot de la izquierda (antes en la cadena)", L"이 효과를 왼쪽 슬롯과 교환(체인 앞쪽)",
+			L"与左侧插槽对调（更早应用）", L"تبديل مع الفتحة اليسرى (أبكر في السلسلة)",
+			L"Поменять со слотом слева (раньше в цепочке)", L"Mit linkem Slot tauschen (frueher in der Kette)",
+			L"Trocar com o slot a esquerda (mais cedo na cadeia)", L"Wisselen met linker slot (eerder in de keten)",
+			L"Zamien z slotem po lewej (wczesniej w lancuchu)", L"Soldaki slotla degistir (zincirde daha once)"),
+		slot > 0);
 	menu.AddCommand(ID_SC_FX_MOVE_RIGHT,
 		LL14(L"右へ移動", L"Move right", L"Déplacer à droite", L"Sposta a destra",
 			L"Mover a la derecha", L"오른쪽으로", L"向右移动", L"تحريك لليمين",
 			L"Вправо", L"Nach rechts", L"Mover para a direita", L"Naar rechts",
 			L"W prawo", L"Sağa taşı"),
-		NULL, slot < m_slotN - 1);
+		LL14(L"この効果を1つ右のスロットへ入れ替え（適用順を後へ）", L"Swap this effect one slot right (later in the chain)",
+			L"Echanger avec le slot de droite (plus tard dans la chaine)", L"Scambia con lo slot a destra (dopo nella catena)",
+			L"Intercambiar con el slot de la derecha (despues en la cadena)", L"이 효과를 오른쪽 슬롯과 교환(체인 뒤쪽)",
+			L"与右侧插槽对调（更晚应用）", L"تبديل مع الفتحة اليمنى (أحدث في السلسلة)",
+			L"Поменять со слотом справа (позже в цепочке)", L"Mit rechtem Slot tauschen (spaeter in der Kette)",
+			L"Trocar com o slot a direita (mais tarde na cadeia)", L"Wisselen met rechter slot (later in de keten)",
+			L"Zamien z slotem po prawej (pozniej w lancuchu)", L"Sagdaki slotla degistir (zincirde daha sonra)"),
+		slot < m_slotN - 1);
 	menu.AddSeparator();
 
 	CCustomPopupMenu* strRoot = menu.AddSubMenu(
@@ -2179,12 +2257,26 @@ void CScFxWireCtrl::OnRButtonUp(UINT nFlags, CPoint point)
 			L"Borrar a la derecha", L"오른쪽 슬롯 해제", L"清除右侧插槽", L"مسح الفتحات إلى اليمين",
 			L"Очистить справа", L"Rechts löschen", L"Limpar à direita", L"Rechts wissen",
 			L"Wyczyść na prawo", L"Sağı temizle"),
-		NULL, slot < m_slotN - 1);
+		LL14(L"このスロットより右の効果をすべて解除", L"Clear all effects in slots to the right of this one",
+			L"Effacer tous les effets a droite de ce slot", L"Azzera tutti gli effetti a destra di questo slot",
+			L"Borrar todos los efectos a la derecha de este slot", L"이 슬롯보다 오른쪽 효과를 모두 해제",
+			L"清除此插槽右侧的全部效果", L"مسح كل التأثيرات إلى يمين هذه الفتحة",
+			L"Очистить все эффекты справа от этого слота", L"Alle Effekte rechts von diesem Slot loeschen",
+			L"Limpar todos os efeitos a direita deste slot", L"Alle effecten rechts van dit slot wissen",
+			L"Wyczysc wszystkie efekty na prawo od tego slotu", L"Bu slotun sagindaki tum efektleri temizle"),
+		slot < m_slotN - 1);
 	menu.AddCommand(ID_SC_FX_CLEAR_ALL,
 		LL14(L"すべての配線を解除", L"Clear all wiring", L"Effacer tout le câblage", L"Azzera tutto",
 			L"Borrar todo el cableado", L"모든 배선 해제", L"清除全部连线", L"مسح كل التوصيل",
 			L"Очистить всю схему", L"Gesamte Verdrahtung löschen", L"Limpar toda a ligação", L"Alle bedrading wissen",
-			L"Wyczyść całe okablowanie", L"Tüm kablolamayı temizle"));
+			L"Wyczyść całe okablowanie", L"Tüm kablolamayı temizle"),
+		LL14(L"FXチェーン全体を空にし、配線をクリア", L"Empty the entire FX chain and clear all wiring",
+			L"Vider toute la chaine FX et effacer le cablage", L"Svuota l'intera catena FX e azzera il cablaggio",
+			L"Vaciar toda la cadena FX y borrar el cableado", L"FX 체인 전체를 비우고 배선을 클리어",
+			L"清空整个 FX 链并清除连线", L"تفريغ سلسلة FX بالكامل ومسح التوصيل",
+			L"Очистить всю FX-цепочку и схему", L"Gesamte FX-Kette leeren und Verdrahtung loeschen",
+			L"Esvaziar toda a cadeia FX e limpar a ligacao", L"Hele FX-keten legen en bedrading wissen",
+			L"Wyczysc caly lancuch FX i okablowanie", L"Tum FX zincirini bosalt ve kablolamayi temizle"));
 	CPoint sp = point;
 	ClientToScreen(&sp);
 	CWnd* trackOwner = m_owner ? (CWnd*)m_owner : GetParent();

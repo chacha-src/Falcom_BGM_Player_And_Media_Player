@@ -5196,93 +5196,150 @@ protected:
 			LL14(L"最前面", L"Always on top", L"Toujours au premier plan", L"Sempre in primo piano",
 				L"Siempre visible", L"항상 위", L"置顶", L"دائماً في المقدمة", L"Поверх всех", L"Immer im Vordergrund",
 				L"Sempre no topo", L"Altijd boven", L"Zawsze na wierzchu", L"Her zaman ustte"),
-			topMost);
+			topMost,
+			LL14(L"DJパッドを他の窓の上に常時表示。ミキシング中に隠れないようにします。", L"Keep the DJ pad above other windows so it stays visible while mixing.", L"Garde le pad DJ au-dessus des autres fenetres pendant le mix.", L"Tiene il pad DJ sopra le altre finestre durante il mix.", L"Mantiene el pad DJ encima de otras ventanas al mezclar.",
+				L"DJ 패드를 다른 창 위에 항상 표시. 믹스 중 가려지지 않게 합니다.", L"将 DJ 面板置顶，混音时不会被挡住。", L"إبقاء لوحة DJ فوق النوافذ الأخرى أثناء المزج.", L"Держать DJ-пад поверх окон, чтобы не скрывался при микшировании.", L"DJ-Pad immer oben halten, damit es beim Mixen sichtbar bleibt.",
+				L"Manter o pad DJ acima das outras janelas ao mixar.", L"Houd het DJ-pad boven andere vensters tijdens mixen.", L"Trzymaj pad DJ nad innymi oknami podczas miksowania.", L"DJ padini diger pencerelerin ustunde tut; mikste kaybolmasin."));
 		menu.AddCheck(11,
 			LL14(L"メインに追随", L"Follow main window", L"Suivre la fenetre principale", L"Segui finestra principale",
 				L"Seguir ventana principal", L"메인 창 따라가기", L"跟随主窗口", L"اتبع النافذة الرئيسية", L"Следовать главному", L"Hauptfenster folgen",
 				L"Seguir janela principal", L"Volg hoofdvenster", L"Podazaj za glownym", L"Ana pencereyi izle"),
-			savedata.mpDjPadMainLock != 0);
+			savedata.mpDjPadMainLock != 0,
+			LL14(L"メインプレイヤーを動かすとDJパッドも一緒に移動。マルチモニタ作業向き。", L"When you move the main player, the DJ pad moves with it. Handy on multi-monitor setups.", L"Deplacer le lecteur principal deplace aussi le pad DJ. Pratique en multi-ecran.", L"Spostando il player principale si sposta anche il pad DJ. Utile su multi-monitor.", L"Al mover el reproductor principal, el pad DJ se mueve. Util en multi-monitor.",
+				L"메인 플레이어를 움직이면 DJ 패드도 함께 이동. 멀티 모니터에 유용.", L"移动主播放器时 DJ 面板跟随。适合多显示器。", L"عند تحريك المشغل الرئيسي تتحرك لوحة DJ معه. مفيد مع شاشات متعددة.", L"При перемещении главного плеера DJ-пад следует за ним. Удобно на нескольких мониторах.", L"Beim Verschieben des Hauptplayers folgt das DJ-Pad. Praktisch bei mehreren Monitoren.",
+				L"Ao mover o player principal, o pad DJ acompanha. Util em multi-monitor.", L"Als je de hoofdspeler verplaatst, beweegt het DJ-pad mee. Handig bij meerdere monitoren.", L"Przesuwajac glowny odtwarzacz, pad DJ podaza za nim. Przydatne na wielu monitorach.", L"Ana oynaticiyi tasirken DJ padi birlikte gelir. Coklu monitörde kullanisli."));
 		menu.AddSeparator();
 		menu.AddCommand(12,
 			LL14(L"音程/テンポをリセット", L"Reset pitch/tempo", L"Reinit hauteur/tempo", L"Reset pitch/tempo",
 				L"Restablecer tono/tempo", L"음정/템포 초기화", L"重置音高/速度", L"إعادة الدرجة/الإيقاع", L"Сброс тона/темпа", L"Tonhöhe/Tempo zurücksetzen",
-				L"Redefinir tom/tempo", L"Toonhoogte/tempo resetten", L"Reset wysokosci/tempa", L"Perde/tempo sifirla"));
+				L"Redefinir tom/tempo", L"Toonhoogte/tempo resetten", L"Reset wysokosci/tempa", L"Perde/tempo sifirla"),
+			LL14(L"音程とテンポを両方とも100%に戻します。キー合わせ後の復帰用。", L"Reset both pitch and tempo to 100%. Use after key/tempo matching.", L"Remet hauteur et tempo a 100%. Apres accordage.", L"Ripristina pitch e tempo al 100%. Dopo l'accordatura.", L"Restablece tono y tempo al 100%. Tras afinar.",
+				L"음정과 템포를 모두 100%로 되돌립니다. 키 맞춘 뒤 복귀용.", L"将音高和速度都恢复为 100%。调键后还原用。", L"إعادة الدرجة والإيقاع إلى 100%. بعد مطابقة المفتاح.", L"Сбросить тон и темп до 100%. После подстройки ключа.", L"Tonhöhe und Tempo auf 100% zurücksetzen. Nach Key-Anpassung.",
+				L"Redefinir tom e tempo para 100%. Apos ajustar a tonalidade.", L"Zet toonhoogte en tempo terug op 100%. Na toonsoort-matching.", L"Reset wysokosci i tempa do 100%. Po dopasowaniu tonacji.", L"Perde ve tempoyu %100'e sifirla. Ton eslestirmeden sonra."));
 		menu.AddCommand(13,
 			LL14(L"EQ/フィルタをリセット", L"Reset EQ/filter", L"Reinit EQ/filtre", L"Reset EQ/filtro",
 				L"Restablecer EQ/filtro", L"EQ/필터 초기화", L"重置 EQ/滤镜", L"إعادة EQ/المرشح", L"Сброс EQ/фильтра", L"EQ/Filter zurücksetzen",
-				L"Redefinir EQ/filtro", L"EQ/filter resetten", L"Reset EQ/filtra", L"EQ/filtre sifirla"));
+				L"Redefinir EQ/filtro", L"EQ/filter resetten", L"Reset EQ/filtra", L"EQ/filtre sifirla"),
+			LL14(L"Low/Mid/High EQ・フィルタ・Killをすべて平坦(100%)に戻します。", L"Reset Low/Mid/High EQ, filter, and Kill bands all flat to 100%.", L"Remet EQ Low/Mid/High, filtre et Kill a 100%.", L"Ripristina EQ Low/Mid/High, filtro e Kill al 100%.", L"Restablece EQ Low/Mid/High, filtro y Kill al 100%.",
+				L"Low/Mid/High EQ·필터·Kill을 모두 평탄(100%)으로 되돌립니다.", L"将 Low/Mid/High EQ、滤镜和 Kill 全部恢复为平坦 100%。", L"إعادة EQ Low/Mid/High والمرشح وKill كلها إلى 100%.", L"Сбросить EQ Low/Mid/High, фильтр и Kill до 100%.", L"EQ Low/Mid/High, Filter und Kill auf 100% flach setzen.",
+				L"Redefinir EQ Low/Mid/High, filtro e Kill para 100%.", L"Zet Low/Mid/High-EQ, filter en Kill terug op 100%.", L"Reset EQ Low/Mid/High, filtra i Kill do 100%.", L"Low/Mid/High EQ, filtre ve Kill'i %100'e sifirla."));
 		menu.AddCommand(14,
 			LL14(L"スクラッチ設定をリセット", L"Reset scratch settings", L"Reinit scratch", L"Reset scratch",
 				L"Restablecer scratch", L"스크래치 초기화", L"重置刮盘设置", L"إعادة إعدادات الخدش", L"Сброс скретча", L"Scratch zurücksetzen",
-				L"Redefinir scratch", L"Scratch resetten", L"Reset scratch", L"Scratch sifirla"));
+				L"Redefinir scratch", L"Scratch resetten", L"Reset scratch", L"Scratch sifirla"),
+			LL14(L"スクラッチ効果量と速度感度を既定(100%)に戻します。", L"Reset scratch effect amount and speed sensitivity to defaults (100%).", L"Remet effet et sensibilite scratch a 100%.", L"Ripristina effetto e sensibilita scratch al 100%.", L"Restablece efecto y sensibilidad scratch al 100%.",
+				L"스크래치 효과량과 속도 감도를 기본(100%)으로 되돌립니다.", L"将刮盘效果量和速度灵敏度恢复为默认 100%。", L"إعادة مقدار تأثير الخدش وحساسية السرعة إلى 100%.", L"Сбросить силу эффекта и чувствительность скретча до 100%.", L"Scratch-Effektstärke und Geschwindigkeitsempfindlichkeit auf 100% setzen.",
+				L"Redefinir efeito e sensibilidade do scratch para 100%.", L"Zet scratch-effect en snelheidsgevoeligheid terug op 100%.", L"Reset sily efektu i czulosci scratch do 100%.", L"Scratch efekt miktari ve hiz duyarliligini %100'e sifirla."));
 		menu.AddCommand(15,
 			LL14(L"BPM計測", L"Detect BPM", L"Detecter BPM", L"Rileva BPM", L"Detectar BPM",
 				L"BPM 측정", L"检测 BPM", L"اكتشاف BPM", L"Определить BPM", L"BPM erkennen",
-				L"Detectar BPM", L"BPM detecteren", L"Wykryj BPM", L"BPM algila"));
+				L"Detectar BPM", L"BPM detecteren", L"Wykryj BPM", L"BPM algila"),
+			LL14(L"再生中の音からBPMを計測。テンポ合わせやビートグリッド用。数秒再生してから実行。", L"Measure BPM from playing audio for tempo match / beat grid. Play a few seconds first.", L"Mesure le BPM de la lecture pour tempo/grille. Jouer quelques secondes d'abord.", L"Misura il BPM dall'audio in riproduzione. Riproduci alcuni secondi prima.", L"Mide el BPM del audio en reproduccion. Reproduce unos segundos antes.",
+				L"재생 중인 음에서 BPM 측정. 템포 맞춤·비트 그리드용. 수초 재생 후 실행.", L"从正在播放的音频测 BPM，用于对拍/网格。先播放数秒再执行。", L"قياس BPM من الصوت قيد التشغيل لمطابقة الإيقاع. شغّل ثوانٍ أولاً.", L"Измерить BPM с текущего звука для темпа/сетки. Сначала послушайте несколько секунд.", L"BPM aus dem laufenden Audio messen (Tempo/Grid). Zuerst einige Sekunden abspielen.",
+				L"Medir BPM do audio em reproducao para tempo/grade. Toque alguns segundos antes.", L"Meet BPM van speelaudio voor tempo/grid. Speel eerst een paar seconden.", L"Zmierz BPM z odtwarzanego dzwieku (tempo/siatka). Najpierw odtworz kilka sekund.", L"Calinan sesten BPM olc; tempo/izgara icin. Once birkac saniye cal."));
 		menu.AddSeparator();
 		{
 			CCustomPopupMenu* vocalSub = menu.AddSubMenu(
 				LL14(L"ボーカル / M-S", L"Vocal / M-S", L"Vocal / M-S", L"Vocal / M-S", L"Vocal / M-S",
 					L"보컬 / M-S", L"人声 / M-S", L"صوت / M-S", L"Вокал / M-S", L"Gesang / M-S",
-					L"Vocal / M-S", L"Vocaal / M-S", L"Wokal / M-S", L"Vokal / M-S"));
+					L"Vocal / M-S", L"Vocaal / M-S", L"Wokal / M-S", L"Vokal / M-S"),
+				LL14(L"センターボーカル強調/抑制と Mid-Side ステレオ幅の調整。", L"Boost/cut center vocal and adjust Mid-Side stereo width.", L"Renforcer/attenuer le vocal centre et regler la largeur Mid-Side.", L"Aumenta/riduci il vocale centrale e regola la larghezza Mid-Side.", L"Sube/baja la voz central y ajusta la anchura Mid-Side.",
+					L"센터 보컬 강조/억제와 Mid-Side 스테레오 폭 조절.", L"加强/削弱中置人声并调节 Mid-Side 立体声宽度。", L"تعزيز/خفض الصوت المركزي وضبط عرض Mid-Side.", L"Усилить/ослабить центральный вокал и ширину Mid-Side.", L"Center-Gesang anheben/absenken und Mid-Side-Breite einstellen.",
+					L"Reforcar/atenuar o vocal central e ajustar a largura Mid-Side.", L"Center-vocaal versterken/dempen en Mid-Side-breedte aanpassen.", L"Wzmocnij/oslab centralny wokal i szerokosc Mid-Side.", L"Merkez vokali artir/azalt ve Mid-Side genisligini ayarla."));
 			if (vocalSub) {
 				vocalSub->AddCommand(16,
 					LL14(L"ボーカル +", L"Vocal +", L"Vocal +", L"Vocal +", L"Vocal +",
 						L"보컬 +", L"人声 +", L"صوت +", L"Вокал +", L"Gesang +",
-						L"Vocal +", L"Vocaal +", L"Wokal +", L"Vokal +"));
+						L"Vocal +", L"Vocaal +", L"Wokal +", L"Vokal +"),
+					LL14(L"センター成分を上げてボーカルを強調します(+10)。", L"Raise the center component to emphasize vocals (+10).", L"Augmente le centre pour accentuer le vocal (+10).", L"Alza il centro per enfatizzare il vocale (+10).", L"Sube el centro para enfatizar la voz (+10).",
+						L"센터 성분을 올려 보컬을 강조합니다(+10).", L"提高中置成分以强调人声（+10）。", L"رفع المكوّن المركزي لتأكيد الصوت (+10).", L"Поднять центр, чтобы выделить вокал (+10).", L"Centeranteil anheben, um Gesang zu betonen (+10).",
+						L"Aumentar o centro para enfatizar o vocal (+10).", L"Centercomponent verhogen om vocaal te benadrukken (+10).", L"Podnies srodek, by wyeksponowac wokal (+10).", L"Merkez bileseni artirarak vokali vurgula (+10)."));
 				vocalSub->AddCommand(17,
 					LL14(L"ボーカル −", L"Vocal −", L"Vocal −", L"Vocal −", L"Vocal −",
 						L"보컬 −", L"人声 −", L"صوت −", L"Вокал −", L"Gesang −",
-						L"Vocal −", L"Vocaal −", L"Wokal −", L"Vokal −"));
+						L"Vocal −", L"Vocaal −", L"Wokal −", L"Vokal −"),
+					LL14(L"センター成分を下げてボーカルを抑えめにします(−10)。", L"Lower the center component to reduce vocals (−10).", L"Baisse le centre pour attenuer le vocal (−10).", L"Abbassa il centro per ridurre il vocale (−10).", L"Baja el centro para atenuar la voz (−10).",
+						L"센터 성분을 내려 보컬을 줄입니다(−10).", L"降低中置成分以减弱人声（−10）。", L"خفض المكوّن المركزي لتقليل الصوت (−10).", L"Опустить центр, чтобы ослабить вокал (−10).", L"Centeranteil senken, um Gesang zu reduzieren (−10).",
+						L"Diminuir o centro para atenuar o vocal (−10).", L"Centercomponent verlagen om vocaal te verminderen (−10).", L"Obniz srodek, by stlumic wokal (−10).", L"Merkez bileseni dusurerek vokali azalt (−10)."));
 				vocalSub->AddCommand(18,
 					LL14(L"ボーカル リセット", L"Reset vocal", L"Reinit vocal", L"Reset vocal", L"Restablecer vocal",
 						L"보컬 초기화", L"重置人声", L"إعادة الصوت", L"Сброс вокала", L"Gesang zurücksetzen",
-						L"Redefinir vocal", L"Vocaal resetten", L"Reset wokalu", L"Vokal sifirla"));
+						L"Redefinir vocal", L"Vocaal resetten", L"Reset wokalu", L"Vokal sifirla"),
+					LL14(L"ボーカル(センター)量を既定値に戻します。", L"Reset vocal (center) amount to the default.", L"Remet le niveau vocal (centre) par defaut.", L"Ripristina il livello vocale (centro) predefinito.", L"Restablece el nivel de voz (centro) al valor por defecto.",
+						L"보컬(센터) 양을 기본값으로 되돌립니다.", L"将人声（中置）量恢复为默认。", L"إعادة مقدار الصوت (المركز) إلى الافتراضي.", L"Сбросить уровень вокала (центр) к умолчанию.", L"Gesang (Center) auf Standard zurücksetzen.",
+						L"Redefinir o nivel do vocal (centro) para o padrao.", L"Zet vocaal (center) terug op standaard.", L"Reset poziomu wokalu (srodek) do domyslnego.", L"Vokal (merkez) miktarini varsayilana sifirla."));
 				vocalSub->AddSeparator();
 				vocalSub->AddCommand(19,
 					LL14(L"M-S 狭め", L"M-S narrow", L"M-S etroit", L"M-S stretto", L"M-S estrecho",
 						L"M-S 좁게", L"M-S 窄", L"M-S ضيق", L"M-S узко", L"M-S schmal",
-						L"M-S estreito", L"M-S smal", L"M-S wasko", L"M-S dar"));
+						L"M-S estreito", L"M-S smal", L"M-S wasko", L"M-S dar"),
+					LL14(L"Sideを下げてステレオ幅を狭め、中央寄りにします。", L"Reduce Side to narrow stereo width toward mono/center.", L"Baisse Side pour retrecir la stereo vers le centre.", L"Riduci Side per restringere lo stereo verso il centro.", L"Baja Side para estrechar el estereo hacia el centro.",
+						L"Side를 낮춰 스테레오 폭을 좁히고 중앙에 가깝게 합니다.", L"降低 Side 使立体声变窄、更靠中央。", L"خفض Side لتضييق العرض نحو المركز.", L"Уменьшить Side, сузив стерео к центру.", L"Side absenken, Stereo-Breite zur Mitte verengen.",
+						L"Diminuir Side para estreitar o estereo ao centro.", L"Side verlagen om stereobreedte naar het midden te vernauwen.", L"Zmniejsz Side, by zwezic stereo ku srodkowi.", L"Side'i dusurup stereo genisligini merkeze daralt."));
 				vocalSub->AddCommand(20,
 					LL14(L"M-S 広げ", L"M-S wide", L"M-S large", L"M-S ampio", L"M-S ancho",
 						L"M-S 넓게", L"M-S 宽", L"M-S واسع", L"M-S широко", L"M-S breit",
-						L"M-S largo", L"M-S breed", L"M-S szeroko", L"M-S genis"));
+						L"M-S largo", L"M-S breed", L"M-S szeroko", L"M-S genis"),
+					LL14(L"Sideを上げてステレオ幅を広げ、空間感を出します。", L"Raise Side to widen stereo image and add space.", L"Augmente Side pour elargir l'image stereo.", L"Alza Side per allargare l'immagine stereo.", L"Sube Side para ensanchar la imagen estereo.",
+						L"Side를 올려 스테레오 폭을 넓히고 공간감을 냅니다.", L"提高 Side 以加宽立体声、增加空间感。", L"رفع Side لتوسيع الصورة الاستريو وإضافة فضاء.", L"Поднять Side, расширив стерео и пространство.", L"Side anheben, Stereo-Bild und Raum erweitern.",
+						L"Aumentar Side para alargar a imagem estereo.", L"Side verhogen om stereobeeld en ruimte te verbreden.", L"Podnies Side, by poszerzyc obraz stereo.", L"Side'i artirip stereo genisligini ve alan hissini ac."));
 				vocalSub->AddCommand(21,
 					LL14(L"M-S リセット", L"Reset M-S", L"Reinit M-S", L"Reset M-S", L"Restablecer M-S",
 						L"M-S 초기화", L"重置 M-S", L"إعادة M-S", L"Сброс M-S", L"M-S zurücksetzen",
-						L"Redefinir M-S", L"M-S resetten", L"Reset M-S", L"M-S sifirla"));
+						L"Redefinir M-S", L"M-S resetten", L"Reset M-S", L"M-S sifirla"),
+					LL14(L"Mid-Side 幅を既定に戻します。", L"Reset Mid-Side width to the default.", L"Remet la largeur Mid-Side par defaut.", L"Ripristina la larghezza Mid-Side predefinita.", L"Restablece la anchura Mid-Side al valor por defecto.",
+						L"Mid-Side 폭을 기본값으로 되돌립니다.", L"将 Mid-Side 宽度恢复为默认。", L"إعادة عرض Mid-Side إلى الافتراضي.", L"Сбросить ширину Mid-Side к умолчанию.", L"Mid-Side-Breite auf Standard zurücksetzen.",
+						L"Redefinir a largura Mid-Side para o padrao.", L"Zet Mid-Side-breedte terug op standaard.", L"Reset szerokosci Mid-Side do domyslnej.", L"Mid-Side genisligini varsayilana sifirla."));
 			}
 		}
 		{
 			CCustomPopupMenu* killSub = menu.AddSubMenu(
 				LL14(L"EQ Kill", L"EQ Kill", L"EQ Kill", L"EQ Kill", L"EQ Kill",
 					L"EQ Kill", L"EQ Kill", L"EQ Kill", L"EQ Kill", L"EQ Kill",
-					L"EQ Kill", L"EQ Kill", L"EQ Kill", L"EQ Kill"));
+					L"EQ Kill", L"EQ Kill", L"EQ Kill", L"EQ Kill"),
+				LL14(L"Low/Mid/High帯を瞬時にミュートするDJ用キルスイッチ。", L"Instant mute switches for Low/Mid/High bands (DJ kill).", L"Coupures instantanees Low/Mid/High (kill DJ).", L"Mute istantanei Low/Mid/High (kill DJ).", L"Mutes instantaneos Low/Mid/High (kill DJ).",
+					L"Low/Mid/High 대역을 즉시 뮤트하는 DJ용 킬 스위치.", L"瞬间静音 Low/Mid/High 频段的 DJ Kill 开关。", L"مفاتيح كتم فورية لنطاقات Low/Mid/High (قتل DJ).", L"Мгновенный мьют полос Low/Mid/High (DJ kill).", L"Sofort-Mute für Low/Mid/High-Bänder (DJ-Kill).",
+					L"Mutes instantaneos das faixas Low/Mid/High (kill DJ).", L"Directe mute-schakelaars voor Low/Mid/High (DJ-kill).", L"Natychmiastowe wyciszenie Low/Mid/High (kill DJ).", L"Low/Mid/High bantlarini aninda susturan DJ kill anahtarlari."));
 			if (killSub) {
 				killSub->AddCheck(22,
 					LL14(L"Low Kill", L"Low Kill", L"Low Kill", L"Low Kill", L"Low Kill",
 						L"Low Kill", L"Low Kill", L"Low Kill", L"Low Kill", L"Low Kill",
 						L"Low Kill", L"Low Kill", L"Low Kill", L"Low Kill"),
-					(savedata.mpDjEqKill & 1) != 0);
+					(savedata.mpDjEqKill & 1) != 0,
+					LL14(L"低域(Low)を瞬時に切る/戻す。キックやベースを落とすとき。", L"Instantly mute/unmute Low band — drop kick/bass.", L"Coupe/retablit Low — pour couper kick/basse.", L"Muta/riattiva Low — togli kick/basso.", L"Silencia/restaura Low — quita kick/bajo.",
+						L"저역(Low)을 즉시 끄거나 되돌림. 킥·베이스를 뺄 때.", L"瞬间开关低音(Low)。用于去掉 kick/贝斯。", L"كتم/إرجاع Low فوراً — لإسقاط الكيك/الباس.", L"Мгновенно выкл/вкл Low — убрать кик/бас.", L"Low sofort stumm/an — Kick/Bass rausnehmen.",
+						L"Mutar/restaurar Low na hora — tirar kick/baixo.", L"Low direct dempen/aan — kick/bas weghalen.", L"Natychmiast wycisz/wlacz Low — usun kick/bas.", L"Low'u aninda kes/ac — kick/bas dusurmek icin."));
 				killSub->AddCheck(23,
 					LL14(L"Mid Kill", L"Mid Kill", L"Mid Kill", L"Mid Kill", L"Mid Kill",
 						L"Mid Kill", L"Mid Kill", L"Mid Kill", L"Mid Kill", L"Mid Kill",
 						L"Mid Kill", L"Mid Kill", L"Mid Kill", L"Mid Kill"),
-					(savedata.mpDjEqKill & 2) != 0);
+					(savedata.mpDjEqKill & 2) != 0,
+					LL14(L"中域(Mid)を瞬時に切る/戻す。ボーカルや楽器の帯を落とすとき。", L"Instantly mute/unmute Mid band — drop vocals/instruments.", L"Coupe/retablit Mid — pour couper voix/instruments.", L"Muta/riattiva Mid — togli voci/strumenti.", L"Silencia/restaura Mid — quita voces/instrumentos.",
+						L"중역(Mid)을 즉시 끄거나 되돌림. 보컬·악기 대역을 뺄 때.", L"瞬间开关中频(Mid)。用于去掉人声/乐器。", L"كتم/إرجاع Mid فوراً — لإسقاط الأصوات/الآلات.", L"Мгновенно выкл/вкл Mid — убрать вокал/инструменты.", L"Mid sofort stumm/an — Gesang/Instrumente rausnehmen.",
+						L"Mutar/restaurar Mid na hora — tirar vozes/instrumentos.", L"Mid direct dempen/aan — zang/instrumenten weghalen.", L"Natychmiast wycisz/wlacz Mid — usun wokal/instrumenty.", L"Mid'i aninda kes/ac — vokal/enstruman dusurmek icin."));
 				killSub->AddCheck(24,
 					LL14(L"High Kill", L"High Kill", L"High Kill", L"High Kill", L"High Kill",
 						L"High Kill", L"High Kill", L"High Kill", L"High Kill", L"High Kill",
 						L"High Kill", L"High Kill", L"High Kill", L"High Kill"),
-					(savedata.mpDjEqKill & 4) != 0);
+					(savedata.mpDjEqKill & 4) != 0,
+					LL14(L"高域(High)を瞬時に切る/戻す。ハイハットやシンバルを落とすとき。", L"Instantly mute/unmute High band — drop hats/cymbals.", L"Coupe/retablit High — pour couper hats/cymbales.", L"Muta/riattiva High — togli hi-hat/piatti.", L"Silencia/restaura High — quita hats/platillos.",
+						L"고역(High)을 즉시 끄거나 되돌림. 하이햇·심벌을 뺄 때.", L"瞬间开关高频(High)。用于去掉踩镲/镲片。", L"كتم/إرجاع High فوراً — لإسقاط الهات/الصنج.", L"Мгновенно выкл/вкл High — убрать хэты/тарелки.", L"High sofort stumm/an — Hats/Becken rausnehmen.",
+						L"Mutar/restaurar High na hora — tirar hats/pratos.", L"High direct dempen/aan — hats/bekkens weghalen.", L"Natychmiast wycisz/wlacz High — usun hi-haty/talerze.", L"High'i aninda kes/ac — hi-hat/zil dusurmek icin."));
 			}
 		}
 		menu.AddCommand(25,
 			LL14(L"イコライザを開く", L"Open equalizer", L"Ouvrir l'egaliseur", L"Apri equalizzatore", L"Abrir ecualizador",
 				L"이퀄라이저 열기", L"打开均衡器", L"فتح المعادل", L"Открыть эквалайзер", L"Equalizer öffnen",
-				L"Abrir equalizador", L"Equalizer openen", L"Otworz equalizer", L"Equalizeri ac"));
+				L"Abrir equalizador", L"Equalizer openen", L"Otworz equalizer", L"Equalizeri ac"),
+			LL14(L"詳細な帯域調整用のイコライザ窓を開きます。", L"Open the full equalizer window for detailed band control.", L"Ouvre l'egaliseur complet pour un reglage fin.", L"Apre l'equalizzatore completo per regolazioni fini.", L"Abre el ecualizador completo para ajuste fino.",
+				L"세밀한 대역 조절용 이퀄라이저 창을 엽니다.", L"打开完整均衡器窗口，便于细调频段。", L"فتح نافذة المعادل الكاملة للضبط الدقيق.", L"Открыть полное окно эквалайзера для тонкой настройки.", L"Volles Equalizer-Fenster für Feineinstellung öffnen.",
+				L"Abrir a janela completa do equalizador para ajuste fino.", L"Open het volledige equalizer-venster voor fijnafstelling.", L"Otworz pelne okno equalizera do dokladnej regulacji.", L"Ince bant ayari icin tam equalizer penceresini ac."));
 		menu.AddSeparator();
 		menu.AddCommand(1,
-			LL14(L"閉じる", L"Close", L"Fermer", L"Chiudi", L"Cerrar", L"닫기", L"关闭", L"إغلاق", L"Закрыть", L"Schliessen", L"Fechar", L"Sluiten", L"Zamknij", L"Kapat"));
+			LL14(L"閉じる", L"Close", L"Fermer", L"Chiudi", L"Cerrar", L"닫기", L"关闭", L"إغلاق", L"Закрыть", L"Schliessen", L"Fechar", L"Sluiten", L"Zamknij", L"Kapat"),
+			LL14(L"DJパッドを閉じます（設定は保持されます）。", L"Close the DJ pad (settings are kept).", L"Ferme le pad DJ (reglages conserves).", L"Chiude il pad DJ (impostazioni conservate).", L"Cierra el pad DJ (se conservan los ajustes).",
+				L"DJ 패드를 닫습니다(설정은 유지).", L"关闭 DJ 面板（设置会保留）。", L"إغلاق لوحة DJ (تُحفظ الإعدادات).", L"Закрыть DJ-пад (настройки сохраняются).", L"DJ-Pad schließen (Einstellungen bleiben).",
+				L"Fechar o pad DJ (configuracoes sao mantidas).", L"Sluit het DJ-pad (instellingen blijven).", L"Zamknij pad DJ (ustawienia zachowane).", L"DJ padini kapat (ayarlar saklanir)."));
 		AudioMicDevAppendMenu(menu);
 		AudioLoopDevAppendMenu(menu);
 		const UINT cmd = menu.Track(point, this);
@@ -5997,23 +6054,38 @@ protected:
 			LL14(L"リモート有効", L"Enable remote", L"Activer le remote", L"Abilita remote", L"Activar remoto",
 				L"리모트 사용", L"启用遥控", L"تفعيل التحكم", L"Включить пульт", L"Remote aktivieren",
 				L"Ativar remoto", L"Remote inschakelen", L"Wlacz pilota", L"Uzaktan etkin"),
-			enabled);
+			enabled,
+			LL14(L"同一LAN上のブラウザから再生操作できるリモートUIを開始/停止します。", L"Start/stop the remote UI so browsers on the same LAN can control playback.", L"Demarre/arrete l'UI remote pour controler la lecture depuis le LAN.", L"Avvia/ferma l'UI remota per controllare la riproduzione dalla LAN.", L"Inicia/detiene la UI remota para controlar la reproduccion desde la LAN.",
+				L"같은 LAN의 브라우저에서 재생을 조작하는 리모트 UI를 시작/중지합니다.", L"启动/停止远程 UI，使同一局域网浏览器可控制播放。", L"بدء/إيقاف واجهة التحكم عن بُعد من متصفحات الشبكة المحلية.", L"Вкл/выкл удалённый UI для управления воспроизведением из LAN.", L"Remote-UI starten/stoppen, damit Browser im LAN die Wiedergabe steuern.",
+				L"Iniciar/parar a UI remota para controlar a reproducao na mesma LAN.", L"Start/stop de remote-UI zodat browsers op het LAN afspelen kunnen bedienen.", L"Wlacz/wylacz UI zdalne do sterowania odtwarzaniem z LAN.", L"Ayni LAN'daki tarayicilarin calmayi kontrol etmesi icin remote UI baslat/durdur."));
 		menu.AddCheck(13,
 			LL14(L"AAC 聴く", L"AAC listen", L"Ecoute AAC", L"Ascolto AAC", L"Escuchar AAC",
 				L"AAC 듣기", L"AAC 收听", L"استماع AAC", L"Слушать AAC", L"AAC hören",
 				L"Ouvir AAC", L"AAC luisteren", L"Sluchaj AAC", L"AAC dinle"),
-			aacOn);
+			aacOn,
+			LL14(L"リモート接続先へAACストリームを送り、ブラウザで音を聴けます（帯域を使います）。", L"Send an AAC stream to remote clients so the browser can hear audio (uses bandwidth).", L"Envoie un flux AAC aux clients remote pour ecouter dans le navigateur (bande passante).", L"Invia uno stream AAC ai client remoti per ascoltare nel browser (usa banda).", L"Envia un flujo AAC a clientes remotos para oir en el navegador (usa ancho de banda).",
+				L"리모트 클라이언트로 AAC 스트림을 보내 브라우저에서 들을 수 있습니다(대역폭 사용).", L"向远程客户端发送 AAC 流，可在浏览器听音（占用带宽）。", L"إرسال بث AAC للعملاء عن بُعد للاستماع في المتصفح (يستهلك النطاق).", L"Отправлять AAC-поток удалённым клиентам для прослушивания в браузере (тратит полосу).", L"AAC-Stream an Remote-Clients senden, damit der Browser hören kann (Bandbreite).",
+				L"Enviar um fluxo AAC aos clientes remotos para ouvir no navegador (usa banda).", L"Stuur een AAC-stream naar remote-clients zodat de browser kan meeluisteren (bandbreedte).", L"Wysylaj strumien AAC do klientow zdalnych, by sluchac w przegladarce (zuzywa pasmo).", L"Tarayicida dinlemek icin remote istemcilere AAC akisi gonder (bant genisligi kullanir)."));
 		menu.AddCommand(11,
 			LL14(L"URL をコピー", L"Copy URL", L"Copier l'URL", L"Copia URL", L"Copiar URL",
 				L"URL 복사", L"复制 URL", L"نسخ الرابط", L"Копировать URL", L"URL kopieren",
-				L"Copiar URL", L"URL kopieren", L"Kopiuj URL", L"URL kopyala"));
+				L"Copiar URL", L"URL kopieren", L"Kopiuj URL", L"URL kopyala"),
+			LL14(L"LAN用のリモートURLをクリップボードへコピー。スマホ等へ貼り付けて開きます。", L"Copy the LAN remote URL to the clipboard — paste on a phone etc. to open.", L"Copie l'URL remote LAN dans le presse-papiers — a coller sur telephone etc.", L"Copia l'URL remota LAN negli appunti — incolla su telefono ecc.", L"Copia la URL remota LAN al portapapeles — pegala en el telefono etc.",
+				L"LAN용 리모트 URL을 클립보드에 복사. 스마트폰 등에 붙여 엽니다.", L"将局域网远程 URL 复制到剪贴板，可贴到手机等打开。", L"نسخ رابط التحكم عن بُعد للشبكة المحلية إلى الحافظة لفتحه على الهاتف.", L"Скопировать LAN-URL пульта в буфер — вставить на телефон и открыть.", L"LAN-Remote-URL in die Zwischenablage — auf dem Handy einfügen und öffnen.",
+				L"Copiar a URL remota da LAN para a area de transferencia — cole no celular etc.", L"Kopieer de LAN-remote-URL naar het klembord — plak op telefoon enz.", L"Kopiuj LAN-URL pilota do schowka — wklej na telefonie itp.", L"LAN remote URL'sini panoya kopyala — telefona yapistirip ac."));
 		menu.AddCommand(12,
 			LL14(L"ブラウザで開く", L"Open in browser", L"Ouvrir dans le navigateur", L"Apri nel browser", L"Abrir en el navegador",
 				L"브라우저에서 열기", L"在浏览器打开", L"فتح في المتصفح", L"Открыть в браузере", L"Im Browser öffnen",
-				L"Abrir no navegador", L"Openen in browser", L"Otworz w przegladarce", L"Tarayicida ac"));
+				L"Abrir no navegador", L"Openen in browser", L"Otworz w przegladarce", L"Tarayicida ac"),
+			LL14(L"リモートを有効にして既定ブラウザで操作ページを開きます。", L"Enable remote if needed and open the control page in the default browser.", L"Active le remote si besoin et ouvre la page de controle dans le navigateur.", L"Abilita il remote se serve e apre la pagina di controllo nel browser.", L"Activa el remoto si hace falta y abre la pagina de control en el navegador.",
+				L"필요 시 리모트를 켠 뒤 기본 브라우저에서 조작 페이지를 엽니다.", L"如需则启用远程，并用默认浏览器打开控制页。", L"تفعيل التحكم عند الحاجة وفتح صفحة التحكم في المتصفح الافتراضي.", L"При необходимости включить пульт и открыть страницу управления в браузере.", L"Remote bei Bedarf aktivieren und die Steuerseite im Standardbrowser öffnen.",
+				L"Ativar o remoto se preciso e abrir a pagina de controle no navegador padrao.", L"Schakel remote in indien nodig en open de bedieningspagina in de standaardbrowser.", L"Wlacz pilota w razie potrzeby i otworz strone sterowania w domyslnej przegladarce.", L"Gerekirse remote'u acip kontrol sayfasini varsayilan tarayicida ac."));
 		menu.AddSeparator();
 		menu.AddCommand(1,
-			LL14(L"閉じる", L"Close", L"Fermer", L"Chiudi", L"Cerrar", L"닫기", L"关闭", L"إغلاق", L"Закрыть", L"Schliessen", L"Fechar", L"Sluiten", L"Zamknij", L"Kapat"));
+			LL14(L"閉じる", L"Close", L"Fermer", L"Chiudi", L"Cerrar", L"닫기", L"关闭", L"إغلاق", L"Закрыть", L"Schliessen", L"Fechar", L"Sluiten", L"Zamknij", L"Kapat"),
+			LL14(L"リモート設定ウィンドウを閉じます（サービス状態はそのまま）。", L"Close the remote settings window (service state unchanged).", L"Ferme la fenetre remote (etat du service inchange).", L"Chiude la finestra remote (stato servizio invariato).", L"Cierra la ventana remota (el estado del servicio no cambia).",
+				L"리모트 설정 창을 닫습니다(서비스 상태는 유지).", L"关闭远程设置窗口（服务状态不变）。", L"إغلاق نافذة إعدادات التحكم (حالة الخدمة دون تغيير).", L"Закрыть окно настроек пульта (состояние службы не меняется).", L"Remote-Einstellungsfenster schließen (Dienststatus bleibt).",
+				L"Fechar a janela de configuracao remota (estado do servico inalterado).", L"Sluit het remote-instellingenvenster (servicestatus blijft).", L"Zamknij okno ustawien pilota (stan uslugi bez zmian).", L"Remote ayar penceresini kapat (servis durumu ayni kalir)."));
 		const UINT cmd = menu.Track(point, this);
 		if (cmd == 1) {
 			DestroyWindow();
@@ -6151,11 +6223,17 @@ protected:
 			LL14(L"最前面", L"Always on top", L"Toujours au premier plan", L"Sempre in primo piano",
 				L"Siempre visible", L"항상 위", L"置顶", L"دائماً في المقدمة", L"Поверх всех", L"Immer im Vordergrund",
 				L"Sempre no topo", L"Altijd boven", L"Zawsze na wierzchu", L"Her zaman ustte"),
-			topMost);
+			topMost,
+			LL14(L"スペアナ可視化窓を他の窓の上に常時表示します。", L"Keep this spectrum visualizer above other windows.", L"Garde ce visualiseur de spectre au-dessus des autres fenetres.", L"Tiene questo visualizzatore di spettro sopra le altre finestre.", L"Mantiene este visualizador de espectro encima de otras ventanas.",
+				L"스펙 시각화 창을 다른 창 위에 항상 표시합니다.", L"将频谱可视化窗口始终置于其他窗口之上。", L"إبقاء نافذة طيف الطيف فوق النوافذ الأخرى.", L"Держать окно спектра поверх других окон.", L"Dieses Spektrum-Fenster immer über anderen Fenstern halten.",
+				L"Manter este visualizador de espectro acima das outras janelas.", L"Houd dit spectrumvenster boven andere vensters.", L"Trzymaj to okno spektrum nad innymi oknami.", L"Spektrum gorsel penceresini diger pencerelerin ustunde tut."));
 		menu.AddCheck(3,
 			LL14(L"最大化", L"Maximize", L"Agrandir", L"Ingrandisci", L"Maximizar", L"최대화", L"最大化", L"تكبير",
 				L"Развернуть", L"Maximieren", L"Maximizar", L"Maximaliseren", L"Maksymalizuj", L"Buyut"),
-			maximized);
+			maximized,
+			LL14(L"画面いっぱいに広げ/元のサイズへ戻します。Escでも閉じられます。", L"Maximize to fill the screen, or restore. Esc also closes.", L"Plein ecran ou restaurer. Esc ferme aussi.", L"Schermo intero o ripristina. Esc chiude pure.", L"Pantalla completa o restaurar. Esc tambien cierra.",
+				L"화면 가득 최대화하거나 원래 크기로. Esc로도 닫힙니다.", L"最大化铺满屏幕或还原。Esc 也可关闭。", L"تكبير لملء الشاشة أو الاستعادة. Esc يغلق أيضاً.", L"Развернуть на весь экран или восстановить. Esc тоже закрывает.", L"Maximieren oder wiederherstellen. Esc schließt ebenfalls.",
+				L"Maximizar para preencher a tela ou restaurar. Esc tambem fecha.", L"Maximaliseren of herstellen. Esc sluit ook.", L"Maksymalizuj lub przywroc. Esc tez zamyka.", L"Ekrani kaplayacak sekilde buyut veya eski boyuta don. Esc de kapatir."));
 		menu.AddSeparator();
 		{
 			CCustomPopupMenu* styleSub = menu.AddSubMenu(
@@ -6172,22 +6250,37 @@ protected:
 			if (styleSub) {
 				styleSub->AddCheck(10,
 					LL14(L"棒", L"Bars", L"Barres", L"Barre", L"Barras", L"막대", L"柱状", L"أعمدة", L"Столбцы", L"Balken", L"Barras", L"Balken", L"Slupki", L"Cubuk"),
-					savedata.mpSpeanaStyle == 0);
+					savedata.mpSpeanaStyle == 0,
+					LL14(L"メイン画面のスペアナを棒グラフ表示にします。", L"Set the main player's speana to bar graph style.", L"Affiche le speana principal en barres.", L"Imposta lo speana principale a barre.", L"Pone el speana principal en barras.",
+						L"메인 화면 스펙애너를 막대 그래프로 표시합니다.", L"将主界面频谱设为柱状图。", L"تعيين speana الرئيسي إلى أعمدة.", L"Столбцовый стиль speana в главном плеере.", L"Haupt-Speana als Balken darstellen.",
+						L"Definir o speana principal como barras.", L"Zet de hoofd-speana op staafdiagram.", L"Ustaw speana w odtwarzaczu na slupki.", L"Ana speanayi cubuk grafik stiline al."));
 				styleSub->AddCheck(11,
 					LL14(L"ミラー", L"Mirror", L"Miroir", L"Specchio", L"Espejo", L"미러", L"镜像", L"مرآة", L"Зеркало", L"Spiegel", L"Espelho", L"Spiegel", L"Lustrzane", L"Ayna"),
-					savedata.mpSpeanaStyle == 1);
+					savedata.mpSpeanaStyle == 1,
+					LL14(L"メイン画面のスペアナを左右ミラー表示にします。", L"Set the main player's speana to mirrored left/right style.", L"Affiche le speana principal en miroir G/D.", L"Imposta lo speana principale a specchio S/D.", L"Pone el speana principal en espejo I/D.",
+						L"메인 화면 스펙애너를 좌우 미러로 표시합니다.", L"将主界面频谱设为左右镜像。", L"تعيين speana الرئيسي إلى مرآة يمين/يسار.", L"Зеркальный стиль speana в главном плеере.", L"Haupt-Speana gespiegelt L/R darstellen.",
+						L"Definir o speana principal como espelho E/D.", L"Zet de hoofd-speana op spiegel L/R.", L"Ustaw speana w odtwarzaczu na lustrzane L/P.", L"Ana speanayi sol/sag ayna stiline al."));
 				styleSub->AddCheck(12,
 					LL14(L"波形", L"Wave", L"Onde", L"Onda", L"Onda", L"파형", L"波形", L"موجة", L"Волна", L"Welle", L"Onda", L"Golf", L"Fala", L"Dalga"),
-					savedata.mpSpeanaStyle == 2);
+					savedata.mpSpeanaStyle == 2,
+					LL14(L"メイン画面のスペアナを波形表示にします。", L"Set the main player's speana to waveform style.", L"Affiche le speana principal en forme d'onde.", L"Imposta lo speana principale a forma d'onda.", L"Pone el speana principal en forma de onda.",
+						L"메인 화면 스펙애너를 파형으로 표시합니다.", L"将主界面频谱设为波形。", L"تعيين speana الرئيسي إلى موجة.", L"Волновой стиль speana в главном плеере.", L"Haupt-Speana als Wellenform darstellen.",
+						L"Definir o speana principal como forma de onda.", L"Zet de hoofd-speana op golfvorm.", L"Ustaw speana w odtwarzaczu na fale.", L"Ana speanayi dalgaformu stiline al."));
 			}
 		}
 		menu.AddCommand(13,
 			LL14(L"アナライザを開く", L"Open analyzer", L"Ouvrir l'analyseur", L"Apri analizzatore", L"Abrir analizador",
 				L"분석기 열기", L"打开分析器", L"فتح المحلل", L"Открыть анализатор", L"Analyzer öffnen",
-				L"Abrir analisador", L"Analyzer openen", L"Otworz analizator", L"Analizoru ac"));
+				L"Abrir analisador", L"Analyzer openen", L"Otworz analizator", L"Analizoru ac"),
+			LL14(L"詳細な周波数解析ができるアナライザ窓を開きます。", L"Open the analyzer window for detailed frequency analysis.", L"Ouvre l'analyseur pour une analyse frequentielle detaillee.", L"Apre l'analizzatore per analisi di frequenza dettagliata.", L"Abre el analizador para un analisis de frecuencia detallado.",
+				L"세밀한 주파수 분석용 분석기 창을 엽니다.", L"打开分析器窗口，进行详细频率分析。", L"فتح نافذة المحلل لتحليل التردد التفصيلي.", L"Открыть окно анализатора для детального частотного разбора.", L"Analyzer-Fenster für detaillierte Frequenzanalyse öffnen.",
+				L"Abrir a janela do analisador para analise de frequencia detalhada.", L"Open het analyzer-venster voor gedetailleerde frequentieanalyse.", L"Otworz okno analizatora do szczegolowej analizy czestotliwosci.", L"Ayrintili frekans analizi icin analizor penceresini ac."));
 		menu.AddSeparator();
 		menu.AddCommand(1,
-			LL14(L"閉じる", L"Close", L"Fermer", L"Chiudi", L"Cerrar", L"닫기", L"关闭", L"إغلاق", L"Закрыть", L"Schliessen", L"Fechar", L"Sluiten", L"Zamknij", L"Kapat"));
+			LL14(L"閉じる", L"Close", L"Fermer", L"Chiudi", L"Cerrar", L"닫기", L"关闭", L"إغلاق", L"Закрыть", L"Schliessen", L"Fechar", L"Sluiten", L"Zamknij", L"Kapat"),
+			LL14(L"スペアナ可視化窓を閉じます（Escでも可）。", L"Close this spectrum visualizer (Esc works too).", L"Ferme ce visualiseur (Esc aussi).", L"Chiude questo visualizzatore (anche Esc).", L"Cierra este visualizador (Esc tambien).",
+				L"스펙 시각화 창을 닫습니다(Esc도 가능).", L"关闭频谱可视化窗口（Esc 也可）。", L"إغلاق نافذة طيف الطيف (Esc أيضاً).", L"Закрыть окно спектра (Esc тоже).", L"Spektrum-Fenster schließen (auch Esc).",
+				L"Fechar este visualizador de espectro (Esc tambem).", L"Sluit dit spectrumvenster (Esc ook).", L"Zamknij to okno spektrum (tez Esc).", L"Spektrum gorsel penceresini kapat (Esc de olur)."));
 		const UINT cmd = menu.Track(point, this);
 		if (cmd == 1) {
 			DestroyWindow();

@@ -558,23 +558,58 @@ void CDesktopLyricsWnd::ShowDeskLrcMenu(CPoint screenPt)
 	menu.AddCommand(ID_DLRC_ALPHA_120,
 		LL14(L"薄い (120)", L"Thin (120)", L"Faible (120)", L"Bassa (120)", L"Baja (120)",
 			L"옅음 (120)", L"较淡 (120)", L"خفيف (120)", L"Слабая (120)", L"Duenn (120)",
-			L"Fraca (120)", L"Licht (120)", L"Slaba (120)", L"Ince (120)"));
+			L"Fraca (120)", L"Licht (120)", L"Slaba (120)", L"Ince (120)"),
+		LL14(L"不透明度を 120 に設定（かなり透ける）", L"Set opacity to 120 (quite translucent)",
+			L"Opacite a 120 (assez transparente)", L"Opacita a 120 (abbastanza trasparente)",
+			L"Opacidad a 120 (bastante translucida)", L"불투명도 120으로 (꽤 비침)",
+			L"将不透明度设为 120（较透）", L"ضبط الشفافية إلى 120 (شفاف نسبياً)",
+			L"Непрозрачность 120 (довольно прозрачно)", L"Deckkraft auf 120 (recht durchscheinend)",
+			L"Opacidade 120 (bastante translucida)", L"Dekking op 120 (vrij doorschijnend)",
+			L"Nieprzezroczystosc 120 (dość przezroczyste)", L"Opakligi 120 yap (epey seffaf)"));
 	menu.AddCommand(ID_DLRC_ALPHA_160,
 		LL14(L"やや薄い (160)", L"Light (160)", L"Legere (160)", L"Leggera (160)", L"Ligera (160)",
 			L"약간 옅음 (160)", L"略淡 (160)", L"خفيف قليلاً (160)", L"Чуть слабее (160)", L"Etwas duenn (160)",
-			L"Leve (160)", L"Iets licht (160)", L"Lekko slaba (160)", L"Biraz ince (160)"));
+			L"Leve (160)", L"Iets licht (160)", L"Lekko slaba (160)", L"Biraz ince (160)"),
+		LL14(L"不透明度を 160 に設定（やや透ける）", L"Set opacity to 160 (slightly translucent)",
+			L"Opacite a 160 (legerement transparente)", L"Opacita a 160 (leggermente trasparente)",
+			L"Opacidad a 160 (ligeramente translucida)", L"불투명도 160으로 (약간 비침)",
+			L"将不透明度设为 160（略透）", L"ضبط الشفافية إلى 160 (شفاف قليلاً)",
+			L"Непрозрачность 160 (чуть прозрачнее)", L"Deckkraft auf 160 (etwas durchscheinend)",
+			L"Opacidade 160 (um pouco translucida)", L"Dekking op 160 (iets doorschijnend)",
+			L"Nieprzezroczystosc 160 (lekko przezroczyste)", L"Opakligi 160 yap (biraz seffaf)"));
 	menu.AddCommand(ID_DLRC_ALPHA_200,
 		LL14(L"標準 (200)", L"Normal (200)", L"Normale (200)", L"Normale (200)", L"Normal (200)",
 			L"표준 (200)", L"标准 (200)", L"عادي (200)", L"Обычная (200)", L"Normal (200)",
-			L"Normal (200)", L"Normaal (200)", L"Normalna (200)", L"Normal (200)"));
+			L"Normal (200)", L"Normaal (200)", L"Normalna (200)", L"Normal (200)"),
+		LL14(L"不透明度を標準の 200 に設定", L"Set opacity to the normal value 200",
+			L"Opacite a la valeur normale 200", L"Opacita al valore normale 200",
+			L"Opacidad al valor normal 200", L"불투명도를 표준 200으로",
+			L"将不透明度设为标准值 200", L"ضبط الشفافية إلى القيمة العادية 200",
+			L"Непрозрачность на обычное значение 200", L"Deckkraft auf Normalwert 200",
+			L"Opacidade no valor normal 200", L"Dekking op normale waarde 200",
+			L"Nieprzezroczystosc na normalna wartosc 200", L"Opakligi normal deger 200 yap"));
 	menu.AddCommand(ID_DLRC_ALPHA_230,
 		LL14(L"濃い (230)", L"Dense (230)", L"Forte (230)", L"Alta (230)", L"Alta (230)",
 			L"진함 (230)", L"较浓 (230)", L"كثيف (230)", L"Плотная (230)", L"Deckend (230)",
-			L"Forte (230)", L"Dicht (230)", L"Gesta (230)", L"Yogun (230)"));
+			L"Forte (230)", L"Dicht (230)", L"Gesta (230)", L"Yogun (230)"),
+		LL14(L"不透明度を 230 に設定（ほぼ不透明）", L"Set opacity to 230 (nearly opaque)",
+			L"Opacite a 230 (presque opaque)", L"Opacita a 230 (quasi opaca)",
+			L"Opacidad a 230 (casi opaca)", L"불투명도 230으로 (거의 불투명)",
+			L"将不透明度设为 230（接近不透明）", L"ضبط الشفافية إلى 230 (شبه معتم)",
+			L"Непрозрачность 230 (почти непрозрачно)", L"Deckkraft auf 230 (fast undurchsichtig)",
+			L"Opacidade 230 (quase opaca)", L"Dekking op 230 (bijna ondoorzichtig)",
+			L"Nieprzezroczystosc 230 (prawie nieprzezroczyste)", L"Opakligi 230 yap (neredeyse opak)"));
 	menu.AddCommand(ID_DLRC_ALPHA_255,
 		LL14(L"不透明 (255)", L"Opaque (255)", L"Opaque (255)", L"Opaca (255)", L"Opaca (255)",
 			L"불투명 (255)", L"不透明 (255)", L"معتم (255)", L"Непрозрачная (255)", L"Undurchsichtig (255)",
-			L"Opaca (255)", L"Ondoorzichtig (255)", L"Nieprzezroczysta (255)", L"Opak (255)"));
+			L"Opaca (255)", L"Ondoorzichtig (255)", L"Nieprzezroczysta (255)", L"Opak (255)"),
+		LL14(L"不透明度を最大 255（完全不透明）に設定", L"Set opacity to maximum 255 (fully opaque)",
+			L"Opacite au maximum 255 (entierement opaque)", L"Opacita al massimo 255 (completamente opaca)",
+			L"Opacidad al maximo 255 (totalmente opaca)", L"불투명도 최대 255(완전 불투명)",
+			L"将不透明度设为最大 255（完全不透明）", L"ضبط الشفافية إلى الحد الأقصى 255 (معتم تماماً)",
+			L"Непрозрачность максимум 255 (полностью непрозрачно)", L"Deckkraft auf Maximum 255 (voll undurchsichtig)",
+			L"Opacidade no maximo 255 (totalmente opaca)", L"Dekking op maximum 255 (volledig ondoorzichtig)",
+			L"Nieprzezroczystosc maksimum 255 (calkowicie nieprzezroczyste)", L"Opakligi maksimum 255 (tamamen opak)"));
 
 	menu.AddSeparator();
 	{
@@ -628,23 +663,58 @@ void CDesktopLyricsWnd::ShowDeskLrcMenu(CPoint screenPt)
 		menu.AddCommand(ID_DLRC_FONT_S,
 			LL14(L"小 (10pt)", L"Small (10pt)", L"Petite (10pt)", L"Piccola (10pt)", L"Pequena (10pt)",
 				L"작게 (10pt)", L"小 (10pt)", L"صغير (10pt)", L"Мелкий (10pt)", L"Klein (10pt)",
-				L"Pequena (10pt)", L"Klein (10pt)", L"Mala (10pt)", L"Kucuk (10pt)"));
+				L"Pequena (10pt)", L"Klein (10pt)", L"Mala (10pt)", L"Kucuk (10pt)"),
+			LL14(L"文字サイズを 10pt に固定（自動フィット解除）", L"Fix font size to 10pt (disables auto-fit)",
+				L"Taille fixe 10pt (desactive l'auto)", L"Dimensione fissa 10pt (disattiva auto)",
+				L"Tamano fijo 10pt (desactiva auto)", L"글자 크기 10pt 고정(자동 맞춤 해제)",
+				L"字号固定为 10pt（关闭自动）", L"تثبيت حجم الخط على 10 نقطة (يلغي الملاءمة)",
+				L"Фикс. размер 10pt (отключает авто)", L"Schriftgroesse auf 10pt (Auto aus)",
+				L"Tamanho fixo 10pt (desativa o auto)", L"Lettergrootte 10pt (zet auto uit)",
+				L"Rozmiar 10pt (wylacza auto)", L"Yazi boyutu 10pt (otomati kapatir)"));
 		menu.AddCommand(ID_DLRC_FONT_M,
 			LL14(L"標準 (14pt)", L"Normal (14pt)", L"Normale (14pt)", L"Normale (14pt)", L"Normal (14pt)",
 				L"표준 (14pt)", L"标准 (14pt)", L"عادي (14pt)", L"Обычный (14pt)", L"Normal (14pt)",
-				L"Normal (14pt)", L"Normaal (14pt)", L"Normalna (14pt)", L"Normal (14pt)"));
+				L"Normal (14pt)", L"Normaal (14pt)", L"Normalna (14pt)", L"Normal (14pt)"),
+			LL14(L"文字サイズを 14pt に固定（自動フィット解除）", L"Fix font size to 14pt (disables auto-fit)",
+				L"Taille fixe 14pt (desactive l'auto)", L"Dimensione fissa 14pt (disattiva auto)",
+				L"Tamano fijo 14pt (desactiva auto)", L"글자 크기 14pt 고정(자동 맞춤 해제)",
+				L"字号固定为 14pt（关闭自动）", L"تثبيت حجم الخط على 14 نقطة (يلغي الملاءمة)",
+				L"Фикс. размер 14pt (отключает авто)", L"Schriftgroesse auf 14pt (Auto aus)",
+				L"Tamanho fixo 14pt (desativa o auto)", L"Lettergrootte 14pt (zet auto uit)",
+				L"Rozmiar 14pt (wylacza auto)", L"Yazi boyutu 14pt (otomati kapatir)"));
 		menu.AddCommand(ID_DLRC_FONT_L,
 			LL14(L"大 (20pt)", L"Large (20pt)", L"Grande (20pt)", L"Grande (20pt)", L"Grande (20pt)",
 				L"크게 (20pt)", L"大 (20pt)", L"كبير (20pt)", L"Крупный (20pt)", L"Gross (20pt)",
-				L"Grande (20pt)", L"Groot (20pt)", L"Duza (20pt)", L"Buyuk (20pt)"));
+				L"Grande (20pt)", L"Groot (20pt)", L"Duza (20pt)", L"Buyuk (20pt)"),
+			LL14(L"文字サイズを 20pt に固定（自動フィット解除）", L"Fix font size to 20pt (disables auto-fit)",
+				L"Taille fixe 20pt (desactive l'auto)", L"Dimensione fissa 20pt (disattiva auto)",
+				L"Tamano fijo 20pt (desactiva auto)", L"글자 크기 20pt 고정(자동 맞춤 해제)",
+				L"字号固定为 20pt（关闭自动）", L"تثبيت حجم الخط على 20 نقطة (يلغي الملاءمة)",
+				L"Фикс. размер 20pt (отключает авто)", L"Schriftgroesse auf 20pt (Auto aus)",
+				L"Tamanho fixo 20pt (desativa o auto)", L"Lettergrootte 20pt (zet auto uit)",
+				L"Rozmiar 20pt (wylacza auto)", L"Yazi boyutu 20pt (otomati kapatir)"));
 		menu.AddCommand(ID_DLRC_FONT_XL,
 			LL14(L"特大 (28pt)", L"XL (28pt)", L"Tres grande (28pt)", L"Molto grande (28pt)", L"Muy grande (28pt)",
 				L"아주 크게 (28pt)", L"特大 (28pt)", L"كبير جداً (28pt)", L"Очень крупный (28pt)", L"Sehr gross (28pt)",
-				L"Muito grande (28pt)", L"Erg groot (28pt)", L"Bardzo duza (28pt)", L"Cok buyuk (28pt)"));
+				L"Muito grande (28pt)", L"Erg groot (28pt)", L"Bardzo duza (28pt)", L"Cok buyuk (28pt)"),
+			LL14(L"文字サイズを 28pt に固定（自動フィット解除）", L"Fix font size to 28pt (disables auto-fit)",
+				L"Taille fixe 28pt (desactive l'auto)", L"Dimensione fissa 28pt (disattiva auto)",
+				L"Tamano fijo 28pt (desactiva auto)", L"글자 크기 28pt 고정(자동 맞춤 해제)",
+				L"字号固定为 28pt（关闭自动）", L"تثبيت حجم الخط على 28 نقطة (يلغي الملاءمة)",
+				L"Фикс. размер 28pt (отключает авто)", L"Schriftgroesse auf 28pt (Auto aus)",
+				L"Tamanho fixo 28pt (desativa o auto)", L"Lettergrootte 28pt (zet auto uit)",
+				L"Rozmiar 28pt (wylacza auto)", L"Yazi boyutu 28pt (otomati kapatir)"));
 		menu.AddCommand(ID_DLRC_FONT_XXL,
 			LL14(L"極大 (36pt)", L"XXL (36pt)", L"Enorme (36pt)", L"Enorme (36pt)", L"Enorme (36pt)",
 				L"최대 (36pt)", L"极大 (36pt)", L"ضخم (36pt)", L"Огромный (36pt)", L"Riesig (36pt)",
-				L"Enorme (36pt)", L"Enorm (36pt)", L"Ogromna (36pt)", L"Dev (36pt)"));
+				L"Enorme (36pt)", L"Enorm (36pt)", L"Ogromna (36pt)", L"Dev (36pt)"),
+			LL14(L"文字サイズを 36pt に固定（自動フィット解除）", L"Fix font size to 36pt (disables auto-fit)",
+				L"Taille fixe 36pt (desactive l'auto)", L"Dimensione fissa 36pt (disattiva auto)",
+				L"Tamano fijo 36pt (desactiva auto)", L"글자 크기 36pt 고정(자동 맞춤 해제)",
+				L"字号固定为 36pt（关闭自动）", L"تثبيت حجم الخط على 36 نقطة (يلغي الملاءمة)",
+				L"Фикс. размер 36pt (отключает авто)", L"Schriftgroesse auf 36pt (Auto aus)",
+				L"Tamanho fixo 36pt (desativa o auto)", L"Lettergrootte 36pt (zet auto uit)",
+				L"Rozmiar 36pt (wylacza auto)", L"Yazi boyutu 36pt (otomati kapatir)"));
 	}
 
 	menu.AddSeparator();
@@ -653,7 +723,14 @@ void CDesktopLyricsWnd::ShowDeskLrcMenu(CPoint screenPt)
 		LL14(L"常に手前に表示", L"Always on top", L"Toujours au premier plan", L"Sempre in primo piano", L"Siempre visible",
 			L"항상 위", L"总在最前", L"دائماً في المقدمة", L"Поверх всех окон", L"Immer im Vordergrund",
 			L"Sempre no topo", L"Altijd bovenop", L"Zawsze na wierzchu", L"Her zaman ustte"),
-		topmost);
+		topmost,
+		LL14(L"歌詞ウィンドウを他の窓の上に固定", L"Keep the lyrics window above other windows",
+			L"Garder la fenetre de paroles au-dessus", L"Mantieni la finestra testi sopra le altre",
+			L"Mantener la ventana de letra encima", L"가사 창을 다른 창 위에 고정",
+			L"将歌词窗口固定在其他窗口之上", L"إبقاء نافذة الكلمات فوق النوافذ الأخرى",
+			L"Держать окно текста поверх других", L"Textfenster ueber anderen Fenstern halten",
+			L"Manter a janela de letra acima das outras", L"Songtekstvenster boven andere houden",
+			L"Trzymaj okno tekstu nad innymi", L"Soz penceresini digerlerinin ustunde tut"));
 
 	BOOL canCopy = FALSE;
 	if (og && og->lrcnum >= 2 && og->lrccur >= 0 && og->lrccur < og->lrcnum - 1
@@ -663,7 +740,14 @@ void CDesktopLyricsWnd::ShowDeskLrcMenu(CPoint screenPt)
 		LL14(L"現在の歌詞をコピー", L"Copy current line", L"Copier la ligne actuelle", L"Copia riga corrente", L"Copiar linea actual",
 			L"현재 가사 복사", L"复制当前歌词", L"نسخ السطر الحالي", L"Копировать текущую строку", L"Aktuelle Zeile kopieren",
 			L"Copiar linha atual", L"Huidige regel kopieren", L"Kopiuj biezacy wiersz", L"Gecerli satiri kopyala"),
-		NULL, canCopy);
+		LL14(L"表示中の歌詞1行をクリップボードへコピー", L"Copy the currently shown lyric line to the clipboard",
+			L"Copier la ligne de paroles actuelle", L"Copia la riga di testo corrente",
+			L"Copiar la linea de letra actual", L"표시 중인 가사 한 줄을 클립보드에 복사",
+			L"将当前显示的歌词行复制到剪贴板", L"نسخ سطر الكلمات الحالي إلى الحافظة",
+			L"Копировать текущую строку текста в буфер", L"Aktuelle Textzeile in die Zwischenablage",
+			L"Copiar a linha de letra atual", L"Huidige songtekstregel naar klembord",
+			L"Kopiuj biezacy wiersz tekstu do schowka", L"Gosterilen soz satirini panoya kopyala"),
+		canCopy);
 
 	menu.AddSeparator();
 	{
@@ -691,7 +775,14 @@ void CDesktopLyricsWnd::ShowDeskLrcMenu(CPoint screenPt)
 	menu.AddCommand(ID_MP_LRC_SAVE,
 		LL14(L"LRC を保存…", L"Save LRC…", L"Enregistrer LRC…", L"Salva LRC…", L"Guardar LRC…",
 			L"LRC 저장…", L"保存 LRC…", L"حفظ LRC…", L"Сохранить LRC…", L"LRC speichern…",
-			L"Salvar LRC…", L"LRC opslaan…", L"Zapisz LRC…", L"LRC kaydet…"));
+			L"Salvar LRC…", L"LRC opslaan…", L"Zapisz LRC…", L"LRC kaydet…"),
+		LL14(L"調整済みの歌詞タイミングを LRC ファイルに保存", L"Save adjusted lyric timings to an LRC file",
+			L"Enregistrer les timings ajustes en fichier LRC", L"Salva i timing regolati in un file LRC",
+			L"Guardar los timings ajustados en un archivo LRC", L"조정된 가사 타이밍을 LRC 파일로 저장",
+			L"将调整后的歌词时机保存为 LRC 文件", L"حفظ توقيت الكلمات المعدّل في ملف LRC",
+			L"Сохранить скорректированный тайминг в LRC", L"Angepasste Timing-Daten als LRC speichern",
+			L"Salvar timings ajustados em arquivo LRC", L"Aangepaste timing als LRC-bestand opslaan",
+			L"Zapisz skorygowany timing do pliku LRC", L"Ayarlanmis soz zamanlamasini LRC dosyasina kaydet"));
 	menu.AddSeparator();
 	menu.AddCommand(ID_MP_PHRASE_AB,
 		LL14(L"フレーズA-B [R]", L"Phrase A-B [R]", L"Phrase A-B [R]", L"Frase A-B [R]", L"Frase A-B [R]",
@@ -707,12 +798,26 @@ void CDesktopLyricsWnd::ShowDeskLrcMenu(CPoint screenPt)
 	menu.AddCommand(ID_MP_SEEK_ABCLR,
 		LL14(L"A-B解除", L"Clear A-B", L"Effacer A-B", L"Cancella A-B", L"Borrar A-B",
 			L"A-B 해제", L"清除A-B", L"مسح A-B", L"Сброс A-B", L"A-B aus",
-			L"Limpar A-B", L"A-B uit", L"Wyczysc A-B", L"A-B sil"));
+			L"Limpar A-B", L"A-B uit", L"Wyczysc A-B", L"A-B sil"),
+		LL14(L"設定中の A-B ループを解除します", L"Clear the active A-B loop",
+			L"Effacer la boucle A-B active", L"Cancella il loop A-B attivo",
+			L"Borrar el bucle A-B activo", L"설정된 A-B 루프를 해제합니다",
+			L"清除当前的 A-B 循环", L"مسح حلقة A-B النشطة",
+			L"Сбросить активную петлю A-B", L"Aktive A-B-Schleife aufheben",
+			L"Limpar o loop A-B ativo", L"Actieve A-B-lus wissen",
+			L"Wyczysc aktywna petle A-B", L"Aktif A-B dongusunu temizle"));
 	menu.AddCommand(ID_MP_SEEK_CUEADD,
 		LL14(L"キューを現在位置に追加", L"Add cue at now", L"Ajouter cue ici", L"Aggiungi cue qui",
 			L"Anadir cue aqui", L"현재 위치에 큐 추가", L"在当前位置添加标记", L"إضافة إشارة هنا",
 			L"Добавить метку здесь", L"Cue hier hinzufugen", L"Adicionar cue aqui",
-			L"Cue hier toevoegen", L"Dodaj cue tutaj", L"Buraya cue ekle"));
+			L"Cue hier toevoegen", L"Dodaj cue tutaj", L"Buraya cue ekle"),
+		LL14(L"再生位置にキュー（マーカー）を追加", L"Add a cue (marker) at the current play position",
+			L"Ajouter un cue (marqueur) a la position actuelle", L"Aggiungi un cue (marcatore) alla posizione attuale",
+			L"Anadir un cue (marcador) en la posicion actual", L"재생 위치에 큐(마커)를 추가",
+			L"在当前播放位置添加标记（cue）", L"إضافة إشارة (علامة) عند موضع التشغيل الحالي",
+			L"Добавить метку (cue) в текущую позицию", L"Cue (Marker) an aktueller Position setzen",
+			L"Adicionar um cue (marcador) na posicao atual", L"Cue (markering) op huidige afspeelpositie",
+			L"Dodaj cue (znacznik) w biezacej pozycji", L"Gecerli oynatma konumuna cue (isaret) ekle"));
 
 	menu.AddSeparator();
 	menu.AddCommand(ID_DLRC_CLOSE,

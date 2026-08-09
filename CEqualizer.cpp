@@ -1366,15 +1366,36 @@ void CEqualizer::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
 	menu.AddCommand(IDM_EQ_ABA,
 		LL14(L"A に保存", L"Store to A", L"Enregistrer dans A", L"Salva in A", L"Guardar en A",
 			L"A에 저장", L"保存到 A", L"حفظ في A", L"Сохранить в A", L"In A speichern",
-			L"Salvar em A", L"Opslaan in A", L"Zapisz w A", L"A'ya kaydet"));
+			L"Salvar em A", L"Opslaan in A", L"Zapisz w A", L"A'ya kaydet"),
+		LL14(L"現在のEQカーブをスロットAに保存します。", L"Store the current EQ curve into slot A.",
+			L"Enregistrer la courbe EQ actuelle dans A.", L"Salva la curva EQ attuale nello slot A.",
+			L"Guardar la curva EQ actual en la ranura A.", L"현재 EQ 커브를 슬롯 A에 저장합니다.",
+			L"将当前 EQ 曲线保存到插槽 A。", L"حفظ منحنى EQ الحالي في الفتحة A.",
+			L"Сохранить текущую кривую EQ в слот A.", L"Aktuelle EQ-Kurve in Slot A speichern.",
+			L"Salvar a curva EQ atual no slot A.", L"Huidige EQ-curve opslaan in slot A.",
+			L"Zapisz biezaca krzywa EQ w slocie A.", L"Gecerli EQ egirisini A yuvasina kaydet"));
 	menu.AddCommand(IDM_EQ_ABB,
 		LL14(L"B に保存", L"Store to B", L"Enregistrer dans B", L"Salva in B", L"Guardar en B",
 			L"B에 저장", L"保存到 B", L"حفظ في B", L"Сохранить в B", L"In B speichern",
-			L"Salvar em B", L"Opslaan in B", L"Zapisz w B", L"B'ye kaydet"));
+			L"Salvar em B", L"Opslaan in B", L"Zapisz w B", L"B'ye kaydet"),
+		LL14(L"現在のEQカーブをスロットBに保存します。", L"Store the current EQ curve into slot B.",
+			L"Enregistrer la courbe EQ actuelle dans B.", L"Salva la curva EQ attuale nello slot B.",
+			L"Guardar la curva EQ actual en la ranura B.", L"현재 EQ 커브를 슬롯 B에 저장합니다.",
+			L"将当前 EQ 曲线保存到插槽 B。", L"حفظ منحنى EQ الحالي في الفتحة B.",
+			L"Сохранить текущую кривую EQ в слот B.", L"Aktuelle EQ-Kurve in Slot B speichern.",
+			L"Salvar a curva EQ atual no slot B.", L"Huidige EQ-curve opslaan in slot B.",
+			L"Zapisz biezaca krzywa EQ w slocie B.", L"Gecerli EQ egirisini B yuvasina kaydet"));
 	menu.AddCommand(IDM_EQ_ABTOG,
 		LL14(L"A ↔ B 切替", L"Toggle A ↔ B", L"Basculer A ↔ B", L"Alterna A ↔ B", L"Alternar A ↔ B",
 			L"A ↔ B 전환", L"切换 A ↔ B", L"تبديل A ↔ B", L"Переключить A ↔ B", L"A ↔ B umschalten",
-			L"Alternar A ↔ B", L"Wissel A ↔ B", L"Przelacz A ↔ B", L"A ↔ B gec"));
+			L"Alternar A ↔ B", L"Wissel A ↔ B", L"Przelacz A ↔ B", L"A ↔ B gec"),
+		LL14(L"保存したAとBのEQを切り替えて聴き比べます。", L"Toggle between saved EQ slots A and B to compare.",
+			L"Basculer entre les EQ A et B pour comparer.", L"Alterna tra EQ A e B per confrontare.",
+			L"Alternar entre EQ A y B para comparar.", L"저장한 A/B EQ를 전환해 비교 청취합니다.",
+			L"在已保存的 A/B EQ 之间切换以便对比试听。", L"التبديل بين EQ A وB للمقارنة.",
+			L"Переключать сохранённые EQ A и B для сравнения.", L"Zwischen EQ A und B umschalten zum Vergleich.",
+			L"Alternar entre EQ A e B para comparar.", L"Wissel tussen EQ A en B om te vergelijken.",
+			L"Przelacz miedzy EQ A i B do porownania.", L"Kayitli A/B EQ arasinda gecis yapip karsilastir"));
 	menu.AddSeparator();
 	{
 		static const int kQuickPresets[] = {
@@ -1466,17 +1487,26 @@ void CEqualizer::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
 	menu.AddCommand(IDM_EQ_OPEN_ANALYZER,
 		LL14(L"アナライザを開く", L"Open analyzer", L"Ouvrir l'analyseur", L"Apri analizzatore", L"Abrir analizador",
 			L"분석기 열기", L"打开分析器", L"فتح المحلل", L"Открыть анализатор", L"Analyzer öffnen",
-			L"Abrir analisador", L"Analyzer openen", L"Otworz analizator", L"Analizoru ac"));
+			L"Abrir analisador", L"Analyzer openen", L"Otworz analizator", L"Analizoru ac"),
+		LL14(L"アナライザウィンドウを開きます。", L"Open the analyzer window.", L"Ouvrir la fenetre de l'analyseur.", L"Apri la finestra dell'analizzatore.", L"Abrir la ventana del analizador.",
+			L"분석기 창을 엽니다.", L"打开分析器窗口。", L"فتح نافذة المحلل.", L"Открыть окно анализатора.", L"Analyzer-Fenster öffnen.",
+			L"Abrir a janela do analisador.", L"Open het analyzer-venster.", L"Otworz okno analizatora.", L"Analizor penceresini ac."));
 	menu.AddCommand(IDM_EQ_OPEN_PIANO,
 		LL14(L"ピアノロールを開く", L"Open piano roll", L"Ouvrir le piano roll", L"Apri piano roll", L"Abrir piano roll",
 			L"피아노 롤 열기", L"打开钢琴卷帘", L"فتح لفافة البيانو", L"Открыть пианоролл", L"Piano-Roll öffnen",
-			L"Abrir piano roll", L"Piano-roll openen", L"Otworz piano roll", L"Piyano rolunu ac"));
+			L"Abrir piano roll", L"Piano-roll openen", L"Otworz piano roll", L"Piyano rolunu ac"),
+		LL14(L"ピアノロールウィンドウを開きます。", L"Open the piano roll window.", L"Ouvrir la fenetre du piano roll.", L"Apri la finestra del piano roll.", L"Abrir la ventana del piano roll.",
+			L"피아노 롤 창을 엽니다.", L"打开钢琴卷帘窗口。", L"فتح نافذة لفافة البيانو.", L"Открыть окно пианоролла.", L"Piano-Roll-Fenster öffnen.",
+			L"Abrir a janela do piano roll.", L"Open het piano-roll-venster.", L"Otworz okno piano roll.", L"Piyano rulosu penceresini ac."));
 	menu.AddSeparator();
 	menu.AddCommand(ID_HELP_SHOWSHEET,
 		LL14(L"操作ガイド", L"Operation guide", L"Guide d'utilisation", L"Guida operativa",
 			L"Guía de operación", L"조작 가이드", L"操作指南", L"دليل التشغيل",
 			L"Руководство", L"Bedienungsanleitung", L"Guia de operação", L"Handleiding",
-			L"Przewodnik", L"İşlem kılavuzu"));
+			L"Przewodnik", L"İşlem kılavuzu"),
+		LL14(L"この画面の操作ガイドを表示します。", L"Show the operation guide for this window.", L"Afficher le guide d'utilisation de cette fenetre.", L"Mostra la guida operativa di questa finestra.", L"Mostrar la guia de operacion de esta ventana.",
+			L"이 화면의 조작 가이드를 표시합니다.", L"显示此窗口的操作指南。", L"عرض دليل تشغيل هذه النافذة.", L"Показать руководство по этому окну.", L"Bedienungsanleitung für dieses Fenster anzeigen.",
+			L"Mostrar o guia de operacao desta janela.", L"Toon de handleiding voor dit venster.", L"Pokaz przewodnik po tym oknie.", L"Bu pencerenin islem kilavuzunu goster."));
 	if (point.x == -1 && point.y == -1) {
 		CRect rc; GetClientRect(&rc); ClientToScreen(&rc);
 		point = CPoint(rc.left + 8, rc.top + 8);

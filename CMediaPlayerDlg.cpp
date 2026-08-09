@@ -1279,6 +1279,7 @@ BEGIN_MESSAGE_MAP(CMediaPlayerDlg, CCustomBlurDialogExBase)
 	ON_BN_CLICKED(IDC_MP_SORTTIME, &CMediaPlayerDlg::OnSortTime)
 	ON_BN_CLICKED(IDC_MP_ADDFOLDER, &CMediaPlayerDlg::OnAddFolder)
 	ON_BN_CLICKED(IDC_MP_FINDFILTER, &CMediaPlayerDlg::OnFindFilter)
+	ON_BN_CLICKED(IDC_MP_FINDREGEX, &CMediaPlayerDlg::OnFindRegex)
 	ON_BN_CLICKED(IDC_MP_LIBTOGGLE, &CMediaPlayerDlg::OnLibToggle)
 	ON_BN_CLICKED(IDC_MP_HISTTOGGLE, &CMediaPlayerDlg::OnHistToggle)
 	ON_BN_CLICKED(IDC_MP_TEMPTOGGLE, &CMediaPlayerDlg::OnTempToggle)
@@ -1529,6 +1530,8 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 		}
 		if (!m_findFilter.GetSafeHwnd())
 			m_findFilter.Create(_T("Filter"), WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX | WS_TABSTOP, rc, this, IDC_MP_FINDFILTER);
+		if (!m_findRegex.GetSafeHwnd())
+			m_findRegex.Create(_T("Regex"), WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX | WS_TABSTOP, rc, this, IDC_MP_FINDREGEX);
 		if (!m_lrcBadge.GetSafeHwnd())
 			m_lrcBadge.Create(_T(""), WS_CHILD | WS_VISIBLE | SS_LEFT | SS_ENDELLIPSIS, rc, this, IDC_MP_LRCBADGE);
 		if (!m_lrcView.GetSafeHwnd())
@@ -1553,6 +1556,8 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 		m_addFolder.SetGradation(RGB(220, 240, 230), RGB(180, 220, 200), 0, TRUE);
 		if (m_findFilter.GetSafeHwnd())
 			m_findFilter.SetCheck(savedata.mpFindFilter ? BST_CHECKED : BST_UNCHECKED);
+		if (m_findRegex.GetSafeHwnd())
+			m_findRegex.SetCheck(savedata.mpFindRegex ? BST_CHECKED : BST_UNCHECKED);
 		if (m_seekLock.GetSafeHwnd())
 			m_seekLock.SetCheck(savedata.mpSeekLoopUnlock ? BST_UNCHECKED : BST_CHECKED);
 	}
@@ -1619,6 +1624,8 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 		m_addFolder.SetWindowText(LL14(L"フォルダ追加", L"Add folder", L"Ajouter dossier", L"Aggiungi cartella", L"Anadir carpeta", L"폴더 추가", L"添加文件夹", L"إضافة مجلد", L"Добавить папку", L"Ordner hinzu", L"Add pasta", L"Map toevoegen", L"Dodaj folder", L"Klasor ekle"));
 	if (m_findFilter.GetSafeHwnd())
 		m_findFilter.SetWindowText(LL14(L"絞り込み", L"Filter", L"Filtrer", L"Filtra", L"Filtrar", L"필터", L"筛选", L"تصفية", L"Фильтр", L"Filter", L"Filtrar", L"Filteren", L"Filtruj", L"Filtrele"));
+	if (m_findRegex.GetSafeHwnd())
+		m_findRegex.SetWindowText(LL14(L"正規表現", L"Regex", L"Regex", L"Regex", L"Regex", L"정규식", L"正则", L"تعبير نمطي", L"Регулярка", L"Regex", L"Regex", L"Regex", L"Regex", L"Regex"));
 	m_renzoku.SetWindowText(LL14(L"連続再生", L"Continuous", L"Lect. continue", L"Continua", L"Continua", L"연속 재생", L"连续播放", L"تشغيل متتابع", L"Подряд", L"Folge", L"Continuo", L"Doorlopend", L"Ciągłe", L"Sürekli çal"));
 	m_loop.SetWindowText(LL14(L"ループ再生", L"Loop play", L"Lecture boucle", L"Riproduci loop", L"Repetir", L"루프 재생", L"循环播放", L"تشغيل متكرر", L"Цикл", L"Schleife", L"Repetir", L"Lus afspelen", L"Odtwarz. pętli", L"Donguye al"));
 	m_random.SetWindowText(LL14(L"ランダム再生", L"Random play", L"Lect. aleatoire", L"Casuale", L"Aleatorio", L"랜덤 재생", L"随机播放", L"تشغيل عشوائي", L"Случайно", L"Zufall", L"Aleatorio", L"Willekeurig", L"Losowo", L"Rastgele cal"));
@@ -1884,6 +1891,7 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 	if (m_emptyFolder.GetSafeHwnd()) m_emptyFolder.SetFont(&m_fontChk, TRUE);
 	if (m_emptyM3u.GetSafeHwnd()) m_emptyM3u.SetFont(&m_fontChk, TRUE);
 	if (m_findFilter.GetSafeHwnd()) m_findFilter.SetFont(&m_fontChk, TRUE);
+	if (m_findRegex.GetSafeHwnd()) m_findRegex.SetFont(&m_fontChk, TRUE);
 	// タイトル/アーティスト/アルバムはバナーGDIに表示されるのでスタティックは隠す(縦幅節約)
 	m_title.ShowWindow(SW_HIDE);
 	m_artist.ShowWindow(SW_HIDE);
@@ -2010,9 +2018,25 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 	if (m_cmdroll.GetSafeHwnd())
 		addTip(m_cmdroll, LL14(L"プロンプトロールを開きます。時間軸でコマンドを配置・編集します。", L"Open the prompt roll. Place and edit timed commands on a timeline.", L"Ouvrir le rouleau de prompt.", L"Apri il prompt roll.", L"Abrir el prompt roll.", L"프롬프트 롤을 엽니다. 시간축에서 명령을 배치·편집합니다.", L"打开提示卷轴。在时间轴上放置/编辑命令。", L"فتح لفة الموجه.", L"Открыть prompt roll.", L"Prompt-Roll oeffnen.", L"Abrir prompt roll.", L"Prompt-roll openen.", L"Otworz prompt roll.", L"Prompt rulosunu ac."));
 	addTip(m_st, LL14(L"スペアナのステレオ(L/R)表示を切り替えます。", L"Toggle stereo (L/R) spectrum view.", L"Afficher le spectre stereo L/R.", L"Mostra spettro stereo L/R.", L"Mostrar espectro estereo L/R.", L"스테레오(L/R) 스펙트럼 표시 전환.", L"切换立体声(L/R)频谱显示。", L"تبديل عرض الطيف الستيريو.", L"Переключить стерео-спектр.", L"Stereo-Spektrum umschalten.", L"Alternar espectro stereo.", L"Stereo spectrum wisselen.", L"Przelacz widmo stereo.", L"Stereo spektrumu degistir."));
-	addTip(m_find, LL14(L"検索キーワード。絞り込みONで一致曲のみ表示、OFF時は▲▼で前後検索。", L"Search keyword. With Filter ON, show matches; OFF uses up/down jump.", L"Mot-cle. Filtre ON = liste filtree.", L"Parola. Filtro ON = elenco filtrato.", L"Palabra. Filtro ON = lista filtrada.", L"검색어. 필터 ON이면 일치만.", L"关键字。筛选ON时仅显示匹配。", L"كلمة. التصفية ON تعرض المطابق.", L"Слово. Фильтр ON — только совпадения.", L"Suchbegriff. Filter ON = Treffer.", L"Palavra. Filtro ON = correspondencias.", L"Zoekterm. Filter ON = treffers.", L"Slowo. Filtr ON = trafienia.", L"Kelime. Filtre ON = eslesenler."));
+	addTip(m_find, LL14(L"検索キーワード。絞り込みONで一致曲のみ表示、OFF時は▲▼で前後検索。正規表現ONでECMAScript正規表現(大小無視)。", L"Search keyword. Filter ON shows matches; OFF uses up/down jump. Regex ON = ECMAScript (case-insensitive).", L"Mot-cle. Filtre ON = liste. Regex ON = ECMAScript.", L"Parola. Filtro ON = elenco. Regex ON = ECMAScript.", L"Palabra. Filtro ON = lista. Regex ON = ECMAScript.", L"검색어. 필터 ON=일치만. 정규식 ON=ECMAScript.", L"关键字。筛选ON仅匹配。正则ON=ECMAScript。", L"كلمة. التصفية ON. Regex ON=ECMAScript.", L"Слово. Фильтр ON. Regex ON=ECMAScript.", L"Suchbegriff. Filter ON. Regex ON=ECMAScript.", L"Palavra. Filtro ON. Regex ON=ECMAScript.", L"Zoekterm. Filter ON. Regex ON=ECMAScript.", L"Slowo. Filtr ON. Regex ON=ECMAScript.", L"Kelime. Filtre ON. Regex ON=ECMAScript."));
 	if (m_findFilter.GetSafeHwnd())
 		addTip(m_findFilter, LL14(L"ONで検索語に一致する曲だけ表示します。OFFはジャンプ検索のみ。", L"ON: show only matching tracks. OFF: jump search only.", L"ON: filtrer. OFF: recherche seule.", L"ON: filtra. OFF: solo salto.", L"ON: filtrar. OFF: solo saltar.", L"ON: 일치 곡만. OFF: 점프만.", L"ON:仅显示匹配。OFF:仅跳转。", L"ON: تصفية. OFF: قفز فقط.", L"ON: фильтр. OFF: только переход.", L"ON: filtern. OFF: nur springen.", L"ON: filtrar. OFF: so saltar.", L"ON: filteren. OFF: alleen springen.", L"ON: filtruj. OFF: tylko skok.", L"ON: filtrele. OFF: sadece atla."));
+	if (m_findRegex.GetSafeHwnd())
+		addTip(m_findRegex, LL14(
+			L"ONで正規表現検索(大小文字無視)。例: ^Ys|空の軌跡$  無効な式は一致なし。",
+			L"ON: regex search (case-insensitive). e.g. ^Ys|Sky$  Invalid pattern matches nothing.",
+			L"ON: recherche regex (insensible). Ex: ^Ys|Ciel$  Motif invalide = aucun match.",
+			L"ON: ricerca regex (senza maiuscole). Es: ^Ys|Cielo$  Pattern non valido = nessun match.",
+			L"ON: busqueda regex (sin mayusculas). Ej: ^Ys|Cielo$  Patron invalido = sin coincidencias.",
+			L"ON: 정규식 검색(대소문자 무시). 예: ^Ys|궤적$  잘못된 식은 일치 없음.",
+			L"ON:正则搜索(忽略大小写)。例: ^Ys|轨迹$  无效表达式不匹配。",
+			L"ON: بحث regex (بدون حالة). مثال: ^Ys$  النمط غير صالح = لا تطابق.",
+			L"ON: regex (без регистра). Пример: ^Ys$  Неверное выражение = нет совпадений.",
+			L"ON: Regex-Suche (ohne Gross/Klein). z.B. ^Ys$  Ungueltig = kein Treffer.",
+			L"ON: busca regex (sem maiusculas). Ex: ^Ys$  Padrao invalido = sem match.",
+			L"ON: regex-zoeken (hoofdletterongevoelig). Bijv. ^Ys$  Ongeldig = geen treffer.",
+			L"ON: wyszukiwanie regex (bez wielkości liter). Np. ^Ys$  Błędny wzorzec = brak.",
+			L"ON: regex arama (büyük/küçük duyarsız). Örn: ^Ys$  Geçersiz ifade = eşleşme yok."));
 	if (m_lrcExpand.GetSafeHwnd())
 		addTip(m_lrcExpand, LL14(L"左クリック: 歌詞パネル拡大（カラオケ風）。右クリック: 歌詞メニュー。", L"Left-click: expand lyrics (karaoke). Right-click: lyrics menu.", L"Clic gauche: agrandir. Clic droit: menu paroles.", L"Clic sinistro: espandi. Clic destro: menu testi.", L"Clic izq.: ampliar. Clic der.: menu letra.", L"왼쪽 클릭: 가사 확대. 오른쪽 클릭: 가사 메뉴.", L"左键：扩大歌词。右键：歌词菜单。", L"نقر يسار: توسيع. نقر يمين: قائمة الكلمات.", L"ЛКМ: расширить. ПКМ: меню текста.", L"Linksklick: erweitern. Rechtsklick: Textmenue.", L"Clique esq.: ampliar. Clique dir.: menu de letra.", L"Linksklik: uitklappen. Rechtsklik: tekstmenu.", L"LPM: rozszerz. PPM: menu tekstu.", L"Sol tik: genislet. Sag tik: soz menusu."));
 	if (m_deskLrc.GetSafeHwnd())
@@ -2885,10 +2909,12 @@ void CMediaPlayerDlg::DoLayout()
 	const int toolsBtnW = (int)(88 * s);
 	MoveCtl(&m_toolsToggle, tx, by4, toolsBtnW, tbH); tx += toolsBtnW + (int)(6 * s);
 	int ibw = (int)(16 * s);
-	int filtW = (int)(68 * s);
-	int findW = (int)(72 * s);
+	int filtW = (int)(56 * s);
+	int regexW = (int)(64 * s);
+	int findW = (int)(64 * s);
 	MoveCtl(&m_find, tx, by4 + (int)(1 * s), findW, tbH - (int)(2 * s)); tx += findW + (int)(2 * s);
 	MoveCtl(&m_findFilter, tx, by4, filtW, tbH); tx += filtW + (int)(2 * s);
+	MoveCtl(&m_findRegex, tx, by4, regexW, tbH); tx += regexW + (int)(2 * s);
 	MoveCtl(&m_finddown, tx, by4, ibw, tbH); tx += ibw + (int)(1 * s);
 	MoveCtl(&m_findup, tx, by4, ibw, tbH);
 	int delGap = (int)(24 * s);
@@ -3488,9 +3514,12 @@ void CMediaPlayerDlg::RefreshList(BOOL bForce)
 		CString kw;
 		if (savedata.mpFindFilter && m_find.GetSafeHwnd()) {
 			m_find.GetWindowText(kw);
-			kw.Trim(); kw.MakeLower();
+			kw.Trim();
 		}
 		const BOOL wantKw = !kw.IsEmpty();
+		PlaylistSearchCtx* searchCtx = NULL;
+		if (wantKw)
+			searchCtx = PlaylistSearchCtxCreate(kw, savedata.mpFindRegex != 0);
 		MpSmartRule smartRule; ZeroMemory(&smartRule, sizeof(smartRule));
 		BOOL wantSmartRule = FALSE;
 		if (m_activeSmartId >= 0 && MpSmart_Get(m_activeSmartId, smartRule))
@@ -3505,15 +3534,8 @@ void CMediaPlayerDlg::RefreshList(BOOL bForce)
 				for (int i = 0; i < pl->playcnt; ++i) {
 					const playlistdata0& it = pl->pc[i];
 					bool hit = true;
-					if (wantKw) {
-						hit = false;
-						const TCHAR* fields[5] = { it.name, it.art, it.alb, it.fol, it.game };
-						for (int f = 0; f < 5; ++f) {
-							if (!fields[f] || !fields[f][0]) continue;
-							CString ssl(fields[f]); ssl.MakeLower();
-							if (ssl.Find(kw) >= 0) { hit = true; break; }
-						}
-					}
+					if (wantKw)
+						hit = PlaylistSearchCtxMatch(searchCtx, it) ? true : false;
 					if (hit && m_smartFilt == 2)
 						hit = (m_miss && i < m_missCap && m_miss[i] == 1);
 					if (hit && m_smartFilt == 1)
@@ -3525,6 +3547,7 @@ void CMediaPlayerDlg::RefreshList(BOOL bForce)
 				m_filtOn = 1;
 			}
 		}
+		PlaylistSearchCtxDestroy(searchCtx);
 	}
 	int cnt = m_filtOn ? m_fcnt : pl->playcnt;
 
@@ -6236,20 +6259,25 @@ void CMediaPlayerDlg::OnBotSleep()
 	menu.SetAeroMode(FALSE);
 	menu.SetSkipChrome(TRUE);
 	menu.AddCommand(ID_MP_SLEEP_15,
-		LL14(L"15 分", L"15 min", L"15 min", L"15 min", L"15 min", L"15분", L"15 分钟", L"15 د", L"15 мин", L"15 Min", L"15 min", L"15 min", L"15 min", L"15 dk"));
+		LL14(L"15 分", L"15 min", L"15 min", L"15 min", L"15 min", L"15분", L"15 分钟", L"15 د", L"15 мин", L"15 Min", L"15 min", L"15 min", L"15 min", L"15 dk"),
+		LL14(L"15分後に再生を停止します", L"Stop playback after 15 minutes", L"Arrête la lecture après 15 min", L"Ferma la riproduzione dopo 15 min", L"Detiene la reproducción tras 15 min", L"15분 후 재생을 중지합니다", L"15 分钟后停止播放", L"يوقف التشغيل بعد 15 دقيقة", L"Остановить воспроизведение через 15 мин", L"Wiedergabe nach 15 Min stoppen", L"Para a reprodução após 15 min", L"Stopt afspelen na 15 min", L"Zatrzymaj odtwarzanie po 15 min", L"15 dk sonra calmayi durdurur"));
 	menu.AddCommand(ID_MP_SLEEP_30,
-		LL14(L"30 分", L"30 min", L"30 min", L"30 min", L"30 min", L"30분", L"30 分钟", L"30 د", L"30 мин", L"30 Min", L"30 min", L"30 min", L"30 min", L"30 dk"));
+		LL14(L"30 分", L"30 min", L"30 min", L"30 min", L"30 min", L"30분", L"30 分钟", L"30 د", L"30 мин", L"30 Min", L"30 min", L"30 min", L"30 min", L"30 dk"),
+		LL14(L"30分後に再生を停止します", L"Stop playback after 30 minutes", L"Arrête la lecture après 30 min", L"Ferma la riproduzione dopo 30 min", L"Detiene la reproducción tras 30 min", L"30분 후 재생을 중지합니다", L"30 分钟后停止播放", L"يوقف التشغيل بعد 30 دقيقة", L"Остановить воспроизведение через 30 мин", L"Wiedergabe nach 30 Min stoppen", L"Para a reprodução após 30 min", L"Stopt afspelen na 30 min", L"Zatrzymaj odtwarzanie po 30 min", L"30 dk sonra calmayi durdurur"));
 	menu.AddCommand(ID_MP_SLEEP_60,
-		LL14(L"60 分", L"60 min", L"60 min", L"60 min", L"60 min", L"60분", L"60 分钟", L"60 د", L"60 мин", L"60 Min", L"60 min", L"60 min", L"60 min", L"60 dk"));
+		LL14(L"60 分", L"60 min", L"60 min", L"60 min", L"60 min", L"60분", L"60 分钟", L"60 د", L"60 мин", L"60 Min", L"60 min", L"60 min", L"60 min", L"60 dk"),
+		LL14(L"60分後に再生を停止します", L"Stop playback after 60 minutes", L"Arrête la lecture après 60 min", L"Ferma la riproduzione dopo 60 min", L"Detiene la reproducción tras 60 min", L"60분 후 재생을 중지합니다", L"60 分钟后停止播放", L"يوقف التشغيل بعد 60 دقيقة", L"Остановить воспроизведение через 60 мин", L"Wiedergabe nach 60 Min stoppen", L"Para a reprodução após 60 min", L"Stopt afspelen na 60 min", L"Zatrzymaj odtwarzanie po 60 min", L"60 dk sonra calmayi durdurur"));
 	menu.AddCommand(ID_MP_SLEEP_CUSTOM,
 		LL14(L"カスタム…", L"Custom…", L"Perso…", L"Personalizzato…", L"Personalizado…",
 			L"사용자…", L"自定义…", L"مخصص…", L"Своё…", L"Eigene…",
-			L"Personalizado…", L"Aangepast…", L"Wlasne…", L"Ozel…"));
+			L"Personalizado…", L"Aangepast…", L"Wlasne…", L"Ozel…"),
+			LL14(L"分単位でスリープ時間を指定します（1〜240）", L"Set a custom sleep time in minutes (1–240)", L"Definir une duree personnalisee (1–240 min)", L"Imposta durata personalizzata (1–240 min)", L"Definir tiempo personalizado (1–240 min)", L"분 단위로 슬립 시간 지정(1–240)", L"自定义睡眠分钟数（1–240）", L"تعيين مدة نوم مخصصة (1–240)", L"Задать своё время сна (1–240 мин)", L"Eigene Schlafzeit in Minuten (1–240)", L"Definir sono personalizado (1–240 min)", L"Aangepaste slaaptijd in minuten (1–240)", L"Ustaw wlasny czas snu (1–240 min)", L"Ozel uyku suresi (1–240 dk)"));
 	menu.AddSeparator();
 	menu.AddCommand(ID_MP_SLEEP_OFF,
 		LL14(L"スリープ解除", L"Sleep off", L"Veille off", L"Sleep off", L"Suspensión off",
 			L"슬립 해제", L"关闭睡眠", L"إيقاف النوم", L"Сон выкл", L"Schlaf aus",
-			L"Sono off", L"Slaap uit", L"Sen wyl", L"Uyku kapat"));
+			L"Sono off", L"Slaap uit", L"Sen wyl", L"Uyku kapat"),
+			LL14(L"スリープタイマーを解除して通常再生に戻します", L"Cancel the sleep timer and keep playing", L"Annuler la minuterie de veille", L"Annulla il timer sleep", L"Cancelar el temporizador de sueño", L"슬립 타이머를 해제합니다", L"取消睡眠定时器", L"إلغاء مؤقت النوم", L"Отменить таймер сна", L"Schlaf-Timer abschalten", L"Cancelar o temporizador de sono", L"Slaaptimer uitzetten", L"Wylacz timer snu", L"Uyku zamanlayicisini kapat"));
 	CRect r;
 	if (m_botSleep.GetSafeHwnd())
 		m_botSleep.GetWindowRect(&r);
@@ -6669,7 +6697,8 @@ void CMediaPlayerDlg::AppendSeekExtrasToMenu(CCustomPopupMenu& menu, UINT flags)
 
 	if (flags & MP_SEEK_MENU_VIDEO) {
 		menu.AddCommand(ID_MP_VIDEO_REPLACE,
-			LL14(L"動画の音声を差し替え…", L"Replace video audio…", L"Remplacer audio video…", L"Sostituisci audio video…", L"Reemplazar audio video…", L"동영상 오디오 교체…", L"替换视频音频…", L"استبدال صوت الفيديو…", L"Заменить звук видео…", L"Video-Audio ersetzen…", L"Substituir audio do video…", L"Video-audio vervangen…", L"Zastap audio wideo…", L"Video sesini degistir…"));
+			LL14(L"動画の音声を差し替え…", L"Replace video audio…", L"Remplacer audio video…", L"Sostituisci audio video…", L"Reemplazar audio video…", L"동영상 오디오 교체…", L"替换视频音频…", L"استبدال صوت الفيديو…", L"Заменить звук видео…", L"Video-Audio ersetzen…", L"Substituir audio do video…", L"Video-audio vervangen…", L"Zastap audio wideo…", L"Video sesini degistir…"),
+			LL14(L"動画ファイルの音声トラックを WAV で差し替えます", L"Replace the video file audio track with a WAV", L"Remplacer la piste audio video par un WAV", L"Sostituisci la traccia audio del video con WAV", L"Reemplazar la pista de audio del video con WAV", L"동영상 오디오 트랙을 WAV로 교체", L"用 WAV 替换视频音轨", L"استبدال مسار صوت الفيديو بـ WAV", L"Заменить звуковую дорожку видео на WAV", L"Video-Tonspur durch WAV ersetzen", L"Substituir a faixa de audio do video por WAV", L"Vervang de video-audiotrack door WAV", L"Zastap sciezke audio wideo plikiem WAV", L"Video ses izini WAV ile degistir"));
 		needSep = TRUE;
 	}
 	if (flags & MP_SEEK_MENU_LOCK) {
@@ -6680,7 +6709,8 @@ void CMediaPlayerDlg::AppendSeekExtrasToMenu(CCustomPopupMenu& menu, UINT flags)
 				L"Bloquear asas de bucle", L"루프 손잡이 잠금", L"锁定循环端点", L"قفل مقابض الحلقة",
 				L"Блокировать ручки цикла", L"Schleifengriffe sperren", L"Travar alças de loop",
 				L"Lusgrepen vergrendelen", L"Blokuj uchwyty petli", L"Dongu tutamaclarini kilitle"),
-			lockOn);
+			lockOn,
+			LL14(L"ループ端のつまみを動かないようにロックします", L"Lock the loop-end thumbs so they cannot be dragged", L"Verrouiller les poignees de boucle", L"Blocca le maniglie del loop", L"Bloquear las asas del bucle", L"루프 끝 손잡이를 잠급니다", L"锁定循环端点把手，防止误拖", L"قفل مقابض طرفي الحلقة", L"Заблокировать ручки границ цикла", L"Schleifengriffe sperren", L"Travar as alcas do loop", L"Lusgrepen vergrendelen", L"Zablokuj uchwyty petli", L"Dongu tutamaclarini kilitle"));
 	}
 	if (flags & MP_SEEK_MENU_AB_POINTS) {
 		sep();
@@ -6688,14 +6718,17 @@ void CMediaPlayerDlg::AppendSeekExtrasToMenu(CCustomPopupMenu& menu, UINT flags)
 			LL14(L"A点を現在位置に", L"Set A to now", L"Definir A ici", L"Imposta A qui",
 				L"Fijar A aqui", L"A를 현재 위치로", L"将A设为当前位置", L"تعيين A هنا",
 				L"Задать A здесь", L"A hier setzen", L"Definir A aqui", L"A hier instellen",
-				L"Ustaw A tutaj", L"A'yi buraya ayarla"));
+				L"Ustaw A tutaj", L"A'yi buraya ayarla"),
+				LL14(L"現在の再生位置を A 点（ループ／区間の始点）にします", L"Set point A to the current playback position", L"Definir le point A a la position actuelle", L"Imposta il punto A alla posizione attuale", L"Fijar el punto A en la posición actual", L"현재 재생 위치를 A점으로 설정", L"将当前位置设为 A 点", L"تعيين النقطة A إلى الموضع الحالي", L"Задать точку A в текущей позиции", L"Punkt A auf aktuelle Position setzen", L"Definir o ponto A na posicao atual", L"Punt A op huidige positie zetten", L"Ustaw punkt A na biezacej pozycji", L"A noktasini su anki konuma ayarla"));
 		menu.AddCommand(ID_MP_SEEK_SETB,
 			LL14(L"B点を現在位置に", L"Set B to now", L"Definir B ici", L"Imposta B qui",
 				L"Fijar B aqui", L"B를 현재 위치로", L"将B设为当前位置", L"تعيين B هنا",
 				L"Задать B здесь", L"B hier setzen", L"Definir B aqui", L"B hier instellen",
-				L"Ustaw B tutaj", L"B'yi buraya ayarla"));
+				L"Ustaw B tutaj", L"B'yi buraya ayarla"),
+				LL14(L"現在の再生位置を B 点（ループ／区間の終点）にします", L"Set point B to the current playback position", L"Definir le point B a la position actuelle", L"Imposta il punto B alla posizione attuale", L"Fijar el punto B en la posición actual", L"현재 재생 위치를 B점으로 설정", L"将当前位置设为 B 点", L"تعيين النقطة B إلى الموضع الحالي", L"Задать точку B в текущей позиции", L"Punkt B auf aktuelle Position setzen", L"Definir o ponto B na posicao atual", L"Punt B op huidige positie zetten", L"Ustaw punkt B na biezacej pozycji", L"B noktasini su anki konuma ayarla"));
 		menu.AddCommand(ID_MP_SEEK_ABCLR,
-			LL14(L"A-B解除", L"Clear A-B", L"Effacer A-B", L"Cancella A-B", L"Borrar A-B", L"A-B 해제", L"清除A-B", L"مسح A-B", L"Сброс A-B", L"A-B aus", L"Limpar A-B", L"A-B uit", L"Wyczysc A-B", L"A-B sil"));
+			LL14(L"A-B解除", L"Clear A-B", L"Effacer A-B", L"Cancella A-B", L"Borrar A-B", L"A-B 해제", L"清除A-B", L"مسح A-B", L"Сброс A-B", L"A-B aus", L"Limpar A-B", L"A-B uit", L"Wyczysc A-B", L"A-B sil"),
+			LL14(L"A-B 区間とループ選択を解除します", L"Clear the A-B range and loop selection", L"Effacer la plage A-B et la boucle", L"Cancella l'intervallo A-B e il loop", L"Borrar el rango A-B y el bucle", L"A-B 구간과 루프 선택을 해제", L"清除 A-B 区间和循环选择", L"مسح نطاق A-B والحلقة", L"Сбросить диапазон A-B и цикл", L"A-B-Bereich und Loop loeschen", L"Limpar o intervalo A-B e o loop", L"A-B-bereik en lus wissen", L"Wyczysc zakres A-B i petle", L"A-B araligini ve donguyu temizle"));
 	}
 	if (flags & MP_SEEK_MENU_RANGE) {
 		sep();
@@ -6752,7 +6785,8 @@ void CMediaPlayerDlg::AppendSeekExtrasToMenu(CCustomPopupMenu& menu, UINT flags)
 				L"Vista de forma de onda", L"파형 오버뷰", L"波形概览", L"نظرة الموجة",
 				L"Обзор волны", L"Wellenform-Uberblick", L"Visao da forma de onda",
 				L"Golfvorm-overzicht", L"Podglad fali", L"Dalga formu onizleme"),
-			savedata.mpSeekWave != 0);
+			savedata.mpSeekWave != 0,
+			LL14(L"シークバーに曲全体の波形オーバービューを表示します", L"Show a full-track waveform overview on the seek bar", L"Afficher un apercu d'onde sur la barre", L"Mostra panoramica forma d'onda sulla barra", L"Mostrar vista de forma de onda en la barra", L"시크바에 전체 파형 오버뷰를 표시", L"在进度条显示整曲波形概览", L"عرض نظرة موجة على شريط التقديم", L"Показать обзор волны на полосе", L"Wellenform-Uberblick auf der Suchleiste", L"Mostrar visao da forma de onda na barra", L"Golfvorm-overzicht op de zoekbalk", L"Pokaz podglad fali na pasku", L"Seek cubugunda dalga formu onizleme"));
 	}
 	if (flags & MP_SEEK_MENU_CUES) {
 		sep();
@@ -6760,13 +6794,15 @@ void CMediaPlayerDlg::AppendSeekExtrasToMenu(CCustomPopupMenu& menu, UINT flags)
 			LL14(L"キューを現在位置に追加", L"Add cue at now", L"Ajouter cue ici", L"Aggiungi cue qui",
 				L"Anadir cue aqui", L"현재 위치에 큐 추가", L"在当前位置添加标记", L"إضافة إشارة هنا",
 				L"Добавить метку здесь", L"Cue hier hinzufugen", L"Adicionar cue aqui",
-				L"Cue hier toevoegen", L"Dodaj cue tutaj", L"Buraya cue ekle"));
+				L"Cue hier toevoegen", L"Dodaj cue tutaj", L"Buraya cue ekle"),
+				LL14(L"現在位置にキュー（ジャンプ用マーカー）を追加します", L"Add a cue marker at the current position", L"Ajouter un marqueur cue a la position actuelle", L"Aggiungi un cue alla posizione attuale", L"Anadir un cue en la posición actual", L"현재 위치에 큐 마커 추가", L"在当前位置添加标记", L"إضافة إشارة عند الموضع الحالي", L"Добавить метку в текущей позиции", L"Cue an aktueller Position hinzufugen", L"Adicionar um cue na posicao atual", L"Cue op huidige positie toevoegen", L"Dodaj cue w biezacej pozycji", L"Su anki konuma cue ekle"));
 		const int cn = ProAudio_CueCount();
 		if (cn > 0) {
 			CCustomPopupMenu* sub = menu.AddSubMenu(
 				LL14(L"キューへジャンプ", L"Jump to cue", L"Aller au cue", L"Vai al cue",
 					L"Ir al cue", L"큐로 이동", L"跳到标记", L"الانتقال إلى إشارة",
-					L"К метке", L"Zum Cue", L"Ir ao cue", L"Naar cue", L"Do cue", L"Cue'ya git"));
+					L"К метке", L"Zum Cue", L"Ir ao cue", L"Naar cue", L"Do cue", L"Cue'ya git"),
+					LL14(L"登録したキュー位置の一覧からジャンプします", L"Jump to a registered cue from the list", L"Aller a un cue enregistre dans la liste", L"Vai a un cue registrato dall'elenco", L"Ir a un cue registrado de la lista", L"등록된 큐 목록에서 이동합니다", L"从已注册标记列表跳转", L"الانتقال إلى إشارة مسجلة من القائمة", L"Перейти к метке из списка", L"Zu einem Cue aus der Liste springen", L"Ir a um cue registrado da lista", L"Naar een geregistreerde cue in de lijst springen", L"Skocz do cue z listy", L"Listeden kayitli cue'ya git"));
 			if (sub) {
 				for (int i = 0; i < cn && i < 8; ++i) {
 					ProCue c; ProAudio_CueGet(i, c);
@@ -6778,14 +6814,16 @@ void CMediaPlayerDlg::AppendSeekExtrasToMenu(CCustomPopupMenu& menu, UINT flags)
 				LL14(L"キュー全削除", L"Clear all cues", L"Effacer tous les cues", L"Cancella tutti i cue",
 					L"Borrar todos los cues", L"모든 큐 삭제", L"清除全部标记", L"مسح كل الإشارات",
 					L"Очистить метки", L"Alle Cues loschen", L"Limpar todos os cues",
-					L"Alle cues wissen", L"Wyczysc cue", L"Tum cue'lari sil"));
+					L"Alle cues wissen", L"Wyczysc cue", L"Tum cue'lari sil"),
+					LL14(L"登録したキューをすべて削除します", L"Delete all registered cue markers", L"Supprimer tous les marqueurs cue", L"Elimina tutti i cue", L"Eliminar todos los cues", L"등록된 큐를 모두 삭제", L"删除全部标记", L"حذف كل الإشارات", L"Удалить все метки", L"Alle Cues loschen", L"Excluir todos os cues", L"Alle cues verwijderen", L"Usun wszystkie cue", L"Tum cue isaretlerini sil"));
 		}
 	}
 	if (flags & MP_SEEK_MENU_PRACTICE) {
 		sep();
 		CCustomPopupMenu* prac = menu.AddSubMenu(
 			LL14(L"練習", L"Practice", L"Pratique", L"Pratica", L"Practica", L"연습", L"练习", L"تدريب",
-				L"Практика", L"Ubung", L"Pratica", L"Oefenen", L"Cwiczenie", L"Alistirma"));
+				L"Практика", L"Ubung", L"Pratica", L"Oefenen", L"Cwiczenie", L"Alistirma"),
+				LL14(L"テンポ変更やフレーズ A-B など練習用ツールです", L"Practice tools: tempo change and phrase A-B", L"Outils de pratique: tempo et phrase A-B", L"Strumenti pratica: tempo e frase A-B", L"Herramientas de practica: tempo y frase A-B", L"템포 변경·프레이즈 A-B 등 연습 도구", L"练习工具：变速与乐句 A-B", L"أدوات التدريب: الإيقاع وعبارة A-B", L"Инструменты практики: темп и фраза A-B", L"Ubungswerkzeuge: Tempo und Phrase A-B", L"Ferramentas de pratica: tempo e frase A-B", L"Oefenhulpmiddelen: tempo en frase A-B", L"Narzedzia cwiczen: tempo i fraza A-B", L"Alistirma araclari: tempo ve cumle A-B"));
 		if (prac) {
 			int pct = tempo / 2;
 			if (pct < 50) pct = 50;
@@ -6839,7 +6877,8 @@ void CMediaPlayerDlg::AppendSeekExtrasToMenu(CCustomPopupMenu& menu, UINT flags)
 			LL14(L"マイクミックス", L"Mic mix", L"Mix micro", L"Mix microfono", L"Mezcla micro",
 				L"마이크 믹스", L"麦克风混音", L"مزج الميكروفون", L"Микс микрофона", L"Mikrofon-Mix",
 				L"Mix microfone", L"Mic-mix", L"Mix mikrofonu", L"Mikrofon karisimi"),
-			savedata.mic_mix != 0);
+			savedata.mic_mix != 0,
+			LL14(L"再生／書き出し時にマイク入力をミックスします", L"Mix microphone input into playback/export", L"Mixer le micro dans la lecture/export", L"Mixa il microfono in riproduzione/export", L"Mezclar el microfono en reproduccion/exportacion", L"재생/내보내기에 마이크 입력을 믹스", L"在播放/导出时混合麦克风", L"مزج الميكروفون في التشغيل/التصدير", L"Микшировать микрофон при воспроизведении/экспорте", L"Mikrofon in Wiedergabe/Export mischen", L"Misturar microfone na reproducao/exportacao", L"Microfoon mixen bij afspelen/export", L"Miksuj mikrofon przy odtwarzaniu/eksporcie", L"Calma/disa aktarmada mikrofonu karistir"));
 		int lv = savedata.mic_mix_level;
 		if (lv < 0) lv = 0;
 		if (lv > 200) lv = 200;
@@ -6857,33 +6896,43 @@ void CMediaPlayerDlg::AppendSeekExtrasToMenu(CCustomPopupMenu& menu, UINT flags)
 	if (flags & MP_SEEK_MENU_SNAPS) {
 		sep();
 		menu.AddCommand(ID_MP_AB_SNAP_A,
-			LL14(L"スナップショット A", L"Snapshot A", L"Instantane A", L"Istantanea A", L"Instantanea A", L"스냅샷 A", L"快照 A", L"لقطة A", L"Снимок A", L"Schnappschuss A", L"Instantaneo A", L"Momentopname A", L"Migawka A", L"Anlik goruntu A"));
+			LL14(L"スナップショット A", L"Snapshot A", L"Instantane A", L"Istantanea A", L"Instantanea A", L"스냅샷 A", L"快照 A", L"لقطة A", L"Снимок A", L"Schnappschuss A", L"Instantaneo A", L"Momentopname A", L"Migawka A", L"Anlik goruntu A"),
+			LL14(L"現在の EQ／エフェクト設定をスロット A に保存します", L"Save current EQ/effect settings to slot A", L"Enregistrer les reglages EQ/FX dans le slot A", L"Salva EQ/FX attuali nello slot A", L"Guardar EQ/FX actuales en la ranura A", L"현재 EQ/효과 설정을 슬롯 A에 저장", L"将当前 EQ/效果保存到插槽 A", L"حفظ إعدادات EQ/FX الحالية في الفتحة A", L"Сохранить текущие EQ/FX в слот A", L"Aktuelle EQ/FX-Einstellungen in Slot A speichern", L"Salvar EQ/FX atuais no slot A", L"Huidige EQ/FX-instellingen in slot A opslaan", L"Zapisz biezace EQ/FX w slocie A", L"Gecerli EQ/FX ayarlarini A yuvasina kaydet"));
 		menu.AddCommand(ID_MP_AB_SNAP_B,
-			LL14(L"スナップショット B", L"Snapshot B", L"Instantane B", L"Istantanea B", L"Instantanea B", L"스냅샷 B", L"快照 B", L"لقطة B", L"Снимок B", L"Schnappschuss B", L"Instantaneo B", L"Momentopname B", L"Migawka B", L"Anlik goruntu B"));
+			LL14(L"スナップショット B", L"Snapshot B", L"Instantane B", L"Istantanea B", L"Instantanea B", L"스냅샷 B", L"快照 B", L"لقطة B", L"Снимок B", L"Schnappschuss B", L"Instantaneo B", L"Momentopname B", L"Migawka B", L"Anlik goruntu B"),
+			LL14(L"現在の EQ／エフェクト設定をスロット B に保存します", L"Save current EQ/effect settings to slot B", L"Enregistrer les reglages EQ/FX dans le slot B", L"Salva EQ/FX attuali nello slot B", L"Guardar EQ/FX actuales en la ranura B", L"현재 EQ/효과 설정을 슬롯 B에 저장", L"将当前 EQ/效果保存到插槽 B", L"حفظ إعدادات EQ/FX الحالية في الفتحة B", L"Сохранить текущие EQ/FX в слот B", L"Aktuelle EQ/FX-Einstellungen in Slot B speichern", L"Salvar EQ/FX atuais no slot B", L"Huidige EQ/FX-instellingen in slot B opslaan", L"Zapisz biezace EQ/FX w slocie B", L"Gecerli EQ/FX ayarlarini B yuvasina kaydet"));
 		menu.AddCommand(ID_MP_AB_APPLY_A,
-			LL14(L"A を適用", L"Apply A", L"Appliquer A", L"Applica A", L"Aplicar A", L"A 적용", L"应用 A", L"تطبيق A", L"Применить A", L"A anwenden", L"Aplicar A", L"A toepassen", L"Zastosuj A", L"A uygula"));
+			LL14(L"A を適用", L"Apply A", L"Appliquer A", L"Applica A", L"Aplicar A", L"A 적용", L"应用 A", L"تطبيق A", L"Применить A", L"A anwenden", L"Aplicar A", L"A toepassen", L"Zastosuj A", L"A uygula"),
+			LL14(L"スロット A の設定を再生に適用します", L"Apply slot A settings to playback", L"Appliquer les reglages du slot A", L"Applica le impostazioni dello slot A", L"Aplicar la configuracion de la ranura A", L"슬롯 A 설정을 재생에 적용", L"将插槽 A 设置应用到播放", L"تطبيق إعدادات الفتحة A", L"Применить настройки слота A", L"Einstellungen aus Slot A anwenden", L"Aplicar as configuracoes do slot A", L"Instellingen van slot A toepassen", L"Zastosuj ustawienia slotu A", L"A yuvasi ayarlarini uygula"));
 		menu.AddCommand(ID_MP_AB_APPLY_B,
-			LL14(L"B を適用", L"Apply B", L"Appliquer B", L"Applica B", L"Aplicar B", L"B 적용", L"应用 B", L"تطبيق B", L"Применить B", L"B anwenden", L"Aplicar B", L"B toepassen", L"Zastosuj B", L"B uygula"));
+			LL14(L"B を適用", L"Apply B", L"Appliquer B", L"Applica B", L"Aplicar B", L"B 적용", L"应用 B", L"تطبيق B", L"Применить B", L"B anwenden", L"Aplicar B", L"B toepassen", L"Zastosuj B", L"B uygula"),
+			LL14(L"スロット B の設定を再生に適用します", L"Apply slot B settings to playback", L"Appliquer les reglages du slot B", L"Applica le impostazioni dello slot B", L"Aplicar la configuracion de la ranura B", L"슬롯 B 설정을 재생에 적용", L"将插槽 B 设置应用到播放", L"تطبيق إعدادات الفتحة B", L"Применить настройки слота B", L"Einstellungen aus Slot B anwenden", L"Aplicar as configuracoes do slot B", L"Instellingen van slot B toepassen", L"Zastosuj ustawienia slotu B", L"B yuvasi ayarlarini uygula"));
 		menu.AddCommand(ID_MP_AB_TOGGLE,
-			LL14(L"A/B 切替", L"Toggle A/B", L"Basculer A/B", L"Commuta A/B", L"Alternar A/B", L"A/B 전환", L"切换 A/B", L"تبديل A/B", L"Переключить A/B", L"A/B umschalten", L"Alternar A/B", L"A/B wisselen", L"Przelacz A/B", L"A/B degistir"));
+			LL14(L"A/B 切替", L"Toggle A/B", L"Basculer A/B", L"Commuta A/B", L"Alternar A/B", L"A/B 전환", L"切换 A/B", L"تبديل A/B", L"Переключить A/B", L"A/B umschalten", L"Alternar A/B", L"A/B wisselen", L"Przelacz A/B", L"A/B degistir"),
+			LL14(L"スロット A と B の設定を交互に切り替えます", L"Toggle between slot A and B settings", L"Basculer entre les slots A et B", L"Commuta tra gli slot A e B", L"Alternar entre las ranuras A y B", L"슬롯 A/B 설정을 번갈아 전환", L"在插槽 A 与 B 之间切换", L"التبديل بين الفتحات A و B", L"Переключить между слотами A и B", L"Zwischen Slot A und B umschalten", L"Alternar entre os slots A e B", L"Wisselen tussen slot A en B", L"Przelacz miedzy slotami A i B", L"A ve B yuvalari arasinda gec"));
 	}
 	if (flags & MP_SEEK_MENU_EXPORT) {
 		sep();
 		menu.AddCommand(ID_MP_EXPORT_AB_NOW,
-			LL14(L"A-Bを今すぐWAVへ…", L"Export A-B to WAV now…", L"Exporter A-B en WAV…", L"Esporta A-B in WAV…", L"Exportar A-B a WAV…", L"A-B를 지금 WAV로…", L"立即将 A-B 导出为 WAV…", L"تصدير A-B إلى WAV الآن…", L"Экспорт A-B в WAV сейчас…", L"A-B jetzt als WAV…", L"Exportar A-B para WAV agora…", L"A-B nu naar WAV…", L"Eksportuj A-B do WAV teraz…", L"A-B simdi WAV…"));
+			LL14(L"A-Bを今すぐWAVへ…", L"Export A-B to WAV now…", L"Exporter A-B en WAV…", L"Esporta A-B in WAV…", L"Exportar A-B a WAV…", L"A-B를 지금 WAV로…", L"立即将 A-B 导出为 WAV…", L"تصدير A-B إلى WAV الآن…", L"Экспорт A-B в WAV сейчас…", L"A-B jetzt als WAV…", L"Exportar A-B para WAV agora…", L"A-B nu naar WAV…", L"Eksportuj A-B do WAV teraz…", L"A-B simdi WAV…"),
+			LL14(L"設定した A-B 区間を今すぐ WAV ファイルへ書き出します", L"Export the A-B range to a WAV file right now", L"Exporter la plage A-B en WAV maintenant", L"Esporta subito l'intervallo A-B in WAV", L"Exportar ya el rango A-B a WAV", L"설정한 A-B 구간을 지금 WAV로 내보내기", L"立即将 A-B 区间导出为 WAV", L"تصدير نطاق A-B إلى WAV الآن", L"Сразу экспортировать диапазон A-B в WAV", L"A-B-Bereich jetzt als WAV exportieren", L"Exportar agora o intervalo A-B para WAV", L"A-B-bereik nu naar WAV exporteren", L"Eksportuj teraz zakres A-B do WAV", L"A-B araligini simdi WAV olarak disa aktar"));
 		menu.AddCommand(ID_MP_EXPORT_AB,
-			LL14(L"A-Bを書き出し範囲に", L"Export A-B range", L"Exporter plage A-B", L"Esporta intervallo A-B", L"Exportar rango A-B", L"A-B를 내보내기 범위로", L"将 A-B 设为导出范围", L"تصدير نطاق A-B", L"Экспорт диапазона A-B", L"A-B-Bereich exportieren", L"Exportar faixa A-B", L"A-B-bereik exporteren", L"Eksport zakresu A-B", L"A-B araligini disa aktar"));
+			LL14(L"A-Bを書き出し範囲に", L"Export A-B range", L"Exporter plage A-B", L"Esporta intervallo A-B", L"Exportar rango A-B", L"A-B를 내보내기 범위로", L"将 A-B 设为导出范围", L"تصدير نطاق A-B", L"Экспорт диапазона A-B", L"A-B-Bereich exportieren", L"Exportar faixa A-B", L"A-B-bereik exporteren", L"Eksport zakresu A-B", L"A-B araligini disa aktar"),
+			LL14(L"A-B 区間を以降の書き出し範囲として設定します", L"Use the A-B range for the next export", L"Utiliser la plage A-B pour le prochain export", L"Usa l'intervallo A-B per il prossimo export", L"Usar el rango A-B para la proxima exportacion", L"A-B 구간을 다음 내보내기 범위로 설정", L"将 A-B 设为下次导出范围", L"استخدام نطاق A-B للتصدير التالي", L"Использовать A-B для следующего экспорта", L"A-B als nachsten Exportbereich setzen", L"Usar o intervalo A-B na proxima exportacao", L"A-B gebruiken voor de volgende export", L"Uzyj zakresu A-B do nastepnego eksportu", L"Sonraki disa aktarma icin A-B kullan"));
 		menu.AddCommand(ID_MP_AB_PACK,
-			LL14(L"A-B/キューを一括書き出し…", L"Export A-B/cue pack…", L"Exporter pack A-B/cues…", L"Esporta pack A-B/cue…", L"Exportar pack A-B/cues…", L"A-B/큐 일괄 내보내기…", L"批量导出 A-B/标记…", L"تصدير حزمة A-B/cues…", L"Пакетный экспорт A-B/cue…", L"A-B/Cue-Paket export…", L"Exportar pacote A-B/cues…", L"A-B/cue-pakket…", L"Pakiet A-B/cue…", L"A-B/cue paketi…"));
+			LL14(L"A-B/キューを一括書き出し…", L"Export A-B/cue pack…", L"Exporter pack A-B/cues…", L"Esporta pack A-B/cue…", L"Exportar pack A-B/cues…", L"A-B/큐 일괄 내보내기…", L"批量导出 A-B/标记…", L"تصدير حزمة A-B/cues…", L"Пакетный экспорт A-B/cue…", L"A-B/Cue-Paket export…", L"Exportar pacote A-B/cues…", L"A-B/cue-pakket…", L"Pakiet A-B/cue…", L"A-B/cue paketi…"),
+			LL14(L"A-B 区間とキューをまとめて書き出します", L"Batch-export the A-B range and cue markers", L"Exporter en lot la plage A-B et les cues", L"Esporta in batch intervallo A-B e cue", L"Exportar por lotes el rango A-B y cues", L"A-B 구간과 큐를 일괄 내보내기", L"批量导出 A-B 区间与标记", L"تصدير نطاق A-B والإشارات دفعة واحدة", L"Пакетно экспортировать A-B и метки", L"A-B und Cues als Paket exportieren", L"Exportar em lote o intervalo A-B e cues", L"A-B en cues als pakket exporteren", L"Eksportuj pakietowo zakres A-B i cue", L"A-B ve cue'lari toplu disa aktar"));
 	}
 	if (flags & MP_SEEK_MENU_GRID) {
 		sep();
 		menu.AddCheck(ID_MP_BEAT_GRID,
 			LL14(L"拍グリッド", L"Beat grid", L"Grille de battements", L"Griglia beat", L"Cuadricula de beats", L"비트 그리드", L"节拍网格", L"شبكة الإيقاع", L"Сетка битов", L"Beat-Raster", L"Grade de batidas", L"Beatraster", L"Siatka beatow", L"Vurus izgarasi"),
-			savedata.mpBeatGrid != 0);
+			savedata.mpBeatGrid != 0,
+			LL14(L"シーク上に拍グリッドを重ねて表示します（BPM 計測後に有効）", L"Show a beat grid on the seek bar (after BPM measure)", L"Afficher une grille de temps sur la barre (apres BPM)", L"Mostra griglia beat sulla barra (dopo BPM)", L"Mostrar cuadricula de beats en la barra (tras BPM)", L"시크바에 비트 그리드 표시(BPM 측정 후)", L"在进度条显示节拍网格（测 BPM 后）", L"عرض شبكة الإيقاع على الشريط (بعد قياس BPM)", L"Показать сетку долей на полосе (после BPM)", L"Beat-Raster auf der Suchleiste (nach BPM)", L"Mostrar grade de batidas na barra (apos BPM)", L"Beatraster op de zoekbalk (na BPM)", L"Pokaz siatke beatow na pasku (po BPM)", L"Seekte vurus izgarasi goster (BPM sonrasi)"));
 		menu.AddCheck(ID_MP_XFADE_PREVIEW,
 			LL14(L"書き出しクロスフェード帯", L"Export xfade band", L"Bande xfade export", L"Banda xfade export", L"Banda xfade export", L"내보내기 크로스페이드 띠", L"导出交叉淡化带", L"شريط xfade للتصدير", L"Полоса xfade экспорта", L"Export-Xfade-Band", L"Faixa xfade export", L"Export-xfade-band", L"Pasmo xfade eksportu", L"Disa aktarma xfade seridi"),
-			savedata.mpXfadePreview != 0);
+			savedata.mpXfadePreview != 0,
+			LL14(L"書き出しクロスフェードの重なり帯をシークに表示します", L"Show the export crossfade overlap band on the seek bar", L"Afficher la bande de chevauchement xfade sur la barre", L"Mostra la banda di sovrapposizione xfade sulla barra", L"Mostrar la banda de solape xfade en la barra", L"내보내기 크로스페이드 겹침을 시크바에 표시", L"在进度条显示导出交叉淡化重叠带", L"عرض شريط تداخل xfade على الشريط", L"Показать полосу перекрытия xfade на сике", L"Export-Xfade-Uberlappung auf der Suchleiste zeigen", L"Mostrar a faixa de sobreposicao xfade na barra", L"Export-xfade-overlap op de zoekbalk tonen", L"Pokaz pasmo nakladania xfade na pasku", L"Disa aktarma xfade bindirme bandini seekte goster"));
 	}
 }
 
@@ -7335,6 +7384,13 @@ void CMediaPlayerDlg::OnToolsPanelToggle()
 void CMediaPlayerDlg::OnFindFilter()
 {
 	savedata.mpFindFilter = (m_findFilter.GetCheck() == BST_CHECKED) ? 1 : 0;
+	RefreshList(TRUE);
+	MpPersistSavedataQuick();
+}
+
+void CMediaPlayerDlg::OnFindRegex()
+{
+	savedata.mpFindRegex = (m_findRegex.GetCheck() == BST_CHECKED) ? 1 : 0;
 	RefreshList(TRUE);
 	MpPersistSavedataQuick();
 }
@@ -8439,28 +8495,35 @@ void CMediaPlayerDlg::OnRButtonUp(UINT nFlags, CPoint point)
 		if (onBanner) {
 			menu.AddCheck(ID_MP_SPEANA_BAR,
 				LL14(L"スペアナ: バー", L"Spectrum: Bars", L"Spectre: Barres", L"Spettro: Barre", L"Espectro: Barras", L"스펙트럼: 막대", L"频谱: 柱状", L"الطيف: أشرطة", L"Спектр: Столбцы", L"Spektrum: Balken", L"Espectro: Barras", L"Spectrum: Balken", L"Widmo: Slupki", L"Spektrum: Cubuk"),
-				savedata.mpSpeanaStyle == 0);
+				savedata.mpSpeanaStyle == 0,
+				LL14(L"バナースペアナを棒グラフ表示にします", L"Show the banner spectrum as bars", L"Afficher le spectre en barres", L"Mostra lo spettro a barre", L"Mostrar el espectro en barras", L"배너 스펙트럼을 막대 표시로", L"将横幅频谱显示为柱状", L"عرض طيف الشريط كأعمدة", L"Показать спектр баннера столбцами", L"Banner-Spektrum als Balken anzeigen", L"Mostrar o espectro do banner em barras", L"Banner-spectrum als staven tonen", L"Pokaz widmo banera jako slupki", L"Banner spektrumunu cubuk olarak goster"));
 			menu.AddCheck(ID_MP_SPEANA_MIRROR,
 				LL14(L"スペアナ: ミラー", L"Spectrum: Mirror", L"Spectre: Miroir", L"Spettro: Specchio", L"Espectro: Espejo", L"스펙트럼: 미러", L"频谱: 镜像", L"الطيف: مرآة", L"Спектр: Зеркало", L"Spektrum: Spiegel", L"Espectro: Espelho", L"Spectrum: Spiegel", L"Widmo: Lustro", L"Spektrum: Ayna"),
-				savedata.mpSpeanaStyle == 1);
+				savedata.mpSpeanaStyle == 1,
+				LL14(L"バナースペアナを左右ミラー表示にします", L"Show the banner spectrum as a mirror view", L"Afficher le spectre en miroir", L"Mostra lo spettro a specchio", L"Mostrar el espectro en espejo", L"배너 스펙트럼을 미러 표시로", L"将横幅频谱显示为镜像", L"عرض طيف الشريط كمرآة", L"Показать спектр баннера зеркально", L"Banner-Spektrum als Spiegel anzeigen", L"Mostrar o espectro do banner em espelho", L"Banner-spectrum als spiegel tonen", L"Pokaz widmo banera jako lustro", L"Banner spektrumunu ayna olarak goster"));
 			menu.AddCheck(ID_MP_SPEANA_WAVE,
 				LL14(L"スペアナ: 波形", L"Spectrum: Waveform", L"Spectre: Forme d'onde", L"Spettro: Forma d'onda", L"Espectro: Forma de onda", L"스펙트럼: 파형", L"频谱: 波形", L"الطيف: موجة", L"Спектр: Волна", L"Spektrum: Wellenform", L"Espectro: Forma de onda", L"Spectrum: Golfvorm", L"Widmo: Fala", L"Spektrum: Dalga"),
-				savedata.mpSpeanaStyle == 2);
+				savedata.mpSpeanaStyle == 2,
+				LL14(L"バナースペアナを波形表示にします", L"Show the banner spectrum as a waveform", L"Afficher le spectre en forme d'onde", L"Mostra lo spettro come forma d'onda", L"Mostrar el espectro como forma de onda", L"배너 스펙트럼을 파형 표시로", L"将横幅频谱显示为波形", L"عرض طيف الشريط كموجة", L"Показать спектр баннера волной", L"Banner-Spektrum als Wellenform anzeigen", L"Mostrar o espectro do banner como forma de onda", L"Banner-spectrum als golfvorm tonen", L"Pokaz widmo banera jako fale", L"Banner spektrumunu dalga olarak goster"));
 			menu.AddCheck(ID_MP_CORR_METER,
 				LL14(L"位相相関メーター (φ/LR)", L"Correlation meter (φ/LR)", L"Corrélomètre (φ/LR)", L"Misuratore correlazione (φ/LR)", L"Medidor de correlación (φ/LR)", L"위상 상관 미터 (φ/LR)", L"相位相关表 (φ/LR)", L"مقياس الترابط (φ/LR)", L"Корреляция (φ/LR)", L"Korrelationsmesser (φ/LR)", L"Medidor de correlação (φ/LR)", L"Correlatiemeter (φ/LR)", L"Miernik korelacji (φ/LR)", L"Faz korelasyon (φ/LR)"),
-				savedata.pro_corr_meter != 0);
+				savedata.pro_corr_meter != 0,
+				LL14(L"左右位相の相関メーターをバナーに表示します", L"Show a L/R phase correlation meter on the banner", L"Afficher le correlometre L/R sur la banniere", L"Mostra il correlometro L/R sul banner", L"Mostrar el medidor de correlacion L/R en el banner", L"배너에 L/R 위상 상관 미터 표시", L"在横幅显示左右相位相关表", L"عرض مقياس ترابط الطور L/R على الشريط", L"Показать коррелометр L/R на баннере", L"L/R-Korrelationsmesser auf dem Banner zeigen", L"Mostrar o medidor de correlacao L/R no banner", L"L/R-correlatiemeter op de banner tonen", L"Pokaz miernik korelacji L/R na banerze", L"Bannerda L/R faz korelasyon olcerini goster"));
 			menu.AddSeparator();
 			menu.AddCheck(ID_MP_OPEN_ANALYZER,
 				LL14(L"アナライザー...", L"Analyzer...", L"Analyseur...", L"Analizzatore...", L"Analizador...", L"애널라이저...", L"分析器...", L"المحلل...", L"Анализатор...", L"Analyzer...", L"Analisador...", L"Analyser...", L"Analizator...", L"Analizor..."),
-				savedata.analyzerwindow != 0);
+				savedata.analyzerwindow != 0,
+				LL14(L"周波数アナライザーウィンドウを開閉します", L"Open or close the frequency analyzer window", L"Ouvrir/fermer la fenetre analyseur", L"Apri/chiudi la finestra analizzatore", L"Abrir/cerrar la ventana del analizador", L"주파수 애널라이저 창을 여닫기", L"打开或关闭频率分析器窗口", L"فتح/إغلاق نافذة المحلل", L"Открыть/закрыть окно анализатора", L"Frequenz-Analyzer-Fenster oeffnen/schliessen", L"Abrir/fechar a janela do analisador", L"Frequentie-analyservenster openen/sluiten", L"Otworz/zamknij okno analizatora", L"Frekans analizor penceresini ac/kapat"));
 			menu.AddCheck(ID_MP_OPEN_PIANOROLL,
 				LL14(L"ピアノロール...", L"Piano roll...", L"Piano roll...", L"Piano roll...", L"Piano roll...", L"피아노 롤...", L"钢琴卷帘...", L"لفة البيانو...", L"Пианоролл...", L"Piano Roll...", L"Piano roll...", L"Piano roll...", L"Piano roll...", L"Piano roll..."),
-				savedata.pianorollwindow != 0);
+				savedata.pianorollwindow != 0,
+				LL14(L"ピアノロールウィンドウを開閉します", L"Open or close the piano-roll window", L"Ouvrir/fermer la fenetre piano roll", L"Apri/chiudi la finestra piano roll", L"Abrir/cerrar la ventana piano roll", L"피아노 롤 창을 여닫기", L"打开或关闭钢琴卷帘窗口", L"فتح/إغلاق نافذة لفة البيانو", L"Открыть/закрыть окно пианоролла", L"Piano-Roll-Fenster oeffnen/schliessen", L"Abrir/fechar a janela do piano roll", L"Piano-rollvenster openen/sluiten", L"Otworz/zamknij okno piano roll", L"Piano roll penceresini ac/kapat"));
 			menu.AddCheck(ID_MP_OPEN_EQ,
 				LL14(L"イコライザー...", L"Equalizer...", L"Egaliseur...", L"Equalizzatore...", L"Ecualizador...",
 					L"이퀄라이저...", L"均衡器...", L"المعادل...", L"Эквалайзер...", L"Equalizer...",
 					L"Equalizador...", L"Equalizer...", L"Equalizer...", L"Equalizer..."),
-				savedata.eqwindow != 0);
+				savedata.eqwindow != 0,
+				LL14(L"イコライザーウィンドウを開閉します", L"Open or close the equalizer window", L"Ouvrir/fermer la fenetre egaliseur", L"Apri/chiudi la finestra equalizzatore", L"Abrir/cerrar la ventana del ecualizador", L"이퀄라이저 창을 여닫기", L"打开或关闭均衡器窗口", L"فتح/إغلاق نافذة المعادل", L"Открыть/закрыть окно эквалайзера", L"Equalizer-Fenster oeffnen/schliessen", L"Abrir/fechar a janela do equalizador", L"Equalizervenster openen/sluiten", L"Otworz/zamknij okno equalizera", L"Equalizer penceresini ac/kapat"));
 			{
 				extern CProToolsDlg* g_proToolsDlg;
 				const BOOL ptOpen = (g_proToolsDlg && ::IsWindow(g_proToolsDlg->GetSafeHwnd())) ? TRUE : FALSE;
@@ -8468,48 +8531,56 @@ void CMediaPlayerDlg::OnRButtonUp(UINT nFlags, CPoint point)
 					LL14(L"再生詳細...", L"Playback details...", L"Details lecture...", L"Dettagli riproduzione...", L"Detalles de reproduccion...",
 						L"재생 상세...", L"播放详情...", L"تفاصيل التشغيل...", L"Подробности воспроизведения...", L"Wiedergabedetails...",
 						L"Detalhes de reproducao...", L"Afspeeldetails...", L"Szczegoly odtwarzania...", L"Calma ayrintilari..."),
-					ptOpen);
+					ptOpen,
+					LL14(L"再生詳細（Pro Tools 風）パネルを開閉します", L"Open or close the playback-details panel", L"Ouvrir/fermer le panneau details de lecture", L"Apri/chiudi il pannello dettagli riproduzione", L"Abrir/cerrar el panel de detalles de reproduccion", L"재생 상세 패널을 여닫기", L"打开或关闭播放详情面板", L"فتح/إغلاق لوحة تفاصيل التشغيل", L"Открыть/закрыть панель подробностей", L"Wiedergabedetails-Panel oeffnen/schliessen", L"Abrir/fechar o painel de detalhes", L"Afspeeldetailsvenster openen/sluiten", L"Otworz/zamknij panel szczegolow", L"Calma ayrintilari panelini ac/kapat"));
 			}
 			menu.AddSeparator();
 			menu.AddCheck(ID_MP_LRC_EXPAND,
 				LL14(L"歌詞パネル拡大", L"Expand lyrics panel", L"Agrandir paroles", L"Espandi testi", L"Expandir letra",
 					L"가사 패널 확대", L"扩大歌词面板", L"توسيع لوحة الكلمات", L"Развернуть панель текста", L"Textpanel vergroessern",
 					L"Expandir painel de letra", L"Songtekstpaneel vergroten", L"Rozszerz panel tekstu", L"Soz panelini genislet"),
-				savedata.mpLrcExpand != 0);
+				savedata.mpLrcExpand != 0,
+				LL14(L"プレイヤー内の歌詞をカラオケ風に拡大表示します", L"Expand in-player lyrics to karaoke-style view", L"Agrandir les paroles en style karaoke", L"Espandi i testi in stile karaoke", L"Expandir la letra al estilo karaoke", L"플레이어 내 가사를 가라오케풍으로 확대", L"将播放器内歌词扩大为卡拉OK样式", L"توسيع الكلمات داخل المشغّل بأسلوب كاريوكي", L"Развернуть текст в плеере в стиле караоке", L"Liedtext im Player karaokeartig vergroessern", L"Expandir a letra no player em estilo karaoke", L"Songtekst in speler karaoke-achtig vergroten", L"Rozszerz tekst w odtwarzaczu jak karaoke", L"Oynaticida sozleri karaoke gibi genislet"));
 			menu.AddCheck(ID_MP_DESK_LRC,
 				LL14(L"歌詞ウィンドウを表示", L"Show lyrics window", L"Afficher fenetre paroles", L"Mostra finestra testi", L"Mostrar ventana de letra",
 					L"가사 창 표시", L"显示歌词窗口", L"عرض نافذة الكلمات", L"Показать окно текста", L"Textfenster anzeigen",
 					L"Mostrar janela de letra", L"Songtekstvenster tonen", L"Pokaz okno tekstu", L"Soz penceresini goster"),
-				IsDesktopLyricsOpen());
+				IsDesktopLyricsOpen(),
+				LL14(L"常時最前面の歌詞ウィンドウを開閉します（不透明度などは右クリック）", L"Toggle the always-on-top lyrics window (RMB for opacity etc.)", L"Basculer la fenetre de paroles au premier plan (clic droit pour opacite)", L"Attiva/disattiva la finestra testi in primo piano (tasto destro per opacita)", L"Alternar la ventana de letra siempre visible (clic der. para opacidad)", L"항상 위 가사 창을 여닫기(불투명도 등은 우클릭)", L"打开/关闭置顶歌词窗口（右键调不透明度等）", L"فتح/إغلاق نافذة كلمات أمامية (زر يمين للعتامة)", L"Открыть/закрыть окно текста поверх всех (ПКМ — непрозрачность)", L"Textfenster im Vordergrund ein/aus (RMB fur Deckkraft)", L"Abrir/fechar janela de letra no topo (botao dir. para opacidade)", L"Songtekstvenster bovenop aan/uit (RMB voor dekking)", L"Otworz/zamknij okno tekstu na wierzchu (PPM: nieprzezroczystosc)", L"Her zaman ustte soz penceresini ac/kapat (opaklik icin sag tik)"));
 			menu.AddSeparator();
 		}
 		menu.AddCommand(ID_MP_REFRESH_JACKET,
 			LL14(L"再生中のジャケを再取得", L"Refresh playing jacket", L"Rafraichir la pochette en lecture", L"Aggiorna copertina in riproduzione",
 				L"Actualizar caratula en reproduccion", L"재생 중 재킷 다시 가져오기", L"重新获取正在播放的封面", L"تحديث غلاف التشغيل",
 				L"Обновить обложку текущего", L"Aktuelles Cover neu laden", L"Atualizar capa em reproducao",
-				L"Huidige hoes vernieuwen", L"Odswiez okladke odtwarzanego", L"Oynatilan kapagi yenile"));
+				L"Huidige hoes vernieuwen", L"Odswiez okladke odtwarzanego", L"Oynatilan kapagi yenile"),
+				LL14(L"再生中の曲のジャケット画像を再取得します", L"Re-fetch the jacket art for the playing track", L"Retrouver la pochette du titre en lecture", L"Ricarica la copertina del brano in riproduzione", L"Volver a obtener la caratula de la pista actual", L"재생 중 곡의 재킷을 다시 가져오기", L"重新获取正在播放曲目的封面", L"إعادة جلب غلاف المقطع الحالي", L"Заново получить обложку текущего трека", L"Cover des aktuellen Titels neu laden", L"Buscar de novo a capa da faixa atual", L"Hoes van het huidige nummer opnieuw ophalen", L"Pobierz ponownie okladke biezacego utworu", L"Calan parcanin kapagini yeniden al"));
 		if (onJacket) {
 			menu.AddCheck(ID_MP_JACKET_REM_OVERLAY,
 				LL14(L"残時間リングとタイム", L"Remaining ring and time", L"Anneau restant et temps", L"Anello rest. e tempo",
 					L"Anillo restante y tiempo", L"남은 시간 링과 타임", L"剩余时间环与时间", L"حلقة الوقت المتبقي والزمن",
 					L"Кольцо остатка и время", L"Restzeit-Ring und Zeit", L"Anel restante e tempo",
 					L"Resttijd-ring en tijd", L"Piermien pozostaly i czas", L"Kalan sure halkasi ve zaman"),
-				savedata.mpJacketRemOverlay != 0);
+				savedata.mpJacketRemOverlay != 0,
+				LL14(L"ジャケット上に残時間リングとタイムを重ねます", L"Overlay remaining-time ring and clock on the jacket", L"Superposer anneau de temps restant et horloge sur la pochette", L"Sovrapponi anello tempo restante e orologio sulla copertina", L"Superponer anillo de tiempo restante y reloj en la caratula", L"재킷 위에 남은 시간 링과 타임 표시", L"在封面上叠加剩余时间环与时间", L"عرض حلقة الوقت المتبقي والساعة على الغلاف", L"Наложить кольцо остатка и время на обложку", L"Restzeit-Ring und Uhr auf dem Cover anzeigen", L"Sobrepor anel de tempo restante e relogio na capa", L"Resttijd-ring en tijd op de hoes tonen", L"Nałóż pierścień pozostałego czasu i zegar na okladke", L"Kapak uzerine kalan sure halkasi ve zamani goster"));
 			menu.AddCommand(ID_MP_JACKET_RELOAD,
 				LL14(L"代替ジャケを再読込", L"Reload jacket alternatives", L"Recharger alternatives", L"Ricarica alternative",
 					L"Recargar alternativas", L"대체 재킷 다시 읽기", L"重新加载备选封面", L"إعادة تحميل البدائل",
 					L"Перечитать альтернативы", L"Alternativen neu laden", L"Recarregar alternativas",
-					L"Alternatieven herladen", L"Przeladuj alternatywy", L"Alternatif kapaklari yenile"));
+					L"Alternatieven herladen", L"Przeladuj alternatywy", L"Alternatif kapaklari yenile"),
+					LL14(L"代替ジャケット候補をフォルダから再読込します", L"Reload alternate jacket candidates from the folder", L"Recharger les pochettes alternatives du dossier", L"Ricarica le copertine alternative dalla cartella", L"Recargar caratulas alternativas de la carpeta", L"폴더에서 대체 재킷 후보를 다시 읽기", L"从文件夹重新加载备选封面", L"إعادة تحميل أغلفة بديلة من المجلد", L"Перечитать альтернативные обложки из папки", L"Alternative Cover aus dem Ordner neu laden", L"Recarregar capas alternativas da pasta", L"Alternatieve hoezen uit de map herladen", L"Przeladuj alternatywne okladki z folderu", L"Klasorden alternatif kapaklari yeniden yukle"));
 			menu.AddCommand(ID_MP_JACKET_COVERJPG,
 				LL14(L"フォルダの cover.jpg を選ぶ", L"Pick cover.jpg in folder", L"Choisir cover.jpg", L"Scegli cover.jpg",
 					L"Elegir cover.jpg", L"폴더의 cover.jpg 선택", L"选择文件夹 cover.jpg", L"اختيار cover.jpg",
 					L"Выбрать cover.jpg", L"cover.jpg waehlen", L"Escolher cover.jpg",
-					L"Kies cover.jpg", L"Wybierz cover.jpg", L"cover.jpg sec"));
+					L"Kies cover.jpg", L"Wybierz cover.jpg", L"cover.jpg sec"),
+					LL14(L"曲フォルダ内の cover.jpg をジャケットに選びます", L"Use cover.jpg from the track folder as jacket", L"Utiliser cover.jpg du dossier comme pochette", L"Usa cover.jpg della cartella come copertina", L"Usar cover.jpg de la carpeta como caratula", L"곡 폴더의 cover.jpg를 재킷으로 선택", L"使用曲目文件夹中的 cover.jpg 作为封面", L"استخدام cover.jpg من مجلد المقطع كغلاف", L"Взять cover.jpg из папки трека как обложку", L"cover.jpg aus dem Ordner als Cover wahlen", L"Usar cover.jpg da pasta como capa", L"cover.jpg uit de map als hoes gebruiken", L"Uzyj cover.jpg z folderu jako okladki", L"Klasordeki cover.jpg'yi kapak olarak sec"));
 			menu.AddCommand(ID_MP_JACKET_SAVE_COVER,
 				LL14(L"画像を cover.jpg として保存…", L"Save image as cover.jpg…", L"Enregistrer en cover.jpg…", L"Salva come cover.jpg…",
 					L"Guardar como cover.jpg…", L"이미지를 cover.jpg로 저장…", L"另存为 cover.jpg…", L"حفظ كـ cover.jpg…",
 					L"Сохранить как cover.jpg…", L"Als cover.jpg speichern…", L"Salvar como cover.jpg…",
-					L"Opslaan als cover.jpg…", L"Zapisz jako cover.jpg…", L"cover.jpg olarak kaydet…"));
+					L"Opslaan als cover.jpg…", L"Zapisz jako cover.jpg…", L"cover.jpg olarak kaydet…"),
+					LL14(L"表示中の画像を cover.jpg としてフォルダに保存します", L"Save the displayed image as cover.jpg in the folder", L"Enregistrer l'image affichee comme cover.jpg", L"Salva l'immagine visualizzata come cover.jpg", L"Guardar la imagen mostrada como cover.jpg", L"표시 중인 이미지를 cover.jpg로 저장", L"将当前显示的图像另存为 cover.jpg", L"حفظ الصورة المعروضة كـ cover.jpg", L"Сохранить отображаемое изображение как cover.jpg", L"Angezeigtes Bild als cover.jpg speichern", L"Salvar a imagem exibida como cover.jpg", L"Getoonde afbeelding opslaan als cover.jpg", L"Zapisz wyswietlany obraz jako cover.jpg", L"Gorunen gorseli cover.jpg olarak kaydet"));
 		}
 		menu.AddSeparator();
 		menu.AddCheck(ID_MP_SEEK_WAVE,
@@ -8517,22 +8588,26 @@ void CMediaPlayerDlg::OnRButtonUp(UINT nFlags, CPoint point)
 				L"Vista de forma de onda", L"파형 오버뷰", L"波形概览", L"نظرة الموجة",
 				L"Обзор волны", L"Wellenform-Uberblick", L"Visao da forma de onda",
 				L"Golfvorm-overzicht", L"Podglad fali", L"Dalga formu onizleme"),
-			savedata.mpSeekWave != 0);
+			savedata.mpSeekWave != 0,
+			LL14(L"シークバーに曲全体の波形オーバービューを表示します", L"Show a full-track waveform overview on the seek bar", L"Afficher un apercu d'onde sur la barre", L"Mostra panoramica forma d'onda sulla barra", L"Mostrar vista de forma de onda en la barra", L"시크바에 전체 파형 오버뷰를 표시", L"在进度条显示整曲波形概览", L"عرض نظرة موجة على شريط التقديم", L"Показать обзор волны на полосе", L"Wellenform-Uberblick auf der Suchleiste", L"Mostrar visao da forma de onda na barra", L"Golfvorm-overzicht op de zoekbalk", L"Pokaz podglad fali na pasku", L"Seek cubugunda dalga formu onizleme"));
 		menu.AddCommand(ID_MP_SEEK_CUEADD,
 			LL14(L"キューを現在位置に追加", L"Add cue at now", L"Ajouter cue ici", L"Aggiungi cue qui",
 				L"Anadir cue aqui", L"현재 위치에 큐 추가", L"在当前位置添加标记", L"إضافة إشارة هنا",
 				L"Добавить метку здесь", L"Cue hier hinzufugen", L"Adicionar cue aqui",
-				L"Cue hier toevoegen", L"Dodaj cue tutaj", L"Buraya cue ekle"));
+				L"Cue hier toevoegen", L"Dodaj cue tutaj", L"Buraya cue ekle"),
+				LL14(L"現在位置にキュー（ジャンプ用マーカー）を追加します", L"Add a cue marker at the current position", L"Ajouter un marqueur cue a la position actuelle", L"Aggiungi un cue alla posizione attuale", L"Anadir un cue en la posición actual", L"현재 위치에 큐 마커 추가", L"在当前位置添加标记", L"إضافة إشارة عند الموضع الحالي", L"Добавить метку в текущей позиции", L"Cue an aktueller Position hinzufugen", L"Adicionar um cue na posicao atual", L"Cue op huidige positie toevoegen", L"Dodaj cue w biezacej pozycji", L"Su anki konuma cue ekle"));
 		menu.AddCommand(ID_MP_PHRASE_AB,
 			LL14(L"フレーズA-B [R]", L"Phrase A-B [R]", L"Phrase A-B [R]", L"Frase A-B [R]", L"Frase A-B [R]",
 				L"프레이즈 A-B [R]", L"乐句A-B [R]", L"عبارة A-B [R]", L"Фраза A-B [R]", L"Phrase A-B [R]",
-				L"Frase A-B [R]", L"Frase A-B [R]", L"Fraza A-B [R]", L"Cumle A-B [R]"));
+				L"Frase A-B [R]", L"Frase A-B [R]", L"Fraza A-B [R]", L"Cumle A-B [R]"),
+				LL14(L"現在位置を中心にフレーズ幅で A-B を設定します（ショートカット R）", L"Set A-B around now by phrase width (shortcut R)", L"Definir A-B autour de maintenant selon la phrase (R)", L"Imposta A-B attorno ad ora per larghezza frase (R)", L"Fijar A-B alrededor de ahora segun frase (R)", L"현재 위치 기준으로 프레이즈 폭 A-B 설정(단축키 R)", L"以当前位置为中心按乐句宽度设 A-B（快捷键 R）", L"تعيين A-B حول الموضع بعرض العبارة (اختصار R)", L"Задать A-B вокруг текущей позиции по ширине фразы (R)", L"A-B um Jetzt mit Phrasenbreite setzen (Kurzbefehl R)", L"Definir A-B em torno de agora pela largura da frase (R)", L"A-B rond nu zetten op frasebreedte (sneltoets R)", L"Ustaw A-B wokol teraz wg szerokosci frazy (R)", L"Su anin etrafinda cumle genisligiyle A-B ayarla (R)"));
 		menu.AddSeparator();
 		menu.AddCommand(ID_HELP_SHOWSHEET,
 			LL14(L"操作ガイド", L"Operation guide", L"Guide d'utilisation", L"Guida operativa",
 				L"Guía de operación", L"조작 가이드", L"操作指南", L"دليل التشغيل",
 				L"Руководство", L"Bedienungsanleitung", L"Guia de operação", L"Handleiding",
-				L"Przewodnik", L"İşlem kılavuzu"));
+				L"Przewodnik", L"İşlem kılavuzu"),
+				LL14(L"この画面の操作ガイド（ヘルプシート）を表示します", L"Show the operation guide (help sheet) for this view", L"Afficher le guide d'utilisation de cette vue", L"Mostra la guida operativa di questa vista", L"Mostrar la guía de operación de esta vista", L"이 화면의 조작 가이드를 표시", L"显示此界面的操作指南", L"عرض دليل التشغيل لهذه الشاشة", L"Показать руководство по этой панели", L"Bedienungsanleitung fur diese Ansicht zeigen", L"Mostrar o guia de operacao desta tela", L"Handleiding voor dit scherm tonen", L"Pokaz przewodnik po tym widoku", L"Bu ekranin islem kilavuzunu goster"));
 		CPoint sp = point;
 		ClientToScreen(&sp);
 		const UINT cmd = menu.Track(sp, this);
@@ -8861,7 +8936,8 @@ void CMediaPlayerDlg::ShowLyricsExtrasMenu(CPoint screenPt)
 			LL14(L"LRC 微調整", L"LRC fine adjust", L"Reglage fin LRC", L"Regolazione fine LRC",
 				L"Ajuste fino LRC", L"LRC 미세 조정", L"LRC 微调", L"ضبط دقيق LRC",
 				L"Тонкая настройка LRC", L"LRC Feineinstellung", L"Ajuste fino LRC", L"LRC fijnafstellen",
-				L"Dostrojenie LRC", L"LRC ince ayar"));
+				L"Dostrojenie LRC", L"LRC ince ayar"),
+				LL14(L"歌詞タイミングを ±10/50/100 ms 単位でずらします", L"Nudge lyric timing by ±10/50/100 ms", L"Decaler le timing par ±10/50/100 ms", L"Sposta il timing di ±10/50/100 ms", L"Desplazar el timing ±10/50/100 ms", L"가사 타이밍을 ±10/50/100 ms 단위로 이동", L"按 ±10/50/100 ms 微调歌词时间", L"إزاحة توقيت الكلمات بمقدار ±10/50/100 مللي ثانية", L"Сдвинуть тайминг текста на ±10/50/100 мс", L"Text-Timing um ±10/50/100 ms verschieben", L"Deslocar o timing da letra em ±10/50/100 ms", L"Teksttiming met ±10/50/100 ms verschuiven", L"Przesun timing tekstu o ±10/50/100 ms", L"Soz zamanlamasini ±10/50/100 ms kaydir"));
 		if (lrcSub) {
 			lrcSub->AddCommand(ID_MP_LRC_MINUS100, L"-100 ms");
 			lrcSub->AddCommand(ID_MP_LRC_MINUS50, L"-50 ms");
@@ -8872,19 +8948,23 @@ void CMediaPlayerDlg::ShowLyricsExtrasMenu(CPoint screenPt)
 		}
 	}
 	menu.AddCommand(ID_MP_LRC_SAVE,
-		LL14(L"LRC を保存…", L"Save LRC…", L"Enregistrer LRC…", L"Salva LRC…", L"Guardar LRC…", L"LRC 저장…", L"保存 LRC…", L"حفظ LRC…", L"Сохранить LRC…", L"LRC speichern…", L"Salvar LRC…", L"LRC opslaan…", L"Zapisz LRC…", L"LRC kaydet…"));
+		LL14(L"LRC を保存…", L"Save LRC…", L"Enregistrer LRC…", L"Salva LRC…", L"Guardar LRC…", L"LRC 저장…", L"保存 LRC…", L"حفظ LRC…", L"Сохранить LRC…", L"LRC speichern…", L"Salvar LRC…", L"LRC opslaan…", L"Zapisz LRC…", L"LRC kaydet…"),
+		LL14(L"調整した歌詞タイミングを LRC ファイルに保存します", L"Save adjusted lyric timing to an LRC file", L"Enregistrer le timing ajuste dans un LRC", L"Salva il timing regolato in un file LRC", L"Guardar el timing ajustado en un LRC", L"조정한 가사 타이밍을 LRC로 저장", L"将调整后的歌词时间保存为 LRC", L"حفظ توقيت الكلمات المضبوط في ملف LRC", L"Сохранить скорректированный тайминг в LRC", L"Angepasstes Text-Timing als LRC speichern", L"Salvar o timing ajustado em um LRC", L"Aangepaste teksttiming als LRC opslaan", L"Zapisz skorygowany timing do LRC", L"Ayarlanan soz zamanlamasini LRC olarak kaydet"));
 	menu.AddSeparator();
 	menu.AddCommand(ID_MP_PHRASE_AB,
 		LL14(L"フレーズA-B [R]", L"Phrase A-B [R]", L"Phrase A-B [R]", L"Frase A-B [R]", L"Frase A-B [R]",
 			L"프레이즈 A-B [R]", L"乐句A-B [R]", L"عبارة A-B [R]", L"Фраза A-B [R]", L"Phrase A-B [R]",
-			L"Frase A-B [R]", L"Frase A-B [R]", L"Fraza A-B [R]", L"Cumle A-B [R]"));
+			L"Frase A-B [R]", L"Frase A-B [R]", L"Fraza A-B [R]", L"Cumle A-B [R]"),
+			LL14(L"現在位置を中心にフレーズ幅で A-B を設定します（ショートカット R）", L"Set A-B around now by phrase width (shortcut R)", L"Definir A-B autour de maintenant selon la phrase (R)", L"Imposta A-B attorno ad ora per larghezza frase (R)", L"Fijar A-B alrededor de ahora segun frase (R)", L"현재 위치 기준으로 프레이즈 폭 A-B 설정(단축키 R)", L"以当前位置为中心按乐句宽度设 A-B（快捷键 R）", L"تعيين A-B حول الموضع بعرض العبارة (اختصار R)", L"Задать A-B вокруг текущей позиции по ширине фразы (R)", L"A-B um Jetzt mit Phrasenbreite setzen (Kurzbefehl R)", L"Definir A-B em torno de agora pela largura da frase (R)", L"A-B rond nu zetten op frasebreedte (sneltoets R)", L"Ustaw A-B wokol teraz wg szerokosci frazy (R)", L"Su anin etrafinda cumle genisligiyle A-B ayarla (R)"));
 	menu.AddCommand(ID_MP_SEEK_ABCLR,
-		LL14(L"A-B解除", L"Clear A-B", L"Effacer A-B", L"Cancella A-B", L"Borrar A-B", L"A-B 해제", L"清除A-B", L"مسح A-B", L"Сброс A-B", L"A-B aus", L"Limpar A-B", L"A-B uit", L"Wyczysc A-B", L"A-B sil"));
+		LL14(L"A-B解除", L"Clear A-B", L"Effacer A-B", L"Cancella A-B", L"Borrar A-B", L"A-B 해제", L"清除A-B", L"مسح A-B", L"Сброс A-B", L"A-B aus", L"Limpar A-B", L"A-B uit", L"Wyczysc A-B", L"A-B sil"),
+		LL14(L"A-B 区間とループ選択を解除します", L"Clear the A-B range and loop selection", L"Effacer la plage A-B et la boucle", L"Cancella l'intervallo A-B e il loop", L"Borrar el rango A-B y el bucle", L"A-B 구간과 루프 선택을 해제", L"清除 A-B 区间和循环选择", L"مسح نطاق A-B والحلقة", L"Сбросить диапазон A-B и цикл", L"A-B-Bereich und Loop loeschen", L"Limpar o intervalo A-B e o loop", L"A-B-bereik en lus wissen", L"Wyczysc zakres A-B i petle", L"A-B araligini ve donguyu temizle"));
 	menu.AddCommand(ID_MP_SEEK_CUEADD,
 		LL14(L"キューを現在位置に追加", L"Add cue at now", L"Ajouter cue ici", L"Aggiungi cue qui",
 			L"Anadir cue aqui", L"현재 위치에 큐 추가", L"在当前位置添加标记", L"إضافة إشارة هنا",
 			L"Добавить метку здесь", L"Cue hier hinzufugen", L"Adicionar cue aqui",
-			L"Cue hier toevoegen", L"Dodaj cue tutaj", L"Buraya cue ekle"));
+			L"Cue hier toevoegen", L"Dodaj cue tutaj", L"Buraya cue ekle"),
+			LL14(L"現在位置にキュー（ジャンプ用マーカー）を追加します", L"Add a cue marker at the current position", L"Ajouter un marqueur cue a la position actuelle", L"Aggiungi un cue alla posizione attuale", L"Anadir un cue en la posición actual", L"현재 위치에 큐 마커 추가", L"在当前位置添加标记", L"إضافة إشارة عند الموضع الحالي", L"Добавить метку в текущей позиции", L"Cue an aktueller Position hinzufugen", L"Adicionar um cue na posicao atual", L"Cue op huidige positie toevoegen", L"Dodaj cue w biezacej pozycji", L"Su anki konuma cue ekle"));
 
 	const UINT cmd = menu.Track(screenPt, this);
 	if (cmd)
@@ -8906,13 +8986,15 @@ void MpShowSettingsExtrasMenu(CWnd* owner, CPoint screenPt)
 		LL14(L"アップスケール出力", L"Upscale output", L"Sortie upscale", L"Uscita upscale", L"Salida upscale",
 			L"업스케일 출력", L"升频输出", L"خرج التكبير", L"Апскейл выход", L"Upscale-Ausgabe",
 			L"Saida upscale", L"Upscale-uitvoer", L"Wyjscie upscale", L"Upscale cikis"),
-		savedata.upscale_enable != 0);
+		savedata.upscale_enable != 0,
+		LL14(L"出力を高サンプルレートへアップスケールします（再初期化あり）", L"Upscale output to a higher sample rate (re-inits audio)", L"Upscaler la sortie (reinit audio)", L"Upscale dell'uscita (reiniz. audio)", L"Escalar la salida (reinicia audio)", L"출력을 고샘플레이트로 업스케일(오디오 재초기화)", L"将输出升频到更高采样率（会重新初始化）", L"رفع معدل العينات للخرج (إعادة تهيئة)", L"Апскейл выхода к более высокой ЧД (реинит.)", L"Ausgabe auf hoehere Samplerate (Audio-Reinit)", L"Fazer upscale da saida (reinicia audio)", L"Uitvoer upscalen (audio-herinit)", L"Upscale wyjscia (reinicjalizacja audio)", L"Cikisi yuksek ornekleme hizina cikar (ses yeniden)"));
 
 	{
 		CCustomPopupMenu* bitSub = menu.AddSubMenu(
 			LL14(L"ビット深度", L"Bit depth", L"Profondeur bits", L"Profondita bit", L"Profundidad de bits",
 				L"비트 심도", L"位深", L"عمق البت", L"Разрядность", L"Bittiefe",
-				L"Profundidade de bits", L"Bitdiepte", L"Glebia bitowa", L"Bit derinligi"));
+				L"Profundidade de bits", L"Bitdiepte", L"Glebia bitowa", L"Bit derinligi"),
+				LL14(L"出力のビット深度を選びます（変更時は再初期化）", L"Choose output bit depth (re-inits on change)", L"Choisir la profondeur de bits (reinit)", L"Scegli la profondita bit (reiniz.)", L"Elegir profundidad de bits (reinicia)", L"출력 비트 심도를 선택(변경 시 재초기화)", L"选择输出位深（更改会重新初始化）", L"اختيار عمق بت الخرج (إعادة تهيئة عند التغيير)", L"Выбрать разрядность выхода (реинит.)", L"Ausgangsbittiefe wahlen (Reinit bei Anderung)", L"Escolher profundidade de bits (reinicia)", L"Uitvoerbitdiepte kiezen (herinit bij wijziging)", L"Wybierz glebie bitowa (reinicj. przy zmianie)", L"Cikis bit derinligini sec (degisince yeniden)"));
 		if (bitSub) {
 			const int bits = savedata.bit32 ? 32 : (savedata.bit24 ? 24 : 16);
 			bitSub->AddCheck(ID_MP_SET_BIT16, L"16 bit", bits == 16);
@@ -8924,7 +9006,8 @@ void MpShowSettingsExtrasMenu(CWnd* owner, CPoint screenPt)
 		CCustomPopupMenu* spkSub = menu.AddSubMenu(
 			LL14(L"出力チャンネル", L"Output channels", L"Canaux de sortie", L"Canali di uscita", L"Canales de salida",
 				L"출력 채널", L"输出声道", L"قنوات الخرج", L"Каналы выхода", L"Ausgangskanäle",
-				L"Canais de saida", L"Uitgangskanalen", L"Kanaly wyjsciowe", L"Cikis kanallari"));
+				L"Canais de saida", L"Uitgangskanalen", L"Kanaly wyjsciowe", L"Cikis kanallari"),
+				LL14(L"出力スピーカー配置を選びます（変更時は再初期化）", L"Choose output speaker layout (re-inits on change)", L"Choisir la disposition des enceintes (reinit)", L"Scegli il layout degli altoparlanti (reiniz.)", L"Elegir disposicion de altavoces (reinicia)", L"출력 스피커 배치를 선택(변경 시 재초기화)", L"选择输出扬声器布局（更改会重新初始化）", L"اختيار تخطيط مكبرات الخرج (إعادة تهيئة)", L"Выбрать раскладку колонок (реинит.)", L"Lautsprecherlayout wahlen (Reinit bei Anderung)", L"Escolher layout de alto-falantes (reinicia)", L"Luidsprekerlayout kiezen (herinit bij wijziging)", L"Wybierz uklad glosnikow (reinicj. przy zmianie)", L"Cikis hoparlor yerlesimini sec (degisince yeniden)"));
 		if (spkSub) {
 			const int sp = (savedata.speaker_layout >= 0 && savedata.speaker_layout <= 5) ? savedata.speaker_layout : 0;
 			spkSub->AddCheck(ID_MP_SET_SPK0, LL14(L"ステレオ (2ch)", L"Stereo (2ch)", L"Stereo (2ch)", L"Stereo (2ch)", L"Estereo (2ch)", L"스테레오 (2ch)", L"立体声 (2ch)", L"ستيريو (2ch)", L"Стерео (2ch)", L"Stereo (2ch)", L"Estereo (2ch)", L"Stereo (2ch)", L"Stereo (2ch)", L"Stereo (2ch)"), sp == 0);
@@ -8939,7 +9022,8 @@ void MpShowSettingsExtrasMenu(CWnd* owner, CPoint screenPt)
 		CCustomPopupMenu* rateSub = menu.AddSubMenu(
 			LL14(L"サンプルレート", L"Sample rate", L"Frequence d'echantillonnage", L"Frequenza di campionamento", L"Frecuencia de muestreo",
 				L"샘플레이트", L"采样率", L"معدل العينات", L"Частота дискретизации", L"Samplerate",
-				L"Taxa de amostragem", L"Samplefrequentie", L"Czestotliwosc", L"Ornekleme hizi"));
+				L"Taxa de amostragem", L"Samplefrequentie", L"Czestotliwosc", L"Ornekleme hizi"),
+				LL14(L"出力サンプルレートを選びます（変更時は再初期化）", L"Choose output sample rate (re-inits on change)", L"Choisir la frequence d'echantillonnage (reinit)", L"Scegli la frequenza di campionamento (reiniz.)", L"Elegir frecuencia de muestreo (reinicia)", L"출력 샘플레이트를 선택(변경 시 재초기화)", L"选择输出采样率（更改会重新初始化）", L"اختيار معدل عينات الخرج (إعادة تهيئة)", L"Выбрать частоту дискретизации (реинит.)", L"Samplerate wahlen (Reinit bei Anderung)", L"Escolher taxa de amostragem (reinicia)", L"Samplefrequentie kiezen (herinit bij wijziging)", L"Wybierz czestotliwosc (reinicj. przy zmianie)", L"Cikis ornekleme hizini sec (degisince yeniden)"));
 		if (rateSub) {
 			rateSub->AddCheck(ID_MP_SET_RATE_44100, L"44100 Hz", savedata.samples == 44100);
 			rateSub->AddCheck(ID_MP_SET_RATE_48000, L"48000 Hz", savedata.samples == 48000);
@@ -8953,21 +9037,24 @@ void MpShowSettingsExtrasMenu(CWnd* owner, CPoint screenPt)
 		LL14(L"アクリルモード", L"Acrylic mode", L"Mode acrylique", L"Modalita acrilico", L"Modo acrilico",
 			L"아크릴 모드", L"亚克力模式", L"وضع الأكريليك", L"Акриловый режим", L"Acryl-Modus",
 			L"Modo acrilico", L"Acrylmodus", L"Tryb akrylowy", L"Akrilik mod"),
-		savedata.aero != 0);
+		savedata.aero != 0,
+		LL14(L"ウィンドウ背景をアクリル／半透明スタイルにします", L"Use acrylic/translucent window backgrounds", L"Utiliser un fond acrylique/translucide", L"Usa sfondo acrilico/traslucido", L"Usar fondo acrilico/translucido", L"창 배경을 아크릴/반투명으로", L"使用亚克力/半透明窗口背景", L"استخدام خلفية أكريليك/شفافة", L"Акриловый/полупрозрачный фон окна", L"Acryl-/Halbtransparenten Fensterhintergrund nutzen", L"Usar fundo acrilico/translucido", L"Acryl-/doorschijnende vensterachtergrond", L"Uzyj akrylowego/polprzezroczystego tla", L"Pencere arka planini akrilik/yarisaydam yap"));
 	menu.AddCheck(ID_MP_SET_LRC_NET,
 		LL14(L"ネットから LRC 取得", L"Fetch LRC from network", L"Telecharger LRC reseau", L"Scarica LRC rete", L"Obtener LRC de red",
 			L"네트워크에서 LRC 가져오기", L"从网络获取 LRC", L"جلب LRC من الشبكة", L"Загрузить LRC из сети", L"LRC aus dem Netz laden",
 			L"Buscar LRC na rede", L"LRC van netwerk ophalen", L"Pobierz LRC z sieci", L"Agdan LRC al"),
-		savedata.lrc_net != 0);
+		savedata.lrc_net != 0,
+		LL14(L"ネットから歌詞（LRC）を自動取得します", L"Automatically fetch lyrics (LRC) from the network", L"Telecharger automatiquement les paroles (LRC)", L"Scarica automaticamente i testi (LRC)", L"Obtener automaticamente la letra (LRC) de la red", L"네트워크에서 가사(LRC) 자동 가져오기", L"自动从网络获取歌词（LRC）", L"جلب الكلمات (LRC) تلقائياً من الشبكة", L"Автоматически загружать текст (LRC) из сети", L"Liedtexte (LRC) automatisch aus dem Netz laden", L"Buscar letra (LRC) automaticamente na rede", L"Songtekst (LRC) automatisch van het netwerk ophalen", L"Automatycznie pobieraj tekst (LRC) z sieci", L"Agdan sozleri (LRC) otomatik al"));
 	menu.AddCheck(ID_MP_SET_SPEANA,
 		LL14(L"スペアナモード", L"Spectrum analyzer mode", L"Mode speana", L"Modalita speana", L"Modo speana",
 			L"스펙애너 모드", L"频谱模式", L"وضع speana", L"Режим speana", L"Speana-Modus",
 			L"Modo speana", L"Speana-modus", L"Tryb speana", L"Speana modu"),
-		savedata.speanamode != 0);
+		savedata.speanamode != 0,
+		LL14(L"バナー／ジャケット周辺のスペクトラム表示を有効にします", L"Enable spectrum display around the banner/jacket", L"Activer l'affichage spectre autour de la banniere", L"Abilita lo spettro intorno al banner/copertina", L"Activar el espectro alrededor del banner/caratula", L"배너/재킷 주변 스펙트럼 표시를 켭니다", L"启用横幅/封面附近的频谱显示", L"تفعيل عرض الطيف حول الشريط/الغلاف", L"Включить спектр у баннера/обложки", L"Spektrum um Banner/Cover aktivieren", L"Ativar espectro ao redor do banner/capa", L"Spectrum rond banner/hoes inschakelen", L"Wlacz widmo wokol banera/okladki", L"Banner/kapak cevresinde spektrum gosterimini ac"));
 
 	menu.AddSeparator();
 	{
-		CCustomPopupMenu* mp3Sub = menu.AddSubMenu(LL14(L"mp3 音量", L"mp3 volume", L"Volume mp3", L"Volume mp3", L"Volumen mp3", L"mp3 볼륨", L"mp3 音量", L"مستوى mp3", L"Громкость mp3", L"mp3-Lautstarke", L"Volume mp3", L"mp3-volume", L"Glosnosc mp3", L"mp3 ses"));
+		CCustomPopupMenu* mp3Sub = menu.AddSubMenu(LL14(L"mp3 音量", L"mp3 volume", L"Volume mp3", L"Volume mp3", L"Volumen mp3", L"mp3 볼륨", L"mp3 音量", L"مستوى mp3", L"Громкость mp3", L"mp3-Lautstarke", L"Volume mp3", L"mp3-volume", L"Glosnosc mp3", L"mp3 ses"), LL14(L"mp3 再生時の内部ゲイン倍率を選びます", L"Choose internal gain multiplier for mp3 playback", L"Choisir le gain interne pour la lecture mp3", L"Scegli il gain interno per la riproduzione mp3", L"Elegir la ganancia interna para mp3", L"mp3 재생 내부 게인 배율을 선택", L"选择 mp3 播放的内部增益倍率", L"اختيار مضاعف الكسب الداخلي لتشغيل mp3", L"Выбрать внутренний коэффициент для mp3", L"Internen Gain-Faktor fur mp3 wahlen", L"Escolher o ganho interno para mp3", L"Interne gain-factor voor mp3 kiezen", L"Wybierz wewnetrzny wspolczynnik gain dla mp3", L"mp3 calma dahili kazanc carpanini sec"));
 		if (mp3Sub) {
 			mp3Sub->AddCheck(ID_MP_SET_MP3_1, L"1.0x", savedata.mp3 == 1);
 			mp3Sub->AddCheck(ID_MP_SET_MP3_2, L"1.5x", savedata.mp3 == 2);
@@ -8975,7 +9062,7 @@ void MpShowSettingsExtrasMenu(CWnd* owner, CPoint screenPt)
 			mp3Sub->AddCheck(ID_MP_SET_MP3_4, L"2.5x", savedata.mp3 == 4);
 			mp3Sub->AddCheck(ID_MP_SET_MP3_5, L"3.0x", savedata.mp3 == 5);
 		}
-		CCustomPopupMenu* spcSub = menu.AddSubMenu(LL14(L"SPC/HES 音量", L"SPC/HES volume", L"Volume SPC/HES", L"Volume SPC/HES", L"Volumen SPC/HES", L"SPC/HES 볼륨", L"SPC/HES 音量", L"مستوى SPC/HES", L"Громкость SPC/HES", L"SPC/HES-Lautstarke", L"Volume SPC/HES", L"SPC/HES-volume", L"Glosnosc SPC/HES", L"SPC/HES ses"));
+		CCustomPopupMenu* spcSub = menu.AddSubMenu(LL14(L"SPC/HES 音量", L"SPC/HES volume", L"Volume SPC/HES", L"Volume SPC/HES", L"Volumen SPC/HES", L"SPC/HES 볼륨", L"SPC/HES 音量", L"مستوى SPC/HES", L"Громкость SPC/HES", L"SPC/HES-Lautstarke", L"Volume SPC/HES", L"SPC/HES-volume", L"Glosnosc SPC/HES", L"SPC/HES ses"), LL14(L"SPC/HES 再生時の内部ゲイン倍率を選びます", L"Choose internal gain multiplier for SPC/HES", L"Choisir le gain interne pour SPC/HES", L"Scegli il gain interno per SPC/HES", L"Elegir la ganancia interna para SPC/HES", L"SPC/HES 재생 내부 게인 배율을 선택", L"选择 SPC/HES 播放的内部增益倍率", L"اختيار مضاعف الكسب الداخلي لـ SPC/HES", L"Выбрать внутренний коэффициент для SPC/HES", L"Internen Gain-Faktor fur SPC/HES wahlen", L"Escolher o ganho interno para SPC/HES", L"Interne gain-factor voor SPC/HES kiezen", L"Wybierz wewnetrzny wspolczynnik gain dla SPC/HES", L"SPC/HES calma dahili kazanc carpanini sec"));
 		if (spcSub) {
 			spcSub->AddCheck(ID_MP_SET_SPC_1, L"1x", savedata.spc == 1);
 			spcSub->AddCheck(ID_MP_SET_SPC_2, L"2x", savedata.spc == 2);
@@ -8983,7 +9070,7 @@ void MpShowSettingsExtrasMenu(CWnd* owner, CPoint screenPt)
 			spcSub->AddCheck(ID_MP_SET_SPC_8, L"8x", savedata.spc == 8);
 			spcSub->AddCheck(ID_MP_SET_SPC_16, L"16x", savedata.spc == 16);
 		}
-		CCustomPopupMenu* kpiSub = menu.AddSubMenu(LL14(L"その他 kpi 音量", L"Other kpi volume", L"Volume kpi autres", L"Volume kpi altri", L"Volumen kpi otros", L"기타 kpi 볼륨", L"其他 kpi 音量", L"مستوى kpi أخرى", L"Громкость прочих kpi", L"Sonstige kpi-Lautstarke", L"Volume kpi outros", L"Overig kpi-volume", L"Glosnosc innych kpi", L"Diger kpi ses"));
+		CCustomPopupMenu* kpiSub = menu.AddSubMenu(LL14(L"その他 kpi 音量", L"Other kpi volume", L"Volume kpi autres", L"Volume kpi altri", L"Volumen kpi otros", L"기타 kpi 볼륨", L"其他 kpi 音量", L"مستوى kpi أخرى", L"Громкость прочих kpi", L"Sonstige kpi-Lautstarke", L"Volume kpi outros", L"Overig kpi-volume", L"Glosnosc innych kpi", L"Diger kpi ses"), LL14(L"その他 kpi 再生時の内部ゲイン倍率を選びます", L"Choose internal gain multiplier for other kpi formats", L"Choisir le gain interne pour les autres kpi", L"Scegli il gain interno per altri kpi", L"Elegir la ganancia interna para otros kpi", L"기타 kpi 재생 내부 게인 배율을 선택", L"选择其他 kpi 播放的内部增益倍率", L"اختيار مضاعف الكسب الداخلي لـ kpi الأخرى", L"Выбрать внутренний коэффициент для прочих kpi", L"Internen Gain-Faktor fur sonstige kpi wahlen", L"Escolher o ganho interno para outros kpi", L"Interne gain-factor voor overige kpi kiezen", L"Wybierz wewnetrzny wspolczynnik gain dla innych kpi", L"Diger kpi calma dahili kazanc carpanini sec"));
 		if (kpiSub) {
 			kpiSub->AddCheck(ID_MP_SET_KPI_1, L"1.0x", savedata.kpivol == 1);
 			kpiSub->AddCheck(ID_MP_SET_KPI_2, L"1.5x", savedata.kpivol == 2);
@@ -8996,18 +9083,21 @@ void MpShowSettingsExtrasMenu(CWnd* owner, CPoint screenPt)
 		LL14(L"m4a 内蔵エンジン", L"Built-in m4a engine", L"Moteur m4a integre", L"Motore m4a interno", L"Motor m4a integrado",
 			L"m4a 내장 엔진", L"内置 m4a 引擎", L"محرك m4a مدمج", L"Встроенный m4a", L"Integrierte m4a-Engine",
 			L"Motor m4a interno", L"Ingebouwde m4a-engine", L"Wbudowany silnik m4a", L"Dahili m4a motoru"),
-		savedata.m4a != 0);
+		savedata.m4a != 0,
+		LL14(L"m4a/AAC を内蔵エンジンでデコードします", L"Decode m4a/AAC with the built-in engine", L"Decoder m4a/AAC avec le moteur integre", L"Decodifica m4a/AAC con il motore interno", L"Decodificar m4a/AAC con el motor integrado", L"m4a/AAC를 내장 엔진으로 디코드", L"用内置引擎解码 m4a/AAC", L"فك m4a/AAC بالمحرك المدمج", L"Декодировать m4a/AAC встроенным движком", L"m4a/AAC mit integrierter Engine dekodieren", L"Decodificar m4a/AAC com o motor interno", L"m4a/AAC decoderen met de ingebouwde engine", L"Dekoduj m4a/AAC wbudowanym silnikiem", L"m4a/AAC'yi dahili motorla coz"));
 	menu.AddCheck(ID_MP_SET_MP3ORIG,
 		LL14(L"mp3 オリジナルデコーダ", L"Original mp3 decoder", L"Decodeur mp3 original", L"Decoder mp3 originale", L"Decodificador mp3 original",
 			L"mp3 원본 디코더", L"原始 mp3 解码器", L"مفكك mp3 أصلي", L"Оригинальный mp3-декодер", L"Originaler mp3-Decoder",
 			L"Decoder mp3 original", L"Originele mp3-decoder", L"Oryginalny dekoder mp3", L"Orijinal mp3 cozucu"),
-		savedata.mp3orig != 0);
+		savedata.mp3orig != 0,
+		LL14(L"mp3 をオリジナル互換デコーダで再生します", L"Play mp3 with the original-compatible decoder", L"Lire le mp3 avec le decodeur original", L"Riproduci mp3 con il decoder originale", L"Reproducir mp3 con el decodificador original", L"mp3를 원본 호환 디코더로 재생", L"用原始兼容解码器播放 mp3", L"تشغيل mp3 بمفكك متوافق أصلي", L"Воспроизводить mp3 оригинальным декодером", L"mp3 mit originalem Decoder wiedergeben", L"Reproduzir mp3 com o decoder original", L"mp3 afspelen met de originele decoder", L"Odtwarzaj mp3 oryginalnym dekoderem", L"mp3'u orijinal uyumlu cozucuyle cal"));
 
 	menu.AddSeparator();
 	menu.AddCommand(ID_MP_SET_OPEN,
 		LL14(L"設定画面を開く…", L"Open settings…", L"Ouvrir les reglages…", L"Apri impostazioni…", L"Abrir ajustes…",
 			L"설정 화면 열기…", L"打开设置…", L"فتح الإعدادات…", L"Открыть настройки…", L"Einstellungen öffnen…",
-			L"Abrir configuracoes…", L"Instellingen openen…", L"Otworz ustawienia…", L"Ayarlari ac…"));
+			L"Abrir configuracoes…", L"Instellingen openen…", L"Otworz ustawienia…", L"Ayarlari ac…"),
+			LL14(L"詳細な設定ダイアログを開きます", L"Open the full settings dialog", L"Ouvrir la boite de dialogue des reglages", L"Apri la finestra delle impostazioni", L"Abrir el dialogo de ajustes", L"상세 설정 대화상자를 엽니다", L"打开详细设置对话框", L"فتح مربع حوار الإعدادات", L"Открыть диалог настроек", L"Einstellungsdialog oeffnen", L"Abrir o dialogo de configuracoes", L"Instellingendialoog openen", L"Otworz okno ustawien", L"Ayarlar penceresini ac"));
 
 	const UINT cmd = menu.Track(screenPt, owner);
 	if (!cmd) return;
@@ -9075,15 +9165,18 @@ void CMediaPlayerDlg::ShowFolderExtrasMenu(CPoint screenPt)
 	menu.AddCommand(ID_MP_FOLDER_OPEN,
 		LL14(L"フォルダ設定を開く…", L"Open folder settings…", L"Ouvrir parametres dossier…", L"Apri impostazioni cartella…", L"Abrir config. carpeta…",
 			L"폴더 설정 열기…", L"打开文件夹设置…", L"فتح إعدادات المجلد…", L"Открыть настройки папки…", L"Ordnereinstellungen öffnen…",
-			L"Abrir config. pasta…", L"Mapinstellingen openen…", L"Otworz ustawienia folderu…", L"Klasor ayarlarini ac…"));
+			L"Abrir config. pasta…", L"Mapinstellingen openen…", L"Otworz ustawienia folderu…", L"Klasor ayarlarini ac…"),
+			LL14(L"監視フォルダなどのフォルダ設定を開きます", L"Open folder settings (watched folders, etc.)", L"Ouvrir les parametres de dossiers", L"Apri le impostazioni cartelle", L"Abrir la configuracion de carpetas", L"감시 폴더 등 폴더 설정을 엽니다", L"打开文件夹设置（监视文件夹等）", L"فتح إعدادات المجلدات", L"Открыть настройки папок", L"Ordnereinstellungen oeffnen", L"Abrir as configuracoes de pastas", L"Mapinstellingen openen", L"Otworz ustawienia folderow", L"Klasor ayarlarini ac"));
 	menu.AddCommand(ID_MP_FOLDER_ADD,
 		LL14(L"フォルダを追加…", L"Add folder…", L"Ajouter un dossier…", L"Aggiungi cartella…", L"Anadir carpeta…",
 			L"폴더 추가…", L"添加文件夹…", L"إضافة مجلد…", L"Добавить папку…", L"Ordner hinzufügen…",
-			L"Adicionar pasta…", L"Map toevoegen…", L"Dodaj folder…", L"Klasor ekle…"));
+			L"Adicionar pasta…", L"Map toevoegen…", L"Dodaj folder…", L"Klasor ekle…"),
+			LL14(L"ライブラリへ新しいフォルダを追加します", L"Add a new folder to the library", L"Ajouter un nouveau dossier a la bibliotheque", L"Aggiungi una nuova cartella alla libreria", L"Anadir una carpeta nueva a la biblioteca", L"라이브러리에 새 폴더를 추가", L"向媒体库添加新文件夹", L"إضافة مجلد جديد إلى المكتبة", L"Добавить новую папку в библиотеку", L"Neuen Ordner zur Bibliothek hinzufugen", L"Adicionar uma nova pasta a biblioteca", L"Een nieuwe map aan de bibliotheek toevoegen", L"Dodaj nowy folder do biblioteki", L"Kitapliga yeni klasor ekle"));
 	menu.AddCommand(ID_MP_FOLDER_SYNC,
 		LL14(L"フォルダ同期差分…", L"Folder sync diff…", L"Diff sync dossier…", L"Diff sync cartella…", L"Diff sync carpeta…",
 			L"폴더 동기화 차이…", L"文件夹同步差异…", L"فرق مزامنة المجلد…", L"Разница синхр. папки…", L"Ordner-Sync-Diff…",
-			L"Diff sync pasta…", L"Map-sync-diff…", L"Roznica sync folderu…", L"Klasor senkron fark…"));
+			L"Diff sync pasta…", L"Map-sync-diff…", L"Roznica sync folderu…", L"Klasor senkron fark…"),
+			LL14(L"監視フォルダとリストの差分を確認・同期します", L"Review and sync differences vs watched folders", L"Verifier/synchroniser les differences des dossiers", L"Controlla/sincronizza le differenze delle cartelle", L"Revisar/sincronizar diferencias de carpetas", L"감시 폴더와 목록 차이를 확인하고 동기화", L"查看并同步监视文件夹与列表的差异", L"مراجعة ومزامنة فروق المجلدات", L"Проверить и синхронизировать различия папок", L"Differenzen zu Uberwachungsordnern prufen/synchronisieren", L"Revisar e sincronizar diferencas das pastas", L"Mapverschillen controleren/synchroniseren", L"Sprawdz i zsynchronizuj roznice folderow", L"Klasor farklarini incele ve senkronize et"));
 	const UINT cmd = menu.Track(screenPt, this);
 	if (cmd == ID_MP_FOLDER_OPEN) OnFolder();
 	else if (cmd == ID_MP_FOLDER_ADD) OnAddFolder();
@@ -9097,20 +9190,24 @@ void CMediaPlayerDlg::ShowEqButtonExtrasMenu(CPoint screenPt)
 	menu.AddCommand(ID_MP_OPEN_EQ,
 		LL14(L"イコライザを開く", L"Open equalizer", L"Ouvrir l'egaliseur", L"Apri equalizzatore", L"Abrir ecualizador",
 			L"이퀄라이저 열기", L"打开均衡器", L"فتح المعادل", L"Открыть эквалайзер", L"Equalizer öffnen",
-			L"Abrir equalizador", L"Equalizer openen", L"Otworz equalizer", L"Equalizeri ac"));
+			L"Abrir equalizador", L"Equalizer openen", L"Otworz equalizer", L"Equalizeri ac"),
+			LL14(L"イコライザーウィンドウを開閉します", L"Open or close the equalizer window", L"Ouvrir/fermer la fenetre egaliseur", L"Apri/chiudi la finestra equalizzatore", L"Abrir/cerrar la ventana del ecualizador", L"이퀄라이저 창을 여닫기", L"打开或关闭均衡器窗口", L"فتح/إغلاق نافذة المعادل", L"Открыть/закрыть окно эквалайзера", L"Equalizer-Fenster oeffnen/schliessen", L"Abrir/fechar a janela do equalizador", L"Equalizervenster openen/sluiten", L"Otworz/zamknij okno equalizera", L"Equalizer penceresini ac/kapat"));
 	menu.AddCommand(ID_MP_EQBTN_FLAT,
 		LL14(L"デフォルト（フラット）", L"Default (flat)", L"Par defaut (plat)", L"Predefinito (piatto)", L"Predeterminado (plano)",
 			L"기본(플랫)", L"默认（平直）", L"افتراضي (مسطح)", L"По умолчанию (ровный)", L"Standard (flach)",
-			L"Padrao (plano)", L"Standaard (vlak)", L"Domyslny (plaski)", L"Varsayilan (duz)"));
+			L"Padrao (plano)", L"Standaard (vlak)", L"Domyslny (plaski)", L"Varsayilan (duz)"),
+			LL14(L"EQ をフラット（効果なし）に戻します", L"Reset EQ to flat (no boost/cut)", L"Remettre l'EQ a plat", L"Ripristina EQ piatto", L"Restablecer el EQ a plano", L"EQ를 플랫(효과 없음)으로 되돌림", L"将 EQ 重置为平直", L"إعادة EQ إلى المستوى المسطح", L"Сбросить EQ в ровный", L"EQ auf flach zurucksetzen", L"Redefinir o EQ para plano", L"EQ terugzetten naar vlak", L"Przywroc EQ do plaskiego", L"EQ'yu duz (etkisiz) yap"));
 	menu.AddCommand(ID_MP_EQBTN_SUGGEST,
 		LL14(L"キーからEQを提案", L"Suggest EQ from key", L"Suggérer EQ depuis la tonalité", L"Suggerisci EQ dalla tonalità", L"Sugerir EQ desde tonalidad",
 			L"키에서 EQ 제안", L"根据调性建议 EQ", L"اقتراح EQ من المفتاح", L"Предложить EQ по тональности", L"EQ aus Tonart vorschlagen",
-			L"Sugerir EQ pela tonalidade", L"EQ voorstellen uit toonsoort", L"Zaproponuj EQ z tonacji", L"Anahtardan EQ oner"));
+			L"Sugerir EQ pela tonalidade", L"EQ voorstellen uit toonsoort", L"Zaproponuj EQ z tonacji", L"Anahtardan EQ oner"),
+			LL14(L"検出キーに基づく EQ カーブを提案します", L"Suggest an EQ curve from the detected key", L"Suggérer une courbe EQ selon la tonalite", L"Suggerisci una curva EQ dalla tonalita", L"Sugerir una curva EQ segun la tonalidad", L"감지된 키 기반 EQ 커브 제안", L"根据检测到的调性建议 EQ 曲线", L"اقتراح منحنى EQ حسب المفتاح", L"Предложить кривую EQ по тональности", L"EQ-Kurve aus erkannter Tonart vorschlagen", L"Sugerir uma curva EQ pela tonalidade", L"EQ-curve voorstellen uit gedetecteerde toonsoort", L"Zaproponuj krzywa EQ z tonacji", L"Algilanan anahtara gore EQ egrisi oner"));
 	menu.AddCheck(ID_MP_EQBTN_AUTO,
 		LL14(L"キー検出時に自動提案", L"Auto-suggest on key detect", L"Suggestion auto sur détection", L"Suggerimento auto su rilevamento", L"Sugerencia auto al detectar",
 			L"키 검출 시 자동 제안", L"检测到调性时自动建议", L"اقتراح تلقائي عند الكشف", L"Авто-предложение по ключу", L"Auto-Vorschlag bei Erkennung",
 			L"Sugestao auto na deteccao", L"Auto-voorstel bij detectie", L"Auto-propozycja przy wykryciu", L"Algilamada otomatik oneri"),
-		savedata.mpKeyEqSuggest != 0);
+		savedata.mpKeyEqSuggest != 0,
+		LL14(L"キー検出時に EQ 提案を自動適用します", L"Auto-apply EQ suggestions when a key is detected", L"Appliquer auto les suggestions EQ a la detection", L"Applica auto i suggerimenti EQ al rilevamento", L"Aplicar auto sugerencias EQ al detectar", L"키 검출 시 EQ 제안을 자동 적용", L"检测到调性时自动应用 EQ 建议", L"تطبيق اقتراحات EQ تلقائياً عند الكشف", L"Автоприменять предложения EQ при детекции", L"EQ-Vorschlage bei Tonarterkennung automatisch anwenden", L"Aplicar auto sugestoes de EQ na deteccao", L"EQ-voorstellen automatisch toepassen bij detectie", L"Auto-stosuj propozycje EQ przy wykryciu", L"Anahtar algilaninca EQ onerisini otomatik uygula"));
 	const UINT cmd = menu.Track(screenPt, this);
 	if (cmd == ID_MP_OPEN_EQ) {
 		OnEq();
@@ -9133,12 +9230,14 @@ void CMediaPlayerDlg::ShowFadeExtrasMenu(CPoint screenPt)
 	menu.AddCommand(ID_MP_FADE_NOW,
 		LL14(L"今すぐフェードアウト", L"Fade out now", L"Fondu maintenant", L"Dissolvenza ora", L"Desvanecer ahora",
 			L"지금 페이드 아웃", L"立即淡出", L"تلاشي الآن", L"Затухание сейчас", L"Jetzt ausblenden",
-			L"Desvanecer agora", L"Nu uitfaden", L"Wycisz teraz", L"Simdi soluklastir"));
+			L"Desvanecer agora", L"Nu uitfaden", L"Wycisz teraz", L"Simdi soluklastir"),
+			LL14(L"いま再生中の曲をすぐにフェードアウトします", L"Fade out the current track immediately", L"Faire un fondu immediat de la piste", L"Esegui dissolvenza immediata del brano", L"Desvanecer inmediatamente la pista actual", L"현재 곡을 바로 페이드 아웃", L"立即淡出当前曲目", L"تلاشي المقطع الحالي فوراً", L"Сразу затушить текущий трек", L"Aktuellen Titel sofort ausblenden", L"Desvanecer a faixa atual imediatamente", L"Huidige nummer meteen uitfaden", L"Wycisz biezacy utwor natychmiast", L"Calan parcayi hemen soluklastir"));
 	menu.AddCheck(ID_MP_XFADE_PREVIEW,
 		LL14(L"クロスフェード帯をシークに表示", L"Show crossfade band on seek", L"Afficher bande xfade sur seek", L"Mostra banda xfade sul seek", L"Mostrar banda xfade en seek",
 			L"시크에 크로스페이드 대역 표시", L"在进度条显示交叉淡入淡出带", L"إظهار نطاق xfade على الشريط", L"Показывать полосу xfade на сике", L"Xfade-Band auf Seek zeigen",
 			L"Mostrar faixa xfade no seek", L"Xfade-band op seek tonen", L"Pokaz pasmo xfade na seek", L"Seekte xfade bandini goster"),
-		savedata.mpXfadePreview != 0);
+		savedata.mpXfadePreview != 0,
+		LL14(L"書き出しクロスフェードの重なり帯をシークに表示します", L"Show the export crossfade overlap band on the seek bar", L"Afficher la bande de chevauchement xfade sur la barre", L"Mostra la banda di sovrapposizione xfade sulla barra", L"Mostrar la banda de solape xfade en la barra", L"내보내기 크로스페이드 겹침을 시크바에 표시", L"在进度条显示导出交叉淡化重叠带", L"عرض شريط تداخل xfade على الشريط", L"Показать полосу перекрытия xfade на сике", L"Export-Xfade-Uberlappung auf der Suchleiste zeigen", L"Mostrar a faixa de sobreposicao xfade na barra", L"Export-xfade-overlap op de zoekbalk tonen", L"Pokaz pasmo nakladania xfade na pasku", L"Disa aktarma xfade bindirme bandini seekte goster"));
 	const UINT cmd = menu.Track(screenPt, this);
 	if (cmd == ID_MP_FADE_NOW) OnFadeout();
 	else if (cmd == ID_MP_XFADE_PREVIEW) OnXfadePreviewToggle();
@@ -9155,17 +9254,20 @@ void CMediaPlayerDlg::ShowPlayModeExtrasMenu(CPoint screenPt)
 		LL14(L"連続再生", L"Continuous", L"Lecture continue", L"Continua", L"Continua",
 			L"연속 재생", L"连续播放", L"تشغيل متتابع", L"Подряд", L"Folge",
 			L"Continuo", L"Doorlopend", L"Ciagle", L"Surekli"),
-		cont);
+		cont,
+		LL14(L"リストを最後まで連続再生します", L"Play through the list continuously", L"Lire la liste en continu", L"Riproduci l'elenco in continuo", L"Reproducir la lista de forma continua", L"목록을 끝까지 연속 재생", L"连续播放列表直到结束", L"تشغيل القائمة بشكل متتابع", L"Воспроизводить список подряд", L"Liste durchgehend abspielen", L"Reproduzir a lista continuamente", L"Lijst doorlopend afspelen", L"Odtwarzaj liste ciagle", L"Listeyi surekli cal"));
 	menu.AddCheck(ID_MP_MODE_LOOP,
 		LL14(L"ループ再生", L"Loop", L"Boucle", L"Loop", L"Repetir",
 			L"루프", L"循环", L"تكرار", L"Цикл", L"Schleife",
 			L"Repetir", L"Lus", L"Petla", L"Dongu"),
-		loop);
+		loop,
+		LL14(L"現在の曲または選択区間をループ再生します", L"Loop the current track or selected range", L"Boucler la piste ou la plage selectionnee", L"Ripeti il brano o l'intervallo selezionato", L"Repetir la pista o el rango seleccionado", L"현재 곡 또는 선택 구간을 루프", L"循环当前曲目或所选区间", L"تكرار المقطع أو النطاق المحدد", L"Зациклить текущий трек или диапазон", L"Aktuellen Titel oder Bereich in Schleife", L"Repetir a faixa ou o intervalo selecionado", L"Huidige nummer of bereik herhalen", L"Zapetl biezacy utwor lub zakres", L"Gecerli parcayi veya araligi donguye al"));
 	menu.AddCheck(ID_MP_MODE_RAND,
 		LL14(L"ランダム再生", L"Random", L"Aleatoire", L"Casuale", L"Aleatorio",
 			L"랜덤", L"随机", L"عشوائي", L"Случайно", L"Zufall",
 			L"Aleatorio", L"Willekeurig", L"Losowo", L"Rastgele"),
-		rnd);
+		rnd,
+		LL14(L"リストをランダム順で再生します", L"Play the list in random order", L"Lire la liste dans un ordre aleatoire", L"Riproduci l'elenco in ordine casuale", L"Reproducir la lista en orden aleatorio", L"목록을 무작위 순서로 재생", L"按随机顺序播放列表", L"تشغيل القائمة بترتيب عشوائي", L"Воспроизводить список в случайном порядке", L"Liste in Zufallsreihenfolge abspielen", L"Reproduzir a lista em ordem aleatoria", L"Lijst in willekeurige volgorde afspelen", L"Odtwarzaj liste losowo", L"Listeyi rastgele sirada cal"));
 	const UINT cmd = menu.Track(screenPt, this);
 	if (cmd == ID_MP_MODE_CONT) {
 		if (m_renzoku.GetSafeHwnd()) { m_renzoku.SetCheck(cont ? BST_UNCHECKED : BST_CHECKED); OnRenzoku(); }
@@ -9184,11 +9286,13 @@ void CMediaPlayerDlg::ShowMirrorExtrasMenu(CPoint screenPt)
 		LL14(L"ミラー出力を有効", L"Enable mirror output", L"Activer sortie miroir", L"Abilita uscita mirror", L"Activar salida espejo",
 			L"미러 출력 사용", L"启用镜像输出", L"تفعيل خرج المرآة", L"Включить зеркальный выход", L"Spiegelausgabe aktivieren",
 			L"Ativar saida espelho", L"Spiegelaudio inschakelen", L"Wlacz wyjscie lustrzane", L"Ayna cikisi etkin"),
-		savedata.mpMirrorOut != 0);
+		savedata.mpMirrorOut != 0,
+		LL14(L"別デバイスへのミラー音声出力を有効／無効にします", L"Enable/disable mirrored audio to another device", L"Activer/desactiver la sortie miroir", L"Abilita/disabilita l'uscita mirror", L"Activar/desactivar la salida espejo", L"다른 장치로의 미러 출력을 켜거나 끔", L"启用/禁用镜像到另一设备的音频输出", L"تفعيل/تعطيل خرج المرآة لجهاز آخر", L"Вкл/выкл зеркальный вывод на другое устройство", L"Spiegelausgabe auf anderes Gerat ein/aus", L"Ativar/desativar saida espelho para outro dispositivo", L"Spiegelaudio naar ander apparaat aan/uit", L"Wlacz/wylacz wyjscie lustrzane na inne urzadzenie", L"Baska cihaza ayna cikisini ac/kapat"));
 	menu.AddCommand(ID_MP_MIRROR_OPEN,
 		LL14(L"ミラー設定を開く…", L"Open mirror settings…", L"Ouvrir reglages miroir…", L"Apri impostazioni mirror…", L"Abrir ajustes espejo…",
 			L"미러 설정 열기…", L"打开镜像设置…", L"فتح إعدادات المرآة…", L"Открыть настройки зеркала…", L"Spiegeleinstellungen öffnen…",
-			L"Abrir config. espelho…", L"Spiegelinstellingen openen…", L"Otworz ustawienia lustra…", L"Ayna ayarlarini ac…"));
+			L"Abrir config. espelho…", L"Spiegelinstellingen openen…", L"Otworz ustawienia lustra…", L"Ayna ayarlarini ac…"),
+			LL14(L"ミラー出力デバイスや遅延などの設定を開きます", L"Open mirror output device and latency settings", L"Ouvrir les reglages du miroir (peripherique/latence)", L"Apri impostazioni mirror (dispositivo/latenza)", L"Abrir ajustes de espejo (dispositivo/latencia)", L"미러 출력 장치·지연 설정을 엽니다", L"打开镜像输出设备与延迟设置", L"فتح إعدادات جهاز المرآة والتأخير", L"Открыть настройки зеркала (устройство/задержка)", L"Spiegeleinstellungen (Gerat/Latenz) oeffnen", L"Abrir configuracoes do espelho (dispositivo/latencia)", L"Spiegelinstellingen (apparaat/latentie) openen", L"Otworz ustawienia lustra (urzadzenie/opoznienie)", L"Ayna cikis cihaz/gecikme ayarlarini ac"));
 	const UINT cmd = menu.Track(screenPt, this);
 	if (cmd == ID_MP_MIRROR_TOGGLE) {
 		savedata.mpMirrorOut = savedata.mpMirrorOut ? 0 : 1;
@@ -9210,7 +9314,8 @@ void CMediaPlayerDlg::ShowToolsExtrasMenu(CPoint screenPt)
 
 	menu.AddCheck(ID_MP_TOOLS_PANEL,
 		LL14(L"並べ替え・フォルダ追加パネル", L"Sort / add-folder panel", L"Panneau tri / dossier", L"Pannello ordina / cartella", L"Panel ordenar / carpeta", L"정렬/폴더 추가 패널", L"排序/添加文件夹面板", L"لوحة الترتيب/المجلد", L"Панель сортировки/папки", L"Sortier-/Ordnerpanel", L"Painel ordenar/pasta", L"Sorteer-/mappaneel", L"Panel sortowania/folderu", L"Sirala/klasor paneli"),
-		savedata.mpToolsOpen != 0);
+		savedata.mpToolsOpen != 0,
+		LL14(L"並べ替えやフォルダ追加などのツールパネルを開閉します", L"Show/hide the sort and add-folder tools panel", L"Afficher/masquer le panneau tri/dossier", L"Mostra/nascondi il pannello ordina/cartella", L"Mostrar/ocultar el panel ordenar/carpeta", L"정렬·폴더 추가 도구 패널을 여닫기", L"打开/关闭排序与添加文件夹工具面板", L"إظهار/إخفاء لوحة الترتيب وإضافة المجلد", L"Показать/скрыть панель сортировки/папки", L"Sortier-/Ordnerpanel ein-/ausblenden", L"Mostrar/ocultar o painel ordenar/pasta", L"Sorteer-/mappaneel tonen/verbergen", L"Pokaz/ukryj panel sortowania/folderu", L"Sirala/klasor arac panelini ac/kapat"));
 	{
 		if (!savedata.mpBotToolsInited) {
 			savedata.mpBotToolsInited = 1;
@@ -9236,33 +9341,42 @@ void CMediaPlayerDlg::ShowToolsExtrasMenu(CPoint screenPt)
 		}
 	}
 	menu.AddCommand(ID_MP_MISS_MANAGE,
-		LL14(L"欠損を整理…", L"Manage missing…", L"Gerer manquants…", L"Gestisci mancanti…", L"Gestionar faltantes…", L"결손 정리…", L"整理缺失…", L"إدارة المفقود…", L"Управление отсутствующими…", L"Fehlende verwalten…", L"Gerir ausentes…", L"Ontbrekende beheren…", L"Zarzadzaj brakujacymi…", L"Eksikleri yonnet…"));
+		LL14(L"欠損を整理…", L"Manage missing…", L"Gerer manquants…", L"Gestisci mancanti…", L"Gestionar faltantes…", L"결손 정리…", L"整理缺失…", L"إدارة المفقود…", L"Управление отсутствующими…", L"Fehlende verwalten…", L"Gerir ausentes…", L"Ontbrekende beheren…", L"Zarzadzaj brakujacymi…", L"Eksikleri yonnet…"),
+		LL14(L"見つからないファイルを一覧し整理します", L"List and clean up missing files", L"Lister et nettoyer les fichiers manquants", L"Elenca e sistema i file mancanti", L"Listar y limpiar archivos faltantes", L"없는 파일을 목록으로 정리", L"列出并整理缺失文件", L"سرد وتنظيف الملفات المفقودة", L"Показать и упорядочить отсутствующие файлы", L"Fehlende Dateien auflisten und bereinigen", L"Listar e limpar arquivos ausentes", L"Ontbrekende bestanden tonen en opruimen", L"Wyswietl i uporzadkuj brakujace pliki", L"Eksik dosyalari listele ve duzenle"));
 	menu.AddSeparator();
 	menu.AddCommand(ID_MP_SMART_EDIT,
-		LL14(L"スマートプレイリスト…", L"Smart playlists…", L"Playlists intelligentes…", L"Playlist smart…", L"Listas inteligentes…", L"스마트 재생목록…", L"智能播放列表…", L"قوائم ذكية…", L"Умные списки…", L"Smart-Playlists…", L"Playlists inteligentes…", L"Slimme afspeellijsten…", L"Inteligentne listy…", L"Akilli listeler…"));
+		LL14(L"スマートプレイリスト…", L"Smart playlists…", L"Playlists intelligentes…", L"Playlist smart…", L"Listas inteligentes…", L"스마트 재생목록…", L"智能播放列表…", L"قوائم ذكية…", L"Умные списки…", L"Smart-Playlists…", L"Playlists inteligentes…", L"Slimme afspeellijsten…", L"Inteligentne listy…", L"Akilli listeler…"),
+		LL14(L"条件付きスマートプレイリストを作成・編集します", L"Create or edit conditional smart playlists", L"Creer/editer des playlists intelligentes", L"Crea/modifica playlist smart", L"Crear/editar listas inteligentes", L"조건 기반 스마트 재생목록 만들기/편집", L"创建或编辑条件智能播放列表", L"إنشاء/تحرير قوائم ذكية", L"Создать/править умные списки", L"Smart-Playlists erstellen/bearbeiten", L"Criar/editar playlists inteligentes", L"Slimme afspeellijsten maken/bewerken", L"Tworz/edytuj inteligentne listy", L"Kosullu akilli listeleri olustur/duzenle"));
 	for (int si = 0; si < MpSmart_Count() && si < MP_SMART_MAX; ++si) {
 		MpSmartRule r;
 		if (!MpSmart_Get(si, r)) continue;
-		menu.AddCheck(ID_MP_SMART_BASE + si, MpSmart_UiLabel(r), m_activeSmartId == si);
+		menu.AddCheck(ID_MP_SMART_BASE + si, MpSmart_UiLabel(r), m_activeSmartId == si, LL14(L"このスマートプレイリストを適用／解除します", L"Apply or clear this smart playlist", L"Appliquer/effacer cette playlist intelligente", L"Applica/cancella questa playlist smart", L"Aplicar/quitar esta lista inteligente", L"이 스마트 재생목록을 적용/해제", L"应用或清除此智能播放列表", L"تطبيق/مسح هذه القائمة الذكية", L"Применить/сбросить этот умный список", L"Diese Smart-Playlist anwenden/entfernen", L"Aplicar/limpar esta playlist inteligente", L"Deze slimme afspeellijst toepassen/wissen", L"Zastosuj/wyczysc te inteligentna liste", L"Bu akilli listeyi uygula/temizle"));
 	}
 	menu.AddSeparator();
 	// 旧「クイック: 未再生/欠損」は既定スマートPLと同義のため出さない
 	menu.AddCommand(ID_MP_FILT_CLEAR,
-		LL14(L"フィルタ解除", L"Clear filter", L"Effacer filtre", L"Cancella filtro", L"Borrar filtro", L"필터 해제", L"清除筛选", L"مسح التصفية", L"Сбросить фильтр", L"Filter aus", L"Limpar filtro", L"Filter wissen", L"Wyczysc filtr", L"Filtreyi temizle"));
+		LL14(L"フィルタ解除", L"Clear filter", L"Effacer filtre", L"Cancella filtro", L"Borrar filtro", L"필터 해제", L"清除筛选", L"مسح التصفية", L"Сбросить фильтр", L"Filter aus", L"Limpar filtro", L"Filter wissen", L"Wyczysc filtr", L"Filtreyi temizle"),
+		LL14(L"リストにかかっているフィルタをすべて解除します", L"Clear all active list filters", L"Effacer tous les filtres actifs", L"Cancella tutti i filtri attivi", L"Borrar todos los filtros activos", L"적용 중인 필터를 모두 해제", L"清除所有活动列表筛选", L"مسح كل عوامل التصفية النشطة", L"Сбросить все активные фильтры", L"Alle aktiven Filter entfernen", L"Limpar todos os filtros ativos", L"Alle actieve filters wissen", L"Wyczysc wszystkie aktywne filtry", L"Tum etkin filtreleri temizle"));
 	menu.AddSeparator();
 	menu.AddCommand(ID_MP_QUEUE_SHOW,
-		LL14(L"Up Next を表示…", L"Show Up Next…", L"Afficher Up Next…", L"Mostra Up Next…", L"Mostrar Up Next…", L"Up Next 표시…", L"显示 Up Next…", L"عرض Up Next…", L"Показать Up Next…", L"Up Next anzeigen…", L"Mostrar Up Next…", L"Up Next tonen…", L"Pokaz Up Next…", L"Up Next goster…"));
+		LL14(L"Up Next を表示…", L"Show Up Next…", L"Afficher Up Next…", L"Mostra Up Next…", L"Mostrar Up Next…", L"Up Next 표시…", L"显示 Up Next…", L"عرض Up Next…", L"Показать Up Next…", L"Up Next anzeigen…", L"Mostrar Up Next…", L"Up Next tonen…", L"Pokaz Up Next…", L"Up Next goster…"),
+		LL14(L"Up Next（次に再生するキュー）を表示します", L"Show the Up Next playback queue", L"Afficher la file Up Next", L"Mostra la coda Up Next", L"Mostrar la cola Up Next", L"Up Next 재생 큐를 표시", L"显示 Up Next 播放队列", L"عرض طابور Up Next", L"Показать очередь Up Next", L"Up-Next-Warteschlange anzeigen", L"Mostrar a fila Up Next", L"Up Next-wachtrij tonen", L"Pokaz kolejke Up Next", L"Up Next kuyrugunu goster"));
 	menu.AddCommand(ID_MP_QUEUE_ADD,
-		LL14(L"Up Next に追加", L"Add to Up Next", L"Ajouter a Up Next", L"Aggiungi a Up Next", L"Anadir a Up Next", L"Up Next에 추가", L"加入 Up Next", L"إضافة إلى Up Next", L"В Up Next", L"Zu Up Next", L"Adicionar a Up Next", L"Toevoegen aan Up Next", L"Dodaj do Up Next", L"Up Next'e ekle"));
+		LL14(L"Up Next に追加", L"Add to Up Next", L"Ajouter a Up Next", L"Aggiungi a Up Next", L"Anadir a Up Next", L"Up Next에 추가", L"加入 Up Next", L"إضافة إلى Up Next", L"В Up Next", L"Zu Up Next", L"Adicionar a Up Next", L"Toevoegen aan Up Next", L"Dodaj do Up Next", L"Up Next'e ekle"),
+		LL14(L"選択曲を Up Next の末尾に追加します", L"Append the selection to the end of Up Next", L"Ajouter la selection a la fin de Up Next", L"Aggiungi la selezione in coda a Up Next", L"Anadir la seleccion al final de Up Next", L"선택 곡을 Up Next 끝에 추가", L"将所选追加到 Up Next 末尾", L"إضافة التحديد إلى نهاية Up Next", L"Добавить выбор в конец Up Next", L"Auswahl ans Ende von Up Next anhangen", L"Acrescentar a selecao ao fim de Up Next", L"Selectie aan het einde van Up Next toevoegen", L"Dodaj wybor na koniec Up Next", L"Secimi Up Next sonuna ekle"));
 	menu.AddCommand(ID_MP_QUEUE_PLAYNEXT,
-		LL14(L"次に再生", L"Play Next", L"Lire ensuite", L"Riproduci dopo", L"Reproducir despues", L"다음에 재생", L"下一首播放", L"تشغيل التالي", L"Играть следующим", L"Als Nachstes", L"Tocar a seguir", L"Speel hierna", L"Odtworz nastepnie", L"Sonraki oynat"));
+		LL14(L"次に再生", L"Play Next", L"Lire ensuite", L"Riproduci dopo", L"Reproducir despues", L"다음에 재생", L"下一首播放", L"تشغيل التالي", L"Играть следующим", L"Als Nachstes", L"Tocar a seguir", L"Speel hierna", L"Odtworz nastepnie", L"Sonraki oynat"),
+		LL14(L"選択曲を次に再生する位置へ挿入します", L"Insert the selection to play next", L"Inserer la selection pour lire ensuite", L"Inserisci la selezione da riprodurre dopo", L"Insertar la seleccion para reproducir despues", L"선택 곡을 다음에 재생되도록 삽입", L"将所选插入为下一首播放", L"إدراج التحديد للتشغيل التالي", L"Вставить выбор следующим", L"Auswahl als Nachstes einfugen", L"Inserir a selecao para tocar a seguir", L"Selectie als volgende invoegen", L"Wstaw wybor jako nastepny", L"Secimi sonraki olarak ekle"));
 	menu.AddCommand(ID_MP_QUEUE_CLEAR,
-		LL14(L"キューをクリア", L"Clear Queue", L"Vider la file", L"Svuota coda", L"Vaciar cola", L"큐 비우기", L"清空队列", L"مسح الطابور", L"Очистить очередь", L"Warteschlange leeren", L"Limpar fila", L"Wachtrij wissen", L"Wyczysc kolejke", L"Kuyrugu temizle"));
+		LL14(L"キューをクリア", L"Clear Queue", L"Vider la file", L"Svuota coda", L"Vaciar cola", L"큐 비우기", L"清空队列", L"مسح الطابور", L"Очистить очередь", L"Warteschlange leeren", L"Limpar fila", L"Wachtrij wissen", L"Wyczysc kolejke", L"Kuyrugu temizle"),
+		LL14(L"Up Next キューを空にします", L"Clear the entire Up Next queue", L"Vider toute la file Up Next", L"Svuota tutta la coda Up Next", L"Vaciar toda la cola Up Next", L"Up Next 큐를 비웁니다", L"清空整个 Up Next 队列", L"مسح طابور Up Next بالكامل", L"Очистить всю очередь Up Next", L"Gesamte Up-Next-Warteschlange leeren", L"Limpar toda a fila Up Next", L"Hele Up Next-wachtrij wissen", L"Wyczysc cala kolejke Up Next", L"Tum Up Next kuyrugunu temizle"));
 	menu.AddSeparator();
 	menu.AddCommand(ID_MP_DUPES,
-		LL14(L"重複を検出…", L"Find duplicates…", L"Trouver doublons…", L"Trova duplicati…", L"Buscar duplicados…", L"중복 찾기…", L"查找重复…", L"البحث عن مكررات…", L"Найти дубликаты…", L"Duplikate finden…", L"Localizar duplicatas…", L"Duplicaten zoeken…", L"Znajdz duplikaty…", L"Yinelenenleri bul…"));
+		LL14(L"重複を検出…", L"Find duplicates…", L"Trouver doublons…", L"Trova duplicati…", L"Buscar duplicados…", L"중복 찾기…", L"查找重复…", L"البحث عن مكررات…", L"Найти дубликаты…", L"Duplikate finden…", L"Localizar duplicatas…", L"Duplicaten zoeken…", L"Znajdz duplikaty…", L"Yinelenenleri bul…"),
+		LL14(L"ライブラリ内の重複曲を検出します", L"Find duplicate tracks in the library", L"Trouver les doublons dans la bibliotheque", L"Trova i duplicati nella libreria", L"Buscar duplicados en la biblioteca", L"라이브러리에서 중복 곡을 찾습니다", L"在媒体库中查找重复曲目", L"البحث عن مكررات في المكتبة", L"Найти дубликаты в библиотеке", L"Duplikate in der Bibliothek finden", L"Localizar duplicatas na biblioteca", L"Duplicaten in de bibliotheek zoeken", L"Znajdz duplikaty w bibliotece", L"Kitaplikta yinelenenleri bul"));
 	menu.AddCommand(ID_MP_FOLDER_SYNC,
-		LL14(L"フォルダ同期差分…", L"Folder sync diff…", L"Diff sync dossier…", L"Diff sync cartella…", L"Diff sync carpeta…", L"폴더 동기화 차이…", L"文件夹同步差异…", L"فرق مزامنة المجلد…", L"Разница синхр. папки…", L"Ordner-Sync-Diff…", L"Diff sync pasta…", L"Map-sync-diff…", L"Roznica sync folderu…", L"Klasor senkron fark…"));
+		LL14(L"フォルダ同期差分…", L"Folder sync diff…", L"Diff sync dossier…", L"Diff sync cartella…", L"Diff sync carpeta…", L"폴더 동기화 차이…", L"文件夹同步差异…", L"فرق مزامنة المجلد…", L"Разница синхр. папки…", L"Ordner-Sync-Diff…", L"Diff sync pasta…", L"Map-sync-diff…", L"Roznica sync folderu…", L"Klasor senkron fark…"),
+		LL14(L"監視フォルダとリストの差分を確認・同期します", L"Review and sync differences vs watched folders", L"Verifier/synchroniser les differences des dossiers", L"Controlla/sincronizza le differenze delle cartelle", L"Revisar/sincronizar diferencias de carpetas", L"감시 폴더와 목록 차이를 확인하고 동기화", L"查看并同步监视文件夹与列表的差异", L"مراجعة ومزامنة فروق المجلدات", L"Проверить и синхронизировать различия папок", L"Differenzen zu Uberwachungsordnern prufen/synchronisieren", L"Revisar e sincronizar diferencas das pastas", L"Mapverschillen controleren/synchroniseren", L"Sprawdz i zsynchronizuj roznice folderow", L"Klasor farklarini incele ve senkronize et"));
 	menu.AddSeparator();
 	menu.AddSlider(
 		LL14(L"LRC オフセット (ms)", L"LRC offset (ms)", L"Decalage LRC (ms)", L"Offset LRC (ms)",
@@ -9281,7 +9395,8 @@ void CMediaPlayerDlg::ShowToolsExtrasMenu(CPoint screenPt)
 			LL14(L"LRC 微調整", L"LRC fine adjust", L"Reglage fin LRC", L"Regolazione fine LRC",
 				L"Ajuste fino LRC", L"LRC 미세 조정", L"LRC 微调", L"ضبط دقيق LRC",
 				L"Тонкая настройка LRC", L"LRC Feineinstellung", L"Ajuste fino LRC", L"LRC fijnafstellen",
-				L"Dostrojenie LRC", L"LRC ince ayar"));
+				L"Dostrojenie LRC", L"LRC ince ayar"),
+				LL14(L"歌詞タイミングを ±10/50/100 ms 単位でずらします", L"Nudge lyric timing by ±10/50/100 ms", L"Decaler le timing par ±10/50/100 ms", L"Sposta il timing di ±10/50/100 ms", L"Desplazar el timing ±10/50/100 ms", L"가사 타이밍을 ±10/50/100 ms 단위로 이동", L"按 ±10/50/100 ms 微调歌词时间", L"إزاحة توقيت الكلمات بمقدار ±10/50/100 مللي ثانية", L"Сдвинуть тайминг текста на ±10/50/100 мс", L"Text-Timing um ±10/50/100 ms verschieben", L"Deslocar o timing da letra em ±10/50/100 ms", L"Teksttiming met ±10/50/100 ms verschuiven", L"Przesun timing tekstu o ±10/50/100 ms", L"Soz zamanlamasini ±10/50/100 ms kaydir"));
 		if (lrcSub) {
 			lrcSub->AddCommand(ID_MP_LRC_MINUS100, L"-100 ms");
 			lrcSub->AddCommand(ID_MP_LRC_MINUS50, L"-50 ms");
@@ -9292,18 +9407,23 @@ void CMediaPlayerDlg::ShowToolsExtrasMenu(CPoint screenPt)
 		}
 	}
 	menu.AddCommand(ID_MP_LRC_SAVE,
-		LL14(L"LRC を保存…", L"Save LRC…", L"Enregistrer LRC…", L"Salva LRC…", L"Guardar LRC…", L"LRC 저장…", L"保存 LRC…", L"حفظ LRC…", L"Сохранить LRC…", L"LRC speichern…", L"Salvar LRC…", L"LRC opslaan…", L"Zapisz LRC…", L"LRC kaydet…"));
+		LL14(L"LRC を保存…", L"Save LRC…", L"Enregistrer LRC…", L"Salva LRC…", L"Guardar LRC…", L"LRC 저장…", L"保存 LRC…", L"حفظ LRC…", L"Сохранить LRC…", L"LRC speichern…", L"Salvar LRC…", L"LRC opslaan…", L"Zapisz LRC…", L"LRC kaydet…"),
+		LL14(L"調整した歌詞タイミングを LRC ファイルに保存します", L"Save adjusted lyric timing to an LRC file", L"Enregistrer le timing ajuste dans un LRC", L"Salva il timing regolato in un file LRC", L"Guardar el timing ajustado en un LRC", L"조정한 가사 타이밍을 LRC로 저장", L"将调整后的歌词时间保存为 LRC", L"حفظ توقيت الكلمات المضبوط في ملف LRC", L"Сохранить скорректированный тайминг в LRC", L"Angepasstes Text-Timing als LRC speichern", L"Salvar o timing ajustado em um LRC", L"Aangepaste teksttiming als LRC opslaan", L"Zapisz skorygowany timing do LRC", L"Ayarlanan soz zamanlamasini LRC olarak kaydet"));
 	menu.AddCheck(ID_MP_DESK_LRC,
 		LL14(L"歌詞ウィンドウを表示", L"Show lyrics window", L"Afficher fenetre paroles", L"Mostra finestra testi", L"Mostrar ventana de letra",
 			L"가사 창 표시", L"显示歌词窗口", L"عرض نافذة الكلمات", L"Показать окно текста", L"Textfenster anzeigen",
 			L"Mostrar janela de letra", L"Songtekstvenster tonen", L"Pokaz okno tekstu", L"Soz penceresini goster"),
-		IsDesktopLyricsOpen());
+		IsDesktopLyricsOpen(),
+		LL14(L"常時最前面の歌詞ウィンドウを開閉します（不透明度などは右クリック）", L"Toggle the always-on-top lyrics window (RMB for opacity etc.)", L"Basculer la fenetre de paroles au premier plan (clic droit pour opacite)", L"Attiva/disattiva la finestra testi in primo piano (tasto destro per opacita)", L"Alternar la ventana de letra siempre visible (clic der. para opacidad)", L"항상 위 가사 창을 여닫기(불투명도 등은 우클릭)", L"打开/关闭置顶歌词窗口（右键调不透明度等）", L"فتح/إغلاق نافذة كلمات أمامية (زر يمين للعتامة)", L"Открыть/закрыть окно текста поверх всех (ПКМ — непрозрачность)", L"Textfenster im Vordergrund ein/aus (RMB fur Deckkraft)", L"Abrir/fechar janela de letra no topo (botao dir. para opacidade)", L"Songtekstvenster bovenop aan/uit (RMB voor dekking)", L"Otworz/zamknij okno tekstu na wierzchu (PPM: nieprzezroczystosc)", L"Her zaman ustte soz penceresini ac/kapat (opaklik icin sag tik)"));
 	menu.AddCommand(ID_MP_TAG_EDIT,
-		LL14(L"タグ編集 (F2)", L"Edit tags (F2)", L"Editer tags (F2)", L"Modifica tag (F2)", L"Editar etiquetas (F2)", L"태그 편집 (F2)", L"编辑标签 (F2)", L"تحرير الوسوم (F2)", L"Правка тегов (F2)", L"Tags bearbeiten (F2)", L"Editar tags (F2)", L"Tags bewerken (F2)", L"Edytuj tagi (F2)", L"Etiket duzenle (F2)"));
+		LL14(L"タグ編集 (F2)", L"Edit tags (F2)", L"Editer tags (F2)", L"Modifica tag (F2)", L"Editar etiquetas (F2)", L"태그 편집 (F2)", L"编辑标签 (F2)", L"تحرير الوسوم (F2)", L"Правка тегов (F2)", L"Tags bearbeiten (F2)", L"Editar tags (F2)", L"Tags bewerken (F2)", L"Edytuj tagi (F2)", L"Etiket duzenle (F2)"),
+		LL14(L"選択曲のタグを編集します（F2）", L"Edit tags for the selection (F2)", L"Editer les tags de la selection (F2)", L"Modifica i tag della selezione (F2)", L"Editar etiquetas de la seleccion (F2)", L"선택 곡의 태그를 편집(F2)", L"编辑所选曲目的标签（F2）", L"تحرير وسوم التحديد (F2)", L"Редактировать теги выбора (F2)", L"Tags der Auswahl bearbeiten (F2)", L"Editar tags da selecao (F2)", L"Tags van de selectie bewerken (F2)", L"Edytuj tagi wyboru (F2)", L"Secimin etiketlerini duzenle (F2)"));
 	menu.AddCommand(ID_MP_NORM_PREVIEW,
-		LL14(L"正規化プレビュー…", L"Normalize preview…", L"Apercu normalisation…", L"Anteprima normalizza…", L"Vista previa normalizar…", L"정규화 미리보기…", L"标准化预览…", L"معاينة التطبيع…", L"Превью нормализации…", L"Normalisierungsvorschau…", L"Previa normalizacao…", L"Normalisatie-voorbeeld…", L"Podglad normalizacji…", L"Normalizasyon onizleme…"));
+		LL14(L"正規化プレビュー…", L"Normalize preview…", L"Apercu normalisation…", L"Anteprima normalizza…", L"Vista previa normalizar…", L"정규화 미리보기…", L"标准化预览…", L"معاينة التطبيع…", L"Превью нормализации…", L"Normalisierungsvorschau…", L"Previa normalizacao…", L"Normalisatie-voorbeeld…", L"Podglad normalizacji…", L"Normalizasyon onizleme…"),
+		LL14(L"正規化後の音量感をプレビューします", L"Preview how normalization will sound", L"Apercu du rendu apres normalisation", L"Anteprima del suono dopo normalizzazione", L"Vista previa del sonido tras normalizar", L"정규화 후 음량을 미리 듣기", L"预览标准化后的音量效果", L"معاينة الصوت بعد التطبيع", L"Превью звучания после нормализации", L"Vorschau des normalisierten Klangs", L"Previa do som apos normalizacao", L"Voorbeeld van genormaliseerd geluid", L"Podglad brzmienia po normalizacji", L"Normalizasyon sonrasi sesi onizle"));
 	menu.AddCommand(ID_MP_NORM_SCAN,
-		LL14(L"計測して表示…", L"Measure & show…", L"Mesurer et afficher…", L"Misura e mostra…", L"Medir y mostrar…", L"측정하여 표시…", L"测量并显示…", L"قياس وعرض…", L"Измерить и показать…", L"Messen und anzeigen…", L"Medir e mostrar…", L"Meten en tonen…", L"Zmierz i pokaz…", L"Olç ve goster…"));
+		LL14(L"計測して表示…", L"Measure & show…", L"Mesurer et afficher…", L"Misura e mostra…", L"Medir y mostrar…", L"측정하여 표시…", L"测量并显示…", L"قياس وعرض…", L"Измерить и показать…", L"Messen und anzeigen…", L"Medir e mostrar…", L"Meten en tonen…", L"Zmierz i pokaz…", L"Olç ve goster…"),
+		LL14(L"選択曲のラウドネスを計測して表示します", L"Measure and display loudness for the selection", L"Mesurer et afficher le loudness de la selection", L"Misura e mostra il loudness della selezione", L"Medir y mostrar el loudness de la seleccion", L"선택 곡의 라우드니스를 측정·표시", L"测量并显示所选的响度", L"قياس وعرض جهارة التحديد", L"Измерить и показать громкость выбора", L"Loudness der Auswahl messen und anzeigen", L"Medir e mostrar o loudness da selecao", L"Loudness van de selectie meten en tonen", L"Zmierz i pokaz glosnosc wyboru", L"Secimin seslilik olcumunu yap ve goster"));
 	{
 		int lufs = savedata.mpNormTargetLufs;
 		if (lufs > -14) lufs = -14;
@@ -9319,20 +9439,25 @@ void CMediaPlayerDlg::ShowToolsExtrasMenu(CPoint screenPt)
 				L"هدف التطبيع LUFS -18…-14 (مباشر)", L"Цель нормализации LUFS -18…-14 (сразу)",
 				L"Normalisierungsziel LUFS -18…-14 (live)", L"Alvo de normalizacao LUFS -18…-14 (ao vivo)",
 				L"Normalisatiedoel LUFS -18…-14 (live)", L"Cel normalizacji LUFS -18…-14 (na zywo)", L"Normalizasyon hedefi LUFS -18…-14 (anlik)"));
-		menu.AddCommand(ID_MP_NORM_LUFS14, L"-14 LUFS");
-		menu.AddCommand(ID_MP_NORM_LUFS16, L"-16 LUFS");
-		menu.AddCommand(ID_MP_NORM_LUFS18, L"-18 LUFS");
+		menu.AddCommand(ID_MP_NORM_LUFS14, L"-14 LUFS", LL14(L"正規化ターゲットを -14 LUFS（やや大きめ）にします", L"Set normalize target to -14 LUFS (louder)", L"Cible de normalisation -14 LUFS (plus fort)", L"Target normalizzazione -14 LUFS (piu forte)", L"Objetivo de normalizacion -14 LUFS (mas alto)", L"정규화 목표를 -14 LUFS(조금 크게)", L"将标准化目标设为 -14 LUFS（偏响）", L"تعيين هدف التطبيع إلى -14 LUFS (أعلى)", L"Цель нормализации -14 LUFS (громче)", L"Normalisierungsziel -14 LUFS (lauter)", L"Definir alvo de normalizacao -14 LUFS (mais alto)", L"Normalisatiedoel -14 LUFS (luider)", L"Cel normalizacji -14 LUFS (glosniej)", L"Normalizasyon hedefi -14 LUFS (daha yuksek)"));
+		menu.AddCommand(ID_MP_NORM_LUFS16, L"-16 LUFS", LL14(L"正規化ターゲットを -16 LUFS（標準）にします", L"Set normalize target to -16 LUFS (standard)", L"Cible de normalisation -16 LUFS (standard)", L"Target normalizzazione -16 LUFS (standard)", L"Objetivo de normalizacion -16 LUFS (estandar)", L"정규화 목표를 -16 LUFS(표준)", L"将标准化目标设为 -16 LUFS（标准）", L"تعيين هدف التطبيع إلى -16 LUFS (قياسي)", L"Цель нормализации -16 LUFS (стандарт)", L"Normalisierungsziel -16 LUFS (Standard)", L"Definir alvo de normalizacao -16 LUFS (padrao)", L"Normalisatiedoel -16 LUFS (standaard)", L"Cel normalizacji -16 LUFS (standard)", L"Normalizasyon hedefi -16 LUFS (standart)"));
+		menu.AddCommand(ID_MP_NORM_LUFS18, L"-18 LUFS", LL14(L"正規化ターゲットを -18 LUFS（控えめ）にします", L"Set normalize target to -18 LUFS (quieter)", L"Cible de normalisation -18 LUFS (plus bas)", L"Target normalizzazione -18 LUFS (piu basso)", L"Objetivo de normalizacion -18 LUFS (mas bajo)", L"정규화 목표를 -18 LUFS(낮게)", L"将标准化目标设为 -18 LUFS（偏轻）", L"تعيين هدف التطبيع إلى -18 LUFS (أخفض)", L"Цель нормализации -18 LUFS (тише)", L"Normalisierungsziel -18 LUFS (leiser)", L"Definir alvo de normalizacao -18 LUFS (mais baixo)", L"Normalisatiedoel -18 LUFS (zachter)", L"Cel normalizacji -18 LUFS (ciszej)", L"Normalizasyon hedefi -18 LUFS (daha dusuk)"));
 	}
 	menu.AddCommand(ID_MP_EXPORT_AB_NOW,
-		LL14(L"A-Bを今すぐWAVへ…", L"Export A-B to WAV now…", L"Exporter A-B en WAV…", L"Esporta A-B in WAV…", L"Exportar A-B a WAV…", L"A-B를 지금 WAV로…", L"立即将 A-B 导出为 WAV…", L"تصدير A-B إلى WAV الآن…", L"Экспорт A-B в WAV сейчас…", L"A-B jetzt als WAV…", L"Exportar A-B para WAV agora…", L"A-B nu naar WAV…", L"Eksportuj A-B do WAV teraz…", L"A-B simdi WAV…"));
+		LL14(L"A-Bを今すぐWAVへ…", L"Export A-B to WAV now…", L"Exporter A-B en WAV…", L"Esporta A-B in WAV…", L"Exportar A-B a WAV…", L"A-B를 지금 WAV로…", L"立即将 A-B 导出为 WAV…", L"تصدير A-B إلى WAV الآن…", L"Экспорт A-B в WAV сейчас…", L"A-B jetzt als WAV…", L"Exportar A-B para WAV agora…", L"A-B nu naar WAV…", L"Eksportuj A-B do WAV teraz…", L"A-B simdi WAV…"),
+		LL14(L"設定した A-B 区間を今すぐ WAV ファイルへ書き出します", L"Export the A-B range to a WAV file right now", L"Exporter la plage A-B en WAV maintenant", L"Esporta subito l'intervallo A-B in WAV", L"Exportar ya el rango A-B a WAV", L"설정한 A-B 구간을 지금 WAV로 내보내기", L"立即将 A-B 区间导出为 WAV", L"تصدير نطاق A-B إلى WAV الآن", L"Сразу экспортировать диапазон A-B в WAV", L"A-B-Bereich jetzt als WAV exportieren", L"Exportar agora o intervalo A-B para WAV", L"A-B-bereik nu naar WAV exporteren", L"Eksportuj teraz zakres A-B do WAV", L"A-B araligini simdi WAV olarak disa aktar"));
 	menu.AddCommand(ID_MP_EXPORT_AB,
-		LL14(L"A-Bを書き出し範囲に", L"Export A-B range", L"Exporter plage A-B", L"Esporta intervallo A-B", L"Exportar rango A-B", L"A-B를 내보내기 범위로", L"将 A-B 设为导出范围", L"تصدير نطاق A-B", L"Экспорт диапазона A-B", L"A-B-Bereich exportieren", L"Exportar faixa A-B", L"A-B-bereik exporteren", L"Eksport zakresu A-B", L"A-B araligini disa aktar"));
+		LL14(L"A-Bを書き出し範囲に", L"Export A-B range", L"Exporter plage A-B", L"Esporta intervallo A-B", L"Exportar rango A-B", L"A-B를 내보내기 범위로", L"将 A-B 设为导出范围", L"تصدير نطاق A-B", L"Экспорт диапазона A-B", L"A-B-Bereich exportieren", L"Exportar faixa A-B", L"A-B-bereik exporteren", L"Eksport zakresu A-B", L"A-B araligini disa aktar"),
+		LL14(L"A-B 区間を以降の書き出し範囲として設定します", L"Use the A-B range for the next export", L"Utiliser la plage A-B pour le prochain export", L"Usa l'intervallo A-B per il prossimo export", L"Usar el rango A-B para la proxima exportacion", L"A-B 구간을 다음 내보내기 범위로 설정", L"将 A-B 设为下次导出范围", L"استخدام نطاق A-B للتصدير التالي", L"Использовать A-B для следующего экспорта", L"A-B als nachsten Exportbereich setzen", L"Usar o intervalo A-B na proxima exportacao", L"A-B gebruiken voor de volgende export", L"Uzyj zakresu A-B do nastepnego eksportu", L"Sonraki disa aktarma icin A-B kullan"));
 	menu.AddCommand(ID_MP_AB_PACK,
-		LL14(L"A-B/キューを一括書き出し…", L"Export A-B/cue pack…", L"Exporter pack A-B/cues…", L"Esporta pack A-B/cue…", L"Exportar pack A-B/cues…", L"A-B/큐 일괄 내보내기…", L"批量导出 A-B/标记…", L"تصدير حزمة A-B/cues…", L"Пакетный экспорт A-B/cue…", L"A-B/Cue-Paket export…", L"Exportar pacote A-B/cues…", L"A-B/cue-pakket…", L"Pakiet A-B/cue…", L"A-B/cue paketi…"));
+		LL14(L"A-B/キューを一括書き出し…", L"Export A-B/cue pack…", L"Exporter pack A-B/cues…", L"Esporta pack A-B/cue…", L"Exportar pack A-B/cues…", L"A-B/큐 일괄 내보내기…", L"批量导出 A-B/标记…", L"تصدير حزمة A-B/cues…", L"Пакетный экспорт A-B/cue…", L"A-B/Cue-Paket export…", L"Exportar pacote A-B/cues…", L"A-B/cue-pakket…", L"Pakiet A-B/cue…", L"A-B/cue paketi…"),
+		LL14(L"A-B 区間とキューをまとめて書き出します", L"Batch-export the A-B range and cue markers", L"Exporter en lot la plage A-B et les cues", L"Esporta in batch intervallo A-B e cue", L"Exportar por lotes el rango A-B y cues", L"A-B 구간과 큐를 일괄 내보내기", L"批量导出 A-B 区间与标记", L"تصدير نطاق A-B والإشارات دفعة واحدة", L"Пакетно экспортировать A-B и метки", L"A-B und Cues als Paket exportieren", L"Exportar em lote o intervalo A-B e cues", L"A-B en cues als pakket exporteren", L"Eksportuj pakietowo zakres A-B i cue", L"A-B ve cue'lari toplu disa aktar"));
 	menu.AddCommand(ID_MP_NORM_BATCH,
-		LL14(L"選択曲をLUFS正規化書き出し…", L"Batch normalize export (LUFS)…", L"Export normalise LUFS…", L"Esporta normalizzazione LUFS…", L"Exportar normalizar LUFS…", L"선택곡 LUFS 정규화…", L"批量 LUFS 标准化导出…", L"تصدير تطبيع LUFS…", L"Пакетная нормализация LUFS…", L"Batch-Normalisierung LUFS…", L"Exportar normalizacao LUFS…", L"Batch LUFS normaliseren…", L"Normalizacja LUFS…", L"LUFS toplu normalizasyon…"));
+		LL14(L"選択曲をLUFS正規化書き出し…", L"Batch normalize export (LUFS)…", L"Export normalise LUFS…", L"Esporta normalizzazione LUFS…", L"Exportar normalizar LUFS…", L"선택곡 LUFS 정규화…", L"批量 LUFS 标准化导出…", L"تصدير تطبيع LUFS…", L"Пакетная нормализация LUFS…", L"Batch-Normalisierung LUFS…", L"Exportar normalizacao LUFS…", L"Batch LUFS normaliseren…", L"Normalizacja LUFS…", L"LUFS toplu normalizasyon…"),
+		LL14(L"選択曲を LUFS 正規化して一括書き出します", L"Batch-export the selection with LUFS normalization", L"Exporter la selection normalisee en LUFS", L"Esporta la selezione normalizzata LUFS", L"Exportar la seleccion normalizada LUFS", L"선택 곡을 LUFS 정규화하여 일괄 내보내기", L"将所选按 LUFS 标准化后批量导出", L"تصدير التحديد بعد تطبيع LUFS", L"Пакетно экспортировать выбор с нормализацией LUFS", L"Auswahl mit LUFS-Normalisierung batch-exportieren", L"Exportar a selecao com normalizacao LUFS", L"Selectie batch-exporteren met LUFS-normalisatie", L"Eksportuj wybor z normalizacja LUFS", L"Secimi LUFS normalizasyonuyla toplu disa aktar"));
 	menu.AddCommand(ID_MP_MB_AUTOTAG,
-		LL14(L"MusicBrainz 自動タグ…", L"MusicBrainz auto-tag…", L"Auto-tag MusicBrainz…", L"Auto-tag MusicBrainz…", L"Auto-etiqueta MusicBrainz…", L"MusicBrainz 자동 태그…", L"MusicBrainz 自动标签…", L"وسوم MusicBrainz…", L"Авто-тег MusicBrainz…", L"MusicBrainz Auto-Tag…", L"Auto-tag MusicBrainz…", L"MusicBrainz auto-tag…", L"Auto-tag MusicBrainz…", L"MusicBrainz otomatik etiket…"));
+		LL14(L"MusicBrainz 自動タグ…", L"MusicBrainz auto-tag…", L"Auto-tag MusicBrainz…", L"Auto-tag MusicBrainz…", L"Auto-etiqueta MusicBrainz…", L"MusicBrainz 자동 태그…", L"MusicBrainz 自动标签…", L"وسوم MusicBrainz…", L"Авто-тег MusicBrainz…", L"MusicBrainz Auto-Tag…", L"Auto-tag MusicBrainz…", L"MusicBrainz auto-tag…", L"Auto-tag MusicBrainz…", L"MusicBrainz otomatik etiket…"),
+		LL14(L"MusicBrainz からタグ情報を自動取得します", L"Auto-fill tags from MusicBrainz", L"Remplir auto les tags via MusicBrainz", L"Compila auto i tag da MusicBrainz", L"Rellenar auto etiquetas desde MusicBrainz", L"MusicBrainz에서 태그 자동 가져오기", L"从 MusicBrainz 自动填充标签", L"ملء الوسوم تلقائياً من MusicBrainz", L"Автозаполнить теги из MusicBrainz", L"Tags automatisch von MusicBrainz holen", L"Preencher tags automaticamente pelo MusicBrainz", L"Tags automatisch van MusicBrainz invullen", L"Uzupelnij tagi automatycznie z MusicBrainz", L"MusicBrainz'den etiketleri otomatik doldur"));
 	menu.AddSeparator();
 	// 本体シークと同系統の値を og->m_time から取る（メニュー開時の (0) ズレ防止）
 	if (og && ::IsWindow(og->GetSafeHwnd())) {
@@ -9384,15 +9509,20 @@ void CMediaPlayerDlg::ShowToolsExtrasMenu(CPoint screenPt)
 		}
 	}
 	menu.AddCommand(ID_MP_AB_SNAP_A,
-		LL14(L"スナップショット A", L"Snapshot A", L"Instantane A", L"Istantanea A", L"Instantanea A", L"스냅샷 A", L"快照 A", L"لقطة A", L"Снимок A", L"Schnappschuss A", L"Instantaneo A", L"Momentopname A", L"Migawka A", L"Anlik goruntu A"));
+		LL14(L"スナップショット A", L"Snapshot A", L"Instantane A", L"Istantanea A", L"Instantanea A", L"스냅샷 A", L"快照 A", L"لقطة A", L"Снимок A", L"Schnappschuss A", L"Instantaneo A", L"Momentopname A", L"Migawka A", L"Anlik goruntu A"),
+		LL14(L"現在の EQ／エフェクト設定をスロット A に保存します", L"Save current EQ/effect settings to slot A", L"Enregistrer les reglages EQ/FX dans le slot A", L"Salva EQ/FX attuali nello slot A", L"Guardar EQ/FX actuales en la ranura A", L"현재 EQ/효과 설정을 슬롯 A에 저장", L"将当前 EQ/效果保存到插槽 A", L"حفظ إعدادات EQ/FX الحالية في الفتحة A", L"Сохранить текущие EQ/FX в слот A", L"Aktuelle EQ/FX-Einstellungen in Slot A speichern", L"Salvar EQ/FX atuais no slot A", L"Huidige EQ/FX-instellingen in slot A opslaan", L"Zapisz biezace EQ/FX w slocie A", L"Gecerli EQ/FX ayarlarini A yuvasina kaydet"));
 	menu.AddCommand(ID_MP_AB_SNAP_B,
-		LL14(L"スナップショット B", L"Snapshot B", L"Instantane B", L"Istantanea B", L"Instantanea B", L"스냅샷 B", L"快照 B", L"لقطة B", L"Снимок B", L"Schnappschuss B", L"Instantaneo B", L"Momentopname B", L"Migawka B", L"Anlik goruntu B"));
+		LL14(L"スナップショット B", L"Snapshot B", L"Instantane B", L"Istantanea B", L"Instantanea B", L"스냅샷 B", L"快照 B", L"لقطة B", L"Снимок B", L"Schnappschuss B", L"Instantaneo B", L"Momentopname B", L"Migawka B", L"Anlik goruntu B"),
+		LL14(L"現在の EQ／エフェクト設定をスロット B に保存します", L"Save current EQ/effect settings to slot B", L"Enregistrer les reglages EQ/FX dans le slot B", L"Salva EQ/FX attuali nello slot B", L"Guardar EQ/FX actuales en la ranura B", L"현재 EQ/효과 설정을 슬롯 B에 저장", L"将当前 EQ/效果保存到插槽 B", L"حفظ إعدادات EQ/FX الحالية في الفتحة B", L"Сохранить текущие EQ/FX в слот B", L"Aktuelle EQ/FX-Einstellungen in Slot B speichern", L"Salvar EQ/FX atuais no slot B", L"Huidige EQ/FX-instellingen in slot B opslaan", L"Zapisz biezace EQ/FX w slocie B", L"Gecerli EQ/FX ayarlarini B yuvasina kaydet"));
 	menu.AddCommand(ID_MP_AB_APPLY_A,
-		LL14(L"A を適用", L"Apply A", L"Appliquer A", L"Applica A", L"Aplicar A", L"A 적용", L"应用 A", L"تطبيق A", L"Применить A", L"A anwenden", L"Aplicar A", L"A toepassen", L"Zastosuj A", L"A uygula"));
+		LL14(L"A を適用", L"Apply A", L"Appliquer A", L"Applica A", L"Aplicar A", L"A 적용", L"应用 A", L"تطبيق A", L"Применить A", L"A anwenden", L"Aplicar A", L"A toepassen", L"Zastosuj A", L"A uygula"),
+		LL14(L"スロット A の設定を再生に適用します", L"Apply slot A settings to playback", L"Appliquer les reglages du slot A", L"Applica le impostazioni dello slot A", L"Aplicar la configuracion de la ranura A", L"슬롯 A 설정을 재생에 적용", L"将插槽 A 设置应用到播放", L"تطبيق إعدادات الفتحة A", L"Применить настройки слота A", L"Einstellungen aus Slot A anwenden", L"Aplicar as configuracoes do slot A", L"Instellingen van slot A toepassen", L"Zastosuj ustawienia slotu A", L"A yuvasi ayarlarini uygula"));
 	menu.AddCommand(ID_MP_AB_APPLY_B,
-		LL14(L"B を適用", L"Apply B", L"Appliquer B", L"Applica B", L"Aplicar B", L"B 적용", L"应用 B", L"تطبيق B", L"Применить B", L"B anwenden", L"Aplicar B", L"B toepassen", L"Zastosuj B", L"B uygula"));
+		LL14(L"B を適用", L"Apply B", L"Appliquer B", L"Applica B", L"Aplicar B", L"B 적용", L"应用 B", L"تطبيق B", L"Применить B", L"B anwenden", L"Aplicar B", L"B toepassen", L"Zastosuj B", L"B uygula"),
+		LL14(L"スロット B の設定を再生に適用します", L"Apply slot B settings to playback", L"Appliquer les reglages du slot B", L"Applica le impostazioni dello slot B", L"Aplicar la configuracion de la ranura B", L"슬롯 B 설정을 재생에 적용", L"将插槽 B 设置应用到播放", L"تطبيق إعدادات الفتحة B", L"Применить настройки слота B", L"Einstellungen aus Slot B anwenden", L"Aplicar as configuracoes do slot B", L"Instellingen van slot B toepassen", L"Zastosuj ustawienia slotu B", L"B yuvasi ayarlarini uygula"));
 	menu.AddCommand(ID_MP_AB_TOGGLE,
-		LL14(L"A/B 切替", L"Toggle A/B", L"Basculer A/B", L"Commuta A/B", L"Alternar A/B", L"A/B 전환", L"切换 A/B", L"تبديل A/B", L"Переключить A/B", L"A/B umschalten", L"Alternar A/B", L"A/B wisselen", L"Przelacz A/B", L"A/B degistir"));
+		LL14(L"A/B 切替", L"Toggle A/B", L"Basculer A/B", L"Commuta A/B", L"Alternar A/B", L"A/B 전환", L"切换 A/B", L"تبديل A/B", L"Переключить A/B", L"A/B umschalten", L"Alternar A/B", L"A/B wisselen", L"Przelacz A/B", L"A/B degistir"),
+		LL14(L"スロット A と B の設定を交互に切り替えます", L"Toggle between slot A and B settings", L"Basculer entre les slots A et B", L"Commuta tra gli slot A e B", L"Alternar entre las ranuras A y B", L"슬롯 A/B 설정을 번갈아 전환", L"在插槽 A 与 B 之间切换", L"التبديل بين الفتحات A و B", L"Переключить между слотами A и B", L"Zwischen Slot A und B umschalten", L"Alternar entre os slots A e B", L"Wisselen tussen slot A en B", L"Przelacz miedzy slotami A i B", L"A ve B yuvalari arasinda gec"));
 	{
 		CCustomPopupMenu* seekMore = menu.AddSubMenu(
 			LL14(L"シーク拡張", L"Seek extras", L"Seek avance", L"Seek extra", L"Seek extra",
@@ -9467,13 +9597,17 @@ void CMediaPlayerDlg::ShowToolsExtrasMenu(CPoint screenPt)
 		menu.AddCommand(ID_MP_SLEEP_OFF,
 			LL14(L"スリープ解除", L"Sleep off", L"Veille off", L"Sleep off", L"Suspensión off",
 				L"슬립 해제", L"关闭睡眠", L"إيقاف النوم", L"Сон выкл", L"Schlaf aus",
-				L"Sono off", L"Slaap uit", L"Sen wyl", L"Uyku kapat"));
+				L"Sono off", L"Slaap uit", L"Sen wyl", L"Uyku kapat"),
+				LL14(L"スリープタイマーを解除して通常再生に戻します", L"Cancel the sleep timer and keep playing", L"Annuler la minuterie de veille", L"Annulla il timer sleep", L"Cancelar el temporizador de sueño", L"슬립 타이머를 해제합니다", L"取消睡眠定时器", L"إلغاء مؤقت النوم", L"Отменить таймер сна", L"Schlaf-Timer abschalten", L"Cancelar o temporizador de sono", L"Slaaptimer uitzetten", L"Wylacz timer snu", L"Uyku zamanlayicisini kapat"));
 		menu.AddCommand(ID_MP_SLEEP_15,
-			LL14(L"15 分", L"15 min", L"15 min", L"15 min", L"15 min", L"15분", L"15 分钟", L"15 د", L"15 мин", L"15 Min", L"15 min", L"15 min", L"15 min", L"15 dk"));
+			LL14(L"15 分", L"15 min", L"15 min", L"15 min", L"15 min", L"15분", L"15 分钟", L"15 د", L"15 мин", L"15 Min", L"15 min", L"15 min", L"15 min", L"15 dk"),
+			LL14(L"15分後に再生を停止します", L"Stop playback after 15 minutes", L"Arrête la lecture après 15 min", L"Ferma la riproduzione dopo 15 min", L"Detiene la reproducción tras 15 min", L"15분 후 재생을 중지합니다", L"15 分钟后停止播放", L"يوقف التشغيل بعد 15 دقيقة", L"Остановить воспроизведение через 15 мин", L"Wiedergabe nach 15 Min stoppen", L"Para a reprodução após 15 min", L"Stopt afspelen na 15 min", L"Zatrzymaj odtwarzanie po 15 min", L"15 dk sonra calmayi durdurur"));
 		menu.AddCommand(ID_MP_SLEEP_30,
-			LL14(L"30 分", L"30 min", L"30 min", L"30 min", L"30 min", L"30분", L"30 分钟", L"30 د", L"30 мин", L"30 Min", L"30 min", L"30 min", L"30 min", L"30 dk"));
+			LL14(L"30 分", L"30 min", L"30 min", L"30 min", L"30 min", L"30분", L"30 分钟", L"30 د", L"30 мин", L"30 Min", L"30 min", L"30 min", L"30 min", L"30 dk"),
+			LL14(L"30分後に再生を停止します", L"Stop playback after 30 minutes", L"Arrête la lecture après 30 min", L"Ferma la riproduzione dopo 30 min", L"Detiene la reproducción tras 30 min", L"30분 후 재생을 중지합니다", L"30 分钟后停止播放", L"يوقف التشغيل بعد 30 دقيقة", L"Остановить воспроизведение через 30 мин", L"Wiedergabe nach 30 Min stoppen", L"Para a reprodução após 30 min", L"Stopt afspelen na 30 min", L"Zatrzymaj odtwarzanie po 30 min", L"30 dk sonra calmayi durdurur"));
 		menu.AddCommand(ID_MP_SLEEP_60,
-			LL14(L"60 分", L"60 min", L"60 min", L"60 min", L"60 min", L"60분", L"60 分钟", L"60 د", L"60 мин", L"60 Min", L"60 min", L"60 min", L"60 min", L"60 dk"));
+			LL14(L"60 分", L"60 min", L"60 min", L"60 min", L"60 min", L"60분", L"60 分钟", L"60 د", L"60 мин", L"60 Min", L"60 min", L"60 min", L"60 min", L"60 dk"),
+			LL14(L"60分後に再生を停止します", L"Stop playback after 60 minutes", L"Arrête la lecture après 60 min", L"Ferma la riproduzione dopo 60 min", L"Detiene la reproducción tras 60 min", L"60분 후 재생을 중지합니다", L"60 分钟后停止播放", L"يوقف التشغيل بعد 60 دقيقة", L"Остановить воспроизведение через 60 мин", L"Wiedergabe nach 60 Min stoppen", L"Para a reprodução após 60 min", L"Stopt afspelen na 60 min", L"Zatrzymaj odtwarzanie po 60 min", L"60 dk sonra calmayi durdurur"));
 	}
 	menu.AddSeparator();
 	{
@@ -9488,7 +9622,7 @@ void CMediaPlayerDlg::ShowToolsExtrasMenu(CPoint screenPt)
 		else {
 			bpmItem = LL14(L"BPM 計測開始（再生/PC音で数秒→再クリック）", L"Start BPM measure (play/PC audio a few sec → click again)", L"Demarrer BPM (lecture/PC quelques sec → recliquer)", L"Avvia BPM (riproduci/PC pochi sec → clic)", L"Iniciar BPM (reproduccion/PC unos seg → clic)", L"BPM 측정 시작 (재생/PC 소리 수초→다시 클릭)", L"开始测 BPM（播放/PC声数秒→再点）", L"بدء قياس BPM (تشغيل/صوت الجهاز ثم انقر)", L"Начать BPM (воспроизведение/ПК сек → клик)", L"BPM starten (Wiedergabe/PC einige Sek → Klick)", L"Iniciar BPM (reproducao/PC alguns seg → clique)", L"Start BPM (afspelen/pc enkele sec → klik)", L"Start BPM (odtwarzanie/PC kilka sek → klik)", L"BPM baslat (cal/PC birkac sn → tekrar)");
 		}
-		menu.AddCheck(ID_MP_BPM_DETECT, bpmItem, MpBpmIsMeasuring());
+		menu.AddCheck(ID_MP_BPM_DETECT, bpmItem, MpBpmIsMeasuring(), LL14(L"再生中のテンポを計測します（再クリックで確定）", L"Measure tempo while playing (click again to confirm)", L"Mesurer le tempo en lecture (recliquer pour confirmer)", L"Misura il tempo in riproduzione (clic di nuovo)", L"Medir el tempo al reproducir (clic otra vez)", L"재생 중 템포를 측정(다시 클릭으로 확정)", L"在播放中测量速度（再点确认）", L"قياس الإيقاع أثناء التشغيل (انقر مجدداً)", L"Измерить темп во время воспроизведения (клик снова)", L"Tempo wahrend Wiedergabe messen (nochmals klicken)", L"Medir o tempo durante a reproducao (clique de novo)", L"Tempo tijdens afspelen meten (opnieuw klikken)", L"Zmierz tempo podczas odtwarzania (klik ponownie)", L"Calarken temposu olc (onay icin tekrar tikla)"));
 		if (!MpBpmIsMeasuring() && (savedata.mpDetectedBpm > 0 || savedata.mpBpmCand[0] > 0)) {
 			MpBpmEnsureCandList();
 			CCustomPopupMenu* candSub = NULL;
@@ -9500,7 +9634,8 @@ void CMediaPlayerDlg::ShowToolsExtrasMenu(CPoint screenPt)
 						LL14(L"BPM 候補", L"BPM candidates", L"Candidats BPM", L"Candidati BPM",
 							L"Candidatos BPM", L"BPM 후보", L"BPM 候选", L"مرشحو BPM",
 							L"Кандидаты BPM", L"BPM-Kandidaten", L"Candidatos BPM", L"BPM-kandidaten",
-							L"Kandydaci BPM", L"BPM adaylari"));
+							L"Kandydaci BPM", L"BPM adaylari"),
+							LL14(L"計測で得た BPM 候補から採用値を選びます", L"Pick the adopted BPM from measured candidates", L"Choisir le BPM retenu parmi les candidats", L"Scegli il BPM adottato tra i candidati", L"Elegir el BPM adoptado entre candidatos", L"측정된 BPM 후보에서 채택값을 선택", L"从测得的 BPM 候选中选择采用值", L"اختيار BPM المعتمد من المرشحين", L"Выбрать принятый BPM из кандидатов", L"Erkanntes BPM aus Kandidaten wahlen", L"Escolher o BPM adotado entre candidatos", L"Gekozen BPM uit kandidaten kiezen", L"Wybierz przyjete BPM sposrod kandydatow", L"Olcum adaylarindan BPM degerini sec"));
 					if (!candSub) break;
 				}
 				CString candItem;
@@ -9511,9 +9646,11 @@ void CMediaPlayerDlg::ShowToolsExtrasMenu(CPoint screenPt)
 		}
 	}
 	menu.AddCommand(ID_MP_DJPAD,
-		LL14(L"DJ パッド", L"DJ Pad", L"Pad DJ", L"Pad DJ", L"Pad DJ", L"DJ 패드", L"DJ 垫", L"لوحة DJ", L"DJ-панель", L"DJ-Pad", L"Pad DJ", L"DJ-pad", L"Pad DJ", L"DJ paneli"));
+		LL14(L"DJ パッド", L"DJ Pad", L"Pad DJ", L"Pad DJ", L"Pad DJ", L"DJ 패드", L"DJ 垫", L"لوحة DJ", L"DJ-панель", L"DJ-Pad", L"Pad DJ", L"DJ-pad", L"Pad DJ", L"DJ paneli"),
+		LL14(L"DJ パッド（ホットキュー／エフェクト）を開きます", L"Open the DJ pad (hotcues/effects)", L"Ouvrir le pad DJ (hotcues/effets)", L"Apri il pad DJ (hotcue/effetti)", L"Abrir el pad DJ (hotcues/efectos)", L"DJ 패드(핫큐/이펙트)를 엽니다", L"打开 DJ 垫（热键标记/效果）", L"فتح لوحة DJ (إشارات/تأثيرات)", L"Открыть DJ-панель (hotcue/эффекты)", L"DJ-Pad (Hotcues/Effekte) oeffnen", L"Abrir o pad DJ (hotcues/efeitos)", L"DJ-pad (hotcues/effecten) openen", L"Otworz pad DJ (hotcue/efekty)", L"DJ panelini ac (hotcue/efekt)"));
 	menu.AddCommand(ID_MP_VIDEO_EXTRACT,
-		LL14(L"動画→音声抽出…", L"Extract audio from video…", L"Extraire audio de la video…", L"Estrai audio dal video…", L"Extraer audio del video…", L"동영상→오디오 추출…", L"从视频提取音频…", L"استخراج صوت من الفيديو…", L"Извлечь аудио из видео…", L"Audio aus Video…", L"Extrair audio do video…", L"Audio uit video…", L"Wyodrebnij audio z wideo…", L"Videodan ses cikar…"));
+		LL14(L"動画→音声抽出…", L"Extract audio from video…", L"Extraire audio de la video…", L"Estrai audio dal video…", L"Extraer audio del video…", L"동영상→오디오 추출…", L"从视频提取音频…", L"استخراج صوت من الفيديو…", L"Извлечь аудио из видео…", L"Audio aus Video…", L"Extrair audio do video…", L"Audio uit video…", L"Wyodrebnij audio z wideo…", L"Videodan ses cikar…"),
+		LL14(L"動画ファイルから音声だけを抽出します", L"Extract audio only from a video file", L"Extraire uniquement l'audio d'une video", L"Estrai solo l'audio da un video", L"Extraer solo el audio de un video", L"동영상에서 오디오만 추출", L"仅从视频文件提取音频", L"استخراج الصوت فقط من فيديو", L"Извлечь только аудио из видео", L"Nur Audio aus einer Videodatei extrahieren", L"Extrair apenas o audio de um video", L"Alleen audio uit een videobestand halen", L"Wyodrebnij tylko audio z wideo", L"Videodan yalnizca sesi cikar"));
 	menu.AddCommand(ID_MP_VIDEO_REPLACE,
 		LL14(L"動画の音声を差し替え…", L"Replace video audio…", L"Remplacer audio video…", L"Sostituisci audio video…", L"Reemplazar audio video…", L"동영상 오디오 교체…", L"替换视频音频…", L"استبدال صوت الفيديو…", L"Заменить звук видео…", L"Video-Audio ersetzen…", L"Substituir audio do video…", L"Video-audio vervangen…", L"Zastap audio wideo…", L"Video sesini degistir…"),
 		LL14(L"動画ファイルの音声トラックを WAV で差し替えます", L"Replace the video file audio track with a WAV", L"Remplacer la piste audio video par un WAV", L"Sostituisci la traccia audio del video con WAV", L"Reemplazar la pista de audio del video con WAV",
@@ -9567,9 +9704,11 @@ void CMediaPlayerDlg::ShowToolsExtrasMenu(CPoint screenPt)
 		}
 	}
 	menu.AddCommand(ID_MP_MIRROR,
-		LL14(L"ミラー出力…", L"Mirror output…", L"Sortie miroir…", L"Uscita mirror…", L"Salida espejo…", L"미러 출력…", L"镜像输出…", L"خرج مرآة…", L"Зеркальный выход…", L"Spiegelausgabe…", L"Saida espelho…", L"Spiegelaudio…", L"Wyjscie lustrzane…", L"Ayna cikis…"));
+		LL14(L"ミラー出力…", L"Mirror output…", L"Sortie miroir…", L"Uscita mirror…", L"Salida espejo…", L"미러 출력…", L"镜像输出…", L"خرج مرآة…", L"Зеркальный выход…", L"Spiegelausgabe…", L"Saida espelho…", L"Spiegelaudio…", L"Wyjscie lustrzane…", L"Ayna cikis…"),
+		LL14(L"ミラー出力の設定ダイアログを開きます", L"Open the mirror-output settings dialog", L"Ouvrir la boite de sortie miroir", L"Apri la finestra di uscita mirror", L"Abrir el dialogo de salida espejo", L"미러 출력 설정 대화상자를 엽니다", L"打开镜像输出设置对话框", L"فتح مربع حوار خرج المرآة", L"Открыть диалог зеркального выхода", L"Dialog der Spiegelausgabe oeffnen", L"Abrir o dialogo de saida espelho", L"Dialoog van spiegelaudio openen", L"Otworz okno wyjscia lustrzanego", L"Ayna cikis ayar penceresini ac"));
 	menu.AddCommand(ID_MP_SSVIZ,
-		LL14(L"SS ビジュアライザ", L"SS visualizer", L"Visualiseur SS", L"Visualizzatore SS", L"Visualizador SS", L"SS 비주얼", L"SS 可视化", L"عارض SS", L"SS-визуализатор", L"SS-Visualizer", L"Visual SS", L"SS-visualizer", L"Wizual SS", L"SS gorsel"));
+		LL14(L"SS ビジュアライザ", L"SS visualizer", L"Visualiseur SS", L"Visualizzatore SS", L"Visualizador SS", L"SS 비주얼", L"SS 可视化", L"عارض SS", L"SS-визуализатор", L"SS-Visualizer", L"Visual SS", L"SS-visualizer", L"Wizual SS", L"SS gorsel"),
+		LL14(L"スクリーンセーバー風ビジュアライザを開きます", L"Open the screensaver-style visualizer", L"Ouvrir le visualiseur type ecran de veille", L"Apri il visualizzatore stile screensaver", L"Abrir el visualizador tipo protector", L"화면보호기풍 비주얼라이저를 엽니다", L"打开屏保风格可视化器", L"فتح العارض بأسلوب شاشة التوقف", L"Открыть визуализатор в стиле заставки", L"Screensaver-Visualizer oeffnen", L"Abrir o visualizador estilo protetor", L"Screensaver-achtige visualizer openen", L"Otworz wizualizer w stylu wygaszacza", L"Ekran koruyucu tarzi gorseli ac"));
 	{
 		static wchar_t s_hh[24][4];
 		static wchar_t s_mm[60][4];
@@ -9682,50 +9821,59 @@ void CMediaPlayerDlg::ShowToolsExtrasMenu(CPoint screenPt)
 	}
 	menu.AddCheck(ID_MP_MIDI_IN,
 		LL14(L"MIDI In", L"MIDI In", L"MIDI In", L"MIDI In", L"MIDI In", L"MIDI In", L"MIDI 输入", L"MIDI In", L"MIDI In", L"MIDI In", L"MIDI In", L"MIDI In", L"MIDI In", L"MIDI In"),
-		MpMidiInIsActive());
+		MpMidiInIsActive(),
+		LL14(L"MIDI 入力デバイスからの操作を受け付けます", L"Accept control from a MIDI input device", L"Accepter les commandes d'un peripherique MIDI", L"Accetta comandi da un dispositivo MIDI In", L"Aceptar control desde un dispositivo MIDI", L"MIDI 입력 장치의 조작을 받습니다", L"接受来自 MIDI 输入设备的控制", L"قبول التحكم من جهاز إدخال MIDI", L"Принимать управление с MIDI-входа", L"Steuerung uber MIDI-Eingabegerat annehmen", L"Aceitar controle de um dispositivo MIDI", L"Bediening vanaf een MIDI-invoerapparaat", L"Przyjmuj sterowanie z urzadzenia MIDI", L"MIDI giris cihazindan kontrol kabul et"));
 	menu.AddSeparator();
 	MpFeatAppendKeyMenu(menu);
 	menu.AddCheck(ID_MP_FOCUS_MODE,
 		LL14(L"フォーカスモード", L"Focus mode", L"Mode focus", L"Modalita focus", L"Modo foco",
 			L"포커스 모드", L"专注模式", L"وضع التركيز", L"Режим фокуса", L"Fokusmodus",
 			L"Modo foco", L"Focusmodus", L"Tryb focus", L"Odak modu"),
-		savedata.mpFocusMode != 0);
+		savedata.mpFocusMode != 0,
+		LL14(L"作業に集中できるよう UI の装飾を控えめにします", L"Simplify UI chrome for a calmer focus mode", L"Simplifier l'interface pour se concentrer", L"Semplifica l'interfaccia in modalita focus", L"Simplificar la interfaz en modo foco", L"집중을 위해 UI 장식을 줄입니다", L"简化界面装饰以便专注", L"تبسيط واجهة المستخدم لوضع التركيز", L"Упростить интерфейс для режима фокуса", L"UI beruhigen fur Fokusmodus", L"Simplificar a interface no modo foco", L"UI vereenvoudigen voor focusmodus", L"Uprosc interfejs w trybie focus", L"Odak icin arayuzu sadeleştir"));
 	menu.AddCheck(ID_MP_CONFIRM_DANGER,
 		LL14(L"危険操作の確認", L"Confirm dangerous ops", L"Confirmer ops dangereuses", L"Conferma ops rischiose", L"Confirmar ops peligrosas",
 			L"위험 작업 확인", L"危险操作确认", L"تأكيد العمليات الخطرة", L"Подтверждать опасные", L"Gefährliche bestätigen",
 			L"Confirmar ops perigosas", L"Bevestig gevaarlijke", L"Potwierdzaj niebezpieczne", L"Tehlikeli islem onayi"),
-		savedata.confirmDanger != 0);
+		savedata.confirmDanger != 0,
+		LL14(L"削除など危険な操作の前に確認ダイアログを出します", L"Ask for confirmation before dangerous actions", L"Demander confirmation avant les actions dangereuses", L"Chiedi conferma prima delle azioni rischiose", L"Pedir confirmacion antes de acciones peligrosas", L"삭제 등 위험 작업 전에 확인", L"危险操作前弹出确认", L"طلب تأكيد قبل العمليات الخطرة", L"Спрашивать подтверждение перед опасными действиями", L"Vor gefahrlichen Aktionen nachfragen", L"Pedir confirmacao antes de acoes perigosas", L"Om bevestiging vragen bij gevaarlijke acties", L"Pytaj o potwierdzenie przed niebezpiecznymi", L"Tehlikeli islemlerden once onay iste"));
 	menu.AddCommand(ID_MP_LIVE_SET_REC,
 		LL14(L"ライブセット録画（画面+録音）", L"Live-set record (capture+audio)", L"Enreg. set live", L"Registra set live", L"Grabar set en vivo",
 			L"라이브 세트 녹화", L"现场套录制", L"تسجيل المجموعة", L"Запись сета", L"Live-Set aufnehmen",
-			L"Gravar set ao vivo", L"Live-set opnemen", L"Nagraj set live", L"Canli set kaydi"));
-	menu.AddCheck(ID_MP_NOWPLAYING_FILE, L"nowplaying.txt", savedata.mpNowPlayingFile != 0);
+			L"Gravar set ao vivo", L"Live-set opnemen", L"Nagraj set live", L"Canli set kaydi"),
+			LL14(L"画面キャプチャと録音を同時に開始します", L"Start screen capture and audio recording together", L"Demarrer capture ecran et enregistrement ensemble", L"Avvia cattura schermo e registrazione insieme", L"Iniciar captura de pantalla y grabacion juntas", L"화면 캡처와 녹음을 함께 시작", L"同时开始画面捕获与录音", L"بدء التقاط الشاشة والتسجيل معاً", L"Запустить захват экрана и запись вместе", L"Bildschirm- und Audioaufnahme zusammen starten", L"Iniciar captura de tela e gravacao juntas", L"Schermopname en audio-opname samen starten", L"Uruchom przechwytywanie i nagrywanie razem", L"Ekran yakalama ve kaydi birlikte baslat"));
+	menu.AddCheck(ID_MP_NOWPLAYING_FILE, L"nowplaying.txt", savedata.mpNowPlayingFile != 0, LL14(L"再生中の曲情報を nowplaying.txt に書き出します（配信連携）", L"Write now-playing info to nowplaying.txt (for streaming)", L"Ecrire les infos en cours dans nowplaying.txt", L"Scrivi le info in riproduzione su nowplaying.txt", L"Escribir la info en reproducción en nowplaying.txt", L"재생 정보를 nowplaying.txt에 기록(방송 연동)", L"将正在播放信息写入 nowplaying.txt（直播联动）", L"كتابة معلومات التشغيل إلى nowplaying.txt", L"Писать текущий трек в nowplaying.txt", L"Aktuelle Titelinfo in nowplaying.txt schreiben", L"Gravar info atual em nowplaying.txt", L"Huidige info naar nowplaying.txt schrijven", L"Zapisz biezace info do nowplaying.txt", L"Calan bilgiyi nowplaying.txt'ye yaz"));
 	menu.AddCheck(ID_MP_MIDI_LEARN,
 		LL14(L"MIDI 学習", L"MIDI learn", L"Apprentissage MIDI", L"Apprendimento MIDI", L"Aprendizaje MIDI",
 			L"MIDI 학습", L"MIDI 学习", L"تعلم MIDI", L"Обучение MIDI", L"MIDI lernen",
 			L"Aprendizado MIDI", L"MIDI leren", L"Nauka MIDI", L"MIDI ogren"),
-		savedata.mpMidiLearn != 0);
+		savedata.mpMidiLearn != 0,
+		LL14(L"次の操作を MIDI コントローラに割り当てる学習モードです", L"Learn mode: map the next action to a MIDI control", L"Mode apprentissage: associer l'action suivante au MIDI", L"Modalita learn: associa l'azione successiva al MIDI", L"Modo aprendizaje: asignar la siguiente accion a MIDI", L"다음 동작을 MIDI에 할당하는 학습 모드", L"学习模式：将下一操作映射到 MIDI", L"وضع التعلم: ربط الإجراء التالي بـ MIDI", L"Режим обучения: назначить следующее действие MIDI", L"Lernmodus: nächste Aktion einem MIDI-Regler zuweisen", L"Modo aprendizado: mapear a proxima acao ao MIDI", L"Leermodus: volgende actie aan MIDI koppelen", L"Tryb nauki: mapuj nastepna akcje na MIDI", L"Ogrenme modu: sonraki islemi MIDI'ye ata"));
 	menu.AddCheck(ID_MP_MIRROR_CUE,
 		LL14(L"Mirror CUE プレビュー", L"Mirror CUE preview", L"Apercu CUE miroir", L"Anteprima CUE mirror", L"Vista previa CUE espejo",
 			L"미러 CUE 미리보기", L"镜像 CUE 预览", L"معاينة CUE المرآة", L"Превью CUE зеркала", L"Mirror-CUE-Vorschau",
 			L"Previa CUE espelho", L"Mirror-CUE-voorbeeld", L"Podglad CUE lustra", L"Ayna CUE onizleme"),
-		savedata.mpMirrorCueMode != 0);
+		savedata.mpMirrorCueMode != 0,
+		LL14(L"ミラー出力側で CUE プレビューを使えるようにします", L"Enable CUE preview on the mirror output", L"Activer l'apercu CUE sur la sortie miroir", L"Abilita anteprima CUE sull'uscita mirror", L"Activar vista previa CUE en la salida espejo", L"미러 출력에서 CUE 미리보기를 사용", L"在镜像输出上启用 CUE 预览", L"تفعيل معاينة CUE على خرج المرآة", L"Включить превью CUE на зеркальном выходе", L"CUE-Vorschau auf der Spiegelausgabe aktivieren", L"Ativar previa CUE na saida espelho", L"CUE-voorbeeld op spiegelaudio inschakelen", L"Wlacz podglad CUE na wyjsciu lustrzanym", L"Ayna cikisinda CUE onizlemeyi ac"));
 	menu.AddCheck(ID_MP_PHRASE_SNAP,
 		LL14(L"フレーズを拍スナップ", L"Snap phrases to beats", L"Accrocher phrases aux temps", L"Aggancia frasi ai beat", L"Ajustar frases al beat",
 			L"프레이즈 비트 스냅", L"乐句对齐拍", L"محاذاة العبارات للنبض", L"Привязка фраз к долям", L"Phrasen an Beats",
 			L"Ajustar frases aos beats", L"Frases aan beats", L"Frazy do beatow", L"Cumleleri vuruslara"),
-		savedata.mpPhraseSnapBeat != 0);
+		savedata.mpPhraseSnapBeat != 0,
+		LL14(L"フレーズ A-B を拍グリッドにスナップします", L"Snap phrase A-B points to the beat grid", L"Accrocher les points A-B de phrase a la grille", L"Aggancia i punti A-B della frase alla griglia", L"Ajustar los puntos A-B de frase a la cuadricula", L"프레이즈 A-B를 비트 그리드에 스냅", L"将乐句 A-B 对齐到节拍网格", L"محاذاة نقاط عبارة A-B لشبكة الإيقاع", L"Привязать точки фразы A-B к сетке долей", L"Phrasen-A-B an das Beat-Raster snappen", L"Ajustar pontos A-B da frase a grade", L"Frase-A-B aan het beatraster snappen", L"Przypnij punkty frazy A-B do siatki", L"Cumle A-B noktalarini vurus izgarasina yapistir"));
 	{
 		CCustomPopupMenu* tr = menu.AddSubMenu(LL14(L"トランジション・プリセット", L"Transition presets", L"Presets transition", L"Preset transizione", L"Presets de transicion",
 			L"전환 프리셋", L"过渡预设", L"إعدادات الانتقال", L"Пресеты перехода", L"Übergangs-Presets",
-			L"Presets de transicao", L"Overgangs-presets", L"Preset przejsc", L"Gecis onayarlari"));
+			L"Presets de transicao", L"Overgangs-presets", L"Preset przejsc", L"Gecis onayarlari"),
+			LL14(L"曲間トランジションのプリセットを適用します", L"Apply a between-track transition preset", L"Appliquer un preset de transition", L"Applica un preset di transizione", L"Aplicar un preset de transicion", L"곡 사이 전환 프리셋을 적용", L"应用曲间过渡预设", L"تطبيق إعداد انتقال بين المقاطع", L"Применить пресет перехода между треками", L"Ubergangs-Preset zwischen Titeln anwenden", L"Aplicar um preset de transicao entre faixas", L"Overgangs-preset tussen nummers toepassen", L"Zastosuj preset przejscia miedzy utworami", L"Parcalar arasi gecis onayarisini uygula"));
 		if (tr) {
 			tr->AddCommand(ID_MP_TRANS_PRE_0, L"EQ sweep / 4s");
 			tr->AddCommand(ID_MP_TRANS_PRE_1, L"Filter / 8s");
 			tr->AddCommand(ID_MP_TRANS_PRE_2, L"Quick xfade / 2s");
 		}
 		CCustomPopupMenu* lay = menu.AddSubMenu(LL14(L"レイアウト", L"Layout", L"Disposition", L"Layout", L"Diseno",
-			L"레이아웃", L"布局", L"تخطيط", L"Макет", L"Layout", L"Layout", L"Layout", L"Uklad", L"Duzen"));
+			L"레이아웃", L"布局", L"تخطيط", L"Макет", L"Layout", L"Layout", L"Layout", L"Uklad", L"Duzen"),
+			LL14(L"ウィンドウ配置の保存／読込スロットです", L"Save/load window layout slots", L"Slots pour enregistrer/charger la disposition", L"Slot per salvare/caricare il layout", L"Ranuras para guardar/cargar el diseno", L"창 배치 저장/불러오기 슬롯", L"窗口布局的保存/加载插槽", L"فتحات حفظ/تحميل تخطيط النوافذ", L"Слоты сохранения/загрузки макета", L"Slots zum Speichern/Laden des Layouts", L"Slots para salvar/carregar o layout", L"Slots om de indeling op te slaan/laden", L"Sloty zapisu/wczytania ukladu", L"Pencere duzeni kaydet/yukle yuvalari"));
 		if (lay) {
 			lay->AddCommand(ID_MP_LAYOUT_SAVE0, L"Save slot 1");
 			lay->AddCommand(ID_MP_LAYOUT_SAVE0 + 1, L"Save slot 2");
@@ -9734,7 +9882,7 @@ void CMediaPlayerDlg::ShowToolsExtrasMenu(CPoint screenPt)
 			lay->AddCommand(ID_MP_LAYOUT_LOAD0 + 1, L"Load slot 2");
 			lay->AddCommand(ID_MP_LAYOUT_LOAD0 + 2, L"Load slot 3");
 		}
-		CCustomPopupMenu* aac = menu.AddSubMenu(L"AAC profile");
+		CCustomPopupMenu* aac = menu.AddSubMenu(L"AAC profile", LL14(L"AAC 書き出しのビットレート／プロファイルを選びます", L"Choose AAC export bitrate/profile", L"Choisir le debit/profil AAC", L"Scegli bitrate/profilo AAC", L"Elegir bitrate/perfil AAC", L"AAC 내보내기 비트레이트/프로필 선택", L"选择 AAC 导出码率/配置", L"اختيار معدل بت/ملف تعريف AAC", L"Выбрать битрейт/профиль AAC", L"AAC-Bitrate/Profil wahlen", L"Escolher bitrate/perfil AAC", L"AAC-bitrate/profiel kiezen", L"Wybierz bitrate/profil AAC", L"AAC bitrate/profili sec"));
 		if (aac) {
 			aac->AddCheck(ID_MP_AAC_PROF0, L"128 kbps", savedata.mpAacProfile == 0);
 			aac->AddCheck(ID_MP_AAC_PROF1, L"192 kbps", savedata.mpAacProfile == 1);
@@ -9743,11 +9891,14 @@ void CMediaPlayerDlg::ShowToolsExtrasMenu(CPoint screenPt)
 	}
 	menu.AddCommand(ID_MP_WEEKLY_SUMMARY,
 		LL14(L"週次サマリ…", L"Weekly summary…", L"Resume hebdo…", L"Riepilogo…", L"Resumen…",
-			L"주간 요약…", L"周汇总…", L"ملخص…", L"Сводка…", L"Wochenübersicht…", L"Resumo…", L"Weekoverzicht…", L"Podsumowanie…", L"Haftalik ozet…"));
+			L"주간 요약…", L"周汇总…", L"ملخص…", L"Сводка…", L"Wochenübersicht…", L"Resumo…", L"Weekoverzicht…", L"Podsumowanie…", L"Haftalik ozet…"),
+			LL14(L"今週の再生・練習状況のサマリを表示します", L"Show this week's playback/practice summary", L"Afficher le resume de lecture/pratique de la semaine", L"Mostra il riepilogo di riproduzione/pratica della settimana", L"Mostrar el resumen de reproduccion/practica de la semana", L"이번 주 재생·연습 요약을 표시", L"显示本周播放/练习汇总", L"عرض ملخص التشغيل/التدريب لهذا الأسبوع", L"Показать сводку воспроизведения/практики за неделю", L"Wochenubersicht von Wiedergabe/Ubung anzeigen", L"Mostrar o resumo de reproducao/pratica da semana", L"Weekoverzicht van afspelen/oefenen tonen", L"Pokaz podsumowanie odtwarzania/cwiczen tygodnia", L"Bu haftanin calma/alisirma ozetini goster"));
 	menu.AddCommand(ID_MP_PRACTICE_LOG, LL14(L"練習ログ追記", L"Append practice log", L"Journal pratique", L"Log pratica", L"Registro practica",
-		L"연습 로그", L"练习日志", L"سجل التمرين", L"Журнал практики", L"Übungsprotokoll", L"Log de pratica", L"Oefenlog", L"Dziennik cwiczen", L"Alisirma gunlugu"));
+		L"연습 로그", L"练习日志", L"سجل التمرين", L"Журнал практики", L"Übungsprotokoll", L"Log de pratica", L"Oefenlog", L"Dziennik cwiczen", L"Alisirma gunlugu"),
+		LL14(L"現在の練習内容をログに追記します", L"Append the current practice session to the log", L"Ajouter la session de pratique au journal", L"Aggiungi la sessione di pratica al log", L"Anadir la sesion de practica al registro", L"현재 연습 내용을 로그에 추가", L"将当前练习内容追加到日志", L"إلحاق جلسة التدريب بالسجل", L"Добавить текущую практику в журнал", L"Aktuelle Ubungseinheit ins Protokoll schreiben", L"Acrescentar a sessao de pratica ao log", L"Huidige oefensessie aan het log toevoegen", L"Dopisz biezaca sesje cwiczen do dziennika", L"Gecerli alistirmayi gunluge ekle"));
 	menu.AddCommand(ID_MP_PRACTICE_PACK, LL14(L"練習パック書き出し…", L"Export practice pack…", L"Exporter pack pratique…", L"Esporta pack pratica…", L"Exportar pack practica…",
-		L"연습 팩 내보내기…", L"导出练习包…", L"تصدير حزمة…", L"Экспорт пакета…", L"Übungspaket…", L"Exportar pacote…", L"Oefenpakket…", L"Pakiet cwiczen…", L"Alisirma paketi…"));
+		L"연습 팩 내보내기…", L"导出练习包…", L"تصدير حزمة…", L"Экспорт пакета…", L"Übungspaket…", L"Exportar pacote…", L"Oefenpakket…", L"Pakiet cwiczen…", L"Alisirma paketi…"),
+		LL14(L"練習用の区間・設定をパックとして書き出します", L"Export practice ranges and settings as a pack", L"Exporter plages/reglages de pratique en pack", L"Esporta intervalli/impostazioni pratica come pack", L"Exportar rangos/ajustes de practica como pack", L"연습 구간·설정을 팩으로 내보내기", L"将练习区间与设置导出为包", L"تصدير نطاقات/إعدادات التدريب كحزمة", L"Экспортировать диапазоны/настройки практики пакетом", L"Ubungsbereiche/-einstellungen als Paket exportieren", L"Exportar intervalos/ajustes de pratica como pacote", L"Oefenbereiken/-instellingen als pakket exporteren", L"Eksportuj zakresy/ustawienia cwiczen jako pakiet", L"Alisirma aralik/ayarlarini paket olarak disa aktar"));
 	const UINT cmd = menu.Track(screenPt, this);
 	// メニュー閉鎖時に LRC オフセットの端数(1–9ms)を捨てない
 	if (lrcCtx.pendingMs != 0) {
@@ -11307,10 +11458,10 @@ void CMpCheatSheetDlg::OnPaint()
 		L"· Renombrar / Eliminar lista / Quitar …… D&D para ordenar", L"· 이름변경 / 목록삭제 / 곡삭제 …… D&D로 정렬", L"· 重命名 / 删列表 / 删曲 …… 拖放排序", L"· إعادة تسمية / حذف قائمة / حذف …… سحب للترتيب",
 		L"· Переименовать / Удалить список / Удалить …… D&D порядок", L"· Umbenennen / Liste loeschen / Entfernen …… D&D sortieren", L"· Renomear / Excluir lista / Remover …… D&D ordenar", L"· Hernoemen / Lijst wissen / Verwijder …… D&D ordenen",
 		L"· Zmień nazwę / Usuń listę / Usuń …… D&D kolejność", L"· Yeniden adlandır / Liste sil / Parça sil …… D&D sırala")); yR += lh;
-	body(R, yR, LL14(L"・m3u入出力 / 検索 / 絞り込み / ▾ツール …… 並べ替え・Folder+", L"· m3u I/O / Find / Filter / ▾ tools …… sort & Folder+", L"· m3u / Recherche / Filtre / ▾ …… tri et Folder+", L"· m3u / Cerca / Filtro / ▾ …… ordina e Folder+",
-		L"· m3u / Buscar / Filtro / ▾ …… orden y Folder+", L"· m3u / 검색 / 필터 / ▾ …… 정렬·Folder+", L"· m3u / 搜索 / 筛选 / ▾ …… 排序与 Folder+", L"· m3u / بحث / تصفية / ▾ …… فرز و Folder+",
-		L"· m3u / Поиск / Фильтр / ▾ …… сорт и Folder+", L"· m3u / Suche / Filter / ▾ …… Sort und Folder+", L"· m3u / Busca / Filtro / ▾ …… ordem e Folder+", L"· m3u / Zoeken / Filter / ▾ …… sorteren en Folder+",
-		L"· m3u / Szukaj / Filtr / ▾ …… sort i Folder+", L"· m3u / Ara / Filtre / ▾ …… sırala ve Folder+")); yR += lh;
+	body(R, yR, LL14(L"・m3u入出力 / 検索 / 絞り込み / 正規表現 / ▾ツール …… 並べ替え・Folder+", L"· m3u I/O / Find / Filter / Regex / ▾ tools …… sort & Folder+", L"· m3u / Recherche / Filtre / Regex / ▾ …… tri et Folder+", L"· m3u / Cerca / Filtro / Regex / ▾ …… ordina e Folder+",
+		L"· m3u / Buscar / Filtro / Regex / ▾ …… orden y Folder+", L"· m3u / 검색 / 필터 / 정규식 / ▾ …… 정렬·Folder+", L"· m3u / 搜索 / 筛选 / 正则 / ▾ …… 排序与 Folder+", L"· m3u / بحث / تصفية / Regex / ▾ …… فرز و Folder+",
+		L"· m3u / Поиск / Фильтр / Regex / ▾ …… сорт и Folder+", L"· m3u / Suche / Filter / Regex / ▾ …… Sort und Folder+", L"· m3u / Busca / Filtro / Regex / ▾ …… ordem e Folder+", L"· m3u / Zoeken / Filter / Regex / ▾ …… sorteren en Folder+",
+		L"· m3u / Szukaj / Filtr / Regex / ▾ …… sort i Folder+", L"· m3u / Ara / Filtre / Regex / ▾ …… sırala ve Folder+")); yR += lh;
 	body(R, yR, LL14(L"・名前の印 …… 橙SAV=曲ごと保存 / 青LRC=歌詞。色タグで表示（PLの印列も同じ）", L"· Name marks …… amber SAV=per-song saved / blue LRC=lyrics. Color chips (same in PL Mark col)", L"· Marques …… orange SAV / bleu LRC. Pastilles couleur", L"· Segni …… arancio SAV / blu LRC. Chip colorati",
 		L"· Marcas …… naranja SAV / azul LRC. Chips de color", L"· 이름 표시 …… 주황 SAV / 파랑 LRC. 컬러 태그", L"· 名称标记 …… 橙SAV / 蓝LRC。彩色标签", L"· علامات …… برتقالي SAV / أزرق LRC. شارات ملونة",
 		L"· Метки …… оранж. SAV / син. LRC. Цветные чипы", L"· Zeichen …… orange SAV / blau LRC. Farb-Chips", L"· Marcas …… laranja SAV / azul LRC. Chips coloridos", L"· Tekens …… oranje SAV / blauw LRC. Kleurchips",

@@ -1636,7 +1636,8 @@ void CAnalyzerDlg::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
 	CCustomPopupMenu menu;
 
 	CCustomPopupMenu* subWave = menu.AddSubMenu(
-		LL14(L"上部の表示", L"Upper display", L"Affichage superieur", L"Display superiore", L"Pantalla superior", L"상단 표시", L"上部显示", L"العرض العلوي", L"Верхняя область", L"Obere Anzeige", L"Exibicao superior", L"Bovenste weergave", L"Gorny widok", L"Ust gosterim"));
+		LL14(L"上部の表示", L"Upper display", L"Affichage superieur", L"Display superiore", L"Pantalla superior", L"상단 표시", L"上部显示", L"العرض العلوي", L"Верхняя область", L"Obere Anzeige", L"Exibicao superior", L"Bovenste weergave", L"Gorny widok", L"Ust gosterim"),
+		LL14(L"上部ペインの表示内容（スクロール波形／トリガー式オシロ）を選びます。", L"Choose what the upper pane shows (scrolling wave / triggered scope).", L"Choisir l'affichage du panneau superieur (onde / oscillo).", L"Scegli cosa mostra il riquadro superiore (onda / oscilloscopio).", L"Elegir que muestra el panel superior (onda / osciloscopio).", L"상단 패널 표시(스크롤 파형/트리거 스코프)를 고릅니다.", L"选择上部窗格显示内容（滚动波形/触发示波）。", L"اختر ما يعرضه اللوح العلوي (موجة/راسم).", L"Выбрать содержимое верхней панели (волна / осциллограф).", L"Obere Anzeige wahlen (Scrollwelle / Scope).", L"Escolher o que o painel superior mostra (onda / osciloscopio).", L"Kies wat het bovenpaneel toont (golf / scoop).", L"Wybierz zawartosc gornego panelu (fala / oscyloskop).", L"Ust panelde ne gosterilecegini sec (kayan dalga / osiloskop)."));
 	if (subWave) {
 		subWave->AddCheck(IDM_WAVE_SCROLL,
 			LL14(L"スクロール波形", L"Scrolling wave", L"Onde defilante", L"Onda scorrevole", L"Onda desplazable", L"스크롤 파형", L"滚动波形", L"موجة متمررة", L"Прокрутка волны", L"Scrollende Welle", L"Onda rolante", L"Scrollende golf", L"Przewijana fala", L"Kayan dalga"),
@@ -1647,7 +1648,8 @@ void CAnalyzerDlg::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
 	}
 
 	CCustomPopupMenu* subLower = menu.AddSubMenu(
-		LL14(L"下部の表示", L"Lower display", L"Affichage inferieur", L"Display inferiore", L"Pantalla inferior", L"하단 표시", L"下部显示", L"العرض السفلي", L"Нижняя область", L"Untere Anzeige", L"Exibicao inferior", L"Onderste weergave", L"Dolny widok", L"Alt gosterim"));
+		LL14(L"下部の表示", L"Lower display", L"Affichage inferieur", L"Display inferiore", L"Pantalla inferior", L"하단 표시", L"下部显示", L"العرض السفلي", L"Нижняя область", L"Untere Anzeige", L"Exibicao inferior", L"Onderste weergave", L"Dolny widok", L"Alt gosterim"),
+		LL14(L"下部ペインの表示内容（周波数特性／スペクトログラム／位相スコープ）を選びます。", L"Choose what the lower pane shows (spectrum / spectrogram / phase scope).", L"Choisir l'affichage du panneau inferieur (spectre / spectro / phase).", L"Scegli cosa mostra il riquadro inferiore (spettro / spettrogramma / fase).", L"Elegir que muestra el panel inferior (espectro / espectrograma / fase).", L"하단 패널 표시(스펙트럼/스펙트로그램/위상 스코프)를 고릅니다.", L"选择下部窗格显示内容（频谱/频谱图/相位示波）。", L"اختر ما يعرضه اللوح السفلي (طيف/مخطط طيفي/طور).", L"Выбрать содержимое нижней панели (спектр / спектрограмма / фаза).", L"Untere Anzeige wahlen (Spektrum / Spektrogramm / Phase).", L"Escolher o que o painel inferior mostra (espectro / espectrograma / fase).", L"Kies wat het onderpaneel toont (spectrum / spectrogram / fase).", L"Wybierz zawartosc dolnego panelu (widmo / spektrogram / faza).", L"Alt panelde ne gosterilecegini sec (spektrum / spektrogram / faz)."));
 	if (subLower) {
 		subLower->AddCheck(IDM_LOWER_SPECTRUM,
 			LL14(L"周波数特性", L"Spectrum", L"Spectre", L"Spettro", L"Espectro", L"스펙트럼", L"频谱", L"الطيف", L"Спектр", L"Spektrum", L"Espectro", L"Spectrum", L"Widmo", L"Spektrum"),
@@ -1675,7 +1677,8 @@ void CAnalyzerDlg::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
 	}
 
 	CCustomPopupMenu* subZoom = menu.AddSubMenu(
-		LL14(L"周波数の範囲", L"Frequency range", L"Plage de frequences", L"Intervallo di frequenza", L"Rango de frecuencias", L"주파수 범위", L"频率范围", L"نطاق التردد", L"Диапазон частот", L"Frequenzbereich", L"Faixa de frequencia", L"Frequentiebereik", L"Zakres czestotliwosci", L"Frekans araligi"));
+		LL14(L"周波数の範囲", L"Frequency range", L"Plage de frequences", L"Intervallo di frequenza", L"Rango de frecuencias", L"주파수 범위", L"频率范围", L"نطاق التردد", L"Диапазон частот", L"Frequenzbereich", L"Faixa de frequencia", L"Frequentiebereik", L"Zakres czestotliwosci", L"Frekans araligi"),
+		LL14(L"表示する周波数帯域をズームします（全帯域／低域／中域／高域）。", L"Zoom the spectrum to a frequency band (full / low / mid / high).", L"Zoomer le spectre sur une bande (complete / graves / mediums / aigus).", L"Zoom dello spettro su una banda (intera / bassi / medi / alti).", L"Acercar el espectro a una banda (completa / graves / medios / agudos).", L"스펙트럼을 주파수 대역으로 확대합니다(전대역/저역/중역/고역).", L"将频谱缩放到频段（全频/低频/中频/高频）。", L"تكبير الطيف إلى نطاق تردد (كامل/منخفض/متوسط/عالي).", L"Масштабировать спектр по полосе (весь / низ / середина / верх).", L"Spektrum auf Frequenzband zoomen (voll / Tiefen / Mitten / Hohen).", L"Aproximar o espectro a uma faixa (completa / graves / medios / agudos).", L"Zoom het spectrum naar een band (volledig / laag / midden / hoog).", L"Przybliz widmo do pasma (pelne / niskie / srednie / wysokie).", L"Spektrumu frekans bandina yaklastir (tam / bas / orta / tiz)."));
 	if (subZoom) {
 		subZoom->AddCheck(IDM_ZOOM_FULL,
 			LL14(L"全帯域", L"Full range", L"Bande complete", L"Banda intera", L"Banda completa", L"전대역", L"全频段", L"النطاق الكامل", L"Весь диапазон", L"Voller Bereich", L"Faixa completa", L"Volledig bereik", L"Pelny zakres", L"Tam bant"),
@@ -1692,7 +1695,8 @@ void CAnalyzerDlg::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
 	}
 
 	CCustomPopupMenu* subMarker = menu.AddSubMenu(
-		LL14(L"周波数マーカー", L"Frequency markers", L"Marqueurs de frequence", L"Marcatori di frequenza", L"Marcadores de frecuencia", L"주파수 마커", L"频率标记", L"علامات التردد", L"Частотные маркеры", L"Frequenzmarker", L"Marcadores de frequencia", L"Frequentiemarkeringen", L"Znaczniki czestotliwosci", L"Frekans isaretleri"));
+		LL14(L"周波数マーカー", L"Frequency markers", L"Marqueurs de frequence", L"Marcatori di frequenza", L"Marcadores de frecuencia", L"주파수 마커", L"频率标记", L"علامات التردد", L"Частотные маркеры", L"Frequenzmarker", L"Marcadores de frequencia", L"Frequentiemarkeringen", L"Znaczniki czestotliwosci", L"Frekans isaretleri"),
+		LL14(L"ホバー位置への追加や、近いマーカー／すべての削除など周波数マーカーを管理します。", L"Manage frequency markers (add at hover, remove nearest, or clear all).", L"Gerer les marqueurs (ajouter au survol, retirer le plus proche, tout effacer).", L"Gestisci i marcatori (aggiungi all'hover, rimuovi il piu vicino, cancella tutti).", L"Administrar marcadores (anadir al hover, quitar el mas cercano, borrar todos).", L"호버에 추가·가까운 것/전체 삭제 등 주파수 마커를 관리합니다.", L"管理频率标记（悬停处添加、删除最近、全部清除）。", L"إدارة علامات التردد (إضافة عند التمرير، إزالة الأقرب، مسح الكل).", L"Управлять частотными маркерами (добавить, удалить ближайший, очистить все).", L"Frequenzmarker verwalten (an Hover, Nachsten entfernen, alle loschen).", L"Gerenciar marcadores (adicionar no hover, remover o mais proximo, limpar todos).", L"Beheer frequentiemarkers (toevoegen bij hover, dichtstbij verwijderen, alles wissen).", L"Zarzadzaj znacznikami (dodaj przy hover, usun najblizszy, wyczysc wszystkie).", L"Frekans isaretlerini yonet (hover'a ekle, en yakini sil, tumunu temizle)."));
 	if (subMarker) {
 		subMarker->AddCommand(IDM_MARKER_ADD,
 			LL14(L"ホバー位置に追加", L"Add at hover position", L"Ajouter a la position du survol", L"Aggiungi alla posizione del cursore", L"Anadir en la posicion del cursor", L"호버 위치에 추가", L"在悬停位置添加", L"إضافة عند موضع المؤشر", L"Добавить в позиции курсора", L"An Hover-Position hinzufugen", L"Adicionar na posicao do cursor", L"Toevoegen op hoverpositie", L"Dodaj w miejscu kursora", L"Imlec konumuna ekle"),
@@ -1737,11 +1741,13 @@ void CAnalyzerDlg::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
 			LL14(L"相関ヒストから提案", L"Suggest from corr history", L"Suggérer depuis corr.", L"Suggerisci da corr.", L"Sugerir desde corr.", L"상관 이력에서 제안", L"根据相关历史建议", L"اقتراح من الارتباط", L"Предложить по корреляции", L"Aus Korr.-Verlauf vorschlagen", L"Sugerir pelo hist. corr.", L"Voorstel uit corr.-geschiedenis", L"Zaproponuj z historii kor.", L"Korelasyon gecmisinden oner"));
 	}
 	menu.AddCommand(IDM_SAVE_JACKET,
-		LL14(L"スペクトルを画像保存…", L"Save spectrogram as image…", L"Enregistrer le spectrogramme…", L"Salva spettrogramma…", L"Guardar espectrograma…", L"스펙트럼 이미지 저장…", L"将频谱图保存为图片…", L"حفظ الطيف كصورة…", L"Сохранить спектrogram…", L"Spektrogramm speichern…", L"Salvar espectrograma…", L"Spectrogram opslaan…", L"Zapisz spektrogram…", L"Spektrumu kaydet…"));
+		LL14(L"スペクトルを画像保存…", L"Save spectrogram as image…", L"Enregistrer le spectrogramme…", L"Salva spettrogramma…", L"Guardar espectrograma…", L"스펙트럼 이미지 저장…", L"将频谱图保存为图片…", L"حفظ الطيف كصورة…", L"Сохранить спектrogram…", L"Spektrogramm speichern…", L"Salvar espectrograma…", L"Spectrogram opslaan…", L"Zapisz spektrogram…", L"Spektrumu kaydet…"),
+		LL14(L"スペクトル／スペクトログラムを画像として書き出します（ジャケット用）。", L"Export the spectrum/spectrogram as an image (for jacket use).", L"Exporter le spectre/spectrogramme en image (pour jaquette).", L"Esporta spettro/spettrogramma come immagine (per jacket).", L"Exportar espectro/espectrograma como imagen (para caratula).", L"스펙트럼/스펙트로그램을 이미지로 내보냅니다(재킷용).", L"将频谱/频谱图导出为图片（封面用）。", L"تصدير الطيف/المخطط الطيفي كصورة (للغلاف).", L"Экспортировать спектр/спектрограмму как изображение (для обложки).", L"Spektrum/Spektrogramm als Bild exportieren (fur Cover).", L"Exportar espectro/espectrograma como imagem (para capa).", L"Exporteer spectrum/spectrogram als afbeelding (voor jacket).", L"Eksportuj widmo/spektrogram jako obraz (na okladke).", L"Spektrum/spektrogrami goruntu olarak disa aktar (kapak icin)."));
 	menu.AddSeparator();
 
 	CCustomPopupMenu* subLayout = menu.AddSubMenu(
-		LL14(L"周波数特性の表示", L"Frequency display", L"Affichage frequence", L"Visualizzazione frequenza", L"Vista de frecuencia", L"주파수 표시", L"频率显示", L"عرض التردد", L"Отображение АЧХ", L"Frequenzanzeige", L"Exibicao de frequencia", L"Frequentieweergave", L"Wyswietlanie czest.", L"Frekans gorunumu"));
+		LL14(L"周波数特性の表示", L"Frequency display", L"Affichage frequence", L"Visualizzazione frequenza", L"Vista de frecuencia", L"주파수 표시", L"频率显示", L"عرض التردد", L"Отображение АЧХ", L"Frequenzanzeige", L"Exibicao de frequencia", L"Frequentieweergave", L"Wyswietlanie czest.", L"Frekans gorunumu"),
+		LL14(L"チャンネルの配置（重ね描き／上下・左右分割／グリッド）を選びます。", L"Choose channel layout (overlay / split / grid).", L"Choisir la disposition des canaux (superpose / division / grille).", L"Scegli layout canali (sovrapposto / divisione / griglia).", L"Elegir disposicion de canales (superpuesto / division / cuadrícula).", L"채널 배치(겹침/상하·좌우 분할/그리드)를 고릅니다.", L"选择声道布局（叠加/上下·左右分割/网格）。", L"اختر تخطيط القنوات (تراكب/تقسيم/شبكة).", L"Выбрать раскладку каналов (наложение / разделение / сетка).", L"Kanallage wahlen (Uberlagerung / Teilung / Raster).", L"Escolher layout dos canais (sobreposto / divisao / grade).", L"Kies kanaallayout (overlay / splitsen / raster).", L"Wybierz uklad kanalow (nakladanie / podzial / siatka).", L"Kanal duzenini sec (ustuste / bolme / izgara)."));
 	if (subLayout) {
 		subLayout->AddCheck(IDM_SPEC_OVERLAY,
 			LL14(L"重ね描き", L"Overlay", L"Superpose", L"Sovrapposto", L"Superpuesto", L"겹침", L"叠加", L"تراكب", L"Наложение", L"Uberlagert", L"Sobreposto", L"Overlay", L"Nakladanie", L"Ustuste"),
@@ -1761,7 +1767,8 @@ void CAnalyzerDlg::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
 	}
 
 	CCustomPopupMenu* subStyle = menu.AddSubMenu(
-		LL14(L"周波数の表示モード", L"Frequency display mode", L"Mode d'affichage frequence", L"Modalita visualizzazione", L"Modo de visualizacion", L"주파수 표시 모드", L"频率显示模式", L"وضع عرض التردد", L"Режим АЧХ", L"Frequenz-Anzeigemodus", L"Modo de frequencia", L"Frequentieweergavemodus", L"Tryb wyswietlania czest.", L"Frekans gorunum modu"));
+		LL14(L"周波数の表示モード", L"Frequency display mode", L"Mode d'affichage frequence", L"Modalita visualizzazione", L"Modo de visualizacion", L"주파수 표시 모드", L"频率显示模式", L"وضع عرض التردد", L"Режим АЧХ", L"Frequenz-Anzeigemodus", L"Modo de frequencia", L"Frequentieweergavemodus", L"Tryb wyswietlania czest.", L"Frekans gorunum modu"),
+		LL14(L"周波数特性の見た目（Ozone／Cubase／SPAN／Ableton／FabFilter 風など）を選びます。", L"Choose spectrum visual style (Ozone / Cubase / SPAN / Ableton / FabFilter looks, etc.).", L"Choisir le style visuel du spectre (Ozone / Cubase / SPAN / Ableton / FabFilter…).", L"Scegli lo stile visuale dello spettro (Ozone / Cubase / SPAN / Ableton / FabFilter…).", L"Elegir el estilo visual del espectro (Ozone / Cubase / SPAN / Ableton / FabFilter…).", L"스펙트럼 시각 스타일(Ozone/Cubase/SPAN/Ableton/FabFilter 등)을 고릅니다.", L"选择频谱视觉风格（Ozone/Cubase/SPAN/Ableton/FabFilter 等）。", L"اختر نمط عرض الطيف (Ozone/Cubase/SPAN/Ableton/FabFilter…).", L"Выбрать визуальный стиль спектра (Ozone / Cubase / SPAN / Ableton / FabFilter…).", L"Visuellen Spektrumstil wahlen (Ozone / Cubase / SPAN / Ableton / FabFilter…).", L"Escolher o estilo visual do espectro (Ozone / Cubase / SPAN / Ableton / FabFilter…).", L"Kies visuele spectrumstijl (Ozone / Cubase / SPAN / Ableton / FabFilter…).", L"Wybierz styl wizualny widma (Ozone / Cubase / SPAN / Ableton / FabFilter…).", L"Spektrum gorsel stilini sec (Ozone / Cubase / SPAN / Ableton / FabFilter…)."));
 	if (subStyle) {
 		subStyle->AddCheck(IDM_STYLE_FILL,
 			LL14(L"Ozone 風 (塗+線)", L"Ozone (fill+line)", L"Ozone (rempl.+ligne)", L"Ozone (riemp.+linea)", L"Ozone (relleno+linea)", L"Ozone (채움+선)", L"Ozone(填充+线)", L"Ozone (تعبئة+خط)", L"Ozone (заливка+линия)", L"Ozone (Fullung+Linie)", L"Ozone (preench.+linha)", L"Ozone (vulling+lijn)", L"Ozone (wypeln.+linia)", L"Ozone (dolgu+cizgi)"),
@@ -1802,17 +1809,20 @@ void CAnalyzerDlg::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
 	menu.AddSeparator();
 	menu.AddCheck(IDM_PEAK_HOLD,
 		LL14(L"ピークホールド", L"Peak hold", L"Maintien de crete", L"Picco trattenuto", L"Retencion de pico", L"피크 홀드", L"峰值保持", L"الاحتفاظ بالذروة", L"Удержание пика", L"Peak Hold", L"Retencao de pico", L"Piekvasthouden", L"Przytrzymanie szczytu", L"Tepe tutma"),
-		m_peakHold);
+		m_peakHold,
+		LL14(L"メーター／スペクトル上のピークレベルを保持表示します。", L"Hold peak levels on meters and the spectrum.", L"Maintenir les niveaux de crete sur les indicateurs et le spectre.", L"Trattiene i livelli di picco su misuratori e spettro.", L"Retener niveles de pico en medidores y espectro.", L"미터/스펙트럼의 피크 레벨을 유지 표시합니다.", L"在电平表和频谱上保持峰值电平显示。", L"الاحتفاظ بمستويات الذروة على المقاييس والطيف.", L"Удерживать пиковые уровни на метрах и спектре.", L"Peak-Pegel auf Anzeigen und Spektrum halten.", L"Reter niveis de pico nos medidores e no espectro.", L"Pieklevels op meters en spectrum vasthouden.", L"Przytrzymuj poziomy szczytu na miernikach i widmie.", L"Olcerlerde ve spektrumda tepe seviyelerini tut."));
 	menu.AddCheck(IDM_EQ_OVERLAY,
 		LL14(L"EQオーバーレイ", L"EQ overlay", L"Superposition EQ", L"Sovrapposizione EQ", L"Superposicion EQ", L"EQ 오버레이", L"EQ叠加", L"تراكب EQ", L"Оверлей EQ", L"EQ-Overlay", L"Sobreposicao EQ", L"EQ-overlay", L"Nakladka EQ", L"EQ kaplama"),
 		m_eqOverlay,
 		LL14(L"周波数特性の上に EQ カーブを重ねてドラッグ調整できます。", L"Overlay the EQ curve on the spectrum for drag adjustment.", L"Superposer la courbe EQ pour un reglage au glisser.", L"Sovrapponi la curva EQ per regolarla trascinando.", L"Superponer la curva EQ para ajustar arrastrando.", L"스펙트럼 위에 EQ 곡선을 겹쳐 드래그 조정합니다.", L"在频谱上叠加 EQ 曲线以便拖动调整。", L"تراكب منحنى EQ على الطيف للضبط بالسحب.", L"Наложить кривую EQ на спектр для правки перетаскиванием.", L"EQ-Kurve uber Spektrum legen und per Ziehen anpassen.", L"Sobrepor a curva EQ no espectro para ajustar arrastando.", L"EQ-curve over spectrum leggen om te slepen.", L"Nakladka krzywej EQ na widmo do regulacji przeciagnieciem.", L"Spektrum uzerine EQ egrisini bindirip surukleyerek ayarla."));
 	menu.AddCheck(IDM_LEVEL_METER,
 		LL14(L"レベルメーター", L"Level meter", L"Indicateur de niveau", L"Misuratore di livello", L"Medidor de nivel", L"레벨 미터", L"电平表", L"مقياس المستوى", L"Уровень сигнала", L"Pegelanzeige", L"Medidor de nivel", L"Niveaumeter", L"Miernik poziomu", L"Seviye olcer"),
-		m_showLevelMeter);
+		m_showLevelMeter,
+		LL14(L"レベルメーターの表示／非表示を切り替えます。", L"Show or hide the level meters.", L"Afficher ou masquer les indicateurs de niveau.", L"Mostra o nasconde i misuratori di livello.", L"Mostrar u ocultar los medidores de nivel.", L"레벨 미터 표시/숨기기를 전환합니다.", L"显示或隐藏电平表。", L"إظهار أو إخفاء مقاييس المستوى.", L"Показать или скрыть измерители уровня.", L"Pegelanzeigen ein- oder ausblenden.", L"Mostrar ou ocultar os medidores de nivel.", L"Niveaumeters tonen of verbergen.", L"Pokaz lub ukryj mierniki poziomu.", L"Seviye olcerlerini goster veya gizle."));
 	menu.AddCheck(IDM_FREEZE,
 		LL14(L"フリーズ", L"Freeze", L"Gel", L"Congela", L"Congelar", L"정지", L"冻结", L"تجميد", L"Заморозка", L"Einfrieren", L"Congelar", L"Bevriezen", L"Zamroz", L"Dondur"),
-		m_frozen);
+		m_frozen,
+		LL14(L"アナライザ表示を一時停止（フリーズ）します。", L"Freeze the analyzer display.", L"Geler l'affichage de l'analyseur.", L"Congela la visualizzazione dell'analizzatore.", L"Congelar la pantalla del analizador.", L"분석기 표시를 일시 정지(프리즈)합니다.", L"冻结分析器显示。", L"تجميد عرض المحلل.", L"Заморозить отображение анализатора.", L"Analysatoranzeige einfrieren.", L"Congelar a exibicao do analisador.", L"Bevries de analyserweergave.", L"Zamroz wyswietlacz analizatora.", L"Analizor goruntusunu dondur."));
 	menu.AddCommand(IDM_RESET_PEAK,
 		LL14(L"ピークをリセット (ダブルクリック)", L"Reset peaks (double-click)", L"Reinit. cretes (double-clic)", L"Reset picchi (doppio clic)", L"Restablecer picos (doble clic)", L"피크 리셋(더블클릭)", L"重置峰值(双击)", L"إعادة الذروة (نقر مزدوج)", L"Сброс пиков (двойной клик)", L"Peaks zurucksetzen (Doppelklick)", L"Redefinir picos (duplo clique)", L"Piekreset (dubbelklik)", L"Reset szczytow (dwuklik)", L"Tepe sifirla (cift tik)"),
 		LL14(L"ピークホールドをリセットします（ダブルクリックでも可）。", L"Reset peak hold (also via double-click).", L"Reinitialiser le maintien de crete (aussi double-clic).", L"Reset del picco trattenuto (anche doppio clic).", L"Restablecer retencion de pico (tambien doble clic).", L"피크 홀드를 리셋합니다(더블클릭도 가능).", L"重置峰值保持（也可双击）。", L"إعادة الاحتفاظ بالذروة (أو بالنقر المزدوج).", L"Сброс удержания пика (также двойной клик).", L"Peak Hold zurucksetzen (auch Doppelklick).", L"Redefinir retencao de pico (tambem duplo clique).", L"Piekvasthouden resetten (ook dubbelklik).", L"Reset przytrzymania szczytu (tez dwuklik).", L"Tepe tutmayi sifirla (cift tik de olur)."));
@@ -1820,33 +1830,41 @@ void CAnalyzerDlg::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
 	menu.AddSeparator();
 	menu.AddCommand(IDM_COPY_HOVER,
 		LL14(L"ホバー値をコピー", L"Copy hover readout", L"Copier la lecture au survol", L"Copia lettura hover", L"Copiar lectura al pasar", L"호버 값 복사", L"复制悬停读数", L"نسخ قراءة التمرير", L"Копировать наведение", L"Hover-Wert kopieren", L"Copiar leitura ao pairar", L"Hoverwaarde kopieren", L"Kopiuj odczyt hover", L"Hover degerini kopyala"),
-		NULL, m_hoverValid);
+		LL14(L"カーソル位置の周波数／レベル値をクリップボードへコピーします。", L"Copy the hover frequency/level readout to the clipboard.", L"Copier la lecture frequence/niveau au survol dans le presse-papiers.", L"Copia lettura frequenza/livello hover negli appunti.", L"Copiar la lectura de frecuencia/nivel al portapapeles.", L"호버 위치의 주파수/레벨 값을 클립보드로 복사합니다.", L"将悬停处的频率/电平读数复制到剪贴板。", L"نسخ قراءة التردد/المستوى عند التمرير إلى الحافظة.", L"Копировать частоту/уровень под курсором в буфер.", L"Hover-Frequenz/Pegel in die Zwischenablage kopieren.", L"Copiar a leitura de frequencia/nivel ao pairar para a area de transferencia.", L"Kopieer hover frequentie/niveau naar het klembord.", L"Kopiuj odczyt czestotliwosci/poziomu hover do schowka.", L"Hover frekans/seviye degerini panoya kopyala."),
+		m_hoverValid);
 	menu.AddCommand(IDM_COPY_PEAK,
-		LL14(L"最大ピークをコピー", L"Copy loudest peak", L"Copier le pic max", L"Copia picco massimo", L"Copiar pico maximo", L"최대 피크 복사", L"复制最大峰值", L"نسخ أعلى قمة", L"Копировать макс. пик", L"Lautesten Peak kopieren", L"Copiar pico mais alto", L"Luidste piek kopieren", L"Kopiuj najglosniejszy szczyt", L"En yuksek tepeyi kopyala"));
+		LL14(L"最大ピークをコピー", L"Copy loudest peak", L"Copier le pic max", L"Copia picco massimo", L"Copiar pico maximo", L"최대 피크 복사", L"复制最大峰值", L"نسخ أعلى قمة", L"Копировать макс. пик", L"Lautesten Peak kopieren", L"Copiar pico mais alto", L"Luidste piek kopieren", L"Kopiuj najglosniejszy szczyt", L"En yuksek tepeyi kopyala"),
+		LL14(L"最大ピークの値をクリップボードへコピーします。", L"Copy the loudest peak value to the clipboard.", L"Copier la valeur du pic maximal dans le presse-papiers.", L"Copia il valore del picco massimo negli appunti.", L"Copiar el valor del pico maximo al portapapeles.", L"최대 피크 값을 클립보드로 복사합니다.", L"将最大峰值复制到剪贴板。", L"نسخ قيمة أعلى قمة إلى الحافظة.", L"Копировать значение максимального пика в буфер.", L"Lautesten Peak-Wert in die Zwischenablage kopieren.", L"Copiar o valor do pico mais alto para a area de transferencia.", L"Kopieer de luidste piekwaarde naar het klembord.", L"Kopiuj wartosc najglosniejszego szczytu do schowka.", L"En yuksek tepe degerini panoya kopyala."));
 	menu.AddCommand(IDM_COPY_LEVELS,
-		LL14(L"レベルをコピー", L"Copy levels", L"Copier les niveaux", L"Copia livelli", L"Copiar niveles", L"레벨 복사", L"复制电平", L"نسخ المستويات", L"Копировать уровни", L"Pegel kopieren", L"Copiar niveis", L"Niveaus kopieren", L"Kopiuj poziomy", L"Seviyeleri kopyala"));
+		LL14(L"レベルをコピー", L"Copy levels", L"Copier les niveaux", L"Copia livelli", L"Copiar niveles", L"레벨 복사", L"复制电平", L"نسخ المستويات", L"Копировать уровни", L"Pegel kopieren", L"Copiar niveis", L"Niveaus kopieren", L"Kopiuj poziomy", L"Seviyeleri kopyala"),
+		LL14(L"現在のレベル値をクリップボードへコピーします。", L"Copy current level values to the clipboard.", L"Copier les niveaux actuels dans le presse-papiers.", L"Copia i livelli correnti negli appunti.", L"Copiar los niveles actuales al portapapeles.", L"현재 레벨 값을 클립보드로 복사합니다.", L"将当前电平值复制到剪贴板。", L"نسخ مستويات المستوى الحالية إلى الحافظة.", L"Копировать текущие уровни в буфер.", L"Aktuelle Pegelwerte in die Zwischenablage kopieren.", L"Copiar os niveis atuais para a area de transferencia.", L"Kopieer huidige niveaus naar het klembord.", L"Kopiuj biezace poziomy do schowka.", L"Gecerli seviye degerlerini panoya kopyala."));
 
 	menu.AddSeparator();
 	menu.AddCommand(IDM_CLEAR_DISPLAY,
-		LL14(L"表示をクリア", L"Clear display", L"Effacer l'affichage", L"Cancella visualizzazione", L"Borrar pantalla", L"표시 지우기", L"清除显示", L"مسح العرض", L"Очистить экран", L"Anzeige leeren", L"Limpar exibicao", L"Weergave wissen", L"Wyczysc wyswietlacz", L"Goruntuyu temizle"));
+		LL14(L"表示をクリア", L"Clear display", L"Effacer l'affichage", L"Cancella visualizzazione", L"Borrar pantalla", L"표시 지우기", L"清除显示", L"مسح العرض", L"Очистить экран", L"Anzeige leeren", L"Limpar exibicao", L"Weergave wissen", L"Wyczysc wyswietlacz", L"Goruntuyu temizle"),
+		LL14(L"表示履歴（波形トレースなど）をクリアします。", L"Clear display history (wave traces, etc.).", L"Effacer l'historique d'affichage (traces d'onde, etc.).", L"Cancella la cronologia di visualizzazione (tracce onda, ecc.).", L"Borrar el historial de pantalla (trazas de onda, etc.).", L"표시 이력(파형 트레이스 등)을 지웁니다.", L"清除显示历史（波形轨迹等）。", L"مسح سجل العرض (آثار الموجة وغيرها).", L"Очистить историю отображения (трассы волны и т. д.).", L"Anzeigehistorie leeren (Wellenspuren usw.).", L"Limpar o historico de exibicao (trilhas de onda, etc.).", L"Wis weergavegeschiedenis (golfsporen enz.).", L"Wyczysc historie wyswietlania (slady fali itd.).", L"Goruntu gecmisini temizle (dalga izleri vb.)."));
 	menu.AddCheck(IDM_ALWAYS_ON_TOP,
 		LL14(L"常に手前に表示", L"Always on top", L"Toujours au premier plan", L"Sempre in primo piano", L"Siempre visible", L"항상 위에 표시", L"始终置顶", L"دائما في المقدمة", L"Поверх всех окон", L"Immer im Vordergrund", L"Sempre no topo", L"Altijd op voorgrond", L"Zawsze na wierzchu", L"Her zaman ustte"),
-		m_alwaysOnTop);
+		m_alwaysOnTop,
+		LL14(L"ウィンドウを常に他のウィンドウの手前に表示します。", L"Keep this window always on top of others.", L"Garder cette fenetre toujours au premier plan.", L"Mantieni questa finestra sempre in primo piano.", L"Mantener esta ventana siempre delante de las demas.", L"이 창을 항상 다른 창 위에 표시합니다.", L"将此窗口始终置于其他窗口之上。", L"إبقاء هذه النافذة دائماً فوق النوافذ الأخرى.", L"Держать это окно поверх остальных.", L"Dieses Fenster immer im Vordergrund halten.", L"Manter esta janela sempre acima das outras.", L"Houd dit venster altijd boven andere.", L"Trzymaj to okno zawsze na wierzchu.", L"Bu pencereyi her zaman digerlerinin ustunde tut."));
 	menu.AddSeparator();
 	menu.AddCommand(ID_MP_OPEN_EQ,
 		LL14(L"イコライザを開く", L"Open equalizer", L"Ouvrir l'egaliseur", L"Apri equalizzatore", L"Abrir ecualizador",
 			L"이퀄라이저 열기", L"打开均衡器", L"فتح المعادل", L"Открыть эквалайзер", L"Equalizer öffnen",
-			L"Abrir equalizador", L"Equalizer openen", L"Otworz equalizer", L"Equalizeri ac"));
+			L"Abrir equalizador", L"Equalizer openen", L"Otworz equalizer", L"Equalizeri ac"),
+		LL14(L"イコライザウィンドウを開きます。", L"Open the equalizer window.", L"Ouvrir la fenetre de l'egaliseur.", L"Apri la finestra dell'equalizzatore.", L"Abrir la ventana del ecualizador.", L"이퀄라이저 창을 엽니다.", L"打开均衡器窗口。", L"فتح نافذة المعادل.", L"Открыть окно эквалайзера.", L"Equalizer-Fenster offnen.", L"Abrir a janela do equalizador.", L"Open het equalizer-venster.", L"Otworz okno equalizera.", L"Equalizer penceresini ac."));
 	menu.AddCommand(ID_MP_OPEN_PIANOROLL,
 		LL14(L"ピアノロールを開く", L"Open piano roll", L"Ouvrir le piano roll", L"Apri piano roll", L"Abrir piano roll",
 			L"피아노 롤 열기", L"打开钢琴卷帘", L"فتح لفافة البيانو", L"Открыть пианоролл", L"Piano-Roll öffnen",
-			L"Abrir piano roll", L"Piano-roll openen", L"Otworz piano roll", L"Piyano rolunu ac"));
+			L"Abrir piano roll", L"Piano-roll openen", L"Otworz piano roll", L"Piyano rolunu ac"),
+		LL14(L"簡易ピアノロールウィンドウを開きます。", L"Open the simple piano roll window.", L"Ouvrir la fenetre du piano roll simple.", L"Apri la finestra del piano roll semplice.", L"Abrir la ventana del piano roll simple.", L"간이 피아노 롤 창을 엽니다.", L"打开简易钢琴卷帘窗口。", L"فتح نافذة لفافة البيانو البسيطة.", L"Открыть окно простого пианоролла.", L"Einfaches Piano-Roll-Fenster offnen.", L"Abrir a janela do piano roll simples.", L"Open het eenvoudige piano-roll-venster.", L"Otworz okno prostego piano roll.", L"Basit piyano roll penceresini ac."));
 	menu.AddSeparator();
 	menu.AddCommand(ID_HELP_SHOWSHEET,
 		LL14(L"操作ガイド", L"Operation guide", L"Guide d'utilisation", L"Guida operativa",
 			L"Guía de operación", L"조작 가이드", L"操作指南", L"دليل التشغيل",
 			L"Руководство", L"Bedienungsanleitung", L"Guia de operação", L"Handleiding",
-			L"Przewodnik", L"İşlem kılavuzu"));
+			L"Przewodnik", L"İşlem kılavuzu"),
+		LL14(L"アナライザの操作ガイドを表示します。", L"Show the analyzer operation guide.", L"Afficher le guide d'utilisation de l'analyseur.", L"Mostra la guida operativa dell'analizzatore.", L"Mostrar la guia de operacion del analizador.", L"분석기 조작 가이드를 표시합니다.", L"显示分析器操作指南。", L"عرض دليل تشغيل المحلل.", L"Показать руководство по анализатору.", L"Bedienungsanleitung des Analysators anzeigen.", L"Mostrar o guia de operacao do analisador.", L"Toon de handleiding van de analyser.", L"Pokaz przewodnik po analizatorze.", L"Analizor islem kilavuzunu goster."));
 
 	if (point.x == -1 && point.y == -1) {
 		CRect rc; GetClientRect(&rc); ClientToScreen(&rc);

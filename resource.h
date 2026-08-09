@@ -1481,6 +1481,7 @@
 #define IDC_DJPAD_MICDEV_L              3991
 #define IDC_DJPAD_LOOPDEV_L             3992
 #define IDC_SC_CURSOR                   3993
+#define IDC_MP_FINDREGEX                3994
 
 // Next default values for new objects
 // 
@@ -1488,7 +1489,7 @@
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NEXT_RESOURCE_VALUE        250
 #define _APS_NEXT_COMMAND_VALUE         33243
-#define _APS_NEXT_CONTROL_VALUE         3994
+#define _APS_NEXT_CONTROL_VALUE         3995
 #define _APS_NEXT_SYMED_VALUE           104
 #endif
 #endif

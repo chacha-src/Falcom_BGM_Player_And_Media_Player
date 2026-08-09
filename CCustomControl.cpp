@@ -11361,27 +11361,76 @@ void CCustomSysPerfCtrl::ShowCtxMenu(CPoint screenPt)
 	CCustomPopupMenu menu;
 	menu.AddCheck(kCmdViewAll,
 		LL14(L"すべて表示", L"Show all", L"Tout afficher", L"Mostra tutto", L"Mostrar todo", L"모두 표시", L"全部显示", L"عرض الكل", L"Показать все", L"Alles anzeigen", L"Mostrar tudo", L"Alles tonen", L"Pokaz wszystko", L"Tumunu goster"),
-		m_viewMode == VIEW_ALL);
+		m_viewMode == VIEW_ALL,
+		LL14(L"メモリ＋CPU全体＋コアグリッドをまとめて表示", L"Show memory + overall CPU + per-core grid together",
+			L"Afficher memoire + CPU global + grille", L"Mostra memoria + CPU totale + griglia",
+			L"Mostrar memoria + CPU total + cuadrícula", L"메모리+CPU 전체+코어 그리드를 함께 표시",
+			L"同时显示内存+CPU总体+核心网格", L"عرض الذاكرة + المعالج الكلي + الشبكة",
+			L"Показать память + общий CPU + сетку ядер", L"Speicher + Gesamt-CPU + Kernraster zusammen",
+			L"Mostrar memoria + CPU geral + grade", L"Geheugen + totale CPU + kernraster tonen",
+			L"Pokaz pamiec + CPU ogolne + siatke rdzeni", L"Bellek + genel CPU + cekirdek ızgarasini goster"));
 	menu.AddCheck(kCmdViewMem,
 		LL14(L"メモリのみ", L"Memory only", L"Memoire seule", L"Solo memoria", L"Solo memoria", L"메모리만", L"仅内存", L"الذاكرة فقط", L"Только память", L"Nur Speicher", L"Somente memoria", L"Alleen geheugen", L"Tylko pamiec", L"Yalniz bellek"),
-		m_viewMode == VIEW_MEM);
+		m_viewMode == VIEW_MEM,
+		LL14(L"メモリ使用量グラフだけを表示（CPUは非表示）", L"Show only the memory graph (hide CPU)",
+			L"Afficher seulement le graphe memoire (masquer CPU)", L"Solo grafico memoria (nascondi CPU)",
+			L"Solo grafico de memoria (ocultar CPU)", L"메모리 그래프만 표시(CPU 숨김)",
+			L"仅显示内存图（隐藏 CPU）", L"عرض رسم الذاكرة فقط (إخفاء المعالج)",
+			L"Только график памяти (скрыть CPU)", L"Nur Speicherdiagramm (CPU aus)",
+			L"Somente grafico de memoria (ocultar CPU)", L"Alleen geheugengrafiek (CPU verbergen)",
+			L"Tylko wykres pamieci (ukryj CPU)", L"Yalniz bellek grafigi (CPU gizle)"));
 	menu.AddCheck(kCmdViewCpuOverall,
 		LL14(L"CPU 全体のみ", L"CPU overall only", L"CPU global seul", L"Solo CPU totale", L"Solo CPU total", L"CPU 전체만", L"仅 CPU 总体", L"وحدة المعالجة فقط", L"Только CPU общий", L"Nur CPU gesamt", L"Somente CPU geral", L"Alleen CPU totaal", L"Tylko CPU ogolne", L"Yalniz CPU genel"),
-		m_viewMode == VIEW_CPU_OVERALL);
+		m_viewMode == VIEW_CPU_OVERALL,
+		LL14(L"全体CPU使用率グラフだけを表示", L"Show only the overall CPU usage graph",
+			L"Afficher seulement le graphe CPU global", L"Solo grafico CPU totale",
+			L"Solo grafico CPU total", L"전체 CPU 사용률 그래프만 표시",
+			L"仅显示总体 CPU 使用率图", L"عرض رسم استخدام المعالج الكلي فقط",
+			L"Только график общей загрузки CPU", L"Nur Gesamt-CPU-Diagramm",
+			L"Somente grafico CPU geral", L"Alleen totale CPU-grafiek",
+			L"Tylko wykres ogolnego CPU", L"Yalniz genel CPU kullanim grafigi"));
 	menu.AddCheck(kCmdViewCpuGrid,
 		LL14(L"CPU グリッドのみ", L"CPU grid only", L"Grille CPU seule", L"Solo griglia CPU", L"Solo cuadrícula CPU", L"CPU 그리드만", L"仅 CPU 网格", L"شبكة المعالج فقط", L"Только сетка CPU", L"Nur CPU-Raster", L"Somente grade CPU", L"Alleen CPU-raster", L"Tylko siatka CPU", L"Yalniz CPU izgarasi"),
-		m_viewMode == VIEW_CPU_GRID);
+		m_viewMode == VIEW_CPU_GRID,
+		LL14(L"コア別CPUグリッドだけを表示", L"Show only the per-core CPU grid",
+			L"Afficher seulement la grille CPU par coeur", L"Solo griglia CPU per core",
+			L"Solo cuadrícula CPU por nucleo", L"코어별 CPU 그리드만 표시",
+			L"仅显示每核 CPU 网格", L"عرض شبكة المعالج لكل نواة فقط",
+			L"Только сетка CPU по ядрам", L"Nur per-Kern-CPU-Raster",
+			L"Somente grade CPU por nucleo", L"Alleen CPU-raster per kern",
+			L"Tylko siatka CPU per rdzen", L"Yalniz cekirdek basina CPU ızgarasi"));
 	menu.AddCheck(kCmdViewCpuBoth,
 		LL14(L"CPU のみ (全体+グリッド)", L"CPU only (overall+grid)", L"CPU seul (global+grille)", L"Solo CPU (totale+griglia)", L"Solo CPU (total+cuadrícula)", L"CPU만 (전체+그리드)", L"仅 CPU（总体+网格）", L"المعالج فقط (كلي+شبكة)", L"Только CPU (общий+сетка)", L"Nur CPU (gesamt+Raster)", L"Somente CPU (geral+grade)", L"Alleen CPU (totaal+raster)", L"Tylko CPU (ogolne+siatka)", L"Yalniz CPU (genel+izgara)"),
-		m_viewMode == VIEW_CPU_BOTH);
+		m_viewMode == VIEW_CPU_BOTH,
+		LL14(L"CPU全体＋コアグリッドのみ（メモリは非表示）", L"Overall CPU + per-core grid only (hide memory)",
+			L"CPU global + grille seulement (masquer memoire)", L"Solo CPU totale + griglia (nascondi memoria)",
+			L"Solo CPU total + cuadrícula (ocultar memoria)", L"CPU 전체+코어 그리드만(메모리 숨김)",
+			L"仅总体 CPU+核心网格（隐藏内存）", L"المعالج الكلي + الشبكة فقط (إخفاء الذاكرة)",
+			L"Только общий CPU + сетка (скрыть память)", L"Nur Gesamt-CPU + Raster (Speicher aus)",
+			L"Somente CPU geral + grade (ocultar memoria)", L"Alleen totale CPU + raster (geheugen uit)",
+			L"Tylko CPU ogolne + siatka (ukryj pamiec)", L"Yalniz genel CPU + izgara (bellek gizle)"));
 	menu.AddSeparator();
 	menu.AddCheck(kCmdPause,
 		m_bPaused
 		? LL14(L"更新を再開", L"Resume updates", L"Reprendre", L"Riprendi", L"Reanudar", L"업데이트 재개", L"恢复更新", L"استئناف التحديث", L"Возобновить", L"Fortsetzen", L"Retomar", L"Hervatten", L"Wznow", L"Devam et")
 		: LL14(L"更新を一時停止", L"Pause updates", L"Pause", L"Pausa", L"Pausar", L"업데이트 일시정지", L"暂停更新", L"إيقاف مؤقت", L"Пауза", L"Pausieren", L"Pausar", L"Pauzeren", L"Wstrzymaj", L"Duraklat"),
-		m_bPaused);
+		m_bPaused,
+		LL14(L"モニタ表示のライブ更新を一時停止／再開", L"Pause or resume live monitor updates",
+			L"Mettre en pause / reprendre les maj live", L"Pausa o riprendi aggiornamenti live",
+			L"Pausar o reanudar actualizaciones en vivo", L"모니터 실시간 갱신 일시정지/재개",
+			L"暂停/恢复监视器实时更新", L"إيقاف أو استئناف تحديثات المراقبة",
+			L"Пауза / возобновление живого обновления", L"Live-Updates pausieren / fortsetzen",
+			L"Pausar ou retomar atualizacoes ao vivo", L"Live-updates pauzeren / hervatten",
+			L"Wstrzymaj lub wznow aktualizacje na zywo", L"Canli monitor guncellemelerini duraklat/devam et"));
 	menu.AddCommand(kCmdCopy,
-		LL14(L"統計をコピー", L"Copy statistics", L"Copier les stats", L"Copia statistiche", L"Copiar estadisticas", L"통계 복사", L"复制统计", L"نسخ الإحصاءات", L"Копировать статистику", L"Statistik kopieren", L"Copiar estatisticas", L"Statistieken kopieren", L"Kopiuj statystyki", L"Istatistikleri kopyala"));
+		LL14(L"統計をコピー", L"Copy statistics", L"Copier les stats", L"Copia statistiche", L"Copiar estadisticas", L"통계 복사", L"复制统计", L"نسخ الإحصاءات", L"Копировать статистику", L"Statistik kopieren", L"Copiar estatisticas", L"Statistieken kopieren", L"Kopiuj statystyki", L"Istatistikleri kopyala"),
+		LL14(L"現在のCPU／メモリ統計をクリップボードへコピー", L"Copy current CPU/memory stats to the clipboard",
+			L"Copier les stats CPU/memoire dans le presse-papiers", L"Copia stats CPU/memoria negli appunti",
+			L"Copiar stats CPU/memoria al portapapeles", L"현재 CPU/메모리 통계를 클립보드에 복사",
+			L"将当前 CPU/内存统计复制到剪贴板", L"نسخ إحصاءات المعالج/الذاكرة إلى الحافظة",
+			L"Копировать статистику CPU/памяти в буфер", L"CPU-/Speicherstatistik in Zwischenablage",
+			L"Copiar stats CPU/memoria para a area de transferencia", L"CPU-/geheugenstatistieken naar klembord",
+			L"Kopiuj statystyki CPU/pamieci do schowka", L"Guncel CPU/bellek istatistiklerini panoya kopyala"));
 	menu.AddSeparator();
 	{
 		CCustomPopupMenu* cols = menu.AddSubMenu(
@@ -15542,29 +15591,79 @@ static void CCC_CaptionTrackContextMenu(CWnd* pDlg, CPoint ptClient, int* pMainL
     const BOOL zoomed = pDlg->IsZoomed();
     menu.AddCommand(SC_RESTORE,
         LL14(L"元のサイズに戻す", L"Restore", L"Restaurer", L"Ripristina", L"Restaurar", L"이전 크기로", L"还原", L"استعادة", L"Восстановить", L"Wiederherstellen", L"Restaurar", L"Vorige grootte", L"Przywroc", L"Onceki boyut"),
-        NULL, zoomed);
+        LL14(L"最大化前の位置・サイズに戻します", L"Restore the window to its previous size and position",
+            L"Restaurer la taille et la position precedentes", L"Ripristina dimensioni e posizione precedenti",
+            L"Restaurar tamano y posicion anteriores", L"최대화 전 위치·크기로 되돌림",
+            L"还原为最大化前的位置和大小", L"استعادة الحجم والموضع السابقين",
+            L"Вернуть прежний размер и положение", L"Vorherige Groesse und Position wiederherstellen",
+            L"Restaurar tamanho e posicao anteriores", L"Vorige grootte en positie herstellen",
+            L"Przywroc poprzedni rozmiar i pozycje", L"Onceki boyut ve konuma geri yukle"),
+        zoomed);
     menu.AddCommand(SC_MOVE,
-        LL14(L"移動", L"Move", L"Deplacer", L"Sposta", L"Mover", L"이동", L"移动", L"تحريك", L"Переместить", L"Verschieben", L"Mover", L"Verplaatsen", L"Przesun", L"Tasi"));
+        LL14(L"移動", L"Move", L"Deplacer", L"Sposta", L"Mover", L"이동", L"移动", L"تحريك", L"Переместить", L"Verschieben", L"Mover", L"Verplaatsen", L"Przesun", L"Tasi"),
+        LL14(L"タイトルバーをドラッグしてウィンドウを移動", L"Drag the title bar to move the window",
+            L"Glisser la barre de titre pour deplacer", L"Trascina la barra del titolo per spostare",
+            L"Arrastrar la barra de titulo para mover", L"제목 표시줄을 끌어 창 이동",
+            L"拖动标题栏移动窗口", L"اسحب شريط العنوان لتحريك النافذة",
+            L"Перетащить за заголовок для перемещения", L"Titelleiste ziehen zum Verschieben",
+            L"Arrastar a barra de titulo para mover", L"Titelbalk slepen om te verplaatsen",
+            L"Przeciagnij pasek tytulu aby przesunac", L"Tasimak icin baslik cubugunu surukle"));
     if (pDlg->GetStyle() & WS_THICKFRAME)
         menu.AddCommand(SC_SIZE,
             LL14(L"サイズ変更", L"Size", L"Taille", L"Dimensiona", L"Tamano", L"크기 조정", L"大小", L"الحجم", L"Размер", L"Groesse", L"Tamanho", L"Grootte", L"Rozmiar", L"Boyut"),
-            NULL, !zoomed);
+            LL14(L"枠をドラッグしてウィンドウサイズを変更", L"Drag the window borders to resize",
+                L"Glisser les bords pour redimensionner", L"Trascina i bordi per ridimensionare",
+                L"Arrastrar los bordes para cambiar tamano", L"테두리를 끌어 창 크기 변경",
+                L"拖动边框调整窗口大小", L"اسحب حواف النافذة لتغيير الحجم",
+                L"Потянуть края для изменения размера", L"Raender ziehen zum Groesse aendern",
+                L"Arrastar as bordas para redimensionar", L"Randen slepen om te vergroten/verkleinen",
+                L"Przeciagnij krawedzie aby zmienic rozmiar", L"Boyut degistirmek icin kenarlari surukle"),
+            !zoomed);
     CCC_CaptionEntry* e = CCC_FindCaption(hWnd);
     if (e && e->hasMin)
         menu.AddCommand(SC_MINIMIZE,
-            LL14(L"最小化", L"Minimize", L"Reduire", L"Riduci a icona", L"Minimizar", L"최소화", L"最小化", L"تصغير", L"Свернуть", L"Minimieren", L"Minimizar", L"Minimaliseren", L"Minimalizuj", L"Kucult"));
+            LL14(L"最小化", L"Minimize", L"Reduire", L"Riduci a icona", L"Minimizar", L"최소화", L"最小化", L"تصغير", L"Свернуть", L"Minimieren", L"Minimizar", L"Minimaliseren", L"Minimalizuj", L"Kucult"),
+            LL14(L"タスクバーへ最小化します", L"Minimize the window to the taskbar",
+                L"Reduire la fenetre dans la barre des taches", L"Riduci a icona nella barra delle applicazioni",
+                L"Minimizar a la barra de tareas", L"작업 표시줄로 최소화",
+                L"最小化到任务栏", L"تصغير النافذة إلى شريط المهام",
+                L"Свернуть окно на панель задач", L"Fenster in die Taskleiste minimieren",
+                L"Minimizar para a barra de tarefas", L"Minimaliseren naar de taakbalk",
+                L"Minimalizuj do paska zadan", L"Gorev cubuguna kucult"));
     if (e && e->hasMax)
         menu.AddCommand(SC_MAXIMIZE,
             LL14(L"最大化", L"Maximize", L"Agrandir", L"Ingrandisci", L"Maximizar", L"최대화", L"最大化", L"تكبير", L"Развернуть", L"Maximieren", L"Maximizar", L"Maximaliseren", L"Maksymalizuj", L"Buyut"),
-            NULL, !zoomed);
+            LL14(L"画面いっぱいに最大化します", L"Maximize the window to fill the screen",
+                L"Agrandir la fenetre pour remplir l'ecran", L"Ingrandisci per riempire lo schermo",
+                L"Maximizar para llenar la pantalla", L"화면 가득 최대화",
+                L"最大化以填满屏幕", L"تكبير النافذة لملء الشاشة",
+                L"Развернуть на весь экран", L"Fenster auf Bildschirmgroesse maximieren",
+                L"Maximizar para preencher a tela", L"Maximaliseren om het scherm te vullen",
+                L"Maksymalizuj aby wypelnic ekran", L"Ekrani dolduracak sekilde buyut"),
+            !zoomed);
     menu.AddSeparator();
     if (e && e->hasSettings)
         menu.AddCommand(IDC_CAP_SETTINGS,
-            LL14(L"設定", L"Settings", L"Parametres", L"Impostazioni", L"Ajustes", L"설정", L"设置", L"الإعدادات", L"Настройки", L"Einstellungen", L"Configuracoes", L"Instellingen", L"Ustawienia", L"Ayarlar"));
+            LL14(L"設定", L"Settings", L"Parametres", L"Impostazioni", L"Ajustes", L"설정", L"设置", L"الإعدادات", L"Настройки", L"Einstellungen", L"Configuracoes", L"Instellingen", L"Ustawienia", L"Ayarlar"),
+            LL14(L"キャプション／ウィンドウ関連の設定を開く", L"Open caption / window-related settings",
+                L"Ouvrir les reglages barre de titre / fenetre", L"Apri impostazioni titolo / finestra",
+                L"Abrir ajustes de titulo / ventana", L"캡션/창 관련 설정 열기",
+                L"打开标题栏/窗口相关设置", L"فتح إعدادات شريط العنوان / النافذة",
+                L"Открыть настройки заголовка / окна", L"Titelleisten-/Fenstereinstellungen oeffnen",
+                L"Abrir configuracoes de titulo / janela", L"Titelbalk-/vensterinstellingen openen",
+                L"Otworz ustawienia paska tytulu / okna", L"Baslik cubugu / pencere ayarlarini ac"));
     if (e)
         menu.AddCheck(IDC_CAP_PIN,
             LL14(L"常に手前に表示", L"Always on top", L"Toujours au premier plan", L"Sempre in primo piano", L"Siempre visible", L"항상 위", L"总在最前", L"دائماً في المقدمة", L"Поверх всех окон", L"Immer im Vordergrund", L"Sempre no topo", L"Altijd bovenop", L"Zawsze na wierzchu", L"Her zaman ustte"),
-            e->topmost);
+            e->topmost,
+            LL14(L"他ウィンドウの上に常に表示（ピン留め）", L"Keep this window above others (pin / always on top)",
+                L"Garder cette fenetre au-dessus des autres", L"Mantieni questa finestra sopra le altre",
+                L"Mantener esta ventana sobre las demas", L"다른 창 위에 항상 표시(핀)",
+                L"始终显示在其他窗口之上（置顶）", L"إبقاء هذه النافذة فوق الأخريات",
+                L"Держать окно поверх остальных", L"Fenster immer ueber anderen halten",
+                L"Manter esta janela acima das outras", L"Dit venster boven andere houden",
+                L"Trzymaj to okno nad innymi", L"Bu pencereyi digerlerinin ustunde tut"));
+
     if (pMainLockSave) {
         CCC_MainLockEntry* le = CCC_FindMainLockEntry(hWnd);
         menu.AddCheck(IDC_MAINWIN_LOCK, CCC_MainLockLabel(), (le && le->locked) ? TRUE : FALSE,
@@ -15595,14 +15694,28 @@ static void CCC_CaptionTrackContextMenu(CWnd* pDlg, CPoint ptClient, int* pMainL
                     text[0] = 0;
                     ::GetMenuStringW(hSys, i, text, 256, MF_BYPOSITION);
                     if (text[0])
-                        menu.AddCommand(id, text);
+                        menu.AddCommand(id, text,
+                            LL14(L"このシステムメニュー／キャプチャ操作を実行", L"Run this system-menu / capture action",
+                                L"Executer cette action systeme / capture", L"Esegui questa azione di sistema / cattura",
+                                L"Ejecutar esta accion de sistema / captura", L"이 시스템 메뉴/캡처 동작 실행",
+                                L"执行此系统菜单/捕获操作", L"تشغيل أمر قائمة النظام / الالتقاط هذا",
+                                L"Выполнить эту команду системного меню / захвата", L"Diesen Systemmenü-/Capture-Befehl ausführen",
+                                L"Executar esta acao de menu do sistema / captura", L"Deze systeemmenu-/capture-actie uitvoeren",
+                                L"Wykonaj te polecenie menu systemu / przechwytu", L"Bu sistem menusu / yakalama eylemini calistir"));
                 }
             }
         }
     }
     menu.AddSeparator();
     menu.AddCommand(SC_CLOSE,
-        LL14(L"閉じる", L"Close", L"Fermer", L"Chiudi", L"Cerrar", L"닫기", L"关闭", L"إغلاق", L"Закрыть", L"Schliessen", L"Fechar", L"Sluiten", L"Zamknij", L"Kapat"));
+        LL14(L"閉じる", L"Close", L"Fermer", L"Chiudi", L"Cerrar", L"닫기", L"关闭", L"إغلاق", L"Закрыть", L"Schliessen", L"Fechar", L"Sluiten", L"Zamknij", L"Kapat"),
+        LL14(L"このウィンドウを閉じます", L"Close this window",
+            L"Fermer cette fenetre", L"Chiudi questa finestra",
+            L"Cerrar esta ventana", L"이 창을 닫습니다",
+            L"关闭此窗口", L"إغلاق هذه النافذة",
+            L"Закрыть это окно", L"Dieses Fenster schliessen",
+            L"Fechar esta janela", L"Dit venster sluiten",
+            L"Zamknij to okno", L"Bu pencereyi kapat"));
     const UINT cmd = menu.Track(scr, pDlg);
     if (cmd == IDC_CAP_SETTINGS)
         pDlg->SendMessage(WM_COMMAND, MAKEWPARAM(IDC_CAP_SETTINGS, BN_CLICKED), 0);

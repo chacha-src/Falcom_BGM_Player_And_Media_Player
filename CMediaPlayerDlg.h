@@ -1,4 +1,4 @@
-// CMediaPlayerDlg.h : メディアプレイヤーモード画面(張りぼて)とモード選択ダイアログ
+﻿// CMediaPlayerDlg.h : メディアプレイヤーモード画面(張りぼて)とモード選択ダイアログ
 //
 // このソフトは元々ファルコム特化型再生ソフトだが、メディアプレイヤーの側面も持つ。
 // CMediaPlayerDlg は「張りぼて(ファサード)」であり、実体は COggDlg(og->) と
@@ -146,6 +146,7 @@ public:
 	CCustomStandardButton m_sortName, m_sortArt, m_sortAlb, m_sortTime;
 	CCustomStandardButton m_addFolder; // フォルダから追加(ライブラリ)
 	CCustomCheckBox m_findFilter;      // 検索=絞り込み
+	CCustomCheckBox m_findRegex;       // 検索=正規表現
 	CCustomStatic m_lrcBadge;          // LRC状態バッジ
 	CCustomStatic m_plRailBg;          // Lib/Hist 左レールの不透明ピンク下地（白抜け防止）
 	// ライブラリ左ドロワー(フォルダツリー＋アルバム一覧)
@@ -591,6 +592,7 @@ protected:
 	afx_msg void OnSortTime();
 	afx_msg void OnAddFolder();
 	afx_msg void OnFindFilter();
+	afx_msg void OnFindRegex();
 	afx_msg void OnLibToggle();
 	afx_msg void OnHistToggle();
 	afx_msg void OnTempToggle();

@@ -964,24 +964,67 @@ void CCustomPopupMenu::EnsureChromePrefix()
 			LL14(L"太字", L"Bold", L"Gras", L"Grassetto", L"Negrita",
 				L"굵게", L"粗体", L"عريض", L"Жирный", L"Fett",
 				L"Negrito", L"Vet", L"Pogrubienie", L"Kalin"),
-			savedata.popupMenuBold ? TRUE : FALSE);
+			savedata.popupMenuBold ? TRUE : FALSE,
+			LL14(L"メニュー文字を太字にします（全カスタムメニュー共通・すぐ反映）",
+				L"Bold menu text (all custom menus; applies immediately)",
+				L"Texte du menu en gras (tous les menus; immédiat)",
+				L"Testo menu in grassetto (tutti i menu; subito)",
+				L"Texto del menu en negrita (todos; inmediato)",
+				L"메뉴 글자를 굵게 (모든 커스텀 메뉴, 즉시)",
+				L"菜单文字加粗（全部自定义菜单，立即生效）",
+				L"نص القائمة عريض (كل القوائم، فوري)",
+				L"Жирный текст меню (все меню, сразу)",
+				L"Menütext fett (alle Menüs, sofort)",
+				L"Texto do menu em negrito (todos; imediato)",
+				L"Menutekst vet (alle menu's; meteen)",
+				L"Pogrub tekst menu (wszystkie; od razu)",
+				L"Menu yazisini kalin yap (tum menu, aninda)"));
 		fontSub->AddCheck(CCUSTOM_POPUP_ID_FONT_ITALIC,
 			LL14(L"斜体", L"Italic", L"Italique", L"Corsivo", L"Cursiva",
 				L"기울임", L"斜体", L"مائل", L"Курсив", L"Kursiv",
 				L"Italico", L"Cursief", L"Kursywa", L"Italik"),
-			savedata.popupMenuItalic ? TRUE : FALSE);
+			savedata.popupMenuItalic ? TRUE : FALSE,
+			LL14(L"メニュー文字を斜体にします（全カスタムメニュー共通・すぐ反映）",
+				L"Italic menu text (all custom menus; applies immediately)",
+				L"Texte du menu en italique (tous; immédiat)",
+				L"Testo menu in corsivo (tutti; subito)",
+				L"Texto del menu en cursiva (todos; inmediato)",
+				L"메뉴 글자를 기울임 (모든 커스텀 메뉴, 즉시)",
+				L"菜单文字斜体（全部自定义菜单，立即生效）",
+				L"نص القائمة مائل (كل القوائم، فوري)",
+				L"Курсив меню (все меню, сразу)",
+				L"Menütext kursiv (alle Menüs, sofort)",
+				L"Texto do menu em italico (todos; imediato)",
+				L"Menutekst cursief (alle menu's; meteen)",
+				L"Kursywa tekstu menu (wszystkie; od razu)",
+				L"Menu yazisini italik yap (tum menu, aninda)"));
 		fontSub->AddSeparator();
 		fontSub->SetStickyLeading(4); // サイズ/太字/斜体/セパレータを固定
 		EnsureFaceList();
 		const int room = CCUSTOM_POPUP_MAX_ITEMS - fontSub->m_itemCount - 1;
 		const int n = min(s_faceCount, max(0, room));
+		LPCTSTR faceTip = LL14(
+			L"ホバーでプレビュー、クリックでこの書体に確定（次回以降のメニューにも保存）",
+			L"Hover to preview; click to apply this face (saved for later menus)",
+			L"Survol = apercu; clic = appliquer (enregistre)",
+			L"Passa = anteprima; clic = applica (salva)",
+			L"Pasar = vista previa; clic = aplicar (guarda)",
+			L"호버 미리보기, 클릭으로 이 서체 확정(저장)",
+			L"悬停预览，点击采用该字体（会保存）",
+			L"مرر للمعاينة؛ انقر لتطبيق الخط (يُحفظ)",
+			L"Наведение — превью; клик — применить (сохраняется)",
+			L"Hover=Vorschau; Klick=Übernehmen (gespeichert)",
+			L"Passe=preview; clique=aplicar (salva)",
+			L"Hover=voorbeeld; klik=toepassen (opgeslagen)",
+			L"Najazd=podglad; klik=zastosuj (zapis)",
+			L"Gezdir=onizleme; tikla=uygula (kaydedilir)");
 		for (int i = 0; i < n; ++i) {
 			const BOOL cur = (savedata.popupMenuFace[0]
 				&& _wcsicmp(savedata.popupMenuFace, s_faces[i]) == 0) ? TRUE : FALSE;
 			if (cur)
-				fontSub->AddCheck(CCUSTOM_POPUP_ID_FONT_FACE, s_faces[i], TRUE);
+				fontSub->AddCheck(CCUSTOM_POPUP_ID_FONT_FACE, s_faces[i], TRUE, faceTip);
 			else
-				fontSub->AddCommand(CCUSTOM_POPUP_ID_FONT_FACE, s_faces[i]);
+				fontSub->AddCommand(CCUSTOM_POPUP_ID_FONT_FACE, s_faces[i], faceTip);
 		}
 	}
 

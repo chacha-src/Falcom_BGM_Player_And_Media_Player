@@ -761,6 +761,9 @@ BOOL COggApp::InitInstance()
 	if (datFileSize < (int)(offsetof(save, mpFindFilter) + sizeof(savedata.mpFindFilter)))
 		savedata.mpFindFilter = 0;
 	else if (savedata.mpFindFilter) savedata.mpFindFilter = 1;
+	if (datFileSize < (int)(offsetof(save, mpFindRegex) + sizeof(savedata.mpFindRegex)))
+		savedata.mpFindRegex = 0;
+	else if (savedata.mpFindRegex) savedata.mpFindRegex = 1;
 	if (datFileSize < (int)(offsetof(save, mpToolsOpen) + sizeof(savedata.mpToolsOpen)))
 		savedata.mpToolsOpen = 0;
 	else if (savedata.mpToolsOpen) savedata.mpToolsOpen = 1;

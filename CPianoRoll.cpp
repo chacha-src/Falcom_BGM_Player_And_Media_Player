@@ -2867,7 +2867,8 @@ void CPianoRoll::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
     CCustomPopupMenu menu;
 
     CCustomPopupMenu* subView = menu.AddSubMenu(
-        LL14(L"表示モード", L"View mode", L"Mode d'affichage", L"Modalita di visualizzazione", L"Modo de visualizacion", L"표시 모드", L"显示模式", L"وضع العرض", L"Режим отображения", L"Anzeigemodus", L"Modo de exibicao", L"Weergavemodus", L"Tryb wyswietlania", L"Goruntuleme modu"));
+        LL14(L"表示モード", L"View mode", L"Mode d'affichage", L"Modalita di visualizzazione", L"Modo de visualizacion", L"표시 모드", L"显示模式", L"وضع العرض", L"Режим отображения", L"Anzeigemodus", L"Modo de exibicao", L"Weergavemodus", L"Tryb wyswietlania", L"Goruntuleme modu"),
+        LL14(L"ロールの表示モード（通常2D／簡易3D）を選びます。", L"Choose roll view mode (normal 2D / soft 3D).", L"Choisir le mode d'affichage (2D normal / 3D simplifie).", L"Scegli la modalita di vista (2D normale / 3D semplificato).", L"Elegir el modo de vista (2D normal / 3D simple).", L"롤 표시 모드(일반 2D/간이 3D)를 고릅니다.", L"选择卷帘显示模式（普通2D/简易3D）。", L"اختر وضع عرض اللفة (2D عادي / 3D مبسط).", L"Выбрать режим отображения ролла (обычный 2D / простой 3D).", L"Anzeigemodus der Rolle wahlen (normal 2D / einfaches 3D).", L"Escolher o modo de vista do roll (2D normal / 3D simples).", L"Kies weergavemodus van de roll (normaal 2D / eenvoudig 3D).", L"Wybierz tryb widoku rolki (zwykly 2D / uproszczone 3D).", L"Roll goruntuleme modunu sec (normal 2D / basit 3B)."));
     if (subView) {
         subView->AddCheck(IDM_ROLL_VIEW_BASE + 0,
             LL14(L"通常 (2D)", L"Normal (2D)", L"Normal (2D)", L"Normale (2D)", L"Normal (2D)", L"일반 (2D)", L"普通 (2D)", L"عادي (2D)", L"Обычный (2D)", L"Normal (2D)", L"Normal (2D)", L"Normaal (2D)", L"Zwykly (2D)", L"Normal (2D)"),
@@ -2918,7 +2919,8 @@ void CPianoRoll::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
     }
 
     CCustomPopupMenu* subKeys = menu.AddSubMenu(
-        LL14(L"鍵盤レンジ", L"Keyboard range", L"Etendue du clavier", L"Estensione tastiera", L"Rango del teclado", L"건반 범위", L"键盘范围", L"مدى لوحة المفاتيح", L"Диапазон клавиатуры", L"Tastaturumfang", L"Faixa do teclado", L"Toetsenbereik", L"Zakres klawiatury", L"Klavye araligi"));
+        LL14(L"鍵盤レンジ", L"Keyboard range", L"Etendue du clavier", L"Estensione tastiera", L"Rango del teclado", L"건반 범위", L"键盘范围", L"مدى لوحة المفاتيح", L"Диапазон клавиатуры", L"Tastaturumfang", L"Faixa do teclado", L"Toetsenbereik", L"Zakres klawiatury", L"Klavye araligi"),
+        LL14(L"表示する鍵盤の範囲（88鍵／108鍵）を選びます。", L"Choose the visible keyboard range (88 / 108 keys).", L"Choisir l'etendue du clavier affichee (88 / 108 touches).", L"Scegli l'estensione tastiera visibile (88 / 108 tasti).", L"Elegir el rango de teclado visible (88 / 108 teclas).", L"표시할 건반 범위(88건/108건)를 고릅니다.", L"选择可见键盘范围（88键/108键）。", L"اختر مدى لوحة المفاتيح الظاهر (88 / 108 مفتاحا).", L"Выбрать видимый диапазон клавиатуры (88 / 108 клавиш).", L"Sichtbaren Tastaturumfang wahlen (88 / 108 Tasten).", L"Escolher a faixa de teclado visivel (88 / 108 teclas).", L"Kies zichtbaar toetsenbereik (88 / 108 toetsen).", L"Wybierz widoczny zakres klawiatury (88 / 108 klawiszy).", L"Gorunen klavye araligini sec (88 / 108 tus)."));
     if (subKeys) {
         subKeys->AddCheck(IDM_ROLL_KEYS_BASE + 0,
             LL14(L"88鍵 (A0～)", L"88 keys (A0-)", L"88 touches (A0-)", L"88 tasti (A0-)", L"88 teclas (A0-)", L"88건반 (A0-)", L"88键 (A0-)", L"88 مفتاحا (A0-)", L"88 клавиш (A0-)", L"88 Tasten (A0-)", L"88 teclas (A0-)", L"88 toetsen (A0-)", L"88 klawiszy (A0-)", L"88 tus (A0-)"),
@@ -2930,7 +2932,8 @@ void CPianoRoll::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
 
     menu.AddCheck(IDM_ROLL_NOTENAME,
         LL14(L"ノート名を表示", L"Show note names", L"Afficher les noms de notes", L"Mostra nomi delle note", L"Mostrar nombres de notas", L"음이름 표시", L"显示音名", L"إظهار أسماء النغمات", L"Показывать названия нот", L"Notennamen anzeigen", L"Mostrar nomes das notas", L"Notennamen tonen", L"Pokazuj nazwy nut", L"Nota adlarini goster"),
-        m_showNoteNames);
+        m_showNoteNames,
+        LL14(L"鍵盤／ノートに音名（C, D…）を表示します。", L"Show note names (C, D…) on the keyboard/notes.", L"Afficher les noms de notes (C, D…) sur le clavier/notes.", L"Mostra i nomi delle note (C, D…) su tastiera/note.", L"Mostrar nombres de notas (C, D…) en teclado/notas.", L"건반/노트에 음이름(C, D…)을 표시합니다.", L"在键盘/音符上显示音名（C、D…）。", L"إظهار أسماء النغمات (C, D…) على المفاتيح/النغمات.", L"Показывать имена нот (C, D…) на клавиатуре/нотах.", L"Notennamen (C, D…) auf Tastatur/Noten anzeigen.", L"Mostrar nomes das notas (C, D…) no teclado/notas.", L"Toon notennamen (C, D…) op toetsen/noten.", L"Pokazuj nazwy nut (C, D…) na klawiaturze/nutach.", L"Klavye/notalarda nota adlarini (C, D…) goster."));
     menu.AddCheck(IDM_ROLL_CHORD_PANEL,
         LL14(L"コード進行パネル(実験)", L"Chord panel (experimental)", L"Panneau accords (exp.)", L"Pannello accordi (sper.)", L"Panel acordes (exp.)", L"코드 진행 패널(실험)", L"和弦进行面板(实验)", L"لوحة التآلفات (تجريبي)", L"Панель аккордов (эксп.)", L"Akkordpanel (exp.)", L"Painel de acordes (exp.)", L"Akkoordenpaneel (exp.)", L"Panel akordow (eksperymentalny)", L"Akor paneli (deneysel)"),
         savedata.mpChordPanel != 0,
@@ -2966,16 +2969,20 @@ void CPianoRoll::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
     menu.AddSeparator();
     menu.AddCheck(IDM_ROLL_LEGEND,
         LL14(L"記号の凡例", L"Symbol legend", L"Legende des symboles", L"Legenda simboli", L"Leyenda de simbolos", L"기호 범례", L"符号图例", L"دليل الرموز", L"Легенда символов", L"Symbollegende", L"Legenda de simbolos", L"Symbollegenda", L"Legenda symboli", L"Sembol aciklamasi"),
-        m_showExprLegend);
+        m_showExprLegend,
+        LL14(L"表現記号の凡例パネルを表示します。", L"Show the expression-symbol legend panel.", L"Afficher le panneau legende des symboles d'expression.", L"Mostra il pannello legenda dei simboli espressivi.", L"Mostrar el panel de leyenda de simbolos de expresion.", L"표현 기호 범례 패널을 표시합니다.", L"显示奏法记号图例面板。", L"عرض لوحة دليل رموز التعبير.", L"Показывать панель легенды знаков экспрессии.", L"Legendenpanel fur Ausdruckszeichen anzeigen.", L"Mostrar o painel de legenda dos simbolos de expressao.", L"Toon het legenda-paneel voor expressietekens.", L"Pokaz panel legendy znakow ekspresji.", L"Ifade isareti aciklama panelini goster."));
     menu.AddCheck(IDM_ROLL_EXPR,
         LL14(L"表現記号を表示", L"Show expression marks", L"Afficher les symboles d'expression", L"Mostra simboli espressivi", L"Mostrar simbolos de expresion", L"표현 기호 표시", L"显示奏法记号", L"إظهار رموز التعبير", L"Показывать знаки экспрессии", L"Ausdruckszeichen anzeigen", L"Mostrar simbolos de expressao", L"Expressietekens tonen", L"Pokazuj znaki ekspresji", L"Ifade isaretlerini goster"),
-        m_showExprMarks);
+        m_showExprMarks,
+        LL14(L"検出した表現記号（ダイナミクスなど）をロール上に表示します。", L"Show detected expression marks (dynamics, etc.) on the roll.", L"Afficher les symboles d'expression detectes (dynamiques…) sur le roll.", L"Mostra i simboli espressivi rilevati (dinamiche…) sul roll.", L"Mostrar simbolos de expresion detectados (dinamicas…) en el roll.", L"감지된 표현 기호(다이내믹스 등)를 롤에 표시합니다.", L"在卷帘上显示检测到的奏法记号（力度等）。", L"عرض رموز التعبير المكتشفة (الديناميكيات…) على اللفة.", L"Показывать обнаруженные знаки экспрессии (динамика…) на ролле.", L"Erkannte Ausdruckszeichen (Dynamik usw.) auf der Rolle anzeigen.", L"Mostrar simbolos de expressao detectados (dinamicas…) no roll.", L"Toon gedetecteerde expressietekens (dynamiek enz.) op de roll.", L"Pokaz wykryte znaki ekspresji (dynamika itd.) na rolce.", L"Algilanan ifade isaretlerini (dinamikler vb.) roll uzerinde goster."));
     menu.AddCheck(IDM_ROLL_METER,
         LL14(L"レベルメーター", L"Level meter", L"Indicateur de niveau", L"Misuratore di livello", L"Medidor de nivel", L"레벨 미터", L"电平表", L"مقياس المستوى", L"Уровень сигнала", L"Pegelanzeige", L"Medidor de nivel", L"Niveaumeter", L"Miernik poziomu", L"Seviye olcer"),
-        m_showLevelMeter);
+        m_showLevelMeter,
+        LL14(L"レベルメーターの表示／非表示を切り替えます。", L"Show or hide the level meters.", L"Afficher ou masquer les indicateurs de niveau.", L"Mostra o nasconde i misuratori di livello.", L"Mostrar u ocultar los medidores de nivel.", L"레벨 미터 표시/숨기기를 전환합니다.", L"显示或隐藏电平表。", L"إظهار أو إخفاء مقاييس المستوى.", L"Показать или скрыть измерители уровня.", L"Pegelanzeigen ein- oder ausblenden.", L"Mostrar ou ocultar os medidores de nivel.", L"Niveaumeters tonen of verbergen.", L"Pokaz lub ukryj mierniki poziomu.", L"Seviye olcerlerini goster veya gizle."));
     menu.AddCheck(IDM_ROLL_TOPMOST,
         LL14(L"常に手前に表示", L"Always on top", L"Toujours au premier plan", L"Sempre in primo piano", L"Siempre visible", L"항상 위에 표시", L"始终置顶", L"دائما في المقدمة", L"Поверх всех окон", L"Immer im Vordergrund", L"Sempre no topo", L"Altijd op voorgrond", L"Zawsze na wierzchu", L"Her zaman ustte"),
-        m_alwaysOnTop);
+        m_alwaysOnTop,
+        LL14(L"ウィンドウを常に他のウィンドウの手前に表示します。", L"Keep this window always on top of others.", L"Garder cette fenetre toujours au premier plan.", L"Mantieni questa finestra sempre in primo piano.", L"Mantener esta ventana siempre delante de las demas.", L"이 창을 항상 다른 창 위에 표시합니다.", L"将此窗口始终置于其他窗口之上。", L"إبقاء هذه النافذة دائماً فوق النوافذ الأخرى.", L"Держать это окно поверх остальных.", L"Dieses Fenster immer im Vordergrund halten.", L"Manter esta janela sempre acima das outras.", L"Houd dit venster altijd boven andere.", L"Trzymaj to okno zawsze na wierzchu.", L"Bu pencereyi her zaman digerlerinin ustunde tut."));
 
     CCustomPopupMenu* subDetect = menu.AddSubMenu(
         LL14(L"検出オプション", L"Detection options", L"Options de detection", L"Opzioni di rilevamento", L"Opciones de deteccion", L"검출 옵션", L"检测选项", L"خيارات الكشف", L"Параметры обнаружения", L"Erkennungsoptionen", L"Opcoes de deteccao", L"Detectie-opties", L"Opcje wykrywania", L"Algilama secenekleri"),
@@ -3005,24 +3012,29 @@ void CPianoRoll::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
 
     menu.AddCheck(IDM_ROLL_FREEZE,
         LL14(L"フリーズ", L"Freeze", L"Gel", L"Congela", L"Congelar", L"정지", L"冻结", L"تجميد", L"Заморозка", L"Einfrieren", L"Congelar", L"Bevriezen", L"Zamroz", L"Dondur"),
-        m_frozen);
+        m_frozen,
+        LL14(L"ロールのスクロール表示だけを一時停止します（解析は継続）。", L"Freeze only the roll scroll display (analysis continues).", L"Geler uniquement le defilement du roll (l'analyse continue).", L"Congela solo lo scorrimento del roll (l'analisi continua).", L"Congelar solo el desplazamiento del roll (el analisis continua).", L"롤 스크롤 표시만 일시 정지합니다(분석은 계속).", L"仅冻结卷帘滚动显示（分析继续）。", L"تجميد تمرير اللفة فقط (التحليل يستمر).", L"Заморозить только прокрутку ролла (анализ продолжается).", L"Nur Scrollanzeige der Rolle einfrieren (Analyse lauft weiter).", L"Congelar so a rolagem do roll (a analise continua).", L"Bevries alleen de scrollweergave (analyse gaat door).", L"Zamroz tylko przewijanie rolki (analiza trwa).", L"Yalnizca roll kaydirma goruntusunu dondur (analiz surer)."));
     menu.AddCommand(IDM_ROLL_CLEAR,
-        LL14(L"表示をクリア", L"Clear display", L"Effacer l'affichage", L"Cancella visualizzazione", L"Borrar pantalla", L"표시 지우기", L"清除显示", L"مسح العرض", L"Очистить экран", L"Anzeige leeren", L"Limpar exibicao", L"Weergave wissen", L"Wyczysc wyswietlacz", L"Goruntuyu temizle"));
+        LL14(L"表示をクリア", L"Clear display", L"Effacer l'affichage", L"Cancella visualizzazione", L"Borrar pantalla", L"표시 지우기", L"清除显示", L"مسح العرض", L"Очистить экран", L"Anzeige leeren", L"Limpar exibicao", L"Weergave wissen", L"Wyczysc wyswietlacz", L"Goruntuyu temizle"),
+        LL14(L"ロール上の表示履歴（ノート跡など）をクリアします。", L"Clear roll display history (note traces, etc.).", L"Effacer l'historique d'affichage du roll (traces de notes…).", L"Cancella la cronologia di visualizzazione del roll (tracce note…).", L"Borrar el historial de pantalla del roll (trazas de notas…).", L"롤 표시 이력(노트 흔적 등)을 지웁니다.", L"清除卷帘显示历史（音符轨迹等）。", L"مسح سجل عرض اللفة (آثار النغمات…).", L"Очистить историю отображения ролла (следы нот…).", L"Anzeigehistorie der Rolle leeren (Notenspuren usw.).", L"Limpar o historico de exibicao do roll (trilhas de notas…).", L"Wis weergavegeschiedenis van de roll (nootsporen enz.).", L"Wyczysc historie wyswietlania rolki (slady nut itd.).", L"Roll goruntu gecmisini temizle (nota izleri vb.)."));
     menu.AddSeparator();
     menu.AddCommand(ID_MP_OPEN_EQ,
         LL14(L"イコライザを開く", L"Open equalizer", L"Ouvrir l'egaliseur", L"Apri equalizzatore", L"Abrir ecualizador",
             L"이퀄라이저 열기", L"打开均衡器", L"فتح المعادل", L"Открыть эквалайзер", L"Equalizer öffnen",
-            L"Abrir equalizador", L"Equalizer openen", L"Otworz equalizer", L"Equalizeri ac"));
+            L"Abrir equalizador", L"Equalizer openen", L"Otworz equalizer", L"Equalizeri ac"),
+        LL14(L"イコライザウィンドウを開きます。", L"Open the equalizer window.", L"Ouvrir la fenetre de l'egaliseur.", L"Apri la finestra dell'equalizzatore.", L"Abrir la ventana del ecualizador.", L"이퀄라이저 창을 엽니다.", L"打开均衡器窗口。", L"فتح نافذة المعادل.", L"Открыть окно эквалайзера.", L"Equalizer-Fenster offnen.", L"Abrir a janela do equalizador.", L"Open het equalizer-venster.", L"Otworz okno equalizera.", L"Equalizer penceresini ac."));
     menu.AddCommand(ID_MP_OPEN_ANALYZER,
         LL14(L"アナライザを開く", L"Open analyzer", L"Ouvrir l'analyseur", L"Apri analizzatore", L"Abrir analizador",
             L"분석기 열기", L"打开分析器", L"فتح المحلل", L"Открыть анализатор", L"Analyzer öffnen",
-            L"Abrir analisador", L"Analyzer openen", L"Otworz analizator", L"Analizoru ac"));
+            L"Abrir analisador", L"Analyzer openen", L"Otworz analizator", L"Analizoru ac"),
+        LL14(L"アナライザウィンドウを開きます。", L"Open the analyzer window.", L"Ouvrir la fenetre de l'analyseur.", L"Apri la finestra dell'analizzatore.", L"Abrir la ventana del analizador.", L"분석기 창을 엽니다.", L"打开分析器窗口。", L"فتح نافذة المحلل.", L"Открыть окно анализатора.", L"Analysator-Fenster offnen.", L"Abrir a janela do analisador.", L"Open het analyser-venster.", L"Otworz okno analizatora.", L"Analizor penceresini ac."));
     menu.AddSeparator();
     menu.AddCommand(ID_HELP_SHOWSHEET,
         LL14(L"操作ガイド", L"Operation guide", L"Guide d'utilisation", L"Guida operativa",
             L"Guía de operación", L"조작 가이드", L"操作指南", L"دليل التشغيل",
             L"Руководство", L"Bedienungsanleitung", L"Guia de operação", L"Handleiding",
-            L"Przewodnik", L"İşlem kılavuzu"));
+            L"Przewodnik", L"İşlem kılavuzu"),
+        LL14(L"簡易ピアノロールの操作ガイドを表示します。", L"Show the simple piano roll operation guide.", L"Afficher le guide d'utilisation du piano roll simple.", L"Mostra la guida operativa del piano roll semplice.", L"Mostrar la guia de operacion del piano roll simple.", L"간이 피아노 롤 조작 가이드를 표시합니다.", L"显示简易钢琴卷帘操作指南。", L"عرض دليل تشغيل لفافة البيانو البسيطة.", L"Показать руководство по простому пианороллу.", L"Bedienungsanleitung des einfachen Piano-Roll anzeigen.", L"Mostrar o guia de operacao do piano roll simples.", L"Toon de handleiding van de eenvoudige piano-roll.", L"Pokaz przewodnik po prostym piano roll.", L"Basit piyano roll islem kilavuzunu goster."));
 
     if (point.x == -1 && point.y == -1) {
         CRect rc; GetClientRect(&rc); ClientToScreen(&rc);

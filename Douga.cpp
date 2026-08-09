@@ -6406,19 +6406,40 @@ void CDouga::ShowDougaContextMenu(CPoint point)
 				L"Normal (1x1)", L"표준 (1x1)", L"标准 (1x1)", L"عادي (1×1)",
 				L"Обычный (1x1)", L"Normal (1x1)", L"Normal (1x1)", L"Normaal (1x1)",
 				L"Normalny (1x1)", L"Normal (1x1)"),
-			savedata.douga == 0);
+			savedata.douga == 0,
+			LL14(L"動画ウィンドウを等倍(1x1)に切り替える", L"Switch the video window to 1x1 scale",
+				L"Passer la fenetre video a l'echelle 1x1", L"Imposta la finestra video a scala 1x1",
+				L"Cambiar la ventana de video a escala 1x1", L"동영상 창을 1x1 배율로 전환",
+				L"将视频窗口切换为 1x1 倍率", L"تبديل نافذة الفيديو إلى مقياس 1×1",
+				L"Переключить окно видео на масштаб 1x1", L"Videofenster auf 1x1-Skalierung umschalten",
+				L"Mudar a janela de video para escala 1x1", L"Videovenster naar 1x1-schaal schakelen",
+				L"Przelacz okno wideo na skale 1x1", L"Video penceresini 1x1 olcege al"));
 		menu.AddCheck(ID_MENUITEM32773,
 			LL14(L"中間(1.5x1.5)", L"Medium (1.5x1.5)", L"Moyen (1,5x1,5)", L"Medio (1.5x1.5)",
 				L"Mediano (1.5x1.5)", L"중간 (1.5x1.5)", L"中等 (1.5x1.5)", L"متوسط (1.5×1.5)",
 				L"Средний (1.5x1.5)", L"Mittel (1,5x1,5)", L"Médio (1.5x1.5)", L"Middel (1.5x1.5)",
 				L"Średni (1.5x1.5)", L"Orta (1.5x1.5)"),
-			savedata.douga == 2);
+			savedata.douga == 2,
+			LL14(L"動画ウィンドウを1.5倍に切り替える", L"Switch the video window to 1.5x scale",
+				L"Passer la fenetre video a l'echelle 1,5x", L"Imposta la finestra video a scala 1.5x",
+				L"Cambiar la ventana de video a escala 1.5x", L"동영상 창을 1.5배 배율로 전환",
+				L"将视频窗口切换为 1.5x 倍率", L"تبديل نافذة الفيديو إلى مقياس 1.5×",
+				L"Переключить окно видео на масштаб 1.5x", L"Videofenster auf 1,5x-Skalierung umschalten",
+				L"Mudar a janela de video para escala 1.5x", L"Videovenster naar 1.5x-schaal schakelen",
+				L"Przelacz okno wideo na skale 1.5x", L"Video penceresini 1.5x olcege al"));
 		menu.AddCheck(ID_MENUITEM32772,
 			LL14(L"倍(2x2)", L"Large (2x2)", L"Grand (2x2)", L"Grande (2x2)",
 				L"Grande (2x2)", L"2배 (2x2)", L"双倍 (2x2)", L"كبير (2×2)",
 				L"Двойной (2x2)", L"Groß (2x2)", L"Grande (2x2)", L"Groot (2x2)",
 				L"Duży (2x2)", L"Büyük (2x2)"),
-			savedata.douga == 1);
+			savedata.douga == 1,
+			LL14(L"動画ウィンドウを2倍に切り替える", L"Switch the video window to 2x scale",
+				L"Passer la fenetre video a l'echelle 2x", L"Imposta la finestra video a scala 2x",
+				L"Cambiar la ventana de video a escala 2x", L"동영상 창을 2배 배율로 전환",
+				L"将视频窗口切换为 2x 倍率", L"تبديل نافذة الفيديو إلى مقياس 2×",
+				L"Переключить окно видео на масштаб 2x", L"Videofenster auf 2x-Skalierung umschalten",
+				L"Mudar a janela de video para escala 2x", L"Videovenster naar 2x-schaal schakelen",
+				L"Przelacz okno wideo na skale 2x", L"Video penceresini 2x olcege al"));
 		menu.AddSeparator();
 	}
 
@@ -6426,7 +6447,14 @@ void CDouga::ShowDougaContextMenu(CPoint point)
 		LL14(L"一時停止/再開 (&C)", L"Pause/Resume (&C)", L"Pause/Reprendre (&C)", L"Pausa/Riprendi (&C)",
 			L"Pausa/Reanudar (&C)", L"일시정지/재개 (&C)", L"暂停/继续 (&C)", L"إيقاف مؤقت/استئناف (&C)",
 			L"Пауза/Возобновить (&C)", L"Pause/Fortsetzen (&C)", L"Pausar/Retomar (&C)", L"Pauzeren/Hervatten (&C)",
-			L"Pauza/Wznów (&C)", L"Duraklat/Devam Et (&C)"));
+			L"Pauza/Wznów (&C)", L"Duraklat/Devam Et (&C)"),
+		LL14(L"再生の一時停止と再開を切り替える（ショートカット C）", L"Toggle pause/resume playback (shortcut C)",
+			L"Basculer pause/reprise (raccourci C)", L"Alterna pausa/ripresa (scorciatoia C)",
+			L"Alternar pausa/reanudacion (atajo C)", L"일시정지/재개를 전환 (단축키 C)",
+			L"切换暂停/继续播放（快捷键 C）", L"تبديل الإيقاف المؤقت/الاستئناف (اختصار C)",
+			L"Переключить паузу/возобновление (клавиша C)", L"Pause/Fortsetzen umschalten (Shortcut C)",
+			L"Alternar pausar/retomar (atalho C)", L"Pauze/hervatten wisselen (sneltoets C)",
+			L"Przelacz pauze/wznowienie (skrot C)", L"Duraklat/devam et (kisayol C)"));
 	menu.AddSeparator();
 
 	{
@@ -6442,7 +6470,14 @@ void CDouga::ShowDougaContextMenu(CPoint point)
 					LL14(L"映像ストリーム", L"Video Stream", L"Flux vidéo", L"Flusso video",
 						L"Flujo de vídeo", L"비디오 스트림", L"视频流", L"تدفق الفيديو",
 						L"Видеопоток", L"Videostream", L"Fluxo de vídeo", L"Videostream",
-						L"Strumień wideo", L"Video Akışı"));
+						L"Strumień wideo", L"Video Akışı"),
+					LL14(L"再生する映像ストリームを選ぶ", L"Choose which video stream to play",
+						L"Choisir le flux video a lire", L"Scegli il flusso video da riprodurre",
+						L"Elegir que flujo de video reproducir", L"재생할 비디오 스트림 선택",
+						L"选择要播放的视频流", L"اختر تدفق الفيديو للتشغيل",
+						L"Выбрать видеопоток для воспроизведения", L"Videostream zum Abspielen wählen",
+						L"Escolher qual fluxo de video reproduzir", L"Kies welke videostream af te spelen",
+						L"Wybierz strumien wideo do odtwarzania", L"Oynatilacak video akisini sec"));
 				if (!subV) break;
 			}
 			CString buf;
@@ -6463,7 +6498,14 @@ void CDouga::ShowDougaContextMenu(CPoint point)
 					LL14(L"音声ストリーム", L"Audio Stream", L"Flux audio", L"Flusso audio",
 						L"Flujo de audio", L"오디오 스트림", L"音频流", L"تدفق الصوت",
 						L"Аудиопоток", L"Audiostream", L"Fluxo de áudio", L"Audiostream",
-						L"Strumień audio", L"Ses Akışı"));
+						L"Strumień audio", L"Ses Akışı"),
+					LL14(L"再生する音声ストリームを選ぶ", L"Choose which audio stream to play",
+						L"Choisir le flux audio a lire", L"Scegli il flusso audio da riprodurre",
+						L"Elegir que flujo de audio reproducir", L"재생할 오디오 스트림 선택",
+						L"选择要播放的音频流", L"اختر تدفق الصوت للتشغيل",
+						L"Выбрать аудиопоток для воспроизведения", L"Audiostream zum Abspielen wählen",
+						L"Escolher qual fluxo de audio reproduzir", L"Kies welke audiostream af te spelen",
+						L"Wybierz strumien audio do odtwarzania", L"Oynatilacak ses akisini sec"));
 				if (!subA) break;
 			}
 			CString buf;
@@ -6480,7 +6522,14 @@ void CDouga::ShowDougaContextMenu(CPoint point)
 					LL14(L"字幕ストリーム", L"Subtitle Stream", L"Flux de sous-titres", L"Flusso sottotitoli",
 						L"Flujo de subtítulos", L"자막 스트림", L"字幕流", L"تدفق الترجمة",
 						L"Поток субтитров", L"Untertitelstream", L"Fluxo de legendas", L"Ondertitelstream",
-						L"Strumień napisów", L"Altyazı Akışı"));
+						L"Strumień napisów", L"Altyazı Akışı"),
+					LL14(L"表示する字幕ストリームを選ぶ", L"Choose which subtitle stream to show",
+						L"Choisir le flux de sous-titres a afficher", L"Scegli il flusso sottotitoli da mostrare",
+						L"Elegir que flujo de subtitulos mostrar", L"표시할 자막 스트림 선택",
+						L"选择要显示的字幕流", L"اختر تدفق الترجمة للعرض",
+						L"Выбрать поток субтитров для показа", L"Untertitelstream zum Anzeigen wählen",
+						L"Escolher qual fluxo de legendas mostrar", L"Kies welke ondertitelstream te tonen",
+						L"Wybierz strumien napisow do wyswietlenia", L"Gosterilecek altyazi akisini sec"));
 				if (!subS) break;
 			}
 			subS->AddCommand(ID_ETC1 + i, streamname2[i]);
@@ -6489,28 +6538,98 @@ void CDouga::ShowDougaContextMenu(CPoint point)
 
 	menu.AddSeparator();
 	menu.AddCommand(ID_DOUGA_PLAY,
-		LL14(L"再生", L"Play", L"Lecture", L"Riproduci", L"Reproducir", L"재생", L"播放", L"تشغيل", L"Воспроизведение", L"Abspielen", L"Reproduzir", L"Afspelen", L"Odtwórz", L"Çal"));
+		LL14(L"再生", L"Play", L"Lecture", L"Riproduci", L"Reproducir", L"재생", L"播放", L"تشغيل", L"Воспроизведение", L"Abspielen", L"Reproduzir", L"Afspelen", L"Odtwórz", L"Çal"),
+		LL14(L"動画の再生を開始する", L"Start video playback",
+			L"Demarrer la lecture video", L"Avvia la riproduzione video",
+			L"Iniciar la reproduccion de video", L"동영상 재생 시작",
+			L"开始视频播放", L"بدء تشغيل الفيديو",
+			L"Начать воспроизведение видео", L"Videowiedergabe starten",
+			L"Iniciar reproducao de video", L"Videoweergave starten",
+			L"Rozpocznij odtwarzanie wideo", L"Video oynatmayi baslat"));
 	menu.AddCommand(ID_DOUGA_STOP,
-		LL14(L"停止", L"Stop", L"Arrêt", L"Stop", L"Detener", L"중지", L"停止", L"إيقاف", L"Стоп", L"Stop", L"Parar", L"Stoppen", L"Stop", L"Durdur"));
+		LL14(L"停止", L"Stop", L"Arrêt", L"Stop", L"Detener", L"중지", L"停止", L"إيقاف", L"Стоп", L"Stop", L"Parar", L"Stoppen", L"Stop", L"Durdur"),
+		LL14(L"再生を停止する", L"Stop playback",
+			L"Arreter la lecture", L"Ferma la riproduzione",
+			L"Detener la reproduccion", L"재생 중지",
+			L"停止播放", L"إيقاف التشغيل",
+			L"Остановить воспроизведение", L"Wiedergabe stoppen",
+			L"Parar a reproducao", L"Afspelen stoppen",
+			L"Zatrzymaj odtwarzanie", L"Oynatmayı durdur"));
 	menu.AddCommand(ID_DOUGA_PREV,
-		LL14(L"前へ", L"Previous", L"Précédent", L"Precedente", L"Anterior", L"이전", L"上一首", L"السابق", L"Предыдущий", L"Zurück", L"Anterior", L"Vorige", L"Poprzedni", L"Önceki"));
+		LL14(L"前へ", L"Previous", L"Précédent", L"Precedente", L"Anterior", L"이전", L"上一首", L"السابق", L"Предыдущий", L"Zurück", L"Anterior", L"Vorige", L"Poprzedni", L"Önceki"),
+		LL14(L"前のトラックへ移る", L"Go to the previous track",
+			L"Aller a la piste precedente", L"Vai al brano precedente",
+			L"Ir a la pista anterior", L"이전 트랙으로 이동",
+			L"转到上一曲", L"الانتقال إلى المقطع السابق",
+			L"Перейти к предыдущему треку", L"Zum vorherigen Titel wechseln",
+			L"Ir para a faixa anterior", L"Ga naar het vorige nummer",
+			L"Przejdz do poprzedniego utworu", L"Onceki parcaya git"));
 	menu.AddCommand(ID_DOUGA_NEXT,
-		LL14(L"次へ", L"Next", L"Suivant", L"Successivo", L"Siguiente", L"다음", L"下一首", L"التالي", L"Следующий", L"Weiter", L"Próximo", L"Volgende", L"Następny", L"Sonraki"));
+		LL14(L"次へ", L"Next", L"Suivant", L"Successivo", L"Siguiente", L"다음", L"下一首", L"التالي", L"Следующий", L"Weiter", L"Próximo", L"Volgende", L"Następny", L"Sonraki"),
+		LL14(L"次のトラックへ移る", L"Go to the next track",
+			L"Aller a la piste suivante", L"Vai al brano successivo",
+			L"Ir a la pista siguiente", L"다음 트랙으로 이동",
+			L"转到下一曲", L"الانتقال إلى المقطع التالي",
+			L"Перейти к следующему треку", L"Zum nächsten Titel wechseln",
+			L"Ir para a proxima faixa", L"Ga naar het volgende nummer",
+			L"Przejdz do nastepnego utworu", L"Sonraki parcaya git"));
 	menu.AddCommand(ID_DOUGA_REW,
-		LL14(L"戻す", L"Rewind", L"Reculer", L"Indietro", L"Retroceder", L"되감기", L"快退", L"ترجيع", L"Назад", L"Zurückspulen", L"Voltar", L"Terugspoelen", L"Przewiń wstecz", L"Geri sar"));
+		LL14(L"戻す", L"Rewind", L"Reculer", L"Indietro", L"Retroceder", L"되감기", L"快退", L"ترجيع", L"Назад", L"Zurückspulen", L"Voltar", L"Terugspoelen", L"Przewiń wstecz", L"Geri sar"),
+		LL14(L"再生位置を少し戻す", L"Seek backward a short step",
+			L"Reculer un peu dans la lecture", L"Indietreggia di un piccolo passo",
+			L"Retroceder un poco en la reproduccion", L"재생 위치를 조금 되돌림",
+			L"将播放位置稍微回退", L"الرجوع قليلاً في موضع التشغيل",
+			L"Немного перемотать назад", L"Wiedergabeposition etwas zurückspulen",
+			L"Voltar um pouco na reproducao", L"Kort terugspoelen in de weergave",
+			L"Cofnij pozycje odtwarzania o krok", L"Oynatma konumunu biraz geri sar"));
 	menu.AddCommand(ID_DOUGA_FF,
-		LL14(L"進める", L"Fast forward", L"Avancer", L"Avanti", L"Avanzar", L"빨리감기", L"快进", L"تقديم", L"Вперёд", L"Vorspulen", L"Avançar", L"Vooruitspoelen", L"Przewiń naprzód", L"İleri sar"));
+		LL14(L"進める", L"Fast forward", L"Avancer", L"Avanti", L"Avanzar", L"빨리감기", L"快进", L"تقديم", L"Вперёд", L"Vorspulen", L"Avançar", L"Vooruitspoelen", L"Przewiń naprzód", L"İleri sar"),
+		LL14(L"再生位置を少し進める", L"Seek forward a short step",
+			L"Avancer un peu dans la lecture", L"Avanza di un piccolo passo",
+			L"Avanzar un poco en la reproduccion", L"재생 위치를 조금 앞으로",
+			L"将播放位置稍微快进", L"التقديم قليلاً في موضع التشغيل",
+			L"Немного перемотать вперёд", L"Wiedergabeposition etwas vorspulen",
+			L"Avancar um pouco na reproducao", L"Kort vooruitspoelen in de weergave",
+			L"Przewin pozycje odtwarzania o krok", L"Oynatma konumunu biraz ileri sar"));
 	menu.AddCommand(ID_DOUGA_MUTE,
-		LL14(L"消音", L"Mute", L"Muet", L"Mute", L"Silencio", L"음소거", L"静音", L"كتم", L"Без звука", L"Stumm", L"Mudo", L"Dempen", L"Wycisz", L"Sessiz"));
+		LL14(L"消音", L"Mute", L"Muet", L"Mute", L"Silencio", L"음소거", L"静音", L"كتم", L"Без звука", L"Stumm", L"Mudo", L"Dempen", L"Wycisz", L"Sessiz"),
+		LL14(L"音声のミュートを切り替える", L"Toggle audio mute",
+			L"Basculer le mute audio", L"Attiva/disattiva mute audio",
+			L"Alternar silencio de audio", L"오디오 음소거 전환",
+			L"切换音频静音", L"تبديل كتم الصوت",
+			L"Переключить отключение звука", L"Stummschaltung umschalten",
+			L"Alternar mudo de audio", L"Audiomute wisselen",
+			L"Przelacz wyciszenie audio", L"Ses susturmayı ac/kapat"));
 	menu.AddCommand(ID_DOUGA_FS,
-		LL14(L"フルスクリーン", L"Fullscreen", L"Plein écran", L"Schermo intero", L"Pantalla completa", L"전체화면", L"全屏", L"ملء الشاشة", L"Полный экран", L"Vollbild", L"Tela cheia", L"Volledig scherm", L"Pełny ekran", L"Tam ekran"));
+		LL14(L"フルスクリーン", L"Fullscreen", L"Plein écran", L"Schermo intero", L"Pantalla completa", L"전체화면", L"全屏", L"ملء الشاشة", L"Полный экран", L"Vollbild", L"Tela cheia", L"Volledig scherm", L"Pełny ekran", L"Tam ekran"),
+		LL14(L"フルスクリーン表示を切り替える", L"Toggle fullscreen display",
+			L"Basculer le plein ecran", L"Attiva/disattiva schermo intero",
+			L"Alternar pantalla completa", L"전체화면 표시 전환",
+			L"切换全屏显示", L"تبديل العرض بملء الشاشة",
+			L"Переключить полноэкранный режим", L"Vollbildanzeige umschalten",
+			L"Alternar tela cheia", L"Volledig scherm wisselen",
+			L"Przelacz pelny ekran", L"Tam ekran gorunumunu ac/kapat"));
 	menu.AddCommand(ID_DOUGA_FADE,
-		LL14(L"フェードアウト", L"Fade out", L"Fondu", L"Dissolvenza", L"Desvanecer", L"페이드 아웃", L"淡出", L"تلاشي", L"Затухание", L"Ausblenden", L"Desvanecer", L"Uitfaden", L"Zanikanie", L"Soluklaştır"));
+		LL14(L"フェードアウト", L"Fade out", L"Fondu", L"Dissolvenza", L"Desvanecer", L"페이드 아웃", L"淡出", L"تلاشي", L"Затухание", L"Ausblenden", L"Desvanecer", L"Uitfaden", L"Zanikanie", L"Soluklaştır"),
+		LL14(L"音量をフェードアウトして停止する", L"Fade out volume and stop",
+			L"Faire un fondu du volume puis arreter", L"Dissolvi il volume e ferma",
+			L"Desvanecer el volumen y detener", L"볼륨을 페이드 아웃 후 정지",
+			L"淡出音量并停止", L"تلاشي مستوى الصوت ثم الإيقاف",
+			L"Затухание громкости и остановка", L"Lautstarke ausblenden und stoppen",
+			L"Desvanecer o volume e parar", L"Volume uitfaden en stoppen",
+			L"Zanikaj glosnosc i zatrzymaj", L"Sesi soluklastirip durdur"));
 	menu.AddCommand(ID_DOUGA_CLOSE,
 		LL14(L"動画画面を閉じる", L"Close video window", L"Fermer l'ecran video", L"Chiudi finestra video",
 			L"Cerrar pantalla de video", L"동영상 화면 닫기", L"关闭视频窗口", L"إغلاق شاشة الفيديو",
 			L"Закрыть окно видео", L"Videofenster schliessen", L"Fechar janela de video", L"Videovenster sluiten",
-			L"Zamknij okno wideo", L"Video penceresini kapat"));
+			L"Zamknij okno wideo", L"Video penceresini kapat"),
+		LL14(L"動画ウィンドウを閉じる（動画専用なら再生も停止）", L"Close the video window (also stops video-only playback)",
+			L"Fermer la fenetre video (arrete aussi en lecture video seule)", L"Chiudi la finestra video (ferma anche in solo video)",
+			L"Cerrar la ventana de video (tambien detiene solo video)", L"동영상 창 닫기(동영상 전용이면 재생도 중지)",
+			L"关闭视频窗口（纯视频时也会停止播放）", L"إغلاق نافذة الفيديو (يوقف أيضاً التشغيل للفيديو فقط)",
+			L"Закрыть окно видео (также останавливает только видео)", L"Videofenster schliessen (stoppt auch bei Nur-Video)",
+			L"Fechar a janela de video (tambem para so video)", L"Videovenster sluiten (stopt ook bij alleen-video)",
+			L"Zamknij okno wideo (zatrzymuje tez samo wideo)", L"Video penceresini kapat (yalniz videoda oynatmayi da durdurur)"));
 
 	menu.AddSeparator();
 	menu.AddCheck(ID_DOUGA_TOPMOST,
@@ -6518,13 +6637,27 @@ void CDouga::ShowDougaContextMenu(CPoint point)
 			L"Siempre visible", L"항상 위에 표시", L"总在最前面", L"دائمًا في المقدمة",
 			L"Поверх всех окон", L"Immer im Vordergrund", L"Sempre visivel", L"Altijd op voorgrond",
 			L"Zawsze na wierzchu", L"Her zaman ustte"),
-		savedata.dougatopmost != 0);
+		savedata.dougatopmost != 0,
+		LL14(L"他のウィンドウより常に手前に表示する", L"Keep this window always above others",
+			L"Garder cette fenetre toujours au-dessus des autres", L"Mantieni questa finestra sopra le altre",
+			L"Mantener esta ventana siempre encima de las demas", L"다른 창보다 항상 위에 표시",
+			L"始终将此窗口置于其他窗口之上", L"إبقاء هذه النافذة دائماً فوق الأخرى",
+			L"Держать это окно поверх остальных", L"Dieses Fenster immer über anderen halten",
+			L"Manter esta janela sempre acima das outras", L"Dit venster altijd boven andere houden",
+			L"Trzymaj to okno zawsze nad innymi", L"Bu pencereyi her zaman digerlerinin ustunde tut"));
 	menu.AddCheck(ID_DOUGA_ASPECT,
 		LL14(L"アスペクト比を維持", L"Keep aspect ratio", L"Conserver les proportions", L"Mantieni proporzioni",
 			L"Mantener proporcion", L"화면 비율 유지", L"保持宽高比", L"الحفاظ على نسبة العرض",
 			L"Сохранять пропорции", L"Seitenverhaltnis beibehalten", L"Manter proporcao", L"Beeldverhouding behouden",
 			L"Zachowaj proporcje", L"En-boy oranini koru"),
-		savedata.dougaaspect != 0);
+		savedata.dougaaspect != 0,
+		LL14(L"黒帯で比率を保つ／オフで伸ばして埋める", L"Letterbox to keep ratio; off stretches to fill",
+			L"Bandes noires pour garder le ratio; off etire pour remplir", L"Bande nere per il ratio; off allunga per riempire",
+			L"Bandas negras para ratio; off estira para llenar", L"레터박스로 비율 유지 / 끄면 늘려 채움",
+			L"用黑边保持比例；关闭则拉伸填满", L"أشرطة سوداء للحفاظ على النسبة؛ إيقاف = تمديد للملء",
+			L"Поля для пропорций; выкл. — растянуть", L"Balken fürs Verhältnis; aus = strecken zum Füllen",
+			L"Barras pretas para proporcao; off estica para preencher", L"Zwarte balken voor verhouding; uit = rekken tot vullen",
+			L"Pasma dla proporcji; wyl. rozciaga do wypelnienia", L"Oran icin siyah serit; kapali = doldurmak icin esnet"));
 
 	menu.AddSeparator();
 	menu.AddCommand(ID_DOUGA_DSFILTERS,
@@ -6532,7 +6665,14 @@ void CDouga::ShowDougaContextMenu(CPoint point)
 			L"Lista de filtros DirectShow", L"DirectShow 필터 목록", L"DirectShow 过滤器列表", L"قائمة مرشحات DirectShow",
 			L"Список фильтров DirectShow", L"DirectShow-Filterliste", L"Lista de filtros DirectShow", L"DirectShow-filterlijst",
 			L"Lista filtrów DirectShow", L"DirectShow Filtre Listesi"),
-		NULL, pGraphBuilder != NULL);
+		LL14(L"再生中の DirectShow フィルタグラフ一覧を表示", L"Show the DirectShow filter graph list in use",
+			L"Afficher la liste du graphe de filtres DirectShow", L"Mostra l'elenco del grafo filtri DirectShow",
+			L"Mostrar la lista del grafo de filtros DirectShow", L"사용 중인 DirectShow 필터 그래프 목록 표시",
+			L"显示正在使用的 DirectShow 滤镜图列表", L"عرض قائمة مخطط مرشحات DirectShow المستخدمة",
+			L"Показать список графа фильтров DirectShow", L"DirectShow-Filtergraphenliste anzeigen",
+			L"Mostrar a lista do grafo de filtros DirectShow", L"DirectShow-filtergraaflijst tonen",
+			L"Pokaz liste grafu filtrow DirectShow", L"Kullanilan DirectShow filtre grafi listesini goster"),
+		pGraphBuilder != NULL);
 
 	// 再生速度: IMediaSeeking がレートを返せるときだけスライダー(0.1x..4.0x、ドラッグ中ライブ)
 	{
@@ -6563,7 +6703,14 @@ void CDouga::ShowDougaContextMenu(CPoint point)
 					LL14(L"再生速度プリセット", L"Speed presets", L"Presets de vitesse", L"Preset velocita",
 						L"Presets de velocidad", L"재생 속도 프리셋", L"播放速度预设", L"إعدادات السرعة",
 						L"Пресеты скорости", L"Geschwindigkeits-Presets", L"Presets de velocidade",
-						L"Snelheidpresets", L"Presety predkosci", L"Hiz onayarlari"));
+						L"Snelheidpresets", L"Presety predkosci", L"Hiz onayarlari"),
+					LL14(L"よく使う再生速度へすぐ切り替える", L"Jump to a common playback rate",
+						L"Passer vite a une vitesse de lecture courante", L"Passa subito a una velocita comune",
+						L"Saltar a una velocidad de reproduccion comun", L"자주 쓰는 재생 속도로 바로 전환",
+						L"快速切换到常用播放速度", L"الانتقال سريعاً إلى سرعة تشغيل شائعة",
+						L"Быстро перейти к обычной скорости", L"Schnell zu einer üblichen Rate wechseln",
+						L"Ir logo para uma velocidade comum", L"Snel naar een gangbare afspeelsnelheid",
+						L"Szybko przelacz na typowa predkosc", L"Sik kullanilan oynatma hizina atla"));
 				if (spdSub) {
 					for (int i = 0; i < 8; ++i) {
 						const BOOL on = (cur > kRates[i] - 0.01 && cur < kRates[i] + 0.01);
@@ -6583,7 +6730,14 @@ void CDouga::ShowDougaContextMenu(CPoint point)
 			L"Стрелки: громкость и перемотка.", L"Pfeiltasten: Lautstärke & Suche.",
 			L"Teclas de seta: volume e busca.", L"Pijltoetsen: volume & zoeken.",
 			L"Klawisze strzałek: głośność i wyszukiwanie.", L"Ok tuşları: ses ve arama."),
-		NULL, FALSE);
+		LL14(L"↑↓で音量、←→でシーク（情報メモ）", L"Up/Down = volume, Left/Right = seek (info note)",
+			L"Haut/Bas = volume, Gauche/Droite = seek (note)", L"Su/Giu = volume, Sx/Dx = seek (nota)",
+			L"Arriba/Abajo = volumen, Izq/Der = seek (nota)", L"위/아래=음량, 좌/우=시크 (안내)",
+			L"上下=音量，左右=定位（提示）", L"أعلى/أسفل=الصوت، يسار/يمين=Seek (ملاحظة)",
+			L"↑↓ = громкость, ←→ = перемотка (справка)", L"Hoch/Runter = Lautstärke, Links/Rechts = Seek (Hinweis)",
+			L"Cima/Baixo = volume, Esq/Dir = seek (nota)", L"Omhoog/Omlaag = volume, Links/Rechts = seek (tip)",
+			L"Gora/Dol = glosnosc, Lewo/Prawo = seek (wskazowka)", L"Yukari/Asagi = ses, Sol/Sag = seek (bilgi)"),
+		FALSE);
 	menu.AddCommand(ID__32784,
 		LL14(L"ダブルクリックでフルスクリーンです。", L"Double-click for fullscreen.",
 			L"Double-clic pour plein écran.", L"Doppio clic per schermo intero.",
@@ -6592,13 +6746,27 @@ void CDouga::ShowDougaContextMenu(CPoint point)
 			L"Двойной щелчок — полный экран.", L"Doppelklick für Vollbild.",
 			L"Clique duplo para tela cheia.", L"Dubbelklik voor volledig scherm.",
 			L"Dwuklik dla pełnego ekranu.", L"Tam ekran için çift tıklayın."),
-		NULL, FALSE);
+		LL14(L"映像上をダブルクリックでフルスクリーン切替（情報メモ）", L"Double-click the picture to toggle fullscreen (info note)",
+			L"Double-clic sur l'image pour le plein ecran (note)", L"Doppio clic sull'immagine per schermo intero (nota)",
+			L"Doble clic en la imagen para pantalla completa (nota)", L"화면 더블클릭으로 전체화면 전환 (안내)",
+			L"双击画面切换全屏（提示）", L"انقر نقراً مزدوجاً على الصورة لملء الشاشة (ملاحظة)",
+			L"Двойной щелчок по кадру — полный экран (справка)", L"Doppelklick aufs Bild für Vollbild (Hinweis)",
+			L"Clique duplo na imagem para tela cheia (nota)", L"Dubbelklik op beeld voor volledig scherm (tip)",
+			L"Dwuklik na obrazie dla pelnego ekranu (wskazowka)", L"Goruntuye cift tikla: tam ekran (bilgi)"),
+		FALSE);
 	menu.AddSeparator();
 	menu.AddCommand(ID_HELP_SHOWSHEET,
 		LL14(L"操作ガイド", L"Operation guide", L"Guide d'utilisation", L"Guida operativa",
 			L"Guía de operación", L"조작 가이드", L"操作指南", L"دليل التشغيل",
 			L"Руководство", L"Bedienungsanleitung", L"Guia de operação", L"Bedieningsgids",
-			L"Przewodnik", L"İşlem kılavuzu"));
+			L"Przewodnik", L"İşlem kılavuzu"),
+		LL14(L"このウィンドウの操作ガイドを表示する", L"Show the operation guide for this window",
+			L"Afficher le guide d'utilisation de cette fenetre", L"Mostra la guida operativa di questa finestra",
+			L"Mostrar la guia de operacion de esta ventana", L"이 창의 조작 가이드 표시",
+			L"显示此窗口的操作指南", L"إظهار دليل تشغيل هذه النافذة",
+			L"Показать руководство по этому окну", L"Bedienungsanleitung für dieses Fenster anzeigen",
+			L"Mostrar o guia de operacao desta janela", L"Toon de handleiding voor dit venster",
+			L"Pokaz przewodnik po tym oknie", L"Bu pencerenin islem kilavuzunu goster"));
 
 	CWnd* pWndPopupOwner = this;
 	while (pWndPopupOwner->GetStyle() & WS_CHILD)

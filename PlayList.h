@@ -248,3 +248,12 @@ enum {
 	PL_CTX_MOVE_MAX = PL_CTX_MOVE_BASE + 999,
 	PL_CTX_COPY_MAX = PL_CTX_COPY_BASE + 999,
 };
+
+// あいまい検索 / 絞り込み共通。useRegex=FALSE は部分一致(大小無視)。
+BOOL PlaylistItemMatchesSearch(const playlistdata0& item, LPCTSTR pattern, BOOL useRegex);
+
+// 大量フィルタ用: 正規表現を1回だけコンパイル
+struct PlaylistSearchCtx;
+PlaylistSearchCtx* PlaylistSearchCtxCreate(LPCTSTR pattern, BOOL useRegex);
+BOOL PlaylistSearchCtxMatch(PlaylistSearchCtx* ctx, const playlistdata0& item);
+void PlaylistSearchCtxDestroy(PlaylistSearchCtx* ctx);

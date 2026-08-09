@@ -252,7 +252,10 @@ void AudioMicDevAppendMenu(CCustomPopupMenu& menu)
 	CCustomPopupMenu* sub = menu.AddSubMenu(
 		LL14(L"マイク端末", L"Microphone", L"Microphone", L"Microfono", L"Micrófono",
 			L"마이크", L"麦克风", L"الميكروفون", L"Микрофон", L"Mikrofon",
-			L"Microfone", L"Microfoon", L"Mikrofon", L"Mikrofon"));
+			L"Microfone", L"Microfoon", L"Mikrofon", L"Mikrofon"),
+		LL14(L"マイク入力に使う録音デバイスを選びます。ミックス録音やマイクメーターに反映。", L"Choose the recording device for mic input. Affects mix recording and the mic meter.", L"Choisir le peripherique d'entree micro. Affecte l'enregistrement mix et le vu-metre.", L"Scegli il dispositivo di registrazione micro. Influisce su mix e misuratore.", L"Elige el dispositivo de grabacion del micro. Afecta la mezcla y el medidor.",
+			L"마이크 입력에 쓸 녹음 장치를 고릅니다. 믹스 녹음·마이크 미터에 반영.", L"选择麦克风输入的录音设备。影响混音录音和麦克风电平表。", L"اختر جهاز التسجيل لإدخال الميكروفون. يؤثر على تسجيل المزج ومقياس الميكروفون.", L"Выберите устройство записи микрофона. Влияет на микс и индикатор.", L"Aufnahmegerät für Mikrofoneingang wählen. Betrifft Mix-Aufnahme und Mikrofonpegel.",
+			L"Escolha o dispositivo de gravacao do microfone. Afeta a gravacao de mix e o medidor.", L"Kies het opnameapparaat voor microfooninvoer. Beinvloedt mix-opname en mic-meter.", L"Wybierz urzadzenie nagrywania mikrofonu. Wplywa na mix i miernik.", L"Mikrofon girisi icin kayit aygitini sec. Mix kaydi ve mikrofon metresine yansir."));
 	if (!sub) return;
 	const int cur = AudioMicDevCurSel();
 	for (int i = 0; i < s_micCnt; ++i) {
@@ -375,7 +378,10 @@ void AudioLoopDevAppendMenu(CCustomPopupMenu& menu)
 	CCustomPopupMenu* sub = menu.AddSubMenu(
 		LL14(L"システム音端末", L"System audio device", L"Périphérique son système", L"Dispositivo audio sistema", L"Dispositivo audio sistema",
 			L"시스템 소리 장치", L"系统声音设备", L"جهاز صوت النظام", L"Устройство системного звука", L"Systemton-Gerät",
-			L"Dispositivo de áudio do sistema", L"Systeemaudio-apparaat", L"Urządzenie dźwięku systemu", L"Sistem sesi aygıtı"));
+			L"Dispositivo de áudio do sistema", L"Systeemaudio-apparaat", L"Urządzenie dźwięku systemu", L"Sistem sesi aygıtı"),
+		LL14(L"システム音(ループバック)を取り込む再生デバイスを選びます。PC音の録音/取り込み用。", L"Choose the playback device used for system-audio (loopback) capture.", L"Choisir le peripherique de lecture pour capturer le son systeme (loopback).", L"Scegli il dispositivo di riproduzione per catturare l'audio di sistema (loopback).", L"Elige el dispositivo de reproduccion para capturar el audio del sistema (loopback).",
+			L"시스템 소리(루프백)를 가져올 재생 장치를 고릅니다. PC 음 녹음/캡처용.", L"选择用于抓取系统声音（环回）的播放设备。用于录制/采集 PC 音。", L"اختر جهاز التشغيل لالتقاط صوت النظام (loopback) لتسجيل صوت الجهاز.", L"Выберите устройство воспроизведения для захвата системного звука (loopback).", L"Wiedergabegerät für Systemton-Capture (Loopback) wählen.",
+			L"Escolha o dispositivo de reproducao para capturar o audio do sistema (loopback).", L"Kies het afspeelapparaat voor systeemaudio-capture (loopback).", L"Wybierz urzadzenie odtwarzania do przechwytywania dzwieku systemu (loopback).", L"Sistem sesi (loopback) yakalamak icin oynatma aygitini sec."));
 	if (!sub) return;
 	const int cur = AudioLoopDevCurSel();
 	for (int i = 0; i < s_loopCnt; ++i) {
