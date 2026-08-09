@@ -1766,7 +1766,7 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 	m_list.m_mpRowMissGet = MpRowMissGetCb;
 	m_list.m_bCol1IsRating = true;
 	m_list.InsertColumn(0, LL14(L"名前", L"Name", L"Nom", L"Nome", L"Nombre", L"이름", L"名称", L"الاسم", L"Имя", L"Name", L"Nome", L"Naam", L"Nazwa", L"Ad"), LVCFMT_LEFT, (int)(220 * hD2));
-	// 列1はレーティング(クリックで0〜5)。曲ごと保存[SAV] / 歌詞[LRC]は名前列先頭の印。
+	// 列1はレーティング(クリックで0〜5)。曲ごと保存[SAV] / 歌詞[LRC] / ch[MONO|LR|2.1…]は名前列先頭の印。
 	m_list.InsertColumn(1, LL14(L"評価", L"Rate", L"Note", L"Voto", L"Nota", L"평점", L"评分", L"تقييم", L"Оценка", L"Bew.", L"Nota", L"Cijfer", L"Ocena", L"Puan"), LVCFMT_CENTER, (int)(42 * hD2));
 	m_list.InsertColumn(2, LL14(L"ゲーム", L"Game", L"Jeu", L"Gioco", L"Juego", L"게임", L"游戏", L"لعبة", L"Игра", L"Spiel", L"Jogo", L"Spel", L"Gra", L"Oyun"), LVCFMT_LEFT, (int)(60 * hD2));
 	m_list.InsertColumn(3, LL14(L"時間", L"Time", L"Duree", L"Durata", L"Duracion", L"시간", L"时间", L"الوقت", L"Время", L"Zeit", L"Duracao", L"Tijd", L"Czas", L"Sure"), LVCFMT_RIGHT, (int)(72 * hD2));
@@ -3607,26 +3607,35 @@ void CMediaPlayerDlg::RefreshList(BOOL bForce)
 	// ディスク済ジャケは PL 変更/初回で一括メモリ化。未抽出のみ OnTimer で1件ずつ。
 	if (bForce || cnt != prevCount)
 		MpJacketLoadVisible(this, FALSE, TRUE);
-	// 歌詞フラグはジャケTimerから外したので、ここ(低頻度)で可視分だけ Probe
+	// 歌詞フラグ / チャンネル印はジャケTimerから外したので、ここ(低頻度)で可視分だけ Probe
 	if (::IsWindow(m_list.GetSafeHwnd()) && pl && pl->pc) {
 		const int nDisp = m_list.GetItemCount();
 		int t = m_list.GetTopIndex();
 		if (t < 0) t = 0;
 		int pg = m_list.GetCountPerPage() + 2;
 		if (pg < 4) pg = 4;
-		BOOL lrcDirty = FALSE;
+		BOOL markDirty = FALSE;
 		int budget = 8;
 		for (int disp = t; budget > 0 && disp < t + pg && disp < nDisp; ++disp) {
 			const int pcIdx = MpDispToPc(this, disp);
 			if (pcIdx < 0 || pcIdx >= pl->playcnt) continue;
 			const TCHAR* path = pl->pc[pcIdx].fol;
 			if (!path || !path[0]) continue;
-			if (PlLrcDiskGet(path) >= 0) continue;
-			PlLrcProbe(path);
-			lrcDirty = TRUE;
-			--budget;
+			BOOL did = FALSE;
+			if (PlLrcDiskGet(path) < 0) {
+				PlLrcProbe(path);
+				did = TRUE;
+			}
+			if (PlChDiskGet(path) < 0) {
+				PlChProbe(path);
+				did = TRUE;
+			}
+			if (did) {
+				markDirty = TRUE;
+				--budget;
+			}
 		}
-		if (lrcDirty) {
+		if (markDirty) {
 			CRect r0, r1;
 			if (m_list.GetItemRect(t, &r0, LVIR_BOUNDS)) {
 				int last = t + pg - 1;
@@ -3635,6 +3644,8 @@ void CMediaPlayerDlg::RefreshList(BOOL bForce)
 					r0.bottom = r1.bottom;
 				m_list.RedrawWindow(&r0, NULL, RDW_INVALIDATE | RDW_NOERASE);
 			}
+			if (pl && ::IsWindow(pl->m_lc.GetSafeHwnd()))
+				pl->m_lc.Invalidate(FALSE);
 		}
 	}
 }
@@ -11462,10 +11473,10 @@ void CMpCheatSheetDlg::OnPaint()
 		L"· m3u / Buscar / Filtro / Regex / ▾ …… orden y Folder+", L"· m3u / 검색 / 필터 / 정규식 / ▾ …… 정렬·Folder+", L"· m3u / 搜索 / 筛选 / 正则 / ▾ …… 排序与 Folder+", L"· m3u / بحث / تصفية / Regex / ▾ …… فرز و Folder+",
 		L"· m3u / Поиск / Фильтр / Regex / ▾ …… сорт и Folder+", L"· m3u / Suche / Filter / Regex / ▾ …… Sort und Folder+", L"· m3u / Busca / Filtro / Regex / ▾ …… ordem e Folder+", L"· m3u / Zoeken / Filter / Regex / ▾ …… sorteren en Folder+",
 		L"· m3u / Szukaj / Filtr / Regex / ▾ …… sort i Folder+", L"· m3u / Ara / Filtre / Regex / ▾ …… sırala ve Folder+")); yR += lh;
-	body(R, yR, LL14(L"・名前の印 …… 橙SAV=曲ごと保存 / 青LRC=歌詞。色タグで表示（PLの印列も同じ）", L"· Name marks …… amber SAV=per-song saved / blue LRC=lyrics. Color chips (same in PL Mark col)", L"· Marques …… orange SAV / bleu LRC. Pastilles couleur", L"· Segni …… arancio SAV / blu LRC. Chip colorati",
-		L"· Marcas …… naranja SAV / azul LRC. Chips de color", L"· 이름 표시 …… 주황 SAV / 파랑 LRC. 컬러 태그", L"· 名称标记 …… 橙SAV / 蓝LRC。彩色标签", L"· علامات …… برتقالي SAV / أزرق LRC. شارات ملونة",
-		L"· Метки …… оранж. SAV / син. LRC. Цветные чипы", L"· Zeichen …… orange SAV / blau LRC. Farb-Chips", L"· Marcas …… laranja SAV / azul LRC. Chips coloridos", L"· Tekens …… oranje SAV / blauw LRC. Kleurchips",
-		L"· Znaki …… pomarańcz. SAV / nieb. LRC. Kolorowe chipy", L"· İşaret …… turuncu SAV / mavi LRC. Renkli etiket")); yR += lh + 2;
+	body(R, yR, LL14(L"・名前の印 …… 橙SAV=曲ごと保存 / 青LRC=歌詞 / 緑MONO·LR·2.1…=ch。色タグ（PLの印列も同じ）", L"· Name marks …… amber SAV=per-song / blue LRC=lyrics / green MONO·LR·2.1…=ch (same in PL Mark col)", L"· Marques …… orange SAV / bleu LRC / vert MONO·LR·2.1…=ch", L"· Segni …… arancio SAV / blu LRC / verde MONO·LR·2.1…=ch",
+		L"· Marcas …… naranja SAV / azul LRC / verde MONO·LR·2.1…=ch", L"· 이름 표시 …… 주황 SAV / 파랑 LRC / 초록 MONO·LR·2.1…=ch", L"· 名称标记 …… 橙SAV / 蓝LRC / 绿MONO·LR·2.1…=ch", L"· علامات …… برتقالي SAV / أزرق LRC / أخضر MONO·LR·2.1…=ch",
+		L"· Метки …… оранж. SAV / син. LRC / зел. MONO·LR·2.1…=ch", L"· Zeichen …… orange SAV / blau LRC / gruen MONO·LR·2.1…=ch", L"· Marcas …… laranja SAV / azul LRC / verde MONO·LR·2.1…=ch", L"· Tekens …… oranje SAV / blauw LRC / groen MONO·LR·2.1…=ch",
+		L"· Znaki …… pomarańcz. SAV / nieb. LRC / ziel. MONO·LR·2.1…=ch", L"· İşaret …… turuncu SAV / mavi LRC / yeşil MONO·LR·2.1…=ch")); yR += lh + 2;
 
 	y = max(yL, yR) + 2;
 	yL = y; yR = y;

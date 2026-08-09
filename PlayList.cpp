@@ -879,7 +879,7 @@ BOOL CPlayList::OnInitDialog()
 	m_lc.DragAcceptFiles(TRUE);
 	m_lc.ModifyStyle ( 0, LVS_REPORT );
 	m_lc.InsertColumn ( 0, LL14(L"名前", L"Name", L"Nom", L"Nome", L"Nombre", L"이름", L"名称", L"الاسم", L"Имя", L"Name", L"Nome", L"Naam", L"Nazwa", L"Ad"), LVCFMT_LEFT, (int)(200 * hD2), 0 );
-	m_lc.InsertColumn ( 1, LL14(L"印", L"Mark", L"Marq.", L"Segno", L"Marca", L"표시", L"标记", L"علامة", L"Метка", L"Zchn", L"Marca", L"Teken", L"Znak", L"Isaret"), LVCFMT_CENTER, (int)(88 * hD2), 0 ); // [SAV]=曲ごと保存 / [LRC]=歌詞(.lrc)
+	m_lc.InsertColumn ( 1, LL14(L"印", L"Mark", L"Marq.", L"Segno", L"Marca", L"표시", L"标记", L"علامة", L"Метка", L"Zchn", L"Marca", L"Teken", L"Znak", L"Isaret"), LVCFMT_CENTER, (int)(120 * hD2), 0 ); // [SAV]/[LRC]/[MONO]|[LR]|[2.1]…
 	m_lc.InsertColumn ( 2, LL14(L"ゲーム", L"Game", L"Jeu", L"Gioco", L"Juego", L"게임", L"游戏", L"لعبة", L"Игра", L"Spiel", L"Jogo", L"Spel", L"Gra", L"Oyun"), LVCFMT_LEFT, (int)(50 * hD2), 0 );
 	m_lc.InsertColumn ( 3, LL14(L"時間", L"Time", L"Duree", L"Durata", L"Duracion", L"시간", L"时间", L"الوقت", L"Время", L"Zeit", L"Duracao", L"Tijd", L"Czas", L"Sure"), LVCFMT_RIGHT, (int)(72 * hD2), 0 );
 	m_lc.InsertColumn ( 4, LL14(L"アーティスト", L"Artist", L"Artiste", L"Artista", L"Artista", L"아티스트", L"艺术家", L"الفنان", L"Исполнитель", L"Kunstler", L"Artista", L"Artiest", L"Artysta", L"Sanatçı"), LVCFMT_LEFT, (int)(200 * hD2), 0 );
@@ -1444,18 +1444,319 @@ int PlLrcProbe(LPCTSTR fol)
 	return none;
 }
 
+int PlChDiskGet(LPCTSTR fol)
+{
+	if (!fol || !fol[0]) return -1;
+	// chflag2: 旧 chflag は失敗(0)をキャッシュして再試行不能だったため世代を上げた
+	CString dir = PlYsedCacheDir(_T("chflag2"));
+	if (dir.IsEmpty()) return -1;
+	CString path;
+	path.Format(_T("%s\\%016I64X"), (LPCTSTR)dir, PlCacheHashPath(fol));
+	HANDLE h = ::CreateFile(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL,
+		OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+	if (h == INVALID_HANDLE_VALUE) return -1;
+	BYTE b = 0;
+	DWORD rd = 0;
+	const BOOL ok = ::ReadFile(h, &b, 1, &rd, NULL);
+	::CloseHandle(h);
+	if (!ok || rd != 1) return -1;
+	return (int)b; // 0=不明 / 1..8=ch
+}
+
+void PlChDiskSet(LPCTSTR fol, int ch)
+{
+	if (!fol || !fol[0]) return;
+	if (ch < 0) ch = 0;
+	if (ch > 8) ch = 8;
+	CString dir = PlYsedCacheDir(_T("chflag2"));
+	if (dir.IsEmpty()) return;
+	CString path;
+	path.Format(_T("%s\\%016I64X"), (LPCTSTR)dir, PlCacheHashPath(fol));
+	HANDLE h = ::CreateFile(path, GENERIC_WRITE, FILE_SHARE_READ, NULL,
+		CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+	if (h == INVALID_HANDLE_VALUE) return;
+	BYTE b = (BYTE)ch;
+	DWORD wr = 0;
+	::WriteFile(h, &b, 1, &wr, NULL);
+	::CloseHandle(h);
+}
+
+void PlChDiskForget(LPCTSTR fol)
+{
+	if (!fol || !fol[0]) return;
+	CString dir = PlYsedCacheDir(_T("chflag2"));
+	if (dir.IsEmpty()) return;
+	CString path;
+	path.Format(_T("%s\\%016I64X"), (LPCTSTR)dir, PlCacheHashPath(fol));
+	::DeleteFile(path);
+	// 旧世代も掃除
+	CString dir1 = PlYsedCacheDir(_T("chflag"));
+	if (!dir1.IsEmpty()) {
+		path.Format(_T("%s\\%016I64X"), (LPCTSTR)dir1, PlCacheHashPath(fol));
+		::DeleteFile(path);
+	}
+}
+
+void PlChFormatLabel(int ch, CString& out)
+{
+	out.Empty();
+	if (ch <= 0) return;
+	switch (ch) {
+	case 1: out = _T("MONO"); break;
+	case 2: out = _T("LR"); break;
+	case 3: out = _T("2.1"); break;
+	case 6: out = _T("5.1"); break;
+	case 8: out = _T("7.1"); break;
+	default: out.Format(_T("%d"), ch); break;
+	}
+}
+
+static int PlChProbeWav(HANDLE h)
+{
+	BYTE hdr[12];
+	DWORD rd = 0;
+	if (!::ReadFile(h, hdr, 12, &rd, NULL) || rd < 12) return 0;
+	// RIFF WAVE / RF64 WAVE
+	if (!(memcmp(hdr, "RIFF", 4) == 0 || memcmp(hdr, "RF64", 4) == 0))
+		return 0;
+	if (memcmp(hdr + 8, "WAVE", 4) != 0) return 0;
+	for (int guard = 0; guard < 64; ++guard) {
+		BYTE ck[8];
+		rd = 0;
+		if (!::ReadFile(h, ck, 8, &rd, NULL) || rd < 8) return 0;
+		const DWORD id = *(DWORD*)ck;
+		DWORD sz = *(DWORD*)(ck + 4);
+		if (id == 0x20746d66) { // 'fmt '
+			BYTE fmt[16];
+			ZeroMemory(fmt, sizeof(fmt));
+			const DWORD want = (sz < 16) ? sz : 16;
+			rd = 0;
+			if (!::ReadFile(h, fmt, want, &rd, NULL) || rd < 4) return 0;
+			const WORD ch = *(WORD*)(fmt + 2);
+			return (ch >= 1 && ch <= 8) ? (int)ch : 0;
+		}
+		if (id == 0x34367364) { // 'ds64' (RF64) — サイズだけ飛ばす
+			const LONG skip = (LONG)((sz + 1) & ~1u);
+			if (skip <= 0) return 0;
+			if (::SetFilePointer(h, skip, NULL, FILE_CURRENT) == INVALID_SET_FILE_POINTER)
+				return 0;
+			continue;
+		}
+		const LONG skip = (LONG)((sz + 1) & ~1u);
+		if (skip <= 0) return 0;
+		if (::SetFilePointer(h, skip, NULL, FILE_CURRENT) == INVALID_SET_FILE_POINTER)
+			return 0;
+	}
+	return 0;
+}
+
+static int PlChProbeFlac(HANDLE h)
+{
+	BYTE sig[4];
+	DWORD rd = 0;
+	if (!::ReadFile(h, sig, 4, &rd, NULL) || rd < 4) return 0;
+	if (memcmp(sig, "fLaC", 4) != 0) return 0;
+	BYTE mh[4];
+	rd = 0;
+	if (!::ReadFile(h, mh, 4, &rd, NULL) || rd < 4) return 0;
+	const int type = mh[0] & 0x7F;
+	const DWORD sz = ((DWORD)mh[1] << 16) | ((DWORD)mh[2] << 8) | (DWORD)mh[3];
+	if (type != 0 || sz < 18) return 0; // STREAMINFO
+	BYTE si[34];
+	ZeroMemory(si, sizeof(si));
+	const DWORD want = (sz < 34) ? sz : 34;
+	rd = 0;
+	if (!::ReadFile(h, si, want, &rd, NULL) || rd < 18) return 0;
+	const int ch = ((si[12] >> 1) & 0x07) + 1;
+	return (ch >= 1 && ch <= 8) ? ch : 0;
+}
+
+static int PlChProbeMp3(HANDLE h)
+{
+	BYTE buf[8192];
+	DWORD rd = 0;
+	if (!::ReadFile(h, buf, sizeof(buf), &rd, NULL) || rd < 4) return 0;
+	DWORD off = 0;
+	if (rd >= 10 && buf[0] == 'I' && buf[1] == 'D' && buf[2] == '3') {
+		const DWORD id3sz = ((DWORD)(buf[6] & 0x7F) << 21) | ((DWORD)(buf[7] & 0x7F) << 14)
+			| ((DWORD)(buf[8] & 0x7F) << 7) | (DWORD)(buf[9] & 0x7F);
+		off = 10 + id3sz;
+		if (off >= rd) {
+			if (::SetFilePointer(h, (LONG)off, NULL, FILE_BEGIN) == INVALID_SET_FILE_POINTER)
+				return 0;
+			rd = 0;
+			if (!::ReadFile(h, buf, sizeof(buf), &rd, NULL) || rd < 4) return 0;
+			off = 0;
+		}
+	}
+	for (DWORD i = off; i + 3 < rd; ++i) {
+		if (buf[i] != 0xFF || (buf[i + 1] & 0xE0) != 0xE0) continue;
+		const unsigned head = ((unsigned)buf[i] << 24) | ((unsigned)buf[i + 1] << 16)
+			| ((unsigned)buf[i + 2] << 8) | (unsigned)buf[i + 3];
+		const int mode = (head >> 6) & 0x3;
+		return (mode == 3) ? 1 : 2;
+	}
+	return 0;
+}
+
+// Ogg ページを辿って OpusHead / Vorbis identification の ch を取る
+static int PlChProbeOgg(HANDLE h)
+{
+	BYTE buf[16384];
+	DWORD rd = 0;
+	if (!::ReadFile(h, buf, sizeof(buf), &rd, NULL) || rd < 28) return 0;
+
+	auto tryPayload = [](const BYTE* p, DWORD n) -> int {
+		if (!p || n < 12) return 0;
+		for (DWORD i = 0; i + 12 <= n; ++i) {
+			if (i + 10 <= n && memcmp(p + i, "OpusHead", 8) == 0) {
+				const int ch = (int)p[i + 9];
+				if (ch >= 1 && ch <= 8) return ch;
+			}
+			// Vorbis id: 0x01 'vorbis' + version(4) + channels(1)
+			if (p[i] == 0x01 && i + 12 <= n && memcmp(p + i + 1, "vorbis", 6) == 0) {
+				const int ch = (int)p[i + 11];
+				if (ch >= 1 && ch <= 8) return ch;
+			}
+		}
+		return 0;
+	};
+
+	// 先頭が OggS でない場合（稀な前置）をスキップ
+	DWORD pos = 0;
+	while (pos + 4 <= rd && !(buf[pos] == 'O' && buf[pos + 1] == 'g' && buf[pos + 2] == 'g' && buf[pos + 3] == 'S'))
+		++pos;
+
+	for (int pages = 0; pages < 8 && pos + 27 <= rd; ++pages) {
+		if (!(buf[pos] == 'O' && buf[pos + 1] == 'g' && buf[pos + 2] == 'g' && buf[pos + 3] == 'S'))
+			break;
+		const BYTE nseg = buf[pos + 26];
+		if (pos + 27 + nseg > rd) break;
+		DWORD body = 0;
+		for (BYTE s = 0; s < nseg; ++s)
+			body += buf[pos + 27 + s];
+		const DWORD bodyOff = pos + 27 + nseg;
+		if (bodyOff + body > rd) {
+			// ページ末がバッファ外: 取れた分だけ検索
+			const int ch = tryPayload(buf + bodyOff, rd - bodyOff);
+			if (ch > 0) return ch;
+			break;
+		}
+		const int ch = tryPayload(buf + bodyOff, body);
+		if (ch > 0) return ch;
+		pos = bodyOff + body;
+	}
+	// フォールバック: バッファ全体を線形検索
+	return tryPayload(buf, rd);
+}
+
+static int PlChProbeDsf(HANDLE h)
+{
+	BYTE hdr[28 + 52];
+	DWORD rd = 0;
+	if (!::ReadFile(h, hdr, sizeof(hdr), &rd, NULL) || rd < 28 + 52) return 0;
+	if (memcmp(hdr, "DSD ", 4) != 0) return 0;
+	if (memcmp(hdr + 28, "fmt ", 4) != 0) return 0;
+	// DSF_fmt_HEADER: channel_num at +24 within fmt (after fmt_/size/ver/id/type)
+	const DWORD ch = *(DWORD*)(hdr + 28 + 4 + 8 + 4 + 4 + 4);
+	return (ch >= 1 && ch <= 8) ? (int)ch : 0;
+}
+
+static int PlChProbeDff(HANDLE h)
+{
+	BYTE buf[8192];
+	DWORD rd = 0;
+	if (!::ReadFile(h, buf, sizeof(buf), &rd, NULL) || rd < 16) return 0;
+	if (!(buf[0] == 'F' && buf[1] == 'R' && buf[2] == 'M' && buf[3] == '8'))
+		return 0;
+	// CHNL: 'C''H''N''L' + size(8 BE) + numChannels(2 BE)
+	for (DWORD i = 0; i + 14 < rd; ++i) {
+		if (buf[i] == 'C' && buf[i + 1] == 'H' && buf[i + 2] == 'N' && buf[i + 3] == 'L') {
+			const int ch = ((int)buf[i + 12] << 8) | (int)buf[i + 13];
+			if (ch >= 1 && ch <= 8) return ch;
+		}
+	}
+	return 0;
+}
+
+static int PlChProbeWsd(HANDLE h)
+{
+	// WSD_GENERAL_INFO (32) + WSD_DATA_SPEC; channels at offset 32+12 = 44
+	BYTE buf[64];
+	DWORD rd = 0;
+	if (!::ReadFile(h, buf, sizeof(buf), &rd, NULL) || rd < 48) return 0;
+	const int ch = (int)buf[44];
+	return (ch >= 1 && ch <= 8) ? ch : 0;
+}
+
+static int PlChProbePath(LPCTSTR fol)
+{
+	if (!fol || !fol[0]) return 0;
+	CString ext = fol;
+	const int dot = ext.ReverseFind(_T('.'));
+	if (dot < 0) return 0;
+	ext = ext.Mid(dot);
+	ext.MakeLower();
+
+	HANDLE h = ::CreateFile(fol, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL,
+		OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+	if (h == INVALID_HANDLE_VALUE) return 0;
+	int ch = 0;
+	if (ext == _T(".wav") || ext == _T(".wave"))
+		ch = PlChProbeWav(h);
+	else if (ext == _T(".flac") || ext == _T(".fla"))
+		ch = PlChProbeFlac(h);
+	else if (ext == _T(".mp3") || ext == _T(".mp2") || ext == _T(".mp1"))
+		ch = PlChProbeMp3(h);
+	else if (ext == _T(".ogg") || ext == _T(".oga") || ext == _T(".opus"))
+		ch = PlChProbeOgg(h);
+	else if (ext == _T(".dsf"))
+		ch = PlChProbeDsf(h);
+	else if (ext == _T(".dff"))
+		ch = PlChProbeDff(h);
+	else if (ext == _T(".wsd"))
+		ch = PlChProbeWsd(h);
+	else if (ext == _T(".m4a") || ext == _T(".aac") || ext == _T(".mp4")) {
+		ch = 0; // 再生時に PlChDiskSet
+	}
+	::CloseHandle(h);
+	return ch;
+}
+
+int PlChProbe(LPCTSTR fol)
+{
+	if (!fol || !fol[0]) return -1;
+	const int cached = PlChDiskGet(fol);
+	if (cached >= 0) return cached;
+	const int ch = PlChProbePath(fol);
+	PlChDiskSet(fol, ch);
+	return ch;
+}
+
 void PlFormatRowMarks(int row, LPCTSTR fol, CString& out)
 {
 	out.Empty();
 	const BOOL sav = SongParams_HasEntryForRow(row);
 	BOOL lrc = FALSE;
+	int ch = 0;
 	if (fol && fol[0]) {
 		const int c = PlLrcDiskGet(fol);
 		lrc = (c == 0);
+		const int cc = PlChDiskGet(fol);
+		if (cc > 0) ch = cc;
 	}
-	// [SAV]=曲ごと保存パラメータあり / [LRC]=歌詞(.lrc)あり
+	// [SAV]=曲ごと保存 / [LRC]=歌詞 / [MONO]|[LR]|[2.1]…=チャンネル
 	if (sav) out += _T("[SAV]");
 	if (lrc) out += _T("[LRC]");
+	if (ch > 0) {
+		CString lab;
+		PlChFormatLabel(ch, lab);
+		if (!lab.IsEmpty()) {
+			out += _T("[");
+			out += lab;
+			out += _T("]");
+		}
+	}
 }
 
 // プレイリスト窓用ジャケ(メモリLRU)。ディスクは PlJakDiskPath と共有。
@@ -9230,7 +9531,8 @@ void CPlayList::Load(BOOL restoreSavedRow)
 		f.Read(&c,4);m_lc.SetColumnWidth(2,c); // ゲーム
 		f.Read(&c,4);m_lc.SetColumnWidth(4,c); // アーティスト
 		f.Read(&c,4);m_lc.SetColumnWidth(5,c); // アルバム
-		f.Read(&c,4); // 印列([SAV]/[LRC]。旧★幅は狭いので下限を上げる)
+		f.Read(&c,4); // 印列([SAV]/[LRC]/ch。旧★幅は狭いので下限を上げる)
+		if (c < (int)(100 * hD2)) c = (int)(120 * hD2);
 		if (c > 0 && c <= 400) {
 			const int minMark = (int)(72 * hD2);
 			if (c < minMark) c = minMark;

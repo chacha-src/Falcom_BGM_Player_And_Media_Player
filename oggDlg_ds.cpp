@@ -519,8 +519,8 @@ UINT HandleNotifications(LPVOID)
 		oldw = OUTPUT_BUFFER_SIZE * 2;
 		og->timer.SetEvent();
 	}
-	else if (g_openDecoderMode == -7 && prefilledOldw > 0) {
-		// プリフィル済み区間を再デコードで潰さない
+	else if ((g_openDecoderMode == -7 || g_openDecoderMode == -8) && prefilledOldw > 0) {
+		// DSD/FLAC の長プリフィル済み区間を再デコードで潰さない
 		oldw = prefilledOldw;
 	}
 	fade1 = 0;
@@ -5852,7 +5852,9 @@ static void equaliserBankUnlocked(void* data, int len, BOOL reset) {
 				else
 					pRaw[offset] = (unsigned char)(finalOut * 127.0f + 128.0f);
 			}
-			if (wavchannel == 2) bi++;
+			// left/rightSamples はフレーム単位。mono/多ch でも毎フレーム進める
+			// （旧: wavchannel==2 のときだけ → mono は全サンプルが leftSamples[0] になりノイズ化）
+			bi++;
 		}
 	}
 

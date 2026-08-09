@@ -195,7 +195,16 @@ void PlLrcDiskForget(LPCTSTR fol);
 CString PlLrcSidecarPath(LPCTSTR fol);
 // 未キャッシュならサイドカーを見て登録。戻り: 0=あり 1=なし (-1はfol不正)
 int PlLrcProbe(LPCTSTR fol);
-// [SAV]=曲ごと保存 / [LRC]=歌詞(.lrc)。キャッシュのみ参照。未スキャンは空
+// チャンネル数キャッシュ(%LOCALAPPDATA%\oggYSED\chflag2)。-1=未 / 0=不明 / 1..8=ch
+int PlChDiskGet(LPCTSTR fol);
+void PlChDiskSet(LPCTSTR fol, int ch);
+void PlChDiskForget(LPCTSTR fol);
+// 未キャッシュならヘッダを覗いて登録。戻り: 0=不明 / 1..8=ch (-1はfol不正)
+// 対応 peek: wav/rf64, flac, mp3, ogg/opus, dsf/dff/wsd。再生時も確定 ch を書き戻す
+int PlChProbe(LPCTSTR fol);
+// 印用ラベル: MONO / LR / 2.1 / 3 / 4 / 5.1 / 7.1 等。ch<=0 は空
+void PlChFormatLabel(int ch, CString& out);
+// [SAV]=曲ごと保存 / [LRC]=歌詞 / [MONO]|[LR]|[2.1]…=ch。キャッシュのみ参照
 void PlFormatRowMarks(int row, LPCTSTR fol, CString& out);
 
 enum {

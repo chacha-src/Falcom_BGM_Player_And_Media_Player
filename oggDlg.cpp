@@ -1959,6 +1959,10 @@ void ConfigurePlaybackOutputAndUpscaler()
 	}
 	g_audioUpscaler.Configure(wavbit_sample_Hz, wavchannel, srcBits, g_ds_pcm_rate, g_ds_pcm_ch, g_ds_pcm_bits);
 	g_pcm_upscale_active = g_audioUpscaler.IsActive() ? 1 : 0;
+	// 再生で確定した ch を印キャッシュへ（リストの MONO/LR/2.1… 即反映）
+	extern CString filen;
+	if (!filen.IsEmpty() && wavchannel >= 1 && wavchannel <= 8)
+		PlChDiskSet(filen, wavchannel);
 	extern void MpMirrorOnFormatReady();
 	MpMirrorOnFormatReady();
 }
@@ -11078,6 +11082,22 @@ void COggDlg::play()
 	char* pdsb;
 	lo = 0; loc = 0;
 
+	// プリフィル／通知スレッドより前に endf を確定する。
+	// 旧: Play 後に設定 → 先読み中に endf==0（前曲のゲームループ残）だと
+	// playwavkpi の短読みが Seek(0) し「頭の巻き戻り」になる（特に KPI）。
+	endf = 0;
+	if (pl && plw) { if (pl->m_loop.GetCheck() == TRUE) { if (loop2 == 0)loop2 = oggsize / 4; } }
+	if (loop2 == 0) endf = 1;
+	if (mode == 30 && (loop1 != 0 || loop2 != 0)) {
+		const int ts = (data_size > 0) ? (data_size / 4) : ((oggsize > 0) ? (oggsize / 4) : 0);
+		const __int64 endSamp = (__int64)loop1 + (__int64)loop2;
+		if (ts <= 0 || loop1 < 0 || loop2 <= 0 || loop1 >= ts || loop2 > ts
+			|| endSamp > (__int64)ts + 8 || loop1 == loop2) {
+			loop1 = 0; loop2 = 0; endf = 1;
+		}
+	}
+	if (mode == -3 || mode == -7 || mode == -8 || mode == -9 || mode == -10 || mode == 999) endf = 1;
+
 	if (loop1 == 0 && loop2 == 0) {
 		const int fullLen = m_time.GetMaxValue();
 		m_time.SetSelection(0, (fullLen > 0) ? fullLen : 1);
@@ -11137,37 +11157,45 @@ void COggDlg::play()
 		const int bpf = (g_ds_pcm_ch > 0 && g_ds_pcm_bits >= 8) ? (g_ds_pcm_ch * (g_ds_pcm_bits / 8)) : 4;
 		const int ring = (int)((g_ds_buffer_bytes > 0) ? g_ds_buffer_bytes : (ULONG)(OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM));
 		const bool isDsd = (g_openDecoderMode == -7 || mode == -7);
-		// DSD は変換が重い。リングを無音埋め＋数十msだけ書いて即 Play すると、
-		// 通知スレッド起動前に無音区間へ突入して「ポツ→無音」になる。
-		// DSD は半分程度を先に埋め、他形式は短めプリフィル。
-		if (len1 <= 0) {
-			const int rate = (g_ds_pcm_rate >= 8000) ? g_ds_pcm_rate : ((wavbit_sample_Hz >= 8000) ? wavbit_sample_Hz : 44100);
-			int fill;
-			if (isDsd) {
-				fill = ring / 2;
+		const bool isFlac = (g_openDecoderMode == -8 || mode == -8);
+		// 比較基準: 2026.08.08 88c4b63（通常再生） / 08.09 e125f4a（DSD用のみ長プリフィル）。
+		// 非DSDへゼロ＋強制プリフィルを広げると、頭がリングに残り通知追従まで
+		// 同じ内容が数周する（KPIで確認済。MP3も同症状）。
+		// DSD/FLAC以外は 88c4b63 どおり WriteCursor ベース・ゼロ無し・強制プリフィル無し。
+		if (isDsd || isFlac) {
+			if (len1 <= 0) {
+				const int rate = (g_ds_pcm_rate >= 8000) ? g_ds_pcm_rate : ((wavbit_sample_Hz >= 8000) ? wavbit_sample_Hz : 44100);
+				int fill = isDsd ? (ring / 2) : (bpf * (rate / 2)); // DSD:~半リング / FLAC:~500ms
 				const int maxMs = bpf * (rate / 2); // ~500ms 上限
 				if (fill > maxMs && maxMs > 0)
 					fill = maxMs;
 				if (fill < OUTPUT_BUFFER_SIZE)
 					fill = OUTPUT_BUFFER_SIZE;
+				if (fill > ring / 2)
+					fill = ring / 2;
+				if (bpf > 0)
+					fill = (fill / bpf) * bpf;
+				len1 = fill;
+				len2 = 0;
 			}
-			else {
-				fill = bpf * (rate / 10); // ~100ms
-				if (fill < OUTPUT_BUFFER_SIZE)
-					fill = OUTPUT_BUFFER_SIZE;
-				if (fill > ring / 4)
-					fill = ring / 4;
+			if (m_dsb && ring > 0 && bpf > 0) {
+				void* pZero = NULL; DWORD zlen = 0;
+				if (m_dsb->Lock(0, (DWORD)ring, &pZero, &zlen, NULL, NULL, 0) == DS_OK && pZero && zlen) {
+					ZeroMemory(pZero, zlen);
+					m_dsb->Unlock(pZero, zlen, NULL, 0);
+				}
 			}
-			if (bpf > 0)
-				fill = (fill / bpf) * bpf;
-			len1 = fill;
-			len2 = 0;
 		}
-		if (m_dsb && ring > 0 && bpf > 0) {
-			void* pZero = NULL; DWORD zlen = 0;
-			if (m_dsb->Lock(0, (DWORD)ring, &pZero, &zlen, NULL, NULL, 0) == DS_OK && pZero && zlen) {
-				ZeroMemory(pZero, zlen);
-				m_dsb->Unlock(pZero, zlen, NULL, 0);
+		else {
+			len1 = (int)WriteCursor;
+			len2 = 0;
+			if (len1 < 0) {
+				len1 = ring / 4;
+				len2 = 0;
+			}
+			if (bpf > 0) {
+				len1 = (len1 / bpf) * bpf;
+				len2 = (len2 / bpf) * bpf;
 			}
 		}
 	}
@@ -11191,14 +11219,19 @@ void COggDlg::play()
 	}
 
 	DispatchPlaywavFill(bufwav3, 0, len1, len2);
-	if (m_dsb) {
+	if (m_dsb && (len1 + len2) > 0) {
 		m_dsb->Lock(0, len1 + len2, (LPVOID*)&pdsb, (DWORD*)&len3, NULL, 0, 0);
 		memcpy(pdsb, bufwav3, len3);
 		m_dsb->Unlock(pdsb, len3, NULL, 0);
 		m_dsb->SetVolume((savedata.dsvol - 1) * 10);
 	}
-	// 通知スレッドがプリフィル区間を上書きしないよう書込みカーソルを進める
-	oldw = (ULONG)(len1 + len2);
+	else if (m_dsb) {
+		m_dsb->SetVolume((savedata.dsvol - 1) * 10);
+	}
+	// DSD/FLAC のみプリフィル位置を通知へ渡す。MP3/KPI等は 88c4b63 どおり触らない
+	// （ここで進めると通知側の固定 oldw と食い違い、頭がリングに残って周回する）。
+	if (g_openDecoderMode == -7 || mode == -7 || g_openDecoderMode == -8 || mode == -8)
+		oldw = (ULONG)(len1 + len2);
 	CFile f123;
 	int flggg = 0;
 	if (silentNow) {
@@ -11255,13 +11288,13 @@ void COggDlg::play()
 	thn1 = FALSE;
 	playf = 1;
 	plf = 1;
-	// DSD: Play より先に通知スレッドを起動し、無音リングへ追従書き込みを開始する
-	if (g_openDecoderMode == -7 || mode == -7)
+	// DSD/FLAC: Play 前に通知。KPI は Play 後（ここに混ぜると破綻する）。
+	if (g_openDecoderMode == -7 || mode == -7 || g_openDecoderMode == -8 || mode == -8)
 		BeginPlaybackNotifyThread();
 	if (m_dsb) {
 		m_dsb->Play(0, 0, DSBPLAY_LOOPING);
 	}
-	if (!(g_openDecoderMode == -7 || mode == -7))
+	if (!(g_openDecoderMode == -7 || mode == -7 || g_openDecoderMode == -8 || mode == -8))
 		BeginPlaybackNotifyThread();
 
 	endflg = 0;
@@ -11283,7 +11316,7 @@ void COggDlg::play()
 	}
 
 	SetTimer(9000, 10, NULL);
-	endf = 0;
+	// endf はプリフィル前に設定済み。ここは loop チェック後の再同期のみ。
 	if (pl && plw) { if (pl->m_loop.GetCheck() == TRUE) { if (loop2 == 0)loop2 = oggsize / 4; } }
 	if (loop2 == 0) endf = 1;
 	if (mode == 30 && (loop1 != 0 || loop2 != 0)) {

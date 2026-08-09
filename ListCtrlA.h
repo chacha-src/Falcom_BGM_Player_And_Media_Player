@@ -21,7 +21,7 @@ public:
 	playlistdata0 *pc;
 	// true のとき、プレイリストのツールチップに曲ごと保存パラメータの変更点を付記する
 	bool m_bSongParamTip = false;
-	// true のとき列1はレーティング。false なら印([SAV]=曲ごと保存 / [LRC]=歌詞)
+	// true のとき列1はレーティング。false なら印([SAV]=曲ごと保存 / [LRC]=歌詞 / [MONO]|[LR]|[2.1]…=ch)
 	bool m_bCol1IsRating = false;
 	// メディアプレイヤー: 行左にジャケットサムネを描く(0=無効)。HBITMAP は呼び出し側が所有。
 	int m_mpJacketPx = 0;

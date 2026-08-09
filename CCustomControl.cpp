@@ -1976,11 +1976,12 @@ static void DrawFittedText(CDC& dc, const CRect& rect, const CString& str, UINT 
     dc.RestoreDC(-1);
 }
 
-// 名前列/印列の [SAV]/[LRC] を抜き出し、色付きチップ描画用に分離する。
-static void CCC_ExtractSavLrc(CString& text, BOOL& bSav, BOOL& bLrc)
+// 名前列/印列の [SAV]/[LRC]/[MONO]|[LR]|[2.1]… を抜き出し、色付きチップ描画用に分離する。
+static void CCC_ExtractSavLrc(CString& text, BOOL& bSav, BOOL& bLrc, CString& chLabel)
 {
     bSav = FALSE;
     bLrc = FALSE;
+    chLabel.Empty();
     if (text.IsEmpty()) return;
 
     // 先頭の欠損印「⚠ 」は残す
@@ -2002,6 +2003,32 @@ static void CCC_ExtractSavLrc(CString& text, BOOL& bSav, BOOL& bLrc)
             bLrc = TRUE;
             rest = rest.Mid(5);
             continue;
+        }
+        // [MONO] / [LR] / [2.1] / [3] / [5.1] …
+        if (!rest.IsEmpty() && rest[0] == _T('[')) {
+            const int end = rest.Find(_T(']'));
+            if (end >= 2) {
+                const CString inner = rest.Mid(1, end - 1);
+                if (inner != _T("SAV") && inner != _T("LRC") && !inner.IsEmpty()) {
+                    // 英数字と '.' のみをチャンネル印として採用
+                    BOOL ok = TRUE;
+                    for (int k = 0; k < inner.GetLength(); ++k) {
+                        const TCHAR c = inner[k];
+                        if (!((c >= _T('0') && c <= _T('9'))
+                            || (c >= _T('A') && c <= _T('Z'))
+                            || (c >= _T('a') && c <= _T('z'))
+                            || c == _T('.'))) {
+                            ok = FALSE;
+                            break;
+                        }
+                    }
+                    if (ok && chLabel.IsEmpty()) {
+                        chLabel = inner;
+                        rest = rest.Mid(end + 1);
+                        continue;
+                    }
+                }
+            }
         }
         if (!rest.IsEmpty() && (rest[0] == _T(' ') || rest[0] == _T('\t'))) {
             rest = rest.Mid(1);
@@ -2067,10 +2094,10 @@ static int CCC_DrawMarkChip(CDC* pDC, int x, int midY, LPCTSTR label,
     return w + 3;
 }
 
-// SAV=琥珀 / LRC=青。文字は黒固定（白字はアクリル上で読みにくい）
-static int CCC_DrawSavLrcChips(CDC* pDC, int x, int midY, BOOL bSav, BOOL bLrc, BOOL bOpaque)
+// SAV=琥珀 / LRC=青 / CH=薄荷。文字は黒固定（白字はアクリル上で読みにくい）
+static int CCC_DrawSavLrcChips(CDC* pDC, int x, int midY, BOOL bSav, BOOL bLrc, const CString& chLabel, BOOL bOpaque)
 {
-    if (!bSav && !bLrc) return x;
+    if (!bSav && !bLrc && chLabel.IsEmpty()) return x;
     const COLORREF fg = RGB(20, 20, 24);
     if (bSav)
         x += CCC_DrawMarkChip(pDC, x, midY, _T("SAV"),
@@ -2078,12 +2105,15 @@ static int CCC_DrawSavLrcChips(CDC* pDC, int x, int midY, BOOL bSav, BOOL bLrc, 
     if (bLrc)
         x += CCC_DrawMarkChip(pDC, x, midY, _T("LRC"),
             RGB(186, 210, 255), fg, bOpaque);
+    if (!chLabel.IsEmpty())
+        x += CCC_DrawMarkChip(pDC, x, midY, chLabel,
+            RGB(186, 236, 210), fg, bOpaque);
     return x;
 }
 
-static int CCC_MeasureSavLrcChips(CDC* pDC, BOOL bSav, BOOL bLrc)
+static int CCC_MeasureSavLrcChips(CDC* pDC, BOOL bSav, BOOL bLrc, const CString& chLabel)
 {
-    if (!pDC || (!bSav && !bLrc)) return 0;
+    if (!pDC || (!bSav && !bLrc && chLabel.IsEmpty())) return 0;
     CFont* pCur = pDC->GetCurrentFont();
     LOGFONT lf = {};
     if (pCur) pCur->GetLogFont(&lf);
@@ -2100,6 +2130,10 @@ static int CCC_MeasureSavLrcChips(CDC* pDC, BOOL bSav, BOOL bLrc)
     }
     if (bLrc) {
         CSize s = pDC->GetTextExtent(_T("LRC"));
+        w += max(20, s.cx + 8) + 3;
+    }
+    if (!chLabel.IsEmpty()) {
+        CSize s = pDC->GetTextExtent(chLabel);
         w += max(20, s.cx + 8) + 3;
     }
     pDC->SelectObject(pOf);
@@ -7641,7 +7675,8 @@ void CCustomListCtrl::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
 
         CString st = GetItemText(ni, ns);
         BOOL bSav = FALSE, bLrc = FALSE;
-        CCC_ExtractSavLrc(st, bSav, bLrc);
+        CString chLabel;
+        CCC_ExtractSavLrc(st, bSav, bLrc, chLabel);
         const BOOL bOpaqueChips = bCapGlass;
         pDC->SetTextColor(m_bAeroMode ? RGB(1, 1, 1) : RGB(0, 0, 0));
         pDC->SetBkMode(TRANSPARENT);
@@ -7684,17 +7719,17 @@ void CCustomListCtrl::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
 
         CFont* po = pDC->SelectObject(GetFont());
         const int midY = (r.top + r.bottom) / 2;
-        if (bSav || bLrc) {
+        if (bSav || bLrc || !chLabel.IsEmpty()) {
             if (st.IsEmpty() && (uColFmt & DT_CENTER)) {
                 // 印列のみ: チップを中央寄せ
-                const int chipsW = CCC_MeasureSavLrcChips(pDC, bSav, bLrc);
+                const int chipsW = CCC_MeasureSavLrcChips(pDC, bSav, bLrc, chLabel);
                 int x = r.left + (r.Width() - chipsW) / 2;
                 if (x < r.left + 2) x = r.left + 2;
-                CCC_DrawSavLrcChips(pDC, x, midY, bSav, bLrc, bOpaqueChips);
+                CCC_DrawSavLrcChips(pDC, x, midY, bSav, bLrc, chLabel, bOpaqueChips);
             } else {
                 // 名前列: チップ → 曲名
                 int x = rt.left;
-                x = CCC_DrawSavLrcChips(pDC, x, midY, bSav, bLrc, bOpaqueChips);
+                x = CCC_DrawSavLrcChips(pDC, x, midY, bSav, bLrc, chLabel, bOpaqueChips);
                 if (x + 2 < rt.right)
                     rt.left = x + 1;
                 if (!st.IsEmpty() && rt.Width() > 4)
