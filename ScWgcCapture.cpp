@@ -44,7 +44,9 @@
 
 #pragma comment(lib, "d3d11.lib")
 #pragma comment(lib, "dxgi.lib")
-#pragma comment(lib, "d3dcompiler.lib")
+#pragma comment(lib, "d3d11.lib")
+#pragma comment(lib, "dxgi.lib")
+// d3dcompiler.lib は vcxproj で Windows SDK 版を明示リンク（DXSDK 2010 の _42 依存を避ける）
 #pragma comment(lib, "windowsapp.lib")
 
 namespace {

@@ -30,6 +30,7 @@ void MpSortPlaylistByKey(int key);
 void MpMirrorWritePcm(const BYTE* pcm, int bytes);
 void MpMirrorShutdown();
 void MpMirrorOnFormatReady(); // UI/再生準備後: ミラーONなら初期化（オーディオスレッドから呼ばない）
+void MpRemoteWritePcm(const BYTE* pcm, int bytes); // ローカルリモート AAC（接続中のみ）
 
 void MpBpmOnTimerTick();
 void MpBpmDetectFromPeaks();

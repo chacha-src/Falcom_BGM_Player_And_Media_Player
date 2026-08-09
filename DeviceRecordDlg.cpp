@@ -6,6 +6,7 @@
 #include "oggDlg.h"
 #include "CPianoRoll.h"
 #include "DeviceRecordDlg.h"
+#include "AudioDevSync.h"
 #include "TranscodeExport.h"
 #include "ProAudio.h"
 #include "MpPlayerAddons.h"
@@ -578,6 +579,8 @@ void CDeviceRecordDlg::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDC_DR_PATH, m_path);
 	DDX_Control(pDX, IDC_DR_BROWSE, m_browse);
 	DDX_Control(pDX, IDC_DR_MIXMIC, m_mixMic);
+	DDX_Control(pDX, IDC_DR_MICDEV_L, m_micDevLabel);
+	DDX_Control(pDX, IDC_DR_MICDEV, m_micDev);
 	DDX_Control(pDX, IDC_DR_METER_MIC_L, m_meterMicL);
 	DDX_Control(pDX, IDC_DR_METER_SYS_L, m_meterSysL);
 	DDX_Control(pDX, IDC_DR_METER_MIX_L, m_meterMixL);
@@ -596,6 +599,8 @@ BEGIN_MESSAGE_MAP(CDeviceRecordDlg, CCustomBlurDialogBase)
 	ON_BN_CLICKED(IDC_DR_CLOSE, &CDeviceRecordDlg::OnBnClickedClose)
 	ON_BN_CLICKED(IDC_DR_HELP, &CDeviceRecordDlg::OnBnClickedHelp)
 	ON_CBN_SELCHANGE(IDC_DR_FMT, &CDeviceRecordDlg::OnCbnSelchangeFormat)
+	ON_CBN_SELCHANGE(IDC_DR_DEV, &CDeviceRecordDlg::OnCbnSelchangeDev)
+	ON_CBN_SELCHANGE(IDC_DR_MICDEV, &CDeviceRecordDlg::OnCbnSelchangeMicDev)
 	ON_WM_TIMER()
 	ON_WM_SIZE()
 	ON_WM_DESTROY()
@@ -687,64 +692,9 @@ CString CDeviceRecordDlg::NormalizeOutPath(const CString& pathIn, int fmt) const
 
 void CDeviceRecordDlg::FillDeviceCombo()
 {
-	m_devCnt = 0;
-	m_dev.ResetContent();
-	m_dev.AddString(LL14(
-		L"(既定の再生デバイス)", L"(Default playback device)", L"(Périphérique de lecture par défaut)",
-		L"(Dispositivo di riproduzione predefinito)", L"(Dispositivo de reproducción predeterminado)",
-		L"(기본 재생 장치)", L"(默认播放设备)", L"(جهاز التشغيل الافتراضي)",
-		L"(Устройство воспроизведения по умолчанию)", L"(Standardwiedergabegerät)",
-		L"(Dispositivo de reprodução padrão)", L"(Standaard afspeelapparaat)",
-		L"(Domyślne urządzenie odtwarzania)", L"(Varsayılan oynatma aygıtı)"));
-	m_devIds[0][0] = 0;
-	m_devCnt = 1;
-
-	IMMDeviceEnumerator* enumer = NULL;
-	IMMDeviceCollection* coll = NULL;
-	HRESULT hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), NULL, CLSCTX_ALL,
-		__uuidof(IMMDeviceEnumerator), (void**)&enumer);
-	if (SUCCEEDED(hr) && enumer) {
-		hr = enumer->EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE, &coll);
-		if (SUCCEEDED(hr) && coll) {
-			UINT cnt = 0;
-			coll->GetCount(&cnt);
-			for (UINT i = 0; i < cnt && m_devCnt < DR_DEV_MAX; ++i) {
-				IMMDevice* device = NULL;
-				if (FAILED(coll->Item(i, &device)) || !device) continue;
-				LPWSTR id = NULL;
-				if (FAILED(device->GetId(&id)) || !id) { device->Release(); continue; }
-				IPropertyStore* props = NULL;
-				CString name = id;
-				if (SUCCEEDED(device->OpenPropertyStore(STGM_READ, &props)) && props) {
-					PROPVARIANT var;
-					PropVariantInit(&var);
-					if (SUCCEEDED(props->GetValue(PKEY_Device_FriendlyName, &var)) && var.vt == VT_LPWSTR && var.pwszVal)
-						name = var.pwszVal;
-					PropVariantClear(&var);
-					props->Release();
-				}
-				_tcsncpy(m_devIds[m_devCnt], id, _countof(m_devIds[0]) - 1);
-				m_devIds[m_devCnt][_countof(m_devIds[0]) - 1] = 0;
-				m_dev.AddString(name);
-				CoTaskMemFree(id);
-				device->Release();
-				m_devCnt++;
-			}
-			coll->Release();
-		}
-		enumer->Release();
-	}
-
-	int sel = 0;
-	if (savedata.loop_device[0]) {
-		for (int i = 1; i < m_devCnt; ++i) {
-			if (_tcscmp(m_devIds[i], savedata.loop_device) == 0) { sel = i; break; }
-		}
-	} else if (savedata.loop_device_cur > 0 && savedata.loop_device_cur < m_devCnt) {
-		sel = savedata.loop_device_cur;
-	}
-	m_dev.SetCurSelPhysical(sel);
+	AudioLoopDevFillCombo(m_dev);
 }
+
 
 void CDeviceRecordDlg::RefreshQualityCombo()
 {
@@ -789,13 +739,8 @@ void CDeviceRecordDlg::RefreshQualityCombo()
 void CDeviceRecordDlg::PersistUiToSavedata()
 {
 	if (!GetSafeHwnd()) return;
-	int sel = m_dev.GetCurSelPhysical();
-	if (sel < 0) sel = 0;
-	if (sel >= m_devCnt) sel = 0;
-	savedata.loop_device_cur = sel;
-	_tcsncpy(savedata.loop_device, m_devIds[sel], _countof(savedata.loop_device) - 1);
-	savedata.loop_device[_countof(savedata.loop_device) - 1] = 0;
-
+	AudioLoopDevApplyFromCombo(m_dev);
+	
 	int fmt = m_fmt.GetCurSel();
 	if (fmt < 0 || fmt > 2) fmt = 0;
 	savedata.record_format = fmt;
@@ -892,6 +837,11 @@ BOOL CDeviceRecordDlg::OnInitDialog()
 		L"Kayıt sırasında aygıtta ses çalın."));
 
 	FillDeviceCombo();
+	AudioMicDevFillCombo(m_micDev);
+	m_micDevLabel.SetWindowText(LL14(
+		L"マイク", L"Mic", L"Micro", L"Micro", L"Micro",
+		L"마이크", L"麦克风", L"ميكروفون", L"Микрофон", L"Mikrofon",
+		L"Microfone", L"Microfoon", L"Mikrofon", L"Mikrofon"));
 	m_fmt.AddString(L"WAV");
 	m_fmt.AddString(L"mp3");
 	m_fmt.AddString(L"FLAC");
@@ -1041,6 +991,16 @@ void CDeviceRecordDlg::StopPeakMonitor()
 	m_peakOnly = FALSE;
 	if (GetSafeHwnd())
 		KillTimer(DR_TIMER);
+}
+
+void CDeviceRecordDlg::OnCbnSelchangeDev()
+{
+	AudioLoopDevApplyFromCombo(m_dev);
+}
+
+void CDeviceRecordDlg::OnCbnSelchangeMicDev()
+{
+	AudioMicDevApplyFromCombo(m_micDev);
 }
 
 void CDeviceRecordDlg::OnCbnSelchangeFormat()
@@ -1793,6 +1753,8 @@ void CDeviceRecordDlg::OnSize(UINT nType, int cx, int cy)
 
 void CDeviceRecordDlg::OnDestroy()
 {
+	AudioMicDevUnregisterCombo(&m_micDev);
+	AudioLoopDevUnregisterCombo(&m_dev);
 	KillTimer(DR_TIMER);
 	m_peakOnly = TRUE; // StopPeakMonitor 経路でも落とす
 	InterlockedExchange(&m_stop, 1);

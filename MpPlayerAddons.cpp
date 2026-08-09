@@ -1,5 +1,6 @@
 ﻿#include "StdAfx.h"
 #include "MpPlayerAddons.h"
+#include "AudioDevSync.h"
 #include "CMediaPlayerDlg.h"
 #include "CPromptEngine.h"
 #include "ProAudio.h"
@@ -14,6 +15,8 @@
 #include "AudioUpscaler.h"
 #include "SongParams.h"
 #include "CEqualizer.h"
+#include "MpKeyCamelot.h"
+#include "MpFeatureExtras.h"
 #include "MpRemoteEqEnvLabels.inc"
 
 #include <mmdeviceapi.h>
@@ -601,7 +604,7 @@ void MpBpmApplyValue(int bpm)
 	savedata.mpBeatGrid = 1;
 	MpPersistSavedataQuick();
 	if (mp && mp->m_seek.GetSafeHwnd()) {
-		mp->m_seek.SetBeatGrid((float)bpm, TRUE);
+		mp->m_seek.SetBeatGrid((float)bpm, TRUE, savedata.mpBeatGridOffsetMs);
 		mp->m_seek.Invalidate(FALSE);
 	}
 	if (savedata.wav_export_xfade) {
@@ -941,7 +944,7 @@ void MpMirrorWritePcm(const BYTE* pcm, int bytes)
 	if (!pcm || bytes <= 0 || !savedata.mpMirrorOut) return;
 	if (InterlockedCompareExchange(&g_mpMirrorFailed, 0, 0) != 0) return;
 
-	const int vol = savedata.mpMirrorVol;
+	const int vol = (int)((savedata.mpMirrorVol * (savedata.mpMirrorGain > 0 ? savedata.mpMirrorGain : 100)) / 100);
 	if (vol <= 0) return;
 
 	MpMirrorCsEnsure();
@@ -1035,6 +1038,548 @@ void MpMirrorWritePcm(const BYTE* pcm, int bytes)
 	memcpy(pData, dst, (size_t)useLen);
 	render->ReleaseBuffer(framesNeed, 0);
 	LeaveCriticalSection(&g_mpMirrorCs);
+}
+
+// ---- Remote AAC (ADTS)：接続中クライアントがあるときだけエンコード ----
+#include <mfapi.h>
+#include <mftransform.h>
+#include <wmcodecdsp.h>
+#include <mferror.h>
+#pragma comment(lib, "wmcodecdspuuid.lib")
+
+enum { kMpRemAacRing = 262144 };
+enum { kMpRemAacPcmMax = 8192 };
+enum { kMpRemAacFrame = 1024 };
+
+static CRITICAL_SECTION g_mpRemAacCs;
+static int g_mpRemAacCsInit = 0;
+static IMFTransform* g_mpRemAacEnc = NULL;
+static int g_mpRemAacRate = 0;
+static int g_mpRemAacMfUp = 0;
+static volatile LONG g_mpRemAacClients = 0;
+static BYTE g_mpRemAacRing[kMpRemAacRing];
+static volatile LONG g_mpRemAacW = 0;
+static short g_mpRemAacPcm[kMpRemAacPcmMax * 2];
+static int g_mpRemAacPcmN = 0;
+static LONGLONG g_mpRemAacTime = 0;
+static DWORD g_mpRemAacLastPcmMs = 0;
+static int g_mpRemAacOutProv = 0;
+static DWORD g_mpRemAacOutCb = 0;
+
+static void MpRemAacCsEnsure()
+{
+	if (g_mpRemAacCsInit) return;
+	InitializeCriticalSection(&g_mpRemAacCs);
+	g_mpRemAacCsInit = 1;
+}
+
+static void MpRemAacRingWriteLocked(const BYTE* p, int n)
+{
+	if (!p || n <= 0) return;
+	LONG w = g_mpRemAacW;
+	for (int i = 0; i < n; ++i) {
+		g_mpRemAacRing[(unsigned)(w + i) % (unsigned)kMpRemAacRing] = p[i];
+	}
+	InterlockedExchange(&g_mpRemAacW, w + n);
+}
+
+static void MpRemAacEncReleaseLocked()
+{
+	if (g_mpRemAacEnc) {
+		g_mpRemAacEnc->ProcessMessage(MFT_MESSAGE_COMMAND_FLUSH, 0);
+		g_mpRemAacEnc->Release();
+		g_mpRemAacEnc = NULL;
+	}
+	g_mpRemAacRate = 0;
+	g_mpRemAacPcmN = 0;
+	g_mpRemAacTime = 0;
+	g_mpRemAacOutProv = 0;
+	g_mpRemAacOutCb = 0;
+}
+
+static int MpRemAacPickSrcRate()
+{
+	int r = g_ds_pcm_rate;
+	if (r < 8000) r = wavbit_sample_Hz;
+	if (r < 8000) r = 44100;
+	return r;
+}
+
+// MF AAC は実質 44100/48000。それ以外は間引いて渡す（嘘のレート表記をしない）。
+static int MpRemAacPickDstRate(int src)
+{
+	if (src == 44100 || src == 48000) return src;
+	if (src > 0 && (src % 48000) == 0) return 48000;
+	if (src > 0 && (src % 44100) == 0) return 44100;
+	if (src >= 48000) return 48000;
+	return 44100;
+}
+
+static int g_mpRemAacAdtsProfile = 1; // AAC-LC
+static int g_mpRemAacAdtsSfi = 4;     // 44100
+static int g_mpRemAacAdtsCh = 2;
+static int g_mpRemAacLpL = 0;
+static int g_mpRemAacLpR = 0;
+
+static int MpRemAacSfIndex(int rate)
+{
+	static const int kSf[12] = {
+		96000, 88200, 64000, 48000, 44100, 32000,
+		24000, 22050, 16000, 12000, 11025, 8000
+	};
+	for (int i = 0; i < 12; ++i) {
+		if (kSf[i] == rate) return i;
+	}
+	return (rate >= 46000) ? 3 : 4; // 48000 / 44100
+}
+
+// raw AAC 1フレームに ADTS ヘッダを付けてリングへ（MF の ADTS 出力は環境差があるため自前）
+static void MpRemAacRingWriteAacFrameLocked(const BYTE* data, int len)
+{
+	if (!data || len <= 0) return;
+	if (len >= 7 && data[0] == 0xFF && (data[1] & 0xF0) == 0xF0) {
+		const int fl = ((data[3] & 3) << 11) | (data[4] << 3) | ((data[5] & 0xE0) >> 5);
+		// 長さが一致するときだけ「既に ADTS」とみなす（偶然の 0xFFF を誤認しない）
+		if (fl == len) {
+			MpRemAacRingWriteLocked(data, len);
+			return;
+		}
+	}
+	const int profile = g_mpRemAacAdtsProfile;
+	const int sfi = g_mpRemAacAdtsSfi;
+	const int ch = g_mpRemAacAdtsCh;
+	const int total = len + 7;
+	BYTE h[7];
+	h[0] = 0xFF;
+	h[1] = 0xF1; // MPEG-4, layer0, no CRC
+	h[2] = (BYTE)(((profile & 3) << 6) | ((sfi & 0x0F) << 2) | ((ch >> 2) & 0x01));
+	h[3] = (BYTE)(((ch & 3) << 6) | ((total >> 11) & 0x03));
+	h[4] = (BYTE)((total >> 3) & 0xFF);
+	h[5] = (BYTE)(((total & 7) << 5) | 0x1F);
+	h[6] = 0xFC;
+	MpRemAacRingWriteLocked(h, 7);
+	MpRemAacRingWriteLocked(data, len);
+}
+
+static BOOL MpRemAacEncEnsureLocked(int rate)
+{
+	if (rate != 44100 && rate != 48000) rate = MpRemAacPickDstRate(rate);
+	if (g_mpRemAacEnc && g_mpRemAacRate == rate)
+		return TRUE;
+	MpRemAacEncReleaseLocked();
+	g_mpRemAacAdtsProfile = 1;
+	g_mpRemAacAdtsSfi = MpRemAacSfIndex(rate);
+	g_mpRemAacAdtsCh = 2;
+	g_mpRemAacLpL = 0;
+	g_mpRemAacLpR = 0;
+	if (!g_mpRemAacMfUp) {
+		CoInitializeEx(NULL, COINIT_MULTITHREADED);
+		if (FAILED(MFStartup(MF_VERSION)))
+			return FALSE;
+		g_mpRemAacMfUp = 1;
+	}
+	IMFTransform* enc = NULL;
+	HRESULT hr = CoCreateInstance(CLSID_AACMFTEncoder, NULL, CLSCTX_INPROC_SERVER,
+		IID_PPV_ARGS(&enc));
+	if (FAILED(hr) || !enc) {
+		CString msg = LL14(
+			L"AACエンコーダを初期化できませんでした。\n次に: リモート設定で AAC をオフにするか、Windows Media Feature Pack を確認してください。",
+			L"Could not init AAC encoder.\nNext: turn AAC off in Remote settings, or check Windows Media Feature Pack.",
+			L"Echec init AAC.\nEnsuite: desactiver AAC ou verifier Media Feature Pack.",
+			L"Init AAC non riuscita.\nPoi: disattiva AAC o controlla Media Feature Pack.",
+			L"No se pudo iniciar AAC.\nSiguiente: desactive AAC o revise Media Feature Pack.",
+			L"AAC 인코더 초기화 실패.\n다음: 리모트에서 AAC 끄기 또는 Media Feature Pack 확인.",
+			L"无法初始化 AAC。\n下一步：在遥控中关闭 AAC，或检查 Media Feature Pack。",
+			L"تعذر تهيئة AAC.\nالتالي: أوقف AAC أو تحقق من Media Feature Pack.",
+			L"Не удалось инициализировать AAC.\nДалее: отключите AAC или проверьте Media Feature Pack.",
+			L"AAC-Encoder fehlgeschlagen.\nAls Naechstes: AAC aus oder Media Feature Pack pruefen.",
+			L"Falha ao iniciar AAC.\nSeguinte: desligue AAC ou verifique Media Feature Pack.",
+			L"AAC-encoder mislukt.\nVolgende: AAC uit of Media Feature Pack controleren.",
+			L"Nie udalo sie AAC.\nDalej: wylacz AAC lub sprawdz Media Feature Pack.",
+			L"AAC baslatilamadi.\nSonraki: AAC kapatin veya Media Feature Pack kontrol edin.");
+		if (mp && ::IsWindow(mp->GetSafeHwnd()))
+			mp->MessageBox(msg, L"AAC", MB_OK | MB_ICONWARNING);
+		return FALSE;
+	}
+
+	IMFMediaType* outType = NULL;
+	IMFMediaType* inType = NULL;
+	hr = MFCreateMediaType(&outType);
+	if (SUCCEEDED(hr)) hr = outType->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Audio);
+	if (SUCCEEDED(hr)) hr = outType->SetGUID(MF_MT_SUBTYPE, MFAudioFormat_AAC);
+	if (SUCCEEDED(hr)) hr = outType->SetUINT32(MF_MT_AUDIO_BITS_PER_SAMPLE, 16);
+	if (SUCCEEDED(hr)) hr = outType->SetUINT32(MF_MT_AUDIO_SAMPLES_PER_SECOND, (UINT32)rate);
+	if (SUCCEEDED(hr)) hr = outType->SetUINT32(MF_MT_AUDIO_NUM_CHANNELS, 2);
+	{
+		extern int MpFeatAacBytesPerSec();
+		const int bps = MpFeatAacBytesPerSec();
+		if (SUCCEEDED(hr)) hr = outType->SetUINT32(MF_MT_AUDIO_AVG_BYTES_PER_SECOND, (UINT32)bps);
+	}
+	// 0=raw。ADTS は自前付与（環境によって MF の ADTS が壊れて持続ノイズになるため）
+	if (SUCCEEDED(hr)) hr = outType->SetUINT32(MF_MT_AAC_PAYLOAD_TYPE, 0);
+	if (SUCCEEDED(hr)) hr = outType->SetUINT32(MF_MT_AAC_AUDIO_PROFILE_LEVEL_INDICATION, 0x29);
+	if (SUCCEEDED(hr)) hr = enc->SetOutputType(0, outType, 0);
+
+	if (SUCCEEDED(hr)) hr = MFCreateMediaType(&inType);
+	if (SUCCEEDED(hr)) hr = inType->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Audio);
+	if (SUCCEEDED(hr)) hr = inType->SetGUID(MF_MT_SUBTYPE, MFAudioFormat_PCM);
+	if (SUCCEEDED(hr)) hr = inType->SetUINT32(MF_MT_AUDIO_BITS_PER_SAMPLE, 16);
+	if (SUCCEEDED(hr)) hr = inType->SetUINT32(MF_MT_AUDIO_SAMPLES_PER_SECOND, (UINT32)rate);
+	if (SUCCEEDED(hr)) hr = inType->SetUINT32(MF_MT_AUDIO_NUM_CHANNELS, 2);
+	if (SUCCEEDED(hr)) hr = inType->SetUINT32(MF_MT_AUDIO_BLOCK_ALIGNMENT, 4);
+	if (SUCCEEDED(hr)) hr = inType->SetUINT32(MF_MT_AUDIO_AVG_BYTES_PER_SECOND, (UINT32)(rate * 4));
+	if (SUCCEEDED(hr)) hr = inType->SetUINT32(MF_MT_AUDIO_CHANNEL_MASK, 0x3u); // FL|FR
+	if (SUCCEEDED(hr)) hr = enc->SetInputType(0, inType, 0);
+
+	// エンコーダが確定した ASC から ADTS の profile/sfi/ch を合わせる
+	if (SUCCEEDED(hr)) {
+		IMFMediaType* cur = NULL;
+		if (SUCCEEDED(enc->GetOutputCurrentType(0, &cur)) && cur) {
+			UINT32 n = 0;
+			if (SUCCEEDED(cur->GetBlobSize(MF_MT_USER_DATA, &n)) && n >= 14) {
+				BYTE ud[64];
+				UINT32 got = 0;
+				if (n > sizeof(ud)) n = (UINT32)sizeof(ud);
+				if (SUCCEEDED(cur->GetBlob(MF_MT_USER_DATA, ud, n, &got)) && got >= 14) {
+					const UINT32 ascOff = 12; // HEAACWAVEINFO without WAVEFORMATEX
+					if (got > ascOff + 1) {
+						const unsigned v = ((unsigned)ud[ascOff] << 8) | (unsigned)ud[ascOff + 1];
+						const int aot = (int)((v >> 11) & 0x1F);
+						const int sfi = (int)((v >> 7) & 0x0F);
+						const int chcfg = (int)((v >> 3) & 0x0F);
+						if (aot >= 1 && aot <= 4)
+							g_mpRemAacAdtsProfile = aot - 1;
+						if (sfi >= 0 && sfi <= 11)
+							g_mpRemAacAdtsSfi = sfi;
+						if (chcfg >= 1 && chcfg <= 7)
+							g_mpRemAacAdtsCh = chcfg;
+					}
+				}
+			}
+			cur->Release();
+		}
+	}
+
+	if (outType) outType->Release();
+	if (inType) inType->Release();
+	if (FAILED(hr)) {
+		enc->Release();
+		return FALSE;
+	}
+	enc->ProcessMessage(MFT_MESSAGE_NOTIFY_BEGIN_STREAMING, 0);
+	enc->ProcessMessage(MFT_MESSAGE_NOTIFY_START_OF_STREAM, 0);
+
+	MFT_OUTPUT_STREAM_INFO osi = {};
+	if (SUCCEEDED(enc->GetOutputStreamInfo(0, &osi))) {
+		g_mpRemAacOutProv = (osi.dwFlags & MFT_OUTPUT_STREAM_PROVIDES_SAMPLES) ? 1 : 0;
+		g_mpRemAacOutCb = osi.cbSize;
+	}
+	g_mpRemAacEnc = enc;
+	g_mpRemAacRate = rate;
+	g_mpRemAacPcmN = 0;
+	g_mpRemAacTime = 0;
+	return TRUE;
+}
+
+static void MpRemAacDrainOutLocked()
+{
+	if (!g_mpRemAacEnc) return;
+	for (;;) {
+		MFT_OUTPUT_DATA_BUFFER ob = {};
+		IMFSample* sample = NULL;
+		IMFMediaBuffer* buf = NULL;
+		if (!g_mpRemAacOutProv) {
+			const DWORD cb = (g_mpRemAacOutCb > 0) ? g_mpRemAacOutCb : 4096;
+			if (FAILED(MFCreateSample(&sample))) break;
+			if (FAILED(MFCreateMemoryBuffer(cb, &buf))) { sample->Release(); break; }
+			sample->AddBuffer(buf);
+			buf->Release();
+			ob.pSample = sample;
+		}
+		DWORD st = 0;
+		const HRESULT hr = g_mpRemAacEnc->ProcessOutput(0, 1, &ob, &st);
+		if (hr == MF_E_TRANSFORM_NEED_MORE_INPUT) {
+			if (sample) sample->Release();
+			break;
+		}
+		if (FAILED(hr)) {
+			if (sample) sample->Release();
+			if (ob.pEvents) ob.pEvents->Release();
+			break;
+		}
+		IMFSample* outS = ob.pSample ? ob.pSample : sample;
+		if (outS) {
+			IMFMediaBuffer* outB = NULL;
+			if (SUCCEEDED(outS->ConvertToContiguousBuffer(&outB)) && outB) {
+				BYTE* p = NULL; DWORD maxL = 0, curL = 0;
+				if (SUCCEEDED(outB->Lock(&p, &maxL, &curL)) && p && curL > 0)
+					MpRemAacRingWriteAacFrameLocked(p, (int)curL);
+				if (p) outB->Unlock();
+				outB->Release();
+			}
+		}
+		if (ob.pSample && ob.pSample != sample) ob.pSample->Release();
+		if (sample) sample->Release();
+		if (ob.pEvents) ob.pEvents->Release();
+	}
+}
+
+static void MpRemAacEncodeFramesLocked(const short* pcm, int frames)
+{
+	if (!g_mpRemAacEnc || !pcm || frames <= 0) return;
+	const DWORD cb = (DWORD)(frames * 2 * 2);
+	IMFSample* sample = NULL;
+	IMFMediaBuffer* buf = NULL;
+	if (FAILED(MFCreateSample(&sample))) return;
+	if (FAILED(MFCreateMemoryBuffer(cb, &buf))) { sample->Release(); return; }
+	BYTE* p = NULL;
+	if (SUCCEEDED(buf->Lock(&p, NULL, NULL)) && p) {
+		memcpy(p, pcm, cb);
+		buf->Unlock();
+	}
+	buf->SetCurrentLength(cb);
+	sample->AddBuffer(buf);
+	buf->Release();
+	const LONGLONG dur = (10000000LL * frames) / (g_mpRemAacRate > 0 ? g_mpRemAacRate : 44100);
+	sample->SetSampleTime(g_mpRemAacTime);
+	sample->SetSampleDuration(dur);
+	g_mpRemAacTime += dur;
+	HRESULT hr = g_mpRemAacEnc->ProcessInput(0, sample, 0);
+	sample->Release();
+	if (SUCCEEDED(hr) || hr == MF_E_NOTACCEPTING)
+		MpRemAacDrainOutLocked();
+}
+
+static void MpRemAacPushStereo16Locked(const short* stereo, int frames, int srcRate)
+{
+	if (!stereo || frames <= 0) return;
+	if (srcRate < 8000) srcRate = MpRemAacPickSrcRate();
+	const int dstRate = MpRemAacPickDstRate(srcRate);
+	if (!MpRemAacEncEnsureLocked(dstRate)) return;
+
+	static short rs[16384 * 2];
+	const short* use = stereo;
+	int useFrames = frames;
+	if (srcRate != dstRate) {
+		if (frames > 16384) frames = 16384;
+		if (srcRate > dstRate && (srcRate % dstRate) == 0) {
+			const int step = srcRate / dstRate;
+			// 三角窓でアンチエイリアス（単純平均より折返しサー音が減る）
+			useFrames = frames / step;
+			if (useFrames > 1) useFrames -= 1;
+			for (int i = 0; i < useFrames; ++i) {
+				const int c = i * step + step / 2;
+				int sumL = 0, sumR = 0, wsum = 0;
+				for (int d = -(step - 1); d <= (step - 1); ++d) {
+					int idx = c + d;
+					if (idx < 0) idx = 0;
+					if (idx >= frames) idx = frames - 1;
+					int w = step - (d < 0 ? -d : d);
+					if (w < 1) w = 1;
+					sumL += (int)stereo[idx * 2] * w;
+					sumR += (int)stereo[idx * 2 + 1] * w;
+					wsum += w;
+				}
+				if (wsum < 1) wsum = 1;
+				rs[i * 2] = (short)(sumL / wsum);
+				rs[i * 2 + 1] = (short)(sumR / wsum);
+			}
+		}
+		else {
+			// 線形（非整数比・アップ含む）
+			useFrames = (int)(((__int64)frames * dstRate) / srcRate);
+			if (useFrames < 1) return;
+			if (useFrames > 16384) useFrames = 16384;
+			for (int i = 0; i < useFrames; ++i) {
+				const __int64 pos = ((__int64)i * srcRate);
+				int i0 = (int)(pos / dstRate);
+				int i1 = i0 + 1;
+				if (i0 >= frames) i0 = frames - 1;
+				if (i1 >= frames) i1 = frames - 1;
+				const int frac = (int)(pos % dstRate);
+				const int L0 = stereo[i0 * 2], L1 = stereo[i1 * 2];
+				const int R0 = stereo[i0 * 2 + 1], R1 = stereo[i1 * 2 + 1];
+				rs[i * 2] = (short)(L0 + (int)(((__int64)(L1 - L0) * frac) / dstRate));
+				rs[i * 2 + 1] = (short)(R0 + (int)(((__int64)(R1 - R0) * frac) / dstRate));
+			}
+		}
+		use = rs;
+	}
+
+	// 軽い LPF（~10kHz）で残留サー音を削る（固定小数 α≈0.75）
+	{
+		static short filt[16384 * 2];
+		int n = useFrames;
+		if (n > 16384) n = 16384;
+		for (int i = 0; i < n; ++i) {
+			const int xL = use[i * 2];
+			const int xR = use[i * 2 + 1];
+			g_mpRemAacLpL += ((xL - g_mpRemAacLpL) * 3) >> 2;
+			g_mpRemAacLpR += ((xR - g_mpRemAacLpR) * 3) >> 2;
+			filt[i * 2] = (short)g_mpRemAacLpL;
+			filt[i * 2 + 1] = (short)g_mpRemAacLpR;
+		}
+		use = filt;
+		useFrames = n;
+	}
+
+	int off = 0;
+	while (off < useFrames) {
+		if (g_mpRemAacPcmN >= kMpRemAacPcmMax)
+			g_mpRemAacPcmN = 0;
+		int n = useFrames - off;
+		if (n > kMpRemAacPcmMax - g_mpRemAacPcmN)
+			n = kMpRemAacPcmMax - g_mpRemAacPcmN;
+		memcpy(g_mpRemAacPcm + g_mpRemAacPcmN * 2, use + off * 2, (size_t)n * 4);
+		g_mpRemAacPcmN += n;
+		off += n;
+		while (g_mpRemAacPcmN >= kMpRemAacFrame) {
+			MpRemAacEncodeFramesLocked(g_mpRemAacPcm, kMpRemAacFrame);
+			g_mpRemAacPcmN -= kMpRemAacFrame;
+			if (g_mpRemAacPcmN > 0)
+				memmove(g_mpRemAacPcm, g_mpRemAacPcm + kMpRemAacFrame * 2, (size_t)g_mpRemAacPcmN * 4);
+		}
+	}
+	g_mpRemAacLastPcmMs = GetTickCount();
+}
+
+void MpRemoteWritePcm(const BYTE* pcm, int bytes)
+{
+	if (!pcm || bytes <= 0) return;
+	if (!savedata.mpRemoteOn || !savedata.mpRemoteAac) return;
+	if (InterlockedCompareExchange(&g_mpRemAacClients, 0, 0) <= 0) return;
+
+	const int ch = (g_ds_pcm_ch >= 1) ? g_ds_pcm_ch : 2;
+	int bpf = (g_outBytesPerFrame > 0) ? g_outBytesPerFrame : 0;
+	int bits = g_ds_pcm_bits;
+	if (bpf >= ch && ch > 0) {
+		const int bps = bpf / ch;
+		if (bps == 4) bits = 32;
+		else if (bps == 3) bits = 24;
+		else bits = 16;
+	}
+	else {
+		if (bits != 16 && bits != 24 && bits != 32) bits = 16;
+		bpf = ch * (bits / 8);
+	}
+	if (bpf < 1 || bytes < bpf) return;
+	const int frames = bytes / bpf;
+	if (frames <= 0 || frames > 16384) return;
+
+	static short stereo[16384 * 2];
+	if (bits == 16) {
+		const short* src = (const short*)pcm;
+		for (int i = 0; i < frames; ++i) {
+			short L = src[i * ch];
+			short R = (ch >= 2) ? src[i * ch + 1] : L;
+			stereo[i * 2] = L;
+			stereo[i * 2 + 1] = R;
+		}
+	}
+	else if (bits == 24) {
+		const int step = bits / 8;
+		for (int i = 0; i < frames; ++i) {
+			const BYTE* b = pcm + i * bpf;
+			int L = (int)b[0] | ((int)b[1] << 8) | ((int)((signed char)b[2]) << 16);
+			int R = L;
+			if (ch >= 2) {
+				const BYTE* br = b + step;
+				R = (int)br[0] | ((int)br[1] << 8) | ((int)((signed char)br[2]) << 16);
+			}
+			stereo[i * 2] = (short)(L >> 8);
+			stereo[i * 2 + 1] = (short)(R >> 8);
+		}
+	}
+	else {
+		const int* src = (const int*)pcm;
+		for (int i = 0; i < frames; ++i) {
+			int L = src[i * ch];
+			int R = (ch >= 2) ? src[i * ch + 1] : L;
+			stereo[i * 2] = (short)(L >> 16);
+			stereo[i * 2 + 1] = (short)(R >> 16);
+		}
+	}
+
+	MpRemAacCsEnsure();
+	if (!TryEnterCriticalSection(&g_mpRemAacCs))
+		return;
+	MpRemAacPushStereo16Locked(stereo, frames, MpRemAacPickSrcRate());
+	LeaveCriticalSection(&g_mpRemAacCs);
+}
+
+static void MpRemAacFeedSilenceIfNeeded()
+{
+	if (!savedata.mpRemoteOn || !savedata.mpRemoteAac) return;
+	if (InterlockedCompareExchange(&g_mpRemAacClients, 0, 0) <= 0) return;
+	// 再生中の DS チャンク間に無音を挟むとノイズになる。停止/一時停止時のみ。
+	if (plf == 1 && ps != 1) return;
+	const DWORD now = GetTickCount();
+	if (g_mpRemAacLastPcmMs != 0 && (now - g_mpRemAacLastPcmMs) < 250)
+		return;
+	MpRemAacCsEnsure();
+	if (!TryEnterCriticalSection(&g_mpRemAacCs))
+		return;
+	const int dst = MpRemAacPickDstRate(MpRemAacPickSrcRate());
+	static short z[kMpRemAacFrame * 2];
+	memset(z, 0, sizeof(z));
+	MpRemAacPushStereo16Locked(z, kMpRemAacFrame, dst);
+	LeaveCriticalSection(&g_mpRemAacCs);
+}
+
+// リング上の ADTS 1フレーム長。0=不足 / -1=非同期
+static int MpRemAacAdtsLenAt(LONG absPos, LONG wpos)
+{
+	if (wpos - absPos < 7) return 0;
+	const unsigned r = (unsigned)kMpRemAacRing;
+	const BYTE b0 = g_mpRemAacRing[(unsigned)absPos % r];
+	const BYTE b1 = g_mpRemAacRing[(unsigned)(absPos + 1) % r];
+	if (b0 != 0xFF || (b1 & 0xF0) != 0xF0) return -1;
+	const BYTE b3 = g_mpRemAacRing[(unsigned)(absPos + 3) % r];
+	const BYTE b4 = g_mpRemAacRing[(unsigned)(absPos + 4) % r];
+	const BYTE b5 = g_mpRemAacRing[(unsigned)(absPos + 5) % r];
+	const int fl = ((b3 & 3) << 11) | (b4 << 3) | ((b5 & 0xE0) >> 5);
+	if (fl < 7 || fl > 8192) return -1;
+	if (wpos - absPos < fl) return 0;
+	return fl;
+}
+
+static LONG MpRemAacFindAdts(LONG from, LONG wpos, int maxScan)
+{
+	if (from < 0) from = 0;
+	for (int i = 0; i < maxScan; ++i) {
+		if (from + i + 7 > wpos) break;
+		const int fl = MpRemAacAdtsLenAt(from + i, wpos);
+		if (fl > 0) return from + i;
+		if (fl == 0) break; // 途中フレーム待ち
+	}
+	return -1;
+}
+
+static volatile LONG g_mpRemAacLagCs = 90; // 歌詞補正用の聴こえ遅延目安(1/100秒)
+
+static void MpRemAacClientEnter()
+{
+	MpRemAacCsEnsure();
+	EnterCriticalSection(&g_mpRemAacCs);
+	InterlockedIncrement(&g_mpRemAacClients);
+	MpRemAacEncEnsureLocked(MpRemAacPickDstRate(MpRemAacPickSrcRate()));
+	LeaveCriticalSection(&g_mpRemAacCs);
+}
+
+static void MpRemAacClientLeave()
+{
+	MpRemAacCsEnsure();
+	EnterCriticalSection(&g_mpRemAacCs);
+	LONG n = InterlockedDecrement(&g_mpRemAacClients);
+	if (n < 0) {
+		InterlockedExchange(&g_mpRemAacClients, 0);
+		n = 0;
+	}
+	if (n == 0) {
+		MpRemAacEncReleaseLocked();
+		InterlockedExchange(&g_mpRemAacW, 0);
+	}
+	LeaveCriticalSection(&g_mpRemAacCs);
 }
 
 // ---- Remote HTTP (LAN / Wi-Fi、最大3クライアント同時) ----
@@ -1323,6 +1868,147 @@ static void MpRemoteHandleRequest(SOCKET s)
 	char* nl = strchr(line, '\n');
 	if (nl) *nl = 0;
 
+	if (strstr(line, "GET /overlay")) {
+		CString html;
+		MpFeatEnsureRemoteOverlayHtml(html);
+		CStringA utf8 = CW2A(html, CP_UTF8);
+		CStringA hdr;
+		hdr.Format("HTTP/1.0 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nConnection: close\r\nCache-Control: no-store\r\nContent-Length: %d\r\n\r\n",
+			utf8.GetLength());
+		MpRemoteSendAll(s, hdr, hdr.GetLength());
+		MpRemoteSendAll(s, utf8, utf8.GetLength());
+		return;
+	}
+	if (strstr(line, "GET /api/queue-add") || strstr(line, "POST /api/queue-add")) {
+		const char* q = strchr(line, '?');
+		int idx = MpRemoteQueryInt(q, "i=", -1);
+		if (idx < 0) idx = MpRemoteQueryInt(q, "index=", -1);
+		if (idx >= 0)
+			MpRemoteSendCmd(30, (LPARAM)idx); // queue add
+		const char* ok = "HTTP/1.0 204 No Content\r\nConnection: close\r\nCache-Control: no-store\r\n\r\n";
+		MpRemoteSendAll(s, ok, (int)strlen(ok));
+		return;
+	}
+
+	if (strstr(line, "GET /stream")) {
+		if (!savedata.mpRemoteAac) {
+			const char* no =
+				"HTTP/1.0 404 Not Found\r\nConnection: close\r\n"
+				"Content-Type: text/plain; charset=utf-8\r\n\r\nAAC off";
+			MpRemoteSendAll(s, no, (int)strlen(no));
+			return;
+		}
+		const char* hdr =
+			"HTTP/1.0 200 OK\r\n"
+			"Content-Type: audio/aac\r\n"
+			"Cache-Control: no-store\r\n"
+			"Pragma: no-cache\r\n"
+			"Connection: close\r\n"
+			"\r\n";
+		MpRemoteSendAll(s, hdr, (int)strlen(hdr));
+		MpRemAacClientEnter();
+		LONG rpos = -1;
+		const DWORD t0 = GetTickCount();
+		// 最初の ADTS 同期まで待つ（途中開始＝ホワイトノイズ）
+		while (InterlockedCompareExchange(&g_mpRemoteStop, 0, 0) == 0) {
+			MpRemAacFeedSilenceIfNeeded();
+			const LONG wpos = InterlockedCompareExchange(&g_mpRemAacW, 0, 0);
+			if (wpos > 0) {
+				LONG start = wpos - 8192;
+				if (start < 0) start = 0;
+				rpos = MpRemAacFindAdts(start, wpos, 8192);
+				if (rpos >= 0) break;
+			}
+			if (GetTickCount() - t0 > 2000) break;
+			Sleep(5);
+		}
+		if (rpos < 0) {
+			MpRemAacClientLeave();
+			return;
+		}
+		// ごく短いプライム（数フレーム）。長く溜めると歌詞ずれが増える。
+		{
+			const DWORD tp = GetTickCount();
+			int frames = 0;
+			while (frames < 4 && InterlockedCompareExchange(&g_mpRemoteStop, 0, 0) == 0) {
+				const LONG wpos = InterlockedCompareExchange(&g_mpRemAacW, 0, 0);
+				LONG p = rpos;
+				frames = 0;
+				while (frames < 8) {
+					const int fl = MpRemAacAdtsLenAt(p, wpos);
+					if (fl <= 0) break;
+					p += fl;
+					frames++;
+				}
+				if (frames >= 4) break;
+				if (GetTickCount() - tp > 400) break;
+				MpRemAacFeedSilenceIfNeeded();
+				Sleep(5);
+			}
+		}
+		u_long nb = 1;
+		ioctlsocket(s, FIONBIO, &nb);
+		while (InterlockedCompareExchange(&g_mpRemoteStop, 0, 0) == 0) {
+			MpRemAacFeedSilenceIfNeeded();
+			const LONG wpos = InterlockedCompareExchange(&g_mpRemAacW, 0, 0);
+			LONG avail = wpos - rpos;
+			if (avail < 0) avail = 0;
+			if (avail > kMpRemAacRing / 2) {
+				// 遅れすぎ: ライブ付近の ADTS 先頭へ（途中バイトから読まない）
+				LONG start = wpos - 16384;
+				if (start < rpos) start = rpos;
+				if (start < 0) start = 0;
+				const LONG syn = MpRemAacFindAdts(start, wpos, 16384);
+				if (syn >= 0) rpos = syn;
+				else rpos = wpos;
+				avail = wpos - rpos;
+			}
+			if (avail < 7) {
+				Sleep(3);
+				char peek;
+				const int pk = recv(s, &peek, 1, MSG_PEEK);
+				if (pk == 0) break;
+				if (pk < 0) {
+					const int e = WSAGetLastError();
+					if (e != WSAEWOULDBLOCK && e != WSAEINTR) break;
+				}
+				continue;
+			}
+			// 完全な ADTS フレームだけ送る（途中切断＝ノイズ）
+			char chunk[4096];
+			int chunkN = 0;
+			LONG p = rpos;
+			while (chunkN + 7 < (int)sizeof(chunk)) {
+				const int fl = MpRemAacAdtsLenAt(p, wpos);
+				if (fl <= 0) break;
+				if (chunkN + fl > (int)sizeof(chunk)) break;
+				for (int i = 0; i < fl; ++i)
+					chunk[chunkN + i] = (char)g_mpRemAacRing[(unsigned)(p + i) % (unsigned)kMpRemAacRing];
+				chunkN += fl;
+				p += fl;
+			}
+			if (chunkN <= 0) {
+				// 同期ずれ: 次の sync を探す
+				const LONG syn = MpRemAacFindAdts(rpos + 1, wpos, 4096);
+				if (syn >= 0) rpos = syn;
+				else Sleep(3);
+				continue;
+			}
+			MpRemoteSendAll(s, chunk, chunkN);
+			rpos = p;
+			{
+				// 聴こえ遅延の粗い推定（リング残 + 固定エンコード分）
+				const LONG left = wpos - rpos;
+				int lag = 40 + (int)((left * 8) / 1280); // 128kbps 換算 cs
+				if (lag < 50) lag = 50;
+				if (lag > 250) lag = 250;
+				InterlockedExchange(&g_mpRemAacLagCs, (LONG)lag);
+			}
+		}
+		MpRemAacClientLeave();
+		return;
+	}
+
 	if (strstr(line, "GET /cmd")) {
 		const char* q = strchr(line, '?');
 		if (MpRemoteHasQueryParam(q, "c=play")) MpRemoteSendCmd(0);
@@ -1364,11 +2050,11 @@ static void MpRemoteHandleRequest(SOCKET s)
 		}
 		else if (MpRemoteHasQueryParam(q, "c=eqreset")) MpRemoteSendCmd(18);
 		else if (MpRemoteHasQueryParam(q, "c=eqresetg")) MpRemoteSendCmd(19);
-		else if (MpRemoteHasQueryParam(q, "c=scrbeg")) MpRemoteSendCmd(20);
-		else if (MpRemoteHasQueryParam(q, "c=scrend")) MpRemoteSendCmd(21);
+		else if (MpRemoteHasQueryParam(q, "c=scrbeg")) MpRemoteSendCmd(23);
+		else if (MpRemoteHasQueryParam(q, "c=scrend")) MpRemoteSendCmd(24);
 		else if (MpRemoteHasQueryParam(q, "c=scr") && q) {
 			// d= は角度差*100（符号付き）。例: 1.5° → 150
-			MpRemoteSendCmd(22, (LPARAM)MpRemoteQueryInt(q, "d=", 0));
+			MpRemoteSendCmd(25, (LPARAM)MpRemoteQueryInt(q, "d=", 0));
 		}
 		const char* ok = "HTTP/1.0 204 No Content\r\nConnection: close\r\nCache-Control: no-store\r\n\r\n";
 		MpRemoteSendAll(s, ok, (int)strlen(ok));
@@ -1391,9 +2077,14 @@ static void MpRemoteHandleRequest(SOCKET s)
 		const int posCs = (int)InterlockedCompareExchange(&g_mpRemotePosCs, 0, 0);
 		const int durCs = (int)InterlockedCompareExchange(&g_mpRemoteDurCs, 0, 0);
 		const int lrccur = (int)InterlockedCompareExchange(&g_mpRemoteLrcCur, 0, 0);
+		const int aacLag = (int)InterlockedCompareExchange(&g_mpRemAacLagCs, 0, 0);
 		CStringW json;
-		json.Format(L"{\"title\":\"%s\",\"artist\":\"%s\",\"album\":\"%s\",\"vol\":%d,\"state\":\"%s\",\"muted\":%d,\"index\":%d,\"playcnt\":%d,\"pos_cs\":%d,\"dur_cs\":%d,\"lrccur\":%d}",
-			(LPCWSTR)jt, (LPCWSTR)ja, (LPCWSTR)jb, vol, state, muted, idx, pcnt, posCs, durCs, lrccur);
+		CStringW keyLab;
+		if (savedata.mpCamelot > 0)
+			keyLab = MpCamelotLabel(savedata.mpCamelot);
+		json.Format(L"{\"title\":\"%s\",\"artist\":\"%s\",\"album\":\"%s\",\"vol\":%d,\"state\":\"%s\",\"muted\":%d,\"index\":%d,\"playcnt\":%d,\"pos_cs\":%d,\"dur_cs\":%d,\"lrccur\":%d,\"aac\":%d,\"aac_lag_cs\":%d,\"key\":\"%s\"}",
+			(LPCWSTR)jt, (LPCWSTR)ja, (LPCWSTR)jb, vol, state, muted, idx, pcnt, posCs, durCs, lrccur,
+			savedata.mpRemoteAac ? 1 : 0, aacLag, (LPCWSTR)keyLab);
 		CStringA utf8;
 		{
 			const int nbytes = ::WideCharToMultiByte(CP_UTF8, 0, json, -1, NULL, 0, NULL, NULL);
@@ -1700,9 +2391,12 @@ static void MpRemoteHandleRequest(SOCKET s)
 	const wchar_t* labTabDj = LL14(L"DJ", L"DJ", L"DJ", L"DJ", L"DJ", L"DJ", L"DJ", L"DJ", L"DJ", L"DJ", L"DJ", L"DJ", L"DJ", L"DJ");
 	const wchar_t* labTabPiano = LL14(L"ピアノ", L"Piano", L"Piano", L"Piano", L"Piano", L"피아노", L"钢琴", L"بيانو", L"Пиано", L"Piano", L"Piano", L"Piano", L"Piano", L"Piyano");
 	const wchar_t* labTabAna = LL14(L"アナ", L"Ana", L"Ana", L"Ana", L"Ana", L"아나", L"分析", L"محلل", L"Ана", L"Ana", L"Ana", L"Ana", L"Ana", L"Ana");
-	const wchar_t* labHint = LL14(L"Wi-Fi / LAN · 同時最大6台", L"Wi-Fi / LAN · up to 6 clients", L"Wi-Fi / LAN · max 3 clients", L"Wi-Fi / LAN · max 3 client", L"Wi-Fi / LAN · max. 3 clientes",
-		L"Wi-Fi / LAN · 최대 3대", L"Wi-Fi / LAN · 最多3台", L"Wi-Fi / LAN · حد 3", L"Wi-Fi / LAN · до 3", L"WLAN / LAN · max. 3",
-		L"Wi-Fi / LAN · max. 3", L"Wi-Fi / LAN · max 3", L"Wi-Fi / LAN · max 3", L"Wi-Fi / LAN · en fazla 3");
+	const wchar_t* labHint = LL14(L"Wi-Fi / LAN · 同時最大6台 · AACで聴ける", L"Wi-Fi / LAN · up to 6 · AAC listen", L"Wi-Fi / LAN · max 6 · ecoute AAC", L"Wi-Fi / LAN · max 6 · ascolto AAC", L"Wi-Fi / LAN · max. 6 · escuchar AAC",
+		L"Wi-Fi / LAN · 최대 6 · AAC 청취", L"Wi-Fi / LAN · 最多6 · 可听AAC", L"Wi-Fi / LAN · حد 6 · استماع AAC", L"Wi-Fi / LAN · до 6 · AAC", L"WLAN / LAN · max. 6 · AAC hören",
+		L"Wi-Fi / LAN · max. 6 · ouvir AAC", L"Wi-Fi / LAN · max 6 · AAC luisteren", L"Wi-Fi / LAN · max 6 · sluchaj AAC", L"Wi-Fi / LAN · en fazla 6 · AAC dinle");
+	const wchar_t* labListen = LL14(L"聴く (AAC)", L"Listen (AAC)", L"Ecouter (AAC)", L"Ascolta (AAC)", L"Escuchar (AAC)",
+		L"듣기 (AAC)", L"收听 (AAC)", L"استماع (AAC)", L"Слушать (AAC)", L"Hören (AAC)",
+		L"Ouvir (AAC)", L"Luisteren (AAC)", L"Sluchaj (AAC)", L"Dinle (AAC)");
 	const wchar_t* labPre = LL14(L"プリセット", L"Preset", L"Preset", L"Preset", L"Preajuste", L"프리셋", L"预设", L"إعداد مسبق", L"Пресет", L"Preset", L"Preset", L"Preset", L"Preset", L"Onayar");
 	const wchar_t* labEnv = LL14(L"環境", L"Environment", L"Environnement", L"Ambiente", L"Entorno", L"환경", L"环境", L"بيئة", L"Среда", L"Umgebung", L"Ambiente", L"Omgeving", L"Srodowisko", L"Ortam");
 	const wchar_t* labRev = LL14(L"リバーブ", L"Reverb", L"Reverb", L"Riverbero", L"Reverb", L"리버브", L"混响", L"صدى", L"Реверб", L"Hall", L"Reverb", L"Galm", L"Poglos", L"Reverb");
@@ -1732,7 +2426,7 @@ static void MpRemoteHandleRequest(SOCKET s)
 	page += L");margin:0 0 6px}#title{margin:0;font-size:1.25rem;font-weight:750;line-height:1.35;word-break:break-word;background:linear-gradient(90deg,#ff69b4,#963ca0);-webkit-background-clip:text;background-clip:text;color:transparent}#artist,#album{margin:6px 0 0;color:var(--muted);font-size:.95rem;word-break:break-word}#album{font-size:.85rem;opacity:.9}.state{display:inline-flex;align-items:center;gap:6px;margin-top:10px;padding:4px 10px;border-radius:999px;background:#ffe6f3;color:#b03070;font-size:.75rem;font-weight:700}.state.play{background:#e4ffe8;color:#2d7a3e}.state.pause{background:#fff3d6;color:#9a6a10}.tabs{display:flex;flex-direction:column;gap:6px;margin:0 0 12px;padding:4px;background:#ffffffcc;";
 	page += L"border-radius:16px;border:1px solid #ffffffaa;box-shadow:var(--shadow)}.tabrow{display:grid;gap:6px}.tabrow.r4{grid-template-columns:repeat(4,1fr)}.tabrow.r3{grid-template-columns:repeat(3,1fr)}.tab{appearance:none;border:0;cursor:pointer;border-radius:12px;padding:10px 6px;font-weight:750;font-size:.76rem;color:#6a4a60;background:transparent}.tab.on{background:linear-gradient(135deg,var(--pink),var(--pink2));color:#fff;box-shadow:0 4px 14px #ff69b455}.panel{display:none}.panel.on{display:block}.vinyl-wrap{display:flex;flex-direction:column;align-items:center;gap:10px;margin-top:4px}#vinyl{width:min(100%,320px);aspect-ratio:1;border-radius:50%;touch-action:none;cursor:grab;display:block;box-shadow:0 10px 28px #00000033,inset 0 0 0 2px #ffffff22}#vinyl:active{cursor:grabbing}.vinyl-tip{font-size:.82rem;color:var(--muted);font-weight:650;text-align:center}.pad{display:grid;grid-template-columns:1fr 1.15fr 1fr;gap:10px;margin-top:4px}.btn{appearance:none;border:0;cursor:pointer;user-select:none;border-radius:18px;min-height:64px;padding:12px 8px;font-wei";
 	page += L"ght:750;font-size:.92rem;color:#2a2030;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;box-shadow:0 6px 16px #00000014;transition:transform .12s ease,filter .12s ease,box-shadow .12s ease}.btn i{font-size:1.25rem}.btn:active{transform:scale(.96);filter:brightness(.97)}.btn.busy{opacity:.65;pointer-events:none}.btn.sm{min-height:44px;border-radius:14px;font-size:.8rem;flex-direction:row;gap:8px}.b-prev,.b-next{background:linear-gradient(180deg,var(--nav1),var(--nav2))}.b-play{background:linear-gradient(180deg,var(--play1),var(--play2));min-height:76px;font-size:1rem}.b-pause{background:linear-gradient(180deg,var(--pause1),var(--pause2))}.b-stop{background:";
-	page += L"linear-gradient(180deg,var(--stop1),var(--stop2))}.row2{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px}.row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:10px}.row4{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px;margin-top:10px}.b-seek{background:linear-gradient(180deg,#efe7ff,#d5c8f8);min-height:54px}.b-mute{background:linear-gradient(180deg,#ffe8f1,#ffc1d8);min-height:48px;width:100%;margin-top:10px}.b-mute.on{background:linear-gradient(180deg,#ff9eb8,#ff5a8a);color:#fff;box-shadow:0 0 0 2px #ff69b466}.b-soft{background:linear-gradient(180deg,#f5f0ff,#e2d6f8);min-height:48px}.b-kill.on{background:linear-gradient(180deg,#ff9eb8,#ff5a8a);";
+	page += L"linear-gradient(180deg,var(--stop1),var(--stop2))}.row2{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px}.row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:10px}.row4{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px;margin-top:10px}.b-seek{background:linear-gradient(180deg,#efe7ff,#d5c8f8);min-height:54px}.b-mute{background:linear-gradient(180deg,#ffe8f1,#ffc1d8);min-height:48px;width:100%;margin-top:10px}.b-mute.on{background:linear-gradient(180deg,#ff9eb8,#ff5a8a);color:#fff;box-shadow:0 0 0 2px #ff69b466}.b-listen{background:linear-gradient(180deg,#e8fff4,#a8e8c8);min-height:48px;width:100%;margin-top:10px}.b-listen.on{background:linear-gradient(180deg,#7ad9a0,#3cb878);color:#fff;box-shadow:0 0 0 2px #3cb87866}.b-listen:disabled{opacity:.45}.b-soft{background:linear-gradient(180deg,#f5f0ff,#e2d6f8);min-height:48px}.b-kill.on{background:linear-gradient(180deg,#ff9eb8,#ff5a8a);";
 	page += L"color:#fff}.vol-wrap{margin-top:8px}.vol-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}.vol-top span{font-weight:700;font-size:.9rem}#volVal,.vnum{color:var(--pink);font-variant-numeric:tabular-nums}input[type=range]{width:100%;accent-color:var(--pink);height:28px}#tab-eq{padding-bottom:20px}#tab-eq input[type=range]{touch-action:manipulation}.eq-reset{position:sticky;top:0;z-index:2;background:linear-gradient(180deg,#fffffff8,#fffffff0);padding:8px 0 10px;margin:4px 0 8px}.eq-grid{display:flex;flex-direction:column;gap:6px;margin-top:10px}.eq-band{display:grid;grid-template-columns:42px 1fr 36px;align-items:center;gap:8px}.eq-band label{font-size:.75rem;color:var(--muted);font-weight:700;text-align:right}.eq-band input{width:100%;height:28px;writing-mode:horizontal-tb;-webkit-appearance:auto;appearance:auto}.viz-wrap{margin-top:6px}.viz-chord{text-align:center;font-weight:800;font-size:1.05rem;color:var(--pink2);margin:0 0 8px;min-height:1.4em}#pianoCan,#anaCan{width:100%;height:auto;display:block;border-radius:14px;background:#0e1018;box-shadow:inset 0 0 0 1px #ffffff18}#pianoCan{min-height:220px}#anaCan{min-height:140px}select.sel{width:100%;margin-top:8px;padding:10px;border-radius:12px;border:1px ";
 	page += L"solid #e8d0e0;background:#fff;font-weight:650;color:var(--ink)}.list{max-height:360px;overflow:auto;margin-top:8px;-webkit-overflow-scrolling:touch}.li{display:block;width:100%;text-align:left;padding:12px 12px;border:0;border-radius:14px;background:transparent;cursor:pointer;margin-bottom:4px}.li:active{background:#ffe6f3}.li.cur{background:linear-gradient(90deg,#ffe6f3,#f0e6ff);font-weight:750}.li .t{display:block;font-size:.95rem}.li .m{display:block;font-size:.78rem;color:var(--muted);margin-top:2px}.pager{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:10px}.lrc{max-height:min(52vh,380px);min-height:220px;overflow:auto;margin:0 0 12px;line-height:1.55;padding:8px 0 28%}.lrc .ln{padding:6px 8px;bord";
 	page += L"er-radius:10px;color:var(--muted);font-size:.92rem}.lrc .ln.cur{background:#ffe6f3;color:#3a2a3a;font-weight:750}.sec-lab{font-size:.78rem;font-weight:750;color:var(--muted);margin:12px 0 4px;text-transform:uppercase;letter-spacing:.06em}.toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%) translateY(20px);opacity:0;background:#3a2a3add;color:#fff;padding:10px 16px;border-radius:999px;font-size:.85rem;pointer-events:none;transition:opacity .2s,transform .2s;z-index:9}.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}.hint{text-align:center;color:var(--muted);font-size:.75rem;margin-top:12px}";
@@ -1797,6 +2491,9 @@ static void MpRemoteHandleRequest(SOCKET s)
 	page += L"</span></button></div>"
 		L"<button type=\"button\" class=\"btn b-mute\" data-cmd=\"mute\"><i class=\"fa-solid fa-volume-xmark\"></i><span>";
 	page += labMute;
+	page += L"</span></button>"
+		L"<button type=\"button\" class=\"btn b-listen\" id=\"btnListen\"><i class=\"fa-solid fa-headphones\"></i><span>";
+	page += labListen;
 	page += L"</span></button>"
 		L"<div class=\"vol-wrap\"><div class=\"vol-top\"><span>";
 	page += labVol;
@@ -1888,11 +2585,11 @@ static void MpRemoteHandleRequest(SOCKET s)
 
 	page += L"<p class=\"hint\">"; page += labHint; page += L"</p></div><div id=\"toast\" class=\"toast\"></div>";
 	page += L"<script src=\"https://code.jquery.com/jquery-3.7.1.min.js\"></script><script>";
-	page += L"var _st={title:'',artist:'',album:'',vol:-1,state:'',muted:-1,index:-1,lrccur:-1};var _tab='play',_plOff=0,_plPage=40,_eqReady=0,_djReady=0,_lrcSig='',_userEq=0,_userDj=0,_userVol=0;function toast(m){var $t=$('#toast');$t.text(m).addClass('show');clearTimeout(window._tt);window._tt=setTimeout(function(){$t.removeClass('show')},900)}function setState(s){var $s=$('#state');if($s.data('s')===s)return;$s.data('s',s);$s.removeClass('play pause stop');if(s==='play'){$s.addClass('play').html('<i class=\"fa-solid fa-play\"></i> PLAY')}else if(s==='pause'){$s.addClass('pause').html('<i class=\"fa-solid fa-pause\"></i> PAUSE')}else{$s.addClass('stop').html('<i class=\"fa-solid fa-stop\"></i> STOP')}}functio";
+	page += L"var _st={title:'',artist:'',album:'',vol:-1,state:'',muted:-1,index:-1,lrccur:-1,aac:-1,pos_cs:0,aac_lag_cs:90};var _tab='play',_plOff=0,_plPage=40,_eqReady=0,_djReady=0,_lrcSig='',_lrcLines=[],_userEq=0,_userDj=0,_userVol=0,_listen=0,_audio=null;function toast(m){var $t=$('#toast');$t.text(m).addClass('show');clearTimeout(window._tt);window._tt=setTimeout(function(){$t.removeClass('show')},900)}function setState(s){var $s=$('#state');if($s.data('s')===s)return;$s.data('s',s);$s.removeClass('play pause stop');if(s==='play'){$s.addClass('play').html('<i class=\"fa-solid fa-play\"></i> PLAY')}else if(s==='pause'){$s.addClass('pause').html('<i class=\"fa-solid fa-pause\"></i> PAUSE')}else{$s.addClass('stop').html('<i class=\"fa-solid fa-stop\"></i> STOP')}}functio";
 	page += L"n showTab(id){_tab=id;$('.tab').removeClass('on');$('.tab[data-tab=\"'+id+'\"]').addClass('on');$('.panel').removeClass('on');$('#tab-'+id).addClass('on');if(id==='list')loadPlaylist();if(id==='lrc')loadLyrics(true);if(id==='eq')loadEq(false);if(id==='dj')loadDj(false);if(id==='piano')loadPiano();if(id==='ana')loadAna()}function sendCmd(c,extra){var q='/cmd?c='+encodeURIComponent(c)+(extra||'');return $.ajax({url:q,method:'GET',timeout:2500})}function applyStatus(d){if(!d)return;if(d.title!==_st.title){_st.title=d.title;$('#title').text(d.title&&d.title.length?d.title:'—')}if(d.artist!==_st.artist){_st.artist=d.artist;$('#artist').text(d.artist||'').toggle(!!(d.artist&&d.artist.length))}if(d.album!==_st.album){_st.album=d.album;$('#album').text";
-	page += L"(d.album||'').toggle(!!(d.album&&d.album.length))}if(!_userVol&&typeof d.vol==='number'&&d.vol!==_st.vol){_st.vol=d.vol;$('#vol').val(d.vol);$('#volVal').text(d.vol)}if(!!d.muted!==!!_st.muted){_st.muted=d.muted;$('.b-mute').toggleClass('on',!!d.muted)}if(d.state!==_st.state){_st.state=d.state;setState(d.state||'stop')}if(typeof d.index==='number'&&d.index!==_st.index){_st.index=d.index;if(_tab==='list')markPlCur()}if(typeof d.lrccur==='number'&&d.lrccur!==_st.lrccur){_st.lrccur=d.lrccur;markLrcCur(true)}}function refresh(){$.getJSON('/api/status').done(applyStatus).fail(function(){})}function loadPlaylist(){$.getJSON('/api/playlist?o='+_plOff+'&n='+_plPage).done(function(d){if(!d)return;va";
+	page += L"(d.album||'').toggle(!!(d.album&&d.album.length))}if(!_userVol&&typeof d.vol==='number'&&d.vol!==_st.vol){_st.vol=d.vol;$('#vol').val(d.vol);$('#volVal').text(d.vol)}if(!!d.muted!==!!_st.muted){_st.muted=d.muted;$('.b-mute').toggleClass('on',!!d.muted)}if(d.state!==_st.state){_st.state=d.state;setState(d.state||'stop')}if(typeof d.index==='number'&&d.index!==_st.index){_st.index=d.index;if(_tab==='list')markPlCur()}if(typeof d.pos_cs==='number')_st.pos_cs=d.pos_cs;if(typeof d.aac_lag_cs==='number'&&d.aac_lag_cs>0)_st.aac_lag_cs=d.aac_lag_cs;if(typeof d.lrccur==='number'){var want=d.lrccur;if(_listen&&_lrcLines.length){var hp=_st.pos_cs-(_st.aac_lag_cs||90);if(hp<0)hp=0;want=-1;for(var li=0;li<_lrcLines.length;li++){if((_lrcLines[li].t||0)<=hp)want=li;else break}}if(want!==_st.lrccur){_st.lrccur=want;markLrcCur(true)}}if(typeof d.aac==='number'&&d.aac!==_st.aac){_st.aac=d.aac;$('#btnListen').prop('disabled',!d.aac);if(!d.aac&&_listen)stopListen()}}function stopListen(){_listen=0;$('#btnListen').removeClass('on');if(_audio){try{_audio.pause()}catch(e){}try{_audio.removeAttribute('src');_audio.load()}catch(e){}_audio=null}}function toggleListen(){if(!_st.aac){toast('AAC off');return}if(_listen){stopListen();return}_audio=new Audio('/stream');_audio.preload='none';_audio.play().then(function(){_listen=1;$('#btnListen').addClass('on');refresh();if(_tab==='lrc')loadLyrics(false)}).catch(function(){toast('Listen failed');stopListen()})}$(function(){$('#btnListen').on('click',function(){toggleListen()})});function refresh(){$.getJSON('/api/status').done(applyStatus).fail(function(){})}function loadPlaylist(){$.getJSON('/api/playlist?o='+_plOff+'&n='+_plPage).done(function(d){if(!d)return;va";
 	page += L"r h='',i,it;for(i=0;i<(d.items||[]).length;i++){it=d.items[i];h+='<button type=\"button\" class=\"li'+(it.i===_st.index?' cur':'')+'\" data-i=\"'+it.i+'\"><span class=\"t\"></span><span class=\"m\"></span></button>'}var $l=$('#plList');$l.html(h);$l.children().each(function(idx){var it=d.items[idx];$(this).find('.t').text(it.title||('#'+it.i));$(this).find('.m').text([(it.artist||''),(it.album||'')].filter(Boolean).join(' · '))});$('#plInfo').text((_plOff+1)+'-'+Math.min(_plOff+_plPage,d.total)+' / '+d.total);$('#plPrev').prop('disabled',_plOff<=0);$('#plNext').prop('disabled',_plOff+_plPage>=d.total)}).fail(function(){})}function markPlCur(){$('#plList .li').each(function(){$(this).toggleClass('cur',";
-	page += L"(+$(this).data('i'))===_st.index)})}function loadLyrics(force){$.getJSON('/api/lyrics').done(function(d){if(!d)return;var sig=(d.n||0)+':'+(d.lines&&d.lines[0]?d.lines[0].t:'');if(!force&&sig===_lrcSig){if(typeof d.cur==='number'){var ch=(d.cur!==_st.lrccur);_st.lrccur=d.cur;markLrcCur(ch)}return}_lrcSig=sig;var h='',i;for(i=0;i<(d.lines||[]).length;i++){h+='<div class=\"ln\" data-i=\"'+i+'\"></div>'}$('#lrcBox').html(h);$('#lrcBox .ln').each(function(idx){$(this).text(d.lines[idx].x||'')});_st.lrccur=(typeof d.cur==='number')?d.cur:-1;markLrcCur(true)}).fail(function(){})}function markLrcCur(scroll){var $b=$('#lrcBox');if(!$b.length)return;$b.find('.ln').removeClass('cur');if(_st.lrccur<0)return;var $c=$b.find('.ln[data";
+	page += L"(+$(this).data('i'))===_st.index)})}function loadLyrics(force){$.getJSON('/api/lyrics').done(function(d){if(!d)return;var sig=(d.n||0)+':'+(d.lines&&d.lines[0]?d.lines[0].t:'');_lrcLines=d.lines||[];if(!force&&sig===_lrcSig){var want=(typeof d.cur==='number')?d.cur:-1;if(_listen&&_lrcLines.length){var hp=_st.pos_cs-(_st.aac_lag_cs||90);if(hp<0)hp=0;want=-1;for(var li=0;li<_lrcLines.length;li++){if((_lrcLines[li].t||0)<=hp)want=li;else break}}if(want!==_st.lrccur){_st.lrccur=want;markLrcCur(true)}return}_lrcSig=sig;var h='',i;for(i=0;i<_lrcLines.length;i++){h+='<div class=\"ln\" data-i=\"'+i+'\"></div>'}$('#lrcBox').html(h);$('#lrcBox .ln').each(function(idx){$(this).text(_lrcLines[idx].x||'')});var cur=(typeof d.cur==='number')?d.cur:-1;if(_listen&&_lrcLines.length){var hp2=_st.pos_cs-(_st.aac_lag_cs||90);if(hp2<0)hp2=0;cur=-1;for(var lj=0;lj<_lrcLines.length;lj++){if((_lrcLines[lj].t||0)<=hp2)cur=lj;else break}}_st.lrccur=cur;markLrcCur(true)}).fail(function(){})}function markLrcCur(scroll){var $b=$('#lrcBox');if(!$b.length)return;$b.find('.ln').removeClass('cur');if(_st.lrccur<0)return;var $c=$b.find('.ln[data";
 	page += L"-i=\"'+_st.lrccur+'\"]');if(!$c.length)return;$c.addClass('cur');if(scroll){var lh=$c.outerHeight()||28;var top=$c.position().top+$b.scrollTop()-lh*2.2;if(top<0)top=0;$b.stop(true).animate({scrollTop:top},180)}}function loadEq(force){$.getJSON('/api/eq').done(function(d){if(!d)return;if(_userEq&&!force)return;var i;for(i=0;i<15;i++){var v=(d.eq&&typeof d.eq[i]==='number')?d.eq[i]:100;$('#eq'+i).val(v);$('#eqv'+i).text(v)}if(typeof d.pre==='number')$('#eqPre').val(String(d.pre));if(typeof d.env==='number')$('#eqEnv').val(String(d.env));if(typeof d.rev==='number'){$('#eqRev').val(d.rev);$('#eqRevV').text(d.rev)}if(typeof d.cho==='number'){$('#eqCho').val(d.cho);$('#eqChoV').text(d.cho)}if(typeof d.del==='number')";
 	page += L"{$('#eqDel').val(d.del);$('#eqDelV').text(d.del)}if(typeof d.eff==='number'){$('#eqEff').val(d.eff);$('#eqEffV').text(d.eff)}_eqReady=1}).fail(function(){})}var _vinyl={drag:0,lastA:0,spin:0,head:0,pending:0,raf:0};function vinylAng(e,el){var r=el.getBoundingClientRect(),cx=r.left+r.width/2,cy=r.top+r.height/2;var x=(e.clientX!=null?e.clientX:(e.touches&&e.touches[0]?e.touches[0].clientX:0))-cx;var y=(e.clientY!=null?e.clientY:(e.touches&&e.touches[0]?e.touches[0].clientY:0))-cy;return Math.atan2(y,x)*180/Math.PI}function drawVinyl(){var c=document.getElementById('vinyl');if(!c)return;var ctx=c.getContext('2d'),W=c.width,H=c.height,cx=W/2,cy=H/2,R=Math.min(W,H)/2-8;ctx.clearRect(0,0,W,H);ctx.save();ctx.translate(cx,cy);ctx.rotate(((_vinyl.spin+_vinyl.head)%360)*Math.PI/180);ctx.beginPath();ctx.arc(0,0,R,0,Math.PI*2);ctx.fillStyle='#1c1e26';ctx.fill();for(var i=0;i<18;i++){ctx.beginPath();ctx.arc(0,0,R*(0.92-i*0.035),0,Math.PI*2);ctx.strokeStyle='rgba(255,255,255,'+(0.04+(i%2)*0.03)+')';ctx.lineWidth=2;ctx.stroke()}ctx.beginPath();ctx.arc(0,0,R*0.22,0,Math.PI*2);ctx.fillStyle='#ff69b4';ctx.fill();ctx.beginPath();ctx.arc(0,0,R*0.08,0,Math.PI*2);ctx.fillStyle='#fff';ctx.fill();ctx.strokeStyle='#ffd28c';ctx.lineWidth=6;ctx.beginPath();ctx.moveTo(0,-R*0.22);ctx.lineTo(0,-R*0.92);ctx.stroke();ctx.restore()}function loadDj(force){$.getJSON('/api/dj').done(function(d){if(!d)return;if(_vinyl.drag)return;if(typeof d.head==='number')_vinyl.head=d.head;if(d.playing){_vinyl.spin=(_vinyl.spin+2.2)%360}drawVinyl();_djReady=1}).fail(function(){})}function flushScratch(){if(!_vinyl.pending)return;var d=Math.round(_vinyl.pending*100);_vinyl.pending=0;if(d===0)return;sendCmd('scr','&d='+d)}$(function(){setState('";
 	page += state;
@@ -1900,7 +2597,7 @@ static void MpRemoteHandleRequest(SOCKET s)
 	page += L"endCmd('playidx','&i='+i).always(function(){setTimeout(function(){refresh();loadPlaylist()},100);toast('play')})});$('#plPrev').on('click',function(){if(_plOff<=0)return;_plOff=Math.max(0,_plOff-_plPage);loadPlaylist()});$('#plNext').on('click',function(){_plOff+=_plPage;loadPlaylist()});$('.lrcbtn').on('click',function(){var d=+$(this).data('d');sendCmd('lrc','&delta='+d).always(function(){setTimeout(function(){loadLyrics(true)},80);toast('lrc')})});$('#lrcSave').on('click',function(){sendCmd('lrcsave').always(function(){toast('save')})});var eqT=null;function eqIsScroll(el){return !!(el&&el._eqScroll)}function eqRevert(el){if(!el)return;el.value=String(el._eqV);var id=el.id;if(el.classList.contains('eqb'))$('#eqv'+$(el).attr('data-b')).text(el._eqV);else if(id==='eqRev')$('#eqRevV').text(el._eqV);else if(id==='eqCho')$('#eqChoV').text(el._eqV);else if(id==='eqDel')$('#eqDelV').text(el._eqV);else if(id==='eqEff')$('#eqEffV').text(el._eqV)}function eqBindGate(sel){$(document).on('pointerdown',sel,function(e){this._eqX=e.clientX;this._eqY=e.clientY;this._eqV=+this.value;this._eqScroll=0;this._eqMoved=0;this._eqDown=1;this._eqPend=0});$(document).on('pointermove',sel,function(e){if(!this._eqDown||this._eqScroll)return;var dx=e.clientX-this._eqX,dy=e.clientY-this._eqY;if(!this._eqMoved&&Math.abs(dy)>10&&Math.abs(dy)>Math.abs(dx)*1.1){this._eqScroll=1;eqRevert(this);this._eqPend=0;return}if(Math.abs(dx)>8)this._eqMoved=1});$(document).on('pointerup pointercancel',sel,function(){if(!this._eqDown)return;this._eqDown=0;if(this._eqScroll){eqRevert(this);return}if(!this._eqPend)return;var el=this;if(el.classList.contains('eqb')){var b=+$(el).attr('data-b'),v=+el.value;_userEq=1;clearTimeout(eqT);eqT=setTimeout(function(){sendCmd('eqband','&b='+b+'&v='+v).always(function(){_userEq=0})},40)}else if(el.id==='eqRev')fxSend(0,+el.value);else if(el.id==='eqCho')fxSend(1,+el.value);else if(el.id==='eqDel')fxSend(2,+el.value);else if(el.id==='eqEff')fxSend(3,+el.value)})}eqBindGate('.eqb,#eqRev,#eqCho,#eqDel,#eqEff');$(document).on('input','.eqb',function(){if(eqIsScroll(this)){eqRevert(this);return}var b=+$(this).attr('data-b'),v=+this.value;$('#eqv'+b).text(v);if(this._eqDown){this._eqPend=1;return}_userEq=1;clearTimeout(eqT);eqT=setTimeou";
 	page += L"t(function(){sendCmd('eqband','&b='+b+'&v='+v).always(function(){_userEq=0})},80)});$('#eqPre').on('change',function(){_userEq=1;sendCmd('eqpreset','&p='+this.value).always(function(){setTimeout(function(){_userEq=0;loadEq(true)},120)})});$('#eqEnv').on('change',function(){_userEq=1;sendCmd('eqenv','&p='+this.value).always(function(){_userEq=0})});$('#eqReset').on('click',function(){_userEq=1;sendCmd('eqreset').always(function(){setTimeout(function(){_userEq=0;loadEq(true)},80);toast('eq')})});$('#eqResetG').on('click',function(){_userEq=1;sendCmd('eqresetg').always(function(){setTimeout(function(){_userEq=0;loadEq(true)},80);toast('eq')})});var fxT=null;function fxSend(which,v){_userEq=1;clearTimeout(fxT);fxT=setTimeout(function(){sendCmd('eqfx','&w='+which+'&v='+v).always(function(){_userEq=0})},80)}$('#eqRev').on('input',function(){if(eqIsScroll(this)){eqRevert(this);return}$('#eqRevV').text(this.value);if(this._eqDown){this._eqPend=1;return}fxSend(0,+this.value)});$('#eqCho').on('input',function(){if(eqIsScroll(this)){eqRevert(this);return}$('#eqChoV').text(this.value);if(this._eqDown){this._eqPend=1;return}fxSend(1,+this.value)});$('#eqDel";
 	page += L"').on('input',function(){if(eqIsScroll(this)){eqRevert(this);return}$('#eqDelV').text(this.value);if(this._eqDown){this._eqPend=1;return}fxSend(2,+this.value)});$('#eqEff').on('input',function(){if(eqIsScroll(this)){eqRevert(this);return}$('#eqEffV').text(this.value);if(this._eqDown){this._eqPend=1;return}fxSend(3,+this.value)});function fitCan(c,aspect){if(!c)return null;var r=c.getBoundingClientRect(),d=window.devicePixelRatio||1,aw=Math.max(1,r.width),ah=Math.max(1,aw*(aspect||0.42)),w=Math.max(1,Math.floor(aw*d)),h=Math.max(1,Math.floor(ah*d));if(c.width!==w||c.height!==h){c.width=w;c.height=h}return c.getContext('2d')}function smoothBins(bins,outN){var n=(bins&&bins.length)?bins.length:0,dst=new Array(outN),i,t,a,b,c,d,p,u,u2,u3;if(!n){for(i=0;i<outN;i++)dst[i]=0;return dst}function at(j){j=j<0?0:(j>=n?n-1:j);var v=+bins[j]||0;return v<0?0:(v>96?96:v)}for(i=0;i<outN;i++){t=i*(n-1)/Math.max(1,outN-1);p=Math.floor(t);u=t-p;a=at(p-1);b=at(p);c=at(p+1);d=at(p+2);u2=u*u;u3=u2*u;dst[i]=0.5*((2*b)+(-a+c)*u+(2*a-5*b+4*c-d)*u2+(-a+3*b-3*c+d)*u3);if(dst[i]<0)dst[i]=0;if(dst[i]>96)dst[i]=96}return dst}function drawAna(payload){var chs=[],labs=[],c=document.getElementById('anaCan'),ctx=fitCan(c,0.48);if(!ctx||!c)return;if(payload&&payload.b){if(payload.b.length&&typeof payload.b[0]==='object'){chs=payload.b;labs=payload.lab||[]}else{chs=[payload.b]}}else if(payload&&payload.length){chs=[payload]}var n=chs.length;if(!n){ctx.fillStyle='#0e1018';ctx.fillRect(0,0,c.width,c.height);return}var cols=['rgba(80,200,255,','rgba(255,140,180,','rgba(120,230,140,','rgba(255,200,80,','rgba(180,140,255,','rgba(80,220,200,','rgba(255,160,100,','rgba(200,200,220,'];var W=c.width,H=c.height,pad=Math.max(2,W*0.01),gap=Math.max(3,Math.floor(H*0.012));var bandH=Math.max(28,Math.floor((H-pad*2-gap*(n-1))/n));ctx.fillStyle='#0e1018';ctx.fillRect(0,0,W,H);for(var ci=0;ci<n;ci++){var yBase=pad+ci*(bandH+gap),y0=yBase+2,y1=yBase+bandH-2,plotW=W-pad*2,plotH=Math.max(8,y1-y0);var sm=smoothBins(chs[ci]||[],Math.max(64,Math.floor(plotW/2))),N=sm.length,i,x,y;ctx.strokeStyle='rgba(255,255,255,0.05)';ctx.lineWidth=1;for(i=1;i<=3;i++){y=y0+plotH*i/4;ctx.beginPath();ctx.moveTo(pad,y);ctx.lineTo(W-pad,y);ctx.stroke()}var g=ctx.createLinearGradient(0,y0,0,y1);g.addColorStop(0,cols[ci%8]+'0.5)');g.addColorStop(1,cols[ci%8]+'0.06)');ctx.beginPath();ctx.moveTo(pad,y1);for(i=0;i<N;i++){x=pad+(i/Math.max(1,N-1))*plotW;y=y1-(sm[i]/96)*plotH;ctx.lineTo(x,y)}ctx.lineTo(W-pad,y1);ctx.closePath();ctx.fillStyle=g;ctx.fill();ctx.beginPath();for(i=0;i<N;i++){x=pad+(i/Math.max(1,N-1))*plotW;y=y1-(sm[i]/96)*plotH;if(i===0)ctx.moveTo(x,y);else ctx.lineTo(x,y)}ctx.strokeStyle=cols[ci%8]+'1)';ctx.lineWidth=Math.max(1.2,W/420);ctx.lineJoin='round';ctx.stroke();if(labs[ci]){ctx.fillStyle=cols[ci%8]+'0.95)';ctx.font='bold '+Math.max(10,Math.floor(W/42))+'px sans-serif';ctx.textAlign='right';ctx.fillText(labs[ci],W-pad-2,y0+Math.max(11,bandH*0.28))}}}var _pianoHist=[],_pianoHistX=[],_pianoHistMax=96,_pianoOff=0,_pianoLastT=0;function isBlack(m){var k=m%12;return k===1||k===3||k===6||k===8||k===10}function exprColor(e){if(e&2)return 'rgba(255,220,80,0.95)';if(e&1)return 'rgba(255,100,100,0.95)';if(e&4)return 'rgba(120,255,180,0.95)';if(e&8)return 'rgba(120,160,255,0.95)';if(e&16)return 'rgba(255,170,90,0.95)';if(e&64)return 'rgba(120,230,255,0.95)';if(e&128)return 'rgba(200,150,255,0.95)';if(e&32)return 'rgba(190,190,210,0.9)';return null}function exprGlyph(e){if(e&2)return '↗';if(e&1)return '▸';if(e&4)return '~';if(e&8)return '→';if(e&16)return '↘';if(e&64)return '<';if(e&128)return '>';if(e&32)return '―';return ''}function drawPiano(keys,chord,hist,histX,exprOn,keyExpr){if(hist&&hist.length){_pianoHist=hist.slice(0,_pianoHistMax);_pianoHistX=(histX&&histX.length)?histX.slice(0,_pianoHistMax):[]}else if(keys){var act=[],ax=[];for(var i=0;i<108;i++)if((+keys[i]|0)>=1){act.push(i);ax.push((keyExpr&&keyExpr[i])?(+keyExpr[i]|0):0)}_pianoHist.unshift(act);_pianoHistX.unshift(ax);if(_pianoHist.length>_pianoHistMax){_pianoHist.length=_pianoHistMax;_pianoHistX.length=_pianoHistMax}}var now=performance.now();if(_pianoLastT){var dt=Math.min(50,now-_pianoLastT);_pianoOff+=dt/45}else _pianoOff=0;_pianoLastT=now;if(_pianoOff>1)_pianoOff-=Math.floor(_pianoOff);var c=document.getElementById('pianoCan');var ctx=fitCan(c,0.62);if(!ctx||!c)return;var W=c.width,H=c.height;ctx.fillStyle='#0e1018';ctx.fillRect(0,0,W,H);if(chord)$('#pianoChord').text(chord);var keyH=Math.floor(H*0.22),rollH=H-keyH,lo=21,hi=107,wh=[],m,i;for(m=lo;m<=hi;m++)if(!isBlack(m))wh.push(m);var ww=W/Math.max(1,wh.length);function whiteIdx(midi){var k=wh.indexOf(midi);return k<0?0:k}function noteX(midi){if(!isBlack(midi))return whiteIdx(midi)*ww;var left=midi-1;while(left>=lo&&isBlack(left))left--;return (whiteIdx(left)+1)*ww-ww*0.32}function noteW(midi){return isBlack(midi)?ww*0.55:Math.max(1,ww-1.5)}var rowH=Math.max(2,Math.floor(rollH/Math.max(48,_pianoHist.length||48)));var rows=Math.min(_pianoHist.length,Math.floor(rollH/rowH)+2),off=(_pianoOff%1)*rowH;ctx.save();ctx.beginPath();ctx.rect(0,0,W,rollH);ctx.clip();ctx.fillStyle='#12151e';ctx.fillRect(0,0,W,rollH);ctx.strokeStyle='rgba(255,255,255,0.04)';ctx.lineWidth=1;for(i=0;i<wh.length;i++){var gx=i*ww;ctx.beginPath();ctx.moveTo(gx,0);ctx.lineTo(gx,rollH);ctx.stroke()}var fs=Math.max(8,Math.min(14,Math.floor(rowH*0.9)));for(var r=0;r<rows;r++){var fr=_pianoHist[r];if(!fr||!fr.length)continue;var fx=_pianoHistX[r]||[];var y=rollH-(r+1)*rowH+off;if(y+rowH<0||y>rollH)continue;for(i=0;i<fr.length;i++){m=+fr[i]|0;if(m<lo||m>hi)continue;var ex=exprOn?(+fx[i]|0):0;ctx.fillStyle=isBlack(m)?'rgba(196,90,208,0.85)':'rgba(255,105,180,0.9)';ctx.fillRect(noteX(m)+0.5,y+0.5,noteW(m),Math.max(1,rowH-1));if(ex){var ec=exprColor(ex);if(ec){ctx.fillStyle=ec;ctx.fillRect(noteX(m)+0.5,y+0.5,Math.max(1,noteW(m)*0.35),Math.max(1,rowH-1));if(rowH>=8&&noteW(m)>=6){var g=exprGlyph(ex);if(g){ctx.fillStyle='#fff';ctx.font='bold '+fs+'px sans-serif';ctx.textAlign='left';ctx.textBaseline='middle';ctx.fillText(g,noteX(m)+1,y+rowH/2)}}}}}}ctx.restore();var yK=rollH;for(i=0;i<wh.length;i++){m=wh[i];var v=(keys&&keys[m])?(+keys[m]|0):0;ctx.fillStyle=v>=1?('rgba(255,105,180,'+(0.35+v/100*0.65)+')'):'#f2efe8';ctx.fillRect(i*ww,yK,Math.max(1,ww-1),keyH);ctx.strokeStyle='#c8c0b8';ctx.strokeRect(i*ww,yK,Math.max(1,ww-1),keyH);if(exprOn&&keyExpr&&(+keyExpr[m]|0)){var e2=+keyExpr[m]|0,ec2=exprColor(e2);if(ec2){ctx.fillStyle=ec2;ctx.fillRect(i*ww+1,yK+1,Math.max(1,ww-3),3)}}}for(m=lo;m<=hi;m++){if(!isBlack(m))continue;v=(keys&&keys[m])?(+keys[m]|0):0;ctx.fillStyle=v>=1?('rgba(196,90,208,'+(0.45+v/100*0.55)+')'):'#1a1a22';ctx.fillRect(noteX(m),yK,noteW(m),keyH*0.62);if(exprOn&&keyExpr&&(+keyExpr[m]|0)){var e3=+keyExpr[m]|0,ec3=exprColor(e3);if(ec3){ctx.fillStyle=ec3;ctx.fillRect(noteX(m),yK,noteW(m),2)}}}ctx.fillStyle='rgba(255,210,140,0.9)';ctx.fillRect(0,rollH-2,W,2)}function loadAna(){$.getJSON('/api/analyzer').done(function(d){if(d)drawAna(d)}).fail(function(){})}function loadPiano(){$.getJSON('/api/piano').done(function(d){if(!d)return;drawPiano(d.k||[],d.c||'-',d.h||null,d.x||null,!!d.xm,d.kx||null)}).fail(function(){})}function onVinylDown(e){var el=document.getElementById('vinyl');if(!el)return;e.preventDefault();_vinyl.drag=1;_vinyl.lastA=vinylAng(e,el);_vinyl.pending=0;sendCmd('scrbeg');if(el.setPointerCapture&&e.pointerId!=null)el.setPointerCapture(e.pointerId)}function onVinylMove(e){if(!_vinyl.drag)return;e.preventDefault();var el=document.getElementById('vinyl');var a=vinylAng(e,el);var d=a-_vinyl.lastA;if(d>180)d-=360;if(d<-180)d+=360;_vinyl.lastA=a;_vinyl.spin=(_vinyl.spin+d)%360;_vinyl.pending+=d;drawVinyl();if(!_vinyl.raf)_vinyl.raf=requestAnimationFrame(function(){_vinyl.raf=0;flushScratch()})}";
-	page += L"function onVinylUp(e){if(!_vinyl.drag)return;_vinyl.drag=0;flushScratch();sendCmd('scrend')}var vv=document.getElementById('vinyl');if(vv){vv.addEventListener('pointerdown',onVinylDown);vv.addEventListener('pointermove',onVinylMove);vv.addEventListener('pointerup',onVinylUp);vv.addEventListener('pointercancel',onVinylUp);drawVinyl()}showTab('play');setInterval(function(){refresh();if(_tab==='lrc')loadLyrics(false);if(_tab==='dj')loadDj(false)},2000);setInterval(function(){if(_tab==='piano')loadPiano();if(_tab==='ana')loadAna()},50);refresh();});";
+	page += L"function onVinylUp(e){if(!_vinyl.drag)return;_vinyl.drag=0;flushScratch();sendCmd('scrend')}var vv=document.getElementById('vinyl');if(vv){vv.addEventListener('pointerdown',onVinylDown);vv.addEventListener('pointermove',onVinylMove);vv.addEventListener('pointerup',onVinylUp);vv.addEventListener('pointercancel',onVinylUp);drawVinyl()}showTab('play');setInterval(function(){refresh();if(_tab==='lrc')loadLyrics(false);if(_tab==='dj')loadDj(false)},2000);setInterval(function(){if(_listen){refresh();if(_tab==='lrc')loadLyrics(false)}},250);setInterval(function(){if(_tab==='piano')loadPiano();if(_tab==='ana')loadAna()},50);refresh();});";
 	page += L"</script></body></html>";
 
 	CStringA bodyA;
@@ -1980,6 +2677,12 @@ void MpRemoteStop()
 {
 	InterlockedExchange(&g_mpRemoteStop, 1);
 	MpRemoteKickClients();
+	MpRemAacCsEnsure();
+	EnterCriticalSection(&g_mpRemAacCs);
+	MpRemAacEncReleaseLocked();
+	InterlockedExchange(&g_mpRemAacClients, 0);
+	InterlockedExchange(&g_mpRemAacW, 0);
+	LeaveCriticalSection(&g_mpRemAacCs);
 	if (g_mpRemoteListen != INVALID_SOCKET) {
 		closesocket(g_mpRemoteListen);
 		g_mpRemoteListen = INVALID_SOCKET;
@@ -2071,6 +2774,7 @@ void MpRemoteEnsureRunning(HWND notifyHwnd)
 void MpRemoteUiTick(CMediaPlayerDlg* mpDlg)
 {
 	if (!savedata.mpRemoteOn) return;
+	MpRemAacFeedSilenceIfNeeded();
 	int posCs = 0, durCs = 0, head100 = 0;
 	if (og && ::IsWindow(og->GetSafeHwnd()) && og->m_time.GetSafeHwnd()) {
 		int mn = 0, mx = 0;
@@ -2205,15 +2909,41 @@ static void CALLBACK MpMidiInCallback(HMIDIIN, UINT msg, DWORD_PTR, DWORD_PTR dw
 	const BYTE d2 = (BYTE)((pack >> 16) & 0xFF);
 	int cmd = -1;
 	int volAbs = -1;
+	if (savedata.mpMidiLearn && ((st & 0xF0) == 0xB0)) {
+		// 学習: 最初の空きスロットへ CC を割当
+		for (int i = 0; i < 4; ++i) {
+			if (savedata.mpMidiMapCc[i] < 0) {
+				savedata.mpMidiMapCc[i] = (int)d1;
+				savedata.mpMidiLearn = 0;
+				break;
+			}
+		}
+		return;
+	}
 	if ((st & 0xF0) == 0x90 && d2 > 0) {
 		if (d1 == 60) cmd = 0;
 		else if (d1 == 61) cmd = 1;
 		else if (d1 == 62) cmd = 2;
 	}
-	else if ((st & 0xF0) == 0xB0 && d1 == 7) {
-		// CC7 = 絶対音量 0..100（±5 連打にしない）
-		volAbs = (int)d2 * 100 / 127;
-		cmd = 10;
+	else if ((st & 0xF0) == 0xB0) {
+		if (d1 == 7 || (savedata.mpMidiMapCc[0] >= 0 && d1 == (BYTE)savedata.mpMidiMapCc[0])) {
+			volAbs = (int)d2 * 100 / 127;
+			cmd = 10;
+		}
+		else if (savedata.mpMidiMapCc[1] >= 0 && d1 == (BYTE)savedata.mpMidiMapCc[1]) {
+			// tempo
+			const int pct = 33 + (int)d2 * (300 - 33) / 127;
+			::PostMessage(g_mpMidiHwnd, WM_MP_TRANSPORT_CMD, (WPARAM)20, (LPARAM)pct);
+			return;
+		}
+		else if (savedata.mpMidiMapCc[2] >= 0 && d1 == (BYTE)savedata.mpMidiMapCc[2]) {
+			::PostMessage(g_mpMidiHwnd, WM_MP_TRANSPORT_CMD, (WPARAM)21, (LPARAM)d2);
+			return;
+		}
+		else if (savedata.mpMidiMapCc[3] >= 0 && d1 == (BYTE)savedata.mpMidiMapCc[3]) {
+			::PostMessage(g_mpMidiHwnd, WM_MP_TRANSPORT_CMD, (WPARAM)22, (LPARAM)d2);
+			return;
+		}
 	}
 	if (cmd == 10) {
 		::PostMessage(g_mpMidiHwnd, WM_MP_TRANSPORT_CMD, (WPARAM)10, (LPARAM)volAbs);
@@ -2455,15 +3185,15 @@ LRESULT MpAddonsOnTransportCmd(CMediaPlayerDlg* mpDlg, WPARAM wParam, LPARAM lPa
 			MpRemoteSyncEqUi();
 		}
 		break;
-	case 20: // scratch begin
+	case 23: // scratch begin
 		g_mpRemoteScratchLastMs = 0;
 		MpDjScratchBegin();
 		break;
-	case 21: // scratch end
+	case 24: // scratch end
 		MpDjScratchEnd();
 		g_mpRemoteScratchLastMs = 0;
 		break;
-	case 22: // scratch delta (centidegrees)
+	case 25: // scratch delta (centidegrees)
 		{
 			const float d = (float)((int)lParam) * 0.01f;
 			const DWORD now = GetTickCount();
@@ -2491,6 +3221,42 @@ LRESULT MpAddonsOnTransportCmd(CMediaPlayerDlg* mpDlg, WPARAM wParam, LPARAM lPa
 						MpDjSeekToSliderPos(og->m_time.GetPos() + delta);
 				}
 			}
+		}
+		break;
+	case 30: // remote queue-add
+		if (mpDlg)
+			mpDlg->QueueAdd((int)lParam, FALSE);
+		break;
+	case 40: // MIDI tempo percent
+		{
+			int pct = (int)lParam;
+			if (pct < 33) pct = 33;
+			if (pct > 300) pct = 300;
+			int pos;
+			if (pct >= 100) pos = pct + 100;
+			else pos = (int)(((double)pct - 33.3) * 3.0 + 0.5);
+			if (og && og->m_tempo_sl.GetSafeHwnd()) {
+				og->m_tempo_sl.SetPos(pos);
+				tempo = pos;
+			}
+			if (mpDlg->m_tempo.GetSafeHwnd())
+				mpDlg->m_tempo.SetPos(pos);
+		}
+		break;
+	case 41: // MIDI eq low
+		{
+			int v = (int)lParam * 200 / 127;
+			if (v < 0) v = 0; if (v > 200) v = 200;
+			savedata.eq[0] = v;
+			savedata.eq[1] = v;
+		}
+		break;
+	case 42: // MIDI eq high
+		{
+			int v = (int)lParam * 200 / 127;
+			if (v < 0) v = 0; if (v > 200) v = 200;
+			savedata.eq[13] = v;
+			savedata.eq[14] = v;
 		}
 		break;
 	default: break;
@@ -3806,6 +4572,10 @@ public:
 	CCustomSliderCtrl m_eqLow, m_eqMid, m_eqHigh;
 	CCustomRangeSliderCtrl m_seek;
 	CCustomLevelMeter m_meter;
+	CCustomStatic m_micDevL;
+	CCustomComboBox m_micDev;
+	CCustomStatic m_loopDevL;
+	CCustomComboBox m_loopDev;
 	CToolTipCtrl m_tooltip;
 	int m_cueMem;
 	int m_lastCueLit;
@@ -3871,6 +4641,10 @@ protected:
 		DDX_Control(pDX, IDC_DJPAD_KILL_H, m_killH);
 		DDX_Control(pDX, IDC_DJPAD_SEEK, m_seek);
 		DDX_Control(pDX, IDC_DJPAD_METER, m_meter);
+		DDX_Control(pDX, IDC_DJPAD_MICDEV_L, m_micDevL);
+		DDX_Control(pDX, IDC_DJPAD_MICDEV, m_micDev);
+		DDX_Control(pDX, IDC_DJPAD_LOOPDEV_L, m_loopDevL);
+		DDX_Control(pDX, IDC_DJPAD_LOOPDEV, m_loopDev);
 	}
 	virtual BOOL OnInitDialog()
 	{
@@ -3935,6 +4709,10 @@ protected:
 			L"필터", L"滤镜", L"مرشح", L"Фильтр", L"Filter", L"Filtro", L"Filter", L"Filtr", L"Filtre"));
 		SetDlgItemText(IDC_DJPAD_VOL_L, LL14(L"音量", L"Vol", L"Vol", L"Vol", L"Vol",
 			L"볼륨", L"音量", L"صوت", L"Громк.", L"Laut", L"Vol", L"Vol", L"Glosn.", L"Ses"));
+		AudioMicDevFillCombo(m_micDev);
+		AudioLoopDevFillCombo(m_loopDev);
+		m_micDevL.SetWindowText(LL14(L"マイク", L"Mic", L"Micro", L"Micro", L"Micro", L"마이크", L"麦克风", L"ميكروفون", L"Микрофон", L"Mikrofon", L"Microfone", L"Microfoon", L"Mikrofon", L"Mikrofon"));
+		m_loopDevL.SetWindowText(LL14(L"システム", L"System", L"Système", L"Sistema", L"Sistema", L"시스템", L"系统", L"النظام", L"Система", L"System", L"Sistema", L"Systeem", L"System", L"Sistem"));
 		{
 			int fx = savedata.mpDjScratchEffect;
 			int spd = savedata.mpDjScratchSpeed;
@@ -4297,7 +5075,7 @@ protected:
 		if (mp && mp->m_wavePeakN > 0)
 			m_seek.SetWavePeaks(mp->m_wavePeaks, mp->m_wavePeakN);
 		if (savedata.mpDetectedBpm > 0)
-			m_seek.SetBeatGrid((float)savedata.mpDetectedBpm, savedata.mpBeatGrid ? TRUE : FALSE);
+			m_seek.SetBeatGrid((float)savedata.mpDetectedBpm, savedata.mpBeatGrid ? TRUE : FALSE, savedata.mpBeatGridOffsetMs);
 		int frames[8];
 		int n = ProAudio_CueCount();
 		if (n > 8) n = 8;
@@ -4347,6 +5125,8 @@ protected:
 	}
 	afx_msg void OnDestroy()
 	{
+		AudioMicDevUnregisterCombo(&m_micDev);
+		AudioLoopDevUnregisterCombo(&m_loopDev);
 		KillTimer(1);
 		MpDjScratchShutdown();
 		CCustomBlurDialogBase::OnDestroy();
@@ -4503,7 +5283,10 @@ protected:
 		menu.AddSeparator();
 		menu.AddCommand(1,
 			LL14(L"閉じる", L"Close", L"Fermer", L"Chiudi", L"Cerrar", L"닫기", L"关闭", L"إغلاق", L"Закрыть", L"Schliessen", L"Fechar", L"Sluiten", L"Zamknij", L"Kapat"));
+		AudioMicDevAppendMenu(menu);
+		AudioLoopDevAppendMenu(menu);
 		const UINT cmd = menu.Track(point, this);
+		if (AudioMicDevHandleMenuCmd(cmd) || AudioLoopDevHandleMenuCmd(cmd)) return;
 		if (cmd == 1) {
 			if (!s_djPadAppExit) {
 				savedata.mpDjPadwindow = 0;
@@ -4713,6 +5496,8 @@ protected:
 		RefreshKillLook();
 		MpPersistSavedataQuick();
 	}
+	afx_msg void OnMicDev() { AudioMicDevApplyFromCombo(m_micDev); }
+	afx_msg void OnLoopDev() { AudioLoopDevApplyFromCombo(m_loopDev); }
 	DECLARE_MESSAGE_MAP()
 };
 
@@ -4758,6 +5543,8 @@ BEGIN_MESSAGE_MAP(CMpDjPadDlg, CCustomBlurDialogBase)
 	ON_BN_CLICKED(IDC_DJPAD_KILL_L, &CMpDjPadDlg::OnKillL)
 	ON_BN_CLICKED(IDC_DJPAD_KILL_M, &CMpDjPadDlg::OnKillM)
 	ON_BN_CLICKED(IDC_DJPAD_KILL_H, &CMpDjPadDlg::OnKillH)
+	ON_CBN_SELCHANGE(IDC_DJPAD_MICDEV, &CMpDjPadDlg::OnMicDev)
+	ON_CBN_SELCHANGE(IDC_DJPAD_LOOPDEV, &CMpDjPadDlg::OnLoopDev)
 END_MESSAGE_MAP()
 
 void CMpDjPadDlg::ApplyRemoteDeckFromSavedata()
@@ -5085,6 +5872,7 @@ public:
 	enum { IDD = IDD_MP_REMOTE };
 	CMpRemoteDlg(CWnd* p = NULL) : CCustomBlurDialogBase(IDD, p) {}
 	CCustomCheckBox m_enable;
+	CCustomCheckBox m_aac;
 	CCustomEdit m_port;
 	CCustomStatic m_url;
 	CCustomStandardButton m_open;
@@ -5093,6 +5881,7 @@ protected:
 	{
 		CCustomBlurDialogBase::DoDataExchange(pDX);
 		DDX_Control(pDX, IDC_REMOTE_ENABLE, m_enable);
+		DDX_Control(pDX, IDC_REMOTE_AAC, m_aac);
 		DDX_Control(pDX, IDC_REMOTE_PORT, m_port);
 		DDX_Control(pDX, IDC_REMOTE_URL, m_url);
 		DDX_Control(pDX, IDC_REMOTE_OPEN, m_open);
@@ -5120,23 +5909,30 @@ protected:
 		SetWindowText(LL14(L"ローカルリモート", L"Local remote", L"Telecommande locale", L"Remote locale", L"Remoto local",
 			L"로컬 리모트", L"本地遥控", L"تحكم محلي", L"Локальный пульт", L"Lokalfernbedienung",
 			L"Remoto local", L"Lokale bediening", L"Pilot lokalny", L"Yerel uzaktan"));
-		m_enable.SetWindowText(LL14(L"Wi-Fi / LAN で HTTP（最大3台）", L"HTTP on Wi-Fi/LAN (max 3)", L"HTTP Wi-Fi/LAN (max 3)", L"HTTP Wi-Fi/LAN (max 3)", L"HTTP Wi-Fi/LAN (máx. 3)",
-			L"Wi-Fi/LAN HTTP (최대 3)", L"Wi-Fi/LAN HTTP（最多3）", L"HTTP عبر Wi-Fi/LAN (حد 3)", L"HTTP по Wi-Fi/LAN (до 3)", L"HTTP im WLAN/LAN (max. 3)",
-			L"HTTP no Wi-Fi/LAN (máx. 3)", L"HTTP op Wi-Fi/LAN (max 3)", L"HTTP w Wi-Fi/LAN (max 3)", L"Wi-Fi/LAN HTTP (en fazla 3)"));
+		m_enable.SetWindowText(LL14(L"Wi-Fi / LAN で HTTP（最大6台）", L"HTTP on Wi-Fi/LAN (max 6)", L"HTTP Wi-Fi/LAN (max 6)", L"HTTP Wi-Fi/LAN (max 6)", L"HTTP Wi-Fi/LAN (máx. 6)",
+			L"Wi-Fi/LAN HTTP (최대 6)", L"Wi-Fi/LAN HTTP（最多6）", L"HTTP عبر Wi-Fi/LAN (حد 6)", L"HTTP по Wi-Fi/LAN (до 6)", L"HTTP im WLAN/LAN (max. 6)",
+			L"HTTP no Wi-Fi/LAN (máx. 6)", L"HTTP op Wi-Fi/LAN (max 6)", L"HTTP w Wi-Fi/LAN (max 6)", L"Wi-Fi/LAN HTTP (en fazla 6)"));
+		m_aac.SetWindowText(LL14(L"AAC をスマホ／PC で聴けるようにする", L"Allow AAC listen on phone/PC", L"Autoriser l'ecoute AAC (tel/PC)", L"Consenti ascolto AAC (tel/PC)", L"Permitir escuchar AAC (movil/PC)",
+			L"폰/PC에서 AAC 청취 허용", L"允许在手机/PC 收听 AAC", L"السماح باستماع AAC على الهاتف/الكمبيوتر", L"Разрешить слушать AAC на телефоне/ПК", L"AAC-Hören auf Telefon/PC erlauben",
+			L"Permitir ouvir AAC no telemovel/PC", L"AAC beluisteren op telefoon/pc toestaan", L"Zezwol na sluchanie AAC na telefonie/PC", L"Telefon/PC'de AAC dinlemeye izin ver"));
 		SetDlgItemText(IDC_REMOTE_PORT_L, LL14(L"ポート", L"Port", L"Port", L"Porta", L"Puerto",
 			L"포트", L"端口", L"منفذ", L"Порт", L"Port", L"Porta", L"Poort", L"Port", L"Port"));
 		m_open.SetWindowText(LL14(L"ブラウザで開く", L"Open in browser", L"Ouvrir dans le navigateur", L"Apri nel browser", L"Abrir en el navegador",
 			L"브라우저에서 열기", L"在浏览器打开", L"فتح في المتصفح", L"Открыть в браузере", L"Im Browser öffnen",
 			L"Abrir no navegador", L"Openen in browser", L"Otworz w przegladarce", L"Tarayicida ac"));
 		m_enable.SetCheck(savedata.mpRemoteOn ? BST_CHECKED : BST_UNCHECKED);
+		m_aac.SetCheck(savedata.mpRemoteAac ? BST_CHECKED : BST_UNCHECKED);
 		CString p; p.Format(_T("%d"), savedata.mpRemotePort);
 		m_port.SetWindowText(p);
 		RefreshUrlLabel();
 		m_open.SetGradation(RGB(220, 240, 255), RGB(160, 200, 240), 0, TRUE);
 		CCustomControlUtility::BeginDialogToolTip(m_tooltip, this, TTS_NOPREFIX);
-		m_tooltip.AddTool(&m_enable, LL14(L"同じ Wi-Fi のスマホ／PC から再生操作できる HTTP サーバ（同時3接続まで）。", L"HTTP server for phones/PCs on the same Wi-Fi (up to 3 clients).", L"Serveur HTTP pour telephones/PC sur le meme Wi-Fi (max 3).", L"Server HTTP per telefoni/PC sulla stessa Wi-Fi (max 3).", L"Servidor HTTP para moviles/PC en la misma Wi-Fi (máx. 3).",
-			L"같은 Wi-Fi의 폰/PC에서 조작하는 HTTP 서버(최대 3).", L"同一 Wi-Fi 下手机/PC 控制的 HTTP 服务器（最多3）。", L"خادم HTTP للهواتف/أجهزة الكمبيوتر على نفس Wi-Fi (حد 3).", L"HTTP-сервер для телефонов/ПК в той же Wi-Fi (до 3).", L"HTTP-Server für Telefone/PCs im gleichen WLAN (max. 3).",
-			L"Servidor HTTP para telemoveis/PCs na mesma Wi-Fi (máx. 3).", L"HTTP-server voor telefoons/pc's op hetzelfde Wi-Fi (max 3).", L"Serwer HTTP dla telefonow/PC w tej samej Wi-Fi (max 3).", L"Ayni Wi-Fi'deki telefon/PC icin HTTP sunucusu (en fazla 3)."));
+		m_tooltip.AddTool(&m_enable, LL14(L"同じ Wi-Fi のスマホ／PC から再生操作できる HTTP サーバ（同時6接続まで）。", L"HTTP server for phones/PCs on the same Wi-Fi (up to 6 clients).", L"Serveur HTTP pour telephones/PC sur le meme Wi-Fi (max 6).", L"Server HTTP per telefoni/PC sulla stessa Wi-Fi (max 6).", L"Servidor HTTP para moviles/PC en la misma Wi-Fi (máx. 6).",
+			L"같은 Wi-Fi의 폰/PC에서 조작하는 HTTP 서버(최대 6).", L"同一 Wi-Fi 下手机/PC 控制的 HTTP 服务器（最多6）。", L"خادم HTTP للهواتف/أجهزة الكمبيوتر على نفس Wi-Fi (حد 6).", L"HTTP-сервер для телефонов/ПК в той же Wi-Fi (до 6).", L"HTTP-Server für Telefone/PCs im gleichen WLAN (max. 6).",
+			L"Servidor HTTP para telemoveis/PCs na mesma Wi-Fi (máx. 6).", L"HTTP-server voor telefoons/pc's op hetzelfde Wi-Fi (max 6).", L"Serwer HTTP dla telefonow/PC w tej samej Wi-Fi (max 6).", L"Ayni Wi-Fi'deki telefon/PC icin HTTP sunucusu (en fazla 6)."));
+		m_tooltip.AddTool(&m_aac, LL14(L"リモコンの「聴く」で再生中の音を AAC 圧縮して送ります（遅延約0.5〜1秒）。接続がある間だけエンコードします。", L"Remote \"Listen\" sends playing audio as AAC (~0.5–1s latency). Encodes only while someone is connected.", L"\"Ecouter\" envoie l'audio en AAC (latence ~0,5–1 s). Encode seulement si connecte.", L"\"Ascolta\" invia l'audio in AAC (latenza ~0,5–1 s). Codifica solo se connesso.", L"\"Escuchar\" envia el audio en AAC (latencia ~0,5–1 s). Codifica solo si hay conexion.",
+			L"리모트의 \"듣기\"로 재생음을 AAC로 보냅니다(지연 약 0.5–1초). 연결 중에만 인코딩.", L"遥控「收听」以 AAC 发送播放音频（延迟约 0.5–1 秒）。仅在有连接时编码。", L"\"استماع\" يرسل الصوت كـ AAC (تأخير ~0.5–1 ث). يُرمَّز أثناء الاتصال فقط.", L"«Слушать» шлёт звук как AAC (~0,5–1 с). Кодирует только при подключении.", L"„Hören“ sendet Audio als AAC (~0,5–1 s Latenz). Kodiert nur bei Verbindung.",
+			L"\"Ouvir\" envia o audio em AAC (latencia ~0,5–1 s). Codifica so com ligacao.", L"\"Luisteren\" stuurt audio als AAC (~0,5–1 s). Encodeert alleen bij verbinding.", L"\"Sluchaj\" wysyla dzwiek jako AAC (~0,5–1 s). Koduje tylko przy polaczeniu.", L"\"Dinle\" sesi AAC olarak gonderir (~0,5–1 sn). Yalniz bagliyken kodlar."));
 		m_tooltip.AddTool(&m_port, LL14(L"待ち受けポート (1024–65535)。", L"Listen port (1024–65535).", L"Port d'ecoute (1024–65535).", L"Porta di ascolto (1024–65535).", L"Puerto de escucha (1024–65535).",
 			L"수신 포트 (1024–65535).", L"监听端口 (1024–65535)。", L"منفذ الاستماع (1024–65535).", L"Порт прослушивания (1024–65535).", L"Listenport (1024–65535).",
 			L"Porta de escuta (1024–65535).", L"Luisterpoort (1024–65535).", L"Port nasluchu (1024–65535).", L"Dinleme portu (1024–65535)."));
@@ -5158,6 +5954,7 @@ protected:
 	afx_msg void OnDestroy()
 	{
 		savedata.mpRemoteOn = m_enable.GetCheck() ? 1 : 0;
+		savedata.mpRemoteAac = m_aac.GetCheck() ? 1 : 0;
 		CString p; m_port.GetWindowText(p);
 		int port = _ttoi(p);
 		if (port >= 1024 && port <= 65535) savedata.mpRemotePort = port;
@@ -5193,6 +5990,7 @@ protected:
 			point.x = r.left + 40; point.y = r.top + 40;
 		}
 		const BOOL enabled = m_enable.GetCheck() == BST_CHECKED;
+		const BOOL aacOn = m_aac.GetCheck() == BST_CHECKED;
 		CCustomPopupMenu menu;
 		menu.SetAeroMode(FALSE);
 		menu.AddCheck(10,
@@ -5200,6 +5998,11 @@ protected:
 				L"리모트 사용", L"启用遥控", L"تفعيل التحكم", L"Включить пульт", L"Remote aktivieren",
 				L"Ativar remoto", L"Remote inschakelen", L"Wlacz pilota", L"Uzaktan etkin"),
 			enabled);
+		menu.AddCheck(13,
+			LL14(L"AAC 聴く", L"AAC listen", L"Ecoute AAC", L"Ascolto AAC", L"Escuchar AAC",
+				L"AAC 듣기", L"AAC 收听", L"استماع AAC", L"Слушать AAC", L"AAC hören",
+				L"Ouvir AAC", L"AAC luisteren", L"Sluchaj AAC", L"AAC dinle"),
+			aacOn);
 		menu.AddCommand(11,
 			LL14(L"URL をコピー", L"Copy URL", L"Copier l'URL", L"Copia URL", L"Copiar URL",
 				L"URL 복사", L"复制 URL", L"نسخ الرابط", L"Копировать URL", L"URL kopieren",
@@ -5221,6 +6024,11 @@ protected:
 			MpPersistSavedataQuick();
 			if (mp) MpRemoteEnsureRunning(mp->GetSafeHwnd());
 			RefreshUrlLabel();
+		} else if (cmd == 13) {
+			const BOOL next = !aacOn;
+			m_aac.SetCheck(next ? BST_CHECKED : BST_UNCHECKED);
+			savedata.mpRemoteAac = next ? 1 : 0;
+			MpPersistSavedataQuick();
 		} else if (cmd == 11) {
 			RefreshUrlLabel();
 			int port = savedata.mpRemotePort;

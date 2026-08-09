@@ -1,0 +1,391 @@
+﻿#include "stdafx.h"
+#include "AudioDevSync.h"
+#include "oggDlg.h"
+#include "CCustomControl.h"
+#include "CCustomPopupMenu.h"
+#include "resource.h"
+#include <mmdeviceapi.h>
+#include <functiondiscoverykeys_devpkey.h>
+
+#pragma comment(lib, "Ole32.lib")
+
+extern void MpPersistSavedataQuick();
+extern void MpMicMixRestartIfRunning();
+
+enum { kComboRegMax = 24 };
+
+static TCHAR s_micIds[AUDIODEV_MAX][256];
+static CString s_micNames[AUDIODEV_MAX];
+static int s_micCnt = 0;
+static int s_micReady = 0;
+
+static TCHAR s_loopIds[AUDIODEV_MAX][256];
+static CString s_loopNames[AUDIODEV_MAX];
+static int s_loopCnt = 0;
+static int s_loopReady = 0;
+
+static CCustomComboBox* s_micCombos[kComboRegMax];
+static int s_micComboN = 0;
+static CCustomComboBox* s_loopCombos[kComboRegMax];
+static int s_loopComboN = 0;
+
+static int s_micGuard = 0;
+static int s_loopGuard = 0;
+
+static CString AudioDevDefaultMicLabel()
+{
+	return LL14(L"(既定の録音デバイス)", L"(Default recording device)", L"(Périphérique d'enregistrement par défaut)", L"(Dispositivo di registrazione predefinito)", L"(Dispositivo de grabación predeterminado)", L"(기본 녹음 장치)", L"(默认录制设备)", L"(جهاز التسجيل الافتراضي)", L"(Устройство записи по умолчанию)", L"(Standardaufnahmegerät)", L"(Dispositivo de gravação padrão)", L"(Standaard opnameapparaat)", L"(Domyślne urządzenie nagrywania)", L"(Varsayılan kayıt aygıtı)");
+}
+
+static CString AudioDevDefaultLoopLabel()
+{
+	return LL14(L"(既定の再生デバイス)", L"(Default playback device)", L"(Périphérique de lecture par défaut)", L"(Dispositivo di riproduzione predefinito)", L"(Dispositivo de reproducción predeterminado)", L"(기본 재생 장치)", L"(默认播放设备)", L"(جهاز التشغيل الافتراضي)", L"(Устройство воспроизведения по умолчанию)", L"(Standardwiedergabegerät)", L"(Dispositivo de reprodução padrão)", L"(Standaard afspeelapparaat)", L"(Domyślne urządzenie odtwarzania)", L"(Varsayılan oynatma aygıtı)");
+}
+
+static void RegAdd(CCustomComboBox** arr, int* pn, CCustomComboBox* cb)
+{
+	if (!cb || !cb->GetSafeHwnd()) return;
+	for (int i = 0; i < *pn; ++i) {
+		if (arr[i] == cb) return;
+	}
+	if (*pn >= kComboRegMax) return;
+	arr[(*pn)++] = cb;
+}
+
+static void RegDel(CCustomComboBox** arr, int* pn, CCustomComboBox* cb)
+{
+	if (!cb) return;
+	for (int i = 0; i < *pn; ++i) {
+		if (arr[i] != cb) continue;
+		for (int j = i; j < *pn - 1; ++j) arr[j] = arr[j + 1];
+		(*pn)--;
+		return;
+	}
+}
+
+static void EnumEndpoints(EDataFlow flow, TCHAR ids[][256], CString* names, int* pCnt)
+{
+	*pCnt = 0;
+	ids[0][0] = 0;
+	names[0] = (flow == eCapture) ? AudioDevDefaultMicLabel() : AudioDevDefaultLoopLabel();
+	*pCnt = 1;
+
+	IMMDeviceEnumerator* enumer = NULL;
+	IMMDeviceCollection* coll = NULL;
+	HRESULT hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), NULL, CLSCTX_ALL,
+		__uuidof(IMMDeviceEnumerator), (void**)&enumer);
+	if (FAILED(hr) || !enumer) return;
+	hr = enumer->EnumAudioEndpoints(flow, DEVICE_STATE_ACTIVE, &coll);
+	if (SUCCEEDED(hr) && coll) {
+		UINT cnt = 0;
+		coll->GetCount(&cnt);
+		for (UINT i = 0; i < cnt && *pCnt < AUDIODEV_MAX; ++i) {
+			IMMDevice* dev = NULL;
+			if (FAILED(coll->Item(i, &dev)) || !dev) continue;
+			LPWSTR id = NULL;
+			if (FAILED(dev->GetId(&id)) || !id) { dev->Release(); continue; }
+			IPropertyStore* props = NULL;
+			CString name = id;
+			if (SUCCEEDED(dev->OpenPropertyStore(STGM_READ, &props)) && props) {
+				PROPVARIANT var;
+				PropVariantInit(&var);
+				if (SUCCEEDED(props->GetValue(PKEY_Device_FriendlyName, &var)) && var.vt == VT_LPWSTR && var.pwszVal)
+					name = var.pwszVal;
+				PropVariantClear(&var);
+				props->Release();
+			}
+			_tcsncpy(ids[*pCnt], id, 255);
+			ids[*pCnt][255] = 0;
+			names[*pCnt] = name;
+			CoTaskMemFree(id);
+			dev->Release();
+			(*pCnt)++;
+		}
+		coll->Release();
+	}
+	enumer->Release();
+}
+
+static int FindSelById(const TCHAR ids[][256], int cnt, LPCTSTR wantId, int wantCur)
+{
+	int sel = 0;
+	if (wantId && wantId[0]) {
+		for (int i = 1; i < cnt; ++i) {
+			if (_tcscmp(ids[i], wantId) == 0) { sel = i; break; }
+		}
+	} else if (wantCur > 0 && wantCur < cnt) {
+		sel = wantCur;
+	}
+	return sel;
+}
+
+static void FillComboFrom(CCustomComboBox& cb, const CString* names, int cnt, int sel)
+{
+	if (!cb.GetSafeHwnd()) return;
+	cb.ResetContent();
+	for (int i = 0; i < cnt; ++i)
+		cb.AddString(names[i]);
+	if (sel < 0 || sel >= cnt) sel = 0;
+	cb.SetCurSelPhysical(sel);
+}
+
+static void SyncComboSelOnly(CCustomComboBox& cb, int sel)
+{
+	if (!cb.GetSafeHwnd()) return;
+	if (cb.GetCount() <= 0) return;
+	if (sel < 0) sel = 0;
+	if (sel >= cb.GetCount()) sel = 0;
+	if (cb.GetCurSelPhysical() != sel)
+		cb.SetCurSelPhysical(sel);
+}
+
+// ---- Mic ----
+
+void AudioMicDevRefresh()
+{
+	EnumEndpoints(eCapture, s_micIds, s_micNames, &s_micCnt);
+	s_micReady = 1;
+	int sel = FindSelById(s_micIds, s_micCnt, savedata.mic_device, savedata.mic_device_cur);
+	savedata.mic_device_cur = sel;
+	_tcsncpy(savedata.mic_device, s_micIds[sel], _countof(savedata.mic_device) - 1);
+	savedata.mic_device[_countof(savedata.mic_device) - 1] = 0;
+}
+
+int AudioMicDevCount()
+{
+	if (!s_micReady) AudioMicDevRefresh();
+	return s_micCnt;
+}
+
+LPCTSTR AudioMicDevId(int i)
+{
+	if (!s_micReady) AudioMicDevRefresh();
+	if (i < 0 || i >= s_micCnt) return L"";
+	return s_micIds[i];
+}
+
+CString AudioMicDevName(int i)
+{
+	if (!s_micReady) AudioMicDevRefresh();
+	if (i < 0 || i >= s_micCnt) return CString();
+	return s_micNames[i];
+}
+
+int AudioMicDevCurSel()
+{
+	if (!s_micReady) AudioMicDevRefresh();
+	return FindSelById(s_micIds, s_micCnt, savedata.mic_device, savedata.mic_device_cur);
+}
+
+void AudioMicDevRegisterCombo(CCustomComboBox* cb) { RegAdd(s_micCombos, &s_micComboN, cb); }
+void AudioMicDevUnregisterCombo(CCustomComboBox* cb) { RegDel(s_micCombos, &s_micComboN, cb); }
+
+void AudioMicDevFillCombo(CCustomComboBox& cb)
+{
+	if (!s_micReady) AudioMicDevRefresh();
+	FillComboFrom(cb, s_micNames, s_micCnt, AudioMicDevCurSel());
+	AudioMicDevRegisterCombo(&cb);
+}
+
+void AudioMicDevSyncComboSel(CCustomComboBox& cb)
+{
+	SyncComboSelOnly(cb, AudioMicDevCurSel());
+}
+
+void AudioMicDevSyncAllUi()
+{
+	const int sel = AudioMicDevCurSel();
+	for (int i = 0; i < s_micComboN; ++i) {
+		CCustomComboBox* p = s_micCombos[i];
+		if (!p || !p->GetSafeHwnd()) continue;
+		// 空なら再 Fill（初回同期や再作成）
+		if (p->GetCount() != s_micCnt)
+			FillComboFrom(*p, s_micNames, s_micCnt, sel);
+		else
+			SyncComboSelOnly(*p, sel);
+	}
+}
+
+void AudioMicDevApplySel(int sel)
+{
+	if (s_micGuard) return;
+	if (!s_micReady) AudioMicDevRefresh();
+	if (sel < 0 || sel >= s_micCnt) sel = 0;
+	savedata.mic_device_cur = sel;
+	_tcsncpy(savedata.mic_device, s_micIds[sel], _countof(savedata.mic_device) - 1);
+	savedata.mic_device[_countof(savedata.mic_device) - 1] = 0;
+	// MRU: 先頭へ
+	{
+		TCHAR cur[256];
+		_tcsncpy(cur, savedata.mic_device, 255); cur[255] = 0;
+		for (int i = 0; i < 2; ++i) {
+			if (_tcsicmp(savedata.mpMicMru[i], cur) == 0) {
+				// 詰め
+				for (int j = i; j < 2; ++j)
+					_tcscpy_s(savedata.mpMicMru[j], savedata.mpMicMru[j + 1]);
+				savedata.mpMicMru[2][0] = 0;
+				break;
+			}
+		}
+		for (int i = 2; i > 0; --i)
+			_tcscpy_s(savedata.mpMicMru[i], savedata.mpMicMru[i - 1]);
+		_tcscpy_s(savedata.mpMicMru[0], cur);
+	}
+	MpMicMixRestartIfRunning();
+	MpPersistSavedataQuick();
+	s_micGuard = 1;
+	AudioMicDevSyncAllUi();
+	s_micGuard = 0;
+}
+
+void AudioMicDevApplyFromCombo(CCustomComboBox& cb)
+{
+	if (s_micGuard) return;
+	if (!cb.GetSafeHwnd()) return;
+	int sel = cb.GetCurSelPhysical();
+	AudioMicDevApplySel(sel);
+}
+
+void AudioMicDevAppendMenu(CCustomPopupMenu& menu)
+{
+	if (!s_micReady) AudioMicDevRefresh();
+	CCustomPopupMenu* sub = menu.AddSubMenu(
+		LL14(L"マイク端末", L"Microphone", L"Microphone", L"Microfono", L"Micrófono",
+			L"마이크", L"麦克风", L"الميكروفون", L"Микрофон", L"Mikrofon",
+			L"Microfone", L"Microfoon", L"Mikrofon", L"Mikrofon"));
+	if (!sub) return;
+	const int cur = AudioMicDevCurSel();
+	for (int i = 0; i < s_micCnt; ++i) {
+		sub->AddCheck((UINT)(ID_AUDIO_MIC_BASE + i), s_micNames[i], i == cur);
+	}
+}
+
+BOOL AudioMicDevHandleMenuCmd(UINT cmd)
+{
+	if (cmd < ID_AUDIO_MIC_BASE || cmd > (ID_AUDIO_MIC_BASE + AUDIODEV_MAX - 1)) return FALSE;
+	AudioMicDevApplySel((int)(cmd - ID_AUDIO_MIC_BASE));
+	return TRUE;
+}
+
+// ---- Loop ----
+
+void AudioLoopDevRefresh()
+{
+	EnumEndpoints(eRender, s_loopIds, s_loopNames, &s_loopCnt);
+	s_loopReady = 1;
+	int sel = FindSelById(s_loopIds, s_loopCnt, savedata.loop_device, savedata.loop_device_cur);
+	savedata.loop_device_cur = sel;
+	_tcsncpy(savedata.loop_device, s_loopIds[sel], _countof(savedata.loop_device) - 1);
+	savedata.loop_device[_countof(savedata.loop_device) - 1] = 0;
+}
+
+int AudioLoopDevCount()
+{
+	if (!s_loopReady) AudioLoopDevRefresh();
+	return s_loopCnt;
+}
+
+LPCTSTR AudioLoopDevId(int i)
+{
+	if (!s_loopReady) AudioLoopDevRefresh();
+	if (i < 0 || i >= s_loopCnt) return L"";
+	return s_loopIds[i];
+}
+
+CString AudioLoopDevName(int i)
+{
+	if (!s_loopReady) AudioLoopDevRefresh();
+	if (i < 0 || i >= s_loopCnt) return CString();
+	return s_loopNames[i];
+}
+
+int AudioLoopDevCurSel()
+{
+	if (!s_loopReady) AudioLoopDevRefresh();
+	return FindSelById(s_loopIds, s_loopCnt, savedata.loop_device, savedata.loop_device_cur);
+}
+
+void AudioLoopDevRegisterCombo(CCustomComboBox* cb) { RegAdd(s_loopCombos, &s_loopComboN, cb); }
+void AudioLoopDevUnregisterCombo(CCustomComboBox* cb) { RegDel(s_loopCombos, &s_loopComboN, cb); }
+
+void AudioLoopDevFillCombo(CCustomComboBox& cb)
+{
+	if (!s_loopReady) AudioLoopDevRefresh();
+	FillComboFrom(cb, s_loopNames, s_loopCnt, AudioLoopDevCurSel());
+	AudioLoopDevRegisterCombo(&cb);
+}
+
+void AudioLoopDevSyncComboSel(CCustomComboBox& cb)
+{
+	SyncComboSelOnly(cb, AudioLoopDevCurSel());
+}
+
+void AudioLoopDevSyncAllUi()
+{
+	const int sel = AudioLoopDevCurSel();
+	for (int i = 0; i < s_loopComboN; ++i) {
+		CCustomComboBox* p = s_loopCombos[i];
+		if (!p || !p->GetSafeHwnd()) continue;
+		if (p->GetCount() != s_loopCnt)
+			FillComboFrom(*p, s_loopNames, s_loopCnt, sel);
+		else
+			SyncComboSelOnly(*p, sel);
+	}
+}
+
+void AudioLoopDevApplySel(int sel)
+{
+	if (s_loopGuard) return;
+	if (!s_loopReady) AudioLoopDevRefresh();
+	if (sel < 0 || sel >= s_loopCnt) sel = 0;
+	savedata.loop_device_cur = sel;
+	_tcsncpy(savedata.loop_device, s_loopIds[sel], _countof(savedata.loop_device) - 1);
+	savedata.loop_device[_countof(savedata.loop_device) - 1] = 0;
+	{
+		TCHAR cur[256];
+		_tcsncpy(cur, savedata.loop_device, 255); cur[255] = 0;
+		for (int i = 0; i < 2; ++i) {
+			if (_tcsicmp(savedata.mpLoopMru[i], cur) == 0) {
+				for (int j = i; j < 2; ++j)
+					_tcscpy_s(savedata.mpLoopMru[j], savedata.mpLoopMru[j + 1]);
+				savedata.mpLoopMru[2][0] = 0;
+				break;
+			}
+		}
+		for (int i = 2; i > 0; --i)
+			_tcscpy_s(savedata.mpLoopMru[i], savedata.mpLoopMru[i - 1]);
+		_tcscpy_s(savedata.mpLoopMru[0], cur);
+	}
+	MpPersistSavedataQuick();
+	s_loopGuard = 1;
+	AudioLoopDevSyncAllUi();
+	s_loopGuard = 0;
+}
+
+void AudioLoopDevApplyFromCombo(CCustomComboBox& cb)
+{
+	if (s_loopGuard) return;
+	if (!cb.GetSafeHwnd()) return;
+	AudioLoopDevApplySel(cb.GetCurSelPhysical());
+}
+
+void AudioLoopDevAppendMenu(CCustomPopupMenu& menu)
+{
+	if (!s_loopReady) AudioLoopDevRefresh();
+	CCustomPopupMenu* sub = menu.AddSubMenu(
+		LL14(L"システム音端末", L"System audio device", L"Périphérique son système", L"Dispositivo audio sistema", L"Dispositivo audio sistema",
+			L"시스템 소리 장치", L"系统声音设备", L"جهاز صوت النظام", L"Устройство системного звука", L"Systemton-Gerät",
+			L"Dispositivo de áudio do sistema", L"Systeemaudio-apparaat", L"Urządzenie dźwięku systemu", L"Sistem sesi aygıtı"));
+	if (!sub) return;
+	const int cur = AudioLoopDevCurSel();
+	for (int i = 0; i < s_loopCnt; ++i) {
+		sub->AddCheck((UINT)(ID_AUDIO_LOOP_BASE + i), s_loopNames[i], i == cur);
+	}
+}
+
+BOOL AudioLoopDevHandleMenuCmd(UINT cmd)
+{
+	if (cmd < ID_AUDIO_LOOP_BASE || cmd > ID_AUDIO_LOOP_LAST) return FALSE;
+	AudioLoopDevApplySel((int)(cmd - ID_AUDIO_LOOP_BASE));
+	return TRUE;
+}

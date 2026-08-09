@@ -50,11 +50,12 @@ static bool SongParams_IsStopping()
 #else
 #define SONGPARAM_DAT_NAME "oggYSEDbgm_AudioData.dat"
 #endif
-static const int SONGPARAM_FILE_VERSION = 3;
+static const int SONGPARAM_FILE_VERSION = 4;
 // ver1 レコード末尾(mode/ret2 無し)のサイズ
 static const size_t SONGPARAM_V1_SIZE = offsetof(SongParam, mode);
 // ver2 レコード末尾(BPM 無し)のサイズ
 static const size_t SONGPARAM_V2_SIZE = offsetof(SongParam, detectedBpm);
+static const size_t SONGPARAM_V3_SIZE = offsetof(SongParam, keyRoot);
 
 // ---- メモリ内テーブル(g_cs で保護) ----
 // g_tbl: レコード本体(ファイルI/O用)。順序は問わない。
@@ -180,6 +181,8 @@ static bool ParamsEqual(const SongParam& a, const SongParam& b)
 	if (a.analyzerspecstyle != b.analyzerspecstyle) return false;
 	if (a.detectedBpm != b.detectedBpm || a.beatGrid != b.beatGrid) return false;
 	for (int i = 0; i < 3; i++) if (a.bpmCand[i] != b.bpmCand[i]) return false;
+	if (a.keyRoot != b.keyRoot || a.keyMinor != b.keyMinor || a.camelot != b.camelot) return false;
+	if (a.beatGridOffsetMs != b.beatGridOffsetMs) return false;
 	return true;
 }
 
@@ -216,6 +219,10 @@ static void SnapshotCurrent(SongParam& p)
 	p.bpmCand[1] = savedata.mpBpmCand[1];
 	p.bpmCand[2] = savedata.mpBpmCand[2];
 	p.beatGrid = savedata.mpBeatGrid ? 1 : 0;
+	p.keyRoot = savedata.mpKeyRoot;
+	p.keyMinor = savedata.mpKeyMinor ? 1 : 0;
+	p.camelot = savedata.mpCamelot;
+	p.beatGridOffsetMs = savedata.mpBeatGridOffsetMs;
 }
 
 // プレイリストの fol / filen をキー用に整える。
@@ -372,9 +379,14 @@ void SongParams_LoadFile()
 		for (int i = 0; i < cnt; i++) {
 			SongParam e;
 			ZeroMemory(&e, sizeof(e));
-			if (ver >= 3) {
+			if (ver >= 4) {
 				UINT got = f.Read(&e, sizeof(SongParam));
 				if (got != sizeof(SongParam)) break;
+			}
+			else if (ver >= 3) {
+				UINT got = f.Read(&e, (UINT)SONGPARAM_V3_SIZE);
+				if (got != (UINT)SONGPARAM_V3_SIZE) break;
+				e.keyRoot = -1; e.keyMinor = 0; e.camelot = 0; e.beatGridOffsetMs = 0;
 			}
 			else if (ver >= 2) {
 				UINT got = f.Read(&e, (UINT)SONGPARAM_V2_SIZE);
@@ -382,6 +394,7 @@ void SongParams_LoadFile()
 				e.detectedBpm = 0;
 				e.bpmCand[0] = e.bpmCand[1] = e.bpmCand[2] = 0;
 				e.beatGrid = 0;
+				e.keyRoot = -1; e.keyMinor = 0; e.camelot = 0; e.beatGridOffsetMs = 0;
 			}
 			else {
 				// ver1: mode/ret2 無し
@@ -683,6 +696,10 @@ static bool Upsert(LPCTSTR listName, LPCTSTR path, int mode, int ret2Val, const 
 		e.bpmCand[1] = params.bpmCand[1];
 		e.bpmCand[2] = params.bpmCand[2];
 		e.beatGrid = params.beatGrid ? 1 : 0;
+		e.keyRoot = params.keyRoot;
+		e.keyMinor = params.keyMinor ? 1 : 0;
+		e.camelot = params.camelot;
+		e.beatGridOffsetMs = params.beatGridOffsetMs;
 		SpReindexRowLocked((size_t)idx, oldKey);
 		return false;
 	}
@@ -723,6 +740,10 @@ void SongParams_SaveBpmForCurrentSong()
 	e.bpmCand[1] = savedata.mpBpmCand[1];
 	e.bpmCand[2] = savedata.mpBpmCand[2];
 	e.beatGrid = savedata.mpBeatGrid ? 1 : 0;
+	e.keyRoot = savedata.mpKeyRoot;
+	e.keyMinor = savedata.mpKeyMinor ? 1 : 0;
+	e.camelot = savedata.mpCamelot;
+	e.beatGridOffsetMs = savedata.mpBeatGridOffsetMs;
 	const bool added = Upsert(list, path, md, r2, e);
 	s_lastSaved = e;
 	s_baselineValid = true;
@@ -751,11 +772,49 @@ void SongParams_RestoreBpmForCurrentSong()
 	savedata.mpBpmCand[1] = ClampI(e.bpmCand[1], 0, 300);
 	savedata.mpBpmCand[2] = ClampI(e.bpmCand[2], 0, 300);
 	savedata.mpBeatGrid = e.beatGrid ? 1 : 0;
+	savedata.mpKeyRoot = e.keyRoot;
+	savedata.mpKeyMinor = e.keyMinor ? 1 : 0;
+	savedata.mpCamelot = e.camelot;
+	savedata.mpBeatGridOffsetMs = e.beatGridOffsetMs;
 	if (mp && ::IsWindow(mp->GetSafeHwnd()) && mp->m_seek.GetSafeHwnd()) {
-		mp->m_seek.SetBeatGrid((float)savedata.mpDetectedBpm, savedata.mpBeatGrid ? TRUE : FALSE);
+		mp->m_seek.SetBeatGrid((float)savedata.mpDetectedBpm, savedata.mpBeatGrid ? TRUE : FALSE, savedata.mpBeatGridOffsetMs);
 		mp->m_seek.Invalidate(FALSE);
 	}
 }
+
+void SongParams_SaveKeyGridForCurrentSong()
+{
+	if (MpPromptIsActive())
+		return;
+	CString list, path;
+	int md = 0, r2 = 0;
+	ResolveActiveOrPlayingKey(list, path, md, r2);
+	if (path.IsEmpty() || list.IsEmpty())
+		return;
+	SongParam e;
+	ZeroMemory(&e, sizeof(e));
+	const bool had = SongParams_FindCopy(list, path, md, r2, e);
+	if (!had)
+		SnapshotCurrent(e);
+	e.keyRoot = savedata.mpKeyRoot;
+	e.keyMinor = savedata.mpKeyMinor ? 1 : 0;
+	e.camelot = savedata.mpCamelot;
+	e.beatGridOffsetMs = savedata.mpBeatGridOffsetMs;
+	e.beatGrid = savedata.mpBeatGrid ? 1 : 0;
+	if (savedata.mpDetectedBpm > 0) {
+		e.detectedBpm = savedata.mpDetectedBpm;
+		e.bpmCand[0] = savedata.mpBpmCand[0];
+		e.bpmCand[1] = savedata.mpBpmCand[1];
+		e.bpmCand[2] = savedata.mpBpmCand[2];
+	}
+	const bool added = Upsert(list, path, md, r2, e);
+	s_lastSaved = e;
+	s_baselineValid = true;
+	MarkDirtyAndMaybeWrite();
+	if (added)
+		SongParams_NotifyListMarksChanged();
+}
+
 
 void SongParams_ResetAll()
 {
@@ -1038,6 +1097,10 @@ void SongParams_ApplyEntryToMain(const SongParam& e)
 		savedata.mpBpmCand[2] = ClampI(e.bpmCand[2], 0, 300);
 		savedata.mpBeatGrid = e.beatGrid ? 1 : 0;
 	}
+	savedata.mpKeyRoot = e.keyRoot;
+	savedata.mpKeyMinor = e.keyMinor ? 1 : 0;
+	savedata.mpCamelot = e.camelot;
+	savedata.mpBeatGridOffsetMs = e.beatGridOffsetMs;
 
 	if (!og || !::IsWindow(og->GetSafeHwnd()))
 		return;
@@ -1062,8 +1125,9 @@ void SongParams_ApplyEntryToMain(const SongParam& e)
 	if (og->m_AnalyzerDlg && ::IsWindow(og->m_AnalyzerDlg->GetSafeHwnd()))
 		og->m_AnalyzerDlg->ApplySpecStyleExternal(savedata.analyzerspecstyle);
 
-	if (e.detectedBpm > 0 && mp && ::IsWindow(mp->GetSafeHwnd()) && mp->m_seek.GetSafeHwnd()) {
-		mp->m_seek.SetBeatGrid((float)savedata.mpDetectedBpm, savedata.mpBeatGrid ? TRUE : FALSE);
+	if (mp && ::IsWindow(mp->GetSafeHwnd()) && mp->m_seek.GetSafeHwnd()) {
+		const float bpm = savedata.mpDetectedBpm > 0 ? (float)savedata.mpDetectedBpm : 120.f;
+		mp->m_seek.SetBeatGrid(bpm, savedata.mpBeatGrid ? TRUE : FALSE, savedata.mpBeatGridOffsetMs);
 		mp->m_seek.Invalidate(FALSE);
 	}
 }
@@ -1098,6 +1162,8 @@ void SongParams_OnSongStarted()
 
 	// BPM は「曲ごと保存」OFFでも曲単位で復元する
 	SongParams_RestoreBpmForCurrentSong();
+	extern void MpFeatOnSongStartedHooks();
+	MpFeatOnSongStartedHooks();
 
 	if (!savedata.saveSongParams) {
 		s_baselineValid = false;

@@ -246,6 +246,32 @@ BOOL COggApp::InitInstance()
 	savedata.mpMirrorDevice[0] = 0;
 	savedata.mpRemoteOn = 0;
 	savedata.mpRemotePort = 8765;
+	savedata.mpRemoteAac = 1;
+	savedata.mpKeyRoot = -1;
+	savedata.mpKeyMinor = 0;
+	savedata.mpCamelot = 0;
+	savedata.mpBeatGridOffsetMs = 0;
+	savedata.confirmDanger = 0;
+	savedata.mpFocusMode = 0;
+	savedata.mpAacProfile = 0;
+	savedata.mpMirrorGain = 100;
+	savedata.mpRemoteGain = 100;
+	savedata.mpNowPlayingFile = 0;
+	ZeroMemory(savedata.mpBotToolsUse, sizeof(savedata.mpBotToolsUse));
+	ZeroMemory(savedata.mpMicMru, sizeof(savedata.mpMicMru));
+	ZeroMemory(savedata.mpLoopMru, sizeof(savedata.mpLoopMru));
+	savedata.mpLayoutPreset = 0;
+	ZeroMemory(savedata.mpLayoutX, sizeof(savedata.mpLayoutX));
+	ZeroMemory(savedata.mpLayoutY, sizeof(savedata.mpLayoutY));
+	ZeroMemory(savedata.mpLayoutW, sizeof(savedata.mpLayoutW));
+	ZeroMemory(savedata.mpLayoutH, sizeof(savedata.mpLayoutH));
+	ZeroMemory(savedata.mpLayoutFlags, sizeof(savedata.mpLayoutFlags));
+	savedata.mpSetChapterFilter = 0;
+	savedata.mpMidiLearn = 0;
+	savedata.mpMidiMapCc[0] = savedata.mpMidiMapCc[1] = savedata.mpMidiMapCc[2] = savedata.mpMidiMapCc[3] = -1;
+	savedata.mpMirrorCueMode = 0;
+	savedata.mpTransPreset = 0;
+	savedata.mpPhraseSnapBeat = 0;
 	savedata.mpAlarmHour = -1;
 	savedata.mpAlarmMin = 0;
 	savedata.mpSsVizOn = 0;
@@ -411,6 +437,7 @@ BOOL COggApp::InitInstance()
 	savedata.cap_canvas_w = 1920;
 	savedata.cap_canvas_h = 1080;
 	savedata.cap_include_mp = 0;
+	savedata.cap_show_cursor = 0;
 	savedata.cap_monitor_idx = 0;
 	savedata.cap_effect = 0;
 	savedata.cap_fx_n = 0;
@@ -1079,6 +1106,10 @@ BOOL COggApp::InitInstance()
 		savedata.cap_include_mp = 0;
 	else if (savedata.cap_include_mp != 0)
 		savedata.cap_include_mp = 1;
+	if (datFileSize < (int)(offsetof(save, cap_show_cursor) + sizeof(savedata.cap_show_cursor)))
+		savedata.cap_show_cursor = 0;
+	else if (savedata.cap_show_cursor != 0)
+		savedata.cap_show_cursor = 1;
 	if (datFileSize < (int)(offsetof(save, cap_monitor_idx) + sizeof(savedata.cap_monitor_idx))
 		|| savedata.cap_monitor_idx < 0 || savedata.cap_monitor_idx > 63)
 		savedata.cap_monitor_idx = 0;
@@ -1331,6 +1362,36 @@ BOOL COggApp::InitInstance()
 		savedata.popupMenuAnim = 9; // 既定: オーロラ
 	else if (savedata.popupMenuAnim < 0 || savedata.popupMenuAnim > 9)
 		savedata.popupMenuAnim = 9;
+	if (datFileSize < (int)(offsetof(save, mpRemoteAac) + sizeof(savedata.mpRemoteAac)))
+		savedata.mpRemoteAac = 1;
+	else if (savedata.mpRemoteAac != 0)
+		savedata.mpRemoteAac = 1;
+	if (datFileSize < (int)(offsetof(save, mpKeyRoot) + sizeof(savedata.mpKeyRoot))) {
+		savedata.mpKeyRoot = -1;
+		savedata.mpKeyMinor = 0;
+		savedata.mpCamelot = 0;
+		savedata.mpBeatGridOffsetMs = 0;
+		savedata.confirmDanger = 0;
+		savedata.mpFocusMode = 0;
+		savedata.mpAacProfile = 0;
+		savedata.mpMirrorGain = 100;
+		savedata.mpRemoteGain = 100;
+		savedata.mpNowPlayingFile = 0;
+		ZeroMemory(savedata.mpBotToolsUse, sizeof(savedata.mpBotToolsUse));
+		ZeroMemory(savedata.mpMicMru, sizeof(savedata.mpMicMru));
+		ZeroMemory(savedata.mpLoopMru, sizeof(savedata.mpLoopMru));
+		savedata.mpLayoutPreset = 0;
+		savedata.mpSetChapterFilter = 0;
+		savedata.mpMidiLearn = 0;
+		savedata.mpMidiMapCc[0] = savedata.mpMidiMapCc[1] = savedata.mpMidiMapCc[2] = savedata.mpMidiMapCc[3] = -1;
+		savedata.mpMirrorCueMode = 0;
+		savedata.mpTransPreset = 0;
+		savedata.mpPhraseSnapBeat = 0;
+	}
+	{
+		extern void MpFeatInitDefaults();
+		MpFeatInitDefaults();
+	}
 	// 旧: cap_effect のみ → チェーン1段へ移行
 	if (savedata.cap_fx_n <= 0 && savedata.cap_effect > 0) {
 		savedata.cap_fx_n = 1;
@@ -1381,20 +1442,20 @@ BOOL COggApp::InitInstance()
 		}
 		if (!hasKlite) {
 			int abcKlite = AfxMessageBox(LL14(
-				L"動画再生に必要な K-Lite Codec Pack がインストールされていないようです。\nインストール方法の解説ページを開きますか？\n(いいえを選ぶと今後表示しません)",
-				L"K-Lite Codec Pack (needed for video playback) does not appear to be installed.\nOpen the install guide page?\n(Selecting No will not show this again.)",
-				L"K-Lite Codec Pack (necessaire a la lecture video) ne semble pas installe.\nOuvrir la page d'installation ?\n(Non = ne plus afficher.)",
-				L"K-Lite Codec Pack (necessario per i video) non sembra installato.\nAprire la guida all'installazione?\n(No = non mostrare piu.)",
-				L"K-Lite Codec Pack (necesario para video) no parece instalado.\nAbrir la pagina de instalacion?\n(No = no volver a mostrar.)",
-				L"동영상 재생에 필요한 K-Lite Codec Pack이 설치되지 않은 것 같습니다.\n설치 안내 페이지를 여시겠습니까?\n(아니요를 누르면 다시 표시하지 않습니다)",
-				L"似乎未安装视频播放所需的 K-Lite Codec Pack。\n是否打开安装说明页面？\n（选择“否”后将不再显示）",
-				L"يبدو ان K-Lite Codec Pack المطلوب للفيديو غير مثبت.\nفتح صفحة دليل التثبيت؟\n(لا = عدم الاظهار مجددا)",
-				L"Похоже, K-Lite Codec Pack (нужен для видео) не установлен.\nОткрыть страницу с инструкцией?\n(Нет = больше не показывать.)",
-				L"K-Lite Codec Pack (fuer Video noetig) scheint nicht installiert.\nInstallationsseite oeffnen?\n(Nein = nicht mehr anzeigen.)",
-				L"K-Lite Codec Pack (necessario para video) nao parece instalado.\nAbrir a pagina de instalacao?\n(Nao = nao mostrar de novo.)",
-				L"K-Lite Codec Pack (nodig voor video) lijkt niet geinstalleerd.\nInstallatiepagina openen?\n(Nee = niet meer tonen.)",
-				L"K-Lite Codec Pack (potrzebny do wideo) wydaje sie nieinstalowany.\nOtworzyc strone instalacji?\n(Nie = nie pokazuj wiecej.)",
-				L"Video icin gerekli K-Lite Codec Pack yuklu degil gibi.\nKurulum sayfasi acilsin mi?\n(Hayir = bir daha gosterme.)"
+				L"K-Lite Codec Pack は、動画再生が必要な場合に必要です。\nインストールされていないようです。\nインストール方法の解説ページを開きますか？\n(いいえを選ぶと今後表示しません)",
+				L"K-Lite Codec Pack is required when you need video playback.\nIt does not appear to be installed.\nOpen the install guide page?\n(Selecting No will not show this again.)",
+				L"K-Lite Codec Pack est necessaire lorsque la lecture video est requise.\nIl ne semble pas installe.\nOuvrir la page d'installation ?\n(Non = ne plus afficher.)",
+				L"K-Lite Codec Pack e necessario quando serve la riproduzione video.\nNon sembra installato.\nAprire la guida all'installazione?\n(No = non mostrare piu.)",
+				L"K-Lite Codec Pack es necesario cuando se requiere reproduccion de video.\nNo parece instalado.\nAbrir la pagina de instalacion?\n(No = no volver a mostrar.)",
+				L"K-Lite Codec Pack은 동영상 재생이 필요할 때 필요합니다.\n설치되지 않은 것 같습니다.\n설치 안내 페이지를 여시겠습니까?\n(아니요를 누르면 다시 표시하지 않습니다)",
+				L"需要播放视频时，需要 K-Lite Codec Pack。\n似乎尚未安装。\n是否打开安装说明页面？\n（选择“否”后将不再显示）",
+				L"K-Lite Codec Pack مطلوب عند الحاجة لتشغيل الفيديو.\nيبدو انه غير مثبت.\nفتح صفحة دليل التثبيت؟\n(لا = عدم الاظهار مجددا)",
+				L"K-Lite Codec Pack нужен, когда требуется воспроизведение видео.\nПохоже, не установлен.\nОткрыть страницу с инструкцией?\n(Нет = больше не показывать.)",
+				L"K-Lite Codec Pack ist noetig, wenn Videowiedergabe benoetigt wird.\nScheint nicht installiert.\nInstallationsseite oeffnen?\n(Nein = nicht mehr anzeigen.)",
+				L"K-Lite Codec Pack e necessario quando a reproducao de video e necessaria.\nNao parece instalado.\nAbrir a pagina de instalacao?\n(Nao = nao mostrar de novo.)",
+				L"K-Lite Codec Pack is nodig wanneer videoweergave vereist is.\nLijkt niet geinstalleerd.\nInstallatiepagina openen?\n(Nee = niet meer tonen.)",
+				L"K-Lite Codec Pack jest potrzebny, gdy wymagane jest odtwarzanie wideo.\nWyglada na nieinstalowany.\nOtworzyc strone instalacji?\n(Nie = nie pokazuj wiecej.)",
+				L"Video oynatma gerektiginde K-Lite Codec Pack gereklidir.\nYuklu degil gibi.\nKurulum sayfasi acilsin mi?\n(Hayir = bir daha gosterme.)"
 				), MB_YESNO | MB_ICONINFORMATION);
 			if (abcKlite == IDYES) {
 				::ShellExecute(NULL, _T("open"), _T("https://ppp.oohara.jp/k-lite.html"), NULL, NULL, SW_SHOWNORMAL);

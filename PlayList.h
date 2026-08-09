@@ -42,6 +42,7 @@ public:
 	void SIconTimer(int i);
 	int Add(CString name,int sub,int loop1,int loop2,CString art,CString alb,CString fol,int ret,int time,BOOL f=TRUE,BOOL ff=TRUE);
 	void Del();
+	void UndoLastDelete(); // 直近の曲削除を1段だけ戻す
 	// プレイリスト行をインデックス配列で削除(降順ソートして安全に後ろから)。Save あり。
 	void DelByIndices(const std::vector<int>& indices);
 	void Load(BOOL restoreSavedRow = TRUE);
@@ -241,6 +242,7 @@ enum {
 	PL_CTX_EQ = 41,
 	PL_CTX_TEMP_CLEAR = 42,
 	PL_CTX_TEMP_EXIT = 43,
+	PL_CTX_UNDO_DEL = 44,
 	PL_CTX_MOVE_BASE = 42500,
 	PL_CTX_COPY_BASE = 43500,
 	PL_CTX_MOVE_MAX = PL_CTX_MOVE_BASE + 999,

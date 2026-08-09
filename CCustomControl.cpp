@@ -5340,7 +5340,11 @@ BEGIN_MESSAGE_MAP(CCustomSliderCtrl, CSliderCtrl)
 END_MESSAGE_MAP()
 
 CCustomSliderCtrl::CCustomSliderCtrl() : m_bAutoDelete(FALSE), m_nMode(0), m_bAeroMode(FALSE),
-    m_nShimmer(0), m_bHover(FALSE), m_backstoreW(0), m_backstoreH(0) {}
+    m_nShimmer(0), m_bHover(FALSE), m_nSparkleN(0), m_nSparkleSpawnAcc(0),
+    m_backstoreW(0), m_backstoreH(0)
+{
+    ZeroMemory(m_sparklePos, sizeof(m_sparklePos));
+}
 CCustomSliderCtrl::~CCustomSliderCtrl()
 {
     if (m_memBackstore.GetSafeHandle()) m_memBackstore.DeleteObject();
@@ -5349,10 +5353,81 @@ CCustomSliderCtrl::~CCustomSliderCtrl()
 #endif
 }
 
+int CCustomSliderCtrl::SparkleSpan(BOOL* pbVert)
+{
+    CRect r;
+    GetClientRect(&r);
+    int mn = 0, mx = 0;
+    GetRange(mn, mx);
+    const int np = GetPos();
+    const BOOL bV = (GetStyle() & TBS_VERT) ? TRUE : FALSE;
+    if (pbVert) *pbVert = bV;
+    if (mx <= mn) return 0;
+    if (!bV)
+    {
+        const int tL = 12, tR = r.Width() - 12;
+        const int tP = tL + (int)((double)(np - mn) * (tR - tL) / (mx - mn));
+        return tP - tL;
+    }
+    const int tT = 12, tB = r.Height() - 12;
+    const int tP = tT + (int)((double)(np - mn) * (tB - tT) / (mx - mn));
+    return tB - tP;
+}
+
+void CCustomSliderCtrl::SparkleTick(BOOL bSpawn)
+{
+    const int speed = 4;
+    BOOL bV = FALSE;
+    const int span = SparkleSpan(&bV);
+    if (span <= 8)
+    {
+        m_nSparkleN = 0;
+        m_nSparkleSpawnAcc = 0;
+        return;
+    }
+    const int gap = max(20, span / 6);
+
+    // 進行・到達で消滅
+    int w = 0;
+    for (int i = 0; i < m_nSparkleN; ++i)
+    {
+        const int np = m_sparklePos[i] + speed;
+        if (np >= span) continue;
+        m_sparklePos[w++] = np;
+    }
+    m_nSparkleN = w;
+
+    if (!bSpawn) return;
+
+    // ホバー中: 等間隔で新しい点を先頭(0)に発生
+    if (m_nSparkleN == 0)
+    {
+        m_sparklePos[0] = 0;
+        m_nSparkleN = 1;
+        m_nSparkleSpawnAcc = 0;
+        return;
+    }
+    m_nSparkleSpawnAcc += speed;
+    while (m_nSparkleSpawnAcc >= gap && m_nSparkleN < kSliderSparkleMax)
+    {
+        m_nSparkleSpawnAcc -= gap;
+        // 先頭付近に既に点があればスキップ（密着防止）
+        BOOL near0 = FALSE;
+        for (int i = 0; i < m_nSparkleN; ++i)
+        {
+            if (m_sparklePos[i] < gap / 2) { near0 = TRUE; break; }
+        }
+        if (near0) break;
+        m_sparklePos[m_nSparkleN++] = 0;
+    }
+}
+
 LRESULT CCustomSliderCtrl::OnMouseLeaveMsg(WPARAM, LPARAM)
 {
     m_bHover = FALSE;
-    KillTimer(kSliderShimmerTimerId);
+    // 残点が消えるまでタイマー継続（全滅したら OnTimer で止める）
+    if (m_nSparkleN <= 0)
+        KillTimer(kSliderShimmerTimerId);
     Invalidate(FALSE);
     return 0;
 }
@@ -5362,6 +5437,9 @@ void CCustomSliderCtrl::OnTimer(UINT_PTR nIDEvent)
     if (nIDEvent == kSliderShimmerTimerId)
     {
         m_nShimmer++;
+        SparkleTick(m_bHover);
+        if (!m_bHover && m_nSparkleN <= 0)
+            KillTimer(kSliderShimmerTimerId);
         Invalidate(FALSE);
         return;
     }
@@ -5525,6 +5603,12 @@ LRESULT CCustomSliderCtrl::OnMouseMoveMsg(WPARAM w, LPARAM l)
         TRACKMOUSEEVENT t = { sizeof(t), TME_LEAVE, m_hWnd, 0 };
         TrackMouseEvent(&t);
         m_bHover = TRUE;
+        if (m_nSparkleN <= 0)
+        {
+            m_sparklePos[0] = 0;
+            m_nSparkleN = 1;
+            m_nSparkleSpawnAcc = 0;
+        }
         SetTimer(kSliderShimmerTimerId, 40, NULL);
     }
 #if CCUSTOM_AERO_SUPPORT
@@ -5566,8 +5650,8 @@ void CCustomSliderCtrl::DrawSlider(CDC* pDC)
     else if (m_nMode == 2) DrawMode2(pDC, r, mn, mx, np);
     else DrawMode1(pDC, r, mn, mx, np);
 
-    // ホバー中: 通ってきたトラック上をきらめきがスーッと流れる
-    if (m_bHover && mx > mn)
+    // ホバー中＋残点の慣性: 通ってきたトラック上をきらめきがスーッと流れる
+    if ((m_bHover || m_nSparkleN > 0) && mx > mn)
     {
         const BOOL bV = (GetStyle() & TBS_VERT);
         if (!bV)
@@ -5578,9 +5662,15 @@ void CCustomSliderCtrl::DrawSlider(CDC* pDC)
             const int span = tP - tL;
             if (span > 8)
             {
-                const int gx = tL + (int)((m_nShimmer * 4) % (UINT)span);
-                DrawShine(pDC, gx, cY, 3, 3);
-                DrawSparkle(pDC, gx, cY, 2, COLOR_SPARKLE);
+                for (int di = 0; di < m_nSparkleN; ++di)
+                {
+                    const int pos = m_sparklePos[di];
+                    if (pos < 0 || pos >= span) continue;
+                    const int gx = tL + pos;
+                    const int sz = (di == 0) ? 3 : 2;
+                    DrawShine(pDC, gx, cY, sz, sz);
+                    DrawSparkle(pDC, gx, cY, max(1, sz - 1), COLOR_SPARKLE);
+                }
             }
         }
         else
@@ -5592,9 +5682,15 @@ void CCustomSliderCtrl::DrawSlider(CDC* pDC)
             const int span = tB - tP;
             if (span > 8)
             {
-                const int gy = tB - (int)((m_nShimmer * 4) % (UINT)span);
-                DrawShine(pDC, cX, gy, 3, 3);
-                DrawSparkle(pDC, cX, gy, 2, COLOR_SPARKLE);
+                for (int di = 0; di < m_nSparkleN; ++di)
+                {
+                    const int pos = m_sparklePos[di];
+                    if (pos < 0 || pos >= span) continue;
+                    const int gy = tB - pos;
+                    const int sz = (di == 0) ? 3 : 2;
+                    DrawShine(pDC, cX, gy, sz, sz);
+                    DrawSparkle(pDC, cX, gy, max(1, sz - 1), COLOR_SPARKLE);
+                }
             }
         }
     }
@@ -5867,12 +5963,14 @@ CCustomRangeSliderCtrl::CCustomRangeSliderCtrl()
     m_nAbA(-1), m_nAbB(-1), m_bSelLocked(TRUE),
     m_nDragTarget(0), m_bDragging(FALSE), m_nVisualPos(0), m_nLogicalPos(0), m_bAeroMode(FALSE),
     m_wavePeakCount(0), m_cueCount(0), m_nCueClick(-1),
+    m_lrcCount(0), m_nLrcClick(-1), m_bHoverZoom(TRUE), m_hoverZoomX(-1),
     m_ribbonN(0), m_xfadePreviewMs(0), m_timeBaseHz(44100),
-    m_beatBpm(120.f), m_bBeatGrid(FALSE), m_bHoverTracking(FALSE),
+    m_beatBpm(120.f), m_bBeatGrid(FALSE), m_beatOffsetMs(0), m_bHoverTracking(FALSE),
     m_backstoreW(0), m_backstoreH(0)
 {
     ZeroMemory(m_wavePeaks, sizeof(m_wavePeaks));
     ZeroMemory(m_cueFrames, sizeof(m_cueFrames));
+    ZeroMemory(m_lrcFrames, sizeof(m_lrcFrames));
     ZeroMemory(m_ribbon, sizeof(m_ribbon));
 }
 CCustomRangeSliderCtrl::~CCustomRangeSliderCtrl() {}
@@ -6073,6 +6171,46 @@ void CCustomRangeSliderCtrl::ClearCues()
     SetCues(NULL, 0);
 }
 
+void CCustomRangeSliderCtrl::SetLrcMarkers(const int* frames, int count)
+{
+    if (count <= 0 || !frames) {
+        if (m_lrcCount == 0) return;
+        m_lrcCount = 0;
+        if (::IsWindow(m_hWnd) && ::IsWindowVisible(m_hWnd))
+            Invalidate(FALSE);
+        return;
+    }
+    if (count > kLrcMarkMax) count = kLrcMarkMax;
+    BOOL same = (count == m_lrcCount);
+    if (same) {
+        for (int i = 0; i < count; ++i) {
+            if (m_lrcFrames[i] != frames[i]) { same = FALSE; break; }
+        }
+    }
+    if (same) return;
+    for (int i = 0; i < count; ++i)
+        m_lrcFrames[i] = frames[i];
+    m_lrcCount = count;
+    if (::IsWindow(m_hWnd) && ::IsWindowVisible(m_hWnd))
+        Invalidate(FALSE);
+}
+
+void CCustomRangeSliderCtrl::ClearLrcMarkers()
+{
+    SetLrcMarkers(NULL, 0);
+}
+
+int CCustomRangeSliderCtrl::GetLrcFrame(int idx) const
+{
+    if (idx < 0 || idx >= m_lrcCount) return -1;
+    return m_lrcFrames[idx];
+}
+
+void CCustomRangeSliderCtrl::SetHoverZoom(BOOL on)
+{
+    m_bHoverZoom = on ? TRUE : FALSE;
+}
+
 void CCustomRangeSliderCtrl::SetMeterRibbon(const float* bins, int n)
 {
     if (n <= 0 || !bins) {
@@ -6119,11 +6257,17 @@ void CCustomRangeSliderCtrl::SetTimeBaseHz(int hz)
 
 void CCustomRangeSliderCtrl::SetBeatGrid(float bpm, BOOL enabled)
 {
+	SetBeatGrid(bpm, enabled, m_beatOffsetMs);
+}
+
+void CCustomRangeSliderCtrl::SetBeatGrid(float bpm, BOOL enabled, int offsetMs)
+{
     if (bpm <= 1.f) bpm = 120.f;
     const BOOL en = enabled ? TRUE : FALSE;
-    if (en == m_bBeatGrid && fabsf(bpm - m_beatBpm) < 0.01f) return;
+    if (en == m_bBeatGrid && fabsf(bpm - m_beatBpm) < 0.01f && offsetMs == m_beatOffsetMs) return;
     m_bBeatGrid = en;
     m_beatBpm = bpm;
+    m_beatOffsetMs = offsetMs;
     if (::IsWindow(m_hWnd) && ::IsWindowVisible(m_hWnd))
         Invalidate(FALSE);
 }
@@ -6411,7 +6555,9 @@ void CCustomRangeSliderCtrl::DrawRangeSlider(CDC* pDC)
             if (maxLines > 256) maxLines = 256;
             COLORREF gc = m_bAeroMode ? RGB(60, 60, 70) : RGB(210, 215, 225);
             for (int i = 0; i < maxLines; ++i) {
-                int fv = m_nMin + (int)(i * framesPerBeat + 0.5);
+                const int offFrames = (int)(((__int64)m_beatOffsetMs * m_timeBaseHz) / 1000);
+                int fv = m_nMin + offFrames + (int)(i * framesPerBeat + 0.5);
+                if (fv < m_nMin) continue;
                 if (fv > m_nMax) break;
                 int x = ValueToPixel(fv);
                 pDC->FillSolidRect(x, cy - 10, 1, 20, gc);
@@ -6550,6 +6696,54 @@ void CCustomRangeSliderCtrl::DrawRangeSlider(CDC* pDC)
         }
     }
 
+    // LRC 時刻マーカー（下向き細い線）
+    if (m_lrcCount > 0) {
+        if (bWave) pDC->SetROP2(R2_COPYPEN);
+        if (CPen* pL = CCC_GetPooledPen(1, RGB(80, 180, 255)))
+            pDC->SelectObject(pL);
+        for (int i = 0; i < m_lrcCount; ++i) {
+            int x = ValueToPixel(m_lrcFrames[i]);
+            pDC->MoveTo(x, cy + 2);
+            pDC->LineTo(x, cy + 10);
+        }
+        if (bWave) pDC->SetROP2(R2_XORPEN);
+    }
+
+    // ホバー拡大波形
+    if (m_bHoverZoom && m_hoverZoomX >= 0 && m_wavePeakCount > 8 && !m_bDragging) {
+        if (bWave) pDC->SetROP2(R2_COPYPEN);
+        CRect zr(m_hoverZoomX - 36, 2, m_hoverZoomX + 36, r.Height() - 2);
+        if (zr.left < 2) zr.OffsetRect(2 - zr.left, 0);
+        if (zr.right > r.Width() - 2) zr.OffsetRect(r.Width() - 2 - zr.right, 0);
+        CBrush zb(RGB(20, 24, 36));
+        CBrush* ob = pDC->SelectObject(&zb);
+        pDC->Rectangle(zr);
+        pDC->SelectObject(ob);
+        const int centerVal = PixelToValue(m_hoverZoomX);
+        const int halfSpan = max(1, (m_nMax - m_nMin) / 40);
+        const int v0 = max(m_nMin, centerVal - halfSpan);
+        const int v1 = min(m_nMax, centerVal + halfSpan);
+        if (CPen* pZ = CCC_GetPooledPen(1, RGB(120, 220, 255)))
+            pDC->SelectObject(pZ);
+        const int zw = max(1, zr.Width());
+        for (int x = zr.left; x < zr.right; ++x) {
+            const double t = (double)(x - zr.left) / (double)zw;
+            const int vv = v0 + (int)(t * (v1 - v0));
+            int bi = 0;
+            if (m_nMax > m_nMin)
+                bi = (int)(((__int64)(vv - m_nMin) * m_wavePeakCount) / (m_nMax - m_nMin));
+            if (bi < 0) bi = 0;
+            if (bi >= m_wavePeakCount) bi = m_wavePeakCount - 1;
+            float amp = m_wavePeaks[bi];
+            if (amp < 0.f) amp = 0.f;
+            if (amp > 1.f) amp = 1.f;
+            const int hh = (int)(amp * (zr.Height() / 2 - 2));
+            pDC->MoveTo(x, cy - hh);
+            pDC->LineTo(x, cy + hh);
+        }
+        if (bWave) pDC->SetROP2(R2_XORPEN);
+    }
+
     // 現在位置（ハート + きらめき）— 波形時は XOR で波形を潰さない
     DrawHeart(pDC, CRect(xP - 9, cy - 12, xP + 9, cy + 6), COLOR_SLIDER_THUMB);
     DrawSparkle(pDC, xP + 7, cy - 12, 3, COLOR_SPARKLE);
@@ -6606,6 +6800,10 @@ int CCustomRangeSliderCtrl::HitTest(CPoint p) const
         int x = ValueToPixel(m_cueFrames[i]);
         if (CRect(x - 6, cy - 22, x + 6, cy - 1).PtInRect(p)) return 10 + i;
     }
+    for (int i = 0; i < m_lrcCount; ++i) {
+        int x = ValueToPixel(m_lrcFrames[i]);
+        if (CRect(x - 4, cy + 1, x + 4, cy + 12).PtInRect(p)) return 30 + i;
+    }
     // ロック解除時のみ loop つまみを再生位置より優先。ロック中はシークを優先（クリックを食わない）
     if (!m_bSelLocked) {
         if (CRect(xMx - 7, cy - 10, xMx + 7, cy + 10).PtInRect(p)) return 2;
@@ -6620,11 +6818,25 @@ void CCustomRangeSliderCtrl::OnLButtonDown(UINT f, CPoint p)
     CCC_InvalidateParent(m_hWnd, m_bAeroMode);
 #endif
     SetFocus();
+    // Alt+ドラッグ: 拍グリッド位相オフセット
+    if ((f & MK_ALT) && m_bBeatGrid) {
+        m_nDragTarget = 99; // grid offset
+        m_bDragging = TRUE;
+        m_nVisualPos = p.x;
+        SetCapture();
+        return;
+    }
     m_nVisualPos = m_nLogicalPos;
     m_nDragTarget = HitTest(p);
     if (m_nDragTarget >= 10 && m_nDragTarget < 10 + kCueMax) {
         // キュークリック → 親が GetCueClick でジャンプ
         m_nCueClick = m_nDragTarget - 10;
+        m_nDragTarget = 0;
+        GetParent()->SendMessage(WM_HSCROLL, MAKEWPARAM(TB_ENDTRACK, 0), (LPARAM)m_hWnd);
+        return;
+    }
+    if (m_nDragTarget >= 30 && m_nDragTarget < 30 + kLrcMarkMax) {
+        m_nLrcClick = m_nDragTarget - 30;
         m_nDragTarget = 0;
         GetParent()->SendMessage(WM_HSCROLL, MAKEWPARAM(TB_ENDTRACK, 0), (LPARAM)m_hWnd);
         return;
@@ -6663,6 +6875,11 @@ void CCustomRangeSliderCtrl::OnLButtonUp(UINT f, CPoint p)
             // SB_THUMBPOSITION は位置シークと衝突しないよう LOWORD に TB_ENDTRACK を使う。
             GetParent()->SendMessage(WM_HSCROLL, MAKEWPARAM(TB_ENDTRACK, 0), (LPARAM)m_hWnd);
         }
+        else if (dragTarget == 99)
+        {
+            // グリッド位相確定 → 親へ通知（TB_ENDTRACK）
+            GetParent()->SendMessage(WM_HSCROLL, MAKEWPARAM(TB_ENDTRACK, 0), (LPARAM)m_hWnd);
+        }
 #if CCUSTOM_AERO_SUPPORT
         CCC_InvalidateParent(m_hWnd, m_bAeroMode);
 #endif
@@ -6680,6 +6897,12 @@ void CCustomRangeSliderCtrl::OnMouseMove(UINT f, CPoint p)
     }
     if (!m_bDragging)
         UpdateHoverTip(p);
+    if (m_bHoverZoom && !m_bDragging && m_wavePeakCount > 0) {
+        if (m_hoverZoomX != p.x) {
+            m_hoverZoomX = p.x;
+            Invalidate(FALSE);
+        }
+    }
     if (m_bDragging)
     {
 #if CCUSTOM_AERO_SUPPORT
@@ -6706,6 +6929,21 @@ void CCustomRangeSliderCtrl::OnMouseMove(UINT f, CPoint p)
             if (m_nAbA >= 0 && m_nAbB <= m_nAbA)
                 m_nAbB = min(m_nMax, m_nAbA + 1);
         }
+        else if (m_nDragTarget == 99) {
+            // ピクセル差分 → ms（1px ≒ 数ms）。相対ドラッグ
+            const int dx = p.x - m_nVisualPos;
+            m_nVisualPos = p.x;
+            if (m_timeBaseHz > 0 && dx != 0) {
+                const int span = max(1, m_nMax - m_nMin);
+                CRect rc; GetClientRect(&rc);
+                const int tw = max(1, rc.Width() - 28);
+                const double framesPerPx = (double)span / (double)tw;
+                const int dMs = (int)((dx * framesPerPx * 1000.0) / (double)m_timeBaseHz);
+                m_beatOffsetMs += dMs;
+                if (m_beatOffsetMs < -60000) m_beatOffsetMs = -60000;
+                if (m_beatOffsetMs > 60000) m_beatOffsetMs = 60000;
+            }
+        }
         if (m_nDragTarget == 1 || m_nDragTarget == 2 || m_nDragTarget == 4 || m_nDragTarget == 5)
             GetParent()->SendMessage(WM_HSCROLL, MAKEWPARAM(TB_THUMBTRACK, 0), (LPARAM)m_hWnd);
         RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW | RDW_NOERASE);
@@ -6715,8 +6953,10 @@ void CCustomRangeSliderCtrl::OnMouseMove(UINT f, CPoint p)
 void CCustomRangeSliderCtrl::OnMouseLeave()
 {
     m_bHoverTracking = FALSE;
+    m_hoverZoomX = -1;
     if (m_hoverTip.GetSafeHwnd())
         m_hoverTip.SendMessage(TTM_POP, 0, 0);
+    Invalidate(FALSE);
 }
 
 BOOL CCustomRangeSliderCtrl::OnSetCursor(CWnd* pWnd, UINT nHitTest, UINT message)
@@ -8602,6 +8842,7 @@ END_MESSAGE_MAP()
 
 CCustomStandardButton::CCustomStandardButton()
     : m_bAutoDelete(FALSE), m_bMouseOver(FALSE), m_nAnimTick(0), m_bAnimRunning(FALSE),
+    m_nSparkleN(0), m_nSparkleSpawnAcc(0),
     m_clrGradStart(RGB(255, 255, 255)),
     m_clrGradEnd(RGB(255, 255, 255)), m_nGradDirection(0), m_bGradEnable(FALSE),
     m_clrShadow(RGB(0, 0, 0)), m_nShadowDirection(135), m_nShadowDistance(2),
@@ -8609,6 +8850,7 @@ CCustomStandardButton::CCustomStandardButton()
     m_hIconIn(NULL), m_hIconOut(NULL), m_bFlat(FALSE), m_bAeroMode(FALSE),
     m_bIconOwnedIn(FALSE), m_bIconOwnedOut(FALSE)
 {
+    ZeroMemory(m_sparklePos, sizeof(m_sparklePos));
     m_brBackground.CreateSolidBrush(COLOR_BUTTON_BG);
 }
 
@@ -8617,10 +8859,61 @@ void CCustomStandardButton::EnsureAnimTimer()
     UpdateAnimTimer();
 }
 
+void CCustomStandardButton::SparkleTick(BOOL bSpawn)
+{
+    if (m_bFlat) {
+        m_nSparkleN = 0;
+        m_nSparkleSpawnAcc = 0;
+        return;
+    }
+    CRect r;
+    GetClientRect(&r);
+    const int W = r.Width();
+    if (W < 8) {
+        m_nSparkleN = 0;
+        return;
+    }
+    const int speed = 7;
+    const int gap = max(20, W / 6);
+    const int endPos = W - 2;
+
+    int w = 0;
+    for (int i = 0; i < m_nSparkleN; ++i)
+    {
+        const int np = m_sparklePos[i] + speed;
+        if (np >= endPos) continue;
+        m_sparklePos[w++] = np;
+    }
+    m_nSparkleN = w;
+
+    if (!bSpawn) return;
+
+    if (m_nSparkleN == 0)
+    {
+        m_sparklePos[0] = 0;
+        m_nSparkleN = 1;
+        m_nSparkleSpawnAcc = 0;
+        return;
+    }
+    m_nSparkleSpawnAcc += speed;
+    while (m_nSparkleSpawnAcc >= gap && m_nSparkleN < kBtnSparkleMax)
+    {
+        m_nSparkleSpawnAcc -= gap;
+        BOOL near0 = FALSE;
+        for (int i = 0; i < m_nSparkleN; ++i)
+        {
+            if (m_sparklePos[i] < gap / 2) { near0 = TRUE; break; }
+        }
+        if (near0) break;
+        m_sparklePos[m_nSparkleN++] = 0;
+    }
+}
+
 void CCustomStandardButton::UpdateAnimTimer()
 {
     if (!GetSafeHwnd()) return;
-    const BOOL bWant = IsWindowEnabled() && (m_bMouseOver || (GetFocus() == this));
+    const BOOL bWant = IsWindowEnabled() &&
+        (m_bMouseOver || (GetFocus() == this) || m_nSparkleN > 0);
     if (bWant && !m_bAnimRunning)
     {
         m_bAnimRunning = TRUE;
@@ -8639,6 +8932,8 @@ void CCustomStandardButton::OnTimer(UINT_PTR nIDEvent)
     if (nIDEvent == kButtonAnimTimerId)
     {
         m_nAnimTick++;
+        SparkleTick(m_bMouseOver && !m_bFlat);
+        UpdateAnimTimer(); // 残点ゼロ＆非ホバーなら停止
         Invalidate(FALSE);
         return;
     }
@@ -8829,16 +9124,34 @@ void CCustomStandardButton::PaintClient(CDC& dc, const CRect& r)
             DrawLaceScallop(&mDC, r.left + 8, r.bottom - 6, r.right - 8, 3, COLOR_LACE);
 
         // ホバー時: とろみハイライトがスーッと流れる(押下トグル上でもホバー中は表示)
-        if (bShowFlow && !m_bFlat)
+        // 点はホバー終了後も残点が消えるまで描画
+        if (!m_bFlat && (bShowFlow || m_nSparkleN > 0))
         {
             const int W = r.Width();
-            const int bandW = max(10, W / 4);
-            const int period = W + bandW + W / 2;
-            const int pos = (int)((m_nAnimTick * 7) % (UINT)max(1, period));
-            CRect band(r.left + pos - bandW, r.top, r.left + pos, r.bottom);
+            const int H = r.Height();
             CRgn rgn; rgn.CreateRoundRectRgn(r.left, r.top, r.right + 1, r.bottom + 1, 16, 16);
             mDC.SelectClipRgn(&rgn);
-            FillRectAlpha(&mDC, band, RGB(255, 255, 255), bP ? 48 : 72);
+            if (bShowFlow)
+            {
+                const int bandW = max(10, W / 4);
+                const int period = W + bandW + W / 2;
+                const int pos = (int)((m_nAnimTick * 7) % (UINT)max(1, period));
+                CRect band(r.left + pos - bandW, r.top, r.left + pos, r.bottom);
+                FillRectAlpha(&mDC, band, RGB(255, 255, 255), bP ? 48 : 72);
+            }
+            const int cy = r.top + H / 2;
+            for (int di = 0; di < m_nSparkleN; ++di)
+            {
+                const int ox = m_sparklePos[di];
+                if (ox < 2 || ox >= W - 2) continue;
+                const int sx = r.left + ox;
+                const int yoff = ((di & 1) ? -1 : 1) * (2 + (di % 3));
+                const int sy = cy + yoff;
+                if (sy < r.top + 2 || sy > r.bottom - 2) continue;
+                const int sz = (di == 0) ? 4 : 2;
+                DrawShine(&mDC, sx, sy, sz, sz);
+                DrawSparkle(&mDC, sx, sy, max(1, sz - 1), COLOR_SPARKLE);
+            }
             mDC.SelectClipRgn(NULL);
         }
         // フォーカス: 鼓動のようにほのかに明滅
@@ -9175,6 +9488,12 @@ void CCustomStandardButton::OnMouseMove(UINT f, CPoint p)
         TRACKMOUSEEVENT t = { sizeof(t), TME_LEAVE, m_hWnd, 0 };
         TrackMouseEvent(&t);
         m_bMouseOver = TRUE;
+        if (!m_bFlat && m_nSparkleN <= 0)
+        {
+            m_sparklePos[0] = 0;
+            m_nSparkleN = 1;
+            m_nSparkleSpawnAcc = 0;
+        }
         UpdateAnimTimer();
         Invalidate(FALSE);
         CCC_InvalidateParent(m_hWnd, m_bAeroMode);
@@ -9185,6 +9504,7 @@ void CCustomStandardButton::OnMouseMove(UINT f, CPoint p)
 LRESULT CCustomStandardButton::OnMouseLeave(WPARAM, LPARAM)
 {
     m_bMouseOver = FALSE;
+    // 残点がある間は UpdateAnimTimer がタイマーを維持
     UpdateAnimTimer();
     Invalidate(FALSE);
     CCC_InvalidateParent(m_hWnd, m_bAeroMode);

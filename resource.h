@@ -1232,6 +1232,7 @@
 // ??????x 0.5 / 0.75 / 1.0 / 1.25 / 1.5 / 2.0 ??6?A??B????????????????B
 #define ID_DOUGA_SPEED_FIRST            32965
 #define ID_DOUGA_SPEED_LAST             32972
+#define ID_DOUGA_CLOSE                  32980
 
 // ???f?B?A?v???C???[ ?o?i?[?E?N???b?N???????
 #define ID_MP_OPEN_ANALYZER             32971
@@ -1336,6 +1337,7 @@
 #define IDC_REMOTE_PORT                 3863
 #define IDC_REMOTE_URL                  3967
 #define IDC_REMOTE_OPEN                 3968
+#define IDC_REMOTE_AAC                  3969
 #define IDC_DJPAD_TIP                   3864
 #define IDC_DJPAD_FX_L                  3865
 #define IDC_DJPAD_FX                    3866
@@ -1462,14 +1464,31 @@
 #define ID_MP_MIRROR_TOGGLE             33176
 #define ID_MP_MIRROR_OPEN               33177
 #define ID_MP_FADE_NOW                  33178
+#define ID_AUDIO_MIC_BASE               33179
+#define ID_AUDIO_LOOP_BASE              33211
+#define ID_AUDIO_LOOP_LAST              33242
+
+#define IDC_OGG_MICDEV                  3981
+#define IDC_MP_MICDEV                   3982
+#define IDC_DR_MICDEV                   3983
+#define IDC_DR_MICDEV_L                 3984
+#define IDC_SC_MICDEV                   3985
+#define IDC_SC_LOOPDEV                  3986
+#define IDC_SC_MICDEV_L                 3987
+#define IDC_SC_LOOPDEV_L                3988
+#define IDC_DJPAD_MICDEV                3989
+#define IDC_DJPAD_LOOPDEV               3990
+#define IDC_DJPAD_MICDEV_L              3991
+#define IDC_DJPAD_LOOPDEV_L             3992
+#define IDC_SC_CURSOR                   3993
 
 // Next default values for new objects
 // 
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NEXT_RESOURCE_VALUE        250
-#define _APS_NEXT_COMMAND_VALUE         33179
-#define _APS_NEXT_CONTROL_VALUE         3981
+#define _APS_NEXT_COMMAND_VALUE         33243
+#define _APS_NEXT_CONTROL_VALUE         3994
 #define _APS_NEXT_SYMED_VALUE           104
 #endif
 #endif

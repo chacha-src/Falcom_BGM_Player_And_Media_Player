@@ -1,4 +1,4 @@
-// oggDlg.h : ヘッダー ファイル
+﻿// oggDlg.h : ヘッダー ファイル
 //
 #include "afxmt.h"
 //#include "afxcmn.h"
@@ -35,6 +35,10 @@ void ApplyPlaylistRowDisplay(const playlistdata0& row);
 #endif
 #ifndef WM_PLAYBACK_AUTO_STOPPED
 #define WM_PLAYBACK_AUTO_STOPPED (WM_APP + 72)
+#endif
+// 動画画面を閉じる(タイトルバー× / 右クリック)。本体側で tear-down
+#ifndef WM_OGG_CLOSE_DOUGA
+#define WM_OGG_CLOSE_DOUGA (WM_APP + 103)
 #endif
 
 #if _MSC_VER > 1000
@@ -96,6 +100,7 @@ public:
 	float hD;
 	void gamen(int uu);
 	void gamenkill();
+	void CloseVideoScreen(); // 動画画面だけ閉じる(動画専用再生なら停止も)
 	void dougaplay(int uu, CString str = L"");
 	DWORD GetVol();
 	// bPaintBars=FALSE なら PCM→EQコード供給のみ（メイン GDI pending 中でも呼ぶ）
@@ -226,8 +231,10 @@ public:
 	CCustomCheckBox	m_micmix;
 	CCustomSliderCtrl	m_miclev;
 	CCustomStatic	m_miclevs;
+	CCustomComboBox m_micdev;
 	afx_msg void OnMicMixCheck();
 	afx_msg void OnMicLevRelease(NMHDR* pNMHDR, LRESULT* pResult);
+	afx_msg void OnCbnSelchangeMicDev();
 	void SyncMicMixUiFromSavedata();
 	void ApplyMicMixLevelLabel();
 	CCustomStatic	m_11;
@@ -429,6 +436,7 @@ public:
 	afx_msg LRESULT OnEndpointVolume(WPARAM wParam, LPARAM lParam);
 	afx_msg LRESULT OnRefreshAeroAll(WPARAM wParam, LPARAM lParam);
 	afx_msg LRESULT OnPlaybackAutoStopped(WPARAM wParam, LPARAM lParam);
+	afx_msg LRESULT OnCloseDougaMsg(WPARAM wParam, LPARAM lParam);
 	afx_msg LRESULT OnEnterMpModeMsg(WPARAM wParam, LPARAM lParam);
 	afx_msg LRESULT OnSongParamRestore(WPARAM wParam, LPARAM lParam); // 曲ごとパラメータ復元(再生スレッド→メイン)
 	afx_msg LRESULT OnSongParamMarks(WPARAM wParam, LPARAM lParam);   // ★列再描画

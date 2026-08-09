@@ -592,6 +592,36 @@ struct save{
 	// --- コンテキストメニュー描画方法(末尾追記。旧.datは0=クラシック) ---
 	// 0=クラシック 1=上下伸び 2=カーテン 3=ワイプ 4=リップル 5=ビッグバン/ブラックホール
 	int popupMenuAnim;
+
+	// --- ローカルリモート AAC 聴く配信(末尾追記。旧.datは1=ON) ---
+	int mpRemoteAac; // 1=GET /stream で ADTS AAC を配れる
+
+	// --- キー / Camelot / グリッド位相 / 機能パック(末尾追記) ---
+	int mpKeyRoot;            // -1=未, 0..11
+	int mpKeyMinor;           // 0=maj 1=min
+	int mpCamelot;            // 0=未, 1..24
+	int mpBeatGridOffsetMs;   // 拍グリッド位相
+	int confirmDanger;        // 1=危険操作で確認
+	int mpFocusMode;          // 1=フォーカスモード
+	int mpAacProfile;         // 0=標準128 1=高音質192 2=低遅延96
+	int mpMirrorGain;         // 0..200 Mirror音量(100=等倍)
+	int mpRemoteGain;         // 0..200 Remote AAC 音量相当(エンコード前ゲイン)
+	int mpNowPlayingFile;     // 1=nowplaying.txt を書く
+	int mpBotToolsUse[8];     // 下部ツール使用回数
+	TCHAR mpMicMru[3][256];   // マイク端末 MRU
+	TCHAR mpLoopMru[3][256];  // ループ端末 MRU
+	int mpLayoutPreset;       // 0..2 選択中プリセット
+	int mpLayoutX[3], mpLayoutY[3], mpLayoutW[3], mpLayoutH[3];
+	int mpLayoutFlags[3];     // bot tools flags etc.
+	int mpSetChapterFilter;   // 0=all 1=warmup 2=peak 3=cooldown
+	int mpMidiLearn;          // 1=学習モード
+	int mpMidiMapCc[4];       // CC for pitch/tempo/eqLow/eqHigh (-1=未)
+	int mpMirrorCueMode;      // 0=本出力 1=CUEプレビュー
+	int mpTransPreset;        // トランジション・プリセット index
+	int mpPhraseSnapBeat;     // 1=フレーズ幅を拍スナップ
+
+	// --- 画面キャプチャ: マウスカーソル(末尾追記。旧.datは0=載せない) ---
+	int cap_show_cursor;      // 1=マウスカーソルを録画/プレビューに載せる
 };
 extern save savedata;
 /* コード間隔(ms)。16..500。旧.dat や未設定は 25。 */

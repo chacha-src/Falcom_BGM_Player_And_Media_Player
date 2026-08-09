@@ -668,6 +668,8 @@ UINT HandleNotifications(LPVOID)
 				dsb->Unlock(pdsb1, len3, pdsb2, len4);
 				if (!stageFade)
 					MpMirrorWritePcm(s_dsStage.data(), stageBytes);
+				if (!stageFade)
+					MpRemoteWritePcm(s_dsStage.data(), stageBytes);
 			}
 			InterlockedExchange(&g_dsDeviceOpBusy, 0);
 		}

@@ -24,7 +24,10 @@ enum {
 	MP_SMART_ARTIST     = 0x0008,
 	MP_SMART_HOUR_RANGE = 0x0010, // current local hour in [hourFrom, hourTo]
 	MP_SMART_PLAY_MAX   = 0x0020, // playCount <= playCountMax
-	MP_SMART_LAST_HOUR  = 0x0040  // lastPlay local hour in range (else current hour)
+	MP_SMART_LAST_HOUR  = 0x0040, // lastPlay local hour in range (else current hour)
+	MP_SMART_BPM_RANGE  = 0x0080,
+	MP_SMART_KEY        = 0x0100,
+	MP_SMART_NO_JACKET  = 0x0200
 };
 
 struct MpSmartRule {
@@ -36,6 +39,9 @@ struct MpSmartRule {
 	int hourTo;          // 0..23 (inclusive; wrap allowed if from>to)
 	int playCountMax;    // when PLAY_MAX
 	int enabled;         // 1=active definition (still selectable when 0)
+	int bpmMin;          // when BPM_RANGE
+	int bpmMax;
+	int camelotWant;     // when KEY (0=any saved key)
 };
 
 void MpHist_Init();

@@ -21,6 +21,7 @@
 //   リスト : 名前変更/削除/曲の他リスト移動・コピー時に listName キーを追従
 //            コンテキストメニューから選択曲の記憶パラメータだけ削除も可
 //   BPM    : detectedBpm / bpmCand[3] / beatGrid は「曲ごと保存」OFFでも曲単位で保存・再生時復元
+//   AudioData.dat ファイル ver: 1=pathのみ / 2=mode+ret2 / 3=BPM / 4=key+Camelot+gridOffset
 //   索引   : メモリ上は主キー(list+path+mode+ret2)ハッシュで検索。削除は末尾入替。
 // ============================================================================
 
@@ -56,6 +57,11 @@ struct SongParam {
 	int detectedBpm;       // 選択中 BPM (0=未)
 	int bpmCand[3];        // 候補3つ (0=空き)
 	int beatGrid;          // 1=シーク拍グリッド表示
+	// --- ver4 追記: キー / Camelot / グリッド位相 ---
+	int keyRoot;           // 0..11 (C=0), -1=未
+	int keyMinor;          // 0=major 1=minor
+	int camelot;           // 1..24 (1A..12A=1..12, 1B..12B=13..24), 0=未
+	int beatGridOffsetMs;  // 拍グリッド位相オフセット(ms)。正=右へ
 };
 
 // 起動時に 1 度だけ読み込む
@@ -120,7 +126,8 @@ bool SongParams_HasEntryForRow(int row);
 // PL/MP リストの★列を再描画。別スレッドからは PostMessage 経由。
 void SongParams_NotifyListMarksChanged();
 
-// 現在曲の BPM（選択中 + 候補3 + グリッド）を AudioData.dat へ即時反映。
-// 「曲ごと保存」チェックOFFでも BPM だけは曲単位で覚える。
+// 現在曲の BPM（選択中 + 候補3 + グリッド + キー/オフセット）を AudioData.dat へ即時反映。
+// 「曲ごと保存」チェックOFFでも BPM/キーだけは曲単位で覚える。
 void SongParams_SaveBpmForCurrentSong();
 void SongParams_RestoreBpmForCurrentSong();
+void SongParams_SaveKeyGridForCurrentSong(); // key + beatGridOffsetMs を現エントリへ

@@ -1394,9 +1394,13 @@ public:
 
 	float get()
 	{
-		float acc = 0.0;
+		float acc = 0.0f;
+		const int sections = (int)(sizeof(my_ns_coeffs) / sizeof(my_ns_coeffs[0]) / 4);
+		const int n = (sos_count > 0 && sos_count < sections) ? sos_count : sections;
+		if (n <= 0 || (int)t1.size() < n || (int)t2.size() < n)
+			return 0.0f;
 		const float* c = my_ns_coeffs;
-		for (int i = 0; i < sos_count; ++i) {
+		for (int i = 0; i < n; ++i) {
 			float t1i = t1[i];
 			float t2i = t2[i];
 			t2[i] = (acc -= t1i * c[2] + t2i * c[3]);
@@ -1408,7 +1412,9 @@ public:
 
 	void update(float qerror)
 	{
-		for (int i = 0; i < sos_count; ++i) {
+		const int n = (sos_count > 0 && sos_count <= (int)t1.size() && sos_count <= (int)t2.size())
+			? sos_count : (int)((t1.size() < t2.size()) ? t1.size() : t2.size());
+		for (int i = 0; i < n; ++i) {
 			t2[i] += qerror;
 		}
 		std::swap(t1, t2);

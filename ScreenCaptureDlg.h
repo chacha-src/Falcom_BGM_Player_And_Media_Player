@@ -127,6 +127,7 @@ public:
 		int fx[8]; // SC_FX_* chain (max SC_FX_CHAIN_MAX)
 		BYTE fxStr[8][8]; // S1..S8 (0..8)
 		float fxTime;
+		BOOL showCursor; // マウスカーソルを載せる
 	};
 
 protected:
@@ -221,7 +222,10 @@ public:
 	afx_msg void OnBnClickedScale100();
 	afx_msg void OnBnClickedTile();
 	afx_msg void OnBnClickedIncludeMp();
+	afx_msg void OnBnClickedShowCursor();
 	afx_msg void OnBnClickedMic();
+	afx_msg void OnCbnSelchangeMicDev();
+	afx_msg void OnCbnSelchangeLoopDev();
 	afx_msg void OnCbnSelchangeMode();
 	afx_msg void OnCbnSelchangeCanvas();
 	afx_msg void OnCbnSelchangeFps();
@@ -256,7 +260,12 @@ public:
 	CCustomComboBox m_effect;
 	CCustomCheckBox m_audio;
 	CCustomCheckBox m_mic;
+	CCustomStatic m_micDevLabel;
+	CCustomComboBox m_micDev;
+	CCustomStatic m_loopDevLabel;
+	CCustomComboBox m_loopDev;
 	CCustomCheckBox m_includeMp;
+	CCustomCheckBox m_showCursor;
 	CCustomStandardButton m_pick;
 	CCustomStandardButton m_refresh;
 	CCustomStatic m_availLabel;

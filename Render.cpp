@@ -12,13 +12,10 @@
 #include "PlayList.h"
 #include "CImageBase.h"
 #include "AudioUpscaler.h"
+#include "AudioDevSync.h"
 #include <mutex>
 #include <mmdeviceapi.h>
 #include <FunctionDiscoveryKeys_devpkey.h>
-
-enum { RENDER_MIC_DEV_MAX = 32 };
-static TCHAR s_renderMicIds[RENDER_MIC_DEV_MAX][256];
-static int s_renderMicCnt = 0;
 
 static void SerializeLogFont(const LOGFONT* lf, TCHAR* str, int maxLen)
 {
@@ -821,65 +818,8 @@ BOOL CRender::OnInitDialog()
 	}
 	m_soundlist.SetCurSel(savedata.soundcur);
 
-	// マイク(録音)端末: WASAPI eCapture を列挙し savedata.mic_device へ保存
-	s_renderMicCnt = 0;
-	m_miclist.ResetContent();
-	m_miclist.AddString(LL14(L"(既定の録音デバイス)", L"(Default recording device)", L"(Périphérique d'enregistrement par défaut)", L"(Dispositivo di registrazione predefinito)", L"(Dispositivo de grabación predeterminado)", L"(기본 녹음 장치)", L"(默认录制设备)", L"(جهاز التسجيل الافتراضي)", L"(Устройство записи по умолчанию)", L"(Standardaufnahmegerät)", L"(Dispositivo de gravação padrão)", L"(Standaard opnameapparaat)", L"(Domyślne urządzenie nagrywania)", L"(Varsayılan kayıt aygıtı)"));
-	s_renderMicIds[0][0] = 0;
-	s_renderMicCnt = 1;
-	{
-		IMMDeviceEnumerator* enumer = NULL;
-		IMMDeviceCollection* coll = NULL;
-		HRESULT hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), NULL, CLSCTX_ALL,
-			__uuidof(IMMDeviceEnumerator), (void**)&enumer);
-		if (SUCCEEDED(hr) && enumer) {
-			hr = enumer->EnumAudioEndpoints(eCapture, DEVICE_STATE_ACTIVE, &coll);
-			if (SUCCEEDED(hr) && coll) {
-				UINT cnt = 0;
-				coll->GetCount(&cnt);
-				for (UINT i = 0; i < cnt && s_renderMicCnt < RENDER_MIC_DEV_MAX; ++i) {
-					IMMDevice* dev = NULL;
-					if (FAILED(coll->Item(i, &dev)) || !dev) continue;
-					LPWSTR id = NULL;
-					if (FAILED(dev->GetId(&id)) || !id) { dev->Release(); continue; }
-					IPropertyStore* props = NULL;
-					CString name = id;
-					if (SUCCEEDED(dev->OpenPropertyStore(STGM_READ, &props)) && props) {
-						PROPVARIANT var;
-						PropVariantInit(&var);
-						if (SUCCEEDED(props->GetValue(PKEY_Device_FriendlyName, &var)) && var.vt == VT_LPWSTR && var.pwszVal)
-							name = var.pwszVal;
-						PropVariantClear(&var);
-						props->Release();
-					}
-					_tcsncpy(s_renderMicIds[s_renderMicCnt], id, _countof(s_renderMicIds[0]) - 1);
-					s_renderMicIds[s_renderMicCnt][_countof(s_renderMicIds[0]) - 1] = 0;
-					m_miclist.AddString(name);
-					CoTaskMemFree(id);
-					dev->Release();
-					s_renderMicCnt++;
-				}
-				coll->Release();
-			}
-			enumer->Release();
-		}
-	}
-	{
-		int sel = 0;
-		if (savedata.mic_device[0]) {
-			for (int i = 1; i < s_renderMicCnt; ++i) {
-				if (_tcscmp(s_renderMicIds[i], savedata.mic_device) == 0) { sel = i; break; }
-			}
-		} else if (savedata.mic_device_cur > 0 && savedata.mic_device_cur < s_renderMicCnt) {
-			sel = savedata.mic_device_cur;
-		}
-		m_miclist.SetCurSelPhysical(sel);
-		savedata.mic_device_cur = sel;
-		if (sel >= 0 && sel < s_renderMicCnt) {
-			_tcsncpy(savedata.mic_device, s_renderMicIds[sel], _countof(savedata.mic_device) - 1);
-			savedata.mic_device[_countof(savedata.mic_device) - 1] = 0;
-		}
-	}
+	// マイク(録音)端末: 共通列挙（savedata.mic_device）
+	AudioMicDevFillCombo(m_miclist);
 
 	if (!pGraphBuilder)
 		m_l.EnableWindow(FALSE);
@@ -986,6 +926,7 @@ void CRender::OnSize(UINT nType, int cx, int cy)
 
 void CRender::OnDestroy()
 {
+	AudioMicDevUnregisterCombo(&m_miclist);
 	if (g_rdHelpDlg && ::IsWindow(g_rdHelpDlg->GetSafeHwnd()))
 		g_rdHelpDlg->DestroyWindow();
 	CCustomBlurDialogExBase::OnDestroy();
@@ -1371,15 +1312,7 @@ void CRender::OnBnClickedOk()
 			savedata.soundguid = { 0,0,0,0 };
 		savedata.soundcur = dev;
 	}
-	{
-		int mic = m_miclist.GetCurSelPhysical();
-		if (mic < 0) mic = 0;
-		if (mic >= s_renderMicCnt) mic = 0;
-		savedata.mic_device_cur = mic;
-		_tcsncpy(savedata.mic_device, s_renderMicIds[mic], _countof(savedata.mic_device) - 1);
-		savedata.mic_device[_countof(savedata.mic_device) - 1] = 0;
-		MpMicMixRestartIfRunning();
-	}
+	AudioMicDevApplyFromCombo(m_miclist);
 	extern int gameon;
 	ReleaseRenderGrassBackdrop();
 	CCustomBlurDialogExBase::OnOK();
@@ -1387,12 +1320,7 @@ void CRender::OnBnClickedOk()
 
 void CRender::OnCbnSelchangeMic()
 {
-	int mic = m_miclist.GetCurSelPhysical();
-	if (mic < 0 || mic >= s_renderMicCnt) return;
-	savedata.mic_device_cur = mic;
-	_tcsncpy(savedata.mic_device, s_renderMicIds[mic], _countof(savedata.mic_device) - 1);
-	savedata.mic_device[_countof(savedata.mic_device) - 1] = 0;
-	MpMicMixRestartIfRunning();
+	AudioMicDevApplyFromCombo(m_miclist);
 }
 
 

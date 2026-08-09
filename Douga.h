@@ -157,6 +157,7 @@ public:
 	CDougaBarHost m_bar;
 	int m_applyBusy;       // ApplyVideoDest 再入防止
 	int m_inSizeMove;      // リサイズドラッグ中(バー子の再配置を遅延)
+	int m_closingByMain;   // gamenkill からの WM_CLOSE（ユーザー×と区別）
 
 // オーバーライド
 	// ClassWizard は仮想関数のオーバーライドを生成します。
@@ -322,6 +323,7 @@ public:
 	afx_msg void OnDougaMenuTopmost();
 	afx_msg void OnDougaMenuAspect();
 	afx_msg void OnDougaMenuSpeed(UINT nID);
+	afx_msg void OnDougaMenuClose();
 	void ApplyDougaTopmost();
 	void ShowHelpSheet();
 	void DestroyHelpSheet();

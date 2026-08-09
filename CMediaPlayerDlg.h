@@ -190,6 +190,7 @@ public:
 	CCustomCheckBox m_renzoku, m_loop, m_random;
 	CCustomCheckBox m_tip, m_mini, m_savemp3, m_saveds, m_savewav;
 	CCustomCheckBox m_micmix;
+	CCustomComboBox m_micdev;
 	CCustomSliderCtrl m_miclev;
 	CCustomStatic m_miclevL;
 	CCustomLevelMeter m_micMeter;
@@ -477,6 +478,8 @@ protected:
 	afx_msg void OnSaveWav();
 	afx_msg void OnMicMix();
 	afx_msg void OnMicMixMenuToggle();
+	afx_msg void OnCbnSelchangeMicDev();
+	afx_msg void OnAudioDevMenuRange(UINT nID);
 	afx_msg void OnMicLevRelease(NMHDR* pNMHDR, LRESULT* pResult);
 	afx_msg void OnRecord();
 	afx_msg void OnCapture();

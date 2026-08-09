@@ -2251,6 +2251,8 @@ int CPlayList::ShowTrackContextMenu(CPoint pt, CWnd* pOwner)
 			LL14(L"ラウドネス計測", L"Measure loudness", L"Mesurer loudness", L"Misura loudness", L"Medir loudness", L"라우드니스 측정", L"响度测量", L"قياس الجهارة", L"Измерить громкость", L"Lautheit messen", L"Medir loudness", L"Loudness meten", L"Zmierz glosnosc", L"Loudness olc"));
 		menu.AddCommand(PL_CTX_EXPORT_AB,
 			LL14(L"A-B を WAV 書き出し", L"Export A-B to WAV", L"Exporter A-B en WAV", L"Esporta A-B in WAV", L"Exportar A-B a WAV", L"A-B를 WAV로 내보내기", L"将 A-B 导出为 WAV", L"تصدير A-B إلى WAV", L"Экспорт A-B в WAV", L"A-B als WAV exportieren", L"Exportar A-B para WAV", L"A-B naar WAV", L"Eksport A-B do WAV", L"A-B WAV aktar"));
+		extern void MpFeatAppendChapterMenu(CCustomPopupMenu& menu, int row);
+		MpFeatAppendChapterMenu(menu, Lindex);
 		menu.AddCommand(PL_CTX_SSVIZ,
 			LL14(L"SS ビジュアライザ", L"SS visualizer", L"Visualiseur SS", L"Visualizzatore SS", L"Visualizador SS", L"SS 비주얼", L"SS 可视化", L"عارض SS", L"SS-визуализатор", L"SS-Visualizer", L"Visual SS", L"SS-visualizer", L"Wizual SS", L"SS gorsel"));
 		menu.AddCheck(PL_CTX_DESK_LRC,
@@ -2289,6 +2291,10 @@ int CPlayList::ShowTrackContextMenu(CPoint pt, CWnd* pOwner)
 			L"Quitar de la lista", L"목록에서 선택 곡 삭제(파일 유지)", L"从列表删除所选（保留文件）", L"إزالة من القائمة",
 			L"Удалить из списка", L"Aus Liste entfernen", L"Remover da lista", L"Uit lijst verwijderen",
 			L"Usun z listy", L"Listeden kaldir (dosya kalir)"));
+	menu.AddCommand(PL_CTX_UNDO_DEL,
+		LL14(L"削除を元に戻す", L"Undo delete", L"Annuler suppression", L"Annulla elimina", L"Deshacer eliminar",
+			L"삭제 실행 취소", L"撤销删除", L"تراجع عن الحذف", L"Отменить удаление", L"Löschen rückgängig",
+			L"Desfazer exclusao", L"Verwijderen ongedaan", L"Cofnij usuwanie", L"Silmeyi geri al"));
 	menu.AddCommand(PL_CTX_CLEAR_SONGPARAM,
 		LL14(L"選択曲の記憶パラメータを削除", L"Clear saved params for selection",
 			L"Effacer les parametres enregistres de la selection", L"Cancella parametri salvati della selezione",
@@ -2519,6 +2525,7 @@ void CPlayList::HandleTrackContextCmd(int cmd)
 	else if (cmd == PL_CTX_TRANSCODE) OnPopTranscode();
 	else if (cmd == PL_CTX_TAG_EDIT) OnPopTagEdit();
 	else if (cmd == PL_CTX_DEL) Del();
+	else if (cmd == PL_CTX_UNDO_DEL) UndoLastDelete();
 	else if (cmd == PL_CTX_REMOVE_MISSING) RemoveMissingFiles();
 	else if (cmd == PL_CTX_RESCAN_MISS) {
 		if (pc && playcnt > 0) {
@@ -3307,12 +3314,50 @@ void CPlayList::Del()
 	DelByIndices(sel);
 }
 
+static playlistdata0 s_plDelUndo[64];
+static int s_plDelUndoN = 0;
+static int s_plDelUndoAt = 0; // 挿入位置（削除前の先頭 index）
+
+void CPlayList::UndoLastDelete()
+{
+	if (s_plDelUndoN <= 0 || !pc) return;
+	int at = s_plDelUndoAt;
+	if (at < 0) at = 0;
+	if (at > playcnt) at = playcnt;
+	const int need = playcnt + s_plDelUndoN;
+	playlistdata0* np = (playlistdata0*)realloc(pc, (size_t)sizeof(playlistdata0) * (need + 2));
+	if (!np) return;
+	pc = np;
+	for (int i = playcnt - 1; i >= at; --i)
+		memcpy(&pc[i + s_plDelUndoN], &pc[i], sizeof(playlistdata0));
+	for (int i = 0; i < s_plDelUndoN; ++i)
+		memcpy(&pc[at + i], &s_plDelUndo[i], sizeof(playlistdata0));
+	playcnt += s_plDelUndoN;
+	s_plDelUndoN = 0;
+	if (::IsWindow(m_lc.GetSafeHwnd())) {
+		m_lc.SetItemCount(playcnt);
+		m_lc.RedrawWindow();
+	}
+	Save();
+	extern CMediaPlayerDlg* mp;
+	if (mp && ::IsWindow(mp->GetSafeHwnd()))
+		mp->RefreshList(TRUE);
+}
+
 void CPlayList::DelByIndices(const std::vector<int>& indices)
 {
 	if (!pc || playcnt <= 0 || indices.empty()) return;
 	std::vector<int> sel = indices;
 	std::sort(sel.begin(), sel.end());
 	sel.erase(std::unique(sel.begin(), sel.end()), sel.end());
+	// 1段 Undo: 昇順で最大64件を保存
+	s_plDelUndoN = 0;
+	s_plDelUndoAt = sel.empty() ? 0 : sel.front();
+	for (size_t k = 0; k < sel.size() && s_plDelUndoN < 64; ++k) {
+		const int i = sel[k];
+		if (i < 0 || i >= playcnt) continue;
+		memcpy(&s_plDelUndo[s_plDelUndoN++], &pc[i], sizeof(playlistdata0));
+	}
 	std::sort(sel.begin(), sel.end(), std::greater<int>());
 	for (int i : sel) {
 		if (i < 0 || i >= playcnt) continue;

@@ -19,10 +19,11 @@ extern TCHAR karento2[1024];
 #define PRO_EXTRA_DAT_NAME "oggYSEDbgm_ProExtra.dat"
 #endif
 
-static const int PRO_EXTRA_FILE_VER = 4;
+static const int PRO_EXTRA_FILE_VER = 5;
 static const int PRO_EXTRA_FILE_VER_V1 = 1;
 static const int PRO_EXTRA_FILE_VER_V2 = 2;
 static const int PRO_EXTRA_FILE_VER_V3 = 3;
+static const int PRO_EXTRA_FILE_VER_V4 = 4; // playCount/lastPlay まで、setChapter 無し
 
 // ---- 曲別テーブル(固定) ----
 static ProSongExtra g_extra[PRO_SONG_EXTRA_MAX];
@@ -137,13 +138,15 @@ void ProAudio_LoadExtras()
 		int ver = 0, cnt = 0;
 		if (f.Read(&ver, sizeof(int)) != sizeof(int)) { f.Close(); return; }
 		if (ver != PRO_EXTRA_FILE_VER && ver != PRO_EXTRA_FILE_VER_V1
-			&& ver != PRO_EXTRA_FILE_VER_V2 && ver != PRO_EXTRA_FILE_VER_V3) { f.Close(); return; }
+			&& ver != PRO_EXTRA_FILE_VER_V2 && ver != PRO_EXTRA_FILE_VER_V3
+			&& ver != PRO_EXTRA_FILE_VER_V4) { f.Close(); return; }
 		if (f.Read(&cnt, sizeof(int)) != sizeof(int)) { f.Close(); return; }
 		if (cnt < 0) cnt = 0;
 		if (cnt > PRO_SONG_EXTRA_MAX) cnt = PRO_SONG_EXTRA_MAX;
 		const size_t v1Size = offsetof(ProSongExtra, albumRgValid); // albumRgValid/rating 無し
 		const size_t v2Size = offsetof(ProSongExtra, rating);       // rating 無し
 		const size_t v3Size = offsetof(ProSongExtra, playCount);   // playCount/lastPlay 無し
+		const size_t v4Size = offsetof(ProSongExtra, setChapter);  // setChapter 無し
 		for (int i = 0; i < cnt; ++i) {
 			ProSongExtra e;
 			ZeroMemory(&e, sizeof(e));
@@ -161,6 +164,10 @@ void ProAudio_LoadExtras()
 				e.playCount = 0;
 				ZeroMemory(&e.lastPlay, sizeof(e.lastPlay));
 			}
+			else if (ver == PRO_EXTRA_FILE_VER_V4) {
+				if (f.Read(&e, (UINT)v4Size) != v4Size) break;
+				e.setChapter = 0;
+			}
 			else {
 				if (f.Read(&e, sizeof(e)) != sizeof(e)) break;
 			}
@@ -171,6 +178,7 @@ void ProAudio_LoadExtras()
 			if (e.rating < 0) e.rating = 0;
 			if (e.rating > 5) e.rating = 5;
 			if (e.playCount < 0) e.playCount = 0;
+			if (e.setChapter < 0 || e.setChapter > 3) e.setChapter = 0;
 			g_extra[g_extraCount++] = e;
 		}
 	}

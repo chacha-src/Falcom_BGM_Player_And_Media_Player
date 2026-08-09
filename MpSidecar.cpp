@@ -13,7 +13,7 @@ extern TCHAR karento2[1024];
 #endif
 
 static const int MP_HIST_FILE_VER = 1;
-static const int MP_SMART_FILE_VER = 1;
+static const int MP_SMART_FILE_VER = 2;
 
 static MpHistEntry g_hist[MP_HIST_MAX];
 static int g_histCnt = 0;
@@ -205,14 +205,20 @@ void MpSmart_Load()
 	try {
 		int ver = 0, cnt = 0;
 		if (f.Read(&ver, sizeof(int)) != sizeof(int)) { f.Close(); return; }
-		if (ver != MP_SMART_FILE_VER) { f.Close(); return; }
+		if (ver != 1 && ver != MP_SMART_FILE_VER) { f.Close(); return; }
 		if (f.Read(&cnt, sizeof(int)) != sizeof(int)) { f.Close(); return; }
 		if (cnt < 0) cnt = 0;
 		if (cnt > MP_SMART_MAX) cnt = MP_SMART_MAX;
+		const size_t v1Size = offsetof(MpSmartRule, bpmMin);
 		for (int i = 0; i < cnt; ++i) {
 			MpSmartRule r;
 			ZeroMemory(&r, sizeof(r));
-			if (f.Read(&r, sizeof(r)) != sizeof(r)) break;
+			if (ver == 1) {
+				if (f.Read(&r, (UINT)v1Size) != v1Size) break;
+				r.bpmMin = 60; r.bpmMax = 180; r.camelotWant = 0;
+			} else {
+				if (f.Read(&r, sizeof(r)) != sizeof(r)) break;
+			}
 			r.name[_countof(r.name) - 1] = 0;
 			r.artist[_countof(r.artist) - 1] = 0;
 			g_smart[g_smartCnt++] = r;
@@ -299,6 +305,7 @@ void MpSmart_EnsureDefaults()
 	a.ratingMin = 1;
 	a.hourFrom = 0; a.hourTo = 23;
 	a.playCountMax = 0;
+	a.bpmMin = 60; a.bpmMax = 180;
 	MpSmart_Add(a);
 	MpSmartRule b; ZeroMemory(&b, sizeof(b));
 	_tcscpy_s(b.name, _T("Missing"));
@@ -306,7 +313,20 @@ void MpSmart_EnsureDefaults()
 	b.enabled = 1;
 	b.ratingMin = 1;
 	b.hourFrom = 0; b.hourTo = 23;
+	b.bpmMin = 60; b.bpmMax = 180;
 	MpSmart_Add(b);
+	MpSmartRule c; ZeroMemory(&c, sizeof(c));
+	_tcscpy_s(c.name, _T("NoJacket"));
+	c.flags = MP_SMART_NO_JACKET;
+	c.enabled = 1;
+	c.bpmMin = 60; c.bpmMax = 180;
+	MpSmart_Add(c);
+	MpSmartRule d; ZeroMemory(&d, sizeof(d));
+	_tcscpy_s(d.name, _T("BPM90-130"));
+	d.flags = MP_SMART_BPM_RANGE;
+	d.enabled = 1;
+	d.bpmMin = 90; d.bpmMax = 130;
+	MpSmart_Add(d);
 }
 
 CString MpSmart_UiLabel(const MpSmartRule& r)

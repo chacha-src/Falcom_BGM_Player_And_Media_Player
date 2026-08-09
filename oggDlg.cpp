@@ -24,6 +24,7 @@ int flacmode = 0;
 #include "mp3info.h"
 #include "ogg.h"
 #include "oggDlg.h"
+#include "AudioDevSync.h"
 #include "CEqualizer.h"
 #include "CPianoRoll.h"
 #include "CPianoRollTuneDlg.h"
@@ -1065,6 +1066,7 @@ END_MESSAGE_MAP()
 
 class CKpiLoadingWnd;
 static CKpiLoadingWnd* g_pActiveLoadingWnd = NULL;
+int g_oggKpiLoading = 0; // 1=KPI読み込み中（タスクバー不定進捗用。他UIからも参照）
 static int g_nCurrentKpiIndex = 0;
 // KPI 読み込み中に二重起動インスタンスから WM_APP+1(再生要求)が届いた場合の遅延フラグ。
 // 読み込み中に play() をネスト実行させず、plug() 完了後に再ポストして処理する。
@@ -1537,6 +1539,7 @@ void COggDlg::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDC_CHECK_MICMIX, m_micmix);
 	DDX_Control(pDX, IDC_SLIDER_MICLEV, m_miclev);
 	DDX_Control(pDX, IDC_STATIC_MICLEV, m_miclevs);
+	DDX_Control(pDX, IDC_OGG_MICDEV, m_micdev);
 	DDX_Control(pDX, IDC_STATIC11, m_11);
 	//}}AFX_DATA_MAP
 	DDX_Control(pDX, IDC_CHECK16, m_xa);
@@ -1665,6 +1668,7 @@ BEGIN_MESSAGE_MAP(COggDlg, CCustomBlurDialogBase)
 	ON_MESSAGE(WM_OGG_ENTER_MP_MODE, &COggDlg::OnEnterMpModeMsg)
 	ON_MESSAGE(WM_OGG_TOGGLE_SUBUI, &COggDlg::OnToggleSubUiMsg)
 	ON_MESSAGE(WM_PLAYBACK_AUTO_STOPPED, OnPlaybackAutoStopped)
+	ON_MESSAGE(WM_OGG_CLOSE_DOUGA, OnCloseDougaMsg)
 	ON_WM_COPYDATA()
 	ON_WM_KEYDOWN()
 	ON_WM_SYSKEYDOWN()
@@ -1686,6 +1690,7 @@ BEGIN_MESSAGE_MAP(COggDlg, CCustomBlurDialogBase)
 	ON_WM_WINDOWPOSCHANGING()
 	ON_BN_CLICKED(IDC_BUTTON58, &COggDlg::OnBnmp3jake)
 	ON_BN_CLICKED(IDC_CHECK_MICMIX, &COggDlg::OnMicMixCheck)
+	ON_CBN_SELCHANGE(IDC_OGG_MICDEV, &COggDlg::OnCbnSelchangeMicDev)
 	ON_NOTIFY(NM_RELEASEDCAPTURE, IDC_SLIDER_MICLEV, &COggDlg::OnMicLevRelease)
 	ON_WM_DESTROY()
 	ON_WM_CREATE()
@@ -3904,7 +3909,7 @@ BOOL COggDlg::OnInitDialog()
 	CoCreateInstance(CLSID_TaskbarList, NULL, CLSCTX_INPROC_SERVER, IID_ITaskbarList3, (void**)&ptl);
 	if (ptl) {
 		ptl->HrInit();
-		ptl->SetProgressState(m_hWnd, TBPF_NOPROGRESS | TBPF_NORMAL);
+		ptl->SetProgressState(m_hWnd, TBPF_NOPROGRESS);
 		SetTimer(5219, 200, NULL);
 	}
 	pcdl = NULL;
@@ -3980,9 +3985,13 @@ BOOL COggDlg::OnInitDialog()
 	loadingWnd.Create(NULL);
 	loadingWnd.Show();
 	g_pActiveLoadingWnd = &loadingWnd;
+	g_oggKpiLoading = 1;
 	g_nCurrentKpiIndex = 0;
+	if (ptl) ptl->SetProgressState(m_hWnd, TBPF_INDETERMINATE);
 	plug(karento2, NULL);
 	g_pActiveLoadingWnd = NULL;
+	g_oggKpiLoading = 0;
+	if (ptl) ptl->SetProgressState(m_hWnd, TBPF_NOPROGRESS);
 	loadingWnd.DestroyWindow();
 	// 読み込み中に届いた再生要求(WM_APP+1)を今から処理する。
 	// PostMessage なので OnInitDialog 完了後に通常のメッセージループで実行される。
@@ -21410,8 +21419,13 @@ void COggDlg::timerp()
 		pMediaPosition->get_CurrentPosition(&aa);
 		m_time.SetPos((int)(aa * 100));
 		if (ptl) {
-			ptl->SetProgressState(m_hWnd, TBPF_NORMAL);
-			ptl->SetProgressValue(m_hWnd, (LONGLONG)aa, (LONGLONG)aa1);
+			if (g_oggKpiLoading) {
+				ptl->SetProgressState(m_hWnd, TBPF_INDETERMINATE);
+			}
+			else {
+				ptl->SetProgressState(m_hWnd, (ps == 1) ? TBPF_PAUSED : TBPF_NORMAL);
+				ptl->SetProgressValue(m_hWnd, (LONGLONG)aa, (LONGLONG)aa1);
+			}
 		}
 	}
 	else if (plf && hsc == 0) {
@@ -21486,11 +21500,16 @@ void COggDlg::timerp()
 		g_seekAppliedRate = rate;
 
 		if (ptl) {
-			ptl->SetProgressState(m_hWnd, TBPF_NORMAL);
-			if (posMode == -10)
-				ptl->SetProgressValue(m_hWnd, (LONGLONG)pb, (LONGLONG)ogs);
-			else
-				ptl->SetProgressValue(m_hWnd, (LONGLONG)pb, (LONGLONG)ogs / (wavsam_depth / 4));
+			if (g_oggKpiLoading) {
+				ptl->SetProgressState(m_hWnd, TBPF_INDETERMINATE);
+			}
+			else {
+				ptl->SetProgressState(m_hWnd, (ps == 1) ? TBPF_PAUSED : TBPF_NORMAL);
+				if (posMode == -10)
+					ptl->SetProgressValue(m_hWnd, (LONGLONG)pb, (LONGLONG)ogs);
+				else
+					ptl->SetProgressValue(m_hWnd, (LONGLONG)pb, (LONGLONG)ogs / (wavsam_depth / 4));
+			}
 		}
 	}
 	// MP: playb 更新と同じ UI ターンでシークを追従(Timer3 の遅延 Invalidate を避ける)
@@ -22929,6 +22948,7 @@ void COggDlg::gamenkill()
 		pMainFrame1->GetWindowRect(&r);
 		savedata.gx = r.left;
 		savedata.gy = r.top;
+		pMainFrame1->m_closingByMain = 1;
 		pMainFrame1->stop();
 		::SendMessage(pMainFrame1->m_hWnd, WM_CLOSE, NULL, NULL);
 		//		delete pMainFrame1;
@@ -22938,6 +22958,27 @@ void COggDlg::gamenkill()
 		pMainFrame1 = NULL;
 		//		for(int i=0;i<20;i++){DoEvent();Sleep(5);};
 	}
+}
+
+// タイトルバー× / 右クリック「動画画面を閉じる」
+// 動画専用再生(mode==-2 / videoonly)は停止も。ゲーム合成の動画窓だけなら画面だけ消す。
+void COggDlg::CloseVideoScreen()
+{
+	if (pMainFrame1 == NULL)
+		return;
+	if (mode == -2 || videoonly) {
+		randomf = 0;
+		m_rund.EnableWindow(TRUE);
+		stop();
+		return;
+	}
+	gamenkill();
+}
+
+LRESULT COggDlg::OnCloseDougaMsg(WPARAM, LPARAM)
+{
+	CloseVideoScreen();
+	return 0;
 }
 
 void COggDlg::dougaplay(int uu, CString ss)
@@ -26385,6 +26426,15 @@ void COggDlg::SyncMicMixUiFromSavedata()
 		m_miclev.SetPos(lv);
 	}
 	ApplyMicMixLevelLabel();
+	if (m_micdev.GetSafeHwnd()) {
+		if (m_micdev.GetCount() <= 0) AudioMicDevFillCombo(m_micdev);
+		else AudioMicDevSyncComboSel(m_micdev);
+	}
+}
+
+void COggDlg::OnCbnSelchangeMicDev()
+{
+	AudioMicDevApplyFromCombo(m_micdev);
 }
 
 void COggDlg::OnMicMixCheck()

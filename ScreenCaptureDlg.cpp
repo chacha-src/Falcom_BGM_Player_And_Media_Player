@@ -6,6 +6,7 @@
 #include "ogg.h"
 #include "oggDlg.h"
 #include "ScreenCaptureDlg.h"
+#include "AudioDevSync.h"
 #include "ScWgcCapture.h"
 #include "CMediaPlayerDlg.h"
 #include <mmdeviceapi.h>
@@ -605,6 +606,109 @@ static BOOL ScCaptureMonitorFast(HMONITOR mon, const RECT& mr, ScFrameBuf& out, 
 	return ScCaptureMonitorRectGdi(mr, out);
 }
 
+// 画面座標→キャンバスへマウスカーソルを載せる（FX後に呼ぶ）
+static void ScDrawCursorAt(HDC hdc, int dx, int dy, double sx, double sy, HCURSOR hCursor)
+{
+	if (!hdc || !hCursor) return;
+	ICONINFO ii = {};
+	int hotX = 0, hotY = 0;
+	if (::GetIconInfo(hCursor, &ii)) {
+		hotX = (int)ii.xHotspot;
+		hotY = (int)ii.yHotspot;
+		if (ii.hbmMask) ::DeleteObject(ii.hbmMask);
+		if (ii.hbmColor) ::DeleteObject(ii.hbmColor);
+	}
+	const int iw = ::GetSystemMetrics(SM_CXCURSOR);
+	const int ih = ::GetSystemMetrics(SM_CYCURSOR);
+	int dw = (int)(iw * sx + 0.5);
+	int dh = (int)(ih * sy + 0.5);
+	if (dw < 8) dw = 8;
+	if (dh < 8) dh = 8;
+	const int ox = dx - (int)(hotX * sx + 0.5);
+	const int oy = dy - (int)(hotY * sy + 0.5);
+	::DrawIconEx(hdc, ox, oy, hCursor, dw, dh, 0, NULL, DI_NORMAL);
+}
+
+static void ScOverlayCursorOnFrame(HDC hdc, int canvasW, int canvasH,
+	int srcL, int srcT, int srcR, int srcB)
+{
+	if (!hdc || canvasW < 2 || canvasH < 2 || srcR <= srcL || srcB <= srcT)
+		return;
+	CURSORINFO ci = {};
+	ci.cbSize = sizeof(ci);
+	if (!::GetCursorInfo(&ci) || !(ci.flags & CURSOR_SHOWING) || !ci.hCursor)
+		return;
+	const double sx = (double)canvasW / (double)(srcR - srcL);
+	const double sy = (double)canvasH / (double)(srcB - srcT);
+	const int cx = (int)((ci.ptScreenPos.x - srcL) * sx + 0.5);
+	const int cy = (int)((ci.ptScreenPos.y - srcT) * sy + 0.5);
+	if (cx < -64 || cy < -64 || cx > canvasW + 64 || cy > canvasH + 64)
+		return;
+	ScDrawCursorAt(hdc, cx, cy, sx, sy, ci.hCursor);
+}
+
+static BOOL ScTryMapCursorOntoLayer(HWND hwnd, int lx, int ly, int lw, int lh,
+	int srcX, int srcY, int srcW, int srcH, POINT pt,
+	int* outCx, int* outCy, double* outSx, double* outSy)
+{
+	if (!hwnd || !::IsWindow(hwnd) || lw < 1 || lh < 1 || !outCx || !outCy || !outSx || !outSy)
+		return FALSE;
+	RECT wr = {};
+	if (!::GetWindowRect(hwnd, &wr))
+		return FALSE;
+	const int ww = wr.right - wr.left;
+	const int wh = wr.bottom - wr.top;
+	if (ww < 1 || wh < 1) return FALSE;
+	const int cx0 = (srcW > 0) ? srcX : 0;
+	const int cy0 = (srcH > 0) ? srcY : 0;
+	const int cw = (srcW > 0) ? srcW : ww;
+	const int ch = (srcH > 0) ? srcH : wh;
+	if (cw < 1 || ch < 1) return FALSE;
+	const int left = wr.left + cx0;
+	const int top = wr.top + cy0;
+	const int right = left + cw;
+	const int bottom = top + ch;
+	if (pt.x < left || pt.x >= right || pt.y < top || pt.y >= bottom)
+		return FALSE;
+	const double sx = (double)lw / (double)cw;
+	const double sy = (double)lh / (double)ch;
+	*outCx = lx + (int)((pt.x - left) * sx + 0.5);
+	*outCy = ly + (int)((pt.y - top) * sy + 0.5);
+	*outSx = sx;
+	*outSy = sy;
+	return TRUE;
+}
+
+static void ScOverlayCursorComposeWindows(HDC hdc, const CScreenCaptureDlg::ComposeSnap& snap)
+{
+	if (!hdc) return;
+	CURSORINFO ci = {};
+	ci.cbSize = sizeof(ci);
+	if (!::GetCursorInfo(&ci) || !(ci.flags & CURSOR_SHOWING) || !ci.hCursor)
+		return;
+	int cx = 0, cy = 0;
+	double sx = 1.0, sy = 1.0;
+	BOOL hit = FALSE;
+	// 手前(index 0)から探す
+	for (int i = 0; i < snap.layerCnt; ++i) {
+		const CScreenCaptureDlg::Layer& L = snap.layers[i];
+		if (L.hidden) continue;
+		if (ScIsExcludedHwnd(L.hwnd, snap.excludeHwnd)) continue;
+		if (ScTryMapCursorOntoLayer(L.hwnd, L.x, L.y, L.w, L.h,
+			L.srcX, L.srcY, L.srcW, L.srcH, ci.ptScreenPos, &cx, &cy, &sx, &sy)) {
+			hit = TRUE;
+			break;
+		}
+	}
+	if (!hit && snap.includeMp && !snap.mpHidden) {
+		hit = ScTryMapCursorOntoLayer(snap.mpHwnd, snap.mpX, snap.mpY, snap.mpW, snap.mpH,
+			snap.mpSrcX, snap.mpSrcY, snap.mpSrcW, snap.mpSrcH,
+			ci.ptScreenPos, &cx, &cy, &sx, &sy);
+	}
+	if (!hit) return;
+	ScDrawCursorAt(hdc, cx, cy, sx, sy, ci.hCursor);
+}
+
 static BOOL ScComposeFrame(ScFrameBuf& out, const CScreenCaptureDlg::ComposeSnap& snap, BOOL forceGdi)
 {
 	int cw = snap.canvasW;
@@ -632,6 +736,8 @@ static BOOL ScComposeFrame(ScFrameBuf& out, const CScreenCaptureDlg::ComposeSnap
 		BOOL ok = ScCaptureMonitorFast(mon, mr, out, forceGdi);
 		if (ok && snap.fxN > 0 && out.bits)
 			ScGpuApplyEffectChain(out.bits, out.w, out.h, out.stride, snap.fx, snap.fxN, snap.fxTime, snap.fxStr);
+		if (ok && snap.showCursor && out.hdc)
+			ScOverlayCursorOnFrame(out.hdc, out.w, out.h, mr.left, mr.top, mr.right, mr.bottom);
 		return ok;
 	}
 
@@ -647,6 +753,8 @@ static BOOL ScComposeFrame(ScFrameBuf& out, const CScreenCaptureDlg::ComposeSnap
 		BOOL ok = ScCaptureMonitorRectGdi(vr, out);
 		if (ok && snap.fxN > 0 && out.bits)
 			ScGpuApplyEffectChain(out.bits, out.w, out.h, out.stride, snap.fx, snap.fxN, snap.fxTime, snap.fxStr);
+		if (ok && snap.showCursor && out.hdc)
+			ScOverlayCursorOnFrame(out.hdc, out.w, out.h, vr.left, vr.top, vr.right, vr.bottom);
 		return ok;
 	}
 
@@ -676,6 +784,8 @@ static BOOL ScComposeFrame(ScFrameBuf& out, const CScreenCaptureDlg::ComposeSnap
 	}
 	if (snap.fxN > 0 && out.bits)
 		ScGpuApplyEffectChain(out.bits, out.w, out.h, out.stride, snap.fx, snap.fxN, snap.fxTime, snap.fxStr);
+	if (snap.showCursor && out.hdc)
+		ScOverlayCursorComposeWindows(out.hdc, snap);
 	return TRUE;
 }
 
@@ -2281,7 +2391,11 @@ void CScHelpDlg::OnPaint()
 	body(L, y, LL14(L"・音声 …… システム音 / マイク。右側の棒はピークメータ", L"· Audio …… system / mic. Right bars = peak meters", L"· Audio …… système / micro. Barres = crêtes", L"· Audio …… sistema / micro. Barre = picchi",
 		L"· Audio …… sistema / mic. Barras = picos", L"· 오디오 …… 시스템/마이크. 막대=피크", L"· 音频 …… 系统/麦克风。右侧=峰值", L"· صوت …… نظام/ميك. الأشرطة=قمم",
 		L"· Звук …… система / микрофон. Полосы = пики", L"· Audio …… System / Mikro. Balken = Pegel", L"· Áudio …… sistema / micro. Barras = picos", L"· Audio …… systeem / mic. Balken = pieken",
-		L"· Dźwięk …… system / mik. Paski = szczyty", L"· Ses …… sistem / mik. Çubuklar = tepe")); y += lh + 4;
+		L"· Dźwięk …… system / mik. Paski = szczyty", L"· Ses …… sistem / mik. Çubuklar = tepe")); y += lh;
+	body(L, y, LL14(L"・マウスカーソル …… チェックで録画・プレビューに載せる／外す", L"· Mouse cursor …… checkbox to include/exclude in preview & recording", L"· Curseur …… case pour inclure/exclure aperçu et enregistrement", L"· Cursore …… casella per includere/escludere anteprima e registrazione",
+		L"· Cursor …… casilla para incluir/excluir en vista y grabación", L"· 마우스 커서 …… 체크로 미리보기·녹화에 포함/제외", L"· 鼠标光标 …… 勾选以在预览/录制中包含或排除", L"· مؤشر الفأرة …… خانة لتضمين/استبعاد في المعاينة والتسجيل",
+		L"· Курсор …… галочка — показать/скрыть в превью и записи", L"· Mauszeiger …… Haken = in Vorschau/Aufnahme ein-/ausblenden", L"· Cursor …… caixa para incluir/excluir na prévia e gravação", L"· Muiscursor …… vinkje om in voorbeeld/opname te tonen/verbergen",
+		L"· Kursor …… zaznaczenie = pokaż/ukryj w podglądzie i nagraniu", L"· Fare imleci …… onay kutusu ile önizleme/kayıtta göster/gizle")); y += lh + 4;
 
 	// mini wiring diagram
 	title(L, y, LL14(L"FX配線", L"FX wiring", L"Câblage FX", L"Cablaggio FX", L"Cableado FX", L"FX 배선", L"效果连线", L"توصيل FX",
@@ -2474,6 +2588,10 @@ void CScreenCaptureDlg::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDC_SC_EFFECT, m_effect);
 	DDX_Control(pDX, IDC_SC_AUDIO, m_audio);
 	DDX_Control(pDX, IDC_SC_MIC, m_mic);
+	DDX_Control(pDX, IDC_SC_MICDEV_L, m_micDevLabel);
+	DDX_Control(pDX, IDC_SC_MICDEV, m_micDev);
+	DDX_Control(pDX, IDC_SC_LOOPDEV_L, m_loopDevLabel);
+	DDX_Control(pDX, IDC_SC_LOOPDEV, m_loopDev);
 	DDX_Control(pDX, IDC_SC_METER_MIC_L, m_meterMicL);
 	DDX_Control(pDX, IDC_SC_METER_SYS_L, m_meterSysL);
 	DDX_Control(pDX, IDC_SC_METER_MIX_L, m_meterMixL);
@@ -2481,6 +2599,7 @@ void CScreenCaptureDlg::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDC_SC_METER_SYS, m_meterSys);
 	DDX_Control(pDX, IDC_SC_METER_MIX, m_meterMix);
 	DDX_Control(pDX, IDC_SC_INCMP, m_includeMp);
+	DDX_Control(pDX, IDC_SC_CURSOR, m_showCursor);
 	DDX_Control(pDX, IDC_SC_PICK, m_pick);
 	DDX_Control(pDX, IDC_SC_REFRESH, m_refresh);
 	DDX_Control(pDX, IDC_SC_AVAIL_L, m_availLabel);
@@ -2533,7 +2652,10 @@ BEGIN_MESSAGE_MAP(CScreenCaptureDlg, CCustomBlurDialogBase)
 	ON_BN_CLICKED(IDC_SC_SCALE100, &CScreenCaptureDlg::OnBnClickedScale100)
 	ON_BN_CLICKED(IDC_SC_TILE, &CScreenCaptureDlg::OnBnClickedTile)
 	ON_BN_CLICKED(IDC_SC_INCMP, &CScreenCaptureDlg::OnBnClickedIncludeMp)
+	ON_BN_CLICKED(IDC_SC_CURSOR, &CScreenCaptureDlg::OnBnClickedShowCursor)
 	ON_BN_CLICKED(IDC_SC_MIC, &CScreenCaptureDlg::OnBnClickedMic)
+	ON_CBN_SELCHANGE(IDC_SC_MICDEV, &CScreenCaptureDlg::OnCbnSelchangeMicDev)
+	ON_CBN_SELCHANGE(IDC_SC_LOOPDEV, &CScreenCaptureDlg::OnCbnSelchangeLoopDev)
 	ON_CBN_SELCHANGE(IDC_SC_MODE, &CScreenCaptureDlg::OnCbnSelchangeMode)
 	ON_CBN_SELCHANGE(IDC_SC_CANVAS, &CScreenCaptureDlg::OnCbnSelchangeCanvas)
 	ON_CBN_SELCHANGE(IDC_SC_FPS, &CScreenCaptureDlg::OnCbnSelchangeFps)
@@ -2848,6 +2970,8 @@ void CScreenCaptureDlg::BuildComposeSnap(ComposeSnap& out) const
 	const BOOL wantMp = (m_includeMp.GetSafeHwnd()
 		&& const_cast<CCustomCheckBox&>(m_includeMp).GetCheck());
 	out.includeMp = wantMp;
+	out.showCursor = (m_showCursor.GetSafeHwnd()
+		&& const_cast<CCustomCheckBox&>(m_showCursor).GetCheck()) ? TRUE : FALSE;
 	out.mpHidden = FALSE;
 	out.mpHwnd = FindMediaPlayerHwnd();
 
@@ -4048,6 +4172,7 @@ void CScreenCaptureDlg::PersistUiToSavedata()
 	savedata.cap_with_audio = m_audio.GetCheck() ? 1 : 0;
 	savedata.cap_with_mic = m_mic.GetCheck() ? 1 : 0;
 	savedata.cap_include_mp = m_includeMp.GetCheck() ? 1 : 0;
+	savedata.cap_show_cursor = m_showCursor.GetCheck() ? 1 : 0;
 	savedata.cap_fps = CurrentPreviewFps();
 	int monIdx = 0;
 	int mode = ModeComboToSavedMode(m_mode.GetCurSel(), monIdx);
@@ -4377,6 +4502,23 @@ void CScreenCaptureDlg::OnBnClickedIncludeMp()
 {
 	if (m_uiLocked) return;
 	SyncMpLayerFromCheck();
+}
+
+void CScreenCaptureDlg::OnBnClickedShowCursor()
+{
+	if (m_uiLocked) return;
+	PersistUiToSavedata();
+	UpdatePreview(TRUE);
+}
+
+void CScreenCaptureDlg::OnCbnSelchangeMicDev()
+{
+	AudioMicDevApplyFromCombo(m_micDev);
+}
+
+void CScreenCaptureDlg::OnCbnSelchangeLoopDev()
+{
+	AudioLoopDevApplyFromCombo(m_loopDev);
 }
 
 void CScreenCaptureDlg::OnBnClickedMic()
@@ -4991,6 +5133,7 @@ BOOL CScreenCaptureDlg::OnInitDialog()
 	m_audio.SetAeroMode(FALSE);
 	m_mic.SetAeroMode(FALSE);
 	m_includeMp.SetAeroMode(FALSE);
+	m_showCursor.SetAeroMode(FALSE);
 	m_fps.SetAeroMode(FALSE);
 	m_effect.SetAeroMode(FALSE);
 	m_fxPre.SetAeroMode(FALSE);
@@ -5037,6 +5180,11 @@ BOOL CScreenCaptureDlg::OnInitDialog()
 		L"Incluir MP", L"MP 포함", L"放入MP", L"تضمين MP",
 		L"Включить MP", L"MP einbeziehen", L"Incluir MP", L"MP opnemen",
 		L"Dołącz MP", L"MP ekle"));
+	m_showCursor.SetWindowText(LL14(
+		L"マウスカーソルを載せる", L"Include mouse cursor", L"Inclure le curseur", L"Includi cursore",
+		L"Incluir cursor", L"마우스 커서 포함", L"包含鼠标光标", L"تضمين مؤشر الفأرة",
+		L"Включить курсор", L"Mauszeiger einbeziehen", L"Incluir cursor", L"Muiscursor opnemen",
+		L"Dołącz kursor myszy", L"Fare imlecini ekle"));
 	m_availLabel.SetWindowText(LL14(L"ウィンドウ一覧", L"Windows", L"Fenêtres", L"Finestre", L"Ventanas", L"창 목록", L"窗口列表", L"النوافذ",
 		L"Окна", L"Fenster", L"Janelas", L"Vensters", L"Okna", L"Pencereler"));
 	m_layerLabel.SetWindowText(LL14(L"合成レイヤ (上が手前)", L"Layers (top = front)", L"Calques (haut = avant)", L"Livelli (alto = davanti)",
@@ -5099,7 +5247,12 @@ BOOL CScreenCaptureDlg::OnInitDialog()
 
 	m_audio.SetCheck(savedata.cap_with_audio ? BST_CHECKED : BST_UNCHECKED);
 	m_mic.SetCheck(savedata.cap_with_mic ? BST_CHECKED : BST_UNCHECKED);
+	AudioMicDevFillCombo(m_micDev);
+	AudioLoopDevFillCombo(m_loopDev);
+	m_micDevLabel.SetWindowText(LL14(L"マイク", L"Mic", L"Micro", L"Micro", L"Micro", L"마이크", L"麦克风", L"ميكروفون", L"Микрофон", L"Mikrofon", L"Microfone", L"Microfoon", L"Mikrofon", L"Mikrofon"));
+	m_loopDevLabel.SetWindowText(LL14(L"システム", L"System", L"Système", L"Sistema", L"Sistema", L"시스템", L"系统", L"النظام", L"Система", L"System", L"Sistema", L"Systeem", L"System", L"Sistem"));
 	m_includeMp.SetCheck(savedata.cap_include_mp ? BST_CHECKED : BST_UNCHECKED);
+	m_showCursor.SetCheck(savedata.cap_show_cursor ? BST_CHECKED : BST_UNCHECKED);
 
 	static const int fpsTab[] = { 10, 15, 20, 24, 30, 60, 90, 120 };
 	int fpsSel = 1;
@@ -5305,6 +5458,21 @@ BOOL CScreenCaptureDlg::OnInitDialog()
 			L"Voegt MP toe. Alleen audio: rechtsklik voorbeeld → Hide (aan laten)",
 			L"Dodaje MP. Tylko dźwięk: PPM podgląd → Hide (zostaw zaznaczone)",
 			L"MP penceresi ekler. Yalnızca ses: sağ tık önizleme → Hide (işaretli kalsın)"));
+		m_tooltip.AddTool(&m_showCursor, LL14(
+			L"録画・プレビューにマウスカーソルを載せます（オフなら非表示）",
+			L"Include the mouse cursor in preview/recording (off = hidden)",
+			L"Inclut le curseur dans l'aperçu/l'enregistrement (off = masqué)",
+			L"Include il cursore in anteprima/registrazione (off = nascosto)",
+			L"Incluye el cursor en vista previa/grabación (off = oculto)",
+			L"미리보기/녹화에 마우스 커서를 포함 (끄면 숨김)",
+			L"在预览/录制中包含鼠标光标（关闭则隐藏）",
+			L"يضمّن مؤشر الفأرة في المعاينة/التسجيل (إيقاف=إخفاء)",
+			L"Показывать курсор в превью/записи (выкл = скрыт)",
+			L"Mauszeiger in Vorschau/Aufnahme (aus = verborgen)",
+			L"Inclui o cursor na prévia/gravação (off = oculto)",
+			L"Muiscursor in voorbeeld/opname (uit = verborgen)",
+			L"Kursor myszy w podglądzie/nagraniu (wył. = ukryty)",
+			L"Önizleme/kayıtta fare imleci (kapalı = gizli)"));
 		m_tooltip.AddTool(&m_pick, LL14(
 			L"次にクリックしたウィンドウをレイヤに追加します",
 			L"Next click adds that window as a layer",
@@ -6841,8 +7009,12 @@ void CScreenCaptureDlg::ApplySavedataToUi(BOOL gameGuide)
 		m_audio.SetCheck(savedata.cap_with_audio ? BST_CHECKED : BST_UNCHECKED);
 	if (m_mic.GetSafeHwnd())
 		m_mic.SetCheck(savedata.cap_with_mic ? BST_CHECKED : BST_UNCHECKED);
+		AudioMicDevSyncComboSel(m_micDev);
+		AudioLoopDevSyncComboSel(m_loopDev);
 	if (m_includeMp.GetSafeHwnd())
 		m_includeMp.SetCheck(savedata.cap_include_mp ? BST_CHECKED : BST_UNCHECKED);
+	if (m_showCursor.GetSafeHwnd())
+		m_showCursor.SetCheck(savedata.cap_show_cursor ? BST_CHECKED : BST_UNCHECKED);
 
 	static const int fpsTab[] = { 10, 15, 20, 24, 30, 60, 90, 120 };
 	int fpsSel = 1;
@@ -6932,6 +7104,8 @@ void CScreenCaptureDlg::OnTimer(UINT_PTR nIDEvent)
 
 void CScreenCaptureDlg::OnDestroy()
 {
+	AudioMicDevUnregisterCombo(&m_micDev);
+	AudioLoopDevUnregisterCombo(&m_loopDev);
 	::RemoveProp(m_hWnd, CCUSTOM_POPUP_RELAX_DISMISS_PROP);
 	KillTimer(SC_TIMER_PREV);
 	KillTimer(SC_TIMER_UI);

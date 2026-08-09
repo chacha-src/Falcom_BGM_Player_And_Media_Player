@@ -341,6 +341,10 @@ void CDougaHelpDlg::OnPaint()
 		L"· Siempre visible …… clic der. Sobre otras ventanas", L"· 항상 위에 …… 우클릭. 다른 창 위에 고정", L"· 总在最前 …… 右键。固定在其他窗口之上", L"· دائماً في المقدمة …… يمين. فوق النوافذ الأخرى",
 		L"· Поверх всех …… ПКМ. Над другими окнами", L"· Immer im Vordergrund …… Rechtsklick. Über anderen Fenstern", L"· Sempre visível …… direito. Acima das outras janelas", L"· Altijd op voorgrond …… rechtsklik. Boven andere vensters",
 		L"· Zawsze na wierzchu …… PPM. Nad innymi oknami", L"· Her zaman üstte …… sağ tık. Diğer pencerelerin üstünde")); y += lh;
+	body(L, y, LL14(L"・動画画面を閉じる …… タイトルバーの×、または右クリック。動画専用なら再生も停止", L"· Close video window …… title-bar × or right-click. Also stops playback for video-only", L"· Fermer l'ecran …… × barre titre ou clic droit. Arrete aussi en lecture video seule", L"· Chiudi finestra …… × barra titolo o destro. Ferma anche in solo video",
+		L"· Cerrar pantalla …… × de titulo o clic der. Tambien detiene en solo video", L"· 동영상 화면 닫기 …… 제목 표시줄 × 또는 우클릭. 동영상 전용이면 재생도 중지", L"· 关闭视频窗口 …… 标题栏×或右键。仅视频时也会停止播放", L"· إغلاق الشاشة …… × شريط العنوان أو يمين. يوقف أيضاً عند الفيديو فقط",
+		L"· Закрыть окно …… × заголовка или ПКМ. Для только-видео также стоп", L"· Videofenster …… × Titelleiste oder Rechtsklick. Bei Nur-Video auch Stop", L"· Fechar janela …… × da barra ou direito. Em so-video tambem para", L"· Videovenster …… × titelbalk of rechtsklik. Bij alleen-video ook stop",
+		L"· Zamknij okno …… × paska lub PPM. Przy samym wideo tez stop", L"· Video penceresi …… baslik × veya sag tik. Sadece videoda oynatmayi da durdurur")); y += lh;
 	body(L, y, LL14(L"・再生速度 …… バー右のスライダー／右クリック。0.1x〜4.0x（テンポ連動）", L"· Playback speed …… bar slider / right-click. 0.1x–4.0x (tempo sync)", L"· Vitesse …… curseur / clic droit. 0,1x–4,0x (tempo)", L"· Velocità …… cursore / destro. 0.1x–4.0x (tempo)",
 		L"· Velocidad …… control / clic der. 0.1x–4.0x (tempo)", L"· 재생 속도 …… 바 슬라이더/우클릭. 0.1x–4.0x (템포 연동)", L"· 播放速度 …… 栏滑块/右键。0.1x–4.0x（速度联动）", L"· السرعة …… شريط / يمين. 0.1x–4.0x",
 		L"· Скорость …… слайдер / ПКМ. 0.1x–4.0x (темп)", L"· Geschwindigkeit …… Leiste / RMB. 0,1x–4,0x", L"· Velocidade …… barra / direito. 0,1x–4,0x", L"· Snelheid …… balk / rechtsklik. 0,1x–4,0x",
@@ -397,6 +401,7 @@ IMPLEMENT_DYNCREATE(CDouga, CFrameWnd)
 CDouga::CDouga()
 	: m_applyBusy(0)
 	, m_inSizeMove(0)
+	, m_closingByMain(0)
 {
 }
 
@@ -1740,6 +1745,7 @@ BEGIN_MESSAGE_MAP(CDouga, CFrameWnd)
 	ON_COMMAND(ID_DOUGA_DSFILTERS, OnDougaMenuDsFilters)
 	ON_COMMAND(ID_DOUGA_TOPMOST, OnDougaMenuTopmost)
 	ON_COMMAND(ID_DOUGA_ASPECT, OnDougaMenuAspect)
+	ON_COMMAND(ID_DOUGA_CLOSE, OnDougaMenuClose)
 	ON_COMMAND_RANGE(ID_DOUGA_SPEED_FIRST, ID_DOUGA_SPEED_LAST, OnDougaMenuSpeed)
 	ON_COMMAND(ID_HELP_SHOWSHEET, OnHelpShowSheet)
 END_MESSAGE_MAP()
@@ -1832,7 +1838,7 @@ BOOL CDouga::Create(HWND h)
     MAKEINTRESOURCE(IDR_DOUGA)));
 
     int ret=CreateEx(WS_EX_OVERLAPPEDWINDOW|WS_EX_ACCEPTFILES,sClassName, LL14(L"メディアプレイヤーらいら✡動画画面", L"Media Player Raira ✡ Video Screen", L"Lecteur multimédia Raira ✡ Écran vidéo", L"Lettore multimediale Raira ✡ Schermata video", L"Reproductor multimedia Raira ✡ Pantalla de vídeo", L"미디어 플레이어 라이라 ✡ 동영상 화면", L"媒体播放器莱拉 ✡ 视频画面", L"مشغل الوسائط رايرا ✡ شاشة الفيديو", L"Медиаплеер Райра ✡ Экран видео", L"Mediaplayer Raira ✡ Videobildschirm", L"Reprodutor multimídia Raira ✡ Tela de vídeo", L"Mediaspeler Raira ✡ Videoscherm", L"Odtwarzacz multimedialny Raira ✡ Ekran wideo", L"Medya Oynatıcı Raira ✡ Video Ekranı"),
-	  ((WS_OVERLAPPEDWINDOW)& ~WS_MAXIMIZEBOX & ~WS_MINIMIZEBOX & ~WS_SYSMENU),
+	  ((WS_OVERLAPPEDWINDOW)& ~WS_MAXIMIZEBOX & ~WS_MINIMIZEBOX),
 	0,0,640,360,NULL,NULL,NULL);
 	if(ret==0) MessageBox(LL14(L"作成", L"Create", L"Créer", L"Crea", L"Crear", L"생성", L"创建", L"إنشاء", L"Создать", L"Erstellen", L"Criar", L"Maken", L"Utwórz", L"Oluştur"));
 	ev=FALSE;
@@ -5276,6 +5282,11 @@ void CDouga::OnExitSizeMove()
 void CDouga::OnClose() 
 {
 	DestroyHelpSheet();
+	// gamenkill からの閉じは通常 Destroy。ユーザーの×は本体に委譲（ポインタ整合のため）
+	if (!m_closingByMain && og && ::IsWindow(og->GetSafeHwnd()) && pMainFrame1 == this) {
+		og->PostMessage(WM_OGG_CLOSE_DOUGA, 0, 0);
+		return;
+	}
 	CFrameWnd::OnClose();
 }
 
@@ -6495,6 +6506,11 @@ void CDouga::ShowDougaContextMenu(CPoint point)
 		LL14(L"フルスクリーン", L"Fullscreen", L"Plein écran", L"Schermo intero", L"Pantalla completa", L"전체화면", L"全屏", L"ملء الشاشة", L"Полный экран", L"Vollbild", L"Tela cheia", L"Volledig scherm", L"Pełny ekran", L"Tam ekran"));
 	menu.AddCommand(ID_DOUGA_FADE,
 		LL14(L"フェードアウト", L"Fade out", L"Fondu", L"Dissolvenza", L"Desvanecer", L"페이드 아웃", L"淡出", L"تلاشي", L"Затухание", L"Ausblenden", L"Desvanecer", L"Uitfaden", L"Zanikanie", L"Soluklaştır"));
+	menu.AddCommand(ID_DOUGA_CLOSE,
+		LL14(L"動画画面を閉じる", L"Close video window", L"Fermer l'ecran video", L"Chiudi finestra video",
+			L"Cerrar pantalla de video", L"동영상 화면 닫기", L"关闭视频窗口", L"إغلاق شاشة الفيديو",
+			L"Закрыть окно видео", L"Videofenster schliessen", L"Fechar janela de video", L"Videovenster sluiten",
+			L"Zamknij okno wideo", L"Video penceresini kapat"));
 
 	menu.AddSeparator();
 	menu.AddCheck(ID_DOUGA_TOPMOST,
@@ -7209,7 +7225,7 @@ void CDouga::ToggleFullScreen()
 		savedata.fs = 0;
 		SetWindowLong(m_hWnd, GWL_EXSTYLE, WS_EX_OVERLAPPEDWINDOW | WS_EX_ACCEPTFILES);
 		int i = GetWindowLong(m_hWnd, GWL_STYLE);
-		SetWindowLong(m_hWnd, GWL_STYLE, ((i | WS_OVERLAPPEDWINDOW) & ~WS_MAXIMIZEBOX & ~WS_MINIMIZEBOX & ~WS_SYSMENU));
+		SetWindowLong(m_hWnd, GWL_STYLE, ((i | WS_OVERLAPPEDWINDOW) & ~WS_MAXIMIZEBOX & ~WS_MINIMIZEBOX));
 		OnMenuitem32774();
 		RestoreDougaCursor();
 		ApplyDougaTopmost(); // 拡張スタイル入れ替えで TOPMOST が落ちるため戻す
@@ -7334,6 +7350,11 @@ void CDouga::OnDougaMenuFf() { m_bar.OnBnFf(); }
 void CDouga::OnDougaMenuMute() { m_bar.OnBnMute(); }
 void CDouga::OnDougaMenuFs() { m_bar.OnBnFs(); }
 void CDouga::OnDougaMenuFade() { m_bar.OnBnFade(); }
+void CDouga::OnDougaMenuClose()
+{
+	if (og && ::IsWindow(og->GetSafeHwnd()))
+		og->PostMessage(WM_OGG_CLOSE_DOUGA, 0, 0);
+}
 
 void CDouga::OnDougaMenuDsFilters()
 {

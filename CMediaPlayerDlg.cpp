@@ -11,6 +11,7 @@
 #include "CPianoRoll.h"
 #include "CAnalyzerDlg.h"
 #include "CMediaPlayerDlg.h"
+#include "AudioDevSync.h"
 #include "CProToolsDlg.h"
 #include "ProAudio.h"
 #include "SongParams.h"
@@ -32,6 +33,7 @@
 #include "CDesktopLyricsWnd.h"
 #include "Douga.h"
 #include "MpPlayerAddons.h"
+#include "MpFeatureExtras.h"
 #include "TagEditDlg.h"
 #include "FileTagInfo.h"
 #include "Render.h"
@@ -167,6 +169,30 @@ static BOOL MpTrackMatchesSmart(CMediaPlayerDlg* self, int pcIdx, const MpSmartR
 	if (flags & MP_SMART_PLAY_MAX) {
 		const int pc = ProAudio_GetPlayCount(MpCurListName(), it.fol, it.sub, it.ret2);
 		if (pc > rule.playCountMax) return FALSE;
+	}
+	if (flags & MP_SMART_BPM_RANGE) {
+		SongParam e;
+		if (!SongParams_FindCopy(MpCurListName(), it.fol, it.sub, it.ret2, e) || e.detectedBpm <= 0)
+			return FALSE;
+		if (e.detectedBpm < rule.bpmMin || e.detectedBpm > rule.bpmMax)
+			return FALSE;
+	}
+	if (flags & MP_SMART_KEY) {
+		SongParam e;
+		if (!SongParams_FindCopy(MpCurListName(), it.fol, it.sub, it.ret2, e) || e.camelot < 1)
+			return FALSE;
+		if (rule.camelotWant > 0 && e.camelot != rule.camelotWant)
+			return FALSE;
+	}
+	if (flags & MP_SMART_NO_JACKET) {
+		if (it.fol[0] && PathFileExists(it.fol)) {
+			// 簡易: cover.jpg 同梱無しを「欠損ジャケ」扱い
+			CString dir(it.fol);
+			const int slash = dir.ReverseFind(_T('\\'));
+			if (slash >= 0) dir = dir.Left(slash + 1);
+			if (PathFileExists(dir + L"cover.jpg") || PathFileExists(dir + L"folder.jpg"))
+				return FALSE;
+		}
 	}
 	if (flags & (MP_SMART_HOUR_RANGE | MP_SMART_LAST_HOUR)) {
 		int hour = -1;
@@ -1065,6 +1091,7 @@ void CMediaPlayerDlg::DoDataExchange(CDataExchange* pDX)
 	MpDdxControl(pDX, IDC_MP_MICLEV, m_miclev);
 	MpDdxControl(pDX, IDC_MP_MICLEV_L, m_miclevL);
 	MpDdxControl(pDX, IDC_MP_MICMETER, m_micMeter);
+	MpDdxControl(pDX, IDC_MP_MICDEV, m_micdev);
 	MpDdxControl(pDX, IDC_MP_SAVEPARAM, m_saveparam);
 	MpDdxControl(pDX, IDC_MP_RECORD, m_record);
 	MpDdxControl(pDX, IDC_MP_CAPTURE, m_capture);
@@ -1129,6 +1156,7 @@ BEGIN_MESSAGE_MAP(CMediaPlayerDlg, CCustomBlurDialogExBase)
 	ON_BN_CLICKED(IDC_MP_SAVEDS, &CMediaPlayerDlg::OnSaveDs)
 	ON_BN_CLICKED(IDC_MP_SAVEWAV, &CMediaPlayerDlg::OnSaveWav)
 	ON_BN_CLICKED(IDC_MP_MICMIX, &CMediaPlayerDlg::OnMicMix)
+	ON_CBN_SELCHANGE(IDC_MP_MICDEV, &CMediaPlayerDlg::OnCbnSelchangeMicDev)
 	ON_NOTIFY(NM_RELEASEDCAPTURE, IDC_MP_MICLEV, &CMediaPlayerDlg::OnMicLevRelease)
 	ON_BN_CLICKED(IDC_MP_RECORD, &CMediaPlayerDlg::OnRecord)
 	ON_BN_CLICKED(IDC_MP_CAPTURE, &CMediaPlayerDlg::OnCapture)
@@ -1269,6 +1297,7 @@ BEGIN_MESSAGE_MAP(CMediaPlayerDlg, CCustomBlurDialogExBase)
 	ON_COMMAND(ID_MP_OPEN_PROTOOLS, &CMediaPlayerDlg::OnProTools)
 	ON_COMMAND(ID_MP_LRC_EXPAND, &CMediaPlayerDlg::OnLrcExpand)
 	ON_COMMAND(ID_MP_MICMIX_TOGGLE, &CMediaPlayerDlg::OnMicMixMenuToggle)
+	ON_COMMAND_RANGE(ID_AUDIO_MIC_BASE, ID_AUDIO_LOOP_LAST, &CMediaPlayerDlg::OnAudioDevMenuRange)
 	ON_COMMAND(ID_MP_REFRESH_JACKET, &CMediaPlayerDlg::OnRefreshJacket)
 	ON_NOTIFY(TVN_SELCHANGED, IDC_MP_LIBTREE, &CMediaPlayerDlg::OnLibTreeSel)
 	ON_NOTIFY(TVN_ITEMEXPANDING, IDC_MP_LIBTREE, &CMediaPlayerDlg::OnLibTreeExpanding)
@@ -1624,6 +1653,7 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 	m_savewav.SetWindowText(LL14(L"WAVファイルへ保存", L"Save to WAV file", L"Enregistrer en WAV", L"Salva come WAV", L"Guardar como WAV", L"WAV 파일로 저장", L"保存到WAV文件", L"حفظ كـ WAV", L"Сохранить в WAV", L"Als WAV speichern", L"Salvar como WAV", L"Opslaan als WAV", L"Zapisz jako WAV", L"WAV olarak kaydet"));
 	m_micmix.SetWindowText(LL14(L"マイクミックス", L"Mic mix", L"Mix micro", L"Mix microfono", L"Mezcla micro", L"마이크 믹스", L"麦克风混音", L"مزج الميكروفون", L"Микс микрофона", L"Mikrofon-Mix", L"Mix microfone", L"Mic-mix", L"Mix mikrofonu", L"Mikrofon karışımı"));
 	m_miclevL.SetWindowText(LL14(L"マイク", L"Mic", L"Micro", L"Micro", L"Micro", L"마이크", L"麦克风", L"ميكروفون", L"Микрофон", L"Mikrofon", L"Microfone", L"Microfoon", L"Mikrofon", L"Mikrofon"));
+	AudioMicDevFillCombo(m_micdev);
 	m_record.SetWindowText(LL14(L"録音", L"Record", L"Enreg.", L"Registra", L"Grabar", L"녹음", L"录音", L"تسجيل", L"Запись", L"Aufnahme", L"Gravar", L"Opnemen", L"Nagraj", L"Kaydet"));
 	m_capture.SetWindowText(LL14(L"キャプチャ", L"Capture", L"Capture", L"Cattura", L"Captura", L"캡처", L"捕获", L"التقاط", L"Захват", L"Aufnahme", L"Captura", L"Opname", L"Przechwyt", L"Yakala"));
 	m_saveparam.SetWindowText(LL14(L"曲ごとに設定保存", L"Save per-song", L"Réglages/morceau", L"Impost. per brano", L"Ajustes por pista", L"곡별 설정 저장", L"逐曲保存设置", L"حفظ لكل أغنية", L"Настройки на трек", L"Pro Titel speichern", L"Config. por faixa", L"Per nummer opslaan", L"Ustaw. na utwor", L"Parça başına kaydet"));
@@ -3126,18 +3156,29 @@ void CMediaPlayerDlg::DoLayout()
 		cdc.SelectObject(pOldChkF);
 
 	int ckx = M + gPad;
-	// マイクミックス行(チェック帯の直上)。端末選択は設定(CRender)
+	// マイクミックス行(チェック帯の直上)。端末コンボも同じ行に並べる
 	{
 		int mx = M + gPad;
-		const int micChkW = (int)(120 * s);
-		const int micLabW = (int)(40 * s);
-		const int micSlW = (int)(120 * s);
+		const int micChkW = (int)(100 * s);
+		const int micLabW = (int)(36 * s);
+		const int micSlW = (int)(100 * s);
+		const int micMeterW = (int)(10 * s);
+		const int gapMic = (int)(4 * s);
 		MoveCtl(&m_micmix, mx, micY, micChkW, chkRowH); mx += micChkW + gapCk;
 		MoveCtl(&m_miclevL, mx, micY, micLabW, chkRowH); mx += micLabW + (int)(2 * s);
-		const int micMeterW = (int)(10 * s);
 		MoveCtl(&m_miclev, mx, micY, micSlW - micMeterW - (int)(4 * s), chkRowH);
 		mx += micSlW - micMeterW - (int)(2 * s);
 		MoveCtl(&m_micMeter, mx, micY, micMeterW, chkRowH);
+		mx += micMeterW + gapMic;
+		// 右端（終了ボタン手前）まで。下部ツール列には載せない
+		const int micDevRight = W - M - gPad;
+		int micDevW = micDevRight - mx;
+		if (micDevW > (int)(280 * s)) micDevW = (int)(280 * s);
+		if (micDevW < (int)(100 * s)) micDevW = (int)(100 * s);
+		if (mx + micDevW > micDevRight)
+			micDevW = micDevRight - mx;
+		if (micDevW > (int)(60 * s) && m_micdev.GetSafeHwnd())
+			MoveCtl(&m_micdev, mx, micY, micDevW, chkRowH);
 	}
 	MoveCtl(&m_tip, ckx, ckY, ckW, chkRowH); ckx += ckW + gapCk;
 	MoveCtl(&m_mini, ckx, ckY, ckW, chkRowH); ckx += ckW + gapCk;
@@ -4073,7 +4114,7 @@ void CMediaPlayerDlg::MirrorSeekVol()
 			m_seek.SetTimeBaseHz(tb);
 		}
 		m_seek.SetBeatGrid(savedata.mpDetectedBpm > 0 ? (float)savedata.mpDetectedBpm : 120.f,
-			savedata.mpBeatGrid ? TRUE : FALSE);
+			savedata.mpBeatGrid ? TRUE : FALSE, savedata.mpBeatGridOffsetMs);
 		{
 			int xms = 0;
 			if (savedata.mpXfadePreview)
@@ -4128,11 +4169,15 @@ void CMediaPlayerDlg::MirrorSeekVol()
 			}
 		}
 
-		// タスクバー進捗(緑追随)。og は非表示なので og->m_hWnd ではなく
-		// このメディアプレイヤー画面のウィンドウに対して設定する必要がある。
+		// タスクバー進捗。og は非表示なのでこの MP 画面 HWND に設定。
+		// 再生=緑 / 一時停止=黄 / 読み込み=不定 / 停止=消す
 		if (ptl) {
-			if (plf && mx > mn) {
-				ptl->SetProgressState(m_hWnd, TBPF_NORMAL);
+			extern int g_oggKpiLoading;
+			if (g_oggKpiLoading) {
+				ptl->SetProgressState(m_hWnd, TBPF_INDETERMINATE);
+			}
+			else if (plf && mx > mn) {
+				ptl->SetProgressState(m_hWnd, (ps == 1) ? TBPF_PAUSED : TBPF_NORMAL);
 				ptl->SetProgressValue(m_hWnd, (ULONGLONG)(psPos - mn), (ULONGLONG)(mx - mn));
 			}
 			else {
@@ -5403,7 +5448,29 @@ void CMediaPlayerDlg::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
 				CCustomBlurDialogExBase::OnHScroll(nSBCode, nPos, pScrollBar);
 				return;
 			}
-			if (tgt == 4 || tgt == 5) {
+			const int lrcHit = m_seek.GetLrcClick();
+			if (lrcHit >= 0) {
+				m_seek.ClearLrcClick();
+				const int fr = m_seek.GetLrcFrame(lrcHit);
+				if (fr >= 0 && og && ::IsWindow(og->GetSafeHwnd())) {
+					og->m_time.SetPos(fr);
+					og->SendMessage(WM_HSCROLL, MAKEWPARAM(SB_THUMBPOSITION, fr), (LPARAM)og->m_time.GetSafeHwnd());
+					if (m_abApos < 0)
+						m_abApos = fr;
+					else if (m_abBpos <= m_abApos)
+						m_abBpos = fr;
+					m_seek.SetAB(m_abApos, m_abBpos);
+				}
+				m_seekDragging = 0;
+				if (hsc == 1) hsc = 0;
+				CCustomBlurDialogExBase::OnHScroll(nSBCode, nPos, pScrollBar);
+				return;
+			}
+			if (tgt == 99) {
+				savedata.mpBeatGridOffsetMs = m_seek.GetBeatGridOffsetMs();
+				SongParams_SaveKeyGridForCurrentSong();
+			}
+			else if (tgt == 4 || tgt == 5) {
 				m_seek.GetAB(m_abApos, m_abBpos);
 			}
 			else if (tgt == 1 || tgt == 2) {
@@ -5931,6 +5998,141 @@ BOOL CMediaPlayerDlg::OnCommand(WPARAM wParam, LPARAM lParam)
 		else if (id == 3) OnNext();
 		return TRUE;
 	}
+	const UINT cmd = LOWORD(wParam);
+	if (MpFeatHandleKeyMenuCmd(cmd)) return TRUE;
+	if (MpFeatHandleChapterMenuCmd(cmd, GetSelectedPcIndex())) return TRUE;
+	if (cmd == ID_MP_FOCUS_MODE) {
+		MpFeatApplyFocusMode(this, savedata.mpFocusMode ? FALSE : TRUE);
+		MpPersistSavedataQuick();
+		return TRUE;
+	}
+	if (cmd == ID_MP_CONFIRM_DANGER) {
+		savedata.confirmDanger = savedata.confirmDanger ? 0 : 1;
+		MpPersistSavedataQuick();
+		return TRUE;
+	}
+	if (cmd == ID_MP_LIVE_SET_REC) {
+		MpFeatLiveSetRecordStart(this);
+		return TRUE;
+	}
+	if (cmd == ID_MP_NOWPLAYING_FILE) {
+		savedata.mpNowPlayingFile = savedata.mpNowPlayingFile ? 0 : 1;
+		if (savedata.mpNowPlayingFile) MpFeatWriteNowPlaying();
+		MpPersistSavedataQuick();
+		return TRUE;
+	}
+	if (cmd == ID_MP_MIDI_LEARN) {
+		savedata.mpMidiLearn = savedata.mpMidiLearn ? 0 : 1;
+		MpPersistSavedataQuick();
+		return TRUE;
+	}
+	if (cmd == ID_MP_MIRROR_CUE) {
+		savedata.mpMirrorCueMode = savedata.mpMirrorCueMode ? 0 : 1;
+		MpPersistSavedataQuick();
+		return TRUE;
+	}
+	if (cmd == ID_MP_PHRASE_SNAP) {
+		savedata.mpPhraseSnapBeat = savedata.mpPhraseSnapBeat ? 0 : 1;
+		MpPersistSavedataQuick();
+		return TRUE;
+	}
+	if (cmd >= ID_MP_TRANS_PRE_0 && cmd <= ID_MP_TRANS_PRE_2) {
+		savedata.mpTransPreset = (int)(cmd - ID_MP_TRANS_PRE_0);
+		// プリセット: EQ ハイパス気味 / ローカット / クロスフェード秒
+		if (savedata.mpTransPreset == 0) {
+			savedata.wav_export_xfade_sec = 4;
+			savedata.eq[0] = 70; savedata.eq[1] = 80; // 低域下げスイープ開始相当
+		} else if (savedata.mpTransPreset == 1) {
+			savedata.wav_export_xfade_sec = 8;
+			savedata.eq[18] = 60; // フィルタ寄り
+		} else {
+			savedata.wav_export_xfade_sec = 2;
+		}
+		MpPersistSavedataQuick();
+		MessageBox(LL14(L"次曲へトランジション設定を適用しました（クロスフェード秒・EQヒント）。",
+			L"Transition preset applied for next track (xfade sec / EQ hint).",
+			L"Preset transition applique.", L"Preset transizione applicato.", L"Preset de transicion aplicado.",
+			L"다음 곡 전환 프리셋 적용.", L"已将过渡预设应用到下一曲。", L"تم تطبيق إعداد الانتقال.",
+			L"Пресет перехода применён.", L"Übergangs-Preset angewendet.", L"Preset de transicao aplicado.",
+			L"Overgangs-preset toegepast.", L"Preset przejscia zastosowany.", L"Gecis onayari uygulandi."),
+			LL14(L"トランジション", L"Transition", L"Transition", L"Transizione", L"Transicion", L"전환", L"过渡", L"انتقال", L"Переход", L"Übergang", L"Transicao", L"Overgang", L"Przejscie", L"Gecis"),
+			MB_OK | MB_ICONINFORMATION);
+		return TRUE;
+	}
+	if (cmd >= ID_MP_LAYOUT_SAVE0 && cmd < ID_MP_LAYOUT_SAVE0 + 3) {
+		const int slot = (int)(cmd - ID_MP_LAYOUT_SAVE0);
+		CRect wr; GetWindowRect(&wr);
+		savedata.mpLayoutX[slot] = wr.left;
+		savedata.mpLayoutY[slot] = wr.top;
+		savedata.mpLayoutW[slot] = wr.Width();
+		savedata.mpLayoutH[slot] = wr.Height();
+		savedata.mpLayoutFlags[slot] = savedata.mpBotToolsFlags;
+		savedata.mpLayoutPreset = slot;
+		MpPersistSavedataQuick();
+		return TRUE;
+	}
+	if (cmd >= ID_MP_LAYOUT_LOAD0 && cmd < ID_MP_LAYOUT_LOAD0 + 3) {
+		const int slot = (int)(cmd - ID_MP_LAYOUT_LOAD0);
+		if (savedata.mpLayoutW[slot] > 100 && savedata.mpLayoutH[slot] > 100) {
+			SetWindowPos(NULL, savedata.mpLayoutX[slot], savedata.mpLayoutY[slot],
+				savedata.mpLayoutW[slot], savedata.mpLayoutH[slot], SWP_NOZORDER);
+			savedata.mpBotToolsFlags = savedata.mpLayoutFlags[slot];
+			savedata.mpLayoutPreset = slot;
+			DoLayout();
+			MpPersistSavedataQuick();
+		}
+		return TRUE;
+	}
+	if (cmd == ID_MP_WEEKLY_SUMMARY) {
+		int plays = 0;
+		FILETIME newest = {};
+		for (int i = 0; pl && i < pl->playcnt; ++i) {
+			plays += ProAudio_GetPlayCount(MpCurListName(), pl->pc[i].fol, pl->pc[i].sub, pl->pc[i].ret2);
+			FILETIME ft;
+			if (ProAudio_GetLastPlay(MpCurListName(), pl->pc[i].fol, pl->pc[i].sub, pl->pc[i].ret2, ft)) {
+				if (CompareFileTime(&ft, &newest) > 0) newest = ft;
+			}
+		}
+		CString msg;
+		msg.Format(LL14(L"プレイリスト再生回数合計: %d\n（簡易週次サマリ）",
+			L"Total playlist play count: %d\n(simple weekly summary)",
+			L"Total lectures: %d", L"Totale riproduzioni: %d", L"Total reproducciones: %d",
+			L"재생 횟수 합계: %d", L"播放次数合计: %d", L"إجمالي التشغيل: %d",
+			L"Сумма проигрываний: %d", L"Summe Wiedergaben: %d", L"Total de plays: %d",
+			L"Totaal plays: %d", L"Suma odtworzen: %d", L"Toplam calma: %d"), plays);
+		MessageBox(msg, LL14(L"週次サマリ", L"Weekly summary", L"Resume hebdo", L"Riepilogo settimanale", L"Resumen semanal",
+			L"주간 요약", L"周汇总", L"ملخص أسبوعي", L"Недельная сводка", L"Wochenübersicht", L"Resumo semanal", L"Weekoverzicht", L"Podsumowanie tygodnia", L"Haftalik ozet"), MB_OK);
+		return TRUE;
+	}
+	if (cmd == ID_MP_AAC_PROF0 || cmd == ID_MP_AAC_PROF1 || cmd == ID_MP_AAC_PROF2) {
+		savedata.mpAacProfile = (int)(cmd - ID_MP_AAC_PROF0);
+		MpPersistSavedataQuick();
+		return TRUE;
+	}
+	if (cmd == ID_MP_PRACTICE_LOG) {
+		CString path;
+		TCHAR dir[MAX_PATH] = {};
+		if (::GetModuleFileName(NULL, dir, MAX_PATH)) {
+			CString base(dir);
+			const int slash = base.ReverseFind(_T('\\'));
+			if (slash >= 0) base = base.Left(slash + 1);
+			path = base + L"practice_log.txt";
+			CString line;
+			line.Format(L"%d%% tempo, loops=%d\r\n", (int)TempoPercentFromPos(tempo), m_abLoopCount);
+			CFile f;
+			if (f.Open(path, CFile::modeCreate | CFile::modeNoTruncate | CFile::modeWrite | CFile::shareDenyWrite, NULL) == TRUE) {
+				f.SeekToEnd();
+				const CStringA a = CW2A(line, CP_UTF8);
+				f.Write((LPCSTR)a, a.GetLength());
+				f.Close();
+			}
+		}
+		return TRUE;
+	}
+	if (cmd == ID_MP_PRACTICE_PACK) {
+		OnAbPackExport();
+		return TRUE;
+	}
 	return CCustomBlurDialogExBase::OnCommand(wParam, lParam);
 }
 
@@ -5965,6 +6167,17 @@ void CMediaPlayerDlg::OnSaveWav()
 {
 	if (!og || !::IsWindow(og->GetSafeHwnd())) return;
 	og->m_c2.SetCheck(m_savewav.GetCheck() ? 1 : 0);
+}
+
+void CMediaPlayerDlg::OnCbnSelchangeMicDev()
+{
+	AudioMicDevApplyFromCombo(m_micdev);
+}
+
+void CMediaPlayerDlg::OnAudioDevMenuRange(UINT nID)
+{
+	if (!AudioMicDevHandleMenuCmd(nID))
+		AudioLoopDevHandleMenuCmd(nID);
 }
 
 void CMediaPlayerDlg::OnMicMix()
@@ -6094,8 +6307,10 @@ void CMediaPlayerDlg::OnResetData()
 		L"Alle per-nummer-instellingen verwijderen en parameters resetten?",
 		L"Usunąć wszystkie ustawienia na utwór i zresetować parametry?",
 		L"Tüm parça ayarlarını silip parametreleri sıfırlansın mı?");
-	if (AfxMessageBox(msg, MB_YESNO | MB_ICONQUESTION) != IDYES)
-		return;
+	if (savedata.confirmDanger) {
+		if (!MpFeatConfirmDanger(GetSafeHwnd(), msg))
+			return;
+	}
 
 	// 保存ファイルとメモリ内テーブルを破棄
 	SongParams_ResetAll();
@@ -6212,6 +6427,7 @@ void CMediaPlayerDlg::OnRclickList(NMHDR* pNMHDR, LRESULT* pResult)
 	if (cmd == PL_CTX_QUEUE_ADD) { OnQueueAdd(); return; }
 	if (cmd == PL_CTX_QUEUE_PLAYNEXT) { OnQueuePlayNext(); return; }
 	if (cmd == PL_CTX_QUEUE_CLEAR) { OnQueueClear(); return; }
+	if (MpFeatHandleChapterMenuCmd((UINT)cmd, GetSelectedPcIndex())) return;
 	pl->HandleTrackContextCmd(cmd);
 }
 
@@ -6369,6 +6585,23 @@ void CMediaPlayerDlg::RefreshSeekCues()
 		frames[i] = pos;
 	}
 	m_seek.SetCues(frames, n);
+
+	int lrcFr[CCustomRangeSliderCtrl::kLrcMarkMax];
+	int ln = 0;
+	if (og && og->lrcnum > 0 && og->lrctm) {
+		extern int wavbit_sample_Hz;
+		const int hz = (wavbit_sample_Hz > 0) ? wavbit_sample_Hz : 44100;
+		for (int i = 0; i < og->lrcnum && ln < CCustomRangeSliderCtrl::kLrcMarkMax; ++i) {
+			const int cs = og->lrctm[i];
+			int fr = (int)((__int64)cs * ( __int64)hz / 100);
+			if (mx > mn) {
+				if (fr < mn) fr = mn;
+				if (fr > mx) fr = mx;
+			}
+			lrcFr[ln++] = fr;
+		}
+	}
+	m_seek.SetLrcMarkers(lrcFr, ln);
 }
 
 void CMediaPlayerDlg::JumpToCueIndex(int idx)
@@ -6415,6 +6648,7 @@ BOOL CMediaPlayerDlg::IsSeekExtrasCommand(UINT cmd)
 	if (cmd >= ID_MP_AB_SNAP_A && cmd <= ID_MP_AB_TOGGLE) return TRUE;
 	if (cmd == ID_MP_BEAT_GRID || cmd == ID_MP_XFADE_PREVIEW) return TRUE;
 	if (cmd == ID_MP_VIDEO_REPLACE || cmd == ID_MP_MICMIX_TOGGLE) return TRUE;
+	if (AudioMicDevHandleMenuCmd(cmd) || AudioLoopDevHandleMenuCmd(cmd)) return TRUE;
 	if (cmd == ID_MP_EXPORT_AB_NOW || cmd == ID_MP_EXPORT_AB || cmd == ID_MP_AB_PACK) return TRUE;
 	if (cmd == ID_MP_QUEUE_SHOW) return TRUE;
 	if (cmd == ID_MP_LRC_PLUS10 || cmd == ID_MP_LRC_MINUS10
@@ -6617,6 +6851,8 @@ void CMediaPlayerDlg::AppendSeekExtrasToMenu(CCustomPopupMenu& menu, UINT flags)
 			LL14(L"マイクミックスの音量 0〜200（ドラッグ中に反映）", L"Mic mix level 0–200 (live)", L"Niveau mix micro 0–200 (direct)", L"Livello mix microfono 0–200 (live)", L"Nivel mezcla micro 0–200 (en vivo)",
 				L"마이크 믹스 볼륨 0–200(즉시)", L"麦克风混音音量 0–200（即时）", L"مستوى مزج الميكروفون 0–200 (مباشر)", L"Громкость микса микрофона 0–200 (сразу)", L"Mikrofon-Mix-Pegel 0–200 (live)",
 				L"Nivel do mix de microfone 0–200 (ao vivo)", L"Mic-mixniveau 0–200 (live)", L"Poziom mixu mikrofonu 0–200 (na zywo)", L"Mikrofon mix seviyesi 0–200 (anlik)"));
+		AudioMicDevAppendMenu(menu);
+		AudioLoopDevAppendMenu(menu);
 	}
 	if (flags & MP_SEEK_MENU_SNAPS) {
 		sep();
@@ -6901,6 +7137,20 @@ void CMediaPlayerDlg::SetPhraseAbAroundNow()
 	int b = now + half;
 	if (a < mn) a = mn;
 	if (b > mx) b = mx;
+	if (savedata.mpPhraseSnapBeat && savedata.mpDetectedBpm > 0 && wavbit_sample_Hz > 0) {
+		const double beatFrames = (60.0 * (double)wavbit_sample_Hz) / (double)savedata.mpDetectedBpm;
+		auto snap = [&](int v) -> int {
+			const double rel = (double)(v - mn) / beatFrames;
+			const int n = (int)floor(rel + 0.5);
+			int out = mn + (int)(n * beatFrames + 0.5);
+			if (out < mn) out = mn;
+			if (out > mx) out = mx;
+			return out;
+		};
+		a = snap(a);
+		b = snap(b);
+		if (b <= a) b = min(mx, a + (int)(beatFrames + 0.5));
+	}
 	if (b <= a) b = (a < mx) ? (a + 1) : a;
 	m_abApos = a;
 	m_abBpos = b;
@@ -9433,6 +9683,71 @@ void CMediaPlayerDlg::ShowToolsExtrasMenu(CPoint screenPt)
 	menu.AddCheck(ID_MP_MIDI_IN,
 		LL14(L"MIDI In", L"MIDI In", L"MIDI In", L"MIDI In", L"MIDI In", L"MIDI In", L"MIDI 输入", L"MIDI In", L"MIDI In", L"MIDI In", L"MIDI In", L"MIDI In", L"MIDI In", L"MIDI In"),
 		MpMidiInIsActive());
+	menu.AddSeparator();
+	MpFeatAppendKeyMenu(menu);
+	menu.AddCheck(ID_MP_FOCUS_MODE,
+		LL14(L"フォーカスモード", L"Focus mode", L"Mode focus", L"Modalita focus", L"Modo foco",
+			L"포커스 모드", L"专注模式", L"وضع التركيز", L"Режим фокуса", L"Fokusmodus",
+			L"Modo foco", L"Focusmodus", L"Tryb focus", L"Odak modu"),
+		savedata.mpFocusMode != 0);
+	menu.AddCheck(ID_MP_CONFIRM_DANGER,
+		LL14(L"危険操作の確認", L"Confirm dangerous ops", L"Confirmer ops dangereuses", L"Conferma ops rischiose", L"Confirmar ops peligrosas",
+			L"위험 작업 확인", L"危险操作确认", L"تأكيد العمليات الخطرة", L"Подтверждать опасные", L"Gefährliche bestätigen",
+			L"Confirmar ops perigosas", L"Bevestig gevaarlijke", L"Potwierdzaj niebezpieczne", L"Tehlikeli islem onayi"),
+		savedata.confirmDanger != 0);
+	menu.AddCommand(ID_MP_LIVE_SET_REC,
+		LL14(L"ライブセット録画（画面+録音）", L"Live-set record (capture+audio)", L"Enreg. set live", L"Registra set live", L"Grabar set en vivo",
+			L"라이브 세트 녹화", L"现场套录制", L"تسجيل المجموعة", L"Запись сета", L"Live-Set aufnehmen",
+			L"Gravar set ao vivo", L"Live-set opnemen", L"Nagraj set live", L"Canli set kaydi"));
+	menu.AddCheck(ID_MP_NOWPLAYING_FILE, L"nowplaying.txt", savedata.mpNowPlayingFile != 0);
+	menu.AddCheck(ID_MP_MIDI_LEARN,
+		LL14(L"MIDI 学習", L"MIDI learn", L"Apprentissage MIDI", L"Apprendimento MIDI", L"Aprendizaje MIDI",
+			L"MIDI 학습", L"MIDI 学习", L"تعلم MIDI", L"Обучение MIDI", L"MIDI lernen",
+			L"Aprendizado MIDI", L"MIDI leren", L"Nauka MIDI", L"MIDI ogren"),
+		savedata.mpMidiLearn != 0);
+	menu.AddCheck(ID_MP_MIRROR_CUE,
+		LL14(L"Mirror CUE プレビュー", L"Mirror CUE preview", L"Apercu CUE miroir", L"Anteprima CUE mirror", L"Vista previa CUE espejo",
+			L"미러 CUE 미리보기", L"镜像 CUE 预览", L"معاينة CUE المرآة", L"Превью CUE зеркала", L"Mirror-CUE-Vorschau",
+			L"Previa CUE espelho", L"Mirror-CUE-voorbeeld", L"Podglad CUE lustra", L"Ayna CUE onizleme"),
+		savedata.mpMirrorCueMode != 0);
+	menu.AddCheck(ID_MP_PHRASE_SNAP,
+		LL14(L"フレーズを拍スナップ", L"Snap phrases to beats", L"Accrocher phrases aux temps", L"Aggancia frasi ai beat", L"Ajustar frases al beat",
+			L"프레이즈 비트 스냅", L"乐句对齐拍", L"محاذاة العبارات للنبض", L"Привязка фраз к долям", L"Phrasen an Beats",
+			L"Ajustar frases aos beats", L"Frases aan beats", L"Frazy do beatow", L"Cumleleri vuruslara"),
+		savedata.mpPhraseSnapBeat != 0);
+	{
+		CCustomPopupMenu* tr = menu.AddSubMenu(LL14(L"トランジション・プリセット", L"Transition presets", L"Presets transition", L"Preset transizione", L"Presets de transicion",
+			L"전환 프리셋", L"过渡预设", L"إعدادات الانتقال", L"Пресеты перехода", L"Übergangs-Presets",
+			L"Presets de transicao", L"Overgangs-presets", L"Preset przejsc", L"Gecis onayarlari"));
+		if (tr) {
+			tr->AddCommand(ID_MP_TRANS_PRE_0, L"EQ sweep / 4s");
+			tr->AddCommand(ID_MP_TRANS_PRE_1, L"Filter / 8s");
+			tr->AddCommand(ID_MP_TRANS_PRE_2, L"Quick xfade / 2s");
+		}
+		CCustomPopupMenu* lay = menu.AddSubMenu(LL14(L"レイアウト", L"Layout", L"Disposition", L"Layout", L"Diseno",
+			L"레이아웃", L"布局", L"تخطيط", L"Макет", L"Layout", L"Layout", L"Layout", L"Uklad", L"Duzen"));
+		if (lay) {
+			lay->AddCommand(ID_MP_LAYOUT_SAVE0, L"Save slot 1");
+			lay->AddCommand(ID_MP_LAYOUT_SAVE0 + 1, L"Save slot 2");
+			lay->AddCommand(ID_MP_LAYOUT_SAVE0 + 2, L"Save slot 3");
+			lay->AddCommand(ID_MP_LAYOUT_LOAD0, L"Load slot 1");
+			lay->AddCommand(ID_MP_LAYOUT_LOAD0 + 1, L"Load slot 2");
+			lay->AddCommand(ID_MP_LAYOUT_LOAD0 + 2, L"Load slot 3");
+		}
+		CCustomPopupMenu* aac = menu.AddSubMenu(L"AAC profile");
+		if (aac) {
+			aac->AddCheck(ID_MP_AAC_PROF0, L"128 kbps", savedata.mpAacProfile == 0);
+			aac->AddCheck(ID_MP_AAC_PROF1, L"192 kbps", savedata.mpAacProfile == 1);
+			aac->AddCheck(ID_MP_AAC_PROF2, L"96 kbps low-latency", savedata.mpAacProfile == 2);
+		}
+	}
+	menu.AddCommand(ID_MP_WEEKLY_SUMMARY,
+		LL14(L"週次サマリ…", L"Weekly summary…", L"Resume hebdo…", L"Riepilogo…", L"Resumen…",
+			L"주간 요약…", L"周汇总…", L"ملخص…", L"Сводка…", L"Wochenübersicht…", L"Resumo…", L"Weekoverzicht…", L"Podsumowanie…", L"Haftalik ozet…"));
+	menu.AddCommand(ID_MP_PRACTICE_LOG, LL14(L"練習ログ追記", L"Append practice log", L"Journal pratique", L"Log pratica", L"Registro practica",
+		L"연습 로그", L"练习日志", L"سجل التمرين", L"Журнал практики", L"Übungsprotokoll", L"Log de pratica", L"Oefenlog", L"Dziennik cwiczen", L"Alisirma gunlugu"));
+	menu.AddCommand(ID_MP_PRACTICE_PACK, LL14(L"練習パック書き出し…", L"Export practice pack…", L"Exporter pack pratique…", L"Esporta pack pratica…", L"Exportar pack practica…",
+		L"연습 팩 내보내기…", L"导出练习包…", L"تصدير حزمة…", L"Экспорт пакета…", L"Übungspaket…", L"Exportar pacote…", L"Oefenpakket…", L"Pakiet cwiczen…", L"Alisirma paketi…"));
 	const UINT cmd = menu.Track(screenPt, this);
 	// メニュー閉鎖時に LRC オフセットの端数(1–9ms)を捨てない
 	if (lrcCtx.pendingMs != 0) {
@@ -10611,7 +10926,7 @@ void CMediaPlayerDlg::OnBeatGridToggle()
 	MpPersistSavedataQuick();
 	if (m_seek.GetSafeHwnd()) {
 		const float bpm = savedata.mpDetectedBpm > 0 ? (float)savedata.mpDetectedBpm : 120.f;
-		m_seek.SetBeatGrid(bpm, savedata.mpBeatGrid ? TRUE : FALSE);
+		m_seek.SetBeatGrid(bpm, savedata.mpBeatGrid ? TRUE : FALSE, savedata.mpBeatGridOffsetMs);
 		m_seek.Invalidate(FALSE);
 	}
 	if (savedata.mpDetectedBpm > 0)
@@ -10742,6 +11057,13 @@ CString CMediaPlayerDlg::MpTechFormatLine() const
 		bp.Format(L"%dkbps", kbps);
 		line += L" · ";
 		line += bp;
+	}
+	{
+		const CString extra = MpFeatStatusLine();
+		if (!extra.IsEmpty()) {
+			line += L" · ";
+			line += extra;
+		}
 	}
 	return line;
 }
@@ -10924,6 +11246,18 @@ void CMpCheatSheetDlg::OnPaint()
 		L"· Seek …… rosa=bucle; azul=A-B; bloqueo fija el bucle", L"· 시크 …… 분홍=루프; 파랑=A-B; 잠금으로 루프 고정", L"· 进度条 …… 粉=循环；蓝=A-B；锁定固定循环", L"· Seek …… وردي=حلقة؛ أزرق=A-B؛ القفل يثبت الحلقة",
 		L"· Seek …… розовый=цикл; синий=A-B; блок фиксирует цикл", L"· Seek …… rosa=Schleife; blau=A-B; Sperre fixiert Schleife", L"· Seek …… rosa=loop; azul=A-B; trava fixa o loop", L"· Seek …… roze=lus; blauw=A-B; slot fixeert lus",
 		L"· Seek …… rozowy=petla; niebieski=A-B; blokada pinuje petle", L"· Seek …… pembe=dongu; mavi=A-B; kilit donguyu sabitler")); yR += lh;
+	body(R, yR, LL14(L"・Alt+ドラッグ …… 拍グリッドの位相(オフセット)をずらす。曲ごとに記憶", L"· Alt+drag …… shift beat-grid phase (offset). Saved per song", L"· Alt+glisser …… décaler la phase de grille. Par morceau", L"· Alt+trascina …… sfasa griglia. Per brano",
+		L"· Alt+arrastrar …… desplaza fase de rejilla. Por pista", L"· Alt+드래그 …… 비트 그리드 위상 이동. 곡별 저장", L"· Alt+拖 …… 移动拍网格相位。按曲记忆", L"· Alt+سحب …… إزاحة طور الشبكة. لكل أغنية",
+		L"· Alt+перетаскивание …… сдвиг фазы сетки. На трек", L"· Alt+Ziehen …… Beat-Raster-Phase. Pro Titel", L"· Alt+arrastar …… desloca fase da grade. Por faixa", L"· Alt+slepen …… verschuif beatrasterfase. Per nummer",
+		L"· Alt+przeciągnij …… przesuń fazę siatki. Na utwór", L"· Alt+sürükle …… vuruş ızgarası fazını kaydır. Parça başına")); yR += lh;
+	body(R, yR, LL14(L"・水色の下線 …… LRC時刻マーカー。クリックでシーク／A-B候補", L"· Cyan ticks …… LRC time marks. Click to seek / A-B candidate", L"· Traits cyan …… marques LRC. Clic = seek / A-B", L"· Tratti ciano …… marche LRC. Clic = seek / A-B",
+		L"· Marcas cian …… LRC. Clic = seek / A-B", L"· 청록 눈금 …… LRC 시각. 클릭으로 시크/A-B", L"· 青色刻度 …… LRC 时刻。点击定位/A-B", L"· علامات سماوية …… LRC. نقر=seek/A-B",
+		L"· Голубые метки …… LRC. Клик = seek / A-B", L"· Cyan-Striche …… LRC. Klick = Seek / A-B", L"· Marcas ciano …… LRC. Clique = seek / A-B", L"· Cyaan tikken …… LRC. Klik = seek / A-B",
+		L"· Cyan znaczniki …… LRC. Klik = seek / A-B", L"· Camgöbeği işaret …… LRC. Tık = seek / A-B")); yR += lh;
+	body(R, yR, LL14(L"・ホバー …… 波形があるとき拡大ルーペ（局所拡大）", L"· Hover …… local waveform magnifier when peaks exist", L"· Survol …… loupe d'onde locale", L"· Passaggio …… lente sull'onda",
+		L"· Pasar …… lupa de onda local", L"· 호버 …… 파형 확대 루페", L"· 悬停 …… 局部波形放大镜", L"· مرور …… عدسة موجة محلية",
+		L"· Наведение …… лупа волны", L"· Hover …… Wellen-Lupe", L"· Hover …… lupa de onda local", L"· Hover …… lokale golflens",
+		L"· Najechanie …… lupa fali", L"· Üzerine gel …… yerel dalga büyüteci")); yR += lh;
 	body(R, yR, LL14(L"・波形 …… 最奥に表示。再生で埋まり、WAVは全体概観に置換。右クリックでON/OFF", L"· Wave …… backmost layer; fills live, WAV gets full overview. RMB toggle", L"· Onde …… couche arrière; se remplit en live. Clic droit ON/OFF", L"· Onda …… strato posteriore; si riempie in live. Destro ON/OFF",
 		L"· Onda …… capa trasera; se llena en vivo. Clic der. ON/OFF", L"· 파형 …… 최후층. 재생으로 채워지고 WAV는 전체 개요. 우클릭 ON/OFF", L"· 波形 …… 最底层；播放中填充，WAV换全曲概览。右键开/关", L"· الموجة …… أبعد طبقة؛ تُملأ أثناء التشغيل. يمين ON/OFF",
 		L"· Волна …… самый задний слой; заполняется live. ПКМ ON/OFF", L"· Welle …… hinterste Ebene; fuellt sich live. RMB ON/OFF", L"· Onda …… camada de fundo; preenche ao vivo. Direito ON/OFF", L"· Golf …… achterste laag; vult live. Rechtsklik ON/OFF",
@@ -11127,6 +11461,189 @@ void CMpCheatSheetDlg::OnPaint()
 		L"· MIDI In …… klawisze/CC. Zapis partytury = PPM rolki", L"· MIDI In …… tuş/CC. Parti kaydı = piyano rulosu sağ tık")); yR += lh + 2;
 
 	y = max(yL, yR) + 2;
+
+	// ---- 図解: シーク階層 ----
+	title(L, y, LL14(L"シークバーの層（図）", L"Seek bar layers (diagram)", L"Couches Seek (schéma)", L"Livelli Seek (schema)",
+		L"Capas Seek (diagrama)", L"시크 바 계층(그림)", L"进度条分层（图）", L"طبقات Seek (رسم)",
+		L"Слои Seek (схема)", L"Seek-Ebenen (Diagramm)", L"Camadas Seek (diagrama)", L"Seek-lagen (diagram)",
+		L"Warstwy Seek (schemat)", L"Seek katmanları (şekil)"));
+	y += titleLh;
+	{
+		const int gx = L, gy = y, gw = min(560, rc.Width() - L * 2), gh = lh * 5 + 18;
+		dc.FillSolidRect(gx, gy, gw, gh, RGB(248, 249, 252));
+		dc.FrameRect(CRect(gx, gy, gx + gw, gy + gh), &frameBrush);
+		// 波形帯
+		dc.FillSolidRect(gx + 8, gy + 6, gw - 16, lh + 2, RGB(210, 225, 240));
+		dc.SetTextColor(RGB(40, 50, 70));
+		dc.TextOut(gx + 14, gy + 7, LL14(L"波形オーバービュー（最奥）", L"Wave overview (backmost)", L"Onde (arrière)", L"Onda (fondo)",
+			L"Onda (fondo)", L"파형 개요(최후)", L"波形概览（最底）", L"موجة (خلف)", L"Волна (сзади)", L"Welle (hinten)", L"Onda (fundo)", L"Golf (achter)", L"Fala (tył)", L"Dalga (arka)"));
+		// 拍グリッド
+		dc.FillSolidRect(gx + 8, gy + lh + 10, gw - 16, lh + 2, RGB(230, 235, 250));
+		for (int i = 0; i < 8; ++i) {
+			const int x = gx + 20 + i * ((gw - 40) / 8);
+			dc.FillSolidRect(x, gy + lh + 12, 2, lh - 2, RGB(120, 140, 200));
+		}
+		dc.TextOut(gx + 14, gy + lh + 11, LL14(L"拍グリッド（BPM）  ←Alt+ドラッグで位相→", L"Beat grid (BPM)  ←Alt+drag phase→", L"Grille BPM  ←Alt+glisser→", L"Griglia BPM  ←Alt+trascina→",
+			L"Rejilla BPM  ←Alt+arrastrar→", L"비트 그리드  ←Alt+드래그 위상→", L"拍网格  ←Alt+拖相位→", L"شبكة BPM  ←Alt+سحب→",
+			L"Сетка BPM  ←Alt+сдвиг→", L"Beat-Raster  ←Alt+Phase→", L"Grade BPM  ←Alt+arrastar→", L"Beatraster  ←Alt+fase→",
+			L"Siatka BPM  ←Alt+faza→", L"Vuruş ızgarası  ←Alt+faz→"));
+		// LRC
+		dc.FillSolidRect(gx + 8, gy + 2 * lh + 14, gw - 16, lh + 2, RGB(220, 240, 255));
+		for (int i = 0; i < 5; ++i) {
+			const int x = gx + 40 + i * ((gw - 80) / 5);
+			dc.FillSolidRect(x, gy + 2 * lh + 16, 2, lh - 2, RGB(80, 180, 255));
+		}
+		dc.TextOut(gx + 14, gy + 2 * lh + 15, LL14(L"水色マーカー = LRC 時刻（クリックでシーク）", L"Cyan marks = LRC times (click to seek)", L"Traits cyan = LRC", L"Marche ciano = LRC",
+			L"Marcas cian = LRC", L"청록 = LRC 시각(클릭)", L"青色 = LRC 时刻（点击）", L"سماوي = LRC", L"Голубые = LRC", L"Cyan = LRC", L"Ciano = LRC", L"Cyaan = LRC", L"Cyan = LRC", L"Camgöbeği = LRC"));
+		// ループ / A-B / 再生
+		dc.FillSolidRect(gx + 30, gy + 3 * lh + 18, gw / 3, lh, RGB(255, 180, 200));
+		dc.FillSolidRect(gx + 30 + gw / 4, gy + 3 * lh + 18, 6, lh, RGB(80, 120, 255));
+		dc.FillSolidRect(gx + 30 + gw / 3, gy + 3 * lh + 18, 6, lh, RGB(80, 120, 255));
+		dc.FillSolidRect(gx + gw / 2, gy + 3 * lh + 18, 4, lh, RGB(255, 80, 120));
+		dc.SetTextColor(RGB(50, 40, 60));
+		dc.TextOut(gx + 14, gy + 4 * lh + 8, LL14(L"ピンク=ループ　青つまみ=A-B　♥=再生位置　三角=キュー", L"Pink=loop  Blue=A-B  ♥=playhead  Tri=cues", L"Rose=boucle  Bleu=A-B  ♥=tête  Tri=cues", L"Rosa=loop  Blu=A-B  ♥=testina  Tri=cue",
+			L"Rosa=bucle  Azul=A-B  ♥=cabeza  Tri=cues", L"분홍=루프  파랑=A-B  ♥=재생  삼각=큐", L"粉=循环  蓝=A-B  ♥=播放头  三角=标记", L"وردي=حلقة  أزرق=A-B  ♥=رأس  مثلث=إشارات",
+			L"Розовый=цикл  Синий=A-B  ♥=голова  ▲=метки", L"Rosa=Schleife  Blau=A-B  ♥=Kopf  Dreieck=Cues", L"Rosa=loop  Azul=A-B  ♥=cabeça  Tri=cues", L"Roze=lus  Blauw=A-B  ♥=kop  Driehoek=cues",
+			L"Różowy=pętla  Niebieski=A-B  ♥=głowica  Trój=cue", L"Pembe=döngü  Mavi=A-B  ♥=kafa  Üçgen=cue"));
+		y = gy + gh + 4;
+	}
+
+	// ---- 図解: Camelot ----
+	title(L, y, LL14(L"キー / Camelot 相性（図）", L"Key / Camelot compatibility (diagram)", L"Clé / Camelot (schéma)", L"Tonalità / Camelot (schema)",
+		L"Tonalidad / Camelot (diagrama)", L"키 / Camelot 호환(그림)", L"调性 / Camelot 相容（图）", L"مفتاح / Camelot (رسم)",
+		L"Тональность / Camelot (схема)", L"Tonart / Camelot (Diagramm)", L"Tom / Camelot (diagrama)", L"Toonsoort / Camelot (diagram)",
+		L"Tonacja / Camelot (schemat)", L"Ton / Camelot (şekil)"));
+	y += titleLh;
+	{
+		const int gx = L, gy = y, gw = min(560, rc.Width() - L * 2), gh = lh * 4 + 14;
+		dc.FillSolidRect(gx, gy, gw, gh, RGB(252, 248, 255));
+		dc.FrameRect(CRect(gx, gy, gx + gw, gy + gh), &frameBrush);
+		// 中心
+		dc.FillSolidRect(gx + gw / 2 - 28, gy + lh + 4, 56, lh + 4, RGB(200, 170, 230));
+		dc.SetTextColor(RGB(40, 30, 60));
+		dc.TextOut(gx + gw / 2 - 18, gy + lh + 6, L"8A");
+		// 隣接
+		auto box = [&](int x, int by, LPCTSTR t, COLORREF c) {
+			dc.FillSolidRect(x, by, 44, lh, c);
+			dc.SetTextColor(RGB(30, 30, 40));
+			dc.TextOut(x + 10, by + 1, t);
+		};
+		box(gx + gw / 2 - 28 - 56, gy + lh + 4, L"7A", RGB(180, 210, 255));
+		box(gx + gw / 2 - 28 + 62, gy + lh + 4, L"9A", RGB(180, 210, 255));
+		box(gx + gw / 2 - 28, gy + 4, L"8B", RGB(255, 210, 170));
+		box(gx + gw / 2 - 28 - 56, gy + 4, L"7B", RGB(255, 230, 200));
+		box(gx + gw / 2 - 28 + 62, gy + 4, L"9B", RGB(255, 230, 200));
+		dc.SetTextColor(RGB(60, 50, 80));
+		dc.TextOut(gx + 10, gy + 2 * lh + 10, LL14(
+			L"ツール「キー確定」→曲に記憶。相性候補=隣接±1＋相対長/短。未検出曲はスキップ。",
+			L"Tools “Capture key” → save per song. Compatible = ±1 neighbors + relative major/minor. Skip unknown.",
+			L"« Capturer clé » → par morceau. Compatibles = ±1 + relatif. Inconnus ignorés.",
+			L"« Cattura chiave » → per brano. Compatibili = ±1 + relativo. Sconosciuti saltati.",
+			L"« Capturar tonalidad » → por pista. Compatibles = ±1 + relativo. Desconocidos omitidos.",
+			L"「키 확정」→곡별 저장. 호환=±1+상대. 미검출 건너뜀.",
+			L"「确定调性」→按曲保存。相容=±1+关系大小调。未检测跳过。",
+			L"«تأكيد المفتاح» → لكل أغنية. متوافق=±1+نسبي. مجهول يُتخطى.",
+			L"«Зафиксировать тональность» → на трек. Совместимые = ±1 + относительные. Неизвестные пропускаются.",
+			L"„Tonart speichern“ → pro Titel. Passend = ±1 + relativ. Unbekannte übersprungen.",
+			L"«Capturar tom» → por faixa. Compatíveis = ±1 + relativo. Desconhecidos ignorados.",
+			L"„Toonsoort vastleggen“ → per nummer. Compatibel = ±1 + relatief. Onbekend overgeslagen.",
+			L"«Zapisz tonację» → na utwór. Kompatybilne = ±1 + względne. Nieznane pomijane.",
+			L"«Ton kaydet» → parça. Uyumlu = ±1 + göreli. Bilinmeyen atlanır."));
+		y = gy + gh + 4;
+	}
+
+	yL = y; yR = y;
+	title(L, yL, LL14(L"セット章 / フィルタ（図）", L"Set chapters / filter (diagram)", L"Chapitres set (schéma)", L"Capitoli set (schema)",
+		L"Capítulos set (diagrama)", L"세트 구간/필터(그림)", L"套章节/筛选（图）", L"فصول المجموعة (رسم)",
+		L"Главы сета (схема)", L"Set-Kapitel (Diagramm)", L"Capítulos do set (diagrama)", L"Set-hoofdstukken (diagram)",
+		L"Rozdziały setu (schemat)", L"Set bölümleri (şekil)")); yL += titleLh;
+	{
+		const int bx = L, by = yL, bw = min(250, (rc.Width() / 2) - 20);
+		dc.FillSolidRect(bx, by, bw, lh * 3 + 8, RGB(250, 250, 245));
+		dc.FrameRect(CRect(bx, by, bx + bw, by + lh * 3 + 8), &frameBrush);
+		dc.FillSolidRect(bx + 6, by + 4, bw - 12, lh, RGB(200, 230, 200));
+		dc.FillSolidRect(bx + 6, by + lh + 6, bw - 12, lh, RGB(255, 210, 160));
+		dc.FillSolidRect(bx + 6, by + 2 * lh + 8, bw - 12, lh, RGB(180, 200, 240));
+		dc.SetTextColor(RGB(40, 40, 50));
+		dc.TextOut(bx + 12, by + 5, L"Warmup");
+		dc.TextOut(bx + 12, by + lh + 7, L"Peak");
+		dc.TextOut(bx + 12, by + 2 * lh + 9, L"Cooldown");
+		yL = by + lh * 3 + 14;
+	}
+	body(L, yL, LL14(L"・リスト右クリック「セット章」で曲にタグ。色分けの目安に。", L"· List RMB “Set chapter” tags a track for set planning.", L"· Clic droit liste « Chapitre ».", L"· Destro lista « Capitolo ».",
+		L"· Clic der. lista « Capítulo ».", L"· 목록 우클릭 「세트 구간」.", L"· 列表右键「套章节」。", L"· يمين القائمة «فصل».",
+		L"· ПКМ списка «Глава сета».", L"· Listen-RMB „Set-Kapitel“.", L"· Direito lista «Capítulo».", L"· Lijst-RMB „Set-hoofdstuk“.",
+		L"· PPM listy «Rozdział setu».", L"· Liste sağ tık «Set bölümü».")); yL += lh + 2;
+
+	title(R, yR, LL14(L"ツール追加メニュー（図）", L"Tools menu additions (diagram)", L"Extras menu (schéma)", L"Menu extra (schema)",
+		L"Menú extra (diagrama)", L"도구 추가 메뉴(그림)", L"工具新增菜单（图）", L"قائمة إضافية (رسم)",
+		L"Доп. меню (схема)", L"Zusatzmenü (Diagramm)", L"Menu extra (diagrama)", L"Extra-menu (diagram)",
+		L"Menu ekstra (schemat)", L"Ek menü (şekil)")); yR += titleLh;
+	body(R, yR, LL14(L"▾ツール下段あたり:", L"Near bottom of ▾ Tools:", L"Bas du menu ▾:", L"Fondo menu ▾:",
+		L"Final del menú ▾:", L"▾도구 하단:", L"▾工具靠下:", L"أسفل ▾:", L"Низ ▾:", L"Unten in ▾:", L"Fim do ▾:", L"Onder in ▾:", L"Dół ▾:", L"▾ altı:")); yR += lh;
+	body(R, yR, LL14(L"・キー確定／相性候補　・フォーカス　・危険操作確認", L"· Capture key / Compatible　· Focus　· Confirm danger", L"· Clé / Compatibles　· Focus　· Confirmer", L"· Chiave / Compatibili　· Focus　· Conferma",
+		L"· Tonalidad / Compatibles　· Foco　· Confirmar", L"· 키 확정/호환　· 포커스　· 위험 확인", L"· 确定调性/相容　· 专注　· 危险确认", L"· مفتاح/متوافق　· تركيز　· تأكيد",
+		L"· Тональность/совмест.　· Фокус　· Подтверждение", L"· Tonart/Passend　· Fokus　· Bestätigen", L"· Tom/Compatíveis　· Foco　· Confirmar", L"· Toonsoort/Compatibel　· Focus　· Bevestigen",
+		L"· Tonacja/Kompat.　· Focus　· Potwierdź", L"· Ton/Uyumlu　· Odak　· Onay")); yR += lh;
+	body(R, yR, LL14(L"・ライブセット録画(画面+録音)　・nowplaying.txt　・MIDI学習", L"· Live-set record (cap+audio)　· nowplaying.txt　· MIDI learn", L"· Enreg. set　· nowplaying　· MIDI learn", L"· Registra set　· nowplaying　· MIDI learn",
+		L"· Grabar set　· nowplaying　· MIDI learn", L"· 라이브 세트 녹화　· nowplaying　· MIDI 학습", L"· 现场套录制　· nowplaying　· MIDI学习", L"· تسجيل المجموعة　· nowplaying　· تعلم MIDI",
+		L"· Запись сета　· nowplaying　· MIDI learn", L"· Live-Set　· nowplaying　· MIDI lernen", L"· Gravar set　· nowplaying　· MIDI learn", L"· Live-set　· nowplaying　· MIDI leren",
+		L"· Nagraj set　· nowplaying　· Nauka MIDI", L"· Canlı set　· nowplaying　· MIDI öğren")); yR += lh;
+	body(R, yR, LL14(L"・トランジション・プリセット　・レイアウト1–3　・週次サマリ", L"· Transition presets　· Layout slots 1–3　· Weekly summary", L"· Presets transition　· Layout 1–3　· Résumé", L"· Preset transizione　· Layout 1–3　· Riepilogo",
+		L"· Presets transición　· Layout 1–3　· Resumen", L"· 전환 프리셋　· 레이아웃1–3　· 주간 요약", L"· 过渡预设　· 布局1–3　· 周汇总", L"· إعدادات انتقال　· تخطيط 1–3　· ملخص",
+		L"· Пресеты перехода　· Макет 1–3　· Сводка", L"· Übergangs-Presets　· Layout 1–3　· Wochenübersicht", L"· Presets transição　· Layout 1–3　· Resumo", L"· Overgangs-presets　· Layout 1–3　· Weekoverzicht",
+		L"· Preset przejść　· Układ 1–3　· Podsumowanie", L"· Geçiş önayarları　· Düzen 1–3　· Haftalık özet")); yR += lh;
+	body(R, yR, LL14(L"・AACプロファイル　・Mirror CUE　・フレーズ拍スナップ　・練習ログ", L"· AAC profile　· Mirror CUE　· Phrase beat-snap　· Practice log", L"· Profil AAC　· CUE miroir　· Accrochage　· Journal", L"· Profilo AAC　· CUE mirror　· Snap　· Log",
+		L"· Perfil AAC　· CUE espejo　· Snap　· Registro", L"· AAC 프로필　· 미러 CUE　· 비트 스냅　· 연습 로그", L"· AAC配置　· 镜像CUE　· 拍对齐　· 练习日志", L"· ملف AAC　· CUE مرآة　· محاذاة　· سجل",
+		L"· Профиль AAC　· CUE зеркала　· Привязка　· Журнал", L"· AAC-Profil　· Mirror-CUE　· Beat-Snap　· Übungsprotokoll", L"· Perfil AAC　· CUE espelho　· Snap　· Log", L"· AAC-profiel　· Mirror-CUE　· Snap　· Oefenlog",
+		L"· Profil AAC　· CUE lustra　· Snap　· Dziennik", L"· AAC profil　· Ayna CUE　· Snap　· Günlük")); yR += lh + 2;
+
+	y = max(yL, yR) + 2;
+	title(L, y, LL14(L"Remote / OBS（図）", L"Remote / OBS (diagram)", L"Remote / OBS (schéma)", L"Remote / OBS (schema)",
+		L"Remote / OBS (diagrama)", L"Remote / OBS(그림)", L"Remote / OBS（图）", L"Remote / OBS (رسم)",
+		L"Remote / OBS (схема)", L"Remote / OBS (Diagramm)", L"Remote / OBS (diagrama)", L"Remote / OBS (diagram)",
+		L"Remote / OBS (schemat)", L"Remote / OBS (şekil)"));
+	y += titleLh;
+	{
+		const int gx = L, gy = y, gw = min(560, rc.Width() - L * 2), gh = lh * 3 + 12;
+		dc.FillSolidRect(gx, gy, gw, gh, RGB(245, 250, 255));
+		dc.FrameRect(CRect(gx, gy, gx + gw, gy + gh), &frameBrush);
+		dc.FillSolidRect(gx + 8, gy + 6, 90, lh * 2, RGB(160, 200, 240));
+		dc.FillSolidRect(gx + 110, gy + 6, 100, lh * 2, RGB(180, 220, 180));
+		dc.FillSolidRect(gx + 222, gy + 6, 110, lh * 2, RGB(240, 210, 160));
+		dc.FillSolidRect(gx + 344, gy + 6, 120, lh * 2, RGB(220, 190, 245));
+		dc.SetTextColor(RGB(30, 40, 50));
+		dc.TextOut(gx + 16, gy + 10, L"/");
+		dc.TextOut(gx + 16, gy + lh + 4, L"remote UI");
+		dc.TextOut(gx + 118, gy + 10, L"/overlay");
+		dc.TextOut(gx + 118, gy + lh + 4, L"OBS HTML");
+		dc.TextOut(gx + 230, gy + 10, L"/api/queue-add");
+		dc.TextOut(gx + 230, gy + lh + 4, L"?i=row");
+		dc.TextOut(gx + 352, gy + 10, L"nowplaying.txt");
+		dc.TextOut(gx + 352, gy + lh + 4, L"exe folder");
+		dc.TextOut(gx + 10, gy + 2 * lh + 6, LL14(
+			L"同一LANのみ。認証なし（既存Remoteと同水準）。オーバーレイは透過タイトル用。",
+			L"Same LAN only. No auth (same as existing Remote). Overlay is transparent title for OBS.",
+			L"LAN uniquement. Sans auth. Overlay = titre transparent OBS.",
+			L"Solo LAN. Senza auth. Overlay = titolo trasparente OBS.",
+			L"Solo LAN. Sin auth. Overlay = título transparente OBS.",
+			L"동일 LAN만. 인증 없음. 오버레이=OBS 투명 타이틀.",
+			L"仅同一局域网。无认证。overlay=OBS透明标题。",
+			L"LAN فقط. بلا مصادقة. Overlay لعنوان شفاف.",
+			L"Только LAN. Без auth. Overlay — прозрачный заголовок OBS.",
+			L"Nur LAN. Keine Auth. Overlay = transparenter OBS-Titel.",
+			L"Só LAN. Sem auth. Overlay = título transparente OBS.",
+			L"Alleen LAN. Geen auth. Overlay = transparante OBS-titel.",
+			L"Tylko LAN. Bez auth. Overlay = przezroczysty tytuł OBS.",
+			L"Yalnızca LAN. Kimlik yok. Overlay = OBS şeffaf başlık."));
+		y = gy + gh + 4;
+	}
+
+	body(L, y, LL14(L"・リスト削除の「削除を元に戻す」 …… 直近1回分のみ（フルUndoではない）", L"· List “Undo delete” …… last delete only (not full undo stack)", L"· « Annuler suppression » …… dernier seul", L"· « Annulla elimina » …… solo ultimo",
+		L"· « Deshacer eliminar » …… solo el último", L"· 「삭제 실행 취소」 …… 직전 1회만", L"·「撤销删除」……仅最近一次", L"· «تراجع عن الحذف» …… الأخير فقط",
+		L"· «Отменить удаление» …… только последний", L"· „Löschen rückgängig“ …… nur letzter", L"· «Desfazer exclusão» …… só o último", L"· „Verwijderen ongedaan“ …… alleen laatste",
+		L"· «Cofnij usuwanie» …… tylko ostatnie", L"· «Silmeyi geri al» …… yalnızca son")); y += lh + 2;
+
 	muted(L, y, LL14(
 		L"各サブ窓の ? も同様に操作ガイドを開きます。キャプションの「メインに追随」はサブ窓の位置追従です。",
 		L"Each sub-window ? opens its own guide. Caption “Follow main” keeps sub-windows attached.",

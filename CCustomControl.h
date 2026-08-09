@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "stdafx.h"
 #include "afxdialogex.h"
@@ -1088,8 +1088,14 @@ private:
     BOOL m_bMouseOver;     // マウスカーソルがボタンに乗っているかどうか
     UINT m_nAnimTick;      // アニメーション用カウンタ(流れるツヤ・鼓動パルス)
     BOOL m_bAnimRunning;   // アニメーションタイマー動作中か
-    void UpdateAnimTimer(); // ホバー/フォーカス状態に応じてタイマーを開始/停止
+    void UpdateAnimTimer(); // ホバー/フォーカス/残点に応じてタイマーを開始/停止
     void PaintOpaqueClient(CDC& dc);
+    void SparkleTick(BOOL bSpawn); // 点を進め、必要なら発生。全滅で FALSE 相当は N==0
+
+    enum { kBtnSparkleMax = 48 };
+    int m_nSparkleN;                 // 生存中の流れる点の数
+    int m_sparklePos[kBtnSparkleMax]; // 各点の X 位置（左端からの px）
+    int m_nSparkleSpawnAcc;          // 等間隔発生用アキュムレータ
 
     // プロパティ保持用メンバ変数
     COLORREF m_clrGradStart, m_clrGradEnd;
@@ -1158,8 +1164,14 @@ protected:
     void PaintClient(CDC& dc);
 
 private:
-    UINT m_nShimmer; // 流れるシマー用カウンタ
+    UINT m_nShimmer; // 流れるシマー用カウンタ（互換・予備）
     BOOL m_bHover;   // マウスがスライダー上にあるか
+    enum { kSliderSparkleMax = 48 };
+    int m_nSparkleN;                    // 生存中の流れる点の数
+    int m_sparklePos[kSliderSparkleMax]; // 各点の軌跡上位置（px）
+    int m_nSparkleSpawnAcc;             // 等間隔発生用アキュムレータ
+    void SparkleTick(BOOL bSpawn);      // 点を進め、ホバー中なら発生
+    int SparkleSpan(BOOL* pbVert);      // 現在の軌跡長（つまみまで）
     CBitmap m_memBackstore; // 毎描画 CreateCompatibleBitmap を避ける
     int m_backstoreW;
     int m_backstoreH;
@@ -1238,6 +1250,17 @@ public:
     int GetCueClick() const { return m_nCueClick; }
     void ClearCueClick() { m_nCueClick = -1; }
 
+    // LRC 時刻マーカー(フレーム)。クリックで GetLrcClick>=0。
+    enum { kLrcMarkMax = 64 };
+    void SetLrcMarkers(const int* frames, int count);
+    void ClearLrcMarkers();
+    int GetLrcClick() const { return m_nLrcClick; }
+    void ClearLrcClick() { m_nLrcClick = -1; }
+    int GetLrcFrame(int idx) const;
+
+    // ホバー拡大波形（peaks があるとき）
+    void SetHoverZoom(BOOL on);
+
     // スペアナ・リボン(最大64本)。シーク中央上に細いバー。
     enum { kRibbonMax = 64 };
     void SetMeterRibbon(const float* bins, int n);
@@ -1248,6 +1271,8 @@ public:
 
     // 拍グリッド。bpm<=0 は 120 扱い。
     void SetBeatGrid(float bpm, BOOL enabled);
+    void SetBeatGrid(float bpm, BOOL enabled, int offsetMs);
+    int GetBeatGridOffsetMs() const { return m_beatOffsetMs; }
 
     // アクリルモードの設定
     void SetAeroMode(BOOL b);
@@ -1301,12 +1326,18 @@ private:
     int m_cueFrames[kCueMax];
     int m_cueCount;
     int m_nCueClick;            // クリックされたキュー index。-1=なし
+    int m_lrcFrames[kLrcMarkMax];
+    int m_lrcCount;
+    int m_nLrcClick;            // クリックされた LRC index。-1=なし
+    BOOL m_bHoverZoom;
+    int m_hoverZoomX;           // クライアント X（ホバー拡大中心）
     float m_ribbon[kRibbonMax];
     int m_ribbonN;
     int m_xfadePreviewMs;
     int m_timeBaseHz;
     float m_beatBpm;
     BOOL m_bBeatGrid;
+    int m_beatOffsetMs;
     BOOL m_bHoverTracking;
     CToolTipCtrl m_hoverTip;
     CString m_hoverTipText;

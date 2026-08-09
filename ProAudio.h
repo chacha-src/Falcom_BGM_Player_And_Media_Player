@@ -44,6 +44,7 @@ struct ProSongExtra {
 	int   rating;        // 0..5。末尾追記(ファイル ver3)
 	int   playCount;     // 再生回数。末尾追記(ファイル ver4)
 	FILETIME lastPlay;   // 最終再生(ローカル FILETIME)。0=未
+	int   setChapter;    // 0=なし 1=Warmup 2=Peak 3=Cooldown。末尾追記
 };
 
 // ---- A/B スナップショット(EQ/環境/FX/テンポ/ピッチ) ----
