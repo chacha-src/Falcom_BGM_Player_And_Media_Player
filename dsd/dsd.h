@@ -993,7 +993,8 @@ BOOL CDSFFile::checkHeader()
 			return FALSE;
 		if (header.size != DSF_HEADER_SIZE)
 			return FALSE;
-		if (header.file_size != liFileSize.QuadPart)
+		// file_size 不一致はよくある（末尾 ID3 追記など）。実ファイルより大きいときだけ拒否。
+		if (header.file_size == 0 || header.file_size > (uint64_t)liFileSize.QuadPart)
 			return FALSE;
 	}
 	{
@@ -1347,8 +1348,9 @@ private:
 	//     b1           b2           a1           a2
 
 public:
-	Noiseshaper() : sos_count(sizeof(my_ns_coeffs) / sizeof(my_ns_coeffs[0]) * 4), t1(sos_count, 0.0f), t2(sos_count, 0.0f)
+	Noiseshaper() : sos_count((int)(sizeof(my_ns_coeffs) / sizeof(my_ns_coeffs[0]) / 4)), t1(sos_count, 0.0f), t2(sos_count, 0.0f)
 	{
+		// sos_count = セクション数（係数4個で1セクション）。旧: *4 は32になり get() が係数外読み→16bitが-32768固定
 		my_ns_coeffs[0] = -1.62666423f,
 			my_ns_coeffs[1] = 0.79410094f,
 			my_ns_coeffs[2] = 0.61367127f,
@@ -1363,14 +1365,20 @@ public:
 		sos_count = other.sos_count;
 		t1.assign(other.t1.begin(), other.t1.end());
 		t2.assign(other.t2.begin(), other.t2.end());
+		for (int i = 0; i < 8; ++i)
+			my_ns_coeffs[i] = other.my_ns_coeffs[i];
 	}
 
 	Noiseshaper& operator=(const Noiseshaper& other)
 	{
 		if (this == &other)
 			return *this;
+		sos_count = other.sos_count;
 		t1.assign(other.t1.begin(), other.t1.end());
 		t2.assign(other.t2.begin(), other.t2.end());
+		for (int i = 0; i < 8; ++i)
+			my_ns_coeffs[i] = other.my_ns_coeffs[i];
+		return *this;
 	}
 
 	~Noiseshaper()
@@ -1440,11 +1448,13 @@ public:
 	}
 
 	void Reset();
-	void Open(long DSDsamplesPerSec, int desiredSampleRate, int ch, int desiredWordSize);
+	// false = soxr 作成失敗。Open 成功扱いにすると無音再生になる
+	bool Open(long DSDsamplesPerSec, int desiredSampleRate, int ch, int desiredWordSize);
 	void Close();
+	bool isReady() const { return soxr != NULL && channels > 0; }
 
 	// return: # of samples written
-	size_t writeFinal(std::vector<float> resample_data, size_t odone, uint8_t* out);
+	size_t writeFinal(const std::vector<float>& resample_data, size_t odone, uint8_t* out);
 
 	// convert channels, src is interlaced as LRLRLR...
 	// return: # of samples rendered
@@ -1511,10 +1521,11 @@ void DSD2PCM::Reset()
 	}
 	flush_phase = false;
 
-	soxr_clear(soxr);
+	if (soxr)
+		soxr_clear(soxr);
 }
 
-void DSD2PCM::Open(long DSDsamplesPerSec, int desiredSampleRate, int ch, int desiredWordSize)
+bool DSD2PCM::Open(long DSDsamplesPerSec, int desiredSampleRate, int ch, int desiredWordSize)
 {
 	dsd_samples_per_sec = DSDsamplesPerSec;
 	channels = ch;
@@ -1527,23 +1538,36 @@ void DSD2PCM::Open(long DSDsamplesPerSec, int desiredSampleRate, int ch, int des
 	buffer_stored = 0;
 	flush_phase = false;
 
+	ds.reserve((size_t)ch);
+	ns.reserve((size_t)ch);
 	for (int i = 0; i < ch; ++i) {
 		ds.push_back(Downsampler(ds_pc));
 		ns.push_back(Noiseshaper());
 	}
 	if (soxr != NULL) {
 		soxr_delete(soxr);
+		soxr = NULL;
 	}
 	{
 		soxr_error_t e = NULL;
+		long inRate = DSDsamplesPerSec / 8;
+		int outRate = desiredSampleRate;
+		if (outRate < 8000 || outRate > 384000)
+			outRate = 44100;
+		desired_sample_rate = outRate;
 		soxr_runtime_spec_t spec = soxr_runtime_spec(0);
-		soxr = soxr_create(DSDsamplesPerSec / 8, desiredSampleRate, ch, &e, NULL, NULL, &spec);
-		if (e != NULL) {
-			OutputDebugStringA((char*)e);
-			DebugBreak();
+		if (inRate >= 1000 && ch > 0)
+			soxr = soxr_create((double)inRate, (double)outRate, (unsigned)ch, &e, NULL, NULL, &spec);
+		if (e != NULL || soxr == NULL) {
+			if (soxr) {
+				soxr_delete(soxr);
+				soxr = NULL;
+			}
+			OutputDebugStringA(e ? (char*)e : "soxr_create failed");
+			return false;
 		}
-
 	}
+	return true;
 }
 
 void DSD2PCM::Close()
@@ -1567,13 +1591,15 @@ void DSD2PCM::Close()
 }
 
 // return: # of samples written
-size_t DSD2PCM::writeFinal(std::vector<float> resample_data, size_t odone, uint8_t* out)
+size_t DSD2PCM::writeFinal(const std::vector<float>& resample_data, size_t odone, uint8_t* out)
 {
 	uint8_t* op = out;
+	if (odone == 0 || !out || channels <= 0)
+		return 0;
 
 	switch (wordSize) {
 	case 16:
-		for (int s = 0; s < odone * channels; ) {
+		for (size_t s = 0; s < odone * (size_t)channels; ) {
 			for (int ch = 0; ch < channels; ++ch) {
 				float r = resample_data[s] * 32768.0f + ns[ch].get();
 				long smp = clip<long>(-32768, myround((float)r), 32767);
@@ -1585,7 +1611,7 @@ size_t DSD2PCM::writeFinal(std::vector<float> resample_data, size_t odone, uint8
 		}
 		break;
 	case 24:
-		for (int s = 0; s < odone * channels; ) {
+		for (size_t s = 0; s < odone * (size_t)channels; ) {
 			for (int ch = 0; ch < channels; ++ch) {
 				float r = resample_data[s] * 8388608.0f;
 				long smp = clip<long>(-8388608, myround(r), 8388607);
@@ -1596,7 +1622,7 @@ size_t DSD2PCM::writeFinal(std::vector<float> resample_data, size_t odone, uint8
 		}
 		break;
 	case 32:
-		for (int s = 0; s < odone * channels; ) {
+		for (size_t s = 0; s < odone * (size_t)channels; ) {
 			for (int ch = 0; ch < channels; ++ch) {
 				float r = resample_data[s] * (1 << 31);
 				long smp = clip<long>(INT32_MIN, myround(r), INT32_MAX);
@@ -1606,6 +1632,8 @@ size_t DSD2PCM::writeFinal(std::vector<float> resample_data, size_t odone, uint8
 			}
 		}
 		break;
+	default:
+		return 0;
 	}
 	return odone;
 }
@@ -1614,12 +1642,16 @@ size_t DSD2PCM::writeFinal(std::vector<float> resample_data, size_t odone, uint8
 // return: # of samples rendered
 size_t DSD2PCM::Render(uint8_t* src, size_t src_size, size_t block_size, int lsbf, uint8_t* dst, size_t samplesToRender)
 {
+	if (flush_phase) {
+		return RenderFlush(dst, samplesToRender);
+	}
+	if (soxr == NULL || channels <= 0 || samplesToRender == 0)
+		return 0;
+	if (src_size < (size_t)channels)
+		return (buffer_stored > 0) ? RenderFlush(dst, samplesToRender) : 0;
+
 	std::vector<float> float_data(src_size, 0), resample_data(src_size, 0);
 	size_t idone = 0, odone = 0;
-
-	if (flush_phase) {
-		return 0; // RenderFlush(dst, samplesToRender);
-	}
 
 	for (int ch = 0; ch < channels; ++ch) {
 		ds[ch].translate(src_size / channels, src + ch * block_size, (block_size > 1) ? 1 : channels, lsbf, float_data.data() + ch, channels);
@@ -1635,7 +1667,6 @@ size_t DSD2PCM::Render(uint8_t* src, size_t src_size, size_t block_size, int lsb
 		if (samplesWritten > 0) {
 			buffer.erase(buffer.begin(), buffer.begin() + samplesToRender * channels);
 			buffer_stored -= samplesWritten;
-
 			return samplesWritten;
 		}
 	}
@@ -1649,6 +1680,10 @@ size_t DSD2PCM::RenderLast()
 
 	if (flush_phase)
 		return buffer_stored;
+	if (soxr == NULL || channels <= 0) {
+		flush_phase = true;
+		return buffer_stored;
+	}
 
 	size_t idone = 0, odone = 0;
 	do {
@@ -1660,7 +1695,6 @@ size_t DSD2PCM::RenderLast()
 	} while (odone > 0);
 
 	flush_phase = true;
-
 	return buffer_stored;
 }
 
@@ -1680,7 +1714,6 @@ size_t DSD2PCM::RenderFlush(uint8_t* dst, size_t samplesToRender)
 	}
 	return samplesWritten;
 }
-
 
 
 
@@ -2213,10 +2246,30 @@ BOOL CDSFDecoderKpi::Open(LPWSTR szFileName, SOUNDINFO* pInfo, ULONGLONG& dwTagS
 		soundinfo.dwUnitRender = file.FmtHeader()->block_size_per_channel * channels * 2;
 		break;
 	}
-	dsd2pcm.Open(dsd_fs, pInfo->dwSamplesPerSec, channels, soundinfo.dwBitsPerSample);
-	uint64_t qwSamples = file.FmtHeader()->sample_count;
-	qwSamples *= 1000;
-	qwSamples /= dsd_fs;
+	{
+		DWORD outRate = pInfo->dwSamplesPerSec;
+		if (outRate < 8000 || outRate > 384000)
+			outRate = 44100;
+		soundinfo.dwSamplesPerSec = outRate;
+		if (!dsd2pcm.Open(dsd_fs, (int)outRate, (int)channels, (int)soundinfo.dwBitsPerSample))
+			goto fail_cleanup;
+	}
+	uint64_t qwFromHdr = file.FmtHeader()->sample_count;
+	uint64_t qwFromData = 0;
+	if (channels > 0) {
+		uint64_t dataBytes = file.DataHeader()->size;
+		if (dataBytes > 12) dataBytes -= 12;
+		qwFromData = (dataBytes * 8ULL) / (uint64_t)channels;
+	}
+	// sample_count 欠落/過小の DSF 対策: data 実長の方が大きければそちらを採用
+	uint64_t qwSamples = (qwFromHdr > qwFromData) ? qwFromHdr : qwFromData;
+	if (dsd_fs > 0) {
+		qwSamples *= 1000;
+		qwSamples /= dsd_fs;
+	}
+	else {
+		qwSamples = 0;
+	}
 	soundinfo.dwLength = (DWORD)qwSamples;
 
 	memcpy(pInfo, &soundinfo, sizeof soundinfo);
@@ -2295,8 +2348,12 @@ DWORD CDSFDecoderKpi::Render(BYTE* buffer, DWORD dwSizeSample)
 	DWORD dwSamplesToRender = dwSizeSample;
 
 	::ZeroMemory(buffer, dwSize);
-	while (dwSamplesToRender > 0 && samplesRendered < sampleCount)
+	// samplesRendered 加算による早期 EOF はしない（動いていた頃と同じ）
+	(void)sampleCount;
+	int guard = 0;
+	while (dwSamplesToRender > 0 && guard++ < 100000)
 	{
+		dwBytesRead = 0;
 		if (!dsd2pcm.isInFlush() && file.Tell() >= dataEndPos) {
 			dsd2pcm.RenderLast();
 		}
@@ -2306,23 +2363,17 @@ DWORD CDSFDecoderKpi::Render(BYTE* buffer, DWORD dwSizeSample)
 			if (dwBytesRead < dwBytesPerBlockChannel * soundinfo.dwChannels) {
 				dsd2pcm.RenderLast();
 			}
-			if (dwBytesRead > 0 && soundinfo.dwChannels > 0) {
-				const uint64_t perChBytes = (uint64_t)dwBytesRead / (uint64_t)soundinfo.dwChannels;
-				samplesRendered += perChBytes * 8ULL;
-			}
 		}
-    	samplesWritten = dsd2pcm.Render(srcBuffer, dwBytesRead, dwBytesPerBlockChannel, bps == DSF_BPS_LSB ? 1 : 0, d, dwSamplesToRender);
+		samplesWritten = (DWORD)dsd2pcm.Render(srcBuffer, dwBytesRead, dwBytesPerBlockChannel, bps == DSF_BPS_LSB ? 1 : 0, d, dwSamplesToRender);
 		d += samplesWritten * soundinfo.dwChannels * (soundinfo.dwBitsPerSample / 8);
 		totalSamplesWritten += samplesWritten;
 		if (dsd2pcm.isInFlush() && samplesWritten < dwSamplesToRender)
 			break;
+		if (samplesWritten == 0 && dsd2pcm.isInFlush())
+			break;
+		if (samplesWritten == 0 && !dsd2pcm.isReady())
+			break;
 		dwSamplesToRender -= samplesWritten;
-		// `samplesRendered` is advanced by input bytes consumed (per-channel),
-		// not by rendered PCM samples.
-
-		//if (!dsd2pcm.isInFlush() && dwSamplesToRender * 16 > sampleCount - samplesRendered) {
-		//	dsd2pcm.RenderLast();
-		//}
 	}
 
 	return totalSamplesWritten;
@@ -2401,7 +2452,14 @@ BOOL CDFFDecoderKpi::Open(LPWSTR szFileName, SOUNDINFO* pInfo, ULONGLONG& dwTagS
 		soundinfo.dwUnitRender = 4 * channels * SAMPLES_PER_BLOCK / 2;
 		break;
 	}
-	dsd2pcm.Open(dsd_fs, soundinfo.dwSamplesPerSec, channels, soundinfo.dwBitsPerSample);
+	{
+		DWORD outRate = soundinfo.dwSamplesPerSec;
+		if (outRate < 8000 || outRate > 384000)
+			outRate = 44100;
+		soundinfo.dwSamplesPerSec = outRate;
+		if (!dsd2pcm.Open(dsd_fs, (int)outRate, (int)channels, (int)soundinfo.dwBitsPerSample))
+			goto fail_cleanup;
+	}
 	{
 		uint64_t samples = file.FRM8().dsd.DataSize();
 		dwTagSize = 0;   // DFF: ID3 位置はジャケ読込側で先頭/末尾スキャン
@@ -2468,28 +2526,39 @@ DWORD CDFFDecoderKpi::Render(BYTE* buffer, DWORD dwSizeSample)
 	DWORD dwSamplesToRender = dwSizeSample;
 
 	::ZeroMemory(buffer, dwSize);
-	while (dwSamplesToRender > 0) {
+	int guard = 0;
+	while (dwSamplesToRender > 0 && guard++ < 100000) {
 		DWORD dwBytesToRead = srcBufferSize;
+		dwBytesRead = 0;
 
 		if (!dsd2pcm.isInFlush() && file.Tell() >= dsdEndPos) {
 			dsd2pcm.RenderLast();
 		}
 
-		if (dsdEndPos - file.Tell() < dwBytesToRead)
-			dwBytesToRead = (DWORD)(dsdEndPos - file.Tell());
+		if (!dsd2pcm.isInFlush()) {
+			uint64_t tell = file.Tell();
+			uint64_t remain = (tell < dsdEndPos) ? (dsdEndPos - tell) : 0;
+			if (remain < (uint64_t)dwBytesToRead)
+				dwBytesToRead = (DWORD)remain;
+			if (dwBytesToRead == 0) {
+				dsd2pcm.RenderLast();
+			}
+			else if (!file.Read(srcBuffer, dwBytesToRead, &dwBytesRead)) {
+				break;
+			}
+		}
 
-		if (!dsd2pcm.isInFlush() && !file.Read(srcBuffer, dwBytesToRead, &dwBytesRead))
-			break;
-
-		samplesWritten = dsd2pcm.Render(srcBuffer, dwBytesRead, 1, 0, d, dwSamplesToRender);
+		samplesWritten = (DWORD)dsd2pcm.Render(srcBuffer, dwBytesRead, 1, 0, d, dwSamplesToRender);
 		d += samplesWritten * soundinfo.dwChannels * (soundinfo.dwBitsPerSample / 8);
 		totalSamplesWritten += samplesWritten;
 
 		if (dsd2pcm.isInFlush() && samplesWritten < dwSamplesToRender)
 			break;
+		if (samplesWritten == 0 && dsd2pcm.isInFlush())
+			break;
+		if (samplesWritten == 0 && !dsd2pcm.isReady())
+			break;
 		dwSamplesToRender -= samplesWritten;
-		//if (dwBytesRead < srcBufferSize)
-		//	break;
 	}
 
 	return totalSamplesWritten;
@@ -2552,7 +2621,6 @@ BOOL CWSDDecoderKpi::Open(LPWSTR szFileName, SOUNDINFO* pInfo, ULONGLONG& dwTagS
 	soundinfo.dwReserved1 = soundinfo.dwReserved2 = 0;
 	soundinfo.dwSeekable = 1;
 
-	dsd2pcm.Open(dsd_fs, soundinfo.dwSamplesPerSec, channels, soundinfo.dwBitsPerSample);
 	switch (pInfo->dwBitsPerSample)
 	{
 	case 0:
@@ -2565,6 +2633,14 @@ BOOL CWSDDecoderKpi::Open(LPWSTR szFileName, SOUNDINFO* pInfo, ULONGLONG& dwTagS
 		soundinfo.dwBitsPerSample = 32;
 		soundinfo.dwUnitRender = 4 * channels * SAMPLES_PER_BLOCK / 2;
 		break;
+	}
+	{
+		DWORD outRate = soundinfo.dwSamplesPerSec;
+		if (outRate < 8000 || outRate > 384000)
+			outRate = 44100;
+		soundinfo.dwSamplesPerSec = outRate;
+		if (!dsd2pcm.Open(dsd_fs, (int)outRate, (int)channels, (int)soundinfo.dwBitsPerSample))
+			goto fail_cleanup;
 	}
 
 	{
@@ -2632,8 +2708,10 @@ DWORD CWSDDecoderKpi::Render(BYTE* buffer, DWORD dwSizeSample)
 	DWORD dwSamplesToRender = dwSizeSample;
 
 	::ZeroMemory(buffer, dwSize);
-	while (dwSamplesToRender > 0)
+	int guard = 0;
+	while (dwSamplesToRender > 0 && guard++ < 100000)
 	{
+		dwBytesRead = 0;
 		if (!dsd2pcm.isInFlush()) {
 			file.Read(srcBuffer, srcBufferSize, &dwBytesRead);
 			if (dwBytesRead < srcBufferSize) {
@@ -2641,20 +2719,25 @@ DWORD CWSDDecoderKpi::Render(BYTE* buffer, DWORD dwSizeSample)
 			}
 		}
 
-		samplesWritten = dsd2pcm.Render(srcBuffer, dwBytesRead, 1, 0, d, dwSamplesToRender);
+		samplesWritten = (DWORD)dsd2pcm.Render(srcBuffer, dwBytesRead, 1, 0, d, dwSamplesToRender);
 		d += samplesWritten * soundinfo.dwChannels * (soundinfo.dwBitsPerSample / 8);
 		totalSamplesWritten += samplesWritten;
 
 		if (dsd2pcm.isInFlush() && samplesWritten < dwSamplesToRender)
 			break;
+		if (samplesWritten == 0 && dsd2pcm.isInFlush())
+			break;
+		if (samplesWritten == 0 && !dsd2pcm.isReady())
+			break;
 		dwSamplesToRender -= samplesWritten;
-
-		//if (dwBytesRead < srcBufferSize)
-		//	break;
 	}
 
 	return totalSamplesWritten;
 }
+
+
+
+
 
 
 

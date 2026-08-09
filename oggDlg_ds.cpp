@@ -510,6 +510,7 @@ UINT HandleNotifications(LPVOID)
 		return v >= 0x10000 && (v % sizeof(void*)) == 0;
 	};
 
+	const ULONG prefilledOldw = oldw; // play() がプリフィル後に進めた値
 	oldw = 0;
 	if (isPlausibleDsb(m_dsb))
 		m_dsb->SetCurrentPosition(0);
@@ -517,6 +518,10 @@ UINT HandleNotifications(LPVOID)
 	if (g_openDecoderMode == -10 || g_openDecoderMode == 999) {
 		oldw = OUTPUT_BUFFER_SIZE * 2;
 		og->timer.SetEvent();
+	}
+	else if (g_openDecoderMode == -7 && prefilledOldw > 0) {
+		// プリフィル済み区間を再デコードで潰さない
+		oldw = prefilledOldw;
 	}
 	fade1 = 0;
 	sek4 = FALSE;

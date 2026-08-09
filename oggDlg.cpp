@@ -582,6 +582,7 @@ BOOL WaitForPlaybackNotifyThreadExit(DWORD timeoutMs = 2500);
 extern DWORD g_playbackNotifyJoinTimeoutMs;
 extern volatile LONG g_interactiveTrackChange;
 void BeginPlaybackNotifyThread();
+extern ULONG oldw;
 ULONG WAVDALen;
 UINT WAVDAStartLen;
 
@@ -782,7 +783,80 @@ int ogpl0 = 0;
 extern void DoEvent();
 #include "CCustomControl.h"
 #include <dxgi.h>
+#include <dxgi1_4.h>
 #pragma comment(lib, "dxgi.lib")
+
+// 表示クラスの HardwareInformation.qwMemorySize(QWORD)。
+// x86 では DXGI DedicatedVideoMemory(SIZE_T) が 4GB 超を表せず、NVIDIA はよく 3072MB を返す。
+static UINT64 QueryGpuVramBytesFromRegistry(UINT vendorId, UINT deviceId, const wchar_t* descName)
+{
+	HKEY hClass = NULL;
+	if (::RegOpenKeyExW(HKEY_LOCAL_MACHINE,
+		L"SYSTEM\\CurrentControlSet\\Control\\Class\\{4d36e968-e325-11ce-bfc1-08002be10318}",
+		0, KEY_READ, &hClass) != ERROR_SUCCESS)
+		return 0;
+
+	wchar_t venTok[16];
+	wchar_t devTok[16];
+	_snwprintf_s(venTok, _TRUNCATE, L"VEN_%04X", vendorId & 0xffffu);
+	_snwprintf_s(devTok, _TRUNCATE, L"DEV_%04X", deviceId & 0xffffu);
+
+	UINT64 best = 0;
+	for (DWORD i = 0; ; ++i) {
+		wchar_t subName[64];
+		DWORD subLen = (DWORD)_countof(subName);
+		if (::RegEnumKeyExW(hClass, i, subName, &subLen, NULL, NULL, NULL, NULL) != ERROR_SUCCESS)
+			break;
+		BOOL digits = (subLen > 0) ? TRUE : FALSE;
+		for (DWORD c = 0; c < subLen; ++c) {
+			if (subName[c] < L'0' || subName[c] > L'9') {
+				digits = FALSE;
+				break;
+			}
+		}
+		if (!digits)
+			continue;
+
+		HKEY hSub = NULL;
+		if (::RegOpenKeyExW(hClass, subName, 0, KEY_READ, &hSub) != ERROR_SUCCESS)
+			continue;
+
+		BOOL match = FALSE;
+		wchar_t matching[256];
+		DWORD mcb = sizeof(matching);
+		DWORD type = 0;
+		if (::RegQueryValueExW(hSub, L"MatchingDeviceId", NULL, &type, (LPBYTE)matching, &mcb) == ERROR_SUCCESS
+			&& (type == REG_SZ || type == REG_EXPAND_SZ)) {
+			matching[_countof(matching) - 1] = 0;
+			_wcsupr_s(matching);
+			if (wcsstr(matching, venTok) && wcsstr(matching, devTok))
+				match = TRUE;
+		}
+		if (!match && descName && descName[0]) {
+			wchar_t driverDesc[256];
+			DWORD dcb = sizeof(driverDesc);
+			if (::RegQueryValueExW(hSub, L"DriverDesc", NULL, &type, (LPBYTE)driverDesc, &dcb) == ERROR_SUCCESS
+				&& (type == REG_SZ || type == REG_EXPAND_SZ)) {
+				driverDesc[_countof(driverDesc) - 1] = 0;
+				if (_wcsicmp(driverDesc, descName) == 0)
+					match = TRUE;
+			}
+		}
+
+		UINT64 qw = 0;
+		if (match) {
+			DWORD cb = sizeof(qw);
+			type = 0;
+			if (::RegQueryValueExW(hSub, L"HardwareInformation.qwMemorySize", NULL, &type, (LPBYTE)&qw, &cb) == ERROR_SUCCESS) {
+				if ((type == REG_QWORD || type == REG_BINARY) && cb >= sizeof(UINT64) && qw > best)
+					best = qw;
+			}
+		}
+		::RegCloseKey(hSub);
+	}
+	::RegCloseKey(hClass);
+	return best;
+}
 
 // プライマリモニタを駆動している DXGI アダプタ名（取れなければ EnumDisplayDevices）。
 static CString BuildGpuInfoString()
@@ -848,12 +922,33 @@ static CString BuildGpuInfoString()
 			if (SUCCEEDED(best->GetDesc1(&desc))) {
 				CString name(desc.Description);
 				name.Trim();
-				SIZE_T vram = desc.DedicatedVideoMemory;
+				// SIZE_T のまま扱うと x86 で 4GB 超が切れる。常に 64bit で集計する。
+				UINT64 vram = (UINT64)desc.DedicatedVideoMemory;
 				if (vram == 0)
-					vram = desc.SharedSystemMemory;
-				const UINT mb = (UINT)(vram / (1024ull * 1024ull));
+					vram = (UINT64)desc.SharedSystemMemory;
+
+				// Budget は UINT64。32bit プロセスでも実 VRAM に近い値が取れることが多い。
+				IDXGIAdapter3* a3 = NULL;
+				if (SUCCEEDED(best->QueryInterface(__uuidof(IDXGIAdapter3), (void**)&a3)) && a3) {
+					DXGI_QUERY_VIDEO_MEMORY_INFO vmi = {};
+					if (SUCCEEDED(a3->QueryVideoMemoryInfo(0, DXGI_MEMORY_SEGMENT_GROUP_LOCAL, &vmi))) {
+						if (vmi.Budget > vram)
+							vram = vmi.Budget;
+					}
+					a3->Release();
+				}
+
+				// レジストリの搭載量がより大きければそちらを採用(16GB カードで 3072MB になる対策)
+				const UINT64 regVram = QueryGpuVramBytesFromRegistry(desc.VendorId, desc.DeviceId, name);
+				if (regVram > vram)
+					vram = regVram;
+
+				const UINT64 mb64 = vram / (1024ull * 1024ull);
+				const UINT mb = (mb64 > 0xffffffffull) ? 0xffffffffu : (UINT)mb64;
 				if (!name.IsEmpty()) {
-					if (mb > 0)
+					if (mb >= 1024)
+						result.Format(_T("%s (%u GB)"), (LPCTSTR)name, (mb + 512u) / 1024u);
+					else if (mb > 0)
 						result.Format(_T("%s (%u MB)"), (LPCTSTR)name, mb);
 					else
 						result = name;
@@ -4917,6 +5012,9 @@ void COggDlg::dsdload(CString& filen, CString& tagfile, CString& tagname, CStrin
 	if (savedata.bit32 == 1) {
 		sikpi.dwBitsPerSample = 32;
 	}
+	// soxr は Open 時に作る。Normalize 後では遅いのでここでレートを確定する。
+	if (sikpi.dwSamplesPerSec < 8000 || sikpi.dwSamplesPerSec > 384000)
+		sikpi.dwSamplesPerSec = 44100;
 	ULONGLONG pointer;
 	if (1) {
 		if (ss == "") {
@@ -8993,6 +9091,7 @@ void COggDlg::play()
 	else if (mode == -7) { // dsd
 		ULONGLONG po;
 		dsdload(filen, tagfile, tagname, tagalbum, po, 1);
+		if (kmp == NULL) { m_saisai.EnableWindow(TRUE); endflg = 0; return; }
 	}
 	else if (mode == -8) { // flac
 		CString ss;
@@ -10547,7 +10646,7 @@ void COggDlg::play()
 					loop1 = 0; loop2 = 0; endf = 1;
 				}
 			}
-			if (mode == -3 || mode == -8 || mode == -9 || mode == -10 || mode == 999) endf = 1;
+			if (mode == -3 || mode == -7 || mode == -8 || mode == -9 || mode == -10 || mode == 999) endf = 1;
 			loopcnt = 0;
 			if (g_openDecoderMode == INT_MIN)
 				g_openDecoderMode = mode;
@@ -10608,7 +10707,7 @@ void COggDlg::play()
 			loop1 = 0; loop2 = 0; endf = 1;
 		}
 	}
-	if (mode == -3 || mode == -8 || mode == -9 || mode == -10 || mode == 999) endf = 1;
+	if (mode == -3 || mode == -7 || mode == -8 || mode == -9 || mode == -10 || mode == 999) endf = 1;
 	loopcnt = 0;
 	if (g_openDecoderMode == INT_MIN)
 		g_openDecoderMode = mode;
@@ -11022,10 +11121,43 @@ void COggDlg::play()
 	if (m_dsb)m_dsb->GetCurrentPosition(&PlayCursor, &WriteCursor);//再生位置取得
 	len1 = (int)WriteCursor;//書き込み範囲取得
 	len2 = 0;
-	if (len1 < 0) {
+	{
 		const int bpf = (g_ds_pcm_ch > 0 && g_ds_pcm_bits >= 8) ? (g_ds_pcm_ch * (g_ds_pcm_bits / 8)) : 4;
-		len1 = (int)(g_ds_buffer_bytes / (ULONG)((bpf > 0) ? bpf : 4));
-		len2 = WriteCursor;
+		const int ring = (int)((g_ds_buffer_bytes > 0) ? g_ds_buffer_bytes : (ULONG)(OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM));
+		const bool isDsd = (g_openDecoderMode == -7 || mode == -7);
+		// DSD は変換が重い。リングを無音埋め＋数十msだけ書いて即 Play すると、
+		// 通知スレッド起動前に無音区間へ突入して「ポツ→無音」になる。
+		// DSD は半分程度を先に埋め、他形式は短めプリフィル。
+		if (len1 <= 0) {
+			const int rate = (g_ds_pcm_rate >= 8000) ? g_ds_pcm_rate : ((wavbit_sample_Hz >= 8000) ? wavbit_sample_Hz : 44100);
+			int fill;
+			if (isDsd) {
+				fill = ring / 2;
+				const int maxMs = bpf * (rate / 2); // ~500ms 上限
+				if (fill > maxMs && maxMs > 0)
+					fill = maxMs;
+				if (fill < OUTPUT_BUFFER_SIZE)
+					fill = OUTPUT_BUFFER_SIZE;
+			}
+			else {
+				fill = bpf * (rate / 10); // ~100ms
+				if (fill < OUTPUT_BUFFER_SIZE)
+					fill = OUTPUT_BUFFER_SIZE;
+				if (fill > ring / 4)
+					fill = ring / 4;
+			}
+			if (bpf > 0)
+				fill = (fill / bpf) * bpf;
+			len1 = fill;
+			len2 = 0;
+		}
+		if (m_dsb && ring > 0 && bpf > 0) {
+			void* pZero = NULL; DWORD zlen = 0;
+			if (m_dsb->Lock(0, (DWORD)ring, &pZero, &zlen, NULL, NULL, 0) == DS_OK && pZero && zlen) {
+				ZeroMemory(pZero, zlen);
+				m_dsb->Unlock(pZero, zlen, NULL, 0);
+			}
+		}
 	}
 	if (len2 < 0)
 		len2 = 0;
@@ -11053,6 +11185,8 @@ void COggDlg::play()
 		m_dsb->Unlock(pdsb, len3, NULL, 0);
 		m_dsb->SetVolume((savedata.dsvol - 1) * 10);
 	}
+	// 通知スレッドがプリフィル区間を上書きしないよう書込みカーソルを進める
+	oldw = (ULONG)(len1 + len2);
 	CFile f123;
 	int flggg = 0;
 	if (silentNow) {
@@ -11091,9 +11225,6 @@ void COggDlg::play()
 		if (pMainFrame1) { pMainFrame1->seek(0); }
 	}
 	syukai = 0;
-	if (m_dsb) {
-		m_dsb->Play(0, 0, DSBPLAY_LOOPING);
-	}
 	fade1 = 0;
 	sflg = FALSE;
 	// 通知スレッド起動直前は DoEvent しない（再入 play が旧デコーダを潰す）
@@ -11112,7 +11243,14 @@ void COggDlg::play()
 	thn1 = FALSE;
 	playf = 1;
 	plf = 1;
-	BeginPlaybackNotifyThread();
+	// DSD: Play より先に通知スレッドを起動し、無音リングへ追従書き込みを開始する
+	if (g_openDecoderMode == -7 || mode == -7)
+		BeginPlaybackNotifyThread();
+	if (m_dsb) {
+		m_dsb->Play(0, 0, DSBPLAY_LOOPING);
+	}
+	if (!(g_openDecoderMode == -7 || mode == -7))
+		BeginPlaybackNotifyThread();
 
 	endflg = 0;
 	g_dsWrittenBytes = 0;
@@ -11144,7 +11282,7 @@ void COggDlg::play()
 			loop1 = 0; loop2 = 0; endf = 1;
 		}
 	}
-	if (mode == -3 || mode == -8 || mode == -9 || mode == -10 || mode == 999) endf = 1;
+	if (mode == -3 || mode == -7 || mode == -8 || mode == -9 || mode == -10 || mode == 999) endf = 1;
 	loopcnt = 0;
 	if (pl && plw && !pl->m_tempMode) {
 		int plc = 1;
@@ -17850,45 +17988,40 @@ int playwavdsd(BYTE* bw, int old, int l1, int l2)
 {
 	//データ読み込み
 	if (l1 == 0) return 0;
-	int rrr = readdsd(bw + old, l1);
+	int r1 = readdsd(bw + old, l1);
+	int r2 = 0;
+	if (l2)
+		r2 = readdsd(bw, l2);
 	{
 		const int bpf = PcmOutBytesPerFrame();
-		const int outSamp = (bpf > 0) ? ((l1 + l2) / bpf) : 0;
+		// 実デコードバイトで進める（要求長だと無音でも時間が進む）
+		const int got = r1 + r2;
+		const int outSamp = (bpf > 0) ? (got / bpf) : 0;
 		AdvanceOutAndSrcPos(outSamp);
 	}
-	if (oggsize / ((wavchannel == 1) ? 2 : 1) - 192 * 20 <= (int)(poss5 * wavchannel * 2 * (wavsam_depth / 16.0))) {
-		if (!WantPlaybackLoop()) {
-			l1 = rrr;
-			if (savedata.saverenzoku == 0)
-				fade1 = 1;
-			else
-				endflg = 1;
-			return l1;
-		}
-	}
-	if (l1 != rrr) {
-		if (!WantPlaybackLoop()) {
-			l1 = rrr;
-			if (savedata.saverenzoku == 0)
-				fade1 = 1;
-			else
-				endflg = 1;
-
-		}
-		else {
-			PlaybackNoteLoop(loop1);
-			dsd_.kpiSetPosition(og->kmp, 0);
-			poss2 = poss3 = poss4 = poss6 = 0; poss5 = loop1;
-			RubberBand_DestroyBank(0);
-			reset = TRUE;
-			readdsd(bw + old + rrr, l1 - rrr);
-		}
-	}
-	if (l2) {
-		rrr = readdsd(bw, l2);
-		if (l2 != rrr) {
+	// loop3 = dsdload が保存した総PCMサンプル数。1秒未満は信用しない。
+	{
+		const int totalSamp = (loop3 > 0) ? loop3
+			: ((oggsize > 0 && wavchannel > 0 && wavsam_depth >= 8)
+				? (oggsize / (wavchannel * (wavsam_depth / 8))) : 0);
+		const int minReliable = (wavbit_sample_Hz > 0) ? wavbit_sample_Hz : 44100;
+		const int margin = (wavbit_sample_Hz > 0) ? (wavbit_sample_Hz / 50) : 882;
+		if (totalSamp >= minReliable && poss5 + margin >= totalSamp) {
 			if (!WantPlaybackLoop()) {
-				l2 = rrr;
+				if (savedata.saverenzoku == 0)
+					fade1 = 1;
+				else
+					endflg = 1;
+				return r1 + r2;
+			}
+		}
+	}
+	if (l1 != r1) {
+		// フレーム端数の短読みは無視。真の欠落（半分未満）だけ EOF 扱い
+		const int dsdFrame = (wavchannel > 0 && wavsam_depth >= 8) ? (wavchannel * (wavsam_depth / 8)) : 4;
+		const bool realShort = (r1 <= 0) || (r1 + dsdFrame <= l1 && r1 * 2 < l1);
+		if (realShort) {
+			if (!WantPlaybackLoop()) {
 				if (savedata.saverenzoku == 0)
 					fade1 = 1;
 				else
@@ -17900,11 +18033,33 @@ int playwavdsd(BYTE* bw, int old, int l1, int l2)
 				poss2 = poss3 = poss4 = poss6 = 0; poss5 = loop1;
 				RubberBand_DestroyBank(0);
 				reset = TRUE;
-				readdsd(bw + rrr, (int)l2 - rrr);
+				if (r1 < l1)
+					readdsd(bw + old + r1, l1 - r1);
 			}
 		}
 	}
-	return l1 + l2;
+	if (l2 && l2 != r2) {
+		const int dsdFrame = (wavchannel > 0 && wavsam_depth >= 8) ? (wavchannel * (wavsam_depth / 8)) : 4;
+		const bool realShort = (r2 <= 0) || (r2 + dsdFrame <= l2 && r2 * 2 < l2);
+		if (realShort) {
+			if (!WantPlaybackLoop()) {
+				if (savedata.saverenzoku == 0)
+					fade1 = 1;
+				else
+					endflg = 1;
+			}
+			else {
+				PlaybackNoteLoop(loop1);
+				dsd_.kpiSetPosition(og->kmp, 0);
+				poss2 = poss3 = poss4 = poss6 = 0; poss5 = loop1;
+				RubberBand_DestroyBank(0);
+				reset = TRUE;
+				if (r2 < l2)
+					readdsd(bw + r2, (int)l2 - r2);
+			}
+		}
+	}
+	return r1 + r2;
 }
 extern int sek;
 extern int flg3;
@@ -17913,84 +18068,101 @@ int readdsd(BYTE* bw, int cnt)
 	if (cnt == 0)return 0;
 	if (IsPlaybackStopRequested() || !og || !og->kmp)
 		return 0;
-	//_set_se_translator(trans_func);
-	DWORD cnt2 = (DWORD)cnt;
-	DWORD r = 0;
-	int len3 = 0, len4 = 0;
-	int max_buffer_size = OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3;
+	EqualiserSetFormatVolContext(0, FALSE);
 	const int dsdFrame = wavchannel * (wavsam_depth / 8);
 	if (dsdFrame <= 0)
 		return 0;
-	if (poss4 <= cnt) {
+
+	int lenl = cnt;
+	int max_buffer_size = OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3;
+	DWORD r = 0;
+	int eofStreak = 0;
+	const int kEofStreak = 3;
+
+	if (poss4 < lenl) {
 		int dsdRbStallIters = 0;
-		int fadeTailIters = 0;
 		const int kDsdRbStallMax = 512;
-		const int kFadeTailMax = 128;
-		while (true) {
+		while (poss4 < lenl) {
 			if (IsPlaybackStopRequested() || !og->kmp)
 				break;
-			if(fade1 == 0)
-				cnt3 = dsd_.kpiRender(og->kmp, (BYTE*)bufkpi, cnt / dsdFrame) * dsdFrame;
 
+			r = 0;
+			if (fade1 == 0) {
+				// 1 回の kpiRender でまとめて取る（classic DSD2PCM は要求量そろえてから返す）
+				DWORD reqSamp = (DWORD)(lenl / dsdFrame);
+				if (reqSamp == 0)
+					reqSamp = 1;
+				if (reqSamp > 8192u)
+					reqSamp = 8192u;
+				ZeroMemory(bufkpi, (SIZE_T)(reqSamp * (DWORD)dsdFrame));
+				const DWORD rendered = dsd_.kpiRender(og->kmp, (BYTE*)bufkpi, reqSamp);
+				r = rendered * (DWORD)dsdFrame;
+				cnt3 = (int)r;
+			}
 			if (fade1 == 1 && muon != 0) {
-				r = cnt;
+				r = (DWORD)((lenl / dsdFrame) * dsdFrame);
+				if (r == 0) r = (DWORD)lenl;
 				ZeroMemory(bufkpi, r);
 				muon--;
 			}
 			if (fade1 == 1 && muon == MUON) {
-				ZeroMemory(bufkpi + r, cnt - r);
-				r = cnt;
+				ZeroMemory(bufkpi + r, (SIZE_T)(lenl - (int)r));
+				r = (DWORD)lenl;
 				muon--;
 			}
+			if (fade1 == 1 && muon == 0)
+				r = 0;
 
-
-			int len2 = readtempo(bufkpi, cnt);
-			if (sek == 0) {
-				if (cnt2 <= cnt3) {
-					cnt3 -= cnt2;
-					if (cnt3 != 0)	memcpy(bufkpi, bufkpi + cnt2, cnt3);
+			if (r == 0) {
+				// FLAC 同様: EOF なら RB 尻尾だけ出して抜ける（連続 0 待ちで fade 誤爆しない）
+				int tailLen = readtempo(bufkpi, 0);
+				if (tailLen > 0) {
+					RingBufWrite(bufkpi3, max_buffer_size, poss2, outputRawBytesData.data(), tailLen);
+					poss4 += tailLen;
 				}
+				break;
 			}
+			eofStreak = 0;
 
+			int len2 = readtempo(bufkpi, (int)r);
 			if (len2 > 0) {
 				dsdRbStallIters = 0;
-				// 書き込み
 				RingBufWrite(bufkpi3, max_buffer_size, poss2, outputRawBytesData.data(), len2);
 				poss4 += len2;
-			}
-			if (len4 != 0) break;
-			if (poss4 > cnt) break;
-			if (fade1 == 1 && muon == 0) {
-				if (len2 <= 0) break;
-				if (++fadeTailIters >= kFadeTailMax) break;
-			}
-			if (len2 <= 0 && fade1 == 0 && poss4 <= cnt) {
-				if (++dsdRbStallIters >= kDsdRbStallMax)
+				if (poss4 >= lenl)
 					break;
+			}
+			else if (++dsdRbStallIters >= kDsdRbStallMax) {
+				break;
 			}
 		}
 	}
 
-	cnt2 = cnt;
-	int to_read = cnt;
-	if (len4 != 0) {
-		cnt2 = len4;
-		to_read = len4;
-	}
+	int to_read = lenl;
+	if (to_read > poss4)
+		to_read = (poss4 > 0) ? poss4 : 0;
 
-	if (cnt2 > 0) {
+	if (to_read > 0) {
 		RingBufRead(bw, bufkpi3, max_buffer_size, poss3, to_read);
 		poss4 -= to_read;
 	}
+	if (to_read < cnt)
+		ZeroMemory(bw + to_read, (SIZE_T)(cnt - to_read));
 
-	equaliser(bw, cnt2, reset);
-	og->FeedPianoRoll(bw, cnt2);
+	// デコード成功分があるのにフレーム端数だけで短くなるのは EOF ではない。
+	// ここで短読みを返すと playwavdsd が即 fade1→無音になる。
+	int ret = to_read;
+	if (to_read > 0 && eofStreak < kEofStreak) {
+		ret = cnt;
+	}
+
+	equaliser(bw, ret, reset);
+	og->FeedPianoRoll(bw, ret);
 	reset = FALSE;
 
-	wl += PlaybackCcWrite(bw, cnt2);
+	wl += PlaybackCcWrite(bw, ret);
 
-
-	return cnt;
+	return ret;
 }
 
 // readmp3 はテンポ伸縮で 1 回あたり要求バイトに満たない／0 返しがある。
