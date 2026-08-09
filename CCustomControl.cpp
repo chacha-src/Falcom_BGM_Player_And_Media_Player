@@ -4997,14 +4997,12 @@ int CCustomComboBox::PhysicalToLogical(int n) const
 void CCustomComboBox::PreSubclassWindow()
 {
     CComboBox::PreSubclassWindow();
-    DWORD dw = GetStyle();
-    dw &= ~CBS_OWNERDRAWVARIABLE;
-    dw |= CBS_OWNERDRAWFIXED | CBS_HASSTRINGS;
-    ModifyStyle(0, CBS_OWNERDRAWFIXED | CBS_HASSTRINGS);
-    SetWindowLong(GetSafeHwnd(), GWL_STYLE, dw);
+    // VARIABLE を外し FIXED に。CLIPSIBLINGS で縦長 HWND 時の下段兄弟へのはみ出し描画を防ぐ。
+    ModifyStyle(CBS_OWNERDRAWVARIABLE, CBS_OWNERDRAWFIXED | CBS_HASSTRINGS | WS_CLIPSIBLINGS);
     const UINT dpi = CCC_GetControlDpi(m_hWnd);
-    SetItemHeight(-1, CCC_ScaleDpi(22, dpi)); // 閉じた状態の表示部
-    SetItemHeight(0, CCC_ScaleDpi(28, dpi));  // ドロップダウン行
+    // 選択欄は 19px@96dpi(MP ツールバー tbH と同一)。28 はドロップダウン行のみ。
+    SetItemHeight(-1, CCC_ScaleDpi(19, dpi));
+    SetItemHeight(0, CCC_ScaleDpi(28, dpi));
 }
 
 HBRUSH CCustomComboBox::CtlColor(CDC* pDC, UINT nC)
@@ -5024,6 +5022,10 @@ BOOL CCustomComboBox::OnEraseBkgnd(CDC* pDC)
     {
         CRect r;
         GetClientRect(&r);
+        // MoveWindow でドロップ領域まで高さがある場合、選択欄だけ消す(下段ボタンを塗り潰さない)
+        const int selH = (int)(INT_PTR)SendMessage(CB_GETITEMHEIGHT, (WPARAM)-1, 0);
+        if (selH > 0 && r.Height() > selH + 1)
+            r.bottom = r.top + selH;
         pDC->FillSolidRect(&r, COLOR_COMBO_BG);
     }
     return TRUE;
@@ -5034,6 +5036,14 @@ void CCustomComboBox::PaintClient(CDC& dc)
     CRect r;
     GetClientRect(&r);
     if (r.Width() <= 0 || r.Height() <= 0)
+        return;
+    // 選択欄の高さに制限(ドロップダウン確保分の HWND 高さがあっても枠・王冠を大きく描かない)
+    {
+        const int selH = (int)(INT_PTR)SendMessage(CB_GETITEMHEIGHT, (WPARAM)-1, 0);
+        if (selH > 0 && r.Height() > selH + 1)
+            r.bottom = r.top + selH;
+    }
+    if (r.Height() <= 0)
         return;
 
     CDC mDC;
@@ -5101,6 +5111,9 @@ void CCustomComboBox::PaintClient(CDC& dc)
     if (nPS != CB_ERR && !bIL)
     {
         int cs = max(4, (rt.Height() - CCC_ScaleDpi(8, dpi)) / 2);
+        // 王冠が選択欄を食いつぶさない上限
+        const int csMax = max(4, rt.Height() / 2 - 1);
+        if (cs > csMax) cs = csMax;
         DrawCrown(&mDC, rt.left + cs, rt.Height() / 2, cs, RGB(255, 215, 0));
         rt.left += cs * 2 + CCC_ScaleDpi(4, dpi);
     }
@@ -5124,6 +5137,9 @@ void CCustomComboBox::OnPaint()
     CPaintDC dc(this);
     CRect r;
     GetClientRect(&r);
+    const int selH = (int)(INT_PTR)SendMessage(CB_GETITEMHEIGHT, (WPARAM)-1, 0);
+    if (selH > 0 && r.Height() > selH + 1)
+        r.bottom = r.top + selH;
     if (r.Width() <= 0 || r.Height() <= 0) return;
 
     // ポップアップ子など: 素 BitBlt が消える環境向けに不透明化
@@ -5175,6 +5191,8 @@ void CCustomComboBox::DrawItem(LPDRAWITEMSTRUCT lp)
     {
         int it = lp->itemID % 4;
         int is = max(8, r.Height() / 3);
+        const int isMax = max(8, r.Height() / 2 - 1);
+        if (is > isMax) is = isMax;
         int ix = r.left + max(4, is / 2);
         int iy = r.top + (r.Height() - is) / 2;
         switch (it)
@@ -5220,7 +5238,9 @@ void CCustomComboBox::DrawItem(LPDRAWITEMSTRUCT lp)
     pOF = pDC->SelectObject(&fc);
     pDC->SetBkMode(TRANSPARENT);
     CRect rt = r;
-    const int iconPad = max(20, r.Height() * 2 / 3 + 4);
+    int iconPad = max(20, r.Height() * 2 / 3 + 4);
+    const int iconPadMax = max(20, r.Width() / 3);
+    if (iconPad > iconPadMax) iconPad = iconPadMax;
     rt.left += bD ? max(4, r.Height() / 6) : iconPad;
     pDC->DrawText(st, &rt, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
     if (pOF)
@@ -5229,7 +5249,7 @@ void CCustomComboBox::DrawItem(LPDRAWITEMSTRUCT lp)
         fc.DeleteObject();
     }
     if (bS && !bD) {
-        const int cr = max(6, r.Height() / 4);
+        const int cr = max(6, min(r.Height() / 4, r.Height() / 2 - 1));
         DrawCrown(pDC, r.right - cr * 2 - 2, r.top + r.Height() / 2, cr, RGB(255, 215, 0));
     }
 }
@@ -7359,7 +7379,7 @@ void CCustomListCtrl::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
             if (bS)
                 DrawHeart(pDC, CRect(noteX, noteY + CCC_ScaleDpi(2, dpiNote), noteX + CCC_ScaleDpi(14, dpiNote), noteY + ih), COLOR_HEART);
             if (pIL && noteImg >= 0 && noteImg != 1) {
-                // ImageList は行高確保でジャケ相当。♪自体は 16x16@96dpi。
+                // ImageList は行高確保(♪相当)。♪自体は 16x16@96dpi。
                 HICON hNote = ImageList_GetIcon(pIL->GetSafeHandle(), noteImg, ILD_TRANSPARENT);
                 if (hNote) {
                     ::DrawIconEx(pDC->GetSafeHdc(), noteX, noteY, hNote, iw, ih, 0, NULL, DI_NORMAL);
@@ -7390,9 +7410,11 @@ void CCustomListCtrl::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
         if (ns == 0)
         {
             const UINT dpiTxt = CCC_GetControlDpi(m_hWnd);
-            int tl = r.left + CCC_ScaleDpi(36, dpiTxt);
+            // 名前列テキスト開始: ジャケ右 + ♪(16) + 隙間。旧 36/24@96 固定のまま ScaleDpi
+            // するとジャケ縮小後も余白だけ残り横に間延びする。
+            int tl = r.left + CCC_ScaleDpi(4, dpiTxt);
             if (m_mpJacketPx > 0)
-                tl = r.left + m_mpJacketPx + CCC_ScaleDpi(24, dpiTxt);
+                tl = r.left + m_mpJacketPx + CCC_ScaleDpi(3, dpiTxt) + CCC_ScaleDpi(16, dpiTxt) + CCC_ScaleDpi(4, dpiTxt);
             CRect ri2;
             if (GetItemRect(ni, &ri2, LVIR_ICON))
             {

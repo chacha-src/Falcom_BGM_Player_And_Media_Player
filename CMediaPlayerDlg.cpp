@@ -1710,7 +1710,9 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 	// Create 失敗後の Add は ENSURE→CInvalidArgException（「引数が正しくありません」）
 	if (il.m_hImageList)
 		il.DeleteImageList();
-	const int jakPx = max(16, (int)(kMpJakPx * hD2 + 0.5f));
+	// 行高は ♪ 相当(16px@96dpi)。ジャケ描画も同サイズに揃える。
+	// 24*hD2 を ImageList に使うと高 DPI で行が間延びし、見える曲が半分近くになる。
+	const int jakPx = max(16, (int)(16 * hD2 + 0.5f));
 	if (il.Create(jakPx, jakPx, ILC_COLOR32 | ILC_MASK, 0, 1)) {
 		HICON h1 = AfxGetApp()->LoadIcon(IDI_ICON1);
 		HICON h2 = AfxGetApp()->LoadIcon(IDI_ICON2);
@@ -2373,8 +2375,9 @@ static int MpPlselQueryRowH(HWND hCombo)
 	return h;
 }
 
-// listRowH = ドロップダウン行の高さ(MeasureItem と同じ 28px)
-// closedH  = 選択欄の高さ(MoveCtl の tbH と同じ)。index 1 で明示する。
+// listRowH = ドロップダウン行の高さ(MeasureItem と同じ 28px@96dpi)
+// closedH  = 選択欄の高さ(MoveCtl の tbH と同じ)。CBS_OWNERDRAWFIXED では
+//            wParam=-1 が選択欄、-1 以外の 0 がリスト行。index 1 は無効。
 static void FixPlselDropList(CCustomComboBox& cb, int listRowH, int closedH)
 {
 	if (!cb.GetSafeHwnd() || listRowH <= 0 || closedH <= 0) return;
@@ -2382,18 +2385,18 @@ static void FixPlselDropList(CCustomComboBox& cb, int listRowH, int closedH)
 	const auto setH = [&](WPARAM idx, int ht) -> LRESULT {
 		return ::SendMessage(h, CB_SETITEMHEIGHT, idx, (LPARAM)ht);
 	};
-	const LRESULT r0 = setH(0, listRowH);
 	if (cb.GetStyle() & CBS_OWNERDRAWVARIABLE)
 	{
 		const int n = (int)::SendMessage(h, CB_GETCOUNT, 0, 0);
-		for (int i = 1; i < n; ++i)
+		for (int i = 0; i < n; ++i)
 			setH((WPARAM)i, listRowH);
 	}
-	else if (r0 == CB_ERR)
+	else
 	{
-		setH((WPARAM)-1, listRowH);
+		setH(0, listRowH);
 	}
-	setH(1, closedH);
+	// 選択欄は必ず -1。ここを listRowH のままにすると tbH より縦に伸びて下段ボタンに被る。
+	setH((WPARAM)-1, closedH);
 	const int cnt = (int)::SendMessage(h, CB_GETCOUNT, 0, 0);
 	if (cnt > 0)
 		::SendMessage(h, CB_SETMINVISIBLE, (WPARAM)min(cnt, 12), 0);

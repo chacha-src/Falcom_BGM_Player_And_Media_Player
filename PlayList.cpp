@@ -782,7 +782,10 @@ BOOL CPlayList::OnInitDialog()
 	DWORD dwExStyle = m_lc.GetExtendedStyle();
 	dwExStyle |= LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES;//|LVS_EX_INFOTIP;
 	m_lc.SetExtendedStyle(dwExStyle);
-	if (il.Create(max(16, (int)(16 * hD2 + 0.5f)), max(16, (int)(16 * hD2 + 0.5f)), ILC_COLOR32 | ILC_MASK, 0, 3)) {
+	// 行高は ♪ 相当(16px@96dpi)。ジャケも同じ px に揃えて行内に収める。
+	// (以前ジャケ24・ImageList16 だと描画が行を食み、逆に両方24だと高 DPI で縦に間延びした)
+	const int plRowPx = max(16, (int)(16 * hD2 + 0.5f));
+	if (il.Create(plRowPx, plRowPx, ILC_COLOR32 | ILC_MASK, 0, 3)) {
 		HICON h1 = ::AfxGetApp()->LoadIcon(IDI_ICON1);
 		HICON h2 = ::AfxGetApp()->LoadIcon(IDI_ICON2);
 		HICON h3 = ::AfxGetApp()->LoadIcon(IDI_ICON3);
@@ -805,7 +808,7 @@ BOOL CPlayList::OnInitDialog()
 	m_lc.InsertColumn ( 6, LL14(L"フォルダ", L"Folder", L"Dossier", L"Cartella", L"Carpeta", L"폴더", L"文件夹", L"المجلد", L"Папка", L"Ordner", L"Pasta", L"Map", L"Folder", L"Klasor"), LVCFMT_LEFT, (int)(50 * hD2), 0 );
 	m_lc.pc = pc;
 	m_lc.m_bSongParamTip = true; // 曲ごと保存パラメータをツールチップに付記
-	m_lc.m_mpJacketPx = max(16, (int)(kPlJakPx * hD2 + 0.5f));
+	m_lc.m_mpJacketPx = plRowPx;
 	m_lc.m_mpJacketGet = PlJacketGetCb;
 	m_lc.m_mpJacketCtx = this;
 	m_lc.m_mpNoteIconGet = PlNoteIconGetCb;

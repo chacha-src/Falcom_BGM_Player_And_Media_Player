@@ -329,10 +329,10 @@ void CDougaHelpDlg::OnPaint()
 		L"Вид / Полный экран", L"Anzeige / Vollbild", L"Ecrã / Completo", L"Weergave / Volledig",
 		L"Widok / Pełny ekran", L"Görünüm / Tam ekran"));
 	y += titleLh;
-	body(L, y, LL14(L"・全画面 …… バー／メニュー／ダブルクリック。ウィンドウ時は 1x・1.5x・2x サイズ", L"· Fullscreen …… bar / menu / double-click. In window: 1x · 1.5x · 2x size", L"· Plein écran …… barre / menu / double-clic. Fenêtre: 1x · 1,5x · 2x", L"· Schermo intero …… barra / menu / doppio clic. Finestra: 1x · 1.5x · 2x",
-		L"· Completa …… barra / menú / doble clic. Ventana: 1x · 1.5x · 2x", L"· 전체화면 …… 바/메뉴/더블클릭. 창 모드: 1x·1.5x·2x", L"· 全屏 …… 栏/菜单/双击。窗口模式: 1x·1.5x·2x", L"· ملء الشاشة …… شريط/قائمة/نقر مزدوج. النافذة: 1x·1.5x·2x",
-		L"· Полный экран …… панель / меню / двойной щелчок. Окно: 1x · 1.5x · 2x", L"· Vollbild …… Leiste / Menü / Doppelklick. Fenster: 1x · 1,5x · 2x", L"· Ecrã inteiro …… barra / menu / duplo clique. Janela: 1x · 1.5x · 2x", L"· Volledig …… balk / menu / dubbelklik. Venster: 1x · 1.5x · 2x",
-		L"· Pełny ekran …… pasek / menu / dwuklik. Okno: 1x · 1.5x · 2x", L"· Tam ekran …… çubuk / menü / çift tık. Pencere: 1x · 1.5x · 2x")); y += lh;
+	body(L, y, LL14(L"・全画面 …… バー／メニュー／ダブルクリック。ウィンドウ時は 1x・1.5x・2x（タスクバーを除く画面内に自動収める）", L"· Fullscreen …… bar / menu / double-click. In window: 1x · 1.5x · 2x (auto-fit inside work area, excluding taskbar)", L"· Plein écran …… barre / menu / double-clic. Fenêtre: 1x · 1,5x · 2x (ajusté à la zone utile, hors barre des tâches)", L"· Schermo intero …… barra / menu / doppio clic. Finestra: 1x · 1.5x · 2x (adattato all'area utile, esclusa la barra)",
+		L"· Completa …… barra / menú / doble clic. Ventana: 1x · 1.5x · 2x (ajuste al área de trabajo, sin barra de tareas)", L"· 전체화면 …… 바/메뉴/더블클릭. 창 모드: 1x·1.5x·2x (작업 표시줄 제외 화면 안에 자동 맞춤)", L"· 全屏 …… 栏/菜单/双击。窗口模式: 1x·1.5x·2x（自动收进不含任务栏的工作区）", L"· ملء الشاشة …… شريط/قائمة/نقر مزدوج. النافذة: 1x·1.5x·2x (ملاءمة تلقائية داخل منطقة العمل دون شريط المهام)",
+		L"· Полный экран …… панель / меню / двойной щелчок. Окно: 1x · 1.5x · 2x (автоподгон в рабочую область без панели задач)", L"· Vollbild …… Leiste / Menü / Doppelklick. Fenster: 1x · 1,5x · 2x (automatisch in Arbeitsbereich ohne Taskleiste)", L"· Ecrã inteiro …… barra / menu / duplo clique. Janela: 1x · 1.5x · 2x (ajuste automático à área de trabalho, sem barra de tarefas)", L"· Volledig …… balk / menu / dubbelklik. Venster: 1x · 1.5x · 2x (automatisch in werkgebied zonder taakbalk)",
+		L"· Pełny ekran …… pasek / menu / dwuklik. Okno: 1x · 1.5x · 2x (auto dopasowanie do obszaru roboczego bez paska zadań)", L"· Tam ekran …… çubuk / menü / çift tık. Pencere: 1x · 1.5x · 2x (görev çubuğu hariç çalışma alanına otomatik sığdırma)")); y += lh;
 	body(L, y, LL14(L"・アスペクト比を維持 …… 右クリック。黒帯で比率を保つ／伸ばして埋める", L"· Keep aspect …… right-click. Letterbox vs stretch-to-fill", L"· Proportions …… clic droit. Bandes noires ou étirement", L"· Proporzioni …… destro. Bande nere o stiramento",
 		L"· Proporción …… clic der. Bandas negras o estirar", L"· 화면비 유지 …… 우클릭. 레터박스 / 늘려 채우기", L"· 保持宽高比 …… 右键。黑边或拉伸填满", L"· نسبة العرض …… يمين. أشرطة سوداء أو تمديد",
 		L"· Пропорции …… ПКМ. Поля или растяжение", L"· Seitenverhältnis …… Rechtsklick. Balken oder strecken", L"· Proporção …… direito. Barras pretas ou esticar", L"· Beeldverhouding …… rechtsklik. Zwarte balken of rekken",
@@ -1450,6 +1450,69 @@ BOOL CDouga::PreTranslateMessage(MSG* pMsg)
 	if (m_bar.IsBarReady() && m_bar.m_tip.GetSafeHwnd())
 		m_bar.m_tip.RelayEvent(pMsg);
 	return CFrameWnd::PreTranslateMessage(pMsg);
+}
+
+// 外枠をタスクバー除外のワークエリア内に収める。
+// はみ出すときだけ動画部を等比縮小し、位置もワーク内へ補正する(収まるなら触らない)。
+static void DougaFitOuterToWorkArea(HWND hwnd, int& x, int& y, int& outerW, int& outerH, int chromeH)
+{
+	if (!hwnd || !::IsWindow(hwnd) || outerW < 1 || outerH < 1)
+		return;
+	if (chromeH < 0)
+		chromeH = 0;
+
+	RECT propose;
+	propose.left = x;
+	propose.top = y;
+	propose.right = x + outerW;
+	propose.bottom = y + outerH;
+	HMONITOR mon = ::MonitorFromRect(&propose, MONITOR_DEFAULTTONEAREST);
+	MONITORINFO mi = {};
+	mi.cbSize = sizeof(mi);
+	RECT rcWork;
+	if (mon && ::GetMonitorInfo(mon, &mi))
+		rcWork = mi.rcWork;
+	else if (!::SystemParametersInfo(SPI_GETWORKAREA, 0, &rcWork, 0))
+		return;
+
+	const int workW = rcWork.right - rcWork.left;
+	const int workH = rcWork.bottom - rcWork.top;
+	if (workW < 32 || workH < 32)
+		return;
+
+	int videoW = outerW;
+	int videoH = outerH - chromeH;
+	if (videoH < 1)
+		videoH = 1;
+
+	int maxVideoW = workW;
+	int maxVideoH = workH - chromeH;
+	if (maxVideoH < 1)
+		maxVideoH = 1;
+
+	if (videoW > maxVideoW || videoH > maxVideoH) {
+		const double sx = (double)maxVideoW / (double)videoW;
+		const double sy = (double)maxVideoH / (double)videoH;
+		double s = (sx < sy) ? sx : sy;
+		if (s < 1.0) {
+			videoW = (int)(videoW * s);
+			videoH = (int)(videoH * s);
+			if (videoW < 1) videoW = 1;
+			if (videoH < 1) videoH = 1;
+		}
+	}
+
+	outerW = videoW;
+	outerH = videoH + chromeH;
+	if (outerW > workW) outerW = workW;
+	if (outerH > workH) outerH = workH;
+	if (outerW < 1) outerW = 1;
+	if (outerH < 1) outerH = 1;
+
+	if (x + outerW > rcWork.right) x = rcWork.right - outerW;
+	if (y + outerH > rcWork.bottom) y = rcWork.bottom - outerH;
+	if (x < rcWork.left) x = rcWork.left;
+	if (y < rcWork.top) y = rcWork.top;
 }
 
 // アスペクト比維持がONなら、元サイズ(rcm)比で dest 矩形をレターボックス化する。
@@ -5188,6 +5251,22 @@ void CDouga::OnEnterSizeMove()
 void CDouga::OnExitSizeMove()
 {
 	m_inSizeMove = 0;
+	if (!savedata.fs && GetSafeHwnd()) {
+		RECT r;
+		GetWindowRect(&r);
+		int wx = r.left, wy = r.top, ww = r.right - r.left, wh = r.bottom - r.top;
+		const int chromeH = GetSystemMetrics(SM_CYSIZEFRAME) + ::GetSystemMetrics(SM_CYCAPTION) + GetBarHeight();
+		const int ox = wx, oy = wy, ow = ww, oh = wh;
+		DougaFitOuterToWorkArea(m_hWnd, wx, wy, ww, wh, chromeH);
+		if (wx != ox || wy != oy || ww != ow || wh != oh) {
+			SetWindowPos(NULL, wx, wy, ww, wh, SWP_NOOWNERZORDER | SWP_NOACTIVATE);
+			savedata.p.top = wy;
+			savedata.p.left = wx;
+			savedata.p.bottom = wy + wh;
+			savedata.p.right = wx + ww;
+			savedata.douga = 3;
+		}
+	}
 	ApplyVideoDest(); // ここで LayoutBar を一回だけ
 	if (m_bar.IsBarReady())
 		m_bar.Invalidate(TRUE);
@@ -6309,23 +6388,26 @@ void CDouga::ShowDougaContextMenu(CPoint point)
 	CCustomPopupMenu menu;
 	menu.SetAeroMode(FALSE);
 
-	// ウィンドウ時は倍率項目付き
+	// ウィンドウ時は倍率項目付き(現在の倍率にチェック)
 	if (!savedata.fs) {
-		menu.AddCommand(ID_MENUITEM32771,
+		menu.AddCheck(ID_MENUITEM32771,
 			LL14(L"通常(1x1)", L"Normal (1x1)", L"Normal (1x1)", L"Normale (1x1)",
 				L"Normal (1x1)", L"표준 (1x1)", L"标准 (1x1)", L"عادي (1×1)",
 				L"Обычный (1x1)", L"Normal (1x1)", L"Normal (1x1)", L"Normaal (1x1)",
-				L"Normalny (1x1)", L"Normal (1x1)"));
-		menu.AddCommand(ID_MENUITEM32773,
+				L"Normalny (1x1)", L"Normal (1x1)"),
+			savedata.douga == 0);
+		menu.AddCheck(ID_MENUITEM32773,
 			LL14(L"中間(1.5x1.5)", L"Medium (1.5x1.5)", L"Moyen (1,5x1,5)", L"Medio (1.5x1.5)",
 				L"Mediano (1.5x1.5)", L"중간 (1.5x1.5)", L"中等 (1.5x1.5)", L"متوسط (1.5×1.5)",
 				L"Средний (1.5x1.5)", L"Mittel (1,5x1,5)", L"Médio (1.5x1.5)", L"Middel (1.5x1.5)",
-				L"Średni (1.5x1.5)", L"Orta (1.5x1.5)"));
-		menu.AddCommand(ID_MENUITEM32772,
+				L"Średni (1.5x1.5)", L"Orta (1.5x1.5)"),
+			savedata.douga == 2);
+		menu.AddCheck(ID_MENUITEM32772,
 			LL14(L"倍(2x2)", L"Large (2x2)", L"Grand (2x2)", L"Grande (2x2)",
 				L"Grande (2x2)", L"2배 (2x2)", L"双倍 (2x2)", L"كبير (2×2)",
 				L"Двойной (2x2)", L"Groß (2x2)", L"Grande (2x2)", L"Groot (2x2)",
-				L"Duży (2x2)", L"Büyük (2x2)"));
+				L"Duży (2x2)", L"Büyük (2x2)"),
+			savedata.douga == 1);
 		menu.AddSeparator();
 	}
 
@@ -6683,8 +6765,7 @@ DEFINE_SUBTITLE_SWITCH(40)
 
 void CDouga::OnMenuitem32771()
 {
-	RECT r,rr;
-	// TODO: この位置にコマンド ハンドラ用のコードを追加してください
+	RECT r;
 	r.bottom=rcm.bottom;
 	r.top=rcm.top;
 	r.right=rcm.right;
@@ -6692,11 +6773,17 @@ void CDouga::OnMenuitem32771()
 	y=r.bottom-r.top; x=r.right-r.left;
 	y1_=rcm.bottom-rcm.top; x1=rcm.right-rcm.left;
 	si=0;
-	SetWindowPos(NULL,
-				0,0,x, y+(GetSystemMetrics(SM_CYSIZEFRAME)+::GetSystemMetrics(SM_CYCAPTION))+GetBarHeight(),   SWP_NOMOVE|SWP_NOOWNERZORDER);
-	GetClientRect(&rr);
+	const int chromeH = GetSystemMetrics(SM_CYSIZEFRAME) + ::GetSystemMetrics(SM_CYCAPTION) + GetBarHeight();
 	GetWindowRect(&r);
-	MoveWindow(&r);
+	int wx = r.left, wy = r.top, ww = x, wh = y + chromeH;
+	DougaFitOuterToWorkArea(m_hWnd, wx, wy, ww, wh, chromeH);
+	{
+		UINT flags = SWP_NOOWNERZORDER | SWP_NOACTIVATE;
+		if (!::IsWindowVisible(m_hWnd))
+			flags |= SWP_NOREDRAW;
+		SetWindowPos(NULL, wx, wy, ww, wh, flags);
+	}
+	GetWindowRect(&r);
 	ApplyVideoDest();
 	savedata.douga=0;
 
@@ -6710,19 +6797,24 @@ void CDouga::OnMenuitem32771()
 
 void CDouga::OnMenuitem32772() 
 {
-	RECT r,rr;
-	// TODO: この位置にコマンド ハンドラ用のコードを追加してください
+	RECT r;
 	r.bottom=rcm.bottom;
 	r.top=rcm.top;
 	r.right=rcm.right;
 	r.left=rcm.left;
 	y=r.bottom-r.top; x=r.right-r.left;
 	si=0;
-	SetWindowPos(NULL,
-				0,0,x*2, y*2+(GetSystemMetrics(SM_CYSIZEFRAME)+::GetSystemMetrics(SM_CYCAPTION))+GetBarHeight(),   SWP_NOMOVE|SWP_NOOWNERZORDER);
-	GetClientRect(&rr);
+	const int chromeH = GetSystemMetrics(SM_CYSIZEFRAME) + ::GetSystemMetrics(SM_CYCAPTION) + GetBarHeight();
 	GetWindowRect(&r);
-	MoveWindow(&r);
+	int wx = r.left, wy = r.top, ww = x * 2, wh = y * 2 + chromeH;
+	DougaFitOuterToWorkArea(m_hWnd, wx, wy, ww, wh, chromeH);
+	{
+		UINT flags = SWP_NOOWNERZORDER | SWP_NOACTIVATE;
+		if (!::IsWindowVisible(m_hWnd))
+			flags |= SWP_NOREDRAW;
+		SetWindowPos(NULL, wx, wy, ww, wh, flags);
+	}
+	GetWindowRect(&r);
 	ApplyVideoDest();
 	savedata.douga=1;	
 	savedata.p.top=r.top;
@@ -6731,24 +6823,30 @@ void CDouga::OnMenuitem32772()
 	savedata.p.right=r.right;
 	si=1;
 	SetTimer(1597,30,NULL);
-	
 }
 
 void CDouga::OnMenuitem32773() 
 {
-	RECT r,rr;
-	// TODO: この位置にコマンド ハンドラ用のコードを追加してください
+	RECT r;
 	r.bottom=rcm.bottom;
 	r.top=rcm.top;
 	r.right=rcm.right;
 	r.left=rcm.left;
 	y=r.bottom-r.top; x=r.right-r.left;
 	si=0;
-	SetWindowPos(NULL,
-				0,0,(int)((double)x*1.5), (int)((double)y*1.5)+(GetSystemMetrics(SM_CYSIZEFRAME)+::GetSystemMetrics(SM_CYCAPTION))+GetBarHeight(),   SWP_NOMOVE|SWP_NOOWNERZORDER);
-	GetClientRect(&rr);
+	const int chromeH = GetSystemMetrics(SM_CYSIZEFRAME) + ::GetSystemMetrics(SM_CYCAPTION) + GetBarHeight();
 	GetWindowRect(&r);
-	MoveWindow(&r);
+	int wx = r.left, wy = r.top;
+	int ww = (int)((double)x * 1.5);
+	int wh = (int)((double)y * 1.5) + chromeH;
+	DougaFitOuterToWorkArea(m_hWnd, wx, wy, ww, wh, chromeH);
+	{
+		UINT flags = SWP_NOOWNERZORDER | SWP_NOACTIVATE;
+		if (!::IsWindowVisible(m_hWnd))
+			flags |= SWP_NOREDRAW;
+		SetWindowPos(NULL, wx, wy, ww, wh, flags);
+	}
+	GetWindowRect(&r);
 	ApplyVideoDest();
 	savedata.douga=2;	
 	savedata.p.top=r.top;
@@ -6762,21 +6860,33 @@ void CDouga::OnMenuitem32773()
 void CDouga::OnMenuitem32774() 
 {
 	if (pBasicVideo == NULL && !(ev && Vdc)) return;
-	RECT r,rr;
+	RECT r;
 	double i;
-	// TODO: この位置にコマンド ハンドラ用のコードを追加してください
 	r.bottom=rcm.bottom;
 	r.top=rcm.top;
 	r.right=rcm.right;
 	r.left=rcm.left;
 	if (rcm.right <= 0) return;
 	i=(double)(savedata.p.right-savedata.p.left)/(double)rcm.right;
-	SetWindowPos(NULL,
-				savedata.p.left,savedata.p.top,(int)(i*(double)(rcm.right-rcm.left)),
-				(int)(i*(double)(rcm.bottom-rcm.top)+(GetSystemMetrics(SM_CYSIZEFRAME)+::GetSystemMetrics(SM_CYCAPTION))+GetBarHeight()),  SWP_NOOWNERZORDER);
-	GetClientRect(&rr);
+	const int chromeH = GetSystemMetrics(SM_CYSIZEFRAME) + ::GetSystemMetrics(SM_CYCAPTION) + GetBarHeight();
+	int wx = savedata.p.left;
+	int wy = savedata.p.top;
+	int ww = (int)(i * (double)(rcm.right - rcm.left));
+	int wh = (int)(i * (double)(rcm.bottom - rcm.top) + chromeH);
+	if (ww < 1) ww = 1;
+	if (wh < 1) wh = 1;
+	DougaFitOuterToWorkArea(m_hWnd, wx, wy, ww, wh, chromeH);
+	{
+		UINT flags = SWP_NOOWNERZORDER | SWP_NOACTIVATE;
+		if (!::IsWindowVisible(m_hWnd))
+			flags |= SWP_NOREDRAW;
+		SetWindowPos(NULL, wx, wy, ww, wh, flags);
+	}
 	GetWindowRect(&r);
-	MoveWindow(&r);
+	savedata.p.top = r.top;
+	savedata.p.left = r.left;
+	savedata.p.bottom = r.bottom;
+	savedata.p.right = r.right;
 	ApplyVideoDest();
 //	savedata.douga=3;	
 }
@@ -6837,14 +6947,26 @@ LRESULT CDouga::OnNcHitTest(CPoint point)
 
 void CDouga::OnGetMinMaxInfo(MINMAXINFO FAR* lpMMI) 
 {
-	// TODO: この位置にメッセージ ハンドラ用のコードを追加するかまたはデフォルトの処理を呼び出してください
-//	if(si==1){
-//		lpMMI->ptMinTrackSize.y=(int)xx1-20;
-//		lpMMI->ptMinTrackSize.x=(int)yy1_-20;
-//		lpMMI->ptMaxTrackSize.y=(int)xx1+20;
-//		lpMMI->ptMaxTrackSize.x=(int)yy1_+20;
-//	}
 	CFrameWnd::OnGetMinMaxInfo(lpMMI);
+	// フルスクリーン以外は手動リサイズもタスクバー除外ワークエリアを上限にする
+	if (savedata.fs || !GetSafeHwnd())
+		return;
+	HMONITOR mon = ::MonitorFromWindow(m_hWnd, MONITOR_DEFAULTTONEAREST);
+	MONITORINFO mi = {};
+	mi.cbSize = sizeof(mi);
+	RECT rcWork;
+	if (mon && ::GetMonitorInfo(mon, &mi))
+		rcWork = mi.rcWork;
+	else if (!::SystemParametersInfo(SPI_GETWORKAREA, 0, &rcWork, 0))
+		return;
+	const int workW = rcWork.right - rcWork.left;
+	const int workH = rcWork.bottom - rcWork.top;
+	if (workW < 32 || workH < 32)
+		return;
+	lpMMI->ptMaxTrackSize.x = workW;
+	lpMMI->ptMaxTrackSize.y = workH;
+	lpMMI->ptMaxSize.x = workW;
+	lpMMI->ptMaxSize.y = workH;
 }
 
 int CDouga::OnMouseActivate(CWnd* pDesktopWnd, UINT nHitTest, UINT message) 
