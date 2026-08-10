@@ -8,6 +8,7 @@
 // 右クリック: レイアウト/表示モード/速度、コピー、クリア、常に手前に表示。
 #include "afxdialogex.h"
 #include "CCustomControl.h"
+#include "GdiSoft3D.h"
 #include <vector>
 
 class CAnalyzerDlg : public CCustomBlurDialogExBase
@@ -104,6 +105,7 @@ protected:
 	afx_msg void OnLButtonDown(UINT nFlags, CPoint point);
 	afx_msg void OnLButtonUp(UINT nFlags, CPoint point);
 	afx_msg void OnLButtonDblClk(UINT nFlags, CPoint point);
+	afx_msg BOOL OnMouseWheel(UINT nFlags, short zDelta, CPoint pt);
 	afx_msg void OnSpecLayoutOverlay();
 	afx_msg void OnSpecLayoutSplitV();
 	afx_msg void OnSpecLayoutSplitH();
@@ -167,6 +169,18 @@ private:
 	void DrawFreqMarkers(CDC& dc, const CRect& plot, float nyquist);
 	void DrawTpLufsReadout(CDC& dc, const CRect& waveRc);
 	void Present(CDC& dc, const CRect& rc, BOOL bAero);
+	void PresentSoft3DTop(CDC& dc, const CRect& pane);
+	void PresentSoft3DBot(CDC& dc, const CRect& pane);
+	void SyncSoft3DCamsFromSave();
+	void PersistSoft3DCams();
+	bool IsSoft3DTop() const { return savedata.analyzerviewmodeTop == 1; }
+	bool IsSoft3DBot() const { return savedata.analyzerviewmodeBot == 1; }
+	static void Soft3dYawTopCb(void* ctx, int value);
+	static void Soft3dPitchTopCb(void* ctx, int value);
+	static void Soft3dZoomTopCb(void* ctx, int value);
+	static void Soft3dYawBotCb(void* ctx, int value);
+	static void Soft3dPitchBotCb(void* ctx, int value);
+	static void Soft3dZoomBotCb(void* ctx, int value);
 	void ReleaseBuffers();
 	bool EnsureWaveBuffer(CDC& refDC, int w, int h);
 	bool EnsureSpecBuffer(CDC& refDC, int w, int h);
@@ -302,6 +316,15 @@ private:
 	DWORD m_lastPresentKickTick = 0;
 
 	CFont m_font;
+
+	GdiSoft3D::Cam m_camTop;
+	GdiSoft3D::Cam m_camBot;
+	bool m_soft3dApiDemo = false;
+	bool m_rotDragging = false;
+	int m_rotPane = 0; // 0=top 1=bot
+	CPoint m_rotOrigin;
+	float m_rotYaw0 = 0.f;
+	float m_rotPitch0 = 0.f;
 
 	HANDLE m_hSpecThread = nullptr;
 	HANDLE m_hSpecWake = nullptr;

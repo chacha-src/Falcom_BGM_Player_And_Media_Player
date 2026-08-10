@@ -94,6 +94,8 @@ BEGIN_MESSAGE_MAP(CCommandRollView, CWnd)
 	ON_WM_LBUTTONDBLCLK()
 	ON_WM_MOUSEMOVE()
 	ON_WM_KEYDOWN()
+	ON_WM_CONTEXTMENU()
+	ON_WM_RBUTTONUP()
 END_MESSAGE_MAP()
 
 BOOL CCommandRollView::CreateRoll(CWnd* pParent, const CRect& rc, UINT nId)
@@ -106,6 +108,7 @@ int CCommandRollView::OnCreate(LPCREATESTRUCT lp)
 {
 	if (CWnd::OnCreate(lp) == -1) return -1;
 	ModifyStyleEx(0, WS_EX_CLIENTEDGE);
+	SyncSoft3DCamFromSave();
 	return 0;
 }
 
@@ -565,6 +568,10 @@ void CCommandRollView::InvalidateRoll()
 
 void CCommandRollView::PaintRoll(CDC& dc, const CRect& rc)
 {
+	if (IsSoft3D()) {
+		PaintRollSoft3D(dc, rc);
+		return;
+	}
 	dc.FillSolidRect(rc, RGB(245, 246, 250));
 	CPen gridPen(PS_SOLID, 1, RGB(220, 222, 230));
 	CPen* oldPen = dc.SelectObject(&gridPen);
@@ -676,6 +683,162 @@ void CCommandRollView::PaintRoll(CDC& dc, const CRect& rc)
 
 	dc.SelectObject(oldPen);
 	dc.SelectObject(oldFont);
+}
+
+void CCommandRollView::SyncSoft3DCamFromSave()
+{
+	GdiSoft3D::CamFromSaved(m_cam3d, savedata.mpCmdRoll3dyaw, savedata.mpCmdRoll3dpitch, savedata.mpCmdRoll3dzoom);
+}
+
+void CCommandRollView::PersistSoft3DCam()
+{
+	GdiSoft3D::CamToSaved(m_cam3d, savedata.mpCmdRoll3dyaw, savedata.mpCmdRoll3dpitch, savedata.mpCmdRoll3dzoom);
+}
+
+void CCommandRollView::Soft3dYawCb(void* ctx, int value)
+{
+	auto* self = (CCommandRollView*)ctx;
+	if (!self) return;
+	self->m_cam3d.yawDeg = (float)value / 10.f;
+	GdiSoft3D::ClampCam(self->m_cam3d);
+	self->PersistSoft3DCam();
+	self->InvalidateRoll();
+}
+void CCommandRollView::Soft3dPitchCb(void* ctx, int value)
+{
+	auto* self = (CCommandRollView*)ctx;
+	if (!self) return;
+	self->m_cam3d.pitchDeg = (float)value / 10.f;
+	GdiSoft3D::ClampCam(self->m_cam3d);
+	self->PersistSoft3DCam();
+	self->InvalidateRoll();
+}
+void CCommandRollView::Soft3dZoomCb(void* ctx, int value)
+{
+	auto* self = (CCommandRollView*)ctx;
+	if (!self) return;
+	self->m_cam3d.zoom = (float)value / 100.f;
+	GdiSoft3D::ClampCam(self->m_cam3d);
+	self->PersistSoft3DCam();
+	self->InvalidateRoll();
+}
+
+void CCommandRollView::PaintRollSoft3D(CDC& dc, const CRect& rc)
+{
+	const int w = rc.Width(), h = rc.Height();
+	if (w < 8 || h < 8) return;
+	CDC mem; mem.CreateCompatibleDC(&dc);
+	CBitmap bmp; bmp.CreateCompatibleBitmap(&dc, w, h);
+	CBitmap* ob = mem.SelectObject(&bmp);
+	mem.FillSolidRect(0, 0, w, h, RGB(32, 34, 42));
+
+	const float laneDepth = 0.085f;
+	const float farZ = laneDepth * (float)kLaneCount + 0.20f;
+	const float boxes[1][6] = { { -1.25f, 1.15f, -0.02f, 0.65f, -0.08f, farZ } };
+	GdiSoft3D::View v;
+	GdiSoft3D::BuildView(w, h, m_cam3d, boxes, 1, v);
+	GdiSoft3D::Scene sc;
+	sc.Begin(v);
+
+	const double viewSec = max(1.0, (double)max(1, w - m_labelW) / m_pxPerSec);
+	const double sec0 = m_scrollSec;
+	const double sec1 = m_scrollSec + viewSec;
+	auto secToX = [&](double t) -> float {
+		float u = (float)((t - sec0) / (sec1 - sec0));
+		if (u < -0.2f) u = -0.2f;
+		if (u > 1.2f) u = 1.2f;
+		return -1.0f + 2.0f * u;
+	};
+
+	for (int lane = kLaneCount - 1; lane >= 0; --lane) {
+		const float z0 = laneDepth * (float)lane;
+		const float z1 = z0 + laneDepth * 0.92f;
+		const float yFloor = (lane % 2) ? 0.012f : 0.0f;
+		COLORREF floor = (lane % 2) ? RGB(55, 58, 72) : RGB(48, 50, 62);
+		sc.AddBox(-1.0f, 1.0f, yFloor, z0, z1, floor, yFloor - 0.01f);
+	}
+
+	for (int lane = kLaneCount - 1; lane >= 0; --lane) {
+		const float yBase = (lane % 2) ? 0.012f : 0.0f;
+		const float z0 = laneDepth * (float)lane + laneDepth * 0.15f;
+		const float z1 = z0 + laneDepth * 0.55f;
+		for (int i = 0; i < m_evCount; ++i) {
+			if (LaneFromEvent(m_ev[i]) != lane) continue;
+			const MpPromptSnapshotEvent& ev = m_ev[i];
+			float x0 = secToX(ev.t0);
+			float x1 = secToX(ev.t1);
+			if (x1 < x0 + 0.02f) x1 = x0 + 0.02f;
+			if (x1 < -1.05f || x0 > 1.05f) continue;
+			float topY = yBase + 0.18f;
+			if (ev.hasVal) {
+				int vv = max(ev.v0, ev.v1);
+				if (vv < 0) vv = 0;
+				if (vv > 200) vv = 200;
+				topY = yBase + 0.08f + (float)vv / 200.f * 0.40f;
+			}
+			const BOOL pct = (ev.period > 0.001);
+			COLORREF fill = ev.isPreset ? RGB(180, 140, 220) : (pct ? RGB(120, 180, 210) : RGB(100, 170, 130));
+			if (i == m_sel) fill = RGB(255, 170, 80);
+			sc.AddBox(x0, x1, topY, z0, z1, fill, yBase);
+		}
+	}
+
+	{
+		const float hx = secToX(MpGetPerformanceTimeSec());
+		if (hx >= -1.05f && hx <= 1.05f) {
+			sc.AddBox(hx - 0.010f, hx + 0.010f, 0.55f, -0.05f, farZ, RGB(220, 60, 80), 0.0f);
+		}
+	}
+
+	sc.Flush(mem);
+
+	// テキストは PlgBlt せず、投影位置へスクリーン空間で描く（潰れ防止）
+	{
+		mem.SetBkMode(TRANSPARENT);
+		mem.SetTextColor(RGB(230, 235, 245));
+		CFont* of = mem.SelectObject(GetFont());
+		const double step = (m_pxPerSec >= 120) ? 0.25
+			: (m_pxPerSec >= 60) ? 0.5
+			: (m_pxPerSec >= 24) ? 1.0
+			: (m_pxPerSec >= 8) ? 5.0
+			: 10.0;
+		for (double t = floor(sec0 / step) * step; t <= sec1 + step; t += step) {
+			const float x = secToX(t);
+			if (x < -1.05f || x > 1.05f) continue;
+			POINT p;
+			GdiSoft3D::Project(v, x, 0.36f, -0.02f, p);
+			CString lab;
+			if (step < 1.0) lab.Format(L"%.2f", t);
+			else lab.Format(L"%.0f", t);
+			CRect tr(p.x - 28, p.y - 10, p.x + 28, p.y + 10);
+			mem.FillSolidRect(&tr, RGB(40, 44, 58));
+			mem.DrawText(lab, &tr, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+		}
+		for (int lane = 0; lane < kLaneCount; ++lane) {
+			const float z = laneDepth * ((float)lane + 0.45f);
+			const float y0 = ((lane % 2) ? 0.012f : 0.0f) + 0.08f;
+			POINT p;
+			GdiSoft3D::Project(v, -1.12f, y0, z, p);
+			CString name = LaneName(lane);
+			CRect tr(p.x - 36, p.y - 9, p.x + 36, p.y + 9);
+			mem.FillSolidRect(&tr, RGB(36, 40, 54));
+			mem.DrawText(name, &tr, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+		}
+		if (of) mem.SelectObject(of);
+	}
+
+	{
+		GdiSoft2D::Context s2;
+		if (s2.Create(w, h, false) && s2.fb.hdc) {
+			::BitBlt(s2.fb.hdc, 0, 0, w, h, mem.GetSafeHdc(), 0, 0, SRCCOPY);
+			s2.Vignette(0.38f);
+			s2.Saturate(1.08f);
+			s2.Present(mem, 0, 0);
+		}
+	}
+
+	dc.BitBlt(rc.left, rc.top, w, h, &mem, 0, 0, SRCCOPY);
+	mem.SelectObject(ob);
 }
 
 void CCommandRollView::AutoFollowPlayhead(double t)
@@ -825,6 +988,12 @@ void CCommandRollView::OnVScroll(UINT nSBCode, UINT nPos, CScrollBar* /*pScrollB
 
 BOOL CCommandRollView::OnMouseWheel(UINT nFlags, short zDelta, CPoint pt)
 {
+	if (IsSoft3D() && !(nFlags & (MK_SHIFT | MK_CONTROL))) {
+		GdiSoft3D::WheelZoom(m_cam3d, zDelta);
+		PersistSoft3DCam();
+		InvalidateRoll();
+		return TRUE;
+	}
 	const int steps = (zDelta > 0) ? -1 : 1;
 	if (nFlags & MK_SHIFT) {
 		m_scrollY += steps * m_laneH * 3;
@@ -847,6 +1016,14 @@ BOOL CCommandRollView::OnMouseWheel(UINT nFlags, short zDelta, CPoint pt)
 void CCommandRollView::OnLButtonDown(UINT nFlags, CPoint point)
 {
 	SetFocus();
+	if (IsSoft3D()) {
+		m_rotDragging = true;
+		m_rotOrigin = point;
+		m_rotYaw0 = m_cam3d.yawDeg;
+		m_rotPitch0 = m_cam3d.pitchDeg;
+		SetCapture();
+		return;
+	}
 	m_downPt = point;
 	const int pal = HitTestPalette(point);
 	if (pal >= 0) {
@@ -871,6 +1048,18 @@ void CCommandRollView::OnLButtonDown(UINT nFlags, CPoint point)
 
 void CCommandRollView::OnMouseMove(UINT nFlags, CPoint point)
 {
+	if (m_rotDragging) {
+		if (!(nFlags & MK_LBUTTON)) {
+			m_rotDragging = false;
+			if (GetCapture() == this) ReleaseCapture();
+			PersistSoft3DCam();
+			return;
+		}
+		GdiSoft3D::OrbitDrag(m_cam3d, m_rotYaw0, m_rotPitch0, m_rotOrigin, point);
+		PersistSoft3DCam();
+		InvalidateRoll();
+		return;
+	}
 	if (m_paletteDrag || m_creating) {
 		m_dragT1 = XToSec(point.x);
 		InvalidateRoll();
@@ -888,6 +1077,12 @@ void CCommandRollView::OnMouseMove(UINT nFlags, CPoint point)
 
 void CCommandRollView::OnLButtonUp(UINT nFlags, CPoint point)
 {
+	if (m_rotDragging) {
+		m_rotDragging = false;
+		if (GetCapture() == this) ReleaseCapture();
+		PersistSoft3DCam();
+		return;
+	}
 	if (GetCapture() == this) ReleaseCapture();
 	if (m_paletteDrag || m_creating) {
 		m_paletteDrag = FALSE;
@@ -919,6 +1114,7 @@ void CCommandRollView::OnLButtonUp(UINT nFlags, CPoint point)
 
 void CCommandRollView::OnLButtonDblClk(UINT nFlags, CPoint point)
 {
+	if (IsSoft3D()) return; // 編集は2Dのみ
 	const int hit = HitTestEvent(point);
 	if (hit < 0) return;
 	MpPromptSnapshotEvent ev = m_ev[hit];
@@ -926,6 +1122,66 @@ void CCommandRollView::OnLButtonDblClk(UINT nFlags, CPoint point)
 	m_ev[hit] = ev;
 	m_sel = hit;
 	CommitToPeer();
+}
+
+void CCommandRollView::OnRButtonUp(UINT nFlags, CPoint point)
+{
+	UNREFERENCED_PARAMETER(nFlags);
+	CPoint sp = point;
+	ClientToScreen(&sp);
+	OnContextMenu(this, sp);
+}
+
+void CCommandRollView::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
+{
+	enum {
+		IDM_CR_VIEW_2D = 42320,
+		IDM_CR_VIEW_3D = 42321
+	};
+	CCustomPopupMenu menu;
+	CCustomPopupMenu* subView = menu.AddSubMenu(
+		LL14(L"表示モード", L"View mode", L"Mode d'affichage", L"Modalita di visualizzazione", L"Modo de visualizacion", L"표시 모드", L"显示模式", L"وضع العرض", L"Режим отображения", L"Anzeigemodus", L"Modo de exibicao", L"Weergavemodus", L"Tryb wyswietlania", L"Goruntuleme modu"),
+		LL14(L"ロールの表示モード（通常2D／簡易3D）を選びます。編集は2Dのみです。", L"Choose roll view mode (normal 2D / soft 3D). Edit only in 2D.", L"Choisir le mode (2D / 3D). Edition en 2D seulement.", L"Scegli modalita (2D / 3D). Modifica solo in 2D.", L"Elegir modo (2D / 3D). Edicion solo en 2D.", L"표시 모드(일반 2D/간이 3D). 편집은 2D만.", L"选择显示模式（普通2D/简易3D）。仅在2D中编辑。", L"اختر الوضع (2D / 3D). التحرير في 2D فقط.", L"Режим (2D / 3D). Правка только в 2D.", L"Anzeigemodus (2D / 3D). Bearbeiten nur in 2D.", L"Modo (2D / 3D). Edicao apenas em 2D.", L"Modus (2D / 3D). Bewerken alleen in 2D.", L"Tryb (2D / 3D). Edycja tylko w 2D.", L"Gorunum (2D / 3D). Duzenleme sadece 2D."));
+	if (subView) {
+		subView->AddCheck(IDM_CR_VIEW_2D,
+			LL14(L"通常 (2D)", L"Normal (2D)", L"Normal (2D)", L"Normale (2D)", L"Normal (2D)", L"일반 (2D)", L"普通 (2D)", L"عادي (2D)", L"Обычный (2D)", L"Normal (2D)", L"Normal (2D)", L"Normaal (2D)", L"Zwykly (2D)", L"Normal (2D)"),
+			!IsSoft3D());
+		subView->AddCheck(IDM_CR_VIEW_3D,
+			LL14(L"簡易3D", L"Soft 3D", L"3D simplifie", L"3D semplificato", L"3D simple", L"간이 3D", L"简易3D", L"ثلاثي الأبعاد مبسط", L"Простой 3D", L"Einfaches 3D", L"3D simples", L"Eenvoudig 3D", L"Uproszczone 3D", L"Basit 3B"),
+			IsSoft3D());
+		if (IsSoft3D()) {
+			int yaw10 = (int)(m_cam3d.yawDeg * 10.f);
+			int pit10 = (int)(m_cam3d.pitchDeg * 10.f);
+			int zoomPct = (int)(m_cam3d.zoom * 100.f + 0.5f);
+			if (yaw10 < -1800) yaw10 = -1800; if (yaw10 > 1800) yaw10 = 1800;
+			if (pit10 < -850) pit10 = -850; if (pit10 > 850) pit10 = 850;
+			if (zoomPct < 35) zoomPct = 35; if (zoomPct > 400) zoomPct = 400;
+			subView->AddSeparator();
+			subView->AddSlider(LL14(L"Yaw (0.1°)", L"Yaw (0.1°)", L"Lacet (0.1°)", L"Yaw (0.1°)", L"Yaw (0.1°)", L"Yaw (0.1°)", L"偏航 (0.1°)", L"Yaw (0.1°)", L"Yaw (0.1°)", L"Yaw (0.1°)", L"Yaw (0.1°)", L"Yaw (0.1°)", L"Yaw (0.1°)", L"Yaw (0.1°)"),
+				-1800, 1800, yaw10, &CCommandRollView::Soft3dYawCb, this,
+				LL14(L"水平回転（ドラッグ中に反映）", L"Horizontal rotation (live)", L"Rotation horizontale (direct)", L"Rotazione orizzontale (live)", L"Rotacion horizontal (en vivo)", L"수평 회전(즉시)", L"水平旋转（即时）", L"دوران أفقي (مباشر)", L"Горизонтальный поворот (сразу)", L"Horizontale Drehung (live)", L"Rotacao horizontal (ao vivo)", L"Horizontale rotatie (live)", L"Obrot poziomy (na zywo)", L"Yatay donus (anlik)"));
+			subView->AddSlider(LL14(L"Pitch (0.1°)", L"Pitch (0.1°)", L"Tangage (0.1°)", L"Pitch (0.1°)", L"Pitch (0.1°)", L"Pitch (0.1°)", L"俯仰 (0.1°)", L"Pitch (0.1°)", L"Pitch (0.1°)", L"Pitch (0.1°)", L"Pitch (0.1°)", L"Pitch (0.1°)", L"Pitch (0.1°)", L"Pitch (0.1°)"),
+				-850, 850, pit10, &CCommandRollView::Soft3dPitchCb, this,
+				LL14(L"仰角（ドラッグ中に反映）", L"Elevation angle (live)", L"Angle d'elevation (direct)", L"Angolo di elevazione (live)", L"Angulo de elevacion (en vivo)", L"앙각(즉시)", L"仰角（即时）", L"زاوية الارتفاع (مباشر)", L"Угол наклона (сразу)", L"Neigungswinkel (live)", L"Angulo de elevacao (ao vivo)", L"Elevatiehoek (live)", L"Kat nachylenia (na zywo)", L"Yukselis acisi (anlik)"));
+			subView->AddSlider(LL14(L"Zoom (%)", L"Zoom (%)", L"Zoom (%)", L"Zoom (%)", L"Zoom (%)", L"Zoom (%)", L"缩放 (%)", L"تكبير (%)", L"Масштаб (%)", L"Zoom (%)", L"Zoom (%)", L"Zoom (%)", L"Zoom (%)", L"Zoom (%)"),
+				35, 400, zoomPct, &CCommandRollView::Soft3dZoomCb, this,
+				LL14(L"拡大縮小（ドラッグ中に反映）", L"Zoom (live)", L"Zoom (direct)", L"Zoom (live)", L"Zoom (en vivo)", L"확대/축소(즉시)", L"缩放（即时）", L"تكبير (مباشر)", L"Масштаб (сразу)", L"Zoom (live)", L"Zoom (ao vivo)", L"Zoom (live)", L"Powiększenie (na zywo)", L"Yakinlastirma (anlik)"));
+		}
+	}
+	if (point.x == -1 && point.y == -1) {
+		CRect rc; GetClientRect(&rc); ClientToScreen(&rc);
+		point = CPoint(rc.left + 8, rc.top + 8);
+	}
+	const UINT cmd = menu.Track(point, this);
+	if (cmd == IDM_CR_VIEW_2D) {
+		savedata.mpCmdRollviewmode = 0;
+		InvalidateRoll();
+	}
+	else if (cmd == IDM_CR_VIEW_3D) {
+		savedata.mpCmdRollviewmode = 1;
+		SyncSoft3DCamFromSave();
+		InvalidateRoll();
+	}
 }
 
 void CCommandRollView::OnKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags)

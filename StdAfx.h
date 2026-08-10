@@ -641,6 +641,27 @@ struct save{
 	int yt_token_exp;         // access 失効時刻 (time_t 相当・秒)
 	TCHAR yt_broadcast_id[64];
 	TCHAR yt_stream_id[64];
+
+	// --- GDI Soft3D Phase1（末尾追記。旧.datは offsetof で初期化）---
+	// アナライザー上下ペイン独立: 0=通常2D 1=簡易3D
+	int analyzerviewmodeTop;
+	int analyzerviewmodeBot;
+	int analyzer3dyawTop;    // 度×10
+	int analyzer3dpitchTop;
+	int analyzer3dzoomTop;   // ×100
+	int analyzer3dyawBot;
+	int analyzer3dpitchBot;
+	int analyzer3dzoomBot;
+	// コマンドロール
+	int mpCmdRollviewmode;
+	int mpCmdRoll3dyaw;
+	int mpCmdRoll3dpitch;
+	int mpCmdRoll3dzoom;
+	// MP バナー／ジャケット／曲情報（同一カメラ）
+	int mpBannerviewmode;
+	int mpBanner3dyaw;
+	int mpBanner3dpitch;
+	int mpBanner3dzoom;
 };
 extern save savedata;
 /* コード間隔(ms)。16..500。旧.dat や未設定は 25。 */

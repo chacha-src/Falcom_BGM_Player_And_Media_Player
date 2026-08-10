@@ -1,4 +1,4 @@
-﻿// Microsoft Visual C++ generated resource script.
+// Microsoft Visual C++ generated resource script.
 //
 #pragma code_page(65001)
 
@@ -1409,11 +1409,11 @@ BEGIN
     LTEXT           "URL",IDC_SC_LIVE_URL_L,7,564,32,10
     EDITTEXT        IDC_SC_LIVE_URL,42,562,511,14,ES_AUTOHSCROLL
     LTEXT           "Key",IDC_SC_LIVE_KEY_L,7,582,32,10
-    EDITTEXT        IDC_SC_LIVE_KEY,42,580,511,14,ES_AUTOHSCROLL | ES_PASSWORD
+    EDITTEXT        IDC_SC_LIVE_KEY,42,580,511,14,ES_PASSWORD | ES_AUTOHSCROLL
     LTEXT           "CID",IDC_SC_LIVE_CID_L,7,600,32,10
     EDITTEXT        IDC_SC_LIVE_CID,42,598,220,14,ES_AUTOHSCROLL
     LTEXT           "Sec",IDC_SC_LIVE_CSEC_L,270,600,28,10
-    EDITTEXT        IDC_SC_LIVE_CSEC,300,598,253,14,ES_AUTOHSCROLL | ES_PASSWORD
+    EDITTEXT        IDC_SC_LIVE_CSEC,300,598,253,14,ES_PASSWORD | ES_AUTOHSCROLL
     LTEXT           "Path",IDC_SC_PATH_L,7,620,40,10
     EDITTEXT        IDC_SC_PATH,50,618,470,14,ES_AUTOHSCROLL
     PUSHBUTTON      "...",IDC_SC_BROWSE,525,617,28,16
@@ -1785,7 +1785,7 @@ END
 //
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 0,9,1,703
+ FILEVERSION 0,9,1,710
  PRODUCTVERSION 1,0,0,1
  FILEFLAGSMASK 0x3fL
 #ifdef _DEBUG
@@ -1804,7 +1804,7 @@ BEGIN
             VALUE "Comments", "Falcom BGM Player & Media Player"
             VALUE "CompanyName", "Pre Prayer Power Soft"
             VALUE "FileDescription", "Falcom BGM Player & Media Player Ver 0.9a Rel.2026.08.10"
-            VALUE "FileVersion", "0.9.1.703"
+            VALUE "FileVersion", "0.9.1.710"
             VALUE "InternalName", "ogg YS/ED bgm"
             VALUE "LegalCopyright", "Copyright (C) 2026.08.10"
             VALUE "LegalTrademarks", "Pre Prayer Power Soft"

@@ -2,6 +2,7 @@
 
 #include "CCustomControl.h"
 #include "CPromptEngine.h"
+#include "GdiSoft3D.h"
 #include "resource.h"
 
 class CPromptDlg;
@@ -91,6 +92,13 @@ protected:
 	int HitTestPalette(CPoint pt) const;
 	void EnsureMemDC(int w, int h);
 	void PaintRoll(CDC& dc, const CRect& rc);
+	void PaintRollSoft3D(CDC& dc, const CRect& rc);
+	bool IsSoft3D() const { return savedata.mpCmdRollviewmode == 1; }
+	void SyncSoft3DCamFromSave();
+	void PersistSoft3DCam();
+	static void Soft3dYawCb(void* ctx, int value);
+	static void Soft3dPitchCb(void* ctx, int value);
+	static void Soft3dZoomCb(void* ctx, int value);
 	BOOL RunPlaceDialog(MpPromptSnapshotEvent& ev);
 	void AutoFollowPlayhead(double t);
 	void InvalidateRoll();
@@ -108,7 +116,15 @@ protected:
 	afx_msg void OnLButtonDblClk(UINT nFlags, CPoint point);
 	afx_msg void OnMouseMove(UINT nFlags, CPoint point);
 	afx_msg void OnKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags);
+	afx_msg void OnContextMenu(CWnd* pWnd, CPoint point);
+	afx_msg void OnRButtonUp(UINT nFlags, CPoint point);
 	DECLARE_MESSAGE_MAP()
+
+	GdiSoft3D::Cam m_cam3d;
+	bool m_rotDragging = false;
+	CPoint m_rotOrigin;
+	float m_rotYaw0 = 0.f;
+	float m_rotPitch0 = 0.f;
 };
 
 class CCommandRollDlg : public CCustomBlurDialogExBase

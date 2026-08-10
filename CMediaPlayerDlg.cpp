@@ -1310,6 +1310,7 @@ BEGIN_MESSAGE_MAP(CMediaPlayerDlg, CCustomBlurDialogExBase)
 	ON_WM_MOUSEMOVE()
 	ON_WM_LBUTTONDOWN()
 	ON_WM_LBUTTONUP()
+	ON_WM_MOUSEWHEEL()
 	ON_WM_ENTERSIZEMOVE()
 	ON_WM_EXITSIZEMOVE()
 	ON_NOTIFY(LVN_GETDISPINFO, IDC_MP_LIST, &CMediaPlayerDlg::OnGetdispinfoList)
@@ -1372,6 +1373,8 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 	try {
 	if (!CCustomBlurDialogExBase::OnInitDialog())
 		return FALSE;
+
+	SyncBannerSoft3DCamFromSave();
 
 	// 子コントロールを親の再描画で塗り潰さない(スタティック消失・リスト欠け・ちらつき防止)
 	ModifyStyle(0, WS_CLIPCHILDREN | WS_CLIPSIBLINGS);
@@ -4708,7 +4711,171 @@ void CMediaPlayerDlg::BlitVisualizer(CDC* pDC)
 	::SelectObject(m_memBanner.GetSafeHdc(), oldBmp);
 }
 
-// og と同じ規則で表示用タイトルを解決(timerp の sss 決定ロジックと一致)
+void CMediaPlayerDlg::SyncBannerSoft3DCamFromSave()
+{
+	GdiSoft3D::CamFromSaved(m_bannerCam3d, savedata.mpBanner3dyaw, savedata.mpBanner3dpitch, savedata.mpBanner3dzoom);
+}
+
+void CMediaPlayerDlg::PersistBannerSoft3DCam()
+{
+	GdiSoft3D::CamToSaved(m_bannerCam3d, savedata.mpBanner3dyaw, savedata.mpBanner3dpitch, savedata.mpBanner3dzoom);
+}
+
+void CMediaPlayerDlg::BannerSoft3dYawCb(void* ctx, int value)
+{
+	auto* self = (CMediaPlayerDlg*)ctx;
+	if (!self) return;
+	self->m_bannerCam3d.yawDeg = (float)value / 10.f;
+	GdiSoft3D::ClampCam(self->m_bannerCam3d);
+	self->PersistBannerSoft3DCam();
+	if (::IsWindow(self->m_hWnd)) self->Invalidate(FALSE);
+}
+void CMediaPlayerDlg::BannerSoft3dPitchCb(void* ctx, int value)
+{
+	auto* self = (CMediaPlayerDlg*)ctx;
+	if (!self) return;
+	self->m_bannerCam3d.pitchDeg = (float)value / 10.f;
+	GdiSoft3D::ClampCam(self->m_bannerCam3d);
+	self->PersistBannerSoft3DCam();
+	if (::IsWindow(self->m_hWnd)) self->Invalidate(FALSE);
+}
+void CMediaPlayerDlg::BannerSoft3dZoomCb(void* ctx, int value)
+{
+	auto* self = (CMediaPlayerDlg*)ctx;
+	if (!self) return;
+	self->m_bannerCam3d.zoom = (float)value / 100.f;
+	GdiSoft3D::ClampCam(self->m_bannerCam3d);
+	self->PersistBannerSoft3DCam();
+	if (::IsWindow(self->m_hWnd)) self->Invalidate(FALSE);
+}
+
+void CMediaPlayerDlg::PresentBannerSoft3D(CDC* pDC)
+{
+	if (!pDC || m_bannerRect.IsRectEmpty()) return;
+	// アナライザ/ピアノと同様: Soft3D はバナー矩形だけ。ジャケ/情報は 2D サイドパネル。
+	// （旧: 3領域を1枚に載せてバーがジャケ・情報の下に食い込み、クリップで中心帯だけ見えて壊れて見えた）
+	const int sw = m_bannerRect.Width(), sh = m_bannerRect.Height();
+	if (sw < 40 || sh < 24) return;
+
+	CDC mem; mem.CreateCompatibleDC(pDC);
+	CBitmap bmp; bmp.CreateCompatibleBitmap(pDC, sw, sh);
+	CBitmap* ob = mem.SelectObject(&bmp);
+	mem.FillSolidRect(0, 0, sw, sh, RGB(8, 10, 16));
+
+	{
+		static DWORD s_fftMs = 0;
+		const DWORD now = GetTickCount();
+		if (og && plf == 1 && (now - s_fftMs) >= 33u) {
+			s_fftMs = now;
+			og->Speana(FALSE, TRUE);
+		}
+	}
+
+	extern int speanaInst[400];
+	extern int speanaLiveStereo;
+	extern int speanaFftL[88];
+	extern int speanaFftR[88];
+	extern int speanaFftStereo;
+	extern int speanaFftValid;
+
+	float levL[64] = {}, levR[64] = {};
+	const int barN = 64;
+	bool stereo = false;
+	bool have = false;
+
+	// 2Dバナーと同じ speanaInst を最優先（FFT 経路だけが低域偏り／枯死しやすい）
+	{
+		int nz = 0;
+		if (speanaLiveStereo) {
+			stereo = true;
+			for (int i = 0; i < barN; ++i) {
+				const int src = (i * 88) / barN;
+				levL[i] = (float)speanaInst[100 + src] / 96.f;
+				levR[i] = (float)speanaInst[200 + src] / 96.f;
+				if (levL[i] > 0.01f || levR[i] > 0.01f) ++nz;
+			}
+		} else {
+			for (int i = 0; i < barN; ++i) {
+				const int src = (i * 88) / barN;
+				levL[i] = (float)speanaInst[src] / 96.f;
+				if (levL[i] > 0.01f) ++nz;
+			}
+		}
+		have = (nz > 0);
+	}
+
+	// フォールバック: Soft3D 用 FFT
+	if (!have && speanaFftValid) {
+		stereo = (speanaFftStereo != 0);
+		int nz = 0;
+		for (int i = 0; i < barN; ++i) {
+			const int i0 = (i * 88) / barN;
+			const int i1 = ((i + 1) * 88) / barN;
+			float aL = 0.f, aR = 0.f;
+			for (int k = i0; k < i1 && k < 88; ++k) {
+				float vL = (float)speanaFftL[k] / 96.f;
+				float vR = (float)speanaFftR[k] / 96.f;
+				if (vL > aL) aL = vL;
+				if (vR > aR) aR = vR;
+			}
+			levL[i] = (aL > 1.f) ? 1.f : aL;
+			levR[i] = (aR > 1.f) ? 1.f : aR;
+			if (levL[i] > 0.01f || levR[i] > 0.01f) ++nz;
+		}
+		have = (nz > 0);
+	}
+
+	const float boxes[1][6] = { { -1.15f, 1.15f, -0.02f, 0.72f, 0.0f, 0.95f } };
+	GdiSoft3D::View v;
+	GdiSoft3D::BuildView(sw, sh, m_bannerCam3d, boxes, 1, v);
+
+	if (!m_bannerSoftCtx.Create(sw, sh)) {
+		mem.SelectObject(ob);
+		return;
+	}
+	GdiSoft3D::Context& ctx = m_bannerSoftCtx;
+	ctx.view = v;
+	ctx.depthTest = true;
+	ctx.depthWrite = true;
+	ctx.BeginFrame(RGB(8, 10, 16));
+	ctx.DrawGrid(-1.05f, 1.05f, 0.05f, 0.90f, 0.0f, 6, RGB(40, 44, 58));
+
+	if (have) {
+		// 左半分=L全帯域 / 右半分=R全帯域（同じZ。bin内交互や手前奥は使わない）
+		const float z0 = 0.22f, z1 = 0.55f, maxY = 0.58f;
+		const float gapFrac = (savedata.mpSpeanaStyle == 1) ? 0.08f : 0.18f;
+		const COLORREF cL = RGB(80, 210, 255);
+		const COLORREF cR = RGB(255, 140, 90);
+		if (stereo)
+			ctx.DrawStereoBarsLR(-1.0f, 1.0f, barN, levL, levR, z0, z1, maxY, gapFrac, cL, cR);
+		else
+			ctx.DrawStereoBarsLR(-1.0f, 1.0f, barN, levL, nullptr, z0, z1, maxY, gapFrac, cL, cL);
+	}
+
+	if (savedata.pro_corr_meter) {
+		const float corr = ProAudio_CorrValue();
+		const float bal = ProAudio_CorrBalance();
+		ctx.DrawBox(0.92f, 1.02f, 0.30f + corr * 0.25f, 0.15f, 0.35f, RGB(100, 230, 150), 0.f);
+		const float bx = 1.08f + bal * 0.06f;
+		ctx.DrawBox(bx - 0.025f, bx + 0.025f, 0.12f, 0.15f, 0.35f, RGB(255, 190, 90), 0.f);
+	}
+
+	ctx.EndFrame();
+	ctx.Present(mem, 0, 0);
+
+#if CCUSTOM_AERO_SUPPORT
+	if (savedata.aero == 1 && CCC_IsWin11())
+		CCC_BlitStretchNF(pDC->m_hDC, m_bannerRect.left, m_bannerRect.top, sw, sh, mem.GetSafeHdc(), 0, 0, sw, sh, RGB(0, 0, 0));
+	else if (CCC_AcrylicCaption(m_hWnd) && CCC_IsWin11() && !CCC_IsAeroEnabled())
+		CCC_BlitStretchOpaque(pDC->m_hDC, m_bannerRect.left, m_bannerRect.top, sw, sh, mem.GetSafeHdc(), 0, 0, sw, sh);
+	else
+#endif
+		pDC->BitBlt(m_bannerRect.left, m_bannerRect.top, sw, sh, &mem, 0, 0, SRCCOPY);
+
+	mem.SelectObject(ob);
+}
+
+
 CString CMediaPlayerDlg::CurrentTrackTitle() const
 {
 	CString t = fnn;
@@ -5294,8 +5461,13 @@ void CMediaPlayerDlg::OnPaint()
 			CCC_PaintAeroGaps(dc, this, &m_bannerRect);
 			dc.RestoreDC(saved);
 		}
-		if (hitBanner) BlitVisualizer(&dc);
-		DrawSidePanels(&dc);
+		if (IsBannerSoft3D()) {
+			PresentBannerSoft3D(&dc);
+			DrawSidePanels(&dc);
+		} else {
+			if (hitBanner) BlitVisualizer(&dc);
+			DrawSidePanels(&dc);
+		}
 		CCC_CaptionPaint(dc, m_hWnd);
 		COgg_ClearGdiPaintPending();
 		return;
@@ -5342,8 +5514,13 @@ void CMediaPlayerDlg::OnPaint()
 		}
 		pdc.RestoreDC(saved);
 	}
-	if (hitBanner) BlitVisualizer(&pdc);
-	DrawSidePanels(&pdc);
+	if (IsBannerSoft3D()) {
+		PresentBannerSoft3D(&pdc);
+		DrawSidePanels(&pdc);
+	} else {
+		if (hitBanner) BlitVisualizer(&pdc);
+		DrawSidePanels(&pdc);
+	}
 	CCC_CaptionPaint(pdc, m_hWnd);
 	COgg_ClearGdiPaintPending();
 }
@@ -8504,6 +8681,37 @@ void CMediaPlayerDlg::OnRButtonUp(UINT nFlags, CPoint point)
 		CCustomPopupMenu menu;
 		menu.SetAeroMode(FALSE);
 		if (onBanner) {
+			enum { IDM_MP_BANNER_2D = 42340, IDM_MP_BANNER_3D = 42341 };
+			CCustomPopupMenu* subView = menu.AddSubMenu(
+				LL14(L"表示モード", L"View mode", L"Mode d'affichage", L"Modalita di visualizzazione", L"Modo de visualizacion", L"표시 모드", L"显示模式", L"وضع العرض", L"Режим отображения", L"Anzeigemodus", L"Modo de exibicao", L"Weergavemodus", L"Tryb wyswietlania", L"Goruntuleme modu"),
+				LL14(L"バナー／ジャケット／曲情報の表示モード（通常2D／簡易3D）を選びます。", L"Choose banner/jacket/info view mode (normal 2D / soft 3D).", L"Choisir le mode banniere/pochette/infos (2D / 3D).", L"Scegli modalita banner/copertina/info (2D / 3D).", L"Elegir modo banner/caratula/info (2D / 3D).", L"배너/재킷/정보 표시 모드(일반 2D/간이 3D).", L"选择横幅/封面/信息显示模式（普通2D/简易3D）。", L"اختر وضع الشريط/الغلاف/المعلومات (2D / 3D).", L"Режим баннера/обложки/инфо (2D / 3D).", L"Banner-/Cover-/Info-Modus (2D / 3D).", L"Modo banner/capa/info (2D / 3D).", L"Banner-/hoes-/infomodus (2D / 3D).", L"Tryb banera/okladki/info (2D / 3D).", L"Banner/kapak/bilgi modu (2D / 3D)."));
+			if (subView) {
+				subView->AddCheck(IDM_MP_BANNER_2D,
+					LL14(L"通常 (2D)", L"Normal (2D)", L"Normal (2D)", L"Normale (2D)", L"Normal (2D)", L"일반 (2D)", L"普通 (2D)", L"عادي (2D)", L"Обычный (2D)", L"Normal (2D)", L"Normal (2D)", L"Normaal (2D)", L"Zwykly (2D)", L"Normal (2D)"),
+					!IsBannerSoft3D());
+				subView->AddCheck(IDM_MP_BANNER_3D,
+					LL14(L"簡易3D", L"Soft 3D", L"3D simplifie", L"3D semplificato", L"3D simple", L"간이 3D", L"简易3D", L"ثلاثي الأبعاد مبسط", L"Простой 3D", L"Einfaches 3D", L"3D simples", L"Eenvoudig 3D", L"Uproszczone 3D", L"Basit 3B"),
+					IsBannerSoft3D());
+				if (IsBannerSoft3D()) {
+					int yaw10 = (int)(m_bannerCam3d.yawDeg * 10.f);
+					int pit10 = (int)(m_bannerCam3d.pitchDeg * 10.f);
+					int zoomPct = (int)(m_bannerCam3d.zoom * 100.f + 0.5f);
+					if (yaw10 < -1800) yaw10 = -1800; if (yaw10 > 1800) yaw10 = 1800;
+					if (pit10 < -850) pit10 = -850; if (pit10 > 850) pit10 = 850;
+					if (zoomPct < 35) zoomPct = 35; if (zoomPct > 400) zoomPct = 400;
+					subView->AddSeparator();
+					subView->AddSlider(LL14(L"Yaw (0.1°)", L"Yaw (0.1°)", L"Lacet (0.1°)", L"Yaw (0.1°)", L"Yaw (0.1°)", L"Yaw (0.1°)", L"偏航 (0.1°)", L"Yaw (0.1°)", L"Yaw (0.1°)", L"Yaw (0.1°)", L"Yaw (0.1°)", L"Yaw (0.1°)", L"Yaw (0.1°)", L"Yaw (0.1°)"),
+						-1800, 1800, yaw10, &CMediaPlayerDlg::BannerSoft3dYawCb, this,
+						LL14(L"水平回転（ドラッグ中に反映）", L"Horizontal rotation (live)", L"Rotation horizontale (direct)", L"Rotazione orizzontale (live)", L"Rotacion horizontal (en vivo)", L"수평 회전(즉시)", L"水平旋转（即时）", L"دوران أفقي (مباشر)", L"Горизонтальный поворот (сразу)", L"Horizontale Drehung (live)", L"Rotacao horizontal (ao vivo)", L"Horizontale rotatie (live)", L"Obrot poziomy (na zywo)", L"Yatay donus (anlik)"));
+					subView->AddSlider(LL14(L"Pitch (0.1°)", L"Pitch (0.1°)", L"Tangage (0.1°)", L"Pitch (0.1°)", L"Pitch (0.1°)", L"Pitch (0.1°)", L"俯仰 (0.1°)", L"Pitch (0.1°)", L"Pitch (0.1°)", L"Pitch (0.1°)", L"Pitch (0.1°)", L"Pitch (0.1°)", L"Pitch (0.1°)", L"Pitch (0.1°)"),
+						-850, 850, pit10, &CMediaPlayerDlg::BannerSoft3dPitchCb, this,
+						LL14(L"仰角（ドラッグ中に反映）", L"Elevation angle (live)", L"Angle d'elevation (direct)", L"Angolo di elevazione (live)", L"Angulo de elevacion (en vivo)", L"앙각(즉시)", L"仰角（即时）", L"زاوية الارتفاع (مباشر)", L"Угол наклона (сразу)", L"Neigungswinkel (live)", L"Angulo de elevacao (ao vivo)", L"Elevatiehoek (live)", L"Kat nachylenia (na zywo)", L"Yukselis acisi (anlik)"));
+					subView->AddSlider(LL14(L"Zoom (%)", L"Zoom (%)", L"Zoom (%)", L"Zoom (%)", L"Zoom (%)", L"Zoom (%)", L"缩放 (%)", L"تكبير (%)", L"Масштаб (%)", L"Zoom (%)", L"Zoom (%)", L"Zoom (%)", L"Zoom (%)", L"Zoom (%)"),
+						35, 400, zoomPct, &CMediaPlayerDlg::BannerSoft3dZoomCb, this,
+						LL14(L"拡大縮小（ドラッグ中に反映）", L"Zoom (live)", L"Zoom (direct)", L"Zoom (live)", L"Zoom (en vivo)", L"확대/축소(즉시)", L"缩放（即时）", L"تكبير (مباشر)", L"Масштаб (сразу)", L"Zoom (live)", L"Zoom (ao vivo)", L"Zoom (live)", L"Powiększenie (na zywo)", L"Yakinlastirma (anlik)"));
+				}
+			}
+			menu.AddSeparator();
 			menu.AddCheck(ID_MP_SPEANA_BAR,
 				LL14(L"スペアナ: バー", L"Spectrum: Bars", L"Spectre: Barres", L"Spettro: Barre", L"Espectro: Barras", L"스펙트럼: 막대", L"频谱: 柱状", L"الطيف: أشرطة", L"Спектр: Столбцы", L"Spektrum: Balken", L"Espectro: Barras", L"Spectrum: Balken", L"Widmo: Slupki", L"Spektrum: Cubuk"),
 				savedata.mpSpeanaStyle == 0,
@@ -8622,7 +8830,16 @@ void CMediaPlayerDlg::OnRButtonUp(UINT nFlags, CPoint point)
 		CPoint sp = point;
 		ClientToScreen(&sp);
 		const UINT cmd = menu.Track(sp, this);
-		if (cmd)
+		if (cmd == 42340) {
+			savedata.mpBannerviewmode = 0;
+			Invalidate(FALSE);
+		}
+		else if (cmd == 42341) {
+			savedata.mpBannerviewmode = 1;
+			SyncBannerSoft3DCamFromSave();
+			Invalidate(FALSE);
+		}
+		else if (cmd)
 			PostMessage(WM_COMMAND, cmd);
 		return;
 	}
@@ -11900,6 +12117,20 @@ void CMediaPlayerDlg::OnBeginDragList(NMHDR* pNMHDR, LRESULT* pResult)
 // ジャケ分離していない狭い窓ではバナー内蔵ジャケなので、バナー領域クリックでも開く。
 void CMediaPlayerDlg::OnLButtonDown(UINT nFlags, CPoint point)
 {
+	if (IsBannerSoft3D()) {
+		const bool hit =
+			(!m_bannerRect.IsRectEmpty() && m_bannerRect.PtInRect(point)) ||
+			(!m_jacketRect.IsRectEmpty() && m_jacketRect.PtInRect(point)) ||
+			(!m_infoPanelRect.IsRectEmpty() && m_infoPanelRect.PtInRect(point));
+		if (hit) {
+			m_bannerRotDragging = true;
+			m_bannerRotOrigin = point;
+			m_bannerRotYaw0 = m_bannerCam3d.yawDeg;
+			m_bannerRotPitch0 = m_bannerCam3d.pitchDeg;
+			SetCapture();
+			return;
+		}
+	}
 	BOOL hasJacket = (og && og->jx > 0 && !og->img.IsNull());
 	if (g_mpSideJacket && !m_jacketRect.IsRectEmpty() && m_jacketRect.PtInRect(point)) {
 		if (hasJacket) OnJacket();
@@ -11914,6 +12145,18 @@ void CMediaPlayerDlg::OnLButtonDown(UINT nFlags, CPoint point)
 
 void CMediaPlayerDlg::OnMouseMove(UINT nFlags, CPoint point)
 {
+	if (m_bannerRotDragging) {
+		if (!(nFlags & MK_LBUTTON)) {
+			m_bannerRotDragging = false;
+			if (::GetCapture() == m_hWnd) ::ReleaseCapture();
+			PersistBannerSoft3DCam();
+			return;
+		}
+		GdiSoft3D::OrbitDrag(m_bannerCam3d, m_bannerRotYaw0, m_bannerRotPitch0, m_bannerRotOrigin, point);
+		PersistBannerSoft3DCam();
+		Invalidate(FALSE);
+		return;
+	}
 	// バナー上ホバーで og と同じジャケットアニメを発火(ジャケ分離中は無効)
 	g_mpBannerHover = (!g_mpSideJacket && m_bannerRect.PtInRect(point)) ? 1 : 0;
 	// ジャケ拡大できる領域(ミニジャケ or バナー内蔵ジャケ)では手のひらカーソル
@@ -11943,6 +12186,12 @@ void CMediaPlayerDlg::OnMouseMove(UINT nFlags, CPoint point)
 
 void CMediaPlayerDlg::OnLButtonUp(UINT nFlags, CPoint point)
 {
+	if (m_bannerRotDragging) {
+		m_bannerRotDragging = false;
+		if (::GetCapture() == m_hWnd) ::ReleaseCapture();
+		PersistBannerSoft3DCam();
+		return;
+	}
 	if (m_libDrag) {
 		m_libDrag = 0;
 		ReleaseCapture();
@@ -11992,6 +12241,25 @@ void CMediaPlayerDlg::OnLButtonUp(UINT nFlags, CPoint point)
 		m_dragSrc = -1;
 	}
 	CCustomBlurDialogExBase::OnLButtonUp(nFlags, point);
+}
+
+BOOL CMediaPlayerDlg::OnMouseWheel(UINT nFlags, short zDelta, CPoint pt)
+{
+	if (IsBannerSoft3D()) {
+		CPoint client = pt;
+		ScreenToClient(&client);
+		const bool hit =
+			(!m_bannerRect.IsRectEmpty() && m_bannerRect.PtInRect(client)) ||
+			(!m_jacketRect.IsRectEmpty() && m_jacketRect.PtInRect(client)) ||
+			(!m_infoPanelRect.IsRectEmpty() && m_infoPanelRect.PtInRect(client));
+		if (hit) {
+			GdiSoft3D::WheelZoom(m_bannerCam3d, zDelta);
+			PersistBannerSoft3DCam();
+			Invalidate(FALSE);
+			return TRUE;
+		}
+	}
+	return CCustomBlurDialogExBase::OnMouseWheel(nFlags, zDelta, pt);
 }
 
 /////////////////////////////////////////////////////////////////////////////

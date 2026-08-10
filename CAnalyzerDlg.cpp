@@ -8,6 +8,7 @@
 #include "CProToolsDlg.h"
 #include "CMediaPlayerDlg.h"
 #include <cmath>
+#include <cstring>
 #include <algorithm>
 
 extern COggDlg* og;
@@ -295,6 +296,12 @@ namespace
 		IDM_MS_MONO = 42053,
 		IDM_MS_RESET = 42054,
 		IDM_MS_FROM_CORR = 42055,
+
+		IDM_VIEW_TOP_2D = 42300,
+		IDM_VIEW_TOP_3D = 42301,
+		IDM_VIEW_BOT_2D = 42302,
+		IDM_VIEW_BOT_3D = 42303,
+		IDM_SOFT3D_API_DEMO = 42304,
 
 		IDM_WAVE_SPEED_BASE = 42100, // +0..WAVE_SPEED_COUNT-1
 		WM_ANALYZER_SPEC_DONE = WM_APP + 510,
@@ -720,6 +727,7 @@ BEGIN_MESSAGE_MAP(CAnalyzerDlg, CCustomBlurDialogExBase)
 	ON_WM_LBUTTONDOWN()
 	ON_WM_LBUTTONUP()
 	ON_WM_LBUTTONDBLCLK()
+	ON_WM_MOUSEWHEEL()
 	ON_COMMAND(IDM_SPEC_OVERLAY, &CAnalyzerDlg::OnSpecLayoutOverlay)
 	ON_COMMAND(IDM_SPEC_SPLIT_V, &CAnalyzerDlg::OnSpecLayoutSplitV)
 	ON_COMMAND(IDM_SPEC_SPLIT_H, &CAnalyzerDlg::OnSpecLayoutSplitH)
@@ -824,6 +832,7 @@ BOOL CAnalyzerDlg::OnInitDialog()
 	m_frozen = false;
 	m_hoverPlot.SetRectEmpty();
 	m_hoverPlotCount = 0;
+	SyncSoft3DCamsFromSave();
 
 
 	m_help.SetWindowText(L"?");
@@ -873,7 +882,7 @@ void CAnalyzerDlg::ExportRemoteBars(BYTE outCh64[][64], int maxCh, int& outCh) c
 	if (n > CH_MAX) n = CH_MAX;
 	if (n > maxCh) n = maxCh;
 	outCh = n;
-	const float (*src)[SPEC_BINS] = m_peakHold ? m_specPeakDb : m_specDb;
+	const float (*src)[SPEC_BINS] = m_specDb; // Soft3D/リモートはライブ（ピーク固定を避ける）
 	for (int c = 0; c < n; ++c) {
 		for (int o = 0; o < 64; ++o) {
 			const int b0 = o * SPEC_BINS / 64;
@@ -1635,6 +1644,67 @@ void CAnalyzerDlg::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
 {
 	CCustomPopupMenu menu;
 
+	menu.AddSeparator();
+
+	CCustomPopupMenu* subViewTop = menu.AddSubMenu(
+		LL14(L"上パネル表示", L"Upper panel view", L"Vue panneau superieur", L"Vista pannello superiore", L"Vista panel superior", L"상단 패널 표시", L"上方面板显示", L"عرض اللوح العلوي", L"Вид верхней панели", L"Obere Panelansicht", L"Vista do painel superior", L"Bovenpaneelweergave", L"Widok gornego panelu", L"Ust panel gorunumu"),
+		LL14(L"上部ペインの表示モード（通常2D／簡易3D）を選びます。", L"Choose upper pane view mode (normal 2D / soft 3D).", L"Choisir le mode du panneau superieur (2D / 3D simplifie).", L"Scegli modalita riquadro superiore (2D / 3D semplificato).", L"Elegir modo del panel superior (2D / 3D simple).", L"상단 패널 표시 모드(일반 2D/간이 3D)를 고릅니다.", L"选择上部窗格显示模式（普通2D/简易3D）。", L"اختر وضع اللوح العلوي (2D / 3D مبسط).", L"Режим верхней панели (2D / простой 3D).", L"Obere Anzeige (2D / einfaches 3D).", L"Modo do painel superior (2D / 3D simples).", L"Bovenpaneelmodus (2D / eenvoudig 3D).", L"Tryb gornego panelu (2D / uproszczone 3D).", L"Ust panel modu (2D / basit 3B)."));
+	if (subViewTop) {
+		subViewTop->AddCheck(IDM_VIEW_TOP_2D,
+			LL14(L"通常 (2D)", L"Normal (2D)", L"Normal (2D)", L"Normale (2D)", L"Normal (2D)", L"일반 (2D)", L"普通 (2D)", L"عادي (2D)", L"Обычный (2D)", L"Normal (2D)", L"Normal (2D)", L"Normaal (2D)", L"Zwykly (2D)", L"Normal (2D)"),
+			!IsSoft3DTop());
+		subViewTop->AddCheck(IDM_VIEW_TOP_3D,
+			LL14(L"簡易3D", L"Soft 3D", L"3D simplifie", L"3D semplificato", L"3D simple", L"간이 3D", L"简易3D", L"ثلاثي الأبعاد مبسط", L"Простой 3D", L"Einfaches 3D", L"3D simples", L"Eenvoudig 3D", L"Uproszczone 3D", L"Basit 3B"),
+			IsSoft3DTop());
+		if (IsSoft3DTop()) {
+			int yaw10 = (int)(m_camTop.yawDeg * 10.f);
+			int pit10 = (int)(m_camTop.pitchDeg * 10.f);
+			int zoomPct = (int)(m_camTop.zoom * 100.f + 0.5f);
+			if (yaw10 < -1800) yaw10 = -1800; if (yaw10 > 1800) yaw10 = 1800;
+			if (pit10 < -850) pit10 = -850; if (pit10 > 850) pit10 = 850;
+			if (zoomPct < 35) zoomPct = 35; if (zoomPct > 400) zoomPct = 400;
+			subViewTop->AddSeparator();
+			subViewTop->AddSlider(LL14(L"Yaw (0.1°)", L"Yaw (0.1°)", L"Lacet (0.1°)", L"Yaw (0.1°)", L"Yaw (0.1°)", L"Yaw (0.1°)", L"偏航 (0.1°)", L"Yaw (0.1°)", L"Yaw (0.1°)", L"Yaw (0.1°)", L"Yaw (0.1°)", L"Yaw (0.1°)", L"Yaw (0.1°)", L"Yaw (0.1°)"),
+				-1800, 1800, yaw10, &CAnalyzerDlg::Soft3dYawTopCb, this,
+				LL14(L"水平回転（ドラッグ中に反映）", L"Horizontal rotation (live)", L"Rotation horizontale (direct)", L"Rotazione orizzontale (live)", L"Rotacion horizontal (en vivo)", L"수평 회전(즉시)", L"水平旋转（即时）", L"دوران أفقي (مباشر)", L"Горизонтальный поворот (сразу)", L"Horizontale Drehung (live)", L"Rotacao horizontal (ao vivo)", L"Horizontale rotatie (live)", L"Obrot poziomy (na zywo)", L"Yatay donus (anlik)"));
+			subViewTop->AddSlider(LL14(L"Pitch (0.1°)", L"Pitch (0.1°)", L"Tangage (0.1°)", L"Pitch (0.1°)", L"Pitch (0.1°)", L"Pitch (0.1°)", L"俯仰 (0.1°)", L"Pitch (0.1°)", L"Pitch (0.1°)", L"Pitch (0.1°)", L"Pitch (0.1°)", L"Pitch (0.1°)", L"Pitch (0.1°)", L"Pitch (0.1°)"),
+				-850, 850, pit10, &CAnalyzerDlg::Soft3dPitchTopCb, this,
+				LL14(L"仰角（ドラッグ中に反映）", L"Elevation angle (live)", L"Angle d'elevation (direct)", L"Angolo di elevazione (live)", L"Angulo de elevacion (en vivo)", L"앙각(즉시)", L"仰角（即时）", L"زاوية الارتفاع (مباشر)", L"Угол наклона (сразу)", L"Neigungswinkel (live)", L"Angulo de elevacao (ao vivo)", L"Elevatiehoek (live)", L"Kat nachylenia (na zywo)", L"Yukselis acisi (anlik)"));
+			subViewTop->AddSlider(LL14(L"Zoom (%)", L"Zoom (%)", L"Zoom (%)", L"Zoom (%)", L"Zoom (%)", L"Zoom (%)", L"缩放 (%)", L"تكبير (%)", L"Масштаб (%)", L"Zoom (%)", L"Zoom (%)", L"Zoom (%)", L"Zoom (%)", L"Zoom (%)"),
+				35, 400, zoomPct, &CAnalyzerDlg::Soft3dZoomTopCb, this,
+				LL14(L"拡大縮小（ドラッグ中に反映）", L"Zoom (live)", L"Zoom (direct)", L"Zoom (live)", L"Zoom (en vivo)", L"확대/축소(즉시)", L"缩放（即时）", L"تكبير (مباشر)", L"Масштаб (сразу)", L"Zoom (live)", L"Zoom (ao vivo)", L"Zoom (live)", L"Powiększenie (na zywo)", L"Yakinlastirma (anlik)"));
+		}
+	}
+	CCustomPopupMenu* subViewBot = menu.AddSubMenu(
+		LL14(L"下パネル表示", L"Lower panel view", L"Vue panneau inferieur", L"Vista pannello inferiore", L"Vista panel inferior", L"하단 패널 표시", L"下方面板显示", L"عرض اللوح السفلي", L"Вид нижней панели", L"Untere Panelansicht", L"Vista do painel inferior", L"Onderpaneelweergave", L"Widok dolnego panelu", L"Alt panel gorunumu"),
+		LL14(L"下部ペインの表示モード（通常2D／簡易3D）を選びます。", L"Choose lower pane view mode (normal 2D / soft 3D).", L"Choisir le mode du panneau inferieur (2D / 3D simplifie).", L"Scegli modalita riquadro inferiore (2D / 3D semplificato).", L"Elegir modo del panel inferior (2D / 3D simple).", L"하단 패널 표시 모드(일반 2D/간이 3D)를 고릅니다.", L"选择下部窗格显示模式（普通2D/简易3D）。", L"اختر وضع اللوح السفلي (2D / 3D مبسط).", L"Режим нижней панели (2D / простой 3D).", L"Untere Anzeige (2D / einfaches 3D).", L"Modo do painel inferior (2D / 3D simples).", L"Onderpaneelmodus (2D / eenvoudig 3D).", L"Tryb dolnego panelu (2D / uproszczone 3D).", L"Alt panel modu (2D / basit 3B)."));
+	if (subViewBot) {
+		subViewBot->AddCheck(IDM_VIEW_BOT_2D,
+			LL14(L"通常 (2D)", L"Normal (2D)", L"Normal (2D)", L"Normale (2D)", L"Normal (2D)", L"일반 (2D)", L"普通 (2D)", L"عادي (2D)", L"Обычный (2D)", L"Normal (2D)", L"Normal (2D)", L"Normaal (2D)", L"Zwykly (2D)", L"Normal (2D)"),
+			!IsSoft3DBot());
+		subViewBot->AddCheck(IDM_VIEW_BOT_3D,
+			LL14(L"簡易3D", L"Soft 3D", L"3D simplifie", L"3D semplificato", L"3D simple", L"간이 3D", L"简易3D", L"ثلاثي الأبعاد مبسط", L"Простой 3D", L"Einfaches 3D", L"3D simples", L"Eenvoudig 3D", L"Uproszczone 3D", L"Basit 3B"),
+			IsSoft3DBot());
+		if (IsSoft3DBot()) {
+			int yaw10 = (int)(m_camBot.yawDeg * 10.f);
+			int pit10 = (int)(m_camBot.pitchDeg * 10.f);
+			int zoomPct = (int)(m_camBot.zoom * 100.f + 0.5f);
+			if (yaw10 < -1800) yaw10 = -1800; if (yaw10 > 1800) yaw10 = 1800;
+			if (pit10 < -850) pit10 = -850; if (pit10 > 850) pit10 = 850;
+			if (zoomPct < 35) zoomPct = 35; if (zoomPct > 400) zoomPct = 400;
+			subViewBot->AddSeparator();
+			subViewBot->AddSlider(LL14(L"Yaw (0.1°)", L"Yaw (0.1°)", L"Lacet (0.1°)", L"Yaw (0.1°)", L"Yaw (0.1°)", L"Yaw (0.1°)", L"偏航 (0.1°)", L"Yaw (0.1°)", L"Yaw (0.1°)", L"Yaw (0.1°)", L"Yaw (0.1°)", L"Yaw (0.1°)", L"Yaw (0.1°)", L"Yaw (0.1°)"),
+				-1800, 1800, yaw10, &CAnalyzerDlg::Soft3dYawBotCb, this,
+				LL14(L"水平回転（ドラッグ中に反映）", L"Horizontal rotation (live)", L"Rotation horizontale (direct)", L"Rotazione orizzontale (live)", L"Rotacion horizontal (en vivo)", L"수평 회전(즉시)", L"水平旋转（即时）", L"دوران أفقي (مباشر)", L"Горизонтальный поворот (сразу)", L"Horizontale Drehung (live)", L"Rotacao horizontal (ao vivo)", L"Horizontale rotatie (live)", L"Obrot poziomy (na zywo)", L"Yatay donus (anlik)"));
+			subViewBot->AddSlider(LL14(L"Pitch (0.1°)", L"Pitch (0.1°)", L"Tangage (0.1°)", L"Pitch (0.1°)", L"Pitch (0.1°)", L"Pitch (0.1°)", L"俯仰 (0.1°)", L"Pitch (0.1°)", L"Pitch (0.1°)", L"Pitch (0.1°)", L"Pitch (0.1°)", L"Pitch (0.1°)", L"Pitch (0.1°)", L"Pitch (0.1°)"),
+				-850, 850, pit10, &CAnalyzerDlg::Soft3dPitchBotCb, this,
+				LL14(L"仰角（ドラッグ中に反映）", L"Elevation angle (live)", L"Angle d'elevation (direct)", L"Angolo di elevazione (live)", L"Angulo de elevacion (en vivo)", L"앙각(즉시)", L"仰角（即时）", L"زاوية الارتفاع (مباشر)", L"Угол наклона (сразу)", L"Neigungswinkel (live)", L"Angulo de elevacao (ao vivo)", L"Elevatiehoek (live)", L"Kat nachylenia (na zywo)", L"Yukselis acisi (anlik)"));
+			subViewBot->AddSlider(LL14(L"Zoom (%)", L"Zoom (%)", L"Zoom (%)", L"Zoom (%)", L"Zoom (%)", L"Zoom (%)", L"缩放 (%)", L"تكبير (%)", L"Масштаб (%)", L"Zoom (%)", L"Zoom (%)", L"Zoom (%)", L"Zoom (%)", L"Zoom (%)"),
+				35, 400, zoomPct, &CAnalyzerDlg::Soft3dZoomBotCb, this,
+				LL14(L"拡大縮小（ドラッグ中に反映）", L"Zoom (live)", L"Zoom (direct)", L"Zoom (live)", L"Zoom (en vivo)", L"확대/축소(즉시)", L"缩放（即时）", L"تكبير (مباشر)", L"Масштаб (сразу)", L"Zoom (live)", L"Zoom (ao vivo)", L"Zoom (live)", L"Powiększenie (na zywo)", L"Yakinlastirma (anlik)"));
+		}
+	}
+
 	CCustomPopupMenu* subWave = menu.AddSubMenu(
 		LL14(L"上部の表示", L"Upper display", L"Affichage superieur", L"Display superiore", L"Pantalla superior", L"상단 표시", L"上部显示", L"العرض العلوي", L"Верхняя область", L"Obere Anzeige", L"Exibicao superior", L"Bovenste weergave", L"Gorny widok", L"Ust gosterim"),
 		LL14(L"上部ペインの表示内容（スクロール波形／トリガー式オシロ）を選びます。", L"Choose what the upper pane shows (scrolling wave / triggered scope).", L"Choisir l'affichage du panneau superieur (onde / oscillo).", L"Scegli cosa mostra il riquadro superiore (onda / oscilloscopio).", L"Elegir que muestra el panel superior (onda / osciloscopio).", L"상단 패널 표시(스크롤 파형/트리거 스코프)를 고릅니다.", L"选择上部窗格显示内容（滚动波形/触发示波）。", L"اختر ما يعرضه اللوح العلوي (موجة/راسم).", L"Выбрать содержимое верхней панели (волна / осциллограф).", L"Obere Anzeige wahlen (Scrollwelle / Scope).", L"Escolher o que o painel superior mostra (onda / osciloscopio).", L"Kies wat het bovenpaneel toont (golf / scoop).", L"Wybierz zawartosc gornego panelu (fala / oscyloskop).", L"Ust panelde ne gosterilecegini sec (kayan dalga / osiloskop)."));
@@ -1848,6 +1918,12 @@ void CAnalyzerDlg::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
 		m_alwaysOnTop,
 		LL14(L"ウィンドウを常に他のウィンドウの手前に表示します。", L"Keep this window always on top of others.", L"Garder cette fenetre toujours au premier plan.", L"Mantieni questa finestra sempre in primo piano.", L"Mantener esta ventana siempre delante de las demas.", L"이 창을 항상 다른 창 위에 표시합니다.", L"将此窗口始终置于其他窗口之上。", L"إبقاء هذه النافذة دائماً فوق النوافذ الأخرى.", L"Держать это окно поверх остальных.", L"Dieses Fenster immer im Vordergrund halten.", L"Manter esta janela sempre acima das outras.", L"Houd dit venster altijd boven andere.", L"Trzymaj to okno zawsze na wierzchu.", L"Bu pencereyi her zaman digerlerinin ustunde tut."));
 	menu.AddSeparator();
+	menu.AddSeparator();
+	menu.AddCheck(IDM_SOFT3D_API_DEMO,
+		LL14(L"Soft3D APIデモ", L"Soft3D API demo", L"Demo API Soft3D", L"Demo API Soft3D", L"Demo API Soft3D", L"Soft3D API 데모", L"Soft3D API演示", L"عرض Soft3D API", L"Демо Soft3D API", L"Soft3D-API-Demo", L"Demo API Soft3D", L"Soft3D API-demo", L"Demo Soft3D API", L"Soft3D API demosu"),
+		m_soft3dApiDemo,
+		LL14(L"エンジンAPI（箱・球・ワイヤー・テクスチャ・フォグ・DOF）の確認用デモを表示します。", L"Show engine API demo (box/sphere/wire/texture/fog/DOF).", L"Afficher la demo API moteur.", L"Mostra demo API motore.", L"Mostrar demo de API del motor.", L"엔진 API 데모를 표시합니다.", L"显示引擎API演示。", L"عرض عرض توضيحي لواجهة المحرك.", L"Показать демо API движка.", L"Engine-API-Demo anzeigen.", L"Mostrar demo da API do motor.", L"Toon engine-API-demo.", L"Pokaz demo API silnika.", L"Motor API demosunu goster."));
+	menu.AddSeparator();
 	menu.AddCommand(ID_MP_OPEN_EQ,
 		LL14(L"イコライザを開く", L"Open equalizer", L"Ouvrir l'egaliseur", L"Apri equalizzatore", L"Abrir ecualizador",
 			L"이퀄라이저 열기", L"打开均衡器", L"فتح المعادل", L"Открыть эквалайзер", L"Equalizer öffnen",
@@ -1871,7 +1947,29 @@ void CAnalyzerDlg::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
 		point = CPoint(rc.left + 8, rc.top + 8);
 	}
 	const UINT cmd = menu.Track(point, this);
-	if (cmd == ID_MP_OPEN_EQ || cmd == ID_MP_OPEN_PIANOROLL) {
+	if (cmd == IDM_VIEW_TOP_2D) {
+		savedata.analyzerviewmodeTop = 0;
+		KickUiPresent();
+	}
+	else if (cmd == IDM_VIEW_TOP_3D) {
+		savedata.analyzerviewmodeTop = 1;
+		SyncSoft3DCamsFromSave();
+		KickUiPresent();
+	}
+	else if (cmd == IDM_VIEW_BOT_2D) {
+		savedata.analyzerviewmodeBot = 0;
+		KickUiPresent();
+	}
+	else if (cmd == IDM_VIEW_BOT_3D) {
+		savedata.analyzerviewmodeBot = 1;
+		SyncSoft3DCamsFromSave();
+		KickUiPresent();
+	}
+	else if (cmd == IDM_SOFT3D_API_DEMO) {
+		m_soft3dApiDemo = !m_soft3dApiDemo;
+		KickUiPresent();
+	}
+	else if (cmd == ID_MP_OPEN_EQ || cmd == ID_MP_OPEN_PIANOROLL) {
 		extern CMediaPlayerDlg* mp;
 		if (mp && ::IsWindow(mp->GetSafeHwnd()))
 			mp->PostMessage(WM_COMMAND, cmd);
@@ -3471,6 +3569,8 @@ bool CAnalyzerDlg::HitEqBand(CPoint ptClient, int& outBand, CRect& outPlot)
 {
 	outBand = -1;
 	outPlot.SetRectEmpty();
+	// Soft3D 中は読取専用（誤操作防止）
+	if (IsSoft3DBot()) return false;
 	// EQ カーブが出ている表示(周波数特性/スペクトログラム)でのみ掴める
 	if (!m_eqOverlay || m_lowerMode == LowerPhase) return false;
 	if (m_hoverPlotCount <= 0 || m_hoverSplitY <= 0) return false;
@@ -3540,29 +3640,47 @@ void CAnalyzerDlg::Present(CDC& dc, const CRect& rc, BOOL bAero)
 	const int specH = contentH - splitLocal;
 	const int clientW = rc.Width();
 	const int clientH = contentH;
+	const bool top3d = IsSoft3DTop();
+	const bool bot3d = IsSoft3DBot();
 
 	CDC* pDst = &dc;
 	if (EnsureFrameBuffer(dc, clientW, clientH) && m_frameDC.GetSafeHdc())
 		pDst = &m_frameDC;
 
-	if (m_waveReady && m_waveDC.GetSafeHdc())
-		pDst->BitBlt(0, 0, m_waveW, waveH, &m_waveDC, 0, 0, SRCCOPY);
-	else
-		pDst->FillSolidRect(0, 0, clientW, waveH, ANALYZER_BG);
+	if (m_soft3dApiDemo) {
+		GdiSoft3D::PresentApiDemo(*pDst, CRect(0, 0, clientW, clientH));
+	}
+	else {
+	if (top3d) {
+		PresentSoft3DTop(*pDst, CRect(0, 0, clientW, waveH));
+	}
+	else {
+		if (m_waveReady && m_waveDC.GetSafeHdc())
+			pDst->BitBlt(0, 0, m_waveW, waveH, &m_waveDC, 0, 0, SRCCOPY);
+		else
+			pDst->FillSolidRect(0, 0, clientW, waveH, ANALYZER_BG);
 
-	DrawTpLufsReadout(*pDst, CRect(0, 0, m_waveW > 0 ? m_waveW : clientW, waveH));
+		DrawTpLufsReadout(*pDst, CRect(0, 0, m_waveW > 0 ? m_waveW : clientW, waveH));
 
-	if (m_showLevelMeter)
-		DrawLevelMeters(*pDst, CRect(0, 0, m_waveW > 0 ? m_waveW : clientW, waveH), ANALYZER_BG);
+		if (m_showLevelMeter)
+			DrawLevelMeters(*pDst, CRect(0, 0, m_waveW > 0 ? m_waveW : clientW, waveH), ANALYZER_BG);
+	}
 
-	if (m_specReady && m_specDC.GetSafeHdc())
-		pDst->BitBlt(0, splitLocal, m_specW, specH, &m_specDC, 0, 0, SRCCOPY);
-	else
-		pDst->FillSolidRect(0, splitLocal, clientW, specH, ANALYZER_BG);
+	if (bot3d) {
+		PresentSoft3DBot(*pDst, CRect(0, splitLocal, clientW, clientH));
+	}
+	else {
+		if (m_specReady && m_specDC.GetSafeHdc())
+			pDst->BitBlt(0, splitLocal, m_specW, specH, &m_specDC, 0, 0, SRCCOPY);
+		else
+			pDst->FillSolidRect(0, splitLocal, clientW, specH, ANALYZER_BG);
+	}
 
-	pDst->FillSolidRect(0, splitLocal - 1, clientW, 2, RGB(60, 65, 80));
-	if (m_hoverValid)
+	if (!top3d || !bot3d)
+		pDst->FillSolidRect(0, splitLocal - 1, clientW, 2, RGB(60, 65, 80));
+	if (m_hoverValid && !bot3d)
 		DrawHoverReadout(*pDst, CRect(0, 0, clientW, clientH));
+	}
 	if (m_frozen) {
 		pDst->SetBkMode(TRANSPARENT);
 		pDst->SetTextColor(RGB(255, 180, 80));
@@ -3580,6 +3698,358 @@ void CAnalyzerDlg::Present(CDC& dc, const CRect& rc, BOOL bAero)
 #endif
 			dc.BitBlt(0, rc.top, clientW, clientH, pDst, 0, 0, SRCCOPY);
 	}
+}
+
+void CAnalyzerDlg::SyncSoft3DCamsFromSave()
+{
+	GdiSoft3D::CamFromSaved(m_camTop, savedata.analyzer3dyawTop, savedata.analyzer3dpitchTop, savedata.analyzer3dzoomTop);
+	GdiSoft3D::CamFromSaved(m_camBot, savedata.analyzer3dyawBot, savedata.analyzer3dpitchBot, savedata.analyzer3dzoomBot);
+}
+
+void CAnalyzerDlg::PersistSoft3DCams()
+{
+	GdiSoft3D::CamToSaved(m_camTop, savedata.analyzer3dyawTop, savedata.analyzer3dpitchTop, savedata.analyzer3dzoomTop);
+	GdiSoft3D::CamToSaved(m_camBot, savedata.analyzer3dyawBot, savedata.analyzer3dpitchBot, savedata.analyzer3dzoomBot);
+}
+
+void CAnalyzerDlg::Soft3dYawTopCb(void* ctx, int value)
+{
+	auto* self = (CAnalyzerDlg*)ctx;
+	if (!self) return;
+	self->m_camTop.yawDeg = (float)value / 10.f;
+	GdiSoft3D::ClampCam(self->m_camTop);
+	self->PersistSoft3DCams();
+	self->KickUiPresent();
+}
+void CAnalyzerDlg::Soft3dPitchTopCb(void* ctx, int value)
+{
+	auto* self = (CAnalyzerDlg*)ctx;
+	if (!self) return;
+	self->m_camTop.pitchDeg = (float)value / 10.f;
+	GdiSoft3D::ClampCam(self->m_camTop);
+	self->PersistSoft3DCams();
+	self->KickUiPresent();
+}
+void CAnalyzerDlg::Soft3dZoomTopCb(void* ctx, int value)
+{
+	auto* self = (CAnalyzerDlg*)ctx;
+	if (!self) return;
+	self->m_camTop.zoom = (float)value / 100.f;
+	GdiSoft3D::ClampCam(self->m_camTop);
+	self->PersistSoft3DCams();
+	self->KickUiPresent();
+}
+void CAnalyzerDlg::Soft3dYawBotCb(void* ctx, int value)
+{
+	auto* self = (CAnalyzerDlg*)ctx;
+	if (!self) return;
+	self->m_camBot.yawDeg = (float)value / 10.f;
+	GdiSoft3D::ClampCam(self->m_camBot);
+	self->PersistSoft3DCams();
+	self->KickUiPresent();
+}
+void CAnalyzerDlg::Soft3dPitchBotCb(void* ctx, int value)
+{
+	auto* self = (CAnalyzerDlg*)ctx;
+	if (!self) return;
+	self->m_camBot.pitchDeg = (float)value / 10.f;
+	GdiSoft3D::ClampCam(self->m_camBot);
+	self->PersistSoft3DCams();
+	self->KickUiPresent();
+}
+void CAnalyzerDlg::Soft3dZoomBotCb(void* ctx, int value)
+{
+	auto* self = (CAnalyzerDlg*)ctx;
+	if (!self) return;
+	self->m_camBot.zoom = (float)value / 100.f;
+	GdiSoft3D::ClampCam(self->m_camBot);
+	self->PersistSoft3DCams();
+	self->KickUiPresent();
+}
+
+void CAnalyzerDlg::PresentSoft3DTop(CDC& dc, const CRect& pane)
+{
+	const int pw = pane.Width(), ph = pane.Height();
+	if (pw < 8 || ph < 8) return;
+	CDC clip; clip.CreateCompatibleDC(&dc);
+	CBitmap bm; bm.CreateCompatibleBitmap(&dc, pw, ph);
+	CBitmap* ob = clip.SelectObject(&bm);
+	clip.FillSolidRect(0, 0, pw, ph, ANALYZER_BG);
+
+	const float boxes[1][6] = { { -1.20f, 1.25f, -0.05f, 0.75f, -0.05f, 1.05f } };
+	GdiSoft3D::View v;
+	GdiSoft3D::BuildView(pw, ph, m_camTop, boxes, 1, v);
+	GdiSoft3D::Context ctx;
+	if (!ctx.Create(pw, ph)) {
+		clip.SelectObject(ob);
+		return;
+	}
+	ctx.view = v;
+	ctx.SetFog(GdiSoft3D::FogLinear, ANALYZER_BG, 0.05f, 1.1f, 0.7f);
+	ctx.BeginFrame(ANALYZER_BG);
+	ctx.DrawGrid(-1.05f, 1.05f, 0.0f, 0.95f, 0.0f, 6, RGB(40, 44, 58));
+
+	int wr = 0, wf = 0, wch = 0;
+	if (!SnapshotRing(wr, wf, wch) || wf < 32) {
+		ctx.EndFrame();
+		ctx.Present(clip, 0, 0);
+		dc.BitBlt(pane.left, pane.top, pw, ph, &clip, 0, 0, SRCCOPY);
+		clip.SelectObject(ob);
+		return;
+	}
+
+	const int chUse = (std::max)(1, (std::min)(wch, 2));
+	const bool trigger = (m_waveMode == WaveTrigger);
+
+	if (trigger) {
+		// オシロ: ゼロクロス整列の固定窓。L/R を Y=振幅のリボンとして分離（Z で前後）
+		const int cols = 120;
+		const int budget = (std::min)(wf, RING_SAMPLES / 2);
+		const int spc = (std::max)(1, budget / cols);
+		const int window = spc * cols;
+		int base = wr - window;
+		int searchMax = (std::min)(RING_SAMPLES / 4, wf - window);
+		if (searchMax < 0) searchMax = 0;
+		int trigStart = base;
+		for (int k = 0; k < searchMax; ++k) {
+			const int cur = ((base - k) % RING_SAMPLES + RING_SAMPLES) % RING_SAMPLES;
+			const int prv = ((base - k - 1) % RING_SAMPLES + RING_SAMPLES) % RING_SAMPLES;
+			if (m_ringSnap[0][prv] <= 0.0f && m_ringSnap[0][cur] > 0.0f) {
+				trigStart = base - k;
+				break;
+			}
+		}
+		auto sampleAt = [&](int ch, int i) -> float {
+			int idx = trigStart + i * spc;
+			while (idx < 0) idx += RING_SAMPLES;
+			idx %= RING_SAMPLES;
+			float a = m_ringSnap[ch][idx];
+			if (a > 1.f) a = 1.f; if (a < -1.f) a = -1.f;
+			return a;
+		};
+		for (int i = 0; i < cols - 1; ++i) {
+			const float x0 = -1.0f + 2.0f * ((float)i / (float)cols);
+			const float x1 = -1.0f + 2.0f * ((float)(i + 1) / (float)cols);
+			for (int c = 0; c < chUse; ++c) {
+				const float y0 = 0.32f + sampleAt(c, i) * 0.28f;
+				const float y1 = 0.32f + sampleAt(c, i + 1) * 0.28f;
+				const float z0 = (c == 0) ? 0.22f : 0.55f;
+				const float z1 = z0 + 0.06f;
+				const float yLo = (std::min)(y0, y1) - 0.01f;
+				const float yHi = (std::max)(y0, y1) + 0.01f;
+				ctx.DrawBox(x0, x1, yHi, z0, z1, kChColor[c], yLo);
+			}
+		}
+		// ゼロ線
+		ctx.DrawLine(-1.0f, 0.32f, 0.15f, 1.0f, 0.32f, 0.15f, RGB(70, 78, 98));
+		ctx.DrawLine(-1.0f, 0.32f, 0.70f, 1.0f, 0.32f, 0.70f, RGB(70, 78, 98));
+	}
+	else {
+		// スクロール履歴: フレームごとにピークを右端へ押し込み（オシロの瞬間窓と区別）
+		static float histL[96] = {}, histR[96] = {};
+		static int histInit = 0;
+		const int cols = 96;
+		if (!histInit) { memset(histL, 0, sizeof(histL)); memset(histR, 0, sizeof(histR)); histInit = 1; }
+		const int useN = (std::min)(wf, 512);
+		float peakL = 0.f, peakR = 0.f;
+		for (int s = 0; s < useN; ++s) {
+			int idx = wr - useN + s;
+			while (idx < 0) idx += RING_SAMPLES;
+			idx %= RING_SAMPLES;
+			float aL = fabsf(m_ringSnap[0][idx]);
+			if (aL > peakL) peakL = aL;
+			if (chUse >= 2) {
+				float aR = fabsf(m_ringSnap[1][idx]);
+				if (aR > peakR) peakR = aR;
+			}
+		}
+		if (peakL > 1.f) peakL = 1.f;
+		if (peakR > 1.f) peakR = 1.f;
+		memmove(histL, histL + 1, (cols - 1) * sizeof(float));
+		memmove(histR, histR + 1, (cols - 1) * sizeof(float));
+		histL[cols - 1] = peakL;
+		histR[cols - 1] = peakR;
+		ctx.DrawMirrorFloor(-1.05f, 1.05f, 0.22f, 0.68f, RGB(50, 70, 110), 0.22f);
+		if (chUse >= 2)
+			ctx.DrawStereoBarsLR(-1.0f, 1.0f, cols, histL, histR, 0.30f, 0.55f, 0.52f, 0.12f, kChColor[0], kChColor[1]);
+		else
+			ctx.DrawStereoBarsLR(-1.0f, 1.0f, cols, histL, nullptr, 0.30f, 0.55f, 0.52f, 0.12f, kChColor[0], kChColor[0]);
+	}
+
+	if (m_showLevelMeter) {
+		const int ch = (std::max)(1, (std::min)(m_channels, CH_MAX));
+		const float slot = 0.055f;
+		for (int c = 0; c < ch; ++c) {
+			float lv = m_meterRms[c];
+			if (lv < 0.02f) continue;
+			if (lv > 1.f) lv = 1.f;
+			const float x0 = 1.05f + slot * (float)c;
+			ctx.DrawBox(x0, x0 + slot * 0.70f, 0.04f + lv * 0.55f, 0.20f, 0.40f, kChColor[c % CH_MAX], 0.f);
+		}
+	}
+
+	ctx.EndFrame();
+	ctx.Present(clip, 0, 0);
+	// Soft2D: ヴィネット＋グロー＋薄いスキャンライン
+	{
+		GdiSoft2D::Context s2;
+		if (s2.Create(pw, ph, false) && s2.fb.hdc) {
+			::BitBlt(s2.fb.hdc, 0, 0, pw, ph, clip.GetSafeHdc(), 0, 0, SRCCOPY);
+			s2.Vignette(0.40f);
+			s2.Present(clip, 0, 0);
+		}
+	}
+	dc.BitBlt(pane.left, pane.top, pw, ph, &clip, 0, 0, SRCCOPY);
+	clip.SelectObject(ob);
+}
+
+void CAnalyzerDlg::PresentSoft3DBot(CDC& dc, const CRect& pane)
+{
+	const int pw = pane.Width(), ph = pane.Height();
+	if (pw < 8 || ph < 8) return;
+	CDC clip; clip.CreateCompatibleDC(&dc);
+	CBitmap bm; bm.CreateCompatibleBitmap(&dc, pw, ph);
+	CBitmap* ob = clip.SelectObject(&bm);
+	clip.FillSolidRect(0, 0, pw, ph, ANALYZER_BG);
+
+	// ---- 位相スコープ ----
+	if (m_lowerMode == LowerPhase) {
+		const float boxes[1][6] = { { -0.85f, 0.85f, -0.05f, 0.85f, -0.05f, 1.05f } };
+		GdiSoft3D::View v;
+		GdiSoft3D::BuildView(pw, ph, m_camBot, boxes, 1, v);
+		GdiSoft3D::Scene sc;
+		sc.Begin(v);
+		sc.AddFloor(-0.75f, 0.75f, 0.0f, 0.95f, RGB(40, 44, 58));
+		sc.AddBox(-0.02f, 0.02f, 0.02f, 0.0f, 0.95f, RGB(70, 78, 98), 0.f);
+		sc.AddBox(-0.75f, 0.75f, 0.02f, 0.46f, 0.50f, RGB(70, 78, 98), 0.f);
+
+		int wr = 0, wf = 0, wch = 0;
+		if (SnapshotRing(wr, wf, wch) && wf >= 64 && wch >= 2) {
+			const int useN = (std::min)(wf, 1024);
+			const int step = (std::max)(1, useN / 220);
+			int n = 0;
+			for (int i = 0; i < useN && n < 220; i += step, ++n) {
+				int idx = wr - useN + i;
+				while (idx < 0) idx += RING_SAMPLES;
+				idx %= RING_SAMPLES;
+				float l = m_ringSnap[0][idx];
+				float rr = m_ringSnap[1][idx];
+				if (l > 1.f) l = 1.f; if (l < -1.f) l = -1.f;
+				if (rr > 1.f) rr = 1.f; if (rr < -1.f) rr = -1.f;
+				const float x = (l - rr) * 0.55f;
+				const float y = fabsf(l + rr) * 0.40f + 0.02f;
+				const float z = 0.05f + 0.85f * ((float)n / 220.f);
+				const float s = 0.014f;
+				COLORREF col = RGB(120, 230, 170);
+				if (fabsf(l - rr) > 0.55f) col = RGB(255, 160, 100);
+				sc.AddBox(x - s, x + s, y, z, z + 0.022f, col, 0.f);
+			}
+		}
+		sc.Flush(clip);
+		dc.BitBlt(pane.left, pane.top, pw, ph, &clip, 0, 0, SRCCOPY);
+		clip.SelectObject(ob);
+		return;
+	}
+
+	// ---- スペクトログラム: L/R を左右に分けた時間ウォール ----
+	if (m_lowerMode == LowerWaterfall) {
+		const float boxes[1][6] = { { -1.10f, 1.10f, -0.02f, 0.55f, 0.0f, 1.10f } };
+		GdiSoft3D::View v;
+		GdiSoft3D::BuildView(pw, ph, m_camBot, boxes, 1, v);
+		GdiSoft3D::Scene sc;
+		sc.Begin(v);
+		sc.AddFloor(-1.05f, 1.05f, 0.0f, 1.0f, RGB(34, 38, 50));
+
+		int wfWrite = 0, wfFilled = 0;
+		EnterCriticalSection(&m_cs);
+		wfWrite = m_wfWrite;
+		wfFilled = m_wfFilled;
+		LeaveCriticalSection(&m_cs);
+		// 面予算: rows×bins×ch×3面 ≤ kMaxFaces。間引き必須。
+		const int rows = (std::min)(wfFilled, 36);
+		const int bins = SPEC_BINS;
+		const int chUse = (std::max)(1, (std::min)(m_channels, 2));
+		const float rowD = 0.85f / 36.f;
+		const int bStep = 4;
+		for (int r = rows - 1; r >= 0; --r) {
+			const int src = ((wfWrite - 1 - r) % WF_ROWS + WF_ROWS) % WF_ROWS;
+			const float z0 = 0.08f + rowD * (float)r;
+			const float z1 = z0 + rowD * 0.80f;
+			for (int c = 0; c < chUse; ++c) {
+				const float xOff = (chUse >= 2) ? ((c == 0) ? -1.02f : 0.02f) : -1.0f;
+				const float xSpan = (chUse >= 2) ? 0.98f : 2.0f;
+				COLORREF base = kChColor[c % CH_MAX];
+				for (int b = 0; b < bins; b += bStep) {
+					float db = m_wfHist[c][src][b];
+					float t = (db + 96.f) / 96.f;
+					if (t < 0.08f) continue;
+					if (t > 1.f) t = 1.f;
+					const float xL = xOff + xSpan * ((float)b / (float)bins);
+					const float xR = xOff + xSpan * ((float)(b + bStep) / (float)bins) - 0.004f;
+					if (xR <= xL) continue;
+					sc.AddBox(xL, xR, t * 0.40f, z0, z1, GdiSoft3D::Shade(base, 0.45f + 0.55f * t), 0.f);
+				}
+			}
+		}
+		sc.Flush(clip);
+		dc.BitBlt(pane.left, pane.top, pw, ph, &clip, 0, 0, SRCCOPY);
+		clip.SelectObject(ob);
+		return;
+	}
+
+	// ---- 周波数特性: Scene + ステレオ左右並び ----
+	float maxY = 0.55f;
+	float gap = 0.18f;
+	switch (m_specStyle) {
+	case StyleLine: gap = 0.40f; break;
+	case StyleBars: gap = 0.28f; break;
+	case StyleCubase: gap = 0.18f; maxY = 0.60f; break;
+	case StyleSpan: gap = 0.06f; break;
+	case StyleAbleton: gap = 0.22f; break;
+	case StyleFabFilter: gap = 0.12f; maxY = 0.58f; break;
+	default: break;
+	}
+
+	const float boxes[1][6] = { { -1.05f, 1.05f, -0.02f, maxY + 0.08f, 0.0f, 0.95f } };
+	GdiSoft3D::View v;
+	GdiSoft3D::BuildView(pw, ph, m_camBot, boxes, 1, v);
+	GdiSoft3D::Scene sc;
+	sc.Begin(v);
+	sc.AddFloor(-1.0f, 1.0f, 0.0f, 0.88f, RGB(40, 44, 58));
+
+	const float (*src)[SPEC_BINS] = m_peakHold ? m_specPeakDb : m_specDb;
+	const int bins = SPEC_BINS;
+	const int chN = (std::max)(1, (std::min)(m_channels, 2));
+	float levL[SPEC_BINS] = {}, levR[SPEC_BINS] = {};
+	for (int b = 0; b < bins; ++b) {
+		float tL = (src[0][b] + 96.f) / 96.f;
+		if (tL < 0.f) tL = 0.f; if (tL > 1.f) tL = 1.f;
+		levL[b] = tL;
+		if (chN >= 2) {
+			float tR = (src[1][b] + 96.f) / 96.f;
+			if (tR < 0.f) tR = 0.f; if (tR > 1.f) tR = 1.f;
+			levR[b] = tR;
+		}
+	}
+	if (chN >= 2) {
+		sc.AddStereoBarsLR(-1.0f, 1.0f, bins, levL, levR,
+			0.28f, 0.55f, maxY, gap, kChColor[0], kChColor[1]);
+	} else {
+		sc.AddStereoBarsLR(-1.0f, 1.0f, bins, levL, nullptr,
+			0.28f, 0.55f, maxY, gap, kChColor[0], kChColor[0]);
+	}
+
+	sc.Flush(clip);
+	{
+		GdiSoft2D::Context s2;
+		if (s2.Create(pw, ph, false) && s2.fb.hdc) {
+			::BitBlt(s2.fb.hdc, 0, 0, pw, ph, clip.GetSafeHdc(), 0, 0, SRCCOPY);
+			s2.Vignette(0.35f);
+			s2.Present(clip, 0, 0);
+		}
+	}
+	dc.BitBlt(pane.left, pane.top, pw, ph, &clip, 0, 0, SRCCOPY);
+	clip.SelectObject(ob);
 }
 
 void CAnalyzerDlg::OnPaint()
@@ -3635,30 +4105,42 @@ void CAnalyzerDlg::OnPaint()
 	m_lastWaveScroll = 0;
 #endif
 
-	// トリガー表示は毎回全描画(スクロール差分を使わない)
-	if (!m_waveReady || m_waveMode == WaveTrigger) {
-		InterlockedExchange(&m_fullRedrawBusy, 1);
-		FullRedrawWave(bg);
-		didWaveFull = true;
-		InterlockedExchange(&m_fullRedrawBusy, 0);
-		if (InterlockedExchange(&m_presentDeferred, 0) != 0)
-			needDeferredKick = true;
-	}
-	else if (pending > 0) {
-		const int scrolled = ScrollWaveAndDrawNew(bg, scrollCap);
-		if (scrolled < 0) {
+	// Soft3D 中は 2D 波形/スペクトルの GDI 更新を飛ばす（二重描画で UI/ピアノが死ぬ）
+	const bool softTop = IsSoft3DTop();
+	const bool softBot = IsSoft3DBot();
+	if (!softTop) {
+		// トリガー表示は毎回全描画(スクロール差分を使わない)
+		if (!m_waveReady || m_waveMode == WaveTrigger) {
+			InterlockedExchange(&m_fullRedrawBusy, 1);
+			FullRedrawWave(bg);
 			didWaveFull = true;
+			InterlockedExchange(&m_fullRedrawBusy, 0);
+			if (InterlockedExchange(&m_presentDeferred, 0) != 0)
+				needDeferredKick = true;
 		}
-		else if (scrolled > 0) {
-			didWaveScroll = true;
+		else if (pending > 0) {
+			const int scrolled = ScrollWaveAndDrawNew(bg, scrollCap);
+			if (scrolled < 0) {
+				didWaveFull = true;
+			}
+			else if (scrolled > 0) {
+				didWaveScroll = true;
 #if CCUSTOM_AERO_SUPPORT
-			m_lastWaveScroll = scrolled;
+				m_lastWaveScroll = scrolled;
 #endif
+			}
+		}
+	} else {
+		// Soft3D scroll 用に pending だけ消費（2D BB は触らない）
+		if (pending > 0) {
+			EnterCriticalSection(&m_cs);
+			m_pendingScroll = 0;
+			LeaveCriticalSection(&m_cs);
 		}
 	}
 
 	// FFT キックは FeedPCM 側のみ。ここで再要求するとフォーカス時に描画ループ化する。
-	const bool didSpec = (!m_specReady || m_specDirty);
+	const bool didSpec = (!softBot && (!m_specReady || m_specDirty));
 	if (didSpec)
 		RedrawSpectrum(bg);
 
@@ -3945,6 +4427,19 @@ void CAnalyzerDlg::OnBnClickedHelp()
 void CAnalyzerDlg::OnMouseMove(UINT nFlags, CPoint point)
 {
 	UNREFERENCED_PARAMETER(nFlags);
+	if (m_rotDragging) {
+		if (!(nFlags & MK_LBUTTON)) {
+			m_rotDragging = false;
+			if (::GetCapture() == m_hWnd) ::ReleaseCapture();
+			PersistSoft3DCams();
+			return;
+		}
+		GdiSoft3D::Cam& cam = (m_rotPane == 0) ? m_camTop : m_camBot;
+		GdiSoft3D::OrbitDrag(cam, m_rotYaw0, m_rotPitch0, m_rotOrigin, point);
+		PersistSoft3DCams();
+		KickUiPresent();
+		return;
+	}
 	if (m_eqDrag) {
 		if (!(nFlags & MK_LBUTTON)) {
 			// キャプチャを取り逃した場合の保険
@@ -3999,6 +4494,31 @@ void CAnalyzerDlg::OnMouseLeave()
 
 void CAnalyzerDlg::OnLButtonDown(UINT nFlags, CPoint point)
 {
+	CRect rc; GetClientRect(&rc);
+	const int capH = CCC_GetCustomCaptionHeight(m_hWnd);
+	const int contentTop = (capH > 0) ? capH : 0;
+	const int contentH = rc.Height() - contentTop;
+	const int split = contentTop + (int)(contentH * 0.65);
+	if (point.y >= contentTop) {
+		if (IsSoft3DTop() && point.y < split) {
+			m_rotDragging = true;
+			m_rotPane = 0;
+			m_rotOrigin = point;
+			m_rotYaw0 = m_camTop.yawDeg;
+			m_rotPitch0 = m_camTop.pitchDeg;
+			SetCapture();
+			return;
+		}
+		if (IsSoft3DBot() && point.y >= split) {
+			m_rotDragging = true;
+			m_rotPane = 1;
+			m_rotOrigin = point;
+			m_rotYaw0 = m_camBot.yawDeg;
+			m_rotPitch0 = m_camBot.pitchDeg;
+			SetCapture();
+			return;
+		}
+	}
 	int band = -1;
 	CRect plot;
 	if (HitEqBand(point, band, plot)) {
@@ -4014,6 +4534,12 @@ void CAnalyzerDlg::OnLButtonDown(UINT nFlags, CPoint point)
 
 void CAnalyzerDlg::OnLButtonUp(UINT nFlags, CPoint point)
 {
+	if (m_rotDragging) {
+		m_rotDragging = false;
+		if (::GetCapture() == m_hWnd) ::ReleaseCapture();
+		PersistSoft3DCams();
+		return;
+	}
 	if (m_eqDrag) {
 		m_eqDrag = false;
 		m_eqDragBand = -1;
@@ -4032,6 +4558,29 @@ void CAnalyzerDlg::OnLButtonDblClk(UINT nFlags, CPoint point)
 	UNREFERENCED_PARAMETER(point);
 	ResetPeakHold();
 	CCustomBlurDialogExBase::OnLButtonDblClk(nFlags, point);
+}
+
+BOOL CAnalyzerDlg::OnMouseWheel(UINT nFlags, short zDelta, CPoint pt)
+{
+	UNREFERENCED_PARAMETER(nFlags);
+	CPoint client = pt;
+	ScreenToClient(&client);
+	CRect rc; GetClientRect(&rc);
+	const int capH = CCC_GetCustomCaptionHeight(m_hWnd);
+	const int contentTop = (capH > 0) ? capH : 0;
+	const int contentH = rc.Height() - contentTop;
+	const int split = contentTop + (int)(contentH * 0.65);
+	GdiSoft3D::Cam* cam = nullptr;
+	if (IsSoft3DTop() && client.y >= contentTop && client.y < split)
+		cam = &m_camTop;
+	else if (IsSoft3DBot() && client.y >= split)
+		cam = &m_camBot;
+	if (!cam)
+		return CCustomBlurDialogExBase::OnMouseWheel(nFlags, zDelta, pt);
+	GdiSoft3D::WheelZoom(*cam, zDelta);
+	PersistSoft3DCams();
+	KickUiPresent();
+	return TRUE;
 }
 
 BOOL CAnalyzerDlg::PreTranslateMessage(MSG* pMsg)

@@ -19,6 +19,7 @@
 #include "afxdialogex.h"
 #include "CCustomControl.h"
 #include "NoteEnvelopeModel.h"
+#include "GdiSoft3D.h"
 
 class CPianoRoll : public CCustomBlurDialogExBase
 {
@@ -634,15 +635,17 @@ private:
     // ---- 簡易3D ----
     void BuildView3D(int width, int height, View3D& v) const;
     static void ProjectView3D(const View3D& v, float x, float y, float z, POINT& out);
-    static void DrawBox3D(CDC& dc, const View3D& v, float xL, float xR, float topY,
+    static void DrawBox3D(GdiSoft3D::Context& ctx, float xL, float xR, float topY,
         float z0, float z1, COLORREF col, float frontShade, float baseY = 0.0f);
     void Capture3DWalls();   // 履歴リングから m_wall3D を作る(m_cs 下)
     void KeyXSpan3D(int keyIndex, float& xL, float& xR) const;   // 3D 空間での鍵の左右端
     void Draw3DSceneToBuffer(CDC& dc, int width, int height,
-        const bool* activesCopy, const float* chFillCopy, int chCountCopy) const;
-    void Draw3DKeyboard(CDC& dc, const View3D& v, const bool* activesCopy) const;
-    void Draw3DWalls(CDC& dc, const View3D& v) const;
-    void Draw3DMeters(CDC& dc, const View3D& v, const float* chFillCopy, int chCountCopy) const;
+        const bool* activesCopy, const float* chFillCopy, int chCountCopy, const uint8_t* exprCopy) const;
+    void Draw3DKeyboard(GdiSoft3D::Context& ctx, const View3D& v, CDC* textDC, const bool* activesCopy) const;
+    void Draw3DWalls(GdiSoft3D::Context& ctx, const View3D& v) const;
+    void Draw3DMeters(GdiSoft3D::Context& ctx, const View3D& v, const float* chFillCopy, int chCountCopy) const;
+    void Draw3DExprMarks(GdiSoft3D::Context& ctx, const View3D& v, const bool* activesCopy, const uint8_t* exprCopy) const;
+    void Draw3DExprLegend(GdiSoft3D::Context& ctx) const;
 
     void SetRollSpeedPct(int pct);
     int  RollSpeedIndex() const;

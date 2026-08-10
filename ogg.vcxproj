@@ -375,6 +375,8 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="CPianoRoll.cpp" />
+    <ClCompile Include="GdiSoft3D.cpp" />
+    <ClCompile Include="GdiSoft2D.cpp" />
     <ClCompile Include="CAnalyzerDlg.cpp" />
     <ClCompile Include="CPromptDlg.cpp" />
     <ClCompile Include="CPromptEngine.cpp" />
@@ -470,6 +472,9 @@
     <ClInclude Include="NoteFundamentalPick.h" />
     <ClInclude Include="PianoKeyTable.h" />
     <ClInclude Include="CPianoRoll.h" />
+    <ClInclude Include="GdiSoft3D.h" />
+    <ClInclude Include="GdiSoft2D.h" />
+    <ClInclude Include="GdiSoftFB.h" />
     <ClInclude Include="CAnalyzerDlg.h" />
     <ClInclude Include="CPromptDlg.h" />
     <ClInclude Include="CPromptEngine.h" />

@@ -10,6 +10,7 @@
 
 #include "CCustomControl.h"
 #include "CLyricsViewWnd.h"
+#include "GdiSoft3D.h"
 #include "resource.h"
 #include <atlimage.h>
 
@@ -248,6 +249,13 @@ public:
 	CBitmap m_bmpBanner;
 	int m_bannerCacheW, m_bannerCacheH;
 
+	GdiSoft3D::Cam m_bannerCam3d;
+	GdiSoft3D::Context m_bannerSoftCtx; // 毎フレーム Create/Destroy しない（GDI枯渇防止）
+	bool m_bannerRotDragging = false;
+	CPoint m_bannerRotOrigin;
+	float m_bannerRotYaw0 = 0.f;
+	float m_bannerRotPitch0 = 0.f;
+
 	// ---- 右曲情報パネルのテキスト marquee スクロール ----
 	// WM_MP_INFO_SCROLL(TheadLoop ~30fps)で進行。収まる行は静止したまま。
 	// [0]=タイトル, [1]=アーティスト, [2]=アルバム, [3]=曲番号, [4]=オーディオ情報, [5]=フォーマット
@@ -390,6 +398,14 @@ public:
 	// og のオフスクリーン合成 DC(スペアナ+ジャケ+時間)を m_bannerRect へ StretchBlit する。
 	// アクリル(Win11)時は黒透過合成、非アクリル時は永続メモリ DC でキャッシュ Blit。
 	void BlitVisualizer(CDC* pDC);
+	// Soft3D: バナー／ジャケット／曲情報を同一透視シーンへ
+	void PresentBannerSoft3D(CDC* pDC);
+	bool IsBannerSoft3D() const { return savedata.mpBannerviewmode == 1; }
+	void SyncBannerSoft3DCamFromSave();
+	void PersistBannerSoft3DCam();
+	static void BannerSoft3dYawCb(void* ctx, int value);
+	static void BannerSoft3dPitchCb(void* ctx, int value);
+	static void BannerSoft3dZoomCb(void* ctx, int value);
 	// 左ジャケット・右曲情報パネルをオフスクリーンバッファで GDI 描画して Blit する。
 	// クリップ矩形がサイドパネルと重ならない限り重い処理は走らない(バナーの毎フレーム無効化と共存)。
 	void DrawSidePanels(CDC* pDC);
@@ -646,6 +662,7 @@ protected:
 	afx_msg void OnMouseMove(UINT nFlags, CPoint point);
 	afx_msg void OnLButtonDown(UINT nFlags, CPoint point);
 	afx_msg void OnLButtonUp(UINT nFlags, CPoint point);
+	afx_msg BOOL OnMouseWheel(UINT nFlags, short zDelta, CPoint pt);
 	afx_msg LRESULT OnInfoScrollTick(WPARAM wParam, LPARAM lParam);
 	afx_msg LRESULT OnPlselExpandPopup(WPARAM wParam, LPARAM lParam);
 	afx_msg LRESULT OnMissScanDone(WPARAM wParam, LPARAM lParam);

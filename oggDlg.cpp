@@ -544,6 +544,18 @@ char cm1[10000];
 int wavbit2;
 extern save savedata;
 int spelv[400];
+// Soft3D/バナー用: 瞬間値（ピーク保持 spelv とは別。止まって見える原因を避ける）
+int speanaInst[400];
+float speanaWaveL[128];
+float speanaWaveR[128];
+int speanaWaveN = 0;
+int speanaLiveStereo = 0; // 0=mono(0..87), 1=L@100 R@200
+// Soft3D専用: 常にFFT帯（音階モードの疎な検出で高域が“止まる”のを避ける）
+int speanaFftL[88];
+int speanaFftR[88];
+int speanaFftStereo = 0;
+int speanaFftValid = 0;
+
 int spetm[400];
 #ifdef _DEBUG
 #define new DEBUG_NEW
@@ -21168,8 +21180,13 @@ void COggDlg::timerp()
 	// ローカルリモートは !bGdiFrame 側で Speana(FALSE,TRUE) のみ（GDI二重実行で UI ハングしない）。
 	{
 		extern BOOL MpSsVizIsOpen();
+		extern CMediaPlayerDlg* mp;
+		const bool soft3dBanner = (mp && ::IsWindow(mp->GetSafeHwnd()) && mp->IsBannerSoft3D());
 		if ((m_supe.GetCheck() == TRUE || MpSsVizIsOpen()) && plf == 1 && (wav || ogg || m_dsb))
 			Speana(TRUE);
+		// Soft3Dバナーは毎フレーム軽量FFTで speanaFft* を更新（validゲートすると再演奏で凍る）
+		if (soft3dBanner && plf == 1 && (wav || ogg || m_dsb))
+			Speana(FALSE, TRUE);
 	}
 	if (plf == 1 && ::IsWindow(m_PianoRollDlg->GetSafeHwnd()) && Ms2DrawDue(ms2))
 		m_PianoRollDlg->RequestSyncFromMainUi();
@@ -25555,6 +25572,8 @@ static int g_speanaDrawEnable = 1;
 
 inline void SpeanaDrawBar(CDC& dc, int x, int bar_w, int idx, int d)
 {
+	if (idx >= 0 && idx < 400)
+		speanaInst[idx] = d;
 	if (savedata.mpSpeanaStyle == 2)
 		return; // 波形モードは別経路
 	if (spelv[idx] < d) { spelv[idx] = d; spetm[idx] = 0; }
@@ -26215,6 +26234,26 @@ void COggDlg::Speana(BOOL bPaintBars, BOOL bFillLevels)
 			plot(bufR, penR);
 		dc.SelectObject(old);
 		dc.FillSolidRect(x0, mid, wPx, 1, RGB(0, 180, 180));
+		// Soft3D 波形用に間引きサンプルを公開
+		speanaWaveN = 128;
+		speanaLiveStereo = stereoSpeana ? 1 : 0;
+		for (int i = 0; i < 128; ++i) {
+			const int si = (int)((__int64)i * framesToRead / 128);
+			float vL = 0.f, vR = 0.f;
+			if (si >= 0 && si < framesToRead) {
+				vL = (float)bufL[si];
+				vR = stereoSpeana ? (float)bufR[si] : vL;
+			}
+			if (vL < -1.f) vL = -1.f; if (vL > 1.f) vL = 1.f;
+			if (vR < -1.f) vR = -1.f; if (vR > 1.f) vR = 1.f;
+			speanaWaveL[i] = vL;
+			speanaWaveR[i] = vR;
+			const int hL = (int)(fabsf(vL) * 96.f + 0.5f);
+			const int hR = (int)(fabsf(vR) * 96.f + 0.5f);
+			speanaInst[i] = hL;
+			speanaInst[100 + i] = hL;
+			speanaInst[200 + i] = hR;
+		}
 		g_speanaDrawEnable = prevDrawEnable;
 		return;
 	}
@@ -26305,12 +26344,26 @@ void COggDlg::Speana(BOOL bPaintBars, BOOL bFillLevels)
 		if (!stereoSpeana) {
 			for (i = 0; i < DISP_KEYS; i++)
 				SpeanaDrawBar(dc, (21 * 8 + i * 2) * 4, 8, i, dtbl[i]);
+			speanaLiveStereo = 0;
+			for (i = 0; i < DISP_KEYS; i++) {
+				speanaFftL[i] = dtbl[i];
+				speanaFftR[i] = dtbl[i];
+			}
+			speanaFftStereo = 0;
+			speanaFftValid = 1;
 		}
 		else {
 			for (i = 0; i < DISP_KEYS; i++) {
 				SpeanaDrawBar(dc, (21 * 8 + i) * 4, 4, 100 + i, dtbl[i]);
 				SpeanaDrawBar(dc, (21 * 8 + 89 + i) * 4, 4, 200 + i, dtatbl[i]);
 			}
+			speanaLiveStereo = 1;
+			for (i = 0; i < DISP_KEYS; i++) {
+				speanaFftL[i] = dtbl[i];
+				speanaFftR[i] = dtatbl[i];
+			}
+			speanaFftStereo = 1;
+			speanaFftValid = 1;
 			if (g_speanaDrawEnable)
 				dc.FillSolidRect((21 * 8 + 88) * 4, 20, 4, 368, RGB(0, 255, 255));
 		}

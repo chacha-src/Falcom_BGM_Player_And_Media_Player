@@ -496,6 +496,22 @@ BOOL COggApp::InitInstance()
 	savedata.pianoroll3dyaw = -220;   // -22.0 度
 	savedata.pianoroll3dpitch = 260;  //  26.0 度
 	savedata.pianoroll3dzoom = 100;   // 1.00x
+	savedata.analyzerviewmodeTop = 0;
+	savedata.analyzerviewmodeBot = 0;
+	savedata.analyzer3dyawTop = -220;
+	savedata.analyzer3dpitchTop = 260;
+	savedata.analyzer3dzoomTop = 100;
+	savedata.analyzer3dyawBot = -220;
+	savedata.analyzer3dpitchBot = 260;
+	savedata.analyzer3dzoomBot = 100;
+	savedata.mpCmdRollviewmode = 0;
+	savedata.mpCmdRoll3dyaw = -220;
+	savedata.mpCmdRoll3dpitch = 260;
+	savedata.mpCmdRoll3dzoom = 100;
+	savedata.mpBannerviewmode = 0;
+	savedata.mpBanner3dyaw = -220;
+	savedata.mpBanner3dpitch = 260;
+	savedata.mpBanner3dzoom = 100;
 	savedata.dougatopmost = 0;
 	savedata.dougaaspect = 0;
 
@@ -809,6 +825,42 @@ BOOL COggApp::InitInstance()
 		savedata.yt_refresh_token[_countof(savedata.yt_refresh_token) - 1] = 0;
 		savedata.yt_broadcast_id[_countof(savedata.yt_broadcast_id) - 1] = 0;
 		savedata.yt_stream_id[_countof(savedata.yt_stream_id) - 1] = 0;
+	}
+	// Soft3D Phase1（末尾追記）
+	auto soft3dClampCam = [](int& yaw, int& pitch, int& zoom) {
+		if (yaw < -1800) yaw = -1800;
+		if (yaw > 1800) yaw = 1800;
+		if (pitch < -850) pitch = -850;
+		if (pitch > 850) pitch = 850;
+		if (zoom < 35) zoom = 35;
+		if (zoom > 400) zoom = 400;
+	};
+	if (datFileSize < (int)(offsetof(save, analyzerviewmodeTop) + sizeof(savedata.analyzerviewmodeTop))) {
+		savedata.analyzerviewmodeTop = 0;
+		savedata.analyzerviewmodeBot = 0;
+		savedata.analyzer3dyawTop = -220;
+		savedata.analyzer3dpitchTop = 260;
+		savedata.analyzer3dzoomTop = 100;
+		savedata.analyzer3dyawBot = -220;
+		savedata.analyzer3dpitchBot = 260;
+		savedata.analyzer3dzoomBot = 100;
+		savedata.mpCmdRollviewmode = 0;
+		savedata.mpCmdRoll3dyaw = -220;
+		savedata.mpCmdRoll3dpitch = 260;
+		savedata.mpCmdRoll3dzoom = 100;
+		savedata.mpBannerviewmode = 0;
+		savedata.mpBanner3dyaw = -220;
+		savedata.mpBanner3dpitch = 260;
+		savedata.mpBanner3dzoom = 100;
+	} else {
+		if (savedata.analyzerviewmodeTop != 1) savedata.analyzerviewmodeTop = 0;
+		if (savedata.analyzerviewmodeBot != 1) savedata.analyzerviewmodeBot = 0;
+		if (savedata.mpCmdRollviewmode != 1) savedata.mpCmdRollviewmode = 0;
+		if (savedata.mpBannerviewmode != 1) savedata.mpBannerviewmode = 0;
+		soft3dClampCam(savedata.analyzer3dyawTop, savedata.analyzer3dpitchTop, savedata.analyzer3dzoomTop);
+		soft3dClampCam(savedata.analyzer3dyawBot, savedata.analyzer3dpitchBot, savedata.analyzer3dzoomBot);
+		soft3dClampCam(savedata.mpCmdRoll3dyaw, savedata.mpCmdRoll3dpitch, savedata.mpCmdRoll3dzoom);
+		soft3dClampCam(savedata.mpBanner3dyaw, savedata.mpBanner3dpitch, savedata.mpBanner3dzoom);
 	}
 	if (datFileSize < (int)(offsetof(save, mpToolsOpen) + sizeof(savedata.mpToolsOpen)))
 		savedata.mpToolsOpen = 0;
