@@ -10,6 +10,7 @@ extern CString streamname[40];
 extern IAMStreamSelect* iam;
 extern int audionum;
 extern int au;
+extern int streamidx[40];
 
 IMPLEMENT_DYNAMIC(CAudioSelect, CCustomBlurDialogBase)
 
@@ -78,14 +79,12 @@ BOOL CAudioSelect::OnInitDialog()
 	}
 
 	AM_MEDIA_TYPE* ppmt = NULL;
-	DWORD* pdwFlags = NULL;
-	for (int l = 0; l < audionum; l++) {
-		int num = l + au;
-		
-		if (iam->Info(num, NULL, pdwFlags, NULL, NULL, NULL, NULL, NULL) == S_OK) {
-			if (pdwFlags != nullptr && *pdwFlags == AMSTREAMSELECTINFO_ENABLED) {
+	for (int l = 0; l < audionum && l < 40; l++) {
+		const int num = (streamidx[l] >= 0) ? streamidx[l] : (l + au);
+		DWORD flags = 0;
+		if (iam && SUCCEEDED(iam->Info(num, NULL, &flags, NULL, NULL, NULL, NULL, NULL))) {
+			if (flags & (AMSTREAMSELECTINFO_ENABLED | AMSTREAMSELECTINFO_EXCLUSIVE))
 				m_lb.SetCurSel(l);
-			}
 		}
 	}
 

@@ -1958,6 +1958,26 @@ BOOL CCustomPopupMenu::IsPointInChain(CPoint screenPt) const
 		const int si = m_items[m_openSub].subIndex;
 		if (si >= 0 && si < m_subCount && m_subs[si] && m_subs[si]->IsPointInChain(screenPt))
 			return TRUE;
+		// 親→サブの隙間（余白）もチェーン内扱い（クリックで全体が閉じない）
+		if (si >= 0 && si < m_subCount && m_subs[si] && m_subs[si]->GetSafeHwnd()) {
+			CRect pwr; GetWindowRect(&pwr);
+			CRect swr; m_subs[si]->GetWindowRect(&swr);
+			CRect item = ItemViewRect(m_openSub);
+			CPoint a(item.left, item.top), b(item.right, item.bottom);
+			const_cast<CCustomPopupMenu*>(this)->ClientToScreen(&a);
+			const_cast<CCustomPopupMenu*>(this)->ClientToScreen(&b);
+			CRect bridge;
+			bridge.left = (std::min)(b.x, swr.left) - 12;
+			bridge.right = (std::max)(b.x, swr.left) + 12;
+			bridge.top = (std::min)((std::min)(a.y, swr.top), pwr.top) - 20;
+			bridge.bottom = (std::max)((std::max)(b.y, swr.bottom), pwr.bottom) + 20;
+			if (bridge.Width() < 28) {
+				bridge.left = (std::min)(pwr.right, swr.left) - 16;
+				bridge.right = (std::max)(pwr.right, swr.left) + 16;
+			}
+			if (bridge.PtInRect(screenPt))
+				return TRUE;
+		}
 	}
 	return FALSE;
 }
@@ -2370,12 +2390,62 @@ void CCustomPopupMenu::OpenSubAt(int idx)
 	sub->m_owner = m_owner;
 	CRect wr; GetWindowRect(&wr);
 	CRect vr = ItemViewRect(idx);
-	sub->CreatePopupAt(CPoint(wr.right - 2, wr.top + vr.top), this, RootMenu());
+	// 余白／影を跨いで消えないよう親右端と十分重ねる
+	sub->CreatePopupAt(CPoint(wr.right - 16, wr.top + vr.top), this, RootMenu());
 }
 
 void CCustomPopupMenu::SetHot(int idx)
 {
 	if (idx == m_hot) return;
+
+	// 項目間・左右パッド等の余白(idx<0): 開いているサブへ渡る途中なら閉じない
+	if (idx < 0) {
+		if (m_openSub >= 0) {
+			CPoint sp;
+			::GetCursorPos(&sp);
+			CRect wr;
+			GetWindowRect(&wr);
+			if (wr.PtInRect(sp)) {
+				if (m_hot != m_openSub) {
+					m_hot = m_openSub;
+					InvalidateBgOnly();
+					UpdateTip();
+				}
+				return;
+			}
+			const int si = m_items[m_openSub].subIndex;
+			if (si >= 0 && si < m_subCount && m_subs[si] && m_subs[si]->IsPointInChain(sp))
+				return;
+			if (si >= 0 && si < m_subCount && m_subs[si] && m_subs[si]->GetSafeHwnd()) {
+				CRect swr; m_subs[si]->GetWindowRect(&swr);
+				CRect item = ItemViewRect(m_openSub);
+				CPoint a(item.left, item.top), b(item.right, item.bottom);
+				ClientToScreen(&a);
+				ClientToScreen(&b);
+				CRect bridge;
+				bridge.left = (std::min)(b.x, swr.left) - 12;
+				bridge.right = (std::max)(b.x, swr.left) + 12;
+				bridge.top = (std::min)((std::min)(a.y, swr.top), wr.top) - 20;
+				bridge.bottom = (std::max)((std::max)(b.y, swr.bottom), wr.bottom) + 20;
+				if (bridge.Width() < 28) {
+					bridge.left = (std::min)(wr.right, swr.left) - 16;
+					bridge.right = (std::max)(wr.right, swr.left) + 16;
+				}
+				if (bridge.PtInRect(sp))
+					return;
+			}
+			m_hot = -1;
+			InvalidateBgOnly();
+			UpdateTip();
+			CloseOpenSub();
+			return;
+		}
+		m_hot = -1;
+		InvalidateBgOnly();
+		UpdateTip();
+		return;
+	}
+
 	m_hot = idx;
 	// Invalidate(FALSE) は BufferedPaint が子 HWND を塗り潰す。背景のみ。
 	InvalidateBgOnly();
@@ -2390,8 +2460,6 @@ void CCustomPopupMenu::SetHot(int idx)
 			OpenSubAt(idx);
 		else if (m_openSub >= 0)
 			CloseOpenSub();
-	} else if (m_openSub >= 0) {
-		CloseOpenSub();
 	}
 }
 

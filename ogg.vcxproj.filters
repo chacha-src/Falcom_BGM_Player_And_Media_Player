@@ -435,6 +435,9 @@
     <ClCompile Include="ScreenCaptureDlg.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="ScreenCaptureLive.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="ScWgcCapture.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>

@@ -470,6 +470,9 @@ void OggResetRubberBandStretcher();
 void RequestPlaybackRestart(HWND hwnd = NULL);
 // タグ編集など: 現再生位置を .save に書き、次回 play で確認なし復帰する
 void OggArmSilentResumeFromCurrent();
+// リモート再生: MessageBox なし。Yes=途中から / No=先頭から(.save削除)
+void OggArmRemoteSilentResumeYes();
+void OggArmRemoteSilentResumeNo();
 
 //{{AFX_INSERT_LOCATION}}
 // Microsoft Visual C++ は前行の直前に追加の宣言を挿入します。

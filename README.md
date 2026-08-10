@@ -154,13 +154,14 @@ Windows 11のアクリル風ぼかし表示に対応しています。コンテ�
 メディアプレイヤー下段の「録音」から、再生端末のループバックを **WAV / mp3 / FLAC** に録音できます。端末・形式・品質・保存先を指定でき、マイクの同時ミックスにも対応しています。mp3 / FLAC はいったんWAV経由で変換します。
 
 ### 画面キャプチャ
-同じく下段の「キャプチャ」から、画面を **MP4（H.264 + AAC）** で録画できます。
+同じく下段の「キャプチャ」から、画面を **MP4（H.264 + AAC）** で録画できます。**ライブ配信モード**では MP4 を作らず、ffmpeg 経由で YouTube Live / ニコニコ / カスタム RTMP へ送ります。
 
 - **モード:** プライマリ画面 / 全モニタ（仮想デスクトップ） / ウィンドウ合成
 - **ウィンドウ合成:** 複数ウィンドウをレイヤとして配置。プレビュー上でドラッグ移動・四隅での拡大縮小、Z順の入れ替え
 - **システム音**（ループバック）と**マイク**の有無、FPS、出力解像度
 - **MPの曲を載せる:** 開いているメディアプレイヤー画面を合成に含め、配置・サイズを調整可能
 - プレビューは録画中も更新されます（枠やHUDは録画ファイルには入りません）
+- **ライブ配信:** Live チェック ON。YouTube は Google OAuth Client ID/Secret → 認証 → 配信枠作成（タイトル／公開・限定・非公開）→ 配信開始。ニコニコ／カスタムは配信ページの RTMP URL＋キーを入力。実行ファイル隣（または `ogg_binary`）に **ffmpeg.exe** が必要です
 
 ### 附属ツール（らいら）
 メディアプレイヤーのツール右クリック／各ウィンドウの右クリックから使える、プレイヤー附属の便利機能です。
@@ -190,7 +191,7 @@ Windows 11のアクリル風ぼかし表示に対応しています。コンテ�
 - **nowplaying.txt:** 実行ファイルフォルダへ現在曲を書き出し（Discord本体連携はファイル出力のみ）
 - **フォーカスモード／危険操作確認／レイアウト1–3／週次サマリ／練習ログ** …… ツールメニューから
 - **アラーム:** 指定時刻に再生開始（スリープタイマーは従来どおり）
-- **ゲーム配信プリセット:** 画面キャプチャ＋デバイス録音を所定設定でまとめて開く
+- **ゲーム録画プリセット:** 画面キャプチャ＋デバイス録音を所定設定でまとめて開く（ネット配信ではない）
 - **リスト削除の1段Undo:** 右クリック「削除を元に戻す」（フル履歴Undoではありません）
 
 Remote / OBS の関係:
@@ -307,7 +308,7 @@ avi, mpgなどのDirectShow対応動画を再生可能です。Windows Vista以�
 - 歌詞ウィンドウ、LRC微調整／保存、ピアノロールのMIDI・MusicXML録り、PC音譜面化、簡易3D表示
 - A-B／キュー素材パック、音量正規化バッチ、MusicBrainz自動タグ、ボーカルMid、M/Sプリセット、キーEQ提案
 - BPM計測、DJパッド（スクラッチ／Kill／ホットキュー等）、MIDI操作、動画音声抽出、出力ミラー、SS風ビジュアライザ
-- ローカルリモート（LAN／同時6台・タブ：操作/EQ/リスト/歌詞/DJスクラッチ/ピアノ/アナ）、アラーム、ゲーム配信プリセット
+- ローカルリモート（LAN／同時6台・タブ：操作/EQ/リスト/歌詞/DJスクラッチ/ピアノ/アナ）、アラーム、ゲーム録画プリセット、画面キャプチャのライブ配信（YouTube API / RTMP）
 - ピアノロールの検出パラメータ調整ダイアログ（多数スライダー）、88／108鍵レンジ
 - プレイリストからアナライザー／ピアノロールを直接開く
 - 並べ替え、他プレイリストへの移動・コピー、選択曲のジャケ再取得、一時プレイリスト
@@ -500,7 +501,8 @@ Handy media-player add-ons from the Tools right-click menu and each window’s c
 - **Screensaver-style visualizer:** Fullscreen display (ESC to exit)
 - **Local remote:** Browser transport from PCs/phones on the same Wi-Fi / LAN (up to 6 clients). Tabs: transport / EQ / playlist / lyrics / DJ scratch / piano / analyzer. Open the `http://(LAN IP):port/` shown in settings (on the PC, `127.0.0.1` also works). Not exposed to the public Internet; Windows Firewall may prompt once
 - **Alarm:** Start playback at a set time (sleep timer remains as before)
-- **Game-stream preset:** Open screen capture + device record with preset settings
+- **Game-capture preset:** Open screen capture + device record with preset settings (local recording, not internet streaming)
+- **Live streaming (screen capture):** Live checkbox → YouTube (OAuth + Live API: title/privacy) or Niconico/Custom RTMP URL+key. Requires `ffmpeg.exe` beside the exe (or under `ogg_binary`). Does not write MP4 while live.
 
 ![Player Screen](https://ppp.oohara.jp/img/ysedplay2e_git7.png)
 

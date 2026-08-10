@@ -324,6 +324,7 @@ public:
 	afx_msg void OnDougaMenuAspect();
 	afx_msg void OnDougaMenuSpeed(UINT nID);
 	afx_msg void OnDougaMenuClose();
+	afx_msg void OnDougaMenuSubOff();
 	void ApplyDougaTopmost();
 	void ShowHelpSheet();
 	void DestroyHelpSheet();

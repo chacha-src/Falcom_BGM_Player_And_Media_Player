@@ -224,6 +224,11 @@ public:
 	afx_msg void OnBnClickedIncludeMp();
 	afx_msg void OnBnClickedShowCursor();
 	afx_msg void OnBnClickedMic();
+	afx_msg void OnBnClickedLive();
+	afx_msg void OnBnClickedLiveAuth();
+	afx_msg void OnBnClickedLiveCreate();
+	afx_msg void OnCbnSelchangeLiveSvc();
+	afx_msg void OnCbnSelchangeLivePriv();
 	afx_msg void OnCbnSelchangeMicDev();
 	afx_msg void OnCbnSelchangeLoopDev();
 	afx_msg void OnCbnSelchangeMode();
@@ -242,6 +247,14 @@ public:
 	afx_msg void OnDestroy();
 	virtual void OnCancel();
 	virtual void OnOK();
+
+	void SyncLiveUiEnable();
+	void PersistLiveFieldsFromUi();
+	void ApplyLiveFieldsToUi();
+	BOOL PrepareYouTubeLiveBeforeStart(CString& errOut);
+	void FinishYouTubeLiveAfterStop();
+	void TryYouTubeGoLiveTransition();
+	BOOL ResolveFfmpegPath(TCHAR* outPath, int outCch) const;
 
 	CScPreviewCtrl m_preview;
 	CScFxWireCtrl m_fxWire;
@@ -266,6 +279,25 @@ public:
 	CCustomComboBox m_loopDev;
 	CCustomCheckBox m_includeMp;
 	CCustomCheckBox m_showCursor;
+	CCustomCheckBox m_live;
+	CCustomStatic m_liveSvcLabel;
+	CCustomComboBox m_liveSvc;
+	CCustomStatic m_livePrivLabel;
+	CCustomComboBox m_livePriv;
+	CCustomStatic m_liveTitleLabel;
+	CCustomEdit m_liveTitle;
+	CCustomStatic m_liveDescLabel;
+	CCustomEdit m_liveDesc;
+	CCustomStatic m_liveUrlLabel;
+	CCustomEdit m_liveUrl;
+	CCustomStatic m_liveKeyLabel;
+	CCustomEdit m_liveKey;
+	CCustomStatic m_liveCidLabel;
+	CCustomEdit m_liveCid;
+	CCustomStatic m_liveCsecLabel;
+	CCustomEdit m_liveCsec;
+	CCustomStandardButton m_liveAuth;
+	CCustomStandardButton m_liveCreate;
 	CCustomStandardButton m_pick;
 	CCustomStandardButton m_refresh;
 	CCustomStatic m_availLabel;
@@ -353,6 +385,8 @@ public:
 	CString m_outPath;
 	BOOL m_withAudio;
 	BOOL m_withMic;
+	BOOL m_liveMode;
+	int m_liveService;
 	int m_fpsVal;
 	DWORD m_startTick;
 

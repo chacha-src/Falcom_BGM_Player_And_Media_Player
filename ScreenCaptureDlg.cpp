@@ -1355,11 +1355,38 @@ void CScPreviewCtrl::OnRButtonUp(UINT nFlags, CPoint point)
 			if (sel >= 0 && sel < m_owner->m_layerCnt)
 				layer = sel;
 		}
+
+		auto addLiveToggle = [&](CCustomPopupMenu& menu) {
+			const BOOL liveOn = m_owner->m_live.GetSafeHwnd() && m_owner->m_live.GetCheck();
+			menu.AddCheck(ID_SC_LIVE_TOGGLE,
+				LL14(L"ライブ配信モード", L"Live stream mode", L"Mode diffusion live", L"Modalità diretta",
+					L"Modo transmisión", L"라이브 방송 모드", L"直播模式", L"وضع البث المباشر",
+					L"Режим эфира", L"Livestream-Modus", L"Modo ao vivo", L"Livestream-modus",
+					L"Tryb transmisji", L"Canlı yayın modu"),
+				liveOn,
+				LL14(L"ONでRTMP配信（MP4なし）。ffmpeg.exe が必要です",
+					L"ON = RTMP live (no MP4). Requires ffmpeg.exe",
+					L"ON = live RTMP (pas de MP4). ffmpeg.exe requis",
+					L"ON = live RTMP (niente MP4). Serve ffmpeg.exe",
+					L"ON = vivo RTMP (sin MP4). Requiere ffmpeg.exe",
+					L"ON이면 RTMP 라이브(MP4 없음). ffmpeg.exe 필요",
+					L"开启后 RTMP 直播（不写 MP4）。需要 ffmpeg.exe",
+					L"تشغيل = بث RTMP (بدون MP4). يلزم ffmpeg.exe",
+					L"Вкл. = RTMP эфир (без MP4). Нужен ffmpeg.exe",
+					L"AN = RTMP-Live (kein MP4). ffmpeg.exe nötig",
+					L"ON = ao vivo RTMP (sem MP4). Requer ffmpeg.exe",
+					L"AAN = RTMP-live (geen MP4). ffmpeg.exe vereist",
+					L"WŁ = live RTMP (bez MP4). Wymaga ffmpeg.exe",
+					L"AÇIK = RTMP canlı (MP4 yok). ffmpeg.exe gerekir"));
+		};
+
 		if (layer >= 0 && layer < m_owner->m_layerCnt) {
 			m_owner->m_layer.SetCurSel(layer);
 			m_owner->SyncGeoEditsFromSel();
 			const BOOL hidden = m_owner->m_layers[layer].hidden;
 			CCustomPopupMenu menu;
+			addLiveToggle(menu);
+			menu.AddSeparator();
 			menu.AddCommand(ID_SC_LAYER_HIDE,
 				hidden
 				? LL14(L"表示する", L"Show", L"Afficher", L"Mostra", L"Mostrar", L"표시", L"显示", L"إظهار",
@@ -1480,7 +1507,12 @@ void CScPreviewCtrl::OnRButtonUp(UINT nFlags, CPoint point)
 			CPoint sp = point;
 			ClientToScreen(&sp);
 			const UINT cmd = menu.Track(sp, m_owner);
-			if (cmd == ID_SC_LAYER_HIDE) {
+			if (cmd == ID_SC_LIVE_TOGGLE) {
+				if (m_owner->m_live.GetSafeHwnd()) {
+					m_owner->m_live.SetCheck(m_owner->m_live.GetCheck() ? BST_UNCHECKED : BST_CHECKED);
+					m_owner->OnBnClickedLive();
+				}
+			} else if (cmd == ID_SC_LAYER_HIDE) {
 				m_owner->ToggleLayerHidden(layer);
 			} else if (cmd == ID_SC_LAYER_FIT) {
 				m_owner->m_layer.SetCurSel(layer);
@@ -1505,6 +1537,21 @@ void CScPreviewCtrl::OnRButtonUp(UINT nFlags, CPoint point)
 			} else if (cmd == ID_SC_LAYER_REMOVE) {
 				m_owner->m_layer.SetCurSel(layer);
 				m_owner->OnBnClickedRemove();
+			}
+			Invalidate(FALSE);
+			return;
+		}
+
+		// レイヤ無しでも Live 切替メニューを出す
+		{
+			CCustomPopupMenu menu;
+			addLiveToggle(menu);
+			CPoint sp = point;
+			ClientToScreen(&sp);
+			const UINT cmd = menu.Track(sp, m_owner);
+			if (cmd == ID_SC_LIVE_TOGGLE && m_owner->m_live.GetSafeHwnd()) {
+				m_owner->m_live.SetCheck(m_owner->m_live.GetCheck() ? BST_UNCHECKED : BST_CHECKED);
+				m_owner->OnBnClickedLive();
 			}
 			Invalidate(FALSE);
 			return;
@@ -2487,7 +2534,23 @@ void CScHelpDlg::OnPaint()
 	body(L, y, LL14(L"・マウスカーソル …… チェックで録画・プレビューに載せる／外す", L"· Mouse cursor …… checkbox to include/exclude in preview & recording", L"· Curseur …… case pour inclure/exclure aperçu et enregistrement", L"· Cursore …… casella per includere/escludere anteprima e registrazione",
 		L"· Cursor …… casilla para incluir/excluir en vista y grabación", L"· 마우스 커서 …… 체크로 미리보기·녹화에 포함/제외", L"· 鼠标光标 …… 勾选以在预览/录制中包含或排除", L"· مؤشر الفأرة …… خانة لتضمين/استبعاد في المعاينة والتسجيل",
 		L"· Курсор …… галочка — показать/скрыть в превью и записи", L"· Mauszeiger …… Haken = in Vorschau/Aufnahme ein-/ausblenden", L"· Cursor …… caixa para incluir/excluir na prévia e gravação", L"· Muiscursor …… vinkje om in voorbeeld/opname te tonen/verbergen",
-		L"· Kursor …… zaznaczenie = pokaż/ukryj w podglądzie i nagraniu", L"· Fare imleci …… onay kutusu ile önizleme/kayıtta göster/gizle")); y += lh + 4;
+		L"· Kursor …… zaznaczenie = pokaż/ukryj w podglądzie i nagraniu", L"· Fare imleci …… onay kutusu ile önizleme/kayıtta göster/gizle")); y += lh;
+	body(L, y, LL14(L"・ライブ配信 …… YouTube認証→配信枠作成、または Nico/カスタムで URL+キー。ffmpeg.exe 必須", L"· Live …… YouTube Auth→Create, or Nico/Custom URL+key. ffmpeg.exe required", L"· Live …… Auth YouTube→Créer, ou Nico/Perso URL+clé. ffmpeg.exe requis", L"· Live …… Auth YouTube→Crea, o Nico/Custom URL+chiave. Serve ffmpeg.exe",
+		L"· En vivo …… Auth YouTube→Crear, o Nico/Pers. URL+clave. Requiere ffmpeg.exe", L"· 라이브 …… YouTube 인증→방송 생성, 또는 Nico/사용자 URL+키. ffmpeg.exe 필수", L"· 直播 …… YouTube 认证→创建直播，或 Nico/自定义 URL+密钥。需要 ffmpeg.exe", L"· بث …… مصادقة YouTube→إنشاء، أو Nico/مخصص رابط+مفتاح. يلزم ffmpeg.exe",
+		L"· Эфир …… Auth YouTube→Создать, или Nico/свой URL+ключ. Нужен ffmpeg.exe", L"· Live …… YouTube-Auth→Anlegen, oder Nico/Custom URL+Key. ffmpeg.exe nötig", L"· Ao vivo …… Auth YouTube→Criar, ou Nico/Pers. URL+chave. Requer ffmpeg.exe", L"· Live …… YouTube-auth→Maken, of Nico/Custom URL+key. ffmpeg.exe vereist",
+		L"· Live …… Auth YouTube→Utwórz, lub Nico/Własne URL+klucz. Wymaga ffmpeg.exe", L"· Canlı …… YouTube Auth→Oluştur, veya Nico/Özel URL+anahtar. ffmpeg.exe gerekir")); y += lh + 4;
+
+	title(L, y, LL14(L"ライブ配信", L"Live streaming", L"Diffusion live", L"Diretta", L"Transmisión", L"라이브", L"直播", L"البث المباشر",
+		L"Прямой эфир", L"Livestream", L"Transmissão ao vivo", L"Livestream", L"Transmisja", L"Canlı yayın"));
+	y += titleLh;
+	body(L, y, LL14(L"・YouTube …… Client ID/Secret → 認証 → 配信枠作成 → 配信開始（MP4は書きません）", L"· YouTube …… Client ID/Secret → Auth → Create → Go live (no MP4)", L"· YouTube …… Client ID/Secret → Auth → Créer → Diffuser (pas de MP4)", L"· YouTube …… Client ID/Secret → Auth → Crea → Diretta (niente MP4)",
+		L"· YouTube …… Client ID/Secret → Auth → Crear → Emitir (sin MP4)", L"· YouTube …… Client ID/Secret → 인증 → 방송 생성 → 시작(MP4 없음)", L"· YouTube …… Client ID/Secret → 认证 → 创建 → 开播（不写 MP4）", L"· YouTube …… Client ID/Secret → مصادقة → إنشاء → بث (بدون MP4)",
+		L"· YouTube …… Client ID/Secret → Auth → Создать → Эфир (без MP4)", L"· YouTube …… Client-ID/Secret → Auth → Anlegen → Live (kein MP4)", L"· YouTube …… Client ID/Secret → Auth → Criar → Ao vivo (sem MP4)", L"· YouTube …… Client-ID/Secret → Auth → Maken → Live (geen MP4)",
+		L"· YouTube …… Client ID/Secret → Auth → Utwórz → Live (bez MP4)", L"· YouTube …… Client ID/Secret → Auth → Oluştur → Canlı (MP4 yok)")); y += lh;
+	body(L, y, LL14(L"・Nico/カスタム …… 配信サイトの RTMP URL とキーを手入力して配信開始", L"· Nico/Custom …… enter the site's RTMP URL and key, then Go live", L"· Nico/Perso …… saisissez URL RTMP et clé, puis Diffuser", L"· Nico/Custom …… inserisci URL RTMP e chiave, poi Vai in diretta",
+		L"· Nico/Pers. …… introduzca URL RTMP y clave, luego Emitir", L"· Nico/사용자 …… 사이트의 RTMP URL·키를 입력 후 시작", L"· Nico/自定义 …… 填写站点 RTMP URL 和密钥后开播", L"· Nico/مخصص …… أدخل رابط RTMP والمفتاح ثم ابدأ البث",
+		L"· Nico/свой …… введите RTMP URL и ключ, затем В эфир", L"· Nico/Custom …… RTMP-URL und Key eingeben, dann Live starten", L"· Nico/Pers. …… introduza URL RTMP e chave e Entre ao vivo", L"· Nico/Custom …… vul RTMP-URL en key in, dan Live starten",
+		L"· Nico/Własne …… wpisz URL RTMP i klucz, potem Rozpocznij", L"· Nico/Özel …… sitenin RTMP URL ve anahtarını girip Yayına başla")); y += lh + 4;
 
 	// mini wiring diagram
 	title(L, y, LL14(L"FX配線", L"FX wiring", L"Câblage FX", L"Cablaggio FX", L"Cableado FX", L"FX 배선", L"效果连线", L"توصيل FX",
@@ -2620,6 +2683,8 @@ CScreenCaptureDlg::CScreenCaptureDlg(CWnd* pParent)
 	, m_peakMix(0)
 	, m_withAudio(TRUE)
 	, m_withMic(FALSE)
+	, m_liveMode(FALSE)
+	, m_liveService(0)
 	, m_fpsVal(15)
 	, m_startTick(0)
 {
@@ -2692,6 +2757,25 @@ void CScreenCaptureDlg::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDC_SC_METER_MIX, m_meterMix);
 	DDX_Control(pDX, IDC_SC_INCMP, m_includeMp);
 	DDX_Control(pDX, IDC_SC_CURSOR, m_showCursor);
+	DDX_Control(pDX, IDC_SC_LIVE, m_live);
+	DDX_Control(pDX, IDC_SC_LIVE_SVC_L, m_liveSvcLabel);
+	DDX_Control(pDX, IDC_SC_LIVE_SVC, m_liveSvc);
+	DDX_Control(pDX, IDC_SC_LIVE_PRIV_L, m_livePrivLabel);
+	DDX_Control(pDX, IDC_SC_LIVE_PRIV, m_livePriv);
+	DDX_Control(pDX, IDC_SC_LIVE_TITLE_L, m_liveTitleLabel);
+	DDX_Control(pDX, IDC_SC_LIVE_TITLE, m_liveTitle);
+	DDX_Control(pDX, IDC_SC_LIVE_DESC_L, m_liveDescLabel);
+	DDX_Control(pDX, IDC_SC_LIVE_DESC, m_liveDesc);
+	DDX_Control(pDX, IDC_SC_LIVE_URL_L, m_liveUrlLabel);
+	DDX_Control(pDX, IDC_SC_LIVE_URL, m_liveUrl);
+	DDX_Control(pDX, IDC_SC_LIVE_KEY_L, m_liveKeyLabel);
+	DDX_Control(pDX, IDC_SC_LIVE_KEY, m_liveKey);
+	DDX_Control(pDX, IDC_SC_LIVE_CID_L, m_liveCidLabel);
+	DDX_Control(pDX, IDC_SC_LIVE_CID, m_liveCid);
+	DDX_Control(pDX, IDC_SC_LIVE_CSEC_L, m_liveCsecLabel);
+	DDX_Control(pDX, IDC_SC_LIVE_CSEC, m_liveCsec);
+	DDX_Control(pDX, IDC_SC_LIVE_AUTH, m_liveAuth);
+	DDX_Control(pDX, IDC_SC_LIVE_CREATE, m_liveCreate);
 	DDX_Control(pDX, IDC_SC_PICK, m_pick);
 	DDX_Control(pDX, IDC_SC_REFRESH, m_refresh);
 	DDX_Control(pDX, IDC_SC_AVAIL_L, m_availLabel);
@@ -2745,6 +2829,11 @@ BEGIN_MESSAGE_MAP(CScreenCaptureDlg, CCustomBlurDialogBase)
 	ON_BN_CLICKED(IDC_SC_TILE, &CScreenCaptureDlg::OnBnClickedTile)
 	ON_BN_CLICKED(IDC_SC_INCMP, &CScreenCaptureDlg::OnBnClickedIncludeMp)
 	ON_BN_CLICKED(IDC_SC_CURSOR, &CScreenCaptureDlg::OnBnClickedShowCursor)
+	ON_BN_CLICKED(IDC_SC_LIVE, &CScreenCaptureDlg::OnBnClickedLive)
+	ON_BN_CLICKED(IDC_SC_LIVE_AUTH, &CScreenCaptureDlg::OnBnClickedLiveAuth)
+	ON_BN_CLICKED(IDC_SC_LIVE_CREATE, &CScreenCaptureDlg::OnBnClickedLiveCreate)
+	ON_CBN_SELCHANGE(IDC_SC_LIVE_SVC, &CScreenCaptureDlg::OnCbnSelchangeLiveSvc)
+	ON_CBN_SELCHANGE(IDC_SC_LIVE_PRIV, &CScreenCaptureDlg::OnCbnSelchangeLivePriv)
 	ON_BN_CLICKED(IDC_SC_MIC, &CScreenCaptureDlg::OnBnClickedMic)
 	ON_CBN_SELCHANGE(IDC_SC_MICDEV, &CScreenCaptureDlg::OnCbnSelchangeMicDev)
 	ON_CBN_SELCHANGE(IDC_SC_LOOPDEV, &CScreenCaptureDlg::OnCbnSelchangeLoopDev)
@@ -2775,6 +2864,8 @@ void CScreenCaptureDlg::RefreshOpaqueUi()
 	if (m_fxWire.GetSafeHwnd()) m_fxWire.Invalidate(FALSE);
 	if (m_mode.GetSafeHwnd()) m_mode.Invalidate(FALSE);
 	if (m_canvas.GetSafeHwnd()) m_canvas.Invalidate(FALSE);
+	if (m_liveSvc.GetSafeHwnd()) m_liveSvc.Invalidate(FALSE);
+	if (m_livePriv.GetSafeHwnd()) m_livePriv.Invalidate(FALSE);
 }
 
 CString CScreenCaptureDlg::NormalizeOutPath(const CString& pathIn) const
@@ -4308,6 +4399,7 @@ void CScreenCaptureDlg::PersistUiToSavedata()
 	path = NormalizeOutPath(path);
 	_tcsncpy(savedata.cap_last_path, path, _countof(savedata.cap_last_path) - 1);
 	savedata.cap_last_path[_countof(savedata.cap_last_path) - 1] = 0;
+	PersistLiveFieldsFromUi();
 	MpPersistSavedataQuick();
 }
 
@@ -4320,11 +4412,24 @@ void CScreenCaptureDlg::EnableComposeUi(BOOL /*enable*/)
 void CScreenCaptureDlg::SetRecordingUi(BOOL recording)
 {
 	m_uiLocked = recording;
-	m_start.SetWindowText(recording
-		? LL14(L"録画停止", L"Stop", L"Arrêter", L"Stop", L"Detener", L"중지", L"停止", L"إيقاف",
-			L"Стоп", L"Stopp", L"Parar", L"Stop", L"Stop", L"Durdur")
-		: LL14(L"録画開始", L"Start", L"Démarrer", L"Avvia", L"Iniciar", L"시작", L"开始", L"بدء",
-			L"Старт", L"Start", L"Iniciar", L"Start", L"Start", L"Başlat"));
+	const BOOL liveUi = m_liveMode || (m_live.GetSafeHwnd() && m_live.GetCheck());
+	if (recording) {
+		m_start.SetWindowText(liveUi
+			? LL14(L"配信停止", L"Stop live", L"Arrêter le live", L"Ferma diretta",
+				L"Detener vivo", L"방송 중지", L"停止直播", L"إيقاف البث",
+				L"Стоп эфир", L"Live stoppen", L"Parar ao vivo", L"Live stoppen",
+				L"Zatrzymaj transmisję", L"Yayını durdur")
+			: LL14(L"録画停止", L"Stop", L"Arrêter", L"Stop", L"Detener", L"중지", L"停止", L"إيقاف",
+				L"Стоп", L"Stopp", L"Parar", L"Stop", L"Stop", L"Durdur"));
+	} else {
+		m_start.SetWindowText(liveUi
+			? LL14(L"配信開始", L"Go live", L"Diffuser", L"Vai in diretta",
+				L"Emitir", L"방송 시작", L"开始直播", L"بدء البث",
+				L"В эфир", L"Live starten", L"Entrar ao vivo", L"Live starten",
+				L"Rozpocznij transmisję", L"Yayına başla")
+			: LL14(L"録画開始", L"Start", L"Démarrer", L"Avvia", L"Iniciar", L"시작", L"开始", L"بدء",
+				L"Старт", L"Start", L"Iniciar", L"Start", L"Start", L"Başlat"));
+	}
 	const BOOL compose = IsWindowComposeMode();
 	EnableComposeUi(compose);
 	// EnableWindow は透過を壊すのでモード/キャンバスは PreTranslate でロック
@@ -5226,6 +5331,11 @@ BOOL CScreenCaptureDlg::OnInitDialog()
 	m_mic.SetAeroMode(FALSE);
 	m_includeMp.SetAeroMode(FALSE);
 	m_showCursor.SetAeroMode(FALSE);
+	m_live.SetAeroMode(FALSE);
+	m_liveSvc.SetAeroMode(FALSE);
+	m_livePriv.SetAeroMode(FALSE);
+	m_liveAuth.SetAeroMode(FALSE);
+	m_liveCreate.SetAeroMode(FALSE);
 	m_fps.SetAeroMode(FALSE);
 	m_effect.SetAeroMode(FALSE);
 	m_fxPre.SetAeroMode(FALSE);
@@ -5345,6 +5455,22 @@ BOOL CScreenCaptureDlg::OnInitDialog()
 	m_loopDevLabel.SetWindowText(LL14(L"システム", L"System", L"Système", L"Sistema", L"Sistema", L"시스템", L"系统", L"النظام", L"Система", L"System", L"Sistema", L"Systeem", L"System", L"Sistem"));
 	m_includeMp.SetCheck(savedata.cap_include_mp ? BST_CHECKED : BST_UNCHECKED);
 	m_showCursor.SetCheck(savedata.cap_show_cursor ? BST_CHECKED : BST_UNCHECKED);
+
+	m_liveSvc.ResetContent();
+	m_liveSvc.AddString(L"YouTube");
+	m_liveSvc.AddString(LL14(L"ニコニコ", L"Niconico", L"Niconico", L"Niconico", L"Niconico", L"니코니코", L"Niconico", L"نيكونيكو",
+		L"Niconico", L"Niconico", L"Niconico", L"Niconico", L"Niconico", L"Niconico"));
+	m_liveSvc.AddString(LL14(L"カスタム RTMP", L"Custom RTMP", L"RTMP perso", L"RTMP personalizzato", L"RTMP personalizado", L"사용자 RTMP", L"自定义 RTMP", L"RTMP مخصص",
+		L"Свой RTMP", L"Eigenes RTMP", L"RTMP personalizado", L"Aangepaste RTMP", L"Własny RTMP", L"Özel RTMP"));
+	m_livePriv.ResetContent();
+	m_livePriv.AddString(LL14(L"公開", L"Public", L"Public", L"Pubblico", L"Público", L"공개", L"公开", L"عام",
+		L"Открытый", L"Öffentlich", L"Público", L"Openbaar", L"Publiczny", L"Herkese açık"));
+	m_livePriv.AddString(LL14(L"限定公開", L"Unlisted", L"Non répertorié", L"Non in elenco", L"No listado", L"한정공개", L"不公开列出", L"غير مدرج",
+		L"По ссылке", L"Nicht gelistet", L"Não listado", L"Niet vermeld", L"Niepubliczny link", L"Listelenmemiş"));
+	m_livePriv.AddString(LL14(L"非公開", L"Private", L"Privé", L"Privato", L"Privado", L"비공개", L"私密", L"خاص",
+		L"Частный", L"Privat", L"Privado", L"Privé", L"Prywatny", L"Özel"));
+	ApplyLiveFieldsToUi();
+	SyncLiveUiEnable();
 
 	static const int fpsTab[] = { 10, 15, 20, 24, 30, 60, 90, 120 };
 	int fpsSel = 1;
@@ -5565,6 +5691,141 @@ BOOL CScreenCaptureDlg::OnInitDialog()
 			L"Muiscursor in voorbeeld/opname (uit = verborgen)",
 			L"Kursor myszy w podglądzie/nagraniu (wył. = ukryty)",
 			L"Önizleme/kayıtta fare imleci (kapalı = gizli)"));
+		m_tooltip.AddTool(&m_live, LL14(
+			L"ONでRTMPライブ配信（MP4なし）。ffmpeg.exe が必要",
+			L"ON = RTMP live (no MP4). Requires ffmpeg.exe",
+			L"ON = live RTMP (pas de MP4). ffmpeg.exe requis",
+			L"ON = live RTMP (niente MP4). Serve ffmpeg.exe",
+			L"ON = vivo RTMP (sin MP4). Requiere ffmpeg.exe",
+			L"ON이면 RTMP 라이브(MP4 없음). ffmpeg.exe 필요",
+			L"开启后 RTMP 直播（不写 MP4）。需要 ffmpeg.exe",
+			L"تشغيل = بث RTMP (بدون MP4). يلزم ffmpeg.exe",
+			L"Вкл. = RTMP эфир (без MP4). Нужен ffmpeg.exe",
+			L"AN = RTMP-Live (kein MP4). ffmpeg.exe nötig",
+			L"ON = ao vivo RTMP (sem MP4). Requer ffmpeg.exe",
+			L"AAN = RTMP-live (geen MP4). ffmpeg.exe vereist",
+			L"WŁ = live RTMP (bez MP4). Wymaga ffmpeg.exe",
+			L"AÇIK = RTMP canlı (MP4 yok). ffmpeg.exe gerekir"));
+		m_tooltip.AddTool(&m_liveSvc, LL14(
+			L"YouTube / ニコニコ / カスタムRTMP",
+			L"YouTube / Niconico / Custom RTMP",
+			L"YouTube / Niconico / RTMP perso",
+			L"YouTube / Niconico / RTMP personalizzato",
+			L"YouTube / Niconico / RTMP personalizado",
+			L"YouTube / 니코니코 / 사용자 RTMP",
+			L"YouTube / Niconico / 自定义 RTMP",
+			L"YouTube / Niconico / RTMP مخصص",
+			L"YouTube / Niconico / свой RTMP",
+			L"YouTube / Niconico / Eigenes RTMP",
+			L"YouTube / Niconico / RTMP personalizado",
+			L"YouTube / Niconico / Aangepaste RTMP",
+			L"YouTube / Niconico / Własny RTMP",
+			L"YouTube / Niconico / Özel RTMP"));
+		m_tooltip.AddTool(&m_livePriv, LL14(
+			L"YouTube 公開範囲（公開 / 限定公開 / 非公開）",
+			L"YouTube privacy (public / unlisted / private)",
+			L"Visibilité YouTube (public / non répertorié / privé)",
+			L"Privacy YouTube (pubblico / non in elenco / privato)",
+			L"Privacidad de YouTube (público / no listado / privado)",
+			L"YouTube 공개 범위(공개/한정/비공개)",
+			L"YouTube 公开范围（公开/不列出/私密）",
+			L"خصوصية YouTube (عام / غير مدرج / خاص)",
+			L"Доступ YouTube (открытый / по ссылке / частный)",
+			L"YouTube-Sichtbarkeit (öffentlich / unlisted / privat)",
+			L"Privacidade YouTube (público / não listado / privado)",
+			L"YouTube-privacy (openbaar / unlisted / privé)",
+			L"Prywatność YouTube (publiczny / unlisted / prywatny)",
+			L"YouTube gizliliği (herkese açık / listelenmemiş / özel)"));
+		m_tooltip.AddTool(&m_liveTitle, LL14(
+			L"配信タイトル（YouTube 配信枠作成時に使用）",
+			L"Stream title (used when creating a YouTube broadcast)",
+			L"Titre du live (création YouTube)",
+			L"Titolo diretta (creazione YouTube)",
+			L"Título de emisión (creación YouTube)",
+			L"방송 제목(YouTube 방송 생성 시)",
+			L"直播标题（创建 YouTube 直播时使用）",
+			L"عنوان البث (عند إنشاء بث YouTube)",
+			L"Название эфира (при создании YouTube)",
+			L"Stream-Titel (bei YouTube-Broadcast)",
+			L"Título da transmissão (ao criar YouTube)",
+			L"Streamtitel (bij YouTube-broadcast)",
+			L"Tytuł transmisji (przy tworzeniu YouTube)",
+			L"Yayın başlığı (YouTube yayını oluştururken)"));
+		m_tooltip.AddTool(&m_liveUrl, LL14(
+			L"RTMP(S) サーバ URL。YouTube は「配信枠作成」で自動入力",
+			L"RTMP(S) server URL. YouTube fills this via Create broadcast",
+			L"URL serveur RTMP(S). YouTube: rempli par Créer",
+			L"URL server RTMP(S). YouTube: compilato da Crea",
+			L"URL del servidor RTMP(S). YouTube: lo rellena Crear",
+			L"RTMP(S) 서버 URL. YouTube는 방송 생성으로 자동 입력",
+			L"RTMP(S) 服务器 URL。YouTube 可通过「创建直播」自动填入",
+			L"رابط خادم RTMP(S). YouTube يملؤه عبر إنشاء البث",
+			L"URL сервера RTMP(S). YouTube заполняет через создание эфира",
+			L"RTMP(S)-Server-URL. YouTube füllt per Broadcast anlegen",
+			L"URL do servidor RTMP(S). YouTube preenche ao criar",
+			L"RTMP(S)-server-URL. YouTube vult via Broadcast maken",
+			L"URL serwera RTMP(S). YouTube wypełnia przez Utwórz",
+			L"RTMP(S) sunucu URL. YouTube Yayın oluştur ile dolar"));
+		m_tooltip.AddTool(&m_liveKey, LL14(
+			L"ストリームキー。第三者に見せないでください",
+			L"Stream key. Keep it secret",
+			L"Clé de flux. Ne la partagez pas",
+			L"Chiave stream. Non condividerla",
+			L"Clave de stream. No la comparta",
+			L"스트림 키. 외부에 노출하지 마세요",
+			L"串流密钥。请勿泄露",
+			L"مفتاح البث. لا تشاركه",
+			L"Ключ потока. Не показывайте",
+			L"Stream-Key. Geheim halten",
+			L"Chave de stream. Mantenha em segredo",
+			L"Streamkey. Houd geheim",
+			L"Klucz streamu. Zachowaj w tajemnicy",
+			L"Yayın anahtarı. Gizli tutun"));
+		m_tooltip.AddTool(&m_liveAuth, LL14(
+			L"Google OAuth（Installed App・ループバック）で YouTube 認証",
+			L"YouTube auth via Google OAuth (installed app / loopback)",
+			L"Auth YouTube via OAuth Google (app installée / loopback)",
+			L"Auth YouTube via OAuth Google (app installata / loopback)",
+			L"Auth YouTube vía OAuth de Google (app instalada / loopback)",
+			L"Google OAuth(설치형·루프백)로 YouTube 인증",
+			L"通过 Google OAuth（已安装应用/环回）认证 YouTube",
+			L"مصادقة YouTube عبر OAuth Google (تطبيق مثبت / حلقة محلية)",
+			L"Вход YouTube через Google OAuth (уст. приложение / loopback)",
+			L"YouTube-Auth per Google-OAuth (Installed App / Loopback)",
+			L"Auth YouTube via OAuth Google (app instalada / loopback)",
+			L"YouTube-auth via Google OAuth (geïnstalleerde app / loopback)",
+			L"Auth YouTube przez Google OAuth (app zainstalowana / loopback)",
+			L"Google OAuth (yüklü uygulama / loopback) ile YouTube Auth"));
+		m_tooltip.AddTool(&m_liveCreate, LL14(
+			L"YouTube 配信枠を作成し RTMP URL/キーを取得（配信前でも可）",
+			L"Create YouTube broadcast and fill RTMP URL/key (even before going live)",
+			L"Créer une diffusion YouTube et remplir URL/clé RTMP",
+			L"Crea diretta YouTube e compila URL/chiave RTMP",
+			L"Crear emisión de YouTube y rellenar URL/clave RTMP",
+			L"YouTube 방송을 만들고 RTMP URL/키를 채움(방송 전에도 가능)",
+			L"创建 YouTube 直播并填入 RTMP URL/密钥（开播前也可）",
+			L"إنشاء بث YouTube وملء رابط/مفتاح RTMP",
+			L"Создать эфир YouTube и заполнить RTMP URL/ключ",
+			L"YouTube-Broadcast anlegen und RTMP-URL/Key füllen",
+			L"Criar transmissão YouTube e preencher URL/chave RTMP",
+			L"YouTube-broadcast maken en RTMP-URL/key vullen",
+			L"Utwórz transmisję YouTube i wypełnij URL/klucz RTMP",
+			L"YouTube yayını oluşturup RTMP URL/anahtar doldur"));
+		m_tooltip.AddTool(&m_liveCid, LL14(
+			L"Google Cloud OAuth Client ID（デスクトップアプリ）",
+			L"Google Cloud OAuth Client ID (Desktop app)",
+			L"Client ID OAuth Google Cloud (app bureau)",
+			L"Client ID OAuth Google Cloud (app desktop)",
+			L"Client ID OAuth de Google Cloud (app de escritorio)",
+			L"Google Cloud OAuth Client ID(데스크톱 앱)",
+			L"Google Cloud OAuth Client ID（桌面应用）",
+			L"معرّف عميل OAuth في Google Cloud (تطبيق سطح المكتب)",
+			L"Client ID OAuth Google Cloud (десктоп)",
+			L"Google-Cloud-OAuth-Client-ID (Desktop-App)",
+			L"Client ID OAuth Google Cloud (app ambiente de trabalho)",
+			L"Google Cloud OAuth Client-ID (desktop-app)",
+			L"Client ID OAuth Google Cloud (aplikacja desktop)",
+			L"Google Cloud OAuth Client ID (masaüstü uygulaması)"));
 		m_tooltip.AddTool(&m_pick, LL14(
 			L"次にクリックしたウィンドウをレイヤに追加します",
 			L"Next click adds that window as a layer",
@@ -5998,28 +6259,91 @@ BOOL CScreenCaptureDlg::StartRecording()
 	CString path;
 	m_path.GetWindowText(path);
 	path = NormalizeOutPath(path);
-	if (path.IsEmpty()) {
-		m_status.SetWindowText(LL14(
-			L"保存先を指定してください。", L"Please specify a save path.", L"Indiquez un chemin.",
-			L"Specificare un percorso.", L"Especifique una ruta.", L"저장 위치를 지정하세요.",
-			L"请指定保存路径。", L"حدد المسار.", L"Укажите путь.", L"Bitte Pfad angeben.",
-			L"Indique um caminho.", L"Geef een pad op.", L"Podaj ścieżkę.", L"Yol belirtin."));
-		return FALSE;
+
+	const BOOL liveChecked = m_live.GetSafeHwnd() && m_live.GetCheck();
+	int liveSvc = m_liveSvc.GetSafeHwnd() ? m_liveSvc.GetCurSel() : 0;
+	if (liveSvc < 0 || liveSvc > 2) liveSvc = 0;
+
+	if (liveChecked) {
+		PersistLiveFieldsFromUi();
+		if (liveSvc == 0) {
+			// 既に「配信枠作成」済みなら再利用（毎回新規枠を作らない）
+			CString urlHave, keyHave;
+			if (m_liveUrl.GetSafeHwnd()) m_liveUrl.GetWindowText(urlHave);
+			if (m_liveKey.GetSafeHwnd()) m_liveKey.GetWindowText(keyHave);
+			urlHave.Trim();
+			keyHave.Trim();
+			const BOOL haveReady = !urlHave.IsEmpty() && !keyHave.IsEmpty()
+				&& savedata.yt_broadcast_id[0] != 0;
+			if (!haveReady) {
+				CString ytErr;
+				if (!PrepareYouTubeLiveBeforeStart(ytErr)) {
+					m_status.SetWindowText(ytErr.IsEmpty()
+						? LL14(L"YouTube 配信の準備に失敗しました。", L"YouTube live prepare failed.",
+							L"Préparation YouTube échouée.", L"Preparazione YouTube non riuscita.",
+							L"Falló la preparación de YouTube.", L"YouTube 방송 준비 실패.",
+							L"YouTube 直播准备失败。", L"فشل تجهيز بث YouTube.",
+							L"Не удалось подготовить эфир YouTube.", L"YouTube-Live-Vorbereitung fehlgeschlagen.",
+							L"Falha ao preparar YouTube ao vivo.", L"Voorbereiding YouTube-live mislukt.",
+							L"Przygotowanie YouTube nie powiodło się.", L"YouTube canlı hazırlığı başarısız.")
+						: ytErr);
+					return FALSE;
+				}
+			}
+		} else {
+			CString url, key;
+			if (m_liveUrl.GetSafeHwnd()) m_liveUrl.GetWindowText(url);
+			if (m_liveKey.GetSafeHwnd()) m_liveKey.GetWindowText(key);
+			url.Trim();
+			key.Trim();
+			if (url.IsEmpty() || key.IsEmpty()) {
+				m_status.SetWindowText(LL14(
+					L"RTMP URL とストリームキーを入力してください。",
+					L"Enter RTMP URL and stream key.",
+					L"Saisissez l'URL RTMP et la clé.",
+					L"Inserisci URL RTMP e chiave stream.",
+					L"Introduzca URL RTMP y clave de stream.",
+					L"RTMP URL과 스트림 키를 입력하세요.",
+					L"请输入 RTMP URL 和串流密钥。",
+					L"أدخل رابط RTMP ومفتاح البث.",
+					L"Введите RTMP URL и ключ потока.",
+					L"RTMP-URL und Stream-Key eingeben.",
+					L"Introduza URL RTMP e chave de stream.",
+					L"Voer RTMP-URL en streamkey in.",
+					L"Wprowadź URL RTMP i klucz streamu.",
+					L"RTMP URL ve yayın anahtarını girin."));
+				return FALSE;
+			}
+		}
+		m_liveMode = TRUE;
+		m_liveService = liveSvc;
+		m_outPath.Empty();
+	} else {
+		m_liveMode = FALSE;
+		m_liveService = 0;
+		if (path.IsEmpty()) {
+			m_status.SetWindowText(LL14(
+				L"保存先を指定してください。", L"Please specify a save path.", L"Indiquez un chemin.",
+				L"Specificare un percorso.", L"Especifique una ruta.", L"저장 위치를 지정하세요.",
+				L"请指定保存路径。", L"حدد المسار.", L"Укажите путь.", L"Bitte Pfad angeben.",
+				L"Indique um caminho.", L"Geef een pad op.", L"Podaj ścieżkę.", L"Yol belirtin."));
+			return FALSE;
+		}
+		{
+			const int slash = (path.ReverseFind(L'\\') > path.ReverseFind(L'/')) ? path.ReverseFind(L'\\') : path.ReverseFind(L'/');
+			if (slash > 0)
+				CreateDirectory(path.Left(slash), NULL);
+		}
+		::DeleteFile(path);
+		m_outPath = path;
+		m_path.SetWindowText(path);
 	}
-	{
-		const int slash = (path.ReverseFind(L'\\') > path.ReverseFind(L'/')) ? path.ReverseFind(L'\\') : path.ReverseFind(L'/');
-		if (slash > 0)
-			CreateDirectory(path.Left(slash), NULL);
-	}
-	::DeleteFile(path);
 
 	m_fpsVal = CurrentPreviewFps();
 	if (m_fpsVal < 5) m_fpsVal = 15;
 	if (m_fpsVal > 120) m_fpsVal = 120;
 	m_withAudio = m_audio.GetCheck() ? TRUE : FALSE;
 	m_withMic = m_mic.GetCheck() ? TRUE : FALSE;
-	m_outPath = path;
-	m_path.SetWindowText(path);
 
 	// 固着 WGC を破棄して新規セッションで録る（WGC=高速、失敗時のみ GDI）。
 	InterlockedExchange(&m_encodeGdi, 0);
@@ -6057,21 +6381,37 @@ BOOL CScreenCaptureDlg::StartRecording()
 	m_thread = (HANDLE)th;
 	InterlockedExchange(&m_run, 1);
 	SetRecordingUi(TRUE);
-	m_status.SetWindowText(LL14(
-		L"録画中…",
-		L"Recording…",
-		L"Enregistrement…",
-		L"Registrazione…",
-		L"Grabando…",
-		L"녹화 중…",
-		L"录制中…",
-		L"جاري التسجيل…",
-		L"Запись…",
-		L"Aufnahme…",
-		L"A gravar…",
-		L"Opnemen…",
-		L"Nagrywanie…",
-		L"Kaydediliyor…"));
+	m_status.SetWindowText(m_liveMode
+		? LL14(
+			L"配信中…",
+			L"Streaming…",
+			L"Diffusion…",
+			L"In diretta…",
+			L"Emitiendo…",
+			L"방송 중…",
+			L"直播中…",
+			L"جارٍ البث…",
+			L"В эфире…",
+			L"Live…",
+			L"A transmitir…",
+			L"Live…",
+			L"Transmisja…",
+			L"Yayında…")
+		: LL14(
+			L"録画中…",
+			L"Recording…",
+			L"Enregistrement…",
+			L"Registrazione…",
+			L"Grabando…",
+			L"녹화 중…",
+			L"录制中…",
+			L"جاري التسجيل…",
+			L"Запись…",
+			L"Aufnahme…",
+			L"A gravar…",
+			L"Opnemen…",
+			L"Nagrywanie…",
+			L"Kaydediliyor…"));
 	return TRUE;
 }
 
@@ -6087,6 +6427,11 @@ void CScreenCaptureDlg::StopRecording()
 	}
 	InterlockedExchange(&m_run, 0);
 	InterlockedExchange(&m_encodeGdi, 0);
+	const BOOL wasLive = m_liveMode;
+	const int wasLiveSvc = m_liveService;
+	if (wasLive && wasLiveSvc == 0)
+		FinishYouTubeLiveAfterStop();
+	m_liveMode = FALSE;
 	const BOOL uiAlive = (GetSafeHwnd() != NULL);
 	if (uiAlive && IsIconic())
 		ShowWindow(SW_RESTORE);
@@ -6096,31 +6441,55 @@ void CScreenCaptureDlg::StopRecording()
 	if (uiAlive) {
 		SetRecordingUi(FALSE);
 		if (SUCCEEDED(capHr) && frames > 0) {
-			CString msg;
-			msg.Format(LL14(
-				L"保存しました:\n%s", L"Saved:\n%s", L"Enregistré:\n%s", L"Salvato:\n%s",
-				L"Guardado:\n%s", L"저장됨:\n%s", L"已保存:\n%s", L"تم الحفظ:\n%s",
-				L"Сохранено:\n%s", L"Gespeichert:\n%s", L"Guardado:\n%s", L"Opgeslagen:\n%s",
-				L"Zapisano:\n%s", L"Kaydedildi:\n%s"), (LPCTSTR)m_outPath);
-			m_status.SetWindowText(msg);
+			if (wasLive) {
+				m_status.SetWindowText(LL14(
+					L"配信を終了しました。", L"Live stream ended.", L"Diffusion terminée.", L"Diretta terminata.",
+					L"Transmisión finalizada.", L"방송을 종료했습니다.", L"直播已结束。", L"انتهى البث.",
+					L"Эфир завершён.", L"Livestream beendet.", L"Transmissão encerrada.", L"Livestream beëindigd.",
+					L"Transmisja zakończona.", L"Canlı yayın bitti."));
+			} else {
+				CString msg;
+				msg.Format(LL14(
+					L"保存しました:\n%s", L"Saved:\n%s", L"Enregistré:\n%s", L"Salvato:\n%s",
+					L"Guardado:\n%s", L"저장됨:\n%s", L"已保存:\n%s", L"تم الحفظ:\n%s",
+					L"Сохранено:\n%s", L"Gespeichert:\n%s", L"Guardado:\n%s", L"Opgeslagen:\n%s",
+					L"Zapisano:\n%s", L"Kaydedildi:\n%s"), (LPCTSTR)m_outPath);
+				m_status.SetWindowText(msg);
+			}
 		} else if (FAILED(capHr)) {
 			const LONG stage = InterlockedCompareExchange(&m_lastStage, 0, 0);
 			CString msg;
-			msg.Format(LL14(
-				L"録画に失敗しました (HRESULT=0x%08X, stage=%ld)。音声オフで再試行も可。",
-				L"Capture failed (HRESULT=0x%08X, stage=%ld). Try with audio off.",
-				L"Échec de la capture (HRESULT=0x%08X, stage=%ld). Essayez sans audio.",
-				L"Cattura non riuscita (HRESULT=0x%08X, stage=%ld). Prova senza audio.",
-				L"Error de captura (HRESULT=0x%08X, stage=%ld). Pruebe sin audio.",
-				L"캡처 실패 (HRESULT=0x%08X, stage=%ld). 오디오 끄고 재시도.",
-				L"捕获失败 (HRESULT=0x%08X, stage=%ld)。可尝试关闭音频。",
-				L"فشل الالتقاط (HRESULT=0x%08X, stage=%ld). جرّب بدون صوت.",
-				L"Ошибка захвата (HRESULT=0x%08X, stage=%ld). Попробуйте без звука.",
-				L"Aufnahme fehlgeschlagen (HRESULT=0x%08X, stage=%ld). Ohne Audio versuchen.",
-				L"Falha na captura (HRESULT=0x%08X, stage=%ld). Tente sem áudio.",
-				L"Opname mislukt (HRESULT=0x%08X, stage=%ld). Probeer zonder audio.",
-				L"Przechwytywanie nie powiodło się (HRESULT=0x%08X, stage=%ld). Spróbuj bez dźwięku.",
-				L"Yakalama başarısız (HRESULT=0x%08X, stage=%ld). Ses kapalı deneyin."),
+			msg.Format(wasLive
+				? LL14(
+					L"配信に失敗しました (HRESULT=0x%08X, stage=%ld)。ffmpeg / URL / 認証を確認。",
+					L"Live failed (HRESULT=0x%08X, stage=%ld). Check ffmpeg / URL / auth.",
+					L"Échec du live (HRESULT=0x%08X, stage=%ld). Vérifiez ffmpeg / URL / auth.",
+					L"Diretta non riuscita (HRESULT=0x%08X, stage=%ld). Controlla ffmpeg / URL / auth.",
+					L"Falló el vivo (HRESULT=0x%08X, stage=%ld). Revise ffmpeg / URL / auth.",
+					L"방송 실패 (HRESULT=0x%08X, stage=%ld). ffmpeg / URL / 인증을 확인.",
+					L"直播失败 (HRESULT=0x%08X, stage=%ld)。请检查 ffmpeg / URL / 认证。",
+					L"فشل البث (HRESULT=0x%08X, stage=%ld). تحقق من ffmpeg / الرابط / المصادقة.",
+					L"Сбой эфира (HRESULT=0x%08X, stage=%ld). Проверьте ffmpeg / URL / auth.",
+					L"Live fehlgeschlagen (HRESULT=0x%08X, stage=%ld). ffmpeg / URL / Auth prüfen.",
+					L"Falha no ao vivo (HRESULT=0x%08X, stage=%ld). Verifique ffmpeg / URL / auth.",
+					L"Live mislukt (HRESULT=0x%08X, stage=%ld). Controleer ffmpeg / URL / auth.",
+					L"Transmisja nie powiodła się (HRESULT=0x%08X, stage=%ld). Sprawdź ffmpeg / URL / auth.",
+					L"Canlı başarısız (HRESULT=0x%08X, stage=%ld). ffmpeg / URL / auth kontrol edin.")
+				: LL14(
+					L"録画に失敗しました (HRESULT=0x%08X, stage=%ld)。音声オフで再試行も可。",
+					L"Capture failed (HRESULT=0x%08X, stage=%ld). Try with audio off.",
+					L"Échec de la capture (HRESULT=0x%08X, stage=%ld). Essayez sans audio.",
+					L"Cattura non riuscita (HRESULT=0x%08X, stage=%ld). Prova senza audio.",
+					L"Error de captura (HRESULT=0x%08X, stage=%ld). Pruebe sin audio.",
+					L"캡처 실패 (HRESULT=0x%08X, stage=%ld). 오디오 끄고 재시도.",
+					L"捕获失败 (HRESULT=0x%08X, stage=%ld)。可尝试关闭音频。",
+					L"فشل الالتقاط (HRESULT=0x%08X, stage=%ld). جرّب بدون صوت.",
+					L"Ошибка захвата (HRESULT=0x%08X, stage=%ld). Попробуйте без звука.",
+					L"Aufnahme fehlgeschlagen (HRESULT=0x%08X, stage=%ld). Ohne Audio versuchen.",
+					L"Falha na captura (HRESULT=0x%08X, stage=%ld). Tente sem áudio.",
+					L"Opname mislukt (HRESULT=0x%08X, stage=%ld). Probeer zonder audio.",
+					L"Przechwytywanie nie powiodło się (HRESULT=0x%08X, stage=%ld). Spróbuj bez dźwięku.",
+					L"Yakalama başarısız (HRESULT=0x%08X, stage=%ld). Ses kapalı deneyin."),
 				(unsigned)capHr, (long)stage);
 			m_status.SetWindowText(msg);
 		} else {
@@ -6137,6 +6506,7 @@ void CScreenCaptureDlg::StopRecording()
 		// 録画終了後は再び Win+Shift+S でこの画面を撮れるようにする
 		::SetWindowDisplayAffinity(m_hWnd, WDA_NONE);
 		StartPeakMonitor();
+		SyncLiveUiEnable();
 	}
 }
 
@@ -6371,8 +6741,515 @@ UINT __stdcall CScreenCaptureDlg::CaptureThread(void* p)
 	BOOL videoRgbBottomUp = FALSE;
 	LONGLONG videoRt = 0;
 	LONGLONG audioRt = 0;
+	HRESULT hr = S_OK;
 
-	HRESULT hr = MFStartup(MF_VERSION);
+	// ===== ライブ配信 (ffmpeg → RTMP)。MP4 / IMFSinkWriter は使わない =====
+	if (self->m_liveMode) {
+		CString rtmpUrl;
+		CString rtmpKey;
+		CString cmd;
+		STARTUPINFO si = {};
+		PROCESS_INFORMATION pi = {};
+		HANDLE hVidPipe = INVALID_HANDLE_VALUE;
+		HANDLE hAudPipe = INVALID_HANDLE_VALUE;
+		BOOL haveFfmpegProc = FALSE;
+		auto writeAll = [](HANDLE h, const void* data, DWORD len) -> BOOL {
+			const BYTE* p = (const BYTE*)data;
+			DWORD left = len;
+			while (left > 0) {
+				DWORD wr = 0;
+				if (!WriteFile(h, p, left, &wr, NULL) || wr == 0)
+					return FALSE;
+				p += wr;
+				left -= wr;
+			}
+			return TRUE;
+		};
+
+		TCHAR ffmpegPath[MAX_PATH] = {};
+		if (!self->ResolveFfmpegPath(ffmpegPath, MAX_PATH)) {
+			InterlockedExchange(&self->m_lastStage, 100);
+			InterlockedExchange(&self->m_lastHr, HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND));
+			goto done_live;
+		}
+
+		rtmpUrl = savedata.cap_live_url;
+		rtmpKey = savedata.cap_live_key;
+		rtmpUrl.Trim();
+		rtmpKey.Trim();
+		if (rtmpUrl.IsEmpty()) {
+			InterlockedExchange(&self->m_lastStage, 104);
+			InterlockedExchange(&self->m_lastHr, E_INVALIDARG);
+			goto done_live;
+		}
+		if (!rtmpKey.IsEmpty() && rtmpUrl.Find(rtmpKey) < 0) {
+			if (rtmpUrl.Right(1) != L"/")
+				rtmpUrl += L"/";
+			rtmpUrl += rtmpKey;
+		}
+
+		if (!ScComposeFrame(frame, snap, FALSE)) {
+			if (!ScComposeFrame(frame, snap, TRUE)) {
+				InterlockedExchange(&self->m_lastStage, 2);
+				InterlockedExchange(&self->m_lastHr, E_FAIL);
+				goto done_live;
+			}
+		}
+		{
+			int ew = frame.w & ~1, eh = frame.h & ~1;
+			if (ew < 16) ew = 16;
+			if (eh < 16) eh = 16;
+			if (ew > 4096) ew = 4096;
+			if (eh > 2304) eh = 2304;
+			if (ew != frame.w || eh != frame.h) {
+				ScFrameBuf scaled = {};
+				if (ScFrameAlloc(scaled, ew, eh)) {
+					SetStretchBltMode(scaled.hdc, COLORONCOLOR);
+					StretchBlt(scaled.hdc, 0, 0, ew, eh, frame.hdc, 0, 0, frame.w, frame.h, SRCCOPY);
+					ScFrameFree(frame);
+					frame = scaled;
+				} else {
+					frame.w = ew;
+					frame.h = eh;
+				}
+			}
+		}
+
+		const int pixels = frame.w * frame.h;
+		int vBitrate = 1500;
+		if (pixels >= 3840 * 2160) vBitrate = 12000;
+		else if (pixels >= 1920 * 1080) vBitrate = 4500;
+		else if (pixels >= 1280 * 720) vBitrate = 2500;
+		const int gop = fps * 2;
+
+		TCHAR pipeVid[128] = {}, pipeAud[128] = {};
+		_sntprintf_s(pipeVid, _TRUNCATE, L"\\\\.\\pipe\\oggscvid%lu", (unsigned long)GetCurrentProcessId());
+		_sntprintf_s(pipeAud, _TRUNCATE, L"\\\\.\\pipe\\oggscaud%lu", (unsigned long)GetCurrentProcessId());
+
+		hVidPipe = CreateNamedPipe(pipeVid, PIPE_ACCESS_OUTBOUND,
+			PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT, 1, 1 << 20, 1 << 20, 5000, NULL);
+		hAudPipe = CreateNamedPipe(pipeAud, PIPE_ACCESS_OUTBOUND,
+			PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT, 1, 1 << 16, 1 << 16, 5000, NULL);
+		if (hVidPipe == INVALID_HANDLE_VALUE || hAudPipe == INVALID_HANDLE_VALUE) {
+			if (hVidPipe != INVALID_HANDLE_VALUE) { CloseHandle(hVidPipe); hVidPipe = INVALID_HANDLE_VALUE; }
+			if (hAudPipe != INVALID_HANDLE_VALUE) { CloseHandle(hAudPipe); hAudPipe = INVALID_HANDLE_VALUE; }
+			InterlockedExchange(&self->m_lastStage, 101);
+			InterlockedExchange(&self->m_lastHr, HRESULT_FROM_WIN32(GetLastError()));
+			goto done_live;
+		}
+
+		cmd.Format(
+			L"\"%s\" -hide_banner -loglevel error -y "
+			L"-f rawvideo -pix_fmt bgra -s %dx%d -r %d -i \"%s\" "
+			L"-f s16le -ar %u -ac %u -i \"%s\" "
+			L"-c:v libx264 -pix_fmt yuv420p -preset veryfast -tune zerolatency "
+			L"-b:v %dk -maxrate %dk -bufsize %dk -g %d "
+			L"-c:a aac -b:a 160k -f flv \"%s\"",
+			ffmpegPath, frame.w, frame.h, fps, pipeVid,
+			(unsigned)outHz, (unsigned)outCh, pipeAud,
+			vBitrate, vBitrate, vBitrate * 2, gop, (LPCTSTR)rtmpUrl);
+
+		si.cb = sizeof(si);
+		si.dwFlags = STARTF_USESHOWWINDOW;
+		si.wShowWindow = SW_HIDE;
+		wchar_t* cmdBuf = _tcsdup(cmd);
+		BOOL procOk = FALSE;
+		if (cmdBuf) {
+			procOk = CreateProcess(NULL, cmdBuf, NULL, NULL, FALSE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi);
+			free(cmdBuf);
+		}
+		if (!procOk) {
+			CloseHandle(hVidPipe); hVidPipe = INVALID_HANDLE_VALUE;
+			CloseHandle(hAudPipe); hAudPipe = INVALID_HANDLE_VALUE;
+			InterlockedExchange(&self->m_lastStage, 102);
+			InterlockedExchange(&self->m_lastHr, HRESULT_FROM_WIN32(GetLastError()));
+			goto done_live;
+		}
+		haveFfmpegProc = TRUE;
+
+		{
+			const BOOL c1 = ConnectNamedPipe(hVidPipe, NULL) || (GetLastError() == ERROR_PIPE_CONNECTED);
+			const BOOL c2 = ConnectNamedPipe(hAudPipe, NULL) || (GetLastError() == ERROR_PIPE_CONNECTED);
+			if (!c1 || !c2) {
+				InterlockedExchange(&self->m_lastStage, 101);
+				InterlockedExchange(&self->m_lastHr, HRESULT_FROM_WIN32(GetLastError()));
+				CloseHandle(hVidPipe); hVidPipe = INVALID_HANDLE_VALUE;
+				CloseHandle(hAudPipe); hAudPipe = INVALID_HANDLE_VALUE;
+				TerminateProcess(pi.hProcess, 1);
+				CloseHandle(pi.hThread);
+				CloseHandle(pi.hProcess);
+				haveFfmpegProc = FALSE;
+				goto done_live;
+			}
+		}
+
+		if (wantAudio) {
+			hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), NULL, CLSCTX_ALL,
+				__uuidof(IMMDeviceEnumerator), (void**)&enumer);
+			if (SUCCEEDED(hr) && enumer) {
+				if (savedata.loop_device[0]) {
+					hr = enumer->GetDevice(savedata.loop_device, &renderDev);
+					if (FAILED(hr) || !renderDev) {
+						if (renderDev) { renderDev->Release(); renderDev = NULL; }
+						hr = enumer->GetDefaultAudioEndpoint(eRender, eConsole, &renderDev);
+					}
+				} else {
+					hr = enumer->GetDefaultAudioEndpoint(eRender, eConsole, &renderDev);
+				}
+				if (SUCCEEDED(hr) && renderDev) {
+					hr = ScInitLoopbackCapture(renderDev, &loopClient, &loopCap, &mixFmt, &hEvent);
+					if (SUCCEEDED(hr) && loopClient && loopCap && mixFmt)
+						haveAudio = TRUE;
+				}
+			}
+		}
+		if (haveAudio && loopClient)
+			loopClient->Start();
+
+		if (haveAudio && wantMic && enumer) {
+			ScMicEnsureCs();
+			InterlockedExchange(&s_micW, 0);
+			HRESULT hm = S_OK;
+			if (savedata.mic_device[0]) {
+				hm = enumer->GetDevice(savedata.mic_device, &micDev);
+				if (FAILED(hm) || !micDev) {
+					if (micDev) { micDev->Release(); micDev = NULL; }
+					hm = enumer->GetDefaultAudioEndpoint(eCapture, eConsole, &micDev);
+				}
+			} else {
+				hm = enumer->GetDefaultAudioEndpoint(eCapture, eConsole, &micDev);
+			}
+			if (SUCCEEDED(hm) && micDev) {
+				hm = micDev->Activate(__uuidof(IAudioClient), CLSCTX_ALL, NULL, (void**)&micClient);
+				if (SUCCEEDED(hm) && micClient) {
+					hm = micClient->GetMixFormat(&micFmt);
+					if (SUCCEEDED(hm) && micFmt) {
+						hMicEvent = CreateEvent(NULL, FALSE, FALSE, NULL);
+						BOOL micOk = FALSE;
+						if (hMicEvent) {
+							hm = micClient->Initialize(AUDCLNT_SHAREMODE_SHARED,
+								AUDCLNT_STREAMFLAGS_EVENTCALLBACK | AUDCLNT_STREAMFLAGS_NOPERSIST,
+								2000000, 0, micFmt, NULL);
+							if (SUCCEEDED(hm))
+								hm = micClient->SetEventHandle(hMicEvent);
+							if (SUCCEEDED(hm))
+								hm = micClient->GetService(__uuidof(IAudioCaptureClient), (void**)&micCap);
+							if (SUCCEEDED(hm) && micCap) micOk = TRUE;
+						}
+						if (micOk) {
+							InterlockedExchange(&s_micCapRate, (LONG)micFmt->nSamplesPerSec);
+							micClient->Start();
+						} else {
+							if (hMicEvent) { CloseHandle(hMicEvent); hMicEvent = NULL; }
+							if (micCap) { micCap->Release(); micCap = NULL; }
+							if (micClient) { micClient->Release(); micClient = NULL; }
+							if (micFmt) { CoTaskMemFree(micFmt); micFmt = NULL; }
+						}
+					}
+				}
+			}
+		}
+
+		{
+			const DWORD srcHz = (mixFmt && mixFmt->nSamplesPerSec) ? mixFmt->nSamplesPerSec : outHz;
+			LARGE_INTEGER qpf, qpc0;
+			QueryPerformanceFrequency(&qpf);
+			QueryPerformanceCounter(&qpc0);
+			LONGLONG nextFrameQpc = 0;
+			BOOL writeFail = FALSE;
+			const LONGLONG qpf64 = (qpf.QuadPart > 0) ? qpf.QuadPart : 1;
+			LONGLONG audioSamplesWritten = 0;
+			DWORD encWinTick = GetTickCount();
+			int encWinCnt = 0;
+			LONGLONG periodQ = qpf64 / (fps > 0 ? fps : 30);
+			if (periodQ < 1) periodQ = 1;
+
+			auto drainAudioLive = [&]() {
+				if (writeFail) return;
+				if (micCap && micFmt) {
+					UINT32 micPkt = 0;
+					HRESULT hm = micCap->GetNextPacketSize(&micPkt);
+					while (SUCCEEDED(hm) && micPkt > 0 && InterlockedCompareExchange(&self->m_stop, 0, 0) == 0) {
+						BYTE* data = NULL;
+						UINT32 frames = 0;
+						DWORD flags = 0;
+						hm = micCap->GetBuffer(&data, &frames, &flags, NULL, NULL);
+						if (FAILED(hm)) break;
+						if (frames > 0 && data && !(flags & AUDCLNT_BUFFERFLAGS_SILENT)) {
+							float conv[4096 * 2];
+							UINT32 done = 0;
+							while (done < frames) {
+								UINT32 n = frames - done;
+								if (n > 4096) n = 4096;
+								float pk = 0.f;
+								for (UINT32 i = 0; i < n; ++i) {
+									float L, R;
+									ScSampleToFloat(data + (done + i) * micFmt->nBlockAlign, micFmt, L, R);
+									conv[i * 2 + 0] = L;
+									conv[i * 2 + 1] = R;
+									const float aL = (L < 0.f) ? -L : L;
+									const float aR = (R < 0.f) ? -R : R;
+									if (aL > pk) pk = aL;
+									if (aR > pk) pk = aR;
+								}
+								{
+									const LONG v = (LONG)(pk * 1000.f);
+									LONG cur = InterlockedCompareExchange(&self->m_peakMic, 0, 0);
+									if (v > cur) InterlockedExchange(&self->m_peakMic, v > 1000 ? 1000 : v);
+								}
+								ScMicRingWrite(conv, (int)n);
+								done += n;
+							}
+						}
+						micCap->ReleaseBuffer(frames);
+						hm = micCap->GetNextPacketSize(&micPkt);
+					}
+				}
+
+				if (haveAudio && loopCap && mixFmt) {
+					UINT32 packet = 0;
+					HRESULT ha = loopCap->GetNextPacketSize(&packet);
+					while (SUCCEEDED(ha) && packet > 0 && InterlockedCompareExchange(&self->m_stop, 0, 0) == 0) {
+						BYTE* data = NULL;
+						UINT32 frames = 0;
+						DWORD flags = 0;
+						ha = loopCap->GetBuffer(&data, &frames, &flags, NULL, NULL);
+						if (FAILED(ha)) break;
+						if (frames > 0) {
+							float fL[4096], fR[4096];
+							short pcm[8192 * 2];
+							UINT32 done = 0;
+							while (done < frames) {
+								UINT32 n = frames - done;
+								if (n > 4096) n = 4096;
+								float pkSys = 0.f;
+								for (UINT32 i = 0; i < n; ++i) {
+									float L = 0.f, R = 0.f;
+									if (data && !(flags & AUDCLNT_BUFFERFLAGS_SILENT))
+										ScSampleToFloat(data + (done + i) * mixFmt->nBlockAlign, mixFmt, L, R);
+									fL[i] = L;
+									fR[i] = R;
+									const float aL = (L < 0.f) ? -L : L;
+									const float aR = (R < 0.f) ? -R : R;
+									if (aL > pkSys) pkSys = aL;
+									if (aR > pkSys) pkSys = aR;
+								}
+								{
+									const LONG v = (LONG)(pkSys * 1000.f);
+									LONG cur = InterlockedCompareExchange(&self->m_peakSys, 0, 0);
+									if (v > cur) InterlockedExchange(&self->m_peakSys, v > 1000 ? 1000 : v);
+									LONG curP = InterlockedCompareExchange(&self->m_peakMix, 0, 0);
+									if (v > curP) InterlockedExchange(&self->m_peakMix, v > 1000 ? 1000 : v);
+								}
+								if (wantMic)
+									ScMicIntoStereo(fL, fR, (int)n, (int)srcHz);
+
+								int outFrames = (int)(((__int64)n * (int)outHz) / (srcHz ? (int)srcHz : (int)outHz));
+								if (outFrames < 1 && n > 0) outFrames = 1;
+								if (outFrames > 8192) outFrames = 8192;
+								for (int o = 0; o < outFrames; ++o) {
+									double srcPos = (srcHz == outHz) ? (double)o : ((double)o * (double)srcHz / (double)outHz);
+									int i0 = (int)srcPos;
+									int i1 = i0 + 1;
+									if (i0 < 0) i0 = 0;
+									if (i0 >= (int)n) i0 = (int)n - 1;
+									if (i1 >= (int)n) i1 = (int)n - 1;
+									const float frac = (float)(srcPos - (double)i0);
+									float L = fL[i0] + (fL[i1] - fL[i0]) * frac;
+									float R = fR[i0] + (fR[i1] - fR[i0]) * frac;
+									L = ScClamp1(L);
+									R = ScClamp1(R);
+									pcm[o * 2 + 0] = (short)(L * 32767.f);
+									pcm[o * 2 + 1] = (short)(R * 32767.f);
+								}
+								if (!writeAll(hAudPipe, pcm, (DWORD)(outFrames * outCh * sizeof(short)))) {
+									InterlockedExchange(&self->m_lastStage, 103);
+									InterlockedExchange(&self->m_lastHr, HRESULT_FROM_WIN32(GetLastError()));
+									writeFail = TRUE;
+									break;
+								}
+								audioSamplesWritten += outFrames;
+								done += n;
+							}
+						}
+						loopCap->ReleaseBuffer(frames);
+						if (writeFail) break;
+						ha = loopCap->GetNextPacketSize(&packet);
+					}
+				}
+			};
+
+			while (InterlockedCompareExchange(&self->m_stop, 0, 0) == 0 && !writeFail) {
+				drainAudioLive();
+				if (writeFail) break;
+
+				LARGE_INTEGER qpc;
+				QueryPerformanceCounter(&qpc);
+				const LONGLONG elapsedQ = qpc.QuadPart - qpc0.QuadPart;
+				BOOL didVideo = FALSE;
+				if (elapsedQ >= nextFrameQpc) {
+					if (nextFrameQpc + periodQ < elapsedQ)
+						nextFrameQpc = elapsedQ;
+					snap.fxTime = (float)((elapsedQ * 1000.0) / (double)qpf64) * 0.001f;
+					BOOL haveFrame = ScComposeFrame(frame, snap, FALSE);
+					if (!haveFrame)
+						haveFrame = ScComposeFrame(frame, snap, TRUE);
+					if (!haveFrame) {
+						if (ScFrameAlloc(frame, snap.canvasW, snap.canvasH)) {
+							ScFrameClear(frame, RGB(16, 16, 20));
+							if (snap.fxN > 0 && frame.bits)
+								ScGpuApplyEffectChain(frame.bits, frame.w, frame.h, frame.stride,
+									snap.fx, snap.fxN, snap.fxTime, snap.fxStr);
+							haveFrame = TRUE;
+						}
+					}
+					if (haveFrame && frame.bits) {
+						const int stride = frame.stride > 0 ? frame.stride : (frame.w * 4);
+						if (stride == frame.w * 4) {
+							if (!writeAll(hVidPipe, frame.bits, (DWORD)(stride * frame.h))) {
+								InterlockedExchange(&self->m_lastStage, 103);
+								InterlockedExchange(&self->m_lastHr, HRESULT_FROM_WIN32(GetLastError()));
+								writeFail = TRUE;
+								break;
+							}
+						} else {
+							for (int y = 0; y < frame.h && !writeFail; ++y) {
+								if (!writeAll(hVidPipe, frame.bits + (size_t)y * (size_t)stride, (DWORD)(frame.w * 4))) {
+									InterlockedExchange(&self->m_lastStage, 103);
+									InterlockedExchange(&self->m_lastHr, HRESULT_FROM_WIN32(GetLastError()));
+									writeFail = TRUE;
+								}
+							}
+							if (writeFail) break;
+						}
+
+						// 音声が無い／不足時は無音で映像に追従
+						{
+							const LONGLONG wantSamples = (InterlockedCompareExchange(&self->m_frameCnt, 0, 0) + 1)
+								* (LONGLONG)outHz / (fps > 0 ? fps : 30);
+							while (audioSamplesWritten < wantSamples && !writeFail) {
+								short silence[1024 * 2] = {};
+								int n = (int)(wantSamples - audioSamplesWritten);
+								if (n > 1024) n = 1024;
+								if (!writeAll(hAudPipe, silence, (DWORD)(n * outCh * sizeof(short)))) {
+									InterlockedExchange(&self->m_lastStage, 103);
+									InterlockedExchange(&self->m_lastHr, HRESULT_FROM_WIN32(GetLastError()));
+									writeFail = TRUE;
+									break;
+								}
+								audioSamplesWritten += n;
+							}
+						}
+
+						const LONG fc = InterlockedIncrement(&self->m_frameCnt);
+						// YouTube: 数秒おきに streamStatus=active を見て live 遷移（ブロック無し・単発API）
+						if (self->m_liveService == 0 && fc >= (LONG)(fps > 0 ? fps * 2 : 60)
+							&& (fc % (fps > 0 ? fps : 30)) == 0)
+							self->TryYouTubeGoLiveTransition();
+						if ((fc % 3) == 0 && self->m_snapCsInit && TryEnterCriticalSection(&self->m_snapCs)) {
+							if (self->m_cacheBits && frame.bits) {
+								if (self->m_cacheW == frame.w && self->m_cacheH == frame.h
+									&& frame.stride == frame.w * 4) {
+									const size_t nbytes = (size_t)frame.stride * (size_t)frame.h;
+									memcpy(self->m_cacheBits, frame.bits, nbytes);
+								} else if (self->m_cacheDc && frame.hdc && self->m_cacheW > 0 && self->m_cacheH > 0) {
+									SetStretchBltMode(self->m_cacheDc, COLORONCOLOR);
+									StretchBlt(self->m_cacheDc, 0, 0, self->m_cacheW, self->m_cacheH,
+										frame.hdc, 0, 0, frame.w, frame.h, SRCCOPY);
+								}
+							}
+							LeaveCriticalSection(&self->m_snapCs);
+						}
+						{
+							encWinCnt++;
+							const DWORD nowEnc = GetTickCount();
+							const DWORD elEnc = nowEnc - encWinTick;
+							if (elEnc >= 800) {
+								const LONG x10 = (LONG)((encWinCnt * 10000.0) / (double)elEnc + 0.5);
+								InterlockedExchange(&self->m_encFpsX10, x10);
+								encWinTick = nowEnc;
+								encWinCnt = 0;
+							}
+						}
+					}
+					nextFrameQpc += periodQ;
+					didVideo = TRUE;
+					drainAudioLive();
+				}
+
+				if (writeFail) break;
+				if (haveAudio && loopCap && mixFmt) {
+					if (!didVideo) {
+						if (hEvent) {
+							HANDLE waits[2];
+							DWORD nWait = 1;
+							waits[0] = hEvent;
+							if (hMicEvent) { waits[1] = hMicEvent; nWait = 2; }
+							WaitForMultipleObjects(nWait, waits, FALSE, 5);
+						} else {
+							Sleep(1);
+						}
+						drainAudioLive();
+					}
+				} else if (!didVideo) {
+					Sleep(1);
+				}
+			}
+		}
+
+		if (hVidPipe != INVALID_HANDLE_VALUE) {
+			FlushFileBuffers(hVidPipe);
+			DisconnectNamedPipe(hVidPipe);
+			CloseHandle(hVidPipe);
+			hVidPipe = INVALID_HANDLE_VALUE;
+		}
+		if (hAudPipe != INVALID_HANDLE_VALUE) {
+			FlushFileBuffers(hAudPipe);
+			DisconnectNamedPipe(hAudPipe);
+			CloseHandle(hAudPipe);
+			hAudPipe = INVALID_HANDLE_VALUE;
+		}
+		if (haveFfmpegProc) {
+			WaitForSingleObject(pi.hProcess, 8000);
+			CloseHandle(pi.hThread);
+			CloseHandle(pi.hProcess);
+			haveFfmpegProc = FALSE;
+		}
+
+	done_live:
+		if (hVidPipe != INVALID_HANDLE_VALUE) { CloseHandle(hVidPipe); hVidPipe = INVALID_HANDLE_VALUE; }
+		if (hAudPipe != INVALID_HANDLE_VALUE) { CloseHandle(hAudPipe); hAudPipe = INVALID_HANDLE_VALUE; }
+		if (haveFfmpegProc) {
+			TerminateProcess(pi.hProcess, 1);
+			WaitForSingleObject(pi.hProcess, 3000);
+			CloseHandle(pi.hThread);
+			CloseHandle(pi.hProcess);
+			haveFfmpegProc = FALSE;
+		}
+		if (micClient) micClient->Stop();
+		if (loopClient) loopClient->Stop();
+		if (micCap) micCap->Release();
+		if (micClient) micClient->Release();
+		if (micFmt) CoTaskMemFree(micFmt);
+		if (micDev) micDev->Release();
+		if (hMicEvent) CloseHandle(hMicEvent);
+		if (loopCap) loopCap->Release();
+		if (loopClient) loopClient->Release();
+		if (mixFmt) CoTaskMemFree(mixFmt);
+		if (renderDev) renderDev->Release();
+		if (enumer) enumer->Release();
+		if (hEvent) CloseHandle(hEvent);
+		ScFrameFree(frame);
+		ScReleaseReuseBuf();
+		ScGdiReleaseScreenDc();
+		timeEndPeriod(1);
+		if (SUCCEEDED(hrCo)) CoUninitialize();
+		InterlockedExchange(&self->m_encodeGdi, 0);
+		InterlockedExchange(&self->m_run, 0);
+		return 0;
+	}
+
+	hr = MFStartup(MF_VERSION);
 	if (FAILED(hr)) {
 		InterlockedExchange(&self->m_lastStage, 1);
 		InterlockedExchange(&self->m_lastHr, hr);
@@ -7107,6 +7984,8 @@ void CScreenCaptureDlg::ApplySavedataToUi(BOOL gameGuide)
 		m_includeMp.SetCheck(savedata.cap_include_mp ? BST_CHECKED : BST_UNCHECKED);
 	if (m_showCursor.GetSafeHwnd())
 		m_showCursor.SetCheck(savedata.cap_show_cursor ? BST_CHECKED : BST_UNCHECKED);
+	ApplyLiveFieldsToUi();
+	SyncLiveUiEnable();
 
 	static const int fpsTab[] = { 10, 15, 20, 24, 30, 60, 90, 120 };
 	int fpsSel = 1;

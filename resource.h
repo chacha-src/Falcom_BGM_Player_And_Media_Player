@@ -1205,6 +1205,7 @@
 #define ID_SC_FX_DUP_SLOT               39014
 #define ID_SC_FX_CLEAR_AFTER            39015
 #define ID_SC_FX_STR_RESET              39016
+#define ID_SC_LIVE_TOGGLE               39017
 // S設定: 39100 + si*9 + level (si=0..7, level=0..8)
 #define ID_SC_FX_STR_BASE               39100
 #define ID_SC_FX_STR_END                39171
@@ -1233,6 +1234,7 @@
 #define ID_DOUGA_SPEED_FIRST            32965
 #define ID_DOUGA_SPEED_LAST             32972
 #define ID_DOUGA_CLOSE                  32980
+#define ID_DOUGA_SUBOFF                 40090
 
 // ???f?B?A?v???C???[ ?o?i?[?E?N???b?N???????
 #define ID_MP_OPEN_ANALYZER             32971
@@ -1454,7 +1456,7 @@
 #define ID_MP_SET_KPI_5                 33166
 #define ID_MP_FOLDER_OPEN               33167
 #define ID_MP_FOLDER_ADD                33168
-#define ID_MP_FOLDER_SYNC               33169
+// ID_MP_FOLDER_SYNC は上で 33000（二重定義 RC4005 防止）
 #define ID_MP_EQBTN_FLAT                33170
 #define ID_MP_EQBTN_SUGGEST             33171
 #define ID_MP_EQBTN_AUTO                33172
@@ -1482,6 +1484,25 @@
 #define IDC_DJPAD_LOOPDEV_L             3992
 #define IDC_SC_CURSOR                   3993
 #define IDC_MP_FINDREGEX                3994
+#define IDC_SC_LIVE                     3995
+#define IDC_SC_LIVE_SVC_L               3996
+#define IDC_SC_LIVE_SVC                 3997
+#define IDC_SC_LIVE_PRIV_L              3998
+#define IDC_SC_LIVE_PRIV                3999
+#define IDC_SC_LIVE_TITLE_L             4000
+#define IDC_SC_LIVE_TITLE               4001
+#define IDC_SC_LIVE_DESC_L              4002
+#define IDC_SC_LIVE_DESC                4003
+#define IDC_SC_LIVE_URL_L               4004
+#define IDC_SC_LIVE_URL                 4005
+#define IDC_SC_LIVE_KEY_L               4006
+#define IDC_SC_LIVE_KEY                 4007
+#define IDC_SC_LIVE_AUTH                4008
+#define IDC_SC_LIVE_CREATE              4009
+#define IDC_SC_LIVE_CID_L               4010
+#define IDC_SC_LIVE_CID                 4011
+#define IDC_SC_LIVE_CSEC_L              4012
+#define IDC_SC_LIVE_CSEC                4013
 
 // Next default values for new objects
 // 
@@ -1489,7 +1510,7 @@
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NEXT_RESOURCE_VALUE        250
 #define _APS_NEXT_COMMAND_VALUE         33243
-#define _APS_NEXT_CONTROL_VALUE         3995
+#define _APS_NEXT_CONTROL_VALUE         4014
 #define _APS_NEXT_SYMED_VALUE           104
 #endif
 #endif

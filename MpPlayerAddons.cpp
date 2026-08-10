@@ -9,6 +9,7 @@
 #include "CAnalyzerDlg.h"
 #include "DeviceRecordDlg.h"
 #include "ScreenCaptureDlg.h"
+#include "ScWgcCapture.h"
 #include "CCustomPopupMenu.h"
 #include "CProToolsDlg.h"
 #include "PlayList.h"
@@ -18,6 +19,7 @@
 #include "MpKeyCamelot.h"
 #include "MpFeatureExtras.h"
 #include "MpRemoteEqEnvLabels.inc"
+#include "Douga.h"
 
 #include <mmdeviceapi.h>
 #include <audioclient.h>
@@ -29,11 +31,30 @@
 #include <math.h>
 #include <windowsx.h>
 #include <uxtheme.h>
+#include <mfapi.h>
+#include <mfidl.h>
+#include <mftransform.h>
+#include <mferror.h>
+#include <codecapi.h>
+#include <wmcodecdsp.h>
+#include <gdiplus.h>
 
 #pragma comment(lib, "ws2_32.lib")
 #pragma comment(lib, "msimg32.lib")
 #pragma comment(lib, "uxtheme.lib")
 #pragma comment(lib, "winmm.lib")
+#pragma comment(lib, "gdiplus.lib")
+#pragma comment(lib, "mfplat.lib")
+#pragma comment(lib, "mf.lib")
+#pragma comment(lib, "mfuuid.lib")
+#pragma comment(lib, "wmcodecdspuuid.lib")
+
+#ifndef MF_E_TRANSFORM_NEED_MORE_INPUT
+#define MF_E_TRANSFORM_NEED_MORE_INPUT ((HRESULT)0xC00D6D72L)
+#endif
+#ifndef PW_RENDERFULLCONTENT
+#define PW_RENDERFULLCONTENT 0x00000002
+#endif
 
 extern save savedata;
 extern COggDlg* og;
@@ -55,6 +76,14 @@ extern int g_ds_pcm_bits;
 extern int g_outBytesPerFrame;
 extern CString fnn, tagname, tagfile, tagalbum;
 extern CString stitle;
+extern BOOL videoonly;
+extern CDouga* pMainFrame1;
+extern IMediaPosition* pMediaPosition;
+extern IBasicVideo* pBasicVideo;
+extern BOOL ev;
+extern __int64 playb;
+extern int poss;
+extern int poss5;
 
 class CMpDjPadDlg;
 class CMpAlarmDlg;
@@ -1507,6 +1536,494 @@ void MpRemoteWritePcm(const BYTE* pcm, int bytes)
 	LeaveCriticalSection(&g_mpRemAacCs);
 }
 
+// ---- Remote video: Douga HWND → RGB → H264 MFT + JPEG(multipart) ----
+enum { kMpRemVidRing = 2 * 1024 * 1024 };
+enum { kMpRemVidJpegMax = 256 * 1024 };
+static CRITICAL_SECTION g_mpRemVidCs;
+static int g_mpRemVidCsInit = 0;
+static volatile LONG g_mpRemVidClients = 0;
+static volatile LONG g_mpRemotePosCs = 0;
+static BYTE g_mpRemVidRing[kMpRemVidRing];
+static volatile LONG g_mpRemVidW = 0;
+static BYTE g_mpRemVidJpeg[kMpRemVidJpegMax];
+static volatile LONG g_mpRemVidJpegN = 0;
+static volatile LONG g_mpRemVidJpegPts = 0;
+static volatile LONG g_mpRemVidJpegGen = 0;
+static IMFTransform* g_mpRemH264 = NULL;
+static int g_mpRemH264W = 0, g_mpRemH264H = 0;
+static int g_mpRemH264WantNv12 = 0;
+static DWORD g_mpRemVidLastCap = 0;
+static ULONG_PTR g_mpRemGdipToken = 0;
+static int g_mpRemGdipUp = 0;
+
+static void MpRemVidCsEnsure()
+{
+	if (!g_mpRemVidCsInit) {
+		InitializeCriticalSection(&g_mpRemVidCs);
+		g_mpRemVidCsInit = 1;
+	}
+}
+
+static void MpRemVidGdipEnsure()
+{
+	if (g_mpRemGdipUp) return;
+	Gdiplus::GdiplusStartupInput in;
+	if (Gdiplus::GdiplusStartup(&g_mpRemGdipToken, &in, NULL) == Gdiplus::Ok)
+		g_mpRemGdipUp = 1;
+}
+
+static int MpRemVidGetEncoderClsid(const WCHAR* mime, CLSID* pClsid)
+{
+	UINT n = 0, s = 0;
+	Gdiplus::GetImageEncodersSize(&n, &s);
+	if (!s) return -1;
+	Gdiplus::ImageCodecInfo* info = (Gdiplus::ImageCodecInfo*)malloc(s);
+	if (!info) return -1;
+	Gdiplus::GetImageEncoders(n, s, info);
+	int found = -1;
+	for (UINT i = 0; i < n; ++i) {
+		if (wcscmp(info[i].MimeType, mime) == 0) {
+			*pClsid = info[i].Clsid;
+			found = (int)i;
+			break;
+		}
+	}
+	free(info);
+	return found;
+}
+
+static void MpRemVidPushRing(const BYTE* data, int n, int ptsCs)
+{
+	if (!data || n <= 0 || n > 512 * 1024) return;
+	MpRemVidCsEnsure();
+	EnterCriticalSection(&g_mpRemVidCs);
+	// packet: 'V' 'D' u16 len, i32 pts, payload
+	const int total = 2 + 2 + 4 + n;
+	LONG w = g_mpRemVidW;
+	if (total < kMpRemVidRing) {
+		g_mpRemVidRing[(unsigned)(w++) % (unsigned)kMpRemVidRing] = 'V';
+		g_mpRemVidRing[(unsigned)(w++) % (unsigned)kMpRemVidRing] = 'D';
+		g_mpRemVidRing[(unsigned)(w++) % (unsigned)kMpRemVidRing] = (BYTE)((n >> 8) & 0xFF);
+		g_mpRemVidRing[(unsigned)(w++) % (unsigned)kMpRemVidRing] = (BYTE)(n & 0xFF);
+		g_mpRemVidRing[(unsigned)(w++) % (unsigned)kMpRemVidRing] = (BYTE)((ptsCs >> 24) & 0xFF);
+		g_mpRemVidRing[(unsigned)(w++) % (unsigned)kMpRemVidRing] = (BYTE)((ptsCs >> 16) & 0xFF);
+		g_mpRemVidRing[(unsigned)(w++) % (unsigned)kMpRemVidRing] = (BYTE)((ptsCs >> 8) & 0xFF);
+		g_mpRemVidRing[(unsigned)(w++) % (unsigned)kMpRemVidRing] = (BYTE)(ptsCs & 0xFF);
+		for (int i = 0; i < n; ++i)
+			g_mpRemVidRing[(unsigned)(w++) % (unsigned)kMpRemVidRing] = data[i];
+		InterlockedExchange(&g_mpRemVidW, w);
+	}
+	LeaveCriticalSection(&g_mpRemVidCs);
+}
+
+static BOOL MpRemH264Ensure(int w, int h)
+{
+	w &= ~1; h &= ~1;
+	if (w < 16) w = 16;
+	if (h < 16) h = 16;
+	if (g_mpRemH264 && g_mpRemH264W == w && g_mpRemH264H == h)
+		return TRUE;
+	if (g_mpRemH264) {
+		g_mpRemH264->Release();
+		g_mpRemH264 = NULL;
+		g_mpRemH264W = g_mpRemH264H = 0;
+	}
+	static int s_mfUp = 0;
+	if (!s_mfUp) {
+		if (FAILED(MFStartup(MF_VERSION)))
+			return FALSE;
+		s_mfUp = 1;
+	}
+	IMFTransform* enc = NULL;
+	HRESULT hr = CoCreateInstance(CLSID_CMSH264EncoderMFT, NULL, CLSCTX_INPROC_SERVER,
+		IID_PPV_ARGS(&enc));
+	if (FAILED(hr) || !enc) return FALSE;
+	ICodecAPI* api = NULL;
+	if (SUCCEEDED(enc->QueryInterface(IID_PPV_ARGS(&api))) && api) {
+		VARIANT v; VariantInit(&v); v.vt = VT_BOOL; v.boolVal = VARIANT_TRUE;
+		api->SetValue(&CODECAPI_AVLowLatencyMode, &v);
+		VariantClear(&v);
+		api->Release();
+	}
+	IMFMediaType* outType = NULL;
+	IMFMediaType* inType = NULL;
+	hr = MFCreateMediaType(&outType);
+	if (SUCCEEDED(hr)) hr = outType->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
+	if (SUCCEEDED(hr)) hr = outType->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_H264);
+	if (SUCCEEDED(hr)) hr = MFSetAttributeSize(outType, MF_MT_FRAME_SIZE, (UINT32)w, (UINT32)h);
+	if (SUCCEEDED(hr)) hr = MFSetAttributeRatio(outType, MF_MT_FRAME_RATE, 10, 1);
+	if (SUCCEEDED(hr)) hr = outType->SetUINT32(MF_MT_AVG_BITRATE, 600000);
+	if (SUCCEEDED(hr)) hr = outType->SetUINT32(MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive);
+	if (SUCCEEDED(hr)) hr = outType->SetUINT32(MF_MT_MPEG2_PROFILE, (UINT32)eAVEncH264VProfile_Base);
+	if (SUCCEEDED(hr)) hr = enc->SetOutputType(0, outType, 0);
+	if (SUCCEEDED(hr)) hr = MFCreateMediaType(&inType);
+	if (SUCCEEDED(hr)) hr = inType->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
+	if (SUCCEEDED(hr)) hr = inType->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_RGB32);
+	if (SUCCEEDED(hr)) hr = MFSetAttributeSize(inType, MF_MT_FRAME_SIZE, (UINT32)w, (UINT32)h);
+	if (SUCCEEDED(hr)) hr = MFSetAttributeRatio(inType, MF_MT_FRAME_RATE, 10, 1);
+	if (SUCCEEDED(hr)) hr = inType->SetUINT32(MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive);
+	if (SUCCEEDED(hr)) hr = inType->SetUINT32(MF_MT_DEFAULT_STRIDE, (UINT32)(w * 4));
+	if (SUCCEEDED(hr)) hr = enc->SetInputType(0, inType, 0);
+	if (FAILED(hr)) {
+		// RGB32 拒否時は NV12
+		if (inType) { inType->Release(); inType = NULL; }
+		hr = MFCreateMediaType(&inType);
+		if (SUCCEEDED(hr)) hr = inType->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
+		if (SUCCEEDED(hr)) hr = inType->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_NV12);
+		if (SUCCEEDED(hr)) hr = MFSetAttributeSize(inType, MF_MT_FRAME_SIZE, (UINT32)w, (UINT32)h);
+		if (SUCCEEDED(hr)) hr = MFSetAttributeRatio(inType, MF_MT_FRAME_RATE, 10, 1);
+		if (SUCCEEDED(hr)) hr = inType->SetUINT32(MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive);
+		if (SUCCEEDED(hr)) hr = inType->SetUINT32(MF_MT_DEFAULT_STRIDE, (UINT32)w);
+		if (SUCCEEDED(hr)) hr = enc->SetInputType(0, inType, 0);
+		if (SUCCEEDED(hr))
+			g_mpRemH264WantNv12 = 1;
+		else
+			g_mpRemH264WantNv12 = 0;
+	} else {
+		g_mpRemH264WantNv12 = 0;
+	}
+	if (outType) outType->Release();
+	if (inType) inType->Release();
+	if (FAILED(hr)) {
+		enc->Release();
+		return FALSE;
+	}
+	enc->ProcessMessage(MFT_MESSAGE_NOTIFY_BEGIN_STREAMING, 0);
+	enc->ProcessMessage(MFT_MESSAGE_NOTIFY_START_OF_STREAM, 0);
+	g_mpRemH264 = enc;
+	g_mpRemH264W = w;
+	g_mpRemH264H = h;
+	return TRUE;
+}
+
+static void MpRemRgb32ToNv12(const BYTE* bgra, int w, int h, int stride, BYTE* nv12)
+{
+	BYTE* yPlane = nv12;
+	BYTE* uvPlane = nv12 + w * h;
+	for (int y = 0; y < h; ++y) {
+		const BYTE* row = bgra + y * stride;
+		BYTE* yd = yPlane + y * w;
+		for (int x = 0; x < w; ++x) {
+			const int b = row[x * 4 + 0], g = row[x * 4 + 1], r = row[x * 4 + 2];
+			int Y = ((66 * r + 129 * g + 25 * b + 128) >> 8) + 16;
+			if (Y < 0) Y = 0; if (Y > 255) Y = 255;
+			yd[x] = (BYTE)Y;
+		}
+	}
+	for (int y = 0; y < h; y += 2) {
+		const BYTE* row0 = bgra + y * stride;
+		const BYTE* row1 = bgra + (y + 1) * stride;
+		BYTE* uvd = uvPlane + (y / 2) * w;
+		for (int x = 0; x < w; x += 2) {
+			const int b = (row0[x * 4] + row0[(x + 1) * 4] + row1[x * 4] + row1[(x + 1) * 4]) >> 2;
+			const int g = (row0[x * 4 + 1] + row0[(x + 1) * 4 + 1] + row1[x * 4 + 1] + row1[(x + 1) * 4 + 1]) >> 2;
+			const int r = (row0[x * 4 + 2] + row0[(x + 1) * 4 + 2] + row1[x * 4 + 2] + row1[(x + 1) * 4 + 2]) >> 2;
+			int U = ((-38 * r - 74 * g + 112 * b + 128) >> 8) + 128;
+			int V = ((112 * r - 94 * g - 18 * b + 128) >> 8) + 128;
+			if (U < 0) U = 0; if (U > 255) U = 255;
+			if (V < 0) V = 0; if (V > 255) V = 255;
+			uvd[x] = (BYTE)U;
+			uvd[x + 1] = (BYTE)V;
+		}
+	}
+}
+
+static void MpRemH264PushRgb(const BYTE* rgb, int w, int h, int stride, int ptsCs)
+{
+	if (!MpRemH264Ensure(w, h) || !g_mpRemH264 || !rgb) return;
+	BYTE* nvScratch = NULL;
+	const BYTE* payload = rgb;
+	DWORD cb = (DWORD)(stride * h);
+	if (g_mpRemH264WantNv12) {
+		cb = (DWORD)(w * h * 3 / 2);
+		nvScratch = (BYTE*)malloc(cb);
+		if (!nvScratch) return;
+		MpRemRgb32ToNv12(rgb, w, h, stride, nvScratch);
+		payload = nvScratch;
+	}
+	IMFSample* sample = NULL;
+	IMFMediaBuffer* buf = NULL;
+	if (FAILED(MFCreateSample(&sample))) { free(nvScratch); return; }
+	if (FAILED(MFCreateMemoryBuffer(cb, &buf))) { sample->Release(); free(nvScratch); return; }
+	BYTE* p = NULL; DWORD maxLen = 0;
+	if (SUCCEEDED(buf->Lock(&p, &maxLen, NULL)) && p) {
+		memcpy(p, payload, cb);
+		buf->Unlock();
+		buf->SetCurrentLength(cb);
+	}
+	sample->AddBuffer(buf);
+	sample->SetSampleTime((LONGLONG)ptsCs * 100000LL);
+	sample->SetSampleDuration(1000000LL); // 10fps
+	buf->Release();
+	g_mpRemH264->ProcessInput(0, sample, 0);
+	sample->Release();
+	free(nvScratch);
+
+	MFT_OUTPUT_STREAM_INFO osi = {};
+	g_mpRemH264->GetOutputStreamInfo(0, &osi);
+	const BOOL provides = (osi.dwFlags & MFT_OUTPUT_STREAM_PROVIDES_SAMPLES) != 0;
+	for (;;) {
+		MFT_OUTPUT_DATA_BUFFER out = {};
+		DWORD status = 0;
+		IMFSample* os = NULL;
+		if (!provides) {
+			IMFMediaBuffer* ob = NULL;
+			DWORD need = osi.cbSize ? osi.cbSize : (DWORD)(256 * 1024);
+			if (FAILED(MFCreateSample(&os))) break;
+			if (FAILED(MFCreateMemoryBuffer(need, &ob))) { os->Release(); break; }
+			os->AddBuffer(ob);
+			ob->Release();
+			out.pSample = os;
+		}
+		HRESULT hr = g_mpRemH264->ProcessOutput(0, 1, &out, &status);
+		if (hr == MF_E_TRANSFORM_NEED_MORE_INPUT) {
+			if (os) os->Release();
+			if (out.pEvents) out.pEvents->Release();
+			break;
+		}
+		if (FAILED(hr)) {
+			if (os) os->Release();
+			if (out.pSample && out.pSample != os) out.pSample->Release();
+			if (out.pEvents) out.pEvents->Release();
+			break;
+		}
+		IMFSample* got = out.pSample ? out.pSample : os;
+		if (got) {
+			IMFMediaBuffer* outBuf = NULL;
+			if (SUCCEEDED(got->ConvertToContiguousBuffer(&outBuf)) && outBuf) {
+				BYTE* op = NULL; DWORD olen = 0;
+				if (SUCCEEDED(outBuf->Lock(&op, NULL, &olen)) && op && olen > 0)
+					MpRemVidPushRing(op, (int)olen, ptsCs);
+				if (op) outBuf->Unlock();
+				outBuf->Release();
+			}
+			got->Release();
+		}
+		if (out.pEvents) out.pEvents->Release();
+	}
+}
+
+static void MpRemVidClientEnter()
+{
+	InterlockedIncrement(&g_mpRemVidClients);
+}
+static void MpRemVidClientLeave()
+{
+	LONG n = InterlockedDecrement(&g_mpRemVidClients);
+	if (n < 0) InterlockedExchange(&g_mpRemVidClients, 0);
+}
+
+static volatile LONG g_mpRemVidWantMs = 0;
+static void MpRemVidWantPulse()
+{
+	InterlockedExchange(&g_mpRemVidWantMs, (LONG)GetTickCount());
+}
+
+static void MpRemVidEncodeJpeg(const BYTE* bits, int dw, int dh, int stride, int ptsCs)
+{
+	MpRemVidGdipEnsure();
+	if (!g_mpRemGdipUp || !bits) return;
+	// WGC は BGRA。アルファを不透明にして JPEG 化する
+	Gdiplus::Bitmap bmp(dw, dh, stride, PixelFormat32bppPARGB, (BYTE*)bits);
+	CLSID jpgClsid = {};
+	if (MpRemVidGetEncoderClsid(L"image/jpeg", &jpgClsid) < 0) return;
+	IStream* stm = NULL;
+	if (FAILED(CreateStreamOnHGlobal(NULL, TRUE, &stm)) || !stm) return;
+	Gdiplus::EncoderParameters ep;
+	ULONG q = 42;
+	ep.Count = 1;
+	ep.Parameter[0].Guid = Gdiplus::EncoderQuality;
+	ep.Parameter[0].Type = Gdiplus::EncoderParameterValueTypeLong;
+	ep.Parameter[0].NumberOfValues = 1;
+	ep.Parameter[0].Value = &q;
+	if (bmp.Save(stm, &jpgClsid, &ep) == Gdiplus::Ok) {
+		STATSTG st = {};
+		if (SUCCEEDED(stm->Stat(&st, STATFLAG_NONAME))) {
+			const ULONG n = (ULONG)st.cbSize.QuadPart;
+			if (n > 0 && n < (ULONG)kMpRemVidJpegMax) {
+				HGLOBAL hg = NULL;
+				if (SUCCEEDED(GetHGlobalFromStream(stm, &hg)) && hg) {
+					const void* p = GlobalLock(hg);
+					if (p) {
+						MpRemVidCsEnsure();
+						EnterCriticalSection(&g_mpRemVidCs);
+						memcpy(g_mpRemVidJpeg, p, n);
+						InterlockedExchange(&g_mpRemVidJpegN, (LONG)n);
+						InterlockedExchange(&g_mpRemVidJpegPts, (LONG)ptsCs);
+						InterlockedIncrement(&g_mpRemVidJpegGen);
+						LeaveCriticalSection(&g_mpRemVidCs);
+						GlobalUnlock(hg);
+					}
+				}
+			}
+		}
+	}
+	stm->Release();
+}
+
+// 映像取得: EVR はトップレベル枠の WGC、それ以外は IBasicVideo::GetCurrentImage（レンダラ別の正攻法）
+static void MpRemVidCaptureTick()
+{
+	if (!savedata.mpRemoteOn) return;
+	const LONG wantMs = InterlockedCompareExchange(&g_mpRemVidWantMs, 0, 0);
+	const BOOL wantFresh = (wantMs != 0) && ((DWORD)(GetTickCount() - (DWORD)wantMs) < 4000u);
+	if (InterlockedCompareExchange(&g_mpRemVidClients, 0, 0) <= 0 && !wantFresh)
+		return;
+	if (!(mode == -2 || videoonly)) return;
+	if (!pMainFrame1 || !::IsWindow(pMainFrame1->GetSafeHwnd()) || !::IsWindowVisible(pMainFrame1->GetSafeHwnd()))
+		return;
+	if (::IsIconic(pMainFrame1->GetSafeHwnd()))
+		return;
+	const DWORD now = GetTickCount();
+	if (g_mpRemVidLastCap != 0 && (now - g_mpRemVidLastCap) < 50)
+		return;
+	g_mpRemVidLastCap = now;
+
+	BYTE* rgb = NULL;
+	int dw = 0, dh = 0, stride = 0;
+
+	if (ev) {
+		HWND frame = pMainFrame1->GetSafeHwnd();
+		HWND site = pMainFrame1->GetVideoSiteHwnd();
+		if (!site || !::IsWindow(site))
+			site = frame;
+		RECT fr = {}, sr = {};
+		if (!::GetWindowRect(frame, &fr) || !::GetWindowRect(site, &sr))
+			return;
+		int cropX = sr.left - fr.left;
+		int cropY = sr.top - fr.top;
+		int cropW = sr.right - sr.left;
+		int cropH = sr.bottom - sr.top;
+		if (cropW < 8 || cropH < 8) {
+			cropX = 0; cropY = 0;
+			cropW = fr.right - fr.left;
+			cropH = fr.bottom - fr.top;
+		}
+		if (cropW < 8 || cropH < 8) return;
+		dw = cropW; dh = cropH;
+		if (dw > 480) {
+			dh = (int)((__int64)dh * 480 / dw);
+			dw = 480;
+		}
+		dw &= ~1; dh &= ~1;
+		if (dw < 16) dw = 16;
+		if (dh < 16) dh = 16;
+		stride = dw * 4;
+		rgb = (BYTE*)malloc((size_t)stride * (size_t)dh);
+		if (!rgb) return;
+		memset(rgb, 0, (size_t)stride * (size_t)dh);
+		// 初回はフレーム未到着があり得るので続けて2回
+		if (!ScWgcCaptureWindowBgraCrop(frame, rgb, dw, dh, stride, cropX, cropY, cropW, cropH)) {
+			if (!ScWgcCaptureWindowBgraCrop(frame, rgb, dw, dh, stride, cropX, cropY, cropW, cropH)) {
+				free(rgb);
+				return;
+			}
+		}
+		for (int y = 0; y < dh; ++y) {
+			BYTE* row = rgb + (size_t)y * (size_t)stride;
+			for (int x = 0; x < dw; ++x)
+				row[x * 4 + 3] = 255;
+		}
+	} else {
+		if (!pBasicVideo) return;
+		long dibSize = 0;
+		if (FAILED(pBasicVideo->GetCurrentImage(&dibSize, NULL)) || dibSize <= (long)sizeof(BITMAPINFOHEADER))
+			return;
+		BYTE* dibBuf = (BYTE*)malloc((size_t)dibSize);
+		if (!dibBuf) return;
+		if (FAILED(pBasicVideo->GetCurrentImage(&dibSize, (long*)dibBuf))) {
+			free(dibBuf);
+			return;
+		}
+		BITMAPINFOHEADER* bih = (BITMAPINFOHEADER*)dibBuf;
+		const int bw = bih->biWidth;
+		const int bhAbs = abs(bih->biHeight);
+		if (bih->biSize < sizeof(BITMAPINFOHEADER) || bw < 8 || bhAbs < 8) {
+			free(dibBuf);
+			return;
+		}
+		dw = bw; dh = bhAbs;
+		if (dw > 480) {
+			dh = (int)((__int64)dh * 480 / dw);
+			dw = 480;
+		}
+		dw &= ~1; dh &= ~1;
+		if (dw < 16 || dh < 16) {
+			free(dibBuf);
+			return;
+		}
+		BITMAPINFO bi = {};
+		bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+		bi.bmiHeader.biWidth = dw;
+		bi.bmiHeader.biHeight = -dh;
+		bi.bmiHeader.biPlanes = 1;
+		bi.bmiHeader.biBitCount = 32;
+		bi.bmiHeader.biCompression = BI_RGB;
+		void* bits = NULL;
+		HDC hdcScreen = ::GetDC(NULL);
+		HDC hdcMem = hdcScreen ? ::CreateCompatibleDC(hdcScreen) : NULL;
+		HBITMAP hbmp = hdcMem ? ::CreateDIBSection(hdcMem, &bi, DIB_RGB_COLORS, &bits, NULL, 0) : NULL;
+		BOOL ok = FALSE;
+		if (hdcMem && hbmp && bits) {
+			HGDIOBJ old = ::SelectObject(hdcMem, hbmp);
+			::SetStretchBltMode(hdcMem, HALFTONE);
+			ok = (::StretchDIBits(hdcMem, 0, 0, dw, dh, 0, 0, bw, bhAbs,
+				dibBuf + bih->biSize, (BITMAPINFO*)bih, DIB_RGB_COLORS, SRCCOPY) != 0);
+			::SelectObject(hdcMem, old);
+		}
+		free(dibBuf);
+		if (!ok || !bits) {
+			if (hbmp) ::DeleteObject(hbmp);
+			if (hdcMem) ::DeleteDC(hdcMem);
+			if (hdcScreen) ::ReleaseDC(NULL, hdcScreen);
+			return;
+		}
+		stride = dw * 4;
+		rgb = (BYTE*)malloc((size_t)stride * (size_t)dh);
+		if (!rgb) {
+			::DeleteObject(hbmp);
+			::DeleteDC(hdcMem);
+			::ReleaseDC(NULL, hdcScreen);
+			return;
+		}
+		memcpy(rgb, bits, (size_t)stride * (size_t)dh);
+		for (int y = 0; y < dh; ++y) {
+			BYTE* row = rgb + (size_t)y * (size_t)stride;
+			for (int x = 0; x < dw; ++x)
+				row[x * 4 + 3] = 255;
+		}
+		::DeleteObject(hbmp);
+		::DeleteDC(hdcMem);
+		::ReleaseDC(NULL, hdcScreen);
+	}
+
+	const int ptsCs = (int)InterlockedCompareExchange(&g_mpRemotePosCs, 0, 0);
+	// 静止画の再送を抑える（ポーズ等）
+	{
+		DWORD h = 2166136261u;
+		const int ptsN = 16;
+		for (int i = 0; i < ptsN; ++i) {
+			const int x = (dw * (i * 2 + 1)) / (ptsN * 2);
+			const int y = (dh * ((i % 4) * 2 + 1)) / 8;
+			const BYTE* p = rgb + (size_t)y * (size_t)stride + (size_t)x * 4;
+			h ^= (DWORD)p[0] + ((DWORD)p[1] << 8) + ((DWORD)p[2] << 16);
+			h *= 16777619u;
+		}
+		static DWORD s_lastHash = 0;
+		static DWORD s_lastHashMs = 0;
+		if (h == s_lastHash && (now - s_lastHashMs) < 400
+			&& InterlockedCompareExchange(&g_mpRemVidJpegN, 0, 0) > 0) {
+			free(rgb);
+			return;
+		}
+		s_lastHash = h;
+		s_lastHashMs = now;
+	}
+	MpRemH264PushRgb(rgb, dw, dh, stride, ptsCs);
+	MpRemVidEncodeJpeg(rgb, dw, dh, stride, ptsCs);
+	free(rgb);
+}
+
 static void MpRemAacFeedSilenceIfNeeded()
 {
 	if (!savedata.mpRemoteOn || !savedata.mpRemoteAac) return;
@@ -1597,7 +2114,6 @@ static int g_mpRemoteCsInit = 0;
 static SOCKET g_mpRemoteActive[kMpRemoteMaxClients];
 
 static volatile LONG g_mpRemoteVolCache = 50;
-static volatile LONG g_mpRemotePosCs = 0;
 static volatile LONG g_mpRemoteDurCs = 0;
 static volatile LONG g_mpRemoteLrcCur = -1;
 static volatile LONG g_mpRemotePlayIdx = -1;
@@ -1807,9 +2323,9 @@ static void MpRemoteEscJson(const wchar_t* in, CStringW& out)
 	}
 }
 
-static void MpRemoteSendAll(SOCKET s, const char* data, int len)
+static BOOL MpRemoteSendAll(SOCKET s, const char* data, int len)
 {
-	if (!data || len <= 0) return;
+	if (!data || len <= 0) return TRUE;
 	int off = 0;
 	while (off < len) {
 		const int n = send(s, data + off, len - off, 0);
@@ -1818,11 +2334,12 @@ static void MpRemoteSendAll(SOCKET s, const char* data, int len)
 		if (n < 0 && (err == WSAEWOULDBLOCK || err == WSAEINTR)) {
 			fd_set wf; FD_ZERO(&wf); FD_SET(s, &wf);
 			timeval tv; tv.tv_sec = 5; tv.tv_usec = 0;
-			if (select(0, NULL, &wf, NULL, &tv) <= 0) break;
+			if (select(0, NULL, &wf, NULL, &tv) <= 0) return FALSE;
 			continue;
 		}
-		break;
+		return FALSE;
 	}
+	return TRUE;
 }
 
 static void MpRemoteReadMeta(CStringW& title, CStringW& artist, CStringW& album, int& vol, const wchar_t*& state, int& muted)
@@ -1887,6 +2404,164 @@ static void MpRemoteHandleRequest(SOCKET s)
 			MpRemoteSendCmd(30, (LPARAM)idx); // queue add
 		const char* ok = "HTTP/1.0 204 No Content\r\nConnection: close\r\nCache-Control: no-store\r\n\r\n";
 		MpRemoteSendAll(s, ok, (int)strlen(ok));
+		return;
+	}
+
+	if (strstr(line, "GET /vframe.jpg") || strstr(line, "GET /vframe")) {
+		// 単発 JPEG（スマホは multipart 非対応が多い → ポーリング用）
+		MpRemVidWantPulse();
+		InterlockedIncrement(&g_mpRemVidClients); // キャプチャ起動のフック
+		BYTE local[kMpRemVidJpegMax];
+		int ln = 0;
+		int pts = 0;
+		MpRemVidCsEnsure();
+		EnterCriticalSection(&g_mpRemVidCs);
+		ln = (int)InterlockedCompareExchange(&g_mpRemVidJpegN, 0, 0);
+		pts = (int)InterlockedCompareExchange(&g_mpRemVidJpegPts, 0, 0);
+		if (ln > 0 && ln < kMpRemVidJpegMax)
+			memcpy(local, g_mpRemVidJpeg, (size_t)ln);
+		else
+			ln = 0;
+		LeaveCriticalSection(&g_mpRemVidCs);
+		InterlockedDecrement(&g_mpRemVidClients);
+		if (ln <= 0) {
+			const char* no =
+				"HTTP/1.0 204 No Content\r\nConnection: close\r\nCache-Control: no-store\r\n\r\n";
+			MpRemoteSendAll(s, no, (int)strlen(no));
+			return;
+		}
+		char hdr[192];
+		_snprintf_s(hdr, _TRUNCATE,
+			"HTTP/1.0 200 OK\r\nContent-Type: image/jpeg\r\nX-Pts-Cs: %d\r\n"
+			"Cache-Control: no-store\r\nConnection: close\r\nContent-Length: %d\r\n\r\n",
+			pts, ln);
+		MpRemoteSendAll(s, hdr, (int)strlen(hdr));
+		MpRemoteSendAll(s, (const char*)local, ln);
+		return;
+	}
+
+	if (strstr(line, "GET /vmjpeg") || strstr(line, "GET /vstream.jpg")) {
+		// ブラウザ向け multipart JPEG（聴くONで <img>）
+		MpRemVidWantPulse();
+		const char* hdr =
+			"HTTP/1.0 200 OK\r\n"
+			"Content-Type: multipart/x-mixed-replace; boundary=mpframe\r\n"
+			"Cache-Control: no-store\r\n"
+			"Pragma: no-cache\r\n"
+			"Connection: close\r\n"
+			"\r\n";
+		MpRemoteSendAll(s, hdr, (int)strlen(hdr));
+		MpRemVidClientEnter();
+		u_long nb = 1;
+		ioctlsocket(s, FIONBIO, &nb);
+		LONG lastGen = -1;
+		while (InterlockedCompareExchange(&g_mpRemoteStop, 0, 0) == 0) {
+			const LONG gen = InterlockedCompareExchange(&g_mpRemVidJpegGen, 0, 0);
+			const LONG n = InterlockedCompareExchange(&g_mpRemVidJpegN, 0, 0);
+			const LONG pts = InterlockedCompareExchange(&g_mpRemVidJpegPts, 0, 0);
+			if (gen != lastGen && n > 0 && n < kMpRemVidJpegMax) {
+				lastGen = gen;
+				BYTE local[kMpRemVidJpegMax];
+				int ln = 0;
+				MpRemVidCsEnsure();
+				EnterCriticalSection(&g_mpRemVidCs);
+				ln = (int)InterlockedCompareExchange(&g_mpRemVidJpegN, 0, 0);
+				if (ln > 0 && ln < kMpRemVidJpegMax)
+					memcpy(local, g_mpRemVidJpeg, (size_t)ln);
+				else
+					ln = 0;
+				LeaveCriticalSection(&g_mpRemVidCs);
+				if (ln > 0) {
+					char part[160];
+					_snprintf_s(part, _TRUNCATE,
+						"--mpframe\r\nContent-Type: image/jpeg\r\nX-Pts-Cs: %d\r\nContent-Length: %d\r\n\r\n",
+						(int)pts, ln);
+					if (!MpRemoteSendAll(s, part, (int)strlen(part)))
+						break;
+					if (!MpRemoteSendAll(s, (const char*)local, ln))
+						break;
+					if (!MpRemoteSendAll(s, "\r\n", 2))
+						break;
+				}
+			} else {
+				Sleep(30);
+			}
+			char peek;
+			const int pk = recv(s, &peek, 1, MSG_PEEK);
+			if (pk == 0) break;
+			if (pk < 0) {
+				const int e = WSAGetLastError();
+				if (e != WSAEWOULDBLOCK && e != WSAEINTR) break;
+			}
+		}
+		MpRemVidClientLeave();
+		return;
+	}
+
+	if (strstr(line, "GET /vstream")) {
+		// H264 Annex-B（VDフレーム: 'V''D' u16len i32pts payload）
+		const char* hdr =
+			"HTTP/1.0 200 OK\r\n"
+			"Content-Type: application/octet-stream\r\n"
+			"Cache-Control: no-store\r\n"
+			"Pragma: no-cache\r\n"
+			"Connection: close\r\n"
+			"\r\n";
+		MpRemoteSendAll(s, hdr, (int)strlen(hdr));
+		MpRemVidClientEnter();
+		u_long nb = 1;
+		ioctlsocket(s, FIONBIO, &nb);
+		LONG rpos = InterlockedCompareExchange(&g_mpRemVidW, 0, 0);
+		while (InterlockedCompareExchange(&g_mpRemoteStop, 0, 0) == 0) {
+			const LONG wpos = InterlockedCompareExchange(&g_mpRemVidW, 0, 0);
+			LONG avail = wpos - rpos;
+			if (avail < 0) avail = 0;
+			if (avail > kMpRemVidRing / 2) {
+				rpos = wpos - (kMpRemVidRing / 4);
+				if (rpos < 0) rpos = 0;
+				avail = wpos - rpos;
+			}
+			if (avail < 8) {
+				Sleep(20);
+				char peek;
+				const int pk = recv(s, &peek, 1, MSG_PEEK);
+				if (pk == 0) break;
+				if (pk < 0) {
+					const int e = WSAGetLastError();
+					if (e != WSAEWOULDBLOCK && e != WSAEINTR) break;
+				}
+				continue;
+			}
+			char chunk[64 * 1024];
+			int chunkN = 0;
+			LONG p = rpos;
+			while (chunkN + 8 < (int)sizeof(chunk) && (wpos - p) >= 8) {
+				const BYTE b0 = g_mpRemVidRing[(unsigned)(p) % (unsigned)kMpRemVidRing];
+				const BYTE b1 = g_mpRemVidRing[(unsigned)(p + 1) % (unsigned)kMpRemVidRing];
+				if (b0 != 'V' || b1 != 'D') {
+					p++;
+					continue;
+				}
+				const int n = ((int)g_mpRemVidRing[(unsigned)(p + 2) % (unsigned)kMpRemVidRing] << 8)
+					| (int)g_mpRemVidRing[(unsigned)(p + 3) % (unsigned)kMpRemVidRing];
+				if (n <= 0 || n > 512 * 1024) { p += 2; continue; }
+				if ((wpos - p) < (8 + n)) break;
+				if (chunkN + 8 + n > (int)sizeof(chunk)) break;
+				for (int i = 0; i < 8 + n; ++i)
+					chunk[chunkN + i] = (char)g_mpRemVidRing[(unsigned)(p + i) % (unsigned)kMpRemVidRing];
+				chunkN += 8 + n;
+				p += 8 + n;
+			}
+			if (chunkN <= 0) {
+				rpos = p;
+				Sleep(10);
+				continue;
+			}
+			if (!MpRemoteSendAll(s, chunk, chunkN))
+				break;
+			rpos = p;
+		}
+		MpRemVidClientLeave();
 		return;
 	}
 
@@ -2082,9 +2757,13 @@ static void MpRemoteHandleRequest(SOCKET s)
 		CStringW keyLab;
 		if (savedata.mpCamelot > 0)
 			keyLab = MpCamelotLabel(savedata.mpCamelot);
-		json.Format(L"{\"title\":\"%s\",\"artist\":\"%s\",\"album\":\"%s\",\"vol\":%d,\"state\":\"%s\",\"muted\":%d,\"index\":%d,\"playcnt\":%d,\"pos_cs\":%d,\"dur_cs\":%d,\"lrccur\":%d,\"aac\":%d,\"aac_lag_cs\":%d,\"key\":\"%s\"}",
+		const int vidOn = (pMainFrame1 && ::IsWindow(pMainFrame1->GetSafeHwnd())
+			&& ::IsWindowVisible(pMainFrame1->GetSafeHwnd())) ? 1 : 0;
+		if (vidOn)
+			MpRemVidWantPulse();
+		json.Format(L"{\"title\":\"%s\",\"artist\":\"%s\",\"album\":\"%s\",\"vol\":%d,\"state\":\"%s\",\"muted\":%d,\"index\":%d,\"playcnt\":%d,\"pos_cs\":%d,\"dur_cs\":%d,\"lrccur\":%d,\"aac\":%d,\"aac_lag_cs\":%d,\"vid\":%d,\"key\":\"%s\"}",
 			(LPCWSTR)jt, (LPCWSTR)ja, (LPCWSTR)jb, vol, state, muted, idx, pcnt, posCs, durCs, lrccur,
-			savedata.mpRemoteAac ? 1 : 0, aacLag, (LPCWSTR)keyLab);
+			savedata.mpRemoteAac ? 1 : 0, aacLag, vidOn, (LPCWSTR)keyLab);
 		CStringA utf8;
 		{
 			const int nbytes = ::WideCharToMultiByte(CP_UTF8, 0, json, -1, NULL, 0, NULL, NULL);
@@ -2429,7 +3108,7 @@ static void MpRemoteHandleRequest(SOCKET s)
 	page += L"linear-gradient(180deg,var(--stop1),var(--stop2))}.row2{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px}.row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:10px}.row4{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px;margin-top:10px}.b-seek{background:linear-gradient(180deg,#efe7ff,#d5c8f8);min-height:54px}.b-mute{background:linear-gradient(180deg,#ffe8f1,#ffc1d8);min-height:48px;width:100%;margin-top:10px}.b-mute.on{background:linear-gradient(180deg,#ff9eb8,#ff5a8a);color:#fff;box-shadow:0 0 0 2px #ff69b466}.b-listen{background:linear-gradient(180deg,#e8fff4,#a8e8c8);min-height:48px;width:100%;margin-top:10px}.b-listen.on{background:linear-gradient(180deg,#7ad9a0,#3cb878);color:#fff;box-shadow:0 0 0 2px #3cb87866}.b-listen:disabled{opacity:.45}.b-soft{background:linear-gradient(180deg,#f5f0ff,#e2d6f8);min-height:48px}.b-kill.on{background:linear-gradient(180deg,#ff9eb8,#ff5a8a);";
 	page += L"color:#fff}.vol-wrap{margin-top:8px}.vol-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}.vol-top span{font-weight:700;font-size:.9rem}#volVal,.vnum{color:var(--pink);font-variant-numeric:tabular-nums}input[type=range]{width:100%;accent-color:var(--pink);height:28px}#tab-eq{padding-bottom:20px}#tab-eq input[type=range]{touch-action:manipulation}.eq-reset{position:sticky;top:0;z-index:2;background:linear-gradient(180deg,#fffffff8,#fffffff0);padding:8px 0 10px;margin:4px 0 8px}.eq-grid{display:flex;flex-direction:column;gap:6px;margin-top:10px}.eq-band{display:grid;grid-template-columns:42px 1fr 36px;align-items:center;gap:8px}.eq-band label{font-size:.75rem;color:var(--muted);font-weight:700;text-align:right}.eq-band input{width:100%;height:28px;writing-mode:horizontal-tb;-webkit-appearance:auto;appearance:auto}.viz-wrap{margin-top:6px}.viz-chord{text-align:center;font-weight:800;font-size:1.05rem;color:var(--pink2);margin:0 0 8px;min-height:1.4em}#pianoCan,#anaCan{width:100%;height:auto;display:block;border-radius:14px;background:#0e1018;box-shadow:inset 0 0 0 1px #ffffff18}#pianoCan{min-height:220px}#anaCan{min-height:140px}select.sel{width:100%;margin-top:8px;padding:10px;border-radius:12px;border:1px ";
 	page += L"solid #e8d0e0;background:#fff;font-weight:650;color:var(--ink)}.list{max-height:360px;overflow:auto;margin-top:8px;-webkit-overflow-scrolling:touch}.li{display:block;width:100%;text-align:left;padding:12px 12px;border:0;border-radius:14px;background:transparent;cursor:pointer;margin-bottom:4px}.li:active{background:#ffe6f3}.li.cur{background:linear-gradient(90deg,#ffe6f3,#f0e6ff);font-weight:750}.li .t{display:block;font-size:.95rem}.li .m{display:block;font-size:.78rem;color:var(--muted);margin-top:2px}.pager{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:10px}.lrc{max-height:min(52vh,380px);min-height:220px;overflow:auto;margin:0 0 12px;line-height:1.55;padding:8px 0 28%}.lrc .ln{padding:6px 8px;bord";
-	page += L"er-radius:10px;color:var(--muted);font-size:.92rem}.lrc .ln.cur{background:#ffe6f3;color:#3a2a3a;font-weight:750}.sec-lab{font-size:.78rem;font-weight:750;color:var(--muted);margin:12px 0 4px;text-transform:uppercase;letter-spacing:.06em}.toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%) translateY(20px);opacity:0;background:#3a2a3add;color:#fff;padding:10px 16px;border-radius:999px;font-size:.85rem;pointer-events:none;transition:opacity .2s,transform .2s;z-index:9}.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}.hint{text-align:center;color:var(--muted);font-size:.75rem;margin-top:12px}";
+	page += L"er-radius:10px;color:var(--muted);font-size:.92rem}.lrc .ln.cur{background:#ffe6f3;color:#3a2a3a;font-weight:750}.sec-lab{font-size:.78rem;font-weight:750;color:var(--muted);margin:12px 0 4px;text-transform:uppercase;letter-spacing:.06em}.toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%) translateY(20px);opacity:0;background:#3a2a3add;color:#fff;padding:10px 16px;border-radius:999px;font-size:.85rem;pointer-events:none;transition:opacity .2s,transform .2s;z-index:9}.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}.hint{text-align:center;color:var(--muted);font-size:.75rem;margin-top:12px}.vwrap{margin:10px 0 0;border-radius:12px;overflow:hidden;background:#111;aspect-ratio:16/9;touch-action:manipulation;-webkit-user-select:none;user-select:none}.vwrap img{display:block;width:100%;height:100%;object-fit:contain;background:#000;pointer-events:none}.vwrap.fs{position:fixed;inset:0;z-index:200;margin:0;border-radius:0;aspect-ratio:auto;width:100vw;height:100vh;max-height:none}.vwrap.fs img{width:100%;height:100%;object-fit:contain}body.vidfs{overflow:hidden;background:#000}body.vidfs .shell{padding:0;max-width:none}body.vidfs .brand,body.vidfs .tabs,body.vidfs .hint,body.vidfs .toast,body.vidfs .shell>.card:not(.now),body.vidfs .now-label,body.vidfs #title,body.vidfs #artist,body.vidfs #album,body.vidfs #state{display:none!important}body.vidfs .now{margin:0;padding:0;border:0;box-shadow:none;background:#000;border-radius:0}body.vidfs #vwrap{display:block!important}";
 	page += L"</style></head><body><div class=\"shell\">"
 		L"<div class=\"brand\"><i class=\"fa-solid fa-wifi\"></i><h1>";
 	page += brand;
@@ -2443,7 +3122,7 @@ static void MpRemoteHandleRequest(SOCKET s)
 	page += ha;
 	page += L"</p><p id=\"album\">";
 	page += hb;
-	page += L"</p><div id=\"state\" class=\"state\">—</div></section>";
+	page += L"</p><div id=\"vwrap\" class=\"vwrap\" style=\"display:none\"><img id=\"vimg\" alt=\"\"/></div><div id=\"state\" class=\"state\">—</div></section>";
 
 	page += L"<div class=\"tabs\" role=\"tablist\">"
 		L"<div class=\"tabrow r4\">"
@@ -2585,9 +3264,9 @@ static void MpRemoteHandleRequest(SOCKET s)
 
 	page += L"<p class=\"hint\">"; page += labHint; page += L"</p></div><div id=\"toast\" class=\"toast\"></div>";
 	page += L"<script src=\"https://code.jquery.com/jquery-3.7.1.min.js\"></script><script>";
-	page += L"var _st={title:'',artist:'',album:'',vol:-1,state:'',muted:-1,index:-1,lrccur:-1,aac:-1,pos_cs:0,aac_lag_cs:90};var _tab='play',_plOff=0,_plPage=40,_eqReady=0,_djReady=0,_lrcSig='',_lrcLines=[],_userEq=0,_userDj=0,_userVol=0,_listen=0,_audio=null;function toast(m){var $t=$('#toast');$t.text(m).addClass('show');clearTimeout(window._tt);window._tt=setTimeout(function(){$t.removeClass('show')},900)}function setState(s){var $s=$('#state');if($s.data('s')===s)return;$s.data('s',s);$s.removeClass('play pause stop');if(s==='play'){$s.addClass('play').html('<i class=\"fa-solid fa-play\"></i> PLAY')}else if(s==='pause'){$s.addClass('pause').html('<i class=\"fa-solid fa-pause\"></i> PAUSE')}else{$s.addClass('stop').html('<i class=\"fa-solid fa-stop\"></i> STOP')}}functio";
+	page += L"var _st={title:'',artist:'',album:'',vol:-1,state:'',muted:-1,index:-1,lrccur:-1,aac:-1,vid:-1,pos_cs:0,aac_lag_cs:90};var _tab='play',_plOff=0,_plPage=40,_eqReady=0,_djReady=0,_lrcSig='',_lrcLines=[],_userEq=0,_userDj=0,_userVol=0,_listen=0,_audio=null,_vidFs=0,_vidTapT=0,_vidTapX=0,_vidTapY=0,_vidTapTimer=0;function toast(m){var $t=$('#toast');$t.text(m).addClass('show');clearTimeout(window._tt);window._tt=setTimeout(function(){$t.removeClass('show')},900)}function setState(s){var $s=$('#state');if($s.data('s')===s)return;$s.data('s',s);$s.removeClass('play pause stop');if(s==='play'){$s.addClass('play').html('<i class=\"fa-solid fa-play\"></i> PLAY')}else if(s==='pause'){$s.addClass('pause').html('<i class=\"fa-solid fa-pause\"></i> PAUSE')}else{$s.addClass('stop').html('<i class=\"fa-solid fa-stop\"></i> STOP')}}functio";
 	page += L"n showTab(id){_tab=id;$('.tab').removeClass('on');$('.tab[data-tab=\"'+id+'\"]').addClass('on');$('.panel').removeClass('on');$('#tab-'+id).addClass('on');if(id==='list')loadPlaylist();if(id==='lrc')loadLyrics(true);if(id==='eq')loadEq(false);if(id==='dj')loadDj(false);if(id==='piano')loadPiano();if(id==='ana')loadAna()}function sendCmd(c,extra){var q='/cmd?c='+encodeURIComponent(c)+(extra||'');return $.ajax({url:q,method:'GET',timeout:2500})}function applyStatus(d){if(!d)return;if(d.title!==_st.title){_st.title=d.title;$('#title').text(d.title&&d.title.length?d.title:'—')}if(d.artist!==_st.artist){_st.artist=d.artist;$('#artist').text(d.artist||'').toggle(!!(d.artist&&d.artist.length))}if(d.album!==_st.album){_st.album=d.album;$('#album').text";
-	page += L"(d.album||'').toggle(!!(d.album&&d.album.length))}if(!_userVol&&typeof d.vol==='number'&&d.vol!==_st.vol){_st.vol=d.vol;$('#vol').val(d.vol);$('#volVal').text(d.vol)}if(!!d.muted!==!!_st.muted){_st.muted=d.muted;$('.b-mute').toggleClass('on',!!d.muted)}if(d.state!==_st.state){_st.state=d.state;setState(d.state||'stop')}if(typeof d.index==='number'&&d.index!==_st.index){_st.index=d.index;if(_tab==='list')markPlCur()}if(typeof d.pos_cs==='number')_st.pos_cs=d.pos_cs;if(typeof d.aac_lag_cs==='number'&&d.aac_lag_cs>0)_st.aac_lag_cs=d.aac_lag_cs;if(typeof d.lrccur==='number'){var want=d.lrccur;if(_listen&&_lrcLines.length){var hp=_st.pos_cs-(_st.aac_lag_cs||90);if(hp<0)hp=0;want=-1;for(var li=0;li<_lrcLines.length;li++){if((_lrcLines[li].t||0)<=hp)want=li;else break}}if(want!==_st.lrccur){_st.lrccur=want;markLrcCur(true)}}if(typeof d.aac==='number'&&d.aac!==_st.aac){_st.aac=d.aac;$('#btnListen').prop('disabled',!d.aac);if(!d.aac&&_listen)stopListen()}}function stopListen(){_listen=0;$('#btnListen').removeClass('on');if(_audio){try{_audio.pause()}catch(e){}try{_audio.removeAttribute('src');_audio.load()}catch(e){}_audio=null}}function toggleListen(){if(!_st.aac){toast('AAC off');return}if(_listen){stopListen();return}_audio=new Audio('/stream');_audio.preload='none';_audio.play().then(function(){_listen=1;$('#btnListen').addClass('on');refresh();if(_tab==='lrc')loadLyrics(false)}).catch(function(){toast('Listen failed');stopListen()})}$(function(){$('#btnListen').on('click',function(){toggleListen()})});function refresh(){$.getJSON('/api/status').done(applyStatus).fail(function(){})}function loadPlaylist(){$.getJSON('/api/playlist?o='+_plOff+'&n='+_plPage).done(function(d){if(!d)return;va";
+	page += L"(d.album||'').toggle(!!(d.album&&d.album.length))}if(!_userVol&&typeof d.vol==='number'&&d.vol!==_st.vol){_st.vol=d.vol;$('#vol').val(d.vol);$('#volVal').text(d.vol)}if(!!d.muted!==!!_st.muted){_st.muted=d.muted;$('.b-mute').toggleClass('on',!!d.muted)}if(d.state!==_st.state){_st.state=d.state;setState(d.state||'stop')}if(typeof d.index==='number'&&d.index!==_st.index){_st.index=d.index;if(_tab==='list')markPlCur()}if(typeof d.pos_cs==='number')_st.pos_cs=d.pos_cs;if(typeof d.aac_lag_cs==='number'&&d.aac_lag_cs>0)_st.aac_lag_cs=d.aac_lag_cs;if(typeof d.lrccur==='number'){var want=d.lrccur;if(_listen&&_lrcLines.length){var hp=_st.pos_cs-(_st.aac_lag_cs||90);if(hp<0)hp=0;want=-1;for(var li=0;li<_lrcLines.length;li++){if((_lrcLines[li].t||0)<=hp)want=li;else break}}if(want!==_st.lrccur){_st.lrccur=want;markLrcCur(true)}}if(typeof d.aac==='number'&&d.aac!==_st.aac){_st.aac=d.aac;$('#btnListen').prop('disabled',!d.aac);if(!d.aac&&_listen)stopListen()}if(typeof d.vid==='number'&&d.vid!==_st.vid){_st.vid=d.vid;$('#vwrap').toggle(!!d.vid);if(!d.vid){if(_vidFs)exitVidFs();stopVid()}else startVid()}}function stopVid(){if(window._vidT){clearInterval(window._vidT);window._vidT=0}var vi=document.getElementById('vimg');if(vi){try{vi.removeAttribute('src')}catch(e){}}}function startVid(){if(!_st.vid)return;$('#vwrap').show();if(window._vidT){clearInterval(window._vidT);window._vidT=0}window._vidT=setInterval(function(){var vi=document.getElementById('vimg');if(!vi||!_st.vid)return;vi.src='/vframe.jpg?t='+Date.now()},50)}function stopListen(){_listen=0;$('#btnListen').removeClass('on');if(_audio){try{_audio.pause()}catch(e){}try{_audio.removeAttribute('src');_audio.load()}catch(e){}_audio=null}}function ensureListen(){if(_listen||!_st.aac)return;_audio=new Audio('/stream');_audio.preload='none';_audio.play().then(function(){_listen=1;$('#btnListen').addClass('on');if(_st.vid)startVid();refresh()}).catch(function(){})}function enterVidFs(){if(!_st.vid)return;_vidFs=1;$('body').addClass('vidfs');$('#vwrap').addClass('fs');ensureListen();try{var de=document.documentElement;if(de.requestFullscreen)de.requestFullscreen()}catch(e){}try{if(screen.orientation&&screen.orientation.lock)screen.orientation.lock('landscape')}catch(e){}}function exitVidFs(){if(!_vidFs)return;_vidFs=0;$('body').removeClass('vidfs');$('#vwrap').removeClass('fs');try{if(document.fullscreenElement)document.exitFullscreen()}catch(e){}try{if(screen.orientation&&screen.orientation.unlock)screen.orientation.unlock()}catch(e){}}function toggleVidFs(e){if(e){e.preventDefault();e.stopPropagation()}if(!_st.vid)return;if(_vidFs)exitVidFs();else enterVidFs()}function vidFsSeekAt(x){if(!_vidFs)return;var el=document.getElementById('vwrap');if(!el)return;var r=el.getBoundingClientRect(),rx=x-r.left;if(rx<r.width*0.3)sendCmd('seekbk');else if(rx>r.width*0.7)sendCmd('seekfw')}function onVidPointerUp(e){if(!_st.vid)return;var x=e.clientX,y=e.clientY;if(e.changedTouches&&e.changedTouches[0]){x=e.changedTouches[0].clientX;y=e.changedTouches[0].clientY}var now=Date.now();if(now-_vidTapT<320&&Math.abs(x-_vidTapX)<48&&Math.abs(y-_vidTapY)<48){clearTimeout(_vidTapTimer);_vidTapT=0;toggleVidFs(e);return}_vidTapT=now;_vidTapX=x;_vidTapY=y;clearTimeout(_vidTapTimer);_vidTapTimer=setTimeout(function(){vidFsSeekAt(x)},280)}function toggleListen(){if(!_st.aac){toast('AAC off');return}if(_listen){stopListen();return}_audio=new Audio('/stream');_audio.preload='none';_audio.play().then(function(){_listen=1;$('#btnListen').addClass('on');if(_st.vid)startVid();refresh();if(_tab==='lrc')loadLyrics(false)}).catch(function(){toast('Listen failed');stopListen()})}$(function(){$('#btnListen').on('click',function(){toggleListen()});$(document).on('dblclick','#vwrap',function(e){toggleVidFs(e)});var vw=document.getElementById('vwrap');if(vw){vw.addEventListener('pointerup',onVidPointerUp);vw.addEventListener('touchend',onVidPointerUp,{passive:false})} $(document).on('keydown',function(e){if(!_vidFs)return;if(e.key==='ArrowLeft'){sendCmd('seekbk');e.preventDefault()}else if(e.key==='ArrowRight'){sendCmd('seekfw');e.preventDefault()}else if(e.key==='Escape'){exitVidFs();e.preventDefault()}});document.addEventListener('fullscreenchange',function(){if(!document.fullscreenElement&&_vidFs)exitVidFs()})});function refresh(){$.getJSON('/api/status').done(applyStatus).fail(function(){})}function loadPlaylist(){$.getJSON('/api/playlist?o='+_plOff+'&n='+_plPage).done(function(d){if(!d)return;va";
 	page += L"r h='',i,it;for(i=0;i<(d.items||[]).length;i++){it=d.items[i];h+='<button type=\"button\" class=\"li'+(it.i===_st.index?' cur':'')+'\" data-i=\"'+it.i+'\"><span class=\"t\"></span><span class=\"m\"></span></button>'}var $l=$('#plList');$l.html(h);$l.children().each(function(idx){var it=d.items[idx];$(this).find('.t').text(it.title||('#'+it.i));$(this).find('.m').text([(it.artist||''),(it.album||'')].filter(Boolean).join(' · '))});$('#plInfo').text((_plOff+1)+'-'+Math.min(_plOff+_plPage,d.total)+' / '+d.total);$('#plPrev').prop('disabled',_plOff<=0);$('#plNext').prop('disabled',_plOff+_plPage>=d.total)}).fail(function(){})}function markPlCur(){$('#plList .li').each(function(){$(this).toggleClass('cur',";
 	page += L"(+$(this).data('i'))===_st.index)})}function loadLyrics(force){$.getJSON('/api/lyrics').done(function(d){if(!d)return;var sig=(d.n||0)+':'+(d.lines&&d.lines[0]?d.lines[0].t:'');_lrcLines=d.lines||[];if(!force&&sig===_lrcSig){var want=(typeof d.cur==='number')?d.cur:-1;if(_listen&&_lrcLines.length){var hp=_st.pos_cs-(_st.aac_lag_cs||90);if(hp<0)hp=0;want=-1;for(var li=0;li<_lrcLines.length;li++){if((_lrcLines[li].t||0)<=hp)want=li;else break}}if(want!==_st.lrccur){_st.lrccur=want;markLrcCur(true)}return}_lrcSig=sig;var h='',i;for(i=0;i<_lrcLines.length;i++){h+='<div class=\"ln\" data-i=\"'+i+'\"></div>'}$('#lrcBox').html(h);$('#lrcBox .ln').each(function(idx){$(this).text(_lrcLines[idx].x||'')});var cur=(typeof d.cur==='number')?d.cur:-1;if(_listen&&_lrcLines.length){var hp2=_st.pos_cs-(_st.aac_lag_cs||90);if(hp2<0)hp2=0;cur=-1;for(var lj=0;lj<_lrcLines.length;lj++){if((_lrcLines[lj].t||0)<=hp2)cur=lj;else break}}_st.lrccur=cur;markLrcCur(true)}).fail(function(){})}function markLrcCur(scroll){var $b=$('#lrcBox');if(!$b.length)return;$b.find('.ln').removeClass('cur');if(_st.lrccur<0)return;var $c=$b.find('.ln[data";
 	page += L"-i=\"'+_st.lrccur+'\"]');if(!$c.length)return;$c.addClass('cur');if(scroll){var lh=$c.outerHeight()||28;var top=$c.position().top+$b.scrollTop()-lh*2.2;if(top<0)top=0;$b.stop(true).animate({scrollTop:top},180)}}function loadEq(force){$.getJSON('/api/eq').done(function(d){if(!d)return;if(_userEq&&!force)return;var i;for(i=0;i<15;i++){var v=(d.eq&&typeof d.eq[i]==='number')?d.eq[i]:100;$('#eq'+i).val(v);$('#eqv'+i).text(v)}if(typeof d.pre==='number')$('#eqPre').val(String(d.pre));if(typeof d.env==='number')$('#eqEnv').val(String(d.env));if(typeof d.rev==='number'){$('#eqRev').val(d.rev);$('#eqRevV').text(d.rev)}if(typeof d.cho==='number'){$('#eqCho').val(d.cho);$('#eqChoV').text(d.cho)}if(typeof d.del==='number')";
@@ -2682,6 +3361,14 @@ void MpRemoteStop()
 	MpRemAacEncReleaseLocked();
 	InterlockedExchange(&g_mpRemAacClients, 0);
 	InterlockedExchange(&g_mpRemAacW, 0);
+	InterlockedExchange(&g_mpRemVidClients, 0);
+	InterlockedExchange(&g_mpRemVidW, 0);
+	InterlockedExchange(&g_mpRemVidJpegN, 0);
+	if (g_mpRemH264) {
+		g_mpRemH264->Release();
+		g_mpRemH264 = NULL;
+		g_mpRemH264W = g_mpRemH264H = 0;
+	}
 	LeaveCriticalSection(&g_mpRemAacCs);
 	if (g_mpRemoteListen != INVALID_SOCKET) {
 		closesocket(g_mpRemoteListen);
@@ -2775,10 +3462,13 @@ void MpRemoteUiTick(CMediaPlayerDlg* mpDlg)
 {
 	if (!savedata.mpRemoteOn) return;
 	MpRemAacFeedSilenceIfNeeded();
+	MpRemVidCaptureTick();
 	int posCs = 0, durCs = 0, head100 = 0;
 	if (og && ::IsWindow(og->GetSafeHwnd()) && og->m_time.GetSafeHwnd()) {
-		int mn = 0, mx = 0;
-		og->m_time.GetRange(mn, mx);
+		int mn = og->m_time.GetMinValue();
+		int mx = og->m_time.GetMaxValue();
+		if (mx <= mn)
+			og->m_time.GetRange(mn, mx);
 		const int pos = og->m_time.GetPos();
 		const int span = mx - mn;
 		if (span > 0) {
@@ -2995,9 +3685,30 @@ LRESULT MpAddonsOnTransportCmd(CMediaPlayerDlg* mpDlg, WPARAM wParam, LPARAM lPa
 {
 	if (!mpDlg) return 0;
 	switch ((int)wParam) {
-	case 0: mpDlg->SendMessage(WM_COMMAND, MAKEWPARAM(IDC_MP_PLAY, BN_CLICKED), 0); break;
-	case 1: mpDlg->SendMessage(WM_COMMAND, MAKEWPARAM(IDC_MP_PAUSE, BN_CLICKED), 0); break;
-	case 2: mpDlg->SendMessage(WM_COMMAND, MAKEWPARAM(IDC_MP_NEXT, BN_CLICKED), 0); break;
+	case 0:
+		// 動画: 一時停止中は再開。停止中は途中再生確認を抑止して再演奏。
+		if ((mode == -2 || videoonly) && pMainFrame1 && ::IsWindow(pMainFrame1->GetSafeHwnd())) {
+			if (ps == 1) {
+				pMainFrame1->On32775();
+			} else {
+				OggArmRemoteSilentResumeYes();
+				MpTaskbarReplay();
+			}
+		} else {
+			OggArmRemoteSilentResumeYes();
+			mpDlg->SendMessage(WM_COMMAND, MAKEWPARAM(IDC_MP_PLAY, BN_CLICKED), 0);
+		}
+		break;
+	case 1:
+		if ((mode == -2 || videoonly) && pMainFrame1 && ::IsWindow(pMainFrame1->GetSafeHwnd()))
+			pMainFrame1->On32775();
+		else
+			mpDlg->SendMessage(WM_COMMAND, MAKEWPARAM(IDC_MP_PAUSE, BN_CLICKED), 0);
+		break;
+	case 2:
+		OggArmRemoteSilentResumeYes();
+		mpDlg->SendMessage(WM_COMMAND, MAKEWPARAM(IDC_MP_NEXT, BN_CLICKED), 0);
+		break;
 	case 3:
 	case 4:
 		{
@@ -3022,18 +3733,76 @@ LRESULT MpAddonsOnTransportCmd(CMediaPlayerDlg* mpDlg, WPARAM wParam, LPARAM lPa
 			MpRemoteCacheVol(v);
 		}
 		break;
-	case 5: mpDlg->SendMessage(WM_COMMAND, MAKEWPARAM(IDC_MP_PREV, BN_CLICKED), 0); break;
+	case 5:
+		// 3秒ルール: 頭出し時は先頭から、前曲へ移る時だけ途中再開可
+		{
+			extern UINT ttt;
+			if (plf && ps != 1 && ttt >= 300)
+				OggArmRemoteSilentResumeNo();
+			else
+				OggArmRemoteSilentResumeYes();
+		}
+		mpDlg->SendMessage(WM_COMMAND, MAKEWPARAM(IDC_MP_PREV, BN_CLICKED), 0);
+		break;
 	case 6: mpDlg->SendMessage(WM_COMMAND, MAKEWPARAM(IDC_MP_STOP, BN_CLICKED), 0); break;
 	case 7:
 	case 8:
 		if (og && ::IsWindow(og->GetSafeHwnd()) && og->m_time.GetSafeHwnd()) {
-			int mn = 0, mx = 0;
-			og->m_time.GetRange(mn, mx);
-			const int span = mx - mn;
-			int delta = span / 20; // 約5%
-			if (delta < 1) delta = 1;
-			int pos = og->m_time.GetPos() + ((wParam == 8) ? delta : -delta);
-			MpDjSeekToSliderPos(pos);
+			const BOOL videoGraph = (mode == -2 || videoonly);
+			if (videoGraph) {
+				// Douga バーと同型: OnHScroll / RubberBand_DestroyBank を踏まない
+				int mn = og->m_time.GetMinValue();
+				int mx = og->m_time.GetMaxValue();
+				if (mx <= mn && pMediaPosition) {
+					REFTIME dur = 0;
+					if (FAILED(pMediaPosition->get_Duration(&dur)) || dur <= 0.0)
+						pMediaPosition->get_StopTime(&dur);
+					mn = 0;
+					mx = (int)(dur * 100.0);
+					if (mx > mn)
+						og->m_time.SetRange(mn, mx, TRUE);
+				}
+				if (mx <= mn) mx = mn + 1;
+				int delta = (mx - mn) / 20;
+				if (delta < 1) delta = 1000; // ±10s（Rew/Ff 相当）
+				int pos = og->m_time.GetPos() + ((wParam == 8) ? delta : -delta);
+				if (pos < mn) pos = mn;
+				if (pos > mx) pos = mx;
+				og->m_time.SetPos(pos);
+				playb = (__int64)pos;
+				poss = 0;
+				poss5 = pos;
+				if (pMainFrame1)
+					pMainFrame1->seek((LONGLONG)((float)pos * 100000.0f));
+				if (mpDlg && ::IsWindow(mpDlg->GetSafeHwnd())) {
+					mpDlg->m_seekHoldPos = pos;
+					mpDlg->m_seekHoldUntil = GetTickCount64() + 800;
+					if (mpDlg->m_seek.GetSafeHwnd())
+						mpDlg->m_seek.SetPos(pos);
+				}
+			} else {
+				int mn = og->m_time.GetMinValue();
+				int mx = og->m_time.GetMaxValue();
+				if (mx <= mn) {
+					mn = 0;
+					mx = 1;
+					og->m_time.GetRange(mn, mx);
+				}
+				const int span = mx - mn;
+				int delta = span / 20;
+				if (delta < 1) delta = 1;
+				int pos = og->m_time.GetPos() + ((wParam == 8) ? delta : -delta);
+				MpDjSeekToSliderPos(pos);
+				// ゲームBGM＋douga: 本体音声シークに加え映像グラフも同割合で飛ばす
+				if (pMainFrame1 && pMediaPosition) {
+					REFTIME dur = 0;
+					if (SUCCEEDED(pMediaPosition->get_Duration(&dur)) && dur > 0.0) {
+						const double frac = (span > 0) ? (double)(pos - mn) / (double)span : 0.0;
+						const int vpos = (int)(frac * dur * 100.0);
+						pMainFrame1->seek((LONGLONG)((float)vpos * 100000.0f));
+					}
+				}
+			}
 		}
 		break;
 	case 9:
@@ -3090,6 +3859,7 @@ LRESULT MpAddonsOnTransportCmd(CMediaPlayerDlg* mpDlg, WPARAM wParam, LPARAM lPa
 		{
 			const int idx = (int)lParam;
 			if (pl && pl->pc && idx >= 0 && idx < pl->playcnt) {
+				OggArmRemoteSilentResumeYes();
 				pl->Get(idx);
 				plcnt = idx;
 				gameon = 0;

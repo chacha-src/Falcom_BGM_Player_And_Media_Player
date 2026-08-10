@@ -440,12 +440,32 @@ static BOOL ResumeModeUsesPlayb(int m)
 	return FALSE;
 }
 
-// 動画グラフ構築(play/plays)の前に呼ぶ。.save が無ければ 0、途中再生なら 1、はじめからなら 0（.save 削除）
+// 動画グラフ構築(play/plays)の前に呼ぶ。.save が無ければ 0。
+// g_resumeSilentArm: 0=ダイアログ / 1=はい(途中から) / 2=いいえ(先頭から)
+static volatile LONG g_resumeSilentArm = 0;
+
+void OggArmRemoteSilentResumeYes()
+{
+	InterlockedExchange(&g_resumeSilentArm, 1);
+}
+
+void OggArmRemoteSilentResumeNo()
+{
+	InterlockedExchange(&g_resumeSilentArm, 2);
+}
+
 static int PromptResumePlaybackIfSaveExists(CWnd* wnd, LPCTSTR mediaPath)
 {
 	if (!wnd || !mediaPath || !*mediaPath) return 0;
 	CString path = ResumeSavePathRead(mediaPath);
 	if (!ResumeSaveFileExists(path)) return 0;
+	const LONG arm = InterlockedExchange(&g_resumeSilentArm, 0);
+	if (arm == 1)
+		return 1; // リモート等: 途中から
+	if (arm == 2) {
+		ResumeSaveRemove(mediaPath); // リモート等: 先頭から
+		return 0;
+	}
 	if (IDYES == wnd->MessageBox(LL14(
 		L"途中再生データが存在します。\n前回中断した部分から再生しますか？\nはい = 途中から再生\nいいえ = はじめから再生", /* 日本語 */
 		L"Resume data exists.\nResume from where you left off?\nYes = Resume\nNo = Play from start", /* 英語 */
@@ -22576,6 +22596,8 @@ void timerog1(UINT nIDEvent)
 						break;
 				}
 			}
+			extern volatile LONG g_dougaAssocTopMost;
+			InterlockedExchange(&g_dougaAssocTopMost, 1);
 			og->dp(ndd);
 		}
 	}

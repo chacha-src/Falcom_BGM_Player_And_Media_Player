@@ -438,6 +438,20 @@ BOOL COggApp::InitInstance()
 	savedata.cap_canvas_h = 1080;
 	savedata.cap_include_mp = 0;
 	savedata.cap_show_cursor = 0;
+	savedata.cap_live_mode = 0;
+	savedata.cap_live_service = 0;
+	savedata.cap_live_privacy = 0;
+	savedata.cap_live_title[0] = 0;
+	savedata.cap_live_desc[0] = 0;
+	savedata.cap_live_url[0] = 0;
+	savedata.cap_live_key[0] = 0;
+	savedata.yt_client_id[0] = 0;
+	savedata.yt_client_secret[0] = 0;
+	savedata.yt_access_token[0] = 0;
+	savedata.yt_refresh_token[0] = 0;
+	savedata.yt_token_exp = 0;
+	savedata.yt_broadcast_id[0] = 0;
+	savedata.yt_stream_id[0] = 0;
 	savedata.cap_monitor_idx = 0;
 	savedata.cap_effect = 0;
 	savedata.cap_fx_n = 0;
@@ -764,6 +778,38 @@ BOOL COggApp::InitInstance()
 	if (datFileSize < (int)(offsetof(save, mpFindRegex) + sizeof(savedata.mpFindRegex)))
 		savedata.mpFindRegex = 0;
 	else if (savedata.mpFindRegex) savedata.mpFindRegex = 1;
+	if (datFileSize < (int)(offsetof(save, cap_live_mode) + sizeof(savedata.cap_live_mode))) {
+		savedata.cap_live_mode = 0;
+		savedata.cap_live_service = 0;
+		savedata.cap_live_privacy = 0;
+		savedata.cap_live_title[0] = 0;
+		savedata.cap_live_desc[0] = 0;
+		savedata.cap_live_url[0] = 0;
+		savedata.cap_live_key[0] = 0;
+		savedata.yt_client_id[0] = 0;
+		savedata.yt_client_secret[0] = 0;
+		savedata.yt_access_token[0] = 0;
+		savedata.yt_refresh_token[0] = 0;
+		savedata.yt_token_exp = 0;
+		savedata.yt_broadcast_id[0] = 0;
+		savedata.yt_stream_id[0] = 0;
+	} else {
+		if (savedata.cap_live_mode) savedata.cap_live_mode = 1;
+		if (savedata.cap_live_service < 0 || savedata.cap_live_service > 2)
+			savedata.cap_live_service = 0;
+		if (savedata.cap_live_privacy < 0 || savedata.cap_live_privacy > 2)
+			savedata.cap_live_privacy = 0;
+		savedata.cap_live_title[_countof(savedata.cap_live_title) - 1] = 0;
+		savedata.cap_live_desc[_countof(savedata.cap_live_desc) - 1] = 0;
+		savedata.cap_live_url[_countof(savedata.cap_live_url) - 1] = 0;
+		savedata.cap_live_key[_countof(savedata.cap_live_key) - 1] = 0;
+		savedata.yt_client_id[_countof(savedata.yt_client_id) - 1] = 0;
+		savedata.yt_client_secret[_countof(savedata.yt_client_secret) - 1] = 0;
+		savedata.yt_access_token[_countof(savedata.yt_access_token) - 1] = 0;
+		savedata.yt_refresh_token[_countof(savedata.yt_refresh_token) - 1] = 0;
+		savedata.yt_broadcast_id[_countof(savedata.yt_broadcast_id) - 1] = 0;
+		savedata.yt_stream_id[_countof(savedata.yt_stream_id) - 1] = 0;
+	}
 	if (datFileSize < (int)(offsetof(save, mpToolsOpen) + sizeof(savedata.mpToolsOpen)))
 		savedata.mpToolsOpen = 0;
 	else if (savedata.mpToolsOpen) savedata.mpToolsOpen = 1;

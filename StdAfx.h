@@ -625,6 +625,22 @@ struct save{
 
 	// --- MPあいまい検索: 正規表現モード(末尾追記。旧.datは0=部分一致) ---
 	int mpFindRegex;          // 1=正規表現検索
+
+	// --- 画面キャプチャ Live配信(末尾追記。旧.datは録画のみ) ---
+	int cap_live_mode;        // 1=ライブ配信(MP4なし) 0=従来MP4録画
+	int cap_live_service;     // 0=YouTube 1=ニコニコ 2=カスタム
+	int cap_live_privacy;     // 0=public 1=unlisted 2=private (YouTube API)
+	TCHAR cap_live_title[256];
+	TCHAR cap_live_desc[512];
+	TCHAR cap_live_url[512];  // rtmp(s)://...
+	TCHAR cap_live_key[256];
+	TCHAR yt_client_id[128];
+	TCHAR yt_client_secret[128];
+	TCHAR yt_access_token[512];
+	TCHAR yt_refresh_token[512];
+	int yt_token_exp;         // access 失効時刻 (time_t 相当・秒)
+	TCHAR yt_broadcast_id[64];
+	TCHAR yt_stream_id[64];
 };
 extern save savedata;
 /* コード間隔(ms)。16..500。旧.dat や未設定は 25。 */
