@@ -1546,7 +1546,8 @@ void CRender::OnTimer(UINT_PTR nIDEvent)
 	// TODO: ここにメッセージ ハンドラー コードを追加するか、既定の処理を呼び出します。
 	if (nIDEvent == 7000) {
 		KillTimer(7000);
-		CKpilist k;
+		// 親を付けないとメイン背面に回り、CRender の下に隠れて操作不能になる
+		CKpilist k(this);
 		k.status = 0;
 		k.DoModal();
 		return;
@@ -1619,7 +1620,7 @@ void CRender::OnBnClickedCheckUpscale()
 void CRender::OnBnClickedButton1()
 {
 	// TODO: ここにコントロール通知ハンドラー コードを追加します。
-	CZeroFol z;
+	CZeroFol z(this);
 	z.DoModal();
 }
 

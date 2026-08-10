@@ -89,6 +89,7 @@ BOOL CGraph::OnInitDialog()
 	if (m_ok.GetSafeHwnd())
 		m_ok.MoveWindow((cr.Width() - btnW) / 2, cr.Height() - pad - btnH, btnW, btnH);
 
+	CCC_BringDialogToForeground(this);
 	return TRUE;  // return TRUE unless you set the focus to a control
 	// 例外 : OCX プロパティ ページは必ず FALSE を返します。
 }

@@ -539,6 +539,7 @@ BOOL CProToolsDlg::OnInitDialog()
 
 	CCC_CaptionLayout(m_hWnd);
 	LayoutHelpBtn();
+	CCC_BringDialogToForeground(this);
 	return TRUE;
 }
 

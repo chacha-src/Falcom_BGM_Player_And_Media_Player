@@ -16513,8 +16513,11 @@ int seekadpcm(int pos)
 	const int bpf = PcmOutBytesPerFrame();
 	lenl = pos * bpf;
 	playb = pos;
-	poss5 = lenl;
+	// poss5 はソースPCMサンプル位置（PlaybackNoteLoop / readBuffwav と同じ単位）。
+	// 旧バイト計 (lenl) のままだとループ終端判定が壊れシークも loop1 に吸い寄せられる。
+	poss5 = pos;
 	poss = 0;
+	poss2 = poss3 = poss4 = poss6 = 0;
 	RubberBand_DestroyBank(0);
 	return 0;
 }
@@ -26903,6 +26906,8 @@ void COggDlg::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
 					}
 				}
 				else {
+					poss = 0; poss2 = 0; poss3 = 0; poss4 = 0; poss6 = 0;
+					ZeroMemory(bufkpi, OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3);
 					seekadpcm((int)playb);
 				}
 			}

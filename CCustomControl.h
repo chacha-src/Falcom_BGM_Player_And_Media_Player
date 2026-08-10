@@ -83,7 +83,9 @@ void CCC_FillRectAlpha(HDC hdc, const RECT& rc, COLORREF clr, BYTE alpha);
 
 // ============================================================================
 // 隠し機能: 淫女モード (savedata.inwoman==1 のときだけ UI 演出を盛る)
-// F12 を5回連打でトグル。音は出さず見た目だけで恥ずかしくなる遊び。
+// F12 を2秒以内に5回でトグル。
+// バイブ=ロータ/電マ/吸引/クンニ、愛液=XXXから垂れ・溜まり、
+// ピクン=控件全体が跳ねる、イク=白み+赤み。
 // ============================================================================
 extern save savedata;
 static inline BOOL CCC_IsInwoman()
@@ -96,6 +98,8 @@ BOOL CCC_InwomanHotkey(MSG* pMsg, CWnd* pWnd);
 void CCC_StartInwomanTimer();
 // 不透明パネル等への淫女オーバーレイ描画（ポップアップメニュー等から利用）
 void CCC_DrawInwoman(CDC* pDC, const CRect& rc, BOOL bAeroTrans);
+// ピクン時の控件全体シェイク量(非淫女/静止時は 0,0)
+void CCC_InwomanGetShake(int& dx, int& dy);
 // コンテキストメニューからアクリルON/OFFしたとき全UIへ再適用
 void CCC_NotifyAeroSettingChanged();
 

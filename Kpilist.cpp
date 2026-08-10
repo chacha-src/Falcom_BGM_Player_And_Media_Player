@@ -415,6 +415,10 @@ BOOL CKpilist::OnInitDialog()
 	CCC_CaptionLayout(m_hWnd);
 	LayoutHelpBtn();
 
+	// CRender 等の別モーダルから開くとオーナー未指定だと最背面に回る。
+	// MoveWindow 後に前面化して操作可能にする。
+	CCC_BringDialogToForeground(this);
+
 	return TRUE;  // return TRUE unless you set the focus to a control
 	// 例外 : OCX プロパティ ページは必ず FALSE を返します。
 }

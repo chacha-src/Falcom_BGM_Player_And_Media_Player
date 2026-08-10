@@ -2308,6 +2308,11 @@ static int s_uiSoftBusy = 0;
 static GdiSoft2D::Context s_uiSoft2d;
 static GdiSoft3D::Context s_uiSoft3d;
 
+// 淫女モード共通パルス(はぁはぁ／ピクン／イク)。SoftJk・CCC_DrawInwoman 双方から使う。
+static void CCC_InwomanPulse(DWORD t, double& breath, double& twitch, double& climax);
+static void CCC_DrawVibrator(CDC* pDC, int cx, int cy, int sz, double t, double twitch, double breath, double climax, BOOL bAeroTrans);
+static void CCC_DrawLoveFluid(CDC* pDC, const CRect& rc, double breath, double twitch, double climax, BOOL bAeroTrans);
+
 static void SoftPremultPresent(GdiSoftFB::Framebuffer& fb, HDC dst, int dx, int dy, int w, int h, BYTE constA)
 {
     if (!fb.color || !fb.hdc || fb.w != w || fb.h != h || !dst) return;
@@ -2349,9 +2354,10 @@ static void DrawSoftJkBackdrop(CDC* pDC, const CRect& rc, int animTick, BOOL hot
         s_uiSoft3d.postVignette = s_uiSoft3d.postGlow = s_uiSoft3d.postSaturate = false;
 
         const float t = (float)animTick * 0.035f;
-        s_uiSoft3d.cam.yawDeg = -18.f + sinf(t) * 7.f;
-        s_uiSoft3d.cam.pitchDeg = 38.f + cosf(t * 0.7f) * 3.f;
-        s_uiSoft3d.cam.zoom = hot ? 1.08f : 1.0f;
+        const float buzz = CCC_IsInwoman() ? (sinf(t * 8.f) * 14.f) : (sinf(t) * 7.f);
+        s_uiSoft3d.cam.yawDeg = -18.f + buzz;
+        s_uiSoft3d.cam.pitchDeg = 38.f + cosf(t * 0.7f) * (CCC_IsInwoman() ? 8.f : 3.f);
+        s_uiSoft3d.cam.zoom = hot ? (CCC_IsInwoman() ? 1.16f : 1.08f) : (CCC_IsInwoman() ? 1.06f : 1.0f);
         float boxes[1][6] = { { -0.85f, 0.85f, 0.f, 0.18f, -0.55f, 0.55f } };
         s_uiSoft3d.SetViewportFit(boxes, 1);
 
@@ -2399,16 +2405,38 @@ static void DrawSoftJkChip(CDC* pDC, const CRect& rc, int animTick, BOOL hot)
         s_uiSoft3d.dofEnable = false;
         s_uiSoft3d.postVignette = s_uiSoft3d.postGlow = s_uiSoft3d.postSaturate = false;
         const float t = (float)animTick * 0.05f;
-        s_uiSoft3d.cam.yawDeg = -28.f + sinf(t) * 10.f;
-        s_uiSoft3d.cam.pitchDeg = 32.f + cosf(t * 0.9f) * 4.f;
-        s_uiSoft3d.cam.zoom = hot ? 1.25f : 1.1f;
+        // 淫女: バイブ先端の小刻み振動。通常: ゆるい揺れ
+        const float buzz = CCC_IsInwoman() ? (sinf(t * 9.f) * 16.f + cosf(t * 13.f) * 8.f) : (sinf(t) * 10.f);
+        s_uiSoft3d.cam.yawDeg = -28.f + buzz;
+        s_uiSoft3d.cam.pitchDeg = 32.f + cosf(t * 0.9f) * (CCC_IsInwoman() ? 10.f : 4.f);
+        s_uiSoft3d.cam.zoom = hot ? (CCC_IsInwoman() ? 1.38f : 1.25f) : (CCC_IsInwoman() ? 1.22f : 1.1f);
         float boxes[1][6] = { { -0.45f, 0.45f, 0.f, 0.28f, -0.45f, 0.45f } };
         s_uiSoft3d.SetViewportFit(boxes, 1);
-        const COLORREF c = CCC_IsInwoman() ? RGB(255, 120, 175) : RGB(255, 165, 210);
-        const float y = hot ? 0.22f : 0.16f;
-        s_uiSoft3d.DrawNeonBox(-0.28f, 0.28f, y + sinf(t) * 0.02f, -0.28f, 0.28f, c, 0.f);
+        const COLORREF c = CCC_IsInwoman() ? RGB(255, 96, 168) : RGB(255, 165, 210);
+        if (CCC_IsInwoman()) {
+            // 愛液まみれのバイブ先端(丸) + 本体短柱
+            s_uiSoft3d.DrawSphere(0.f, 0.22f + sinf(t * 11.f) * 0.03f, 0.04f, 0.20f, RGB(255, 190, 230), 8, 6);
+            s_uiSoft3d.DrawNeonBox(-0.12f, 0.12f, 0.08f, -0.22f, 0.22f, c, -0.18f);
+        } else {
+            const float y = hot ? 0.22f : 0.16f;
+            s_uiSoft3d.DrawNeonBox(-0.28f, 0.28f, y + sinf(t) * 0.02f, -0.28f, 0.28f, c, 0.f);
+        }
         SoftPremultPresent(s_uiSoft3d.fb, pDC->GetSafeHdc(), rc.left, rc.top, w, h,
-            hot ? (BYTE)150 : (BYTE)110);
+            hot ? (BYTE)(CCC_IsInwoman() ? 190 : 150) : (BYTE)(CCC_IsInwoman() ? 150 : 110));
+        if (CCC_IsInwoman()) {
+            // チップ下に愛液しずく(GDI)。Soft3D の上に載せる。
+            double breath = 0, twitch = 0, climax = 0;
+            CCC_InwomanPulse(::GetTickCount(), breath, twitch, climax);
+            const int dx = rc.CenterPoint().x + (int)(2 * twitch);
+            const int dy = rc.bottom - 1 + (int)(3 * breath + 4 * climax);
+            CBrush bf(RGB(255, 230, 244));
+            CBrush* ob = pDC->SelectObject(&bf);
+            CGdiObject* op = pDC->SelectStockObject(NULL_PEN);
+            const int r = max(2, w / 6);
+            pDC->Ellipse(dx - r, dy - r, dx + r, dy + r);
+            if (op) pDC->SelectObject(op);
+            pDC->SelectObject(ob);
+        }
     }
     --s_uiSoftBusy;
 }
@@ -2434,20 +2462,42 @@ static void DrawSoftJkHeart(CDC* pDC, const CRect& rc, int animTick, BOOL hot, C
         s_uiSoft3d.dofEnable = false;
         s_uiSoft3d.postVignette = s_uiSoft3d.postGlow = s_uiSoft3d.postSaturate = false;
         const float spin = (float)animTick * 5.5f;
-        s_uiSoft3d.cam.yawDeg = -22.f + spin + (hot ? sinf((float)animTick * 0.08f) * 6.f : 0.f);
-        s_uiSoft3d.cam.pitchDeg = 28.f + cosf((float)animTick * 0.05f) * 4.f;
-        s_uiSoft3d.cam.zoom = hot ? 1.45f : 1.28f;
-        float boxes[1][6] = { { -0.55f, 0.55f, -0.55f, 0.55f, -0.4f, 0.4f } };
-        s_uiSoft3d.SetViewportFit(boxes, 1);
-        const COLORREF c = col ? col : (CCC_IsInwoman() ? RGB(255, 120, 175) : RGB(255, 140, 188));
-        const COLORREF cDeep = CCC_Darken(c, 40);
-        s_uiSoft3d.DrawSphere(-0.18f, 0.18f, 0.05f, 0.22f, c, 10, 7);
-        s_uiSoft3d.DrawSphere(0.18f, 0.18f, 0.05f, 0.22f, c, 10, 7);
-        s_uiSoft3d.DrawQuad(
-            -0.38f, 0.02f, 0.02f,  0.38f, 0.02f, 0.02f,
-             0.0f, -0.48f, 0.08f,  0.0f, -0.48f, -0.02f, cDeep);
-        SoftPremultPresent(s_uiSoft3d.fb, pDC->GetSafeHdc(), rc.left, rc.top, w, h,
-            hot ? (BYTE)230 : (BYTE)200);
+        double breath = 0, twitch = 0, climax = 0;
+        if (CCC_IsInwoman())
+            CCC_InwomanPulse(::GetTickCount(), breath, twitch, climax);
+        // 淫女: ハートごまかしをやめ、震えるバイブ形(先端球+縦柱)
+        if (CCC_IsInwoman()) {
+            const float buzz = (float)(twitch * 22.0 + climax * 18.0);
+            s_uiSoft3d.cam.yawDeg = -12.f + sinf((float)animTick * 0.9f) * (10.f + buzz);
+            s_uiSoft3d.cam.pitchDeg = 26.f + cosf((float)animTick * 0.7f) * 8.f;
+            s_uiSoft3d.cam.zoom = hot ? 1.55f : 1.38f;
+            float boxes[1][6] = { { -0.35f, 0.35f, -0.55f, 0.55f, -0.35f, 0.35f } };
+            s_uiSoft3d.SetViewportFit(boxes, 1);
+            const COLORREF tip = RGB(255, 198, 232);
+            const COLORREF body = col ? col : RGB(255, 110, 175);
+            s_uiSoft3d.DrawSphere(0.f, 0.38f, 0.05f, 0.20f, tip, 9, 7);
+            s_uiSoft3d.DrawNeonBox(-0.11f, 0.11f, 0.28f, -0.28f, 0.28f, body, -0.42f);
+            SoftPremultPresent(s_uiSoft3d.fb, pDC->GetSafeHdc(),
+                rc.left + (int)(3 * twitch), rc.top + (int)(-2 * twitch), w, h,
+                hot ? (BYTE)240 : (BYTE)215);
+            // 下端の愛液
+            CCC_DrawLoveFluid(pDC, rc, breath, twitch, climax, FALSE);
+        } else {
+            s_uiSoft3d.cam.yawDeg = -22.f + spin + (hot ? sinf((float)animTick * 0.08f) * 6.f : 0.f);
+            s_uiSoft3d.cam.pitchDeg = 28.f + cosf((float)animTick * 0.05f) * 4.f;
+            s_uiSoft3d.cam.zoom = hot ? 1.45f : 1.28f;
+            float boxes[1][6] = { { -0.55f, 0.55f, -0.55f, 0.55f, -0.4f, 0.4f } };
+            s_uiSoft3d.SetViewportFit(boxes, 1);
+            const COLORREF c = col ? col : RGB(255, 140, 188);
+            const COLORREF cDeep = CCC_Darken(c, 40);
+            s_uiSoft3d.DrawSphere(-0.18f, 0.18f, 0.05f, 0.22f, c, 10, 7);
+            s_uiSoft3d.DrawSphere(0.18f, 0.18f, 0.05f, 0.22f, c, 10, 7);
+            s_uiSoft3d.DrawQuad(
+                -0.38f, 0.02f, 0.02f,  0.38f, 0.02f, 0.02f,
+                 0.0f, -0.48f, 0.08f,  0.0f, -0.48f, -0.02f, cDeep);
+            SoftPremultPresent(s_uiSoft3d.fb, pDC->GetSafeHdc(), rc.left, rc.top, w, h,
+                hot ? (BYTE)230 : (BYTE)200);
+        }
     }
     --s_uiSoftBusy;
 }
@@ -2473,15 +2523,28 @@ static void DrawSoftJkThumb(CDC* pDC, const CRect& rc, int animTick, BOOL hot, f
         s_uiSoft3d.dofEnable = false;
         s_uiSoft3d.postVignette = s_uiSoft3d.postGlow = s_uiSoft3d.postSaturate = false;
         const float t = (float)animTick * 0.06f;
-        s_uiSoft3d.cam.yawDeg = -24.f + tiltDeg + sinf(t) * (hot ? 14.f : 6.f);
+        double breath = 0, twitch = 0, climax = 0;
+        if (CCC_IsInwoman())
+            CCC_InwomanPulse(::GetTickCount(), breath, twitch, climax);
+        const float buzz = CCC_IsInwoman() ? (float)(twitch * 20.0 + climax * 14.0) : 0.f;
+        s_uiSoft3d.cam.yawDeg = -24.f + tiltDeg + sinf(t) * (hot ? 14.f : 6.f) + buzz;
         s_uiSoft3d.cam.pitchDeg = 34.f + cosf(t * 0.8f) * 3.f;
-        s_uiSoft3d.cam.zoom = hot ? 1.3f : 1.12f;
+        s_uiSoft3d.cam.zoom = hot ? (CCC_IsInwoman() ? 1.42f : 1.3f) : (CCC_IsInwoman() ? 1.24f : 1.12f);
         float boxes[1][6] = { { -0.4f, 0.4f, 0.f, 0.3f, -0.4f, 0.4f } };
         s_uiSoft3d.SetViewportFit(boxes, 1);
-        const COLORREF c = CCC_IsInwoman() ? RGB(255, 130, 190) : RGB(200, 160, 255);
-        s_uiSoft3d.DrawNeonBox(-0.22f, 0.22f, 0.2f + sinf(t) * 0.02f, -0.22f, 0.22f, c, 0.f);
-        SoftPremultPresent(s_uiSoft3d.fb, pDC->GetSafeHdc(), rc.left, rc.top, w, h,
-            hot ? (BYTE)165 : (BYTE)125);
+        const COLORREF c = CCC_IsInwoman() ? RGB(255, 100, 178) : RGB(200, 160, 255);
+        if (CCC_IsInwoman()) {
+            s_uiSoft3d.DrawSphere(0.f, 0.28f, 0.04f, 0.18f, RGB(255, 200, 235), 8, 6);
+            s_uiSoft3d.DrawNeonBox(-0.13f, 0.13f, 0.16f + sinf(t * 10.f) * 0.03f, -0.24f, 0.24f, c, -0.22f);
+        } else {
+            s_uiSoft3d.DrawNeonBox(-0.22f, 0.22f, 0.2f + sinf(t) * 0.02f, -0.22f, 0.22f, c, 0.f);
+        }
+        SoftPremultPresent(s_uiSoft3d.fb, pDC->GetSafeHdc(),
+            rc.left + (CCC_IsInwoman() ? (int)(2 * twitch) : 0),
+            rc.top + (CCC_IsInwoman() ? (int)(-2 * climax) : 0), w, h,
+            hot ? (BYTE)(CCC_IsInwoman() ? 200 : 165) : (BYTE)(CCC_IsInwoman() ? 155 : 125));
+        if (CCC_IsInwoman())
+            CCC_DrawLoveFluid(pDC, rc, breath, twitch, climax, FALSE);
     }
     --s_uiSoftBusy;
 }
@@ -2507,14 +2570,26 @@ static void DrawSoftJkKnot(CDC* pDC, const CRect& rc, int animTick)
         s_uiSoft3d.dofEnable = false;
         s_uiSoft3d.postVignette = s_uiSoft3d.postGlow = s_uiSoft3d.postSaturate = false;
         const float t = (float)animTick * 0.09f;
-        s_uiSoft3d.cam.yawDeg = -40.f + sinf(t) * 18.f;
-        s_uiSoft3d.cam.pitchDeg = 40.f + cosf(t * 0.7f) * 8.f;
-        s_uiSoft3d.cam.zoom = 1.4f;
+        double breath = 0, twitch = 0, climax = 0;
+        if (CCC_IsInwoman())
+            CCC_InwomanPulse(::GetTickCount(), breath, twitch, climax);
+        s_uiSoft3d.cam.yawDeg = -40.f + sinf(t) * (CCC_IsInwoman() ? (24.f + (float)twitch * 20.f) : 18.f);
+        s_uiSoft3d.cam.pitchDeg = 40.f + cosf(t * 0.7f) * (CCC_IsInwoman() ? 12.f : 8.f);
+        s_uiSoft3d.cam.zoom = CCC_IsInwoman() ? 1.55f : 1.4f;
         float boxes[1][6] = { { -0.5f, 0.5f, -0.2f, 0.35f, -0.5f, 0.5f } };
         s_uiSoft3d.SetViewportFit(boxes, 1);
-        const COLORREF c = CCC_IsInwoman() ? RGB(255, 110, 170) : RGB(255, 150, 200);
-        s_uiSoft3d.DrawTorus(0.f, 0.05f, 0.f, 0.28f, 0.09f, c, 12, 8);
-        SoftPremultPresent(s_uiSoft3d.fb, pDC->GetSafeHdc(), rc.left, rc.top, w, h, (BYTE)150);
+        const COLORREF c = CCC_IsInwoman() ? RGB(255, 96, 168) : RGB(255, 150, 200);
+        if (CCC_IsInwoman()) {
+            // 濡れ玉(愛液の塊) — リボン結びのごまかしをやめる
+            s_uiSoft3d.DrawSphere(0.f, 0.08f, 0.f, 0.32f, c, 10, 8);
+            s_uiSoft3d.DrawSphere(0.06f, 0.18f, 0.08f, 0.14f, RGB(255, 220, 240), 8, 6);
+        } else {
+            s_uiSoft3d.DrawTorus(0.f, 0.05f, 0.f, 0.28f, 0.09f, c, 12, 8);
+        }
+        SoftPremultPresent(s_uiSoft3d.fb, pDC->GetSafeHdc(), rc.left, rc.top, w, h,
+            (BYTE)(CCC_IsInwoman() ? 190 : 150));
+        if (CCC_IsInwoman())
+            CCC_DrawLoveFluid(pDC, rc, breath, twitch, climax, FALSE);
     }
     --s_uiSoftBusy;
 }
@@ -2540,14 +2615,19 @@ static void DrawSoftJkSwayCorner(CDC* pDC, const CRect& rc, int animTick, float 
         s_uiSoft3d.dofEnable = false;
         s_uiSoft3d.postVignette = s_uiSoft3d.postGlow = s_uiSoft3d.postSaturate = false;
         const float t = (float)animTick * 0.04f;
-        s_uiSoft3d.cam.yawDeg = -20.f + sinf(t) * amp;
-        s_uiSoft3d.cam.pitchDeg = 36.f + cosf(t * 0.85f) * (amp * 0.4f);
-        s_uiSoft3d.cam.zoom = 1.08f;
+        const float buzz = CCC_IsInwoman() ? (sinf(t * 11.f) * (amp + 6.f)) : (sinf(t) * amp);
+        s_uiSoft3d.cam.yawDeg = -20.f + buzz;
+        s_uiSoft3d.cam.pitchDeg = 36.f + cosf(t * 0.85f) * (amp * (CCC_IsInwoman() ? 0.7f : 0.4f));
+        s_uiSoft3d.cam.zoom = CCC_IsInwoman() ? 1.18f : 1.08f;
         float boxes[1][6] = { { -0.4f, 0.4f, 0.f, 0.22f, -0.4f, 0.4f } };
         s_uiSoft3d.SetViewportFit(boxes, 1);
-        const COLORREF c = CCC_IsInwoman() ? RGB(255, 150, 195) : RGB(220, 180, 255);
-        s_uiSoft3d.DrawBox(-0.22f, 0.22f, 0.12f + sinf(t) * 0.015f, -0.22f, 0.22f, c, 0.f);
-        SoftPremultPresent(s_uiSoft3d.fb, pDC->GetSafeHdc(), rc.left, rc.top, w, h, (BYTE)100);
+        const COLORREF c = CCC_IsInwoman() ? RGB(255, 120, 185) : RGB(220, 180, 255);
+        if (CCC_IsInwoman())
+            s_uiSoft3d.DrawSphere(0.f, 0.06f + sinf(t * 9.f) * 0.02f, 0.f, 0.22f, c, 8, 6);
+        else
+            s_uiSoft3d.DrawBox(-0.22f, 0.22f, 0.12f + sinf(t) * 0.015f, -0.22f, 0.22f, c, 0.f);
+        SoftPremultPresent(s_uiSoft3d.fb, pDC->GetSafeHdc(), rc.left, rc.top, w, h,
+            (BYTE)(CCC_IsInwoman() ? 140 : 100));
     }
     --s_uiSoftBusy;
 }
@@ -2863,13 +2943,17 @@ static void CCC_InwomanInvalidateAll()
 static void CALLBACK CCC_InwomanTimerProc(HWND, UINT, UINT_PTR, DWORD)
 {
     if (!CCC_IsInwoman()) return; // 通常モード時は何もしない
+    // クリック／ドラッグ中に全控件 Invalidate すると BN_CLICKED が欠落しやすい
+    if (::GetCapture() != NULL) return;
+    if (CCustomPopupMenu::GetTrackingRoot() != NULL) return;
     CCC_InwomanInvalidateAll();
 }
 
 void CCC_StartInwomanTimer()
 {
     if (g_inwomanTimer == 0)
-        g_inwomanTimer = ::SetTimer(NULL, 0, 70, CCC_InwomanTimerProc);
+        // 55ms 全控件再描画は入力飢餓の温床。Soft タイマと同程度に間引く
+        g_inwomanTimer = ::SetTimer(NULL, 0, 180, CCC_InwomanTimerProc);
 }
 
 BOOL CCC_InwomanHotkey(MSG* pMsg, CWnd* pWnd)
@@ -2898,29 +2982,135 @@ BOOL CCC_InwomanHotkey(MSG* pMsg, CWnd* pWnd)
     return FALSE;
 }
 
-// とろけ顔(ハート目 + 半開きの口 + ほてり + 汗)。発情した子の表情をコンパクトに。
-// コントロールの隅に小さく置く想定(中央や文字の上は塗らない)。
-static void CCC_DrawAhegaoFace(CDC* pDC, int cx, int cy, int sz, double twitch, BOOL bAeroTrans)
+// はぁはぁ / ピクン(連打スパイク) / イク / 突発の刺激。控件シェイクにも使う。
+static void CCC_InwomanPulse(DWORD t, double& breath, double& twitch, double& climax)
+{
+    breath = 0.5 + 0.5 * sin(t / 460.0);
+
+    // ピクン: 線の連続振動ではなく、短い連打スパイク(控件全体が跳ねる用)
+    const double cyc = (t % 920) / 920.0;
+    twitch = 0.0;
+    if (cyc < 0.11)
+        twitch = sin(cyc / 0.11 * 3.14159265);
+    else if (cyc > 0.15 && cyc < 0.24)
+        twitch = sin((cyc - 0.15) / 0.09 * 3.14159265);
+    else if (cyc > 0.28 && cyc < 0.34)
+        twitch = 0.75 * sin((cyc - 0.28) / 0.06 * 3.14159265);
+    twitch *= twitch;
+
+    // 突発の突き刺激(~2.1秒に一瞬) — ロータ等の当て直し感
+    {
+        const double sp = (t % 2100) / 2100.0;
+        if (sp < 0.055) {
+            double s = sin(sp / 0.055 * 3.14159265);
+            s *= s;
+            if (s > twitch) twitch = s;
+        }
+    }
+
+    // イク: ~3.6秒周期。ピークで白み/赤み＋連ピクン
+    const double oc = (t % 3600) / 3600.0;
+    climax = 0.0;
+    if (oc < 0.26) {
+        climax = sin(oc / 0.26 * 3.14159265);
+        climax *= climax;
+    }
+    if (climax > 0.04) {
+        const double buzz = 0.6 + 0.4 * sin(t / 22.0);
+        if (twitch < climax * buzz)
+            twitch = climax * buzz;
+    }
+}
+
+// ピクン=控件全体が跳ねる。静止時は 0。
+// 振幅は最大2px程度に抑え、全面ピンク帯で操作不能にならないようにする。
+void CCC_InwomanGetShake(int& dx, int& dy)
+{
+    dx = 0;
+    dy = 0;
+    if (!CCC_IsInwoman()) return;
+    double breath = 0, twitch = 0, climax = 0;
+    const DWORD t = ::GetTickCount();
+    CCC_InwomanPulse(t, breath, twitch, climax);
+    UNREFERENCED_PARAMETER(breath);
+    const double p = (twitch > climax) ? twitch : climax;
+    // 弱いピクンは無視。ピーク時だけ小さく跳ねる
+    if (p < 0.35) return;
+    // 8方向に跳ねる(同じ方向に張り付かない)
+    static const int ox[8] = { 1, -1, 0, 0, 1, -1, 1, -1 };
+    static const int oy[8] = { 0, 0, 1, -1, 1, 1, -1, -1 };
+    const int dir = (int)((t / 35) % 8);
+    const int amp = (p > 0.75 || climax > 0.55) ? 2 : 1;
+    dx = ox[dir] * amp;
+    dy = oy[dir] * amp;
+}
+
+// mem→画面の最終転送。ピクン時は露出した縁だけ gap で埋めてからずらして BitBlt。
+// (全面 FillRect するとピンク帯が並んで操作不能になる)
+static void CCC_InwomanBitBlt(HDC dst, int w, int h, HDC src, COLORREF gap)
+{
+    if (!dst || !src || w <= 0 || h <= 0) return;
+    int ox = 0, oy = 0;
+    CCC_InwomanGetShake(ox, oy);
+    if (ox || oy) {
+        HBRUSH br = ::CreateSolidBrush(gap);
+        if (br) {
+            if (ox > 0) {
+                RECT r = { 0, 0, ox, h };
+                ::FillRect(dst, &r, br);
+            } else if (ox < 0) {
+                RECT r = { w + ox, 0, w, h };
+                ::FillRect(dst, &r, br);
+            }
+            if (oy > 0) {
+                RECT r = { 0, 0, w, oy };
+                ::FillRect(dst, &r, br);
+            } else if (oy < 0) {
+                RECT r = { 0, h + oy, w, h };
+                ::FillRect(dst, &r, br);
+            }
+            ::DeleteObject(br);
+        }
+    }
+    ::BitBlt(dst, ox, oy, w, h, src, 0, 0, SRCCOPY);
+}
+
+static void CCC_InwomanAlphaBlend(HDC dst, int w, int h, HDC src)
+{
+    if (!dst || !src || w <= 0 || h <= 0) return;
+    int ox = 0, oy = 0;
+    CCC_InwomanGetShake(ox, oy);
+    if (ox || oy) {
+        // ずらし分の穴は不透明黒ではなく、src の端色に近い塗りを避け dst を一度クリア相当に
+        // (fixer 経路は直前に背景塗り済みのことが多いのでずらすだけ)
+    }
+    const BLENDFUNCTION bf = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
+    ::GdiAlphaBlend(dst, ox, oy, w, h, src, 0, 0, w, h, bf);
+}
+
+// とろけ顔(ハート目 + 半開きの口 + ほてり + 汗)。絶頂時に隅へ出す"イク顔"。
+static void CCC_DrawAhegaoFace(CDC* pDC, int cx, int cy, int sz, double twitch, double climax, BOOL bAeroTrans)
 {
     if (!pDC || sz < 8) return;
+    const double iku = (climax > twitch) ? climax : twitch;
 
     // 深い火照り(頬の赤み)— 濃いめにして発情感を強める
     if (!bAeroTrans)
     {
-        const int rx = sz / 2, ry = sz / 3;
-        FillRectAlpha(pDC, CRect(cx - sz / 2 - rx / 2, cy, cx - sz / 6, cy + ry), RGB(255, 70, 120), 110);
-        FillRectAlpha(pDC, CRect(cx + sz / 6, cy, cx + sz / 2 + rx / 2, cy + ry), RGB(255, 70, 120), 110);
+        const int rx = sz / 2 + (int)(sz / 8 * iku), ry = sz / 3 + (int)(sz / 10 * iku);
+        const BYTE a = (BYTE)(120 + (int)(60 * iku));
+        FillRectAlpha(pDC, CRect(cx - sz / 2 - rx / 2, cy, cx - sz / 6, cy + ry), RGB(255, 50, 110), a);
+        FillRectAlpha(pDC, CRect(cx + sz / 6, cy, cx + sz / 2 + rx / 2, cy + ry), RGB(255, 50, 110), a);
     }
 
     const int eo = sz / 3;
-    const int ey = cy - sz / 8 - (int)(sz / 8 * twitch); // ビクッで上に
-    const int es = max(4, sz / 2);
-    // 目: 普段は「とろん」と潤んだ半目(ハート頼みを減らす)。
-    //     絶頂(twitch高)の瞬間だけハート目にして"イってる"感を出す。
-    if (twitch > 0.55)
+    const int ey = cy - sz / 8 - (int)(sz / 6 * iku); // ビクッ／イクで上に
+    const int es = max(4, sz / 2 + (int)(sz / 8 * climax));
+    // 目: 普段はとろん半目。ピクン高／イクはハート目で"イってる"
+    if (iku > 0.40)
     {
-        DrawHeart(pDC, CRect(cx - eo - es / 2, ey - es / 2, cx - eo + es / 2, ey + es / 2), RGB(255, 40, 92));
-        DrawHeart(pDC, CRect(cx + eo - es / 2, ey - es / 2, cx + eo + es / 2, ey + es / 2), RGB(255, 40, 92));
+        DrawHeart(pDC, CRect(cx - eo - es / 2, ey - es / 2, cx - eo + es / 2, ey + es / 2), RGB(255, 28, 88));
+        DrawHeart(pDC, CRect(cx + eo - es / 2, ey - es / 2, cx + eo + es / 2, ey + es / 2), RGB(255, 28, 88));
     }
     else
     {
@@ -2934,7 +3124,6 @@ static void CCC_DrawAhegaoFace(CDC* pDC, int cx, int cy, int sz, double twitch, 
         pDC->SelectObject(obe);
         DrawShine(pDC, cx - eo - er / 3, ey - er / 3, max(1, er / 3), max(1, er / 2), RGB(255, 200, 225));
         DrawShine(pDC, cx + eo - er / 3, ey - er / 3, max(1, er / 3), max(1, er / 2), RGB(255, 200, 225));
-        // 重い上まぶた(半目)
         CPen lid(PS_SOLID, max(1, sz / 14), RGB(120, 40, 70));
         CPen* opn = pDC->SelectObject(&lid);
         pDC->MoveTo(cx - eo - er, ey - er / 2); pDC->LineTo(cx - eo + er, ey - er / 2);
@@ -2942,135 +3131,248 @@ static void CCC_DrawAhegaoFace(CDC* pDC, int cx, int cy, int sz, double twitch, 
         pDC->SelectObject(opn);
     }
 
-    // 半開きの口 + だらしなく伸びた舌(ビクッで大きく開く)
+    // 半開きの口 + だらり舌(イクで大きく開く)
     const int my = cy + sz / 3;
-    const int mw = max(4, sz * 2 / 5);
-    const int mh = max(3, sz / 5) + (int)(sz / 5 * twitch);
+    const int mw = max(4, sz * 2 / 5) + (int)(sz / 8 * climax);
+    const int mh = max(3, sz / 5) + (int)(sz / 4 * iku);
     CBrush bm(RGB(150, 30, 52));
     CBrush* ob = pDC->SelectObject(&bm);
     CGdiObject* op = pDC->SelectStockObject(NULL_PEN);
     pDC->Ellipse(cx - mw / 2, my - mh / 2, cx + mw / 2, my + mh / 2 + 1);
-    // 舌(下にだらりと伸びる)
-    CBrush bt(RGB(255, 120, 150));
+    CBrush bt(RGB(255, 110, 145));
     pDC->SelectObject(&bt);
-    pDC->RoundRect(cx - mw / 4, my, cx + mw / 4, my + mh / 2 + (int)(sz / 4 * (0.4 + twitch)), 3, 3);
+    pDC->RoundRect(cx - mw / 4, my, cx + mw / 4, my + mh / 2 + (int)(sz / 3 * (0.45 + iku)), 3, 3);
     if (op) pDC->SelectObject(op);
     pDC->SelectObject(ob);
 
-    // よだれ(口角から1筋たらり)
-    if (!bAeroTrans)
-        FillRectAlpha(pDC, CRect(cx + mw / 2 - 1, my, cx + mw / 2 + 1, my + sz / 3), RGB(235, 240, 255), 140);
+    // よだれ(口角からたらり。イクで2筋)
+    if (!bAeroTrans) {
+        FillRectAlpha(pDC, CRect(cx + mw / 2 - 1, my, cx + mw / 2 + 1, my + sz / 3 + (int)(sz / 5 * climax)), RGB(235, 240, 255), 160);
+        if (climax > 0.35)
+            FillRectAlpha(pDC, CRect(cx - mw / 2 - 1, my + 1, cx - mw / 2 + 1, my + sz / 4), RGB(235, 240, 255), 130);
+    }
     DrawShine(pDC, cx - mw / 6, my, max(1, mw / 6), max(1, mh / 4), RGB(255, 200, 220));
 
-    // 汗(こめかみ)
+    // 汗(こめかみ) — イクで2粒
     CBrush bs(RGB(190, 225, 255));
     CBrush* ob2 = pDC->SelectObject(&bs);
     CGdiObject* op2 = pDC->SelectStockObject(NULL_PEN);
     pDC->Ellipse(cx + sz / 2 - 1, cy - sz / 2, cx + sz / 2 + 2, cy - sz / 2 + 3);
+    if (climax > 0.25)
+        pDC->Ellipse(cx - sz / 2 - 1, cy - sz / 3, cx - sz / 2 + 2, cy - sz / 3 + 3);
     if (op2) pDC->SelectObject(op2);
     pDC->SelectObject(ob2);
 }
 
-// 愛液表現: 下端からとろりと滴る半透明のしずく + 細い糸。
-// 透明感のある乳白色〜淡いピンクで、脈動(breath)とビクッ(twitch)で伸縮する。
-static void CCC_DrawLoveFluid(CDC* pDC, const CRect& rc, double breath, double twitch, BOOL bAeroTrans)
+// 愛液: XXX(秘部)から出て垂れ・溜まる。ピクン／イクで伸び・飛び散る。
+static void CCC_DrawLoveFluid(CDC* pDC, const CRect& rc, double breath, double twitch, double climax, BOOL bAeroTrans)
 {
-    if (!pDC || rc.Width() < 12 || rc.Height() < 12) return;
-    const COLORREF fluid = RGB(235, 240, 255);
-    const COLORREF tint  = RGB(255, 226, 241);
+    if (!pDC || rc.Width() < 10 || rc.Height() < 10) return;
+    const COLORREF fluid = RGB(242, 246, 255);
+    const COLORREF tint  = RGB(255, 210, 236);
+    const COLORREF wet   = RGB(255, 170, 210);
+    const COLORREF lip   = RGB(255, 140, 180);
+    const COLORREF lipIn = RGB(200, 70, 120);
+    const double iku = (climax > twitch) ? climax : twitch;
 
-    // 下端にとろりとした溜まり(薄い半透明の帯)を敷いて"濡れ"感を強める
-    if (!bAeroTrans)
+    // --- XXX ソース: 下端中央の秘部(外唇+割れ目)。ここから愛液が出る ---
+    const int cx = rc.left + rc.Width() / 2;
+    const int srcY = rc.bottom - max(4, rc.Height() / 7);
+    const int lipW = max(6, rc.Width() / 7 + (int)(rc.Width() / 40 * breath));
+    const int lipH = max(4, rc.Height() / 12 + (int)(2 * twitch));
     {
-        const int pool = max(2, rc.Height() / 12);
-        FillRectAlpha(pDC, CRect(rc.left, rc.bottom - pool, rc.right, rc.bottom), fluid, 70);
-    }
-
-    const int n = (rc.Width() >= 64) ? 4 : 3;
-    for (int i = 0; i < n; ++i)
-    {
-        int x = rc.left + rc.Width() * (i * 2 + 1) / (n * 2);
-        x += (int)(2 * sin((double)i * 1.7 + breath * 6.2831853));
-        int drip = (int)(rc.Height() * 0.22 * (0.5 + 0.5 * breath) + rc.Height() * 0.16 * twitch);
-        if (drip < 4) drip = 4;
-        if (drip > rc.Height() * 3 / 5) drip = rc.Height() * 3 / 5;
-        const int y0 = rc.bottom - drip;
-        if (!bAeroTrans)
-            FillRectAlpha(pDC, CRect(x - 1, y0, x + 1, rc.bottom), fluid, 140);
-        const int r = max(2, rc.Width() / 22);
-        CBrush bb(tint);
-        CBrush* ob = pDC->SelectObject(&bb);
+        CBrush bl(lip);
+        CBrush* ob = pDC->SelectObject(&bl);
         CGdiObject* op = pDC->SelectStockObject(NULL_PEN);
-        pDC->Ellipse(x - r, rc.bottom - r * 2, x + r, rc.bottom);
+        pDC->Ellipse(cx - lipW - lipW / 3, srcY - lipH, cx - lipW / 6, srcY + lipH);
+        pDC->Ellipse(cx + lipW / 6, srcY - lipH, cx + lipW + lipW / 3, srcY + lipH);
+        CBrush bi(lipIn);
+        pDC->SelectObject(&bi);
+        const int gap = max(2, lipW / 5) + (int)(2 * climax);
+        pDC->Ellipse(cx - gap, srcY - lipH / 2 - (int)(2 * twitch), cx + gap, srcY + lipH + (int)(3 * climax));
         if (op) pDC->SelectObject(op);
         pDC->SelectObject(ob);
-        DrawShine(pDC, x - r / 2, rc.bottom - r - r / 2, max(1, r / 3), max(1, r / 2));
+        DrawShine(pDC, cx - lipW / 2, srcY - lipH / 3, max(1, lipW / 6), max(1, lipH / 3), RGB(255, 220, 235));
+        DrawShine(pDC, cx + lipW / 4, srcY - lipH / 4, max(1, lipW / 7), max(1, lipH / 4), RGB(255, 230, 240));
+    }
+
+    // 割れ目直下の溜まり(下端だけ・中央ラベルを残す)
+    if (!bAeroTrans)
+    {
+        const int pool = max(2, rc.Height() / 14 + (int)(rc.Height() / 20 * iku));
+        FillRectAlpha(pDC, CRect(cx - lipW, rc.bottom - pool, cx + lipW, rc.bottom), tint, (BYTE)(55 + (int)(50 * breath)));
+        FillRectAlpha(pDC, CRect(rc.left + rc.Width() / 5, rc.bottom - pool / 2, rc.right - rc.Width() / 5, rc.bottom), fluid, (BYTE)(40 + (int)(45 * iku)));
+    }
+
+    // 割れ目から垂れる糸+しずく(ソースは中央=XXX)。伸びすぎて文字を隠さない。
+    const int n = (rc.Width() >= 72) ? 4 : ((rc.Width() >= 40) ? 3 : 2);
+    for (int i = 0; i < n; ++i)
+    {
+        const double u = (i + 0.5) / n;
+        int x = cx + (int)((u - 0.5) * lipW * 2.2);
+        x += (int)(2 * sin((double)i * 1.7 + breath * 6.2831853) + 2 * twitch * ((i & 1) ? 1 : -1));
+        int drip = (int)(rc.Height() * 0.14 * (0.4 + 0.6 * breath)
+            + rc.Height() * 0.14 * twitch
+            + rc.Height() * 0.18 * climax);
+        if (drip < 4) drip = 4;
+        if (drip > rc.Height() / 3) drip = rc.Height() / 3;
+        const int y0 = srcY + lipH / 2;
+        const int y1 = min(rc.bottom, y0 + drip);
+        if (!bAeroTrans) {
+            FillRectAlpha(pDC, CRect(x - 1, y0, x + 2, y1), fluid, (BYTE)(155 + (int)(50 * iku)));
+            if (drip > 10)
+                FillRectAlpha(pDC, CRect(x - 2, y0 + drip / 3, x + 3, y0 + drip / 3 + 3), tint, 130);
+        }
+        const int r = max(2, rc.Width() / 18 + (int)(2 * climax));
+        CBrush bb(iku > 0.5 ? wet : tint);
+        CBrush* ob = pDC->SelectObject(&bb);
+        CGdiObject* op = pDC->SelectStockObject(NULL_PEN);
+        pDC->Ellipse(x - r, y1 - r * 2, x + r, y1 + (int)(2 * climax));
+        if (op) pDC->SelectObject(op);
+        pDC->SelectObject(ob);
+        DrawShine(pDC, x - r / 2, y1 - r, max(1, r / 3), max(1, r / 2));
+    }
+
+    // イク: XXXから斜めに飛び散る
+    if (climax > 0.2 && !bAeroTrans && rc.Width() >= 28)
+    {
+        const int ns = (rc.Width() >= 64) ? 6 : 4;
+        for (int s = 0; s < ns; ++s) {
+            const double ang = -1.0 + s * (2.0 / (ns - 1));
+            const int len = (int)((rc.Height() / 4 + rc.Width() / 9) * climax);
+            const int x0 = cx + (s - ns / 2) * (lipW / 2);
+            const int y0 = srcY;
+            const int x1 = x0 + (int)(len * sin(ang));
+            const int y1 = y0 - (int)(len * cos(ang) * 0.4);
+            FillRectAlpha(pDC, CRect(min(x0, x1), min(y0, y1), max(x0, x1) + 2, max(y0, y1) + 2), fluid, (BYTE)(110 + (int)(80 * climax)));
+            CBrush bb(tint);
+            CBrush* ob = pDC->SelectObject(&bb);
+            CGdiObject* op = pDC->SelectStockObject(NULL_PEN);
+            const int rr = max(2, 2 + (int)(2 * climax));
+            pDC->Ellipse(x1 - rr, y1 - rr, x1 + rr, y1 + rr);
+            if (op) pDC->SelectObject(op);
+            pDC->SelectObject(ob);
+        }
     }
 }
 
-// バイブ表現(主役): 丸い先端のトイ + ブーンの振動線。twitch/時間で小刻みに震える。
-// 愛液まみれの照り(濡れツヤ)をまとい、本体の下端から愛液を糸を引いて滴らせる。
-// 方向性: 体液・玩具中心 / イッてる最中(脈動 breath とビクッ twitch で滴りが伸びる)。
-static void CCC_DrawVibrator(CDC* pDC, int cx, int cy, int sz, double t, double twitch, double breath, BOOL bAeroTrans)
+// バイブ=ロータ / 電マ / 吸引バイブ / クンニ。時間で切替。愛液まみれ＋振動。
+static void CCC_DrawVibrator(CDC* pDC, int cx, int cy, int sz, double t, double twitch, double breath, double climax, BOOL bAeroTrans)
 {
-    if (!pDC || sz < 10) return;
-    cx += (int)(2 * sin(t / 16.0)) + (int)(2 * twitch);   // ブーンと震える
-    const int w = max(5, sz / 3);
-    const int h = sz;
-    const int top = cy - h / 2;
-    const int bot = cy + h / 2;
-    const COLORREF body  = RGB(228, 126, 198);
-    const COLORREF tip   = RGB(255, 182, 226);
-    const COLORREF fluid = RGB(235, 240, 255);
+    if (!pDC || sz < 8) return;
+    const double iku = (climax > twitch) ? climax : twitch;
+    cx += (int)(2 * sin(t / 11.0) + 2 * cos(t / 7.0) + 3 * twitch + 4 * climax);
+    cy += (int)(1 * sin(t / 9.0) - 2 * twitch - 3 * climax);
+    const int kind = ((int)(t / 2600)) & 3; // 0ロータ 1電マ 2吸引 3クンニ
+    const COLORREF body = RGB(236, 110, 188);
+    const COLORREF tip  = RGB(255, 190, 230);
+    const COLORREF fluid = RGB(240, 244, 255);
+    const COLORREF tongue = RGB(255, 130, 160);
 
-    CBrush bb(body);
-    CBrush* ob = pDC->SelectObject(&bb);
-    CGdiObject* op = pDC->SelectStockObject(NULL_PEN);
-    pDC->RoundRect(cx - w / 2, top + w / 2, cx + w / 2, bot, w, w);   // 本体
-    CBrush bt(tip);
-    pDC->SelectObject(&bt);
-    pDC->Ellipse(cx - w / 2, top, cx + w / 2, top + w);              // 丸い先端
-    if (op) pDC->SelectObject(op);
-    pDC->SelectObject(ob);
+    CGdiObject* opN = pDC->SelectStockObject(NULL_PEN);
 
-    // 愛液まみれの濡れツヤ(縦ハイライト2本)
-    DrawShine(pDC, cx - w / 5, top + w / 3, max(1, w / 6), max(2, h / 3), RGB(255, 235, 245));
-    DrawShine(pDC, cx + w / 6, cy, max(1, w / 8), max(1, h / 6), RGB(255, 255, 255));
-
-    // 振動線(ブーン)
-    CPen pen(PS_SOLID, 1, RGB(255, 212, 236));
-    CPen* opn = pDC->SelectObject(&pen);
-    for (int s = 0; s < 2; ++s)
-    {
-        const int dx = w / 2 + 3 + s * 3;
-        pDC->MoveTo(cx - dx, cy - h / 5); pDC->LineTo(cx - dx, cy + h / 8);
-        pDC->MoveTo(cx + dx, cy - h / 5); pDC->LineTo(cx + dx, cy + h / 8);
-    }
-    pDC->SelectObject(opn);
-
-    // 本体下端から愛液を垂らす(糸+先端のしずく。脈動/ビクッで伸びる)
-    for (int i = 0; i < 2; ++i)
-    {
-        const int x = cx + ((i == 0) ? -w / 5 : w / 5);
-        int drip = (int)(h * 0.32 * (0.5 + 0.5 * breath) + h * 0.28 * twitch);
-        if (drip < 4) drip = 4;
+    if (kind == 0) {
+        // ロータ: 小さな楕円エッグ + 短いコード
+        const int ew = max(6, sz / 2), eh = max(8, sz * 2 / 3);
+        CBrush bb(body);
+        CBrush* ob = pDC->SelectObject(&bb);
+        pDC->Ellipse(cx - ew / 2, cy - eh / 2, cx + ew / 2, cy + eh / 2);
+        CBrush bt(tip);
+        pDC->SelectObject(&bt);
+        pDC->Ellipse(cx - ew / 3, cy - eh / 2, cx + ew / 3, cy - eh / 6);
+        pDC->SelectObject(ob);
+        CPen pc(PS_SOLID, max(1, sz / 14), RGB(180, 80, 140));
+        CPen* opn = pDC->SelectObject(&pc);
+        pDC->MoveTo(cx, cy + eh / 2);
+        pDC->LineTo(cx + ew / 2 + 4, cy + eh / 2 + eh / 3);
+        pDC->SelectObject(opn);
+        DrawShine(pDC, cx - ew / 5, cy - eh / 4, max(1, ew / 5), max(2, eh / 3), RGB(255, 235, 248));
         if (!bAeroTrans)
-            FillRectAlpha(pDC, CRect(x - 1, bot - 1, x + 1, bot + drip), fluid, 155);
-        const int r = max(2, w / 4);
-        CBrush bf(RGB(255, 230, 244));
+            FillRectAlpha(pDC, CRect(cx - 1, cy + eh / 2, cx + 2, cy + eh / 2 + (int)(eh * 0.4 * (0.5 + iku))), fluid, 170);
+    }
+    else if (kind == 1) {
+        // 電マ: 太いヘッド + 柄
+        const int hw = max(8, sz * 2 / 3), hh = max(7, sz / 2);
+        const int sw = max(4, sz / 4), sh = max(8, sz / 2);
+        CBrush bh(tip);
+        CBrush* ob = pDC->SelectObject(&bh);
+        pDC->Ellipse(cx - hw / 2, cy - hh - sh / 4, cx + hw / 2, cy - sh / 4 + hh / 6);
+        CBrush bb(body);
+        pDC->SelectObject(&bb);
+        pDC->RoundRect(cx - sw / 2, cy - sh / 4, cx + sw / 2, cy + sh / 2, sw, sw);
+        pDC->SelectObject(ob);
+        DrawShine(pDC, cx - hw / 4, cy - hh, max(2, hw / 5), max(2, hh / 3), RGB(255, 255, 255));
+        CPen pen(PS_SOLID, 1, RGB(255, 200, 230));
+        CPen* opn = pDC->SelectObject(&pen);
+        for (int s = 0; s < 2 + (int)(2 * iku); ++s) {
+            const int d = hw / 2 + 3 + s * 3;
+            pDC->Arc(cx - d, cy - hh - sh / 4 - d / 4, cx + d, cy - sh / 4 + d / 4,
+                cx + d, cy - hh / 2, cx - d, cy - hh / 2);
+        }
+        pDC->SelectObject(opn);
+        if (!bAeroTrans)
+            FillRectAlpha(pDC, CRect(cx - hw / 3, cy - sh / 4, cx + hw / 3, cy - sh / 4 + (int)(6 + 8 * breath)), fluid, 120);
+    }
+    else if (kind == 2) {
+        // 吸引バイブ: カップ口 + 吸引の脈動リング
+        const int rw = max(8, sz * 3 / 5), rh = max(6, sz / 2);
+        CBrush bb(body);
+        CBrush* ob = pDC->SelectObject(&bb);
+        pDC->Ellipse(cx - rw / 2, cy - rh / 2, cx + rw / 2, cy + rh / 2);
+        CBrush hole(RGB(90, 30, 55));
+        pDC->SelectObject(&hole);
+        const int gap = max(3, rw / 3) - (int)(2 * breath);
+        pDC->Ellipse(cx - gap, cy - rh / 4, cx + gap, cy + rh / 3);
+        pDC->SelectObject(ob);
+        CPen pen(PS_SOLID, 1, RGB(255, 180, 220));
+        CPen* opn = pDC->SelectObject(&pen);
+        const int nR = 2 + (twitch > 0.3 ? 1 : 0) + (climax > 0.3 ? 1 : 0);
+        for (int s = 0; s < nR; ++s) {
+            const int d = rw / 2 + 2 + s * 3 + (int)(3 * sin(t / 80.0 + s));
+            pDC->Ellipse(cx - d, cy - rh / 2 - s, cx + d, cy + rh / 2 + s);
+        }
+        pDC->SelectObject(opn);
+        if (!bAeroTrans)
+            FillRectAlpha(pDC, CRect(cx - gap, cy, cx + gap, cy + rh / 2 + (int)(rh * 0.5 * iku)), fluid, 150);
+    }
+    else {
+        // クンニ: 割れ目に舌が這う
+        const int lw = max(6, sz / 2), lh = max(5, sz / 3);
+        CBrush lipBr(RGB(255, 140, 180));
+        CBrush* ob = pDC->SelectObject(&lipBr);
+        pDC->Ellipse(cx - lw, cy - lh / 2, cx - 1, cy + lh / 2);
+        pDC->Ellipse(cx + 1, cy - lh / 2, cx + lw, cy + lh / 2);
+        CBrush tg(tongue);
+        pDC->SelectObject(&tg);
+        const int lick = (int)(lh * 0.6 * (0.5 + 0.5 * sin(t / 90.0)) + lh * 0.4 * twitch);
+        pDC->RoundRect(cx - lw / 4, cy - lick / 2, cx + lw / 4, cy + lh / 2 + lick / 3, 4, 4);
+        pDC->SelectObject(ob);
+        DrawShine(pDC, cx - 1, cy, max(1, lw / 6), max(1, lh / 3), RGB(255, 220, 230));
+        if (!bAeroTrans)
+            FillRectAlpha(pDC, CRect(cx - 2, cy + lh / 3, cx + 2, cy + lh / 2 + (int)(lh * (0.5 + iku))), fluid, 180);
+    }
+
+    if (opN) pDC->SelectObject(opN);
+
+    for (int i = 0; i < 2 + (climax > 0.25 ? 1 : 0); ++i) {
+        const int x = cx + ((i == 0) ? -sz / 6 : ((i == 1) ? sz / 6 : 0));
+        int drip = (int)(sz * 0.35 * (0.45 + 0.55 * breath) + sz * 0.4 * twitch + sz * 0.5 * climax);
+        if (drip < 4) drip = 4;
+        const int bot = cy + sz / 3;
+        if (!bAeroTrans)
+            FillRectAlpha(pDC, CRect(x - 1, bot, x + 2, bot + drip), fluid, (BYTE)(160 + (int)(50 * iku)));
+        const int r = max(2, sz / 10 + (int)(2 * climax));
+        CBrush bf(RGB(255, 220, 240));
         CBrush* obf = pDC->SelectObject(&bf);
         CGdiObject* opf = pDC->SelectStockObject(NULL_PEN);
         pDC->Ellipse(x - r, bot + drip - r, x + r, bot + drip + r);
         if (opf) pDC->SelectObject(opf);
         pDC->SelectObject(obf);
-        DrawShine(pDC, x - r / 3, bot + drip - r / 3, max(1, r / 3), max(1, r / 2));
     }
 }
 
-// 淫女モードの演出オーバーレイ(方向性: 発情して自慰中の子が"そこにいる"雰囲気)。
-// SM/拘束は無し。読みやすさ優先で中央は塗らず、縁と隅だけで火照り・トロ顔・汗・ビクッ。
-// ハート一辺倒にならないよう、愛液(滴り)とバイブ(振動)も添える。
-// bAeroTrans時は半透明演出を避ける。
+// 淫女オーバーレイ: ロータ/電マ/吸引/クンニ＋XXX愛液＋控件ピクン＋イク(白み/赤み)。
+// 縁デコ中心にし、中央の文字・クリック領域はなるべく残す。
 void CCC_DrawInwoman(CDC* pDC, const CRect& rc, BOOL bAeroTrans)
 {
     if (!pDC || !CCC_IsInwoman() || rc.Width() < 8 || rc.Height() < 8)
@@ -3078,64 +3380,75 @@ void CCC_DrawInwoman(CDC* pDC, const CRect& rc, BOOL bAeroTrans)
 
     const DWORD t = ::GetTickCount();
     const int W = rc.Width(), H = rc.Height();
+    double breath = 0, twitch = 0, climax = 0;
+    CCC_InwomanPulse(t, breath, twitch, climax);
+    const double iku = (climax > twitch) ? climax : twitch;
+    const double heat = min(1.0, breath * 0.45 + twitch * 0.7 + climax * 0.85);
 
-    // はぁ…はぁ… ゆっくりした発情の脈動 + ビクッ(鋭いスパイク)
-    const double breath = 0.5 + 0.5 * sin(t / 600.0);
-    const double cyc = (t % 1700) / 1700.0;
-    double twitch = (cyc < 0.12) ? sin(cyc / 0.12 * 3.14159265) : 0.0;
-    twitch *= twitch;
-    const double heat = min(1.0, breath * 0.6 + twitch);
+    // --- イク: ほんのり白み＋赤み(文字が読める強さに抑える) ---
+    if (!bAeroTrans && climax > 0.22) {
+        FillRectAlpha(pDC, rc, RGB(255, 252, 255), (BYTE)(10 + (int)(36 * climax)));
+        FillRectAlpha(pDC, rc, RGB(255, 70, 120), (BYTE)(6 + (int)(28 * climax)));
+    }
 
-    // --- 発情の火照り: 縁が熱く脈打つ(中央は塗らない=文字/アイコンは読める) ---
-    //     濃いめ+広めにして"のぼせた"色気を強調する。
+    // --- 発情の火照り(細い縁だけ。太い帯になると操作不能) ---
     if (!bAeroTrans)
     {
-        const int g = 22 + (int)(78 * heat);
-        const COLORREF hot = RGB(255, 60, 110);
-        const int b = max(3, min(W, H) / 6);
-        FillRectAlpha(pDC, CRect(rc.left, rc.top, rc.right, rc.top + b), hot, g);
-        FillRectAlpha(pDC, CRect(rc.left, rc.bottom - b, rc.right, rc.bottom), hot, g);
-        FillRectAlpha(pDC, CRect(rc.left, rc.top, rc.left + b, rc.bottom), hot, g * 7 / 10);
-        FillRectAlpha(pDC, CRect(rc.right - b, rc.top, rc.right, rc.bottom), hot, g * 7 / 10);
+        const int g = 18 + (int)(55 * heat);
+        const COLORREF hot = (climax > 0.35) ? RGB(255, 35, 95) : RGB(255, 55, 115);
+        const int b = max(2, min(5, min(W, H) / 12));
+        FillRectAlpha(pDC, CRect(rc.left, rc.top, rc.right, rc.top + b), hot, (BYTE)g);
+        FillRectAlpha(pDC, CRect(rc.left, rc.bottom - b, rc.right, rc.bottom), hot, (BYTE)g);
+        FillRectAlpha(pDC, CRect(rc.left, rc.top, rc.left + b, rc.bottom), hot, (BYTE)(g * 3 / 4));
+        FillRectAlpha(pDC, CRect(rc.right - b, rc.top, rc.right, rc.bottom), hot, (BYTE)(g * 3 / 4));
 
-        // 上端から立ちのぼる"はぁ…"の湯気(白い半透明の小さな塊が揺らぐ)
         if (W >= 40 && H >= 22)
         {
-            const int puffs = (W >= 80) ? 3 : 2;
+            const int puffs = (W >= 80) ? (2 + (climax > 0.4 ? 1 : 0)) : 1;
             for (int i = 0; i < puffs; ++i)
             {
-                const double ph = t / 520.0 + i * 1.3;
+                const double ph = t / 420.0 + i * 1.15;
                 const int px = rc.left + rc.Width() * (i * 2 + 1) / (puffs * 2) + (int)(3 * sin(ph));
-                const int rise = (int)((0.5 + 0.5 * sin(ph)) * (H / 6));
-                const int py = rc.top + 3 + rise;
-                const int pr = max(2, W / 26);
-                FillRectAlpha(pDC, CRect(px - pr, py - pr, px + pr, py + pr), RGB(255, 245, 250), 26);
+                const int rise = (int)((0.5 + 0.5 * sin(ph)) * (H / 8 + (int)(H / 14 * climax)));
+                const int py = rc.top + 2 + rise;
+                const int pr = max(2, W / 28 + (int)(1 * climax));
+                FillRectAlpha(pDC, CRect(px - pr, py - pr, px + pr, py + pr), RGB(255, 245, 250), (BYTE)(18 + (int)(22 * iku)));
             }
         }
     }
 
-    // --- 主役: 愛液を垂らしたバイブ(体液・玩具中心。顔は出さない) ---
-    // 右寄りに立てて中央の文字/アイコンを大きく覆わないようにしつつ、はっきり見せる。
-    if (W >= 40 && H >= 20)
+    // --- 刺激具: 右端寄り・小さめ(ラベルを隠さない) ---
+    if (W >= 48 && H >= 22)
     {
-        const int vs = min(H * 7 / 10, max(16, W * 4 / 10));
-        const int vw = max(5, vs / 3);
-        const int vx = rc.right - vw / 2 - max(4, W / 12);
-        const int vy = rc.top + H / 2 - (int)(2 * twitch);
-        CCC_DrawVibrator(pDC, vx, vy, vs, (double)t, twitch, breath, bAeroTrans);
+        const int vs = min(H * 5 / 10, max(10, W * 3 / 10));
+        const int vw = max(4, vs / 3);
+        const int vx = rc.right - vw / 2 - max(2, W / 18);
+        const int vy = rc.top + H / 2;
+        CCC_DrawVibrator(pDC, vx, vy, vs, (double)t, twitch, breath, climax, bAeroTrans);
     }
 
-    // --- 愛液: 下端からとろりと滴る(溜まり+しずく) ---
-    CCC_DrawLoveFluid(pDC, rc, breath, twitch, bAeroTrans);
+    // --- 愛液: 十分な高さの控件だけ(細いボタンはスキップ) ---
+    if (H >= 28 && W >= 36)
+        CCC_DrawLoveFluid(pDC, rc, breath, twitch, climax, bAeroTrans);
 
-    // --- 汗の玉: 左上から1粒、ゆらゆら(べた塗りなので透過でも安全) ---
+    // --- イク顔(大きめのみ・左上) ---
+    if (W >= 72 && H >= 36 && iku > 0.45)
     {
-        const int sx = rc.left + 5 + (int)(2 * sin(t / 85.0));
-        const int sy = rc.top + 4 + (int)(3 * (0.5 + 0.5 * sin(t / 120.0)));
+        const int fs = min(H / 4, max(10, W / 9));
+        CCC_DrawAhegaoFace(pDC, rc.left + fs / 2 + 3, rc.top + fs / 2 + 2, fs, twitch, climax, bAeroTrans);
+    }
+
+    // --- 汗 ---
+    if (H >= 16)
+    {
+        const int sx = rc.left + 4 + (int)(2 * sin(t / 70.0) + 1 * twitch);
+        const int sy = rc.top + 3 + (int)(3 * (0.5 + 0.5 * sin(t / 95.0)));
         CBrush bb(RGB(190, 225, 255));
         CBrush* ob = pDC->SelectObject(&bb);
         CGdiObject* op = pDC->SelectStockObject(NULL_PEN);
-        pDC->Ellipse(sx - 2, sy - 3, sx + 2, sy + 2);
+        pDC->Ellipse(sx - 1, sy - 2, sx + 2, sy + 2);
+        if (climax > 0.35)
+            pDC->Ellipse(sx + 5, sy + 3, sx + 8, sy + 7);
         if (op) pDC->SelectObject(op);
         pDC->SelectObject(ob);
         DrawShine(pDC, sx - 1, sy - 1, 1, 1);
@@ -4943,7 +5256,7 @@ void CCustomStatic::DrawClient(CDC& dc)
     if (bTrans)
         blitTrans(memDC.GetSafeHdc());
     else
-        dc.BitBlt(0, 0, rw, rh, &memDC, 0, 0, SRCCOPY);
+        CCC_InwomanBitBlt(dc.GetSafeHdc(), rw, rh, memDC.GetSafeHdc(), COLOR_DIALOG_BG);
 
     memDC.SelectObject(ob);
     memDC.DeleteDC();
@@ -5205,7 +5518,22 @@ void CCustomListBox::DrawItem(LPDRAWITEMSTRUCT lp)
     int ix = r.left + max(4, is / 2);
     int iy = r.top + (r.Height() - is) / 2;
 
-    switch (it)
+    if (CCC_IsInwoman()) {
+        // 花/星/ハートごまかし禁止 → バイブ／愛液／ピクン
+        double breath = 0, twitch = 0, climax = 0;
+        CCC_InwomanPulse(::GetTickCount(), breath, twitch, climax);
+        const int cx = ix + is / 2, cy = iy + is / 2;
+        switch (it) {
+        case 0:
+        case 2:
+            CCC_DrawVibrator(pDC, cx, cy, is, (double)::GetTickCount(), twitch, breath, climax, FALSE);
+            break;
+        case 1:
+        case 3:
+            CCC_DrawLoveFluid(pDC, CRect(ix, iy, ix + is, iy + is + is / 2), breath, twitch, climax, FALSE);
+            break;
+        }
+    } else switch (it)
     {
     case 0: DrawFlower(pDC, ix + is / 2, iy + is / 2, is / 2, RGB(255, 200, 220)); break;
     case 1: DrawStar(pDC, ix + is / 2, iy + is / 2, is / 3, RGB(255, 215, 0)); break;
@@ -5219,7 +5547,16 @@ void CCustomListBox::DrawItem(LPDRAWITEMSTRUCT lp)
     case 3: DrawRibbon(pDC, CRect(ix, iy, ix + is, iy + is), RGB(255, 182, 193)); break;
     }
 
-    if (lp->itemState & ODS_SELECTED) DrawStar(pDC, r.right - max(10, is + 4), r.top + r.Height() / 2, max(3, is / 3), RGB(255, 215, 0));
+    if (lp->itemState & ODS_SELECTED) {
+        if (CCC_IsInwoman()) {
+            double breath = 0, twitch = 0, climax = 0;
+            CCC_InwomanPulse(::GetTickCount(), breath, twitch, climax);
+            CCC_DrawVibrator(pDC, r.right - max(10, is + 4), r.top + r.Height() / 2,
+                max(8, is * 2 / 3), (double)::GetTickCount(), twitch, breath, climax, FALSE);
+        } else {
+            DrawStar(pDC, r.right - max(10, is + 4), r.top + r.Height() / 2, max(3, is / 3), RGB(255, 215, 0));
+        }
+    }
 
     CString st;
     GetText(lp->itemID, st);
@@ -5432,20 +5769,32 @@ void CCustomComboBox::PaintClient(CDC& dc)
         mDC.SelectObject(op);
     }
 
-    // ハート3つはやめ、ひとつのリボンで上品に（Soft3D チップは DrawBow 内）
+    // 淫女: リボンごまかし→震えるバイブ。通常: 上品リボン
     {
         int cy2 = rB.Height() / 2 + rB.top;
         int bw = min(rB.Width() - 4, CCC_ScaleDpi(16, dpi));
         const int bh = CCC_ScaleDpi(5, dpi);
         const int cxB = rB.CenterPoint().x;
-        DrawBow(&mDC, CRect(cxB - bw / 2, cy2 - bh, cxB + bw / 2, cy2 + bh), COLOR_BOW);
-        // ドロップ展開中／ホバー相当: Soft 結びを強めに
-        if (GetDroppedState())
-            DrawSoftJkKnot(&mDC, CRect(cxB - 8, cy2 - 8, cxB + 8, cy2 + 8),
-                (int)(::GetTickCount64() / 40));
+        if (CCC_IsInwoman()) {
+            double breath = 0, twitch = 0, climax = 0;
+            CCC_InwomanPulse(::GetTickCount(), breath, twitch, climax);
+            const int vs = max(10, rB.Height() - 2);
+            CCC_DrawVibrator(&mDC, cxB, cy2, vs, (double)::GetTickCount(), twitch, breath, climax, bTrans);
+        } else {
+            DrawBow(&mDC, CRect(cxB - bw / 2, cy2 - bh, cxB + bw / 2, cy2 + bh), COLOR_BOW);
+            if (GetDroppedState())
+                DrawSoftJkKnot(&mDC, CRect(cxB - 8, cy2 - 8, cxB + 8, cy2 + 8),
+                    (int)(::GetTickCount64() / 40));
+        }
     }
 
-    DrawSparkle(&mDC, r.right - CCC_ScaleDpi(8, dpi), r.top + CCC_ScaleDpi(8, dpi), CCC_ScaleDpi(4, dpi), COLOR_SPARKLE);
+    if (CCC_IsInwoman()) {
+        double breath = 0, twitch = 0, climax = 0;
+        CCC_InwomanPulse(::GetTickCount(), breath, twitch, climax);
+        CCC_DrawLoveFluid(&mDC, r, breath, twitch, climax, bTrans);
+    } else {
+        DrawSparkle(&mDC, r.right - CCC_ScaleDpi(8, dpi), r.top + CCC_ScaleDpi(8, dpi), CCC_ScaleDpi(4, dpi), COLOR_SPARKLE);
+    }
 
     int nPS = CComboBox::GetCurSel();
     CString st;
@@ -5477,7 +5826,7 @@ void CCustomComboBox::PaintClient(CDC& dc)
     CCC_DrawInwoman(&mDC, r, bTrans);
 
     if (bTrans) CCC_ClearDestBlt(dc.GetSafeHdc(), 0, 0, r.Width(), r.Height(), mDC.GetSafeHdc(), 0, 0, RGB(0, 0, 0));
-    else dc.BitBlt(0, 0, r.Width(), r.Height(), &mDC, 0, 0, SRCCOPY);
+    else CCC_InwomanBitBlt(dc.GetSafeHdc(), r.Width(), r.Height(), mDC.GetSafeHdc(), COLOR_COMBO_BG);
 
     mDC.SelectObject(ob);
     mB.DeleteObject();
@@ -5581,7 +5930,15 @@ void CCustomComboBox::DrawItem(LPDRAWITEMSTRUCT lp)
         if (is > isMax) is = isMax;
         int ix = r.left + max(4, is / 2);
         int iy = r.top + (r.Height() - is) / 2;
-        switch (it)
+        if (CCC_IsInwoman()) {
+            double breath = 0, twitch = 0, climax = 0;
+            CCC_InwomanPulse(::GetTickCount(), breath, twitch, climax);
+            const int cx = ix + is / 2, cy = iy + is / 2;
+            if (it == 0 || it == 2)
+                CCC_DrawVibrator(pDC, cx, cy, is, (double)::GetTickCount(), twitch, breath, climax, FALSE);
+            else
+                CCC_DrawLoveFluid(pDC, CRect(ix, iy, ix + is, iy + is + is / 2), breath, twitch, climax, FALSE);
+        } else switch (it)
         {
         case 0: DrawFlower(pDC, ix + is / 2, iy + is / 2, is / 2, RGB(255, 200, 220)); break;
         case 1: DrawStar(pDC, ix + is / 2, iy + is / 2, is / 3, RGB(255, 215, 0)); break;
@@ -5922,7 +6279,7 @@ void CCustomSliderCtrl::PaintClient(CDC& dc)
         mDC.FillSolidRect(&r, COLOR_DIALOG_BG);
         DrawSlider(&mDC);
         CCC_DrawInwoman(&mDC, r, FALSE);
-        dc.BitBlt(0, 0, rw, rh, &mDC, 0, 0, SRCCOPY);
+        CCC_InwomanBitBlt(dc.GetSafeHdc(), rw, rh, mDC.GetSafeHdc(), COLOR_DIALOG_BG);
     }
     mDC.SelectObject(ob);
     mDC.DeleteDC();
@@ -6852,7 +7209,7 @@ void CCustomRangeSliderCtrl::PaintClient(CDC& dc)
         mDC.FillSolidRect(&r, COLOR_DIALOG_BG);
         DrawRangeSlider(&mDC);
         CCC_DrawInwoman(&mDC, r, FALSE);
-        dc.BitBlt(0, 0, rw, rh, &mDC, 0, 0, SRCCOPY);
+        CCC_InwomanBitBlt(dc.GetSafeHdc(), rw, rh, mDC.GetSafeHdc(), COLOR_DIALOG_BG);
     }
     mDC.SelectObject(ob);
     mDC.DeleteDC();
@@ -7820,37 +8177,75 @@ LRESULT CCustomListCtrl::OnPrintClient(WPARAM wParam, LPARAM lParam)
 
 // LVS_EX_CHECKBOXES 時、列0の状態イメージ領域へチェックボックスを自前描画する。
 // OnCustomDraw が CDRF_SKIPDEFAULT で全描画を奪うため、既定のチェックボックスが
-// 描かれずに消えてしまう問題への対処。GDI プリミティブで自己完結描画する。
+// 描かれずに消えてしまう問題への対処。
+// 素の Rectangle/Pen はアクリル／REDIRECTIONBITMAP 上で α=0 になり透過して見えるので、
+// 32bpp DIB に描いて α=255 固定で AlphaBlend する。
 static void CCC_DrawListCheckBox(CDC* pDC, const CRect& rc, bool checked)
 {
     if (!pDC || rc.Width() < 6 || rc.Height() < 6) return;
+    const int w = rc.Width();
+    const int h = rc.Height();
+    HDC hdcDst = pDC->GetSafeHdc();
+    if (!hdcDst) return;
 
-    // 枠つきの白いボックス
-    CBrush brFill(RGB(255, 255, 255));
-    CPen penBorder(PS_SOLID, 1, RGB(96, 96, 100));
-    CBrush* ob = pDC->SelectObject(&brFill);
-    CPen* op = pDC->SelectObject(&penBorder);
-    pDC->Rectangle(rc);
+    BITMAPINFO bi;
+    ZeroMemory(&bi, sizeof(bi));
+    bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bi.bmiHeader.biWidth = w;
+    bi.bmiHeader.biHeight = -h; // top-down
+    bi.bmiHeader.biPlanes = 1;
+    bi.bmiHeader.biBitCount = 32;
+    bi.bmiHeader.biCompression = BI_RGB;
+    void* bits = NULL;
+    HBITMAP dib = ::CreateDIBSection(hdcDst, &bi, DIB_RGB_COLORS, &bits, NULL, 0);
+    if (!dib || !bits) {
+        // 最低限の不透明白だけでも文字との区別は付く
+        CCC_FillRectOpaqueBits(hdcDst, rc, RGB(255, 255, 255));
+        return;
+    }
+
+    HDC mem = ::CreateCompatibleDC(hdcDst);
+    HGDIOBJ oldBmp = ::SelectObject(mem, dib);
+    RECT zr = { 0, 0, w, h };
+    HBRUSH brFill = ::CreateSolidBrush(RGB(255, 255, 255));
+    ::FillRect(mem, &zr, brFill);
+    ::DeleteObject(brFill);
+
+    HPEN penBorder = ::CreatePen(PS_SOLID, 1, RGB(70, 70, 78));
+    HGDIOBJ oldPen = ::SelectObject(mem, penBorder);
+    HGDIOBJ oldBr = ::SelectObject(mem, ::GetStockObject(NULL_BRUSH));
+    ::Rectangle(mem, 0, 0, w, h);
+    ::SelectObject(mem, oldBr);
 
     if (checked)
     {
-        // チェックマーク(レ点)
-        const int w = rc.Width();
-        const int h = rc.Height();
         const int penW = (std::max)(2, w / 7);
-        CPen penChk(PS_SOLID, penW, RGB(0, 128, 32));
-        CPen* op2 = pDC->SelectObject(&penChk);
-        POINT pt[3] = {
-            { rc.left + w * 22 / 100, rc.top + h * 52 / 100 },
-            { rc.left + w * 42 / 100, rc.top + h * 72 / 100 },
-            { rc.left + w * 80 / 100, rc.top + h * 26 / 100 },
-        };
-        pDC->Polyline(pt, 3);
-        pDC->SelectObject(op2);
+        HPEN penChk = ::CreatePen(PS_SOLID, penW, RGB(0, 140, 40));
+        ::SelectObject(mem, penChk);
+        ::MoveToEx(mem, w * 22 / 100, h * 52 / 100, NULL);
+        ::LineTo(mem, w * 42 / 100, h * 72 / 100);
+        ::LineTo(mem, w * 80 / 100, h * 26 / 100);
+        ::SelectObject(mem, penBorder);
+        ::DeleteObject(penChk);
     }
 
-    pDC->SelectObject(ob);
-    pDC->SelectObject(op);
+    ::SelectObject(mem, oldPen);
+    ::DeleteObject(penBorder);
+
+    // 全画素 α=255（透過禁止）
+    {
+        DWORD* px = (DWORD*)bits;
+        const int n = w * h;
+        for (int i = 0; i < n; ++i)
+            px[i] |= 0xFF000000u;
+    }
+    const BLENDFUNCTION bf = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
+    if (!::GdiAlphaBlend(hdcDst, rc.left, rc.top, w, h, mem, 0, 0, w, h, bf))
+        CCC_FillRectOpaqueBits(hdcDst, rc, RGB(255, 255, 255));
+
+    ::SelectObject(mem, oldBmp);
+    ::DeleteDC(mem);
+    ::DeleteObject(dib);
 }
 
 void CCustomListCtrl::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
@@ -7944,6 +8339,7 @@ void CCustomListCtrl::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
         // プレイリスト系は m_mpNoteIconGet で実♪を取得(GetDispInfo の iImage は空のまま)。
         // テキスト左余白計算でも同じ値を使う。
         int noteImg = 1;
+        int checkPad = 0; // LVS_EX_CHECKBOXES 時、文字開始をチェック右へずらす
         if (ns == 0)
         {
             // LVS_EX_CHECKBOXES 指定リスト(kpi一覧)のみ、状態イメージ領域へ
@@ -7966,6 +8362,7 @@ void CCustomListCtrl::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
                 rcCb.right = rcCb.left + cbSize;
                 rcCb.bottom = rcCb.top + cbSize;
                 CCC_DrawListCheckBox(pDC, rcCb, GetCheck(ni) != FALSE);
+                checkPad = (rcCb.right - r.left) + 4; // チェック右端 + 隙間
             }
             // 再生アイコン: ImageList と pc[].icon の対応は
             //   0=♪A(IDI_ICON1) / 1=空(IDI_ICON2・透明) / 2=♪B(IDI_ICON3)
@@ -8082,19 +8479,25 @@ void CCustomListCtrl::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
             const UINT dpiTxt = CCC_GetControlDpi(m_hWnd);
             // 名前列テキスト開始: ジャケ右 + ♪(16) + 隙間。旧 36/24@96 固定のまま ScaleDpi
             // するとジャケ縮小後も余白だけ残り横に間延びする。
+            // kpi一覧(LVS_EX_CHECKBOXES)はチェック幅を先に確保して文字と重ねない。
             int tl = r.left + CCC_ScaleDpi(4, dpiTxt);
+            if (checkPad > 0)
+                tl = r.left + checkPad;
             if (m_mpJacketPx > 0)
-                tl = r.left + m_mpJacketPx + CCC_ScaleDpi(3, dpiTxt) + CCC_ScaleDpi(16, dpiTxt) + CCC_ScaleDpi(4, dpiTxt);
+                tl = r.left + checkPad + m_mpJacketPx + CCC_ScaleDpi(3, dpiTxt) + CCC_ScaleDpi(16, dpiTxt) + CCC_ScaleDpi(4, dpiTxt);
             CRect ri2;
             if (GetItemRect(ni, &ri2, LVIR_ICON))
             {
                 if (noteImg >= 0 && noteImg != 1) {
                     if (m_mpJacketPx > 0)
-                        tl = (std::max)(tl, (int)r.left + m_mpJacketPx + CCC_ScaleDpi(3, dpiTxt) + CCC_ScaleDpi(16, dpiTxt) + CCC_ScaleDpi(4, dpiTxt));
+                        tl = (std::max)(tl, (int)r.left + checkPad + m_mpJacketPx + CCC_ScaleDpi(3, dpiTxt) + CCC_ScaleDpi(16, dpiTxt) + CCC_ScaleDpi(4, dpiTxt));
                     else if (ri2.Width() > 0)
-                        tl = (std::max)(tl, (int)ri2.right + CCC_ScaleDpi(4, dpiTxt));
+                        tl = (std::max)(tl, (int)(std::max)((int)ri2.right, (int)r.left + checkPad) + CCC_ScaleDpi(4, dpiTxt));
                 }
             }
+            // チェックありでアイコン矩形が無い／空♪のときも、チェック右を下回らない
+            if (checkPad > 0)
+                tl = (std::max)(tl, (int)r.left + checkPad);
             tl = (std::min)(tl, (int)r.right - CCC_ScaleDpi(4, dpiTxt));
             rt.left = (std::max)(tl, (int)r.left + CCC_ScaleDpi(4, dpiTxt));
             rt.DeflateRect(CCC_ScaleDpi(2, dpiTxt), 0);
@@ -9791,12 +10194,14 @@ void CCustomStandardButton::PaintClient(CDC& dc, const CRect& r)
 
 #if CCUSTOM_AERO_SUPPORT
     if (bAeroTrans) {
-        CCC_BlitChromaTrans(dc.GetSafeHdc(), 0, 0, r.Width(), r.Height(),
+        int ox = 0, oy = 0;
+        CCC_InwomanGetShake(ox, oy);
+        CCC_BlitChromaTrans(dc.GetSafeHdc(), ox, oy, r.Width(), r.Height(),
             mDC.GetSafeHdc(), 0, 0, CCC_AERO_CHROMA_KEY);
     } else
 #endif
     {
-        dc.BitBlt(0, 0, r.Width(), r.Height(), &mDC, 0, 0, SRCCOPY);
+        CCC_InwomanBitBlt(dc.GetSafeHdc(), r.Width(), r.Height(), mDC.GetSafeHdc(), COLOR_BUTTON_BG);
     }
     mDC.SelectObject(ob);
     mB.DeleteObject();
@@ -10188,7 +10593,7 @@ void CCustomCheckBox::OnPaint()
     if (!bmp.CreateCompatibleBitmap(&dc, r.Width(), r.Height())) { OnDrawLayer(&dc, r); return; }
     CBitmap* ob = mem.SelectObject(&bmp);
     OnDrawLayer(&mem, r);
-    dc.BitBlt(0, 0, r.Width(), r.Height(), &mem, 0, 0, SRCCOPY);
+    CCC_InwomanBitBlt(dc.GetSafeHdc(), r.Width(), r.Height(), mem.GetSafeHdc(), COLOR_DIALOG_BG);
     mem.SelectObject(ob);
 }
 
@@ -12780,6 +13185,17 @@ private:
                 ::FillRect(pCache->hdcDib, &zr, (HBRUSH)brush.GetSafeHandle());
                 PaintClientIntoBuffer(hWnd, pCache->hdcDib);
                 pCache->MakeRectOpaque(0, 0, width, height);
+                if (CCC_IsInwoman()) {
+                    int ox = 0, oy = 0;
+                    CCC_InwomanGetShake(ox, oy);
+                    if (ox || oy) {
+                        CBrush brush(m_clrBg);
+                        RECT zr = { 0, 0, width, height };
+                        ::FillRect(hDestDC, &zr, (HBRUSH)brush.GetSafeHandle());
+                    }
+                    CCC_InwomanAlphaBlend(hDestDC, width, height, pCache->hdcDib);
+                    return;
+                }
                 const BLENDFUNCTION bf = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
                 if (::GdiAlphaBlend(hDestDC, 0, 0, width, height,
                         pCache->hdcDib, 0, 0, width, height, bf))
@@ -12814,7 +13230,7 @@ private:
         CBrush brush(m_clrBg);
         dcMem.FillRect(CRect(0, 0, width, height), &brush);
         PaintClientIntoBuffer(hWnd, dcMem.GetSafeHdc());
-        dcDest.BitBlt(0, 0, width, height, &dcMem, 0, 0, SRCCOPY);
+        CCC_InwomanBitBlt(dcDest.GetSafeHdc(), width, height, dcMem.GetSafeHdc(), m_clrBg);
 
         dcMem.SelectObject(pOld);
         dcDest.Detach();

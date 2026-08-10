@@ -234,6 +234,38 @@ namespace {
 			|| msg == WM_NCRBUTTONDOWN || msg == WM_NCRBUTTONUP
 			|| msg == WM_CONTEXTMENU;
 	}
+	// 退場アニメ／破棄中にメインへ流すと押下見た目だけ残って BN_CLICKED が死ぬ
+	static BOOL PopupIsInputMessage(UINT msg)
+	{
+		if (msg >= WM_MOUSEFIRST && msg <= WM_MOUSELAST) return TRUE;
+		if (msg >= WM_KEYFIRST && msg <= WM_KEYLAST) return TRUE;
+		if (msg >= WM_NCMOUSEMOVE && msg <= WM_NCMBUTTONDBLCLK) return TRUE;
+		if (msg == WM_CONTEXTMENU || msg == WM_APPCOMMAND) return TRUE;
+		return FALSE;
+	}
+	// 外側クリックで閉じた DOWN の対になる UP／残クリックを捨てる（キャプチャ残留防止）
+	static void PopupEatDismissClickTail()
+	{
+		MSG m;
+		for (;;) {
+			BOOL got = FALSE;
+			if (::PeekMessage(&m, NULL, WM_LBUTTONDOWN, WM_LBUTTONDBLCLK, PM_REMOVE))
+				got = TRUE;
+			else if (::PeekMessage(&m, NULL, WM_NCLBUTTONDOWN, WM_NCLBUTTONDBLCLK, PM_REMOVE))
+				got = TRUE;
+			else if (::PeekMessage(&m, NULL, WM_RBUTTONDOWN, WM_RBUTTONDBLCLK, PM_REMOVE))
+				got = TRUE;
+			else if (::PeekMessage(&m, NULL, WM_NCRBUTTONDOWN, WM_NCRBUTTONDBLCLK, PM_REMOVE))
+				got = TRUE;
+			else if (::PeekMessage(&m, NULL, WM_MBUTTONDOWN, WM_MBUTTONDBLCLK, PM_REMOVE))
+				got = TRUE;
+			else if (::PeekMessage(&m, NULL, WM_CONTEXTMENU, WM_CONTEXTMENU, PM_REMOVE))
+				got = TRUE;
+			if (!got) break;
+		}
+		if (::GetCapture())
+			::ReleaseCapture();
+	}
 	static void PopupArmReopenAt(CPoint screenPt, BOOL nc)
 	{
 		s_reopenRClick = TRUE;
@@ -295,33 +327,41 @@ namespace {
 			}
 			fb.PresentAlpha(dc.GetSafeHdc(), rc.left, rc.top, constA);
 		};
-		if (s_popSoft3d.fb.w != w || s_popSoft3d.fb.h != h)
-			s_popSoft3d.Create(w, h);
-		if (s_popSoft3d.fb.color && s_popSoft3d.fb.w == w && s_popSoft3d.fb.h == h) {
-			s_popSoft3d.fb.Clear(GdiSoftFB::PackBGRA(0, 0, 0, 0), 1e9f);
-			s_popSoft3d.alphaBlend = true;
-			s_popSoft3d.depthTest = true;
-			s_popSoft3d.depthWrite = true;
-			s_popSoft3d.fogMode = GdiSoft3D::FogNone;
-			s_popSoft3d.edgeOverlay = false;
-			s_popSoft3d.dofEnable = false;
-			s_popSoft3d.postVignette = s_popSoft3d.postGlow = s_popSoft3d.postSaturate = false;
-			const float tf = (float)animTick * 0.03f;
-			const float door = (doorT < 0.f) ? 1.f : ((doorT > 1.f) ? 1.f : doorT);
-			const float remain = 1.f - door;
-			s_popSoft3d.cam.yawDeg = -16.f + sinf(tf) * 6.f + remain * 48.f;
-			s_popSoft3d.cam.pitchDeg = 40.f + cosf(tf * 0.8f) * 2.5f + remain * 18.f;
-			s_popSoft3d.cam.zoom = 1.0f + (rowPill ? 0.06f : 0.f) + boost * 0.04f + remain * 0.12f;
-			float boxes[1][6] = { { -0.85f, 0.85f, 0.f, 0.16f, -0.5f, 0.5f } };
-			s_popSoft3d.SetViewportFit(boxes, 1);
-			const float bob = sinf(tf * 1.05f) * 0.015f;
-			s_popSoft3d.DrawBox(-0.65f, -0.05f, 0.08f + bob, -0.35f, 0.05f, pink, 0.f);
-			s_popSoft3d.DrawBox(0.0f, 0.68f, 0.07f - bob, -0.1f, 0.38f, lav, 0.f);
-			BYTE a3 = (BYTE)(rowPill ? (72 + strength * 14 + boost * 16) : (48 + boost * 14));
-			a3 = (BYTE)min(160, (int)a3 + (int)(remain * 36.f));
-			premultPresent(s_popSoft3d.fb, a3);
+		// Soft3D は行ピル／扉アニメのみ。全面パネル毎フレ Soft3D が重さの主因。
+		const BOOL useSoft3d = rowPill || (doorT >= 0.f);
+		if (useSoft3d) {
+			if (s_popSoft3d.fb.w != w || s_popSoft3d.fb.h != h)
+				s_popSoft3d.Create(w, h);
+			if (s_popSoft3d.fb.color && s_popSoft3d.fb.w == w && s_popSoft3d.fb.h == h) {
+				s_popSoft3d.fb.Clear(GdiSoftFB::PackBGRA(0, 0, 0, 0), 1e9f);
+				s_popSoft3d.alphaBlend = true;
+				s_popSoft3d.depthTest = true;
+				s_popSoft3d.depthWrite = true;
+				s_popSoft3d.fogMode = GdiSoft3D::FogNone;
+				s_popSoft3d.edgeOverlay = false;
+				s_popSoft3d.dofEnable = false;
+				s_popSoft3d.postVignette = s_popSoft3d.postGlow = s_popSoft3d.postSaturate = false;
+				const float tf = (float)animTick * 0.03f;
+				const float door = (doorT < 0.f) ? 1.f : ((doorT > 1.f) ? 1.f : doorT);
+				const float remain = 1.f - door;
+				s_popSoft3d.cam.yawDeg = -16.f + sinf(tf) * 6.f + remain * 48.f;
+				s_popSoft3d.cam.pitchDeg = 40.f + cosf(tf * 0.8f) * 2.5f + remain * 18.f;
+				s_popSoft3d.cam.zoom = 1.0f + (rowPill ? 0.06f : 0.f) + boost * 0.04f + remain * 0.12f;
+				float boxes[1][6] = { { -0.85f, 0.85f, 0.f, 0.16f, -0.5f, 0.5f } };
+				s_popSoft3d.SetViewportFit(boxes, 1);
+				const float bob = sinf(tf * 1.05f) * 0.015f;
+				s_popSoft3d.DrawBox(-0.65f, -0.05f, 0.08f + bob, -0.35f, 0.05f, pink, 0.f);
+				if (rowPill || boost || remain > 0.05f)
+					s_popSoft3d.DrawBox(0.0f, 0.68f, 0.07f - bob, -0.1f, 0.38f, lav, 0.f);
+				BYTE a3 = (BYTE)(rowPill ? (72 + strength * 14 + boost * 16) : (48 + boost * 14));
+				a3 = (BYTE)min(160, (int)a3 + (int)(remain * 36.f));
+				premultPresent(s_popSoft3d.fb, a3);
+			}
 		}
-		if (s_popSoft2d.Create(w, h, false) && s_popSoft2d.fb.color) {
+		// Soft2D: 行ピル／boost／扉。全面は Soft2D のみ（Soft3D より軽い）＋3フレに1回
+		const BOOL soft2dWant = rowPill || boost || doorT >= 0.f;
+		const BOOL soft2dThrottleOk = rowPill || doorT >= 0.f || ((animTick % 3) == 0);
+		if (soft2dWant && soft2dThrottleOk && s_popSoft2d.Create(w, h, false) && s_popSoft2d.fb.color) {
 			s_popSoft2d.ClearArgb(0);
 			const int ox = (int)(sinf((float)animTick * 0.035f) * 2.f);
 			s_popSoft2d.FillEllipse(w / 5 + ox, h * 3 / 4, max(3, w / 6), max(2, h / 5), pink, 22);
@@ -529,7 +569,7 @@ static COLORREF BlendRGB(COLORREF a, COLORREF b, int t)
 		PopupSoftGem(dc, gem, (int)(::GetTickCount64() / 48));
 	}
 
-	static void DrawJkBackdrop(CDC& dc, const CRect& rc, int /*animTick*/, float doorT = -1.f)
+	static void DrawJkBackdrop(CDC& dc, const CRect& rc, int /*animTick*/, float doorT = -1.f, BOOL softOn = TRUE)
 	{
 		const COLORREF c0 = CCC_IsInwoman() ? RGB(255, 220, 236) : RGB(255, 232, 244);
 		const COLORREF c1 = CCC_IsInwoman() ? RGB(255, 192, 224) : RGB(232, 214, 255);
@@ -599,7 +639,8 @@ static COLORREF BlendRGB(COLORREF a, COLORREF b, int t)
 			dc.FillSolidRect(L, T + i, R - L, 1, BlendRGB(RGB(255, 255, 255), c0, 256 - a));
 		}
 		// Soft2D/3D 透過プレート（巨大面は PopupSoftPlate 内でスキップ）
-		PopupSoftPlate(dc, rc, savedata.popupMenuSoftBoost ? 1 : 0, (int)(::GetTickCount64() / 50), doorT);
+		if (softOn)
+			PopupSoftPlate(dc, rc, savedata.popupMenuSoftBoost ? 1 : 0, (int)(::GetTickCount64() / 50), doorT);
 	}
 
 	static void DrawTornRibbon(CDC& dc, const CRect& rcClient, int animTick)
@@ -692,7 +733,7 @@ static COLORREF BlendRGB(COLORREF a, COLORREF b, int t)
 		CBrush* ob = dc.SelectObject(&br);
 		dc.Ellipse(hr.left + 5, cy - 3, hr.left + 12, cy + 4);
 		dc.SelectObject(ob);
-		PopupSoftPlate(dc, hr, 2, (int)(::GetTickCount64() / 48));
+		// Soft plate は行全面だと重い。小さなジェムだけ（見た目は残す）
 		CRect gem(hr.left + 3, cy - 6, hr.left + 15, cy + 6);
 		PopupSoftGem(dc, gem, (int)(::GetTickCount64() / 48));
 	}
@@ -705,20 +746,36 @@ static COLORREF BlendRGB(COLORREF a, COLORREF b, int t)
 		dc.Draw3dRect(&inn, RGB(255, 255, 255), BlendRGB(PopupBorderDark(), PopupBg(), 150));
 	}
 
-	static void PopupSoftFlightAccent(CDC& dc, const CRect& chip, int style, float flightT, int fade)
+	static void PopupSoftFlightAccent(CDC& dc, const CRect& chip, int style, float flightT, int fade, int animTick, int rowIdx)
 	{
-		// 飛行中の Soft3D（回転→着地）。memDC 上のみ。マゼンタ禁止。
+		// 飛行中 Soft3D。フル幅×全行×毎フレは重いので:
+		// ・小さな固定 FB（リボン付近）
+		// ・4フレに1回
+		// ・同時描画は最大 3 行
 		if (s_popSoftBusy || chip.Width() < 20 || chip.Height() < 12) return;
-		if (chip.Width() > 520 || chip.Height() > 48) return;
-		if (fade < 24) return;
-		++s_popSoftBusy;
-		const int w = chip.Width();
-		const int h = chip.Height();
+		if (fade < 40) return;
 		const float t = (flightT < 0.f) ? 0.f : (flightT > 1.f ? 1.f : flightT);
-		const float remain = 1.f - t; // 0=着地（合体）
+		const float remain = 1.f - t;
+		if (remain < 0.02f) return;
+		if (((animTick + rowIdx) % 4) != 0) return;
+		static int s_softFlightBudget = 0;
+		static ULONGLONG s_softFlightTick = 0;
+		const ULONGLONG now = ::GetTickCount64();
+		if (now != s_softFlightTick) { s_softFlightTick = now; s_softFlightBudget = 0; }
+		if (s_softFlightBudget >= 3) return;
+		++s_softFlightBudget;
+
+		++s_popSoftBusy;
 		const int boost = savedata.popupMenuSoftBoost ? 1 : 0;
 		const COLORREF pink = CCC_IsInwoman() ? RGB(255, 160, 200) : RGB(255, 190, 220);
 		const COLORREF lav = CCC_IsInwoman() ? RGB(240, 150, 210) : RGB(210, 190, 255);
+		// リボン側の小さなパッチだけ（全幅 Soft の ~1/6）
+		const int aw = min(48, max(28, chip.Width() / 5));
+		const int ah = min(28, chip.Height());
+		CRect accent(chip.left + 2, chip.top + (chip.Height() - ah) / 2,
+			chip.left + 2 + aw, chip.top + (chip.Height() - ah) / 2 + ah);
+		const int w = accent.Width();
+		const int h = accent.Height();
 		auto premultPresent = [&](BYTE constA) {
 			if (!s_popSoft3d.fb.color || !s_popSoft3d.fb.hdc || s_popSoft3d.fb.w != w || s_popSoft3d.fb.h != h)
 				return;
@@ -733,7 +790,7 @@ static COLORREF BlendRGB(COLORREF a, COLORREF b, int t)
 					(BYTE)(GdiSoftFB::G(pix) * a / 255),
 					(BYTE)(GdiSoftFB::B(pix) * a / 255));
 			}
-			s_popSoft3d.fb.PresentAlpha(dc.GetSafeHdc(), chip.left, chip.top, constA);
+			s_popSoft3d.fb.PresentAlpha(dc.GetSafeHdc(), accent.left, accent.top, constA);
 		};
 		if (s_popSoft3d.fb.w != w || s_popSoft3d.fb.h != h)
 			s_popSoft3d.Create(w, h);
@@ -750,24 +807,24 @@ static COLORREF BlendRGB(COLORREF a, COLORREF b, int t)
 		s_popSoft3d.dofEnable = false;
 		s_popSoft3d.postVignette = s_popSoft3d.postGlow = s_popSoft3d.postSaturate = false;
 
-		float yaw = -16.f, pitch = 36.f, zoom = 1.05f;
+		float yaw = -16.f, pitch = 36.f, zoom = 1.15f;
 		switch (style) {
 		case POPUP_ANIM_SPIRAL:
 			yaw = -20.f + remain * 220.f;
 			pitch = 30.f + remain * 18.f;
-			zoom = 1.0f + remain * 0.35f;
+			zoom = 1.1f + remain * 0.3f;
 			break;
 		case POPUP_ANIM_BIGBANG:
-			yaw = -18.f + remain * 160.f * ((fade & 1) ? 1.f : -1.f);
+			yaw = -18.f + remain * 160.f * ((rowIdx & 1) ? 1.f : -1.f);
 			pitch = 28.f + remain * 24.f;
-			zoom = 0.95f + remain * 0.4f;
+			zoom = 1.05f + remain * 0.35f;
 			break;
 		case POPUP_ANIM_PETAL:
 			yaw = -14.f + sinf(remain * 3.1f) * 28.f * remain;
 			pitch = 42.f - remain * 10.f;
 			break;
 		case POPUP_ANIM_ZIPPER:
-			yaw = -12.f + remain * 55.f * ((fade & 1) ? 1.f : -1.f);
+			yaw = -12.f + remain * 55.f * ((rowIdx & 1) ? 1.f : -1.f);
 			pitch = 38.f;
 			break;
 		case POPUP_ANIM_AURORA:
@@ -785,7 +842,7 @@ static COLORREF BlendRGB(COLORREF a, COLORREF b, int t)
 		case POPUP_ANIM_POP:
 			yaw = -18.f;
 			pitch = 32.f;
-			zoom = 0.7f + t * 0.45f;
+			zoom = 0.85f + t * 0.4f;
 			break;
 		default:
 			yaw = -16.f + remain * 24.f;
@@ -795,45 +852,36 @@ static COLORREF BlendRGB(COLORREF a, COLORREF b, int t)
 		s_popSoft3d.cam.yawDeg = yaw;
 		s_popSoft3d.cam.pitchDeg = pitch;
 		s_popSoft3d.cam.zoom = zoom + boost * 0.05f;
-		float boxes[1][6] = { { -0.9f, 0.9f, 0.f, 0.2f, -0.45f, 0.45f } };
+		float boxes[1][6] = { { -0.55f, 0.55f, 0.f, 0.28f, -0.45f, 0.45f } };
 		s_popSoft3d.SetViewportFit(boxes, 1);
+		// 1プリミティブに絞る（Sphere/Wave は飛行中は重い）
+		if (style == POPUP_ANIM_POP && remain > 0.4f)
+			s_popSoft3d.DrawSphere(0.f, 0.06f, 0.f, 0.2f + remain * 0.08f, pink, 8, 6);
+		else
+			s_popSoft3d.DrawNeonBox(-0.32f, 0.32f, 0.14f + remain * 0.03f, -0.28f, 0.28f,
+				(style == POPUP_ANIM_AURORA) ? lav : pink, 0.f);
 
-		if (style == POPUP_ANIM_POP && remain > 0.35f) {
-			s_popSoft3d.DrawSphere(0.f, 0.08f, 0.f, 0.18f + remain * 0.12f, pink, 10, 7);
-		} else if (style == POPUP_ANIM_AURORA && remain > 0.15f) {
-			float wave[8];
-			for (int i = 0; i < 8; ++i)
-				wave[i] = sinf((float)i * 0.9f + remain * 5.f) * 0.08f * remain;
-			s_popSoft3d.DrawWaveRibbon(-0.7f, 0.7f, 0.f, 0.06f, 0.12f, wave, 8, lav, 0.03f);
-			s_popSoft3d.DrawBox(-0.55f, 0.55f, 0.06f, -0.2f, 0.2f, pink, 0.f);
-		} else if (style == POPUP_ANIM_PETAL) {
-			s_popSoft3d.DrawQuad(
-				-0.55f, 0.02f, -0.1f, 0.55f, 0.02f, -0.1f,
-				0.35f, 0.12f, 0.25f, -0.35f, 0.12f, 0.25f, pink);
-			s_popSoft3d.DrawBox(-0.35f, 0.35f, 0.08f, -0.15f, 0.15f, lav, 0.f);
-		} else {
-			s_popSoft3d.DrawNeonBox(-0.55f, 0.55f, 0.12f + remain * 0.04f, -0.28f, 0.28f, pink, 0.f);
-			s_popSoft3d.DrawBox(-0.25f, 0.65f, 0.08f, -0.1f, 0.32f, lav, 0.f);
-		}
-		BYTE a = (BYTE)(58 + (int)(remain * 70.f) + boost * 18);
-		if (a > 150) a = 150;
+		BYTE a = (BYTE)(70 + (int)(remain * 70.f) + boost * 18);
+		if (a > 160) a = 160;
 		if (fade < 180) {
 			const int af = (int)a * fade / 180;
-			a = (BYTE)((af < 30) ? 30 : af);
+			a = (BYTE)((af < 36) ? 36 : af);
 		}
 		premultPresent(a);
 		--s_popSoftBusy;
 	}
 
 	// BigBang: 行ごとに独立したチップ（背景＋リボン＋枠）。矩形を不透明で密閉（クロマ穴を作らない）
-	static void DrawRowChip(CDC& dc, const CRect& chip, int animTick, int fade, int style = -1, float flightT = 1.f)
+	static void DrawRowChip(CDC& dc, const CRect& chip, int animTick, int fade, int style = -1, float flightT = 1.f, int rowIdx = 0)
 	{
 		if (chip.Width() <= 1 || chip.Height() <= 1 || fade < 8) return;
 		const int clip = dc.SaveDC();
 		dc.IntersectClipRect(&chip);
 		// 下地を必ずベタ塗り（グラデ穴・キー混入防止）
 		dc.FillSolidRect(&chip, PopupBg());
-		if (fade >= 220) {
+		const BOOL flying = (style >= POPUP_ANIM_CASCADE && style < POPUP_ANIM_COUNT && flightT < 0.995f);
+		// 飛行中は Soft 付き DrawJkBackdrop を使わない（行×毎フレ Soft3D が重い）。GDI のみ。
+		if (!flying && fade >= 220) {
 			DrawJkBackdrop(dc, chip, animTick);
 			DrawTornRibbon(dc, chip, animTick);
 		} else {
@@ -843,9 +891,11 @@ static COLORREF BlendRGB(COLORREF a, COLORREF b, int t)
 			CRect rib(chip.left, chip.top, chip.left + CCUSTOM_POPUP_RIBBON_W, chip.bottom);
 			const COLORREF r0 = CCC_IsInwoman() ? RGB(255, 108, 168) : RGB(158, 140, 228);
 			dc.FillSolidRect(&rib, BlendRGB(PopupBg(), r0, fade));
+			if (!flying && fade >= 180)
+				DrawTornRibbon(dc, chip, animTick);
 		}
-		if (style >= POPUP_ANIM_CASCADE && style < POPUP_ANIM_COUNT && flightT < 0.995f)
-			PopupSoftFlightAccent(dc, chip, style, flightT, fade);
+		if (flying)
+			PopupSoftFlightAccent(dc, chip, style, flightT, fade, animTick, rowIdx);
 		DrawPanelChrome(dc, chip);
 		dc.RestoreDC(clip);
 	}
@@ -2035,8 +2085,9 @@ void CCustomPopupMenu::AnimateOut()
 				::PostQuitMessage((int)msg.wParam);
 				break;
 			}
-			// 退場中に右クリック／CONTEXTMENU を通すと新規 Track が二重起動する
-			if (PopupIsMenuOpenMessage(msg.message))
+			// 退場中に入力をメインへ流すと、ボタンは押下見た目だけ残って
+			// BN_CLICKED／再生イベントが死ぬ。再オープン系もここで捨てる。
+			if (PopupIsInputMessage(msg.message) || PopupIsMenuOpenMessage(msg.message))
 				continue;
 			::TranslateMessage(&msg);
 			::DispatchMessage(&msg);
@@ -2154,7 +2205,7 @@ BOOL CCustomPopupMenu::CreatePopupAt(CPoint screenPt, CCustomPopupMenu* parentMe
 		m_tip.SendMessage(TTM_ADDTOOL, 0, (LPARAM)&ti);
 		CCustomControlUtility::FinalizeDialogToolTip(m_tip, 420, 12000);
 	}
-	if (CCC_IsInwoman()) { CCC_StartInwomanTimer(); SetTimer(kInwomanTimer, 50, NULL); }
+	if (CCC_IsInwoman()) { CCC_StartInwomanTimer(); SetTimer(kInwomanTimer, 180, NULL); }
 	SetWindowPos(&wndTopMost, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 	AnimateIn();
 	// 内包コントロールは行アニメ完了後に OnTimer で表示（出現中のちらつき防止）
@@ -2938,7 +2989,8 @@ void CCustomPopupMenu::PaintToDC(CDC& dc)
 					content = rc;
 				const int clipSave = dc.SaveDC();
 				dc.IntersectClipRect(&content);
-				DrawJkBackdrop(dc, content, m_animTick);
+				// 橋渡しパネルは Soft なし（飛行アクセント側で Soft を出す）
+				DrawJkBackdrop(dc, content, m_animTick, -1.f, FALSE);
 				DrawTornRibbon(dc, content, m_animTick);
 				for (int i = 0; i < m_itemCount; ++i)
 					paintItem(i);
@@ -2953,7 +3005,7 @@ void CCustomPopupMenu::PaintToDC(CDC& dc)
 					CRect vr = ItemViewRect(i);
 					CRect chip(m_flightPad, vr.top, m_flightPad + m_menuW, vr.bottom);
 					chip.OffsetRect(ox, oy);
-					DrawRowChip(dc, chip, m_animTick, fade, animStyle, flightT);
+					DrawRowChip(dc, chip, m_animTick, fade, animStyle, flightT, i);
 					paintItem(i);
 				}
 			}
@@ -3666,6 +3718,8 @@ void CCustomPopupMenu::RunModalLoop()
 				else
 					s_reopenRClick = FALSE;
 				PopupEatOpenMenuMessages();
+				// DOWN だけ食って UP をメインへ流すと押下状態だけ残る
+				PopupEatDismissClickTail();
 				return TRUE;
 			}
 		}
@@ -3711,8 +3765,13 @@ void CCustomPopupMenu::RunModalLoop()
 		}
 	}
 	m_tracking = FALSE;
+	// 破棄前に残クリック／キャプチャを掃除（AnimateOut 中の入力は別途捨てる）
+	PopupEatDismissClickTail();
 	DestroyPopupTree();
 	PopupEatOpenMenuMessages();
+	PopupEatDismissClickTail();
+	if (s_trackingRoot == this)
+		s_trackingRoot = NULL;
 	if (hCap && ::IsWindow(hCap)) ::SetForegroundWindow(hCap);
 }
 

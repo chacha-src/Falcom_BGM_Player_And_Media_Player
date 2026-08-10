@@ -64,6 +64,7 @@ BOOL CZeroFol::OnInitDialog()
 	r.top += 600;
 	r.bottom += 600;
 	MoveWindow(&r);
+	CCC_BringDialogToForeground(this);
 	return TRUE;  // return TRUE unless you set the focus to a control
 				  // 例外 : OCX プロパティ ページは必ず FALSE を返します。
 }

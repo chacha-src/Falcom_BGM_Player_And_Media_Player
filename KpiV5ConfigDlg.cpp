@@ -98,6 +98,7 @@ BOOL CKpiV5ConfigDlg::OnInitDialog()
 		L"Kapat"));
 
 	BuildInitialText();
+	CCC_BringDialogToForeground(this);
 	return TRUE;
 }
 
