@@ -1621,6 +1621,7 @@ protected:
     afx_msg void OnPaint();
     afx_msg LRESULT OnPrintClient(WPARAM, LPARAM);
     afx_msg BOOL OnEraseBkgnd(CDC*);
+    afx_msg void OnTimer(UINT_PTR nIDEvent);
 
     DECLARE_MESSAGE_MAP()
 

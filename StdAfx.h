@@ -662,6 +662,9 @@ struct save{
 	int mpBanner3dyaw;
 	int mpBanner3dpitch;
 	int mpBanner3dzoom;
+
+	// --- コンテキストメニュー Soft 立体アクセント(末尾追記。旧.datは1=強め) ---
+	int popupMenuSoftBoost; // 0=標準 1=立体強め
 };
 extern save savedata;
 /* コード間隔(ms)。16..500。旧.dat や未設定は 25。 */

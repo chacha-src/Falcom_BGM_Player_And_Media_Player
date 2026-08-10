@@ -171,8 +171,8 @@ public:
 	CString m_libSelFolder;
 	int m_libTreeBuilt;
 	int m_libBuildPosted; // 1=WM_MP_LIB_BUILD 投稿済み
-	CButtonST m_lsup, m_up, m_down, m_lsdown;   // プレイリスト行移動(一番上/上/下/一番下)
-	CButtonST m_findup, m_finddown;              // あいまい検索 上/下
+	CButtonST m_lsup, m_up, m_down, m_lsdown;   // プレイリスト行移動(一番上/上/下/一番下) — 透過ボタン
+	CButtonST m_findup, m_finddown;              // あいまい検索 上/下 — 透過ボタン
 	CCustomEdit m_find;
 
 	// ---- 状態チェックボックス(og/pl の状態を SyncFromMain でミラー) ----

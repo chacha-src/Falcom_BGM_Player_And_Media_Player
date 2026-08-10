@@ -1,5 +1,7 @@
 ﻿#include "stdafx.h"
 #include "CCustomPopupMenu.h"
+#include "GdiSoft2D.h"
+#include "GdiSoft3D.h"
 #include <uxtheme.h>
 #include <math.h>
 #include <algorithm>
@@ -207,7 +209,163 @@ namespace {
 	static COLORREF PopupBorderLite() { return RGB(255, 250, 253); }
 	static COLORREF PopupBorderDark() { return RGB(176, 118, 152); }
 
-	static COLORREF BlendRGB(COLORREF a, COLORREF b, int t)
+	// メニュー外クリック／退場中に積まれた「新しいメニューを開く」系を捨てる
+	static BOOL s_reopenRClick = FALSE;
+	static POINT s_reopenScreenPt = {};
+	static BOOL s_reopenNc = FALSE;
+
+	static void PopupEatOpenMenuMessages()
+	{
+		MSG m;
+		for (;;) {
+			BOOL got = FALSE;
+			if (::PeekMessage(&m, NULL, WM_RBUTTONDOWN, WM_RBUTTONUP, PM_REMOVE))
+				got = TRUE;
+			else if (::PeekMessage(&m, NULL, WM_NCRBUTTONDOWN, WM_NCRBUTTONUP, PM_REMOVE))
+				got = TRUE;
+			else if (::PeekMessage(&m, NULL, WM_CONTEXTMENU, WM_CONTEXTMENU, PM_REMOVE))
+				got = TRUE;
+			if (!got) break;
+		}
+	}
+	static BOOL PopupIsMenuOpenMessage(UINT msg)
+	{
+		return msg == WM_RBUTTONDOWN || msg == WM_RBUTTONUP
+			|| msg == WM_NCRBUTTONDOWN || msg == WM_NCRBUTTONUP
+			|| msg == WM_CONTEXTMENU;
+	}
+	static void PopupArmReopenAt(CPoint screenPt, BOOL nc)
+	{
+		s_reopenRClick = TRUE;
+		s_reopenScreenPt = screenPt;
+		s_reopenNc = nc ? TRUE : FALSE;
+	}
+	// Track 完了後: 閉じた右クリックで新規メニューを1つ開く（DOWN+UP。CONTEXTMENU は DefWindowProc に任せる）
+	static void PopupFlushReopenContextClick()
+	{
+		if (!s_reopenRClick) return;
+		s_reopenRClick = FALSE;
+		const POINT pt = s_reopenScreenPt;
+		const BOOL nc = s_reopenNc;
+		s_reopenNc = FALSE;
+		HWND h = ::WindowFromPoint(pt);
+		if (!h || !::IsWindow(h)) return;
+		if (nc) {
+			::PostMessage(h, WM_NCRBUTTONDOWN, (WPARAM)HTCLIENT, MAKELPARAM(pt.x, pt.y));
+			::PostMessage(h, WM_NCRBUTTONUP, (WPARAM)HTCLIENT, MAKELPARAM(pt.x, pt.y));
+		} else {
+			POINT c = pt;
+			::ScreenToClient(h, &c);
+			::PostMessage(h, WM_RBUTTONDOWN, MK_RBUTTON, MAKELPARAM(c.x, c.y));
+			::PostMessage(h, WM_RBUTTONUP, 0, MAKELPARAM(c.x, c.y));
+		}
+	}
+
+	// Soft*（ポップアップ専用・CCustomControl の静的とは分離）
+	static int s_popSoftBusy = 0;
+	static GdiSoft2D::Context s_popSoft2d;
+	static GdiSoft3D::Context s_popSoft3d;
+
+	static void PopupSoftPlate(CDC& dc, const CRect& rc, int strength, int animTick, float doorT = -1.f)
+	{
+		// 全面パネルはごく薄い背景ポリゴン。ホット行(低い)だけ少し濃く。キャンディ箱は置かない。
+		// doorT>=0: EXPAND/CLASSIC 着地用（1=着地、0=開いた/回転中）
+		if (s_popSoftBusy || rc.Width() < 24 || rc.Height() < 14) return;
+		if (rc.Width() > 640 || rc.Height() > 520) return;
+		if ((LONGLONG)rc.Width() * (LONGLONG)rc.Height() > 220000) return;
+		++s_popSoftBusy;
+		const int w = rc.Width();
+		const int h = rc.Height();
+		const int boost = savedata.popupMenuSoftBoost ? 1 : 0;
+		const BOOL rowPill = (h <= 40);
+		const COLORREF pink = CCC_IsInwoman() ? RGB(255, 160, 200) : RGB(255, 190, 220);
+		const COLORREF lav = CCC_IsInwoman() ? RGB(240, 150, 210) : RGB(210, 190, 255);
+		auto premultPresent = [&](GdiSoftFB::Framebuffer& fb, BYTE constA) {
+			if (!fb.color || !fb.hdc || fb.w != w || fb.h != h) return;
+			const int n = w * h;
+			for (int i = 0; i < n; ++i) {
+				const DWORD pix = fb.color[i];
+				const BYTE a = GdiSoftFB::A(pix);
+				if (a == 0) { fb.color[i] = 0; continue; }
+				if (a >= 255) continue;
+				fb.color[i] = GdiSoftFB::PackBGRA(a,
+					(BYTE)(GdiSoftFB::R(pix) * a / 255),
+					(BYTE)(GdiSoftFB::G(pix) * a / 255),
+					(BYTE)(GdiSoftFB::B(pix) * a / 255));
+			}
+			fb.PresentAlpha(dc.GetSafeHdc(), rc.left, rc.top, constA);
+		};
+		if (s_popSoft3d.fb.w != w || s_popSoft3d.fb.h != h)
+			s_popSoft3d.Create(w, h);
+		if (s_popSoft3d.fb.color && s_popSoft3d.fb.w == w && s_popSoft3d.fb.h == h) {
+			s_popSoft3d.fb.Clear(GdiSoftFB::PackBGRA(0, 0, 0, 0), 1e9f);
+			s_popSoft3d.alphaBlend = true;
+			s_popSoft3d.depthTest = true;
+			s_popSoft3d.depthWrite = true;
+			s_popSoft3d.fogMode = GdiSoft3D::FogNone;
+			s_popSoft3d.edgeOverlay = false;
+			s_popSoft3d.dofEnable = false;
+			s_popSoft3d.postVignette = s_popSoft3d.postGlow = s_popSoft3d.postSaturate = false;
+			const float tf = (float)animTick * 0.03f;
+			const float door = (doorT < 0.f) ? 1.f : ((doorT > 1.f) ? 1.f : doorT);
+			const float remain = 1.f - door;
+			s_popSoft3d.cam.yawDeg = -16.f + sinf(tf) * 6.f + remain * 48.f;
+			s_popSoft3d.cam.pitchDeg = 40.f + cosf(tf * 0.8f) * 2.5f + remain * 18.f;
+			s_popSoft3d.cam.zoom = 1.0f + (rowPill ? 0.06f : 0.f) + boost * 0.04f + remain * 0.12f;
+			float boxes[1][6] = { { -0.85f, 0.85f, 0.f, 0.16f, -0.5f, 0.5f } };
+			s_popSoft3d.SetViewportFit(boxes, 1);
+			const float bob = sinf(tf * 1.05f) * 0.015f;
+			s_popSoft3d.DrawBox(-0.65f, -0.05f, 0.08f + bob, -0.35f, 0.05f, pink, 0.f);
+			s_popSoft3d.DrawBox(0.0f, 0.68f, 0.07f - bob, -0.1f, 0.38f, lav, 0.f);
+			BYTE a3 = (BYTE)(rowPill ? (72 + strength * 14 + boost * 16) : (48 + boost * 14));
+			a3 = (BYTE)min(160, (int)a3 + (int)(remain * 36.f));
+			premultPresent(s_popSoft3d.fb, a3);
+		}
+		if (s_popSoft2d.Create(w, h, false) && s_popSoft2d.fb.color) {
+			s_popSoft2d.ClearArgb(0);
+			const int ox = (int)(sinf((float)animTick * 0.035f) * 2.f);
+			s_popSoft2d.FillEllipse(w / 5 + ox, h * 3 / 4, max(3, w / 6), max(2, h / 5), pink, 22);
+			if (rowPill)
+				s_popSoft2d.FillEllipse(w * 4 / 5 - ox, h / 3, max(3, w / 7), max(2, h / 4), lav, 18);
+			BYTE a2 = (BYTE)(rowPill ? (78 + boost * 18) : (48 + boost * 14));
+			premultPresent(s_popSoft2d.fb, a2);
+		}
+		--s_popSoftBusy;
+	}
+
+	static void PopupSoftGem(CDC& dc, const CRect& rc, int animTick)
+	{
+		// セパレータ中央の小さな Soft 紙片（控えめ）
+		if (s_popSoftBusy || rc.Width() < 8 || rc.Height() < 8) return;
+		if (rc.Width() > 48 || rc.Height() > 48) return;
+		++s_popSoftBusy;
+		const int w = rc.Width();
+		const int h = rc.Height();
+		if (s_popSoft3d.fb.w != w || s_popSoft3d.fb.h != h)
+			s_popSoft3d.Create(w, h);
+		if (s_popSoft3d.fb.color && s_popSoft3d.fb.w == w && s_popSoft3d.fb.h == h) {
+			s_popSoft3d.fb.Clear(GdiSoftFB::PackBGRA(0, 0, 0, 0), 1e9f);
+			s_popSoft3d.alphaBlend = true;
+			s_popSoft3d.depthTest = true;
+			s_popSoft3d.depthWrite = true;
+			s_popSoft3d.fogMode = GdiSoft3D::FogNone;
+			s_popSoft3d.edgeOverlay = false;
+			s_popSoft3d.dofEnable = false;
+			s_popSoft3d.postVignette = s_popSoft3d.postGlow = s_popSoft3d.postSaturate = false;
+			const float tf = (float)animTick * 0.04f;
+			s_popSoft3d.cam.yawDeg = -22.f + sinf(tf) * 8.f;
+			s_popSoft3d.cam.pitchDeg = 36.f;
+			s_popSoft3d.cam.zoom = 1.15f;
+			float boxes[1][6] = { { -0.5f, 0.5f, 0.f, 0.2f, -0.5f, 0.5f } };
+			s_popSoft3d.SetViewportFit(boxes, 1);
+			const COLORREF c = CCC_IsInwoman() ? RGB(255, 140, 185) : RGB(230, 170, 230);
+			s_popSoft3d.DrawBox(-0.28f, 0.28f, 0.12f, -0.28f, 0.28f, c, 0.f);
+			s_popSoft3d.fb.PresentAlpha(dc.GetSafeHdc(), rc.left, rc.top, savedata.popupMenuSoftBoost ? (BYTE)120 : (BYTE)95);
+		}
+		--s_popSoftBusy;
+	}
+
+static COLORREF BlendRGB(COLORREF a, COLORREF b, int t)
 	{
 		const int u = 256 - t;
 		return RGB(
@@ -367,9 +525,11 @@ namespace {
 		dc.SetPixel(mid - 1, y - 1, RGB(255, 255, 255));
 		dc.SelectObject(ob);
 		dc.SelectObject(op);
+		CRect gem(mid - 7, y - 7, mid + 8, y + 8);
+		PopupSoftGem(dc, gem, (int)(::GetTickCount64() / 48));
 	}
 
-	static void DrawJkBackdrop(CDC& dc, const CRect& rc, int /*animTick*/)
+	static void DrawJkBackdrop(CDC& dc, const CRect& rc, int /*animTick*/, float doorT = -1.f)
 	{
 		const COLORREF c0 = CCC_IsInwoman() ? RGB(255, 220, 236) : RGB(255, 232, 244);
 		const COLORREF c1 = CCC_IsInwoman() ? RGB(255, 192, 224) : RGB(232, 214, 255);
@@ -438,6 +598,8 @@ namespace {
 			if (a <= 0) break;
 			dc.FillSolidRect(L, T + i, R - L, 1, BlendRGB(RGB(255, 255, 255), c0, 256 - a));
 		}
+		// Soft2D/3D 透過プレート（巨大面は PopupSoftPlate 内でスキップ）
+		PopupSoftPlate(dc, rc, savedata.popupMenuSoftBoost ? 1 : 0, (int)(::GetTickCount64() / 50), doorT);
 	}
 
 	static void DrawTornRibbon(CDC& dc, const CRect& rcClient, int animTick)
@@ -530,6 +692,9 @@ namespace {
 		CBrush* ob = dc.SelectObject(&br);
 		dc.Ellipse(hr.left + 5, cy - 3, hr.left + 12, cy + 4);
 		dc.SelectObject(ob);
+		PopupSoftPlate(dc, hr, 2, (int)(::GetTickCount64() / 48));
+		CRect gem(hr.left + 3, cy - 6, hr.left + 15, cy + 6);
+		PopupSoftGem(dc, gem, (int)(::GetTickCount64() / 48));
 	}
 
 	static void DrawPanelChrome(CDC& dc, const CRect& rc)
@@ -540,8 +705,128 @@ namespace {
 		dc.Draw3dRect(&inn, RGB(255, 255, 255), BlendRGB(PopupBorderDark(), PopupBg(), 150));
 	}
 
+	static void PopupSoftFlightAccent(CDC& dc, const CRect& chip, int style, float flightT, int fade)
+	{
+		// 飛行中の Soft3D（回転→着地）。memDC 上のみ。マゼンタ禁止。
+		if (s_popSoftBusy || chip.Width() < 20 || chip.Height() < 12) return;
+		if (chip.Width() > 520 || chip.Height() > 48) return;
+		if (fade < 24) return;
+		++s_popSoftBusy;
+		const int w = chip.Width();
+		const int h = chip.Height();
+		const float t = (flightT < 0.f) ? 0.f : (flightT > 1.f ? 1.f : flightT);
+		const float remain = 1.f - t; // 0=着地（合体）
+		const int boost = savedata.popupMenuSoftBoost ? 1 : 0;
+		const COLORREF pink = CCC_IsInwoman() ? RGB(255, 160, 200) : RGB(255, 190, 220);
+		const COLORREF lav = CCC_IsInwoman() ? RGB(240, 150, 210) : RGB(210, 190, 255);
+		auto premultPresent = [&](BYTE constA) {
+			if (!s_popSoft3d.fb.color || !s_popSoft3d.fb.hdc || s_popSoft3d.fb.w != w || s_popSoft3d.fb.h != h)
+				return;
+			const int n = w * h;
+			for (int i = 0; i < n; ++i) {
+				const DWORD pix = s_popSoft3d.fb.color[i];
+				const BYTE a = GdiSoftFB::A(pix);
+				if (a == 0) { s_popSoft3d.fb.color[i] = 0; continue; }
+				if (a >= 255) continue;
+				s_popSoft3d.fb.color[i] = GdiSoftFB::PackBGRA(a,
+					(BYTE)(GdiSoftFB::R(pix) * a / 255),
+					(BYTE)(GdiSoftFB::G(pix) * a / 255),
+					(BYTE)(GdiSoftFB::B(pix) * a / 255));
+			}
+			s_popSoft3d.fb.PresentAlpha(dc.GetSafeHdc(), chip.left, chip.top, constA);
+		};
+		if (s_popSoft3d.fb.w != w || s_popSoft3d.fb.h != h)
+			s_popSoft3d.Create(w, h);
+		if (!s_popSoft3d.fb.color || s_popSoft3d.fb.w != w || s_popSoft3d.fb.h != h) {
+			--s_popSoftBusy;
+			return;
+		}
+		s_popSoft3d.fb.Clear(GdiSoftFB::PackBGRA(0, 0, 0, 0), 1e9f);
+		s_popSoft3d.alphaBlend = true;
+		s_popSoft3d.depthTest = true;
+		s_popSoft3d.depthWrite = true;
+		s_popSoft3d.fogMode = GdiSoft3D::FogNone;
+		s_popSoft3d.edgeOverlay = false;
+		s_popSoft3d.dofEnable = false;
+		s_popSoft3d.postVignette = s_popSoft3d.postGlow = s_popSoft3d.postSaturate = false;
+
+		float yaw = -16.f, pitch = 36.f, zoom = 1.05f;
+		switch (style) {
+		case POPUP_ANIM_SPIRAL:
+			yaw = -20.f + remain * 220.f;
+			pitch = 30.f + remain * 18.f;
+			zoom = 1.0f + remain * 0.35f;
+			break;
+		case POPUP_ANIM_BIGBANG:
+			yaw = -18.f + remain * 160.f * ((fade & 1) ? 1.f : -1.f);
+			pitch = 28.f + remain * 24.f;
+			zoom = 0.95f + remain * 0.4f;
+			break;
+		case POPUP_ANIM_PETAL:
+			yaw = -14.f + sinf(remain * 3.1f) * 28.f * remain;
+			pitch = 42.f - remain * 10.f;
+			break;
+		case POPUP_ANIM_ZIPPER:
+			yaw = -12.f + remain * 55.f * ((fade & 1) ? 1.f : -1.f);
+			pitch = 38.f;
+			break;
+		case POPUP_ANIM_AURORA:
+			yaw = -22.f + sinf(t * 4.f) * 20.f * remain;
+			pitch = 34.f + cosf(t * 3.f) * 8.f * remain;
+			break;
+		case POPUP_ANIM_CASCADE:
+			yaw = -16.f;
+			pitch = 20.f + remain * 35.f;
+			break;
+		case POPUP_ANIM_SLIDE:
+			yaw = -10.f + remain * 40.f;
+			pitch = 36.f;
+			break;
+		case POPUP_ANIM_POP:
+			yaw = -18.f;
+			pitch = 32.f;
+			zoom = 0.7f + t * 0.45f;
+			break;
+		default:
+			yaw = -16.f + remain * 24.f;
+			pitch = 36.f + remain * 8.f;
+			break;
+		}
+		s_popSoft3d.cam.yawDeg = yaw;
+		s_popSoft3d.cam.pitchDeg = pitch;
+		s_popSoft3d.cam.zoom = zoom + boost * 0.05f;
+		float boxes[1][6] = { { -0.9f, 0.9f, 0.f, 0.2f, -0.45f, 0.45f } };
+		s_popSoft3d.SetViewportFit(boxes, 1);
+
+		if (style == POPUP_ANIM_POP && remain > 0.35f) {
+			s_popSoft3d.DrawSphere(0.f, 0.08f, 0.f, 0.18f + remain * 0.12f, pink, 10, 7);
+		} else if (style == POPUP_ANIM_AURORA && remain > 0.15f) {
+			float wave[8];
+			for (int i = 0; i < 8; ++i)
+				wave[i] = sinf((float)i * 0.9f + remain * 5.f) * 0.08f * remain;
+			s_popSoft3d.DrawWaveRibbon(-0.7f, 0.7f, 0.f, 0.06f, 0.12f, wave, 8, lav, 0.03f);
+			s_popSoft3d.DrawBox(-0.55f, 0.55f, 0.06f, -0.2f, 0.2f, pink, 0.f);
+		} else if (style == POPUP_ANIM_PETAL) {
+			s_popSoft3d.DrawQuad(
+				-0.55f, 0.02f, -0.1f, 0.55f, 0.02f, -0.1f,
+				0.35f, 0.12f, 0.25f, -0.35f, 0.12f, 0.25f, pink);
+			s_popSoft3d.DrawBox(-0.35f, 0.35f, 0.08f, -0.15f, 0.15f, lav, 0.f);
+		} else {
+			s_popSoft3d.DrawNeonBox(-0.55f, 0.55f, 0.12f + remain * 0.04f, -0.28f, 0.28f, pink, 0.f);
+			s_popSoft3d.DrawBox(-0.25f, 0.65f, 0.08f, -0.1f, 0.32f, lav, 0.f);
+		}
+		BYTE a = (BYTE)(58 + (int)(remain * 70.f) + boost * 18);
+		if (a > 150) a = 150;
+		if (fade < 180) {
+			const int af = (int)a * fade / 180;
+			a = (BYTE)((af < 30) ? 30 : af);
+		}
+		premultPresent(a);
+		--s_popSoftBusy;
+	}
+
 	// BigBang: 行ごとに独立したチップ（背景＋リボン＋枠）。矩形を不透明で密閉（クロマ穴を作らない）
-	static void DrawRowChip(CDC& dc, const CRect& chip, int animTick, int fade)
+	static void DrawRowChip(CDC& dc, const CRect& chip, int animTick, int fade, int style = -1, float flightT = 1.f)
 	{
 		if (chip.Width() <= 1 || chip.Height() <= 1 || fade < 8) return;
 		const int clip = dc.SaveDC();
@@ -559,6 +844,8 @@ namespace {
 			const COLORREF r0 = CCC_IsInwoman() ? RGB(255, 108, 168) : RGB(158, 140, 228);
 			dc.FillSolidRect(&rib, BlendRGB(PopupBg(), r0, fade));
 		}
+		if (style >= POPUP_ANIM_CASCADE && style < POPUP_ANIM_COUNT && flightT < 0.995f)
+			PopupSoftFlightAccent(dc, chip, style, flightT, fade);
 		DrawPanelChrome(dc, chip);
 		dc.RestoreDC(clip);
 	}
@@ -640,6 +927,7 @@ BOOL CCustomPopupMenu::IsInteractiveKind(int kind) const
 BOOL CCustomPopupMenu::IsChromeCommand(UINT id) const
 {
 	return id == CCUSTOM_POPUP_ID_ACRYLIC
+		|| id == CCUSTOM_POPUP_ID_SOFTBOOST
 		|| id == CCUSTOM_POPUP_ID_FONT_BOLD
 		|| id == CCUSTOM_POPUP_ID_FONT_ITALIC
 		|| id == CCUSTOM_POPUP_ID_FONT_FACE
@@ -1041,6 +1329,18 @@ void CCustomPopupMenu::EnsureChromePrefix()
 			L"Desfoque Win10+. Alternar sem ajustes", L"Vervaging Win10+. Schakelen zonder instellingen",
 			L"Rozmycie Win10+. Przelacz bez ustawien", L"Win10+ bulaniklik. Ayar acmadan degistir"));
 
+	AddCheck(CCUSTOM_POPUP_ID_SOFTBOOST,
+		LL14(L"立体アクセント強め", L"Stronger 3D accent", L"Accent 3D fort", L"Accento 3D forte", L"Acento 3D fuerte",
+			L"입체 액센트 강하게", L"加强立体强调", L"لمسة ثلاثية أقوى", L"Сильнее 3D-акцент", L"Stärkerer 3D-Akzent",
+			L"Acento 3D forte", L"Sterkere 3D-accent", L"Silniejszy akcent 3D", L"Daha guclu 3B vurgu"),
+		savedata.popupMenuSoftBoost ? TRUE : FALSE,
+		LL14(L"メニュー面の Soft 透過ボックス／グロウを強めます", L"Boost Soft translucent boxes/glow on the menu surface",
+			L"Renforce les boites Soft translucides/glow", L"Aumenta box Soft traslucidi/glow", L"Aumenta cajas Soft translucidas/glow",
+			L"메뉴 Soft 반투명 박스/글로우를 강하게", L"加强菜单 Soft 半透明盒/光晕", L"تعزيز صناديق Soft الشفافة/التوهج",
+			L"Усилить Soft-полупрозрачные боксы/свечение", L"Soft-Translucent-Boxen/Glow verstärken",
+			L"Reforcar caixas Soft translucidas/glow", L"Soft doorschijnende dozen/glow versterken",
+			L"Wzmocnij polprzezroczyste Soft boxy/glow", L"Soft yari saydam kutu/glow guclendir"));
+
 	ClampPopupAnimSave();
 	CCustomPopupMenu* animSub = AddSubMenu(
 		LL14(L"メニュー描画方法", L"Menu animation", L"Animation du menu", L"Animazione menu", L"Animacion del menu",
@@ -1361,11 +1661,12 @@ BOOL CCustomPopupMenu::ChipFlightRowsAtRest() const
 	return any;
 }
 
-BOOL CCustomPopupMenu::CalcLineAnim(int idx, int* ox, int* oy, int* fade) const
+BOOL CCustomPopupMenu::CalcLineAnim(int idx, int* ox, int* oy, int* fade, float* pT) const
 {
 	if (ox) *ox = 0;
 	if (oy) *oy = 0;
 	if (fade) *fade = 256;
+	if (pT) *pT = 1.f;
 	if (m_lineAnimPhase == 0 || idx < 0 || idx >= m_itemCount)
 		return TRUE;
 	const int style = PopupAnimStyle();
@@ -1445,6 +1746,10 @@ BOOL CCustomPopupMenu::CalcLineAnim(int idx, int* ox, int* oy, int* fade) const
 		float t = (float)(elapsed - delay) / (float)max(1, dur);
 		if (t > 1.f) t = 1.f;
 		if (t < 0.f) t = 0.f;
+		auto doneIn = [&]() -> BOOL {
+			if (pT) *pT = t;
+			return TRUE;
+		};
 
 		if (style == POPUP_ANIM_BIGBANG) {
 			float sx = 0.f, sy = 0.f;
@@ -1453,7 +1758,7 @@ BOOL CCustomPopupMenu::CalcLineAnim(int idx, int* ox, int* oy, int* fade) const
 			if (ox) *ox = (int)(sx * (1.f - e));
 			if (oy) *oy = (int)(sy * (1.f - e));
 			if (fade) *fade = fadeIn(t);
-			return TRUE;
+			return doneIn();
 		}
 		if (style == POPUP_ANIM_SPIRAL) {
 			const float e = easeOutBack(t);
@@ -1464,7 +1769,7 @@ BOOL CCustomPopupMenu::CalcLineAnim(int idx, int* ox, int* oy, int* fade) const
 			if (ox) *ox = (int)(cosf(ang) * rad);
 			if (oy) *oy = (int)(sinf(ang) * rad);
 			if (fade) *fade = fadeIn(t);
-			return TRUE;
+			return doneIn();
 		}
 		if (style == POPUP_ANIM_PETAL) {
 			const float e = easeInOutSine(t);
@@ -1472,7 +1777,7 @@ BOOL CCustomPopupMenu::CalcLineAnim(int idx, int* ox, int* oy, int* fade) const
 			if (ox) *ox = (int)sway;
 			if (oy) *oy = (int)(52.f * (1.f - e)); // 下からふわり
 			if (fade) *fade = fadeIn(t * 0.9f);
-			return TRUE;
+			return doneIn();
 		}
 		if (style == POPUP_ANIM_ZIPPER) {
 			const float e = easeOutBack(t);
@@ -1480,7 +1785,7 @@ BOOL CCustomPopupMenu::CalcLineAnim(int idx, int* ox, int* oy, int* fade) const
 			if (ox) *ox = (int)(side * 96.f * (1.f - min(e, 1.f)));
 			if (oy) *oy = (int)(side * -10.f * (1.f - min(e, 1.f)));
 			if (fade) *fade = fadeIn(t);
-			return TRUE;
+			return doneIn();
 		}
 		if (style == POPUP_ANIM_AURORA) {
 			const float e = easeInOutSine(t);
@@ -1488,21 +1793,21 @@ BOOL CCustomPopupMenu::CalcLineAnim(int idx, int* ox, int* oy, int* fade) const
 			if (ox) *ox = (int)((-68.f + wave) * (1.f - e));
 			if (oy) *oy = (int)(sinf((float)idx * 0.95f) * 18.f * (1.f - e));
 			if (fade) *fade = fadeIn(t * 0.85f);
-			return TRUE;
+			return doneIn();
 		}
 		if (style == POPUP_ANIM_CASCADE) {
 			const float e = easeOut(t);
 			if (ox) *ox = 0;
 			if (oy) *oy = (int)(-56.f * (1.f - e));
 			if (fade) *fade = fadeIn(t);
-			return TRUE;
+			return doneIn();
 		}
 		if (style == POPUP_ANIM_SLIDE) {
 			const float e = easeOut(t);
 			if (ox) *ox = (int)(-72.f * (1.f - e));
 			if (oy) *oy = 0;
 			if (fade) *fade = fadeIn(t);
-			return TRUE;
+			return doneIn();
 		}
 		if (style == POPUP_ANIM_POP) {
 			const float e = easeOut(t);
@@ -1514,7 +1819,7 @@ BOOL CCustomPopupMenu::CalcLineAnim(int idx, int* ox, int* oy, int* fade) const
 			if (ox) *ox = 0;
 			if (oy) *oy = (int)(pull * (1.f - e));
 			if (fade) *fade = fadeIn(t);
-			return TRUE;
+			return doneIn();
 		}
 
 		const float e = easeOut(t);
@@ -1534,7 +1839,7 @@ BOOL CCustomPopupMenu::CalcLineAnim(int idx, int* ox, int* oy, int* fade) const
 			if (oy) *oy = 0;
 		}
 		if (fade) *fade = fadeIn(t);
-		return TRUE;
+		return doneIn();
 	}
 
 	// ---- exit ----
@@ -1556,6 +1861,7 @@ BOOL CCustomPopupMenu::CalcLineAnim(int idx, int* ox, int* oy, int* fade) const
 	float t = (float)(elapsed - delay) / (float)max(1, dur);
 	if (t > 1.f) t = 1.f;
 	if (t < 0.f) t = 0.f;
+	if (pT) *pT = 1.f - t; // 退場: 着地度が下がる＝回転が増える
 	const float e = easeOut(t);
 
 	if (style == POPUP_ANIM_BIGBANG) {
@@ -1729,6 +2035,9 @@ void CCustomPopupMenu::AnimateOut()
 				::PostQuitMessage((int)msg.wParam);
 				break;
 			}
+			// 退場中に右クリック／CONTEXTMENU を通すと新規 Track が二重起動する
+			if (PopupIsMenuOpenMessage(msg.message))
+				continue;
 			::TranslateMessage(&msg);
 			::DispatchMessage(&msg);
 		}
@@ -1876,8 +2185,6 @@ void CCustomPopupMenu::AbortAnimAndHide()
 
 void CCustomPopupMenu::DestroyPopupTree(BOOL animateOut)
 {
-	if (s_trackingRoot == this)
-		s_trackingRoot = NULL;
 	CloseOpenSub();
 	for (int i = 0; i < m_subCount; ++i)
 		if (m_subs[i]) m_subs[i]->DestroyPopupTree(FALSE);
@@ -1905,6 +2212,10 @@ void CCustomPopupMenu::DestroyPopupTree(BOOL animateOut)
 		DestroyWindow();
 	}
 	if (m_memBmp.GetSafeHandle()) { m_memBmp.DeleteObject(); m_memW = m_memH = 0; }
+	// AnimateOut の Peek/Dispatch 中に新規 Track が走ると二重メニューになる。
+	// ルート解放はウィンドウ破棄後に行う。
+	if (s_trackingRoot == this)
+		s_trackingRoot = NULL;
 }
 
 void CCustomPopupMenu::CloseOpenSub()
@@ -2636,12 +2947,13 @@ void CCustomPopupMenu::PaintToDC(CDC& dc)
 			} else {
 				for (int i = 0; i < m_itemCount; ++i) {
 					int ox = 0, oy = 0, fade = 0;
-					if (!CalcLineAnim(i, &ox, &oy, &fade) || fade < 8)
+					float flightT = 1.f;
+					if (!CalcLineAnim(i, &ox, &oy, &fade, &flightT) || fade < 8)
 						continue;
 					CRect vr = ItemViewRect(i);
 					CRect chip(m_flightPad, vr.top, m_flightPad + m_menuW, vr.bottom);
 					chip.OffsetRect(ox, oy);
-					DrawRowChip(dc, chip, m_animTick, fade);
+					DrawRowChip(dc, chip, m_animTick, fade, animStyle, flightT);
 					paintItem(i);
 				}
 			}
@@ -2683,7 +2995,12 @@ void CCustomPopupMenu::PaintToDC(CDC& dc)
 		if (hasHull) {
 			const int clipSave = dc.SaveDC();
 			dc.IntersectClipRect(&hull);
-			DrawJkBackdrop(dc, rc, m_animTick);
+			float doorT = 1.f;
+			if (animStyle == POPUP_ANIM_EXPAND && !m_asSubmenu) {
+				int ox0 = 0, oy0 = 0, fade0 = 0;
+				CalcLineAnim(m_lineAnimOrigin, &ox0, &oy0, &fade0, &doorT);
+			}
+			DrawJkBackdrop(dc, rc, m_animTick, (animStyle == POPUP_ANIM_EXPAND) ? doorT : -1.f);
 			DrawTornRibbon(dc, rc, m_animTick);
 			if (animStyle == POPUP_ANIM_EXPAND && !m_asSubmenu) {
 				const COLORREF tip = CCC_IsInwoman() ? RGB(255, 190, 220) : RGB(210, 200, 255);
@@ -2935,6 +3252,14 @@ BOOL CCustomPopupMenu::HandleChromeClick(int idx)
 		if (it.checked) StartCheckBounce(idx);
 		CCC_NotifyAeroSettingChanged();
 		CloseChain(0);
+		return TRUE;
+	}
+	if (it.id == CCUSTOM_POPUP_ID_SOFTBOOST) {
+		savedata.popupMenuSoftBoost = savedata.popupMenuSoftBoost ? 0 : 1;
+		it.checked = savedata.popupMenuSoftBoost ? TRUE : FALSE;
+		if (it.checked) StartCheckBounce(idx);
+		MpPersistSavedataQuick();
+		InvalidateBgOnly();
 		return TRUE;
 	}
 	if (it.id == CCUSTOM_POPUP_ID_FONT_BOLD) {
@@ -3332,7 +3657,17 @@ void CCustomPopupMenu::RunModalLoop()
 			|| m.message == WM_LBUTTONDBLCLK) {
 			DWORD pos = ::GetMessagePos();
 			CPoint sp(GET_X_LPARAM(pos), GET_Y_LPARAM(pos));
-			if (!IsPointInChain(sp)) { m_done = TRUE; m_result = 0; return TRUE; }
+			if (!IsPointInChain(sp)) {
+				m_done = TRUE;
+				m_result = 0;
+				// 右クリック外は「閉じて同じクリックで開き直す」。左は閉じるだけ。
+				if (m.message == WM_RBUTTONDOWN || m.message == WM_NCRBUTTONDOWN)
+					PopupArmReopenAt(sp, m.message == WM_NCRBUTTONDOWN);
+				else
+					s_reopenRClick = FALSE;
+				PopupEatOpenMenuMessages();
+				return TRUE;
+			}
 		}
 		if (m_tip.GetSafeHwnd()) m_tip.RelayEvent(&m);
 		TranslateMessage(&m);
@@ -3377,11 +3712,15 @@ void CCustomPopupMenu::RunModalLoop()
 	}
 	m_tracking = FALSE;
 	DestroyPopupTree();
+	PopupEatOpenMenuMessages();
 	if (hCap && ::IsWindow(hCap)) ::SetForegroundWindow(hCap);
 }
 
 UINT CCustomPopupMenu::Track(CPoint screenPt, CWnd* pOwner)
 {
+	// AnimateOut 中などにネストして呼ばれると二重メニューになる
+	if (s_trackingRoot != NULL)
+		return 0;
 	m_owner = pOwner;
 	m_root = this;
 	m_parentMenu = NULL;
@@ -3392,6 +3731,9 @@ UINT CCustomPopupMenu::Track(CPoint screenPt, CWnd* pOwner)
 	RunModalLoop();
 	if (s_trackingRoot == this)
 		s_trackingRoot = NULL;
+	PopupEatOpenMenuMessages();
+	// 外側右クリックで閉じた場合、同じ操作で新しいメニューを開く
+	PopupFlushReopenContextClick();
 	// 骨格コマンドは呼び出し元へ返さない
 	if (IsChromeCommand(m_result))
 		return 0;

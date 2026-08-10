@@ -2,6 +2,8 @@
 #include "CCustomControl.h"
 #include "resource.h"
 #include "CImageBase.h"
+#include "GdiSoft2D.h"
+#include "GdiSoft3D.h"
 #include <algorithm>
 #include <cmath>
 #include <functional>
@@ -1777,6 +1779,8 @@ static void DrawHanamaru(CDC* pDC, CRect rc, COLORREF cC, COLORREF cP)
     DrawStar(pDC, cx + radius * 9 / 10, cy, 1, RGB(255, 180, 200));
 }
 
+static void DrawSoftJkChip(CDC* pDC, const CRect& rc, int animTick, BOOL hot);
+
 static void DrawDecorations(CDC* pDC, CRect rect, BOOL bPA, BOOL bPushed)
 {
     CPen pV(PS_SOLID, 1, COLOR_VINE_DECO);
@@ -1805,6 +1809,7 @@ static void DrawDecorations(CDC* pDC, CRect rect, BOOL bPA, BOOL bPushed)
         nCorners = 2;
     }
 
+    const int softTick = (int)(::GetTickCount64() / 220);
     for (int ci = 0; ci < nCorners; ++ci)
     {
         C& c = corners[ci];
@@ -1830,6 +1835,9 @@ static void DrawDecorations(CDC* pDC, CRect rect, BOOL bPA, BOOL bPushed)
         pDC->SelectObject(&bC);
         pDC->Ellipse(fx - 1, fy - 1, fx + 1, fy + 1);
         pDC->SelectObject(&pV);
+
+        // Soft3D の小さな宝石チップを角花に紛れ込ませる（前面を奪わない）
+        DrawSoftJkChip(pDC, CRect(fx - 5, fy - 5, fx + 5, fy + 5), softTick + ci * 5, bPushed);
     }
     pDC->SelectObject(op);
     pDC->SelectObject(ob);
@@ -2295,8 +2303,258 @@ static void FillRectAlpha(CDC* pDC, const CRect& rc, COLORREF clr, BYTE alpha)
 // （全カスタムコントロールで共有して使用します）
 // ============================================================================
 
+// Soft2D/Soft3D は UI スレッド専用・file-static 再利用（ネスト再入禁止）
+static int s_uiSoftBusy = 0;
+static GdiSoft2D::Context s_uiSoft2d;
+static GdiSoft3D::Context s_uiSoft3d;
+
+static void SoftPremultPresent(GdiSoftFB::Framebuffer& fb, HDC dst, int dx, int dy, int w, int h, BYTE constA)
+{
+    if (!fb.color || !fb.hdc || fb.w != w || fb.h != h || !dst) return;
+    const int n = w * h;
+    for (int i = 0; i < n; ++i) {
+        const DWORD pix = fb.color[i];
+        const BYTE a = GdiSoftFB::A(pix);
+        if (a == 0) { fb.color[i] = 0; continue; }
+        if (a >= 255) continue;
+        fb.color[i] = GdiSoftFB::PackBGRA(a,
+            (BYTE)(GdiSoftFB::R(pix) * a / 255),
+            (BYTE)(GdiSoftFB::G(pix) * a / 255),
+            (BYTE)(GdiSoftFB::B(pix) * a / 255));
+    }
+    fb.PresentAlpha(dst, dx, dy, constA);
+}
+
+// 背景用: 薄い Soft3D ポリゴンがゆっくり揺れる（前面を奪わない。リスト行には使わない）
+static void DrawSoftJkBackdrop(CDC* pDC, const CRect& rc, int animTick, BOOL hot)
+{
+    if (!pDC || s_uiSoftBusy || rc.Width() < 28 || rc.Height() < 16) return;
+    if (rc.Width() > 520 || rc.Height() > 160) return;
+    ++s_uiSoftBusy;
+    const int w = rc.Width();
+    const int h = rc.Height();
+    const COLORREF pink = CCC_IsInwoman() ? RGB(255, 160, 200) : RGB(255, 190, 220);
+    const COLORREF lav = CCC_IsInwoman() ? RGB(240, 150, 210) : RGB(210, 190, 255);
+
+    if (s_uiSoft3d.fb.w != w || s_uiSoft3d.fb.h != h)
+        s_uiSoft3d.Create(w, h);
+    if (s_uiSoft3d.fb.color && s_uiSoft3d.fb.w == w && s_uiSoft3d.fb.h == h) {
+        s_uiSoft3d.fb.Clear(GdiSoftFB::PackBGRA(0, 0, 0, 0), 1e9f);
+        s_uiSoft3d.alphaBlend = true;
+        s_uiSoft3d.depthTest = true;
+        s_uiSoft3d.depthWrite = true;
+        s_uiSoft3d.fogMode = GdiSoft3D::FogNone;
+        s_uiSoft3d.edgeOverlay = false;
+        s_uiSoft3d.dofEnable = false;
+        s_uiSoft3d.postVignette = s_uiSoft3d.postGlow = s_uiSoft3d.postSaturate = false;
+
+        const float t = (float)animTick * 0.035f;
+        s_uiSoft3d.cam.yawDeg = -18.f + sinf(t) * 7.f;
+        s_uiSoft3d.cam.pitchDeg = 38.f + cosf(t * 0.7f) * 3.f;
+        s_uiSoft3d.cam.zoom = hot ? 1.08f : 1.0f;
+        float boxes[1][6] = { { -0.85f, 0.85f, 0.f, 0.18f, -0.55f, 0.55f } };
+        s_uiSoft3d.SetViewportFit(boxes, 1);
+
+        const float bob = sinf(t * 1.1f) * 0.02f;
+        s_uiSoft3d.DrawBox(-0.70f, -0.10f, 0.10f + bob, -0.40f, 0.05f, pink, 0.f);
+        s_uiSoft3d.DrawBox(0.05f, 0.72f, 0.08f - bob, -0.15f, 0.40f, lav, 0.f);
+        s_uiSoft3d.DrawQuad(
+            -0.35f, 0.02f, -0.45f, 0.35f, 0.06f + bob, -0.20f,
+             0.25f, 0.02f, 0.35f, -0.40f, 0.04f, 0.25f, pink);
+
+		SoftPremultPresent(s_uiSoft3d.fb, pDC->GetSafeHdc(), rc.left, rc.top, w, h,
+            hot ? (BYTE)88 : (BYTE)64);
+    }
+
+    if (s_uiSoft2d.Create(w, h, false) && s_uiSoft2d.fb.color) {
+        s_uiSoft2d.ClearArgb(0);
+        const int ox = (int)(sinf((float)animTick * 0.04f) * 3.f);
+        const int oy = (int)(cosf((float)animTick * 0.03f) * 2.f);
+        s_uiSoft2d.FillEllipse(w / 5 + ox, h * 3 / 4 + oy, max(4, w / 5), max(3, h / 4), pink, 28);
+        s_uiSoft2d.FillEllipse(w * 4 / 5 - ox, h / 3 - oy, max(3, w / 6), max(2, h / 5), lav, 22);
+        SoftPremultPresent(s_uiSoft2d.fb, pDC->GetSafeHdc(), rc.left, rc.top, w, h, hot ? (BYTE)95 : (BYTE)72);
+    }
+    --s_uiSoftBusy;
+}
+
+// 共通装飾用の小さな Soft3D チップ（リボン結び・角デコ・♡下地など）
+// 常時OKだが PresentAlpha は控えめ。animTick は間引き更新前提。
+static void DrawSoftJkChip(CDC* pDC, const CRect& rc, int animTick, BOOL hot)
+{
+    if (!pDC || s_uiSoftBusy) return;
+    if (rc.Width() < 8 || rc.Height() < 8) return;
+    if (rc.Width() > 36 || rc.Height() > 36) return;
+    ++s_uiSoftBusy;
+    const int w = rc.Width();
+    const int h = rc.Height();
+    if (s_uiSoft3d.fb.w != w || s_uiSoft3d.fb.h != h)
+        s_uiSoft3d.Create(w, h);
+    if (s_uiSoft3d.fb.color && s_uiSoft3d.fb.w == w && s_uiSoft3d.fb.h == h) {
+        s_uiSoft3d.fb.Clear(GdiSoftFB::PackBGRA(0, 0, 0, 0), 1e9f);
+        s_uiSoft3d.alphaBlend = true;
+        s_uiSoft3d.depthTest = true;
+        s_uiSoft3d.depthWrite = true;
+        s_uiSoft3d.fogMode = GdiSoft3D::FogNone;
+        s_uiSoft3d.edgeOverlay = false;
+        s_uiSoft3d.dofEnable = false;
+        s_uiSoft3d.postVignette = s_uiSoft3d.postGlow = s_uiSoft3d.postSaturate = false;
+        const float t = (float)animTick * 0.05f;
+        s_uiSoft3d.cam.yawDeg = -28.f + sinf(t) * 10.f;
+        s_uiSoft3d.cam.pitchDeg = 32.f + cosf(t * 0.9f) * 4.f;
+        s_uiSoft3d.cam.zoom = hot ? 1.25f : 1.1f;
+        float boxes[1][6] = { { -0.45f, 0.45f, 0.f, 0.28f, -0.45f, 0.45f } };
+        s_uiSoft3d.SetViewportFit(boxes, 1);
+        const COLORREF c = CCC_IsInwoman() ? RGB(255, 120, 175) : RGB(255, 165, 210);
+        const float y = hot ? 0.22f : 0.16f;
+        s_uiSoft3d.DrawNeonBox(-0.28f, 0.28f, y + sinf(t) * 0.02f, -0.28f, 0.28f, c, 0.f);
+        SoftPremultPresent(s_uiSoft3d.fb, pDC->GetSafeHdc(), rc.left, rc.top, w, h,
+            hot ? (BYTE)150 : (BYTE)110);
+    }
+    --s_uiSoftBusy;
+}
+
+// Soft3D ハート（2球＋下三角）。yaw でゆっくり回転。リスト／ツリー／レンジサム用。
+static void DrawSoftJkHeart(CDC* pDC, const CRect& rc, int animTick, BOOL hot, COLORREF col)
+{
+    if (!pDC || s_uiSoftBusy) return;
+    if (rc.Width() < 10 || rc.Height() < 10) return;
+    if (rc.Width() > 40 || rc.Height() > 40) return;
+    ++s_uiSoftBusy;
+    const int w = rc.Width();
+    const int h = rc.Height();
+    if (s_uiSoft3d.fb.w != w || s_uiSoft3d.fb.h != h)
+        s_uiSoft3d.Create(w, h);
+    if (s_uiSoft3d.fb.color && s_uiSoft3d.fb.w == w && s_uiSoft3d.fb.h == h) {
+        s_uiSoft3d.fb.Clear(GdiSoftFB::PackBGRA(0, 0, 0, 0), 1e9f);
+        s_uiSoft3d.alphaBlend = true;
+        s_uiSoft3d.depthTest = true;
+        s_uiSoft3d.depthWrite = true;
+        s_uiSoft3d.fogMode = GdiSoft3D::FogNone;
+        s_uiSoft3d.edgeOverlay = false;
+        s_uiSoft3d.dofEnable = false;
+        s_uiSoft3d.postVignette = s_uiSoft3d.postGlow = s_uiSoft3d.postSaturate = false;
+        const float spin = (float)animTick * 5.5f;
+        s_uiSoft3d.cam.yawDeg = -22.f + spin + (hot ? sinf((float)animTick * 0.08f) * 6.f : 0.f);
+        s_uiSoft3d.cam.pitchDeg = 28.f + cosf((float)animTick * 0.05f) * 4.f;
+        s_uiSoft3d.cam.zoom = hot ? 1.45f : 1.28f;
+        float boxes[1][6] = { { -0.55f, 0.55f, -0.55f, 0.55f, -0.4f, 0.4f } };
+        s_uiSoft3d.SetViewportFit(boxes, 1);
+        const COLORREF c = col ? col : (CCC_IsInwoman() ? RGB(255, 120, 175) : RGB(255, 140, 188));
+        const COLORREF cDeep = CCC_Darken(c, 40);
+        s_uiSoft3d.DrawSphere(-0.18f, 0.18f, 0.05f, 0.22f, c, 10, 7);
+        s_uiSoft3d.DrawSphere(0.18f, 0.18f, 0.05f, 0.22f, c, 10, 7);
+        s_uiSoft3d.DrawQuad(
+            -0.38f, 0.02f, 0.02f,  0.38f, 0.02f, 0.02f,
+             0.0f, -0.48f, 0.08f,  0.0f, -0.48f, -0.02f, cDeep);
+        SoftPremultPresent(s_uiSoft3d.fb, pDC->GetSafeHdc(), rc.left, rc.top, w, h,
+            hot ? (BYTE)230 : (BYTE)200);
+    }
+    --s_uiSoftBusy;
+}
+
+// Soft3D つまみ／先端ジェム（NeonBox）。スライダー・プログレス用。
+static void DrawSoftJkThumb(CDC* pDC, const CRect& rc, int animTick, BOOL hot, float tiltDeg)
+{
+    if (!pDC || s_uiSoftBusy) return;
+    if (rc.Width() < 8 || rc.Height() < 8) return;
+    if (rc.Width() > 36 || rc.Height() > 36) return;
+    ++s_uiSoftBusy;
+    const int w = rc.Width();
+    const int h = rc.Height();
+    if (s_uiSoft3d.fb.w != w || s_uiSoft3d.fb.h != h)
+        s_uiSoft3d.Create(w, h);
+    if (s_uiSoft3d.fb.color && s_uiSoft3d.fb.w == w && s_uiSoft3d.fb.h == h) {
+        s_uiSoft3d.fb.Clear(GdiSoftFB::PackBGRA(0, 0, 0, 0), 1e9f);
+        s_uiSoft3d.alphaBlend = true;
+        s_uiSoft3d.depthTest = true;
+        s_uiSoft3d.depthWrite = true;
+        s_uiSoft3d.fogMode = GdiSoft3D::FogNone;
+        s_uiSoft3d.edgeOverlay = false;
+        s_uiSoft3d.dofEnable = false;
+        s_uiSoft3d.postVignette = s_uiSoft3d.postGlow = s_uiSoft3d.postSaturate = false;
+        const float t = (float)animTick * 0.06f;
+        s_uiSoft3d.cam.yawDeg = -24.f + tiltDeg + sinf(t) * (hot ? 14.f : 6.f);
+        s_uiSoft3d.cam.pitchDeg = 34.f + cosf(t * 0.8f) * 3.f;
+        s_uiSoft3d.cam.zoom = hot ? 1.3f : 1.12f;
+        float boxes[1][6] = { { -0.4f, 0.4f, 0.f, 0.3f, -0.4f, 0.4f } };
+        s_uiSoft3d.SetViewportFit(boxes, 1);
+        const COLORREF c = CCC_IsInwoman() ? RGB(255, 130, 190) : RGB(200, 160, 255);
+        s_uiSoft3d.DrawNeonBox(-0.22f, 0.22f, 0.2f + sinf(t) * 0.02f, -0.22f, 0.22f, c, 0.f);
+        SoftPremultPresent(s_uiSoft3d.fb, pDC->GetSafeHdc(), rc.left, rc.top, w, h,
+            hot ? (BYTE)165 : (BYTE)125);
+    }
+    --s_uiSoftBusy;
+}
+
+// Soft3D リボン結び（ホバー時ボタン等）。小さな torus。
+static void DrawSoftJkKnot(CDC* pDC, const CRect& rc, int animTick)
+{
+    if (!pDC || s_uiSoftBusy) return;
+    if (rc.Width() < 10 || rc.Height() < 10) return;
+    if (rc.Width() > 40 || rc.Height() > 40) return;
+    ++s_uiSoftBusy;
+    const int w = rc.Width();
+    const int h = rc.Height();
+    if (s_uiSoft3d.fb.w != w || s_uiSoft3d.fb.h != h)
+        s_uiSoft3d.Create(w, h);
+    if (s_uiSoft3d.fb.color && s_uiSoft3d.fb.w == w && s_uiSoft3d.fb.h == h) {
+        s_uiSoft3d.fb.Clear(GdiSoftFB::PackBGRA(0, 0, 0, 0), 1e9f);
+        s_uiSoft3d.alphaBlend = true;
+        s_uiSoft3d.depthTest = true;
+        s_uiSoft3d.depthWrite = true;
+        s_uiSoft3d.fogMode = GdiSoft3D::FogNone;
+        s_uiSoft3d.edgeOverlay = false;
+        s_uiSoft3d.dofEnable = false;
+        s_uiSoft3d.postVignette = s_uiSoft3d.postGlow = s_uiSoft3d.postSaturate = false;
+        const float t = (float)animTick * 0.09f;
+        s_uiSoft3d.cam.yawDeg = -40.f + sinf(t) * 18.f;
+        s_uiSoft3d.cam.pitchDeg = 40.f + cosf(t * 0.7f) * 8.f;
+        s_uiSoft3d.cam.zoom = 1.4f;
+        float boxes[1][6] = { { -0.5f, 0.5f, -0.2f, 0.35f, -0.5f, 0.5f } };
+        s_uiSoft3d.SetViewportFit(boxes, 1);
+        const COLORREF c = CCC_IsInwoman() ? RGB(255, 110, 170) : RGB(255, 150, 200);
+        s_uiSoft3d.DrawTorus(0.f, 0.05f, 0.f, 0.28f, 0.09f, c, 12, 8);
+        SoftPremultPresent(s_uiSoft3d.fb, pDC->GetSafeHdc(), rc.left, rc.top, w, h, (BYTE)150);
+    }
+    --s_uiSoftBusy;
+}
+
+// Soft3D コーナー／枠のゆらゆら（GroupBox 等）。微小 yaw/pitch。
+static void DrawSoftJkSwayCorner(CDC* pDC, const CRect& rc, int animTick, float amp)
+{
+    if (!pDC || s_uiSoftBusy) return;
+    if (rc.Width() < 8 || rc.Height() < 8) return;
+    if (rc.Width() > 28 || rc.Height() > 28) return;
+    ++s_uiSoftBusy;
+    const int w = rc.Width();
+    const int h = rc.Height();
+    if (s_uiSoft3d.fb.w != w || s_uiSoft3d.fb.h != h)
+        s_uiSoft3d.Create(w, h);
+    if (s_uiSoft3d.fb.color && s_uiSoft3d.fb.w == w && s_uiSoft3d.fb.h == h) {
+        s_uiSoft3d.fb.Clear(GdiSoftFB::PackBGRA(0, 0, 0, 0), 1e9f);
+        s_uiSoft3d.alphaBlend = true;
+        s_uiSoft3d.depthTest = true;
+        s_uiSoft3d.depthWrite = true;
+        s_uiSoft3d.fogMode = GdiSoft3D::FogNone;
+        s_uiSoft3d.edgeOverlay = false;
+        s_uiSoft3d.dofEnable = false;
+        s_uiSoft3d.postVignette = s_uiSoft3d.postGlow = s_uiSoft3d.postSaturate = false;
+        const float t = (float)animTick * 0.04f;
+        s_uiSoft3d.cam.yawDeg = -20.f + sinf(t) * amp;
+        s_uiSoft3d.cam.pitchDeg = 36.f + cosf(t * 0.85f) * (amp * 0.4f);
+        s_uiSoft3d.cam.zoom = 1.08f;
+        float boxes[1][6] = { { -0.4f, 0.4f, 0.f, 0.22f, -0.4f, 0.4f } };
+        s_uiSoft3d.SetViewportFit(boxes, 1);
+        const COLORREF c = CCC_IsInwoman() ? RGB(255, 150, 195) : RGB(220, 180, 255);
+        s_uiSoft3d.DrawBox(-0.22f, 0.22f, 0.12f + sinf(t) * 0.015f, -0.22f, 0.22f, c, 0.f);
+        SoftPremultPresent(s_uiSoft3d.fb, pDC->GetSafeHdc(), rc.left, rc.top, w, h, (BYTE)100);
+    }
+    --s_uiSoftBusy;
+}
+
 // ぷるんとした濡れツヤ(ガラス/リップグロス風)を上半分にのせる。
 // 不透明な面の上にのみ使用すること（クロマキー透過領域には使わない）。
+// ※ Soft* はここへ入れない。リスト選択行の♡白飛びを防ぐため GDI ツヤのみ。
 static void DrawGlossHighlight(CDC* pDC, const CRect& rc, int radius)
 {
     if (!pDC || rc.Width() <= 4 || rc.Height() <= 6) return;
@@ -2400,16 +2658,32 @@ static void DrawBow(CDC* pDC, const CRect& rc, COLORREF c)
 
     pDC->SelectObject(ob);
     pDC->SelectObject(op);
+
+    // 結び目下に Soft3D チップ（常時でも小さく間引き前提）
+    DrawSoftJkChip(pDC, CRect(cx - 6, cy - 6, cx + 6, cy + 6),
+        (int)(::GetTickCount64() / 220), FALSE);
 }
 
 // ぷるんとした濡れツヤ付きのチェック(レ点)。丸端の太線でやわらかく。
-static void DrawCheckMark(CDC* pDC, const CRect& rc, COLORREF c, int thick)
+// swayDeg: ホバー時のゆっくり首振り（±数度）。0=静止。
+static void DrawCheckMark(CDC* pDC, const CRect& rc, COLORREF c, int thick, float swayDeg = 0.f)
 {
     if (!pDC || rc.Width() < 5 || rc.Height() < 5) return;
     if (thick < 2) thick = 2;
-    const int x1 = rc.left + rc.Width() * 12 / 100, y1 = rc.top + rc.Height() * 54 / 100;
-    const int x2 = rc.left + rc.Width() * 40 / 100, y2 = rc.top + rc.Height() * 82 / 100;
-    const int x3 = rc.left + rc.Width() * 92 / 100, y3 = rc.top + rc.Height() * 14 / 100;
+    int x1 = rc.left + rc.Width() * 12 / 100, y1 = rc.top + rc.Height() * 54 / 100;
+    int x2 = rc.left + rc.Width() * 40 / 100, y2 = rc.top + rc.Height() * 82 / 100;
+    int x3 = rc.left + rc.Width() * 92 / 100, y3 = rc.top + rc.Height() * 14 / 100;
+    if (swayDeg != 0.f) {
+        const float rad = swayDeg * (float)(3.14159265 / 180.0);
+        const float cs = cosf(rad), sn = sinf(rad);
+        const float ox = (float)rc.CenterPoint().x, oy = (float)rc.CenterPoint().y;
+        auto rot = [&](int& x, int& y) {
+            const float dx = (float)x - ox, dy = (float)y - oy;
+            x = (int)(ox + dx * cs - dy * sn + 0.5f);
+            y = (int)(oy + dx * sn + dy * cs + 0.5f);
+        };
+        rot(x1, y1); rot(x2, y2); rot(x3, y3);
+    }
 
     // 影でぷっくり立体感
     CPen psh(PS_SOLID, thick, CCC_Darken(c, 45));
@@ -2494,13 +2768,27 @@ static void DrawLaceScallop(CDC* pDC, int x1, int y, int x2, int r, COLORREF c)
 }
 
 // ほどけかけリボン: 左右非対称のループ + だらりと垂れた2本のテール。色っぽいしどけなさ。
-static void DrawLooseRibbon(CDC* pDC, const CRect& rc, COLORREF c)
+// angleDeg: ホバー時のゆっくり回転（±十数度まで）。0=静止。
+static void DrawLooseRibbon(CDC* pDC, const CRect& rc, COLORREF c, float angleDeg = 0.f)
 {
     if (!pDC || rc.Width() < 6 || rc.Height() < 5) return;
     const int cx = rc.CenterPoint().x;
     const int cy = rc.top + rc.Height() / 3;
     const int w = max(3, rc.Width() / 2);
     const int h = max(2, rc.Height() / 3);
+
+    int saved = 0;
+    if (angleDeg != 0.f) {
+        saved = pDC->SaveDC();
+        ::SetGraphicsMode(pDC->GetSafeHdc(), GM_ADVANCED);
+        const float rad = angleDeg * (float)(3.14159265 / 180.0);
+        const float cs = cosf(rad), sn = sinf(rad);
+        XFORM xf = {};
+        xf.eM11 = cs; xf.eM12 = sn; xf.eM21 = -sn; xf.eM22 = cs;
+        xf.eDx = (float)cx - cs * (float)cx + sn * (float)cy;
+        xf.eDy = (float)cy - sn * (float)cx - cs * (float)cy;
+        pDC->SetWorldTransform(&xf);
+    }
 
     CBrush br(c);
     CPen pen(PS_SOLID, 1, CCC_Darken(c, 64));
@@ -2529,6 +2817,7 @@ static void DrawLooseRibbon(CDC* pDC, const CRect& rc, COLORREF c)
 
     pDC->SelectObject(ob);
     pDC->SelectObject(op);
+    if (saved) pDC->RestoreDC(saved);
 }
 
 // ============================================================================
@@ -3117,7 +3406,12 @@ static const UINT_PTR kEditSelTimerId = 4108;
 static const UINT_PTR kEditCaretTimerId = 4109; // 自前キャレット点滅
 static const UINT_PTR kButtonAnimTimerId    = 4120; // ボタンの流れるツヤ/鼓動パルス
 static const UINT_PTR kCheckBounceTimerId   = 4121; // チェックON時のバウンス
+static const UINT_PTR kCheckHoverTimerId    = 4123; // ホバー中レ点／リボンゆっくり動き
+static const UINT_PTR kButtonSoftTimerId    = 4124; // Soft3D 常時（間引き 220ms）
 static const UINT_PTR kSliderShimmerTimerId = 4122; // スライダーの流れるシマー
+static const UINT_PTR kListSoftTimerId      = 4125; // 選択♡ Soft3D 回転（120ms）
+static const UINT_PTR kGroupSoftTimerId     = 4126; // GroupBox ゆらゆら（500ms）
+static const UINT_PTR kTabSoftTimerId       = 4127; // 選択タブ Soft（220ms）
 
 CCustomEdit::CCustomEdit()
     : m_bHasFocus(FALSE), m_bAutoDelete(FALSE), m_bSelDrag(FALSE), m_bCaretOn(TRUE)
@@ -3750,6 +4044,8 @@ void CCustomEdit::DrawEditFrame(CDC& dc, const CRect& r)
         DrawSparkle(&dc, r.right - 8, r.bottom - 8, 2, COLOR_SPARKLE);
         // 窓外へはみ出さない(top-1 は親アクリルを抉る)
         DrawBow(&dc, CRect(r.CenterPoint().x - 8, r.top + 0, r.CenterPoint().x + 8, r.top + 9), COLOR_BOW);
+        DrawSoftJkThumb(&dc, CRect(r.right - 18, r.top + 2, r.right - 4, r.top + 16),
+            (int)(::GetTickCount64() / 80), TRUE, 8.f);
     }
 
     CRect rL(r.left + 2, r.CenterPoint().y - 3, r.left + 8, r.CenterPoint().y + 3);
@@ -4877,7 +5173,10 @@ BOOL CCustomListBox::OnEraseBkgnd(CDC* pDC)
     {
         CRect r;
         GetClientRect(&r);
-        pDC->FillSolidRect(&r, COLOR_LIST_BG);
+        if (CCC_HostNeedsChildOpaque(m_hWnd))
+            CCC_FillRectOpaqueBits(pDC->GetSafeHdc(), r, COLOR_LIST_BG);
+        else
+            pDC->FillSolidRect(&r, COLOR_LIST_BG);
     }
     return TRUE;
 }
@@ -4890,7 +5189,10 @@ void CCustomListBox::DrawItem(LPDRAWITEMSTRUCT lp)
     COLORREF bg = (lp->itemState & ODS_SELECTED) ? COLOR_SEL_BG : (lp->itemID % 2 == 0 ? COLOR_LIST_BG : COLOR_LIST_ALT);
 
     const BOOL bListAero = m_bAeroMode && !CCC_IsBlurDialogChild(m_hWnd);
-    if (bListAero)
+    // 選択切替の部分描画はアクリル下で素 Fill が透過穴になる
+    if (CCC_HostNeedsChildOpaque(m_hWnd))
+        CCC_FillRectOpaqueBits(pDC->GetSafeHdc(), r, bg);
+    else if (bListAero)
         FillRectAlpha(pDC, r, bg, (lp->itemState & ODS_SELECTED) ? 180 : AERO_ALPHA_SEMI);
     else
         pDC->FillSolidRect(&r, bg);
@@ -4907,7 +5209,13 @@ void CCustomListBox::DrawItem(LPDRAWITEMSTRUCT lp)
     {
     case 0: DrawFlower(pDC, ix + is / 2, iy + is / 2, is / 2, RGB(255, 200, 220)); break;
     case 1: DrawStar(pDC, ix + is / 2, iy + is / 2, is / 3, RGB(255, 215, 0)); break;
-    case 2: DrawHeart(pDC, CRect(ix, iy, ix + is, iy + is), COLOR_HEART); break;
+    case 2:
+        if (lp->itemState & ODS_SELECTED)
+            DrawSoftJkHeart(pDC, CRect(ix, iy, ix + is, iy + is),
+                (int)(::GetTickCount64() / 160), TRUE, COLOR_HEART);
+        else
+            DrawHeart(pDC, CRect(ix, iy, ix + is, iy + is), COLOR_HEART);
+        break;
     case 3: DrawRibbon(pDC, CRect(ix, iy, ix + is, iy + is), RGB(255, 182, 193)); break;
     }
 
@@ -5061,7 +5369,11 @@ BOOL CCustomComboBox::OnEraseBkgnd(CDC* pDC)
         const int selH = (int)(INT_PTR)SendMessage(CB_GETITEMHEIGHT, (WPARAM)-1, 0);
         if (selH > 0 && r.Height() > selH + 1)
             r.bottom = r.top + selH;
-        pDC->FillSolidRect(&r, COLOR_COMBO_BG);
+        // アクリル/キャプションガラス下の素 FillSolidRect は α=0 穴になる
+        if (CCC_HostNeedsChildOpaque(m_hWnd))
+            CCC_FillRectOpaqueBits(pDC->GetSafeHdc(), r, COLOR_COMBO_BG);
+        else
+            pDC->FillSolidRect(&r, COLOR_COMBO_BG);
     }
     return TRUE;
 }
@@ -5120,12 +5432,17 @@ void CCustomComboBox::PaintClient(CDC& dc)
         mDC.SelectObject(op);
     }
 
-    // ハート3つはやめ、ひとつのリボンで上品に
+    // ハート3つはやめ、ひとつのリボンで上品に（Soft3D チップは DrawBow 内）
     {
         int cy2 = rB.Height() / 2 + rB.top;
         int bw = min(rB.Width() - 4, CCC_ScaleDpi(16, dpi));
         const int bh = CCC_ScaleDpi(5, dpi);
-        DrawBow(&mDC, CRect(rB.CenterPoint().x - bw / 2, cy2 - bh, rB.CenterPoint().x + bw / 2, cy2 + bh), COLOR_BOW);
+        const int cxB = rB.CenterPoint().x;
+        DrawBow(&mDC, CRect(cxB - bw / 2, cy2 - bh, cxB + bw / 2, cy2 + bh), COLOR_BOW);
+        // ドロップ展開中／ホバー相当: Soft 結びを強めに
+        if (GetDroppedState())
+            DrawSoftJkKnot(&mDC, CRect(cxB - 8, cy2 - 8, cxB + 8, cy2 + 8),
+                (int)(::GetTickCount64() / 40));
     }
 
     DrawSparkle(&mDC, r.right - CCC_ScaleDpi(8, dpi), r.top + CCC_ScaleDpi(8, dpi), CCC_ScaleDpi(4, dpi), COLOR_SPARKLE);
@@ -5210,12 +5527,46 @@ void CCustomComboBox::DrawItem(LPDRAWITEMSTRUCT lp)
 {
     if (lp->itemID == (UINT)-1) return;
     CDC* pDC = CDC::FromHandle(lp->hDC);
+    if (!pDC) return;
+
+    // 閉じた選択欄: 素の項目塗りは枠・王冠を消し、アクリル下では α=0 穴になる。
+    // チェンジ直後の WM_DRAWITEM(ODS_COMBOBOXEDIT) が主因。OnPaint と同じ不透明経路へ。
+    if (lp->itemState & ODS_COMBOBOXEDIT)
+    {
+        CRect r;
+        GetClientRect(&r);
+        const int selH = (int)(INT_PTR)SendMessage(CB_GETITEMHEIGHT, (WPARAM)-1, 0);
+        if (selH > 0 && r.Height() > selH + 1)
+            r.bottom = r.top + selH;
+        if (r.Width() <= 0 || r.Height() <= 0) return;
+        if (CCC_HostNeedsChildOpaque(m_hWnd))
+        {
+            BP_PAINTPARAMS params = { sizeof(BP_PAINTPARAMS) };
+            params.dwFlags = BPPF_ERASE;
+            HDC hdcBuf = NULL;
+            HPAINTBUFFER hBP = ::BeginBufferedPaint(pDC->GetSafeHdc(), &r, BPBF_TOPDOWNDIB, &params, &hdcBuf);
+            if (hdcBuf && hBP) {
+                CDC dcBuf;
+                dcBuf.Attach(hdcBuf);
+                PaintClient(dcBuf);
+                dcBuf.Detach();
+                ::BufferedPaintMakeOpaque(hBP, &r);
+                ::EndBufferedPaint(hBP, TRUE);
+                return;
+            }
+        }
+        PaintClient(*pDC);
+        return;
+    }
+
     CRect r = lp->rcItem;
     BOOL bD = (lp->itemID < (UINT)m_vDisabledItems.size()) && m_vDisabledItems[lp->itemID];
     BOOL bS = !bD && (lp->itemState & ODS_SELECTED);
     COLORREF bg = bD ? m_clrLabelBg : (bS ? COLOR_SEL_BG : (lp->itemID % 2 == 0 ? COLOR_COMBO_BG : RGB(255, 232, 220)));
 
-    if (m_bAeroMode && !CCC_IsBlurDialogChild(m_hWnd))
+    if (CCC_HostNeedsChildOpaque(m_hWnd))
+        CCC_FillRectOpaqueBits(pDC->GetSafeHdc(), r, bg);
+    else if (m_bAeroMode && !CCC_IsBlurDialogChild(m_hWnd))
     {
         pDC->FillSolidRect(&r, RGB(0, 0, 0));
         FillRectAlpha(pDC, r, bg, bS ? 180 : bD ? 200 : AERO_ALPHA_SEMI);
@@ -5234,7 +5585,13 @@ void CCustomComboBox::DrawItem(LPDRAWITEMSTRUCT lp)
         {
         case 0: DrawFlower(pDC, ix + is / 2, iy + is / 2, is / 2, RGB(255, 200, 220)); break;
         case 1: DrawStar(pDC, ix + is / 2, iy + is / 2, is / 3, RGB(255, 215, 0)); break;
-        case 2: DrawHeart(pDC, CRect(ix, iy, ix + is, iy + is), COLOR_HEART); break;
+        case 2:
+            if (lp->itemState & ODS_SELECTED)
+                DrawSoftJkHeart(pDC, CRect(ix, iy, ix + is, iy + is),
+                    (int)(::GetTickCount64() / 160), TRUE, COLOR_HEART);
+            else
+                DrawHeart(pDC, CRect(ix, iy, ix + is, iy + is), COLOR_HEART);
+            break;
         case 3: DrawRibbon(pDC, CRect(ix, iy, ix + is, iy + is), RGB(255, 182, 193)); break;
         }
     }
@@ -5762,6 +6119,11 @@ void CCustomSliderCtrl::DrawMode0(CDC* pDC, const CRect& rect, int nMin, int nMa
         }
         CRect rN(tX - 10, cY - 12, tX + 10, cY + 12);
         DrawMusicNote(pDC, rN, RGB(138, 43, 226));
+        if (m_bHover || m_nSparkleN > 0) {
+            const float tilt = (nR > 0) ? ((float)(nPos - nMin) / (float)nR * 24.f - 12.f) : 0.f;
+            DrawSoftJkThumb(pDC, CRect(tX - 8, cY - 8, tX + 8, cY + 8),
+                (int)(m_nShimmer + ::GetTickCount64() / 40), TRUE, tilt);
+        }
         DrawStar(pDC, tX - 12, cY - 14, 2, RGB(255, 215, 0));
         DrawStar(pDC, tX + 12, cY - 14, 2, RGB(255, 215, 0));
     }
@@ -6779,8 +7141,14 @@ void CCustomRangeSliderCtrl::DrawRangeSlider(CDC* pDC)
         if (bWave) pDC->SetROP2(R2_XORPEN);
     }
 
-    // 現在位置（ハート + きらめき）— 波形時は XOR で波形を潰さない
-    DrawHeart(pDC, CRect(xP - 9, cy - 12, xP + 9, cy + 6), COLOR_SLIDER_THUMB);
+    // 現在位置（Soft3D ハート + きらめき）— 波形時は XOR で波形を潰さない
+    {
+        CRect rh(xP - 9, cy - 12, xP + 9, cy + 6);
+        if (m_bDragging || m_bHoverTracking)
+            DrawSoftJkHeart(pDC, rh, (int)(::GetTickCount64() / 80), TRUE, COLOR_SLIDER_THUMB);
+        else
+            DrawHeart(pDC, rh, COLOR_SLIDER_THUMB);
+    }
     DrawSparkle(pDC, xP + 7, cy - 12, 3, COLOR_SPARKLE);
     // 再生位置の縦ガイド（波形全体で位置が追える）
     if (bWave) {
@@ -7155,6 +7523,15 @@ BOOL CCustomListCtrl::OnMouseWheel(UINT n, short z, CPoint p)
 
 void CCustomListCtrl::OnTimer(UINT_PTR nIDEvent)
 {
+    if (nIDEvent == kListSoftTimerId)
+    {
+        if (GetSelectedCount() <= 0) {
+            KillTimer(kListSoftTimerId);
+            return;
+        }
+        Invalidate(FALSE);
+        return;
+    }
     if (nIDEvent == kListScrollOpaqueTimerId)
     {
         KillTimer(kListScrollOpaqueTimerId);
@@ -7189,6 +7566,12 @@ void CCustomListCtrl::UpdateHotItem(int n)
     // 索引のみ更新し、見た目はスクロール等の全面描画時に合わせる。
     if (m_mpNoteIconGet || m_mpJacketPx > 0)
         return;
+    // アクリル/キャプションガラス: 部分 Invalidate の素塗りは α=0 穴→ホバーで透過。
+    // 連続 WM_MOUSEMOVE は Post で1回にまとめ、全面不透明再描画する。
+    if (CCC_HostNeedsChildOpaque(m_hWnd)) {
+        PostMessage(CCC_WM_POST_OPAQUE_PAINT);
+        return;
+    }
     if (o >= 0) {
         CRect rr;
         if (GetItemRect(o, &rr, LVIR_BOUNDS))
@@ -7523,16 +7906,15 @@ void CCustomListCtrl::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
         if (!bS && m_mpRowMissGet && m_mpRowMissGet(m_mpJacketCtx, ni))
             bg = RGB(255, 214, 214); // 欠損行: 薄い赤
 
-        // キャプション常時アクリル下、名前列の素 FillRect は α=0→ガラスが一瞬見える。
-        // ジャケ有り行は StretchBlt で帯が埋まるが、ジャケ無し行は穴のままちらつく。
-        const BOOL bNameJakCol = (ns == 0 && m_mpJacketPx > 0);
+        // アクリル/キャプションガラス下の素 FillRect は α=0→ホバー・選択で透過穴になる。
+        // 全セルを不透明ビット塗り(名前列ジャケ有無を問わない)。
 #if CCUSTOM_AERO_SUPPORT
         const BOOL bCapGlass = CCC_IsWin11() && (CCC_CaptionOnlyHostGlass(m_hWnd) || CCC_IsAeroEnabled());
 #else
         const BOOL bCapGlass = FALSE;
 #endif
         const BOOL bLvAero = m_bAeroMode && !CCC_IsBlurDialogChild(m_hWnd);
-        if (bNameJakCol && bCapGlass)
+        if (bCapGlass || CCC_HostNeedsChildOpaque(m_hWnd))
         {
 #if CCUSTOM_AERO_SUPPORT
             CCC_FillRectOpaqueBits(pDC->GetSafeHdc(), r, bg);
@@ -7548,7 +7930,13 @@ void CCustomListCtrl::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
 
         // 欠損ヒート: 名前列左に 4px ストライプ
         if (ns == 0 && !bS && m_mpRowMissGet && m_mpRowMissGet(m_mpJacketCtx, ni))
-            pDC->FillSolidRect(r.left, r.top, 4, r.Height(), RGB(220, 60, 60));
+        {
+            CRect rs(r.left, r.top, r.left + 4, r.bottom);
+            if (CCC_HostNeedsChildOpaque(m_hWnd))
+                CCC_FillRectOpaqueBits(pDC->GetSafeHdc(), rs, RGB(220, 60, 60));
+            else
+                pDC->FillSolidRect(&rs, RGB(220, 60, 60));
+        }
 
         if (bS && !bLvAero)
             DrawGlossHighlight(pDC, r, 6);
@@ -7651,9 +8039,14 @@ void CCustomListCtrl::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
                 noteX = ri.left + (ri.Width() - iw) / 2;
             else
                 noteX = r.left + CCC_ScaleDpi(2, dpiNote);
-            if (bS)
-                // 選択行はラベンダー地なので濃ピンク♡は避け、明るいラベンダーで♪の下地に
-                DrawHeart(pDC, CRect(noteX, noteY + CCC_ScaleDpi(2, dpiNote), noteX + CCC_ScaleDpi(14, dpiNote), noteY + ih), RGB(230, 220, 255));
+            if (bS) {
+                // Soft3D 回転♡（選択行のみ）。GDI ハートは載せない。
+                CRect rh(noteX, noteY + CCC_ScaleDpi(2, dpiNote),
+                    noteX + CCC_ScaleDpi(14, dpiNote), noteY + ih);
+                DrawSoftJkHeart(pDC, rh, (int)(::GetTickCount64() / 120), TRUE, RGB(255, 140, 188));
+                if (GetSafeHwnd())
+                    SetTimer(kListSoftTimerId, 120, NULL);
+            }
             if (pIL && noteImg >= 0 && noteImg != 1) {
                 // ImageList は行高確保(♪相当)。♪自体は 16x16@96dpi。
                 HICON hNote = ImageList_GetIcon(pIL->GetSafeHandle(), noteImg, ILD_TRANSPARENT);
@@ -8118,9 +8511,14 @@ void CCustomTreeCtrl::OnMouseMove(UINT nFlags, CPoint point)
 	{
 		HTREEITEM hOld = m_hHotItem;
 		m_hHotItem = hItem;
-		InvalidateItemRow(hOld);
-		InvalidateItemRow(m_hHotItem);
-		UpdateWindow();
+		// アクリル下の部分 Invalidate+UpdateWindow は α=0 穴になり得る → Post 全面不透明
+		if (CCC_HostNeedsChildOpaque(m_hWnd))
+			ScheduleOpaqueRepaint();
+		else {
+			InvalidateItemRow(hOld);
+			InvalidateItemRow(m_hHotItem);
+			UpdateWindow();
+		}
 	}
 
 	TRACKMOUSEEVENT tme = { sizeof(tme), TME_LEAVE, m_hWnd, 0 };
@@ -8135,8 +8533,12 @@ void CCustomTreeCtrl::OnMouseLeave()
 	{
 		HTREEITEM hOld = m_hHotItem;
 		m_hHotItem = NULL;
-		InvalidateItemRow(hOld);
-		UpdateWindow();
+		if (CCC_HostNeedsChildOpaque(m_hWnd))
+			ScheduleOpaqueRepaint();
+		else {
+			InvalidateItemRow(hOld);
+			UpdateWindow();
+		}
 	}
 }
 
@@ -8302,7 +8704,7 @@ void CCustomTreeCtrl::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
 		if (bSel)
 		{
 			CRect rcH(rcRow.left + 2, nCenterY - 7, rcRow.left + 16, nCenterY + 7);
-			DrawHeart(pDC, rcH, COLOR_HEART);
+			DrawSoftJkHeart(pDC, rcH, (int)(::GetTickCount64() / 160), TRUE, COLOR_HEART);
 			DrawStar(pDC, rcRow.right - 12, nCenterY, 3, RGB(255, 215, 0));
 		}
 		else if (bHot)
@@ -8548,7 +8950,15 @@ void CCustomTabCtrl::DrawTabItem(CDC* pDC, int nItem, CRect rc, BOOL bSelected, 
 	rgn.CreateRoundRectRgn(rc.left, rc.top, rc.right + 1, rc.bottom + 1, 8, 8);
 	pDC->SelectClipRgn(&rgn);
 	DrawGradientBackground(pDC, rc, clrTop, clrBottom, IsVertical() ? 90 : 0);
-	if (bSelected && !IsVertical()) DrawGlossHighlight(pDC, rc, 6);
+	if (bSelected && !IsVertical()) {
+		DrawGlossHighlight(pDC, rc, 6);
+		if (rc.Width() >= 36 && rc.Height() >= 18)
+			DrawSoftJkBackdrop(pDC, rc, (int)(::GetTickCount64() / 80), bHot);
+		DrawSoftJkThumb(pDC, CRect(rc.right - 16, rc.top + 2, rc.right - 2, rc.top + 16),
+			(int)(::GetTickCount64() / 220), bHot, bHot ? 10.f : 0.f);
+		if (GetSafeHwnd())
+			SetTimer(kTabSoftTimerId, 220, NULL);
+	}
 	pDC->SelectClipRgn(NULL);
 
 	CPen pen(PS_SOLID, 1, clrEdge);
@@ -8778,6 +9188,14 @@ void CCustomTabCtrl::OnWindowPosChanged(WINDOWPOS* lpwndpos)
 
 void CCustomTabCtrl::OnTimer(UINT_PTR nIDEvent)
 {
+	if (nIDEvent == kTabSoftTimerId) {
+		if (GetCurSel() < 0) {
+			KillTimer(kTabSoftTimerId);
+			return;
+		}
+		Invalidate(FALSE);
+		return;
+	}
 	if (nIDEvent == kTabScrollOpaqueTimerId) {
 		KillTimer(kTabScrollOpaqueTimerId);
 #if CCUSTOM_AERO_SUPPORT
@@ -8932,6 +9350,7 @@ void CCustomStandardButton::SparkleTick(BOOL bSpawn)
 void CCustomStandardButton::UpdateAnimTimer()
 {
     if (!GetSafeHwnd()) return;
+    // ホバー／フォーカス／残点のみ（33ms の常時軌道はうざいのでやめる）
     const BOOL bWant = IsWindowEnabled() &&
         (m_bMouseOver || (GetFocus() == this) || m_nSparkleN > 0);
     if (bWant && !m_bAnimRunning)
@@ -8947,8 +9366,28 @@ void CCustomStandardButton::UpdateAnimTimer()
     }
 }
 
+// Soft3D 背景の常時ゆらぎ。間引き 220ms。flat／キャプション帯は対象外。
+static void CCC_ButtonSoftTimerSync(HWND hWnd, BOOL bFlat)
+{
+    if (!hWnd) return;
+    if (!bFlat && !CCC_IsCaptionChromeCtrl(hWnd))
+        ::SetTimer(hWnd, kButtonSoftTimerId, 220, NULL);
+    else
+        ::KillTimer(hWnd, kButtonSoftTimerId);
+}
+
 void CCustomStandardButton::OnTimer(UINT_PTR nIDEvent)
 {
+    if (nIDEvent == kButtonSoftTimerId)
+    {
+        if (m_bFlat || CCC_IsCaptionChromeCtrl(m_hWnd)) {
+            KillTimer(kButtonSoftTimerId);
+            return;
+        }
+        m_nAnimTick++;
+        Invalidate(FALSE);
+        return;
+    }
     if (nIDEvent == kButtonAnimTimerId)
     {
         m_nAnimTick++;
@@ -9051,7 +9490,10 @@ DWORD CCustomStandardButton::SetIcon(HICON hIconIn, HICON hIconOut)
 void CCustomStandardButton::SetFlat(BOOL bFlat)
 {
     m_bFlat = bFlat;
-    if (GetSafeHwnd()) Invalidate(FALSE);
+    if (GetSafeHwnd()) {
+        CCC_ButtonSoftTimerSync(m_hWnd, m_bFlat);
+        Invalidate(FALSE);
+    }
 }
 
 void CCustomStandardButton::SetAeroMode(BOOL b)
@@ -9075,6 +9517,8 @@ void CCustomStandardButton::PreSubclassWindow()
             p(m_hWnd, L"", L"");
         ::FreeLibrary(h);
     }
+    UpdateAnimTimer();
+    CCC_ButtonSoftTimerSync(m_hWnd, m_bFlat);
 }
 
 HBRUSH CCustomStandardButton::CtlColor(CDC*, UINT)
@@ -9138,6 +9582,13 @@ void CCustomStandardButton::PaintClient(CDC& dc, const CRect& r)
         DrawGlossHighlight(&mDC, rg, m_bFlat ? 4 : 8);
         if (!m_bFlat)
             DrawJellyEdges(&mDC, rg, 8, RGB(120, 40, 80));
+        // 薄い背景 Soft ポリゴン（キャンディ箱／常時軌道はしない）
+        if (!m_bFlat && r.Width() >= 36 && r.Height() >= 20
+            && !CCC_IsCaptionChromeCtrl(m_hWnd))
+        {
+            const int tick = (int)(::GetTickCount64() / 80) + (int)(m_nAnimTick / 2);
+            DrawSoftJkBackdrop(&mDC, rg, tick, m_bMouseOver || bP);
+        }
 
         // 大きめのボタンは裾に透けレースの色気を(アイコン平坦ボタンは省略=はみ出し防止)
         if (!m_bFlat && !m_hIconIn && r.Width() >= 64 && r.Height() >= 26)
@@ -9197,8 +9648,10 @@ void CCustomStandardButton::PaintClient(CDC& dc, const CRect& r)
             }
             if (m_bMouseOver && !bP)
             {
-                // ほどけかけリボン + きらめきで色っぽく
-                DrawLooseRibbon(&mDC, CRect(r.Width() / 2 - 11, r.top + 2, r.Width() / 2 + 11, r.top + 16), COLOR_BOW);
+                // ホバーでリボンがゆっくり回転 + Soft3D 結び
+                const float ang = sinf((float)m_nAnimTick * 0.08f) * 14.f;
+                DrawLooseRibbon(&mDC, CRect(r.Width() / 2 - 11, r.top + 2, r.Width() / 2 + 11, r.top + 16), COLOR_BOW, ang);
+                DrawSoftJkKnot(&mDC, CRect(r.Width() / 2 - 10, r.top + 1, r.Width() / 2 + 10, r.top + 18), (int)m_nAnimTick);
                 DrawSparkle(&mDC, r.right - 10, r.top + 10, 4, COLOR_SPARKLE);
                 DrawSparkle(&mDC, r.left + 12, r.bottom - 10, 3, COLOR_SPARKLE);
             }
@@ -9207,7 +9660,8 @@ void CCustomStandardButton::PaintClient(CDC& dc, const CRect& r)
                 DrawSparkle(&mDC, r.Width() / 2, r.top + 8, 4, COLOR_SPARKLE);
                 DrawStar(&mDC, r.left + 15, r.Height() / 2, 2, RGB(255, 240, 150));
                 DrawStar(&mDC, r.right - 15, r.Height() / 2, 2, RGB(255, 240, 150));
-                DrawLooseRibbon(&mDC, CRect(r.Width() / 2 - 10, r.bottom - 15, r.Width() / 2 + 10, r.bottom - 2), COLOR_BOW);
+                const float ang = sinf((float)m_nAnimTick * 0.1f) * 10.f;
+                DrawLooseRibbon(&mDC, CRect(r.Width() / 2 - 10, r.bottom - 15, r.Width() / 2 + 10, r.bottom - 2), COLOR_BOW, ang);
             }
         }
         else if (m_bMouseOver && m_hIconIn)
@@ -9589,6 +10043,12 @@ void CCustomCheckBox::OnTimer(UINT_PTR nIDEvent)
         Invalidate();
         return;
     }
+    if (nIDEvent == kCheckHoverTimerId)
+    {
+        if (!m_bIsHot) { KillTimer(kCheckHoverTimerId); return; }
+        Invalidate(FALSE);
+        return;
+    }
     CButton::OnTimer(nIDEvent);
 }
 
@@ -9674,6 +10134,8 @@ void CCustomCheckBox::OnMouseMove(UINT n, CPoint p)
     if (m_bIsHot != h)
     {
         m_bIsHot = h;
+        if (h) SetTimer(kCheckHoverTimerId, 50, NULL);
+        else KillTimer(kCheckHoverTimerId);
         Invalidate();
     }
 }
@@ -9681,6 +10143,7 @@ void CCustomCheckBox::OnMouseMove(UINT n, CPoint p)
 void CCustomCheckBox::OnMouseLeave()
 {
     m_bIsHot = m_bTracking = FALSE;
+    KillTimer(kCheckHoverTimerId);
     Invalidate();
 }
 
@@ -9806,6 +10269,16 @@ void CCustomCheckBox::OnDrawLayer(CDC* pDC, CRect rect)
             dc.RoundRect(&rcB, CPoint(6, 6));
             DrawGlossHighlight(&dc, rcB, 4);
             DrawJellyEdges(&dc, rcB, 4, RGB(120, 40, 80));   // ぷっくりジェリー感
+            // 枠内にさりげない Soft3D（ホバー／ON で NeonBox ヨー。レ点 sway は別）
+            {
+                CRect chip = rcB;
+                chip.DeflateRect(1, 1);
+                const int tick = (int)(::GetTickCount64() / 50);
+                if (m_bIsHot || bC)
+                    DrawSoftJkThumb(&dc, chip, tick, TRUE, m_bIsHot ? 12.f : 4.f);
+                else
+                    DrawSoftJkChip(&dc, chip, tick / 4, FALSE);
+            }
             // 箱の下に透けレース + 黒の細レースでランジェリー風の色気
             if (rcB.bottom + 5 < rh)
             {
@@ -9849,12 +10322,14 @@ void CCustomCheckBox::OnDrawLayer(CDC* pDC, CRect rect)
                 if (rk.right > rw)   rk.right = rw;
                 if (rk.bottom > rh)  rk.bottom = rh;
 
-                DrawCheckMark(&dc, rk, bD ? CCC_Desaturate(COLOR_CHECK, 62) : COLOR_CHECK, max(3, s / 4));
+                DrawCheckMark(&dc, rk, bD ? CCC_Desaturate(COLOR_CHECK, 62) : COLOR_CHECK, max(3, s / 4),
+                    m_bIsHot ? sinf((float)::GetTickCount64() * 0.004f) * 8.f : 0.f);
                 DrawSparkle(&dc, rk.left + 2, rk.top + 1, 2, COLOR_SPARKLE);
                 if (rk.top >= 6)
                 {
                     int bL = max(0, rcB.right - 10);
-                    DrawLooseRibbon(&dc, CRect(bL, rcB.top - 6, min(rw, bL + 14), rcB.top + 4), COLOR_BOW);
+                    const float ang = m_bIsHot ? sinf((float)::GetTickCount64() * 0.0035f) * 12.f : 0.f;
+                    DrawLooseRibbon(&dc, CRect(bL, rcB.top - 6, min(rw, bL + 14), rcB.top + 4), COLOR_BOW, ang);
                 }
             }
         }
@@ -10218,6 +10693,19 @@ void CCustomProgressCtrl::DrawProgressLayer(CDC& dc, const CRect& r, BOOL bAeroT
 		CPen penIn(PS_SOLID, 1, RGB(255, 245, 250));
 		dc.SelectObject(&penIn);
 		dc.RoundRect(&inner, CPoint((std::max)(2, rr - 1), (std::max)(2, rr - 1)));
+
+		// ホバー時のみ Soft3D 先端ジェム（クリップ解除後）
+		if (fillW >= track.Height()) {
+			const int rad = track.Height() / 2;
+			const int cx = fill.right - rad;
+			const int cy = track.top + rad;
+			POINT pt = {};
+			::GetCursorPos(&pt);
+			::ScreenToClient(m_hWnd, &pt);
+			if (track.PtInRect(pt))
+				DrawSoftJkThumb(&dc, CRect(cx - 8, cy - 8, cx + 8, cy + 8),
+					(int)(::GetTickCount64() / 60), TRUE, 6.f);
+		}
 	}
 
 	if (m_bShowPercent) {
@@ -11194,6 +11682,15 @@ void CCustomSysPerfCtrl::DrawPerfLayer(CDC& dc, const CRect& r, BOOL bAeroTrans)
 	DrawMemory(dc, rcMem, bAeroTrans);
 	DrawOverallCpu(dc, rcOverall, bAeroTrans);
 	DrawCoreGrid(dc, rcGrid, bAeroTrans);
+	// ホバー時のみ Soft アクセント（1s 更新には載せない）
+	{
+		POINT pt = {};
+		::GetCursorPos(&pt);
+		::ScreenToClient(m_hWnd, &pt);
+		if (r.PtInRect(pt) && !bAeroTrans)
+			DrawSoftJkThumb(&dc, CRect(r.right - 18, r.top + 4, r.right - 4, r.top + 18),
+				(int)(::GetTickCount64() / 80), TRUE, 5.f);
+	}
 	CCC_DrawInwoman(&dc, r, bAeroTrans);
 }
 
@@ -11510,6 +12007,7 @@ BEGIN_MESSAGE_MAP(CCustomGroupBox, CButton)
     ON_WM_PAINT()
     ON_MESSAGE(WM_PRINTCLIENT, OnPrintClient)
     ON_WM_ERASEBKGND()
+    ON_WM_TIMER()
 END_MESSAGE_MAP()
 
 CCustomGroupBox::CCustomGroupBox() : m_bAutoDelete(FALSE), m_bAeroMode(FALSE) {}
@@ -11526,6 +12024,17 @@ void CCustomGroupBox::PreSubclassWindow()
     CButton::PreSubclassWindow();
     // グループは兄弟(Edit/Static)の下に回り、かつ兄弟領域へ描画しない
     ModifyStyle(0, WS_CLIPSIBLINGS);
+    SetTimer(kGroupSoftTimerId, 500, NULL);
+}
+
+void CCustomGroupBox::OnTimer(UINT_PTR nIDEvent)
+{
+    if (nIDEvent == kGroupSoftTimerId) {
+        if (!IsWindowVisible()) return;
+        Invalidate(FALSE);
+        return;
+    }
+    CButton::OnTimer(nIDEvent);
 }
 void CCustomGroupBox::OnPaint()
 {
@@ -11959,8 +12468,10 @@ private:
             pThis->MakeWindowOpaque(hWnd);
             return lRes;
         }
-        // Edit/ListBox: マウス進入/移動でテーマ NC や既定描画が α=0 を載せる → 透過に見える
+        // Edit/ListBox/ComboBox: マウス進入/移動でテーマ NC や既定描画が α=0 を載せる → 透過に見える
         // ListBox は項目切替(LBUTTON)の部分描画でも同様。離脱で WM_PAINT が来ると直る。
+        // ComboBox は CBN 選択後の ODS_COMBOBOXEDIT 素塗りも同様(DrawItem 側でも抑止)。
+        // SysListView32 は毎 MOVE の全面再描画だと重いので UpdateHotItem 側の Post に任せる。
         case WM_MOUSEMOVE:
         case WM_MOUSELEAVE:
         case WM_NCMOUSEMOVE:
@@ -11969,7 +12480,9 @@ private:
             wchar_t cls[32];
             cls[0] = 0;
             ::GetClassNameW(hWnd, cls, 32);
-            if (::_wcsicmp(cls, L"Edit") != 0 && ::_wcsicmp(cls, L"ListBox") != 0)
+            if (::_wcsicmp(cls, L"Edit") != 0
+                && ::_wcsicmp(cls, L"ListBox") != 0
+                && ::_wcsicmp(cls, L"ComboBox") != 0)
                 break;
             LRESULT lRes = ::DefSubclassProc(hWnd, uMsg, wParam, lParam);
             // 連続 WM_MOUSEMOVE は Post でまとめて再不透明化
@@ -11977,6 +12490,8 @@ private:
             return lRes;
         }
         // ListBox: 選択切替の owner-draw が α=0 で先に載る。描画を止めてから不透明全面を載せる。
+        // ListView: SETREDRAW はドラッグ選択等を阻害するので Post で再不透明化。
+        // ComboBox は LBUTTON でドロップダウンを開くため SETREDRAW 禁止(選択欄は DrawItem で抑止)。
         case WM_LBUTTONDOWN:
         case WM_LBUTTONDBLCLK:
         case WM_LBUTTONUP:
@@ -11984,6 +12499,12 @@ private:
             wchar_t cls[32];
             cls[0] = 0;
             ::GetClassNameW(hWnd, cls, 32);
+            if (::_wcsicmp(cls, L"SysListView32") == 0
+                || ::_wcsicmp(cls, L"SysTreeView32") == 0) {
+                LRESULT lRes = ::DefSubclassProc(hWnd, uMsg, wParam, lParam);
+                ::PostMessage(hWnd, CCC_WM_POST_OPAQUE_PAINT, 0, 0);
+                return lRes;
+            }
             if (::_wcsicmp(cls, L"ListBox") != 0)
                 break;
             ::SendMessage(hWnd, WM_SETREDRAW, FALSE, 0);
@@ -12031,6 +12552,19 @@ private:
             cls[0] = 0;
             ::GetClassNameW(hWnd, cls, 32);
             // ListBox: 矢印等で選択が動くときも α=0 部分描画になる
+            // ListView: SETREDRAW せず Post(ホバーと同じ)。Combo キーボードは DrawItem 側。
+            if (::_wcsicmp(cls, L"SysListView32") == 0
+                || ::_wcsicmp(cls, L"SysTreeView32") == 0) {
+                const WPARAM vk = wParam;
+                const BOOL nav = (vk == VK_UP || vk == VK_DOWN || vk == VK_LEFT || vk == VK_RIGHT
+                    || vk == VK_PRIOR || vk == VK_NEXT || vk == VK_HOME || vk == VK_END
+                    || vk == VK_SPACE || vk == VK_RETURN);
+                if (!nav)
+                    break;
+                LRESULT lRes = ::DefSubclassProc(hWnd, uMsg, wParam, lParam);
+                ::PostMessage(hWnd, CCC_WM_POST_OPAQUE_PAINT, 0, 0);
+                return lRes;
+            }
             if (::_wcsicmp(cls, L"ListBox") == 0) {
                 const WPARAM vk = wParam;
                 const BOOL nav = (vk == VK_UP || vk == VK_DOWN || vk == VK_LEFT || vk == VK_RIGHT
@@ -12642,6 +13176,13 @@ static void CCC_DrawGroupBoxFrame(CDC& dc, const CRect& r, const CString& t, BOO
     DrawLooseRibbon(&dc, CRect(r.right - 19, nT - 8, r.right - 1, nT + 8), COLOR_BOW);
     if (title.IsEmpty())
         DrawLooseRibbon(&dc, CRect(r.left + 1, nT - 8, r.left + 19, nT + 8), COLOR_BOW);
+    // Soft3D ゆらゆら（疎タイマーで Invalidate される前提）
+    {
+        const int tick = (int)(::GetTickCount64() / 500);
+        DrawSoftJkSwayCorner(&dc, CRect(r.right - 16, nT - 6, r.right - 2, nT + 8), tick, 8.f);
+        DrawSoftJkSwayCorner(&dc, CRect(r.left + 2, r.bottom - 16, r.left + 16, r.bottom - 2), tick + 3, 6.f);
+        DrawSoftJkChip(&dc, CRect(r.right - 14, r.bottom - 14, r.right - 2, r.bottom - 2), tick, FALSE);
+    }
     DrawSparkle(&dc, r.right - 9, r.bottom - 9, 3, COLOR_SPARKLE);
     DrawSparkle(&dc, r.left + 9, r.bottom - 9, 3, COLOR_SPARKLE);
     // 下辺に黒の細レース + 透けレースのスカラップでランジェリー風の色気

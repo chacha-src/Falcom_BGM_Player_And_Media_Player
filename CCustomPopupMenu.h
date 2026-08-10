@@ -88,7 +88,9 @@ enum {
 	CCUSTOM_POPUP_ID_ANIM6 = 0x00E00126,
 	CCUSTOM_POPUP_ID_ANIM7 = 0x00E00127,
 	CCUSTOM_POPUP_ID_ANIM8 = 0x00E00128,
-	CCUSTOM_POPUP_ID_ANIM9 = 0x00E00129
+	CCUSTOM_POPUP_ID_ANIM9 = 0x00E00129,
+	// Soft 立体アクセント強め（アクリルの下）
+	CCUSTOM_POPUP_ID_SOFTBOOST = 0x00E0012A
 };
 
 enum {
@@ -340,7 +342,7 @@ protected:
 	void BlitOpaqueToWindow(HDC hdcSrc, int w, int h); // ULW解除後の同期焼き込み
 	void SnapAnimToIdle(); // 出現アニメ中断→一枚状態（サブ遷移・クリック用）
 	// phase中の行オフセット/フェード(ox,oy,fade0..256)。未出現は FALSE
-	BOOL CalcLineAnim(int idx, int* ox, int* oy, int* fade) const;
+	BOOL CalcLineAnim(int idx, int* ox, int* oy, int* fade, float* pT = NULL) const;
 	void NotifyEditFromHwnd(HWND hwnd);
 	void NotifyChoiceFromHwnd(HWND hwnd, BOOL fromList);
 	void NotifyRangeFromHwnd(HWND hwnd, UINT nSBCode);

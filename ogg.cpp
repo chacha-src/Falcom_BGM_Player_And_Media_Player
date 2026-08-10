@@ -512,6 +512,7 @@ BOOL COggApp::InitInstance()
 	savedata.mpBanner3dyaw = -220;
 	savedata.mpBanner3dpitch = 260;
 	savedata.mpBanner3dzoom = 100;
+	savedata.popupMenuSoftBoost = 1;
 	savedata.dougatopmost = 0;
 	savedata.dougaaspect = 0;
 
@@ -862,6 +863,10 @@ BOOL COggApp::InitInstance()
 		soft3dClampCam(savedata.mpCmdRoll3dyaw, savedata.mpCmdRoll3dpitch, savedata.mpCmdRoll3dzoom);
 		soft3dClampCam(savedata.mpBanner3dyaw, savedata.mpBanner3dpitch, savedata.mpBanner3dzoom);
 	}
+	if (datFileSize < (int)(offsetof(save, popupMenuSoftBoost) + sizeof(savedata.popupMenuSoftBoost)))
+		savedata.popupMenuSoftBoost = 1;
+	else if (savedata.popupMenuSoftBoost != 0)
+		savedata.popupMenuSoftBoost = 1;
 	if (datFileSize < (int)(offsetof(save, mpToolsOpen) + sizeof(savedata.mpToolsOpen)))
 		savedata.mpToolsOpen = 0;
 	else if (savedata.mpToolsOpen) savedata.mpToolsOpen = 1;
