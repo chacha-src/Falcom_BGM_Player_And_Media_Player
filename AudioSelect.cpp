@@ -6,18 +6,22 @@
 #include "AudioSelect.h"
 
 extern CString streamname[40];
-// CAudioSelect ダイアログ
+extern CString streamname2[40];
 extern IAMStreamSelect* iam;
 extern int audionum;
 extern int au;
 extern int streamidx[40];
+extern int streamidx2[40];
 
 IMPLEMENT_DYNAMIC(CAudioSelect, CCustomBlurDialogBase)
 
 CAudioSelect::CAudioSelect(CWnd* pParent /*=NULL*/)
 	: CCustomBlurDialogBase(CAudioSelect::IDD, pParent)
+	, audioCount(0)
+	, subCount(0)
+	, no(0)
+	, subNo(-1)
 {
-
 }
 
 CAudioSelect::~CAudioSelect()
@@ -28,75 +32,253 @@ void CAudioSelect::DoDataExchange(CDataExchange* pDX)
 {
 	CCustomBlurDialogBase::DoDataExchange(pDX);
 	DDX_Control(pDX, IDC_LIST1, m_lb);
+	DDX_Control(pDX, IDC_AS_SUBLIST, m_lbSub);
 	DDX_Control(pDX, IDOK, m_okdummy);
 	DDX_Control(pDX, IDC_STATIC, m_desc);
+	DDX_Control(pDX, IDC_AS_AUDIOLBL, m_audioLbl);
+	DDX_Control(pDX, IDC_AS_SUBLBL, m_subLbl);
 }
-
 
 BEGIN_MESSAGE_MAP(CAudioSelect, CCustomBlurDialogBase)
 	ON_LBN_DBLCLK(IDC_LIST1, &CAudioSelect::OnLbnDblclkList1)
+	ON_LBN_DBLCLK(IDC_AS_SUBLIST, &CAudioSelect::OnLbnDblclkSubList)
 	ON_BN_CLICKED(IDOK, &CAudioSelect::OnBnClickedOk)
+	ON_BN_CLICKED(IDCANCEL, &CAudioSelect::OnBnClickedCancel)
 END_MESSAGE_MAP()
 
+static BOOL AudioNameMatchesLang(const CString& low, WORD prim)
+{
+	switch (prim) {
+	case LANG_JAPANESE:
+		return low.Find(L"japanese") >= 0 || low.Find(L"日本語") >= 0
+			|| low.Find(L"jpn") >= 0 || low.Find(L"ja-") >= 0 || low.Find(L"[ja]") >= 0
+			|| low.Find(L"(ja)") >= 0 || low.Find(L" jap") >= 0;
+	case LANG_ENGLISH:
+		return low.Find(L"english") >= 0 || low.Find(L"eng") >= 0
+			|| low.Find(L"en-") >= 0 || low.Find(L"[en]") >= 0 || low.Find(L"(en)") >= 0;
+	case LANG_KOREAN:
+		return low.Find(L"korean") >= 0 || low.Find(L"한국") >= 0 || low.Find(L"한국어") >= 0
+			|| low.Find(L"kor") >= 0 || low.Find(L"ko-") >= 0;
+	case LANG_CHINESE:
+		return low.Find(L"chinese") >= 0 || low.Find(L"中文") >= 0 || low.Find(L"chi") >= 0
+			|| low.Find(L"zh-") >= 0 || low.Find(L"mandarin") >= 0 || low.Find(L"cantonese") >= 0;
+	case LANG_FRENCH:
+		return low.Find(L"french") >= 0 || low.Find(L"français") >= 0 || low.Find(L"francais") >= 0
+			|| low.Find(L"fra") >= 0 || low.Find(L"fre") >= 0 || low.Find(L"fr-") >= 0;
+	case LANG_GERMAN:
+		return low.Find(L"german") >= 0 || low.Find(L"deutsch") >= 0
+			|| low.Find(L"ger") >= 0 || low.Find(L"deu") >= 0 || low.Find(L"de-") >= 0;
+	case LANG_SPANISH:
+		return low.Find(L"spanish") >= 0 || low.Find(L"español") >= 0 || low.Find(L"espanol") >= 0
+			|| low.Find(L"spa") >= 0 || low.Find(L"es-") >= 0;
+	case LANG_RUSSIAN:
+		return low.Find(L"russian") >= 0 || low.Find(L"рус") >= 0
+			|| low.Find(L"rus") >= 0 || low.Find(L"ru-") >= 0;
+	case LANG_ITALIAN:
+		return low.Find(L"italian") >= 0 || low.Find(L"italiano") >= 0
+			|| low.Find(L"ita") >= 0 || low.Find(L"it-") >= 0;
+	case LANG_PORTUGUESE:
+		return low.Find(L"portuguese") >= 0 || low.Find(L"portugu") >= 0
+			|| low.Find(L"por") >= 0 || low.Find(L"pt-") >= 0;
+	default:
+		return FALSE;
+	}
+}
 
-// CAudioSelect メッセージ ハンドラ
+int CAudioSelect::PickOsLocaleAudio() const
+{
+	const int n = (audioCount > 0) ? audioCount : audionum;
+	if (n <= 0 || !iam) return -1;
+
+	const LANGID ui = GetUserDefaultUILanguage();
+	const WORD prim = PRIMARYLANGID(ui);
+	int byLcid = -1;
+	int byName = -1;
+
+	for (int i = 0; i < n && i < 40; ++i) {
+		const int idx = (streamidx[i] >= 0) ? streamidx[i] : (i + au);
+		LCID lcid = 0;
+		LPWSTR pname = NULL;
+		if (FAILED(iam->Info(idx, NULL, NULL, &lcid, NULL, &pname, NULL, NULL)))
+			continue;
+		CString nm = (pname && pname[0]) ? pname : streamname[i];
+		if (pname) CoTaskMemFree(pname);
+
+		if (lcid != 0 && PRIMARYLANGID(LANGIDFROMLCID(lcid)) == prim) {
+			byLcid = i;
+			break;
+		}
+		CString low = nm;
+		low.MakeLower();
+		if (byName < 0 && AudioNameMatchesLang(low, prim))
+			byName = i;
+	}
+	if (byLcid >= 0) return byLcid;
+	return byName;
+}
+
+void CAudioSelect::LayoutNoSubtitles()
+{
+	if (m_subLbl.GetSafeHwnd())
+		m_subLbl.ShowWindow(SW_HIDE);
+	if (m_lbSub.GetSafeHwnd())
+		m_lbSub.ShowWindow(SW_HIDE);
+
+	// 字幕欄ぶんだけ縮め、再生開始ボタンを字幕ラベル位置へ上げる
+	CRect rcSubLbl;
+	if (m_subLbl.GetSafeHwnd())
+		m_subLbl.GetWindowRect(&rcSubLbl);
+	else
+		return;
+	ScreenToClient(&rcSubLbl);
+
+	CRect rcOk;
+	m_okdummy.GetWindowRect(&rcOk);
+	ScreenToClient(&rcOk);
+	const int btnH = rcOk.Height();
+	const int btnW = rcOk.Width();
+	CRect rcClient;
+	GetClientRect(&rcClient);
+	const int btnX = (rcClient.Width() - btnW) / 2;
+	m_okdummy.SetWindowPos(NULL, btnX, rcSubLbl.top, btnW, btnH,
+		SWP_NOZORDER | SWP_NOACTIVATE);
+
+	CRect rcList;
+	m_lb.GetWindowRect(&rcList);
+	ScreenToClient(&rcList);
+	const int bottomPad = MulDiv(10, LOWORD(GetDialogBaseUnits()), 8);
+	const int needClientH = rcSubLbl.top + btnH + bottomPad;
+
+	CRect rcWnd;
+	GetWindowRect(&rcWnd);
+	const int nonClient = rcWnd.Height() - rcClient.Height();
+	SetWindowPos(NULL, 0, 0, rcWnd.Width(), needClientH + nonClient,
+		SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+}
+
+void CAudioSelect::CommitAndClose(BOOL forceSubOff)
+{
+	int a = m_lb.GetCurSel();
+	if (a < 0) a = 0;
+	no = a;
+
+	if (forceSubOff || subCount <= 0 || !m_lbSub.IsWindowVisible()) {
+		subNo = -1;
+	} else {
+		const int s = m_lbSub.GetCurSel();
+		// 0 = なし
+		subNo = (s <= 0) ? -1 : (s - 1);
+		if (subNo >= subCount) subNo = -1;
+	}
+	EndDialog(IDOK);
+}
 
 void CAudioSelect::OnLbnDblclkList1()
 {
-	// TODO: ここにコントロール通知ハンドラ コードを追加します。
-	select();
+	// 音声ダブルクリック: 字幕なしで開始（従来動作）
+	CommitAndClose(TRUE);
+}
+
+void CAudioSelect::OnLbnDblclkSubList()
+{
+	// 字幕ダブルクリック: 音声は選択行のまま、字幕だけ反映して開始
+	CommitAndClose(FALSE);
 }
 
 void CAudioSelect::OnBnClickedOk()
 {
-	// TODO: ここにコントロール通知ハンドラ コードを追加します。
-	select();
-	OnOK();
+	// 再生開始: 音声／字幕のアクティブ行を両方反映
+	CommitAndClose(FALSE);
 }
 
-void CAudioSelect::select()
+void CAudioSelect::OnBnClickedCancel()
 {
-	int cnt=m_lb.GetCurSel();
-	no=cnt;
-	EndDialog(cnt);
+	EndDialog(IDCANCEL);
+}
+
+void CAudioSelect::OnCancel()
+{
+	EndDialog(IDCANCEL);
 }
 
 BOOL CAudioSelect::OnInitDialog()
 {
 	CCustomBlurDialogBase::OnInitDialog();
 
-	SetWindowText(LL14(L"再生ストリーム選択", L"Select Playback Stream", L"Sélectionner le flux de lecture", L"Seleziona flusso di riproduzione", L"Seleccionar flujo de reproducción", L"재생 스트림 선택", L"选择播放流", L"حدد دفق التشغيل", L"Выбрать поток воспроизведения", L"Wiedergabestream auswählen", L"Selecionar fluxo de reprodução", L"Selecteer afspeelstroom", L"Wybierz strumień odtwarzania", L"Çalma akışı seç"));
-	m_desc.SetWindowText(LL14(L"複数の音声チャンネルがある時に\nこの画面が表示されます。\n再生したい音声チャンネルを\n選択して下さい。\n\n再生ウィンドウでの右クリック\nメニューからも選択できます。", L"When there are multiple audio channels,\nthis screen will be displayed.\nPlease select the audio channel\nyou want to play.\n\nYou can also select from the\nright-click menu on the playback window.", L"Lorsqu'il y a plusieurs canaux audio,\ncet écran s'affichera.\nVeuillez sélectionner le canal audio\nque vous souhaitez lire.\n\nVous pouvez également sélectionner depuis\nle menu contextuel de la fenêtre de lecture.", L"Quando ci sono più canali audio,\nquesta schermata verrà visualizzata.\nSeleziona il canale audio\nche desideri riprodurre.\n\nPuoi anche selezionare dal menu\ncontesto della finestra di riproduzione.", L"Cuando hay varios canales de audio,\nse mostrará esta pantalla.\nSeleccione el canal de audio\nque desea reproducir.\n\nTambién puede seleccionar desde el\nmenú contextual de la ventana de reproducción.", L"여러 오디오 채널이 있을 때\n이 화면이 표시됩니다.\n재생하려는 오디오 채널을\n선택하세요.\n\n재생 창의 마우스 오른쪽 버튼\n메뉴에서도 선택할 수 있습니다.", L"当有多个音频声道时\n将显示此屏幕。\n请选择要播放的\n音频声道。\n\n您也可以从播放窗口的\n右键菜单中进行选择。", L"عند وجود قنوات صوتية متعددة،\nستظهر هذه الشاشة.\nالرجاء تحديد القناة الصوتية\nالتي تريد تشغيلها.\n\nيمكنك أيضًا الاختيار من\nقائمة النقر بزر الماوس الأيمن في نافذة التشغيل.", L"При наличии нескольких звуковых каналов\nбудет отображаться этот экран.\nВыберите звуковой канал,\nкоторый хотите воспроизвести.\n\nВы также можете выбрать из\nконтекстного меню окна воспроизведения.", L"Wenn mehrere Audiokanäle vorhanden sind,\nwird dieser Bildschirm angezeigt.\nBitte wählen Sie den Audiokanal,\nden Sie abspielen möchten.\n\nSie können auch aus dem Kontextmenü\nder Wiedergabefenster wählen.", L"Quando há vários canais de áudio,\nesta tela será exibida.\nSelecione o canal de áudio\nque deseja reproduzir.\n\nVocê também pode selecionar no\nmenu de contexto da janela de reprodução.", L"Wanneer er meerdere audiokanalen zijn,\nwordt dit scherm weergegeven.\nSelecteer het audiokanaal\ndat u wilt afspelen.\n\nU kunt ook selecteren via het\nrechtermuismenu van het afspeelvenster.", L"Gdy dostępnych jest kilka kanałów audio,\nzostanie wyświetlony ten ekran.\nWybierz kanał audio,\nktóry chcesz odtworzyć.\n\nMożesz także wybrać z menu\nkontekstowego okna odtwarzania.", L"Birden fazla ses kanalı olduğunda\nbu ekran görüntülenir.\nÇalmak istediğiniz ses kanalını\nseçin.\n\nAyrıca oynatma penceresindeki\nsağ tık menüsünden de seçebilirsiniz."));
+	const int nAudio = (audioCount > 0) ? audioCount : ((no > 0) ? no : audionum);
+	audioCount = nAudio;
+
+	SetWindowText(LL14(L"音声／字幕の選択", L"Select Audio / Subtitles", L"Audio / sous-titres", L"Audio / sottotitoli", L"Audio / subtítulos", L"오디오/자막 선택", L"选择音频/字幕", L"الصوت/الترجمة", L"Аудио / субтитры", L"Audio / Untertitel", L"Áudio / legendas", L"Audio / ondertitels", L"Audio / napisy", L"Ses / altyazı"));
+	m_desc.SetWindowText(LL14(
+		L"複数の音声があるときに表示されます。\n音声と字幕を選び、「再生開始」で開始します。\n\n音声のダブルクリック＝字幕なしで開始\n字幕のダブルクリック＝その字幕で開始\n\n右クリックメニューからも切替できます。",
+		L"Shown when multiple audio tracks exist.\nPick audio and subtitles, then Start.\n\nDouble-click audio = start with no subtitles\nDouble-click subtitle = start with that subtitle\n\nYou can also switch from the right-click menu.",
+		L"Affiche s'il y a plusieurs pistes audio.\nChoisissez audio et sous-titres, puis Demarrer.\n\nDouble-clic audio = sans sous-titres\nDouble-clic sous-titre = avec ce sous-titre\n\nAussi via le menu contextuel.",
+		L"Mostrato con piu tracce audio.\nScegli audio e sottotitoli, poi Avvia.\n\nDoppio clic audio = senza sottotitoli\nDoppio clic sottotitolo = con quel sottotitolo\n\nAnche dal menu contestuale.",
+		L"Se muestra con varias pistas de audio.\nElija audio y subtitulos, luego Iniciar.\n\nDoble clic audio = sin subtitulos\nDoble clic subtitulo = con ese subtitulo\n\nTambien desde el menu contextual.",
+		L"오디오 트랙이 여러 개일 때 표시됩니다.\n오디오와 자막을 고른 뒤 재생 시작.\n\n오디오 더블클릭=자막 없이 시작\n자막 더블클릭=해당 자막으로 시작\n\n우클릭 메뉴에서도 전환할 수 있습니다.",
+		L"有多个音轨时显示。\n选择音频和字幕后点“开始播放”。\n\n双击音频=无字幕开始\n双击字幕=用该字幕开始\n\n也可在右键菜单切换。",
+		L"يظهر عند وجود عدة مسارات صوت.\nاختر الصوت والترجمة ثم ابدأ.\n\nنقر مزدوج للصوت=بدون ترجمة\nنقر مزدوج للترجمة=بتلك الترجمة\n\nيمكن أيضا من قائمة النقر الأيمن.",
+		L"Показывается при нескольких аудиодорожках.\nВыберите аудио и субтитры, затем Старт.\n\nДвойной клик по аудио = без субтитров\nДвойной клик по субтитрам = с ними\n\nТакже из контекстного меню.",
+		L"Wird bei mehreren Audiospuren angezeigt.\nAudio und Untertitel wahlen, dann Start.\n\nDoppelklick Audio = ohne Untertitel\nDoppelklick Untertitel = mit diesem\n\nAuch uber das Kontextmenu.",
+		L"Exibido com varias faixas de audio.\nEscolha audio e legendas e inicie.\n\nDuplo clique no audio = sem legendas\nDuplo clique na legenda = com ela\n\nTambem pelo menu de contexto.",
+		L"Verschijnt bij meerdere audiosporen.\nKies audio en ondertitels, start daarna.\n\nDubbelklik audio = zonder ondertitels\nDubbelklik ondertitel = met die ondertitel\n\nOok via het snelmenu.",
+		L"Pokazywane przy wielu sciezkach audio.\nWybierz audio i napisy, potem Start.\n\nPodwojne klikniecie audio = bez napisow\nPodwojne klikniecie napisow = z nimi\n\nTakze z menu kontekstowego.",
+		L"Birden fazla ses izi varken gosterilir.\nSes ve altyaziyi secip Baslat.\n\nSese cift tik = altyazisiz baslat\nAltyaziya cift tik = o altyaziyla baslat\n\nSag tik menusunden de degistirilebilir."));
+
+	m_audioLbl.SetWindowText(LL14(L"音声", L"Audio", L"Audio", L"Audio", L"Audio", L"오디오", L"音频", L"صوت", L"Аудио", L"Audio", L"Áudio", L"Audio", L"Audio", L"Ses"));
+	m_subLbl.SetWindowText(LL14(L"字幕", L"Subtitles", L"Sous-titres", L"Sottotitoli", L"Subtítulos", L"자막", L"字幕", L"ترجمة", L"Субтитры", L"Untertitel", L"Legendas", L"Ondertitels", L"Napisy", L"Altyazı"));
+	m_okdummy.SetWindowText(LL14(L"再生開始", L"Start", L"Démarrer", L"Avvia", L"Iniciar", L"재생 시작", L"开始播放", L"بدء", L"Старт", L"Start", L"Iniciar", L"Start", L"Start", L"Başlat"));
+
 	CCustomControlUtility::BeginDialogToolTip(m_tooltip, this);
-	m_tooltip.AddTool(&m_okdummy, LL14(L"音声ストリームを決定します", L"Determine audio stream", L"Définir le flux audio", L"Determina flusso audio", L"Determinar flujo de audio", L"오디오 스트림 결정", L"确定音频流", L"تحديد دفق الصوت", L"Определить аудиопоток", L"Audiostream festlegen", L"Determinar fluxo de áudio", L"Audiostroom bepalen", L"Określ strumień audio", L"Ses akışını belirle"));
-	m_tooltip.AddTool(GetDlgItem(IDC_LIST1), LL14(L"再生する音声ストリームを選択します。\n複数チャンネルがある動画などで表示されます。", L"Select the audio stream to play.\nShown for videos with multiple channels.", L"Selectionner le flux audio a lire.\nAffiche pour les videos a plusieurs canaux.", L"Seleziona il flusso audio da riprodurre.\nPer video con piu canali.", L"Seleccionar flujo de audio a reproducir.\nPara videos con varios canales.", L"재생할 오디오 스트림을 선택합니다.\n여러 채널이 있는 동영상 등에서 표시됩니다.", L"选择要播放的音频流。\n多声道视频等会显示此界面。", L"اختر دفق الصوت للتشغيل.\nيظهر للفيديو بعدة قنوات.", L"Выберите аудиопоток для воспроизведения.\nДля видео с несколькими каналами.", L"Audiostream zum Abspielen wahlen.\nBei Videos mit mehreren Kanalen.", L"Selecione o fluxo de audio.\nPara videos com varios canais.", L"Selecteer audiostroom.\nBij video met meerdere kanalen.", L"Wybierz strumien audio do odtworzenia.\nDla wideo z wieloma kanalami.", L"Calinacak ses akisini secin.\nBirden fazla kanalli videolarda gosterilir."));
+	m_tooltip.AddTool(&m_okdummy, LL14(L"選択中の音声と字幕で再生を開始します", L"Start playback with the selected audio and subtitles", L"Demarrer avec l'audio et les sous-titres selectionnes", L"Avvia con audio e sottotitoli selezionati", L"Iniciar con el audio y subtitulos seleccionados", L"선택한 오디오와 자막으로 재생을 시작합니다", L"使用所选音频和字幕开始播放", L"بدء التشغيل بالصوت والترجمة المحددين", L"Запуск с выбранными аудио и субтитрами", L"Wiedergabe mit gewahltem Audio und Untertiteln starten", L"Iniciar com o audio e legendas selecionados", L"Start met geselecteerde audio en ondertitels", L"Uruchom z wybranym audio i napisami", L"Secili ses ve altyaziyla baslat"));
+	m_tooltip.AddTool(GetDlgItem(IDC_LIST1), LL14(L"再生する音声ストリーム。ダブルクリックで字幕なし開始。", L"Audio stream to play. Double-click starts with no subtitles.", L"Flux audio. Double-clic = sans sous-titres.", L"Flusso audio. Doppio clic = senza sottotitoli.", L"Flujo de audio. Doble clic = sin subtitulos.", L"재생할 오디오. 더블클릭 시 자막 없이 시작.", L"要播放的音频。双击则以无字幕开始。", L"دفق الصوت. نقر مزدوج=بدون ترجمة.", L"Аудиопоток. Двойной клик = без субтитров.", L"Audiostream. Doppelklick = ohne Untertitel.", L"Fluxo de audio. Duplo clique = sem legendas.", L"Audiostroom. Dubbelklik = zonder ondertitels.", L"Strumien audio. Podwojne klikniecie = bez napisow.", L"Ses akisi. Cift tik = altyazisiz baslat."));
+	if (subCount > 0)
+		m_tooltip.AddTool(GetDlgItem(IDC_AS_SUBLIST), LL14(L"字幕ストリーム。既定はなし。ダブルクリックでその字幕で開始。", L"Subtitle stream. Default is Off. Double-click starts with that subtitle.", L"Sous-titres. Defaut: aucun. Double-clic pour demarrer avec.", L"Sottotitoli. Predefinito: nessuno. Doppio clic per avviare.", L"Subtitulos. Predeterminado: ninguno. Doble clic para iniciar.", L"자막. 기본은 없음. 더블클릭 시 해당 자막으로 시작.", L"字幕。默认无。双击则以该字幕开始。", L"الترجمة. الافتراضي: بدون. نقر مزدوج للبدء بها.", L"Субтитры. По умолчанию нет. Двойной клик — старт с ними.", L"Untertitel. Standard: aus. Doppelklick startet damit.", L"Legendas. Padrao: nenhuma. Duplo clique inicia com ela.", L"Ondertitels. Standaard: uit. Dubbelklik start ermee.", L"Napisy. Domyslnie brak. Podwojne klikniecie uruchamia z nimi.", L"Altyazi. Varsayilan: yok. Cift tik ile baslat."));
 	CCustomControlUtility::FinalizeDialogToolTip(m_tooltip, 512, 10000);
 
-	for(int i=0;i<no;i++){
+	for (int i = 0; i < nAudio && i < 40; i++) {
 		CString str;
-		str.Format(LL14(L"音声%d:%s", L"Audio %d:%s", L"Audio %d:%s", L"Audio %d:%s", L"Audio %d:%s", L"오디오 %d:%s", L"音频%d：%s", L"صوت %d:%s", L"Аудио %d:%s", L"Audio %d:%s", L"Áudio %d:%s", L"Audio %d:%s", L"Dźwięk %d:%s", L"Ses %d:%s"), i+1, streamname[i]);
+		str.Format(LL14(L"音声%d:%s", L"Audio %d:%s", L"Audio %d:%s", L"Audio %d:%s", L"Audio %d:%s", L"오디오 %d:%s", L"音频%d：%s", L"صوت %d:%s", L"Аудио %d:%s", L"Audio %d:%s", L"Áudio %d:%s", L"Audio %d:%s", L"Dźwięk %d:%s", L"Ses %d:%s"), i + 1, streamname[i]);
 		m_lb.AddString(str);
 	}
 
-	AM_MEDIA_TYPE* ppmt = NULL;
-	for (int l = 0; l < audionum && l < 40; l++) {
-		const int num = (streamidx[l] >= 0) ? streamidx[l] : (l + au);
-		DWORD flags = 0;
-		if (iam && SUCCEEDED(iam->Info(num, NULL, &flags, NULL, NULL, NULL, NULL, NULL))) {
-			if (flags & (AMSTREAMSELECTINFO_ENABLED | AMSTREAMSELECTINFO_EXCLUSIVE))
-				m_lb.SetCurSel(l);
+	int sel = PickOsLocaleAudio();
+	if (sel < 0) {
+		for (int l = 0; l < nAudio && l < 40; l++) {
+			const int num = (streamidx[l] >= 0) ? streamidx[l] : (l + au);
+			DWORD flags = 0;
+			if (iam && SUCCEEDED(iam->Info(num, NULL, &flags, NULL, NULL, NULL, NULL, NULL))) {
+				if (flags & (AMSTREAMSELECTINFO_ENABLED | AMSTREAMSELECTINFO_EXCLUSIVE)) {
+					sel = l;
+					break;
+				}
+			}
 		}
 	}
+	if (sel < 0) sel = 0;
+	if (nAudio > 0)
+		m_lb.SetCurSel(sel);
+	no = sel;
+	subNo = -1;
 
+	if (subCount > 0) {
+		m_lbSub.AddString(LL14(L"なし", L"Off", L"Aucun", L"Nessuno", L"Ninguno", L"없음", L"无", L"إيقاف", L"Выкл.", L"Aus", L"Nenhuma", L"Uit", L"Brak", L"Yok"));
+		for (int i = 0; i < subCount && i < 40; i++) {
+			CString str;
+			str.Format(LL14(L"字幕%d:%s", L"Subtitle %d:%s", L"Sous-titre %d:%s", L"Sottotitolo %d:%s", L"Subtítulo %d:%s", L"자막 %d:%s", L"字幕%d：%s", L"ترجمة %d:%s", L"Субтитры %d:%s", L"Untertitel %d:%s", L"Legenda %d:%s", L"Ondertitel %d:%s", L"Napisy %d:%s", L"Altyazı %d:%s"),
+				i + 1, streamname2[i]);
+			m_lbSub.AddString(str);
+		}
+		m_lbSub.SetCurSel(0); // 既定: なし
+	} else {
+		LayoutNoSubtitles();
+	}
 
-	return TRUE;  // return TRUE unless you set the focus to a control
-	// 例外 : OCX プロパティ ページは必ず FALSE を返します。
+	return TRUE;
 }
 
 BOOL CAudioSelect::PreTranslateMessage(MSG* pMsg)
 {
-	// TODO: ここに特定なコードを追加するか、もしくは基本クラスを呼び出してください。
-		m_tooltip.RelayEvent(pMsg);
-
+	m_tooltip.RelayEvent(pMsg);
 	return CCustomBlurDialogBase::PreTranslateMessage(pMsg);
 }

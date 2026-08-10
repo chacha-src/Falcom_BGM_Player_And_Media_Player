@@ -4887,7 +4887,7 @@ void CCustomListBox::DrawItem(LPDRAWITEMSTRUCT lp)
     if (lp->itemID == (UINT)-1) return;
     CDC* pDC = CDC::FromHandle(lp->hDC);
     CRect r = lp->rcItem;
-    COLORREF bg = (lp->itemState & ODS_SELECTED) ? COLOR_SEL_BG : (lp->itemID % 2 == 0 ? COLOR_LIST_BG : RGB(183, 221, 238));
+    COLORREF bg = (lp->itemState & ODS_SELECTED) ? COLOR_SEL_BG : (lp->itemID % 2 == 0 ? COLOR_LIST_BG : COLOR_LIST_ALT);
 
     const BOOL bListAero = m_bAeroMode && !CCC_IsBlurDialogChild(m_hWnd);
     if (bListAero)
@@ -4919,7 +4919,8 @@ void CCustomListBox::DrawItem(LPDRAWITEMSTRUCT lp)
     rt.left += max(20, is * 2 + 4);
     rt.DeflateRect(1, 1);
 
-    COLORREF tc = m_bAeroMode ? RGB(1, 1, 1) : COLOR_EDIT_TEXT;
+    const BOOL bSel = (lp->itemState & ODS_SELECTED) != 0;
+    COLORREF tc = bSel ? COLOR_LIST_SEL_TEXT : (m_bAeroMode ? RGB(1, 1, 1) : COLOR_EDIT_TEXT);
     pDC->SetTextColor(tc);
     pDC->SetBkMode(TRANSPARENT);
 
@@ -5265,7 +5266,7 @@ void CCustomComboBox::DrawItem(LPDRAWITEMSTRUCT lp)
     }
     else
     {
-        pDC->SetTextColor(m_bAeroMode ? RGB(1, 1, 1) : RGB(0, 0, 0));
+        pDC->SetTextColor(bS ? COLOR_LIST_SEL_TEXT : (m_bAeroMode ? RGB(1, 1, 1) : RGB(0, 0, 0)));
         lf.lfWeight = FW_BOLD;
     }
     fc.CreateFontIndirect(&lf);
@@ -7517,8 +7518,8 @@ void CCustomListCtrl::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
 
         BOOL bS = (GetItemState(ni, LVIS_SELECTED) & LVIS_SELECTED);
         BOOL bH = (ni == m_nHotItem);
-        COLORREF bg = bS ? COLOR_SEL_BG : (ni % 2 == 0 ? COLOR_LIST_BG : RGB(183, 221, 238));
-        if (bH && !bS) bg = RGB(220, 235, 250);
+        COLORREF bg = bS ? COLOR_SEL_BG : (ni % 2 == 0 ? COLOR_LIST_BG : COLOR_LIST_ALT);
+        if (bH && !bS) bg = RGB(210, 228, 248);
         if (!bS && m_mpRowMissGet && m_mpRowMissGet(m_mpJacketCtx, ni))
             bg = RGB(255, 214, 214); // 欠損行: 薄い赤
 
@@ -7651,7 +7652,8 @@ void CCustomListCtrl::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
             else
                 noteX = r.left + CCC_ScaleDpi(2, dpiNote);
             if (bS)
-                DrawHeart(pDC, CRect(noteX, noteY + CCC_ScaleDpi(2, dpiNote), noteX + CCC_ScaleDpi(14, dpiNote), noteY + ih), COLOR_HEART);
+                // 選択行はラベンダー地なので濃ピンク♡は避け、明るいラベンダーで♪の下地に
+                DrawHeart(pDC, CRect(noteX, noteY + CCC_ScaleDpi(2, dpiNote), noteX + CCC_ScaleDpi(14, dpiNote), noteY + ih), RGB(230, 220, 255));
             if (pIL && noteImg >= 0 && noteImg != 1) {
                 // ImageList は行高確保(♪相当)。♪自体は 16x16@96dpi。
                 HICON hNote = ImageList_GetIcon(pIL->GetSafeHandle(), noteImg, ILD_TRANSPARENT);
@@ -7678,7 +7680,7 @@ void CCustomListCtrl::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
         CString chLabel;
         CCC_ExtractSavLrc(st, bSav, bLrc, chLabel);
         const BOOL bOpaqueChips = bCapGlass;
-        pDC->SetTextColor(m_bAeroMode ? RGB(1, 1, 1) : RGB(0, 0, 0));
+        pDC->SetTextColor(bS ? COLOR_LIST_SEL_TEXT : (m_bAeroMode ? RGB(1, 1, 1) : RGB(0, 0, 0)));
         pDC->SetBkMode(TRANSPARENT);
 
         CRect rt = r;
@@ -8288,25 +8290,8 @@ void CCustomTreeCtrl::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
 		CString strText = GetItemText(hItem);
 		CRect   rcText(nIconRight + 4, rcRow.top, rcRow.right - 22, rcRow.bottom);
 
-		if (bSel && !strText.IsEmpty())
-		{
-			CFont* pFontMeasure = pDC->SelectObject(GetFont());
-			CSize  szT = pDC->GetTextExtent(strText);
-			pDC->SelectObject(pFontMeasure);
-
-			CRect rcLbl(rcText.left - 2, rcRow.top + 1,
-				(std::min)(rcText.left + szT.cx + 4, rcText.right),
-				rcRow.bottom - 1);
-#if CCUSTOM_AERO_SUPPORT
-			if (CCC_HostNeedsChildOpaque(m_hWnd))
-				CCC_FillRectOpaqueBits(pDC->GetSafeHdc(), rcLbl, RGB(200, 170, 235));
-			else
-#endif
-				pDC->FillSolidRect(&rcLbl, RGB(200, 170, 235));
-		}
-
 		pDC->SetBkMode(TRANSPARENT);
-		pDC->SetTextColor(RGB(0, 0, 0));
+		pDC->SetTextColor(bSel ? COLOR_LIST_SEL_TEXT : RGB(0, 0, 0));
 		{
 			CFont* pOldFont = pDC->SelectObject(GetFont());
 			pDC->DrawText(strText, &rcText,
@@ -11974,7 +11959,8 @@ private:
             pThis->MakeWindowOpaque(hWnd);
             return lRes;
         }
-        // Edit: マウス進入/移動でテーマ NC や既定描画が α=0 を載せる → 透過に見える
+        // Edit/ListBox: マウス進入/移動でテーマ NC や既定描画が α=0 を載せる → 透過に見える
+        // ListBox は項目切替(LBUTTON)の部分描画でも同様。離脱で WM_PAINT が来ると直る。
         case WM_MOUSEMOVE:
         case WM_MOUSELEAVE:
         case WM_NCMOUSEMOVE:
@@ -11983,11 +11969,33 @@ private:
             wchar_t cls[32];
             cls[0] = 0;
             ::GetClassNameW(hWnd, cls, 32);
-            if (::_wcsicmp(cls, L"Edit") != 0)
+            if (::_wcsicmp(cls, L"Edit") != 0 && ::_wcsicmp(cls, L"ListBox") != 0)
                 break;
             LRESULT lRes = ::DefSubclassProc(hWnd, uMsg, wParam, lParam);
             // 連続 WM_MOUSEMOVE は Post でまとめて再不透明化
             ::PostMessage(hWnd, CCC_WM_POST_OPAQUE_PAINT, 0, 0);
+            return lRes;
+        }
+        // ListBox: 選択切替の owner-draw が α=0 で先に載る。描画を止めてから不透明全面を載せる。
+        case WM_LBUTTONDOWN:
+        case WM_LBUTTONDBLCLK:
+        case WM_LBUTTONUP:
+        {
+            wchar_t cls[32];
+            cls[0] = 0;
+            ::GetClassNameW(hWnd, cls, 32);
+            if (::_wcsicmp(cls, L"ListBox") != 0)
+                break;
+            ::SendMessage(hWnd, WM_SETREDRAW, FALSE, 0);
+            LRESULT lRes = ::DefSubclassProc(hWnd, uMsg, wParam, lParam);
+            HDC hDC = ::GetDC(hWnd);
+            if (hDC) {
+                pThis->PaintOpaque(hWnd, hDC);
+                ::ReleaseDC(hWnd, hDC);
+            }
+            ::ValidateRect(hWnd, NULL);
+            ::SendMessage(hWnd, WM_SETREDRAW, TRUE, 0);
+            ::ValidateRect(hWnd, NULL);
             return lRes;
         }
         // Edit: キー入力の既定描画が α=0 で先に載り一瞬アクリルが見える。
@@ -12022,6 +12030,26 @@ private:
             wchar_t cls[32];
             cls[0] = 0;
             ::GetClassNameW(hWnd, cls, 32);
+            // ListBox: 矢印等で選択が動くときも α=0 部分描画になる
+            if (::_wcsicmp(cls, L"ListBox") == 0) {
+                const WPARAM vk = wParam;
+                const BOOL nav = (vk == VK_UP || vk == VK_DOWN || vk == VK_LEFT || vk == VK_RIGHT
+                    || vk == VK_PRIOR || vk == VK_NEXT || vk == VK_HOME || vk == VK_END
+                    || vk == VK_SPACE || vk == VK_RETURN);
+                if (!nav)
+                    break;
+                ::SendMessage(hWnd, WM_SETREDRAW, FALSE, 0);
+                LRESULT lRes = ::DefSubclassProc(hWnd, uMsg, wParam, lParam);
+                HDC hDC = ::GetDC(hWnd);
+                if (hDC) {
+                    pThis->PaintOpaque(hWnd, hDC);
+                    ::ReleaseDC(hWnd, hDC);
+                }
+                ::ValidateRect(hWnd, NULL);
+                ::SendMessage(hWnd, WM_SETREDRAW, TRUE, 0);
+                ::ValidateRect(hWnd, NULL);
+                return lRes;
+            }
             if (::_wcsicmp(cls, L"Edit") != 0)
                 break;
             const WPARAM vk = wParam;

@@ -3696,19 +3696,77 @@ void CDouga::plays(TCHAR* s)
 			audioStreams.size(), videoStreams.size(), subtitleStreams.size());
 		// OutputDebugString(debug);
 	}
+	// CntPin2 で字幕 0 でも GetStreamInfo 側に拾えていれば一覧へ反映
+	if (streamMap.subtitleCount == 0 && !subtitleStreams.empty()) {
+		int n = 0;
+		for (size_t si = 0; si < subtitleStreams.size() && n < 40; ++si) {
+			if (DougaIsOffSubtitleName(subtitleStreams[si].name)) {
+				streamidxSubOff = (int)subtitleStreams[si].streamIndex;
+				continue;
+			}
+			streamidx2[n] = (int)subtitleStreams[si].streamIndex;
+			if (!subtitleStreams[si].name.IsEmpty())
+				streamname2[n] = subtitleStreams[si].name;
+			else
+				streamname2[n].Format(L"%s %d",
+					LL14(L"字幕", L"Subtitle", L"Sous-titres", L"Sottotitoli", L"Subtítulos", L"자막", L"字幕", L"ترجمة",
+						L"Субтитры", L"Untertitel", L"Legendas", L"Ondertitel", L"Napisy", L"Altyazı"),
+					n + 1);
+			++n;
+		}
+		streamMap.subtitleCount = n;
+		if (n > 0)
+			streamMap.subtitleStart = streamidx2[0];
+	}
 
 	if(savedata.audiost==1)
 		if (audionum > 1) {
 			CAudioSelect as;
-			as.no = audionum;
-			int rett = as.DoModal();
+			as.audioCount = audionum;
+			as.subCount = streamMap.subtitleCount;
+			as.no = 0;
+			as.subNo = -1;
+			const INT_PTR rett = as.DoModal();
+			if (rett != IDOK) {
+				// ×／キャンセル: 再生開始せず動画を止めて閉じる
+				stops();
+				if (og && ::IsWindow(og->GetSafeHwnd()))
+					og->PostMessage(WM_OGG_CLOSE_DOUGA, 0, 0);
+				return;
+			}
 			if (as.no < 0) as.no = 0;
+			if (as.no >= audionum) as.no = 0;
 			st12 = as.no + 1;
 			// 相対番号ではなく IAMStreamSelect 絶対 index（streamidx）で切替
 			if (pGraphBuilder && iam && as.no < 40 && streamidx[as.no] >= 0) {
 				HRESULT ehr = iam->Enable(streamidx[as.no], AMSTREAMSELECTENABLE_ENABLEONLY);
 				if (FAILED(ehr))
 					ehr = iam->Enable(streamidx[as.no], AMSTREAMSELECTENABLE_ENABLE);
+			}
+			// 字幕: subNo>=0 で選択、それ以外（ダブルクリック音声含む）はオフ
+			if (iam) {
+				if (as.subNo >= 0 && as.subNo < streamMap.subtitleCount && as.subNo < 40
+					&& streamidx2[as.subNo] >= 0) {
+					HRESULT shr = iam->Enable(streamidx2[as.subNo], AMSTREAMSELECTENABLE_ENABLEONLY);
+					if (FAILED(shr))
+						shr = iam->Enable(streamidx2[as.subNo], AMSTREAMSELECTENABLE_ENABLE);
+					if (pGraphBuilder)
+						ConnectSubtitleWithDirectVobSub(pGraphBuilder);
+				} else {
+					BOOL offOk = FALSE;
+					if (streamidxSubOff >= 0) {
+						HRESULT ohr = iam->Enable(streamidxSubOff, AMSTREAMSELECTENABLE_ENABLEONLY);
+						if (FAILED(ohr))
+							ohr = iam->Enable(streamidxSubOff, AMSTREAMSELECTENABLE_ENABLE);
+						offOk = SUCCEEDED(ohr);
+					}
+					if (!offOk) {
+						for (int i = 0; i < streamMap.subtitleCount && i < 40; ++i) {
+							if (streamidx2[i] >= 0)
+								iam->Enable(streamidx2[i], 0);
+						}
+					}
+				}
 			}
 		}
 }

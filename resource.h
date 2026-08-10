@@ -1503,6 +1503,9 @@
 #define IDC_SC_LIVE_CID                 4011
 #define IDC_SC_LIVE_CSEC_L              4012
 #define IDC_SC_LIVE_CSEC                4013
+#define IDC_AS_AUDIOLBL                 4014
+#define IDC_AS_SUBLBL                   4015
+#define IDC_AS_SUBLIST                  4016
 
 // Next default values for new objects
 // 
@@ -1510,7 +1513,7 @@
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NEXT_RESOURCE_VALUE        250
 #define _APS_NEXT_COMMAND_VALUE         33243
-#define _APS_NEXT_CONTROL_VALUE         4014
+#define _APS_NEXT_CONTROL_VALUE         4017
 #define _APS_NEXT_SYMED_VALUE           104
 #endif
 #endif

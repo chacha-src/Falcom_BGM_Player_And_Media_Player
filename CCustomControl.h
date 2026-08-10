@@ -121,7 +121,8 @@ void CCC_GroupBoxesBack(HWND hDlg);
 #define COLOR_DIALOG_BG         RGB(255, 224, 236) // ダイアログの基本背景色（とろけるブラッシュピンク）
 #define COLOR_EDIT_BG           RGB(255, 234, 238) // エディットボックスの背景色（ローズクリーム）
 #define COLOR_EDIT_TEXT         RGB(0,   0,   0)   // エディットボックスの文字色
-#define COLOR_LIST_BG           RGB(252, 228, 240) // リストボックスの背景色（淡いローズ）
+#define COLOR_LIST_BG           RGB(252, 236, 244) // リスト偶数行（淡いローズ）
+#define COLOR_LIST_ALT          RGB(230, 244, 238) // リスト奇数行（薄いミント）
 #define COLOR_COMBO_BG          RGB(255, 234, 238) // コンボボックスの背景色
 #define COLOR_BUTTON_BG         RGB(200, 232, 190) // ボタンの通常時背景色（やさしい緑：ファルコム特化型）
 #define COLOR_BUTTON_PUSHED     RGB( 60, 160,  60) // ボタンの押下時背景色（濃い緑）
@@ -137,7 +138,9 @@ void CCC_GroupBoxesBack(HWND hDlg);
 #define COLOR_FLOWER_DECO       RGB(255, 240, 245) // お花の装飾色
 #define COLOR_VINE_DECO         RGB(216, 132, 176) // 蔓（つる）の装飾色（ローズモーヴ）
 #define COLOR_HEART             RGB(255,  86, 150) // ハートの装飾色（色っぽい濃ピンク）
-#define COLOR_SEL_BG            RGB(255, 184, 212) // リストなどの選択時背景色（ローズ）
+// 選択: ローズ／ミント交互と被らない薄ラベンダー（コバルトは強すぎて見づらい）
+#define COLOR_SEL_BG            RGB(176, 158, 228)
+#define COLOR_LIST_SEL_TEXT     RGB( 40,  28,  88) // 選択行文字（濃い紫、白より目に優しい）
 #define COLOR_EDIT_SEL_BG       RGB( 51, 120, 210) // Edit選択背景(青・文字と対比)
 #define COLOR_EDIT_SEL_TEXT     RGB(255, 255, 255) // Edit選択文字
 #define COLOR_GRAD_DARK_GREEN   RGB(  0, 100,   0) // グラデーション用の濃い緑
