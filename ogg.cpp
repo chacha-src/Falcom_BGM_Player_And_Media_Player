@@ -1,4 +1,4 @@
-﻿// ogg.cpp : アプリケーション用クラスの定義を行います。
+// ogg.cpp : アプリケーション用クラスの定義を行います。
 //
 
 #include "stdafx.h"
@@ -114,6 +114,8 @@ LRESULT COggApp::ProcessWndProcException(CException* e, const MSG* pMsg)
 
 BOOL COggApp::InitInstance()
 {
+	// 旧KPIの SEH/確保失敗で WER ダイアログを出さない（配布プラグインは触らない）
+	::SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX);
 	// マニフェストに dpiAwareness を足すと SxS が壊れやすいので API で Per-Monitor V2 を要求
 	{
 		HMODULE hUser = ::GetModuleHandleW(L"user32.dll");
@@ -514,6 +516,49 @@ BOOL COggApp::InitInstance()
 	savedata.mpBanner3dzoom = 100;
 	savedata.popupMenuSoftBoost = 1;
 	savedata.kpi_plugin_dl_skip = 0;
+	savedata.soft3dTourSeen = 0;
+	savedata.soft3dPerfHintDismiss = 0;
+	savedata.s3m_size = 30;
+	savedata.s3m_seed = 0;
+	savedata.s3m_minimap = 10;
+	savedata.s3m_show_map = 1;
+	savedata.s3m_item_mask = 63;
+	savedata.s3m_have_run = 0;
+	savedata.s3m_run_n = 0;
+	savedata.s3m_run_px = 0;
+	savedata.s3m_run_pz = 0;
+	savedata.s3m_run_yaw = 0;
+	savedata.s3m_run_won = 0;
+	savedata.sm_mic_device[0] = 0;
+	savedata.sm_response = 1;
+	savedata.dig_cap_device[0] = 0;
+	savedata.dig_mon_device[0] = 0;
+	savedata.dig_monitor = 1;
+	savedata.dig_format = 0;
+	savedata.dig_mp3_kbps = 192;
+	savedata.dig_flac_level = 5;
+	savedata.dig_hpf_hz = 80;
+	savedata.dig_gain = 100;
+	savedata.dig_gate = 0;
+	savedata.dig_last_path[0] = 0;
+	savedata.vc_mic_device[0] = 0;
+	savedata.vc_out_device[0] = 0;
+	savedata.vc_pitch = 100;
+	savedata.vc_formant = 100;
+	savedata.vc_gain = 100;
+	savedata.vc_monitor = 0;
+	savedata.vc_preset = 0;
+	savedata.tn_mic_device[0] = 0;
+	savedata.tn_out_device[0] = 0;
+	savedata.tn_bpm = 120;
+	savedata.tn_beats = 4;
+	savedata.tn_mute = 0;
+	savedata.tn_a4_hz = 440;
+	savedata.pf_folder[0] = 0;
+	savedata.pf_interval_ms = 5000;
+	savedata.pf_shuffle = 0;
+	savedata.pf_topmost = 0;
+	savedata.pf_bgm = 1;
 	savedata.dougatopmost = 0;
 	savedata.dougaaspect = 0;
 
@@ -872,6 +917,94 @@ BOOL COggApp::InitInstance()
 		savedata.kpi_plugin_dl_skip = 0;
 	else if (savedata.kpi_plugin_dl_skip)
 		savedata.kpi_plugin_dl_skip = 1;
+	if (datFileSize < (int)(offsetof(save, soft3dTourSeen) + sizeof(savedata.soft3dTourSeen))) {
+		savedata.soft3dTourSeen = 0;
+		savedata.soft3dPerfHintDismiss = 0;
+	} else {
+		if (savedata.soft3dTourSeen < 0) savedata.soft3dTourSeen = 0;
+		if (savedata.soft3dPerfHintDismiss < 0) savedata.soft3dPerfHintDismiss = 0;
+	}
+	if (datFileSize < (int)(offsetof(save, s3m_size) + sizeof(savedata.s3m_size))) {
+		savedata.s3m_size = 30;
+		savedata.s3m_seed = 0;
+		savedata.s3m_minimap = 10;
+		savedata.s3m_show_map = 1;
+		savedata.s3m_item_mask = 63;
+		savedata.s3m_have_run = 0;
+		savedata.s3m_run_n = 0;
+		savedata.s3m_run_px = 0;
+		savedata.s3m_run_pz = 0;
+		savedata.s3m_run_yaw = 0;
+		savedata.s3m_run_won = 0;
+		savedata.mpBotToolsFlags |= 256; // Soft3D迷路ボタンを下段に出す
+	} else {
+		// 旧: 0..3 のインデックス → 実寸へ
+		if (savedata.s3m_size >= 0 && savedata.s3m_size <= 3) {
+			static const int legacy[] = { 11, 15, 21, 31 };
+			savedata.s3m_size = legacy[savedata.s3m_size];
+			savedata.mpBotToolsFlags |= 256;
+		}
+		if (savedata.s3m_size < 10) savedata.s3m_size = 10;
+		if (savedata.s3m_size > 400) savedata.s3m_size = 400;
+		if (datFileSize < (int)(offsetof(save, s3m_minimap) + sizeof(savedata.s3m_minimap))) {
+			savedata.s3m_minimap = 10;
+			savedata.s3m_show_map = 1;
+			savedata.s3m_item_mask = 63;
+			savedata.s3m_have_run = 0;
+			savedata.s3m_run_n = 0;
+			savedata.mpBotToolsFlags |= 256;
+		} else {
+			if (savedata.s3m_minimap < 8 || savedata.s3m_minimap > 16) savedata.s3m_minimap = 10;
+			if (savedata.s3m_minimap & 1) savedata.s3m_minimap++;
+			if (savedata.s3m_show_map) savedata.s3m_show_map = 1;
+			if (savedata.s3m_item_mask <= 0 || savedata.s3m_item_mask > 63) savedata.s3m_item_mask = 63;
+			if (savedata.s3m_have_run) savedata.s3m_have_run = 1;
+		}
+	}
+	if (datFileSize < (int)(offsetof(save, sm_response) + sizeof(savedata.sm_response))) {
+		savedata.sm_mic_device[0] = 0;
+		savedata.sm_response = 1;
+		savedata.dig_cap_device[0] = 0;
+		savedata.dig_mon_device[0] = 0;
+		savedata.dig_monitor = 1;
+		savedata.dig_format = 0;
+		savedata.dig_mp3_kbps = 192;
+		savedata.dig_flac_level = 5;
+		savedata.dig_hpf_hz = 80;
+		savedata.dig_gain = 100;
+		savedata.dig_gate = 0;
+		savedata.dig_last_path[0] = 0;
+		savedata.vc_mic_device[0] = 0;
+		savedata.vc_out_device[0] = 0;
+		savedata.vc_pitch = 100;
+		savedata.vc_formant = 100;
+		savedata.vc_gain = 100;
+		savedata.vc_monitor = 0;
+		savedata.vc_preset = 0;
+		savedata.tn_mic_device[0] = 0;
+		savedata.tn_out_device[0] = 0;
+		savedata.tn_bpm = 120;
+		savedata.tn_beats = 4;
+		savedata.tn_mute = 0;
+		savedata.tn_a4_hz = 440;
+		savedata.pf_folder[0] = 0;
+		savedata.pf_interval_ms = 5000;
+		savedata.pf_shuffle = 0;
+		savedata.pf_topmost = 0;
+		savedata.pf_bgm = 1;
+	} else {
+		if (savedata.sm_response < 0 || savedata.sm_response > 2) savedata.sm_response = 1;
+		if (savedata.dig_format < 0 || savedata.dig_format > 2) savedata.dig_format = 0;
+		if (savedata.dig_gain < 0 || savedata.dig_gain > 200) savedata.dig_gain = 100;
+		if (savedata.dig_gate < 0 || savedata.dig_gate > 100) savedata.dig_gate = 0;
+		if (savedata.vc_pitch < 50 || savedata.vc_pitch > 200) savedata.vc_pitch = 100;
+		if (savedata.vc_formant < 50 || savedata.vc_formant > 200) savedata.vc_formant = 100;
+		if (savedata.vc_gain < 0 || savedata.vc_gain > 200) savedata.vc_gain = 100;
+		if (savedata.tn_bpm < 40 || savedata.tn_bpm > 240) savedata.tn_bpm = 120;
+		if (savedata.tn_beats < 2 || savedata.tn_beats > 8) savedata.tn_beats = 4;
+		if (savedata.tn_a4_hz < 430 || savedata.tn_a4_hz > 450) savedata.tn_a4_hz = 440;
+		if (savedata.pf_interval_ms < 1000 || savedata.pf_interval_ms > 60000) savedata.pf_interval_ms = 5000;
+	}
 	if (datFileSize < (int)(offsetof(save, mpToolsOpen) + sizeof(savedata.mpToolsOpen)))
 		savedata.mpToolsOpen = 0;
 	else if (savedata.mpToolsOpen) savedata.mpToolsOpen = 1;

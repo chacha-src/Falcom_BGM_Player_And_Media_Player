@@ -398,21 +398,24 @@ void CDrHelpDlg::OnPaint()
 		L"Przewodnik nagrywania", L"Cihaz kaydı kılavuzu"));
 	y += titleLh;
 	muted(L, y, LL14(
-		L"再生端末のループバックを録音し、WAV / MP3 / FLAC に保存します。",
-		L"Records loopback from a playback device to WAV / MP3 / FLAC.",
-		L"Enregistre la boucle d'un périphérique vers WAV / MP3 / FLAC.",
-		L"Registra il loopback del dispositivo in WAV / MP3 / FLAC.",
-		L"Graba el loopback del dispositivo a WAV / MP3 / FLAC.",
-		L"재생 장치의 루프백을 녹음해 WAV / MP3 / FLAC으로 저장합니다.",
-		L"录制播放设备的环回，保存为 WAV / MP3 / FLAC。",
-		L"يسجّل حلقة الجهاز إلى WAV / MP3 / FLAC.",
-		L"Записывает loopback устройства в WAV / MP3 / FLAC.",
-		L"Nimmt Loopback eines Geräts als WAV / MP3 / FLAC auf.",
-		L"Grava o loopback do dispositivo em WAV / MP3 / FLAC.",
-		L"Neemt loopback van een apparaat op naar WAV / MP3 / FLAC.",
-		L"Nagrywa loopback urządzenia do WAV / MP3 / FLAC.",
-		L"Oynatma aygıtı loopback'ini WAV / MP3 / FLAC olarak kaydeder."));
+		L"再生端末のループバックを録音し、WAV / MP3 / FLAC に保存します。ライン入力の起こしは「アナログ起こし台」を使います。",
+		L"Records loopback from a playback device to WAV / MP3 / FLAC. For line-in digitizing, use Analog digitizer.",
+		L"Enregistre la boucle d'un périphérique vers WAV / MP3 / FLAC. Pour la ligne, utilisez le Numériseur analogique.",
+		L"Registra il loopback del dispositivo in WAV / MP3 / FLAC. Per linea usare Digitalizzatore analogico.",
+		L"Graba el loopback del dispositivo a WAV / MP3 / FLAC. Para línea use Digitalizador analógico.",
+		L"재생 장치의 루프백을 녹음해 WAV / MP3 / FLAC으로 저장합니다. 라인 입력은 아날로그 디지타이저를 사용하세요.",
+		L"录制播放设备的环回，保存为 WAV / MP3 / FLAC。线路输入请用「模拟数字化」。",
+		L"يسجّل حلقة الجهاز إلى WAV / MP3 / FLAC. لدخل الخط استخدم المحول التماثلي.",
+		L"Записывает loopback устройства в WAV / MP3 / FLAC. Для линейного входа — Оцифровка аналога.",
+		L"Nimmt Loopback eines Geräts als WAV / MP3 / FLAC auf. Für Line-In: Analog-Digitalisierer.",
+		L"Grava o loopback do dispositivo em WAV / MP3 / FLAC. Para linha, use o Digitalizador analógico.",
+		L"Neemt loopback van een apparaat op naar WAV / MP3 / FLAC. Voor lijn-in: Analoge digitizer.",
+		L"Nagrywa loopback urządzenia do WAV / MP3 / FLAC. Dla wejścia liniowego: Digitalizacja analogowa.",
+		L"Oynatma aygıtı loopback'ini WAV / MP3 / FLAC olarak kaydeder. Hat girişi için Analog dijitalleştiriciyi kullanın."));
 	y += lh + 4;
+	y = CCC_GdiHelpDrawSoftDemoPair(dc, L, y, rc.Width() - L * 2, min(140, max(112, rc.Height() / 5)),
+		CCC_HELPDEMO_KWAVE);
+
 
 	title(L, y, LL14(L"基本操作", L"Basics", L"Bases", L"Basi", L"Básicos", L"기본", L"基本", L"أساسيات",
 		L"Основы", L"Grundlagen", L"Básicos", L"Basis", L"Podstawy", L"Temeller"));

@@ -1,4 +1,4 @@
-// CAnalyzerDlg.cpp : 簡易波形アナライザー(スクロールBB・多ch・周波数特性)
+﻿// CAnalyzerDlg.cpp : 簡易波形アナライザー(スクロールBB・多ch・周波数特性)
 #include "stdafx.h"
 #include "ogg.h"
 #include "CAnalyzerDlg.h"
@@ -302,6 +302,8 @@ namespace
 		IDM_VIEW_BOT_2D = 42302,
 		IDM_VIEW_BOT_3D = 42303,
 		IDM_SOFT3D_API_DEMO = 42304,
+		IDM_VIEW_TOP_RESET = 42308,
+		IDM_VIEW_BOT_RESET = 42309,
 
 		IDM_WAVE_SPEED_BASE = 42100, // +0..WAVE_SPEED_COUNT-1
 		WM_ANALYZER_SPEC_DONE = WM_APP + 510,
@@ -383,24 +385,41 @@ void CAnHelpDlg::OnPaint()
 	CRect rc = hp.rc;
 	const int footerH = hp.footerH;
 	dc.SetBkMode(TRANSPARENT);
-	CFont* oldFont = dc.SelectObject(GetFont());
+	CFont* baseFont = GetFont();
+	CFont boldFont;
+	{
+		LOGFONT lf = {};
+		if (baseFont && baseFont->GetSafeHandle())
+			baseFont->GetLogFont(&lf);
+		else {
+			NONCLIENTMETRICS ncm = {};
+			ncm.cbSize = sizeof(ncm);
+			::SystemParametersInfo(SPI_GETNONCLIENTMETRICS, sizeof(ncm), &ncm, 0);
+			lf = ncm.lfMessageFont;
+		}
+		lf.lfWeight = FW_BOLD;
+		boldFont.CreateFontIndirect(&lf);
+	}
+	CFont* oldFont = dc.SelectObject(baseFont);
 
 	TEXTMETRIC tm{};
 	dc.GetTextMetrics(&tm);
 	const int lh = max(14, tm.tmHeight + tm.tmExternalLeading + 1);
-	const int titleLh = lh + 1;
+	const int titleLh = lh + 2;
 	CBrush frameBrush(RGB(130, 130, 150));
 
 	auto title = [&](int x, int y, LPCTSTR t) {
-		dc.SetTextColor(RGB(55, 45, 85));
+		CFont* prev = dc.SelectObject(&boldFont);
+		dc.SetTextColor(RGB(72, 48, 120));
 		dc.TextOut(x, y, t);
+		dc.SelectObject(prev);
 	};
 	auto body = [&](int x, int y, LPCTSTR t) {
-		dc.SetTextColor(RGB(65, 65, 80));
+		dc.SetTextColor(RGB(52, 52, 68));
 		dc.TextOut(x, y, t);
 	};
 	auto muted = [&](int x, int y, LPCTSTR t) {
-		dc.SetTextColor(RGB(100, 100, 115));
+		dc.SetTextColor(RGB(100, 100, 120));
 		dc.TextOut(x, y, t);
 	};
 
@@ -427,6 +446,8 @@ void CAnHelpDlg::OnPaint()
 		L"Obserwuj PCM: fala u góry, widmo na dole. PPM przełącza.",
 		L"PCM izle: üstte dalga, altta spektrum. Sağ tık ile değiştir."));
 	y += lh + 4;
+	y = CCC_GdiHelpDrawSoftDemoPair(dc, L, y, rc.Width() - L * 2, min(140, max(112, rc.Height() / 5)),
+		CCC_HELPDEMO_KSPECTRUM);
 
 	title(L, y, LL14(L"表示レイアウト", L"Display layout", L"Disposition", L"Layout",
 		L"Diseño", L"표시 레이아웃", L"显示布局", L"تخطيط العرض",
@@ -633,6 +654,75 @@ void CAnHelpDlg::OnPaint()
 		L"· Venster …… sleep kader / randen. Positie wordt onthouden",
 		L"· Okno …… przeciągnij ramkę / krawędzie. Pozycja zapamiętana",
 		L"· Pencere …… çerçeveyi sürükle, kenarlardan boyutlandır. Konum hatırlanır")); y += lh + 2;
+
+	title(L, y, LL14(L"簡易3D(Soft3D)表示", L"Soft 3D view", L"Vue 3D simplifiée", L"Vista 3D semplificata",
+		L"Vista 3D simple", L"간이 3D(Soft3D) 표시", L"简易3D(Soft3D)显示", L"عرض Soft3D",
+		L"Простой 3D-вид", L"Soft-3D-Ansicht", L"Vista Soft 3D", L"Eenvoudige 3D-weergave",
+		L"Widok Soft 3D", L"Soft 3B görünüm"));
+	y += titleLh;
+	y = CCC_GdiHelpDrawSoft3DDemo(dc, L, y, min(280, rc.Width() - L * 2), min(100, max(72, rc.Height() / 6)),
+		CCC_HELPDEMO_KWAVE);
+	body(L, y, LL14(
+		L"・右クリック「表示」→ 簡易3D で上部／下部ペインを CPU 描画の透視表示に切替",
+		L"· Right-click → View → Soft 3D switches the upper/lower pane to a CPU-drawn 3D view",
+		L"· Clic droit → Affichage → 3D simplifiée pour les panneaux",
+		L"· Destro → Vista → 3D semplificato per i riquadri",
+		L"· Clic der. → Vista → 3D simple para los paneles",
+		L"· 우클릭 「표시」→ 간이 3D 로 상단/하단 패널을 CPU 투시 표시로 전환",
+		L"· 右键「显示」→ 简易3D 将上/下窗格切换为 CPU 透视绘制",
+		L"· يمين ← العرض ← Soft 3D لتحويل اللوحين إلى عرض ثلاثي بالمعالج",
+		L"· ПКМ → Вид → простой 3D для верхней/нижней панели",
+		L"· Rechtsklick → Ansicht → Soft 3D für obere/untere Anzeige",
+		L"· Direito → Exibir → Soft 3D para os painéis",
+		L"· Rechtsklik → Weergave → Soft 3D voor de panelen",
+		L"· PPM → Widok → Soft 3D dla paneli",
+		L"· Sağ tık → Görünüm → Soft 3B ile panelleri çevir")); y += lh;
+	body(L, y, LL14(
+		L"・ペイン内を左ドラッグで視点回転、ホイールでズーム(0.35〜4.0倍)",
+		L"· Left-drag inside a pane to orbit, wheel to zoom (0.35x–4.0x)",
+		L"· Glisser gauche = orbite, molette = zoom (0,35–4,0x)",
+		L"· Trascina sinistro = orbita, rotella = zoom (0,35–4,0x)",
+		L"· Arrastrar izq. = órbita, rueda = zoom (0,35–4,0x)",
+		L"· 패널 안 좌드래그로 시점 회전, 휠로 줌(0.35~4.0배)",
+		L"· 窗格内左键拖动旋转视角，滚轮缩放（0.35～4.0 倍）",
+		L"· سحب أيسر للدوران، العجلة للتكبير (0.35–4.0)",
+		L"· ЛКМ-перетаскивание — облёт, колесо — зум (0,35–4,0x)",
+		L"· Linksziehen = Orbit, Rad = Zoom (0,35–4,0x)",
+		L"· Arrastar esq. = órbita, roda = zoom (0,35–4,0x)",
+		L"· Links slepen = orbit, wiel = zoom (0,35–4,0x)",
+		L"· Przeciąganie LPM = orbita, kółko = zoom (0,35–4,0x)",
+		L"· Sol sürükleme = yörünge, teker = zoom (0,35–4,0x)")); y += lh;
+	body(L, y, LL14(
+		L"・0 キーで視点を既定へ。視点は上下ペイン別に保存されます(重いときは 2D へ)",
+		L"· Press 0 to reset the camera. Each pane keeps its own camera (go 2D if it feels heavy)",
+		L"· 0 = réinitialiser la caméra ; chaque panneau garde la sienne",
+		L"· 0 = reset camera; ogni riquadro ha la propria",
+		L"· 0 = reiniciar cámara; cada panel guarda la suya",
+		L"· 0 키로 시점 초기화. 시점은 상·하 패널별로 저장(무거우면 2D)",
+		L"· 按 0 复位视角。上下窗格各自保存视角（卡就回 2D）",
+		L"· 0 لتصفير الكاميرا؛ كل لوح يحفظ كاميرته",
+		L"· 0 — сброс камеры; у каждой панели своя",
+		L"· 0 = Kamera zurücksetzen; jede Anzeige merkt ihre eigene",
+		L"· 0 = redefinir câmera; cada painel guarda a sua",
+		L"· 0 = camera resetten; elk paneel bewaart de eigen stand",
+		L"· 0 = reset kamery; każdy panel ma własną",
+		L"· 0 = kamerayı sıfırla; her panel kendi kamerasını tutar")); y += lh;
+	body(L, y, LL14(
+		L"・ボタンやチェックなど CCustom にも小さな Soft3D 飾りがあります（全面 Soft3D とは別）",
+		L"· CCustom buttons/checks also get tiny Soft 3D accents (separate from full Soft 3D view)",
+		L"· Boutons/cases CCustom ont aussi de petits accents Soft 3D (hors vue Soft 3D)",
+		L"· Pulsanti/check CCustom hanno anche piccoli accenti Soft 3D (oltre alla vista Soft 3D)",
+		L"· Botones/casillas CCustom también llevan Soft 3D pequeño (aparte de la vista Soft 3D)",
+		L"· 버튼·체크 등 CCustom에도 작은 Soft3D 장식(전체 Soft3D와 별개)",
+		L"· 按钮/复选等 CCustom 也有细小 Soft3D 装饰（与整窗 Soft3D 不同）",
+		L"· أزرار/مربعات CCustom لها أيضاً زخارف Soft3D صغيرة (غير العرض الكامل)",
+		L"· Кнопки/флажки CCustom — мелкие Soft 3D-акценты (не полный Soft 3D-вид)",
+		L"· CCustom-Buttons/Checks haben auch kleine Soft-3D-Akzente (neben Soft-3D-Ansicht)",
+		L"· Botões/checks CCustom também têm Soft 3D pequeno (além da vista Soft 3D)",
+		L"· CCustom-knoppen/checks hebben ook Soft 3D-accenten (naast Soft 3D-weergave)",
+		L"· Przyciski/checkboxy CCustom mają też Soft 3D (oprócz widoku Soft 3D)",
+		L"· CCustom düğme/onayda da Soft 3B süs (tam Soft 3B görünümden ayrı)")); y += lh + 2;
+
 	muted(L, y, LL14(
 		L"キャプションの「?」または右クリック「操作ガイド」でもこの画面を開けます。",
 		L"Open this sheet from caption \"?\" or right-click → Operation guide.",
@@ -944,6 +1034,7 @@ void CAnalyzerDlg::DetachForDestroy()
 {
 	m_feedEnabled = false;
 	KillTimer(1);
+	KillTimer(2);
 	StopSpecWorker();
 	InterlockedExchange(&m_presentPosted, 0);
 	InterlockedExchange(&m_syncPosted, 0);
@@ -1673,6 +1764,14 @@ void CAnalyzerDlg::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
 			subViewTop->AddSlider(LL14(L"Zoom (%)", L"Zoom (%)", L"Zoom (%)", L"Zoom (%)", L"Zoom (%)", L"Zoom (%)", L"缩放 (%)", L"تكبير (%)", L"Масштаб (%)", L"Zoom (%)", L"Zoom (%)", L"Zoom (%)", L"Zoom (%)", L"Zoom (%)"),
 				35, 400, zoomPct, &CAnalyzerDlg::Soft3dZoomTopCb, this,
 				LL14(L"拡大縮小（ドラッグ中に反映）", L"Zoom (live)", L"Zoom (direct)", L"Zoom (live)", L"Zoom (en vivo)", L"확대/축소(즉시)", L"缩放（即时）", L"تكبير (مباشر)", L"Масштаб (сразу)", L"Zoom (live)", L"Zoom (ao vivo)", L"Zoom (live)", L"Powiększenie (na zywo)", L"Yakinlastirma (anlik)"));
+			subViewTop->AddSeparator();
+			subViewTop->AddCommand(IDM_VIEW_TOP_RESET,
+				LL14(L"視点をリセット", L"Reset view", L"Reinitialiser la vue", L"Reimposta vista", L"Restablecer vista",
+					L"시점 재설정", L"重置视角", L"إعادة ضبط العرض", L"Сбросить вид", L"Ansicht zurucksetzen",
+					L"Redefinir vista", L"Weergave resetten", L"Resetuj widok", L"Gorunumu sifirla"),
+				LL14(L"カメラを既定の視点（Yaw/Pitch/Zoom）に戻します。", L"Restore the default camera (yaw / pitch / zoom).", L"Retablir la camera par defaut (lacet / tangage / zoom).", L"Ripristina la camera predefinita (yaw / pitch / zoom).", L"Restaurar la camara predeterminada (yaw / pitch / zoom).",
+					L"기본 카메라(요/피치/줌)로 되돌립니다.", L"将相机恢复为默认视角（偏航/俯仰/缩放）。", L"استعادة الكاميرا الافتراضية (الانحراف / الميل / التكبير).", L"Вернуть камеру к значениям по умолчанию (yaw / pitch / zoom).", L"Kamera auf Standardansicht (Yaw / Pitch / Zoom) zurucksetzen.",
+					L"Restaurar a camera padrao (yaw / pitch / zoom).", L"Herstel de standaardcamera (yaw / pitch / zoom).", L"Przywroc domyslna kamere (yaw / pitch / zoom).", L"Kamerayi varsayilan gorunume (yaw / pitch / zoom) dondur."));
 		}
 	}
 	CCustomPopupMenu* subViewBot = menu.AddSubMenu(
@@ -1702,6 +1801,14 @@ void CAnalyzerDlg::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
 			subViewBot->AddSlider(LL14(L"Zoom (%)", L"Zoom (%)", L"Zoom (%)", L"Zoom (%)", L"Zoom (%)", L"Zoom (%)", L"缩放 (%)", L"تكبير (%)", L"Масштаб (%)", L"Zoom (%)", L"Zoom (%)", L"Zoom (%)", L"Zoom (%)", L"Zoom (%)"),
 				35, 400, zoomPct, &CAnalyzerDlg::Soft3dZoomBotCb, this,
 				LL14(L"拡大縮小（ドラッグ中に反映）", L"Zoom (live)", L"Zoom (direct)", L"Zoom (live)", L"Zoom (en vivo)", L"확대/축소(즉시)", L"缩放（即时）", L"تكبير (مباشر)", L"Масштаб (сразу)", L"Zoom (live)", L"Zoom (ao vivo)", L"Zoom (live)", L"Powiększenie (na zywo)", L"Yakinlastirma (anlik)"));
+			subViewBot->AddSeparator();
+			subViewBot->AddCommand(IDM_VIEW_BOT_RESET,
+				LL14(L"視点をリセット", L"Reset view", L"Reinitialiser la vue", L"Reimposta vista", L"Restablecer vista",
+					L"시점 재설정", L"重置视角", L"إعادة ضبط العرض", L"Сбросить вид", L"Ansicht zurucksetzen",
+					L"Redefinir vista", L"Weergave resetten", L"Resetuj widok", L"Gorunumu sifirla"),
+				LL14(L"カメラを既定の視点（Yaw/Pitch/Zoom）に戻します。", L"Restore the default camera (yaw / pitch / zoom).", L"Retablir la camera par defaut (lacet / tangage / zoom).", L"Ripristina la camera predefinita (yaw / pitch / zoom).", L"Restaurar la camara predeterminada (yaw / pitch / zoom).",
+					L"기본 카메라(요/피치/줌)로 되돌립니다.", L"将相机恢复为默认视角（偏航/俯仰/缩放）。", L"استعادة الكاميرا الافتراضية (الانحراف / الميل / التكبير).", L"Вернуть камеру к значениям по умолчанию (yaw / pitch / zoom).", L"Kamera auf Standardansicht (Yaw / Pitch / Zoom) zurucksetzen.",
+					L"Restaurar a camera padrao (yaw / pitch / zoom).", L"Herstel de standaardcamera (yaw / pitch / zoom).", L"Przywroc domyslna kamere (yaw / pitch / zoom).", L"Kamerayi varsayilan gorunume (yaw / pitch / zoom) dondur."));
 		}
 	}
 
@@ -1922,7 +2029,7 @@ void CAnalyzerDlg::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
 	menu.AddCheck(IDM_SOFT3D_API_DEMO,
 		LL14(L"Soft3D APIデモ", L"Soft3D API demo", L"Demo API Soft3D", L"Demo API Soft3D", L"Demo API Soft3D", L"Soft3D API 데모", L"Soft3D API演示", L"عرض Soft3D API", L"Демо Soft3D API", L"Soft3D-API-Demo", L"Demo API Soft3D", L"Soft3D API-demo", L"Demo Soft3D API", L"Soft3D API demosu"),
 		m_soft3dApiDemo,
-		LL14(L"エンジンAPI（箱・球・ワイヤー・テクスチャ・フォグ・DOF）の確認用デモを表示します。", L"Show engine API demo (box/sphere/wire/texture/fog/DOF).", L"Afficher la demo API moteur.", L"Mostra demo API motore.", L"Mostrar demo de API del motor.", L"엔진 API 데모를 표시합니다.", L"显示引擎API演示。", L"عرض عرض توضيحي لواجهة المحرك.", L"Показать демо API движка.", L"Engine-API-Demo anzeigen.", L"Mostrar demo da API do motor.", L"Toon engine-API-demo.", L"Pokaz demo API silnika.", L"Motor API demosunu goster."));
+		LL14(L"カメラがゆっくり周回し、箱・球・トーラス・波形が公転する確認用デモです（もう一度選ぶと解除）。", L"Camera slowly orbits while boxes, spheres, torus and waves revolve (pick again to turn off).", L"La caméra orbite; boîtes, sphères, tore et ondes tournent (réactiver pour couper).", L"La camera orbita; scatole, sfere, toro e onde ruotano (riseleziona per spegnere).", L"La cámara orbita; cajas, esferas, toro y ondas giran (vuelva a elegir para apagar).", L"카메라가 천천히 돌며 상자·구·토러스·파형이 공전하는 확인용 데모(다시 선택하면 해제).", L"相机缓慢环绕，箱/球/环/波形公转的确认演示（再选一次关闭）。", L"الكاميرا تدور ببطء مع صناديق وكرات وحلقات وموجات (أعد الاختيار للإيقاف).", L"Камера медленно облетает; ящики, сферы, тор и волны вращаются (выберите снова, чтобы выкл.).", L"Kamera kreist langsam; Boxen, Kugeln, Torus und Wellen kreisen (erneut wählen zum Aus).", L"A câmera orbita; caixas, esferas, toro e ondas giram (escolha de novo para desligar).", L"Camera draait langzaam; dozen, bollen, torus en golven cirkelen (kies opnieuw om uit).", L"Kamera powoli orbituje; pudełka, sfery, torus i fale krążą (wybierz ponownie, by wyłączyć).", L"Kamera yavaş döner; kutular, küreler, torus ve dalgalar dolanır (kapatmak için tekrar seçin)."));
 	menu.AddSeparator();
 	menu.AddCommand(ID_MP_OPEN_EQ,
 		LL14(L"イコライザを開く", L"Open equalizer", L"Ouvrir l'egaliseur", L"Apri equalizzatore", L"Abrir ecualizador",
@@ -1953,6 +2060,10 @@ void CAnalyzerDlg::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
 	}
 	else if (cmd == IDM_VIEW_TOP_3D) {
 		savedata.analyzerviewmodeTop = 1;
+		if (!(savedata.soft3dTourSeen & 2)) {
+			savedata.soft3dTourSeen |= 2;
+			m_soft3dTourUntil = GetTickCount() + 3000;
+		}
 		SyncSoft3DCamsFromSave();
 		KickUiPresent();
 	}
@@ -1962,11 +2073,33 @@ void CAnalyzerDlg::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
 	}
 	else if (cmd == IDM_VIEW_BOT_3D) {
 		savedata.analyzerviewmodeBot = 1;
+		if (!(savedata.soft3dTourSeen & 2)) {
+			savedata.soft3dTourSeen |= 2;
+			m_soft3dTourUntil = GetTickCount() + 3000;
+		}
+		SyncSoft3DCamsFromSave();
+		KickUiPresent();
+	}
+	else if (cmd == IDM_VIEW_TOP_RESET) {
+		savedata.analyzer3dyawTop = -220;
+		savedata.analyzer3dpitchTop = 260;
+		savedata.analyzer3dzoomTop = 100;
+		SyncSoft3DCamsFromSave();
+		KickUiPresent();
+	}
+	else if (cmd == IDM_VIEW_BOT_RESET) {
+		savedata.analyzer3dyawBot = -220;
+		savedata.analyzer3dpitchBot = 260;
+		savedata.analyzer3dzoomBot = 100;
 		SyncSoft3DCamsFromSave();
 		KickUiPresent();
 	}
 	else if (cmd == IDM_SOFT3D_API_DEMO) {
 		m_soft3dApiDemo = !m_soft3dApiDemo;
+		if (m_soft3dApiDemo)
+			SetTimer(2, 33, nullptr); // 回転アニメ用
+		else
+			KillTimer(2);
 		KickUiPresent();
 	}
 	else if (cmd == ID_MP_OPEN_EQ || cmd == ID_MP_OPEN_PIANOROLL) {
@@ -2414,6 +2547,8 @@ void CAnalyzerDlg::KickUiPresent()
 	int minMs = savedata.ms2;
 	if (minMs < 16) minMs = 16;
 	if (minMs > 960) minMs = 960;
+	// Soft3D APIデモは回転アニメのため短周期でキック
+	if (m_soft3dApiDemo && minMs > 33) minMs = 33;
 	if (m_lastPresentKickTick != 0 && (now - m_lastPresentKickTick) < (DWORD)minMs)
 		return;
 	if (InterlockedCompareExchange(&m_presentPosted, 1, 0) != 0) return;
@@ -3688,6 +3823,67 @@ void CAnalyzerDlg::Present(CDC& dc, const CRect& rc, BOOL bAero)
 		pDst->TextOut(8, 4, LL14(L"フリーズ中", L"Frozen", L"Gele", L"Congelato", L"Congelado", L"정지됨", L"已冻结", L"مجمد", L"Заморожено", L"Eingefroren", L"Congelado", L"Bevroren", L"Zamrozone", L"Donduruldu"));
 		pDst->SelectObject(of);
 	}
+	if ((top3d || bot3d) && m_soft3dTourUntil != 0 && GetTickCount() < m_soft3dTourUntil) {
+		pDst->SetBkMode(TRANSPARENT);
+		pDst->SetTextColor(RGB(240, 245, 255));
+		CFont* of = pDst->SelectObject(&m_font);
+		const int tipY = m_frozen ? 22 : 8;
+		pDst->TextOut(8, tipY, LL14(
+			L"ドラッグ=回転 ホイール=ズーム 0=リセット",
+			L"Drag=rotate  Wheel=zoom  0=reset",
+			L"Glisser=rotation  Molette=zoom  0=reinit.",
+			L"Trascina=ruota  Rotella=zoom  0=reset",
+			L"Arrastrar=rotar  Rueda=zoom  0=restablecer",
+			L"드래그=회전  휠=줌  0=리셋",
+			L"拖动=旋转  滚轮=缩放  0=重置",
+			L"سحب=دوران  عجلة=تكبير  0=إعادة",
+			L"Перетащ.=поворот  Колесо=масштаб  0=сброс",
+			L"Ziehen=drehen  Rad=Zoom  0=Reset",
+			L"Arrastar=girar  Roda=zoom  0=redefinir",
+			L"Sleep=draaien  Wiel=zoom  0=reset",
+			L"Przeciagnij=obrot  Kolo=zoom  0=reset",
+			L"Surukle=don  Tekerlek=zoom  0=sifirla"));
+		pDst->SelectObject(of);
+	}
+	if ((top3d || bot3d) && (savedata.soft3dPerfHintDismiss & 2) == 0) {
+		static DWORD s_anSoftT0 = 0;
+		static int s_anSlow = 0;
+		static DWORD s_anHintUntil = 0;
+		const DWORD now = GetTickCount();
+		if (s_anSoftT0 != 0) {
+			const DWORD spent = now - s_anSoftT0;
+			if (spent >= 28) {
+				if (++s_anSlow >= 40) {
+					s_anSlow = 0;
+					s_anHintUntil = now + 4000;
+				}
+			} else if (s_anSlow > 0) {
+				--s_anSlow;
+			}
+		}
+		s_anSoftT0 = now;
+		if (now < s_anHintUntil) {
+			pDst->SetBkMode(TRANSPARENT);
+			pDst->SetTextColor(RGB(255, 190, 160));
+			CFont* of = pDst->SelectObject(&m_font);
+			pDst->TextOut(8, 26, LL14(
+				L"重いときは右クリックから 2D に戻せます",
+				L"Feeling heavy? Switch back to 2D from the context menu",
+				L"Trop lourd ? Revenez en 2D via le menu contextuel",
+				L"Troppo pesante? Torna al 2D dal menu contestuale",
+				L"¿Va lento? Vuelva a 2D desde el menú contextual",
+				L"무거우면 우클릭에서 2D로 돌릴 수 있습니다",
+				L"若觉得卡，可从右键菜单切回 2D",
+				L"ثقيل؟ عد إلى 2D من قائمة السياق",
+				L"Тяжело? Вернитесь в 2D через контекстное меню",
+				L"Zu zäh? Über das Kontextmenü zurück zu 2D",
+				L"Pesado? Volte ao 2D pelo menu de contexto",
+				L"Te zwaar? Ga terug naar 2D via het contextmenu",
+				L"Za ciężko? Wróć do 2D z menu kontekstowego",
+				L"Ağır mı? Bağlam menüsünden 2B'ye dönün"));
+			pDst->SelectObject(of);
+		}
+	}
 
 	if (pDst != &dc) {
 #if CCUSTOM_AERO_SUPPORT
@@ -3704,6 +3900,12 @@ void CAnalyzerDlg::SyncSoft3DCamsFromSave()
 {
 	GdiSoft3D::CamFromSaved(m_camTop, savedata.analyzer3dyawTop, savedata.analyzer3dpitchTop, savedata.analyzer3dzoomTop);
 	GdiSoft3D::CamFromSaved(m_camBot, savedata.analyzer3dyawBot, savedata.analyzer3dpitchBot, savedata.analyzer3dzoomBot);
+}
+
+void CAnalyzerDlg::PaletteApplySoft3D()
+{
+	SyncSoft3DCamsFromSave();
+	KickUiPresent();
 }
 
 void CAnalyzerDlg::PersistSoft3DCams()
@@ -4363,6 +4565,13 @@ BOOL CAnalyzerDlg::OnEraseBkgnd(CDC* pDC)
 
 void CAnalyzerDlg::OnTimer(UINT_PTR nIDEvent)
 {
+	if (nIDEvent == 2) {
+		if (m_soft3dApiDemo)
+			KickUiPresent();
+		else
+			KillTimer(2);
+		return;
+	}
 	if (nIDEvent == 1) {
 		// 描画は PostMessage 自由走行。タイマーは座標保存のみ。
 		CRect rc;
@@ -4616,6 +4825,46 @@ BOOL CAnalyzerDlg::PreTranslateMessage(MSG* pMsg)
 	if (m_tooltip.GetSafeHwnd())
 		m_tooltip.RelayEvent(pMsg);
 	if (pMsg->message == WM_KEYDOWN) {
+		bool textFocus = false;
+		{
+			wchar_t cls[32] = { 0 };
+			HWND hFocus = ::GetFocus();
+			if (hFocus && ::GetClassName(hFocus, cls, 32) > 0)
+				textFocus = (_wcsicmp(cls, L"Edit") == 0 || _wcsicmp(cls, L"ComboBox") == 0);
+		}
+		// Ctrl+K = メディアプレイヤーのコマンドパレット
+		if (!textFocus && (pMsg->wParam == 'K')
+			&& (::GetKeyState(VK_CONTROL) & 0x8000)
+			&& !(::GetKeyState(VK_MENU) & 0x8000)) {
+			extern CMediaPlayerDlg* mp;
+			if (mp && ::IsWindow(mp->GetSafeHwnd())) {
+				mp->OpenCommandPalette();
+				return TRUE;
+			}
+		}
+		if (!textFocus
+			&& (pMsg->wParam == '0' || pMsg->wParam == VK_NUMPAD0)
+			&& !(::GetKeyState(VK_CONTROL) & 0x8000)
+			&& !(::GetKeyState(VK_MENU) & 0x8000)) {
+			bool did = false;
+			if (IsSoft3DTop()) {
+				savedata.analyzer3dyawTop = -220;
+				savedata.analyzer3dpitchTop = 260;
+				savedata.analyzer3dzoomTop = 100;
+				did = true;
+			}
+			if (IsSoft3DBot()) {
+				savedata.analyzer3dyawBot = -220;
+				savedata.analyzer3dpitchBot = 260;
+				savedata.analyzer3dzoomBot = 100;
+				did = true;
+			}
+			if (did) {
+				SyncSoft3DCamsFromSave();
+				KickUiPresent();
+				return TRUE;
+			}
+		}
 		if (pMsg->wParam == VK_ESCAPE) {
 			PostMessage(WM_CLOSE);
 			return TRUE;

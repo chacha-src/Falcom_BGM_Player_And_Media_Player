@@ -585,7 +585,7 @@ struct save{
 	int mpTempOpen;
 
 	// --- MP底バー: ツール由来ショートカットボタン(末尾追記。旧.datは0→起動時既定) ---
-	// mpBotToolsInited=1 なら mpBotToolsFlags 有効。bit: DJ/Tag/BPM/Sleep/Mirror/SsViz/Alarm/Remote
+	// mpBotToolsInited=1 なら mpBotToolsFlags 有効。bit: DJ/Tag/BPM/Sleep/Mirror/SsViz/Alarm/Remote/Maze
 	int mpBotToolsInited;
 	int mpBotToolsFlags;
 
@@ -668,6 +668,54 @@ struct save{
 
 	// --- KPI プラグイン自動取得(末尾追記。0=起動時に未検出なら尋ねる 1=いいえ済みで尋ねない) ---
 	int kpi_plugin_dl_skip;
+
+	// --- 異端5機能（末尾追記。旧.datは offsetof で初期化）---
+	TCHAR sm_mic_device[256];   // 騒音計マイク
+	int sm_response;            // 0=速 1=標準 2=遅
+	TCHAR dig_cap_device[256];  // 起こし台キャプチャ
+	TCHAR dig_mon_device[256];  // 起こし台モニタ出力
+	int dig_monitor;            // 1=モニタON
+	int dig_format;             // 0=WAV 1=mp3 2=FLAC
+	int dig_mp3_kbps;
+	int dig_flac_level;
+	int dig_hpf_hz;             // 0=OFF, 40..400
+	int dig_gain;               // 0..200 (100=等倍)
+	int dig_gate;               // 0..100 (0=OFF, 相対ゲート閾値)
+	TCHAR dig_last_path[1024];
+	TCHAR vc_mic_device[256];
+	TCHAR vc_out_device[256];   // 仮想ケーブル等 eRender
+	int vc_pitch;               // 50..200 (100=等倍)
+	int vc_formant;             // 50..200 (簡易)
+	int vc_gain;                // 0..200
+	int vc_monitor;             // 1=自分にもモニタ
+	int vc_preset;              // 0..4
+	TCHAR tn_mic_device[256];
+	TCHAR tn_out_device[256];   // メトロノーム出力
+	int tn_bpm;                 // 40..240
+	int tn_beats;               // 2..8
+	int tn_mute;                // 1=クリック無音
+	int tn_a4_hz;               // 430..450 (既定440)
+	TCHAR pf_folder[1024];
+	int pf_interval_ms;         // 1000..60000
+	int pf_shuffle;             // 1=シャッフル
+	int pf_topmost;             // 1=最前面
+	int pf_bgm;                 // 1=プレイリストBGM
+
+	// --- Soft3D UX（末尾追記。旧.datは offsetof で初期化）---
+	// bit0=MP banner bit1=Analyzer bit2=CmdRoll bit3=Piano
+	int soft3dTourSeen;
+	int soft3dPerfHintDismiss;
+
+	// --- Soft3D 迷路ゲーム ---
+	int s3m_size;               // マス数 10..400（実寸）
+	int s3m_seed;               // 0=時刻
+	int s3m_minimap;            // 8/10/12/14/16（近傍マス数）
+	int s3m_show_map;           // 1=ミニマップ表示
+	int s3m_item_mask;          // bit0=tempo 1=pitch↑ 2=pitch↓ 3=next 4=eq 5=window
+	int s3m_have_run;           // 1=自動保存された進行あり（本体は別ファイル）
+	int s3m_run_n;
+	float s3m_run_px, s3m_run_pz, s3m_run_yaw;
+	int s3m_run_won;
 };
 extern save savedata;
 /* コード間隔(ms)。16..500。旧.dat や未設定は 25。 */
@@ -753,6 +801,23 @@ struct CCC_GdiHelpPaint {
 };
 BOOL CCC_GdiHelpBeginPaint(CWnd* wnd, CDC& paintDc, CCC_GdiHelpPaint& hp);
 void CCC_GdiHelpEndPaint(CCC_GdiHelpPaint& hp);
+
+// ヘルプ Soft3D 実演（CPU）。2D 概念も Soft3D で箱／リボンとして描き、タイマーでアニメする。
+enum {
+	CCC_HELPDEMO_KGENERIC = 0,
+	CCC_HELPDEMO_KSPECTRUM,
+	CCC_HELPDEMO_KWAVE,
+	CCC_HELPDEMO_KPIANO,
+	CCC_HELPDEMO_KEQ,
+	CCC_HELPDEMO_KCAPTURE,
+	CCC_HELPDEMO_KCMDROLL,
+	CCC_HELPDEMO_KLIST,
+	CCC_HELPDEMO_KTRANSPORT,
+	CCC_HELPDEMO_KMAZE
+};
+int CCC_GdiHelpDrawSoft3DDemo(CDC& dc, int x, int y, int maxW, int maxH, int kind);
+int CCC_GdiHelpDrawSoftDemoPair(CDC& dc, int x, int y, int totalW, int demoH, int kind);
+
 // Per-Monitor DPI 変更時にキャプション帯高さを再計算してレイアウト
 void CCC_CaptionRefreshDpi(HWND hDlg);
 

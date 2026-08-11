@@ -3,6 +3,7 @@
 #include "CPromptDlg.h"
 #include "CPromptEngine.h"
 #include "CPromptAnalyze.h"
+#include "CMediaPlayerDlg.h"
 #include <cmath>
 
 extern void MpPersistSavedataQuick();
@@ -845,6 +846,66 @@ void CCommandRollView::PaintRollSoft3D(CDC& dc, const CRect& rc)
 			s2.Present(dc, 0, 0);
 		}
 	}
+	if (m_soft3dTourUntil != 0 && GetTickCount() < m_soft3dTourUntil) {
+		dc.SetBkMode(TRANSPARENT);
+		dc.SetTextColor(RGB(240, 245, 255));
+		CFont* of = dc.SelectObject(GetFont());
+		dc.TextOut(8, 8, LL14(
+			L"ドラッグ=回転 ホイール=ズーム 0=リセット",
+			L"Drag=rotate  Wheel=zoom  0=reset",
+			L"Glisser=rotation  Molette=zoom  0=reinit.",
+			L"Trascina=ruota  Rotella=zoom  0=reset",
+			L"Arrastrar=rotar  Rueda=zoom  0=restablecer",
+			L"드래그=회전  휠=줌  0=리셋",
+			L"拖动=旋转  滚轮=缩放  0=重置",
+			L"سحب=دوران  عجلة=تكبير  0=إعادة",
+			L"Перетащ.=поворот  Колесо=масштаб  0=сброс",
+			L"Ziehen=drehen  Rad=Zoom  0=Reset",
+			L"Arrastar=girar  Roda=zoom  0=redefinir",
+			L"Sleep=draaien  Wiel=zoom  0=reset",
+			L"Przeciagnij=obrot  Kolo=zoom  0=reset",
+			L"Surukle=don  Tekerlek=zoom  0=sifirla"));
+		if (of) dc.SelectObject(of);
+	}
+	if (IsSoft3D() && (savedata.soft3dPerfHintDismiss & 4) == 0) {
+		static DWORD s_crSoftT0 = 0;
+		static int s_crSlow = 0;
+		static DWORD s_crHintUntil = 0;
+		const DWORD now = GetTickCount();
+		if (s_crSoftT0 != 0) {
+			const DWORD spent = now - s_crSoftT0;
+			if (spent >= 28) {
+				if (++s_crSlow >= 40) {
+					s_crSlow = 0;
+					s_crHintUntil = now + 4000;
+				}
+			} else if (s_crSlow > 0) {
+				--s_crSlow;
+			}
+		}
+		s_crSoftT0 = now;
+		if (now < s_crHintUntil) {
+			dc.SetBkMode(TRANSPARENT);
+			dc.SetTextColor(RGB(255, 190, 160));
+			CFont* of = dc.SelectObject(GetFont());
+			dc.TextOut(8, 26, LL14(
+				L"重いときは右クリックから 2D に戻せます（編集は2Dのみ）",
+				L"Feeling heavy? Switch to 2D from the context menu (edit is 2D-only)",
+				L"Trop lourd ? Passez en 2D (edition 2D seulement)",
+				L"Troppo pesante? Torna al 2D (modifica solo in 2D)",
+				L"¿Va lento? Pase a 2D (edición solo en 2D)",
+				L"무거우면 우클릭에서 2D로 (편집은 2D만)",
+				L"若觉得卡，右键切回 2D（仅 2D 可编辑）",
+				L"ثقيل؟ عد إلى 2D (التحرير في 2D فقط)",
+				L"Тяжело? Вернитесь в 2D (правка только в 2D)",
+				L"Zu zäh? Zurück zu 2D (Bearbeiten nur in 2D)",
+				L"Pesado? Volte ao 2D (edicao so em 2D)",
+				L"Te zwaar? Terug naar 2D (bewerken alleen in 2D)",
+				L"Za ciężko? Wróć do 2D (edycja tylko w 2D)",
+				L"Ağır mı? 2B'ye dön (düzenleme yalnız 2B)"));
+			if (of) dc.SelectObject(of);
+		}
+	}
 }
 
 void CCommandRollView::AutoFollowPlayhead(double t)
@@ -880,6 +941,12 @@ void CCommandRollView::TickPlayhead()
 		static DWORD s_qualityForTick = 0;
 		if (age >= 180u && s_qualityForTick != m_userScrollTick) {
 			s_qualityForTick = m_userScrollTick;
+			need = TRUE;
+		}
+	}
+	if (m_soft3dTourUntil != 0 && IsSoft3D()) {
+		if (GetTickCount() >= m_soft3dTourUntil) {
+			m_soft3dTourUntil = 0;
 			need = TRUE;
 		}
 	}
@@ -1160,7 +1227,8 @@ void CCommandRollView::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
 {
 	enum {
 		IDM_CR_VIEW_2D = 42320,
-		IDM_CR_VIEW_3D = 42321
+		IDM_CR_VIEW_3D = 42321,
+		IDM_CR_VIEW_RESET = 42322
 	};
 	CCustomPopupMenu menu;
 	CCustomPopupMenu* subView = menu.AddSubMenu(
@@ -1190,6 +1258,14 @@ void CCommandRollView::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
 			subView->AddSlider(LL14(L"Zoom (%)", L"Zoom (%)", L"Zoom (%)", L"Zoom (%)", L"Zoom (%)", L"Zoom (%)", L"缩放 (%)", L"تكبير (%)", L"Масштаб (%)", L"Zoom (%)", L"Zoom (%)", L"Zoom (%)", L"Zoom (%)", L"Zoom (%)"),
 				35, 400, zoomPct, &CCommandRollView::Soft3dZoomCb, this,
 				LL14(L"拡大縮小（ドラッグ中に反映）", L"Zoom (live)", L"Zoom (direct)", L"Zoom (live)", L"Zoom (en vivo)", L"확대/축소(즉시)", L"缩放（即时）", L"تكبير (مباشر)", L"Масштаб (сразу)", L"Zoom (live)", L"Zoom (ao vivo)", L"Zoom (live)", L"Powiększenie (na zywo)", L"Yakinlastirma (anlik)"));
+			subView->AddSeparator();
+			subView->AddCommand(IDM_CR_VIEW_RESET,
+				LL14(L"視点をリセット", L"Reset view", L"Reinitialiser la vue", L"Reimposta vista", L"Restablecer vista",
+					L"시점 재설정", L"重置视角", L"إعادة ضبط العرض", L"Сбросить вид", L"Ansicht zurucksetzen",
+					L"Redefinir vista", L"Weergave resetten", L"Resetuj widok", L"Gorunumu sifirla"),
+				LL14(L"カメラを既定の視点（Yaw/Pitch/Zoom）に戻します。", L"Restore the default camera (yaw / pitch / zoom).", L"Retablir la camera par defaut (lacet / tangage / zoom).", L"Ripristina la camera predefinita (yaw / pitch / zoom).", L"Restaurar la camara predeterminada (yaw / pitch / zoom).",
+					L"기본 카메라(요/피치/줌)로 되돌립니다.", L"将相机恢复为默认视角（偏航/俯仰/缩放）。", L"استعادة الكاميرا الافتراضية (الانحراف / الميل / التكبير).", L"Вернуть камеру к значениям по умолчанию (yaw / pitch / zoom).", L"Kamera auf Standardansicht (Yaw / Pitch / Zoom) zurucksetzen.",
+					L"Restaurar a camera padrao (yaw / pitch / zoom).", L"Herstel de standaardcamera (yaw / pitch / zoom).", L"Przywroc domyslna kamere (yaw / pitch / zoom).", L"Kamerayi varsayilan gorunume (yaw / pitch / zoom) dondur."));
 		}
 	}
 	if (point.x == -1 && point.y == -1) {
@@ -1203,6 +1279,17 @@ void CCommandRollView::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
 	}
 	else if (cmd == IDM_CR_VIEW_3D) {
 		savedata.mpCmdRollviewmode = 1;
+		if (!(savedata.soft3dTourSeen & 4)) {
+			savedata.soft3dTourSeen |= 4;
+			m_soft3dTourUntil = GetTickCount() + 3000;
+		}
+		SyncSoft3DCamFromSave();
+		InvalidateRoll();
+	}
+	else if (cmd == IDM_CR_VIEW_RESET) {
+		savedata.mpCmdRoll3dyaw = -220;
+		savedata.mpCmdRoll3dpitch = 260;
+		savedata.mpCmdRoll3dzoom = 100;
 		SyncSoft3DCamFromSave();
 		InvalidateRoll();
 	}
@@ -1210,6 +1297,14 @@ void CCommandRollView::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
 
 void CCommandRollView::OnKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags)
 {
+	if (IsSoft3D() && (nChar == '0' || nChar == VK_NUMPAD0)) {
+		savedata.mpCmdRoll3dyaw = -220;
+		savedata.mpCmdRoll3dpitch = 260;
+		savedata.mpCmdRoll3dzoom = 100;
+		SyncSoft3DCamFromSave();
+		InvalidateRoll();
+		return;
+	}
 	if ((nChar == VK_DELETE || nChar == VK_BACK) && m_sel >= 0 && m_sel < m_evCount) {
 		for (int i = m_sel; i + 1 < m_evCount; ++i) m_ev[i] = m_ev[i + 1];
 		--m_evCount; m_sel = -1;
@@ -1280,6 +1375,13 @@ BEGIN_MESSAGE_MAP(CCommandRollDlg, CCustomBlurDialogExBase)
 	ON_WM_CTLCOLOR()
 	ON_WM_CLOSE()
 END_MESSAGE_MAP()
+
+void CCommandRollDlg::PaletteApplySoft3D()
+{
+	if (!m_view.GetSafeHwnd()) return;
+	m_view.SyncSoft3DCamFromSave();
+	m_view.InvalidateRoll();
+}
 
 void CCommandRollDlg::SetPromptPeer(CPromptDlg* peer)
 {
@@ -1515,6 +1617,20 @@ BOOL CCommandRollDlg::PreTranslateMessage(MSG* pMsg)
 {
 	if (m_tooltip.GetSafeHwnd())
 		m_tooltip.RelayEvent(pMsg);
+	// Ctrl+K = メディアプレイヤーのコマンドパレット(入力コントロール上では素通し)
+	if (pMsg->message == WM_KEYDOWN && pMsg->wParam == 'K'
+		&& (::GetKeyState(VK_CONTROL) & 0x8000)
+		&& !(::GetKeyState(VK_MENU) & 0x8000)) {
+		wchar_t cls[32] = { 0 };
+		HWND hFocus = ::GetFocus();
+		const bool textFocus = (hFocus && ::GetClassName(hFocus, cls, 32) > 0)
+			&& (_wcsicmp(cls, L"Edit") == 0 || _wcsicmp(cls, L"ComboBox") == 0);
+		extern CMediaPlayerDlg* mp;
+		if (!textFocus && mp && ::IsWindow(mp->GetSafeHwnd())) {
+			mp->OpenCommandPalette();
+			return TRUE;
+		}
+	}
 	return CCustomBlurDialogExBase::PreTranslateMessage(pMsg);
 }
 
@@ -1875,7 +1991,22 @@ void CCmdRollHelpDlg::OnPaint()
 	CRect rc = hp.rc;
 	const int footerH = hp.footerH;
 	dc.SetBkMode(TRANSPARENT);
-	CFont* oldFont = dc.SelectObject(GetFont());
+	CFont* baseFont = GetFont();
+	CFont boldFont;
+	{
+		LOGFONT lf = {};
+		if (baseFont && baseFont->GetSafeHandle())
+			baseFont->GetLogFont(&lf);
+		else {
+			NONCLIENTMETRICS ncm = {};
+			ncm.cbSize = sizeof(ncm);
+			::SystemParametersInfo(SPI_GETNONCLIENTMETRICS, sizeof(ncm), &ncm, 0);
+			lf = ncm.lfMessageFont;
+		}
+		lf.lfWeight = FW_BOLD;
+		boldFont.CreateFontIndirect(&lf);
+	}
+	CFont* oldFont = dc.SelectObject(baseFont);
 
 	TEXTMETRIC tm{};
 	dc.GetTextMetrics(&tm);
@@ -1884,15 +2015,17 @@ void CCmdRollHelpDlg::OnPaint()
 	CBrush frameBrush(RGB(130, 130, 150));
 
 	auto title = [&](int x, int y, LPCTSTR t) {
-		dc.SetTextColor(RGB(55, 45, 85));
+		CFont* prev = dc.SelectObject(&boldFont);
+		dc.SetTextColor(RGB(72, 48, 120));
 		dc.TextOut(x, y, t);
+		dc.SelectObject(prev);
 	};
 	auto body = [&](int x, int y, LPCTSTR t) {
-		dc.SetTextColor(RGB(65, 65, 80));
+		dc.SetTextColor(RGB(52, 52, 68));
 		dc.TextOut(x, y, t);
 	};
 	auto muted = [&](int x, int y, LPCTSTR t) {
-		dc.SetTextColor(RGB(100, 100, 115));
+		dc.SetTextColor(RGB(100, 100, 120));
 		dc.TextOut(x, y, t);
 	};
 
@@ -1902,6 +2035,8 @@ void CCmdRollHelpDlg::OnPaint()
 	y += titleLh;
 	muted(L, y, LL14(L"時間軸で @/% コマンドを置き、プロンプト本文と双方向に同期します。", L"Place @/% commands on a timeline; two-way sync with prompt text.", L"Placer des @/% synchronises au prompt.", L"Posiziona @/% sincronizzati col prompt.", L"Coloca @/% sincronizados con el prompt.", L"시간축에 @/% 명령을 두고 프롬프트와 양방향 동기화합니다.", L"在时间轴放置 @/% 命令，并与提示文本双向同步。", L"Place @/%; two-way sync with prompt.", L"Размещение @/% и двусторонняя синхронизация.", L"@/% setzen; Zweiwege-Sync mit Prompt.", L"Coloque @/%; sync bidirecional.", L"Plaats @/%; tweeweg sync.", L"Umiesc @/%; dwukierunkowy sync.", L"@/% yerlestir; cift yonlu senkron."));
 	y += lh + 6;
+	y = CCC_GdiHelpDrawSoftDemoPair(dc, L, y, rc.Width() - L * 2, min(140, max(112, rc.Height() / 5)),
+		CCC_HELPDEMO_KCMDROLL);
 
 	// --- 上段: 左にミニロール図 / 右に操作一覧 ---
 	const int gx = L;
@@ -1994,6 +2129,15 @@ void CCmdRollHelpDlg::OnPaint()
 	body(L, y, LL14(L"p t d …… ピッチ / テンポ / DirectSound音量", L"p t d …… pitch / tempo / DirectSound volume", L"p t d …… hauteur / tempo / volume DS", L"p t d …… pitch / tempo / volume DS", L"p t d …… tono / tempo / volumen DS", L"p t d …… 피치 / 템포 / DS 음량", L"p t d …… 音高 / 速度 / DS 音量", L"p t d …… pitch / tempo / DS volume", L"p t d …… высота / темп / громкость DS", L"p t d …… Tonhoehe / Tempo / DS-Lautstaerke", L"p t d …… tom / tempo / volume DS", L"p t d …… toonhoogte / tempo / DS-volume", L"p t d …… wysokosc / tempo / glosnosc DS", L"p t d …… perde / tempo / DS ses")); y += lh;
 	body(L, y, LL14(L"r c y …… リバーブ / コーラス / ディレイ　　E F …… 環境番号 / かかり具合", L"r c y …… reverb / chorus / delay　　E F …… env id / amount", L"r c y …… reverb / chorus / delay　　E F …… env", L"r c y …… reverb / chorus / delay　　E F …… env", L"r c y …… reverb / chorus / delay　　E F …… env", L"r c y …… 리버브 / 코러스 / 딜레이　　E F …… 환경 / 강도", L"r c y …… 混响 / 合唱 / 延迟　　E F …… 环境 / 强度", L"r c y …… reverb / chorus / delay　　E F …… env", L"r c y …… реверб / хорус / дилей　　E F …… окружение", L"r c y …… Reverb / Chorus / Delay　　E F …… Umgebung", L"r c y …… reverb / chorus / delay　　E F …… ambiente", L"r c y …… reverb / chorus / delay　　E F …… omgeving", L"r c y …… reverb / chorus / delay　　E F …… srodowisko", L"r c y …… reverb / chorus / delay　　E F …… ortam")); y += lh;
 	body(L, y, LL14(L"a b e…o …… EQ周波数帯(25Hz〜16kHz)。※c/d はコーラス/DSのためEQ帯では未使用", L"a b e…o …… EQ bands (25Hz–16kHz). *c/d unused here (chorus/DS)", L"a b e…o …… bandes EQ. *c/d non utilises", L"a b e…o …… bande EQ. *c/d non usati", L"a b e…o …… bandas EQ. *c/d no usados", L"a b e…o …… EQ 주파수 대역. *c/d 미사용", L"a b e…o …… EQ 频段。*c/d 此处未用", L"a b e…o …… EQ bands. *c/d unused here", L"a b e…o …… полосы EQ. *c/d не используются", L"a b e…o …… EQ-Baender. *c/d unbenutzt", L"a b e…o …… faixas EQ. *c/d nao usados", L"a b e…o …… EQ-banden. *c/d ongebruikt", L"a b e…o …… pasma EQ. *c/d nieuzywane", L"a b e…o …… EQ bantlari. *c/d kullanilmaz")); y += lh + 6;
+
+	// --- 簡易3D(Soft3D) ---
+	title(L, y, LL14(L"簡易3D(Soft3D)表示", L"Soft 3D view", L"Vue 3D simplifiee", L"Vista 3D semplificata", L"Vista 3D simple", L"간이 3D(Soft3D) 표시", L"简易3D(Soft3D)显示", L"Soft 3D view", L"Простой 3D-вид", L"Soft-3D-Ansicht", L"Vista Soft 3D", L"Eenvoudige 3D-weergave", L"Widok Soft 3D", L"Soft 3B gorunum"));
+	y += titleLh;
+	body(L, y, LL14(L"・右クリック「表示」で 2D / 簡易3D を切替。3D は CPU 描画(OpenGL/Direct3D 不使用)", L"· Right-click View to switch 2D / Soft 3D. The 3D path is CPU-only (no OpenGL/Direct3D)", L"· Clic droit Affichage : 2D / 3D simplifiee (rendu CPU)", L"· Destro Vista: 2D / 3D semplificato (rendering CPU)", L"· Clic der. Vista: 2D / 3D simple (render CPU)", L"· 우클릭 「표시」로 2D / 간이 3D 전환. 3D는 CPU 렌더링", L"· 右键「显示」切换 2D / 简易3D。3D 为纯 CPU 绘制", L"· Right-click View: 2D / Soft 3D (CPU only)", L"· ПКМ «Вид»: 2D / простой 3D (только CPU)", L"· Rechtsklick Ansicht: 2D / Soft 3D (nur CPU)", L"· Direito Exibir: 2D / Soft 3D (so CPU)", L"· Rechtsklik Weergave: 2D / Soft 3D (alleen CPU)", L"· PPM Widok: 2D / Soft 3D (tylko CPU)", L"· Sag tik Gorunum: 2B / Soft 3B (yalnizca CPU)")); y += lh;
+	body(L, y, LL14(L"・左ドラッグで視点回転、ホイールでズーム、0 キー／「視点をリセット」で既定へ", L"· Left-drag orbits, wheel zooms, 0 or Reset view restores the default camera", L"· Glisser = orbite, molette = zoom, 0 / Reinit. = vue par defaut", L"· Trascina = orbita, rotella = zoom, 0 / Reset = vista default", L"· Arrastrar = orbita, rueda = zoom, 0 / Restablecer = vista pred.", L"· 좌드래그=회전, 휠=줌, 0/시점 재설정=기본", L"· 左键拖=旋转，滚轮=缩放，0/重置视角=默认", L"· Left-drag orbits, wheel zooms, 0 resets", L"· ЛКМ — облёт, колесо — зум, 0 — сброс", L"· Linksziehen = Orbit, Rad = Zoom, 0 = Reset", L"· Arrastar = orbita, roda = zoom, 0 = redefinir", L"· Links slepen = orbit, wiel = zoom, 0 = reset", L"· Przeciaganie LPM = orbita, kolko = zoom, 0 = reset", L"· Sol surukleme = yorunge, teker = zoom, 0 = sifirla")); y += lh;
+	body(L, y, LL14(L"・メニューの Yaw/Pitch/Zoom スライダーでも微調整可。重いときは 2D に戻す案内が出ます", L"· Yaw/Pitch/Zoom sliders in the menu fine-tune too. A tip appears if Soft 3D feels heavy", L"· Curseurs Yaw/Pitch/Zoom aussi. Astuce si trop lourd", L"· Anche slider Yaw/Pitch/Zoom. Suggerimento se pesante", L"· También deslizadores Yaw/Pitch/Zoom. Aviso si va lento", L"· 메뉴 Yaw/Pitch/Zoom 슬라이더로도 미세 조정. 무거우면 안내", L"· 菜单 Yaw/Pitch/Zoom 滑块也可微调。卡顿时会提示", L"· Yaw/Pitch/Zoom sliders too. Tip if heavy", L"· Также ползунки Yaw/Pitch/Zoom. Подсказка при нагрузке", L"· Auch Yaw/Pitch/Zoom-Slider. Hinweis bei Last", L"· Também sliders Yaw/Pitch/Zoom. Dica se pesado", L"· Ook Yaw/Pitch/Zoom-sliders. Hint als zwaar", L"· Też suwaki Yaw/Pitch/Zoom. Podpowiedź gdy ciężko", L"· Yaw/Pitch/Zoom kaydırıcıları da. Ağırsa ipucu")); y += lh;
+	muted(L, y, LL14(L"・3D 中はバーの編集を受け付けません(誤操作防止)。編集は 2D に戻してから。", L"· Editing bars is disabled while in 3D (to avoid mis-drags). Switch back to 2D to edit.", L"· L'edition est desactivee en 3D. Revenez en 2D pour editer.", L"· La modifica e disabilitata in 3D. Torna al 2D per modificare.", L"· La edicion esta desactivada en 3D. Vuelva a 2D para editar.", L"· 3D 중에는 바 편집이 잠깁니다. 편집은 2D로 돌린 뒤에.", L"· 3D 模式下不接受编辑（防误操作）。请先回到 2D。", L"· Editing is disabled in 3D. Switch back to 2D.", L"· В 3D правка отключена. Вернитесь в 2D.", L"· In 3D ist Bearbeiten gesperrt. Zurueck zu 2D.", L"· A edicao fica desativada em 3D. Volte ao 2D.", L"· Bewerken is uit in 3D. Ga terug naar 2D.", L"· W 3D edycja jest wylaczona. Wroc do 2D.", L"· 3B'de duzenleme kapalidir. 2B'ye donun."));
+	y += lh + 8;
 
 	// --- 詳細Tips ---
 	title(L, y, LL14(L"補足", L"Notes", L"Notes", L"Note", L"Notas", L"보완", L"补充", L"Notes", L"Заметки", L"Hinweise", L"Notas", L"Opmerkingen", L"Uwagi", L"Notlar"));
@@ -2095,6 +2239,11 @@ void MpToggleCommandRollDialog(CWnd* pParent)
 BOOL MpIsCommandRollOpen()
 {
 	return (g_rollDlg && ::IsWindow(g_rollDlg->GetSafeHwnd())) ? TRUE : FALSE;
+}
+
+CCommandRollDlg* MpCommandRollDlgInstance()
+{
+	return (g_rollDlg && ::IsWindow(g_rollDlg->GetSafeHwnd())) ? g_rollDlg : nullptr;
 }
 
 void MpCommandRollNotifyText(const CString& text, UINT syncGen)

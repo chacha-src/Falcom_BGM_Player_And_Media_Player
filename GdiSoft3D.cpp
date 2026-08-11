@@ -49,11 +49,25 @@ namespace GdiSoft3D
 	DWORD Texture::Sample(float u, float v) const
 	{
 		if (w <= 0 || h <= 0 || pixels.empty()) return 0xFFFFFFFFu;
-		if (u < 0.f) u = 0.f; if (u > 1.f) u = 1.f;
-		if (v < 0.f) v = 0.f; if (v > 1.f) v = 1.f;
-		const int x = (int)(u * (w - 1));
-		const int y = (int)(v * (h - 1));
-		return pixels[(size_t)y * (size_t)w + (size_t)x];
+		// タイルラップ（ワールド UV でレンガを繰り返す）
+		u = u - floorf(u);
+		v = v - floorf(v);
+		if (u < 0.f) u += 1.f;
+		if (v < 0.f) v += 1.f;
+		if (u >= 1.f) u = 0.f;
+		if (v >= 1.f) v = 0.f;
+		const int x = (int)(u * (float)(w - 1) + 0.5f);
+		const int y = (int)(v * (float)(h - 1) + 0.5f);
+		DWORD c = pixels[(size_t)y * (size_t)w + (size_t)x];
+		// 軽いガンマ寄り（中間調を持ち上げて潰れた感じを緩和）
+		auto lift = [](BYTE p) -> BYTE {
+			const float t = (float)p / 255.f;
+			const float g = powf(t, 0.85f);
+			int o = (int)(g * 255.f + 0.5f);
+			if (o < 0) o = 0; if (o > 255) o = 255;
+			return (BYTE)o;
+		};
+		return GdiSoftFB::PackBGRA(GdiSoftFB::A(c), lift(GdiSoftFB::R(c)), lift(GdiSoftFB::G(c)), lift(GdiSoftFB::B(c)));
 	}
 
 	bool Context::Create(int w, int h)
@@ -117,18 +131,136 @@ namespace GdiSoft3D
 		return GdiSoftFB::PackBGRA(GdiSoftFB::A(c), (BYTE)r, (BYTE)g, (BYTE)b);
 	}
 
+	namespace {
+		struct ClipV {
+			float x, y, z;
+			float u, v;
+			DWORD color;
+		};
+
+		static ClipV LerpClipV(const ClipV& a, const ClipV& b, float t)
+		{
+			ClipV o;
+			o.x = a.x + (b.x - a.x) * t;
+			o.y = a.y + (b.y - a.y) * t;
+			o.z = a.z + (b.z - a.z) * t;
+			o.u = a.u + (b.u - a.u) * t;
+			o.v = a.v + (b.v - a.v) * t;
+			o.color = (t < 0.5f) ? a.color : b.color;
+			return o;
+		}
+
+		// Sutherland–Hodgman: z >= nearZ
+		static int ClipPolyNear(const ClipV* in, int nIn, float nearZ, ClipV* out)
+		{
+			if (nIn < 2) return 0;
+			int nOut = 0;
+			for (int i = 0; i < nIn; ++i) {
+				const ClipV& a = in[i];
+				const ClipV& b = in[(i + 1) % nIn];
+				const bool aIn = a.z >= nearZ;
+				const bool bIn = b.z >= nearZ;
+				if (aIn && bIn) {
+					out[nOut++] = b;
+				} else if (aIn && !bIn) {
+					const float denom = b.z - a.z;
+					const float t = (fabsf(denom) < 1e-8f) ? 0.f : (nearZ - a.z) / denom;
+					out[nOut++] = LerpClipV(a, b, t);
+				} else if (!aIn && bIn) {
+					const float denom = b.z - a.z;
+					const float t = (fabsf(denom) < 1e-8f) ? 0.f : (nearZ - a.z) / denom;
+					out[nOut++] = LerpClipV(a, b, t);
+					out[nOut++] = b;
+				}
+			}
+			return nOut;
+		}
+
+		static void RasterTriView(Context& ctx, const ClipV& a, const ClipV& b, const ClipV& c)
+		{
+			if (!ctx.fb.color || ctx.fb.w <= 0) return;
+			float ax, ay, bx, by, cx, cy;
+			ProjectView(ctx.view, a.x, a.y, a.z, ax, ay);
+			ProjectView(ctx.view, b.x, b.y, b.z, bx, by);
+			ProjectView(ctx.view, c.x, c.y, c.z, cx, cy);
+			const float ad = a.z, bd = b.z, cd = c.z;
+
+			if (ctx.cullBack) {
+				const float area = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
+				if (area <= 0.f) return;
+			}
+
+			const int minX = (std::max)(0, (int)floorf((std::min)({ ax, bx, cx })));
+			const int maxX = (std::min)(ctx.fb.w - 1, (int)ceilf((std::max)({ ax, bx, cx })));
+			const int minY = (std::max)(0, (int)floorf((std::min)({ ay, by, cy })));
+			const int maxY = (std::min)(ctx.fb.h - 1, (int)ceilf((std::max)({ ay, by, cy })));
+			if (minX > maxX || minY > maxY) return;
+
+			const float area = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
+			if (fabsf(area) < 1e-6f) return;
+			const float invA = 1.f / area;
+
+			for (int y = minY; y <= maxY; ++y) {
+				DWORD* row = ctx.fb.Row(y);
+				float* zrow = ctx.fb.ZRow(y);
+				for (int x = minX; x <= maxX; ++x) {
+					const float px = (float)x + 0.5f, py = (float)y + 0.5f;
+					float w0 = ((bx - px) * (cy - py) - (by - py) * (cx - px)) * invA;
+					float w1 = ((cx - px) * (ay - py) - (cy - py) * (ax - px)) * invA;
+					float w2 = 1.f - w0 - w1;
+					if (w0 < 0.f || w1 < 0.f || w2 < 0.f) continue;
+					const float depth = w0 * ad + w1 * bd + w2 * cd;
+					if (depth < kNearZ) continue;
+					if (ctx.depthTest && zrow && !(depth < zrow[x])) continue;
+					if (ctx.depthWrite && zrow) zrow[x] = depth;
+
+					DWORD col;
+					if (ctx.texture && ctx.texture->w > 0) {
+						const float wEye0 = ctx.view.camD + ad;
+						const float wEye1 = ctx.view.camD + bd;
+						const float wEye2 = ctx.view.camD + cd;
+						const float oow0 = 1.f / wEye0;
+						const float oow1 = 1.f / wEye1;
+						const float oow2 = 1.f / wEye2;
+						const float oow = w0 * oow0 + w1 * oow1 + w2 * oow2;
+						const float inv = (oow > 1e-8f) ? (1.f / oow) : 0.f;
+						const float u = (w0 * a.u * oow0 + w1 * b.u * oow1 + w2 * c.u * oow2) * inv;
+						const float v = (w0 * a.v * oow0 + w1 * b.v * oow1 + w2 * c.v * oow2) * inv;
+						col = ctx.texture->Sample(u, v);
+					} else {
+						const int ar = GdiSoftFB::R(a.color), ag = GdiSoftFB::G(a.color), ab = GdiSoftFB::B(a.color), aa = GdiSoftFB::A(a.color);
+						const int br = GdiSoftFB::R(b.color), bg = GdiSoftFB::G(b.color), bb = GdiSoftFB::B(b.color), ba = GdiSoftFB::A(b.color);
+						const int cr = GdiSoftFB::R(c.color), cg = GdiSoftFB::G(c.color), cb = GdiSoftFB::B(c.color), ca = GdiSoftFB::A(c.color);
+						col = GdiSoftFB::PackBGRA(
+							(BYTE)(aa * w0 + ba * w1 + ca * w2 + 0.5f),
+							(BYTE)(ar * w0 + br * w1 + cr * w2 + 0.5f),
+							(BYTE)(ag * w0 + bg * w1 + cg * w2 + 0.5f),
+							(BYTE)(ab * w0 + bb * w1 + cb * w2 + 0.5f));
+					}
+					col = ctx.ApplyFog(col, depth);
+					if (ctx.alphaBlend && GdiSoftFB::A(col) < 255)
+						row[x] = GdiSoftFB::BlendSrcOver(row[x], col);
+					else
+						row[x] = col;
+				}
+			}
+		}
+	}
+
 	void Context::RasterTri(const Vertex& a, const Vertex& b, const Vertex& c)
 	{
 		if (!fb.color || fb.w <= 0) return;
-		float ax, ay, ad, bx, by, bd, cx, cy, cd;
-		ProjectEx(view, a.x, a.y, a.z, ax, ay, ad);
-		ProjectEx(view, b.x, b.y, b.z, bx, by, bd);
-		ProjectEx(view, c.x, c.y, c.z, cx, cy, cd);
 
-		if (cullBack) {
-			const float area = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
-			if (area <= 0.f) return;
-		}
+		ClipV vin[3];
+		ToView(view, a.x, a.y, a.z, vin[0].x, vin[0].y, vin[0].z);
+		vin[0].u = a.u; vin[0].v = a.v; vin[0].color = a.color;
+		ToView(view, b.x, b.y, b.z, vin[1].x, vin[1].y, vin[1].z);
+		vin[1].u = b.u; vin[1].v = b.v; vin[1].color = b.color;
+		ToView(view, c.x, c.y, c.z, vin[2].x, vin[2].y, vin[2].z);
+		vin[2].u = c.u; vin[2].v = c.v; vin[2].color = c.color;
+
+		if (vin[0].z < kNearZ && vin[1].z < kNearZ && vin[2].z < kNearZ)
+			return;
 
 		if (fillMode == FillWire) {
 			DrawLine(a.x, a.y, a.z, b.x, b.y, b.z, RGB(GdiSoftFB::R(a.color), GdiSoftFB::G(a.color), GdiSoftFB::B(a.color)));
@@ -137,58 +269,39 @@ namespace GdiSoft3D
 			return;
 		}
 
-		const int minX = (std::max)(0, (int)floorf((std::min)({ ax, bx, cx })));
-		const int maxX = (std::min)(fb.w - 1, (int)ceilf((std::max)({ ax, bx, cx })));
-		const int minY = (std::max)(0, (int)floorf((std::min)({ ay, by, cy })));
-		const int maxY = (std::min)(fb.h - 1, (int)ceilf((std::max)({ ay, by, cy })));
-		if (minX > maxX || minY > maxY) return;
+		ClipV tmp[8], vout[8];
+		int n = ClipPolyNear(vin, 3, kNearZ, tmp);
+		if (n < 3) return;
+		n = ClipPolyNear(tmp, n, kNearZ, vout);
+		if (n < 3) return;
 
-		const float area = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
-		if (fabsf(area) < 1e-6f) return;
-		const float invA = 1.f / area;
-
-		for (int y = minY; y <= maxY; ++y) {
-			DWORD* row = fb.Row(y);
-			float* zrow = fb.ZRow(y);
-			for (int x = minX; x <= maxX; ++x) {
-				const float px = (float)x + 0.5f, py = (float)y + 0.5f;
-				float w0 = ((bx - px) * (cy - py) - (by - py) * (cx - px)) * invA;
-				float w1 = ((cx - px) * (ay - py) - (cy - py) * (ax - px)) * invA;
-				float w2 = 1.f - w0 - w1;
-				if (w0 < 0.f || w1 < 0.f || w2 < 0.f) continue;
-				const float depth = w0 * ad + w1 * bd + w2 * cd;
-				if (depthTest && zrow && !(depth < zrow[x])) continue;
-				if (depthWrite && zrow) zrow[x] = depth;
-
-				DWORD col;
-				if (texture && texture->w > 0) {
-					const float u = w0 * a.u + w1 * b.u + w2 * c.u;
-					const float v = w0 * a.v + w1 * b.v + w2 * c.v;
-					col = texture->Sample(u, v);
-				} else {
-					const int ar = GdiSoftFB::R(a.color), ag = GdiSoftFB::G(a.color), ab = GdiSoftFB::B(a.color), aa = GdiSoftFB::A(a.color);
-					const int br = GdiSoftFB::R(b.color), bg = GdiSoftFB::G(b.color), bb = GdiSoftFB::B(b.color), ba = GdiSoftFB::A(b.color);
-					const int cr = GdiSoftFB::R(c.color), cg = GdiSoftFB::G(c.color), cb = GdiSoftFB::B(c.color), ca = GdiSoftFB::A(c.color);
-					col = GdiSoftFB::PackBGRA(
-						(BYTE)(aa * w0 + ba * w1 + ca * w2 + 0.5f),
-						(BYTE)(ar * w0 + br * w1 + cr * w2 + 0.5f),
-						(BYTE)(ag * w0 + bg * w1 + cg * w2 + 0.5f),
-						(BYTE)(ab * w0 + bb * w1 + cb * w2 + 0.5f));
-				}
-				col = ApplyFog(col, depth);
-				if (alphaBlend && GdiSoftFB::A(col) < 255)
-					row[x] = GdiSoftFB::BlendSrcOver(row[x], col);
-				else
-					row[x] = col;
-			}
-		}
+		for (int i = 1; i + 1 < n; ++i)
+			RasterTriView(*this, vout[0], vout[i], vout[i + 1]);
 	}
 
 	void Context::DrawLine(float x0, float y0, float z0, float x1, float y1, float z1, COLORREF col)
 	{
-		float sx0, sy0, d0, sx1, sy1, d1;
-		ProjectEx(view, x0, y0, z0, sx0, sy0, d0);
-		ProjectEx(view, x1, y1, z1, sx1, sy1, d1);
+		float v0x, v0y, v0z, v1x, v1y, v1z;
+		ToView(view, x0, y0, z0, v0x, v0y, v0z);
+		ToView(view, x1, y1, z1, v1x, v1y, v1z);
+		if (v0z < kNearZ && v1z < kNearZ) return;
+		if (v0z < kNearZ || v1z < kNearZ) {
+			const float denom = v1z - v0z;
+			if (fabsf(denom) < 1e-8f) return;
+			const float t = (kNearZ - v0z) / denom;
+			if (v0z < kNearZ) {
+				v0x = v0x + (v1x - v0x) * t;
+				v0y = v0y + (v1y - v0y) * t;
+				v0z = kNearZ;
+			} else {
+				v1x = v0x + (v1x - v0x) * t;
+				v1y = v0y + (v1y - v0y) * t;
+				v1z = kNearZ;
+			}
+		}
+		float sx0, sy0, sx1, sy1;
+		ProjectView(view, v0x, v0y, v0z, sx0, sy0);
+		ProjectView(view, v1x, v1y, v1z, sx1, sy1);
 		int ix0 = (int)floorf(sx0 + 0.5f), iy0 = (int)floorf(sy0 + 0.5f);
 		int ix1 = (int)floorf(sx1 + 0.5f), iy1 = (int)floorf(sy1 + 0.5f);
 		int dx = abs(ix1 - ix0), sx = ix0 < ix1 ? 1 : -1;
@@ -196,16 +309,12 @@ namespace GdiSoft3D
 		int err = dx + dy;
 		const int steps = (std::max)(dx, -dy) + 1;
 		int step = 0;
-		// ワイヤーは深度書き込みのみ（テストは弱め）で点線化を防ぐ
-		const bool oldTest = depthTest;
-		depthTest = false;
 		for (;;) {
 			const float t = (steps <= 1) ? 0.f : (float)step / (float)(steps - 1);
-			const float depth = d0 + (d1 - d0) * t;
+			const float depth = v0z + (v1z - v0z) * t;
 			DWORD p = ApplyFog(GdiSoftFB::PackColorref(col, 255), depth);
-			if (fb.DepthTestWrite(ix0, iy0, depth - 0.002f, false, depthWrite)) {
+			if (fb.DepthTestWrite(ix0, iy0, depth - 0.015f, depthTest, depthWrite)) {
 				fb.Put(ix0, iy0, p);
-				// 1px 太めにして欠落を目立たなくする
 				if (ix0 + 1 < fb.w) fb.Put(ix0 + 1, iy0, p);
 				if (iy0 + 1 < fb.h) fb.Put(ix0, iy0 + 1, p);
 			}
@@ -215,7 +324,6 @@ namespace GdiSoft3D
 			if (e2 <= dx) { err += dx; iy0 += sy; }
 			++step;
 		}
-		depthTest = oldTest;
 	}
 
 	void Context::DrawTriangles(const Vertex* verts, int count)
@@ -238,9 +346,9 @@ namespace GdiSoft3D
 	}
 
 	void Context::DrawQuad(float x0, float y0, float z0, float x1, float y1, float z1,
-		float x2, float y2, float z2, float x3, float y3, float z3, COLORREF col)
+		float x2, float y2, float z2, float x3, float y3, float z3, COLORREF col, BYTE alpha)
 	{
-		const DWORD c = GdiSoftFB::PackColorref(col, 255);
+		const DWORD c = GdiSoftFB::PackColorref(col, alpha);
 		Vertex t[6] = {
 			Vtx(x0, y0, z0, c), Vtx(x1, y1, z1, c), Vtx(x2, y2, z2, c),
 			Vtx(x0, y0, z0, c), Vtx(x2, y2, z2, c), Vtx(x3, y3, z3, c)
@@ -251,10 +359,21 @@ namespace GdiSoft3D
 	void Context::DrawTexturedQuad(float x0, float y0, float z0, float x1, float y1, float z1,
 		float x2, float y2, float z2, float x3, float y3, float z3)
 	{
+		DrawTexturedQuadUV(
+			x0, y0, z0, 0.f, 0.f, x1, y1, z1, 1.f, 0.f,
+			x2, y2, z2, 1.f, 1.f, x3, y3, z3, 0.f, 1.f);
+	}
+
+	void Context::DrawTexturedQuadUV(
+		float x0, float y0, float z0, float u0, float v0,
+		float x1, float y1, float z1, float u1, float v1,
+		float x2, float y2, float z2, float u2, float v2,
+		float x3, float y3, float z3, float u3, float v3)
+	{
 		const DWORD c = 0xFFFFFFFFu;
 		Vertex t[6] = {
-			Vtx(x0, y0, z0, c, 0, 0), Vtx(x1, y1, z1, c, 1, 0), Vtx(x2, y2, z2, c, 1, 1),
-			Vtx(x0, y0, z0, c, 0, 0), Vtx(x2, y2, z2, c, 1, 1), Vtx(x3, y3, z3, c, 0, 1)
+			Vtx(x0, y0, z0, c, u0, v0), Vtx(x1, y1, z1, c, u1, v1), Vtx(x2, y2, z2, c, u2, v2),
+			Vtx(x0, y0, z0, c, u0, v0), Vtx(x2, y2, z2, c, u2, v2), Vtx(x3, y3, z3, c, u3, v3)
 		};
 		DrawTriangles(t, 6);
 	}
@@ -292,11 +411,11 @@ namespace GdiSoft3D
 		DrawLine(xL, yBase, z1, xL, yTop, z1, col);
 	}
 
-	void Context::DrawSphere(float cx, float cy, float cz, float radius, COLORREF col, int slices, int stacks)
+	void Context::DrawSphere(float cx, float cy, float cz, float radius, COLORREF col, int slices, int stacks, BYTE alpha)
 	{
 		if (slices < 4) slices = 4;
 		if (stacks < 2) stacks = 2;
-		const DWORD c = GdiSoftFB::PackColorref(col, 255);
+		const DWORD c = GdiSoftFB::PackColorref(col, alpha);
 		for (int i = 0; i < stacks; ++i) {
 			const float v0 = (float)i / (float)stacks;
 			const float v1 = (float)(i + 1) / (float)stacks;
@@ -464,6 +583,57 @@ namespace GdiSoft3D
 				Vertex tri[6] = { a, b, c0, a, c0, d };
 				DrawTriangles(tri, 6);
 			}
+		}
+	}
+
+	void Context::HudFillTri(float x0, float y0, float x1, float y1, float x2, float y2,
+		COLORREF col, BYTE alpha)
+	{
+		if (!fb.color || fb.w <= 0) return;
+		const DWORD c = GdiSoftFB::PackColorref(col, alpha);
+		const float ax = x0, ay = y0, bx = x1, by = y1, cx = x2, cy = y2;
+		const int minX = (std::max)(0, (int)floorf((std::min)({ ax, bx, cx })));
+		const int maxX = (std::min)(fb.w - 1, (int)ceilf((std::max)({ ax, bx, cx })));
+		const int minY = (std::max)(0, (int)floorf((std::min)({ ay, by, cy })));
+		const int maxY = (std::min)(fb.h - 1, (int)ceilf((std::max)({ ay, by, cy })));
+		if (minX > maxX || minY > maxY) return;
+		const float area = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
+		if (fabsf(area) < 1e-6f) return;
+		const float invA = 1.f / area;
+		for (int y = minY; y <= maxY; ++y) {
+			for (int x = minX; x <= maxX; ++x) {
+				const float px = (float)x + 0.5f, py = (float)y + 0.5f;
+				const float w0 = ((bx - px) * (cy - py) - (by - py) * (cx - px)) * invA;
+				const float w1 = ((cx - px) * (ay - py) - (cy - py) * (ax - px)) * invA;
+				const float w2 = 1.f - w0 - w1;
+				if (w0 < 0.f || w1 < 0.f || w2 < 0.f) continue;
+				fb.PutBlend(x, y, c);
+			}
+		}
+	}
+
+	void Context::HudFillQuad(float x0, float y0, float x1, float y1, float x2, float y2, float x3, float y3,
+		COLORREF col, BYTE alpha)
+	{
+		HudFillTri(x0, y0, x1, y1, x2, y2, col, alpha);
+		HudFillTri(x0, y0, x2, y2, x3, y3, col, alpha);
+	}
+
+	void Context::HudLine(float x0, float y0, float x1, float y1, COLORREF col, BYTE alpha)
+	{
+		if (!fb.color || fb.w <= 0) return;
+		const DWORD c = GdiSoftFB::PackColorref(col, alpha);
+		int ix0 = (int)floorf(x0 + 0.5f), iy0 = (int)floorf(y0 + 0.5f);
+		int ix1 = (int)floorf(x1 + 0.5f), iy1 = (int)floorf(y1 + 0.5f);
+		int dx = abs(ix1 - ix0), sx = ix0 < ix1 ? 1 : -1;
+		int dy = -abs(iy1 - iy0), sy = iy0 < iy1 ? 1 : -1;
+		int err = dx + dy;
+		for (;;) {
+			fb.PutBlend(ix0, iy0, c);
+			if (ix0 == ix1 && iy0 == iy1) break;
+			const int e2 = 2 * err;
+			if (e2 >= dy) { err += dy; ix0 += sx; }
+			if (e2 <= dx) { err += dx; iy0 += sy; }
 		}
 	}
 
@@ -644,65 +814,80 @@ namespace GdiSoft3D
 		const int w = rc.Width(), h = rc.Height();
 		if (w < 16 || h < 16) return;
 
+		const float t = (float)(::GetTickCount64() % 120000ull) * 0.001f;
+
 		Context ctx;
 		if (!ctx.Create(w, h)) return;
-		ctx.cam.yawDeg = -28.f;
-		ctx.cam.pitchDeg = 26.f;
-		ctx.cam.zoom = 1.05f;
-		const float boxes[1][6] = { { -1.4f, 1.4f, -0.05f, 1.1f, -0.2f, 1.4f } };
+		// 回転アニメ：画面を埋めるよう寄り気味＋ゆったり周回
+		ctx.cam.yawDeg = -35.f + 48.f * sinf(t * 0.55f);
+		ctx.cam.pitchDeg = 18.f + 14.f * cosf(t * 0.38f);
+		ctx.cam.zoom = 0.78f + 0.10f * sinf(t * 0.25f);
+		ClampCam(ctx.cam);
+		const float boxes[1][6] = { { -1.55f, 1.55f, -0.05f, 1.25f, -0.25f, 1.55f } };
 		ctx.SetViewportFit(boxes, 1);
 		ctx.SetFog(FogLinear, RGB(8, 10, 18), -0.05f, 0.95f, 1.2f);
 		ctx.SetEdgeOverlay(true, RGB(10, 12, 18));
 		ctx.SetDof(true, -0.15f, 0.85f, 5);
 		ctx.postVignette = true;
-		ctx.postVignetteStr = 0.5f;
+		ctx.postVignetteStr = 0.45f;
 		ctx.postGlow = true;
 		ctx.postSaturate = true;
-		ctx.postSatAmount = 1.25f;
+		ctx.postSatAmount = 1.28f;
 		ctx.BeginFrame(RGB(14, 16, 24));
 
-		ctx.DrawGrid(-1.2f, 1.2f, 0.0f, 1.25f, 0.0f, 8, RGB(50, 56, 72));
-		ctx.DrawMirrorFloor(-1.15f, 1.15f, 0.05f, 1.20f, RGB(70, 110, 180), 0.32f);
-		ctx.DrawNeonBox(-1.15f, -0.55f, 0.55f, 0.10f, 0.45f, RGB(80, 170, 255), 0.f);
-		ctx.DrawWireBox(0.55f, 1.15f, 0.50f, 0.15f, 0.55f, RGB(255, 200, 90), 0.f);
-		ctx.DrawSphere(0.0f, 0.35f, 0.40f, 0.22f, RGB(120, 230, 160), 16, 12);
-		ctx.DrawTorus(0.85f, 0.28f, 0.95f, 0.18f, 0.055f, RGB(255, 120, 180), 18, 10);
-		// 奥の箱で fog/DOF を明示
-		ctx.DrawBox(-0.25f, 0.25f, 0.22f, 1.05f, 1.25f, RGB(180, 90, 220), 0.f);
+		ctx.DrawGrid(-1.45f, 1.45f, 0.0f, 1.45f, 0.0f, 9, RGB(50, 56, 72));
+		ctx.DrawMirrorFloor(-1.40f, 1.40f, 0.02f, 1.40f, RGB(70, 110, 180), 0.34f);
 
-		// Soft2D overlay strip + texture board
+		const float bob = 0.06f * sinf(t * 1.2f);
+		// 左右の箱を円弧上で公転させ、中央ボード周りに動きを足す
+		const float orb = t * 0.85f;
+		const float lx = -0.90f + 0.42f * cosf(orb);
+		const float lz = 0.55f + 0.38f * sinf(orb);
+		const float rx = 0.90f + 0.42f * cosf(orb + 3.14159265f);
+		const float rz = 0.55f + 0.38f * sinf(orb + 3.14159265f);
+		ctx.DrawNeonBox(lx - 0.40f, lx + 0.40f, 0.72f + bob, 0.08f, lz, RGB(80, 170, 255), 0.f);
+		ctx.DrawWireBox(rx - 0.40f, rx + 0.40f, 0.68f - bob * 0.5f, 0.10f, rz, RGB(255, 200, 90), 0.f);
+		ctx.DrawSphere(-0.05f + 0.22f * cosf(t * 1.15f), 0.48f + bob, 0.55f + 0.20f * sinf(t * 1.15f),
+			0.30f, RGB(120, 230, 160), 18, 12);
+		ctx.DrawTorus(0.75f * cosf(orb * 1.2f), 0.36f + 0.08f * cosf(t * 1.6f),
+			0.55f + 0.55f * sinf(orb * 1.2f), 0.28f, 0.08f, RGB(255, 120, 180), 22, 14);
+		ctx.DrawBox(-0.38f, 0.38f, 0.28f, 1.18f, 1.45f, RGB(180, 90, 220), 0.f);
+		ctx.DrawNeonBox(-0.58f, 0.58f, 0.16f, 0.72f, 1.00f, RGB(255, 140, 200), 0.f);
+
+		// Soft2D overlay strip + texture board（中央ボードもゆらぐ）
 		{
 			GdiSoft2D::Context s2;
-			s2.Create(96, 96, false);
-			s2.GradientFillRectH(0, 0, 96, 96, RGB(40, 80, 180), RGB(220, 80, 140), 255);
-			s2.FillEllipse(48, 48, 28, 28, RGB(255, 255, 255), 180);
-			s2.DrawRect(4, 4, 88, 88, RGB(255, 255, 255), 255, 2);
+			s2.Create(112, 112, false);
+			s2.GradientFillRectH(0, 0, 112, 112, RGB(40, 80, 180), RGB(220, 80, 140), 255);
+			s2.FillEllipse(56, 56, 32, 32, RGB(255, 255, 255), 190);
+			s2.FillEllipse(56, 56, 14, 14, RGB(140, 255, 120), 230);
+			s2.DrawRect(4, 4, 104, 104, RGB(255, 255, 255), 255, 2);
 			Texture tex;
-			tex.LoadFromHdc(s2.fb.hdc ? s2.fb.hdc : nullptr, 96, 96);
+			tex.LoadFromHdc(s2.fb.hdc ? s2.fb.hdc : nullptr, 112, 112);
 			if (tex.w > 0) {
 				ctx.SetTexture(&tex);
-				ctx.DrawTexturedQuad(-0.35f, 0.70f, 0.20f, 0.35f, 0.70f, 0.20f,
-					0.35f, 0.10f, 0.20f, -0.35f, 0.10f, 0.20f);
+				const float zx = 0.08f * sinf(t * 0.7f);
+				ctx.DrawTexturedQuad(-0.42f + zx, 0.82f, 0.18f, 0.42f + zx, 0.82f, 0.18f,
+					0.42f + zx, 0.08f, 0.18f, -0.42f + zx, 0.08f, 0.18f);
 				ctx.SetTexture(nullptr);
 			}
 		}
 
-		float levL[16], levR[16], wave[48];
+		float levL[16], levR[16], wave[64];
 		for (int i = 0; i < 16; ++i) {
-			levL[i] = 0.2f + 0.6f * fabsf(sinf(i * 0.7f));
-			levR[i] = 0.15f + 0.55f * fabsf(cosf(i * 0.55f));
+			levL[i] = 0.18f + 0.72f * fabsf(sinf(t * 2.1f + i * 0.55f));
+			levR[i] = 0.15f + 0.70f * fabsf(cosf(t * 1.8f + i * 0.48f));
 		}
-		for (int i = 0; i < 48; ++i)
-			wave[i] = sinf(i * 0.35f) * 0.85f;
-		// 左右並びステレオバー + 波形リボン
-		ctx.DrawStereoBarsLR(-0.95f, 0.95f, 16, levL, levR, 0.58f, 0.78f,
-			0.38f, 0.22f, RGB(80, 200, 255), RGB(255, 140, 180));
-		ctx.DrawWaveRibbon(-0.95f, 0.95f, 0.22f, 0.55f, 0.12f, wave, 48, RGB(180, 255, 120), 0.015f);
+		for (int i = 0; i < 64; ++i)
+			wave[i] = sinf(t * 2.4f + i * 0.28f) * (0.75f + 0.25f * cosf(t + i * 0.05f));
+		ctx.DrawStereoBarsLR(-1.15f, 1.15f, 16, levL, levR, 0.55f, 0.82f,
+			0.52f, 0.18f, RGB(80, 200, 255), RGB(255, 140, 180));
+		ctx.DrawWaveRibbon(-1.20f, 1.20f, 0.20f, 0.48f, 0.22f, wave, 64, RGB(180, 255, 120), 0.02f);
+		ctx.DrawWaveRibbon(-1.20f, 1.20f, 0.32f, 0.38f, 0.16f, wave, 64, RGB(255, 200, 120), 0.015f);
 
 		ctx.EndFrame();
 		ctx.Present(dc, rc.left, rc.top);
 
-		// Soft2D blur/alpha strip + CRT タッチ
 		GdiSoft2D::Context bar;
 		bar.Create(w, 28, false);
 		bar.GradientFillRectH(0, 0, w, 28, RGB(30, 40, 70), RGB(90, 40, 80), 200);

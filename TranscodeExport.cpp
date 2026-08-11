@@ -1,4 +1,4 @@
-﻿// TranscodeExport.cpp
+// TranscodeExport.cpp
 // WAV書き出し結果を mp3 / FLAC に変換するUIとエンコード。
 
 #include "stdafx.h"
@@ -1004,6 +1004,9 @@ void CTcHelpDlg::OnPaint()
 		L"Eksport do WAV / mp3 / FLAC. Format, bitrate, pętle, fade / xfade.",
 		L"WAV / mp3 / FLAC'e aktarın. Biçim, bitrate, döngü, solma / xfade."));
 	y += lh + 4;
+	y = CCC_GdiHelpDrawSoftDemoPair(dc, L, y, rc.Width() - L * 2, min(140, max(112, rc.Height() / 5)),
+		CCC_HELPDEMO_KGENERIC);
+
 
 	title(L, y, LL14(L"形式 / 品質", L"Format / Quality", L"Format / Qualité", L"Formato / Qualità",
 		L"Formato / Calidad", L"형식 / 품질", L"格式 / 质量", L"التنسيق / الجودة",

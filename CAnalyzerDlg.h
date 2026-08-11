@@ -85,6 +85,8 @@ public:
 
 	void LayoutHelpBtn();
 	void ShowHelpSheet();
+	// コマンドパレットが savedata の簡易3D設定を書き換えた後にカメラと描画へ反映する
+	void PaletteApplySoft3D();
 
 protected:
 	virtual void DoDataExchange(CDataExchange* pDX);
@@ -320,6 +322,8 @@ private:
 	GdiSoft3D::Cam m_camTop;
 	GdiSoft3D::Cam m_camBot;
 	bool m_soft3dApiDemo = false;
+	DWORD m_soft3dTourUntil = 0;
+	int m_soft3dSlowFrames = 0; // Soft3D 負荷ヒント用（後続）
 	bool m_rotDragging = false;
 	int m_rotPane = 0; // 0=top 1=bot
 	CPoint m_rotOrigin;

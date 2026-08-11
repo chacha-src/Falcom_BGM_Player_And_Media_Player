@@ -202,7 +202,7 @@ public:
 	CCustomStandardButton m_capture;   // 画面キャプチャ UI
 	// キャプチャ右〜終了左のツールショートカット（コンテキストでON/OFF）
 	CCustomStandardButton m_botDj, m_botTag, m_botBpm, m_botSleep;
-	CCustomStandardButton m_botMirror, m_botSsViz, m_botAlarm, m_botRemote;
+	CCustomStandardButton m_botMirror, m_botSsViz, m_botAlarm, m_botRemote, m_botMaze;
 	int m_mpBotShort; // 底バー短縮段階 0=フル 1=中 2=短
 	CCustomStatic m_kaisuuL;
 	CCustomEdit m_kaisuu;
@@ -255,6 +255,18 @@ public:
 	CPoint m_bannerRotOrigin;
 	float m_bannerRotYaw0 = 0.f;
 	float m_bannerRotPitch0 = 0.f;
+	// Soft3D ツアー(自動周回でヒントを出す)の終了時刻。0=非稼働
+	DWORD m_soft3dTourUntil = 0;
+	int m_soft3dSlowFrames = 0;          // 連続で描画が遅かったフレーム数
+	DWORD m_soft3dPerfHintUntil = 0;     // 「重いなら2Dへ」ヒントの表示終了時刻
+	// ガイドのミニマップから来た一時ハイライト(-1=なし)
+	int m_pulseHighlightId = -1;
+	DWORD m_pulseUntil = 0;
+	// 曲切替 Soft2D クロスフェード（ジャケット／情報パネル）
+	DWORD m_trackFadeStart = 0;
+	// 下部ステータス／「今できること」チップ文言
+	CString m_uxStatusText;
+	CString m_uxChipText;
 
 	// ---- 右曲情報パネルのテキスト marquee スクロール ----
 	// WM_MP_INFO_SCROLL(TheadLoop ~30fps)で進行。収まる行は静止したまま。
@@ -321,6 +333,9 @@ public:
 	void QueueRemoveAt(int i);
 	void QueueClear();
 	void UpdateQueueChrome();                // ツール▾は記号のみ。状態はツールチップ
+	// コマンドパレット(Ctrl+K / バナー右クリック)。モードレスシングルトン。
+	// アナライザー等のサブ窓からも呼ぶため public。
+	void OpenCommandPalette();
 	void ShowToolsExtrasMenu(CPoint screenPt);
 	void ShowLyricsExtrasMenu(CPoint screenPt);
 	void ShowSettingsExtrasMenu(CPoint screenPt);
@@ -406,6 +421,11 @@ public:
 	static void BannerSoft3dYawCb(void* ctx, int value);
 	static void BannerSoft3dPitchCb(void* ctx, int value);
 	static void BannerSoft3dZoomCb(void* ctx, int value);
+	// 操作ガイドのミニマップから指名されたパーツを橙枠で一時的に囲む(0.8秒)
+	void DrawHighlightPulse(CDC* pDC);
+	void UpdateUxStatusAndChips();
+	void DrawUxStatusBand(CDC* pDC);
+	void DrawTrackFadeOverlay(CDC* pDC, const CRect& rc);
 	// 左ジャケット・右曲情報パネルをオフスクリーンバッファで GDI 描画して Blit する。
 	// クリップ矩形がサイドパネルと重ならない限り重い処理は走らない(バナーの毎フレーム無効化と共存)。
 	void DrawSidePanels(CDC* pDC);
@@ -510,6 +530,7 @@ protected:
 	afx_msg void OnBotVisSsViz();
 	afx_msg void OnBotVisAlarm();
 	afx_msg void OnBotVisRemote();
+	afx_msg void OnBotVisMaze();
 	afx_msg void OnSaveParam();
 	afx_msg void OnResetData();
 	afx_msg void OnKaisuuKillFocus();
@@ -588,6 +609,12 @@ protected:
 	afx_msg void OnMpDjPad();
 	afx_msg void OnMpAlarm();
 	afx_msg void OnMpMirror();
+	afx_msg void OnMpSoundMeter();
+	afx_msg void OnMpDigitize();
+	afx_msg void OnMpVoiceChanger();
+	afx_msg void OnMpTunerPractice();
+	afx_msg void OnMpPhotoFrame();
+	afx_msg void OnMpSoft3DMaze();
 	afx_msg void OnMpRemote();
 	afx_msg void OnMpRemoteDlg();
 	afx_msg void OnMpRemoteBrowser();
@@ -669,6 +696,7 @@ protected:
 	afx_msg LRESULT OnJakLoadDone(WPARAM wParam, LPARAM lParam);
 	afx_msg LRESULT OnWaveOverviewDone(WPARAM wParam, LPARAM lParam);
 	afx_msg LRESULT OnLibBuildLazy(WPARAM wParam, LPARAM lParam);
+	afx_msg LRESULT OnMpHelpHighlight(WPARAM wParam, LPARAM lParam);
 	afx_msg BOOL OnNcActivate(BOOL bActive);
 	afx_msg void OnSysCommand(UINT nID, LPARAM lParam);
 	DECLARE_MESSAGE_MAP()

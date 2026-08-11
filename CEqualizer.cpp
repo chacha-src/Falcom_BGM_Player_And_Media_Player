@@ -1,4 +1,4 @@
-﻿// CEqualizer.cpp : 実装ファイル
+// CEqualizer.cpp : 実装ファイル
 //
 
 #include "stdafx.h"
@@ -179,24 +179,41 @@ void CEqHelpDlg::OnPaint()
 	CRect rc = hp.rc;
 	const int footerH = hp.footerH;
 	dc.SetBkMode(TRANSPARENT);
-	CFont* oldFont = dc.SelectObject(GetFont());
+	CFont* baseFont = GetFont();
+	CFont boldFont;
+	{
+		LOGFONT lf = {};
+		if (baseFont && baseFont->GetSafeHandle())
+			baseFont->GetLogFont(&lf);
+		else {
+			NONCLIENTMETRICS ncm = {};
+			ncm.cbSize = sizeof(ncm);
+			::SystemParametersInfo(SPI_GETNONCLIENTMETRICS, sizeof(ncm), &ncm, 0);
+			lf = ncm.lfMessageFont;
+		}
+		lf.lfWeight = FW_BOLD;
+		boldFont.CreateFontIndirect(&lf);
+	}
+	CFont* oldFont = dc.SelectObject(baseFont);
 
 	TEXTMETRIC tm{};
 	dc.GetTextMetrics(&tm);
 	const int lh = max(14, tm.tmHeight + tm.tmExternalLeading + 1);
-	const int titleLh = lh + 1;
+	const int titleLh = lh + 2;
 	CBrush frameBrush(RGB(130, 130, 150));
 
 	auto title = [&](int x, int y, LPCTSTR t) {
-		dc.SetTextColor(RGB(55, 45, 85));
+		CFont* prev = dc.SelectObject(&boldFont);
+		dc.SetTextColor(RGB(72, 48, 120));
 		dc.TextOut(x, y, t);
+		dc.SelectObject(prev);
 	};
 	auto body = [&](int x, int y, LPCTSTR t) {
-		dc.SetTextColor(RGB(65, 65, 80));
+		dc.SetTextColor(RGB(52, 52, 68));
 		dc.TextOut(x, y, t);
 	};
 	auto muted = [&](int x, int y, LPCTSTR t) {
-		dc.SetTextColor(RGB(100, 100, 115));
+		dc.SetTextColor(RGB(100, 100, 120));
 		dc.TextOut(x, y, t);
 	};
 
@@ -223,6 +240,8 @@ void CEqHelpDlg::OnPaint()
 		L"EQ 15-pasmowy, presety, globalne, FX i A/B.",
 		L"15 bant EQ, ön ayarlar, global, FX ve A/B."));
 	y += lh + 4;
+	y = CCC_GdiHelpDrawSoftDemoPair(dc, L, y, rc.Width() - L * 2, min(140, max(112, rc.Height() / 5)),
+		CCC_HELPDEMO_KEQ);
 
 	title(L, y, LL14(L"バンドとプリセット", L"Bands & presets", L"Bandes et préréglages", L"Bande e preset",
 		L"Bandas y presets", L"밴드와 프리셋", L"频段与预设", L"النطاقات والإعدادات",
@@ -359,7 +378,44 @@ void CEqHelpDlg::OnPaint()
 		L"· Reset EQ / global …… só bandas ou tudo",
 		L"· EQ-/globaal reset …… alleen banden of alles",
 		L"· Reset EQ / globalny …… tylko pasma lub wszystko",
-		L"· EQ sıfırla / genel sıfırla …… yalnızca bantlar veya tümü")); y += lh + 2;
+		L"· EQ sıfırla / genel sıfırla …… yalnızca bantlar veya tümü")); y += lh + 4;
+
+	title(L, y, LL14(L"Soft3D（CCustom の飾り）", L"Soft 3D (CCustom accents)", L"Soft 3D (accents CCustom)", L"Soft 3D (accenti CCustom)",
+		L"Soft 3D (acentos CCustom)", L"Soft3D (CCustom 장식)", L"Soft3D（CCustom 装饰）", L"Soft3D (زخارف CCustom)",
+		L"Soft 3D (акценты CCustom)", L"Soft 3D (CCustom-Akzente)", L"Soft 3D (acentos CCustom)", L"Soft 3D (CCustom-accenten)",
+		L"Soft 3D (akcenty CCustom)", L"Soft 3B (CCustom süs)"));
+	y += titleLh;
+	body(L, y, LL14(
+		L"・スライダーつまみ／ボタン／チェックなどに小さな Soft3D 飾りが入ります（CPU のみ）",
+		L"· Slider thumbs, buttons and checks get tiny Soft 3D accents (CPU only)",
+		L"· Curseurs, boutons et cases ont de petits accents Soft 3D (CPU seul)",
+		L"· Slider, pulsanti e check hanno piccoli accenti Soft 3D (solo CPU)",
+		L"· Deslizadores, botones y casillas llevan Soft 3D pequeño (solo CPU)",
+		L"· 슬라이더 손잡이·버튼·체크에 작은 Soft3D 장식(CPU만)",
+		L"· 滑块拇指、按钮、复选有细小 Soft3D 装饰（仅 CPU）",
+		L"· منزلقات وأزرار ومربعات لها زخارف Soft3D صغيرة (معالج فقط)",
+		L"· Ползунки, кнопки и флажки — мелкие Soft 3D-акценты (только CPU)",
+		L"· Slider, Buttons und Checks mit kleinen Soft-3D-Akzenten (nur CPU)",
+		L"· Thumbs, botões e checks têm Soft 3D pequeno (só CPU)",
+		L"· Sliderknoppen, knoppen en checks hebben Soft 3D (alleen CPU)",
+		L"· Suwaki, przyciski i checkboxy mają Soft 3D (tylko CPU)",
+		L"· Kaydırıcı, düğme ve onaylarda Soft 3B süs (yalnızca CPU)")); y += lh;
+	muted(L, y, LL14(
+		L"視点付きの全面 Soft3D は MP／アナライザー／ピアノロール／コマンドロール側です。",
+		L"Full interactive Soft 3D views are on MP, Analyzer, Piano Roll and Command Roll.",
+		L"Les vues Soft 3D interactives = MP, analyseur, piano roll, command roll.",
+		L"Le viste Soft 3D interattive = MP, analizzatore, piano roll, command roll.",
+		L"Las vistas Soft 3D interactivas = MP, analizador, piano roll, command roll.",
+		L"시점 Soft3D는 MP·애널라이저·피아노롤·커맨드롤 쪽입니다.",
+		L"可操作 Soft3D 在 MP、分析器、钢琴卷帘、命令卷帘。",
+		L"مشاهد Soft3D التفاعلية في MP والمحلل والبيانو وCommand Roll.",
+		L"Интерактивные Soft 3D — MP, анализатор, piano roll, command roll.",
+		L"Interaktive Soft-3D-Ansichten: MP, Analyzer, Piano Roll, Command Roll.",
+		L"Soft 3D interativo: MP, analisador, piano roll, command roll.",
+		L"Interactieve Soft 3D: MP, analyser, pianorol, command roll.",
+		L"Interaktywne Soft 3D: MP, analizator, piano roll, command roll.",
+		L"Etkileşimli Soft 3B: MP, analizör, piyano roll, komut roll.")); y += lh + 2;
+
 	muted(L, y, LL14(
 		L"キャプションの「?」でこのガイドを開けます。各スライダーにマウスを置くと個別の説明が出ます。",
 		L"Open this guide from caption \"?\". Hover sliders for per-control tips.",

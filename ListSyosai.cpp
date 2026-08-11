@@ -132,6 +132,9 @@ void CSyHelpDlg::OnPaint()
 		L"Edytuj listę i tagi osobno. OK zapisuje playlistę.",
 		L"Çalma listesi ve etiketleri ayrı düzenle. Tamam PL kaydeder."));
 	y += lh + 4;
+	y = CCC_GdiHelpDrawSoftDemoPair(dc, L, y, rc.Width() - L * 2, min(140, max(112, rc.Height() / 5)),
+		CCC_HELPDEMO_KLIST);
+
 
 	title(L, y, LL14(L"プレイリスト欄 vs タグ", L"Playlist fields vs tags", L"Playlist vs tags", L"Playlist vs tag",
 		L"Lista vs etiquetas", L"재생 목록 vs 태그", L"播放列表栏 vs 标签", L"الحقول vs الوسوم",

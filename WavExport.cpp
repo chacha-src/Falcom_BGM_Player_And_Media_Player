@@ -1,4 +1,4 @@
-﻿// WavExport.cpp
+// WavExport.cpp
 //
 
 #include "stdafx.h"
@@ -288,6 +288,9 @@ void CWeHelpDlg::OnPaint()
 		L"Dekoduj utwór do WAV. Pętle, fade i tagi tutaj.",
 		L"Parçayı decode edip WAV yazın. Döngü, solma ve etiketler burada."));
 	y += lh + 4;
+	y = CCC_GdiHelpDrawSoftDemoPair(dc, L, y, rc.Width() - L * 2, min(140, max(112, rc.Height() / 5)),
+		CCC_HELPDEMO_KGENERIC);
+
 
 	title(L, y, LL14(L"基本操作", L"Basics", L"Bases", L"Basi", L"Básicos", L"기본", L"基本", L"أساسيات",
 		L"Основы", L"Grundlagen", L"Básicos", L"Basis", L"Podstawy", L"Temeller"));

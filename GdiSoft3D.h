@@ -54,38 +54,58 @@ namespace GdiSoft3D
 		return RGB(r, g, b);
 	}
 
-	inline float DepthOf(const View& v, float x, float y, float z)
+	// カメラ空間 Z。左右の壁はカメラ面をまたぐのでわずかに負まで許可（-camD 未満は射影不能）
+	// eye が論理位置より前方 0.8 なので、マス後方〜左右の壁は z≈-1 付近まで必要
+	static constexpr float kNearZ = -1.20f;
+	static constexpr float kProjEps = 0.05f;
+
+	inline void ToView(const View& v, float x, float y, float z,
+		float& vx, float& vy, float& vz)
 	{
+		const float rx = x * v.cosYaw - z * v.sinYaw;
 		const float rz = x * v.sinYaw + z * v.cosYaw;
-		return rz * v.cosPitch - y * v.sinPitch;
+		vx = rx;
+		vy = y * v.cosPitch + rz * v.sinPitch;
+		vz = rz * v.cosPitch - y * v.sinPitch;
+	}
+
+	inline void ProjectView(const View& v, float vx, float vy, float vz,
+		float& sx, float& sy)
+	{
+		float denom = v.camD + vz;
+		if (denom < kProjEps) denom = kProjEps;
+		const float p = v.camD / denom;
+		sx = v.originX + vx * p * v.scale;
+		sy = v.originY - vy * p * v.scale;
 	}
 
 	inline void Project(const View& v, float x, float y, float z, POINT& out)
 	{
-		const float rx = x * v.cosYaw - z * v.sinYaw;
-		const float rz = x * v.sinYaw + z * v.cosYaw;
-		const float ry2 = y * v.cosPitch + rz * v.sinPitch;
-		const float rz2 = rz * v.cosPitch - y * v.sinPitch;
-		float denom = v.camD + rz2;
-		if (denom < 0.30f) denom = 0.30f;
-		const float p = v.camD / denom;
-		out.x = (long)floorf(v.originX + rx * p * v.scale + 0.5f);
-		out.y = (long)floorf(v.originY - ry2 * p * v.scale + 0.5f);
+		float vx, vy, vz, sx, sy;
+		ToView(v, x, y, z, vx, vy, vz);
+		if (vz < kNearZ) vz = kNearZ;
+		ProjectView(v, vx, vy, vz, sx, sy);
+		out.x = (long)floorf(sx + 0.5f);
+		out.y = (long)floorf(sy + 0.5f);
 	}
 
 	inline void ProjectEx(const View& v, float x, float y, float z,
 		float& sx, float& sy, float& depth)
 	{
-		const float rx = x * v.cosYaw - z * v.sinYaw;
-		const float rz = x * v.sinYaw + z * v.cosYaw;
-		const float ry2 = y * v.cosPitch + rz * v.sinPitch;
-		const float rz2 = rz * v.cosPitch - y * v.sinPitch;
-		float denom = v.camD + rz2;
-		if (denom < 0.30f) denom = 0.30f;
-		const float p = v.camD / denom;
-		sx = v.originX + rx * p * v.scale;
-		sy = v.originY - ry2 * p * v.scale;
-		depth = rz2;
+		float vx, vy, vz;
+		ToView(v, x, y, z, vx, vy, vz);
+		depth = vz;
+		float zProj = vz;
+		if (zProj < kNearZ) zProj = kNearZ;
+		ProjectView(v, vx, vy, zProj, sx, sy);
+	}
+
+	inline float DepthOf(const View& v, float x, float y, float z)
+	{
+		float vx, vy, vz;
+		ToView(v, x, y, z, vx, vy, vz);
+		(void)vx; (void)vy;
+		return vz;
 	}
 
 	inline void BuildView(int width, int height, const Cam& cam,
@@ -192,10 +212,16 @@ namespace GdiSoft3D
 		void DrawBox(float xL, float xR, float yTop, float z0, float z1, COLORREF col, float yBase = 0.f);
 		void DrawWireBox(float xL, float xR, float yTop, float z0, float z1, COLORREF col, float yBase = 0.f);
 		void DrawQuad(float x0, float y0, float z0, float x1, float y1, float z1,
-			float x2, float y2, float z2, float x3, float y3, float z3, COLORREF col);
+			float x2, float y2, float z2, float x3, float y3, float z3, COLORREF col, BYTE alpha = 255);
 		void DrawTexturedQuad(float x0, float y0, float z0, float x1, float y1, float z1,
 			float x2, float y2, float z2, float x3, float y3, float z3);
-		void DrawSphere(float cx, float cy, float cz, float radius, COLORREF col, int slices = 12, int stacks = 8);
+		// UV 明示（ワールド座標にレンガを貼る用）。透視補正は RasterTri 側
+		void DrawTexturedQuadUV(
+			float x0, float y0, float z0, float u0, float v0,
+			float x1, float y1, float z1, float u1, float v1,
+			float x2, float y2, float z2, float u2, float v2,
+			float x3, float y3, float z3, float u3, float v3);
+		void DrawSphere(float cx, float cy, float cz, float radius, COLORREF col, int slices = 12, int stacks = 8, BYTE alpha = 255);
 		void DrawGrid(float x0, float x1, float z0, float z1, float y, int div, COLORREF col);
 		void DrawLine(float x0, float y0, float z0, float x1, float y1, float z1, COLORREF col);
 		void DrawStereoBars(float xMin, float xMax, int bins,
@@ -219,9 +245,17 @@ namespace GdiSoft3D
 		void DrawTorus(float cx, float cy, float cz, float R, float r, COLORREF col,
 			int slices = 16, int stacks = 10);
 
+		// ---- HUD 2D（画面空間・深度無視。回転クワッド／三角／線）----
+		void HudFillTri(float x0, float y0, float x1, float y1, float x2, float y2,
+			COLORREF col, BYTE alpha = 220);
+		void HudFillQuad(float x0, float y0, float x1, float y1, float x2, float y2, float x3, float y3,
+			COLORREF col, BYTE alpha = 220);
+		void HudLine(float x0, float y0, float x1, float y1, COLORREF col, BYTE alpha = 255);
+
+		DWORD ApplyFog(DWORD c, float depth) const;
+
 	private:
 		void RasterTri(const Vertex& a, const Vertex& b, const Vertex& c);
-		DWORD ApplyFog(DWORD c, float depth) const;
 		void PostFog();
 		void PostEdge();
 		void PostDof();

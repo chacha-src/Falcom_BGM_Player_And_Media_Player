@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "stdafx.h"
 #include "afxdialogex.h"
@@ -669,6 +669,9 @@ public:
 
     // 頻繁更新ラベル用: 親ぼかし Invalidate を抑えて UI 詰まりを防ぐ
     void SetNoParentInvalidate(BOOL b) { m_bNoParentInvalidate = b; }
+
+    // OpaqueFixer 経由の不透明バッファへ自前描画する（TRUE=描画済みで DrawClient を使わない）
+    virtual BOOL PaintCustomOpaque(CDC& dc) { UNREFERENCED_PARAMETER(dc); return FALSE; }
 
 protected:
     virtual void PreSubclassWindow();

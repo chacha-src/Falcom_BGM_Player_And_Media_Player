@@ -153,6 +153,7 @@ protected:
     afx_msg void OnToggleHarmonicProfile();
     afx_msg void OnOpenTuneDialog();
     afx_msg void OnViewModeCmd(UINT nID);
+    afx_msg void OnCamResetCmd();
     afx_msg void OnKeyRangeCmd(UINT nID);
     afx_msg void OnToggleNoteNames();
     afx_msg void OnToggleCaptureMidi();
@@ -232,6 +233,7 @@ private:
     static constexpr UINT  IDM_ROLL_TUNE = 42220;
     static constexpr UINT  IDM_ROLL_VIEW_BASE = 42221;   // +0=2D +1=簡易3D
     static constexpr UINT  IDM_ROLL_VIEW_COUNT = 2;
+    static constexpr UINT  IDM_ROLL_CAM_RESET = 42240;   // Soft3D 視点リセット（ON_COMMAND_RANGE外）
     static constexpr UINT  IDM_ROLL_KEYS_BASE = 42224;   // +0=88鍵 +1=108鍵
     static constexpr UINT  IDM_ROLL_KEYS_COUNT = 2;
     static constexpr UINT  IDM_ROLL_NOTENAME = 42227;
@@ -534,6 +536,7 @@ private:
     float m_view3dYawDeg = -22.0f;    // 簡易3D 水平回転角(-180..180、ドラッグで360度)
     float m_view3dPitchDeg = 26.0f;   // 簡易3D 仰角(負=下から / 正=上から)
     float m_view3dZoom = 1.0f;        // ホイール拡大縮小(1=自動フレーミング基準)
+    DWORD m_soft3dTourUntil = 0;
     bool  m_rotDragging = false;      // 視点ドラッグ中
     CPoint m_rotDragOrigin = CPoint(0, 0);
     float m_rotDragYaw0 = 0.0f;

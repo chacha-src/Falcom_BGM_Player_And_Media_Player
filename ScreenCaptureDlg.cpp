@@ -1,4 +1,4 @@
-﻿// ScreenCaptureDlg.cpp
+// ScreenCaptureDlg.cpp
 // 画面キャプチャ → MP4 (H.264 + AAC)
 // プライマリ / 全モニタ / ウィンドウ合成(配置・拡大縮小・Z順)
 
@@ -2489,24 +2489,41 @@ void CScHelpDlg::OnPaint()
 	CRect rc = hp.rc;
 	const int footerH = hp.footerH;
 	dc.SetBkMode(TRANSPARENT);
-	CFont* oldFont = dc.SelectObject(GetFont());
+	CFont* baseFont = GetFont();
+	CFont boldFont;
+	{
+		LOGFONT lf = {};
+		if (baseFont && baseFont->GetSafeHandle())
+			baseFont->GetLogFont(&lf);
+		else {
+			NONCLIENTMETRICS ncm = {};
+			ncm.cbSize = sizeof(ncm);
+			::SystemParametersInfo(SPI_GETNONCLIENTMETRICS, sizeof(ncm), &ncm, 0);
+			lf = ncm.lfMessageFont;
+		}
+		lf.lfWeight = FW_BOLD;
+		boldFont.CreateFontIndirect(&lf);
+	}
+	CFont* oldFont = dc.SelectObject(baseFont);
 
 	TEXTMETRIC tm{};
 	dc.GetTextMetrics(&tm);
 	const int lh = max(14, tm.tmHeight + tm.tmExternalLeading + 1);
-	const int titleLh = lh + 1;
+	const int titleLh = lh + 2;
 	CBrush frameBrush(RGB(130, 130, 150));
 
 	auto title = [&](int x, int y, LPCTSTR t) {
-		dc.SetTextColor(RGB(55, 45, 85));
+		CFont* prev = dc.SelectObject(&boldFont);
+		dc.SetTextColor(RGB(72, 48, 120));
 		dc.TextOut(x, y, t);
+		dc.SelectObject(prev);
 	};
 	auto body = [&](int x, int y, LPCTSTR t) {
-		dc.SetTextColor(RGB(65, 65, 80));
+		dc.SetTextColor(RGB(52, 52, 68));
 		dc.TextOut(x, y, t);
 	};
 	auto muted = [&](int x, int y, LPCTSTR t) {
-		dc.SetTextColor(RGB(100, 100, 115));
+		dc.SetTextColor(RGB(100, 100, 120));
 		dc.TextOut(x, y, t);
 	};
 
@@ -2533,6 +2550,8 @@ void CScHelpDlg::OnPaint()
 		L"Ułóż podgląd, podłącz FX, nagraj do MP4.",
 		L"Önizlemeyi düzenle, FX bağla, MP4 kaydet."));
 	y += lh + 4;
+	y = CCC_GdiHelpDrawSoftDemoPair(dc, L, y, rc.Width() - L * 2, min(140, max(112, rc.Height() / 5)),
+		CCC_HELPDEMO_KCAPTURE);
 
 	title(L, y, LL14(L"基本操作", L"Basics", L"Bases", L"Basi", L"Básicos", L"기본", L"基本", L"أساسيات",
 		L"Основы", L"Grundlagen", L"Básicos", L"Basis", L"Podstawy", L"Temeller"));
@@ -2630,23 +2649,58 @@ void CScHelpDlg::OnPaint()
 		yy += lh;
 	}
 	y = max(y1, y2) + 4;
-	if (y < rc.bottom - 4) {
-		muted(L, y, LL14(
-			L"FPS は 120 まで。色味は軽め。中〜重（ぼかし極大/放射/油絵/ゴッドレイ等）は GPU 負荷大・実フレーム低下はユーザー判断。",
-			L"FPS up to 120. Tints are light. Med–heavy (mega blur/radial/oil/godrays…) tax the GPU—FPS drop is your call.",
-			L"FPS jusqu'à 120. Teintes légères. Moyen–lourd (flou max/radial/huile/rayons…) charge le GPU—baisse = votre choix.",
-			L"FPS fino a 120. Tinte leggere. Medio–pesante (mega blur/radiale/olio/godrays…) carica la GPU—calo fps a vostra scelta.",
-			L"FPS hasta 120. Tintes ligeros. Med–pesado (mega blur/radial/óleo/rayos…) carga la GPU—bajar fps es su decisión.",
-			L"FPS는 120까지. 색조는 가벼움. 중~무거움(초대형 블러/방사/유화/갓레이 등)은 GPU 부하—프레임 저하는 사용자 판단.",
-			L"FPS最高120。色调较轻。中~重（超模糊/径向/油画/丁达尔等）GPU负载大，掉帧由您决定。",
-			L"حتى 120 إطارًا. الصبغات خفيفة. المتوسط–الثقيل يحمّل GPU—انخفاض الإطارات قرارك.",
-			L"FPS до 120. Оттенки лёгкие. Сред–тяж. (мега-blur/radial/масло/лучи…) нагружают GPU—падение частоты на ваш выбор.",
-			L"FPS bis 120. Töne leicht. Mittel–schwer (Mega-Blur/Radial/Öl/Godrays…) belasten die GPU—FPS-Abfall ist Ihre Entscheidung.",
-			L"FPS até 120. Tons leves. Méd–pesado (mega blur/radial/óleo/raios…) carrega a GPU—queda de fps é sua escolha.",
-			L"FPS tot 120. Tinten licht. Mid–zwaar (mega-blur/radiaal/olie/godrays…) belasten de GPU—fps-daling is jouw keuze.",
-			L"FPS do 120. Odcienie lekkie. Śr.–ciężkie (mega blur/radial/olej/promienie…) obciążają GPU—spadek fps to Twoja decyzja.",
-			L"FPS 120'ye kadar. Tonlar hafif. Orta–ağır (mega blur/radyal/yağlı/godrays…) GPU yükler—kare düşüşü sizin kararınız."));
-	}
+	muted(L, y, LL14(
+		L"FPS は 120 まで。色味は軽め。中〜重（ぼかし極大/放射/油絵/ゴッドレイ等）は GPU 負荷大・実フレーム低下はユーザー判断。",
+		L"FPS up to 120. Tints are light. Med–heavy (mega blur/radial/oil/godrays…) tax the GPU—FPS drop is your call.",
+		L"FPS jusqu'à 120. Teintes légères. Moyen–lourd (flou max/radial/huile/rayons…) charge le GPU—baisse = votre choix.",
+		L"FPS fino a 120. Tinte leggere. Medio–pesante (mega blur/radiale/olio/godrays…) carica la GPU—calo fps a vostra scelta.",
+		L"FPS hasta 120. Tintes ligeros. Med–pesado (mega blur/radial/óleo/rayos…) carga la GPU—bajar fps es su decisión.",
+		L"FPS는 120까지. 색조는 가벼움. 중~무거움(초대형 블러/방사/유화/갓레이 등)은 GPU 부하—프레임 저하는 사용자 판단.",
+		L"FPS最高120。色调较轻。中~重（超模糊/径向/油画/丁达尔等）GPU负载大，掉帧由您决定。",
+		L"حتى 120 إطارًا. الصبغات خفيفة. المتوسط–الثقيل يحمّل GPU—انخفاض الإطارات قرارك.",
+		L"FPS до 120. Оттенки лёгкие. Сред–тяж. (мега-blur/radial/масло/лучи…) нагружают GPU—падение частоты на ваш выбор.",
+		L"FPS bis 120. Töne leicht. Mittel–schwer (Mega-Blur/Radial/Öl/Godrays…) belasten die GPU—FPS-Abfall ist Ihre Entscheidung.",
+		L"FPS até 120. Tons leves. Méd–pesado (mega blur/radial/óleo/raios…) carrega a GPU—queda de fps é sua escolha.",
+		L"FPS tot 120. Tinten licht. Mid–zwaar (mega-blur/radiaal/olie/godrays…) belasten de GPU—fps-daling is jouw keuze.",
+		L"FPS do 120. Odcienie lekkie. Śr.–ciężkie (mega blur/radial/olej/promienie…) obciążają GPU—spadek fps to Twoja decyzja.",
+		L"FPS 120'ye kadar. Tonlar hafif. Orta–ağır (mega blur/radyal/yağlı/godrays…) GPU yükler—kare düşüşü sizin kararınız."));
+	y += lh + 6;
+
+	title(L, y, LL14(L"Soft3D（CCustom の飾り）", L"Soft 3D (CCustom accents)", L"Soft 3D (accents CCustom)", L"Soft 3D (accenti CCustom)",
+		L"Soft 3D (acentos CCustom)", L"Soft3D (CCustom 장식)", L"Soft3D（CCustom 装饰）", L"Soft3D (زخارف CCustom)",
+		L"Soft 3D (акценты CCustom)", L"Soft 3D (CCustom-Akzente)", L"Soft 3D (acentos CCustom)", L"Soft 3D (CCustom-accenten)",
+		L"Soft 3D (akcenty CCustom)", L"Soft 3B (CCustom süs)"));
+	y += titleLh;
+	body(L, y, LL14(
+		L"・この窓はボタン／チェック／グループ枠など CCustom コントロールに小さな Soft3D 飾りが入ります（CPU、OpenGL/D3D なし）",
+		L"· This window’s CCustom buttons, checks and group boxes carry tiny Soft 3D accents (CPU; no OpenGL/D3D)",
+		L"· Boutons/cases/cadres CCustom ont de petits accents Soft 3D (CPU, sans OpenGL/D3D)",
+		L"· Pulsanti/check/group box CCustom hanno piccoli accenti Soft 3D (CPU, no OpenGL/D3D)",
+		L"· Botones/casillas/marcos CCustom llevan Soft 3D pequeño (CPU, sin OpenGL/D3D)",
+		L"· 이 창의 CCustom 버튼·체크·그룹박스에 작은 Soft3D 장식(CPU, OpenGL/D3D 없음)",
+		L"· 本窗的 CCustom 按钮/复选/分组框有细小 Soft3D 装饰（CPU，无 OpenGL/D3D）",
+		L"· أزرار/مربعات/أطر CCustom هنا لها زخارف Soft3D صغيرة (معالج فقط)",
+		L"· Кнопки/флажки/group box CCustom — мелкие Soft 3D-акценты (только CPU)",
+		L"· CCustom-Buttons/Checks/GroupBox mit kleinen Soft-3D-Akzenten (nur CPU)",
+		L"· Botões/checks/group boxes CCustom têm Soft 3D pequeno (só CPU)",
+		L"· CCustom-knoppen/checks/groupboxes hebben Soft 3D-accenten (alleen CPU)",
+		L"· Przyciski/checkboxy/groupboxy CCustom mają Soft 3D (tylko CPU)",
+		L"· CCustom düğme/onay/grup kutularında Soft 3B süs (yalnızca CPU)")); y += lh;
+	muted(L, y, LL14(
+		L"視点付きの全面 Soft3D は MPバナー／アナライザー／ピアノロール／コマンドロール側です。各窓の「?」ガイドも参照。",
+		L"Full interactive Soft 3D views live on the MP banner, Analyzer, Piano Roll and Command Roll. See each window’s ? guide too.",
+		L"Les vues Soft 3D interactives = bannière MP, analyseur, piano roll, command roll. Voir aussi « ? ».",
+		L"Le viste Soft 3D interattive = banner MP, analizzatore, piano roll, command roll. Vedi anche « ? ».",
+		L"Las vistas Soft 3D interactivas = banner MP, analizador, piano roll, command roll. Vea también « ? ».",
+		L"시점 Soft3D는 MP 배너·애널라이저·피아노롤·커맨드롤. 각 창「?」가이드도 참고.",
+		L"可操作 Soft3D 在 MP 横幅、分析器、钢琴卷帘、命令卷帘。也可看各窗「?」指南。",
+		L"مشاهد Soft3D التفاعلية في بانر MP والمحلل والبيانو وCommand Roll. راجع أيضاً «؟».",
+		L"Интерактивные Soft 3D — баннер MP, анализатор, piano roll, command roll. См. также «?».",
+		L"Interaktive Soft-3D-Ansichten: MP-Banner, Analyzer, Piano Roll, Command Roll. Auch „?“.",
+		L"Soft 3D interativo: banner MP, analisador, piano roll, command roll. Veja também «?».",
+		L"Interactieve Soft 3D: MP-banner, analyser, pianorol, command roll. Zie ook «?».",
+		L"Interaktywne Soft 3D: baner MP, analizator, piano roll, command roll. Zobacz też «?».",
+		L"Etkileşimli Soft 3B: MP banner, analizör, piyano roll, komut roll. Ayrıca «?»."));
 
 	dc.SelectObject(oldFont);
 	CCC_GdiHelpEndPaint(hp);

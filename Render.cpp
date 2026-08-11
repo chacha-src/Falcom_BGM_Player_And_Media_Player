@@ -1,4 +1,4 @@
-﻿// Render.cpp : インプリメンテーション ファイル
+// Render.cpp : インプリメンテーション ファイル
 //
 
 #include "stdafx.h"
@@ -206,6 +206,9 @@ void CRdHelpDlg::OnPaint()
 		L"Ustawienia globalne: urządzenie, bufor, renderer, akryl. Zobacz też podpowiedzi.",
 		L"Genel oynatma ayarları: aygıt, tampon, video, akrilik. İpuçlarına da bakın."));
 	y += lh + 4;
+	y = CCC_GdiHelpDrawSoftDemoPair(dc, L, y, rc.Width() - L * 2, min(140, max(112, rc.Height() / 5)),
+		CCC_HELPDEMO_KGENERIC);
+
 
 	title(L, y, LL14(L"音声出力", L"Audio output", L"Sortie audio", L"Uscita audio", L"Salida de audio", L"오디오 출력", L"音频输出", L"إخراج الصوت",
 		L"Аудиовыход", L"Audioausgabe", L"Saída de áudio", L"Audio-uitvoer", L"Wyjście audio", L"Ses çıkışı"));

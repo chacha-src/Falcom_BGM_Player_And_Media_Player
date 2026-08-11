@@ -469,8 +469,12 @@ void BeginPlaybackNotifyThread()
 	// CWinThread オブジェクトとスレッドハンドルは破棄されず、安全に Join できる。
 	// Resume 前に s_playNotifyThread へ登録し、起動直後の stop が「スレッド無し」と
 	// 誤認してデコーダを潰し、再生スレッドが Lock で永久待ち→連続固まりになるのを防ぐ。
+	// kbvio2sf / DeSmuME 系は Render がスタックを大量に使う。
+	// STACK_SIZE_PARAM_IS_A_RESERVATION 無しだと nStackSize は「初期 Commit」扱いになり、
+	// 64MB Commit 要求で CreateThread が失敗したり VA を圧迫する。予約のみ大きくする。
 	CWinThread* t = AfxBeginThread((AFX_THREADPROC)HandleNotifications, NULL,
-		THREAD_PRIORITY_TIME_CRITICAL, 0, CREATE_SUSPENDED);
+		THREAD_PRIORITY_TIME_CRITICAL, 64 * 1024 * 1024,
+		CREATE_SUSPENDED | STACK_SIZE_PARAM_IS_A_RESERVATION);
 	if (!t)
 		return;
 	t->m_bAutoDelete = FALSE;
@@ -1514,7 +1518,9 @@ resetパラメータ:
 
 #define MAX_CH 8
 #define EQ_BANDS 15
-#define MAX_DELAY_SAMPLES 3072000*2
+// 旧 3072000*2 は銀行あたり ~187MB。InitEngine で x86 VA が死に 2SF JIT が 0x7FFC で落ちる。
+// 192kHz で 2 秒あれば環境ディレイに十分。
+#define MAX_DELAY_SAMPLES (192000*2)
 #define MAX_EARLY_REFLECTIONS 16
 
 #define EQ_PRESET_COUNT 101
@@ -1834,7 +1840,19 @@ enum { EQ_BANKS = 2 };
 static int g_eqCur = 0;
 static std::mutex g_eqMu;
 static ChannelState g_channels[EQ_BANKS][MAX_CH];
-static float g_delayMemory[EQ_BANKS][MAX_CH][MAX_DELAY_SAMPLES];
+// 静的 BSS だと 2*8*6144000*4 ~= 375MB で SizeOfImage が肥大し、
+// x86 VA が足りず kbvio2sf(DeSmuME JIT) が 0x7FFC で落ちる。必要時に確保する。
+static float* g_delayMemory[EQ_BANKS] = {};
+
+static float* EnsureDelayBank(int bank)
+{
+	if (bank < 0 || bank >= EQ_BANKS) bank = 0;
+	if (!g_delayMemory[bank]) {
+		const SIZE_T bytes = (SIZE_T)MAX_CH * (SIZE_T)MAX_DELAY_SAMPLES * sizeof(float);
+		g_delayMemory[bank] = (float*)VirtualAlloc(NULL, bytes, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+	}
+	return g_delayMemory[bank];
+}
 static int g_lastRate[EQ_BANKS] = { 0, 0 };
 static int g_lastEqPreset[EQ_BANKS] = { -1, -1 };
 static int g_lastEnvPreset[EQ_BANKS] = { -1, -1 };
@@ -4202,8 +4220,19 @@ static BlockAnalysis AnalyzeBlock(
 // release=0.30: 3〜4ブロックで元のゲインに復帰 → 不自然な揺り戻しなし
 static float g_stagingGainSmooth[EQ_BANKS] = { 1.0f, 1.0f };
 static float g_laLimEnv[EQ_BANKS] = { 1.0f, 1.0f };
-static float g_eqLeftSamples[EQ_BANKS][8192 * 40];
-static float g_eqRightSamples[EQ_BANKS][8192 * 40];
+// 銀行あたり ~1.25MB x2。静的 BSS を避けて必要時確保。
+static float* g_eqLeftSamples[EQ_BANKS] = {};
+static float* g_eqRightSamples[EQ_BANKS] = {};
+enum { EQ_SAMPLE_CAP = 8192 * 40 };
+static void EnsureEqSampleBuffers(int bank)
+{
+	if (bank < 0 || bank >= EQ_BANKS) bank = 0;
+	if (!g_eqLeftSamples[bank]) {
+		g_eqLeftSamples[bank] = (float*)VirtualAlloc(NULL, (SIZE_T)EQ_SAMPLE_CAP * sizeof(float), MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+		g_eqRightSamples[bank] = (float*)VirtualAlloc(NULL, (SIZE_T)EQ_SAMPLE_CAP * sizeof(float), MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+	}
+}
+
 
 
 
@@ -4499,13 +4528,15 @@ static void InitEngine(int rate, int bank = 0) {
 		oldYamabiko[i] = g_channels[g_eqCur][i].yamabikoBuf;
 
 	memset(g_channels[g_eqCur], 0, sizeof(g_channels[g_eqCur]));
-	memset(g_delayMemory[g_eqCur], 0, sizeof(g_delayMemory[g_eqCur]));
+	float* delayBank = EnsureDelayBank(g_eqCur);
+	if (delayBank)
+		memset(delayBank, 0, (SIZE_T)MAX_CH * (SIZE_T)MAX_DELAY_SAMPLES * sizeof(float));
 
 	for (int i = 0; i < MAX_CH; i++) {
 		if (oldYamabiko[i] != NULL)
 			free(oldYamabiko[i]);
 
-		g_channels[g_eqCur][i].delayBuffer = g_delayMemory[g_eqCur][i];
+		g_channels[g_eqCur][i].delayBuffer = delayBank ? (delayBank + (SIZE_T)i * (SIZE_T)MAX_DELAY_SAMPLES) : NULL;
 		g_channels[g_eqCur][i].lfo.phase = 0.0f;
 		g_channels[g_eqCur][i].flutterPhase = 0.0f;
 		g_channels[g_eqCur][i].dopplerPhase = 0.0f;
@@ -4581,6 +4612,19 @@ void FreeEngine(void) {
 				g_channels[b][i].yamabikoBufSize = 0;
 				g_channels[b][i].yamabikoPos = 0;
 			}
+			g_channels[b][i].delayBuffer = NULL;
+		}
+		if (g_delayMemory[b]) {
+			VirtualFree(g_delayMemory[b], 0, MEM_RELEASE);
+			g_delayMemory[b] = NULL;
+		}
+		if (g_eqLeftSamples[b]) {
+			VirtualFree(g_eqLeftSamples[b], 0, MEM_RELEASE);
+			g_eqLeftSamples[b] = NULL;
+		}
+		if (g_eqRightSamples[b]) {
+			VirtualFree(g_eqRightSamples[b], 0, MEM_RELEASE);
+			g_eqRightSamples[b] = NULL;
 		}
 	}
 }
@@ -5483,8 +5527,10 @@ static void equaliserBankUnlocked(void* data, int len, BOOL reset) {
 	float diffusionScale = ba.isChiptune ? 0.55f : 1.0f;
 
 	// 出力用サンプルバッファ (最大約40ブロック分)
+	EnsureEqSampleBuffers(g_eqCur);
 	float* leftSamples = g_eqLeftSamples[g_eqCur];
 	float* rightSamples = g_eqRightSamples[g_eqCur];
+	if (!leftSamples || !rightSamples) return;
 	int bufferIndex = 0;
 
 	float harmonicAmount = (density - 100.0f) / 100.0f;

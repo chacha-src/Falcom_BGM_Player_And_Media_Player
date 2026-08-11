@@ -120,6 +120,9 @@ void CPrtHelpDlg::OnPaint()
 		L"Czułość wykrywania nut w %. 100% = domyślnie (25–400%).",
 		L"Nota yakalama hassasiyetini % ile ayarla. %100 varsayılan (25–400)."));
 	y += lh + 4;
+	y = CCC_GdiHelpDrawSoftDemoPair(dc, L, y, rc.Width() - L * 2, min(140, max(112, rc.Height() / 5)),
+		CCC_HELPDEMO_KPIANO);
+
 
 	title(L, y, LL14(L"スライダーの意味（概要）", L"Slider meanings (overview)", L"Signification des curseurs", L"Significato cursori",
 		L"Significado de deslizadores", L"슬라이더 의미(개요)", L"滑块含义（概览）", L"معاني المنزلقات (نظرة عامة)",

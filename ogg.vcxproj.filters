@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
     <Filter Include="Source Files">
@@ -432,6 +432,24 @@
     <ClCompile Include="DeviceRecordDlg.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="DigitizeDlg.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="VoiceChangerDlg.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="TunerPracticeDlg.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="PhotoFrameDlg.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Soft3DMazeDlg.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="SoundMeterDlg.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="ScreenCaptureDlg.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -513,6 +531,12 @@
     <ClCompile Include="CMpQueueDlg.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="CMpCommandPaletteDlg.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CMpHelpDlg.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="CMpPlaylistIO.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -526,6 +550,21 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="CProToolsDlg.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="KpiPluginInstall.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="AudioDevSync.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="MpPlayerAddons.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="MpFeatureExtras.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="MpKeyCamelot.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
@@ -1015,6 +1054,24 @@
     <ClInclude Include="DeviceRecordDlg.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="DigitizeDlg.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="VoiceChangerDlg.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="TunerPracticeDlg.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="PhotoFrameDlg.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Soft3DMazeDlg.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="SoundMeterDlg.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="ScreenCaptureDlg.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -1093,6 +1150,12 @@
     <ClInclude Include="CMpQueueDlg.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="CMpCommandPaletteDlg.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CMpHelpDlg.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="CMpPlaylistIO.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -1124,6 +1187,24 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="CProToolsDlg.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="ScWgcCapture.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="MpPlayerAddons.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="MpFeatureExtras.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="MpKeyCamelot.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="AppMixerMuteCheck.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="AudioDevSync.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
@@ -1176,6 +1257,24 @@
     <None Include="ReadMe.txt" />
     <None Include="cpp.hint" />
     <None Include="oggDlg_DeferredHeavy.inc" />
+    <None Include="res\cursor1.cur">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="res\cur00001.cur">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="res\cur00002.cur">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="res\cur00003.cur">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="res\cur00004.cur">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="res\cursor2.cur">
+      <Filter>Resource Files</Filter>
+    </None>
   </ItemGroup>
   <ItemGroup>
     <Text Include="codec\APPLE_LICENSE.txt">

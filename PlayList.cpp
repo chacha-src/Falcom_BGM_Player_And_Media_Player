@@ -1,4 +1,4 @@
-﻿// PlayList.cpp : 実装ファイル
+// PlayList.cpp : 実装ファイル
 //
 
 #include "stdafx.h"
@@ -318,6 +318,9 @@ void CPlHelpDlg::OnPaint()
 		L"Tu przestawiaj, ciągłe/pętla, szukaj i zarządzaj listami.",
 		L"Burada sırala, sürekli/döngü, ara ve listeleri yönet."));
 	y += lh + 4;
+	y = CCC_GdiHelpDrawSoftDemoPair(dc, L, y, rc.Width() - L * 2, min(140, max(112, rc.Height() / 5)),
+		CCC_HELPDEMO_KLIST);
+
 
 	title(L, y, LL14(L"再生チェック", L"Playback checks", L"Cases lecture", L"Opzioni riproduzione",
 		L"Casillas de reproducción", L"재생 체크", L"播放选项", L"خيارات التشغيل",

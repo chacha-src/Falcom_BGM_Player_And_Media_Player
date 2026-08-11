@@ -174,11 +174,14 @@
       <IgnoreSpecificDefaultLibraries>uafxcw.lib;Libcmt.lib</IgnoreSpecificDefaultLibraries>
       <GenerateDebugInformation>DebugFastLink</GenerateDebugInformation>
       <TurnOffAssemblyGeneration>false</TurnOffAssemblyGeneration>
-      <HeapReserveSize>80000000</HeapReserveSize>
+      <HeapReserveSize>2097152</HeapReserveSize>
       <HeapCommitSize>
       </HeapCommitSize>
-      <StackReserveSize>10000000</StackReserveSize>
-      <StackCommitSize>10000000</StackCommitSize>
+      <!-- 昔動いていたビルドは StackReserve=70MB。16MB に削ると DeSmuME(2SF) が足りない。
+           Commit は 50MB のままだと追加スレッドがそれぞれ掴み x86 VA が枯渇するので 1MB。
+           HeapReserve は 80MB 常時予約だと JIT 用 VA が圧迫されるため小さくする。 -->
+      <StackReserveSize>70000000</StackReserveSize>
+      <StackCommitSize>1048576</StackCommitSize>
       <LargeAddressAware>true</LargeAddressAware>
       <ModuleDefinitionFile>
       </ModuleDefinitionFile>
@@ -257,11 +260,14 @@
       <IgnoreSpecificDefaultLibraries>uafxcw.lib;Libcmt.lib</IgnoreSpecificDefaultLibraries>
       <GenerateDebugInformation>DebugFull</GenerateDebugInformation>
       <TurnOffAssemblyGeneration>false</TurnOffAssemblyGeneration>
-      <HeapReserveSize>80000000</HeapReserveSize>
+      <HeapReserveSize>2097152</HeapReserveSize>
       <HeapCommitSize>
       </HeapCommitSize>
-      <StackReserveSize>10000000</StackReserveSize>
-      <StackCommitSize>10000000</StackCommitSize>
+      <!-- 昔動いていたビルドは StackReserve=70MB。16MB に削ると DeSmuME(2SF) が足りない。
+           Commit は 50MB のままだと追加スレッドがそれぞれ掴み x86 VA が枯渇するので 1MB。
+           HeapReserve は 80MB 常時予約だと JIT 用 VA が圧迫されるため小さくする。 -->
+      <StackReserveSize>70000000</StackReserveSize>
+      <StackCommitSize>1048576</StackCommitSize>
       <LargeAddressAware>true</LargeAddressAware>
       <ModuleDefinitionFile>
       </ModuleDefinitionFile>
@@ -560,6 +566,12 @@
     <ClCompile Include="WavExport.cpp" />
     <ClCompile Include="TranscodeExport.cpp" />
     <ClCompile Include="DeviceRecordDlg.cpp" />
+    <ClCompile Include="DigitizeDlg.cpp" />
+    <ClCompile Include="VoiceChangerDlg.cpp" />
+    <ClCompile Include="TunerPracticeDlg.cpp" />
+    <ClCompile Include="PhotoFrameDlg.cpp" />
+    <ClCompile Include="Soft3DMazeDlg.cpp" />
+    <ClCompile Include="SoundMeterDlg.cpp" />
     <ClCompile Include="ScreenCaptureDlg.cpp" />
     <ClCompile Include="ScreenCaptureLive.cpp" />
     <ClCompile Include="ScLiveSettingsDlg.cpp" />
@@ -611,6 +623,8 @@
     <ClCompile Include="CMpFolderSyncDlg.cpp" />
     <ClCompile Include="CMpSmartPlaylistDlg.cpp" />
     <ClCompile Include="CMpQueueDlg.cpp" />
+    <ClCompile Include="CMpCommandPaletteDlg.cpp" />
+    <ClCompile Include="CMpHelpDlg.cpp" />
     <ClCompile Include="CMpPlaylistIO.cpp" />
     <ClCompile Include="oggDlg.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">Use</PrecompiledHeader>
@@ -703,6 +717,12 @@
     <ClInclude Include="WavExport.h" />
     <ClInclude Include="TranscodeExport.h" />
     <ClInclude Include="DeviceRecordDlg.h" />
+    <ClInclude Include="DigitizeDlg.h" />
+    <ClInclude Include="VoiceChangerDlg.h" />
+    <ClInclude Include="TunerPracticeDlg.h" />
+    <ClInclude Include="PhotoFrameDlg.h" />
+    <ClInclude Include="Soft3DMazeDlg.h" />
+    <ClInclude Include="SoundMeterDlg.h" />
     <ClInclude Include="ScreenCaptureDlg.h" />
     <ClInclude Include="ScLiveSettingsDlg.h" />
     <ClInclude Include="ScWgcCapture.h" />
@@ -749,6 +769,8 @@
     <ClInclude Include="CMpFolderSyncDlg.h" />
     <ClInclude Include="CMpSmartPlaylistDlg.h" />
     <ClInclude Include="CMpQueueDlg.h" />
+    <ClInclude Include="CMpCommandPaletteDlg.h" />
+    <ClInclude Include="CMpHelpDlg.h" />
     <ClInclude Include="CMpPlaylistIO.h" />
     <ClInclude Include="AppMixerMuteCheck.h" />
     <ClInclude Include="AudioDevSync.h" />
@@ -795,6 +817,12 @@
   <ItemGroup>
     <None Include="cpp.hint" />
     <None Include="oggDlg_DeferredHeavy.inc" />
+    <None Include="res\cur00001.cur" />
+    <None Include="res\cur00002.cur" />
+    <None Include="res\cur00003.cur" />
+    <None Include="res\cur00004.cur" />
+    <None Include="res\cursor1.cur" />
+    <None Include="res\cursor2.cur" />
     <None Include="res\ico00001.ico" />
     <None Include="res\ico00002.ico" />
     <None Include="res\ico00003.ico" />

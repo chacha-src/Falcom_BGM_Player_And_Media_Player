@@ -331,6 +331,9 @@ void CDougaHelpDlg::OnPaint()
 		L"Dolny pasek i PPM: odtwarzanie, widok i strumienie. Dwuklik = pełny ekran.",
 		L"Alt çubuk ve sağ tık: oynatma, görünüm, akışlar. Çift tık = tam ekran."));
 	y += lh + 4;
+	y = CCC_GdiHelpDrawSoftDemoPair(dc, L, y, rc.Width() - L * 2, min(140, max(112, rc.Height() / 5)),
+		CCC_HELPDEMO_KGENERIC);
+
 
 	title(L, y, LL14(L"再生 / シーク", L"Play / Seek", L"Lecture / Position", L"Play / Seek",
 		L"Reproducir / Buscar", L"재생 / 탐색", L"播放 / 定位", L"تشغيل / تقديم",

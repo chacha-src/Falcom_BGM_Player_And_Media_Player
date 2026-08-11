@@ -133,6 +133,9 @@ void CPtHelpDlg::OnPaint()
 		L"Gapless, ReplayGain, pętla/cue i tagi. Wiele działa od razu.",
 		L"Gapless, ReplayGain, döngü/cue ve etiketler. Çoğu hemen uygulanır."));
 	y += lh + 4;
+	y = CCC_GdiHelpDrawSoftDemoPair(dc, L, y, rc.Width() - L * 2, min(140, max(112, rc.Height() / 5)),
+		CCC_HELPDEMO_KGENERIC);
+
 
 	title(L, y, LL14(L"再生 / レベル", L"Playback / Level", L"Lecture / Niveau", L"Riproduzione / Livello",
 		L"Reproducción / Nivel", L"재생 / 레벨", L"播放 / 电平", L"تشغيل / مستوى",

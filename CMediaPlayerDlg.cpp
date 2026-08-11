@@ -1,4 +1,4 @@
-// CMediaPlayerDlg.cpp : メディアプレイヤーモード画面(張りぼて)とモード選択ダイアログ
+﻿// CMediaPlayerDlg.cpp : メディアプレイヤーモード画面(張りぼて)とモード選択ダイアログ
 //
 // 実体は COggDlg(og->) と CPlayList(pl->)。ここは表示と操作の取り次ぎだけを行う。
 // メディアプレイヤーモード中は og / pl のウィンドウを非表示にして裏で生かしておく。
@@ -24,12 +24,20 @@
 #include "CMpFolderSyncDlg.h"
 #include "CMpSmartPlaylistDlg.h"
 #include "CMpQueueDlg.h"
+#include "CMpCommandPaletteDlg.h"
+#include "CMpHelpDlg.h"
 #include "CMissingFilesDlg.h"
 #include "MpSidecar.h"
 #include "CPromptDlg.h"
 #include "CCommandRollDlg.h"
 #include "DeviceRecordDlg.h"
 #include "ScreenCaptureDlg.h"
+#include "SoundMeterDlg.h"
+#include "DigitizeDlg.h"
+#include "VoiceChangerDlg.h"
+#include "TunerPracticeDlg.h"
+#include "PhotoFrameDlg.h"
+#include "Soft3DMazeDlg.h"
 #include "CDesktopLyricsWnd.h"
 #include "Douga.h"
 #include "MpPlayerAddons.h"
@@ -1168,6 +1176,7 @@ BEGIN_MESSAGE_MAP(CMediaPlayerDlg, CCustomBlurDialogExBase)
 	ON_BN_CLICKED(IDC_MP_BOT_SSVIZ, &CMediaPlayerDlg::OnMpSsViz)
 	ON_BN_CLICKED(IDC_MP_BOT_ALARM, &CMediaPlayerDlg::OnMpAlarm)
 	ON_BN_CLICKED(IDC_MP_BOT_REMOTE, &CMediaPlayerDlg::OnMpRemote)
+	ON_BN_CLICKED(IDC_MP_BOT_MAZE, &CMediaPlayerDlg::OnMpSoft3DMaze)
 	ON_COMMAND(ID_MP_BOTVIS_DJ, &CMediaPlayerDlg::OnBotVisDj)
 	ON_COMMAND(ID_MP_BOTVIS_TAG, &CMediaPlayerDlg::OnBotVisTag)
 	ON_COMMAND(ID_MP_BOTVIS_BPM, &CMediaPlayerDlg::OnBotVisBpm)
@@ -1176,6 +1185,7 @@ BEGIN_MESSAGE_MAP(CMediaPlayerDlg, CCustomBlurDialogExBase)
 	ON_COMMAND(ID_MP_BOTVIS_SSVIZ, &CMediaPlayerDlg::OnBotVisSsViz)
 	ON_COMMAND(ID_MP_BOTVIS_ALARM, &CMediaPlayerDlg::OnBotVisAlarm)
 	ON_COMMAND(ID_MP_BOTVIS_REMOTE, &CMediaPlayerDlg::OnBotVisRemote)
+	ON_COMMAND(ID_MP_BOTVIS_MAZE, &CMediaPlayerDlg::OnBotVisMaze)
 	ON_BN_CLICKED(IDC_MP_SAVEPARAM, &CMediaPlayerDlg::OnSaveParam)
 	ON_BN_CLICKED(IDC_MP_RESETDATA, &CMediaPlayerDlg::OnResetData)
 	ON_EN_KILLFOCUS(IDC_MP_KAISUU, &CMediaPlayerDlg::OnKaisuuKillFocus)
@@ -1263,6 +1273,12 @@ BEGIN_MESSAGE_MAP(CMediaPlayerDlg, CCustomBlurDialogExBase)
 	ON_COMMAND(ID_MP_REMOTE_DLG, &CMediaPlayerDlg::OnMpRemoteDlg)
 	ON_COMMAND(ID_MP_REMOTE_BROWSER, &CMediaPlayerDlg::OnMpRemoteBrowser)
 	ON_COMMAND(ID_MP_SSVIZ, &CMediaPlayerDlg::OnMpSsViz)
+	ON_COMMAND(ID_MP_SOUNDMETER, &CMediaPlayerDlg::OnMpSoundMeter)
+	ON_COMMAND(ID_MP_DIGITIZE, &CMediaPlayerDlg::OnMpDigitize)
+	ON_COMMAND(ID_MP_VOICECHANGER, &CMediaPlayerDlg::OnMpVoiceChanger)
+	ON_COMMAND(ID_MP_TUNERPRACTICE, &CMediaPlayerDlg::OnMpTunerPractice)
+	ON_COMMAND(ID_MP_PHOTOFRAME, &CMediaPlayerDlg::OnMpPhotoFrame)
+	ON_COMMAND(ID_MP_SOFT3DMAZE, &CMediaPlayerDlg::OnMpSoft3DMaze)
 	ON_COMMAND(ID_MP_VIDEO_EXTRACT, &CMediaPlayerDlg::OnMpVideoExtract)
 	ON_COMMAND(ID_MP_VIDEO_REPLACE, &CMediaPlayerDlg::OnMpVideoReplace)
 	ON_COMMAND(ID_MP_GAME_PRESET, &CMediaPlayerDlg::OnMpGamePreset)
@@ -1333,6 +1349,7 @@ BEGIN_MESSAGE_MAP(CMediaPlayerDlg, CCustomBlurDialogExBase)
 	ON_MESSAGE(WM_MP_WAVE_DONE, &CMediaPlayerDlg::OnWaveOverviewDone)
 	ON_MESSAGE(WM_MP_LIB_BUILD, &CMediaPlayerDlg::OnLibBuildLazy)
 	ON_MESSAGE(WM_MP_TRANSPORT_CMD, &CMediaPlayerDlg::OnMpTransportCmd)
+	ON_MESSAGE(WM_MP_HELP_HIGHLIGHT, &CMediaPlayerDlg::OnMpHelpHighlight)
 	ON_WM_NCACTIVATE()
 	ON_WM_SYSCOMMAND()
 	ON_WM_MOVING()
@@ -1510,12 +1527,14 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 			m_botAlarm.Create(_T("Alarm"), WS_CHILD | BS_PUSHBUTTON | WS_TABSTOP, rc, this, IDC_MP_BOT_ALARM);
 		if (!m_botRemote.GetSafeHwnd())
 			m_botRemote.Create(_T("Remote"), WS_CHILD | BS_PUSHBUTTON | WS_TABSTOP, rc, this, IDC_MP_BOT_REMOTE);
+		if (!m_botMaze.GetSafeHwnd())
+			m_botMaze.Create(_T("Maze"), WS_CHILD | BS_PUSHBUTTON | WS_TABSTOP, rc, this, IDC_MP_BOT_MAZE);
 		{
 			// ショートカットは色で役割が分かるようにする（水色一色は避ける）
-			CCustomStandardButton* bots[8] = {
-				&m_botDj, &m_botTag, &m_botBpm, &m_botSleep, &m_botMirror, &m_botSsViz, &m_botAlarm, &m_botRemote
+			CCustomStandardButton* bots[9] = {
+				&m_botDj, &m_botTag, &m_botBpm, &m_botSleep, &m_botMirror, &m_botSsViz, &m_botAlarm, &m_botRemote, &m_botMaze
 			};
-			const COLORREF botGrad[8][2] = {
+			const COLORREF botGrad[9][2] = {
 				{ RGB(240, 225, 255), RGB(200, 170, 245) }, // DJ: 紫
 				{ RGB(255, 235, 220), RGB(250, 195, 160) }, // Tag: 桃
 				{ RGB(220, 250, 235), RGB(155, 220, 190) }, // BPM: ミント
@@ -1524,10 +1543,10 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 				{ RGB(255, 250, 220), RGB(240, 215, 150) }, // SS: 金
 				{ RGB(255, 230, 240), RGB(245, 180, 205) }, // Alarm: 薔薇
 				{ RGB(225, 250, 250), RGB(160, 215, 220) }, // Remote: 青緑
+				{ RGB(235, 245, 255), RGB(150, 190, 230) }, // Maze: 青
 			};
-			for (int bi = 0; bi < 8; ++bi) {
+			for (int bi = 0; bi < 9; ++bi) {
 				if (!bots[bi]->GetSafeHwnd()) continue;
-				// Flat にすると DrawDecorations/キラキラが消える。キャプチャ等と同系の飾りを残す
 				bots[bi]->SetGradation(botGrad[bi][0], botGrad[bi][1], 0, TRUE);
 			}
 		}
@@ -1883,6 +1902,7 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 	if (m_botSsViz.GetSafeHwnd()) m_botSsViz.SetFont(&m_fontChk, TRUE);
 	if (m_botAlarm.GetSafeHwnd()) m_botAlarm.SetFont(&m_fontChk, TRUE);
 	if (m_botRemote.GetSafeHwnd()) m_botRemote.SetFont(&m_fontChk, TRUE);
+	if (m_botMaze.GetSafeHwnd()) m_botMaze.SetFont(&m_fontChk, TRUE);
 	if (m_abA.GetSafeHwnd()) m_abA.SetFont(&m_fontChk, TRUE);
 	if (m_abB.GetSafeHwnd()) m_abB.SetFont(&m_fontChk, TRUE);
 	if (m_abClr.GetSafeHwnd()) m_abClr.SetFont(&m_fontChk, TRUE);
@@ -2102,6 +2122,8 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 		addTip(m_botAlarm, LL14(L"アラームのON/OFFを切り替えます。", L"Toggle alarm on/off.", L"Activer/desactiver l'alarme.", L"Attiva/disattiva sveglia.", L"Activar/desactivar alarma.", L"알람 ON/OFF.", L"开关闹钟。", L"تشغيل/إيقاف المنبه.", L"Вкл/выкл будильник.", L"Wecker ein/aus.", L"Ligar/desligar alarme.", L"Wekker aan/uit.", L"Wlacz/wylacz budzik.", L"Alarm ac/kapa."));
 	if (m_botRemote.GetSafeHwnd())
 		addTip(m_botRemote, LL14(L"ローカルリモート (HTTP) を切り替えます。", L"Toggle local remote (HTTP).", L"Basculer la telecommande locale (HTTP).", L"Attiva/disattiva remote locale (HTTP).", L"Alternar remoto local (HTTP).", L"로컬 리모트(HTTP) 전환.", L"切换本地遥控 (HTTP)。", L"تبديل التحكم المحلي (HTTP).", L"Переключить локальный пульт (HTTP).", L"Lokalfernbedienung (HTTP) umschalten.", L"Alternar remoto local (HTTP).", L"Lokale bediening (HTTP) wisselen.", L"Przelacz pilot lokalny (HTTP).", L"Yerel uzaktan (HTTP) ac/kapa."));
+	if (m_botMaze.GetSafeHwnd())
+		addTip(m_botMaze, LL14(L"Soft3D 迷路を開きます。", L"Open Soft3D maze.", L"Ouvrir le labyrinthe Soft3D.", L"Apri il labirinto Soft3D.", L"Abrir el laberinto Soft3D.", L"Soft3D 미로 열기.", L"打开 Soft3D 迷宫。", L"فتح متاهة Soft3D.", L"Открыть лабиринт Soft3D.", L"Soft3D-Labyrinth öffnen.", L"Abrir o labirinto Soft3D.", L"Soft3D-doolhof openen.", L"Otwórz labirynt Soft3D.", L"Soft3D labirenti aç."));
 	addTip(m_saveparam, LL14(L"曲ごとに音量・EQ・テンポ等の全パラメータを記憶し、その曲を再生する度に自動で復元します。", L"Remember all parameters (volume, EQ, tempo, etc.) per song and auto-restore them each time the song plays.", L"Memoriser tous les parametres par morceau et les restaurer automatiquement.", L"Memorizza tutti i parametri per brano e li ripristina automaticamente.", L"Recuerda todos los parametros por pista y los restaura automaticamente.", L"곡별로 볼륨·EQ·템포 등 모든 파라미터를 기억하고 재생할 때마다 자동 복원합니다.", L"逐曲记忆音量、EQ、速度等所有参数，每次播放该曲时自动恢复。", L"تذكر كل المعلمات لكل أغنية واستعادتها تلقائيًا.", L"Запоминать все параметры для каждого трека и восстанавливать автоматически.", L"Alle Parameter pro Titel merken und automatisch wiederherstellen.", L"Memoriza todos os parametros por faixa e restaura automaticamente.", L"Onthoud alle parameters per nummer en herstel automatisch.", L"Zapamietaj wszystkie parametry na utwor i przywracaj automatycznie.", L"Her parça için tüm parametreleri hatırla ve otomatik geri yükle."));
 	addTip(m_resetdata, LL14(L"曲ごとに保存した設定を全削除し、音量50%・拡張100%・EQ等を初期状態へ戻します。", L"Delete all per-song saved settings and reset volume to 50%, ext to 100%, EQ etc. to defaults.", L"Supprimer tous les reglages par morceau et reinitialiser les parametres.", L"Elimina tutte le impostazioni per brano e ripristina i parametri.", L"Elimina todos los ajustes por pista y restablece los parametros.", L"곡별 저장 설정을 모두 삭제하고 볼륨 50%·확장 100%·EQ 등을 초기화합니다.", L"删除所有逐曲保存的设置，并将音量重置为50%、扩展100%、EQ等为默认。", L"حذف كل الإعدادات المحفوظة لكل أغنية وإعادة الضبط.", L"Удалить все сохранённые настройки треков и сбросить параметры.", L"Alle pro-Titel-Einstellungen loeschen und Parameter zuruecksetzen.", L"Excluir todas as configuracoes por faixa e redefinir os parametros.", L"Verwijder alle per-nummer-instellingen en reset de parameters.", L"Usun wszystkie ustawienia na utwor i zresetuj parametry.", L"Tum parca ayarlarini sil ve parametreleri sifirla."));
 	addTip(m_kaisuu, LL14(L"連続再生時、指定回数ループしたら次の曲へ進みます。", L"During continuous play, advance after this many loops.", L"En lecture continue, passer apres ce nombre de boucles.", L"In riproduzione continua, avanza dopo questo numero di loop.", L"En reproduccion continua, avanzar tras este numero de bucles.", L"연속 재생 시 지정 횟수만큼 반복 후 다음 곡.", L"连续播放时，循环指定次数后进入下一首。", L"في التشغيل المستمر، الانتقال بعد هذا العدد من الحلقات.", L"При непрерывном воспроизведении перейти после стольких повторов.", L"Bei Dauerwiedergabe nach so vielen Schleifen weiter.", L"Na reproducao continua, avancar apos este numero de loops.", L"Bij doorlopend afspelen na dit aantal loops verder.", L"Przy ciaglym odtwarzaniu przejdz po tylu petlach.", L"Surekli calmada bu dongu sayisindan sonra ilerle."));
@@ -2262,6 +2284,33 @@ BOOL CMediaPlayerDlg::RelayPreTranslateMessage(MSG* pMsg)
 				ShowCheatSheet();
 				return TRUE;
 			}
+		}
+	}
+	// Ctrl+K = コマンドパレット（入力欄フォーカス時は文字入力を優先）
+	if (pMsg->message == WM_KEYDOWN && (pMsg->wParam == 'K' || pMsg->wParam == 'k')
+		&& (GetKeyState(VK_CONTROL) & 0x8000) != 0
+		&& (GetKeyState(VK_MENU) & 0x8000) == 0) {
+		CWnd* pFocus = GetFocus();
+		const BOOL inEdit = (pFocus && (pFocus->GetSafeHwnd() == m_find.GetSafeHwnd()
+			|| pFocus->IsKindOf(RUNTIME_CLASS(CEdit))));
+		if (!inEdit) {
+			OpenCommandPalette();
+			return TRUE;
+		}
+	}
+	// Soft3D 中 0 = 視点リセット
+	if (pMsg->message == WM_KEYDOWN && IsBannerSoft3D()
+		&& (pMsg->wParam == '0' || pMsg->wParam == VK_NUMPAD0)) {
+		CWnd* pFocus = GetFocus();
+		const BOOL inEdit = (pFocus && (pFocus->GetSafeHwnd() == m_find.GetSafeHwnd()
+			|| pFocus->IsKindOf(RUNTIME_CLASS(CEdit))));
+		if (!inEdit) {
+			savedata.mpBanner3dyaw = -220;
+			savedata.mpBanner3dpitch = 260;
+			savedata.mpBanner3dzoom = 100;
+			SyncBannerSoft3DCamFromSave();
+			Invalidate(FALSE);
+			return TRUE;
 		}
 	}
 	// Space = 再生/一時停止。og(非表示)の IsDialogMessage がフォーカスボタン(Ys6等)を押すのを防ぐ
@@ -2963,7 +3012,10 @@ void CMediaPlayerDlg::DoLayout()
 
 	int swH = (int)(22 * s);
 	int listY = by4 + tbH + toolsH + (int)(4 * s);
-	const int botY = H - swH - M + (int)(2 * s);
+	// UXステータス帯（操作ヒント）を画面最下端に確保。ボタンと重ねない
+	const int uxBandH = max(16, (int)(18 * s));
+	const int uxBandPad = max(2, (int)(3 * s));
+	const int botY = H - swH - M - uxBandH - uxBandPad;
 	const int micRowH = chkRowH + (int)(2 * s);
 	const int ckY = botY - (int)(8 * s) - chkRowH;
 	const int micY = ckY - micRowH;
@@ -3233,27 +3285,27 @@ void CMediaPlayerDlg::DoLayout()
 	const int gapBot = (int)(4 * s);
 	if (!savedata.mpBotToolsInited) {
 		savedata.mpBotToolsInited = 1;
-		savedata.mpBotToolsFlags = 0x0F; // DJ|Tag|BPM|Sleep
+		savedata.mpBotToolsFlags = 0x10F; // DJ|Tag|BPM|Sleep|Maze
 	}
 	const int botFl = savedata.mpBotToolsFlags;
-	CCustomStandardButton* botBtn[8] = {
-		&m_botDj, &m_botTag, &m_botBpm, &m_botSleep, &m_botMirror, &m_botSsViz, &m_botAlarm, &m_botRemote
+	CCustomStandardButton* botBtn[9] = {
+		&m_botDj, &m_botTag, &m_botBpm, &m_botSleep, &m_botMirror, &m_botSsViz, &m_botAlarm, &m_botRemote, &m_botMaze
 	};
-	const int botBit[8] = { 1, 2, 4, 8, 16, 32, 64, 128 };
-	const int wFull[8] = {
+	const int botBit[9] = { 1, 2, 4, 8, 16, 32, 64, 128, 256 };
+	const int wFull[9] = {
 		(int)(56 * s), (int)(52 * s), (int)(48 * s), (int)(56 * s),
-		(int)(60 * s), (int)(40 * s), (int)(56 * s), (int)(64 * s)
+		(int)(60 * s), (int)(40 * s), (int)(56 * s), (int)(64 * s), (int)(52 * s)
 	};
-	const int wMid[8] = {
+	const int wMid[9] = {
 		(int)(36 * s), (int)(36 * s), (int)(36 * s), (int)(40 * s),
-		(int)(40 * s), (int)(32 * s), (int)(40 * s), (int)(44 * s)
+		(int)(40 * s), (int)(32 * s), (int)(40 * s), (int)(44 * s), (int)(36 * s)
 	};
-	const int wShort[8] = {
+	const int wShort[9] = {
 		(int)(28 * s), (int)(28 * s), (int)(28 * s), (int)(28 * s),
-		(int)(28 * s), (int)(28 * s), (int)(28 * s), (int)(28 * s)
+		(int)(28 * s), (int)(28 * s), (int)(28 * s), (int)(28 * s), (int)(28 * s)
 	};
 	int needFull = 0, needMid = 0, needShort = 0;
-	for (int i = 0; i < 8; ++i) {
+	for (int i = 0; i < 9; ++i) {
 		if (!(botFl & botBit[i])) continue;
 		needFull += wFull[i] + gapBot;
 		needMid += wMid[i] + gapBot;
@@ -3281,8 +3333,10 @@ void CMediaPlayerDlg::DoLayout()
 			m_botAlarm.SetWindowText(botShortLv >= 2 ? L"Alm" : LL14(L"アラーム", L"Alarm", L"Alarme", L"Sveglia", L"Alarma", L"알람", L"闹钟", L"منبه", L"Будильник", L"Wecker", L"Alarme", L"Wekker", L"Budzik", L"Alarm"));
 		if (m_botRemote.GetSafeHwnd())
 			m_botRemote.SetWindowText(botShortLv >= 2 ? L"Rem" : LL14(L"リモート", L"Remote", L"Remote", L"Remote", L"Remoto", L"리모트", L"遥控", L"تحكم", L"Пульт", L"Remote", L"Remoto", L"Remote", L"Pilot", L"Uzaktan"));
+		if (m_botMaze.GetSafeHwnd())
+			m_botMaze.SetWindowText(botShortLv >= 2 ? L"Mz" : LL14(L"迷路", L"Maze", L"Labyrinthe", L"Labirinto", L"Laberinto", L"미로", L"迷宫", L"متاهة", L"Лабиринт", L"Labyrinth", L"Labirinto", L"Doolhof", L"Labirynt", L"Labirent"));
 	}
-	for (int i = 0; i < 8; ++i) {
+	for (int i = 0; i < 9; ++i) {
 		CCustomStandardButton* b = botBtn[i];
 		if (!b->GetSafeHwnd()) continue;
 		if (!(botFl & botBit[i])) {
@@ -4078,6 +4132,7 @@ void CMediaPlayerDlg::SyncFromMain()
 			g_ds_pcm_rate, g_ds_pcm_ch, g_ds_pcm_bits);
 		if (key != m_lastBannerKey) {
 			m_lastBannerKey = key;
+			m_trackFadeStart = GetTickCount();
 			ResetInfoScroll();   // 曲変更時はスクロール位置をリセット
 			InvalidateSidePanels();
 		}
@@ -4840,6 +4895,7 @@ void CMediaPlayerDlg::PresentBannerSoft3D(CDC* pDC)
 	GdiSoft3D::View v;
 	GdiSoft3D::BuildView(sw, sh, m_bannerCam3d, boxes, 1, v);
 
+	const DWORD softT0 = GetTickCount();
 	if (!m_bannerSoftCtx.Create(sw, sh)) {
 		::SelectObject(m_memBanner.GetSafeHdc(), oldBmp);
 		return;
@@ -4873,6 +4929,66 @@ void CMediaPlayerDlg::PresentBannerSoft3D(CDC* pDC)
 
 	ctx.EndFrame();
 	ctx.Present(m_memBanner, 0, 0);
+
+	// CPU 描画なので面積次第で遅くなる。連続で重かったら 2D に戻す案内を出す。
+	{
+		const DWORD spent = GetTickCount() - softT0;
+		if (spent >= 24) {
+			if (++m_soft3dSlowFrames >= 30) {
+				m_soft3dSlowFrames = 0;
+				m_soft3dPerfHintUntil = GetTickCount() + 4000;
+			}
+		} else if (m_soft3dSlowFrames > 0) {
+			--m_soft3dSlowFrames;
+		}
+	}
+
+	// ツアー中(操作ガイドの Soft3D 章から)はバナー左上にヒントを重ねる
+	{
+		const DWORD now = GetTickCount();
+		if (now < m_soft3dTourUntil || now < m_soft3dPerfHintUntil) {
+			const int oldMode = m_memBanner.SetBkMode(TRANSPARENT);
+			CFont* oldFont = m_memBanner.SelectObject(GetFont());
+			if (now < m_soft3dTourUntil) {
+				m_memBanner.SetTextColor(RGB(255, 236, 180));
+				m_memBanner.TextOut(8, 6, LL14(
+					L"ドラッグで視点、ホイールでズーム、0 で戻る",
+					L"Drag to orbit, wheel to zoom, 0 to reset",
+					L"Glisser = orbite, molette = zoom, 0 = reset",
+					L"Trascina = orbita, rotella = zoom, 0 = reset",
+					L"Arrastrar = órbita, rueda = zoom, 0 = reiniciar",
+					L"드래그로 시점, 휠로 줌, 0 으로 복귀",
+					L"拖动旋转视角，滚轮缩放，0 复位",
+					L"اسحب للدوران، العجلة للتكبير، 0 للتصفير",
+					L"Тянуть — облёт, колесо — зум, 0 — сброс",
+					L"Ziehen = Orbit, Rad = Zoom, 0 = Reset",
+					L"Arraste = órbita, roda = zoom, 0 = redefinir",
+					L"Slepen = orbit, wiel = zoom, 0 = reset",
+					L"Przeciąganie = orbita, kółko = zoom, 0 = reset",
+					L"Sürükle = yörünge, teker = zoom, 0 = sıfırla"));
+			}
+			if (now < m_soft3dPerfHintUntil) {
+				m_memBanner.SetTextColor(RGB(255, 190, 160));
+				m_memBanner.TextOut(8, 6 + 18, LL14(
+					L"重いときは右クリックから 2D に戻せます",
+					L"Feeling heavy? Switch back to 2D from the context menu",
+					L"Trop lourd ? Revenez en 2D via le menu contextuel",
+					L"Troppo pesante? Torna al 2D dal menu contestuale",
+					L"¿Va lento? Vuelva a 2D desde el menú contextual",
+					L"무거우면 우클릭에서 2D로 돌릴 수 있습니다",
+					L"若觉得卡，可从右键菜单切回 2D",
+					L"ثقيل؟ عد إلى 2D من قائمة السياق",
+					L"Тяжело? Вернитесь в 2D через контекстное меню",
+					L"Zu zäh? Über das Kontextmenü zurück zu 2D",
+					L"Pesado? Volte ao 2D pelo menu de contexto",
+					L"Te zwaar? Ga terug naar 2D via het contextmenu",
+					L"Za ciężko? Wróć do 2D z menu kontekstowego",
+					L"Ağır mı? Bağlam menüsünden 2B'ye dönün"));
+			}
+			if (oldFont) m_memBanner.SelectObject(oldFont);
+			m_memBanner.SetBkMode(oldMode);
+		}
+	}
 
 #if CCUSTOM_AERO_SUPPORT
 	if (savedata.aero == 1 && CCC_IsWin11())
@@ -5479,6 +5595,15 @@ void CMediaPlayerDlg::OnPaint()
 			if (hitBanner) BlitVisualizer(&dc);
 			DrawSidePanels(&dc);
 		}
+		DrawHighlightPulse(&dc);
+		if (!m_jacketRect.IsRectEmpty())
+			DrawTrackFadeOverlay(&dc, m_jacketRect);
+		if (!m_infoPanelRect.IsRectEmpty())
+			DrawTrackFadeOverlay(&dc, m_infoPanelRect);
+		else if (!m_bannerRect.IsRectEmpty())
+			DrawTrackFadeOverlay(&dc, m_bannerRect);
+		UpdateUxStatusAndChips();
+		DrawUxStatusBand(&dc);
 		CCC_CaptionPaint(dc, m_hWnd);
 		COgg_ClearGdiPaintPending();
 		return;
@@ -5532,6 +5657,15 @@ void CMediaPlayerDlg::OnPaint()
 		if (hitBanner) BlitVisualizer(&pdc);
 		DrawSidePanels(&pdc);
 	}
+	DrawHighlightPulse(&pdc);
+	if (!m_jacketRect.IsRectEmpty())
+		DrawTrackFadeOverlay(&pdc, m_jacketRect);
+	if (!m_infoPanelRect.IsRectEmpty())
+		DrawTrackFadeOverlay(&pdc, m_infoPanelRect);
+	else if (!m_bannerRect.IsRectEmpty())
+		DrawTrackFadeOverlay(&pdc, m_bannerRect);
+	UpdateUxStatusAndChips();
+	DrawUxStatusBand(&pdc);
 	CCC_CaptionPaint(pdc, m_hWnd);
 	COgg_ClearGdiPaintPending();
 }
@@ -5616,6 +5750,10 @@ void CMediaPlayerDlg::OnDestroy()
 		RemoveWindowSubclass(m_list.GetSafeHwnd(), ListHeaderNotifySubclassProc, kMpListHdrSubclassId);
 	if (g_mpHelpDlg && ::IsWindow(g_mpHelpDlg->GetSafeHwnd()))
 		g_mpHelpDlg->DestroyWindow();
+	if (CMpHelpDlg* help = CMpHelpDlg::Instance()) {
+		if (::IsWindow(help->GetSafeHwnd()))
+			help->DestroyWindow();
+	}
 	MpAddonsShutdownAll();
 	CloseDeviceRecordIfOpen();
 	CCustomBlurDialogExBase::OnDestroy();
@@ -6507,6 +6645,7 @@ void CMediaPlayerDlg::OnBotVisMirror() { ToggleBotVisFlag(16); }
 void CMediaPlayerDlg::OnBotVisSsViz() { ToggleBotVisFlag(32); }
 void CMediaPlayerDlg::OnBotVisAlarm() { ToggleBotVisFlag(64); }
 void CMediaPlayerDlg::OnBotVisRemote() { ToggleBotVisFlag(128); }
+void CMediaPlayerDlg::OnBotVisMaze() { ToggleBotVisFlag(256); }
 
 void CMediaPlayerDlg::OnSaveParam()
 {
@@ -7869,6 +8008,189 @@ void CMediaPlayerDlg::LibFitNoHScroll(CWnd* pList)
 	::ShowScrollBar(h, SB_HORZ, FALSE);
 }
 
+// 操作ガイドのミニマップクリック → 該当パーツを 0.8 秒だけ枠で光らせる
+LRESULT CMediaPlayerDlg::OnMpHelpHighlight(WPARAM wParam, LPARAM lParam)
+{
+	if (!::IsWindow(GetSafeHwnd())) return 0;
+	m_pulseHighlightId = (int)wParam;
+	m_pulseUntil = GetTickCount() + 800;
+	// lParam==1: ガイドの Soft3D 章を開いた合図。バナー上でツアーヒントを流す。
+	if (lParam == 1 && IsBannerSoft3D())
+		m_soft3dTourUntil = GetTickCount() + 6000;
+	Invalidate(FALSE);
+	return 0;
+}
+
+void CMediaPlayerDlg::DrawHighlightPulse(CDC* pDC)
+{
+	if (!pDC || m_pulseHighlightId < 0) return;
+	const DWORD now = GetTickCount();
+	if (now >= m_pulseUntil) {
+		m_pulseHighlightId = -1;
+		return;
+	}
+	CRect rc;
+	switch (m_pulseHighlightId) {
+	case 0: // Lib
+		if (m_plRailRect.IsRectEmpty()) return;
+		rc = m_plRailRect;
+		break;
+	case 1: // Banner
+		if (m_bannerRect.IsRectEmpty()) return;
+		rc = m_bannerRect;
+		break;
+	case 2: // Play
+		if (m_play.GetSafeHwnd()) m_play.GetWindowRect(&rc);
+		else return;
+		ScreenToClient(&rc);
+		break;
+	case 3: // Sound
+		if (m_vol.GetSafeHwnd()) m_vol.GetWindowRect(&rc);
+		else return;
+		ScreenToClient(&rc);
+		break;
+	case 4: // List
+		if (m_list.GetSafeHwnd()) m_list.GetWindowRect(&rc);
+		else return;
+		ScreenToClient(&rc);
+		break;
+	case 5: // Lyrics
+		if (m_lrc.GetSafeHwnd()) m_lrc.GetWindowRect(&rc);
+		else if (!m_infoPanelRect.IsRectEmpty()) rc = m_infoPanelRect;
+		else return;
+		if (m_lrc.GetSafeHwnd()) ScreenToClient(&rc);
+		break;
+	case 6: // Tools
+		if (m_toolsToggle.GetSafeHwnd()) m_toolsToggle.GetWindowRect(&rc);
+		else return;
+		ScreenToClient(&rc);
+		break;
+	default:
+		return;
+	}
+	rc.InflateRect(2, 2);
+	CPen pen(PS_SOLID, 2, RGB(255, 160, 60));
+	CPen* old = pDC->SelectObject(&pen);
+	CBrush* oldBr = (CBrush*)pDC->SelectStockObject(NULL_BRUSH);
+	pDC->Rectangle(&rc);
+	if (oldBr) pDC->SelectObject(oldBr);
+	pDC->SelectObject(old);
+	// パルス中は次フレームも再描画
+	InvalidateRect(&rc, FALSE);
+}
+
+void CMediaPlayerDlg::DrawTrackFadeOverlay(CDC* pDC, const CRect& rc)
+{
+	if (!pDC || rc.IsRectEmpty() || m_trackFadeStart == 0) return;
+	const DWORD el = GetTickCount() - m_trackFadeStart;
+	if (el >= 260) {
+		m_trackFadeStart = 0;
+		return;
+	}
+	const int a = 220 - (int)(el * 220 / 260);
+	if (a <= 0) return;
+	const int w = rc.Width(), h = rc.Height();
+	if (w < 2 || h < 2) return;
+	BITMAPINFO bi = {};
+	bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+	bi.bmiHeader.biWidth = w;
+	bi.bmiHeader.biHeight = -h;
+	bi.bmiHeader.biPlanes = 1;
+	bi.bmiHeader.biBitCount = 32;
+	bi.bmiHeader.biCompression = BI_RGB;
+	void* bits = nullptr;
+	HBITMAP dib = ::CreateDIBSection(pDC->GetSafeHdc(), &bi, DIB_RGB_COLORS, &bits, nullptr, 0);
+	if (!dib || !bits) return;
+	CDC mem;
+	mem.CreateCompatibleDC(pDC);
+	HGDIOBJ old = ::SelectObject(mem.GetSafeHdc(), dib);
+	mem.FillSolidRect(0, 0, w, h, RGB(12, 14, 22));
+	BLENDFUNCTION bf = {};
+	bf.BlendOp = AC_SRC_OVER;
+	bf.SourceConstantAlpha = (BYTE)a;
+	bf.AlphaFormat = 0;
+	::AlphaBlend(pDC->GetSafeHdc(), rc.left, rc.top, w, h, mem.GetSafeHdc(), 0, 0, w, h, bf);
+	::SelectObject(mem.GetSafeHdc(), old);
+	::DeleteObject(dib);
+	InvalidateRect(&rc, FALSE);
+}
+
+void CMediaPlayerDlg::UpdateUxStatusAndChips()
+{
+	CString status;
+	CString chip;
+	CWnd* pFocus = GetFocus();
+	if (pFocus && ::IsWindow(pFocus->GetSafeHwnd())) {
+		const int id = pFocus->GetDlgCtrlID();
+		if (id == IDC_MP_FIND)
+			status = LL14(L"検索欄: Enter で次候補", L"Find: Enter = next hit", L"Recherche: Entree = suivant", L"Cerca: Invio = successivo", L"Buscar: Enter = siguiente", L"검색: Enter=다음", L"搜索：Enter 下一个", L"بحث: Enter التالي", L"Поиск: Enter — далее", L"Suche: Enter = naechster", L"Busca: Enter = proximo", L"Zoeken: Enter = volgende", L"Szukaj: Enter = nastepny", L"Ara: Enter = sonraki");
+		else if (id == IDC_MP_PLAY || id == IDC_MP_PAUSE)
+			status = LL14(L"再生操作: Space でも切替", L"Playback: Space also toggles", L"Lecture: Espace bascule aussi", L"Play: Spazio alterna", L"Play: Espacio tambien", L"재생: Space로도 전환", L"播放：也可用 Space 切换", L"تشغيل: Space أيضاً", L"Воспроизведение: Space тоже", L"Wiedergabe: Leertaste wechselt", L"Play: Espaco tambem", L"Play: Spatie wisselt ook", L"Play: Spacja tez", L"Play: Space de degistirir");
+	}
+	if (status.IsEmpty()) {
+		if (IsBannerSoft3D())
+			status = LL14(L"簡易3D: ドラッグ=回転 / ホイール=ズーム / 0=リセット / Ctrl+K=パレット", L"Soft 3D: drag=orbit / wheel=zoom / 0=reset / Ctrl+K=palette", L"Soft 3D: glisser=orbite / molette=zoom / 0=reset / Ctrl+K", L"Soft 3D: trascina=orbita / rotella=zoom / 0=reset / Ctrl+K", L"Soft 3D: arrastrar=órbita / rueda=zoom / 0=reset / Ctrl+K", L"간이3D: 드래그=회전 / 휠=줌 / 0=리셋 / Ctrl+K", L"简易3D：拖=旋转 / 轮=缩放 / 0=复位 / Ctrl+K", L"Soft 3D: سحب=دوران / عجلة=تكبير / 0=تصفير / Ctrl+K", L"Soft 3D: тянуть=облёт / колесо=зум / 0=сброс / Ctrl+K", L"Soft 3D: Ziehen=Orbit / Rad=Zoom / 0=Reset / Ctrl+K", L"Soft 3D: arraste=orbita / roda=zoom / 0=reset / Ctrl+K", L"Soft 3D: slepen=orbit / wiel=zoom / 0=reset / Ctrl+K", L"Soft 3D: przeciągnij=orbita / kółko=zoom / 0=reset / Ctrl+K", L"Soft 3D: sürükle=yörünge / teker=zoom / 0=sıfırla / Ctrl+K");
+		else
+			status = LL14(L"?:操作ガイド  Ctrl+K:コマンドパレット  Space:再生/一時停止", L"?: guide  Ctrl+K: command palette  Space: play/pause", L"?: guide  Ctrl+K: palette  Espace: lecture/pause", L"?: guida  Ctrl+K: palette  Spazio: play/pausa", L"?: guía  Ctrl+K: paleta  Espacio: play/pausa", L"?:가이드  Ctrl+K:팔레트  Space:재생/일시정지", L"?:指南  Ctrl+K:命令面板  Space:播放/暂停", L"?:دليل  Ctrl+K:لوحة أوامر  Space:تشغيل/إيقاف", L"?:руководство  Ctrl+K:палитра  Space:play/пауза", L"?:Guide  Ctrl+K:Palette  Leertaste:Play/Pause", L"?:guia  Ctrl+K:paleta  Espaco:play/pausa", L"?:gids  Ctrl+K:palet  Spatie:play/pauze", L"?:przewodnik  Ctrl+K:paleta  Spacja:play/pauza", L"?:kılavuz  Ctrl+K:palet  Space:play/duraklat");
+	}
+	{
+		const CString extra = MpFeatStatusLine();
+		if (!extra.IsEmpty()) {
+			status += L"  ·  ";
+			status += extra;
+		}
+	}
+	if (plf)
+		chip = LL14(L"Space=一時停止", L"Space=Pause", L"Espace=Pause", L"Spazio=Pausa", L"Espacio=Pausa", L"Space=일시정지", L"Space=暂停", L"Space=إيقاف", L"Space=Пауза", L"Leertaste=Pause", L"Espaco=Pausa", L"Spatie=Pauze", L"Spacja=Pauza", L"Space=Duraklat");
+	else
+		chip = LL14(L"Space=再生", L"Space=Play", L"Espace=Lecture", L"Spazio=Play", L"Espacio=Play", L"Space=재생", L"Space=播放", L"Space=تشغيل", L"Space=Play", L"Leertaste=Play", L"Espaco=Play", L"Spatie=Play", L"Spacja=Play", L"Space=Play");
+	if (IsBannerSoft3D()) {
+		chip += L"  |  ";
+		chip += LL14(L"0=視点リセット", L"0=Reset view", L"0=Reset vue", L"0=Reset vista", L"0=Restablecer", L"0=시점 리셋", L"0=重置视角", L"0=تصفير العرض", L"0=Сброс вида", L"0=Ansicht zurueck", L"0=Redefinir vista", L"0=Weergave reset", L"0=Reset widoku", L"0=Gorunum sifirla");
+	}
+	if (m_soft3dPerfHintUntil && GetTickCount() < m_soft3dPerfHintUntil
+		&& (savedata.soft3dPerfHintDismiss & 1) == 0) {
+		chip += L"  |  ";
+		chip += LL14(L"クリックで2Dへ", L"Click→2D", L"Clic→2D", L"Clic→2D", L"Clic→2D", L"클릭→2D", L"点击→2D", L"نقر→2D", L"Клик→2D", L"Klick→2D", L"Clique→2D", L"Klik→2D", L"Klik→2D", L"Tik→2D");
+	}
+	const bool changed = (status != m_uxStatusText) || (chip != m_uxChipText);
+	m_uxStatusText = status;
+	m_uxChipText = chip;
+	if (changed)
+		Invalidate(FALSE);
+}
+
+void CMediaPlayerDlg::DrawUxStatusBand(CDC* pDC)
+{
+	if (!pDC) return;
+	CRect rc;
+	GetClientRect(&rc);
+	const int capH = CCC_GetCustomCaptionHeight(m_hWnd);
+	const float s = (hD2 > 0.f) ? hD2 : 1.f;
+	const int bandH = max(16, (int)(18 * s));
+	const int bandPad = max(2, (int)(2 * s));
+	CRect band(rc.left + 6, rc.bottom - bandH - bandPad, rc.right - 6, rc.bottom - bandPad);
+	if (band.top <= capH) return;
+	pDC->FillSolidRect(&band, RGB(248, 248, 252));
+	pDC->SetBkMode(TRANSPARENT);
+	CFont* old = pDC->SelectObject(GetFont());
+	pDC->SetTextColor(RGB(70, 70, 90));
+	CString left = m_uxStatusText;
+	CString right = m_uxChipText;
+	CRect leftRc = band;
+	if (!right.IsEmpty()) {
+		CSize sz = pDC->GetTextExtent(right);
+		CRect chipRc(band.right - sz.cx - 10, band.top + 1, band.right - 2, band.bottom - 1);
+		pDC->FillSolidRect(&chipRc, RGB(255, 236, 210));
+		pDC->SetTextColor(RGB(120, 70, 20));
+		pDC->DrawText(right, &chipRc, DT_RIGHT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+		leftRc.right = chipRc.left - 6;
+		pDC->SetTextColor(RGB(70, 70, 90));
+	}
+	pDC->DrawText(left, &leftRc, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
+	if (old) pDC->SelectObject(old);
+}
+
 LRESULT CMediaPlayerDlg::OnLibBuildLazy(WPARAM, LPARAM)
 {
 	if (!::IsWindow(GetSafeHwnd())) return 0;
@@ -8721,6 +9043,12 @@ void CMediaPlayerDlg::OnRButtonUp(UINT nFlags, CPoint point)
 					subView->AddSlider(LL14(L"Zoom (%)", L"Zoom (%)", L"Zoom (%)", L"Zoom (%)", L"Zoom (%)", L"Zoom (%)", L"缩放 (%)", L"تكبير (%)", L"Масштаб (%)", L"Zoom (%)", L"Zoom (%)", L"Zoom (%)", L"Zoom (%)", L"Zoom (%)"),
 						35, 400, zoomPct, &CMediaPlayerDlg::BannerSoft3dZoomCb, this,
 						LL14(L"拡大縮小（ドラッグ中に反映）", L"Zoom (live)", L"Zoom (direct)", L"Zoom (live)", L"Zoom (en vivo)", L"확대/축소(즉시)", L"缩放（即时）", L"تكبير (مباشر)", L"Масштаб (сразу)", L"Zoom (live)", L"Zoom (ao vivo)", L"Zoom (live)", L"Powiększenie (na zywo)", L"Yakinlastirma (anlik)"));
+					subView->AddSeparator();
+					subView->AddCommand(42342,
+						LL14(L"視点をリセット", L"Reset view", L"Reinitialiser la vue", L"Reimposta vista", L"Restablecer vista",
+							L"시점 재설정", L"重置视角", L"إعادة ضبط العرض", L"Сбросить вид", L"Ansicht zuruecksetzen",
+							L"Redefinir vista", L"Weergave resetten", L"Resetuj widok", L"Gorunumu sifirla"),
+						LL14(L"簡易3Dのカメラを既定（Yaw/Pitch/Zoom）に戻します。ショートカット 0。", L"Restore Soft 3D camera to defaults (Yaw/Pitch/Zoom). Shortcut 0.", L"Remettre la camera 3D par defaut. Raccourci 0.", L"Ripristina la camera Soft 3D ai valori predefiniti. Scorciatoia 0.", L"Restaurar la camara Soft 3D a valores por defecto. Atajo 0.", L"간이 3D 카메라를 기본값으로. 단축키 0.", L"将简易3D相机恢复为默认。快捷键 0。", L"إعادة كاميرا Soft 3D للافتراضي. اختصار 0.", L"Вернуть Soft 3D камеру к умолчанию. Клавиша 0.", L"Soft-3D-Kamera auf Standard. Taste 0.", L"Restaurar camera Soft 3D ao padrao. Atalho 0.", L"Soft 3D-camera terugzetten. Sneltoets 0.", L"Przywroc kamere Soft 3D do domyslnych. Skrot 0.", L"Soft 3D kamerayi varsayilana al. Kisayol 0."));
 				}
 			}
 			menu.AddSeparator();
@@ -8839,6 +9167,12 @@ void CMediaPlayerDlg::OnRButtonUp(UINT nFlags, CPoint point)
 				L"Руководство", L"Bedienungsanleitung", L"Guia de operação", L"Handleiding",
 				L"Przewodnik", L"İşlem kılavuzu"),
 				LL14(L"この画面の操作ガイド（ヘルプシート）を表示します", L"Show the operation guide (help sheet) for this view", L"Afficher le guide d'utilisation de cette vue", L"Mostra la guida operativa di questa vista", L"Mostrar la guía de operación de esta vista", L"이 화면의 조작 가이드를 표시", L"显示此界面的操作指南", L"عرض دليل التشغيل لهذه الشاشة", L"Показать руководство по этой панели", L"Bedienungsanleitung fur diese Ansicht zeigen", L"Mostrar o guia de operacao desta tela", L"Handleiding voor dit scherm tonen", L"Pokaz przewodnik po tym widoku", L"Bu ekranin islem kilavuzunu goster"));
+		menu.AddCommand(42343,
+			LL14(L"コマンドパレット… Ctrl+K", L"Command palette… Ctrl+K", L"Palette de commandes… Ctrl+K", L"Palette comandi… Ctrl+K",
+				L"Paleta de comandos… Ctrl+K", L"명령 팔레트… Ctrl+K", L"命令面板… Ctrl+K", L"لوحة الأوامر… Ctrl+K",
+				L"Палитра команд… Ctrl+K", L"Befehlspalette… Ctrl+K", L"Paleta de comandos… Ctrl+K", L"Opdrachtpalet… Ctrl+K",
+				L"Paleta polecen… Ctrl+K", L"Komut paleti… Ctrl+K"),
+				LL14(L"入力して絞り込み、Enter で実行できるコマンド一覧を開きます（Ctrl+K）", L"Open a searchable command list; Enter runs the selection (Ctrl+K)", L"Ouvrir la liste de commandes filtrable ; Entree execute (Ctrl+K)", L"Apri l'elenco comandi filtrabile; Invio esegue (Ctrl+K)", L"Abrir la lista de comandos filtrable; Enter ejecuta (Ctrl+K)", L"입력으로 좁히고 Enter 로 실행하는 명령 목록을 엽니다(Ctrl+K)", L"打开可筛选的命令列表，Enter 执行（Ctrl+K）", L"فتح قائمة أوامر قابلة للتصفية وينفذ Enter التحديد (Ctrl+K)", L"Открыть список команд с фильтром; Enter выполняет (Ctrl+K)", L"Durchsuchbare Befehlsliste oeffnen; Enter fuehrt aus (Ctrl+K)", L"Abrir a lista de comandos filtravel; Enter executa (Ctrl+K)", L"Zoekbare opdrachtenlijst openen; Enter voert uit (Ctrl+K)", L"Otworz filtrowana liste polecen; Enter uruchamia (Ctrl+K)", L"Filtrelenebilir komut listesini ac; Enter calistirir (Ctrl+K)"));
 		CPoint sp = point;
 		ClientToScreen(&sp);
 		const UINT cmd = menu.Track(sp, this);
@@ -8849,7 +9183,21 @@ void CMediaPlayerDlg::OnRButtonUp(UINT nFlags, CPoint point)
 		else if (cmd == 42341) {
 			savedata.mpBannerviewmode = 1;
 			SyncBannerSoft3DCamFromSave();
+			if ((savedata.soft3dTourSeen & 1) == 0) {
+				savedata.soft3dTourSeen |= 1;
+				m_soft3dTourUntil = ::GetTickCount() + 3000;
+			}
 			Invalidate(FALSE);
+		}
+		else if (cmd == 42342) {
+			savedata.mpBanner3dyaw = -220;
+			savedata.mpBanner3dpitch = 260;
+			savedata.mpBanner3dzoom = 100;
+			SyncBannerSoft3DCamFromSave();
+			Invalidate(FALSE);
+		}
+		else if (cmd == 42343) {
+			OpenCommandPalette();
 		}
 		else if (cmd)
 			PostMessage(WM_COMMAND, cmd);
@@ -9578,6 +9926,7 @@ void CMediaPlayerDlg::ShowToolsExtrasMenu(CPoint screenPt)
 			botSub->AddCheck(ID_MP_BOTVIS_SSVIZ, LL14(L"SS ビジュアライザ", L"SS visualizer", L"Visualiseur SS", L"Visualizzatore SS", L"Visualizador SS", L"SS 비주얼", L"SS 可视化", L"عارض SS", L"SS-визуализатор", L"SS-Visualizer", L"Visual SS", L"SS-visualizer", L"Wizual SS", L"SS gorsel"), (bf & 32) != 0);
 			botSub->AddCheck(ID_MP_BOTVIS_ALARM, LL14(L"アラーム", L"Alarm", L"Alarme", L"Sveglia", L"Alarma", L"알람", L"闹钟", L"منبه", L"Будильник", L"Wecker", L"Alarme", L"Wekker", L"Budzik", L"Alarm"), (bf & 64) != 0);
 			botSub->AddCheck(ID_MP_BOTVIS_REMOTE, LL14(L"リモート", L"Remote", L"Remote", L"Remote", L"Remoto", L"리모트", L"遥控", L"تحكم", L"Пульт", L"Remote", L"Remoto", L"Remote", L"Pilot", L"Uzaktan"), (bf & 128) != 0);
+			botSub->AddCheck(ID_MP_BOTVIS_MAZE, LL14(L"迷路", L"Maze", L"Labyrinthe", L"Labirinto", L"Laberinto", L"미로", L"迷宫", L"متاهة", L"Лабиринт", L"Labyrinth", L"Labirinto", L"Doolhof", L"Labirynt", L"Labirent"), (bf & 256) != 0);
 		}
 	}
 	menu.AddCommand(ID_MP_MISS_MANAGE,
@@ -9946,6 +10295,49 @@ void CMediaPlayerDlg::ShowToolsExtrasMenu(CPoint screenPt)
 	menu.AddCommand(ID_MP_MIRROR,
 		LL14(L"ミラー出力…", L"Mirror output…", L"Sortie miroir…", L"Uscita mirror…", L"Salida espejo…", L"미러 출력…", L"镜像输出…", L"خرج مرآة…", L"Зеркальный выход…", L"Spiegelausgabe…", L"Saida espelho…", L"Spiegelaudio…", L"Wyjscie lustrzane…", L"Ayna cikis…"),
 		LL14(L"ミラー出力の設定ダイアログを開きます", L"Open the mirror-output settings dialog", L"Ouvrir la boite de sortie miroir", L"Apri la finestra di uscita mirror", L"Abrir el dialogo de salida espejo", L"미러 출력 설정 대화상자를 엽니다", L"打开镜像输出设置对话框", L"فتح مربع حوار خرج المرآة", L"Открыть диалог зеркального выхода", L"Dialog der Spiegelausgabe oeffnen", L"Abrir o dialogo de saida espelho", L"Dialoog van spiegelaudio openen", L"Otworz okno wyjscia lustrzanego", L"Ayna cikis ayar penceresini ac"));
+	menu.AddSeparator();
+	menu.AddCommand(ID_MP_SOUNDMETER,
+		LL14(L"騒音計…", L"Sound meter…", L"Sonomètre…", L"Fonometro…", L"Medidor de sonido…",
+			L"소음계…", L"声级计…", L"مقياس الصوت…", L"Шумомер…", L"Schallpegelmesser…",
+			L"Medidor de som…", L"Geluidsmeter…", L"Miernik dźwięku…", L"Ses ölçer…"),
+		LL14(L"マイクの相対 dBFS を表示します（校正 SPL ではありません）", L"Shows relative mic dBFS (not calibrated SPL)", L"Affiche le dBFS micro relatif (pas SPL calibré)", L"Mostra dBFS micro relativo (non SPL calibrato)", L"Muestra dBFS de mic relativo (no SPL calibrado)",
+			L"마이크 상대 dBFS 표시(교정 SPL 아님)", L"显示麦克风相对 dBFS（非校准 SPL）", L"يعرض dBFS نسبي للميكروفون (ليس SPL معايرًا)", L"Показывает относительный dBFS микрофона (не калибр. SPL)", L"Zeigt relativen Mikrofon-dBFS (kein kalibrierter SPL)",
+			L"Mostra dBFS relativo do micro (não SPL calibrado)", L"Toont relatief micro-dBFS (geen gekalibreerde SPL)", L"Pokazuje względne dBFS mikrofonu (nie skalibrowany SPL)", L"Mikrofon göreli dBFS gösterir (kalibre SPL değil)"));
+	menu.AddCommand(ID_MP_DIGITIZE,
+		LL14(L"アナログ起こし台…", L"Analog digitizer…", L"Numériseur analogique…", L"Digitalizzatore analogico…", L"Digitalizador analógico…",
+			L"아날로그 디지타이저…", L"模拟数字化…", L"محول تماثلي…", L"Оцифровка аналога…", L"Analog-Digitalisierer…",
+			L"Digitalizador analógico…", L"Analoge digitizer…", L"Digitalizacja analogowa…", L"Analog dijitalleştirici…"),
+		LL14(L"ライン／マイク入力を録り、モニタしながら WAV/mp3/FLAC に保存します", L"Record line/mic input to WAV/mp3/FLAC with monitoring", L"Enregistre entrée ligne/micro vers WAV/mp3/FLAC avec monitoring", L"Registra ingresso linea/micro in WAV/mp3/FLAC con monitor", L"Graba entrada de línea/mic a WAV/mp3/FLAC con monitor",
+			L"라인/마이크 입력을 모니터하며 WAV/mp3/FLAC로 녹음", L"录制线路/麦克风输入为 WAV/mp3/FLAC（可监听）", L"يسجّل دخل الخط/الميك إلى WAV/mp3/FLAC مع مراقبة", L"Запись линейного/микрофонного входа в WAV/mp3/FLAC с монитором", L"Line-/Mikrofon-Eingang als WAV/mp3/FLAC mit Monitor aufnehmen",
+			L"Grava entrada de linha/micro em WAV/mp3/FLAC com monitor", L"Neemt lijn/micro-invoer op naar WAV/mp3/FLAC met monitor", L"Nagrywa wejście liniowe/mikrofon do WAV/mp3/FLAC z monitorem", L"Hat/mikrofon girişini monitörleyerek WAV/mp3/FLAC kaydeder"));
+	menu.AddCommand(ID_MP_VOICECHANGER,
+		LL14(L"ボイスチェンジャー…", L"Voice changer…", L"Changeur de voix…", L"Cambia voce…", L"Cambiador de voz…",
+			L"보이스 체인저…", L"变声器…", L"مغير الصوت…", L"Изменение голоса…", L"Stimmenwandler…",
+			L"Modificador de voz…", L"Stemvervormer…", L"Zmiana głosu…", L"Ses değiştirici…"),
+		LL14(L"マイクを加工して仮想ケーブル等の出力へ送ります", L"Process the mic and send it to a virtual-cable output", L"Traite le micro vers une sortie câble virtuel", L"Elabora il microverso un'uscita cavo virtuale", L"Procesa el micrófono hacia una salida de cable virtual",
+			L"마이크를 가공해 가상 케이블 등으로 출력", L"处理麦克风并送到虚拟线缆等输出", L"يعالج الميكروفون ويرسله لخرج كابل افتراضي", L"Обрабатывает микрофон и выводит на виртуальный кабель", L"Verarbeitet Mikrofon und sendet an virtuelles Kabel",
+			L"Processa o microfone e envia a um cabo virtual", L"Verwerkt microfoon en stuurt naar virtuele kabel", L"Przetwarza mikrofon i wysyła na kabel wirtualny", L"Mikrofonu işleyip sanal kablo çıkışına yollar"));
+	menu.AddCommand(ID_MP_TUNERPRACTICE,
+		LL14(L"チューナー道場…", L"Tuner practice…", L"Entraînement accordeur…", L"Pratica accordatore…", L"Práctica de afinación…",
+			L"튜너 연습…", L"调音练习…", L"تدريب الموالف…", L"Практика с тюнером…", L"Stimmtraining…",
+			L"Prática de afinação…", L"Stemoefening…", L"Ćwiczenie strojenia…", L"Akort alıştırması…"),
+		LL14(L"単音チューナーとメトロノーム（趣味用途）", L"Monophonic tuner and metronome (hobby use)", L"Accordeur monophonique et métronome (loisir)", L"Accordatore monofonico e metronomo (hobbistico)", L"Afinador monofónico y metrónomo (aficionado)",
+			L"단음 튜너와 메트로놈(취미용)", L"单音调音器与节拍器（爱好用途）", L"موالف أحادي ومترونوم (للهواية)", L"Монофонический тюнер и метроном (хобби)", L"Monophones Stimmgerät und Metronom (Hobby)",
+			L"Afinador monofónico e metrónomo (amador)", L"Monofoon stemapparaat en metronoom (hobby)", L"Stroik monofoniczny i metronom (hobby)", L"Tek ses akort aleti ve metronom (hobi)"));
+	menu.AddCommand(ID_MP_PHOTOFRAME,
+		LL14(L"フォトフレーム…", L"Photo frame…", L"Cadre photo…", L"Cornice foto…", L"Marco de fotos…",
+			L"포토 프레임…", L"照片框…", L"إطار الصور…", L"Фоторамка…", L"Fotorahmen…",
+			L"Moldura…", L"Fotolijst…", L"Ramka zdjęć…", L"Fotoğraf çerçevesi…"),
+		LL14(L"画像スライドショー。プレイリストを BGM にできます", L"Image slideshow; can use the playlist as BGM", L"Diaporama d'images; playlist en BGM possible", L"Presentazione immagini; playlist come BGM", L"Diapositivas de imágenes; playlist como BGM",
+			L"이미지 슬라이드쇼. 플레이리스트를 BGM으로 사용 가능", L"图片幻灯片；可用播放列表作 BGM", L"عرض شرائح للصور؛ يمكن استخدام قائمة التشغيل كـ BGM", L"Слайд-шоу изображений; плейлист как BGM", L"Bild-Diashow; Playlist als BGM möglich",
+			L"Apresentação de imagens; playlist como BGM", L"Afbeeldingsdiavoorstelling; afspeellijst als BGM", L"Pokaz obrazów; playlista jako BGM", L"Görüntü slayt gösterisi; çalma listesi BGM olabilir"));
+	menu.AddCommand(ID_MP_SOFT3DMAZE,
+		LL14(L"Soft3D 迷路…", L"Soft3D maze…", L"Labyrinthe Soft3D…", L"Labirinto Soft3D…", L"Laberinto Soft3D…",
+			L"Soft3D 미로…", L"Soft3D 迷宫…", L"متاهة Soft3D…", L"Лабиринт Soft3D…", L"Soft3D-Labyrinth…",
+			L"Labirinto Soft3D…", L"Soft3D-doolhof…", L"Labirynt Soft3D…", L"Soft3D labirent…"),
+		LL14(L"大きさで迷路を生成。アイテムでテンポ・ピッチ・次曲・EQ に干渉します", L"Generate a maze by size; items tweak tempo, pitch, next track, EQ", L"Labyrinthe par taille ; objets affectent tempo, hauteur, piste, EQ", L"Labirinto per dimensione; oggetti influenzano tempo, pitch, brano, EQ", L"Laberinto por tamaño; objetos afectan tempo, tono, pista, EQ",
+			L"크기로 미로 생성. 아이템이 템포·피치·다음 곡·EQ에 개입", L"按大小生成迷宫；道具干预速度、音高、下一曲、EQ", L"متاهة حسب الحجم؛ العناصر تؤثر على الإيقاع والطبقة والمسار وEQ", L"Лабиринт по размеру; предметы влияют на темп, высоту, трек, EQ", L"Labyrinth nach Größe; Items greifen in Tempo, Tonhöhe, Titel, EQ ein",
+			L"Labirinto por tamanho; itens afetam tempo, tom, faixa, EQ", L"Doolhof op grootte; items grijpen in op tempo, toon, nummer, EQ", L"Labirynt wg rozmiaru; przedmioty wpływają na tempo, wysokość, utwór, EQ", L"Boyuta göre labirent; öğeler tempo, perde, parça, EQ’ye müdahale eder"));
 	menu.AddCommand(ID_MP_SSVIZ,
 		LL14(L"SS ビジュアライザ", L"SS visualizer", L"Visualiseur SS", L"Visualizzatore SS", L"Visualizador SS", L"SS 비주얼", L"SS 可视化", L"عارض SS", L"SS-визуализатор", L"SS-Visualizer", L"Visual SS", L"SS-visualizer", L"Wizual SS", L"SS gorsel"),
 		LL14(L"スクリーンセーバー風ビジュアライザを開きます", L"Open the screensaver-style visualizer", L"Ouvrir le visualiseur type ecran de veille", L"Apri il visualizzatore stile screensaver", L"Abrir el visualizador tipo protector", L"화면보호기풍 비주얼라이저를 엽니다", L"打开屏保风格可视化器", L"فتح العارض بأسلوب شاشة التوقف", L"Открыть визуализатор в стиле заставки", L"Screensaver-Visualizer oeffnen", L"Abrir o visualizador estilo protetor", L"Screensaver-achtige visualizer openen", L"Otworz wizualizer w stylu wygaszacza", L"Ekran koruyucu tarzi gorseli ac"));
@@ -11359,6 +11751,13 @@ void CMediaPlayerDlg::OnMpAlarm()
 	MpAlarmEnsureTimer(this);
 }
 void CMediaPlayerDlg::OnMpMirror() { OpenMpMirrorDlgModeless(this); }
+
+void CMediaPlayerDlg::OnMpSoundMeter() { OpenSoundMeterModeless(this); }
+void CMediaPlayerDlg::OnMpDigitize() { OpenDigitizeModeless(this); }
+void CMediaPlayerDlg::OnMpVoiceChanger() { OpenVoiceChangerModeless(this); }
+void CMediaPlayerDlg::OnMpTunerPractice() { OpenTunerPracticeModeless(this); }
+void CMediaPlayerDlg::OnMpPhotoFrame() { OpenPhotoFrameModeless(this); }
+void CMediaPlayerDlg::OnMpSoft3DMaze() { OpenSoft3DMazeModeless(this); }
 void CMediaPlayerDlg::OnMpRemote()
 {
 	CloseMpRemoteDlgIfOpen();
@@ -11574,6 +11973,8 @@ void CMpCheatSheetDlg::OnPaint()
 		L"Ekran Laira. Przegląd banera, listy, tekstu i narzędzi. Też z ? na belce.",
 		L"Laira ekranı. Banner, liste, söz ve araçların özeti. Başlıktaki ? ile de açılır."));
 	y += lh + 3;
+	y = CCC_GdiHelpDrawSoftDemoPair(dc, L, y, rc.Width() - L * 2, min(140, max(112, rc.Height() / 5)),
+		CCC_HELPDEMO_KSPECTRUM);
 
 	// mini map
 	{
@@ -11758,7 +12159,11 @@ void CMpCheatSheetDlg::OnPaint()
 	body(L, yL, LL14(L"・録音 / キャプチャ / WAV保存 …… デバイス録音・画面録画・書き出し", L"· Record / Capture / WAV …… device record, screen capture, export", L"· Enreg. / Capture / WAV …… enregistrement et export", L"· Registra / Cattura / WAV …… registrazione ed export",
 		L"· Grabar / Captura / WAV …… grabación y exportación", L"· 녹음 / 캡처 / WAV …… 장치 녹음·화면 녹화·내보내기", L"· 录音 / 捕获 / WAV …… 设备录音、屏录、导出", L"· تسجيل / التقاط / WAV …… تسجيل وتصدير",
 		L"· Запись / Захват / WAV …… запись и экспорт", L"· Aufnahme / Capture / WAV …… Aufnahme und Export", L"· Gravar / Captura / WAV …… gravação e exportação", L"· Opnemen / Capture / WAV …… opname en export",
-		L"· Nagraj / Capture / WAV …… nagrywanie i eksport", L"· Kaydet / Yakalama / WAV …… kayıt ve dışa aktarma")); yL += lh + 2;
+		L"· Nagraj / Capture / WAV …… nagrywanie i eksport", L"· Kaydet / Yakalama / WAV …… kayıt ve dışa aktarma")); yL += lh;
+	body(L, yL, LL14(L"・騒音計 / 起こし台 / ボイスチェンジャー / チューナー道場 / フォトフレーム / Soft3D迷路", L"· Sound meter / Digitizer / Voice changer / Tuner practice / Photo frame / Soft3D maze", L"· Sonomètre / Numériseur / Changeur de voix / Accordeur / Cadre photo / Labyrinthe Soft3D", L"· Fonometro / Digitalizzatore / Cambia voce / Accordatore / Cornice / Labirinto Soft3D",
+		L"· Medidor / Digitalizador / Cambiador / Afinador / Marco / Laberinto Soft3D", L"· 소음계 / 디지타이저 / 보이스체인저 / 튜너 / 포토프레임 / Soft3D 미로", L"· 声级计 / 数字化 / 变声器 / 调音练习 / 照片框 / Soft3D 迷宫", L"· مقياس صوت / محول / مغير صوت / موالف / إطار صور / متاهة Soft3D",
+		L"· Шумомер / Оцифровка / Голос / Тюнер / Фоторамка / Лабиринт Soft3D", L"· Schallpegel / Digitalisierer / Stimmenwandler / Stimmtraining / Fotorahmen / Soft3D-Labyrinth", L"· Medidor / Digitalizador / Modificador / Afinador / Moldura / Labirinto Soft3D", L"· Geluidsmeter / Digitizer / Stemvervormer / Stemtrainer / Fotolijst / Soft3D-doolhof",
+		L"· Miernik / Digitalizacja / Zmiana głosu / Stroik / Ramka / Labirynt Soft3D", L"· Ses ölçer / Dijitalleştirici / Ses değiştirici / Akort / Çerçeve / Soft3D labirent")); yL += lh + 2;
 
 	title(R, yR, LL14(L"保存 / 設定 / 切替", L"Save / Settings / Switch", L"Sauver / Réglages / Basculer", L"Salva / Impostazioni / Passa",
 		L"Guardar / Ajustes / Cambiar", L"저장 / 설정 / 전환", L"保存 / 设置 / 切换", L"حفظ / إعدادات / تبديل",
@@ -12064,20 +12469,25 @@ void CMediaPlayerDlg::OnCheatSheetBtn()
 
 void CMediaPlayerDlg::ShowCheatSheet()
 {
-	if (g_mpHelpDlg && ::IsWindow(g_mpHelpDlg->GetSafeHwnd())) {
-		CCC_PresentOwnedHelp(g_mpHelpDlg, this);
+	// アクリルキャプション＋Soft3D 実演つきの新ガイド(CMpHelpDlg)を開く。
+	CMpHelpDlg* dlg = CMpHelpDlg::Instance();
+	if (dlg && ::IsWindow(dlg->GetSafeHwnd())) {
+		CCC_PresentOwnedHelp(dlg, this);
 		return;
 	}
-	if (g_mpHelpDlg && !::IsWindow(g_mpHelpDlg->GetSafeHwnd()))
-		g_mpHelpDlg = nullptr;
 	// オーナー付きモードレス。ヘルプはオーナー上、他UI前面時は下へ（TOPMOSTしない）
-	CMpCheatSheetDlg* dlg = new CMpCheatSheetDlg(this);
+	dlg = new CMpHelpDlg(this);
 	if (!dlg->Create(IDD_MP_CHEATSHEET, this)) {
 		delete dlg;
 		return;
 	}
-	g_mpHelpDlg = dlg;
 	CCC_PresentOwnedHelp(dlg, this);
+}
+
+void CMediaPlayerDlg::OpenCommandPalette()
+{
+	// オーナー付きモードレス。シングルトン管理と自己破棄はパレット側で行う。
+	CMpCommandPaletteDlg::OpenPalette(this);
 }
 
 // pc[] を src→dst へ移動(リスト内ドラッグ移動)。再生インデックスも追従。
@@ -12129,6 +12539,20 @@ void CMediaPlayerDlg::OnBeginDragList(NMHDR* pNMHDR, LRESULT* pResult)
 // ジャケ分離していない狭い窓ではバナー内蔵ジャケなので、バナー領域クリックでも開く。
 void CMediaPlayerDlg::OnLButtonDown(UINT nFlags, CPoint point)
 {
+	// Soft3D 負荷ヒント表示中にバナーをクリック → 2D に戻す（案内どおり）
+	if (IsBannerSoft3D()
+		&& m_soft3dPerfHintUntil != 0
+		&& GetTickCount() < m_soft3dPerfHintUntil
+		&& (savedata.soft3dPerfHintDismiss & 1) == 0
+		&& !m_bannerRect.IsRectEmpty()
+		&& m_bannerRect.PtInRect(point)
+		&& point.y < m_bannerRect.top + 44) {
+		savedata.mpBannerviewmode = 0;
+		savedata.soft3dPerfHintDismiss |= 1;
+		m_soft3dPerfHintUntil = 0;
+		Invalidate(FALSE);
+		return;
+	}
 	if (IsBannerSoft3D()) {
 		const bool hit =
 			(!m_bannerRect.IsRectEmpty() && m_bannerRect.PtInRect(point)) ||

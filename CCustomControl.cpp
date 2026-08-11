@@ -5798,7 +5798,17 @@ void CCustomComboBox::PaintClient(CDC& dc)
 
     int nPS = CComboBox::GetCurSel();
     CString st;
-    if (nPS != CB_ERR) GetLBText(nPS, st);
+    // CBS_DROPDOWN/SIMPLE: 編集欄の入力を優先（CurSel の LB 文字列で上書きすると手入力が消える）
+    {
+        const DWORD cbs = (GetStyle() & 0x0Ful);
+        if (cbs == CBS_DROPDOWN || cbs == CBS_SIMPLE) {
+            GetWindowText(st);
+            if (st.IsEmpty() && nPS != CB_ERR)
+                GetLBText(nPS, st);
+        } else if (nPS != CB_ERR) {
+            GetLBText(nPS, st);
+        }
+    }
 
     COLORREF tc = bTrans ? RGB(1, 1, 1) : RGB(0, 0, 0);
     mDC.SetTextColor(tc);
@@ -9769,12 +9779,12 @@ void CCustomStandardButton::UpdateAnimTimer()
     }
 }
 
-// Soft3D 背景の常時ゆらぎ。間引き 220ms。flat／キャプション帯は対象外。
+// Soft3D 背景の常時ゆらぎ。間引き。キャプション帯は対象外（flat でも角チップ用に回す）
 static void CCC_ButtonSoftTimerSync(HWND hWnd, BOOL bFlat)
 {
     if (!hWnd) return;
-    if (!bFlat && !CCC_IsCaptionChromeCtrl(hWnd))
-        ::SetTimer(hWnd, kButtonSoftTimerId, 220, NULL);
+    if (!CCC_IsCaptionChromeCtrl(hWnd))
+        ::SetTimer(hWnd, kButtonSoftTimerId, bFlat ? 400 : 220, NULL);
     else
         ::KillTimer(hWnd, kButtonSoftTimerId);
 }
@@ -9783,7 +9793,7 @@ void CCustomStandardButton::OnTimer(UINT_PTR nIDEvent)
 {
     if (nIDEvent == kButtonSoftTimerId)
     {
-        if (m_bFlat || CCC_IsCaptionChromeCtrl(m_hWnd)) {
+        if (CCC_IsCaptionChromeCtrl(m_hWnd)) {
             KillTimer(kButtonSoftTimerId);
             return;
         }
@@ -9985,12 +9995,18 @@ void CCustomStandardButton::PaintClient(CDC& dc, const CRect& r)
         DrawGlossHighlight(&mDC, rg, m_bFlat ? 4 : 8);
         if (!m_bFlat)
             DrawJellyEdges(&mDC, rg, 8, RGB(120, 40, 80));
-        // 薄い背景 Soft ポリゴン（キャンディ箱／常時軌道はしない）
-        if (!m_bFlat && r.Width() >= 36 && r.Height() >= 20
-            && !CCC_IsCaptionChromeCtrl(m_hWnd))
+        // Soft3D: 通常ボタンは背景ゆらぎ、flat でも角チップ（キャプション帯以外）
+        if (!CCC_IsCaptionChromeCtrl(m_hWnd) && r.Width() >= 24 && r.Height() >= 16)
         {
             const int tick = (int)(::GetTickCount64() / 80) + (int)(m_nAnimTick / 2);
-            DrawSoftJkBackdrop(&mDC, rg, tick, m_bMouseOver || bP);
+            if (!m_bFlat && r.Width() >= 36 && r.Height() >= 20)
+                DrawSoftJkBackdrop(&mDC, rg, tick, m_bMouseOver || bP);
+            else {
+                const int cs = min(12, min(r.Width(), r.Height()) / 2);
+                DrawSoftJkChip(&mDC,
+                    CRect(rg.right - cs - 2, rg.top + 2, rg.right - 2, rg.top + 2 + cs),
+                    tick, m_bMouseOver || bP);
+            }
         }
 
         // 大きめのボタンは裾に透けレースの色気を(アイコン平坦ボタンは省略=はみ出し防止)
@@ -13455,6 +13471,13 @@ static BOOL CCC_PaintChildDirect(HWND hWnd, HDC hdcBuf)
         dc.Detach();
         return TRUE;
     }
+    else if (auto* pSt = dynamic_cast<CCustomStatic*>(pw))
+    {
+        if (pSt->PaintCustomOpaque(dc)) {
+            dc.Detach();
+            return TRUE;
+        }
+    }
     dc.Detach();
     return painted;
 }
@@ -13858,7 +13881,9 @@ static BOOL CCC_IsCaptionChromeCtrl(HWND hWnd)
         IDC_SC_HELP, IDC_PL_HELP, IDC_AN_HELP, IDC_PR_HELP, IDC_EQ_HELP,
         IDC_PT_HELP, IDC_RD_HELP, IDC_DR_HELP, IDC_WE_HELP, IDC_TC_HELP,
         IDC_TE_HELP, IDC_FD_HELP, IDC_KPI_HELP, IDC_SY_HELP, IDC_PRT_HELP,
-        IDC_OGG_HELP, IDC_MP_CHEATBTN
+        IDC_OGG_HELP, IDC_MP_CHEATBTN,
+        IDC_SM_HELP, IDC_DIG_HELP, IDC_VC_HELP, IDC_TN_HELP, IDC_PF_HELP,
+        IDC_S3M_HELP
     };
     for (int i = 0; i < (int)_countof(kHelpChromeIds); ++i) {
         if (id == kHelpChromeIds[i])
@@ -13873,7 +13898,9 @@ static BOOL CCC_IsCaptionHelpChromeId(UINT id)
         IDC_SC_HELP, IDC_PL_HELP, IDC_AN_HELP, IDC_PR_HELP, IDC_EQ_HELP,
         IDC_PT_HELP, IDC_RD_HELP, IDC_DR_HELP, IDC_WE_HELP, IDC_TC_HELP,
         IDC_TE_HELP, IDC_FD_HELP, IDC_KPI_HELP, IDC_SY_HELP, IDC_PRT_HELP,
-        IDC_OGG_HELP, IDC_MP_CHEATBTN
+        IDC_OGG_HELP, IDC_MP_CHEATBTN,
+        IDC_SM_HELP, IDC_DIG_HELP, IDC_VC_HELP, IDC_TN_HELP, IDC_PF_HELP,
+        IDC_S3M_HELP
     };
     for (int i = 0; i < (int)_countof(kHelpChromeIds); ++i) {
         if (id == kHelpChromeIds[i])
@@ -13889,7 +13916,9 @@ static HWND CCC_FindCaptionHelpChrome(HWND hDlg)
         IDC_SC_HELP, IDC_PL_HELP, IDC_AN_HELP, IDC_PR_HELP, IDC_EQ_HELP,
         IDC_PT_HELP, IDC_RD_HELP, IDC_DR_HELP, IDC_WE_HELP, IDC_TC_HELP,
         IDC_TE_HELP, IDC_FD_HELP, IDC_KPI_HELP, IDC_SY_HELP, IDC_PRT_HELP,
-        IDC_OGG_HELP, IDC_MP_CHEATBTN
+        IDC_OGG_HELP, IDC_MP_CHEATBTN,
+        IDC_SM_HELP, IDC_DIG_HELP, IDC_VC_HELP, IDC_TN_HELP, IDC_PF_HELP,
+        IDC_S3M_HELP
     };
     for (int i = 0; i < (int)_countof(kHelpChromeIds); ++i) {
         HWND h = ::GetDlgItem(hDlg, kHelpChromeIds[i]);
@@ -14408,7 +14437,9 @@ void CCC_CaptionLayout(HWND hDlg)
         IDC_SC_HELP, IDC_PL_HELP, IDC_AN_HELP, IDC_PR_HELP, IDC_EQ_HELP,
         IDC_PT_HELP, IDC_RD_HELP, IDC_DR_HELP, IDC_WE_HELP, IDC_TC_HELP,
         IDC_TE_HELP, IDC_FD_HELP, IDC_KPI_HELP, IDC_SY_HELP, IDC_PRT_HELP,
-        IDC_OGG_HELP, IDC_MP_CHEATBTN
+        IDC_OGG_HELP, IDC_MP_CHEATBTN,
+        IDC_SM_HELP, IDC_DIG_HELP, IDC_VC_HELP, IDC_TN_HELP, IDC_PF_HELP,
+        IDC_S3M_HELP
     };
     for (int i = 0; i < (int)_countof(kHelpChromeIds); ++i) {
         HWND hHelp = ::GetDlgItem(hDlg, kHelpChromeIds[i]);
@@ -15235,10 +15266,310 @@ void CCC_MainLockBringToFront(HWND hDlg)
 // ---- GDI ヘルプ: DPI 込み実描画範囲フィット ----
 static const UINT CCC_GDIHELP_SUBCLASS_ID = 0x47444948u; // 'GDIH'
 static const UINT CCC_WM_GDIHELP_FIT = WM_USER + 0x47F1;
+static const UINT_PTR CCC_GDIHELP_ANIM_TIMER = 0x47444154u; // Soft3D 実演アニメ
 static const COLORREF CCC_GDIHELP_BG = RGB(248, 248, 252);
 static const WCHAR CCC_GDIHELP_PROP_FITTED[] = L"CCC_GdiHelpFitted";
 static const WCHAR CCC_GDIHELP_PROP_CW[] = L"CCC_GdiHelpCW";
 static const WCHAR CCC_GDIHELP_PROP_CH[] = L"CCC_GdiHelpCH";
+
+// Soft3D ヘルプ実演（UI スレッド専用・静的再利用）
+static GdiSoft3D::Context s_helpSoft3d;
+static GdiSoft2D::Context s_helpSoft2d;
+
+static void CCC_GdiHelpFillDemoScene(GdiSoft3D::Context& ctx, int kind, DWORD tick)
+{
+	const float t = (float)tick * 0.09f;
+	switch (kind) {
+	case CCC_HELPDEMO_KSPECTRUM: {
+		float levL[16], levR[16];
+		for (int i = 0; i < 16; ++i) {
+			const float p = t + i * 0.45f;
+			levL[i] = 0.18f + 0.70f * fabsf(sinf(p));
+			levR[i] = 0.18f + 0.70f * fabsf(sinf(p + 0.85f));
+		}
+		ctx.DrawGrid(-1.05f, 1.05f, 0.0f, 0.95f, 0.0f, 6, RGB(46, 52, 70));
+		ctx.DrawStereoBarsLR(-0.98f, 0.98f, 16, levL, levR,
+			0.18f, 0.55f, 0.62f, 0.16f, RGB(80, 210, 255), RGB(255, 140, 90));
+		break;
+	}
+	case CCC_HELPDEMO_KWAVE: {
+		float samp[48];
+		for (int i = 0; i < 48; ++i)
+			samp[i] = sinf(t * 1.2f + i * 0.28f) * (0.55f + 0.35f * sinf(t * 0.4f + i * 0.05f));
+		ctx.DrawGrid(-1.05f, 1.05f, 0.0f, 0.9f, 0.0f, 5, RGB(50, 56, 72));
+		ctx.DrawMirrorFloor(-1.0f, 1.0f, 0.05f, 0.85f, RGB(40, 80, 120), 0.28f);
+		ctx.DrawWaveRibbon(-0.95f, 0.95f, 0.42f, 0.28f, 0.42f, samp, 48, RGB(120, 210, 255), 0.025f);
+		ctx.DrawWaveRibbon(-0.95f, 0.95f, 0.58f, 0.22f, 0.32f, samp, 48, RGB(255, 160, 120), 0.02f);
+		break;
+	}
+	case CCC_HELPDEMO_KPIANO: {
+		ctx.DrawGrid(-1.1f, 1.1f, 0.0f, 1.0f, 0.0f, 5, RGB(48, 50, 62));
+		for (int i = 0; i < 14; ++i) {
+			const float x0 = -1.0f + i * (2.0f / 14.f);
+			const float x1 = x0 + (2.0f / 14.f) * 0.88f;
+			const BOOL black = (i % 7 == 1 || i % 7 == 3 || i % 7 == 6);
+			const float h = black ? 0.28f : 0.42f;
+			const COLORREF c = black ? RGB(40, 42, 55) : RGB(235, 238, 248);
+			ctx.DrawBox(x0, x1, h, 0.15f, 0.55f, c, 0.f);
+		}
+		for (int n = 0; n < 5; ++n) {
+			const float ph = t * 0.7f + n * 1.1f;
+			const float x = -0.85f + fmodf(ph, 1.7f);
+			const float y = 0.55f + 0.22f * fabsf(sinf(ph * 2.f));
+			ctx.DrawNeonBox(x, x + 0.12f, y, 0.58f, 0.78f, RGB(90, 170, 255), 0.48f);
+		}
+		break;
+	}
+	case CCC_HELPDEMO_KEQ: {
+		ctx.DrawGrid(-1.05f, 1.05f, 0.0f, 0.9f, 0.0f, 5, RGB(48, 52, 68));
+		for (int i = 0; i < 12; ++i) {
+			const float x0 = -0.95f + i * (1.9f / 12.f);
+			const float x1 = x0 + (1.9f / 12.f) * 0.72f;
+			const float h = 0.15f + 0.55f * (0.5f + 0.5f * sinf(t + i * 0.55f));
+			ctx.DrawBox(x0, x1, h, 0.25f, 0.55f,
+				RGB(255, (BYTE)(120 + i * 8), (BYTE)(160 + i * 4)), 0.f);
+		}
+		ctx.DrawSphere(0.f, 0.72f + 0.08f * sinf(t), 0.7f, 0.08f, RGB(255, 200, 120), 10, 6);
+		break;
+	}
+	case CCC_HELPDEMO_KCAPTURE: {
+		ctx.DrawGrid(-1.1f, 1.1f, 0.0f, 1.0f, 0.0f, 4, RGB(44, 50, 64));
+		// 背面モニタ平面
+		ctx.DrawQuad(-0.95f, 0.75f, 0.85f, 0.95f, 0.75f, 0.85f,
+			0.95f, 0.05f, 0.85f, -0.95f, 0.05f, 0.85f, RGB(55, 110, 90));
+		// FX レイヤ（手前に浮遊）
+		const float bob = 0.04f * sinf(t);
+		ctx.DrawNeonBox(-0.55f, -0.15f, 0.55f + bob, 0.35f, 0.55f, RGB(180, 140, 60), 0.2f);
+		ctx.DrawNeonBox(-0.05f, 0.35f, 0.48f - bob, 0.30f, 0.50f, RGB(180, 140, 60), 0.18f);
+		ctx.DrawNeonBox(0.40f, 0.75f, 0.42f + bob * 0.5f, 0.25f, 0.45f, RGB(150, 70, 70), 0.16f);
+		break;
+	}
+	case CCC_HELPDEMO_KCMDROLL: {
+		ctx.DrawGrid(-1.1f, 1.1f, 0.0f, 0.95f, 0.0f, 5, RGB(46, 50, 66));
+		ctx.DrawBox(-1.0f, 1.0f, 0.08f, 0.35f, 0.55f, RGB(70, 78, 100), 0.f); // タイムライン帯
+		for (int i = 0; i < 7; ++i) {
+			const float x = -0.85f + i * 0.28f + 0.06f * sinf(t + i);
+			const float h = 0.25f + 0.35f * (0.5f + 0.5f * sinf(t * 1.3f + i));
+			ctx.DrawNeonBox(x, x + 0.14f, h, 0.40f, 0.70f,
+				(i & 1) ? RGB(120, 200, 255) : RGB(255, 160, 100), 0.12f);
+		}
+		break;
+	}
+	case CCC_HELPDEMO_KLIST: {
+		ctx.DrawGrid(-1.05f, 1.05f, 0.0f, 0.9f, 0.0f, 4, RGB(48, 52, 68));
+		for (int row = 0; row < 5; ++row) {
+			const float z0 = 0.15f + row * 0.14f;
+			const float z1 = z0 + 0.10f;
+			const float pulse = 0.5f + 0.5f * sinf(t + row * 0.7f);
+			const COLORREF c = (row == ((tick / 8) % 5))
+				? RGB(255, (BYTE)(180 + 40 * pulse), (BYTE)(200 + 30 * pulse))
+				: RGB(210, 215, 230);
+			ctx.DrawBox(-0.9f, 0.9f, 0.12f + 0.04f * pulse, z0, z1, c, 0.f);
+		}
+		break;
+	}
+	case CCC_HELPDEMO_KTRANSPORT: {
+		ctx.DrawGrid(-1.05f, 1.05f, 0.0f, 0.9f, 0.0f, 5, RGB(48, 52, 68));
+		ctx.DrawBox(-0.95f, 0.95f, 0.10f, 0.45f, 0.58f, RGB(255, 170, 200), 0.f); // シーク
+		const float thumb = -0.7f + 1.4f * (0.5f + 0.5f * sinf(t * 0.55f));
+		ctx.DrawSphere(thumb, 0.18f, 0.52f, 0.09f, RGB(90, 140, 255), 10, 6);
+		ctx.DrawNeonBox(-0.35f, -0.10f, 0.42f, 0.20f, 0.38f, RGB(120, 220, 140), 0.12f); // play
+		ctx.DrawBox(0.00f, 0.18f, 0.40f, 0.20f, 0.38f, RGB(240, 210, 120), 0.12f);
+		ctx.DrawBox(0.28f, 0.46f, 0.40f, 0.20f, 0.38f, RGB(240, 140, 140), 0.12f);
+		break;
+	}
+	case CCC_HELPDEMO_KMAZE: {
+		// 通路・壁・窓・アイテム・ゴールを周回カメラで説明
+		ctx.DrawMirrorFloor(-1.1f, 1.1f, 0.05f, 1.15f, RGB(40, 48, 70), 0.30f);
+		ctx.DrawGrid(-1.05f, 1.05f, 0.05f, 1.10f, 0.002f, 6, RGB(55, 65, 95));
+		// 左右の壁列
+		for (int i = 0; i < 5; ++i) {
+			const float z0 = 0.08f + i * 0.20f;
+			const float z1 = z0 + 0.16f;
+			ctx.DrawBox(-1.05f, -0.55f, 0.95f, z0, z1, RGB(72, 86, 118), 0.f);
+			ctx.DrawBox(0.55f, 1.05f, 0.95f, z0, z1, RGB(72, 86, 118), 0.f);
+		}
+		// 窓（ネオン）
+		ctx.DrawNeonBox(-1.02f, -0.58f, 0.92f, 0.48f, 0.68f, RGB(120, 190, 255), 0.f);
+		ctx.DrawBox(-0.92f, -0.68f, 0.55f, 0.54f, 0.62f, RGB(40, 90, 140), 0.28f);
+		// 浮遊アイテム（色分け）
+		const float bob = 0.06f * sinf(t * 1.8f);
+		ctx.DrawSphere(-0.22f, 0.28f + bob, 0.35f, 0.11f, RGB(80, 220, 140), 10, 8);   // tempo
+		ctx.DrawSphere(0.05f, 0.30f - bob, 0.52f, 0.11f, RGB(255, 180, 90), 10, 8);    // pitch up
+		ctx.DrawSphere(0.28f, 0.28f + bob * 0.7f, 0.70f, 0.11f, RGB(200, 140, 255), 10, 8); // EQ
+		// ゴール
+		ctx.DrawNeonBox(-0.22f, 0.22f, 0.72f + 0.04f * sinf(t), 0.88f, 1.08f, RGB(255, 210, 80), 0.f);
+		// プレイヤー位置の三角っぽいマーカー（手前）
+		ctx.DrawNeonBox(-0.06f, 0.06f, 0.18f, 0.12f, 0.22f, RGB(255, 240, 120), 0.f);
+		break;
+	}
+	default: { // GENERIC
+		ctx.DrawGrid(-1.0f, 1.0f, 0.0f, 0.95f, 0.0f, 5, RGB(46, 52, 70));
+		ctx.DrawNeonBox(-0.45f, 0.45f, 0.55f + 0.06f * sinf(t), 0.25f, 0.65f, RGB(255, 140, 190), 0.f);
+		ctx.DrawTorus(0.f, 0.35f, 0.45f, 0.38f, 0.08f, RGB(120, 200, 255), 14, 8);
+		ctx.DrawSphere(0.55f * cosf(t), 0.55f, 0.45f + 0.35f * sinf(t), 0.10f, RGB(255, 210, 120), 10, 6);
+		break;
+	}
+	}
+}
+
+int CCC_GdiHelpDrawSoft3DDemo(CDC& dc, int x, int y, int maxW, int maxH, int kind)
+{
+	if (maxW < 80 || maxH < 48) return y;
+	int w = maxW;
+	int h = maxH;
+	if (w > 360) w = 360;
+	if (h > 180) h = 180;
+	if (h < 96) h = min(maxH > 0 ? maxH : 96, 96);
+	if (h < 72) h = 72;
+	if (w < 140) w = min(maxW, 140);
+
+	GdiSoft3D::Cam cam;
+	const DWORD tick = (DWORD)(::GetTickCount64() / 40);
+	cam.yawDeg = -28.f + 22.f * sinf((float)tick * 0.035f);
+	cam.pitchDeg = 26.f + 8.f * sinf((float)tick * 0.028f);
+	cam.zoom = 1.05f;
+	GdiSoft3D::ClampCam(cam);
+
+	const float boxes[1][6] = { { -1.15f, 1.15f, -0.02f, 0.85f, 0.0f, 1.05f } };
+	GdiSoft3D::View v;
+	GdiSoft3D::BuildView(w, h, cam, boxes, 1, v);
+	if (!s_helpSoft3d.Create(w, h))
+		return y;
+	s_helpSoft3d.view = v;
+	s_helpSoft3d.depthTest = true;
+	s_helpSoft3d.depthWrite = true;
+	s_helpSoft3d.BeginFrame(RGB(14, 16, 24));
+	CCC_GdiHelpFillDemoScene(s_helpSoft3d, kind, tick);
+	s_helpSoft3d.EndFrame();
+	s_helpSoft3d.Present(dc, x, y);
+
+	CBrush fr(RGB(132, 132, 152));
+	dc.FrameRect(CRect(x, y, x + w, y + h), &fr);
+	dc.SetBkMode(TRANSPARENT);
+	dc.SetTextColor(RGB(100, 100, 120));
+	dc.TextOut(x + 4, y + h + 2, LL14(
+		L"Soft3D 実演（自動周回）", L"Soft 3D demo (auto orbit)", L"Démo Soft 3D (orbite auto)",
+		L"Demo Soft 3D (orbita auto)", L"Demo Soft 3D (órbita auto)", L"Soft3D 실연(자동 회전)",
+		L"Soft3D 演示（自动环绕）", L"عرض Soft3D (دوران تلقائي)", L"Демо Soft 3D (авто-облёт)",
+		L"Soft-3D-Demo (Auto-Orbit)", L"Demo Soft 3D (órbita auto)", L"Soft 3D-demo (auto-orbit)",
+		L"Demo Soft 3D (auto-orbita)", L"Soft 3B demo (otomatik dönüş)"));
+	TEXTMETRIC tm = {};
+	dc.GetTextMetrics(&tm);
+	const int lh = max(12, tm.tmHeight + tm.tmExternalLeading);
+	return y + h + lh + 8;
+}
+
+int CCC_GdiHelpDrawSoftDemoPair(CDC& dc, int x, int y, int totalW, int demoH, int kind)
+{
+	if (totalW < 160 || demoH < 48) return y;
+	// 手順コマ内 Soft3D が潰れないよう最低高さを確保
+	if (demoH < 112) demoH = 112;
+	const int gap = 10;
+	int rightW = min(260, max(140, totalW / 3));
+	int leftW = totalW - rightW - gap;
+	if (leftW < 140) {
+		return CCC_GdiHelpDrawSoft3DDemo(dc, x, y, totalW, demoH, kind);
+	}
+	const DWORD tick = (DWORD)(::GetTickCount64() / 40);
+	const int cells = 4;
+	const int cg = 6;
+	const int cellW = (leftW - cg * (cells - 1)) / cells;
+	const COLORREF cellCol[4] = {
+		RGB(255, 226, 196), RGB(206, 232, 255), RGB(214, 245, 220), RGB(232, 220, 250)
+	};
+	LPCTSTR stepLab[4] = {
+		LL14(L"1.見る", L"1.Look", L"1.Voir", L"1.Guarda", L"1.Ver", L"1.보기", L"1.看", L"1.انظر",
+			L"1.Смотри", L"1.Sehen", L"1.Ver", L"1.Kijk", L"1.Patrz", L"1.Bak"),
+		LL14(L"2.切替", L"2.Switch", L"2.Basculer", L"2.Cambia", L"2.Cambiar", L"2.전환", L"2.切换", L"2.بدّل",
+			L"2.Смена", L"2.Umsch.", L"2.Trocar", L"2.Wissel", L"2.Zmień", L"2.Değiş"),
+		LL14(L"3.回す", L"3.Orbit", L"3.Orbite", L"3.Orbita", L"3.Órbita", L"3.회전", L"3.旋转", L"3.دور",
+			L"3.Облёт", L"3.Orbit", L"3.Órbita", L"3.Orbit", L"3.Orbita", L"3.Dön"),
+		LL14(L"4.拡大", L"4.Zoom", L"4.Zoom", L"4.Zoom", L"4.Zoom", L"4.확대", L"4.放大", L"4.تكبير",
+			L"4.Зум", L"4.Zoom", L"4.Zoom", L"4.Zoom", L"4.Zoom", L"4.Yakın")
+	};
+
+	TEXTMETRIC tm0 = {};
+	dc.GetTextMetrics(&tm0);
+	const int labH = max(14, tm0.tmHeight + 2);
+	const int innerPad = 3;
+	const int softTop = labH + 4;
+	const int softH = max(40, demoH - softTop - 4);
+	const int softW = max(40, cellW - innerPad * 2);
+
+	if (s_helpSoft2d.Create(leftW, demoH)) {
+		s_helpSoft2d.Clear(RGB(248, 248, 252));
+		for (int i = 0; i < cells; ++i) {
+			const int cx = i * (cellW + cg);
+			s_helpSoft2d.FillRect(cx, 0, cellW, demoH, cellCol[i], 255);
+			s_helpSoft2d.DrawRect(cx, 0, cellW, demoH, RGB(150, 150, 172), 255, 1);
+			if (i + 1 < cells) {
+				const int ax = cx + cellW + 1;
+				const int ay = softTop + softH / 2;
+				s_helpSoft2d.DrawLine(ax, ay, ax + cg - 2, ay, RGB(90, 100, 160), 255, 2);
+				s_helpSoft2d.DrawLine(ax + cg - 6, ay - 3, ax + cg - 2, ay, RGB(90, 100, 160), 255, 2);
+				s_helpSoft2d.DrawLine(ax + cg - 6, ay + 3, ax + cg - 2, ay, RGB(90, 100, 160), 255, 2);
+			}
+		}
+		s_helpSoft2d.Present(dc, x, y);
+	}
+
+	// 各コマほぼ全面を Soft3D 実演にする（28px チップは小さすぎた）
+	for (int i = 0; i < cells; ++i) {
+		const int cx0 = x + i * (cellW + cg) + innerPad;
+		const int cy0 = y + softTop;
+		GdiSoft3D::Cam cam;
+		cam.yawDeg = -50.f + (float)i * 18.f + 28.f * sinf((float)(tick + i * 9) * 0.05f);
+		cam.pitchDeg = 24.f + 8.f * cosf((float)(tick + i * 5) * 0.04f);
+		cam.zoom = 0.82f; // コマ内でも立体が小さく見えないよう寄る
+		GdiSoft3D::ClampCam(cam);
+		const float boxes[1][6] = { { -1.1f, 1.1f, -0.05f, 0.85f, 0.0f, 1.0f } };
+		GdiSoft3D::View v;
+		GdiSoft3D::BuildView(softW, softH, cam, boxes, 1, v);
+		if (!s_helpSoft3d.Create(softW, softH))
+			continue;
+		s_helpSoft3d.view = v;
+		s_helpSoft3d.depthTest = true;
+		s_helpSoft3d.depthWrite = true;
+		s_helpSoft3d.BeginFrame(RGB(16, 18, 26));
+		// コマごとに少し違う見本（同じ kind を位相ずらし）
+		CCC_GdiHelpFillDemoScene(s_helpSoft3d, kind, tick + (DWORD)(i * 17));
+		s_helpSoft3d.EndFrame();
+		s_helpSoft3d.Present(dc, cx0, cy0);
+		CBrush frCell(RGB(120, 120, 140));
+		dc.FrameRect(CRect(cx0, cy0, cx0 + softW, cy0 + softH), &frCell);
+
+		dc.SetBkMode(TRANSPARENT);
+		dc.SetTextColor(RGB(40, 40, 60));
+		dc.TextOut(x + i * (cellW + cg) + 4, y + 2, stepLab[i]);
+	}
+	CBrush fr(RGB(132, 132, 152));
+	dc.FrameRect(CRect(x, y, x + leftW, y + demoH), &fr);
+
+	const int rightX = x + leftW + gap;
+	CCC_GdiHelpDrawSoft3DDemo(dc, rightX, y, rightW, demoH, kind);
+	dc.SetBkMode(TRANSPARENT);
+	dc.SetTextColor(RGB(90, 70, 130));
+	dc.TextOut(x + 4, y + demoH + 2, LL14(
+		L"左の黄・青・緑・紫＝見る→切替→回す→拡大の流れ（中の立体が Soft3D）。右＝大きめの自動実演。",
+		L"Yellow/blue/green/purple = Look→Switch→Orbit→Zoom (Soft 3D inside). Right = larger auto demo.",
+		L"Jaune/bleu/vert/violet = Voir→Basculer→Orbite→Zoom (Soft 3D). Droite = grande démo auto.",
+		L"Giallo/blu/verde/viola = Guarda→Cambia→Orbita→Zoom (Soft 3D). Destra = demo auto grande.",
+		L"Amarillo/azul/verde/violeta = Ver→Cambiar→Órbita→Zoom (Soft 3D). Derecha = demo auto.",
+		L"노랑·파랑·초록·보라=보기→전환→회전→확대(안 Soft3D). 오른쪽=큰 자동 실연.",
+		L"黄/蓝/绿/紫=看→切换→旋转→放大（内为 Soft3D）。右=较大自动演示。",
+		L"أصفر/أزرق/أخضر/بنفسجي=انظر→بدّل→دور→كبّر (Soft3D). يميناً=عرض تلقائي أكبر.",
+		L"Жёлт./син./зел./фиол. = Смотри→Смена→Облёт→Зум (Soft 3D). Справа — крупное автодемо.",
+		L"Gelb/Blau/Grün/Violett = Sehen→Umsch.→Orbit→Zoom (Soft 3D). Rechts = große Auto-Demo.",
+		L"Amarelo/azul/verde/roxo = Ver→Trocar→Órbita→Zoom (Soft 3D). Direita = demo auto maior.",
+		L"Geel/blauw/groen/paars = Kijk→Wissel→Orbit→Zoom (Soft 3D). Rechts = grotere autodemo.",
+		L"Żółty/nieb./ziel./fiolet = Patrz→Zmień→Orbita→Zoom (Soft 3D). Prawo = większe autodemo.",
+		L"Sarı/mavi/yeşil/mor = Bak→Değiş→Dön→Yakın (Soft 3B). Sağ = büyük otomatik demo."));
+	TEXTMETRIC tm = {};
+	dc.GetTextMetrics(&tm);
+	const int lh = max(12, tm.tmHeight + tm.tmExternalLeading);
+	return y + demoH + lh + 8;
+}
 
 static void CCC_GdiHelpLayoutCloseBtn(CWnd* wnd, int footerH)
 {
@@ -15303,12 +15634,18 @@ static LRESULT CALLBACK CCC_GdiHelpSubclassProc(HWND hWnd, UINT uMsg, WPARAM wPa
         ::InvalidateRect(hWnd, NULL, FALSE);
         return 0;
     }
+    if (uMsg == WM_TIMER && wParam == CCC_GDIHELP_ANIM_TIMER) {
+        // Soft3D 実演の再描画（ちらつき低減のため全体 Invalidate は FALSE）
+        ::InvalidateRect(hWnd, NULL, FALSE);
+        return 0;
+    }
     if (uMsg == WM_DPICHANGED) {
         ::RemoveProp(hWnd, CCC_GDIHELP_PROP_FITTED);
         ::RemoveProp(hWnd, CCC_GDIHELP_PROP_CW);
         ::RemoveProp(hWnd, CCC_GDIHELP_PROP_CH);
     }
     if (uMsg == WM_NCDESTROY) {
+        ::KillTimer(hWnd, CCC_GDIHELP_ANIM_TIMER);
         ::RemoveProp(hWnd, CCC_GDIHELP_PROP_FITTED);
         ::RemoveProp(hWnd, CCC_GDIHELP_PROP_CW);
         ::RemoveProp(hWnd, CCC_GDIHELP_PROP_CH);
@@ -15323,6 +15660,8 @@ static void CCC_GdiHelpEnsureSubclass(HWND hWnd)
     DWORD_PTR data = 0;
     if (!::GetWindowSubclass(hWnd, CCC_GdiHelpSubclassProc, CCC_GDIHELP_SUBCLASS_ID, &data))
         ::SetWindowSubclass(hWnd, CCC_GdiHelpSubclassProc, CCC_GDIHELP_SUBCLASS_ID, 0);
+    // Soft3D 実演アニメ（未設定なら開始）
+    ::SetTimer(hWnd, CCC_GDIHELP_ANIM_TIMER, 40, NULL);
 }
 
 static void CCC_GdiHelpScanExtent(const UINT32* bits, int w, int h, COLORREF bg, int* pMaxX, int* pMaxY)
@@ -15412,7 +15751,7 @@ void CCC_GdiHelpEndPaint(CCC_GdiHelpPaint& hp)
 
     HWND hWnd = hp.wnd->GetSafeHwnd();
     const UINT dpi = CCC_GetControlDpi(hWnd);
-    const int pad = CCC_ScaleDpi(10, dpi);
+    const int pad = CCC_ScaleDpi(18, dpi); // DPI で末尾行が見切れないよう余白を厚めに
 
     int maxX = 0, maxY = 0;
     CCC_GdiHelpScanExtent((const UINT32*)hp.bits, hp.bw, hp.bh, CCC_GDIHELP_BG, &maxX, &maxY);

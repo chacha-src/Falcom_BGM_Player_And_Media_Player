@@ -38,6 +38,9 @@ public:
 	double GetPxPerSec() const { return m_pxPerSec; }
 	void SetPxPerSec(double px);
 	void ClearAllEvents();
+	// コマンドパレットから savedata を書き換えた後の反映用
+	void SyncSoft3DCamFromSave();
+	void InvalidateRoll();
 
 	MpPromptSnapshotEvent m_ev[kMaxEv];
 	int m_evCount = 0;
@@ -94,14 +97,12 @@ protected:
 	void PaintRoll(CDC& dc, const CRect& rc);
 	void PaintRollSoft3D(CDC& dc, const CRect& rc);
 	bool IsSoft3D() const { return savedata.mpCmdRollviewmode == 1; }
-	void SyncSoft3DCamFromSave();
 	void PersistSoft3DCam();
 	static void Soft3dYawCb(void* ctx, int value);
 	static void Soft3dPitchCb(void* ctx, int value);
 	static void Soft3dZoomCb(void* ctx, int value);
 	BOOL RunPlaceDialog(MpPromptSnapshotEvent& ev);
 	void AutoFollowPlayhead(double t);
-	void InvalidateRoll();
 	void EnsureDurationFloor(double hintSec = 0.0);
 
 	afx_msg int OnCreate(LPCREATESTRUCT lp);
@@ -121,6 +122,7 @@ protected:
 	DECLARE_MESSAGE_MAP()
 
 	GdiSoft3D::Cam m_cam3d;
+	DWORD m_soft3dTourUntil = 0;
 	bool m_rotDragging = false;
 	CPoint m_rotOrigin;
 	float m_rotYaw0 = 0.f;
@@ -137,6 +139,8 @@ public:
 
 	void ReloadFromText(const CString& text, UINT syncGen);
 	void SetPromptPeer(CPromptDlg* peer);
+	// コマンドパレットが savedata の簡易3D設定を書き換えた後にビューへ反映する
+	void PaletteApplySoft3D();
 
 protected:
 	enum { kTimerId = 77 };
@@ -198,4 +202,6 @@ protected:
 void MpShowCommandRollDialog(CWnd* pParent, BOOL bActivate = TRUE);
 void MpToggleCommandRollDialog(CWnd* pParent);
 BOOL MpIsCommandRollOpen();
+// 開いていなければ nullptr
+CCommandRollDlg* MpCommandRollDlgInstance();
 void MpCommandRollNotifyText(const CString& text, UINT syncGen);

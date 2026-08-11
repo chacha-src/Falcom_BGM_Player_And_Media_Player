@@ -125,6 +125,9 @@ void CKpiHelpDlg::OnPaint()
 		L"Zarządzaj włączeniem/kolejnością. Od góry.",
 		L"Eklenti açık/sıra yönet. Üstten uygulanır."));
 	y += lh + 4;
+	y = CCC_GdiHelpDrawSoftDemoPair(dc, L, y, rc.Width() - L * 2, min(140, max(112, rc.Height() / 5)),
+		CCC_HELPDEMO_KLIST);
+
 
 	title(L, y, LL14(L"一覧と優先順", L"List & priority", L"Liste et priorité", L"Elenco e priorità",
 		L"Lista y prioridad", L"목록과 우선순위", L"列表与优先顺序", L"القائمة والأولوية",

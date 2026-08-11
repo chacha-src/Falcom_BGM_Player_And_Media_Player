@@ -2216,6 +2216,16 @@ void ConfigurePlaybackOutputAndUpscaler()
 
 extern __int64 playb;
 
+void DispatchPlaywavFill(BYTE* bufwav3, ULONG oldw, int len1, int len2);
+
+static void DispatchPlaywavFillPrefill(BYTE* bufwav3, ULONG oldw, int len1, int len2)
+{
+	// KPI(2SF等)は初回だけ別スレッドで Render すると、通知スレッド側の次回 Render で
+	// DeSmuME JIT が未マップページ(0x7FFC)を踏む。0.14s 表示後クラッシュの形になる。
+	// 旧実装どおり、呼び出し元スレッドで同期プリフィルする。
+	DispatchPlaywavFill(bufwav3, oldw, len1, len2);
+}
+
 void DispatchPlaywavFill(BYTE* bufwav3, ULONG oldw, int len1, int len2)
 {
 	if (IsPlaybackStopRequested())
@@ -2817,6 +2827,7 @@ void COggDlg::Resize()
 #include <unknwn.h>
 #include "KpiHostClient.h"
 #include "KpiV5ConfigStore.h"
+#include <process.h>
 BYTE kvver;
 IKpiDecoderModule* ob5 = NULL;
 const KPI_DECODER_MODULEINFO* m_ModuleInfo5;
@@ -3044,6 +3055,99 @@ static HMODULE LoadKpiLibraryWithDependencies(const wchar_t* path)
 	return h;
 }
 
+struct KpiTeardownJob {
+	KMPMODULE* mod;
+	HKMP kmp1;
+	HINSTANCE hDll;
+	IKpiDecoder* dec;
+	IKpiDecoderModule* module;
+	uint64_t remoteSessionId;
+	bool remote;
+};
+
+static HANDLE g_kpiTeardownDone = NULL;
+static volatile LONG g_kpiTeardownBusy = 0;
+
+static void EnsureKpiTeardownEvent()
+{
+	if (!g_kpiTeardownDone)
+		g_kpiTeardownDone = CreateEventW(NULL, TRUE, TRUE, NULL);
+}
+
+static void KpiTeardownJobRun(KpiTeardownJob* j)
+{
+	if (!j) return;
+	if (j->mod) {
+		if (j->mod->Close && j->kmp1) j->mod->Close(j->kmp1);
+		if (j->mod->Deinit) j->mod->Deinit();
+	}
+	if (j->hDll) FreeLibrary(j->hDll);
+	if (j->dec) j->dec->Release();
+	if (j->module) j->module->Release();
+	if (j->remote && j->remoteSessionId)
+		g_kpiHost.Close(j->remoteSessionId);
+}
+
+static unsigned __stdcall KpiTeardownThread(void* p)
+{
+	KpiTeardownJob* j = (KpiTeardownJob*)p;
+	KpiTeardownJobRun(j);
+	delete j;
+	InterlockedExchange(&g_kpiTeardownBusy, 0);
+	if (g_kpiTeardownDone) SetEvent(g_kpiTeardownDone);
+	return 0;
+}
+
+static void WaitPendingKpiTeardown(DWORD timeoutMs = 30000)
+{
+	EnsureKpiTeardownEvent();
+	if (InterlockedCompareExchange(&g_kpiTeardownBusy, 0, 0) == 0)
+		return;
+	WaitForSingleObject(g_kpiTeardownDone, timeoutMs);
+}
+
+// Close / FreeLibrary / Release は UI を数秒止めるのでワーカーへ。ポインタは先に NULL。
+static void ReleaseKpiPlaybackAsync(KMPMODULE*& modRef, HKMP& kmp1Ref, HINSTANCE& hDllRef)
+{
+	EnsureKpiTeardownEvent();
+	WaitPendingKpiTeardown(30000);
+
+	const bool haveRemote = g_kpiRemote && g_kpiSession.sessionId != 0;
+	if (!modRef && !hDllRef && !kpidec && !ob5 && !haveRemote)
+		return;
+
+	KpiTeardownJob* j = new KpiTeardownJob();
+	j->mod = modRef;
+	j->kmp1 = kmp1Ref;
+	j->hDll = hDllRef;
+	j->dec = kpidec;
+	j->module = ob5;
+	j->remote = haveRemote;
+	j->remoteSessionId = haveRemote ? g_kpiSession.sessionId : 0;
+
+	modRef = NULL;
+	kmp1Ref = NULL;
+	hDllRef = NULL;
+	kpidec = NULL;
+	ob5 = NULL;
+	if (haveRemote) {
+		ZeroMemory(&g_kpiSession, sizeof(g_kpiSession));
+		g_kpiRemote = false;
+		ResetKpiRemoteCache();
+	}
+	g_kpiPlaybackArch = 0;
+
+	ResetEvent(g_kpiTeardownDone);
+	InterlockedExchange(&g_kpiTeardownBusy, 1);
+	uintptr_t th = _beginthreadex(NULL, 0, KpiTeardownThread, j, 0, NULL);
+	if (!th) {
+		KpiTeardownThread(j);
+	}
+	else {
+		CloseHandle((HANDLE)th);
+	}
+}
+
 static HRESULT SafeCreateDecoderModuleInstance(HRESULT(WINAPI* createFn)(REFIID, void**, IKpiUnknown*), void** ppvObject, IKpiUnknown* pUnknown)
 {
 	HRESULT hr = E_FAIL;
@@ -3203,10 +3307,19 @@ public:
 	// --- IKpiFile の実装 (ハンドルベース) ---
 	virtual DWORD WINAPI Read(void* pBuffer, DWORD dwSize)
 	{
-		if (m_hFile == INVALID_HANDLE_VALUE) return 0;
-		DWORD dwRead = 0;
-		ReadFile(m_hFile, pBuffer, dwSize, &dwRead, NULL);
-		return dwRead;
+		if (m_hFile == INVALID_HANDLE_VALUE || !pBuffer || dwSize == 0) return 0;
+		BYTE* ptr = (BYTE*)pBuffer;
+		DWORD total = 0;
+		// .2sflib / .psf2lib 等は大きいので1回の ReadFile では足りないことがある
+		while (dwSize > 0) {
+			DWORD dwRead = 0;
+			if (!ReadFile(m_hFile, ptr, dwSize, &dwRead, NULL) || dwRead == 0)
+				break;
+			ptr += dwRead;
+			total += dwRead;
+			dwSize -= dwRead;
+		}
+		return total;
 	}
 
 	virtual UINT64 WINAPI Seek(INT64 i64Pos, DWORD dwOrigin)
@@ -3253,6 +3366,7 @@ public:
 
 		UINT64 fileSize = GetSize();
 		if (fileSize == KPI_FILE_EOF || fileSize == 0) return FALSE;
+		if (fileSize > (UINT64)IKpiFile::GET_BUFFER_MAXSIZE) return FALSE;
 #include <new>
 		m_dwBufferSize = fileSize;
 		m_pDataBuffer = new (std::nothrow) BYTE[(size_t)m_dwBufferSize];
@@ -3265,9 +3379,15 @@ public:
 		UINT64 currentPos = Seek(0, FILE_CURRENT);
 		Seek(0, FILE_BEGIN);
 
-		// メモリに一括読み込み
-		DWORD dwRead = 0;
-		if (!ReadFile(m_hFile, m_pDataBuffer, (DWORD)m_dwBufferSize, &dwRead, NULL) || dwRead != m_dwBufferSize) {
+		// メモリに一括読み込み（巨大 lib は分割 Read）
+		UINT64 off = 0;
+		while (off < m_dwBufferSize) {
+			DWORD want = (DWORD)((m_dwBufferSize - off) > 0x40000ull ? 0x40000u : (DWORD)(m_dwBufferSize - off));
+			DWORD got = Read(m_pDataBuffer + (size_t)off, want);
+			if (got == 0) break;
+			off += got;
+		}
+		if (off != m_dwBufferSize) {
 			// 読み込み失敗
 			delete[] m_pDataBuffer;
 			m_pDataBuffer = NULL;
@@ -9888,6 +10008,7 @@ void COggDlg::play()
 				else
 					g_kpiPlaybackArch = ResolveKpiArchBits(CString(kpi), filen);
 			}
+			WaitPendingKpiTeardown(30000);
 			hDLLk = LoadKpiLibraryWithDependencies((const wchar_t*)kpi);
 			typedef HRESULT(WINAPI* kpi_CreateInstance)(REFIID riid, void** ppvObject, IKpiUnknown* pUnknown);
 			kpi_CreateInstance cr = (kpi_CreateInstance)GetProcAddress(hDLLk, "kpi_CreateInstance");
@@ -11496,7 +11617,7 @@ void COggDlg::play()
 		}
 	}
 
-	DispatchPlaywavFill(bufwav3, 0, len1, len2);
+	DispatchPlaywavFillPrefill(bufwav3, 0, len1, len2);
 	if (m_dsb && (len1 + len2) > 0) {
 		m_dsb->Lock(0, len1 + len2, (LPVOID*)&pdsb, (DWORD*)&len3, NULL, 0, 0);
 		memcpy(pdsb, bufwav3, len3);
@@ -17239,13 +17360,15 @@ int playwavkpi(BYTE* bw, int old, int l1, int l2)
 		if (endf == 1 && !exporting) {
 			if (rrr < l1)
 				ZeroMemory(bw + old + rrr, (SIZE_T)(l1 - rrr));
-			l1 = rrr;
+			// 途中のリング/RB短読みは終端にしない（DSD/MP3 と同じ）。真欠落だけ fade。
 			if (PlaybackShortMeansEof(rrr)) {
+				l1 = rrr;
 				if (savedata.saverenzoku == 0)
 					fade1 = 1;
 				else
 					endflg = 1;
 			}
+			// else: 要求長を維持（ゼロ埋め済み）。誤停止で KPI を解放しない。
 		}
 		else if (endf == 1 && exporting && rrr <= 0 && fade1) {
 			l1 = rrr;
@@ -17291,8 +17414,8 @@ int playwavkpi(BYTE* bw, int old, int l1, int l2)
 			if (endf == 1 && !exporting) {
 				if (rrr < l2)
 					ZeroMemory(bw + rrr, (SIZE_T)(l2 - rrr));
-				l2 = rrr;
 				if (PlaybackShortMeansEof(rrr)) {
+					l2 = rrr;
 					if (savedata.saverenzoku == 0)
 						fade1 = 1;
 					else
@@ -17450,7 +17573,7 @@ int readkpi(BYTE* bw, int cnt)
 {
 	if (cnt == 0) return 0;
 	_set_se_translator(trans_func);
-	DWORD cnt1 = (kvver == 2) ? og->sikpi.dwUnitRender : 4096, cnt2 = (DWORD)cnt, cnt4 = 0; if (cnt1 == 0) cnt1 = 4096;
+	DWORD cnt1 = (kvver == 2) ? og->sikpi.dwUnitRender * 2 : 4096, cnt2 = (DWORD)cnt, cnt4 = 0; if (cnt1 == 0) cnt1 = 4096;
 	DWORD r = cnt;
 
 	// 無音判定用に、ここで先に拡張子を取得しておきますわ
@@ -17464,7 +17587,11 @@ int readkpi(BYTE* bw, int cnt)
 		int max_buffer_size = OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3;
 		if (poss4 <= cnt) {
 			r = 0;
-			for (int kl = 0; kl < 5; kl++) {
+			// RB プライミング等で readtempo が 0 を返す間、旧実装はリングを無理読みしていた。
+			// 短読み→0 返却は playwavkpi(endf==1) が即 EOF→解放レースで KPI 全体が落ちる。
+			int kpiRbStallIters = 0;
+			const int kKpiRbStallMax = 512;
+			for (int kl = 0; kl < kKpiRbStallMax; kl++) {
 				for (;;) {
 					if (IsPlaybackStopRequested())
 						break;
@@ -17637,6 +17764,7 @@ int readkpi(BYTE* bw, int cnt)
 				int len2 = readtempo(bufkpi, cnt);
 
 				if (len2 > 0) {
+					kpiRbStallIters = 0;
 					RingBufWrite(bufkpi3, max_buffer_size, poss2, outputRawBytesData.data(), len2);
 					poss4 += len2;
 					// cnt3 < cnt のとき 0 を返すと playwavkpi が EOF 扱いし、
@@ -17646,22 +17774,39 @@ int readkpi(BYTE* bw, int cnt)
 						if (cnt3 != 0)	memcpy(bufkpi, bufkpi + cnt2, cnt3);
 					}
 				}
+				else if (++kpiRbStallIters >= kKpiRbStallMax) {
+					break;
+				}
 				if (poss4 > cnt) break;
+				// デコーダが既に EOF（fade1&muon尽）でリングも空なら打ち切り
+				if (fade1 == 1 && muon == 0 && poss4 <= 0)
+					break;
 			}
 		}
 
 		cnt2 = cnt;
 
+		int to_read = 0;
 		if (cnt2 > 0 && poss4 > 0) {
-			int to_read = cnt;
+			to_read = cnt;
 			if (to_read > poss4) to_read = poss4;
 			RingBufRead(bw, bufkpi3, max_buffer_size, poss3, to_read);
 			poss4 -= to_read;
-			cnt = to_read;
 		}
-		else if (r == 0 || poss4 <= 0) {
-			cnt = 0;
-		}
+		if (to_read < cnt)
+			ZeroMemory(bw + to_read, (SIZE_T)(cnt - to_read));
+
+		// DSD と同じ: リング不足や RB 待ちの短読みは EOF にしない。
+		// 真の終端（デコーダ EOF かつリング空）のときだけ 0。
+		const bool kpiTrueEof = (fade1 == 1 && muon == 0) || (r == 0 && to_read == 0 && poss4 <= 0);
+		int ret = to_read;
+		if (to_read > 0 && !kpiTrueEof)
+			ret = cnt;
+		else if (to_read == 0 && !kpiTrueEof)
+			ret = cnt; // 無音パッドでフレームを維持（誤停止・解放レース防止）
+		else
+			ret = to_read;
+		cnt = ret;
 
 		equaliser(bw, cnt, reset);
 		og->FeedPianoRoll(bw, cnt);
@@ -20071,23 +20216,7 @@ void COggDlg::stop()
 		if (stoppingMode == 999) wav_.Close();
 		kmp = NULL;
 		ClearOpenDecoderMode();
-		if (mod) {
-			if (mod->Close) mod->Close(kmp1);
-			if (mod->Deinit) mod->Deinit();
-			FreeLibrary(hDLLk);
-			mod = NULL; kmp1 = NULL; hDLLk = NULL;
-		}
-		if (kpidec)
-			kpidec->Release();
-		if (ob5)
-			ob5->Release();
-		if (g_kpiRemote && g_kpiSession.sessionId != 0) {
-			g_kpiHost.Close(g_kpiSession.sessionId);
-			ZeroMemory(&g_kpiSession, sizeof(g_kpiSession));
-			g_kpiRemote = false;
-			ResetKpiRemoteCache();
-		}
-		g_kpiPlaybackArch = 0;
+		ReleaseKpiPlaybackAsync(mod, kmp1, hDLLk);
 		thn1 = FALSE;
 		stf = 0;
 		// Join/解放後に DoEvent しない（再入で別形式の play が走り UAF になる）
@@ -20256,20 +20385,7 @@ BOOL COggDlg::stop1()
 	if (stoppingMode == 999) wav_.Close();
 	kmp = NULL;
 	ClearOpenDecoderMode();
-	if (mod) {
-		if (mod->Close) mod->Close(kmp1);
-		if (mod->Deinit) mod->Deinit();
-		FreeLibrary(hDLLk);
-		mod = NULL; kmp1 = NULL; hDLLk = NULL;
-	}
-	if (kpidec) {
-		kpidec->Release();
-		kpidec = NULL;
-	}
-	if (ob5) {
-		ob5->Release();
-		ob5 = NULL;
-	}
+	ReleaseKpiPlaybackAsync(mod, kmp1, hDLLk);
 
 	fadeadd = 0; fade = 1.0;
 	// 解放完了後に初めて停止フラグを下ろす（play() 先頭でも下ろすが、ここでも戻す）
@@ -22822,6 +22938,11 @@ void timerog1(UINT nIDEvent)
 			}
 		}
 		if (ip != 0) return;
+		{
+			extern BOOL IsSoft3DMazeActive();
+			if (IsSoft3DMazeActive())
+				return;
+		}
 		if (maini)
 			::SetWindowPos(maini->m_hWnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
 		::SetWindowPos(og->m_hWnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
@@ -23132,27 +23253,7 @@ LRESULT COggDlg::OnPlaybackAutoStopped(WPARAM, LPARAM)
 	if (stoppingMode == 999) wav_.Close();
 	kmp = NULL;
 	ClearOpenDecoderMode();
-	if (mod) {
-		if (mod->Close) mod->Close(kmp1);
-		if (mod->Deinit) mod->Deinit();
-		FreeLibrary(hDLLk);
-		mod = NULL; kmp1 = NULL; hDLLk = NULL;
-	}
-	if (kpidec) {
-		kpidec->Release();
-		kpidec = NULL;
-	}
-	if (ob5) {
-		ob5->Release();
-		ob5 = NULL;
-	}
-	if (g_kpiRemote && g_kpiSession.sessionId != 0) {
-		g_kpiHost.Close(g_kpiSession.sessionId);
-		ZeroMemory(&g_kpiSession, sizeof(g_kpiSession));
-		g_kpiRemote = false;
-		ResetKpiRemoteCache();
-	}
-	g_kpiPlaybackArch = 0;
+	ReleaseKpiPlaybackAsync(mod, kmp1, hDLLk);
 	thn1 = FALSE;
 	stf = 0;
 	thend = 1;
@@ -27279,6 +27380,11 @@ void COggDlg::OnKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags)
 
 LRESULT COggDlg::OnHotKey(WPARAM wp, LPARAM a)
 {
+	// Soft3D 迷路操作中は上下＝音量／左右＝シークのグローバルホットキーを無効化
+	extern BOOL IsSoft3DMazeActive();
+	if (IsSoft3DMazeActive())
+		return 0;
+
 	std::unique_lock<std::mutex> hscroll_lock(cl2);
 	switch (wp) {
 	case 8000:
@@ -27396,10 +27502,13 @@ void COggDlg::OnActivate(UINT nState, CWnd * pWndOther, BOOL bMinimized)
 		UnregisterHotKey(GetSafeHwnd(), ID_HOTKEY3);
 	}
 	else {
-		RegisterHotKey(GetSafeHwnd(), ID_HOTKEY0, 0, VK_UP);
-		RegisterHotKey(GetSafeHwnd(), ID_HOTKEY1, 0, VK_DOWN);
-		RegisterHotKey(GetSafeHwnd(), ID_HOTKEY2, 0, VK_RIGHT);
-		RegisterHotKey(GetSafeHwnd(), ID_HOTKEY3, 0, VK_LEFT);
+		extern BOOL IsSoft3DMazeActive();
+		if (!IsSoft3DMazeActive()) {
+			RegisterHotKey(GetSafeHwnd(), ID_HOTKEY0, 0, VK_UP);
+			RegisterHotKey(GetSafeHwnd(), ID_HOTKEY1, 0, VK_DOWN);
+			RegisterHotKey(GetSafeHwnd(), ID_HOTKEY2, 0, VK_RIGHT);
+			RegisterHotKey(GetSafeHwnd(), ID_HOTKEY3, 0, VK_LEFT);
+		}
 		if (nState == WA_ACTIVE) {
 		}
 	}
@@ -29206,6 +29315,8 @@ void COggHelpDlg::OnPaint()
 		L"BGM gier, odtwarzanie i podokna. Ponownie przez \"?\" w prawym górnym rogu.",
 		L"Oyun BGM, çalma ve alt pencereler. Sağ üst \"?\" ile yeniden açın."));
 	y += lh + 4;
+	y = CCC_GdiHelpDrawSoftDemoPair(dc, L, y, rc.Width() - L * 2, min(140, max(112, rc.Height() / 5)),
+		CCC_HELPDEMO_KTRANSPORT);
 
 	// mini UI map
 	title(L, y, LL14(L"画面マップ", L"UI map", L"Carte UI", L"Mappa UI", L"Mapa UI", L"화면 맵", L"界面地图", L"خريطة الواجهة",

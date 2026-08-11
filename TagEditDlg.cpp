@@ -1,4 +1,4 @@
-﻿#include "stdafx.h"
+#include "stdafx.h"
 #include "ogg.h"
 #include "oggDlg.h"
 #include "TagEditDlg.h"
@@ -646,6 +646,9 @@ void CTeHelpDlg::OnPaint()
 		L"Edytuj tytuł, artystę i okładkę; zapisz do pliku.",
 		L"Başlık, sanatçı ve kapağı düzenleyip dosyaya yazın."));
 	y += lh + 4;
+	y = CCC_GdiHelpDrawSoftDemoPair(dc, L, y, rc.Width() - L * 2, min(140, max(112, rc.Height() / 5)),
+		CCC_HELPDEMO_KGENERIC);
+
 
 	title(L, y, LL14(L"フィールド", L"Fields", L"Champs", L"Campi", L"Campos", L"필드", L"字段", L"الحقول",
 		L"Поля", L"Felder", L"Campos", L"Velden", L"Pola", L"Alanlar"));

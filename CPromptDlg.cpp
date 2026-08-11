@@ -125,6 +125,9 @@ void CPrmHelpDlg::OnPaint()
 		L"Komendy czasowe zmieniają dźwięk. Roll i prompt współdzielą listę.",
 		L"Zamanlı komutlar sesi değiştirir. Rulo ve istem aynı listeyi paylaşır."));
 	y += lh + 4;
+	y = CCC_GdiHelpDrawSoftDemoPair(dc, L, y, rc.Width() - L * 2, min(140, max(112, rc.Height() / 5)),
+		CCC_HELPDEMO_KCMDROLL);
+
 
 	title(L, y, LL14(L"編集 / コマンド", L"Edit / Commands", L"Édition / Commandes", L"Modifica / Comandi",
 		L"Edición / Comandos", L"편집 / 명령", L"编辑 / 命令", L"تحرير / أوامر",

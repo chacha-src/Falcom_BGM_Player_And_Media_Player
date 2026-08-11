@@ -276,25 +276,24 @@ namespace {
 		s_reopenScreenPt = screenPt;
 		s_reopenNc = nc ? TRUE : FALSE;
 	}
-	// Track 完了後: 閉じた右クリックで新規メニューを1つ開く（DOWN+UP。CONTEXTMENU は DefWindowProc に任せる）
+	// Track 完了後: 外側右クリックで新規メニューを1つ開く。
+	// DOWN+UP 再送は新規 Track のモーダルが「外側クリック」と誤認して即閉じる／
+	// 二重 CONTEXTMENU の原因になるので、WM_CONTEXTMENU を1通だけ投げる。
 	static void PopupFlushReopenContextClick()
 	{
 		if (!s_reopenRClick) return;
 		s_reopenRClick = FALSE;
 		const POINT pt = s_reopenScreenPt;
-		const BOOL nc = s_reopenNc;
 		s_reopenNc = FALSE;
 		HWND h = ::WindowFromPoint(pt);
 		if (!h || !::IsWindow(h)) return;
-		if (nc) {
-			::PostMessage(h, WM_NCRBUTTONDOWN, (WPARAM)HTCLIENT, MAKELPARAM(pt.x, pt.y));
-			::PostMessage(h, WM_NCRBUTTONUP, (WPARAM)HTCLIENT, MAKELPARAM(pt.x, pt.y));
-		} else {
-			POINT c = pt;
-			::ScreenToClient(h, &c);
-			::PostMessage(h, WM_RBUTTONDOWN, MK_RBUTTON, MAKELPARAM(c.x, c.y));
-			::PostMessage(h, WM_RBUTTONUP, 0, MAKELPARAM(c.x, c.y));
-		}
+		// 直前のメニュー owner へ戻したフォーカスを、実際にクリックした UI へ移す。
+		// これをしないと新メニューの IsForegroundOurs が即座に FALSE → 出現途中で消える。
+		HWND root = ::GetAncestor(h, GA_ROOT);
+		if (!root) root = h;
+		if (::IsWindow(root))
+			::SetForegroundWindow(root);
+		::PostMessage(h, WM_CONTEXTMENU, (WPARAM)h, MAKELPARAM(pt.x, pt.y));
 	}
 
 	// Soft*（ポップアップ専用・CCustomControl の静的とは分離）
@@ -3763,6 +3762,17 @@ void CCustomPopupMenu::RunModalLoop()
 	m_tracking = TRUE; m_done = FALSE; m_result = 0;
 	HWND hCap = (m_owner && m_owner->GetSafeHwnd()) ? m_owner->GetSafeHwnd() : NULL;
 	MSG msg;
+	// 他アプリ／別トップレベルへフォーカスが移って閉じたときは
+	// 終了時に SetForegroundWindow(owner) しない（すぐメディアプレイヤーが前面に戻るのを防ぐ）
+	BOOL lostForeignFocus = FALSE;
+
+	auto dismissForForeignFocus = [&]() {
+		m_done = TRUE;
+		m_result = 0;
+		lostForeignFocus = TRUE;
+		// アプリ外／別トップレベルへのフォーカス移動では開き直ししない
+		s_reopenRClick = FALSE;
+	};
 
 	auto dispatchOne = [&](MSG& m) -> BOOL {
 		if (m.message == WM_QUIT) {
@@ -3771,7 +3781,8 @@ void CCustomPopupMenu::RunModalLoop()
 			return FALSE;
 		}
 		if (m.message == WM_ACTIVATEAPP && m.wParam == FALSE) {
-			m_done = TRUE; m_result = 0; return TRUE;
+			dismissForForeignFocus();
+			return TRUE;
 		}
 		if (m.message == WM_KEYDOWN && m.wParam == VK_ESCAPE) {
 			CWnd* f = GetFocus();
@@ -3832,22 +3843,31 @@ void CCustomPopupMenu::RunModalLoop()
 				if (elapsed >= total || atRest)
 					SnapAnimToIdle();
 			}
-			if (!m_done && !IsForegroundOurs()) {
-				m_done = TRUE; m_result = 0;
-			}
+			if (!m_done && !IsForegroundOurs())
+				dismissForForeignFocus();
 			continue;
 		}
 
-		// 定着後は GetMessage（WM_TIMER を正しく起こす）
-		if (!::GetMessage(&msg, NULL, 0, 0)) {
-			m_done = TRUE; m_result = 0;
-			::PostQuitMessage((int)msg.wParam); break;
+		// 定着後: GetMessage 無限待ちだと他アプリ切替を検知できない。
+		// WM_ACTIVATEAPP は SendMessage 経由でキューに乗らないため、短周期で
+		// IsForegroundOurs を見る（タイマ合成のため Peek も回す）。
+		const DWORD wake = ::MsgWaitForMultipleObjects(0, NULL, FALSE, 100, QS_ALLINPUT);
+		if (wake == WAIT_TIMEOUT) {
+			if (!IsForegroundOurs())
+				dismissForForeignFocus();
+			continue;
 		}
-		if (!dispatchOne(msg))
-			break;
-		if (!m_done && !IsForegroundOurs()) {
-			m_done = TRUE; m_result = 0;
+		while (!m_done && ::PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
+			if (msg.message == WM_QUIT) {
+				m_done = TRUE; m_result = 0;
+				::PostQuitMessage((int)msg.wParam);
+				break;
+			}
+			if (!dispatchOne(msg))
+				break;
 		}
+		if (!m_done && !IsForegroundOurs())
+			dismissForForeignFocus();
 	}
 	m_tracking = FALSE;
 	// 破棄前に残クリック／キャプチャを掃除（AnimateOut 中の入力は別途捨てる）
@@ -3859,7 +3879,9 @@ void CCustomPopupMenu::RunModalLoop()
 		s_trackingRoot = NULL;
 		s_trackingHwnd = NULL;
 	}
-	if (hCap && ::IsWindow(hCap)) ::SetForegroundWindow(hCap);
+	// 他UI開き直し／他アプリへ移ったあとは owner を前面に戻さない
+	if (hCap && ::IsWindow(hCap) && !s_reopenRClick && !lostForeignFocus)
+		::SetForegroundWindow(hCap);
 }
 
 UINT CCustomPopupMenu::Track(CPoint screenPt, CWnd* pOwner)
