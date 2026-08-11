@@ -1,4 +1,4 @@
-//{{NO_DEPENDENCIES}}
+﻿//{{NO_DEPENDENCIES}}
 // Microsoft Visual C++ ??????????C???N???[?h ?t?@?C???B
 // ogg.rc ??g?p
 //
@@ -1510,6 +1510,8 @@
 #define IDC_AS_AUDIOLBL                 4014
 #define IDC_AS_SUBLBL                   4015
 #define IDC_AS_SUBLIST                  4016
+#define IDC_KPI_PLUGIN_DL               4021
+#define IDC_KPI_PLUGIN_RELOAD           4022
 
 // Next default values for new objects
 // 
@@ -1517,7 +1519,7 @@
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NEXT_RESOURCE_VALUE        251
 #define _APS_NEXT_COMMAND_VALUE         33243
-#define _APS_NEXT_CONTROL_VALUE         4021
+#define _APS_NEXT_CONTROL_VALUE         4023
 #define _APS_NEXT_SYMED_VALUE           104
 #endif
 #endif

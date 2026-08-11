@@ -513,6 +513,7 @@ BOOL COggApp::InitInstance()
 	savedata.mpBanner3dpitch = 260;
 	savedata.mpBanner3dzoom = 100;
 	savedata.popupMenuSoftBoost = 1;
+	savedata.kpi_plugin_dl_skip = 0;
 	savedata.dougatopmost = 0;
 	savedata.dougaaspect = 0;
 
@@ -867,6 +868,10 @@ BOOL COggApp::InitInstance()
 		savedata.popupMenuSoftBoost = 1;
 	else if (savedata.popupMenuSoftBoost != 0)
 		savedata.popupMenuSoftBoost = 1;
+	if (datFileSize < (int)(offsetof(save, kpi_plugin_dl_skip) + sizeof(savedata.kpi_plugin_dl_skip)))
+		savedata.kpi_plugin_dl_skip = 0;
+	else if (savedata.kpi_plugin_dl_skip)
+		savedata.kpi_plugin_dl_skip = 1;
 	if (datFileSize < (int)(offsetof(save, mpToolsOpen) + sizeof(savedata.mpToolsOpen)))
 		savedata.mpToolsOpen = 0;
 	else if (savedata.mpToolsOpen) savedata.mpToolsOpen = 1;

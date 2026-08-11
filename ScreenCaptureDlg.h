@@ -372,8 +372,9 @@ public:
 	BOOL m_ytLiveTransitionDone;
 	BOOL m_ytTestingRequested; // testing 遷移を一度投げた
 	volatile LONG m_ytLivePhase; // 0=なし 1=RTMP待ち 2=遷移中 3=ライブ 4=遷移失敗 5=枠なし 6=ffmpeg死
-	volatile LONG m_ytGoLiveRequest; // キャプチャ→UI: ライブ遷移ポーリング要求
-	DWORD m_ytGoLiveLastTick; // UI側の前回ポーリング時刻
+	volatile LONG m_ytGoLiveRequest; // キャプチャ→ワーカ: ライブ遷移ポーリング要求
+	DWORD m_ytGoLiveLastTick; // 前回キック時刻
+	HANDLE m_ytGoLiveThread; // YouTube API は UI を止めない専用スレッド
 	TCHAR m_ytStreamStatus[96]; // streamStatus / lifeCycle / api err
 	int m_liveService;
 	int m_fpsVal;

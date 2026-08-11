@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include "CCustomControl.h"
 
 // ============================================================================
@@ -90,7 +90,9 @@ enum {
 	CCUSTOM_POPUP_ID_ANIM8 = 0x00E00128,
 	CCUSTOM_POPUP_ID_ANIM9 = 0x00E00129,
 	// Soft 立体アクセント強め（アクリルの下）
-	CCUSTOM_POPUP_ID_SOFTBOOST = 0x00E0012A
+	CCUSTOM_POPUP_ID_SOFTBOOST = 0x00E0012A,
+	CCUSTOM_POPUP_ID_KPI_DL = 0x00E0012B,
+	CCUSTOM_POPUP_ID_KPI_RELOAD = 0x00E0012C
 };
 
 enum {
@@ -339,7 +341,7 @@ protected:
 	void CommitChipFlightSettle();
 	void ForceChipPresent();
 	// optDst!=NULL ならその画面座標に w*h で出す（畳む前に最終サイズへ先送りできる）
-	BOOL PresentChipLayered(HDC hdcSrc, int w, int h, const POINT* optDst = NULL);
+	BOOL PresentChipLayered(HDC hdcSrc, int w, int h, const POINT* optDst = NULL, BYTE opacity = 255);
 	void BlitOpaqueToWindow(HDC hdcSrc, int w, int h); // ULW解除後の同期焼き込み
 	void SnapAnimToIdle(); // 出現アニメ中断→一枚状態（サブ遷移・クリック用）
 	// phase中の行オフセット/フェード(ox,oy,fade0..256)。未出現は FALSE

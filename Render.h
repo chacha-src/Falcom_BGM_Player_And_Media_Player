@@ -98,6 +98,10 @@ public:
 	afx_msg void Onkpi30();
 	afx_msg void Onkpi();
 	CCustomStandardButton m_kpi;
+	CCustomStandardButton m_kpiPluginDl;
+	CCustomStandardButton m_kpiPluginReload;
+	afx_msg void OnKpiPluginDl();
+	afx_msg void OnKpiPluginReload();
 	afx_msg void OnFontMain();
 	afx_msg void OnFontList();
 	CCustomCheckBox m_mp3orig;

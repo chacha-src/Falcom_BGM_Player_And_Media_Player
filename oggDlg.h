@@ -355,6 +355,7 @@ public:
 	CCustomStandardButton d_arc;
 	afx_msg void OnBnClickedButton51();
 	afx_msg LRESULT OnUpdateAvailable(WPARAM wParam, LPARAM lParam);
+	afx_msg LRESULT OnKpiPluginMsg(WPARAM wParam, LPARAM lParam);
 	CCustomStandardButton d_san1;
 	afx_msg void OnBnClickedButton53();
 	CCustomStandardButton d_san2;
@@ -473,6 +474,13 @@ void OggArmSilentResumeFromCurrent();
 // リモート再生: MessageBox なし。Yes=途中から / No=先頭から(.save削除)
 void OggArmRemoteSilentResumeYes();
 void OggArmRemoteSilentResumeNo();
+
+// KPI プラグイン: confirm/startupEmpty/reloadAfter。いいえ(起動0件時)は kpi_plugin_dl_skip を立てる。
+BOOL OggKpiDownloadPlugins(CWnd* owner, BOOL confirm, BOOL startupEmpty, BOOL reloadAfter);
+BOOL OggKpiReloadPlugins(CWnd* owner);
+#ifndef WM_APP_KPI_PLUGIN
+#define WM_APP_KPI_PLUGIN (WM_APP + 58) // wParam: 1=DL 2=再読込
+#endif
 
 //{{AFX_INSERT_LOCATION}}
 // Microsoft Visual C++ は前行の直前に追加の宣言を挿入します。

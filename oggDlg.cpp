@@ -1,4 +1,4 @@
-// oggDlg.cpp : インプリメンテーション ファイル
+﻿// oggDlg.cpp : インプリメンテーション ファイル
 //
 //#define _DLL
 #include "stdafx.h"
@@ -1297,6 +1297,15 @@ public:
 		}
 	}
 
+	void SetStatusText(const CString& text)
+	{
+		m_strText = text;
+		if (m_hWnd) {
+			Invalidate(FALSE);
+			UpdateWindow();
+		}
+	}
+
 	void Show()
 	{
 		if (m_hWnd != NULL) {
@@ -1446,6 +1455,208 @@ BEGIN_MESSAGE_MAP(CKpiLoadingWnd, CWnd)
 	ON_WM_PAINT()
 	ON_WM_ERASEBKGND()
 END_MESSAGE_MAP()
+
+#include "KpiPluginInstall.h"
+
+extern void COgg_KickTimerp();
+
+static void OggKpiLoadingProgressPct(int percent, void* ctx)
+{
+	CKpiLoadingWnd* w = (CKpiLoadingWnd*)ctx;
+	if (!w || !w->GetSafeHwnd()) return;
+	if (percent < 0) percent = 0;
+	if (percent > 100) percent = 100;
+	CString t;
+	t.Format(LL14(
+		L"KPIプラグインをダウンロード中…\n%d%%",
+		L"Downloading KPI plugins…\n%d%%",
+		L"Telechargement des plugins KPI…\n%d%%",
+		L"Download plugin KPI…\n%d%%",
+		L"Descargando plugins KPI…\n%d%%",
+		L"KPI 플러그인 다운로드 중…\n%d%%",
+		L"正在下载 KPI 插件…\n%d%%",
+		L"جارٍ تنزيل إضافات KPI…\n%d%%",
+		L"Загрузка KPI-плагинов…\n%d%%",
+		L"KPI-Plugins werden heruntergeladen…\n%d%%",
+		L"A descarregar plugins KPI…\n%d%%",
+		L"KPI-plugins downloaden…\n%d%%",
+		L"Pobieranie wtyczek KPI…\n%d%%",
+		L"KPI eklentileri indiriliyor…\n%d%%"), percent);
+	w->SetStatusText(t);
+	w->SetRange(0, 100);
+	w->SetPos(percent);
+}
+
+static void OggKpiApplyAfterPlug()
+{
+	CKpilist kp;
+	kp.status = 1;
+	kp.Init();
+	kp.Save();
+}
+
+static CString OggKpiAskDownloadMsg()
+{
+	return LL14(
+		L"KPIプラグインが見つかりませんでした。\nダウンロードしますか？",
+		L"No KPI plugins were found.\nDownload them?",
+		L"Aucun plugin KPI trouve.\nTelecharger ?",
+		L"Nessun plugin KPI trovato.\nScaricare?",
+		L"No se encontraron plugins KPI.\n¿Descargar?",
+		L"KPI 플러그인을 찾지 못했습니다.\n다운로드할까요?",
+		L"未找到 KPI 插件。\n是否下载？",
+		L"لم يُعثر على إضافات KPI.\nهل تريد التنزيل؟",
+		L"KPI-плагины не найдены.\nСкачать?",
+		L"Keine KPI-Plugins gefunden.\nHerunterladen?",
+		L"Nenhum plugin KPI encontrado.\nDescarregar?",
+		L"Geen KPI-plugins gevonden.\nDownloaden?",
+		L"Nie znaleziono wtyczek KPI.\nPobrac?",
+		L"KPI eklentisi bulunamadi.\nIndirilsin mi?");
+}
+
+// confirm=TRUE で確認ダイアログ。startupEmpty=TRUE のとき「いいえ」で再尋ねないフラグを保存。
+// reloadAfter=TRUE のとき展開後に plug+KPI適用（起動時 plug 内からは FALSE）。
+BOOL OggKpiDownloadPlugins(CWnd* owner, BOOL confirm, BOOL startupEmpty, BOOL reloadAfter)
+{
+#if WIN64
+	UNREFERENCED_PARAMETER(owner);
+	UNREFERENCED_PARAMETER(confirm);
+	UNREFERENCED_PARAMETER(startupEmpty);
+	UNREFERENCED_PARAMETER(reloadAfter);
+	return FALSE;
+#else
+	if (confirm) {
+		const int ans = AfxMessageBox(OggKpiAskDownloadMsg(), MB_YESNO | MB_ICONQUESTION);
+		if (ans != IDYES) {
+			if (startupEmpty) {
+				savedata.kpi_plugin_dl_skip = 1;
+				MpPersistSavedataQuick();
+			}
+			return FALSE;
+		}
+	}
+
+	CKpiLoadingWnd localWnd;
+	CKpiLoadingWnd* wnd = g_pActiveLoadingWnd;
+	BOOL ownWnd = FALSE;
+	if (!wnd || !wnd->GetSafeHwnd()) {
+		localWnd.Create(owner);
+		localWnd.Show();
+		wnd = &localWnd;
+		g_pActiveLoadingWnd = wnd;
+		ownWnd = TRUE;
+		g_oggKpiLoading = 1;
+	}
+
+	OggKpiLoadingProgressPct(0, wnd);
+	CString err;
+	const BOOL ok = KpiInstall_DownloadAndExtract(karento2, OggKpiLoadingProgressPct, wnd, err);
+	if (!ok) {
+		if (err.IsEmpty()) {
+			err = LL14(L"KPIプラグインの取得に失敗しました。", L"Failed to obtain KPI plugins.",
+				L"Echec de l'obtention des plugins KPI.", L"Acquisizione plugin KPI non riuscita.",
+				L"Fallo al obtener plugins KPI.", L"KPI 플러그인 확보 실패.", L"获取 KPI 插件失败。",
+				L"فشل الحصول على إضافات KPI.", L"Не удалось получить KPI-плагины.",
+				L"KPI-Plugins konnten nicht geholt werden.", L"Falha ao obter plugins KPI.",
+				L"KPI-plugins ophalen mislukt.", L"Nie udalo sie pobrac wtyczek KPI.",
+				L"KPI eklentileri alinamadi.");
+		}
+		AfxMessageBox(err, MB_ICONERROR);
+	} else if (reloadAfter) {
+		wnd->SetStatusText(LL14(
+			L"KPI読み込み中…\n（ダウンロード完了・再読込）",
+			L"Reading KPI list…\n(Download done — reloading)",
+			L"Lecture KPI…\n(Telechargement OK — relecture)",
+			L"Lettura KPI…\n(Download OK — ricarica)",
+			L"Leyendo KPI…\n(Descarga OK — recarga)",
+			L"KPI 목록 읽는 중…\n(다운로드 완료·다시 읽기)",
+			L"正在读取 KPI…\n（下载完成·重新加载）",
+			L"قراءة KPI…\n(اكتمل التنزيل — إعادة)",
+			L"Чтение KPI…\n(Загрузка OK — перечитывание)",
+			L"KPI-Liste lesen…\n(Download fertig — neu laden)",
+			L"A ler KPI…\n(Download OK — a recarregar)",
+			L"KPI lezen…\n(Download klaar — herladen)",
+			L"Odczyt KPI…\n(Pobrano — ponowne wczytanie)",
+			L"KPI okunuyor…\n(Indirme bitti — yeniden)"));
+		g_nCurrentKpiIndex = 0;
+		if (og && ::IsWindow(og->GetSafeHwnd()))
+			og->plug(karento2, NULL);
+		OggKpiApplyAfterPlug();
+	} else if (wnd) {
+		wnd->SetStatusText(LL14(
+			L"KPI読み込み中…\n（しばらく時間がかかる場合があります）",
+			L"Reading KPI list…\n(This may take some time)",
+			L"Lecture de la liste KPI…\n(Cela peut prendre du temps)",
+			L"Lettura della lista KPI…\n(Questo potrebbe richiedere del tempo)",
+			L"Leyendo la lista KPI…\n(Esto puede tardar un poco)",
+			L"KPI 목록을 읽는 중…\n(시간이 다소 걸릴 수 있습니다)",
+			L"正在读取KPI列表…\n（可能需要一些时间）",
+			L"جاري قراءة قائمة KPI…\n(قد يستغرق هذا بعض الوقت)",
+			L"Чтение списка KPI…\n(Это может занять некоторое время)",
+			L"KPI-Liste wird gelesen…\n(Dies kann einige Zeit dauern)",
+			L"Lendo a lista KPI…\n(Isso pode levar algum tempo)",
+			L"KPI-lijst lezen…\n(Dit kan even duren)",
+			L"Odczytywanie listy KPI…\n(Może to zająć trochę czasu)",
+			L"KPI listesi okunuyor…\n(Bu biraz zaman alabilir)"));
+	}
+
+	if (ownWnd) {
+		g_pActiveLoadingWnd = NULL;
+		g_oggKpiLoading = 0;
+		localWnd.DestroyWindow();
+		COgg_KickTimerp();
+	}
+	return ok;
+#endif
+}
+
+BOOL OggKpiReloadPlugins(CWnd* owner)
+{
+#if WIN64
+	UNREFERENCED_PARAMETER(owner);
+	return FALSE;
+#else
+	if (!og || !::IsWindow(og->GetSafeHwnd()))
+		return FALSE;
+
+	CKpiLoadingWnd localWnd;
+	CKpiLoadingWnd* wnd = g_pActiveLoadingWnd;
+	BOOL ownWnd = FALSE;
+	if (!wnd || !wnd->GetSafeHwnd()) {
+		localWnd.Create(owner);
+		localWnd.Show();
+		wnd = &localWnd;
+		g_pActiveLoadingWnd = wnd;
+		ownWnd = TRUE;
+		g_oggKpiLoading = 1;
+	}
+	wnd->SetStatusText(LL14(
+		L"KPI読み込み中…\n（再読込）",
+		L"Reading KPI list…\n(Reload)",
+		L"Lecture KPI…\n(Relecture)",
+		L"Lettura KPI…\n(Ricarica)",
+		L"Leyendo KPI…\n(Recarga)",
+		L"KPI 목록 읽는 중…\n(다시 읽기)",
+		L"正在读取 KPI…\n（重新加载）",
+		L"قراءة KPI…\n(إعادة)",
+		L"Чтение KPI…\n(Перечитывание)",
+		L"KPI-Liste lesen…\n(Neu laden)",
+		L"A ler KPI…\n(Recarregar)",
+		L"KPI lezen…\n(Herladen)",
+		L"Odczyt KPI…\n(Ponowne wczytanie)",
+		L"KPI okunuyor…\n(Yeniden)"));
+	g_nCurrentKpiIndex = 0;
+	og->plug(karento2, NULL);
+	OggKpiApplyAfterPlug();
+	if (ownWnd) {
+		g_pActiveLoadingWnd = NULL;
+		g_oggKpiLoading = 0;
+		localWnd.DestroyWindow();
+		COgg_KickTimerp();
+	}
+	return TRUE;
+#endif
+}
 
 double aa1_ = 0;
 BOOL CAboutDlg::OnInitDialog()
@@ -1693,6 +1904,7 @@ BEGIN_MESSAGE_MAP(COggDlg, CCustomBlurDialogBase)
 
 	ON_MESSAGE(WM_APP + 1, dp1)
 	ON_MESSAGE(WM_APP + 2, dp2)
+	ON_MESSAGE(WM_APP_KPI_PLUGIN, OnKpiPluginMsg)
 	ON_MESSAGE(WM_TIMERP_VSYNC_TICK, &COggDlg::OnTimerpVsyncTick)
 	ON_MESSAGE(WM_SPEANA_TICK, &COggDlg::OnSpeanaTick)
 	ON_MESSAGE(WM_ENDPOINT_VOLUME, &COggDlg::OnEndpointVolume)
@@ -22960,6 +23172,15 @@ LRESULT COggDlg::OnPlaybackAutoStopped(WPARAM, LPARAM)
 	return 0;
 }
 
+LRESULT COggDlg::OnKpiPluginMsg(WPARAM wParam, LPARAM)
+{
+	if (wParam == 1)
+		OggKpiDownloadPlugins(this, TRUE, FALSE, TRUE);
+	else if (wParam == 2)
+		OggKpiReloadPlugins(this);
+	return 0;
+}
+
 LRESULT COggDlg::OnUpdateAvailable(WPARAM wParam, LPARAM)
 {
 	UpdateCheckBeginPrompt();
@@ -27902,9 +28123,16 @@ void COggDlg::plug(CString ff, KMPMODULE * mod)
 	for (int i = 0; i < 500; i++)
 		hDLLk1[i] = NULL;
 
+	int totalKpis = CountKpiFiles(ff);
+	if (totalKpis == 0 && !savedata.kpi_plugin_dl_skip) {
+		// 起動時／再読込で 0 件: 確認のうえ公式 Plugins.zip を取得（plug 再入はしない）
+		if (OggKpiDownloadPlugins(this, TRUE, TRUE, FALSE))
+			totalKpis = CountKpiFiles(ff);
+	}
+
 	if (g_pActiveLoadingWnd != NULL) {
-		int totalKpis = CountKpiFiles(ff);
-		g_pActiveLoadingWnd->SetRange(0, totalKpis);
+		g_pActiveLoadingWnd->SetRange(0, totalKpis > 0 ? totalKpis : 1);
+		g_pActiveLoadingWnd->SetPos(0);
 	}
 
 	plugloop(ff);

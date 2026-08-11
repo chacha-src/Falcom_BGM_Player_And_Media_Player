@@ -1,4 +1,4 @@
-#include "stdafx.h"
+﻿#include "stdafx.h"
 #include "CCustomPopupMenu.h"
 #include "GdiSoft2D.h"
 #include "GdiSoft3D.h"
@@ -8,6 +8,10 @@
 #pragma comment(lib, "uxtheme.lib")
 
 extern void MpPersistSavedataQuick();
+
+#ifndef WM_APP_KPI_PLUGIN
+#define WM_APP_KPI_PLUGIN (WM_APP + 58)
+#endif
 
 IMPLEMENT_DYNAMIC(CCustomPopupMenu, CWnd)
 
@@ -295,6 +299,7 @@ namespace {
 
 	// Soft*（ポップアップ専用・CCustomControl の静的とは分離）
 	static int s_popSoftBusy = 0;
+	static BOOL s_popSoftDisabled = FALSE; // 退場フェード等で Soft 全停止
 	static GdiSoft2D::Context s_popSoft2d;
 	static GdiSoft3D::Context s_popSoft3d;
 
@@ -302,7 +307,7 @@ namespace {
 	{
 		// 全面パネルはごく薄い背景ポリゴン。ホット行(低い)だけ少し濃く。キャンディ箱は置かない。
 		// doorT>=0: EXPAND/CLASSIC 着地用（1=着地、0=開いた/回転中）
-		if (s_popSoftBusy || rc.Width() < 24 || rc.Height() < 14) return;
+		if (s_popSoftDisabled || s_popSoftBusy || rc.Width() < 24 || rc.Height() < 14) return;
 		if (rc.Width() > 640 || rc.Height() > 520) return;
 		if ((LONGLONG)rc.Width() * (LONGLONG)rc.Height() > 220000) return;
 		++s_popSoftBusy;
@@ -360,7 +365,7 @@ namespace {
 		}
 		// Soft2D: 行ピル／boost／扉。全面は Soft2D のみ（Soft3D より軽い）＋3フレに1回
 		const BOOL soft2dWant = rowPill || boost || doorT >= 0.f;
-		const BOOL soft2dThrottleOk = rowPill || doorT >= 0.f || ((animTick % 3) == 0);
+		const BOOL soft2dThrottleOk = rowPill || doorT >= 0.f || ((animTick % 5) == 0);
 		if (soft2dWant && soft2dThrottleOk && s_popSoft2d.Create(w, h, false) && s_popSoft2d.fb.color) {
 			s_popSoft2d.ClearArgb(0);
 			const int ox = (int)(sinf((float)animTick * 0.035f) * 2.f);
@@ -375,9 +380,10 @@ namespace {
 
 	static void PopupSoftGem(CDC& dc, const CRect& rc, int animTick)
 	{
-		// セパレータ中央の小さな Soft 紙片（控えめ）
-		if (s_popSoftBusy || rc.Width() < 8 || rc.Height() < 8) return;
+		// セパレータ中央の小さな Soft 紙片（控えめ）。通常は SoftBoost 時のみ。
+		if (s_popSoftDisabled || s_popSoftBusy || rc.Width() < 8 || rc.Height() < 8) return;
 		if (rc.Width() > 48 || rc.Height() > 48) return;
+		if (!savedata.popupMenuSoftBoost) return;
 		++s_popSoftBusy;
 		const int w = rc.Width();
 		const int h = rc.Height();
@@ -733,9 +739,11 @@ static COLORREF BlendRGB(COLORREF a, COLORREF b, int t)
 		CBrush* ob = dc.SelectObject(&br);
 		dc.Ellipse(hr.left + 5, cy - 3, hr.left + 12, cy + 4);
 		dc.SelectObject(ob);
-		// Soft plate は行全面だと重い。小さなジェムだけ（見た目は残す）
-		CRect gem(hr.left + 3, cy - 6, hr.left + 15, cy + 6);
-		PopupSoftGem(dc, gem, (int)(::GetTickCount64() / 48));
+		// Soft plate は行全面だと重い。小さなジェムは SoftBoost 時のみ
+		if (savedata.popupMenuSoftBoost) {
+			CRect gem(hr.left + 3, cy - 6, hr.left + 15, cy + 6);
+			PopupSoftGem(dc, gem, (int)(::GetTickCount64() / 48));
+		}
 	}
 
 	static void DrawPanelChrome(CDC& dc, const CRect& rc)
@@ -750,19 +758,21 @@ static COLORREF BlendRGB(COLORREF a, COLORREF b, int t)
 	{
 		// 飛行中 Soft3D。フル幅×全行×毎フレは重いので:
 		// ・小さな固定 FB（リボン付近）
-		// ・4フレに1回
-		// ・同時描画は最大 3 行
-		if (s_popSoftBusy || chip.Width() < 20 || chip.Height() < 12) return;
+		// ・5フレに1回
+		// ・同時描画は最大 2 行
+		if (s_popSoftDisabled || s_popSoftBusy || chip.Width() < 20 || chip.Height() < 12) return;
 		if (fade < 40) return;
+		// SoftBoost オフ時は飛行 Soft を省略（入場は GDI だけ）
+		if (!savedata.popupMenuSoftBoost) return;
 		const float t = (flightT < 0.f) ? 0.f : (flightT > 1.f ? 1.f : flightT);
 		const float remain = 1.f - t;
 		if (remain < 0.02f) return;
-		if (((animTick + rowIdx) % 4) != 0) return;
+		if (((animTick + rowIdx) % 5) != 0) return;
 		static int s_softFlightBudget = 0;
 		static ULONGLONG s_softFlightTick = 0;
 		const ULONGLONG now = ::GetTickCount64();
 		if (now != s_softFlightTick) { s_softFlightTick = now; s_softFlightBudget = 0; }
-		if (s_softFlightBudget >= 3) return;
+		if (s_softFlightBudget >= 2) return;
 		++s_softFlightBudget;
 
 		++s_popSoftBusy;
@@ -986,6 +996,8 @@ BOOL CCustomPopupMenu::IsChromeCommand(UINT id) const
 		|| id == CCUSTOM_POPUP_ID_FONT_BOLD
 		|| id == CCUSTOM_POPUP_ID_FONT_ITALIC
 		|| id == CCUSTOM_POPUP_ID_FONT_FACE
+		|| id == CCUSTOM_POPUP_ID_KPI_DL
+		|| id == CCUSTOM_POPUP_ID_KPI_RELOAD
 		|| (id >= CCUSTOM_POPUP_ID_ANIM0
 			&& id < CCUSTOM_POPUP_ID_ANIM0 + (UINT)POPUP_ANIM_COUNT);
 }
@@ -1395,6 +1407,61 @@ void CCustomPopupMenu::EnsureChromePrefix()
 			L"Усилить Soft-полупрозрачные боксы/свечение", L"Soft-Translucent-Boxen/Glow verstärken",
 			L"Reforcar caixas Soft translucidas/glow", L"Soft doorschijnende dozen/glow versterken",
 			L"Wzmocnij polprzezroczyste Soft boxy/glow", L"Soft yari saydam kutu/glow guclendir"));
+
+	CCustomPopupMenu* kpiSub = AddSubMenu(
+		LL14(L"KPIプラグイン", L"KPI plugins", L"Plugins KPI", L"Plugin KPI", L"Plugins KPI",
+			L"KPI 플러그인", L"KPI 插件", L"إضافات KPI", L"KPI-плагины", L"KPI-Plugins",
+			L"Plugins KPI", L"KPI-plugins", L"Wtyczki KPI", L"KPI eklentileri"),
+		LL14(L"KPIプラグインのダウンロード／再読込", L"Download or reload KPI plugins",
+			L"Telecharger ou relire les plugins KPI", L"Scarica o ricarica i plugin KPI",
+			L"Descargar o recargar plugins KPI", L"KPI 플러그인 다운로드/다시 읽기",
+			L"下载或重新加载 KPI 插件", L"تنزيل أو إعادة تحميل إضافات KPI",
+			L"Скачать или перечитать KPI-плагины", L"KPI-Plugins herunterladen/neu laden",
+			L"Descarregar ou recarregar plugins KPI", L"KPI-plugins downloaden/herladen",
+			L"Pobierz lub wczytaj ponownie wtyczki KPI", L"KPI eklentilerini indir/yeniden yukle"));
+	if (kpiSub) {
+		kpiSub->SetSkipChrome(TRUE);
+		kpiSub->AddCommand(CCUSTOM_POPUP_ID_KPI_DL,
+			LL14(L"KPIプラグインダウンロード", L"Download KPI plugins", L"Telecharger plugins KPI",
+				L"Scarica plugin KPI", L"Descargar plugins KPI", L"KPI 플러그인 다운로드",
+				L"下载 KPI 插件", L"تنزيل إضافات KPI", L"Скачать KPI-плагины", L"KPI-Plugins herunterladen",
+				L"Descarregar plugins KPI", L"KPI-plugins downloaden", L"Pobierz wtyczki KPI",
+				L"KPI eklentilerini indir"),
+			LL14(L"公式 Plugins.zip を取得し、このプログラムと同じフォルダへ展開します",
+				L"Download official Plugins.zip and extract next to this program",
+				L"Telecharger Plugins.zip officiel et extraire a cote du programme",
+				L"Scarica Plugins.zip ufficiale e estrai accanto al programma",
+				L"Descargar Plugins.zip oficial y extraer junto al programa",
+				L"공식 Plugins.zip을 받아 이 프로그램과 같은 폴더에 펼칩니다",
+				L"下载官方 Plugins.zip 并解压到本程序同目录",
+				L"تنزيل Plugins.zip الرسمي واستخراجه بجانب البرنامج",
+				L"Скачать официальный Plugins.zip и распаковать рядом с программой",
+				L"Offizielles Plugins.zip laden und neben das Programm entpacken",
+				L"Descarregar Plugins.zip oficial e extrair ao lado do programa",
+				L"Officiele Plugins.zip downloaden en naast het programma uitpakken",
+				L"Pobierz oficjalny Plugins.zip i rozpakuj obok programu",
+				L"Resmi Plugins.zip indirip programla ayni klasore ac"));
+		kpiSub->AddCommand(CCUSTOM_POPUP_ID_KPI_RELOAD,
+			LL14(L"KPIプラグイン再読み込み", L"Reload KPI plugins", L"Relire plugins KPI",
+				L"Ricarica plugin KPI", L"Recargar plugins KPI", L"KPI 플러그인 다시 읽기",
+				L"重新加载 KPI 插件", L"إعادة تحميل إضافات KPI", L"Перечитать KPI-плагины", L"KPI-Plugins neu laden",
+				L"Recarregar plugins KPI", L"KPI-plugins herladen", L"Wczytaj ponownie wtyczki KPI",
+				L"KPI eklentilerini yeniden yukle"),
+			LL14(L"exe フォルダ配下の .kpi を最初から読み直します",
+				L"Re-scan .kpi files under the exe folder from scratch",
+				L"Relire les .kpi sous le dossier exe",
+				L"Rileggi i .kpi sotto la cartella exe",
+				L"Volver a leer los .kpi bajo la carpeta exe",
+				L"exe 폴더 아래 .kpi를 처음부터 다시 읽습니다",
+				L"从头重新扫描 exe 目录下的 .kpi",
+				L"إعادة قراءة ملفات .kpi تحت مجلد البرنامج",
+				L"Перечитать .kpi в папке exe с начала",
+				L".kpi unter dem Exe-Ordner neu einlesen",
+				L"Relê os .kpi sob a pasta do exe",
+				L".kpi onder de exe-map opnieuw inlezen",
+				L"Wczytaj ponownie pliki .kpi w folderze exe",
+				L"exe klasorundeki .kpi dosyalarini bastan oku"));
+	}
 
 	ClampPopupAnimSave();
 	CCustomPopupMenu* animSub = AddSubMenu(
@@ -2033,93 +2100,66 @@ void CCustomPopupMenu::AnimateOut()
 	ShowEmbedded(FALSE);
 	if (m_tip.GetSafeHwnd()) m_tip.Activate(FALSE);
 
-	const int style = PopupAnimStyle();
-	if (style == POPUP_ANIM_CLASSIC || m_skipChrome) {
-		::SetWindowRgn(m_hWnd, NULL, TRUE);
-		m_lineAnimPhase = 0;
-		if (style == POPUP_ANIM_CLASSIC && !m_asSubmenu) {
-			if (!::AnimateWindow(m_hWnd, 120, AW_BLEND | AW_HIDE))
-				ShowWindow(SW_HIDE);
-		} else {
-			ShowWindow(SW_HIDE);
-		}
-		return;
-	}
-
-	// 上下伸びは RGN 維持。行チップ系は ULW 飛行（全体→行は拡大直後に即 Present）
-	if (UsesRowChipFlight(style)) {
-		BeginChipFlight();
-		m_bridgePanel = TRUE;
-		m_lineAnimPhase = 2;
-		m_lineAnimStart = GetTickCount64();
-		ForceChipPresent();
-		m_bridgePanel = FALSE;
-	} else if (!(style == POPUP_ANIM_EXPAND && !m_asSubmenu)) {
-		::SetWindowRgn(m_hWnd, NULL, TRUE);
-		CClientDC dc(this);
-		CRect rc; GetClientRect(&rc);
-		dc.FillSolidRect(&rc, PopupBg());
-		m_lineAnimPhase = 2;
-		m_lineAnimStart = GetTickCount64();
-	} else {
-		m_lineAnimPhase = 2;
-		m_lineAnimStart = GetTickCount64();
-	}
-	SetTimer(kAnimTimer, 16, NULL);
-	int stag = CCUSTOM_POPUP_LINE_STAGGER_OUT;
-	if (m_itemCount > 1) {
-		const int need = stag * (m_itemCount - 1);
-		if (need > CCUSTOM_POPUP_LINE_STAGGER_BUDGET)
-			stag = max(1, CCUSTOM_POPUP_LINE_STAGGER_BUDGET / (m_itemCount - 1));
-	}
-	int span = 0;
-	if (UsesRadialStagger(style)
-		|| (!m_asSubmenu && style == POPUP_ANIM_EXPAND))
-		span = max(m_lineAnimOrigin, m_itemCount - 1 - m_lineAnimOrigin);
-	else if (UsesIndexStagger(style) || m_asSubmenu)
-		span = (m_itemCount > 0) ? (m_itemCount - 1) : 0;
-	else
-		span = max(m_lineAnimOrigin, m_itemCount - 1 - m_lineAnimOrigin);
-	const int outDur = ChipOutDurMs(style);
-	const int total = span * stag + outDur + 40;
-	const ULONGLONG endAt = m_lineAnimStart + (ULONGLONG)total;
-	MSG msg;
-	while (GetSafeHwnd() && GetTickCount64() < endAt) {
-		while (::PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
-			if (msg.message == WM_QUIT) {
-				::PostQuitMessage((int)msg.wParam);
-				break;
-			}
-			// 退場中に入力をメインへ流すと、ボタンは押下見た目だけ残って
-			// BN_CLICKED／再生イベントが死ぬ。再オープン系もここで捨てる。
-			if (PopupIsInputMessage(msg.message) || PopupIsMenuOpenMessage(msg.message))
-				continue;
-			// ホスト WM_PAINT は必ず Dispatch。BeginPaint だけの空 validate は
-			// g_gdiPaintPending／Posted 系を殺し得る。重さは Soft3D/Speana の
-			// GetTrackingRoot ガードで抑える（メッセージ自体は落とさない）。
-			::TranslateMessage(&msg);
-			::DispatchMessage(&msg);
-		}
-		InvalidateBgOnly();
-		UpdateWindow();
-		::MsgWaitForMultipleObjects(0, NULL, FALSE, 8, QS_ALLINPUT);
-	}
+	// 決定後は複雑な退場（行飛行など）を使わず、短いフェードで即閉じる
 	KillTimer(kAnimTimer);
 	KillTimer(kSettleTimer);
 	m_lineAnimPhase = 0;
-	// 先に隠す。レイヤ解除や EndChipFlight を見える状態でやると
-	// 透明ULW→不透明GDI が一フレ出てチラつく。
-	if (GetSafeHwnd())
-		ShowWindow(SW_HIDE);
-	if (GetSafeHwnd()) {
-		if (UsesRowChipFlight(style)) {
+	m_bridgePanel = FALSE;
+
+	s_popSoftDisabled = TRUE;
+	if (m_flightPad > 0 || (GetExStyle() & WS_EX_LAYERED)) {
+		const int pad = m_flightPad;
+		const int fw = m_menuW;
+		const int fh = m_menuH;
+		BOOL painted = FALSE;
+		if (fw > 0 && fh > 0) {
+			CRect rc; GetClientRect(&rc);
+			CClientDC dc(this);
+			CDC finalDC; finalDC.CreateCompatibleDC(&dc);
+			CBitmap finalBmp;
+			if (finalBmp.CreateCompatibleBitmap(&dc, fw, fh)) {
+				CBitmap* ob = finalDC.SelectObject(&finalBmp);
+				if (pad > 0 && rc.Width() >= fw && rc.Height() >= fh) {
+					CDC largeDC; largeDC.CreateCompatibleDC(&dc);
+					CBitmap largeBmp;
+					if (largeBmp.CreateCompatibleBitmap(&dc, rc.Width(), rc.Height())) {
+						CBitmap* ol = largeDC.SelectObject(&largeBmp);
+						largeDC.FillSolidRect(&rc, PopupBg());
+						PaintToDC(largeDC);
+						::BitBlt(finalDC.GetSafeHdc(), 0, 0, fw, fh,
+							largeDC.GetSafeHdc(), pad, pad, SRCCOPY);
+						largeDC.SelectObject(ol);
+						painted = TRUE;
+					}
+				} else {
+					CRect fr(0, 0, fw, fh);
+					finalDC.FillSolidRect(&fr, PopupBg());
+					PaintToDC(finalDC);
+					painted = TRUE;
+				}
+				EndChipFlight();
+				if (GetExStyle() & WS_EX_LAYERED)
+					ModifyStyleEx(WS_EX_LAYERED, 0);
+				if (painted)
+					BlitOpaqueToWindow(finalDC.GetSafeHdc(), fw, fh);
+				finalDC.SelectObject(ob);
+			}
+		}
+		if (!painted) {
 			EndChipFlight();
 			if (GetExStyle() & WS_EX_LAYERED)
 				ModifyStyleEx(WS_EX_LAYERED, 0);
-		} else {
-			::SetWindowRgn(m_hWnd, NULL, FALSE);
 		}
 	}
+	::SetWindowRgn(m_hWnd, NULL, TRUE);
+	s_popSoftDisabled = FALSE;
+
+	if (m_skipChrome) {
+		ShowWindow(SW_HIDE);
+		return;
+	}
+	if (!::AnimateWindow(m_hWnd, 90, AW_BLEND | AW_HIDE))
+		ShowWindow(SW_HIDE);
 }
 
 BOOL CCustomPopupMenu::CreatePopupAt(CPoint screenPt, CCustomPopupMenu* parentMenu, CCustomPopupMenu* root)
@@ -2498,7 +2538,7 @@ void CCustomPopupMenu::EndChipFlight()
 	::SetWindowRgn(m_hWnd, NULL, FALSE);
 }
 
-BOOL CCustomPopupMenu::PresentChipLayered(HDC hdcSrc, int w, int h, const POINT* optDst)
+BOOL CCustomPopupMenu::PresentChipLayered(HDC hdcSrc, int w, int h, const POINT* optDst, BYTE opacity)
 {
 	if (!GetSafeHwnd() || !hdcSrc || w <= 0 || h <= 0) return FALSE;
 
@@ -2553,7 +2593,7 @@ BOOL CCustomPopupMenu::PresentChipLayered(HDC hdcSrc, int w, int h, const POINT*
 	SIZE size = { outW, outH };
 	BLENDFUNCTION bf = {};
 	bf.BlendOp = AC_SRC_OVER;
-	bf.SourceConstantAlpha = 255;
+	bf.SourceConstantAlpha = opacity ? opacity : (BYTE)255;
 	bf.AlphaFormat = AC_SRC_ALPHA;
 	const BOOL ok = ::UpdateLayeredWindow(m_hWnd, NULL, &ptDst, &size, hdcDib, &ptSrc, 0, &bf, ULW_ALPHA);
 
@@ -3346,6 +3386,14 @@ BOOL CCustomPopupMenu::HandleChromeClick(int idx)
 		if (it.checked) StartCheckBounce(idx);
 		MpPersistSavedataQuick();
 		InvalidateBgOnly();
+		return TRUE;
+	}
+	if (it.id == CCUSTOM_POPUP_ID_KPI_DL || it.id == CCUSTOM_POPUP_ID_KPI_RELOAD) {
+		const WPARAM wp = (it.id == CCUSTOM_POPUP_ID_KPI_DL) ? 1 : 2;
+		CloseChain(0);
+		CWnd* main = AfxGetMainWnd();
+		if (main && ::IsWindow(main->GetSafeHwnd()))
+			main->PostMessage(WM_APP_KPI_PLUGIN, wp, 0);
 		return TRUE;
 	}
 	if (it.id == CCUSTOM_POPUP_ID_FONT_BOLD) {

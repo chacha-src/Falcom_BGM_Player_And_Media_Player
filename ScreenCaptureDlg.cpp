@@ -34,6 +34,17 @@
 
 extern void MpPersistSavedataQuick();
 
+// YouTube go-live API は UI スレッドで同期するとプレビューが固まるので専用スレッドへ
+struct ScYtGoLiveThunk {
+	static UINT __stdcall Run(void* p)
+	{
+		CScreenCaptureDlg* self = (CScreenCaptureDlg*)p;
+		if (self)
+			self->TryYouTubeGoLiveTransition();
+		return 0;
+	}
+};
+
 #ifndef MF_E_TRANSFORM_NEED_MORE_INPUT
 #define MF_E_TRANSFORM_NEED_MORE_INPUT ((HRESULT)0xC00D6D72L)
 #endif
@@ -2695,6 +2706,7 @@ CScreenCaptureDlg::CScreenCaptureDlg(CWnd* pParent)
 	, m_ytLivePhase(0)
 	, m_ytGoLiveRequest(0)
 	, m_ytGoLiveLastTick(0)
+	, m_ytGoLiveThread(NULL)
 	, m_liveService(0)
 	, m_fpsVal(15)
 	, m_startTick(0)
@@ -2719,6 +2731,11 @@ CScreenCaptureDlg::~CScreenCaptureDlg()
 		WaitForSingleObject(m_thread, 8000);
 		CloseHandle(m_thread);
 		m_thread = NULL;
+	}
+	if (m_ytGoLiveThread) {
+		WaitForSingleObject(m_ytGoLiveThread, 8000);
+		CloseHandle(m_ytGoLiveThread);
+		m_ytGoLiveThread = NULL;
 	}
 	if (m_cacheDc) {
 		if (m_cacheOld) SelectObject(m_cacheDc, m_cacheOld);
@@ -6310,6 +6327,11 @@ BOOL CScreenCaptureDlg::StartRecording()
 	}
 	InterlockedExchange(&m_ytGoLiveRequest, 0);
 	m_ytGoLiveLastTick = 0;
+	if (m_ytGoLiveThread) {
+		WaitForSingleObject(m_ytGoLiveThread, 100);
+		CloseHandle(m_ytGoLiveThread);
+		m_ytGoLiveThread = NULL;
+	}
 
 	// 固着 WGC を破棄して新規セッションで録る（WGC=高速、失敗時のみ GDI）。
 	InterlockedExchange(&m_encodeGdi, 0);
@@ -6391,6 +6413,11 @@ void CScreenCaptureDlg::StopRecording()
 		WaitForSingleObject(m_thread, 15000);
 		CloseHandle(m_thread);
 		m_thread = NULL;
+	}
+	if (m_ytGoLiveThread) {
+		WaitForSingleObject(m_ytGoLiveThread, 60000);
+		CloseHandle(m_ytGoLiveThread);
+		m_ytGoLiveThread = NULL;
 	}
 	InterlockedExchange(&m_run, 0);
 	InterlockedExchange(&m_encodeGdi, 0);
@@ -6750,7 +6777,7 @@ UINT __stdcall CScreenCaptureDlg::CaptureThread(void* p)
 							}
 						}
 						Sleep(1);
-						if (++spins > 8000) { // ~8s
+						if (++spins > 2500) { // ~2.5s: 開始時 RTMP 待ちを超えたら失敗
 							SetLastError(ERROR_TIMEOUT);
 							return FALSE;
 						}
@@ -6760,6 +6787,10 @@ UINT __stdcall CScreenCaptureDlg::CaptureThread(void* p)
 				}
 				if (wr == 0) {
 					Sleep(1);
+					if (++spins > 2500) {
+						SetLastError(ERROR_TIMEOUT);
+						return FALSE;
+					}
 					continue;
 				}
 				p += wr;
@@ -6866,8 +6897,14 @@ UINT __stdcall CScreenCaptureDlg::CaptureThread(void* p)
 		_sntprintf_s(pipeAud, _TRUNCATE, L"\\\\.\\pipe\\oggscaud%lu%lu",
 			(unsigned long)GetCurrentProcessId(), (unsigned long)pipeTag);
 
+		// 1080p BGRA ≈8MB/frame。1MB だと1フレーム書き込み中に ffmpeg が止まると毎回ブロックする。
+		// 2フレーム分を確保し、満杯時はフレームごとスキップして時計を止めない。
+		DWORD vidPipeBytes = (DWORD)((__int64)liveOutW * (size_t)liveOutH * 4u * 2u);
+		if (vidPipeBytes < (2u << 20)) vidPipeBytes = (2u << 20);
+		if (vidPipeBytes > (48u << 20)) vidPipeBytes = (48u << 20);
+
 		hVidPipe = CreateNamedPipe(pipeVid, PIPE_ACCESS_OUTBOUND,
-			PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT, 1, 1 << 20, 1 << 20, 0, NULL);
+			PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT, 1, vidPipeBytes, vidPipeBytes, 0, NULL);
 		hAudPipe = CreateNamedPipe(pipeAud, PIPE_ACCESS_OUTBOUND,
 			PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT, 1, 1 << 18, 1 << 18, 0, NULL);
 		if (hVidPipe == INVALID_HANDLE_VALUE || hAudPipe == INVALID_HANDLE_VALUE) {
@@ -6907,7 +6944,7 @@ UINT __stdcall CScreenCaptureDlg::CaptureThread(void* p)
 			ffmpegPath, liveOutW, liveOutH, fps, pipeVid,
 			(unsigned)outHz, (unsigned)outCh, pipeAud,
 			gop, gop,
-			vBitrate, vBitrate, vBitrate * 2,
+			vBitrate, vBitrate, vBitrate, // bufsize=1s 相当（*2 だと開始時 VBV で映像が詰まりやすい）
 			(unsigned)outHz, (LPCTSTR)rtmpUrl);
 
 		// exe 隣に残る ffmpeg-*.log（旧 -report）を掃除。詳細ログは %TEMP% のみ。
@@ -7310,25 +7347,48 @@ UINT __stdcall CScreenCaptureDlg::CaptureThread(void* p)
 						writeH = liveOutH;
 						writeStride = liveOutW * 4;
 					}
-					if (writeStride == writeW * 4) {
-						if (!writeVid(hVidPipe, writeBits, (DWORD)(writeStride * writeH))) {
-							InterlockedExchange(&self->m_lastStage, 103);
-							InterlockedExchange(&self->m_lastHr, HRESULT_FROM_WIN32(GetLastError()));
-							writeFail = TRUE;
-							break;
+					// パイプ書き込みより先にプレビュー更新（RTMP/エンコ待ちで WriteFile が
+					// 止まってもローカル映像は進む）
+					const LONG fc = InterlockedIncrement(&self->m_frameCnt);
+					if ((fc % 2) == 0 && self->m_snapCsInit) {
+						EnterCriticalSection(&self->m_snapCs);
+						if (self->m_cacheDc && frame.hdc && self->m_cacheW > 0 && self->m_cacheH > 0) {
+							SetStretchBltMode(self->m_cacheDc, COLORONCOLOR);
+							StretchBlt(self->m_cacheDc, 0, 0, self->m_cacheW, self->m_cacheH,
+								frame.hdc, 0, 0, frame.w, frame.h, SRCCOPY);
 						}
-					} else {
-						for (int y = 0; y < writeH && !writeFail; ++y) {
-							if (!writeVid(hVidPipe, writeBits + (size_t)y * (size_t)writeStride, (DWORD)(writeW * 4))) {
+						LeaveCriticalSection(&self->m_snapCs);
+					}
+					// パイプに1フレーム以上残っている＝ffmpeg が追いついていない → 丸ごとスキップ
+					// （途中放棄は rawvideo 破壊になるので書込前判定のみ）
+					BOOL skipVid = FALSE;
+					{
+						DWORD pipeBytes = 0;
+						const DWORD frameBytes = (DWORD)((__int64)writeW * (size_t)writeH * 4u);
+						if (frameBytes > 0 && PeekNamedPipe(hVidPipe, NULL, 0, NULL, &pipeBytes, NULL)
+							&& pipeBytes >= frameBytes)
+							skipVid = TRUE;
+					}
+					if (!skipVid) {
+						if (writeStride == writeW * 4) {
+							if (!writeVid(hVidPipe, writeBits, (DWORD)(writeStride * writeH))) {
 								InterlockedExchange(&self->m_lastStage, 103);
 								InterlockedExchange(&self->m_lastHr, HRESULT_FROM_WIN32(GetLastError()));
 								writeFail = TRUE;
+								break;
 							}
+						} else {
+							for (int y = 0; y < writeH && !writeFail; ++y) {
+								if (!writeVid(hVidPipe, writeBits + (size_t)y * (size_t)writeStride, (DWORD)(writeW * 4))) {
+									InterlockedExchange(&self->m_lastStage, 103);
+									InterlockedExchange(&self->m_lastHr, HRESULT_FROM_WIN32(GetLastError()));
+									writeFail = TRUE;
+								}
+							}
+							if (writeFail) break;
 						}
-						if (writeFail) break;
 					}
 
-					const LONG fc = InterlockedIncrement(&self->m_frameCnt);
 					if (haveFfmpegProc && (fc % (fps > 0 ? fps : 30)) == 0) {
 						DWORD ffCode = STILL_ACTIVE;
 						if (GetExitCodeProcess(pi.hProcess, &ffCode) && ffCode != STILL_ACTIVE) {
@@ -7346,15 +7406,6 @@ UINT __stdcall CScreenCaptureDlg::CaptureThread(void* p)
 							lastYtKickTick = nowKick;
 							InterlockedExchange(&self->m_ytGoLiveRequest, 1);
 						}
-					}
-					if ((fc % 2) == 0 && self->m_snapCsInit) {
-						EnterCriticalSection(&self->m_snapCs);
-						if (self->m_cacheDc && frame.hdc && self->m_cacheW > 0 && self->m_cacheH > 0) {
-							SetStretchBltMode(self->m_cacheDc, COLORONCOLOR);
-							StretchBlt(self->m_cacheDc, 0, 0, self->m_cacheW, self->m_cacheH,
-								frame.hdc, 0, 0, frame.w, frame.h, SRCCOPY);
-						}
-						LeaveCriticalSection(&self->m_snapCs);
 					}
 					{
 						encWinCnt++;
@@ -8259,13 +8310,25 @@ void CScreenCaptureDlg::OnTimer(UINT_PTR nIDEvent)
 			if (GetExitCodeThread(m_thread, &code) && code != STILL_ACTIVE)
 				StopRecording();
 		}
-		// YouTube ライブ遷移は UI スレッドで定期ポーリング（Enc スレッドは触らない）
+		// YouTube ライブ遷移: 同期 HTTPS を UI でやるとプレビューが 0.3s 単位で止まる。
+		// キックだけ UI、実APIは専用スレッド（Enc とも分離）。
 		if (m_liveMode && m_liveService == 0 && !m_ytLiveTransitionDone) {
-			InterlockedExchange(&m_ytGoLiveRequest, 0);
+			if (m_ytGoLiveThread) {
+				DWORD code = 0;
+				if (GetExitCodeThread(m_ytGoLiveThread, &code) && code != STILL_ACTIVE) {
+					CloseHandle(m_ytGoLiveThread);
+					m_ytGoLiveThread = NULL;
+				}
+			}
+			const BOOL kick = (InterlockedCompareExchange(&m_ytGoLiveRequest, 0, 1) == 1);
 			const DWORD now = GetTickCount();
-			if (m_ytGoLiveLastTick == 0 || (now - m_ytGoLiveLastTick) >= 2000) {
+			const BOOL due = (m_ytGoLiveLastTick == 0 || (now - m_ytGoLiveLastTick) >= 2000);
+			if (!m_ytGoLiveThread && (kick || due)) {
 				m_ytGoLiveLastTick = now;
-				TryYouTubeGoLiveTransition();
+				uintptr_t th = _beginthreadex(NULL, 0, &ScYtGoLiveThunk::Run, this, 0, NULL);
+				m_ytGoLiveThread = (th ? (HANDLE)th : NULL);
+			} else if (kick && m_ytGoLiveThread) {
+				InterlockedExchange(&m_ytGoLiveRequest, 1); // 実行中なら次ティックへ持ち越し
 			}
 		}
 		if (m_liveMode && m_liveService == 0) {

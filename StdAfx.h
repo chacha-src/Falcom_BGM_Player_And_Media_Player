@@ -665,6 +665,9 @@ struct save{
 
 	// --- コンテキストメニュー Soft 立体アクセント(末尾追記。旧.datは1=強め) ---
 	int popupMenuSoftBoost; // 0=標準 1=立体強め
+
+	// --- KPI プラグイン自動取得(末尾追記。0=起動時に未検出なら尋ねる 1=いいえ済みで尋ねない) ---
+	int kpi_plugin_dl_skip;
 };
 extern save savedata;
 /* コード間隔(ms)。16..500。旧.dat や未設定は 25。 */

@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003" DefaultTargets="Build" ToolsVersion="14.0">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="uni_2026_de|Win32">
@@ -445,6 +445,7 @@
     </ClCompile>
     <ClCompile Include="minizip\ioapi.c" />
     <ClCompile Include="minizip\iowin32.c" />
+    <ClCompile Include="KpiPluginInstall.cpp" />
     <ClCompile Include="UpdateCheck.cpp">
       <PreprocessorDefinitions>NOUNCRYPT;USEWIN32IOAPI;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>

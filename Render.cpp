@@ -456,6 +456,8 @@ void CRender::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDC_CHECK44, m_kpi25);
 	DDX_Control(pDX, IDC_CHECK46, m_kpi30);
 	DDX_Control(pDX, IDCANCEL3, m_kpi);
+	DDX_Control(pDX, IDC_KPI_PLUGIN_DL, m_kpiPluginDl);
+	DDX_Control(pDX, IDC_KPI_PLUGIN_RELOAD, m_kpiPluginReload);
 	DDX_Control(pDX, IDC_CHECK47, m_mp3orig);
 	DDX_Control(pDX, IDC_CHECK48, m_audiost);
 	DDX_Control(pDX, IDC_CHECK49, m_24);
@@ -509,6 +511,8 @@ BEGIN_MESSAGE_MAP(CRender, CCustomBlurDialogExBase)
 	ON_BN_CLICKED(IDC_CHECK44, &CRender::Onkpi25)
 	ON_BN_CLICKED(IDC_CHECK46, &CRender::Onkpi30)
 	ON_BN_CLICKED(IDCANCEL3, &CRender::Onkpi)
+	ON_BN_CLICKED(IDC_KPI_PLUGIN_DL, &CRender::OnKpiPluginDl)
+	ON_BN_CLICKED(IDC_KPI_PLUGIN_RELOAD, &CRender::OnKpiPluginReload)
 	ON_BN_CLICKED(IDC_FONT, &CRender::OnFontMain)
 	ON_BN_CLICKED(IDC_FONT2, &CRender::OnFontList)
 	ON_BN_CLICKED(IDOK, &CRender::OnBnClickedOk)
@@ -567,6 +571,8 @@ BOOL CRender::OnInitDialog()
 	SetDlgItemText(IDCANCEL, LL14(L"キャンセル", L"Cancel", L"Annuler", L"Annulla", L"Cancelar", L"취소", L"取消", L"إلغاء", L"Отмена", L"Abbrechen", L"Cancelar", L"Annuleren", L"Anuluj", L"İptal"));
 	SetDlgItemText(IDCANCEL2, LL14(L"DirectShowフィルタ一覧", L"DirectShow Filter List", L"Liste des filtres DirectShow", L"Elenco filtri DirectShow", L"Lista de filtros DirectShow", L"DirectShow 필터 목록", L"DirectShow 过滤器列表", L"قائمة مرشحات DirectShow", L"Список фильтров DirectShow", L"DirectShow-Filterliste", L"Lista de filtros DirectShow", L"DirectShow-filterlijst", L"Lista filtrów DirectShow", L"DirectShow Filtre Listesi"));
 	SetDlgItemText(IDCANCEL3, LL14(L"kpi一覧", L"kpi List", L"Liste kpi", L"Elenco kpi", L"Lista kpi", L"kpi 목록", L"kpi 列表", L"قائمة kpi", L"Список kpi", L"kpi-Liste", L"Lista kpi", L"kpi-lijst", L"Lista kpi", L"kpi Listesi"));
+	SetDlgItemText(IDC_KPI_PLUGIN_DL, LL14(L"KPIプラグインDL", L"KPI plugin DL", L"DL plugins KPI", L"DL plugin KPI", L"DL plugins KPI", L"KPI 플러그인 DL", L"KPI 插件下载", L"تنزيل KPI", L"Скачать KPI", L"KPI-Plugin DL", L"DL plugins KPI", L"KPI-plugin DL", L"Pobierz KPI", L"KPI eklenti DL"));
+	SetDlgItemText(IDC_KPI_PLUGIN_RELOAD, LL14(L"KPI再読込", L"Reload KPI", L"Relire KPI", L"Ricarica KPI", L"Recargar KPI", L"KPI 다시 읽기", L"重新加载 KPI", L"إعادة KPI", L"Перечитать KPI", L"KPI neu laden", L"Recarregar KPI", L"KPI herladen", L"Wczytaj KPI", L"KPI yeniden"));
 	SetDlgItemText(IDCANCEL5, LL14(L"関連付け", L"File Association", L"Association de fichiers", L"Associazione file", L"Asociación de archivos", L"파일 연결", L"文件关联", L"ربط الملفات", L"Связь файлов", L"Dateizuordnung", L"Associação de ficheiros", L"Bestandskoppeling", L"Powiazanie plików", L"Dosya ilişkilendirme"));
 	SetDlgItemText(IDC_CHECK1, LL14(L"デフォルトでEVR使用(Vista以降)", L"Default EVR use (Vista+)", L"EVR par défaut (Vista+)", L"Uso EVR predefinito (Vista+)", L"Uso EVR predeterminado (Vista+)", L"기본 EVR 사용(Vista+)", L"默认使用 EVR（Vista+）", L"استخدام EVR افتراضي (Vista+)", L"Использовать EVR по умолчанию (Vista+)", L"EVR standardmäßig (Vista+)", L"Usar EVR por defeito (Vista+)", L"Standaard EVR (Vista+)", L"Domyślne EVR (Vista+)", L"Varsayılan EVR kullan (Vista+)"));
 	SetDlgItemText(IDC_CHECK2, LL14(L"デスクトップコンポジションを使用する", L"Use desktop composition", L"Utiliser la composition du bureau", L"Usa composizione desktop", L"Usar composición de escritorio", L"데스크톱 컴포지션 사용", L"使用桌面合成", L"استخدام تركيب سطح المكتب", L"Использовать композицию рабочего стола", L"Desktop-Komposition verwenden", L"Usar composição do ambiente de trabalho", L"Bureaubladcompositie gebruiken", L"Użyj kompozycji pulpitu", L"Masaüstü birleşimini kullan"));
@@ -696,6 +702,36 @@ BOOL CRender::OnInitDialog()
 	m_tooltip.AddTool(GetDlgItem(IDC_FONT2), LL14(L"リスト画面（プレイリスト等）のフォントを設定します", L"Set list view font (playlist, etc.)", L"Definir la police des vues liste (playlist, etc.)", L"Imposta carattere viste elenco (playlist, ecc.)", L"Establecer fuente de listas (playlist, etc.)", L"목록 화면(재생 목록 등) 글꼴 설정", L"设置列表界面（播放列表等）字体", L"تعيين خط عرض القائمة (قائمة التشغيل، إلخ)", L"Задать шрифт списков (плейлист и т.д.)", L"Schriftart fur Listenansichten festlegen", L"Definir fonte das listas (playlist etc.)", L"Lettertype lijstweergaven instellen", L"Ustaw czcionke widokow listy", L"Liste gorunumu yazi tipini ayarla"));
 	m_tooltip.AddTool(GetDlgItem(IDCANCEL2), LL14(L"再生中の使用DirectShowフィルタを表示します。", L"Show DirectShow filters in use during playback.", L"Afficher les filtres DirectShow utilises pendant la lecture.", L"Mostra filtri DirectShow in uso durante la riproduzione.", L"Mostrar filtros DirectShow en uso durante la reproduccion.", L"재생 중 사용 중인 DirectShow 필터 표시.", L"显示播放中使用的 DirectShow 过滤器。", L"إظهار مرشحات DirectShow المستخدمة أثناء التشغيل.", L"Показать фильтры DirectShow при воспроизведении.", L"DirectShow-Filter wahrend der Wiedergabe anzeigen.", L"Mostrar filtros DirectShow em uso durante reproducao.", L"DirectShow-filters tonen tijdens afspelen.", L"Pokaz filtry DirectShow uzywane podczas odtwarzania.", L"Calma sirasinda kullanilan DirectShow filtrelerini goster."));
 	m_tooltip.AddTool(GetDlgItem(IDCANCEL3), LL14(L"kpi一覧を表示します。", L"Show kpi list.", L"Afficher la liste kpi.", L"Mostra elenco kpi.", L"Mostrar lista kpi.", L"kpi 목록 표시.", L"显示 kpi 列表。", L"إظهار قائمة kpi.", L"Показать список kpi.", L"kpi-Liste anzeigen.", L"Mostrar lista kpi.", L"kpi-lijst tonen.", L"Pokaz liste kpi.", L"kpi listesini goster."));
+	m_tooltip.AddTool(&m_kpiPluginDl, LL14(
+		L"公式 Plugins.zip をダウンロードし、このプログラムと同じフォルダへ展開します。",
+		L"Download official Plugins.zip and extract next to this program.",
+		L"Telecharger Plugins.zip officiel et extraire a cote du programme.",
+		L"Scarica Plugins.zip ufficiale e estrai accanto al programma.",
+		L"Descargar Plugins.zip oficial y extraer junto al programa.",
+		L"공식 Plugins.zip을 받아 이 프로그램과 같은 폴더에 펼칩니다.",
+		L"下载官方 Plugins.zip 并解压到本程序同目录。",
+		L"تنزيل Plugins.zip الرسمي واستخراجه بجانب البرنامج.",
+		L"Скачать официальный Plugins.zip и распаковать рядом с программой.",
+		L"Offizielles Plugins.zip laden und neben das Programm entpacken.",
+		L"Descarregar Plugins.zip oficial e extrair ao lado do programa.",
+		L"Officiele Plugins.zip downloaden en naast het programma uitpakken.",
+		L"Pobierz oficjalny Plugins.zip i rozpakuj obok programu.",
+		L"Resmi Plugins.zip indirip programla ayni klasore ac."));
+	m_tooltip.AddTool(&m_kpiPluginReload, LL14(
+		L"exe フォルダ配下の .kpi を最初から読み直します。",
+		L"Re-scan .kpi files under the exe folder from scratch.",
+		L"Relire les .kpi sous le dossier exe.",
+		L"Rileggi i .kpi sotto la cartella exe.",
+		L"Volver a leer los .kpi bajo la carpeta exe.",
+		L"exe 폴더 아래 .kpi를 처음부터 다시 읽습니다.",
+		L"从头重新扫描 exe 目录下的 .kpi。",
+		L"إعادة قراءة ملفات .kpi تحت مجلد البرنامج.",
+		L"Перечитать .kpi в папке exe с начала.",
+		L".kpi unter dem Exe-Ordner neu einlesen.",
+		L"Relê os .kpi sob a pasta do exe.",
+		L".kpi onder de exe-map opnieuw inlezen.",
+		L"Wczytaj ponownie pliki .kpi w folderze exe.",
+		L"exe klasorundeki .kpi dosyalarini bastan oku."));
 	m_tooltip.AddTool(GetDlgItem(IDC_CHECK1), LL14(L"Windows Vista/7以降で有効です。\nIndeoを用いた動画の場合OFFにしてください。\nそれ以外はONでいいです。", L"Effective on Windows Vista/7+.\nTurn OFF for Indeo video.\nOtherwise ON.", L"Actif sous Windows Vista/7+.\nDesactiver pour video Indeo.\nSinon laissez active.", L"Attivo su Windows Vista/7+.\nDisattiva per video Indeo.\nAltrimenti lascia attivo.", L"Efectivo en Windows Vista/7+.\nDesactivar para video Indeo.\nEn otros casos dejar activado.", L"Windows Vista/7 이상에서 유효.\nIndeo 동영상은 끄세요.\n그 외는 켜두면 됩니다.", L"Windows Vista/7 及以上有效。\nIndeo 视频请关闭。\n其他情况可开启。", L"فعّال على Windows Vista/7+.\nأوقفه لفيديو Indeo.\nوإلا اتركه مفعّلاً.", L"Действует в Windows Vista/7+.\nВыключите для видео Indeo.\nИначе оставьте включенным.", L"Unter Windows Vista/7+ wirksam.\nBei Indeo-Video AUS.\nSonst AN lassen.", L"Efetivo no Windows Vista/7+.\nDesative para video Indeo.\nCaso contrario deixe ativo.", L"Actief op Windows Vista/7+.\nUit voor Indeo-video.\nAnders aan laten.", L"Dziala w Windows Vista/7+.\nWylacz dla wideo Indeo.\nW pozostalych przypadkach wlacz.", L"Windows Vista/7+ uzerinde gecerli.\nIndeo videosu icin kapat.\nDiger durumlarda acik birak."));
 	m_tooltip.AddTool(GetDlgItem(IDC_CHECK2), LL14(L"Windows Vista/7以降で有効です。\nデスクトップコンポジション(Aero)を使用するかどうかを選択します。\n使用しないにするとEVRじゃなくても動画画面はきれいになります。", L"Effective on Vista/7+.\nUse desktop composition (Aero).\nWithout it, video may still look good without EVR.", L"Actif sous Vista/7+.\nUtiliser la composition bureau (Aero).\nSans Aero, la video peut rester nette sans EVR.", L"Attivo su Vista/7+.\nUsa composizione desktop (Aero).\nSenza Aero, il video puo essere comunque nitido.", L"Efectivo en Vista/7+.\nUsar composicion de escritorio (Aero).\nSin Aero, el video puede verse bien sin EVR.", L"Vista/7+에서 유효.\n데스크톱 컴포지션(Aero) 사용 여부.\n끄면 EVR 없이도 화질이 좋을 수 있음.", L"Vista/7+ 有效。\n是否使用桌面合成(Aero)。\n关闭时无 EVR 也可能画面清晰。", L"فعّال على Vista/7+.\nاستخدام تركيب سطح المكتب (Aero).\nبدونه قد يبدو الفيديو جيداً.", L"Действует в Vista/7+.\nКомпозиция рабочего стола (Aero).\nБез нее видео может быть четким без EVR.", L"Unter Vista/7+.\nDesktop-Komposition (Aero).\nOhne Aero kann Video auch ohne EVR gut aussehen.", L"Efetivo no Vista/7+.\nComposicao da area de trabalho (Aero).\nSem Aero, video pode ficar bom sem EVR.", L"Actief op Vista/7+.\nBureauscompositie (Aero).\nZonder Aero kan video toch scherp zijn.", L"Dziala w Vista/7+.\nKompozycja pulpitu (Aero).\nBez Aero obraz moze byc dobry bez EVR.", L"Vista/7+ uzerinde gecerli.\nMasaustu bilesimi (Aero).\nKapali olsa bile EVR olmadan video iyi olabilir."));
 	m_tooltip.AddTool(GetDlgItem(IDC_CHECK3), LL14(L"Windows 10以降で有効です。\nアクリルモード（半透明ぼかし背景）を使用するかどうか決めます。", L"Effective on Windows 10+.\nEnable acrylic mode (translucent blurred background).", L"Actif sous Windows 10+.\nActiver le mode acrylique (fond flou translucide).", L"Attivo su Windows 10+.\nAbilita modalita acrilica (sfondo sfocato traslucido).", L"Efectivo en Windows 10+.\nActivar modo acrilico (fondo borroso translucido).", L"Windows 10+에서 유효.\n아크릴 모드(반투명 흐림 배경) 사용 여부.", L"Windows 10+ 有效。\n是否启用亚克力模式（半透明模糊背景）。", L"فعّال على Windows 10+.\nتفعيل وضع الأكريليك (خلفية ضبابية شفافة).", L"Действует в Windows 10+.\nРежим акрила (полупрозрачный размытый фон).", L"Unter Windows 10+.\nAcryl-Modus (transparenter Unscharfe-Hintergrund).", L"Efetivo no Windows 10+.\nModo acrilico (fundo desfocado translucido).", L"Actief op Windows 10+.\nAcrylmodus (doorzichtige wazige achtergrond).", L"Dziala w Windows 10+.\nTryb akrylowy (polprzezroczyste rozmyte tlo).", L"Windows 10+ uzerinde gecerli.\nAkrilik mod (yarim saydam bulanik arka plan)."));
@@ -1188,6 +1224,16 @@ void CRender::Onkpi()
 {
 	// TODO: ここにコントロール通知ハンドラ コードを追加します。
 	SetTimer(7000, 300, NULL);
+}
+
+void CRender::OnKpiPluginDl()
+{
+	OggKpiDownloadPlugins(this, TRUE, FALSE, TRUE);
+}
+
+void CRender::OnKpiPluginReload()
+{
+	OggKpiReloadPlugins(this);
 }
 
 extern HFONT	hFont;
