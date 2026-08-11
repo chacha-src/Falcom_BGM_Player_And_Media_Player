@@ -47,6 +47,7 @@ int flacmode = 0;
 #include <MMSystem.h>
 #include "dsound.h"
 #include "Douga.h"
+#include "ScWgcCapture.h"
 #include "itiran.h"
 #include "itiran_FC.h"
 #include "itiran_YSF.h"
@@ -23445,6 +23446,9 @@ void COggDlg::gamenkill()
 		savedata.gy = r.top;
 		pMainFrame1->m_closingByMain = 1;
 		pMainFrame1->stop();
+		// 配信/録画中の WGC が Destroy とレースしないよう、閉じる前にセッションを外す
+		if (pMainFrame1->GetSafeHwnd())
+			ScWgcReleaseWindow(pMainFrame1->GetSafeHwnd());
 		::SendMessage(pMainFrame1->m_hWnd, WM_CLOSE, NULL, NULL);
 		//		delete pMainFrame1;
 		//動画画面が閉じるのを待つ

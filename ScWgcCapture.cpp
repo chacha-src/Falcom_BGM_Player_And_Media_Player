@@ -98,6 +98,29 @@ struct WgcSession {
 	bool closed = false;
 	HANDLE frameEvent = nullptr;
 	std::mutex frameMtx;
+
+	// COM Close はデストラクタへ。map から外しても Capture 側 shared_ptr 保持中は生きる。
+	~WgcSession()
+	{
+		closed = true;
+		try {
+			if (pool && arrivedToken.value)
+				pool.FrameArrived(arrivedToken);
+			arrivedToken = {};
+			if (item && closedToken.value)
+				item.Closed(closedToken);
+			closedToken = {};
+			if (session) session.Close();
+			session = nullptr;
+			if (pool) pool.Close();
+			pool = nullptr;
+		} catch (...) {
+		}
+		if (frameEvent) {
+			CloseHandle(frameEvent);
+			frameEvent = nullptr;
+		}
+	}
 };
 
 static std::mutex g_mtx;
@@ -105,8 +128,8 @@ static std::mutex g_ctxMtx;
 static com_ptr<ID3D11Device> g_d3d;
 static com_ptr<ID3D11DeviceContext> g_ctx;
 static IDirect3DDevice g_winrtDevice{ nullptr };
-static std::unordered_map<HWND, std::unique_ptr<WgcSession>> g_winSessions;
-static std::unordered_map<HMONITOR, std::unique_ptr<WgcSession>> g_monSessions;
+static std::unordered_map<HWND, std::shared_ptr<WgcSession>> g_winSessions;
+static std::unordered_map<HMONITOR, std::shared_ptr<WgcSession>> g_monSessions;
 static bool g_apartmentReady = false;
 
 static com_ptr<ID3D11VertexShader> g_vs;
@@ -593,21 +616,8 @@ static void DestroyWinSession_NoLock(HWND hwnd)
 {
 	auto it = g_winSessions.find(hwnd);
 	if (it == g_winSessions.end()) return;
-	WgcSession* s = it->second.get();
-	s->closed = true;
-	try {
-		if (s->pool && s->arrivedToken.value)
-			s->pool.FrameArrived(s->arrivedToken);
-		if (s->item && s->closedToken.value)
-			s->item.Closed(s->closedToken);
-		if (s->session) s->session.Close();
-		if (s->pool) s->pool.Close();
-	} catch (...) {
-	}
-	if (s->frameEvent) {
-		CloseHandle(s->frameEvent);
-		s->frameEvent = nullptr;
-	}
+	// closed だけ立てて map から外す。COM Close は最後の shared_ptr 解放時。
+	it->second->closed = true;
 	g_winSessions.erase(it);
 }
 
@@ -615,26 +625,14 @@ static void DestroyMonSession_NoLock(HMONITOR mon)
 {
 	auto it = g_monSessions.find(mon);
 	if (it == g_monSessions.end()) return;
-	WgcSession* s = it->second.get();
-	s->closed = true;
-	try {
-		if (s->pool && s->arrivedToken.value)
-			s->pool.FrameArrived(s->arrivedToken);
-		if (s->item && s->closedToken.value)
-			s->item.Closed(s->closedToken);
-		if (s->session) s->session.Close();
-		if (s->pool) s->pool.Close();
-	} catch (...) {
-	}
-	if (s->frameEvent) {
-		CloseHandle(s->frameEvent);
-		s->frameEvent = nullptr;
-	}
+	it->second->closed = true;
 	g_monSessions.erase(it);
 }
 
-static BOOL StartSessionCommon(WgcSession& s)
+static BOOL StartSessionCommon(const std::shared_ptr<WgcSession>& sp)
 {
+	if (!sp) return FALSE;
+	WgcSession& s = *sp;
 	SizeInt32 itemSize = s.item.Size();
 	const int poolW = ScEven2((int)itemSize.Width);
 	const int poolH = ScEven2((int)itemSize.Height);
@@ -646,10 +644,12 @@ static BOOL StartSessionCommon(WgcSession& s)
 	s.pool = Direct3D11CaptureFramePool::CreateFreeThreaded(
 		g_winrtDevice, DirectXPixelFormat::B8G8R8A8UIntNormalized, 2, SizeInt32{ poolW, poolH });
 
-	WgcSession* raw = &s;
+	std::weak_ptr<WgcSession> weak = sp;
 	s.arrivedToken = s.pool.FrameArrived(
-		[raw](Direct3D11CaptureFramePool const& sender, winrt::Windows::Foundation::IInspectable const&) {
-			OnFrameArrived(raw, sender);
+		[weak](Direct3D11CaptureFramePool const& sender, winrt::Windows::Foundation::IInspectable const&) {
+			std::shared_ptr<WgcSession> hold = weak.lock();
+			if (!hold || hold->closed) return;
+			OnFrameArrived(hold.get(), sender);
 		});
 
 	s.session = s.pool.CreateCaptureSession(s.item);
@@ -663,7 +663,7 @@ static BOOL StartSessionCommon(WgcSession& s)
 	return TRUE;
 }
 
-static WgcSession* EnsureWindowSession(HWND hwnd)
+static std::shared_ptr<WgcSession> EnsureWindowSession(HWND hwnd)
 {
 	if (!hwnd || !IsWindow(hwnd) || IsIconic(hwnd)) return nullptr;
 	if (!EnsureD3D()) return nullptr;
@@ -671,15 +671,15 @@ static WgcSession* EnsureWindowSession(HWND hwnd)
 	std::lock_guard<std::mutex> lock(g_mtx);
 	auto it = g_winSessions.find(hwnd);
 	if (it != g_winSessions.end()) {
-		WgcSession* s = it->second.get();
-		if (s->closed || !IsWindow(hwnd))
+		std::shared_ptr<WgcSession> s = it->second;
+		if (!s || s->closed || !IsWindow(hwnd))
 			DestroyWinSession_NoLock(hwnd);
 		else
 			return s;
 	}
 
 	try {
-		auto s = std::make_unique<WgcSession>();
+		auto s = std::make_shared<WgcSession>();
 		s->kind = WgcTargetKind::Window;
 		s->hwnd = hwnd;
 		s->frameEvent = CreateEventW(nullptr, FALSE, FALSE, nullptr);
@@ -689,17 +689,16 @@ static WgcSession* EnsureWindowSession(HWND hwnd)
 				std::lock_guard<std::mutex> lk(g_mtx);
 				DestroyWinSession_NoLock(hwnd);
 			});
-		if (!StartSessionCommon(*s))
+		if (!StartSessionCommon(s))
 			return nullptr;
-		WgcSession* out = s.get();
-		g_winSessions.emplace(hwnd, std::move(s));
-		return out;
+		g_winSessions.emplace(hwnd, s);
+		return s;
 	} catch (...) {
 		return nullptr;
 	}
 }
 
-static WgcSession* EnsureMonitorSession(HMONITOR mon)
+static std::shared_ptr<WgcSession> EnsureMonitorSession(HMONITOR mon)
 {
 	if (!mon) return nullptr;
 	if (!EnsureD3D()) return nullptr;
@@ -707,15 +706,15 @@ static WgcSession* EnsureMonitorSession(HMONITOR mon)
 	std::lock_guard<std::mutex> lock(g_mtx);
 	auto it = g_monSessions.find(mon);
 	if (it != g_monSessions.end()) {
-		WgcSession* s = it->second.get();
-		if (s->closed)
+		std::shared_ptr<WgcSession> s = it->second;
+		if (!s || s->closed)
 			DestroyMonSession_NoLock(mon);
 		else
 			return s;
 	}
 
 	try {
-		auto s = std::make_unique<WgcSession>();
+		auto s = std::make_shared<WgcSession>();
 		s->kind = WgcTargetKind::Monitor;
 		s->monitor = mon;
 		s->frameEvent = CreateEventW(nullptr, FALSE, FALSE, nullptr);
@@ -725,11 +724,10 @@ static WgcSession* EnsureMonitorSession(HMONITOR mon)
 				std::lock_guard<std::mutex> lk(g_mtx);
 				DestroyMonSession_NoLock(mon);
 			});
-		if (!StartSessionCommon(*s))
+		if (!StartSessionCommon(s))
 			return nullptr;
-		WgcSession* out = s.get();
-		g_monSessions.emplace(mon, std::move(s));
-		return out;
+		g_monSessions.emplace(mon, s);
+		return s;
 	} catch (...) {
 		return nullptr;
 	}
@@ -738,7 +736,7 @@ static WgcSession* EnsureMonitorSession(HMONITOR mon)
 static BOOL CaptureSessionToBgra(WgcSession* s, BYTE* dstBgra, int dstW, int dstH, int dstStride,
 	int cropX, int cropY, int cropW, int cropH)
 {
-	if (!s || !dstBgra) return FALSE;
+	if (!s || s->closed || !dstBgra) return FALSE;
 	dstW &= ~1;
 	dstH &= ~1;
 	if (dstW < 2 || dstH < 2 || dstStride < dstW * 4) return FALSE;
@@ -760,6 +758,8 @@ static BOOL CaptureSessionToBgra(WgcSession* s, BYTE* dstBgra, int dstW, int dst
 		s->wantH.store(dstH);
 	}
 
+	if (s->closed) return FALSE;
+
 	// プレビュー用: 溜まっているフレームを1枚だけ引く（長い Wait は FPS を半減させるのでしない）
 	if (s->pool && !s->closed) {
 		try {
@@ -769,14 +769,15 @@ static BOOL CaptureSessionToBgra(WgcSession* s, BYTE* dstBgra, int dstW, int dst
 		}
 	}
 
-	if (!s->gpuReady && s->frameEvent)
+	if (!s->gpuReady && s->frameEvent && !s->closed)
 		WaitForSingleObject(s->frameEvent, 100);
 
+	if (s->closed) return FALSE;
 	if (!ReadbackScaledToCpu(*s))
 		return FALSE;
 
 	std::lock_guard<std::mutex> lock(s->frameMtx);
-	if (!s->hasFrame || s->bgra.empty() || s->contentW < 2 || s->contentH < 2)
+	if (s->closed || !s->hasFrame || s->bgra.empty() || s->contentW < 2 || s->contentH < 2)
 		return FALSE;
 	if (useCrop) {
 		// crop はウィンドウ実寸基準 → content サイズへスケール
@@ -807,17 +808,17 @@ BOOL ScWgcCaptureWindowBgraCrop(HWND hwnd, BYTE* dstBgra, int dstW, int dstH, in
 	int cropX, int cropY, int cropW, int cropH)
 {
 	if (!hwnd || !dstBgra || !IsWindow(hwnd)) return FALSE;
-	WgcSession* s = EnsureWindowSession(hwnd);
-	if (!s) return FALSE;
-	return CaptureSessionToBgra(s, dstBgra, dstW, dstH, dstStride, cropX, cropY, cropW, cropH);
+	std::shared_ptr<WgcSession> s = EnsureWindowSession(hwnd);
+	if (!s || s->closed) return FALSE;
+	return CaptureSessionToBgra(s.get(), dstBgra, dstW, dstH, dstStride, cropX, cropY, cropW, cropH);
 }
 
 BOOL ScWgcCaptureMonitorBgra(HMONITOR mon, BYTE* dstBgra, int dstW, int dstH, int dstStride)
 {
 	if (!mon || !dstBgra) return FALSE;
-	WgcSession* s = EnsureMonitorSession(mon);
-	if (!s) return FALSE;
-	return CaptureSessionToBgra(s, dstBgra, dstW, dstH, dstStride, 0, 0, 0, 0);
+	std::shared_ptr<WgcSession> s = EnsureMonitorSession(mon);
+	if (!s || s->closed) return FALSE;
+	return CaptureSessionToBgra(s.get(), dstBgra, dstW, dstH, dstStride, 0, 0, 0, 0);
 }
 
 static void ScFxCpuGray(BYTE* bgra, int w, int h, int stride)
@@ -1608,4 +1609,11 @@ void ScWgcReleaseSessions(void)
 		mons.push_back(kv.first);
 	for (HMONITOR m : mons)
 		DestroyMonSession_NoLock(m);
+}
+
+void ScWgcReleaseWindow(HWND hwnd)
+{
+	if (!hwnd) return;
+	std::lock_guard<std::mutex> lock(g_mtx);
+	DestroyWinSession_NoLock(hwnd);
 }

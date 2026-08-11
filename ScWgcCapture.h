@@ -113,6 +113,8 @@ BOOL ScGpuApplyEffectChain(BYTE* bgra, int w, int h, int stride,
 void ScWgcShutdown(void);
 // キャプチャセッションのみ破棄（D3D/エフェクトは維持）。録画開始時の WGC 固着対策。
 void ScWgcReleaseSessions(void);
+// 指定 HWND のウィンドウセッションだけ破棄（曲切替で動画窓を閉じる直前など）
+void ScWgcReleaseWindow(HWND hwnd);
 
 #ifdef __cplusplus
 }

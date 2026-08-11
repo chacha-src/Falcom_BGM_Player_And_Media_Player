@@ -33,6 +33,7 @@
 #pragma comment(lib, "winmm.lib")
 
 extern void MpPersistSavedataQuick();
+extern volatile LONG g_interactiveTrackChange;
 
 // YouTube go-live API は UI スレッドで同期するとプレビューが固まるので専用スレッドへ
 struct ScYtGoLiveThunk {
@@ -506,7 +507,11 @@ static BOOL ScCaptureWindowScaled(HWND hwnd, ScFrameBuf& fb, int dstW, int dstH,
 	}
 
 	// 3) 正確経路: PrintWindow（WGC不可・遮蔽時）
-	if (!ScPrintWindowViaCompat(hwnd, ww, wh, s_scNativeBuf)) {
+	// 曲切替中は stop/play の DoEvent へ WM_PRINT が再入してクラッシュするため禁止。
+	BOOL gotNative = FALSE;
+	if (InterlockedCompareExchange(&g_interactiveTrackChange, 0, 0) == 0)
+		gotNative = ScPrintWindowViaCompat(hwnd, ww, wh, s_scNativeBuf);
+	if (!gotNative) {
 		HDC wdc = ::GetWindowDC(hwnd);
 		BOOL ok = FALSE;
 		if (wdc) {
