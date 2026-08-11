@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "CCustomControl.h"
 #include "CLyricsViewWnd.h"
@@ -17,7 +17,7 @@ public:
 	CDesktopLyricsWnd(CWnd* pParent = NULL);
 	virtual ~CDesktopLyricsWnd();
 
-	void SyncFromOg();
+	void SyncFromOg(BOOL catchFromTop = FALSE);
 	void PersistGeometry();
 	void ApplyWindowAlpha();
 	void MakeSolidClient();

@@ -1,4 +1,4 @@
-﻿// oggDlg.cpp : インプリメンテーション ファイル
+// oggDlg.cpp : インプリメンテーション ファイル
 //
 //#define _DLL
 #include "stdafx.h"
@@ -1282,6 +1282,7 @@ public:
 			// や 5211(プレイリスト Create)が発火すると、KPI 読み込み中に play() が
 			// ネスト実行され「読み込み中のまま固まる+裏で再生+メモリエラー」になる。
 			// (淫女タイマーもここで止まるが、SetPos ごとの再描画で GetTickCount 演出は進む)
+			// ※ WM_TIMERP_VSYNC_TICK 等の Posted oneshot は捨てない（フラグ固着で再生UI死）
 			MSG msg;
 			while (::PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
 				if (msg.message == WM_QUIT) {
@@ -1306,7 +1307,8 @@ public:
 			ShowWindow(SW_SHOW);
 			UpdateWindow();
 
-			// Pump messages once (WM_TIMER は SetPos と同じ理由で除外)
+			// Pump messages once (WM_TIMER は SetPos と同じ理由で除外。
+			// Posted oneshot(WM_TIMERP_VSYNC_TICK 等)は捨てない)
 			MSG msg;
 			while (::PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
 				if (msg.message == WM_QUIT) {
@@ -3648,6 +3650,8 @@ DWORD COgg_GetGdiPaintPendingAgeMs()
 	return GetTickCount() - since;
 }
 
+static DWORD g_timerpLastPostTick = 0;
+
 static void COgg_RequestTimerp(COggDlg* dlg)
 {
 	if (!dlg)
@@ -3655,9 +3659,35 @@ static void COgg_RequestTimerp(COggDlg* dlg)
 	HWND h = dlg->GetSafeHwnd();
 	if (!h || !::IsWindow(h))
 		return;
-	if (InterlockedCompareExchange(&g_timerpPosted, 1, 0) != 0)
-		return;
-	::PostMessage(h, WM_TIMERP_VSYNC_TICK, 0, 0);
+	if (InterlockedCompareExchange(&g_timerpPosted, 1, 0) != 0) {
+		// Peek で tick を落とした場合の自己修復（EQ コードの 150ms 復旧と同型）
+		const DWORD now = GetTickCount();
+		if (g_timerpLastPostTick != 0 && (now - g_timerpLastPostTick) >= 500u) {
+			InterlockedExchange(&g_timerpPosted, 0);
+			if (InterlockedCompareExchange(&g_timerpPosted, 1, 0) != 0)
+				return;
+		} else {
+			return;
+		}
+	}
+	g_timerpLastPostTick = GetTickCount();
+	if (!::PostMessage(h, WM_TIMERP_VSYNC_TICK, 0, 0)) {
+		InterlockedExchange(&g_timerpPosted, 0);
+		g_timerpLastPostTick = 0;
+	}
+}
+
+// メニュー退場などで Posted tick を落とした場合の復旧（フラグ強制クリア）
+void COgg_KickTimerp()
+{
+	InterlockedExchange(&g_timerpPosted, 0);
+	g_timerpLastPostTick = 0;
+	g_gdiPaintPendingSince = 0;
+	InterlockedExchange(&g_gdiPaintPending, 0);
+	InterlockedExchange(&g_speanaPosted, 0);
+	extern COggDlg* og;
+	if (og)
+		COgg_RequestTimerp(og);
 }
 
 BOOL COggDlg::OnInitDialog()
@@ -4032,6 +4062,8 @@ BOOL COggDlg::OnInitDialog()
 	g_oggKpiLoading = 0;
 	if (ptl) ptl->SetProgressState(m_hWnd, TBPF_NOPROGRESS);
 	loadingWnd.DestroyWindow();
+	// KPI 読み込み中の Peek が Posted tick を落としても再生 UI が死なないよう復旧
+	COgg_KickTimerp();
 	// 読み込み中に届いた再生要求(WM_APP+1)を今から処理する。
 	// PostMessage なので OnInitDialog 完了後に通常のメッセージループで実行される。
 	if (g_kpiLoadDeferredPlay) {
@@ -4185,8 +4217,9 @@ BOOL COggDlg::OnInitDialog()
 	if (savedata.playerMode == 1)
 		EnterMediaPlayerMode();
 
-	// サブUI復元は MP Create 完了後に武装(Create 中の WM_TIMER ネストを避ける)
-	SetTimer(59877, 500, NULL);
+	// サブUI復元(EQ/ピアノ等): OnInitDialog 内で即 Post すると Create ネストの恐れがあるため
+	// タイマ経由。MP は直前で同期完了済みなので旧 500ms 待ちは不要 → 1ms で武装。
+	SetTimer(59877, 1, NULL);
 
 	m_help.SetWindowText(L"?");
 	m_help.SetFlat(TRUE);
@@ -21185,10 +21218,12 @@ void COggDlg::timerp()
 		extern BOOL MpSsVizIsOpen();
 		extern CMediaPlayerDlg* mp;
 		const bool soft3dBanner = (mp && ::IsWindow(mp->GetSafeHwnd()) && mp->IsBannerSoft3D());
-		if ((m_supe.GetCheck() == TRUE || MpSsVizIsOpen()) && plf == 1 && (wav || ogg || m_dsb))
+		const bool menuTracking = (CCustomPopupMenu::GetTrackingRoot() != NULL);
+		// メニュー Track／退場中に Speana+Soft3D を回すと Peek/Dispatch で数秒固まる
+		if (!menuTracking && (m_supe.GetCheck() == TRUE || MpSsVizIsOpen()) && plf == 1 && (wav || ogg || m_dsb))
 			Speana(TRUE);
 		// Soft3Dバナーは毎フレーム軽量FFTで speanaFft* を更新（validゲートすると再演奏で凍る）
-		if (soft3dBanner && plf == 1 && (wav || ogg || m_dsb))
+		if (!menuTracking && soft3dBanner && plf == 1 && (wav || ogg || m_dsb))
 			Speana(FALSE, TRUE);
 	}
 	if (plf == 1 && ::IsWindow(m_PianoRollDlg->GetSafeHwnd()) && Ms2DrawDue(ms2))
@@ -22548,7 +22583,7 @@ void timerog1(UINT nIDEvent)
 		if (savedata.playerMode == 1) {
 			extern CMediaPlayerDlg* mp;
 			if (!mp || !::IsWindow(mp->GetSafeHwnd()) || !mp->m_uiReady) {
-				og->SetTimer(59877, 100, NULL);
+				og->SetTimer(59877, 50, NULL);
 				return;
 			}
 		}
@@ -27594,8 +27629,29 @@ LRESULT COggDlg::OnToggleSubUiMsg(WPARAM wParam, LPARAM)
 			e->Delete();
 		}
 		g_oggSubUiRestoring = 0;
-		if (wParam < 16)
-			PostMessage(WM_OGG_TOGGLE_SUBUI, wParam + 1, 0);
+		// 閉じている窓の空メッセージを飛ばし、次に復元が要る番号へ
+		WPARAM next = wParam + 1;
+		while (next <= 16) {
+			BOOL need = FALSE;
+			if (next == 10)
+				need = (savedata.eqwindow == 1 && m_EqualizerDlg);
+			else if (next == 11)
+				need = (savedata.pianorollwindow == 1 && m_PianoRollDlg);
+			else if (next == 12)
+				need = (savedata.prTunewindow == 1 && m_PianoRollTuneDlg);
+			else if (next == 13)
+				need = (savedata.analyzerwindow == 1 && m_AnalyzerDlg);
+			else if (next == 14)
+				need = (savedata.mpPromptwindow == 1);
+			else if (next == 15)
+				need = (savedata.mpCmdRollwindow == 1);
+			else if (next == 16)
+				need = (savedata.mpDjPadwindow == 1);
+			if (need) break;
+			++next;
+		}
+		if (next <= 16)
+			PostMessage(WM_OGG_TOGGLE_SUBUI, next, 0);
 		else {
 			// 復元完了: 押下見た目を一度だけ同期(復元中は抑止していた)
 			extern CMediaPlayerDlg* mp;
@@ -27883,6 +27939,7 @@ void COggDlg::plugloop(CString ff)
 					// pl->Create / 他ダイアログをネスト CreateDialog すると
 					// ERROR_INVALID_PARAMETER→「引数が正しくありません」になり得る。
 					// 進捗表示は SetPos の Invalidate で足りるため TIMER は後回し。
+					// Posted oneshot(WM_TIMERP_VSYNC_TICK 等)は捨てない（フラグ固着防止）。
 					MSG msg;
 					while (::PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
 						if (msg.message == WM_QUIT) {

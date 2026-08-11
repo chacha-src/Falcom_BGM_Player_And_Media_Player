@@ -1,4 +1,4 @@
-﻿#include "StdAfx.h"
+#include "StdAfx.h"
 #include "CDesktopLyricsWnd.h"
 #include "CCustomPopupMenu.h"
 #include "oggDlg.h"
@@ -209,7 +209,7 @@ BOOL CDesktopLyricsWnd::OnInitDialog()
 
 	savedata.deskLrcOn = 1;
 	MpPersistSavedataQuick();
-	SyncFromOg();
+	SyncFromOg(TRUE); // 途中オープン: 頭から該当行へ高速 chase
 	ApplyWindowAlpha();
 	return TRUE;
 }
@@ -420,7 +420,7 @@ void CDesktopLyricsWnd::LayoutClient()
 			MulDiv(50, (int)dpi, 96), MulDiv(18, (int)dpi, 96), SWP_NOZORDER | SWP_NOACTIVATE);
 }
 
-void CDesktopLyricsWnd::SyncFromOg()
+void CDesktopLyricsWnd::SyncFromOg(BOOL catchFromTop)
 {
 	if (!m_view.GetSafeHwnd()) return;
 	if (!og || og->lrcnum < 2) {
@@ -441,6 +441,8 @@ void CDesktopLyricsWnd::SyncFromOg()
 			centis = (DWORD)(sec * 100.0 + 0.5);
 	}
 	m_view.SetPlayCentis(centis);
+	if (catchFromTop)
+		m_view.BeginCatchFromTop();
 	m_view.Invalidate(FALSE);
 }
 
@@ -1002,7 +1004,7 @@ void OpenDesktopLyricsModeless(CWnd* pParent)
 		g_desktopLyricsWnd->SetForegroundWindow();
 		g_desktopLyricsWnd->MakeSolidClient();
 		g_desktopLyricsWnd->ApplyWindowAlpha();
-		g_desktopLyricsWnd->SyncFromOg();
+		g_desktopLyricsWnd->SyncFromOg(TRUE); // 再表示も頭から高速 chase
 		savedata.deskLrcOn = 1;
 		MpPersistSavedataQuick();
 		if (mp && ::IsWindow(mp->GetSafeHwnd()))

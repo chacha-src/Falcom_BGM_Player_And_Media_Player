@@ -6,6 +6,7 @@
 #include "ogg.h"
 #include "oggDlg.h"
 #include "ScreenCaptureDlg.h"
+#include "ScLiveSettingsDlg.h"
 #include "AudioDevSync.h"
 #include "ScWgcCapture.h"
 #include "CMediaPlayerDlg.h"
@@ -1203,6 +1204,11 @@ static BOOL CALLBACK ScEnumWindowsProc(HWND hwnd, LPARAM lp)
 	if (*ctx->cnt >= ctx->maxCnt) return FALSE;
 	if (!IsWindowVisible(hwnd)) return TRUE;
 	if (hwnd == ctx->skip) return TRUE;
+	{
+		const HWND liveHwnd = GetScLiveSettingsHwnd();
+		if (liveHwnd && hwnd == liveHwnd)
+			return TRUE;
+	}
 	if (GetWindow(hwnd, GW_OWNER)) return TRUE;
 	const LONG_PTR ex = GetWindowLongPtr(hwnd, GWL_EXSTYLE);
 	if (ex & WS_EX_TOOLWINDOW) return TRUE;
@@ -2543,10 +2549,10 @@ void CScHelpDlg::OnPaint()
 	title(L, y, LL14(L"ライブ配信", L"Live streaming", L"Diffusion live", L"Diretta", L"Transmisión", L"라이브", L"直播", L"البث المباشر",
 		L"Прямой эфир", L"Livestream", L"Transmissão ao vivo", L"Livestream", L"Transmisja", L"Canlı yayın"));
 	y += titleLh;
-	body(L, y, LL14(L"・YouTube …… Client ID/Secret → 認証 → 配信枠作成 → 配信開始（MP4は書きません）", L"· YouTube …… Client ID/Secret → Auth → Create → Go live (no MP4)", L"· YouTube …… Client ID/Secret → Auth → Créer → Diffuser (pas de MP4)", L"· YouTube …… Client ID/Secret → Auth → Crea → Diretta (niente MP4)",
-		L"· YouTube …… Client ID/Secret → Auth → Crear → Emitir (sin MP4)", L"· YouTube …… Client ID/Secret → 인증 → 방송 생성 → 시작(MP4 없음)", L"· YouTube …… Client ID/Secret → 认证 → 创建 → 开播（不写 MP4）", L"· YouTube …… Client ID/Secret → مصادقة → إنشاء → بث (بدون MP4)",
-		L"· YouTube …… Client ID/Secret → Auth → Создать → Эфир (без MP4)", L"· YouTube …… Client-ID/Secret → Auth → Anlegen → Live (kein MP4)", L"· YouTube …… Client ID/Secret → Auth → Criar → Ao vivo (sem MP4)", L"· YouTube …… Client-ID/Secret → Auth → Maken → Live (geen MP4)",
-		L"· YouTube …… Client ID/Secret → Auth → Utwórz → Live (bez MP4)", L"· YouTube …… Client ID/Secret → Auth → Oluştur → Canlı (MP4 yok)")); y += lh;
+	body(L, y, LL14(L"・YouTube …… Googleでログイン → 配信枠作成 → 配信開始（MP4は書きません）", L"· YouTube …… Sign in with Google → Create → Go live (no MP4)", L"· YouTube …… Google → Créer → Diffuser (pas de MP4)", L"· YouTube …… Google → Crea → Diretta (niente MP4)",
+		L"· YouTube …… Google → Crear → Emitir (sin MP4)", L"· YouTube …… Google 로그인 → 방송 생성 → 시작(MP4 없음)", L"· YouTube …… Google 登录 → 创建 → 开播（不写 MP4）", L"· YouTube …… تسجيل Google → إنشاء → بث (بدون MP4)",
+		L"· YouTube …… Google → Создать → Эфир (без MP4)", L"· YouTube …… Google → Anlegen → Live (kein MP4)", L"· YouTube …… Google → Criar → Ao vivo (sem MP4)", L"· YouTube …… Google → Maken → Live (geen MP4)",
+		L"· YouTube …… Google → Utwórz → Live (bez MP4)", L"· YouTube …… Google → Oluştur → Canlı (MP4 yok)")); y += lh;
 	body(L, y, LL14(L"・Nico/カスタム …… 配信サイトの RTMP URL とキーを手入力して配信開始", L"· Nico/Custom …… enter the site's RTMP URL and key, then Go live", L"· Nico/Perso …… saisissez URL RTMP et clé, puis Diffuser", L"· Nico/Custom …… inserisci URL RTMP e chiave, poi Vai in diretta",
 		L"· Nico/Pers. …… introduzca URL RTMP y clave, luego Emitir", L"· Nico/사용자 …… 사이트의 RTMP URL·키를 입력 후 시작", L"· Nico/自定义 …… 填写站点 RTMP URL 和密钥后开播", L"· Nico/مخصص …… أدخل رابط RTMP والمفتاح ثم ابدأ البث",
 		L"· Nico/свой …… введите RTMP URL и ключ, затем В эфир", L"· Nico/Custom …… RTMP-URL und Key eingeben, dann Live starten", L"· Nico/Pers. …… introduza URL RTMP e chave e Entre ao vivo", L"· Nico/Custom …… vul RTMP-URL en key in, dan Live starten",
@@ -2632,7 +2638,7 @@ void CScHelpDlg::OnPaint()
 
 } // namespace
 
-static CScreenCaptureDlg* g_screenCaptureDlg = NULL;
+CScreenCaptureDlg* g_screenCaptureDlg = NULL;
 
 IMPLEMENT_DYNAMIC(CScreenCaptureDlg, CCustomBlurDialogBase)
 
@@ -2684,10 +2690,16 @@ CScreenCaptureDlg::CScreenCaptureDlg(CWnd* pParent)
 	, m_withAudio(TRUE)
 	, m_withMic(FALSE)
 	, m_liveMode(FALSE)
+	, m_ytLiveTransitionDone(FALSE)
+	, m_ytTestingRequested(FALSE)
+	, m_ytLivePhase(0)
+	, m_ytGoLiveRequest(0)
+	, m_ytGoLiveLastTick(0)
 	, m_liveService(0)
 	, m_fpsVal(15)
 	, m_startTick(0)
 {
+	m_ytStreamStatus[0] = 0;
 	memset(m_availHwnd, 0, sizeof(m_availHwnd));
 	memset(m_layers, 0, sizeof(m_layers));
 	memset(&m_recSnap, 0, sizeof(m_recSnap));
@@ -2758,24 +2770,7 @@ void CScreenCaptureDlg::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDC_SC_INCMP, m_includeMp);
 	DDX_Control(pDX, IDC_SC_CURSOR, m_showCursor);
 	DDX_Control(pDX, IDC_SC_LIVE, m_live);
-	DDX_Control(pDX, IDC_SC_LIVE_SVC_L, m_liveSvcLabel);
-	DDX_Control(pDX, IDC_SC_LIVE_SVC, m_liveSvc);
-	DDX_Control(pDX, IDC_SC_LIVE_PRIV_L, m_livePrivLabel);
-	DDX_Control(pDX, IDC_SC_LIVE_PRIV, m_livePriv);
-	DDX_Control(pDX, IDC_SC_LIVE_TITLE_L, m_liveTitleLabel);
-	DDX_Control(pDX, IDC_SC_LIVE_TITLE, m_liveTitle);
-	DDX_Control(pDX, IDC_SC_LIVE_DESC_L, m_liveDescLabel);
-	DDX_Control(pDX, IDC_SC_LIVE_DESC, m_liveDesc);
-	DDX_Control(pDX, IDC_SC_LIVE_URL_L, m_liveUrlLabel);
-	DDX_Control(pDX, IDC_SC_LIVE_URL, m_liveUrl);
-	DDX_Control(pDX, IDC_SC_LIVE_KEY_L, m_liveKeyLabel);
-	DDX_Control(pDX, IDC_SC_LIVE_KEY, m_liveKey);
-	DDX_Control(pDX, IDC_SC_LIVE_CID_L, m_liveCidLabel);
-	DDX_Control(pDX, IDC_SC_LIVE_CID, m_liveCid);
-	DDX_Control(pDX, IDC_SC_LIVE_CSEC_L, m_liveCsecLabel);
-	DDX_Control(pDX, IDC_SC_LIVE_CSEC, m_liveCsec);
-	DDX_Control(pDX, IDC_SC_LIVE_AUTH, m_liveAuth);
-	DDX_Control(pDX, IDC_SC_LIVE_CREATE, m_liveCreate);
+	DDX_Control(pDX, IDC_SC_LIVE_CFG, m_liveCfg);
 	DDX_Control(pDX, IDC_SC_PICK, m_pick);
 	DDX_Control(pDX, IDC_SC_REFRESH, m_refresh);
 	DDX_Control(pDX, IDC_SC_AVAIL_L, m_availLabel);
@@ -2830,10 +2825,7 @@ BEGIN_MESSAGE_MAP(CScreenCaptureDlg, CCustomBlurDialogBase)
 	ON_BN_CLICKED(IDC_SC_INCMP, &CScreenCaptureDlg::OnBnClickedIncludeMp)
 	ON_BN_CLICKED(IDC_SC_CURSOR, &CScreenCaptureDlg::OnBnClickedShowCursor)
 	ON_BN_CLICKED(IDC_SC_LIVE, &CScreenCaptureDlg::OnBnClickedLive)
-	ON_BN_CLICKED(IDC_SC_LIVE_AUTH, &CScreenCaptureDlg::OnBnClickedLiveAuth)
-	ON_BN_CLICKED(IDC_SC_LIVE_CREATE, &CScreenCaptureDlg::OnBnClickedLiveCreate)
-	ON_CBN_SELCHANGE(IDC_SC_LIVE_SVC, &CScreenCaptureDlg::OnCbnSelchangeLiveSvc)
-	ON_CBN_SELCHANGE(IDC_SC_LIVE_PRIV, &CScreenCaptureDlg::OnCbnSelchangeLivePriv)
+	ON_BN_CLICKED(IDC_SC_LIVE_CFG, &CScreenCaptureDlg::OnBnClickedLiveCfg)
 	ON_BN_CLICKED(IDC_SC_MIC, &CScreenCaptureDlg::OnBnClickedMic)
 	ON_CBN_SELCHANGE(IDC_SC_MICDEV, &CScreenCaptureDlg::OnCbnSelchangeMicDev)
 	ON_CBN_SELCHANGE(IDC_SC_LOOPDEV, &CScreenCaptureDlg::OnCbnSelchangeLoopDev)
@@ -2864,8 +2856,6 @@ void CScreenCaptureDlg::RefreshOpaqueUi()
 	if (m_fxWire.GetSafeHwnd()) m_fxWire.Invalidate(FALSE);
 	if (m_mode.GetSafeHwnd()) m_mode.Invalidate(FALSE);
 	if (m_canvas.GetSafeHwnd()) m_canvas.Invalidate(FALSE);
-	if (m_liveSvc.GetSafeHwnd()) m_liveSvc.Invalidate(FALSE);
-	if (m_livePriv.GetSafeHwnd()) m_livePriv.Invalidate(FALSE);
 }
 
 CString CScreenCaptureDlg::NormalizeOutPath(const CString& pathIn) const
@@ -3126,6 +3116,21 @@ void CScreenCaptureDlg::FitLayerIntoCanvas(Layer& L, int cw, int ch) const
 	if (L.y < 0) L.y = 0;
 }
 
+// ユーザ配置を維持したままキャンバス内へ収める（中央寄せしない）
+void CScreenCaptureDlg::ClampLayerToCanvas(Layer& L, int cw, int ch) const
+{
+	if (cw < 2) cw = 2;
+	if (ch < 2) ch = 2;
+	if (L.w < 2) L.w = 2;
+	if (L.h < 2) L.h = 2;
+	if (L.w > cw) L.w = cw;
+	if (L.h > ch) L.h = ch;
+	if (L.x + L.w > cw) L.x = cw - L.w;
+	if (L.y + L.h > ch) L.y = ch - L.h;
+	if (L.x < 0) L.x = 0;
+	if (L.y < 0) L.y = 0;
+}
+
 void CScreenCaptureDlg::FitAllLayersIntoCanvas()
 {
 	int cw = 0, ch = 0;
@@ -3139,6 +3144,14 @@ void CScreenCaptureDlg::FitAllLayersIntoCanvas()
 	RefreshLayerList();
 	SyncGeoEditsFromSel();
 	UpdatePreview(TRUE);
+}
+
+void CScreenCaptureDlg::ClampAllLayersToCanvas()
+{
+	int cw = 0, ch = 0;
+	ResolveCanvasSize(cw, ch);
+	for (int i = 0; i < m_layerCnt; ++i)
+		ClampLayerToCanvas(m_layers[i], cw, ch);
 }
 
 void CScreenCaptureDlg::BuildComposeSnap(ComposeSnap& out) const
@@ -4434,10 +4447,10 @@ void CScreenCaptureDlg::SetRecordingUi(BOOL recording)
 	EnableComposeUi(compose);
 	// EnableWindow は透過を壊すのでモード/キャンバスは PreTranslate でロック
 	RefreshOpaqueUi();
-	// 録画中はプレビュー描画を間引き（Enc の周期ドロップ軽減）
+	// 録画中はプレビュー描画を間引きすぎない（配信中の「停止」見えを防ぐ）
 	if (recording) {
 		KillTimer(SC_TIMER_PREV);
-		SetTimer(SC_TIMER_PREV, 200, NULL);
+		SetTimer(SC_TIMER_PREV, m_liveMode ? 100 : 200, NULL);
 	} else {
 		ApplyPreviewTimer();
 	}
@@ -4463,6 +4476,15 @@ void CScreenCaptureDlg::UpdateElapsedUi()
 		avgEnc = (frames * 1000.0) / (double)ms;
 	t.Format(L"%02d:%02d  Enc %.1f fps (avg %.1f)  Prev %.1f  set %d  %ldf",
 		sec / 60, sec % 60, encFps, avgEnc, prevFps, setFps, (long)frames);
+	if (m_liveMode && m_liveService == 0) {
+		const LONG ph = InterlockedCompareExchange(&m_ytLivePhase, 0, 0);
+		if (ph == 1) t += L"  [YT: 受信待ち]";
+		else if (ph == 2) t += L"  [YT: 開始中]";
+		else if (ph == 3) t += L"  [YT: ライブ]";
+		else if (ph == 4) t += L"  [YT: 開始失敗]";
+		else if (ph == 5) t += L"  [YT: 枠なし]";
+		else if (ph == 6) t += L"  [YT: ffmpeg終了]";
+	}
 	m_time.SetWindowText(t);
 }
 
@@ -4605,10 +4627,17 @@ void CScreenCaptureDlg::AddLayerHwnd(HWND hwnd, BOOL isMp)
 	if (!isMp && !IsWindowComposeMode())
 		m_mode.SetCurSel(SavedModeToComboSel(SC_MODE_WINDOWS, 0));
 	EnableComposeUi(TRUE);
-	// 追加後に全レイヤをキャンバス内へ再フィット（見切れ防止）
-	FitAllLayersIntoCanvas();
+	// 追加レイヤ以外の配置は維持（全体再中央寄せしない）
+	{
+		int cw = 0, ch = 0;
+		ResolveCanvasSize(cw, ch);
+		for (int i = 0; i < m_layerCnt - 1; ++i)
+			ClampLayerToCanvas(m_layers[i], cw, ch);
+	}
+	RefreshLayerList();
 	m_layer.SetCurSel(m_layerCnt - 1);
 	SyncGeoEditsFromSel();
+	UpdatePreview(TRUE);
 }
 
 HWND CScreenCaptureDlg::FindMediaPlayerHwnd() const
@@ -5058,7 +5087,15 @@ void CScreenCaptureDlg::UpdatePreviewDrag(CPoint ptClient)
 		h = minSz;
 	}
 	L.x = x; L.y = y; L.w = w; L.h = h;
+	{
+		int cw = 0, ch = 0;
+		ResolveCanvasSize(cw, ch);
+		ClampLayerToCanvas(L, cw, ch);
+	}
 	SyncGeoEditsFromSel();
+	// ドラッグ中も合成プレビューを追従（HUDだけ動いて中身が戻るのを防ぐ）
+	if (!InterlockedCompareExchange(&m_run, 0, 0))
+		RefreshComposeCache();
 }
 
 void CScreenCaptureDlg::EndPreviewDrag()
@@ -5068,6 +5105,11 @@ void CScreenCaptureDlg::EndPreviewDrag()
 	const int layer = m_dragLayer;
 	m_dragHandle = SC_HIT_NONE;
 	m_dragLayer = -1;
+	if (layer >= 0 && layer < m_layerCnt) {
+		int cw = 0, ch = 0;
+		ResolveCanvasSize(cw, ch);
+		ClampLayerToCanvas(m_layers[layer], cw, ch);
+	}
 	RefreshLayerList();
 	if (layer >= 0 && layer < m_layerCnt)
 		m_layer.SetCurSel(layer);
@@ -5272,8 +5314,9 @@ void CScreenCaptureDlg::PaintPreview(CDC& dc, const CRect& client)
 	}
 
 	if (m_cacheDc && m_cacheBmp && m_cacheW > 0 && m_cacheH > 0) {
+		// HALFTONE+長時間 CS 保持は配信スレッドの cache 更新を阻害しプレビューが凍る
 		if (m_snapCsInit) EnterCriticalSection(&m_snapCs);
-		SetStretchBltMode(dc.GetSafeHdc(), HALFTONE);
+		SetStretchBltMode(dc.GetSafeHdc(), COLORONCOLOR);
 		StretchBlt(dc.GetSafeHdc(), imageRect.left, imageRect.top, imageRect.Width(), imageRect.Height(),
 			m_cacheDc, 0, 0, m_cacheW, m_cacheH, SRCCOPY);
 		if (m_snapCsInit) LeaveCriticalSection(&m_snapCs);
@@ -5287,17 +5330,15 @@ void CScreenCaptureDlg::PaintPreview(CDC& dc, const CRect& client)
 
 void CScreenCaptureDlg::UpdatePreview(BOOL forceCompose)
 {
+	(void)forceCompose;
 	if (!GetSafeHwnd() || !m_preview.GetSafeHwnd()) return;
 	// 録画中は CaptureThread が m_cache を更新するので再合成しない（Enc と奪い合わない）
 	const BOOL recording = InterlockedCompareExchange(&m_run, 0, 0) != 0;
-	if (!recording && (forceCompose || !m_dragging))
+	if (!recording)
 		RefreshComposeCache();
 	m_preview.Invalidate(FALSE);
-	// RDW_FRAME はシステム枠の再描画でちらつく。枠は PaintPreview 側の自前描画。
-	::RedrawWindow(m_preview.GetSafeHwnd(), NULL, NULL,
-		recording
-		? (RDW_INVALIDATE)
-		: (RDW_INVALIDATE | RDW_UPDATENOW));
+	// 録画/配信中も UPDATENOW でプレビューを動かさないと「止まった」ように見える
+	::RedrawWindow(m_preview.GetSafeHwnd(), NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW);
 }
 
 BOOL CScreenCaptureDlg::OnInitDialog()
@@ -5332,10 +5373,7 @@ BOOL CScreenCaptureDlg::OnInitDialog()
 	m_includeMp.SetAeroMode(FALSE);
 	m_showCursor.SetAeroMode(FALSE);
 	m_live.SetAeroMode(FALSE);
-	m_liveSvc.SetAeroMode(FALSE);
-	m_livePriv.SetAeroMode(FALSE);
-	m_liveAuth.SetAeroMode(FALSE);
-	m_liveCreate.SetAeroMode(FALSE);
+	if (m_liveCfg.GetSafeHwnd()) m_liveCfg.SetAeroMode(FALSE);
 	m_fps.SetAeroMode(FALSE);
 	m_effect.SetAeroMode(FALSE);
 	m_fxPre.SetAeroMode(FALSE);
@@ -5456,21 +5494,12 @@ BOOL CScreenCaptureDlg::OnInitDialog()
 	m_includeMp.SetCheck(savedata.cap_include_mp ? BST_CHECKED : BST_UNCHECKED);
 	m_showCursor.SetCheck(savedata.cap_show_cursor ? BST_CHECKED : BST_UNCHECKED);
 
-	m_liveSvc.ResetContent();
-	m_liveSvc.AddString(L"YouTube");
-	m_liveSvc.AddString(LL14(L"ニコニコ", L"Niconico", L"Niconico", L"Niconico", L"Niconico", L"니코니코", L"Niconico", L"نيكونيكو",
-		L"Niconico", L"Niconico", L"Niconico", L"Niconico", L"Niconico", L"Niconico"));
-	m_liveSvc.AddString(LL14(L"カスタム RTMP", L"Custom RTMP", L"RTMP perso", L"RTMP personalizzato", L"RTMP personalizado", L"사용자 RTMP", L"自定义 RTMP", L"RTMP مخصص",
-		L"Свой RTMP", L"Eigenes RTMP", L"RTMP personalizado", L"Aangepaste RTMP", L"Własny RTMP", L"Özel RTMP"));
-	m_livePriv.ResetContent();
-	m_livePriv.AddString(LL14(L"公開", L"Public", L"Public", L"Pubblico", L"Público", L"공개", L"公开", L"عام",
-		L"Открытый", L"Öffentlich", L"Público", L"Openbaar", L"Publiczny", L"Herkese açık"));
-	m_livePriv.AddString(LL14(L"限定公開", L"Unlisted", L"Non répertorié", L"Non in elenco", L"No listado", L"한정공개", L"不公开列出", L"غير مدرج",
-		L"По ссылке", L"Nicht gelistet", L"Não listado", L"Niet vermeld", L"Niepubliczny link", L"Listelenmemiş"));
-	m_livePriv.AddString(LL14(L"非公開", L"Private", L"Privé", L"Privato", L"Privado", L"비공개", L"私密", L"خاص",
-		L"Частный", L"Privat", L"Privado", L"Privé", L"Prywatny", L"Özel"));
 	ApplyLiveFieldsToUi();
 	SyncLiveUiEnable();
+	if (savedata.cap_live_mode) {
+		EnsureFfmpegAvailable(TRUE);
+		OpenScLiveSettingsModeless(this);
+	}
 
 	static const int fpsTab[] = { 10, 15, 20, 24, 30, 60, 90, 120 };
 	int fpsSel = 1;
@@ -5692,140 +5721,37 @@ BOOL CScreenCaptureDlg::OnInitDialog()
 			L"Kursor myszy w podglądzie/nagraniu (wył. = ukryty)",
 			L"Önizleme/kayıtta fare imleci (kapalı = gizli)"));
 		m_tooltip.AddTool(&m_live, LL14(
-			L"ONでRTMPライブ配信（MP4なし）。ffmpeg.exe が必要",
-			L"ON = RTMP live (no MP4). Requires ffmpeg.exe",
-			L"ON = live RTMP (pas de MP4). ffmpeg.exe requis",
-			L"ON = live RTMP (niente MP4). Serve ffmpeg.exe",
-			L"ON = vivo RTMP (sin MP4). Requiere ffmpeg.exe",
-			L"ON이면 RTMP 라이브(MP4 없음). ffmpeg.exe 필요",
-			L"开启后 RTMP 直播（不写 MP4）。需要 ffmpeg.exe",
-			L"تشغيل = بث RTMP (بدون MP4). يلزم ffmpeg.exe",
-			L"Вкл. = RTMP эфир (без MP4). Нужен ffmpeg.exe",
-			L"AN = RTMP-Live (kein MP4). ffmpeg.exe nötig",
-			L"ON = ao vivo RTMP (sem MP4). Requer ffmpeg.exe",
-			L"AAN = RTMP-live (geen MP4). ffmpeg.exe vereist",
-			L"WŁ = live RTMP (bez MP4). Wymaga ffmpeg.exe",
-			L"AÇIK = RTMP canlı (MP4 yok). ffmpeg.exe gerekir"));
-		m_tooltip.AddTool(&m_liveSvc, LL14(
-			L"YouTube / ニコニコ / カスタムRTMP",
-			L"YouTube / Niconico / Custom RTMP",
-			L"YouTube / Niconico / RTMP perso",
-			L"YouTube / Niconico / RTMP personalizzato",
-			L"YouTube / Niconico / RTMP personalizado",
-			L"YouTube / 니코니코 / 사용자 RTMP",
-			L"YouTube / Niconico / 自定义 RTMP",
-			L"YouTube / Niconico / RTMP مخصص",
-			L"YouTube / Niconico / свой RTMP",
-			L"YouTube / Niconico / Eigenes RTMP",
-			L"YouTube / Niconico / RTMP personalizado",
-			L"YouTube / Niconico / Aangepaste RTMP",
-			L"YouTube / Niconico / Własny RTMP",
-			L"YouTube / Niconico / Özel RTMP"));
-		m_tooltip.AddTool(&m_livePriv, LL14(
-			L"YouTube 公開範囲（公開 / 限定公開 / 非公開）",
-			L"YouTube privacy (public / unlisted / private)",
-			L"Visibilité YouTube (public / non répertorié / privé)",
-			L"Privacy YouTube (pubblico / non in elenco / privato)",
-			L"Privacidad de YouTube (público / no listado / privado)",
-			L"YouTube 공개 범위(공개/한정/비공개)",
-			L"YouTube 公开范围（公开/不列出/私密）",
-			L"خصوصية YouTube (عام / غير مدرج / خاص)",
-			L"Доступ YouTube (открытый / по ссылке / частный)",
-			L"YouTube-Sichtbarkeit (öffentlich / unlisted / privat)",
-			L"Privacidade YouTube (público / não listado / privado)",
-			L"YouTube-privacy (openbaar / unlisted / privé)",
-			L"Prywatność YouTube (publiczny / unlisted / prywatny)",
-			L"YouTube gizliliği (herkese açık / listelenmemiş / özel)"));
-		m_tooltip.AddTool(&m_liveTitle, LL14(
-			L"配信タイトル（YouTube 配信枠作成時に使用）",
-			L"Stream title (used when creating a YouTube broadcast)",
-			L"Titre du live (création YouTube)",
-			L"Titolo diretta (creazione YouTube)",
-			L"Título de emisión (creación YouTube)",
-			L"방송 제목(YouTube 방송 생성 시)",
-			L"直播标题（创建 YouTube 直播时使用）",
-			L"عنوان البث (عند إنشاء بث YouTube)",
-			L"Название эфира (при создании YouTube)",
-			L"Stream-Titel (bei YouTube-Broadcast)",
-			L"Título da transmissão (ao criar YouTube)",
-			L"Streamtitel (bij YouTube-broadcast)",
-			L"Tytuł transmisji (przy tworzeniu YouTube)",
-			L"Yayın başlığı (YouTube yayını oluştururken)"));
-		m_tooltip.AddTool(&m_liveUrl, LL14(
-			L"RTMP(S) サーバ URL。YouTube は「配信枠作成」で自動入力",
-			L"RTMP(S) server URL. YouTube fills this via Create broadcast",
-			L"URL serveur RTMP(S). YouTube: rempli par Créer",
-			L"URL server RTMP(S). YouTube: compilato da Crea",
-			L"URL del servidor RTMP(S). YouTube: lo rellena Crear",
-			L"RTMP(S) 서버 URL. YouTube는 방송 생성으로 자동 입력",
-			L"RTMP(S) 服务器 URL。YouTube 可通过「创建直播」自动填入",
-			L"رابط خادم RTMP(S). YouTube يملؤه عبر إنشاء البث",
-			L"URL сервера RTMP(S). YouTube заполняет через создание эфира",
-			L"RTMP(S)-Server-URL. YouTube füllt per Broadcast anlegen",
-			L"URL do servidor RTMP(S). YouTube preenche ao criar",
-			L"RTMP(S)-server-URL. YouTube vult via Broadcast maken",
-			L"URL serwera RTMP(S). YouTube wypełnia przez Utwórz",
-			L"RTMP(S) sunucu URL. YouTube Yayın oluştur ile dolar"));
-		m_tooltip.AddTool(&m_liveKey, LL14(
-			L"ストリームキー。第三者に見せないでください",
-			L"Stream key. Keep it secret",
-			L"Clé de flux. Ne la partagez pas",
-			L"Chiave stream. Non condividerla",
-			L"Clave de stream. No la comparta",
-			L"스트림 키. 외부에 노출하지 마세요",
-			L"串流密钥。请勿泄露",
-			L"مفتاح البث. لا تشاركه",
-			L"Ключ потока. Не показывайте",
-			L"Stream-Key. Geheim halten",
-			L"Chave de stream. Mantenha em segredo",
-			L"Streamkey. Houd geheim",
-			L"Klucz streamu. Zachowaj w tajemnicy",
-			L"Yayın anahtarı. Gizli tutun"));
-		m_tooltip.AddTool(&m_liveAuth, LL14(
-			L"Google OAuth（Installed App・ループバック）で YouTube 認証",
-			L"YouTube auth via Google OAuth (installed app / loopback)",
-			L"Auth YouTube via OAuth Google (app installée / loopback)",
-			L"Auth YouTube via OAuth Google (app installata / loopback)",
-			L"Auth YouTube vía OAuth de Google (app instalada / loopback)",
-			L"Google OAuth(설치형·루프백)로 YouTube 인증",
-			L"通过 Google OAuth（已安装应用/环回）认证 YouTube",
-			L"مصادقة YouTube عبر OAuth Google (تطبيق مثبت / حلقة محلية)",
-			L"Вход YouTube через Google OAuth (уст. приложение / loopback)",
-			L"YouTube-Auth per Google-OAuth (Installed App / Loopback)",
-			L"Auth YouTube via OAuth Google (app instalada / loopback)",
-			L"YouTube-auth via Google OAuth (geïnstalleerde app / loopback)",
-			L"Auth YouTube przez Google OAuth (app zainstalowana / loopback)",
-			L"Google OAuth (yüklü uygulama / loopback) ile YouTube Auth"));
-		m_tooltip.AddTool(&m_liveCreate, LL14(
-			L"YouTube 配信枠を作成し RTMP URL/キーを取得（配信前でも可）",
-			L"Create YouTube broadcast and fill RTMP URL/key (even before going live)",
-			L"Créer une diffusion YouTube et remplir URL/clé RTMP",
-			L"Crea diretta YouTube e compila URL/chiave RTMP",
-			L"Crear emisión de YouTube y rellenar URL/clave RTMP",
-			L"YouTube 방송을 만들고 RTMP URL/키를 채움(방송 전에도 가능)",
-			L"创建 YouTube 直播并填入 RTMP URL/密钥（开播前也可）",
-			L"إنشاء بث YouTube وملء رابط/مفتاح RTMP",
-			L"Создать эфир YouTube и заполнить RTMP URL/ключ",
-			L"YouTube-Broadcast anlegen und RTMP-URL/Key füllen",
-			L"Criar transmissão YouTube e preencher URL/chave RTMP",
-			L"YouTube-broadcast maken en RTMP-URL/key vullen",
-			L"Utwórz transmisję YouTube i wypełnij URL/klucz RTMP",
-			L"YouTube yayını oluşturup RTMP URL/anahtar doldur"));
-		m_tooltip.AddTool(&m_liveCid, LL14(
-			L"Google Cloud OAuth Client ID（デスクトップアプリ）",
-			L"Google Cloud OAuth Client ID (Desktop app)",
-			L"Client ID OAuth Google Cloud (app bureau)",
-			L"Client ID OAuth Google Cloud (app desktop)",
-			L"Client ID OAuth de Google Cloud (app de escritorio)",
-			L"Google Cloud OAuth Client ID(데스크톱 앱)",
-			L"Google Cloud OAuth Client ID（桌面应用）",
-			L"معرّف عميل OAuth في Google Cloud (تطبيق سطح المكتب)",
-			L"Client ID OAuth Google Cloud (десктоп)",
-			L"Google-Cloud-OAuth-Client-ID (Desktop-App)",
-			L"Client ID OAuth Google Cloud (app ambiente de trabalho)",
-			L"Google Cloud OAuth Client-ID (desktop-app)",
-			L"Client ID OAuth Google Cloud (aplikacja desktop)",
-			L"Google Cloud OAuth Client ID (masaüstü uygulaması)"));
+			L"ONでRTMPライブ配信（MP4なし）。ffmpeg.exe が必要。設定は専用窓で行います。",
+			L"ON = RTMP live (no MP4). Requires ffmpeg.exe. Configure in the settings window.",
+			L"ON = live RTMP (pas de MP4). ffmpeg.exe requis. Réglages dans la fenêtre dédiée.",
+			L"ON = live RTMP (niente MP4). Serve ffmpeg.exe. Impostazioni nella finestra dedicata.",
+			L"ON = vivo RTMP (sin MP4). Requiere ffmpeg.exe. Ajustes en la ventana dedicada.",
+			L"ON이면 RTMP 라이브(MP4 없음). ffmpeg.exe 필요. 설정은 전용 창에서.",
+			L"开启后 RTMP 直播（不写 MP4）。需要 ffmpeg.exe。在专用窗口中设置。",
+			L"تشغيل = بث RTMP (بدون MP4). يلزم ffmpeg.exe. الإعدادات في النافذة المخصصة.",
+			L"Вкл. = RTMP эфир (без MP4). Нужен ffmpeg.exe. Настройки в отдельном окне.",
+			L"AN = RTMP-Live (kein MP4). ffmpeg.exe nötig. Einstellungen im eigenen Fenster.",
+			L"ON = ao vivo RTMP (sem MP4). Requer ffmpeg.exe. Definições na janela dedicada.",
+			L"AAN = RTMP-live (geen MP4). ffmpeg.exe vereist. Instellingen in apart venster.",
+			L"WŁ = live RTMP (bez MP4). Wymaga ffmpeg.exe. Ustawienia w osobnym oknie.",
+			L"AÇIK = RTMP canlı (MP4 yok). ffmpeg.exe gerekir. Ayarlar ayrı pencerede."));
+		if (m_liveCfg.GetSafeHwnd()) {
+			m_tooltip.AddTool(&m_liveCfg, LL14(
+				L"ライブ配信の設定窓を開く（配信先・URL・認証など）",
+				L"Open live stream settings (service, URL, auth, …)",
+				L"Ouvrir les réglages live (service, URL, auth…)",
+				L"Apri impostazioni diretta (servizio, URL, auth…)",
+				L"Abrir ajustes de transmisión (servicio, URL, auth…)",
+				L"라이브 설정 창 열기(서비스·URL·인증 등)",
+				L"打开直播设置窗口（服务、URL、认证等）",
+				L"فتح نافذة إعدادات البث (الخدمة، الرابط، المصادقة…)",
+				L"Открыть настройки эфира (сервис, URL, вход…)",
+				L"Livestream-Einstellungen öffnen (Dienst, URL, Auth…)",
+				L"Abrir definições de transmissão (serviço, URL, auth…)",
+				L"Livestream-instellingen openen (dienst, URL, auth…)",
+				L"Otwórz ustawienia transmisji (usługa, URL, auth…)",
+				L"Canlı yayın ayarlarını aç (servis, URL, auth…)"));
+		}
 		m_tooltip.AddTool(&m_pick, LL14(
 			L"次にクリックしたウィンドウをレイヤに追加します",
 			L"Next click adds that window as a layer",
@@ -5926,6 +5852,7 @@ BOOL CScreenCaptureDlg::OnInitDialog()
 	RefreshOpaqueUi();
 	StartPeakMonitor();
 	FitToWorkArea();
+	// Fit が子を動かしたあと、Live フッターを Live 行基準で再確定
 	CCC_CaptionLayout(m_hWnd); // 先に P/閉じる等を確定してから ? を左隣へ
 	LayoutHelpBtn();
 	return TRUE;
@@ -6021,6 +5948,9 @@ void CScreenCaptureDlg::ApplyPreviewTimer()
 	int fps = CurrentPreviewFps();
 	if (fps < 5) fps = 5;
 	if (fps > 120) fps = 120;
+	// 配信中はプレビューを軽く（Enc 優先）
+	if (InterlockedCompareExchange(&m_run, 0, 0) && m_liveMode && fps > 10)
+		fps = 10;
 	UINT ms = (UINT)(1000 / fps);
 	if (ms < 8) ms = 8; // ~120fps
 	// エフェクトチェーンON時はプレビューだけ軽く間引き（録画FPSは別経路）
@@ -6220,9 +6150,12 @@ BOOL CScreenCaptureDlg::StartRecording()
 		m_mode.SetCurSel(SavedModeToComboSel(SC_MODE_WINDOWS, 0));
 		EnableComposeUi(TRUE);
 	}
-	// 録画直前にキャンバス内へ再フィット（見切れ防止）
-	if (m_layerCnt > 0)
-		FitAllLayersIntoCanvas();
+	// 録画直前は配置を維持したままキャンバス内へクランプ（中央寄せで戻さない）
+	if (m_layerCnt > 0) {
+		ClampAllLayersToCanvas();
+		RefreshLayerList();
+		SyncGeoEditsFromSel();
+	}
 	::SetWindowDisplayAffinity(m_hWnd, WDA_EXCLUDEFROMCAPTURE);
 
 	// ファイル名の日時を録画開始時点で更新（上書き連発を防ぐ）
@@ -6261,20 +6194,41 @@ BOOL CScreenCaptureDlg::StartRecording()
 	path = NormalizeOutPath(path);
 
 	const BOOL liveChecked = m_live.GetSafeHwnd() && m_live.GetCheck();
-	int liveSvc = m_liveSvc.GetSafeHwnd() ? m_liveSvc.GetCurSel() : 0;
+	int liveSvc = savedata.cap_live_service;
 	if (liveSvc < 0 || liveSvc > 2) liveSvc = 0;
 
 	if (liveChecked) {
 		PersistLiveFieldsFromUi();
+		TCHAR ffCheck[MAX_PATH] = {};
+		if (!EnsureFfmpegAvailable(TRUE)) {
+			if (!ResolveFfmpegPath(ffCheck, MAX_PATH)) {
+				m_status.SetWindowText(LL14(
+					L"ffmpeg.exe が見つかりません。ライブ配信UIから公式ビルドを取得できます。",
+					L"ffmpeg.exe not found. You can download the official build from the live settings UI.",
+					L"ffmpeg.exe introuvable. Telechargez la build officielle depuis l'UI live.",
+					L"ffmpeg.exe non trovato. Scarica la build ufficiale dall'UI live.",
+					L"No se encontro ffmpeg.exe. Descargue la build oficial desde la UI en vivo.",
+					L"ffmpeg.exe 없음. 라이브 UI에서 공식 빌드를 받을 수 있습니다.",
+					L"找不到 ffmpeg.exe。可从直播设置界面获取官方构建。",
+					L"لم يُعثر على ffmpeg.exe. يمكن تنزيل البناء الرسمي من واجهة البث.",
+					L"ffmpeg.exe не найден. Официальную сборку можно скачать из UI эфира.",
+					L"ffmpeg.exe nicht gefunden. Offizielle Build uber die Live-UI holen.",
+					L"ffmpeg.exe nao encontrado. Baixe a build oficial pela UI ao vivo.",
+					L"ffmpeg.exe niet gevonden. Download de officiele build via de live-UI.",
+					L"Nie znaleziono ffmpeg.exe. Oficjalny build mozna pobrac z UI live.",
+					L"ffmpeg.exe bulunamadi. Resmi surumu canli arayuzden indirebilirsiniz."));
+			}
+			return FALSE;
+		}
 		if (liveSvc == 0) {
 			// 既に「配信枠作成」済みなら再利用（毎回新規枠を作らない）
-			CString urlHave, keyHave;
-			if (m_liveUrl.GetSafeHwnd()) m_liveUrl.GetWindowText(urlHave);
-			if (m_liveKey.GetSafeHwnd()) m_liveKey.GetWindowText(keyHave);
+			CString urlHave = savedata.cap_live_url;
+			CString keyHave = savedata.cap_live_key;
 			urlHave.Trim();
 			keyHave.Trim();
 			const BOOL haveReady = !urlHave.IsEmpty() && !keyHave.IsEmpty()
-				&& savedata.yt_broadcast_id[0] != 0;
+				&& savedata.yt_broadcast_id[0] != 0
+				&& savedata.yt_stream_id[0] != 0;
 			if (!haveReady) {
 				CString ytErr;
 				if (!PrepareYouTubeLiveBeforeStart(ytErr)) {
@@ -6291,33 +6245,38 @@ BOOL CScreenCaptureDlg::StartRecording()
 				}
 			}
 		} else {
-			CString url, key;
-			if (m_liveUrl.GetSafeHwnd()) m_liveUrl.GetWindowText(url);
-			if (m_liveKey.GetSafeHwnd()) m_liveKey.GetWindowText(key);
+			CString url = savedata.cap_live_url;
+			CString key = savedata.cap_live_key;
 			url.Trim();
 			key.Trim();
 			if (url.IsEmpty() || key.IsEmpty()) {
 				m_status.SetWindowText(LL14(
-					L"RTMP URL とストリームキーを入力してください。",
-					L"Enter RTMP URL and stream key.",
-					L"Saisissez l'URL RTMP et la clé.",
-					L"Inserisci URL RTMP e chiave stream.",
-					L"Introduzca URL RTMP y clave de stream.",
-					L"RTMP URL과 스트림 키를 입력하세요.",
-					L"请输入 RTMP URL 和串流密钥。",
-					L"أدخل رابط RTMP ومفتاح البث.",
-					L"Введите RTMP URL и ключ потока.",
-					L"RTMP-URL und Stream-Key eingeben.",
-					L"Introduza URL RTMP e chave de stream.",
-					L"Voer RTMP-URL en streamkey in.",
-					L"Wprowadź URL RTMP i klucz streamu.",
-					L"RTMP URL ve yayın anahtarını girin."));
+					L"RTMP URL とストリームキーを入力してください（設定…）。",
+					L"Enter RTMP URL and stream key (Settings…).",
+					L"Saisissez l'URL RTMP et la clé (Réglages…).",
+					L"Inserisci URL RTMP e chiave stream (Impostazioni…).",
+					L"Introduzca URL RTMP y clave de stream (Ajustes…).",
+					L"RTMP URL과 스트림 키를 입력하세요(설정…).",
+					L"请输入 RTMP URL 和串流密钥（设置…）。",
+					L"أدخل رابط RTMP ومفتاح البث (إعدادات…).",
+					L"Введите RTMP URL и ключ потока (Настройки…).",
+					L"RTMP-URL und Stream-Key eingeben (Einstellungen…).",
+					L"Introduza URL RTMP e chave de stream (Definições…).",
+					L"Voer RTMP-URL en streamkey in (Instellingen…).",
+					L"Wprowadź URL RTMP i klucz streamu (Ustawienia…).",
+					L"RTMP URL ve yayın anahtarını girin (Ayarlar…)."));
+				OpenScLiveSettingsModeless(this);
 				return FALSE;
 			}
 		}
 		m_liveMode = TRUE;
 		m_liveService = liveSvc;
+		m_ytLiveTransitionDone = FALSE;
+		m_ytTestingRequested = FALSE;
+		InterlockedExchange(&m_ytLivePhase, 1);
+		m_ytStreamStatus[0] = 0;
 		m_outPath.Empty();
+		ScLiveSettingsSetStreamingUi(TRUE);
 	} else {
 		m_liveMode = FALSE;
 		m_liveService = 0;
@@ -6344,6 +6303,13 @@ BOOL CScreenCaptureDlg::StartRecording()
 	if (m_fpsVal > 120) m_fpsVal = 120;
 	m_withAudio = m_audio.GetCheck() ? TRUE : FALSE;
 	m_withMic = m_mic.GetCheck() ? TRUE : FALSE;
+	// ライブはシステム音声を常に送る
+	if (m_liveMode) {
+		m_withAudio = TRUE;
+		if (m_audio.GetSafeHwnd()) m_audio.SetCheck(BST_CHECKED);
+	}
+	InterlockedExchange(&m_ytGoLiveRequest, 0);
+	m_ytGoLiveLastTick = 0;
 
 	// 固着 WGC を破棄して新規セッションで録る（WGC=高速、失敗時のみ GDI）。
 	InterlockedExchange(&m_encodeGdi, 0);
@@ -6381,22 +6347,23 @@ BOOL CScreenCaptureDlg::StartRecording()
 	m_thread = (HANDLE)th;
 	InterlockedExchange(&m_run, 1);
 	SetRecordingUi(TRUE);
+	ApplyPreviewTimer();
 	m_status.SetWindowText(m_liveMode
 		? LL14(
-			L"配信中…",
-			L"Streaming…",
-			L"Diffusion…",
-			L"In diretta…",
-			L"Emitiendo…",
-			L"방송 중…",
-			L"直播中…",
-			L"جارٍ البث…",
-			L"В эфире…",
-			L"Live…",
-			L"A transmitir…",
-			L"Live…",
-			L"Transmisja…",
-			L"Yayında…")
+			L"配信送信中…（Studioが「公開予約」のままなら RTMP 未到達。ffmpeg/URLを確認）",
+			L"Sending stream… (If Studio stays Scheduled, RTMP is not reaching YouTube)",
+			L"Envoi… (Si Studio reste planifie, RTMP n'arrive pas)",
+			L"Invio… (Se Studio resta programmato, RTMP non arriva)",
+			L"Enviando… (Si Studio sigue programado, RTMP no llega)",
+			L"송출 중…(Studio가 예약이면 RTMP 미도달)",
+			L"推流中…（若 Studio 仍为预约，则 RTMP 未到达）",
+			L"جارٍ الإرسال… (إذا بقي مجدولًا فـ RTMP لا يصل)",
+			L"Отправка… (если всё ещё запланировано — RTMP не доходит)",
+			L"Sende… (Bleibt Studio geplant, kommt RTMP nicht an)",
+			L"A enviar… (Se continuar agendado, RTMP nao chega)",
+			L"Verzenden… (Blijft Studio gepland, dan komt RTMP niet aan)",
+			L"Wysylanie… (Jesli nadal zaplanowane, RTMP nie dociera)",
+			L"Gonderiliyor… (Studio planli kalirsa RTMP ulasmıyor)")
 		: LL14(
 			L"録画中…",
 			L"Recording…",
@@ -6432,6 +6399,13 @@ void CScreenCaptureDlg::StopRecording()
 	if (wasLive && wasLiveSvc == 0)
 		FinishYouTubeLiveAfterStop();
 	m_liveMode = FALSE;
+	m_ytLiveTransitionDone = FALSE;
+	m_ytTestingRequested = FALSE;
+	InterlockedExchange(&m_ytLivePhase, 0);
+	InterlockedExchange(&m_ytGoLiveRequest, 0);
+	m_ytGoLiveLastTick = 0;
+	if (wasLive)
+		ScLiveSettingsSetStreamingUi(FALSE);
 	const BOOL uiAlive = (GetSafeHwnd() != NULL);
 	if (uiAlive && IsIconic())
 		ShowWindow(SW_RESTORE);
@@ -6440,6 +6414,7 @@ void CScreenCaptureDlg::StopRecording()
 
 	if (uiAlive) {
 		SetRecordingUi(FALSE);
+		ApplyPreviewTimer();
 		if (SUCCEEDED(capHr) && frames > 0) {
 			if (wasLive) {
 				m_status.SetWindowText(LL14(
@@ -6752,20 +6727,47 @@ UINT __stdcall CScreenCaptureDlg::CaptureThread(void* p)
 		PROCESS_INFORMATION pi = {};
 		HANDLE hVidPipe = INVALID_HANDLE_VALUE;
 		HANDLE hAudPipe = INVALID_HANDLE_VALUE;
+		HANDLE thAudFeed = NULL;
 		BOOL haveFfmpegProc = FALSE;
-		auto writeAll = [](HANDLE h, const void* data, DWORD len) -> BOOL {
+		ScFrameBuf livePipe = {};
+		int liveOutW = 1920, liveOutH = 1080;
+		BOOL needLiveScale = FALSE;
+		auto writeVid = [&](HANDLE h, const void* data, DWORD len) -> BOOL {
 			const BYTE* p = (const BYTE*)data;
 			DWORD left = len;
+			DWORD spins = 0;
 			while (left > 0) {
 				DWORD wr = 0;
-				if (!WriteFile(h, p, left, &wr, NULL) || wr == 0)
+				if (!WriteFile(h, p, left, &wr, NULL)) {
+					const DWORD err = GetLastError();
+					if (err == ERROR_NO_DATA || err == ERROR_IO_PENDING) {
+						if (haveFfmpegProc) {
+							DWORD ffCode = STILL_ACTIVE;
+							if (GetExitCodeProcess(pi.hProcess, &ffCode) && ffCode != STILL_ACTIVE) {
+								InterlockedExchange(&self->m_ytLivePhase, 6);
+								SetLastError(ffCode ? ffCode : ERROR_BROKEN_PIPE);
+								return FALSE;
+							}
+						}
+						Sleep(1);
+						if (++spins > 8000) { // ~8s
+							SetLastError(ERROR_TIMEOUT);
+							return FALSE;
+						}
+						continue;
+					}
 					return FALSE;
+				}
+				if (wr == 0) {
+					Sleep(1);
+					continue;
+				}
 				p += wr;
 				left -= wr;
+				spins = 0;
 			}
 			return TRUE;
 		};
-
 		TCHAR ffmpegPath[MAX_PATH] = {};
 		if (!self->ResolveFfmpegPath(ffmpegPath, MAX_PATH)) {
 			InterlockedExchange(&self->m_lastStage, 100);
@@ -6815,21 +6817,59 @@ UINT __stdcall CScreenCaptureDlg::CaptureThread(void* p)
 			}
 		}
 
-		const int pixels = frame.w * frame.h;
-		int vBitrate = 1500;
-		if (pixels >= 3840 * 2160) vBitrate = 12000;
-		else if (pixels >= 1920 * 1080) vBitrate = 4500;
-		else if (pixels >= 1280 * 720) vBitrate = 2500;
-		const int gop = fps * 2;
+		// ライブ送出サイズ（キャンバス解像度、上限 4K。1080p30 以上も可）
+		liveOutW = frame.w & ~1;
+		liveOutH = frame.h & ~1;
+		int vBitrate = 6000;
+		{
+			const int maxW = 3840, maxH = 2160;
+			if (liveOutW > maxW || liveOutH > maxH) {
+				int nw = liveOutW, nh = liveOutH;
+				if (nw > maxW) { nh = (nh * maxW) / nw; nw = maxW; }
+				if (nh > maxH) { nw = (nw * maxH) / nh; nh = maxH; }
+				nw &= ~1; nh &= ~1;
+				if (nw < 16) nw = 16;
+				if (nh < 16) nh = 16;
+				liveOutW = nw;
+				liveOutH = nh;
+			}
+		}
+		{
+			const int pixels = liveOutW * liveOutH;
+			int base = 2500;
+			if (pixels >= 3840 * 2160) base = 20000;
+			else if (pixels >= 2560 * 1440) base = 10000;
+			else if (pixels >= 1920 * 1080) base = 6000;
+			else if (pixels >= 1280 * 720) base = 4500;
+			else base = 2500;
+			if (fps > 30)
+				vBitrate = (int)(((__int64)base * fps) / 30);
+			else
+				vBitrate = base;
+			if (vBitrate < 1500) vBitrate = 1500;
+			if (vBitrate > 51000) vBitrate = 51000;
+		}
+		needLiveScale = (liveOutW != frame.w || liveOutH != frame.h);
+		if (needLiveScale) {
+			if (!ScFrameAlloc(livePipe, liveOutW, liveOutH)) {
+				InterlockedExchange(&self->m_lastStage, 2);
+				InterlockedExchange(&self->m_lastHr, E_OUTOFMEMORY);
+				goto done_live;
+			}
+		}
+		const int gop = (fps > 0 ? fps : 30) * 2;
 
 		TCHAR pipeVid[128] = {}, pipeAud[128] = {};
-		_sntprintf_s(pipeVid, _TRUNCATE, L"\\\\.\\pipe\\oggscvid%lu", (unsigned long)GetCurrentProcessId());
-		_sntprintf_s(pipeAud, _TRUNCATE, L"\\\\.\\pipe\\oggscaud%lu", (unsigned long)GetCurrentProcessId());
+		const DWORD pipeTag = GetTickCount();
+		_sntprintf_s(pipeVid, _TRUNCATE, L"\\\\.\\pipe\\oggscvid%lu%lu",
+			(unsigned long)GetCurrentProcessId(), (unsigned long)pipeTag);
+		_sntprintf_s(pipeAud, _TRUNCATE, L"\\\\.\\pipe\\oggscaud%lu%lu",
+			(unsigned long)GetCurrentProcessId(), (unsigned long)pipeTag);
 
 		hVidPipe = CreateNamedPipe(pipeVid, PIPE_ACCESS_OUTBOUND,
-			PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT, 1, 1 << 20, 1 << 20, 5000, NULL);
+			PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT, 1, 1 << 20, 1 << 20, 0, NULL);
 		hAudPipe = CreateNamedPipe(pipeAud, PIPE_ACCESS_OUTBOUND,
-			PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT, 1, 1 << 16, 1 << 16, 5000, NULL);
+			PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT, 1, 1 << 18, 1 << 18, 0, NULL);
 		if (hVidPipe == INVALID_HANDLE_VALUE || hAudPipe == INVALID_HANDLE_VALUE) {
 			if (hVidPipe != INVALID_HANDLE_VALUE) { CloseHandle(hVidPipe); hVidPipe = INVALID_HANDLE_VALUE; }
 			if (hAudPipe != INVALID_HANDLE_VALUE) { CloseHandle(hAudPipe); hAudPipe = INVALID_HANDLE_VALUE; }
@@ -6838,27 +6878,106 @@ UINT __stdcall CScreenCaptureDlg::CaptureThread(void* p)
 			goto done_live;
 		}
 
+		struct PipeConn { HANDLE h; BOOL ok; };
+		PipeConn connV = { hVidPipe, FALSE };
+		PipeConn connA = { hAudPipe, FALSE };
+		struct PipeConnThunk {
+			static DWORD WINAPI Run(LPVOID p) {
+				PipeConn* c = (PipeConn*)p;
+				c->ok = ConnectNamedPipe(c->h, NULL) || (GetLastError() == ERROR_PIPE_CONNECTED);
+				return 0;
+			}
+		};
+		HANDLE thV = CreateThread(NULL, 0, &PipeConnThunk::Run, &connV, 0, NULL);
+		HANDLE thA = CreateThread(NULL, 0, &PipeConnThunk::Run, &connA, 0, NULL);
+		Sleep(40);
+
 		cmd.Format(
-			L"\"%s\" -hide_banner -loglevel error -y "
+			L"\"%s\" -hide_banner -loglevel info -y "
+			L"-fflags +nobuffer+genpts -flags low_delay "
+			L"-thread_queue_size 512 -probesize 32 -analyzeduration 0 "
 			L"-f rawvideo -pix_fmt bgra -s %dx%d -r %d -i \"%s\" "
+			L"-thread_queue_size 512 -probesize 32 -analyzeduration 0 "
 			L"-f s16le -ar %u -ac %u -i \"%s\" "
-			L"-c:v libx264 -pix_fmt yuv420p -preset veryfast -tune zerolatency "
-			L"-b:v %dk -maxrate %dk -bufsize %dk -g %d "
-			L"-c:a aac -b:a 160k -f flv \"%s\"",
-			ffmpegPath, frame.w, frame.h, fps, pipeVid,
+			L"-c:v libx264 -pix_fmt yuv420p -preset ultrafast -tune zerolatency -threads 0 "
+			L"-bf 0 -g %d -keyint_min %d -sc_threshold 0 "
+			L"-b:v %dk -maxrate %dk -bufsize %dk "
+			L"-c:a aac -ar %u -b:a 128k -ac 2 "
+			L"-f flv -flvflags no_duration_filesize \"%s\"",
+			ffmpegPath, liveOutW, liveOutH, fps, pipeVid,
 			(unsigned)outHz, (unsigned)outCh, pipeAud,
-			vBitrate, vBitrate, vBitrate * 2, gop, (LPCTSTR)rtmpUrl);
+			gop, gop,
+			vBitrate, vBitrate, vBitrate * 2,
+			(unsigned)outHz, (LPCTSTR)rtmpUrl);
+
+		// exe 隣に残る ffmpeg-*.log（旧 -report）を掃除。詳細ログは %TEMP% のみ。
+		{
+			TCHAR mod[MAX_PATH] = {};
+			if (GetModuleFileName(NULL, mod, MAX_PATH)) {
+				TCHAR* slash = _tcsrchr(mod, L'\\');
+				if (slash) {
+					slash[1] = 0;
+					TCHAR pattern[MAX_PATH] = {};
+					_sntprintf_s(pattern, _TRUNCATE, L"%sffmpeg-*.log", mod);
+					WIN32_FIND_DATA fd = {};
+					HANDLE hFind = FindFirstFile(pattern, &fd);
+					if (hFind != INVALID_HANDLE_VALUE) {
+						do {
+							if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) {
+								TCHAR delPath[MAX_PATH] = {};
+								_sntprintf_s(delPath, _TRUNCATE, L"%s%s", mod, fd.cFileName);
+								DeleteFile(delPath);
+							}
+						} while (FindNextFile(hFind, &fd));
+						FindClose(hFind);
+					}
+				}
+			}
+		}
+
+		// ffmpeg ログ（接続失敗の切り分け用・%TEMP% のみ）
+		TCHAR ffLog[MAX_PATH] = {};
+		{
+			TCHAR tmp[MAX_PATH] = {};
+			GetTempPath(MAX_PATH, tmp);
+			_sntprintf_s(ffLog, _TRUNCATE, L"%sogg_sc_ffmpeg.log", tmp);
+			DeleteFile(ffLog);
+		}
+		SECURITY_ATTRIBUTES sa = {};
+		sa.nLength = sizeof(sa);
+		sa.bInheritHandle = TRUE;
+		HANDLE hLog = CreateFile(ffLog, GENERIC_WRITE, FILE_SHARE_READ, &sa,
+			CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
 
 		si.cb = sizeof(si);
 		si.dwFlags = STARTF_USESHOWWINDOW;
 		si.wShowWindow = SW_HIDE;
-		wchar_t* cmdBuf = _tcsdup(cmd);
 		BOOL procOk = FALSE;
-		if (cmdBuf) {
-			procOk = CreateProcess(NULL, cmdBuf, NULL, NULL, FALSE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi);
-			free(cmdBuf);
+		if (hLog != INVALID_HANDLE_VALUE) {
+			HANDLE hNul = CreateFile(L"NUL", GENERIC_READ, FILE_SHARE_READ, &sa, OPEN_EXISTING, 0, NULL);
+			si.dwFlags |= STARTF_USESTDHANDLES;
+			si.hStdInput = (hNul != INVALID_HANDLE_VALUE) ? hNul : NULL;
+			si.hStdOutput = hLog;
+			si.hStdError = hLog;
+			wchar_t* cmdBuf2 = _tcsdup(cmd);
+			if (cmdBuf2) {
+				procOk = CreateProcess(NULL, cmdBuf2, NULL, NULL, TRUE,
+					CREATE_NO_WINDOW, NULL, NULL, &si, &pi);
+				free(cmdBuf2);
+			}
+			if (hNul != INVALID_HANDLE_VALUE) CloseHandle(hNul);
+			CloseHandle(hLog);
+			hLog = INVALID_HANDLE_VALUE;
+		} else {
+			wchar_t* cmdBuf = _tcsdup(cmd);
+			if (cmdBuf) {
+				procOk = CreateProcess(NULL, cmdBuf, NULL, NULL, FALSE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi);
+				free(cmdBuf);
+			}
 		}
 		if (!procOk) {
+			if (thV) { WaitForSingleObject(thV, 100); CloseHandle(thV); thV = NULL; }
+			if (thA) { WaitForSingleObject(thA, 100); CloseHandle(thA); thA = NULL; }
 			CloseHandle(hVidPipe); hVidPipe = INVALID_HANDLE_VALUE;
 			CloseHandle(hAudPipe); hAudPipe = INVALID_HANDLE_VALUE;
 			InterlockedExchange(&self->m_lastStage, 102);
@@ -6867,335 +6986,397 @@ UINT __stdcall CScreenCaptureDlg::CaptureThread(void* p)
 		}
 		haveFfmpegProc = TRUE;
 
+		// ffmpeg は入力を順に open する。映像パイプ接続後すぐに映像を流し、
+		// 音声 Connect は音声スレッド側で待つ（両方待ちはデッドロック→Enc0）。
 		{
-			const BOOL c1 = ConnectNamedPipe(hVidPipe, NULL) || (GetLastError() == ERROR_PIPE_CONNECTED);
-			const BOOL c2 = ConnectNamedPipe(hAudPipe, NULL) || (GetLastError() == ERROR_PIPE_CONNECTED);
-			if (!c1 || !c2) {
+			TCHAR liveLog[MAX_PATH] = {};
+			TCHAR tmpDir[MAX_PATH] = {};
+			GetTempPath(MAX_PATH, tmpDir);
+			_sntprintf_s(liveLog, _TRUNCATE, L"%sogg_sc_live.log", tmpDir);
+			HANDLE hLiveLog = CreateFile(liveLog, GENERIC_WRITE, FILE_SHARE_READ, NULL,
+				CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+			auto liveLogLine = [&](const char* msg) {
+				if (hLiveLog == INVALID_HANDLE_VALUE || !msg) return;
+				DWORD wr = 0;
+				WriteFile(hLiveLog, msg, (DWORD)strlen(msg), &wr, NULL);
+				WriteFile(hLiveLog, "\r\n", 2, &wr, NULL);
+				FlushFileBuffers(hLiveLog);
+			};
+			liveLogLine("wait video ConnectNamedPipe");
+			DWORD wrV = thV ? WaitForSingleObject(thV, 15000) : WAIT_FAILED;
+			if (thV) { CloseHandle(thV); thV = NULL; }
+			if (wrV != WAIT_OBJECT_0 || !connV.ok) {
+				liveLogLine("FAIL video connect");
+				if (hLiveLog != INVALID_HANDLE_VALUE) { CloseHandle(hLiveLog); hLiveLog = INVALID_HANDLE_VALUE; }
+				if (thA) { WaitForSingleObject(thA, 100); CloseHandle(thA); thA = NULL; }
 				InterlockedExchange(&self->m_lastStage, 101);
-				InterlockedExchange(&self->m_lastHr, HRESULT_FROM_WIN32(GetLastError()));
-				CloseHandle(hVidPipe); hVidPipe = INVALID_HANDLE_VALUE;
-				CloseHandle(hAudPipe); hAudPipe = INVALID_HANDLE_VALUE;
+				InterlockedExchange(&self->m_lastHr, HRESULT_FROM_WIN32(ERROR_PIPE_NOT_CONNECTED));
 				TerminateProcess(pi.hProcess, 1);
 				CloseHandle(pi.hThread);
 				CloseHandle(pi.hProcess);
 				haveFfmpegProc = FALSE;
+				CloseHandle(hVidPipe); hVidPipe = INVALID_HANDLE_VALUE;
+				CloseHandle(hAudPipe); hAudPipe = INVALID_HANDLE_VALUE;
 				goto done_live;
 			}
+			liveLogLine("video connected OK; start audio thread (audio connect deferred)");
+			if (hLiveLog != INVALID_HANDLE_VALUE) { CloseHandle(hLiveLog); hLiveLog = INVALID_HANDLE_VALUE; }
 		}
 
-		if (wantAudio) {
-			hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), NULL, CLSCTX_ALL,
-				__uuidof(IMMDeviceEnumerator), (void**)&enumer);
-			if (SUCCEEDED(hr) && enumer) {
-				if (savedata.loop_device[0]) {
-					hr = enumer->GetDevice(savedata.loop_device, &renderDev);
-					if (FAILED(hr) || !renderDev) {
-						if (renderDev) { renderDev->Release(); renderDev = NULL; }
-						hr = enumer->GetDefaultAudioEndpoint(eRender, eConsole, &renderDev);
+
+		// 音声は専用スレッドでパイプへ供給（映像スレッドと分離し ffmpeg 二重入力デッドロックを防ぐ）
+		struct LiveAudFeed {
+			CScreenCaptureDlg* self;
+			HANDLE hPipe;
+			HANDLE hFfmpeg;
+			HANDLE thConn; // audio ConnectNamedPipe thread
+			PipeConn* conn; // audio connect result
+			DWORD outHz;
+			WORD outCh;
+			BOOL wantLoop;
+			volatile LONG fail;
+			static DWORD WINAPI Run(LPVOID p) {
+				LiveAudFeed* c = (LiveAudFeed*)p;
+				if (!c || c->hPipe == INVALID_HANDLE_VALUE) return 0;
+				// 映像が流れ始めたあと ffmpeg が音声パイプを開くまで待つ
+				if (c->thConn) {
+					const DWORD wr = WaitForSingleObject(c->thConn, 20000);
+					CloseHandle(c->thConn);
+					c->thConn = NULL;
+					if (wr != WAIT_OBJECT_0 || !c->conn || !c->conn->ok) {
+						InterlockedExchange(&c->fail, 1);
+						return 0;
 					}
-				} else {
-					hr = enumer->GetDefaultAudioEndpoint(eRender, eConsole, &renderDev);
 				}
-				if (SUCCEEDED(hr) && renderDev) {
-					hr = ScInitLoopbackCapture(renderDev, &loopClient, &loopCap, &mixFmt, &hEvent);
-					if (SUCCEEDED(hr) && loopClient && loopCap && mixFmt)
-						haveAudio = TRUE;
-				}
-			}
-		}
-		if (haveAudio && loopClient)
-			loopClient->Start();
-
-		if (haveAudio && wantMic && enumer) {
-			ScMicEnsureCs();
-			InterlockedExchange(&s_micW, 0);
-			HRESULT hm = S_OK;
-			if (savedata.mic_device[0]) {
-				hm = enumer->GetDevice(savedata.mic_device, &micDev);
-				if (FAILED(hm) || !micDev) {
-					if (micDev) { micDev->Release(); micDev = NULL; }
-					hm = enumer->GetDefaultAudioEndpoint(eCapture, eConsole, &micDev);
-				}
-			} else {
-				hm = enumer->GetDefaultAudioEndpoint(eCapture, eConsole, &micDev);
-			}
-			if (SUCCEEDED(hm) && micDev) {
-				hm = micDev->Activate(__uuidof(IAudioClient), CLSCTX_ALL, NULL, (void**)&micClient);
-				if (SUCCEEDED(hm) && micClient) {
-					hm = micClient->GetMixFormat(&micFmt);
-					if (SUCCEEDED(hm) && micFmt) {
-						hMicEvent = CreateEvent(NULL, FALSE, FALSE, NULL);
-						BOOL micOk = FALSE;
-						if (hMicEvent) {
-							hm = micClient->Initialize(AUDCLNT_SHAREMODE_SHARED,
-								AUDCLNT_STREAMFLAGS_EVENTCALLBACK | AUDCLNT_STREAMFLAGS_NOPERSIST,
-								2000000, 0, micFmt, NULL);
-							if (SUCCEEDED(hm))
-								hm = micClient->SetEventHandle(hMicEvent);
-							if (SUCCEEDED(hm))
-								hm = micClient->GetService(__uuidof(IAudioCaptureClient), (void**)&micCap);
-							if (SUCCEEDED(hm) && micCap) micOk = TRUE;
-						}
-						if (micOk) {
-							InterlockedExchange(&s_micCapRate, (LONG)micFmt->nSamplesPerSec);
-							micClient->Start();
+				HRESULT hrCo = CoInitializeEx(NULL, COINIT_MULTITHREADED);
+				IMMDeviceEnumerator* enumer = NULL;
+				IMMDevice* renderDev = NULL;
+				IAudioClient* loopClient = NULL;
+				IAudioCaptureClient* loopCap = NULL;
+				WAVEFORMATEX* mixFmt = NULL;
+				HANDLE hEvent = NULL;
+				BOOL haveLoop = FALSE;
+				if (c->wantLoop) {
+					HRESULT hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), NULL, CLSCTX_ALL,
+						__uuidof(IMMDeviceEnumerator), (void**)&enumer);
+					if (SUCCEEDED(hr) && enumer) {
+						if (savedata.loop_device[0]) {
+							hr = enumer->GetDevice(savedata.loop_device, &renderDev);
+							if (FAILED(hr) || !renderDev) {
+								if (renderDev) { renderDev->Release(); renderDev = NULL; }
+								hr = enumer->GetDefaultAudioEndpoint(eRender, eConsole, &renderDev);
+							}
 						} else {
-							if (hMicEvent) { CloseHandle(hMicEvent); hMicEvent = NULL; }
-							if (micCap) { micCap->Release(); micCap = NULL; }
-							if (micClient) { micClient->Release(); micClient = NULL; }
-							if (micFmt) { CoTaskMemFree(micFmt); micFmt = NULL; }
+							hr = enumer->GetDefaultAudioEndpoint(eRender, eConsole, &renderDev);
+						}
+						if (SUCCEEDED(hr) && renderDev) {
+							hr = ScInitLoopbackCapture(renderDev, &loopClient, &loopCap, &mixFmt, &hEvent);
+							if (SUCCEEDED(hr) && loopClient && loopCap && mixFmt)
+								haveLoop = TRUE;
 						}
 					}
+					if (haveLoop && loopClient)
+						loopClient->Start();
 				}
+				const DWORD srcHz = (mixFmt && mixFmt->nSamplesPerSec) ? mixFmt->nSamplesPerSec : c->outHz;
+				LARGE_INTEGER qpf, qpc0;
+				QueryPerformanceFrequency(&qpf);
+				QueryPerformanceCounter(&qpc0);
+				const LONGLONG qpf64 = (qpf.QuadPart > 0) ? qpf.QuadPart : 1;
+				LONGLONG written = 0;
+				short silence[4800 * 2];
+				memset(silence, 0, sizeof(silence));
+				auto writeBlk = [&](const void* data, DWORD len) -> BOOL {
+					const BYTE* pb = (const BYTE*)data;
+					DWORD left = len;
+					while (left > 0) {
+						if (InterlockedCompareExchange(&c->self->m_stop, 0, 0) != 0)
+							return FALSE;
+						DWORD wr = 0;
+						if (!WriteFile(c->hPipe, pb, left, &wr, NULL)) {
+							const DWORD err = GetLastError();
+							if (c->hFfmpeg) {
+								DWORD ffCode = STILL_ACTIVE;
+								if (GetExitCodeProcess(c->hFfmpeg, &ffCode) && ffCode != STILL_ACTIVE) {
+									InterlockedExchange(&c->self->m_ytLivePhase, 6);
+									InterlockedExchange(&c->fail, 1);
+									return FALSE;
+								}
+							}
+							if (err == ERROR_BROKEN_PIPE || err == ERROR_NO_DATA) {
+								InterlockedExchange(&c->fail, 1);
+								return FALSE;
+							}
+							Sleep(1);
+							continue;
+						}
+						if (wr == 0) { Sleep(1); continue; }
+						pb += wr;
+						left -= wr;
+					}
+					return TRUE;
+				};
+				auto pushSilence = [&](int nFrames) -> BOOL {
+					while (nFrames > 0) {
+						int n = nFrames;
+						if (n > 4800) n = 4800;
+						if (!writeBlk(silence, (DWORD)(n * c->outCh * sizeof(short))))
+							return FALSE;
+						written += n;
+						nFrames -= n;
+					}
+					return TRUE;
+				};
+				while (InterlockedCompareExchange(&c->self->m_stop, 0, 0) == 0
+					&& InterlockedCompareExchange(&c->fail, 0, 0) == 0) {
+					LARGE_INTEGER qpc;
+					QueryPerformanceCounter(&qpc);
+					const LONGLONG elapsedQ = qpc.QuadPart - qpc0.QuadPart;
+					const LONGLONG target = (elapsedQ * (LONGLONG)c->outHz) / qpf64;
+					if (written >= target + (LONGLONG)c->outHz / 5) {
+						if (hEvent)
+							WaitForSingleObject(hEvent, 5);
+						else
+							Sleep(1);
+						continue;
+					}
+					BOOL wroteReal = FALSE;
+					if (haveLoop && loopCap && mixFmt) {
+						UINT32 packet = 0;
+						HRESULT ha = loopCap->GetNextPacketSize(&packet);
+						while (SUCCEEDED(ha) && packet > 0
+							&& InterlockedCompareExchange(&c->self->m_stop, 0, 0) == 0
+							&& written < target + (LONGLONG)c->outHz / 5) {
+							BYTE* data = NULL;
+							UINT32 frames = 0;
+							DWORD flags = 0;
+							ha = loopCap->GetBuffer(&data, &frames, &flags, NULL, NULL);
+							if (FAILED(ha)) break;
+							if (frames > 0) {
+								float fL[4096], fR[4096];
+								short pcm[8192 * 2];
+								UINT32 done = 0;
+								float pk = 0.f;
+								while (done < frames) {
+									UINT32 n = frames - done;
+									if (n > 4096) n = 4096;
+									for (UINT32 ii = 0; ii < n; ++ii) {
+										float L = 0.f, R = 0.f;
+										if (data && !(flags & AUDCLNT_BUFFERFLAGS_SILENT))
+											ScSampleToFloat(data + (done + ii) * mixFmt->nBlockAlign, mixFmt, L, R);
+										fL[ii] = L; fR[ii] = R;
+										const float aL = (L < 0.f) ? -L : L;
+										const float aR = (R < 0.f) ? -R : R;
+										if (aL > pk) pk = aL;
+										if (aR > pk) pk = aR;
+									}
+									int outFrames = (int)(((__int64)n * (int)c->outHz) / (srcHz ? (int)srcHz : (int)c->outHz));
+									if (outFrames < 1 && n > 0) outFrames = 1;
+									if (outFrames > 8192) outFrames = 8192;
+									if (srcHz == c->outHz) {
+										for (int o = 0; o < outFrames; ++o) {
+											float L = ScClamp1(fL[o]);
+											float R = ScClamp1(fR[o]);
+											pcm[o * 2 + 0] = (short)(L * 32767.f);
+											pcm[o * 2 + 1] = (short)(R * 32767.f);
+										}
+									} else {
+										for (int o = 0; o < outFrames; ++o) {
+											double srcPos = ((double)o * (double)srcHz / (double)c->outHz);
+											int i0 = (int)srcPos;
+											int i1 = i0 + 1;
+											if (i0 < 0) i0 = 0;
+											if (i0 >= (int)n) i0 = (int)n - 1;
+											if (i1 >= (int)n) i1 = (int)n - 1;
+											const float frac = (float)(srcPos - (double)i0);
+											float L = fL[i0] + (fL[i1] - fL[i0]) * frac;
+											float R = fR[i0] + (fR[i1] - fR[i0]) * frac;
+											L = ScClamp1(L); R = ScClamp1(R);
+											pcm[o * 2 + 0] = (short)(L * 32767.f);
+											pcm[o * 2 + 1] = (short)(R * 32767.f);
+										}
+									}
+									if (!writeBlk(pcm, (DWORD)(outFrames * c->outCh * sizeof(short)))) {
+										loopCap->ReleaseBuffer(frames);
+										goto aud_done;
+									}
+									written += outFrames;
+									wroteReal = TRUE;
+									done += n;
+								}
+								if (pk > 0.f) {
+									const LONG v = (LONG)(pk * 1000.f);
+									LONG cur = InterlockedCompareExchange(&c->self->m_peakSys, 0, 0);
+									if (v > cur) InterlockedExchange(&c->self->m_peakSys, v > 1000 ? 1000 : v);
+									LONG curP = InterlockedCompareExchange(&c->self->m_peakMix, 0, 0);
+									if (v > curP) InterlockedExchange(&c->self->m_peakMix, v > 1000 ? 1000 : v);
+								}
+							}
+							loopCap->ReleaseBuffer(frames);
+							ha = loopCap->GetNextPacketSize(&packet);
+						}
+					}
+					if (!wroteReal && written < target) {
+						const int need = (int)(target - written);
+						if (need > 0 && !pushSilence(need))
+							break;
+					}
+					if (hEvent)
+						WaitForSingleObject(hEvent, 2);
+					else
+						Sleep(1);
+				}
+			aud_done:
+				if (loopClient) loopClient->Stop();
+				if (loopCap) loopCap->Release();
+				if (loopClient) loopClient->Release();
+				if (mixFmt) CoTaskMemFree(mixFmt);
+				if (renderDev) renderDev->Release();
+				if (enumer) enumer->Release();
+				if (hEvent) CloseHandle(hEvent);
+				if (SUCCEEDED(hrCo) || hrCo == S_FALSE) CoUninitialize();
+				return 0;
 			}
+		};
+
+		LiveAudFeed audFeed = {};
+		audFeed.self = self;
+		audFeed.hPipe = hAudPipe;
+		audFeed.hFfmpeg = pi.hProcess;
+		audFeed.thConn = thA; // ownership moves to audio thread
+		thA = NULL;
+		audFeed.conn = &connA;
+		audFeed.outHz = outHz;
+		audFeed.outCh = outCh;
+		audFeed.wantLoop = wantAudio ? TRUE : FALSE;
+		audFeed.fail = 0;
+		thAudFeed = CreateThread(NULL, 0, &LiveAudFeed::Run, &audFeed, 0, NULL);
+		if (!thAudFeed) {
+			if (audFeed.thConn) { WaitForSingleObject(audFeed.thConn, 100); CloseHandle(audFeed.thConn); audFeed.thConn = NULL; }
+			InterlockedExchange(&self->m_lastStage, 103);
+			InterlockedExchange(&self->m_lastHr, HRESULT_FROM_WIN32(GetLastError()));
+			goto done_live;
 		}
+		// 映像は待たず即ループへ（ffmpeg の video probe を先に満たす）
 
 		{
-			const DWORD srcHz = (mixFmt && mixFmt->nSamplesPerSec) ? mixFmt->nSamplesPerSec : outHz;
 			LARGE_INTEGER qpf, qpc0;
 			QueryPerformanceFrequency(&qpf);
 			QueryPerformanceCounter(&qpc0);
 			LONGLONG nextFrameQpc = 0;
 			BOOL writeFail = FALSE;
 			const LONGLONG qpf64 = (qpf.QuadPart > 0) ? qpf.QuadPart : 1;
-			LONGLONG audioSamplesWritten = 0;
 			DWORD encWinTick = GetTickCount();
 			int encWinCnt = 0;
 			LONGLONG periodQ = qpf64 / (fps > 0 ? fps : 30);
 			if (periodQ < 1) periodQ = 1;
+			DWORD lastYtKickTick = 0;
 
-			auto drainAudioLive = [&]() {
-				if (writeFail) return;
-				if (micCap && micFmt) {
-					UINT32 micPkt = 0;
-					HRESULT hm = micCap->GetNextPacketSize(&micPkt);
-					while (SUCCEEDED(hm) && micPkt > 0 && InterlockedCompareExchange(&self->m_stop, 0, 0) == 0) {
-						BYTE* data = NULL;
-						UINT32 frames = 0;
-						DWORD flags = 0;
-						hm = micCap->GetBuffer(&data, &frames, &flags, NULL, NULL);
-						if (FAILED(hm)) break;
-						if (frames > 0 && data && !(flags & AUDCLNT_BUFFERFLAGS_SILENT)) {
-							float conv[4096 * 2];
-							UINT32 done = 0;
-							while (done < frames) {
-								UINT32 n = frames - done;
-								if (n > 4096) n = 4096;
-								float pk = 0.f;
-								for (UINT32 i = 0; i < n; ++i) {
-									float L, R;
-									ScSampleToFloat(data + (done + i) * micFmt->nBlockAlign, micFmt, L, R);
-									conv[i * 2 + 0] = L;
-									conv[i * 2 + 1] = R;
-									const float aL = (L < 0.f) ? -L : L;
-									const float aR = (R < 0.f) ? -R : R;
-									if (aL > pk) pk = aL;
-									if (aR > pk) pk = aR;
-								}
-								{
-									const LONG v = (LONG)(pk * 1000.f);
-									LONG cur = InterlockedCompareExchange(&self->m_peakMic, 0, 0);
-									if (v > cur) InterlockedExchange(&self->m_peakMic, v > 1000 ? 1000 : v);
-								}
-								ScMicRingWrite(conv, (int)n);
-								done += n;
-							}
-						}
-						micCap->ReleaseBuffer(frames);
-						hm = micCap->GetNextPacketSize(&micPkt);
-					}
-				}
-
-				if (haveAudio && loopCap && mixFmt) {
-					UINT32 packet = 0;
-					HRESULT ha = loopCap->GetNextPacketSize(&packet);
-					while (SUCCEEDED(ha) && packet > 0 && InterlockedCompareExchange(&self->m_stop, 0, 0) == 0) {
-						BYTE* data = NULL;
-						UINT32 frames = 0;
-						DWORD flags = 0;
-						ha = loopCap->GetBuffer(&data, &frames, &flags, NULL, NULL);
-						if (FAILED(ha)) break;
-						if (frames > 0) {
-							float fL[4096], fR[4096];
-							short pcm[8192 * 2];
-							UINT32 done = 0;
-							while (done < frames) {
-								UINT32 n = frames - done;
-								if (n > 4096) n = 4096;
-								float pkSys = 0.f;
-								for (UINT32 i = 0; i < n; ++i) {
-									float L = 0.f, R = 0.f;
-									if (data && !(flags & AUDCLNT_BUFFERFLAGS_SILENT))
-										ScSampleToFloat(data + (done + i) * mixFmt->nBlockAlign, mixFmt, L, R);
-									fL[i] = L;
-									fR[i] = R;
-									const float aL = (L < 0.f) ? -L : L;
-									const float aR = (R < 0.f) ? -R : R;
-									if (aL > pkSys) pkSys = aL;
-									if (aR > pkSys) pkSys = aR;
-								}
-								{
-									const LONG v = (LONG)(pkSys * 1000.f);
-									LONG cur = InterlockedCompareExchange(&self->m_peakSys, 0, 0);
-									if (v > cur) InterlockedExchange(&self->m_peakSys, v > 1000 ? 1000 : v);
-									LONG curP = InterlockedCompareExchange(&self->m_peakMix, 0, 0);
-									if (v > curP) InterlockedExchange(&self->m_peakMix, v > 1000 ? 1000 : v);
-								}
-								if (wantMic)
-									ScMicIntoStereo(fL, fR, (int)n, (int)srcHz);
-
-								int outFrames = (int)(((__int64)n * (int)outHz) / (srcHz ? (int)srcHz : (int)outHz));
-								if (outFrames < 1 && n > 0) outFrames = 1;
-								if (outFrames > 8192) outFrames = 8192;
-								for (int o = 0; o < outFrames; ++o) {
-									double srcPos = (srcHz == outHz) ? (double)o : ((double)o * (double)srcHz / (double)outHz);
-									int i0 = (int)srcPos;
-									int i1 = i0 + 1;
-									if (i0 < 0) i0 = 0;
-									if (i0 >= (int)n) i0 = (int)n - 1;
-									if (i1 >= (int)n) i1 = (int)n - 1;
-									const float frac = (float)(srcPos - (double)i0);
-									float L = fL[i0] + (fL[i1] - fL[i0]) * frac;
-									float R = fR[i0] + (fR[i1] - fR[i0]) * frac;
-									L = ScClamp1(L);
-									R = ScClamp1(R);
-									pcm[o * 2 + 0] = (short)(L * 32767.f);
-									pcm[o * 2 + 1] = (short)(R * 32767.f);
-								}
-								if (!writeAll(hAudPipe, pcm, (DWORD)(outFrames * outCh * sizeof(short)))) {
-									InterlockedExchange(&self->m_lastStage, 103);
-									InterlockedExchange(&self->m_lastHr, HRESULT_FROM_WIN32(GetLastError()));
-									writeFail = TRUE;
-									break;
-								}
-								audioSamplesWritten += outFrames;
-								done += n;
-							}
-						}
-						loopCap->ReleaseBuffer(frames);
-						if (writeFail) break;
-						ha = loopCap->GetNextPacketSize(&packet);
-					}
-				}
-			};
-
-			while (InterlockedCompareExchange(&self->m_stop, 0, 0) == 0 && !writeFail) {
-				drainAudioLive();
-				if (writeFail) break;
-
+			while (InterlockedCompareExchange(&self->m_stop, 0, 0) == 0 && !writeFail
+				&& InterlockedCompareExchange(&audFeed.fail, 0, 0) == 0) {
 				LARGE_INTEGER qpc;
 				QueryPerformanceCounter(&qpc);
 				const LONGLONG elapsedQ = qpc.QuadPart - qpc0.QuadPart;
-				BOOL didVideo = FALSE;
-				if (elapsedQ >= nextFrameQpc) {
-					if (nextFrameQpc + periodQ < elapsedQ)
-						nextFrameQpc = elapsedQ;
-					snap.fxTime = (float)((elapsedQ * 1000.0) / (double)qpf64) * 0.001f;
-					BOOL haveFrame = ScComposeFrame(frame, snap, FALSE);
-					if (!haveFrame)
-						haveFrame = ScComposeFrame(frame, snap, TRUE);
-					if (!haveFrame) {
-						if (ScFrameAlloc(frame, snap.canvasW, snap.canvasH)) {
-							ScFrameClear(frame, RGB(16, 16, 20));
-							if (snap.fxN > 0 && frame.bits)
-								ScGpuApplyEffectChain(frame.bits, frame.w, frame.h, frame.stride,
-									snap.fx, snap.fxN, snap.fxTime, snap.fxStr);
-							haveFrame = TRUE;
-						}
+				if (elapsedQ < nextFrameQpc) {
+					Sleep(1);
+					continue;
+				}
+				if (nextFrameQpc + periodQ < elapsedQ)
+					nextFrameQpc = elapsedQ;
+				snap.fxTime = (float)((elapsedQ * 1000.0) / (double)qpf64) * 0.001f;
+				BOOL haveFrame = ScComposeFrame(frame, snap, FALSE);
+				if (!haveFrame)
+					haveFrame = ScComposeFrame(frame, snap, TRUE);
+				if (!haveFrame) {
+					if (ScFrameAlloc(frame, snap.canvasW, snap.canvasH)) {
+						ScFrameClear(frame, RGB(16, 16, 20));
+						if (snap.fxN > 0 && frame.bits)
+							ScGpuApplyEffectChain(frame.bits, frame.w, frame.h, frame.stride,
+								snap.fx, snap.fxN, snap.fxTime, snap.fxStr);
+						haveFrame = TRUE;
 					}
-					if (haveFrame && frame.bits) {
-						const int stride = frame.stride > 0 ? frame.stride : (frame.w * 4);
-						if (stride == frame.w * 4) {
-							if (!writeAll(hVidPipe, frame.bits, (DWORD)(stride * frame.h))) {
+				}
+				if (haveFrame && frame.bits) {
+					const BYTE* writeBits = frame.bits;
+					int writeW = frame.w;
+					int writeH = frame.h;
+					int writeStride = frame.stride > 0 ? frame.stride : (frame.w * 4);
+					if (needLiveScale && livePipe.bits && livePipe.hdc && frame.hdc) {
+						SetStretchBltMode(livePipe.hdc, COLORONCOLOR);
+						StretchBlt(livePipe.hdc, 0, 0, liveOutW, liveOutH,
+							frame.hdc, 0, 0, frame.w, frame.h, SRCCOPY);
+						writeBits = livePipe.bits;
+						writeW = liveOutW;
+						writeH = liveOutH;
+						writeStride = liveOutW * 4;
+					}
+					if (writeStride == writeW * 4) {
+						if (!writeVid(hVidPipe, writeBits, (DWORD)(writeStride * writeH))) {
+							InterlockedExchange(&self->m_lastStage, 103);
+							InterlockedExchange(&self->m_lastHr, HRESULT_FROM_WIN32(GetLastError()));
+							writeFail = TRUE;
+							break;
+						}
+					} else {
+						for (int y = 0; y < writeH && !writeFail; ++y) {
+							if (!writeVid(hVidPipe, writeBits + (size_t)y * (size_t)writeStride, (DWORD)(writeW * 4))) {
 								InterlockedExchange(&self->m_lastStage, 103);
 								InterlockedExchange(&self->m_lastHr, HRESULT_FROM_WIN32(GetLastError()));
 								writeFail = TRUE;
-								break;
 							}
-						} else {
-							for (int y = 0; y < frame.h && !writeFail; ++y) {
-								if (!writeAll(hVidPipe, frame.bits + (size_t)y * (size_t)stride, (DWORD)(frame.w * 4))) {
-									InterlockedExchange(&self->m_lastStage, 103);
-									InterlockedExchange(&self->m_lastHr, HRESULT_FROM_WIN32(GetLastError()));
-									writeFail = TRUE;
-								}
-							}
-							if (writeFail) break;
 						}
+						if (writeFail) break;
+					}
 
-						// 音声が無い／不足時は無音で映像に追従
-						{
-							const LONGLONG wantSamples = (InterlockedCompareExchange(&self->m_frameCnt, 0, 0) + 1)
-								* (LONGLONG)outHz / (fps > 0 ? fps : 30);
-							while (audioSamplesWritten < wantSamples && !writeFail) {
-								short silence[1024 * 2] = {};
-								int n = (int)(wantSamples - audioSamplesWritten);
-								if (n > 1024) n = 1024;
-								if (!writeAll(hAudPipe, silence, (DWORD)(n * outCh * sizeof(short)))) {
-									InterlockedExchange(&self->m_lastStage, 103);
-									InterlockedExchange(&self->m_lastHr, HRESULT_FROM_WIN32(GetLastError()));
-									writeFail = TRUE;
-									break;
-								}
-								audioSamplesWritten += n;
-							}
-						}
-
-						const LONG fc = InterlockedIncrement(&self->m_frameCnt);
-						// YouTube: 数秒おきに streamStatus=active を見て live 遷移（ブロック無し・単発API）
-						if (self->m_liveService == 0 && fc >= (LONG)(fps > 0 ? fps * 2 : 60)
-							&& (fc % (fps > 0 ? fps : 30)) == 0)
-							self->TryYouTubeGoLiveTransition();
-						if ((fc % 3) == 0 && self->m_snapCsInit && TryEnterCriticalSection(&self->m_snapCs)) {
-							if (self->m_cacheBits && frame.bits) {
-								if (self->m_cacheW == frame.w && self->m_cacheH == frame.h
-									&& frame.stride == frame.w * 4) {
-									const size_t nbytes = (size_t)frame.stride * (size_t)frame.h;
-									memcpy(self->m_cacheBits, frame.bits, nbytes);
-								} else if (self->m_cacheDc && frame.hdc && self->m_cacheW > 0 && self->m_cacheH > 0) {
-									SetStretchBltMode(self->m_cacheDc, COLORONCOLOR);
-									StretchBlt(self->m_cacheDc, 0, 0, self->m_cacheW, self->m_cacheH,
-										frame.hdc, 0, 0, frame.w, frame.h, SRCCOPY);
-								}
-							}
-							LeaveCriticalSection(&self->m_snapCs);
-						}
-						{
-							encWinCnt++;
-							const DWORD nowEnc = GetTickCount();
-							const DWORD elEnc = nowEnc - encWinTick;
-							if (elEnc >= 800) {
-								const LONG x10 = (LONG)((encWinCnt * 10000.0) / (double)elEnc + 0.5);
-								InterlockedExchange(&self->m_encFpsX10, x10);
-								encWinTick = nowEnc;
-								encWinCnt = 0;
-							}
+					const LONG fc = InterlockedIncrement(&self->m_frameCnt);
+					if (haveFfmpegProc && (fc % (fps > 0 ? fps : 30)) == 0) {
+						DWORD ffCode = STILL_ACTIVE;
+						if (GetExitCodeProcess(pi.hProcess, &ffCode) && ffCode != STILL_ACTIVE) {
+							InterlockedExchange(&self->m_lastStage, 105);
+							InterlockedExchange(&self->m_lastHr, HRESULT_FROM_WIN32(ffCode ? ffCode : ERROR_BROKEN_PIPE));
+							InterlockedExchange(&self->m_ytLivePhase, 6);
+							writeFail = TRUE;
+							break;
 						}
 					}
-					nextFrameQpc += periodQ;
-					didVideo = TRUE;
-					drainAudioLive();
-				}
-
-				if (writeFail) break;
-				if (haveAudio && loopCap && mixFmt) {
-					if (!didVideo) {
-						if (hEvent) {
-							HANDLE waits[2];
-							DWORD nWait = 1;
-							waits[0] = hEvent;
-							if (hMicEvent) { waits[1] = hMicEvent; nWait = 2; }
-							WaitForMultipleObjects(nWait, waits, FALSE, 5);
-						} else {
-							Sleep(1);
+					if (self->m_liveService == 0 && !self->m_ytLiveTransitionDone
+						&& fc >= (LONG)(fps > 0 ? fps : 30)) {
+						const DWORD nowKick = GetTickCount();
+						if (lastYtKickTick == 0 || (nowKick - lastYtKickTick) >= 2000) {
+							lastYtKickTick = nowKick;
+							InterlockedExchange(&self->m_ytGoLiveRequest, 1);
 						}
-						drainAudioLive();
 					}
-				} else if (!didVideo) {
-					Sleep(1);
+					if ((fc % 2) == 0 && self->m_snapCsInit) {
+						EnterCriticalSection(&self->m_snapCs);
+						if (self->m_cacheDc && frame.hdc && self->m_cacheW > 0 && self->m_cacheH > 0) {
+							SetStretchBltMode(self->m_cacheDc, COLORONCOLOR);
+							StretchBlt(self->m_cacheDc, 0, 0, self->m_cacheW, self->m_cacheH,
+								frame.hdc, 0, 0, frame.w, frame.h, SRCCOPY);
+						}
+						LeaveCriticalSection(&self->m_snapCs);
+					}
+					{
+						encWinCnt++;
+						const DWORD nowEnc = GetTickCount();
+						const DWORD elEnc = nowEnc - encWinTick;
+						if (elEnc >= 800) {
+							const LONG x10 = (LONG)((encWinCnt * 10000.0) / (double)elEnc + 0.5);
+							InterlockedExchange(&self->m_encFpsX10, x10);
+							encWinTick = nowEnc;
+							encWinCnt = 0;
+						}
+					}
 				}
+				nextFrameQpc += periodQ;
+			}
+			if (InterlockedCompareExchange(&audFeed.fail, 0, 0) != 0 && !writeFail) {
+				InterlockedExchange(&self->m_lastStage, 103);
+				InterlockedExchange(&self->m_lastHr, HRESULT_FROM_WIN32(ERROR_BROKEN_PIPE));
 			}
 		}
+
+		InterlockedExchange(&self->m_stop, 1);
 
 		if (hVidPipe != INVALID_HANDLE_VALUE) {
 			FlushFileBuffers(hVidPipe);
@@ -7217,6 +7398,13 @@ UINT __stdcall CScreenCaptureDlg::CaptureThread(void* p)
 		}
 
 	done_live:
+		if (thAudFeed) {
+			InterlockedExchange(&self->m_stop, 1);
+			WaitForSingleObject(thAudFeed, 5000);
+			CloseHandle(thAudFeed);
+			thAudFeed = NULL;
+		}
+		ScFrameFree(livePipe);
 		if (hVidPipe != INVALID_HANDLE_VALUE) { CloseHandle(hVidPipe); hVidPipe = INVALID_HANDLE_VALUE; }
 		if (hAudPipe != INVALID_HANDLE_VALUE) { CloseHandle(hAudPipe); hAudPipe = INVALID_HANDLE_VALUE; }
 		if (haveFfmpegProc) {
@@ -7749,6 +7937,7 @@ void CScreenCaptureDlg::CloseModeless()
 		StopRecording();
 	StopPeakMonitor();
 	PersistUiToSavedata();
+	CloseScLiveSettingsFromOwner();
 	if (GetSafeHwnd())
 		DestroyWindow();
 }
@@ -7790,28 +7979,10 @@ void CScreenCaptureDlg::FitToWorkArea()
 			SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
 	};
 
-	// 1) FX配線を優先して縮める（パレットは ScFxMakeMetrics が列増で追従）
-	if (overflow > margin && m_fxWire.GetSafeHwnd()) {
-		CRect fx;
-		m_fxWire.GetWindowRect(&fx);
-		ScreenToClient(&fx);
-		const int minFxH = 168;
-		int can = fx.Height() - minFxH;
-		if (can < 0) can = 0;
-		int take = overflow - margin;
-		if (take > can) take = can;
-		if (take > 0) {
-			shrinkCtrlH(m_fxWire, take);
-			ShiftChildrenBelow(this, fx.bottom, -take);
-			SetWindowPos(NULL, 0, 0, wr.Width(), wr.Height() - take,
-				SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
-			GetWindowRect(&wr);
-			overflow = wr.Height() - workH;
-			m_fxWire.Invalidate(FALSE);
-		}
-	}
+	// 配線パネルは操作の中心なので最後まで潰さない。
+	// 1) プレビュー → 2) リスト → 3) 配線（最低高さ高め）
 
-	// 2) プレビュー高さを縮める
+	// 1) プレビュー高さを縮める
 	if (overflow > margin && m_preview.GetSafeHwnd()) {
 		CRect pv;
 		m_preview.GetWindowRect(&pv);
@@ -7832,7 +8003,7 @@ void CScreenCaptureDlg::FitToWorkArea()
 		}
 	}
 
-	// 3) リスト高さを縮める
+	// 2) リスト高さを縮める
 	if (overflow > margin && m_avail.GetSafeHwnd() && m_layer.GetSafeHwnd()) {
 		CRect a;
 		m_avail.GetWindowRect(&a);
@@ -7850,6 +8021,27 @@ void CScreenCaptureDlg::FitToWorkArea()
 				SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
 			GetWindowRect(&wr);
 			overflow = wr.Height() - workH;
+		}
+	}
+
+	// 3) FX配線は最後の手段（パレットが読める最低高を維持）
+	if (overflow > margin && m_fxWire.GetSafeHwnd()) {
+		CRect fx;
+		m_fxWire.GetWindowRect(&fx);
+		ScreenToClient(&fx);
+		const int minFxH = 200;
+		int can = fx.Height() - minFxH;
+		if (can < 0) can = 0;
+		int take = overflow - margin;
+		if (take > can) take = can;
+		if (take > 0) {
+			shrinkCtrlH(m_fxWire, take);
+			ShiftChildrenBelow(this, fx.bottom, -take);
+			SetWindowPos(NULL, 0, 0, wr.Width(), wr.Height() - take,
+				SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+			GetWindowRect(&wr);
+			overflow = wr.Height() - workH;
+			m_fxWire.Invalidate(FALSE);
 		}
 	}
 
@@ -8066,6 +8258,129 @@ void CScreenCaptureDlg::OnTimer(UINT_PTR nIDEvent)
 			DWORD code = 0;
 			if (GetExitCodeThread(m_thread, &code) && code != STILL_ACTIVE)
 				StopRecording();
+		}
+		// YouTube ライブ遷移は UI スレッドで定期ポーリング（Enc スレッドは触らない）
+		if (m_liveMode && m_liveService == 0 && !m_ytLiveTransitionDone) {
+			InterlockedExchange(&m_ytGoLiveRequest, 0);
+			const DWORD now = GetTickCount();
+			if (m_ytGoLiveLastTick == 0 || (now - m_ytGoLiveLastTick) >= 2000) {
+				m_ytGoLiveLastTick = now;
+				TryYouTubeGoLiveTransition();
+			}
+		}
+		if (m_liveMode && m_liveService == 0) {
+			const LONG ph = InterlockedCompareExchange(&m_ytLivePhase, 0, 0);
+			CString st;
+			if (ph == 3) {
+				st = LL14(
+					L"YouTube ライブ中。",
+					L"YouTube is live.",
+					L"YouTube en direct.",
+					L"YouTube in diretta.",
+					L"YouTube en vivo.",
+					L"YouTube 라이브 중.",
+					L"YouTube 直播中。",
+					L"YouTube مباشر.",
+					L"YouTube в эфире.",
+					L"YouTube live.",
+					L"YouTube ao vivo.",
+					L"YouTube live.",
+					L"YouTube na zywo.",
+					L"YouTube canlida.");
+			} else if (ph == 4) {
+				CString detail = m_ytStreamStatus[0] ? m_ytStreamStatus : L"";
+				if (!detail.IsEmpty() && detail.Find(L'/') >= 0
+					&& detail.Find(L"fail") < 0 && detail.Find(L"err") < 0)
+					detail.Empty();
+				st = LL14(
+					L"RTMP到達済。ライブ開始に失敗。Studioで手動開始できます。",
+					L"RTMP connected. Go-live failed. Start manually in Studio.",
+					L"RTMP connecte. Echec du live. Demarrez dans Studio.",
+					L"RTMP connesso. Avvio live non riuscito. Avvia in Studio.",
+					L"RTMP conectado. Fallo al ir en vivo. Inicie en Studio.",
+					L"RTMP 연결됨. 라이브 시작 실패. Studio에서 수동 시작.",
+					L"RTMP 已连接。开播失败。可在 Studio 手动开始。",
+					L"RTMP متصل. فشل بدء البث. ابدأ يدويًا في Studio.",
+					L"RTMP подключен. Старт эфира не удался. Запустите в Studio.",
+					L"RTMP verbunden. Live-Start fehlgeschlagen. In Studio starten.",
+					L"RTMP ligado. Falha ao ir ao vivo. Inicie no Studio.",
+					L"RTMP verbonden. Live-start mislukt. Start in Studio.",
+					L"RTMP polaczony. Start live nieudany. Uruchom w Studio.",
+					L"RTMP baglandi. Canli baslatma basarisiz. Studio'dan baslatin.");
+				if (!detail.IsEmpty()) {
+					st += L" ";
+					st += detail;
+				}
+			} else if (ph == 5) {
+				st = LL14(
+					L"配信枠IDがありません。「配信枠作成」を先に実行してください。",
+					L"No broadcast id. Click Create broadcast first.",
+					L"Pas d'id de diffusion. Cliquez Creer d'abord.",
+					L"Manca id diretta. Premi Crea diretta prima.",
+					L"No hay id de emision. Pulse Crear emision primero.",
+					L"방송 ID 없음. 먼저 방송 생성을 실행하세요.",
+					L"没有直播框 ID。请先点击「创建直播」。",
+					L"لا يوجد معرف بث. نفّذ إنشاء البث أولاً.",
+					L"Нет id эфира. Сначала нажмите «Создать эфир».",
+					L"Keine Broadcast-ID. Zuerst Broadcast anlegen.",
+					L"Sem id de transmissao. Clique Criar primeiro.",
+					L"Geen broadcast-id. Klik eerst Broadcast maken.",
+					L"Brak id transmisji. Najpierw kliknij Utworz.",
+					L"Yayin id yok. Once Yayin olustur'a basin.");
+			} else if (ph == 1) {
+				st = LL14(
+					L"RTMP送信中。YouTubeの受信を待っています。",
+					L"Sending RTMP. Waiting for YouTube ingest.",
+					L"Envoi RTMP. Attente de la reception YouTube.",
+					L"Invio RTMP. In attesa della ricezione YouTube.",
+					L"Enviando RTMP. Esperando recepcion de YouTube.",
+					L"RTMP 송출 중. YouTube 수신 대기.",
+					L"正在推送 RTMP。等待 YouTube 接收。",
+					L"جارٍ إرسال RTMP. بانتظار استقبال YouTube.",
+					L"Отправка RTMP. Ожидание приёма YouTube.",
+					L"RTMP senden. Warte auf YouTube-Empfang.",
+					L"A enviar RTMP. A aguardar rececao do YouTube.",
+					L"RTMP verzenden. Wachten op YouTube-ontvangst.",
+					L"Wysylanie RTMP. Czekam na odbior YouTube.",
+					L"RTMP gonderiliyor. YouTube alimi bekleniyor.");
+			} else if (ph == 2) {
+				st = LL14(
+					L"RTMP到達済。ライブ配信を開始しています。",
+					L"RTMP connected. Starting the live broadcast.",
+					L"RTMP connecte. Demarrage de la diffusion.",
+					L"RTMP connesso. Avvio della diretta.",
+					L"RTMP conectado. Iniciando la emision en vivo.",
+					L"RTMP 연결됨. 라이브 방송 시작 중.",
+					L"RTMP 已连接。正在开始直播。",
+					L"RTMP متصل. جارٍ بدء البث المباشر.",
+					L"RTMP подключен. Запуск эфира.",
+					L"RTMP verbunden. Live-Broadcast wird gestartet.",
+					L"RTMP ligado. A iniciar a transmissao ao vivo.",
+					L"RTMP verbonden. Live-uitzending starten.",
+					L"RTMP polaczony. Uruchamiam transmisje na zywo.",
+					L"RTMP baglandi. Canli yayin baslatiliyor.");
+			} else if (ph == 6) {
+				st = LL14(
+					L"ffmpeg が終了しました。",
+					L"ffmpeg exited.",
+					L"ffmpeg s'est arrete.",
+					L"ffmpeg terminato.",
+					L"ffmpeg termino.",
+					L"ffmpeg 종료됨.",
+					L"ffmpeg 已退出。",
+					L"توقف ffmpeg.",
+					L"ffmpeg завершился.",
+					L"ffmpeg beendet.",
+					L"ffmpeg saiu.",
+					L"ffmpeg gestopt.",
+					L"ffmpeg zakonczyl.",
+					L"ffmpeg cikti.");
+			}
+			if (!st.IsEmpty()) {
+				if (m_status.GetSafeHwnd())
+					m_status.SetWindowText(st);
+				ScLiveSettingsSetStatusText(st);
+			}
 		}
 		if (m_path.GetSafeHwnd() && ::GetFocus() == m_path.GetSafeHwnd())
 			m_path.RepaintClient();

@@ -166,7 +166,9 @@ protected:
 	void EnableComposeUi(BOOL enable);
 	void ResolveCanvasSize(int& outW, int& outH) const;
 	void FitLayerIntoCanvas(Layer& L, int cw, int ch) const;
+	void ClampLayerToCanvas(Layer& L, int cw, int ch) const;
 	void FitAllLayersIntoCanvas();
+	void ClampAllLayersToCanvas();
 	void BuildComposeSnap(ComposeSnap& out) const;
 	void AddLayerHwnd(HWND hwnd, BOOL isMp = FALSE);
 	void SyncMpLayerFromCheck();
@@ -225,10 +227,7 @@ public:
 	afx_msg void OnBnClickedShowCursor();
 	afx_msg void OnBnClickedMic();
 	afx_msg void OnBnClickedLive();
-	afx_msg void OnBnClickedLiveAuth();
-	afx_msg void OnBnClickedLiveCreate();
-	afx_msg void OnCbnSelchangeLiveSvc();
-	afx_msg void OnCbnSelchangeLivePriv();
+	afx_msg void OnBnClickedLiveCfg();
 	afx_msg void OnCbnSelchangeMicDev();
 	afx_msg void OnCbnSelchangeLoopDev();
 	afx_msg void OnCbnSelchangeMode();
@@ -255,6 +254,7 @@ public:
 	void FinishYouTubeLiveAfterStop();
 	void TryYouTubeGoLiveTransition();
 	BOOL ResolveFfmpegPath(TCHAR* outPath, int outCch) const;
+	BOOL EnsureFfmpegAvailable(BOOL promptIfMissing);
 
 	CScPreviewCtrl m_preview;
 	CScFxWireCtrl m_fxWire;
@@ -280,24 +280,7 @@ public:
 	CCustomCheckBox m_includeMp;
 	CCustomCheckBox m_showCursor;
 	CCustomCheckBox m_live;
-	CCustomStatic m_liveSvcLabel;
-	CCustomComboBox m_liveSvc;
-	CCustomStatic m_livePrivLabel;
-	CCustomComboBox m_livePriv;
-	CCustomStatic m_liveTitleLabel;
-	CCustomEdit m_liveTitle;
-	CCustomStatic m_liveDescLabel;
-	CCustomEdit m_liveDesc;
-	CCustomStatic m_liveUrlLabel;
-	CCustomEdit m_liveUrl;
-	CCustomStatic m_liveKeyLabel;
-	CCustomEdit m_liveKey;
-	CCustomStatic m_liveCidLabel;
-	CCustomEdit m_liveCid;
-	CCustomStatic m_liveCsecLabel;
-	CCustomEdit m_liveCsec;
-	CCustomStandardButton m_liveAuth;
-	CCustomStandardButton m_liveCreate;
+	CCustomStandardButton m_liveCfg;
 	CCustomStandardButton m_pick;
 	CCustomStandardButton m_refresh;
 	CCustomStatic m_availLabel;
@@ -386,6 +369,12 @@ public:
 	BOOL m_withAudio;
 	BOOL m_withMic;
 	BOOL m_liveMode;
+	BOOL m_ytLiveTransitionDone;
+	BOOL m_ytTestingRequested; // testing 遷移を一度投げた
+	volatile LONG m_ytLivePhase; // 0=なし 1=RTMP待ち 2=遷移中 3=ライブ 4=遷移失敗 5=枠なし 6=ffmpeg死
+	volatile LONG m_ytGoLiveRequest; // キャプチャ→UI: ライブ遷移ポーリング要求
+	DWORD m_ytGoLiveLastTick; // UI側の前回ポーリング時刻
+	TCHAR m_ytStreamStatus[96]; // streamStatus / lifeCycle / api err
 	int m_liveService;
 	int m_fpsVal;
 	DWORD m_startTick;
@@ -400,6 +389,8 @@ public:
 	CCustomLevelMeter m_meterSys;
 	CCustomLevelMeter m_meterMix;
 };
+
+extern CScreenCaptureDlg* g_screenCaptureDlg;
 
 void OpenScreenCaptureModeless(CWnd* parent);
 void CloseScreenCaptureIfOpen();

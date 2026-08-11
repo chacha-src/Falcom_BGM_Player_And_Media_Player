@@ -1,4 +1,4 @@
-﻿//{{NO_DEPENDENCIES}}
+//{{NO_DEPENDENCIES}}
 // Microsoft Visual C++ ??????????C???N???[?h ?t?@?C???B
 // ogg.rc ??g?p
 //
@@ -1089,6 +1089,7 @@
 // ???L???v?`???_?C?A???O
 #define IDD_SCREENCAPTURE               215
 #define IDD_SC_HELP                     216
+#define IDD_SC_LIVESETTINGS             249
 #define IDC_SC_PREVIEW                  3769
 #define IDC_SC_PATH_L                   3770
 #define IDC_SC_PATH                     3771
@@ -1503,6 +1504,9 @@
 #define IDC_SC_LIVE_CID                 4011
 #define IDC_SC_LIVE_CSEC_L              4012
 #define IDC_SC_LIVE_CSEC                4013
+#define IDC_SC_LIVE_CFG                 4018
+#define IDC_SC_LIVE_HINT                4019
+#define IDC_SC_LIVE_ADV                 4020
 #define IDC_AS_AUDIOLBL                 4014
 #define IDC_AS_SUBLBL                   4015
 #define IDC_AS_SUBLIST                  4016
@@ -1511,9 +1515,9 @@
 // 
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
-#define _APS_NEXT_RESOURCE_VALUE        250
+#define _APS_NEXT_RESOURCE_VALUE        251
 #define _APS_NEXT_COMMAND_VALUE         33243
-#define _APS_NEXT_CONTROL_VALUE         4017
+#define _APS_NEXT_CONTROL_VALUE         4021
 #define _APS_NEXT_SYMED_VALUE           104
 #endif
 #endif

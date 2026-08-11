@@ -1,0 +1,5 @@
+// Copy to YtOAuthDefaults.local.inc and fill in (do not commit secrets).
+#undef YT_OAUTH_DEFAULT_CLIENT_ID
+#undef YT_OAUTH_DEFAULT_CLIENT_SECRET
+#define YT_OAUTH_DEFAULT_CLIENT_ID L"YOUR_CLIENT_ID.apps.googleusercontent.com"
+#define YT_OAUTH_DEFAULT_CLIENT_SECRET L"YOUR_CLIENT_SECRET"

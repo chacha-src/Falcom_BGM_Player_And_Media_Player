@@ -1,4 +1,4 @@
-﻿#include "stdafx.h"
+#include "stdafx.h"
 #include "CCustomPopupMenu.h"
 #include "GdiSoft2D.h"
 #include "GdiSoft3D.h"
@@ -934,6 +934,11 @@ CCustomPopupMenu::CCustomPopupMenu()
 
 CCustomPopupMenu::~CCustomPopupMenu()
 {
+	// Track 中例外／途中 return でも Speana・Soft3D・淫女タイマが永久停止しないよう掃除
+	if (s_trackingRoot == this) {
+		s_trackingRoot = NULL;
+		s_trackingHwnd = NULL;
+	}
 	Reset();
 	if (m_fontOwned) { ::DeleteObject(m_fontOwned); m_fontOwned = NULL; }
 	if (m_memBmp.GetSafeHandle()) m_memBmp.DeleteObject();
@@ -2089,6 +2094,9 @@ void CCustomPopupMenu::AnimateOut()
 			// BN_CLICKED／再生イベントが死ぬ。再オープン系もここで捨てる。
 			if (PopupIsInputMessage(msg.message) || PopupIsMenuOpenMessage(msg.message))
 				continue;
+			// ホスト WM_PAINT は必ず Dispatch。BeginPaint だけの空 validate は
+			// g_gdiPaintPending／Posted 系を殺し得る。重さは Soft3D/Speana の
+			// GetTrackingRoot ガードで抑える（メッセージ自体は落とさない）。
 			::TranslateMessage(&msg);
 			::DispatchMessage(&msg);
 		}
@@ -2140,6 +2148,10 @@ BOOL CCustomPopupMenu::CreatePopupAt(CPoint screenPt, CCustomPopupMenu* parentMe
 			m_menuH = m_contentH;
 			m_scrollMax = 0;
 		}
+		// ルート: 右に収まらないときはクリック位置を右端にして左へ展開
+		// （右端クランプだけだとサブが親に重なりクリック不能になる）
+		if (!parentMenu && clickPt.x + m_menuW > mi.rcWork.right)
+			screenPt.x = clickPt.x - m_menuW;
 		if (screenPt.x + m_menuW > mi.rcWork.right) screenPt.x = mi.rcWork.right - m_menuW;
 		if (screenPt.y + m_menuH > mi.rcWork.bottom) screenPt.y = mi.rcWork.bottom - m_menuH;
 		if (screenPt.x < mi.rcWork.left) screenPt.x = mi.rcWork.left;
@@ -2265,8 +2277,10 @@ void CCustomPopupMenu::DestroyPopupTree(BOOL animateOut)
 	if (m_memBmp.GetSafeHandle()) { m_memBmp.DeleteObject(); m_memW = m_memH = 0; }
 	// AnimateOut の Peek/Dispatch 中に新規 Track が走ると二重メニューになる。
 	// ルート解放はウィンドウ破棄後に行う。
-	if (s_trackingRoot == this)
+	if (s_trackingRoot == this) {
 		s_trackingRoot = NULL;
+		s_trackingHwnd = NULL;
+	}
 }
 
 void CCustomPopupMenu::CloseOpenSub()
@@ -2329,13 +2343,15 @@ BOOL CCustomPopupMenu::IsPointInChain(CPoint screenPt) const
 			const_cast<CCustomPopupMenu*>(this)->ClientToScreen(&a);
 			const_cast<CCustomPopupMenu*>(this)->ClientToScreen(&b);
 			CRect bridge;
-			bridge.left = (std::min)(b.x, swr.left) - 12;
-			bridge.right = (std::max)(b.x, swr.left) + 12;
 			bridge.top = (std::min)((std::min)(a.y, swr.top), pwr.top) - 20;
 			bridge.bottom = (std::max)((std::max)(b.y, swr.bottom), pwr.bottom) + 20;
-			if (bridge.Width() < 28) {
+			// 右開き／左開きどちらでも親↔サブの隙間をカバー
+			if (swr.CenterPoint().x >= pwr.CenterPoint().x) {
 				bridge.left = (std::min)(pwr.right, swr.left) - 16;
 				bridge.right = (std::max)(pwr.right, swr.left) + 16;
+			} else {
+				bridge.left = (std::min)(swr.right, pwr.left) - 16;
+				bridge.right = (std::max)(swr.right, pwr.left) + 16;
 			}
 			if (bridge.PtInRect(screenPt))
 				return TRUE;
@@ -2752,8 +2768,25 @@ void CCustomPopupMenu::OpenSubAt(int idx)
 	sub->m_owner = m_owner;
 	CRect wr; GetWindowRect(&wr);
 	CRect vr = ItemViewRect(idx);
-	// 余白／影を跨いで消えないよう親右端と十分重ねる
-	sub->CreatePopupAt(CPoint(wr.right - 16, wr.top + vr.top), this, RootMenu());
+	sub->RebuildMenuFont();
+	sub->MeasureLayout();
+	const int overlap = 16;
+	const int y = wr.top + vr.top;
+	int xRight = wr.right - overlap;
+	int xLeft = wr.left - sub->m_menuW + overlap;
+	BOOL placeLeft = FALSE;
+	MONITORINFO mi; ZeroMemory(&mi, sizeof(mi)); mi.cbSize = sizeof(mi);
+	HMONITOR hMon = ::MonitorFromWindow(m_hWnd, MONITOR_DEFAULTTONEAREST);
+	if (hMon && ::GetMonitorInfo(hMon, &mi)) {
+		const BOOL fitsRight = (xRight + sub->m_menuW <= mi.rcWork.right);
+		const BOOL fitsLeft = (xLeft >= mi.rcWork.left);
+		if (!fitsRight && fitsLeft)
+			placeLeft = TRUE;
+		else if (!fitsRight && !fitsLeft)
+			placeLeft = (wr.left - mi.rcWork.left) >= (mi.rcWork.right - wr.right);
+	}
+	// 右に余地がなければ左へ。余白／影を跨いで消えないよう親と重ねる
+	sub->CreatePopupAt(CPoint(placeLeft ? xLeft : xRight, y), this, RootMenu());
 }
 
 void CCustomPopupMenu::SetHot(int idx)
@@ -2785,13 +2818,14 @@ void CCustomPopupMenu::SetHot(int idx)
 				ClientToScreen(&a);
 				ClientToScreen(&b);
 				CRect bridge;
-				bridge.left = (std::min)(b.x, swr.left) - 12;
-				bridge.right = (std::max)(b.x, swr.left) + 12;
 				bridge.top = (std::min)((std::min)(a.y, swr.top), wr.top) - 20;
 				bridge.bottom = (std::max)((std::max)(b.y, swr.bottom), wr.bottom) + 20;
-				if (bridge.Width() < 28) {
+				if (swr.CenterPoint().x >= wr.CenterPoint().x) {
 					bridge.left = (std::min)(wr.right, swr.left) - 16;
 					bridge.right = (std::max)(wr.right, swr.left) + 16;
+				} else {
+					bridge.left = (std::min)(swr.right, wr.left) - 16;
+					bridge.right = (std::max)(swr.right, wr.left) + 16;
 				}
 				if (bridge.PtInRect(sp))
 					return;
@@ -3723,6 +3757,9 @@ void CCustomPopupMenu::RunModalLoop()
 				return TRUE;
 			}
 		}
+		// ホスト WM_PAINT は Dispatch する（validate のみだと g_gdiPaintPending /
+		// Soft3D以外の描画が止まりやすい）。重さは Soft3D/Speana 側の
+		// GetTrackingRoot ガードで抑える。
 		if (m_tip.GetSafeHwnd()) m_tip.RelayEvent(&m);
 		TranslateMessage(&m);
 		DispatchMessage(&m);
@@ -3770,26 +3807,41 @@ void CCustomPopupMenu::RunModalLoop()
 	DestroyPopupTree();
 	PopupEatOpenMenuMessages();
 	PopupEatDismissClickTail();
-	if (s_trackingRoot == this)
+	if (s_trackingRoot == this) {
 		s_trackingRoot = NULL;
+		s_trackingHwnd = NULL;
+	}
 	if (hCap && ::IsWindow(hCap)) ::SetForegroundWindow(hCap);
 }
 
 UINT CCustomPopupMenu::Track(CPoint screenPt, CWnd* pOwner)
 {
 	// AnimateOut 中などにネストして呼ばれると二重メニューになる
-	if (s_trackingRoot != NULL)
+	if (GetTrackingRoot() != NULL)
 		return 0;
 	m_owner = pOwner;
 	m_root = this;
 	m_parentMenu = NULL;
 	EnsureChromePrefix();
-	if (!CreatePopupAt(screenPt, NULL, this))
-		return 0;
+	// CreatePopupAt／AnimateIn 中も Soft3D 等が GetTrackingRoot で抑制できるよう先に立てる
 	s_trackingRoot = this;
+	s_trackingHwnd = NULL;
+	if (!CreatePopupAt(screenPt, NULL, this)) {
+		if (s_trackingRoot == this) {
+			s_trackingRoot = NULL;
+			s_trackingHwnd = NULL;
+		}
+		return 0;
+	}
+	s_trackingHwnd = m_hWnd;
 	RunModalLoop();
-	if (s_trackingRoot == this)
+	if (s_trackingRoot == this) {
 		s_trackingRoot = NULL;
+		s_trackingHwnd = NULL;
+	}
+	// 退場中に Posted tick を落としても再生 UI が死なないようキック
+	extern void COgg_KickTimerp();
+	COgg_KickTimerp();
 	PopupEatOpenMenuMessages();
 	// 外側右クリックで閉じた場合、同じ操作で新しいメニューを開く
 	PopupFlushReopenContextClick();
@@ -3910,9 +3962,18 @@ BOOL CCustomPopupMenu::GetRangeValues(UINT id, int* pos, int* selMin, int* selMa
 }
 
 CCustomPopupMenu* CCustomPopupMenu::s_trackingRoot = NULL;
+HWND CCustomPopupMenu::s_trackingHwnd = NULL;
 
 CCustomPopupMenu* CCustomPopupMenu::GetTrackingRoot()
 {
+	if (s_trackingRoot == NULL)
+		return NULL;
+	// HWND が死んでいればポインタだけ残った固着。this は触らない。
+	if (s_trackingHwnd != NULL && !::IsWindow(s_trackingHwnd)) {
+		s_trackingRoot = NULL;
+		s_trackingHwnd = NULL;
+		return NULL;
+	}
 	return s_trackingRoot;
 }
 

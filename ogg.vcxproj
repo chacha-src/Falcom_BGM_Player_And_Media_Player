@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003" DefaultTargets="Build" ToolsVersion="14.0">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="uni_2026_de|Win32">
@@ -561,6 +561,7 @@
     <ClCompile Include="DeviceRecordDlg.cpp" />
     <ClCompile Include="ScreenCaptureDlg.cpp" />
     <ClCompile Include="ScreenCaptureLive.cpp" />
+    <ClCompile Include="ScLiveSettingsDlg.cpp" />
     <ClCompile Include="ScWgcCapture.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <LanguageStandard>stdcpp17</LanguageStandard>
@@ -702,6 +703,7 @@
     <ClInclude Include="TranscodeExport.h" />
     <ClInclude Include="DeviceRecordDlg.h" />
     <ClInclude Include="ScreenCaptureDlg.h" />
+    <ClInclude Include="ScLiveSettingsDlg.h" />
     <ClInclude Include="ScWgcCapture.h" />
     <ClInclude Include="TagEditDlg.h" />
     <ClInclude Include="flac.h" />

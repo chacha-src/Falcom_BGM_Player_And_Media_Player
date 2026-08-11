@@ -1,4 +1,4 @@
-﻿// CAnalyzerDlg.cpp : 簡易波形アナライザー(スクロールBB・多ch・周波数特性)
+// CAnalyzerDlg.cpp : 簡易波形アナライザー(スクロールBB・多ch・周波数特性)
 #include "stdafx.h"
 #include "ogg.h"
 #include "CAnalyzerDlg.h"
@@ -3771,6 +3771,10 @@ void CAnalyzerDlg::PresentSoft3DTop(CDC& dc, const CRect& pane)
 {
 	const int pw = pane.Width(), ph = pane.Height();
 	if (pw < 8 || ph < 8) return;
+	if (CCustomPopupMenu::GetTrackingRoot() != NULL) {
+		dc.FillSolidRect(&pane, ANALYZER_BG);
+		return;
+	}
 	CDC clip; clip.CreateCompatibleDC(&dc);
 	CBitmap bm; bm.CreateCompatibleBitmap(&dc, pw, ph);
 	CBitmap* ob = clip.SelectObject(&bm);
@@ -3890,13 +3894,23 @@ void CAnalyzerDlg::PresentSoft3DTop(CDC& dc, const CRect& pane)
 
 	ctx.EndFrame();
 	ctx.Present(clip, 0, 0);
-	// Soft2D: ヴィネット＋グロー＋薄いスキャンライン
+	// Soft2D ヴィネットは毎フレ O(wh) で重い。数フレに1回・永続バッファで品質パス
 	{
-		GdiSoft2D::Context s2;
-		if (s2.Create(pw, ph, false) && s2.fb.hdc) {
-			::BitBlt(s2.fb.hdc, 0, 0, pw, ph, clip.GetSafeHdc(), 0, 0, SRCCOPY);
-			s2.Vignette(0.40f);
-			s2.Present(clip, 0, 0);
+		static DWORD s_postTick = 0;
+		static GdiSoft2D::Context s2;
+		static int s2w = 0, s2h = 0;
+		const DWORD now = GetTickCount();
+		if (now - s_postTick >= 100u) {
+			s_postTick = now;
+			if (s2w != pw || s2h != ph || !s2.fb.hdc) {
+				if (!s2.Create(pw, ph, false) || !s2.fb.hdc) { /* skip */ }
+				else { s2w = pw; s2h = ph; }
+			}
+			if (s2.fb.hdc && s2w == pw && s2h == ph) {
+				::BitBlt(s2.fb.hdc, 0, 0, pw, ph, clip.GetSafeHdc(), 0, 0, SRCCOPY);
+				s2.Vignette(0.32f);
+				s2.Present(clip, 0, 0);
+			}
 		}
 	}
 	dc.BitBlt(pane.left, pane.top, pw, ph, &clip, 0, 0, SRCCOPY);
@@ -3907,6 +3921,10 @@ void CAnalyzerDlg::PresentSoft3DBot(CDC& dc, const CRect& pane)
 {
 	const int pw = pane.Width(), ph = pane.Height();
 	if (pw < 8 || ph < 8) return;
+	if (CCustomPopupMenu::GetTrackingRoot() != NULL) {
+		dc.FillSolidRect(&pane, ANALYZER_BG);
+		return;
+	}
 	CDC clip; clip.CreateCompatibleDC(&dc);
 	CBitmap bm; bm.CreateCompatibleBitmap(&dc, pw, ph);
 	CBitmap* ob = clip.SelectObject(&bm);
@@ -4041,11 +4059,21 @@ void CAnalyzerDlg::PresentSoft3DBot(CDC& dc, const CRect& pane)
 
 	sc.Flush(clip);
 	{
-		GdiSoft2D::Context s2;
-		if (s2.Create(pw, ph, false) && s2.fb.hdc) {
-			::BitBlt(s2.fb.hdc, 0, 0, pw, ph, clip.GetSafeHdc(), 0, 0, SRCCOPY);
-			s2.Vignette(0.35f);
-			s2.Present(clip, 0, 0);
+		static DWORD s_postTickBot = 0;
+		static GdiSoft2D::Context s2;
+		static int s2w = 0, s2h = 0;
+		const DWORD now = GetTickCount();
+		if (now - s_postTickBot >= 100u) {
+			s_postTickBot = now;
+			if (s2w != pw || s2h != ph || !s2.fb.hdc) {
+				if (!s2.Create(pw, ph, false) || !s2.fb.hdc) { /* skip */ }
+				else { s2w = pw; s2h = ph; }
+			}
+			if (s2.fb.hdc && s2w == pw && s2h == ph) {
+				::BitBlt(s2.fb.hdc, 0, 0, pw, ph, clip.GetSafeHdc(), 0, 0, SRCCOPY);
+				s2.Vignette(0.28f);
+				s2.Present(clip, 0, 0);
+			}
 		}
 	}
 	dc.BitBlt(pane.left, pane.top, pw, ph, &clip, 0, 0, SRCCOPY);

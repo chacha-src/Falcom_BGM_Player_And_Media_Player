@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include "CCustomControl.h"
 
 // ============================================================================
@@ -271,6 +271,7 @@ protected:
 	CCustomPopupMenu* m_parentMenu;
 	CCustomPopupMenu* m_root;
 	static CCustomPopupMenu* s_trackingRoot;
+	static HWND s_trackingHwnd; // 破棄検知用（dangling this を触らない）
 	CToolTipCtrl m_tip;
 	int m_tipHot;
 	CBitmap m_memBmp;

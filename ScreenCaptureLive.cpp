@@ -4,6 +4,7 @@
 #include "stdafx.h"
 #include "ogg.h"
 #include "ScreenCaptureDlg.h"
+#include "ScLiveSettingsDlg.h"
 
 #include <wininet.h>
 #include <winsock2.h>
@@ -11,12 +12,84 @@
 #include <time.h>
 #include <shellapi.h>
 
+#include "minizip/unzip.h"
+#include "minizip/iowin32.h"
+
 #pragma comment(lib, "wininet.lib")
 #pragma comment(lib, "ws2_32.lib")
+
+#include "YtOAuthDefaults.inc"
+#if __has_include("YtOAuthDefaults.local.inc")
+#include "YtOAuthDefaults.local.inc"
+#endif
 
 extern void MpPersistSavedataQuick();
 
 namespace {
+
+static CString ScLiveResolveClientId()
+{
+	// 製品埋め込みがあるときはそれを優先（古い savedata 上書きで 401 になるのを防ぐ）
+	const CString def = CString(YT_OAUTH_DEFAULT_CLIENT_ID);
+	if (!def.IsEmpty())
+		return def;
+	if (savedata.yt_client_id[0])
+		return CString(savedata.yt_client_id);
+	return CString();
+}
+
+static CString ScLiveResolveClientSecret()
+{
+	const CString def = CString(YT_OAUTH_DEFAULT_CLIENT_SECRET);
+	if (!def.IsEmpty())
+		return def;
+	if (savedata.yt_client_secret[0])
+		return CString(savedata.yt_client_secret);
+	return CString();
+}
+
+static BOOL ScLiveHaveClientCreds()
+{
+	return !ScLiveResolveClientId().IsEmpty() && !ScLiveResolveClientSecret().IsEmpty();
+}
+
+static CString ScLiveMissingClientCredsMsg()
+{
+	return LL14(
+		L"Client ID / Secret が未設定です。「詳細設定」に Google Cloud の OAuth クライアントを入力してから、もう一度「Googleでログイン」を押してください。",
+		L"Client ID / Secret is not set. Enter your Google Cloud OAuth client under Advanced, then click Sign in with Google again.",
+		L"Client ID / Secret non definis. Saisissez le client OAuth Google Cloud dans Avance, puis reconnectez-vous avec Google.",
+		L"Client ID / Secret non impostati. Inserisci il client OAuth Google Cloud in Avanzate, poi Accedi con Google di nuovo.",
+		L"Client ID / Secret no estan definidos. Introduzca el cliente OAuth de Google Cloud en Avanzado y vuelva a iniciar sesion con Google.",
+		L"Client ID / Secret이 없습니다. 고급에 Google Cloud OAuth 클라이언트를 입력한 뒤 Google로 로그인을 다시 누르세요.",
+		L"未设置 Client ID / Secret。请在「高级」中填写 Google Cloud OAuth 客户端，然后再次点击「使用 Google 登录」。",
+		L"لم يُعيَّن Client ID / Secret. أدخل عميل OAuth في Google Cloud ضمن متقدم ثم سجّل الدخول عبر Google مجددًا.",
+		L"Client ID / Secret не заданы. Введите OAuth-клиент Google Cloud в «Дополнительно» и снова нажмите «Войти через Google».",
+		L"Client-ID / Secret fehlen. Geben Sie den Google-Cloud-OAuth-Client unter Erweitert ein und melden Sie sich erneut mit Google an.",
+		L"Client ID / Secret nao definidos. Introduza o cliente OAuth do Google Cloud em Avancado e entre com o Google novamente.",
+		L"Client ID / Secret ontbreken. Vul de Google Cloud OAuth-client in onder Geavanceerd en log opnieuw in met Google.",
+		L"Brak Client ID / Secret. Wprowadz klienta OAuth Google Cloud w Zaawansowane i ponownie kliknij Zaloguj przez Google.",
+		L"Client ID / Secret ayarlanmadi. Gelismis altina Google Cloud OAuth istemcisini girip Google ile oturum ac'a tekrar basin.");
+}
+
+static CString ScLiveNeedLoginMsg()
+{
+	return LL14(
+		L"YouTube ログインが必要です。「Googleでログイン」を実行してください。",
+		L"YouTube login required. Click Sign in with Google.",
+		L"Connexion YouTube requise. Cliquez Se connecter avec Google.",
+		L"Accesso YouTube richiesto. Clicca Accedi con Google.",
+		L"Se requiere iniciar sesion en YouTube. Pulse Iniciar sesion con Google.",
+		L"YouTube 로그인이 필요합니다. Google로 로그인을 실행하세요.",
+		L"需要登录 YouTube。请点击「使用 Google 登录」。",
+		L"مطلوب تسجيل الدخول إلى YouTube. انقر تسجيل الدخول عبر Google.",
+		L"Нужен вход в YouTube. Нажмите «Войти через Google».",
+		L"YouTube-Anmeldung noetig. Auf Mit Google anmelden klicken.",
+		L"Login no YouTube necessario. Clique Entrar com o Google.",
+		L"YouTube-login vereist. Klik Inloggen met Google.",
+		L"Wymagane logowanie YouTube. Kliknij Zaloguj przez Google.",
+		L"YouTube girisi gerekli. Google ile oturum ac'a tiklayin.");
+}
 
 static void ScLiveCopyField(TCHAR* dst, int dstCch, const CString& src)
 {
@@ -246,47 +319,22 @@ static BOOL ScLiveEnsureAccessToken(CString& errOut)
 		return TRUE;
 	}
 	if (!savedata.yt_refresh_token[0]) {
-		errOut = LL14(
-			L"YouTube 認証が必要です。「認証」を実行してください。",
-			L"YouTube authentication required. Click Auth.",
-			L"Authentification YouTube requise. Cliquez Auth.",
-			L"Autenticazione YouTube richiesta. Premi Auth.",
-			L"Se requiere autenticación de YouTube. Pulse Auth.",
-			L"YouTube 인증이 필요합니다. 인증을 실행하세요.",
-			L"需要 YouTube 认证。请点击「认证」。",
-			L"مطلوب مصادقة YouTube. انقر Auth.",
-			L"Нужна авторизация YouTube. Нажмите Auth.",
-			L"YouTube-Anmeldung nötig. Auth klicken.",
-			L"Autenticação YouTube necessária. Clique Auth.",
-			L"YouTube-authenticatie vereist. Klik Auth.",
-			L"Wymagane uwierzytelnienie YouTube. Kliknij Auth.",
-			L"YouTube kimlik doğrulaması gerekli. Auth'a tıklayın.");
+		errOut = ScLiveNeedLoginMsg();
 		return FALSE;
 	}
-	if (!savedata.yt_client_id[0] || !savedata.yt_client_secret[0]) {
-		errOut = LL14(
-			L"Client ID / Secret を入力してください。",
-			L"Enter Client ID / Secret.",
-			L"Saisissez Client ID / Secret.",
-			L"Inserisci Client ID / Secret.",
-			L"Introduzca Client ID / Secret.",
-			L"Client ID / Secret을 입력하세요.",
-			L"请输入 Client ID / Secret。",
-			L"أدخل Client ID / Secret.",
-			L"Введите Client ID / Secret.",
-			L"Client-ID / Secret eingeben.",
-			L"Introduza Client ID / Secret.",
-			L"Voer Client ID / Secret in.",
-			L"Wprowadź Client ID / Secret.",
-			L"Client ID / Secret girin.");
+	if (!ScLiveHaveClientCreds()) {
+		errOut = ScLiveMissingClientCredsMsg();
 		return FALSE;
 	}
 
+	const CString clientId = ScLiveResolveClientId();
+	const CString clientSecret = ScLiveResolveClientSecret();
+
 	CStringA body;
 	body = "client_id=";
-	body += ScLiveUrlEncodeUtf8(ScLiveWideToUtf8(savedata.yt_client_id));
+	body += ScLiveUrlEncodeUtf8(ScLiveWideToUtf8(clientId));
 	body += "&client_secret=";
-	body += ScLiveUrlEncodeUtf8(ScLiveWideToUtf8(savedata.yt_client_secret));
+	body += ScLiveUrlEncodeUtf8(ScLiveWideToUtf8(clientSecret));
 	body += "&refresh_token=";
 	body += ScLiveUrlEncodeUtf8(ScLiveWideToUtf8(savedata.yt_refresh_token));
 	body += "&grant_type=refresh_token";
@@ -410,7 +458,7 @@ static BOOL ScLiveYtApiJson(
 	return TRUE;
 }
 
-static BOOL ScLiveCreateBindBroadcast(CString& errOut, BOOL updateUi, CScreenCaptureDlg* dlg)
+static BOOL ScLiveCreateBindBroadcast(CString& errOut, BOOL updateUi)
 {
 	errOut.Empty();
 	if (!ScLiveEnsureAccessToken(errOut))
@@ -428,6 +476,16 @@ static BOOL ScLiveCreateBindBroadcast(CString& errOut, BOOL updateUi, CScreenCap
 
 	SYSTEMTIME st = {};
 	GetSystemTime(&st);
+	// すぐ開始できるよう、開始時刻を少し過去にして「公開予約」滞留を避ける
+	FILETIME ft = {};
+	SystemTimeToFileTime(&st, &ft);
+	ULARGE_INTEGER uli = {};
+	uli.LowPart = ft.dwLowDateTime;
+	uli.HighPart = ft.dwHighDateTime;
+	uli.QuadPart -= 120ULL * 10000000ULL; // 2 minutes
+	ft.dwLowDateTime = uli.LowPart;
+	ft.dwHighDateTime = uli.HighPart;
+	FileTimeToSystemTime(&ft, &st);
 	char startIso[64];
 	sprintf_s(startIso, "%04u-%02u-%02uT%02u:%02u:%02u.000Z",
 		(unsigned)st.wYear, (unsigned)st.wMonth, (unsigned)st.wDay,
@@ -443,7 +501,7 @@ static BOOL ScLiveCreateBindBroadcast(CString& errOut, BOOL updateUi, CScreenCap
 		"\"status\":{\"privacyStatus\":\"%s\",\"selfDeclaredMadeForKids\":false},"
 		"\"contentDetails\":{\"enableAutoStart\":true,\"enableAutoStop\":true,"
 		"\"enableDvr\":true,\"recordFromStart\":true,\"startWithSlate\":false,"
-		"\"monitorStream\":{\"enableMonitorStream\":false}}}",
+		"\"monitorStream\":{\"enableMonitorStream\":true,\"broadcastStreamDelayMs\":0}}}",
 		(LPCSTR)titleEsc, (LPCSTR)descEsc, startIso, (LPCSTR)privacyA);
 
 	CStringA respBc;
@@ -533,7 +591,7 @@ static BOOL ScLiveCreateBindBroadcast(CString& errOut, BOOL updateUi, CScreenCap
 	if (!ScLiveYtApiJson(L"POST", objBind, CStringA(), respBind, errOut))
 		return FALSE;
 
-	const CStringA urlA = rtmps[0] ? CStringA(rtmps) : CStringA(ingest);
+	const CStringA urlA = ingest[0] ? CStringA(ingest) : CStringA(rtmps);
 	const CString urlW = ScLiveUtf8ToWide(urlA);
 	const CString keyW = ScLiveUtf8ToWide(streamName);
 
@@ -543,34 +601,21 @@ static BOOL ScLiveCreateBindBroadcast(CString& errOut, BOOL updateUi, CScreenCap
 	ScLiveCopyField(savedata.cap_live_key, _countof(savedata.cap_live_key), keyW);
 	MpPersistSavedataQuick();
 
-	if (updateUi && dlg && dlg->GetSafeHwnd()) {
-		if (dlg->m_liveUrl.GetSafeHwnd()) dlg->m_liveUrl.SetWindowText(urlW);
-		if (dlg->m_liveKey.GetSafeHwnd()) dlg->m_liveKey.SetWindowText(keyW);
-	}
+	if (updateUi)
+		ScLiveSettingsApplyUrlKey(urlW, keyW);
 	return TRUE;
 }
 
 static BOOL ScLiveOAuthLoopback(CWnd* owner, CString& errOut)
 {
 	errOut.Empty();
-	if (!savedata.yt_client_id[0] || !savedata.yt_client_secret[0]) {
-		errOut = LL14(
-			L"Client ID / Secret を入力してください（Google Cloud の OAuth クライアント）。",
-			L"Enter Client ID / Secret (Google Cloud OAuth client).",
-			L"Saisissez Client ID / Secret (client OAuth Google Cloud).",
-			L"Inserisci Client ID / Secret (client OAuth Google Cloud).",
-			L"Introduzca Client ID / Secret (cliente OAuth de Google Cloud).",
-			L"Client ID / Secret을 입력하세요(Google Cloud OAuth 클라이언트).",
-			L"请输入 Client ID / Secret（Google Cloud OAuth 客户端）。",
-			L"أدخل Client ID / Secret (عميل OAuth في Google Cloud).",
-			L"Введите Client ID / Secret (OAuth-клиент Google Cloud).",
-			L"Client-ID / Secret eingeben (Google-Cloud-OAuth-Client).",
-			L"Introduza Client ID / Secret (cliente OAuth Google Cloud).",
-			L"Voer Client ID / Secret in (Google Cloud OAuth-client).",
-			L"Wprowadź Client ID / Secret (klient OAuth Google Cloud).",
-			L"Client ID / Secret girin (Google Cloud OAuth istemcisi).");
+	if (!ScLiveHaveClientCreds()) {
+		errOut = ScLiveMissingClientCredsMsg();
 		return FALSE;
 	}
+
+	const CString clientId = ScLiveResolveClientId();
+	const CString clientSecret = ScLiveResolveClientSecret();
 
 	WSADATA wsa = {};
 	if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) {
@@ -623,13 +668,13 @@ static BOOL ScLiveOAuthLoopback(CWnd* owner, CString& errOut)
 	const int port = (int)ntohs(bound.sin_port);
 
 	CStringA redirectA;
-	redirectA.Format("http://127.0.0.1:%d/", port);
+	redirectA.Format("http://localhost:%d/", port);
 	CStringA scopeA = "https://www.googleapis.com/auth/youtube.force-ssl";
 	CStringA authUrl;
 	authUrl.Format(
 		"https://accounts.google.com/o/oauth2/v2/auth?client_id=%s&redirect_uri=%s"
 		"&response_type=code&scope=%s&access_type=offline&prompt=consent",
-		(LPCSTR)ScLiveUrlEncodeUtf8(ScLiveWideToUtf8(savedata.yt_client_id)),
+		(LPCSTR)ScLiveUrlEncodeUtf8(ScLiveWideToUtf8(clientId)),
 		(LPCSTR)ScLiveUrlEncodeUtf8(redirectA),
 		(LPCSTR)ScLiveUrlEncodeUtf8(scopeA));
 
@@ -755,11 +800,11 @@ static BOOL ScLiveOAuthLoopback(CWnd* owner, CString& errOut)
 
 	CStringA body;
 	body = "code=";
-	body += code;
+	body += ScLiveUrlEncodeUtf8(CStringA(code));
 	body += "&client_id=";
-	body += ScLiveUrlEncodeUtf8(ScLiveWideToUtf8(savedata.yt_client_id));
+	body += ScLiveUrlEncodeUtf8(ScLiveWideToUtf8(clientId));
 	body += "&client_secret=";
-	body += ScLiveUrlEncodeUtf8(ScLiveWideToUtf8(savedata.yt_client_secret));
+	body += ScLiveUrlEncodeUtf8(ScLiveWideToUtf8(clientSecret));
 	body += "&redirect_uri=";
 	body += ScLiveUrlEncodeUtf8(redirectA);
 	body += "&grant_type=authorization_code";
@@ -772,22 +817,53 @@ static BOOL ScLiveOAuthLoopback(CWnd* owner, CString& errOut)
 	WSACleanup();
 
 	if (!httpOk || status < 200 || status >= 300) {
-		errOut.Format(LL14(
-			L"トークン交換に失敗しました (HTTP %lu)。",
-			L"Token exchange failed (HTTP %lu).",
-			L"Échange de jeton échoué (HTTP %lu).",
-			L"Scambio token non riuscito (HTTP %lu).",
-			L"Intercambio de token fallido (HTTP %lu).",
-			L"토큰 교환 실패 (HTTP %lu).",
-			L"令牌交换失败 (HTTP %lu)。",
-			L"فشل تبادل الرمز (HTTP %lu).",
-			L"Обмен токена не удался (HTTP %lu).",
-			L"Token-Austausch fehlgeschlagen (HTTP %lu).",
-			L"Troca de token falhou (HTTP %lu).",
-			L"Tokenuitwisseling mislukt (HTTP %lu).",
-			L"Wymiana tokenu nie powiodła się (HTTP %lu).",
-			L"Jeton değişimi başarısız (HTTP %lu)."),
-			(unsigned long)status);
+		char errKey[64] = {};
+		char errDesc[256] = {};
+		ScLiveJsonGetString(resp, "error", errKey, (int)_countof(errKey));
+		ScLiveJsonGetString(resp, "error_description", errDesc, (int)_countof(errDesc));
+		CString detail;
+		if (errKey[0] || errDesc[0]) {
+			detail = ScLiveUtf8ToWide(CStringA(errKey));
+			if (errDesc[0]) {
+				if (!detail.IsEmpty()) detail += L": ";
+				detail += ScLiveUtf8ToWide(CStringA(errDesc));
+			}
+		}
+		if (detail.IsEmpty()) {
+			errOut.Format(LL14(
+				L"トークン交換に失敗しました (HTTP %lu)。",
+				L"Token exchange failed (HTTP %lu).",
+				L"Échange de jeton échoué (HTTP %lu).",
+				L"Scambio token non riuscito (HTTP %lu).",
+				L"Intercambio de token fallido (HTTP %lu).",
+				L"토큰 교환 실패 (HTTP %lu).",
+				L"令牌交换失败 (HTTP %lu)。",
+				L"فشل تبادل الرمز (HTTP %lu).",
+				L"Обмен токена не удался (HTTP %lu).",
+				L"Token-Austausch fehlgeschlagen (HTTP %lu).",
+				L"Troca de token falhou (HTTP %lu).",
+				L"Tokenuitwisseling mislukt (HTTP %lu).",
+				L"Wymiana tokenu nie powiodła się (HTTP %lu).",
+				L"Jeton değişimi başarısız (HTTP %lu)."),
+				(unsigned long)status);
+		} else {
+			errOut.Format(LL14(
+				L"トークン交換に失敗しました (HTTP %lu)。\n%s",
+				L"Token exchange failed (HTTP %lu).\n%s",
+				L"Échange de jeton échoué (HTTP %lu).\n%s",
+				L"Scambio token non riuscito (HTTP %lu).\n%s",
+				L"Intercambio de token fallido (HTTP %lu).\n%s",
+				L"토큰 교환 실패 (HTTP %lu).\n%s",
+				L"令牌交换失败 (HTTP %lu)。\n%s",
+				L"فشل تبادل الرمز (HTTP %lu).\n%s",
+				L"Обмен токена не удался (HTTP %lu).\n%s",
+				L"Token-Austausch fehlgeschlagen (HTTP %lu).\n%s",
+				L"Troca de token falhou (HTTP %lu).\n%s",
+				L"Tokenuitwisseling mislukt (HTTP %lu).\n%s",
+				L"Wymiana tokenu nie powiodła się (HTTP %lu).\n%s",
+				L"Jeton değişimi başarısız (HTTP %lu).\n%s"),
+				(unsigned long)status, (LPCWSTR)detail);
+		}
 		return FALSE;
 	}
 
@@ -862,6 +938,13 @@ BOOL CScreenCaptureDlg::ResolveFfmpegPath(TCHAR* outPath, int outCch) const
 		return TRUE;
 	}
 
+	// PATH 上の ffmpeg.exe
+	if (SearchPath(NULL, L"ffmpeg.exe", NULL, MAX_PATH, full, NULL) && ScLiveFileExists(full)) {
+		_tcsncpy(outPath, full, outCch - 1);
+		outPath[outCch - 1] = 0;
+		return TRUE;
+	}
+
 	WIN32_FIND_DATA fd = {};
 	CString pattern;
 	pattern.Format(L"%s\\oggYSEDbgm*.exe", (LPCTSTR)exeDir);
@@ -898,24 +981,424 @@ BOOL CScreenCaptureDlg::ResolveFfmpegPath(TCHAR* outPath, int outCch) const
 	return FALSE;
 }
 
+static void ScLivePumpUi()
+{
+	MSG msg;
+	while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
+		if (msg.message == WM_QUIT) {
+			PostQuitMessage((int)msg.wParam);
+			break;
+		}
+		TranslateMessage(&msg);
+		DispatchMessage(&msg);
+	}
+}
+
+static BOOL ScLiveIsMzPe(const TCHAR* path, ULONGLONG minBytes)
+{
+	if (!path || !path[0]) return FALSE;
+	WIN32_FILE_ATTRIBUTE_DATA fad = {};
+	if (!GetFileAttributesEx(path, GetFileExInfoStandard, &fad))
+		return FALSE;
+	ULARGE_INTEGER sz;
+	sz.LowPart = fad.nFileSizeLow;
+	sz.HighPart = fad.nFileSizeHigh;
+	if (sz.QuadPart < minBytes)
+		return FALSE;
+	HANDLE h = CreateFile(path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
+	if (h == INVALID_HANDLE_VALUE)
+		return FALSE;
+	unsigned char mz[2] = {};
+	DWORD rd = 0;
+	const BOOL ok = ReadFile(h, mz, 2, &rd, NULL);
+	CloseHandle(h);
+	return ok && rd == 2 && mz[0] == 'M' && mz[1] == 'Z';
+}
+
+static BOOL ScLiveDownloadUrlToFile(const TCHAR* url, const TCHAR* localPath, HWND hBusy, CString& errOut)
+{
+	errOut.Empty();
+	HINTERNET hInet = InternetOpen(L"oggScreenCaptureLive/1.0", INTERNET_OPEN_TYPE_PRECONFIG, NULL, NULL, 0);
+	if (!hInet) {
+		errOut = LL14(L"ネットワークを初期化できません。", L"Could not init network.", L"Reseau indisponible.",
+			L"Rete non disponibile.", L"Red no disponible.", L"네트워크 초기화 실패.", L"无法初始化网络。",
+			L"تعذر تهيئة الشبكة.", L"Сеть недоступна.", L"Netzwerk nicht initialisierbar.",
+			L"Nao foi possivel iniciar a rede.", L"Netwerk starten mislukt.", L"Nie mozna zainicjowac sieci.",
+			L"Ag baslatilamadi.");
+		return FALSE;
+	}
+	DWORD timeout = 600000;
+	InternetSetOption(hInet, INTERNET_OPTION_CONNECT_TIMEOUT, &timeout, sizeof(timeout));
+	InternetSetOption(hInet, INTERNET_OPTION_RECEIVE_TIMEOUT, &timeout, sizeof(timeout));
+	InternetSetOption(hInet, INTERNET_OPTION_SEND_TIMEOUT, &timeout, sizeof(timeout));
+
+	const DWORD flags = INTERNET_FLAG_RELOAD | INTERNET_FLAG_NO_CACHE_WRITE
+		| INTERNET_FLAG_KEEP_CONNECTION | INTERNET_FLAG_NO_UI;
+	HINTERNET hUrl = InternetOpenUrl(hInet, url, NULL, 0, flags, 0);
+	if (!hUrl) {
+		InternetCloseHandle(hInet);
+		errOut = LL14(L"ダウンロードに失敗しました。", L"Download failed.", L"Echec du telechargement.",
+			L"Download non riuscito.", L"Fallo la descarga.", L"다운로드 실패.", L"下载失败。",
+			L"فشل التنزيل.", L"Сбой загрузки.", L"Download fehlgeschlagen.",
+			L"Falha no download.", L"Download mislukt.", L"Pobieranie nieudane.", L"Indirme basarisiz.");
+		return FALSE;
+	}
+
+	DWORD status = 0, slen = sizeof(status);
+	if (!HttpQueryInfo(hUrl, HTTP_QUERY_STATUS_CODE | HTTP_QUERY_FLAG_NUMBER, &status, &slen, NULL)
+		|| status < 200 || status >= 300) {
+		InternetCloseHandle(hUrl);
+		InternetCloseHandle(hInet);
+		errOut = LL14(L"ダウンロードに失敗しました（サーバー応答エラー）。",
+			L"Download failed (server error).", L"Echec du telechargement (serveur).",
+			L"Download non riuscito (server).", L"Fallo la descarga (servidor).",
+			L"다운로드 실패(서버 오류).", L"下载失败（服务器错误）。", L"فشل التنزيل (خطأ بالخادم).",
+			L"Сбой загрузки (ошибка сервера).", L"Download fehlgeschlagen (Server).",
+			L"Falha no download (servidor).", L"Download mislukt (server).",
+			L"Pobieranie nieudane (serwer).", L"Indirme basarisiz (sunucu).");
+		return FALSE;
+	}
+
+	DeleteFile(localPath);
+	HANDLE hFile = CreateFile(localPath, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+	if (hFile == INVALID_HANDLE_VALUE) {
+		InternetCloseHandle(hUrl);
+		InternetCloseHandle(hInet);
+		errOut = LL14(L"一時ファイルを作成できません。", L"Could not create temp file.", L"Fichier temporaire impossible.",
+			L"Impossibile creare file temporaneo.", L"No se pudo crear archivo temporal.",
+			L"임시 파일을 만들 수 없습니다.", L"无法创建临时文件。", L"تعذر إنشاء ملف مؤقت.",
+			L"Не удалось создать временный файл.", L"Temp-Datei nicht erstellbar.",
+			L"Nao foi possivel criar arquivo temporario.", L"Tijdelijk bestand maken mislukt.",
+			L"Nie mozna utworzyc pliku tymczasowego.", L"Gecici dosya olusturulamadi.");
+		return FALSE;
+	}
+
+	BYTE buf[16384];
+	DWORD read = 0;
+	ULONGLONG total = 0;
+	DWORD lastUi = GetTickCount();
+	BOOL ok = TRUE;
+	while (InternetReadFile(hUrl, buf, sizeof(buf), &read) && read > 0) {
+		DWORD wr = 0;
+		if (!WriteFile(hFile, buf, read, &wr, NULL) || wr != read) {
+			ok = FALSE;
+			break;
+		}
+		total += read;
+		const DWORD now = GetTickCount();
+		if (hBusy && (now - lastUi) >= 400) {
+			lastUi = now;
+			CString t;
+			t.Format(LL14(
+				L"ffmpeg をダウンロード中…\n%.1f MB",
+				L"Downloading ffmpeg…\n%.1f MB",
+				L"Telechargement de ffmpeg…\n%.1f Mo",
+				L"Download di ffmpeg…\n%.1f MB",
+				L"Descargando ffmpeg…\n%.1f MB",
+				L"ffmpeg 다운로드 중…\n%.1f MB",
+				L"正在下载 ffmpeg…\n%.1f MB",
+				L"جارٍ تنزيل ffmpeg…\n%.1f MB",
+				L"Загрузка ffmpeg…\n%.1f МБ",
+				L"ffmpeg wird heruntergeladen…\n%.1f MB",
+				L"A descarregar ffmpeg…\n%.1f MB",
+				L"ffmpeg downloaden…\n%.1f MB",
+				L"Pobieranie ffmpeg…\n%.1f MB",
+				L"ffmpeg indiriliyor…\n%.1f MB"),
+				(double)total / (1024.0 * 1024.0));
+			SetWindowText(hBusy, t);
+			ScLivePumpUi();
+		}
+	}
+	CloseHandle(hFile);
+	InternetCloseHandle(hUrl);
+	InternetCloseHandle(hInet);
+
+	if (!ok || total < 1000000ULL) {
+		DeleteFile(localPath);
+		errOut = LL14(L"ダウンロードが完了しませんでした。", L"Download incomplete.", L"Telechargement incomplet.",
+			L"Download incompleto.", L"Descarga incompleta.", L"다운로드가 완료되지 않았습니다.",
+			L"下载未完成。", L"التنزيل غير مكتمل.", L"Загрузка не завершена.", L"Download unvollstandig.",
+			L"Download incompleto.", L"Download onvolledig.", L"Pobieranie niekompletne.", L"Indirme tamamlanmadi.");
+		return FALSE;
+	}
+	return TRUE;
+}
+
+static BOOL ScLiveExtractFfmpegFromZip(const TCHAR* zipPath, const TCHAR* destDir, CString& errOut)
+{
+	errOut.Empty();
+	zlib_filefunc64_def ffunc = {};
+	fill_win32_filefunc64W(&ffunc);
+	unzFile uf = unzOpen2_64(zipPath, &ffunc);
+	if (!uf) {
+		errOut = LL14(L"ZIP を開けません。", L"Could not open ZIP.", L"ZIP illisible.",
+			L"ZIP non apribile.", L"No se pudo abrir el ZIP.", L"ZIP을 열 수 없습니다.",
+			L"无法打开 ZIP。", L"تعذر فتح ZIP.", L"Не удалось открыть ZIP.", L"ZIP nicht offenbar.",
+			L"Nao foi possivel abrir o ZIP.", L"ZIP openen mislukt.", L"Nie mozna otworzyc ZIP.",
+			L"ZIP acilamadi.");
+		return FALSE;
+	}
+
+	unz_global_info64 gi = {};
+	if (unzGetGlobalInfo64(uf, &gi) != UNZ_OK) {
+		unzClose(uf);
+		errOut = LL14(L"ZIP が不正です。", L"Invalid ZIP.", L"ZIP invalide.", L"ZIP non valido.",
+			L"ZIP invalido.", L"ZIP이 올바르지 않습니다.", L"ZIP 无效。", L"ZIP غير صالح.",
+			L"Некорректный ZIP.", L"ZIP ungultig.", L"ZIP invalido.", L"Ongeldige ZIP.",
+			L"Nieprawidlowy ZIP.", L"Gecersiz ZIP.");
+		return FALSE;
+	}
+
+	BOOL found = FALSE;
+	for (ZPOS64_T i = 0; i < gi.number_entry; i++) {
+		char filename_inzip[1024] = {};
+		unz_file_info64 fi = {};
+		if (unzGetCurrentFileInfo64(uf, &fi, filename_inzip, sizeof(filename_inzip), NULL, 0, NULL, 0) != UNZ_OK)
+			break;
+		const char* fileNameOnly = filename_inzip;
+		for (const char* p = filename_inzip; *p; ++p) {
+			if (*p == '/' || *p == '\\')
+				fileNameOnly = p + 1;
+		}
+		if (!fileNameOnly[0]) {
+			if ((ZPOS64_T)(i + 1) < gi.number_entry) unzGoToNextFile(uf);
+			continue;
+		}
+		CString currentFileName = CA2T(fileNameOnly, CP_UTF8);
+		if (currentFileName.CompareNoCase(L"ffmpeg.exe") != 0) {
+			if ((ZPOS64_T)(i + 1) < gi.number_entry) unzGoToNextFile(uf);
+			continue;
+		}
+		if (unzOpenCurrentFile(uf) != UNZ_OK)
+			break;
+		CString outPath;
+		outPath.Format(L"%s\\ffmpeg.exe", destDir);
+		DeleteFile(outPath);
+		HANDLE hOut = CreateFile(outPath, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+		BOOL writeOk = FALSE;
+		ULONGLONG written = 0;
+		if (hOut != INVALID_HANDLE_VALUE) {
+			writeOk = TRUE;
+			char buf[8192];
+			int n;
+			while ((n = unzReadCurrentFile(uf, buf, sizeof(buf))) > 0) {
+				DWORD wr = 0;
+				if (!WriteFile(hOut, buf, (DWORD)n, &wr, NULL) || wr != (DWORD)n) {
+					writeOk = FALSE;
+					break;
+				}
+				written += (ULONGLONG)n;
+			}
+			if (n < 0) writeOk = FALSE;
+			CloseHandle(hOut);
+		}
+		unzCloseCurrentFile(uf);
+		const ULONGLONG minBytes = 1000000ULL;
+		if (writeOk && written == (ULONGLONG)fi.uncompressed_size
+			&& written >= minBytes && ScLiveIsMzPe(outPath, minBytes)) {
+			found = TRUE;
+		} else {
+			DeleteFile(outPath);
+		}
+		break;
+	}
+	unzClose(uf);
+	if (!found) {
+		errOut = LL14(L"ZIP 内に ffmpeg.exe が見つかりません。", L"ffmpeg.exe not found in ZIP.",
+			L"ffmpeg.exe introuvable dans le ZIP.", L"ffmpeg.exe non trovato nello ZIP.",
+			L"No se encontro ffmpeg.exe en el ZIP.", L"ZIP에 ffmpeg.exe가 없습니다.",
+			L"ZIP 中找不到 ffmpeg.exe。", L"لم يُعثر على ffmpeg.exe في ZIP.",
+			L"В ZIP нет ffmpeg.exe.", L"ffmpeg.exe nicht in ZIP gefunden.",
+			L"ffmpeg.exe nao encontrado no ZIP.", L"ffmpeg.exe niet in ZIP gevonden.",
+			L"Brak ffmpeg.exe w ZIP.", L"ZIP icinde ffmpeg.exe yok.");
+		return FALSE;
+	}
+	return TRUE;
+}
+
+static HWND ScLiveCreateBusyWnd(CWnd* owner, const CString& text)
+{
+	HWND parent = owner && owner->GetSafeHwnd() ? owner->GetSafeHwnd() : NULL;
+	RECT pr = { 100, 100, 520, 220 };
+	if (parent) {
+		GetWindowRect(parent, &pr);
+		const int cx = (pr.left + pr.right) / 2;
+		const int cy = (pr.top + pr.bottom) / 2;
+		pr.left = cx - 210;
+		pr.top = cy - 60;
+		pr.right = cx + 210;
+		pr.bottom = cy + 60;
+	}
+	HWND h = CreateWindowEx(
+		WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_DLGMODALFRAME,
+		L"STATIC", (LPCTSTR)text,
+		WS_POPUP | WS_VISIBLE | WS_BORDER | SS_CENTER,
+		pr.left, pr.top, pr.right - pr.left, pr.bottom - pr.top,
+		parent, NULL, AfxGetInstanceHandle(), NULL);
+	if (h) {
+		HFONT font = (HFONT)GetStockObject(DEFAULT_GUI_FONT);
+		SendMessage(h, WM_SETFONT, (WPARAM)font, TRUE);
+		UpdateWindow(h);
+	}
+	return h;
+}
+
+static BOOL ScLiveInstallFfmpegFromOfficial(CWnd* owner, CString& errOut)
+{
+	errOut.Empty();
+	TCHAR mod[MAX_PATH] = {};
+	if (!GetModuleFileName(NULL, mod, MAX_PATH)) {
+		errOut = LL14(L"実行フォルダを取得できません。", L"Could not resolve exe folder.",
+			L"Dossier exe introuvable.", L"Cartella exe non trovata.", L"No se pudo obtener la carpeta.",
+			L"실행 폴더를 알 수 없습니다.", L"无法取得程序目录。", L"تعذر معرفة مجلد البرنامج.",
+			L"Не удалось получить папку exe.", L"Exe-Ordner unbekannt.", L"Pasta do exe desconhecida.",
+			L"Exe-map onbekend.", L"Nieznany folder exe.", L"Exe klasoru bilinmiyor.");
+		return FALSE;
+	}
+	TCHAR* slash = _tcsrchr(mod, L'\\');
+	if (!slash) return FALSE;
+	*slash = 0;
+	const CString exeDir = mod;
+
+	TCHAR tmp[MAX_PATH] = {};
+	GetTempPath(MAX_PATH, tmp);
+	TCHAR zipPath[MAX_PATH] = {};
+	_sntprintf_s(zipPath, _TRUNCATE, L"%sogg_ffmpeg_essentials.zip", tmp);
+
+	const CString busy0 = LL14(
+		L"ffmpeg をダウンロード中…\nしばらくお待ちください",
+		L"Downloading ffmpeg…\nPlease wait",
+		L"Telechargement de ffmpeg…\nVeuillez patienter",
+		L"Download di ffmpeg…\nAttendere",
+		L"Descargando ffmpeg…\nEspere",
+		L"ffmpeg 다운로드 중…\n잠시만 기다려 주세요",
+		L"正在下载 ffmpeg…\n请稍候",
+		L"جارٍ تنزيل ffmpeg…\nيرجى الانتظار",
+		L"Загрузка ffmpeg…\nПодождите",
+		L"ffmpeg wird heruntergeladen…\nBitte warten",
+		L"A descarregar ffmpeg…\nAguarde",
+		L"ffmpeg downloaden…\nEven geduld",
+		L"Pobieranie ffmpeg…\nProsze czekac",
+		L"ffmpeg indiriliyor…\nLutfen bekleyin");
+	HWND hBusy = ScLiveCreateBusyWnd(owner, busy0);
+	if (owner) owner->EnableWindow(FALSE);
+
+	// gyan.dev = ffmpeg.org が案内する Windows 公式ビルド（essentials ZIP）
+	const TCHAR* url = L"https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip";
+	BOOL ok = ScLiveDownloadUrlToFile(url, zipPath, hBusy, errOut);
+	if (ok) {
+		if (hBusy) {
+			SetWindowText(hBusy, LL14(
+				L"ffmpeg を配置中…",
+				L"Installing ffmpeg…",
+				L"Installation de ffmpeg…",
+				L"Installazione di ffmpeg…",
+				L"Instalando ffmpeg…",
+				L"ffmpeg 배치 중…",
+				L"正在安装 ffmpeg…",
+				L"جارٍ تثبيت ffmpeg…",
+				L"Установка ffmpeg…",
+				L"ffmpeg wird installiert…",
+				L"A instalar ffmpeg…",
+				L"ffmpeg installeren…",
+				L"Instalowanie ffmpeg…",
+				L"ffmpeg kuruluyor…"));
+			ScLivePumpUi();
+		}
+		ok = ScLiveExtractFfmpegFromZip(zipPath, exeDir, errOut);
+	}
+	DeleteFile(zipPath);
+
+	if (owner) owner->EnableWindow(TRUE);
+	if (hBusy) DestroyWindow(hBusy);
+	return ok;
+}
+
+BOOL CScreenCaptureDlg::EnsureFfmpegAvailable(BOOL promptIfMissing)
+{
+	TCHAR path[MAX_PATH] = {};
+	if (ResolveFfmpegPath(path, MAX_PATH))
+		return TRUE;
+	if (!promptIfMissing)
+		return FALSE;
+
+	const int ans = AfxMessageBox(LL14(
+		L"ffmpeg.exe が見つかりません。\nライブ配信に必要です。\n公式ビルドをダウンロードして、このプログラムと同じフォルダに配置しますか？",
+		L"ffmpeg.exe was not found.\nIt is required for live streaming.\nDownload the official build and place it next to this program?",
+		L"ffmpeg.exe introuvable.\nNecessaire pour le live.\nTelecharger la build officielle a cote de ce programme ?",
+		L"ffmpeg.exe non trovato.\nServe per la diretta.\nScaricare la build ufficiale accanto a questo programma?",
+		L"No se encontro ffmpeg.exe.\nEs necesario para el directo.\n¿Descargar la build oficial junto a este programa?",
+		L"ffmpeg.exe를 찾을 수 없습니다.\n라이브에 필요합니다.\n공식 빌드를 받아 이 프로그램과 같은 폴더에 둘까요?",
+		L"找不到 ffmpeg.exe。\n直播需要它。\n是否下载官方构建并放到本程序同目录？",
+		L"لم يُعثر على ffmpeg.exe.\nمطلوب للبث.\nتنزيل البناء الرسمي ووضعه بجانب البرنامج؟",
+		L"ffmpeg.exe не найден.\nНужен для эфира.\nСкачать официальную сборку рядом с программой?",
+		L"ffmpeg.exe nicht gefunden.\nFur Live noetig.\nOffizielle Build herunterladen und neben dieses Programm legen?",
+		L"ffmpeg.exe nao encontrado.\nNecessario para ao vivo.\nDescarregar a build oficial ao lado deste programa?",
+		L"ffmpeg.exe niet gevonden.\nNodig voor live.\nOfficiele build downloaden en naast dit programma zetten?",
+		L"Nie znaleziono ffmpeg.exe.\nWymagane do live.\nPobrac oficjalny build i umiescic obok programu?",
+		L"ffmpeg.exe bulunamadi.\nCanli yayin icin gerekli.\nResmi surumu indirip bu programla ayni klasore koyayim mi?"),
+		MB_YESNO | MB_ICONQUESTION);
+	if (ans != IDYES)
+		return FALSE;
+
+	CString err;
+	if (!ScLiveInstallFfmpegFromOfficial(this, err)) {
+		if (err.IsEmpty()) {
+			err = LL14(L"ffmpeg の導入に失敗しました。", L"Failed to install ffmpeg.",
+				L"Echec de l'installation de ffmpeg.", L"Installazione di ffmpeg non riuscita.",
+				L"Fallo la instalacion de ffmpeg.", L"ffmpeg 설치 실패.", L"安装 ffmpeg 失败。",
+				L"فشل تثبيت ffmpeg.", L"Не удалось установить ffmpeg.", L"Installation von ffmpeg fehlgeschlagen.",
+				L"Falha ao instalar ffmpeg.", L"Installatie van ffmpeg mislukt.", L"Instalacja ffmpeg nieudana.",
+				L"ffmpeg kurulumu basarisiz.");
+		}
+		AfxMessageBox(err, MB_ICONERROR);
+		return FALSE;
+	}
+
+	path[0] = 0;
+	if (!ResolveFfmpegPath(path, MAX_PATH)) {
+		AfxMessageBox(LL14(
+			L"配置後も ffmpeg.exe を認識できません。",
+			L"ffmpeg.exe still not recognized after install.",
+			L"ffmpeg.exe toujours non reconnu.",
+			L"ffmpeg.exe ancora non riconosciuto.",
+			L"ffmpeg.exe sigue sin reconocerse.",
+			L"배치 후에도 ffmpeg.exe를 찾지 못했습니다.",
+			L"安装后仍无法识别 ffmpeg.exe。",
+			L"ما زال ffmpeg.exe غير معروف.",
+			L"ffmpeg.exe всё ещё не распознан.",
+			L"ffmpeg.exe nach Installation nicht erkannt.",
+			L"ffmpeg.exe ainda nao reconhecido.",
+			L"ffmpeg.exe nog niet herkend.",
+			L"ffmpeg.exe nadal nierozpoznany.",
+			L"ffmpeg.exe hala taninamadi."), MB_ICONERROR);
+		return FALSE;
+	}
+
+	AfxMessageBox(LL14(
+		L"ffmpeg の配置が完了しました。ライブ配信が可能です。",
+		L"ffmpeg is ready. Live streaming is available.",
+		L"ffmpeg est pret. Le live est disponible.",
+		L"ffmpeg e pronto. La diretta e disponibile.",
+		L"ffmpeg listo. El directo esta disponible.",
+		L"ffmpeg 배치 완료. 라이브 방송이 가능합니다.",
+		L"ffmpeg 已就绪。可以开始直播。",
+		L"ffmpeg جاهز. البث المباشر متاح.",
+		L"ffmpeg готов. Эфир доступен.",
+		L"ffmpeg ist bereit. Live-Streaming ist verfugbar.",
+		L"ffmpeg pronto. Transmissao ao vivo disponivel.",
+		L"ffmpeg is klaar. Live-streaming is beschikbaar.",
+		L"ffmpeg gotowy. Live jest dostepny.",
+		L"ffmpeg hazir. Canli yayin kullanilabilir."), MB_ICONINFORMATION);
+	return TRUE;
+}
+
 void CScreenCaptureDlg::PersistLiveFieldsFromUi()
 {
 	if (!GetSafeHwnd()) return;
 	savedata.cap_live_mode = (m_live.GetSafeHwnd() && m_live.GetCheck()) ? 1 : 0;
-	int svc = m_liveSvc.GetSafeHwnd() ? m_liveSvc.GetCurSel() : savedata.cap_live_service;
-	if (svc < 0 || svc > 2) svc = 0;
-	savedata.cap_live_service = svc;
-	int priv = m_livePriv.GetSafeHwnd() ? m_livePriv.GetCurSel() : savedata.cap_live_privacy;
-	if (priv < 0 || priv > 2) priv = 0;
-	savedata.cap_live_privacy = priv;
-
-	CString s;
-	if (m_liveTitle.GetSafeHwnd()) { m_liveTitle.GetWindowText(s); ScLiveCopyField(savedata.cap_live_title, _countof(savedata.cap_live_title), s); }
-	if (m_liveDesc.GetSafeHwnd()) { m_liveDesc.GetWindowText(s); ScLiveCopyField(savedata.cap_live_desc, _countof(savedata.cap_live_desc), s); }
-	if (m_liveUrl.GetSafeHwnd()) { m_liveUrl.GetWindowText(s); ScLiveCopyField(savedata.cap_live_url, _countof(savedata.cap_live_url), s); }
-	if (m_liveKey.GetSafeHwnd()) { m_liveKey.GetWindowText(s); ScLiveCopyField(savedata.cap_live_key, _countof(savedata.cap_live_key), s); }
-	if (m_liveCid.GetSafeHwnd()) { m_liveCid.GetWindowText(s); ScLiveCopyField(savedata.yt_client_id, _countof(savedata.yt_client_id), s); }
-	if (m_liveCsec.GetSafeHwnd()) { m_liveCsec.GetWindowText(s); ScLiveCopyField(savedata.yt_client_secret, _countof(savedata.yt_client_secret), s); }
+	// 詳細フィールドは専用UI側。開いていればそこから flush
+	SyncScLiveSettingsIfOpen();
 }
 
 void CScreenCaptureDlg::ApplyLiveFieldsToUi()
@@ -923,24 +1406,6 @@ void CScreenCaptureDlg::ApplyLiveFieldsToUi()
 	if (!GetSafeHwnd()) return;
 	if (m_live.GetSafeHwnd())
 		m_live.SetCheck(savedata.cap_live_mode ? BST_CHECKED : BST_UNCHECKED);
-	if (m_liveSvc.GetSafeHwnd()) {
-		int svc = savedata.cap_live_service;
-		if (svc < 0 || svc > 2) svc = 0;
-		if (m_liveSvc.GetCount() > 0)
-			m_liveSvc.SetCurSel(svc);
-	}
-	if (m_livePriv.GetSafeHwnd()) {
-		int priv = savedata.cap_live_privacy;
-		if (priv < 0 || priv > 2) priv = 0;
-		if (m_livePriv.GetCount() > 0)
-			m_livePriv.SetCurSel(priv);
-	}
-	if (m_liveTitle.GetSafeHwnd()) m_liveTitle.SetWindowText(savedata.cap_live_title);
-	if (m_liveDesc.GetSafeHwnd()) m_liveDesc.SetWindowText(savedata.cap_live_desc);
-	if (m_liveUrl.GetSafeHwnd()) m_liveUrl.SetWindowText(savedata.cap_live_url);
-	if (m_liveKey.GetSafeHwnd()) m_liveKey.SetWindowText(savedata.cap_live_key);
-	if (m_liveCid.GetSafeHwnd()) m_liveCid.SetWindowText(savedata.yt_client_id);
-	if (m_liveCsec.GetSafeHwnd()) m_liveCsec.SetWindowText(savedata.yt_client_secret);
 	SyncLiveUiEnable();
 }
 
@@ -948,10 +1413,6 @@ void CScreenCaptureDlg::SyncLiveUiEnable()
 {
 	if (!GetSafeHwnd()) return;
 	const BOOL liveOn = m_live.GetSafeHwnd() && m_live.GetCheck();
-	int svc = m_liveSvc.GetSafeHwnd() ? m_liveSvc.GetCurSel() : 0;
-	if (svc < 0) svc = 0;
-	const BOOL isYt = (svc == 0);
-	const BOOL isNicoOrCustom = (svc == 1 || svc == 2);
 
 	if (m_live.GetSafeHwnd()) {
 		m_live.SetWindowText(LL14(
@@ -960,75 +1421,14 @@ void CScreenCaptureDlg::SyncLiveUiEnable()
 			L"Прямой эфир", L"Livestream", L"Transmissão ao vivo", L"Livestream",
 			L"Transmisja na żywo", L"Canlı yayın"));
 	}
-	if (m_liveSvcLabel.GetSafeHwnd()) {
-		m_liveSvcLabel.SetWindowText(LL14(
-			L"配信先", L"Service", L"Service", L"Servizio", L"Servicio", L"서비스", L"服务", L"الخدمة",
-			L"Сервис", L"Dienst", L"Serviço", L"Dienst", L"Usługa", L"Servis"));
+	if (m_liveCfg.GetSafeHwnd()) {
+		m_liveCfg.SetWindowText(LL14(
+			L"設定…", L"Settings…", L"Réglages…", L"Impostazioni…",
+			L"Ajustes…", L"설정…", L"设置…", L"إعدادات…",
+			L"Настройки…", L"Einstellungen…", L"Definições…", L"Instellingen…",
+			L"Ustawienia…", L"Ayarlar…"));
+		m_liveCfg.EnableWindow(TRUE);
 	}
-	if (m_livePrivLabel.GetSafeHwnd()) {
-		m_livePrivLabel.SetWindowText(LL14(
-			L"公開", L"Privacy", L"Visibilité", L"Privacy", L"Privacidad", L"공개", L"公开", L"الخصوصية",
-			L"Доступ", L"Sichtbarkeit", L"Privacidade", L"Privacy", L"Prywatność", L"Gizlilik"));
-	}
-	if (m_liveTitleLabel.GetSafeHwnd()) {
-		m_liveTitleLabel.SetWindowText(LL14(
-			L"タイトル", L"Title", L"Titre", L"Titolo", L"Título", L"제목", L"标题", L"العنوان",
-			L"Название", L"Titel", L"Título", L"Titel", L"Tytuł", L"Başlık"));
-	}
-	if (m_liveDescLabel.GetSafeHwnd()) {
-		m_liveDescLabel.SetWindowText(LL14(
-			L"説明", L"Desc", L"Desc", L"Desc", L"Desc", L"설명", L"说明", L"الوصف",
-			L"Опис", L"Beschr.", L"Desc", L"Beschr.", L"Opis", L"Açıkl."));
-	}
-	if (m_liveUrlLabel.GetSafeHwnd()) {
-		m_liveUrlLabel.SetWindowText(LL14(
-			L"RTMP URL", L"RTMP URL", L"URL RTMP", L"URL RTMP", L"URL RTMP", L"RTMP URL", L"RTMP URL", L"رابط RTMP",
-			L"RTMP URL", L"RTMP-URL", L"URL RTMP", L"RTMP-URL", L"URL RTMP", L"RTMP URL"));
-	}
-	if (m_liveKeyLabel.GetSafeHwnd()) {
-		m_liveKeyLabel.SetWindowText(LL14(
-			L"ストリームキー", L"Stream key", L"Clé de flux", L"Chiave stream", L"Clave de stream", L"스트림 키", L"串流密钥", L"مفتاح البث",
-			L"Ключ потока", L"Stream-Schlüssel", L"Chave de stream", L"Streamkey", L"Klucz streamu", L"Yayın anahtarı"));
-	}
-	if (m_liveCidLabel.GetSafeHwnd()) {
-		m_liveCidLabel.SetWindowText(L"Client ID");
-	}
-	if (m_liveCsecLabel.GetSafeHwnd()) {
-		m_liveCsecLabel.SetWindowText(L"Secret");
-	}
-	if (m_liveAuth.GetSafeHwnd()) {
-		m_liveAuth.SetWindowText(LL14(
-			L"YouTube認証", L"YouTube Auth", L"Auth YouTube", L"Auth YouTube",
-			L"Auth YouTube", L"YouTube 인증", L"YouTube 认证", L"مصادقة YouTube",
-			L"Вход YouTube", L"YouTube-Auth", L"Auth YouTube", L"YouTube-auth",
-			L"Auth YouTube", L"YouTube Auth"));
-	}
-	if (m_liveCreate.GetSafeHwnd()) {
-		m_liveCreate.SetWindowText(LL14(
-			L"配信枠作成", L"Create broadcast", L"Créer diffusion", L"Crea diretta",
-			L"Crear emisión", L"방송 생성", L"创建直播", L"إنشاء بث",
-			L"Создать эфир", L"Broadcast anlegen", L"Criar transmissão", L"Broadcast maken",
-			L"Utwórz transmisję", L"Yayın oluştur"));
-	}
-
-	const int showYt = (liveOn && isYt) ? SW_SHOW : SW_HIDE;
-	const int showKeyEdit = liveOn ? SW_SHOW : SW_SHOW; // 常時表示（タスク: path 同様見える）
-	(void)showKeyEdit;
-
-	if (m_liveAuth.GetSafeHwnd()) m_liveAuth.ShowWindow(showYt);
-	if (m_liveCreate.GetSafeHwnd()) m_liveCreate.ShowWindow(showYt);
-	if (m_livePrivLabel.GetSafeHwnd()) m_livePrivLabel.ShowWindow(showYt);
-	if (m_livePriv.GetSafeHwnd()) m_livePriv.ShowWindow(showYt);
-	if (m_liveCidLabel.GetSafeHwnd()) m_liveCidLabel.ShowWindow(showYt);
-	if (m_liveCid.GetSafeHwnd()) m_liveCid.ShowWindow(showYt);
-	if (m_liveCsecLabel.GetSafeHwnd()) m_liveCsecLabel.ShowWindow(showYt);
-	if (m_liveCsec.GetSafeHwnd()) m_liveCsec.ShowWindow(showYt);
-
-	// YouTube: URL/Key は API 出力（編集可だが Create/Auth で上書き）。Nico/Custom: 手入力。
-	if (m_liveUrl.GetSafeHwnd())
-		m_liveUrl.SetReadOnly(FALSE);
-	if (m_liveKey.GetSafeHwnd())
-		m_liveKey.SetReadOnly(FALSE);
 
 	if (!InterlockedCompareExchange(&m_run, 0, 0)) {
 		if (liveOn) {
@@ -1043,15 +1443,25 @@ void CScreenCaptureDlg::SyncLiveUiEnable()
 				L"Старт", L"Start", L"Iniciar", L"Start", L"Start", L"Başlat"));
 		}
 	}
-
-	(void)isNicoOrCustom;
 	RefreshOpaqueUi();
 }
 
 BOOL CScreenCaptureDlg::PrepareYouTubeLiveBeforeStart(CString& errOut)
 {
-	PersistLiveFieldsFromUi();
-	return ScLiveCreateBindBroadcast(errOut, TRUE, this);
+	SyncScLiveSettingsIfOpen();
+	if (savedata.yt_refresh_token[0]) {
+		// dat / セッション保持トークンで再ログイン省略
+		if (!ScLiveEnsureAccessToken(errOut)) {
+			// refresh 失効時のみ再認証
+			if (!ScLiveOAuthLoopback(this, errOut))
+				return FALSE;
+		}
+	} else {
+		if (!ScLiveOAuthLoopback(this, errOut))
+			return FALSE;
+	}
+	MpPersistSavedataQuick();
+	return ScLiveCreateBindBroadcast(errOut, TRUE);
 }
 
 void CScreenCaptureDlg::FinishYouTubeLiveAfterStop()
@@ -1067,7 +1477,6 @@ void CScreenCaptureDlg::FinishYouTubeLiveAfterStop()
 		savedata.yt_broadcast_id);
 	CStringA resp;
 	ScLiveYtApiJson(L"POST", obj, CStringA(), resp, err);
-	// 完了後は id をクリア（次回 Create 用）
 	savedata.yt_broadcast_id[0] = 0;
 	savedata.yt_stream_id[0] = 0;
 	MpPersistSavedataQuick();
@@ -1075,32 +1484,138 @@ void CScreenCaptureDlg::FinishYouTubeLiveAfterStop()
 
 void CScreenCaptureDlg::TryYouTubeGoLiveTransition()
 {
-	if (!savedata.yt_broadcast_id[0] || !savedata.yt_stream_id[0])
+	if (!savedata.yt_broadcast_id[0] || !savedata.yt_stream_id[0]) {
+		InterlockedExchange(&m_ytLivePhase, 5); // 枠IDなし
 		return;
-	CString err;
-	if (!ScLiveEnsureAccessToken(err))
+	}
+	if (m_ytLiveTransitionDone)
 		return;
 
+	CString err;
+	if (!ScLiveEnsureAccessToken(err)) {
+		_tcsncpy(m_ytStreamStatus, L"token_err", _countof(m_ytStreamStatus) - 1);
+		InterlockedExchange(&m_ytLivePhase, 4);
+		return;
+	}
+
+	auto jsonStatus = [](const CStringA& json, const char* key, CStringA& out) -> BOOL {
+		out.Empty();
+		const char* p = strstr((const char*)json, key);
+		if (!p) return FALSE;
+		const char* q = strchr(p, ':');
+		if (!q) return FALSE;
+		++q;
+		while (*q == ' ' || *q == '\t') ++q;
+		if (*q != '\"') return FALSE;
+		++q;
+		const char* e = strchr(q, '\"');
+		if (!e || e <= q) return FALSE;
+		out = CStringA(q, (int)(e - q));
+		return TRUE;
+	};
+
+	// streamStatus
 	CString listObj;
 	listObj.Format(L"/youtube/v3/liveStreams?part=status&id=%s", savedata.yt_stream_id);
 	CStringA listResp;
-	if (!ScLiveYtApiJson(L"GET", listObj, CStringA(), listResp, err))
+	if (!ScLiveYtApiJson(L"GET", listObj, CStringA(), listResp, err)) {
+		_tcsncpy(m_ytStreamStatus, L"stream_api_err", _countof(m_ytStreamStatus) - 1);
+		InterlockedExchange(&m_ytLivePhase, 4);
 		return;
-	const char* p = strstr((const char*)listResp, "\"streamStatus\"");
-	BOOL active = FALSE;
-	if (p) {
-		const char* q = strchr(p, ':');
-		if (q && strstr(q, "active"))
-			active = TRUE;
 	}
-	if (!active)
-		return;
+	CStringA streamStatus;
+	jsonStatus(listResp, "\"streamStatus\"", streamStatus);
+	const BOOL active = (streamStatus == "active");
 
-	CString obj;
-	obj.Format(L"/youtube/v3/liveBroadcasts/transition?broadcastStatus=live&id=%s&part=status",
-		savedata.yt_broadcast_id);
-	CStringA resp;
-	ScLiveYtApiJson(L"POST", obj, CStringA(), resp, err);
+	// lifeCycleStatus
+	CString bcObj;
+	bcObj.Format(L"/youtube/v3/liveBroadcasts?part=status&id=%s", savedata.yt_broadcast_id);
+	CStringA bcResp;
+	CStringA life;
+	if (ScLiveYtApiJson(L"GET", bcObj, CStringA(), bcResp, err))
+		jsonStatus(bcResp, "\"lifeCycleStatus\"", life);
+
+	// 通常時は API 生ステータス（ready 等）を UI に出さない
+	m_ytStreamStatus[0] = 0;
+
+	if (life == "live" || life == "liveStarting") {
+		m_ytLiveTransitionDone = TRUE;
+		InterlockedExchange(&m_ytLivePhase, 3);
+		return;
+	}
+
+	if (!active) {
+		InterlockedExchange(&m_ytLivePhase, 1); // RTMP待ち
+		return;
+	}
+
+	InterlockedExchange(&m_ytLivePhase, 2); // 開始処理中
+
+	auto tryTransition = [&](const wchar_t* status, CStringA& errBody) -> BOOL {
+		errBody.Empty();
+		CString obj;
+		obj.Format(L"/youtube/v3/liveBroadcasts/transition?broadcastStatus=%s&id=%s&part=status",
+			status, savedata.yt_broadcast_id);
+		CStringA resp;
+		CString localErr;
+		if (ScLiveYtApiJson(L"POST", obj, CStringA(), resp, localErr))
+			return TRUE;
+		errBody = resp;
+		if (errBody.GetLength() > 180)
+			errBody = errBody.Left(180);
+		return FALSE;
+	};
+
+	// YouTube: ready/created → testing → live（同一ティックで連打しない）
+	if (life == "testing") {
+		CStringA errBody;
+		if (tryTransition(L"live", errBody)) {
+			m_ytLiveTransitionDone = TRUE;
+			InterlockedExchange(&m_ytLivePhase, 3);
+			return;
+		}
+		CString w;
+		w.Format(L"live_fail/%s", errBody.IsEmpty() ? L"?" : CString(errBody));
+		_tcsncpy(m_ytStreamStatus, w, _countof(m_ytStreamStatus) - 1);
+		m_ytStreamStatus[_countof(m_ytStreamStatus) - 1] = 0;
+		InterlockedExchange(&m_ytLivePhase, 4);
+		return;
+	}
+
+	if (!m_ytTestingRequested) {
+		CStringA errBody;
+		if (tryTransition(L"testing", errBody) || life == "testStarting") {
+			m_ytTestingRequested = TRUE;
+			InterlockedExchange(&m_ytLivePhase, 2);
+			return; // 次ポーリングで live へ
+		}
+		// testing 不可でも live を試す（一部アカウント）
+		if (tryTransition(L"live", errBody)) {
+			m_ytLiveTransitionDone = TRUE;
+			InterlockedExchange(&m_ytLivePhase, 3);
+			return;
+		}
+		CString w;
+		w.Format(L"trans_fail/%s", errBody.IsEmpty() ? L"?" : CString(errBody));
+		_tcsncpy(m_ytStreamStatus, w, _countof(m_ytStreamStatus) - 1);
+		m_ytStreamStatus[_countof(m_ytStreamStatus) - 1] = 0;
+		InterlockedExchange(&m_ytLivePhase, 4);
+		return;
+	}
+
+	{
+		CStringA errBody;
+		if (tryTransition(L"live", errBody)) {
+			m_ytLiveTransitionDone = TRUE;
+			InterlockedExchange(&m_ytLivePhase, 3);
+			return;
+		}
+		CString w;
+		w.Format(L"live_fail/%s", errBody.IsEmpty() ? L"?" : CString(errBody));
+		_tcsncpy(m_ytStreamStatus, w, _countof(m_ytStreamStatus) - 1);
+		m_ytStreamStatus[_countof(m_ytStreamStatus) - 1] = 0;
+		InterlockedExchange(&m_ytLivePhase, 4);
+	}
 }
 
 void CScreenCaptureDlg::OnBnClickedLive()
@@ -1109,114 +1624,56 @@ void CScreenCaptureDlg::OnBnClickedLive()
 	PersistLiveFieldsFromUi();
 	SyncLiveUiEnable();
 	PersistUiToSavedata();
+	const BOOL liveOn = m_live.GetSafeHwnd() && m_live.GetCheck();
+	if (liveOn) {
+		EnsureFfmpegAvailable(TRUE);
+		OpenScLiveSettingsModeless(this);
+	} else
+		CloseScLiveSettingsFromOwner();
 }
 
-void CScreenCaptureDlg::OnCbnSelchangeLiveSvc()
+void CScreenCaptureDlg::OnBnClickedLiveCfg()
 {
 	if (m_uiLocked) return;
-	PersistLiveFieldsFromUi();
-	SyncLiveUiEnable();
-	PersistUiToSavedata();
+	if (m_live.GetSafeHwnd() && !m_live.GetCheck()) {
+		m_live.SetCheck(BST_CHECKED);
+		OnBnClickedLive();
+		return;
+	}
+	EnsureFfmpegAvailable(TRUE);
+	OpenScLiveSettingsModeless(this);
 }
 
-void CScreenCaptureDlg::OnCbnSelchangeLivePriv()
+BOOL ScLiveRunOAuth(CWnd* owner, CString& errOut)
 {
-	if (m_uiLocked) return;
-	PersistLiveFieldsFromUi();
-	PersistUiToSavedata();
+	const BOOL ok = ScLiveOAuthLoopback(owner, errOut);
+	if (ok)
+		MpPersistSavedataQuick();
+	return ok;
 }
 
-void CScreenCaptureDlg::OnBnClickedLiveAuth()
+BOOL ScLiveIsLoggedIn()
 {
-	if (m_uiLocked) return;
-	if (!m_live.GetCheck()) return;
-	if (m_liveSvc.GetCurSel() != 0) {
-		ScLiveMsgError(this, LL14(
-			L"認証は YouTube 選択時のみです。",
-			L"Auth is only for YouTube.",
-			L"Auth uniquement pour YouTube.",
-			L"Auth solo per YouTube.",
-			L"Auth solo para YouTube.",
-			L"인증은 YouTube 선택 시에만.",
-			L"仅在选择 YouTube 时可认证。",
-			L"المصادقة لـ YouTube فقط.",
-			L"Авторизация только для YouTube.",
-			L"Auth nur bei YouTube.",
-			L"Auth só para YouTube.",
-			L"Auth alleen voor YouTube.",
-			L"Auth tylko dla YouTube.",
-			L"Auth yalnızca YouTube için."));
-		return;
-	}
-	PersistLiveFieldsFromUi();
-	CString err;
-	if (!ScLiveOAuthLoopback(this, err)) {
-		ScLiveMsgError(this, err);
-		return;
-	}
-	::MessageBox(m_hWnd, LL14(
-		L"YouTube 認証に成功しました。",
-		L"YouTube authentication succeeded.",
-		L"Authentification YouTube réussie.",
-		L"Autenticazione YouTube riuscita.",
-		L"Autenticación de YouTube correcta.",
-		L"YouTube 인증에 성공했습니다.",
-		L"YouTube 认证成功。",
-		L"نجحت مصادقة YouTube.",
-		L"Авторизация YouTube выполнена.",
-		L"YouTube-Anmeldung erfolgreich.",
-		L"Autenticação YouTube concluída.",
-		L"YouTube-authenticatie geslaagd.",
-		L"Uwierzytelnienie YouTube powiodło się.",
-		L"YouTube kimlik doğrulaması başarılı."),
-		LL14(L"画面キャプチャ", L"Screen capture", L"Capture d'écran", L"Cattura schermo",
-			L"Captura de pantalla", L"화면 캡처", L"屏幕捕获", L"التقاط الشاشة",
-			L"Захват экрана", L"Bildschirmaufnahme", L"Captura de ecrã", L"Schermopname",
-			L"Przechwytywanie ekranu", L"Ekran yakalama"),
-		MB_OK | MB_ICONINFORMATION);
+	return savedata.yt_refresh_token[0] != 0;
 }
 
-void CScreenCaptureDlg::OnBnClickedLiveCreate()
+BOOL ScLiveRunCreateBroadcast(CWnd* owner, CString& errOut)
 {
-	if (m_uiLocked) return;
-	if (!m_live.GetCheck()) return;
-	if (m_liveSvc.GetCurSel() != 0) {
-		ScLiveMsgError(this, LL14(
-			L"配信枠作成は YouTube のみです。Nico/カスタムは URL とキーを手入力してください。",
-			L"Create broadcast is YouTube-only. For Nico/Custom, enter URL and key.",
-			L"Création réservée à YouTube. Nico/Perso: saisissez URL et clé.",
-			L"Crea diretta solo YouTube. Nico/Custom: inserisci URL e chiave.",
-			L"Crear emisión solo YouTube. Nico/Personalizado: introduzca URL y clave.",
-			L"방송 생성은 YouTube 전용. Nico/사용자 지정은 URL·키를 입력하세요.",
-			L"创建直播仅限 YouTube。Nico/自定义请手动填写 URL 和密钥。",
-			L"إنشاء البث لـ YouTube فقط. لـ Nico/مخصص أدخل الرابط والمفتاح.",
-			L"Создание эфира только для YouTube. Для Nico/своего — введите URL и ключ.",
-			L"Broadcast anlegen nur für YouTube. Nico/Custom: URL und Key eingeben.",
-			L"Criar transmissão só YouTube. Nico/Personalizado: introduza URL e chave.",
-			L"Broadcast maken alleen YouTube. Nico/Custom: vul URL en key in.",
-			L"Tworzenie transmisji tylko YouTube. Nico/Własne: wpisz URL i klucz.",
-			L"Yayın oluşturma yalnızca YouTube. Nico/Özel için URL ve anahtar girin."));
-		return;
+	SyncScLiveSettingsIfOpen();
+	if (savedata.yt_refresh_token[0]) {
+		if (!ScLiveEnsureAccessToken(errOut)) {
+			if (!ScLiveOAuthLoopback(owner, errOut))
+				return FALSE;
+		}
+	} else {
+		if (!ScLiveOAuthLoopback(owner, errOut))
+			return FALSE;
 	}
-	PersistLiveFieldsFromUi();
-	CString err;
-	if (!PrepareYouTubeLiveBeforeStart(err)) {
-		ScLiveMsgError(this, err);
-		return;
-	}
-	m_status.SetWindowText(LL14(
-		L"YouTube 配信枠を作成し、RTMP URL/キーを設定しました。",
-		L"YouTube broadcast created; RTMP URL/key set.",
-		L"Diffusion YouTube créée; URL/clé RTMP définis.",
-		L"Diretta YouTube creata; URL/chiave RTMP impostati.",
-		L"Emisión de YouTube creada; URL/clave RTMP listos.",
-		L"YouTube 방송을 만들고 RTMP URL/키를 설정했습니다.",
-		L"已创建 YouTube 直播并填入 RTMP URL/密钥。",
-		L"تم إنشاء بث YouTube وتعيين رابط/مفتاح RTMP.",
-		L"Эфир YouTube создан; RTMP URL/ключ заданы.",
-		L"YouTube-Broadcast angelegt; RTMP-URL/Key gesetzt.",
-		L"Transmissão YouTube criada; URL/chave RTMP definidos.",
-		L"YouTube-broadcast gemaakt; RTMP-URL/key gezet.",
-		L"Utworzono transmisję YouTube; ustawiono URL/klucz RTMP.",
-		L"YouTube yayını oluşturuldu; RTMP URL/anahtar ayarlandı."));
+	MpPersistSavedataQuick();
+	return ScLiveCreateBindBroadcast(errOut, TRUE);
+}
+
+BOOL ScLiveHaveOAuthClientCreds()
+{
+	return ScLiveHaveClientCreds();
 }

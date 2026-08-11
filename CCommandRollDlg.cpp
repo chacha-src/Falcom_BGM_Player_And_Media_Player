@@ -1,4 +1,4 @@
-﻿#include "stdafx.h"
+#include "stdafx.h"
 #include "CCommandRollDlg.h"
 #include "CPromptDlg.h"
 #include "CPromptEngine.h"
@@ -727,10 +727,16 @@ void CCommandRollView::PaintRollSoft3D(CDC& dc, const CRect& rc)
 {
 	const int w = rc.Width(), h = rc.Height();
 	if (w < 8 || h < 8) return;
-	CDC mem; mem.CreateCompatibleDC(&dc);
-	CBitmap bmp; bmp.CreateCompatibleBitmap(&dc, w, h);
-	CBitmap* ob = mem.SelectObject(&bmp);
-	mem.FillSolidRect(0, 0, w, h, RGB(32, 34, 42));
+	if (CCustomPopupMenu::GetTrackingRoot() != NULL) {
+		dc.FillSolidRect(&rc, RGB(32, 34, 42));
+		return;
+	}
+	// スクロール／ドラッグ中は軽量パス（毎フレ Soft2D 後処理や文字投影を避ける）
+	const BOOL interacting = (m_userScrollTick != 0
+		&& (GetTickCount() - m_userScrollTick) < 180u)
+		|| (::GetCapture() == m_hWnd);
+
+	dc.FillSolidRect(0, 0, w, h, RGB(32, 34, 42));
 
 	const float laneDepth = 0.085f;
 	const float farZ = laneDepth * (float)kLaneCount + 0.20f;
@@ -790,13 +796,13 @@ void CCommandRollView::PaintRollSoft3D(CDC& dc, const CRect& rc)
 		}
 	}
 
-	sc.Flush(mem);
+	sc.Flush(dc);
 
-	// テキストは PlgBlt せず、投影位置へスクリーン空間で描く（潰れ防止）
-	{
-		mem.SetBkMode(TRANSPARENT);
-		mem.SetTextColor(RGB(230, 235, 245));
-		CFont* of = mem.SelectObject(GetFont());
+	// 文字／Soft2D後処理は定着時のみ（スクロール中は箱だけで十分・体感が3倍遅くなる主因だった）
+	if (!interacting) {
+		dc.SetBkMode(TRANSPARENT);
+		dc.SetTextColor(RGB(230, 235, 245));
+		CFont* of = dc.SelectObject(GetFont());
 		const double step = (m_pxPerSec >= 120) ? 0.25
 			: (m_pxPerSec >= 60) ? 0.5
 			: (m_pxPerSec >= 24) ? 1.0
@@ -811,8 +817,8 @@ void CCommandRollView::PaintRollSoft3D(CDC& dc, const CRect& rc)
 			if (step < 1.0) lab.Format(L"%.2f", t);
 			else lab.Format(L"%.0f", t);
 			CRect tr(p.x - 28, p.y - 10, p.x + 28, p.y + 10);
-			mem.FillSolidRect(&tr, RGB(40, 44, 58));
-			mem.DrawText(lab, &tr, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+			dc.FillSolidRect(&tr, RGB(40, 44, 58));
+			dc.DrawText(lab, &tr, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
 		}
 		for (int lane = 0; lane < kLaneCount; ++lane) {
 			const float z = laneDepth * ((float)lane + 0.45f);
@@ -821,24 +827,24 @@ void CCommandRollView::PaintRollSoft3D(CDC& dc, const CRect& rc)
 			GdiSoft3D::Project(v, -1.12f, y0, z, p);
 			CString name = LaneName(lane);
 			CRect tr(p.x - 36, p.y - 9, p.x + 36, p.y + 9);
-			mem.FillSolidRect(&tr, RGB(36, 40, 54));
-			mem.DrawText(name, &tr, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+			dc.FillSolidRect(&tr, RGB(36, 40, 54));
+			dc.DrawText(name, &tr, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
 		}
-		if (of) mem.SelectObject(of);
-	}
+		if (of) dc.SelectObject(of);
 
-	{
-		GdiSoft2D::Context s2;
-		if (s2.Create(w, h, false) && s2.fb.hdc) {
-			::BitBlt(s2.fb.hdc, 0, 0, w, h, mem.GetSafeHdc(), 0, 0, SRCCOPY);
-			s2.Vignette(0.38f);
-			s2.Saturate(1.08f);
-			s2.Present(mem, 0, 0);
+		static GdiSoft2D::Context s2;
+		static int s2w = 0, s2h = 0;
+		if (s2w != w || s2h != h || !s2.fb.hdc) {
+			if (s2.Create(w, h, false) && s2.fb.hdc) {
+				s2w = w; s2h = h;
+			}
+		}
+		if (s2.fb.hdc && s2w == w && s2h == h) {
+			::BitBlt(s2.fb.hdc, 0, 0, w, h, dc.GetSafeHdc(), 0, 0, SRCCOPY);
+			s2.Vignette(0.28f);
+			s2.Present(dc, 0, 0);
 		}
 	}
-
-	dc.BitBlt(rc.left, rc.top, w, h, &mem, 0, 0, SRCCOPY);
-	mem.SelectObject(ob);
 }
 
 void CCommandRollView::AutoFollowPlayhead(double t)
@@ -861,11 +867,23 @@ void CCommandRollView::TickPlayhead()
 {
 	const double t = MpGetPerformanceTimeSec();
 	EnsureDurationFloor(t);
+	const double oldScroll = m_scrollSec;
 	AutoFollowPlayhead(t);
-	// ヘッド位置が変わった／追随でスクロールしたときだけ再描画
+	// ヘッド位置か追随スクロールが変わったときだけ再描画。
+	// （旧: plf&&follow で毎タイマ Invalidate → 再生中に常時フル描画して重くなる）
 	const int hxOld = (m_lastDrawnPlay < 0) ? -99999 : SecToX(m_lastDrawnPlay);
 	const int hxNew = SecToX(t);
-	if (hxOld != hxNew || (plf && m_followPlay))
+	BOOL need = (hxOld != hxNew || m_scrollSec != oldScroll);
+	// Soft3D 軽量パス解除直後にラベル／ヴィネット品質パスを1回戻す
+	if (IsSoft3D() && m_userScrollTick != 0) {
+		const DWORD age = GetTickCount() - m_userScrollTick;
+		static DWORD s_qualityForTick = 0;
+		if (age >= 180u && s_qualityForTick != m_userScrollTick) {
+			s_qualityForTick = m_userScrollTick;
+			need = TRUE;
+		}
+	}
+	if (need)
 		InvalidateRoll();
 }
 
@@ -956,7 +974,9 @@ void CCommandRollView::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* /*pScrollB
 	if (pos > maxPos) pos = maxPos;
 	m_scrollSec = (double)pos / max(m_pxPerSec, 0.001);
 	NoteUserScroll();
-	SyncScrollBars();
+	// THUMBTRACK 中の SetScrollInfo は毎ピクセル高コスト。描画だけ先に回す
+	if (nSBCode != SB_THUMBTRACK)
+		SyncScrollBars();
 	InvalidateRoll();
 }
 
@@ -982,7 +1002,8 @@ void CCommandRollView::OnVScroll(UINT nSBCode, UINT nPos, CScrollBar* /*pScrollB
 	if (pos > maxPos) pos = maxPos;
 	m_scrollY = pos;
 	NoteUserScroll();
-	SyncScrollBars();
+	if (nSBCode != SB_THUMBTRACK)
+		SyncScrollBars();
 	InvalidateRoll();
 }
 
@@ -991,6 +1012,7 @@ BOOL CCommandRollView::OnMouseWheel(UINT nFlags, short zDelta, CPoint pt)
 	if (IsSoft3D() && !(nFlags & (MK_SHIFT | MK_CONTROL))) {
 		GdiSoft3D::WheelZoom(m_cam3d, zDelta);
 		PersistSoft3DCam();
+		NoteUserScroll();
 		InvalidateRoll();
 		return TRUE;
 	}
@@ -1053,10 +1075,11 @@ void CCommandRollView::OnMouseMove(UINT nFlags, CPoint point)
 			m_rotDragging = false;
 			if (GetCapture() == this) ReleaseCapture();
 			PersistSoft3DCam();
+			InvalidateRoll();
 			return;
 		}
 		GdiSoft3D::OrbitDrag(m_cam3d, m_rotYaw0, m_rotPitch0, m_rotOrigin, point);
-		PersistSoft3DCam();
+		NoteUserScroll();
 		InvalidateRoll();
 		return;
 	}
@@ -1081,6 +1104,7 @@ void CCommandRollView::OnLButtonUp(UINT nFlags, CPoint point)
 		m_rotDragging = false;
 		if (GetCapture() == this) ReleaseCapture();
 		PersistSoft3DCam();
+		InvalidateRoll();
 		return;
 	}
 	if (GetCapture() == this) ReleaseCapture();

@@ -1,4 +1,4 @@
-﻿// CMediaPlayerDlg.cpp : メディアプレイヤーモード画面(張りぼて)とモード選択ダイアログ
+// CMediaPlayerDlg.cpp : メディアプレイヤーモード画面(張りぼて)とモード選択ダイアログ
 //
 // 実体は COggDlg(og->) と CPlayList(pl->)。ここは表示と操作の取り次ぎだけを行う。
 // メディアプレイヤーモード中は og / pl のウィンドウを非表示にして裏で生かしておく。
@@ -4752,15 +4752,26 @@ void CMediaPlayerDlg::BannerSoft3dZoomCb(void* ctx, int value)
 void CMediaPlayerDlg::PresentBannerSoft3D(CDC* pDC)
 {
 	if (!pDC || m_bannerRect.IsRectEmpty()) return;
+	// コンテキストメニュー Track 中は重い Soft3D+Speana を止める（退場／再オープンで UI フリーズする）
+	if (CCustomPopupMenu::GetTrackingRoot() != NULL) {
+		pDC->FillSolidRect(&m_bannerRect, RGB(8, 10, 16));
+		return;
+	}
 	// アナライザ/ピアノと同様: Soft3D はバナー矩形だけ。ジャケ/情報は 2D サイドパネル。
 	// （旧: 3領域を1枚に載せてバーがジャケ・情報の下に食い込み、クリップで中心帯だけ見えて壊れて見えた）
 	const int sw = m_bannerRect.Width(), sh = m_bannerRect.Height();
 	if (sw < 40 || sh < 24) return;
 
-	CDC mem; mem.CreateCompatibleDC(pDC);
-	CBitmap bmp; bmp.CreateCompatibleBitmap(pDC, sw, sh);
-	CBitmap* ob = mem.SelectObject(&bmp);
-	mem.FillSolidRect(0, 0, sw, sh, RGB(8, 10, 16));
+	// 毎フレ CreateCompatibleBitmap しない（2D BlitVisualizer と同じ永続面）
+	if (m_memBanner.GetSafeHdc() == NULL)
+		m_memBanner.CreateCompatibleDC(pDC);
+	if (m_bannerCacheW != sw || m_bannerCacheH != sh || m_bmpBanner.GetSafeHandle() == NULL) {
+		if (m_bmpBanner.GetSafeHandle()) m_bmpBanner.DeleteObject();
+		if (!m_bmpBanner.CreateCompatibleBitmap(pDC, sw, sh)) return;
+		m_bannerCacheW = sw; m_bannerCacheH = sh;
+	}
+	HGDIOBJ oldBmp = ::SelectObject(m_memBanner.GetSafeHdc(), m_bmpBanner.GetSafeHandle());
+	m_memBanner.FillSolidRect(0, 0, sw, sh, RGB(8, 10, 16));
 
 	{
 		static DWORD s_fftMs = 0;
@@ -4830,7 +4841,7 @@ void CMediaPlayerDlg::PresentBannerSoft3D(CDC* pDC)
 	GdiSoft3D::BuildView(sw, sh, m_bannerCam3d, boxes, 1, v);
 
 	if (!m_bannerSoftCtx.Create(sw, sh)) {
-		mem.SelectObject(ob);
+		::SelectObject(m_memBanner.GetSafeHdc(), oldBmp);
 		return;
 	}
 	GdiSoft3D::Context& ctx = m_bannerSoftCtx;
@@ -4861,18 +4872,18 @@ void CMediaPlayerDlg::PresentBannerSoft3D(CDC* pDC)
 	}
 
 	ctx.EndFrame();
-	ctx.Present(mem, 0, 0);
+	ctx.Present(m_memBanner, 0, 0);
 
 #if CCUSTOM_AERO_SUPPORT
 	if (savedata.aero == 1 && CCC_IsWin11())
-		CCC_BlitStretchNF(pDC->m_hDC, m_bannerRect.left, m_bannerRect.top, sw, sh, mem.GetSafeHdc(), 0, 0, sw, sh, RGB(0, 0, 0));
+		CCC_BlitStretchNF(pDC->m_hDC, m_bannerRect.left, m_bannerRect.top, sw, sh, m_memBanner.GetSafeHdc(), 0, 0, sw, sh, RGB(0, 0, 0));
 	else if (CCC_AcrylicCaption(m_hWnd) && CCC_IsWin11() && !CCC_IsAeroEnabled())
-		CCC_BlitStretchOpaque(pDC->m_hDC, m_bannerRect.left, m_bannerRect.top, sw, sh, mem.GetSafeHdc(), 0, 0, sw, sh);
+		CCC_BlitStretchOpaque(pDC->m_hDC, m_bannerRect.left, m_bannerRect.top, sw, sh, m_memBanner.GetSafeHdc(), 0, 0, sw, sh);
 	else
 #endif
-		pDC->BitBlt(m_bannerRect.left, m_bannerRect.top, sw, sh, &mem, 0, 0, SRCCOPY);
+		pDC->BitBlt(m_bannerRect.left, m_bannerRect.top, sw, sh, &m_memBanner, 0, 0, SRCCOPY);
 
-	mem.SelectObject(ob);
+	::SelectObject(m_memBanner.GetSafeHdc(), oldBmp);
 }
 
 
@@ -7534,6 +7545,7 @@ void CMediaPlayerDlg::OnLrcExpand()
 					centis = (DWORD)(sec * 100.0 + 0.5);
 			}
 			m_lrcView.SetPlayCentis(centis);
+			m_lrcView.BeginCatchFromTop(); // 途中拡大: 頭から該当行へ高速 chase
 		} else {
 			m_lrcView.Clear();
 		}

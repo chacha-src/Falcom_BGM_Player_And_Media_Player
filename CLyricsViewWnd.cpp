@@ -1,4 +1,4 @@
-﻿#include "StdAfx.h"
+#include "StdAfx.h"
 #include "CLyricsViewWnd.h"
 #include "CCustomControl.h"
 #include <math.h>
@@ -7,7 +7,9 @@ IMPLEMENT_DYNAMIC(CLyricsViewWnd, CWnd)
 
 namespace {
 	const UINT_PTR kAnimTimer = 61;
-	const UINT kAnimMs = 8; // ~120Hz サンプリング（実dtで積分）
+	// timerp と同じ ~60fps（16ms）。8ms はタイマ分解能で潰れ、重い描画と重なりギクシャクしやすい
+	const UINT kAnimMs = 16;
+	const UINT WM_LRC_ANIM_TICK = WM_APP + 0x4C52; // 'LR'
 	inline double AbsD(double x) { return (x < 0.0) ? -x : x; }
 	// 描画Yの量子化を安定させ、スクロール終端の1px震えを抑える
 	inline int ScrollToPix(double v)
@@ -70,6 +72,7 @@ BEGIN_MESSAGE_MAP(CLyricsViewWnd, CWnd)
 	ON_WM_SIZE()
 	ON_WM_MOUSEWHEEL()
 	ON_WM_RBUTTONUP()
+	ON_MESSAGE(WM_LRC_ANIM_TICK, &CLyricsViewWnd::OnAnimTick)
 END_MESSAGE_MAP()
 
 CLyricsViewWnd::CLyricsViewWnd()
@@ -81,12 +84,17 @@ CLyricsViewWnd::CLyricsViewWnd()
 	, m_scrollY(0.0)
 	, m_targetY(0.0)
 	, m_scrollVel(0.0)
+	, m_fastCatch(FALSE)
 	, m_lastAnimQpc(0)
 	, m_qpcFreq(0)
 	, m_fontPt(0)
 	, m_dpi(96)
 	, m_timer(0)
 	, m_overlay(FALSE)
+	, m_animPosted(0)
+	, m_oldBmp(nullptr)
+	, m_memW(0)
+	, m_memH(0)
 {
 	ZeroMemory(m_tm, sizeof(m_tm));
 	LARGE_INTEGER f = {};
@@ -97,6 +105,12 @@ CLyricsViewWnd::CLyricsViewWnd()
 CLyricsViewWnd::~CLyricsViewWnd()
 {
 	StopAnim();
+	if (m_memDC.GetSafeHdc()) {
+		if (m_oldBmp) m_memDC.SelectObject(m_oldBmp);
+		m_oldBmp = nullptr;
+		m_memDC.DeleteDC();
+	}
+	if (m_memBmp.GetSafeHandle()) m_memBmp.DeleteObject();
 	if (m_hWnd)
 		DestroyWindow();
 }
@@ -121,6 +135,7 @@ void CLyricsViewWnd::Clear()
 	m_scrollY = 0.0;
 	m_targetY = 0.0;
 	m_scrollVel = 0.0;
+	m_fastCatch = FALSE;
 	ZeroMemory(m_tm, sizeof(m_tm));
 	StopAnim();
 	if (m_hWnd)
@@ -130,6 +145,26 @@ void CLyricsViewWnd::Clear()
 UINT CLyricsViewWnd::GetViewDpi() const
 {
 	return LrcGetDpi(m_hWnd);
+}
+
+void CLyricsViewWnd::EnsureMemDC(int w, int h)
+{
+	if (w < 1) w = 1;
+	if (h < 1) h = 1;
+	if (m_memDC.GetSafeHdc() && m_memW == w && m_memH == h && m_memBmp.GetSafeHandle())
+		return;
+	if (m_memDC.GetSafeHdc()) {
+		if (m_oldBmp) m_memDC.SelectObject(m_oldBmp);
+		m_oldBmp = nullptr;
+		m_memDC.DeleteDC();
+	}
+	if (m_memBmp.GetSafeHandle()) m_memBmp.DeleteObject();
+	CClientDC dc(this);
+	m_memDC.CreateCompatibleDC(&dc);
+	m_memBmp.CreateCompatibleBitmap(&dc, w, h);
+	m_oldBmp = m_memDC.SelectObject(&m_memBmp);
+	m_memW = w;
+	m_memH = h;
 }
 
 void CLyricsViewWnd::EnsureFonts(int dpiPointTenths, LPCTSTR face)
@@ -160,16 +195,16 @@ void CLyricsViewWnd::EnsureFonts(int dpiPointTenths, LPCTSTR face)
 	TEXTMETRIC tm = {};
 	dc.GetTextMetrics(&tm);
 	const int pad = m_overlay ? MulDiv(8, (int)dpi, 96) : MulDiv(4, (int)dpi, 96);
+	const int prevLH = m_lineH;
 	m_lineH = tm.tmHeight + tm.tmExternalLeading + pad;
 	const int minLH = MulDiv(16, (int)dpi, 96);
 	if (m_lineH < minLH) m_lineH = minLH;
 	dc.SelectObject(old);
-	const double prevScroll = m_scrollY;
+	// 行高変化時はスクロール位置を比率で引き継ぎ（大ジャンプで瞬間合わせしない＝途中 chase を殺さない）
+	if (prevLH > 0 && m_lineH > 0 && prevLH != m_lineH)
+		m_scrollY = m_scrollY * ((double)m_lineH / (double)prevLH);
 	RecalcTarget();
-	// フォント寸法が変わったときだけ瞬間合わせ。追従中のジャンプを避ける
-	if (AbsD(prevScroll - m_targetY) > (double)m_lineH * 2.0)
-		m_scrollY = m_targetY;
-	else if (AbsD(m_scrollY - m_targetY) > 0.35)
+	if (AbsD(m_scrollY - m_targetY) > 0.35)
 		StartAnim();
 	if (m_hWnd)
 		Invalidate(FALSE);
@@ -192,18 +227,19 @@ void CLyricsViewWnd::SetLines(const CString* lines, int count, const DWORD* time
 	if (timeCount < 0) timeCount = 0;
 	// 番兵時刻(次行開始)を含めるため count+1 まで許可
 	if (timeCount > kMaxLines) timeCount = kMaxLines;
-	BOOL changed = (count != m_count) || (timeCount != m_tmCount);
-	if (!changed && lines) {
+	BOOL linesChanged = (count != m_count);
+	if (!linesChanged && lines) {
 		for (int i = 0; i < count; i++) {
-			if (m_line[i] != lines[i]) { changed = TRUE; break; }
+			if (m_line[i] != lines[i]) { linesChanged = TRUE; break; }
 		}
 	}
-	if (!changed && times) {
+	BOOL timesChanged = (timeCount != m_tmCount);
+	if (!timesChanged && times) {
 		for (int i = 0; i < timeCount; i++) {
-			if (m_tm[i] != times[i]) { changed = TRUE; break; }
+			if (m_tm[i] != times[i]) { timesChanged = TRUE; break; }
 		}
 	}
-	if (!changed) return;
+	if (!linesChanged && !timesChanged) return;
 	m_count = count;
 	m_tmCount = times ? timeCount : 0;
 	for (int i = 0; i < count; i++)
@@ -219,8 +255,31 @@ void CLyricsViewWnd::SetLines(const CString* lines, int count, const DWORD* time
 	if (m_cur >= m_count) m_cur = m_count > 0 ? m_count - 1 : 0;
 	m_scrollVel = 0.0;
 	RecalcTarget();
-	// 歌詞入れ替え時のみ瞬間合わせ（追従アニメの途中ジャンプを防ぐ）
-	m_scrollY = m_targetY;
+	if (linesChanged) {
+		// 曲／歌詞本文の入れ替え: 頭から高速 chase（途中オープンと同じ）
+		m_scrollY = 0.0;
+		m_fastCatch = (AbsD(m_targetY) > (double)m_lineH * 2.0) ? TRUE : FALSE;
+		if (m_fastCatch)
+			StartAnim();
+		else
+			m_scrollY = m_targetY;
+	} else {
+		// 時刻だけの微調整: 現位置を保ち通常追従
+		if (AbsD(m_scrollY - m_targetY) > 0.35)
+			StartAnim();
+	}
+	if (m_hWnd)
+		Invalidate(FALSE);
+}
+
+void CLyricsViewWnd::BeginCatchFromTop()
+{
+	m_scrollY = 0.0;
+	m_scrollVel = 0.0;
+	RecalcTarget();
+	m_fastCatch = (AbsD(m_targetY - m_scrollY) > 0.35) ? TRUE : FALSE;
+	if (m_fastCatch)
+		StartAnim();
 	if (m_hWnd)
 		Invalidate(FALSE);
 }
@@ -241,6 +300,10 @@ void CLyricsViewWnd::SetCurrent(int idx)
 	}
 	m_cur = idx;
 	RecalcTarget();
+	// 大距離 or 先頭付近からの chase → 高速パス
+	const double gap = AbsD(m_targetY - m_scrollY);
+	if (gap > (double)m_lineH * 3.0 || (m_scrollY < (double)m_lineH * 1.5 && gap > (double)m_lineH))
+		m_fastCatch = TRUE;
 	StartAnim();
 	if (m_hWnd)
 		Invalidate(FALSE);
@@ -283,7 +346,7 @@ void CLyricsViewWnd::SetPlayCentis(DWORD centis)
 		RecalcTarget();
 		if (AbsD(m_scrollY - m_targetY) > 0.35)
 			StartAnim();
-		if (fracChanged && m_hWnd)
+		if (fracChanged && m_hWnd && !m_fastCatch)
 			Invalidate(FALSE);
 	}
 }
@@ -317,6 +380,15 @@ void CLyricsViewWnd::RecalcTarget()
 	}
 }
 
+void CLyricsViewWnd::RequestAnimTick()
+{
+	if (!m_hWnd) return;
+	if (InterlockedCompareExchange(&m_animPosted, 1, 0) != 0)
+		return;
+	if (!::PostMessage(m_hWnd, WM_LRC_ANIM_TICK, 0, 0))
+		InterlockedExchange(&m_animPosted, 0);
+}
+
 void CLyricsViewWnd::StartAnim()
 {
 	if (!m_hWnd) return;
@@ -327,6 +399,8 @@ void CLyricsViewWnd::StartAnim()
 		m_lastAnimQpc = (ULONGLONG)now.QuadPart;
 	else
 		m_lastAnimQpc = ::GetTickCount64();
+	// timerp と同じ: oneshot Post で UI スレッドに即時フレームを積む（タイマ待ちを減らす）
+	RequestAnimTick();
 }
 
 void CLyricsViewWnd::StopAnim()
@@ -336,6 +410,8 @@ void CLyricsViewWnd::StopAnim()
 		m_timer = 0;
 	}
 	m_scrollVel = 0.0;
+	m_fastCatch = FALSE;
+	InterlockedExchange(&m_animPosted, 0);
 }
 
 void CLyricsViewWnd::StepScroll(double dtSec)
@@ -343,34 +419,62 @@ void CLyricsViewWnd::StepScroll(double dtSec)
 	if (dtSec < 0.0) dtSec = 0.0;
 	if (dtSec > 0.05) dtSec = 0.05; // スパイク吸収
 	const double d = m_targetY - m_scrollY;
-	if (AbsD(d) < 0.25 && AbsD(m_scrollVel) < 8.0) {
+	const double ad = AbsD(d);
+	const double lineH = (m_lineH > 0) ? (double)m_lineH : 18.0;
+
+	if (ad < 0.25 && AbsD(m_scrollVel) < 8.0) {
 		m_scrollY = m_targetY;
 		m_scrollVel = 0.0;
+		m_fastCatch = FALSE;
 		StopAnim();
 		Invalidate(FALSE);
 		return;
 	}
-	// 臨界減衰っぽい追従: 加速度 = ω^2 * d - 2ζω * v
-	// ω≈10, ζ≈1.05 → 素早く・行き過ぎ少なめ
-	const double omega = 11.0;
+
+	// ---- 大距離 catch-up（途中オープン／歌詞入替）: ~0.3〜0.45 秒で該当行へ ----
+	if (m_fastCatch || ad > lineH * 4.0) {
+		m_fastCatch = TRUE;
+		// 残り距離を tau 秒で埋める速度。下限で「止まって見える」のを防ぐ
+		const double tau = 0.28;
+		double v = d / tau;
+		const double vmin = lineH * 70.0;   // 最低 ~70 行/秒
+		const double vmax = lineH * 220.0;  // 上限 ~220 行/秒（長尺でも ~0.5s）
+		if (AbsD(v) < vmin) v = (d >= 0.0) ? vmin : -vmin;
+		if (v > vmax) v = vmax;
+		if (v < -vmax) v = -vmax;
+		const double step = v * dtSec;
+		if (AbsD(step) >= ad) {
+			m_scrollY = m_targetY;
+			m_scrollVel = 0.0;
+			m_fastCatch = FALSE;
+		} else {
+			m_scrollY += step;
+			m_scrollVel = v;
+			// 残りが数行になったら通常の臨界減衰へ（着地を滑らかに）
+			if (AbsD(m_targetY - m_scrollY) < lineH * 1.75)
+				m_fastCatch = FALSE;
+		}
+		Invalidate(FALSE);
+		return;
+	}
+
+	// ---- 通常追従: 臨界減衰っぽい（行送り） ----
+	const double omega = 14.0;
 	const double zeta = 1.05;
 	const double acc = (omega * omega) * d - (2.0 * zeta * omega) * m_scrollVel;
 	m_scrollVel += acc * dtSec;
-	// 速度上限（行高の約14倍/秒）で大ジャンプ時の飛び過ぎを抑える
-	const double vmax = (m_lineH > 0) ? ((double)m_lineH * 14.0) : 400.0;
+	const double vmax = lineH * 28.0; // 旧14 → 行送りも少し機敏に
 	if (m_scrollVel > vmax) m_scrollVel = vmax;
 	if (m_scrollVel < -vmax) m_scrollVel = -vmax;
 	m_scrollY += m_scrollVel * dtSec;
 	Invalidate(FALSE);
 }
 
-void CLyricsViewWnd::OnTimer(UINT_PTR nIDEvent)
+LRESULT CLyricsViewWnd::OnAnimTick(WPARAM, LPARAM)
 {
-	if (nIDEvent != kAnimTimer) {
-		CWnd::OnTimer(nIDEvent);
-		return;
-	}
-	double dt = 0.008;
+	InterlockedExchange(&m_animPosted, 0);
+	if (!m_hWnd) return 0;
+	double dt = 0.016;
 	if (m_qpcFreq) {
 		LARGE_INTEGER now = {};
 		if (::QueryPerformanceCounter(&now)) {
@@ -385,7 +489,27 @@ void CLyricsViewWnd::OnTimer(UINT_PTR nIDEvent)
 			dt = (double)(t - m_lastAnimQpc) * 0.001;
 		m_lastAnimQpc = t;
 	}
+	const BOOL wasCatch = m_fastCatch;
+	const double before = m_scrollY;
 	StepScroll(dt);
+	// まだ追従中なら次フレームを即 Post（timerp の oneshot 連鎖）。16ms 未満ならタイマに任せる
+	if (m_timer && AbsD(m_scrollY - m_targetY) > 0.35) {
+		if (wasCatch || AbsD(m_scrollY - before) > 0.5) {
+			if (dt >= 0.012)
+				RequestAnimTick();
+		}
+	}
+	return 0;
+}
+
+void CLyricsViewWnd::OnTimer(UINT_PTR nIDEvent)
+{
+	if (nIDEvent != kAnimTimer) {
+		CWnd::OnTimer(nIDEvent);
+		return;
+	}
+	// バックアップ駆動（Post が落ちても 60fps で継続）
+	RequestAnimTick();
 }
 
 void CLyricsViewWnd::OnSize(UINT nType, int cx, int cy)
@@ -403,6 +527,7 @@ BOOL CLyricsViewWnd::OnMouseWheel(UINT nFlags, short zDelta, CPoint pt)
 	UNREFERENCED_PARAMETER(nFlags);
 	UNREFERENCED_PARAMETER(pt);
 	if (m_lineH <= 0) return TRUE;
+	m_fastCatch = FALSE;
 	m_targetY -= (double)zDelta / 120.0 * (double)m_lineH;
 	CRect rc; GetClientRect(&rc);
 	const double maxY = (double)m_count * (double)m_lineH - (double)rc.Height();
@@ -443,20 +568,19 @@ void CLyricsViewWnd::OnPaint()
 	const int h = rc.Height();
 	if (w <= 0 || h <= 0) return;
 
-	// 本体は通常の不透明 GDI。半透明は親側の子 LWA_ALPHA に任せる（キャプションアクリルと分離）。
-	CDC mem;
-	mem.CreateCompatibleDC(&pdc);
-	CBitmap bmp;
-	bmp.CreateCompatibleBitmap(&pdc, w, h);
-	CBitmap* oldBmp = mem.SelectObject(&bmp);
+	EnsureMemDC(w, h);
+	CDC& mem = m_memDC;
 
 	mem.FillSolidRect(&rc, m_overlay ? RGB(18, 18, 28) : RGB(248, 250, 255));
 
-	for (int i = 0; i < 12 && i < h / 4; i++) {
-		const int fa = 40 - i * 3;
-		if (fa <= 0) break;
-		mem.FillSolidRect(0, i, w, 1, m_overlay ? RGB(28, 28, 40) : RGB(235, 240, 250));
-		mem.FillSolidRect(0, h - 1 - i, w, 1, m_overlay ? RGB(28, 28, 40) : RGB(235, 240, 250));
+	// catch-up 中は上下フェード帯を省略（描画負荷を下げる）
+	if (!m_fastCatch) {
+		for (int i = 0; i < 12 && i < h / 4; i++) {
+			const int fa = 40 - i * 3;
+			if (fa <= 0) break;
+			mem.FillSolidRect(0, i, w, 1, m_overlay ? RGB(28, 28, 40) : RGB(235, 240, 250));
+			mem.FillSolidRect(0, h - 1 - i, w, 1, m_overlay ? RGB(28, 28, 40) : RGB(235, 240, 250));
+		}
 	}
 
 	if (m_count > 0 && m_lineH > 0) {
@@ -471,13 +595,15 @@ void CLyricsViewWnd::OnPaint()
 			CRect hi(0, cy - 1, w, cy + m_lineH + 1);
 			if (hi.bottom > 0 && hi.top < h) {
 				mem.FillSolidRect(&hi, m_overlay ? RGB(40, 50, 80) : RGB(220, 232, 255));
-				CPen pen(PS_SOLID, 1, m_overlay ? RGB(90, 140, 220) : RGB(160, 190, 235));
-				CPen* op = mem.SelectObject(&pen);
-				mem.MoveTo(0, hi.top);
-				mem.LineTo(w, hi.top);
-				mem.MoveTo(0, hi.bottom - 1);
-				mem.LineTo(w, hi.bottom - 1);
-				mem.SelectObject(op);
+				if (!m_fastCatch) {
+					CPen pen(PS_SOLID, 1, m_overlay ? RGB(90, 140, 220) : RGB(160, 190, 235));
+					CPen* op = mem.SelectObject(&pen);
+					mem.MoveTo(0, hi.top);
+					mem.LineTo(w, hi.top);
+					mem.MoveTo(0, hi.bottom - 1);
+					mem.LineTo(w, hi.bottom - 1);
+					mem.SelectObject(op);
+				}
 			}
 		}
 
@@ -505,13 +631,14 @@ void CLyricsViewWnd::OnPaint()
 			CFont* use = isCur ? &m_fontHi : &m_font;
 			CFont fit;
 			CRect tr(padX, y, w - padX, y + m_lineH);
-			const BOOL fitted = LrcMakeFitFont(mem, *use, m_line[i], tr.Width(), dpi, fit);
+			// catch-up 中は FitFont を省略（毎行 CreateFont がギクシャクの主因）
+			const BOOL fitted = (!m_fastCatch)
+				&& LrcMakeFitFont(mem, *use, m_line[i], tr.Width(), dpi, fit);
 			if (fitted)
 				use = &fit;
 			CFont* old = mem.SelectObject(use);
-			// 「...」は濁るので使わない。縮小後もあふれる分は矩形クリップのみ。
 			const UINT dtFlags = DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX;
-			if (isCur && m_tmCount >= 2 && m_frac > 0.001) {
+			if (!m_fastCatch && isCur && m_tmCount >= 2 && m_frac > 0.001) {
 				CSize te = mem.GetTextExtent(m_line[i]);
 				int tw = te.cx;
 				if (tw > tr.Width()) tw = tr.Width();
@@ -546,7 +673,6 @@ void CLyricsViewWnd::OnPaint()
 	}
 
 #if CCUSTOM_AERO_SUPPORT
-	// 親アクリル帯の上でも本文ビットマップは不透明に載せる（透過キー合成にしない）
 	if (m_overlay || CCC_IsAeroEnabled() || CCC_IsWin11()) {
 		CCC_BlitStretchOpaque(pdc.GetSafeHdc(), 0, 0, w, h,
 			mem.GetSafeHdc(), 0, 0, w, h);
@@ -556,8 +682,4 @@ void CLyricsViewWnd::OnPaint()
 #else
 	pdc.BitBlt(0, 0, w, h, &mem, 0, 0, SRCCOPY);
 #endif
-	mem.SelectObject(oldBmp);
 }
-
-
-
