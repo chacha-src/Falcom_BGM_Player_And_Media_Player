@@ -1,4 +1,5 @@
 ﻿#include "StdAfx.h"
+#include "XfadePlayback.h"
 #include "MpPlayerAddons.h"
 #include "AudioDevSync.h"
 #include "CMediaPlayerDlg.h"
@@ -81,9 +82,6 @@ extern CDouga* pMainFrame1;
 extern IMediaPosition* pMediaPosition;
 extern IBasicVideo* pBasicVideo;
 extern BOOL ev;
-extern __int64 playb;
-extern int poss;
-extern int poss5;
 
 class CMpDjPadDlg;
 class CMpAlarmDlg;

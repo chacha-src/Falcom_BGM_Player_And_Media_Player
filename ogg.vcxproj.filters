@@ -102,6 +102,9 @@
     <ClCompile Include="oggDlg_ds.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="XfadePlayback.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="PlayList.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>

@@ -32,6 +32,7 @@
 
 #include "rubberband/RubberBandStretcher.h"
 #include "AudioUpscaler.h"
+#include "XfadePlayback.h"
 #include "ProAudio.h"
 #include "DecodeProgress.h"
 #include "CPromptEngine.h"
@@ -40,8 +41,6 @@
 #else
 #pragma comment(lib,"rubberband-library")
 #endif
-extern int fade1;
-extern int endflg;
 // 曲終端のジャスト検出用（oggDlg.cpp 定義）。単位は「DS バッファへ書き込んだ総バイト数」。
 extern __int64 g_dsWrittenBytes;
 extern __int64 g_endWrittenBytes;
@@ -83,7 +82,6 @@ extern BOOL playwavBuffwav(BYTE* bw, int old, int l1, int l2);
 extern int mode;
 extern int oggsize;
 extern int loop2;
-extern __int64 playb;
 extern CPlayList* pl;
 extern int plcnt;
 extern int Mp3GetDecoderBitsForRubberBand(void);
@@ -100,7 +98,6 @@ bool ProcessAudioWithRubberBand(float tempoRate, bool t = false);
 bool ProcessAudioWithRubberBandBank(int bank, float tempoRate, bool t,
 	const uint8_t* inData, int inBytes, int bits, int ch, int rate,
 	std::vector<float>& outFloat);
-BOOL reset = TRUE;
 
 #define REFTIMES_PER_SEC  10000000
 #define REFTIMES_PER_MILLISEC  10000
@@ -285,14 +282,11 @@ extern BOOL thn;
 extern BOOL thn1;
 extern int stf;
 extern int endf;
-extern int lenl;
-extern int fade1;
 extern BOOL sek;
 extern int wavchannel, wavbit_sample_Hz, wavsam_depth;
 //スレッド
 int syukai = 0, syukai2 = 0;
 extern BOOL sflg;
-extern int muon;
 #define MUON 180
 int flg3 = 0;
 int sek4;
@@ -340,7 +334,6 @@ std::mutex cl2;  // OnHScroll(シーク)とHandleNotifications(再生)の排他�
 // DS Lock/Unlock 実行中(cl2 外)。UI の GetCurrentPosition が同一デバイスで固まるのを避ける。
 volatile LONG g_dsDeviceOpBusy = 0;
 BOOL syoriflg;
-extern int readme;
 
 // 再生通知スレッド: thn==TRUE は「ループが終了シグナルを出した」だけでスレッド本体はまだ動くことがある。
 // stop/stop1 から Closeds() やデコーダ解放の前に必ず Join する。
@@ -588,10 +581,34 @@ UINT HandleNotifications(LPVOID)
 			len1 = (int)ringBytes - (int)oldw;
 			len2 = (int)WriteCursor;
 		}
+		/* DS 書込みカーソルは bpf 非整列になり得る（24bit 等）。部分フレームを混ぜると
+		 * シーク位相によって数サンプルのクリックが xfade 混合時に出る。 */
+		{
+			const int bpfSnap = (g_outBytesPerFrame > 0) ? g_outBytesPerFrame : 4;
+			if (bpfSnap > 1) {
+				int total = len1 + len2;
+				const int drop = total % bpfSnap;
+				if (drop > 0 && total > drop) {
+					total -= drop;
+					if (len2 >= drop) {
+						len2 -= drop;
+					}
+					else {
+						const int from1 = drop - len2;
+						len2 = 0;
+						len1 -= from1;
+						if (len1 < 0) len1 = 0;
+					}
+				}
+				if (len1 + len2 <= 0) continue;
+			}
+		}
 
 		// 終端ドレイン中か（実音声が終わった後の純無音サイクル）。終端確定後、書込みヘッドが
 		// 終端位置を越えていれば、このサイクルはすべて無音で埋める（古いループ音の漏れ防止）。
-		const bool drainSilence = (g_endWrittenBytes != 0 && g_dsWrittenBytes >= g_endWrittenBytes);
+		// クロスフェード中は A 終端でも混合 PCM を捨てない（無音化すると次曲も聞こえない）。
+		const bool drainSilence = (!InterlockedCompareExchange(&g_xfInProgress, 0, 0)
+			&& g_endWrittenBytes != 0 && g_dsWrittenBytes >= g_endWrittenBytes);
 
 		// cl2 はデコード＋状態更新のみ。dsb->Lock はドライバ待ちで数秒固まることがあり、
 		// その間 UI(timerp) が同じ cl2 で止まるのを避けるため、PCM をステージしてから Lock する。
@@ -605,7 +622,6 @@ UINT HandleNotifications(LPVOID)
 		{
 			std::lock_guard<std::mutex> guard(cl2);
 
-			// 3. 各種デコード処理（ロック内で実行）
 			if (og->m_dou.GetCheck() == 1 && pGraphBuilder && pMediaControl) {
 				if (timeee > 900 && dougainit == 0) {
 					pMediaControl->Run();
@@ -619,10 +635,66 @@ UINT HandleNotifications(LPVOID)
 			}
 			else {
 				sflg = TRUE;
-				if (m_dsb) DispatchPlaywavFill(bufwav3, oldw, len1, len2);
+				if (m_dsb) {
+					if (InterlockedCompareExchange(&g_xfInProgress, 0, 0)) {
+						const int aSlot = XfActiveSlot();
+						const int bSlot = (int)InterlockedCompareExchange(&g_xfSecSlot, 0, 0);
+						const int total = len1 + len2;
+						static BYTE s_xfA[512 * 1024];
+						static BYTE s_xfB[512 * 1024];
+						static BYTE s_xfMix[512 * 1024];
+						const int cap = (int)sizeof(s_xfA);
+						const int n = (total > cap) ? cap : total;
+						ZeroMemory(s_xfA, n);
+						ZeroMemory(s_xfB, n);
+						ZeroMemory(s_xfMix, n);
+						extern int g_pcm_upscale_active;
+						/* A: スロット配列→作業用にロードしてからデコード */
+						InterlockedExchange(&g_xfFillSlot, aSlot);
+						XfLoadSlotDecodeState(aSlot);
+						XfApplySlotFormatToGlobals(aSlot);
+						g_pcm_upscale_active = g_audioUpscalerArr[aSlot].IsActive() ? 1 : 0;
+						DispatchPlaywavFill(s_xfA, 0, n, 0);
+						XfSaveSlotDecodeState(aSlot);
+						XfCaptureGlobalsToSlot(aSlot);
+						/* B */
+						InterlockedExchange(&g_xfFillSlot, bSlot);
+						XfLoadSlotDecodeState(bSlot);
+						XfApplySlotFormatToGlobals(bSlot);
+						g_pcm_upscale_active = g_audioUpscalerArr[bSlot].IsActive() ? 1 : 0;
+						DispatchPlaywavFill(s_xfB, 0, n, 0);
+						XfSaveSlotDecodeState(bSlot);
+						XfCaptureGlobalsToSlot(bSlot);
+						/* 作業用を本流 A に戻す */
+						InterlockedExchange(&g_xfFillSlot, -1);
+						XfLoadSlotDecodeState(aSlot);
+						XfApplySlotFormatToGlobals(aSlot);
+						g_pcm_upscale_active = g_audioUpscalerArr[aSlot].IsActive() ? 1 : 0;
+						const int bits = (g_ds_pcm_bits >= 8) ? g_ds_pcm_bits : 16;
+						const int ch = (g_ds_pcm_ch >= 1) ? g_ds_pcm_ch : 2;
+						const int bpfMix = (bits / 8) * ch;
+						int nMix = n;
+						if (bpfMix > 1)
+							nMix -= (nMix % bpfMix);
+						if (nMix > 0)
+							XfMixEqualPower(s_xfMix, s_xfA, s_xfB, nMix, bits, ch);
+						/* 端数は A を残す（未初期化/無音クリック防止） */
+						if (nMix < n)
+							memcpy(s_xfMix + nMix, s_xfA + nMix, (size_t)(n - nMix));
+						if (len1 > 0)
+							memcpy(bufwav3 + oldw, s_xfMix, (size_t)((len1 < n) ? len1 : n));
+						if (len2 > 0 && len1 < n)
+							memcpy(bufwav3, s_xfMix + len1, (size_t)((len2 < n - len1) ? len2 : (n - len1)));
+						if (g_xfFadePos >= g_xfFadeTotalFrames)
+							XfOnCrossfadeFinished();
+					}
+					else {
+						DispatchPlaywavFill(bufwav3, oldw, len1, len2);
+					}
+				}
 				// 曲最後まで行ったとき
 				readmeThisCycle = readme; // 終端確定に使うため reset 前に退避
-				if (readme) {
+				if (readme && !InterlockedCompareExchange(&g_xfInProgress, 0, 0)) {
 					if (len1 > readme)
 						ZeroMemory(bufwav3 + readme, len2);
 					else
@@ -633,7 +705,8 @@ UINT HandleNotifications(LPVOID)
 					sflg = FALSE;
 				}
 				else {
-					stageFade = (fade2 || drainSilence) ? true : false;
+					stageFade = (!InterlockedCompareExchange(&g_xfInProgress, 0, 0)
+						&& (fade2 || drainSilence)) ? true : false;
 					stageBytes = writtenThisCycle;
 					if (stageBytes > 0) {
 						if ((int)s_dsStage.size() < stageBytes)
@@ -674,6 +747,15 @@ UINT HandleNotifications(LPVOID)
 					MpMirrorWritePcm(s_dsStage.data(), stageBytes);
 				if (!stageFade)
 					MpRemoteWritePcm(s_dsStage.data(), stageBytes);
+				/* xfade チェック WAV: 聞こえている PCM を 96k/2ch/24 へ変換して追記 */
+				if (!stageFade && stageBytes > 0) {
+					extern int g_ds_pcm_rate, g_ds_pcm_ch, g_ds_pcm_bits;
+					extern UINT PlaybackCcWriteDsPcm(const void* p, UINT n, int rate, int ch, int bits);
+					const int r = (g_ds_pcm_rate >= 8000) ? g_ds_pcm_rate : wavbit_sample_Hz;
+					const int c = (g_ds_pcm_ch >= 1) ? g_ds_pcm_ch : 2;
+					const int b = (g_ds_pcm_bits == 16 || g_ds_pcm_bits == 24 || g_ds_pcm_bits == 32) ? g_ds_pcm_bits : 16;
+					PlaybackCcWriteDsPcm(s_dsStage.data(), (UINT)stageBytes, r, c, b);
+				}
 			}
 			InterlockedExchange(&g_dsDeviceOpBusy, 0);
 		}
@@ -685,7 +767,8 @@ UINT HandleNotifications(LPVOID)
 			g_dsWrittenBytes += (writtenThisCycle > 0) ? writtenThisCycle : 0;
 			// EOF（fade1=停止 / endflg=連続）を最初に検出したサイクルで実音声の終端を確定。
 			// readme があれば最終チャンク内の実バイト境界が分かるのでそれを使う。無ければこのサイクル末尾。
-			if (g_endWrittenBytes == 0 && (fade1 || endflg)) {
+			if (g_endWrittenBytes == 0 && (fade1 || endflg)
+				&& !InterlockedCompareExchange(&g_xfInProgress, 0, 0)) {
 				if (readmeThisCycle > 0 && readmeThisCycle <= writtenThisCycle)
 					g_endWrittenBytes = writtenBefore + readmeThisCycle;
 				else
@@ -694,20 +777,32 @@ UINT HandleNotifications(LPVOID)
 			oldw = WriteCursor;
 		}
 
+		// 再生カーソル基準の heard を毎サイクル更新（クロスフェード早期開始に必要）
+		{
+			LPDIRECTSOUNDBUFFER8 dsbb = m_dsb;
+			if (isPlausibleDsb(dsbb) && ringBytes > 0) {
+				ULONG pc = 0, wc = 0;
+				if (dsbb->GetCurrentPosition(&pc, &wc) == DS_OK) {
+					const __int64 queued = (__int64)(((ULONG)oldw + ringBytes - pc) % ringBytes);
+					g_heardBytes = g_dsWrittenBytes - queued;
+				}
+			}
+		}
+
+		/* クロスフェード早期開始（曲長 expected または end 確定後） */
+		if (!InterlockedCompareExchange(&g_xfInProgress, 0, 0) && XfEnabled()) {
+			if (XfShouldStartEarly(g_heardBytes, g_endWrittenBytes))
+				XfTryStartCrossfade();
+		}
+
 		// 終端の短フェード＆ジャスト停止判定（ロックを外して終了処理へ）。
 		// playb(デコード先頭)ではなく DS 再生カーソルが実音声終端へ到達した瞬間を「曲終わり」とする。
 		// 実再生バイト数 = 累積書込み − 未再生キュー(我々の書込みヘッド oldw と再生カーソル pc の差)。
 		// oldw はリング上の実書込み位置。g_dsWrittenBytes%ring とは初期オフセット分ずれるため oldw を使う。
-		if (g_endWrittenBytes != 0) {
+		if (g_endWrittenBytes != 0 && !InterlockedCompareExchange(&g_xfInProgress, 0, 0)) {
 			LPDIRECTSOUNDBUFFER8 dsbb = m_dsb;
-			__int64 heard = g_endWrittenBytes; // 既定: 終端到達扱い（dsb 取得失敗時の保険）
+			__int64 heard = g_heardBytes;
 			if (isPlausibleDsb(dsbb)) {
-				ULONG pc = 0, wc = 0;
-				if (dsbb->GetCurrentPosition(&pc, &wc) == DS_OK && ringBytes > 0) {
-					const __int64 queued = (__int64)(((ULONG)oldw + ringBytes - pc) % ringBytes);
-					heard = g_dsWrittenBytes - queued;
-				}
-				g_heardBytes = heard; // 連続再生のタイマー 9000 などが参照
 				// 終端直前の残り実音声に短いフェードをかけてクリック/プツ音を防ぐ。
 				const __int64 remain = g_endWrittenBytes - heard;
 				const int bpf = (g_outBytesPerFrame > 0) ? g_outBytesPerFrame : 4;
@@ -718,9 +813,6 @@ UINT HandleNotifications(LPVOID)
 					if (vol < DSBVOLUME_MIN) vol = DSBVOLUME_MIN;
 					dsbb->SetVolume(vol);
 				}
-			}
-			else {
-				g_heardBytes = heard;
 			}
 
 			// fade1(=停止 / 連続でない) のときだけ DS スレッドで停止する。
@@ -1131,7 +1223,7 @@ bool ProcessAudioWithRubberBand(float tempoRate, bool t)
 		const int n = (int)m_bufwav3_1.size();
 		const int ch = (wavchannel > 0) ? wavchannel : 2;
 		const int rate = (wavbit_sample_Hz >= 8000) ? wavbit_sample_Hz : 44100;
-		return ProcessAudioWithRubberBandBank(0, tempoRate, t, p, n, bits, ch, rate,
+		return ProcessAudioWithRubberBandBank(XfDecSlot(), tempoRate, t, p, n, bits, ch, rate,
 			m_convertedPcmFloatData);
 	}
 	catch (...) {
@@ -5179,7 +5271,7 @@ void equaliserBank(int bank, void* data, int len, BOOL reset) {
 }
 
 void equaliser(void* data, int len, BOOL reset) {
-	equaliserBank(0, data, len, reset);
+	equaliserBank(XfDecSlot(), data, len, reset);
 }
 
 static void equaliserBankUnlocked(void* data, int len, BOOL reset) {

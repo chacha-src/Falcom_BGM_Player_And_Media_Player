@@ -1,4 +1,4 @@
-// ogg.cpp : アプリケーション用クラスの定義を行います。
+﻿// ogg.cpp : アプリケーション用クラスの定義を行います。
 //
 
 #include "stdafx.h"
@@ -529,6 +529,10 @@ BOOL COggApp::InitInstance()
 	savedata.s3m_run_pz = 0;
 	savedata.s3m_run_yaw = 0;
 	savedata.s3m_run_won = 0;
+	savedata.play_xfade = 0;
+	savedata.play_xfade_sec100 = 500;
+	savedata.s3m_bob = 1;
+	savedata.s3m_fov = 1;
 	savedata.sm_mic_device[0] = 0;
 	savedata.sm_response = 1;
 	savedata.dig_cap_device[0] = 0;
@@ -960,6 +964,20 @@ BOOL COggApp::InitInstance()
 			if (savedata.s3m_item_mask <= 0 || savedata.s3m_item_mask > 63) savedata.s3m_item_mask = 63;
 			if (savedata.s3m_have_run) savedata.s3m_have_run = 1;
 		}
+	}
+	if (datFileSize < (int)(offsetof(save, play_xfade) + sizeof(savedata.play_xfade)))
+		savedata.play_xfade = 0;
+	else if (savedata.play_xfade)
+		savedata.play_xfade = 1;
+	if (datFileSize < (int)(offsetof(save, play_xfade_sec100) + sizeof(savedata.play_xfade_sec100))
+		|| savedata.play_xfade_sec100 < 10 || savedata.play_xfade_sec100 > 12000)
+		savedata.play_xfade_sec100 = 500;
+	if (datFileSize < (int)(offsetof(save, s3m_bob) + sizeof(savedata.s3m_bob))) {
+		savedata.s3m_bob = 1;
+		savedata.s3m_fov = 1;
+	} else {
+		savedata.s3m_bob = savedata.s3m_bob ? 1 : 0;
+		if (savedata.s3m_fov < 0 || savedata.s3m_fov > 2) savedata.s3m_fov = 1;
 	}
 	if (datFileSize < (int)(offsetof(save, sm_response) + sizeof(savedata.sm_response))) {
 		savedata.sm_mic_device[0] = 0;

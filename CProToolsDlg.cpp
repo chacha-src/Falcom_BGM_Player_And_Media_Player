@@ -1,4 +1,5 @@
 ﻿#include "stdafx.h"
+#include "XfadePlayback.h"
 #include "ogg.h"
 #include "oggDlg.h"
 #include "CProToolsDlg.h"
@@ -12,7 +13,6 @@ extern save savedata;
 extern COggDlg* og;
 extern CPlayList* pl;
 extern int plcnt;
-extern __int64 playb;
 extern int wavbit_sample_Hz;
 
 CProToolsDlg* g_proToolsDlg = nullptr;

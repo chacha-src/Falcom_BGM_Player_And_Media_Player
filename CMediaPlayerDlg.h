@@ -190,6 +190,9 @@ public:
 	CString m_libDragFolder;     // ドロップ中のパス(フォルダ or ファイル)
 
 	CCustomCheckBox m_renzoku, m_loop, m_random;
+	CCustomCheckBox m_xfade;
+	CCustomEdit m_xfadeSec;
+	CCustomStatic m_xfadeL;
 	CCustomCheckBox m_tip, m_mini, m_savemp3, m_saveds, m_savewav;
 	CCustomCheckBox m_micmix;
 	CCustomComboBox m_micdev;
@@ -238,6 +241,14 @@ public:
 	CRect m_bannerRect;
 	// 幅拡張時に左余白へ分離するジャケット(ミニ)領域。IsRectEmpty なら非表示。
 	CRect m_jacketRect;
+	// ジャケット永続オフスクリーン（黒塗り→描画の点滅防止）
+	CDC m_jacketMemDC;
+	CBitmap m_jacketMemBmp;
+	CBitmap* m_jacketMemOldBmp = nullptr;
+	int m_jacketMemW = 0;
+	int m_jacketMemH = 0;
+	CString m_jacketCacheKey;
+	int m_jacketCacheJx = -1;
 	// 幅拡張時に右余白へ展開する曲情報パネル領域。IsRectEmpty なら非表示。
 	CRect m_infoPanelRect;
 	// ツール▾＋Lib/Hist 左レール。アクリル時のグループ隙間白抜けを不透明ピンクで塞ぐ。
@@ -430,6 +441,9 @@ public:
 	// クリップ矩形がサイドパネルと重ならない限り重い処理は走らない(バナーの毎フレーム無効化と共存)。
 	void DrawSidePanels(CDC* pDC);
 	void InvalidateSidePanels();     // 曲変更・リサイズ時にサイドパネルの WM_PAINT を要求
+	void PresentJacketCached(CDC* pDC); // 黒無しでジャケを BitBlt（昇格時用）
+	void InvalidateJacketImageOnly();   // キャッシュ再構築＋直接提示（Invalidate しない）
+	void CancelTrackFade();             // xfade 開始／昇格時の暗いオーバーレイを止める
 	void ResetInfoScroll();          // 曲変更・リサイズ時に marquee オフセットを全行リセット
 	// m_tip チェックの ON/OFF を m_list のカスタムツールチップ(CListCtrlA)に反映する。
 	// LVS_EX_INFOTIP はカスタム実装と競合するため、ON 時は除去・OFF 時は付与する。
@@ -494,6 +508,11 @@ protected:
 	afx_msg void OnRenzoku();
 	afx_msg void OnLoop();
 	afx_msg void OnRandom();
+	afx_msg void OnPlayXfade();
+	afx_msg void OnPlayXfadeSec();
+public:
+	void SyncPlayXfadeUi(BOOL fromSavedata);
+protected:
 	afx_msg void OnPlSel();
 	afx_msg void OnPlselDropdown();
 	afx_msg void OnPlRename();

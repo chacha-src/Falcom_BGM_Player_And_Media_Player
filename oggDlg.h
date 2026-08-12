@@ -222,6 +222,9 @@ public:
 	CCustomEdit	m_kaisuu;
 	CCustomCheckBox	m_junji;
 	CCustomCheckBox	m_random;
+	CCustomCheckBox	m_xfade;
+	CCustomEdit	m_xfadeSec;
+	CCustomStatic	m_xfadeL;
 	CCustomCheckBox	m_sita;
 	CCustomStandardButton	m_ue;
 	CCustomCheckBox	m_ed6sc;
@@ -303,6 +306,8 @@ protected:
 	afx_msg void OnButton12();
 	afx_msg void OnCheck5();
 	afx_msg void OnCheck6();
+	afx_msg void OnPlayXfade();
+	afx_msg void OnPlayXfadeSec();
 	afx_msg void OnButton14();
 	afx_msg void OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar);
 	afx_msg void OnYso();
@@ -453,6 +458,10 @@ public:
 	afx_msg LRESULT OnSongParamRestore(WPARAM wParam, LPARAM lParam); // 曲ごとパラメータ復元(再生スレッド→メイン)
 	afx_msg LRESULT OnSongParamMarks(WPARAM wParam, LPARAM lParam);   // ★列再描画
 	afx_msg LRESULT OnProAudioCueSeek(WPARAM wParam, LPARAM lParam);
+	afx_msg LRESULT OnXfadeStart(WPARAM wParam, LPARAM lParam);
+	afx_msg LRESULT OnXfadePromoted(WPARAM wParam, LPARAM lParam);
+	afx_msg LRESULT OnXfadePreloadJacket(WPARAM wParam, LPARAM lParam);
+	afx_msg LRESULT OnXfadePromoteUi(WPARAM wParam, LPARAM lParam);
 	HANDLE m_hTimerpVsyncThread;
 	HANDLE m_hTimerpVsyncStopEvent;
 };

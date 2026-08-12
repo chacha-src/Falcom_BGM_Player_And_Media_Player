@@ -56,8 +56,9 @@ private:
 	std::vector<float> m_scratchFrame;
 };
 
-// グローバル（oggDlg / oggDlg_ds から参照）
-extern AudioUpscaler g_audioUpscaler;
+// グローバル（oggDlg / oggDlg_ds から参照）— スロット別。アクセスは g_audioUpscalerArr[XfDecSlot()]
+extern AudioUpscaler g_audioUpscalerArr[2];
+AudioUpscaler& ActiveAudioUpscaler();
 extern int g_ds_pcm_ch;
 extern int g_ds_pcm_rate;
 extern int g_ds_pcm_bits;

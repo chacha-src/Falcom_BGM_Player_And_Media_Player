@@ -15,7 +15,9 @@
 extern BOOL miw;
 extern CMp3Image *mi;
 extern int killw1;
-extern OggVorbis_File vf;
+extern OggVorbis_File vf_arr[2];
+extern OggVorbis_File* g_vfPtr;
+#define vf (*g_vfPtr)
 extern ULONGLONG po;
 
 static bool FindId3ApicInBuffer(const BYTE* bufimage, int scanLen, ULONGLONG baseOffset, ULONGLONG& absImagePos, UINT& size)

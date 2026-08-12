@@ -1,4 +1,4 @@
-// Render.cpp : インプリメンテーション ファイル
+﻿// Render.cpp : インプリメンテーション ファイル
 //
 
 #include "stdafx.h"
@@ -12,6 +12,7 @@
 #include "PlayList.h"
 #include "CImageBase.h"
 #include "AudioUpscaler.h"
+#include "XfadePlayback.h"
 #include "AudioDevSync.h"
 #include <mutex>
 #include <mmdeviceapi.h>
@@ -308,7 +309,6 @@ static void SyncRenderGrassBackdrop(CRender* pRender);
 
 extern int sek;
 extern void DoEvent();
-extern int fade1;
 extern int wavbit_sample_Hz, wavchannel, wavsam_depth;
 extern LPDIRECTSOUND8 m_ds;
 extern LPDIRECTSOUNDBUFFER m_dsb1;
@@ -400,10 +400,10 @@ static void RenderRecreateSecondarySound(COggDlg* og)
 				srcBits = 16;
 			if (!(srcBits == 8 || srcBits == 16 || srcBits == 24 || srcBits == 32))
 				srcBits = 16;
-			g_audioUpscaler.Configure(wavbit_sample_Hz, wavchannel, srcBits, g_ds_pcm_rate, g_ds_pcm_ch, g_ds_pcm_bits);
-			g_pcm_upscale_active = g_audioUpscaler.IsActive() ? 1 : 0;
+			g_audioUpscalerArr[XfDecSlot()].Configure(wavbit_sample_Hz, wavchannel, srcBits, g_ds_pcm_rate, g_ds_pcm_ch, g_ds_pcm_bits);
+			g_pcm_upscale_active = g_audioUpscalerArr[XfDecSlot()].IsActive() ? 1 : 0;
 		}
-		g_audioUpscaler.Reset();
+		g_audioUpscalerArr[XfDecSlot()].Reset();
 		oldw = 0;
 		m_dsb->Play(0, 0, DSBPLAY_LOOPING);
 		return;

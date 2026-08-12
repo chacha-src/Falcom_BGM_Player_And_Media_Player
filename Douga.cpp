@@ -2,6 +2,7 @@
 //
 
 #include "stdafx.h"
+#include "XfadePlayback.h"
 #include "d3d9.h"
 //#include "d3dtypes.h"
 #include "ogg.h"
@@ -947,10 +948,7 @@ void CDougaBarHost::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
 			|| nSBCode == TB_TOP || nSBCode == TB_BOTTOM) {
 			extern IMediaPosition* pMediaPosition;
 			extern BOOL videoonly;
-			extern __int64 playb;
-			extern int poss;
-			extern int poss5;
-			if (pMediaPosition && (mode == -2 || (mode > 0 && videoonly == TRUE))) {
+												if (pMediaPosition && (mode == -2 || (mode > 0 && videoonly == TRUE))) {
 				int mn = 0, mx = 1;
 				og->m_time.GetRange(mn, mx);
 				if (p < mn) p = mn;

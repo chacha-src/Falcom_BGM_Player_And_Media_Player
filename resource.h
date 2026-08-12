@@ -1223,6 +1223,13 @@
 #define IDC_S3M_CLOSE                   4136
 #define IDC_S3M_HINT                    4137
 #define IDC_MP_BOT_MAZE                 4141
+#define IDC_OGG_XFADE                   4142
+#define IDC_OGG_XFADE_SEC               4143
+#define IDC_OGG_XFADE_L                 4144
+#define IDC_MP_XFADE                    4145
+#define IDC_MP_XFADE_SEC                4146
+#define IDC_MP_XFADE_L                  4147
+#define ID_MP_MODE_XFADE                33240
 #define ID_MENUITEM32771                32771
 #define ID_MENUITEM32772                32772
 #define ID_MENUITEM32773                32773
@@ -1607,7 +1614,7 @@
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NEXT_RESOURCE_VALUE        268
 #define _APS_NEXT_COMMAND_VALUE         33250
-#define _APS_NEXT_CONTROL_VALUE         4140
+#define _APS_NEXT_CONTROL_VALUE         4148
 #define _APS_NEXT_SYMED_VALUE           104
 #endif
 #endif

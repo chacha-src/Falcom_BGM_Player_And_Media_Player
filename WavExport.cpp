@@ -748,10 +748,14 @@ void CWavExport::OnBnClickedWavExportExec()
 	m_trimSec.GetWindowText(trimStr);
 	int loopCount = _tstoi(loopStr);
 	if (loopCount < 1) loopCount = 1;
-	int fadeSec = _tstoi(fadeStr);
-	if (fadeSec < 1) fadeSec = 15;
-	int trimKeepSec = _tstoi(trimStr);
-	if (trimKeepSec < 0) trimKeepSec = 1;
+	double fadeSecD = _tstof(fadeStr);
+	if (fadeSecD < 0.1) fadeSecD = 15.0;
+	int fadeSec = (int)(fadeSecD + 0.5);
+	if (fadeSec < 1) fadeSec = 1;
+	double trimKeepSecD = _tstof(trimStr);
+	if (trimKeepSecD < 0) trimKeepSecD = 1.0;
+	int trimKeepSec = (int)(trimKeepSecD + 0.5);
+	if (trimKeepSec < 0) trimKeepSec = 0;
 
 	WavExportOptions opts = {};
 	opts.fadeEnable = m_fadeCheck.GetCheck() ? 1 : 0;

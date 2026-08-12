@@ -2,6 +2,7 @@
 //
 
 #include "stdafx.h"
+#include "XfadePlayback.h"
 #include "direct.h"
 #include "dshow.h"
 #include "ogg.h"
@@ -792,7 +793,6 @@ int syo;
 int syomode;
 CString syos;
 extern TCHAR karento2[1024];
-extern int fade1;
 extern IMediaPosition *pMediaPosition;
 extern int mode,videoonly,playf,plf;
 extern int plcnt;
@@ -9723,7 +9723,6 @@ void CPlayList::OnSize(UINT nType, int cx, int cy)
 	}
 }
 int kk=0;
-extern int lenl;
 int tlg=0;
 
 extern int aaaa,aaaa1;

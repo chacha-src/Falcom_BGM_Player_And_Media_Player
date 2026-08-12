@@ -1,12 +1,17 @@
 ﻿#include "stdafx.h"
 #include "AudioUpscaler.h"
+#include "XfadePlayback.h"
 #include <algorithm>
 #include <cmath>
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
 #endif
 
-AudioUpscaler g_audioUpscaler;
+AudioUpscaler g_audioUpscalerArr[2];
+AudioUpscaler& ActiveAudioUpscaler()
+{
+	return g_audioUpscalerArr[XfDecSlot()];
+}
 int g_ds_pcm_ch = 2;
 int g_ds_pcm_rate = 44100;
 int g_ds_pcm_bits = 16;
@@ -40,7 +45,7 @@ static void RefreshDsBufferBytesFromFormat()
 
 void ResetAudioUpscalerPipeline()
 {
-	g_audioUpscaler.Reset();
+	g_audioUpscalerArr[XfDecSlot()].Reset();
 }
 
 int SpeakerLayoutToOutChannels(int layout)

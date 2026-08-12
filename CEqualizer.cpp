@@ -2,6 +2,7 @@
 //
 
 #include "stdafx.h"
+#include "XfadePlayback.h"
 #include "ogg.h"
 #include "afxdialogex.h"
 #include "CEqualizer.h"
@@ -1108,7 +1109,6 @@ void CEqualizer::ApplyTitleFont()
 		m_t.SetFont(&m_titleFont);
 }
 
-extern BOOL reset;
 void CEqualizer::OnCbnSelchangeCombo1()
 {
 	// TODO: ここにコントロール通知ハンドラー コードを追加します。

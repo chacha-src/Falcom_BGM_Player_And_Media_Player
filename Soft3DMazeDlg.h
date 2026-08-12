@@ -2,22 +2,115 @@
 #include "afxwin.h"
 #include "CCustomControl.h"
 #include "resource.h"
-#include "GdiSoft3D.h"
+#include <d3d11.h>
+#include <dxgi.h>
+
+struct ID3D11Device;
+struct ID3D11DeviceContext;
+struct IDXGISwapChain;
+struct ID3D11RenderTargetView;
+struct ID3D11DepthStencilView;
+struct ID3D11Texture2D;
+struct ID3D11ShaderResourceView;
+struct ID3D11VertexShader;
+struct ID3D11HullShader;
+struct ID3D11DomainShader;
+struct ID3D11PixelShader;
+struct ID3D11InputLayout;
+struct ID3D11Buffer;
+struct ID3D11SamplerState;
+struct ID3D11RasterizerState;
+struct ID3D11DepthStencilState;
+struct ID3D11BlendState;
 
 class CS3mView : public CCustomStatic
 {
 	DECLARE_DYNAMIC(CS3mView)
 public:
 	CS3mView();
-	void RequestRedraw() { if (GetSafeHwnd()) Invalidate(FALSE); }
-	GdiSoft3D::Context m_ctx;
+	virtual ~CS3mView();
+	void RequestRedraw() {}
+	BOOL InitDx();
+	void ReleaseDx();
+	BOOL ResizeDx(int w, int h);
+	BOOL EnsureSceneTargets(int w, int h);
+	void PresentFrame();
 	BOOL m_ready;
-	virtual BOOL PaintCustomOpaque(CDC& dc);
+	int m_vw, m_vh;
+
+	ID3D11Device* m_dev;
+	ID3D11DeviceContext* m_imm;
+	IDXGISwapChain* m_swap;
+	ID3D11RenderTargetView* m_bbRtv;
+	ID3D11Texture2D* m_dsTex;
+	ID3D11DepthStencilView* m_dsv;
+	ID3D11ShaderResourceView* m_dsSrv;
+	ID3D11Texture2D* m_sceneTex;
+	ID3D11RenderTargetView* m_sceneRtv;
+	ID3D11ShaderResourceView* m_sceneSrv;
+	ID3D11Texture2D* m_postTex;
+	ID3D11RenderTargetView* m_postRtv;
+	ID3D11ShaderResourceView* m_postSrv;
+	ID3D11Texture2D* m_shadowTex;
+	ID3D11DepthStencilView* m_shadowDsv;
+	ID3D11ShaderResourceView* m_shadowSrv;
+	enum { S3M_SHADOW_SIZE = 1024 };
+
+	ID3D11VertexShader* m_vsTess;
+	ID3D11HullShader* m_hsTess;
+	ID3D11DomainShader* m_dsTess;
+	ID3D11PixelShader* m_psWall;
+	ID3D11VertexShader* m_vsSolid;
+	ID3D11PixelShader* m_psSolid;
+	ID3D11VertexShader* m_vsHud;
+	ID3D11PixelShader* m_psHud;
+	ID3D11VertexShader* m_vsPost;
+	ID3D11PixelShader* m_psSsr;
+	ID3D11PixelShader* m_psDof;
+	ID3D11PixelShader* m_psFinal;
+	ID3D11InputLayout* m_ilPatch;
+	ID3D11InputLayout* m_ilSolid;
+	ID3D11InputLayout* m_ilHud;
+
+	ID3D11Buffer* m_cbFrame;
+	ID3D11Buffer* m_vbDyn;
+	ID3D11Buffer* m_vbHud;
+	UINT m_vbDynBytes;
+	UINT m_vbHudBytes;
+
+	ID3D11Texture2D* m_texBrick;
+	ID3D11ShaderResourceView* m_srvBrick;
+	ID3D11Texture2D* m_texFloor;
+	ID3D11ShaderResourceView* m_srvFloor;
+	ID3D11Texture2D* m_texEnv;
+	ID3D11ShaderResourceView* m_srvEnv;
+	ID3D11Texture2D* m_texClear;
+	ID3D11ShaderResourceView* m_srvClear;
+	int m_clearTexW, m_clearTexH;
+
+	ID3D11SamplerState* m_sampLin;
+	ID3D11SamplerState* m_sampPoint;
+	ID3D11SamplerState* m_sampCmp;
+	ID3D11RasterizerState* m_rsSolid;
+	ID3D11RasterizerState* m_rsShadow;
+	ID3D11DepthStencilState* m_dssWrite;
+	ID3D11DepthStencilState* m_dssRead;
+	ID3D11DepthStencilState* m_dssOff;
+	ID3D11BlendState* m_bsOpaque;
+	ID3D11BlendState* m_bsAlpha;
+	ID3D11BlendState* m_bsAdd;
+
+	BOOL CreateShaders();
+	BOOL CreateProcTextures();
+	BOOL BakeClearTexture(const wchar_t* text, float alpha);
+	void ReleaseClearTexture();
+
 protected:
 	afx_msg void OnPaint();
 	afx_msg LRESULT OnPrintClient(WPARAM, LPARAM);
 	afx_msg BOOL OnEraseBkgnd(CDC*) { return TRUE; }
 	afx_msg void OnSize(UINT, int, int);
+	afx_msg void OnDestroy();
 	afx_msg void OnContextMenu(CWnd*, CPoint);
 	afx_msg void OnLButtonDown(UINT nFlags, CPoint point);
 	afx_msg void OnLButtonUp(UINT nFlags, CPoint point);
@@ -25,7 +118,6 @@ protected:
 	afx_msg BOOL OnMouseWheel(UINT nFlags, short zDelta, CPoint pt);
 	afx_msg void OnMButtonDown(UINT nFlags, CPoint point);
 	afx_msg BOOL OnSetCursor(CWnd* pWnd, UINT nHitTest, UINT message);
-	// 0=左旋回 1=右旋回 2=前進 3=後退
 	int HitMoveDir(CPoint pt) const;
 	CPoint m_dragOrigin;
 	int m_dragging;
@@ -87,8 +179,8 @@ protected:
 	int ReadSizeFromUi();
 	void SetSizeToUi(int n);
 	void GenerateMaze();
+	void GenerateMazeWithSeed(DWORD seed);
 	void RenderScene();
-	void DrawMinimap();
 	void TickMove(float dt);
 	void MarkVisited();
 	void TryPickup();
@@ -101,14 +193,13 @@ protected:
 	void BeginClearSequence();
 	void TickClear(float dt);
 	BOOL IsBlocked(float x, float z) const;
-	// Soft3D Project と同型のカメラ基底（前=sin/cos、右=cos/-sin）
 	void CamBasisYaw(float yaw, float& fwdX, float& fwdZ, float& rightX, float& rightZ) const;
-	// 3D 描画用 eye（論理位置より前方 0.8）。ミニマップは m_px/m_pz のまま
 	void GetRenderEye(float& ex, float& ez) const;
 	void WorldToCam(float wx, float wz, float& lx, float& lz) const;
 	void WorldToMap(float wx, float wz, float& mx, float& my) const;
 	BOOL TryTurn(int dir);
 	BOOL TryStep(int mx, int mz);
+	void RefreshClearTex();
 public:
 	BOOL InputTurn(int dir) { return TryTurn(dir); }
 	BOOL InputStep(int mx, int mz) { return TryStep(mx, mz); }
@@ -126,7 +217,6 @@ public:
 	afx_msg void OnDestroy();
 	afx_msg void OnContextMenu(CWnd*, CPoint);
 	void ShowContextMenu(CPoint screenPt);
-	void PaintClearOverlay(CDC& dc, const CRect& rc);
 
 	CCustomStandardButton m_help, m_gen, m_close;
 	CCustomStatic m_sizeL, m_hint, m_status;
@@ -145,16 +235,19 @@ public:
 	int m_moving;
 	int m_moveHeld;
 	float m_bob;
+	float m_anim;
 	int m_won;
 	int m_clearPhase;
 	float m_clearT;
 	float m_clearTextA;
 	float m_clearScreenA;
+	float m_clearTextAPrev;
 	int m_itemsLeft;
 	int m_baseTempoPos;
 	int m_basePitchPos;
 	DWORD m_lastTick;
 	DWORD m_rng;
+	DWORD m_genSeed;
 	DWORD m_lastAutosave;
 	int m_runDirty;
 };

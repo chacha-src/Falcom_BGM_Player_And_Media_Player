@@ -147,7 +147,10 @@ BEGIN
     PUSHBUTTON      "設定",IDC_BUTTON21,48,238,28,14
     PUSHBUTTON      "フォルダ設定",IDC_BUTTON9,130,238,42,14
     DEFPUSHBUTTON   "終了",IDOK,172,238,31,14
-    CONTROL         "ランダム再生",IDC_CHECK5,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,214,22,87,12
+    CONTROL         "ランダム再生",IDC_CHECK5,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,214,22,72,12
+    CONTROL         "クロスフェード",IDC_OGG_XFADE,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,288,22,58,12
+    EDITTEXT        IDC_OGG_XFADE_SEC,348,21,28,12,ES_AUTOHSCROLL
+    LTEXT           "秒",IDC_OGG_XFADE_L,378,23,12,8
     CONTROL         "順次再生",IDC_CHECK6,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,214,35,43,10
     EDITTEXT        IDC_EDIT1,252,46,25,12,ES_AUTOHSCROLL
     PUSHBUTTON      "演奏開始",IDC_BUTTON14,217,72,50,14
@@ -677,6 +680,9 @@ BEGIN
     PUSHBUTTON      ">>|",IDC_MP_NEXT,179,146,40,18
     CONTROL         "連続",IDC_MP_RENZOKU,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,228,148,40,8
     CONTROL         "ランダム",IDC_MP_RANDOM,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,274,148,48,8
+    CONTROL         "クロスフェード",IDC_MP_XFADE,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,324,148,58,8
+    EDITTEXT        IDC_MP_XFADE_SEC,384,146,28,12,ES_AUTOHSCROLL
+    LTEXT           "秒",IDC_MP_XFADE_L,414,148,12,8
     CONTROL         "ループ",IDC_MP_LOOP,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,228,158,44,8
     LTEXT           "ループ回数",IDC_MP_KAISUU_L,314,160,56,8
     EDITTEXT        IDC_MP_KAISUU,372,158,28,12,ES_AUTOHSCROLL | ES_NUMBER
@@ -1995,7 +2001,7 @@ END
 //
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 0,9,1,750
+ FILEVERSION 0,9,1,760
  PRODUCTVERSION 1,0,0,1
  FILEFLAGSMASK 0x3fL
 #ifdef _DEBUG
@@ -2014,7 +2020,7 @@ BEGIN
             VALUE "Comments", "Falcom BGM Player & Media Player"
             VALUE "CompanyName", "Pre Prayer Power Soft"
             VALUE "FileDescription", "Falcom BGM Player & Media Player Ver 0.9a Rel.2026.08.12"
-            VALUE "FileVersion", "0.9.1.750"
+            VALUE "FileVersion", "0.9.1.760"
             VALUE "InternalName", "ogg YS/ED bgm"
             VALUE "LegalCopyright", "Copyright (C) 2026.08.12"
             VALUE "LegalTrademarks", "Pre Prayer Power Soft"

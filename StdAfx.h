@@ -716,6 +716,12 @@ struct save{
 	int s3m_run_n;
 	float s3m_run_px, s3m_run_pz, s3m_run_yaw;
 	int s3m_run_won;
+
+	// --- ライブ再生クロスフェード(末尾追記。旧.datは0/500へ) ---
+	int play_xfade;            // 1=有効（連続再生時のみ発動）
+	int play_xfade_sec100;     // 秒×100（5.5秒→550、既定500）
+	int s3m_bob;               // 1=歩行時カメラ揺れ
+	int s3m_fov;               // 0=55°, 1=70°, 2=90°
 };
 extern save savedata;
 /* コード間隔(ms)。16..500。旧.dat や未設定は 25。 */

@@ -2971,12 +2971,19 @@ void CTranscodeExport::OnBnClickedExec()
 	m_xfadeSec.GetWindowText(xfadeStr);
 	int loopCount = _tstoi(loopStr);
 	if (loopCount < 1) loopCount = 1;
-	int fadeSec = _tstoi(fadeStr);
-	if (fadeSec < 1) fadeSec = 15;
-	int trimKeepSec = _tstoi(trimStr);
-	if (trimKeepSec < 0) trimKeepSec = 1;
-	int xfadeSec = _tstoi(xfadeStr);
-	if (xfadeSec < 1) xfadeSec = 5;
+	double fadeSecD = _tstof(fadeStr);
+	if (fadeSecD < 0.1) fadeSecD = 15.0;
+	int fadeSec = (int)(fadeSecD + 0.5);
+	if (fadeSec < 1) fadeSec = 1;
+	double trimKeepSecD = _tstof(trimStr);
+	if (trimKeepSecD < 0) trimKeepSecD = 1.0;
+	int trimKeepSec = (int)(trimKeepSecD + 0.5);
+	if (trimKeepSec < 0) trimKeepSec = 0;
+	double xfadeSecD = _tstof(xfadeStr);
+	if (xfadeSecD < 0.1) xfadeSecD = 5.0;
+	if (xfadeSecD > 120.0) xfadeSecD = 120.0;
+	int xfadeSec = (int)(xfadeSecD + 0.5);
+	if (xfadeSec < 1) xfadeSec = 1;
 	if (xfadeSec > 120) xfadeSec = 120;
 
 	const int fmt = CurrentFormat();

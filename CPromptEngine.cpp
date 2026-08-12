@@ -1,4 +1,5 @@
 ﻿#include "stdafx.h"
+#include "XfadePlayback.h"
 #include "CPromptEngine.h"
 #include "CMediaPlayerDlg.h"
 #include "CEqualizer.h"
@@ -8,7 +9,6 @@
 
 extern save savedata;
 extern COggDlg* og;
-extern __int64 playb;
 extern int loop1, loop2;
 extern int plf;
 extern int wavbit_sample_Hz, wavchannel;

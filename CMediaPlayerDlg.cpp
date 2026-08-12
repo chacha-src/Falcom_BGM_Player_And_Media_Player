@@ -1075,6 +1075,9 @@ void CMediaPlayerDlg::DoDataExchange(CDataExchange* pDX)
 	MpDdxControl(pDX, IDC_MP_RENZOKU, m_renzoku);
 	MpDdxControl(pDX, IDC_MP_LOOP, m_loop);
 	MpDdxControl(pDX, IDC_MP_RANDOM, m_random);
+	MpDdxControl(pDX, IDC_MP_XFADE, m_xfade);
+	MpDdxControl(pDX, IDC_MP_XFADE_SEC, m_xfadeSec);
+	MpDdxControl(pDX, IDC_MP_XFADE_L, m_xfadeL);
 	MpDdxControl(pDX, IDC_MP_PLSEL, m_plsel);
 	MpDdxControl(pDX, IDC_MP_PLRENAME, m_plrename);
 	MpDdxControl(pDX, IDC_MP_PLDELETE, m_pldelete);
@@ -1144,6 +1147,8 @@ BEGIN_MESSAGE_MAP(CMediaPlayerDlg, CCustomBlurDialogExBase)
 	ON_BN_CLICKED(IDC_MP_RENZOKU, &CMediaPlayerDlg::OnRenzoku)
 	ON_BN_CLICKED(IDC_MP_LOOP, &CMediaPlayerDlg::OnLoop)
 	ON_BN_CLICKED(IDC_MP_RANDOM, &CMediaPlayerDlg::OnRandom)
+	ON_BN_CLICKED(IDC_MP_XFADE, &CMediaPlayerDlg::OnPlayXfade)
+	ON_EN_KILLFOCUS(IDC_MP_XFADE_SEC, &CMediaPlayerDlg::OnPlayXfadeSec)
 	ON_CBN_SELCHANGE(IDC_MP_PLSEL, &CMediaPlayerDlg::OnPlSel)
 	ON_CBN_DROPDOWN(IDC_MP_PLSEL, &CMediaPlayerDlg::OnPlselDropdown)
 	ON_BN_CLICKED(IDC_MP_PLRENAME, &CMediaPlayerDlg::OnPlRename)
@@ -1652,6 +1657,11 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 	m_renzoku.SetWindowText(LL14(L"連続再生", L"Continuous", L"Lect. continue", L"Continua", L"Continua", L"연속 재생", L"连续播放", L"تشغيل متتابع", L"Подряд", L"Folge", L"Continuo", L"Doorlopend", L"Ciągłe", L"Sürekli çal"));
 	m_loop.SetWindowText(LL14(L"ループ再生", L"Loop play", L"Lecture boucle", L"Riproduci loop", L"Repetir", L"루프 재생", L"循环播放", L"تشغيل متكرر", L"Цикл", L"Schleife", L"Repetir", L"Lus afspelen", L"Odtwarz. pętli", L"Donguye al"));
 	m_random.SetWindowText(LL14(L"ランダム再生", L"Random play", L"Lect. aleatoire", L"Casuale", L"Aleatorio", L"랜덤 재생", L"随机播放", L"تشغيل عشوائي", L"Случайно", L"Zufall", L"Aleatorio", L"Willekeurig", L"Losowo", L"Rastgele cal"));
+	m_xfade.SetWindowText(LL14(L"クロスフェード", L"Crossfade", L"Fondu croise", L"Crossfade", L"Fundido cruzado",
+		L"크로스페이드", L"交叉淡化", L"تلاشي متقاطع", L"Кроссфейд", L"Crossfade",
+		L"Crossfade", L"Crossfade", L"Przenikanie", L"Capraz gechis"));
+	m_xfadeL.SetWindowText(LL14(L"秒", L"sec", L"s", L"s", L"s", L"초", L"秒", L"ث", L"с", L"s", L"s", L"s", L"s", L"sn"));
+	SyncPlayXfadeUi(TRUE);
 	m_eq.SetWindowText(LL14(L"イコライザー", L"Equalizer", L"Egaliseur", L"Equalizzatore", L"Ecualizador", L"이퀄라이저", L"均衡器", L"المعادل", L"Эквалайзер", L"Equalizer", L"Equalizador", L"Equalizer", L"Korektor", L"Ekolayzer"));
 	m_piano.SetWindowText(LL14(L"簡易ピアノロール", L"Simple Piano Roll", L"Rouleau piano simple", L"Piano roll semplice", L"Rollo piano simple", L"간이 피아노 롤", L"简易钢琴卷帘", L"لوحة بيانو بسيطة", L"Простой пианоролл", L"Einfache Klavierrolle", L"Piano roll simples", L"Eenvoudige pianorol", L"Prosta rolka pianina", L"Basit piyano rulosu"));
 	if (m_analyzer.GetSafeHwnd())
@@ -2001,6 +2011,7 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 	addTip(m_renzoku, LL14(L"プレイリストを順番に連続再生します。", L"Play the playlist continuously in order.", L"Lecture continue dans l'ordre.", L"Riproduzione continua in ordine.", L"Reproduccion continua en orden.", L"순서대로 연속 재생.", L"按顺序连续播放。", L"تشغيل متواصل بالترتيب.", L"Непрерывное воспроизведение по порядку.", L"Fortlaufend in Reihenfolge abspielen.", L"Reproducao continua em ordem.", L"Doorlopend afspelen op volgorde.", L"Odtwarzaj po kolei.", L"Sırayla sürekli çal."));
 	addTip(m_loop, LL14(L"選択した曲をループ再生します。", L"Loop the selected track.", L"Lire la piste en boucle.", L"Ripeti la traccia.", L"Repetir la pista.", L"선택한 곡을 반복 재생.", L"循环播放所选曲目。", L"تكرار المقطع المحدد.", L"Зациклить выбранный трек.", L"Ausgewahlten Titel wiederholen.", L"Repetir a faixa selecionada.", L"Geselecteerde track herhalen.", L"Zapętl wybrany utwór.", L"Seçili parçayı döngüye al."));
 	addTip(m_random, LL14(L"ランダム再生 / 順次再生を切り替えます。", L"Toggle random / sequential play.", L"Lecture aleatoire / sequentielle.", L"Riproduzione casuale / sequenziale.", L"Reproduccion aleatoria / secuencial.", L"랜덤 / 순차 재생 전환.", L"切换随机/顺序播放。", L"تبديل التشغيل العشوائي/المتسلسل.", L"Случайное / последовательное.", L"Zufall / Reihenfolge umschalten.", L"Aleatorio / sequencial.", L"Willekeurig / opeenvolgend.", L"Losowo / po kolei.", L"Rastgele / sıralı."));
+	addTip(m_xfade, LL14(L"連続再生時、曲のつなぎでフェードアウト／インします。", L"During continuous play, fade between tracks.", L"En lecture continue, fondu entre pistes.", L"In riproduzione continua, dissolve tra brani.", L"En reproduccion continua, fundido entre pistas.", L"연속 재생 시 곡 전환 페이드.", L"连续播放时曲间淡入淡出。", L"تلاشي بين المقاطع أثناء التشغيل المتتابع.", L"При непрерывном воспроизведении — кроссфейд.", L"Bei Dauerwiedergabe zwischen Titeln überblenden.", L"Na reproducao continua, crossfade entre faixas.", L"Bij doorlopend afspelen crossfaden.", L"Przy ciaglym odtwarzaniu przenikanie.", L"Surekli calmada parcilar arasi crossfade."));
 	addTip(m_seek, LL14(L"再生位置。ピンク帯=ループ。青つまみ=A-B。⇔カーソルでつまみ移動、他はシーク。", L"Position. Pink=loop. Blue thumbs=A-B. Size cursor moves thumbs; else seek.", L"Position. Rose=boucle. Bleu=A-B. Curseur⇔=poignees.", L"Posizione. Rosa=loop. Blu=A-B. Cursore⇔=maniglie.", L"Posicion. Rosa=bucle. Azul=A-B. Cursor⇔=asas.", L"재생 위치. 분홍=루프. 파랑=A-B. ⇔커서=손잡이.", L"播放位置。粉=循环。蓝=A-B。⇔光标移动端点。", L"الموضع. وردي=حلقة. أزرق=A-B. مؤشر⇔=مقابض.", L"Позиция. Розовый=цикл. Синий=A-B. Курсор⇔=ручки.", L"Position. Rosa=Schleife. Blau=A-B. Cursor⇔=Griffe.", L"Posicao. Rosa=loop. Azul=A-B. Cursor⇔=alças.", L"Positie. Roze=lus. Blauw=A-B. Cursor⇔=grepen.", L"Pozycja. Rozowy=petla. Niebieski=A-B. Kursor⇔=uchwyty.", L"Konum. Pembe=dongu. Mavi=A-B. Imlec⇔=tutamac."));
 	addTip(m_time, _T("%"));
 	if (m_seekLock.GetSafeHwnd())
@@ -2888,13 +2899,16 @@ void CMediaPlayerDlg::DoLayout()
 	MoveCtl(&m_loop, cx, optY, (int)(92 * s), chkRowH); cx += (int)(96 * s);
 	MoveCtl(&m_kaisuuL, cx, optY, (int)(80 * s), chkRowH); cx += (int)(82 * s);
 	MoveCtl(&m_kaisuu, cx, optY, (int)(36 * s), chkRowH); cx += (int)(40 * s);
-	MoveCtl(&m_random, cx, optY, (int)(98 * s), chkRowH);
+	MoveCtl(&m_random, cx, optY, (int)(88 * s), chkRowH); cx += (int)(92 * s);
+	MoveCtl(&m_xfade, cx, optY, (int)(100 * s), chkRowH); cx += (int)(104 * s);
+	MoveCtl(&m_xfadeSec, cx, optY, (int)(40 * s), chkRowH); cx += (int)(42 * s);
+	MoveCtl(&m_xfadeL, cx, optY, (int)(24 * s), chkRowH); cx += (int)(28 * s);
 	int folW = (int)(54 * s), stW = (int)(72 * s), supeW = (int)(62 * s);
 	const int prWFull = max(1, (int)(76 * s));
 	const int prWShort = max(1, (int)(36 * s));
 	const int rollWFull = max(1, (int)(56 * s));
 	const int rollWShort = max(1, (int)(36 * s));
-	const int randomEndX = M + (int)(90 * s) + (int)(96 * s) + (int)(82 * s) + (int)(40 * s) + (int)(98 * s);
+	const int randomEndX = cx;
 	int btnRowH = (int)(24 * s);
 	int btnY1 = by2 + (ch - btnRowH) / 2;
 	int rcx = W - M - folW;
@@ -4137,9 +4151,24 @@ void CMediaPlayerDlg::SyncFromMain()
 			g_ds_pcm_rate, g_ds_pcm_ch, g_ds_pcm_bits);
 		if (key != m_lastBannerKey) {
 			m_lastBannerKey = key;
-			m_trackFadeStart = GetTickCount();
-			ResetInfoScroll();   // 曲変更時はスクロール位置をリセット
-			InvalidateSidePanels();
+			extern volatile LONG g_xfInProgress, g_xfOpening;
+			extern ULONGLONG g_xfJacketStableUntil;
+			/* xfade 開始(SoftOpenでHz等が一瞬変わる)／終了(昇格で jx/タグ更新)では
+			 * 暗いトラックフェード＋ジャケ Invalidate を抑止（開始・終了の数回点滅の主因） */
+			const bool xfBusy =
+				InterlockedCompareExchange(&g_xfInProgress, 0, 0) != 0
+				|| InterlockedCompareExchange(&g_xfOpening, 0, 0) != 0
+				|| (g_xfJacketStableUntil != 0 && GetTickCount64() < g_xfJacketStableUntil);
+			if (xfBusy) {
+				ResetInfoScroll();
+				if (!m_infoPanelRect.IsRectEmpty())
+					InvalidateRect(&m_infoPanelRect, FALSE);
+			}
+			else {
+				m_trackFadeStart = GetTickCount();
+				ResetInfoScroll();
+				InvalidateSidePanels();
+			}
 		}
 	}
 }
@@ -4259,10 +4288,15 @@ void CMediaPlayerDlg::MirrorSeekVol()
 
 		// #6: ジャケット残時間リングを進捗に合わせて更新(1%刻みで Invalidate)
 		if (savedata.mpJacketRemOverlay && !m_jacketRect.IsRectEmpty() && plf) {
-			const int bucket = (int)(pct + 0.5);
-			if (bucket != m_jacketRemBucket) {
-				m_jacketRemBucket = bucket;
-				InvalidateRect(&m_jacketRect, FALSE);
+			extern ULONGLONG g_xfJacketStableUntil;
+			if (!(g_xfJacketStableUntil != 0 && GetTickCount64() < g_xfJacketStableUntil)) {
+				const int bucket = (int)(pct + 0.5);
+				if (bucket != m_jacketRemBucket) {
+					m_jacketRemBucket = bucket;
+					/* Invalidate せず直接提示（黒→描画の点滅を避ける） */
+					CClientDC dc(this);
+					PresentJacketCached(&dc);
+				}
 			}
 		}
 
@@ -5033,7 +5067,10 @@ CString CMediaPlayerDlg::CurrentTrackTitle() const
 void CMediaPlayerDlg::InvalidateSidePanels()
 {
 	if (!::IsWindow(GetSafeHwnd())) return;
-	if (!m_jacketRect.IsRectEmpty())    InvalidateRect(&m_jacketRect, FALSE);
+	extern ULONGLONG g_xfJacketStableUntil;
+	const bool holdJak = (g_xfJacketStableUntil != 0 && GetTickCount64() < g_xfJacketStableUntil);
+	if (!holdJak && !m_jacketRect.IsRectEmpty())
+		InvalidateRect(&m_jacketRect, FALSE);
 	if (!m_infoPanelRect.IsRectEmpty()) InvalidateRect(&m_infoPanelRect, FALSE);
 }
 
@@ -5393,6 +5430,93 @@ static void Mp_DrawNoJacketPlaceholder(CDC& dc, int w, int h)
 		RGB(200, 72, 128));
 }
 
+void CMediaPlayerDlg::PresentJacketCached(CDC* pDC)
+{
+	if (!pDC || m_jacketRect.IsRectEmpty()) return;
+	const int w = m_jacketRect.Width(), h = m_jacketRect.Height();
+	if (w <= 0 || h <= 0) return;
+	const COLORREF kBg = RGB(0, 0, 0);
+
+	CString key;
+	if (og && og->jx >= 64 && !og->img.IsNull())
+		key.Format(_T("%d:%d:%d"), og->jx, og->jy, (int)(og->jxy * 10000.0));
+	else
+		key = _T("none");
+
+	const bool need = (m_jacketMemDC.GetSafeHdc() == NULL || m_jacketMemW != w || m_jacketMemH != h
+		|| key != m_jacketCacheKey || m_jacketCacheJx != (og ? og->jx : -1));
+	if (need) {
+		if (m_jacketMemDC.GetSafeHdc()) {
+			if (m_jacketMemOldBmp) m_jacketMemDC.SelectObject(m_jacketMemOldBmp);
+			m_jacketMemDC.DeleteDC();
+		}
+		m_jacketMemBmp.DeleteObject();
+		m_jacketMemOldBmp = nullptr;
+		m_jacketMemW = m_jacketMemH = 0;
+		if (!m_jacketMemDC.CreateCompatibleDC(pDC)
+			|| !m_jacketMemBmp.CreateCompatibleBitmap(pDC, w, h)) {
+			if (m_jacketMemDC.GetSafeHdc()) m_jacketMemDC.DeleteDC();
+			m_jacketMemBmp.DeleteObject();
+			return;
+		}
+		m_jacketMemOldBmp = m_jacketMemDC.SelectObject(&m_jacketMemBmp);
+		m_jacketMemW = w;
+		m_jacketMemH = h;
+		m_jacketCacheKey = key;
+		m_jacketCacheJx = og ? og->jx : -1;
+	}
+
+	m_jacketMemDC.FillSolidRect(0, 0, w, h, kBg);
+	if (og && og->jx >= 64 && !og->img.IsNull()) {
+		double jr = og->jxy; if (jr <= 0.0) jr = 1.0;
+		int dw = w, dh = h;
+		if (jr >= 1.0) { dw = w; dh = (int)((double)w / jr); }
+		else { dh = h; dw = (int)((double)h * jr); }
+		if (dw > w) { dw = w; dh = (int)((double)w / jr); }
+		if (dh > h) { dh = h; dw = (int)((double)h * jr); }
+		if (dw < 1) dw = 1; if (dh < 1) dh = 1;
+		const int dx = (w - dw) / 2, dy = (h - dh) / 2;
+		const int om = ::SetStretchBltMode(m_jacketMemDC.GetSafeHdc(), HALFTONE);
+		::SetBrushOrgEx(m_jacketMemDC.GetSafeHdc(), 0, 0, NULL);
+		og->img.Draw(m_jacketMemDC.GetSafeHdc(), dx, dy, dw, dh, 0, 0, og->jx, og->jy);
+		::SetStretchBltMode(m_jacketMemDC.GetSafeHdc(), om);
+	}
+	else {
+		Mp_DrawNoJacketPlaceholder(m_jacketMemDC, w, h);
+	}
+	DrawJacketHeroOverlay(m_jacketMemDC, w, h);
+
+	bool aero = false;
+#if CCUSTOM_AERO_SUPPORT
+	aero = (savedata.aero == 1 && CCC_IsWin11());
+#endif
+	if (aero)
+		CCC_BlitStretchNF(pDC->m_hDC, m_jacketRect.left, m_jacketRect.top, w, h,
+			m_jacketMemDC.GetSafeHdc(), 0, 0, w, h, kBg);
+#if CCUSTOM_AERO_SUPPORT
+	else if (CCC_AcrylicCaption(m_hWnd) && CCC_IsWin11() && !CCC_IsAeroEnabled())
+		CCC_BlitStretchOpaque(pDC->m_hDC, m_jacketRect.left, m_jacketRect.top, w, h,
+			m_jacketMemDC.GetSafeHdc(), 0, 0, w, h);
+#endif
+	else
+		pDC->BitBlt(m_jacketRect.left, m_jacketRect.top, w, h, &m_jacketMemDC, 0, 0, SRCCOPY);
+}
+
+void CMediaPlayerDlg::InvalidateJacketImageOnly()
+{
+	if (!::IsWindow(GetSafeHwnd()) || m_jacketRect.IsRectEmpty()) return;
+	m_jacketCacheKey.Empty();
+	m_jacketCacheJx = -2;
+	m_trackFadeStart = 0;
+	CClientDC dc(this);
+	PresentJacketCached(&dc);
+}
+
+void CMediaPlayerDlg::CancelTrackFade()
+{
+	m_trackFadeStart = 0;
+}
+
 // 左ジャケット / 右曲情報 パネルを描画。バナーと同じ黒地に統一し、上部の帯全体が
 // ひとつのメディアバー(左:ジャケ / 中央:スペアナ / 右:曲情報)に見えるようにする。
 // 内容は曲変更/リサイズ時のみ再描画されるため(毎フレームではない)ちらつかない。
@@ -5413,44 +5537,9 @@ void CMediaPlayerDlg::DrawSidePanels(CDC* pDC)
 	// 文字描画)は走らない(=サイドパネルは曲変更/リサイズ時のみ再描画)。
 	CRect clip; pDC->GetClipBox(&clip);
 
-	// ---- 左: ジャケット(ミニ・余白へ分離) ----
-	if (!m_jacketRect.IsRectEmpty() && CRect().IntersectRect(&clip, &m_jacketRect)) {
-		int w = m_jacketRect.Width(), h = m_jacketRect.Height();
-		if (w > 0 && h > 0) {
-			CDC mem; mem.CreateCompatibleDC(pDC);
-			CBitmap bm; bm.CreateCompatibleBitmap(pDC, w, h);
-			CBitmap* ob = mem.SelectObject(&bm);
-			mem.FillSolidRect(0, 0, w, h, kBg);
-			if (og && og->jx >= 64 && !og->img.IsNull()) {
-				double jr = og->jxy; if (jr <= 0.0) jr = 1.0;
-				int dw = w, dh = h;                 // アスペクト維持で正方形内にフィット
-				if (jr >= 1.0) { dw = w; dh = (int)((double)w / jr); }
-				else { dh = h; dw = (int)((double)h * jr); }
-				if (dw > w) { dw = w; dh = (int)((double)w / jr); }
-				if (dh > h) { dh = h; dw = (int)((double)h * jr); }
-				if (dw < 1) dw = 1; if (dh < 1) dh = 1;
-				int dx = (w - dw) / 2, dy = (h - dh) / 2;
-				int om = ::SetStretchBltMode(mem.GetSafeHdc(), HALFTONE);
-				::SetBrushOrgEx(mem.GetSafeHdc(), 0, 0, NULL);
-				og->img.Draw(mem.GetSafeHdc(), dx, dy, dw, dh, 0, 0, og->jx, og->jy);
-				::SetStretchBltMode(mem.GetSafeHdc(), om);
-			}
-			else {                                  // 未取得/小さすぎ: プレースホルダ(24px引き伸ばし禁止)
-				Mp_DrawNoJacketPlaceholder(mem, w, h);
-			}
-			// Now Playing hero: 残り時間リング + mm:ss
-			DrawJacketHeroOverlay(mem, w, h);
-			if (aero)
-				CCC_BlitStretchNF(pDC->m_hDC, m_jacketRect.left, m_jacketRect.top, w, h, mem.GetSafeHdc(), 0, 0, w, h, kBg);
-#if CCUSTOM_AERO_SUPPORT
-			else if (CCC_AcrylicCaption(m_hWnd) && CCC_IsWin11() && !CCC_IsAeroEnabled())
-				CCC_BlitStretchOpaque(pDC->m_hDC, m_jacketRect.left, m_jacketRect.top, w, h, mem.GetSafeHdc(), 0, 0, w, h);
-#endif
-			else
-				pDC->BitBlt(m_jacketRect.left, m_jacketRect.top, w, h, &mem, 0, 0, SRCCOPY);
-			mem.SelectObject(ob);
-		}
-	}
+	// ---- 左: ジャケット(ミニ・余白へ分離) — オフスクリーン完成後に1回 BitBlt ----
+	if (!m_jacketRect.IsRectEmpty() && CRect().IntersectRect(&clip, &m_jacketRect))
+		PresentJacketCached(pDC);
 
 	// ---- 右: 曲情報パネル(タイトル/アーティスト/アルバム/形式, スクロール対応) ----
 	if (!m_infoPanelRect.IsRectEmpty() && CRect().IntersectRect(&clip, &m_infoPanelRect)) {
@@ -5611,8 +5700,7 @@ void CMediaPlayerDlg::OnPaint()
 			DrawSidePanels(&dc);
 		}
 		DrawHighlightPulse(&dc);
-		if (!m_jacketRect.IsRectEmpty())
-			DrawTrackFadeOverlay(&dc, m_jacketRect);
+		/* ジャケットにはトラックフェードを掛けない（黒半透明の点滅になる） */
 		if (!m_infoPanelRect.IsRectEmpty())
 			DrawTrackFadeOverlay(&dc, m_infoPanelRect);
 		else if (!m_bannerRect.IsRectEmpty())
@@ -5673,8 +5761,6 @@ void CMediaPlayerDlg::OnPaint()
 		DrawSidePanels(&pdc);
 	}
 	DrawHighlightPulse(&pdc);
-	if (!m_jacketRect.IsRectEmpty())
-		DrawTrackFadeOverlay(&pdc, m_jacketRect);
 	if (!m_infoPanelRect.IsRectEmpty())
 		DrawTrackFadeOverlay(&pdc, m_infoPanelRect);
 	else if (!m_bannerRect.IsRectEmpty())
@@ -6097,6 +6183,65 @@ void CMediaPlayerDlg::OnRandom()
 	// 既存ハンドラ(OnCheck5=ランダム / OnCheck6=順次)を WM_COMMAND で流用
 	if (st) og->SendMessage(WM_COMMAND, MAKEWPARAM(IDC_CHECK5, BN_CLICKED), 0);
 	else    og->SendMessage(WM_COMMAND, MAKEWPARAM(IDC_CHECK6, BN_CLICKED), 0);
+}
+
+void CMediaPlayerDlg::SyncPlayXfadeUi(BOOL fromSavedata)
+{
+	if (fromSavedata) {
+		if (m_xfade.GetSafeHwnd())
+			m_xfade.SetCheck(savedata.play_xfade ? BST_CHECKED : BST_UNCHECKED);
+		if (m_xfadeSec.GetSafeHwnd()) {
+			CString s;
+			s.Format(_T("%.2f"), (double)savedata.play_xfade_sec100 / 100.0);
+			m_xfadeSec.SetWindowText(s);
+		}
+	}
+	if (og && ::IsWindow(og->GetSafeHwnd())) {
+		if (og->m_xfade.GetSafeHwnd())
+			og->m_xfade.SetCheck(savedata.play_xfade ? BST_CHECKED : BST_UNCHECKED);
+		if (og->m_xfadeSec.GetSafeHwnd()) {
+			CString s;
+			s.Format(_T("%.2f"), (double)savedata.play_xfade_sec100 / 100.0);
+			og->m_xfadeSec.SetWindowText(s);
+		}
+	}
+}
+
+void CMediaPlayerDlg::OnPlayXfade()
+{
+	savedata.play_xfade = m_xfade.GetCheck() ? 1 : 0;
+	TCHAR tmp_savedir[1024];
+	_tgetcwd(tmp_savedir, 1000);
+	DatArc_Chdir();
+	CFile ab;
+	if (ab.Open(L"oggYSEDbgmu.dat", CFile::modeCreate | CFile::modeWrite | CFile::shareExclusive, NULL) == TRUE) {
+		ab.Write(&savedata, sizeof(save));
+		ab.Close();
+		DatArc_Commit(L"oggYSEDbgmu.dat");
+	}
+	_tchdir(tmp_savedir);
+	SyncPlayXfadeUi(TRUE);
+}
+
+void CMediaPlayerDlg::OnPlayXfadeSec()
+{
+	CString s;
+	m_xfadeSec.GetWindowText(s);
+	double sec = _tstof(s);
+	if (sec < 0.1) sec = 0.1;
+	if (sec > 120.0) sec = 120.0;
+	savedata.play_xfade_sec100 = (int)(sec * 100.0 + 0.5);
+	TCHAR tmp_savedir[1024];
+	_tgetcwd(tmp_savedir, 1000);
+	DatArc_Chdir();
+	CFile ab;
+	if (ab.Open(L"oggYSEDbgmu.dat", CFile::modeCreate | CFile::modeWrite | CFile::shareExclusive, NULL) == TRUE) {
+		ab.Write(&savedata, sizeof(save));
+		ab.Close();
+		DatArc_Commit(L"oggYSEDbgmu.dat");
+	}
+	_tchdir(tmp_savedir);
+	SyncPlayXfadeUi(TRUE);
 }
 
 void CMediaPlayerDlg::OnDblclkList(NMHDR* pNMHDR, LRESULT* pResult)
@@ -8105,6 +8250,17 @@ void CMediaPlayerDlg::DrawHighlightPulse(CDC* pDC)
 void CMediaPlayerDlg::DrawTrackFadeOverlay(CDC* pDC, const CRect& rc)
 {
 	if (!pDC || rc.IsRectEmpty() || m_trackFadeStart == 0) return;
+	/* ジャケット矩形への適用は呼び出し側で除外済み。念のため拒否 */
+	if (!m_jacketRect.IsRectEmpty() && rc.EqualRect(m_jacketRect))
+		return;
+	extern volatile LONG g_xfInProgress, g_xfOpening;
+	extern ULONGLONG g_xfJacketStableUntil;
+	if (InterlockedCompareExchange(&g_xfInProgress, 0, 0)
+		|| InterlockedCompareExchange(&g_xfOpening, 0, 0)
+		|| (g_xfJacketStableUntil != 0 && GetTickCount64() < g_xfJacketStableUntil)) {
+		m_trackFadeStart = 0;
+		return;
+	}
 	const DWORD el = GetTickCount() - m_trackFadeStart;
 	if (el >= 260) {
 		m_trackFadeStart = 0;
@@ -9879,6 +10035,13 @@ void CMediaPlayerDlg::ShowPlayModeExtrasMenu(CPoint screenPt)
 			L"Aleatorio", L"Willekeurig", L"Losowo", L"Rastgele"),
 		rnd,
 		LL14(L"リストをランダム順で再生します", L"Play the list in random order", L"Lire la liste dans un ordre aleatoire", L"Riproduci l'elenco in ordine casuale", L"Reproducir la lista en orden aleatorio", L"목록을 무작위 순서로 재생", L"按随机顺序播放列表", L"تشغيل القائمة بترتيب عشوائي", L"Воспроизводить список в случайном порядке", L"Liste in Zufallsreihenfolge abspielen", L"Reproduzir a lista em ordem aleatoria", L"Lijst in willekeurige volgorde afspelen", L"Odtwarzaj liste losowo", L"Listeyi rastgele sirada cal"));
+	const BOOL xf = savedata.play_xfade != 0;
+	menu.AddCheck(ID_MP_MODE_XFADE,
+		LL14(L"クロスフェード", L"Crossfade", L"Fondu croise", L"Crossfade", L"Fundido cruzado",
+			L"크로스페이드", L"交叉淡化", L"تلاشي متقاطع", L"Кроссфейд", L"Crossfade",
+			L"Crossfade", L"Crossfade", L"Przenikanie", L"Capraz gechis"),
+		xf,
+		LL14(L"連続再生時、曲のつなぎでフェードアウト／インします", L"During continuous play, fade out/in between tracks", L"En lecture continue, enchainement en fondu", L"In riproduzione continua, dissolve tra brani", L"En reproduccion continua, fundido entre pistas", L"연속 재생 시 곡 전환에 페이드", L"连续播放时曲间淡入淡出", L"تلاشي عند الانتقال أثناء التشغيل المتتابع", L"При непрерывном воспроизведении — кроссфейд", L"Bei Dauerwiedergabe zwischen Titeln überblenden", L"Na reproducao continua, crossfade entre faixas", L"Bij doorlopend afspelen crossfaden tussen nummers", L"Przy ciaglym odtwarzaniu przenikanie miedzy utworami", L"Surekli calmada parcilar arasi crossfade"));
 	const UINT cmd = menu.Track(screenPt, this);
 	if (cmd == ID_MP_MODE_CONT) {
 		if (m_renzoku.GetSafeHwnd()) { m_renzoku.SetCheck(cont ? BST_UNCHECKED : BST_CHECKED); OnRenzoku(); }
@@ -9886,6 +10049,8 @@ void CMediaPlayerDlg::ShowPlayModeExtrasMenu(CPoint screenPt)
 		if (m_loop.GetSafeHwnd()) { m_loop.SetCheck(loop ? BST_UNCHECKED : BST_CHECKED); OnLoop(); }
 	} else if (cmd == ID_MP_MODE_RAND) {
 		if (m_random.GetSafeHwnd()) { m_random.SetCheck(rnd ? BST_UNCHECKED : BST_CHECKED); OnRandom(); }
+	} else if (cmd == ID_MP_MODE_XFADE) {
+		if (m_xfade.GetSafeHwnd()) { m_xfade.SetCheck(xf ? BST_UNCHECKED : BST_CHECKED); OnPlayXfade(); }
 	}
 }
 
