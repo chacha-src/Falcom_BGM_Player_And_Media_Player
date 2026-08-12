@@ -1398,10 +1398,12 @@ CAPTION "Soft3D 迷路"
 FONT 8, "MS Shell Dlg", 400, 0, 0x1
 BEGIN
     PUSHBUTTON      "?",IDC_S3M_HELP,488,2,24,16
-    LTEXT           "大きさ",IDC_S3M_SIZE_L,7,14,40,10
-    COMBOBOX        IDC_S3M_SIZE,50,12,120,160,CBS_DROPDOWN | CBS_AUTOHSCROLL | WS_VSCROLL | WS_TABSTOP
-    PUSHBUTTON      "生成",IDC_S3M_GEN,180,11,60,18
-    LTEXT           "",IDC_S3M_HINT,250,14,260,12
+    LTEXT           "大きさ",IDC_S3M_SIZE_L,7,14,36,10
+    COMBOBOX        IDC_S3M_SIZE,44,12,72,160,CBS_DROPDOWN | CBS_AUTOHSCROLL | WS_VSCROLL | WS_TABSTOP
+    LTEXT           "地下",IDC_S3M_BASE_L,122,14,24,10
+    COMBOBOX        IDC_S3M_BASE,148,12,72,80,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    PUSHBUTTON      "生成",IDC_S3M_GEN,228,11,52,18
+    LTEXT           "",IDC_S3M_HINT,286,14,224,12
     LTEXT           "",IDC_S3M_VIEW,7,36,506,300,SS_NOTIFY | WS_BORDER
     LTEXT           "",IDC_S3M_STATUS,7,344,400,14
     PUSHBUTTON      "閉じる",IDC_S3M_CLOSE,420,342,80,18
@@ -2001,7 +2003,7 @@ END
 //
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 0,9,1,760
+ FILEVERSION 0,9,1,762
  PRODUCTVERSION 1,0,0,1
  FILEFLAGSMASK 0x3fL
 #ifdef _DEBUG
@@ -2019,10 +2021,10 @@ BEGIN
         BEGIN
             VALUE "Comments", "Falcom BGM Player & Media Player"
             VALUE "CompanyName", "Pre Prayer Power Soft"
-            VALUE "FileDescription", "Falcom BGM Player & Media Player Ver 0.9a Rel.2026.08.12"
-            VALUE "FileVersion", "0.9.1.760"
+            VALUE "FileDescription", "Falcom BGM Player & Media Player Ver 0.9a Rel.2026.08.13"
+            VALUE "FileVersion", "0.9.1.762"
             VALUE "InternalName", "ogg YS/ED bgm"
-            VALUE "LegalCopyright", "Copyright (C) 2026.08.12"
+            VALUE "LegalCopyright", "Copyright (C) 2026.08.13"
             VALUE "LegalTrademarks", "Pre Prayer Power Soft"
             VALUE "OriginalFilename", "oggYSEDbgm_uni_avx2.exe"
             VALUE "ProductName", "Falcom BGM Player & Media Player"

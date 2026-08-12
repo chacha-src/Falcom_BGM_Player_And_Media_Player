@@ -707,7 +707,7 @@ struct save{
 	int soft3dPerfHintDismiss;
 
 	// --- Soft3D 迷路ゲーム ---
-	int s3m_size;               // マス数 10..400（実寸）
+	int s3m_size;               // マス数 10..3000（実寸・偶数推奨）
 	int s3m_seed;               // 0=時刻
 	int s3m_minimap;            // 8/10/12/14/16（近傍マス数）
 	int s3m_show_map;           // 1=ミニマップ表示
@@ -722,6 +722,7 @@ struct save{
 	int play_xfade_sec100;     // 秒×100（5.5秒→550、既定500）
 	int s3m_bob;               // 1=歩行時カメラ揺れ
 	int s3m_fov;               // 0=55°, 1=70°, 2=90°
+	int s3m_basements;         // 地下階数 0..3（0=地上のみ）
 };
 extern save savedata;
 /* コード間隔(ms)。16..500。旧.dat や未設定は 25。 */

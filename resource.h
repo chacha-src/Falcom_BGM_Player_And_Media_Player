@@ -1222,6 +1222,8 @@
 #define IDC_S3M_STATUS                  4135
 #define IDC_S3M_CLOSE                   4136
 #define IDC_S3M_HINT                    4137
+#define IDC_S3M_BASE_L                  4138
+#define IDC_S3M_BASE                    4139
 #define IDC_MP_BOT_MAZE                 4141
 #define IDC_OGG_XFADE                   4142
 #define IDC_OGG_XFADE_SEC               4143

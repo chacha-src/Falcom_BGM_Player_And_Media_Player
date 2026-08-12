@@ -55,6 +55,12 @@ public:
 	ID3D11DepthStencilView* m_shadowDsv;
 	ID3D11ShaderResourceView* m_shadowSrv;
 	enum { S3M_SHADOW_SIZE = 1024 };
+	enum { S3M_MIRROR_N = 8, S3M_MIRROR_SIZE = 384, S3M_MIRROR_FX0 = 2, S3M_MIRROR_FX_N = 6 };
+	ID3D11Texture2D* m_mirrorTex[S3M_MIRROR_N];
+	ID3D11RenderTargetView* m_mirrorRtv[S3M_MIRROR_N];
+	ID3D11ShaderResourceView* m_mirrorSrv[S3M_MIRROR_N];
+	ID3D11Texture2D* m_mirrorDs;
+	ID3D11DepthStencilView* m_mirrorDsv;
 
 	ID3D11VertexShader* m_vsTess;
 	ID3D11HullShader* m_hsTess;
@@ -78,15 +84,22 @@ public:
 	UINT m_vbDynBytes;
 	UINT m_vbHudBytes;
 
-	ID3D11Texture2D* m_texBrick;
-	ID3D11ShaderResourceView* m_srvBrick;
-	ID3D11Texture2D* m_texFloor;
-	ID3D11ShaderResourceView* m_srvFloor;
+	enum { S3M_WALL_VAR = 16, S3M_THEME_N = 4 };
+	ID3D11Texture2D* m_texBrick[S3M_THEME_N];
+	ID3D11ShaderResourceView* m_srvBrick[S3M_THEME_N];
+	ID3D11Texture2D* m_texFloor[S3M_THEME_N];
+	ID3D11ShaderResourceView* m_srvFloor[S3M_THEME_N];
 	ID3D11Texture2D* m_texEnv;
 	ID3D11ShaderResourceView* m_srvEnv;
 	ID3D11Texture2D* m_texClear;
 	ID3D11ShaderResourceView* m_srvClear;
 	int m_clearTexW, m_clearTexH;
+	enum { S3M_MAP_SIZE = 1024 };
+	ID3D11Texture2D* m_texMap;
+	ID3D11ShaderResourceView* m_srvMap;
+	ID3D11Texture2D* m_texTip;
+	ID3D11ShaderResourceView* m_srvTip;
+	int m_tipW, m_tipH;
 
 	ID3D11SamplerState* m_sampLin;
 	ID3D11SamplerState* m_sampPoint;
@@ -104,6 +117,8 @@ public:
 	BOOL CreateProcTextures();
 	BOOL BakeClearTexture(const wchar_t* text, float alpha);
 	void ReleaseClearTexture();
+	BOOL BakeTipTexture(const wchar_t* text);
+	void ReleaseTipTexture();
 
 protected:
 	afx_msg void OnPaint();
@@ -133,9 +148,10 @@ public:
 	virtual ~CSoft3DMazeDlg();
 	enum { IDD = IDD_SOFT3DMAZE };
 	enum {
-		S3M_MAX = 400,
+		S3M_MAX = 3000,
 		S3M_MIN = 10,
 		S3M_TIMER = 96,
+		S3M_MAX_FLOORS = 4,
 		CELL_WALL = 1,
 		CELL_FLOOR = 0,
 		CELL_START = 2,
@@ -146,6 +162,8 @@ public:
 		CELL_NEXT = 7,
 		CELL_EQ = 8,
 		CELL_WINDOW = 9,
+		CELL_STAIRS_DOWN = 10,
+		CELL_STAIRS_UP = 11,
 		ITEM_TEMPO = 1,
 		ITEM_PITCH_UP = 2,
 		ITEM_PITCH_DN = 4,
@@ -158,7 +176,11 @@ public:
 		CLEAR_TEXT_HOLD = 2,
 		CLEAR_TEXT_OUT = 3,
 		CLEAR_FADE_OUT = 4,
-		CLEAR_FADE_IN = 5
+		CLEAR_FADE_IN = 5,
+		FLOORFX_IDLE = 0,
+		FLOORFX_IN = 1,
+		FLOORFX_HOLD = 2,
+		FLOORFX_OUT = 3
 	};
 protected:
 	virtual void DoDataExchange(CDataExchange*);
@@ -171,15 +193,24 @@ protected:
 	void PersistRun();
 	BOOL LoadRun();
 	void FreeGrid();
-	BOOL AllocGrid(int n);
-	BYTE& Cell(int x, int z) { return m_grid[(size_t)z * (size_t)m_n + (size_t)x]; }
-	BYTE CellAt(int x, int z) const { return m_grid[(size_t)z * (size_t)m_n + (size_t)x]; }
-	BYTE& Visit(int x, int z) { return m_visit[(size_t)z * (size_t)m_n + (size_t)x]; }
-	BYTE VisitAt(int x, int z) const { return m_visit[(size_t)z * (size_t)m_n + (size_t)x]; }
+	BOOL AllocGrid(int n, int nFloors);
+	void BindFloor(int f);
+	BYTE& Cell(int x, int z) { return m_grids[m_floor][(size_t)z * (size_t)m_n + (size_t)x]; }
+	BYTE CellAt(int x, int z) const { return m_grids[m_floor][(size_t)z * (size_t)m_n + (size_t)x]; }
+	BYTE& Visit(int x, int z) { return m_visits[m_floor][(size_t)z * (size_t)m_n + (size_t)x]; }
+	BYTE VisitAt(int x, int z) const { return m_visits[m_floor][(size_t)z * (size_t)m_n + (size_t)x]; }
+	BYTE& CellF(int f, int x, int z) { return m_grids[f][(size_t)z * (size_t)m_n + (size_t)x]; }
+	BYTE CellAtF(int f, int x, int z) const { return m_grids[f][(size_t)z * (size_t)m_n + (size_t)x]; }
+	BYTE& VisitF(int f, int x, int z) { return m_visits[f][(size_t)z * (size_t)m_n + (size_t)x]; }
+	BYTE VisitAtF(int f, int x, int z) const { return m_visits[f][(size_t)z * (size_t)m_n + (size_t)x]; }
 	int ReadSizeFromUi();
 	void SetSizeToUi(int n);
+	int ReadBasementsFromUi();
+	void SetBasementsToUi(int b);
 	void GenerateMaze();
-	void GenerateMazeWithSeed(DWORD seed);
+	void GenerateMazeWithSeed(DWORD seed, int forceSize = -1);
+	void GenerateOneFloor(int f);
+	void PlaceStairsAndGoal();
 	void RenderScene();
 	void TickMove(float dt);
 	void MarkVisited();
@@ -192,17 +223,36 @@ protected:
 	void ResetClearFx();
 	void BeginClearSequence();
 	void TickClear(float dt);
+	void ResetFloorFx();
+	void BeginFloorChange(int newFloor);
+	void TickFloorFx(float dt);
+	void RefreshFloorTex();
+	CString FloorLabel(int f) const;
+	void OverviewFloorDelta(int d);
 	BOOL IsBlocked(float x, float z) const;
+	BOOL IsBlockedF(int f, float x, float z) const;
+	float AxisSpan(int i) const;
+	float AxisOrigin(int i) const;
+	float GridToWorldX(float gx) const;
+	float GridToWorldZ(float gz) const;
+	int WorldToGridAxis(float w) const;
 	void CamBasisYaw(float yaw, float& fwdX, float& fwdZ, float& rightX, float& rightZ) const;
 	void GetRenderEye(float& ex, float& ez) const;
+	float GetRenderEyeY() const;
+	int ThemeOfFloor(int f) const;
 	void WorldToCam(float wx, float wz, float& lx, float& lz) const;
 	void WorldToMap(float wx, float wz, float& mx, float& my) const;
 	BOOL TryTurn(int dir);
 	BOOL TryStep(int mx, int mz);
 	void RefreshClearTex();
 public:
-	BOOL InputTurn(int dir) { return TryTurn(dir); }
-	BOOL InputStep(int mx, int mz) { return TryStep(mx, mz); }
+	BOOL IsOverviewHold() const { return (GetAsyncKeyState(VK_SPACE) & 0x8000) != 0; }
+	BOOL IsOverviewActive() const { return IsOverviewHold() || m_mapToggle != 0; }
+	void ToggleMapOverlay() { m_mapToggle = m_mapToggle ? 0 : 1; }
+	BOOL ConsumeOverviewClick();
+	BOOL InputTurn(int dir) { return IsOverviewActive() || m_floorFx != FLOORFX_IDLE ? FALSE : TryTurn(dir); }
+	BOOL InputStep(int mx, int mz) { return IsOverviewActive() || m_floorFx != FLOORFX_IDLE ? FALSE : TryStep(mx, mz); }
+	void InputOverviewFloorDelta(int d) { OverviewFloorDelta(d); }
 	virtual BOOL OnInitDialog();
 	virtual void OnOK() {}
 	virtual void OnCancel() { DestroyWindow(); }
@@ -211,6 +261,7 @@ public:
 	afx_msg void OnHelp();
 	afx_msg void OnSizeChanged();
 	afx_msg void OnSizeEditChange();
+	afx_msg void OnBaseChanged();
 	afx_msg void OnTimer(UINT_PTR);
 	afx_msg void OnSize(UINT, int, int);
 	afx_msg void OnShowWindow(BOOL bShow, UINT nStatus);
@@ -219,14 +270,19 @@ public:
 	void ShowContextMenu(CPoint screenPt);
 
 	CCustomStandardButton m_help, m_gen, m_close;
-	CCustomStatic m_sizeL, m_hint, m_status;
-	CCustomComboBox m_size;
+	CCustomStatic m_sizeL, m_baseL, m_hint, m_status;
+	CCustomComboBox m_size, m_base;
 	CS3mView m_view;
 	CToolTipCtrl m_tooltip;
 
+	BYTE* m_grids[S3M_MAX_FLOORS];
+	BYTE* m_visits[S3M_MAX_FLOORS];
 	BYTE* m_grid;
 	BYTE* m_visit;
 	int m_n;
+	int m_nFloors;
+	int m_floor;
+	int m_mapViewFloor;
 	float m_px, m_pz, m_yaw;
 	float m_yawTarget;
 	float m_pxTarget, m_pzTarget;
@@ -242,6 +298,20 @@ public:
 	float m_clearTextA;
 	float m_clearScreenA;
 	float m_clearTextAPrev;
+	int m_floorFx;
+	float m_floorFxT;
+	float m_floorTextA;
+	float m_floorScreenA;
+	float m_floorTextAPrev;
+	int m_stairFrom;
+	int m_stairTo;
+	int m_stairSwapDone;
+	float m_stairShiftX;
+	float m_stairShiftZ;
+	float m_stairCamY;
+	float m_miniFade;
+	int m_miniFadeFrom;
+	int m_miniFadeTo;
 	int m_itemsLeft;
 	int m_baseTempoPos;
 	int m_basePitchPos;
@@ -250,6 +320,9 @@ public:
 	DWORD m_genSeed;
 	DWORD m_lastAutosave;
 	int m_runDirty;
+	int m_mapBakeDirty;
+	int m_mapToggle;
+	int m_overviewFloorHeld;
 };
 
 void OpenSoft3DMazeModeless(CWnd*);

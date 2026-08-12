@@ -533,6 +533,7 @@ BOOL COggApp::InitInstance()
 	savedata.play_xfade_sec100 = 500;
 	savedata.s3m_bob = 1;
 	savedata.s3m_fov = 1;
+	savedata.s3m_basements = 0;
 	savedata.sm_mic_device[0] = 0;
 	savedata.sm_response = 1;
 	savedata.dig_cap_device[0] = 0;
@@ -949,7 +950,9 @@ BOOL COggApp::InitInstance()
 			savedata.mpBotToolsFlags |= 256;
 		}
 		if (savedata.s3m_size < 10) savedata.s3m_size = 10;
-		if (savedata.s3m_size > 400) savedata.s3m_size = 400;
+		if (savedata.s3m_size > 3000) savedata.s3m_size = 3000;
+		if (savedata.s3m_size & 1) savedata.s3m_size++; // 奇数は切り上げ
+		if (savedata.s3m_size > 3000) savedata.s3m_size = 3000;
 		if (datFileSize < (int)(offsetof(save, s3m_minimap) + sizeof(savedata.s3m_minimap))) {
 			savedata.s3m_minimap = 10;
 			savedata.s3m_show_map = 1;
@@ -979,6 +982,10 @@ BOOL COggApp::InitInstance()
 		savedata.s3m_bob = savedata.s3m_bob ? 1 : 0;
 		if (savedata.s3m_fov < 0 || savedata.s3m_fov > 2) savedata.s3m_fov = 1;
 	}
+	if (datFileSize < (int)(offsetof(save, s3m_basements) + sizeof(savedata.s3m_basements)))
+		savedata.s3m_basements = 0;
+	else if (savedata.s3m_basements < 0 || savedata.s3m_basements > 3)
+		savedata.s3m_basements = 0;
 	if (datFileSize < (int)(offsetof(save, sm_response) + sizeof(savedata.sm_response))) {
 		savedata.sm_mic_device[0] = 0;
 		savedata.sm_response = 1;
