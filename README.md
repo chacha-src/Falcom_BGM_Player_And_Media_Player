@@ -94,6 +94,14 @@ Ozone風のリアルタイムアナライザーを追加しました。
 「曲ごとに設定保存」のチェックを入れると、★付きの曲は保存済みパラメータを読み直して反映します。チェックを外すときは、その時点の設定をその曲へ保存してから無効化します。
 フォルダの `cover.jpg` や代替ジャケットの再読込・画像保存にも対応しています。
 
+### 連続再生クロスフェード
+**連続再生 ON** のとき、メイン／メディプレのチェックと秒数（小数可・既定 5.00 秒）で、曲末から指定秒だけ次曲と等パワーで重ねてシームレスに切り替えます（書き出し用のクロスフェードとは別系統）。
+
+- 終端手前で次曲を裏で soft-open し、指定秒のあいだ A/B を混合してから本流を次曲へ昇格
+- 昇格時にプレイリストの♪・ジャケット差し替え・リストの時間／タグ欄を更新
+- 動画扱いや再生できない行は飛ばして、次の音声曲へ進みます
+- **WAVへ保存** と併用すると「チェック用」モードになり、最初に流した曲名の WAV へ追記し続けます。出力は余裕を見て **96 kHz / 2ch / 24bit**（聞こえている混合 PCM を変換）に固定。停止でファイルを確定します
+
 ### アクリル（ぼかし）UI
 Windows 11のアクリル風ぼかし表示に対応しています。コンテキストメニューの「アクリルモード」から、設定を開かずに ON/OFF できます。
 
@@ -149,6 +157,7 @@ Windows 11のアクリル風ぼかし表示に対応しています。コンテ�
 
 ### マイクミックス（再生中WAVへ）
 「WAVへ保存」がONのとき、再生PCMにマイク入力をミックスして書き込めます。マイク端末はレンダリング設定（CRender）側で選び、ミックス量は0〜200%です。メディアプレイヤーのプレイリスト右クリックからもON/OFFできます。
+連続再生クロスフェードと併用したときのチェック用ダンプ（96 kHz / 2ch / 24bit・先頭曲名へ追記）については、上記「連続再生クロスフェード」を参照してください。
 
 ### デバイス録音
 メディアプレイヤー下段の「録音」から、再生端末のループバックを **WAV / mp3 / FLAC** に録音できます。端末・形式・品質・保存先を指定でき、マイクの同時ミックスにも対応しています。mp3 / FLAC はいったんWAV経由で変換します。
@@ -299,12 +308,14 @@ avi, mpgなどのDirectShow対応動画を再生可能です。Windows Vista以�
 
 ### 補足
 - ランダム再生、連続再生、ループ回数の指定、A-Bリピート
+- **連続再生クロスフェード**（曲末の等パワー混合・秒数指定。書き出しクロスフェードとは別）
 - シーク波形オーバービュー、ループつまみロック、Up Next、スリープタイマー
 - ファイルのドラッグ＆ドロップ追加
 - mp3やDirectShow再生の途中位置の保存
 - 音声書き出し（WAV / mp3 / FLAC。ループ／フェード／先頭無音揃え／クロスフェード／同時ミックス／サンプリング指定）
 - WAV書き出し時の2GB超対応（RF64）
 - マイクミックス（WAVへ保存時）、デバイス録音（ループバック→WAV/mp3/FLAC）、画面キャプチャ（MP4）
+- 連続再生クロスフェードON時のWAV保存チェック用ダンプ（先頭曲名へ追記・96k/2ch/24bit）
 - 歌詞ウィンドウ、LRC微調整／保存、ピアノロールのMIDI・MusicXML録り、PC音譜面化、簡易3D表示
 - A-B／キュー素材パック、音量正規化バッチ、MusicBrainz自動タグ、ボーカルMid、M/Sプリセット、キーEQ提案
 - BPM計測、DJパッド（スクラッチ／Kill／ホットキュー等）、MIDI操作、動画音声抽出、出力ミラー、SS風ビジュアライザ
@@ -327,6 +338,16 @@ avi, mpgなどのDirectShow対応動画を再生可能です。Windows Vista以�
 - タグ書き込み（MP3 / FLAC / WAV / M4A / Ogg Vorbis）
 - kpi一覧の拡張子絞り込み
 - 拡張音量（主音量／EQマスターとは別系統）
+- Soft3D迷路（おまけ・下段ボタンから。地下階層・曲連動アイテムあり）
+
+## おまけ：Soft3D迷路
+メディアプレイヤー下段の **迷路** ボタンから開ける、DirectX11 の一人称迷路です。BGMを聴きながらの息抜き用で、本編の再生機能とは別枠のおまけです。
+
+- **操作:** WASD／矢印で移動、Q・E（または ←→）で旋回。右クリックでサイズ再生成・ミニマップ・アイテム種類など
+- **マップ:** 右上ミニマップ。SPACE押しっぱなし／ホイールクリックで全体マップ（地下あり時は ←→ やホイールで階層切替）
+- **曲連動:** 通路の浮遊球でテンポ↑／ピッチ↑↓／次曲／EQ。窓は通過不可の飾り
+- **地下:** 「地下」コンボで 0〜3F。橙の階段＝下り、水色＝上り。斜めに昇降し、階段穴から上下階を垣間見えます（地下は天井あり）。ゴールは最下層
+- **見た目:** 地上は草木、地下1〜3は石／金属／暗い岩など階ごとの壁・床。進行は自動保存され、開き直すと続きから
 
 ## 注意事項
 - **Brandish4 および ガガーブトリロジー**については、WAVファイルをHDDへコピーする必要があります（フォルダ名は `WAVE`, `WAVEDV`, `WAVEDVD` などゲームにより異なります）。
@@ -415,6 +436,14 @@ Album jacket display and playlists are supported (import m3u / m3u8 / pls / xspf
 Turning **Save per-song** on reloads and applies saved parameters for tracks marked with ★. Turning it off saves the current settings for that track before disabling the feature.
 Folder `cover.jpg`, alternate jacket reload, and saving jacket images are also supported.
 
+### Continuous-Play Crossfade
+With **continuous play ON**, use the main / media-player checkbox and duration (decimals allowed; default **5.00** seconds) to equal-power blend into the next track for that many seconds at the end—seamless handoff (separate from export crossfade).
+
+- Soft-opens the next track in the background near the end, mixes A/B for the chosen window, then promotes the next track to the main stream
+- On promote: playlist ♪, jacket swap, and list duration / tag fields update
+- Skips video rows and unplayable entries, continuing to the next audio track
+- Combined with **Save to WAV**, this becomes a **verification dump**: one WAV named after the first track, appended continuously at a fixed **96 kHz / 2ch / 24-bit** (converted from the audible mix). Stopping playback finalizes the file
+
 ### Acrylic (Blur) UI
 Supports Windows 11 acrylic-style blur for the interface. Toggle it from the context-menu **Acrylic mode** item without opening Settings.
 
@@ -468,6 +497,7 @@ Exports larger than 2GB use RF64, same as the traditional WAV path.
 
 ### Mic Mix (into live WAV save)
 When **Save to WAV** is on, microphone input can be mixed into the PCM being written. Pick the capture device in Rendering (CRender); mix level is 0–200%. You can also toggle it from the media-player playlist context menu.
+For the verification dump when combined with continuous-play crossfade (96 kHz / 2ch / 24-bit, append under the first track’s name), see **Continuous-Play Crossfade** above.
 
 ### Device Recording
 From the media player **Record** button, capture playback-device loopback to **WAV / mp3 / FLAC**. Choose device, format, quality, and path; optional mic mix is available. mp3 / FLAC go through a temporary WAV encode step.
@@ -584,12 +614,14 @@ Plays avi, mpg, and other DirectShow-compatible formats. On Windows Vista and la
 
 ### Additional Notes
 - Random play, continuous play, loop-count settings, and A-B repeat
+- **Continuous-play crossfade** (equal-power blend at track end; duration in seconds—separate from export crossfade)
 - Seek waveform overview, loop-thumb lock, Up Next, and sleep timer
 - Drag-and-drop file adding
 - Resume position for mp3 and DirectShow playback
 - Audio export (WAV / mp3 / FLAC; loop / fade / leading-silence align / crossfade / concurrent mix / sample-rate)
 - WAV export larger than 2GB (RF64)
 - Mic mix (with Save to WAV), device recording (loopback → WAV/mp3/FLAC), screen capture (MP4)
+- WAV verification dump while continuous-play crossfade is on (append to first-track name; fixed 96 kHz / 2ch / 24-bit)
 - Lyrics window, LRC nudge/save, piano-roll MIDI/MusicXML capture, score from PC audio, simple 3D view
 - A-B/cue pack export, loudness normalize batch, MusicBrainz auto-tag, vocal Mid, M/S presets, key→EQ suggest
 - BPM measure, DJ pad (scratch / Kill / hot cues, etc.), MIDI control, video audio extract, output mirror, screensaver visualizer
@@ -612,6 +644,16 @@ Plays avi, mpg, and other DirectShow-compatible formats. On Windows Vista and la
 - Tag writing (MP3 / FLAC / WAV / M4A / Ogg Vorbis)
 - kpi list extension filter
 - Extended volume (separate from main volume / EQ master)
+- Soft3D maze (bonus; bottom-bar button; basements and track-linked items)
+
+## Extra: Soft3D Maze
+A first-person DirectX 11 maze opened from the media player’s bottom-bar **Maze** button. It’s a light distraction while BGM plays—separate from the core playback features.
+
+- **Controls:** WASD / arrows to move, Q·E (or ←→) to turn. Right-click for regenerate size, minimap, item types, and more
+- **Maps:** Top-right minimap. Hold SPACE or middle-click for the full overview (with basements: ←→ or mouse wheel switches floors)
+- **Track links:** Floating orbs adjust tempo↑ / pitch↑↓ / next track / EQ. Windows are decorative and block movement
+- **Basements:** The basement combo adds 0–3 underground floors. Orange stairs go down, cyan stairs go up. You move diagonally between floors and can glimpse adjacent levels through stair shafts (basements have ceilings). The goal sits on the deepest floor
+- **Look:** Ground floor uses greenery; B1–B3 use stone / metal / dark rock motifs for walls and floors. Progress autosaves and resumes when you reopen the maze
 
 ## Important Notes
 - **For Brandish 4 and the Gagharv Trilogy:** WAV files must be copied to your HDD (Folder names like `WAVE`, `WAVEDV`, or `WAVEDVD` vary by game).
