@@ -40,6 +40,16 @@ void ApplyPlaylistRowDisplay(const playlistdata0& row);
 #ifndef WM_OGG_CLOSE_DOUGA
 #define WM_OGG_CLOSE_DOUGA (WM_APP + 103)
 #endif
+// 途中再生確認。Space の KEYDOWN 中に MessageBox すると同じキーではいが押される
+#ifndef WM_OGG_RESUME_PROMPT
+#define WM_OGG_RESUME_PROMPT (WM_APP + 104)
+#endif
+#ifndef IDT_OGG_RESUME_PROMPT
+#define IDT_OGG_RESUME_PROMPT 10404
+#endif
+#ifndef IDT_OGG_RESUME_RESTART
+#define IDT_OGG_RESUME_RESTART 10405
+#endif
 
 #if _MSC_VER > 1000
 #pragma once
@@ -127,6 +137,7 @@ public:
 	void dp(CString a);
 	LRESULT dp1(WPARAM, LPARAM);
 	LRESULT dp2(WPARAM, LPARAM);
+	LRESULT OnResumePrompt(WPARAM, LPARAM);
 	void SetAdd(CString fnn,int mode,int loop1,int loop2,CString filen,int ret2,REFTIME time);
 	// applyTags=false は中間WAV用(タグ/ジャケットのコピーを行わない)。
 	BOOL ExportToWav(playlistdata0* pc, CString outputPath, int loopCount, const WavExportOptions* opts = NULL, bool applyTags = true);
@@ -469,6 +480,11 @@ float PitchScaleFromPos(int pitchPos);
 int TempoPosFromPercent(float percent); // 表示% → スライダー 0..400
 void OggResetRubberBandStretcher();
 void RequestPlaybackRestart(HWND hwnd = NULL);
+void OggCancelPendingPlaybackRestart(); // 停止など: 積んだ再演奏を捨てる
+BOOL OggIsResumePromptActive();         // 途中再生のはい/いいえ/キャンセル表示中
+// 再生開始前に途中位置を確認。キャンセルなら FALSE（再生しない。.save は残す）
+BOOL OggPrepareResumeBeforePlayback(LPCTSTR mediaPath);
+void OggRunResumePrompt(); // 表示中ウィンドウ側から呼ぶ途中再生確認
 // タグ編集など: 現再生位置を .save に書き、次回 play で確認なし復帰する
 void OggArmSilentResumeFromCurrent();
 // リモート再生: MessageBox なし。Yes=途中から / No=先頭から(.save削除)

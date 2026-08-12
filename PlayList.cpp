@@ -1,4 +1,4 @@
-// PlayList.cpp : 実装ファイル
+﻿// PlayList.cpp : 実装ファイル
 //
 
 #include "stdafx.h"
@@ -4123,6 +4123,9 @@ void CPlayList::RestoreSavedPlaybackRow()
 extern int gameon;
 static void RequestPlaylistRestartAsync()
 {
+	extern CString filen;
+	if (!OggPrepareResumeBeforePlayback(filen))
+		return;
 	if (og && ::IsWindow(og->GetSafeHwnd()))
 		RequestPlaybackRestart(og->GetSafeHwnd());
 }

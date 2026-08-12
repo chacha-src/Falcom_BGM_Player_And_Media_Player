@@ -442,8 +442,10 @@ static BOOL ResumeModeUsesPlayb(int m)
 }
 
 // 動画グラフ構築(play/plays)の前に呼ぶ。.save が無ければ 0。
-// g_resumeSilentArm: 0=ダイアログ / 1=はい(途中から) / 2=いいえ(先頭から)
+// g_resumeSilentArm: 0=未指定 / 1=はい(途中から) / 2=いいえ(先頭から)
 static volatile LONG g_resumeSilentArm = 0;
+static volatile LONG g_inResumePrompt = 0;
+static volatile LONG g_inDougaTeardown = 0;
 
 void OggArmRemoteSilentResumeYes()
 {
@@ -455,69 +457,111 @@ void OggArmRemoteSilentResumeNo()
 	InterlockedExchange(&g_resumeSilentArm, 2);
 }
 
+static volatile LONG g_resumePromptPosted = 0;
+static CString g_resumePromptPath;
+
+static HWND ResumePromptTargetHwnd()
+{
+	extern CMediaPlayerDlg* mp;
+	if (mp && ::IsWindow(mp->GetSafeHwnd()))
+		return mp->GetSafeHwnd();
+	if (og && ::IsWindow(og->GetSafeHwnd()))
+		return og->GetSafeHwnd();
+	return NULL;
+}
+
+static void ResumePromptKillQueued()
+{
+	MSG m;
+	extern CMediaPlayerDlg* mp;
+	if (mp && ::IsWindow(mp->GetSafeHwnd())) {
+		::KillTimer(mp->GetSafeHwnd(), IDT_OGG_RESUME_PROMPT);
+		::KillTimer(mp->GetSafeHwnd(), IDT_OGG_RESUME_RESTART);
+		while (::PeekMessage(&m, mp->GetSafeHwnd(), WM_OGG_RESUME_PROMPT, WM_OGG_RESUME_PROMPT, PM_REMOVE)) {}
+	}
+	if (og && ::IsWindow(og->GetSafeHwnd())) {
+		::KillTimer(og->GetSafeHwnd(), IDT_OGG_RESUME_PROMPT);
+		::KillTimer(og->GetSafeHwnd(), IDT_OGG_RESUME_RESTART);
+		while (::PeekMessage(&m, og->GetSafeHwnd(), WM_OGG_RESUME_PROMPT, WM_OGG_RESUME_PROMPT, PM_REMOVE)) {}
+	}
+}
+
+static void ResumeDrainQueuedKeyDowns()
+{
+	MSG msg;
+	while (::PeekMessage(&msg, NULL, WM_KEYDOWN, WM_KEYUP, PM_REMOVE)) {}
+	while (::PeekMessage(&msg, NULL, WM_SYSKEYDOWN, WM_SYSKEYUP, PM_REMOVE)) {}
+	while (::PeekMessage(&msg, NULL, WM_CHAR, WM_DEADCHAR, PM_REMOVE)) {}
+}
+
+// Space の KEYDOWN 中に MessageBox すると同じキーではいが押されるため、
+// ここでは投稿するだけ。TRUE=再生してよい / FALSE=確認待ち or キャンセル。
+BOOL OggPrepareResumeBeforePlayback(LPCTSTR mediaPath)
+{
+	if (InterlockedCompareExchange(&g_inDougaTeardown, 0, 0) != 0)
+		return FALSE;
+	if (!mediaPath || !*mediaPath) return TRUE;
+	CString path = ResumeSavePathRead(mediaPath);
+	if (!ResumeSaveFileExists(path)) return TRUE;
+	const LONG already = InterlockedCompareExchange(&g_resumeSilentArm, 0, 0);
+	if (already == 1 || already == 2)
+		return TRUE;
+	if (OggIsResumePromptActive())
+		return FALSE;
+	if (InterlockedCompareExchange(&g_resumePromptPosted, 1, 0) != 0)
+		return FALSE;
+	g_resumePromptPath = mediaPath;
+	HWND h = ResumePromptTargetHwnd();
+	BOOL queued = FALSE;
+	if (h) {
+		if (::PostMessage(h, WM_OGG_RESUME_PROMPT, 0, 0))
+			queued = TRUE;
+		if (::SetTimer(h, IDT_OGG_RESUME_PROMPT, 30, NULL))
+			queued = TRUE;
+	}
+	if (!queued) {
+		InterlockedExchange(&g_resumePromptPosted, 0);
+		OggRunResumePrompt();
+	}
+	return FALSE;
+}
+
+// play/OnRestart 内ではダイアログを出さない（動画グラフ構築中の MessageBox で固まる）
 static int PromptResumePlaybackIfSaveExists(CWnd* wnd, LPCTSTR mediaPath)
 {
-	if (!wnd || !mediaPath || !*mediaPath) return 0;
+	UNREFERENCED_PARAMETER(wnd);
+	if (!mediaPath || !*mediaPath) return 0;
 	CString path = ResumeSavePathRead(mediaPath);
 	if (!ResumeSaveFileExists(path)) return 0;
 	const LONG arm = InterlockedExchange(&g_resumeSilentArm, 0);
-	if (arm == 1)
-		return 1; // リモート等: 途中から
 	if (arm == 2) {
-		ResumeSaveRemove(mediaPath); // リモート等: 先頭から
+		ResumeSaveRemove(mediaPath);
 		return 0;
 	}
-	if (IDYES == wnd->MessageBox(LL14(
-		L"途中再生データが存在します。\n前回中断した部分から再生しますか？\nはい = 途中から再生\nいいえ = はじめから再生", /* 日本語 */
-		L"Resume data exists.\nResume from where you left off?\nYes = Resume\nNo = Play from start", /* 英語 */
-		L"Des données de reprise existent.\nReprendre là où vous vous êtes arrêté ?\nOui = Reprendre\nNon = Jouer depuis le début", /* フランス語 */
-		L"Esistono dati di ripresa.\nRiprendere da dove ci si è fermati?\nSì = Riprendi\nNo = Riproduci dall'inizio", /* イタリア語 */
-		L"Existen datos de reanudación.\n¿Reanudar desde donde lo dejó?\nSí = Reanudar\nNo = Reproducir desde el inicio", /* スペイン語 */
-		L"중간 재생 데이터가 존재합니다.\n지난번 중단한 부분부터 재생하시겠습니까?\n예 = 중간부터 재생\n아니요 = 처음부터 재생", /* 韓国語 */
-		L"存在中途播放数据。\n是否从上次中断处播放？\n是 = 从中途播放\n否 = 从头播放", /* 中国語 */
-		L"بيانات الاستئناف موجودة.\nهل تريد الاستئناف من حيث توقفت؟\nنعم = استئناف\nلا = تشغيل من البداية", /* アラビア語 */
-		L"Данные возобновления существуют.\nПродолжить с места остановки?\nДа = Продолжить\nНет = Играть с начала", /* ロシア語 */
-		L"Fortsetzungsdaten vorhanden.\nVon der Unterbrechungsstelle fortfahren?\nJa = Fortsetzen\nNein = Von Anfang abspielen", /* ドイツ語 */
-		L"Dados de retomada existem.\nRetomar de onde parou?\nSim = Retomar\nNão = Reproduzir do início", /* ポルトガル語 */
-		L"Hervatgegevens aanwezig.\nHervatten waar u gebleven was?\nJa = Hervatten\nNee = Afspelen vanaf het begin", /* オランダ語 */
-		L"Istnieją dane wznowienia.\nWznowić od miejsca przerwania?\nTak = Wznów\nNie = Odtwórz od początku", /* ポーランド語 */
-		L"Devam verisi mevcut.\nKaldığınız yerden devam edilsin mi?\nEvet = Devam et\nHayır = Baştan oynat"), /* トルコ語 */
-		LL14(
-			L"再生確認", /* 日本語タイトル */
-			L"Playback confirmation",
-			L"Confirmation de lecture",
-			L"Conferma riproduzione",
-			L"Confirmación de reproducción",
-			L"재생 확인",
-			L"播放确认",
-			L"تأكيد التشغيل",
-			L"Подтверждение воспроизведения",
-			L"Wiedergabebestätigung",
-			L"Confirmação de reprodução",
-			L"Afspeelbevestiging",
-			L"Potwierdzenie odtwarzania",
-			L"Oynatma onayı"), /* トルコ語タイトル */
-		MB_YESNO)) {
-		return 1;
-	}
-	ResumeSaveRemove(mediaPath);
-	return 0;
+	if (OggIsResumePromptActive())
+		return 0;
+	// arm==1（はい）または未確認の自動再開: 途中から（位置を捨てない）
+	return 1;
 }
 
 // plays2 直後の Run。先に即試行し、失敗時のみ短いリトライ（従来の無条件 Sleep 450ms を避ける）
 static void TryRunMediaControlQuick()
 {
 	extern IMediaControl* pMediaControl;
+	extern CDouga* pMainFrame1;
 	extern void DoEvent();
 	if (!pMediaControl) return;
 	HRESULT hr = pMediaControl->Run();
-	if (SUCCEEDED(hr)) return;
-	for (int y = 0; y < 30; ++y) {
-		Sleep(10);
-		DoEvent();
-		hr = pMediaControl->Run();
-		if (SUCCEEDED(hr)) break;
+	if (FAILED(hr)) {
+		for (int y = 0; y < 30; ++y) {
+			Sleep(10);
+			DoEvent();
+			hr = pMediaControl->Run();
+			if (SUCCEEDED(hr)) break;
+		}
 	}
+	if (pMainFrame1 && ::IsWindow(pMainFrame1->GetSafeHwnd()))
+		pMainFrame1->ApplyVideoDest();
 }
 
 static void ResumeApplyPlaybSeek(__int64 pb);
@@ -1916,6 +1960,7 @@ BEGIN_MESSAGE_MAP(COggDlg, CCustomBlurDialogBase)
 	ON_MESSAGE(WM_OGG_TOGGLE_SUBUI, &COggDlg::OnToggleSubUiMsg)
 	ON_MESSAGE(WM_PLAYBACK_AUTO_STOPPED, OnPlaybackAutoStopped)
 	ON_MESSAGE(WM_OGG_CLOSE_DOUGA, OnCloseDougaMsg)
+	ON_MESSAGE(WM_OGG_RESUME_PROMPT, OnResumePrompt)
 	ON_WM_COPYDATA()
 	ON_WM_KEYDOWN()
 	ON_WM_SYSKEYDOWN()
@@ -2419,13 +2464,33 @@ void MpPushPlayHistory(LPCTSTR path, LPCTSTR displayName)
 
 static volatile LONG s_restartMsgQueued = 0;
 static volatile LONG s_restartWanted = 0;
+static volatile LONG s_onRestartBusy = 0;
 // 二重DS昇格の soft play() 実行中。この間の Restart 再キューは頭出しデグレの原因なので捨てる。
 // Promote で確定したスキップ。atomic が消えても play() で頭出ししない。
+
+BOOL OggIsResumePromptActive()
+{
+	return InterlockedCompareExchange(&g_inResumePrompt, 0, 0) != 0 ? TRUE : FALSE;
+}
+
+void OggCancelPendingPlaybackRestart()
+{
+	InterlockedExchange(&s_restartWanted, 0);
+	InterlockedExchange(&s_restartMsgQueued, 0);
+	if (og && ::IsWindow(og->GetSafeHwnd())) {
+		MSG m;
+		while (::PeekMessage(&m, og->GetSafeHwnd(), WM_APP + 2, WM_APP + 2, PM_REMOVE)) {}
+	}
+}
 
 // WM_APP+2(再演奏)を 1 件にまとめる。リストで曲を連打しても stop/play が直列に
 // 何十回も走らないようにする(キュー溜めによる UI 固まり対策)。
 void RequestPlaybackRestart(HWND hwnd)
 {
+	if (OggIsResumePromptActive())
+		return;
+	if (InterlockedCompareExchange(&s_onRestartBusy, 0, 0) != 0)
+		return;
 	if (!hwnd) {
 		if (og && ::IsWindow(og->GetSafeHwnd()))
 			hwnd = og->GetSafeHwnd();
@@ -2489,6 +2554,9 @@ void MpTaskbarReplay()
 {
 	if (pl && pl->playcnt > 0)
 		pl->RestoreSavedPlaybackRow();
+	extern CString filen;
+	if (!OggPrepareResumeBeforePlayback(filen))
+		return;
 	if (og && ::IsWindow(og->GetSafeHwnd()))
 		RequestPlaybackRestart(og->GetSafeHwnd());
 }
@@ -2550,6 +2618,8 @@ static BOOL MpPlayExistingPlaylistPath(LPCTSTR path)
 	MpPushPlayHistory(pl->pc[idx].fol, pl->pc[idx].name);
 	if (mp && ::IsWindow(mp->GetSafeHwnd()))
 		mp->FollowPlayingRow();
+	if (!OggPrepareResumeBeforePlayback(pl->pc[idx].fol))
+		return TRUE;
 	if (og && ::IsWindow(og->GetSafeHwnd()))
 		RequestPlaybackRestart(og->GetSafeHwnd());
 	return TRUE;
@@ -5358,6 +5428,8 @@ static void PumpUntilFlagOrTimeout(int& flag, DWORD timeoutMs = 10000)
 {
 	const DWORD t0 = GetTickCount();
 	for (; flag == 0;) {
+		if (InterlockedCompareExchange(&g_inDougaTeardown, 0, 0) != 0)
+			ResumePromptKillQueued();
 		DoEvent();
 		if (GetTickCount() - t0 >= timeoutMs)
 			break;
@@ -8066,6 +8138,8 @@ extern BOOL reset;
 
 void COggDlg::play()
 {
+	if (OggIsResumePromptActive())
+		return;
 	// stop1/play 実行中の DoEvent 再入で形式切替が重なるとデコーダ UAF になる
 	if (s_inPlay)
 		return;
@@ -11610,11 +11684,7 @@ void COggDlg::play()
 	if (silentNow) {
 		if (ResumeModeUsesPlayb(mode) && silentPb > 0)
 			ResumeApplyPlaybSeek(silentPb);
-		if (mode == -2 && silentAa > 0.0) {
-			aa1_ = silentAa;
-			if (pMainFrame1)
-				pMainFrame1->seek((LONGLONG)(((float)((float)aa1_ * 100.0f * 100000.0f))));
-		}
+		// mode=-2 の silent シークは plays2/Run 後（PitchCorrect 前は避ける）
 	}
 
 	DispatchPlaywavFillPrefill(bufwav3, 0, len1, len2);
@@ -11634,9 +11704,15 @@ void COggDlg::play()
 	CFile f123;
 	int flggg = 0;
 	if (silentNow) {
-		// 既にシーク済。途中再生ダイアログは出さない
-		if (pMainFrame1 && pGraphBuilder && mode == -2)
+		// 既に位置はメモリにある。途中再生ダイアログは出さない
+		if (pMainFrame1 && pGraphBuilder && mode == -2) {
 			pMainFrame1->plays2();
+			TryRunMediaControlQuick();
+			if (silentAa > 0.0) {
+				aa1_ = silentAa;
+				pMainFrame1->seek((LONGLONG)(((float)((float)aa1_ * 100.0f * 100000.0f))));
+			}
+		}
 	}
 	else if (ResumeModeUsesPlayb(mode) || mode == -2) {
 		flggg = PromptResumePlaybackIfSaveExists(this, filen);
@@ -11652,21 +11728,24 @@ void COggDlg::play()
 				}
 			}
 			if (mode == -2) {
+				// 動画の途中位置は Run 後にシーク（下の TryRun 相当は呼び出し側）
+				// ここでは plays2 のみ。シークは呼び出し側で Run 後に行う想定だが、
+				// play() 内のこの経路では直後に DS Play するため、ここで Run→seek する。
+				TryRunMediaControlQuick();
 				if (f123.Open(ResumeSavePathRead(filen), CFile::modeRead | CFile::shareDenyWrite, NULL) == TRUE) {
 					f123.Read(&aa1_, sizeof(double));
-					pMainFrame1->seek((LONGLONG)(((float)((float)aa1_ * 100.0f * 100000.0f))));
 					f123.Close();
+					if (pMainFrame1)
+						pMainFrame1->seek((LONGLONG)(((float)((float)aa1_ * 100.0f * 100000.0f))));
 				}
 			}
 		}
 		else {
 			if (pMainFrame1 && pGraphBuilder)pMainFrame1->plays2();
-			if (pMainFrame1) { pMainFrame1->seek(0); }
 		}
 	}
 	else {
 		if (pMainFrame1) pMainFrame1->plays2();
-		if (pMainFrame1) { pMainFrame1->seek(0); }
 	}
 	syukai = 0;
 	fade1 = 0;
@@ -19654,6 +19733,8 @@ void COggDlg::dp(CString a)
 	if (filen.Right(1) == "\"") filen = filen.Left(filen.GetLength() - 1);
 	if (savedata.playerMode == 1 && MpPlayExistingPlaylistPath(filen))
 		return;
+	if (!OggPrepareResumeBeforePlayback(filen))
+		return;
 	ti = filen.Right(filen.GetLength() - filen.ReverseFind('\\') - 1);
 	stop1();
 	if (filen.Right(5).MakeLower() == ".opus") {
@@ -19759,6 +19840,8 @@ void COggDlg::dp(CString a)
 		mode = -2; modesub = -2;
 		// グラフ構築(play)の前に確認 → ダイアログ表示までの待ちを短縮
 		const int flggg = PromptResumePlaybackIfSaveExists(this, filen);
+		if (pMainFrame1)
+			gamenkill();
 		pMainFrame1 = new CDouga;
 		pMainFrame1->Create(GetSafeHwnd());
 		pMainFrame1->ShowWindow(SW_HIDE);
@@ -19767,7 +19850,6 @@ void COggDlg::dp(CString a)
 		if (flggg == 1 && f123.Open(ResumeSavePathRead(filen), CFile::modeRead | CFile::shareDenyWrite, NULL) == TRUE) {
 			f123.Close();
 			if (pMainFrame1 && pGraphBuilder)pMainFrame1->plays2();
-			if (pMediaControl) { TryRunMediaControlQuick(); }
 			if (mode == -10) {
 				if (f123.Open(ResumeSavePathRead(filen), CFile::modeRead | CFile::shareDenyWrite, NULL) == TRUE) {
 					f123.Read(&playb, sizeof(__int64));
@@ -19782,18 +19864,20 @@ void COggDlg::dp(CString a)
 					f123.Close();
 				}
 			}
+			// 途中再生シークは Run 後。PitchCorrect 導入直後＋Stopped での SetPositions が不安定
+			if (pMediaControl) { TryRunMediaControlQuick(); }
 			if (mode == -2) {
 				if (f123.Open(ResumeSavePathRead(filen), CFile::modeRead | CFile::shareDenyWrite, NULL) == TRUE) {
 					f123.Read(&aa1_, sizeof(double));
-					pMainFrame1->seek((LONGLONG)(((float)((float)aa1_ * 100.0f * 100000.0f))));
 					f123.Close();
+					if (pMainFrame1)
+						pMainFrame1->seek((LONGLONG)(((float)((float)aa1_ * 100.0f * 100000.0f))));
 				}
 			}
 		}
 		else {
 			if (pMainFrame1 && pGraphBuilder)pMainFrame1->plays2();
 			if (pMediaControl) { TryRunMediaControlQuick(); }
-			if (pMainFrame1) { pMainFrame1->seek(0); }
 		}
 		//		if(pGraphBuilder)pMainFrame1->plays2();
 		//		if(pMediaControl)pMediaControl->Run();
@@ -20078,6 +20162,8 @@ void COggDlg::stop()
 	}
 	s_inStop1 = true;
 	struct ClearInStop1 { ~ClearInStop1() { s_inStop1 = false; } } _clearInStop1;
+	ResumePromptKillQueued();
+	ResumeDrainQueuedKeyDowns();
 
 	// DoEvent 再入より先に解析を止める（停止ボタンでは起きず曲切替で落ちる主因）
 	playf = 0;
@@ -20223,7 +20309,6 @@ void COggDlg::stop()
 		thend = 1;
 		fadeadd = 0; fade = 1.0;
 	}
-	// 通知スレッドが pMediaControl を触るのを止めてから動画グラフを解放する
 	if (pMainFrame1 != NULL)
 		pMainFrame1->stop();
 	else if ((mode == -2 || videoonly) && pMediaControl)
@@ -20252,6 +20337,8 @@ void COggDlg::stop()
 	eqflg = TRUE;
 	if (pl && plw && pl->pnt >= 0 && pl->pnt < pl->playcnt)
 		ApplyPlaylistRowDisplay(pl->pc[pl->pnt]);
+	ResumePromptKillQueued();
+	ResumeDrainQueuedKeyDowns();
 	MpPromptOnPlaybackStop();
 }
 
@@ -23189,16 +23276,121 @@ void COggDlg::OnTimer(UINT_PTR nIDEvent)
 void COggDlg::OnTimer(UINT nIDEvent)
 #endif
 {
+	if (nIDEvent == IDT_OGG_RESUME_PROMPT) {
+		KillTimer(IDT_OGG_RESUME_PROMPT);
+		OggRunResumePrompt();
+		return;
+	}
+	if (nIDEvent == IDT_OGG_RESUME_RESTART) {
+		KillTimer(IDT_OGG_RESUME_RESTART);
+		RequestPlaybackRestart(NULL);
+		return;
+	}
 	// TODO: この位置にメッセージ ハンドラ用のコードを追加するかまたはデフォルトの処理を呼び出してください
 	timerog(nIDEvent);
 	CCustomBlurDialogBase::OnTimer(nIDEvent);
 }
+void OggRunResumePrompt()
+{
+	if (InterlockedCompareExchange(&g_inDougaTeardown, 0, 0) != 0) {
+		ResumePromptKillQueued();
+		InterlockedExchange(&g_resumePromptPosted, 0);
+		return;
+	}
+	ResumePromptKillQueued();
+	if (OggIsResumePromptActive())
+		return;
+	InterlockedExchange(&g_resumePromptPosted, 0);
+	CString mediaPath = g_resumePromptPath;
+	g_resumePromptPath.Empty();
+	if (mediaPath.IsEmpty())
+		return;
+	InterlockedExchange(&g_inResumePrompt, 1);
+	ResumeDrainQueuedKeyDowns();
+
+	extern CMediaPlayerDlg* mp;
+	HWND hOwn = ResumePromptTargetHwnd();
+	// og が隠れ親のとき IsWindowVisible(mp) も FALSE になる。隠れ og をオーナーにすると
+	// MessageBox が非表示のままモーダルになり、ダイアログ無しフリーズに見える。
+	if (hOwn && og && hOwn == og->GetSafeHwnd() && !::IsWindowVisible(hOwn))
+		hOwn = NULL;
+	if (hOwn) {
+		::EnableWindow(hOwn, TRUE);
+		::SetForegroundWindow(hOwn);
+	}
+	const int box = ::MessageBox(hOwn, LL14(
+		L"途中再生データが存在します。\n前回中断した部分から再生しますか？\nはい = 途中から再生\nいいえ = はじめから再生\nキャンセル = 再生しない（途中位置は残します）", /* 日本語 */
+		L"Resume data exists.\nResume from where you left off?\nYes = Resume\nNo = Play from start\nCancel = Don't play (keep resume position)", /* 英語 */
+		L"Des données de reprise existent.\nReprendre là où vous vous êtes arrêté ?\nOui = Reprendre\nNon = Jouer depuis le début\nAnnuler = Ne pas lire (conserver la position)", /* フランス語 */
+		L"Esistono dati di ripresa.\nRiprendere da dove ci si è fermati?\nSì = Riprendi\nNo = Riproduci dall'inizio\nAnnulla = Non riprodurre (mantieni la posizione)", /* イタリア語 */
+		L"Existen datos de reanudación.\n¿Reanudar desde donde lo dejó?\nSí = Reanudar\nNo = Reproducir desde el inicio\nCancelar = No reproducir (conservar la posición)", /* スペイン語 */
+		L"중간 재생 데이터가 존재합니다.\n지난번 중단한 부분부터 재생하시겠습니까?\n예 = 중간부터 재생\n아니요 = 처음부터 재생\n취소 = 재생하지 않음(위치 유지)", /* 韓国語 */
+		L"存在中途播放数据。\n是否从上次中断处播放？\n是 = 从中途播放\n否 = 从头播放\n取消 = 不播放（保留中途位置）", /* 中国語 */
+		L"بيانات الاستئناف موجودة.\nهل تريد الاستئناف من حيث توقفت؟\nنعم = استئناف\nلا = تشغيل من البداية\nإلغاء = عدم التشغيل (الإبقاء على الموضع)", /* アラビア語 */
+		L"Данные возобновления существуют.\nПродолжить с места остановки?\nДа = Продолжить\nНет = Играть с начала\nОтмена = Не воспроизводить (сохранить позицию)", /* ロシア語 */
+		L"Fortsetzungsdaten vorhanden.\nVon der Unterbrechungsstelle fortfahren?\nJa = Fortsetzen\nNein = Von Anfang abspielen\nAbbrechen = Nicht abspielen (Position behalten)", /* ドイツ語 */
+		L"Dados de retomada existem.\nRetomar de onde parou?\nSim = Retomar\nNão = Reproduzir do início\nCancelar = Não reproduzir (manter a posição)", /* ポルトガル語 */
+		L"Hervatgegevens aanwezig.\nHervatten waar u gebleven was?\nJa = Hervatten\nNee = Afspelen vanaf het begin\nAnnuleren = Niet afspelen (positie behouden)", /* オランダ語 */
+		L"Istnieją dane wznowienia.\nWznowić od miejsca przerwania?\nTak = Wznów\nNie = Odtwórz od początku\nAnuluj = Nie odtwarzaj (zachowaj pozycję)", /* ポーランド語 */
+		L"Devam verisi mevcut.\nKaldığınız yerden devam edilsin mi?\nEvet = Devam et\nHayır = Baştan oynat\nİptal = Oynatma (konumu sakla)"), /* トルコ語 */
+		LL14(
+			L"再生確認", /* 日本語タイトル */
+			L"Playback confirmation",
+			L"Confirmation de lecture",
+			L"Conferma riproduzione",
+			L"Confirmación de reproducción",
+			L"재생 확인",
+			L"播放确认",
+			L"تأكيد التشغيل",
+			L"Подтверждение воспроизведения",
+			L"Wiedergabebestätigung",
+			L"Confirmação de reprodução",
+			L"Afspeelbevestiging",
+			L"Potwierdzenie odtwarzania",
+			L"Oynatma onayı"),
+		MB_YESNOCANCEL | MB_ICONQUESTION | MB_SETFOREGROUND | MB_TASKMODAL | MB_TOPMOST | MB_DEFBUTTON1);
+
+	if (mp && ::IsWindow(mp->GetSafeHwnd()))
+		::EnableWindow(mp->GetSafeHwnd(), TRUE);
+	if (og && ::IsWindow(og->GetSafeHwnd()))
+		::EnableWindow(og->GetSafeHwnd(), TRUE);
+	if (pMainFrame1 && ::IsWindow(pMainFrame1->GetSafeHwnd()))
+		::EnableWindow(pMainFrame1->GetSafeHwnd(), TRUE);
+
+	InterlockedExchange(&g_inResumePrompt, 0);
+	ResumeDrainQueuedKeyDowns();
+
+	if (box == IDYES)
+		InterlockedExchange(&g_resumeSilentArm, 1);
+	else if (box == IDNO)
+		InterlockedExchange(&g_resumeSilentArm, 2);
+	else
+		return;
+
+	if (!mediaPath.IsEmpty())
+		filen = mediaPath;
+	HWND hRestart = ResumePromptTargetHwnd();
+	if (hRestart && ::SetTimer(hRestart, IDT_OGG_RESUME_RESTART, 50, NULL))
+		return;
+	RequestPlaybackRestart(NULL);
+}
+
+LRESULT COggDlg::OnResumePrompt(WPARAM, LPARAM)
+{
+	OggRunResumePrompt();
+	return 0;
+}
+
 LRESULT COggDlg::dp2(WPARAM, LPARAM)
 {
 	InterlockedExchange(&s_restartMsgQueued, 0);
 	InterlockedExchange(&s_restartWanted, 0);
 	// KPI 読み込み中は再生も始まっていないので再開要求は破棄してよい
 	if (g_pActiveLoadingWnd != NULL)
+		return 0;
+	if (OggIsResumePromptActive())
+		return 0;
+	if (InterlockedCompareExchange(&s_onRestartBusy, 0, 0) != 0)
 		return 0;
 	OnRestart();
 	return 0;
@@ -23367,6 +23559,12 @@ void COggDlg::OnButton1()
 	// TODO: この位置にコントロール通知ハンドラ用のコードを追加してください
 	randomf = 0;
 	m_rund.EnableWindow(TRUE);
+	OggCancelPendingPlaybackRestart();
+	InterlockedExchange(&g_resumeSilentArm, 0);
+	ResumePromptKillQueued();
+	InterlockedExchange(&g_resumePromptPosted, 0);
+	InterlockedExchange(&g_inResumePrompt, 0);
+	g_resumePromptPath.Empty();
 	stop();
 }
 
@@ -23540,6 +23738,9 @@ void COggDlg::gamen(int uu)
 void COggDlg::gamenkill()
 {
 	if (pMainFrame1 != NULL) {
+		InterlockedExchange(&g_inDougaTeardown, 1);
+		ResumePromptKillQueued();
+		ResumeDrainQueuedKeyDowns();
 		killw = 0;
 		RECT r;
 		pMainFrame1->GetWindowRect(&r);
@@ -23547,16 +23748,13 @@ void COggDlg::gamenkill()
 		savedata.gy = r.top;
 		pMainFrame1->m_closingByMain = 1;
 		pMainFrame1->stop();
-		// 配信/録画中の WGC が Destroy とレースしないよう、閉じる前にセッションを外す
 		if (pMainFrame1->GetSafeHwnd())
 			ScWgcReleaseWindow(pMainFrame1->GetSafeHwnd());
 		::SendMessage(pMainFrame1->m_hWnd, WM_CLOSE, NULL, NULL);
-		//		delete pMainFrame1;
-		//動画画面が閉じるのを待つ
 		PumpUntilFlagOrTimeout(killw, 10000);
-		//delete pMainFrame1;
 		pMainFrame1 = NULL;
-		//		for(int i=0;i<20;i++){DoEvent();Sleep(5);};
+		ResumePromptKillQueued();
+		InterlockedExchange(&g_inDougaTeardown, 0);
 	}
 }
 
@@ -23569,6 +23767,7 @@ void COggDlg::CloseVideoScreen()
 	if (mode == -2 || videoonly) {
 		randomf = 0;
 		m_rund.EnableWindow(TRUE);
+		OggCancelPendingPlaybackRestart();
 		stop();
 		return;
 	}
@@ -25114,7 +25313,6 @@ void COggDlg::OnOK()
 	CCustomBlurDialogBase::OnOK();
 }
 extern IMediaEvent* pMediaEvent;
-static volatile LONG s_onRestartBusy = 0;
 
 
 static int g_ccFmtRate = 0;
@@ -25610,13 +25808,11 @@ void Ogg_FeedPianoRoll(const void* p, int n)
 
 void COggDlg::OnRestart()
 {
-	const bool softBusy = false;
-	if (InterlockedCompareExchange(&s_onRestartBusy, 1, 0) != 0) {
-		// 昇格中の重複は wanted にも積まない（終わった後の keep 無し再Restart防止）
-		if (!softBusy)
-			InterlockedExchange(&s_restartWanted, 1);
+	if (OggIsResumePromptActive())
 		return;
-	}
+	const bool softBusy = false;
+	if (InterlockedCompareExchange(&s_onRestartBusy, 1, 0) != 0)
+		return;
 	// play() 中の DoEvent 再入で stop() がフラグだけ立てると CWread/再生が壊れる。延期する。
 	if (s_inPlay || s_inStop1) {
 		InterlockedExchange(&s_onRestartBusy, 0);
@@ -25731,6 +25927,8 @@ void COggDlg::OnRestart()
 			modesub = -2; mode = -2;
 			// グラフ構築(play)の前に確認 → ダイアログ表示までの待ちを短縮
 			const int flggg = PromptResumePlaybackIfSaveExists(this, filen);
+			if (pMainFrame1)
+				gamenkill();
 			pMainFrame1 = new CDouga;
 			pMainFrame1->Create(GetSafeHwnd());
 			pMainFrame1->ShowWindow(SW_HIDE);
@@ -25740,36 +25938,20 @@ void COggDlg::OnRestart()
 				f123.Close();
 				if (pMainFrame1 && pGraphBuilder)pMainFrame1->plays2();
 				TryRunMediaControlQuick();
-				if (mode == -10) {
-					if (f123.Open(ResumeSavePathRead(filen), CFile::modeRead | CFile::shareDenyWrite, NULL) == TRUE) {
-						f123.Read(&playb, sizeof(__int64));
-						if (oggsize > 0 && playb > (__int64)oggsize)
-							playb /= 4;
-						if (savedata.mp3orig) {
-							mp3_.seek2(Mp3SeekDwPosFromPlaybFrames(playb), wavchannel);
-						}
-						else {
-							mp3_.seek(Mp3SeekDwPosFromPlaybFrames(playb), wavchannel);
-						}
-						f123.Close();
-					}
-				}
+				// 途中再生シークは Run 後（PitchCorrect 張り替え直後の Stopped シークを避ける）
 				if (mode == -2) {
 					if (f123.Open(ResumeSavePathRead(filen), CFile::modeRead | CFile::shareDenyWrite, NULL) == TRUE) {
 						f123.Read(&aa1_, sizeof(double));
-						pMainFrame1->seek((LONGLONG)(((float)((float)aa1_ * 100.0f * 100000.0f))));
 						f123.Close();
+						if (pMainFrame1)
+							pMainFrame1->seek((LONGLONG)(((float)((float)aa1_ * 100.0f * 100000.0f))));
 					}
 				}
 			}
 			else {
 				if (pMainFrame1 && pGraphBuilder)pMainFrame1->plays2();
 				TryRunMediaControlQuick();
-				if (pMainFrame1) { pMainFrame1->seek(0); }
 			}
-			//			if(pGraphBuilder)pMainFrame1->plays2();
-			//			if(pMediaControl)pMediaControl->Run();
-			//			if(pMediaPosition)pMediaPosition->put_CurrentPosition(0);
 			int a = 0; aa2 = 0;
 			REFTIME aa = 0;
 			aa2 = 0;
@@ -25794,25 +25976,6 @@ void COggDlg::OnRestart()
 			}
 			SetTimer(1250, 100, NULL);
 			plf = 1;
-			CFile ff;
-			CString ss11 = filen; ss11.MakeLower();
-			if (ss11.Right(3) == "m4a") {
-				if (ff.Open(filen, CFile::modeRead | CFile::shareDenyWrite, NULL) == TRUE) {
-					mp3file = filen;
-					ZeroMemory(bufimage, sizeof(bufimage));
-					int i;
-					ff.Read(bufimage, sizeof(bufimage));
-					for (i = 0; i < 0x300000; i++) {// 00 06 5D 6A 64 61 74 61
-						if (bufimage[i] == 0x63 && bufimage[i + 1] == 0x6f && bufimage[i + 2] == 0x76 && bufimage[i + 3] == 0x72 && bufimage[i + 8] == 0x64 && bufimage[i + 9] == 0x61 && bufimage[i + 10] == 0x74 && bufimage[i + 11] == 0x61) {
-							break;
-						}
-					}
-					m_mp3jake.EnableWindow(FALSE);
-					if (i != 0x300000) {
-						m_mp3jake.EnableWindow(TRUE);
-					}
-				}ff.Close();
-			}
 		}
 		else {
 			if (mode == 19)filen = filen.Left(5);

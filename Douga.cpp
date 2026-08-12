@@ -12,6 +12,7 @@
 #include "dsound.h"
 #include "rubberband/RubberBandStretcher.h"
 #include <vector>
+#include <deque>
 #include <cmath>
 #include <algorithm>
 #include <mmreg.h>
@@ -53,6 +54,11 @@ void DougaPitchCorrect_SetPaused(BOOL paused);
 void DougaPitchCorrect_Poll();
 void DougaPitchCorrect_PauseForGraphSeek();
 void DougaPitchCorrect_OnSeek();
+
+// PitchCorrect: Grabber→外部 DS（mode=-2）。0=無効（切り分け用）
+#ifndef DOUGA_PITCHCORRECT_ENABLE
+#define DOUGA_PITCHCORRECT_ENABLE 1
+#endif
 //#include "vfw.h"
 //#include <digitalv.h>
 //#include "resource.h"
@@ -206,7 +212,7 @@ public:
 
 
 
-#define		RELEASE1(x)			{ if(x){ULONG r;for(r=1;;){r=x->Release();if(r==0)break;} x=NULL;} }
+#define		RELEASE1(x)			{ if(x){ ULONG r=1; int _n=0; for(; _n<32; ++_n){ r=x->Release(); if(r==0) break; } x=NULL; } }
 #define		RELEASE(x)			{ if (x != NULL) {x->Release(); x = NULL;} }
 #ifdef _DEBUG
 #define new DEBUG_NEW
@@ -1962,14 +1968,16 @@ HRESULT CntPin(IBaseFilter *pFilter){
 		hr=pFilter->EnumPins(&e);
 	if(FAILED(hr) || pFilter==NULL)
 		return hr;
-	FILTER_INFO filinfo;
+	FILTER_INFO filinfo = {};
 	pFilter->QueryFilterInfo(&filinfo);
+	if (filinfo.pGraph) { filinfo.pGraph->Release(); filinfo.pGraph = NULL; }
 	while(e->Next(1, &pResult, NULL) == S_OK){
 		PIN_DIRECTION PinDirThis;
 		hr=pResult->QueryDirection(&PinDirThis);
 		if (pResult!=NULL && SUCCEEDED(hr) && PinDirThis==PINDIR_OUTPUT){
-			PIN_INFO info;
+			PIN_INFO info = {};
 			pResult->QueryPinInfo(&info);
+			if (info.pFilter) { info.pFilter->Release(); info.pFilter = NULL; }
 			{
 				IEnumMediaTypes *em=NULL;
 				AM_MEDIA_TYPE *amt;
@@ -1977,6 +1985,7 @@ HRESULT CntPin(IBaseFilter *pFilter){
 				if(SUCCEEDED(hr)){
 					while(em->Next(1,&amt,NULL)==S_OK){
 						GUID mj=amt->majortype;
+						(void)mj;
 						// amt を解放
 						if (amt->cbFormat != 0){
 							CoTaskMemFree((PVOID)amt->pbFormat);
@@ -2205,30 +2214,29 @@ HRESULT GetPin(IBaseFilter *pFilter,PIN_DIRECTION dir,IPin *&pPin,GUID majorType
 	HRESULT hr=NOERROR;
 	IEnumPins *e=NULL;
 	IPin *pResult=NULL;
+	pPin = NULL;
 	if(pFilter)
 		hr=pFilter->EnumPins(&e);
 	if(FAILED(hr) || pFilter==NULL)
 		return hr;
-	FILTER_INFO filinfo;
+	FILTER_INFO filinfo = {};
 	pFilter->QueryFilterInfo(&filinfo);
+	if (filinfo.pGraph) { filinfo.pGraph->Release(); filinfo.pGraph = NULL; }
 	while(e->Next(1, &pResult, NULL) == S_OK){
 		PIN_DIRECTION PinDirThis;
 		hr=pResult->QueryDirection(&PinDirThis);
 		if (pResult!=NULL && SUCCEEDED(hr) && PinDirThis==dir){
-			PIN_INFO info;
+			PIN_INFO info = {};
 			pResult->QueryPinInfo(&info);
+			if (info.pFilter) { info.pFilter->Release(); info.pFilter = NULL; }
 			if(dir==PINDIR_INPUT){
 				pPin=pResult;
+				pResult = NULL; // ownership to caller
 				retCode=S_OK;
 			}else{
 				IEnumMediaTypes *em=NULL;
 				AM_MEDIA_TYPE *amt=NULL;
 				hr=pResult->EnumMediaTypes(&em);
-//				if(_wcsnicmp(info.achName,L"Video",5*2+2)>=0){
-//					pPin=pResult;
-//					retCode=S_OK;
-//					break;
-//				}
 				if(SUCCEEDED(hr)){
 					while(em->Next(1,&amt,NULL)==S_OK){
 						GUID mj=amt->majortype;
@@ -2241,12 +2249,14 @@ HRESULT GetPin(IBaseFilter *pFilter,PIN_DIRECTION dir,IPin *&pPin,GUID majorType
 						if(Haali==NULL || name==NULL){
 							if(mj==majorType){
 								pPin=pResult;
+								pResult = NULL;
 								retCode=S_OK;
 								break;
 							}
 						}else{
 							if(mj==majorType && _wcsnicmp(info.achName,name,14)==0){
 								pPin=pResult;
+								pResult = NULL;
 								retCode=S_OK;
 								break;
 							}
@@ -2304,6 +2314,7 @@ CString s2;
 double CDouga::GetFrameRate(IGraphBuilder* pGraph)
 {
 	double frameRate = 0.0;
+	if (!pGraph) return 0.0;
 
 	// 方法1: ビデオデコーダーのメディアタイプから取得
 	IEnumFilters* pEnum = NULL;
@@ -2325,31 +2336,26 @@ double CDouga::GetFrameRate(IGraphBuilder* pGraph)
 
 					if (dir == PINDIR_OUTPUT)
 					{
-						AM_MEDIA_TYPE* pmt = NULL;
-						if (SUCCEEDED(pPin->ConnectionMediaType(pmt)))
+						AM_MEDIA_TYPE mt;
+						ZeroMemory(&mt, sizeof(mt));
+						if (SUCCEEDED(pPin->ConnectionMediaType(&mt)))
 						{
-							if (pmt->majortype == MEDIATYPE_Video)
+							if (mt.majortype == MEDIATYPE_Video && mt.pbFormat)
 							{
-								// VIDEOINFOHEADER から取得
-								if (pmt->formattype == FORMAT_VideoInfo)
+								if (mt.formattype == FORMAT_VideoInfo)
 								{
-									VIDEOINFOHEADER* pVih = (VIDEOINFOHEADER*)pmt->pbFormat;
+									VIDEOINFOHEADER* pVih = (VIDEOINFOHEADER*)mt.pbFormat;
 									if (pVih->AvgTimePerFrame > 0)
-									{
 										frameRate = 10000000.0 / pVih->AvgTimePerFrame;
-									}
 								}
-								// VIDEOINFOHEADER2 から取得（インターレース対応）
-								else if (pmt->formattype == FORMAT_VideoInfo2)
+								else if (mt.formattype == FORMAT_VideoInfo2)
 								{
-									VIDEOINFOHEADER2* pVih2 = (VIDEOINFOHEADER2*)pmt->pbFormat;
+									VIDEOINFOHEADER2* pVih2 = (VIDEOINFOHEADER2*)mt.pbFormat;
 									if (pVih2->AvgTimePerFrame > 0)
-									{
 										frameRate = 10000000.0 / pVih2->AvgTimePerFrame;
-									}
 								}
 							}
-							DeleteMediaType(pmt);
+							FreeMediaType(mt);
 						}
 					}
 					pPin->Release();
@@ -2365,33 +2371,7 @@ double CDouga::GetFrameRate(IGraphBuilder* pGraph)
 		pEnum->Release();
 	}
 
-	// 方法2: フレームレートが取得できなかった場合はIMediaDetを使用
-	if (frameRate == 0.0)
-	{
-		IMediaDet* pDet = NULL;
-		if (SUCCEEDED(CoCreateInstance(CLSID_MediaDet, NULL, CLSCTX_INPROC,
-			IID_IMediaDet, (LPVOID*)&pDet)))
-		{
-			if (SUCCEEDED(pDet->put_Filename(douga)))
-			{
-				long streams = 0;
-				pDet->get_OutputStreams(&streams);
-
-				for (long i = 0; i < streams; i++)
-				{
-					pDet->put_CurrentStream(i);
-					double tempRate = 0.0;
-					if (SUCCEEDED(pDet->get_FrameRate(&tempRate)) && tempRate > 0.0)
-					{
-						frameRate = tempRate;
-						break;
-					}
-				}
-			}
-			pDet->Release();
-		}
-	}
-
+	// MediaDet の put_Filename は前グラフがファイルロック中だと UI フリーズする。使わない。
 	return frameRate;
 }
 
@@ -2594,6 +2574,141 @@ public:
 	STDMETHOD(putParam)(unsigned int paramID, int value) PURE;
 };
 
+static const GUID CLSID_ffdshowRawVideo =
+{ 0x0B390488, 0xD80F, 0x4A68, { 0x84, 0x08, 0x48, 0xDC, 0x19, 0x9F, 0x0E, 0x97 } };
+static const GUID CLSID_ffdshowVideoDecoder =
+{ 0x04FE9017, 0xF873, 0x410E, { 0x87, 0x1E, 0xAB, 0x91, 0x66, 0x1A, 0x4E, 0xF7 } };
+// 汚れの主因: IC が ffdshow Audio を拾うと有↔無を跨いで残る
+static const GUID CLSID_ffdshowAudioDecoder =
+{ 0x0F40E1E5, 0x4F79, 0x4988, { 0xB1, 0xA9, 0xCC, 0x98, 0x79, 0x4E, 0x6B, 0x55 } };
+static const GUID CLSID_ffdshowAudioRaw =
+{ 0xB86F6BEE, 0xE7C0, 0x4D03, { 0x8D, 0x52, 0x5B, 0x44, 0x30, 0xCF, 0x6C, 0x88 } };
+
+static void DougaPrefFfdshowSubsReg(BOOL enable)
+{
+	HKEY hk = NULL;
+	if (RegCreateKeyExW(HKEY_CURRENT_USER, L"Software\\GNU\\ffdshow_raw\\default",
+		0, NULL, 0, KEY_SET_VALUE, NULL, &hk, NULL) != ERROR_SUCCESS)
+		return;
+	DWORD v = enable ? 1u : 0u;
+	RegSetValueExW(hk, L"isSubtitles", 0, REG_DWORD, (const BYTE*)&v, sizeof(v));
+	RegSetValueExW(hk, L"showSubtitles", 0, REG_DWORD, (const BYTE*)&v, sizeof(v));
+	RegSetValueExW(hk, L"subTextpin", 0, REG_DWORD, (const BYTE*)&v, sizeof(v));
+	RegSetValueExW(hk, L"subText", 0, REG_DWORD, (const BYTE*)&v, sizeof(v));
+	RegSetValueExW(hk, L"subSSA", 0, REG_DWORD, (const BYTE*)&v, sizeof(v));
+	RegCloseKey(hk);
+}
+
+// Intelligent Connect だけ遮断。CoCreateInstance（Ensure）は通る。
+static void DougaSetClsidMeritHKCU(REFCLSID clsid, DWORD merit)
+{
+	WCHAR guid[64] = {};
+	if (!StringFromGUID2(clsid, guid, 64))
+		return;
+	WCHAR key[160] = {};
+	wsprintfW(key, L"Software\\Classes\\CLSID\\%s", guid);
+	HKEY hk = NULL;
+	if (RegCreateKeyExW(HKEY_CURRENT_USER, key, 0, NULL, 0, KEY_SET_VALUE, NULL, &hk, NULL) != ERROR_SUCCESS)
+		return;
+	RegSetValueExW(hk, L"Merit", 0, REG_DWORD, (const BYTE*)&merit, sizeof(merit));
+	RegCloseKey(hk);
+}
+
+static void DougaBlockFfdshowIntelligentConnect(BOOL block)
+{
+	const DWORD m = block ? (DWORD)MERIT_DO_NOT_USE : (DWORD)MERIT_NORMAL;
+	DougaSetClsidMeritHKCU(CLSID_ffdshowRawVideo, m);
+	DougaSetClsidMeritHKCU(CLSID_ffdshowVideoDecoder, m);
+	DougaSetClsidMeritHKCU(CLSID_ffdshowAudioDecoder, m);
+	DougaSetClsidMeritHKCU(CLSID_ffdshowAudioRaw, m);
+}
+
+// RenderFile の IC が ffdshow raw/Video に入って固まるのを防ぐ。
+// BindToStorage は使わない（汚れた ffd でそこが固まる）。Ensure の CoCreate は別経路。
+class CDougaRejectFfdCb : public IAMGraphBuilderCallback
+{
+	LONG m_cRef;
+public:
+	CDougaRejectFfdCb() : m_cRef(1) {}
+	STDMETHODIMP QueryInterface(REFIID riid, void** ppv)
+	{
+		if (!ppv) return E_POINTER;
+		*ppv = NULL;
+		if (riid == IID_IUnknown || riid == IID_IAMGraphBuilderCallback) {
+			*ppv = static_cast<IAMGraphBuilderCallback*>(this);
+			AddRef();
+			return S_OK;
+		}
+		return E_NOINTERFACE;
+	}
+	STDMETHODIMP_(ULONG) AddRef() { return (ULONG)InterlockedIncrement(&m_cRef); }
+	STDMETHODIMP_(ULONG) Release()
+	{
+		LONG c = InterlockedDecrement(&m_cRef);
+		if (c < 1) InterlockedExchange(&m_cRef, 1);
+		return (ULONG)(c < 1 ? 1 : c);
+	}
+	STDMETHODIMP SelectedFilter(IMoniker* pMon)
+	{
+		if (!pMon) return S_OK;
+		IBindCtx* bc = NULL;
+		if (FAILED(CreateBindCtx(0, &bc)) || !bc) return S_OK;
+		LPOLESTR dn = NULL;
+		const HRESULT hr = pMon->GetDisplayName(bc, NULL, &dn);
+		bc->Release();
+		if (FAILED(hr) || !dn) return S_OK;
+		CString s(dn);
+		CoTaskMemFree(dn);
+		s.MakeUpper();
+		// raw / Video / Audio / audio raw — いずれも IC 拒否（Audio 残留が有→無→有フリーズの汚れ）
+		if (s.Find(L"0B390488") >= 0 || s.Find(L"04FE9017") >= 0
+			|| s.Find(L"0F40E1E5") >= 0 || s.Find(L"B86F6BEE") >= 0)
+			return E_FAIL;
+		return S_OK;
+	}
+	STDMETHODIMP CreatedFilter(IBaseFilter* pFil)
+	{
+		if (!pFil) return S_OK;
+		CLSID clsid = CLSID_NULL;
+		if (SUCCEEDED(pFil->GetClassID(&clsid))) {
+			if (clsid == CLSID_ffdshowRawVideo || clsid == CLSID_ffdshowVideoDecoder
+				|| clsid == CLSID_ffdshowAudioDecoder || clsid == CLSID_ffdshowAudioRaw)
+				return E_FAIL;
+		}
+		FILTER_INFO fi = {};
+		if (SUCCEEDED(pFil->QueryFilterInfo(&fi))) {
+			CString name = fi.achName;
+			if (fi.pGraph) fi.pGraph->Release();
+			if (name.Find(L"ffdshow raw") >= 0 || name.Find(L"ffdshow Video") >= 0
+				|| name.Find(L"ffdshow Audio") >= 0 || name.Find(L"ffdshow audio") >= 0)
+				return E_FAIL;
+		}
+		return S_OK;
+	}
+};
+
+static CDougaRejectFfdCb s_dougaRejectFfdCb;
+
+static void DougaInstallRejectFfdCallback(IGraphBuilder* g)
+{
+	if (!g) return;
+	IObjectWithSite* ows = NULL;
+	if (FAILED(g->QueryInterface(IID_IObjectWithSite, (void**)&ows)) || !ows)
+		return;
+	ows->SetSite(static_cast<IAMGraphBuilderCallback*>(&s_dougaRejectFfdCb));
+	ows->Release();
+}
+
+static void DougaClearRejectFfdCallback(IGraphBuilder* g)
+{
+	if (!g) return;
+	IObjectWithSite* ows = NULL;
+	if (FAILED(g->QueryInterface(IID_IObjectWithSite, (void**)&ows)) || !ows)
+		return;
+	ows->SetSite(NULL);
+	ows->Release();
+}
+
 static void DougaEnableFfdshowSubs(IBaseFilter* pFfd)
 {
 	if (!pFfd) return;
@@ -2609,28 +2724,11 @@ static void DougaEnableFfdshowSubs(IBaseFilter* pFfd)
 	ff->putParam(kIdff_subSSA, 1);
 	ff->putParam(kIdff_subPGS, 1);
 	ff->putParam(kIdff_subFiles, 1);
-	// mode=-2 ピッチ経路は DS 先行バッファ分だけ音声が遅れる。字幕を同量遅延。
 	const int subDelayMs = DougaPitchCorrect_IsActive()
 		? DougaPitchCorrect_GetLatencyMs() : 0;
 	ff->putParam(kIdff_subDelay, subDelayMs);
-	int v = ff->getParam2(kIdff_isSubtitles);
-	CString msg;
-	msg.Format(L"ffdshow isSubtitles now=%d subDelay=%d\n", v, subDelayMs);
-	OutputDebugString(msg);
 	ff->Release();
-
-	// 永続化（次回以降も raw で字幕を受け付ける）
-	HKEY hk = NULL;
-	if (RegCreateKeyExW(HKEY_CURRENT_USER, L"Software\\GNU\\ffdshow_raw\\default",
-		0, NULL, 0, KEY_SET_VALUE, NULL, &hk, NULL) == ERROR_SUCCESS) {
-		DWORD one = 1;
-		RegSetValueExW(hk, L"isSubtitles", 0, REG_DWORD, (const BYTE*)&one, sizeof(one));
-		RegSetValueExW(hk, L"showSubtitles", 0, REG_DWORD, (const BYTE*)&one, sizeof(one));
-		RegSetValueExW(hk, L"subTextpin", 0, REG_DWORD, (const BYTE*)&one, sizeof(one));
-		RegSetValueExW(hk, L"subText", 0, REG_DWORD, (const BYTE*)&one, sizeof(one));
-		RegSetValueExW(hk, L"subSSA", 0, REG_DWORD, (const BYTE*)&one, sizeof(one));
-		RegCloseKey(hk);
-	}
+	// Pref は触らない。TRUE を残すと次の字幕なし RenderFile に ffdshow が巻き込まれて落ちる。
 }
 
 static BOOL DougaNameIsVsFilter(const CString& name)
@@ -3007,11 +3105,10 @@ void CDouga::ReplaceSourceWithLAV(IGraphBuilder* pGraph, LPCWSTR filename)
 					PinConnection conn;
 					conn.downstream = pConnected;
 
-					AM_MEDIA_TYPE* pmt = NULL;
-					if (SUCCEEDED(pPin->ConnectionMediaType(pmt)))
+					ZeroMemory(&conn.mt, sizeof(conn.mt));
+					if (SUCCEEDED(pPin->ConnectionMediaType(&conn.mt)))
 					{
-						CopyMediaType(&conn.mt, pmt);
-						DeleteMediaType(pmt);
+						// conn.mt にコピー済み。Free は connections 破棄時
 					}
 
 					connections.push_back(conn);
@@ -3080,32 +3177,297 @@ void CDouga::ReplaceSourceWithLAV(IGraphBuilder* pGraph, LPCWSTR filename)
 	OutputDebugString(L"=== ReplaceSourceWithLAV End ===\n");
 }
 
-void CDouga::ConnectSubtitleWithDirectVobSub(IGraphBuilder* pGraph)
+static IPin* DougaFirstPin(IBaseFilter* f, PIN_DIRECTION want)
 {
-	if (!pGraph) return;
-	OutputDebugString(L"=== ConnectSubtitleWithDirectVobSub Start ===\n");
+	if (!f) return NULL;
+	IEnumPins* ep = NULL;
+	if (FAILED(f->EnumPins(&ep)) || !ep) return NULL;
+	IPin* pin = NULL;
+	IPin* found = NULL;
+	while (ep->Next(1, &pin, NULL) == S_OK) {
+		PIN_DIRECTION d = PINDIR_INPUT;
+		pin->QueryDirection(&d);
+		if (d == want) { found = pin; break; }
+		pin->Release();
+	}
+	ep->Release();
+	return found;
+}
 
-	// 目的: LAV(Video) → ffdshow(raw/Video) → Renderer
-	//       LAV Splitter 字幕ピン → ffdshow 「In Text」
-	// VSFilter だけでは tx3g 等が出ない。In Text 配線が本命。
-	static const GUID CLSID_ffdshowRaw =
-	{ 0x0B390488, 0xD80F, 0x4A68, { 0x84, 0x08, 0x48, 0xDC, 0x19, 0x9F, 0x0E, 0x97 } };
-	static const GUID CLSID_ffdshowVideoDec =
-	{ 0x04FE9017, 0xF873, 0x410E, { 0x87, 0x1E, 0xAB, 0x91, 0x66, 0x1A, 0x4E, 0xF7 } };
+static IPin* DougaFfdVideoIn(IBaseFilter* f)
+{
+	if (!f) return NULL;
+	IEnumPins* ep = NULL;
+	if (FAILED(f->EnumPins(&ep)) || !ep) return NULL;
+	IPin* pin = NULL;
+	IPin* found = NULL;
+	while (ep->Next(1, &pin, NULL) == S_OK) {
+		PIN_DIRECTION d = PINDIR_OUTPUT;
+		pin->QueryDirection(&d);
+		PIN_INFO pi; pi.pFilter = NULL;
+		pin->QueryPinInfo(&pi);
+		CString low = pi.achName; low.MakeLower();
+		if (pi.pFilter) pi.pFilter->Release();
+		if (d == PINDIR_INPUT && low.Find(L"text") < 0) { found = pin; break; }
+		pin->Release();
+	}
+	ep->Release();
+	return found;
+}
 
-	IBaseFilter* pSplit = NULL;
-	IBaseFilter* pDec = NULL;
+static BOOL DougaPinPeerHas(IPin* p, LPCWSTR needle)
+{
+	if (!p || !needle) return FALSE;
+	IPin* peer = NULL;
+	if (p->ConnectedTo(&peer) != S_OK || !peer) return FALSE;
+	PIN_INFO pi; pi.pFilter = NULL;
+	peer->QueryPinInfo(&pi);
+	peer->Release();
+	BOOL hit = FALSE;
+	if (pi.pFilter) {
+		FILTER_INFO fi;
+		pi.pFilter->QueryFilterInfo(&fi);
+		CString n = fi.achName;
+		if (fi.pGraph) fi.pGraph->Release();
+		hit = (n.Find(needle) >= 0);
+		pi.pFilter->Release();
+	}
+	return hit;
+}
+
+static void DougaPinDisconnectPair(IPin* p)
+{
+	if (!p) return;
+	IPin* o = NULL;
+	if (p->ConnectedTo(&o) == S_OK) {
+		p->Disconnect();
+		o->Disconnect();
+		o->Release();
+	}
+}
+
+static void DougaDisconnectAllPins(IBaseFilter* f)
+{
+	if (!f) return;
+	IEnumPins* ep = NULL;
+	if (FAILED(f->EnumPins(&ep)) || !ep) return;
+	IPin* pin = NULL;
+	while (ep->Next(1, &pin, NULL) == S_OK) {
+		DougaPinDisconnectPair(pin);
+		pin->Release();
+	}
+	ep->Release();
+}
+
+static void DougaHangTrace(LPCWSTR stage);
+
+// RenderFile 直後のクリーンな Dec→Ren 接続を保存し、Ensure / Peel で再利用する
+struct DougaVideoPinMap {
+	BOOL valid;
+	AM_MEDIA_TYPE mt;
+	WCHAR decName[128];
+	WCHAR renName[128];
+};
+static DougaVideoPinMap s_dougaVidMap = {};
+
+static void DougaClearVideoPinMap()
+{
+	if (s_dougaVidMap.valid)
+		FreeMediaType(s_dougaVidMap.mt);
+	ZeroMemory(&s_dougaVidMap, sizeof(s_dougaVidMap));
+}
+
+static void DougaCaptureVideoPinMap(IGraphBuilder* g)
+{
+	DougaClearVideoPinMap();
+	if (!g) return;
+
+	IBaseFilter* pRen = NULL;
+	IEnumFilters* pEnum = NULL;
+	if (FAILED(g->EnumFilters(&pEnum)) || !pEnum) return;
+	IBaseFilter* pF = NULL;
+	ULONG n = 0;
+	while (pEnum->Next(1, &pF, &n) == S_OK) {
+		FILTER_INFO fi;
+		pF->QueryFilterInfo(&fi);
+		CString name = fi.achName;
+		if (fi.pGraph) fi.pGraph->Release();
+		if (name.Find(L"Enhanced Video Renderer") >= 0
+			|| name.Find(L"Video Mixing Renderer") >= 0
+			|| name.Find(L"Video Renderer") == 0) {
+			if (pRen) pRen->Release();
+			pRen = pF; pRen->AddRef();
+		}
+		// 全フィルタの接続を短くログ（クリーン化検証用）
+		{
+			IEnumPins* ep = NULL;
+			if (SUCCEEDED(pF->EnumPins(&ep)) && ep) {
+				IPin* pin = NULL;
+				while (ep->Next(1, &pin, NULL) == S_OK) {
+					PIN_DIRECTION d = PINDIR_INPUT;
+					pin->QueryDirection(&d);
+					if (d == PINDIR_OUTPUT) {
+						IPin* peer = NULL;
+						if (pin->ConnectedTo(&peer) == S_OK && peer) {
+							PIN_INFO pi; pi.pFilter = NULL;
+							peer->QueryPinInfo(&pi);
+							CString peerName = L"?";
+							if (pi.pFilter) {
+								FILTER_INFO pfi;
+								pi.pFilter->QueryFilterInfo(&pfi);
+								peerName = pfi.achName;
+								if (pfi.pGraph) pfi.pGraph->Release();
+								pi.pFilter->Release();
+							}
+							CString line;
+							line.Format(L"PinMap:%s -> %s", (LPCWSTR)name, (LPCWSTR)peerName);
+							DougaHangTrace((LPCWSTR)line);
+							peer->Release();
+						}
+					}
+					pin->Release();
+				}
+				ep->Release();
+			}
+		}
+		pF->Release();
+	}
+	pEnum->Release();
+
+	if (!pRen) {
+		DougaHangTrace(L"PinMap:no renderer");
+		return;
+	}
+
+	IPin* rIn = DougaFirstPin(pRen, PINDIR_INPUT);
+	IPin* up = NULL;
+	if (rIn && rIn->ConnectedTo(&up) == S_OK && up) {
+		PIN_INFO pi; pi.pFilter = NULL;
+		up->QueryPinInfo(&pi);
+		if (pi.pFilter) {
+			FILTER_INFO fi;
+			pi.pFilter->QueryFilterInfo(&fi);
+			wcsncpy_s(s_dougaVidMap.decName, _countof(s_dougaVidMap.decName), fi.achName, _TRUNCATE);
+			if (fi.pGraph) fi.pGraph->Release();
+			pi.pFilter->Release();
+		}
+		{
+			FILTER_INFO rfi;
+			pRen->QueryFilterInfo(&rfi);
+			wcsncpy_s(s_dougaVidMap.renName, _countof(s_dougaVidMap.renName), rfi.achName, _TRUNCATE);
+			if (rfi.pGraph) rfi.pGraph->Release();
+		}
+		ZeroMemory(&s_dougaVidMap.mt, sizeof(s_dougaVidMap.mt));
+		if (SUCCEEDED(up->ConnectionMediaType(&s_dougaVidMap.mt))) {
+			s_dougaVidMap.valid = TRUE;
+			CString msg;
+			msg.Format(L"PinMap:captured %s -> %s (mt ok)",
+				s_dougaVidMap.decName, s_dougaVidMap.renName);
+			DougaHangTrace((LPCWSTR)msg);
+		} else {
+			DougaHangTrace(L"PinMap:ConnectionMediaType FAILED");
+		}
+		up->Release();
+	} else {
+		DougaHangTrace(L"PinMap:renderer input not connected");
+	}
+	if (rIn) rIn->Release();
+	pRen->Release();
+}
+
+// フリーズ調査用ログは不要になったので無効化
+static void DougaHangTrace(LPCWSTR)
+{
+}
+
+static void DougaPumpSleep(DWORD ms)
+{
+	const DWORD t0 = GetTickCount();
+	for (;;) {
+		MSG msg;
+		while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
+			TranslateMessage(&msg);
+			DispatchMessage(&msg);
+		}
+		const DWORD elapsed = GetTickCount() - t0;
+		if (elapsed >= ms) break;
+		MsgWaitForMultipleObjects(0, NULL, FALSE, ms - elapsed, QS_ALLINPUT);
+	}
+}
+
+static LONG s_dougaSessionUsedFfd = 0;
+static LONG s_dougaAvoidFlush = 0; // ffd 直後の Flush を避ける（次の字幕つき Run が固まる）
+static LONG s_dougaPlayRoute = 0; // 0=none / 1=NO-SUB / 2=WITH-SUB
+static int s_dougaDeferSubStreamIdx = -1;
+static BOOL s_dougaDeferSubConnect = FALSE; // InText も Run 後（Run 前接続が無→有で固まる）
+static LONG s_dougaNeedComRecycle = 0;
+static LONG s_dougaOurCoInit = 0;
+
+static void DougaFlushLeftoverFilterModules()
+{
+	if (InterlockedCompareExchange(&s_dougaAvoidFlush, 0, 0) > 0) {
+		InterlockedDecrement(&s_dougaAvoidFlush);
+		DougaHangTrace(L"FlushModules:skipped (post-ffd)");
+		return;
+	}
+	DougaHangTrace(L"FlushModules:begin");
+	for (int i = 0; i < 6; ++i) {
+		CoFreeUnusedLibraries();
+		DougaPumpSleep(30);
+	}
+	DougaHangTrace(L"FlushModules:done");
+}
+
+// 字幕ありセッション後に COM を起動直後相当へ戻す（別スレッド RenderFile は STA 違反でデッドロック）
+static void DougaRecycleComApartmentIfNeeded()
+{
+	if (InterlockedExchange(&s_dougaNeedComRecycle, 0) == 0)
+		return;
+	// 無効化: CoFreeUnusedLibraries 後の RenderFile が固まる
+	DougaHangTrace(L"ComRecycle:skipped");
+}
+
+static void DougaEnsureComInitialized()
+{
+	HRESULT hr = CoInitialize(NULL);
+	if (hr == S_OK || hr == S_FALSE) {
+		InterlockedIncrement(&s_dougaOurCoInit);
+		DougaHangTrace(hr == S_OK ? L"CoInitialize:S_OK" : L"CoInitialize:S_FALSE");
+	}
+}
+
+static void DougaNukeGraphFilters(IGraphBuilder* g)
+{
+	if (!g) return;
+	// Stop 後は DisconnectAllPins しない（ffd を切ると次の字幕再生で固まる）
+	for (int pass = 0; pass < 16; ++pass) {
+		IBaseFilter* list[64];
+		int n = 0;
+		IEnumFilters* e = NULL;
+		if (FAILED(g->EnumFilters(&e)) || !e) break;
+		IBaseFilter* f = NULL;
+		ULONG c = 0;
+		while (n < 64 && e->Next(1, &f, &c) == S_OK)
+			list[n++] = f;
+		e->Release();
+		if (n == 0) break;
+		for (int i = 0; i < n; ++i) {
+			g->RemoveFilter(list[i]);
+			list[i]->Release();
+		}
+	}
+}
+
+// Stop 前に ffdshow を外す。再接続成功で TRUE。失敗時は呼び出し側で Stop せず Nuke する。
+static BOOL DougaPeelFfdBeforeStop(IGraphBuilder* pGraph)
+{
+	if (!pGraph) return TRUE;
+	DougaHangTrace(L"PeelFfd:begin");
+
 	IBaseFilter* pFfd = NULL;
 	IBaseFilter* pRen = NULL;
-	CString connectLog = L"=== Subtitle connect log ===\n";
-	int linked = 0;
-
-	// iam の実体フィルタを最優先（字幕ピンはここ）
-	if (iam)
-		iam->QueryInterface(IID_IBaseFilter, (void**)&pSplit);
-
 	IEnumFilters* pEnum = NULL;
-	if (SUCCEEDED(pGraph->EnumFilters(&pEnum))) {
+	if (SUCCEEDED(pGraph->EnumFilters(&pEnum)) && pEnum) {
 		IBaseFilter* pF = NULL;
 		ULONG n = 0;
 		while (pEnum->Next(1, &pF, &n) == S_OK) {
@@ -3113,10 +3475,383 @@ void CDouga::ConnectSubtitleWithDirectVobSub(IGraphBuilder* pGraph)
 			pF->QueryFilterInfo(&fi);
 			CString name = fi.achName;
 			if (fi.pGraph) fi.pGraph->Release();
-
-			if (!pSplit && DougaNameIsSplitterish(name)) {
-				pSplit = pF; pSplit->AddRef();
+			if (name.Find(L"ffdshow raw") >= 0 || name.Find(L"ffdshow Video") >= 0) {
+				if (pFfd) pFfd->Release();
+				pFfd = pF; pFfd->AddRef();
 			}
+			if (name.Find(L"Enhanced Video Renderer") >= 0
+				|| name.Find(L"Video Mixing Renderer") >= 0
+				|| name.Find(L"Video Renderer") == 0) {
+				if (pRen) pRen->Release();
+				pRen = pF; pRen->AddRef();
+			}
+			pF->Release();
+		}
+		pEnum->Release();
+	}
+	if (!pFfd) {
+		DougaHangTrace(L"PeelFfd:no ffd");
+		if (pRen) pRen->Release();
+		return TRUE;
+	}
+
+	// InText 切断
+	{
+		IEnumPins* ep = NULL;
+		if (SUCCEEDED(pFfd->EnumPins(&ep)) && ep) {
+			IPin* pin = NULL;
+			while (ep->Next(1, &pin, NULL) == S_OK) {
+				PIN_DIRECTION d = PINDIR_OUTPUT;
+				pin->QueryDirection(&d);
+				if (d == PINDIR_INPUT) {
+					PIN_INFO pi; pi.pFilter = NULL;
+					pin->QueryPinInfo(&pi);
+					CString low = pi.achName; low.MakeLower();
+					if (pi.pFilter) pi.pFilter->Release();
+					if (low.Find(L"text") >= 0)
+						DougaPinDisconnectPair(pin);
+				}
+				pin->Release();
+			}
+			ep->Release();
+		}
+		DougaHangTrace(L"PeelFfd:InText disconnected");
+	}
+
+	// ffd 単体 Stop（グラフ Stop の前にワーカーを落とす）
+	{
+		IMediaFilter* mf = NULL;
+		if (SUCCEEDED(pFfd->QueryInterface(IID_IMediaFilter, (void**)&mf)) && mf) {
+			mf->Stop();
+			mf->Release();
+			DougaHangTrace(L"PeelFfd:ffd IMediaFilter::Stop");
+		}
+	}
+
+	IPin* fIn = DougaFfdVideoIn(pFfd);
+	IPin* fOut = DougaFirstPin(pFfd, PINDIR_OUTPUT);
+	IPin* rIn = pRen ? DougaFirstPin(pRen, PINDIR_INPUT) : NULL;
+	IPin* upOut = NULL;
+	BOOL reconnected = FALSE;
+	if (fIn && fIn->ConnectedTo(&upOut) == S_OK && upOut) {
+		// RenderFile 直後に保存した Dec→Ren のタイプで戻す（ffd 経由タイプだと CANNOT_CONNECT）
+		AM_MEDIA_TYPE mtLive = {};
+		AM_MEDIA_TYPE* pMt = NULL;
+		BOOL freeLive = FALSE;
+		if (s_dougaVidMap.valid) {
+			pMt = &s_dougaVidMap.mt;
+			DougaHangTrace(L"PeelFfd:using PinMap mt");
+		} else {
+			freeLive = SUCCEEDED(fIn->ConnectionMediaType(&mtLive));
+			if (freeLive) pMt = &mtLive;
+			DougaHangTrace(L"PeelFfd:using live fIn mt");
+		}
+		DougaHangTrace(L"PeelFfd:bypass Dec->Ren");
+		DougaPinDisconnectPair(fIn);
+		if (fOut) DougaPinDisconnectPair(fOut);
+		HRESULT hr = E_FAIL;
+		if (rIn) {
+			if (pMt)
+				hr = pGraph->ConnectDirect(upOut, rIn, pMt);
+			if (FAILED(hr))
+				hr = pGraph->ConnectDirect(upOut, rIn, NULL);
+			if (FAILED(hr))
+				hr = pGraph->Connect(upOut, rIn);
+			reconnected = SUCCEEDED(hr);
+		}
+		{
+			CString msg;
+			msg.Format(L"PeelFfd:reconnect hr=0x%08X", (unsigned)hr);
+			DougaHangTrace((LPCWSTR)msg);
+		}
+		if (freeLive) FreeMediaType(mtLive);
+		upOut->Release();
+	}
+	if (fIn) fIn->Release();
+	if (fOut) fOut->Release();
+	if (rIn) rIn->Release();
+
+	DougaDisconnectAllPins(pFfd);
+	pGraph->RemoveFilter(pFfd);
+	pFfd->Release();
+	if (pRen) pRen->Release();
+	DougaHangTrace(reconnected ? L"PeelFfd:done OK" : L"PeelFfd:done BROKEN");
+	return reconnected;
+}
+
+static void DougaStopFiltersIndividually(IGraphBuilder* g)
+{
+	if (!g) return;
+	DougaHangTrace(L"StopFilters:begin");
+	IEnumFilters* e = NULL;
+	if (FAILED(g->EnumFilters(&e)) || !e) return;
+	IBaseFilter* f = NULL;
+	ULONG n = 0;
+	while (e->Next(1, &f, &n) == S_OK) {
+		IMediaFilter* mf = NULL;
+		if (SUCCEEDED(f->QueryInterface(IID_IMediaFilter, (void**)&mf)) && mf) {
+			mf->Stop();
+			mf->Release();
+		}
+		f->Release();
+	}
+	e->Release();
+	DougaHangTrace(L"StopFilters:done");
+}
+
+static void DougaColdResetPlaybackGlobals()
+{
+	// 起動直後と同じ状態へ。すべて UI (STA) スレッド上で行う。
+	DougaHangTrace(L"ColdReset:enter");
+	const BOOL hadFfd = (InterlockedCompareExchange(&s_dougaSessionUsedFfd, 0, 0) != 0);
+
+	DougaHangTrace(L"ColdReset:PitchCorrect_Shutdown");
+	DougaPitchCorrect_Shutdown();
+
+	if (Vdc)
+		Vdc->SetVideoWindow(NULL);
+	if (pVideoWindow) {
+		pVideoWindow->put_Visible(OAFALSE);
+		pVideoWindow->put_Owner(NULL);
+	}
+
+	// PitchCorrect 無効時はグラフ内 DS が音源。Peel 失敗で Stop を飛ばすと
+	// Nuke しても DS が鳴り続ける（画面だけ消えて音が残る）。
+	// 先に必ず Stop してから Nuke する。
+	if (pMediaControl) {
+		DougaHangTrace(L"ColdReset:Stop");
+		pMediaControl->Stop();
+		for (int i = 0; i < 30; ++i) {
+			OAFilterState st = State_Running;
+			HRESULT ghr = pMediaControl->GetState(50, &st);
+			if (st == State_Stopped) break;
+			if (FAILED(ghr) && ghr != VFW_S_STATE_INTERMEDIATE && ghr != VFW_S_CANT_CUE)
+				break;
+			DougaPumpSleep(10);
+		}
+		DougaHangTrace(L"ColdReset:Stop done");
+	} else if (pGraphBuilder) {
+		DougaHangTrace(L"ColdReset:StopFilters (no MediaControl)");
+		DougaStopFiltersIndividually(pGraphBuilder);
+	}
+
+	// Peel は Nuke 前には不要。Stop 後の再配線が ffd モジュールを汚し、
+	// 無→有の次 Run を固める（ログ上 PinMap はクリーンなのに plays2:return で停止）。
+	if (pGraphBuilder) {
+		DougaHangTrace(L"ColdReset:Nuke");
+		DougaNukeGraphFilters(pGraphBuilder);
+		DougaHangTrace(L"ColdReset:Nuke done");
+	}
+	DougaClearVideoPinMap();
+
+	RELEASE(pop);
+	RELEASE(vr);
+	RELEASE(pMediaPosition);
+	RELEASE(pBasicAudio);
+	RELEASE(service);
+	RELEASE(Vdc);
+	RELEASE(prenda);
+	RELEASE(prenda2);
+	RELEASE(prenda3);
+	RELEASE(prenda4);
+	RELEASE(prenda5);
+	RELEASE(prenda6);
+	RELEASE(prenda7);
+	RELEASE(prenda8);
+	RELEASE(prenda9);
+	RELEASE(prenda10);
+	RELEASE(prend);
+	RELEASE(pDSRenderer);
+	RELEASE(pDSRenderer2);
+	RELEASE(pDSRenderer3);
+	RELEASE(pDSRenderer4);
+	RELEASE(pDSRenderer5);
+	RELEASE(pDSRenderer6);
+	RELEASE(pDSRenderer7);
+	RELEASE(pDSRenderer8);
+	RELEASE(pDSRenderer9);
+	RELEASE(pDSRenderer10);
+	RELEASE(pACM);
+	RELEASE(pRenderer0);
+	RELEASE(pRenderer0_);
+	RELEASE(pRenderer1);
+	RELEASE(pRenderer);
+	RELEASE(pColour);
+	RELEASE(pAviDecomp);
+	RELEASE(pSourceFilter);
+	RELEASE(Haali);
+	RELEASE(pSplitter);
+	RELEASE(pCaptureGraphBuilder2);
+	RELEASE(pSource2);
+	RELEASE(pSource1);
+	RELEASE(pSource);
+	RELEASE(pVmr9);
+	RELEASE(pMediaControl);
+	RELEASE(pBasicVideo);
+	RELEASE(pVideoWindow);
+	RELEASE(pMediaSeeking);
+	RELEASE(iam);
+	RELEASE(pMediaEvent);
+	// Graph は他経路から AddRef 残りやすい → 参照が尽くまで落とす
+	RELEASE1(pGraphBuilder);
+
+	ev = FALSE;
+	streamidxSubOff = -1;
+	s_dougaDeferSubStreamIdx = -1;
+	s_dougaDeferSubConnect = FALSE;
+	st12 = 0; // 字幕/音声選択の残り。次の字幕なしで EnumFilters が落ちる原因になる
+	for (int j = 0; j < 40; j++) {
+		streamname[j] = L"";
+		streamname1[j] = L"";
+		streamname2[j] = L"";
+		streamidx[j] = -1;
+		streamidx1[j] = -1;
+		streamidx2[j] = -1;
+	}
+	DougaPrefFfdshowSubsReg(FALSE);
+	DougaBlockFfdshowIntelligentConnect(TRUE);
+	InterlockedExchange(&s_dougaSessionUsedFfd, 0);
+	// 「クリーン＝インスタンス無し」: Flush スキップしない（残留 ffd.ax が次の Run を壊す）
+	InterlockedExchange(&s_dougaAvoidFlush, 0);
+	if (hadFfd)
+		DougaHangTrace(L"ColdReset:Flush always (full unload)");
+	DougaFlushLeftoverFilterModules();
+	DougaHangTrace(L"ColdReset:leave");
+}
+static BOOL DougaGraphHasFfdshow(IGraphBuilder* g)
+{
+	if (!g) return FALSE;
+	IEnumFilters* e = NULL;
+	if (FAILED(g->EnumFilters(&e)) || !e) return FALSE;
+	IBaseFilter* f = NULL;
+	ULONG n = 0;
+	BOOL hit = FALSE;
+	while (e->Next(1, &f, &n) == S_OK) {
+		FILTER_INFO fi;
+		f->QueryFilterInfo(&fi);
+		CString name = fi.achName;
+		if (fi.pGraph) fi.pGraph->Release();
+		// Audio Decoder を映像 ffd と誤認しない（Ensure フリーズの主因）
+		if (name.Find(L"ffdshow raw") >= 0 || name.Find(L"ffdshow Video") >= 0)
+			hit = TRUE;
+		f->Release();
+		if (hit) break;
+	}
+	e->Release();
+	return hit;
+}
+
+static BOOL DougaGraphHasFfdAudio(IGraphBuilder* g)
+{
+	if (!g) return FALSE;
+	IEnumFilters* e = NULL;
+	if (FAILED(g->EnumFilters(&e)) || !e) return FALSE;
+	IBaseFilter* f = NULL;
+	ULONG n = 0;
+	BOOL hit = FALSE;
+	while (e->Next(1, &f, &n) == S_OK) {
+		FILTER_INFO fi;
+		f->QueryFilterInfo(&fi);
+		CString name = fi.achName;
+		if (fi.pGraph) fi.pGraph->Release();
+		if (name.Find(L"ffdshow Audio") >= 0 || name.Find(L"ffdshow audio") >= 0)
+			hit = TRUE;
+		f->Release();
+		if (hit) break;
+	}
+	e->Release();
+	return hit;
+}
+
+static BOOL DougaGraphHasAnyFfdDirt(IGraphBuilder* g)
+{
+	return DougaGraphHasFfdshow(g) || DougaGraphHasFfdAudio(g);
+}
+
+static void DougaEnableAllFfdshowInGraph(IGraphBuilder* g);
+static void DougaEnsureFfdOnVideoPath(IGraphBuilder* pGraph);
+
+// =============================================================================
+// DougaPins — 字幕あり/なし分岐の唯一入口（Peel / Graph 作り直しはしない）
+// 契約:
+//  1) RenderFile は常に LAV→EVR / LAV→DS（ffd は IC 拒否）
+//  2) NO-SUB: 映像ピンを触らない
+//  3) WITH-SUB: PinMap の mt で Dec→ffd raw→EVR を挿入するだけ
+//  4) InText は呼び出し側が Stopped 中に ConnectSubtitleWithDirectVobSub
+//  5) 破棄は ColdReset の Stop→Nuke（Peel なし）
+// =============================================================================
+static BOOL DougaPins_ApplyRoute(IGraphBuilder* g, BOOL wantSubtitle)
+{
+	if (!g) return FALSE;
+	if (!wantSubtitle) {
+		DougaHangTrace(L"Pins:route NO-SUB (leave Dec->Ren alone)");
+		if (DougaGraphHasAnyFfdDirt(g))
+			DougaHangTrace(L"Pins:NO-SUB warning: unexpected ffd still in graph");
+		InterlockedExchange(&s_dougaSessionUsedFfd, 0);
+		return TRUE;
+	}
+	DougaHangTrace(L"Pins:route WITH-SUB (insert ffd raw on video)");
+	DougaEnsureFfdOnVideoPath(g);
+	DougaEnableAllFfdshowInGraph(g);
+	if (DougaGraphHasFfdshow(g)) {
+		InterlockedExchange(&s_dougaSessionUsedFfd, 1);
+		DougaHangTrace(L"Pins:WITH-SUB ready");
+		return TRUE;
+	}
+	DougaHangTrace(L"Pins:WITH-SUB Ensure failed (no video ffd)");
+	InterlockedExchange(&s_dougaSessionUsedFfd, 0);
+	return FALSE;
+}
+
+// 旧: 同一 Graph の Nuke+RenderFile。EVR 再利用事故の温床なので入口から外す
+static HRESULT DougaRerenderFileClean(IGraphBuilder* g, LPCWSTR file, IBaseFilter* evr)
+{
+	UNREFERENCED_PARAMETER(g);
+	UNREFERENCED_PARAMETER(file);
+	UNREFERENCED_PARAMETER(evr);
+	DougaHangTrace(L"rerender:DISABLED (use Pins_ApplyRoute)");
+	return E_NOTIMPL;
+}
+
+static void DougaEnableAllFfdshowInGraph(IGraphBuilder* g)
+{
+	if (!g) return;
+	IEnumFilters* e = NULL;
+	if (FAILED(g->EnumFilters(&e)) || !e) return;
+	IBaseFilter* f = NULL;
+	ULONG n = 0;
+	while (e->Next(1, &f, &n) == S_OK) {
+		FILTER_INFO fi;
+		f->QueryFilterInfo(&fi);
+		CString name = fi.achName;
+		if (fi.pGraph) fi.pGraph->Release();
+		if (name.Find(L"ffdshow raw") >= 0 || name.Find(L"ffdshow Video") >= 0)
+			DougaEnableFfdshowSubs(f);
+		f->Release();
+	}
+	e->Release();
+}
+
+// 字幕表示には映像経路上の ffdshow が必要。plays のグラフ構築時だけ呼ぶ。
+static void DougaEnsureFfdOnVideoPath(IGraphBuilder* pGraph)
+{
+	if (!pGraph) return;
+	/* CLSID_ffdshowRawVideo / CLSID_ffdshowVideoDecoder are file-scope */
+
+	IBaseFilter* pDec = NULL;
+	IBaseFilter* pFfd = NULL;
+	IBaseFilter* pRen = NULL;
+	BOOL addedFfd = FALSE;
+
+	IEnumFilters* pEnum = NULL;
+	if (SUCCEEDED(pGraph->EnumFilters(&pEnum)) && pEnum) {
+		IBaseFilter* pF = NULL;
+		ULONG n = 0;
+		while (pEnum->Next(1, &pF, &n) == S_OK) {
+			FILTER_INFO fi;
+			pF->QueryFilterInfo(&fi);
+			CString name = fi.achName;
+			if (fi.pGraph) fi.pGraph->Release();
 			if (name.Find(L"ffdshow raw") >= 0 || name.Find(L"ffdshow Video") >= 0) {
 				if (pFfd) pFfd->Release();
 				pFfd = pF; pFfd->AddRef();
@@ -3136,367 +3871,286 @@ void CDouga::ConnectSubtitleWithDirectVobSub(IGraphBuilder* pGraph)
 		pEnum->Release();
 	}
 
-	if (!pRen) {
-		OutputDebugString(L"ERR: no renderer\n");
-		goto cleanup;
-	}
-
-	// Renderer の上流からデコーダ / ffdshow を補完
-	{
-		IEnumPins* ep = NULL;
-		if (SUCCEEDED(pRen->EnumPins(&ep))) {
-			IPin* pin = NULL;
-			while (ep->Next(1, &pin, NULL) == S_OK) {
-				PIN_DIRECTION dir;
-				pin->QueryDirection(&dir);
-				if (dir != PINDIR_INPUT) { pin->Release(); continue; }
-				IPin* up = NULL;
-				if (pin->ConnectedTo(&up) != S_OK) { pin->Release(); continue; }
+	if (pRen) {
+		IPin* rIn = DougaFirstPin(pRen, PINDIR_INPUT);
+		if (rIn) {
+			IPin* up = NULL;
+			if (rIn->ConnectedTo(&up) == S_OK && up) {
 				PIN_INFO pi; pi.pFilter = NULL;
 				up->QueryPinInfo(&pi);
 				up->Release();
-				if (!pi.pFilter) { pin->Release(); continue; }
-				FILTER_INFO fi; pi.pFilter->QueryFilterInfo(&fi);
-				CString nm = fi.achName;
-				if (fi.pGraph) fi.pGraph->Release();
-
-				if (nm.Find(L"ffdshow") >= 0) {
-					if (pFfd) pFfd->Release();
-					pFfd = pi.pFilter; pFfd->AddRef();
-					// ffdshow 映像 In の上流 = デコーダ
-					IEnumPins* fp = NULL;
-					if (SUCCEEDED(pi.pFilter->EnumPins(&fp))) {
-						IPin* fin = NULL;
-						while (fp->Next(1, &fin, NULL) == S_OK) {
-							PIN_DIRECTION fd; fin->QueryDirection(&fd);
-							PIN_INFO fpi; fpi.pFilter = NULL; fin->QueryPinInfo(&fpi);
-							CString pn = fpi.achName; if (fpi.pFilter) fpi.pFilter->Release();
-							CString low = pn; low.MakeLower();
-							if (fd == PINDIR_INPUT && low.Find(L"text") < 0) {
-								IPin* dout = NULL;
-								if (fin->ConnectedTo(&dout) == S_OK) {
-									PIN_INFO dpi; dpi.pFilter = NULL;
-									dout->QueryPinInfo(&dpi);
-									dout->Release();
-									if (dpi.pFilter) {
-										if (pDec) pDec->Release();
-										pDec = dpi.pFilter; pDec->AddRef();
-										dpi.pFilter->Release();
-									}
-								}
-							}
-							fin->Release();
-							if (pDec) break;
-						}
-						fp->Release();
-					}
-				} else if (DougaNameIsVsFilter(nm)) {
-					// VSFilter を挟んでいる場合はさらに上流へ
-					IEnumPins* vp = NULL;
-					if (SUCCEEDED(pi.pFilter->EnumPins(&vp))) {
-						IPin* vin = NULL;
-						while (vp->Next(1, &vin, NULL) == S_OK) {
-							PIN_DIRECTION vd; vin->QueryDirection(&vd);
-							if (vd == PINDIR_INPUT) {
-								IPin* dout = NULL;
-								if (vin->ConnectedTo(&dout) == S_OK) {
-									PIN_INFO dpi; dpi.pFilter = NULL;
-									dout->QueryPinInfo(&dpi);
-									dout->Release();
-									if (dpi.pFilter) {
-										FILTER_INFO dfi; dpi.pFilter->QueryFilterInfo(&dfi);
-										CString dn = dfi.achName; if (dfi.pGraph) dfi.pGraph->Release();
-										if (dn.Find(L"ffdshow") >= 0) {
-											if (pFfd) pFfd->Release();
-											pFfd = dpi.pFilter; pFfd->AddRef();
-										} else if (!pDec) {
-											pDec = dpi.pFilter; pDec->AddRef();
-										}
-										dpi.pFilter->Release();
-									}
-								}
-							}
-							vin->Release();
-						}
-						vp->Release();
-					}
-				} else if (!pDec) {
-					pDec = pi.pFilter; pDec->AddRef();
-				}
-				pi.pFilter->Release();
-				pin->Release();
-				break;
-			}
-			ep->Release();
-		}
-	}
-
-	// ffdshow が無ければ raw を追加（無ければ Video Decoder）
-	if (!pFfd) {
-		HRESULT hr = CoCreateInstance(CLSID_ffdshowRaw, NULL, CLSCTX_INPROC_SERVER,
-			IID_IBaseFilter, (void**)&pFfd);
-		if (FAILED(hr) || !pFfd) {
-			pFfd = NULL;
-			hr = CoCreateInstance(CLSID_ffdshowVideoDec, NULL, CLSCTX_INPROC_SERVER,
-				IID_IBaseFilter, (void**)&pFfd);
-			if (FAILED(hr)) pFfd = NULL;
-		}
-		if (pFfd) {
-			hr = pGraph->AddFilter(pFfd, L"ffdshow raw video filter");
-			CString msg; msg.Format(L"AddFilter ffdshow: 0x%08X\n", hr);
-			OutputDebugString(msg);
-			if (FAILED(hr)) { pFfd->Release(); pFfd = NULL; }
-		} else {
-			OutputDebugString(L"ERR: cannot create ffdshow\n");
-		}
-	}
-
-	auto pinDisconnect = [](IPin* p) {
-		if (!p) return;
-		IPin* o = NULL;
-		if (p->ConnectedTo(&o) == S_OK) {
-			p->Disconnect();
-			o->Disconnect();
-			o->Release();
-		}
-	};
-	auto firstPin = [](IBaseFilter* f, PIN_DIRECTION want) -> IPin* {
-		if (!f) return NULL;
-		IEnumPins* ep = NULL;
-		if (FAILED(f->EnumPins(&ep))) return NULL;
-		IPin* pin = NULL; IPin* found = NULL;
-		while (ep->Next(1, &pin, NULL) == S_OK) {
-			PIN_DIRECTION d; pin->QueryDirection(&d);
-			if (d == want) { found = pin; break; }
-			pin->Release();
-		}
-		ep->Release();
-		return found;
-	};
-	auto ffdVideoIn = [](IBaseFilter* f) -> IPin* {
-		if (!f) return NULL;
-		IEnumPins* ep = NULL;
-		if (FAILED(f->EnumPins(&ep))) return NULL;
-		IPin* pin = NULL; IPin* found = NULL;
-		while (ep->Next(1, &pin, NULL) == S_OK) {
-			PIN_DIRECTION d; pin->QueryDirection(&d);
-			PIN_INFO pi; pi.pFilter = NULL; pin->QueryPinInfo(&pi);
-			CString nm = pi.achName; if (pi.pFilter) pi.pFilter->Release();
-			CString low = nm; low.MakeLower();
-			if (d == PINDIR_INPUT && low.Find(L"text") < 0) { found = pin; break; }
-			pin->Release();
-		}
-		ep->Release();
-		return found;
-	};
-	auto ffdTextInFree = [](IBaseFilter* f) -> IPin* {
-		if (!f) return NULL;
-		IEnumPins* ep = NULL;
-		if (FAILED(f->EnumPins(&ep))) return NULL;
-		IPin* pin = NULL; IPin* found = NULL;
-		while (ep->Next(1, &pin, NULL) == S_OK) {
-			PIN_DIRECTION d; pin->QueryDirection(&d);
-			PIN_INFO pi; pi.pFilter = NULL; pin->QueryPinInfo(&pi);
-			CString nm = pi.achName; if (pi.pFilter) pi.pFilter->Release();
-			CString low = nm; low.MakeLower();
-			if (d == PINDIR_INPUT && low.Find(L"text") >= 0) {
-				IPin* busy = NULL;
-				if (pin->ConnectedTo(&busy) == S_OK) { busy->Release(); pin->Release(); continue; }
-				found = pin; break;
-			}
-			pin->Release();
-		}
-		ep->Release();
-		return found;
-	};
-
-	// Decoder → ffdshow → Renderer
-	if (pFfd && pDec) {
-		IPin* decOut = firstPin(pDec, PINDIR_OUTPUT);
-		IPin* fIn = ffdVideoIn(pFfd);
-		IPin* fOut = firstPin(pFfd, PINDIR_OUTPUT);
-		IPin* rIn = firstPin(pRen, PINDIR_INPUT);
-
-		BOOL already = FALSE;
-		if (decOut) {
-			IPin* to = NULL;
-			if (decOut->ConnectedTo(&to) == S_OK) {
-				PIN_INFO pi; pi.pFilter = NULL; to->QueryPinInfo(&pi); to->Release();
 				if (pi.pFilter) {
-					FILTER_INFO fi; pi.pFilter->QueryFilterInfo(&fi);
-					CString n = fi.achName; if (fi.pGraph) fi.pGraph->Release();
-					if (n.Find(L"ffdshow") >= 0) already = TRUE;
+					FILTER_INFO fi;
+					pi.pFilter->QueryFilterInfo(&fi);
+					CString nm = fi.achName;
+					if (fi.pGraph) fi.pGraph->Release();
+					// Audio 等は除外。raw / Video のみ「映像経路上」とみなす
+					if (nm.Find(L"ffdshow raw") >= 0 || nm.Find(L"ffdshow Video") >= 0) {
+						DougaHangTrace(L"Ensure:already on video path");
+						InterlockedExchange(&s_dougaSessionUsedFfd, 1);
+						pi.pFilter->Release();
+						rIn->Release();
+						if (pDec) pDec->Release();
+						if (pFfd) pFfd->Release();
+						if (pRen) pRen->Release();
+						return;
+					} else if (!pDec) {
+						pDec = pi.pFilter; pDec->AddRef();
+					}
 					pi.pFilter->Release();
 				}
 			}
+			rIn->Release();
 		}
+	}
 
-		if (!already && decOut && fIn && fOut && rIn) {
-			// 既存の Decoder→(VSFilter?)→Renderer を外して差し替え
-			pinDisconnect(decOut);
-			pinDisconnect(rIn);
-			HRESULT h1 = pGraph->Connect(decOut, fIn);
-			if (FAILED(h1)) h1 = pGraph->ConnectDirect(decOut, fIn, NULL);
+	// グラフ内の stray ffd は使わない（誤接続で固まる）。字幕用は raw を新規挿入。
+	if (pFfd) { pFfd->Release(); pFfd = NULL; }
+	{
+		HRESULT hr = CoCreateInstance(CLSID_ffdshowRawVideo, NULL, CLSCTX_INPROC_SERVER,
+			IID_IBaseFilter, (void**)&pFfd);
+		if (FAILED(hr) || !pFfd) {
+			pFfd = NULL;
+			DougaHangTrace(L"Ensure:CoCreate raw FAILED");
+		} else {
+			hr = pGraph->AddFilter(pFfd, L"ffdshow raw video filter");
+			if (FAILED(hr)) {
+				DougaHangTrace(L"Ensure:AddFilter raw FAILED");
+				pFfd->Release();
+				pFfd = NULL;
+			} else {
+				addedFfd = TRUE;
+				DougaHangTrace(L"Ensure:AddFilter raw OK");
+			}
+		}
+	}
+
+	if (pFfd && pDec && pRen) {
+		IPin* decOut = DougaFirstPin(pDec, PINDIR_OUTPUT);
+		IPin* fIn = DougaFfdVideoIn(pFfd);
+		IPin* fOut = DougaFirstPin(pFfd, PINDIR_OUTPUT);
+		IPin* rIn = DougaFirstPin(pRen, PINDIR_INPUT);
+		BOOL directToRen = FALSE;
+		IPin* origDown = NULL;
+		if (decOut && decOut->ConnectedTo(&origDown) == S_OK && origDown) {
+			PIN_INFO pi; pi.pFilter = NULL;
+			origDown->QueryPinInfo(&pi);
+			if (pi.pFilter) {
+				FILTER_INFO fi;
+				pi.pFilter->QueryFilterInfo(&fi);
+				CString n = fi.achName;
+				if (fi.pGraph) fi.pGraph->Release();
+				if (n.Find(L"Enhanced Video Renderer") >= 0
+					|| n.Find(L"Video Mixing Renderer") >= 0
+					|| n.Find(L"Video Renderer") == 0)
+					directToRen = TRUE;
+				pi.pFilter->Release();
+			}
+		}
+		if (directToRen && decOut && fIn && fOut && rIn && origDown) {
+			DougaHangTrace(L"Ensure:Connect Dec->raw->Ren begin");
+			AM_MEDIA_TYPE mtLive = {};
+			AM_MEDIA_TYPE* pMt = NULL;
+			BOOL freeLive = FALSE;
+			if (s_dougaVidMap.valid) {
+				pMt = &s_dougaVidMap.mt;
+				DougaHangTrace(L"Ensure:using PinMap mt");
+			} else {
+				freeLive = SUCCEEDED(decOut->ConnectionMediaType(&mtLive));
+				if (freeLive) pMt = &mtLive;
+			}
+			DougaPinDisconnectPair(decOut);
+			HRESULT h1 = E_FAIL;
+			if (pMt)
+				h1 = pGraph->ConnectDirect(decOut, fIn, pMt);
+			if (FAILED(h1))
+				h1 = pGraph->ConnectDirect(decOut, fIn, NULL);
+			if (FAILED(h1))
+				h1 = pGraph->Connect(decOut, fIn);
 			HRESULT h2 = E_FAIL;
 			if (SUCCEEDED(h1)) {
+				// EVR 側は Intelligent Connect 優先（色変換が挟まる場合がある）
 				h2 = pGraph->Connect(fOut, rIn);
 				if (FAILED(h2)) h2 = pGraph->ConnectDirect(fOut, rIn, NULL);
 			}
-			CString msg; msg.Format(L"wire Dec->ffd->Ren: 0x%08X / 0x%08X\n", h1, h2);
-			OutputDebugString(msg);
+			{
+				CString msg;
+				msg.Format(L"Ensure:Connect hr=0x%08X / 0x%08X", (unsigned)h1, (unsigned)h2);
+				DougaHangTrace((LPCWSTR)msg);
+			}
+			if (FAILED(h1) || FAILED(h2)) {
+				DougaPinDisconnectPair(decOut);
+				DougaPinDisconnectPair(fOut);
+				HRESULT hrRest = E_FAIL;
+				if (pMt)
+					hrRest = pGraph->ConnectDirect(decOut, origDown, pMt);
+				if (FAILED(hrRest))
+					hrRest = pGraph->ConnectDirect(decOut, origDown, NULL);
+				if (FAILED(hrRest))
+					pGraph->Connect(decOut, origDown);
+				if (addedFfd) {
+					pGraph->RemoveFilter(pFfd);
+					pFfd->Release();
+					pFfd = NULL;
+				}
+			}
+			if (freeLive) FreeMediaType(mtLive);
 		} else {
-			OutputDebugString(already ? L"ffdshow already on video path\n" : L"skip video insert (pins)\n");
+			DougaHangTrace(L"Ensure:skip (not Dec->Ren direct)");
+			if (addedFfd && pFfd) {
+				pGraph->RemoveFilter(pFfd);
+				pFfd->Release();
+				pFfd = NULL;
+			}
 		}
+		if (origDown) origDown->Release();
 		if (decOut) decOut->Release();
 		if (fIn) fIn->Release();
 		if (fOut) fOut->Release();
 		if (rIn) rIn->Release();
 	} else {
-		OutputDebugString(L"ERR: missing ffdshow or decoder for video path\n");
+		DougaHangTrace(L"Ensure:missing Dec/ffd/Ren");
+		if (addedFfd && pFfd) {
+			pGraph->RemoveFilter(pFfd);
+			pFfd->Release();
+			pFfd = NULL;
+		}
 	}
 
-	// raw の isSubtitles が 0 だと In Text が接続を拒否する（今回の未接続の主因）
+	if (pDec) pDec->Release();
+	if (pFfd) {
+		InterlockedExchange(&s_dougaSessionUsedFfd, 1);
+		pFfd->Release();
+	}
+	if (pRen) pRen->Release();
+}
+
+// 字幕選択時のみ。InText 配線。映像経路の ffdshow raw は plays の Ensure で載せる。
+void CDouga::ConnectSubtitleWithDirectVobSub(IGraphBuilder* pGraph)
+{
+	if (!pGraph) return;
+	OutputDebugString(L"=== ConnectSubtitleWithDirectVobSub (text-only) ===\n");
+
+	IBaseFilter* pSplit = NULL;
+	IBaseFilter* pFfd = NULL;
+	IEnumFilters* pEnum = NULL;
+	if (SUCCEEDED(pGraph->EnumFilters(&pEnum)) && pEnum) {
+		IBaseFilter* pF = NULL;
+		ULONG n = 0;
+		while (pEnum->Next(1, &pF, &n) == S_OK) {
+			FILTER_INFO fi;
+			pF->QueryFilterInfo(&fi);
+			CString name = fi.achName;
+			if (fi.pGraph) fi.pGraph->Release();
+			if (!pSplit && DougaNameIsSplitterish(name)) {
+				pSplit = pF; pSplit->AddRef();
+			}
+			if (name.Find(L"ffdshow raw") >= 0 || name.Find(L"ffdshow Video") >= 0) {
+				if (pFfd) pFfd->Release();
+				pFfd = pF; pFfd->AddRef();
+			}
+			pF->Release();
+		}
+		pEnum->Release();
+	}
+
+	if (!pFfd) {
+		OutputDebugString(L"subtitle: no ffdshow in graph\n");
+		if (pSplit) pSplit->Release();
+		return;
+	}
 	DougaEnableFfdshowSubs(pFfd);
+	if (!pSplit) {
+		pFfd->Release();
+		return;
+	}
 
-	// 字幕ピン → ffdshow In Text
-	if (pSplit && pFfd) {
-		IEnumPins* ep = NULL;
-		if (SUCCEEDED(pSplit->EnumPins(&ep))) {
-			IPin* pin = NULL;
-			while (ep->Next(1, &pin, NULL) == S_OK) {
-				PIN_DIRECTION dir; pin->QueryDirection(&dir);
-				if (dir != PINDIR_OUTPUT) { pin->Release(); continue; }
-
-				PIN_INFO pi; pi.pFilter = NULL; pin->QueryPinInfo(&pi);
-				CString pn = pi.achName; if (pi.pFilter) pi.pFilter->Release();
-				CString low = pn; low.MakeLower();
-
+	IPin* pSub = NULL;
+	IEnumPins* ep = NULL;
+	if (SUCCEEDED(pSplit->EnumPins(&ep)) && ep) {
+		IPin* pin = NULL;
+		while (ep->Next(1, &pin, NULL) == S_OK) {
+			PIN_DIRECTION dir = PINDIR_INPUT;
+			pin->QueryDirection(&dir);
+			if (dir == PINDIR_OUTPUT) {
+				PIN_INFO pi; pi.pFilter = NULL;
+				pin->QueryPinInfo(&pi);
+				CString low = pi.achName; low.MakeLower();
+				if (pi.pFilter) pi.pFilter->Release();
 				BOOL isSub = (low.Find(L"subtitle") >= 0 || low.Find(L"subpic") >= 0
 					|| low.Find(L"字幕") >= 0 || low.Find(L"softsub") >= 0);
-				CString mtLog;
-				IEnumMediaTypes* em = NULL;
-				if (SUCCEEDED(pin->EnumMediaTypes(&em))) {
-					AM_MEDIA_TYPE* mt = NULL;
-					int mti = 0;
-					while (em->Next(1, &mt, NULL) == S_OK) {
-						CString one;
-						one.Format(L"  mt[%d] major=%08X-%04X sub=%08X-%04X\n",
-							mti,
-							mt->majortype.Data1, mt->majortype.Data2,
-							mt->subtype.Data1, mt->subtype.Data2);
-						mtLog += one;
-						if (mt->majortype == MEDIATYPE_Subtitle || mt->majortype == MEDIATYPE_Subtitle_MPC
-							|| mt->majortype == MEDIATYPE_Text
-							|| mt->majortype.Data1 == 0xe487eb08) // LAV/MPC MEDIATYPE_Subtitle
-							isSub = TRUE;
-						DeleteMediaType(mt);
-						++mti;
-					}
-					em->Release();
-				}
 				if (!isSub) {
-					pin->Release();
-					continue;
-				}
-
-				connectLog += L"pin ";
-				connectLog += pn;
-				connectLog += L"\n";
-				connectLog += mtLog;
-
-				IPin* cur = NULL;
-				if (pin->ConnectedTo(&cur) == S_OK) {
-					PIN_INFO cpi; cpi.pFilter = NULL; cur->QueryPinInfo(&cpi);
-					CString cn;
-					if (cpi.pFilter) {
-						FILTER_INFO fi; cpi.pFilter->QueryFilterInfo(&fi);
-						cn = fi.achName; if (fi.pGraph) fi.pGraph->Release();
-						cpi.pFilter->Release();
+					IEnumMediaTypes* em = NULL;
+					if (SUCCEEDED(pin->EnumMediaTypes(&em)) && em) {
+						AM_MEDIA_TYPE* mt = NULL;
+						while (em->Next(1, &mt, NULL) == S_OK) {
+							if (mt && (mt->majortype == MEDIATYPE_Subtitle
+								|| mt->majortype == MEDIATYPE_Subtitle_MPC
+								|| mt->majortype == MEDIATYPE_Text
+								|| mt->majortype.Data1 == 0xe487eb08))
+								isSub = TRUE;
+							if (mt) DeleteMediaType(mt);
+							if (isSub) break;
+						}
+						em->Release();
 					}
-					cur->Release();
-					if (cn.Find(L"ffdshow") >= 0) {
-						connectLog += L"  already on ffdshow\n";
-						pin->Release();
-						linked++;
-						continue;
-					}
-					pinDisconnect(pin);
 				}
-
-				// 全 In Text / In Text 2 を試す
-				IEnumPins* tp = NULL;
-				HRESULT bestHr = E_FAIL;
-				if (SUCCEEDED(pFfd->EnumPins(&tp))) {
-					IPin* text = NULL;
-					while (tp->Next(1, &text, NULL) == S_OK) {
-						PIN_DIRECTION td; text->QueryDirection(&td);
-						PIN_INFO tpi; tpi.pFilter = NULL; text->QueryPinInfo(&tpi);
-						CString tn = tpi.achName; if (tpi.pFilter) tpi.pFilter->Release();
-						CString tl = tn; tl.MakeLower();
-						if (td != PINDIR_INPUT || tl.Find(L"text") < 0) {
-							text->Release();
-							continue;
-						}
-						IPin* busy = NULL;
-						if (text->ConnectedTo(&busy) == S_OK) {
-							busy->Release();
-							text->Release();
-							continue;
-						}
-
-						HRESULT hr = pGraph->ConnectDirect(pin, text, NULL);
-						CString one;
-						one.Format(L"  ConnectDirect(%s)=0x%08X\n", (LPCWSTR)tn, hr);
-						connectLog += one;
-						if (FAILED(hr)) {
-							hr = pGraph->Connect(pin, text);
-							one.Format(L"  Connect(%s)=0x%08X\n", (LPCWSTR)tn, hr);
-							connectLog += one;
-						}
-						if (FAILED(hr)) {
-							IEnumMediaTypes* em2 = NULL;
-							if (SUCCEEDED(pin->EnumMediaTypes(&em2))) {
-								AM_MEDIA_TYPE* mt = NULL;
-								while (em2->Next(1, &mt, NULL) == S_OK) {
-									hr = pGraph->ConnectDirect(pin, text, mt);
-									one.Format(L"  ConnectDirect mt %08X=0x%08X\n", mt->subtype.Data1, hr);
-									connectLog += one;
-									DeleteMediaType(mt);
-									if (SUCCEEDED(hr)) break;
-								}
-								em2->Release();
-							}
-						}
-						text->Release();
-						bestHr = hr;
-						if (SUCCEEDED(hr)) {
-							linked++;
-							break;
-						}
+				if (isSub && !DougaPinPeerHas(pin, L"ffdshow")) {
+					IPin* peer = NULL;
+					if (pin->ConnectedTo(&peer) != S_OK) {
+						pSub = pin; pSub->AddRef();
+					} else {
+						peer->Release();
 					}
-					tp->Release();
 				}
-				if (FAILED(bestHr))
-					connectLog += L"  FAILED all text pins\n";
-				pin->Release();
 			}
-			ep->Release();
+			pin->Release();
+			if (pSub) break;
 		}
+		ep->Release();
+	}
+
+	IPin* pText = NULL;
+	ep = NULL;
+	if (SUCCEEDED(pFfd->EnumPins(&ep)) && ep) {
+		IPin* pin = NULL;
+		while (ep->Next(1, &pin, NULL) == S_OK) {
+			PIN_DIRECTION dir = PINDIR_OUTPUT;
+			pin->QueryDirection(&dir);
+			if (dir == PINDIR_INPUT) {
+				PIN_INFO pi; pi.pFilter = NULL;
+				pin->QueryPinInfo(&pi);
+				CString low = pi.achName; low.MakeLower();
+				if (pi.pFilter) pi.pFilter->Release();
+				if (low.Find(L"text") >= 0) {
+					IPin* busy = NULL;
+					if (pin->ConnectedTo(&busy) != S_OK) {
+						pText = pin; pText->AddRef();
+					} else {
+						busy->Release();
+					}
+				}
+			}
+			pin->Release();
+			if (pText) break;
+		}
+		ep->Release();
+	}
+
+	if (pSub && pText) {
+		HRESULT hr = pGraph->ConnectDirect(pSub, pText, NULL);
+		if (FAILED(hr)) hr = pGraph->Connect(pSub, pText);
+		CString msg; msg.Format(L"subtitle: InText hr=0x%08X", (unsigned)hr);
+		DougaHangTrace((LPCWSTR)msg);
+		OutputDebugString(msg + L"\n");
 	} else {
-		connectLog += L"ERR: no splitter or ffdshow\n";
+		DougaHangTrace(L"subtitle: free sub/InText not found");
+		OutputDebugString(L"subtitle: free sub/InText not found (may already be wired)\n");
 	}
-
-	{
-		CString msg; msg.Format(L"subtitle links made: %d\n", linked);
-		OutputDebugString(msg);
-		OutputDebugString(connectLog);
-	}
-
-cleanup:
-	if (pSplit) pSplit->Release();
-	if (pDec) pDec->Release();
-	if (pFfd) pFfd->Release();
-	if (pRen) pRen->Release();
+	if (pSub) pSub->Release();
+	if (pText) pText->Release();
+	pSplit->Release();
+	pFfd->Release();
 	OutputDebugString(L"=== ConnectSubtitleWithDirectVobSub End ===\n");
 }
 
@@ -3514,13 +4168,27 @@ void CDouga::plays(TCHAR* s)
 	// RenderFile 前にジャケット取得(再生中はファイル占有で Shell/MF が失敗しやすい)
 	if (og && s && s[0])
 		og->LoadJacket(CString(s));
-	CoInitialize(NULL);
-	
+
+	DougaHangTrace(L"plays:enter");
+	// 前回字幕ありなら COM を起動直後相当に戻してから始める
+	DougaRecycleComApartmentIfNeeded();
+	DougaEnsureComInitialized();
+
 	int len = ::WideCharToMultiByte(CP_THREAD_ACP,0, ss, -1, NULL, 0, NULL, NULL);
 	memcpy((TCHAR*)douga,(TCHAR*)ss,len*2+2);
 
-	Haali=NULL;pSplitter=NULL;
+	// 途中停止漏れでも起動直後と同じグローバル状態から始める
+	DougaColdResetPlaybackGlobals();
+	DougaHangTrace(L"plays:after ColdReset");
+	DougaEnsureComInitialized();
+	audioStreams.clear();
+	videoStreams.clear();
+	subtitleStreams.clear();
+	streamMap.videoStart = streamMap.audioStart = streamMap.subtitleStart = -1;
+	streamMap.videoCount = streamMap.audioCount = streamMap.subtitleCount = 0;
 	CoCreateInstance(CLSID_FilterGraph,NULL,CLSCTX_INPROC_SERVER,IID_IGraphBuilder,(LPVOID *)&pGraphBuilder);
+	if (!pGraphBuilder)
+		return;
 	if(pGraphBuilder){
 		pGraphBuilder->QueryInterface(IID_IMediaControl,(LPVOID *)&pMediaControl);
 		pGraphBuilder->QueryInterface(IID_IVideoWindow,(LPVOID *)&pVideoWindow);
@@ -3558,31 +4226,20 @@ void CDouga::plays(TCHAR* s)
 
 		IFilterMapper2 *pMapper = NULL;
 		ICreateDevEnum *pDevEnum = NULL;
-		IBaseFilter* pVSFilter = NULL;
 		IEnumMoniker *pEnum = NULL;
 
-		// 字幕は auto-loading DirectVobSub を優先（通常版は埋め込み字幕を拾わない）
-		hr = CoCreateInstance(CLSID_VSFilter, NULL, CLSCTX_INPROC_SERVER,
-			IID_IBaseFilter, (void**)&pVSFilter);
-		if (FAILED(hr) || !pVSFilter)
-		{
-			pVSFilter = NULL;
-			hr = CoCreateInstance(CLSID_DirectVobSubNormal, NULL, CLSCTX_INPROC_SERVER,
-				IID_IBaseFilter, (void**)&pVSFilter);
-			if (FAILED(hr))
-				pVSFilter = NULL;
-		}
-		if (pVSFilter)
-			OutputDebugString(L"Created DirectVobSub for subtitle overlay\n");
-
+		// VSFilter を RenderFile 前に入れない。2回目の字幕ピン Intelligent Connect で固まる。
 		hr = CoCreateInstance(CLSID_SystemDeviceEnum, NULL, CLSCTX_INPROC,
 			IID_ICreateDevEnum, (void**)&pDevEnum);
-		hr = pDevEnum->CreateClassEnumerator(CLSID_LegacyAmFilterCategory, &pEnum, 0);
-	    pDevEnum->Release();
+		if (SUCCEEDED(hr) && pDevEnum) {
+			hr = pDevEnum->CreateClassEnumerator(CLSID_LegacyAmFilterCategory, &pEnum, 0);
+			pDevEnum->Release();
+			pDevEnum = NULL;
+		}
 		OSVERSIONINFO in;ZeroMemory(&in,sizeof(in));in.dwOSVersionInfoSize=sizeof(OSVERSIONINFO);GetVersionEx(&in);
 
 
-		if(in.dwMajorVersion>=5){
+		if(in.dwMajorVersion>=5 && pEnum){
 
 			// モニカを列挙する。
 			IMoniker *pMoniker;
@@ -3596,15 +4253,35 @@ void CDouga::plays(TCHAR* s)
 					VARIANT varName;
 					VariantInit(&varName);
 					hr = pPropBag->Read(L"FriendlyName", &varName, 0);
+					if (FAILED(hr) || varName.vt != VT_BSTR || !varName.bstrVal) {
+						VariantClear(&varName);
+						RELEASE(pPropBag);
+						RELEASE(pMoniker);
+						continue;
+					}
 					int len = ::WideCharToMultiByte(CP_THREAD_ACP,0, varName.bstrVal, -1, NULL, 0, NULL, NULL);
 
 					if(_wcsnicmp(varName.bstrVal,L"Enhanced Video Renderer",len*2-2)==0 && savedata.evr && savedata.render==0
-						&& !(mode==11 || mode==12 || mode==16 || mode==19)){ev=TRUE;
-//						CoCreateInstance(CLSID_EnhancedVideoRenderer, NULL, CLSCTX_INPROC_SERVER,IID_IBaseFilter, reinterpret_cast<void **>(&prend));
-						hr = pMoniker->BindToObject(NULL, NULL, IID_IBaseFilter, (void**)&prend);
-						prend->QueryInterface(IID_IMFGetService,(LPVOID *)&service);
-						hr=service->GetService(MR_VIDEO_RENDER_SERVICE, IID_IMFVideoDisplayControl, (void**)&Vdc);
-						hr=Vdc->SetVideoWindow(m_videoSite.GetSafeHwnd() ? m_videoSite.m_hWnd : m_hWnd);
+						&& !(mode==11 || mode==12 || mode==16 || mode==19)){
+						IBaseFilter* evrF = NULL;
+						hr = pMoniker->BindToObject(NULL, NULL, IID_IBaseFilter, (void**)&evrF);
+						if (SUCCEEDED(hr) && evrF) {
+							RELEASE(Vdc);
+							RELEASE(service);
+							RELEASE(prend);
+							prend = evrF;
+							ev = TRUE;
+							if (SUCCEEDED(prend->QueryInterface(IID_IMFGetService, (LPVOID*)&service)) && service) {
+								hr = service->GetService(MR_VIDEO_RENDER_SERVICE, IID_IMFVideoDisplayControl, (void**)&Vdc);
+								if (FAILED(hr) || !Vdc)
+									Vdc = NULL;
+							} else {
+								service = NULL;
+							}
+							HWND hwndVideo = m_videoSite.GetSafeHwnd() ? m_videoSite.m_hWnd : m_hWnd;
+							if (Vdc && hwndVideo)
+								Vdc->SetVideoWindow(hwndVideo);
+						}
 					}
 					VariantClear(&varName);
 					RELEASE(pPropBag);
@@ -3630,50 +4307,47 @@ void CDouga::plays(TCHAR* s)
 
 
 
-	if (pVSFilter)
-	{
-		OutputDebugString(L"Adding DirectVobSub to graph...\n");
-		hr = pGraphBuilder->AddFilter(pVSFilter, L"DirectVobSub");
-		CString msg;
-		msg.Format(L"DirectVobSub AddFilter: 0x%08X\n", hr);
-		OutputDebugString(msg);
-		pVSFilter->Release();
-		pVSFilter = NULL;
-	}
-	else
-	{
-		OutputDebugString(L"DirectVobSub not found in system\n");
-	}
-
 	if(prend)
 		pGraphBuilder->AddFilter(prend, L"Enhanced Video Renderer");
-
-	DumpFilterGraph();
-
-	HRESULT hr2 = pGraphBuilder->RenderFile(ss, NULL);
-	ConnectSubtitleWithDirectVobSub(pGraphBuilder);
-	DumpFilterGraph();
-
-	// RenderFile 後に実際の FPS を取得（失敗時は拡張子推定のまま）
-	{
-		const double r2 = GetFrameRate(pGraphBuilder);
-		if (r2 > 0.0) {
-			rate = (float)((int)(r2 * 1000.0f)) / 1000.0f;
-			rateflg = 0;
-		}
+	// AddFilter 後なら GetService が通ることがある（UI 前の NULL クラッシュ回避）
+	if (ev && prend && !Vdc) {
+		if (!service)
+			prend->QueryInterface(IID_IMFGetService, (LPVOID*)&service);
+		if (service)
+			service->GetService(MR_VIDEO_RENDER_SERVICE, IID_IMFVideoDisplayControl, (void**)&Vdc);
+		HWND hwndVideo = m_videoSite.GetSafeHwnd() ? m_videoSite.m_hWnd : m_hWnd;
+		if (Vdc && hwndVideo)
+			Vdc->SetVideoWindow(hwndVideo);
 	}
 
-	//if(prend)
-	//	pGraphBuilder->AddFilter(prend, L"Enhanced Video Renderer");
+	DumpFilterGraph();
 
-	if (prend)
-		Filtervideooff2(pGraphBuilder);
-	// 既定 Video Renderer 除去後に字幕経路を再確保
-	ConnectSubtitleWithDirectVobSub(pGraphBuilder);
+	// IC に ffdshow を拾わせない（字幕は Ensure の CoCreate で載せる）
+	DougaPrefFfdshowSubsReg(FALSE);
+	DougaBlockFfdshowIntelligentConnect(TRUE);
+	DougaInstallRejectFfdCallback(pGraphBuilder);
+	DougaHangTrace(L"plays:RenderFile:begin (UI/STA sync)");
+	HRESULT hr2 = pGraphBuilder->RenderFile(ss, NULL);
+	DougaClearRejectFfdCallback(pGraphBuilder);
+	{
+		CString m; m.Format(L"plays:RenderFile:end hr=0x%08X", (unsigned)hr2);
+		DougaHangTrace(m);
+	}
+	if (ev && prend && !Vdc) {
+		if (!service)
+			prend->QueryInterface(IID_IMFGetService, (LPVOID*)&service);
+		if (service)
+			service->GetService(MR_VIDEO_RENDER_SERVICE, IID_IMFVideoDisplayControl, (void**)&Vdc);
+		HWND hwndVideo = m_videoSite.GetSafeHwnd() ? m_videoSite.m_hWnd : m_hWnd;
+		if (Vdc && hwndVideo)
+			Vdc->SetVideoWindow(hwndVideo);
+	}
+	DumpFilterGraph();
 
-	//Filtervideooff3(pGraphBuilder);
+	// Filtervideooff2 / GetFrameRate は字幕・ffdshow 判定の後へ（汚染グラフで先に走ると落ちる）
 	if(pGraphBuilder)pGraphBuilder->QueryInterface(IID_IMediaSeeking,(LPVOID *)&pMediaSeeking);
 
+	DougaHangTrace(L"plays:Filtersdown:begin");
 	Filtersdown(pGraphBuilder, NULL);
 	Filtersdown(pGraphBuilder, NULL);
 	Filtersdown(pGraphBuilder, NULL);
@@ -3683,6 +4357,11 @@ void CDouga::plays(TCHAR* s)
 	Filtersdown(pGraphBuilder, NULL);
 	Filtersdown(pGraphBuilder, NULL);
 	Filtersdown(pGraphBuilder, NULL);
+	DougaHangTrace(L"plays:Filtersdown:end");
+
+	// 何も足す前のクリーンなピン地図を取得 → 以降の再配線／Peel の基準
+	DougaHangTrace(L"plays:PinMap capture");
+	DougaCaptureVideoPinMap(pGraphBuilder);
 
 	audionum = 0;
 	if (iam) {
@@ -3692,12 +4371,6 @@ void CDouga::plays(TCHAR* s)
 	if (GetStreamInfo(pGraphBuilder, audioStreams, videoStreams, subtitleStreams))
 	{
 		audionum = audioStreams.size();
-
-		// デバッグ出力（必要に応じて）
-		CString debug;
-		debug.Format(L"Audio: %d, Video: %d, Subtitle: %d",
-			audioStreams.size(), videoStreams.size(), subtitleStreams.size());
-		// OutputDebugString(debug);
 	}
 	// CntPin2 で字幕 0 でも GetStreamInfo 側に拾えていれば一覧へ反映
 	if (streamMap.subtitleCount == 0 && !subtitleStreams.empty()) {
@@ -3722,125 +4395,168 @@ void CDouga::plays(TCHAR* s)
 			streamMap.subtitleStart = streamidx2[0];
 	}
 
-	if(savedata.audiost==1)
-		if (audionum > 1) {
-			CAudioSelect as;
-			as.audioCount = audionum;
-			as.subCount = streamMap.subtitleCount;
-			as.no = 0;
-			as.subNo = -1;
-			const INT_PTR rett = as.DoModal();
-			if (rett != IDOK) {
-				// ×／キャンセル: 再生開始せず動画を止めて閉じる
-				stops();
-				if (og && ::IsWindow(og->GetSafeHwnd()))
-					og->PostMessage(WM_OGG_CLOSE_DOUGA, 0, 0);
-				return;
-			}
-			if (as.no < 0) as.no = 0;
-			if (as.no >= audionum) as.no = 0;
-			st12 = as.no + 1;
-			// 相対番号ではなく IAMStreamSelect 絶対 index（streamidx）で切替
-			if (pGraphBuilder && iam && as.no < 40 && streamidx[as.no] >= 0) {
-				HRESULT ehr = iam->Enable(streamidx[as.no], AMSTREAMSELECTENABLE_ENABLEONLY);
-				if (FAILED(ehr))
-					ehr = iam->Enable(streamidx[as.no], AMSTREAMSELECTENABLE_ENABLE);
-			}
-			// 字幕: subNo>=0 で選択、それ以外（ダブルクリック音声含む）はオフ
-			if (iam) {
-				if (as.subNo >= 0 && as.subNo < streamMap.subtitleCount && as.subNo < 40
-					&& streamidx2[as.subNo] >= 0) {
-					HRESULT shr = iam->Enable(streamidx2[as.subNo], AMSTREAMSELECTENABLE_ENABLEONLY);
-					if (FAILED(shr))
-						shr = iam->Enable(streamidx2[as.subNo], AMSTREAMSELECTENABLE_ENABLE);
-					if (pGraphBuilder)
-						ConnectSubtitleWithDirectVobSub(pGraphBuilder);
-				} else {
-					BOOL offOk = FALSE;
-					if (streamidxSubOff >= 0) {
-						HRESULT ohr = iam->Enable(streamidxSubOff, AMSTREAMSELECTENABLE_ENABLEONLY);
-						if (FAILED(ohr))
-							ohr = iam->Enable(streamidxSubOff, AMSTREAMSELECTENABLE_ENABLE);
-						offOk = SUCCEEDED(ohr);
+	const BOOL hasSub = (streamMap.subtitleCount > 0);
+	const LONG newRoute = hasSub ? 2 : 1;
+	const LONG oldRoute = InterlockedExchange(&s_dougaPlayRoute, newRoute);
+	{
+		CString rm;
+		rm.Format(L"plays:route %s (prev=%ld)", hasSub ? L"WITH-SUB" : L"NO-SUB", oldRoute);
+		DougaHangTrace((LPCWSTR)rm);
+	}
+
+	// ピン分岐は DougaPins_ApplyRoute のみ（Rerender / Peel / Graph 再生成はしない）
+	DougaPins_ApplyRoute(pGraphBuilder, hasSub);
+	if (hasSub) {
+		HWND hwndVideo = m_videoSite.GetSafeHwnd() ? m_videoSite.m_hWnd : m_hWnd;
+		if (Vdc && hwndVideo)
+			Vdc->SetVideoWindow(hwndVideo);
+	}
+
+	DougaHangTrace(L"plays:GetFrameRate:begin");
+	{
+		const double r2 = GetFrameRate(pGraphBuilder);
+		if (r2 > 0.0) {
+			rate = (float)((int)(r2 * 1000.0f)) / 1000.0f;
+			rateflg = 0;
+		}
+	}
+
+	DougaHangTrace(L"plays:GetFrameRate:end");
+	if (prend)
+		Filtervideooff2(pGraphBuilder);
+	DougaHangTrace(L"plays:before AudioSelect");
+
+	BOOL wiredSub = FALSE;
+	if (savedata.audiost == 1 && (audionum > 1 || streamMap.subtitleCount > 0)) {
+		CAudioSelect as;
+		as.audioCount = (audionum > 0) ? audionum : 1;
+		as.subCount = streamMap.subtitleCount;
+		as.no = 0;
+		as.subNo = -1;
+		const INT_PTR rett = as.DoModal();
+		if (rett != IDOK) {
+			// ×／キャンセル: 再生開始せず動画を止めて閉じる
+			stops();
+			if (og && ::IsWindow(og->GetSafeHwnd()))
+				og->PostMessage(WM_OGG_CLOSE_DOUGA, 0, 0);
+			return;
+		}
+		if (as.no < 0) as.no = 0;
+		if (as.no >= audionum) as.no = 0;
+		st12 = as.no + 1;
+		// 相対番号ではなく IAMStreamSelect 絶対 index（streamidx）で切替
+		if (pGraphBuilder && iam && as.no < 40 && streamidx[as.no] >= 0) {
+			HRESULT ehr = iam->Enable(streamidx[as.no], AMSTREAMSELECTENABLE_ENABLEONLY);
+			if (FAILED(ehr))
+				ehr = iam->Enable(streamidx[as.no], AMSTREAMSELECTENABLE_ENABLE);
+		}
+		// 字幕: subNo>=0 で選択、それ以外（ダブルクリック音声含む）はオフ
+		if (iam) {
+			if (as.subNo >= 0 && as.subNo < streamMap.subtitleCount && as.subNo < 40
+				&& streamidx2[as.subNo] >= 0) {
+				// InText + Enable は Stopped 中に完了（Run 後 Enable は途中再生で数秒無音）
+				if (pGraphBuilder) {
+					ConnectSubtitleWithDirectVobSub(pGraphBuilder);
+					wiredSub = TRUE;
+				}
+				s_dougaDeferSubConnect = FALSE;
+				s_dougaDeferSubStreamIdx = -1;
+				{
+					const int sidx = streamidx2[as.subNo];
+					for (int i = 0; i < 40; ++i) {
+						if (streamidx2[i] >= 0 && streamidx2[i] != sidx)
+							iam->Enable(streamidx2[i], 0);
 					}
-					if (!offOk) {
-						for (int i = 0; i < streamMap.subtitleCount && i < 40; ++i) {
-							if (streamidx2[i] >= 0)
-								iam->Enable(streamidx2[i], 0);
-						}
+					HRESULT shr = iam->Enable(sidx, AMSTREAMSELECTENABLE_ENABLE);
+					if (FAILED(shr))
+						shr = iam->Enable(sidx, AMSTREAMSELECTENABLE_ENABLEONLY);
+					// ENABLEONLY で音声が落ちた場合に戻す
+					int aidx = -1;
+					if (as.no >= 0 && as.no < 40 && streamidx[as.no] >= 0)
+						aidx = streamidx[as.no];
+					else if (streamidx[0] >= 0)
+						aidx = streamidx[0];
+					if (aidx >= 0) {
+						HRESULT ahr = iam->Enable(aidx, AMSTREAMSELECTENABLE_ENABLE);
+						if (FAILED(ahr))
+							iam->Enable(aidx, AMSTREAMSELECTENABLE_ENABLEONLY);
+					}
+				}
+			} else {
+				s_dougaDeferSubConnect = FALSE;
+				s_dougaDeferSubStreamIdx = -1;
+				BOOL offOk = FALSE;
+				if (streamidxSubOff >= 0) {
+					HRESULT ohr = iam->Enable(streamidxSubOff, AMSTREAMSELECTENABLE_ENABLEONLY);
+					if (FAILED(ohr))
+						ohr = iam->Enable(streamidxSubOff, AMSTREAMSELECTENABLE_ENABLE);
+					offOk = SUCCEEDED(ohr);
+				}
+				if (!offOk) {
+					for (int i = 0; i < streamMap.subtitleCount && i < 40; ++i) {
+						if (streamidx2[i] >= 0)
+							iam->Enable(streamidx2[i], 0);
 					}
 				}
 			}
 		}
+	}
+	(void)wiredSub;
+	DougaHangTrace(L"plays:return");
 }
 
 void CDouga::Filtersdown(IGraphBuilder *pGraph,WCHAR *filter) 
 {
-    IEnumFilters *pEnum = NULL;
-    IBaseFilter *pFilter;
-    ULONG cFetched;
-	CString s;
-    HRESULT hr = pGraph->EnumFilters(&pEnum);
-    if (FAILED(hr)) return ;
+	UNREFERENCED_PARAMETER(filter);
+	if (!pGraph) return;
+	IEnumFilters *pEnum = NULL;
+	if (FAILED(pGraph->EnumFilters(&pEnum)) || !pEnum) return;
 
-    while(pEnum->Next(1, &pFilter, &cFetched) == S_OK)
-    {
-		IEnumPins *p;
-		IPin *pPin;
-		PIN_INFO pp, pp1;
-		FILTER_INFO FilterInfo,FilterInfo1,FilterInfo2;
-        pFilter->QueryFilterInfo(&FilterInfo);
-		pFilter->EnumPins(&p);
-		pFilter->QueryFilterInfo(&FilterInfo1);
-		s = FilterInfo1.achName;
-		if (s.Find(L"\\") != -1) {
-			if (iam == NULL)pFilter->QueryInterface(IID_IAMStreamSelect, (void**)&iam);
-			RELEASE(pFilter);
+	IBaseFilter *pFilter = NULL;
+	ULONG cFetched = 0;
+	while (pEnum->Next(1, &pFilter, &cFetched) == S_OK) {
+		FILTER_INFO FilterInfo = {};
+		pFilter->QueryFilterInfo(&FilterInfo);
+		CString s = FilterInfo.achName;
+		if (FilterInfo.pGraph) {
+			FilterInfo.pGraph->Release();
+			FilterInfo.pGraph = NULL;
 		}
-		if (s.Find(L"Splitter") != -1) {
-			if (iam == NULL)pFilter->QueryInterface(IID_IAMStreamSelect, (void**)&iam);
-			RELEASE(pFilter);
-		}
-		while(p->Next(1, &pPin, 0) == S_OK)
-		{
-			PIN_DIRECTION PinDirThis;
-			pPin->QueryDirection(&PinDirThis);
-			//if (PinDirThis == PINDIR_OUTPUT){
-				PIN_INFO pp,pp1;
-				IPin *pn;
-				if (pPin->ConnectedTo(&pn) == S_OK) {
+
+		// Splitter / ファイルソースから IAMStreamSelect を1回だけ取る
+		if (iam == NULL && (s.Find(L"\\") != -1 || s.Find(L"Splitter") != -1))
+			pFilter->QueryInterface(IID_IAMStreamSelect, (void**)&iam);
+
+		IEnumPins *pPins = NULL;
+		if (SUCCEEDED(pFilter->EnumPins(&pPins)) && pPins) {
+			IPin *pPin = NULL;
+			while (pPins->Next(1, &pPin, 0) == S_OK) {
+				IPin *pn = NULL;
+				if (pPin->ConnectedTo(&pn) == S_OK && pn) {
+					PIN_INFO pp = {};
 					pn->QueryPinInfo(&pp);
-					pp.pFilter->QueryFilterInfo(&FilterInfo1);
-					pPin->QueryPinInfo(&pp1);
-					pp1.pFilter->QueryFilterInfo(&FilterInfo2);
-					s = FilterInfo1.achName;
-					if (s.Find(L"Splitter") != -1) {
-						if (iam == NULL)pp.pFilter->QueryInterface(IID_IAMStreamSelect, (void**)&iam);
-						RELEASE(pp.pFilter);
-						RELEASE(pp1.pFilter);
+					if (pp.pFilter) {
+						FILTER_INFO fiPeer = {};
+						pp.pFilter->QueryFilterInfo(&fiPeer);
+						CString peer = fiPeer.achName;
+						if (fiPeer.pGraph) {
+							fiPeer.pGraph->Release();
+							fiPeer.pGraph = NULL;
+						}
+						if (iam == NULL && peer.Find(L"Splitter") != -1)
+							pp.pFilter->QueryInterface(IID_IAMStreamSelect, (void**)&iam);
+						pp.pFilter->Release();
+						pp.pFilter = NULL;
 					}
-					if (_wcsnicmp(FilterInfo1.achName, L"Default DirectSound Device", 27 * 2 + 4) == 0) {
-						//pGraph->RemoveFilter(pp.pFilter);
-						//pGraph->RemoveFilter(pp1.pFilter);
-						RELEASE(pp.pFilter);
-						RELEASE(pp1.pFilter);
-					}
-					RELEASE(pp.pFilter);
-					RELEASE(pp1.pFilter);
+					pn->Release();
 				}
-				//}
+				pPin->Release();
+			}
+			pPins->Release();
 		}
-		p->Release();
-        // FILTER_INFO 構造体はフィルタ グラフ マネージャへのポインタを保持する。
-        // その参照カウントは解放しなければならない。
-        if (FilterInfo.pGraph != NULL)
-            FilterInfo.pGraph->Release();
-		if(pFilter)
-	        pFilter->Release();
-    }
-
-    pEnum->Release();
-    return ;
+		pFilter->Release();
+	}
+	pEnum->Release();
 }
 
 void CDouga::Filtervideooff(IGraphBuilder *pGraph,WCHAR *filter) 
@@ -3903,58 +4619,33 @@ void CDouga::Filtervideooff(IGraphBuilder *pGraph,WCHAR *filter)
 
 void CDouga::Filtervideooff2(IGraphBuilder *pGraph, WCHAR *filter)
 {
-	IEnumFilters *pEnum = NULL;
-	IBaseFilter *pFilter;
-	ULONG cFetched;
-	CString s;
-
-	HRESULT hr = pGraph->EnumFilters(&pEnum);
-	if (FAILED(hr)) return;
-
-	while (pEnum->Next(1, &pFilter, &cFetched) == S_OK)
-	{
-		IEnumPins *p;
-		IPin *pPin;
-		FILTER_INFO FilterInfo, FilterInfo1;
-		pFilter->QueryFilterInfo(&FilterInfo);
-		pFilter->EnumPins(&p);
-		PIN_INFO pp;
-		pFilter->QueryFilterInfo(&FilterInfo1);
-		s = FilterInfo1.achName;
-		if (s.Find(L"Video Renderer") == 0) {
-			pGraph->RemoveFilter(pFilter);
-			RELEASE(pFilter);
-		}
-		RELEASE(pFilter);
-		while (p->Next(1, &pPin, 0) == S_OK)
-		{
-			PIN_DIRECTION PinDirThis;
-			pPin->QueryDirection(&PinDirThis);
-			if (PinDirThis == PINDIR_OUTPUT) {
-				PIN_INFO pp;
-				IPin *pn;
-				if (pPin->ConnectedTo(&pn) == S_OK) {
-					pn->QueryPinInfo(&pp);
-					pp.pFilter->QueryFilterInfo(&FilterInfo1);
-					s = FilterInfo1.achName;
-					if (s.Find(L"Video Renderer") == 0) {
-						pGraph->RemoveFilter(pp.pFilter);
-						RELEASE(pp.pFilter);
-					}
-				}
-			}
-		}
-		p->Release();
-		// FILTER_INFO 構造体はフィルタ グラフ マネージャへのポインタを保持する。
-		// その参照カウントは解放しなければならない。
-		if (FilterInfo.pGraph != NULL)
-			FilterInfo.pGraph->Release();
-		if (pFilter)
+	(void)filter;
+	if (!pGraph) return;
+	// 旧実装は Release 後にピン列挙しており、字幕あり→なしで落ちることがある。
+	IBaseFilter* kill[64];
+	int kn = 0;
+	IEnumFilters* pEnum = NULL;
+	if (FAILED(pGraph->EnumFilters(&pEnum)) || !pEnum) return;
+	IBaseFilter* pFilter = NULL;
+	ULONG cFetched = 0;
+	while (kn < 64 && pEnum->Next(1, &pFilter, &cFetched) == S_OK) {
+		FILTER_INFO fi;
+		fi.pGraph = NULL;
+		pFilter->QueryFilterInfo(&fi);
+		CString s = fi.achName;
+		if (fi.pGraph) fi.pGraph->Release();
+		// 先頭一致のみ（Enhanced Video Renderer は除外）
+		if (s.Find(L"Video Renderer") == 0 && s.Find(L"Enhanced") < 0) {
+			kill[kn++] = pFilter;
+		} else {
 			pFilter->Release();
+		}
 	}
-
 	pEnum->Release();
-	return;
+	for (int i = 0; i < kn; ++i) {
+		pGraph->RemoveFilter(kill[i]);
+		kill[i]->Release();
+	}
 }
 
 void CDouga::Filtervideooff3(IGraphBuilder *pGraph, WCHAR *filter)
@@ -4885,9 +5576,10 @@ HRESULT CDouga::EnumFilters (IGraphBuilder *pGraph,int no)
 							pp.pFilter->QueryInterface(IID_IBasicAudio,(LPVOID *)&pBasicAudio);
 						else{
 							IBasicAudio *pBasicAudio1=NULL;
-							pp.pFilter->QueryInterface(IID_IBasicAudio,(LPVOID *)&pBasicAudio1);
-							pBasicAudio1->put_Volume(-10000);
-							pBasicAudio1->Release();
+							if (SUCCEEDED(pp.pFilter->QueryInterface(IID_IBasicAudio,(LPVOID *)&pBasicAudio1)) && pBasicAudio1) {
+								pBasicAudio1->put_Volume(-10000);
+								pBasicAudio1->Release();
+							}
 						}
 					}
 					if(s.Right(11)==_T("d Renderer2")){
@@ -4896,9 +5588,10 @@ HRESULT CDouga::EnumFilters (IGraphBuilder *pGraph,int no)
 							pp.pFilter->QueryInterface(IID_IBasicAudio,(LPVOID *)&pBasicAudio);
 						else{
 							IBasicAudio *pBasicAudio1=NULL;
-							pp.pFilter->QueryInterface(IID_IBasicAudio,(LPVOID *)&pBasicAudio1);
-							pBasicAudio1->put_Volume(-10000);
-							pBasicAudio1->Release();
+							if (SUCCEEDED(pp.pFilter->QueryInterface(IID_IBasicAudio,(LPVOID *)&pBasicAudio1)) && pBasicAudio1) {
+								pBasicAudio1->put_Volume(-10000);
+								pBasicAudio1->Release();
+							}
 						}
 					}
 					if(s.Right(11)==_T("d Renderer3")){
@@ -4907,9 +5600,10 @@ HRESULT CDouga::EnumFilters (IGraphBuilder *pGraph,int no)
 							pp.pFilter->QueryInterface(IID_IBasicAudio,(LPVOID *)&pBasicAudio);
 						else{
 							IBasicAudio *pBasicAudio1=NULL;
-							pp.pFilter->QueryInterface(IID_IBasicAudio,(LPVOID *)&pBasicAudio1);
-							pBasicAudio1->put_Volume(-10000);
-							pBasicAudio1->Release();
+							if (SUCCEEDED(pp.pFilter->QueryInterface(IID_IBasicAudio,(LPVOID *)&pBasicAudio1)) && pBasicAudio1) {
+								pBasicAudio1->put_Volume(-10000);
+								pBasicAudio1->Release();
+							}
 						}
 					}
 					if(s.Right(11)==_T("d Renderer4")){
@@ -4918,9 +5612,10 @@ HRESULT CDouga::EnumFilters (IGraphBuilder *pGraph,int no)
 							pp.pFilter->QueryInterface(IID_IBasicAudio,(LPVOID *)&pBasicAudio);
 						else{
 							IBasicAudio *pBasicAudio1=NULL;
-							pp.pFilter->QueryInterface(IID_IBasicAudio,(LPVOID *)&pBasicAudio1);
-							pBasicAudio1->put_Volume(-10000);
-							pBasicAudio1->Release();
+							if (SUCCEEDED(pp.pFilter->QueryInterface(IID_IBasicAudio,(LPVOID *)&pBasicAudio1)) && pBasicAudio1) {
+								pBasicAudio1->put_Volume(-10000);
+								pBasicAudio1->Release();
+							}
 						}
 					}
 					if(s.Right(11)==_T("d Renderer5")){
@@ -4929,9 +5624,10 @@ HRESULT CDouga::EnumFilters (IGraphBuilder *pGraph,int no)
 							pp.pFilter->QueryInterface(IID_IBasicAudio,(LPVOID *)&pBasicAudio);
 						else{
 							IBasicAudio *pBasicAudio1=NULL;
-							pp.pFilter->QueryInterface(IID_IBasicAudio,(LPVOID *)&pBasicAudio1);
-							pBasicAudio1->put_Volume(-10000);
-							pBasicAudio1->Release();
+							if (SUCCEEDED(pp.pFilter->QueryInterface(IID_IBasicAudio,(LPVOID *)&pBasicAudio1)) && pBasicAudio1) {
+								pBasicAudio1->put_Volume(-10000);
+								pBasicAudio1->Release();
+							}
 						}
 					}
 					if(s.Right(11)==_T("d Renderer6")){
@@ -4940,9 +5636,10 @@ HRESULT CDouga::EnumFilters (IGraphBuilder *pGraph,int no)
 							pp.pFilter->QueryInterface(IID_IBasicAudio,(LPVOID *)&pBasicAudio);
 						else{
 							IBasicAudio *pBasicAudio1=NULL;
-							pp.pFilter->QueryInterface(IID_IBasicAudio,(LPVOID *)&pBasicAudio1);
-							pBasicAudio1->put_Volume(-10000);
-							pBasicAudio1->Release();
+							if (SUCCEEDED(pp.pFilter->QueryInterface(IID_IBasicAudio,(LPVOID *)&pBasicAudio1)) && pBasicAudio1) {
+								pBasicAudio1->put_Volume(-10000);
+								pBasicAudio1->Release();
+							}
 						}
 					}
 					if(s.Right(11)==_T("d Renderer7")){
@@ -4951,9 +5648,10 @@ HRESULT CDouga::EnumFilters (IGraphBuilder *pGraph,int no)
 							pp.pFilter->QueryInterface(IID_IBasicAudio,(LPVOID *)&pBasicAudio);
 						else{
 							IBasicAudio *pBasicAudio1=NULL;
-							pp.pFilter->QueryInterface(IID_IBasicAudio,(LPVOID *)&pBasicAudio1);
-							pBasicAudio1->put_Volume(-10000);
-							pBasicAudio1->Release();
+							if (SUCCEEDED(pp.pFilter->QueryInterface(IID_IBasicAudio,(LPVOID *)&pBasicAudio1)) && pBasicAudio1) {
+								pBasicAudio1->put_Volume(-10000);
+								pBasicAudio1->Release();
+							}
 						}
 					}
 					if(s.Right(11)==_T("d Renderer8")){
@@ -4962,9 +5660,10 @@ HRESULT CDouga::EnumFilters (IGraphBuilder *pGraph,int no)
 							pp.pFilter->QueryInterface(IID_IBasicAudio,(LPVOID *)&pBasicAudio);
 						else{
 							IBasicAudio *pBasicAudio1=NULL;
-							pp.pFilter->QueryInterface(IID_IBasicAudio,(LPVOID *)&pBasicAudio1);
-							pBasicAudio1->put_Volume(-10000);
-							pBasicAudio1->Release();
+							if (SUCCEEDED(pp.pFilter->QueryInterface(IID_IBasicAudio,(LPVOID *)&pBasicAudio1)) && pBasicAudio1) {
+								pBasicAudio1->put_Volume(-10000);
+								pBasicAudio1->Release();
+							}
 						}
 					}
 					if(s.Right(11)==_T("d Renderer9")){
@@ -4973,9 +5672,10 @@ HRESULT CDouga::EnumFilters (IGraphBuilder *pGraph,int no)
 							pp.pFilter->QueryInterface(IID_IBasicAudio,(LPVOID *)&pBasicAudio);
 						else{
 							IBasicAudio *pBasicAudio1=NULL;
-							pp.pFilter->QueryInterface(IID_IBasicAudio,(LPVOID *)&pBasicAudio1);
-							pBasicAudio1->put_Volume(-10000);
-							pBasicAudio1->Release();
+							if (SUCCEEDED(pp.pFilter->QueryInterface(IID_IBasicAudio,(LPVOID *)&pBasicAudio1)) && pBasicAudio1) {
+								pBasicAudio1->put_Volume(-10000);
+								pBasicAudio1->Release();
+							}
 						}
 					}
 					if(s.Right(11)==_T("d Renderer10")){
@@ -4984,9 +5684,10 @@ HRESULT CDouga::EnumFilters (IGraphBuilder *pGraph,int no)
 							pp.pFilter->QueryInterface(IID_IBasicAudio,(LPVOID *)&pBasicAudio);
 						else{
 							IBasicAudio *pBasicAudio1=NULL;
-							pp.pFilter->QueryInterface(IID_IBasicAudio,(LPVOID *)&pBasicAudio1);
-							pBasicAudio1->put_Volume(-10000);
-							pBasicAudio1->Release();
+							if (SUCCEEDED(pp.pFilter->QueryInterface(IID_IBasicAudio,(LPVOID *)&pBasicAudio1)) && pBasicAudio1) {
+								pBasicAudio1->put_Volume(-10000);
+								pBasicAudio1->Release();
+							}
 						}
 					}
 					pn->Release();
@@ -5083,21 +5784,87 @@ void CDouga::plays2()
 	videocnt3 = 0;
 	height = 0; width = 0;
 
-	if (pGraphBuilder)EnumFilters(pGraphBuilder, 0);
 	HWND hwndVideo = m_videoSite.GetSafeHwnd() ? m_videoSite.m_hWnd : m_hWnd;
+	if (Vdc && hwndVideo)
+		Vdc->SetVideoWindow(hwndVideo);
 	if (pVideoWindow)pVideoWindow->put_Owner((OAHWND)hwndVideo);
 	if (pVideoWindow)pVideoWindow->put_WindowStyle(WS_CHILD | WS_CLIPSIBLINGS);
 	if (pVideoWindow)pVideoWindow->put_MessageDrain((OAHWND)m_hWnd);
+	if (pBasicVideo) { pBasicVideo->Release(); pBasicVideo = NULL; }
 	if (pGraphBuilder)pGraphBuilder->QueryInterface(IID_IBasicVideo, (LPVOID*)&pBasicVideo);
 
-	// IBasicVideo2インターフェースを取得
 	IBasicVideo2* pBasicVideo2 = NULL;
 	if (pGraphBuilder)pGraphBuilder->QueryInterface(IID_IBasicVideo2, (LPVOID*)&pBasicVideo2);
 
-	// mode=-2: SetRate 後の音声を Grabber→Stretcher(pitch=1/R)→専用 DS へ（Run 前に張り替え）
+	width = 0;
+	// EVR GetNativeVideoSize は条件により返りにくい。IBasicVideo を優先。
+	if (pBasicVideo) {
+		pBasicVideo->get_VideoHeight(&height);
+		pBasicVideo->get_VideoWidth(&width);
+	}
+	if (width == 0 && ev && Vdc) {
+		SIZE a = { 0 }, b = { 0 };
+		if (SUCCEEDED(Vdc->GetNativeVideoSize(&a, &b)) && a.cx > 0) {
+			width = a.cx;
+			height = a.cy;
+		}
+	} else if (width == 0 && ev && !Vdc) {
+		ev = FALSE;
+	}
+
+	long actualWidth = width;
+	long actualHeight = height;
+	if (pBasicVideo2) {
+		long aspectX = 0, aspectY = 0;
+		HRESULT hr = pBasicVideo2->GetPreferredAspectRatio(&aspectX, &aspectY);
+		if (SUCCEEDED(hr) && aspectX > 0 && aspectY > 0 && height > 0)
+			actualWidth = (long)((double)height * aspectX / aspectY);
+	}
+
+	if (pVideoWindow)pVideoWindow->SetWindowPosition(0, 0, actualHeight, actualWidth);
+	rc.top = 0; rc.left = 0; rc.right = actualWidth; rc.bottom = actualHeight;
+	rcm.top = 0; rcm.left = 0; rcm.right = actualWidth; rcm.bottom = actualHeight;
+	if (rcm.right == 704 && rcm.bottom == 480)
+		rcm.bottom = 396;
+
+	// PitchCorrect より先に動画UIを出す（張り替えで固まっても画面は出る）
+	if (width == 0) {
+		ShowWindow(SW_HIDE);
+		if (m_bar.IsBarReady())
+			m_bar.SetMediaInfoText(L"");
+	} else {
+		if (pVideoWindow)pVideoWindow->put_Visible(OATRUE);
+		if (savedata.gx != -10000) {
+			SetWindowPos(NULL, savedata.gx, savedata.gy, 0, 0,
+				SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOREDRAW);
+		}
+		switch (savedata.douga) {
+		case 0:OnMenuitem32771(); break;
+		case 1:OnMenuitem32772(); break;
+		case 2:OnMenuitem32773(); break;
+		case 3:OnMenuitem32774(); break;
+		}
+		if (InterlockedCompareExchange(&g_dougaAssocTopMost, 0, 0) != 0)
+			::SetWindowPos(m_hWnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+		else if (savedata.dougatopmost)
+			::SetWindowPos(m_hWnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+		ShowWindow(SW_SHOWNORMAL);
+		::SetWindowPos(m_hWnd, savedata.dougatopmost ? HWND_TOPMOST : HWND_TOP,
+			0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
+		::BringWindowToTop(m_hWnd);
+		RefreshBarMediaInfo();
+		SetTimer(155, 400, NULL);
+	}
+	SetTimer(1255, 200, NULL);
+
+	DougaHangTrace(L"plays2:after ShowWindow");
+	// mode=-2: UI 表示後に Grabber→Stretcher 張り替え
+#if DOUGA_PITCHCORRECT_ENABLE
 	if (mode == -2 && pGraphBuilder) {
+		DougaHangTrace(L"plays2:PitchCorrect_Install:begin");
 		HWND hwndOwner = GetSafeHwnd();
 		if (DougaPitchCorrect_Install(pGraphBuilder, hwndOwner)) {
+			DougaHangTrace(L"plays2:PitchCorrect_Install OK");
 			if (pBasicAudio) { pBasicAudio->Release(); pBasicAudio = NULL; }
 			DougaPitchCorrect_SetVolumeDsPos(savedata.dsvol);
 			if (pMediaSeeking) {
@@ -5105,126 +5872,34 @@ void CDouga::plays2()
 				if (SUCCEEDED(pMediaSeeking->GetRate(&r)))
 					DougaPitchCorrect_SetPlaybackRate(r);
 			}
-			// 字幕接続は Install より前。DS 遅延に合わせて ffdshow subDelay を付け直す
-			IEnumFilters* en = NULL;
-			if (SUCCEEDED(pGraphBuilder->EnumFilters(&en))) {
-				IBaseFilter* f = NULL;
-				ULONG n = 0;
-				while (en->Next(1, &f, &n) == S_OK) {
-					FILTER_INFO fi;
-					f->QueryFilterInfo(&fi);
-					if (fi.pGraph) fi.pGraph->Release();
-					if (wcsstr(fi.achName, L"ffdshow"))
-						DougaEnableFfdshowSubs(f);
-					f->Release();
-				}
-				en->Release();
-			}
+			// SetDefaultSyncSource は Install 内で済み。二重呼び出しは例外の原因になる
 		} else {
+			DougaHangTrace(L"plays2:PitchCorrect_Install FAILED");
 			OutputDebugStringW(L"[DougaPitch] Install failed at plays2\n");
 		}
+		DougaHangTrace(L"plays2:PitchCorrect_Install:end");
+	}
+#else
+	if (mode == -2 && pGraphBuilder)
+		DougaHangTrace(L"plays2:PitchCorrect DISABLED (verify)");
+#endif
+
+
+	if (s_dougaDeferSubStreamIdx >= 0) {
+		SetTimer(1260, 400, NULL);
+		DougaHangTrace(L"plays2:arm subtitle Enable timer");
 	}
 
-	// 音量設定（ピッチ補正経路は専用 DS、それ以外は IBasicAudio）
+	DougaHangTrace(L"plays2:return");
 	if (!DougaPitchCorrect_IsActive()) {
 		if (savedata.dsvol == -498) {
 			if (pBasicAudio)pBasicAudio->put_Volume(-10000);
-		}
-		else {
+		} else {
 			if (pBasicAudio)pBasicAudio->put_Volume((savedata.dsvol - 1) * 7);
 		}
 	}
 
-	width = 0;
-
-	if (ev) {
-		SIZE a = { 0 }, b = { 0 };
-		Vdc->GetNativeVideoSize(&a, &b);
-		width = a.cx;
-		height = a.cy;
-	}
-	else {
-		if (pBasicVideo)pBasicVideo->get_VideoHeight(&height);
-		if (pBasicVideo)pBasicVideo->get_VideoWidth(&width);
-	}
-
-	// アスペクト比を考慮したサイズ計算
-	long actualWidth = width;
-	long actualHeight = height;
-
-	if (pBasicVideo2)
-	{
-		long aspectX = 0, aspectY = 0;
-		HRESULT hr = pBasicVideo2->GetPreferredAspectRatio(&aspectX, &aspectY);
-
-		if (SUCCEEDED(hr) && aspectX > 0 && aspectY > 0)
-		{
-			// アスペクト比を使って実際の表示サイズを計算
-			// 高さを基準にして幅を調整
-			actualWidth = (long)((double)height * aspectX / aspectY);
-		}
-	}
-
-	if (pVideoWindow)pVideoWindow->SetWindowPosition(0, 0, actualHeight, actualWidth);
-
-	rc.top = 0; rc.left = 0; rc.right = actualWidth; rc.bottom = actualHeight;
-	rcm.top = 0; rcm.left = 0; rcm.right = actualWidth; rcm.bottom = actualHeight;
-
-	// 以前のハードコード補正は不要になりますわ
-	/*
-	if(rcm.right==352&&rcm.bottom==480){
-		rcm.right=640;
-	}
-	if(rcm.right==1440&&rcm.bottom==1080){
-		rcm.right=1920;
-	}
-	if(rcm.right==1440&&rcm.bottom==1088){
-		rcm.right=1920;
-	}
-	*/
-
-	if (rcm.right == 704 && rcm.bottom == 480) {
-		rcm.bottom = 396;
-	}
-
-	// 表示は最終サイズ確定後に一度だけ。
-	// (旧: Show → 100x100 に縮める → 倍率適用 で「出て消えてまた出る」ように見えた)
-	if (width == 0) {
-		ShowWindow(SW_HIDE);
-		if (m_bar.IsBarReady())
-			m_bar.SetMediaInfoText(L"");
-	}
-	else {
-		if (pVideoWindow)pVideoWindow->put_Visible(OATRUE);
-
-		if (savedata.gx != -10000) {
-			// 位置だけ先に合わせる(まだ非表示のまま、再描画しない)
-			SetWindowPos(NULL, savedata.gx, savedata.gy, 0, 0,
-				SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOREDRAW);
-		}
-
-		switch (savedata.douga) {
-		case 0:OnMenuitem32771(); break;
-		case 1:OnMenuitem32772(); break;
-		case 2:OnMenuitem32773(); break;
-		case 3:OnMenuitem32774(); break;
-		}
-
-		if (InterlockedCompareExchange(&g_dougaAssocTopMost, 0, 0) != 0)
-			::SetWindowPos(m_hWnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
-		ShowWindow(SW_SHOWNORMAL);
-		ApplyVideoDest();
-		RefreshBarMediaInfo();
-		UpdateWindow();
-		SetTimer(155, 400, NULL);
-	}
-
-	SetTimer(1255, 200, NULL);
-
-	// 解放をお忘れなく
 	if (pBasicVideo2) pBasicVideo2->Release();
-
-	DumpFilterGraph();
 }
 
 extern REFTIME aa2,aa;
@@ -5258,77 +5933,33 @@ void CDouga::pause(int a)
 
 void CDouga::stops()
 {
-	CRect r,rr;
-	GetWindowRect(&r);
-	savedata.gx=r.left;
-	savedata.gy=r.top;
-	if(savedata.douga==3){
-		rr.top=r.top-savedata.p.top;
-		rr.left=r.left-savedata.p.left;
-		savedata.p.top+=rr.top;
-		savedata.p.left+=rr.left;
-		savedata.p.bottom+=rr.top;
-		savedata.p.right+=rr.left;
+	if (!pGraphBuilder && !pMediaControl) {
+		ev = FALSE;
+		DougaColdResetPlaybackGlobals();
+		return;
 	}
-	if(pMediaControl)pMediaControl->Stop();
-	DougaPitchCorrect_Shutdown();
-	REFERENCE_TIME rtpos = 0;
-	if(pMediaSeeking)pMediaSeeking->SetPositions(&rtpos,AM_SEEKING_AbsolutePositioning,NULL,AM_SEEKING_NoPositioning);
-//	pMediaControl->Pause();
-	if(pVideoWindow)pVideoWindow->put_Visible(OAFALSE);
-	if(pVideoWindow)pVideoWindow->put_Owner(NULL);
-	
-	RELEASE(pop);
-	RELEASE(vr);
-	RELEASE(pMediaPosition);
-	RELEASE(pBasicAudio);
-	RELEASE(service);
-	RELEASE(Vdc);
-	RELEASE(prenda);
-	RELEASE(prenda2);
-	RELEASE(prenda3);
-	RELEASE(prenda4);
-	RELEASE(prenda5);
-	RELEASE(prenda6);
-	RELEASE(prenda7);
-	RELEASE(prenda8);
-	RELEASE(prenda9);
-	RELEASE(prenda10);
-	RELEASE(prend);
-	RELEASE(pDSRenderer);
-	RELEASE(pDSRenderer2);
-	RELEASE(pDSRenderer3);
-	RELEASE(pDSRenderer4);
-	RELEASE(pDSRenderer5);
-	RELEASE(pDSRenderer6);
-	RELEASE(pDSRenderer7);
-	RELEASE(pDSRenderer8);
-	RELEASE(pDSRenderer9);
-	RELEASE(pDSRenderer10);
-	RELEASE(pACM);
-	RELEASE(pRenderer0);
-	RELEASE(pRenderer0_);
-	RELEASE(pRenderer1);
-	RELEASE(pRenderer);
-	RELEASE(pColour);
-	RELEASE(pAviDecomp);
-	RELEASE(pSourceFilter);
-	RELEASE(Haali);
-	RELEASE(pSplitter);
-	RELEASE(pCaptureGraphBuilder2);
-	RELEASE(pSource2);
-	RELEASE(pSource1);
-	RELEASE(pSource);
-	RELEASE(pVmr9);
-	RELEASE(pMediaControl);
-	RELEASE(pBasicVideo);
-	RELEASE(pVideoWindow);
-	RELEASE(pMediaSeeking);
-	RELEASE(iam);
-	RELEASE1(pGraphBuilder);
-	CoUninitialize();
+	CRect r,rr;
+	if (GetSafeHwnd()) {
+		GetWindowRect(&r);
+		savedata.gx=r.left;
+		savedata.gy=r.top;
+		if(savedata.douga==3){
+			rr.top=r.top-savedata.p.top;
+			rr.left=r.left-savedata.p.left;
+			savedata.p.top+=rr.top;
+			savedata.p.left+=rr.left;
+			savedata.p.bottom+=rr.top;
+			savedata.p.right+=rr.left;
+		}
+	}
+	audioStreams.clear();
+	videoStreams.clear();
+	subtitleStreams.clear();
+	streamMap.videoStart = streamMap.audioStart = streamMap.subtitleStart = -1;
+	streamMap.videoCount = streamMap.audioCount = streamMap.subtitleCount = 0;
+	DougaColdResetPlaybackGlobals();
+	// 字幕あり後の COM リサイクルは次の plays 冒頭 DougaRecycleComApartmentIfNeeded で行う。
 	if(mode==-14) Sleep(500);
-	ev=FALSE;
 }
 
 void CDouga::stop()
@@ -5630,6 +6261,41 @@ void CDouga::OnTimer(UINT nIDEvent)
 		}
 		SetFocus();
 	}
+	if (nIDEvent == 1260) {
+		KillTimer(1260);
+		s_dougaDeferSubConnect = FALSE;
+		const int idx = s_dougaDeferSubStreamIdx;
+		s_dougaDeferSubStreamIdx = -1;
+		if (iam && idx >= 0) {
+			for (int i = 0; i < 40; ++i) {
+				if (streamidx2[i] >= 0 && streamidx2[i] != idx)
+					iam->Enable(streamidx2[i], 0);
+			}
+			// ENABLEONLY は他ストリーム（音声）を落とすので最後の手段
+			HRESULT shr = iam->Enable(idx, AMSTREAMSELECTENABLE_ENABLE);
+			if (FAILED(shr))
+				shr = iam->Enable(idx, AMSTREAMSELECTENABLE_ENABLEONLY);
+			CString msg;
+			msg.Format(L"plays2:deferred subtitle Enable idx=%d hr=0x%08X", idx, (unsigned)shr);
+			DougaHangTrace((LPCWSTR)msg);
+			// 字幕切替後は必ず音声を戻す（st12 未設定でも先頭音声）
+			int aidx = -1;
+			if (st12 > 0 && st12 <= 40 && streamidx[st12 - 1] >= 0)
+				aidx = streamidx[st12 - 1];
+			else if (streamidx[0] >= 0)
+				aidx = streamidx[0];
+			else if (streamMap.audioStart >= 0)
+				aidx = streamMap.audioStart;
+			if (aidx >= 0) {
+				HRESULT ahr = iam->Enable(aidx, AMSTREAMSELECTENABLE_ENABLE);
+				if (FAILED(ahr))
+					ahr = iam->Enable(aidx, AMSTREAMSELECTENABLE_ENABLEONLY);
+				CString amsg;
+				amsg.Format(L"plays2:re-enable audio idx=%d hr=0x%08X", aidx, (unsigned)ahr);
+				DougaHangTrace((LPCWSTR)amsg);
+			}
+		}
+	}
 	if(nIDEvent==3366){
 		if (!savedata.fs) {
 			RestoreDougaCursor();
@@ -5808,18 +6474,32 @@ void CDouga::OnNcRButtonDown(UINT nHitTest, CPoint point)
 // SampleGrabber は SetRate(R) 後、壁時計あたり約 R 倍の原音程 PCM を渡す。
 // timeRatio=1 のまま DS(Fs) に書くと書込速度≠再生速度になり、繰り返し／ノイズになる。
 // timeRatio=1/R で壁時計あたり Fs サンプルに直し、pitchScale=1 で音程を維持する。
-// （計画の「速度 R・音程 1」を Grabber 地点に合わせた実装。ゲーム合成は触らない）
+//
+// 出力 DS は 16bit 固定（EAC→デコーダが float/24 でもここで変換）。
+// リアルタイム PitchCorrect 用。映画再生の実用品質としては十分。
 // ============================================================================
 namespace {
 
 static const double kDougaPitchEps = 0.02;
 static const DWORD kDougaPcPrebufferMs = 60;   // Play 開始前に少しだけ貯める
-// 旧 1000ms は 5.1 等で先行が膨らみ、映像/字幕より音声が大幅に遅れて見えた
-static const DWORD kDougaPcMaxAheadMs = 150;   // これ以上は書き込みを捨てる
+static const DWORD kDougaPcPrebufferMsMulti = 120;
+// 2ch: 短めで低遅延。多ch: デコードバーストで先行が膨らむ。
+// ここで捨てると「届いたサンプルをロスト→音声だけ先へ」となりセリフ位置が狂う。
+static const DWORD kDougaPcMaxAheadMs = 800;
+static const DWORD kDougaPcMaxAheadMsMulti = 2500;
 static const DWORD kDougaPcGapFlushMs = 350;   // PCM 途切れ → flush＋ドレイン開始
+static const DWORD kDougaPcStartGraceMs = 4000; // 字幕/ffd 起動直後のギャップで DS を止めない
+static const double kDougaPcLeadSec = 0.06;     // graph よりこれだけ先まで書いてよい
+static const size_t kDougaPcQMax = 96;
+
+struct DougaPcQItem {
+	double t; // BufferCB SampleTime（秒）。不明は <0
+	std::vector<BYTE> data;
+};
 
 struct DougaPcState {
 	LONG refCb;
+	IGraphBuilder* graph; // weak（Install 中のグラフ。Shutdown で RemoveFilter 用）
 	IBaseFilter* grabberF;
 	IBaseFilter* nullF;
 	IBaseFilter* oldRenderer;
@@ -5836,25 +6516,37 @@ struct DougaPcState {
 	BOOL dsRunning;
 	BOOL endFlushed;
 	BOOL draining;       // EOS 後、残量だけ再生して Stop
+	BOOL downmix;        // Grabber 多ch → DS/RB は stereo
 	DWORD lastPcmTick;
 	DWORD drainTick;
 	DWORD drainAheadBytes; // flush 時点の残りバイト（ループ防止の上限）
+	DWORD startTick;     // Install 時刻（起動グレース）
 	double rate;
+	double dropBeforeSec; // シーク位置より前の SampleTime を破棄
 	int sampleRate;
-	int channels;
-	int bits;
-	int blockAlign;
+	int channels;        // DS / RubberBand / EQ 側
+	int srcChannels;     // SampleGrabber 入力
+	int bits;            // DS 出力ビット（常に 16）
+	int srcBits;         // Grabber 実ビット（float/24 可）
+	BOOL srcFloat;       // IEEE float 入力
+	int blockAlign;      // 出力（DS）側
+	int srcBlockAlign;   // 入力側（実フレームバイト）
+	DWORD channelMask;
 	DWORD bufBytes;
 	DWORD writePos;
 	BOOL writePosValid;
 	DWORD prebufferBytes;
 	volatile LONG inCallback; // BufferCB 滞在中（UI は Stop 前に待つ）
+	volatile LONG shuttingDown; // Shutdown 中は CB を即抜ける（SetCallback 待ち回避）
+	DWORD dropUntilTick; // シーク直後の補助
+	std::deque<DougaPcQItem> pcmQ;
 	std::vector<float> inFlat;
 	std::vector<float> outFlat;
 	std::vector<float> interleavedTmp;
 	std::vector<float*> inPtrs;
 	std::vector<float*> outPtrs;
 	std::vector<BYTE> pcmOut;
+	std::vector<BYTE> downmixBuf;
 	volatile LONG eqNeedReset; // シーク後の次PCM1回だけ equaliser reset
 };
 
@@ -5919,6 +6611,12 @@ static DWORD DougaPcMsToBytes(DWORD ms)
 	return b;
 }
 
+static DWORD DougaPcMaxAheadBytes()
+{
+	const DWORD ms = (g_pc.channels > 2) ? kDougaPcMaxAheadMsMulti : kDougaPcMaxAheadMs;
+	return DougaPcMsToBytes(ms);
+}
+
 static void DougaPcSilenceAll_NoLock()
 {
 	if (!g_pc.dsb || g_pc.bufBytes == 0) return;
@@ -5940,8 +6638,9 @@ static void DougaPcSilenceAll_NoLock()
 
 static void DougaPcWaitCallbackGone()
 {
-	// RubberBand process は数百 ms かかることがある。短すぎると Stop と競合する
-	for (int i = 0; i < 2000; ++i) {
+	// RubberBand process は数百 ms。Shutdown でも短すぎるとスレッドリークする
+	const int lim = (InterlockedCompareExchange(&g_pc.shuttingDown, 0, 0) != 0) ? 800 : 2000;
+	for (int i = 0; i < lim; ++i) {
 		if (InterlockedCompareExchange(&g_pc.inCallback, 0, 0) == 0)
 			break;
 		Sleep(1);
@@ -5961,6 +6660,11 @@ static void DougaPcStopDsOutsideCallback()
 	g_pc.drainAheadBytes = 0;
 	if (g_pc.dsCsInit)
 		LeaveCriticalSection(&g_pc.dsCs);
+	if (g_pc.csInit) {
+		EnterCriticalSection(&g_pc.cs);
+		g_pc.pcmQ.clear();
+		LeaveCriticalSection(&g_pc.cs);
+	}
 }
 
 // [writePos → play) を無音化（有効区間は残す）— 呼び出し元が dsCs 保持
@@ -6004,7 +6708,7 @@ static BOOL DougaPcWritePcm_NoLock(const BYTE* data, DWORD bytes)
 		if (FAILED(g_pc.dsb->GetCurrentPosition(&play, &dsWrite)))
 			return FALSE;
 		const DWORD ahead = DougaPcBytesAhead(g_pc.writePos, play, g_pc.bufBytes);
-		const DWORD maxAhead = DougaPcMsToBytes(kDougaPcMaxAheadMs);
+		const DWORD maxAhead = DougaPcMaxAheadBytes();
 		if (maxAhead > 0 && ahead + bytes > maxAhead)
 			return FALSE;
 		if (ahead + bytes >= g_pc.bufBytes - (DWORD)g_pc.blockAlign * 8)
@@ -6026,7 +6730,8 @@ static BOOL DougaPcWritePcm_NoLock(const BYTE* data, DWORD bytes)
 
 	if (!g_pc.dsRunning && g_pc.playing) {
 		g_pc.prebufferBytes += bytes;
-		const DWORD need = DougaPcMsToBytes(kDougaPcPrebufferMs);
+		const DWORD needMs = (g_pc.channels > 2) ? kDougaPcPrebufferMsMulti : kDougaPcPrebufferMs;
+		const DWORD need = DougaPcMsToBytes(needMs);
 		if (g_pc.prebufferBytes >= need) {
 			g_pc.dsb->SetCurrentPosition(0);
 			if (SUCCEEDED(g_pc.dsb->Play(0, 0, DSBPLAY_LOOPING)))
@@ -6055,6 +6760,7 @@ static void DougaPcEnsureShifter_NoLock()
 			(size_t)g_pc.sampleRate, (size_t)g_pc.channels,
 			RubberBand::RubberBandStretcher::OptionProcessRealTime |
 			RubberBand::RubberBandStretcher::OptionEngineFaster |
+			RubberBand::RubberBandStretcher::OptionThreadingNever |
 			RubberBand::RubberBandStretcher::OptionTransientsMixed |
 			RubberBand::RubberBandStretcher::OptionPhaseLaminar |
 			RubberBand::RubberBandStretcher::OptionFormantPreserved |
@@ -6085,6 +6791,135 @@ static void DougaPcFloatToPcm16(const float* interleaved, size_t frames, int ch,
 	}
 }
 
+// WAVEFORMATEXTENSIBLE 慣習順: FL FR FC LFE BL/SL BR/SR ...
+static void DougaPcDownmixToStereo16(const INT16* src, long frames, int chIn, INT16* dst)
+{
+	const float cC = 0.70710678f;
+	const float cS = 0.70710678f;
+	const float cLfe = 0.5f;
+	for (long i = 0; i < frames; ++i) {
+		const INT16* s = src + i * chIn;
+		float L = (float)s[0];
+		float R = (chIn > 1) ? (float)s[1] : L;
+		if (chIn >= 3) {
+			const float c = cC * (float)s[2];
+			L += c; R += c;
+		}
+		if (chIn >= 4) {
+			const float lfe = cLfe * (float)s[3];
+			L += lfe; R += lfe;
+		}
+		if (chIn >= 5) L += cS * (float)s[4];
+		if (chIn >= 6) R += cS * (float)s[5];
+		if (chIn >= 7) L += cS * (float)s[6];
+		if (chIn >= 8) R += cS * (float)s[7];
+		if (L > 32767.f) L = 32767.f;
+		if (L < -32768.f) L = -32768.f;
+		if (R > 32767.f) R = 32767.f;
+		if (R < -32768.f) R = -32768.f;
+		dst[i * 2] = (INT16)L;
+		dst[i * 2 + 1] = (INT16)R;
+	}
+}
+
+// Grabber は多chで float/24bit になりやすい。DS/RB は 16bit PCM 固定。
+static BOOL DougaPcSrcToPcm16(const BYTE* src, long frames, int ch, int srcBits, BOOL srcFloat, INT16* dst)
+{
+	if (!src || !dst || frames <= 0 || ch < 1) return FALSE;
+	const long n = frames * (long)ch;
+	if (srcFloat) {
+		const float* f = (const float*)src;
+		for (long i = 0; i < n; ++i) {
+			float s = f[i];
+			if (s > 1.f) s = 1.f;
+			if (s < -1.f) s = -1.f;
+			const int v = (int)floorf(s * 32767.f + 0.5f);
+			dst[i] = (INT16)((v > 32767) ? 32767 : (v < -32768 ? -32768 : v));
+		}
+		return TRUE;
+	}
+	if (srcBits == 16) {
+		memcpy(dst, src, (size_t)n * sizeof(INT16));
+		return TRUE;
+	}
+	if (srcBits == 32) {
+		const INT32* s32 = (const INT32*)src;
+		for (long i = 0; i < n; ++i)
+			dst[i] = (INT16)(s32[i] >> 16);
+		return TRUE;
+	}
+	if (srcBits == 24) {
+		const int bytesPerSamp = (g_pc.srcBlockAlign > 0 && ch > 0)
+			? (g_pc.srcBlockAlign / ch) : 3;
+		if (bytesPerSamp >= 4) {
+			const INT32* s32 = (const INT32*)src;
+			for (long i = 0; i < n; ++i)
+				dst[i] = (INT16)(s32[i] >> 16);
+			return TRUE;
+		}
+		for (long i = 0; i < n; ++i) {
+			const BYTE* b = src + i * 3;
+			const int v = (int)((INT8)b[2] << 16) | (b[1] << 8) | b[0];
+			dst[i] = (INT16)(v >> 8);
+		}
+		return TRUE;
+	}
+	return FALSE;
+}
+
+static BOOL DougaPcIsIeeeFloatWfx(const WAVEFORMATEX* wfx, const WAVEFORMATEXTENSIBLE* we)
+{
+	if (!wfx) return FALSE;
+	if (wfx->wFormatTag == WAVE_FORMAT_IEEE_FLOAT) return TRUE;
+	if (we && wfx->wFormatTag == WAVE_FORMAT_EXTENSIBLE) {
+		static const GUID kFloat = { 0x00000003, 0x0000, 0x0010,{ 0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71 } };
+		return IsEqualGUID(we->SubFormat, kFloat) ? TRUE : FALSE;
+	}
+	return FALSE;
+}
+
+static DWORD DougaPcDefaultChannelMask(int ch)
+{
+	// AudioUpscaler の speaker_layout に依存せず、標準マスクを使う
+	switch (ch) {
+	case 1: return 0x4; // SPEAKER_FRONT_CENTER
+	case 2: return 0x3; // FL|FR
+	case 3: return 0x7; // FL|FR|FC
+	case 4: return 0x33; // FL|FR|BL|BR
+	case 5: return 0x37; // FL|FR|FC|BL|BR
+	case 6: return 0x3F; // 5.1
+	case 7: return 0x13F;
+	case 8: return 0x63F; // 7.1
+	default:
+		if (ch <= 0) return 0x3;
+		return DirectSoundChannelMaskForOutput(ch, 0);
+	}
+}
+
+static void DougaPcAttachSystemClock(IGraphBuilder* graph)
+{
+	// DS レンダラを外すと SetDefaultSyncSource が EVR を選び、
+	// 字幕あり(ffd) だと映像プリロール待ちで数秒無音になる。
+	if (!graph) return;
+	IMediaFilter* mf = NULL;
+	if (FAILED(graph->QueryInterface(IID_IMediaFilter, (void**)&mf)) || !mf) {
+		graph->SetDefaultSyncSource();
+		return;
+	}
+	IReferenceClock* clock = NULL;
+	HRESULT hr = CoCreateInstance(CLSID_SystemClock, NULL, CLSCTX_INPROC_SERVER,
+		IID_IReferenceClock, (void**)&clock);
+	if (SUCCEEDED(hr) && clock) {
+		mf->SetSyncSource(clock);
+		clock->Release();
+		DougaHangTrace(L"PitchInstall:SystemClock");
+	} else {
+		graph->SetDefaultSyncSource();
+		DougaHangTrace(L"PitchInstall:SetDefaultSyncSource fallback");
+	}
+	mf->Release();
+}
+
 static void DougaPcRetrieveAndWrite_NoLock()
 {
 	// 注意: 呼び出し元は cs を握らないこと。dsCs のみ使用。
@@ -6102,7 +6937,7 @@ static void DougaPcRetrieveAndWrite_NoLock()
 			DWORD play = 0, dsWrite = 0;
 			if (SUCCEEDED(g_pc.dsb->GetCurrentPosition(&play, &dsWrite))) {
 				const DWORD ahead = DougaPcBytesAhead(g_pc.writePos, play, g_pc.bufBytes);
-				const DWORD maxAhead = DougaPcMsToBytes(kDougaPcMaxAheadMs);
+				const DWORD maxAhead = DougaPcMaxAheadBytes();
 				if (maxAhead > 0 && ahead + DougaPcMsToBytes(40) > maxAhead)
 					canWrite = FALSE;
 			}
@@ -6143,13 +6978,116 @@ static void DougaPcRetrieveAndWrite_NoLock()
 	}
 }
 
-static void DougaPcOnPcm(const BYTE* p, long len)
+static double DougaPcGraphSec()
+{
+	if (!pMediaSeeking) return -1.0;
+	LONGLONG pos = 0;
+	if (FAILED(pMediaSeeking->GetCurrentPosition(&pos)))
+		return -1.0;
+	return (double)pos / 10000000.0;
+}
+
+// グラフ位置に合わせてキューを吐き出す（捨てない＝位置ずれ防止）
+static void DougaPcDrainQueue()
+{
+	if (!g_pc.installed) return;
+	for (;;) {
+		DougaPcQItem item;
+		BOOL have = FALSE;
+		BOOL waitMore = FALSE;
+		if (g_pc.csInit)
+			EnterCriticalSection(&g_pc.cs);
+		if (!g_pc.playing || g_pc.pcmQ.empty()) {
+			if (g_pc.csInit)
+				LeaveCriticalSection(&g_pc.cs);
+			break;
+		}
+		const double g = DougaPcGraphSec();
+		const double t = g_pc.pcmQ.front().t;
+		if (g >= 0.0 && t >= 0.0) {
+			if (t + 0.40 < g) {
+				// 遅すぎ（シーク残骸）→破棄
+				g_pc.pcmQ.pop_front();
+				if (g_pc.csInit)
+					LeaveCriticalSection(&g_pc.cs);
+				continue;
+			}
+			if (t > g + kDougaPcLeadSec) {
+				waitMore = TRUE;
+			}
+		}
+		if (!waitMore) {
+			item = std::move(g_pc.pcmQ.front());
+			g_pc.pcmQ.pop_front();
+			have = TRUE;
+		}
+		if (g_pc.csInit)
+			LeaveCriticalSection(&g_pc.cs);
+		if (waitMore || !have)
+			break;
+
+		if (!item.data.empty()) {
+			DougaPcEqAndRemote(item.data.data(), (DWORD)item.data.size());
+			if (g_pc.dsCsInit)
+				EnterCriticalSection(&g_pc.dsCs);
+			if (g_pc.playing)
+				DougaPcWritePcm_NoLock(item.data.data(), (DWORD)item.data.size());
+			if (g_pc.dsCsInit)
+				LeaveCriticalSection(&g_pc.dsCs);
+		}
+	}
+}
+
+static void DougaPcQueuePcm(double sampleTime, const BYTE* data, DWORD bytes)
+{
+	if (!data || bytes == 0) return;
+	if (g_pc.csInit)
+		EnterCriticalSection(&g_pc.cs);
+	if (!g_pc.playing) {
+		if (g_pc.csInit)
+			LeaveCriticalSection(&g_pc.cs);
+		return;
+	}
+	// 溢れそうなら古いのを強制排出（破棄ではなく書く）
+	while (g_pc.pcmQ.size() >= kDougaPcQMax) {
+		DougaPcQItem old = std::move(g_pc.pcmQ.front());
+		g_pc.pcmQ.pop_front();
+		if (g_pc.csInit)
+			LeaveCriticalSection(&g_pc.cs);
+		if (!old.data.empty()) {
+			DougaPcEqAndRemote(old.data.data(), (DWORD)old.data.size());
+			if (g_pc.dsCsInit)
+				EnterCriticalSection(&g_pc.dsCs);
+			if (g_pc.playing)
+				DougaPcWritePcm_NoLock(old.data.data(), (DWORD)old.data.size());
+			if (g_pc.dsCsInit)
+				LeaveCriticalSection(&g_pc.dsCs);
+		}
+		if (g_pc.csInit)
+			EnterCriticalSection(&g_pc.cs);
+		if (!g_pc.playing) {
+			if (g_pc.csInit)
+				LeaveCriticalSection(&g_pc.cs);
+			return;
+		}
+	}
+	DougaPcQItem it;
+	it.t = sampleTime;
+	it.data.assign(data, data + bytes);
+	g_pc.pcmQ.push_back(std::move(it));
+	if (g_pc.csInit)
+		LeaveCriticalSection(&g_pc.cs);
+	DougaPcDrainQueue();
+}
+
+static void DougaPcOnPcm(const BYTE* p, long len, double sampleTime)
 {
 	if (!p || len <= 0 || !g_pc.installed) return;
 	InterlockedExchange(&g_pc.inCallback, 1);
 
 	BOOL playing = FALSE;
-	int channels = 0, bits = 0, bpf = 0;
+	int channels = 0, srcCh = 0, srcBpf = 0, srcBits = 16;
+	BOOL downmix = FALSE, srcFloat = FALSE;
 	double rate = 1.0;
 	RubberBand::RubberBandStretcher* shifter = NULL;
 
@@ -6157,10 +7095,14 @@ static void DougaPcOnPcm(const BYTE* p, long len)
 		EnterCriticalSection(&g_pc.cs);
 	playing = g_pc.playing;
 	channels = g_pc.channels;
-	bits = g_pc.bits;
-	bpf = g_pc.blockAlign;
+	srcCh = g_pc.srcChannels > 0 ? g_pc.srcChannels : g_pc.channels;
+	srcBpf = g_pc.srcBlockAlign > 0 ? g_pc.srcBlockAlign : g_pc.blockAlign;
+	srcBits = g_pc.srcBits > 0 ? g_pc.srcBits : 16;
+	srcFloat = g_pc.srcFloat;
+	downmix = g_pc.downmix;
 	rate = g_pc.rate;
-	if (playing && channels >= 1 && bits == 16 && bpf >= 1 && (len % bpf) == 0) {
+	if (playing && channels >= 1 && srcCh >= 1 && srcBpf >= 1 && len >= srcBpf) {
+		len -= (len % srcBpf);
 		g_pc.lastPcmTick = GetTickCount();
 		g_pc.endFlushed = FALSE;
 		g_pc.draining = FALSE;
@@ -6171,25 +7113,34 @@ static void DougaPcOnPcm(const BYTE* p, long len)
 	if (g_pc.csInit)
 		LeaveCriticalSection(&g_pc.cs);
 
-	if (!playing) {
+	if (!playing || len < srcBpf) {
 		InterlockedExchange(&g_pc.inCallback, 0);
 		return;
 	}
 
-	const long frames = len / bpf;
-	const INT16* src = (const INT16*)p;
+	const long frames = len / srcBpf;
+	g_pc.pcmOut.resize((size_t)frames * (size_t)srcCh * 2);
+	BOOL converted = DougaPcSrcToPcm16(p, frames, srcCh, srcBits, srcFloat, (INT16*)g_pc.pcmOut.data());
+	if (!converted && srcBits != 16) {
+		converted = DougaPcSrcToPcm16(p, frames, srcCh, 16, FALSE, (INT16*)g_pc.pcmOut.data());
+	}
+	if (!converted) {
+		InterlockedExchange(&g_pc.inCallback, 0);
+		return;
+	}
+	const INT16* pcm16 = (const INT16*)g_pc.pcmOut.data();
+	long pcmBytes = frames * srcCh * 2;
 
-	// rate≈1: CS を持たずに DS へ
+	if (downmix && srcCh > 2 && channels == 2) {
+		g_pc.downmixBuf.resize((size_t)frames * 4);
+		DougaPcDownmixToStereo16(pcm16, frames, srcCh, (INT16*)g_pc.downmixBuf.data());
+		pcm16 = (const INT16*)g_pc.downmixBuf.data();
+		pcmBytes = frames * 4;
+	}
+
+	// rate≈1: グラフ時刻に合わせてキュー経由で書く（多chバーストの先走り防止）
 	if (fabs(rate - 1.0) < kDougaPitchEps) {
-		g_pc.pcmOut.resize((size_t)len);
-		memcpy(g_pc.pcmOut.data(), p, (size_t)len);
-		DougaPcEqAndRemote(g_pc.pcmOut.data(), (DWORD)len);
-		if (g_pc.dsCsInit)
-			EnterCriticalSection(&g_pc.dsCs);
-		if (g_pc.playing)
-			DougaPcWritePcm_NoLock(g_pc.pcmOut.data(), (DWORD)len);
-		if (g_pc.dsCsInit)
-			LeaveCriticalSection(&g_pc.dsCs);
+		DougaPcQueuePcm(sampleTime, (const BYTE*)pcm16, (DWORD)pcmBytes);
 		InterlockedExchange(&g_pc.inCallback, 0);
 		return;
 	}
@@ -6220,7 +7171,7 @@ static void DougaPcOnPcm(const BYTE* p, long len)
 		g_pc.inPtrs[c] = g_pc.inFlat.data() + (size_t)c * samplesIn;
 	for (long i = 0; i < frames; ++i) {
 		for (int c = 0; c < channels; ++c)
-			g_pc.inPtrs[c][i] = (float)src[i * channels + c] / 32768.f;
+			g_pc.inPtrs[c][i] = (float)pcm16[i * channels + c] / 32768.f;
 	}
 
 	const size_t maxChunk = 8192;
@@ -6251,7 +7202,6 @@ static void DougaPcOnPcm(const BYTE* p, long len)
 			break;
 		}
 
-		// retrieve/write は cs なし（dsCs のみ）
 		if (g_pc.playing && g_pc.shifter == sh)
 			DougaPcRetrieveAndWrite_NoLock();
 		done += n;
@@ -6280,9 +7230,24 @@ public:
 		return (ULONG)n;
 	}
 	STDMETHODIMP SampleCB(double, IMediaSample*) { return S_OK; }
-	STDMETHODIMP BufferCB(double, BYTE* pBuffer, long BufferLen)
+	STDMETHODIMP BufferCB(double SampleTime, BYTE* pBuffer, long BufferLen)
 	{
-		DougaPcOnPcm(pBuffer, BufferLen);
+		if (InterlockedCompareExchange(&g_pc.shuttingDown, 0, 0) != 0)
+			return S_OK;
+		const DWORD until = g_pc.dropUntilTick;
+		if (until != 0) {
+			const DWORD now = GetTickCount();
+			if ((LONG)(until - now) > 0)
+				return S_OK;
+			g_pc.dropUntilTick = 0;
+		}
+		if (SampleTime >= 0.0 && g_pc.dropBeforeSec > 0.0) {
+			if (SampleTime + 0.05 < g_pc.dropBeforeSec)
+				return S_OK;
+			if (SampleTime >= g_pc.dropBeforeSec)
+				g_pc.dropBeforeSec = 0.0;
+		}
+		DougaPcOnPcm(pBuffer, BufferLen, SampleTime);
 		return S_OK;
 	}
 };
@@ -6352,56 +7317,137 @@ static BOOL DougaPcFindAudioRenderer(IGraphBuilder* graph, IBaseFilter** ppRende
 	return FALSE;
 }
 
-static BOOL DougaPcCreateDs(HWND hwnd, const WAVEFORMATEX* wfx)
+static BOOL DougaPcCreateDs(HWND hwnd, const WAVEFORMATEX* wfx, DWORD channelMask, BOOL allowDownmix)
 {
 	if (!wfx || wfx->nChannels < 1 || wfx->nSamplesPerSec < 8000) return FALSE;
-	HRESULT hr = DirectSoundCreate8(NULL, &g_pc.ds, NULL);
-	if (FAILED(hr) || !g_pc.ds) {
-		OutputDebugStringW(L"[DougaPitch] DirectSoundCreate8 failed\n");
-		return FALSE;
+	HRESULT hr = E_FAIL;
+	for (int attempt = 0; attempt < 10; ++attempt) {
+		if (g_pc.ds) { g_pc.ds->Release(); g_pc.ds = NULL; }
+		hr = DirectSoundCreate8(NULL, &g_pc.ds, NULL);
+		if (SUCCEEDED(hr) && g_pc.ds) break;
+		Sleep(30 + attempt * 20);
 	}
+	if (FAILED(hr) || !g_pc.ds)
+		return FALSE;
 	HWND owner = hwnd ? hwnd : GetDesktopWindow();
 	if (FAILED(g_pc.ds->SetCooperativeLevel(owner, DSSCL_PRIORITY))) {
-		OutputDebugStringW(L"[DougaPitch] SetCooperativeLevel failed\n");
-		g_pc.ds->Release(); g_pc.ds = NULL;
-		return FALSE;
-	}
-	WAVEFORMATEX fmt = *wfx;
-	fmt.wFormatTag = WAVE_FORMAT_PCM;
-	fmt.wBitsPerSample = 16;
-	fmt.nBlockAlign = (WORD)(fmt.nChannels * fmt.wBitsPerSample / 8);
-	fmt.nAvgBytesPerSec = fmt.nSamplesPerSec * fmt.nBlockAlign;
-	fmt.cbSize = 0;
-	g_pc.sampleRate = (int)fmt.nSamplesPerSec;
-	g_pc.channels = (int)fmt.nChannels;
-	g_pc.bits = 16;
-	g_pc.blockAlign = (int)fmt.nBlockAlign;
-	g_pc.bufBytes = fmt.nAvgBytesPerSec * 3; // 3 sec
-	if (g_pc.bufBytes < 32768) g_pc.bufBytes = 32768;
-	DSBUFFERDESC desc = {};
-	desc.dwSize = sizeof(desc);
-	desc.dwFlags = DSBCAPS_CTRLVOLUME | DSBCAPS_GLOBALFOCUS | DSBCAPS_GETCURRENTPOSITION2;
-	desc.dwBufferBytes = g_pc.bufBytes;
-	desc.lpwfxFormat = &fmt;
-	IDirectSoundBuffer* pPrim = NULL;
-	hr = g_pc.ds->CreateSoundBuffer(&desc, &pPrim, NULL);
-	if (FAILED(hr) || !pPrim) {
-		OutputDebugStringW(L"[DougaPitch] CreateSoundBuffer failed\n");
-		g_pc.ds->Release(); g_pc.ds = NULL;
-		return FALSE;
-	}
-	g_pc.dsb = pPrim;
-	g_pc.writePos = 0;
-	g_pc.writePosValid = FALSE;
-	{
-		void* p1 = NULL; void* p2 = NULL;
-		DWORD b1 = 0, b2 = 0;
-		if (SUCCEEDED(g_pc.dsb->Lock(0, g_pc.bufBytes, &p1, &b1, &p2, &b2, 0))) {
-			if (p1 && b1) memset(p1, 0, b1);
-			if (p2 && b2) memset(p2, 0, b2);
-			g_pc.dsb->Unlock(p1, b1, p2, b2);
+		if (FAILED(g_pc.ds->SetCooperativeLevel(owner, DSSCL_NORMAL))) {
+			g_pc.ds->Release(); g_pc.ds = NULL;
+			return FALSE;
 		}
 	}
+
+	static const GUID kSubtypePcm = { 0x00000001, 0x0000, 0x0010,{ 0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71 } };
+
+	auto tryCreate = [&](WAVEFORMATEX* fmt, BOOL setPrimary) -> BOOL {
+		// 多ch でプライマリを無理に 5.1 にすると、環境によって無音になることがある
+		if (setPrimary) {
+			DSBUFFERDESC primDesc = {};
+			primDesc.dwSize = sizeof(primDesc);
+			primDesc.dwFlags = DSBCAPS_PRIMARYBUFFER;
+			IDirectSoundBuffer* prim = NULL;
+			if (SUCCEEDED(g_pc.ds->CreateSoundBuffer(&primDesc, &prim, NULL)) && prim) {
+				prim->SetFormat(fmt);
+				prim->Release();
+			}
+		}
+		DSBUFFERDESC desc = {};
+		desc.dwSize = sizeof(desc);
+		desc.dwFlags = DSBCAPS_CTRLVOLUME | DSBCAPS_GLOBALFOCUS | DSBCAPS_GETCURRENTPOSITION2;
+		DWORD bytes = fmt->nAvgBytesPerSec * 3;
+		if (bytes < 32768) bytes = 32768;
+		desc.dwBufferBytes = bytes;
+		desc.lpwfxFormat = fmt;
+		IDirectSoundBuffer* pPrim = NULL;
+		HRESULT chr = E_FAIL;
+		for (int attempt = 0; attempt < 8; ++attempt) {
+			chr = g_pc.ds->CreateSoundBuffer(&desc, &pPrim, NULL);
+			if (SUCCEEDED(chr) && pPrim) break;
+			pPrim = NULL;
+			Sleep(30 + attempt * 15);
+		}
+		if (FAILED(chr) || !pPrim) return FALSE;
+		if (g_pc.dsb) { g_pc.dsb->Release(); g_pc.dsb = NULL; }
+		g_pc.dsb = pPrim;
+		g_pc.sampleRate = (int)fmt->nSamplesPerSec;
+		g_pc.channels = (int)fmt->nChannels;
+		g_pc.bits = 16;
+		g_pc.blockAlign = (int)fmt->nBlockAlign;
+		g_pc.bufBytes = bytes;
+		g_pc.writePos = 0;
+		g_pc.writePosValid = FALSE;
+		{
+			void* p1 = NULL; void* p2 = NULL;
+			DWORD b1 = 0, b2 = 0;
+			if (SUCCEEDED(g_pc.dsb->Lock(0, g_pc.bufBytes, &p1, &b1, &p2, &b2, 0))) {
+				if (p1 && b1) memset(p1, 0, b1);
+				if (p2 && b2) memset(p2, 0, b2);
+				g_pc.dsb->Unlock(p1, b1, p2, b2);
+			}
+		}
+		return TRUE;
+	};
+
+	g_pc.srcChannels = (int)wfx->nChannels;
+	g_pc.srcBits = (int)wfx->wBitsPerSample;
+	if (g_pc.srcBits <= 0) g_pc.srcBits = 16;
+	// 実フレームバイト必須。16bit 前提の nCh*2 だと float 多ch が約2倍速になる
+	if (wfx->nBlockAlign > 0)
+		g_pc.srcBlockAlign = (int)wfx->nBlockAlign;
+	else
+		g_pc.srcBlockAlign = (int)wfx->nChannels * ((g_pc.srcBits + 7) / 8);
+	g_pc.channelMask = channelMask
+		? channelMask
+		: DirectSoundChannelMaskForOutput((int)wfx->nChannels, 0); // speaker_layout で並べ替えない（PCM 順＝標準マスク）
+	g_pc.downmix = FALSE;
+
+	// 2ch 以下: PCM
+	if (wfx->nChannels <= 2) {
+		WAVEFORMATEX fmt = *wfx;
+		fmt.wFormatTag = WAVE_FORMAT_PCM;
+		fmt.wBitsPerSample = 16;
+		fmt.nBlockAlign = (WORD)(fmt.nChannels * fmt.wBitsPerSample / 8);
+		fmt.nAvgBytesPerSec = fmt.nSamplesPerSec * fmt.nBlockAlign;
+		fmt.cbSize = 0;
+		if (tryCreate(&fmt, FALSE) || tryCreate(&fmt, TRUE))
+			return TRUE;
+		g_pc.ds->Release(); g_pc.ds = NULL;
+		return FALSE;
+	}
+
+	// 多ch: WAVEFORMATEXTENSIBLE で 5.1/7.1 をそのまま再生（ダウンミックスしない）
+	WAVEFORMATEXTENSIBLE wfex = {};
+	wfex.Format.wFormatTag = WAVE_FORMAT_EXTENSIBLE;
+	wfex.Format.nChannels = wfx->nChannels;
+	wfex.Format.nSamplesPerSec = wfx->nSamplesPerSec;
+	wfex.Format.wBitsPerSample = 16;
+	wfex.Format.nBlockAlign = (WORD)(wfex.Format.nChannels * 2);
+	wfex.Format.nAvgBytesPerSec = wfex.Format.nSamplesPerSec * wfex.Format.nBlockAlign;
+	wfex.Format.cbSize = sizeof(WAVEFORMATEXTENSIBLE) - sizeof(WAVEFORMATEX);
+	wfex.Samples.wValidBitsPerSample = 16;
+	wfex.dwChannelMask = g_pc.channelMask;
+	wfex.SubFormat = kSubtypePcm;
+	// 先にプライマリ非変更で作成。ダメならプライマリ合わせ→最後に stereo
+	if (tryCreate(&wfex.Format, FALSE) || tryCreate(&wfex.Format, TRUE))
+		return TRUE;
+
+	if (!allowDownmix) {
+		g_pc.ds->Release(); g_pc.ds = NULL;
+		return FALSE;
+	}
+	WAVEFORMATEX stereo = {};
+	stereo.wFormatTag = WAVE_FORMAT_PCM;
+	stereo.nChannels = 2;
+	stereo.nSamplesPerSec = wfx->nSamplesPerSec;
+	stereo.wBitsPerSample = 16;
+	stereo.nBlockAlign = 4;
+	stereo.nAvgBytesPerSec = stereo.nSamplesPerSec * stereo.nBlockAlign;
+	stereo.cbSize = 0;
+	if (!tryCreate(&stereo, FALSE) && !tryCreate(&stereo, TRUE)) {
+		g_pc.ds->Release(); g_pc.ds = NULL;
+		return FALSE;
+	}
+	g_pc.downmix = TRUE;
 	return TRUE;
 }
 
@@ -6433,7 +7479,10 @@ int DougaPitchCorrect_GetLatencyMs()
 	if (bps == 0) return (int)kDougaPcPrebufferMs;
 	int ms = (int)((aheadBytes * 1000ull) / bps);
 	if (ms < (int)kDougaPcPrebufferMs) ms = (int)kDougaPcPrebufferMs;
-	if (ms > (int)kDougaPcMaxAheadMs + 40) ms = (int)kDougaPcMaxAheadMs + 40;
+	const int maxMs = (g_pc.channels > 2)
+		? (int)kDougaPcMaxAheadMsMulti + 40
+		: (int)kDougaPcMaxAheadMs + 40;
+	if (ms > maxMs) ms = maxMs;
 	return ms;
 }
 
@@ -6481,16 +7530,24 @@ void DougaPitchCorrect_OnSeek()
 
 	DougaPcStopDsOutsideCallback(); // inCallback==0 まで待ってから DS Stop
 
+	LONGLONG pos = 0;
+	if (pMediaSeeking)
+		pMediaSeeking->GetCurrentPosition(&pos);
+
 	EnterCriticalSection(&g_pc.cs);
 	if (g_pc.shifter)
 		g_pc.shifter->reset();
+	g_pc.pcmQ.clear();
 	g_pc.endFlushed = FALSE;
 	g_pc.draining = FALSE;
 	g_pc.drainAheadBytes = 0;
 	g_pc.writePosValid = FALSE;
 	g_pc.dsRunning = FALSE;
 	g_pc.prebufferBytes = 0;
-	g_pc.lastPcmTick = GetTickCount();
+	g_pc.startTick = GetTickCount();
+	g_pc.lastPcmTick = g_pc.startTick;
+	g_pc.dropUntilTick = g_pc.startTick + 50;
+	g_pc.dropBeforeSec = (double)pos / 10000000.0;
 	InterlockedExchange(&g_pc.eqNeedReset, 1);
 	g_pc.playing = TRUE;
 	LeaveCriticalSection(&g_pc.cs);
@@ -6499,6 +7556,7 @@ void DougaPitchCorrect_OnSeek()
 void DougaPitchCorrect_Poll()
 {
 	if (!g_pc.installed || !g_pc.csInit) return;
+	DougaPcDrainQueue();
 	// UI スレッドをブロックしない
 	if (!TryEnterCriticalSection(&g_pc.cs))
 		return;
@@ -6511,22 +7569,22 @@ void DougaPitchCorrect_Poll()
 	BOOL doStop = FALSE;
 
 	if (gap >= kDougaPcGapFlushMs && g_pc.dsRunning) {
-		// UI では重い flush をしない。ギャップ後は残響ループ防止のため停止のみ。
+		if (g_pc.startTick != 0 && (now - g_pc.startTick) < kDougaPcStartGraceMs) {
+			LeaveCriticalSection(&g_pc.cs);
+			return;
+		}
 		if (!g_pc.draining) {
 			g_pc.draining = TRUE;
 			g_pc.drainTick = now;
 		}
 		const DWORD since = now - g_pc.drainTick;
-		// 0.75x でも末尾が二度鳴らないよう、短めに止める
 		if (since >= 200)
 			doStop = TRUE;
 	}
 	LeaveCriticalSection(&g_pc.cs);
 
-	if (doStop) {
+	if (doStop)
 		DougaPcStopDsOutsideCallback();
-		OutputDebugStringW(L"[DougaPitch] DS stopped after PCM gap (EOS)\n");
-	}
 }
 
 void DougaPitchCorrect_SetPlaybackRate(double rate)
@@ -6566,8 +7624,12 @@ void DougaPitchCorrect_SetPlaybackRate(double rate)
 
 void DougaPitchCorrect_Shutdown()
 {
-	if (!g_pc.csInit && !g_pc.installed && !g_pc.dsb && !g_pc.grabber)
+	if (!g_pc.csInit && !g_pc.installed && !g_pc.dsb && !g_pc.grabber) {
+		DougaHangTrace(L"PitchShutdown:idle");
 		return;
+	}
+
+	InterlockedExchange(&g_pc.shuttingDown, 1);
 
 	ISampleGrabber* grab = NULL;
 	IDirectSoundBuffer* dsb = NULL;
@@ -6576,6 +7638,7 @@ void DougaPitchCorrect_Shutdown()
 	IBaseFilter* grabberF = NULL;
 	IBaseFilter* nullF = NULL;
 	IBaseFilter* oldRenderer = NULL;
+	// graph ポインタは保持しない（Shutdown で RemoveFilter しないため未使用）
 
 	if (g_pc.csInit)
 		EnterCriticalSection(&g_pc.cs);
@@ -6591,25 +7654,43 @@ void DougaPitchCorrect_Shutdown()
 	grabberF = g_pc.grabberF; g_pc.grabberF = NULL;
 	nullF = g_pc.nullF; g_pc.nullF = NULL;
 	oldRenderer = g_pc.oldRenderer; g_pc.oldRenderer = NULL;
+	g_pc.graph = NULL;
 	g_pc.inFlat.clear();
 	g_pc.outFlat.clear();
+	g_pc.pcmQ.clear();
 	g_pc.rate = 1.0;
 	g_pc.writePosValid = FALSE;
+	g_pc.downmix = FALSE;
+	g_pc.srcChannels = 0;
+	g_pc.srcBlockAlign = 0;
+	g_pc.srcBits = 0;
+	g_pc.srcFloat = FALSE;
+	g_pc.channelMask = 0;
+	g_pc.startTick = 0;
+	g_pc.dropBeforeSec = 0.0;
+	g_pc.dropUntilTick = 0;
+	g_pc.downmixBuf.clear();
 	if (g_pc.csInit)
 		LeaveCriticalSection(&g_pc.cs);
 
-	// コールバック終了を待つ（CS 外）。SetCallback(NULL) は完了待ちするため CS 保持禁止。
+	DougaHangTrace(L"PitchShutdown:enter");
 	DougaPcWaitCallbackGone();
 	if (grab) {
 		grab->SetCallback(NULL, 0);
 		grab->Release();
 	}
 	if (dsb) {
+		DougaHangTrace(L"PitchShutdown:dsb Stop");
+		dsb->SetVolume(DSBVOLUME_MIN);
 		dsb->Stop();
+		dsb->SetCurrentPosition(0);
 		dsb->Release();
 	}
 	if (ds) ds->Release();
 	if (shifter) delete shifter;
+	// Grabber/Null はグラフから外さない。外すと音声ピン欠落のまま ffd+EVR の
+	// MediaControl::Stop が返らなくなる（片田舎停止で ColdReset:Stop 固まり）。
+	// 破棄は ColdReset の Nuke に任せる。
 	if (grabberF) grabberF->Release();
 	if (nullF) nullF->Release();
 	if (oldRenderer) oldRenderer->Release();
@@ -6622,10 +7703,18 @@ void DougaPitchCorrect_Shutdown()
 		DeleteCriticalSection(&g_pc.cs);
 		g_pc.csInit = FALSE;
 	}
+	InterlockedExchange(&g_pc.shuttingDown, 0);
+	DougaHangTrace(L"PitchShutdown:leave");
 }
 
 BOOL DougaPitchCorrect_Install(IGraphBuilder* graph, HWND hwndOwner)
 {
+#if !DOUGA_PITCHCORRECT_ENABLE
+	UNREFERENCED_PARAMETER(graph);
+	UNREFERENCED_PARAMETER(hwndOwner);
+	DougaHangTrace(L"PitchInstall:DISABLED for verify");
+	return FALSE;
+#else
 	DougaPitchCorrect_Shutdown();
 	if (!graph || mode != -2) return FALSE;
 
@@ -6669,12 +7758,14 @@ BOOL DougaPitchCorrect_Install(IGraphBuilder* graph, HWND hwndOwner)
 	mtWant.formattype = FORMAT_WaveFormatEx;
 	grab->SetMediaType(&mtWant);
 	grab->SetOneShot(FALSE);
-	grab->SetBufferSamples(TRUE);
+	grab->SetBufferSamples(TRUE); // BufferCB 必須
 
 	// グラフ停止中を想定（plays2 は Run 前）
 	BOOL rewired = FALSE;
+	DougaHangTrace(L"PitchInstall:Disconnect:begin");
 	hr = renIn->Disconnect();
 	hr = upOut->Disconnect();
+	DougaHangTrace(L"PitchInstall:RemoveFilter renderer");
 	hr = graph->RemoveFilter(renderer);
 	hr = graph->AddFilter(grabF, L"Douga Pitch Grabber");
 	hr = graph->AddFilter(nullF, L"Douga Pitch Null");
@@ -6697,10 +7788,8 @@ BOOL DougaPitchCorrect_Install(IGraphBuilder* graph, HWND hwndOwner)
 			graph->AddFilter(renderer, L"Default DirectSound Device");
 			IPin* rin = NULL;
 			DougaPcGetPin(renderer, PINDIR_INPUT, &rin);
-			if (rin && upOut) {
-				if (FAILED(graph->ConnectDirect(upOut, rin, NULL)))
-					graph->Connect(upOut, rin);
-			}
+			if (rin && upOut)
+				graph->ConnectDirect(upOut, rin, NULL);
 			if (rin) rin->Release();
 		}
 		if (nullF) { nullF->Release(); nullF = NULL; }
@@ -6715,16 +7804,16 @@ BOOL DougaPitchCorrect_Install(IGraphBuilder* graph, HWND hwndOwner)
 		return FALSE;
 	}
 	hr = graph->ConnectDirect(upOut, grabIn, NULL);
-	if (FAILED(hr)) hr = graph->Connect(upOut, grabIn);
 	if (FAILED(hr)) {
-		CString msg; msg.Format(L"[DougaPitch] Connect upstream->grabber failed 0x%08X\n", hr);
+		CString msg; msg.Format(L"PitchInstall:upstream->grabber fail 0x%08X", (unsigned)hr);
+		DougaHangTrace((LPCWSTR)msg);
 		failCleanup(msg);
 		return FALSE;
 	}
 	hr = graph->ConnectDirect(grabOut, nullIn, NULL);
-	if (FAILED(hr)) hr = graph->Connect(grabOut, nullIn);
 	if (FAILED(hr)) {
-		CString msg; msg.Format(L"[DougaPitch] Connect grabber->null failed 0x%08X\n", hr);
+		CString msg; msg.Format(L"PitchInstall:grabber->null fail 0x%08X", (unsigned)hr);
+		DougaHangTrace((LPCWSTR)msg);
 		failCleanup(msg);
 		return FALSE;
 	}
@@ -6736,6 +7825,8 @@ BOOL DougaPitchCorrect_Install(IGraphBuilder* graph, HWND hwndOwner)
 
 	AM_MEDIA_TYPE mt = {};
 	WAVEFORMATEX wfx = {};
+	DWORD chMask = 0;
+	BOOL srcFloat = FALSE;
 	wfx.wFormatTag = WAVE_FORMAT_PCM;
 	wfx.nChannels = 2;
 	wfx.nSamplesPerSec = 44100;
@@ -6746,18 +7837,18 @@ BOOL DougaPitchCorrect_Install(IGraphBuilder* graph, HWND hwndOwner)
 		if (mt.formattype == FORMAT_WaveFormatEx && mt.pbFormat && mt.cbFormat >= sizeof(WAVEFORMATEX)) {
 			WAVEFORMATEX* pwf = (WAVEFORMATEX*)mt.pbFormat;
 			wfx = *pwf;
+			const WAVEFORMATEXTENSIBLE* we = NULL;
 			if (wfx.wFormatTag == WAVE_FORMAT_EXTENSIBLE && mt.cbFormat >= sizeof(WAVEFORMATEXTENSIBLE)) {
-				WAVEFORMATEXTENSIBLE* we = (WAVEFORMATEXTENSIBLE*)mt.pbFormat;
+				we = (const WAVEFORMATEXTENSIBLE*)mt.pbFormat;
 				wfx = we->Format;
-				wfx.wFormatTag = WAVE_FORMAT_PCM;
+				chMask = we->dwChannelMask;
 			}
+			srcFloat = DougaPcIsIeeeFloatWfx(&wfx, we);
 		}
 		DougaPcFreeMediaType(mt);
 	}
-	if (wfx.wBitsPerSample != 16) {
-		CString msg; msg.Format(L"[DougaPitch] unexpected bits=%u (need 16)\n", wfx.wBitsPerSample);
-		OutputDebugStringW(msg);
-	}
+	if (chMask == 0)
+		chMask = DirectSoundChannelMaskForOutput((int)wfx.nChannels, 0);
 
 	InitializeCriticalSection(&g_pc.cs);
 	g_pc.csInit = TRUE;
@@ -6765,7 +7856,8 @@ BOOL DougaPitchCorrect_Install(IGraphBuilder* graph, HWND hwndOwner)
 	g_pc.dsCsInit = TRUE;
 	g_pc.rate = 1.0;
 	g_pc.refCb = 1;
-	if (!DougaPcCreateDs(hwndOwner, &wfx)) {
+	if (!DougaPcCreateDs(hwndOwner, &wfx, chMask, TRUE)) {
+		DougaHangTrace(L"PitchInstall:CreateDs FAILED");
 		DeleteCriticalSection(&g_pc.dsCs);
 		g_pc.dsCsInit = FALSE;
 		DeleteCriticalSection(&g_pc.cs);
@@ -6789,10 +7881,8 @@ BOOL DougaPitchCorrect_Install(IGraphBuilder* graph, HWND hwndOwner)
 		graph->AddFilter(renderer, L"Default DirectSound Device");
 		IPin* rin = NULL;
 		DougaPcGetPin(renderer, PINDIR_INPUT, &rin);
-		if (rin && upstream) {
-			if (FAILED(graph->ConnectDirect(upstream, rin, NULL)))
-				graph->Connect(upstream, rin);
-		}
+		if (rin && upstream)
+			graph->ConnectDirect(upstream, rin, NULL);
 		if (rin) rin->Release();
 		if (upstream) upstream->Release();
 		renderer->Release();
@@ -6800,10 +7890,15 @@ BOOL DougaPitchCorrect_Install(IGraphBuilder* graph, HWND hwndOwner)
 		return FALSE;
 	}
 
+	g_pc.graph = graph;
 	g_pc.grabberF = grabF;
 	g_pc.nullF = nullF;
 	g_pc.oldRenderer = renderer; // 所有して stops で Release
 	g_pc.grabber = grab;
+	g_pc.srcFloat = srcFloat;
+	if (g_pc.srcBits <= 0)
+		g_pc.srcBits = (int)wfx.wBitsPerSample;
+	DougaPcAttachSystemClock(graph);
 	InterlockedExchange(&g_pc.refCb, 1);
 	grab->SetCallback(&g_pcCb, 1); // BufferCB
 	g_pc.installed = TRUE;
@@ -6812,12 +7907,17 @@ BOOL DougaPitchCorrect_Install(IGraphBuilder* graph, HWND hwndOwner)
 	g_pc.endFlushed = FALSE;
 	g_pc.draining = FALSE;
 	g_pc.drainAheadBytes = 0;
-	g_pc.lastPcmTick = GetTickCount();
+	g_pc.dropUntilTick = 0;
+	g_pc.dropBeforeSec = 0.0;
+	g_pc.pcmQ.clear();
+	g_pc.startTick = GetTickCount();
+	g_pc.lastPcmTick = g_pc.startTick;
 	DougaPcApplyVolume_NoLock(savedata.dsvol);
 	DougaPcSilenceAll_NoLock();
 	// Play はプリバッファ後。Stretcher は非 1.0x 到達時に生成
 	OutputDebugStringW(L"[DougaPitch] installed OK\n");
 	return TRUE;
+#endif
 }
 
 static LONG s_dougaRateTempoGate = 0;
@@ -7933,9 +9033,8 @@ void CDouga::OnPaint()
 		dcc.BitBlt(0,0,GetSystemMetrics(SM_CXSCREEN),GetSystemMetrics(SM_CYSCREEN),&dc,0,0,SRCCOPY);
 		dd2=0;
 	}
-	if(ev){
+	if (ev && Vdc)
 		Vdc->RepaintVideo();
-	}
 
 	// 描画用メッセージとして CFrameWnd::OnPaint() を呼び出してはいけません
 }
@@ -8392,9 +9491,6 @@ void CDouga::OnDougaMenuSubOff()
 				iam->Enable(idx, 0);
 		}
 	}
-
-	if (pGraphBuilder)
-		ConnectSubtitleWithDirectVobSub(pGraphBuilder);
 
 	if (pMediaSeeking) {
 		REFERENCE_TIME pos = 0;

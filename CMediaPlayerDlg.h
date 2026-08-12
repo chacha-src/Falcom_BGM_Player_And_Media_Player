@@ -475,6 +475,7 @@ protected:
 	afx_msg void OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar);
 	afx_msg void OnPrev();
 	afx_msg void OnPlay();
+	afx_msg LRESULT OnResumePrompt(WPARAM, LPARAM);
 	afx_msg void OnPauseBtn();
 	afx_msg void OnStopBtn();
 	afx_msg void OnNext();

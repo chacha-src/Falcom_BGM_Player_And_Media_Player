@@ -1125,6 +1125,7 @@ BEGIN_MESSAGE_MAP(CMediaPlayerDlg, CCustomBlurDialogExBase)
 	ON_WM_HSCROLL()
 	ON_BN_CLICKED(IDC_MP_PREV, &CMediaPlayerDlg::OnPrev)
 	ON_BN_CLICKED(IDC_MP_PLAY, &CMediaPlayerDlg::OnPlay)
+	ON_MESSAGE(WM_OGG_RESUME_PROMPT, &CMediaPlayerDlg::OnResumePrompt)
 	ON_BN_CLICKED(IDC_MP_PAUSE, &CMediaPlayerDlg::OnPauseBtn)
 	ON_BN_CLICKED(IDC_MP_STOP, &CMediaPlayerDlg::OnStopBtn)
 	ON_BN_CLICKED(IDC_MP_NEXT, &CMediaPlayerDlg::OnNext)
@@ -2229,6 +2230,10 @@ BOOL CMediaPlayerDlg::PreCreateWindow(CREATESTRUCT& cs)
 
 BOOL CMediaPlayerDlg::RelayPreTranslateMessage(MSG* pMsg)
 {
+	// 途中再生確認中は Space/Enter を再生に流さない（確認ダイアログが前面ならここへ来ない）
+	if (OggIsResumePromptActive() && pMsg
+		&& pMsg->message >= WM_KEYFIRST && pMsg->message <= WM_KEYLAST)
+		return TRUE;
 	// 子ボタン上の右クリックは親 OnRButtonUp に届かない → ここでクイックメニュー。
 	auto relayBtn = [&](CWnd& btn, void (CMediaPlayerDlg::*fn)(CPoint)) -> BOOL {
 		if (!btn.GetSafeHwnd()) return FALSE;
@@ -4460,6 +4465,16 @@ void CMediaPlayerDlg::OnTimer(UINT_PTR nIDEvent)
 void CMediaPlayerDlg::OnTimer(UINT nIDEvent)
 #endif
 {
+	if (nIDEvent == IDT_OGG_RESUME_PROMPT) {
+		KillTimer(IDT_OGG_RESUME_PROMPT);
+		OggRunResumePrompt();
+		return;
+	}
+	if (nIDEvent == IDT_OGG_RESUME_RESTART) {
+		KillTimer(IDT_OGG_RESUME_RESTART);
+		RequestPlaybackRestart(NULL);
+		return;
+	}
 	if (nIDEvent == 1) {
 		// 低速: テキスト/リスト/シーク/音量を同期(変化時のみ更新)
 		SyncFromMain();
@@ -5926,6 +5941,8 @@ static void MP_PlayIndex(int idx)
 		mp->ClearWaveOverview();
 	}
 	MpPushPlayHistory(pl->pc[idx].fol, pl->pc[idx].name);
+	if (!OggPrepareResumeBeforePlayback(pl->pc[idx].fol))
+		return;
 	if (og && ::IsWindow(og->GetSafeHwnd()))
 		RequestPlaybackRestart(og->GetSafeHwnd());  // 再生(再演奏)
 }
@@ -5938,6 +5955,12 @@ void CMediaPlayerDlg::OnPrev()
 void CMediaPlayerDlg::OnNext()
 {
 	MpTaskbarNextTrack();
+}
+
+LRESULT CMediaPlayerDlg::OnResumePrompt(WPARAM, LPARAM)
+{
+	OggRunResumePrompt();
+	return 0;
 }
 
 void CMediaPlayerDlg::OnPlay()

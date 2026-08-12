@@ -5526,7 +5526,91 @@ static void equaliserBankUnlocked(void* data, int len, BOOL reset) {
 	float harmonicScale = ba.isChiptune ? 0.00f : 1.0f;
 	float diffusionScale = ba.isChiptune ? 0.55f : 1.0f;
 
-	// 出力用サンプルバッファ (最大約40ブロック分)
+	// ============================================================
+	// 多ch (5.1/7.1): L/R バスに潰すとセンター（台詞）が消える。
+	// 各チャンネルを独立に処理して同じスロットへ書き戻す（順序・マスク維持）。
+	// ============================================================
+	if (wavchannel > 2) {
+		unsigned char* pRaw = (unsigned char*)processData;
+		const int bytesPerSample = wavsam_depth / 8;
+		const int numSamples = processLen / (bytesPerSample * wavchannel);
+		float harmonicAmount = (density - 100.0f) / 100.0f;
+
+		for (int i = 0; i < numSamples; i++) {
+			for (int ch = 0; ch < wavchannel; ch++) {
+				if (ch >= MAX_CH) continue;
+
+				float inSample = 0.0f;
+				int offset = (i * wavchannel + ch) * bytesPerSample;
+				if (wavsam_depth == 16)
+					inSample = *((short*)(pRaw + offset)) / 32768.0f;
+				else if (wavsam_depth == 24) {
+					int val = pRaw[offset] | (pRaw[offset + 1] << 8) | ((signed char)pRaw[offset + 2] << 16);
+					inSample = val / 8388608.0f;
+				}
+				else if (wavsam_depth == 32)
+					inSample = *((int*)(pRaw + offset)) / 2147483648.0f;
+				else
+					inSample = (pRaw[offset] - 128) / 128.0f;
+
+				float signal = inSample * (effectiveMasterGain * eqHeadroomGain);
+				ChannelState* cs = &g_channels[g_eqCur][ch];
+				for (int b = 0; b < EQ_BANDS; b++)
+					signal = ProcessBiquad(&cs->eqFilters[b], signal);
+				signal = ProcessBiquad(&cs->clarityFilter, signal);
+				signal = ProcessBiquad(&cs->bassBalanceFilter, signal);
+				signal = ProcessBiquad(&cs->trebleBalanceFilter, signal);
+				signal = ProcessBiquad(&cs->densityFilter1, signal);
+				signal = ProcessBiquad(&cs->densityFilter2, signal);
+				if (harmonicScale > 0.0f && fabs(harmonicAmount) > 0.01f) {
+					float harmonic = signal * signal * signal * harmonicAmount * 0.30f * harmonicScale;
+					cs->harmonicState = cs->harmonicState * 0.95f + harmonic * 0.05f;
+					signal += cs->harmonicState;
+				}
+				signal *= eqMakeupGain;
+				const float extBoostGain = GetExternalBoostGain();
+				if (extBoostGain != 1.0f)
+					signal *= extBoostGain;
+				if (signal > 0.97f) signal = 0.97f;
+				if (signal < -0.97f) signal = -0.97f;
+
+				if (wavsam_depth == 16) {
+					int32_t v = (int32_t)roundf(signal * 32768.0f);
+					if (v > 32767) v = 32767; if (v < -32768) v = -32768;
+					*((short*)(pRaw + offset)) = (short)v;
+				}
+				else if (wavsam_depth == 24) {
+					int32_t v = (int32_t)roundf(signal * 8388608.0f);
+					if (v > 8388607) v = 8388607; if (v < -8388608) v = -8388608;
+					pRaw[offset] = v & 0xFF;
+					pRaw[offset + 1] = (v >> 8) & 0xFF;
+					pRaw[offset + 2] = (v >> 16) & 0xFF;
+				}
+				else if (wavsam_depth == 32)
+					*((int*)(pRaw + offset)) = (int)(signal * 2147483647.0f);
+				else
+					pRaw[offset] = (unsigned char)(signal * 127.0f + 128.0f);
+			}
+		}
+
+		if (needsResampling) {
+			ResampleDown(processData, processLen, data, originalLen, 44100, originalRate, wavchannel, wavsam_depth);
+			free(tempBuffer);
+		}
+		{
+			void* outPtr = data;
+			int outLen = originalLen;
+			if (!needsResampling) {
+				outPtr = processData;
+				outLen = processLen;
+			}
+			ProAudio_ApplyXfadeIn(outPtr, outLen, originalRate, wavsam_depth, wavchannel);
+			ProAudio_PushTailPcm(outPtr, outLen, originalRate, wavsam_depth, wavchannel);
+		}
+		return;
+	}
+
+	// 出力用サンプルバッファ (最大約40ブロック分) — stereo/mono 専用
 	EnsureEqSampleBuffers(g_eqCur);
 	float* leftSamples = g_eqLeftSamples[g_eqCur];
 	float* rightSamples = g_eqRightSamples[g_eqCur];
