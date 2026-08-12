@@ -100,6 +100,9 @@ public:
 	ID3D11Texture2D* m_texTip;
 	ID3D11ShaderResourceView* m_srvTip;
 	int m_tipW, m_tipH;
+	ID3D11Texture2D* m_texBadge;
+	ID3D11ShaderResourceView* m_srvBadge;
+	int m_badgeW, m_badgeH;
 
 	ID3D11SamplerState* m_sampLin;
 	ID3D11SamplerState* m_sampPoint;
@@ -119,6 +122,8 @@ public:
 	void ReleaseClearTexture();
 	BOOL BakeTipTexture(const wchar_t* text);
 	void ReleaseTipTexture();
+	BOOL BakeBadgeTexture(const wchar_t* text);
+	void ReleaseBadgeTexture();
 
 protected:
 	afx_msg void OnPaint();
@@ -323,6 +328,7 @@ public:
 	int m_mapBakeDirty;
 	int m_mapToggle;
 	int m_overviewFloorHeld;
+	CStringW m_mapBadgeText;
 };
 
 void OpenSoft3DMazeModeless(CWnd*);

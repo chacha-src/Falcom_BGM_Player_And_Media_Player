@@ -425,7 +425,7 @@ CS3mView::CS3mView()
 	, m_psSsr(NULL), m_psDof(NULL), m_psFinal(NULL), m_ilPatch(NULL), m_ilSolid(NULL), m_ilHud(NULL)
 	, m_cbFrame(NULL), m_vbDyn(NULL), m_vbHud(NULL), m_vbDynBytes(6*1024*1024), m_vbHudBytes(512*1024)
 	, m_texEnv(NULL), m_srvEnv(NULL)
-	, m_texClear(NULL), m_srvClear(NULL), m_clearTexW(0), m_clearTexH(0), m_texMap(NULL), m_srvMap(NULL), m_texTip(NULL), m_srvTip(NULL), m_tipW(0), m_tipH(0), m_sampLin(NULL), m_sampPoint(NULL), m_sampCmp(NULL)
+	, m_texClear(NULL), m_srvClear(NULL), m_clearTexW(0), m_clearTexH(0), m_texMap(NULL), m_srvMap(NULL), m_texTip(NULL), m_srvTip(NULL), m_tipW(0), m_tipH(0), m_texBadge(NULL), m_srvBadge(NULL), m_badgeW(0), m_badgeH(0), m_sampLin(NULL), m_sampPoint(NULL), m_sampCmp(NULL)
 	, m_rsSolid(NULL), m_rsShadow(NULL), m_dssWrite(NULL), m_dssRead(NULL), m_dssOff(NULL), m_bsOpaque(NULL), m_bsAlpha(NULL)
 	, m_bsAdd(NULL), m_dragging(0), m_dragTurnAcc(0)
 {
@@ -689,6 +689,54 @@ BOOL CS3mView::ResizeDx(int w,int h)
 void CS3mView::PresentFrame(){if(m_swap&&m_ready)m_swap->Present(0,0);}
 void CS3mView::ReleaseClearTexture(){S3M_RELEASE(m_srvClear);S3M_RELEASE(m_texClear);m_clearTexW=m_clearTexH=0;}
 void CS3mView::ReleaseTipTexture(){S3M_RELEASE(m_srvTip);S3M_RELEASE(m_texTip);m_tipW=m_tipH=0;}
+void CS3mView::ReleaseBadgeTexture(){S3M_RELEASE(m_srvBadge);S3M_RELEASE(m_texBadge);m_badgeW=m_badgeH=0;}
+
+BOOL CS3mView::BakeBadgeTexture(const wchar_t* text)
+{
+	if (!m_dev || !text) return FALSE;
+	ReleaseBadgeTexture();
+	const int w = 220, h = 36;
+	BITMAPINFO bi = {};
+	bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+	bi.bmiHeader.biWidth = w;
+	bi.bmiHeader.biHeight = -h;
+	bi.bmiHeader.biPlanes = 1;
+	bi.bmiHeader.biBitCount = 32;
+	bi.bmiHeader.biCompression = BI_RGB;
+	void* bits = NULL;
+	HDC dc = CreateCompatibleDC(NULL);
+	HBITMAP bm = CreateDIBSection(dc, &bi, DIB_RGB_COLORS, &bits, NULL, 0);
+	HGDIOBJ old = SelectObject(dc, bm);
+	memset(bits, 0, w * h * 4);
+	{
+		Gdiplus::Graphics g(dc);
+		g.SetTextRenderingHint(Gdiplus::TextRenderingHintAntiAlias);
+		g.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
+		Gdiplus::SolidBrush bg(Gdiplus::Color(170, 6, 8, 14));
+		g.FillRectangle(&bg, 0, 0, w, h);
+		Gdiplus::FontFamily ff(L"Segoe UI");
+		Gdiplus::Font font(&ff, 15.f, Gdiplus::FontStyleBold, Gdiplus::UnitPixel);
+		Gdiplus::StringFormat sf;
+		sf.SetAlignment(Gdiplus::StringAlignmentCenter);
+		sf.SetLineAlignment(Gdiplus::StringAlignmentCenter);
+		Gdiplus::SolidBrush sh(Gdiplus::Color(180, 0, 0, 0));
+		Gdiplus::SolidBrush fg(Gdiplus::Color(240, 235, 240, 250));
+		Gdiplus::RectF r(2.f, 1.f, (Gdiplus::REAL)(w - 2), (Gdiplus::REAL)(h - 2));
+		g.DrawString(text, -1, &font, r, &sf, &sh);
+		r.X -= 1.f; r.Y -= 1.f;
+		g.DrawString(text, -1, &font, r, &sf, &fg);
+	}
+	D3D11_TEXTURE2D_DESC d = {};
+	d.Width = w; d.Height = h; d.MipLevels = 1; d.ArraySize = 1;
+	d.Format = DXGI_FORMAT_B8G8R8A8_UNORM; d.SampleDesc.Count = 1;
+	d.Usage = D3D11_USAGE_IMMUTABLE; d.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+	D3D11_SUBRESOURCE_DATA sd = { bits, (UINT)w * 4, 0 };
+	HRESULT hr = m_dev->CreateTexture2D(&d, &sd, &m_texBadge);
+	if (SUCCEEDED(hr)) hr = m_dev->CreateShaderResourceView(m_texBadge, NULL, &m_srvBadge);
+	SelectObject(dc, old); DeleteObject(bm); DeleteDC(dc);
+	m_badgeW = w; m_badgeH = h;
+	return SUCCEEDED(hr);
+}
 
 BOOL CS3mView::BakeClearTexture(const wchar_t* text,float alpha)
 {
@@ -748,7 +796,7 @@ BOOL CS3mView::BakeTipTexture(const wchar_t* text)
 void CS3mView::ReleaseDx()
 {
 	m_ready=FALSE;if(m_imm){m_imm->ClearState();m_imm->Flush();}
-	ReleaseClearTexture();ReleaseTipTexture();S3M_RELEASE(m_srvMap);S3M_RELEASE(m_texMap);S3M_RELEASE(m_srvEnv);S3M_RELEASE(m_texEnv);
+	ReleaseClearTexture();ReleaseTipTexture();ReleaseBadgeTexture();S3M_RELEASE(m_srvMap);S3M_RELEASE(m_texMap);S3M_RELEASE(m_srvEnv);S3M_RELEASE(m_texEnv);
 	for(int i=0;i<S3M_THEME_N;i++){S3M_RELEASE(m_srvFloor[i]);S3M_RELEASE(m_texFloor[i]);S3M_RELEASE(m_srvBrick[i]);S3M_RELEASE(m_texBrick[i]);}
 	S3M_RELEASE(m_bsAdd);S3M_RELEASE(m_bsAlpha);S3M_RELEASE(m_bsOpaque);S3M_RELEASE(m_dssOff);S3M_RELEASE(m_dssRead);S3M_RELEASE(m_dssWrite);S3M_RELEASE(m_rsShadow);S3M_RELEASE(m_rsSolid);S3M_RELEASE(m_sampCmp);S3M_RELEASE(m_sampPoint);S3M_RELEASE(m_sampLin);
 	S3M_RELEASE(m_vbHud);S3M_RELEASE(m_vbDyn);S3M_RELEASE(m_cbFrame);S3M_RELEASE(m_ilHud);S3M_RELEASE(m_ilSolid);S3M_RELEASE(m_ilPatch);
@@ -1123,10 +1171,12 @@ void CSoft3DMazeDlg::SetSizeToUi(int n)
 	s.Format(_T("%d"), n);
 	if (!m_size.GetSafeHwnd())
 		return;
+	// OWNERDRAW の DROPDOWN は描画が GetWindowText 依存 → 編集欄を先に同期
 	m_size.SetWindowText(s);
-	CComboBox& cb = m_size;
-	const int found = cb.FindStringExact(-1, s);
-	cb.SetCurSel(found == CB_ERR ? -1 : found);
+	// FindStringExact は物理 index。CCustomComboBox::SetCurSel は論理 index なので基底を使う
+	const int found = m_size.FindStringExact(-1, s);
+	m_size.CComboBox::SetCurSel(found == CB_ERR ? -1 : found);
+	m_size.Invalidate(FALSE);
 }
 
 int CSoft3DMazeDlg::ReadBasementsFromUi()
@@ -2315,7 +2365,10 @@ void CSoft3DMazeDlg::RenderScene()
 	auto patch=[&](float x0,float y0,float z0,float x1,float y1,float z1,float x2,float y2,float z2,float x3,float y3,float z3,float nx,float ny,float nz,float u0,float v0,float u1,float v1,float r,float g,float b,float a){
 		const float cx=(x0+x1+x2+x3)*.25f,cy=(y0+y1+y2+y3)*.25f,cz=(z0+z1+z2+z3)*.25f;
 		if(nx*(ex-cx)+ny*(eyeY-cy)+nz*(ez-cz)<=0.f)return; // 背面カリング
-		const int N=3;for(int j=0;j<N;j++)for(int i=0;i<N;i++){
+		// CPU 細分化は近い壁だけ（遠い壁まで N=3 だと大マップで頂点バッファが床・壁で溢れる）
+		const float dx=cx-ex,dz=cz-ez;const float dist2=dx*dx+dz*dz;
+		const int N=(dist2>14.f*14.f)?1:((dist2>7.f*7.f)?2:3);
+		for(int j=0;j<N;j++)for(int i=0;i<N;i++){
 			float su0=(float)i/N,su1=(float)(i+1)/N,sv0=(float)j/N,sv1=(float)(j+1)/N;
 			auto L=[&](float u,float vv,float& X,float& Y,float& Z){float ax=x0+(x1-x0)*u,ay=y0+(y1-y0)*u,az=z0+(z1-z0)*u;float bx=x3+(x2-x3)*u,by=y3+(y2-y3)*u,bz=z3+(z2-z3)*u;X=ax+(bx-ax)*vv;Y=ay+(by-ay)*vv;Z=az+(bz-az)*vv;};
 			float p00x,p00y,p00z,p10x,p10y,p10z,p11x,p11y,p11z,p01x,p01y,p01z;L(su0,sv0,p00x,p00y,p00z);L(su1,sv0,p10x,p10y,p10z);L(su1,sv1,p11x,p11y,p11z);L(su0,sv1,p01x,p01y,p01z);
@@ -2323,7 +2376,7 @@ void CSoft3DMazeDlg::RenderScene()
 			patch1(p00x,p00y,p00z,p10x,p10y,p10z,p11x,p11y,p11z,p01x,p01y,p01z,nx,ny,nz,uu0,vv0,uu1,vv1,r,g,b,a);
 		}
 	};
-	// 通路立方体（低い箱）
+	// 通路立方体（低い箱）— 階段など厚みが必要なとき用
 	auto passCube=[&](float x0,float z0,float x1,float z1,float y0,float y1,float r,float g,float b,float a){
 		quad(x0,y1,z0,x1,y1,z0,x1,y1,z1,x0,y1,z1,0,1,0,r,g,b,a);
 		quad(x0,y0,z1,x1,y0,z1,x1,y0,z0,x0,y0,z0,0,-1,0,r*.7f,g*.7f,b*.7f,a);
@@ -2332,7 +2385,8 @@ void CSoft3DMazeDlg::RenderScene()
 		quad(x0,y0,z0,x1,y0,z0,x1,y1,z0,x0,y1,z0,0,0,-1,r,g,b,a);
 		quad(x1,y0,z1,x0,y0,z1,x0,y1,z1,x1,y1,z1,0,0,1,r,g,b,a);
 	};
-	const float wallH=1.20f,passH=0.08f,rad=zFar; // 遠クリップまで走査。画面外はNDCで落とす（距離では落とさない）
+	const float wallH=1.20f,passH=0.08f,drawDist=28.f,rad=drawDist+2.f;
+	// 遠クリップ相当までNDCでは落とさないが、頂点溢れ防止のため走査半径は drawDist に制限
 	const int ix0=max(0,WorldToGridAxis(ex-rad)-1),ix1=min(m_n-1,WorldToGridAxis(ex+rad)+1);
 	const int iz0=max(0,WorldToGridAxis(ez-rad)-1),iz1=min(m_n-1,WorldToGridAxis(ez+rad)+1);
 	auto cellX0=[&](int x)->float{return AxisOrigin(x);};
@@ -2341,7 +2395,7 @@ void CSoft3DMazeDlg::RenderScene()
 	auto cellD=[&](int z)->float{return AxisSpan(z);};
 	auto cellCX=[&](int x)->float{return AxisOrigin(x)+AxisSpan(x)*.5f;};
 	auto cellCZ=[&](int z)->float{return AxisOrigin(z)+AxisSpan(z)*.5f;};
-	// NDC: 画面外XYは描画しない。カメラ後方は除外。奥行き(Z)では落とさない
+	// NDC: 画面外XYは描画しない。カメラ後方は除外。奥行きは drawDist まで（それ以上は頂点バッファが床で埋まる）
 	auto projectNdc=[&](float wx,float wy,float wz,float& nx,float& ny,float& nz,float& cw)->BOOL{
 		const float cx=wx*vpMat.m[0]+wy*vpMat.m[4]+wz*vpMat.m[8]+vpMat.m[12];
 		const float cy=wx*vpMat.m[1]+wy*vpMat.m[5]+wz*vpMat.m[9]+vpMat.m[13];
@@ -2351,6 +2405,10 @@ void CSoft3DMazeDlg::RenderScene()
 		const float iw=1.f/cw;nx=cx*iw;ny=cy*iw;nz=cz*iw;return TRUE;
 	};
 	auto vis=[&](int x,int z)->BOOL{
+		const float cxw=cellCX(x),czw=cellCZ(z);
+		const float dx=cxw-ex,dz=czw-ez;
+		const float lzv=dx*fx+dz*fz;
+		if(lzv<-3.f||lzv>drawDist)return FALSE;
 		const float x0=cellX0(x),x1=x0+cellW(x),z0=cellZ0(z),z1=z0+cellD(z);
 		const float ys[2]={0.f,wallH};
 		const float xs[2]={x0,x1},zs[2]={z0,z1};
@@ -2363,10 +2421,10 @@ void CSoft3DMazeDlg::RenderScene()
 			if(nx<minX)minX=nx;if(nx>maxX)maxX=nx;
 			if(ny<minY)minY=ny;if(ny>maxY)maxY=ny;
 		}
-		if(inFront==0)return FALSE; // 完全にカメラ後方
-		const float m=.20f; // セル端・テッセ余裕
-		if(maxX<-1.f-m||minX>1.f+m||maxY<-1.f-m||minY>1.f+m)return FALSE; // 画面外
-		return TRUE; // NDC.z / 距離ではカリングしない（Z軸上は描画）
+		if(inFront==0)return FALSE;
+		const float m=.20f;
+		if(maxX<-1.f-m||minX>1.f+m||maxY<-1.f-m||minY>1.f+m)return FALSE;
+		return TRUE;
 	};
 	auto wallVid=[&](int x,int z)->int{return ((x*17+z*31+x*z)&15);};
 	auto atlasUV=[&](int vid,float& u0,float& v0,float& u1,float& v1){u0=(float)(vid&3)*.25f;v0=(float)(vid>>2)*.25f;u1=u0+.25f;v1=v0+.25f;};
@@ -2385,32 +2443,11 @@ void CSoft3DMazeDlg::RenderScene()
 		else if(th==2){r=.55f*k;g=.45f*k;b=.38f*k;}
 		else{r=.38f*k;g=.30f*k;b=.32f*k;}
 	};
-	// 指定階の床・壁・（地下のみ）天井。上り階段マスは天井に穴を空けて上階を垣間見る
+	// 指定階の壁を先に、床・天井を後に積む（頂点溢れ時も壁が残る）
 	auto emitLayer=[&](int f,float yBias,int ax0,int ax1,int az0,int az1,BOOL fullVis){
 		if(f<0||f>=m_nFloors||!m_grids[f]||nLay>=4)return;
 		Layer& L=layers[nLay];
 		L.th=ThemeOfFloor(f);
-		L.fBeg=nFloor+nWall+nTrans;
-		phase=0;
-		UINT f0=nFloor;
-		for(int z=az0;z<=az1;z++)for(int x=ax0;x<=ax1;x++){
-			BYTE c=CellAtF(f,x,z);if(c==CELL_WALL||c==CELL_WINDOW)continue;
-			if(fullVis&&!vis(x,z))continue;
-			float x0=cellX0(x),x1=x0+cellW(x),z0=cellZ0(z),z1=z0+cellD(z);
-			// 床：階段マスは穴
-			if(c!=CELL_STAIRS_DOWN&&c!=CELL_STAIRS_UP){
-				float k=VisitAtF(f,x,z)?1.f:.82f;float r,g,b;themeFloorRGB(L.th,k,r,g,b);
-				float a=isMirrorFloor(x,z)?1.12f:1.f;
-				passCube(x0,z0,x1,z1,yBias,yBias+passH,r,g,b,a);
-			}
-			// 地下の天井（上り階段の穴だけ開ける）
-			if(f>0&&c!=CELL_STAIRS_UP){
-				float cr,cg,cb;themeFloorRGB(L.th,.42f,cr,cg,cb);
-				const float yc=yBias+wallH;
-				quad(x0,yc,z0,x0,yc,z1,x1,yc,z1,x1,yc,z0,0,-1,0,cr,cg,cb,1.f);
-			}
-		}
-		L.nF=nFloor-f0;
 		L.wBeg=nFloor+nWall+nTrans;
 		phase=1;
 		UINT w0=nWall;
@@ -2438,6 +2475,28 @@ void CSoft3DMazeDlg::RenderScene()
 			face(x0,y1,z0,x1,y1,z0,x1,y1,z1,x0,y1,z1,0,1,0);
 		}
 		L.nW=nWall-w0;
+		L.fBeg=nFloor+nWall+nTrans;
+		phase=0;
+		UINT f0=nFloor;
+		for(int z=az0;z<=az1;z++)for(int x=ax0;x<=ax1;x++){
+			BYTE c=CellAtF(f,x,z);if(c==CELL_WALL||c==CELL_WINDOW)continue;
+			if(fullVis&&!vis(x,z))continue;
+			float x0=cellX0(x),x1=x0+cellW(x),z0=cellZ0(z),z1=z0+cellD(z);
+			// 床上面のみ（側面立方体は頂点を食い過ぎる）
+			if(c!=CELL_STAIRS_DOWN&&c!=CELL_STAIRS_UP){
+				float k=VisitAtF(f,x,z)?1.f:.82f;float r,g,b;themeFloorRGB(L.th,k,r,g,b);
+				float a=isMirrorFloor(x,z)?1.12f:1.f;
+				const float y1=yBias+passH;
+				quad(x0,y1,z0,x1,y1,z0,x1,y1,z1,x0,y1,z1,0,1,0,r,g,b,a);
+			}
+			// 地下の天井（上り階段の穴だけ開ける）
+			if(f>0&&c!=CELL_STAIRS_UP){
+				float cr,cg,cb;themeFloorRGB(L.th,.42f,cr,cg,cb);
+				const float yc=yBias+wallH;
+				quad(x0,yc,z0,x0,yc,z1,x1,yc,z1,x1,yc,z0,0,-1,0,cr,cg,cb,1.f);
+			}
+		}
+		L.nF=nFloor-f0;
 		nLay++;
 	};
 
@@ -2657,6 +2716,7 @@ void CSoft3DMazeDlg::RenderScene()
 	auto hp=[&](float px,float py,float r,float g,float b,float a){if(hn<maxH)hv[hn++]={(px/(float)w)*2.f-1.f,1.f-(py/(float)h)*2.f,r,g,b,a};};
 	auto hq=[&](float ax,float ay,float bx,float by,float cx,float cy,float dx,float dy,float r,float g,float b,float a){hp(ax,ay,r,g,b,a);hp(bx,by,r,g,b,a);hp(cx,cy,r,g,b,a);hp(ax,ay,r,g,b,a);hp(cx,cy,r,g,b,a);hp(dx,dy,r,g,b,a);};
 	const BOOL overview=IsOverviewActive();
+	float badgeX=0,badgeY=0,badgeMaxW=120.f;int badgeFloor=m_floor;BOOL drawBadge=FALSE;
 	if(overview){
 		hq(0,0,(float)w,0,(float)w,(float)h,0,(float)h,.02f,.03f,.05f,.58f);
 	}else if(savedata.s3m_show_map){
@@ -2712,6 +2772,7 @@ void CSoft3DMazeDlg::RenderScene()
 		float nx,ny,xx,xy;WorldToMap(ex+fx,ez+fz,nx,ny);WorldToMap(ex+rx,ez+rz,xx,xy);
 		float ccx=min(R-8.f,max(L+8.f,mcx+pad-12)),ccy=min(B-8.f,max(T+8.f,mcy-pad+12));
 		hp(ccx+nx*8,ccy+ny*8,1,.2f,.2f,1);hp(ccx-nx*2-xx*4,ccy-ny*2-xy*4,1,.2f,.2f,1);hp(ccx-nx*2+xx*4,ccy-ny*2+xy*4,1,.2f,.2f,1);
+		drawBadge=TRUE;badgeFloor=m_floor;badgeX=L+6.f;badgeY=T+5.f;badgeMaxW=max(72.f,(R-L)*.55f);
 	}
 	if(m_clearScreenA>.01f)hq(0,0,(float)w,0,(float)w,(float)h,0,(float)h,0,0,0,m_clearScreenA);
 	else if(m_floorScreenA>.01f)hq(0,0,(float)w,0,(float)w,(float)h,0,(float)h,0,0,0,m_floorScreenA);
@@ -2774,7 +2835,28 @@ void CSoft3DMazeDlg::RenderScene()
 		hq(ox-2,oy-2,ox+side+2,oy-2,ox+side+2,oy+side+2,ox-2,oy+side+2,.9f,.92f,1.f,.22f);
 		if(hn&&SUCCEEDED(dc->Map(m_view.m_vbHud,0,D3D11_MAP_WRITE_DISCARD,0,&map))){memcpy(map.pData,hv,hn*sizeof(S3MHudVertex));dc->Unmap(m_view.m_vbHud,0);UINT hs=sizeof(S3MHudVertex);dc->IASetVertexBuffers(0,1,&m_view.m_vbHud,&hs,&off);dc->RSSetViewports(1,&vp);dc->IASetInputLayout(m_view.m_ilHud);dc->VSSetShader(m_view.m_vsHud,NULL,0);dc->PSSetShader(m_view.m_psHud,NULL,0);dc->OMSetBlendState(m_view.m_bsAlpha,NULL,~0u);dc->Draw(hn,0);}
 		dc->RSSetViewports(1,&vp);
+		drawBadge=TRUE;badgeFloor=bakeFloor;badgeX=ox+12.f;badgeY=oy+12.f;badgeMaxW=max(100.f,side*.28f);
 	}
+	auto blitFloorBadge=[&](){
+		if(!drawBadge||!m_view.m_ready)return;
+		const CStringW lab(FloorLabel(badgeFloor));
+		if(lab!=m_mapBadgeText||!m_view.m_srvBadge)
+			m_view.BakeBadgeTexture((LPCWSTR)lab),m_mapBadgeText=lab;
+		if(!m_view.m_srvBadge||m_view.m_badgeW<=0)return;
+		float tw=(float)m_view.m_badgeW,th=(float)m_view.m_badgeH;
+		if(tw>badgeMaxW){const float s=badgeMaxW/tw;tw*=s;th*=s;}
+		D3D11_VIEWPORT bvp={badgeX,badgeY,tw,th,0,1};
+		cb.misc.z=99.f;
+		if(SUCCEEDED(dc->Map(m_view.m_cbFrame,0,D3D11_MAP_WRITE_DISCARD,0,&map))){memcpy(map.pData,&cb,sizeof(cb));dc->Unmap(m_view.m_cbFrame,0);}
+		dc->RSSetViewports(1,&bvp);
+		dc->IASetInputLayout(NULL);dc->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+		dc->VSSetShader(m_view.m_vsPost,NULL,0);dc->PSSetShader(m_view.m_psFinal,NULL,0);
+		dc->PSSetConstantBuffers(0,1,&m_view.m_cbFrame);dc->PSSetSamplers(0,1,&m_view.m_sampLin);
+		dc->PSSetShaderResources(0,1,&m_view.m_srvBadge);dc->OMSetBlendState(m_view.m_bsAlpha,NULL,~0u);dc->Draw(3,0);
+		dc->PSSetShaderResources(0,1,ns);
+		dc->RSSetViewports(1,&vp);
+	};
+	blitFloorBadge();
 	if(m_view.m_srvTip&&m_view.m_tipW>0&&m_view.m_tipH>0){
 		const float maxW=(float)w*.48f;
 		float tw=(float)m_view.m_tipW,th=(float)m_view.m_tipH;
@@ -3002,7 +3084,20 @@ BOOL CSoft3DMazeDlg::OnInitDialog()
 void CSoft3DMazeDlg::OnGen() { GenerateMaze(); }
 void CSoft3DMazeDlg::OnSizeChanged()
 {
-	SetSizeToUi(ReadSizeFromUi());
+	// CBN_SELCHANGE 時点では編集欄がまだ旧値のことがある → リスト選択を優先
+	// GetCurSel は論理 index、GetLBText は物理 index（取り違えると常に先頭付近の値になる）
+	int n = -1;
+	if (m_size.GetSafeHwnd()) {
+		const int phys = m_size.GetCurSelPhysical();
+		if (phys != CB_ERR) {
+			CString s;
+			m_size.GetLBText(phys, s);
+			n = _ttoi(s);
+		}
+	}
+	if (n < S3M_MIN)
+		n = ReadSizeFromUi();
+	SetSizeToUi(n);
 	PersistUi();
 }
 void CSoft3DMazeDlg::OnSizeEditChange()
