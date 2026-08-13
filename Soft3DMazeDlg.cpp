@@ -1617,40 +1617,42 @@ void CSoft3DMazeDlg::LayoutAll()
 	int capH = CCC_GetCustomCaptionHeight(m_hWnd);
 	if (capH < 0) capH = 0;
 
-	const int m = 8;
-	const int rowH = 24;
-	const int btnH = 22;
-	int y = capH + 6;
+	const int m = 10;
+	const int rowH = 36;
+	const int btnH = 32;
+	const int comboH = 32;
+	const int labH = 22;
+	int y = capH + 8;
 
 	if (m_sizeL.GetSafeHwnd())
-		m_sizeL.SetWindowPos(NULL, m, y + 3, 40, 14, SWP_NOZORDER | SWP_NOACTIVATE);
+		m_sizeL.SetWindowPos(NULL, m, y + 6, 56, labH, SWP_NOZORDER | SWP_NOACTIVATE);
 	if (m_size.GetSafeHwnd())
-		m_size.SetWindowPos(NULL, m + 42, y, 88, 200, SWP_NOZORDER | SWP_NOACTIVATE);
+		m_size.SetWindowPos(NULL, m + 58, y, 110, 280, SWP_NOZORDER | SWP_NOACTIVATE);
 	if (m_baseL.GetSafeHwnd())
-		m_baseL.SetWindowPos(NULL, m + 136, y + 3, 28, 14, SWP_NOZORDER | SWP_NOACTIVATE);
+		m_baseL.SetWindowPos(NULL, m + 176, y + 6, 40, labH, SWP_NOZORDER | SWP_NOACTIVATE);
 	if (m_base.GetSafeHwnd())
-		m_base.SetWindowPos(NULL, m + 166, y, 88, 200, SWP_NOZORDER | SWP_NOACTIVATE);
+		m_base.SetWindowPos(NULL, m + 218, y, 120, 280, SWP_NOZORDER | SWP_NOACTIVATE);
 	if (m_diffL.GetSafeHwnd())
-		m_diffL.SetWindowPos(NULL, m + 260, y + 3, 36, 14, SWP_NOZORDER | SWP_NOACTIVATE);
+		m_diffL.SetWindowPos(NULL, m + 346, y + 6, 52, labH, SWP_NOZORDER | SWP_NOACTIVATE);
 	if (m_diff.GetSafeHwnd())
-		m_diff.SetWindowPos(NULL, m + 298, y, 100, 200, SWP_NOZORDER | SWP_NOACTIVATE);
+		m_diff.SetWindowPos(NULL, m + 400, y, 130, 280, SWP_NOZORDER | SWP_NOACTIVATE);
 	if (m_gen.GetSafeHwnd())
-		m_gen.SetWindowPos(NULL, m + 406, y - 1, 72, 26, SWP_NOZORDER | SWP_NOACTIVATE);
+		m_gen.SetWindowPos(NULL, m + 540, y - 1, 96, comboH + 2, SWP_NOZORDER | SWP_NOACTIVATE);
 	if (m_navi.GetSafeHwnd())
-		m_navi.SetWindowPos(NULL, m + 486, y - 1, 56, 26, SWP_NOZORDER | SWP_NOACTIVATE);
+		m_navi.SetWindowPos(NULL, m + 644, y - 1, 80, comboH + 2, SWP_NOZORDER | SWP_NOACTIVATE);
 	if (m_hint.GetSafeHwnd())
-		m_hint.SetWindowPos(NULL, m + 550, y + 3, max(40, cx - (m + 550) - m), 14, SWP_NOZORDER | SWP_NOACTIVATE);
-	y += rowH + 2;
+		m_hint.SetWindowPos(NULL, m + 732, y + 6, max(40, cx - (m + 732) - m), labH, SWP_NOZORDER | SWP_NOACTIVATE);
+	y += rowH + 6;
 
 	const int btnY = cy - m - btnH;
-	int viewBottom = btnY - 8;
+	int viewBottom = btnY - 10;
 	if (viewBottom < y + 80) viewBottom = y + 80;
 	m_view.SetWindowPos(NULL, m, y, max(40, cx - 2 * m), max(40, viewBottom - y), SWP_NOZORDER | SWP_NOACTIVATE);
 
 	if (m_close.GetSafeHwnd())
-		m_close.SetWindowPos(NULL, cx - m - 80, btnY, 80, btnH, SWP_NOZORDER | SWP_NOACTIVATE);
+		m_close.SetWindowPos(NULL, cx - m - 100, btnY, 100, btnH, SWP_NOZORDER | SWP_NOACTIVATE);
 	if (m_status.GetSafeHwnd())
-		m_status.SetWindowPos(NULL, m, btnY + 3, max(40, cx - m - 80 - 12 - m), 16, SWP_NOZORDER | SWP_NOACTIVATE);
+		m_status.SetWindowPos(NULL, m, btnY + 6, max(40, cx - m - 100 - 14 - m), 20, SWP_NOZORDER | SWP_NOACTIVATE);
 
 	CCC_CaptionLayout(m_hWnd);
 	LayoutHelpBtn();
@@ -1819,7 +1821,51 @@ void CSoft3DMazeDlg::PersistUi()
 	if (savedata.s3m_zoom < 50 || savedata.s3m_zoom > 250) savedata.s3m_zoom = 100;
 	if (savedata.s3m_map_zoom < 50 || savedata.s3m_map_zoom > 400) savedata.s3m_map_zoom = 100;
 	if (savedata.s3m_difficulty < 0 || savedata.s3m_difficulty >= DIFF_COUNT) savedata.s3m_difficulty = DIFF_NORMAL;
+	PersistWindowRect();
 	MpPersistSavedataQuick();
+}
+
+void CSoft3DMazeDlg::PersistWindowRect()
+{
+	if (!GetSafeHwnd() || !IsWindowVisible() || IsIconic())
+		return;
+	WINDOWPLACEMENT wp = {};
+	wp.length = sizeof(wp);
+	if (!GetWindowPlacement(&wp))
+		return;
+	const RECT& r = wp.rcNormalPosition;
+	const int w = r.right - r.left;
+	const int h = r.bottom - r.top;
+	if (w < 320 || h < 240)
+		return;
+	savedata.s3m_win_x = r.left;
+	savedata.s3m_win_y = r.top;
+	savedata.s3m_win_w = w;
+	savedata.s3m_win_h = h;
+}
+
+void CSoft3DMazeDlg::ApplySavedWindowRect()
+{
+	if (!GetSafeHwnd())
+		return;
+	int w = savedata.s3m_win_w, h = savedata.s3m_win_h;
+	int x = savedata.s3m_win_x, y = savedata.s3m_win_y;
+	if (w < 480 || h < 360)
+		return;
+	RECT r = { x, y, x + w, y + h };
+	HMONITOR mon = MonitorFromRect(&r, MONITOR_DEFAULTTONEAREST);
+	MONITORINFO mi = {};
+	mi.cbSize = sizeof(mi);
+	if (mon && GetMonitorInfo(mon, &mi)) {
+		const RECT& wa = mi.rcWork;
+		if (w > wa.right - wa.left) w = wa.right - wa.left;
+		if (h > wa.bottom - wa.top) h = wa.bottom - wa.top;
+		if (x < wa.left) x = wa.left;
+		if (y < wa.top) y = wa.top;
+		if (x + w > wa.right) x = wa.right - w;
+		if (y + h > wa.bottom) y = wa.bottom - h;
+	}
+	SetWindowPos(NULL, x, y, w, h, SWP_NOZORDER | SWP_NOACTIVATE);
 }
 
 void CSoft3DMazeDlg::PersistRun()
@@ -6419,6 +6465,30 @@ BOOL CSoft3DMazeDlg::OnInitDialog()
 	m_close.SetAeroMode(FALSE);
 	m_view.SetAeroMode(FALSE);
 
+	if (!m_uiFont.GetSafeHandle()) {
+		LOGFONT lf = {};
+		lf.lfHeight = -18;
+		lf.lfWeight = FW_SEMIBOLD;
+		lf.lfCharSet = DEFAULT_CHARSET;
+		lf.lfQuality = CLEARTYPE_QUALITY;
+		_tcscpy_s(lf.lfFaceName, _T("Segoe UI"));
+		m_uiFont.CreateFontIndirect(&lf);
+	}
+	if (m_uiFont.GetSafeHandle()) {
+		CFont* pf = &m_uiFont;
+		if (m_sizeL.GetSafeHwnd()) m_sizeL.SetFont(pf);
+		if (m_baseL.GetSafeHwnd()) m_baseL.SetFont(pf);
+		if (m_diffL.GetSafeHwnd()) m_diffL.SetFont(pf);
+		if (m_hint.GetSafeHwnd()) m_hint.SetFont(pf);
+		if (m_status.GetSafeHwnd()) m_status.SetFont(pf);
+		if (m_size.GetSafeHwnd()) { m_size.SetFont(pf); m_size.SetItemHeight(-1, 28); m_size.SetItemHeight(0, 26); }
+		if (m_base.GetSafeHwnd()) { m_base.SetFont(pf); m_base.SetItemHeight(-1, 28); m_base.SetItemHeight(0, 26); }
+		if (m_diff.GetSafeHwnd()) { m_diff.SetFont(pf); m_diff.SetItemHeight(-1, 28); m_diff.SetItemHeight(0, 26); }
+		if (m_gen.GetSafeHwnd()) m_gen.SetFont(pf);
+		if (m_navi.GetSafeHwnd()) m_navi.SetFont(pf);
+		if (m_close.GetSafeHwnd()) m_close.SetFont(pf);
+	}
+
 	if (savedata.s3m_minimap < 8 || savedata.s3m_minimap > 16)
 		savedata.s3m_minimap = 10;
 	savedata.s3m_minimap = S3mClampMapSize(savedata.s3m_minimap);
@@ -6497,6 +6567,7 @@ BOOL CSoft3DMazeDlg::OnInitDialog()
 	}
 
 	CaptureAudioBaseline();
+	ApplySavedWindowRect();
 	LayoutAll();
 	if(!m_view.InitDx()){
 		MessageBox(LL14(L"DirectX 11 の初期化に失敗しました。",L"DirectX 11 initialization failed.",L"Échec de l'initialisation de DirectX 11.",L"Inizializzazione DirectX 11 non riuscita.",L"Error al iniciar DirectX 11.",L"DirectX 11 초기화에 실패했습니다.",L"DirectX 11 初始化失败。",L"فشل تهيئة DirectX 11.",L"Не удалось инициализировать DirectX 11.",L"DirectX 11 konnte nicht initialisiert werden.",L"Falha ao iniciar o DirectX 11.",L"Initialisatie van DirectX 11 mislukt.",L"Nie udało się zainicjować DirectX 11.",L"DirectX 11 başlatılamadı."),NULL,MB_OK|MB_ICONERROR);
@@ -6546,7 +6617,7 @@ BOOL CSoft3DMazeDlg::OnInitDialog()
 	}
 	m_lastTick = GetTickCount();
 	m_lastAutosave = m_lastTick;
-	SetTimer(S3M_TIMER, 8, NULL);
+	// 描画・更新は og の timerp（TheadLoop≈60Hz）経由。独自 SetTimer は使わない
 	return TRUE;
 }
 
@@ -6638,37 +6709,45 @@ void CSoft3DMazeDlg::OnContextMenu(CWnd* pWnd, CPoint point)
 	ShowContextMenu(sp);
 }
 
-void CSoft3DMazeDlg::OnTimer(UINT_PTR id)
+void CSoft3DMazeDlg::TickFrame()
 {
-	if (id == S3M_TIMER) {
-		const DWORD now = GetTickCount();
-		float dt = (float)(now - m_lastTick) * 0.001f;
-		m_lastTick = now;
-		if (dt < 0.f) dt = 0.f;
-		if (dt > 0.05f) dt = 0.05f;
-		TickClear(dt);
-		TickMove(dt);
-		RenderScene();
-		m_view.RequestRedraw();
-		// 大マップのフルセーブは数十MB。移動中は打たず、間隔もサイズで伸ばす
-		if (m_runDirty && !m_moving) {
-			DWORD interval = 4000;
-			if (m_n >= 200) {
-				const unsigned long long cells = (unsigned long long)m_n * (unsigned long long)m_n * (unsigned long long)max(1, m_nFloors);
-				interval = (DWORD)min(120000ull, max(8000ull, cells / 5000ull));
-			}
-			if ((now - m_lastAutosave) > interval)
-				PersistRun();
+	if (!GetSafeHwnd() || !m_view.m_ready)
+		return;
+	const DWORD now = GetTickCount();
+	float dt = (float)(now - m_lastTick) * 0.001f;
+	m_lastTick = now;
+	if (dt < 0.f) dt = 0.f;
+	if (dt > 0.05f) dt = 0.05f;
+	TickClear(dt);
+	TickMove(dt);
+	RenderScene();
+	m_view.RequestRedraw();
+	if (m_runDirty && !m_moving) {
+		DWORD interval = 4000;
+		if (m_n >= 200) {
+			const unsigned long long cells = (unsigned long long)m_n * (unsigned long long)m_n * (unsigned long long)max(1, m_nFloors);
+			interval = (DWORD)min(120000ull, max(8000ull, cells / 5000ull));
+		}
+		if ((now - m_lastAutosave) > interval) {
+			PersistRun();
+			m_lastAutosave = now;
 		}
 	}
+}
+
+void CSoft3DMazeDlg::OnTimer(UINT_PTR id)
+{
+	// 迷路フレームは Soft3DMazeOnTimerp → TickFrame。ここではアクリル等の基底タイマーのみ
 	CCustomBlurDialogBase::OnTimer(id);
 }
 
 void CSoft3DMazeDlg::OnSize(UINT nType, int cx, int cy)
 {
 	CCustomBlurDialogBase::OnSize(nType, cx, cy);
-	if (nType != SIZE_MINIMIZED)
+	if (nType != SIZE_MINIMIZED) {
 		LayoutAll();
+		PersistWindowRect();
+	}
 }
 
 void CSoft3DMazeDlg::OnShowWindow(BOOL bShow, UINT nStatus)
@@ -6680,7 +6759,6 @@ void CSoft3DMazeDlg::OnShowWindow(BOOL bShow, UINT nStatus)
 
 void CSoft3DMazeDlg::OnDestroy()
 {
-	KillTimer(S3M_TIMER);
 	PersistUi();
 	PersistRun();
 	RestoreAudioBaseline();
@@ -6736,4 +6814,13 @@ BOOL Soft3DMazePreTranslate(MSG* pMsg)
 	if (!IsSoft3DMazeOpen() || !pMsg || !g_s3m)
 		return FALSE;
 	return g_s3m->HandleAccelMessage(pMsg);
+}
+
+void Soft3DMazeOnTimerp()
+{
+	if (!g_s3m || !g_s3m->GetSafeHwnd() || !::IsWindow(g_s3m->GetSafeHwnd()))
+		return;
+	if (!g_s3m->IsWindowVisible() || g_s3m->IsIconic())
+		return;
+	g_s3m->TickFrame();
 }

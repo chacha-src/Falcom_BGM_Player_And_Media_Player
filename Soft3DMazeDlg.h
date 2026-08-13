@@ -174,7 +174,6 @@ public:
 	enum {
 		S3M_MAX = 3000,
 		S3M_MIN = 10,
-		S3M_TIMER = 96,
 		S3M_MAX_FLOORS = 4,
 		CELL_WALL = 1,
 		CELL_FLOOR = 0,
@@ -249,8 +248,11 @@ protected:
 	void LayoutHelpBtn();
 	void LayoutAll();
 	void PersistUi();
+	void PersistWindowRect();
+	void ApplySavedWindowRect();
 	void PersistRun();
 	BOOL LoadRun();
+	CFont m_uiFont;
 	void FreeGrid();
 	BOOL AllocGrid(int n, int nFloors);
 	void BindFloor(int f);
@@ -340,6 +342,7 @@ public:
 	BOOL EndMapPan();
 	BOOL IsMapPanning() const { return m_mapPanDrag != 0; }
 	void ClampMapPan(int viewW, int viewH, float side);
+	void TickFrame(); // timerp から呼ばれる 1フレーム更新＋描画
 	BOOL InputTurn(int dir) { return IsOverviewActive() || m_floorFx == FLOORFX_IN || m_portalFx != PORTALFX_IDLE ? FALSE : TryTurn(dir); }
 	BOOL InputStep(int mx, int mz) { return IsOverviewActive() || m_floorFx == FLOORFX_IN || m_portalFx != PORTALFX_IDLE ? FALSE : TryStep(mx, mz); }
 	void InputOverviewFloorDelta(int d) { OverviewFloorDelta(d); }
@@ -472,3 +475,4 @@ void CloseSoft3DMazeIfOpen();
 BOOL IsSoft3DMazeActive();
 BOOL IsSoft3DMazeOpen();
 BOOL Soft3DMazePreTranslate(MSG* pMsg);
+void Soft3DMazeOnTimerp();

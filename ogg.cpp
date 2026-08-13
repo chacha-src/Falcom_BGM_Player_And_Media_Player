@@ -1,4 +1,4 @@
-// ogg.cpp : アプリケーション用クラスの定義を行います。
+﻿// ogg.cpp : アプリケーション用クラスの定義を行います。
 //
 
 #include "stdafx.h"
@@ -537,6 +537,10 @@ BOOL COggApp::InitInstance()
 	savedata.s3m_zoom = 100;
 	savedata.s3m_map_zoom = 100;
 	savedata.s3m_difficulty = 2;
+	savedata.s3m_win_x = 0;
+	savedata.s3m_win_y = 0;
+	savedata.s3m_win_w = 0;
+	savedata.s3m_win_h = 0;
 	savedata.sm_mic_device[0] = 0;
 	savedata.sm_response = 1;
 	savedata.dig_cap_device[0] = 0;
@@ -1003,6 +1007,11 @@ BOOL COggApp::InitInstance()
 	if (datFileSize < (int)(offsetof(save, s3m_difficulty) + sizeof(savedata.s3m_difficulty))
 		|| savedata.s3m_difficulty < 0 || savedata.s3m_difficulty > 4)
 		savedata.s3m_difficulty = 2;
+	if (datFileSize < (int)(offsetof(save, s3m_win_h) + sizeof(savedata.s3m_win_h))
+		|| savedata.s3m_win_w < 320 || savedata.s3m_win_h < 240) {
+		savedata.s3m_win_x = savedata.s3m_win_y = 0;
+		savedata.s3m_win_w = savedata.s3m_win_h = 0;
+	}
 	if (datFileSize < (int)(offsetof(save, sm_response) + sizeof(savedata.sm_response))) {
 		savedata.sm_mic_device[0] = 0;
 		savedata.sm_response = 1;

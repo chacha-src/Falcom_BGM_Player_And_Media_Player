@@ -1,4 +1,4 @@
-// oggDlg.cpp : インプリメンテーション ファイル
+﻿// oggDlg.cpp : インプリメンテーション ファイル
 //
 //#define _DLL
 #include "stdafx.h"
@@ -21744,6 +21744,11 @@ void COggDlg::timerp()
 	if (g_oggUiThreadId != 0 && GetCurrentThreadId() != g_oggUiThreadId) {
 		COgg_RequestTimerp(this);
 		return;
+	}
+	// Soft3D迷路は再生停止中も回す（TheadLoop→timerp の VSYNC 相当）。playy 判定より前
+	{
+		extern void Soft3DMazeOnTimerp();
+		Soft3DMazeOnTimerp();
 	}
 	if (playy == 0)return;
 
