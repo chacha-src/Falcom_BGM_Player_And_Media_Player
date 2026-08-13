@@ -1624,24 +1624,44 @@ void CSoft3DMazeDlg::LayoutAll()
 	const int labH = 22;
 	int y = capH + 8;
 
+	// 基準幅（狭いときも下限）。広いほどコンボ／ボタンを横に伸ばす
+	const float baseW = 900.f;
+	const float sx = max(1.f, (float)(cx - 2 * m) / baseW);
+	auto sw = [&](int w)->int { return max(w, (int)((float)w * sx + .5f)); };
+
+	const int sizeLW = sw(56), sizeW = sw(110);
+	const int baseLW = sw(40), baseWgt = sw(120);
+	const int diffLW = sw(52), diffW = sw(130);
+	const int genW = sw(96), naviW = sw(80);
+	const int gap = max(6, (int)(8.f * sx + .5f));
+
+	int x = m;
 	if (m_sizeL.GetSafeHwnd())
-		m_sizeL.SetWindowPos(NULL, m, y + 6, 56, labH, SWP_NOZORDER | SWP_NOACTIVATE);
+		m_sizeL.SetWindowPos(NULL, x, y + 6, sizeLW, labH, SWP_NOZORDER | SWP_NOACTIVATE);
+	x += sizeLW + 2;
 	if (m_size.GetSafeHwnd())
-		m_size.SetWindowPos(NULL, m + 58, y, 110, 280, SWP_NOZORDER | SWP_NOACTIVATE);
+		m_size.SetWindowPos(NULL, x, y, sizeW, 280, SWP_NOZORDER | SWP_NOACTIVATE);
+	x += sizeW + gap;
 	if (m_baseL.GetSafeHwnd())
-		m_baseL.SetWindowPos(NULL, m + 176, y + 6, 40, labH, SWP_NOZORDER | SWP_NOACTIVATE);
+		m_baseL.SetWindowPos(NULL, x, y + 6, baseLW, labH, SWP_NOZORDER | SWP_NOACTIVATE);
+	x += baseLW + 2;
 	if (m_base.GetSafeHwnd())
-		m_base.SetWindowPos(NULL, m + 218, y, 120, 280, SWP_NOZORDER | SWP_NOACTIVATE);
+		m_base.SetWindowPos(NULL, x, y, baseWgt, 280, SWP_NOZORDER | SWP_NOACTIVATE);
+	x += baseWgt + gap;
 	if (m_diffL.GetSafeHwnd())
-		m_diffL.SetWindowPos(NULL, m + 346, y + 6, 52, labH, SWP_NOZORDER | SWP_NOACTIVATE);
+		m_diffL.SetWindowPos(NULL, x, y + 6, diffLW, labH, SWP_NOZORDER | SWP_NOACTIVATE);
+	x += diffLW + 2;
 	if (m_diff.GetSafeHwnd())
-		m_diff.SetWindowPos(NULL, m + 400, y, 130, 280, SWP_NOZORDER | SWP_NOACTIVATE);
+		m_diff.SetWindowPos(NULL, x, y, diffW, 280, SWP_NOZORDER | SWP_NOACTIVATE);
+	x += diffW + gap;
 	if (m_gen.GetSafeHwnd())
-		m_gen.SetWindowPos(NULL, m + 540, y - 1, 96, comboH + 2, SWP_NOZORDER | SWP_NOACTIVATE);
+		m_gen.SetWindowPos(NULL, x, y - 1, genW, comboH + 2, SWP_NOZORDER | SWP_NOACTIVATE);
+	x += genW + gap;
 	if (m_navi.GetSafeHwnd())
-		m_navi.SetWindowPos(NULL, m + 644, y - 1, 80, comboH + 2, SWP_NOZORDER | SWP_NOACTIVATE);
+		m_navi.SetWindowPos(NULL, x, y - 1, naviW, comboH + 2, SWP_NOZORDER | SWP_NOACTIVATE);
+	x += naviW + gap;
 	if (m_hint.GetSafeHwnd())
-		m_hint.SetWindowPos(NULL, m + 732, y + 6, max(40, cx - (m + 732) - m), labH, SWP_NOZORDER | SWP_NOACTIVATE);
+		m_hint.SetWindowPos(NULL, x, y + 6, max(40, cx - x - m), labH, SWP_NOZORDER | SWP_NOACTIVATE);
 	y += rowH + 6;
 
 	const int btnY = cy - m - btnH;
@@ -1649,10 +1669,32 @@ void CSoft3DMazeDlg::LayoutAll()
 	if (viewBottom < y + 80) viewBottom = y + 80;
 	m_view.SetWindowPos(NULL, m, y, max(40, cx - 2 * m), max(40, viewBottom - y), SWP_NOZORDER | SWP_NOACTIVATE);
 
+	const int closeW = sw(100);
 	if (m_close.GetSafeHwnd())
-		m_close.SetWindowPos(NULL, cx - m - 100, btnY, 100, btnH, SWP_NOZORDER | SWP_NOACTIVATE);
+		m_close.SetWindowPos(NULL, cx - m - closeW, btnY, closeW, btnH, SWP_NOZORDER | SWP_NOACTIVATE);
 	if (m_status.GetSafeHwnd())
-		m_status.SetWindowPos(NULL, m, btnY + 6, max(40, cx - m - 100 - 14 - m), 20, SWP_NOZORDER | SWP_NOACTIVATE);
+		m_status.SetWindowPos(NULL, m, btnY + 6, max(40, cx - m - closeW - 14 - m), 20, SWP_NOZORDER | SWP_NOACTIVATE);
+
+	// SetWindowPos で DROPDOWNLIST の選択が 0 に戻ることがある → savedata から復元
+	if (m_base.GetSafeHwnd()) {
+		int b = savedata.s3m_basements;
+		if (b < 0) b = 0;
+		if (b > S3M_MAX_FLOORS - 1) b = S3M_MAX_FLOORS - 1;
+		m_base.CComboBox::SetCurSel(b);
+	}
+	if (m_diff.GetSafeHwnd()) {
+		int d = savedata.s3m_difficulty;
+		if (d < 0) d = DIFF_NORMAL;
+		if (d >= DIFF_COUNT) d = DIFF_COUNT - 1;
+		m_diff.CComboBox::SetCurSel(d);
+	}
+	if (m_size.GetSafeHwnd() && savedata.s3m_size >= S3M_MIN) {
+		CString s;
+		s.Format(_T("%d"), savedata.s3m_size);
+		m_size.SetWindowText(s);
+		const int found = m_size.FindStringExact(-1, s);
+		m_size.CComboBox::SetCurSel(found == CB_ERR ? -1 : found);
+	}
 
 	CCC_CaptionLayout(m_hWnd);
 	LayoutHelpBtn();
@@ -1768,7 +1810,8 @@ int CSoft3DMazeDlg::ReadBasementsFromUi()
 {
 	int b = -1;
 	if (m_base.GetSafeHwnd()) {
-		const int sel = m_base.GetCurSel();
+		// 物理 index（全項目選択可）。論理 GetCurSel はリサイズ後にずれることがある
+		const int sel = m_base.CComboBox::GetCurSel();
 		if (sel != CB_ERR) b = sel;
 	}
 	if (b < 0) b = savedata.s3m_basements;
@@ -1783,14 +1826,14 @@ void CSoft3DMazeDlg::SetBasementsToUi(int b)
 	if (b > S3M_MAX_FLOORS - 1) b = S3M_MAX_FLOORS - 1;
 	savedata.s3m_basements = b;
 	if (m_base.GetSafeHwnd())
-		m_base.SetCurSel(b);
+		m_base.CComboBox::SetCurSel(b);
 }
 
 int CSoft3DMazeDlg::ReadDifficultyFromUi()
 {
 	int d = -1;
 	if (m_diff.GetSafeHwnd()) {
-		const int sel = m_diff.GetCurSel();
+		const int sel = m_diff.CComboBox::GetCurSel();
 		if (sel != CB_ERR) d = sel;
 	}
 	if (d < 0) d = savedata.s3m_difficulty;
@@ -1805,7 +1848,7 @@ void CSoft3DMazeDlg::SetDifficultyToUi(int d)
 	if (d >= DIFF_COUNT) d = DIFF_COUNT - 1;
 	savedata.s3m_difficulty = d;
 	if (m_diff.GetSafeHwnd())
-		m_diff.SetCurSel(d);
+		m_diff.CComboBox::SetCurSel(d);
 }
 
 void CSoft3DMazeDlg::PersistUi()
@@ -2985,11 +3028,22 @@ void CSoft3DMazeDlg::GenerateMazeWithSeed(DWORD seed, int forceSize)
 	EnsureGoalReachable();
 	// 鍵／扉：ゴール確定後に配置（鍵なしでは扉＝壁。鍵はスタート側の同階寄り通路へ）
 	{
-		int nDoors = max(0, m_n / 200 + m_nFloors - 1);
-		if (diff == DIFF_VERY_EASY) nDoors = 0;
-		else if (diff == DIFF_EASY) nDoors = max(0, nDoors / 2);
-		else if (diff >= DIFF_HARD) nDoors += max(0, m_nFloors - 1);
-		if (nDoors > 32) nDoors = 32;
+		// ベース：サイズ／階層で増やす（以前より多め）。超簡単はたまに1、他は難易度で上乗せ
+		int nDoors = max(0, m_n / 140 + m_nFloors);
+		if (diff == DIFF_VERY_EASY) {
+			m_rng = m_rng * 1664525u + 1013904223u;
+			const unsigned thr = (m_n >= 60) ? 50u : 35u; // 大マップほど出やすい／約35〜50%
+			nDoors = ((m_rng % 100u) < thr) ? 1 : 0;
+		} else if (diff == DIFF_EASY) {
+			nDoors = max(1, (nDoors * 3 + 2) / 4);
+		} else if (diff == DIFF_NORMAL) {
+			nDoors = max(1, nDoors + 1);
+		} else if (diff == DIFF_HARD) {
+			nDoors = nDoors + 1 + max(0, m_nFloors - 1);
+		} else { // VERY_HARD
+			nDoors = nDoors + 2 + max(0, m_nFloors);
+		}
+		if (nDoors > 40) nDoors = 40;
 		int sx = 1, sz = 1;
 		for (int z = 0; z < m_n; z++) for (int x = 0; x < m_n; x++)
 			if (CellAtF(0, x, z) == CELL_START) { sx = x; sz = z; }
@@ -3075,15 +3129,25 @@ void CSoft3DMazeDlg::GenerateMazeWithSeed(DWORD seed, int forceSize)
 			delete[] seenBits;
 			delete[] q;
 			delete[] dist;
-			// 鍵所持想定でゴール接続を再確認（扉で不通になった場合のみ付け替え）
-			{
-				const int kh = m_keysHeld;
-				m_keysHeld = 1000;
-				EnsureGoalReachable();
-				m_keysHeld = 0;
-				(void)kh;
-			}
 		}
+	}
+	// ゴール到達ルート必須：鍵所持想定で確認。不通なら扉・鍵を外して再保証
+	{
+		const int kh = m_keysHeld;
+		m_keysHeld = 1000;
+		if (!EnsureGoalReachable()) {
+			for (int f = 0; f < m_nFloors; f++) {
+				if (!m_grids[f]) continue;
+				for (int z = 0; z < m_n; z++) for (int x = 0; x < m_n; x++) {
+					const BYTE c = CellAtF(f, x, z);
+					if (c == CELL_KEY || c == CELL_DOOR)
+						CellF(f, x, z) = CELL_FLOOR;
+				}
+			}
+			EnsureGoalReachable();
+		}
+		m_keysHeld = 0;
+		(void)kh;
 	}
 	RefreshGoalCache();
 	RecountExploreStats();
@@ -3355,10 +3419,10 @@ struct S3mCompactBfs {
 	}
 };
 
-void CSoft3DMazeDlg::EnsureGoalReachable()
+BOOL CSoft3DMazeDlg::EnsureGoalReachable()
 {
 	if (m_n <= 0 || m_nFloors <= 0 || !m_grids[0])
-		return;
+		return FALSE;
 	auto isPass = [&](int x, int z) -> BOOL {
 		return ((x & 1) != 0 && (z & 1) != 0 && x > 0 && z > 0 && x < m_n - 1 && z < m_n - 1) ? TRUE : FALSE;
 	};
@@ -3382,12 +3446,12 @@ void CSoft3DMazeDlg::EnsureGoalReachable()
 
 	S3mCompactBfs bfs;
 	if (!bfs.Init(this))
-		return; // OOM 時は既存ゴールを壊さない
+		return FALSE; // OOM 時は既存ゴールを壊さない
 
 	if (gf >= 0) {
 		const int r = bfs.Reach(0, sx, sz, gf, gx, gz, NULL);
-		if (r == 1) { RefreshGoalCache(); return; }
-		if (r < 0) return;
+		if (r == 1) { RefreshGoalCache(); return TRUE; }
+		if (r < 0) return FALSE;
 	}
 
 	for (int f = 0; f < m_nFloors; f++) {
@@ -3401,6 +3465,12 @@ void CSoft3DMazeDlg::EnsureGoalReachable()
 		CellF(bestF, bestX, bestZ) = CELL_GOAL;
 	m_mapBakeDirty = 1;
 	RefreshGoalCache();
+	gx = m_goalX; gz = m_goalZ; gf = m_goalFloor;
+	if (gx < 0 || gz < 0 || gf < 0 || gf >= m_nFloors || !m_grids[gf]
+		|| CellAtF(gf, gx, gz) != CELL_GOAL)
+		return FALSE;
+	const int r2 = bfs.Reach(0, sx, sz, gf, gx, gz, NULL);
+	return (r2 == 1) ? TRUE : FALSE;
 }
 
 void CSoft3DMazeDlg::ClearNavPath()
@@ -6689,11 +6759,13 @@ void CSoft3DMazeDlg::OnSizeEditChange()
 }
 void CSoft3DMazeDlg::OnBaseChanged()
 {
-	// 次に生成する迷路へ反映（現在の迷路はそのまま）
+	savedata.s3m_basements = ReadBasementsFromUi();
 	PersistUi();
 }
 void CSoft3DMazeDlg::OnDiffChanged()
 {
+	// UI→savedata を先に確定（リサイズで選択が0に戻っても値が残る）
+	savedata.s3m_difficulty = ReadDifficultyFromUi();
 	PersistUi();
 }
 void CSoft3DMazeDlg::OnHelp() { ShowHelpSheet(); }

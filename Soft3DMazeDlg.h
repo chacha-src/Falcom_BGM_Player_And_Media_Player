@@ -302,7 +302,7 @@ protected:
 	void ResetPortalFx();
 	void BeginPortalWarp(int toX, int toZ);
 	void TickPortalFx(float dt);
-	void EnsureGoalReachable();
+	BOOL EnsureGoalReachable();
 	void ClearNavPath();
 	BOOL ComputeNavHint();
 	void UpdateNavProgress();
