@@ -8,6 +8,7 @@
 #include "oggDlg.h"
 #include "DatArchive.h"
 #include <math.h>
+#include <new>
 #include <gdiplus.h>
 #include <d3dcompiler.h>
 #include <dxgi1_2.h>
@@ -227,9 +228,21 @@ void CS3mHelpDlg::OnPaint()
 	legendRow(RGB(70, 130, 200),
 		LL14(L"床（訪問済み）", L"Floor (visited)", L"Sol (visité)", L"Visitato", L"Visitado", L"바닥(방문)", L"地板（已走）", L"Visited", L"Посещено", L"Besucht", L"Visitado", L"Bezocht", L"Odwiedzone", L"Gezildi"),
 		LL14(L"通ったマス。青く着色＋3Dでは半透明の板", L"Visited cells: blue tint; translucent plate in 3D", L"Cases visitées", L"Celle visitate", L"Celdas visitadas", L"방문 칸", L"走过的格子", L"Visited tint", L"Посещённые", L"Besuchte", L"Visitados", L"Bezocht", L"Odwiedzone", L"Gezilen"));
-	legendRow(RGB(140, 160, 185),
+	legendRow(RGB(170, 215, 245),
 		LL14(L"鏡床", L"Mirror floor", L"Sol miroir", L"Pavimento specchio", L"Suelo espejo", L"거울 바닥", L"镜面地板", L"Mirror floor", L"Зеркальный пол", L"Spiegelboden", L"Chão espelho", L"Spiegelvloer", L"Lustrzana podłoga", L"Ayna zemin"),
-		LL14(L"一部の床が鏡面反射（見た目のみ）", L"Some floors reflect (visual only)", L"Certains sols reflètent", L"Alcuni pavimenti riflettono", L"Algunos suelos reflejan", L"일부 바닥 반사(외형)", L"部分地板反射（外观）", L"Reflective floors", L"Отражение", L"Spiegelung", L"Reflexo", L"Reflectie", L"Odbicie", L"Yansıma"));
+		LL14(L"銀シアンの通路。歩ける。天井の雲／水滴を映す（地図では通常の床）", L"Silver-cyan path; walkable; reflects clouds/drips (normal floor on maps)", L"Passage miroir; reflète", L"Corridoio specchio", L"Pasillo espejo", L"은청 통로, 걸을 수 있음(지도는 일반)", L"银青通道，可走（地图为普通地板）", L"Walkable mirror floor", L"Проходимо", L"Begehbar", L"Andável", L"Begaanbaar", L"Przechodnie", L"Yürünür"));
+	legendRow(RGB(90, 170, 220),
+		LL14(L"鏡壁", L"Mirror wall", L"Mur miroir", L"Muro specchio", L"Pared espejo", L"거울 벽", L"镜面墙", L"Mirror wall", L"Зеркальная стена", L"Spiegelwand", L"Parede espelho", L"Spiegelmuur", L"Ściana lustrzana", L"Ayna duvar"),
+		LL14(L"銀シアンの壁。通れない。反射あり", L"Silver-cyan wall; blocked; reflective", L"Mur miroir; bloqué", L"Muro specchio; bloccato", L"Pared espejo; bloquea", L"은청 벽, 통과 불가·반사", L"银青墙，不可走，有反射", L"Blocked mirror", L"Непроходимо", L"Nicht begehbar", L"Bloqueia", L"Blokkeert", L"Nieprzechodnie", L"Geçilmez"));
+	legendRow(RGB(200, 90, 255),
+		LL14(L"ポータル", L"Portal", L"Portail", L"Portale", L"Portal", L"포털", L"传送门", L"Portal", L"Портал", L"Portal", L"Portal", L"Portaal", L"Portal", L"Portal"),
+		LL14(L"紫の輪。同階の対になるポータルへ瞬間移動", L"Purple ring; teleports to its paired portal on the same floor", L"Anneau violet; téléporte vers le portail jumelé", L"Anello viola; teletrasporto al portale gemello", L"Anillo violeta; teletransporta al portal pareja", L"보라 고리, 같은 층의 짝 포털로 이동", L"紫环，传送到同层配对门", L"Same-floor warp pair", L"Телепорт на той же этаж", L"Teleport auf dieselbe Etage", L"Teleporta no mesmo piso", L"Teleport op dezelfde verdieping", L"Teleport na to samo piętro", L"Aynı kata ışınlar"));
+	legendRow(RGB(255, 210, 70),
+		LL14(L"鍵", L"Key", L"Clé", L"Chiave", L"Llave", L"열쇠", L"钥匙", L"Key", L"Ключ", L"Schlüssel", L"Chave", L"Sleutel", L"Klucz", L"Anahtar"),
+		LL14(L"金〜黄緑。拾うと所持。扉を開けるために使う（1扉で1消費）", L"Gold–chartreuse; pick up to hold. Spends 1 to open a door", L"Or–vert; ramasser. 1 pour ouvrir une porte", L"Oro–verde; raccogli. 1 per una porta", L"Oro–verde; recoger. 1 por puerta", L"금~연두. 줍면 소지. 문 1개에 1개 소비", L"金～黄绿。拾取后持有。开一扇门消耗1把", L"Pick up; spends 1 per door", L"Поднять; 1 на дверь", L"Aufheben; 1 pro Tür", L"Pegar; 1 por porta", L"Oppakken; 1 per deur", L"Podnieś; 1 na drzwi", L"Al; kapı başına 1"));
+	legendRow(RGB(160, 120, 90),
+		LL14(L"扉", L"Door", L"Porte", L"Porta", L"Puerta", L"문", L"门", L"Door", L"Дверь", L"Tür", L"Porta", L"Deur", L"Drzwi", L"Kapı"),
+		LL14(L"金属の扉。鍵が無いと通れない。開くと床になり再入場可", L"Metal door; blocked without a key. Opens to floor (stays open)", L"Porte métallique; clé requise. Reste ouverte", L"Porta metallica; serve chiave. Resta aperta", L"Puerta metálica; necesita llave. Queda abierta", L"금속 문. 열쇠 없으면 통과 불가. 열리면 바닥", L"金属门。无钥匙不可过。打开后变地板", L"Needs key; stays open", L"Нужен ключ; остаётся открытой", L"Schlüssel nötig; bleibt offen", L"Precisa de chave; fica aberta", L"Sleutel nodig; blijft open", L"Potrzebny klucz; zostaje otwarte", L"Anahtar gerekir; açık kalır"));
 	legendRow(RGB(92, 62, 44),
 		LL14(L"壁", L"Wall", L"Mur", L"Muro", L"Pared", L"벽", L"墙", L"Wall", L"Стена", L"Wand", L"Parede", L"Muur", L"Ściana", L"Duvar"),
 		LL14(L"灰茶の箱。通れない。地図では太めの線で表示", L"Grey-brown boxes; blocked. Drawn thicker on maps", L"Boîtes; impassables", L"Scatole; bloccano", L"Cajas; bloquean", L"회색 상자, 통과 불가", L"灰盒，不可走", L"Blocked walls", L"Непроходимо", L"Nicht begehbar", L"Bloqueia", L"Blokkeert", L"Nieprzechodnie", L"Geçilmez"));
@@ -391,8 +404,8 @@ void CS3mHelpDlg::OnPaint()
 		L"'Kelder' voegt 1–3 verdiepingen toe. Oranje trappen omlaag, cyaan omhoog; doelverdieping hangt af van moeilijkheid.",
 		L"„Piwnica” dodaje 1–3 poziomy. Pomarańczowe schody w dół, cyjanowe w górę; piętro celu zależy od trudności.",
 		L"“Bodrum” 1–3 kat ekler. Turuncu merdiven aşağı, camgöbeği yukarı; hedef kat zorluğa göre değişir."));
-	line(LL14(L"難易度（超簡単〜超難しい）: 通路の広さ・広間・階段の本数・ゴールまでの3D距離に影響。難しいほど細い迷路・階段が多く上下往復し、ゴールは階をまたいだ遠い位置。アイテムは効果用なので多め。",
-		L"Difficulty (very easy–very hard): corridor width, rooms, stair count, and 3D path to the goal. Harder = thinner maze, more stairs (floor zigzags), farther multi-floor goal. Items stay plentiful for effects.",
+	line(LL14(L"難易度（超簡単〜超難しい）: 通路・広間（マップサイズ比例）・階段・ゴールへの別ルート数（普通は200マスごと×階層）に影響。難しいほど細くループ少・階段多。アイテムは効果用で多め。",
+		L"Difficulty (very easy–very hard): corridor width, rooms (scale with map size), stairs, alternate routes to the goal (Normal: +1 route per 200 cells × floors), and 3D path length. Harder = thinner maze, fewer loops, more stairs. Items stay plentiful.",
 		L"Difficulté : couloirs, salles, plus d'escaliers (va-et-vient) et but plus loin. Objets nombreux.",
 		L"Difficoltà: corridoi più stretti, più scale (su/giù) e traguardo lontano. Molti oggetti.",
 		L"Dificultad: pasillos estrechos, más escaleras (sube/baja) y meta lejana. Muchos objetos.",
@@ -405,6 +418,20 @@ void CS3mHelpDlg::OnPaint()
 		L"Harder: thinner maze, more stairs, multi-floor zigzags, plentiful items.",
 		L"Harder: thinner maze, more stairs, multi-floor zigzags, plentiful items.",
 		L"Harder: thinner maze, more stairs, multi-floor zigzags, plentiful items."));
+	line(LL14(L"鍵と扉: 難易度・サイズに応じて扉が置かれ、手前側に鍵がある。鍵を拾って扉を通る（1扉で鍵1消費）。ナビはゴール不通時に最寄りの鍵へ誘導する。",
+		L"Keys & doors: doors scale with size/difficulty; a key sits on the near side. Pick up a key to open a door (1 key each). Navi guides to the nearest key if the goal is locked.",
+		L"Clés et portes : selon taille/difficulté. Ramassez une clé pour ouvrir (1 par porte). Nav vers la clé si le but est bloqué.",
+		L"Chiavi e porte: secondo dimensione/difficoltà. Raccogli chiave per aprire (1 a porta). Navi verso la chiave se il traguardo è chiuso.",
+		L"Llaves y puertas: según tamaño/dificultad. Recoge llave para abrir (1 por puerta). Navi a la llave si la meta está cerrada.",
+		L"열쇠와 문: 크기·난이도에 따라 배치. 열쇠를 주워 문 개방(문당 1). 골이 막히면 내비는 가까운 열쇠로.",
+		L"钥匙与门：随尺寸/难度放置。拾钥匙开门（一扇一门）。终点被锁时导航指向最近钥匙。",
+		L"Keys & doors: pick up keys to open doors. Navi points to a key if the goal is locked.",
+		L"Ключи и двери: подберите ключ, чтобы открыть дверь. Нави ведёт к ключу, если цель закрыта.",
+		L"Schlüssel & Türen: Schlüssel aufheben zum Öffnen. Navi zeigt zum Schlüssel, wenn das Ziel versperrt ist.",
+		L"Chaves e portas: pegue chaves para abrir. Navi aponta à chave se o gol estiver trancado.",
+		L"Sleutels & deuren: pak sleutel om te openen. Navi wijst naar sleutel als doel geblokkeerd is.",
+		L"Klucze i drzwi: podnieś klucz, by otworzyć. Nawi wskazuje klucz, gdy cel jest zablokowany.",
+		L"Anahtar ve kapılar: kapıyı açmak için anahtar alın. Hedef kilitliyse navi anahtara yönlendirir."));
 	line(LL14(L"右クリック: リスタート / サイズ / ミニマップ / アイテム種類。進行は自動保存（再オープンで続きから）。",
 		L"Right-click: restart / size / minimap / item types. Progress auto-saves (resume on reopen).",
 		L"Clic droit : redémarrer / taille / minimap / objets. Progression auto-sauvegardée.",
@@ -516,6 +543,14 @@ static BOOL S3mIsTrapCell(BYTE c)
 {
 	return c >= CSoft3DMazeDlg::CELL_SLIME && c <= CSoft3DMazeDlg::CELL_DARK;
 }
+static BOOL S3mIsSolidWall(BYTE c)
+{
+	return c == CSoft3DMazeDlg::CELL_WALL
+		|| c == CSoft3DMazeDlg::CELL_WINDOW
+		|| c == CSoft3DMazeDlg::CELL_MIRROR_WALL;
+}
+static BOOL S3mIsMirrorWallCell(BYTE c) { return c == CSoft3DMazeDlg::CELL_MIRROR_WALL; }
+static BOOL S3mIsMirrorFloorCell(BYTE c) { return c == CSoft3DMazeDlg::CELL_MIRROR_FLOOR; }
 
 static int S3mClampMapSize(int n)
 {
@@ -579,9 +614,13 @@ CS3mView::CS3mView()
 	, m_psWall(NULL), m_vsSolid(NULL), m_psSolid(NULL), m_vsHud(NULL), m_psHud(NULL), m_vsPost(NULL)
 	, m_psSsr(NULL), m_psDof(NULL), m_psFinal(NULL), m_ilPatch(NULL), m_ilSolid(NULL), m_ilHud(NULL)
 	, m_cbFrame(NULL), m_vbDyn(NULL), m_vbHud(NULL), m_vbDynBytes(6*1024*1024), m_vbHudBytes(512*1024)
+	, m_cpuDynScratch(NULL), m_cpuDynScratchBytes(0), m_cpuHudScratch(NULL), m_cpuHudScratchBytes(0)
 	, m_texEnv(NULL), m_srvEnv(NULL)
-	, m_texClear(NULL), m_srvClear(NULL), m_clearTexW(0), m_clearTexH(0), m_texMap(NULL), m_srvMap(NULL), m_texTip(NULL), m_srvTip(NULL), m_tipW(0), m_tipH(0), m_texBadge(NULL), m_srvBadge(NULL), m_badgeW(0), m_badgeH(0), m_sampLin(NULL), m_sampPoint(NULL), m_sampCmp(NULL)
-	, m_rsSolid(NULL), m_rsShadow(NULL), m_dssWrite(NULL), m_dssRead(NULL), m_dssOff(NULL), m_bsOpaque(NULL), m_bsAlpha(NULL)
+	, m_texMirrorWall(NULL), m_srvMirrorWall(NULL), m_texMirrorFloor(NULL), m_srvMirrorFloor(NULL)
+	, m_texClear(NULL), m_srvClear(NULL), m_clearTexW(0), m_clearTexH(0), m_texMap(NULL), m_srvMap(NULL), m_texTip(NULL), m_srvTip(NULL), m_tipW(0), m_tipH(0), m_texBadge(NULL), m_srvBadge(NULL), m_badgeW(0), m_badgeH(0)
+	, m_texFloorBar(NULL), m_srvFloorBar(NULL), m_floorBarW(0), m_floorBarH(0), m_floorBarRecX0(0), m_floorBarRecX1(0)
+	, m_sampLin(NULL), m_sampPoint(NULL), m_sampCmp(NULL)
+	, m_rsSolid(NULL), m_rsShadow(NULL), m_rsNoCull(NULL), m_dssWrite(NULL), m_dssRead(NULL), m_dssOff(NULL), m_bsOpaque(NULL), m_bsAlpha(NULL)
 	, m_bsAdd(NULL), m_dragging(0), m_dragTurnAcc(0)
 {
 	for (int i = 0; i < S3M_THEME_N; i++) {
@@ -592,6 +631,10 @@ CS3mView::CS3mView()
 		m_mirrorTex[i] = NULL;
 		m_mirrorRtv[i] = NULL;
 		m_mirrorSrv[i] = NULL;
+	}
+	for (int i = 0; i < 4; i++) {
+		m_floorBarTabX0[i] = 0.f;
+		m_floorBarTabX1[i] = 0.f;
 	}
 }
 
@@ -647,10 +690,14 @@ BOOL CS3mView::CreateShaders()
 		"float3 v=normalize(Eye.xyz-i.w);float3 r=reflect(-l,n);float rv=saturate(dot(r,v));"
 		"float sp=pow(rv,56)*sh;float spark=pow(rv,180)*sh;float3 sun=float3(1.0,.94,.78);"
 		"float3 env=Env.Sample(SL,reflect(-v,n)).rgb;float fr=pow(1-saturate(dot(n,v)),3);"
-		"float metal=saturate((i.c.a-1.01)*8);float useMir=LightDir.w;float3 rd=reflect(-v,n);"
+		"float metal=saturate((i.c.a-1.01)*8);float doorM=saturate(1-abs(i.c.a-1.05)*50);float keyM=saturate(1-abs(i.c.a-1.12)*40);"
+		"float useMir=LightDir.w;float3 rd=reflect(-v,n);"
 		"float4 mir=PlanarMir(i.w,ReflectVP,MirrorMap);float4 mir2=PlanarMir(i.w+rd*1.35,ReflectVP,MirrorMap);if(mir2.a>mir.a)mir=mir2;"
 		"float mw=metal*useMir*max(mir.a,.35);env=lerp(env,mir.rgb,mw);"
+		"float pulse=.5+.5*sin(Misc.w*1.65+i.w.x*.4+i.w.z*.3);"
 		"float3 col=lerp(a.rgb*nd,mir.rgb*(.3+.7*a.rgb),mw*.92)+sun*(sp*.4+spark*.8)+env*(.05+fr*.10)*(1-mw*.55)*lerp(.45,1,sh);"
+		"col+=sun*(sp*.55+spark*1.1)*doorM*(.55+.45*pulse);col+=float3(1,.92,.35)*(spark*1.6+sp*.4)*keyM*(.6+.4*pulse);"
+		"col=lerp(col,env*(.4+.6*a.rgb)+mir.rgb*.5,keyM*.35*useMir);"
 		"float d=length(Eye.xyz-i.w),fg=saturate((d-Fog.x)/max(.01,Fog.y-Fog.x));fg=saturate(fg+max(0,Fog.w-i.w.y)*Fog.z);fg=fg*fg*(3-2*fg);"
 		"return float4(lerp(col,float3(.52,.66,.84),fg*.72),1);}"
 		"D VSS(V x){D o;o.w=x.p;o.n=x.n;o.uv=x.uv;o.c=x.c;o.p=mul(float4(x.p,1),VP);return o;}"
@@ -658,13 +705,23 @@ BOOL CS3mView::CreateShaders()
 		"float3 v=normalize(Eye.xyz-i.w);float nd=ShadeLit(dot(n,l),sh);"
 		"float sp=pow(saturate(dot(reflect(-l,n),v)),64)*sh;float3 env=Env.Sample(SL,reflect(-v,n)).rgb;"
 		"float fr=pow(1-saturate(dot(n,v)),2.5);float mirror=saturate((i.c.a-1.01)*8);float glass=saturate((i.c.a-1.18)*10);float useMir=LightDir.w;"
+		"float doorM=saturate(1-abs(i.c.a-1.05)*50);float keyM=saturate(1-abs(i.c.a-1.12)*40);"
 		"float3 rd=reflect(-v,n);float4 mir=PlanarMir(i.w,ReflectFloorVP,MirrorFloor);float4 mir2=PlanarMir(i.w+rd*1.55,ReflectFloorVP,MirrorFloor);"
 		"float4 mir3=PlanarMir(i.w+n*.45,ReflectFloorVP,MirrorFloor);if(mir2.a>mir.a)mir=mir2;if(mir3.a>mir.a)mir=mir3;"
-		"float mw=mirror*useMir*max(mir.a,.5);"
-		"float3 lit=i.c.rgb*nd;float3 c=lerp(lit,mir.rgb*(.42+.58*i.c.rgb),mw*(.92-.22*glass))+env*((.12+fr*.25)*(1-mw*.8)+mirror*.1*(1-glass))*lerp(.4,1,sh)+float3(1,.96,.82)*sp*(.4+mirror);"
-		"float al=mirror>0?lerp(lerp(.84,.64,mw),lerp(.38,.20,mw),glass):saturate(i.c.a);float d=length(Eye.xyz-i.w),fg=saturate((d-Fog.x)/max(.01,Fog.y-Fog.x));"
+		// 鏡床/ギミック: 平面反射。鍵・金属小物は UV が外れても env で写り込みを補う
+		"float mw=mirror*useMir*saturate(max(mir.a,.82)+mirror*.15);"
+		"mw=max(mw,keyM*useMir*saturate(max(mir.a,.7)+.25));"
+		"float3 chrome=mir.rgb*1.15+env*.35;"
+		"float3 lit=i.c.rgb*nd;"
+		"float wet=.5+.5*sin(Misc.w*1.4+i.w.x+i.w.z);float wetSp=pow(saturate(dot(reflect(-l,n),v)),90)*sh*(.08+.07*wet)*(1-mirror);"
+		"float glowP=.55+.45*sin(Misc.w*2.1+i.w.y*3);"
+		"float3 c=lerp(lit,chrome*(.12+.88*saturate(i.c.rgb+.25)),mw*(.98-.18*glass))+env*((.08+fr*.35)*(1-mw*.9)+mirror*.22*(1-glass))*lerp(.4,1,sh)+float3(1,.96,.9)*sp*(.35+mirror*1.4)+float3(.7,.9,1)*pow(fr,1.2)*mirror*.45;"
+		"c=lerp(c,env*(.45+.55*saturate(i.c.rgb+.2))+mir.rgb*.55,keyM*(.42+.28*fr)*useMir);"
+		"c+=float3(.85,.95,1)*wetSp;c+=float3(1,.9,.35)*sp*keyM*(.5+.5*glowP)*1.2;c+=float3(.75,.7,.65)*sp*doorM*.8;"
+		"c+=i.c.rgb*(.04+.05*glowP)*saturate(i.c.a-.35)*(1-mirror)*.35;"
+		"float al=mirror>0?lerp(lerp(.96,.90,mw),lerp(.84,.74,mw),glass):saturate(i.c.a);float d=length(Eye.xyz-i.w),fg=saturate((d-Fog.x)/max(.01,Fog.y-Fog.x));"
 		"fg=saturate(fg+max(0,Fog.w-i.w.y)*Fog.z);fg=fg*fg*(3-2*fg);"
-		"return float4(lerp(c,float3(.52,.66,.84),fg*.7),al);}"
+		"return float4(lerp(c,float3(.52,.66,.84),fg*.55*(1-mw*.7)),al);}"
 		"struct HV{float2 p:POSITION;float4 c:TEXCOORD0;};struct HO{float4 p:SV_POSITION;float4 c:TEXCOORD0;};"
 		"HO VSH(HV x){HO o;o.p=float4(x.p,0,1);o.c=x.c;return o;}float4 PSH(HO i):SV_Target{return i.c;}"
 		"struct Q{float4 p:SV_POSITION;float2 uv:TEXCOORD0;};Q VSQ(uint id:SV_VertexID){Q o;float2 p=float2((id==2)?3:-1,(id==1)?3:-1);o.p=float4(p,0,1);o.uv=float2((p.x+1)*.5,(1-p.y)*.5);return o;}"
@@ -680,7 +737,9 @@ BOOL CS3mView::CreateShaders()
 		"c+=(T0.Sample(SL,i.uv+float2(px.x,0))+T0.Sample(SL,i.uv-float2(px.x,0))+T0.Sample(SL,i.uv+float2(0,px.y))+T0.Sample(SL,i.uv-float2(0,px.y)))*.13;"
 		"c+=(T0.Sample(SL,i.uv+px)+T0.Sample(SL,i.uv-px)+T0.Sample(SL,i.uv+float2(px.x,-px.y))+T0.Sample(SL,i.uv+float2(-px.x,px.y)))*.05;"
 		"return c;}"
-		"float4 FIN(Q i):SV_Target{float4 c=T0.Sample(SL,i.uv);if(Misc.z>8.f)return c;float v=saturate(1-dot((i.uv-.5)*1.05,(i.uv-.5)*1.05));c.rgb*=lerp(.88,1.06,v);return c;}";
+		"float4 FIN(Q i):SV_Target{float4 c=T0.Sample(SL,i.uv);if(Misc.z>8.f)return c;float v=saturate(1-dot((i.uv-.5)*1.05,(i.uv-.5)*1.05));c.rgb*=lerp(.88,1.06,v);"
+		"float th=Eye.w;float3 tone=float3(1.02,.98,.94);if(th>2.5)tone=float3(.98,.92,.90);else if(th>1.5)tone=float3(1.02,.96,.90);else if(th>.5)tone=float3(.94,.98,1.04);"
+		"c.rgb=saturate(c.rgb*tone);return c;}";
 	ID3DBlob *b[11]={0}, *err=NULL;
 	const char* entries[11]={"VST","HST","DST","PSW","VSS","PSS","VSH","PSH","VSQ","SSR","DOFP"};
 	const char* profiles[11]={"vs_5_0","hs_5_0","ds_5_0","ps_5_0","vs_5_0","ps_5_0","vs_5_0","ps_5_0","vs_5_0","ps_5_0","ps_5_0"};
@@ -825,6 +884,43 @@ BOOL CS3mView::CreateProcTextures()
 	for(int f=0;f<6;f++){for(int y=0;y<H;y++)for(int x=0;x<W;x++){float t=(float)y/(H-1);BYTE r=(BYTE)(110+70*(1-t)),g=(BYTE)(145+55*(1-t)),b=(BYTE)(175+40*(1-t));if(f==2){r=(BYTE)(85+35*t);g=(BYTE)(120+45*t);b=(BYTE)(60+25*t);}cube[(f*H+y)*W+x]=0xff000000|((DWORD)r<<16)|((DWORD)g<<8)|b;}cs[f].pSysMem=cube+f*W*H;cs[f].SysMemPitch=W*4;}
 	if(FAILED(m_dev->CreateTexture2D(&d,cs,&m_texEnv))||FAILED(m_dev->CreateShaderResourceView(m_texEnv,NULL,&m_srvEnv))){delete[] cube;delete[] p;return FALSE;}
 	delete[] cube;delete[] p;
+	// 鏡壁／鏡床：滑らかな銀シアン鏡＋細い傷（割れすぎない）
+	{
+		const int MW=128,MH=128;
+		DWORD* mir=new DWORD[MW*MH];
+		auto putMir=[&](BOOL wall){
+			for(int y=0;y<MH;y++)for(int x=0;x<MW;x++){
+				const float u=(float)x/(float)(MW-1),v=(float)y/(float)(MH-1);
+				const float band=.55f+.45f*sinf(v*9.f+u*1.2f);
+				const float gloss=powf(max(0.f,1.f-fabsf(u-v)*.85f),3.2f);
+				const float fres=powf(max(fabsf(u-.5f),fabsf(v-.5f))*2.f,1.6f);
+				const int qx=x/(MW/3),qy=y/(MH/3);
+				const int lx=x%(MW/3),ly=y%(MH/3);
+				const BOOL seam=lx<1||ly<1||lx>=(MW/3)-1||ly>=(MH/3)-1;
+				const BOOL scratch=((x*13+y*7)&127)<1||((x+y*3)&255)==0;
+				float base=wall?168.f:185.f;
+				float r=base+38.f*band+55.f*gloss+30.f*fres;
+				float g=base+52.f*band+60.f*gloss+35.f*fres+18.f;
+				float b=base+70.f*band+70.f*gloss+40.f*fres+35.f;
+				if(seam){r*=.72f;g*=.78f;b*=.85f;}
+				if(scratch&&!seam){r=min(255.f,r+40.f);g=min(255.f,g+45.f);b=min(255.f,b+50.f);}
+				if(((qx+qy)&1)==0){r*=.96f;g*=.97f;b*=.98f;}
+				if(r>255.f)r=255.f;if(g>255.f)g=255.f;if(b>255.f)b=255.f;
+				if(r<40.f)r=40.f;if(g<50.f)g=50.f;if(b<70.f)b=70.f;
+				const BYTE a=wall?(BYTE)(seam?160:230):255;
+				mir[y*MW+x]=((DWORD)a<<24)|(((DWORD)(BYTE)r)<<16)|(((DWORD)(BYTE)g)<<8)|(BYTE)b;
+			}
+		};
+		D3D11_TEXTURE2D_DESC md={};md.Width=MW;md.Height=MH;md.MipLevels=1;md.ArraySize=1;
+		md.Format=DXGI_FORMAT_B8G8R8A8_UNORM;md.SampleDesc.Count=1;md.Usage=D3D11_USAGE_IMMUTABLE;md.BindFlags=D3D11_BIND_SHADER_RESOURCE;
+		putMir(TRUE);
+		D3D11_SUBRESOURCE_DATA sd={mir,MW*4,0};
+		if(FAILED(m_dev->CreateTexture2D(&md,&sd,&m_texMirrorWall))||FAILED(m_dev->CreateShaderResourceView(m_texMirrorWall,NULL,&m_srvMirrorWall))){delete[] mir;return FALSE;}
+		putMir(FALSE);
+		sd.pSysMem=mir;
+		if(FAILED(m_dev->CreateTexture2D(&md,&sd,&m_texMirrorFloor))||FAILED(m_dev->CreateShaderResourceView(m_texMirrorFloor,NULL,&m_srvMirrorFloor))){delete[] mir;return FALSE;}
+		delete[] mir;
+	}
 	{
 		D3D11_TEXTURE2D_DESC md={};md.Width=S3M_MAP_SIZE;md.Height=S3M_MAP_SIZE;md.MipLevels=1;md.ArraySize=1;
 		md.Format=DXGI_FORMAT_B8G8R8A8_UNORM;md.SampleDesc.Count=1;md.Usage=D3D11_USAGE_DYNAMIC;
@@ -858,9 +954,11 @@ BOOL CS3mView::InitDx()
 	bd.ByteWidth=m_vbDynBytes;bd.BindFlags=D3D11_BIND_VERTEX_BUFFER;if(FAILED(m_dev->CreateBuffer(&bd,NULL,&m_vbDyn)))return FALSE;bd.ByteWidth=m_vbHudBytes;if(FAILED(m_dev->CreateBuffer(&bd,NULL,&m_vbHud)))return FALSE;
 	D3D11_SAMPLER_DESC ss={};ss.Filter=D3D11_FILTER_MIN_MAG_MIP_LINEAR;ss.AddressU=ss.AddressV=ss.AddressW=D3D11_TEXTURE_ADDRESS_WRAP;ss.MaxLOD=D3D11_FLOAT32_MAX;m_dev->CreateSamplerState(&ss,&m_sampLin);ss.Filter=D3D11_FILTER_MIN_MAG_MIP_POINT;ss.AddressU=ss.AddressV=ss.AddressW=D3D11_TEXTURE_ADDRESS_CLAMP;m_dev->CreateSamplerState(&ss,&m_sampPoint);
 	ss.Filter=D3D11_FILTER_COMPARISON_MIN_MAG_LINEAR_MIP_POINT;ss.AddressU=ss.AddressV=ss.AddressW=D3D11_TEXTURE_ADDRESS_BORDER;ss.ComparisonFunc=D3D11_COMPARISON_LESS;ss.BorderColor[0]=ss.BorderColor[1]=ss.BorderColor[2]=ss.BorderColor[3]=1.f;m_dev->CreateSamplerState(&ss,&m_sampCmp);
-	D3D11_RASTERIZER_DESC rs={};rs.FillMode=D3D11_FILL_SOLID;rs.CullMode=D3D11_CULL_NONE;rs.DepthClipEnable=TRUE;m_dev->CreateRasterizerState(&rs,&m_rsSolid);
-	// Qullusrent寄り：強すぎるDepthBiasはピーターパンの原因。シェーダ側バイアス主体
-	rs.DepthBias=1000;rs.SlopeScaledDepthBias=1.5f;rs.DepthBiasClamp=0.f;m_dev->CreateRasterizerState(&rs,&m_rsShadow);
+	D3D11_RASTERIZER_DESC rs={};rs.FillMode=D3D11_FILL_SOLID;rs.CullMode=D3D11_CULL_BACK;rs.DepthClipEnable=TRUE;m_dev->CreateRasterizerState(&rs,&m_rsSolid);
+	rs.CullMode=D3D11_CULL_NONE;m_dev->CreateRasterizerState(&rs,&m_rsNoCull);
+	// 影は薄い壁の両面を落とすためカリングなし（DepthBiasは弱め、主体はシェーダ側）
+	D3D11_RASTERIZER_DESC rss={};rss.FillMode=D3D11_FILL_SOLID;rss.CullMode=D3D11_CULL_NONE;rss.DepthClipEnable=TRUE;
+	rss.DepthBias=1000;rss.SlopeScaledDepthBias=1.5f;rss.DepthBiasClamp=0.f;m_dev->CreateRasterizerState(&rss,&m_rsShadow);
 	D3D11_DEPTH_STENCIL_DESC ds={};ds.DepthEnable=TRUE;ds.DepthWriteMask=D3D11_DEPTH_WRITE_MASK_ALL;ds.DepthFunc=D3D11_COMPARISON_LESS_EQUAL;m_dev->CreateDepthStencilState(&ds,&m_dssWrite);ds.DepthWriteMask=D3D11_DEPTH_WRITE_MASK_ZERO;m_dev->CreateDepthStencilState(&ds,&m_dssRead);ds.DepthEnable=FALSE;m_dev->CreateDepthStencilState(&ds,&m_dssOff);
 	D3D11_BLEND_DESC bl={};bl.RenderTarget[0].RenderTargetWriteMask=D3D11_COLOR_WRITE_ENABLE_ALL;m_dev->CreateBlendState(&bl,&m_bsOpaque);bl.RenderTarget[0].BlendEnable=TRUE;bl.RenderTarget[0].SrcBlend=D3D11_BLEND_SRC_ALPHA;bl.RenderTarget[0].DestBlend=D3D11_BLEND_INV_SRC_ALPHA;bl.RenderTarget[0].BlendOp=D3D11_BLEND_OP_ADD;bl.RenderTarget[0].SrcBlendAlpha=D3D11_BLEND_ONE;bl.RenderTarget[0].DestBlendAlpha=D3D11_BLEND_INV_SRC_ALPHA;bl.RenderTarget[0].BlendOpAlpha=D3D11_BLEND_OP_ADD;m_dev->CreateBlendState(&bl,&m_bsAlpha);bl.RenderTarget[0].SrcBlend=D3D11_BLEND_SRC_ALPHA;bl.RenderTarget[0].DestBlend=D3D11_BLEND_ONE;m_dev->CreateBlendState(&bl,&m_bsAdd);
 	{
@@ -916,7 +1014,7 @@ BOOL CS3mView::BakeBadgeTexture(const wchar_t* text)
 {
 	if (!m_dev || !text) return FALSE;
 	ReleaseBadgeTexture();
-	const int w = 320, h = 56;
+	const int w = 420, h = 56;
 	BITMAPINFO bi = {};
 	bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
 	bi.bmiHeader.biWidth = w;
@@ -956,6 +1054,98 @@ BOOL CS3mView::BakeBadgeTexture(const wchar_t* text)
 	if (SUCCEEDED(hr)) hr = m_dev->CreateShaderResourceView(m_texBadge, NULL, &m_srvBadge);
 	SelectObject(dc, old); DeleteObject(bm); DeleteDC(dc);
 	m_badgeW = w; m_badgeH = h;
+	return SUCCEEDED(hr);
+}
+
+void CS3mView::ReleaseFloorBarTexture()
+{
+	S3M_RELEASE(m_srvFloorBar);S3M_RELEASE(m_texFloorBar);m_floorBarW=m_floorBarH=0;
+}
+
+BOOL CS3mView::BakeFloorBarTexture(int nFloors, int viewFloor, int playerFloor, const wchar_t* const* labels)
+{
+	if (!m_dev || nFloors < 1 || !labels) return FALSE;
+	if (nFloors > 4) nFloors = 4;
+	ReleaseFloorBarTexture();
+	const int tabW = 150, recW = 120, gap = 8, pad = 8, h = 48;
+	const int w = pad * 2 + nFloors * tabW + (nFloors - 1) * gap + gap + recW;
+	BITMAPINFO bi = {};
+	bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+	bi.bmiHeader.biWidth = w;
+	bi.bmiHeader.biHeight = -h;
+	bi.bmiHeader.biPlanes = 1;
+	bi.bmiHeader.biBitCount = 32;
+	bi.bmiHeader.biCompression = BI_RGB;
+	void* bits = NULL;
+	HDC dc = CreateCompatibleDC(NULL);
+	HBITMAP bm = CreateDIBSection(dc, &bi, DIB_RGB_COLORS, &bits, NULL, 0);
+	HGDIOBJ old = SelectObject(dc, bm);
+	memset(bits, 0, w * h * 4);
+	static const Gdiplus::Color kTheme[4] = {
+		Gdiplus::Color(230, 48, 95, 58),
+		Gdiplus::Color(230, 42, 68, 110),
+		Gdiplus::Color(230, 110, 62, 38),
+		Gdiplus::Color(230, 120, 40, 36)
+	};
+	static const Gdiplus::Color kThemeSel[4] = {
+		Gdiplus::Color(245, 78, 150, 90),
+		Gdiplus::Color(245, 70, 115, 175),
+		Gdiplus::Color(245, 170, 95, 55),
+		Gdiplus::Color(245, 185, 65, 55)
+	};
+	{
+		Gdiplus::Graphics g(dc);
+		g.SetTextRenderingHint(Gdiplus::TextRenderingHintAntiAlias);
+		g.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
+		Gdiplus::FontFamily ff(L"Segoe UI");
+		Gdiplus::Font font(&ff, 20.f, Gdiplus::FontStyleBold, Gdiplus::UnitPixel);
+		Gdiplus::StringFormat sf;
+		sf.SetAlignment(Gdiplus::StringAlignmentCenter);
+		sf.SetLineAlignment(Gdiplus::StringAlignmentCenter);
+		Gdiplus::SolidBrush fg(Gdiplus::Color(250, 250, 252, 255));
+		Gdiplus::SolidBrush sh(Gdiplus::Color(140, 0, 0, 0));
+		Gdiplus::Pen gold(Gdiplus::Color(255, 255, 210, 70), 3.f);
+		Gdiplus::Pen white(Gdiplus::Color(220, 255, 255, 255), 2.f);
+		float x = (float)pad;
+		for (int i = 0; i < nFloors; i++) {
+			const int th = (i <= 0) ? 0 : ((i == 1) ? 1 : ((i == 2) ? 2 : 3));
+			const BOOL sel = (i == viewFloor);
+			Gdiplus::SolidBrush bg(sel ? kThemeSel[th] : kTheme[th]);
+			Gdiplus::RectF rr(x, 4.f, (Gdiplus::REAL)tabW, (Gdiplus::REAL)(h - 8));
+			g.FillRectangle(&bg, rr);
+			if (sel) g.DrawRectangle(&white, rr);
+			if (i == playerFloor) g.DrawRectangle(&gold, Gdiplus::RectF(rr.X + 2, rr.Y + 2, rr.Width - 4, rr.Height - 4));
+			Gdiplus::RectF tr(rr.X + 2, rr.Y + 1, rr.Width - 2, rr.Height - 2);
+			g.DrawString(labels[i] ? labels[i] : L"?", -1, &font, tr, &sf, &sh);
+			tr.X -= 1.2f; tr.Y -= 1.2f;
+			g.DrawString(labels[i] ? labels[i] : L"?", -1, &font, tr, &sf, &fg);
+			m_floorBarTabX0[i] = x / (float)w;
+			m_floorBarTabX1[i] = (x + tabW) / (float)w;
+			x += tabW + gap;
+		}
+		for (int i = nFloors; i < 4; i++) { m_floorBarTabX0[i] = 0; m_floorBarTabX1[i] = 0; }
+		x += gap;
+		Gdiplus::SolidBrush recBg(Gdiplus::Color(235, 28, 32, 44));
+		Gdiplus::RectF rec(x, 4.f, (Gdiplus::REAL)recW, (Gdiplus::REAL)(h - 8));
+		g.FillRectangle(&recBg, rec);
+		g.DrawRectangle(&white, rec);
+		const wchar_t* recLab = L"◎ 自機へ";
+		Gdiplus::RectF tr(rec.X, rec.Y, rec.Width, rec.Height);
+		g.DrawString(recLab, -1, &font, tr, &sf, &sh);
+		tr.X -= 1.2f; tr.Y -= 1.2f;
+		g.DrawString(recLab, -1, &font, tr, &sf, &fg);
+		m_floorBarRecX0 = x / (float)w;
+		m_floorBarRecX1 = (x + recW) / (float)w;
+	}
+	D3D11_TEXTURE2D_DESC d = {};
+	d.Width = w; d.Height = h; d.MipLevels = 1; d.ArraySize = 1;
+	d.Format = DXGI_FORMAT_B8G8R8A8_UNORM; d.SampleDesc.Count = 1;
+	d.Usage = D3D11_USAGE_IMMUTABLE; d.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+	D3D11_SUBRESOURCE_DATA sd = { bits, (UINT)w * 4, 0 };
+	HRESULT hr = m_dev->CreateTexture2D(&d, &sd, &m_texFloorBar);
+	if (SUCCEEDED(hr)) hr = m_dev->CreateShaderResourceView(m_texFloorBar, NULL, &m_srvFloorBar);
+	SelectObject(dc, old); DeleteObject(bm); DeleteDC(dc);
+	m_floorBarW = w; m_floorBarH = h;
 	return SUCCEEDED(hr);
 }
 
@@ -1017,10 +1207,13 @@ BOOL CS3mView::BakeTipTexture(const wchar_t* text)
 void CS3mView::ReleaseDx()
 {
 	m_ready=FALSE;if(m_imm){m_imm->ClearState();m_imm->Flush();}
-	ReleaseClearTexture();ReleaseTipTexture();ReleaseBadgeTexture();S3M_RELEASE(m_srvMap);S3M_RELEASE(m_texMap);S3M_RELEASE(m_srvEnv);S3M_RELEASE(m_texEnv);
+	ReleaseClearTexture();ReleaseTipTexture();ReleaseBadgeTexture();ReleaseFloorBarTexture();S3M_RELEASE(m_srvMap);S3M_RELEASE(m_texMap);S3M_RELEASE(m_srvEnv);S3M_RELEASE(m_texEnv);
+	S3M_RELEASE(m_srvMirrorWall);S3M_RELEASE(m_texMirrorWall);S3M_RELEASE(m_srvMirrorFloor);S3M_RELEASE(m_texMirrorFloor);
 	for(int i=0;i<S3M_THEME_N;i++){S3M_RELEASE(m_srvFloor[i]);S3M_RELEASE(m_texFloor[i]);S3M_RELEASE(m_srvBrick[i]);S3M_RELEASE(m_texBrick[i]);}
-	S3M_RELEASE(m_bsAdd);S3M_RELEASE(m_bsAlpha);S3M_RELEASE(m_bsOpaque);S3M_RELEASE(m_dssOff);S3M_RELEASE(m_dssRead);S3M_RELEASE(m_dssWrite);S3M_RELEASE(m_rsShadow);S3M_RELEASE(m_rsSolid);S3M_RELEASE(m_sampCmp);S3M_RELEASE(m_sampPoint);S3M_RELEASE(m_sampLin);
+	S3M_RELEASE(m_bsAdd);S3M_RELEASE(m_bsAlpha);S3M_RELEASE(m_bsOpaque);S3M_RELEASE(m_dssOff);S3M_RELEASE(m_dssRead);S3M_RELEASE(m_dssWrite);S3M_RELEASE(m_rsShadow);S3M_RELEASE(m_rsNoCull);S3M_RELEASE(m_rsSolid);S3M_RELEASE(m_sampCmp);S3M_RELEASE(m_sampPoint);S3M_RELEASE(m_sampLin);
 	S3M_RELEASE(m_vbHud);S3M_RELEASE(m_vbDyn);S3M_RELEASE(m_cbFrame);S3M_RELEASE(m_ilHud);S3M_RELEASE(m_ilSolid);S3M_RELEASE(m_ilPatch);
+	delete[] m_cpuDynScratch; m_cpuDynScratch = NULL; m_cpuDynScratchBytes = 0;
+	delete[] m_cpuHudScratch; m_cpuHudScratch = NULL; m_cpuHudScratchBytes = 0;
 	S3M_RELEASE(m_psFinal);S3M_RELEASE(m_psDof);S3M_RELEASE(m_psSsr);S3M_RELEASE(m_vsPost);S3M_RELEASE(m_psHud);S3M_RELEASE(m_vsHud);S3M_RELEASE(m_psSolid);S3M_RELEASE(m_vsSolid);S3M_RELEASE(m_psWall);S3M_RELEASE(m_dsTess);S3M_RELEASE(m_hsTess);S3M_RELEASE(m_vsTess);
 	S3M_RELEASE(m_shadowSrv);S3M_RELEASE(m_shadowDsv);S3M_RELEASE(m_shadowTex);
 	for(int i=0;i<S3M_MIRROR_N;i++){S3M_RELEASE(m_mirrorSrv[i]);S3M_RELEASE(m_mirrorRtv[i]);S3M_RELEASE(m_mirrorTex[i]);}
@@ -1072,6 +1265,13 @@ void CS3mView::OnLButtonDown(UINT nFlags, CPoint point)
 {
 	CSoft3DMazeDlg* dlg = (CSoft3DMazeDlg*)GetParent();
 	if (dlg && dlg->IsOverviewActive()) {
+		int act = -1;
+		if (dlg->HitOverviewFloorUi(point, act)) {
+			dlg->BeginOverviewUiPress(act, point);
+			SetCapture();
+			return;
+		}
+		dlg->BeginOverviewUiPress(-1, point);
 		dlg->BeginMapPan(point);
 		SetCapture();
 		return;
@@ -1086,6 +1286,12 @@ void CS3mView::OnLButtonDown(UINT nFlags, CPoint point)
 void CS3mView::OnLButtonUp(UINT nFlags, CPoint point)
 {
 	CSoft3DMazeDlg* dlg = (CSoft3DMazeDlg*)GetParent();
+	if (dlg && dlg->HasOverviewUiPress()) {
+		dlg->FinishOverviewUiPress(point);
+		if (GetCapture() == this)
+			ReleaseCapture();
+		return;
+	}
 	if (dlg && dlg->EndMapPan()) {
 		if (GetCapture() == this)
 			ReleaseCapture();
@@ -1126,6 +1332,14 @@ BOOL CS3mView::OnSetCursor(CWnd* pWnd, UINT nHitTest, UINT message)
 	if (nHitTest == HTCLIENT) {
 		CSoft3DMazeDlg* dlg = (CSoft3DMazeDlg*)GetParent();
 		if (dlg && dlg->IsOverviewActive()) {
+			CPoint pt;
+			::GetCursorPos(&pt);
+			ScreenToClient(&pt);
+			int act = -1;
+			if (dlg->HitOverviewFloorUi(pt, act) && act >= 0) {
+				HCURSOR h = ::LoadCursor(NULL, IDC_HAND);
+				if (h) { ::SetCursor(h); return TRUE; }
+			}
 			HCURSOR h = ::LoadCursor(NULL, IDC_SIZEALL);
 			if (h) { ::SetCursor(h); return TRUE; }
 		}
@@ -1193,6 +1407,8 @@ CSoft3DMazeDlg::CSoft3DMazeDlg(CWnd* p)
 	: CCustomBlurDialogBase(IDD, p)
 	, m_grid(NULL), m_visit(NULL)
 	, m_n(0), m_nFloors(1), m_floor(0), m_mapViewFloor(0)
+	, m_goalX(-1), m_goalZ(-1), m_goalFloor(0), m_lastMapBakeTick(0)
+	, m_passCells(0), m_visitPassCells(0)
 	, m_px(1.5f), m_pz(1.5f), m_yaw((float)M_PI)
 	, m_yawTarget((float)M_PI), m_pxTarget(1.5f), m_pzTarget(1.5f)
 	, m_turning(0), m_turnHeld(0), m_moving(0), m_moveHeld(0)
@@ -1205,10 +1421,13 @@ CSoft3DMazeDlg::CSoft3DMazeDlg(CWnd* p)
 	, m_stairShiftX(0.f), m_stairShiftZ(0.f), m_stairCamY(0.f)
 	, m_stairStartX(0.f), m_stairStartZ(0.f), m_stairLandX(0.f), m_stairLandZ(0.f)
 	, m_miniFade(1.f), m_miniFadeFrom(0), m_miniFadeTo(0)
-	, m_itemsLeft(0)
+	, m_itemsLeft(0), m_keysHeld(0), m_doorMsgT(0.f), m_toastKind(0)
 	, m_trapCellX(-1), m_trapCellZ(-1), m_slowT(0.f)
 	, m_lastStepMx(0), m_lastStepMz(0), m_iceSlideLeft(0)
 	, m_stepFromX(1.5f), m_stepFromZ(1.5f), m_darkT(0.f)
+	, m_portalFx(PORTALFX_IDLE), m_portalFxT(0.f), m_portalToX(0.f), m_portalToZ(0.f)
+	, m_portalIgnoreX(-1), m_portalIgnoreZ(-1), m_portalFlashA(0.f)
+	, m_navCount(0), m_navWaiting(0)
 	, m_baseTempoPos(200), m_basePitchPos(200)
 	, m_lastTick(0), m_rng(GetTickCount()), m_genSeed(GetTickCount())
 	, m_lastAutosave(0), m_runDirty(0), m_mapBakeDirty(1), m_mapToggle(0)
@@ -1216,10 +1435,14 @@ CSoft3DMazeDlg::CSoft3DMazeDlg(CWnd* p)
 	, m_mapPanX(0.f), m_mapPanY(0.f), m_mapPanDrag(0)
 	, m_overviewZoomPct(100)
 	, m_spaceToggleTick(0), m_tipIsOverview(-1)
+	, m_ovBarX(0), m_ovBarY(0), m_ovBarW(0), m_ovBarH(0)
+	, m_ovRecX0(0), m_ovRecX1(0), m_ovTabN(0), m_ovPressAction(-1)
+	, m_floorBarDirty(1)
 {
 	for (int f = 0; f < S3M_MAX_FLOORS; f++) {
 		m_grids[f] = NULL;
 		m_visits[f] = NULL;
+		m_ovTabX0[f] = m_ovTabX1[f] = 0;
 	}
 }
 
@@ -1239,6 +1462,7 @@ void CSoft3DMazeDlg::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDC_S3M_DIFF_L, m_diffL);
 	DDX_Control(pDX, IDC_S3M_DIFF, m_diff);
 	DDX_Control(pDX, IDC_S3M_GEN, m_gen);
+	DDX_Control(pDX, IDC_S3M_NAVI, m_navi);
 	DDX_Control(pDX, IDC_S3M_HINT, m_hint);
 	DDX_Control(pDX, IDC_S3M_VIEW, m_view);
 	DDX_Control(pDX, IDC_S3M_STATUS, m_status);
@@ -1247,6 +1471,7 @@ void CSoft3DMazeDlg::DoDataExchange(CDataExchange* pDX)
 
 BEGIN_MESSAGE_MAP(CSoft3DMazeDlg, CCustomBlurDialogBase)
 	ON_BN_CLICKED(IDC_S3M_GEN, &CSoft3DMazeDlg::OnGen)
+	ON_BN_CLICKED(IDC_S3M_NAVI, &CSoft3DMazeDlg::OnNavi)
 	ON_BN_CLICKED(IDC_S3M_CLOSE, &CSoft3DMazeDlg::OnCloseBtn)
 	ON_BN_CLICKED(IDC_S3M_HELP, &CSoft3DMazeDlg::OnHelp)
 	ON_CBN_SELCHANGE(IDC_S3M_SIZE, &CSoft3DMazeDlg::OnSizeChanged)
@@ -1309,11 +1534,49 @@ void CSoft3DMazeDlg::ToggleMapOverlay()
 	if (m_mapToggle) {
 		m_mapViewFloor = m_floor;
 		m_mapBakeDirty = 1;
-		m_mapPanX = 0.f;
-		m_mapPanY = 0.f;
-		m_overviewZoomPct = 100;
+		m_floorBarDirty = 1;
+		FocusOverviewOnPlayer();
 	}
 	EnsureTipTexture(m_mapToggle != 0);
+}
+
+void CSoft3DMazeDlg::FocusOverviewOnPlayer()
+{
+	m_mapPanX = 0.f;
+	m_mapPanY = 0.f;
+	m_overviewZoomPct = 100;
+	if (!m_view.GetSafeHwnd() || m_n <= 0)
+		return;
+	CRect rc;
+	m_view.GetClientRect(&rc);
+	const int vw = rc.Width(), vh = rc.Height();
+	if (vw < 8 || vh < 8)
+		return;
+	const float worldSpan = max(1e-3f, AxisOrigin(m_n));
+	// 開いた直後は自機周辺（通路マス換算でおおよそ30前後）を見せる
+	float targetWorld = 34.f;
+	if (targetWorld > worldSpan)
+		targetWorld = worldSpan;
+	const float baseSide = OverviewBaseSide(vw, vh);
+	const float tipBand = 210.f, topPad = 68.f;
+	const float areaH = max(96.f, (float)vh - tipBand - topPad);
+	const float viewSpan = min((float)vw, areaH) * 0.92f;
+	const float needSide = viewSpan * worldSpan / max(1e-3f, targetWorld);
+	int z = (int)(needSide / max(1.f, baseSide) * 100.f + 0.5f);
+	const int zMax = OverviewZoomMaxPct();
+	if (worldSpan <= targetWorld * 1.05f)
+		z = 100;
+	else {
+		if (z < 120) z = 120;
+		if (z > zMax) z = zMax;
+	}
+	m_overviewZoomPct = z;
+	const float side = baseSide * OverviewZoomScale();
+	const float u = GridToWorldX(m_px) / worldSpan;
+	const float v = GridToWorldZ(m_pz) / worldSpan;
+	m_mapPanX = side * (0.5f - u);
+	m_mapPanY = side * (0.5f - v);
+	ClampMapPan(vw, vh, side);
 }
 
 void CSoft3DMazeDlg::EnsureTipTexture(BOOL overviewTip)
@@ -1372,9 +1635,11 @@ void CSoft3DMazeDlg::LayoutAll()
 	if (m_diff.GetSafeHwnd())
 		m_diff.SetWindowPos(NULL, m + 298, y, 100, 200, SWP_NOZORDER | SWP_NOACTIVATE);
 	if (m_gen.GetSafeHwnd())
-		m_gen.SetWindowPos(NULL, m + 406, y, 56, 20, SWP_NOZORDER | SWP_NOACTIVATE);
+		m_gen.SetWindowPos(NULL, m + 406, y - 1, 72, 26, SWP_NOZORDER | SWP_NOACTIVATE);
+	if (m_navi.GetSafeHwnd())
+		m_navi.SetWindowPos(NULL, m + 486, y - 1, 56, 26, SWP_NOZORDER | SWP_NOACTIVATE);
 	if (m_hint.GetSafeHwnd())
-		m_hint.SetWindowPos(NULL, m + 470, y + 3, max(40, cx - (m + 470) - m), 14, SWP_NOZORDER | SWP_NOACTIVATE);
+		m_hint.SetWindowPos(NULL, m + 550, y + 3, max(40, cx - (m + 550) - m), 14, SWP_NOZORDER | SWP_NOACTIVATE);
 	y += rowH + 2;
 
 	const int btnY = cy - m - btnH;
@@ -1393,6 +1658,9 @@ void CSoft3DMazeDlg::LayoutAll()
 
 void CSoft3DMazeDlg::FreeGrid()
 {
+	m_passCells = 0;
+	m_visitPassCells = 0;
+	m_goalX = -1; m_goalZ = -1; m_goalFloor = 0;
 	for (int f = 0; f < S3M_MAX_FLOORS; f++) {
 		delete[] m_grids[f];
 		delete[] m_visits[f];
@@ -1577,6 +1845,7 @@ void CSoft3DMazeDlg::PersistRun()
 			f.Write(m_grids[fl], (UINT)nn);
 			f.Write(m_visits[fl], (UINT)nn);
 		}
+		f.Write(&m_keysHeld, sizeof(m_keysHeld));
 	}
 	catch (...) {
 	}
@@ -1638,6 +1907,12 @@ BOOL CSoft3DMazeDlg::LoadRun()
 			if (f.Read(m_grids[fl], (UINT)nn) != nn) { FreeGrid(); f.Close(); return FALSE; }
 			if (f.Read(m_visits[fl], (UINT)nn) != nn) { FreeGrid(); f.Close(); return FALSE; }
 		}
+		m_keysHeld = 0;
+		{
+			int kh = 0;
+			if (f.Read(&kh, sizeof(kh)) == sizeof(kh) && kh >= 0 && kh < 256)
+				m_keysHeld = kh;
+		}
 		BindFloor(floor0);
 		m_mapViewFloor = m_floor;
 		ResetFloorFx();
@@ -1667,6 +1942,8 @@ BOOL CSoft3DMazeDlg::LoadRun()
 
 	m_won = m_won ? 1 : 0;
 	m_itemsLeft = 0;
+	RefreshGoalCache();
+	RecountExploreStats();
 	for (int fl = 0; fl < m_nFloors; fl++) {
 		for (int z = 0; z < m_n; z++) {
 			for (int x = 0; x < m_n; x++) {
@@ -1686,6 +1963,9 @@ BOOL CSoft3DMazeDlg::LoadRun()
 		savedata.s3m_have_run = 0;
 		return FALSE;
 	}
+	ResetPortalFx();
+	ClearNavPath();
+	EnsureGoalReachable();
 	MarkVisited();
 	UpdateStatus();
 	SetSizeToUi(m_n);
@@ -1724,7 +2004,9 @@ BOOL CSoft3DMazeDlg::IsBlockedF(int f, float x, float z) const
 	if (ix < 0 || iz < 0 || ix >= m_n || iz >= m_n)
 		return TRUE;
 	const BYTE c = CellAtF(f, ix, iz);
-	return (c == CELL_WALL || c == CELL_WINDOW) ? TRUE : FALSE;
+	if (c == CELL_DOOR)
+		return (m_keysHeld > 0) ? FALSE : TRUE;
+	return (c == CELL_WALL || c == CELL_WINDOW || c == CELL_MIRROR_WALL) ? TRUE : FALSE;
 }
 
 BOOL CSoft3DMazeDlg::IsBlocked(float x, float z) const
@@ -1819,16 +2101,67 @@ void CSoft3DMazeDlg::WorldToMap(float wx, float wz, float& mx, float& my) const
 	my = -lz;
 }
 
+void CSoft3DMazeDlg::RecountExploreStats()
+{
+	m_passCells = 0;
+	m_visitPassCells = 0;
+	for (int f = 0; f < m_nFloors; f++) {
+		if (!m_grids[f] || !m_visits[f]) continue;
+		for (int z = 1; z < m_n; z += 2) for (int x = 1; x < m_n; x += 2) {
+			const BYTE c = CellAtF(f, x, z);
+			if (c == CELL_WALL || c == CELL_WINDOW || c == CELL_MIRROR_WALL) continue;
+			m_passCells++;
+			if (VisitAtF(f, x, z)) m_visitPassCells++;
+		}
+	}
+}
+
+void CSoft3DMazeDlg::NoteVisitCell(int ix, int iz)
+{
+	if (ix < 0 || iz < 0 || ix >= m_n || iz >= m_n || !m_visit) return;
+	if (VisitAt(ix, iz)) return;
+	Visit(ix, iz) = 1;
+	m_runDirty = 1;
+	if (IsOverviewActive())
+		m_mapBakeDirty = 1;
+	// 探索率は奇数通路のみ（UpdateStatus と同一基準）
+	if ((ix & 1) && (iz & 1)) {
+		const BYTE c = CellAt(ix, iz);
+		if (c != CELL_WALL && c != CELL_WINDOW && c != CELL_MIRROR_WALL)
+			m_visitPassCells++;
+	}
+}
+
 void CSoft3DMazeDlg::MarkVisited()
 {
-	const int ix = (int)floorf(m_px);
-	const int iz = (int)floorf(m_pz);
-	if (ix < 0 || iz < 0 || ix >= m_n || iz >= m_n) return;
-	if (!VisitAt(ix, iz)) {
-		Visit(ix, iz) = 1;
-		m_runDirty = 1;
-		m_mapBakeDirty = 1;
+	NoteVisitCell((int)floorf(m_px), (int)floorf(m_pz));
+}
+
+void CSoft3DMazeDlg::RefreshGoalCache()
+{
+	m_goalX = -1; m_goalZ = -1; m_goalFloor = 0;
+	for (int f = 0; f < m_nFloors; f++) {
+		if (!m_grids[f]) continue;
+		for (int z = 0; z < m_n; z++) for (int x = 0; x < m_n; x++) {
+			if (CellAtF(f, x, z) != CELL_GOAL) continue;
+			m_goalX = x; m_goalZ = z; m_goalFloor = f;
+			return;
+		}
 	}
+}
+
+int CSoft3DMazeDlg::TargetGoalRoutes() const
+{
+	const int diff = (savedata.s3m_difficulty < 0 || savedata.s3m_difficulty >= DIFF_COUNT)
+		? DIFF_NORMAL : savedata.s3m_difficulty;
+	// 普通=200。簡単ほど間隔小＝ルート多／難しいほど間隔大＝ルート少
+	static const int kChunk[DIFF_COUNT] = { 100, 150, 200, 300, 450 };
+	const int chunk = kChunk[diff];
+	int perSize = m_n / chunk;
+	if (perSize < 1) perSize = 1;
+	int routes = perSize * max(1, m_nFloors);
+	if (routes > 99) routes = 99;
+	return routes;
 }
 
 void CSoft3DMazeDlg::GenerateMaze()
@@ -1846,10 +2179,9 @@ void CSoft3DMazeDlg::GenerateOneFloor(int f)
 
 	const int diff = (savedata.s3m_difficulty < 0 || savedata.s3m_difficulty >= DIFF_COUNT)
 		? DIFF_NORMAL : savedata.s3m_difficulty;
-	// 簡単ほど通路を太く・広間多め、難しいほど細い迷路寄り
+	// 簡単ほど通路を太く・広間多め、難しいほど細い迷路寄り（大マップでも広間はサイズ比例）
 	static const float kWidenScale[DIFF_COUNT] = { 2.2f, 1.5f, 1.0f, 0.45f, 0.15f };
-	static const int kRoomMax[DIFF_COUNT] = { 8, 5, 4, 2, 1 };
-	static const int kRoomDiv[DIFF_COUNT] = { 22, 30, 40, 70, 120 };
+	static const int kRoomDiv[DIFF_COUNT] = { 28, 36, 48, 80, 140 };
 
 	for (int z = 0; z < m_n; z++)
 		for (int x = 0; x < m_n; x++)
@@ -1905,7 +2237,7 @@ void CSoft3DMazeDlg::GenerateOneFloor(int f)
 		auto isOpen = [&](int x, int z) -> BOOL {
 			if (x < 0 || z < 0 || x >= m_n || z >= m_n) return FALSE;
 			const BYTE c = CellAtF(f, x, z);
-			return (c != CELL_WALL && c != CELL_WINDOW) ? TRUE : FALSE;
+			return (c != CELL_WALL && c != CELL_WINDOW && c != CELL_MIRROR_WALL) ? TRUE : FALSE;
 		};
 		auto floorN = [&](int x, int z) -> int {
 			int n = 0;
@@ -1919,7 +2251,7 @@ void CSoft3DMazeDlg::GenerateOneFloor(int f)
 		};
 
 		int widen = (int)((float)max(6, m_n / 2) * kWidenScale[diff] + 0.5f);
-		if (widen > 80) widen = 80;
+		if (widen > 400) widen = 400;
 		if (widen < 0) widen = 0;
 		const int widenTries = max(widen * 48, 80);
 		for (int t = 0; t < widenTries && widen > 0; t++) {
@@ -1936,15 +2268,24 @@ void CSoft3DMazeDlg::GenerateOneFloor(int f)
 			widen--;
 		}
 
-		int roomsLeft = max(diff >= DIFF_VERY_HARD ? 0 : 1, m_n / kRoomDiv[diff]);
-		if (roomsLeft > kRoomMax[diff]) roomsLeft = kRoomMax[diff];
+		// 広間数: マップ辺長に比例（旧 kRoomMax=1〜8 だと大マップで増えない）
+		int roomsLeft = m_n / kRoomDiv[diff];
+		if (diff >= DIFF_VERY_HARD) roomsLeft = max(0, roomsLeft / 2);
+		else if (roomsLeft < 1) roomsLeft = 1;
+		if (roomsLeft > 160) roomsLeft = 160;
 		for (int attempt = 0; attempt < roomsLeft * 80 && roomsLeft > 0; attempt++) {
 			m_rng = m_rng * 1664525u + 1013904223u;
 			const int cx = 1 + 2 * (int)(m_rng % (DWORD)max(1, (m_n - 1) / 2));
 			m_rng = m_rng * 1664525u + 1013904223u;
 			const int cz = 1 + 2 * (int)(m_rng % (DWORD)max(1, (m_n - 1) / 2));
 			if (!inInner(cx, cz) || !isOpen(cx, cz)) continue;
-			const int half = (diff <= DIFF_EASY && (m_rng & 3u) == 0) ? 2 : 1;
+			int half = 1;
+			if (diff <= DIFF_EASY) {
+				if (m_n >= 600 && (m_rng & 3u) == 0) half = 3;
+				else if ((m_rng & 3u) == 0) half = 2;
+			} else if (diff == DIFF_NORMAL && m_n >= 800 && (m_rng & 7u) == 0) {
+				half = 2;
+			}
 			const int x0 = max(1, cx - half), x1 = min(m_n - 2, cx + half);
 			const int z0 = max(1, cz - half), z1 = min(m_n - 2, cz + half);
 			int carved = 0;
@@ -1969,6 +2310,22 @@ void CSoft3DMazeDlg::GenerateOneFloor(int f)
 				}
 			}
 		}
+
+		// 交差柱だけ残った孤立セルを除去（広間／幅広げの消し忘れ）
+		for (int z = 2; z < m_n - 2; z += 2) {
+			for (int x = 2; x < m_n - 2; x += 2) {
+				if (CellAtF(f, x, z) != CELL_WALL) continue;
+				auto solid = [&](int sx, int sz) -> BOOL {
+					if (sx < 0 || sz < 0 || sx >= m_n || sz >= m_n) return TRUE;
+					const BYTE c = CellAtF(f, sx, sz);
+					return (c == CELL_WALL || c == CELL_WINDOW || c == CELL_MIRROR_WALL) ? TRUE : FALSE;
+				};
+				const int segs = (solid(x - 1, z) ? 1 : 0) + (solid(x + 1, z) ? 1 : 0)
+					+ (solid(x, z - 1) ? 1 : 0) + (solid(x, z + 1) ? 1 : 0);
+				if (segs == 0)
+					CellF(f, x, z) = CELL_FLOOR;
+			}
+		}
 	}
 }
 
@@ -1977,7 +2334,9 @@ BOOL CSoft3DMazeDlg::MazeWalkable(int f, int x, int z) const
 	if (f < 0 || f >= m_nFloors || x < 0 || z < 0 || x >= m_n || z >= m_n || !m_grids[f])
 		return FALSE;
 	const BYTE c = CellAtF(f, x, z);
-	return (c != CELL_WALL && c != CELL_WINDOW) ? TRUE : FALSE;
+	if (c == CELL_DOOR)
+		return (m_keysHeld > 0) ? TRUE : FALSE;
+	return (c != CELL_WALL && c != CELL_WINDOW && c != CELL_MIRROR_WALL) ? TRUE : FALSE;
 }
 
 // 下り／上り階段の相手マス（通路は奇数列なので ±2＝壁1マスを挟んだ斜め接続）
@@ -2066,18 +2425,16 @@ int CSoft3DMazeDlg::PickGoalByDifficulty(int sx, int sz, int& outX, int& outZ, i
 	memset(seen, 0, cap);
 
 	struct Qn { int x, z, f, d, tr; };
-	// 超大マップではキュー上限を設けて探索（最遠候補は十分に得られる）
-	size_t qMax = stride * 2;
-	if (qMax < 65536) qMax = 65536;
-	if (qMax > 1500000u) qMax = 1500000u;
-	Qn* q = new Qn[qMax];
+	// 大マップでも全セル探索できるようキューを切らない（1500² では 50万上限だと不通判定になる）
+	const size_t qMax = cap;
+	Qn* q = new (std::nothrow) Qn[qMax];
 	if (!q) { delete[] seen; return 0; }
 
 	auto id = [&](int f, int x, int z) -> size_t {
 		return (size_t)f * stride + (size_t)z * (size_t)m_n + (size_t)x;
 	};
 
-	int qh = 0, qt = 0;
+	size_t qh = 0, qt = 0;
 	q[qt++] = { sx, sz, 0, 0, 0 };
 	seen[id(0, sx, sz)] = 1;
 
@@ -2100,13 +2457,17 @@ int CSoft3DMazeDlg::PickGoalByDifficulty(int sx, int sz, int& outX, int& outZ, i
 			farD = cur.d; farTr = cur.tr; farX = cur.x; farZ = cur.z; farF = cur.f;
 		}
 		if (cur.d >= wantMin && !(cur.f == 0 && cur.x == sx && cur.z == sz)) {
-			const BYTE c = CellAtF(cur.f, cur.x, cur.z);
-			if (c != CELL_STAIRS_DOWN && c != CELL_STAIRS_UP && c != CELL_START) {
-				if (nCand < kCandMax)
-					cand[nCand++] = cur;
-				else {
-					m_rng = m_rng * 1664525u + 1013904223u;
-					cand[m_rng % (DWORD)kCandMax] = cur;
+			// ゴールは奇数×奇数の通路のみ（壁帯・交差点に置かない）
+			if (((cur.x & 1) != 0) && ((cur.z & 1) != 0)
+				&& cur.x > 0 && cur.z > 0 && cur.x < m_n - 1 && cur.z < m_n - 1) {
+				const BYTE c = CellAtF(cur.f, cur.x, cur.z);
+				if (c == CELL_FLOOR) {
+					if (nCand < kCandMax)
+						cand[nCand++] = cur;
+					else {
+						m_rng = m_rng * 1664525u + 1013904223u;
+						cand[m_rng % (DWORD)kCandMax] = cur;
+					}
 				}
 			}
 		}
@@ -2114,9 +2475,9 @@ int CSoft3DMazeDlg::PickGoalByDifficulty(int sx, int sz, int& outX, int& outZ, i
 		auto push = [&](int nf, int nx, int nz, int nd, int ntr) {
 			if (!MazeWalkable(nf, nx, nz)) return;
 			const size_t i = id(nf, nx, nz);
-			if (seen[i]) return;
+			if (seen[i] || qt >= qMax) return;
 			seen[i] = 1;
-			if (qt < (int)qMax) q[qt++] = { nx, nz, nf, nd, ntr };
+			q[qt++] = { nx, nz, nf, nd, ntr };
 		};
 
 		for (int i = 0; i < 4; i++)
@@ -2158,7 +2519,9 @@ int CSoft3DMazeDlg::PickGoalByDifficulty(int sx, int sz, int& outX, int& outZ, i
 		return cand[pick].d;
 	}
 
-	if (farD > 0 && !(farF == 0 && farX == sx && farZ == sz)) {
+	if (farD > 0 && !(farF == 0 && farX == sx && farZ == sz)
+		&& ((farX & 1) != 0) && ((farZ & 1) != 0)
+		&& CellAtF(farF, farX, farZ) == CELL_FLOOR) {
 		outX = farX; outZ = farZ; outF = farF;
 		return farD;
 	}
@@ -2211,9 +2574,10 @@ void CSoft3DMazeDlg::PlaceStairsAndGoal()
 
 	const int basements = m_nFloors - 1;
 	if (basements > 0) {
-		int per = kStairsPer[diff];
+		static const int kChunk[DIFF_COUNT] = { 100, 150, 200, 300, 450 };
+		int per = kStairsPer[diff] + max(0, m_n / kChunk[diff] - 1);
 		if (per < 1) per = 1;
-		if (per > 12) per = 12;
+		if (per > 16) per = 16;
 		// 簡単: 階段を離して迷いを減らす／難しい: 密に置いて上がり下がりが増える
 		const int minSep = (diff <= DIFF_EASY) ? max(6, m_n / 6)
 			: (diff == DIFF_NORMAL ? max(2, m_n / 14) : 0);
@@ -2292,11 +2656,58 @@ void CSoft3DMazeDlg::PlaceStairsAndGoal()
 	}
 	{
 		const BYTE c = CellAtF(gf, gx, gz);
-		if (c == CELL_STAIRS_DOWN || c == CELL_STAIRS_UP || c == CELL_START) {
-			if (!findPassNear(gf, gx, gz, sx, sz, gx, gz)) return;
+		if (!isPassCell(gx, gz) || c != CELL_FLOOR) {
+			if (!findPassNear(gf, (gx >= 0 ? gx : m_n - 2), (gz >= 0 ? gz : 1), sx, sz, gx, gz)) {
+				BOOL ok = FALSE;
+				for (int f = m_nFloors - 1; f >= 0 && !ok; f--) {
+					int tx = -1, tz = -1;
+					if (findPassNear(f, m_n - 2, 1, (f == 0) ? sx : -1, (f == 0) ? sz : -1, tx, tz)) {
+						gf = f; gx = tx; gz = tz; ok = TRUE;
+					}
+				}
+				if (!ok) return;
+			}
 		}
 	}
+	if (!isPassCell(gx, gz) || CellAtF(gf, gx, gz) != CELL_FLOOR)
+		return;
 	CellF(gf, gx, gz) = CELL_GOAL;
+	m_goalX = gx; m_goalZ = gz; m_goalFloor = gf;
+}
+
+// DFS 迷路は通路が1本。壁を抜いてループを足し、ゴールへの別ルートを増やす
+void CSoft3DMazeDlg::AddAlternateRoutes()
+{
+	if (m_n <= 0 || m_nFloors <= 0 || !m_grids[0])
+		return;
+	const int want = TargetGoalRoutes();
+	int need = want - 1; // 1本は生成時の一意経路
+	if (need <= 0) return;
+
+	auto isOpen = [&](int f, int x, int z) -> BOOL {
+		if (x < 0 || z < 0 || x >= m_n || z >= m_n || !m_grids[f]) return FALSE;
+		const BYTE c = CellAtF(f, x, z);
+		return (c != CELL_WALL && c != CELL_WINDOW && c != CELL_MIRROR_WALL) ? TRUE : FALSE;
+	};
+
+	const int triesMax = need * 200 + 2000;
+	for (int tries = 0; tries < triesMax && need > 0; tries++) {
+		m_rng = m_rng * 1664525u + 1013904223u;
+		const int f = (int)(m_rng % (DWORD)max(1, m_nFloors));
+		m_rng = m_rng * 1664525u + 1013904223u;
+		const int x = 1 + (int)(m_rng % (DWORD)(m_n - 2));
+		m_rng = m_rng * 1664525u + 1013904223u;
+		const int z = 1 + (int)(m_rng % (DWORD)(m_n - 2));
+		if (!m_grids[f] || CellAtF(f, x, z) != CELL_WALL) continue;
+		// 東西または南北の通路を結ぶ壁だけ削る（交差柱や外枠は触らない）
+		const BOOL ew = isOpen(f, x - 1, z) && isOpen(f, x + 1, z)
+			&& !isOpen(f, x, z - 1) && !isOpen(f, x, z + 1);
+		const BOOL ns = isOpen(f, x, z - 1) && isOpen(f, x, z + 1)
+			&& !isOpen(f, x - 1, z) && !isOpen(f, x + 1, z);
+		if (!ew && !ns) continue;
+		CellF(f, x, z) = CELL_FLOOR;
+		need--;
+	}
 }
 
 void CSoft3DMazeDlg::GenerateMazeWithSeed(DWORD seed, int forceSize)
@@ -2333,6 +2744,7 @@ void CSoft3DMazeDlg::GenerateMazeWithSeed(DWORD seed, int forceSize)
 	for (int f = 0; f < m_nFloors; f++)
 		GenerateOneFloor(f);
 	PlaceStairsAndGoal();
+	AddAlternateRoutes();
 	BindFloor(0);
 	m_mapViewFloor = 0;
 
@@ -2341,7 +2753,7 @@ void CSoft3DMazeDlg::GenerateMazeWithSeed(DWORD seed, int forceSize)
 		auto isSolidWallF = [&](int f, int x, int z) -> BOOL {
 			if (x < 0 || z < 0 || x >= m_n || z >= m_n) return TRUE;
 			const BYTE c = CellAtF(f, x, z);
-			return (c == CELL_WALL || c == CELL_WINDOW) ? TRUE : FALSE;
+			return (c == CELL_WALL || c == CELL_WINDOW || c == CELL_MIRROR_WALL) ? TRUE : FALSE;
 		};
 		for (int f = 0; f < m_nFloors; f++) {
 			int winBudget = (int)((float)(m_n / 3) * winSc + 0.5f);
@@ -2389,6 +2801,9 @@ void CSoft3DMazeDlg::GenerateMazeWithSeed(DWORD seed, int forceSize)
 	itemBudget = min(320, itemBudget * max(1, m_nFloors));
 	if (itemBudget < 0) itemBudget = 0;
 	const int halfSlots = max(1, (m_n - 1) / 2);
+	auto isPassOdd = [&](int x, int z) -> BOOL {
+		return ((x & 1) != 0 && (z & 1) != 0 && x > 0 && z > 0 && x < m_n - 1 && z < m_n - 1) ? TRUE : FALSE;
+	};
 	for (int tries = 0; tries < 8000 && itemBudget > 0 && nk > 0; tries++) {
 		m_rng = m_rng * 1664525u + 1013904223u;
 		const int f = (int)(m_rng % (DWORD)max(1, m_nFloors));
@@ -2396,7 +2811,7 @@ void CSoft3DMazeDlg::GenerateMazeWithSeed(DWORD seed, int forceSize)
 		const int x = 1 + 2 * (int)(m_rng % (DWORD)halfSlots);
 		m_rng = m_rng * 1664525u + 1013904223u;
 		const int z = 1 + 2 * (int)(m_rng % (DWORD)halfSlots);
-		if (x <= 0 || z <= 0 || x >= m_n - 1 || z >= m_n - 1) continue;
+		if (!isPassOdd(x, z)) continue;
 		if (CellAtF(f, x, z) != CELL_FLOOR) continue;
 		CellF(f, x, z) = kinds[m_rng % (DWORD)nk];
 		itemBudget--;
@@ -2420,19 +2835,622 @@ void CSoft3DMazeDlg::GenerateMazeWithSeed(DWORD seed, int forceSize)
 			const int x = 1 + 2 * (int)(m_rng % (DWORD)halfSlots);
 			m_rng = m_rng * 1664525u + 1013904223u;
 			const int z = 1 + 2 * (int)(m_rng % (DWORD)halfSlots);
-			if (x <= 0 || z <= 0 || x >= m_n - 1 || z >= m_n - 1) continue;
+			if (!isPassOdd(x, z)) continue;
 			if (CellAtF(f, x, z) != CELL_FLOOR) continue;
 			CellF(f, x, z) = traps[m_rng % 4u];
 			trapBudget--;
 		}
 	}
+	// 通路以外に乗ったアイテム／トラップを除去（壁帯・交差点に残さない）
+	for (int f = 0; f < m_nFloors; f++) {
+		if (!m_grids[f]) continue;
+		for (int z = 0; z < m_n; z++) for (int x = 0; x < m_n; x++) {
+			const BYTE c = CellAtF(f, x, z);
+			if (!S3mIsPickupCell(c) && !S3mIsTrapCell(c)) continue;
+			if (isPassOdd(x, z)) continue;
+			CellF(f, x, z) = CELL_WALL;
+			if (S3mIsPickupCell(c) && m_itemsLeft > 0) m_itemsLeft--;
+		}
+	}
+
+	// 鏡壁／鏡床を生成データとして配置（見た目ハッシュではなくセル値）
+	{
+		auto isSolid = [&](int f, int x, int z) -> BOOL {
+			if (x < 0 || z < 0 || x >= m_n || z >= m_n) return TRUE;
+			return S3mIsSolidWall(CellAtF(f, x, z)) ? TRUE : FALSE;
+		};
+		for (int f = 0; f < m_nFloors; f++) {
+			if (!m_grids[f]) continue;
+			int wallBudget = max(2, m_n / 5);
+			int floorBudget = max(2, m_n / 6);
+			if (f > 0) { wallBudget = max(1, wallBudget / 2); floorBudget = max(1, floorBudget / 2); }
+			for (int z = 1; z < m_n - 1 && wallBudget > 0; z++) {
+				for (int x = 1; x < m_n - 1 && wallBudget > 0; x++) {
+					if (CellAtF(f, x, z) != CELL_WALL) continue;
+					if (((x & 1) == 0) && ((z & 1) == 0)) continue; // 交差柱は除外
+					int openN = 0;
+					if (!isSolid(f, x - 1, z)) openN++;
+					if (!isSolid(f, x + 1, z)) openN++;
+					if (!isSolid(f, x, z - 1)) openN++;
+					if (!isSolid(f, x, z + 1)) openN++;
+					if (openN < 1) continue;
+					m_rng = m_rng * 1664525u + 1013904223u;
+					if ((m_rng % 11u) != 0) continue;
+					CellF(f, x, z) = CELL_MIRROR_WALL;
+					wallBudget--;
+				}
+			}
+			for (int tries = 0; tries < 6000 && floorBudget > 0; tries++) {
+				m_rng = m_rng * 1664525u + 1013904223u;
+				const int x = 1 + 2 * (int)(m_rng % (DWORD)halfSlots);
+				m_rng = m_rng * 1664525u + 1013904223u;
+				const int z = 1 + 2 * (int)(m_rng % (DWORD)halfSlots);
+				if (!isPassOdd(x, z)) continue;
+				if (CellAtF(f, x, z) != CELL_FLOOR) continue;
+				CellF(f, x, z) = CELL_MIRROR_FLOOR;
+				floorBudget--;
+			}
+		}
+	}
+
+	// 同階ワープポータル（サイズ／難易度で組数増加＝別ルート）
+	{
+		static const int kChunk[DIFF_COUNT] = { 100, 150, 200, 300, 450 };
+		const int chunk = (diff >= 0 && diff < DIFF_COUNT) ? kChunk[diff] : 200;
+		int pairsPerFloor = max(1, m_n / chunk);
+		if (pairsPerFloor > 8) pairsPerFloor = 8;
+		for (int f = 0; f < m_nFloors; f++) {
+			if (!m_grids[f]) continue;
+			int placed = 0;
+			for (int p = 0; p < pairsPerFloor; p++) {
+				int ax = -1, az = -1, bx = -1, bz = -1;
+				int best = -1;
+				for (int tries = 0; tries < 4000; tries++) {
+					m_rng = m_rng * 1664525u + 1013904223u;
+					const int x1 = 1 + 2 * (int)(m_rng % (DWORD)halfSlots);
+					m_rng = m_rng * 1664525u + 1013904223u;
+					const int z1 = 1 + 2 * (int)(m_rng % (DWORD)halfSlots);
+					m_rng = m_rng * 1664525u + 1013904223u;
+					const int x2 = 1 + 2 * (int)(m_rng % (DWORD)halfSlots);
+					m_rng = m_rng * 1664525u + 1013904223u;
+					const int z2 = 1 + 2 * (int)(m_rng % (DWORD)halfSlots);
+					if (!isPassOdd(x1, z1) || !isPassOdd(x2, z2)) continue;
+					if (CellAtF(f, x1, z1) != CELL_FLOOR || CellAtF(f, x2, z2) != CELL_FLOOR) continue;
+					const int d = abs(x1 - x2) + abs(z1 - z2);
+					if (d < m_n / 4) continue;
+					if (d > best) {
+						best = d;
+						ax = x1; az = z1; bx = x2; bz = z2;
+					}
+				}
+				if (best > 0 && ax >= 0 && bx >= 0) {
+					CellF(f, ax, az) = CELL_PORTAL;
+					CellF(f, bx, bz) = CELL_PORTAL;
+					placed++;
+				}
+			}
+			(void)placed;
+		}
+	}
 	m_trapCellX = -1; m_trapCellZ = -1; m_slowT = 0.f; m_iceSlideLeft = 0; m_darkT = 0.f;
+	ResetPortalFx();
+	ClearNavPath();
+	m_keysHeld = 0;
+	EnsureGoalReachable();
+	// 鍵／扉：ゴール確定後に配置（鍵なしでは扉＝壁。鍵はスタート側の同階寄り通路へ）
+	{
+		int nDoors = max(0, m_n / 200 + m_nFloors - 1);
+		if (diff == DIFF_VERY_EASY) nDoors = 0;
+		else if (diff == DIFF_EASY) nDoors = max(0, nDoors / 2);
+		else if (diff >= DIFF_HARD) nDoors += max(0, m_nFloors - 1);
+		if (nDoors > 32) nDoors = 32;
+		int sx = 1, sz = 1;
+		for (int z = 0; z < m_n; z++) for (int x = 0; x < m_n; x++)
+			if (CellAtF(0, x, z) == CELL_START) { sx = x; sz = z; }
+		if (nDoors > 0 && MazeWalkable(0, sx, sz)) {
+			const size_t stride = (size_t)m_n * (size_t)m_n;
+			const size_t cap = stride * (size_t)m_nFloors;
+			BYTE* seenBits = new (std::nothrow) BYTE[(cap + 7) / 8];
+			UINT* q = new (std::nothrow) UINT[min(cap, (size_t)1 << 20)];
+			UINT* dist = new (std::nothrow) UINT[cap];
+			const size_t qCap = q ? min(cap, (size_t)1 << 20) : 0;
+			static const int dx4[4] = { 1, -1, 0, 0 }, dz4[4] = { 0, 0, 1, -1 };
+			auto idOf = [&](int f, int x, int z) -> size_t {
+				return (size_t)f * stride + (size_t)z * (size_t)m_n + (size_t)x;
+			};
+			if (seenBits && q && dist && qCap > 0) {
+				for (int di = 0; di < nDoors; di++) {
+					BOOL placed = FALSE;
+					for (int attempt = 0; attempt < 120 && !placed; attempt++) {
+						m_rng = m_rng * 1664525u + 1013904223u;
+						const int f = (int)(m_rng % (DWORD)m_nFloors);
+						m_rng = m_rng * 1664525u + 1013904223u;
+						const int x = 1 + (int)(m_rng % (DWORD)(m_n - 2));
+						m_rng = m_rng * 1664525u + 1013904223u;
+						const int z = 1 + (int)(m_rng % (DWORD)(m_n - 2));
+						if (CellAtF(f, x, z) != CELL_FLOOR) continue;
+						int openN = 0;
+						for (int i = 0; i < 4; i++) {
+							const int nx = x + dx4[i], nz = z + dz4[i];
+							if (nx < 0 || nz < 0 || nx >= m_n || nz >= m_n) continue;
+							const BYTE nc = CellAtF(f, nx, nz);
+							if (nc != CELL_WALL && nc != CELL_WINDOW && nc != CELL_MIRROR_WALL && nc != CELL_DOOR)
+								openN++;
+						}
+						if (openN != 2) continue;
+						CellF(f, x, z) = CELL_DOOR;
+						memset(seenBits, 0, (cap + 7) / 8);
+						size_t qh = 0, qt = 0;
+						const UINT start = (UINT)idOf(0, sx, sz);
+						seenBits[start >> 3] = (BYTE)(seenBits[start >> 3] | (BYTE)(1u << (start & 7)));
+						dist[start] = 0; q[qt++] = start;
+						int bestKx = -1, bestKz = -1, bestKf = -1, bestScore = -1;
+						const int minMan = max(4, m_n / 10);
+						while (qh < qt) {
+							const UINT cur = q[qh++];
+							const int cf = (int)(cur / stride);
+							const size_t rem = cur - (size_t)cf * stride;
+							const int cz = (int)(rem / (size_t)m_n);
+							const int cx = (int)(rem - (size_t)cz * (size_t)m_n);
+							if (cf == f && CellAtF(cf, cx, cz) == CELL_FLOOR) {
+								const int man = abs(cx - x) + abs(cz - z);
+								if (man >= minMan) {
+									const int sc = man + (int)dist[cur];
+									if (sc > bestScore) { bestScore = sc; bestKx = cx; bestKz = cz; bestKf = cf; }
+								}
+							}
+							auto tryPush = [&](int nf, int nx, int nz) {
+								if (!MazeWalkable(nf, nx, nz)) return;
+								const UINT nid = (UINT)idOf(nf, nx, nz);
+								if ((seenBits[nid >> 3] >> (nid & 7)) & 1) return;
+								if (qt >= qCap) return;
+								seenBits[nid >> 3] = (BYTE)(seenBits[nid >> 3] | (BYTE)(1u << (nid & 7)));
+								dist[nid] = dist[cur] + 1;
+								q[qt++] = nid;
+							};
+							for (int i = 0; i < 4; i++)
+								tryPush(cf, cx + dx4[i], cz + dz4[i]);
+							const BYTE cc = CellAtF(cf, cx, cz);
+							if (cc == CELL_STAIRS_DOWN || cc == CELL_STAIRS_UP) {
+								int pf = 0, px = 0, pz = 0;
+								if (FindStairPartner(cf, cx, cz, pf, px, pz))
+									tryPush(pf, px, pz);
+							}
+						}
+						if (bestKx < 0) {
+							CellF(f, x, z) = CELL_FLOOR;
+							continue;
+						}
+						CellF(bestKf, bestKx, bestKz) = CELL_KEY;
+						placed = TRUE;
+					}
+				}
+			}
+			delete[] seenBits;
+			delete[] q;
+			delete[] dist;
+			// 鍵所持想定でゴール接続を再確認（扉で不通になった場合のみ付け替え）
+			{
+				const int kh = m_keysHeld;
+				m_keysHeld = 1000;
+				EnsureGoalReachable();
+				m_keysHeld = 0;
+				(void)kh;
+			}
+		}
+	}
+	RefreshGoalCache();
+	RecountExploreStats();
 
 	MarkVisited();
 	m_runDirty = 1;
 	PersistRun();
 	UpdateStatus();
 	RenderScene();
+}
+
+
+// 3000x3000x4 向け省メモリ BFS（seen=bit / parent=UINT / queue 成長）
+// 巨大な構造体キューをフル確保すると Win32 で new 失敗しナビが全滅する
+struct S3mCompactBfs {
+	CSoft3DMazeDlg* d;
+	size_t stride, cap;
+	BYTE* seenBits;
+	UINT* parent;
+	UINT* q;
+	size_t qCap, qh, qt;
+	struct P { int x, z, f; };
+	P* portals;
+	int nPortal;
+	int dx4[4];
+	int dz4[4];
+
+	S3mCompactBfs()
+		: d(NULL), stride(0), cap(0), seenBits(NULL), parent(NULL), q(NULL)
+		, qCap(0), qh(0), qt(0), portals(NULL), nPortal(0)
+	{
+		dx4[0]=1; dx4[1]=-1; dx4[2]=0; dx4[3]=0;
+		dz4[0]=0; dz4[1]=0; dz4[2]=1; dz4[3]=-1;
+	}
+	~S3mCompactBfs() { Destroy(); }
+
+	void Destroy() {
+		delete[] seenBits; seenBits = NULL;
+		delete[] parent; parent = NULL;
+		delete[] q; q = NULL;
+		delete[] portals; portals = NULL;
+		qCap = qh = qt = 0; nPortal = 0; cap = 0;
+	}
+
+	BOOL Init(CSoft3DMazeDlg* dlg) {
+		Destroy();
+		d = dlg;
+		if (!d || d->m_n <= 0 || d->m_nFloors <= 0) return FALSE;
+		stride = (size_t)d->m_n * (size_t)d->m_n;
+		cap = stride * (size_t)d->m_nFloors;
+		seenBits = new (std::nothrow) BYTE[(cap + 7) / 8];
+		parent = new (std::nothrow) UINT[cap];
+		if (!seenBits || !parent) { Destroy(); return FALSE; }
+		nPortal = 0;
+		for (int f = 0; f < d->m_nFloors; f++) {
+			if (!d->m_grids[f]) continue;
+			for (int z = 1; z < d->m_n - 1; z += 2)
+				for (int x = 1; x < d->m_n - 1; x += 2)
+					if (d->CellAtF(f, x, z) == CSoft3DMazeDlg::CELL_PORTAL) nPortal++;
+		}
+		if (nPortal > 0) {
+			portals = new (std::nothrow) P[nPortal];
+			if (!portals) { Destroy(); return FALSE; }
+			int w = 0;
+			for (int f = 0; f < d->m_nFloors; f++) {
+				if (!d->m_grids[f]) continue;
+				for (int z = 1; z < d->m_n - 1; z += 2)
+					for (int x = 1; x < d->m_n - 1; x += 2)
+						if (d->CellAtF(f, x, z) == CSoft3DMazeDlg::CELL_PORTAL)
+							portals[w++] = { x, z, f };
+			}
+		}
+		return TRUE;
+	}
+
+	void ClearSearch() {
+		if (seenBits) memset(seenBits, 0, (cap + 7) / 8);
+		qh = qt = 0;
+	}
+
+	size_t Id(int f, int x, int z) const {
+		return (size_t)f * stride + (size_t)z * (size_t)d->m_n + (size_t)x;
+	}
+	BOOL Seen(size_t i) const { return (seenBits[i >> 3] >> (i & 7)) & 1; }
+	void Mark(size_t i) { seenBits[i >> 3] = (BYTE)(seenBits[i >> 3] | (BYTE)(1u << (i & 7))); }
+
+	BOOL EnsureQ(size_t liveNeed) {
+		if (liveNeed <= qCap) return TRUE;
+		size_t nc = qCap ? qCap : ((size_t)1 << 18);
+		while (nc < liveNeed) {
+			if (nc >= cap) { nc = cap; break; }
+			nc *= 2;
+			if (nc > cap) nc = cap;
+		}
+		if (liveNeed > nc) return FALSE;
+		UINT* nq = new (std::nothrow) UINT[nc];
+		if (!nq) return FALSE;
+		if (q && qt > qh)
+			memcpy(nq, q + qh, (qt - qh) * sizeof(UINT));
+		qt -= qh; qh = 0;
+		delete[] q; q = nq; qCap = nc;
+		return TRUE;
+	}
+
+	BOOL Push(UINT id, UINT from) {
+		if (Seen(id)) return TRUE;
+		if (qt >= qCap) {
+			const size_t live = qt - qh;
+			if (qh > 0 && live + 1 <= qCap) {
+				memmove(q, q + qh, live * sizeof(UINT));
+				qt = live; qh = 0;
+			} else if (!EnsureQ(live + 1)) {
+				return FALSE;
+			}
+		}
+		if (qt >= qCap) return FALSE;
+		Mark(id);
+		parent[id] = from;
+		q[qt++] = id;
+		return TRUE;
+	}
+
+	void Decode(UINT id, int& f, int& x, int& z) const {
+		f = (int)(id / stride);
+		const size_t rem = id - (size_t)f * stride;
+		z = (int)(rem / (size_t)d->m_n);
+		x = (int)(rem - (size_t)z * (size_t)d->m_n);
+	}
+
+	BOOL Pump() {
+		MSG msg;
+		while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
+			if (msg.message == WM_QUIT) {
+				::PostQuitMessage((int)msg.wParam);
+				return FALSE;
+			}
+			::TranslateMessage(&msg);
+			::DispatchMessage(&msg);
+		}
+		return TRUE;
+	}
+
+	// 1=到達, 0=不通, -1=失敗
+	int Reach(int sf, int sx, int sz, int tf, int tx, int tz, UINT* distOut) {
+		if (!d->MazeWalkable(sf, sx, sz) || !d->MazeWalkable(tf, tx, tz)) return 0;
+		ClearSearch();
+		const UINT start = (UINT)Id(sf, sx, sz);
+		const UINT goal = (UINT)Id(tf, tx, tz);
+		if (!EnsureQ(1)) return -1;
+		Mark(start);
+		parent[start] = 0xFFFFFFFFu;
+		if (distOut) distOut[start] = 0;
+		q[qt++] = start;
+		size_t steps = 0;
+		while (qh < qt) {
+			if ((++steps & 0xFFFFu) == 0 && !Pump()) return -1;
+			const UINT cur = q[qh++];
+			if (cur == goal) return 1;
+			int f, x, z; Decode(cur, f, x, z);
+			auto tryPush = [&](int nf, int nx, int nz) -> BOOL {
+				if (!d->MazeWalkable(nf, nx, nz)) return TRUE;
+				const UINT id = (UINT)Id(nf, nx, nz);
+				if (Seen(id)) return TRUE;
+				if (!Push(id, cur)) return FALSE;
+				if (distOut) distOut[id] = distOut[cur] + 1;
+				return TRUE;
+			};
+			for (int i = 0; i < 4; i++)
+				if (!tryPush(f, x + dx4[i], z + dz4[i])) return -1;
+			const BYTE c = d->CellAtF(f, x, z);
+			if (c == CSoft3DMazeDlg::CELL_STAIRS_DOWN || c == CSoft3DMazeDlg::CELL_STAIRS_UP) {
+				int pf = 0, px = 0, pz = 0;
+				if (d->FindStairPartner(f, x, z, pf, px, pz))
+					if (!tryPush(pf, px, pz)) return -1;
+			}
+			if (c == CSoft3DMazeDlg::CELL_PORTAL && portals) {
+				for (int pi = 0; pi < nPortal; pi++) {
+					if (portals[pi].f != f) continue;
+					if (portals[pi].x == x && portals[pi].z == z) continue;
+					if (!tryPush(portals[pi].f, portals[pi].x, portals[pi].z)) return -1;
+				}
+			}
+		}
+		return 0;
+	}
+
+	BOOL FarthestPass(int sx, int sz, int& bestX, int& bestZ, int& bestF, int& bestD) {
+		bestX = -1; bestZ = -1; bestF = 0; bestD = -1;
+		if (!d->MazeWalkable(0, sx, sz)) return FALSE;
+		UINT* dist = new (std::nothrow) UINT[cap];
+		if (!dist) return FALSE;
+		ClearSearch();
+		const UINT start = (UINT)Id(0, sx, sz);
+		if (!EnsureQ(1)) { delete[] dist; return FALSE; }
+		Mark(start); parent[start] = 0xFFFFFFFFu; dist[start] = 0; q[qt++] = start;
+		const int n = d->m_n;
+		size_t steps = 0;
+		while (qh < qt) {
+			if ((++steps & 0xFFFFu) == 0 && !Pump()) { delete[] dist; return FALSE; }
+			const UINT cur = q[qh++];
+			int f, x, z; Decode(cur, f, x, z);
+			const int dd = (int)dist[cur];
+			const BOOL pass = ((x & 1) != 0 && (z & 1) != 0 && x > 0 && z > 0 && x < n - 1 && z < n - 1);
+			if (pass && d->CellAtF(f, x, z) == CSoft3DMazeDlg::CELL_FLOOR
+				&& !(f == 0 && x == sx && z == sz) && dd > bestD) {
+				bestD = dd; bestX = x; bestZ = z; bestF = f;
+			}
+			auto tryPush = [&](int nf, int nx, int nz) -> BOOL {
+				if (!d->MazeWalkable(nf, nx, nz)) return TRUE;
+				const UINT id = (UINT)Id(nf, nx, nz);
+				if (Seen(id)) return TRUE;
+				if (!Push(id, cur)) return FALSE;
+				dist[id] = dist[cur] + 1;
+				return TRUE;
+			};
+			for (int i = 0; i < 4; i++)
+				if (!tryPush(f, x + dx4[i], z + dz4[i])) { delete[] dist; return FALSE; }
+			const BYTE c = d->CellAtF(f, x, z);
+			if (c == CSoft3DMazeDlg::CELL_STAIRS_DOWN || c == CSoft3DMazeDlg::CELL_STAIRS_UP) {
+				int pf = 0, px = 0, pz = 0;
+				if (d->FindStairPartner(f, x, z, pf, px, pz))
+					if (!tryPush(pf, px, pz)) { delete[] dist; return FALSE; }
+			}
+			if (c == CSoft3DMazeDlg::CELL_PORTAL && portals) {
+				for (int pi = 0; pi < nPortal; pi++) {
+					if (portals[pi].f != f) continue;
+					if (portals[pi].x == x && portals[pi].z == z) continue;
+					if (!tryPush(portals[pi].f, portals[pi].x, portals[pi].z)) { delete[] dist; return FALSE; }
+				}
+			}
+		}
+		delete[] dist;
+		return bestX >= 0;
+	}
+
+	// 経路の先頭 maxPts 点（連続）を outPts へ。*outCount に格納数、*outFullLen に全長
+	int PathPrefix(int sf, int sx, int sz, int tf, int tx, int tz,
+		short* outX, short* outZ, short* outF, int maxPts, int* outCount, int* outFullLen) {
+		if (outCount) *outCount = 0;
+		if (outFullLen) *outFullLen = 0;
+		const int r = Reach(sf, sx, sz, tf, tx, tz, NULL);
+		if (r != 1) return r;
+		const UINT start = (UINT)Id(sf, sx, sz);
+		const UINT goal = (UINT)Id(tf, tx, tz);
+		int nFull = 0;
+		for (UINT i = goal; ; ) {
+			nFull++;
+			if (i == start || parent[i] == 0xFFFFFFFFu) break;
+			i = parent[i];
+			if (nFull > (int)cap) return -1;
+		}
+		if (outFullLen) *outFullLen = nFull;
+		if (!outX || maxPts <= 0) return 1;
+		const int nOut = (nFull < maxPts) ? nFull : maxPts;
+		// ゴール側から辿り、スタートからの index < nOut の点だけ拾う（全経路配列不要）
+		int pos = nFull - 1;
+		for (UINT i = goal; ; ) {
+			if (pos < nOut) {
+				int f, x, z; Decode(i, f, x, z);
+				outX[pos] = (short)x; outZ[pos] = (short)z; outF[pos] = (short)f;
+			}
+			if (i == start || parent[i] == 0xFFFFFFFFu) break;
+			i = parent[i];
+			pos--;
+			if (pos < 0) break;
+		}
+		if (outCount) *outCount = nOut;
+		return 1;
+	}
+};
+
+void CSoft3DMazeDlg::EnsureGoalReachable()
+{
+	if (m_n <= 0 || m_nFloors <= 0 || !m_grids[0])
+		return;
+	auto isPass = [&](int x, int z) -> BOOL {
+		return ((x & 1) != 0 && (z & 1) != 0 && x > 0 && z > 0 && x < m_n - 1 && z < m_n - 1) ? TRUE : FALSE;
+	};
+	int gx = -1, gz = -1, gf = -1;
+	int sx = -1, sz = -1;
+	for (int z = 0; z < m_n; z++) for (int x = 0; x < m_n; x++) {
+		if (CellAtF(0, x, z) == CELL_START) { sx = x; sz = z; }
+	}
+	if (sx < 0) { sx = 1; sz = ((m_n - 2) & 1) ? (m_n - 2) : (m_n - 3); }
+	for (int f = 0; f < m_nFloors; f++) {
+		if (!m_grids[f]) continue;
+		for (int z = 0; z < m_n; z++) for (int x = 0; x < m_n; x++) {
+			if (CellAtF(f, x, z) != CELL_GOAL) continue;
+			if (!isPass(x, z) || !MazeWalkable(f, x, z)) {
+				CellF(f, x, z) = CELL_FLOOR;
+				continue;
+			}
+			gx = x; gz = z; gf = f;
+		}
+	}
+
+	S3mCompactBfs bfs;
+	if (!bfs.Init(this))
+		return; // OOM 時は既存ゴールを壊さない
+
+	if (gf >= 0) {
+		const int r = bfs.Reach(0, sx, sz, gf, gx, gz, NULL);
+		if (r == 1) { RefreshGoalCache(); return; }
+		if (r < 0) return;
+	}
+
+	for (int f = 0; f < m_nFloors; f++) {
+		if (!m_grids[f]) continue;
+		for (int z = 0; z < m_n; z++) for (int x = 0; x < m_n; x++)
+			if (CellAtF(f, x, z) == CELL_GOAL)
+				CellF(f, x, z) = CELL_FLOOR;
+	}
+	int bestX = -1, bestZ = -1, bestF = 0, bestD = -1;
+	if (bfs.FarthestPass(sx, sz, bestX, bestZ, bestF, bestD) && bestX >= 0)
+		CellF(bestF, bestX, bestZ) = CELL_GOAL;
+	m_mapBakeDirty = 1;
+	RefreshGoalCache();
+}
+
+void CSoft3DMazeDlg::ClearNavPath()
+{
+	m_navCount = 0;
+}
+
+BOOL CSoft3DMazeDlg::ComputeNavHint()
+{
+	ClearNavPath();
+	if (m_n <= 0 || m_nFloors <= 0 || !m_grids[0])
+		return FALSE;
+	{
+		const int kh = m_keysHeld;
+		m_keysHeld = 1000;
+		EnsureGoalReachable();
+		m_keysHeld = kh;
+	}
+	const int sx = (int)floorf(m_px), sz = (int)floorf(m_pz);
+	if (!MazeWalkable(m_floor, sx, sz))
+		return FALSE;
+	int gx = m_goalX, gz = m_goalZ, gf = m_goalFloor;
+	if (gx < 0 || gz < 0 || gf < 0 || gf >= m_nFloors
+		|| !m_grids[gf] || CellAtF(gf, gx, gz) != CELL_GOAL) {
+		RefreshGoalCache();
+		gx = m_goalX; gz = m_goalZ; gf = m_goalFloor;
+	}
+	if (gx < 0) return FALSE;
+
+	S3mCompactBfs bfs;
+	if (!bfs.Init(this))
+		return FALSE;
+
+	short ox[S3M_NAV_MAX], oz[S3M_NAV_MAX], of[S3M_NAV_MAX];
+	int nOut = 0, nFull = 0;
+	int r = bfs.PathPrefix(m_floor, sx, sz, gf, gx, gz, ox, oz, of, S3M_NAV_MAX, &nOut, &nFull);
+	// ゴール不通（鍵不足で扉）→ 到達可能な最短の鍵へ（1回のBFSで探索）
+	if (r != 1) {
+		UINT* dist = new (std::nothrow) UINT[bfs.cap];
+		if (!dist) return FALSE;
+		bfs.ClearSearch();
+		const UINT start = (UINT)bfs.Id(m_floor, sx, sz);
+		if (!bfs.EnsureQ(1)) { delete[] dist; return FALSE; }
+		bfs.Mark(start); bfs.parent[start] = 0xFFFFFFFFu; dist[start] = 0; bfs.q[bfs.qt++] = start;
+		int bestF = -1, bestX = -1, bestZ = -1; UINT bestD = 0xFFFFFFFFu;
+		while (bfs.qh < bfs.qt) {
+			const UINT cur = bfs.q[bfs.qh++];
+			int f, x, z; bfs.Decode(cur, f, x, z);
+			if (CellAtF(f, x, z) == CELL_KEY && dist[cur] < bestD) {
+				bestD = dist[cur]; bestF = f; bestX = x; bestZ = z;
+			}
+			auto tryPush = [&](int nf, int nx, int nz) {
+				if (!MazeWalkable(nf, nx, nz)) return;
+				const UINT id = (UINT)bfs.Id(nf, nx, nz);
+				if (bfs.Seen(id)) return;
+				if (!bfs.Push(id, cur)) return;
+				dist[id] = dist[cur] + 1;
+			};
+			for (int i = 0; i < 4; i++)
+				tryPush(f, x + bfs.dx4[i], z + bfs.dz4[i]);
+			const BYTE c = CellAtF(f, x, z);
+			if (c == CELL_STAIRS_DOWN || c == CELL_STAIRS_UP) {
+				int pf = 0, px = 0, pz = 0;
+				if (FindStairPartner(f, x, z, pf, px, pz))
+					tryPush(pf, px, pz);
+			}
+			if (c == CELL_PORTAL && bfs.portals) {
+				for (int pi = 0; pi < bfs.nPortal; pi++) {
+					if (bfs.portals[pi].f != f) continue;
+					if (bfs.portals[pi].x == x && bfs.portals[pi].z == z) continue;
+					tryPush(bfs.portals[pi].f, bfs.portals[pi].x, bfs.portals[pi].z);
+				}
+			}
+		}
+		delete[] dist;
+		if (bestF < 0) return FALSE;
+		r = bfs.PathPrefix(m_floor, sx, sz, bestF, bestX, bestZ, ox, oz, of, S3M_NAV_MAX, &nOut, &nFull);
+		if (r != 1 || nOut < 2) return FALSE;
+	}
+	m_navCount = nOut;
+	for (int i = 0; i < nOut; i++) {
+		m_navPath[i].x = ox[i];
+		m_navPath[i].z = oz[i];
+		m_navPath[i].f = of[i];
+	}
+	(void)nFull;
+	return TRUE;
+}
+
+void CSoft3DMazeDlg::UpdateNavProgress()
+{
+	if (m_navCount <= 1) return;
+	const int px = (int)floorf(m_px), pz = (int)floorf(m_pz);
+	const S3mNavPt& dest = m_navPath[m_navCount - 1];
+	if (m_floor == dest.f && px == dest.x && pz == dest.z)
+		ClearNavPath();
 }
 
 void CSoft3DMazeDlg::ApplyItem(int kind)
@@ -2534,15 +3552,49 @@ void CSoft3DMazeDlg::TryPickup()
 	const int ix = (int)floorf(m_px);
 	const int iz = (int)floorf(m_pz);
 	if (ix < 0 || iz < 0 || ix >= m_n || iz >= m_n) return;
+	if (m_portalIgnoreX >= 0 && (ix != m_portalIgnoreX || iz != m_portalIgnoreZ)) {
+		m_portalIgnoreX = -1;
+		m_portalIgnoreZ = -1;
+	}
 	const BYTE c = CellAt(ix, iz);
 	if (S3mIsPickupCell(c)) {
 		ApplyItem(c);
 		Cell(ix, iz) = CELL_FLOOR;
 		if (m_itemsLeft > 0) m_itemsLeft--;
 		UpdateStatus();
+	} else if (c == CELL_KEY) {
+		m_keysHeld++;
+		Cell(ix, iz) = CELL_FLOOR;
+		m_runDirty = 1;
+		if (IsOverviewActive()) m_mapBakeDirty = 1;
+		m_toastKind = 2;
+		m_doorMsgT = 2.0f;
+		m_floorTextAPrev = -1.f;
+		UpdateStatus();
+	} else if (c == CELL_DOOR) {
+		if (m_keysHeld > 0) {
+			m_keysHeld--;
+			Cell(ix, iz) = CELL_FLOOR;
+			m_runDirty = 1;
+			if (IsOverviewActive()) m_mapBakeDirty = 1;
+			m_toastKind = 3;
+			m_doorMsgT = 1.8f;
+			m_floorTextAPrev = -1.f;
+			UpdateStatus();
+		}
+	} else if (c == CELL_PORTAL && m_portalFx == PORTALFX_IDLE && m_clearPhase == CLEAR_IDLE
+		&& m_floorFx == FLOORFX_IDLE
+		&& !(ix == m_portalIgnoreX && iz == m_portalIgnoreZ)) {
+		int ox = -1, oz = -1;
+		for (int z = 0; z < m_n; z++) for (int x = 0; x < m_n; x++) {
+			if (x == ix && z == iz) continue;
+			if (CellAt(x, z) == CELL_PORTAL) { ox = x; oz = z; break; }
+		}
+		if (ox >= 0)
+			BeginPortalWarp(ox, oz);
 	} else if (c == CELL_STAIRS_DOWN || c == CELL_STAIRS_UP) {
 		int pf = 0, px = 0, pz = 0;
-		if (m_clearPhase == CLEAR_IDLE && m_floorFx == FLOORFX_IDLE
+		if (m_clearPhase == CLEAR_IDLE && m_floorFx == FLOORFX_IDLE && m_portalFx == PORTALFX_IDLE
 			&& FindStairPartner(m_floor, ix, iz, pf, px, pz))
 			BeginFloorChange(pf, px, pz);
 	} else if (c == CELL_GOAL && !m_won && m_clearPhase == CLEAR_IDLE) {
@@ -2550,6 +3602,72 @@ void CSoft3DMazeDlg::TryPickup()
 		PersistRun();
 	}
 	TryTrapEnter();
+}
+
+void CSoft3DMazeDlg::ResetPortalFx()
+{
+	m_portalFx = PORTALFX_IDLE;
+	m_portalFxT = 0.f;
+	m_portalFlashA = 0.f;
+	m_portalToX = m_px;
+	m_portalToZ = m_pz;
+	m_portalIgnoreX = -1;
+	m_portalIgnoreZ = -1;
+}
+
+void CSoft3DMazeDlg::BeginPortalWarp(int toX, int toZ)
+{
+	if (toX < 0 || toZ < 0 || toX >= m_n || toZ >= m_n) return;
+	if (m_portalFx != PORTALFX_IDLE) return;
+	m_moving = 0;
+	m_turning = 0;
+	m_portalToX = (float)toX + 0.5f;
+	m_portalToZ = (float)toZ + 0.5f;
+	m_portalFx = PORTALFX_OUT;
+	m_portalFxT = 0.f;
+	m_portalFlashA = 0.f;
+	m_runDirty = 1;
+}
+
+void CSoft3DMazeDlg::TickPortalFx(float dt)
+{
+	if (m_portalFx == PORTALFX_IDLE) return;
+	m_portalFxT += dt;
+	const float kOut = 0.42f;
+	const float kIn = 0.55f;
+	if (m_portalFx == PORTALFX_OUT) {
+		const float t = min(1.f, m_portalFxT / kOut);
+		// 吸い込み：急速に明るく→白飛び
+		m_portalFlashA = t * t * (0.55f + 0.45f * t);
+		if (m_portalFxT >= kOut) {
+			m_px = m_portalToX;
+			m_pz = m_portalToZ;
+			m_pxTarget = m_px;
+			m_pzTarget = m_pz;
+			m_portalIgnoreX = (int)floorf(m_px);
+			m_portalIgnoreZ = (int)floorf(m_pz);
+			m_trapCellX = m_portalIgnoreX;
+			m_trapCellZ = m_portalIgnoreZ;
+			MarkVisited();
+			m_mapBakeDirty = 1;
+			m_portalFx = PORTALFX_IN;
+			m_portalFxT = 0.f;
+			m_portalFlashA = 1.f;
+			UpdateNavProgress();
+			UpdateStatus();
+		}
+	} else if (m_portalFx == PORTALFX_IN) {
+		const float t = min(1.f, m_portalFxT / kIn);
+		// 着地バースト→減衰
+		m_portalFlashA = (1.f - t) * (1.f - t) * (0.85f + 0.4f * sinf(t * 18.f));
+		if (m_portalFlashA < 0.f) m_portalFlashA = 0.f;
+		if (m_portalFxT >= kIn) {
+			m_portalFx = PORTALFX_IDLE;
+			m_portalFxT = 0.f;
+			m_portalFlashA = 0.f;
+			m_runDirty = 1;
+		}
+	}
 }
 
 void CSoft3DMazeDlg::TryTrapEnter()
@@ -2665,6 +3783,19 @@ void CSoft3DMazeDlg::TickFloorFx(float dt)
 	if (m_floorFx == FLOORFX_IDLE)
 		return;
 
+	// 階段移動後：ラベルだけ長く残す（操作は再開）
+	if (m_floorFx == FLOORFX_HOLD) {
+		m_floorFxT += dt;
+		const float kHold = 1.55f;
+		const float kFade = 0.65f;
+		if (m_floorFxT < kHold) m_floorTextA = 1.f;
+		else if (m_floorFxT < kHold + kFade) m_floorTextA = 1.f - (m_floorFxT - kHold) / kFade;
+		else { ResetFloorFx(); return; }
+		m_floorScreenA = 0.f;
+		RefreshFloorTex();
+		return;
+	}
+
 	m_floorFxT += dt;
 	const float kDur = 0.92f;
 	float t = m_floorFxT / kDur;
@@ -2688,13 +3819,13 @@ void CSoft3DMazeDlg::TickFloorFx(float dt)
 		m_stairSwapDone = 1;
 		MarkVisited();
 		m_runDirty = 1;
+		UpdateNavProgress();
 		UpdateStatus();
 	}
 
-	// ラベルのみ（画面暗転なし）
-	if (t < 0.18f) m_floorTextA = t / 0.18f;
-	else if (t < 0.72f) m_floorTextA = 1.f;
-	else m_floorTextA = (1.f - t) / 0.28f;
+	// 移動中はフェードイン→表示維持（消灯はHOLD側）
+	if (t < 0.15f) m_floorTextA = t / 0.15f;
+	else m_floorTextA = 1.f;
 	m_floorScreenA = 0.f;
 	RefreshFloorTex();
 
@@ -2703,13 +3834,22 @@ void CSoft3DMazeDlg::TickFloorFx(float dt)
 			BindFloor(m_stairTo);
 			m_mapViewFloor = m_stairTo;
 			MarkVisited();
+			UpdateNavProgress();
 			UpdateStatus();
 		}
 		m_px = m_stairLandX;
 		m_pz = m_stairLandZ;
 		m_pxTarget = m_px;
 		m_pzTarget = m_pz;
-		ResetFloorFx();
+		m_stairCamY = 0.f;
+		m_stairShiftX = 0.f;
+		m_stairShiftZ = 0.f;
+		m_stairSwapDone = 0;
+		m_floorFx = FLOORFX_HOLD;
+		m_floorFxT = 0.f;
+		m_floorTextA = 1.f;
+		m_floorTextAPrev = -1.f;
+		RefreshFloorTex();
 	}
 }
 
@@ -2723,8 +3863,24 @@ void CSoft3DMazeDlg::RefreshFloorTex()
 	}
 	if (fabsf(m_floorTextA - m_floorTextAPrev) < .08f && m_view.m_srvClear)
 		return;
-	const int labF = (m_floorFx != FLOORFX_IDLE) ? m_stairTo : m_floor;
-	const CStringW label(FloorLabel(labF));
+	CStringW label;
+	if (m_toastKind && m_floorFx == FLOORFX_IDLE && m_doorMsgT > .01f) {
+		if (m_toastKind == 1)
+			label = LL14(L"鍵がないので開きません", L"No key — won't open", L"Pas de clé — ne s'ouvre pas", L"Senza chiave — non si apre", L"Sin llave — no abre",
+				L"열쇠가 없어 열리지 않습니다", L"没有钥匙，打不开", L"لا مفتاح — لن يفتح", L"Нет ключа — не откроется", L"Kein Schlüssel — öffnet nicht",
+				L"Sem chave — não abre", L"Geen sleutel — opent niet", L"Brak klucza — nie otworzy", L"Anahtar yok — açılmaz");
+		else if (m_toastKind == 2)
+			label = LL14(L"鍵を手に入れた", L"Got a key", L"Clé obtenue", L"Chiave presa", L"Llave obtenida",
+				L"열쇠를 얻었다", L"得到了钥匙", L"حصلت على مفتاح", L"Ключ получен", L"Schlüssel erhalten",
+				L"Chave obtida", L"Sleutel gekregen", L"Zdobyto klucz", L"Anahtar alındı");
+		else
+			label = LL14(L"扉を開けた", L"Door unlocked", L"Porte ouverte", L"Porta aperta", L"Puerta abierta",
+				L"문을 열었다", L"门已打开", L"فُتح الباب", L"Дверь открыта", L"Tür geöffnet",
+				L"Porta aberta", L"Deur geopend", L"Otwarto drzwi", L"Kapı açıldı");
+	} else {
+		const int labF = (m_floorFx == FLOORFX_IN || m_floorFx == FLOORFX_HOLD) ? m_stairTo : m_floor;
+		label = FloorLabel(labF);
+	}
 	m_view.BakeClearTexture((LPCWSTR)label, m_floorTextA);
 	m_floorTextAPrev = m_floorTextA;
 	m_clearTextAPrev = -1.f; // クリア表示時に必ず再ベイクさせる
@@ -2737,10 +3893,98 @@ void CSoft3DMazeDlg::OverviewFloorDelta(int d)
 	int f = m_mapViewFloor + d;
 	if (f < 0) f = 0;
 	if (f >= m_nFloors) f = m_nFloors - 1;
+	OverviewFloorSet(f);
+}
+
+void CSoft3DMazeDlg::OverviewFloorSet(int f)
+{
+	if (!IsOverviewActive())
+		return;
+	if (f < 0) f = 0;
+	if (f >= m_nFloors) f = m_nFloors - 1;
 	if (f == m_mapViewFloor)
 		return;
 	m_mapViewFloor = f;
 	m_mapBakeDirty = 1;
+	m_floorBarDirty = 1;
+}
+
+void CSoft3DMazeDlg::LayoutOverviewFloorUi(int viewW, int viewH)
+{
+	m_ovBarX = m_ovBarY = m_ovBarW = m_ovBarH = 0.f;
+	m_ovRecX0 = m_ovRecX1 = 0.f;
+	m_ovTabN = 0;
+	for (int i = 0; i < S3M_MAX_FLOORS; i++)
+		m_ovTabX0[i] = m_ovTabX1[i] = 0.f;
+	if (viewW < 8 || viewH < 8 || !m_view.m_srvFloorBar || m_view.m_floorBarW <= 0)
+		return;
+	float tw = (float)m_view.m_floorBarW, th = (float)m_view.m_floorBarH;
+	const float pad = 10.f;
+	const float tipReserve = (m_view.m_srvTip && m_view.m_tipH > 0)
+		? min(120.f, (float)m_view.m_tipH * ((float)viewW - pad * 2.f) / max(1.f, (float)m_view.m_tipW) + 8.f)
+		: 72.f;
+	const float maxW = (float)viewW - pad * 2.f;
+	if (tw > maxW) {
+		const float s = maxW / tw;
+		tw *= s;
+		th *= s;
+	}
+	m_ovBarW = tw;
+	m_ovBarH = th;
+	m_ovBarX = ((float)viewW - tw) * .5f;
+	m_ovBarY = (float)viewH - tipReserve - th - pad;
+	if (m_ovBarY < pad) m_ovBarY = pad;
+	m_ovTabN = min(m_nFloors, 4);
+	for (int i = 0; i < m_ovTabN; i++) {
+		m_ovTabX0[i] = m_view.m_floorBarTabX0[i];
+		m_ovTabX1[i] = m_view.m_floorBarTabX1[i];
+	}
+	m_ovRecX0 = m_view.m_floorBarRecX0;
+	m_ovRecX1 = m_view.m_floorBarRecX1;
+}
+
+BOOL CSoft3DMazeDlg::HitOverviewFloorUi(CPoint clientPt, int& outAction) const
+{
+	outAction = -1;
+	if (!IsOverviewActive() || m_ovBarW < 1.f || m_ovBarH < 1.f)
+		return FALSE;
+	if (clientPt.x < (int)m_ovBarX || clientPt.x > (int)(m_ovBarX + m_ovBarW)
+		|| clientPt.y < (int)m_ovBarY || clientPt.y > (int)(m_ovBarY + m_ovBarH))
+		return FALSE;
+	const float u = ((float)clientPt.x - m_ovBarX) / m_ovBarW;
+	if (u >= m_ovRecX0 && u <= m_ovRecX1) {
+		outAction = 100;
+		return TRUE;
+	}
+	for (int i = 0; i < m_ovTabN; i++) {
+		if (u >= m_ovTabX0[i] && u <= m_ovTabX1[i]) {
+			outAction = i;
+			return TRUE;
+		}
+	}
+	outAction = -1;
+	return TRUE; // バー上だがタブ外：パン開始を抑止
+}
+
+BOOL CSoft3DMazeDlg::FinishOverviewUiPress(CPoint pt)
+{
+	const int press = m_ovPressAction;
+	m_ovPressAction = -1;
+	if (press < 0)
+		return FALSE;
+	int act = -1;
+	const int dx = pt.x - m_ovPressPt.x;
+	const int dy = pt.y - m_ovPressPt.y;
+	if (abs(dx) >= 12 || abs(dy) >= 12)
+		return TRUE;
+	if (!HitOverviewFloorUi(pt, act) || act != press)
+		return TRUE;
+	if (act == 100) {
+		OverviewFloorSet(m_floor);
+		FocusOverviewOnPlayer();
+	} else if (act >= 0 && act < m_nFloors)
+		OverviewFloorSet(act);
+	return TRUE;
 }
 
 void CSoft3DMazeDlg::ResetClearFx()
@@ -2856,14 +4100,32 @@ void CSoft3DMazeDlg::UpdateStatus()
 			L"Цель! Лабиринт пройден под музыку.", L"Ziel! Labyrinth im Takt geschafft.", L"Gol! Labirinto concluído com a música.", L"Doel! Doolhof gehaald op de muziek.",
 			L"Cel! Labirynt ukończony przy muzyce.", L"Hedef! Labirent müzikle tamamlandı.");
 	} else {
-		s.Format(LL14(L"サイズ %d  残りアイテム %d  （右クリックで設定）", L"Size %d  items left %d  (right-click settings)", L"Taille %d  objets %d  (clic droit)", L"Dimensione %d  oggetti %d  (clic destro)",
-			L"Tamaño %d  objetos %d  (clic derecho)", L"크기 %d  남은 아이템 %d  (우클릭 설정)", L"尺寸 %d  剩余道具 %d  （右键设置）", L"الحجم %d  العناصر %d  (انقر يمينًا)",
-			L"Размер %d  предметов %d  (ПКМ)", L"Größe %d  Items %d  (Rechtsklick)", L"Tamanho %d  itens %d  (clique direito)", L"Grootte %d  items %d  (rechtsklik)",
-			L"Rozmiar %d  przedmioty %d  (PPM)", L"Boyut %d  öğe %d  (sağ tık)"),
-			m_n, m_itemsLeft);
+		if (m_passCells <= 0)
+			RecountExploreStats();
+		const int explorePct = (m_passCells > 0) ? (m_visitPassCells * 100 / m_passCells) : 0;
+		s.Format(LL14(L"サイズ %d  残りアイテム %d  鍵 %d  探索 %d%%  （右クリックで設定）", L"Size %d  items left %d  keys %d  explore %d%%  (right-click settings)", L"Taille %d  objets %d  clés %d  exploré %d%%  (clic droit)", L"Dimensione %d  oggetti %d  chiavi %d  esplorato %d%%  (clic destro)",
+			L"Tamaño %d  objetos %d  llaves %d  explorado %d%%  (clic derecho)", L"크기 %d  남은 아이템 %d  열쇠 %d  탐험 %d%%  (우클릭 설정)", L"尺寸 %d  剩余道具 %d  钥匙 %d  探索 %d%%  （右键设置）", L"الحجم %d  العناصر %d  المفاتيح %d  استكشاف %d%%  (انقر يمينًا)",
+			L"Размер %d  предметов %d  ключей %d  исследовано %d%%  (ПКМ)", L"Größe %d  Items %d  Schlüssel %d  Erkundung %d%%  (Rechtsklick)", L"Tamanho %d  itens %d  chaves %d  explorado %d%%  (clique direito)", L"Grootte %d  items %d  sleutels %d  verkend %d%%  (rechtsklik)",
+			L"Rozmiar %d  przedmioty %d  klucze %d  eksploracja %d%%  (PPM)", L"Boyut %d  öğe %d  anahtar %d  keşif %d%%  (sağ tık)"),
+			m_n, m_itemsLeft, m_keysHeld, explorePct);
 		CString fl;
 		fl.Format(_T("  [%s]"), (LPCTSTR)FloorLabel(m_floor));
 		s += fl;
+		if (HasNavPath()) {
+			CString nv;
+			const S3mNavPt& dest = m_navPath[m_navCount - 1];
+			const BYTE dc = (dest.f >= 0 && dest.f < m_nFloors) ? CellAtF(dest.f, dest.x, dest.z) : (BYTE)0;
+			if (dc == CELL_KEY) {
+				nv.Format(LL14(L"  ナビ…鍵へ%d歩", L"  Navi…key %d steps", L"  Nav…clé %d", L"  Navi…chiave %d", L"  Navi…llave %d",
+					L"  내비…열쇠 %d", L"  导航…钥匙%d步", L"  Navi…key %d", L"  Нави…ключ %d", L"  Navi…Schlüssel %d", L"  Navi…chave %d", L"  Navi…sleutel %d", L"  Nawi…klucz %d", L"  Navi…anahtar %d"),
+					m_navCount - 1);
+			} else {
+				nv.Format(LL14(L"  ナビ…ゴールへ%d歩", L"  Navi…goal %d steps", L"  Nav…but %d", L"  Navi…traguardo %d", L"  Navi…meta %d",
+					L"  내비…골 %d", L"  导航…终点%d步", L"  Navi…goal %d", L"  Нави…цель %d", L"  Navi…Ziel %d", L"  Navi…gol %d", L"  Navi…doel %d", L"  Nawi…cel %d", L"  Navi…hedef %d"),
+					m_navCount - 1);
+			}
+			s += nv;
+		}
 		if (savedata.s3m_zoom != 100) {
 			CString z;
 			z.Format(_T("  ×%.2f"), savedata.s3m_zoom / 100.f);
@@ -2896,7 +4158,7 @@ float CSoft3DMazeDlg::MapZoomScale() const
 
 int CSoft3DMazeDlg::OverviewZoomMaxPct() const
 {
-	// 最大でおおよそ 8px/セルまで寄れる（3000マスでも通路が読める）
+	// 最大でおおよそ 36px/セルまで寄れる（ズーム制限を緩め）
 	int basePx = 720;
 	if (m_view.GetSafeHwnd()) {
 		CRect rc;
@@ -2905,9 +4167,9 @@ int CSoft3DMazeDlg::OverviewZoomMaxPct() const
 	}
 	if (basePx < 64) basePx = 64;
 	const int n = max(1, m_n);
-	const int need = (int)((8.f * (float)n / (float)basePx) * 100.f + .5f);
-	if (need < 400) return 400;
-	if (need > 25000) return 25000;
+	const int need = (int)((36.f * (float)n / (float)basePx) * 100.f + .5f);
+	if (need < 2000) return 2000; // 最低でも20倍まで
+	if (need > 100000) return 100000;
 	return need;
 }
 
@@ -3090,35 +4352,63 @@ BOOL CSoft3DMazeDlg::TryStep(int mx, int mz)
 	const int a2x = cx + gx * 2, a2z = cz + gz * 2;
 
 	auto standable = [&](int x, int z) -> BOOL {
-		if (x < 0 || z < 0 || x >= m_n || z >= m_n) return FALSE;
-		const BYTE c = CellAt(x, z);
-		// 壁・窓には絶対に立てない
-		return (c != CELL_WALL && c != CELL_WINDOW) ? TRUE : FALSE;
+		// 扉は鍵所持時のみ（MazeWalkable と同規則）。壁帯すり抜け禁止のため1マス先も必ず見る
+		return MazeWalkable(m_floor, x, z);
 	};
 
 	int tx = -1, tz = -1;
+	auto noteNoKeyDoor = [&](int x, int z) {
+		if (x < 0 || z < 0 || x >= m_n || z >= m_n) return;
+		if (CellAt(x, z) == CELL_DOOR && m_keysHeld <= 0) {
+			m_toastKind = 1;
+			m_doorMsgT = 2.2f;
+			m_floorTextAPrev = -1.f;
+		}
+	};
+	// 2マス移動では扉マスに着地しないため、通過マスで開錠する
+	auto tryOpenDoorAt = [&](int x, int z) {
+		if (x < 0 || z < 0 || x >= m_n || z >= m_n) return;
+		if (CellAt(x, z) != CELL_DOOR || m_keysHeld <= 0) return;
+		m_keysHeld--;
+		Cell(x, z) = CELL_FLOOR;
+		m_runDirty = 1;
+		if (IsOverviewActive()) m_mapBakeDirty = 1;
+		m_toastKind = 3;
+		m_doorMsgT = 1.8f;
+		m_floorTextAPrev = -1.f;
+		UpdateStatus();
+	};
 	if ((cx & 1) && (cz & 1)) {
-		// 奇数×奇数の通路: 2マス進むには「1マス先も床」が必須（壁すり抜け禁止）
-		// 1マス先だけ床なら広間へ1マス
+		// 奇数×奇数の通路: 2マス進むには「1マス先も通行可」が必須（壁・鍵なし扉のすり抜け禁止）
+		// 1マス先だけ通れるなら広間へ1マス
 		if (standable(a1x, a1z) && standable(a2x, a2z)) {
 			tx = a2x;
 			tz = a2z;
+			tryOpenDoorAt(a1x, a1z);
+			tryOpenDoorAt(a2x, a2z);
 		} else if (standable(a1x, a1z)) {
 			tx = a1x;
 			tz = a1z;
+			tryOpenDoorAt(a1x, a1z);
 		} else {
+			noteNoKeyDoor(a1x, a1z);
 			return FALSE;
 		}
 	} else {
-		// 広間・壁帯上など: 1マスのみ（壁へは進めない）
-		if (!standable(a1x, a1z))
+		// 広間・壁帯上など: 1マスのみ（壁／鍵なし扉へは進めない）
+		if (!standable(a1x, a1z)) {
+			noteNoKeyDoor(a1x, a1z);
 			return FALSE;
+		}
 		tx = a1x;
 		tz = a1z;
+		tryOpenDoorAt(a1x, a1z);
 	}
 
-	if (!standable(tx, tz))
+	if (!standable(tx, tz)) {
+		noteNoKeyDoor(tx, tz);
 		return FALSE;
+	}
 
 	m_pxTarget = (float)tx + 0.5f;
 	m_pzTarget = (float)tz + 0.5f;
@@ -3135,12 +4425,38 @@ void CSoft3DMazeDlg::TickMove(float dt)
 	if (m_n <= 0) return;
 	m_anim += dt;
 	TickFloorFx(dt);
+	// 階層ラベル／クリア／ナビ待ちと共有する中央トースト（同じ BakeClearTexture 経路）
+	if (m_toastKind && m_floorFx == FLOORFX_IDLE && m_clearPhase == CLEAR_IDLE && !m_navWaiting) {
+		if (m_doorMsgT > 0.f) {
+			m_doorMsgT -= dt;
+			if (m_doorMsgT < 0.f) m_doorMsgT = 0.f;
+			const float T = (m_toastKind == 1) ? 2.2f : ((m_toastKind == 2) ? 2.0f : 1.8f);
+			const float left = m_doorMsgT;
+			const float elapsed = T - left;
+			if (elapsed < 0.22f) m_floorTextA = elapsed / 0.22f;
+			else if (left > 0.38f) m_floorTextA = 1.f;
+			else m_floorTextA = left / 0.38f;
+			RefreshFloorTex();
+		} else {
+			m_toastKind = 0;
+			m_floorTextA = 0.f;
+			RefreshFloorTex();
+		}
+	}
+	if (m_portalFx != PORTALFX_IDLE) {
+		TickPortalFx(dt);
+		m_moveHeld = 1;
+		m_turnHeld = 1;
+		if (savedata.s3m_bob) m_bob += dt * 4.f;
+		m_anim += dt;
+		return;
+	}
 	if (m_clearPhase != CLEAR_IDLE) {
 		if(savedata.s3m_bob)m_bob += dt * 3.f;
 		return;
 	}
-	// 階層切替の演出中は移動・旋回しない
-	if (m_floorFx != FLOORFX_IDLE) {
+	// 階層切替の演出中は移動・旋回しない（ラベル残表示HOLDは操作可）
+	if (m_floorFx == FLOORFX_IN) {
 		m_moveHeld = 1;
 		m_turnHeld = 1;
 		if (savedata.s3m_bob) m_bob += dt * 2.f;
@@ -3246,18 +4562,18 @@ void CSoft3DMazeDlg::TickMove(float dt)
 			}
 			m_moving = 0;
 			MarkVisited();
+			UpdateNavProgress();
+			UpdateStatus();
 			{
 				const int nx = (int)floorf(m_px), nz = (int)floorf(m_pz);
 				const int mx = (ox + nx) / 2, mz = (oz + nz) / 2;
-				if (mx >= 0 && mz >= 0 && mx < m_n && mz < m_n && !VisitAt(mx, mz)
+				if (mx >= 0 && mz >= 0 && mx < m_n && mz < m_n
 					&& !IsBlocked((float)mx + 0.5f, (float)mz + 0.5f)) {
-					Visit(mx, mz) = 1;
-					m_runDirty = 1;
-					m_mapBakeDirty = 1;
+					NoteVisitCell(mx, mz);
 				}
 			}
 			TryPickup();
-			if (m_iceSlideLeft > 0 && !m_moving && !m_turning && m_floorFx == FLOORFX_IDLE) {
+			if (m_iceSlideLeft > 0 && !m_moving && !m_turning && m_floorFx != FLOORFX_IN) {
 				const int smx = m_lastStepMx, smz = m_lastStepMz;
 				m_iceSlideLeft = 0;
 				TryStep(smx, smz);
@@ -3266,10 +4582,13 @@ void CSoft3DMazeDlg::TickMove(float dt)
 		} else {
 			m_px += dx / dist * step;
 			m_pz += dz / dist * step;
-			// 壁セルを通過中なら目標へ飛ばす（壁の上に留まらない）
+			// 薄い壁帯の上に留まらないよう飛ばす（鍵なし扉はすり抜けない）
 			if (IsBlocked(m_px, m_pz) && !IsBlocked(m_pxTarget, m_pzTarget)) {
-				m_px = m_pxTarget;
-				m_pz = m_pzTarget;
+				const BYTE mid = CellAt((int)floorf(m_px), (int)floorf(m_pz));
+				if (mid == CELL_WALL || mid == CELL_WINDOW || mid == CELL_MIRROR_WALL) {
+					m_px = m_pxTarget;
+					m_pz = m_pzTarget;
+				}
 			}
 			if(savedata.s3m_bob)m_bob += dt * 18.f;
 			m_runDirty = 1;
@@ -3295,9 +4614,9 @@ void CSoft3DMazeDlg::RenderScene()
 	const float lDist=28.f;const float focusY=.40f;
 	const float lpx=ex+lx*lDist,lpy=focusY+ly*lDist,lpz=ez+lz*lDist;
 	cb.lightVP=S3mMatMul(S3mLookAt(lpx,lpy,lpz,ex,focusY,ez,0,1,0),S3mOrtho(-12.f,12.f,-12.f,12.f,2.f,60.f));
-	cb.eyePos={ex,eyeY,ez,1};
+	cb.eyePos={ex,eyeY,ez,0.f};
 	{
-		const int thFog=ThemeOfFloor((m_floorFx!=FLOORFX_IDLE)?m_stairFrom:m_floor);
+		const int thFog=ThemeOfFloor((m_floorFx==FLOORFX_IN)?m_stairFrom:m_floor);
 		float fogNear=5.5f,fogFar=16.f,fogH=.04f,fogY=.15f;
 		if(thFog<=0){fogNear=5.5f;fogFar=16.f;fogH=.04f;fogY=.15f;}
 		else if(thFog==1){fogNear=4.f;fogFar=13.f;fogH=.07f;fogY=.2f;}
@@ -3310,13 +4629,53 @@ void CSoft3DMazeDlg::RenderScene()
 			fogH+=.08f*k;
 		}
 		cb.fogParams={fogNear,fogFar,fogH,fogY};
+		cb.eyePos.w=(float)thFog;
 	}
 	// DOF: 約6マス以遠からぼけ開始（通路マス≈1ワールド単位）。手前はシャープ
-	cb.dofParams={6.0f,7.0f,4.0f,m_bob};cb.screenSize={(float)w,(float)h,1.f/w,1.f/h};cb.misc={m_clearScreenA,m_clearTextA,1.f/tanf(fov*.5f),(float)savedata.s3m_bob};
+	cb.dofParams={6.0f,7.0f,4.0f,m_bob};cb.screenSize={(float)w,(float)h,1.f/w,1.f/h};cb.misc={m_clearScreenA,m_clearTextA,1.f/tanf(fov*.5f),m_anim};
 	D3D11_MAPPED_SUBRESOURCE map={};if(FAILED(dc->Map(m_view.m_cbFrame,0,D3D11_MAP_WRITE_DISCARD,0,&map)))return;memcpy(map.pData,&cb,sizeof(cb));dc->Unmap(m_view.m_cbFrame,0);
 	const S3MMat vpMat=cb.viewProj;
-	const UINT maxV=m_view.m_vbDynBytes/sizeof(S3MVertex);S3MVertex* v=new S3MVertex[maxV];UINT floorBeg=0,nFloor=0,wallBeg=0,nWall=0,transBeg=0,nTrans=0;int phase=0;
-	auto put=[&](float x,float y,float z,float nx,float ny,float nz,float u,float vv,float r,float g,float b,float a)->BOOL{UINT n=nFloor+nWall+nTrans;if(n>=maxV)return FALSE;v[n]={x,y,z,nx,ny,nz,u,vv,r,g,b,a};if(phase==2)nTrans++;else if(phase==1)nWall++;else nFloor++;return TRUE;};
+	UINT maxV=m_view.m_vbDynBytes/sizeof(S3MVertex);
+	if(maxV<65536u)maxV=65536u;
+	{
+		const UINT needDynBytes=maxV*sizeof(S3MVertex);
+		if(m_view.m_cpuDynScratchBytes<needDynBytes){
+			delete[] m_view.m_cpuDynScratch;
+			m_view.m_cpuDynScratch=new (std::nothrow) BYTE[needDynBytes];
+			m_view.m_cpuDynScratchBytes=m_view.m_cpuDynScratch?needDynBytes:0;
+		}
+	}
+	S3MVertex* v=m_view.m_cpuDynScratch?(S3MVertex*)m_view.m_cpuDynScratch:NULL;
+	if(!v)return;
+	UINT floorBeg=0,nFloor=0,wallBeg=0,nWall=0,transBeg=0,nTrans=0;int phase=0;
+	// 頂点が足りなければCPUスクラッチを倍々拡張（描画欠け防止）。上限≈64MB
+	const UINT kDynVertCap=(64u*1024u*1024u)/sizeof(S3MVertex);
+	auto ensureDynCap=[&](UINT needVerts)->BOOL{
+		if(needVerts<=maxV)return TRUE;
+		if(needVerts>kDynVertCap)return FALSE;
+		UINT neu=maxV?maxV:65536u;
+		while(neu<needVerts){
+			if(neu>=kDynVertCap)return FALSE;
+			UINT n2=neu*2u;if(n2<=neu)return FALSE;neu=n2;
+			if(neu>kDynVertCap)neu=kDynVertCap;
+		}
+		const UINT bytes=neu*sizeof(S3MVertex);
+		BYTE* nb=new (std::nothrow) BYTE[bytes];
+		if(!nb)return FALSE;
+		const UINT used=nFloor+nWall+nTrans;
+		if(v&&used)memcpy(nb,v,used*sizeof(S3MVertex));
+		delete[] m_view.m_cpuDynScratch;
+		m_view.m_cpuDynScratch=nb;
+		m_view.m_cpuDynScratchBytes=bytes;
+		v=(S3MVertex*)nb;
+		maxV=neu;
+		return TRUE;
+	};
+	auto put=[&](float x,float y,float z,float nx,float ny,float nz,float u,float vv,float r,float g,float b,float a)->BOOL{
+		UINT n=nFloor+nWall+nTrans;
+		if(n>=maxV&&!ensureDynCap(n+1u))return FALSE;
+		v[n]={x,y,z,nx,ny,nz,u,vv,r,g,b,a};if(phase==2)nTrans++;else if(phase==1)nWall++;else nFloor++;return TRUE;
+	};
 	auto tri=[&](float x0,float y0,float z0,float x1,float y1,float z1,float x2,float y2,float z2,float nx,float ny,float nz,float u0,float v0,float u1,float v1,float u2,float v2,float r,float g,float b,float a){put(x0,y0,z0,nx,ny,nz,u0,v0,r,g,b,a);put(x1,y1,z1,nx,ny,nz,u1,v1,r,g,b,a);put(x2,y2,z2,nx,ny,nz,u2,v2,r,g,b,a);};
 	auto quadUV=[&](float x0,float y0,float z0,float x1,float y1,float z1,float x2,float y2,float z2,float x3,float y3,float z3,float nx,float ny,float nz,float u0,float v0,float u1,float v1,float r,float g,float b,float a){
 		tri(x0,y0,z0,x1,y1,z1,x2,y2,z2,nx,ny,nz,u0,v1,u1,v1,u1,v0,r,g,b,a);tri(x0,y0,z0,x2,y2,z2,x3,y3,z3,nx,ny,nz,u0,v1,u1,v0,u0,v0,r,g,b,a);};
@@ -3331,17 +4690,8 @@ void CSoft3DMazeDlg::RenderScene()
 	auto patch=[&](float x0,float y0,float z0,float x1,float y1,float z1,float x2,float y2,float z2,float x3,float y3,float z3,float nx,float ny,float nz,float u0,float v0,float u1,float v1,float r,float g,float b,float a){
 		const float cx=(x0+x1+x2+x3)*.25f,cy=(y0+y1+y2+y3)*.25f,cz=(z0+z1+z2+z3)*.25f;
 		if(nx*(ex-cx)+ny*(eyeY-cy)+nz*(ez-cz)<=0.f)return; // 背面カリング
-		// CPU 細分化は近い壁だけ（遠い壁まで N=3 だと大マップで頂点バッファが床・壁で溢れる）
-		const float dx=cx-ex,dz=cz-ez;const float dist2=dx*dx+dz*dz;
-		// 遠い壁はCPU細分化も落とす（テッセと合わせて負荷軽減）
-		const int N=(dist2>12.f*12.f)?1:((dist2>6.f*6.f)?2:3);
-		for(int j=0;j<N;j++)for(int i=0;i<N;i++){
-			float su0=(float)i/N,su1=(float)(i+1)/N,sv0=(float)j/N,sv1=(float)(j+1)/N;
-			auto L=[&](float u,float vv,float& X,float& Y,float& Z){float ax=x0+(x1-x0)*u,ay=y0+(y1-y0)*u,az=z0+(z1-z0)*u;float bx=x3+(x2-x3)*u,by=y3+(y2-y3)*u,bz=z3+(z2-z3)*u;X=ax+(bx-ax)*vv;Y=ay+(by-ay)*vv;Z=az+(bz-az)*vv;};
-			float p00x,p00y,p00z,p10x,p10y,p10z,p11x,p11y,p11z,p01x,p01y,p01z;L(su0,sv0,p00x,p00y,p00z);L(su1,sv0,p10x,p10y,p10z);L(su1,sv1,p11x,p11y,p11z);L(su0,sv1,p01x,p01y,p01z);
-			float uu0=u0+(u1-u0)*su0,uu1=u0+(u1-u0)*su1,vv0=v0+(v1-v0)*sv0,vv1=v0+(v1-v0)*sv1;
-			patch1(p00x,p00y,p00z,p10x,p10y,p10z,p11x,p11y,p11z,p01x,p01y,p01z,nx,ny,nz,uu0,vv0,uu1,vv1,r,g,b,a);
-		}
+		// CPU細分化はしない（HSテッセに任せる）。N>=2 だと床・天井・VFXが溢れる
+		patch1(x0,y0,z0,x1,y1,z1,x2,y2,z2,x3,y3,z3,nx,ny,nz,u0,v0,u1,v1,r,g,b,a);
 	};
 	// 通路立方体（低い箱）— 階段など厚みが必要なとき用
 	auto passCube=[&](float x0,float z0,float x1,float z1,float y0,float y1,float r,float g,float b,float a){
@@ -3351,6 +4701,17 @@ void CSoft3DMazeDlg::RenderScene()
 		quad(x1,y0,z1,x1,y0,z0,x1,y1,z0,x1,y1,z1,1,0,0,r,g,b,a);
 		quad(x0,y0,z0,x1,y0,z0,x1,y1,z0,x0,y1,z0,0,0,-1,r,g,b,a);
 		quad(x1,y0,z1,x0,y0,z1,x0,y1,z1,x1,y1,z1,0,0,1,r,g,b,a);
+	};
+	// 小物用：CPU背面カリングなし（細い直方体が縦線だけになるのを防ぐ）
+	auto passCubeAll=[&](float x0,float z0,float x1,float z1,float y0,float y1,float r,float g,float b,float a){
+		float xa=x0,xb=x1,za=z0,zb=z1,ya=y0,yb=y1;
+		if(xa>xb){float t=xa;xa=xb;xb=t;} if(za>zb){float t=za;za=zb;zb=t;} if(ya>yb){float t=ya;ya=yb;yb=t;}
+		quadUV(xa,yb,za,xb,yb,za,xb,yb,zb,xa,yb,zb,0,1,0,0,0,1,1,r,g,b,a);
+		quadUV(xa,ya,zb,xb,ya,zb,xb,ya,za,xa,ya,za,0,-1,0,0,0,1,1,r*.7f,g*.7f,b*.7f,a);
+		quadUV(xa,ya,za,xa,ya,zb,xa,yb,zb,xa,yb,za,-1,0,0,0,0,1,1,r,g,b,a);
+		quadUV(xb,ya,zb,xb,ya,za,xb,yb,za,xb,yb,zb,1,0,0,0,0,1,1,r,g,b,a);
+		quadUV(xa,ya,za,xb,ya,za,xb,yb,za,xa,yb,za,0,0,-1,0,0,1,1,r,g,b,a);
+		quadUV(xb,ya,zb,xa,ya,zb,xa,yb,zb,xb,yb,zb,0,0,1,0,0,1,1,r,g,b,a);
 	};
 	const float wallH=1.20f,passH=0.08f,drawDist=28.f,rad=drawDist+2.f;
 	// 遠クリップ相当までNDCでは落とさないが、頂点溢れ防止のため走査半径は drawDist に制限
@@ -3395,15 +4756,12 @@ void CSoft3DMazeDlg::RenderScene()
 	};
 	auto wallVid=[&](int x,int z)->int{return ((x*17+z*31+x*z)&15);};
 	auto atlasUV=[&](int vid,float& u0,float& v0,float& u1,float& v1){u0=(float)(vid&3)*.25f;v0=(float)(vid>>2)*.25f;u1=u0+.25f;v1=v0+.25f;};
-	// 生成セルではなく座標ハッシュの見た目鏡。密度を上げて床・壁で確実に出現させる
-	auto isMirrorWall=[&](int x,int z)->BOOL{return (((x*13+z*29+(int)(m_genSeed&255))&3)==0);};
-	auto isMirrorFloor=[&](int x,int z)->BOOL{return (((x*7+z*11+(int)((m_genSeed>>3)&255))&3)==0);};
 	struct MirPick{float score;float nx,ny,nz,px,py,pz;};
 	MirPick bestW={-1.f,0,0,0,0,0,0},bestF={-1.f,0,0,0,0,0,0};
 	const float storyH=1.35f;
-	const BOOL stairMove=(m_floorFx!=FLOORFX_IDLE);
+	const BOOL stairMove=(m_floorFx==FLOORFX_IN);
 	const int stairDir=stairMove?((m_stairTo>m_stairFrom)?1:-1):0;
-	struct Layer{UINT fBeg,nF,wBeg,nW;int th;};
+	struct Layer{UINT fBeg,nF,mfBeg,nMF,wBeg,nW,mwBeg,nMW;int th;};
 	Layer layers[4];int nLay=0;
 	auto themeFloorRGB=[&](int th,float k,float& r,float& g,float& b){
 		if(th<=0){r=.72f*k;g=.58f*k;b=.42f*k;}
@@ -3417,74 +4775,110 @@ void CSoft3DMazeDlg::RenderScene()
 		else if(th==2){r=1.05f;g=.88f;b=.72f;}
 		else{r=1.08f;g=.72f;b=.62f;}
 	};
-	// 指定階の壁を先に、床・天井を後に積む（頂点溢れ時も壁が残る）
+	auto emitWallCell=[&](int f,float yBias,int x,int z,BOOL fullVis,BOOL mirror,float& wr,float& wg,float& wb){
+		if(fullVis){
+			const float dx=cellCX(x)-ex,dz=cellCZ(z)-ez;
+			if(dx*dx+dz*dz>rad*rad)return;
+			if(!vis(x,z)&&(dx*fx+dz*fz)<-2.5f){}
+			else if(!vis(x,z)&&(dx*dx+dz*dz)>10.f*10.f)return;
+		}
+		const int vid=wallVid(x,z);float u0,v0,u1,v1;atlasUV(vid,u0,v0,u1,v1);
+		if(mirror){u0=0;v0=0;u1=1;v1=1;}
+		float x0=cellX0(x),x1=x0+cellW(x),z0=cellZ0(z),z1=z0+cellD(z),cx=cellCX(x),cz=cellCZ(z);
+		float y0=yBias,y1=yBias+wallH;
+		float mnx=0,mny=0,mnz=0,mpx=cx,mpy=y0+wallH*.45f,mpz=cz;
+		if(mirror&&fabsf(yBias)<.01f){
+			if(cellW(x)<=cellD(z)+1e-4f){mnx=(ex>=cx)?1.f:-1.f;mpx=(mnx>0)?x1:x0;}
+			else{mnz=(ez>=cz)?1.f:-1.f;mpz=(mnz>0)?z1:z0;}
+			float tox=ex-mpx,toy=eyeY-mpy,toz=ez-mpz;float facing=mnx*tox+mny*toy+mnz*toz;
+			if(facing>.05f){float dist=sqrtf(tox*tox+toy*toy+toz*toz)+.01f;float sc=facing/(dist*.35f+1.f);if(sc>bestW.score)bestW={sc,mnx,mny,mnz,mpx,mpy,mpz};}
+		}
+		auto face=[&](float ax0,float ay0,float az0,float ax1,float ay1,float az1,float ax2,float ay2,float az2,float ax3,float ay3,float az3,float nx,float ny,float nz,float rr,float gg,float bb,float aa){
+			patch(ax0,ay0,az0,ax1,ay1,az1,ax2,ay2,az2,ax3,ay3,az3,nx,ny,nz,u0,v0,u1,v1,rr,gg,bb,aa);
+		};
+		auto faceA=[&](float nx,float ny,float nz,float ax0,float ay0,float az0,float ax1,float ay1,float az1,float ax2,float ay2,float az2,float ax3,float ay3,float az3){
+			float rr=wr,gg=wg,bb=wb,aa=1.f;
+			if(mirror&&fabsf(nx-mnx)+fabsf(nz-mnz)<.1f){rr=.75f;gg=.88f;bb=1.f;aa=1.16f;}
+			else if(mirror){rr=.82f;gg=.90f;bb=.98f;aa=1.f;}
+			face(ax0,ay0,az0,ax1,ay1,az1,ax2,ay2,az2,ax3,ay3,az3,nx,ny,nz,rr,gg,bb,aa);
+		};
+		faceA(-1,0,0,x0,y0,z0,x0,y0,z1,x0,y1,z1,x0,y1,z0);
+		faceA(1,0,0,x1,y0,z1,x1,y0,z0,x1,y1,z0,x1,y1,z1);
+		faceA(0,0,-1,x1,y0,z0,x0,y0,z0,x0,y1,z0,x1,y1,z0);
+		faceA(0,0,1,x0,y0,z1,x1,y0,z1,x1,y1,z1,x0,y1,z1);
+		face(x0,y1,z0,x1,y1,z0,x1,y1,z1,x0,y1,z1,0,1,0,wr,wg,wb,1.f);
+	};
+	// 床・天井を先に、壁は後（溢れ時も床天井優先）。地下天井は壁パッチ（レンガ）で埋める
 	auto emitLayer=[&](int f,float yBias,int ax0,int ax1,int az0,int az1,BOOL fullVis){
 		if(f<0||f>=m_nFloors||!m_grids[f]||nLay>=4)return;
 		Layer& L=layers[nLay];
 		L.th=ThemeOfFloor(f);
-		L.wBeg=nFloor+nWall+nTrans;
-		phase=1;
-		UINT w0=nWall;
-		for(int z=az0;z<=az1;z++)for(int x=ax0;x<=ax1;x++){
-			BYTE c=CellAtF(f,x,z);if(c!=CELL_WALL)continue;
-			// カメラ外でも近くの壁は影キャスタとして残す（背面の壁が床に影を落とすため）
-			if(fullVis){
-				const float dx=cellCX(x)-ex,dz=cellCZ(z)-ez;
-				if(dx*dx+dz*dz>rad*rad)continue;
-				if(!vis(x,z)&&(dx*fx+dz*fz)<-2.5f){/* 真後ろは距離だけで残す */}
-				else if(!vis(x,z)&&(dx*dx+dz*dz)>10.f*10.f)continue;
-			}
-			const int vid=wallVid(x,z);float u0,v0,u1,v1;atlasUV(vid,u0,v0,u1,v1);
-			float x0=cellX0(x),x1=x0+cellW(x),z0=cellZ0(z),z1=z0+cellD(z),cx=cellCX(x),cz=cellCZ(z);
-			float y0=yBias,y1=yBias+wallH;
-			float wr,wg,wb;themeWallTint(L.th,wr,wg,wb);
-			const BOOL mirW=isMirrorWall(x,z)&&fabsf(yBias)<.01f;
-			float mnx=0,mny=0,mnz=0,mpx=cx,mpy=y0+wallH*.45f,mpz=cz;
-			if(mirW){
-				if(cellW(x)<=cellD(z)+1e-4f){mnx=(ex>=cx)?1.f:-1.f;mpx=(mnx>0)?x1:x0;}
-				else{mnz=(ez>=cz)?1.f:-1.f;mpz=(mnz>0)?z1:z0;}
-				float tox=ex-mpx,toy=eyeY-mpy,toz=ez-mpz;float facing=mnx*tox+mny*toy+mnz*toz;
-				if(facing>.05f){float dist=sqrtf(tox*tox+toy*toy+toz*toz)+.01f;float sc=facing/(dist*.35f+1.f);if(sc>bestW.score)bestW={sc,mnx,mny,mnz,mpx,mpy,mpz};}
-			}
-			auto face=[&](float ax0,float ay0,float az0,float ax1,float ay1,float az1,float ax2,float ay2,float az2,float ax3,float ay3,float az3,float nx,float ny,float nz,float rr,float gg,float bb,float aa){
-				patch(ax0,ay0,az0,ax1,ay1,az1,ax2,ay2,az2,ax3,ay3,az3,nx,ny,nz,u0,v0,u1,v1,rr,gg,bb,aa);
-			};
-			auto faceA=[&](float nx,float ny,float nz,float ax0,float ay0,float az0,float ax1,float ay1,float az1,float ax2,float ay2,float az2,float ax3,float ay3,float az3){
-				float rr=wr,gg=wg,bb=wb,aa=1.f;
-				if(mirW&&fabsf(nx-mnx)+fabsf(nz-mnz)<.1f){rr=.62f*wr;gg=.70f*wg;bb=.88f*wb;aa=1.16f;}
-				face(ax0,ay0,az0,ax1,ay1,az1,ax2,ay2,az2,ax3,ay3,az3,nx,ny,nz,rr,gg,bb,aa);
-			};
-			faceA(-1,0,0,x0,y0,z0,x0,y0,z1,x0,y1,z1,x0,y1,z0);
-			faceA(1,0,0,x1,y0,z1,x1,y0,z0,x1,y1,z0,x1,y1,z1);
-			faceA(0,0,-1,x1,y0,z0,x0,y0,z0,x0,y1,z0,x1,y1,z0);
-			faceA(0,0,1,x0,y0,z1,x1,y0,z1,x1,y1,z1,x0,y1,z1);
-			face(x0,y1,z0,x1,y1,z0,x1,y1,z1,x0,y1,z1,0,1,0,wr,wg,wb,1.f);
-			// 立体感はテッセ変位に任せる（CPUのぎざぎざ突起は出さない）
-		}
-		L.nW=nWall-w0;
+		float wr,wg,wb;themeWallTint(L.th,wr,wg,wb);
+		// --- 床（ソリッド）---
 		L.fBeg=nFloor+nWall+nTrans;
 		phase=0;
 		UINT f0=nFloor;
 		for(int z=az0;z<=az1;z++)for(int x=ax0;x<=ax1;x++){
-			BYTE c=CellAtF(f,x,z);if(c==CELL_WALL||c==CELL_WINDOW)continue;
+			BYTE c=CellAtF(f,x,z);
+			if(S3mIsSolidWall(c)||c==CELL_MIRROR_FLOOR)continue;
 			if(fullVis&&!vis(x,z))continue;
 			float x0=cellX0(x),x1=x0+cellW(x),z0=cellZ0(z),z1=z0+cellD(z);
-			// 床上面のみ（側面立方体は頂点を食い過ぎる）
 			if(c!=CELL_STAIRS_DOWN&&c!=CELL_STAIRS_UP){
 				float k=VisitAtF(f,x,z)?1.f:.82f;float r,g,b;themeFloorRGB(L.th,k,r,g,b);
-				float a=1.f;
-				if(isMirrorFloor(x,z)&&fabsf(yBias)<.01f){r=r+(.72f-r)*.55f;g=g+(.80f-g)*.55f;b=b+(.92f-b)*.55f;a=1.14f;}
 				const float y1=yBias+passH;
-				quad(x0,y1,z0,x1,y1,z0,x1,y1,z1,x0,y1,z1,0,1,0,r,g,b,a);
-			}
-			// 地下の天井（上り階段の穴だけ開ける）
-			if(f>0&&c!=CELL_STAIRS_UP){
-				float cr,cg,cb;themeFloorRGB(L.th,.42f,cr,cg,cb);
-				const float yc=yBias+wallH;
-				quad(x0,yc,z0,x0,yc,z1,x1,yc,z1,x1,yc,z0,0,-1,0,cr,cg,cb,1.f);
+				quad(x0,y1,z0,x1,y1,z0,x1,y1,z1,x0,y1,z1,0,1,0,r,g,b,1.f);
 			}
 		}
 		L.nF=nFloor-f0;
+		L.mfBeg=nFloor+nWall+nTrans;
+		UINT mf0=nFloor;
+		for(int z=az0;z<=az1;z++)for(int x=ax0;x<=ax1;x++){
+			if(CellAtF(f,x,z)!=CELL_MIRROR_FLOOR)continue;
+			if(fullVis&&!vis(x,z))continue;
+			float x0=cellX0(x),x1=x0+cellW(x),z0=cellZ0(z),z1=z0+cellD(z);
+			float k=VisitAtF(f,x,z)?1.f:.92f;
+			float r=.88f*k+.10f,g=.94f*k+.06f,b=1.f*k;
+			const float y1=yBias+passH;
+			quad(x0,y1,z0,x1,y1,z0,x1,y1,z1,x0,y1,z1,0,1,0,r,g,b,1.16f);
+			if(fabsf(yBias)<.01f){
+				float cx=cellCX(x),cz=cellCZ(z);
+				float tox=ex-cx,toz=ez-cz;float dist=sqrtf(tox*tox+toz*toz)+.01f;
+				float sc=(passH+.02f)/(dist*.4f+1.f);
+				if(sc>bestF.score)bestF={sc,0.f,1.f,0.f,cx,passH+.02f,cz};
+			}
+		}
+		L.nMF=nFloor-mf0;
+		// --- 壁＋地下天井（パッチ／レンガ）---
+		L.wBeg=nFloor+nWall+nTrans;
+		phase=1;
+		UINT w0=nWall;
+		// 地下: 通路上の天井を壁テクスチャの下向きパッチで埋める（先に確保）
+		if(f>0){
+			for(int z=az0;z<=az1;z++)for(int x=ax0;x<=ax1;x++){
+				BYTE c=CellAtF(f,x,z);
+				if(S3mIsSolidWall(c))continue;
+				if(c==CELL_STAIRS_UP)continue;
+				if(fullVis&&!vis(x,z))continue;
+				float x0=cellX0(x),x1=x0+cellW(x),z0=cellZ0(z),z1=z0+cellD(z);
+				const float yc=yBias+wallH;
+				const int vid=wallVid(x,z);float u0,v0,u1,v1;atlasUV(vid,u0,v0,u1,v1);
+				// 下向き（室内から見る天井）
+				patch(x0,yc,z0,x0,yc,z1,x1,yc,z1,x1,yc,z0,0,-1,0,u0,v0,u1,v1,wr*.72f,wg*.72f,wb*.72f,1.f);
+			}
+		}
+		for(int z=az0;z<=az1;z++)for(int x=ax0;x<=ax1;x++){
+			if(CellAtF(f,x,z)!=CELL_WALL)continue;
+			emitWallCell(f,yBias,x,z,fullVis,FALSE,wr,wg,wb);
+		}
+		L.nW=nWall-w0;
+		L.mwBeg=nFloor+nWall+nTrans;
+		UINT mw0=nWall;
+		float mr=.85f,mg=.92f,mb=1.f;
+		for(int z=az0;z<=az1;z++)for(int x=ax0;x<=ax1;x++){
+			if(CellAtF(f,x,z)!=CELL_MIRROR_WALL)continue;
+			emitWallCell(f,yBias,x,z,fullVis,TRUE,mr,mg,mb);
+		}
+		L.nMW=nWall-mw0;
 		nLay++;
 	};
 
@@ -3518,20 +4912,10 @@ void CSoft3DMazeDlg::RenderScene()
 	struct XL{float d;int x,z;BYTE c;};XL xl[1536];int nc=0;
 	const int fxFloor=stairMove?m_stairFrom:m_floor;
 	for(int z=iz0;z<=iz1&&nc<1536;z++)for(int x=ix0;x<=ix1&&nc<1536;x++){BYTE c=CellAtF(fxFloor,x,z);if(!vis(x,z))continue;
-		if(c==CELL_WINDOW||c==CELL_GOAL||c==CELL_START||c==CELL_STAIRS_DOWN||c==CELL_STAIRS_UP||S3mIsPickupCell(c)||S3mIsTrapCell(c)){
+		if(c==CELL_WINDOW||c==CELL_GOAL||c==CELL_START||c==CELL_STAIRS_DOWN||c==CELL_STAIRS_UP||c==CELL_PORTAL||c==CELL_KEY||c==CELL_DOOR||S3mIsPickupCell(c)||S3mIsTrapCell(c)){
 			float dx=cellCX(x)-ex,dz=cellCZ(z)-ez;xl[nc++]={dx*fx+dz*fz,x,z,c};}}
 	for(int i=1;i<nc;i++){XL q=xl[i];int j=i-1;while(j>=0&&xl[j].d<q.d){xl[j+1]=xl[j];j--;}xl[j+1]=q;}
 	transBeg=nFloor+nWall;phase=2;
-	auto spinOcta=[&](float cx,float cy,float cz,float s,float ang,float rr,float gg,float bb,float a){
-		float cs=cosf(ang),sn=sinf(ang);float ox[4],oz[4];
-		auto R=[&](float px,float pz,int i){ox[i]=cx+px*cs-pz*sn;oz[i]=cz+px*sn+pz*cs;};
-		R(s,0,0);R(0,s,1);R(-s,0,2);R(0,-s,3);float top=cy+s*1.15f,bot=cy-s*.95f;
-		// 回転しても面のローカルUVを張り、カメラ反射はワールド位置＋法線で取る（UVずれで鏡面が破綻しない）
-		auto face=[&](float ax,float ay,float az,float bx,float by,float bz,float cx2,float cy2,float cz2){
-			float nx=(by-ay)*(cz2-az)-(bz-az)*(cy2-ay),ny=(bz-az)*(cx2-ax)-(bx-ax)*(cz2-az),nz=(bx-ax)*(cy2-ay)-(by-ay)*(cx2-ax);float nl=sqrtf(nx*nx+ny*ny+nz*nz)+1e-6f;nx/=nl;ny/=nl;nz/=nl;
-			tri(ax,ay,az,bx,by,bz,cx2,cy2,cz2,nx,ny,nz,0.f,0.f,1.f,0.f,.5f,1.f,rr,gg,bb,a);};
-		for(int i=0;i<4;i++){int j=(i+1)&3;face(ox[i],cy,oz[i],ox[j],cy,oz[j],cx,top,cz);face(ox[j],cy,oz[j],ox[i],cy,oz[i],cx,bot,cz);}
-	};
 	struct FxRec{UINT beg,n;float cx,cy,cz,d;float nx,ny,nz;BOOL plane;BOOL wantMir;};FxRec fxObj[64];int nFx=0;int fxMirOf[64];
 	for(int i=0;i<64;i++)fxMirOf[i]=-1;
 	const int plx=(int)floorf(m_px),plz=(int)floorf(m_pz);
@@ -3539,29 +4923,28 @@ void CSoft3DMazeDlg::RenderScene()
 		if(c==CELL_WINDOW){
 			if(nFx>=64)continue;
 			const UINT b=nFloor+nWall+nTrans;
-			// ガラス：薄い平面反射（a>1.18 → glass）
-			float rr=.42f,gg=.78f,bb=.95f,a=1.22f;
+			// ガラス：反射ありだが通れると誤解しないよう濃いアルファ（a>1.18 → glass）
+			float rr=.22f,gg=.42f,bb=.58f,a=1.20f;
 			float wnx=0.f,wnz=0.f;float wpx=ocx,wpz=ocz;
+			float fr=.40f,fg=.38f,fb=.36f,fa=.98f,t=.022f;
 			if(cellW(x)<cellD(z)){
-				wnz=(ez>=ocz)?1.f:-1.f;wpz=(wnz>0)?z1:z0;
-				quad(x0,.02f,z0,x1,.02f,z0,x1,wallH-.02f,z0,x0,wallH-.02f,z0,0,0,-1,rr,gg,bb,a);
-				quad(x1,.02f,z1,x0,.02f,z1,x0,wallH-.02f,z1,x1,wallH-.02f,z1,0,0,1,rr,gg,bb,a);
-			}else{
+				// 南北壁（Xに薄い）→ ±X 面
 				wnx=(ex>=ocx)?1.f:-1.f;wpx=(wnx>0)?x1:x0;
-				quad(x0,.02f,z1,x0,.02f,z0,x0,wallH-.02f,z0,x0,wallH-.02f,z1,-1,0,0,rr,gg,bb,a);
-				quad(x1,.02f,z0,x1,.02f,z1,x1,wallH-.02f,z1,x1,wallH-.02f,z0,1,0,0,rr,gg,bb,a);
-			}
-			float fr=.55f,fg=.52f,fb=.48f,fa=.92f,t=.018f;
-			if(cellW(x)<cellD(z)){
-				quad(x0,0,z0,x1,0,z0,x1,t,z0,x0,t,z0,0,0,-1,fr,fg,fb,fa);
-				quad(x0,wallH-t,z0,x1,wallH-t,z0,x1,wallH,z0,x0,wallH,z0,0,0,-1,fr,fg,fb,fa);
-				quad(x1,0,z1,x0,0,z1,x0,t,z1,x1,t,z1,0,0,1,fr,fg,fb,fa);
-				quad(x1,wallH-t,z1,x0,wallH-t,z1,x0,wallH,z1,x1,wallH,z1,0,0,1,fr,fg,fb,fa);
-			}else{
+				quad(x0,.02f,z0,x0,.02f,z1,x0,wallH-.02f,z1,x0,wallH-.02f,z0,-1,0,0,rr,gg,bb,a);
+				quad(x1,.02f,z1,x1,.02f,z0,x1,wallH-.02f,z0,x1,wallH-.02f,z1,1,0,0,rr,gg,bb,a);
 				quad(x0,0,z0,x0,0,z1,x0,t,z1,x0,t,z0,-1,0,0,fr,fg,fb,fa);
 				quad(x0,wallH-t,z0,x0,wallH-t,z1,x0,wallH,z1,x0,wallH,z0,-1,0,0,fr,fg,fb,fa);
 				quad(x1,0,z1,x1,0,z0,x1,t,z0,x1,t,z1,1,0,0,fr,fg,fb,fa);
 				quad(x1,wallH-t,z1,x1,wallH-t,z0,x1,wallH,z0,x1,wallH,z1,1,0,0,fr,fg,fb,fa);
+			}else{
+				// 東西壁（Zに薄い）→ ±Z 面
+				wnz=(ez>=ocz)?1.f:-1.f;wpz=(wnz>0)?z1:z0;
+				quad(x1,.02f,z0,x0,.02f,z0,x0,wallH-.02f,z0,x1,wallH-.02f,z0,0,0,-1,rr,gg,bb,a);
+				quad(x0,.02f,z1,x1,.02f,z1,x1,wallH-.02f,z1,x0,wallH-.02f,z1,0,0,1,rr,gg,bb,a);
+				quad(x1,0,z0,x0,0,z0,x0,t,z0,x1,t,z0,0,0,-1,fr,fg,fb,fa);
+				quad(x1,wallH-t,z0,x0,wallH-t,z0,x0,wallH,z0,x1,wallH,z0,0,0,-1,fr,fg,fb,fa);
+				quad(x0,0,z1,x1,0,z1,x1,t,z1,x0,t,z1,0,0,1,fr,fg,fb,fa);
+				quad(x0,wallH-t,z1,x1,wallH-t,z1,x1,wallH,z1,x0,wallH,z1,0,0,1,fr,fg,fb,fa);
 			}
 			fxObj[nFx++]={b,nFloor+nWall+nTrans-b,wpx,wallH*.5f,wpz,xl[i].d,wnx,0.f,wnz,TRUE,TRUE};
 		}else if(c==CELL_STAIRS_DOWN||c==CELL_STAIRS_UP){
@@ -3575,6 +4958,7 @@ void CSoft3DMazeDlg::RenderScene()
 			const float ax=cellCX(x),az=cellCZ(z),bx=cellCX(px),bz=cellCZ(pz);
 			const float span=sqrtf((bx-ax)*(bx-ax)+(bz-az)*(bz-az))+1e-5f;
 			const float hx=(-(bz-az)/span)*.18f,hz=((bx-ax)/span)*.18f; // 段の幅
+			const float nearDx=ocx-ex,nearDz=ocz-ez;const BOOL nearSt=(nearDx*nearDx+nearDz*nearDz)<(10.f*10.f);
 			for(int st=0;st<6;st++){
 				const float t0=(float)st/6.f,t1=(float)(st+1)/6.f;
 				const float u0=t0*.92f,u1=t1*.92f;
@@ -3582,15 +4966,112 @@ void CSoft3DMazeDlg::RenderScene()
 				const float sx1=ax+(bx-ax)*u1,sz1=az+(bz-az)*u1;
 				const float yTop=dn?(passH-t0*storyH*.95f):(passH+t0*storyH*.95f);
 				const float yBot=dn?(passH-t1*storyH*.95f):(passH+t1*storyH*.95f);
-				const float ya=min(yTop,yBot),yb=max(yTop,yBot)+.025f;
+				const float ya=min(yTop,yBot),yb=max(yTop,yBot)+(nearSt?.038f:.025f);
 				passCube(min(sx0,sx1)-fabsf(hx),min(sz0,sz1)-fabsf(hz),
 					max(sx0,sx1)+fabsf(hx),max(sz0,sz1)+fabsf(hz),ya,yb,rr,gg,bb,stairA);
 			}
-			// 方向マーカー（半透明）
+			if(nearSt){
+				// 簡易手すり（両側1本ずつのレール）
+				for(int side=0;side<2;side++){
+					const float s=(side?1.f:-1.f);
+					const float rx=hx*s*1.55f,rz=hz*s*1.55f;
+					const float y0r=dn?passH:passH;
+					const float y1r=dn?(passH-storyH*.88f):(passH+storyH*.88f);
+					passCube(ax+rx-.015f,az+rz-.015f,ax+(bx-ax)*.9f+rx+.015f,az+(bz-az)*.9f+rz+.015f,
+						min(y0r,y1r)+.18f,min(y0r,y1r)+.22f,rr*.85f,gg*.85f,bb*.85f,stairA+.12f);
+				}
+			}
+			// 方向マーカー（矢印）
 			const float tipX=ax+(bx-ax)*.55f,tipZ=az+(bz-az)*.55f;
-			const float tipY=passH+(dn?-.25f:.45f);
-			spinOcta(tipX,tipY+.04f*sinf(m_anim*2.2f+(float)x),tipZ,.10f,m_anim*(dn?1.9f:-1.9f),rr,gg,bb,stairA+.08f);
+			const float tipY=passH+(dn?-.25f:.45f)+.04f*sinf(m_anim*2.2f+(float)x);
+			const float adx=(bx-ax)/span,adz=(bz-az)/span;
+			const float sx=-adz*.07f,sz=adx*.07f;
+			passCube(tipX-adx*.10f+sx,tipZ-adz*.10f+sz,tipX+adx*.02f-sx,tipZ+adz*.02f-sz,tipY,tipY+.05f,rr,gg,bb,stairA+.15f);
+			passCube(tipX+adx*.00f-sx*1.6f,tipZ+adz*.00f-sz*1.6f,tipX+adx*.14f+sx*1.6f,tipZ+adz*.14f+sz*1.6f,tipY-.01f,tipY+.06f,rr,gg,bb,stairA+.18f);
 			fxObj[nFx++]={b,nFloor+nWall+nTrans-b,ocx,passH+.2f,ocz,xl[i].d,0,0,0,FALSE,FALSE};
+		}else if(c==CELL_PORTAL){
+			if(nFx>=64)continue;
+			const UINT b=nFloor+nWall+nTrans;
+			const float rr=.72f,gg=.28f,bb=1.f,a=.55f;
+			const float pad=.12f;
+			const float pulse=.04f+.03f*sinf(m_anim*4.2f+(float)(x+z));
+			quad(x0+pad,passH+.04f+pulse,z0+pad,x0+pad,passH+.04f+pulse,z1-pad,x1-pad,passH+.04f+pulse,z1-pad,x1-pad,passH+.04f+pulse,z0+pad,0,1,0,rr,gg,bb,a);
+			const float bob=.06f*sinf(m_anim*3.1f+(float)x*.7f);
+			// ポータル核：縦柱＋回転リング（◇廃止）
+			passCubeAll(ocx-.05f,ocz-.05f,ocx+.05f,ocz+.05f,passH+.12f+bob,passH+.55f+bob,.9f,.5f,1.f,.9f);
+			passCubeAll(ocx-.10f,ocz-.04f,ocx+.10f,ocz+.04f,passH+.28f+bob,passH+.40f+bob,.95f,.55f,1.f,.85f);
+			passCubeAll(ocx-.04f,ocz-.10f,ocx+.04f,ocz+.10f,passH+.28f+bob,passH+.40f+bob,.95f,.55f,1.f,.85f);
+			const float nearDx=ocx-ex,nearDz=ocz-ez;const BOOL nearP=(nearDx*nearDx+nearDz*nearDz)<(8.f*8.f);
+			const int nRing=nearP?4:3;const int nSeg=10;
+			for(int ri=0;ri<nRing;ri++){
+				const float rad=.16f+ri*.065f;
+				const float y=passH+.16f+ri*.11f+.03f*sinf(m_anim*5.f+ri);
+				const float ang0=m_anim*(2.2f+ri*.7f);
+				const float thick=nearP?.05f:.04f;
+				for(int s=0;s<nSeg;s++){
+					const float a0=ang0+(float)s*(6.2832f/(float)nSeg),a1=a0+.4f;
+					const float px0=ocx+cosf(a0)*rad,pz0=ocz+sinf(a0)*rad;
+					const float px1=ocx+cosf(a1)*rad,pz1=ocz+sinf(a1)*rad;
+					passCubeAll(min(px0,px1)-.025f,min(pz0,pz1)-.025f,max(px0,px1)+.025f,max(pz0,pz1)+.025f,y,y+thick,
+						.85f,.45f,1.f,.55f);
+				}
+			}
+			fxObj[nFx++]={b,nFloor+nWall+nTrans-b,ocx,passH+.3f,ocz,xl[i].d,0,0,0,FALSE,FALSE};
+		}else if(c==CELL_DOOR){
+			if(nFx>=64)continue;
+			const UINT b=nFloor+nWall+nTrans;
+			const float dr=.55f,dg=.48f,db=.40f,da=1.05f; // 金属扉バンド
+			const float fr=.38f,fg=.34f,fb=.30f;
+			const float nearDx=ocx-ex,nearDz=ocz-ez;const BOOL nearD=(nearDx*nearDx+nearDz*nearDz)<(14.f*14.f);
+			const float frameT=nearD?.06f:.04f;
+			if(cellW(x)<cellD(z)){
+				passCube(x0,z0,x1,z1,passH,wallH*.92f,dr,dg,db,da);
+				passCube(x0-frameT*.2f,z0,x0+frameT,z1,passH,wallH*.95f,fr,fg,fb,1.f);
+				passCube(x1-frameT,z0,x1+frameT*.2f,z1,passH,wallH*.95f,fr,fg,fb,1.f);
+				passCube(x0,z0,x1,z1,wallH*.88f,wallH*.95f,fr,fg,fb,1.f);
+				if(nearD){
+					const float hx=(ex>=ocx)?x1+.01f:x0-.01f;
+					passCube(hx-.02f,ocz-.02f,hx+.02f,ocz+.02f,passH+.42f,passH+.58f,.85f,.75f,.45f,1.05f);
+				}
+			}else{
+				passCube(x0,z0,x1,z1,passH,wallH*.92f,dr,dg,db,da);
+				passCube(x0,z0-frameT*.2f,x1,z0+frameT,passH,wallH*.95f,fr,fg,fb,1.f);
+				passCube(x0,z1-frameT,x1,z1+frameT*.2f,passH,wallH*.95f,fr,fg,fb,1.f);
+				passCube(x0,z0,x1,z1,wallH*.88f,wallH*.95f,fr,fg,fb,1.f);
+				if(nearD){
+					const float hz=(ez>=ocz)?z1+.01f:z0-.01f;
+					passCube(ocx-.02f,hz-.02f,ocx+.02f,hz+.02f,passH+.42f,passH+.58f,.85f,.75f,.45f,1.05f);
+				}
+			}
+			fxObj[nFx++]={b,nFloor+nWall+nTrans-b,ocx,passH+.45f,ocz,xl[i].d,0,0,0,FALSE,FALSE};
+		}else if(c==CELL_KEY){
+			if(nFx>=64)continue;
+			const UINT b=nFloor+nWall+nTrans;
+			passCubeAll(ocx-.14f,ocz-.14f,ocx+.14f,ocz+.14f,passH+.02f,passH+.09f,.35f,.32f,.28f,1.f);
+			const float bob=.05f*sinf(m_anim*2.6f+(float)x);
+			const float ky=passH+.22f+bob;
+			const float ang=m_anim*1.6f;
+			const float cs=cosf(ang),sn=sinf(ang);
+			const float kr=1.f,kg=.88f,kb=.28f,ka=1.12f; // 金属帯（写り込み）＋鍵スパークル
+			// 縦向き鍵：輪は XY 面（縦）、軸は下向き Y、歯は横へ
+			auto kPut=[&](float lx,float ly0,float ly1,float lz,float hx,float hz){
+				const float wx=ocx+lx*cs-lz*sn,wz=ocz+lx*sn+lz*cs;
+				const float sx=fabsf(hx*cs)+fabsf(hz*sn)+.002f;
+				const float sz=fabsf(hx*sn)+fabsf(hz*cs)+.002f;
+				passCubeAll(wx-sx,wz-sz,wx+sx,wz+sz,ky+ly0,ky+ly1,kr,kg,kb,ka);
+			};
+			const float bowY=.28f,br=.10f;
+			for(int i=0;i<8;i++){
+				const float a0=(float)i*(6.2832f/8.f);
+				const float rx=cosf(a0)*br,ry=bowY+sinf(a0)*br;
+				kPut(rx,ry-.045f,ry+.045f,0.f,.045f,.045f);
+			}
+			kPut(0.f,bowY-.04f,bowY+.04f,0.f,.04f,.04f);
+			kPut(0.f,-.02f,bowY-.06f,0.f,.045f,.045f); // 軸（下へ）
+			kPut(.08f,-.02f,.08f,0.f,.06f,.04f); // 歯1
+			kPut(.08f,-.10f,-.02f,0.f,.06f,.04f); // 歯2
+			kPut(0.f,-.14f,-.06f,0.f,.04f,.04f); // 先端
+			fxObj[nFx++]={b,nFloor+nWall+nTrans-b,ocx,ky+bowY*.5f,ocz,xl[i].d,0,0,0,FALSE,TRUE};
 		}else if(S3mIsTrapCell(c)){
 			if(nFx>=64)continue;
 			const UINT b=nFloor+nWall+nTrans;
@@ -3601,15 +5082,36 @@ void CSoft3DMazeDlg::RenderScene()
 			const float pad=.08f;
 			quad(x0+pad,passH+.03f,z0+pad,x0+pad,passH+.03f,z1-pad,x1-pad,passH+.03f,z1-pad,x1-pad,passH+.03f,z0+pad,0,1,0,rr,gg,bb,a);
 			const float bob=.03f*sinf(m_anim*2.8f+x+z);
-			spinOcta(ocx,passH+.28f+bob,ocz,.11f,m_anim*(c==CELL_SPIKE?2.6f:1.2f),rr,gg,bb,a+.12f);
+			const float ty=passH+.18f+bob;
+			if(c==CELL_SPIKE){
+				for(int si=0;si<5;si++){
+					const float ox=((si%3)-1)*.12f,oz=((si/3)-.5f)*.14f;
+					const float h=.10f+(si&1)*.08f;
+					passCubeAll(ocx+ox-.04f,ocz+oz-.04f,ocx+ox+.04f,ocz+oz+.04f,passH+.03f,ty+h,rr,gg,bb,a+.2f);
+					passCubeAll(ocx+ox-.025f,ocz+oz-.025f,ocx+ox+.025f,ocz+oz+.025f,ty+h,ty+h+.08f,rr,gg,bb,a+.25f);
+				}
+			}else if(c==CELL_ICE){
+				passCubeAll(ocx-.10f,ocz-.10f,ocx+.10f,ocz+.10f,passH+.03f,ty+.06f,rr,gg,bb,a+.15f);
+				passCubeAll(ocx-.05f,ocz-.05f,ocx+.05f,ocz+.05f,ty+.06f,ty+.22f,.7f,.95f,1.f,a+.25f);
+				passCubeAll(ocx-.14f,ocz-.04f,ocx-.07f,ocz+.04f,passH+.03f,ty+.14f,rr,gg,bb,a+.2f);
+				passCubeAll(ocx+.07f,ocz-.04f,ocx+.14f,ocz+.04f,passH+.03f,ty+.12f,rr,gg,bb,a+.2f);
+			}else if(c==CELL_DARK){
+				passCubeAll(ocx-.11f,ocz-.11f,ocx+.11f,ocz+.11f,ty,ty+.18f,rr,gg,bb,a+.2f);
+				passCubeAll(ocx-.07f,ocz-.07f,ocx+.07f,ocz+.07f,ty+.18f,ty+.30f,.15f,.1f,.35f,a+.3f);
+				passCubeAll(ocx-.16f,ocz-.04f,ocx+.16f,ocz+.04f,ty+.08f,ty+.14f,.4f,.25f,.6f,a+.15f);
+			}else{ // slime
+				passCubeAll(ocx-.16f,ocz-.14f,ocx+.16f,ocz+.14f,passH+.03f,ty+.08f,rr,gg,bb,a+.2f);
+				passCubeAll(ocx-.10f,ocz-.10f,ocx+.10f,ocz+.10f,ty+.08f,ty+.18f,rr*.85f,gg*.85f,bb*.85f,a+.25f);
+				passCubeAll(ocx-.05f,ocz-.05f,ocx+.05f,ocz+.05f,ty+.18f,ty+.26f,rr,gg,bb,a+.3f);
+			}
 			fxObj[nFx++]={b,nFloor+nWall+nTrans-b,ocx,passH+.25f,ocz,xl[i].d,0,0,0,FALSE,FALSE};
 		}else if(nFx<64){
-			// 自機マスと重なるスタートクリスタルは書かない
+			// 自機マスと重なるスタート旗は書かない
 			if(c==CELL_START&&x==plx&&z==plz&&!stairMove)continue;
-			const UINT b=nFloor+nWall+nTrans;float cy,s,ang,rr,gg,bb;
-			if(c==CELL_GOAL){cy=.48f+.05f*sinf(m_anim*2.6f);s=.30f;ang=m_anim*2.1f;rr=1.f;gg=.88f;bb=.25f;}
-			else if(c==CELL_START){cy=.42f+.04f*sinf(m_anim*2.1f+1.f);s=.24f;ang=-m_anim*1.7f;rr=.30f;gg=1.f;bb=.55f;}
-			else{cy=.40f+.07f*sinf(m_anim*2.4f+x*.7f+z);s=.17f;ang=m_anim*(1.8f+(c&3)*.3f)+x;rr=1;gg=.5f;bb=.8f;
+			const UINT b=nFloor+nWall+nTrans;float cy,rr,gg,bb;
+			if(c==CELL_GOAL){cy=.48f+.05f*sinf(m_anim*2.6f);rr=1.f;gg=.88f;bb=.25f;}
+			else if(c==CELL_START){cy=.42f+.04f*sinf(m_anim*2.1f+1.f);rr=.30f;gg=1.f;bb=.55f;}
+			else{cy=.40f+.07f*sinf(m_anim*2.4f+x*.7f+z);rr=1;gg=.5f;bb=.8f;
 				if(c==CELL_TEMPO){rr=.3f;gg=1;bb=.5f;}
 				else if(c==CELL_TEMPO_DN){rr=.12f;gg=.55f;bb=.28f;}
 				else if(c==CELL_PITCH_UP){rr=1;gg=.65f;bb=.25f;}
@@ -3624,7 +5126,71 @@ void CSoft3DMazeDlg::RenderScene()
 				else if(c==CELL_XFADE){rr=1;gg=.45f;bb=.75f;}
 				else if(c==CELL_RANDOM){rr=.95f;gg=.55f;bb=.2f+0.55f*(0.5f+0.5f*sinf(m_anim*3.f+x));}
 			}
-			spinOcta(ocx,cy,ocz,s,ang,rr,gg,bb,1.20f);
+			const float ka=1.15f; // アイテム／スタート／ゴール：平面反射スロット用の金属アルファ
+			if(c==CELL_GOAL){
+				passCubeAll(ocx-.22f,ocz-.22f,ocx+.22f,ocz+.22f,passH+.02f,passH+.10f,.55f,.45f,.22f,1.f);
+				passCubeAll(ocx-.20f,ocz-.07f,ocx-.12f,ocz+.07f,passH+.10f,passH+.55f,.9f,.75f,.25f,1.05f);
+				passCubeAll(ocx+.12f,ocz-.07f,ocx+.20f,ocz+.07f,passH+.10f,passH+.55f,.9f,.75f,.25f,1.05f);
+				passCubeAll(ocx-.20f,ocz-.07f,ocx+.20f,ocz+.07f,passH+.50f,passH+.58f,1.f,.85f,.3f,1.05f);
+				passCubeAll(ocx-.06f,ocz-.06f,ocx+.06f,ocz+.06f,passH+.10f,cy-.02f,.75f,.65f,.2f,ka);
+				passCubeAll(ocx-.13f,ocz-.09f,ocx+.13f,ocz+.09f,cy-.02f,cy+.10f,rr,gg,bb,ka);
+				passCubeAll(ocx-.09f,ocz-.09f,ocx-.03f,ocz+.09f,cy+.02f,cy+.16f,rr,gg,bb,ka);
+				passCubeAll(ocx+.03f,ocz-.09f,ocx+.09f,ocz+.09f,cy+.02f,cy+.16f,rr,gg,bb,ka);
+				passCubeAll(ocx-.07f,ocz-.07f,ocx+.07f,ocz+.07f,cy+.16f,cy+.22f,1.f,.95f,.4f,ka);
+			}else if(c==CELL_START){
+				// 旗：ポール縦＋布は縦面（寝かさない）
+				passCubeAll(ocx-.04f,ocz-.04f,ocx+.04f,ocz+.04f,passH+.02f,cy+.32f,.55f,.5f,.45f,1.f);
+				passCubeAll(ocx+.03f,ocz-.02f,ocx+.22f,ocz+.02f,cy+.12f,cy+.30f,rr,gg,bb,ka);
+				passCubeAll(ocx+.03f,ocz-.02f,ocx+.16f,ocz+.02f,cy+.04f,cy+.12f,rr*.85f,gg*.85f,bb*.85f,ka);
+				passCubeAll(ocx-.07f,ocz-.07f,ocx+.07f,ocz+.07f,passH+.02f,passH+.07f,.4f,.38f,.35f,1.f);
+			}else{
+				// アイテム：縦長シルエット（床に寝かさない）
+				passCubeAll(ocx-.10f,ocz-.10f,ocx+.10f,ocz+.10f,passH+.02f,passH+.08f,.28f,.26f,.3f,1.f);
+				if(c==CELL_TEMPO||c==CELL_TEMPO_DN){
+					passCubeAll(ocx-.05f,ocz-.05f,ocx+.05f,ocz+.05f,passH+.08f,cy+.22f,rr,gg,bb,ka);
+					const float tip=(c==CELL_TEMPO)?1.f:-1.f;
+					const float ty=cy+.12f+tip*.10f;
+					passCubeAll(ocx-.10f,ocz-.05f,ocx+.10f,ocz+.05f,ty-.04f,ty+.04f,rr,gg,bb,ka);
+					passCubeAll(ocx-.06f,ocz-.05f,ocx+.06f,ocz+.05f,ty+tip*.04f,ty+tip*.12f,rr,gg,bb,ka);
+				}else if(c==CELL_PITCH_UP||c==CELL_PITCH_DN){
+					passCubeAll(ocx-.05f,ocz-.05f,ocx+.05f,ocz+.05f,passH+.08f,cy+.24f,rr,gg,bb,ka);
+					const float uy=(c==CELL_PITCH_UP)?1.f:-1.f;
+					passCubeAll(ocx-.11f,ocz-.05f,ocx+.11f,ocz+.05f,cy+.08f,cy+.14f,rr,gg,bb,ka);
+					passCubeAll(ocx-.07f,ocz-.05f,ocx+.07f,ocz+.05f,cy+.14f,cy+.14f+uy*.10f,rr,gg,bb,ka);
+					passCubeAll(ocx-.04f,ocz-.05f,ocx+.04f,ocz+.05f,cy+.14f+uy*.08f,cy+.14f+uy*.16f,rr,gg,bb,ka);
+				}else if(c==CELL_NEXT||c==CELL_PREV){
+					const float s=(c==CELL_NEXT)?1.f:-1.f;
+					passCubeAll(ocx-.05f,ocz-.05f,ocx+.05f,ocz+.05f,passH+.08f,cy+.20f,rr,gg,bb,ka);
+					passCubeAll(ocx-s*.02f,ocz-.06f,ocx+s*.12f,ocz+.06f,cy+.04f,cy+.16f,rr,gg,bb,ka);
+					passCubeAll(ocx+s*.06f,ocz-.10f,ocx+s*.16f,ocz+.10f,cy+.02f,cy+.18f,rr,gg,bb,ka);
+				}else if(c==CELL_VOL_UP||c==CELL_VOL_DN){
+					passCubeAll(ocx-.08f,ocz-.05f,ocx-.01f,ocz+.05f,passH+.08f,cy+.20f,rr,gg,bb,ka);
+					const int nArc=(c==CELL_VOL_UP)?3:1;
+					for(int ai=0;ai<nArc;ai++){
+						const float rad=.06f+ai*.05f;
+						passCubeAll(ocx+rad*.15f,ocz-rad*.35f,ocx+rad*.15f+.05f,ocz+rad*.35f,
+							cy+.02f+ai*.04f,cy+.14f+ai*.04f,rr,gg,bb,ka);
+					}
+				}else if(c==CELL_EQ||c==CELL_EQ_FLAT){
+					for(int bi=0;bi<4;bi++){
+						const float hx=-.13f+bi*.08f;
+						const float h=(c==CELL_EQ_FLAT)?.18f:(.10f+((bi*3+x)&3)*.07f);
+						passCubeAll(ocx+hx,ocz-.05f,ocx+hx+.06f,ocz+.05f,passH+.08f,passH+.08f+h,rr,gg,bb,ka);
+					}
+				}else if(c==CELL_REVERB){
+					passCubeAll(ocx-.06f,ocz-.06f,ocx+.06f,ocz+.06f,passH+.08f,cy+.22f,rr,gg,bb,ka);
+					passCubeAll(ocx-.12f,ocz-.12f,ocx+.12f,ocz+.12f,cy+.04f,cy+.10f,rr,gg,bb,.75f);
+					passCubeAll(ocx-.16f,ocz-.16f,ocx+.16f,ocz+.16f,cy+.12f,cy+.16f,rr,gg,bb,.55f);
+				}else if(c==CELL_XFADE){
+					passCubeAll(ocx-.14f,ocz-.05f,ocx-.04f,ocz+.05f,passH+.08f,cy+.22f,rr,gg,bb,ka);
+					passCubeAll(ocx+.04f,ocz-.05f,ocx+.14f,ocz+.05f,passH+.08f,cy+.22f,rr*.7f,gg*.7f,bb,ka);
+					passCubeAll(ocx-.05f,ocz-.05f,ocx+.05f,ocz+.05f,cy+.06f,cy+.14f,1.f,1.f,1.f,ka);
+				}else{ // RANDOM 他
+					passCubeAll(ocx-.08f,ocz-.08f,ocx+.08f,ocz+.08f,passH+.08f,cy+.16f,rr,gg,bb,ka);
+					passCubeAll(ocx-.05f,ocz-.05f,ocx+.05f,ocz+.05f,cy+.16f,cy+.28f,rr,gg,bb,ka);
+					passCubeAll(ocx-.12f,ocz-.05f,ocx+.12f,ocz+.05f,cy+.08f,cy+.14f,rr,gg,bb,ka);
+				}
+			}
 			fxObj[nFx++]={b,nFloor+nWall+nTrans-b,ocx,cy,ocz,xl[i].d,0,0,0,FALSE,TRUE};
 		}
 	}
@@ -3636,25 +5202,140 @@ void CSoft3DMazeDlg::RenderScene()
 	const int nUse=min((int)CS3mView::S3M_MIRROR_FX_N,nFx);
 	for(int i=0;i<nUse;i++)fxMirOf[ord[i]]=CS3mView::S3M_MIRROR_FX0+i;}
 	UINT plateBeg=nFloor+nWall+nTrans;
-	// 訪問床：青の半透明板＋鏡床（現在／移動元の階）
+	// 訪問床：青の半透明板（鏡床の反射はソリッド床側）
 	for(int z=iz0;z<=iz1;z++)for(int x=ix0;x<=ix1;x++){
-		BYTE c=CellAtF(fxFloor,x,z);if(c==CELL_WALL||c==CELL_WINDOW||c==CELL_STAIRS_DOWN||c==CELL_STAIRS_UP||!vis(x,z))continue;
+		BYTE c=CellAtF(fxFloor,x,z);if(S3mIsSolidWall(c)||c==CELL_STAIRS_DOWN||c==CELL_STAIRS_UP||!vis(x,z))continue;
 		float x0=cellX0(x),x1=x0+cellW(x),z0=cellZ0(z),z1=z0+cellD(z);
 		if(VisitAtF(fxFloor,x,z))quad(x0,passH+.01f,z0,x0,passH+.01f,z1,x1,passH+.01f,z1,x1,passH+.01f,z0,0,1,0,.25f,.55f,1.f,.35f);
-		if(isMirrorFloor(x,z)){
-			quad(x0,passH+.02f,z0,x0,passH+.02f,z1,x1,passH+.02f,z1,x1,passH+.02f,z0,0,1,0,.68f,.76f,.90f,1.16f);
-			float mpx=cellCX(x),mpy=passH+.02f,mpz=cellCZ(z);float tox=ex-mpx,toy=eyeY-mpy,toz=ez-mpz;
-			if(toy>.05f){float dist=sqrtf(tox*tox+toy*toy+toz*toz)+.01f;float sc=toy/(dist*.4f+1.f);if(sc>bestF.score)bestF={sc,0.f,1.f,0.f,mpx,mpy,mpz};}
-		}
 	}
 	UINT nPlate=(nFloor+nWall+nTrans)-plateBeg;
-	// 環境エフェクト（地上＝レンガから水滴、地下＝水滴／火花／火の粉）
+	// ナビ導線（3D）：現在階の経路を1本の細長い金矢印メッシュとして一括生成
+	UINT navBeg=nFloor+nWall+nTrans;UINT nNav=0;
+	if(HasNavPath()){
+		const float pulse=.55f+.45f*sinf(m_anim*3.2f);
+		const float yBase=passH+.06f; // 地面から少し上
+		const float halfW=.028f;   // 軸の半幅（細め）
+		const float halfH=.022f;
+		const float tipLen=.55f;
+		const float tipHalf=.14f;
+		float gr=.95f,gg=.72f,gb=.12f;
+		{
+			const S3mNavPt& tip=m_navPath[m_navCount-1];
+			if(CellAtF(tip.f,tip.x,tip.z)==CELL_KEY){gr=.72f;gg=.98f;gb=.22f;}
+		}
+		const float aBody=.88f+.10f*pulse;
+		auto navQuad=[&](float x0,float y0,float z0,float x1,float y1,float z1,float x2,float y2,float z2,float x3,float y3,float z3,float nx,float ny,float nz,float rr,float gg2,float bb,float a){
+			quadUV(x0,y0,z0,x1,y1,z1,x2,y2,z2,x3,y3,z3,nx,ny,nz,0,0,1,1,rr,gg2,bb,a);
+		};
+		auto emitShaftRing=[&](float ax,float ay,float az,float bx,float by,float bz,float tx,float tz,float hx,float hz){
+			// 断面ひし形を進行方向に押し出し（上面・下面・側面）
+			float aL[3]={ax-tx*halfW,ay,az-tz*halfW},aR[3]={ax+tx*halfW,ay,az+tz*halfW};
+			float aU[3]={ax,ay+halfH,az},aD[3]={ax,ay-halfH,az};
+			float bL[3]={bx-tx*halfW,by,bz-tz*halfW},bR[3]={bx+tx*halfW,by,bz+tz*halfW};
+			float bU[3]={bx,by+halfH,bz},bD[3]={bx,by-halfH,bz};
+			navQuad(aL[0],aU[1],aL[2],aR[0],aU[1],aR[2],bR[0],bU[1],bR[2],bL[0],bU[1],bL[2],0,1,0,gr,gg,gb,aBody);
+			navQuad(aL[0],aD[1],aL[2],bL[0],bD[1],bL[2],bR[0],bD[1],bR[2],aR[0],aD[1],aR[2],0,-1,0,gr*.85f,gg*.85f,gb,aBody);
+			navQuad(aL[0],aU[1],aL[2],bL[0],bU[1],bL[2],bL[0],bD[1],bL[2],aL[0],aD[1],aL[2],-tx,0,-tz,gr*.9f,gg*.9f,gb,aBody);
+			navQuad(aR[0],aU[1],aR[2],aR[0],aD[1],aR[2],bR[0],bD[1],bR[2],bR[0],bU[1],bR[2],tx,0,tz,gr*.9f,gg*.9f,gb,aBody);
+			(void)hx;(void)hz;
+		};
+		auto emitTip=[&](float tipX,float tipY,float tipZ,float dx,float dz){
+			float len=sqrtf(dx*dx+dz*dz)+1e-5f;dx/=len;dz/=len;
+			float px=-dz,pz=dx;
+			float baseX=tipX-dx*tipLen,baseZ=tipZ-dz*tipLen;
+			float lX=baseX+px*tipHalf,lZ=baseZ+pz*tipHalf;
+			float rX=baseX-px*tipHalf,rZ=baseZ-pz*tipHalf;
+			const float aTip=.95f;
+			// 水平・垂直の両面＋側面で立体矢じり
+			tri(tipX,tipY,tipZ,lX,tipY,lZ,rX,tipY,rZ,0,1,0,0.f,0.f,1.f,0.f,.5f,1.f,gr,gg,gb,aTip);
+			tri(tipX,tipY,tipZ,rX,tipY,rZ,lX,tipY,lZ,0,-1,0,0.f,0.f,1.f,0.f,.5f,1.f,gr*.9f,gg*.9f,gb,aTip);
+			tri(tipX,tipY,tipZ,baseX,tipY+tipHalf*.7f,baseZ,baseX,tipY-tipHalf*.7f,baseZ,px,0,pz,0.f,0.f,1.f,0.f,.5f,1.f,1.f,.82f,.2f,aTip);
+			tri(tipX,tipY,tipZ,baseX,tipY-tipHalf*.7f,baseZ,baseX,tipY+tipHalf*.7f,baseZ,-px,0,-pz,0.f,0.f,1.f,0.f,.5f,1.f,1.f,.82f,.2f,aTip);
+			tri(tipX,tipY,tipZ,lX,tipY,lZ,baseX,tipY+tipHalf*.55f,baseZ,0,1,0,0.f,0.f,1.f,0.f,.5f,1.f,gr,gg*.95f,gb,aTip*.95f);
+			tri(tipX,tipY,tipZ,baseX,tipY+tipHalf*.55f,baseZ,rX,tipY,rZ,0,1,0,0.f,0.f,1.f,0.f,.5f,1.f,gr,gg*.95f,gb,aTip*.95f);
+		};
+		int run0=-1;
+		auto flushRun=[&](int a,int b){
+			if(a<0||b<=a)return;
+			// セル中心列 → 軽くスムーズした連続中心線（1本の矢）
+			float rawX[64],rawZ[64];int nRaw=0;
+			for(int i=a;i<=b&&nRaw<64;i++){
+				rawX[nRaw]=GridToWorldX((float)m_navPath[i].x+.5f);
+				rawZ[nRaw]=GridToWorldZ((float)m_navPath[i].z+.5f);
+				nRaw++;
+			}
+			if(nRaw<2)return;
+			const int maxSamp=96;
+			float sx[96],sy[96],sz[96];int ns=0;
+			auto sampleAt=[&](float t,float& ox,float& oy,float& oz){
+				// t in [0,1] along polyline with slight aerial wave as one ribbon
+				const float total=(float)(nRaw-1);
+				float u=t*total;int i0=(int)floorf(u);if(i0>=nRaw-1)i0=nRaw-2;if(i0<0)i0=0;
+				float f=u-(float)i0;
+				float x=rawX[i0]+(rawX[i0+1]-rawX[i0])*f;
+				float z=rawZ[i0]+(rawZ[i0+1]-rawZ[i0])*f;
+				// 角を少し丸める（前後平均）
+				if(i0>0&&i0+1<nRaw-1&&f>.2f&&f<.8f){
+					float xm=(rawX[i0]+rawX[i0+1])*.5f,zm=(rawZ[i0]+rawZ[i0+1])*.5f;
+					x=x*.65f+xm*.35f;z=z*.65f+zm*.35f;
+				}
+				float wave=.012f*sinf(t*5.5f+m_anim*1.4f);
+				ox=x;oz=z;oy=yBase+wave;
+			};
+			const int nSeg=min(maxSamp-1,max(8,(nRaw-1)*3));
+			for(int i=0;i<=nSeg&&ns<maxSamp;i++){
+				float t=(float)i/(float)nSeg;
+				sampleAt(t,sx[ns],sy[ns],sz[ns]);
+				ns++;
+			}
+			if(ns<2)return;
+			// 軸：終端手前まで押し出し（矢じり分を残す）
+			float tipCut=tipLen*.92f;
+			float acc=0.f;
+			for(int i=ns-1;i>0;i--){
+				float d=sqrtf((sx[i]-sx[i-1])*(sx[i]-sx[i-1])+(sz[i]-sz[i-1])*(sz[i]-sz[i-1]));
+				acc+=d;
+				if(acc>=tipCut){
+					float over=acc-tipCut;float seg=d+1e-5f;float u=over/seg;
+					sx[i]=sx[i]+(sx[i-1]-sx[i])*u;
+					sz[i]=sz[i]+(sz[i-1]-sz[i])*u;
+					sy[i]=sy[i]+(sy[i-1]-sy[i])*u;
+					ns=i+1;
+					break;
+				}
+			}
+			for(int i=0;i+1<ns;i++){
+				float dx=sx[i+1]-sx[i],dz=sz[i+1]-sz[i];
+				float len=sqrtf(dx*dx+dz*dz)+1e-5f;dx/=len;dz/=len;
+				float tx=-dz,tz=dx;
+				emitShaftRing(sx[i],sy[i],sz[i],sx[i+1],sy[i+1],sz[i+1],tx,tz,0,0);
+			}
+			// 終端の大きな矢じり1つ
+			{
+				float dx=sx[ns-1]-sx[max(0,ns-2)],dz=sz[ns-1]-sz[max(0,ns-2)];
+				if(ns>=2){dx=rawX[nRaw-1]-sx[ns-1];dz=rawZ[nRaw-1]-sz[ns-1];}
+				float tipX=rawX[nRaw-1],tipZ=rawZ[nRaw-1],tipY=yBase+.01f+.01f*pulse;
+				if(fabsf(dx)+fabsf(dz)<1e-4f&&ns>=2){dx=sx[ns-1]-sx[ns-2];dz=sz[ns-1]-sz[ns-2];}
+				emitTip(tipX,tipY,tipZ,dx,dz);
+			}
+		};
+		for(int i=0;i<m_navCount;i++){
+			if(m_navPath[i].f==fxFloor){
+				if(run0<0)run0=i;
+			}else if(run0>=0){
+				flushRun(run0,i-1);
+				run0=-1;
+			}
+		}
+		if(run0>=0)flushRun(run0,m_navCount-1);
+		nNav=(nFloor+nWall+nTrans)-navBeg;
+	}
+	// 環境エフェクト：壁＋階層別の天井／空中（雲・水滴等）＋鏡床への吸い込み
 	UINT vfxBeg=nFloor+nWall+nTrans;UINT nVfxAlpha=0;
 	{
 		const int thFx=ThemeOfFloor(fxFloor);
 		auto frac01=[&](float t)->float{return t-floorf(t);};
 		auto emitBill=[&](float px,float py,float pz,float hs,float vs,float rr,float gg,float bb,float a){
-			// カメラ向きビルボード（薄い板）
 			float qx=px-rx*hs,qz=pz-rz*hs,sx=px+rx*hs,sz=pz+rz*hs;
 			quad(qx,py-vs,qz,sx,py-vs,sz,sx,py+vs,sz,qx,py+vs,qz,fx,0,fz,rr,gg,bb,a);
 		};
@@ -3666,15 +5347,25 @@ void CSoft3DMazeDlg::RenderScene()
 			const float y=passH+.025f;
 			quad(px-rad,y,pz-rad,px-rad,y,pz+rad,px+rad,y,pz+rad,px+rad,y,pz-rad,0,1,0,rr,gg,bb,a);
 		};
-		int nEmit=0;const int kMaxEmit=(thFx>=2)?48:36;
+		auto emitMirrorAbsorb=[&](float px,float pz,float s){
+			// 着水→鏡に吸い込まれるリング（明るいシアン）
+			const float y=passH+.03f;
+			const float rad=.04f+s*.16f;
+			const float a=.55f*(1.f-s);
+			emitPuddle(px,pz,rad,.55f,.9f,1.f,a*.45f);
+			emitPuddle(px,pz,rad*.55f,.85f,.95f,1.f,a*.7f);
+			emitBill(px,y+.02f+s*.08f,pz,.03f*(1.f-s),.02f,.7f,.95f,1.f,a);
+		};
+		int nEmit=0;const int kMaxEmit=72;
+		// --- 壁際エフェクト（従来） ---
 		for(int z=iz0;z<=iz1&&nEmit<kMaxEmit;z++)for(int x=ix0;x<=ix1&&nEmit<kMaxEmit;x++){
 			if(!vis(x,z))continue;
-			BYTE c=CellAtF(fxFloor,x,z);if(c!=CELL_WALL)continue;
+			BYTE c=CellAtF(fxFloor,x,z);if(c!=CELL_WALL&&c!=CELL_MIRROR_WALL)continue;
 			float x0=cellX0(x),x1=x0+cellW(x),z0=cellZ0(z),z1=z0+cellD(z),cx=cellCX(x),cz=cellCZ(z);
 			float dx=cx-ex,dz=cz-ez;if(dx*dx+dz*dz>14.f*14.f)continue;
 			auto openN=[&](int ox,int oz)->BOOL{
 				if(ox<0||oz<0||ox>=m_n||oz>=m_n)return FALSE;
-				BYTE oc=CellAtF(fxFloor,ox,oz);return (oc!=CELL_WALL&&oc!=CELL_WINDOW)?TRUE:FALSE;
+				BYTE oc=CellAtF(fxFloor,ox,oz);return S3mIsSolidWall(oc)?FALSE:TRUE;
 			};
 			auto sideDrip=[&](float nx,float nz,float fx0,float fz0,float fx1,float fz1){
 				const int seed=x*47+z*13+(int)(nx*3+nz*5)+thFx*91;
@@ -3685,7 +5376,6 @@ void CSoft3DMazeDlg::RenderScene()
 					px+=nx*.02f;pz+=nz*.02f;
 					float ph=frac01(m_anim*(thFx==3?0.55f:0.85f)+((seed+k*19)&255)/255.f);
 					if(thFx==0||thFx==1){
-						// 水滴：壁から床へ落下＋着水の広がる水たまり
 						float yTop=wallH*(0.55f+((seed+k)&7)*.04f);
 						float y=yTop+(passH+.02f-yTop)*ph;
 						float len=.035f+.05f*ph;
@@ -3696,14 +5386,12 @@ void CSoft3DMazeDlg::RenderScene()
 							float s=(ph-.88f)/.12f;
 							emitPuddle(px+nx*.04f,pz+nz*.04f,.02f+s*.10f,.40f,.62f,.78f,.28f*(1.f-s));
 						}
-						// 継ぎ目からの細かい噴き出し
 						if(((seed+k)&7)==0){
 							float burst=frac01(m_anim*1.4f+u);
 							float by=wallH*(.35f+((seed)&3)*.1f);
 							emitBill(px+nx*(.01f+burst*.06f),by,pz+nz*(.01f+burst*.06f),.012f,.01f,.6f,.82f,.95f,.35f*(1.f-burst));
 						}
 					}else if(thFx==2){
-						// 金属：溶接火花＋薄い湯気
 						float yTop=wallH*(0.3f+((seed+k)&5)*.08f);
 						float y=yTop-ph*wallH*.55f;
 						emitBill(px+nx*.03f,y,pz+nz*.03f,.012f,.012f,1.f,.72f,.28f,.55f*(1.f-ph));
@@ -3712,7 +5400,6 @@ void CSoft3DMazeDlg::RenderScene()
 							emitBill(px+nx*.05f,sy,pz+nz*.05f,.04f,.025f,.55f,.58f,.62f,.18f*(1.f-ph));
 						}
 					}else{
-						// 火山：上昇する火の粉
 						float y=passH+.05f+ph*(wallH*.9f);
 						float flicker=.7f+.3f*sinf(m_anim*9.f+seed+k);
 						emitBill(px+nx*.04f,y,pz+nz*.04f,.01f,.016f,1.f,.45f*flicker,.12f,.5f*(1.f-ph*.6f));
@@ -3725,9 +5412,106 @@ void CSoft3DMazeDlg::RenderScene()
 			if(openN(x,z-1))sideDrip(0,-1,x1,z0,x0,z0);
 			if(openN(x,z+1))sideDrip(0,1,x0,z1,x1,z1);
 		}
+		// --- 天井／空中エフェクト（階層テーマ別） ---
+		for(int z=iz0;z<=iz1&&nEmit<kMaxEmit;z++)for(int x=ix0;x<=ix1&&nEmit<kMaxEmit;x++){
+			if(!vis(x,z))continue;
+			BYTE c=CellAtF(fxFloor,x,z);
+			if(S3mIsSolidWall(c)||c==CELL_STAIRS_DOWN||c==CELL_STAIRS_UP)continue;
+			float cx=cellCX(x),cz=cellCZ(z);
+			float dx=cx-ex,dz=cz-ez;if(dx*dx+dz*dz>16.f*16.f)continue;
+			const int seed=x*73+z*31+thFx*101+fxFloor*17;
+			const BOOL onMirror=(c==CELL_MIRROR_FLOOR);
+			if(thFx==0){
+				// 地上：漂う雲（空中）— 鏡床が映し込む
+				const int nCloud=1+((seed>>2)&1);
+				for(int k=0;k<nCloud&&nEmit<kMaxEmit;k++){
+					float u=((seed+k*41)&255)/255.f,v=((seed*3+k*17)&255)/255.f;
+					float drift=frac01(m_anim*.08f+u);
+					float px=cx+(u-.5f)*AxisSpan(x)*1.4f+sinf(m_anim*.35f+v)*0.35f;
+					float pz=cz+(v-.5f)*AxisSpan(z)*1.4f+cosf(m_anim*.28f+u)*0.35f;
+					float py=wallH*(0.85f+0.45f*v)+sinf(m_anim*.5f+u*6.f)*.08f;
+					float hs=.22f+.18f*((seed+k)&3)/3.f;
+					float vs=.08f+.05f*v;
+					float a=.18f+.14f*sinf(drift*(float)M_PI);
+					emitBill(px,py,pz,hs,vs,.92f,.94f,1.f,a);
+					emitBill(px+hs*.3f,py+.04f,pz-hs*.2f,hs*.7f,vs*.8f,.88f,.91f,.98f,a*.75f);
+					nEmit++;
+				}
+			}else{
+				// 地下：天井からの滴下（テーマで見た目変更）→ 鏡床なら吸い込み
+				const int nDrop=1+((seed>>1)&1)+(thFx>=2?1:0);
+				for(int k=0;k<nDrop&&nEmit<kMaxEmit;k++){
+					float u=((seed+k*53)&255)/255.f,v=((seed*5+k*11)&255)/255.f;
+					float speed=(thFx==3)?0.7f:((thFx==2)?0.95f:1.15f);
+					float ph=frac01(m_anim*speed*((.55f+.45f*u))+v);
+					float px=cx+(u-.5f)*AxisSpan(x)*.7f;
+					float pz=cz+(v-.5f)*AxisSpan(z)*.7f;
+					float yTop=wallH-.02f;
+					float yBot=passH+.03f;
+					float y=yTop+(yBot-yTop)*ph;
+					if(thFx==1){
+						// 湿った石：水色の水滴
+						float len=.04f+.06f*ph;
+						emitStreak(px,y,pz,y-len,.008f,.5f,.82f,.78f,.6f*(1.f-ph*.3f));
+						if(ph>.86f){
+							float s=(ph-.86f)/.14f;
+							if(onMirror)emitMirrorAbsorb(px,pz,s);
+							else emitPuddle(px,pz,.025f+s*.09f,.42f,.68f,.72f,.3f*(1.f-s));
+						}
+					}else if(thFx==2){
+						// 金属：結露＋油滴
+						float len=.03f+.05f*ph;
+						emitStreak(px,y,pz,y-len,.007f,.7f,.75f,.55f,.5f*(1.f-ph*.4f));
+						if(((seed+k)&5)==0)
+							emitBill(px,yTop-ph*wallH*.25f,pz,.035f,.02f,.6f,.62f,.58f,.2f*(1.f-ph));
+						if(ph>.88f){
+							float s=(ph-.88f)/.12f;
+							if(onMirror)emitMirrorAbsorb(px,pz,s);
+							else emitPuddle(px,pz,.02f+s*.07f,.55f,.5f,.35f,.25f*(1.f-s));
+						}
+					}else{
+						// 火山：天井割れ目から落ちる赤熱のしずく／灰
+						float flicker=.65f+.35f*sinf(m_anim*11.f+seed+k);
+						emitBill(px,y,pz,.01f,.018f,1.f,.4f*flicker,.1f,.55f*(1.f-ph*.5f));
+						if(ph>.9f){
+							float s=(ph-.9f)/.1f;
+							if(onMirror)emitMirrorAbsorb(px,pz,s);
+							else emitPuddle(px,pz,.015f+s*.05f,.9f,.35f,.1f,.3f*(1.f-s));
+						}
+					}
+					nEmit++;
+				}
+			}
+			// 鏡床上の常時ハイライト（雲／滴の映り込みを強調）
+			if(onMirror&&nEmit<kMaxEmit){
+				float shimmer=.5f+.5f*sinf(m_anim*3.2f+(float)(x+z));
+				emitPuddle(cx,cz,.12f+.04f*shimmer,.75f,.92f,1.f,.12f+.1f*shimmer);
+				nEmit++;
+			}
+		}
 		nVfxAlpha=(nFloor+nWall+nTrans)-vfxBeg;
 	}
-	if(FAILED(dc->Map(m_view.m_vbDyn,0,D3D11_MAP_WRITE_DISCARD,0,&map))){delete[] v;return;}memcpy(map.pData,v,(nFloor+nWall+nTrans)*sizeof(S3MVertex));dc->Unmap(m_view.m_vbDyn,0);delete[] v;
+	{
+		const UINT used=nFloor+nWall+nTrans;
+		const UINT needBytes=used*sizeof(S3MVertex);
+		UINT gpuBytes=m_view.m_vbDynBytes;
+		if(!m_view.m_vbDyn||gpuBytes<needBytes){
+			gpuBytes=m_view.m_cpuDynScratchBytes;
+			if(gpuBytes<needBytes)gpuBytes=needBytes;
+			// 1MB 単位に切り上げ（再生成回数を抑える）
+			gpuBytes=(gpuBytes+0xFFFFFu)&~0xFFFFFu;
+			if(gpuBytes<needBytes)gpuBytes=needBytes;
+			S3M_RELEASE(m_view.m_vbDyn);
+			D3D11_BUFFER_DESC bd={};
+			bd.ByteWidth=gpuBytes;
+			bd.Usage=D3D11_USAGE_DYNAMIC;
+			bd.BindFlags=D3D11_BIND_VERTEX_BUFFER;
+			bd.CPUAccessFlags=D3D11_CPU_ACCESS_WRITE;
+			if(FAILED(m_view.m_dev->CreateBuffer(&bd,NULL,&m_view.m_vbDyn)))return;
+			m_view.m_vbDynBytes=gpuBytes;
+		}
+	}
+	if(FAILED(dc->Map(m_view.m_vbDyn,0,D3D11_MAP_WRITE_DISCARD,0,&map)))return;memcpy(map.pData,v,(nFloor+nWall+nTrans)*sizeof(S3MVertex));dc->Unmap(m_view.m_vbDyn,0);
 	UINT stride=sizeof(S3MVertex),off=0;ID3D11ShaderResourceView* ns[7]={NULL,NULL,NULL,NULL,NULL,NULL,NULL};ID3D11RenderTargetView* nullRtv=NULL;
 	auto bindCB=[&](){dc->VSSetConstantBuffers(0,1,&m_view.m_cbFrame);dc->HSSetConstantBuffers(0,1,&m_view.m_cbFrame);dc->DSSetConstantBuffers(0,1,&m_view.m_cbFrame);dc->PSSetConstantBuffers(0,1,&m_view.m_cbFrame);};
 	auto drawFloorWall=[&](BOOL colorPass){
@@ -3739,9 +5523,14 @@ void CSoft3DMazeDlg::RenderScene()
 			dc->IASetInputLayout(m_view.m_ilSolid);dc->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 			dc->VSSetShader(m_view.m_vsSolid,NULL,0);dc->HSSetShader(NULL,NULL,0);dc->DSSetShader(NULL,NULL,0);dc->PSSetShader(colorPass?m_view.m_psSolid:NULL,NULL,0);
 			dc->PSSetShaderResources(0,1,&m_view.m_srvFloor[L.th]);if(L.nF)dc->Draw(L.nF,L.fBeg);
+			if(L.nMF&&m_view.m_srvMirrorFloor){dc->PSSetShaderResources(0,1,&m_view.m_srvMirrorFloor);dc->Draw(L.nMF,L.mfBeg);}
 			dc->IASetInputLayout(m_view.m_ilPatch);dc->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_4_CONTROL_POINT_PATCHLIST);
 			dc->VSSetShader(m_view.m_vsTess,NULL,0);dc->HSSetShader(m_view.m_hsTess,NULL,0);dc->DSSetShader(m_view.m_dsTess,NULL,0);dc->PSSetShader(colorPass?m_view.m_psWall:NULL,NULL,0);
 			dc->DSSetShaderResources(0,1,&m_view.m_srvBrick[L.th]);dc->PSSetShaderResources(0,1,&m_view.m_srvBrick[L.th]);if(L.nW)dc->Draw(L.nW,L.wBeg);
+			if(L.nMW&&m_view.m_srvMirrorWall){
+				dc->DSSetShaderResources(0,1,&m_view.m_srvMirrorWall);dc->PSSetShaderResources(0,1,&m_view.m_srvMirrorWall);
+				dc->Draw(L.nMW,L.mwBeg);
+			}
 		}
 		dc->HSSetShader(NULL,NULL,0);dc->DSSetShader(NULL,NULL,0);dc->DSSetShaderResources(0,1,ns);dc->PSSetShaderResources(0,5,ns);
 	};
@@ -3790,7 +5579,8 @@ void CSoft3DMazeDlg::RenderScene()
 	};
 	cb.lightDir.w=0.f;dc->PSSetShaderResources(0,7,ns);
 	auto drawMirrorSlot=[&](int slot,const MirPick& pick,BOOL ok,S3MMat* storeVP,float fovMul){
-		float mbg[4]={.48f,.64f,.82f,1};D3D11_VIEWPORT mvp={0,0,(float)CS3mView::S3M_MIRROR_SIZE,(float)CS3mView::S3M_MIRROR_SIZE,0,1};
+		float mbg[4]={.42f,.58f,.78f,1};if(fxFloor>0){mbg[0]=.06f;mbg[1]=.07f;mbg[2]=.09f;}
+		D3D11_VIEWPORT mvp={0,0,(float)CS3mView::S3M_MIRROR_SIZE,(float)CS3mView::S3M_MIRROR_SIZE,0,1};
 		dc->RSSetViewports(1,&mvp);dc->RSSetState(m_view.m_rsSolid);
 		dc->OMSetRenderTargets(1,&m_view.m_mirrorRtv[slot],m_view.m_mirrorDsv);
 		dc->ClearRenderTargetView(m_view.m_mirrorRtv[slot],mbg);dc->ClearDepthStencilView(m_view.m_mirrorDsv,D3D11_CLEAR_DEPTH,1.f,0);
@@ -3799,7 +5589,21 @@ void CSoft3DMazeDlg::RenderScene()
 		if(slot==0)cb.reflectVP=rVP;else if(slot==1)cb.reflectFloorVP=rVP;
 		if(storeVP)*storeVP=rVP;
 		cb.viewProj=rVP;if(SUCCEEDED(dc->Map(m_view.m_cbFrame,0,D3D11_MAP_WRITE_DISCARD,0,&map))){memcpy(map.pData,&cb,sizeof(cb));dc->Unmap(m_view.m_cbFrame,0);}
-		drawFloorWall(TRUE);dc->PSSetShaderResources(0,7,ns);
+		drawFloorWall(TRUE);
+		// 鏡床反射に天井／雲／水滴を焼き込む
+		if(slot==1&&nVfxAlpha){
+			const int thV=ThemeOfFloor(fxFloor);
+			dc->IASetVertexBuffers(0,1,&m_view.m_vbDyn,&stride,&off);bindCB();
+			dc->IASetInputLayout(m_view.m_ilSolid);dc->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+			dc->VSSetShader(m_view.m_vsSolid,NULL,0);dc->HSSetShader(NULL,NULL,0);dc->DSSetShader(NULL,NULL,0);dc->PSSetShader(m_view.m_psSolid,NULL,0);
+			dc->PSSetSamplers(0,1,&m_view.m_sampLin);dc->OMSetDepthStencilState(m_view.m_dssRead,0);
+			dc->OMSetBlendState(thV>=2?m_view.m_bsAdd:m_view.m_bsAlpha,NULL,~0u);
+			dc->PSSetSamplers(2,1,&m_view.m_sampCmp);dc->PSSetShaderResources(3,1,&m_view.m_srvEnv);dc->PSSetShaderResources(4,1,&m_view.m_shadowSrv);
+			dc->PSSetShaderResources(5,2,ns+5);dc->PSSetShaderResources(6,1,ns+6);
+			dc->Draw(nVfxAlpha,vfxBeg);
+			dc->OMSetBlendState(m_view.m_bsOpaque,NULL,~0u);
+		}
+		dc->PSSetShaderResources(0,7,ns);
 	};
 	drawMirrorSlot(0,bestW,bestW.score>0.f,NULL,1.f);drawMirrorSlot(1,bestF,bestF.score>0.f,NULL,1.f);
 	for(int i=0;i<nFx;i++){
@@ -3826,6 +5630,20 @@ void CSoft3DMazeDlg::RenderScene()
 	dc->PSSetShaderResources(5,1,&m_view.m_mirrorSrv[0]);dc->PSSetShaderResources(6,1,&m_view.m_mirrorSrv[1]);
 	// --- 2パス目: 不透明（PCFでセルフシャドウ／投射影）---
 	drawFloorWall(TRUE);
+	// ナビをシーンRTへ先に焼いておく（ポスト後パスが落ちても見える）
+	if(nNav){
+		dc->RSSetState(m_view.m_rsNoCull);
+		dc->IASetVertexBuffers(0,1,&m_view.m_vbDyn,&stride,&off);bindCB();
+		dc->IASetInputLayout(m_view.m_ilSolid);dc->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+		dc->VSSetShader(m_view.m_vsSolid,NULL,0);dc->HSSetShader(NULL,NULL,0);dc->DSSetShader(NULL,NULL,0);dc->PSSetShader(m_view.m_psSolid,NULL,0);
+		dc->PSSetSamplers(0,1,&m_view.m_sampLin);dc->OMSetDepthStencilState(m_view.m_dssRead,0);
+		dc->OMSetBlendState(m_view.m_bsAlpha,NULL,~0u);
+		dc->PSSetSamplers(2,1,&m_view.m_sampCmp);dc->PSSetShaderResources(3,1,&m_view.m_srvEnv);dc->PSSetShaderResources(4,1,&m_view.m_shadowSrv);
+		dc->PSSetShaderResources(5,2,ns+5);dc->PSSetShaderResources(6,1,ns+6);
+		dc->Draw(nNav,navBeg);
+		dc->RSSetState(m_view.m_rsSolid);dc->OMSetBlendState(m_view.m_bsOpaque,NULL,~0u);
+		dc->PSSetShaderResources(0,7,ns);
+	}
 	dc->PSSetShaderResources(5,2,ns+5);
 	dc->OMSetDepthStencilState(m_view.m_dssOff,0);dc->OMSetBlendState(m_view.m_bsOpaque,NULL,~0u);dc->IASetInputLayout(NULL);dc->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);dc->VSSetShader(m_view.m_vsPost,NULL,0);dc->PSSetSamplers(1,1,&m_view.m_sampPoint);
 	dc->OMSetRenderTargets(1,&m_view.m_postRtv,NULL);dc->PSSetShaderResources(0,1,&m_view.m_sceneSrv);dc->PSSetShaderResources(2,1,&m_view.m_dsSrv);dc->PSSetShader(m_view.m_psSsr,NULL,0);dc->Draw(3,0);dc->PSSetShaderResources(0,5,ns);
@@ -3870,7 +5688,17 @@ void CSoft3DMazeDlg::RenderScene()
 		dc->PSSetShaderResources(5,2,ns+5);
 	}
 	dc->OMSetRenderTargets(1,&m_view.m_bbRtv,NULL);dc->OMSetDepthStencilState(m_view.m_dssOff,0);
-	const UINT maxH=m_view.m_vbHudBytes/sizeof(S3MHudVertex);S3MHudVertex* hv=new S3MHudVertex[maxH];UINT hn=0;
+	dc->RSSetState(m_view.m_rsNoCull); // HUDは画面空間CCWのためカリングなし
+	const UINT maxH=m_view.m_vbHudBytes/sizeof(S3MHudVertex);
+	const UINT needHudBytes=maxH*sizeof(S3MHudVertex);
+	if(m_view.m_cpuHudScratchBytes<needHudBytes){
+		delete[] m_view.m_cpuHudScratch;
+		m_view.m_cpuHudScratch=new (std::nothrow) BYTE[needHudBytes];
+		m_view.m_cpuHudScratchBytes=m_view.m_cpuHudScratch?needHudBytes:0;
+	}
+	S3MHudVertex* hv=m_view.m_cpuHudScratch?(S3MHudVertex*)m_view.m_cpuHudScratch:NULL;
+	if(!hv){m_view.PresentFrame();return;}
+	UINT hn=0;
 	auto hp=[&](float px,float py,float r,float g,float b,float a){if(hn<maxH)hv[hn++]={(px/(float)w)*2.f-1.f,1.f-(py/(float)h)*2.f,r,g,b,a};};
 	auto hq=[&](float ax,float ay,float bx,float by,float cx,float cy,float dx,float dy,float r,float g,float b,float a){hp(ax,ay,r,g,b,a);hp(bx,by,r,g,b,a);hp(cx,cy,r,g,b,a);hp(ax,ay,r,g,b,a);hp(cx,cy,r,g,b,a);hp(dx,dy,r,g,b,a);};
 	const BOOL overview=IsOverviewActive();
@@ -3881,15 +5709,14 @@ void CSoft3DMazeDlg::RenderScene()
 	if(overview){
 		hq(0,0,(float)w,0,(float)w,(float)h,0,(float)h,.02f,.03f,.05f,.58f);
 	}else if(savedata.s3m_show_map){
-		// ミニマップ: 画面上の枠サイズは固定、見えるワールド範囲をズームで変える
+		// ミニマップ: 枠なし。見えるワールド範囲は従来の約3倍。白▲は画面ピクセル固定
 		const float mapZ=MapZoomScale();
-		const float kMapViewWorld=14.f/max(.5f,mapZ);
+		const float kMapViewWorld=42.f/max(.5f,mapZ);
 		const float mpix=(float)min(w,h)*.30f;
 		const float cs=mpix/kMapViewWorld;
-		const float mcx=w-10.f-mpix*.5f,mcy=10.f+mpix*.5f,pad=mpix*.5f+3.f;
+		const float mcx=w-10.f-mpix*.5f,mcy=10.f+mpix*.5f,pad=mpix*.5f;
 		const float L=mcx-pad,R=mcx+pad,T=mcy-pad,B=mcy+pad;
 		haveMini=TRUE;miniL=L;miniT=T;miniR=R;miniB=B;
-		hq(L,T,R,T,R,B,L,B,.04f,.05f,.08f,.72f);
 		auto inBox=[&](float qx,float qy)->BOOL{return qx>=L&&qx<=R&&qy>=T&&qy<=B;};
 		const float rad=kMapViewWorld*.75f;
 		const int gx0=max(0,WorldToGridAxis(ex-rad)-1),gx1=min(m_n,WorldToGridAxis(ex+rad)+2);
@@ -3910,7 +5737,7 @@ void CSoft3DMazeDlg::RenderScene()
 		auto drawMapFloor=[&](int mf,float am){
 			if(mf<0||mf>=m_nFloors||!m_grids[mf]||am<=.01f)return;
 			for(int z=gz0;z<gz1;z++)for(int x=gx0;x<gx1;x++){
-				BYTE c=CellAtF(mf,x,z);if(c==CELL_WALL||c==CELL_WINDOW)continue;
+				BYTE c=CellAtF(mf,x,z);if(S3mIsSolidWall(c))continue;
 				float x0=AxisOrigin(x),x1=x0+AxisSpan(x),z0=AxisOrigin(z),z1=z0+AxisSpan(z);
 				float rr=.22f,gg=.40f,bb=.28f,a=.55f;
 				if(c==CELL_GOAL){rr=1;gg=.8f;bb=.18f;a=.9f;}
@@ -3922,20 +5749,26 @@ void CSoft3DMazeDlg::RenderScene()
 				else if(c==CELL_SPIKE){rr=.95f;gg=.25f;bb=.2f;a=.75f;}
 				else if(c==CELL_ICE){rr=.4f;gg=.8f;bb=1.f;a=.7f;}
 				else if(c==CELL_DARK){rr=.2f;gg=.15f;bb=.4f;a=.75f;}
+				else if(c==CELL_PORTAL){rr=.78f;gg=.35f;bb=1.f;a=.92f;}
+				else if(c==CELL_KEY){rr=1.f;gg=.85f;bb=.25f;a=.92f;}
+				else if(c==CELL_DOOR){rr=.62f;gg=.48f;bb=.35f;a=.95f;}
 				else if(VisitAtF(mf,x,z)){rr=.30f;gg=.55f;bb=.85f;a=.7f;}
 				mapQuad(x0,z0,x1,z0,x1,z1,x0,z1,rr,gg,bb,a*am);
 			}
 			for(int z=gz0;z<gz1;z++)for(int x=gx0;x<gx1;x++){
-				BYTE c=CellAtF(mf,x,z);if(c!=CELL_WALL&&c!=CELL_WINDOW)continue;
+				BYTE c=CellAtF(mf,x,z);if(c!=CELL_WALL&&c!=CELL_WINDOW&&c!=CELL_MIRROR_WALL)continue;
 				float x0=AxisOrigin(x)-kMapWallPad,x1=AxisOrigin(x)+AxisSpan(x)+kMapWallPad;
 				float z0=AxisOrigin(z)-kMapWallPad,z1=AxisOrigin(z)+AxisSpan(z)+kMapWallPad;
-				float rr=.55f,gg=.37f,bb=.25f,a=.95f;if(c==CELL_WINDOW){rr=.25f;gg=.58f;bb=.86f;}
+				float rr=.55f,gg=.37f,bb=.25f,a=.95f;
+				if(c==CELL_WINDOW){rr=.25f;gg=.58f;bb=.86f;}
+				else if(c==CELL_MIRROR_WALL){rr=.45f;gg=.75f;bb=.95f;}
 				mapQuad(x0,z0,x1,z0,x1,z1,x0,z1,rr,gg,bb,a*am);
 			}
 		};
 		if(m_miniFade<.999f){drawMapFloor(m_miniFadeFrom,1.f-m_miniFade);drawMapFloor(m_miniFadeTo,m_miniFade);}
 		else drawMapFloor(m_floor,1.f);
-		float ps=max(2.f,min(4.5f,cs*.18f));
+		// 白▲はズームアウトしても従来サイズ（mpix基準・cs非依存）
+		const float ps=max(7.f,min(14.f,mpix*.034f));
 		auto clipPt2=[&](float& qx,float& qy){qx=max(L+1.f,min(R-1.f,qx));qy=max(T+1.f,min(B-1.f,qy));};
 		// 階段の上下方向矢印（相手マス向き）
 		auto drawStairArrows=[&](int mf,float am){
@@ -3963,18 +5796,154 @@ void CSoft3DMazeDlg::RenderScene()
 		};
 		if(m_miniFade<.999f){drawStairArrows(m_miniFadeFrom,1.f-m_miniFade);drawStairArrows(m_miniFadeTo,m_miniFade);}
 		else drawStairArrows(m_floor,1.f);
-		float p0x=mcx,p0y=mcy-ps,p1x=mcx-ps*.55f,p1y=mcy+ps*.4f,p2x=mcx+ps*.55f,p2y=mcy+ps*.4f;
+		// ナビ導線（ミニマップ）
+		if(HasNavPath()){
+			auto drawNavSeg=[&](int mf,float am){
+				if(mf<0||am<=.01f)return;
+				for(int i=0;i+1<m_navCount;i++){
+					if(m_navPath[i].f!=mf||m_navPath[i+1].f!=mf)continue;
+					float ax=cellCX(m_navPath[i].x),az=cellCZ(m_navPath[i].z);
+					float bx=cellCX(m_navPath[i+1].x),bz=cellCZ(m_navPath[i+1].z);
+					float mx0,my0,mx1,my1;WorldToMap(ax,az,mx0,my0);WorldToMap(bx,bz,mx1,my1);
+					float qx0=mcx+mx0*cs,qy0=mcy+my0*cs,qx1=mcx+mx1*cs,qy1=mcy+my1*cs;
+					if(!inBox((qx0+qx1)*.5f,(qy0+qy1)*.5f))continue;
+					float dx=qx1-qx0,dy=qy1-qy0;float len=sqrtf(dx*dx+dy*dy)+1e-5f;dx/=len;dy/=len;
+					float ox=-dy*1.4f,oy=dx*1.4f;
+					hq(qx0+ox,qy0+oy,qx1+ox,qy1+oy,qx1-ox,qy1-oy,qx0-ox,qy0-oy,.95f,.72f,.12f,.9f*am);
+				}
+				const S3mNavPt& d=m_navPath[m_navCount-1];
+				if(d.f==mf){
+					float mx,my;WorldToMap(cellCX(d.x),cellCZ(d.z),mx,my);
+					float qx=mcx+mx*cs,qy=mcy+my*cs;
+					if(inBox(qx,qy)){
+						const float r=max(3.5f,cs*.18f);
+						float tr=1.f,tg=.85f,tb=.15f;
+						if(CellAtF(d.f,d.x,d.z)==CELL_KEY){tr=.75f;tg=1.f;tb=.28f;}
+						hq(qx-r,qy-r,qx+r,qy-r,qx+r,qy+r,qx-r,qy+r,tr,tg,tb,.95f*am);
+					}
+				}
+			};
+			if(m_miniFade<.999f){drawNavSeg(m_miniFadeFrom,1.f-m_miniFade);drawNavSeg(m_miniFadeTo,m_miniFade);}
+			else drawNavSeg(m_floor,1.f);
+		}
+		// 現在地▲（大きめ＋黒縁で視認性）
+		float p0x=mcx,p0y=mcy-ps,p1x=mcx-ps*.62f,p1y=mcy+ps*.48f,p2x=mcx+ps*.62f,p2y=mcy+ps*.48f;
 		clipPt2(p0x,p0y);clipPt2(p1x,p1y);clipPt2(p2x,p2y);
-		hp(p0x,p0y,1,.92f,.3f,1);hp(p1x,p1y,1,.92f,.3f,1);hp(p2x,p2y,1,.92f,.3f,1);
-		float nx,ny,xx,xy;WorldToMap(ex+fx,ez+fz,nx,ny);WorldToMap(ex+rx,ez+rz,xx,xy);
+		const float os=1.35f;
+		float o0x=mcx,o0y=mcy-ps*os,o1x=mcx-ps*.62f*os,o1y=mcy+ps*.48f*os,o2x=mcx+ps*.62f*os,o2y=mcy+ps*.48f*os;
+		clipPt2(o0x,o0y);clipPt2(o1x,o1y);clipPt2(o2x,o2y);
+		hp(o0x,o0y,.05f,.05f,.08f,1);hp(o1x,o1y,.05f,.05f,.08f,1);hp(o2x,o2y,.05f,.05f,.08f,1);
+		hp(p0x,p0y,1.f,1.f,1.f,1);hp(p1x,p1y,1.f,1.f,1.f,1);hp(p2x,p2y,1.f,1.f,1.f,1);
+		// ゴール方位計：ミニマップより外側・黄色＋縁取り＋「この方向」演出
+		{
+			int gx = m_goalX, gz = m_goalZ;
+			if (gx < 0 || gz < 0 || m_goalFloor < 0 || m_goalFloor >= m_nFloors
+				|| !m_grids[m_goalFloor] || CellAtF(m_goalFloor, gx, gz) != CELL_GOAL) {
+				RefreshGoalCache();
+				gx = m_goalX; gz = m_goalZ;
+			}
+			if (gx >= 0) {
+				float gmx,gmy;WorldToMap(GridToWorldX((float)gx+.5f),GridToWorldZ((float)gz+.5f),gmx,gmy);
+				float glen=sqrtf(gmx*gmx+gmy*gmy);
+				if(glen>1e-4f){
+					gmx/=glen;gmy/=glen;
+					const float rim=pad+10.f; // ミニマップ枠の外側
+					const float pulseG=.7f+.3f*sinf(m_anim*3.6f);
+					float ox=-gmy,oy=gmx;
+					float tipX=mcx+gmx*rim,tipY=mcy+gmy*rim;
+					float midX=tipX-gmx*13.f,midY=tipY-gmy*13.f;
+					float baseX=tipX-gmx*22.f,baseY=tipY-gmy*22.f;
+					// 外側グロー（黄）
+					for(int k=2;k>=0;k--){
+						float s=1.f+(float)k*.22f;
+						float a=.18f*(3-k)*pulseG;
+						hp(tipX+gmx*2.f*s,tipY+gmy*2.f*s,1.f,1.f,.35f,a);
+						hp(baseX-ox*10.f*s,baseY-oy*10.f*s,1.f,1.f,.35f,a);
+						hp(baseX+ox*10.f*s,baseY+oy*10.f*s,1.f,1.f,.35f,a);
+					}
+					// 黒縁
+					hp(tipX+gmx*1.6f,tipY+gmy*1.6f,.05f,.05f,.02f,1);
+					hp(baseX-ox*8.2f,baseY-oy*8.2f,.05f,.05f,.02f,1);
+					hp(baseX+ox*8.2f,baseY+oy*8.2f,.05f,.05f,.02f,1);
+					// 黄色本体
+					hp(tipX,tipY,1.f,.92f,.12f,pulseG);
+					hp(baseX-ox*7.f,baseY-oy*7.f,1.f,.88f,.08f,pulseG);
+					hp(baseX+ox*7.f,baseY+oy*7.f,1.f,.88f,.08f,pulseG);
+					// 白いハイライト縁
+					hp(tipX-gmx*.5f,tipY-gmy*.5f,1.f,1.f,.85f,.9f);
+					hp(midX-ox*3.2f,midY-oy*3.2f,1.f,1.f,.85f,.75f);
+					hp(midX+ox*3.2f,midY+oy*3.2f,1.f,1.f,.85f,.75f);
+					// 「この方向」：矢印後方のパルスシェブロン
+					for(int c=0;c<3;c++){
+						float ph=fmodf(m_anim*1.8f+(float)c*.33f,1.f);
+						float d=8.f+ph*16.f;
+						float cx=tipX-gmx*d,cy=tipY-gmy*d;
+						float w=5.5f*(1.f-ph*.55f);
+						float aa=.55f*(1.f-ph)*pulseG;
+						float c0x=cx+gmx*3.5f,c0y=cy+gmy*3.5f;
+						float c1x=cx-gmx*2.f-ox*w,c1y=cy-gmy*2.f-oy*w;
+						float c2x=cx-gmx*2.f+ox*w,c2y=cy-gmy*2.f+oy*w;
+						hp(c0x,c0y,1.f,.95f,.2f,aa);hp(c1x,c1y,1.f,.9f,.1f,aa);hp(c2x,c2y,1.f,.9f,.1f,aa);
+					}
+					// 根元の短いステム
+					hq(baseX-ox*2.2f,baseY-oy*2.2f,baseX+ox*2.2f,baseY+oy*2.2f,
+						baseX+ox*2.2f-gmx*7.f,baseY+oy*2.2f-gmy*7.f,
+						baseX-ox*2.2f-gmx*7.f,baseY-oy*2.2f-gmy*7.f,
+						1.f,.85f,.1f,.75f*pulseG);
+					if(m_goalFloor!=m_floor){
+						// 他階：小さな二重矢印で階差を示唆
+						float s2=0.62f;
+						float t2x=tipX-gmx*4.f,t2y=tipY-gmy*4.f;
+						hp(t2x,t2y,1.f,.75f,.05f,.85f);
+						hp(t2x-gmx*9.f*s2-ox*5.f*s2,t2y-gmy*9.f*s2-oy*5.f*s2,1.f,.7f,.05f,.85f);
+						hp(t2x-gmx*9.f*s2+ox*5.f*s2,t2y-gmy*9.f*s2+oy*5.f*s2,1.f,.7f,.05f,.85f);
+					}
+				}
+			}
+		}
+		// コンパス：ワールド北(-Z)をミニマップ上で指す（カメラ前方だと常に上向きになる）
+		float nx,ny;WorldToMap(ex+0.f,ez-1.f,nx,ny);
+		float nlen=sqrtf(nx*nx+ny*ny)+1e-5f;nx/=nlen;ny/=nlen;
+		float xx=-ny,xy=nx;
 		float ccx=min(R-8.f,max(L+8.f,mcx+pad-12)),ccy=min(B-8.f,max(T+8.f,mcy-pad+12));
-		hp(ccx+nx*8,ccy+ny*8,1,.2f,.2f,1);hp(ccx-nx*2-xx*4,ccy-ny*2-xy*4,1,.2f,.2f,1);hp(ccx-nx*2+xx*4,ccy-ny*2+xy*4,1,.2f,.2f,1);
+		const float crs=12.f;
+		hp(ccx+nx*crs,ccy+ny*crs,1,.2f,.2f,1);hp(ccx-nx*2.5f-xx*5.5f,ccy-ny*2.5f-xy*5.5f,1,.2f,.2f,1);hp(ccx-nx*2.5f+xx*5.5f,ccy-ny*2.5f+xy*5.5f,1,.2f,.2f,1);
 		// 階層ラベルはミニマップ左側（地図に重ねない・読みやすい大きさ）
 		drawBadge=TRUE;badgeFloor=m_floor;badgeRightEdge=TRUE;
-		badgeX=L-8.f;badgeY=T+2.f;badgeMaxW=min(240.f,max(160.f,L-20.f));
+		badgeX=L-8.f;badgeY=T+2.f;badgeMaxW=min(320.f,max(180.f,L-16.f));
 	}
 	if(m_clearScreenA>.01f)hq(0,0,(float)w,0,(float)w,(float)h,0,(float)h,0,0,0,m_clearScreenA);
 	else if(m_floorScreenA>.01f)hq(0,0,(float)w,0,(float)w,(float)h,0,(float)h,0,0,0,m_floorScreenA);
+	else if(m_portalFx!=PORTALFX_IDLE&&m_portalFlashA>.01f){
+		const float a=min(1.f,m_portalFlashA);
+		hq(0,0,(float)w,0,(float)w,(float)h,0,(float)h,.55f,.12f,.95f,a*.72f);
+		hq(0,0,(float)w,0,(float)w,(float)h,0,(float)h,1.f,.85f,1.f,a*.35f);
+		// 放射リング＋火花
+		const float cx=(float)w*.5f,cy=(float)h*.5f;
+		const float phase=(m_portalFx==PORTALFX_OUT)?(m_portalFxT/.42f):(1.f-m_portalFxT/.55f);
+		for(int ring=0;ring<5;ring++){
+			const float rad=(40.f+ring*55.f)*(0.35f+phase*1.4f)+sinf(m_anim*8.f+(float)ring)*8.f;
+			const float ra=a*(1.f-(float)ring/5.f)*.9f;
+			const int segs=28;
+			for(int s=0;s<segs;s++){
+				const float a0=(float)s/(float)segs*(float)(M_PI*2);
+				const float a1=(float)(s+1)/(float)segs*(float)(M_PI*2);
+				const float rw=6.f+ring*1.5f;
+				float x0=cx+cosf(a0)*rad,y0=cy+sinf(a0)*rad;
+				float x1=cx+cosf(a1)*rad,y1=cy+sinf(a1)*rad;
+				float x2=cx+cosf(a1)*(rad+rw),y2=cy+sinf(a1)*(rad+rw);
+				float x3=cx+cosf(a0)*(rad+rw),y3=cy+sinf(a0)*(rad+rw);
+				hq(x0,y0,x1,y1,x2,y2,x3,y3,.9f,.4f+ring*.08f,1.f,ra);
+			}
+		}
+		for(int sp=0;sp<36;sp++){
+			const float ang=(float)sp/(float)36*(float)(M_PI*2)+m_anim*6.f;
+			const float dist=(30.f+phase*280.f)*(0.4f+0.6f*((sp*17)&7)/7.f);
+			const float px=cx+cosf(ang)*dist,py=cy+sinf(ang)*dist;
+			const float ps=4.f+3.f*(1.f-phase)+((sp*3)&3);
+			hq(px-ps,py-ps,px+ps,py-ps,px+ps,py+ps,px-ps,py+ps,1.f,.7f,1.f,a*.85f);
+		}
+	}
 	else if(m_darkT>.01f){
 		const float da=min(.55f,m_darkT*.18f);
 		hq(0,0,(float)w,0,(float)w,(float)h,0,(float)h,.02f,.01f,.06f,da);
@@ -3985,18 +5954,25 @@ void CSoft3DMazeDlg::RenderScene()
 		int bakeFloor=m_mapViewFloor;
 		if(bakeFloor<0||bakeFloor>=m_nFloors||!m_grids[bakeFloor])bakeFloor=m_floor;
 		if(m_mapBakeDirty){
+			const DWORD nowBake=GetTickCount();
+			// 移動中の毎歩フル再ベイクは大マップで重い → 停止後 or 間引き
+			const BOOL allowBake=(!m_moving && (nowBake-m_lastMapBakeTick)>80)
+				|| (nowBake-m_lastMapBakeTick)>450;
+			if(allowBake){
+			m_lastMapBakeTick=nowBake;
 			D3D11_MAPPED_SUBRESOURCE mm={};
 			if(SUCCEEDED(dc->Map(m_view.m_texMap,0,D3D11_MAP_WRITE_DISCARD,0,&mm))&&mm.pData){
 				BYTE* row=(BYTE*)mm.pData;
 				const int pitch=(int)mm.RowPitch;
-				// 格子1セル→テクスチャ1テクセル寄り（最大3000に4096）。通路/壁を忠実に。
+				// ワールド比率でベイク（壁帯は細い／通路は広い＝ミニマップと同じ見た目）
 				auto rgba=[&](BYTE r,BYTE g,BYTE b,BYTE a)->DWORD{
 					return ((DWORD)a<<24)|((DWORD)r<<16)|((DWORD)g<<8)|b;
 				};
-				const DWORD colWall=rgba(180,130,90,255);
-				const DWORD colWin=rgba(70,150,210,255);
-				const DWORD colVisit=rgba(110,180,230,235);
-				const DWORD colBlack=rgba(0,0,0,255);
+				const DWORD colWall=rgba(140,95,64,255);   // ミニマップ壁に近い茶
+				const DWORD colWin=rgba(64,148,220,255);
+				const DWORD colVisit=rgba(76,140,217,230);
+				const DWORD colFloor=rgba(56,102,71,255);  // ミニマップ床に近い緑
+				const DWORD colBlack=rgba(20,24,22,255);
 				auto cellColor=[&](BYTE c,BOOL visited)->DWORD{
 					if(c==CELL_GOAL)return rgba(255,210,40,235);
 					if(c==CELL_START)return rgba(55,220,120,235);
@@ -4007,25 +5983,91 @@ void CSoft3DMazeDlg::RenderScene()
 					if(c==CELL_SPIKE)return rgba(220,60,50,215);
 					if(c==CELL_ICE)return rgba(100,200,255,210);
 					if(c==CELL_DARK)return rgba(50,40,90,220);
+					if(c==CELL_MIRROR_WALL)return rgba(120,200,230,255);
+					if(c==CELL_MIRROR_FLOOR)return rgba(100,180,210,230);
+					if(c==CELL_PORTAL)return rgba(200,90,255,245);
+					if(c==CELL_KEY)return rgba(255,215,60,245);
+					if(c==CELL_DOOR)return rgba(158,122,88,250);
 					if(c==CELL_WALL)return colWall;
 					if(c==CELL_WINDOW)return colWin;
 					if(visited)return colVisit;
-					return colBlack;
+					return colFloor;
+				};
+				const float worldSpan=max(1e-3f,AxisOrigin(m_n));
+				// ミニマップ相当の細さ（パッドなし＋細い軸をスリム化）
+				const float kWallSlim=.42f;
+				const float uScale=(float)TS/worldSpan;
+				auto fillWorld=[&](float x0,float z0,float x1,float z1,DWORD col,BOOL minPx){
+					int tx0=(int)floorf(x0*uScale),tx1=(int)ceilf(x1*uScale);
+					int ty0=(int)floorf(z0*uScale),ty1=(int)ceilf(z1*uScale);
+					if(minPx){
+						if(tx1<=tx0){tx0=max(0,(int)((x0+x1)*.5f*uScale));tx1=tx0+1;}
+						if(ty1<=ty0){ty0=max(0,(int)((z0+z1)*.5f*uScale));ty1=ty0+1;}
+					}
+					if(tx0<0)tx0=0;if(ty0<0)ty0=0;
+					if(tx1>TS)tx1=TS;if(ty1>TS)ty1=TS;
+					for(int ty=ty0;ty<ty1;ty++){
+						DWORD* dst=(DWORD*)(row+ty*pitch);
+						for(int tx=tx0;tx<tx1;tx++)dst[tx]=col;
+					}
+				};
+				auto fillWorldMin=[&](float x0,float z0,float x1,float z1,DWORD col,int minT){
+					int tx0=(int)floorf(x0*uScale),tx1=(int)ceilf(x1*uScale);
+					int ty0=(int)floorf(z0*uScale),ty1=(int)ceilf(z1*uScale);
+					int cx=(tx0+tx1)/2,cy=(ty0+ty1)/2;
+					if(tx1-tx0<minT){tx0=cx-minT/2;tx1=tx0+minT;}
+					if(ty1-ty0<minT){ty0=cy-minT/2;ty1=ty0+minT;}
+					if(tx0<0)tx0=0;if(ty0<0)ty0=0;
+					if(tx1>TS)tx1=TS;if(ty1>TS)ty1=TS;
+					for(int ty=ty0;ty<ty1;ty++){
+						DWORD* dst=(DWORD*)(row+ty*pitch);
+						for(int tx=tx0;tx<tx1;tx++)dst[tx]=col;
+					}
 				};
 				for(int ty=0;ty<TS;ty++){
-					const int gz=min(m_n-1,(int)(((long long)ty*(long long)m_n+TS/2)/TS));
 					DWORD* dst=(DWORD*)(row+ty*pitch);
-					for(int tx=0;tx<TS;tx++){
-						const int gx=min(m_n-1,(int)(((long long)tx*(long long)m_n+TS/2)/TS));
-						const BYTE c=CellAtF(bakeFloor,gx,gz);
-						dst[tx]=cellColor(c,VisitAtF(bakeFloor,gx,gz)?TRUE:FALSE);
+					for(int tx=0;tx<TS;tx++)dst[tx]=colBlack;
+				}
+				for(int z=0;z<m_n;z++)for(int x=0;x<m_n;x++){
+					const BYTE c=CellAtF(bakeFloor,x,z);
+					if(S3mIsSolidWall(c))continue;
+					DWORD col=cellColor(c,VisitAtF(bakeFloor,x,z)?TRUE:FALSE);
+					fillWorld(AxisOrigin(x),AxisOrigin(z),AxisOrigin(x)+AxisSpan(x),AxisOrigin(z)+AxisSpan(z),col,FALSE);
+				}
+				for(int z=0;z<m_n;z++)for(int x=0;x<m_n;x++){
+					const BYTE c=CellAtF(bakeFloor,x,z);
+					if(c!=CELL_WALL&&c!=CELL_WINDOW&&c!=CELL_MIRROR_WALL)continue;
+					float x0=AxisOrigin(x),x1=x0+AxisSpan(x);
+					float z0=AxisOrigin(z),z1=z0+AxisSpan(z);
+					const float sx=x1-x0,sz=z1-z0;
+					if(sx<=sz){
+						const float cx=(x0+x1)*.5f,half=sx*.5f*kWallSlim;
+						x0=cx-half;x1=cx+half;
 					}
+					if(sz<=sx){
+						const float cz=(z0+z1)*.5f,half=sz*.5f*kWallSlim;
+						z0=cz-half;z1=cz+half;
+					}
+					fillWorld(x0,z0,x1,z1,cellColor(c,FALSE),TRUE);
+				}
+				// 特殊マスを上書き（ズームアウトでも色が見えるよう最小テクスチャサイズを確保）
+				for(int z=0;z<m_n;z++)for(int x=0;x<m_n;x++){
+					const BYTE c=CellAtF(bakeFloor,x,z);
+					const BOOL special=c==CELL_GOAL||c==CELL_START||c==CELL_STAIRS_DOWN||c==CELL_STAIRS_UP
+						||c==CELL_PORTAL||c==CELL_KEY||c==CELL_DOOR||c==CELL_MIRROR_FLOOR||c==CELL_MIRROR_WALL||c==CELL_WINDOW
+						||S3mIsPickupCell(c)||S3mIsTrapCell(c);
+					if(!special)continue;
+					float x0=AxisOrigin(x),x1=x0+AxisSpan(x);
+					float z0=AxisOrigin(z),z1=z0+AxisSpan(z);
+					const int minT=(c==CELL_GOAL||c==CELL_START)?6:((c==CELL_STAIRS_DOWN||c==CELL_STAIRS_UP||c==CELL_PORTAL)?5:4);
+					fillWorldMin(x0,z0,x1,z1,cellColor(c,FALSE),minT);
 				}
 				dc->Unmap(m_view.m_texMap,0);
 				m_mapBakeDirty=0;
 			}
+			} // allowBake
 		}
-		const float tipBand=156.f;
+		const float tipBand=210.f;
 		const float topPad=68.f;
 		const float areaTop=topPad;
 		const float areaH=max(96.f,(float)h-tipBand-topPad);
@@ -4045,45 +6087,83 @@ void CSoft3DMazeDlg::RenderScene()
 		dc->PSSetSamplers(0,1,&m_view.m_sampPoint);
 		dc->PSSetShaderResources(0,1,&m_view.m_srvMap);dc->OMSetBlendState(m_view.m_bsAlpha,NULL,~0u);dc->Draw(3,0);
 		dc->PSSetShaderResources(0,1,ns);
-		// 自機マーカー＋階段（格子正規化＝ベイクと一致）
+		// 自機マーカー＋階段（ワールド正規化＝ベイクと一致）
 		hn=0;
-		const float invN=1.f/max(1.f,(float)m_n);
-		auto g2s=[&](float gx,float gz,float& sx,float& sy){
-			sx=ox+gx*invN*side;
-			sy=oy+gz*invN*side;
+		const float worldSpan=max(1e-3f,AxisOrigin(m_n));
+		const float invW=1.f/worldSpan;
+		auto w2s=[&](float wx,float wz,float& sx,float& sy){
+			sx=ox+wx*invW*side;
+			sy=oy+wz*invW*side;
 		};
+		auto cellCX=[&](int x)->float{return AxisOrigin(x)+AxisSpan(x)*.5f;};
+		auto cellCZ=[&](int z)->float{return AxisOrigin(z)+AxisSpan(z)*.5f;};
 		for(int z=0;z<m_n;z++)for(int x=0;x<m_n;x++){
 			BYTE c=CellAtF(bakeFloor,x,z);
 			if(c!=CELL_STAIRS_DOWN&&c!=CELL_STAIRS_UP)continue;
 			int pf=0,px=0,pz=0;
 			if(!FindStairPartner(bakeFloor,x,z,pf,px,pz))continue;
-			float qx0,qy0,qx1,qy1;g2s((float)x+.5f,(float)z+.5f,qx0,qy0);g2s((float)px+.5f,(float)pz+.5f,qx1,qy1);
+			float qx0,qy0,qx1,qy1;w2s(cellCX(x),cellCZ(z),qx0,qy0);w2s(cellCX(px),cellCZ(pz),qx1,qy1);
 			float dx=qx1-qx0,dy=qy1-qy0;float len=sqrtf(dx*dx+dy*dy)+1e-5f;dx/=len;dy/=len;
-			const float asz=max(6.f,side*.014f);
+			const float asz=max(8.f,side*.018f);
 			float tx=qx0+dx*len*.58f,ty=qy0+dy*len*.58f;
 			float bx2=tx-dx*asz*1.35f,by2=ty-dy*asz*1.35f;
 			float ox2=-dy*asz*.75f,oy2=dx*asz*.75f;
 			float rr=1.f,gg=.55f,bb=.15f;if(c==CELL_STAIRS_UP){rr=.2f;gg=.85f;bb=1.f;}
 			hp(tx,ty,rr,gg,bb,1.f);hp(bx2+ox2,by2+oy2,rr,gg,bb,1.f);hp(bx2-ox2,by2-oy2,rr,gg,bb,1.f);
 		}
-		float pcx,pcy;g2s(m_px,m_pz,pcx,pcy);
+		// ナビ導線（全体マップ）
+		if(HasNavPath()){
+			for(int i=0;i+1<m_navCount;i++){
+				if(m_navPath[i].f!=bakeFloor||m_navPath[i+1].f!=bakeFloor)continue;
+				float sx0,sy0,sx1,sy1;
+				w2s(cellCX(m_navPath[i].x),cellCZ(m_navPath[i].z),sx0,sy0);
+				w2s(cellCX(m_navPath[i+1].x),cellCZ(m_navPath[i+1].z),sx1,sy1);
+				float dx=sx1-sx0,dy=sy1-sy0;float len=sqrtf(dx*dx+dy*dy)+1e-5f;dx/=len;dy/=len;
+				float oxN=-dy*max(1.5f,side*.0025f),oyN=dx*max(1.5f,side*.0025f);
+				hq(sx0+oxN,sy0+oyN,sx1+oxN,sy1+oyN,sx1-oxN,sy1-oyN,sx0-oxN,sy0-oyN,.95f,.72f,.12f,.85f);
+			}
+			const S3mNavPt& d=m_navPath[m_navCount-1];
+			if(d.f==bakeFloor){
+				float sx,sy;w2s(cellCX(d.x),cellCZ(d.z),sx,sy);
+				const float r=max(5.f,side*.01f);
+				float tr=1.f,tg=.85f,tb=.15f;
+				if(CellAtF(d.f,d.x,d.z)==CELL_KEY){tr=.75f;tg=1.f;tb=.28f;}
+				hq(sx-r,sy-r,sx+r,sy-r,sx+r,sy+r,sx-r,sy+r,tr,tg,tb,.95f);
+			}
+		}
 		float ffx,ffz,rrx,rrz;CamBasisYaw(m_yaw,ffx,ffz,rrx,rrz);
-		const float ps=max(5.f,side*.012f);
-		float t0x=pcx+ffx*ps,t0y=pcy+ffz*ps,t1x=pcx-ffx*ps*.4f-rrx*ps*.5f,t1y=pcy-ffz*ps*.4f-rrz*ps*.5f,t2x=pcx-ffx*ps*.4f+rrx*ps*.5f,t2y=pcy-ffz*ps*.4f+rrz*ps*.5f;
+		// 自機▲：通路1マス程度を上限に、画面ピクセルでサイズ固定（ズームで暴走しない）
+		float pcx,pcy;w2s(GridToWorldX(m_px),GridToWorldZ(m_pz),pcx,pcy);
+		const float cellPx=1.f*invW*side; // 通路マスの画面サイズ
+		const float arrowPx=max(7.f,min(16.f,cellPx*.75f));
+		float t0x=pcx+ffx*arrowPx,t0y=pcy+ffz*arrowPx;
+		float t1x=pcx-ffx*arrowPx*.42f-rrx*arrowPx*.55f,t1y=pcy-ffz*arrowPx*.42f-rrz*arrowPx*.55f;
+		float t2x=pcx-ffx*arrowPx*.42f+rrx*arrowPx*.55f,t2y=pcy-ffz*arrowPx*.42f+rrz*arrowPx*.55f;
+		// 注: 画面Yは下方向＋なので、ワールドforwardのz成分はそのまま画面Δyに使う（従来w2s差分と同じ向き）
 		auto clampMap=[&](float& qx,float& qy){qx=max(ox+2.f,min(ox+side-2.f,qx));qy=max(oy+2.f,min(oy+side-2.f,qy));};
 		clampMap(t0x,t0y);clampMap(t1x,t1y);clampMap(t2x,t2y);
-		hp(t0x,t0y,1.f,.92f,.25f,1.f);hp(t1x,t1y,1.f,.92f,.25f,1.f);hp(t2x,t2y,1.f,.92f,.25f,1.f);
+		{
+			float cx=(t0x+t1x+t2x)*(1.f/3.f),cy=(t0y+t1y+t2y)*(1.f/3.f);
+			const float os=1.22f;
+			hp(cx+(t0x-cx)*os,cy+(t0y-cy)*os,.05f,.05f,.08f,1.f);
+			hp(cx+(t1x-cx)*os,cy+(t1y-cy)*os,.05f,.05f,.08f,1.f);
+			hp(cx+(t2x-cx)*os,cy+(t2y-cy)*os,.05f,.05f,.08f,1.f);
+		}
+		hp(t0x,t0y,1.f,.95f,.2f,1.f);hp(t1x,t1y,1.f,.95f,.2f,1.f);hp(t2x,t2y,1.f,.95f,.2f,1.f);
 		hq(ox-2,oy-2,ox+side+2,oy-2,ox+side+2,oy+side+2,ox-2,oy+side+2,.9f,.92f,1.f,.22f);
 		if(hn&&SUCCEEDED(dc->Map(m_view.m_vbHud,0,D3D11_MAP_WRITE_DISCARD,0,&map))){memcpy(map.pData,hv,hn*sizeof(S3MHudVertex));dc->Unmap(m_view.m_vbHud,0);UINT hs=sizeof(S3MHudVertex);dc->IASetVertexBuffers(0,1,&m_view.m_vbHud,&hs,&off);dc->RSSetViewports(1,&vp);dc->IASetInputLayout(m_view.m_ilHud);dc->VSSetShader(m_view.m_vsHud,NULL,0);dc->PSSetShader(m_view.m_psHud,NULL,0);dc->OMSetBlendState(m_view.m_bsAlpha,NULL,~0u);dc->Draw(hn,0);}
 		dc->RSSetViewports(1,&vp);
 		mapOx=ox;mapOy=oy;mapSide=side;
 		drawBadge=TRUE;badgeFloor=bakeFloor;
 		badgeRightEdge=FALSE;badgeAboveMap=FALSE;
-		badgeX=14.f;badgeY=12.f;badgeMaxW=300.f;
+		badgeX=14.f;badgeY=12.f;badgeMaxW=380.f;
 	}
 	auto blitFloorBadge=[&](){
 		if(!drawBadge||!m_view.m_ready)return;
-		const CStringW lab(FloorLabel(badgeFloor));
+		const CStringW keyWord=LL14(L"鍵", L"Keys", L"Clés", L"Chiavi", L"Llaves",
+			L"열쇠", L"钥匙", L"مفاتيح", L"Ключи", L"Schlüssel", L"Chaves", L"Sleutels", L"Klucze", L"Anahtar");
+		CStringW lab;
+		lab.Format(L"%s　%s×%d", (LPCWSTR)CStringW(FloorLabel(badgeFloor)), (LPCWSTR)keyWord, m_keysHeld);
 		if(lab!=m_mapBadgeText||!m_view.m_srvBadge)
 			m_view.BakeBadgeTexture((LPCWSTR)lab),m_mapBadgeText=lab;
 		if(!m_view.m_srvBadge||m_view.m_badgeW<=0)return;
@@ -4113,14 +6193,15 @@ void CSoft3DMazeDlg::RenderScene()
 	};
 	blitFloorBadge();
 	EnsureTipTexture(overview);
+	float tipX=0.f,tipY=0.f,tipTw=0.f,tipTh=0.f;BOOL haveTip=FALSE;
 	if(m_view.m_srvTip&&m_view.m_tipW>0&&m_view.m_tipH>0){
 		float tw=(float)m_view.m_tipW,th=(float)m_view.m_tipH;
-		float tipX=8.f,tipY=8.f;
+		tipX=8.f;tipY=8.f;
 		if(overview){
-			// 下帯に読める大きさで固定（階層ラベルは上帯・地図と分離）
+			// 下帯：操作ヒント。その上に階層タブバーを置く
 			const float pad=10.f;
 			const float maxW=(float)w-pad*2.f;
-			const float maxH=148.f;
+			const float maxH=100.f;
 			if(tw>maxW){const float s=maxW/tw;tw*=s;th*=s;}
 			if(th>maxH){const float s=maxH/th;tw*=s;th*=s;}
 			tipX=((float)w-tw)*.5f;
@@ -4156,6 +6237,7 @@ void CSoft3DMazeDlg::RenderScene()
 			}
 			if(tipY+th>(float)h-pad)tipY=max(pad,(float)h-pad-th);
 		}
+		haveTip=TRUE;tipTw=tw;tipTh=th;
 		D3D11_VIEWPORT tipVp={tipX,tipY,tw,th,0,1};
 		cb.misc.z=99.f;
 		if(SUCCEEDED(dc->Map(m_view.m_cbFrame,0,D3D11_MAP_WRITE_DISCARD,0,&map))){memcpy(map.pData,&cb,sizeof(cb));dc->Unmap(m_view.m_cbFrame,0);}
@@ -4167,12 +6249,52 @@ void CSoft3DMazeDlg::RenderScene()
 		dc->PSSetShaderResources(0,1,ns);
 		dc->RSSetViewports(1,&vp);
 	}
-	delete[] hv;
+	if(overview&&m_nFloors>=1&&m_view.m_ready){
+		static int s_bakedView=-99,s_bakedPlayer=-99,s_bakedN=-99;
+		if(m_floorBarDirty||!m_view.m_srvFloorBar
+			||s_bakedView!=m_mapViewFloor||s_bakedPlayer!=m_floor||s_bakedN!=m_nFloors){
+			CStringW labStore[4];
+			const wchar_t* labs[4]={};
+			for(int i=0;i<m_nFloors&&i<4;i++){
+				labStore[i]=FloorLabel(i);
+				labs[i]=(LPCWSTR)labStore[i];
+			}
+			m_view.BakeFloorBarTexture(m_nFloors,m_mapViewFloor,m_floor,labs);
+			m_floorBarDirty=0;
+			s_bakedView=m_mapViewFloor;s_bakedPlayer=m_floor;s_bakedN=m_nFloors;
+		}
+		if(m_view.m_srvFloorBar&&m_view.m_floorBarW>0){
+			float bw=(float)m_view.m_floorBarW,bh=(float)m_view.m_floorBarH;
+			const float pad=10.f;
+			const float maxW=(float)w-pad*2.f;
+			if(bw>maxW){const float s=maxW/bw;bw*=s;bh*=s;}
+			float bx=((float)w-bw)*.5f;
+			float by=haveTip?(tipY-bh-8.f):((float)h-bh-pad);
+			if(by<pad)by=pad;
+			m_ovBarX=bx;m_ovBarY=by;m_ovBarW=bw;m_ovBarH=bh;
+			m_ovTabN=min(m_nFloors,4);
+			for(int i=0;i<m_ovTabN;i++){m_ovTabX0[i]=m_view.m_floorBarTabX0[i];m_ovTabX1[i]=m_view.m_floorBarTabX1[i];}
+			m_ovRecX0=m_view.m_floorBarRecX0;m_ovRecX1=m_view.m_floorBarRecX1;
+			D3D11_VIEWPORT bvp={bx,by,bw,bh,0,1};
+			cb.misc.z=99.f;
+			if(SUCCEEDED(dc->Map(m_view.m_cbFrame,0,D3D11_MAP_WRITE_DISCARD,0,&map))){memcpy(map.pData,&cb,sizeof(cb));dc->Unmap(m_view.m_cbFrame,0);}
+			dc->RSSetViewports(1,&bvp);
+			dc->IASetInputLayout(NULL);dc->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+			dc->VSSetShader(m_view.m_vsPost,NULL,0);dc->PSSetShader(m_view.m_psFinal,NULL,0);
+			dc->PSSetConstantBuffers(0,1,&m_view.m_cbFrame);dc->PSSetSamplers(0,1,&m_view.m_sampLin);
+			dc->PSSetShaderResources(0,1,&m_view.m_srvFloorBar);dc->OMSetBlendState(m_view.m_bsAlpha,NULL,~0u);dc->Draw(3,0);
+			dc->PSSetShaderResources(0,1,ns);
+			dc->RSSetViewports(1,&vp);
+		}
+	}else{
+		m_ovBarW=m_ovBarH=0.f;
+	}
+	// hv はビューの再利用スクラッチ（delete しない）
 	if(m_clearTextA<=.01f&&m_floorTextA>.01f&&m_view.m_srvClear){
 		cb.misc.z=99.f;if(SUCCEEDED(dc->Map(m_view.m_cbFrame,0,D3D11_MAP_WRITE_DISCARD,0,&map))){memcpy(map.pData,&cb,sizeof(cb));dc->Unmap(m_view.m_cbFrame,0);}
 		D3D11_VIEWPORT tvp={0,(float)h*.375f,(float)w,(float)h*.25f,0,1};dc->RSSetViewports(1,&tvp);dc->IASetInputLayout(NULL);dc->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);dc->VSSetShader(m_view.m_vsPost,NULL,0);dc->PSSetShader(m_view.m_psFinal,NULL,0);dc->PSSetConstantBuffers(0,1,&m_view.m_cbFrame);dc->PSSetShaderResources(0,1,&m_view.m_srvClear);dc->OMSetBlendState(m_view.m_bsAlpha,NULL,~0u);dc->Draw(3,0);dc->PSSetShaderResources(0,1,ns);
 	}
-	if(m_clearTextA>.01f&&m_view.m_srvClear){
+	if((m_clearTextA>.01f||m_navWaiting)&&m_view.m_srvClear){
 		cb.misc.z=99.f;if(SUCCEEDED(dc->Map(m_view.m_cbFrame,0,D3D11_MAP_WRITE_DISCARD,0,&map))){memcpy(map.pData,&cb,sizeof(cb));dc->Unmap(m_view.m_cbFrame,0);}
 		D3D11_VIEWPORT tvp={0,(float)h*.375f,(float)w,(float)h*.25f,0,1};dc->RSSetViewports(1,&tvp);dc->IASetInputLayout(NULL);dc->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);dc->VSSetShader(m_view.m_vsPost,NULL,0);dc->PSSetShader(m_view.m_psFinal,NULL,0);dc->PSSetConstantBuffers(0,1,&m_view.m_cbFrame);dc->PSSetShaderResources(0,1,&m_view.m_srvClear);dc->OMSetBlendState(m_view.m_bsAlpha,NULL,~0u);dc->Draw(3,0);dc->PSSetShaderResources(0,1,ns);
 	}
@@ -4293,6 +6415,7 @@ BOOL CSoft3DMazeDlg::OnInitDialog()
 	m_base.SetAeroMode(FALSE);
 	m_diff.SetAeroMode(FALSE);
 	m_gen.SetAeroMode(FALSE);
+	m_navi.SetAeroMode(FALSE);
 	m_close.SetAeroMode(FALSE);
 	m_view.SetAeroMode(FALSE);
 
@@ -4323,6 +6446,8 @@ BOOL CSoft3DMazeDlg::OnInitDialog()
 		L"난이도", L"难度", L"الصعوبة", L"Сложность", L"Schwierigkeit", L"Dificuldade", L"Moeilijkheid", L"Trudność", L"Zorluk"));
 	m_gen.SetWindowText(LL14(L"生成", L"Generate", L"Générer", L"Genera", L"Generar",
 		L"생성", L"生成", L"توليد", L"Создать", L"Erzeugen", L"Gerar", L"Genereren", L"Generuj", L"Oluştur"));
+	m_navi.SetWindowText(LL14(L"ナビ", L"Navi", L"Nav", L"Navi", L"Navi",
+		L"내비", L"导航", L"توجيه", L"Нави", L"Navi", L"Navi", L"Navi", L"Nawi", L"Navi"));
 	m_close.SetWindowText(LL14(L"閉じる", L"Close", L"Fermer", L"Chiudi", L"Cerrar",
 		L"닫기", L"关闭", L"إغلاق", L"Закрыть", L"Schließen", L"Fechar", L"Sluiten", L"Zamknij", L"Kapat"));
 	m_hint.SetWindowText(LL14(L"WASD / QE · ホイール=拡大縮小 · SPACE/ホイールクリック=全体マップ切替（ホイール=地図ズーム・ドラッグ=スクロール・Shift+ホイール/←→=階層） · 右クリック", L"WASD / QE · wheel=zoom · SPACE/wheel-click=toggle map (wheel=map zoom · drag=scroll · Shift+wheel/←→=floor) · right-click", L"WASD / QE · molette=zoom · Espace/clic molette=carte (molette=zoom · glisser=défiler · Maj+molette/←→=étage) · clic droit", L"WASD / QE · rotella=zoom · SPAZIO/clic rotella=mappa (rotella=zoom · trascina=scorri · Maiusc+rotella/←→=piano) · clic destro",
@@ -4363,8 +6488,8 @@ BOOL CSoft3DMazeDlg::OnInitDialog()
 		m_tooltip.Activate(TRUE);
 		m_tooltip.AddTool(&m_gen, LL14(L"新しい迷路を生成します", L"Generate a new maze", L"Générer un nouveau labyrinthe", L"Genera un nuovo labirinto", L"Generar un nuevo laberinto",
 			L"새 미로 생성", L"生成新迷宫", L"إنشاء متاهة جديدة", L"Создать новый лабиринт", L"Neues Labyrinth erzeugen", L"Gerar um novo labirinto", L"Nieuw doolhof genereren", L"Wygeneruj nowy labirynt", L"Yeni labirent oluştur"));
-		m_tooltip.AddTool(&m_view, LL14(L"右クリックで設定。SPACE／ホイールクリックで全体マップ切替。全体マップ中はホイールでズーム、ドラッグでスクロール、Shift+ホイール／←→で階層。橙の階段=下り／水色=上り。", L"Right-click: settings. SPACE/wheel-click: toggle full map. In map: wheel=zoom, drag=scroll, Shift+wheel/←→=floor. Orange stairs down, cyan up.", L"Clic droit: réglages. Espace/clic molette: carte. Dans la carte: molette=zoom, glisser=défiler, Maj+molette/←→=étage. Orange=descendre, cyan=monter.", L"Clic destro: impostazioni. SPAZIO/clic rotella: mappa. Nella mappa: rotella=zoom, trascina=scorri, Maiusc+rotella/←→=piano. Arancio=giù, ciano=su.", L"Clic derecho: ajustes. Espacio/clic rueda: mapa. En el mapa: rueda=zoom, arrastrar=desplazar, Mayús+rueda/←→=planta. Naranja=bajar, cian=subir.",
-			L"우클릭: 설정. SPACE/휠 클릭: 전체 맵 토글. 맵에서 휠=줌, 드래그=스크롤, Shift+휠/←→=층. 주황 계단=하강, 하늘색=상승.", L"右键：设置。空格/滚轮点击：全图开关。全图中滚轮缩放、拖动滚动、Shift+滚轮/←→换层。橙色楼梯下行，水色上行。", L"يمين: إعدادات. مسافة/نقر العجلة: خريطة. في الخريطة: عجلة=تكبير، سحب=تمرير، Shift+عجلة/←→=طابق. برتقالي=نزول، سماوي=صعود.", L"ПКМ: настройки. Пробел/клик колёсиком: карта. На карте: колесо=зум, перетаскивание=прокрутка, Shift+колесо/←→=этаж. Оранжевые вниз, голубые вверх.", L"Rechtsklick: Einstellungen. Leertaste/Radklick: Karte. In der Karte: Rad=Zoom, Ziehen=Scrollen, Umschalt+Rad/←→=Etage. Orange=abwärts, Cyan=aufwärts.", L"Direito: definições. Espaço/clique roda: mapa. No mapa: roda=zoom, arrastar=rolar, Shift+roda/←→=piso. Laranja=descer, ciano=subir.", L"Rechtsklik: instellingen. Spatie/wielklik: kaart. In de kaart: wiel=zoom, slepen=scrollen, Shift+wiel/←→=verdieping. Oranje=omlaag, cyaan=omhoog.", L"PPM: ustawienia. Spacja/klik kółkiem: mapa. Na mapie: kółko=zoom, przeciąganie=przewijanie, Shift+kółko/←→=piętro. Pomarańcz=w dół, cyjan=w górę.", L"Sağ tık: ayarlar. SPACE/teker tık: harita. Haritada: teker=zoom, sürükle=kaydır, Shift+teker/←→=kat. Turuncu=aşağı, camgöbeği=yukarı."));
+		m_tooltip.AddTool(&m_navi, LL14(L"ゴールへ最大50歩のナビ導線をミニマップ／全体マップ／3Dに表示。鍵不足で不通なら最寄りの鍵へ。到達で消えます（何度でも可）", L"Show up to 50 steps toward the goal on minimap/full map/3D. If locked, guides to nearest key. Clears on arrival (reusable).", L"Affiche jusqu'à 50 pas vers le but (ou la clé). Disparaît à l'arrivée.", L"Fino a 50 passi verso il traguardo (o chiave). Scompare all'arrivo.", L"Hasta 50 pasos hacia la meta (o llave). Desaparece al llegar.",
+			L"골까지 최대 50보(막히면 열쇠). 도착 시 소멸(재사용 가능)", L"最多50步导航至终点（不通则指向钥匙）。到达后消失（可反复使用）", L"Up to 50 steps to goal or key. Clears on arrival.", L"До 50 шагов к цели или ключу. Сбрасывается по прибытии.", L"Bis 50 Schritte zum Ziel oder Schlüssel. Verschwindet bei Ankunft.", L"Até 50 passos à meta ou chave. Some ao chegar.", L"Tot 50 stappen naar doel of sleutel. Verdwijnt bij aankomst.", L"Do 50 kroków do celu lub klucza. Znika po dotarciu.", L"Hedefe veya anahtara 50 adıma kadar. Varınca silinir."));
 		m_tooltip.AddTool(&m_base, LL14(L"地下の階数（0〜3）。階段で階層がつながり、ゴールは難易度に応じてどこかの階に置かれます。", L"Number of basements (0–3). Stairs link floors; goal floor depends on difficulty.", L"Nombre de sous-sols (0–3). Les escaliers relient ; le but dépend de la difficulté.", L"Numero di sotterranei (0–3). Le scale collegano; il traguardo dipende dalla difficoltà.", L"Número de sótanos (0–3). Escaleras unen; la meta depende de la dificultad.",
 			L"지하 층수(0~3). 계단으로 연결되고 골 위치는 난이도에 따라 달라집니다.", L"地下层数（0–3）。楼梯连接各层，终点位置随难度变化。", L"عدد الأقبية (0–3). السلالم تربط والطابق الهدف يعتمد على الصعوبة.", L"Число подземных этажей (0–3). Лестницы связывают; этаж цели зависит от сложности.", L"Anzahl Kellergeschosse (0–3). Treppen verbinden; Zielétage hängt von der Schwierigkeit ab.", L"Número de subsolos (0–3). Escadas ligam; o piso do gol depende da dificuldade.", L"Aantal kelders (0–3). Trappen verbinden; doelverdieping hangt van moeilijkheid af.", L"Liczba piwnic (0–3). Schody łączą; piętro celu zależy od trudności.", L"Bodrum sayısı (0–3). Merdivenler bağlar; hedef katı zorluğa göre değişir."));
 		m_tooltip.AddTool(&m_diff, LL14(L"難易度。難しいほど通路が細く、階段が多く上下往復し、ゴールは階をまたいだ遠い位置になります。アイテムは多めです。", L"Difficulty. Harder = thinner corridors, more stairs (floor zigzags), farther multi-floor goal. Items stay plentiful.", L"Difficulté. Plus difficile = couloirs fins, plus d'escaliers, but lointain. Objets nombreux.", L"Difficoltà. Più difficile = corridoi stretti, più scale, traguardo lontano. Molti oggetti.", L"Dificultad. Más difícil = pasillos estrechos, más escaleras, meta lejana. Muchos objetos.",
@@ -4394,20 +6519,20 @@ BOOL CSoft3DMazeDlg::OnInitDialog()
 		L"WASD / QE: ruch / obrót  Kółko: zoom (Shift+=obrót)\nSpacja / klik kółkiem: mapa (kółko=zoom · przeciąganie=przewijanie · Shift+kółko/←→=piętro)\nPomarańczowe schody w dół, cyjanowe w górę",
 		L"WASD / QE: hareket / dönüş  Teker: zoom (Shift+=dönüş)\nSPACE / teker tık: harita (teker=zoom · sürükle=kaydır · Shift+teker/←→=kat)\nTuruncu merdiven aşağı, camgöbeği yukarı");
 	m_overviewTipText = LL14(
-		L"全体マップ\nSPACE / Esc / ホイールクリック：閉じる\nホイール：ズーム　ドラッグ：スクロール\nShift+ホイール / ←→ / A D：階層切替",
-		L"Full map\nSPACE / Esc / wheel-click: close\nWheel: zoom  Drag: scroll\nShift+wheel / ←→ / A D: change floor",
-		L"Carte\nEspace / Échap / clic molette : fermer\nMolette : zoom  Glisser : défiler\nMaj+molette / ←→ / A D : étage",
-		L"Mappa\nSPAZIO / Esc / clic rotella: chiudi\nRotella: zoom  Trascina: scorri\nMaiusc+rotella / ←→ / A D: piano",
-		L"Mapa\nEspacio / Esc / clic rueda: cerrar\nRueda: zoom  Arrastrar: desplazar\nMayús+rueda / ←→ / A D: planta",
-		L"전체 맵\nSPACE / Esc / 휠 클릭: 닫기\n휠: 줌  드래그: 스크롤\nShift+휠 / ←→ / A D: 층 전환",
-		L"全图\n空格 / Esc / 滚轮点击：关闭\n滚轮：缩放  拖动：滚动\nShift+滚轮 / ←→ / A D：换层",
-		L"الخريطة\nمسافة / Esc / نقر العجلة: إغلاق\nالعجلة: تكبير  السحب: تمرير\nShift+عجلة / ←→ / A D: طابق",
-		L"Карта\nПробел / Esc / клик колёсиком: закрыть\nКолесо: зум  Перетаскивание: прокрутка\nShift+колесо / ←→ / A D: этаж",
-		L"Karte\nLeertaste / Esc / Radklick: schließen\nRad: Zoom  Ziehen: Scrollen\nUmschalt+Rad / ←→ / A D: Etage",
-		L"Mapa\nEspaço / Esc / clique da roda: fechar\nRoda: zoom  Arrastar: rolar\nShift+roda / ←→ / A D: piso",
-		L"Kaart\nSpatie / Esc / wielklik: sluiten\nWiel: zoom  Slepen: scrollen\nShift+wiel / ←→ / A D: verdieping",
-		L"Mapa\nSpacja / Esc / klik kółkiem: zamknij\nKółko: zoom  Przeciąganie: przewijanie\nShift+kółko / ←→ / A D: piętro",
-		L"Harita\nSPACE / Esc / teker tık: kapat\nTeker: zoom  Sürükle: kaydır\nShift+teker / ←→ / A D: kat");
+		L"全体マップ\n下の階層タブをクリック／◎自機へ　Shift+ホイール / ←→ / A D：階層\nホイール：ズーム　ドラッグ：スクロール　SPACE / Esc：閉じる",
+		L"Full map\nClick floor tabs / ◎ recenter  Shift+wheel / ←→ / A D: floor\nWheel: zoom  Drag: scroll  SPACE / Esc: close",
+		L"Carte\nOnglets d'étage / ◎ recentrer  Maj+molette / ←→ / A D : étage\nMolette : zoom  Glisser : défiler  Espace / Échap : fermer",
+		L"Mappa\nSchede piano / ◎ centra  Maiusc+rotella / ←→ / A D: piano\nRotella: zoom  Trascina: scorri  SPAZIO / Esc: chiudi",
+		L"Mapa\nPestañas de planta / ◎ centrar  Mayús+rueda / ←→ / A D: planta\nRueda: zoom  Arrastrar: desplazar  Espacio / Esc: cerrar",
+		L"전체 맵\n아래 층 탭 클릭 / ◎ 자기로  Shift+휠 / ←→ / A D: 층\n휠: 줌  드래그: 스크롤  SPACE / Esc: 닫기",
+		L"全图\n点击下方层标签 / ◎回自身  Shift+滚轮 / ←→ / A D：换层\n滚轮：缩放  拖动：滚动  空格 / Esc：关闭",
+		L"الخريطة\nانقر تبويبات الطابق / ◎ إعادة التمركز\nعجلة: تكبير  سحب: تمرير  مسافة / Esc: إغلاق",
+		L"Карта\nВкладки этажа / ◎ к себе  Shift+колесо / ←→ / A D: этаж\nКолесо: зум  Перетаскивание: прокрутка  Пробел / Esc: закрыть",
+		L"Karte\nEtagen-Tabs / ◎ zentrieren  Umschalt+Rad / ←→ / A D: Etage\nRad: Zoom  Ziehen: Scrollen  Leertaste / Esc: schließen",
+		L"Mapa\nAbas de piso / ◎ recentrar  Shift+roda / ←→ / A D: piso\nRoda: zoom  Arrastar: rolar  Espaço / Esc: fechar",
+		L"Kaart\nVerdiepingstabbladen / ◎ centreren  Shift+wiel / ←→ / A D: verdieping\nWiel: zoom  Slepen: scrollen  Spatie / Esc: sluiten",
+		L"Mapa\nKarty pięter / ◎ wyśrodkuj  Shift+kółko / ←→ / A D: piętro\nKółko: zoom  Przeciąganie: przewijanie  Spacja / Esc: zamknij",
+		L"Harita\nKat sekmeleri / ◎ ortala  Shift+teker / ←→ / A D: kat\nTeker: zoom  Sürükle: kaydır  SPACE / Esc: kapat");
 	m_tipIsOverview = -1;
 	m_mapBadgeText.Empty();
 	EnsureTipTexture(FALSE);
@@ -4426,6 +6551,48 @@ BOOL CSoft3DMazeDlg::OnInitDialog()
 }
 
 void CSoft3DMazeDlg::OnGen() { GenerateMaze(); }
+void CSoft3DMazeDlg::OnNavi()
+{
+	if (m_n <= 0 || m_navWaiting) return;
+	if (m_won || m_clearPhase != CLEAR_IDLE) {
+		if (m_status.GetSafeHwnd())
+			m_status.SetWindowText(LL14(L"ナビ：クリア中は使えません", L"Navi: unavailable while clearing", L"Nav: indisponible", L"Navi: non disponibile", L"Navi: no disponible",
+				L"내비: 클리어 중 불가", L"导航：结算中不可用", L"Navi: unavailable", L"Нави: недоступно", L"Navi: nicht verfügbar", L"Navi: indisponível", L"Navi: niet beschikbaar", L"Nawi: niedostępne", L"Navi: kullanılamaz"));
+		return;
+	}
+
+	m_navWaiting = 1;
+	if (m_navi.GetSafeHwnd()) m_navi.EnableWindow(FALSE);
+	{
+		CStringW wait = LL14(L"少々お待ちください…", L"Please wait…", L"Veuillez patienter…", L"Attendere…", L"Espere…",
+			L"잠시만 기다려 주세요…", L"请稍候…", L"يرجى الانتظار…", L"Подождите…", L"Bitte warten…", L"Aguarde…", L"Even geduld…", L"Proszę czekać…", L"Lütfen bekleyin…");
+		if (m_view.m_ready)
+			m_view.BakeClearTexture((LPCWSTR)wait, 1.f);
+		if (m_status.GetSafeHwnd())
+			m_status.SetWindowText(LL14(L"ナビ探索中…", L"Searching path…", L"Recherche…", L"Ricerca…", L"Buscando…",
+				L"경로 탐색 중…", L"正在寻路…", L"جاري البحث…", L"Поиск пути…", L"Suche Weg…", L"Buscando rota…", L"Pad zoeken…", L"Szukanie…", L"Yol aranıyor…"));
+		RenderScene();
+		if (m_hWnd) UpdateWindow();
+		if (m_view.GetSafeHwnd()) m_view.UpdateWindow();
+	}
+
+	const BOOL ok = ComputeNavHint();
+
+	m_navWaiting = 0;
+	if (m_navi.GetSafeHwnd()) m_navi.EnableWindow(TRUE);
+	if (m_clearPhase == CLEAR_IDLE && m_floorFx == FLOORFX_IDLE)
+		m_view.ReleaseClearTexture();
+
+	if (!ok) {
+		if (m_status.GetSafeHwnd())
+			m_status.SetWindowText(LL14(L"ナビ：経路が見つかりません", L"Navi: no path found", L"Nav: aucun chemin", L"Navi: nessun percorso", L"Navi: sin ruta",
+				L"내비: 경로 없음", L"导航：找不到路径", L"Navi: no path", L"Нави: путь не найден", L"Navi: kein Weg", L"Navi: sem caminho", L"Navi: geen pad", L"Nawi: brak ścieżki", L"Navi: yol yok"));
+		RenderScene();
+		return;
+	}
+	UpdateStatus();
+	RenderScene();
+}
 void CSoft3DMazeDlg::OnSizeChanged()
 {
 	// CBN_SELCHANGE 時点では編集欄がまだ旧値のことがある → リスト選択を優先
@@ -4483,8 +6650,16 @@ void CSoft3DMazeDlg::OnTimer(UINT_PTR id)
 		TickMove(dt);
 		RenderScene();
 		m_view.RequestRedraw();
-		if (m_runDirty && (now - m_lastAutosave) > 2000)
-			PersistRun();
+		// 大マップのフルセーブは数十MB。移動中は打たず、間隔もサイズで伸ばす
+		if (m_runDirty && !m_moving) {
+			DWORD interval = 4000;
+			if (m_n >= 200) {
+				const unsigned long long cells = (unsigned long long)m_n * (unsigned long long)m_n * (unsigned long long)max(1, m_nFloors);
+				interval = (DWORD)min(120000ull, max(8000ull, cells / 5000ull));
+			}
+			if ((now - m_lastAutosave) > interval)
+				PersistRun();
+		}
 	}
 	CCustomBlurDialogBase::OnTimer(id);
 }

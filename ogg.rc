@@ -1,4 +1,4 @@
-// Microsoft Visual C++ generated resource script.
+﻿// Microsoft Visual C++ generated resource script.
 //
 #pragma code_page(65001)
 
@@ -1404,8 +1404,9 @@ BEGIN
     COMBOBOX        IDC_S3M_BASE,128,12,64,80,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
     LTEXT           "難易度",IDC_S3M_DIFF_L,196,14,32,10
     COMBOBOX        IDC_S3M_DIFF,228,12,80,100,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
-    PUSHBUTTON      "生成",IDC_S3M_GEN,314,11,48,18
-    LTEXT           "",IDC_S3M_HINT,368,14,144,12
+    PUSHBUTTON      "生成",IDC_S3M_GEN,314,10,56,20
+    PUSHBUTTON      "ナビ",IDC_S3M_NAVI,374,10,44,20
+    LTEXT           "",IDC_S3M_HINT,422,14,90,12
     LTEXT           "",IDC_S3M_VIEW,7,36,506,300,SS_NOTIFY | WS_BORDER
     LTEXT           "",IDC_S3M_STATUS,7,344,400,14
     PUSHBUTTON      "閉じる",IDC_S3M_CLOSE,420,342,80,18

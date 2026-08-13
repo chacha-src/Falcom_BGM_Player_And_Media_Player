@@ -1,4 +1,4 @@
-﻿chachakotorinのgithubから移転です。
+chachakotorinのgithubから移転です。
 
 # oggYSEDbgm メディアプレイヤー「らいら」
 日本ファルコム (Nihon Falcom) BGMプレイヤー / 高機能メディアプレイヤー

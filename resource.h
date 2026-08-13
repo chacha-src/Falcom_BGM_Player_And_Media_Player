@@ -1227,6 +1227,7 @@
 #define IDC_S3M_DIFF_L                  4140
 #define IDC_S3M_DIFF                    4141
 #define IDC_MP_BOT_MAZE                 4141
+#define IDC_S3M_NAVI                    4190
 #define IDC_OGG_XFADE                   4142
 #define IDC_OGG_XFADE_SEC               4143
 #define IDC_OGG_XFADE_L                 4144

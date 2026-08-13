@@ -1,4 +1,4 @@
-﻿// oggDlg.cpp : インプリメンテーション ファイル
+// oggDlg.cpp : インプリメンテーション ファイル
 //
 //#define _DLL
 #include "stdafx.h"

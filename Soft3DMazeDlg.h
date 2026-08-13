@@ -84,12 +84,21 @@ public:
 	ID3D11Buffer* m_vbHud;
 	UINT m_vbDynBytes;
 	UINT m_vbHudBytes;
+	// RenderScene 毎フレ new 回避（大マップで歩くほど遅くならないよう再利用）
+	BYTE* m_cpuDynScratch;
+	UINT m_cpuDynScratchBytes;
+	BYTE* m_cpuHudScratch;
+	UINT m_cpuHudScratchBytes;
 
 	enum { S3M_WALL_VAR = 16, S3M_THEME_N = 4 };
 	ID3D11Texture2D* m_texBrick[S3M_THEME_N];
 	ID3D11ShaderResourceView* m_srvBrick[S3M_THEME_N];
 	ID3D11Texture2D* m_texFloor[S3M_THEME_N];
 	ID3D11ShaderResourceView* m_srvFloor[S3M_THEME_N];
+	ID3D11Texture2D* m_texMirrorWall;
+	ID3D11ShaderResourceView* m_srvMirrorWall;
+	ID3D11Texture2D* m_texMirrorFloor;
+	ID3D11ShaderResourceView* m_srvMirrorFloor;
 	ID3D11Texture2D* m_texEnv;
 	ID3D11ShaderResourceView* m_srvEnv;
 	ID3D11Texture2D* m_texClear;
@@ -110,6 +119,7 @@ public:
 	ID3D11SamplerState* m_sampCmp;
 	ID3D11RasterizerState* m_rsSolid;
 	ID3D11RasterizerState* m_rsShadow;
+	ID3D11RasterizerState* m_rsNoCull;
 	ID3D11DepthStencilState* m_dssWrite;
 	ID3D11DepthStencilState* m_dssRead;
 	ID3D11DepthStencilState* m_dssOff;
@@ -125,6 +135,14 @@ public:
 	void ReleaseTipTexture();
 	BOOL BakeBadgeTexture(const wchar_t* text);
 	void ReleaseBadgeTexture();
+	BOOL BakeFloorBarTexture(int nFloors, int viewFloor, int playerFloor, const wchar_t* const* labels);
+	void ReleaseFloorBarTexture();
+	ID3D11Texture2D* m_texFloorBar;
+	ID3D11ShaderResourceView* m_srvFloorBar;
+	int m_floorBarW, m_floorBarH;
+	float m_floorBarTabX0[4];
+	float m_floorBarTabX1[4];
+	float m_floorBarRecX0, m_floorBarRecX1;
 
 protected:
 	afx_msg void OnPaint();
@@ -182,6 +200,11 @@ public:
 		CELL_SPIKE = 21,   // 棘：進入マスから1マス戻る（旧SPIN枠を流用）
 		CELL_ICE = 22,     // 氷：進入方向へ1マス滑る
 		CELL_DARK = 23,    // 闇：一時的に視界が狭まる
+		CELL_MIRROR_WALL = 24,  // 鏡壁（通行不可・反射）
+		CELL_MIRROR_FLOOR = 25, // 鏡床（通行可・反射）
+		CELL_PORTAL = 26,       // 同階ワープ（対のポータルへ）
+		CELL_KEY = 27,          // 鍵（拾得で所持）
+		CELL_DOOR = 28,         // 扉（鍵が必要）
 		ITEM_TEMPO = 1,
 		ITEM_PITCH_UP = 2,
 		ITEM_PITCH_DN = 4,
@@ -207,6 +230,9 @@ public:
 		FLOORFX_IN = 1,
 		FLOORFX_HOLD = 2,
 		FLOORFX_OUT = 3,
+		PORTALFX_IDLE = 0,
+		PORTALFX_OUT = 1,
+		PORTALFX_IN = 2,
 		DIFF_VERY_EASY = 0,
 		DIFF_EASY = 1,
 		DIFF_NORMAL = 2,
@@ -214,6 +240,7 @@ public:
 		DIFF_VERY_HARD = 4,
 		DIFF_COUNT = 5
 	};
+	friend struct S3mCompactBfs;
 protected:
 	virtual void DoDataExchange(CDataExchange*);
 	virtual BOOL PreTranslateMessage(MSG*);
@@ -245,6 +272,11 @@ protected:
 	void GenerateMazeWithSeed(DWORD seed, int forceSize = -1);
 	void GenerateOneFloor(int f);
 	void PlaceStairsAndGoal();
+	void AddAlternateRoutes();
+	void RefreshGoalCache();
+	int TargetGoalRoutes() const;
+	void RecountExploreStats();
+	void NoteVisitCell(int x, int z);
 	BOOL MazeWalkable(int f, int x, int z) const;
 	BOOL FindStairPartner(int f, int x, int z, int& outF, int& outX, int& outZ) const;
 	BOOL StairsLayoutModern() const;
@@ -265,6 +297,14 @@ protected:
 	void ResetFloorFx();
 	void BeginFloorChange(int newFloor, int landX, int landZ);
 	void TickFloorFx(float dt);
+	void ResetPortalFx();
+	void BeginPortalWarp(int toX, int toZ);
+	void TickPortalFx(float dt);
+	void EnsureGoalReachable();
+	void ClearNavPath();
+	BOOL ComputeNavHint();
+	void UpdateNavProgress();
+	BOOL HasNavPath() const { return m_navCount > 1; }
 	void RefreshFloorTex();
 	CString FloorLabel(int f) const;
 	void OverviewFloorDelta(int d);
@@ -287,14 +327,21 @@ protected:
 public:
 	BOOL IsOverviewActive() const { return m_mapToggle != 0; }
 	void ToggleMapOverlay();
+	void FocusOverviewOnPlayer();
+	void OverviewFloorSet(int f);
+	BOOL HitOverviewFloorUi(CPoint clientPt, int& outAction) const; // outAction: 0..n-1 floor, 100=recenter
+	void LayoutOverviewFloorUi(int viewW, int viewH);
+	void BeginOverviewUiPress(int action, CPoint pt) { m_ovPressAction = action; m_ovPressPt = pt; }
+	BOOL FinishOverviewUiPress(CPoint pt);
+	BOOL HasOverviewUiPress() const { return m_ovPressAction >= 0; }
 	BOOL HandleAccelMessage(MSG* pMsg);
 	BOOL BeginMapPan(CPoint clientPt);
 	BOOL UpdateMapPan(CPoint clientPt);
 	BOOL EndMapPan();
 	BOOL IsMapPanning() const { return m_mapPanDrag != 0; }
 	void ClampMapPan(int viewW, int viewH, float side);
-	BOOL InputTurn(int dir) { return IsOverviewActive() || m_floorFx != FLOORFX_IDLE ? FALSE : TryTurn(dir); }
-	BOOL InputStep(int mx, int mz) { return IsOverviewActive() || m_floorFx != FLOORFX_IDLE ? FALSE : TryStep(mx, mz); }
+	BOOL InputTurn(int dir) { return IsOverviewActive() || m_floorFx == FLOORFX_IN || m_portalFx != PORTALFX_IDLE ? FALSE : TryTurn(dir); }
+	BOOL InputStep(int mx, int mz) { return IsOverviewActive() || m_floorFx == FLOORFX_IN || m_portalFx != PORTALFX_IDLE ? FALSE : TryStep(mx, mz); }
 	void InputOverviewFloorDelta(int d) { OverviewFloorDelta(d); }
 	void InputFovZoom(int dir);
 	void InputMapZoom(int dir);
@@ -308,6 +355,7 @@ public:
 	virtual void OnOK() {}
 	virtual void OnCancel() { DestroyWindow(); }
 	afx_msg void OnGen();
+	afx_msg void OnNavi();
 	afx_msg void OnCloseBtn();
 	afx_msg void OnHelp();
 	afx_msg void OnSizeChanged();
@@ -321,7 +369,7 @@ public:
 	afx_msg void OnContextMenu(CWnd*, CPoint);
 	void ShowContextMenu(CPoint screenPt);
 
-	CCustomStandardButton m_help, m_gen, m_close;
+	CCustomStandardButton m_help, m_gen, m_navi, m_close;
 	CCustomStatic m_sizeL, m_baseL, m_diffL, m_hint, m_status;
 	CCustomComboBox m_size, m_base, m_diff;
 	CS3mView m_view;
@@ -335,6 +383,10 @@ public:
 	int m_nFloors;
 	int m_floor;
 	int m_mapViewFloor;
+	int m_goalX, m_goalZ, m_goalFloor; // キャッシュ（毎フレ全走査しない）
+	DWORD m_lastMapBakeTick;
+	int m_passCells;      // 探索率用（奇数通路セル数）
+	int m_visitPassCells; // 訪問済み奇数通路
 	float m_px, m_pz, m_yaw;
 	float m_yawTarget;
 	float m_pxTarget, m_pzTarget;
@@ -367,12 +419,25 @@ public:
 	int m_miniFadeFrom;
 	int m_miniFadeTo;
 	int m_itemsLeft;
+	int m_keysHeld;
+	float m_doorMsgT; // 中央トースト残り（階層ラベルと同じ BakeClearTexture 経路）
+	int m_toastKind; // 0=なし 1=鍵なし扉 2=鍵取得 3=扉開放
 	int m_trapCellX, m_trapCellZ;
 	float m_slowT;
 	int m_lastStepMx, m_lastStepMz;
 	int m_iceSlideLeft;
 	float m_stepFromX, m_stepFromZ;
 	float m_darkT;
+	int m_portalFx;
+	float m_portalFxT;
+	float m_portalToX, m_portalToZ;
+	int m_portalIgnoreX, m_portalIgnoreZ;
+	float m_portalFlashA;
+	enum { S3M_NAV_MAX = 52 }; // 現在地＋最大50歩
+	struct S3mNavPt { short x, z, f; };
+	S3mNavPt m_navPath[S3M_NAV_MAX];
+	int m_navCount;
+	int m_navWaiting; // 探索中オーバーレイ
 	int m_baseTempoPos;
 	int m_basePitchPos;
 	DWORD m_lastTick;
@@ -393,6 +458,13 @@ public:
 	CStringW m_playTipText;
 	CStringW m_overviewTipText;
 	void EnsureTipTexture(BOOL overviewTip);
+	float m_ovBarX, m_ovBarY, m_ovBarW, m_ovBarH;
+	float m_ovTabX0[4], m_ovTabX1[4];
+	float m_ovRecX0, m_ovRecX1;
+	int m_ovTabN;
+	int m_ovPressAction; // -1 none, 0..floors-1, 100 recenter
+	CPoint m_ovPressPt;
+	int m_floorBarDirty;
 };
 
 void OpenSoft3DMazeModeless(CWnd*);
