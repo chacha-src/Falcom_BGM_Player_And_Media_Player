@@ -25952,6 +25952,9 @@ BOOL COggDlg::PreTranslateMessage(MSG* pMsg)
 	// メディアプレイヤーモード: DoModal 中は mp の PreTranslateMessage が呼ばれない。
 	// あいまい検索欄の Enter をここで中継し、og の IDOK(終了)へ流さない。
 	if (savedata.playerMode == 1) {
+		extern BOOL Soft3DMazePreTranslate(MSG*);
+		if (Soft3DMazePreTranslate(pMsg))
+			return TRUE;
 		extern CMediaPlayerDlg* mp;
 		if (mp && ::IsWindow(mp->GetSafeHwnd()) && mp->RelayPreTranslateMessage(pMsg))
 			return TRUE;

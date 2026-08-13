@@ -724,7 +724,7 @@ struct save{
 	int s3m_fov;               // 0=55°, 1=70°, 2=90°（基準。ホイールズームと合成）
 	int s3m_basements;         // 地下階数 0..3（0=地上のみ）
 	int s3m_zoom;              // 視点ズーム×100（50..250、100=等倍。大きいほど拡大＝狭いFOV）
-	int s3m_map_zoom;          // 全体マップ／ミニマップ拡大×100（50..250、100=等倍）
+	int s3m_map_zoom;          // 全体マップ／ミニマップ拡大×100（50..400、100=等倍）
 	int s3m_difficulty;        // 0=超簡単 … 4=超難しい（2=普通）
 };
 extern save savedata;

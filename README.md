@@ -344,7 +344,7 @@ avi, mpgなどのDirectShow対応動画を再生可能です。Windows Vista以�
 メディアプレイヤー下段の **迷路** ボタンから開ける、DirectX11 の一人称迷路です。BGMを聴きながらの息抜き用で、本編の再生機能とは別枠のおまけです。
 
 - **操作:** WASD／矢印で移動、Q・E（または ←→）で旋回。右クリックでサイズ再生成・ミニマップ・アイテム種類など。?ヘルプに Soft3D／説明の凡例表あり
-- **マップ:** 右上ミニマップ。SPACE押しっぱなし／ホイールクリックで全体マップ（地下あり時は ←→ やホイールで階層切替）。壁は地図上で太めに表示
+- **マップ:** 右上ミニマップ。SPACE／ホイールクリックで全体マップ切替（Escでも閉じる）。全体マップ中はホイールでズーム、ドラッグでスクロール、Shift+ホイール／←→で階層切替。未訪問は黒・訪問済みは薄い青
 - **曲連動:** 浮遊球でテンポ↑↓／ピッチ↑↓／前後曲／音量／EQ・平坦／リバーブ／クロスフェード／ランダム切替など。全階に配置。窓は通過不可の飾り
 - **地下:** 「地下」コンボで 0〜3F。壁・床のモチーフは階ごと（地上=レンガ／B1=湿った石／B2=錆び金属／B3=火山岩）。橙の階段＝下り、水色＝上り（斜め2マス）。半透明トラップ（粘液・棘・氷・闇、ワープなし）あり。旧セーブの同一マス階段は自動再生成。ゴールは難易度に応じてどこかの階
 - **難易度:** 超簡単〜超難しい。難しいほど細い通路・階段が多く上下往復し、トラップも増えやすい
@@ -651,7 +651,7 @@ Plays avi, mpg, and other DirectShow-compatible formats. On Windows Vista and la
 A first-person DirectX 11 maze opened from the media player’s bottom-bar **Maze** button. It’s a light distraction while BGM plays—separate from the core playback features.
 
 - **Controls:** WASD / arrows to move, Q·E (or ←→) to turn. Right-click for regenerate size, minimap, item types, and more
-- **Maps:** Top-right minimap. Hold SPACE or middle-click for the full overview (with basements: ←→ or mouse wheel switches floors)
+- **Maps:** Top-right minimap. SPACE or middle-click toggles the full overview (Esc closes). While open: wheel zooms, drag scrolls, Shift+wheel / ←→ change floor. Unvisited=black, visited=light blue
 - **Track links:** Floating orbs adjust tempo↑ / pitch↑↓ / next track / EQ. Windows are decorative and block movement
 - **Basements:** The basement combo adds 0–3 underground floors. Orange stairs go down, cyan stairs go up. You move diagonally between floors and can glimpse adjacent levels through stair shafts (basements have ceilings). The goal sits on a floor chosen by difficulty
 - **Difficulty:** Very easy–very hard. Affects corridor width, stair count, and 3D path length to the goal

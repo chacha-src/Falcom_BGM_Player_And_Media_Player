@@ -998,7 +998,7 @@ BOOL COggApp::InitInstance()
 		|| savedata.s3m_zoom < 50 || savedata.s3m_zoom > 250)
 		savedata.s3m_zoom = 100;
 	if (datFileSize < (int)(offsetof(save, s3m_map_zoom) + sizeof(savedata.s3m_map_zoom))
-		|| savedata.s3m_map_zoom < 50 || savedata.s3m_map_zoom > 250)
+		|| savedata.s3m_map_zoom < 50 || savedata.s3m_map_zoom > 400)
 		savedata.s3m_map_zoom = 100;
 	if (datFileSize < (int)(offsetof(save, s3m_difficulty) + sizeof(savedata.s3m_difficulty))
 		|| savedata.s3m_difficulty < 0 || savedata.s3m_difficulty > 4)

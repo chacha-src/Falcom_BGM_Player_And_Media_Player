@@ -284,10 +284,14 @@ protected:
 	BOOL TryStep(int mx, int mz);
 	void RefreshClearTex();
 public:
-	BOOL IsOverviewHold() const { return (GetAsyncKeyState(VK_SPACE) & 0x8000) != 0; }
-	BOOL IsOverviewActive() const { return IsOverviewHold() || m_mapToggle != 0; }
-	void ToggleMapOverlay() { m_mapToggle = m_mapToggle ? 0 : 1; }
-	BOOL ConsumeOverviewClick();
+	BOOL IsOverviewActive() const { return m_mapToggle != 0; }
+	void ToggleMapOverlay();
+	BOOL HandleAccelMessage(MSG* pMsg);
+	BOOL BeginMapPan(CPoint clientPt);
+	BOOL UpdateMapPan(CPoint clientPt);
+	BOOL EndMapPan();
+	BOOL IsMapPanning() const { return m_mapPanDrag != 0; }
+	void ClampMapPan(int viewW, int viewH, float side);
 	BOOL InputTurn(int dir) { return IsOverviewActive() || m_floorFx != FLOORFX_IDLE ? FALSE : TryTurn(dir); }
 	BOOL InputStep(int mx, int mz) { return IsOverviewActive() || m_floorFx != FLOORFX_IDLE ? FALSE : TryStep(mx, mz); }
 	void InputOverviewFloorDelta(int d) { OverviewFloorDelta(d); }
@@ -296,6 +300,7 @@ public:
 	BOOL HitTestMinimap(CPoint clientPt) const;
 	float EffectiveFovDeg() const;
 	float MapZoomScale() const;
+	float OverviewBaseSide(int viewW, int viewH) const;
 	virtual BOOL OnInitDialog();
 	virtual void OnOK() {}
 	virtual void OnCancel() { DestroyWindow(); }
@@ -375,9 +380,19 @@ public:
 	int m_mapBakeDirty;
 	int m_mapToggle;
 	int m_overviewFloorHeld;
+	float m_mapPanX, m_mapPanY;
+	int m_mapPanDrag;
+	CPoint m_mapPanLast;
+	DWORD m_spaceToggleTick;
+	int m_tipIsOverview;
 	CStringW m_mapBadgeText;
+	CStringW m_playTipText;
+	CStringW m_overviewTipText;
+	void EnsureTipTexture(BOOL overviewTip);
 };
 
 void OpenSoft3DMazeModeless(CWnd*);
 void CloseSoft3DMazeIfOpen();
 BOOL IsSoft3DMazeActive();
+BOOL IsSoft3DMazeOpen();
+BOOL Soft3DMazePreTranslate(MSG* pMsg);

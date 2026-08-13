@@ -312,7 +312,7 @@ void CS3mHelpDlg::OnPaint()
 		LL14(L"アイテム: クロスフェード", L"Item: crossfade", L"Objet: fondu", L"Oggetto: crossfade", L"Objeto: fundido", L"아이템: 크로스페이드", L"道具：交叉淡化", L"Item: crossfade", L"Item: crossfade", L"Item: Crossfade", L"Item: crossfade", L"Item: crossfade", L"Przedmiot: crossfade", L"Öğe: crossfade"),
 		LL14(L"桃の球。曲間クロスフェードのON/OFF", L"Pink orb; toggle track crossfade", L"Rose; fondu on/off", L"Rosa; crossfade", L"Rosa; fundido", L"분홍 구, 크로스페이드 전환", L"粉球，交叉淡化开关", L"Toggle crossfade", L"Кроссфейд", L"Crossfade", L"Crossfade", L"Crossfade", L"Crossfade", L"Crossfade"));
 	legendRow(RGB(240, 140, 50),
-		LL14(L"アイ테ム: ランダム再生", L"Item: random play", L"Objet: aléatoire", L"Oggetto: casuale", L"Objeto: aleatorio", L"아이템: 랜덤 재생", L"道具：随机播放", L"Item: random", L"Item: random", L"Item: Zufall", L"Item: aleatório", L"Item: willekeurig", L"Przedmiot: losowo", L"Öğe: rastgele"),
+		LL14(L"アイテム: ランダム再生", L"Item: random play", L"Objet: aléatoire", L"Oggetto: casuale", L"Objeto: aleatorio", L"아이템: 랜덤 재생", L"道具：随机播放", L"Item: random", L"Item: random", L"Item: Zufall", L"Item: aleatório", L"Item: willekeurig", L"Przedmiot: losowo", L"Öğe: rastgele"),
 		LL14(L"虹寄りの球。ランダム／順次を切替", L"Warm multicolor orb; toggle random/sequential", L"Multicolore; aléatoire/séquentiel", L"Multicolore; casuale", L"Multicolor; aleatorio", L"다색 구, 랜덤/순차", L"多彩球，随机/顺序切换", L"Toggle random", L"Случайно", L"Zufall", L"Aleatório", L"Willekeurig", L"Losowo", L"Rastgele"));
 	y += 6;
 
@@ -363,34 +363,34 @@ void CS3mHelpDlg::OnPaint()
 		L"Grootte 10–3000 (lijst of typen). Minimapa: vooruit omhoog; bezocht getint.",
 		L"Rozmiar 10–3000 (lista lub wpisz). Minimapa: przód u góry; odwiedzone zabarwione.",
 		L"Boyut 10–3000 (liste veya yazın). Harita: ileri yukarı; ziyaret edilen boyalı."));
-	line(LL14(L"SPACE 押しっぱなし = 全体マップ（確認のみ）。ホイールクリック = 全体マップ切替（再クリック／左クリックで閉じる）。その間は移動不可。",
-		L"Hold SPACE = full map (view only). Wheel-click = toggle map (again or left-click to close). No move while open.",
-		L"Espace maintenu = carte. Clic molette = bascule (reclic / clic gauche pour fermer). Pas de déplacement.",
-		L"Tieni SPAZIO = mappa. Clic rotella = attiva/disattiva (di nuovo o clic sinistro). Niente movimento.",
-		L"Mantén Espacio = mapa. Clic rueda = alternar (otra vez o clic izq. cierra). Sin mover.",
-		L"SPACE 유지 = 전체 맵. 휠 클릭 = 토글(다시/좌클릭으로 닫기). 표시 중 이동 불가.",
-		L"按住空格 = 全图。滚轮点击 = 开关（再点/左键关闭）。显示中不可移动。",
-		L"استمر مسافة = خريطة. نقر العجلة = تبديل (مرة أخرى/يسار للإغلاق). بلا حركة.",
-		L"Удерживайте Пробел = карта. Клик колёсиком = вкл/выкл (ещё раз или ЛКМ). Без движения.",
-		L"Leertaste halten = Karte. Radklick = umschalten (nochmals / Linksklick schließt). Keine Bewegung.",
-		L"Segure Espaço = mapa. Clique da roda = liga/desliga (de novo ou esquerdo fecha). Sem mover.",
-		L"Houd Spatie = kaart. Wielklik = aan/uit (opnieuw of linksklik sluit). Geen bewegen.",
-		L"Trzymaj Spację = mapa. Klik kółkiem = włącz/wyłącz (ponownie lub LPM zamyka). Bez ruchu.",
-		L"SPACE basılı = harita. Teker tık = aç/kapa (tekrar veya sol tık kapatır). Hareket yok."));
-	line(LL14(L"「地下」で地下1〜3Fを追加。橙の階段=下り／水色=上り。ゴールは難易度に応じてどこかの階（必ずしも最下層ではない）。全体マップ中は ←→ かホイールで階層、Ctrl+ホイールで地図ズーム。",
-		L"\"Basement\" adds 1–3 lower floors. Orange stairs go down, cyan up. Goal floor depends on difficulty (not always deepest). In the full map, ←→ or wheel changes floor; Ctrl+wheel zooms the map.",
-		L"« Sous-sol » ajoute 1–3 étages. Escaliers orange : descendre, cyan : monter ; but au plus profond. Dans la carte, ←→ ou molette = étage ; Ctrl+molette = zoom.",
-		L"«Sotterraneo» aggiunge 1–3 piani. Scale arancioni giù, ciano su; traguardo nel piano più profondo. Nella mappa ←→ o rotella = piano; Ctrl+rotella = zoom.",
-		L"«Sótano» añade 1–3 plantas. Escaleras naranjas bajan, cian suben; la meta está en la más profunda. En el mapa ←→ o rueda = planta; Ctrl+rueda = zoom.",
-		L"「지하」로 지하 1~3층 추가. 주황 계단=하강, 하늘색=상승, 골은 최하층. 전체 맵에서 ←→/휠=층, Ctrl+휠=지도 줌.",
-		L"“地下”可添加 1–3 层。橙色楼梯下行，水色上行，终点在最深层。全图中 ←→/滚轮换层，Ctrl+滚轮缩放地图。",
-		L"«القبو» يضيف 1–3 طوابق. السلالم البرتقالية للأسفل والسماوية للأعلى، والهدف في الأعمق. في الخريطة ←→ أو العجلة = طابق؛ Ctrl+عجلة = تكبير.",
-		L"«Подвал» добавляет 1–3 этажа. Оранжевые лестницы вниз, голубые вверх; цель на нижнем этаже. На карте ←→ или колесо = этаж; Ctrl+колесо = зум.",
-		L"„Keller“ ergänzt 1–3 Etagen. Orange Treppen abwärts, Cyan aufwärts; Ziel in der tiefsten Etage. In der Karte ←→ oder Rad = Etage; Strg+Rad = Zoom.",
-		L"“Subsolo” adiciona 1–3 pisos. Escadas laranja descem, ciano sobem; o gol fica no mais profundo. No mapa ←→ ou roda = piso; Ctrl+roda = zoom.",
-		L"'Kelder' voegt 1–3 verdiepingen toe. Oranje trappen omlaag, cyaan omhoog; doel op de diepste. In de kaart ←→ of wiel = verdieping; Ctrl+wiel = zoom.",
-		L"„Piwnica” dodaje 1–3 poziomy. Pomarańczowe schody w dół, cyjanowe w górę; cel na najniższym. Na mapie ←→ lub kółko = piętro; Ctrl+kółko = zoom.",
-		L"“Bodrum” 1–3 kat ekler. Turuncu merdiven aşağı, camgöbeği yukarı; hedef en alt katta. Haritada ←→ veya teker = kat; Ctrl+teker = zoom."));
+	line(LL14(L"SPACE / ホイールクリック = 全体マップ表示切替（Escでも閉じる）。表示中は移動不可。ホイールで地図ズーム、ドラッグでスクロール。Shift+ホイール／←→／A D で階層切替。",
+		L"SPACE / wheel-click = toggle full map (Esc closes). No move while open. Wheel zooms map; drag to scroll. Shift+wheel / ←→ / A D change floor.",
+		L"Espace / clic molette = carte (Échap ferme). Pas de déplacement. Molette = zoom, glisser = défiler. Maj+molette / ←→ / A D = étage.",
+		L"SPAZIO / clic rotella = mappa (Esc chiude). Niente movimento. Rotella = zoom, trascina = scorri. Maiusc+rotella / ←→ / A D = piano.",
+		L"Espacio / clic rueda = mapa (Esc cierra). Sin mover. Rueda = zoom, arrastrar = desplazar. Mayús+rueda / ←→ / A D = planta.",
+		L"SPACE / 휠 클릭 = 전체 맵 토글(Esc 닫기). 표시 중 이동 불가. 휠=지도 줌, 드래그=스크롤. Shift+휠 / ←→ / A D = 층.",
+		L"空格 / 滚轮点击 = 全图开关（Esc关闭）。显示中不可移动。滚轮缩放，拖动滚动。Shift+滚轮 / ←→ / A D 换层。",
+		L"مسافة / نقر العجلة = خريطة (Esc يغلق). بلا حركة. العجلة=تكبير، السحب=تمرير. Shift+عجلة / ←→ / A D = طابق.",
+		L"Пробел / клик колёсиком = карта (Esc закрывает). Без движения. Колесо = зум, перетаскивание = прокрутка. Shift+колесо / ←→ / A D = этаж.",
+		L"Leertaste / Radklick = Karte (Esc schließt). Keine Bewegung. Rad = Zoom, Ziehen = Scrollen. Umschalt+Rad / ←→ / A D = Etage.",
+		L"Espaço / clique roda = mapa (Esc fecha). Sem mover. Roda = zoom, arrastar = rolar. Shift+roda / ←→ / A D = piso.",
+		L"Spatie / wielklik = kaart (Esc sluit). Geen bewegen. Wiel = zoom, slepen = scrollen. Shift+wiel / ←→ / A D = verdieping.",
+		L"Spacja / klik kółkiem = mapa (Esc zamyka). Bez ruchu. Kółko = zoom, przeciąganie = przewijanie. Shift+kółko / ←→ / A D = piętro.",
+		L"SPACE / teker tık = harita (Esc kapatır). Hareket yok. Teker = zoom, sürükle = kaydır. Shift+teker / ←→ / A D = kat."));
+	line(LL14(L"「地下」で地下1〜3Fを追加。橙の階段=下り／水色=上り。ゴールは難易度に応じてどこかの階（必ずしも最下層ではない）。",
+		L"\"Basement\" adds 1–3 lower floors. Orange stairs go down, cyan up. Goal floor depends on difficulty (not always deepest).",
+		L"« Sous-sol » ajoute 1–3 étages. Escaliers orange : descendre, cyan : monter ; but selon difficulté.",
+		L"«Sotterraneo» aggiunge 1–3 piani. Scale arancioni giù, ciano su; traguardo secondo difficoltà.",
+		L"«Sótano» añade 1–3 plantas. Escaleras naranjas bajan, cian suben; la meta depende de la dificultad.",
+		L"「지하」로 지하 1~3층 추가. 주황 계단=하강, 하늘색=상승. 골 층은 난이도에 따라 다름.",
+		L"“地下”可添加 1–3 层。橙色楼梯下行，水色上行。终点层随难度变化。",
+		L"«القبو» يضيف 1–3 طوابق. السلالم البرتقالية للأسفل والسماوية للأعلى. الطابق الهدف يعتمد على الصعوبة.",
+		L"«Подвал» добавляет 1–3 этажа. Оранжевые лестницы вниз, голубые вверх; этаж цели зависит от сложности.",
+		L"„Keller“ ergänzt 1–3 Etagen. Orange Treppen abwärts, Cyan aufwärts; Zieletage hängt von der Schwierigkeit ab.",
+		L"“Subsolo” adiciona 1–3 pisos. Escadas laranja descem, ciano sobem; o piso do gol depende da dificuldade.",
+		L"'Kelder' voegt 1–3 verdiepingen toe. Oranje trappen omlaag, cyaan omhoog; doelverdieping hangt af van moeilijkheid.",
+		L"„Piwnica” dodaje 1–3 poziomy. Pomarańczowe schody w dół, cyjanowe w górę; piętro celu zależy od trudności.",
+		L"“Bodrum” 1–3 kat ekler. Turuncu merdiven aşağı, camgöbeği yukarı; hedef kat zorluğa göre değişir."));
 	line(LL14(L"難易度（超簡単〜超難しい）: 通路の広さ・広間・階段の本数・ゴールまでの3D距離に影響。難しいほど細い迷路・階段が多く上下往復し、ゴールは階をまたいだ遠い位置。アイテムは効果用なので多め。",
 		L"Difficulty (very easy–very hard): corridor width, rooms, stair count, and 3D path to the goal. Harder = thinner maze, more stairs (floor zigzags), farther multi-floor goal. Items stay plentiful for effects.",
 		L"Difficulté : couloirs, salles, plus d'escaliers (va-et-vient) et but plus loin. Objets nombreux.",
@@ -882,7 +882,7 @@ BOOL CS3mView::BakeBadgeTexture(const wchar_t* text)
 {
 	if (!m_dev || !text) return FALSE;
 	ReleaseBadgeTexture();
-	const int w = 220, h = 36;
+	const int w = 320, h = 56;
 	BITMAPINFO bi = {};
 	bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
 	bi.bmiHeader.biWidth = w;
@@ -899,18 +899,18 @@ BOOL CS3mView::BakeBadgeTexture(const wchar_t* text)
 		Gdiplus::Graphics g(dc);
 		g.SetTextRenderingHint(Gdiplus::TextRenderingHintAntiAlias);
 		g.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
-		Gdiplus::SolidBrush bg(Gdiplus::Color(170, 6, 8, 14));
+		Gdiplus::SolidBrush bg(Gdiplus::Color(110, 6, 8, 14));
 		g.FillRectangle(&bg, 0, 0, w, h);
 		Gdiplus::FontFamily ff(L"Segoe UI");
-		Gdiplus::Font font(&ff, 15.f, Gdiplus::FontStyleBold, Gdiplus::UnitPixel);
+		Gdiplus::Font font(&ff, 28.f, Gdiplus::FontStyleBold, Gdiplus::UnitPixel);
 		Gdiplus::StringFormat sf;
 		sf.SetAlignment(Gdiplus::StringAlignmentCenter);
 		sf.SetLineAlignment(Gdiplus::StringAlignmentCenter);
-		Gdiplus::SolidBrush sh(Gdiplus::Color(180, 0, 0, 0));
-		Gdiplus::SolidBrush fg(Gdiplus::Color(240, 235, 240, 250));
-		Gdiplus::RectF r(2.f, 1.f, (Gdiplus::REAL)(w - 2), (Gdiplus::REAL)(h - 2));
+		Gdiplus::SolidBrush sh(Gdiplus::Color(160, 0, 0, 0));
+		Gdiplus::SolidBrush fg(Gdiplus::Color(250, 245, 248, 255));
+		Gdiplus::RectF r(4.f, 2.f, (Gdiplus::REAL)(w - 4), (Gdiplus::REAL)(h - 2));
 		g.DrawString(text, -1, &font, r, &sf, &sh);
-		r.X -= 1.f; r.Y -= 1.f;
+		r.X -= 1.5f; r.Y -= 1.5f;
 		g.DrawString(text, -1, &font, r, &sf, &fg);
 	}
 	D3D11_TEXTURE2D_DESC d = {};
@@ -937,7 +937,7 @@ BOOL CS3mView::BakeTipTexture(const wchar_t* text)
 {
 	if (!m_dev || !text) return FALSE;
 	ReleaseTipTexture();
-	const int w = 560, h = 84;
+	const int w = 760, h = 148;
 	BITMAPINFO bi = {};
 	bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
 	bi.bmiHeader.biWidth = w;
@@ -954,18 +954,18 @@ BOOL CS3mView::BakeTipTexture(const wchar_t* text)
 		Gdiplus::Graphics g(dc);
 		g.SetTextRenderingHint(Gdiplus::TextRenderingHintAntiAlias);
 		g.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
-		Gdiplus::SolidBrush bg(Gdiplus::Color(150, 8, 10, 16));
+		Gdiplus::SolidBrush bg(Gdiplus::Color(100, 8, 10, 16));
 		g.FillRectangle(&bg, 0, 0, w, h);
 		Gdiplus::FontFamily ff(L"Segoe UI");
-		Gdiplus::Font font(&ff, 13.f, Gdiplus::FontStyleRegular, Gdiplus::UnitPixel);
+		Gdiplus::Font font(&ff, 22.f, Gdiplus::FontStyleBold, Gdiplus::UnitPixel);
 		Gdiplus::StringFormat sf;
 		sf.SetAlignment(Gdiplus::StringAlignmentNear);
 		sf.SetLineAlignment(Gdiplus::StringAlignmentNear);
-		Gdiplus::SolidBrush sh(Gdiplus::Color(160, 0, 0, 0));
-		Gdiplus::SolidBrush fg(Gdiplus::Color(235, 230, 235, 245));
-		Gdiplus::RectF r(9.f, 7.f, (Gdiplus::REAL)(w - 14), (Gdiplus::REAL)(h - 10));
+		Gdiplus::SolidBrush sh(Gdiplus::Color(150, 0, 0, 0));
+		Gdiplus::SolidBrush fg(Gdiplus::Color(250, 240, 245, 255));
+		Gdiplus::RectF r(14.f, 12.f, (Gdiplus::REAL)(w - 24), (Gdiplus::REAL)(h - 18));
 		g.DrawString(text, -1, &font, r, &sf, &sh);
-		r.X -= 1.f; r.Y -= 1.f;
+		r.X -= 1.5f; r.Y -= 1.5f;
 		g.DrawString(text, -1, &font, r, &sf, &fg);
 	}
 	D3D11_TEXTURE2D_DESC d = {};
@@ -1037,8 +1037,11 @@ void CS3mView::OnContextMenu(CWnd*, CPoint point)
 void CS3mView::OnLButtonDown(UINT nFlags, CPoint point)
 {
 	CSoft3DMazeDlg* dlg = (CSoft3DMazeDlg*)GetParent();
-	if (dlg && dlg->ConsumeOverviewClick())
+	if (dlg && dlg->IsOverviewActive()) {
+		dlg->BeginMapPan(point);
+		SetCapture();
 		return;
+	}
 	m_dragging = 1;
 	m_dragOrigin = point;
 	m_dragTurnAcc = 0;
@@ -1048,10 +1051,15 @@ void CS3mView::OnLButtonDown(UINT nFlags, CPoint point)
 
 void CS3mView::OnLButtonUp(UINT nFlags, CPoint point)
 {
+	CSoft3DMazeDlg* dlg = (CSoft3DMazeDlg*)GetParent();
+	if (dlg && dlg->EndMapPan()) {
+		if (GetCapture() == this)
+			ReleaseCapture();
+		return;
+	}
 	if (m_dragging) {
 		const int dx = point.x - m_dragOrigin.x;
 		const int dy = point.y - m_dragOrigin.y;
-		CSoft3DMazeDlg* dlg = (CSoft3DMazeDlg*)GetParent();
 		if (dlg && abs(dx) < 18 && abs(dy) < 18) {
 			switch (HitMoveDir(point)) {
 			case 0: dlg->InputTurn(-1); break;
@@ -1070,6 +1078,11 @@ void CS3mView::OnLButtonUp(UINT nFlags, CPoint point)
 
 void CS3mView::OnMouseMove(UINT nFlags, CPoint point)
 {
+	CSoft3DMazeDlg* dlg = (CSoft3DMazeDlg*)GetParent();
+	if (dlg && dlg->IsMapPanning()) {
+		dlg->UpdateMapPan(point);
+		return;
+	}
 	// カーソルは OnSetCursor で IDC_C* を適用
 	CCustomStatic::OnMouseMove(nFlags, point);
 }
@@ -1077,6 +1090,11 @@ void CS3mView::OnMouseMove(UINT nFlags, CPoint point)
 BOOL CS3mView::OnSetCursor(CWnd* pWnd, UINT nHitTest, UINT message)
 {
 	if (nHitTest == HTCLIENT) {
+		CSoft3DMazeDlg* dlg = (CSoft3DMazeDlg*)GetParent();
+		if (dlg && dlg->IsOverviewActive()) {
+			HCURSOR h = ::LoadCursor(NULL, IDC_SIZEALL);
+			if (h) { ::SetCursor(h); return TRUE; }
+		}
 		CPoint pt;
 		::GetCursorPos(&pt);
 		ScreenToClient(&pt);
@@ -1101,14 +1119,13 @@ BOOL CS3mView::OnMouseWheel(UINT nFlags, short zDelta, CPoint pt)
 	CSoft3DMazeDlg* dlg = (CSoft3DMazeDlg*)GetParent();
 	if (dlg) {
 		const int dir = (zDelta > 0) ? 1 : -1;
-		const BOOL ctrl = (nFlags & MK_CONTROL) != 0;
 		const BOOL shift = (nFlags & MK_SHIFT) != 0;
-		// 全体マップ: ホイール=階層 / Ctrl+ホイール=地図の拡大縮小
+		// 全体マップ: ホイール=地図ズーム / Shift+ホイール=階層
 		if (dlg->IsOverviewActive()) {
-			if (ctrl)
-				dlg->InputMapZoom(dir);
-			else
+			if (shift)
 				dlg->InputOverviewFloorDelta(dir);
+			else
+				dlg->InputMapZoom(dir);
 			return TRUE;
 		}
 		// Shift+ホイール = 従来どおり旋回（Q/E・←→でも可）
@@ -1162,6 +1179,8 @@ CSoft3DMazeDlg::CSoft3DMazeDlg(CWnd* p)
 	, m_lastTick(0), m_rng(GetTickCount()), m_genSeed(GetTickCount())
 	, m_lastAutosave(0), m_runDirty(0), m_mapBakeDirty(1), m_mapToggle(0)
 	, m_overviewFloorHeld(0)
+	, m_mapPanX(0.f), m_mapPanY(0.f), m_mapPanDrag(0)
+	, m_spaceToggleTick(0), m_tipIsOverview(-1)
 {
 	for (int f = 0; f < S3M_MAX_FLOORS; f++) {
 		m_grids[f] = NULL;
@@ -1210,22 +1229,67 @@ BOOL CSoft3DMazeDlg::PreTranslateMessage(MSG* pMsg)
 {
 	if (m_tooltip.GetSafeHwnd())
 		m_tooltip.RelayEvent(pMsg);
-	// SPACE = 全体マップ（押しっぱなし）。コンボ／編集中は入力を妨げない。MPの再生トグルへ渡さない
-	if (pMsg->message == WM_KEYDOWN || pMsg->message == WM_KEYUP || pMsg->message == WM_SYSKEYDOWN || pMsg->message == WM_SYSKEYUP) {
-		if (pMsg->wParam == VK_SPACE) {
-			CWnd* f = GetFocus();
-			const BOOL inEdit = (f && (f == &m_size || m_size.IsChild(f) || f->IsKindOf(RUNTIME_CLASS(CEdit))));
-			if (!inEdit)
-				return TRUE;
-		}
-		// 全体マップ中の ←→ は階層切替に使うので、地下コンボの選択を動かさない
-		if ((pMsg->wParam == VK_LEFT || pMsg->wParam == VK_RIGHT) && IsOverviewActive()) {
-			CWnd* f = GetFocus();
-			if (f && (f == &m_base || m_base.IsChild(f)))
-				return TRUE;
-		}
-	}
+	if (HandleAccelMessage(pMsg))
+		return TRUE;
 	return CCustomBlurDialogBase::PreTranslateMessage(pMsg);
+}
+
+BOOL CSoft3DMazeDlg::HandleAccelMessage(MSG* pMsg)
+{
+	if (!pMsg) return FALSE;
+	const UINT msg = pMsg->message;
+	if (msg != WM_KEYDOWN && msg != WM_KEYUP && msg != WM_SYSKEYDOWN && msg != WM_SYSKEYUP)
+		return FALSE;
+	CWnd* f = GetFocus();
+	const BOOL inEdit = (f && (f == &m_size || m_size.IsChild(f) || f->IsKindOf(RUNTIME_CLASS(CEdit))));
+	if (pMsg->wParam == VK_SPACE) {
+		if (inEdit) return FALSE;
+		// 押しっぱなしリピートは無視。同一キーイベントの二重処理も防ぐ
+		if (msg == WM_KEYDOWN && !(pMsg->lParam & (1 << 30))) {
+			const DWORD now = GetTickCount();
+			if (now != m_spaceToggleTick) {
+				m_spaceToggleTick = now;
+				ToggleMapOverlay();
+			}
+		}
+		return TRUE;
+	}
+	if (msg == WM_KEYDOWN && pMsg->wParam == VK_ESCAPE && IsOverviewActive()) {
+		m_mapToggle = 0;
+		m_mapPanDrag = 0;
+		return TRUE;
+	}
+	// 全体マップ中の ←→ は階層切替に使うので、地下コンボの選択を動かさない
+	if ((pMsg->wParam == VK_LEFT || pMsg->wParam == VK_RIGHT) && IsOverviewActive()) {
+		if (f && (f == &m_base || m_base.IsChild(f)))
+			return TRUE;
+	}
+	return FALSE;
+}
+
+void CSoft3DMazeDlg::ToggleMapOverlay()
+{
+	m_mapToggle = m_mapToggle ? 0 : 1;
+	m_mapPanDrag = 0;
+	if (m_mapToggle) {
+		m_mapViewFloor = m_floor;
+		m_mapBakeDirty = 1;
+		m_mapPanX = 0.f;
+		m_mapPanY = 0.f;
+	}
+	EnsureTipTexture(m_mapToggle != 0);
+}
+
+void CSoft3DMazeDlg::EnsureTipTexture(BOOL overviewTip)
+{
+	if (!m_view.m_ready) return;
+	const int want = overviewTip ? 1 : 0;
+	if (m_tipIsOverview == want && m_view.m_srvTip)
+		return;
+	const CStringW& text = overviewTip ? m_overviewTipText : m_playTipText;
+	if (text.IsEmpty()) return;
+	if (m_view.BakeTipTexture((LPCWSTR)text))
+		m_tipIsOverview = want;
 }
 
 void CSoft3DMazeDlg::PostNcDestroy()
@@ -1449,7 +1513,7 @@ void CSoft3DMazeDlg::PersistUi()
 	savedata.s3m_bob = savedata.s3m_bob ? 1 : 0;
 	if (savedata.s3m_fov < 0 || savedata.s3m_fov > 2) savedata.s3m_fov = 1;
 	if (savedata.s3m_zoom < 50 || savedata.s3m_zoom > 250) savedata.s3m_zoom = 100;
-	if (savedata.s3m_map_zoom < 50 || savedata.s3m_map_zoom > 250) savedata.s3m_map_zoom = 100;
+	if (savedata.s3m_map_zoom < 50 || savedata.s3m_map_zoom > 400) savedata.s3m_map_zoom = 100;
 	if (savedata.s3m_difficulty < 0 || savedata.s3m_difficulty >= DIFF_COUNT) savedata.s3m_difficulty = DIFF_NORMAL;
 	MpPersistSavedataQuick();
 }
@@ -2790,8 +2854,45 @@ float CSoft3DMazeDlg::MapZoomScale() const
 {
 	int z = savedata.s3m_map_zoom;
 	if (z < 50) z = 50;
-	if (z > 250) z = 250;
+	if (z > 400) z = 400;
 	return (float)z / 100.f;
+}
+
+float CSoft3DMazeDlg::OverviewBaseSide(int viewW, int viewH) const
+{
+	// 下に操作説明・上に階層ラベル用の余白を残す
+	const float tipBand = 156.f;
+	const float topPad = 68.f;
+	const float aw = (float)viewW;
+	const float ah = max(96.f, (float)viewH - tipBand - topPad);
+	return min(aw, ah) * .92f;
+}
+
+void CSoft3DMazeDlg::ClampMapPan(int viewW, int viewH, float side)
+{
+	const float margin = 16.f;
+	const float tipBand = 156.f;
+	const float topPad = 68.f;
+	const float areaTop = topPad;
+	const float areaH = max(96.f, (float)viewH - tipBand - topPad);
+	auto clampAxis = [&](float& pan, float view0, float viewSpan, float span) {
+		const float centered = view0 + (viewSpan - span) * .5f;
+		float minO, maxO;
+		if (span <= viewSpan - margin * 2.f) {
+			minO = view0 + margin;
+			maxO = view0 + viewSpan - span - margin;
+		} else {
+			minO = view0 + viewSpan - span - margin;
+			maxO = view0 + margin;
+		}
+		if (minO > maxO) { const float t = minO; minO = maxO; maxO = t; }
+		float o = centered + pan;
+		if (o < minO) o = minO;
+		if (o > maxO) o = maxO;
+		pan = o - centered;
+	};
+	clampAxis(m_mapPanX, 0.f, (float)viewW, side);
+	clampAxis(m_mapPanY, areaTop, areaH, side);
 }
 
 void CSoft3DMazeDlg::InputFovZoom(int dir)
@@ -2819,15 +2920,49 @@ void CSoft3DMazeDlg::InputMapZoom(int dir)
 		return;
 	int z = savedata.s3m_map_zoom;
 	if (z < 50) z = 50;
-	if (z > 250) z = 250;
+	if (z > 400) z = 400;
 	const float f = (dir > 0) ? (z * 1.10f) : (z / 1.10f);
 	z = (int)(f + 0.5f);
 	if (z < 50) z = 50;
-	if (z > 250) z = 250;
+	if (z > 400) z = 400;
 	if (z == savedata.s3m_map_zoom)
 		return;
 	savedata.s3m_map_zoom = z;
+	if (IsOverviewActive() && m_view.GetSafeHwnd()) {
+		CRect rc; m_view.GetClientRect(&rc);
+		const float side = OverviewBaseSide(rc.Width(), rc.Height()) * MapZoomScale();
+		ClampMapPan(rc.Width(), rc.Height(), side);
+	}
 	PersistUi();
+}
+
+BOOL CSoft3DMazeDlg::BeginMapPan(CPoint clientPt)
+{
+	if (!IsOverviewActive()) return FALSE;
+	m_mapPanDrag = 1;
+	m_mapPanLast = clientPt;
+	return TRUE;
+}
+
+BOOL CSoft3DMazeDlg::UpdateMapPan(CPoint clientPt)
+{
+	if (!m_mapPanDrag || !IsOverviewActive()) return FALSE;
+	m_mapPanX += (float)(clientPt.x - m_mapPanLast.x);
+	m_mapPanY += (float)(clientPt.y - m_mapPanLast.y);
+	m_mapPanLast = clientPt;
+	if (m_view.GetSafeHwnd()) {
+		CRect rc; m_view.GetClientRect(&rc);
+		const float side = OverviewBaseSide(rc.Width(), rc.Height()) * MapZoomScale();
+		ClampMapPan(rc.Width(), rc.Height(), side);
+	}
+	return TRUE;
+}
+
+BOOL CSoft3DMazeDlg::EndMapPan()
+{
+	if (!m_mapPanDrag) return FALSE;
+	m_mapPanDrag = 0;
+	return TRUE;
 }
 
 BOOL CSoft3DMazeDlg::HitTestMinimap(CPoint clientPt) const
@@ -2919,16 +3054,6 @@ BOOL CSoft3DMazeDlg::TryStep(int mx, int mz)
 	return TRUE;
 }
 
-BOOL CSoft3DMazeDlg::ConsumeOverviewClick()
-{
-	if (!IsOverviewActive())
-		return FALSE;
-	// トグル表示はクリックで閉じる（SPACE押しっぱなし中はSPACE側が残る）
-	if (m_mapToggle)
-		m_mapToggle = 0;
-	return TRUE;
-}
-
 void CSoft3DMazeDlg::TickMove(float dt)
 {
 	if (m_n <= 0) return;
@@ -2945,7 +3070,7 @@ void CSoft3DMazeDlg::TickMove(float dt)
 		if (savedata.s3m_bob) m_bob += dt * 2.f;
 		return;
 	}
-	// SPACE 押下中／全体マップ表示中は確認のみ（移動・旋回しない）。←→ / A D で表示階層を切替
+	// 全体マップ表示中は確認のみ（移動・旋回しない）。←→ / A D で表示階層を切替
 	if (IsOverviewActive()) {
 		m_moveHeld = 1;
 		m_turnHeld = 1;
@@ -3524,6 +3649,9 @@ void CSoft3DMazeDlg::RenderScene()
 	auto hq=[&](float ax,float ay,float bx,float by,float cx,float cy,float dx,float dy,float r,float g,float b,float a){hp(ax,ay,r,g,b,a);hp(bx,by,r,g,b,a);hp(cx,cy,r,g,b,a);hp(ax,ay,r,g,b,a);hp(cx,cy,r,g,b,a);hp(dx,dy,r,g,b,a);};
 	const BOOL overview=IsOverviewActive();
 	float badgeX=0,badgeY=0,badgeMaxW=120.f;int badgeFloor=m_floor;BOOL drawBadge=FALSE;
+	BOOL badgeRightEdge=FALSE,badgeAboveMap=FALSE;
+	float mapOx=0,mapOy=0,mapSide=0;
+	float miniL=0,miniT=0,miniR=0,miniB=0;BOOL haveMini=FALSE;
 	if(overview){
 		hq(0,0,(float)w,0,(float)w,(float)h,0,(float)h,.02f,.03f,.05f,.58f);
 	}else if(savedata.s3m_show_map){
@@ -3534,6 +3662,7 @@ void CSoft3DMazeDlg::RenderScene()
 		const float cs=mpix/kMapViewWorld;
 		const float mcx=w-10.f-mpix*.5f,mcy=10.f+mpix*.5f,pad=mpix*.5f+3.f;
 		const float L=mcx-pad,R=mcx+pad,T=mcy-pad,B=mcy+pad;
+		haveMini=TRUE;miniL=L;miniT=T;miniR=R;miniB=B;
 		hq(L,T,R,T,R,B,L,B,.04f,.05f,.08f,.72f);
 		auto inBox=[&](float qx,float qy)->BOOL{return qx>=L&&qx<=R&&qy>=T&&qy<=B;};
 		const float rad=kMapViewWorld*.75f;
@@ -3550,8 +3679,8 @@ void CSoft3DMazeDlg::RenderScene()
 			hq(qx[0],qy[0],qx[1],qy[1],qx[2],qy[2],qx[3],qy[3],rr,gg,bb,a);
 		};
 		// 階層切替中は旧階層→新階層をクロスフェード
-		// 壁帯はワールドでは細いので、地図上だけ太く見せる
-		const float kMapWallPad = 0.32f;
+		// 壁帯はワールドでは細いので、地図上だけわずかに太く（通路幅の約1/5程度）
+		const float kMapWallPad = 0.05f;
 		auto drawMapFloor=[&](int mf,float am){
 			if(mf<0||mf>=m_nFloors||!m_grids[mf]||am<=.01f)return;
 			for(int z=gz0;z<gz1;z++)for(int x=gx0;x<gx1;x++){
@@ -3614,7 +3743,9 @@ void CSoft3DMazeDlg::RenderScene()
 		float nx,ny,xx,xy;WorldToMap(ex+fx,ez+fz,nx,ny);WorldToMap(ex+rx,ez+rz,xx,xy);
 		float ccx=min(R-8.f,max(L+8.f,mcx+pad-12)),ccy=min(B-8.f,max(T+8.f,mcy-pad+12));
 		hp(ccx+nx*8,ccy+ny*8,1,.2f,.2f,1);hp(ccx-nx*2-xx*4,ccy-ny*2-xy*4,1,.2f,.2f,1);hp(ccx-nx*2+xx*4,ccy-ny*2+xy*4,1,.2f,.2f,1);
-		drawBadge=TRUE;badgeFloor=m_floor;badgeX=L+6.f;badgeY=T+5.f;badgeMaxW=max(72.f,(R-L)*.55f);
+		// 階層ラベルはミニマップ左側（地図に重ねない・読みやすい大きさ）
+		drawBadge=TRUE;badgeFloor=m_floor;badgeRightEdge=TRUE;
+		badgeX=L-8.f;badgeY=T+2.f;badgeMaxW=min(240.f,max(160.f,L-20.f));
 	}
 	if(m_clearScreenA>.01f)hq(0,0,(float)w,0,(float)w,(float)h,0,(float)h,0,0,0,m_clearScreenA);
 	else if(m_floorScreenA>.01f)hq(0,0,(float)w,0,(float)w,(float)h,0,(float)h,0,0,0,m_floorScreenA);
@@ -3634,35 +3765,44 @@ void CSoft3DMazeDlg::RenderScene()
 				BYTE* row=(BYTE*)mm.pData;
 				const int pitch=(int)mm.RowPitch;
 				const float invTS=worldSpan/(float)TS;
-				// 壁はワールド幅が狭いので、近傍サンプリングで地図上だけ太くする
-				const float wallPad=max(0.28f, worldSpan/(float)TS*2.5f);
+				// 壁は通路の約1/5程度見えるよう軽くだけ太くする（未訪問床のみ）
+				const float wallPad=0.05f;
+				const float wallTexels=0.10f/max(1e-6f,invTS);
+				// 全体マップ: 未訪問=黒 / 訪問床=薄い青 / 壁=茶で区別
+				auto rgba=[&](BYTE r,BYTE g,BYTE b,BYTE a)->DWORD{
+					return ((DWORD)a<<24)|((DWORD)r<<16)|((DWORD)g<<8)|b;
+				};
+				const DWORD colWall=rgba(180,130,90,255);
+				const DWORD colWin=rgba(70,150,210,255);
+				const DWORD colVisit=rgba(110,180,230,235);
+				const DWORD colBlack=rgba(0,0,0,255);
 				auto classify=[&](float wx,float wz)->DWORD{
 					const int gx=WorldToGridAxis(wx),gz=WorldToGridAxis(wz);
 					BYTE c=CellAtF(bakeFloor,gx,gz);
-					auto rgba=[&](BYTE r,BYTE g,BYTE b,BYTE a)->DWORD{
-						return ((DWORD)a<<24)|((DWORD)r<<16)|((DWORD)g<<8)|b;
-					};
+					const BOOL visited=VisitAtF(bakeFloor,gx,gz)?TRUE:FALSE;
 					if(c==CELL_GOAL)return rgba(255,210,40,235);
 					if(c==CELL_START)return rgba(55,220,120,235);
 					if(c==CELL_STAIRS_DOWN)return rgba(255,148,40,240);
 					if(c==CELL_STAIRS_UP)return rgba(60,220,255,240);
+					if(c==CELL_WALL)return colWall;
+					if(c==CELL_WINDOW)return colWin;
+					// 訪問済み通路を壁で潰さない（壁近傍の太さは未訪問側だけ）
+					if(!visited){
+						static const float ox[4]={wallPad,-wallPad,0,0};
+						static const float oz[4]={0,0,wallPad,-wallPad};
+						for(int i=0;i<4;i++){
+							const BYTE n=CellAtF(bakeFloor,WorldToGridAxis(wx+ox[i]),WorldToGridAxis(wz+oz[i]));
+							if(n==CELL_WALL)return colWall;
+							if(n==CELL_WINDOW)return colWin;
+						}
+					}
+					if(!visited)return colBlack;
 					if(S3mIsPickupCell(c))return rgba(210,90,200,225);
 					if(c==CELL_SLIME)return rgba(60,200,80,210);
 					if(c==CELL_SPIKE)return rgba(220,60,50,215);
 					if(c==CELL_ICE)return rgba(100,200,255,210);
 					if(c==CELL_DARK)return rgba(50,40,90,220);
-					if(c==CELL_WALL)return rgba(92,62,44,220);
-					if(c==CELL_WINDOW)return rgba(48,130,190,210);
-					// 床でも壁帯の近傍なら壁色で塗る（細い壁を見やすく）
-					static const float ox[4]={wallPad,-wallPad,0,0};
-					static const float oz[4]={0,0,wallPad,-wallPad};
-					for(int i=0;i<4;i++){
-						const BYTE n=CellAtF(bakeFloor,WorldToGridAxis(wx+ox[i]),WorldToGridAxis(wz+oz[i]));
-						if(n==CELL_WALL)return rgba(92,62,44,220);
-						if(n==CELL_WINDOW)return rgba(48,130,190,210);
-					}
-					if(VisitAtF(bakeFloor,gx,gz))return rgba(70,130,200,200);
-					return rgba(42,78,55,170);
+					return colVisit;
 				};
 				for(int ty=0;ty<TS;ty++){
 					const float wz=((float)ty+.5f)*invTS;
@@ -3672,9 +3812,8 @@ void CSoft3DMazeDlg::RenderScene()
 						dst[tx]=classify(wx,wz);
 					}
 				}
-				// さらに1px相当の膨張（大マップで1px線化しない）
-				const int dilate=max(1,(int)(wallPad/invTS+.5f));
-				if(dilate>0){
+				// 大マップで壁が1px未満になるときだけ1回膨張（訪問床・マーカーは守る）
+				if(wallTexels<1.25f){
 					DWORD* tmp=new DWORD[(size_t)TS*(size_t)TS];
 					if(tmp){
 						for(int ty=0;ty<TS;ty++){
@@ -3682,35 +3821,31 @@ void CSoft3DMazeDlg::RenderScene()
 							memcpy(tmp+(size_t)ty*(size_t)TS,src,(size_t)TS*sizeof(DWORD));
 						}
 						auto isWallish=[&](DWORD p)->BOOL{
-							const BYTE r=(BYTE)((p>>16)&255),g=(BYTE)((p>>8)&255),b=(BYTE)(p&255);
-							return (r==92&&g==62&&b==44)||(r==48&&g==130&&b==190);
+							return p==colWall||p==colWin;
 						};
 						auto isKeep=[&](DWORD p)->BOOL{
+							if(p==colVisit)return TRUE;
 							const BYTE r=(BYTE)((p>>16)&255),g=(BYTE)((p>>8)&255),b=(BYTE)(p&255);
 							return (r==255&&g==210&&b==40)||(r==55&&g==220&&b==120)
 								||(r==255&&g==148&&b==40)||(r==60&&g==220&&b==255)
-								||(r==210&&g==90&&b==200);
+								||(r==210&&g==90&&b==200)
+								||(r==60&&g==200&&b==80)||(r==220&&g==60&&b==50)
+								||(r==100&&g==200&&b==255)||(r==50&&g==40&&b==90);
 						};
-						for(int pass=0;pass<min(2,dilate);pass++){
-							for(int ty=0;ty<TS;ty++){
-								DWORD* dst=(DWORD*)(row+ty*pitch);
-								for(int tx=0;tx<TS;tx++){
-									DWORD cur=tmp[(size_t)ty*(size_t)TS+(size_t)tx];
-									if(isKeep(cur)||isWallish(cur)){dst[tx]=cur;continue;}
-									DWORD take=cur;
-									const int nxy[4][2]={{1,0},{-1,0},{0,1},{0,-1}};
-									for(int k=0;k<4;k++){
-										const int nx=tx+nxy[k][0],ny=ty+nxy[k][1];
-										if(nx<0||ny<0||nx>=TS||ny>=TS)continue;
-										DWORD n=tmp[(size_t)ny*(size_t)TS+(size_t)nx];
-										if(isWallish(n)){take=n;break;}
-									}
-									dst[tx]=take;
+						for(int ty=0;ty<TS;ty++){
+							DWORD* dst=(DWORD*)(row+ty*pitch);
+							for(int tx=0;tx<TS;tx++){
+								DWORD cur=tmp[(size_t)ty*(size_t)TS+(size_t)tx];
+								if(isKeep(cur)||isWallish(cur)){dst[tx]=cur;continue;}
+								DWORD take=cur;
+								const int nxy[4][2]={{1,0},{-1,0},{0,1},{0,-1}};
+								for(int k=0;k<4;k++){
+									const int nx=tx+nxy[k][0],ny=ty+nxy[k][1];
+									if(nx<0||ny<0||nx>=TS||ny>=TS)continue;
+									DWORD n=tmp[(size_t)ny*(size_t)TS+(size_t)nx];
+									if(isWallish(n)){take=n;break;}
 								}
-							}
-							for(int ty=0;ty<TS;ty++){
-								DWORD* src=(DWORD*)(row+ty*pitch);
-								memcpy(tmp+(size_t)ty*(size_t)TS,src,(size_t)TS*sizeof(DWORD));
+								dst[tx]=take;
 							}
 						}
 						delete[] tmp;
@@ -3720,8 +3855,15 @@ void CSoft3DMazeDlg::RenderScene()
 				m_mapBakeDirty=0;
 			}
 		}
-		const float side=min((float)min(w,h)*.98f,(float)min(w,h)*.86f*MapZoomScale());
-		const float ox=((float)w-side)*.5f,oy=((float)h-side)*.5f;
+		const float tipBand=156.f;
+		const float topPad=68.f;
+		const float areaTop=topPad;
+		const float areaH=max(96.f,(float)h-tipBand-topPad);
+		const float baseSide=OverviewBaseSide(w,h);
+		const float side=baseSide*MapZoomScale();
+		ClampMapPan(w,h,side);
+		const float ox=((float)w-side)*.5f+m_mapPanX;
+		const float oy=areaTop+(areaH-side)*.5f+m_mapPanY;
 		D3D11_VIEWPORT mvp={ox,oy,side,side,0,1};
 		cb.misc.z=99.f;
 		if(SUCCEEDED(dc->Map(m_view.m_cbFrame,0,D3D11_MAP_WRITE_DISCARD,0,&map))){memcpy(map.pData,&cb,sizeof(cb));dc->Unmap(m_view.m_cbFrame,0);}
@@ -3762,7 +3904,11 @@ void CSoft3DMazeDlg::RenderScene()
 		hq(ox-2,oy-2,ox+side+2,oy-2,ox+side+2,oy+side+2,ox-2,oy+side+2,.9f,.92f,1.f,.22f);
 		if(hn&&SUCCEEDED(dc->Map(m_view.m_vbHud,0,D3D11_MAP_WRITE_DISCARD,0,&map))){memcpy(map.pData,hv,hn*sizeof(S3MHudVertex));dc->Unmap(m_view.m_vbHud,0);UINT hs=sizeof(S3MHudVertex);dc->IASetVertexBuffers(0,1,&m_view.m_vbHud,&hs,&off);dc->RSSetViewports(1,&vp);dc->IASetInputLayout(m_view.m_ilHud);dc->VSSetShader(m_view.m_vsHud,NULL,0);dc->PSSetShader(m_view.m_psHud,NULL,0);dc->OMSetBlendState(m_view.m_bsAlpha,NULL,~0u);dc->Draw(hn,0);}
 		dc->RSSetViewports(1,&vp);
-		drawBadge=TRUE;badgeFloor=bakeFloor;badgeX=ox+12.f;badgeY=oy+12.f;badgeMaxW=max(100.f,side*.28f);
+		// 階層ラベルは上帯左（操作説明は下帯・地図と分離）
+		mapOx=ox;mapOy=oy;mapSide=side;
+		drawBadge=TRUE;badgeFloor=bakeFloor;
+		badgeRightEdge=FALSE;badgeAboveMap=FALSE;
+		badgeX=14.f;badgeY=12.f;badgeMaxW=300.f;
 	}
 	auto blitFloorBadge=[&](){
 		if(!drawBadge||!m_view.m_ready)return;
@@ -3772,7 +3918,18 @@ void CSoft3DMazeDlg::RenderScene()
 		if(!m_view.m_srvBadge||m_view.m_badgeW<=0)return;
 		float tw=(float)m_view.m_badgeW,th=(float)m_view.m_badgeH;
 		if(tw>badgeMaxW){const float s=badgeMaxW/tw;tw*=s;th*=s;}
-		D3D11_VIEWPORT bvp={badgeX,badgeY,tw,th,0,1};
+		float bx=badgeX,by=badgeY;
+		if(badgeRightEdge){
+			bx=badgeX-tw;
+			if(bx<4.f)bx=4.f;
+		}else if(badgeAboveMap){
+			bx=mapOx+(mapSide-tw)*.5f;
+			by=mapOy-th-6.f;
+			if(by<4.f)by=4.f;
+			if(bx<4.f)bx=4.f;
+			if(bx+tw>(float)w-4.f)bx=max(4.f,(float)w-4.f-tw);
+		}
+		D3D11_VIEWPORT bvp={bx,by,tw,th,0,1};
 		cb.misc.z=99.f;
 		if(SUCCEEDED(dc->Map(m_view.m_cbFrame,0,D3D11_MAP_WRITE_DISCARD,0,&map))){memcpy(map.pData,&cb,sizeof(cb));dc->Unmap(m_view.m_cbFrame,0);}
 		dc->RSSetViewports(1,&bvp);
@@ -3784,11 +3941,51 @@ void CSoft3DMazeDlg::RenderScene()
 		dc->RSSetViewports(1,&vp);
 	};
 	blitFloorBadge();
+	EnsureTipTexture(overview);
 	if(m_view.m_srvTip&&m_view.m_tipW>0&&m_view.m_tipH>0){
-		const float maxW=(float)w*.48f;
 		float tw=(float)m_view.m_tipW,th=(float)m_view.m_tipH;
-		if(tw>maxW){const float s=maxW/tw;tw*=s;th*=s;}
-		D3D11_VIEWPORT tipVp={8.f,8.f,tw,th,0,1};
+		float tipX=8.f,tipY=8.f;
+		if(overview){
+			// 下帯に読める大きさで固定（階層ラベルは上帯・地図と分離）
+			const float pad=10.f;
+			const float maxW=(float)w-pad*2.f;
+			const float maxH=148.f;
+			if(tw>maxW){const float s=maxW/tw;tw*=s;th*=s;}
+			if(th>maxH){const float s=maxH/th;tw*=s;th*=s;}
+			tipX=((float)w-tw)*.5f;
+			tipY=(float)h-th-pad;
+			if(tipX<pad)tipX=pad;
+			if(tipY<pad)tipY=pad;
+		}else{
+			// 通常: ミニマップ／階層ラベルの左側までに収める。狭いときはミニマップ下へ
+			const float pad=8.f;
+			float badgeW=0.f;
+			if(drawBadge&&m_view.m_badgeW>0){
+				badgeW=(float)m_view.m_badgeW;
+				if(badgeW>badgeMaxW)badgeW=badgeMaxW;
+			}
+			float maxW=min((float)w*.72f,780.f);
+			if(haveMini){
+				const float stopX=miniL-(badgeW>0.f?badgeW+12.f:8.f)-pad;
+				maxW=min(maxW,max(180.f,stopX-pad));
+			}
+			if(tw>maxW){const float s=maxW/tw;tw*=s;th*=s;}
+			tipX=pad;
+			tipY=pad;
+			if(haveMini){
+				const float badgeLeft=miniL-(badgeW>0.f?badgeW+8.f:0.f);
+				if(tipX+tw>badgeLeft-6.f){
+					// 横に並ぶと被るのでミニマップ下へ退避
+					tipY=miniB+10.f;
+					maxW=min((float)w-pad*2.f,780.f);
+					tw=(float)m_view.m_tipW;th=(float)m_view.m_tipH;
+					if(tw>maxW){const float s=maxW/tw;tw*=s;th*=s;}
+					tipX=pad;
+				}
+			}
+			if(tipY+th>(float)h-pad)tipY=max(pad,(float)h-pad-th);
+		}
+		D3D11_VIEWPORT tipVp={tipX,tipY,tw,th,0,1};
 		cb.misc.z=99.f;
 		if(SUCCEEDED(dc->Map(m_view.m_cbFrame,0,D3D11_MAP_WRITE_DISCARD,0,&map))){memcpy(map.pData,&cb,sizeof(cb));dc->Unmap(m_view.m_cbFrame,0);}
 		dc->RSSetViewports(1,&tipVp);
@@ -3942,7 +4139,7 @@ BOOL CSoft3DMazeDlg::OnInitDialog()
 	if(savedata.s3m_basements<0||savedata.s3m_basements>S3M_MAX_FLOORS-1)savedata.s3m_basements=0;
 	if(savedata.s3m_difficulty<0||savedata.s3m_difficulty>=DIFF_COUNT)savedata.s3m_difficulty=DIFF_NORMAL;
 	if(savedata.s3m_zoom<50||savedata.s3m_zoom>250)savedata.s3m_zoom=100;
-	if(savedata.s3m_map_zoom<50||savedata.s3m_map_zoom>250)savedata.s3m_map_zoom=100;
+	if(savedata.s3m_map_zoom<50||savedata.s3m_map_zoom>400)savedata.s3m_map_zoom=100;
 
 	SetWindowText(LL14(L"Soft3D 迷路", L"Soft3D maze", L"Labyrinthe Soft3D", L"Labirinto Soft3D", L"Laberinto Soft3D",
 		L"Soft3D 미로", L"Soft3D 迷宫", L"متاهة Soft3D", L"Лабиринт Soft3D", L"Soft3D-Labyrinth",
@@ -3957,10 +4154,10 @@ BOOL CSoft3DMazeDlg::OnInitDialog()
 		L"생성", L"生成", L"توليد", L"Создать", L"Erzeugen", L"Gerar", L"Genereren", L"Generuj", L"Oluştur"));
 	m_close.SetWindowText(LL14(L"閉じる", L"Close", L"Fermer", L"Chiudi", L"Cerrar",
 		L"닫기", L"关闭", L"إغلاق", L"Закрыть", L"Schließen", L"Fechar", L"Sluiten", L"Zamknij", L"Kapat"));
-	m_hint.SetWindowText(LL14(L"WASD / QE · ホイール=拡大縮小 · SPACE/ホイールクリック=全体マップ（←→/ホイール=階層・Ctrl+ホイール=地図ズーム） · 右クリック", L"WASD / QE · wheel=zoom · SPACE/wheel-click=map (←→/wheel=floor · Ctrl+wheel=map zoom) · right-click", L"WASD / QE · molette=zoom · Espace/clic molette=carte (←→/molette=étage · Ctrl+molette=zoom) · clic droit", L"WASD / QE · rotella=zoom · SPAZIO/clic rotella=mappa (←→/rotella=piano · Ctrl+rotella=zoom) · clic destro",
-		L"WASD / QE · rueda=zoom · Espacio/clic rueda=mapa (←→/rueda=planta · Ctrl+rueda=zoom) · clic derecho", L"WASD / QE · 휠=줌 · SPACE/휠클릭=맵(←→/휠=층 · Ctrl+휠=지도줌) · 우클릭", L"WASD / QE · 滚轮=缩放 · 空格/滚轮点击=地图（←→/滚轮=层 · Ctrl+滚轮=地图缩放） · 右键", L"WASD / QE · عجلة=تكبير · مسافة/نقر عجلة=خريطة (←→/عجلة=طابق · Ctrl+عجلة=تكبير) · يمين",
-		L"WASD / QE · колесо=зум · Пробел/клик колёсиком=карта (←→/колесо=этаж · Ctrl+колесо=зум) · ПКМ", L"WASD / QE · Rad=Zoom · Leertaste/Radklick=Karte (←→/Rad=Etage · Strg+Rad=Zoom) · Rechtsklick", L"WASD / QE · roda=zoom · Espaço/roda=mapa (←→/roda=piso · Ctrl+roda=zoom) · direito", L"WASD / QE · wiel=zoom · Spatie/wielklik=kaart (←→/wiel=verdieping · Ctrl+wiel=zoom) · rechtsklik",
-		L"WASD / QE · kółko=zoom · Spacja/klik kółkiem=mapa (←→/kółko=piętro · Ctrl+kółko=zoom) · PPM", L"WASD / QE · teker=zoom · SPACE/teker tık=harita (←→/teker=kat · Ctrl+teker=zoom) · sağ tık"));
+	m_hint.SetWindowText(LL14(L"WASD / QE · ホイール=拡大縮小 · SPACE/ホイールクリック=全体マップ切替（ホイール=地図ズーム・ドラッグ=スクロール・Shift+ホイール/←→=階層） · 右クリック", L"WASD / QE · wheel=zoom · SPACE/wheel-click=toggle map (wheel=map zoom · drag=scroll · Shift+wheel/←→=floor) · right-click", L"WASD / QE · molette=zoom · Espace/clic molette=carte (molette=zoom · glisser=défiler · Maj+molette/←→=étage) · clic droit", L"WASD / QE · rotella=zoom · SPAZIO/clic rotella=mappa (rotella=zoom · trascina=scorri · Maiusc+rotella/←→=piano) · clic destro",
+		L"WASD / QE · rueda=zoom · Espacio/clic rueda=mapa (rueda=zoom · arrastrar=desplazar · Mayús+rueda/←→=planta) · clic derecho", L"WASD / QE · 휠=줌 · SPACE/휠클릭=맵 토글(휠=지도줌 · 드래그=스크롤 · Shift+휠/←→=층) · 우클릭", L"WASD / QE · 滚轮=缩放 · 空格/滚轮点击=地图开关（滚轮=地图缩放 · 拖动=滚动 · Shift+滚轮/←→=层） · 右键", L"WASD / QE · عجلة=تكبير · مسافة/نقر عجلة=خريطة (عجلة=تكبير · سحب=تمرير · Shift+عجلة/←→=طابق) · يمين",
+		L"WASD / QE · колесо=зум · Пробел/клик колёсиком=карта (колесо=зум · перетаскивание=прокрутка · Shift+колесо/←→=этаж) · ПКМ", L"WASD / QE · Rad=Zoom · Leertaste/Radklick=Karte (Rad=Zoom · Ziehen=Scrollen · Umschalt+Rad/←→=Etage) · Rechtsklick", L"WASD / QE · roda=zoom · Espaço/roda=mapa (roda=zoom · arrastar=rolar · Shift+roda/←→=piso) · direito", L"WASD / QE · wiel=zoom · Spatie/wielklik=kaart (wiel=zoom · slepen=scrollen · Shift+wiel/←→=verdieping) · rechtsklik",
+		L"WASD / QE · kółko=zoom · Spacja/klik kółkiem=mapa (kółko=zoom · przeciąganie=przewijanie · Shift+kółko/←→=piętro) · PPM", L"WASD / QE · teker=zoom · SPACE/teker tık=harita (teker=zoom · sürükle=kaydır · Shift+teker/←→=kat) · sağ tık"));
 
 	for (int i = 0; i < kPresetCnt; i++) {
 		CString s;
@@ -3995,8 +4192,8 @@ BOOL CSoft3DMazeDlg::OnInitDialog()
 		m_tooltip.Activate(TRUE);
 		m_tooltip.AddTool(&m_gen, LL14(L"新しい迷路を生成します", L"Generate a new maze", L"Générer un nouveau labyrinthe", L"Genera un nuovo labirinto", L"Generar un nuevo laberinto",
 			L"새 미로 생성", L"生成新迷宫", L"إنشاء متاهة جديدة", L"Создать новый лабиринт", L"Neues Labyrinth erzeugen", L"Gerar um novo labirinto", L"Nieuw doolhof genereren", L"Wygeneruj nowy labirynt", L"Yeni labirent oluştur"));
-		m_tooltip.AddTool(&m_view, LL14(L"右クリックで設定。ホイールクリックで全体マップ切替。SPACE押しっぱなしでも全体マップ。全体マップ中は ←→ / ホイールで表示階層を変更。橙の階段=下り／水色=上り。", L"Right-click: settings. Wheel-click: toggle full map. Hold SPACE: full map. In map, ←→ or wheel changes floor. Orange stairs go down, cyan up.", L"Clic droit: réglages. Clic molette: carte. Espace maintenu: carte. Dans la carte, ←→/molette change d'étage. Orange=descendre, cyan=monter.", L"Clic destro: impostazioni. Clic rotella: mappa. Tieni SPAZIO: mappa. Nella mappa ←→/rotella cambia piano. Arancio=giù, ciano=su.", L"Clic derecho: ajustes. Clic rueda: mapa. Mantén Espacio: mapa. En el mapa ←→/rueda cambia planta. Naranja=bajar, cian=subir.",
-			L"우클릭: 설정. 휠 클릭: 전체 맵 토글. SPACE 유지: 전체 맵. 맵에서 ←→/휠로 층 변경. 주황 계단=하강, 하늘색=상승.", L"右键：设置。滚轮点击：全图开关。按住空格：全图。全图中 ←→/滚轮切换层。橙色楼梯下行，水色上行。", L"يمين: إعدادات. نقر العجلة: خريطة. مسافة: خريطة. في الخريطة ←→/العجلة تغيّر الطابق. برتقالي=نزول، سماوي=صعود.", L"ПКМ: настройки. Клик колёсиком: карта. Пробел: карта. На карте ←→/колесо меняют этаж. Оранжевые лестницы вниз, голубые вверх.", L"Rechtsklick: Einstellungen. Radklick: Karte. Leertaste halten: Karte. In der Karte ←→/Rad wechselt die Etage. Orange=abwärts, Cyan=aufwärts.", L"Direito: definições. Clique roda: mapa. Segure Espaço: mapa. No mapa ←→/roda muda o piso. Laranja=descer, ciano=subir.", L"Rechtsklik: instellingen. Wielklik: kaart. Houd Spatie: kaart. In de kaart wisselt ←→/wiel de verdieping. Oranje=omlaag, cyaan=omhoog.", L"PPM: ustawienia. Klik kółkiem: mapa. Trzymaj Spację: mapa. Na mapie ←→/kółko zmienia piętro. Pomarańcz=w dół, cyjan=w górę.", L"Sağ tık: ayarlar. Teker tık: harita. SPACE basılı: harita. Haritada ←→/teker katı değiştirir. Turuncu=aşağı, camgöbeği=yukarı."));
+		m_tooltip.AddTool(&m_view, LL14(L"右クリックで設定。SPACE／ホイールクリックで全体マップ切替。全体マップ中はホイールでズーム、ドラッグでスクロール、Shift+ホイール／←→で階層。橙の階段=下り／水色=上り。", L"Right-click: settings. SPACE/wheel-click: toggle full map. In map: wheel=zoom, drag=scroll, Shift+wheel/←→=floor. Orange stairs down, cyan up.", L"Clic droit: réglages. Espace/clic molette: carte. Dans la carte: molette=zoom, glisser=défiler, Maj+molette/←→=étage. Orange=descendre, cyan=monter.", L"Clic destro: impostazioni. SPAZIO/clic rotella: mappa. Nella mappa: rotella=zoom, trascina=scorri, Maiusc+rotella/←→=piano. Arancio=giù, ciano=su.", L"Clic derecho: ajustes. Espacio/clic rueda: mapa. En el mapa: rueda=zoom, arrastrar=desplazar, Mayús+rueda/←→=planta. Naranja=bajar, cian=subir.",
+			L"우클릭: 설정. SPACE/휠 클릭: 전체 맵 토글. 맵에서 휠=줌, 드래그=스크롤, Shift+휠/←→=층. 주황 계단=하강, 하늘색=상승.", L"右键：设置。空格/滚轮点击：全图开关。全图中滚轮缩放、拖动滚动、Shift+滚轮/←→换层。橙色楼梯下行，水色上行。", L"يمين: إعدادات. مسافة/نقر العجلة: خريطة. في الخريطة: عجلة=تكبير، سحب=تمرير، Shift+عجلة/←→=طابق. برتقالي=نزول، سماوي=صعود.", L"ПКМ: настройки. Пробел/клик колёсиком: карта. На карте: колесо=зум, перетаскивание=прокрутка, Shift+колесо/←→=этаж. Оранжевые вниз, голубые вверх.", L"Rechtsklick: Einstellungen. Leertaste/Radklick: Karte. In der Karte: Rad=Zoom, Ziehen=Scrollen, Umschalt+Rad/←→=Etage. Orange=abwärts, Cyan=aufwärts.", L"Direito: definições. Espaço/clique roda: mapa. No mapa: roda=zoom, arrastar=rolar, Shift+roda/←→=piso. Laranja=descer, ciano=subir.", L"Rechtsklik: instellingen. Spatie/wielklik: kaart. In de kaart: wiel=zoom, slepen=scrollen, Shift+wiel/←→=verdieping. Oranje=omlaag, cyaan=omhoog.", L"PPM: ustawienia. Spacja/klik kółkiem: mapa. Na mapie: kółko=zoom, przeciąganie=przewijanie, Shift+kółko/←→=piętro. Pomarańcz=w dół, cyjan=w górę.", L"Sağ tık: ayarlar. SPACE/teker tık: harita. Haritada: teker=zoom, sürükle=kaydır, Shift+teker/←→=kat. Turuncu=aşağı, camgöbeği=yukarı."));
 		m_tooltip.AddTool(&m_base, LL14(L"地下の階数（0〜3）。階段で階層がつながり、ゴールは難易度に応じてどこかの階に置かれます。", L"Number of basements (0–3). Stairs link floors; goal floor depends on difficulty.", L"Nombre de sous-sols (0–3). Les escaliers relient ; le but dépend de la difficulté.", L"Numero di sotterranei (0–3). Le scale collegano; il traguardo dipende dalla difficoltà.", L"Número de sótanos (0–3). Escaleras unen; la meta depende de la dificultad.",
 			L"지하 층수(0~3). 계단으로 연결되고 골 위치는 난이도에 따라 달라집니다.", L"地下层数（0–3）。楼梯连接各层，终点位置随难度变化。", L"عدد الأقبية (0–3). السلالم تربط والطابق الهدف يعتمد على الصعوبة.", L"Число подземных этажей (0–3). Лестницы связывают; этаж цели зависит от сложности.", L"Anzahl Kellergeschosse (0–3). Treppen verbinden; Zielétage hängt von der Schwierigkeit ab.", L"Número de subsolos (0–3). Escadas ligam; o piso do gol depende da dificuldade.", L"Aantal kelders (0–3). Trappen verbinden; doelverdieping hangt van moeilijkheid af.", L"Liczba piwnic (0–3). Schody łączą; piętro celu zależy od trudności.", L"Bodrum sayısı (0–3). Merdivenler bağlar; hedef katı zorluğa göre değişir."));
 		m_tooltip.AddTool(&m_diff, LL14(L"難易度。難しいほど通路が細く、階段が多く上下往復し、ゴールは階をまたいだ遠い位置になります。アイテムは多めです。", L"Difficulty. Harder = thinner corridors, more stairs (floor zigzags), farther multi-floor goal. Items stay plentiful.", L"Difficulté. Plus difficile = couloirs fins, plus d'escaliers, but lointain. Objets nombreux.", L"Difficoltà. Più difficile = corridoi stretti, più scale, traguardo lontano. Molti oggetti.", L"Dificultad. Más difícil = pasillos estrechos, más escaleras, meta lejana. Muchos objetos.",
@@ -4010,21 +4207,39 @@ BOOL CSoft3DMazeDlg::OnInitDialog()
 		DestroyWindow();
 		return FALSE;
 	}
-	m_view.BakeTipTexture(LL14(
-		L"WASD / QE：移動・旋回　ホイール：拡大縮小（Shift+で旋回）\nSPACE／ホイールクリック：全体マップ（←→/ホイール=階層・Ctrl+ホイール=地図ズーム）\n橙の階段=地下へ／水色=地上へ。ゴールは難易度で階が変わる",
-		L"WASD / QE: move / turn  Wheel: zoom (Shift+=turn)\nSPACE / wheel-click: full map (←→/wheel=floor · Ctrl+wheel=map zoom)\nOrange stairs down, cyan up. Goal floor depends on difficulty",
-		L"WASD / QE : bouger / tourner  Molette : zoom (Maj+=tourner)\nEspace / clic molette : carte (←→/molette=étage · Ctrl+molette=zoom)\nEscaliers orange : descendre, cyan : monter. But au plus profond",
-		L"WASD / QE: muovi / gira  Rotella: zoom (Maiusc+=gira)\nSPAZIO / clic rotella: mappa (←→/rotella=piano · Ctrl+rotella=zoom)\nScale arancioni giù, ciano su. Traguardo nel piano più profondo",
-		L"WASD / QE: mover / girar  Rueda: zoom (Mayús+=girar)\nEspacio / clic rueda: mapa (←→/rueda=planta · Ctrl+rueda=zoom)\nEscaleras naranjas bajan, cian suben. Meta en la planta más profunda",
-		L"WASD / QE: 이동 / 선회  휠: 줌 (Shift+=회전)\nSPACE / 휠 클릭: 전체 맵 (←→/휠=층 · Ctrl+휠=지도 줌)\n주황 계단=지하로, 하늘색=지상으로. 골은 최하층",
-		L"WASD / QE：移动 / 转向  滚轮：缩放（Shift+=转向）\n空格 / 滚轮点击：全图（←→/滚轮=层 · Ctrl+滚轮=地图缩放）\n橙色楼梯下行，水色上行。终点在最深层",
-		L"WASD / QE: حركة / دوران  عجلة: تكبير (Shift+=دوران)\nمسافة / نقر عجلة: خريطة (←→/عجلة=طابق · Ctrl+عجلة=تكبير)\nالسلالم البرتقالية للأسفل والسماوية للأعلى. الهدف في الأعمق",
-		L"WASD / QE: ход / поворот  Колесо: зум (Shift+=поворот)\nПробел / клик колёсиком: карта (←→/колесо=этаж · Ctrl+колесо=зум)\nОранжевые лестницы вниз, голубые вверх. Цель на нижнем этаже",
-		L"WASD / QE: bewegen / drehen  Rad: Zoom (Umschalt+=drehen)\nLeertaste / Radklick: Karte (←→/Rad=Etage · Strg+Rad=Zoom)\nOrange Treppen abwärts, Cyan aufwärts. Ziel in der tiefsten Etage",
-		L"WASD / QE: mover / girar  Roda: zoom (Shift+=girar)\nEspaço / clique da roda: mapa (←→/roda=piso · Ctrl+roda=zoom)\nEscadas laranja descem, ciano sobem. Gol no piso mais profundo",
-		L"WASD / QE: bewegen / draaien  Wiel: zoom (Shift+=draaien)\nSpatie / wielklik: kaart (←→/wiel=verdieping · Ctrl+wiel=zoom)\nOranje trappen omlaag, cyaan omhoog. Doel op de diepste verdieping",
-		L"WASD / QE: ruch / obrót  Kółko: zoom (Shift+=obrót)\nSpacja / klik kółkiem: mapa (←→/kółko=piętro · Ctrl+kółko=zoom)\nPomarańczowe schody w dół, cyjanowe w górę. Cel na najniższym piętrze",
-		L"WASD / QE: hareket / dönüş  Teker: zoom (Shift+=dönüş)\nSPACE / teker tık: harita (←→/teker=kat · Ctrl+teker=zoom)\nTuruncu merdiven aşağı, camgöbeği yukarı. Hedef en alt katta"));
+	m_playTipText = LL14(
+		L"WASD / QE：移動・旋回　ホイール：拡大縮小（Shift+で旋回）\nSPACE／ホイールクリック：全体マップ切替（ホイール=ズーム・ドラッグ=スクロール・Shift+ホイール/←→=階層）\n橙の階段=地下へ／水色=地上へ。ゴールは難易度で階が変わる",
+		L"WASD / QE: move / turn  Wheel: zoom (Shift+=turn)\nSPACE / wheel-click: toggle map (wheel=zoom · drag=scroll · Shift+wheel/←→=floor)\nOrange stairs down, cyan up. Goal floor depends on difficulty",
+		L"WASD / QE : bouger / tourner  Molette : zoom (Maj+=tourner)\nEspace / clic molette : carte (molette=zoom · glisser=défiler · Maj+molette/←→=étage)\nEscaliers orange : descendre, cyan : monter. But selon difficulté",
+		L"WASD / QE: muovi / gira  Rotella: zoom (Maiusc+=gira)\nSPAZIO / clic rotella: mappa (rotella=zoom · trascina=scorri · Maiusc+rotella/←→=piano)\nScale arancioni giù, ciano su. Traguardo secondo difficoltà",
+		L"WASD / QE: mover / girar  Rueda: zoom (Mayús+=girar)\nEspacio / clic rueda: mapa (rueda=zoom · arrastrar=desplazar · Mayús+rueda/←→=planta)\nEscaleras naranjas bajan, cian suben. Meta según dificultad",
+		L"WASD / QE: 이동 / 선회  휠: 줌 (Shift+=회전)\nSPACE / 휠 클릭: 전체 맵 토글 (휠=줌 · 드래그=스크롤 · Shift+휠/←→=층)\n주황 계단=지하로, 하늘색=지상으로. 골 층은 난이도에 따라",
+		L"WASD / QE：移动 / 转向  滚轮：缩放（Shift+=转向）\n空格 / 滚轮点击：全图开关（滚轮=缩放 · 拖动=滚动 · Shift+滚轮/←→=层）\n橙色楼梯下行，水色上行。终点层随难度变化",
+		L"WASD / QE: حركة / دوران  عجلة: تكبير (Shift+=دوران)\nمسافة / نقر عجلة: خريطة (عجلة=تكبير · سحب=تمرير · Shift+عجلة/←→=طابق)\nالسلالم البرتقالية للأسفل والسماوية للأعلى",
+		L"WASD / QE: ход / поворот  Колесо: зум (Shift+=поворот)\nПробел / клик колёсиком: карта (колесо=зум · перетаскивание=прокрутка · Shift+колесо/←→=этаж)\nОранжевые лестницы вниз, голубые вверх",
+		L"WASD / QE: bewegen / drehen  Rad: Zoom (Umschalt+=drehen)\nLeertaste / Radklick: Karte (Rad=Zoom · Ziehen=Scrollen · Umschalt+Rad/←→=Etage)\nOrange Treppen abwärts, Cyan aufwärts",
+		L"WASD / QE: mover / girar  Roda: zoom (Shift+=girar)\nEspaço / clique da roda: mapa (roda=zoom · arrastar=rolar · Shift+roda/←→=piso)\nEscadas laranja descem, ciano sobem",
+		L"WASD / QE: bewegen / draaien  Wiel: zoom (Shift+=draaien)\nSpatie / wielklik: kaart (wiel=zoom · slepen=scrollen · Shift+wiel/←→=verdieping)\nOranje trappen omlaag, cyaan omhoog",
+		L"WASD / QE: ruch / obrót  Kółko: zoom (Shift+=obrót)\nSpacja / klik kółkiem: mapa (kółko=zoom · przeciąganie=przewijanie · Shift+kółko/←→=piętro)\nPomarańczowe schody w dół, cyjanowe w górę",
+		L"WASD / QE: hareket / dönüş  Teker: zoom (Shift+=dönüş)\nSPACE / teker tık: harita (teker=zoom · sürükle=kaydır · Shift+teker/←→=kat)\nTuruncu merdiven aşağı, camgöbeği yukarı");
+	m_overviewTipText = LL14(
+		L"全体マップ\nSPACE / Esc / ホイールクリック：閉じる\nホイール：ズーム　ドラッグ：スクロール\nShift+ホイール / ←→ / A D：階層切替",
+		L"Full map\nSPACE / Esc / wheel-click: close\nWheel: zoom  Drag: scroll\nShift+wheel / ←→ / A D: change floor",
+		L"Carte\nEspace / Échap / clic molette : fermer\nMolette : zoom  Glisser : défiler\nMaj+molette / ←→ / A D : étage",
+		L"Mappa\nSPAZIO / Esc / clic rotella: chiudi\nRotella: zoom  Trascina: scorri\nMaiusc+rotella / ←→ / A D: piano",
+		L"Mapa\nEspacio / Esc / clic rueda: cerrar\nRueda: zoom  Arrastrar: desplazar\nMayús+rueda / ←→ / A D: planta",
+		L"전체 맵\nSPACE / Esc / 휠 클릭: 닫기\n휠: 줌  드래그: 스크롤\nShift+휠 / ←→ / A D: 층 전환",
+		L"全图\n空格 / Esc / 滚轮点击：关闭\n滚轮：缩放  拖动：滚动\nShift+滚轮 / ←→ / A D：换层",
+		L"الخريطة\nمسافة / Esc / نقر العجلة: إغلاق\nالعجلة: تكبير  السحب: تمرير\nShift+عجلة / ←→ / A D: طابق",
+		L"Карта\nПробел / Esc / клик колёсиком: закрыть\nКолесо: зум  Перетаскивание: прокрутка\nShift+колесо / ←→ / A D: этаж",
+		L"Karte\nLeertaste / Esc / Radklick: schließen\nRad: Zoom  Ziehen: Scrollen\nUmschalt+Rad / ←→ / A D: Etage",
+		L"Mapa\nEspaço / Esc / clique da roda: fechar\nRoda: zoom  Arrastar: rolar\nShift+roda / ←→ / A D: piso",
+		L"Kaart\nSpatie / Esc / wielklik: sluiten\nWiel: zoom  Slepen: scrollen\nShift+wiel / ←→ / A D: verdieping",
+		L"Mapa\nSpacja / Esc / klik kółkiem: zamknij\nKółko: zoom  Przeciąganie: przewijanie\nShift+kółko / ←→ / A D: piętro",
+		L"Harita\nSPACE / Esc / teker tık: kapat\nTeker: zoom  Sürükle: kaydır\nShift+teker / ←→ / A D: kat");
+	m_tipIsOverview = -1;
+	m_mapBadgeText.Empty();
+	EnsureTipTexture(FALSE);
 	if (!LoadRun())
 		GenerateMaze();
 	else {
@@ -4158,16 +4373,21 @@ void CloseSoft3DMazeIfOpen()
 		g_s3m->DestroyWindow();
 }
 
+BOOL IsSoft3DMazeOpen()
+{
+	return (g_s3m && g_s3m->GetSafeHwnd() && ::IsWindow(g_s3m->GetSafeHwnd())
+		&& g_s3m->IsWindowVisible()) ? TRUE : FALSE;
+}
+
 BOOL IsSoft3DMazeActive()
 {
-	if (!g_s3m || !g_s3m->GetSafeHwnd() || !::IsWindow(g_s3m->GetSafeHwnd()))
+	// 迷路ウィンドウが開いていれば操作中扱い（SPACE再生トグル防止・矢印ホットキー抑制）
+	return IsSoft3DMazeOpen();
+}
+
+BOOL Soft3DMazePreTranslate(MSG* pMsg)
+{
+	if (!IsSoft3DMazeOpen() || !pMsg || !g_s3m)
 		return FALSE;
-	const HWND maze = g_s3m->GetSafeHwnd();
-	HWND fg = ::GetForegroundWindow();
-	if (fg && (fg == maze || ::IsChild(maze, fg)))
-		return TRUE;
-	HWND focus = ::GetFocus();
-	if (focus && (focus == maze || ::IsChild(maze, focus)))
-		return TRUE;
-	return FALSE;
+	return g_s3m->HandleAccelMessage(pMsg);
 }

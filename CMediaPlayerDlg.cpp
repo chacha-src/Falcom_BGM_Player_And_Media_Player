@@ -2330,9 +2330,9 @@ BOOL CMediaPlayerDlg::RelayPreTranslateMessage(MSG* pMsg)
 		}
 	}
 	// Space = 再生/一時停止。og(非表示)の IsDialogMessage がフォーカスボタン(Ys6等)を押すのを防ぐ
-	// Soft3D迷路前面時は迷路の全体マップ用SPACEを優先（再生トグルしない）
+	// Soft3D迷路が開いている間は SPACE を再生に使わない（迷路側で全体マップ切替）
 	if (pMsg->message == WM_KEYDOWN && pMsg->wParam == VK_SPACE) {
-		if (IsSoft3DMazeActive())
+		if (IsSoft3DMazeOpen() || IsSoft3DMazeActive())
 			return TRUE;
 		CWnd* pFocus = GetFocus();
 		const BOOL inEdit = (pFocus && (pFocus->GetSafeHwnd() == m_find.GetSafeHwnd()
