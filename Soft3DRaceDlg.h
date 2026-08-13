@@ -106,6 +106,9 @@ public:
 	ID3D11Texture2D* m_texHud;
 	ID3D11ShaderResourceView* m_srvHud;
 	int m_hudTexW, m_hudTexH;
+	ID3D11Texture2D* m_texStand;
+	ID3D11ShaderResourceView* m_srvStand;
+	int m_standTexW, m_standTexH;
 
 	ID3D11SamplerState* m_sampLin;
 	ID3D11SamplerState* m_sampPoint;
@@ -127,6 +130,17 @@ public:
 	void ReleaseClearTexture();
 	BOOL BakeHudTexture(const wchar_t* text);
 	void ReleaseHudTexture();
+	struct S3rStandRow {
+		wchar_t name[16];
+		int rank;
+		int isPlayer;
+		float cr, cg, cb;
+		int lapShowN;
+		int lapNo[3];
+		float lapSec[3];
+	};
+	BOOL BakeStandingsTexture(const S3rStandRow* rows, int nRows);
+	void ReleaseStandingsTexture();
 
 protected:
 	afx_msg void OnPaint();
@@ -196,6 +210,7 @@ public:
 		PHASE_RACE = 2,
 		PHASE_FINISH = 3,
 		PHASE_PODIUM = 4,
+		PHASE_DEMO = 5, // 生成〜スタート前：全体俯瞰＋全機AIデモ
 		AI_SUPER_EASY = 0, // 超簡単（旧・普通相当のゆるさ）
 		AI_EASY = 1,
 		AI_NORMAL = 2,
@@ -249,12 +264,14 @@ protected:
 	void BuildObstacleMesh(int theme);
 	void PlaceObstaclesAndItems();
 	void ResetRaceState();
+	void BeginDemoPreview();
 	void StartRace();
 	void TickPhysics(float dt);
 	void TickAi(float dt);
 	void TickItems(float dt);
 	void TickCountdown(float dt);
 	void TickPodium(float dt);
+	void TickDemo(float dt);
 	void UpdateRanks();
 	void ApplyItem(int kind);
 	void TryPickupCraft(int ci);
@@ -265,6 +282,7 @@ protected:
 	void ShowContextMenu(CPoint screenPt);
 	void RenderScene();
 	void EnsureHudBake();
+	void EnsureStandingsBake();
 
 	void SplinePoint(float t, float& x, float& y, float& z) const;
 	void SplineTangent(float t, float& x, float& y, float& z) const;
@@ -351,10 +369,14 @@ public:
 		float aiCutT; // ショートカット合流目標 pathT（未使用時 -1）
 		float aiCutTimer;
 		float aiCutCool; // >0 の間は通常ライン走行（カット禁止・中央固定）
+		wchar_t name[16];
+		float lapTimes[12];
+		int lapTimesN;
 	};
 	void RespawnCraftToCheckpoint(S3rCraft& c, float fuelAmt, float cool);
 	// ショートカット失敗／帯外危険時：帯中央へ戻しライン固定へ
 	void AbortAiToLine(S3rCraft& c, float lineLockSec);
+	void AlignCraftToPath(S3rCraft& c, float lookAhead=0.02f);
 	struct S3rObs {
 		float x, y, z;
 		float yaw, pitch;
@@ -434,8 +456,13 @@ public:
 	float m_clearBakeA;
 	int m_hudDirty;
 	int m_clearDirty;
+	int m_standDirty;
 	float m_reverbFogBoost;
 	float m_eqDofBoost;
+	float m_podiumBaseX, m_podiumBaseY, m_podiumBaseZ;
+	float m_demoCamT; // 俯瞰オービット角
+	float m_demoCamElev; // 俯瞰の高さバイアス
+	float m_demoMidX, m_demoMidY, m_demoMidZ, m_demoRad;
 };
 
 void OpenSoft3DRaceModeless(CWnd*);

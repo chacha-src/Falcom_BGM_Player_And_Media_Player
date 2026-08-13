@@ -1,4 +1,4 @@
-// Soft3DMazeDlg.cpp — Soft3D 迷路（ミニマップ／訪問／コンテキスト設定／曲連動）
+﻿// Soft3DMazeDlg.cpp — Soft3D 迷路（ミニマップ／訪問／コンテキスト設定／曲連動）
 
 #include "stdafx.h"
 #include "ogg.h"
@@ -12,9 +12,13 @@
 #include <gdiplus.h>
 #include <d3dcompiler.h>
 #include <dxgi1_2.h>
+#define DIRECTINPUT_VERSION 0x0800
+#include <dinput.h>
 
 #ifdef _MSC_VER
 #pragma comment(lib, "d3dcompiler.lib")
+#pragma comment(lib, "dinput8.lib")
+#pragma comment(lib, "dxguid.lib")
 #endif
 
 #ifndef M_PI
@@ -335,20 +339,20 @@ void CS3mHelpDlg::OnPaint()
 		L"조작", L"操作", L"التحكم", L"Управление", L"Steuerung", L"Controles", L"Bediening", L"Sterowanie", L"Kontroller"));
 	y += lh + 2;
 	dc.SetTextColor(RGB(65, 65, 80));
-	line(LL14(L"WASD / 矢印 = スムーズ移動　Q・E または ←→ = 旋回　生成 = 新規迷路",
-		L"WASD / arrows = smooth move  Q/E or ←→ = turn  Generate = new maze",
-		L"WASD / flèches = déplacement  Q/E ou ←→ = tourner  Générer = nouveau",
-		L"WASD / frecce = movimento  Q/E o ←→ = gira  Genera = nuovo",
-		L"WASD / flechas = movimiento  Q/E o ←→ = girar  Generar = nuevo",
-		L"WASD / 화살표 = 이동  Q/E 또는 ←→ = 회전  생성 = 새 미로",
-		L"WASD / 方向键 = 移动  Q/E 或 ←→ = 转向  生成 = 新迷宫",
-		L"WASD / أسهم = حركة  Q/E أو ←→ = دوران  توليد = متاهة جديدة",
-		L"WASD / стрелки = движение  Q/E или ←→ = поворот  Создать = новый",
-		L"WASD / Pfeile = Bewegung  Q/E oder ←→ = Drehen  Erzeugen = neu",
-		L"WASD / setas = mover  Q/E ou ←→ = girar  Gerar = novo",
-		L"WASD / pijlen = bewegen  Q/E of ←→ = draaien  Genereren = nieuw",
-		L"WASD / strzałki = ruch  Q/E lub ←→ = obrót  Generuj = nowy",
-		L"WASD / oklar = hareket  Q/E veya ←→ = dönüş  Oluştur = yeni"));
+	line(LL14(L"WASD / 矢印 / パッド左スティック・十字 = 移動　Q・E / ←→ / 右スティック・LB・RB = 旋回　A・Start = 全体マップ　生成 = 新規迷路",
+		L"WASD / arrows / pad L-stick+hat = move  Q/E / ←→ / R-stick+LB/RB = turn  A/Start = map  Generate = new maze",
+		L"WASD / flèches / pad stick G+croix = déplacement  Q/E / ←→ / stick D+LB/RB = tourner  A/Start = carte  Générer = nouveau",
+		L"WASD / frecce / pad stick SX+croce = movimento  Q/E / ←→ / stick DX+LB/RB = gira  A/Start = mappa  Genera = nuovo",
+		L"WASD / flechas / pad stick izq+cruz = movimiento  Q/E / ←→ / stick der+LB/RB = girar  A/Start = mapa  Generar = nuevo",
+		L"WASD / 화살표 / 패드 좌스틱·십자 = 이동  Q/E / ←→ / 우스틱·LB/RB = 회전  A/Start = 맵  생성 = 새 미로",
+		L"WASD / 方向键 / 手柄左摇杆+十字 = 移动  Q/E / ←→ / 右摇杆+LB/RB = 转向  A/Start = 地图  生成 = 新迷宫",
+		L"WASD / arrows / pad L-stick+hat = move  Q/E / ←→ / R-stick+LB/RB = turn  A/Start = map  Generate = new",
+		L"WASD / стрелки / пад L-стик+крест = ход  Q/E / ←→ / R-стик+LB/RB = поворот  A/Start = карта  Создать = новый",
+		L"WASD / Pfeile / Pad L-Stick+Hut = Bewegung  Q/E / ←→ / R-Stick+LB/RB = Drehen  A/Start = Karte  Erzeugen = neu",
+		L"WASD / setas / pad stick Esq+cruz = mover  Q/E / ←→ / stick Dir+LB/RB = girar  A/Start = mapa  Gerar = novo",
+		L"WASD / pijlen / pad L-stick+hat = bewegen  Q/E / ←→ / R-stick+LB/RB = draaien  A/Start = kaart  Genereren = nieuw",
+		L"WASD / strzałki / pad L-stick+hat = ruch  Q/E / ←→ / R-stick+LB/RB = obrót  A/Start = mapa  Generuj = nowy",
+		L"WASD / oklar / pad sol çubuk+çapraz = hareket  Q/E / ←→ / sağ çubuk+LB/RB = dönüş  A/Start = harita  Oluştur = yeni"));
 	line(LL14(L"ホイール = 視点の拡大縮小（狭いFOVで拡大）。Shift+ホイール = 旋回。ミニマップ上のホイール = 地図ズーム。",
 		L"Wheel = zoom view (narrower FOV). Shift+wheel = turn. Wheel on minimap = map zoom.",
 		L"Molette = zoom (FOV plus étroit). Maj+molette = tourner. Molette sur minimap = zoom carte.",
@@ -532,6 +536,100 @@ static void S3mNudgeReverb(int delta)
 	if (v < 0) v = 0;
 	if (v > 200) v = 200;
 	savedata.eq_reverb = v;
+}
+
+// ---- DirectInput joypad（レースUIと同系） ----
+struct S3mJoyState {
+	float lx, ly, rx, ry;
+	float lt, rt;
+	int buttons; // bit0=A bit1=B bit2=X bit3=Y bit4=LB bit5=RB bit6=Back bit7=Start
+	int hat; // -1 none, 0 up … 7
+	int connected;
+};
+static IDirectInput8W* g_s3mDi = NULL;
+static IDirectInputDevice8W* g_s3mPad = NULL;
+static BOOL g_s3mDiTried = FALSE;
+
+static BOOL CALLBACK S3mEnumPads(const DIDEVICEINSTANCEW* inst, void*)
+{
+	if (FAILED(g_s3mDi->CreateDevice(inst->guidInstance, &g_s3mPad, NULL)))
+		return DIENUM_CONTINUE;
+	return DIENUM_STOP;
+}
+static void S3mEnsureJoypad()
+{
+	if (g_s3mDiTried) return;
+	g_s3mDiTried = TRUE;
+	if (FAILED(DirectInput8Create(GetModuleHandle(NULL), DIRECTINPUT_VERSION, IID_IDirectInput8W, (void**)&g_s3mDi, NULL)))
+		return;
+	g_s3mDi->EnumDevices(DI8DEVCLASS_GAMECTRL, S3mEnumPads, NULL, DIEDFL_ATTACHEDONLY);
+	if (!g_s3mPad) return;
+	g_s3mPad->SetDataFormat(&c_dfDIJoystick2);
+	HWND hw = AfxGetMainWnd() ? AfxGetMainWnd()->GetSafeHwnd() : NULL;
+	g_s3mPad->SetCooperativeLevel(hw, DISCL_BACKGROUND | DISCL_NONEXCLUSIVE);
+	DIPROPRANGE range = {};
+	range.diph.dwSize = sizeof(range);
+	range.diph.dwHeaderSize = sizeof(range.diph);
+	range.diph.dwHow = DIPH_BYOFFSET;
+	range.lMin = -1000; range.lMax = 1000;
+	range.diph.dwObj = DIJOFS_X; g_s3mPad->SetProperty(DIPROP_RANGE, &range.diph);
+	range.diph.dwObj = DIJOFS_Y; g_s3mPad->SetProperty(DIPROP_RANGE, &range.diph);
+	range.diph.dwObj = DIJOFS_RX; g_s3mPad->SetProperty(DIPROP_RANGE, &range.diph);
+	range.diph.dwObj = DIJOFS_RY; g_s3mPad->SetProperty(DIPROP_RANGE, &range.diph);
+	DIPROPDWORD dead = {};
+	dead.diph.dwSize = sizeof(dead);
+	dead.diph.dwHeaderSize = sizeof(dead.diph);
+	dead.diph.dwHow = DIPH_DEVICE;
+	dead.dwData = 1200;
+	g_s3mPad->SetProperty(DIPROP_DEADZONE, &dead.diph);
+	g_s3mPad->Acquire();
+}
+static float S3mAxisN(LONG v)
+{
+	float f = (float)v / 1000.f;
+	if (fabsf(f) < 0.18f) return 0.f;
+	if (f < -1.f) f = -1.f;
+	if (f > 1.f) f = 1.f;
+	return f;
+}
+static void S3mUpdateJoypadState(S3mJoyState& out)
+{
+	memset(&out, 0, sizeof(out));
+	out.hat = -1;
+	S3mEnsureJoypad();
+	if (!g_s3mPad) return;
+	HRESULT hr = g_s3mPad->Poll();
+	if (FAILED(hr)) { g_s3mPad->Acquire(); hr = g_s3mPad->Poll(); }
+	DIJOYSTATE2 st = {};
+	hr = g_s3mPad->GetDeviceState(sizeof(st), &st);
+	if (FAILED(hr)) return;
+	out.connected = 1;
+	out.lx = S3mAxisN(st.lX);
+	out.ly = S3mAxisN(st.lY);
+	out.rx = S3mAxisN(st.lRx);
+	out.ry = S3mAxisN(st.lRy);
+	out.lt = (float)st.lZ / 1000.f;
+	if (out.lt < 0.f) out.lt = 0.f;
+	if (out.lt > 1.f) out.lt = 1.f;
+	float rt = (float)st.lRz / 1000.f;
+	if (rt < 0.f) rt = 0.f;
+	if (rt > 1.f) rt = 1.f;
+	if (rt < 0.01f && st.rglSlider[0] > 0) {
+		rt = st.rglSlider[0] / 1000.f;
+		if (rt < 0.f) rt = 0.f;
+		if (rt > 1.f) rt = 1.f;
+	}
+	out.rt = rt;
+	for (int i = 0; i < 8; i++) if (st.rgbButtons[i] & 0x80) out.buttons |= (1 << i);
+	DWORD pov = st.rgdwPOV[0];
+	if (pov != 0xFFFFFFFF && (LOWORD(pov) != 0xFFFF))
+		out.hat = (int)((pov + 2250) / 4500) % 8;
+}
+static void S3mReleaseJoypad()
+{
+	if (g_s3mPad) { g_s3mPad->Unacquire(); g_s3mPad->Release(); g_s3mPad = NULL; }
+	if (g_s3mDi) { g_s3mDi->Release(); g_s3mDi = NULL; }
+	g_s3mDiTried = FALSE;
 }
 
 static BOOL S3mIsPickupCell(BYTE c)
@@ -4579,6 +4677,35 @@ void CSoft3DMazeDlg::TickMove(float dt)
 		if(savedata.s3m_bob)m_bob += dt * 3.f;
 		return;
 	}
+
+	// パッド（レースと同系）: 左スティック／十字=移動、右スティックX／LB・RB=旋回、A／Start=全体マップ、B=マップ解除
+	S3mJoyState joy = {};
+	S3mUpdateJoypadState(joy);
+	static int s_padBtnPrev = 0;
+	const int padEdge = joy.connected ? (joy.buttons & ~s_padBtnPrev) : 0;
+	s_padBtnPrev = joy.connected ? joy.buttons : 0;
+	if (padEdge & ((1 << 0) | (1 << 7)))
+		ToggleMapOverlay();
+	if ((padEdge & (1 << 1)) && IsOverviewActive()) {
+		m_mapToggle = 0;
+		m_mapPanDrag = 0;
+	}
+	float padMoveX = 0.f, padMoveZ = 0.f;
+	float padTurnX = 0.f;
+	if (joy.connected) {
+		padMoveX = joy.lx;
+		padMoveZ = -joy.ly;
+		if (joy.hat >= 0) {
+			static const float hx[8] = { 0, 0.7f, 1, 0.7f, 0, -0.7f, -1, -0.7f };
+			static const float hy[8] = { 1, 0.7f, 0, -0.7f, -1, -0.7f, 0, 0.7f };
+			padMoveX += hx[joy.hat];
+			padMoveZ += hy[joy.hat];
+		}
+		padTurnX = joy.rx;
+		if (joy.buttons & (1 << 4)) padTurnX -= 1.f; // LB
+		if (joy.buttons & (1 << 5)) padTurnX += 1.f; // RB
+	}
+
 	// 階層切替の演出中は移動・旋回しない（ラベル残表示HOLDは操作可）
 	if (m_floorFx == FLOORFX_IN) {
 		m_moveHeld = 1;
@@ -4586,12 +4713,12 @@ void CSoft3DMazeDlg::TickMove(float dt)
 		if (savedata.s3m_bob) m_bob += dt * 2.f;
 		return;
 	}
-	// 全体マップ表示中は確認のみ（移動・旋回しない）。←→ / A D で表示階層を切替
+	// 全体マップ表示中は確認のみ（移動・旋回しない）。←→ / A D / パッド左右で表示階層を切替
 	if (IsOverviewActive()) {
 		m_moveHeld = 1;
 		m_turnHeld = 1;
-		const bool fl = (GetAsyncKeyState(VK_LEFT) & 0x8000) || (GetAsyncKeyState('A') & 0x8000);
-		const bool fr = (GetAsyncKeyState(VK_RIGHT) & 0x8000) || (GetAsyncKeyState('D') & 0x8000);
+		const bool fl = (GetAsyncKeyState(VK_LEFT) & 0x8000) || (GetAsyncKeyState('A') & 0x8000) || (padMoveX < -0.45f);
+		const bool fr = (GetAsyncKeyState(VK_RIGHT) & 0x8000) || (GetAsyncKeyState('D') & 0x8000) || (padMoveX > 0.45f);
 		int floorReq = 0;
 		if (fl && !fr) floorReq = -1;
 		else if (fr && !fl) floorReq = 1;
@@ -4618,8 +4745,8 @@ void CSoft3DMazeDlg::TickMove(float dt)
 		if (m_darkT < 0.f) m_darkT = 0.f;
 	}
 
-	const bool turnL = (GetAsyncKeyState('Q') & 0x8000) || (GetAsyncKeyState(VK_LEFT) & 0x8000);
-	const bool turnR = (GetAsyncKeyState('E') & 0x8000) || (GetAsyncKeyState(VK_RIGHT) & 0x8000);
+	const bool turnL = (GetAsyncKeyState('Q') & 0x8000) || (GetAsyncKeyState(VK_LEFT) & 0x8000) || (padTurnX < -0.45f);
+	const bool turnR = (GetAsyncKeyState('E') & 0x8000) || (GetAsyncKeyState(VK_RIGHT) & 0x8000) || (padTurnX > 0.45f);
 	int turnReq = 0;
 	if (turnL && !turnR) turnReq = -1;
 	else if (turnR && !turnL) turnReq = 1;
@@ -4649,6 +4776,14 @@ void CSoft3DMazeDlg::TickMove(float dt)
 	if (GetAsyncKeyState('S') & 0x8000 || GetAsyncKeyState(VK_DOWN) & 0x8000) mz -= 1;
 	if (GetAsyncKeyState('A') & 0x8000) mx -= 1;
 	if (GetAsyncKeyState('D') & 0x8000) mx += 1;
+	if (mx == 0 && mz == 0) {
+		if (padMoveZ > 0.45f) mz = 1;
+		else if (padMoveZ < -0.45f) mz = -1;
+		if (mz == 0) {
+			if (padMoveX < -0.45f) mx = -1;
+			else if (padMoveX > 0.45f) mx = 1;
+		}
+	}
 	if (mz != 0) mx = 0;
 
 	// 押下エッジで 1 マスだけ進む（押しっぱなし／到着フレームの連続移動なし）
@@ -6598,10 +6733,10 @@ BOOL CSoft3DMazeDlg::OnInitDialog()
 		L"내비", L"导航", L"توجيه", L"Нави", L"Navi", L"Navi", L"Navi", L"Nawi", L"Navi"));
 	m_close.SetWindowText(LL14(L"閉じる", L"Close", L"Fermer", L"Chiudi", L"Cerrar",
 		L"닫기", L"关闭", L"إغلاق", L"Закрыть", L"Schließen", L"Fechar", L"Sluiten", L"Zamknij", L"Kapat"));
-	m_hint.SetWindowText(LL14(L"WASD / QE · ホイール=拡大縮小 · SPACE/ホイールクリック=全体マップ切替（ホイール=地図ズーム・ドラッグ=スクロール・Shift+ホイール/←→=階層） · 右クリック", L"WASD / QE · wheel=zoom · SPACE/wheel-click=toggle map (wheel=map zoom · drag=scroll · Shift+wheel/←→=floor) · right-click", L"WASD / QE · molette=zoom · Espace/clic molette=carte (molette=zoom · glisser=défiler · Maj+molette/←→=étage) · clic droit", L"WASD / QE · rotella=zoom · SPAZIO/clic rotella=mappa (rotella=zoom · trascina=scorri · Maiusc+rotella/←→=piano) · clic destro",
-		L"WASD / QE · rueda=zoom · Espacio/clic rueda=mapa (rueda=zoom · arrastrar=desplazar · Mayús+rueda/←→=planta) · clic derecho", L"WASD / QE · 휠=줌 · SPACE/휠클릭=맵 토글(휠=지도줌 · 드래그=스크롤 · Shift+휠/←→=층) · 우클릭", L"WASD / QE · 滚轮=缩放 · 空格/滚轮点击=地图开关（滚轮=地图缩放 · 拖动=滚动 · Shift+滚轮/←→=层） · 右键", L"WASD / QE · عجلة=تكبير · مسافة/نقر عجلة=خريطة (عجلة=تكبير · سحب=تمرير · Shift+عجلة/←→=طابق) · يمين",
-		L"WASD / QE · колесо=зум · Пробел/клик колёсиком=карта (колесо=зум · перетаскивание=прокрутка · Shift+колесо/←→=этаж) · ПКМ", L"WASD / QE · Rad=Zoom · Leertaste/Radklick=Karte (Rad=Zoom · Ziehen=Scrollen · Umschalt+Rad/←→=Etage) · Rechtsklick", L"WASD / QE · roda=zoom · Espaço/roda=mapa (roda=zoom · arrastar=rolar · Shift+roda/←→=piso) · direito", L"WASD / QE · wiel=zoom · Spatie/wielklik=kaart (wiel=zoom · slepen=scrollen · Shift+wiel/←→=verdieping) · rechtsklik",
-		L"WASD / QE · kółko=zoom · Spacja/klik kółkiem=mapa (kółko=zoom · przeciąganie=przewijanie · Shift+kółko/←→=piętro) · PPM", L"WASD / QE · teker=zoom · SPACE/teker tık=harita (teker=zoom · sürükle=kaydır · Shift+teker/←→=kat) · sağ tık"));
+	m_hint.SetWindowText(LL14(L"WASD/QE · パッド(左=移動/右·LB·RB=旋回/A·Start=マップ) · ホイール=拡大縮小 · SPACE/ホイールクリック=全体マップ（ホイール=地図ズーム・ドラッグ=スクロール・Shift+ホイール/←→=階層） · 右クリック", L"WASD/QE · pad(L=move/R·LB·RB=turn/A·Start=map) · wheel=zoom · SPACE/wheel-click=map (wheel=map zoom · drag=scroll · Shift+wheel/←→=floor) · right-click", L"WASD/QE · pad(G=bouger/D·LB·RB=tourner/A·Start=carte) · molette=zoom · Espace/clic molette=carte · clic droit", L"WASD/QE · pad(SX=muovi/DX·LB·RB=gira/A·Start=mappa) · rotella=zoom · SPAZIO/clic rotella=mappa · clic destro",
+		L"WASD/QE · pad(izq=mover/der·LB·RB=girar/A·Start=mapa) · rueda=zoom · Espacio/clic rueda=mapa · clic derecho", L"WASD/QE · 패드(좌=이동/우·LB·RB=회전/A·Start=맵) · 휠=줌 · SPACE/휠클릭=맵 · 우클릭", L"WASD/QE · 手柄(左=移动/右·LB·RB=转向/A·Start=地图) · 滚轮=缩放 · 空格/滚轮点击=地图 · 右键", L"WASD/QE · pad(L=move/R·LB·RB=turn/A·Start=map) · wheel=zoom · SPACE=map · right-click",
+		L"WASD/QE · пад(L=ход/R·LB·RB=поворот/A·Start=карта) · колесо=зум · Пробел=карта · ПКМ", L"WASD/QE · Pad(L=Bewegen/R·LB·RB=Drehen/A·Start=Karte) · Rad=Zoom · Leertaste=Karte · Rechtsklick", L"WASD/QE · pad(Esq=mover/Dir·LB·RB=girar/A·Start=mapa) · roda=zoom · Espaço=mapa · direito", L"WASD/QE · pad(L=bewegen/R·LB·RB=draaien/A·Start=kaart) · wiel=zoom · Spatie=kaart · rechtsklik",
+		L"WASD/QE · pad(L=ruch/R·LB·RB=obrót/A·Start=mapa) · kółko=zoom · Spacja=mapa · PPM", L"WASD/QE · pad(sol=hareket/sağ·LB·RB=dönüş/A·Start=harita) · teker=zoom · SPACE=harita · sağ tık"));
 
 	for (int i = 0; i < kPresetCnt; i++) {
 		CString s;
@@ -6653,8 +6788,8 @@ BOOL CSoft3DMazeDlg::OnInitDialog()
 		return FALSE;
 	}
 	m_playTipText = LL14(
-		L"WASD / QE：移動・旋回　ホイール：拡大縮小（Shift+で旋回）\nSPACE／ホイールクリック：全体マップ切替（ホイール=ズーム・ドラッグ=スクロール・Shift+ホイール/←→=階層）\n橙の階段=地下へ／水色=地上へ。ゴールは難易度で階が変わる",
-		L"WASD / QE: move / turn  Wheel: zoom (Shift+=turn)\nSPACE / wheel-click: toggle map (wheel=zoom · drag=scroll · Shift+wheel/←→=floor)\nOrange stairs down, cyan up. Goal floor depends on difficulty",
+		L"WASD / QE / パッド：移動・旋回　ホイール：拡大縮小（Shift+で旋回）\nSPACE／A・Start／ホイールクリック：全体マップ切替（ホイール=ズーム・ドラッグ=スクロール・Shift+ホイール/←→=階層）\n橙の階段=地下へ／水色=地上へ。ゴールは難易度で階が変わる",
+		L"WASD / QE / pad: move / turn  Wheel: zoom (Shift+=turn)\nSPACE / A·Start / wheel-click: toggle map (wheel=zoom · drag=scroll · Shift+wheel/←→=floor)\nOrange stairs down, cyan up. Goal floor depends on difficulty",
 		L"WASD / QE : bouger / tourner  Molette : zoom (Maj+=tourner)\nEspace / clic molette : carte (molette=zoom · glisser=défiler · Maj+molette/←→=étage)\nEscaliers orange : descendre, cyan : monter. But selon difficulté",
 		L"WASD / QE: muovi / gira  Rotella: zoom (Maiusc+=gira)\nSPAZIO / clic rotella: mappa (rotella=zoom · trascina=scorri · Maiusc+rotella/←→=piano)\nScale arancioni giù, ciano su. Traguardo secondo difficoltà",
 		L"WASD / QE: mover / girar  Rueda: zoom (Mayús+=girar)\nEspacio / clic rueda: mapa (rueda=zoom · arrastrar=desplazar · Mayús+rueda/←→=planta)\nEscaleras naranjas bajan, cian suben. Meta según dificultad",
@@ -6668,8 +6803,8 @@ BOOL CSoft3DMazeDlg::OnInitDialog()
 		L"WASD / QE: ruch / obrót  Kółko: zoom (Shift+=obrót)\nSpacja / klik kółkiem: mapa (kółko=zoom · przeciąganie=przewijanie · Shift+kółko/←→=piętro)\nPomarańczowe schody w dół, cyjanowe w górę",
 		L"WASD / QE: hareket / dönüş  Teker: zoom (Shift+=dönüş)\nSPACE / teker tık: harita (teker=zoom · sürükle=kaydır · Shift+teker/←→=kat)\nTuruncu merdiven aşağı, camgöbeği yukarı");
 	m_overviewTipText = LL14(
-		L"全体マップ\n下の階層タブをクリック／◎自機へ　Shift+ホイール / ←→ / A D：階層\nホイール：ズーム　ドラッグ：スクロール　SPACE / Esc：閉じる",
-		L"Full map\nClick floor tabs / ◎ recenter  Shift+wheel / ←→ / A D: floor\nWheel: zoom  Drag: scroll  SPACE / Esc: close",
+		L"全体マップ\n下の階層タブをクリック／◎自機へ　Shift+ホイール / ←→ / A D / パッド左右：階層\nホイール：ズーム　ドラッグ：スクロール　SPACE / A・Start / Esc / B：閉じる",
+		L"Full map\nClick floor tabs / ◎ recenter  Shift+wheel / ←→ / A D / pad L-R: floor\nWheel: zoom  Drag: scroll  SPACE / A·Start / Esc / B: close",
 		L"Carte\nOnglets d'étage / ◎ recentrer  Maj+molette / ←→ / A D : étage\nMolette : zoom  Glisser : défiler  Espace / Échap : fermer",
 		L"Mappa\nSchede piano / ◎ centra  Maiusc+rotella / ←→ / A D: piano\nRotella: zoom  Trascina: scorri  SPAZIO / Esc: chiudi",
 		L"Mapa\nPestañas de planta / ◎ centrar  Mayús+rueda / ←→ / A D: planta\nRueda: zoom  Arrastrar: desplazar  Espacio / Esc: cerrar",
@@ -6843,6 +6978,7 @@ void CSoft3DMazeDlg::OnDestroy()
 	PersistRun();
 	RestoreAudioBaseline();
 	FreeGrid();
+	S3mReleaseJoypad();
 	CCustomBlurDialogBase::OnDestroy();
 	// 閉じたら矢印ホットキー再登録を促す
 	if (og && ::IsWindow(og->GetSafeHwnd()))

@@ -13,6 +13,7 @@
 #include <dxgi1_2.h>
 #define DIRECTINPUT_VERSION 0x0800
 #include <dinput.h>
+#include "Soft3DRaceNames.inc"
 
 #ifdef _MSC_VER
 #pragma comment(lib, "d3dcompiler.lib")
@@ -364,6 +365,9 @@ void CS3rHelpDlg::OnPaint()
 	legendRow(RGB(80, 230, 130),
 		LL14(L"アイテム球", L"Item orbs", L"Sphères d'objets", L"Sfere oggetto", L"Orbes de objeto", L"아이템 구", L"道具球", L"Item orbs", L"Сферы предметов", L"Item-Kugeln", L"Orbes de item", L"Item-bollen", L"Kule przedmiotów", L"Öğe küreleri"),
 		LL14(L"触れると再生テンポ／ピッチ等＋レース効果（加速・霧など）", L"Touch to tweak playback + race buffs (boost, fog, …)", L"Toucher = lecture + buffs course", L"Tocco = riproduzione + buff", L"Tocar = reproducción + buffs", L"접촉 시 재생+레이스 버프", L"触碰改播放并带竞速效果", L"Playback + race effects", L"Воспроизведение + баффы", L"Playback + Buffs", L"Reprodução + buffs", L"Weergave + buffs", L"Odtwarzanie + buffy", L"Oynatma + buff"));
+	legendRow(RGB(140, 200, 255),
+		LL14(L"デモ走行（生成〜スタート前）", L"Demo (after generate, before Start)", L"Démo (après Générer)", L"Demo (dopo Genera)", L"Demo (tras Generar)", L"데모(생성~시작 전)", L"演示（生成到开始前）", L"Demo until Start", L"Демо до Старта", L"Demo bis Start", L"Demo até Iniciar", L"Demo tot Start", L"Demo do Start", L"Demo → Başlat"),
+		LL14(L"俯瞰でコース全体を見せ、自機もAI走行。マウスで視点。スタートで本番", L"Overview of whole course; your craft is AI too. Mouse pans. Start = race", L"Vue d'ensemble; votre craft en IA. Souris=vue. Démarrer=course", L"Vista d'insieme; anche il tuo craft in IA. Mouse=vista. Avvia=gara", L"Vista general; tu nave también IA. Ratón=vista. Iniciar=carrera", L"전체 조감+자기 AI. 마우스 시점. 시작=본경기", L"俯瞰全图，自机也AI跑。鼠标转视角。开始进正式赛", L"Overview + AI you; mouse pans; Start races", L"Обзор; ваш аппарат ИИ; мышь; Старт=гонка", L"Überblick; Ihr Craft KI; Maus; Start=Rennen", L"Visão geral; sua nave IA; mouse; Iniciar=corrida", L"Overzicht; jouw craft AI; muis; Start=race", L"Przegląd; Twój craft AI; mysz; Start=wyścig", L"Genel bakış; gemin AI; fare; Başlat=yarış"));
 	legendRow(RGB(255, 230, 140),
 		LL14(L"5カウント／GO", L"5-count / GO", L"Compte à rebours / GO", L"Conto alla rovescia / VIA", L"Cuenta atrás / ¡YA!", L"5카운트/GO", L"5倒计时/开始", L"Countdown / GO", L"Отсчёт / СТАРТ", L"Countdown / LOS", L"Contagem / JÁ", L"Aftellen / START", L"Odliczanie / START", L"Geri sayım / BAŞLA"),
 		LL14(L"スタート後に大きく表示。GOでレース開始", L"Large overlay after Start; GO begins the race", L"Grand overlay après Démarrer", L"Overlay grande dopo Avvia", L"Overlay grande tras Iniciar", L"시작 후 크게 표시, GO로 레이스", L"开始后大字显示，GO开赛", L"Big overlay; GO starts", L"Крупный оверлей", L"Großes Overlay", L"Overlay grande", L"Grote overlay", L"Duży overlay", L"Büyük kaplama"));
@@ -430,6 +434,34 @@ void CS3rHelpDlg::OnPaint()
 		L"Buiten vrij; stuwkracht 0 = reset (HP blijft). Obstakels alleen HP.",
 		L"Poza pasem wolno; ciąg 0 = reset (HP bez zmian). Przeszkody tylko HP.",
 		L"Bant dışı serbest; itki 0 = dönüş (HP aynı). Engeller yalnız HP."));
+	line(LL14(L"右のミニマップ下に順位パネル（名前・順位・直近LAPタイム）。自機行だけ色が違う。ゴール後は表彰台で1〜3位を表示。",
+		L"Standings under the minimap (name/rank/recent LAP times). Your row is tinted. After finish: podium 1–3.",
+		L"Classement sous la minimap (nom/rang/tours). Votre ligne est teintée. Après: podium 1–3.",
+		L"Classifica sotto minimap (nome/grado/giri). La tua riga è evidenziata. Poi podio 1–3.",
+		L"Clasificación bajo el minimapa (nombre/puesto/vueltas). Tu fila resalta. Luego podio 1–3.",
+		L"미니맵 아래 순위판(이름·순위·최근 랩). 자행만 색 다름. 종료 후 시상대 1~3.",
+		L"小地图下为排名板（名字/名次/近几圈）。自机行异色。完赛后领奖台1–3名。",
+		L"Standings under minimap; your row highlighted. Podium 1–3 after finish.",
+		L"Таблица под миникартой; ваша строка выделена. Подиум 1–3 после финиша.",
+		L"Rangliste unter der Minimap; Ihre Zeile hervorgehoben. Danach Podium 1–3.",
+		L"Classificação sob o minimapa; sua linha destacada. Pódio 1–3 após a chegada.",
+		L"Stand onder minimap; jouw rij gekleurd. Daarna podium 1–3.",
+		L"Tabela pod minimapą; Twój wiersz wyróżniony. Potem podium 1–3.",
+		L"Minimapi altında sıralama; satırın farklı. Bitince podyum 1–3."));
+	line(LL14(L"カメラは左右・上下とも遅れて追従し、3D酔いを抑えます。コース上下は所々の突起のみ。",
+		L"Camera lags on both axes to reduce motion sickness. Course height uses sparse bumps only.",
+		L"Caméra en retard sur les axes pour moins de mal des transports. Relief par bosses locales.",
+		L"Camera in ritardo sugli assi per ridurre il motion sickness. Altezze a bump sparsi.",
+		L"Cámara con retraso en ambos ejes contra el mareo. Altura con protuberancias puntuales.",
+		L"카메라는 좌우·상하 모두 지연 추종해 멀미를 줄입니다. 고저는 드문 돌기만.",
+		L"相机左右上下均延迟跟随以减轻晕动。赛道高低仅为局部凸起。",
+		L"Lagging chase cam reduces motion sickness; sparse elevation bumps only.",
+		L"Камера с запаздыванием снижает укачивание; редкие перепады высоты.",
+		L"Nachlaufende Kamera mindert Motion Sickness; nur lokale Höhenhügel.",
+		L"Câmera atrasada reduz enjoo; relevo só com saliências pontuais.",
+		L"Nalopende camera vermindert misselijkheid; alleen lokale bobbels.",
+		L"Opóźniona kamera zmniejsza mdłości; tylko lokalne wypukłości.",
+		L"Gecikmeli kamera mide bulantısını azaltır; seyrek tümsekler."));
 	line(LL14(L"テーマで森〜雲の庭まで変化。コースは枝下／トンネル／開けた区間を交互に通る。生成で再抽選。",
 		L"Themes from forest to cloud garden. Course weaves under canopy/tunnels then opens up. Gen reshuffles.",
 		L"Thèmes forêt→jardin de nuages. Course sous branches/tunnels puis ouvert. Générer = nouveau.",
@@ -512,6 +544,7 @@ CS3rView::CS3rView()
 	, m_texNoise(NULL), m_srvNoise(NULL), m_uavNoise(NULL)
 	, m_texClear(NULL), m_srvClear(NULL), m_clearTexW(0), m_clearTexH(0)
 	, m_texHud(NULL), m_srvHud(NULL), m_hudTexW(0), m_hudTexH(0)
+	, m_texStand(NULL), m_srvStand(NULL), m_standTexW(0), m_standTexH(0)
 	, m_sampLin(NULL), m_sampPoint(NULL), m_sampCmp(NULL)
 	, m_rsSolid(NULL), m_rsShadow(NULL), m_rsNoCull(NULL), m_dssWrite(NULL), m_dssRead(NULL), m_dssOff(NULL)
 	, m_bsOpaque(NULL), m_bsAlpha(NULL), m_bsAdd(NULL)
@@ -864,12 +897,37 @@ BOOL CS3rView::ResizeDx(int w,int h)
 void CS3rView::PresentFrame(){if(m_swap&&m_ready)m_swap->Present(0,0);}
 void CS3rView::ReleaseClearTexture(){S3R_RELEASE(m_srvClear);S3R_RELEASE(m_texClear);m_clearTexW=m_clearTexH=0;}
 void CS3rView::ReleaseHudTexture(){S3R_RELEASE(m_srvHud);S3R_RELEASE(m_texHud);m_hudTexW=m_hudTexH=0;}
+void CS3rView::ReleaseStandingsTexture(){S3R_RELEASE(m_srvStand);S3R_RELEASE(m_texStand);m_standTexW=m_standTexH=0;}
 
 BOOL CS3rView::BakeClearTexture(const wchar_t* text,float alpha)
 {
 	ReleaseClearTexture();const int w=max(256,m_vw),h=max(96,m_vh/4);BITMAPINFO bi={};bi.bmiHeader.biSize=sizeof(BITMAPINFOHEADER);bi.bmiHeader.biWidth=w;bi.bmiHeader.biHeight=-h;bi.bmiHeader.biPlanes=1;bi.bmiHeader.biBitCount=32;bi.bmiHeader.biCompression=BI_RGB;
 	void* bits=NULL;HDC dc=CreateCompatibleDC(NULL);HBITMAP bm=CreateDIBSection(dc,&bi,DIB_RGB_COLORS,&bits,NULL,0);HGDIOBJ old=SelectObject(dc,bm);memset(bits,0,w*h*4);
-	{Gdiplus::Graphics g(dc);g.SetTextRenderingHint(Gdiplus::TextRenderingHintAntiAlias);Gdiplus::FontFamily ff(L"Segoe UI");Gdiplus::Font font(&ff,(Gdiplus::REAL)max(36,h/2),Gdiplus::FontStyleBold,Gdiplus::UnitPixel);Gdiplus::StringFormat sf;sf.SetAlignment(Gdiplus::StringAlignmentCenter);sf.SetLineAlignment(Gdiplus::StringAlignmentCenter);Gdiplus::SolidBrush sh(Gdiplus::Color((BYTE)(alpha*150),0,0,0)),fg(Gdiplus::Color((BYTE)(alpha*255),255,230,140));Gdiplus::RectF r(3,3,(Gdiplus::REAL)w,(Gdiplus::REAL)h);g.DrawString(text,-1,&font,r,&sf,&sh);r.X-=3;r.Y-=3;g.DrawString(text,-1,&font,r,&sf,&fg);}
+	{
+		Gdiplus::Graphics g(dc);
+		g.SetTextRenderingHint(Gdiplus::TextRenderingHintAntiAliasGridFit);
+		Gdiplus::FontFamily ffJp(L"Yu Gothic UI");
+		Gdiplus::FontFamily ffMe(L"Meiryo UI");
+		Gdiplus::FontFamily ffEn(L"Segoe UI");
+		const Gdiplus::FontFamily* fam = &ffEn;
+		if (ffJp.GetLastStatus() == Gdiplus::Ok) fam = &ffJp;
+		else if (ffMe.GetLastStatus() == Gdiplus::Ok) fam = &ffMe;
+		const int tlen = text ? (int)wcslen(text) : 0;
+		float fontPx = (float)max(40, h / 2);
+		if (tlen > 10) fontPx = (float)max(32, h / 3);
+		if (tlen > 16) fontPx = (float)max(26, h / 4);
+		Gdiplus::Font font(fam, fontPx, Gdiplus::FontStyleBold, Gdiplus::UnitPixel);
+		Gdiplus::StringFormat sf;
+		sf.SetAlignment(Gdiplus::StringAlignmentCenter);
+		sf.SetLineAlignment(Gdiplus::StringAlignmentCenter);
+		BYTE a = (BYTE)min(255, (int)(alpha * 255.f + 0.5f));
+		Gdiplus::SolidBrush sh(Gdiplus::Color((BYTE)min(220, (int)a), 0, 0, 0));
+		Gdiplus::SolidBrush fg(Gdiplus::Color(a, 255, 236, 150));
+		Gdiplus::RectF r(6.f, 6.f, (Gdiplus::REAL)(w - 12), (Gdiplus::REAL)(h - 12));
+		g.DrawString(text, -1, &font, r, &sf, &sh);
+		r.X -= 3.f; r.Y -= 3.f;
+		g.DrawString(text, -1, &font, r, &sf, &fg);
+	}
 	// HDC 経由だと α が落ちることがあるので輝度から復元（迷路 Clear と同じ経路を安定化）
 	{
 		DWORD* p=(DWORD*)bits; const int n=w*h;
@@ -898,10 +956,104 @@ BOOL CS3rView::BakeHudTexture(const wchar_t* text)
 	}
 	D3D11_TEXTURE2D_DESC d={};d.Width=w;d.Height=h;d.MipLevels=1;d.ArraySize=1;d.Format=DXGI_FORMAT_B8G8R8A8_UNORM;d.SampleDesc.Count=1;d.Usage=D3D11_USAGE_IMMUTABLE;d.BindFlags=D3D11_BIND_SHADER_RESOURCE;D3D11_SUBRESOURCE_DATA sd={bits,(UINT)w*4,0};HRESULT hr=m_dev->CreateTexture2D(&d,&sd,&m_texHud);if(SUCCEEDED(hr))hr=m_dev->CreateShaderResourceView(m_texHud,NULL,&m_srvHud);SelectObject(dc,old);DeleteObject(bm);DeleteDC(dc);m_hudTexW=w;m_hudTexH=h;return SUCCEEDED(hr);
 }
+BOOL CS3rView::BakeStandingsTexture(const S3rStandRow* rows, int nRows)
+{
+	if (!m_dev || !rows || nRows < 1) return FALSE;
+	ReleaseStandingsTexture();
+	if (nRows > 12) nRows = 12;
+	// 画面側は常に「12枠分」で行高が決まるので、ベイクも12枠前提の固定行高
+	const int rowH = 96;
+	const int namePx = 24;
+	const int lapPx = 15;
+	const int w = 380, h = nRows * rowH + 8;
+	BITMAPINFO bi={}; bi.bmiHeader.biSize=sizeof(BITMAPINFOHEADER); bi.bmiHeader.biWidth=w; bi.bmiHeader.biHeight=-h;
+	bi.bmiHeader.biPlanes=1; bi.bmiHeader.biBitCount=32; bi.bmiHeader.biCompression=BI_RGB;
+	void* bits=NULL; HDC dc=CreateCompatibleDC(NULL); HBITMAP bm=CreateDIBSection(dc,&bi,DIB_RGB_COLORS,&bits,NULL,0);
+	HGDIOBJ old=SelectObject(dc,bm); memset(bits,0,w*h*4);
+	{
+		Gdiplus::Graphics g(dc);
+		g.SetTextRenderingHint(Gdiplus::TextRenderingHintAntiAliasGridFit);
+		g.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
+		Gdiplus::FontFamily ffJp(L"Yu Gothic UI");
+		Gdiplus::FontFamily ffMe(L"Meiryo UI");
+		Gdiplus::FontFamily ffEn(L"Segoe UI");
+		const Gdiplus::FontFamily* fam = &ffEn;
+		if (ffJp.GetLastStatus() == Gdiplus::Ok) fam = &ffJp;
+		else if (ffMe.GetLastStatus() == Gdiplus::Ok) fam = &ffMe;
+		Gdiplus::Font fName(fam, (Gdiplus::REAL)namePx, Gdiplus::FontStyleBold, Gdiplus::UnitPixel);
+		Gdiplus::Font fLap(fam, (Gdiplus::REAL)lapPx, Gdiplus::FontStyleBold, Gdiplus::UnitPixel);
+		Gdiplus::StringFormat sf; sf.SetAlignment(Gdiplus::StringAlignmentNear);
+		Gdiplus::StringFormat sfRank; sfRank.SetAlignment(Gdiplus::StringAlignmentFar);
+		const float lapStep = (float)(rowH - 46) / 3.f;
+		for (int i = 0; i < nRows; i++) {
+			const S3rStandRow& r = rows[i];
+			float y0 = (float)(6 + i * rowH);
+			BYTE aBg = r.isPlayer ? (BYTE)230 : (BYTE)185;
+			BYTE br = r.isPlayer ? 28 : 10, bg = r.isPlayer ? 48 : 14, bb = r.isPlayer ? 72 : 22;
+			Gdiplus::SolidBrush rowBg(Gdiplus::Color(aBg, br, bg, bb));
+			g.FillRectangle(&rowBg, 3.f, y0, (Gdiplus::REAL)(w - 6), (Gdiplus::REAL)(rowH - 5));
+			BYTE cr=(BYTE)(r.cr*255.f), cg=(BYTE)(r.cg*255.f), cb=(BYTE)(r.cb*255.f);
+			Gdiplus::SolidBrush craftBr(Gdiplus::Color(255, cr, cg, cb));
+			float cx = 30.f, cy = y0 + 24.f;
+			g.FillEllipse(&craftBr, cx - 12.f, cy - 10.f, 24.f, 20.f);
+			Gdiplus::PointF wing[3] = { {cx-16.f,cy}, {cx-2.f,cy-8.f}, {cx-2.f,cy+8.f} };
+			g.FillPolygon(&craftBr, wing, 3);
+			wing[0]={cx+16.f,cy}; wing[1]={cx+2.f,cy-8.f}; wing[2]={cx+2.f,cy+8.f};
+			g.FillPolygon(&craftBr, wing, 3);
+			wchar_t rankBuf[24];
+			if (r.rank == 1) wcscpy_s(rankBuf, LL14(L"1st", L"1st", L"1er", L"1°", L"1.º", L"1위", L"第1", L"1", L"1-й", L"1.", L"1º", L"1e", L"1.", L"1."));
+			else if (r.rank == 2) wcscpy_s(rankBuf, LL14(L"2nd", L"2nd", L"2e", L"2°", L"2.º", L"2위", L"第2", L"2", L"2-й", L"2.", L"2º", L"2e", L"2.", L"2."));
+			else if (r.rank == 3) wcscpy_s(rankBuf, LL14(L"3rd", L"3rd", L"3e", L"3°", L"3.º", L"3위", L"第3", L"3", L"3-й", L"3.", L"3º", L"3e", L"3.", L"3."));
+			else swprintf_s(rankBuf, L"%d%s", r.rank, LL14(L"位", L"th", L"e", L"°", L".º", L"위", L"名", L"", L"-й", L".", L"º", L"e", L".", L"."));
+			Gdiplus::SolidBrush fg(Gdiplus::Color(255, r.isPlayer ? 255 : 250, r.isPlayer ? 252 : 250, r.isPlayer ? 215 : 255));
+			Gdiplus::SolidBrush dim(Gdiplus::Color(255, 210, 230, 245));
+			Gdiplus::SolidBrush sh(Gdiplus::Color(200, 0, 0, 0));
+			Gdiplus::RectF nameR(52.f, y0 + 4.f, 220.f, (Gdiplus::REAL)(namePx + 6));
+			g.DrawString(r.name, -1, &fName, nameR, &sf, &sh);
+			nameR.X -= 1.5f; nameR.Y -= 1.5f;
+			g.DrawString(r.name, -1, &fName, nameR, &sf, &fg);
+			Gdiplus::RectF rankR(260.f, y0 + 4.f, 128.f, (Gdiplus::REAL)(namePx + 6));
+			g.DrawString(rankBuf, -1, &fName, rankR, &sfRank, &sh);
+			rankR.X -= 1.5f; rankR.Y -= 1.5f;
+			g.DrawString(rankBuf, -1, &fName, rankR, &sfRank, &fg);
+			for (int k = 0; k < 3; k++) {
+				int lapNo = r.lapNo[k] > 0 ? r.lapNo[k] : (k + 1);
+				float sec = r.lapSec[k];
+				wchar_t one[40];
+				if (sec >= 0.f) swprintf_s(one, L"LAP%d  %.2f", lapNo, sec);
+				else swprintf_s(one, L"LAP%d  ----", lapNo);
+				Gdiplus::RectF lapR(52.f, y0 + 40.f + lapStep * (float)k, 330.f, lapStep);
+				g.DrawString(one, -1, &fLap, lapR, &sf, &sh);
+				lapR.X -= 1.2f; lapR.Y -= 1.2f;
+				g.DrawString(one, -1, &fLap, lapR, &sf, &dim);
+			}
+		}
+	}
+	{
+		DWORD* p=(DWORD*)bits; const int n=w*h;
+		for (int i=0;i<n;i++) {
+			DWORD c=p[i]; BYTE a=(BYTE)((c>>24)&255);
+			if (a<8) {
+				BYTE r=(BYTE)((c>>16)&255), g=(BYTE)((c>>8)&255), b=(BYTE)(c&255);
+				int lum=r+g+b; if (lum>12) a=(BYTE)min(255,lum+50);
+			}
+			if (a<8) continue;
+			p[i]=((DWORD)a<<24)|(c&0x00FFFFFFu);
+		}
+	}
+	D3D11_TEXTURE2D_DESC d={}; d.Width=w; d.Height=h; d.MipLevels=1; d.ArraySize=1; d.Format=DXGI_FORMAT_B8G8R8A8_UNORM;
+	d.SampleDesc.Count=1; d.Usage=D3D11_USAGE_IMMUTABLE; d.BindFlags=D3D11_BIND_SHADER_RESOURCE;
+	D3D11_SUBRESOURCE_DATA sd={bits,(UINT)w*4,0};
+	HRESULT hr=m_dev->CreateTexture2D(&d,&sd,&m_texStand);
+	if (SUCCEEDED(hr)) hr=m_dev->CreateShaderResourceView(m_texStand,NULL,&m_srvStand);
+	SelectObject(dc,old); DeleteObject(bm); DeleteDC(dc);
+	m_standTexW=w; m_standTexH=h;
+	return SUCCEEDED(hr);
+}
 void CS3rView::ReleaseDx()
 {
 	m_ready=FALSE;if(m_imm){m_imm->ClearState();m_imm->Flush();}
-	ReleaseClearTexture();ReleaseHudTexture();
+	ReleaseClearTexture();ReleaseHudTexture();ReleaseStandingsTexture();
 	S3R_RELEASE(m_uavNoise);S3R_RELEASE(m_srvNoise);S3R_RELEASE(m_texNoise);
 	S3R_RELEASE(m_srvEnv);S3R_RELEASE(m_texEnv);S3R_RELEASE(m_srvCraft);S3R_RELEASE(m_texCraft);S3R_RELEASE(m_srvBand);S3R_RELEASE(m_texBand);
 	for(int i=0;i<S3R_THEME_N;i++){S3R_RELEASE(m_srvTheme[i]);S3R_RELEASE(m_texTheme[i]);}
@@ -964,14 +1116,16 @@ CSoft3DRaceDlg::CSoft3DRaceDlg(CWnd* p)
 	, m_craftNv(0), m_craftNi(0), m_obsNv(0), m_obsNi(0)
 	, m_phase(PHASE_IDLE), m_countT(0), m_countShown(-1), m_podiumT(0)
 	, m_themeActive(THEME_FOREST), m_lapsTarget(3), m_bandHalf(6.f)
+	, m_demoCamT(0.f), m_demoCamElev(0.f), m_demoMidX(0), m_demoMidY(0), m_demoMidZ(0), m_demoRad(80.f)
 	, m_camYawOff(0), m_camPitchOff(0.22f), m_camZoom(1.f)
 	, m_camSx(0), m_camSy(0), m_camSz(0), m_camAx(0), m_camAy(0), m_camAz(0), m_camSmoothInit(0)
 	, m_lookback(0), m_accelHeld(0), m_brakeHeld(0), m_mouseLook(0)
 	, m_lastTick(0), m_rng(1), m_genSeed(1), m_spaceToggleTick(0)
 	, m_baseTempoPos(100), m_basePitchPos(200), m_anim(0), m_raceClock(0), m_playerSpdEma(0), m_playerAccel(0)
 	, m_wrongWay(0), m_overlayHold(0)
-	, m_clearBakeA(0), m_hudDirty(1), m_clearDirty(1)
+	, m_clearBakeA(0), m_hudDirty(1), m_clearDirty(1), m_standDirty(1)
 	, m_reverbFogBoost(0), m_eqDofBoost(0)
+	, m_podiumBaseX(0), m_podiumBaseY(0), m_podiumBaseZ(0)
 {
 	memset(m_knots,0,sizeof(m_knots));
 	memset(m_pathSampleXYZ,0,sizeof(m_pathSampleXYZ));
@@ -1372,18 +1526,18 @@ void CSoft3DRaceDlg::GenerateCourseWithSeed(DWORD seed)
 			float a = (float)i / (float)knots * (float)(M_PI * 2.0);
 			float gy = GroundY(m_knots[i].x, m_knots[i].z);
 			// ごく緩い長波長のみ（高周波のピッチ揺れを出さない）
-			float cruise = gy + (19.f + 2.2f * sinf(a * 1.0f)) * sc;
+			float cruise = gy + (19.f + 3.0f * sinf(a * 1.0f)) * sc;
 			if (m_themeActive == THEME_CLOUD) cruise += 6.f * sc;
-			if (m_themeActive == THEME_RUINS) cruise = gy + (14.f + 1.5f * sinf(a)) * sc;
+			if (m_themeActive == THEME_RUINS) cruise = gy + (14.f + 1.8f * sinf(a)) * sc;
 			baseY[i] = cruise;
 		}
-		// 突起／くぼみを 3〜5 箇所だけ足す（ガウス丘で滑らか）
+		// 突起／くぼみを 3〜5 箇所だけ足す（ガウス丘で滑らか）— 少しだけ高め
 		int nFeat = 3 + (int)(S3rRand01(m_rng) * 2.99f); // 3..5
 		for (int f = 0; f < nFeat; f++) {
 			int center = (int)(S3rRand01(m_rng) * (float)knots) % knots;
-			float width = 3.5f + S3rRand01(m_rng) * 3.5f; // ノット単位の半値幅
-			int up = (S3rRand01(m_rng) > 0.32f) ? 1 : 0; // 多めに上突起
-			float amp = (up ? (7.f + S3rRand01(m_rng) * 9.f) : -(5.f + S3rRand01(m_rng) * 6.f)) * sc;
+			float width = 3.8f + S3rRand01(m_rng) * 3.8f;
+			int up = (S3rRand01(m_rng) > 0.32f) ? 1 : 0;
+			float amp = (up ? (9.f + S3rRand01(m_rng) * 10.f) : -(6.f + S3rRand01(m_rng) * 7.f)) * sc;
 			if (m_themeActive == THEME_CLOUD && up) amp *= 1.25f;
 			if (m_themeActive == THEME_RUINS && !up) amp *= 1.15f;
 			for (int i = 0; i < knots; i++) {
@@ -1405,8 +1559,8 @@ void CSoft3DRaceDlg::GenerateCourseWithSeed(DWORD seed)
 			}
 			memcpy(baseY, tmp, sizeof(float) * knots);
 		}
-		// 隣接点の最大上昇を制限（急勾配＝酔い・操作負荷の元）
-		const float maxStep = 3.8f * sc;
+		// 隣接点の最大上昇を制限（基本は緩やか）
+		const float maxStep = 3.2f * sc;
 		for (int pass = 0; pass < 2; pass++) {
 			for (int i = 0; i < knots; i++) {
 				int j = (i + 1) % knots;
@@ -1414,6 +1568,32 @@ void CSoft3DRaceDlg::GenerateCourseWithSeed(DWORD seed)
 				if (dy > maxStep) baseY[j] = baseY[i] + maxStep;
 				else if (dy < -maxStep) baseY[j] = baseY[i] - maxStep;
 			}
+		}
+		// 急勾配を 1〜2 箇所だけ後付け（そういうコースもあってよい）
+		int nSteep = 1 + ((S3rRand01(m_rng) > 0.45f) ? 1 : 0);
+		for (int s = 0; s < nSteep; s++) {
+			int center = (int)(S3rRand01(m_rng) * (float)knots) % knots;
+			float width = 2.0f + S3rRand01(m_rng) * 1.6f;
+			float amp = (14.f + S3rRand01(m_rng) * 12.f) * sc;
+			if (S3rRand01(m_rng) < 0.35f) amp = -amp;
+			for (int i = 0; i < knots; i++) {
+				int d = i - center;
+				if (d > knots / 2) d -= knots;
+				if (d < -knots / 2) d += knots;
+				float u = (float)d / width;
+				baseY[i] += amp * expf(-0.5f * u * u);
+			}
+		}
+		// 急勾配は潰しすぎないよう軽い平滑のみ
+		{
+			float tmp[S3R_SPLINE_MAX];
+			for (int i = 0; i < knots; i++) {
+				float ym = baseY[(i - 1 + knots) % knots];
+				float y0 = baseY[i];
+				float yp = baseY[(i + 1) % knots];
+				tmp[i] = ym * 0.15f + y0 * 0.70f + yp * 0.15f;
+			}
+			memcpy(baseY, tmp, sizeof(float) * knots);
 		}
 		for (int i = 0; i < knots; i++) {
 			float gy = GroundY(m_knots[i].x, m_knots[i].z);
@@ -1435,10 +1615,29 @@ void CSoft3DRaceDlg::GenerateCourseWithSeed(DWORD seed)
 		}
 		m_pathCumLen[i] = m_pathLen; px=x;py=y;pz=z;
 	}
+	// デモ俯瞰用：コース中心と水平半径
+	{
+		float sx = 0.f, sy = 0.f, sz = 0.f;
+		for (int i = 0; i < S3R_PATH_SAMPLES; i++) {
+			sx += m_pathSampleXYZ[i][0]; sy += m_pathSampleXYZ[i][1]; sz += m_pathSampleXYZ[i][2];
+		}
+		const float inv = 1.f / (float)S3R_PATH_SAMPLES;
+		m_demoMidX = sx * inv; m_demoMidY = sy * inv; m_demoMidZ = sz * inv;
+		float r2 = 1.f;
+		for (int i = 0; i < S3R_PATH_SAMPLES; i++) {
+			float dx = m_pathSampleXYZ[i][0] - m_demoMidX;
+			float dz = m_pathSampleXYZ[i][2] - m_demoMidZ;
+			float d2 = dx * dx + dz * dz;
+			if (d2 > r2) r2 = d2;
+		}
+		m_demoRad = sqrtf(r2);
+		if (m_demoRad < 40.f) m_demoRad = 40.f;
+	}
 	BuildCraftMeshes();
 	BuildObstacleMesh(m_themeActive);
 	PlaceObstaclesAndItems();
 	ResetRaceState();
+	BeginDemoPreview();
 	if (m_view.m_ready) m_view.BakeNoiseCS();
 	UpdateStatus();
 	m_hudDirty = 1; m_clearDirty = 1;
@@ -1768,21 +1967,29 @@ void CSoft3DRaceDlg::ResetRaceState()
 	m_reverbFogBoost=0; m_eqDofBoost=0;
 	m_playerSpdEma=0.f;
 	m_wrongWay=0; m_overlayHold=0.f;
+	m_standDirty=1;
 	int opp=ReadOppFromUi(); if(opp<1)opp=1; if(opp>11)opp=11;
 	m_craftN = 1 + opp;
+	// 名前プールから重複なくランダム割当
+	int namePick[100];
+	for (int i=0;i<100;i++) namePick[i]=i;
+	for (int i=99;i>0;i--) {
+		int j = (int)(S3rRand01(m_rng) * (float)(i + 1)); if (j < 0) j = 0; if (j > i) j = i;
+		int tmp=namePick[i]; namePick[i]=namePick[j]; namePick[j]=tmp;
+	}
 	// 超簡単〜強烈：やや易しめ（普通が楽しめる帯）
 	float aiLineTable[5]={0.52f, 0.62f, 0.74f, 0.85f, 0.92f};
 	int aiLv=ReadAiFromUi();
 	for (int i=0;i<m_craftN;i++){
 		S3rCraft& c=m_crafts[i]; memset(&c,0,sizeof(c));
 		c.isPlayer=(i==0); c.alive=1; c.colorIdx=i%12; c.hp=100.f; c.fuel=100.f;
+		wcscpy_s(c.name, kS3rGirlNames[namePick[i % 100]]);
+		c.lapTimesN = 0;
 		c.pathT = (float)i * 0.012f; if(c.pathT>0.9f)c.pathT=0.01f;
 		float px,py,pz,tx,ty,tz,nx,ny,nz,bx,by,bz; SplineFrame(c.pathT,px,py,pz,tx,ty,tz,nx,ny,nz,bx,by,bz);
 		float lane=(i-(m_craftN-1)*0.5f)*1.2f;
 		c.x=px+bx*lane; c.y=py+by*lane; c.z=pz+bz*lane;
-		c.yaw=atan2f(tx,tz);
-		// スプライン接線の急勾配をそのまま使うと真下を向くので穏やかに制限
-		c.pitch=S3rClamp(asinf(S3rClamp(ty,-1.f,1.f)), -0.28f, 0.28f);
+		AlignCraftToPath(c, 0.06f);
 		if (c.isPlayer) {
 			c.aiSkill = 0.f;
 		} else {
@@ -1804,26 +2011,85 @@ void CSoft3DRaceDlg::ResetRaceState()
 	m_clearBakeText=L""; m_clearDirty=1; m_hudDirty=1;
 }
 
+void CSoft3DRaceDlg::BeginDemoPreview()
+{
+	if (m_knotN < 4 || m_craftN < 1) { m_phase = PHASE_IDLE; return; }
+	m_phase = PHASE_DEMO;
+	m_demoCamT = 0.35f;
+	m_demoCamElev = 0.f;
+	m_camSmoothInit = 0;
+	m_wrongWay = 0; m_overlayHold = 0.f;
+	// 自機もデモ中はAI（スタートで通常操作に戻る）
+	m_crafts[0].aiSkill = 0.70f;
+	m_crafts[0].aiCutCool = 2.f; // 序盤はライン走行で見やすく
+	m_playerSpdEma = RaceSpeedCap(0) * 0.55f;
+	m_clearBakeText = LL14(L"スタートで開始", L"Press Start", L"Démarrer", L"Avvia", L"Iniciar",
+		L"시작", L"按开始", L"Start", L"Старт", L"Start", L"Iniciar", L"Start", L"Start", L"Başlat");
+	m_clearBakeA = 1.f; m_clearDirty = 1; m_standDirty = 1;
+}
+
 void CSoft3DRaceDlg::StartRace()
 {
 	if (m_knotN < 4) GenerateCourse();
 	ResetRaceState();
 	m_phase = PHASE_COUNTDOWN;
 	m_countT = 0; m_countShown = -1;
+	m_camYawOff = 0.f; m_camPitchOff = 0.22f; m_camSmoothInit = 0;
+	m_crafts[0].aiSkill = 0.f; // 操作はプレイヤーへ
+	for (int i = 0; i < m_craftN; i++) {
+		if (m_crafts[i].alive) AlignCraftToPath(m_crafts[i], 0.06f);
+	}
 	m_clearBakeText = L"5"; m_clearBakeA = 1.f; m_clearDirty = 1;
 	UpdateStatus();
 }
 
+void CSoft3DRaceDlg::AlignCraftToPath(S3rCraft& c, float lookAhead)
+{
+	if (lookAhead < 0.02f) lookAhead = 0.02f;
+	float tAim = c.pathT + lookAhead;
+	while (tAim >= 1.f) tAim -= 1.f;
+	while (tAim < 0.f) tAim += 1.f;
+	float ax, ay, az;
+	SplinePoint(tAim, ax, ay, az);
+	float dx = ax - c.x, dy = ay - c.y, dz = az - c.z;
+	float lenXZ = sqrtf(dx * dx + dz * dz);
+	float len = sqrtf(dx * dx + dy * dy + dz * dz);
+	if (lenXZ < 0.05f || len < 0.05f) {
+		// ほぼ真上／真下：接線フォールバック
+		float tx, ty, tz;
+		SplineTangent(c.pathT + lookAhead * 0.5f, tx, ty, tz);
+		dx = tx; dy = ty; dz = tz;
+		lenXZ = sqrtf(dx * dx + dz * dz);
+		len = 1.f;
+	}
+	// 水平向きはライン前方、ピッチは3D狙い
+	c.yaw = atan2f(dx, dz);
+	float pitchSrc = (len > 1e-4f) ? (dy / len) : 0.f;
+	c.pitch = S3rClamp(asinf(S3rClamp(pitchSrc, -1.f, 1.f)), -0.85f, 0.85f);
+	c.chkYaw = c.yaw; c.chkPitch = c.pitch;
+}
+
 void CSoft3DRaceDlg::InputSteerDelta(float dyaw, float dpitch)
 {
-	if (m_phase != PHASE_RACE && m_phase != PHASE_COUNTDOWN) return;
+	if (m_phase != PHASE_RACE && m_phase != PHASE_COUNTDOWN && m_phase != PHASE_DEMO) return;
 	S3rCraft& pl = m_crafts[0];
-	if (!pl.alive || pl.finished) return;
-	// カウント中も向きだけ合わせられる（推力は PHASE_RACE のみ）
+	if (m_phase != PHASE_DEMO && (!pl.alive || pl.finished)) return;
+	// デモ／カウント中は機体を触らずカメラだけで周りを見る
+	if (m_phase == PHASE_COUNTDOWN || m_phase == PHASE_DEMO) {
+		if (m_phase == PHASE_DEMO) {
+			m_demoCamT = S3rNormAngle(m_demoCamT + dyaw * 0.85f);
+			float inv = savedata.s3r_invert_y ? -1.f : 1.f;
+			m_demoCamElev = S3rClamp(m_demoCamElev + inv * dpitch * 18.f, -25.f, 55.f);
+		} else {
+			m_camYawOff = S3rNormAngle(m_camYawOff + dyaw * 1.15f);
+			float inv = savedata.s3r_invert_y ? -1.f : 1.f;
+			m_camPitchOff = S3rClamp(m_camPitchOff + inv * dpitch * 0.85f, -0.35f, 0.72f);
+		}
+		return;
+	}
 	float ag = (pl.agilityT > 0.f) ? 1.45f : 1.f;
 	pl.yaw = S3rNormAngle(pl.yaw + dyaw * ag);
 	pl.pitch = S3rClamp(pl.pitch + dpitch * ag, -1.05f, 1.05f);
-	// マウス操縦時は追従カメラのオフセットを戻し、機体向きと視線を一致させる
 	m_camYawOff *= 0.85f;
 	m_camPitchOff = S3rLerp(m_camPitchOff, 0.22f, 0.12f);
 }
@@ -1943,43 +2209,102 @@ void CSoft3DRaceDlg::UpdateRanks()
 		if (swap) { int t=order[i]; order[i]=order[j]; order[j]=t; }
 	}
 	for (int i=0;i<m_craftN;i++) m_crafts[order[i]].rank = i+1;
+	m_standDirty = 1;
 }
 
 void CSoft3DRaceDlg::TickCountdown(float dt)
 {
 	m_countT += dt;
-	int show = 5 - (int)floorf(m_countT);
-	if (show < 0) show = 0;
-	if (show != m_countShown) {
-		m_countShown = show;
-		if (show > 0) { wchar_t buf[16]; swprintf_s(buf, L"%d", show); m_clearBakeText = buf; }
-		else m_clearBakeText = LL14(L"GO!", L"GO!", L"GO!", L"VIA!", L"¡YA!", L"GO!", L"开始!", L"انطلق!", L"СТАРТ!", L"LOS!", L"JÁ!", L"START!", L"START!", L"BAŞLA!");
-		m_clearBakeA = 1.f;
-		m_clearDirty = 1;
+	// カウント中は帯レーンに吸着しつつ、前方ラインを向かせる
+	for (int i = 0; i < m_craftN; i++) {
+		S3rCraft& c = m_crafts[i];
+		if (!c.alive) continue;
+		float px, py, pz, tx, ty, tz, nx, ny, nz, bx, by, bz;
+		SplineFrame(c.pathT, px, py, pz, tx, ty, tz, nx, ny, nz, bx, by, bz);
+		float lane = (i - (m_craftN - 1) * 0.5f) * 1.2f;
+		c.x = px + bx * lane;
+		c.y = py + by * lane;
+		c.z = pz + bz * lane;
+		c.chkX = px; c.chkY = py; c.chkZ = pz; c.chkPathT = c.pathT;
+		AlignCraftToPath(c, 0.06f);
+		c.vx = c.vy = c.vz = 0.f;
 	}
-	// カウント中はコース向きへ自動レベリング
-	{
-		S3rCraft& pl = m_crafts[0];
-		float px,py,pz,tx,ty,tz,nx,ny,nz,bx,by,bz; SplineFrame(pl.pathT+0.02f,px,py,pz,tx,ty,tz,nx,ny,nz,bx,by,bz);
-		float wantYaw = atan2f(tx,tz);
-		float wantPitch = S3rClamp(asinf(S3rClamp(ty,-1.f,1.f)), -0.28f, 0.28f);
-		pl.yaw = S3rNormAngle(pl.yaw + S3rNormAngle(wantYaw - pl.yaw) * min(1.f, 2.5f * dt));
-		pl.pitch = S3rLerp(pl.pitch, wantPitch, min(1.f, 2.5f * dt));
+	// スタート直前は機体向き＝カメラ基準（見回しオフセットは残すがGOで戻す）
+	if (m_countT < 0.05f) {
+		m_camYawOff = 0.f;
+		m_camPitchOff = 0.22f;
+		m_camSmoothInit = 0;
 	}
-	if (m_countT >= 5.f) {
-		m_phase = PHASE_RACE; m_raceClock = 0; m_clearBakeText = L""; m_clearBakeA = 0.f; m_clearDirty = 1;
-		m_playerSpdEma = 0.f;
+	if (m_countT < 5.f) {
+		int show = 5 - (int)floorf(m_countT);
+		if (show < 1) show = 1;
+		if (show != m_countShown) {
+			m_countShown = show;
+			wchar_t buf[16]; swprintf_s(buf, L"%d", show);
+			m_clearBakeText = buf;
+			m_clearBakeA = 1.f;
+			m_clearDirty = 1;
+		}
+	} else {
+		// GO を約1秒表示してからレース開始
+		if (m_countShown != 0) {
+			m_countShown = 0;
+			m_clearBakeText = LL14(L"GO!", L"GO!", L"GO!", L"VIA!", L"¡YA!", L"GO!", L"开始!", L"انطلق!", L"СТАРТ!", L"LOS!", L"JÁ!", L"START!", L"START!", L"BAŞLA!");
+			m_clearBakeA = 1.f;
+			m_clearDirty = 1;
+		}
+		if (m_countT >= 6.0f) {
+			for (int i = 0; i < m_craftN; i++) {
+				if (!m_crafts[i].alive) continue;
+				S3rCraft& c = m_crafts[i];
+				float px, py, pz, tx, ty, tz, nx, ny, nz, bx, by, bz;
+				SplineFrame(c.pathT, px, py, pz, tx, ty, tz, nx, ny, nz, bx, by, bz);
+				float lane = (i - (m_craftN - 1) * 0.5f) * 1.2f;
+				c.x = px + bx * lane; c.y = py + by * lane; c.z = pz + bz * lane;
+				AlignCraftToPath(c, 0.06f);
+				float ax, ay, az; SplinePoint(c.pathT + 0.06f, ax, ay, az);
+				float dx = ax - c.x, dy = ay - c.y, dz = az - c.z;
+				S3rNorm3(dx, dy, dz);
+				float kick = 8.f / 3.6f;
+				c.vx = dx * kick; c.vy = dy * kick; c.vz = dz * kick;
+			}
+			// 見回しオフセットを戻して進行方向視点へ
+			m_camYawOff = 0.f;
+			m_camPitchOff = 0.22f;
+			m_camSmoothInit = 0;
+			m_phase = PHASE_RACE; m_raceClock = 0;
+			m_overlayHold = 1.0f;
+			m_playerSpdEma = 0.f;
+			m_standDirty = 1;
+		}
 	}
 }
 
 void CSoft3DRaceDlg::TickPodium(float dt)
 {
 	m_podiumT += dt;
+	// 表彰台配置：中央1位・左2位・右3位
+	float h1 = 4.2f, h2 = 2.8f, h3 = 1.8f;
+	float px[3] = { 0.f, -5.2f, 5.2f };
+	float ph[3] = { h1, h2, h3 };
+	int slotCraft[3] = { m_podiumOrder[0], m_podiumOrder[1], m_podiumOrder[2] };
+	for (int s = 0; s < 3; s++) {
+		int ci = slotCraft[s];
+		if (ci < 0 || ci >= m_craftN) continue;
+		S3rCraft& c = m_crafts[ci];
+		c.x = m_podiumBaseX + px[s];
+		c.y = m_podiumBaseY + ph[s] + 1.15f;
+		c.z = m_podiumBaseZ;
+		c.vx = c.vy = c.vz = 0.f;
+		c.yaw = 0.f; // カメラ（+Z）を向く
+		c.pitch = 0.f;
+		c.offBand = 0;
+	}
 	for (int i=0;i<96;i++){
 		if (m_confetti[i][5] <= 0.f) {
-			m_confetti[i][0]=(S3rRand01(m_rng)*2.f-1.f)*18.f;
-			m_confetti[i][1]=8.f+S3rRand01(m_rng)*10.f;
-			m_confetti[i][2]=(S3rRand01(m_rng)*2.f-1.f)*18.f;
+			m_confetti[i][0]=m_podiumBaseX+(S3rRand01(m_rng)*2.f-1.f)*14.f;
+			m_confetti[i][1]=m_podiumBaseY+8.f+S3rRand01(m_rng)*10.f;
+			m_confetti[i][2]=m_podiumBaseZ+(S3rRand01(m_rng)*2.f-1.f)*10.f;
 			m_confetti[i][3]=(S3rRand01(m_rng)-.5f)*4.f;
 			m_confetti[i][4]=-1.f-S3rRand01(m_rng)*3.f;
 			m_confetti[i][5]=2.f+S3rRand01(m_rng)*2.f;
@@ -1994,6 +2319,8 @@ void CSoft3DRaceDlg::TickPodium(float dt)
 void CSoft3DRaceDlg::TickAi(float dt)
 {
 	const float scv = SpeedScale();
+	const int demo = (m_phase == PHASE_DEMO) ? 1 : 0;
+	if (!demo && m_phase != PHASE_RACE) return;
 	const S3rCraft& pl = m_crafts[0];
 	const float plProg = (float)pl.lap + pl.pathT;
 	const float plNow = sqrtf(pl.vx*pl.vx + pl.vy*pl.vy + pl.vz*pl.vz);
@@ -2001,10 +2328,15 @@ void CSoft3DRaceDlg::TickAi(float dt)
 	float paceRef = m_playerSpdEma;
 	if (paceRef < plNow) paceRef = plNow;
 	if (paceRef < 6.f) paceRef = 6.f;
+	if (demo) {
+		// デモは自機ペースに依存せず見やすい巡航速度で
+		paceRef = RaceSpeedCap(0) * 0.58f;
+	}
 
-	for (int i=1;i<m_craftN;i++){
+	const int i0 = demo ? 0 : 1;
+	for (int i=i0;i<m_craftN;i++){
 		S3rCraft& c=m_crafts[i];
-		if (!c.alive || c.finished || m_phase!=PHASE_RACE) continue;
+		if (!c.alive || c.finished) continue;
 		if (c.courseOutCool > 0.f) continue;
 		float half=BandHalfWidth();
 		float lat,vert,cx,cy,cz; BandLocal(c.x,c.y,c.z,c.pathT,lat,vert,cx,cy,cz);
@@ -2215,6 +2547,12 @@ void CSoft3DRaceDlg::TickAi(float dt)
 void CSoft3DRaceDlg::TickItems(float dt)
 {
 	for (int i=0;i<m_itemN;i++) if (!m_items[i].taken) m_items[i].spin += dt * 2.2f;
+	if (m_phase == PHASE_DEMO) {
+		// デモ中は見た目の回転のみ（音響アイテム適用なし）
+		if (m_reverbFogBoost>0) m_reverbFogBoost=max(0.f,m_reverbFogBoost-dt*0.05f);
+		if (m_eqDofBoost>0) m_eqDofBoost=max(0.f,m_eqDofBoost-dt*0.05f);
+		return;
+	}
 	for (int i=0;i<m_craftN;i++) {
 		S3rCraft& c=m_crafts[i];
 		if (c.boostT>0) c.boostT-=dt; if (c.slowT>0) c.slowT-=dt; if (c.agilityT>0) c.agilityT-=dt;
@@ -2228,12 +2566,13 @@ void CSoft3DRaceDlg::TickItems(float dt)
 
 void CSoft3DRaceDlg::TickPhysics(float dt)
 {
-	if (m_phase != PHASE_RACE && m_phase != PHASE_FINISH) return;
+	if (m_phase != PHASE_RACE && m_phase != PHASE_FINISH && m_phase != PHASE_DEMO) return;
+	const int demo = (m_phase == PHASE_DEMO) ? 1 : 0;
 
-	// player input + joypad
+	// player input + joypad（デモ中はAI任せ）
 	S3rJoyState joy={}; UpdateJoypadState(joy);
 	S3rCraft& pl = m_crafts[0];
-	if (pl.alive && !pl.finished && m_phase==PHASE_RACE) {
+	if (!demo && pl.alive && !pl.finished && m_phase==PHASE_RACE) {
 		if (pl.courseOutCool > 0.f) {
 			// 復帰クール中は入力推力を切って帯へ定着させる
 			m_playerAccel = 0;
@@ -2333,7 +2672,7 @@ void CSoft3DRaceDlg::TickPhysics(float dt)
 			spd = sqrtf(c.vx*c.vx+c.vy*c.vy+c.vz*c.vz);
 			float lin = c.offBand ? 2.4f : 0.22f;
 			float quad = c.offBand ? 0.008f : 0.00135f;
-			if (c.isPlayer && !m_playerAccel) lin += 0.7f;
+			if (c.isPlayer && !m_playerAccel && !demo) lin += 0.7f;
 			float t0x,t0y,t0z,t1x,t1y,t1z;
 			SplineTangent(c.pathT, t0x,t0y,t0z);
 			SplineTangent(c.pathT + 0.04f, t1x,t1y,t1z);
@@ -2345,14 +2684,15 @@ void CSoft3DRaceDlg::TickPhysics(float dt)
 		}
 		// 絶対上限 ≈120km/h（ブースト時やや上）。敵も同じ世界の法則
 		float maxSpd = RaceSpeedCap(c.boostT > 0.f ? 1 : 0);
-		if (!c.isPlayer) {
+		if (!c.isPlayer || demo) {
 			const float plNow = sqrtf(m_crafts[0].vx*m_crafts[0].vx + m_crafts[0].vy*m_crafts[0].vy + m_crafts[0].vz*m_crafts[0].vz);
-			float pace = m_playerSpdEma;
-			if (pace < plNow) pace = plNow;
+			float pace = demo ? (RaceSpeedCap(0) * 0.58f) : m_playerSpdEma;
+			if (!demo && pace < plNow) pace = plNow;
 			if (pace < 6.f) pace = 6.f;
 			float sk = c.aiSkill;
+			if (demo && c.isPlayer && sk < 0.45f) sk = 0.70f;
 			float aiCap = pace * (0.88f + 0.16f * sk);
-			float hardCap = max(plNow, m_playerSpdEma) * (1.02f + 0.14f * sk);
+			float hardCap = demo ? (pace * (1.05f + 0.12f * sk)) : (max(plNow, m_playerSpdEma) * (1.02f + 0.14f * sk));
 			float softFloor = RaceSpeedCap(0) * (0.20f + 0.28f * sk);
 			if (aiCap < softFloor) aiCap = softFloor;
 			if (hardCap < softFloor) hardCap = softFloor;
@@ -2362,7 +2702,7 @@ void CSoft3DRaceDlg::TickPhysics(float dt)
 		}
 		if (c.offBand) {
 			// 計画カット中だけ帯外でもレース速度を維持（事故帯外は≈30km/h）
-			int cutting = (!c.isPlayer && c.aiCutT >= 0.f && c.aiCutTimer > 0.f) ? 1 : 0;
+			int cutting = ((!c.isPlayer || demo) && c.aiCutT >= 0.f && c.aiCutTimer > 0.f) ? 1 : 0;
 			if (cutting) maxSpd = min(maxSpd, RaceSpeedCap(0) * (0.72f + 0.12f * c.aiSkill));
 			else maxSpd = min(maxSpd * 0.45f, 30.f / 3.6f);
 		}
@@ -2415,11 +2755,12 @@ void CSoft3DRaceDlg::TickPhysics(float dt)
 			SplineFrame(c.pathT, cx,cy,cz, tx,ty,tz, nx,ny,nz, bx,by,bz);
 			float pull = min(1.f, 0.55f * dt);
 			float rail = 0.08f;
-			if (!c.isPlayer) {
+			if (!c.isPlayer || demo) {
 				float sk = c.aiSkill;
+				if (demo && c.isPlayer && sk < 0.45f) sk = 0.70f;
 				int plRank = (m_crafts[0].rank > 0) ? m_crafts[0].rank : 1;
 				int aiRank = (c.rank > 0) ? c.rank : 2;
-				if (aiRank > plRank) sk = S3rClamp(sk + (float)(aiRank - plRank) * 0.07f, 0.f, 1.f);
+				if (!demo && aiRank > plRank) sk = S3rClamp(sk + (float)(aiRank - plRank) * 0.07f, 0.f, 1.f);
 				rail = 0.22f + 0.28f * sk;
 				// 計画カット中は帯内レールを弱めて弦へ出やすくする
 				if (c.aiCutT >= 0.f && c.aiCutTimer > 0.f) rail = 0.04f;
@@ -2430,7 +2771,7 @@ void CSoft3DRaceDlg::TickPhysics(float dt)
 		} else if (c.courseOutCool <= 0.f) {
 			c.offBand = 1;
 			c.offBandT += dt;
-			if (!c.isPlayer) {
+			if (!c.isPlayer || demo) {
 				const int cutting = (c.aiCutT >= 0.f && c.aiCutTimer > 0.f) ? 1 : 0;
 				if (cutting) {
 					// 計画ショートカット中：緩い燃料減＋合流点へ。危険なら即ライン復帰
@@ -2523,15 +2864,24 @@ void CSoft3DRaceDlg::TickPhysics(float dt)
 			float nearStart = dx*dx+dy*dy+dz*dz;
 			float startR = BandHalfWidth() * 3.5f;
 			if (crossed && c.raceTime >= minLap && nearStart < startR*startR) {
+				if (c.lapTimesN < 12) {
+					c.lapTimes[c.lapTimesN] = c.raceTime;
+					c.lapTimesN++;
+				}
 				c.lap++;
 				if (c.raceTime > 0.5f && c.raceTime < c.bestLap) c.bestLap = c.raceTime;
 				c.raceTime = 0.f;
+				m_standDirty = 1;
 				if (c.lap >= m_lapsTarget) {
-					c.finished = 1; c.finishTime = m_raceClock;
-					if (c.isPlayer) {
-						m_phase = PHASE_FINISH; m_podiumT = 0.f;
-						m_clearBakeText = LL14(L"FINISH!", L"FINISH!", L"ARRIVÉE!", L"ARRIVO!", L"¡META!", L"피니시!", L"完赛!", L"نهاية!", L"ФИНИШ!", L"ZIEL!", L"CHEGADA!", L"FINISH!", L"META!", L"BİTİŞ!");
-						m_clearBakeA=1.f; m_clearDirty=1; m_overlayHold = 99.f;
+					if (demo) {
+						c.lap = 0; // デモは周回し続けてステージを見せる
+					} else {
+						c.finished = 1; c.finishTime = m_raceClock;
+						if (c.isPlayer) {
+							m_phase = PHASE_FINISH; m_podiumT = 0.f;
+							m_clearBakeText = LL14(L"FINISH!", L"FINISH!", L"ARRIVÉE!", L"ARRIVO!", L"¡META!", L"피니시!", L"完赛!", L"نهاية!", L"ФИНИШ!", L"ZIEL!", L"CHEGADA!", L"FINISH!", L"META!", L"BİTİŞ!");
+							m_clearBakeA=1.f; m_clearDirty=1; m_overlayHold = 99.f;
+						}
 					}
 				} else if (c.isPlayer && m_phase == PHASE_RACE) {
 					wchar_t lapBuf[32];
@@ -2600,7 +2950,24 @@ void CSoft3DRaceDlg::TickPhysics(float dt)
 	}
 
 	if (m_phase == PHASE_RACE) m_raceClock += dt;
+	else if (demo) m_raceClock += dt;
 	UpdateRanks();
+}
+
+void CSoft3DRaceDlg::TickDemo(float dt)
+{
+	m_demoCamT = S3rNormAngle(m_demoCamT + dt * 0.18f);
+	TickPhysics(dt);
+	TickItems(dt);
+	// デモ表示は薄く維持（スタート誘導）
+	if (m_clearBakeA < 0.70f) {
+		m_clearBakeText = LL14(L"スタートで開始", L"Press Start", L"Démarrer", L"Avvia", L"Iniciar",
+			L"시작", L"按开始", L"Start", L"Старт", L"Start", L"Iniciar", L"Start", L"Start", L"Başlat");
+		m_clearBakeA = 0.95f; m_clearDirty = 1;
+	} else {
+		m_clearBakeA = max(0.70f, m_clearBakeA - dt * 0.08f);
+		m_clearDirty = 1;
+	}
 }
 
 void CSoft3DRaceDlg::UpdateStatus()
@@ -2609,8 +2976,13 @@ void CSoft3DRaceDlg::UpdateStatus()
 	CString s;
 	S3rCraft& pl=m_crafts[0];
 	float kmh = SpeedToKmh(pl.vx, pl.vy, pl.vz);
-	s.Format(_T("Lap %d/%d  Rank %d/%d  HP %.0f  Thrust %.0f  %.0f km/h  Time %.1fs"),
-		min(m_lapsTarget, pl.lap+1), m_lapsTarget, pl.rank, m_craftN, pl.hp, pl.fuel, kmh, m_raceClock);
+	if (m_phase == PHASE_DEMO) {
+		s.Format(_T("DEMO  Lap %d  Rank %d/%d  %.0f km/h  — Start to race"),
+			pl.lap + 1, pl.rank, m_craftN, kmh);
+	} else {
+		s.Format(_T("Lap %d/%d  Rank %d/%d  HP %.0f  Thrust %.0f  %.0f km/h  Time %.1fs"),
+			min(m_lapsTarget, pl.lap+1), m_lapsTarget, pl.rank, m_craftN, pl.hp, pl.fuel, kmh, m_raceClock);
+	}
 	m_status.SetWindowText(s);
 	m_hudDirty = 1;
 }
@@ -2634,6 +3006,40 @@ void CSoft3DRaceDlg::EnsureHudBake()
 	m_hudDirty = 0;
 }
 
+void CSoft3DRaceDlg::EnsureStandingsBake()
+{
+	if (!m_view.m_ready) return;
+	if (!m_standDirty && m_view.m_srvStand) return;
+	CS3rView::S3rStandRow rows[S3R_MAX_CRAFT];
+	int order[S3R_MAX_CRAFT];
+	for (int i = 0; i < m_craftN; i++) order[i] = i;
+	for (int i = 0; i < m_craftN; i++) for (int j = i + 1; j < m_craftN; j++)
+		if (m_crafts[order[i]].rank > m_crafts[order[j]].rank) { int t = order[i]; order[i] = order[j]; order[j] = t; }
+	for (int i = 0; i < m_craftN; i++) {
+		S3rCraft& c = m_crafts[order[i]];
+		CS3rView::S3rStandRow& r = rows[i];
+		memset(&r, 0, sizeof(r));
+		wcsncpy_s(r.name, c.name, _TRUNCATE);
+		r.rank = c.rank > 0 ? c.rank : (i + 1);
+		r.isPlayer = c.isPlayer;
+		r.cr = kCraftColors[c.colorIdx][0];
+		r.cg = kCraftColors[c.colorIdx][1];
+		r.cb = kCraftColors[c.colorIdx][2];
+		// 常に直近3枠（未計測は ----）。4周目以降は枠が LAP2/3/4… とずれる
+		int nDone = c.lapTimesN;
+		int start = 0;
+		if (nDone > 3) start = nDone - 3;
+		r.lapShowN = 3;
+		for (int k = 0; k < 3; k++) {
+			r.lapNo[k] = start + k + 1;
+			int src = start + k;
+			r.lapSec[k] = (src < nDone) ? c.lapTimes[src] : -1.f;
+		}
+	}
+	m_view.BakeStandingsTexture(rows, m_craftN);
+	m_standDirty = 0;
+}
+
 void CSoft3DRaceDlg::RenderScene()
 {
 	if (!m_view.m_ready || m_knotN < 4) return;
@@ -2645,13 +3051,13 @@ void CSoft3DRaceDlg::RenderScene()
 		m_clearDirty = 0;
 	}
 	EnsureHudBake();
+	EnsureStandingsBake();
 
 	S3rCraft& pl = m_crafts[0];
 	float px,py,pz,tx,ty,tz,nx,ny,nz,bx,by,bz;
 	SplineFrame(pl.pathT, px,py,pz, tx,ty,tz, nx,ny,nz, bx,by,bz);
 	float noseX=sinf(pl.yaw)*cosf(pl.pitch), noseY=sinf(pl.pitch), noseZ=cosf(pl.yaw)*cosf(pl.pitch);
 	float back = m_lookback ? -1.f : 1.f;
-	// 斜め上の追従: 高さオフセットで上げ、カメラ角は浅く保って前方へまっすぐ見る
 	float camDist = 12.5f * m_camZoom;
 	float camH = (5.8f + m_camPitchOff * 10.f) * m_camZoom;
 	float yaw = pl.yaw + m_camYawOff + (m_lookback ? (float)M_PI : 0.f);
@@ -2659,26 +3065,47 @@ void CSoft3DRaceDlg::RenderScene()
 	float cy = pl.y + camH;
 	float cz = pl.z - cosf(yaw)*camDist*back;
 	float ax = pl.x + noseX * 9.0f * back;
-	// 注視点の上下は機体ピッチを弱めに反映（3D酔い対策）
 	float ay = pl.y + noseY * 0.55f * back + 1.4f;
 	float az = pl.z + noseZ * 9.0f * back;
+	if (m_phase == PHASE_PODIUM) {
+		// 表彰台正面からの遅延追従カメラ
+		cx = m_podiumBaseX; cy = m_podiumBaseY + 7.5f; cz = m_podiumBaseZ + 16.f;
+		ax = m_podiumBaseX; ay = m_podiumBaseY + 3.2f; az = m_podiumBaseZ;
+		m_camSmoothInit = 0; // 次レースでリセット
+	} else if (m_phase == PHASE_DEMO) {
+		// コース全体を見渡すオービット＋パック方面へ少し視線
+		float packX = 0.f, packY = 0.f, packZ = 0.f; int pn = 0;
+		for (int i = 0; i < m_craftN; i++) if (m_crafts[i].alive) {
+			packX += m_crafts[i].x; packY += m_crafts[i].y; packZ += m_crafts[i].z; pn++;
+		}
+		if (pn > 0) { packX /= (float)pn; packY /= (float)pn; packZ /= (float)pn; }
+		else { packX = m_demoMidX; packY = m_demoMidY; packZ = m_demoMidZ; }
+		float rad = m_demoRad * 1.12f + 36.f;
+		float elev = m_demoMidY + m_demoRad * 0.42f + 22.f + m_demoCamElev;
+		cx = m_demoMidX + cosf(m_demoCamT) * rad;
+		cy = elev;
+		cz = m_demoMidZ + sinf(m_demoCamT) * rad;
+		ax = S3rLerp(m_demoMidX, packX, 0.55f);
+		ay = S3rLerp(m_demoMidY + 3.5f, packY + 1.2f, 0.55f);
+		az = S3rLerp(m_demoMidZ, packZ, 0.55f);
+	}
 	if (!m_camSmoothInit) {
 		m_camSx = cx; m_camSy = cy; m_camSz = cz;
 		m_camAx = ax; m_camAy = ay; m_camAz = az;
 		m_camSmoothInit = 1;
 	} else {
-		// 水平は比較的追従、垂直は鈍く（上下突起でも画面が暴れにくい）
-		m_camSx = S3rLerp(m_camSx, cx, 0.22f);
-		m_camSy = S3rLerp(m_camSy, cy, 0.10f);
-		m_camSz = S3rLerp(m_camSz, cz, 0.22f);
-		m_camAx = S3rLerp(m_camAx, ax, 0.18f);
-		m_camAy = S3rLerp(m_camAy, ay, 0.08f);
-		m_camAz = S3rLerp(m_camAz, az, 0.18f);
+		// 左右も遅れて追う（急な視点振りで酔わない）
+		m_camSx = S3rLerp(m_camSx, cx, 0.11f);
+		m_camSy = S3rLerp(m_camSy, cy, 0.07f);
+		m_camSz = S3rLerp(m_camSz, cz, 0.11f);
+		m_camAx = S3rLerp(m_camAx, ax, 0.10f);
+		m_camAy = S3rLerp(m_camAy, ay, 0.06f);
+		m_camAz = S3rLerp(m_camAz, az, 0.10f);
 	}
 	cx = m_camSx; cy = m_camSy; cz = m_camSz;
 	ax = m_camAx; ay = m_camAy; az = m_camAz;
 
-	const float fov = (58.f / m_camZoom) * (float)(M_PI/180.0);
+	const float fov = ((m_phase == PHASE_DEMO) ? 68.f : 58.f) / m_camZoom * (float)(M_PI/180.0);
 	const float zNear = 0.2f, zFar = 700.f;
 	S3RFrameCB cb = {};
 	cb.viewProj = S3rMatMul(S3rLookAt(cx,cy,cz, ax,ay,az, 0,1,0), S3rPerspective(fov, (float)w/(float)h, zNear, zFar));
@@ -2846,6 +3273,25 @@ void CSoft3DRaceDlg::RenderScene()
 	}
 	// crafts — キャラ専用テクスチャパス
 	phase=2;
+	// 表彰台（1位中央・2位左・3位右）
+	if (m_phase == PHASE_PODIUM) {
+		auto box = [&](float x, float y0, float z, float hx, float hy, float hz, float r, float g, float b) {
+			float y1 = y0 + hy;
+			// top
+			patch(x-hx,y1,z-hz, x+hx,y1,z-hz, x+hx,y1,z+hz, x-hx,y1,z+hz, 0,1,0, 0,0,1,1, r,g,b,1);
+			// sides
+			patch(x-hx,y0,z+hz, x+hx,y0,z+hz, x+hx,y1,z+hz, x-hx,y1,z+hz, 0,0,1, 0,0,1,1, r*.85f,g*.85f,b*.85f,1);
+			patch(x+hx,y0,z-hz, x-hx,y0,z-hz, x-hx,y1,z-hz, x+hx,y1,z-hz, 0,0,-1, 0,0,1,1, r*.75f,g*.75f,b*.75f,1);
+			patch(x-hx,y0,z-hz, x-hx,y0,z+hz, x-hx,y1,z+hz, x-hx,y1,z-hz, -1,0,0, 0,0,1,1, r*.7f,g*.7f,b*.7f,1);
+			patch(x+hx,y0,z+hz, x+hx,y0,z-hz, x+hx,y1,z-hz, x+hx,y1,z+hz, 1,0,0, 0,0,1,1, r*.9f,g*.9f,b*.9f,1);
+		};
+		phase = 1;
+		float y0 = m_podiumBaseY;
+		box(m_podiumBaseX,      y0, m_podiumBaseZ, 1.6f, 4.2f, 1.6f, 1.f, .85f, .25f);   // 1st gold
+		box(m_podiumBaseX-5.2f, y0, m_podiumBaseZ, 1.5f, 2.8f, 1.5f, .72f, .76f, .82f); // 2nd silver
+		box(m_podiumBaseX+5.2f, y0, m_podiumBaseZ, 1.5f, 1.8f, 1.5f, .78f, .48f, .28f); // 3rd bronze
+		phase = 2;
+	}
 	for (int i=0;i<m_craftN;i++){
 		S3rCraft& c=m_crafts[i];
 		float cr=kCraftColors[c.colorIdx][0], cg=kCraftColors[c.colorIdx][1], cb=kCraftColors[c.colorIdx][2];
@@ -3049,9 +3495,9 @@ void CSoft3DRaceDlg::RenderScene()
 			hv[nh++]={x0,y1,0,0,1,1,1,a}; hv[nh++]={x1,y1,1,0,1,1,1,a}; hv[nh++]={x1,y0,1,1,1,1,1,a};
 			hv[nh++]={x0,y1,0,0,1,1,1,a}; hv[nh++]={x1,y0,1,1,1,1,1,a}; hv[nh++]={x0,y0,0,1,1,1,1,a};
 		};
-		// minimap
+		// minimap（右上）＋順位パネル（その下）
 		if (savedata.s3r_show_map) {
-			float mx0=0.62f, my0=0.55f, mx1=0.96f, my1=0.94f;
+			float mx0=0.62f, my0=0.62f, mx1=0.96f, my1=0.94f;
 			hq(mx0,my0,mx1,my1, 0.05f,0.07f,0.12f,0.55f);
 			const float s=1.f/220.f;
 			for (int i=0;i<S3R_PATH_SAMPLES-1;i+=4){
@@ -3110,6 +3556,19 @@ void CSoft3DRaceDlg::RenderScene()
 		if (m_view.m_srvHud) {
 			ht(-0.96f, 0.42f, -0.28f, 0.78f, 0.92f);
 			flushHud(m_view.m_srvHud);
+		}
+		// ミニマップ下にマージン → 残り縦を最大12台で等分。実台数ぶんだけ上から積む
+		if (m_view.m_srvStand && (m_phase == PHASE_RACE || m_phase == PHASE_COUNTDOWN || m_phase == PHASE_FINISH || m_phase == PHASE_PODIUM || m_phase == PHASE_DEMO)) {
+			const float mapBot = 0.62f; // ミニマップ下端（描画と揃える）
+			const float availTop = mapBot - 0.04f; // 少しマージン
+			const float availBot = -0.96f;
+			const float slotH = (availTop - availBot) / 12.f;
+			const int n = max(1, min(m_craftN, 12));
+			float panelH = slotH * (float)n;
+			float sy1 = availTop;
+			float sy0 = sy1 - panelH;
+			ht(0.58f, sy0, 0.99f, sy1, 0.98f);
+			flushHud(m_view.m_srvStand);
 		}
 	}
 
@@ -3288,8 +3747,8 @@ BOOL CSoft3DRaceDlg::OnInitDialog()
 
 	if (m_tooltip.Create(this, TTS_ALWAYSTIP | TTS_NOPREFIX)) {
 		m_tooltip.Activate(TRUE);
-		m_tooltip.AddTool(&m_start, LL14(L"カウントダウン後にレース開始", L"Start race after countdown", L"Démarrer après le compte à rebours", L"Avvia dopo il conto alla rovescia", L"Iniciar tras la cuenta atrás", L"카운트다운 후 시작", L"倒计时后开始", L"Start after countdown", L"Старт после отсчёта", L"Start nach Countdown", L"Iniciar após contagem", L"Start na countdown", L"Start po odliczaniu", L"Geri sayımdan sonra başlat"));
-		m_tooltip.AddTool(&m_gen, LL14(L"コースを新規生成", L"Generate a new course", L"Générer un nouveau parcours", L"Genera un nuovo percorso", L"Generar un nuevo recorrido", L"새 코스 생성", L"生成新赛道", L"Generate course", L"Создать трассу", L"Strecke erzeugen", L"Gerar percurso", L"Parcours genereren", L"Generuj tor", L"Parkur oluştur"));
+		m_tooltip.AddTool(&m_start, LL14(L"デモを終えてカウントダウン開始", L"End demo and start countdown", L"Fin démo + compte à rebours", L"Fine demo + conto alla rovescia", L"Fin demo + cuenta atrás", L"데모 종료 후 카운트다운", L"结束演示并倒计时", L"End demo, start countdown", L"Конец демо и отсчёт", L"Demo beenden und Countdown", L"Fim da demo e contagem", L"Demo uit, dan countdown", L"Koniec demo i odliczanie", L"Demoyu bitir, geri sayım"));
+		m_tooltip.AddTool(&m_gen, LL14(L"コース再生成（直後にデモ走行）", L"Regenerate course (then demo lap)", L"Régénérer (puis démo)", L"Rigenera (poi demo)", L"Regenerar (luego demo)", L"코스 재생성(직후 데모)", L"重新生成（随后演示）", L"Regen then demo", L"Новая трасса → демо", L"Strecke neu → Demo", L"Gerar de novo → demo", L"Opnieuw → demo", L"Nowa trasa → demo", L"Yeniden oluştur → demo"));
 		m_tooltip.AddTool(&m_invert, LL14(L"マウス上下とパッド上下のピッチを反転します", L"Invert mouse and pad pitch (up/down)", L"Inverser le tangage souris/manette", L"Inverte pitch mouse/pad", L"Invertir pitch de ratón/mando", L"마우스·패드 상하 피치 반전", L"翻转鼠标/手柄俯仰", L"Invert mouse/pad pitch", L"Инверсия pitch мыши/пада", L"Maus-/Pad-Pitch umkehren", L"Inverter pitch do mouse/pad", L"Muis-/pad-pitch omkeren", L"Odwróć pitch myszy/pada", L"Fare/pad pitch ters çevir"));
 	}
 
@@ -3340,7 +3799,9 @@ void CSoft3DRaceDlg::TickFrame()
 	m_anim += dt;
 
 	if (m_phase == PHASE_COUNTDOWN) TickCountdown(dt);
-	else if (m_phase == PHASE_RACE || m_phase == PHASE_FINISH) {
+	else if (m_phase == PHASE_DEMO) {
+		TickDemo(dt);
+	} else if (m_phase == PHASE_RACE || m_phase == PHASE_FINISH) {
 		TickPhysics(dt);
 		TickItems(dt);
 		// transition to podium
@@ -3352,8 +3813,12 @@ void CSoft3DRaceDlg::TickFrame()
 				int order[S3R_MAX_CRAFT]; for (int i=0;i<m_craftN;i++) order[i]=i;
 				for (int i=0;i<m_craftN;i++) for (int j=i+1;j<m_craftN;j++) if (m_crafts[order[i]].rank > m_crafts[order[j]].rank) { int t=order[i]; order[i]=order[j]; order[j]=t; }
 				m_podiumOrder[0]=order[0]; m_podiumOrder[1]=m_craftN>1?order[1]:order[0]; m_podiumOrder[2]=m_craftN>2?order[2]:order[0];
+				SplinePoint(0.f, m_podiumBaseX, m_podiumBaseY, m_podiumBaseZ);
+				m_podiumBaseY += 2.5f;
+				m_camSmoothInit = 0;
 				m_clearBakeText = LL14(L"表彰式", L"Podium", L"Podium", L"Podio", L"Podio", L"시상식", L"领奖台", L"منصة", L"Подиум", L"Podium", L"Pódio", L"Podium", L"Podium", L"Podyum");
 				m_clearBakeA=1.f; m_clearDirty=1;
+				m_standDirty=1;
 				for (int i = 0; i < 96; i++) m_confetti[i][5] = 0.f;
 			}
 		}
