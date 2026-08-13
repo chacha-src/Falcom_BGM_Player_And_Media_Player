@@ -343,11 +343,12 @@ avi, mpgなどのDirectShow対応動画を再生可能です。Windows Vista以�
 ## おまけ：Soft3D迷路
 メディアプレイヤー下段の **迷路** ボタンから開ける、DirectX11 の一人称迷路です。BGMを聴きながらの息抜き用で、本編の再生機能とは別枠のおまけです。
 
-- **操作:** WASD／矢印で移動、Q・E（または ←→）で旋回。右クリックでサイズ再生成・ミニマップ・アイテム種類など
-- **マップ:** 右上ミニマップ。SPACE押しっぱなし／ホイールクリックで全体マップ（地下あり時は ←→ やホイールで階層切替）
-- **曲連動:** 通路の浮遊球でテンポ↑／ピッチ↑↓／次曲／EQ。窓は通過不可の飾り
-- **地下:** 「地下」コンボで 0〜3F。橙の階段＝下り、水色＝上り。斜めに昇降し、階段穴から上下階を垣間見えます（地下は天井あり）。ゴールは最下層
-- **見た目:** 地上は草木、地下1〜3は石／金属／暗い岩など階ごとの壁・床。進行は自動保存され、開き直すと続きから
+- **操作:** WASD／矢印で移動、Q・E（または ←→）で旋回。右クリックでサイズ再生成・ミニマップ・アイテム種類など。?ヘルプに Soft3D／説明の凡例表あり
+- **マップ:** 右上ミニマップ。SPACE押しっぱなし／ホイールクリックで全体マップ（地下あり時は ←→ やホイールで階層切替）。壁は地図上で太めに表示
+- **曲連動:** 浮遊球でテンポ↑↓／ピッチ↑↓／前後曲／音量／EQ・平坦／リバーブ／クロスフェード／ランダム切替など。全階に配置。窓は通過不可の飾り
+- **地下:** 「地下」コンボで 0〜3F。壁・床のモチーフは階ごと（地上=レンガ／B1=湿った石／B2=錆び金属／B3=火山岩）。橙の階段＝下り、水色＝上り（斜め2マス）。半透明トラップ（粘液・棘・氷・闇、ワープなし）あり。旧セーブの同一マス階段は自動再生成。ゴールは難易度に応じてどこかの階
+- **難易度:** 超簡単〜超難しい。難しいほど細い通路・階段が多く上下往復し、トラップも増えやすい
+- **見た目:** 地上は草木付きレンガ、地下は階ごとの壁・床・霧。進行は自動保存され、開き直すと続きから
 
 ## 注意事項
 - **Brandish4 および ガガーブトリロジー**については、WAVファイルをHDDへコピーする必要があります（フォルダ名は `WAVE`, `WAVEDV`, `WAVEDVD` などゲームにより異なります）。
@@ -652,7 +653,8 @@ A first-person DirectX 11 maze opened from the media player’s bottom-bar **Maz
 - **Controls:** WASD / arrows to move, Q·E (or ←→) to turn. Right-click for regenerate size, minimap, item types, and more
 - **Maps:** Top-right minimap. Hold SPACE or middle-click for the full overview (with basements: ←→ or mouse wheel switches floors)
 - **Track links:** Floating orbs adjust tempo↑ / pitch↑↓ / next track / EQ. Windows are decorative and block movement
-- **Basements:** The basement combo adds 0–3 underground floors. Orange stairs go down, cyan stairs go up. You move diagonally between floors and can glimpse adjacent levels through stair shafts (basements have ceilings). The goal sits on the deepest floor
+- **Basements:** The basement combo adds 0–3 underground floors. Orange stairs go down, cyan stairs go up. You move diagonally between floors and can glimpse adjacent levels through stair shafts (basements have ceilings). The goal sits on a floor chosen by difficulty
+- **Difficulty:** Very easy–very hard. Affects corridor width, stair count, and 3D path length to the goal
 - **Look:** Ground floor uses greenery; B1–B3 use stone / metal / dark rock motifs for walls and floors. Progress autosaves and resumes when you reopen the maze
 
 ## Important Notes

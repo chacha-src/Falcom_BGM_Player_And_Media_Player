@@ -522,7 +522,7 @@ BOOL COggApp::InitInstance()
 	savedata.s3m_seed = 0;
 	savedata.s3m_minimap = 10;
 	savedata.s3m_show_map = 1;
-	savedata.s3m_item_mask = 63;
+	savedata.s3m_item_mask = 16383;
 	savedata.s3m_have_run = 0;
 	savedata.s3m_run_n = 0;
 	savedata.s3m_run_px = 0;
@@ -534,6 +534,9 @@ BOOL COggApp::InitInstance()
 	savedata.s3m_bob = 1;
 	savedata.s3m_fov = 1;
 	savedata.s3m_basements = 0;
+	savedata.s3m_zoom = 100;
+	savedata.s3m_map_zoom = 100;
+	savedata.s3m_difficulty = 2;
 	savedata.sm_mic_device[0] = 0;
 	savedata.sm_response = 1;
 	savedata.dig_cap_device[0] = 0;
@@ -934,14 +937,14 @@ BOOL COggApp::InitInstance()
 		savedata.s3m_seed = 0;
 		savedata.s3m_minimap = 10;
 		savedata.s3m_show_map = 1;
-		savedata.s3m_item_mask = 63;
-		savedata.s3m_have_run = 0;
-		savedata.s3m_run_n = 0;
-		savedata.s3m_run_px = 0;
-		savedata.s3m_run_pz = 0;
-		savedata.s3m_run_yaw = 0;
-		savedata.s3m_run_won = 0;
-		savedata.mpBotToolsFlags |= 256; // Soft3D迷路ボタンを下段に出す
+	savedata.s3m_item_mask = 16383;
+	savedata.s3m_have_run = 0;
+	savedata.s3m_run_n = 0;
+	savedata.s3m_run_px = 0;
+	savedata.s3m_run_pz = 0;
+	savedata.s3m_run_yaw = 0;
+	savedata.s3m_run_won = 0;
+	savedata.mpBotToolsFlags |= 256; // Soft3D迷路ボタンを下段に出す
 	} else {
 		// 旧: 0..3 のインデックス → 実寸へ
 		if (savedata.s3m_size >= 0 && savedata.s3m_size <= 3) {
@@ -956,7 +959,7 @@ BOOL COggApp::InitInstance()
 		if (datFileSize < (int)(offsetof(save, s3m_minimap) + sizeof(savedata.s3m_minimap))) {
 			savedata.s3m_minimap = 10;
 			savedata.s3m_show_map = 1;
-			savedata.s3m_item_mask = 63;
+			savedata.s3m_item_mask = 16383;
 			savedata.s3m_have_run = 0;
 			savedata.s3m_run_n = 0;
 			savedata.mpBotToolsFlags |= 256;
@@ -964,7 +967,12 @@ BOOL COggApp::InitInstance()
 			if (savedata.s3m_minimap < 8 || savedata.s3m_minimap > 16) savedata.s3m_minimap = 10;
 			if (savedata.s3m_minimap & 1) savedata.s3m_minimap++;
 			if (savedata.s3m_show_map) savedata.s3m_show_map = 1;
-			if (savedata.s3m_item_mask <= 0 || savedata.s3m_item_mask > 63) savedata.s3m_item_mask = 63;
+			if (savedata.s3m_item_mask <= 0)
+				savedata.s3m_item_mask = 16383;
+			else if (savedata.s3m_item_mask == 63)
+				savedata.s3m_item_mask = 16383; // 旧「全アイテム」→新種含む
+			else if (savedata.s3m_item_mask > 16383)
+				savedata.s3m_item_mask = 16383;
 			if (savedata.s3m_have_run) savedata.s3m_have_run = 1;
 		}
 	}
@@ -986,6 +994,15 @@ BOOL COggApp::InitInstance()
 		savedata.s3m_basements = 0;
 	else if (savedata.s3m_basements < 0 || savedata.s3m_basements > 3)
 		savedata.s3m_basements = 0;
+	if (datFileSize < (int)(offsetof(save, s3m_zoom) + sizeof(savedata.s3m_zoom))
+		|| savedata.s3m_zoom < 50 || savedata.s3m_zoom > 250)
+		savedata.s3m_zoom = 100;
+	if (datFileSize < (int)(offsetof(save, s3m_map_zoom) + sizeof(savedata.s3m_map_zoom))
+		|| savedata.s3m_map_zoom < 50 || savedata.s3m_map_zoom > 250)
+		savedata.s3m_map_zoom = 100;
+	if (datFileSize < (int)(offsetof(save, s3m_difficulty) + sizeof(savedata.s3m_difficulty))
+		|| savedata.s3m_difficulty < 0 || savedata.s3m_difficulty > 4)
+		savedata.s3m_difficulty = 2;
 	if (datFileSize < (int)(offsetof(save, sm_response) + sizeof(savedata.sm_response))) {
 		savedata.sm_mic_device[0] = 0;
 		savedata.sm_response = 1;

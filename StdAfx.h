@@ -711,7 +711,7 @@ struct save{
 	int s3m_seed;               // 0=時刻
 	int s3m_minimap;            // 8/10/12/14/16（近傍マス数）
 	int s3m_show_map;           // 1=ミニマップ表示
-	int s3m_item_mask;          // bit0=tempo 1=pitch↑ 2=pitch↓ 3=next 4=eq 5=window
+	int s3m_item_mask;          // bit0..=tempo↑…window…tempo↓/prev/vol/reverb/xfade/eqflat/random (ITEM_ALL=16383)
 	int s3m_have_run;           // 1=自動保存された進行あり（本体は別ファイル）
 	int s3m_run_n;
 	float s3m_run_px, s3m_run_pz, s3m_run_yaw;
@@ -721,8 +721,11 @@ struct save{
 	int play_xfade;            // 1=有効（連続再生時のみ発動）
 	int play_xfade_sec100;     // 秒×100（5.5秒→550、既定500）
 	int s3m_bob;               // 1=歩行時カメラ揺れ
-	int s3m_fov;               // 0=55°, 1=70°, 2=90°
+	int s3m_fov;               // 0=55°, 1=70°, 2=90°（基準。ホイールズームと合成）
 	int s3m_basements;         // 地下階数 0..3（0=地上のみ）
+	int s3m_zoom;              // 視点ズーム×100（50..250、100=等倍。大きいほど拡大＝狭いFOV）
+	int s3m_map_zoom;          // 全体マップ／ミニマップ拡大×100（50..250、100=等倍）
+	int s3m_difficulty;        // 0=超簡単 … 4=超難しい（2=普通）
 };
 extern save savedata;
 /* コード間隔(ms)。16..500。旧.dat や未設定は 25。 */

@@ -169,13 +169,33 @@ public:
 		CELL_WINDOW = 9,
 		CELL_STAIRS_DOWN = 10,
 		CELL_STAIRS_UP = 11,
+		CELL_TEMPO_DN = 12,
+		CELL_PREV = 13,
+		CELL_VOL_UP = 14,
+		CELL_VOL_DN = 15,
+		CELL_REVERB = 16,
+		CELL_XFADE = 17,
+		CELL_EQ_FLAT = 18,
+		CELL_RANDOM = 19,
+		CELL_SLIME = 20,   // 粘液：移動遅延（半透明・消えず）
+		CELL_SPIKE = 21,   // 棘：進入マスから1マス戻る（旧SPIN枠を流用）
+		CELL_ICE = 22,     // 氷：進入方向へ1マス滑る
+		CELL_DARK = 23,    // 闇：一時的に視界が狭まる
 		ITEM_TEMPO = 1,
 		ITEM_PITCH_UP = 2,
 		ITEM_PITCH_DN = 4,
 		ITEM_NEXT = 8,
 		ITEM_EQ = 16,
 		ITEM_WINDOW = 32,
-		ITEM_ALL = 63,
+		ITEM_TEMPO_DN = 64,
+		ITEM_PREV = 128,
+		ITEM_VOL_UP = 256,
+		ITEM_VOL_DN = 512,
+		ITEM_REVERB = 1024,
+		ITEM_XFADE = 2048,
+		ITEM_EQ_FLAT = 4096,
+		ITEM_RANDOM = 8192,
+		ITEM_ALL = 16383,
 		CLEAR_IDLE = 0,
 		CLEAR_TEXT_IN = 1,
 		CLEAR_TEXT_HOLD = 2,
@@ -185,7 +205,13 @@ public:
 		FLOORFX_IDLE = 0,
 		FLOORFX_IN = 1,
 		FLOORFX_HOLD = 2,
-		FLOORFX_OUT = 3
+		FLOORFX_OUT = 3,
+		DIFF_VERY_EASY = 0,
+		DIFF_EASY = 1,
+		DIFF_NORMAL = 2,
+		DIFF_HARD = 3,
+		DIFF_VERY_HARD = 4,
+		DIFF_COUNT = 5
 	};
 protected:
 	virtual void DoDataExchange(CDataExchange*);
@@ -212,15 +238,22 @@ protected:
 	void SetSizeToUi(int n);
 	int ReadBasementsFromUi();
 	void SetBasementsToUi(int b);
+	int ReadDifficultyFromUi();
+	void SetDifficultyToUi(int d);
 	void GenerateMaze();
 	void GenerateMazeWithSeed(DWORD seed, int forceSize = -1);
 	void GenerateOneFloor(int f);
 	void PlaceStairsAndGoal();
+	BOOL MazeWalkable(int f, int x, int z) const;
+	BOOL FindStairPartner(int f, int x, int z, int& outF, int& outX, int& outZ) const;
+	BOOL StairsLayoutModern() const;
+	int PickGoalByDifficulty(int sx, int sz, int& outX, int& outZ, int& outF);
 	void RenderScene();
 	void TickMove(float dt);
 	void MarkVisited();
 	void TryPickup();
 	void ApplyItem(int kind);
+	void TryTrapEnter();
 	void RestoreAudioBaseline();
 	void CaptureAudioBaseline();
 	void UpdateStatus();
@@ -229,7 +262,7 @@ protected:
 	void BeginClearSequence();
 	void TickClear(float dt);
 	void ResetFloorFx();
-	void BeginFloorChange(int newFloor);
+	void BeginFloorChange(int newFloor, int landX, int landZ);
 	void TickFloorFx(float dt);
 	void RefreshFloorTex();
 	CString FloorLabel(int f) const;
@@ -258,6 +291,11 @@ public:
 	BOOL InputTurn(int dir) { return IsOverviewActive() || m_floorFx != FLOORFX_IDLE ? FALSE : TryTurn(dir); }
 	BOOL InputStep(int mx, int mz) { return IsOverviewActive() || m_floorFx != FLOORFX_IDLE ? FALSE : TryStep(mx, mz); }
 	void InputOverviewFloorDelta(int d) { OverviewFloorDelta(d); }
+	void InputFovZoom(int dir);
+	void InputMapZoom(int dir);
+	BOOL HitTestMinimap(CPoint clientPt) const;
+	float EffectiveFovDeg() const;
+	float MapZoomScale() const;
 	virtual BOOL OnInitDialog();
 	virtual void OnOK() {}
 	virtual void OnCancel() { DestroyWindow(); }
@@ -267,6 +305,7 @@ public:
 	afx_msg void OnSizeChanged();
 	afx_msg void OnSizeEditChange();
 	afx_msg void OnBaseChanged();
+	afx_msg void OnDiffChanged();
 	afx_msg void OnTimer(UINT_PTR);
 	afx_msg void OnSize(UINT, int, int);
 	afx_msg void OnShowWindow(BOOL bShow, UINT nStatus);
@@ -275,8 +314,8 @@ public:
 	void ShowContextMenu(CPoint screenPt);
 
 	CCustomStandardButton m_help, m_gen, m_close;
-	CCustomStatic m_sizeL, m_baseL, m_hint, m_status;
-	CCustomComboBox m_size, m_base;
+	CCustomStatic m_sizeL, m_baseL, m_diffL, m_hint, m_status;
+	CCustomComboBox m_size, m_base, m_diff;
 	CS3mView m_view;
 	CToolTipCtrl m_tooltip;
 
@@ -314,10 +353,18 @@ public:
 	float m_stairShiftX;
 	float m_stairShiftZ;
 	float m_stairCamY;
+	float m_stairStartX, m_stairStartZ;
+	float m_stairLandX, m_stairLandZ;
 	float m_miniFade;
 	int m_miniFadeFrom;
 	int m_miniFadeTo;
 	int m_itemsLeft;
+	int m_trapCellX, m_trapCellZ;
+	float m_slowT;
+	int m_lastStepMx, m_lastStepMz;
+	int m_iceSlideLeft;
+	float m_stepFromX, m_stepFromZ;
+	float m_darkT;
 	int m_baseTempoPos;
 	int m_basePitchPos;
 	DWORD m_lastTick;
