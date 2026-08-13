@@ -475,6 +475,7 @@ void SetupTaskbarThumbButtons(HWND hwnd, BOOL mediaPlayerMode);
 void RefreshTaskbarJumpList(BOOL mediaPlayerMode);
 void MpPushPlayHistory(LPCTSTR path, LPCTSTR displayName);
 void MpPersistSavedataQuick();
+void PlaylistEndModeFillCombo(CComboBox& cb);
 void MpMicMixRestartIfRunning();
 int MpMicPeakLevel(); // 0..1000
 void MpTaskbarReplay();

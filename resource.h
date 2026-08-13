@@ -134,6 +134,8 @@
 #define IDD_PF_HELP                     259
 #define IDD_SOFT3DMAZE                  260
 #define IDD_S3M_HELP                    261
+#define IDD_SOFT3DRACE                  270
+#define IDD_S3R_HELP                    271
 #define IDC_CRIGHT                      263
 #define IDC_CRIGHT13                    264
 #define IDC_CLEFT                       264
@@ -1228,13 +1230,39 @@
 #define IDC_S3M_DIFF                    4141
 #define IDC_MP_BOT_MAZE                 4141
 #define IDC_S3M_NAVI                    4190
+#define IDC_S3R_HELP                    4200
+#define IDC_S3R_AI_L                    4201
+#define IDC_S3R_AI                      4202
+#define IDC_S3R_OPP_L                   4203
+#define IDC_S3R_OPP                     4204
+#define IDC_S3R_LEN_L                   4205
+#define IDC_S3R_LEN                     4206
+#define IDC_S3R_LAPS_L                  4207
+#define IDC_S3R_LAPS                    4208
+#define IDC_S3R_THEME_L                 4209
+#define IDC_S3R_THEME                   4210
+#define IDC_S3R_START                   4211
+#define IDC_S3R_GEN                     4212
+#define IDC_S3R_HINT                    4213
+#define IDC_S3R_VIEW                    4214
+#define IDC_S3R_STATUS                  4215
+#define IDC_S3R_CLOSE                   4216
+#define IDC_MP_BOT_RACE                 4217
+#define IDC_S3R_INVERT_L                4218
+#define IDC_S3R_INVERT                  4219
 #define IDC_OGG_XFADE                   4142
 #define IDC_OGG_XFADE_SEC               4143
 #define IDC_OGG_XFADE_L                 4144
 #define IDC_MP_XFADE                    4145
 #define IDC_MP_XFADE_SEC                4146
 #define IDC_MP_XFADE_L                  4147
+#define IDC_MP_ENDMODE                  4148
+#define IDC_PL_ENDMODE                  4149
 #define ID_MP_MODE_XFADE                33240
+#define ID_MP_MODE_END_STOP             33250
+#define ID_MP_MODE_END_REPEAT           33251
+#define ID_MP_MODE_END_NEXT             33252
+#define ID_MP_MODE_END_CYCLE            33253
 #define ID_MENUITEM32771                32771
 #define ID_MENUITEM32772                32772
 #define ID_MENUITEM32773                32773
@@ -1498,6 +1526,8 @@
 #define ID_MP_PHOTOFRAME                33247
 #define ID_MP_SOFT3DMAZE                33248
 #define ID_MP_BOTVIS_MAZE               33249
+#define ID_MP_SOFT3DRACE                33254
+#define ID_MP_BOTVIS_RACE               33255
 #define ID_SC_LAYER_HIDE                39001
 #define ID_SC_LAYER_FIT                 39002
 #define ID_SC_LAYER_SCALE50             39003
@@ -1618,8 +1648,8 @@
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NEXT_RESOURCE_VALUE        268
-#define _APS_NEXT_COMMAND_VALUE         33250
-#define _APS_NEXT_CONTROL_VALUE         4148
+#define _APS_NEXT_COMMAND_VALUE         33254
+#define _APS_NEXT_CONTROL_VALUE         4150
 #define _APS_NEXT_SYMED_VALUE           104
 #endif
 #endif

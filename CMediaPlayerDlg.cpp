@@ -38,6 +38,7 @@
 #include "TunerPracticeDlg.h"
 #include "PhotoFrameDlg.h"
 #include "Soft3DMazeDlg.h"
+#include "Soft3DRaceDlg.h"
 #include "CDesktopLyricsWnd.h"
 #include "Douga.h"
 #include "MpPlayerAddons.h"
@@ -902,6 +903,8 @@ CMediaPlayerDlg::CMediaPlayerDlg(CWnd* pParent)
 	m_lastComboCount = -1;
 	m_plselDropExtent = 0;
 	m_plselLayoutDpi = 0.f;
+	m_endModeDropExtent = 0;
+	m_endModeLayoutDpi = 0.f;
 	m_lastMs2 = 0;
 	m_seekDragging = 0;
 	m_seekHoldPos = 0;
@@ -1079,6 +1082,7 @@ void CMediaPlayerDlg::DoDataExchange(CDataExchange* pDX)
 	MpDdxControl(pDX, IDC_MP_XFADE_SEC, m_xfadeSec);
 	MpDdxControl(pDX, IDC_MP_XFADE_L, m_xfadeL);
 	MpDdxControl(pDX, IDC_MP_PLSEL, m_plsel);
+	MpDdxControl(pDX, IDC_MP_ENDMODE, m_endMode);
 	MpDdxControl(pDX, IDC_MP_PLRENAME, m_plrename);
 	MpDdxControl(pDX, IDC_MP_PLDELETE, m_pldelete);
 	MpDdxControl(pDX, IDC_MP_LSUP, m_lsup);
@@ -1151,6 +1155,8 @@ BEGIN_MESSAGE_MAP(CMediaPlayerDlg, CCustomBlurDialogExBase)
 	ON_EN_KILLFOCUS(IDC_MP_XFADE_SEC, &CMediaPlayerDlg::OnPlayXfadeSec)
 	ON_CBN_SELCHANGE(IDC_MP_PLSEL, &CMediaPlayerDlg::OnPlSel)
 	ON_CBN_DROPDOWN(IDC_MP_PLSEL, &CMediaPlayerDlg::OnPlselDropdown)
+	ON_CBN_SELCHANGE(IDC_MP_ENDMODE, &CMediaPlayerDlg::OnEndModeSelchange)
+	ON_CBN_DROPDOWN(IDC_MP_ENDMODE, &CMediaPlayerDlg::OnEndModeDropdown)
 	ON_BN_CLICKED(IDC_MP_PLRENAME, &CMediaPlayerDlg::OnPlRename)
 	ON_BN_CLICKED(IDC_MP_PLDELETE, &CMediaPlayerDlg::OnPlDelete)
 	ON_BN_CLICKED(IDC_MP_LSUP, &CMediaPlayerDlg::OnMoveTop)
@@ -1183,6 +1189,7 @@ BEGIN_MESSAGE_MAP(CMediaPlayerDlg, CCustomBlurDialogExBase)
 	ON_BN_CLICKED(IDC_MP_BOT_ALARM, &CMediaPlayerDlg::OnMpAlarm)
 	ON_BN_CLICKED(IDC_MP_BOT_REMOTE, &CMediaPlayerDlg::OnMpRemote)
 	ON_BN_CLICKED(IDC_MP_BOT_MAZE, &CMediaPlayerDlg::OnMpSoft3DMaze)
+	ON_BN_CLICKED(IDC_MP_BOT_RACE, &CMediaPlayerDlg::OnMpSoft3DRace)
 	ON_COMMAND(ID_MP_BOTVIS_DJ, &CMediaPlayerDlg::OnBotVisDj)
 	ON_COMMAND(ID_MP_BOTVIS_TAG, &CMediaPlayerDlg::OnBotVisTag)
 	ON_COMMAND(ID_MP_BOTVIS_BPM, &CMediaPlayerDlg::OnBotVisBpm)
@@ -1192,6 +1199,7 @@ BEGIN_MESSAGE_MAP(CMediaPlayerDlg, CCustomBlurDialogExBase)
 	ON_COMMAND(ID_MP_BOTVIS_ALARM, &CMediaPlayerDlg::OnBotVisAlarm)
 	ON_COMMAND(ID_MP_BOTVIS_REMOTE, &CMediaPlayerDlg::OnBotVisRemote)
 	ON_COMMAND(ID_MP_BOTVIS_MAZE, &CMediaPlayerDlg::OnBotVisMaze)
+	ON_COMMAND(ID_MP_BOTVIS_RACE, &CMediaPlayerDlg::OnBotVisRace)
 	ON_BN_CLICKED(IDC_MP_SAVEPARAM, &CMediaPlayerDlg::OnSaveParam)
 	ON_BN_CLICKED(IDC_MP_RESETDATA, &CMediaPlayerDlg::OnResetData)
 	ON_EN_KILLFOCUS(IDC_MP_KAISUU, &CMediaPlayerDlg::OnKaisuuKillFocus)
@@ -1285,6 +1293,7 @@ BEGIN_MESSAGE_MAP(CMediaPlayerDlg, CCustomBlurDialogExBase)
 	ON_COMMAND(ID_MP_TUNERPRACTICE, &CMediaPlayerDlg::OnMpTunerPractice)
 	ON_COMMAND(ID_MP_PHOTOFRAME, &CMediaPlayerDlg::OnMpPhotoFrame)
 	ON_COMMAND(ID_MP_SOFT3DMAZE, &CMediaPlayerDlg::OnMpSoft3DMaze)
+	ON_COMMAND(ID_MP_SOFT3DRACE, &CMediaPlayerDlg::OnMpSoft3DRace)
 	ON_COMMAND(ID_MP_VIDEO_EXTRACT, &CMediaPlayerDlg::OnMpVideoExtract)
 	ON_COMMAND(ID_MP_VIDEO_REPLACE, &CMediaPlayerDlg::OnMpVideoReplace)
 	ON_COMMAND(ID_MP_GAME_PRESET, &CMediaPlayerDlg::OnMpGamePreset)
@@ -1535,12 +1544,14 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 			m_botRemote.Create(_T("Remote"), WS_CHILD | BS_PUSHBUTTON | WS_TABSTOP, rc, this, IDC_MP_BOT_REMOTE);
 		if (!m_botMaze.GetSafeHwnd())
 			m_botMaze.Create(_T("Maze"), WS_CHILD | BS_PUSHBUTTON | WS_TABSTOP, rc, this, IDC_MP_BOT_MAZE);
+		if (!m_botRace.GetSafeHwnd())
+			m_botRace.Create(_T("Race"), WS_CHILD | BS_PUSHBUTTON | WS_TABSTOP, rc, this, IDC_MP_BOT_RACE);
 		{
 			// ショートカットは色で役割が分かるようにする（水色一色は避ける）
-			CCustomStandardButton* bots[9] = {
-				&m_botDj, &m_botTag, &m_botBpm, &m_botSleep, &m_botMirror, &m_botSsViz, &m_botAlarm, &m_botRemote, &m_botMaze
+			CCustomStandardButton* bots[10] = {
+				&m_botDj, &m_botTag, &m_botBpm, &m_botSleep, &m_botMirror, &m_botSsViz, &m_botAlarm, &m_botRemote, &m_botMaze, &m_botRace
 			};
-			const COLORREF botGrad[9][2] = {
+			const COLORREF botGrad[10][2] = {
 				{ RGB(240, 225, 255), RGB(200, 170, 245) }, // DJ: 紫
 				{ RGB(255, 235, 220), RGB(250, 195, 160) }, // Tag: 桃
 				{ RGB(220, 250, 235), RGB(155, 220, 190) }, // BPM: ミント
@@ -1550,8 +1561,9 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 				{ RGB(255, 230, 240), RGB(245, 180, 205) }, // Alarm: 薔薇
 				{ RGB(225, 250, 250), RGB(160, 215, 220) }, // Remote: 青緑
 				{ RGB(235, 245, 255), RGB(150, 190, 230) }, // Maze: 青
+				{ RGB(255, 230, 220), RGB(245, 150, 120) }, // Race: 珊瑚
 			};
-			for (int bi = 0; bi < 9; ++bi) {
+			for (int bi = 0; bi < 10; ++bi) {
 				if (!bots[bi]->GetSafeHwnd()) continue;
 				bots[bi]->SetGradation(botGrad[bi][0], botGrad[bi][1], 0, TRUE);
 			}
@@ -1700,7 +1712,11 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 	m_resetdata.SetWindowText(LL14(L"保存をリセット", L"Reset saved", L"Réinitialiser", L"Reimposta salvati", L"Restablecer", L"저장 초기화", L"重置已存", L"إعادة تعيين", L"Сброс сохран.", L"Zurücksetzen", L"Redefinir", L"Reset opgeslagen", L"Resetuj zapis", L"Kayıtı sıfırla"));
 	m_kaisuuL.SetWindowText(LL14(L"ループ回数", L"Loop count", L"Nombre de boucles", L"Conteggio loop", L"Cuenta de bucle", L"루프 횟수", L"循环次数", L"عدد الحلقات", L"Количество повторов", L"Schleifenzahler", L"Contagem de loop", L"Loopaantal", L"Liczba petli", L"Dongu sayisi"));
 	{
-		CString ks; ks.Format(_T("%d"), savedata.kaisuu > 0 ? savedata.kaisuu : 2);
+		CString ks;
+		if (savedata.loopKaisuu <= 0)
+			ks.Empty();
+		else
+			ks.Format(_T("%I64d"), savedata.loopKaisuu);
 		m_kaisuu.SetWindowText(ks);
 	}
 	m_grpInfo.SetWindowText(LL14(L"情報", L"Info", L"Info", L"Info", L"Info", L"정보", L"信息", L"معلومات", L"Инфо", L"Info", L"Info", L"Info", L"Info", L"Bilgi"));
@@ -1770,6 +1786,12 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 	if (m_cmdroll.GetSafeHwnd())
 		MpSetPushToggle(m_cmdroll, FALSE, RGB(200, 170, 255), RGB(160, 120, 240), RGB(230, 220, 255), RGB(200, 185, 250));
 	CCustomControlUtility::SetControlBackgroundColor(&m_plsel, COLOR_COMBO_BG);
+	if (m_endMode.GetSafeHwnd()) {
+		PlaylistEndModeFillCombo(m_endMode);
+		CCustomControlUtility::SetControlBackgroundColor(&m_endMode, COLOR_COMBO_BG);
+	}
+	if (m_random.GetSafeHwnd())
+		m_random.SetCheck(savedata.mpListRandom ? BST_CHECKED : BST_UNCHECKED);
 	// タイトルに淡いドロップシャドウで可愛く強調
 	m_title.SetDropShadow(RGB(255, 220, 235), 0, 1, 0, TRUE);
 
@@ -1896,6 +1918,8 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 		m_toolsToggle.SetFont(&m_fontChk, TRUE);
 	if (m_plrename.GetSafeHwnd())
 		m_plrename.SetFont(&m_fontChk, TRUE);
+	if (m_endMode.GetSafeHwnd())
+		m_endMode.SetFont(&m_fontChk, TRUE);
 	// Create() 動的ボタンはダイアログフォントを継がない → システム既定になり見た目がずれる
 	if (m_sortName.GetSafeHwnd()) m_sortName.SetFont(&m_fontChk, TRUE);
 	if (m_sortArt.GetSafeHwnd()) m_sortArt.SetFont(&m_fontChk, TRUE);
@@ -1914,6 +1938,7 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 	if (m_botAlarm.GetSafeHwnd()) m_botAlarm.SetFont(&m_fontChk, TRUE);
 	if (m_botRemote.GetSafeHwnd()) m_botRemote.SetFont(&m_fontChk, TRUE);
 	if (m_botMaze.GetSafeHwnd()) m_botMaze.SetFont(&m_fontChk, TRUE);
+	if (m_botRace.GetSafeHwnd()) m_botRace.SetFont(&m_fontChk, TRUE);
 	if (m_abA.GetSafeHwnd()) m_abA.SetFont(&m_fontChk, TRUE);
 	if (m_abB.GetSafeHwnd()) m_abB.SetFont(&m_fontChk, TRUE);
 	if (m_abClr.GetSafeHwnd()) m_abClr.SetFont(&m_fontChk, TRUE);
@@ -2010,8 +2035,8 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 	addTip(m_next, LL14(L"次の曲へ。", L"Next track.", L"Piste suivante.", L"Traccia successiva.", L"Pista siguiente.", L"다음 곡.", L"下一曲。", L"المقطع التالي.", L"Следующий трек.", L"Nachster Titel.", L"Proxima faixa.", L"Volgende track.", L"Następny utwór.", L"Sonraki parca."));
 	addTip(m_renzoku, LL14(L"プレイリストを順番に連続再生します。", L"Play the playlist continuously in order.", L"Lecture continue dans l'ordre.", L"Riproduzione continua in ordine.", L"Reproduccion continua en orden.", L"순서대로 연속 재생.", L"按顺序连续播放。", L"تشغيل متواصل بالترتيب.", L"Непрерывное воспроизведение по порядку.", L"Fortlaufend in Reihenfolge abspielen.", L"Reproducao continua em ordem.", L"Doorlopend afspelen op volgorde.", L"Odtwarzaj po kolei.", L"Sırayla sürekli çal."));
 	addTip(m_loop, LL14(L"選択した曲をループ再生します。", L"Loop the selected track.", L"Lire la piste en boucle.", L"Ripeti la traccia.", L"Repetir la pista.", L"선택한 곡을 반복 재생.", L"循环播放所选曲目。", L"تكرار المقطع المحدد.", L"Зациклить выбранный трек.", L"Ausgewahlten Titel wiederholen.", L"Repetir a faixa selecionada.", L"Geselecteerde track herhalen.", L"Zapętl wybrany utwór.", L"Seçili parçayı döngüye al."));
-	addTip(m_random, LL14(L"ランダム再生 / 順次再生を切り替えます。", L"Toggle random / sequential play.", L"Lecture aleatoire / sequentielle.", L"Riproduzione casuale / sequenziale.", L"Reproduccion aleatoria / secuencial.", L"랜덤 / 순차 재생 전환.", L"切换随机/顺序播放。", L"تبديل التشغيل العشوائي/المتسلسل.", L"Случайное / последовательное.", L"Zufall / Reihenfolge umschalten.", L"Aleatorio / sequencial.", L"Willekeurig / opeenvolgend.", L"Losowo / po kolei.", L"Rastgele / sıralı."));
-	addTip(m_xfade, LL14(L"連続再生時、曲のつなぎでフェードアウト／インします。", L"During continuous play, fade between tracks.", L"En lecture continue, fondu entre pistes.", L"In riproduzione continua, dissolve tra brani.", L"En reproduccion continua, fundido entre pistas.", L"연속 재생 시 곡 전환 페이드.", L"连续播放时曲间淡入淡出。", L"تلاشي بين المقاطع أثناء التشغيل المتتابع.", L"При непрерывном воспроизведении — кроссфейд.", L"Bei Dauerwiedergabe zwischen Titeln überblenden.", L"Na reproducao continua, crossfade entre faixas.", L"Bij doorlopend afspelen crossfaden.", L"Przy ciaglym odtwarzaniu przenikanie.", L"Surekli calmada parcilar arasi crossfade."));
+	addTip(m_random, LL14(L"リスト内の曲をランダムに再生します（同じ曲が連続しないようにします）。", L"Play tracks in the list at random (avoids repeating the same track).", L"Lire les pistes au hasard (sans repetter la meme).", L"Riproduce i brani a caso (evita lo stesso brano di seguito).", L"Reproduce pistas al azar (evita repetir la misma).", L"목록의 곡을 무작위로 재생합니다(같은 곡이 연속되지 않음).", L"随机播放列表中的曲目（避免连续同一曲）。", L"تشغيل عشوائي من القائمة (بدون تكرار نفس المقطع).", L"Случайное воспроизведение списка (без повтора того же трека).", L"Titel der Liste zufaellig (nicht denselben hintereinander).", L"Tocar faixas da lista aleatoriamente (sem repetir a mesma).", L"Speel nummers willekeurig (niet hetzelfde achter elkaar).", L"Odtwarzaj utwory z listy losowo (bez powtarzania tego samego).", L"Listedeki parcayi rastgele cal (ayni parcayi ust uste getirme)."));
+	addTip(m_xfade, LL14(L"連続再生時、曲のつなぎでフェードアウト／インします。ループ曲は5分時点でもクロスフェードします。", L"During continuous play, fade between tracks. Looped tracks also crossfade at 5 minutes.", L"En lecture continue, fondu entre pistes. Pistes en boucle: fondu a 5 min.", L"In riproduzione continua, dissolve tra brani. Loop: crossfade a 5 min.", L"En reproduccion continua, fundido entre pistas. Bucles: fundido a 5 min.", L"연속 재생 시 곡 전환 페이드. 루프 곡은 5분에도 크로스페이드.", L"连续播放时曲间淡入淡出。循环曲在5分钟时也交叉淡化。", L"تلاشي بين المقاطع أثناء التشغيل المتتابع. الحلقات عند 5 دقائق أيضاً.", L"При непрерывном воспроизведении — кроссфейд. Зацикленные — также на 5-й минуте.", L"Bei Dauerwiedergabe zwischen Titeln überblenden. Loops auch nach 5 Min.", L"Na reproducao continua, crossfade entre faixas. Loops tambem aos 5 min.", L"Bij doorlopend afspelen crossfaden. Loops ook na 5 min.", L"Przy ciaglym odtwarzaniu przenikanie. Petle tez po 5 min.", L"Surekli calmada parcilar arasi crossfade. Dongulu parcilar 5 dakikada da."));
 	addTip(m_seek, LL14(L"再生位置。ピンク帯=ループ。青つまみ=A-B。⇔カーソルでつまみ移動、他はシーク。", L"Position. Pink=loop. Blue thumbs=A-B. Size cursor moves thumbs; else seek.", L"Position. Rose=boucle. Bleu=A-B. Curseur⇔=poignees.", L"Posizione. Rosa=loop. Blu=A-B. Cursore⇔=maniglie.", L"Posicion. Rosa=bucle. Azul=A-B. Cursor⇔=asas.", L"재생 위치. 분홍=루프. 파랑=A-B. ⇔커서=손잡이.", L"播放位置。粉=循环。蓝=A-B。⇔光标移动端点。", L"الموضع. وردي=حلقة. أزرق=A-B. مؤشر⇔=مقابض.", L"Позиция. Розовый=цикл. Синий=A-B. Курсор⇔=ручки.", L"Position. Rosa=Schleife. Blau=A-B. Cursor⇔=Griffe.", L"Posicao. Rosa=loop. Azul=A-B. Cursor⇔=alças.", L"Positie. Roze=lus. Blauw=A-B. Cursor⇔=grepen.", L"Pozycja. Rozowy=petla. Niebieski=A-B. Kursor⇔=uchwyty.", L"Konum. Pembe=dongu. Mavi=A-B. Imlec⇔=tutamac."));
 	addTip(m_time, _T("%"));
 	if (m_seekLock.GetSafeHwnd())
@@ -2040,6 +2065,8 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 	addTip(m_tempo, LL14(L"再生テンポを調整します(ラベルをクリックで100%に戻す)。", L"Adjust playback tempo (click label to reset to 100%).", L"Tempo de lecture (clic sur le label = 100%).", L"Tempo (clic sull'etichetta = 100%).", L"Tempo (clic en etiqueta = 100%).", L"재생 템포 조절(라벨 클릭 시 100%).", L"调整播放速度(点击标签恢复100%)。", L"ضبط الإيقاع (انقر التسمية لإعادة 100%).", L"Темп (клик по метке = 100%).", L"Tempo (Label klicken = 100%).", L"Tempo (clique no rotulo = 100%).", L"Tempo (klik label = 100%).", L"Tempo (etykieta = 100%).", L"Tempo (etikete tıkla = %100)."));
 	addTip(m_pitch, LL14(L"再生ピッチ(音程)を調整します(ラベルをクリックで100%に戻す)。", L"Adjust playback pitch (click label to reset to 100%).", L"Hauteur (clic sur le label = 100%).", L"Altezza (clic sull'etichetta = 100%).", L"Tono (clic en etiqueta = 100%).", L"재생 피치 조절(라벨 클릭 시 100%).", L"调整音高(点击标签恢复100%)。", L"ضبط طبقة الصوت (انقر التسمية لإعادة 100%).", L"Высота (клик по метке = 100%).", L"Tonhohe (Label klicken = 100%).", L"Tom (clique no rotulo = 100%).", L"Toonhoogte (klik label = 100%).", L"Wysokosc (klik = 100%).", L"Perde (etikete tıkla = %100)."));
 	addTip(m_plsel, LL14(L"プレイリストを切り替え/新規追加します。", L"Switch / add a playlist.", L"Changer / ajouter une liste.", L"Cambia / aggiungi playlist.", L"Cambiar / anadir lista.", L"재생목록 전환/추가.", L"切换/新建播放列表。", L"تبديل / إضافة قائمة.", L"Сменить / добавить плейлист.", L"Playlist wechseln / hinzufugen.", L"Trocar / adicionar lista.", L"Playlist wisselen/toevoegen.", L"Zmień/dodaj listę.", L"Liste değiştir/ekle."));
+	if (m_endMode.GetSafeHwnd())
+		addTip(m_endMode, LL14(L"リストの最後まで行ったときの動作。停止／同じリストを繰返し／次のリストへ／全リスト循環。", L"When the list ends: stop, repeat this list, go to the next list, or cycle all lists.", L"En fin de liste: arret, repetter, liste suivante, ou toutes en boucle.", L"A fine lista: stop, ripeti, lista successiva, o cicla tutte.", L"Al final: parar, repetir, lista siguiente, o ciclar todas.", L"목록 끝에서: 정지 / 같은 목록 반복 / 다음 목록 / 전체 순환.", L"列表结束时：停止／重复本列表／下一列表／循环全部。", L"عند نهاية القائمة: توقف / تكرار / التالية / تدوير الكل.", L"В конце списка: стоп / повтор / следующий / цикл всех.", L"Am Listenende: Stopp / wiederholen / naechste / alle zyklisch.", L"No fim da lista: parar, repetir, proxima, ou ciclar todas.", L"Aan het einde: stoppen, herhalen, volgende, of alle cyclisch.", L"Na koncu listy: stop / powtorz / nastepna / cykl wszystkich.", L"Liste sonunda: dur / tekrarla / sonraki / tumunu dongule."));
 	addTip(m_plrename, LL14(L"現在のプレイリスト名を変更します。", L"Rename the current playlist.", L"Renommer la liste.", L"Rinomina la playlist.", L"Renombrar la lista.", L"현재 재생목록 이름 변경.", L"重命名当前播放列表。", L"إعادة تسمية القائمة.", L"Переименовать плейлист.", L"Playlist umbenennen.", L"Renomear a lista.", L"Lijst hernoemen.", L"Zmień nazwę listy.", L"Listeyi yeniden adlandır."));
 	addTip(m_pldelete, LL14(L"現在のプレイリストを削除します。", L"Delete the current playlist.", L"Supprimer la liste.", L"Elimina la playlist.", L"Eliminar la lista.", L"현재 재생목록 삭제.", L"删除当前播放列表。", L"حذف القائمة.", L"Удалить плейлист.", L"Playlist loschen.", L"Excluir a lista.", L"Lijst verwijderen.", L"Usuń listę.", L"Listeyi sil."));
 	addTip(m_m3uExport, LL14(L"現在のプレイリストをM3U形式で書き出します。", L"Export the current playlist as M3U.", L"Exporter la liste en M3U.", L"Esporta la playlist in M3U.", L"Exportar la lista como M3U.", L"현재 재생목록을 M3U로 내보냅니다.", L"将当前播放列表导出为M3U。", L"تصدير القائمة ك M3U.", L"Экспорт плейлиста в M3U.", L"Playlist als M3U exportieren.", L"Exportar lista como M3U.", L"Playlist exporteren als M3U.", L"Eksportuj liste do M3U.", L"Listeyi M3U olarak disa aktar."));
@@ -2136,9 +2163,11 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 		addTip(m_botRemote, LL14(L"ローカルリモート (HTTP) を切り替えます。", L"Toggle local remote (HTTP).", L"Basculer la telecommande locale (HTTP).", L"Attiva/disattiva remote locale (HTTP).", L"Alternar remoto local (HTTP).", L"로컬 리모트(HTTP) 전환.", L"切换本地遥控 (HTTP)。", L"تبديل التحكم المحلي (HTTP).", L"Переключить локальный пульт (HTTP).", L"Lokalfernbedienung (HTTP) umschalten.", L"Alternar remoto local (HTTP).", L"Lokale bediening (HTTP) wisselen.", L"Przelacz pilot lokalny (HTTP).", L"Yerel uzaktan (HTTP) ac/kapa."));
 	if (m_botMaze.GetSafeHwnd())
 		addTip(m_botMaze, LL14(L"暇つぶし迷路を開きます。", L"Open a casual maze.", L"Ouvrir un labyrinthe passe-temps.", L"Apri un labirinto per passare il tempo.", L"Abrir un laberinto para matar el tiempo.", L"심심풀이 미로 열기.", L"打开消遣迷宫。", L"فتح متاهة لتمضية الوقت.", L"Открыть лабиринт для досуга.", L"Freizeit-Labyrinth öffnen.", L"Abrir um labirinto para passar o tempo.", L"Open een doolhof om de tijd te doden.", L"Otwórz labirynt na zabicie czasu.", L"Vakit geçirme labirentini aç."));
+	if (m_botRace.GetSafeHwnd())
+		addTip(m_botRace, LL14(L"Soft3D 空中レースを開きます。", L"Open Soft3D aerial race.", L"Ouvrir la course aérienne Soft3D.", L"Apri la gara aerea Soft3D.", L"Abrir la carrera aérea Soft3D.", L"Soft3D 공중 레이스 열기.", L"打开 Soft3D 空中竞速。", L"فتح سباق Soft3D الجوي.", L"Открыть воздушную гонку Soft3D.", L"Soft3D-Luftrennen öffnen.", L"Abrir corrida aérea Soft3D.", L"Soft3D-luchtrace openen.", L"Otwórz wyścig powietrzny Soft3D.", L"Soft3D hava yarışını aç."));
 	addTip(m_saveparam, LL14(L"曲ごとに音量・EQ・テンポ等の全パラメータを記憶し、その曲を再生する度に自動で復元します。", L"Remember all parameters (volume, EQ, tempo, etc.) per song and auto-restore them each time the song plays.", L"Memoriser tous les parametres par morceau et les restaurer automatiquement.", L"Memorizza tutti i parametri per brano e li ripristina automaticamente.", L"Recuerda todos los parametros por pista y los restaura automaticamente.", L"곡별로 볼륨·EQ·템포 등 모든 파라미터를 기억하고 재생할 때마다 자동 복원합니다.", L"逐曲记忆音量、EQ、速度等所有参数，每次播放该曲时自动恢复。", L"تذكر كل المعلمات لكل أغنية واستعادتها تلقائيًا.", L"Запоминать все параметры для каждого трека и восстанавливать автоматически.", L"Alle Parameter pro Titel merken und automatisch wiederherstellen.", L"Memoriza todos os parametros por faixa e restaura automaticamente.", L"Onthoud alle parameters per nummer en herstel automatisch.", L"Zapamietaj wszystkie parametry na utwor i przywracaj automatycznie.", L"Her parça için tüm parametreleri hatırla ve otomatik geri yükle."));
 	addTip(m_resetdata, LL14(L"曲ごとに保存した設定を全削除し、音量50%・拡張100%・EQ等を初期状態へ戻します。", L"Delete all per-song saved settings and reset volume to 50%, ext to 100%, EQ etc. to defaults.", L"Supprimer tous les reglages par morceau et reinitialiser les parametres.", L"Elimina tutte le impostazioni per brano e ripristina i parametri.", L"Elimina todos los ajustes por pista y restablece los parametros.", L"곡별 저장 설정을 모두 삭제하고 볼륨 50%·확장 100%·EQ 등을 초기화합니다.", L"删除所有逐曲保存的设置，并将音量重置为50%、扩展100%、EQ等为默认。", L"حذف كل الإعدادات المحفوظة لكل أغنية وإعادة الضبط.", L"Удалить все сохранённые настройки треков и сбросить параметры.", L"Alle pro-Titel-Einstellungen loeschen und Parameter zuruecksetzen.", L"Excluir todas as configuracoes por faixa e redefinir os parametros.", L"Verwijder alle per-nummer-instellingen en reset de parameters.", L"Usun wszystkie ustawienia na utwor i zresetuj parametry.", L"Tum parca ayarlarini sil ve parametreleri sifirla."));
-	addTip(m_kaisuu, LL14(L"連続再生時、指定回数ループしたら次の曲へ進みます。", L"During continuous play, advance after this many loops.", L"En lecture continue, passer apres ce nombre de boucles.", L"In riproduzione continua, avanza dopo questo numero di loop.", L"En reproduccion continua, avanzar tras este numero de bucles.", L"연속 재생 시 지정 횟수만큼 반복 후 다음 곡.", L"连续播放时，循环指定次数后进入下一首。", L"في التشغيل المستمر، الانتقال بعد هذا العدد من الحلقات.", L"При непрерывном воспроизведении перейти после стольких повторов.", L"Bei Dauerwiedergabe nach so vielen Schleifen weiter.", L"Na reproducao continua, avancar apos este numero de loops.", L"Bij doorlopend afspelen na dit aantal loops verder.", L"Przy ciaglym odtwarzaniu przejdz po tylu petlach.", L"Surekli calmada bu dongu sayisindan sonra ilerle."));
+	addTip(m_kaisuu, LL14(L"連続再生時のループ回数。空欄・0・-1は無制限（ループ曲は5分で次へ）。数字を入れるとその回数。上限は64bit整数。", L"Loop count for continuous play. Empty/0/-1 = unlimited (looped tracks advance at 5 min). A number sets the count (64-bit max).", L"Nombre de boucles. Vide/0/-1 = illimite (5 min pour les boucles). Un nombre = ce compte (max 64 bits).", L"Conteggio loop. Vuoto/0/-1 = illimitato (5 min per i loop). Un numero = il conteggio (max 64 bit).", L"Cuenta de bucle. Vacio/0/-1 = ilimitado (5 min en bucles). Un numero = la cuenta (max 64 bits).", L"연속 재생 루프 횟수. 공백·0·-1=무제한(루프 곡은 5분). 숫자=횟수(64비트 상한).", L"连续播放循环次数。空/0/-1=无限（循环曲5分钟后下一首）。数字=次数（64位上限）。", L"عدد الحلقات. فارغ/0/-1=غير محدود (5 دقائق للحلقات). رقم=العدد (حد 64 بت).", L"Число повторов. Пусто/0/-1=без лимита (зацикленные — через 5 мин). Число=счётчик (макс. 64 бит).", L"Schleifenzahl. Leer/0/-1=unbegrenzt (Loops nach 5 Min.). Zahl=Anzahl (64-Bit-Maximum).", L"Contagem de loop. Vazio/0/-1=ilimitado (loops aos 5 min). Numero=contagem (max 64 bits).", L"Loopaantal. Leeg/0/-1=onbeperkt (loops na 5 min). Getal=aantal (64-bits max).", L"Liczba petli. Puste/0/-1=bez limitu (petle po 5 min). Liczba=ilosc (max 64 bity).", L"Dongu sayisi. Bos/0/-1=sinirsiz (dongulu 5 dk). Sayi=adet (64-bit ust sinir)."));
 	CCustomControlUtility::FinalizeDialogToolTip(m_tooltip, 360, 10000);
 	m_find.SetFont(&m_fontList, TRUE);
 
@@ -2330,9 +2359,9 @@ BOOL CMediaPlayerDlg::RelayPreTranslateMessage(MSG* pMsg)
 		}
 	}
 	// Space = 再生/一時停止。og(非表示)の IsDialogMessage がフォーカスボタン(Ys6等)を押すのを防ぐ
-	// Soft3D迷路が開いている間は SPACE を再生に使わない（迷路側で全体マップ切替）
+	// Soft3D迷路／空中レースが開いている間は SPACE を再生に使わない
 	if (pMsg->message == WM_KEYDOWN && pMsg->wParam == VK_SPACE) {
-		if (IsSoft3DMazeOpen() || IsSoft3DMazeActive())
+		if (IsSoft3DMazeOpen() || IsSoft3DMazeActive() || IsSoft3DRaceOpen() || IsSoft3DRaceActive())
 			return TRUE;
 		CWnd* pFocus = GetFocus();
 		const BOOL inEdit = (pFocus && (pFocus->GetSafeHwnd() == m_find.GetSafeHwnd()
@@ -2551,35 +2580,35 @@ static void ExpandPlselDropListPopup(HWND hCombo)
 		SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
 }
 
-void CMediaPlayerDlg::LayoutPlselCombo(int x, int y, int w, int tbH, float s)
+void CMediaPlayerDlg::LayoutPlselCombo(CCustomComboBox& cb, int& dropExtent, float& layoutDpi, int x, int y, int w, int tbH, float s)
 {
-	if (!::IsWindow(m_plsel.GetSafeHwnd())) return;
-	if (m_plselDropExtent > 0 && fabs(m_plselLayoutDpi - s) > 0.01f)
-		m_plselDropExtent = 0;
+	if (!::IsWindow(cb.GetSafeHwnd())) return;
+	if (dropExtent > 0 && fabs(layoutDpi - s) > 0.01f)
+		dropExtent = 0;
 
 	const int closedH = MpPlselClosedH(s);
 	const int listRowH = MpPlselListRowH(s);
 	const int dropExt = max((int)(182 * s + 0.5f), listRowH * 12);
 
-	if (m_plselDropExtent <= 0)
+	if (dropExtent <= 0)
 	{
-		m_plsel.MoveWindow(x, y, w, dropExt);
-		m_plselDropExtent = dropExt;
-		m_plselLayoutDpi = s;
-		FixPlselDropList(m_plsel, listRowH, closedH);
+		cb.MoveWindow(x, y, w, dropExt);
+		dropExtent = dropExt;
+		layoutDpi = s;
+		FixPlselDropList(cb, listRowH, closedH);
 	}
 	else
 	{
-		m_plsel.SetWindowPos(NULL, x, y, w, 0, SWP_NOZORDER | SWP_NOSIZE | SWP_NOACTIVATE);
-		FixPlselDropList(m_plsel, listRowH, closedH);
+		cb.SetWindowPos(NULL, x, y, w, 0, SWP_NOZORDER | SWP_NOSIZE | SWP_NOACTIVATE);
+		FixPlselDropList(cb, listRowH, closedH);
 	}
 
 	CRect cr;
-	m_plsel.GetWindowRect(&cr);
+	cb.GetWindowRect(&cr);
 	ScreenToClient(&cr);
 	const int dy = y + max(0, (tbH - cr.Height()) / 2);
 	if (cr.left != x || cr.top != dy)
-		m_plsel.SetWindowPos(NULL, x, dy, w, 0, SWP_NOZORDER | SWP_NOSIZE | SWP_NOACTIVATE);
+		cb.SetWindowPos(NULL, x, dy, w, 0, SWP_NOZORDER | SWP_NOSIZE | SWP_NOACTIVATE);
 }
 
 // DPI/リサイズ対応の手動レイアウト。RC で固定配置すると高 DPI で壊れるため
@@ -2901,7 +2930,7 @@ void CMediaPlayerDlg::DoLayout()
 	MoveCtl(&m_renzoku, cx, optY, (int)(86 * s), chkRowH); cx += (int)(90 * s);
 	MoveCtl(&m_loop, cx, optY, (int)(92 * s), chkRowH); cx += (int)(96 * s);
 	MoveCtl(&m_kaisuuL, cx, optY, (int)(80 * s), chkRowH); cx += (int)(82 * s);
-	MoveCtl(&m_kaisuu, cx, optY, (int)(36 * s), chkRowH); cx += (int)(40 * s);
+	MoveCtl(&m_kaisuu, cx, optY, (int)(52 * s), chkRowH); cx += (int)(56 * s);
 	MoveCtl(&m_random, cx, optY, (int)(88 * s), chkRowH); cx += (int)(92 * s);
 	MoveCtl(&m_xfade, cx, optY, (int)(100 * s), chkRowH); cx += (int)(104 * s);
 	MoveCtl(&m_xfadeSec, cx, optY, (int)(40 * s), chkRowH); cx += (int)(42 * s);
@@ -2970,9 +2999,11 @@ void CMediaPlayerDlg::DoLayout()
 	int plTop = sndBottom + (int)(5 * s);
 	int by4 = plTop + gTitle;
 	int tbH = (int)(19 * s);
-	int comboW = (int)(120 * s);
-	LayoutPlselCombo(M + gPad, by4, comboW, tbH, s);
-	int tx = M + gPad + comboW + (int)(5 * s);
+	int comboW = (int)(100 * s);
+	LayoutPlselCombo(m_plsel, m_plselDropExtent, m_plselLayoutDpi, M + gPad, by4, comboW, tbH, s);
+	int endW = (int)(118 * s);
+	LayoutPlselCombo(m_endMode, m_endModeDropExtent, m_endModeLayoutDpi, M + gPad + comboW + (int)(4 * s), by4, endW, tbH, s);
+	int tx = M + gPad + comboW + (int)(4 * s) + endW + (int)(5 * s);
 	int tbw = (int)(50 * s);
 	MoveCtl(&m_plrename, tx, by4, tbw, tbH); tx += tbw + (int)(3 * s);
 	MoveCtl(&m_pldelete, tx, by4, tbw, tbH); tx += tbw + (int)(4 * s);
@@ -3307,27 +3338,27 @@ void CMediaPlayerDlg::DoLayout()
 	const int gapBot = (int)(4 * s);
 	if (!savedata.mpBotToolsInited) {
 		savedata.mpBotToolsInited = 1;
-		savedata.mpBotToolsFlags = 0x10F; // DJ|Tag|BPM|Sleep|Maze
+		savedata.mpBotToolsFlags = 0x30F; // DJ|Tag|BPM|Sleep|Maze|Race
 	}
 	const int botFl = savedata.mpBotToolsFlags;
-	CCustomStandardButton* botBtn[9] = {
-		&m_botDj, &m_botTag, &m_botBpm, &m_botSleep, &m_botMirror, &m_botSsViz, &m_botAlarm, &m_botRemote, &m_botMaze
+	CCustomStandardButton* botBtn[10] = {
+		&m_botDj, &m_botTag, &m_botBpm, &m_botSleep, &m_botMirror, &m_botSsViz, &m_botAlarm, &m_botRemote, &m_botMaze, &m_botRace
 	};
-	const int botBit[9] = { 1, 2, 4, 8, 16, 32, 64, 128, 256 };
-	const int wFull[9] = {
+	const int botBit[10] = { 1, 2, 4, 8, 16, 32, 64, 128, 256, 512 };
+	const int wFull[10] = {
 		(int)(56 * s), (int)(52 * s), (int)(48 * s), (int)(56 * s),
-		(int)(60 * s), (int)(40 * s), (int)(56 * s), (int)(64 * s), (int)(52 * s)
+		(int)(60 * s), (int)(40 * s), (int)(56 * s), (int)(64 * s), (int)(52 * s), (int)(52 * s)
 	};
-	const int wMid[9] = {
+	const int wMid[10] = {
 		(int)(36 * s), (int)(36 * s), (int)(36 * s), (int)(40 * s),
-		(int)(40 * s), (int)(32 * s), (int)(40 * s), (int)(44 * s), (int)(36 * s)
+		(int)(40 * s), (int)(32 * s), (int)(40 * s), (int)(44 * s), (int)(36 * s), (int)(36 * s)
 	};
-	const int wShort[9] = {
+	const int wShort[10] = {
 		(int)(28 * s), (int)(28 * s), (int)(28 * s), (int)(28 * s),
-		(int)(28 * s), (int)(28 * s), (int)(28 * s), (int)(28 * s), (int)(28 * s)
+		(int)(28 * s), (int)(28 * s), (int)(28 * s), (int)(28 * s), (int)(28 * s), (int)(28 * s)
 	};
 	int needFull = 0, needMid = 0, needShort = 0;
-	for (int i = 0; i < 9; ++i) {
+	for (int i = 0; i < 10; ++i) {
 		if (!(botFl & botBit[i])) continue;
 		needFull += wFull[i] + gapBot;
 		needMid += wMid[i] + gapBot;
@@ -3357,8 +3388,10 @@ void CMediaPlayerDlg::DoLayout()
 			m_botRemote.SetWindowText(botShortLv >= 2 ? L"Rem" : LL14(L"リモート", L"Remote", L"Remote", L"Remote", L"Remoto", L"리모트", L"遥控", L"تحكم", L"Пульт", L"Remote", L"Remoto", L"Remote", L"Pilot", L"Uzaktan"));
 		if (m_botMaze.GetSafeHwnd())
 			m_botMaze.SetWindowText(botShortLv >= 2 ? L"Mz" : LL14(L"迷路", L"Maze", L"Labyrinthe", L"Labirinto", L"Laberinto", L"미로", L"迷宫", L"متاهة", L"Лабиринт", L"Labyrinth", L"Labirinto", L"Doolhof", L"Labirynt", L"Labirent"));
+		if (m_botRace.GetSafeHwnd())
+			m_botRace.SetWindowText(botShortLv >= 2 ? L"Rc" : LL14(L"レース", L"Race", L"Course", L"Gara", L"Carrera", L"레이스", L"竞速", L"سباق", L"Гонка", L"Rennen", L"Corrida", L"Race", L"Wyścig", L"Yarış"));
 	}
-	for (int i = 0; i < 9; ++i) {
+	for (int i = 0; i < 10; ++i) {
 		CCustomStandardButton* b = botBtn[i];
 		if (!b->GetSafeHwnd()) continue;
 		if (!(botFl & botBit[i])) {
@@ -4077,7 +4110,7 @@ void CMediaPlayerDlg::SyncFromMain()
 
 		// 乱数/順次・スペアナ/ステレオ/EQ/簡易ピアノロールの押下見た目
 		int v1;
-		v1 = og->m_random.GetCheck() ? 1 : 0; if (m_random.GetCheck() != v1) m_random.SetCheck(v1);
+		v1 = savedata.mpListRandom ? 1 : 0; if (m_random.GetCheck() != v1) m_random.SetCheck(v1);
 		SyncPushToggleButtons();
 
 		// ジャケット(ボタン/ミニジャケクリック)はデータがあるときのみ有効
@@ -4139,6 +4172,13 @@ void CMediaPlayerDlg::SyncFromMain()
 			}
 			else if (!busy && m_plsel.GetCurSel() != savedata.playlistnum)
 				m_plsel.SetCurSel(savedata.playlistnum);
+		}
+		if (m_endMode.GetSafeHwnd()) {
+			BOOL ebusy = m_endMode.GetDroppedState() || (GetFocus() == (CWnd*)&m_endMode);
+			int em = savedata.plEndMode;
+			if (em < 0 || em > 3) em = 1;
+			if (!ebusy && m_endMode.GetCurSel() != em)
+				m_endMode.SetCurSel(em);
 		}
 	}
 
@@ -6181,11 +6221,8 @@ void CMediaPlayerDlg::OnLoop()
 
 void CMediaPlayerDlg::OnRandom()
 {
-	if (!og || !::IsWindow(og->GetSafeHwnd())) return;
-	int st = m_random.GetCheck() ? 1 : 0;
-	// 既存ハンドラ(OnCheck5=ランダム / OnCheck6=順次)を WM_COMMAND で流用
-	if (st) og->SendMessage(WM_COMMAND, MAKEWPARAM(IDC_CHECK5, BN_CLICKED), 0);
-	else    og->SendMessage(WM_COMMAND, MAKEWPARAM(IDC_CHECK6, BN_CLICKED), 0);
+	savedata.mpListRandom = m_random.GetCheck() ? 1 : 0;
+	MpPersistSavedataQuick();
 }
 
 void CMediaPlayerDlg::SyncPlayXfadeUi(BOOL fromSavedata)
@@ -6277,6 +6314,26 @@ void CMediaPlayerDlg::OnPlselDropdown()
 	FixPlselDropList(m_plsel, MpPlselListRowH(hD2), MpPlselClosedH(hD2));
 	ExpandPlselDropListPopup(m_plsel.GetSafeHwnd());
 	PostMessage(WM_MP_PLSEL_EXPAND, 0, 0);
+}
+
+void CMediaPlayerDlg::OnEndModeSelchange()
+{
+	if (!m_endMode.GetSafeHwnd()) return;
+	int s = m_endMode.GetCurSel();
+	if (s < 0 || s > 3) s = 1;
+	savedata.plEndMode = s;
+	if (pl && ::IsWindow(pl->GetSafeHwnd()) && pl->m_endMode.GetSafeHwnd()) {
+		if (!pl->m_endMode.GetDroppedState() && pl->m_endMode.GetCurSel() != s)
+			pl->m_endMode.SetCurSel(s);
+	}
+	MpPersistSavedataQuick();
+}
+
+void CMediaPlayerDlg::OnEndModeDropdown()
+{
+	if (!m_endMode.GetSafeHwnd()) return;
+	FixPlselDropList(m_endMode, MpPlselListRowH(hD2), MpPlselClosedH(hD2));
+	ExpandPlselDropListPopup(m_endMode.GetSafeHwnd());
 }
 
 LRESULT CMediaPlayerDlg::OnPlselExpandPopup(WPARAM, LPARAM)
@@ -6817,6 +6874,7 @@ void CMediaPlayerDlg::OnBotVisSsViz() { ToggleBotVisFlag(32); }
 void CMediaPlayerDlg::OnBotVisAlarm() { ToggleBotVisFlag(64); }
 void CMediaPlayerDlg::OnBotVisRemote() { ToggleBotVisFlag(128); }
 void CMediaPlayerDlg::OnBotVisMaze() { ToggleBotVisFlag(256); }
+void CMediaPlayerDlg::OnBotVisRace() { ToggleBotVisFlag(512); }
 
 void CMediaPlayerDlg::OnSaveParam()
 {
@@ -6876,12 +6934,17 @@ void CMediaPlayerDlg::OnKaisuuKillFocus()
 	CString s;
 	m_kaisuu.GetWindowText(s);
 	s.Trim();
-	int n = _tstoi(s);
-	if (n < 1) n = 1;
-	s.Format(_T("%d"), n);
-	m_kaisuu.SetWindowText(s);
+	__int64 n = s.IsEmpty() ? 0 : _tstoi64(s);
+	if (n < -1) n = -1;
+	savedata.loopKaisuu = n;
+	if (n <= 0) savedata.kaisuu = 0;
+	else if (n > 2147483647) savedata.kaisuu = 2147483647;
+	else savedata.kaisuu = (int)n;
+	if (n > 0) {
+		s.Format(_T("%I64d"), n);
+		m_kaisuu.SetWindowText(s);
+	}
 	og->m_kaisuu.SetWindowText(s);
-	savedata.kaisuu = n;
 	MpPersistSavedataQuick();
 }
 
@@ -10044,7 +10107,33 @@ void CMediaPlayerDlg::ShowPlayModeExtrasMenu(CPoint screenPt)
 			L"크로스페이드", L"交叉淡化", L"تلاشي متقاطع", L"Кроссфейд", L"Crossfade",
 			L"Crossfade", L"Crossfade", L"Przenikanie", L"Capraz gechis"),
 		xf,
-		LL14(L"連続再生時、曲のつなぎでフェードアウト／インします", L"During continuous play, fade out/in between tracks", L"En lecture continue, enchainement en fondu", L"In riproduzione continua, dissolve tra brani", L"En reproduccion continua, fundido entre pistas", L"연속 재생 시 곡 전환에 페이드", L"连续播放时曲间淡入淡出", L"تلاشي عند الانتقال أثناء التشغيل المتتابع", L"При непрерывном воспроизведении — кроссфейд", L"Bei Dauerwiedergabe zwischen Titeln überblenden", L"Na reproducao continua, crossfade entre faixas", L"Bij doorlopend afspelen crossfaden tussen nummers", L"Przy ciaglym odtwarzaniu przenikanie miedzy utworami", L"Surekli calmada parcilar arasi crossfade"));
+		LL14(L"連続再生時、曲のつなぎでフェードアウト／インします。ループ曲は5分時点でもクロスフェードします", L"During continuous play, fade out/in between tracks. Looped tracks also crossfade at 5 minutes", L"En lecture continue, enchainement en fondu. Boucles aussi a 5 min", L"In riproduzione continua, dissolve tra brani. Loop anche a 5 min", L"En reproduccion continua, fundido entre pistas. Bucles tambien a 5 min", L"연속 재생 시 곡 전환에 페이드. 루프 곡은 5분에도 크로스페이드", L"连续播放时曲间淡入淡出。循环曲在5分钟时也交叉淡化", L"تلاشي عند الانتقال أثناء التشغيل المتتابع. الحلقات عند 5 دقائق أيضاً", L"При непрерывном воспроизведении — кроссфейд. Зацикленные — также на 5-й минуте", L"Bei Dauerwiedergabe zwischen Titeln überblenden. Loops auch nach 5 Min.", L"Na reproducao continua, crossfade entre faixas. Loops tambem aos 5 min", L"Bij doorlopend afspelen crossfaden tussen nummers. Loops ook na 5 min", L"Przy ciaglym odtwarzaniu przenikanie miedzy utworami. Petle tez po 5 min", L"Surekli calmada parcilar arasi crossfade. Dongulu parcilar 5 dakikada da"));
+	menu.AddSeparator();
+	const int em = (savedata.plEndMode >= 0 && savedata.plEndMode <= 3) ? savedata.plEndMode : 1;
+	menu.AddCheck(ID_MP_MODE_END_STOP,
+		LL14(L"最後で停止", L"Stop at end", L"Arret en fin", L"Stop a fine", L"Parar al final",
+			L"끝에서 정지", L"结束时停止", L"توقف عند النهاية", L"Стоп в конце", L"Am Ende stoppen",
+			L"Parar no fim", L"Stoppen aan einde", L"Stop na koncu", L"Sonda dur"),
+		em == 0,
+		LL14(L"プレイリストの最後の曲のあと再生を止めます", L"Stop playback after the last track", L"Arreter apres la derniere piste", L"Ferma dopo l'ultimo brano", L"Detener tras la ultima pista", L"마지막 곡 후 재생 정지", L"最后一首后停止", L"إيقاف بعد آخر مقطع", L"Остановить после последнего трека", L"Nach dem letzten Titel stoppen", L"Parar apos a ultima faixa", L"Stoppen na het laatste nummer", L"Zatrzymaj po ostatnim utworze", L"Son parcadan sonra dur"));
+	menu.AddCheck(ID_MP_MODE_END_REPEAT,
+		LL14(L"同じリストを繰返し", L"Repeat list", L"Repeter la liste", L"Ripeti lista", L"Repetir lista",
+			L"같은 목록 반복", L"重复同一列表", L"تكرار القائمة", L"Повтор списка", L"Liste wiederholen",
+			L"Repetir lista", L"Lijst herhalen", L"Powtorz liste", L"Listeyi tekrarla"),
+		em == 1,
+		LL14(L"最後のあと、同じプレイリストを先頭から繰り返します", L"After the last track, repeat this playlist from the start", L"Apres la fin, recommencer cette liste", L"Dopo l'ultimo, ripeti questa playlist", L"Tras el final, repetir esta lista", L"마지막 후 같은 목록을 처음부터", L"结束后从本列表开头重复", L"بعد النهاية أعد هذه القائمة من البداية", L"После конца повторить этот список с начала", L"Nach dem Ende diese Liste von vorn", L"Apos o fim, repetir esta lista do inicio", L"Na het einde deze lijst vanaf het begin", L"Po koncu powtorz te liste od poczatku", L"Sondan sonra bu listeyi bastan tekrarla"));
+	menu.AddCheck(ID_MP_MODE_END_NEXT,
+		LL14(L"次のリストへ", L"Next playlist", L"Liste suivante", L"Playlist succ.", L"Lista siguiente",
+			L"다음 목록으로", L"下一播放列表", L"القائمة التالية", L"Следующий список", L"Naechste Liste",
+			L"Proxima lista", L"Volgende lijst", L"Nastepna lista", L"Sonraki liste"),
+		em == 2,
+		LL14(L"最後のあと次のプレイリストへ。最後のリストでは停止します", L"After the last track, go to the next playlist. Stop on the last playlist", L"Apres la fin, liste suivante. Stop a la derniere", L"Dopo l'ultimo, playlist successiva. Stop sull'ultima", L"Tras el final, lista siguiente. Parar en la ultima", L"마지막 후 다음 목록. 마지막 목록에서는 정지", L"结束后进入下一列表。最后一个列表则停止", L"بعد النهاية القائمة التالية. توقف عند الأخيرة", L"После конца — следующий список. На последнем — стоп", L"Nach dem Ende naechste Liste. Letzte Liste stoppt", L"Apos o fim, proxima lista. Parar na ultima", L"Na het einde volgende lijst. Stoppen bij de laatste", L"Po koncu nastepna lista. Stop na ostatniej", L"Sondan sonra sonraki liste. Son listede dur"));
+	menu.AddCheck(ID_MP_MODE_END_CYCLE,
+		LL14(L"全リストを循環", L"Cycle all lists", L"Boucler toutes", L"Cicla tutte", L"Ciclar todas",
+			L"모든 목록 순환", L"循环全部列表", L"تدوير كل القوائم", L"Цикл всех списков", L"Alle Listen zyklisch",
+			L"Ciclar todas", L"Alle lijsten cyclisch", L"Cykl wszystkich", L"Tum listeleri dongule"),
+		em == 3,
+		LL14(L"最後のリストのあと、先頭のプレイリストから続けます", L"After the last playlist, continue from the first playlist", L"Apres la derniere liste, reprendre a la premiere", L"Dopo l'ultima playlist, riprendi dalla prima", L"Tras la ultima lista, continuar desde la primera", L"마지막 목록 후 첫 목록부터 계속", L"最后一个列表后从第一个继续", L"بعد آخر قائمة تابع من الأولى", L"После последнего списка продолжить с первого", L"Nach der letzten Liste mit der ersten weiter", L"Apos a ultima lista, continuar da primeira", L"Na de laatste lijst verder vanaf de eerste", L"Po ostatniej liscie kontynuuj od pierwszej", L"Son listeden sonra ilk listeden devam"));
 	const UINT cmd = menu.Track(screenPt, this);
 	if (cmd == ID_MP_MODE_CONT) {
 		if (m_renzoku.GetSafeHwnd()) { m_renzoku.SetCheck(cont ? BST_UNCHECKED : BST_CHECKED); OnRenzoku(); }
@@ -10054,6 +10143,18 @@ void CMediaPlayerDlg::ShowPlayModeExtrasMenu(CPoint screenPt)
 		if (m_random.GetSafeHwnd()) { m_random.SetCheck(rnd ? BST_UNCHECKED : BST_CHECKED); OnRandom(); }
 	} else if (cmd == ID_MP_MODE_XFADE) {
 		if (m_xfade.GetSafeHwnd()) { m_xfade.SetCheck(xf ? BST_UNCHECKED : BST_CHECKED); OnPlayXfade(); }
+	} else if (cmd == ID_MP_MODE_END_STOP || cmd == ID_MP_MODE_END_REPEAT
+		|| cmd == ID_MP_MODE_END_NEXT || cmd == ID_MP_MODE_END_CYCLE) {
+		int ns = 1;
+		if (cmd == ID_MP_MODE_END_STOP) ns = 0;
+		else if (cmd == ID_MP_MODE_END_REPEAT) ns = 1;
+		else if (cmd == ID_MP_MODE_END_NEXT) ns = 2;
+		else ns = 3;
+		savedata.plEndMode = ns;
+		if (m_endMode.GetSafeHwnd()) m_endMode.SetCurSel(ns);
+		if (pl && ::IsWindow(pl->GetSafeHwnd()) && pl->m_endMode.GetSafeHwnd())
+			pl->m_endMode.SetCurSel(ns);
+		MpPersistSavedataQuick();
 	}
 }
 
@@ -10118,6 +10219,7 @@ void CMediaPlayerDlg::ShowToolsExtrasMenu(CPoint screenPt)
 			botSub->AddCheck(ID_MP_BOTVIS_ALARM, LL14(L"アラーム", L"Alarm", L"Alarme", L"Sveglia", L"Alarma", L"알람", L"闹钟", L"منبه", L"Будильник", L"Wecker", L"Alarme", L"Wekker", L"Budzik", L"Alarm"), (bf & 64) != 0);
 			botSub->AddCheck(ID_MP_BOTVIS_REMOTE, LL14(L"リモート", L"Remote", L"Remote", L"Remote", L"Remoto", L"리모트", L"遥控", L"تحكم", L"Пульт", L"Remote", L"Remoto", L"Remote", L"Pilot", L"Uzaktan"), (bf & 128) != 0);
 			botSub->AddCheck(ID_MP_BOTVIS_MAZE, LL14(L"迷路", L"Maze", L"Labyrinthe", L"Labirinto", L"Laberinto", L"미로", L"迷宫", L"متاهة", L"Лабиринт", L"Labyrinth", L"Labirinto", L"Doolhof", L"Labirynt", L"Labirent"), (bf & 256) != 0);
+			botSub->AddCheck(ID_MP_BOTVIS_RACE, LL14(L"レース", L"Race", L"Course", L"Gara", L"Carrera", L"레이스", L"竞速", L"سباق", L"Гонка", L"Rennen", L"Corrida", L"Race", L"Wyścig", L"Yarış"), (bf & 512) != 0);
 		}
 	}
 	menu.AddCommand(ID_MP_MISS_MANAGE,
@@ -10529,6 +10631,13 @@ void CMediaPlayerDlg::ShowToolsExtrasMenu(CPoint screenPt)
 		LL14(L"大きさで迷路を生成。アイテムでテンポ・ピッチ・次曲・EQ に干渉します", L"Generate a maze by size; items tweak tempo, pitch, next track, EQ", L"Labyrinthe par taille ; objets affectent tempo, hauteur, piste, EQ", L"Labirinto per dimensione; oggetti influenzano tempo, pitch, brano, EQ", L"Laberinto por tamaño; objetos afectan tempo, tono, pista, EQ",
 			L"크기로 미로 생성. 아이템이 템포·피치·다음 곡·EQ에 개입", L"按大小生成迷宫；道具干预速度、音高、下一曲、EQ", L"متاهة حسب الحجم؛ العناصر تؤثر على الإيقاع والطبقة والمسار وEQ", L"Лабиринт по размеру; предметы влияют на темп, высоту, трек, EQ", L"Labyrinth nach Größe; Items greifen in Tempo, Tonhöhe, Titel, EQ ein",
 			L"Labirinto por tamanho; itens afetam tempo, tom, faixa, EQ", L"Doolhof op grootte; items grijpen in op tempo, toon, nummer, EQ", L"Labirynt wg rozmiaru; przedmioty wpływają na tempo, wysokość, utwór, EQ", L"Boyuta göre labirent; öğeler tempo, perde, parça, EQ’ye müdahale eder"));
+	menu.AddCommand(ID_MP_SOFT3DRACE,
+		LL14(L"Soft3D 空中レース…", L"Soft3D aerial race…", L"Course aérienne Soft3D…", L"Gara aerea Soft3D…", L"Carrera aérea Soft3D…",
+			L"Soft3D 공중 레이스…", L"Soft3D 空中竞速…", L"سباق Soft3D الجوي…", L"Воздушная гонка Soft3D…", L"Soft3D-Luftrennen…",
+			L"Corrida aérea Soft3D…", L"Soft3D-luchtrace…", L"Wyścig powietrzny Soft3D…", L"Soft3D hava yarışı…"),
+		LL14(L"空中コースを飛ぶレース。アイテムで再生とブースト等に干渉します", L"Fly an aerial course; items tweak playback and boosts", L"Course aérienne ; objets affectent lecture et boosts", L"Gara aerea; oggetti influenzano riproduzione e boost", L"Carrera aérea; objetos afectan reproducción y boosts",
+			L"공중 코스를 나는 레이스. 아이템이 재생·부스트에 개입", L"空中赛道竞速；道具干预播放与加速等", L"سباق جوي؛ العناصر تؤثر على التشغيل والدفع", L"Воздушная гонка; предметы влияют на воспроизведение и бусты", L"Luftrennen; Items greifen in Wiedergabe und Boosts ein",
+			L"Corrida aérea; itens afetam reprodução e boosts", L"Luchtrace; items grijpen in op afspelen en boosts", L"Wyścig powietrzny; przedmioty wpływają na odtwarzanie i boosty", L"Hava yarışı; öğeler çalma ve boost’a müdahale eder"));
 	menu.AddCommand(ID_MP_SSVIZ,
 		LL14(L"SS ビジュアライザ", L"SS visualizer", L"Visualiseur SS", L"Visualizzatore SS", L"Visualizador SS", L"SS 비주얼", L"SS 可视化", L"عارض SS", L"SS-визуализатор", L"SS-Visualizer", L"Visual SS", L"SS-visualizer", L"Wizual SS", L"SS gorsel"),
 		LL14(L"スクリーンセーバー風ビジュアライザを開きます", L"Open the screensaver-style visualizer", L"Ouvrir le visualiseur type ecran de veille", L"Apri il visualizzatore stile screensaver", L"Abrir el visualizador tipo protector", L"화면보호기풍 비주얼라이저를 엽니다", L"打开屏保风格可视化器", L"فتح العارض بأسلوب شاشة التوقف", L"Открыть визуализатор в стиле заставки", L"Screensaver-Visualizer oeffnen", L"Abrir o visualizador estilo protetor", L"Screensaver-achtige visualizer openen", L"Otworz wizualizer w stylu wygaszacza", L"Ekran koruyucu tarzi gorseli ac"));
@@ -11949,6 +12058,7 @@ void CMediaPlayerDlg::OnMpVoiceChanger() { OpenVoiceChangerModeless(this); }
 void CMediaPlayerDlg::OnMpTunerPractice() { OpenTunerPracticeModeless(this); }
 void CMediaPlayerDlg::OnMpPhotoFrame() { OpenPhotoFrameModeless(this); }
 void CMediaPlayerDlg::OnMpSoft3DMaze() { OpenSoft3DMazeModeless(this); }
+void CMediaPlayerDlg::OnMpSoft3DRace() { OpenSoft3DRaceModeless(this); }
 void CMediaPlayerDlg::OnMpRemote()
 {
 	CloseMpRemoteDlgIfOpen();
@@ -12282,10 +12392,18 @@ void CMpCheatSheetDlg::OnPaint()
 		L"Operaciones de lista", L"재생목록 조작", L"播放列表操作", L"عمليات القائمة",
 		L"Операции плейлиста", L"Playlist-Aktionen", L"Operações de lista", L"Afspeellijst-acties",
 		L"Operacje listy", L"Liste işlemleri")); yR += titleLh;
-	body(R, yR, LL14(L"・連続 / ループ / ランダム …… 再生モード。ループ回数は下部", L"· Continuous / Loop / Random …… modes. Loop count at bottom", L"· Continue / Boucle / Aléatoire …… modes. Nb boucles en bas", L"· Continua / Loop / Casuale …… modalità. Conteggio in basso",
-		L"· Continua / Bucle / Aleatorio …… modos. Cuenta abajo", L"· 연속 / 루프 / 랜덤 …… 모드. 루프 횟수는 하단", L"· 连续 / 循环 / 随机 …… 模式。循环次数在底部", L"· متتابع / حلقة / عشوائي …… أوضاع. العدد أسفل",
-		L"· Подряд / Цикл / Случайно …… режимы. Счётчик внизу", L"· Folge / Schleife / Zufall …… Modi. Zaehler unten", L"· Contínuo / Loop / Aleatório …… modos. Contagem embaixo", L"· Doorlopend / Lus / Willekeurig …… modi. Aantal onder",
-		L"· Ciągłe / Pętla / Losowo …… tryby. Licznik na dole", L"· Sürekli / Döngü / Rastgele …… modlar. Sayı altta")); yR += lh;
+	body(R, yR, LL14(L"・連続 / ループ / ランダム …… 再生モード。ランダムはリスト内を無作為（同曲連続なし）", L"· Continuous / Loop / Random …… modes. Random picks in-list (no same-track twice)", L"· Continue / Boucle / Aléatoire …… modes. Aléatoire dans la liste", L"· Continua / Loop / Casuale …… modalità. Casuale nella lista",
+		L"· Continua / Bucle / Aleatorio …… modos. Aleatorio en la lista", L"· 연속 / 루프 / 랜덤 …… 모드. 랜덤은 목록 내(같은 곡 연속 없음)", L"· 连续 / 循环 / 随机 …… 模式。随机为列表内（不连续同一曲）", L"· متتابع / حلقة / عشوائي …… أوضاع. عشوائي من القائمة",
+		L"· Подряд / Цикл / Случайно …… режимы. Случайно в списке", L"· Folge / Schleife / Zufall …… Modi. Zufall in der Liste", L"· Contínuo / Loop / Aleatório …… modos. Aleatório na lista", L"· Doorlopend / Lus / Willekeurig …… modi. Willekeurig in de lijst",
+		L"· Ciągłe / Pętla / Losowo …… tryby. Losowo na liscie", L"· Sürekli / Döngü / Rastgele …… modlar. Listeden rastgele")); yR += lh;
+	body(R, yR, LL14(L"・終端コンボ …… 最後で停止 / 同じリスト繰返し / 次リスト / 全リスト循環", L"· End combo …… stop / repeat list / next list / cycle all", L"· Combo fin …… arret / repetter / suivante / toutes", L"· Combo fine …… stop / ripeti / successiva / cicla",
+		L"· Combo final …… parar / repetir / siguiente / ciclar", L"· 끝 콤보 …… 정지 / 같은 목록 반복 / 다음 목록 / 전체 순환", L"· 结束组合框 …… 停止／重复本列表／下一列表／循环全部", L"· قائمة النهاية …… توقف / تكرار / التالية / تدوير الكل",
+		L"· Комбо конца …… стоп / повтор / следующий / цикл всех", L"· End-Combo …… Stopp / wiederholen / naechste / alle", L"· Combo fim …… parar / repetir / proxima / ciclar", L"· Eind-combo …… stoppen / herhalen / volgende / alle",
+		L"· Combo konca …… stop / powtorz / nastepna / cykl", L"· Bitis kombosu …… dur / tekrarla / sonraki / dongule")); yR += lh;
+	body(R, yR, LL14(L"・ループ回数 …… 空・0・-1=無制限（ループ曲は5分で次へ）。数字=回数（64bit上限）", L"· Loop count …… empty/0/-1=unlimited (looped tracks at 5 min). Number=count (64-bit max)", L"· Boucles …… vide/0/-1=illimite (5 min). Nombre=compte (64 bits)", L"· Loop …… vuoto/0/-1=illimitato (5 min). Numero=conteggio (64 bit)",
+		L"· Bucles …… vacio/0/-1=ilimitado (5 min). Numero=cuenta (64 bits)", L"· 루프 횟수 …… 공백·0·-1=무제한(루프 곡 5분). 숫자=횟수(64비트)", L"· 循环次数 …… 空/0/-1=无限（循环曲5分钟）。数字=次数（64位）", L"· عدد الحلقات …… فارغ/0/-1=غير محدود (5 دقائق). رقم=العدد",
+		L"· Циклы …… пусто/0/-1=без лимита (5 мин). Число=счётчик (64 бит)", L"· Schleifen …… leer/0/-1=unbegrenzt (5 Min.). Zahl=Anzahl (64 Bit)", L"· Loops …… vazio/0/-1=ilimitado (5 min). Numero=contagem (64 bits)", L"· Lussen …… leeg/0/-1=onbeperkt (5 min). Getal=aantal (64 bits)",
+		L"· Petle …… puste/0/-1=bez limitu (5 min). Liczba=ilosc (64 bity)", L"· Dongu …… bos/0/-1=sinirsiz (5 dk). Sayi=adet (64 bit)")); yR += lh;
 	body(R, yR, LL14(L"・名前変更 / リスト削除 / 曲削除 …… PL管理。D&Dで並べ替え", L"· Rename / Delete list / Remove …… manage PL. D&D to reorder", L"· Renommer / Suppr. liste / Retirer …… D&D pour trier", L"· Rinomina / Elimina lista / Rimuovi …… D&D per ordine",
 		L"· Renombrar / Eliminar lista / Quitar …… D&D para ordenar", L"· 이름변경 / 목록삭제 / 곡삭제 …… D&D로 정렬", L"· 重命名 / 删列表 / 删曲 …… 拖放排序", L"· إعادة تسمية / حذف قائمة / حذف …… سحب للترتيب",
 		L"· Переименовать / Удалить список / Удалить …… D&D порядок", L"· Umbenennen / Liste loeschen / Entfernen …… D&D sortieren", L"· Renomear / Excluir lista / Remover …… D&D ordenar", L"· Hernoemen / Lijst wissen / Verwijder …… D&D ordenen",
@@ -12351,7 +12469,7 @@ void CMpCheatSheetDlg::OnPaint()
 		L"· Grabar / Captura / WAV …… grabación y exportación", L"· 녹음 / 캡처 / WAV …… 장치 녹음·화면 녹화·내보내기", L"· 录音 / 捕获 / WAV …… 设备录音、屏录、导出", L"· تسجيل / التقاط / WAV …… تسجيل وتصدير",
 		L"· Запись / Захват / WAV …… запись и экспорт", L"· Aufnahme / Capture / WAV …… Aufnahme und Export", L"· Gravar / Captura / WAV …… gravação e exportação", L"· Opnemen / Capture / WAV …… opname en export",
 		L"· Nagraj / Capture / WAV …… nagrywanie i eksport", L"· Kaydet / Yakalama / WAV …… kayıt ve dışa aktarma")); yL += lh;
-	body(L, yL, LL14(L"・騒音計 / 起こし台 / ボイスチェンジャー / チューナー道場 / フォトフレーム / Soft3D迷路", L"· Sound meter / Digitizer / Voice changer / Tuner practice / Photo frame / Soft3D maze", L"· Sonomètre / Numériseur / Changeur de voix / Accordeur / Cadre photo / Labyrinthe Soft3D", L"· Fonometro / Digitalizzatore / Cambia voce / Accordatore / Cornice / Labirinto Soft3D",
+	body(L, yL, LL14(L"・騒音計 / 起こし台 / ボイスチェンジャー / チューナー道場 / フォトフレーム / Soft3D迷路 / Soft3D空中レース", L"· Sound meter / Digitizer / Voice changer / Tuner practice / Photo frame / Soft3D maze / Soft3D aerial race", L"· Sonomètre / Numériseur / Changeur de voix / Accordeur / Cadre photo / Labyrinthe Soft3D / Course aérienne Soft3D", L"· Fonometro / Digitalizzatore / Cambia voce / Accordatore / Cornice / Labirinto Soft3D / Gara aerea Soft3D",
 		L"· Medidor / Digitalizador / Cambiador / Afinador / Marco / Laberinto Soft3D", L"· 소음계 / 디지타이저 / 보이스체인저 / 튜너 / 포토프레임 / Soft3D 미로", L"· 声级计 / 数字化 / 变声器 / 调音练习 / 照片框 / Soft3D 迷宫", L"· مقياس صوت / محول / مغير صوت / موالف / إطار صور / متاهة Soft3D",
 		L"· Шумомер / Оцифровка / Голос / Тюнер / Фоторамка / Лабиринт Soft3D", L"· Schallpegel / Digitalisierer / Stimmenwandler / Stimmtraining / Fotorahmen / Soft3D-Labyrinth", L"· Medidor / Digitalizador / Modificador / Afinador / Moldura / Labirinto Soft3D", L"· Geluidsmeter / Digitizer / Stemvervormer / Stemtrainer / Fotolijst / Soft3D-doolhof",
 		L"· Miernik / Digitalizacja / Zmiana głosu / Stroik / Ramka / Labirynt Soft3D", L"· Ses ölçer / Dijitalleştirici / Ses değiştirici / Akort / Çerçeve / Soft3D labirent")); yL += lh + 2;

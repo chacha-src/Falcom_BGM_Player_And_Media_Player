@@ -761,20 +761,20 @@
 			L"mp3/m4a/ogg/flac dosyalarına gömülü albüm kapağını gösterir.")); /* トルコ語 */
 
 		addTip(IDC_EDIT1, LL14(
-			L"次の曲へいくためのループ回数を設定します",
-			L"Set loop count before next track",
-			L"Definir le nombre de boucles avant la piste suivante",
-			L"Imposta il numero di loop prima del brano successivo",
-			L"Establecer el numero de bucles antes de la siguiente pista",
-			L"다음 곡으로 가기 전 루프 횟수 설정",
-			L"设置进入下一曲目前的循环次数",
-			L"تعيين عدد الحلقات قبل الانتقال للمسار التالي",
-			L"Установить количество повторов перед следующим треком",
-			L"Anzahl der Wiederholungen vor dem nachsten Titel festlegen",
-			L"Definir numero de loops antes da proxima faixa",
-			L"Aantal herhalingen instellen voor volgend nummer",
-			L"Ustaw liczb? p?tli przed nast?pnym utworem",
-			L"Sonraki parcaya gecmeden once dongu say?s?n? ayarla"));
+			L"次の曲へいくためのループ回数。空欄・0・-1は無制限（ループ曲は5分で次へ）。数字はその回数（上限は64bit整数）",
+			L"Loop count before next track. Empty/0/-1 = unlimited (looped tracks advance at 5 min). A number sets the count (64-bit max)",
+			L"Nombre de boucles avant la piste suivante. Vide/0/-1 = illimite (5 min pour les boucles)",
+			L"Numero di loop prima del brano successivo. Vuoto/0/-1 = illimitato (5 min per i loop)",
+			L"Numero de bucles antes de la siguiente pista. Vacio/0/-1 = ilimitado (5 min en bucles)",
+			L"다음 곡 전 루프 횟수. 공백·0·-1=무제한(루프 곡은 5분). 숫자=횟수(64비트)",
+			L"进入下一曲前的循环次数。空/0/-1=无限（循环曲5分钟后下一首）。数字=次数（64位）",
+			L"عدد الحلقات قبل المسار التالي. فارغ/0/-1=غير محدود (5 دقائق للحلقات)",
+			L"Количество повторов перед следующим треком. Пусто/0/-1=без лимита (зацикленные — через 5 мин)",
+			L"Schleifenzahl vor dem nachsten Titel. Leer/0/-1=unbegrenzt (Loops nach 5 Min.)",
+			L"Numero de loops antes da proxima faixa. Vazio/0/-1=ilimitado (loops aos 5 min)",
+			L"Aantal herhalingen voor volgend nummer. Leeg/0/-1=onbeperkt (loops na 5 min)",
+			L"Liczba petli przed nastepnym utworem. Puste/0/-1=bez limitu (petle po 5 min)",
+			L"Sonraki parcaya kadar dongu sayisi. Bos/0/-1=sinirsiz (dongulu 5 dk)"));
 
 		addTip(IDC_STATICaaab, LL14(
 			L"Windows全体の主音量（IDC_SLIDER1と連動）",
@@ -822,20 +822,20 @@
 			L"Rozszerzona glosnosc (IDC_SLIDER4)\nPowyzej 100%. Korektor zapobiega przesterowaniu",
 			L"Genisletilmis ses (IDC_SLIDER4)\n%%100 ustune cikabilir. Ekolayzer kirpilmayi onler"));
 		addTip(IDC_STATICaaad, LL14(
-			L"次の曲へ進むまでのループ回数（IDC_EDIT1と連動）",
-			L"Loop count before next track (linked to IDC_EDIT1)",
-			L"Nombre de boucles avant la piste suivante (lie a IDC_EDIT1)",
-			L"Numero di loop prima del brano successivo (collegato a IDC_EDIT1)",
-			L"Numero de bucles antes de la siguiente pista (vinculado a IDC_EDIT1)",
-			L"다음 곡까지 루프 횟수(IDC_EDIT1 연동)",
-			L"进入下一曲前的循环次数（与 IDC_EDIT1 联动）",
-			L"عدد الحلقات قبل المسار التالي (مرتبط بـ IDC_EDIT1)",
-			L"Количество повторов перед следующим треком (связано с IDC_EDIT1)",
-			L"Schleifenzahl vor dem nachsten Titel (verbunden mit IDC_EDIT1)",
-			L"Numero de loops antes da proxima faixa (ligado ao IDC_EDIT1)",
-			L"Aantal herhalingen voor volgend nummer (gekoppeld aan IDC_EDIT1)",
-			L"Liczba petli przed nastepnym utworem (powiazana z IDC_EDIT1)",
-			L"Sonraki parcaya kadar dongu sayisi (IDC_EDIT1 ile bagli)"));
+			L"次の曲へ進むまでのループ回数。空欄・0・-1は無制限（IDC_EDIT1と連動）",
+			L"Loop count before next track. Empty/0/-1 = unlimited (linked to IDC_EDIT1)",
+			L"Nombre de boucles avant la piste suivante. Vide/0/-1 = illimite (lie a IDC_EDIT1)",
+			L"Numero di loop prima del brano successivo. Vuoto/0/-1 = illimitato (collegato a IDC_EDIT1)",
+			L"Numero de bucles antes de la siguiente pista. Vacio/0/-1 = ilimitado (vinculado a IDC_EDIT1)",
+			L"다음 곡까지 루프 횟수. 공백·0·-1=무제한(IDC_EDIT1 연동)",
+			L"进入下一曲前的循环次数。空/0/-1=无限（与 IDC_EDIT1 联动）",
+			L"عدد الحلقات قبل المسار التالي. فارغ/0/-1=غير محدود (مرتبط بـ IDC_EDIT1)",
+			L"Количество повторов перед следующим треком. Пусто/0/-1=без лимита (связано с IDC_EDIT1)",
+			L"Schleifenzahl vor dem nachsten Titel. Leer/0/-1=unbegrenzt (verbunden mit IDC_EDIT1)",
+			L"Numero de loops antes da proxima faixa. Vazio/0/-1=ilimitado (ligado ao IDC_EDIT1)",
+			L"Aantal herhalingen voor volgend nummer. Leeg/0/-1=onbeperkt (gekoppeld aan IDC_EDIT1)",
+			L"Liczba petli przed nastepnym utworem. Puste/0/-1=bez limitu (powiazana z IDC_EDIT1)",
+			L"Sonraki parcaya kadar dongu sayisi. Bos/0/-1=sinirsiz (IDC_EDIT1 ile bagli)"));
 		addTip(IDC_SLIDER4, LL14(
 			L"100%以上の拡張音量を設定できます\nイコライザー処理で音割れを抑えます",
 			L"Set extended volume above 100%\nClipping is handled by the equalizer",

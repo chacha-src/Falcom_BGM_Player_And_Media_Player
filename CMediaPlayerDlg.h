@@ -97,7 +97,7 @@ public:
 
 	int  Create(CWnd* pParent);
 	void DoLayout();              // DPI/リサイズ対応の手動レイアウト
-	void LayoutPlselCombo(int x, int y, int w, int tbH, float s); // m_plsel: 高さは初回のみ設定
+	void LayoutPlselCombo(CCustomComboBox& cb, int& dropExtent, float& layoutDpi, int x, int y, int w, int tbH, float s);
 	void RefreshListAfterLayout(); // レイアウト変更後に仮想リストの描画範囲を再確定
 	void RefreshList(BOOL bForce = FALSE);  // pl->pc をそのまま反映
 	void FollowPlayingRow();                // 再生中(♪)の行へカーソル追従(項目挿入後に呼ぶ)
@@ -177,9 +177,12 @@ public:
 
 	// ---- 状態チェックボックス(og/pl の状態を SyncFromMain でミラー) ----
 	CCustomComboBox m_plsel;     // プレイリスト切替/追加(pl->m_listchange のミラー)
+	CCustomComboBox m_endMode;   // リスト終端: 停止/繰返し/次リスト/全循環
 	int m_lastComboCount;        // コンボ項目数の変化検出用
 	int m_plselDropExtent;       // DROPDOWNLIST のドロップダウン高さ(初回のみ MoveWindow で設定)
 	float m_plselLayoutDpi;      // 上記を設定したときの hD2(DPI 変化時に再初期化)
+	int m_endModeDropExtent;
+	float m_endModeLayoutDpi;
 
 	// ---- プレイリストのドラッグ&ドロップ移動 ----
 	int m_dragging;              // ドラッグ操作中(0/1) プレイリスト行
@@ -205,7 +208,7 @@ public:
 	CCustomStandardButton m_capture;   // 画面キャプチャ UI
 	// キャプチャ右〜終了左のツールショートカット（コンテキストでON/OFF）
 	CCustomStandardButton m_botDj, m_botTag, m_botBpm, m_botSleep;
-	CCustomStandardButton m_botMirror, m_botSsViz, m_botAlarm, m_botRemote, m_botMaze;
+	CCustomStandardButton m_botMirror, m_botSsViz, m_botAlarm, m_botRemote, m_botMaze, m_botRace;
 	int m_mpBotShort; // 底バー短縮段階 0=フル 1=中 2=短
 	CCustomStatic m_kaisuuL;
 	CCustomEdit m_kaisuu;
@@ -515,6 +518,8 @@ public:
 protected:
 	afx_msg void OnPlSel();
 	afx_msg void OnPlselDropdown();
+	afx_msg void OnEndModeSelchange();
+	afx_msg void OnEndModeDropdown();
 	afx_msg void OnPlRename();
 	afx_msg void OnPlDelete();
 	afx_msg void OnMoveTop();
@@ -551,6 +556,7 @@ protected:
 	afx_msg void OnBotVisAlarm();
 	afx_msg void OnBotVisRemote();
 	afx_msg void OnBotVisMaze();
+	afx_msg void OnBotVisRace();
 	afx_msg void OnSaveParam();
 	afx_msg void OnResetData();
 	afx_msg void OnKaisuuKillFocus();
@@ -635,6 +641,7 @@ protected:
 	afx_msg void OnMpTunerPractice();
 	afx_msg void OnMpPhotoFrame();
 	afx_msg void OnMpSoft3DMaze();
+	afx_msg void OnMpSoft3DRace();
 	afx_msg void OnMpRemote();
 	afx_msg void OnMpRemoteDlg();
 	afx_msg void OnMpRemoteBrowser();

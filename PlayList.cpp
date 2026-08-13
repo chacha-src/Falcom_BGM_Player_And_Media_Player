@@ -342,6 +342,20 @@ void CPlHelpDlg::OnPaint()
 		L"· Doorlopend …… volgende in volgorde. Toevoegen houdt huidig nummer.",
 		L"· Ciągłe …… następny z listy. Dodawanie nie przerywa bieżącego.",
 		L"· Sürekli …… listedeki sıradaki. Ekleme mevcut parçayı kesmez.")); y += lh;
+	body(L, y, LL14(L"・終端コンボ …… 最後で停止 / 同じリスト繰返し / 次リスト / 全リスト循環。",
+		L"· End combo …… stop at end / repeat this list / next list / cycle all lists.",
+		L"· Combo fin …… arret / repetter / suivante / toutes en boucle.",
+		L"· Combo fine …… stop / ripeti / successiva / cicla tutte.",
+		L"· Combo final …… parar / repetir / siguiente / ciclar todas.",
+		L"· 끝 콤보 …… 정지 / 같은 목록 반복 / 다음 목록 / 전체 순환.",
+		L"· 结束组合框 …… 停止／重复本列表／下一列表／循环全部。",
+		L"· قائمة النهاية …… توقف / تكرار / التالية / تدوير الكل.",
+		L"· Комбо конца …… стоп / повтор / следующий / цикл всех.",
+		L"· End-Combo …… Stopp / wiederholen / naechste / alle zyklisch.",
+		L"· Combo fim …… parar / repetir / proxima / ciclar todas.",
+		L"· Eind-combo …… stoppen / herhalen / volgende / alle cyclisch.",
+		L"· Combo konca …… stop / powtorz / nastepna / cykl wszystkich.",
+		L"· Bitis kombosu …… dur / tekrarla / sonraki / tumunu dongule.")); y += lh;
 	body(L, y, LL14(L"・ループ再生 …… 再生前にチェック。ループ点0の曲(mp3等)が対象です。",
 		L"· Loop …… check before play. For tracks with loop point 0 (e.g. mp3).",
 		L"· Boucle …… cocher avant lecture. Pistes avec point de boucle 0.",
@@ -590,6 +604,7 @@ void CPlayList::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDC_CHECK6, m_save_mp3);
 	DDX_Control(pDX, IDC_CHECK7, m_save_kpi);
 	DDX_Control(pDX, IDC_COMBO1, m_listchange);
+	DDX_Control(pDX, IDC_PL_ENDMODE, m_endMode);
 	DDX_Control(pDX, IDC_BUTTON3, m_namechage);
 	DDX_Control(pDX, IDC_PLAYDELETE, m_listdelete);
 	DDX_Control(pDX, IDC_PIANOROLL, m_pianorollBtn);
@@ -635,6 +650,7 @@ BEGIN_MESSAGE_MAP(CPlayList, CCustomBlurDialogBase)
 	ON_WM_SETFOCUS()
 	ON_WM_NCACTIVATE()
 	ON_CBN_SELCHANGE(IDC_COMBO1, &CPlayList::OnCbnSelchangeCombo1)
+	ON_CBN_SELCHANGE(IDC_PL_ENDMODE, &CPlayList::OnCbnSelchangeEndMode)
 	ON_BN_CLICKED(IDC_BUTTON3, &CPlayList::OnBnClickedButton3)
 	ON_BN_CLICKED(IDC_PLAYDELETE, &CPlayList::OnBnClickedPlaydelete)
 	ON_BN_CLICKED(IDC_PIANOROLL, &CPlayList::OnBnClickedPianoroll)
@@ -854,6 +870,7 @@ BOOL CPlayList::OnInitDialog()
 	addTip(IDC_CHECK6, LL14(L"内蔵音源の再生時に途中保存を有効にします。", L"Enable mid-playback save for built-in audio formats.", L"Activer l enregistrement de position pour l audio integre.", L"Abilita salvataggio posizione per audio interno.", L"Habilitar guardado de posicion para audio interno.", L"내장 음원 재생 시 위치 저장 활성화.", L"内置音源播放时启用位置保存。", L"تفعيل حفظ الموضع للصيغ الصوتية المدمجة.", L"Включить сохранение позиции для встроенных форматов.", L"Positionsspeicherung fur eingebaute Audioformate aktivieren.", L"Habilitar salvamento para audio interno.", L"Positieopslag voor ingebouwde audio inschakelen.", L"Włącz zapisywanie pozycji dla wbudowanych formatów.", L"Dahili ses formatları için konum kaydını etkinleştir."));
 	addTip(IDC_CHECK7, LL14(L"動画などのDirectShow使用時に途中保存を有効にします。", L"Enable mid-playback save for DirectShow (videos, etc.).", L"Activer l'enregistrement pour DirectShow (videos, etc.).", L"Abilita salvataggio per DirectShow (video).", L"Habilitar guardado para DirectShow (videos).", L"DirectShow(동영상 등) 재생 시 위치 저장 활성화.", L"DirectShow（视频等）启用位置保存。", L"تفعيل حفظ الموضع لـ DirectShow (الفيديو).", L"Включить сохранение для DirectShow (видео).", L"Fur DirectShow (Videos) aktivieren.", L"Habilitar para DirectShow (videos).", L"Voor DirectShow (video's) inschakelen.", L"Włącz dla DirectShow (wideo).", L"DirectShow (videolar) için etkinleştir."));
 	addTip(IDC_COMBO1, LL14(L"プレイリストを変更または追加します。", L"Change or add playlists.", L"Modifier ou ajouter des listes.", L"Cambia o aggiungi playlist.", L"Cambiar o anadir listas.", L"재생 목록 변경 또는 추가.", L"更改或添加播放列表。", L"تغيير أو إضافة قوائم التشغيل.", L"Изменить или добавить плейлисты.", L"Playlists andern oder hinzufugen.", L"Alterar ou adicionar listas.", L"Playlists wijzigen of toevoegen.", L"Zmień lub dodaj listy.", L"Listeleri değiştir veya ekle."));
+	addTip(IDC_PL_ENDMODE, LL14(L"リストの最後まで行ったときの動作。停止／同じリストを繰返し／次のリストへ／全リスト循環。", L"When the list ends: stop, repeat this list, go to the next list, or cycle all lists.", L"En fin de liste: arret, repetter, liste suivante, ou toutes en boucle.", L"A fine lista: stop, ripeti, lista successiva, o cicla tutte.", L"Al final: parar, repetir, lista siguiente, o ciclar todas.", L"목록 끝에서: 정지 / 같은 목록 반복 / 다음 목록 / 전체 순환.", L"列表结束时：停止／重复本列表／下一列表／循环全部。", L"عند نهاية القائمة: توقف / تكرار / التالية / تدوير الكل.", L"В конце списка: стоп / повтор / следующий / цикл всех.", L"Am Listenende: Stopp / wiederholen / naechste / alle zyklisch.", L"No fim da lista: parar, repetir, proxima, ou ciclar todas.", L"Aan het einde: stoppen, herhalen, volgende, of alle cyclisch.", L"Na koncu listy: stop / powtorz / nastepna / cykl wszystkich.", L"Liste sonunda: dur / tekrarla / sonraki / tumunu dongule."));
 	addTip(IDC_BUTTON3, LL14(L"プレイリスト名を変更します。", L"Rename playlist.", L"Renommer la liste.", L"Rinomina playlist.", L"Cambiar nombre de lista.", L"재생 목록 이름 변경.", L"重命名播放列表。", L"إعادة تسمية قائمة التشغيل.", L"Переименовать плейлист.", L"Playlist umbenennen.", L"Renomear lista.", L"Playlist hernoemen.", L"Zmień nazwę listy.", L"Liste adını değiştir."));
 	addTip(IDC_PLAYDELETE, LL14(L"表示されているプレイリストを削除します。\n※削除したものは復活できないので注意ください。", L"Delete the displayed playlist.\n*Deleted playlists cannot be recovered.", L"Supprimer la liste affichee.\n*Les listes supprimees ne peuvent pas etre recuperees.", L"Elimina la playlist visualizzata.\n*Le playlist eliminate non possono essere recuperate.", L"Eliminar la lista mostrada.\n*Las listas eliminadas no se pueden recuperar.", L"표시된 재생 목록 삭제.\n*삭제 후 복구 불가.", L"删除显示的播放列表。\n*删除后无法恢复。", L"حذف قائمة التشغيل المعروضة.\n*لا يمكن استرداد المحذوفة.", L"Удалить отображаемый плейлист.\n*Удалённые плейлисты восстановить нельзя.", L"Angezeigte Playlist loschen.\n*Geloschte Playlists konnen nicht wiederhergestellt werden.", L"Excluir lista exibida.\n*Listas excluidas nao podem ser recuperadas.", L"Getoonde playlist verwijderen.\n*Verwijderde playlists kunnen niet worden hersteld.", L"Usuń wyświetlaną listę.\n*Usuniętych list nie można odzyskać.", L"Gösterilen listeyi sil.\n*Silinen listeler geri alınamaz."));
 	addTip(IDC_PIANOROLL, LL14(L"簡易ピアノロール表示を開きます。\n再生中の音程を鍵盤状に表示します。", L"Open simple piano roll view.\nShows pitch of playing audio on a keyboard layout.", L"Ouvrir le rouleau piano simple.\nAffiche la hauteur du son en cours sur un clavier.", L"Apri rotolo pianoforte semplice.\nMostra l'altezza dell'audio in riproduzione su tastiera.", L"Abrir rollo de piano simple.\nMuestra el tono del audio en reproduccion en un teclado.", L"간이 피아노 롤 창을 엽니다.\n재생 중 음정을 건반 형태로 표시합니다.", L"打开简易钢琴卷帘。\n以键盘形式显示正在播放的音频音高。", L"فتح لوحة البيانو البسيطة.\nيعرض طبقة الصوت على شكل لوحة مفاتيح.", L"Открыть простой пианоролл.\nПоказывает высоту звука на клавиатуре.", L"Einfache Klavierrolle offnen.\nZeigt Tonhohe als Tastatur.", L"Abrir rolo de piano simples.\nMostra altura do audio em teclado.", L"Eenvoudige pianorol openen.\nToont toonhoogte op een toetsenbord.", L"Otworz prosta rolke pianina.\nPokazuje wysokosc dzwieku na klawiaturze.", L"Basit piyano rulosunu ac.\nCalan sesin perdesini klavye duzeninde gosterir."));
@@ -940,6 +957,10 @@ BOOL CPlayList::OnInitDialog()
 	SIcon(pnt1);
 
 	CCustomControlUtility::SetControlBackgroundColor(&m_listchange, COLOR_COMBO_BG);
+	if (m_endMode.GetSafeHwnd()) {
+		PlaylistEndModeFillCombo(m_endMode);
+		CCustomControlUtility::SetControlBackgroundColor(&m_endMode, COLOR_COMBO_BG);
+	}
 
 	if (m_fontList.GetSafeHandle()) {
 		m_fontList.DeleteObject();
@@ -10605,7 +10626,7 @@ void CPlayList::RefreshNavControls()
 	const CWnd* btns[] = {
 		&m_lsup, &m_lup, &m_lsdown, &m_ldown,
 		&m_findup, &m_finddown,
-		&m_namechage, &m_listdelete, &m_pianorollBtn
+		&m_namechage, &m_listdelete, &m_pianorollBtn, &m_endMode
 	};
 	for (const CWnd* p : btns)
 	{
@@ -10800,6 +10821,21 @@ BOOL CPlayList::OnNcActivate(BOOL bActive)
 }
 
 BOOL changeflg = FALSE;
+
+void CPlayList::OnCbnSelchangeEndMode()
+{
+	if (!m_endMode.GetSafeHwnd()) return;
+	int s = m_endMode.GetCurSel();
+	if (s < 0 || s > 3) s = 1;
+	savedata.plEndMode = s;
+	extern CMediaPlayerDlg* mp;
+	if (mp && ::IsWindow(mp->GetSafeHwnd()) && mp->m_endMode.GetSafeHwnd()) {
+		if (!mp->m_endMode.GetDroppedState() && mp->m_endMode.GetCurSel() != s)
+			mp->m_endMode.SetCurSel(s);
+	}
+	MpPersistSavedataQuick();
+}
+
 void CPlayList::OnCbnSelchangeCombo1()
 {
 	// TODO: ここにコントロール通知ハンドラー コードを追加します。

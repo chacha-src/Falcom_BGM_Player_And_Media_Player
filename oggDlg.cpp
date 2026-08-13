@@ -2517,6 +2517,27 @@ void MpPersistSavedataQuick()
 	_tchdir(tmp);
 }
 
+void PlaylistEndModeFillCombo(CComboBox& cb)
+{
+	if (!cb.GetSafeHwnd()) return;
+	cb.ResetContent();
+	cb.AddString(LL14(L"最後で停止", L"Stop at end", L"Arret en fin", L"Stop a fine", L"Parar al final",
+		L"끝에서 정지", L"结束时停止", L"توقف عند النهاية", L"Стоп в конце", L"Am Ende stoppen",
+		L"Parar no fim", L"Stoppen aan einde", L"Stop na koncu", L"Sonda dur"));
+	cb.AddString(LL14(L"同じリストを繰返し", L"Repeat list", L"Repeter la liste", L"Ripeti lista", L"Repetir lista",
+		L"같은 목록 반복", L"重复同一列表", L"تكرار القائمة", L"Повтор списка", L"Liste wiederholen",
+		L"Repetir lista", L"Lijst herhalen", L"Powtorz liste", L"Listeyi tekrarla"));
+	cb.AddString(LL14(L"次のリストへ", L"Next playlist", L"Liste suivante", L"Playlist succ.", L"Lista siguiente",
+		L"다음 목록으로", L"下一播放列表", L"القائمة التالية", L"Следующий список", L"Naechste Liste",
+		L"Proxima lista", L"Volgende lijst", L"Nastepna lista", L"Sonraki liste"));
+	cb.AddString(LL14(L"全リストを循環", L"Cycle all lists", L"Boucler toutes", L"Cicla tutte", L"Ciclar todas",
+		L"모든 목록 순환", L"循环全部列表", L"تدوير كل القوائم", L"Цикл всех списков", L"Alle Listen zyklisch",
+		L"Ciclar todas", L"Alle lijsten cyclisch", L"Cykl wszystkich", L"Tum listeleri dongule"));
+	int m = savedata.plEndMode;
+	if (m < 0 || m > 3) m = 1;
+	cb.SetCurSel(m);
+}
+
 void CCC_NotifyAeroSettingChanged()
 {
 	MpPersistSavedataQuick();
@@ -2660,6 +2681,126 @@ void OggArmSilentResumeFromCurrent()
 	InterlockedExchange(&g_silentResumeApply, 1);
 }
 
+extern BOOL changeflg;
+
+// apply=0: 同じリスト内のみ（クロスフェード用。リスト切替はしない）
+// apply=1: 終端モードに従い次リストへ Load する
+static int PlaylistResolveNextIndex(int nextBtn, int apply)
+{
+	if (!pl) return -1;
+	int n = pl->playcnt;
+	int cur = plcnt;
+	if (cur < 0) cur = 0;
+
+	if (savedata.mpListRandom && n > 1) {
+		int next = cur;
+		int t = 0;
+		unsigned mix = (unsigned)rand() ^ ((unsigned)rand() << 15);
+		do {
+			mix = mix * 1103515245u + 12345u;
+			next = (int)(mix % (unsigned)n);
+			t++;
+		} while (next == cur && t < 64);
+		return next;
+	}
+
+	if (n > 0) {
+		int next = cur + 1;
+		if (next < n) return next;
+	}
+
+	int em = savedata.plEndMode;
+	if (em < 0 || em > 3) em = 1;
+	if (nextBtn && em == 0) em = 1;
+	if (em == 0) return -1;
+	if (em == 1) return (n > 0) ? 0 : -1;
+	if (pl->m_tempMode) return (n > 0) ? 0 : -1;
+	if (!apply) return -1;
+
+	int npl = pl->GetPlaylistFileCount();
+	if (npl <= 0) return (n > 0) ? 0 : -1;
+	int startPl = savedata.playlistnum;
+	int np = startPl;
+	for (int guard = 0; guard < npl; guard++) {
+		np++;
+		if (np >= npl) {
+			if (em == 2) return -1;
+			np = 0;
+		}
+		if (np == startPl) return (n > 0) ? 0 : -1;
+		if (pl->pc != NULL && pl->playcnt > 0)
+			pl->Save();
+		savedata.playlistnum = np;
+		pl->playcnt = 0;
+		pl->pnt = -1;
+		pl->pnt1 = -1;
+		free(pl->pc);
+		pl->pc = NULL;
+		pl->Load(FALSE);
+		if (pl->pc == NULL)
+			pl->pc = (playlistdata0*)malloc(sizeof(playlistdata0));
+		pl->m_lc.SetItemCount(pl->playcnt);
+		for (int j = 0; j < pl->playcnt; j++)
+			pl->pc[j].icon = 1;
+		changeflg = TRUE;
+		pl->loadplaylistname();
+		changeflg = FALSE;
+		extern CMediaPlayerDlg* mp;
+		if (mp && ::IsWindow(mp->GetSafeHwnd())) {
+			mp->ReloadPlaylistCombo();
+			mp->RefreshList(TRUE);
+		}
+		if (pl->playcnt > 0) {
+			if (savedata.mpListRandom && pl->playcnt > 1) {
+				unsigned mix = (unsigned)rand() ^ ((unsigned)rand() << 15);
+				return (int)(mix % (unsigned)pl->playcnt);
+			}
+			return 0;
+		}
+	}
+	return -1;
+}
+
+static int PlaylistGoNext(int doRestart, int nextBtn)
+{
+	extern CMediaPlayerDlg* mp;
+	if (doRestart && mp && ::IsWindow(mp->GetSafeHwnd()) && mp->TryPlayFromQueue())
+		return 1;
+	int next = PlaylistResolveNextIndex(nextBtn, 1);
+	if (next < 0) {
+		if (doRestart && og && ::IsWindow(og->GetSafeHwnd()))
+			og->SendMessage(WM_COMMAND, MAKEWPARAM(IDC_BUTTON1, BN_CLICKED), 0);
+		return 0;
+	}
+	if (!pl || next >= pl->playcnt) return 0;
+	plcnt = next;
+	pl->Get(plcnt);
+	pl->SIcon(plcnt);
+	gameon = 0;
+	if (doRestart && og && ::IsWindow(og->GetSafeHwnd())) {
+		if (pl->pc)
+			MpPushPlayHistory(pl->pc[next].fol, pl->pc[next].name);
+		RequestPlaybackRestart(og->GetSafeHwnd());
+	}
+	return 1;
+}
+
+static DWORD g_kpiRenzokuTick = 0;
+static int   g_kpiRenzokuPnt = -999;
+static const DWORD KPI_RENZOKU_LIMIT_MS = 300000;
+
+static void RenzokuFadeOrXfade()
+{
+	if (fadeadd != 0.0f) return;
+	if (InterlockedCompareExchange(&g_xfInProgress, 0, 0)) return;
+	g_kpiRenzokuTick = 0;
+	g_kpiRenzokuPnt = -999;
+	if (XfEnabled() && XfStartCrossfadeFromNotify())
+		return;
+	if (og && ::IsWindow(og->GetSafeHwnd()))
+		og->SendMessage(WM_COMMAND, MAKEWPARAM(IDC_BUTTON5, BN_CLICKED), 0);
+}
+
 static int MpCurrentPlayIndex()
 {
 	if (!pl || pl->playcnt <= 0) return -1;
@@ -2681,22 +2822,7 @@ void MpTaskbarReplay()
 
 void MpTaskbarNextTrack()
 {
-	extern CMediaPlayerDlg* mp;
-	if (mp && ::IsWindow(mp->GetSafeHwnd()) && mp->TryPlayFromQueue())
-		return;
-	if (!pl || pl->playcnt <= 0) return;
-	int idx = MpCurrentPlayIndex();
-	if (idx < 0) idx = 0;
-	else {
-		idx++;
-		if (idx >= pl->playcnt) idx = 0;
-	}
-	pl->Get(idx);
-	plcnt = idx;
-	gameon = 0;
-	MpPushPlayHistory(pl->pc[idx].fol, pl->pc[idx].name);
-	if (og && ::IsWindow(og->GetSafeHwnd()))
-		RequestPlaybackRestart(og->GetSafeHwnd());
+	PlaylistGoNext(1, 1);
 }
 
 void MpTaskbarPrevTrack()
@@ -4018,11 +4144,11 @@ int XfStartCrossfadeFromNotify()
 	if (!pl->pc || pl->playcnt <= 0)
 		return 0;
 
-	int nextIdx = plcnt + 1;
-	if (nextIdx >= pl->playcnt)
-		nextIdx = 0;
+	int nextIdx = PlaylistResolveNextIndex(0, 0);
+	if (nextIdx < 0) return 0;
 	nextIdx = XfFindNextAudioPlIndex(nextIdx);
-	if (nextIdx < 0 || nextIdx == plcnt)
+	if (nextIdx < 0) return 0;
+	if (pl->playcnt <= 1 && nextIdx == plcnt)
 		return 0;
 	if (pl->pc[nextIdx].sub == -2)
 		return 0;
@@ -4523,7 +4649,10 @@ BOOL COggDlg::OnInitDialog()
 	fadeadd = 0.0;
 
 	CString s;
-	s.Format(_T("%d"), savedata.kaisuu);
+	if (savedata.loopKaisuu <= 0)
+		s.Empty();
+	else
+		s.Format(_T("%I64d"), savedata.loopKaisuu);
 	m_kaisuu.SetWindowText(s);
 
 	//画面位置
@@ -21195,7 +21324,15 @@ BOOL COggDlg::DestroyWindow()
 	ReleaseDXSound();
 	CString s;
 	m_kaisuu.GetWindowText(s);
-	savedata.kaisuu = _tstoi(s);
+	s.Trim();
+	{
+		__int64 k = s.IsEmpty() ? 0 : _tstoi64(s);
+		if (k < -1) k = -1;
+		savedata.loopKaisuu = k;
+		if (k <= 0) savedata.kaisuu = 0;
+		else if (k > 2147483647) savedata.kaisuu = 2147483647;
+		else savedata.kaisuu = (int)k;
+	}
 	savedata.gameflg[0] = m_ys6.GetCheck();
 	savedata.gameflg[1] = m_ysf.GetCheck();
 	savedata.gameflg[2] = m_ed6fc.GetCheck();
@@ -21607,11 +21744,6 @@ int pox, poy;
 
 static int s_lastMs2DrawMs = 0;
 
-// KPI(mode==-11)は無限ループで loopcnt が増えないため、連続再生時は経過時間で次曲へ進める。
-static DWORD g_kpiRenzokuTick = 0;   // 現在曲の計測開始tick(0=計測なし/発火済み)
-static int   g_kpiRenzokuPnt = -999; // 計測中の曲インデックス(変化で計測リセット)
-static const DWORD KPI_RENZOKU_LIMIT_MS = 120000;  // 2分
-
 // スクロールテキスト区切り装飾（定義は mojisub の後）
 static void DrawScrollSepDeco(CDC& dc, int x_px, int h_px, int w_px, COLORREF clr = RGB(255, 255, 255));
 
@@ -21749,6 +21881,10 @@ void COggDlg::timerp()
 	{
 		extern void Soft3DMazeOnTimerp();
 		Soft3DMazeOnTimerp();
+	}
+	{
+		extern void Soft3DRaceOnTimerp();
+		Soft3DRaceOnTimerp();
 	}
 	if (playy == 0)return;
 
@@ -21977,14 +22113,8 @@ void COggDlg::timerp()
 							handled = TRUE;
 						}
 						else if (pl->m_renzoku.GetCheck() == TRUE) {
-							// 連続再生: 次の曲へ(末尾なら先頭へ)
-							int idx = plcnt + 1;
-							if (idx >= pl->playcnt) idx = 0;
-							pl->Get(idx);
-							plcnt = idx;
-							gameon = 0;
-							RequestPlaybackRestart(GetSafeHwnd());
-							handled = TRUE;
+							if (PlaylistGoNext(1, 0))
+								handled = TRUE;
 						}
 					}
 					if (!handled)
@@ -22655,8 +22785,7 @@ void COggDlg::timerp()
 	}
 	else if (pl && plw) {
 		if (pl->m_renzoku.GetSafeHwnd() && pl->m_renzoku.GetCheck() == TRUE) {
-			// KPI(kb media player)は mode==-3。無限ループで loopcnt が増えないため、
-			// 連続再生時のみ2分経過で次曲へ進める。
+			// KPI(mode==-3)は loopcnt が増えない。loop1/2 付きは無制限時 5 分で次曲。
 			if (mode == -3) {
 				if (g_kpiRenzokuPnt != pl->pnt) {
 					g_kpiRenzokuPnt = pl->pnt;
@@ -22664,14 +22793,28 @@ void COggDlg::timerp()
 				}
 				else if (g_kpiRenzokuTick != 0 &&
 					(DWORD)(GetTickCount() - g_kpiRenzokuTick) >= KPI_RENZOKU_LIMIT_MS) {
-					g_kpiRenzokuTick = 0;   // 次曲へ移るまで再発火させない
-					OnButton5();
+					RenzokuFadeOrXfade();
 				}
 			}
 			else {
 				CString s; m_kaisuu.GetWindowText(s);
-				int kc = _tstoi(s); if (kc < 1) kc = 1;   // 回数0/空は最低1ループ(即フェード防止)
-				if (loopcnt >= kc) OnButton5();
+				s.Trim();
+				__int64 kc = s.IsEmpty() ? 0 : _tstoi64(s);
+				if (kc <= 0) {
+					if (loop1 || loop2) {
+						if (g_kpiRenzokuPnt != pl->pnt) {
+							g_kpiRenzokuPnt = pl->pnt;
+							g_kpiRenzokuTick = GetTickCount();
+						}
+						else if (g_kpiRenzokuTick != 0 &&
+							(DWORD)(GetTickCount() - g_kpiRenzokuTick) >= KPI_RENZOKU_LIMIT_MS) {
+							RenzokuFadeOrXfade();
+						}
+					}
+				}
+				else if (loopcnt >= kc) {
+					RenzokuFadeOrXfade();
+				}
 			}
 		}
 	}
@@ -23328,8 +23471,23 @@ void COggDlg::timerp()
 			}
 			else {
 				CString s; m_kaisuu.GetWindowText(s);
-				int kc = _tstoi(s); if (kc < 1) kc = 1;   // 回数0/空は最低1ループ(即フェード防止)
-				if (loopcnt >= kc) OnButton5();
+				s.Trim();
+				__int64 kc = s.IsEmpty() ? 0 : _tstoi64(s);
+				if (kc <= 0) {
+					if (loop1 || loop2) {
+						if (g_kpiRenzokuPnt != plcnt) {
+							g_kpiRenzokuPnt = plcnt;
+							g_kpiRenzokuTick = GetTickCount();
+						}
+						else if (g_kpiRenzokuTick != 0 &&
+							(DWORD)(GetTickCount() - g_kpiRenzokuTick) >= KPI_RENZOKU_LIMIT_MS) {
+							RenzokuFadeOrXfade();
+						}
+					}
+				}
+				else if (loopcnt >= kc) {
+					RenzokuFadeOrXfade();
+				}
 			}
 		}
 	}
@@ -23662,7 +23820,8 @@ void timerog1(UINT nIDEvent)
 		if (ip != 0) return;
 		{
 			extern BOOL IsSoft3DMazeActive();
-			if (IsSoft3DMazeActive())
+			extern BOOL IsSoft3DRaceActive();
+			if (IsSoft3DMazeActive() || IsSoft3DRaceActive())
 				return;
 		}
 		if (maini)
@@ -23783,16 +23942,7 @@ void timerog1(UINT nIDEvent)
 			fade1 = 0; lenl = 0;
 			fade = 1.0f; plf = 0;
 			og->KillTimer(9000);
-			extern CMediaPlayerDlg* mp;
-			if (mp && ::IsWindow(mp->GetSafeHwnd()) && mp->TryPlayFromQueue())
-				return;
-			plcnt++;
-			if (pl && plcnt >= pl->m_lc.GetItemCount()) plcnt = 0;
-			if (pl && plcnt < pl->m_lc.GetItemCount()) {
-				pl->Get(plcnt);
-				pl->SIcon(plcnt);
-				RequestPlaybackRestart(og->GetSafeHwnd());
-			}
+			PlaylistGoNext(1, 0);
 		}
 	}
 	if (nIDEvent == 6555) {
@@ -23917,14 +24067,16 @@ void timerog1(UINT nIDEvent)
 	}
 
 	if (nIDEvent == 1250) {
-		// フェードアウト完了後の連続再生(SetTimer(1250) と ID を一致)
 		if ((fade1 == 1 && pl && plw)) {
 			if (pl->m_renzoku.GetCheck() == TRUE) {
-				plcnt++;
-				if (plcnt >= pl->m_lc.GetItemCount()) plcnt = 0;
-				endflg = 0;
-				if (plcnt < pl->m_lc.GetItemCount()) {
-					og->KillTimer(1250);
+				og->KillTimer(1250);
+				int next = PlaylistResolveNextIndex(0, 1);
+				if (next < 0) {
+					og->SendMessage(WM_COMMAND, MAKEWPARAM(IDC_BUTTON1, BN_CLICKED), 0);
+				}
+				else {
+					plcnt = next;
+					endflg = 0;
 					pl->Get(plcnt);
 					pl->SIcon(plcnt);
 					thn = FALSE;
@@ -25959,6 +26111,9 @@ BOOL COggDlg::PreTranslateMessage(MSG* pMsg)
 	if (savedata.playerMode == 1) {
 		extern BOOL Soft3DMazePreTranslate(MSG*);
 		if (Soft3DMazePreTranslate(pMsg))
+			return TRUE;
+		extern BOOL Soft3DRacePreTranslate(MSG*);
+		if (Soft3DRacePreTranslate(pMsg))
 			return TRUE;
 		extern CMediaPlayerDlg* mp;
 		if (mp && ::IsWindow(mp->GetSafeHwnd()) && mp->RelayPreTranslateMessage(pMsg))
@@ -28351,9 +28506,10 @@ void COggDlg::OnKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags)
 
 LRESULT COggDlg::OnHotKey(WPARAM wp, LPARAM a)
 {
-	// Soft3D 迷路操作中は上下＝音量／左右＝シークのグローバルホットキーを無効化
+	// Soft3D 迷路／空中レース操作中は上下＝音量／左右＝シークのグローバルホットキーを無効化
 	extern BOOL IsSoft3DMazeActive();
-	if (IsSoft3DMazeActive())
+	extern BOOL IsSoft3DRaceActive();
+	if (IsSoft3DMazeActive() || IsSoft3DRaceActive())
 		return 0;
 
 	std::unique_lock<std::mutex> hscroll_lock(cl2);
@@ -28474,7 +28630,8 @@ void COggDlg::OnActivate(UINT nState, CWnd * pWndOther, BOOL bMinimized)
 	}
 	else {
 		extern BOOL IsSoft3DMazeActive();
-		if (!IsSoft3DMazeActive()) {
+		extern BOOL IsSoft3DRaceActive();
+		if (!IsSoft3DMazeActive() && !IsSoft3DRaceActive()) {
 			RegisterHotKey(GetSafeHwnd(), ID_HOTKEY0, 0, VK_UP);
 			RegisterHotKey(GetSafeHwnd(), ID_HOTKEY1, 0, VK_DOWN);
 			RegisterHotKey(GetSafeHwnd(), ID_HOTKEY2, 0, VK_RIGHT);
@@ -29020,13 +29177,7 @@ LRESULT COggDlg::OnXfadeStart(WPARAM, LPARAM)
 		endflg = 0;
 		fade1 = 0; lenl = 0;
 		fade = 1.0f; plf = 0;
-		plcnt++;
-		if (plcnt >= pl->m_lc.GetItemCount()) plcnt = 0;
-		if (plcnt < pl->m_lc.GetItemCount()) {
-			pl->Get(plcnt);
-			pl->SIcon(plcnt);
-			RequestPlaybackRestart(GetSafeHwnd());
-		}
+		PlaylistGoNext(1, 0);
 	}
 	return 0;
 }
@@ -30681,10 +30832,10 @@ void COggHelpDlg::OnPaint()
 		L"· Seek / volumen / tempo·tono …… deslizadores; doble clic = 100%", L"· 시크/볼륨/템포·피치 …… 슬라이더. 라벨 더블클릭=100%", L"· 进度/音量/速度·音高 …… 滑块；双击标签恢复100%", L"· التقديم/الصوت/الإيقاع·الدرجة …… منزلقات؛ نقر مزدوج=100٪",
 		L"· Seek / громкость / темп·тон …… ползунки; двойной клик = 100%", L"· Seek / Lautstärke / Tempo·Ton …… Schieberegler; Doppelklick = 100%", L"· Seek / volume / tempo·tom …… controles; duplo clique = 100%", L"· Seek / volume / tempo·toon …… schuiven; dubbelklik = 100%",
 		L"· Seek / głośność / tempo·ton …… suwaki; dwuklik = 100%", L"· Seek / ses / tempo·perde …… kaydırıcılar; çift tık = %100")); y += lh;
-	body(L, y, LL14(L"・ランダム / 順次 …… 次曲の選び方。ループ回数は編集欄で指定", L"· Random / Sequential …… next-track mode. Loop count is in the edit box", L"· Aléatoire / Séquentiel …… mode suivant. Boucles = champ d'édition", L"· Casuale / Sequenziale …… modalità successiva. Loop = campo",
-		L"· Aleatorio / Secuencial …… modo siguiente. Bucles = cuadro", L"· 랜덤/순차 …… 다음 곡 방식. 루프 횟수는 입력란", L"· 随机/顺序 …… 下一曲方式。循环次数在编辑框", L"· عشوائي/متسلسل …… نمط التالي. الحلقات في الحقل",
-		L"· Случайный / Последовательный …… режим следующей. Циклы — в поле", L"· Zufall / Sequentiell …… Folgemodus. Schleifen = Eingabefeld", L"· Aleatório / Sequencial …… modo seguinte. Loops = caixa", L"· Willekeurig / Sequentieel …… volgendenummer. Lussen = veld",
-		L"· Losowe / Kolejne …… tryb następnego. Pętle = pole", L"· Rastgele / Sıralı …… sonraki parça. Döngü = kutu")); y += lh + 4;
+	body(L, y, LL14(L"・ランダム / 順次 …… ファルコム曲の次曲の選び方。ループ回数は空・0・-1で無制限、数字で回数（上限は64bit）", L"· Random / Sequential …… Falcom next-track mode. Loop count: empty/0/-1=unlimited, or a number (64-bit max)", L"· Aléatoire / Séquentiel …… mode Falcom. Boucles: vide/0/-1=illimité", L"· Casuale / Sequenziale …… modalità Falcom. Loop: vuoto/0/-1=illimitato",
+		L"· Aleatorio / Secuencial …… modo Falcom. Bucles: vacío/0/-1=ilimitado", L"· 랜덤/순차 …… 팔콤 다음 곡. 루프 횟수 공백·0·-1=무제한", L"· 随机/顺序 …… Falcom 下一曲。循环次数空/0/-1=无限", L"· عشوائي/متسلسل …… نمط Falcom. الحلقات فارغ/0/-1=غير محدود",
+		L"· Случайный / Последовательный …… режим Falcom. Циклы: пусто/0/-1=без лимита", L"· Zufall / Sequentiell …… Falcom-Folgemodus. Schleifen: leer/0/-1=unbegrenzt", L"· Aleatório / Sequencial …… modo Falcom. Loops: vazio/0/-1=ilimitado", L"· Willekeurig / Sequentieel …… Falcom. Lussen: leeg/0/-1=onbeperkt",
+		L"· Losowe / Kolejne …… tryb Falcom. Pętle: puste/0/-1=bez limitu", L"· Rastgele / Sıralı …… Falcom. Döngü: boş/0/-1=sınırsız")); y += lh + 4;
 
 	const int colW = (rc.Width() - L * 2 - 8) / 2;
 	const int col2 = L + colW + 8;

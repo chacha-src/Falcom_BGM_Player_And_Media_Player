@@ -541,6 +541,9 @@ BOOL COggApp::InitInstance()
 	savedata.s3m_win_y = 0;
 	savedata.s3m_win_w = 0;
 	savedata.s3m_win_h = 0;
+	savedata.plEndMode = 1;
+	savedata.mpListRandom = 0;
+	savedata.loopKaisuu = 2;
 	savedata.sm_mic_device[0] = 0;
 	savedata.sm_response = 1;
 	savedata.dig_cap_device[0] = 0;
@@ -1011,6 +1014,50 @@ BOOL COggApp::InitInstance()
 		|| savedata.s3m_win_w < 320 || savedata.s3m_win_h < 240) {
 		savedata.s3m_win_x = savedata.s3m_win_y = 0;
 		savedata.s3m_win_w = savedata.s3m_win_h = 0;
+	}
+	if (datFileSize < (int)(offsetof(save, plEndMode) + sizeof(savedata.plEndMode))
+		|| savedata.plEndMode < 0 || savedata.plEndMode > 3)
+		savedata.plEndMode = 1;
+	if (datFileSize < (int)(offsetof(save, mpListRandom) + sizeof(savedata.mpListRandom)))
+		savedata.mpListRandom = 0;
+	else if (savedata.mpListRandom)
+		savedata.mpListRandom = 1;
+	if (datFileSize < (int)(offsetof(save, loopKaisuu) + sizeof(savedata.loopKaisuu))) {
+		__int64 k = savedata.kaisuu;
+		if (k < 1) k = 2;
+		savedata.loopKaisuu = k;
+	}
+	if (datFileSize < (int)(offsetof(save, s3r_ai) + sizeof(savedata.s3r_ai))) {
+		savedata.s3r_ai = 2;
+		savedata.s3r_opponents = 5;
+		savedata.s3r_len = 0;
+		savedata.s3r_laps = 0;
+		savedata.s3r_theme = 0;
+		savedata.s3r_show_map = 1;
+		savedata.s3r_item_mask = 16383;
+		savedata.s3r_zoom = 100;
+		savedata.s3r_win_x = savedata.s3r_win_y = 0;
+		savedata.s3r_win_w = savedata.s3r_win_h = 0;
+		savedata.s3r_invert_y = 0;
+		savedata.mpBotToolsFlags |= 512; // Soft3D空中レースボタン
+	} else {
+		if (savedata.s3r_ai < 0 || savedata.s3r_ai > 4) savedata.s3r_ai = 2;
+		if (savedata.s3r_opponents < 1 || savedata.s3r_opponents > 11) savedata.s3r_opponents = 5;
+		if (savedata.s3r_len < 0 || savedata.s3r_len > 3) savedata.s3r_len = 0;
+		if (savedata.s3r_laps < 0 || savedata.s3r_laps > 10) savedata.s3r_laps = 0;
+		if (savedata.s3r_theme < 0 || savedata.s3r_theme > 8) savedata.s3r_theme = 0;
+		if (savedata.s3r_item_mask <= 0) savedata.s3r_item_mask = 16383;
+		if (savedata.s3r_zoom < 50 || savedata.s3r_zoom > 250) savedata.s3r_zoom = 100;
+		if (savedata.s3r_win_w < 320 || savedata.s3r_win_h < 240) {
+			savedata.s3r_win_x = savedata.s3r_win_y = 0;
+			savedata.s3r_win_w = savedata.s3r_win_h = 0;
+		}
+		savedata.s3r_show_map = savedata.s3r_show_map ? 1 : 0;
+	}
+	if (datFileSize < (int)(offsetof(save, s3r_invert_y) + sizeof(savedata.s3r_invert_y))) {
+		savedata.s3r_invert_y = 0;
+	} else {
+		savedata.s3r_invert_y = savedata.s3r_invert_y ? 1 : 0;
 	}
 	if (datFileSize < (int)(offsetof(save, sm_response) + sizeof(savedata.sm_response))) {
 		savedata.sm_mic_device[0] = 0;

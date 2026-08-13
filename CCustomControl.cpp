@@ -1,4 +1,4 @@
-﻿#include "stdafx.h"
+#include "stdafx.h"
 #include "CCustomControl.h"
 #include "resource.h"
 #include "CImageBase.h"
@@ -13883,7 +13883,7 @@ static BOOL CCC_IsCaptionChromeCtrl(HWND hWnd)
         IDC_TE_HELP, IDC_FD_HELP, IDC_KPI_HELP, IDC_SY_HELP, IDC_PRT_HELP,
         IDC_OGG_HELP, IDC_MP_CHEATBTN,
         IDC_SM_HELP, IDC_DIG_HELP, IDC_VC_HELP, IDC_TN_HELP, IDC_PF_HELP,
-        IDC_S3M_HELP
+        IDC_S3M_HELP, IDC_S3R_HELP
     };
     for (int i = 0; i < (int)_countof(kHelpChromeIds); ++i) {
         if (id == kHelpChromeIds[i])
@@ -13900,7 +13900,7 @@ static BOOL CCC_IsCaptionHelpChromeId(UINT id)
         IDC_TE_HELP, IDC_FD_HELP, IDC_KPI_HELP, IDC_SY_HELP, IDC_PRT_HELP,
         IDC_OGG_HELP, IDC_MP_CHEATBTN,
         IDC_SM_HELP, IDC_DIG_HELP, IDC_VC_HELP, IDC_TN_HELP, IDC_PF_HELP,
-        IDC_S3M_HELP
+        IDC_S3M_HELP, IDC_S3R_HELP
     };
     for (int i = 0; i < (int)_countof(kHelpChromeIds); ++i) {
         if (id == kHelpChromeIds[i])
@@ -13918,7 +13918,7 @@ static HWND CCC_FindCaptionHelpChrome(HWND hDlg)
         IDC_TE_HELP, IDC_FD_HELP, IDC_KPI_HELP, IDC_SY_HELP, IDC_PRT_HELP,
         IDC_OGG_HELP, IDC_MP_CHEATBTN,
         IDC_SM_HELP, IDC_DIG_HELP, IDC_VC_HELP, IDC_TN_HELP, IDC_PF_HELP,
-        IDC_S3M_HELP
+        IDC_S3M_HELP, IDC_S3R_HELP
     };
     for (int i = 0; i < (int)_countof(kHelpChromeIds); ++i) {
         HWND h = ::GetDlgItem(hDlg, kHelpChromeIds[i]);
@@ -14439,7 +14439,7 @@ void CCC_CaptionLayout(HWND hDlg)
         IDC_TE_HELP, IDC_FD_HELP, IDC_KPI_HELP, IDC_SY_HELP, IDC_PRT_HELP,
         IDC_OGG_HELP, IDC_MP_CHEATBTN,
         IDC_SM_HELP, IDC_DIG_HELP, IDC_VC_HELP, IDC_TN_HELP, IDC_PF_HELP,
-        IDC_S3M_HELP
+        IDC_S3M_HELP, IDC_S3R_HELP
     };
     for (int i = 0; i < (int)_countof(kHelpChromeIds); ++i) {
         HWND hHelp = ::GetDlgItem(hDlg, kHelpChromeIds[i]);
@@ -15401,6 +15401,43 @@ static void CCC_GdiHelpFillDemoScene(GdiSoft3D::Context& ctx, int kind, DWORD ti
 		ctx.DrawNeonBox(-0.22f, 0.22f, 0.72f + 0.04f * sinf(t), 0.88f, 1.08f, RGB(255, 210, 80), 0.f);
 		// プレイヤー位置の三角っぽいマーカー（手前）
 		ctx.DrawNeonBox(-0.06f, 0.06f, 0.18f, 0.12f, 0.22f, RGB(255, 240, 120), 0.f);
+		break;
+	}
+	case CCC_HELPDEMO_KRACE: {
+		// 空中レース: 地形・パワーバンド・機体・障害・アイテム
+		ctx.DrawMirrorFloor(-1.15f, 1.15f, 0.0f, 1.20f, RGB(55, 120, 70), 0.22f);
+		ctx.DrawGrid(-1.1f, 1.1f, 0.02f, 1.15f, 0.002f, 7, RGB(70, 140, 80));
+		// うねるパワーバンド（ネオン帯）
+		for (int i = 0; i < 8; ++i) {
+			const float z0 = 0.06f + i * 0.13f;
+			const float z1 = z0 + 0.11f;
+			const float y = 0.22f + 0.10f * sinf(t * 0.8f + i * 0.55f);
+			ctx.DrawNeonBox(-0.38f, 0.38f, y + 0.08f, z0, z1, RGB(140, 220, 255), 0.f);
+			ctx.DrawBox(-0.34f, 0.34f, y + 0.05f, z0 + 0.01f, z1 - 0.01f, RGB(90, 180, 230), 0.35f);
+		}
+		// 森の木（左右）
+		for (int i = 0; i < 4; ++i) {
+			const float z = 0.18f + i * 0.24f;
+			ctx.DrawBox(-0.95f, -0.82f, 0.55f, z, z + 0.12f, RGB(90, 55, 30), 0.f);
+			ctx.DrawSphere(-0.88f, 0.72f + 0.04f * sinf(t + i), z + 0.06f, 0.18f, RGB(50, 160, 70), 8, 6);
+			ctx.DrawBox(0.82f, 0.95f, 0.55f, z, z + 0.12f, RGB(90, 55, 30), 0.f);
+			ctx.DrawSphere(0.88f, 0.70f - 0.03f * sinf(t + i), z + 0.06f, 0.17f, RGB(45, 150, 65), 8, 6);
+		}
+		// トンネル枠
+		ctx.DrawBox(-0.55f, -0.42f, 0.85f, 0.55f, 0.70f, RGB(150, 140, 120), 0.f);
+		ctx.DrawBox(0.42f, 0.55f, 0.85f, 0.55f, 0.70f, RGB(150, 140, 120), 0.f);
+		ctx.DrawBox(-0.55f, 0.55f, 0.95f, 0.68f, 0.78f, RGB(140, 130, 110), 0.f);
+		// 自機（鳥っぽい）
+		const float craftZ = 0.28f + 0.08f * sinf(t * 1.2f);
+		const float craftY = 0.38f + 0.05f * sinf(t * 1.6f);
+		ctx.DrawSphere(0.f, craftY, craftZ, 0.10f, RGB(255, 170, 90), 10, 8);
+		ctx.DrawBox(-0.22f, -0.06f, craftY + 0.04f, craftZ - 0.02f, craftZ + 0.04f, RGB(255, 200, 120), 0.f);
+		ctx.DrawBox(0.06f, 0.22f, craftY + 0.04f, craftZ - 0.02f, craftZ + 0.04f, RGB(255, 200, 120), 0.f);
+		// アイテム
+		const float bob = 0.05f * sinf(t * 2.f);
+		ctx.DrawSphere(-0.18f, 0.48f + bob, 0.62f, 0.08f, RGB(80, 230, 130), 8, 6);
+		ctx.DrawSphere(0.16f, 0.50f - bob, 0.78f, 0.08f, RGB(200, 120, 255), 8, 6);
+		ctx.DrawSphere(0.02f, 0.55f + bob * 0.6f, 0.95f, 0.08f, RGB(255, 90, 120), 8, 6);
 		break;
 	}
 	default: { // GENERIC

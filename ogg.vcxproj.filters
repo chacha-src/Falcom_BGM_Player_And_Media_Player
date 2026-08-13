@@ -450,6 +450,9 @@
     <ClCompile Include="Soft3DMazeDlg.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="Soft3DRaceDlg.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="SoundMeterDlg.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -1070,6 +1073,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Soft3DMazeDlg.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Soft3DRaceDlg.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="SoundMeterDlg.h">

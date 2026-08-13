@@ -585,7 +585,7 @@ struct save{
 	int mpTempOpen;
 
 	// --- MP底バー: ツール由来ショートカットボタン(末尾追記。旧.datは0→起動時既定) ---
-	// mpBotToolsInited=1 なら mpBotToolsFlags 有効。bit: DJ/Tag/BPM/Sleep/Mirror/SsViz/Alarm/Remote/Maze
+	// mpBotToolsInited=1 なら mpBotToolsFlags 有効。bit: DJ/Tag/BPM/Sleep/Mirror/SsViz/Alarm/Remote/Maze/Race
 	int mpBotToolsInited;
 	int mpBotToolsFlags;
 
@@ -728,6 +728,24 @@ struct save{
 	int s3m_difficulty;        // 0=超簡単 … 4=超難しい（2=普通）
 	// Soft3D迷路ウィンドウ位置・サイズ（末尾追記。0幅=未保存）
 	int s3m_win_x, s3m_win_y, s3m_win_w, s3m_win_h;
+
+	// --- 連続再生: リスト終端 / リスト内ランダム / ループ回数64bit（末尾追記）---
+	// plEndMode: 0=最後で停止 1=同じリストを先頭から 2=次のリストへ(最後のリストで停止) 3=次のリストへ(最後のあと先頭リスト)
+	int plEndMode;
+	int mpListRandom;          // 1=リストビューをランダム再生（ファルコムゲーム用 random とは別）
+	__int64 loopKaisuu;        // 0 または -1=無制限。正の数=その回数。上限は __int64
+
+	// --- Soft3D 空中レース（末尾追記）---
+	int s3r_ai;                // 0=超弱い … 4=凶暴（2=普通）
+	int s3r_opponents;         // 敵機数 1..11（合計最大12）
+	int s3r_len;               // 0=自動 1=短い 2=普通 3=長い
+	int s3r_laps;              // 0=自動 1..10=周回数
+	int s3r_theme;             // 0=自動 1..8=テーマ
+	int s3r_show_map;          // 1=ミニマップ表示
+	int s3r_item_mask;         // アイテム種類ビット（迷路 ITEM_ALL 相当）
+	int s3r_zoom;              // 視点ズーム×100（50..250）
+	int s3r_win_x, s3r_win_y, s3r_win_w, s3r_win_h; // 0幅=未保存
+	int s3r_invert_y;          // 0=通常 1=マウス/パッド上下反転
 };
 extern save savedata;
 /* コード間隔(ms)。16..500。旧.dat や未設定は 25。 */
@@ -825,7 +843,8 @@ enum {
 	CCC_HELPDEMO_KCMDROLL,
 	CCC_HELPDEMO_KLIST,
 	CCC_HELPDEMO_KTRANSPORT,
-	CCC_HELPDEMO_KMAZE
+	CCC_HELPDEMO_KMAZE,
+	CCC_HELPDEMO_KRACE
 };
 int CCC_GdiHelpDrawSoft3DDemo(CDC& dc, int x, int y, int maxW, int maxH, int kind);
 int CCC_GdiHelpDrawSoftDemoPair(CDC& dc, int x, int y, int totalW, int demoH, int kind);

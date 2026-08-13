@@ -1,4 +1,4 @@
-﻿// Soft3DMazeDlg.cpp — Soft3D 迷路（ミニマップ／訪問／コンテキスト設定／曲連動）
+// Soft3DMazeDlg.cpp — Soft3D 迷路（ミニマップ／訪問／コンテキスト設定／曲連動）
 
 #include "stdafx.h"
 #include "ogg.h"
@@ -29,6 +29,7 @@ extern COggDlg* og;
 extern int tempo;
 extern int pitch;
 extern int playf;
+extern int mode;
 
 namespace {
 
@@ -2074,6 +2075,8 @@ void CSoft3DMazeDlg::CaptureAudioBaseline()
 
 void CSoft3DMazeDlg::RestoreAudioBaseline()
 {
+	// 動画(mode=-2)はテンポ／ピッチ変更で再生速度が動くので触らない
+	if (mode == -2) return;
 	if (mp && ::IsWindow(mp->GetSafeHwnd()))
 		mp->ApplyPracticeTempoPercent(m_baseTempoPos / 2);
 	else {
@@ -3571,6 +3574,11 @@ void CSoft3DMazeDlg::UpdateNavProgress()
 
 void CSoft3DMazeDlg::ApplyItem(int kind)
 {
+	// 動画再生中は音／再生操作を無視（動画が動く・再生開始しない）
+	if (mode == -2) {
+		m_runDirty = 1;
+		return;
+	}
 	switch (kind) {
 	case CELL_TEMPO: {
 		int pct = tempo / 2 + 10;
@@ -6843,6 +6851,8 @@ void CSoft3DMazeDlg::OnDestroy()
 
 void OpenSoft3DMazeModeless(CWnd* p)
 {
+	extern void CloseSoft3DRaceIfOpen();
+	CloseSoft3DRaceIfOpen();
 	if (g_s3m && g_s3m->GetSafeHwnd()) {
 		g_s3m->SetForegroundWindow();
 		return;

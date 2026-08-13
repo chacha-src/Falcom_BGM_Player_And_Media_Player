@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003" DefaultTargets="Build" ToolsVersion="14.0">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="uni_2026_de|Win32">
@@ -162,7 +162,7 @@
       <Culture>0x0411</Culture>
     </ResourceCompile>
     <Link>
-      <AdditionalDependencies>opusfile_avx2_2026.lib;opus_avx2_2026.lib;Strmbase.lib;comctl32.lib;mfuuid.lib;mfplat.lib;mfreadwrite.lib;User32.lib;uafxcw.lib;libogg_static_avx2_2026.lib;libvorbis_static_avx2_2026.lib;libvorbisfile_static_avx2_2026.lib;winmm.lib;dxguid.lib;dsound.lib;strmiids.lib;libmad_avx2_2026.lib;libFLAC_static_avx2_2026.lib;libsoxr_avx2_2026.lib;dwmapi.lib;d3d11.lib;dxgi.lib;$(WindowsSdkDir)Lib\$(TargetPlatformVersion)\um\x86\d3dcompiler.lib;windowsapp.lib;libz-static.lib;libzstd_static.lib;psapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>opusfile_avx2_2026.lib;opus_avx2_2026.lib;Strmbase.lib;comctl32.lib;mfuuid.lib;mfplat.lib;mfreadwrite.lib;User32.lib;uafxcw.lib;libogg_static_avx2_2026.lib;libvorbis_static_avx2_2026.lib;libvorbisfile_static_avx2_2026.lib;winmm.lib;dxguid.lib;dinput8.lib;dsound.lib;strmiids.lib;libmad_avx2_2026.lib;libFLAC_static_avx2_2026.lib;libsoxr_avx2_2026.lib;dwmapi.lib;d3d11.lib;dxgi.lib;$(WindowsSdkDir)Lib\$(TargetPlatformVersion)\um\x86\d3dcompiler.lib;windowsapp.lib;libz-static.lib;libzstd_static.lib;psapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <OutputFile>C:\PROJECTS\APPLICATION3\ogg_binary\oggYSEDbgm_uni_avx2.exe</OutputFile>
       <SuppressStartupBanner>true</SuppressStartupBanner>
       <ProgramDatabaseFile>uni/oggYSEDbgm.pdb</ProgramDatabaseFile>
@@ -572,6 +572,7 @@
     <ClCompile Include="TunerPracticeDlg.cpp" />
     <ClCompile Include="PhotoFrameDlg.cpp" />
     <ClCompile Include="Soft3DMazeDlg.cpp" />
+    <ClCompile Include="Soft3DRaceDlg.cpp" />
     <ClCompile Include="SoundMeterDlg.cpp" />
     <ClCompile Include="ScreenCaptureDlg.cpp" />
     <ClCompile Include="ScreenCaptureLive.cpp" />
@@ -724,6 +725,7 @@
     <ClInclude Include="TunerPracticeDlg.h" />
     <ClInclude Include="PhotoFrameDlg.h" />
     <ClInclude Include="Soft3DMazeDlg.h" />
+    <ClInclude Include="Soft3DRaceDlg.h" />
     <ClInclude Include="SoundMeterDlg.h" />
     <ClInclude Include="ScreenCaptureDlg.h" />
     <ClInclude Include="ScLiveSettingsDlg.h" />

@@ -159,7 +159,9 @@ public:
 	afx_msg void OnSetFocus(CWnd* pOldWnd);
 	afx_msg BOOL OnNcActivate(BOOL bActive);
 	CCustomComboBox m_listchange;
+	CCustomComboBox m_endMode;
 	afx_msg void OnCbnSelchangeCombo1();
+	afx_msg void OnCbnSelchangeEndMode();
 	afx_msg void OnBnClickedButton3();
 	afx_msg void OnBnClickedPlaydelete();
 	afx_msg void OnBnClickedPianoroll();
