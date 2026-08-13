@@ -609,50 +609,77 @@ BOOL CS3mView::CreateShaders()
 		"struct D{float4 p:SV_POSITION;float3 w:TEXCOORD0;float3 n:TEXCOORD1;float2 uv:TEXCOORD2;float4 c:TEXCOORD3;};"
 		"P VST(V x){P o;o.p=x.p;o.n=x.n;o.uv=x.uv;o.c=x.c;return o;}"
 		"struct HC{float e[4]:SV_TessFactor;float i[2]:SV_InsideTessFactor;};"
-		"HC HPC(InputPatch<P,4> p,uint id:SV_PrimitiveID){HC o;float3 c=(p[0].p+p[1].p+p[2].p+p[3].p)*.25;float d=distance(c,Eye.xyz);float tf=clamp(42.-d*1.35,14.,36.);o.e[0]=o.e[1]=o.e[2]=o.e[3]=tf;o.i[0]=o.i[1]=tf;return o;}"
+		"HC HPC(InputPatch<P,4> p,uint id:SV_PrimitiveID){HC o;float3 c=(p[0].p+p[1].p+p[2].p+p[3].p)*.25;float d=distance(c,Eye.xyz);"
+		// LightDir.w==0 → シャドウマップ生成：カメラ距離で粗くせず一定テッセ（色パスの変位と一致させる）
+		"float tf=(LightDir.w<.5)?18.:lerp(28.,1.,saturate((d-1.2)/11.));tf=clamp(tf,1.,28.);"
+		"o.e[0]=o.e[1]=o.e[2]=o.e[3]=tf;o.i[0]=o.i[1]=tf;return o;}"
 		"[domain(\"quad\")][partitioning(\"fractional_even\")][outputtopology(\"triangle_cw\")][outputcontrolpoints(4)][patchconstantfunc(\"HPC\")]"
 		"P HST(InputPatch<P,4> p,uint i:SV_OutputControlPointID,uint id:SV_PrimitiveID){return p[i];}"
 		"[domain(\"quad\")]D DST(HC h,float2 q:SV_DomainLocation,const OutputPatch<P,4> p){"
 		"P a,b,o;a.p=lerp(p[0].p,p[1].p,q.x);b.p=lerp(p[3].p,p[2].p,q.x);o.p=lerp(a.p,b.p,q.y);"
 		"a.n=lerp(p[0].n,p[1].n,q.x);b.n=lerp(p[3].n,p[2].n,q.x);o.n=normalize(lerp(a.n,b.n,q.y));"
 		"a.uv=lerp(p[0].uv,p[1].uv,q.x);b.uv=lerp(p[3].uv,p[2].uv,q.x);o.uv=lerp(a.uv,b.uv,q.y);o.c=p[0].c;"
-		"float ht=T0.SampleLevel(SL,o.uv*2.5,0).a-.5;float bump=(ht*ht)*sign(ht);o.p+=o.n*bump*.11;D z;z.w=o.p;z.n=o.n;z.uv=o.uv;z.c=o.c;z.p=mul(float4(o.p,1),VP);return z;}"
-		"float ShadowAt(float3 w){float4 lp=mul(float4(w,1),LightVP);float3 ndc=lp.xyz/max(lp.w,1e-5);"
-		"float2 uv=float2(ndc.x*.5+.5,.5-ndc.y*.5);float z=ndc.z-0.0015;if(any(uv<0)||any(uv>1)||z<0||z>1)return 1;"
-		"float s=0;const float t=1.0/1024.0;[unroll]for(int i=-1;i<=1;i++)[unroll]for(int j=-1;j<=1;j++)"
-		"s+=ShadowMap.SampleCmpLevelZero(SCmp,uv+float2(i,j)*t,z);return s/9.0;}"
+		"float ht=T0.SampleLevel(SL,o.uv*2.5,0).a-.42;float bump=max(0,ht);bump=bump*bump*(3.-2.*bump);"
+		// 影パスも色パスも同じ変位（Eye=カメラ）。影だけ強く変位すると床に影がはみ出す
+		"float d=distance(o.p,Eye.xyz);float amp=lerp(.38,.015,saturate((d-1.5)/10.));"
+		"o.p+=o.n*bump*amp;float3 nn=normalize(o.n+float3(bump*.8,0,bump*.8)*amp*2.);"
+		"D z;z.w=o.p;z.n=nn;z.uv=o.uv;z.c=o.c;z.p=mul(float4(o.p,1),VP);return z;}"
+		// Qullusrent bias: uv = ndc.xy*(.5,-.5)+.5 （LightVPは View*Proj のまま）
+		"float ShadowAt(float3 w,float3 n){float3 nn=normalize(n);float3 l=normalize(LightDir.xyz);float ndl=saturate(dot(nn,l));"
+		"w+=nn*(0.015+(1-ndl)*0.025);float4 sp=mul(float4(w,1),LightVP);float iw=1.0/max(sp.w,1e-5);"
+		"float2 uv=sp.xy*iw*float2(.5,-.5)+.5;"
+		// 実機ずれ補正: 影が左下寄り → サンプルを右上へ（D3DのVは上が小さい）
+		"uv+=float2(2.0,-2.0)/1024.0;"
+		"float z=sp.z*iw-0.003;"
+		"if(any(uv<0)||any(uv>1)||z<=0||z>=1)return 1;"
+		"const float2 o[12]={float2(-0.326,-0.406),float2(-0.840,-0.074),float2(-0.696,0.457),float2(-0.203,0.621),"
+		"float2(0.962,-0.195),float2(0.473,-0.480),float2(0.519,0.767),float2(0.185,-0.893),"
+		"float2(0.507,0.064),float2(0.896,0.412),float2(-0.322,-0.933),float2(-0.792,-0.598)};"
+		"float s=0;const float t=2.0/1024.0;[unroll]for(int k=0;k<12;k++)s+=ShadowMap.SampleCmpLevelZero(SCmp,uv+o[k]*t,z);"
+		"s/=12.0;return pow(saturate(s),1.35);}"
+		"float ShadeLit(float ndl,float sh){float d=saturate(ndl);float amb=.30;return lerp(amb,max(d,amb*.85),sh);}"
 		"float4 PlanarMir(float3 w,row_major float4x4 RVP,Texture2D M){float4 rp=mul(float4(w,1),RVP);float iw=max(rp.w,1e-5);float2 muv=rp.xy/iw*float2(.5,-.5)+.5;"
 		"float mb=(rp.w>0)*saturate(min(min(muv.x,1-muv.x),min(muv.y,1-muv.y))*6);return float4(M.Sample(SL,saturate(muv)).rgb,mb);}"
 		"float4 PSW(D i):SV_Target{float4 a=T0.Sample(SL,i.uv*2.5)*i.c;float h=T0.Sample(SL,i.uv*2.5).a;"
 		"float hx=T0.Sample(SL,i.uv*2.5+float2(.004,0)).a-h;float hy=T0.Sample(SL,i.uv*2.5+float2(0,.004)).a-h;"
-		"float3 n=normalize(i.n+float3(hx,hy,0)*4.2);float3 l=normalize(LightDir.xyz);float sh=ShadowAt(i.w);"
-		"float nd=.42+.58*saturate(dot(n,l))*lerp(.55,1,sh);"
+		"float3 n=normalize(i.n+float3(hx,hy,0)*4.2);float3 l=normalize(LightDir.xyz);float sh=ShadowAt(i.w,n);"
+		"float nd=ShadeLit(dot(n,l),sh);"
 		"float3 v=normalize(Eye.xyz-i.w);float3 r=reflect(-l,n);float rv=saturate(dot(r,v));"
 		"float sp=pow(rv,56)*sh;float spark=pow(rv,180)*sh;float3 sun=float3(1.0,.94,.78);"
 		"float3 env=Env.Sample(SL,reflect(-v,n)).rgb;float fr=pow(1-saturate(dot(n,v)),3);"
-		"float metal=saturate((i.c.a-1.01)*8);float useMir=LightDir.w;float4 mir=PlanarMir(i.w,ReflectVP,MirrorMap);"
-		"float mw=metal*useMir*max(mir.a,.25);env=lerp(env,mir.rgb,mw);"
-		"float3 col=lerp(a.rgb*nd,mir.rgb*(.35+.65*a.rgb),mw*.85)+sun*(sp*.45+spark*.9)+env*(.06+fr*.12)*(1-mw*.5);"
-		"float d=length(Eye.xyz-i.w),fg=saturate((d-Fog.x)/max(.01,Fog.y-Fog.x));fg=saturate(fg+max(0,Fog.w-i.w.y)*Fog.z);"
-		"return float4(lerp(col,float3(.45,.58,.72),fg*.22),1);}"
+		"float metal=saturate((i.c.a-1.01)*8);float useMir=LightDir.w;float3 rd=reflect(-v,n);"
+		"float4 mir=PlanarMir(i.w,ReflectVP,MirrorMap);float4 mir2=PlanarMir(i.w+rd*1.35,ReflectVP,MirrorMap);if(mir2.a>mir.a)mir=mir2;"
+		"float mw=metal*useMir*max(mir.a,.35);env=lerp(env,mir.rgb,mw);"
+		"float3 col=lerp(a.rgb*nd,mir.rgb*(.3+.7*a.rgb),mw*.92)+sun*(sp*.4+spark*.8)+env*(.05+fr*.10)*(1-mw*.55)*lerp(.45,1,sh);"
+		"float d=length(Eye.xyz-i.w),fg=saturate((d-Fog.x)/max(.01,Fog.y-Fog.x));fg=saturate(fg+max(0,Fog.w-i.w.y)*Fog.z);fg=fg*fg*(3-2*fg);"
+		"return float4(lerp(col,float3(.52,.66,.84),fg*.72),1);}"
 		"D VSS(V x){D o;o.w=x.p;o.n=x.n;o.uv=x.uv;o.c=x.c;o.p=mul(float4(x.p,1),VP);return o;}"
-		"float4 PSS(D i):SV_Target{float3 n=normalize(i.n);float3 l=normalize(LightDir.xyz);float sh=ShadowAt(i.w);"
-		"float3 v=normalize(Eye.xyz-i.w);float nd=.35+.65*saturate(dot(n,l))*lerp(.55,1,sh);"
+		"float4 PSS(D i):SV_Target{float3 n=normalize(i.n);float3 l=normalize(LightDir.xyz);float sh=ShadowAt(i.w,n);"
+		"float3 v=normalize(Eye.xyz-i.w);float nd=ShadeLit(dot(n,l),sh);"
 		"float sp=pow(saturate(dot(reflect(-l,n),v)),64)*sh;float3 env=Env.Sample(SL,reflect(-v,n)).rgb;"
-		"float fr=pow(1-saturate(dot(n,v)),2.5);float mirror=saturate((i.c.a-1.01)*8);float useMir=LightDir.w;"
-		"float3 rd=reflect(-v,n);float4 mir=PlanarMir(i.w,ReflectFloorVP,MirrorFloor);float4 mir2=PlanarMir(i.w+rd*1.25,ReflectFloorVP,MirrorFloor);"
-		"if(mir2.a>mir.a)mir=mir2;float mw=mirror*useMir*max(mir.a,.4);"
-		"float3 lit=i.c.rgb*(.4+.6*nd);float3 c=lerp(lit,mir.rgb*(.5+.5*i.c.rgb),mw*.95)+env*((.2+fr*.3)*(1-mw))+float3(1,.96,.82)*sp*(.5+mirror);"
-		"float al=mirror>0?lerp(.78,.58,mw):saturate(i.c.a);float d=length(Eye.xyz-i.w),fg=saturate((d-Fog.x)/max(.01,Fog.y-Fog.x));"
-		"return float4(lerp(c,float3(.45,.58,.72),fg*.2),al);}"
+		"float fr=pow(1-saturate(dot(n,v)),2.5);float mirror=saturate((i.c.a-1.01)*8);float glass=saturate((i.c.a-1.18)*10);float useMir=LightDir.w;"
+		"float3 rd=reflect(-v,n);float4 mir=PlanarMir(i.w,ReflectFloorVP,MirrorFloor);float4 mir2=PlanarMir(i.w+rd*1.55,ReflectFloorVP,MirrorFloor);"
+		"float4 mir3=PlanarMir(i.w+n*.45,ReflectFloorVP,MirrorFloor);if(mir2.a>mir.a)mir=mir2;if(mir3.a>mir.a)mir=mir3;"
+		"float mw=mirror*useMir*max(mir.a,.5);"
+		"float3 lit=i.c.rgb*nd;float3 c=lerp(lit,mir.rgb*(.42+.58*i.c.rgb),mw*(.92-.22*glass))+env*((.12+fr*.25)*(1-mw*.8)+mirror*.1*(1-glass))*lerp(.4,1,sh)+float3(1,.96,.82)*sp*(.4+mirror);"
+		"float al=mirror>0?lerp(lerp(.84,.64,mw),lerp(.38,.20,mw),glass):saturate(i.c.a);float d=length(Eye.xyz-i.w),fg=saturate((d-Fog.x)/max(.01,Fog.y-Fog.x));"
+		"fg=saturate(fg+max(0,Fog.w-i.w.y)*Fog.z);fg=fg*fg*(3-2*fg);"
+		"return float4(lerp(c,float3(.52,.66,.84),fg*.7),al);}"
 		"struct HV{float2 p:POSITION;float4 c:TEXCOORD0;};struct HO{float4 p:SV_POSITION;float4 c:TEXCOORD0;};"
 		"HO VSH(HV x){HO o;o.p=float4(x.p,0,1);o.c=x.c;return o;}float4 PSH(HO i):SV_Target{return i.c;}"
 		"struct Q{float4 p:SV_POSITION;float2 uv:TEXCOORD0;};Q VSQ(uint id:SV_VertexID){Q o;float2 p=float2((id==2)?3:-1,(id==1)?3:-1);o.p=float4(p,0,1);o.uv=float2((p.x+1)*.5,(1-p.y)*.5);return o;}"
 		"float4 SSR(Q i):SV_Target{float4 c=T0.Sample(SL,i.uv);float z=Depth.Sample(SP,i.uv).r;float2 dir=float2((i.uv.x-.5)*.03,-.018);"
 		"float3 r=0;float hit=0;[loop]for(int k=1;k<20;k++){float2 u=i.uv+dir*k;if(any(u<0)||any(u>1))break;float dz=Depth.Sample(SP,u).r;if(dz+0.001<z){r=T0.Sample(SL,u).rgb;hit=1;break;}}"
 		"float metal=saturate((z-.10)*2.5)*0.12;return float4(lerp(c.rgb,lerp(c.rgb,r,hit),metal),1);}"
-		"float4 DOFP(Q i):SV_Target{float z=Depth.Sample(SP,i.uv).r;float b=saturate(abs(z-Dof.x)/max(.001,Dof.y))*Dof.z;float2 d=Screen.zw*b;"
-		"float4 c=T0.Sample(SL,i.uv)*.28;c+=(T0.Sample(SL,i.uv+float2(d.x,0))+T0.Sample(SL,i.uv-float2(d.x,0))+T0.Sample(SL,i.uv+float2(0,d.y))+T0.Sample(SL,i.uv-float2(0,d.y)))*.18;return c;}"
+		"float4 DOFP(Q i):SV_Target{float zd=Depth.Sample(SP,i.uv).r;const float zn=.05,zf=80.;"
+		"float eyeZ=zn*zf/max(1e-4,zf-zd*(zf-zn));"
+		// Dof.x=ぼけ開始距離(ワールド≒マス), Dof.y=立ち上がり幅, Dof.z=最大ぼけ(px) — 手前はぼかさない
+		"float coc=saturate((eyeZ-Dof.x)/max(.05,Dof.y));coc=coc*coc*(3.-2.*coc);"
+		"float b=coc*Dof.z;if(b<0.35)return T0.Sample(SL,i.uv);float2 px=float2(b,b)*Screen.zw;"
+		"float4 c=T0.Sample(SL,i.uv)*.28;"
+		"c+=(T0.Sample(SL,i.uv+float2(px.x,0))+T0.Sample(SL,i.uv-float2(px.x,0))+T0.Sample(SL,i.uv+float2(0,px.y))+T0.Sample(SL,i.uv-float2(0,px.y)))*.13;"
+		"c+=(T0.Sample(SL,i.uv+px)+T0.Sample(SL,i.uv-px)+T0.Sample(SL,i.uv+float2(px.x,-px.y))+T0.Sample(SL,i.uv+float2(-px.x,px.y)))*.05;"
+		"return c;}"
 		"float4 FIN(Q i):SV_Target{float4 c=T0.Sample(SL,i.uv);if(Misc.z>8.f)return c;float v=saturate(1-dot((i.uv-.5)*1.05,(i.uv-.5)*1.05));c.rgb*=lerp(.88,1.06,v);return c;}";
 	ID3DBlob *b[11]={0}, *err=NULL;
 	const char* entries[11]={"VST","HST","DST","PSW","VSS","PSS","VSH","PSH","VSQ","SSR","DOFP"};
@@ -705,14 +732,20 @@ BOOL CS3mView::CreateProcTextures()
 				int x=tx*TW+lx,y=ty*TH+ly;
 				int n=hash(lx,ly,vid+theme*97)-128;
 				BYTE r,g,b,a;
-				if(theme==0){ // 地上：レンガ＋草木・苔・花
+				if(theme==0){ // 地上：レンガ＋草木・苔・花（αでテッセ変位＝ふんわり凹凸）
 					int row=ly/16,bx=(lx+((row&1)?32:0))&63,by=ly&15;BOOL mortar=by<2||bx<2;
-					if(vid==0){r=(BYTE)(mortar?110:190+n/8);g=(BYTE)(mortar?90:125+n/10);b=(BYTE)(mortar?70:85+n/12);a=(BYTE)(mortar?70:150+n/6);}
-					else if(vid<=3){r=(BYTE)(mortar?90:140+n/10);g=(BYTE)(mortar?100:160+n/8);b=(BYTE)(mortar?70:90+n/12);a=(BYTE)(mortar?90:170+(n>40?40:0));}
-					else if(vid<=6){r=(BYTE)(70+n/12);g=(BYTE)(130+n/6);b=(BYTE)(55+n/14);BOOL blade=((lx+ly*3+vid*17)&15)<3;if(blade){r=50;g=180;b=40;}a=(BYTE)(blade?210:140);}
-					else if(vid<=9){r=(BYTE)(120+n/10);g=(BYTE)(110+n/10);b=(BYTE)(90+n/12);BOOL fl=((hash(lx/4,ly/4,vid)&31)==0);if(fl){r=220;g=80;b=140;a=200;}else a=150;}
-					else if(vid<=12){r=(BYTE)(150+n/8);g=(BYTE)(145+n/8);b=(BYTE)(120+n/10);BOOL crack=((lx*3+ly)&31)<2;if(crack){r=80;g=70;b=60;}a=(BYTE)(crack?100:165);}
-					else{r=(BYTE)(40+n/14);g=(BYTE)(90+n/6);b=(BYTE)(35+n/14);a=(BYTE)(160+abs(n)/4);}
+					if(vid==0){r=(BYTE)(mortar?110:190+n/8);g=(BYTE)(mortar?90:125+n/10);b=(BYTE)(mortar?70:85+n/12);a=(BYTE)(mortar?70:128+n/8);}
+					else if(vid<=3){r=(BYTE)(mortar?90:140+n/10);g=(BYTE)(mortar?100:160+n/8);b=(BYTE)(mortar?70:90+n/12);a=(BYTE)(mortar?90:145+n/6);}
+					else if(vid<=6){ // 苔・葉の塊（ソフトなαブロブ）
+						int blob=hash(lx/5,ly/5,vid+3);int soft=255-min(255,((lx%20-10)*(lx%20-10)+(ly%20-10)*(ly%20-10))*3);
+						r=(BYTE)(55+n/14);g=(BYTE)(140+n/5+(blob&31));b=(BYTE)(45+n/16);
+						a=(BYTE)(110+soft/3+(n>0?n/4:0));
+					}else if(vid<=9){r=(BYTE)(120+n/10);g=(BYTE)(110+n/10);b=(BYTE)(90+n/12);BOOL fl=((hash(lx/4,ly/4,vid)&31)==0);if(fl){r=220;g=80;b=140;a=165;}else a=140;}
+					else if(vid<=12){r=(BYTE)(150+n/8);g=(BYTE)(145+n/8);b=(BYTE)(120+n/10);BOOL crack=((lx*3+ly)&31)<2;if(crack){r=80;g=70;b=60;}a=(BYTE)(crack?100:150);}
+					else{ // 濃い植生
+						int v2=hash(lx/4,ly/4,vid+9);r=(BYTE)(40+n/14);g=(BYTE)(100+n/5+(v2&40));b=(BYTE)(35+n/14);
+						a=(BYTE)(150+abs(n)/3+((v2&15)<<1));
+					}
 				}else if(theme==1){ // 地下1：湿ったダンジョン石（大割り・レンガではない）
 					const int tw=28+(vid&3)*4,th=22+((vid>>1)&3)*3;
 					const int ox=lx%tw,oy=ly%th;
@@ -824,9 +857,10 @@ BOOL CS3mView::InitDx()
 	D3D11_BUFFER_DESC bd={};bd.ByteWidth=sizeof(S3MFrameCB);bd.Usage=D3D11_USAGE_DYNAMIC;bd.BindFlags=D3D11_BIND_CONSTANT_BUFFER;bd.CPUAccessFlags=D3D11_CPU_ACCESS_WRITE;if(FAILED(m_dev->CreateBuffer(&bd,NULL,&m_cbFrame)))return FALSE;
 	bd.ByteWidth=m_vbDynBytes;bd.BindFlags=D3D11_BIND_VERTEX_BUFFER;if(FAILED(m_dev->CreateBuffer(&bd,NULL,&m_vbDyn)))return FALSE;bd.ByteWidth=m_vbHudBytes;if(FAILED(m_dev->CreateBuffer(&bd,NULL,&m_vbHud)))return FALSE;
 	D3D11_SAMPLER_DESC ss={};ss.Filter=D3D11_FILTER_MIN_MAG_MIP_LINEAR;ss.AddressU=ss.AddressV=ss.AddressW=D3D11_TEXTURE_ADDRESS_WRAP;ss.MaxLOD=D3D11_FLOAT32_MAX;m_dev->CreateSamplerState(&ss,&m_sampLin);ss.Filter=D3D11_FILTER_MIN_MAG_MIP_POINT;ss.AddressU=ss.AddressV=ss.AddressW=D3D11_TEXTURE_ADDRESS_CLAMP;m_dev->CreateSamplerState(&ss,&m_sampPoint);
-	ss.Filter=D3D11_FILTER_COMPARISON_MIN_MAG_LINEAR_MIP_POINT;ss.AddressU=ss.AddressV=ss.AddressW=D3D11_TEXTURE_ADDRESS_BORDER;ss.ComparisonFunc=D3D11_COMPARISON_LESS_EQUAL;ss.BorderColor[0]=ss.BorderColor[1]=ss.BorderColor[2]=ss.BorderColor[3]=1.f;m_dev->CreateSamplerState(&ss,&m_sampCmp);
+	ss.Filter=D3D11_FILTER_COMPARISON_MIN_MAG_LINEAR_MIP_POINT;ss.AddressU=ss.AddressV=ss.AddressW=D3D11_TEXTURE_ADDRESS_BORDER;ss.ComparisonFunc=D3D11_COMPARISON_LESS;ss.BorderColor[0]=ss.BorderColor[1]=ss.BorderColor[2]=ss.BorderColor[3]=1.f;m_dev->CreateSamplerState(&ss,&m_sampCmp);
 	D3D11_RASTERIZER_DESC rs={};rs.FillMode=D3D11_FILL_SOLID;rs.CullMode=D3D11_CULL_NONE;rs.DepthClipEnable=TRUE;m_dev->CreateRasterizerState(&rs,&m_rsSolid);
-	rs.DepthBias=2500;rs.SlopeScaledDepthBias=1.75f;rs.DepthBiasClamp=0.f;m_dev->CreateRasterizerState(&rs,&m_rsShadow);
+	// Qullusrent寄り：強すぎるDepthBiasはピーターパンの原因。シェーダ側バイアス主体
+	rs.DepthBias=1000;rs.SlopeScaledDepthBias=1.5f;rs.DepthBiasClamp=0.f;m_dev->CreateRasterizerState(&rs,&m_rsShadow);
 	D3D11_DEPTH_STENCIL_DESC ds={};ds.DepthEnable=TRUE;ds.DepthWriteMask=D3D11_DEPTH_WRITE_MASK_ALL;ds.DepthFunc=D3D11_COMPARISON_LESS_EQUAL;m_dev->CreateDepthStencilState(&ds,&m_dssWrite);ds.DepthWriteMask=D3D11_DEPTH_WRITE_MASK_ZERO;m_dev->CreateDepthStencilState(&ds,&m_dssRead);ds.DepthEnable=FALSE;m_dev->CreateDepthStencilState(&ds,&m_dssOff);
 	D3D11_BLEND_DESC bl={};bl.RenderTarget[0].RenderTargetWriteMask=D3D11_COLOR_WRITE_ENABLE_ALL;m_dev->CreateBlendState(&bl,&m_bsOpaque);bl.RenderTarget[0].BlendEnable=TRUE;bl.RenderTarget[0].SrcBlend=D3D11_BLEND_SRC_ALPHA;bl.RenderTarget[0].DestBlend=D3D11_BLEND_INV_SRC_ALPHA;bl.RenderTarget[0].BlendOp=D3D11_BLEND_OP_ADD;bl.RenderTarget[0].SrcBlendAlpha=D3D11_BLEND_ONE;bl.RenderTarget[0].DestBlendAlpha=D3D11_BLEND_INV_SRC_ALPHA;bl.RenderTarget[0].BlendOpAlpha=D3D11_BLEND_OP_ADD;m_dev->CreateBlendState(&bl,&m_bsAlpha);bl.RenderTarget[0].SrcBlend=D3D11_BLEND_SRC_ALPHA;bl.RenderTarget[0].DestBlend=D3D11_BLEND_ONE;m_dev->CreateBlendState(&bl,&m_bsAdd);
 	{
@@ -1180,6 +1214,7 @@ CSoft3DMazeDlg::CSoft3DMazeDlg(CWnd* p)
 	, m_lastAutosave(0), m_runDirty(0), m_mapBakeDirty(1), m_mapToggle(0)
 	, m_overviewFloorHeld(0)
 	, m_mapPanX(0.f), m_mapPanY(0.f), m_mapPanDrag(0)
+	, m_overviewZoomPct(100)
 	, m_spaceToggleTick(0), m_tipIsOverview(-1)
 {
 	for (int f = 0; f < S3M_MAX_FLOORS; f++) {
@@ -1276,6 +1311,7 @@ void CSoft3DMazeDlg::ToggleMapOverlay()
 		m_mapBakeDirty = 1;
 		m_mapPanX = 0.f;
 		m_mapPanY = 0.f;
+		m_overviewZoomPct = 100;
 	}
 	EnsureTipTexture(m_mapToggle != 0);
 }
@@ -2858,6 +2894,32 @@ float CSoft3DMazeDlg::MapZoomScale() const
 	return (float)z / 100.f;
 }
 
+int CSoft3DMazeDlg::OverviewZoomMaxPct() const
+{
+	// 最大でおおよそ 8px/セルまで寄れる（3000マスでも通路が読める）
+	int basePx = 720;
+	if (m_view.GetSafeHwnd()) {
+		CRect rc;
+		m_view.GetClientRect(&rc);
+		basePx = (int)(OverviewBaseSide(rc.Width(), rc.Height()) + .5f);
+	}
+	if (basePx < 64) basePx = 64;
+	const int n = max(1, m_n);
+	const int need = (int)((8.f * (float)n / (float)basePx) * 100.f + .5f);
+	if (need < 400) return 400;
+	if (need > 25000) return 25000;
+	return need;
+}
+
+float CSoft3DMazeDlg::OverviewZoomScale() const
+{
+	int z = m_overviewZoomPct;
+	const int mx = OverviewZoomMaxPct();
+	if (z < 50) z = 50;
+	if (z > mx) z = mx;
+	return (float)z / 100.f;
+}
+
 float CSoft3DMazeDlg::OverviewBaseSide(int viewW, int viewH) const
 {
 	// 下に操作説明・上に階層ラベル用の余白を残す
@@ -2918,6 +2980,25 @@ void CSoft3DMazeDlg::InputMapZoom(int dir)
 {
 	if (dir == 0)
 		return;
+	if (IsOverviewActive()) {
+		int z = m_overviewZoomPct;
+		const int mx = OverviewZoomMaxPct();
+		if (z < 50) z = 50;
+		if (z > mx) z = mx;
+		const float f = (dir > 0) ? (z * 1.12f) : (z / 1.12f);
+		z = (int)(f + 0.5f);
+		if (z < 50) z = 50;
+		if (z > mx) z = mx;
+		if (z == m_overviewZoomPct)
+			return;
+		m_overviewZoomPct = z;
+		if (m_view.GetSafeHwnd()) {
+			CRect rc; m_view.GetClientRect(&rc);
+			const float side = OverviewBaseSide(rc.Width(), rc.Height()) * OverviewZoomScale();
+			ClampMapPan(rc.Width(), rc.Height(), side);
+		}
+		return;
+	}
 	int z = savedata.s3m_map_zoom;
 	if (z < 50) z = 50;
 	if (z > 400) z = 400;
@@ -2928,11 +3009,6 @@ void CSoft3DMazeDlg::InputMapZoom(int dir)
 	if (z == savedata.s3m_map_zoom)
 		return;
 	savedata.s3m_map_zoom = z;
-	if (IsOverviewActive() && m_view.GetSafeHwnd()) {
-		CRect rc; m_view.GetClientRect(&rc);
-		const float side = OverviewBaseSide(rc.Width(), rc.Height()) * MapZoomScale();
-		ClampMapPan(rc.Width(), rc.Height(), side);
-	}
 	PersistUi();
 }
 
@@ -2952,7 +3028,7 @@ BOOL CSoft3DMazeDlg::UpdateMapPan(CPoint clientPt)
 	m_mapPanLast = clientPt;
 	if (m_view.GetSafeHwnd()) {
 		CRect rc; m_view.GetClientRect(&rc);
-		const float side = OverviewBaseSide(rc.Width(), rc.Height()) * MapZoomScale();
+		const float side = OverviewBaseSide(rc.Width(), rc.Height()) * OverviewZoomScale();
 		ClampMapPan(rc.Width(), rc.Height(), side);
 	}
 	return TRUE;
@@ -3213,25 +3289,30 @@ void CSoft3DMazeDlg::RenderScene()
 	const float fov=EffectiveFovDeg()*(float)(M_PI/180.0);
 	const float zNear=.05f,zFar=80.f;
 	S3MFrameCB cb={};cb.viewProj=S3mMatMul(S3mLookAt(ex,eyeY,ez,ex+fx,eyeY,ez+fz,0,1,0),S3mPerspective(fov,(float)w/(float)h,zNear,zFar));
-	float lx=-.35f,ly=.88f,lz=-.28f;float llen=sqrtf(lx*lx+ly*ly+lz*lz);lx/=llen;ly/=llen;lz/=llen;cb.lightDir={lx,ly,lz,0};
-	const float lDist=24.f;cb.lightVP=S3mMatMul(S3mLookAt(ex+lx*lDist,16.f,ez+lz*lDist,ex,0.f,ez,0,1,0),S3mOrtho(-18.f,18.f,-18.f,18.f,1.f,55.f));
+	// Qullusrent流: LightDir＝面→光源、ライト位置＝注視点＋LightDir*距離（向きを完全一致）
+	float lx=.40f,ly=.88f,lz=.22f;float llen=sqrtf(lx*lx+ly*ly+lz*lz);lx/=llen;ly/=llen;lz/=llen;
+	cb.lightDir={lx,ly,lz,0.f}; // w=0: シャドウ生成中フラグ（テッセ固定用）
+	const float lDist=28.f;const float focusY=.40f;
+	const float lpx=ex+lx*lDist,lpy=focusY+ly*lDist,lpz=ez+lz*lDist;
+	cb.lightVP=S3mMatMul(S3mLookAt(lpx,lpy,lpz,ex,focusY,ez,0,1,0),S3mOrtho(-12.f,12.f,-12.f,12.f,2.f,60.f));
 	cb.eyePos={ex,eyeY,ez,1};
 	{
 		const int thFog=ThemeOfFloor((m_floorFx!=FLOORFX_IDLE)?m_stairFrom:m_floor);
-		float fogNear=18.f,fogFar=48.f,fogH=.02f,fogY=-.5f;
-		if(thFog<=0){fogNear=18.f;fogFar=48.f;fogH=.02f;fogY=-.5f;}
-		else if(thFog==1){fogNear=11.f;fogFar=30.f;fogH=.045f;fogY=-.15f;}
-		else if(thFog==2){fogNear=14.f;fogFar=36.f;fogH=.03f;fogY=-.25f;}
-		else{fogNear=9.f;fogFar=26.f;fogH=.06f;fogY=.05f;}
+		float fogNear=5.5f,fogFar=16.f,fogH=.04f,fogY=.15f;
+		if(thFog<=0){fogNear=5.5f;fogFar=16.f;fogH=.04f;fogY=.15f;}
+		else if(thFog==1){fogNear=4.f;fogFar=13.f;fogH=.07f;fogY=.2f;}
+		else if(thFog==2){fogNear=5.f;fogFar=15.f;fogH=.05f;fogY=.1f;}
+		else{fogNear=3.5f;fogFar=11.f;fogH=.09f;fogY=.25f;}
 		if(m_darkT>0.f){
 			const float k=min(1.f,m_darkT/1.2f);
-			fogNear=max(3.f,fogNear*(1.f-k*.72f));
-			fogFar=max(fogNear+4.f,fogFar*(1.f-k*.55f));
+			fogNear=max(2.f,fogNear*(1.f-k*.72f));
+			fogFar=max(fogNear+3.f,fogFar*(1.f-k*.55f));
 			fogH+=.08f*k;
 		}
 		cb.fogParams={fogNear,fogFar,fogH,fogY};
 	}
-	cb.dofParams={.55f,.42f,.8f,m_bob};cb.screenSize={(float)w,(float)h,1.f/w,1.f/h};cb.misc={m_clearScreenA,m_clearTextA,1.f/tanf(fov*.5f),(float)savedata.s3m_bob};
+	// DOF: 約6マス以遠からぼけ開始（通路マス≈1ワールド単位）。手前はシャープ
+	cb.dofParams={6.0f,7.0f,4.0f,m_bob};cb.screenSize={(float)w,(float)h,1.f/w,1.f/h};cb.misc={m_clearScreenA,m_clearTextA,1.f/tanf(fov*.5f),(float)savedata.s3m_bob};
 	D3D11_MAPPED_SUBRESOURCE map={};if(FAILED(dc->Map(m_view.m_cbFrame,0,D3D11_MAP_WRITE_DISCARD,0,&map)))return;memcpy(map.pData,&cb,sizeof(cb));dc->Unmap(m_view.m_cbFrame,0);
 	const S3MMat vpMat=cb.viewProj;
 	const UINT maxV=m_view.m_vbDynBytes/sizeof(S3MVertex);S3MVertex* v=new S3MVertex[maxV];UINT floorBeg=0,nFloor=0,wallBeg=0,nWall=0,transBeg=0,nTrans=0;int phase=0;
@@ -3252,7 +3333,8 @@ void CSoft3DMazeDlg::RenderScene()
 		if(nx*(ex-cx)+ny*(eyeY-cy)+nz*(ez-cz)<=0.f)return; // 背面カリング
 		// CPU 細分化は近い壁だけ（遠い壁まで N=3 だと大マップで頂点バッファが床・壁で溢れる）
 		const float dx=cx-ex,dz=cz-ez;const float dist2=dx*dx+dz*dz;
-		const int N=(dist2>14.f*14.f)?1:((dist2>7.f*7.f)?2:3);
+		// 遠い壁はCPU細分化も落とす（テッセと合わせて負荷軽減）
+		const int N=(dist2>12.f*12.f)?1:((dist2>6.f*6.f)?2:3);
 		for(int j=0;j<N;j++)for(int i=0;i<N;i++){
 			float su0=(float)i/N,su1=(float)(i+1)/N,sv0=(float)j/N,sv1=(float)(j+1)/N;
 			auto L=[&](float u,float vv,float& X,float& Y,float& Z){float ax=x0+(x1-x0)*u,ay=y0+(y1-y0)*u,az=z0+(z1-z0)*u;float bx=x3+(x2-x3)*u,by=y3+(y2-y3)*u,bz=z3+(z2-z3)*u;X=ax+(bx-ax)*vv;Y=ay+(by-ay)*vv;Z=az+(bz-az)*vv;};
@@ -3313,8 +3395,9 @@ void CSoft3DMazeDlg::RenderScene()
 	};
 	auto wallVid=[&](int x,int z)->int{return ((x*17+z*31+x*z)&15);};
 	auto atlasUV=[&](int vid,float& u0,float& v0,float& u1,float& v1){u0=(float)(vid&3)*.25f;v0=(float)(vid>>2)*.25f;u1=u0+.25f;v1=v0+.25f;};
-	auto isMirrorWall=[&](int x,int z)->BOOL{return ((x*13+z*29)&7)==0;};
-	auto isMirrorFloor=[&](int x,int z)->BOOL{return ((x+z*3)&5)==0;};
+	// 生成セルではなく座標ハッシュの見た目鏡。密度を上げて床・壁で確実に出現させる
+	auto isMirrorWall=[&](int x,int z)->BOOL{return (((x*13+z*29+(int)(m_genSeed&255))&3)==0);};
+	auto isMirrorFloor=[&](int x,int z)->BOOL{return (((x*7+z*11+(int)((m_genSeed>>3)&255))&3)==0);};
 	struct MirPick{float score;float nx,ny,nz,px,py,pz;};
 	MirPick bestW={-1.f,0,0,0,0,0,0},bestF={-1.f,0,0,0,0,0,0};
 	const float storyH=1.35f;
@@ -3344,27 +3427,39 @@ void CSoft3DMazeDlg::RenderScene()
 		UINT w0=nWall;
 		for(int z=az0;z<=az1;z++)for(int x=ax0;x<=ax1;x++){
 			BYTE c=CellAtF(f,x,z);if(c!=CELL_WALL)continue;
-			if(fullVis&&!vis(x,z))continue;
+			// カメラ外でも近くの壁は影キャスタとして残す（背面の壁が床に影を落とすため）
+			if(fullVis){
+				const float dx=cellCX(x)-ex,dz=cellCZ(z)-ez;
+				if(dx*dx+dz*dz>rad*rad)continue;
+				if(!vis(x,z)&&(dx*fx+dz*fz)<-2.5f){/* 真後ろは距離だけで残す */}
+				else if(!vis(x,z)&&(dx*dx+dz*dz)>10.f*10.f)continue;
+			}
 			const int vid=wallVid(x,z);float u0,v0,u1,v1;atlasUV(vid,u0,v0,u1,v1);
 			float x0=cellX0(x),x1=x0+cellW(x),z0=cellZ0(z),z1=z0+cellD(z),cx=cellCX(x),cz=cellCZ(z);
 			float y0=yBias,y1=yBias+wallH;
 			float wr,wg,wb;themeWallTint(L.th,wr,wg,wb);
-			float rr=wr,gg=wg,bb=wb,aa=1;if(isMirrorWall(x,z)&&fabsf(yBias)<.01f){
-				rr=.75f*wr;gg=.82f*wg;bb=.92f*wb;aa=1.15f;
-				float mnx=0,mny=0,mnz=0,mpx=cx,mpy=y0+wallH*.45f,mpz=cz;
+			const BOOL mirW=isMirrorWall(x,z)&&fabsf(yBias)<.01f;
+			float mnx=0,mny=0,mnz=0,mpx=cx,mpy=y0+wallH*.45f,mpz=cz;
+			if(mirW){
 				if(cellW(x)<=cellD(z)+1e-4f){mnx=(ex>=cx)?1.f:-1.f;mpx=(mnx>0)?x1:x0;}
 				else{mnz=(ez>=cz)?1.f:-1.f;mpz=(mnz>0)?z1:z0;}
 				float tox=ex-mpx,toy=eyeY-mpy,toz=ez-mpz;float facing=mnx*tox+mny*toy+mnz*toz;
-				if(facing>.05f){float dist=sqrtf(tox*tox+toy*toy+toz*toz)+.01f;float sc=facing/dist;if(sc>bestW.score)bestW={sc,mnx,mny,mnz,mpx,mpy,mpz};}
+				if(facing>.05f){float dist=sqrtf(tox*tox+toy*toy+toz*toz)+.01f;float sc=facing/(dist*.35f+1.f);if(sc>bestW.score)bestW={sc,mnx,mny,mnz,mpx,mpy,mpz};}
 			}
-			auto face=[&](float ax0,float ay0,float az0,float ax1,float ay1,float az1,float ax2,float ay2,float az2,float ax3,float ay3,float az3,float nx,float ny,float nz){
+			auto face=[&](float ax0,float ay0,float az0,float ax1,float ay1,float az1,float ax2,float ay2,float az2,float ax3,float ay3,float az3,float nx,float ny,float nz,float rr,float gg,float bb,float aa){
 				patch(ax0,ay0,az0,ax1,ay1,az1,ax2,ay2,az2,ax3,ay3,az3,nx,ny,nz,u0,v0,u1,v1,rr,gg,bb,aa);
 			};
-			face(x0,y0,z0,x0,y0,z1,x0,y1,z1,x0,y1,z0,-1,0,0);
-			face(x1,y0,z1,x1,y0,z0,x1,y1,z0,x1,y1,z1,1,0,0);
-			face(x1,y0,z0,x0,y0,z0,x0,y1,z0,x1,y1,z0,0,0,-1);
-			face(x0,y0,z1,x1,y0,z1,x1,y1,z1,x0,y1,z1,0,0,1);
-			face(x0,y1,z0,x1,y1,z0,x1,y1,z1,x0,y1,z1,0,1,0);
+			auto faceA=[&](float nx,float ny,float nz,float ax0,float ay0,float az0,float ax1,float ay1,float az1,float ax2,float ay2,float az2,float ax3,float ay3,float az3){
+				float rr=wr,gg=wg,bb=wb,aa=1.f;
+				if(mirW&&fabsf(nx-mnx)+fabsf(nz-mnz)<.1f){rr=.62f*wr;gg=.70f*wg;bb=.88f*wb;aa=1.16f;}
+				face(ax0,ay0,az0,ax1,ay1,az1,ax2,ay2,az2,ax3,ay3,az3,nx,ny,nz,rr,gg,bb,aa);
+			};
+			faceA(-1,0,0,x0,y0,z0,x0,y0,z1,x0,y1,z1,x0,y1,z0);
+			faceA(1,0,0,x1,y0,z1,x1,y0,z0,x1,y1,z0,x1,y1,z1);
+			faceA(0,0,-1,x1,y0,z0,x0,y0,z0,x0,y1,z0,x1,y1,z0);
+			faceA(0,0,1,x0,y0,z1,x1,y0,z1,x1,y1,z1,x0,y1,z1);
+			face(x0,y1,z0,x1,y1,z0,x1,y1,z1,x0,y1,z1,0,1,0,wr,wg,wb,1.f);
+			// 立体感はテッセ変位に任せる（CPUのぎざぎざ突起は出さない）
 		}
 		L.nW=nWall-w0;
 		L.fBeg=nFloor+nWall+nTrans;
@@ -3377,7 +3472,8 @@ void CSoft3DMazeDlg::RenderScene()
 			// 床上面のみ（側面立方体は頂点を食い過ぎる）
 			if(c!=CELL_STAIRS_DOWN&&c!=CELL_STAIRS_UP){
 				float k=VisitAtF(f,x,z)?1.f:.82f;float r,g,b;themeFloorRGB(L.th,k,r,g,b);
-				float a=isMirrorFloor(x,z)?1.12f:1.f;
+				float a=1.f;
+				if(isMirrorFloor(x,z)&&fabsf(yBias)<.01f){r=r+(.72f-r)*.55f;g=g+(.80f-g)*.55f;b=b+(.92f-b)*.55f;a=1.14f;}
 				const float y1=yBias+passH;
 				quad(x0,y1,z0,x1,y1,z0,x1,y1,z1,x0,y1,z1,0,1,0,r,g,b,a);
 			}
@@ -3430,21 +3526,31 @@ void CSoft3DMazeDlg::RenderScene()
 		float cs=cosf(ang),sn=sinf(ang);float ox[4],oz[4];
 		auto R=[&](float px,float pz,int i){ox[i]=cx+px*cs-pz*sn;oz[i]=cz+px*sn+pz*cs;};
 		R(s,0,0);R(0,s,1);R(-s,0,2);R(0,-s,3);float top=cy+s*1.15f,bot=cy-s*.95f;
+		// 回転しても面のローカルUVを張り、カメラ反射はワールド位置＋法線で取る（UVずれで鏡面が破綻しない）
 		auto face=[&](float ax,float ay,float az,float bx,float by,float bz,float cx2,float cy2,float cz2){
 			float nx=(by-ay)*(cz2-az)-(bz-az)*(cy2-ay),ny=(bz-az)*(cx2-ax)-(bx-ax)*(cz2-az),nz=(bx-ax)*(cy2-ay)-(by-ay)*(cx2-ax);float nl=sqrtf(nx*nx+ny*ny+nz*nz)+1e-6f;nx/=nl;ny/=nl;nz/=nl;
-			tri(ax,ay,az,bx,by,bz,cx2,cy2,cz2,nx,ny,nz,0,0,1,0,1,1,rr,gg,bb,a);};
+			tri(ax,ay,az,bx,by,bz,cx2,cy2,cz2,nx,ny,nz,0.f,0.f,1.f,0.f,.5f,1.f,rr,gg,bb,a);};
 		for(int i=0;i<4;i++){int j=(i+1)&3;face(ox[i],cy,oz[i],ox[j],cy,oz[j],cx,top,cz);face(ox[j],cy,oz[j],ox[i],cy,oz[i],cx,bot,cz);}
 	};
-	struct FxRec{UINT beg,n;float cx,cy,cz,d;};FxRec fxObj[48];int nFx=0;int fxMirOf[48];
-	for(int i=0;i<48;i++)fxMirOf[i]=-1;
-	UINT winBeg=nFloor+nWall,nWin=0;
+	struct FxRec{UINT beg,n;float cx,cy,cz,d;float nx,ny,nz;BOOL plane;BOOL wantMir;};FxRec fxObj[64];int nFx=0;int fxMirOf[64];
+	for(int i=0;i<64;i++)fxMirOf[i]=-1;
+	const int plx=(int)floorf(m_px),plz=(int)floorf(m_pz);
 	for(int i=0;i<nc;i++){int x=xl[i].x,z=xl[i].z;BYTE c=xl[i].c;float ocx=cellCX(x),ocz=cellCZ(z),x0=cellX0(x),x1=x0+cellW(x),z0=cellZ0(z),z1=z0+cellD(z);
 		if(c==CELL_WINDOW){
-			float rr=.35f,gg=.78f,bb=.95f,a=.38f;
-			quad(x0,.02f,z0,x1,.02f,z0,x1,wallH-.02f,z0,x0,wallH-.02f,z0,0,0,-1,rr,gg,bb,a);
-			quad(x1,.02f,z1,x0,.02f,z1,x0,wallH-.02f,z1,x1,wallH-.02f,z1,0,0,1,rr,gg,bb,a);
-			quad(x0,.02f,z1,x0,.02f,z0,x0,wallH-.02f,z0,x0,wallH-.02f,z1,-1,0,0,rr,gg,bb,a);
-			quad(x1,.02f,z0,x1,.02f,z1,x1,wallH-.02f,z1,x1,wallH-.02f,z0,1,0,0,rr,gg,bb,a);
+			if(nFx>=64)continue;
+			const UINT b=nFloor+nWall+nTrans;
+			// ガラス：薄い平面反射（a>1.18 → glass）
+			float rr=.42f,gg=.78f,bb=.95f,a=1.22f;
+			float wnx=0.f,wnz=0.f;float wpx=ocx,wpz=ocz;
+			if(cellW(x)<cellD(z)){
+				wnz=(ez>=ocz)?1.f:-1.f;wpz=(wnz>0)?z1:z0;
+				quad(x0,.02f,z0,x1,.02f,z0,x1,wallH-.02f,z0,x0,wallH-.02f,z0,0,0,-1,rr,gg,bb,a);
+				quad(x1,.02f,z1,x0,.02f,z1,x0,wallH-.02f,z1,x1,wallH-.02f,z1,0,0,1,rr,gg,bb,a);
+			}else{
+				wnx=(ex>=ocx)?1.f:-1.f;wpx=(wnx>0)?x1:x0;
+				quad(x0,.02f,z1,x0,.02f,z0,x0,wallH-.02f,z0,x0,wallH-.02f,z1,-1,0,0,rr,gg,bb,a);
+				quad(x1,.02f,z0,x1,.02f,z1,x1,wallH-.02f,z1,x1,wallH-.02f,z0,1,0,0,rr,gg,bb,a);
+			}
 			float fr=.55f,fg=.52f,fb=.48f,fa=.92f,t=.018f;
 			if(cellW(x)<cellD(z)){
 				quad(x0,0,z0,x1,0,z0,x1,t,z0,x0,t,z0,0,0,-1,fr,fg,fb,fa);
@@ -3457,8 +3563,9 @@ void CSoft3DMazeDlg::RenderScene()
 				quad(x1,0,z1,x1,0,z0,x1,t,z0,x1,t,z1,1,0,0,fr,fg,fb,fa);
 				quad(x1,wallH-t,z1,x1,wallH-t,z0,x1,wallH,z0,x1,wallH,z1,1,0,0,fr,fg,fb,fa);
 			}
+			fxObj[nFx++]={b,nFloor+nWall+nTrans-b,wpx,wallH*.5f,wpz,xl[i].d,wnx,0.f,wnz,TRUE,TRUE};
 		}else if(c==CELL_STAIRS_DOWN||c==CELL_STAIRS_UP){
-			if(nFx>=48)continue;
+			if(nFx>=64)continue;
 			// 斜め段：相手マス方向へ伸びる半透明ステップ（下／上が見えやすい）
 			const UINT b=nFloor+nWall+nTrans;const BOOL dn=(c==CELL_STAIRS_DOWN);
 			const float rr=dn?1.f:.22f,gg=dn?.58f:.86f,bb=dn?.16f:1.f;
@@ -3483,9 +3590,9 @@ void CSoft3DMazeDlg::RenderScene()
 			const float tipX=ax+(bx-ax)*.55f,tipZ=az+(bz-az)*.55f;
 			const float tipY=passH+(dn?-.25f:.45f);
 			spinOcta(tipX,tipY+.04f*sinf(m_anim*2.2f+(float)x),tipZ,.10f,m_anim*(dn?1.9f:-1.9f),rr,gg,bb,stairA+.08f);
-			fxObj[nFx++]={b,nFloor+nWall+nTrans-b,ocx,passH+.2f,ocz,xl[i].d};
+			fxObj[nFx++]={b,nFloor+nWall+nTrans-b,ocx,passH+.2f,ocz,xl[i].d,0,0,0,FALSE,FALSE};
 		}else if(S3mIsTrapCell(c)){
-			if(nFx>=48)continue;
+			if(nFx>=64)continue;
 			const UINT b=nFloor+nWall+nTrans;
 			float rr=.3f,gg=.85f,bb=.35f,a=.42f;
 			if(c==CELL_SPIKE){rr=1.f;gg=.28f;bb=.22f;a=.44f;}
@@ -3495,8 +3602,10 @@ void CSoft3DMazeDlg::RenderScene()
 			quad(x0+pad,passH+.03f,z0+pad,x0+pad,passH+.03f,z1-pad,x1-pad,passH+.03f,z1-pad,x1-pad,passH+.03f,z0+pad,0,1,0,rr,gg,bb,a);
 			const float bob=.03f*sinf(m_anim*2.8f+x+z);
 			spinOcta(ocx,passH+.28f+bob,ocz,.11f,m_anim*(c==CELL_SPIKE?2.6f:1.2f),rr,gg,bb,a+.12f);
-			fxObj[nFx++]={b,nFloor+nWall+nTrans-b,ocx,passH+.25f,ocz,xl[i].d};
-		}else if(nFx<48){
+			fxObj[nFx++]={b,nFloor+nWall+nTrans-b,ocx,passH+.25f,ocz,xl[i].d,0,0,0,FALSE,FALSE};
+		}else if(nFx<64){
+			// 自機マスと重なるスタートクリスタルは書かない
+			if(c==CELL_START&&x==plx&&z==plz&&!stairMove)continue;
 			const UINT b=nFloor+nWall+nTrans;float cy,s,ang,rr,gg,bb;
 			if(c==CELL_GOAL){cy=.48f+.05f*sinf(m_anim*2.6f);s=.30f;ang=m_anim*2.1f;rr=1.f;gg=.88f;bb=.25f;}
 			else if(c==CELL_START){cy=.42f+.04f*sinf(m_anim*2.1f+1.f);s=.24f;ang=-m_anim*1.7f;rr=.30f;gg=1.f;bb=.55f;}
@@ -3516,12 +3625,14 @@ void CSoft3DMazeDlg::RenderScene()
 				else if(c==CELL_RANDOM){rr=.95f;gg=.55f;bb=.2f+0.55f*(0.5f+0.5f*sinf(m_anim*3.f+x));}
 			}
 			spinOcta(ocx,cy,ocz,s,ang,rr,gg,bb,1.20f);
-			fxObj[nFx++]={b,nFloor+nWall+nTrans-b,ocx,cy,ocz,xl[i].d};
+			fxObj[nFx++]={b,nFloor+nWall+nTrans-b,ocx,cy,ocz,xl[i].d,0,0,0,FALSE,TRUE};
 		}
 	}
-	nWin=(nFloor+nWall+nTrans)-winBeg;
-	{int ord[48];for(int i=0;i<nFx;i++)ord[i]=i;
-	for(int i=1;i<nFx;i++){int q=ord[i],j=i-1;while(j>=0&&fxObj[ord[j]].d>fxObj[q].d){ord[j+1]=ord[j];j--;}ord[j+1]=q;}
+	{int ord[64];for(int i=0;i<nFx;i++)ord[i]=i;
+	// 反射が必要な窓・クリスタルを優先してRT割当（近い順）
+	for(int i=1;i<nFx;i++){int q=ord[i],j=i-1;while(j>=0){
+		const BOOL prefer=((int)fxObj[ord[j]].wantMir<(int)fxObj[q].wantMir)||(fxObj[ord[j]].wantMir==fxObj[q].wantMir&&fxObj[ord[j]].d>fxObj[q].d);
+		if(!prefer)break;ord[j+1]=ord[j];j--;}ord[j+1]=q;}
 	const int nUse=min((int)CS3mView::S3M_MIRROR_FX_N,nFx);
 	for(int i=0;i<nUse;i++)fxMirOf[ord[i]]=CS3mView::S3M_MIRROR_FX0+i;}
 	UINT plateBeg=nFloor+nWall+nTrans;
@@ -3531,12 +3642,91 @@ void CSoft3DMazeDlg::RenderScene()
 		float x0=cellX0(x),x1=x0+cellW(x),z0=cellZ0(z),z1=z0+cellD(z);
 		if(VisitAtF(fxFloor,x,z))quad(x0,passH+.01f,z0,x0,passH+.01f,z1,x1,passH+.01f,z1,x1,passH+.01f,z0,0,1,0,.25f,.55f,1.f,.35f);
 		if(isMirrorFloor(x,z)){
-			quad(x0,passH+.02f,z0,x0,passH+.02f,z1,x1,passH+.02f,z1,x1,passH+.02f,z0,0,1,0,.55f,.62f,.72f,1.15f);
+			quad(x0,passH+.02f,z0,x0,passH+.02f,z1,x1,passH+.02f,z1,x1,passH+.02f,z0,0,1,0,.68f,.76f,.90f,1.16f);
 			float mpx=cellCX(x),mpy=passH+.02f,mpz=cellCZ(z);float tox=ex-mpx,toy=eyeY-mpy,toz=ez-mpz;
-			if(toy>.05f){float dist=sqrtf(tox*tox+toy*toy+toz*toz)+.01f;float sc=toy/dist;if(sc>bestF.score)bestF={sc,0.f,1.f,0.f,mpx,mpy,mpz};}
+			if(toy>.05f){float dist=sqrtf(tox*tox+toy*toy+toz*toz)+.01f;float sc=toy/(dist*.4f+1.f);if(sc>bestF.score)bestF={sc,0.f,1.f,0.f,mpx,mpy,mpz};}
 		}
 	}
 	UINT nPlate=(nFloor+nWall+nTrans)-plateBeg;
+	// 環境エフェクト（地上＝レンガから水滴、地下＝水滴／火花／火の粉）
+	UINT vfxBeg=nFloor+nWall+nTrans;UINT nVfxAlpha=0;
+	{
+		const int thFx=ThemeOfFloor(fxFloor);
+		auto frac01=[&](float t)->float{return t-floorf(t);};
+		auto emitBill=[&](float px,float py,float pz,float hs,float vs,float rr,float gg,float bb,float a){
+			// カメラ向きビルボード（薄い板）
+			float qx=px-rx*hs,qz=pz-rz*hs,sx=px+rx*hs,sz=pz+rz*hs;
+			quad(qx,py-vs,qz,sx,py-vs,sz,sx,py+vs,sz,qx,py+vs,qz,fx,0,fz,rr,gg,bb,a);
+		};
+		auto emitStreak=[&](float px,float py0,float pz,float py1,float hw,float rr,float gg,float bb,float a){
+			float qx=px-rx*hw,qz=pz-rz*hw,sx=px+rx*hw,sz=pz+rz*hw;
+			quad(qx,py0,qz,sx,py0,sz,sx,py1,sz,qx,py1,qz,fx,0,fz,rr,gg,bb,a);
+		};
+		auto emitPuddle=[&](float px,float pz,float rad,float rr,float gg,float bb,float a){
+			const float y=passH+.025f;
+			quad(px-rad,y,pz-rad,px-rad,y,pz+rad,px+rad,y,pz+rad,px+rad,y,pz-rad,0,1,0,rr,gg,bb,a);
+		};
+		int nEmit=0;const int kMaxEmit=(thFx>=2)?48:36;
+		for(int z=iz0;z<=iz1&&nEmit<kMaxEmit;z++)for(int x=ix0;x<=ix1&&nEmit<kMaxEmit;x++){
+			if(!vis(x,z))continue;
+			BYTE c=CellAtF(fxFloor,x,z);if(c!=CELL_WALL)continue;
+			float x0=cellX0(x),x1=x0+cellW(x),z0=cellZ0(z),z1=z0+cellD(z),cx=cellCX(x),cz=cellCZ(z);
+			float dx=cx-ex,dz=cz-ez;if(dx*dx+dz*dz>14.f*14.f)continue;
+			auto openN=[&](int ox,int oz)->BOOL{
+				if(ox<0||oz<0||ox>=m_n||oz>=m_n)return FALSE;
+				BYTE oc=CellAtF(fxFloor,ox,oz);return (oc!=CELL_WALL&&oc!=CELL_WINDOW)?TRUE:FALSE;
+			};
+			auto sideDrip=[&](float nx,float nz,float fx0,float fz0,float fx1,float fz1){
+				const int seed=x*47+z*13+(int)(nx*3+nz*5)+thFx*91;
+				const int nDrop=1+((seed>>3)&1);
+				for(int k=0;k<nDrop&&nEmit<kMaxEmit;k++){
+					float u=((seed+k*37)&255)/255.f;
+					float px=fx0+(fx1-fx0)*(0.15f+0.7f*u),pz=fz0+(fz1-fz0)*(0.15f+0.7f*u);
+					px+=nx*.02f;pz+=nz*.02f;
+					float ph=frac01(m_anim*(thFx==3?0.55f:0.85f)+((seed+k*19)&255)/255.f);
+					if(thFx==0||thFx==1){
+						// 水滴：壁から床へ落下＋着水の広がる水たまり
+						float yTop=wallH*(0.55f+((seed+k)&7)*.04f);
+						float y=yTop+(passH+.02f-yTop)*ph;
+						float len=.035f+.05f*ph;
+						float a=.55f*(1.f-ph*.35f);
+						if(thFx==0)emitStreak(px,y,pz,y-len,.007f,.55f,.78f,.95f,a);
+						else emitStreak(px,y,pz,y-len,.008f,.45f,.75f,.70f,a);
+						if(ph>.88f){
+							float s=(ph-.88f)/.12f;
+							emitPuddle(px+nx*.04f,pz+nz*.04f,.02f+s*.10f,.40f,.62f,.78f,.28f*(1.f-s));
+						}
+						// 継ぎ目からの細かい噴き出し
+						if(((seed+k)&7)==0){
+							float burst=frac01(m_anim*1.4f+u);
+							float by=wallH*(.35f+((seed)&3)*.1f);
+							emitBill(px+nx*(.01f+burst*.06f),by,pz+nz*(.01f+burst*.06f),.012f,.01f,.6f,.82f,.95f,.35f*(1.f-burst));
+						}
+					}else if(thFx==2){
+						// 金属：溶接火花＋薄い湯気
+						float yTop=wallH*(0.3f+((seed+k)&5)*.08f);
+						float y=yTop-ph*wallH*.55f;
+						emitBill(px+nx*.03f,y,pz+nz*.03f,.012f,.012f,1.f,.72f,.28f,.55f*(1.f-ph));
+						if(((seed+k)&3)==0){
+							float sy=wallH*(.4f+((seed)&3)*.12f)+ph*.15f;
+							emitBill(px+nx*.05f,sy,pz+nz*.05f,.04f,.025f,.55f,.58f,.62f,.18f*(1.f-ph));
+						}
+					}else{
+						// 火山：上昇する火の粉
+						float y=passH+.05f+ph*(wallH*.9f);
+						float flicker=.7f+.3f*sinf(m_anim*9.f+seed+k);
+						emitBill(px+nx*.04f,y,pz+nz*.04f,.01f,.016f,1.f,.45f*flicker,.12f,.5f*(1.f-ph*.6f));
+					}
+					nEmit++;
+				}
+			};
+			if(openN(x-1,z))sideDrip(-1,0,x0,z0,x0,z1);
+			if(openN(x+1,z))sideDrip(1,0,x1,z1,x1,z0);
+			if(openN(x,z-1))sideDrip(0,-1,x1,z0,x0,z0);
+			if(openN(x,z+1))sideDrip(0,1,x0,z1,x1,z1);
+		}
+		nVfxAlpha=(nFloor+nWall+nTrans)-vfxBeg;
+	}
 	if(FAILED(dc->Map(m_view.m_vbDyn,0,D3D11_MAP_WRITE_DISCARD,0,&map))){delete[] v;return;}memcpy(map.pData,v,(nFloor+nWall+nTrans)*sizeof(S3MVertex));dc->Unmap(m_view.m_vbDyn,0);delete[] v;
 	UINT stride=sizeof(S3MVertex),off=0;ID3D11ShaderResourceView* ns[7]={NULL,NULL,NULL,NULL,NULL,NULL,NULL};ID3D11RenderTargetView* nullRtv=NULL;
 	auto bindCB=[&](){dc->VSSetConstantBuffers(0,1,&m_view.m_cbFrame);dc->HSSetConstantBuffers(0,1,&m_view.m_cbFrame);dc->DSSetConstantBuffers(0,1,&m_view.m_cbFrame);dc->PSSetConstantBuffers(0,1,&m_view.m_cbFrame);};
@@ -3561,7 +3751,13 @@ void CSoft3DMazeDlg::RenderScene()
 		dc->IASetInputLayout(m_view.m_ilSolid);dc->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 		dc->VSSetShader(m_view.m_vsSolid,NULL,0);dc->HSSetShader(NULL,NULL,0);dc->DSSetShader(NULL,NULL,0);dc->PSSetShader(colorPass?m_view.m_psSolid:NULL,NULL,0);
 		dc->PSSetSamplers(0,1,&m_view.m_sampLin);
-		if(colorPass){dc->OMSetDepthStencilState(m_view.m_dssRead,0);dc->OMSetBlendState(m_view.m_bsAlpha,NULL,~0u);dc->PSSetSamplers(2,1,&m_view.m_sampCmp);dc->PSSetShaderResources(3,1,&m_view.m_srvEnv);dc->PSSetShaderResources(4,1,&m_view.m_shadowSrv);}
+		if(colorPass){
+			dc->OMSetDepthStencilState(m_view.m_dssRead,0);dc->OMSetBlendState(m_view.m_bsAlpha,NULL,~0u);
+			dc->PSSetSamplers(2,1,&m_view.m_sampCmp);dc->PSSetShaderResources(3,1,&m_view.m_srvEnv);dc->PSSetShaderResources(4,1,&m_view.m_shadowSrv);
+		}else{
+			// シャドウマップ：半透明も深度書き込み（キャスタとして全部）
+			dc->OMSetDepthStencilState(m_view.m_dssWrite,0);dc->OMSetBlendState(m_view.m_bsOpaque,NULL,~0u);
+		}
 		dc->Draw(nTrans,transBeg);dc->PSSetShaderResources(0,5,ns);
 	};
 	auto drawTransRange=[&](UINT beg,UINT n,BOOL colorPass){
@@ -3574,11 +3770,16 @@ void CSoft3DMazeDlg::RenderScene()
 		dc->Draw(n,beg);
 	};
 	S3MMat fxRefVP[CS3mView::S3M_MIRROR_FX_N];
-	{S3MMat camVP=cb.viewProj;cb.viewProj=cb.lightVP;if(SUCCEEDED(dc->Map(m_view.m_cbFrame,0,D3D11_MAP_WRITE_DISCARD,0,&map))){memcpy(map.pData,&cb,sizeof(cb));dc->Unmap(m_view.m_cbFrame,0);}
+	// --- 1パス目: シャドウマップ（不透明＋半透明すべて深度描画）---
+	{S3MMat camVP=cb.viewProj;
+	// Eyeはカメラのまま（変位量を色パスと一致）。LightDir.w=0 でテッセだけ固定細密
+	cb.viewProj=cb.lightVP;cb.lightDir.w=0.f;
+	if(SUCCEEDED(dc->Map(m_view.m_cbFrame,0,D3D11_MAP_WRITE_DISCARD,0,&map))){memcpy(map.pData,&cb,sizeof(cb));dc->Unmap(m_view.m_cbFrame,0);}
 	D3D11_VIEWPORT svp={0,0,(float)CS3mView::S3M_SHADOW_SIZE,(float)CS3mView::S3M_SHADOW_SIZE,0,1};dc->RSSetViewports(1,&svp);dc->RSSetState(m_view.m_rsShadow);
 	dc->OMSetRenderTargets(1,&nullRtv,m_view.m_shadowDsv);dc->ClearDepthStencilView(m_view.m_shadowDsv,D3D11_CLEAR_DEPTH,1.f,0);
-	drawFloorWall(FALSE);dc->OMSetDepthStencilState(m_view.m_dssWrite,0);dc->OMSetBlendState(m_view.m_bsOpaque,NULL,~0u);drawTrans(FALSE);
-	dc->OMSetRenderTargets(1,&nullRtv,NULL);cb.viewProj=camVP;
+	drawFloorWall(FALSE);
+	drawTrans(FALSE);
+	dc->OMSetRenderTargets(1,&nullRtv,NULL);cb.viewProj=camVP;cb.lightDir.w=1.f;
 	S3MMat idM={};idM.m[0]=idM.m[5]=idM.m[10]=idM.m[15]=1.f;cb.reflectVP=idM;cb.reflectFloorVP=idM;
 	for(int i=0;i<CS3mView::S3M_MIRROR_FX_N;i++)fxRefVP[i]=idM;
 	auto makeReflectVP=[&](const MirPick& m, float fovMul)->S3MMat{
@@ -3603,11 +3804,19 @@ void CSoft3DMazeDlg::RenderScene()
 	drawMirrorSlot(0,bestW,bestW.score>0.f,NULL,1.f);drawMirrorSlot(1,bestF,bestF.score>0.f,NULL,1.f);
 	for(int i=0;i<nFx;i++){
 		const int slot=fxMirOf[i];if(slot<0)continue;
-		float nx=ex-fxObj[i].cx,ny=eyeY-fxObj[i].cy,nz=ez-fxObj[i].cz;float nl=sqrtf(nx*nx+ny*ny+nz*nz)+1e-5f;nx/=nl;ny/=nl;nz/=nl;
-		MirPick mp={1.f,nx,ny,nz,fxObj[i].cx,fxObj[i].cy,fxObj[i].cz};
-		drawMirrorSlot(slot,mp,TRUE,&fxRefVP[slot-CS3mView::S3M_MIRROR_FX0],1.35f);
+		MirPick mp;
+		if(fxObj[i].plane){
+			mp={1.f,fxObj[i].nx,fxObj[i].ny,fxObj[i].nz,fxObj[i].cx,fxObj[i].cy,fxObj[i].cz};
+		}else{
+			// 回転ギミック：カメラ向き平面で反射（面がカメラを向いているように見える）
+			float nx=ex-fxObj[i].cx,ny=eyeY-fxObj[i].cy,nz=ez-fxObj[i].cz;float nl=sqrtf(nx*nx+ny*ny+nz*nz)+1e-5f;nx/=nl;ny/=nl;nz/=nl;
+			mp={1.f,nx,ny,nz,fxObj[i].cx,fxObj[i].cy,fxObj[i].cz};
+		}
+		drawMirrorSlot(slot,mp,TRUE,&fxRefVP[slot-CS3mView::S3M_MIRROR_FX0],fxObj[i].plane?1.15f:1.35f);
 	}
-	dc->OMSetRenderTargets(1,&nullRtv,NULL);cb.viewProj=camVP;cb.lightDir.w=1.f;cb.reflectFloorVP=(bestF.score>0.f)?cb.reflectFloorVP:idM;
+	dc->OMSetRenderTargets(1,&nullRtv,NULL);cb.viewProj=camVP;cb.lightDir.w=1.f;
+	cb.reflectVP=(bestW.score>0.f)?cb.reflectVP:idM;
+	cb.reflectFloorVP=(bestF.score>0.f)?cb.reflectFloorVP:idM;
 	if(SUCCEEDED(dc->Map(m_view.m_cbFrame,0,D3D11_MAP_WRITE_DISCARD,0,&map))){memcpy(map.pData,&cb,sizeof(cb));dc->Unmap(m_view.m_cbFrame,0);}}
 	D3D11_VIEWPORT vp={0,0,(float)w,(float)h,0,1};dc->RSSetViewports(1,&vp);dc->RSSetState(m_view.m_rsSolid);
 	// 地下は青空を出さない（天井＋暗いクリア）
@@ -3615,6 +3824,7 @@ void CSoft3DMazeDlg::RenderScene()
 	float bg[4]={.48f,.64f,.82f,1};if(clearF>0){bg[0]=.07f;bg[1]=.08f;bg[2]=.10f;}
 	dc->OMSetRenderTargets(1,&m_view.m_sceneRtv,m_view.m_dsv);dc->ClearRenderTargetView(m_view.m_sceneRtv,bg);dc->ClearDepthStencilView(m_view.m_dsv,D3D11_CLEAR_DEPTH|D3D11_CLEAR_STENCIL,1,0);
 	dc->PSSetShaderResources(5,1,&m_view.m_mirrorSrv[0]);dc->PSSetShaderResources(6,1,&m_view.m_mirrorSrv[1]);
+	// --- 2パス目: 不透明（PCFでセルフシャドウ／投射影）---
 	drawFloorWall(TRUE);
 	dc->PSSetShaderResources(5,2,ns+5);
 	dc->OMSetDepthStencilState(m_view.m_dssOff,0);dc->OMSetBlendState(m_view.m_bsOpaque,NULL,~0u);dc->IASetInputLayout(NULL);dc->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);dc->VSSetShader(m_view.m_vsPost,NULL,0);dc->PSSetSamplers(1,1,&m_view.m_sampPoint);
@@ -3622,10 +3832,14 @@ void CSoft3DMazeDlg::RenderScene()
 	dc->OMSetRenderTargets(1,&m_view.m_sceneRtv,NULL);dc->PSSetShaderResources(0,1,&m_view.m_postSrv);dc->PSSetShaderResources(2,1,&m_view.m_dsSrv);dc->PSSetShader(m_view.m_psDof,NULL,0);dc->Draw(3,0);dc->PSSetShaderResources(0,5,ns);
 	dc->OMSetRenderTargets(1,&m_view.m_bbRtv,NULL);dc->PSSetShaderResources(0,1,&m_view.m_sceneSrv);dc->PSSetShader(m_view.m_psFinal,NULL,0);dc->Draw(3,0);dc->PSSetShaderResources(0,5,ns);
 	if(nTrans){
+		// --- 3パス目: 半透明（PCFでセルフシャドウ／投射影）---
 		dc->OMSetRenderTargets(1,&m_view.m_bbRtv,m_view.m_dsv);
 		S3MMat floorVP=cb.reflectFloorVP;
-		drawTransRange(winBeg,nWin,TRUE);
-		for(int i=0;i<nFx;i++){
+		// 奥から手前へ1回だけ（二重描画しない）。窓・アイテムに個別RTを割当
+		int ordDraw[64];for(int i=0;i<nFx;i++)ordDraw[i]=i;
+		for(int i=1;i<nFx;i++){int q=ordDraw[i],j=i-1;while(j>=0&&fxObj[ordDraw[j]].d<fxObj[q].d){ordDraw[j+1]=ordDraw[j];j--;}ordDraw[j+1]=q;}
+		for(int oi=0;oi<nFx;oi++){
+			const int i=ordDraw[oi];
 			const int slot=fxMirOf[i];
 			if(slot>=0){
 				cb.reflectFloorVP=fxRefVP[slot-CS3mView::S3M_MIRROR_FX0];
@@ -3641,6 +3855,18 @@ void CSoft3DMazeDlg::RenderScene()
 		if(SUCCEEDED(dc->Map(m_view.m_cbFrame,0,D3D11_MAP_WRITE_DISCARD,0,&map))){memcpy(map.pData,&cb,sizeof(cb));dc->Unmap(m_view.m_cbFrame,0);}
 		dc->PSSetShaderResources(5,1,&m_view.m_mirrorSrv[0]);dc->PSSetShaderResources(6,1,&m_view.m_mirrorSrv[1]);
 		drawTransRange(plateBeg,nPlate,TRUE);
+		if(nVfxAlpha){
+			const int thV=ThemeOfFloor(fxFloor);
+			dc->IASetVertexBuffers(0,1,&m_view.m_vbDyn,&stride,&off);bindCB();
+			dc->IASetInputLayout(m_view.m_ilSolid);dc->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+			dc->VSSetShader(m_view.m_vsSolid,NULL,0);dc->HSSetShader(NULL,NULL,0);dc->DSSetShader(NULL,NULL,0);dc->PSSetShader(m_view.m_psSolid,NULL,0);
+			dc->PSSetSamplers(0,1,&m_view.m_sampLin);dc->OMSetDepthStencilState(m_view.m_dssRead,0);
+			dc->OMSetBlendState(thV>=2?m_view.m_bsAdd:m_view.m_bsAlpha,NULL,~0u);
+			dc->PSSetSamplers(2,1,&m_view.m_sampCmp);dc->PSSetShaderResources(3,1,&m_view.m_srvEnv);dc->PSSetShaderResources(4,1,&m_view.m_shadowSrv);
+			dc->PSSetShaderResources(6,1,ns+6);
+			dc->Draw(nVfxAlpha,vfxBeg);
+			dc->OMSetBlendState(m_view.m_bsAlpha,NULL,~0u);
+		}
 		dc->PSSetShaderResources(5,2,ns+5);
 	}
 	dc->OMSetRenderTargets(1,&m_view.m_bbRtv,NULL);dc->OMSetDepthStencilState(m_view.m_dssOff,0);
@@ -3756,7 +3982,6 @@ void CSoft3DMazeDlg::RenderScene()
 	if(hn&&SUCCEEDED(dc->Map(m_view.m_vbHud,0,D3D11_MAP_WRITE_DISCARD,0,&map))){memcpy(map.pData,hv,hn*sizeof(S3MHudVertex));dc->Unmap(m_view.m_vbHud,0);UINT hs=sizeof(S3MHudVertex);dc->IASetVertexBuffers(0,1,&m_view.m_vbHud,&hs,&off);dc->IASetInputLayout(m_view.m_ilHud);dc->VSSetShader(m_view.m_vsHud,NULL,0);dc->PSSetShader(m_view.m_psHud,NULL,0);dc->OMSetBlendState(m_view.m_bsAlpha,NULL,~0u);dc->Draw(hn,0);}
 	if(overview&&m_view.m_srvMap&&m_view.m_texMap){
 		const int TS=CS3mView::S3M_MAP_SIZE;
-		const float worldSpan=AxisOrigin(m_n);
 		int bakeFloor=m_mapViewFloor;
 		if(bakeFloor<0||bakeFloor>=m_nFloors||!m_grids[bakeFloor])bakeFloor=m_floor;
 		if(m_mapBakeDirty){
@@ -3764,11 +3989,7 @@ void CSoft3DMazeDlg::RenderScene()
 			if(SUCCEEDED(dc->Map(m_view.m_texMap,0,D3D11_MAP_WRITE_DISCARD,0,&mm))&&mm.pData){
 				BYTE* row=(BYTE*)mm.pData;
 				const int pitch=(int)mm.RowPitch;
-				const float invTS=worldSpan/(float)TS;
-				// 壁は通路の約1/5程度見えるよう軽くだけ太くする（未訪問床のみ）
-				const float wallPad=0.05f;
-				const float wallTexels=0.10f/max(1e-6f,invTS);
-				// 全体マップ: 未訪問=黒 / 訪問床=薄い青 / 壁=茶で区別
+				// 格子1セル→テクスチャ1テクセル寄り（最大3000に4096）。通路/壁を忠実に。
 				auto rgba=[&](BYTE r,BYTE g,BYTE b,BYTE a)->DWORD{
 					return ((DWORD)a<<24)|((DWORD)r<<16)|((DWORD)g<<8)|b;
 				};
@@ -3776,79 +3997,28 @@ void CSoft3DMazeDlg::RenderScene()
 				const DWORD colWin=rgba(70,150,210,255);
 				const DWORD colVisit=rgba(110,180,230,235);
 				const DWORD colBlack=rgba(0,0,0,255);
-				auto classify=[&](float wx,float wz)->DWORD{
-					const int gx=WorldToGridAxis(wx),gz=WorldToGridAxis(wz);
-					BYTE c=CellAtF(bakeFloor,gx,gz);
-					const BOOL visited=VisitAtF(bakeFloor,gx,gz)?TRUE:FALSE;
+				auto cellColor=[&](BYTE c,BOOL visited)->DWORD{
 					if(c==CELL_GOAL)return rgba(255,210,40,235);
 					if(c==CELL_START)return rgba(55,220,120,235);
 					if(c==CELL_STAIRS_DOWN)return rgba(255,148,40,240);
 					if(c==CELL_STAIRS_UP)return rgba(60,220,255,240);
-					if(c==CELL_WALL)return colWall;
-					if(c==CELL_WINDOW)return colWin;
-					// 訪問済み通路を壁で潰さない（壁近傍の太さは未訪問側だけ）
-					if(!visited){
-						static const float ox[4]={wallPad,-wallPad,0,0};
-						static const float oz[4]={0,0,wallPad,-wallPad};
-						for(int i=0;i<4;i++){
-							const BYTE n=CellAtF(bakeFloor,WorldToGridAxis(wx+ox[i]),WorldToGridAxis(wz+oz[i]));
-							if(n==CELL_WALL)return colWall;
-							if(n==CELL_WINDOW)return colWin;
-						}
-					}
-					if(!visited)return colBlack;
 					if(S3mIsPickupCell(c))return rgba(210,90,200,225);
 					if(c==CELL_SLIME)return rgba(60,200,80,210);
 					if(c==CELL_SPIKE)return rgba(220,60,50,215);
 					if(c==CELL_ICE)return rgba(100,200,255,210);
 					if(c==CELL_DARK)return rgba(50,40,90,220);
-					return colVisit;
+					if(c==CELL_WALL)return colWall;
+					if(c==CELL_WINDOW)return colWin;
+					if(visited)return colVisit;
+					return colBlack;
 				};
 				for(int ty=0;ty<TS;ty++){
-					const float wz=((float)ty+.5f)*invTS;
+					const int gz=min(m_n-1,(int)(((long long)ty*(long long)m_n+TS/2)/TS));
 					DWORD* dst=(DWORD*)(row+ty*pitch);
 					for(int tx=0;tx<TS;tx++){
-						const float wx=((float)tx+.5f)*invTS;
-						dst[tx]=classify(wx,wz);
-					}
-				}
-				// 大マップで壁が1px未満になるときだけ1回膨張（訪問床・マーカーは守る）
-				if(wallTexels<1.25f){
-					DWORD* tmp=new DWORD[(size_t)TS*(size_t)TS];
-					if(tmp){
-						for(int ty=0;ty<TS;ty++){
-							DWORD* src=(DWORD*)(row+ty*pitch);
-							memcpy(tmp+(size_t)ty*(size_t)TS,src,(size_t)TS*sizeof(DWORD));
-						}
-						auto isWallish=[&](DWORD p)->BOOL{
-							return p==colWall||p==colWin;
-						};
-						auto isKeep=[&](DWORD p)->BOOL{
-							if(p==colVisit)return TRUE;
-							const BYTE r=(BYTE)((p>>16)&255),g=(BYTE)((p>>8)&255),b=(BYTE)(p&255);
-							return (r==255&&g==210&&b==40)||(r==55&&g==220&&b==120)
-								||(r==255&&g==148&&b==40)||(r==60&&g==220&&b==255)
-								||(r==210&&g==90&&b==200)
-								||(r==60&&g==200&&b==80)||(r==220&&g==60&&b==50)
-								||(r==100&&g==200&&b==255)||(r==50&&g==40&&b==90);
-						};
-						for(int ty=0;ty<TS;ty++){
-							DWORD* dst=(DWORD*)(row+ty*pitch);
-							for(int tx=0;tx<TS;tx++){
-								DWORD cur=tmp[(size_t)ty*(size_t)TS+(size_t)tx];
-								if(isKeep(cur)||isWallish(cur)){dst[tx]=cur;continue;}
-								DWORD take=cur;
-								const int nxy[4][2]={{1,0},{-1,0},{0,1},{0,-1}};
-								for(int k=0;k<4;k++){
-									const int nx=tx+nxy[k][0],ny=ty+nxy[k][1];
-									if(nx<0||ny<0||nx>=TS||ny>=TS)continue;
-									DWORD n=tmp[(size_t)ny*(size_t)TS+(size_t)nx];
-									if(isWallish(n)){take=n;break;}
-								}
-								dst[tx]=take;
-							}
-						}
-						delete[] tmp;
+						const int gx=min(m_n-1,(int)(((long long)tx*(long long)m_n+TS/2)/TS));
+						const BYTE c=CellAtF(bakeFloor,gx,gz);
+						dst[tx]=cellColor(c,VisitAtF(bakeFloor,gx,gz)?TRUE:FALSE);
 					}
 				}
 				dc->Unmap(m_view.m_texMap,0);
@@ -3860,7 +4030,7 @@ void CSoft3DMazeDlg::RenderScene()
 		const float areaTop=topPad;
 		const float areaH=max(96.f,(float)h-tipBand-topPad);
 		const float baseSide=OverviewBaseSide(w,h);
-		const float side=baseSide*MapZoomScale();
+		const float side=baseSide*OverviewZoomScale();
 		ClampMapPan(w,h,side);
 		const float ox=((float)w-side)*.5f+m_mapPanX;
 		const float oy=areaTop+(areaH-side)*.5f+m_mapPanY;
@@ -3870,22 +4040,24 @@ void CSoft3DMazeDlg::RenderScene()
 		dc->RSSetViewports(1,&mvp);
 		dc->IASetInputLayout(NULL);dc->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 		dc->VSSetShader(m_view.m_vsPost,NULL,0);dc->PSSetShader(m_view.m_psFinal,NULL,0);
-		dc->PSSetConstantBuffers(0,1,&m_view.m_cbFrame);dc->PSSetSamplers(0,1,&m_view.m_sampPoint);
+		dc->PSSetConstantBuffers(0,1,&m_view.m_cbFrame);
+		// CLAMP+点サンプリング（LinはWRAPのためタイル格子に見える）
+		dc->PSSetSamplers(0,1,&m_view.m_sampPoint);
 		dc->PSSetShaderResources(0,1,&m_view.m_srvMap);dc->OMSetBlendState(m_view.m_bsAlpha,NULL,~0u);dc->Draw(3,0);
 		dc->PSSetShaderResources(0,1,ns);
-		// 自機マーカー＋階段方向矢印（ワールド圧縮座標）
+		// 自機マーカー＋階段（格子正規化＝ベイクと一致）
 		hn=0;
-		auto w2s=[&](float wx,float wz,float& sx,float& sy){
-			sx=ox+(wx/max(.001f,worldSpan))*side;
-			sy=oy+(wz/max(.001f,worldSpan))*side;
+		const float invN=1.f/max(1.f,(float)m_n);
+		auto g2s=[&](float gx,float gz,float& sx,float& sy){
+			sx=ox+gx*invN*side;
+			sy=oy+gz*invN*side;
 		};
 		for(int z=0;z<m_n;z++)for(int x=0;x<m_n;x++){
 			BYTE c=CellAtF(bakeFloor,x,z);
 			if(c!=CELL_STAIRS_DOWN&&c!=CELL_STAIRS_UP)continue;
 			int pf=0,px=0,pz=0;
 			if(!FindStairPartner(bakeFloor,x,z,pf,px,pz))continue;
-			float ax=cellCX(x),az=cellCZ(z),bx=cellCX(px),bz=cellCZ(pz);
-			float qx0,qy0,qx1,qy1;w2s(ax,az,qx0,qy0);w2s(bx,bz,qx1,qy1);
+			float qx0,qy0,qx1,qy1;g2s((float)x+.5f,(float)z+.5f,qx0,qy0);g2s((float)px+.5f,(float)pz+.5f,qx1,qy1);
 			float dx=qx1-qx0,dy=qy1-qy0;float len=sqrtf(dx*dx+dy*dy)+1e-5f;dx/=len;dy/=len;
 			const float asz=max(6.f,side*.014f);
 			float tx=qx0+dx*len*.58f,ty=qy0+dy*len*.58f;
@@ -3894,7 +4066,7 @@ void CSoft3DMazeDlg::RenderScene()
 			float rr=1.f,gg=.55f,bb=.15f;if(c==CELL_STAIRS_UP){rr=.2f;gg=.85f;bb=1.f;}
 			hp(tx,ty,rr,gg,bb,1.f);hp(bx2+ox2,by2+oy2,rr,gg,bb,1.f);hp(bx2-ox2,by2-oy2,rr,gg,bb,1.f);
 		}
-		const float pcx=ox+(ex/max(.001f,worldSpan))*side,pcy=oy+(ez/max(.001f,worldSpan))*side;
+		float pcx,pcy;g2s(m_px,m_pz,pcx,pcy);
 		float ffx,ffz,rrx,rrz;CamBasisYaw(m_yaw,ffx,ffz,rrx,rrz);
 		const float ps=max(5.f,side*.012f);
 		float t0x=pcx+ffx*ps,t0y=pcy+ffz*ps,t1x=pcx-ffx*ps*.4f-rrx*ps*.5f,t1y=pcy-ffz*ps*.4f-rrz*ps*.5f,t2x=pcx-ffx*ps*.4f+rrx*ps*.5f,t2y=pcy-ffz*ps*.4f+rrz*ps*.5f;
@@ -3904,7 +4076,6 @@ void CSoft3DMazeDlg::RenderScene()
 		hq(ox-2,oy-2,ox+side+2,oy-2,ox+side+2,oy+side+2,ox-2,oy+side+2,.9f,.92f,1.f,.22f);
 		if(hn&&SUCCEEDED(dc->Map(m_view.m_vbHud,0,D3D11_MAP_WRITE_DISCARD,0,&map))){memcpy(map.pData,hv,hn*sizeof(S3MHudVertex));dc->Unmap(m_view.m_vbHud,0);UINT hs=sizeof(S3MHudVertex);dc->IASetVertexBuffers(0,1,&m_view.m_vbHud,&hs,&off);dc->RSSetViewports(1,&vp);dc->IASetInputLayout(m_view.m_ilHud);dc->VSSetShader(m_view.m_vsHud,NULL,0);dc->PSSetShader(m_view.m_psHud,NULL,0);dc->OMSetBlendState(m_view.m_bsAlpha,NULL,~0u);dc->Draw(hn,0);}
 		dc->RSSetViewports(1,&vp);
-		// 階層ラベルは上帯左（操作説明は下帯・地図と分離）
 		mapOx=ox;mapOy=oy;mapSide=side;
 		drawBadge=TRUE;badgeFloor=bakeFloor;
 		badgeRightEdge=FALSE;badgeAboveMap=FALSE;

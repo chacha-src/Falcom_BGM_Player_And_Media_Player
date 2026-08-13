@@ -55,7 +55,8 @@ public:
 	ID3D11DepthStencilView* m_shadowDsv;
 	ID3D11ShaderResourceView* m_shadowSrv;
 	enum { S3M_SHADOW_SIZE = 1024 };
-	enum { S3M_MIRROR_N = 8, S3M_MIRROR_SIZE = 384, S3M_MIRROR_FX0 = 2, S3M_MIRROR_FX_N = 6 };
+	// 0=壁鏡 1=床鏡 2.. =窓・アイテム等（NDC軽量なので多めに持つ）
+	enum { S3M_MIRROR_N = 20, S3M_MIRROR_SIZE = 384, S3M_MIRROR_FX0 = 2, S3M_MIRROR_FX_N = 18 };
 	ID3D11Texture2D* m_mirrorTex[S3M_MIRROR_N];
 	ID3D11RenderTargetView* m_mirrorRtv[S3M_MIRROR_N];
 	ID3D11ShaderResourceView* m_mirrorSrv[S3M_MIRROR_N];
@@ -94,7 +95,7 @@ public:
 	ID3D11Texture2D* m_texClear;
 	ID3D11ShaderResourceView* m_srvClear;
 	int m_clearTexW, m_clearTexH;
-	enum { S3M_MAP_SIZE = 1024 };
+	enum { S3M_MAP_SIZE = 4096 };
 	ID3D11Texture2D* m_texMap;
 	ID3D11ShaderResourceView* m_srvMap;
 	ID3D11Texture2D* m_texTip;
@@ -300,6 +301,8 @@ public:
 	BOOL HitTestMinimap(CPoint clientPt) const;
 	float EffectiveFovDeg() const;
 	float MapZoomScale() const;
+	float OverviewZoomScale() const;
+	int OverviewZoomMaxPct() const;
 	float OverviewBaseSide(int viewW, int viewH) const;
 	virtual BOOL OnInitDialog();
 	virtual void OnOK() {}
@@ -383,6 +386,7 @@ public:
 	float m_mapPanX, m_mapPanY;
 	int m_mapPanDrag;
 	CPoint m_mapPanLast;
+	int m_overviewZoomPct;
 	DWORD m_spaceToggleTick;
 	int m_tipIsOverview;
 	CStringW m_mapBadgeText;
