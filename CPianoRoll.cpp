@@ -4005,7 +4005,7 @@ void CPianoRoll::GetExprLegendPanelRect(int rollW, int rollH, CRect& panel) cons
         panelW = min(rollW - 8, pad * 2 + kItemCount * (badgeW + 2));
     }
 
-    panel.SetRect(4, 4, 4 + panelW, 4 + panelH);
+    panel.SetRect(4, 0, 4 + panelW, panelH);
 }
 
 void CPianoRoll::ReleaseExprLegendCache() const
@@ -4186,6 +4186,13 @@ void CPianoRoll::DrawExprLegendContent(CDC& dc, int rollW, int rollH, const CRec
     // 背景は半透明で塗り、下を流れるバーがうっすら透ける(可読性は保つ濃さ)。
     if (fillPanelBg)
         PianoFillRectAlpha(dc, panel, RGB(14, 14, 20), 170);
+
+    // DrawText のはみ出しがパネル外のクロマに残ると ScrollRows で残骸になる
+    CRgn clipRgn;
+    clipRgn.CreateRectRgnIndirect(&panel);
+    const int savedDc = dc.SaveDC();
+    dc.SelectClipRgn(&clipRgn);
+
     HGDIOBJ oldPen = dc.SelectObject(::GetStockObject(DC_PEN));
     ::SetDCPenColor(dc.GetSafeHdc(), RGB(70, 70, 82));
     dc.MoveTo(panel.left, panel.bottom - 1); dc.LineTo(panel.left, panel.top);
@@ -4243,6 +4250,7 @@ void CPianoRoll::DrawExprLegendContent(CDC& dc, int rollW, int rollH, const CRec
         }
     }
     dc.SelectObject(pOldF);
+    dc.RestoreDC(savedDc);
 }
 
 void CPianoRoll::DrawHistoryGrid(CDC& dc, int width, int yFrom, int yTo) const
@@ -5481,6 +5489,24 @@ void CPianoRoll::PresentFinalFrame(CDC& dc, int w, int h, int rollH, int keySect
         && (savedata.aero == 1 || CCC_AcrylicCaption(m_hWnd))) {
         BakeMainFollowOverlayIntoChroma(w, h, rollH, keySectionH);
         if (haveLegend) {
+            // 再合成前に凡例帯をロール下地へ戻す（Scroll 残骸・文字はみ出しの保険）
+            if (m_rollReady && m_rollDC.GetSafeHdc() && lgPanel.Width() > 0) {
+                CRect heal(lgPanel.left - 2, 0, lgPanel.right + 2, lgPanel.bottom + 2);
+                if (heal.left < 0) heal.left = 0;
+                if (heal.right > w) heal.right = w;
+                if (heal.bottom > rollH) heal.bottom = rollH;
+                if (heal.left < heal.right && heal.bottom > 0) {
+                    if (savedata.aero == 1) {
+                        m_chromaCache.UpdateRect(m_rollDC.GetSafeHdc(),
+                            heal.left, heal.top, heal.left, heal.top,
+                            heal.Width(), heal.Height(), PIANO_CHROMA_KEY);
+                    } else {
+                        m_chromaCache.UpdateOpaqueRect(m_rollDC.GetSafeHdc(),
+                            heal.left, heal.top, heal.left, heal.top,
+                            heal.Width(), heal.Height());
+                    }
+                }
+            }
             DrawExprLegend(dc, w, rollH, false);
             if (m_legendBgDC.GetSafeHdc() && lgPanel.Width() > 0 && lgPanel.Height() > 0) {
                 if (savedata.aero == 1) {
@@ -6001,6 +6027,26 @@ void CPianoRoll::OnPaint()
                             }
                         }
                     }
+                    // 凡例は Present でクロマへ焼く。ScrollRows 前に剥がさないと
+                    // 「記号の意味」などが上へ流れてキャプション直下に残骸が残る。
+                    if (m_showExprLegend && m_rollDC.GetSafeHdc()) {
+                        CRect lg;
+                        GetExprLegendPanelRect(w, rollH, lg);
+                        if (!lg.IsRectEmpty()) {
+                            CRect peel = lg;
+                            peel.top -= m_lastScrollPx;
+                            if (peel.top < 0) peel.top = 0;
+                            peel.InflateRect(1, 1);
+                            if (peel.left < 0) peel.left = 0;
+                            if (peel.right > w) peel.right = w;
+                            if (peel.bottom > rollH) peel.bottom = rollH;
+                            if (peel.top < peel.bottom && peel.left < peel.right) {
+                                upd(m_rollDC.GetSafeHdc(),
+                                    peel.left, peel.top, peel.left, peel.top,
+                                    peel.Width(), peel.Height());
+                            }
+                        }
+                    }
                     m_chromaCache.ScrollRows(0, rollH, m_lastScrollPx);
                     int bandTop = m_lastScrollHealTop;
                     if (bandTop <= 0) {
@@ -6011,6 +6057,23 @@ void CPianoRoll::OnPaint()
                     const int bandH = rollH - bandTop;
                     if (bandH > 0)
                         upd(m_rollDC.GetSafeHdc(), 0, bandTop, 0, bandTop, w, bandH);
+                    // Scroll 後に凡例帯(上端〜パネル下)をロール下地で上書き。
+                    // 前フレの凡例が上へ流れた残骸を Present 再合成前に必ず消す。
+                    if (m_showExprLegend && m_rollDC.GetSafeHdc()) {
+                        CRect lg;
+                        GetExprLegendPanelRect(w, rollH, lg);
+                        if (!lg.IsRectEmpty()) {
+                            CRect heal(lg.left - 2, 0, lg.right + 2, lg.bottom + 2);
+                            if (heal.left < 0) heal.left = 0;
+                            if (heal.right > w) heal.right = w;
+                            if (heal.bottom > rollH) heal.bottom = rollH;
+                            if (heal.left < heal.right && heal.bottom > 0) {
+                                upd(m_rollDC.GetSafeHdc(),
+                                    heal.left, heal.top, heal.left, heal.top,
+                                    heal.Width(), heal.Height());
+                            }
+                        }
+                    }
                 }
                 else if (didPlayheadOnly && m_chromaReady) {
                     int yTop = 0, yBot = 0;
