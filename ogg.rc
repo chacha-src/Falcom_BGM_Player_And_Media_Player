@@ -1,4 +1,4 @@
-﻿// Microsoft Visual C++ generated resource script.
+// Microsoft Visual C++ generated resource script.
 //
 #pragma code_page(65001)
 
@@ -1394,7 +1394,6 @@ BEGIN
     DEFPUSHBUTTON   "閉じる",IDOK,176,232,68,18
 END
 
-
 IDD_SOFT3DRACE DIALOGEX 0, 0, 560, 390
 STYLE DS_SETFONT | DS_FIXEDSYS | WS_MINIMIZEBOX | WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME
 CAPTION "Soft3D Race"
@@ -2043,7 +2042,7 @@ END
 //
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 0,9,1,764
+ FILEVERSION 0,9,1,770
  PRODUCTVERSION 1,0,0,1
  FILEFLAGSMASK 0x3fL
 #ifdef _DEBUG
@@ -2062,7 +2061,7 @@ BEGIN
             VALUE "Comments", "Falcom BGM Player & Media Player"
             VALUE "CompanyName", "Pre Prayer Power Soft"
             VALUE "FileDescription", "Falcom BGM Player & Media Player Ver 0.9a Rel.2026.08.14"
-            VALUE "FileVersion", "0.9.1.764"
+            VALUE "FileVersion", "0.9.1.770"
             VALUE "InternalName", "ogg YS/ED bgm"
             VALUE "LegalCopyright", "Copyright (C) 2026.08.14"
             VALUE "LegalTrademarks", "Pre Prayer Power Soft"

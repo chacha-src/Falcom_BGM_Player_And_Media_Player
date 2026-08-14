@@ -8,12 +8,12 @@
 #include "oggDlg.h"
 #include <math.h>
 #include <new>
-#include <gdiplus.h>
 #include <d3dcompiler.h>
 #include <dxgi1_2.h>
 #define DIRECTINPUT_VERSION 0x0800
 #include <dinput.h>
 #include "Soft3DRaceNames.inc"
+#include "Soft3DTextD2D.h"
 
 #ifdef _MSC_VER
 #pragma comment(lib, "d3dcompiler.lib")
@@ -96,6 +96,27 @@ static float S3rNormAngle(float a)
 static float S3rClamp(float v, float lo, float hi) { return v < lo ? lo : (v > hi ? hi : v); }
 static float S3rLerp(float a, float b, float t) { return a + (b - a) * t; }
 static float S3rSaturate(float v) { return S3rClamp(v, 0.f, 1.f); }
+static BOOL S3rWorldToNdc(const S3RMat& vp, float x, float y, float z, float& ndcX, float& ndcY, float& clipW)
+{
+	// HLSL row_major mul(float4(p,1), VP)
+	const float ox = x*vp.m[0] + y*vp.m[4] + z*vp.m[8]  + vp.m[12];
+	const float oy = x*vp.m[1] + y*vp.m[5] + z*vp.m[9]  + vp.m[13];
+	const float ow = x*vp.m[3] + y*vp.m[7] + z*vp.m[11] + vp.m[15];
+	if (ow <= 0.08f) return FALSE;
+	ndcX = ox / ow;
+	ndcY = oy / ow;
+	clipW = ow;
+	if (ndcX < -1.28f || ndcX > 1.28f || ndcY < -1.22f || ndcY > 1.22f) return FALSE;
+	return TRUE;
+}
+static void S3rRankWord(int rank, wchar_t* buf, size_t n)
+{
+	if (!buf || n < 2) return;
+	if (rank == 1) wcscpy_s(buf, n, LL14(L"1st", L"1st", L"1er", L"1°", L"1.º", L"1위", L"第1", L"1", L"1-й", L"1.", L"1º", L"1e", L"1.", L"1."));
+	else if (rank == 2) wcscpy_s(buf, n, LL14(L"2nd", L"2nd", L"2e", L"2°", L"2.º", L"2위", L"第2", L"2", L"2-й", L"2.", L"2º", L"2e", L"2.", L"2."));
+	else if (rank == 3) wcscpy_s(buf, n, LL14(L"3rd", L"3rd", L"3e", L"3°", L"3.º", L"3위", L"第3", L"3", L"3-й", L"3.", L"3º", L"3e", L"3.", L"3."));
+	else swprintf_s(buf, n, L"%d%s", rank, LL14(L"位", L"th", L"e", L"°", L".º", L"위", L"名", L"", L"-й", L".", L"º", L"e", L".", L"."));
+}
 static void S3rNorm3(float& x, float& y, float& z)
 {
 	float l = sqrtf(x*x+y*y+z*z); if (l < 1e-6f) { x=0;y=1;z=0; return; }
@@ -536,7 +557,7 @@ CS3rView::CS3rView()
 	, m_dsTex(NULL), m_dsv(NULL), m_dsSrv(NULL), m_sceneTex(NULL), m_sceneRtv(NULL), m_sceneSrv(NULL)
 	, m_postTex(NULL), m_postRtv(NULL), m_postSrv(NULL), m_shadowTex(NULL), m_shadowDsv(NULL), m_shadowSrv(NULL)
 	, m_vsTess(NULL), m_hsTess(NULL), m_dsTess(NULL)
-	, m_psBand(NULL), m_vsSolid(NULL), m_psSolid(NULL), m_psCraft(NULL), m_vsHud(NULL), m_psHud(NULL), m_vsPost(NULL)
+	, m_psBand(NULL), m_vsSolid(NULL), m_psSolid(NULL), m_psCraft(NULL), m_vsHud(NULL), m_psHud(NULL), m_psHudLine(NULL), m_vsPost(NULL)
 	, m_psSsr(NULL), m_psDof(NULL), m_psFinal(NULL), m_csNoise(NULL), m_ilPatch(NULL), m_ilSolid(NULL), m_ilHud(NULL)
 	, m_cbFrame(NULL), m_vbDyn(NULL), m_vbHud(NULL), m_vbDynBytes(24*1024*1024), m_vbHudBytes(512*1024)
 	, m_cpuDynScratch(NULL), m_cpuDynScratchBytes(0), m_cpuHudScratch(NULL), m_cpuHudScratchBytes(0)
@@ -545,6 +566,7 @@ CS3rView::CS3rView()
 	, m_texClear(NULL), m_srvClear(NULL), m_clearTexW(0), m_clearTexH(0)
 	, m_texHud(NULL), m_srvHud(NULL), m_hudTexW(0), m_hudTexH(0)
 	, m_texStand(NULL), m_srvStand(NULL), m_standTexW(0), m_standTexH(0)
+	, m_texBubble(NULL), m_srvBubble(NULL), m_bubbleTexW(0), m_bubbleTexH(0), m_bubbleN(0)
 	, m_sampLin(NULL), m_sampPoint(NULL), m_sampCmp(NULL)
 	, m_rsSolid(NULL), m_rsShadow(NULL), m_rsNoCull(NULL), m_dssWrite(NULL), m_dssRead(NULL), m_dssOff(NULL)
 	, m_bsOpaque(NULL), m_bsAlpha(NULL), m_bsAdd(NULL)
@@ -594,6 +616,7 @@ BOOL CS3rView::CreateShaders()
 		"struct HV{float2 p:POSITION;float2 uv:TEXCOORD0;float4 c:TEXCOORD1;};struct HO{float4 p:SV_POSITION;float2 uv:TEXCOORD0;float4 c:TEXCOORD1;};"
 		"HO VSH(HV x){HO o;o.p=float4(x.p,0,1);o.uv=x.uv;o.c=x.c;return o;}"
 		"float4 PSH(HO i):SV_Target{if(i.uv.x<-0.5)return i.c;float4 t=T0.Sample(SL,i.uv);return float4(t.rgb*i.c.rgb,t.a*i.c.a);}"
+		"float4 PSLINE(HO i):SV_Target{float t=saturate(1.-abs(i.uv.y-.5)*2.4);float cap=saturate(min(i.uv.x,1.-i.uv.x)*10.);return float4(i.c.rgb,i.c.a*t*cap);}"
 		"float4 PSS(D i):SV_Target{float3 n=normalize(i.n);float3 l=normalize(LightDir.xyz);float sh=ShadowAt(i.w,n);"
 		"float3 v=normalize(Eye.xyz-i.w);float nd=lerp(.32,max(saturate(dot(n,l)),.24),sh);"
 		"float3 tex=T0.Sample(SL,i.w.xz*0.00115).rgb;"
@@ -617,7 +640,7 @@ BOOL CS3rView::CreateShaders()
 		"float b=coc*Dof.z*(1.+Dof.w);if(b<1.15)return T0.Sample(SL,i.uv);float2 px=float2(b,b)*Screen.zw;"
 		"float4 c=T0.Sample(SL,i.uv)*.28;c+=(T0.Sample(SL,i.uv+float2(px.x,0))+T0.Sample(SL,i.uv-float2(px.x,0))+T0.Sample(SL,i.uv+float2(0,px.y))+T0.Sample(SL,i.uv-float2(0,px.y)))*.13;"
 		"c+=(T0.Sample(SL,i.uv+px)+T0.Sample(SL,i.uv-px)+T0.Sample(SL,i.uv+float2(px.x,-px.y))+T0.Sample(SL,i.uv+float2(-px.x,px.y)))*.05;return c;}"
-		"float4 FIN(Q i):SV_Target{float4 c=T0.Sample(SL,i.uv);if(Misc.z>8.f)return c;"
+		"float4 FIN(Q i):SV_Target{float4 c=T0.Sample(SL,i.uv);if(Misc.z>8.f){c.a*=saturate(Misc.y);return c;}"
 		"float v=saturate(1-dot((i.uv-.5)*1.1,(i.uv-.5)*1.1));c.rgb*=lerp(.86,1.08,v);"
 		"float th=Eye.w;float3 tone=float3(1.02,.98,.96);if(th>6.5)tone=float3(1.05,.92,.85);else if(th>5.5)tone=float3(.9,1.02,1.08);"
 		"else if(th>4.5)tone=float3(.88,.92,1.08);else if(th>3.5)tone=float3(.95,.95,1.02);else if(th>2.5)tone=float3(1.0,.9,.85);"
@@ -652,6 +675,11 @@ BOOL CS3rView::CreateShaders()
 		m_dxFailHr = E_FAIL;
 		for(int i=0;i<12;i++) S3R_RELEASE(b[i]); S3R_RELEASE(bcs); S3R_RELEASE(err); return FALSE;
 	}
+	ID3DBlob* bline=NULL;
+	if(FAILED(D3DCompile(hlsl,(SIZE_T)strlen(hlsl),NULL,NULL,NULL,"PSLINE","ps_5_0",D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&bline,&err))){
+		m_dxFailHr = E_FAIL;
+		for(int i=0;i<12;i++) S3R_RELEASE(b[i]); S3R_RELEASE(bcs); S3R_RELEASE(bcraft); S3R_RELEASE(err); return FALSE;
+	}
 	S3R_RELEASE(err);
 	HRESULT hr=S_OK;
 	if(FAILED(hr=m_dev->CreateVertexShader(b[0]->GetBufferPointer(),b[0]->GetBufferSize(),NULL,&m_vsTess))) goto fail_sh;
@@ -663,6 +691,7 @@ BOOL CS3rView::CreateShaders()
 	if(FAILED(hr=m_dev->CreatePixelShader(bcraft->GetBufferPointer(),bcraft->GetBufferSize(),NULL,&m_psCraft))) goto fail_sh;
 	if(FAILED(hr=m_dev->CreateVertexShader(b[6]->GetBufferPointer(),b[6]->GetBufferSize(),NULL,&m_vsHud))) goto fail_sh;
 	if(FAILED(hr=m_dev->CreatePixelShader(b[7]->GetBufferPointer(),b[7]->GetBufferSize(),NULL,&m_psHud))) goto fail_sh;
+	if(FAILED(hr=m_dev->CreatePixelShader(bline->GetBufferPointer(),bline->GetBufferSize(),NULL,&m_psHudLine))) goto fail_sh;
 	if(FAILED(hr=m_dev->CreateVertexShader(b[8]->GetBufferPointer(),b[8]->GetBufferSize(),NULL,&m_vsPost))) goto fail_sh;
 	if(FAILED(hr=m_dev->CreatePixelShader(b[9]->GetBufferPointer(),b[9]->GetBufferSize(),NULL,&m_psSsr))) goto fail_sh;
 	if(FAILED(hr=m_dev->CreatePixelShader(b[10]->GetBufferPointer(),b[10]->GetBufferSize(),NULL,&m_psDof))) goto fail_sh;
@@ -678,11 +707,11 @@ BOOL CS3rView::CreateShaders()
 	if(FAILED(hr=m_dev->CreateInputLayout(il,4,b[0]->GetBufferPointer(),b[0]->GetBufferSize(),&m_ilPatch))) goto fail_sh;
 	if(FAILED(hr=m_dev->CreateInputLayout(il,4,b[4]->GetBufferPointer(),b[4]->GetBufferSize(),&m_ilSolid))) goto fail_sh;
 	if(FAILED(hr=m_dev->CreateInputLayout(ih,3,b[6]->GetBufferPointer(),b[6]->GetBufferSize(),&m_ilHud))) goto fail_sh;
-	for(int i=0;i<12;i++) S3R_RELEASE(b[i]); S3R_RELEASE(bcs); S3R_RELEASE(bcraft);
+	for(int i=0;i<12;i++) S3R_RELEASE(b[i]); S3R_RELEASE(bcs); S3R_RELEASE(bcraft); S3R_RELEASE(bline);
 	return TRUE;
 fail_sh:
 	m_dxFailHr = hr;
-	for(int i=0;i<12;i++) S3R_RELEASE(b[i]); S3R_RELEASE(bcs); S3R_RELEASE(bcraft);
+	for(int i=0;i<12;i++) S3R_RELEASE(b[i]); S3R_RELEASE(bcs); S3R_RELEASE(bcraft); S3R_RELEASE(bline);
 	return FALSE;
 }
 
@@ -898,162 +927,156 @@ void CS3rView::PresentFrame(){if(m_swap&&m_ready)m_swap->Present(0,0);}
 void CS3rView::ReleaseClearTexture(){S3R_RELEASE(m_srvClear);S3R_RELEASE(m_texClear);m_clearTexW=m_clearTexH=0;}
 void CS3rView::ReleaseHudTexture(){S3R_RELEASE(m_srvHud);S3R_RELEASE(m_texHud);m_hudTexW=m_hudTexH=0;}
 void CS3rView::ReleaseStandingsTexture(){S3R_RELEASE(m_srvStand);S3R_RELEASE(m_texStand);m_standTexW=m_standTexH=0;}
-
-BOOL CS3rView::BakeClearTexture(const wchar_t* text,float alpha)
+void CS3rView::ReleaseBubbleTexture()
 {
-	ReleaseClearTexture();const int w=max(256,m_vw),h=max(96,m_vh/4);BITMAPINFO bi={};bi.bmiHeader.biSize=sizeof(BITMAPINFOHEADER);bi.bmiHeader.biWidth=w;bi.bmiHeader.biHeight=-h;bi.bmiHeader.biPlanes=1;bi.bmiHeader.biBitCount=32;bi.bmiHeader.biCompression=BI_RGB;
-	void* bits=NULL;HDC dc=CreateCompatibleDC(NULL);HBITMAP bm=CreateDIBSection(dc,&bi,DIB_RGB_COLORS,&bits,NULL,0);HGDIOBJ old=SelectObject(dc,bm);memset(bits,0,w*h*4);
-	{
-		Gdiplus::Graphics g(dc);
-		g.SetTextRenderingHint(Gdiplus::TextRenderingHintAntiAliasGridFit);
-		Gdiplus::FontFamily ffJp(L"Yu Gothic UI");
-		Gdiplus::FontFamily ffMe(L"Meiryo UI");
-		Gdiplus::FontFamily ffEn(L"Segoe UI");
-		const Gdiplus::FontFamily* fam = &ffEn;
-		if (ffJp.GetLastStatus() == Gdiplus::Ok) fam = &ffJp;
-		else if (ffMe.GetLastStatus() == Gdiplus::Ok) fam = &ffMe;
-		const int tlen = text ? (int)wcslen(text) : 0;
-		float fontPx = (float)max(40, h / 2);
-		if (tlen > 10) fontPx = (float)max(32, h / 3);
-		if (tlen > 16) fontPx = (float)max(26, h / 4);
-		Gdiplus::Font font(fam, fontPx, Gdiplus::FontStyleBold, Gdiplus::UnitPixel);
-		Gdiplus::StringFormat sf;
-		sf.SetAlignment(Gdiplus::StringAlignmentCenter);
-		sf.SetLineAlignment(Gdiplus::StringAlignmentCenter);
-		BYTE a = (BYTE)min(255, (int)(alpha * 255.f + 0.5f));
-		Gdiplus::SolidBrush sh(Gdiplus::Color((BYTE)min(220, (int)a), 0, 0, 0));
-		Gdiplus::SolidBrush fg(Gdiplus::Color(a, 255, 236, 150));
-		Gdiplus::RectF r(6.f, 6.f, (Gdiplus::REAL)(w - 12), (Gdiplus::REAL)(h - 12));
-		g.DrawString(text, -1, &font, r, &sf, &sh);
-		r.X -= 3.f; r.Y -= 3.f;
-		g.DrawString(text, -1, &font, r, &sf, &fg);
-	}
-	// HDC 経由だと α が落ちることがあるので輝度から復元（迷路 Clear と同じ経路を安定化）
-	{
-		DWORD* p=(DWORD*)bits; const int n=w*h;
-		for(int i=0;i<n;i++){
-			DWORD c=p[i]; BYTE r=(BYTE)((c>>16)&255), g=(BYTE)((c>>8)&255), b=(BYTE)(c&255);
-			int lum=(int)r+(int)g+(int)b; BYTE a=(BYTE)((c>>24)&255);
-			if(a<8 && lum>8){ a=(BYTE)min(255, lum); p[i]=((DWORD)a<<24)|(c&0x00FFFFFFu); }
-		}
-	}
-	D3D11_TEXTURE2D_DESC d={};d.Width=w;d.Height=h;d.MipLevels=1;d.ArraySize=1;d.Format=DXGI_FORMAT_B8G8R8A8_UNORM;d.SampleDesc.Count=1;d.Usage=D3D11_USAGE_IMMUTABLE;d.BindFlags=D3D11_BIND_SHADER_RESOURCE;D3D11_SUBRESOURCE_DATA sd={bits,(UINT)w*4,0};HRESULT hr=m_dev->CreateTexture2D(&d,&sd,&m_texClear);if(SUCCEEDED(hr))hr=m_dev->CreateShaderResourceView(m_texClear,NULL,&m_srvClear);SelectObject(dc,old);DeleteObject(bm);DeleteDC(dc);m_clearTexW=w;m_clearTexH=h;return SUCCEEDED(hr);
+	S3R_RELEASE(m_srvBubble);S3R_RELEASE(m_texBubble);m_bubbleTexW=m_bubbleTexH=0;m_bubbleN=0;
+}
+
+BOOL CS3rView::BakeClearTexture(const wchar_t* text,float /*alpha*/)
+{
+	// alpha はシェーダ Misc.y で乗算（毎フレーム再焼きしない）
+	ReleaseClearTexture();
+	if (!m_dev || !text || !text[0]) return FALSE;
+	const int w = max(256, m_vw), h = max(96, m_vh / 4);
+	Soft3DTextD2DCanvas* cv = Soft3DTextD2D_Begin(w, h);
+	if (!cv) return FALSE;
+	const int tlen = (int)wcslen(text);
+	float fontPx = (float)max(40, h / 2);
+	if (tlen > 10) fontPx = (float)max(32, h / 3);
+	if (tlen > 16) fontPx = (float)max(26, h / 4);
+	Soft3DTextD2D_DrawTextShadow(cv, text, 6.f, 6.f, (float)(w - 12), (float)(h - 12),
+		fontPx, 1, 1, 1, 255, 255, 236, 150, 3.f, 3.f, 200, 0, 0, 0);
+	const BYTE* bits = NULL; UINT stride = 0;
+	if (!Soft3DTextD2D_End(cv, &bits, &stride) || !bits) { Soft3DTextD2D_Release(cv); return FALSE; }
+	D3D11_TEXTURE2D_DESC d = {};
+	d.Width = w; d.Height = h; d.MipLevels = 1; d.ArraySize = 1;
+	d.Format = DXGI_FORMAT_B8G8R8A8_UNORM; d.SampleDesc.Count = 1;
+	d.Usage = D3D11_USAGE_IMMUTABLE; d.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+	D3D11_SUBRESOURCE_DATA sd = { bits, stride, 0 };
+	HRESULT hr = m_dev->CreateTexture2D(&d, &sd, &m_texClear);
+	if (SUCCEEDED(hr)) hr = m_dev->CreateShaderResourceView(m_texClear, NULL, &m_srvClear);
+	Soft3DTextD2D_Release(cv);
+	m_clearTexW = w; m_clearTexH = h;
+	return SUCCEEDED(hr);
 }
 BOOL CS3rView::BakeHudTexture(const wchar_t* text)
 {
-	if(!m_dev||!text) return FALSE; ReleaseHudTexture();
-	const int w=640,h=220; BITMAPINFO bi={};bi.bmiHeader.biSize=sizeof(BITMAPINFOHEADER);bi.bmiHeader.biWidth=w;bi.bmiHeader.biHeight=-h;bi.bmiHeader.biPlanes=1;bi.bmiHeader.biBitCount=32;bi.bmiHeader.biCompression=BI_RGB;
-	void* bits=NULL;HDC dc=CreateCompatibleDC(NULL);HBITMAP bm=CreateDIBSection(dc,&bi,DIB_RGB_COLORS,&bits,NULL,0);HGDIOBJ old=SelectObject(dc,bm);memset(bits,0,w*h*4);
-	{Gdiplus::Graphics g(dc);g.SetTextRenderingHint(Gdiplus::TextRenderingHintAntiAlias);Gdiplus::SolidBrush bg(Gdiplus::Color(140,8,10,18));g.FillRectangle(&bg,0,0,w,h);Gdiplus::FontFamily ff(L"Segoe UI");Gdiplus::Font font(&ff,22.f,Gdiplus::FontStyleBold,Gdiplus::UnitPixel);Gdiplus::StringFormat sf;sf.SetAlignment(Gdiplus::StringAlignmentNear);Gdiplus::SolidBrush sh(Gdiplus::Color(160,0,0,0)),fg(Gdiplus::Color(255,245,250,255));Gdiplus::RectF r(14,12,(Gdiplus::REAL)(w-24),(Gdiplus::REAL)(h-20));g.DrawString(text,-1,&font,r,&sf,&sh);r.X-=1.5f;r.Y-=1.5f;g.DrawString(text,-1,&font,r,&sf,&fg);}
-	{
-		DWORD* p=(DWORD*)bits; const int n=w*h;
-		for(int i=0;i<n;i++){
-			DWORD c=p[i]; BYTE a=(BYTE)((c>>24)&255);
-			if(a<8){ BYTE r=(BYTE)((c>>16)&255),g=(BYTE)((c>>8)&255),b=(BYTE)(c&255); int lum=r+g+b; if(lum>12) a=(BYTE)min(255,lum+40); }
-			if(a<8) continue;
-			p[i]=((DWORD)a<<24)|(c&0x00FFFFFFu);
-		}
-	}
-	D3D11_TEXTURE2D_DESC d={};d.Width=w;d.Height=h;d.MipLevels=1;d.ArraySize=1;d.Format=DXGI_FORMAT_B8G8R8A8_UNORM;d.SampleDesc.Count=1;d.Usage=D3D11_USAGE_IMMUTABLE;d.BindFlags=D3D11_BIND_SHADER_RESOURCE;D3D11_SUBRESOURCE_DATA sd={bits,(UINT)w*4,0};HRESULT hr=m_dev->CreateTexture2D(&d,&sd,&m_texHud);if(SUCCEEDED(hr))hr=m_dev->CreateShaderResourceView(m_texHud,NULL,&m_srvHud);SelectObject(dc,old);DeleteObject(bm);DeleteDC(dc);m_hudTexW=w;m_hudTexH=h;return SUCCEEDED(hr);
+	if (!m_dev || !text) return FALSE;
+	ReleaseHudTexture();
+	const int w = 640, h = 220;
+	Soft3DTextD2DCanvas* cv = Soft3DTextD2D_Begin(w, h);
+	if (!cv) return FALSE;
+	Soft3DTextD2D_FillRect(cv, 0, 0, (float)w, (float)h, 140, 8, 10, 18);
+	Soft3DTextD2D_DrawTextShadow(cv, text, 16.f, 14.f, (float)(w - 28), (float)(h - 24),
+		40.f, 1, 0, 0, 255, 245, 250, 255, 2.f, 2.f, 160, 0, 0, 0);
+	const BYTE* bits = NULL; UINT stride = 0;
+	if (!Soft3DTextD2D_End(cv, &bits, &stride) || !bits) { Soft3DTextD2D_Release(cv); return FALSE; }
+	D3D11_TEXTURE2D_DESC d = {};
+	d.Width = w; d.Height = h; d.MipLevels = 1; d.ArraySize = 1;
+	d.Format = DXGI_FORMAT_B8G8R8A8_UNORM; d.SampleDesc.Count = 1;
+	d.Usage = D3D11_USAGE_IMMUTABLE; d.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+	D3D11_SUBRESOURCE_DATA sd = { bits, stride, 0 };
+	HRESULT hr = m_dev->CreateTexture2D(&d, &sd, &m_texHud);
+	if (SUCCEEDED(hr)) hr = m_dev->CreateShaderResourceView(m_texHud, NULL, &m_srvHud);
+	Soft3DTextD2D_Release(cv);
+	m_hudTexW = w; m_hudTexH = h;
+	return SUCCEEDED(hr);
 }
 BOOL CS3rView::BakeStandingsTexture(const S3rStandRow* rows, int nRows)
 {
 	if (!m_dev || !rows || nRows < 1) return FALSE;
 	ReleaseStandingsTexture();
 	if (nRows > 12) nRows = 12;
-	// 画面側は常に「12枠分」で行高が決まるので、ベイクも12枠前提の固定行高
 	const int rowH = 96;
-	const int namePx = 24;
-	const int lapPx = 15;
+	const int namePx = 40;
+	const int lapPx = 22;
 	const int w = 380, h = nRows * rowH + 8;
-	BITMAPINFO bi={}; bi.bmiHeader.biSize=sizeof(BITMAPINFOHEADER); bi.bmiHeader.biWidth=w; bi.bmiHeader.biHeight=-h;
-	bi.bmiHeader.biPlanes=1; bi.bmiHeader.biBitCount=32; bi.bmiHeader.biCompression=BI_RGB;
-	void* bits=NULL; HDC dc=CreateCompatibleDC(NULL); HBITMAP bm=CreateDIBSection(dc,&bi,DIB_RGB_COLORS,&bits,NULL,0);
-	HGDIOBJ old=SelectObject(dc,bm); memset(bits,0,w*h*4);
-	{
-		Gdiplus::Graphics g(dc);
-		g.SetTextRenderingHint(Gdiplus::TextRenderingHintAntiAliasGridFit);
-		g.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
-		Gdiplus::FontFamily ffJp(L"Yu Gothic UI");
-		Gdiplus::FontFamily ffMe(L"Meiryo UI");
-		Gdiplus::FontFamily ffEn(L"Segoe UI");
-		const Gdiplus::FontFamily* fam = &ffEn;
-		if (ffJp.GetLastStatus() == Gdiplus::Ok) fam = &ffJp;
-		else if (ffMe.GetLastStatus() == Gdiplus::Ok) fam = &ffMe;
-		Gdiplus::Font fName(fam, (Gdiplus::REAL)namePx, Gdiplus::FontStyleBold, Gdiplus::UnitPixel);
-		Gdiplus::Font fLap(fam, (Gdiplus::REAL)lapPx, Gdiplus::FontStyleBold, Gdiplus::UnitPixel);
-		Gdiplus::StringFormat sf; sf.SetAlignment(Gdiplus::StringAlignmentNear);
-		Gdiplus::StringFormat sfRank; sfRank.SetAlignment(Gdiplus::StringAlignmentFar);
-		const float lapStep = (float)(rowH - 46) / 3.f;
-		for (int i = 0; i < nRows; i++) {
-			const S3rStandRow& r = rows[i];
-			float y0 = (float)(6 + i * rowH);
-			BYTE aBg = r.isPlayer ? (BYTE)230 : (BYTE)185;
-			BYTE br = r.isPlayer ? 28 : 10, bg = r.isPlayer ? 48 : 14, bb = r.isPlayer ? 72 : 22;
-			Gdiplus::SolidBrush rowBg(Gdiplus::Color(aBg, br, bg, bb));
-			g.FillRectangle(&rowBg, 3.f, y0, (Gdiplus::REAL)(w - 6), (Gdiplus::REAL)(rowH - 5));
-			BYTE cr=(BYTE)(r.cr*255.f), cg=(BYTE)(r.cg*255.f), cb=(BYTE)(r.cb*255.f);
-			Gdiplus::SolidBrush craftBr(Gdiplus::Color(255, cr, cg, cb));
-			float cx = 30.f, cy = y0 + 24.f;
-			g.FillEllipse(&craftBr, cx - 12.f, cy - 10.f, 24.f, 20.f);
-			Gdiplus::PointF wing[3] = { {cx-16.f,cy}, {cx-2.f,cy-8.f}, {cx-2.f,cy+8.f} };
-			g.FillPolygon(&craftBr, wing, 3);
-			wing[0]={cx+16.f,cy}; wing[1]={cx+2.f,cy-8.f}; wing[2]={cx+2.f,cy+8.f};
-			g.FillPolygon(&craftBr, wing, 3);
-			wchar_t rankBuf[24];
-			if (r.rank == 1) wcscpy_s(rankBuf, LL14(L"1st", L"1st", L"1er", L"1°", L"1.º", L"1위", L"第1", L"1", L"1-й", L"1.", L"1º", L"1e", L"1.", L"1."));
-			else if (r.rank == 2) wcscpy_s(rankBuf, LL14(L"2nd", L"2nd", L"2e", L"2°", L"2.º", L"2위", L"第2", L"2", L"2-й", L"2.", L"2º", L"2e", L"2.", L"2."));
-			else if (r.rank == 3) wcscpy_s(rankBuf, LL14(L"3rd", L"3rd", L"3e", L"3°", L"3.º", L"3위", L"第3", L"3", L"3-й", L"3.", L"3º", L"3e", L"3.", L"3."));
-			else swprintf_s(rankBuf, L"%d%s", r.rank, LL14(L"位", L"th", L"e", L"°", L".º", L"위", L"名", L"", L"-й", L".", L"º", L"e", L".", L"."));
-			Gdiplus::SolidBrush fg(Gdiplus::Color(255, r.isPlayer ? 255 : 250, r.isPlayer ? 252 : 250, r.isPlayer ? 215 : 255));
-			Gdiplus::SolidBrush dim(Gdiplus::Color(255, 210, 230, 245));
-			Gdiplus::SolidBrush sh(Gdiplus::Color(200, 0, 0, 0));
-			Gdiplus::RectF nameR(52.f, y0 + 4.f, 220.f, (Gdiplus::REAL)(namePx + 6));
-			g.DrawString(r.name, -1, &fName, nameR, &sf, &sh);
-			nameR.X -= 1.5f; nameR.Y -= 1.5f;
-			g.DrawString(r.name, -1, &fName, nameR, &sf, &fg);
-			Gdiplus::RectF rankR(260.f, y0 + 4.f, 128.f, (Gdiplus::REAL)(namePx + 6));
-			g.DrawString(rankBuf, -1, &fName, rankR, &sfRank, &sh);
-			rankR.X -= 1.5f; rankR.Y -= 1.5f;
-			g.DrawString(rankBuf, -1, &fName, rankR, &sfRank, &fg);
-			for (int k = 0; k < 3; k++) {
-				int lapNo = r.lapNo[k] > 0 ? r.lapNo[k] : (k + 1);
-				float sec = r.lapSec[k];
-				wchar_t one[40];
-				if (sec >= 0.f) swprintf_s(one, L"LAP%d  %.2f", lapNo, sec);
-				else swprintf_s(one, L"LAP%d  ----", lapNo);
-				Gdiplus::RectF lapR(52.f, y0 + 40.f + lapStep * (float)k, 330.f, lapStep);
-				g.DrawString(one, -1, &fLap, lapR, &sf, &sh);
-				lapR.X -= 1.2f; lapR.Y -= 1.2f;
-				g.DrawString(one, -1, &fLap, lapR, &sf, &dim);
-			}
+	Soft3DTextD2DCanvas* cv = Soft3DTextD2D_Begin(w, h);
+	if (!cv) return FALSE;
+	const float lapStep = (float)(rowH - 52) / 3.f;
+	for (int i = 0; i < nRows; i++) {
+		const S3rStandRow& r = rows[i];
+		float y0 = (float)(6 + i * rowH);
+		BYTE aBg = r.isPlayer ? (BYTE)230 : (BYTE)185;
+		BYTE br = r.isPlayer ? 28 : 10, bg = r.isPlayer ? 48 : 14, bb = r.isPlayer ? 72 : 22;
+		Soft3DTextD2D_FillRect(cv, 3.f, y0, (float)(w - 6), (float)(rowH - 5), aBg, br, bg, bb);
+		BYTE cr = (BYTE)(r.cr * 255.f), cg = (BYTE)(r.cg * 255.f), cb = (BYTE)(r.cb * 255.f);
+		float cx = 30.f, cy = y0 + 22.f;
+		Soft3DTextD2D_FillEllipse(cv, cx, cy, 12.f, 10.f, 255, cr, cg, cb);
+		Soft3DTextD2D_FillTriangle(cv, cx - 16.f, cy, cx - 2.f, cy - 8.f, cx - 2.f, cy + 8.f, 255, cr, cg, cb);
+		Soft3DTextD2D_FillTriangle(cv, cx + 16.f, cy, cx + 2.f, cy - 8.f, cx + 2.f, cy + 8.f, 255, cr, cg, cb);
+		wchar_t rankBuf[24];
+		S3rRankWord(r.rank, rankBuf, _countof(rankBuf));
+		BYTE fr = r.isPlayer ? 255 : 250, fg = r.isPlayer ? 252 : 250, fb = r.isPlayer ? 215 : 255;
+		Soft3DTextD2D_DrawTextShadow(cv, r.name, 52.f, y0 + 2.f, 220.f, (float)(namePx + 4),
+			(float)namePx, 1, 0, 0, 255, fr, fg, fb, 1.8f, 1.8f, 200, 0, 0, 0);
+		Soft3DTextD2D_DrawTextShadow(cv, rankBuf, 260.f, y0 + 2.f, 112.f, (float)(namePx + 4),
+			(float)namePx, 1, 2, 0, 255, fr, fg, fb, 1.8f, 1.8f, 200, 0, 0, 0);
+		for (int k = 0; k < 3; k++) {
+			int lapNo = r.lapNo[k] > 0 ? r.lapNo[k] : (k + 1);
+			float sec = r.lapSec[k];
+			wchar_t one[40];
+			if (sec >= 0.f) swprintf_s(one, L"LAP%d  %.2f", lapNo, sec);
+			else swprintf_s(one, L"LAP%d  ----", lapNo);
+			Soft3DTextD2D_DrawTextShadow(cv, one, 52.f, y0 + 48.f + lapStep * (float)k, 330.f, lapStep,
+				(float)lapPx, 1, 0, 0, 255, 210, 230, 245, 1.4f, 1.4f, 200, 0, 0, 0);
 		}
 	}
-	{
-		DWORD* p=(DWORD*)bits; const int n=w*h;
-		for (int i=0;i<n;i++) {
-			DWORD c=p[i]; BYTE a=(BYTE)((c>>24)&255);
-			if (a<8) {
-				BYTE r=(BYTE)((c>>16)&255), g=(BYTE)((c>>8)&255), b=(BYTE)(c&255);
-				int lum=r+g+b; if (lum>12) a=(BYTE)min(255,lum+50);
-			}
-			if (a<8) continue;
-			p[i]=((DWORD)a<<24)|(c&0x00FFFFFFu);
-		}
+	const BYTE* bits = NULL; UINT stride = 0;
+	if (!Soft3DTextD2D_End(cv, &bits, &stride) || !bits) { Soft3DTextD2D_Release(cv); return FALSE; }
+	D3D11_TEXTURE2D_DESC d = {};
+	d.Width = w; d.Height = h; d.MipLevels = 1; d.ArraySize = 1;
+	d.Format = DXGI_FORMAT_B8G8R8A8_UNORM; d.SampleDesc.Count = 1;
+	d.Usage = D3D11_USAGE_IMMUTABLE; d.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+	D3D11_SUBRESOURCE_DATA sd = { bits, stride, 0 };
+	HRESULT hr = m_dev->CreateTexture2D(&d, &sd, &m_texStand);
+	if (SUCCEEDED(hr)) hr = m_dev->CreateShaderResourceView(m_texStand, NULL, &m_srvStand);
+	Soft3DTextD2D_Release(cv);
+	m_standTexW = w; m_standTexH = h;
+	return SUCCEEDED(hr);
+}
+BOOL CS3rView::BakeBubbleTexture(const S3rBubbleRow* rows, int nRows)
+{
+	ReleaseBubbleTexture();
+	if (!m_dev || !rows || nRows < 1) return FALSE;
+	if (nRows > S3R_BUBBLE_MAX) nRows = S3R_BUBBLE_MAX;
+		const int cellW = 384, cellH = 80, cols = 4;
+	const int rowsN = (nRows + cols - 1) / cols;
+	const int w = cellW * cols, h = cellH * rowsN;
+	Soft3DTextD2DCanvas* cv = Soft3DTextD2D_Begin(w, h);
+	if (!cv) return FALSE;
+	for (int i = 0; i < nRows; i++) {
+		const int col = i % cols, row = i / cols;
+		const float x = (float)(col * cellW), y = (float)(row * cellH);
+		const BYTE fr = rows[i].isPlayer ? 255 : 250;
+		const BYTE fg = rows[i].isPlayer ? 252 : 248;
+		const BYTE fb = rows[i].isPlayer ? 210 : 255;
+		Soft3DTextD2D_DrawTextShadow(cv, rows[i].text, x + 8.f, y + 6.f, (float)(cellW - 16), (float)(cellH - 12),
+			40.f, 1, 1, 1, 255, fr, fg, fb, 2.2f, 2.2f, 210, 0, 0, 0);
+		const float pad = 2.f;
+		m_bubbleU0[i] = (x + pad) / (float)w;
+		m_bubbleV0[i] = (y + pad) / (float)h;
+		m_bubbleU1[i] = (x + cellW - pad) / (float)w;
+		m_bubbleV1[i] = (y + cellH - pad) / (float)h;
 	}
-	D3D11_TEXTURE2D_DESC d={}; d.Width=w; d.Height=h; d.MipLevels=1; d.ArraySize=1; d.Format=DXGI_FORMAT_B8G8R8A8_UNORM;
-	d.SampleDesc.Count=1; d.Usage=D3D11_USAGE_IMMUTABLE; d.BindFlags=D3D11_BIND_SHADER_RESOURCE;
-	D3D11_SUBRESOURCE_DATA sd={bits,(UINT)w*4,0};
-	HRESULT hr=m_dev->CreateTexture2D(&d,&sd,&m_texStand);
-	if (SUCCEEDED(hr)) hr=m_dev->CreateShaderResourceView(m_texStand,NULL,&m_srvStand);
-	SelectObject(dc,old); DeleteObject(bm); DeleteDC(dc);
-	m_standTexW=w; m_standTexH=h;
+	const BYTE* bits = NULL; UINT stride = 0;
+	if (!Soft3DTextD2D_End(cv, &bits, &stride) || !bits) { Soft3DTextD2D_Release(cv); return FALSE; }
+	D3D11_TEXTURE2D_DESC d = {};
+	d.Width = w; d.Height = h; d.MipLevels = 1; d.ArraySize = 1;
+	d.Format = DXGI_FORMAT_B8G8R8A8_UNORM; d.SampleDesc.Count = 1;
+	d.Usage = D3D11_USAGE_IMMUTABLE; d.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+	D3D11_SUBRESOURCE_DATA sd = { bits, stride, 0 };
+	HRESULT hr = m_dev->CreateTexture2D(&d, &sd, &m_texBubble);
+	if (SUCCEEDED(hr)) hr = m_dev->CreateShaderResourceView(m_texBubble, NULL, &m_srvBubble);
+	Soft3DTextD2D_Release(cv);
+	m_bubbleTexW = w; m_bubbleTexH = h;
+	m_bubbleN = nRows;
 	return SUCCEEDED(hr);
 }
 void CS3rView::ReleaseDx()
 {
 	m_ready=FALSE;if(m_imm){m_imm->ClearState();m_imm->Flush();}
-	ReleaseClearTexture();ReleaseHudTexture();ReleaseStandingsTexture();
+	ReleaseClearTexture();ReleaseHudTexture();ReleaseStandingsTexture();ReleaseBubbleTexture();
 	S3R_RELEASE(m_uavNoise);S3R_RELEASE(m_srvNoise);S3R_RELEASE(m_texNoise);
 	S3R_RELEASE(m_srvEnv);S3R_RELEASE(m_texEnv);S3R_RELEASE(m_srvCraft);S3R_RELEASE(m_texCraft);S3R_RELEASE(m_srvBand);S3R_RELEASE(m_texBand);
 	for(int i=0;i<S3R_THEME_N;i++){S3R_RELEASE(m_srvTheme[i]);S3R_RELEASE(m_texTheme[i]);}
@@ -1061,7 +1084,7 @@ void CS3rView::ReleaseDx()
 	S3R_RELEASE(m_vbHud);S3R_RELEASE(m_vbDyn);S3R_RELEASE(m_cbFrame);S3R_RELEASE(m_ilHud);S3R_RELEASE(m_ilSolid);S3R_RELEASE(m_ilPatch);
 	delete[] m_cpuDynScratch; m_cpuDynScratch=NULL; m_cpuDynScratchBytes=0;
 	delete[] m_cpuHudScratch; m_cpuHudScratch=NULL; m_cpuHudScratchBytes=0;
-	S3R_RELEASE(m_csNoise);S3R_RELEASE(m_psFinal);S3R_RELEASE(m_psDof);S3R_RELEASE(m_psSsr);S3R_RELEASE(m_vsPost);S3R_RELEASE(m_psHud);S3R_RELEASE(m_vsHud);S3R_RELEASE(m_psCraft);S3R_RELEASE(m_psSolid);S3R_RELEASE(m_vsSolid);S3R_RELEASE(m_psBand);S3R_RELEASE(m_dsTess);S3R_RELEASE(m_hsTess);S3R_RELEASE(m_vsTess);
+	S3R_RELEASE(m_csNoise);S3R_RELEASE(m_psFinal);S3R_RELEASE(m_psDof);S3R_RELEASE(m_psSsr);S3R_RELEASE(m_vsPost);S3R_RELEASE(m_psHudLine);S3R_RELEASE(m_psHud);S3R_RELEASE(m_vsHud);S3R_RELEASE(m_psCraft);S3R_RELEASE(m_psSolid);S3R_RELEASE(m_vsSolid);S3R_RELEASE(m_psBand);S3R_RELEASE(m_dsTess);S3R_RELEASE(m_hsTess);S3R_RELEASE(m_vsTess);
 	S3R_RELEASE(m_shadowSrv);S3R_RELEASE(m_shadowDsv);S3R_RELEASE(m_shadowTex);
 	S3R_RELEASE(m_postSrv);S3R_RELEASE(m_postRtv);S3R_RELEASE(m_postTex);S3R_RELEASE(m_sceneSrv);S3R_RELEASE(m_sceneRtv);S3R_RELEASE(m_sceneTex);S3R_RELEASE(m_dsSrv);S3R_RELEASE(m_dsv);S3R_RELEASE(m_dsTex);S3R_RELEASE(m_bbRtv);S3R_RELEASE(m_swap);S3R_RELEASE(m_imm);S3R_RELEASE(m_dev);m_vw=m_vh=0;
 }
@@ -2959,14 +2982,13 @@ void CSoft3DRaceDlg::TickDemo(float dt)
 	m_demoCamT = S3rNormAngle(m_demoCamT + dt * 0.18f);
 	TickPhysics(dt);
 	TickItems(dt);
-	// デモ表示は薄く維持（スタート誘導）
+	// デモ表示は薄く維持（スタート誘導）— 文字は一度だけ焼き、αはシェーダ Misc.y
 	if (m_clearBakeA < 0.70f) {
 		m_clearBakeText = LL14(L"スタートで開始", L"Press Start", L"Démarrer", L"Avvia", L"Iniciar",
 			L"시작", L"按开始", L"Start", L"Старт", L"Start", L"Iniciar", L"Start", L"Start", L"Başlat");
 		m_clearBakeA = 0.95f; m_clearDirty = 1;
 	} else {
 		m_clearBakeA = max(0.70f, m_clearBakeA - dt * 0.08f);
-		m_clearDirty = 1;
 	}
 }
 
@@ -3037,6 +3059,17 @@ void CSoft3DRaceDlg::EnsureStandingsBake()
 		}
 	}
 	m_view.BakeStandingsTexture(rows, m_craftN);
+	{
+		CS3rView::S3rBubbleRow bub[S3R_MAX_CRAFT];
+		for (int i = 0; i < m_craftN; i++) {
+			S3rCraft& c = m_crafts[i];
+			wchar_t rankBuf[24];
+			S3rRankWord(c.rank > 0 ? c.rank : (i + 1), rankBuf, _countof(rankBuf));
+			swprintf_s(bub[i].text, L"%s %s", rankBuf, c.name);
+			bub[i].isPlayer = c.isPlayer;
+		}
+		m_view.BakeBubbleTexture(bub, m_craftN);
+	}
 	m_standDirty = 0;
 }
 
@@ -3570,6 +3603,83 @@ void CSoft3DRaceDlg::RenderScene()
 			ht(0.58f, sy0, 0.99f, sy1, 0.98f);
 			flushHud(m_view.m_srvStand);
 		}
+
+		// 画面上の機体へ名前＋順位の吹き出し（D2D 文字 + PSLINE 下線）
+		if (m_view.m_srvBubble && m_view.m_psHudLine && m_view.m_bubbleN > 0
+			&& (m_phase == PHASE_RACE || m_phase == PHASE_COUNTDOWN || m_phase == PHASE_FINISH
+				|| m_phase == PHASE_PODIUM || m_phase == PHASE_DEMO)) {
+			struct BubDraw { int i; float nx, ny, w, dist; };
+			BubDraw bd[S3R_MAX_CRAFT];
+			int nBd = 0;
+			for (int i = 0; i < m_craftN && i < m_view.m_bubbleN; i++) {
+				S3rCraft& c = m_crafts[i];
+				float nx, ny, cw;
+				if (!S3rWorldToNdc(cb.viewProj, c.x, c.y + 2.15f, c.z, nx, ny, cw)) continue;
+				if (nx < -1.05f || nx > 1.05f || ny < -1.02f || ny > 1.02f) continue;
+				bd[nBd++] = { i, nx, ny, cw, cw };
+			}
+			for (int a = 1; a < nBd; a++) {
+				BubDraw q = bd[a]; int j = a - 1;
+				while (j >= 0 && bd[j].dist < q.dist) { bd[j + 1] = bd[j]; j--; }
+				bd[j + 1] = q;
+			}
+			auto htuv = [&](float x0, float y0, float x1, float y1, float u0, float v0, float u1, float v1, float a) {
+				if (!hv || nh + 6 > maxH) return;
+				hv[nh++] = { x0, y1, u0, v0, 1, 1, 1, a };
+				hv[nh++] = { x1, y1, u1, v0, 1, 1, 1, a };
+				hv[nh++] = { x1, y0, u1, v1, 1, 1, 1, a };
+				hv[nh++] = { x0, y1, u0, v0, 1, 1, 1, a };
+				hv[nh++] = { x1, y0, u1, v1, 1, 1, 1, a };
+				hv[nh++] = { x0, y0, u0, v1, 1, 1, 1, a };
+			};
+			auto hline = [&](float x0, float y0, float x1, float y1, float r, float g, float b, float a) {
+				if (!hv || nh + 6 > maxH) return;
+				hv[nh++] = { x0, y0, 0, 0, r, g, b, a };
+				hv[nh++] = { x1, y0, 1, 0, r, g, b, a };
+				hv[nh++] = { x1, y1, 1, 1, r, g, b, a };
+				hv[nh++] = { x0, y0, 0, 0, r, g, b, a };
+				hv[nh++] = { x1, y1, 1, 1, r, g, b, a };
+				hv[nh++] = { x0, y1, 0, 1, r, g, b, a };
+			};
+			const UINT lineBeg = nh;
+			for (int k = 0; k < nBd; k++) {
+				const int i = bd[k].i;
+				S3rCraft& c = m_crafts[i];
+				const float sc = S3rClamp(1.35f / max(bd[k].w, 0.45f), 0.62f, 1.55f);
+				const float bw = 0.40f * sc;
+				const float bh = 0.092f * sc;
+				const float x0 = bd[k].nx - bw * 0.5f;
+				const float x1 = bd[k].nx + bw * 0.5f;
+				const float y0 = bd[k].ny + 0.028f * sc;
+				const float y1 = y0 + bh;
+				float r = kCraftColors[c.colorIdx][0], g = kCraftColors[c.colorIdx][1], b = kCraftColors[c.colorIdx][2];
+				if (c.isPlayer) { r = 1.f; g = 0.92f; b = 0.45f; }
+				const float ly1 = y0 - 0.004f * sc;
+				const float ly0 = ly1 - 0.011f * sc;
+				hline(x0 + 0.01f * sc, ly0, x1 - 0.01f * sc, ly1, r, g, b, 0.95f);
+				const float stemW = 0.0045f * sc;
+				hline(bd[k].nx - stemW, bd[k].ny + 0.004f, bd[k].nx + stemW, ly0, r, g, b, 0.82f);
+			}
+			if (nh > lineBeg) {
+				dc->PSSetShader(m_view.m_psHudLine, NULL, 0);
+				flushHud(NULL);
+				dc->PSSetShader(m_view.m_psHud, NULL, 0);
+			}
+			for (int k = 0; k < nBd; k++) {
+				const int i = bd[k].i;
+				S3rCraft& c = m_crafts[i];
+				const float sc = S3rClamp(1.35f / max(bd[k].w, 0.45f), 0.62f, 1.55f);
+				const float bw = 0.40f * sc;
+				const float bh = 0.092f * sc;
+				const float x0 = bd[k].nx - bw * 0.5f;
+				const float x1 = bd[k].nx + bw * 0.5f;
+				const float y0 = bd[k].ny + 0.028f * sc;
+				const float y1 = y0 + bh;
+				const float a = c.isPlayer ? 1.f : 0.94f;
+				htuv(x0, y0, x1, y1, m_view.m_bubbleU0[i], m_view.m_bubbleV0[i], m_view.m_bubbleU1[i], m_view.m_bubbleV1[i], a);
+			}
+			flushHud(m_view.m_srvBubble);
+		}
 	}
 
 	// カウント／FINISH 等: 迷路 Clear! と同じフルスクリーン三角＋ビューポート経路
@@ -3836,9 +3946,12 @@ void CSoft3DRaceDlg::TickFrame()
 			} else if (!holdOverlay || m_overlayHold < 0.55f) {
 				float fade = holdOverlay ? 1.6f : 0.85f;
 				m_clearBakeA = max(0.f, m_clearBakeA - dt * fade);
-				if (m_clearBakeA <= 0.02f) { m_clearBakeText = L""; m_clearBakeA = 0.f; }
+				if (m_clearBakeA <= 0.02f) {
+					m_clearBakeText = L""; m_clearBakeA = 0.f;
+					m_clearDirty = 1; // 解放のみ
+				}
 			}
-			m_clearDirty = 1;
+			// αフェードはシェーダ側（Misc.y）— 毎フレーム再焼きしない
 		}
 		if ((now % 100u) < 20u) UpdateStatus();
 	} else if ((now % 200u) < 20u) {

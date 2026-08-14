@@ -69,6 +69,7 @@ public:
 	ID3D11PixelShader* m_psCraft; // 機体専用（キャラテクスチャ）
 	ID3D11VertexShader* m_vsHud;
 	ID3D11PixelShader* m_psHud;
+	ID3D11PixelShader* m_psHudLine;
 	ID3D11VertexShader* m_vsPost;
 	ID3D11PixelShader* m_psSsr;
 	ID3D11PixelShader* m_psDof;
@@ -109,6 +110,13 @@ public:
 	ID3D11Texture2D* m_texStand;
 	ID3D11ShaderResourceView* m_srvStand;
 	int m_standTexW, m_standTexH;
+	ID3D11Texture2D* m_texBubble;
+	ID3D11ShaderResourceView* m_srvBubble;
+	int m_bubbleTexW, m_bubbleTexH;
+	enum { S3R_BUBBLE_MAX = 12 };
+	float m_bubbleU0[S3R_BUBBLE_MAX], m_bubbleV0[S3R_BUBBLE_MAX];
+	float m_bubbleU1[S3R_BUBBLE_MAX], m_bubbleV1[S3R_BUBBLE_MAX];
+	int m_bubbleN;
 
 	ID3D11SamplerState* m_sampLin;
 	ID3D11SamplerState* m_sampPoint;
@@ -141,6 +149,12 @@ public:
 	};
 	BOOL BakeStandingsTexture(const S3rStandRow* rows, int nRows);
 	void ReleaseStandingsTexture();
+	struct S3rBubbleRow {
+		wchar_t text[40];
+		int isPlayer;
+	};
+	BOOL BakeBubbleTexture(const S3rBubbleRow* rows, int nRows);
+	void ReleaseBubbleTexture();
 
 protected:
 	afx_msg void OnPaint();

@@ -71,6 +71,7 @@ public:
 	ID3D11PixelShader* m_psSolid;
 	ID3D11VertexShader* m_vsHud;
 	ID3D11PixelShader* m_psHud;
+	ID3D11PixelShader* m_psHudLine;
 	ID3D11VertexShader* m_vsPost;
 	ID3D11PixelShader* m_psSsr;
 	ID3D11PixelShader* m_psDof;
@@ -113,6 +114,13 @@ public:
 	ID3D11Texture2D* m_texBadge;
 	ID3D11ShaderResourceView* m_srvBadge;
 	int m_badgeW, m_badgeH;
+	ID3D11Texture2D* m_texCallout;
+	ID3D11ShaderResourceView* m_srvCallout;
+	int m_calloutW, m_calloutH;
+	enum { S3M_CALLOUT_MAX = 20 };
+	float m_calloutU0[S3M_CALLOUT_MAX], m_calloutV0[S3M_CALLOUT_MAX];
+	float m_calloutU1[S3M_CALLOUT_MAX], m_calloutV1[S3M_CALLOUT_MAX];
+	int m_calloutN;
 
 	ID3D11SamplerState* m_sampLin;
 	ID3D11SamplerState* m_sampPoint;
@@ -137,6 +145,8 @@ public:
 	void ReleaseBadgeTexture();
 	BOOL BakeFloorBarTexture(int nFloors, int viewFloor, int playerFloor, const wchar_t* const* labels);
 	void ReleaseFloorBarTexture();
+	BOOL BakeCalloutAtlas(const wchar_t* const* labels, int nLabels);
+	void ReleaseCalloutTexture();
 	ID3D11Texture2D* m_texFloorBar;
 	ID3D11ShaderResourceView* m_srvFloorBar;
 	int m_floorBarW, m_floorBarH;
@@ -410,6 +420,7 @@ public:
 	float m_floorTextA;
 	float m_floorScreenA;
 	float m_floorTextAPrev;
+	CStringW m_toastBakeText; // 共有 Clear テクスチャの最終焼き文字（α変化では再焼きしない）
 	int m_stairFrom;
 	int m_stairTo;
 	int m_stairSwapDone;

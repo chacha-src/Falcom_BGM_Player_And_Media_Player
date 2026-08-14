@@ -453,6 +453,9 @@
     <ClCompile Include="Soft3DRaceDlg.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="Soft3DTextD2D.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="SoundMeterDlg.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
