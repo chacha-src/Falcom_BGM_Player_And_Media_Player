@@ -1,4 +1,4 @@
-#include "stdafx.h"
+﻿#include "stdafx.h"
 #include "CCustomControl.h"
 #include "resource.h"
 #include "CImageBase.h"
@@ -19,6 +19,19 @@
 static UINT CCC_GetControlDpi(HWND hWnd)
 {
     if (!hWnd) return 96;
+    typedef UINT(WINAPI* PFN_GetDpiForWindow)(HWND);
+    static PFN_GetDpiForWindow s_fn = nullptr;
+    static BOOL s_got = FALSE;
+    if (!s_got) {
+        HMODULE hUser = ::GetModuleHandleW(L"user32.dll");
+        if (hUser)
+            s_fn = (PFN_GetDpiForWindow)::GetProcAddress(hUser, "GetDpiForWindow");
+        s_got = TRUE;
+    }
+    if (s_fn) {
+        const UINT dpi = s_fn(hWnd);
+        if (dpi > 0) return dpi;
+    }
     HDC hdc = ::GetDC(hWnd);
     if (!hdc) return 96;
     const UINT dpi = (UINT)GetDeviceCaps(hdc, LOGPIXELSX);
@@ -237,26 +250,42 @@ static void CCC_FillRectOpaqueBits(HDC hdc, const RECT& rc, COLORREF clr)
 
     // 再利用DIB + AlphaBlend（毎フレ BeginBufferedPaint + 画素ループを避ける）
     {
-        static CCC_ChromaBlitCache s_fillCaches[2];
+        static CCC_ChromaBlitCache s_fillCaches[4];
+        static COLORREF s_fillClr[4] = { 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu };
         static unsigned s_fillNext = 0;
         CCC_ChromaBlitCache* pCache = nullptr;
-        for (auto& c : s_fillCaches) {
-            if (c.pBits && c.dibW == w && c.dibH == h) {
-                pCache = &c;
+        unsigned hit = 0;
+        for (unsigned i = 0; i < 4; ++i) {
+            if (s_fillCaches[i].pBits && s_fillCaches[i].dibW == w && s_fillCaches[i].dibH == h) {
+                pCache = &s_fillCaches[i];
+                hit = i;
                 break;
             }
         }
         if (!pCache) {
-            pCache = &s_fillCaches[s_fillNext++ % 2];
+            hit = (s_fillNext++) % 4;
+            pCache = &s_fillCaches[hit];
             if (!pCache->Ensure(hdc, w, h))
                 pCache = nullptr;
+            else
+                s_fillClr[hit] = 0xFFFFFFFFu;
         }
         if (pCache && pCache->pBits && pCache->hdcDib) {
-            RECT zr = { 0, 0, w, h };
-            HBRUSH br = ::CreateSolidBrush(clr);
-            ::FillRect(pCache->hdcDib, &zr, br);
-            ::DeleteObject(br);
-            pCache->MakeRectOpaque(0, 0, w, h);
+            if (s_fillClr[hit] != clr) {
+                const UINT32 px = 0xFF000000u
+                    | ((UINT32)GetRValue(clr) << 16)
+                    | ((UINT32)GetGValue(clr) << 8)
+                    | (UINT32)GetBValue(clr);
+                UINT32* p = (UINT32*)pCache->pBits;
+                const int n = w * h;
+                int i = 0;
+                for (; i + 3 < n; i += 4) {
+                    p[i] = px; p[i + 1] = px; p[i + 2] = px; p[i + 3] = px;
+                }
+                for (; i < n; ++i)
+                    p[i] = px;
+                s_fillClr[hit] = clr;
+            }
             const BLENDFUNCTION bf = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
             if (::GdiAlphaBlend(hdc, rc.left, rc.top, w, h,
                     pCache->hdcDib, 0, 0, w, h, bf))
@@ -317,6 +346,10 @@ static void CCC_InitBPClear(HPAINTBUFFER hBP, int w, int h)
     int rowLength = 0;
     if (FAILED(::GetBufferedPaintBits(hBP, &pPixels, &rowLength)) || !pPixels || w <= 0 || h <= 0)
         return;
+    if (rowLength == w) {
+        ::ZeroMemory(pPixels, (size_t)w * (size_t)h * sizeof(RGBQUAD));
+        return;
+    }
     for (int y = 0; y < h; ++y)
     {
         RGBQUAD* pRow = reinterpret_cast<RGBQUAD*>(
@@ -493,7 +526,14 @@ void CCC_ChromaBlitCache::MakeRectOpaque(int x, int y, int rw, int rh)
     UINT32* base = (UINT32*)pBits;
     for (int row = 0; row < rh; ++row) {
         UINT32* p = base + (size_t)(y + row) * (size_t)dibW + x;
-        for (int col = 0; col < rw; ++col)
+        int col = 0;
+        for (; col + 3 < rw; col += 4) {
+            p[col] |= 0xFF000000u;
+            p[col + 1] |= 0xFF000000u;
+            p[col + 2] |= 0xFF000000u;
+            p[col + 3] |= 0xFF000000u;
+        }
+        for (; col < rw; ++col)
             p[col] |= 0xFF000000u;
     }
 }
@@ -727,7 +767,7 @@ static void CCC_BlitToRectOpaque(HDC hdcDest, const RECT& rect, HDC hdcSrc, int 
 {
     if (destW <= 0 || destH <= 0 || !hdcDest || !hdcSrc) return;
 
-    static CCC_ChromaBlitCache s_opaqueCaches[4];
+    static CCC_ChromaBlitCache s_opaqueCaches[8];
     static unsigned s_opaqueNext = 0;
     CCC_ChromaBlitCache* pCache = nullptr;
     for (auto& c : s_opaqueCaches) {
@@ -737,7 +777,7 @@ static void CCC_BlitToRectOpaque(HDC hdcDest, const RECT& rect, HDC hdcSrc, int 
         }
     }
     if (!pCache) {
-        pCache = &s_opaqueCaches[s_opaqueNext++ % 4];
+        pCache = &s_opaqueCaches[s_opaqueNext++ % 8];
         if (!pCache->Ensure(hdcDest, destW, destH))
             pCache = nullptr;
     }
@@ -13181,7 +13221,7 @@ private:
         // 必ず全面 α=255 にする。部分 MakeOpaque は周囲が透過して見える。
         // BeginBufferedPaint 毎回は重いので、再利用DIB + AlphaBlend を先に試す。
         {
-            static CCC_ChromaBlitCache s_fixCaches[4];
+            static CCC_ChromaBlitCache s_fixCaches[16];
             static unsigned s_fixNext = 0;
             CCC_ChromaBlitCache* pCache = nullptr;
             for (auto& c : s_fixCaches) {
@@ -13191,7 +13231,7 @@ private:
                 }
             }
             if (!pCache) {
-                pCache = &s_fixCaches[s_fixNext++ % 4];
+                pCache = &s_fixCaches[s_fixNext++ % 16];
                 if (!pCache->Ensure(hDestDC, width, height))
                     pCache = nullptr;
             }
@@ -13841,6 +13881,14 @@ struct CCC_CaptionEntry {
     CCustomStandardButton* pMax = nullptr;
     CCustomStandardButton* pSettings = nullptr;
     CCustomStandardButton* pPin = nullptr;
+    // 帯の見た目キャッシュ（本文60fps再描画で帯を毎回作り直さない）
+    BOOL paintValid = FALSE;
+    BOOL paintActive = FALSE;
+    BOOL paintHadIcon = FALSE;
+    int paintW = 0;
+    int paintH = 0;
+    int paintTitleRight = 0;
+    wchar_t paintTitle[512] = {};
 };
 
 static CCC_CaptionEntry g_captions[64];
@@ -13962,7 +14010,7 @@ static void CCC_CaptionPaintChromeNow(HWND hDlg)
             pBtn->RepaintClient();
             continue;
         }
-        ::RedrawWindow(h, NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW | RDW_ERASE);
+        ::RedrawWindow(h, NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW);
     }
 }
 
@@ -14518,47 +14566,50 @@ void CCC_CaptionPaint(CDC& dc, HWND hDlg)
         || (::GetAncestor(hDlg, GA_ROOT) && ::GetForegroundWindow() == ::GetAncestor(hDlg, GA_ROOT));
     const COLORREF bgSolid = active ? CCC_CAP_BG : CCC_CAP_BG_INACTIVE;
 
+    HICON hIcon = CCC_CaptionGetTitleIcon(hDlg);
+    wchar_t title[512];
+    title[0] = 0;
+    ::GetWindowTextW(hDlg, title, 511);
+    int titleRight = bar.right;
+    CCC_CaptionGetTitleRight(hDlg, e, titleRight);
+    const BOOL hadIcon = hIcon ? TRUE : FALSE;
+
+    // 本文込みの再描画（ピアノ/MP/アナライザの60fps）では帯の見た目が同じなら触らない。
+    // 帯だけの Invalidate（活性切替・タイトル変更）は clip が帯内なので描く。
+    BOOL clipBody = TRUE;
+    {
+        CRect clip;
+        if (dc.GetClipBox(&clip) != ERROR && !clip.IsRectEmpty()) {
+            if (clip.bottom <= bar.bottom + 1)
+                clipBody = FALSE;
+        }
+    }
+    if (clipBody && e->paintValid
+        && e->paintW == bar.Width() && e->paintH == bar.Height()
+        && e->paintActive == active && e->paintHadIcon == hadIcon
+        && e->paintTitleRight == titleRight
+        && wcscmp(e->paintTitle, title) == 0)
+        return;
+
 #if CCUSTOM_AERO_SUPPORT
     if (bAcrylicCap) {
         // 帯ガラス: ClearRect(α=0) + タイトル。EnsureBackdrop は毎フレーム呼ばない（ちらつき源）。
+        // 本文 MakeOpaque は呼び出し側（PaintOpaqueBody / BlitStretchOpaque）が行う。
         // ClearRect は帯上のボタン画素も消すので、最後に ChromeNow で載せ直す。
-        const BOOL bCaptionOnly = !CCC_IsAeroEnabled();
-
-        if (bCaptionOnly) {
-            CRect body = cr;
-            if (e->height > 0 && body.Height() > e->height)
-                body.top = e->height;
-            CRect clip;
-            if (dc.GetClipBox(&clip) != ERROR && !clip.IsRectEmpty())
-                body.IntersectRect(&body, &clip);
-            // 帯だけの更新では本文 MakeOpaque しない（バナー演奏ちらつき抑制）
-            if (body.Width() > 0 && body.Height() > 8)
-                CCC_MakeRectOpaquePreserve(dc.GetSafeHdc(), body);
-        }
-
         RECT rcBar = bar;
         CCC_ClearRectChroma(dc.GetSafeHdc(), rcBar, CCC_AERO_CHROMA_KEY);
 
         const int w = bar.Width();
         const int h = bar.Height();
-        BITMAPINFO bi = {};
-        bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-        bi.bmiHeader.biWidth = w;
-        bi.bmiHeader.biHeight = -h;
-        bi.bmiHeader.biPlanes = 1;
-        bi.bmiHeader.biBitCount = 32;
-        bi.bmiHeader.biCompression = BI_RGB;
-        void* pBits = nullptr;
-        HBITMAP hDib = ::CreateDIBSection(dc.GetSafeHdc(), &bi, DIB_RGB_COLORS, &pBits, nullptr, 0);
-        if (hDib && pBits) {
-            ::ZeroMemory(pBits, static_cast<size_t>(w) * static_cast<size_t>(h) * 4u);
-            HDC hdcMem = ::CreateCompatibleDC(dc.GetSafeHdc());
-            HGDIOBJ oldBmp = ::SelectObject(hdcMem, hDib);
+        static CCC_ChromaBlitCache s_capDib;
+        static HTHEME s_capTheme = NULL;
+        if (s_capDib.Ensure(dc.GetSafeHdc(), w, h) && s_capDib.pBits && s_capDib.hdcDib) {
+            ::ZeroMemory(s_capDib.pBits, static_cast<size_t>(w) * static_cast<size_t>(h) * 4u);
+            HDC hdcMem = s_capDib.hdcDib;
 
             int textLeft = 8;
             // 明示 SetIcon された窓のみ。WS_EX_DLGMODALFRAME 時は描かない
             // （WM_GETICON の exe フォールバックで歌詞ウィンドウ等にアイコンが付くのを防ぐ）
-            HICON hIcon = CCC_CaptionGetTitleIcon(hDlg);
             if (hIcon) {
                 const int isz = 16;
                 const int iy = (h - isz) / 2;
@@ -14566,24 +14617,19 @@ void CCC_CaptionPaint(CDC& dc, HWND hDlg)
                 textLeft = 6 + isz + 6;
             }
 
-            wchar_t title[512];
-            title[0] = 0;
-            ::GetWindowTextW(hDlg, title, 511);
-            int titleRight = bar.right;
-            CCC_CaptionGetTitleRight(hDlg, e, titleRight);
             RECT textRc = { textLeft, 0, titleRight - 4, h };
 
-            HTHEME hTheme = ::OpenThemeData(hDlg, L"WINDOW");
-            if (hTheme) {
+            if (!s_capTheme)
+                s_capTheme = ::OpenThemeData(hDlg, L"WINDOW");
+            if (s_capTheme) {
                 DTTOPTS opt = {};
                 opt.dwSize = sizeof(opt);
                 opt.dwFlags = DTT_COMPOSITED | DTT_TEXTCOLOR | DTT_GLOWSIZE;
                 opt.crText = RGB(255, 255, 255);
                 opt.iGlowSize = 10;
-                ::DrawThemeTextEx(hTheme, hdcMem, 0, 0, title, -1,
+                ::DrawThemeTextEx(s_capTheme, hdcMem, 0, 0, title, -1,
                     DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX,
                     &textRc, &opt);
-                ::CloseThemeData(hTheme);
             }
             else {
                 ::SetBkMode(hdcMem, TRANSPARENT);
@@ -14594,34 +14640,51 @@ void CCC_CaptionPaint(CDC& dc, HWND hDlg)
 
             // DrawIconEx 等が α=0 のまま残す画素を、非ゼロ RGB だけ不透明化
             {
-                UINT32* px = static_cast<UINT32*>(pBits);
+                UINT32* px = static_cast<UINT32*>(s_capDib.pBits);
                 const int n = w * h;
-                for (int i = 0; i < n; ++i) {
+                int i = 0;
+                for (; i + 3 < n; i += 4) {
+                    UINT32 p0 = px[i], p1 = px[i + 1], p2 = px[i + 2], p3 = px[i + 3];
+                    if ((p0 & 0x00FFFFFFu) != 0 && (p0 >> 24) == 0) px[i] = p0 | 0xFF000000u;
+                    if ((p1 & 0x00FFFFFFu) != 0 && (p1 >> 24) == 0) px[i + 1] = p1 | 0xFF000000u;
+                    if ((p2 & 0x00FFFFFFu) != 0 && (p2 >> 24) == 0) px[i + 2] = p2 | 0xFF000000u;
+                    if ((p3 & 0x00FFFFFFu) != 0 && (p3 >> 24) == 0) px[i + 3] = p3 | 0xFF000000u;
+                }
+                for (; i < n; ++i) {
                     UINT32 p = px[i];
                     if ((p & 0x00FFFFFFu) != 0 && (p >> 24) == 0)
                         px[i] = p | 0xFF000000u;
                 }
             }
 
-            BP_PAINTPARAMS params = { sizeof(BP_PAINTPARAMS) };
-            HDC hdcBuf = NULL;
-            HPAINTBUFFER hBP = ::BeginBufferedPaint(dc.GetSafeHdc(), &rcBar, BPBF_TOPDOWNDIB, &params, &hdcBuf);
-            if (hdcBuf && hBP) {
-                CCC_InitBPClear(hBP, w, h);
-                const BLENDFUNCTION bf = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
-                ::GdiAlphaBlend(hdcBuf, rcBar.left, rcBar.top, w, h, hdcMem, 0, 0, w, h, bf);
-                ::EndBufferedPaint(hBP, TRUE);
+            // ClearRect 済みの帯へ直接合成（第2 BeginBufferedPaint を避ける）
+            const BLENDFUNCTION bf = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
+            if (!::GdiAlphaBlend(dc.GetSafeHdc(), 0, 0, w, h, hdcMem, 0, 0, w, h, bf)) {
+                BP_PAINTPARAMS params = { sizeof(BP_PAINTPARAMS) };
+                HDC hdcBuf = NULL;
+                HPAINTBUFFER hBP = ::BeginBufferedPaint(dc.GetSafeHdc(), &rcBar, BPBF_TOPDOWNDIB, &params, &hdcBuf);
+                if (hdcBuf && hBP) {
+                    CCC_InitBPClear(hBP, w, h);
+                    ::GdiAlphaBlend(hdcBuf, rcBar.left, rcBar.top, w, h, hdcMem, 0, 0, w, h, bf);
+                    ::EndBufferedPaint(hBP, TRUE);
+                }
             }
-            else {
-                const BLENDFUNCTION bf = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
-                ::GdiAlphaBlend(dc.GetSafeHdc(), 0, 0, w, h, hdcMem, 0, 0, w, h, bf);
+            CCC_CaptionPaintChromeNow(hDlg);
+            e->paintValid = TRUE;
+            e->paintActive = active;
+            e->paintHadIcon = hadIcon;
+            e->paintW = bar.Width();
+            e->paintH = bar.Height();
+            e->paintTitleRight = titleRight;
+            for (int ti = 0; ti < 511; ++ti) {
+                e->paintTitle[ti] = title[ti];
+                if (!title[ti]) break;
             }
-
-            ::SelectObject(hdcMem, oldBmp);
-            ::DeleteDC(hdcMem);
-            ::DeleteObject(hDib);
+            e->paintTitle[511] = 0;
         }
-        CCC_CaptionPaintChromeNow(hDlg);
+        else {
+            CCC_CaptionPaintChromeNow(hDlg);
+        }
         return;
     }
 #endif
@@ -14635,7 +14698,6 @@ void CCC_CaptionPaint(CDC& dc, HWND hDlg)
     mem.FillSolidRect(0, bar.Height() - 1, bar.Width(), 1, RGB(90, 70, 110));
 
     int textLeft = 8;
-    HICON hIcon = CCC_CaptionGetTitleIcon(hDlg);
     if (hIcon) {
         const int isz = 16;
         const int iy = (bar.Height() - isz) / 2;
@@ -14643,11 +14705,6 @@ void CCC_CaptionPaint(CDC& dc, HWND hDlg)
         textLeft = 6 + isz + 6;
     }
 
-    wchar_t title[512];
-    title[0] = 0;
-    ::GetWindowTextW(hDlg, title, 511);
-    int titleRight = bar.right;
-    CCC_CaptionGetTitleRight(hDlg, e, titleRight);
     CRect textRc(textLeft, 0, titleRight - 4, bar.Height());
     mem.SetBkMode(TRANSPARENT);
     mem.SetTextColor(CCC_CAP_TEXT);
@@ -14663,6 +14720,17 @@ void CCC_CaptionPaint(CDC& dc, HWND hDlg)
 
     dc.BitBlt(0, 0, bar.Width(), bar.Height(), &mem, 0, 0, SRCCOPY);
     mem.SelectObject(old);
+    e->paintValid = TRUE;
+    e->paintActive = active;
+    e->paintHadIcon = hadIcon;
+    e->paintW = bar.Width();
+    e->paintH = bar.Height();
+    e->paintTitleRight = titleRight;
+    for (int ti = 0; ti < 511; ++ti) {
+        e->paintTitle[ti] = title[ti];
+        if (!title[ti]) break;
+    }
+    e->paintTitle[511] = 0;
 }
 
 static BOOL CCC_CaptionIsRenderClass(CWnd* pDlg)

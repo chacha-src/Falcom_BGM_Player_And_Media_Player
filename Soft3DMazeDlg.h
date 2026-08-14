@@ -324,6 +324,8 @@ protected:
 	BOOL IsBlockedF(int f, float x, float z) const;
 	float AxisSpan(int i) const;
 	float AxisOrigin(int i) const;
+	BOOL DoorThinX(int f, int x, int z) const;
+	void DoorWorldRect(int f, int x, int z, float pad, float& x0, float& z0, float& x1, float& z1) const;
 	float GridToWorldX(float gx) const;
 	float GridToWorldZ(float gz) const;
 	int WorldToGridAxis(float w) const;

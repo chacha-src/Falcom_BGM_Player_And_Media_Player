@@ -685,7 +685,7 @@ static void S3mCalloutRgb(BYTE c, float& r, float& g, float& b)
 {
 	using C = CSoft3DMazeDlg;
 	r = .95f; g = .85f; b = .55f;
-	if (c == C::CELL_DOOR) { r = .85f; g = .72f; b = .48f; }
+	if (c == C::CELL_DOOR) { r = .95f; g = .42f; b = .22f; }
 	else if (c == C::CELL_KEY) { r = 1.f; g = .9f; b = .35f; }
 	else if (c == C::CELL_GOAL) { r = 1.f; g = .86f; b = .28f; }
 	else if (c == C::CELL_STAIRS_DOWN) { r = 1.f; g = .6f; b = .22f; }
@@ -2256,6 +2256,39 @@ float CSoft3DMazeDlg::AxisOrigin(int i) const
 	if (i <= 0) return 0.f;
 	// [0,i) の偶数個=((i+1)/2)、奇数個=(i/2)
 	return (float)((i + 1) / 2) * 0.10f + (float)(i / 2) * 1.f;
+}
+BOOL CSoft3DMazeDlg::DoorThinX(int f, int x, int z) const
+{
+	if (m_n <= 0) return TRUE;
+	const float sx = AxisSpan(x), sz = AxisSpan(z);
+	if (sx + 1e-4f < sz) return TRUE;
+	if (sz + 1e-4f < sx) return FALSE;
+	auto wall = [&](int nx, int nz) -> BOOL {
+		if (nx < 0 || nz < 0 || nx >= m_n || nz >= m_n) return TRUE;
+		if (f < 0 || f >= m_nFloors || !m_grids[f]) return TRUE;
+		const BYTE c = CellAtF(f, nx, nz);
+		return (c == CELL_WALL || c == CELL_WINDOW || c == CELL_MIRROR_WALL) ? TRUE : FALSE;
+	};
+	const BOOL wallNS = wall(x, z - 1) && wall(x, z + 1);
+	const BOOL wallEW = wall(x - 1, z) && wall(x + 1, z);
+	if (wallNS && !wallEW) return TRUE;
+	if (wallEW && !wallNS) return FALSE;
+	return TRUE;
+}
+void CSoft3DMazeDlg::DoorWorldRect(int f, int x, int z, float pad, float& x0, float& z0, float& x1, float& z1) const
+{
+	x0 = AxisOrigin(x); x1 = x0 + AxisSpan(x);
+	z0 = AxisOrigin(z); z1 = z0 + AxisSpan(z);
+	const float wallT = 0.10f + pad * 2.f;
+	if (DoorThinX(f, x, z)) {
+		const float cx = (x0 + x1) * .5f;
+		x0 = cx - wallT * .5f; x1 = cx + wallT * .5f;
+		z0 -= pad; z1 += pad;
+	} else {
+		const float cz = (z0 + z1) * .5f;
+		z0 = cz - wallT * .5f; z1 = cz + wallT * .5f;
+		x0 -= pad; x1 += pad;
+	}
 }
 float CSoft3DMazeDlg::GridToWorldX(float gx) const
 {
@@ -5328,28 +5361,47 @@ void CSoft3DMazeDlg::RenderScene()
 		}else if(c==CELL_DOOR){
 			if(nFx>=64)continue;
 			const UINT b=nFloor+nWall+nTrans;
-			const float dr=.55f,dg=.48f,db=.40f,da=1.05f; // 金属扉バンド
-			const float fr=.38f,fg=.34f,fb=.30f;
-			const float nearDx=ocx-ex,nearDz=ocz-ez;const BOOL nearD=(nearDx*nearDx+nearDz*nearDz)<(14.f*14.f);
-			const float frameT=nearD?.06f:.04f;
-			if(cellW(x)<cellD(z)){
-				passCube(x0,z0,x1,z1,passH,wallH*.92f,dr,dg,db,da);
-				passCube(x0-frameT*.2f,z0,x0+frameT,z1,passH,wallH*.95f,fr,fg,fb,1.f);
-				passCube(x1-frameT,z0,x1+frameT*.2f,z1,passH,wallH*.95f,fr,fg,fb,1.f);
-				passCube(x0,z0,x1,z1,wallH*.88f,wallH*.95f,fr,fg,fb,1.f);
-				if(nearD){
-					const float hx=(ex>=ocx)?x1+.01f:x0-.01f;
-					passCube(hx-.02f,ocz-.02f,hx+.02f,ocz+.02f,passH+.42f,passH+.58f,.85f,.75f,.45f,1.05f);
-				}
+			const float dr=.72f,dg=.50f,db=.28f,da=1.05f;
+			const float fr=.30f,fg=.24f,fb=.20f;
+			const BOOL thinX=DoorThinX(fxFloor,x,z);
+			const float wallT=0.10f;
+			float dx0,dx1,dz0,dz1;
+			if(thinX){dx0=ocx-wallT*.5f;dx1=ocx+wallT*.5f;dz0=z0;dz1=z1;}
+			else{dz0=ocz-wallT*.5f;dz1=ocz+wallT*.5f;dx0=x0;dx1=x1;}
+			passCube(dx0,dz0,dx1,dz1,passH,wallH*.92f,dr,dg,db,da);
+			const float frameT=.05f;
+			if(thinX){
+				passCube(dx0-frameT*.2f,dz0,dx1+frameT*.2f,dz0+frameT,passH,wallH*.95f,fr,fg,fb,1.f);
+				passCube(dx0-frameT*.2f,dz1-frameT,dx1+frameT*.2f,dz1,passH,wallH*.95f,fr,fg,fb,1.f);
 			}else{
-				passCube(x0,z0,x1,z1,passH,wallH*.92f,dr,dg,db,da);
-				passCube(x0,z0-frameT*.2f,x1,z0+frameT,passH,wallH*.95f,fr,fg,fb,1.f);
-				passCube(x0,z1-frameT,x1,z1+frameT*.2f,passH,wallH*.95f,fr,fg,fb,1.f);
-				passCube(x0,z0,x1,z1,wallH*.88f,wallH*.95f,fr,fg,fb,1.f);
-				if(nearD){
-					const float hz=(ez>=ocz)?z1+.01f:z0-.01f;
-					passCube(ocx-.02f,hz-.02f,ocx+.02f,hz+.02f,passH+.42f,passH+.58f,.85f,.75f,.45f,1.05f);
-				}
+				passCube(dx0,dz0-frameT*.2f,dx0+frameT,dz1+frameT*.2f,passH,wallH*.95f,fr,fg,fb,1.f);
+				passCube(dx1-frameT,dz0-frameT*.2f,dx1,dz1+frameT*.2f,passH,wallH*.95f,fr,fg,fb,1.f);
+			}
+			passCube(dx0,dz0,dx1,dz1,wallH*.88f,wallH*.95f,fr,fg,fb,1.f);
+			if(thinX){
+				const float mz=(dz0+dz1)*.5f;
+				passCubeAll(dx0-.006f,mz-.014f,dx1+.006f,mz+.014f,passH+.08f,wallH*.86f,.22f,.16f,.12f,1.f);
+				passCubeAll(dx0-.01f,dz0+.05f,dx1+.01f,dz1-.05f,passH+.50f,passH+.58f,.42f,.32f,.22f,1.f);
+			}else{
+				const float mx=(dx0+dx1)*.5f;
+				passCubeAll(mx-.014f,dz0-.006f,mx+.014f,dz1+.006f,passH+.08f,wallH*.86f,.22f,.16f,.12f,1.f);
+				passCubeAll(dx0+.05f,dz0-.01f,dx1-.05f,dz1+.01f,passH+.50f,passH+.58f,.42f,.32f,.22f,1.f);
+			}
+			const float hy0=passH+.40f,hy1=passH+.62f;
+			const float hr=1.f,hg=.84f,hb=.30f,ha=1.12f;
+			const float hoff=.20f;
+			if(thinX){
+				const float hz=ocz+hoff;
+				passCubeAll(dx0-.014f,hz-.07f,dx0+.004f,hz+.07f,hy0-.05f,hy1+.05f,.48f,.38f,.24f,1.05f);
+				passCubeAll(dx1-.004f,hz-.07f,dx1+.014f,hz+.07f,hy0-.05f,hy1+.05f,.48f,.38f,.24f,1.05f);
+				passCubeAll(dx0-.055f,hz-.04f,dx0-.010f,hz+.04f,hy0,hy1,hr,hg,hb,ha);
+				passCubeAll(dx1+.010f,hz-.04f,dx1+.055f,hz+.04f,hy0,hy1,hr,hg,hb,ha);
+			}else{
+				const float hx=ocx+hoff;
+				passCubeAll(hx-.07f,dz0-.014f,hx+.07f,dz0+.004f,hy0-.05f,hy1+.05f,.48f,.38f,.24f,1.05f);
+				passCubeAll(hx-.07f,dz1-.004f,hx+.07f,dz1+.014f,hy0-.05f,hy1+.05f,.48f,.38f,.24f,1.05f);
+				passCubeAll(hx-.04f,dz0-.055f,hx+.04f,dz0-.010f,hy0,hy1,hr,hg,hb,ha);
+				passCubeAll(hx-.04f,dz1+.010f,hx+.04f,dz1+.055f,hy0,hy1,hr,hg,hb,ha);
 			}
 			fxObj[nFx++]={b,nFloor+nWall+nTrans-b,ocx,passH+.45f,ocz,xl[i].d,0,0,0,FALSE,FALSE};
 		}else if(c==CELL_KEY){
@@ -6059,7 +6111,6 @@ void CSoft3DMazeDlg::RenderScene()
 				else if(c==CELL_DARK){rr=.2f;gg=.15f;bb=.4f;a=.75f;}
 				else if(c==CELL_PORTAL){rr=.78f;gg=.35f;bb=1.f;a=.92f;}
 				else if(c==CELL_KEY){rr=1.f;gg=.85f;bb=.25f;a=.92f;}
-				else if(c==CELL_DOOR){rr=.62f;gg=.48f;bb=.35f;a=.95f;}
 				else if(VisitAtF(mf,x,z)){rr=.30f;gg=.55f;bb=.85f;a=.7f;}
 				mapQuad(x0,z0,x1,z0,x1,z1,x0,z1,rr,gg,bb,a*am);
 			}
@@ -6071,6 +6122,16 @@ void CSoft3DMazeDlg::RenderScene()
 				if(c==CELL_WINDOW){rr=.25f;gg=.58f;bb=.86f;}
 				else if(c==CELL_MIRROR_WALL){rr=.45f;gg=.75f;bb=.95f;}
 				mapQuad(x0,z0,x1,z0,x1,z1,x0,z1,rr,gg,bb,a*am);
+			}
+			for(int z=gz0;z<gz1;z++)for(int x=gx0;x<gx1;x++){
+				if(CellAtF(mf,x,z)!=CELL_DOOR)continue;
+				float x0,z0,x1,z1;DoorWorldRect(mf,x,z,kMapWallPad,x0,z0,x1,z1);
+				mapQuad(x0,z0,x1,z0,x1,z1,x0,z1,.95f,.42f,.22f,.98f*am);
+				const float cx=(x0+x1)*.5f,cz=(z0+z1)*.5f,ks=.07f;
+				if(DoorThinX(mf,x,z))
+					mapQuad(cx+.03f,cz-ks,cx+.11f,cz-ks,cx+.11f,cz+ks,cx+.03f,cz+ks,1.f,.82f,.28f,.95f*am);
+				else
+					mapQuad(cx-ks,cz+.03f,cx+ks,cz+.03f,cx+ks,cz+.11f,cx-ks,cz+.11f,1.f,.82f,.28f,.95f*am);
 			}
 		};
 		if(m_miniFade<.999f){drawMapFloor(m_miniFadeFrom,1.f-m_miniFade);drawMapFloor(m_miniFadeTo,m_miniFade);}
@@ -6303,17 +6364,23 @@ void CSoft3DMazeDlg::RenderScene()
 			hv[hn++]={x0,y0,0,0,r,g,b,a}; hv[hn++]={x1,y0,1,0,r,g,b,a}; hv[hn++]={x1,y1,1,1,r,g,b,a};
 			hv[hn++]={x0,y0,0,0,r,g,b,a}; hv[hn++]={x1,y1,1,1,r,g,b,a}; hv[hn++]={x0,y1,0,1,r,g,b,a};
 		};
+		auto callA=[&](float cw)->float{
+			if(cw<=4.5f)return 1.f;
+			if(cw>=14.f)return .20f;
+			return 1.f-(cw-4.5f)/(14.f-4.5f)*.80f;
+		};
 		hn=0;
 		for(int k=0;k<nBd;k++){
 			const float sc2=(bd[k].cw>8.f)?0.45f:((bd[k].cw>4.f)?0.7f:1.f);
+			const float aa=callA(bd[k].cw);
 			const float bw=0.32f*sc2, bh=0.085f*sc2;
 			const float x0=bd[k].nx-bw*.5f, x1=bd[k].nx+bw*.5f;
 			const float y0=bd[k].ny+0.02f*sc2, y1=y0+bh;
 			float rr,gg,bb; S3mCalloutRgb(bd[k].c,rr,gg,bb);
 			const float ly1=y0-0.003f*sc2, ly0=ly1-0.01f*sc2;
-			hline(x0+0.012f*sc2,ly0,x1-0.012f*sc2,ly1,rr,gg,bb,.92f);
+			hline(x0+0.012f*sc2,ly0,x1-0.012f*sc2,ly1,rr,gg,bb,.92f*aa);
 			const float stemW=0.004f*sc2;
-			hline(bd[k].nx-stemW, bd[k].ny+0.002f, bd[k].nx+stemW, ly0, rr,gg,bb,.8f);
+			hline(bd[k].nx-stemW, bd[k].ny+0.002f, bd[k].nx+stemW, ly0, rr,gg,bb,.8f*aa);
 		}
 		if(hn){
 			if(SUCCEEDED(dc->Map(m_view.m_vbHud,0,D3D11_MAP_WRITE_DISCARD,0,&map))){memcpy(map.pData,hv,hn*sizeof(S3MHudVertex));dc->Unmap(m_view.m_vbHud,0);}
@@ -6330,11 +6397,12 @@ void CSoft3DMazeDlg::RenderScene()
 		if(m_view.m_srvCallout){
 			for(int k=0;k<nBd;k++){
 				const float sc2=(bd[k].cw>8.f)?0.45f:((bd[k].cw>4.f)?0.7f:1.f);
+				const float aa=callA(bd[k].cw);
 				const float bw=0.32f*sc2, bh=0.085f*sc2;
 				const float x0=bd[k].nx-bw*.5f, x1=bd[k].nx+bw*.5f;
 				const float y0=bd[k].ny+0.02f*sc2, y1=y0+bh;
 				const int s=bd[k].slot;
-				htuv(x0,y0,x1,y1,m_view.m_calloutU0[s],m_view.m_calloutV0[s],m_view.m_calloutU1[s],m_view.m_calloutV1[s],.96f);
+				htuv(x0,y0,x1,y1,m_view.m_calloutU0[s],m_view.m_calloutV0[s],m_view.m_calloutU1[s],m_view.m_calloutV1[s],.96f*aa);
 			}
 			if(hn){
 				if(SUCCEEDED(dc->Map(m_view.m_vbHud,0,D3D11_MAP_WRITE_DISCARD,0,&map))){memcpy(map.pData,hv,hn*sizeof(S3MHudVertex));dc->Unmap(m_view.m_vbHud,0);}
@@ -6387,7 +6455,7 @@ void CSoft3DMazeDlg::RenderScene()
 					if(c==CELL_MIRROR_FLOOR)return rgba(100,180,210,230);
 					if(c==CELL_PORTAL)return rgba(200,90,255,245);
 					if(c==CELL_KEY)return rgba(255,215,60,245);
-					if(c==CELL_DOOR)return rgba(158,122,88,250);
+					if(c==CELL_DOOR)return visited?colVisit:colFloor;
 					if(c==CELL_WALL)return colWall;
 					if(c==CELL_WINDOW)return colWin;
 					if(visited)return colVisit;
@@ -6454,8 +6522,18 @@ void CSoft3DMazeDlg::RenderScene()
 				for(int z=0;z<m_n;z++)for(int x=0;x<m_n;x++){
 					const BYTE c=CellAtF(bakeFloor,x,z);
 					const BOOL special=c==CELL_GOAL||c==CELL_START||c==CELL_STAIRS_DOWN||c==CELL_STAIRS_UP
-						||c==CELL_PORTAL||c==CELL_KEY||c==CELL_DOOR||c==CELL_MIRROR_FLOOR||c==CELL_MIRROR_WALL||c==CELL_WINDOW
+						||c==CELL_PORTAL||c==CELL_KEY||c==CELL_MIRROR_FLOOR||c==CELL_MIRROR_WALL||c==CELL_WINDOW
 						||S3mIsPickupCell(c)||S3mIsTrapCell(c);
+					if(c==CELL_DOOR){
+						float x0,z0,x1,z1;DoorWorldRect(bakeFloor,x,z,0.05f,x0,z0,x1,z1);
+						fillWorldMin(x0,z0,x1,z1,rgba(242,108,48,255),4);
+						const float cx=(x0+x1)*.5f,cz=(z0+z1)*.5f,ks=.08f;
+						if(DoorThinX(bakeFloor,x,z))
+							fillWorldMin(cx+.03f,cz-ks,cx+.12f,cz+ks,rgba(255,210,70,255),3);
+						else
+							fillWorldMin(cx-ks,cz+.03f,cx+ks,cz+.12f,rgba(255,210,70,255),3);
+						continue;
+					}
 					if(!special)continue;
 					float x0=AxisOrigin(x),x1=x0+AxisSpan(x);
 					float z0=AxisOrigin(z),z1=z0+AxisSpan(z);
