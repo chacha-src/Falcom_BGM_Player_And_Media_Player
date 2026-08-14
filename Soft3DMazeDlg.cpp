@@ -1845,6 +1845,8 @@ void CSoft3DMazeDlg::LayoutAll()
 
 	CCC_CaptionLayout(m_hWnd);
 	LayoutHelpBtn();
+	// SetWindowPos 後にアクリル穴が開くので opaque fixer を遅延再適用
+	PostMessage(CCC_MSG_REAPPLY_OPAQUE_FIXERS, 0, 0);
 }
 
 void CSoft3DMazeDlg::FreeGrid()
@@ -2018,6 +2020,7 @@ void CSoft3DMazeDlg::PersistUi()
 
 void CSoft3DMazeDlg::PersistWindowRect()
 {
+	// Create 直後(未表示)の OnSize で既定サイズを .dat に書いて復元値を潰さない
 	if (!GetSafeHwnd() || !IsWindowVisible() || IsIconic())
 		return;
 	WINDOWPLACEMENT wp = {};
@@ -2033,6 +2036,7 @@ void CSoft3DMazeDlg::PersistWindowRect()
 	savedata.s3m_win_y = r.top;
 	savedata.s3m_win_w = w;
 	savedata.s3m_win_h = h;
+	MpPersistSavedataQuick();
 }
 
 void CSoft3DMazeDlg::ApplySavedWindowRect()
@@ -2041,7 +2045,7 @@ void CSoft3DMazeDlg::ApplySavedWindowRect()
 		return;
 	int w = savedata.s3m_win_w, h = savedata.s3m_win_h;
 	int x = savedata.s3m_win_x, y = savedata.s3m_win_y;
-	if (w < 480 || h < 360)
+	if (w < 320 || h < 240)
 		return;
 	RECT r = { x, y, x + w, y + h };
 	HMONITOR mon = MonitorFromRect(&r, MONITOR_DEFAULTTONEAREST);

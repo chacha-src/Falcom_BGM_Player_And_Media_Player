@@ -146,6 +146,7 @@ public:
 		int lapShowN;
 		int lapNo[3];
 		float lapSec[3];
+		int retired;
 	};
 	BOOL BakeStandingsTexture(const S3rStandRow* rows, int nRows);
 	void ReleaseStandingsTexture();
@@ -286,6 +287,9 @@ protected:
 	void TickCountdown(float dt);
 	void TickPodium(float dt);
 	void TickDemo(float dt);
+	BOOL AllAliveFinished() const;
+	void EnterPodium();
+	float AiPaceIndep(float sk) const;
 	void UpdateRanks();
 	void ApplyItem(int kind);
 	void TryPickupCraft(int ci);
@@ -309,8 +313,9 @@ protected:
 	void BandLocal(float x, float y, float z, float t, float& lat, float& vert, float& cx, float& cy, float& cz) const;
 	float BandHalfWidth() const;
 	float SpeedScale() const;
-	float RaceSpeedCap(int boosted=0) const; // ≈120km/h 帯（ブースト時やや上）
+	float RaceSpeedCap(int boosted=0) const; // 物理上限（表示は SpeedToKmh で×20）
 	float SpeedToKmh(float vx, float vy, float vz) const;
+	float BandSpeedFactor(float lat, float vert) const; // 帯横軸中央=最大、上下オフセットで減速
 	float PathArcBetween(float t0, float t1) const;
 	float GroundY(float x, float z) const;
 	float EffectiveLaps() const;
@@ -371,6 +376,7 @@ public:
 		float raceTime;
 		float finishTime;
 		int finished;
+		int retired; // 1=高速シミュでも到達できずリタイア
 		float aiSteerBias;
 		float aiSkill;
 		// 帯上の最終位置（コースアウト復帰地点）
@@ -387,6 +393,7 @@ public:
 		float lapTimes[12];
 		int lapTimesN;
 	};
+	void RetireCraft(S3rCraft& c);
 	void RespawnCraftToCheckpoint(S3rCraft& c, float fuelAmt, float cool);
 	// ショートカット失敗／帯外危険時：帯中央へ戻しライン固定へ
 	void AbortAiToLine(S3rCraft& c, float lineLockSec);
@@ -439,6 +446,8 @@ public:
 	float m_countT;
 	int m_countShown;
 	float m_podiumT;
+	float m_finishSimT; // FINISH中の裏シミュレーション累計秒
+	int m_aiRaceLv; // レース開始時のAI難易度（0..4）
 	int m_podiumOrder[3];
 	float m_confetti[96][6]; // x y z vx vy life
 	int m_themeActive;
@@ -461,7 +470,7 @@ public:
 	int m_basePitchPos;
 	float m_anim;
 	float m_raceClock;
-	float m_playerSpdEma; // 自機の実効速度（AI上限の基準）
+	float m_playerSpdEma; // 自機の実効速度（低難易度AIの基準）
 	int m_playerAccel;
 	int m_wrongWay;
 	float m_overlayHold; // LAP/COURSE OUT 表示の優先保持

@@ -987,39 +987,46 @@ BOOL CS3rView::BakeStandingsTexture(const S3rStandRow* rows, int nRows)
 	if (!m_dev || !rows || nRows < 1) return FALSE;
 	ReleaseStandingsTexture();
 	if (nRows > 12) nRows = 12;
-	const int rowH = 96;
-	const int namePx = 40;
-	const int lapPx = 22;
-	const int w = 380, h = nRows * rowH + 8;
+	const int rowH = 128;
+	const int namePx = 34;
+	const int lapPx = 20;
+	const int lapLineH = 26;
+	const int w = 400, h = nRows * rowH + 8;
 	Soft3DTextD2DCanvas* cv = Soft3DTextD2D_Begin(w, h);
 	if (!cv) return FALSE;
-	const float lapStep = (float)(rowH - 52) / 3.f;
 	for (int i = 0; i < nRows; i++) {
 		const S3rStandRow& r = rows[i];
 		float y0 = (float)(6 + i * rowH);
 		BYTE aBg = r.isPlayer ? (BYTE)230 : (BYTE)185;
 		BYTE br = r.isPlayer ? 28 : 10, bg = r.isPlayer ? 48 : 14, bb = r.isPlayer ? 72 : 22;
-		Soft3DTextD2D_FillRect(cv, 3.f, y0, (float)(w - 6), (float)(rowH - 5), aBg, br, bg, bb);
+		Soft3DTextD2D_FillRect(cv, 3.f, y0, (float)(w - 6), (float)(rowH - 6), aBg, br, bg, bb);
 		BYTE cr = (BYTE)(r.cr * 255.f), cg = (BYTE)(r.cg * 255.f), cb = (BYTE)(r.cb * 255.f);
-		float cx = 30.f, cy = y0 + 22.f;
+		float cx = 30.f, cy = y0 + 20.f;
 		Soft3DTextD2D_FillEllipse(cv, cx, cy, 12.f, 10.f, 255, cr, cg, cb);
 		Soft3DTextD2D_FillTriangle(cv, cx - 16.f, cy, cx - 2.f, cy - 8.f, cx - 2.f, cy + 8.f, 255, cr, cg, cb);
 		Soft3DTextD2D_FillTriangle(cv, cx + 16.f, cy, cx + 2.f, cy - 8.f, cx + 2.f, cy + 8.f, 255, cr, cg, cb);
 		wchar_t rankBuf[24];
 		S3rRankWord(r.rank, rankBuf, _countof(rankBuf));
 		BYTE fr = r.isPlayer ? 255 : 250, fg = r.isPlayer ? 252 : 250, fb = r.isPlayer ? 215 : 255;
-		Soft3DTextD2D_DrawTextShadow(cv, r.name, 52.f, y0 + 2.f, 220.f, (float)(namePx + 4),
-			(float)namePx, 1, 0, 0, 255, fr, fg, fb, 1.8f, 1.8f, 200, 0, 0, 0);
-		Soft3DTextD2D_DrawTextShadow(cv, rankBuf, 260.f, y0 + 2.f, 112.f, (float)(namePx + 4),
-			(float)namePx, 1, 2, 0, 255, fr, fg, fb, 1.8f, 1.8f, 200, 0, 0, 0);
-		for (int k = 0; k < 3; k++) {
-			int lapNo = r.lapNo[k] > 0 ? r.lapNo[k] : (k + 1);
-			float sec = r.lapSec[k];
-			wchar_t one[40];
-			if (sec >= 0.f) swprintf_s(one, L"LAP%d  %.2f", lapNo, sec);
-			else swprintf_s(one, L"LAP%d  ----", lapNo);
-			Soft3DTextD2D_DrawTextShadow(cv, one, 52.f, y0 + 48.f + lapStep * (float)k, 330.f, lapStep,
-				(float)lapPx, 1, 0, 0, 255, 210, 230, 245, 1.4f, 1.4f, 200, 0, 0, 0);
+		Soft3DTextD2D_DrawTextShadow(cv, r.name, 52.f, y0 + 2.f, 230.f, 38.f,
+			(float)namePx, 1, 0, 1, 255, fr, fg, fb, 1.8f, 1.8f, 200, 0, 0, 0);
+		Soft3DTextD2D_DrawTextShadow(cv, rankBuf, 270.f, y0 + 2.f, 120.f, 38.f,
+			(float)namePx, 1, 2, 1, 255, fr, fg, fb, 1.8f, 1.8f, 200, 0, 0, 0);
+		if (r.retired) {
+			const wchar_t* retire = LL14(L"リタイア", L"RETIRED", L"ABANDON", L"RITIRATO", L"ABANDONO",
+				L"리타이어", L"退赛", L"انسحاب", L"СОШЁЛ", L"AUFGABE", L"ABANDONO", L"OPGEGEVEN", L"WYCOFANY", L"ÇEKİLDİ");
+			Soft3DTextD2D_DrawTextShadow(cv, retire, 52.f, y0 + 48.f, 340.f, 56.f,
+				24.f, 1, 0, 1, 255, 255, 170, 140, 1.4f, 1.4f, 200, 0, 0, 0);
+		} else {
+			for (int k = 0; k < 3; k++) {
+				int lapNo = r.lapNo[k] > 0 ? r.lapNo[k] : (k + 1);
+				float sec = r.lapSec[k];
+				wchar_t one[40];
+				if (sec >= 0.f) swprintf_s(one, L"LAP%d  %.2f", lapNo, sec);
+				else swprintf_s(one, L"LAP%d  ----", lapNo);
+				Soft3DTextD2D_DrawTextShadow(cv, one, 52.f, y0 + 42.f + (float)(lapLineH * k), 340.f, (float)lapLineH,
+					(float)lapPx, 1, 0, 1, 255, 210, 230, 245, 1.4f, 1.4f, 200, 0, 0, 0);
+			}
 		}
 	}
 	const BYTE* bits = NULL; UINT stride = 0;
@@ -1138,6 +1145,7 @@ CSoft3DRaceDlg::CSoft3DRaceDlg(CWnd* p)
 	, m_knotN(0), m_pathLen(0), m_craftN(0), m_obsN(0), m_itemN(0)
 	, m_craftNv(0), m_craftNi(0), m_obsNv(0), m_obsNi(0)
 	, m_phase(PHASE_IDLE), m_countT(0), m_countShown(-1), m_podiumT(0)
+	, m_finishSimT(0), m_aiRaceLv(AI_NORMAL)
 	, m_themeActive(THEME_FOREST), m_lapsTarget(3), m_bandHalf(6.f)
 	, m_demoCamT(0.f), m_demoCamElev(0.f), m_demoMidX(0), m_demoMidY(0), m_demoMidZ(0), m_demoRad(80.f)
 	, m_camYawOff(0), m_camPitchOff(0.22f), m_camZoom(1.f)
@@ -1262,6 +1270,8 @@ void CSoft3DRaceDlg::LayoutAll()
 	if (m_theme.GetSafeHwnd()) {int v=savedata.s3r_theme; if(v<0)v=0; if(v>8)v=8; m_theme.CComboBox::SetCurSel(v);}
 	if (m_invert.GetSafeHwnd()) {int v=savedata.s3r_invert_y?1:0; m_invert.CComboBox::SetCurSel(v);}
 	CCC_CaptionLayout(m_hWnd); LayoutHelpBtn();
+	// SetWindowPos 後にアクリル穴が開くので opaque fixer を遅延再適用
+	PostMessage(CCC_MSG_REAPPLY_OPAQUE_FIXERS, 0, 0);
 }
 
 int CSoft3DRaceDlg::ReadAiFromUi(){ int s=m_ai.GetSafeHwnd()?(int)m_ai.CComboBox::GetCurSel():savedata.s3r_ai; if(s<0||s>=AI_COUNT)s=AI_NORMAL; return s; }
@@ -1292,23 +1302,41 @@ void CSoft3DRaceDlg::PersistUi()
 }
 void CSoft3DRaceDlg::PersistWindowRect()
 {
-	if (!GetSafeHwnd() || IsIconic()) return;
-	CRect r; GetWindowRect(&r);
-	int w=r.Width(), h=r.Height(); if (w < 200 || h < 160) return;
-	savedata.s3r_win_x=r.left; savedata.s3r_win_y=r.top; savedata.s3r_win_w=w; savedata.s3r_win_h=h;
+	// Create 直後(未表示)の OnSize で既定サイズを .dat に書いて復元値を潰さない
+	if (!GetSafeHwnd() || !IsWindowVisible() || IsIconic()) return;
+	WINDOWPLACEMENT wp = {};
+	wp.length = sizeof(wp);
+	if (!GetWindowPlacement(&wp)) return;
+	const RECT& r = wp.rcNormalPosition;
+	const int w = r.right - r.left;
+	const int h = r.bottom - r.top;
+	if (w < 320 || h < 240) return;
+	savedata.s3r_win_x = r.left;
+	savedata.s3r_win_y = r.top;
+	savedata.s3r_win_w = w;
+	savedata.s3r_win_h = h;
 	MpPersistSavedataQuick();
 }
 void CSoft3DRaceDlg::ApplySavedWindowRect()
 {
-	int w=savedata.s3r_win_w, h=savedata.s3r_win_h, x=savedata.s3r_win_x, y=savedata.s3r_win_y;
-	if (w < 480 || h < 360) return;
-	HMONITOR mon = MonitorFromPoint(CPoint(x+w/2,y+h/2), MONITOR_DEFAULTTONEAREST);
-	MONITORINFO mi={sizeof(mi)}; GetMonitorInfo(mon,&mi);
-	if (x < mi.rcWork.left) x = mi.rcWork.left;
-	if (y < mi.rcWork.top) y = mi.rcWork.top;
-	if (x+w > mi.rcWork.right) x = mi.rcWork.right - w;
-	if (y+h > mi.rcWork.bottom) y = mi.rcWork.bottom - h;
-	SetWindowPos(NULL,x,y,w,h,SWP_NOZORDER|SWP_NOACTIVATE);
+	if (!GetSafeHwnd()) return;
+	int w = savedata.s3r_win_w, h = savedata.s3r_win_h;
+	int x = savedata.s3r_win_x, y = savedata.s3r_win_y;
+	if (w < 320 || h < 240) return;
+	RECT rr = { x, y, x + w, y + h };
+	HMONITOR mon = MonitorFromRect(&rr, MONITOR_DEFAULTTONEAREST);
+	MONITORINFO mi = {};
+	mi.cbSize = sizeof(mi);
+	if (mon && GetMonitorInfo(mon, &mi)) {
+		const RECT& wa = mi.rcWork;
+		if (w > wa.right - wa.left) w = wa.right - wa.left;
+		if (h > wa.bottom - wa.top) h = wa.bottom - wa.top;
+		if (x < wa.left) x = wa.left;
+		if (y < wa.top) y = wa.top;
+		if (x + w > wa.right) x = wa.right - w;
+		if (y + h > wa.bottom) y = wa.bottom - h;
+	}
+	SetWindowPos(NULL, x, y, w, h, SWP_NOZORDER | SWP_NOACTIVATE);
 }
 void CSoft3DRaceDlg::CaptureAudioBaseline()
 {
@@ -1355,15 +1383,31 @@ float CSoft3DRaceDlg::SpeedScale() const
 }
 float CSoft3DRaceDlg::RaceSpeedCap(int boosted) const
 {
-	// 体感の最高付近 120km/h。長いコースはわずかに余裕
+	// 物理上限（表示は×20で空飛ぶ体感の km/h）
 	float u = 125.f / 3.6f;
 	u *= (0.96f + 0.08f * (CourseScale() / 1.1f));
-	if (boosted) u *= 1.12f; // ≈140km/h 一瞬
+	if (boosted) u *= 1.12f;
 	return u;
 }
 float CSoft3DRaceDlg::SpeedToKmh(float vx, float vy, float vz) const
 {
-	return sqrtf(vx * vx + vy * vy + vz * vz) * 3.6f;
+	// 表示のみ20倍（≈80→1600 km/h 帯）
+	return sqrtf(vx * vx + vy * vy + vz * vz) * 3.6f * 20.f;
+}
+float CSoft3DRaceDlg::BandSpeedFactor(float lat, float vert) const
+{
+	// コース帯の横軸（binormal）中央＝MAX。上下（normal）に離れるほど失速
+	const float half = max(0.01f, BandHalfWidth());
+	const float latN = fabsf(lat) / half;
+	const float vertN = fabsf(vert) / (half * 0.85f);
+	float f = 1.f - latN * 0.16f - vertN * 0.34f;
+	if (latN < 0.28f && vertN < 0.20f) {
+		const float sweet = (1.f - latN / 0.28f) * (1.f - vertN / 0.20f);
+		f += sweet * 0.10f; // 中央やや上乗せ
+	}
+	if (f < 0.58f) f = 0.58f;
+	if (f > 1.08f) f = 1.08f;
+	return f;
 }
 float CSoft3DRaceDlg::PathArcBetween(float t0, float t1) const
 {
@@ -2000,17 +2044,21 @@ void CSoft3DRaceDlg::ResetRaceState()
 		int j = (int)(S3rRand01(m_rng) * (float)(i + 1)); if (j < 0) j = 0; if (j > i) j = i;
 		int tmp=namePick[i]; namePick[i]=namePick[j]; namePick[j]=tmp;
 	}
-	// 超簡単〜強烈：やや易しめ（普通が楽しめる帯）
-	float aiLineTable[5]={0.52f, 0.62f, 0.74f, 0.85f, 0.92f};
+	// 超簡単〜強烈：全体を約10%弱め
+	float aiLineTable[5]={0.47f, 0.59f, 0.72f, 0.83f, 0.90f};
 	int aiLv=ReadAiFromUi();
+	m_aiRaceLv = aiLv;
+	m_finishSimT = 0.f;
 	for (int i=0;i<m_craftN;i++){
 		S3rCraft& c=m_crafts[i]; memset(&c,0,sizeof(c));
 		c.isPlayer=(i==0); c.alive=1; c.colorIdx=i%12; c.hp=100.f; c.fuel=100.f;
 		wcscpy_s(c.name, kS3rGirlNames[namePick[i % 100]]);
 		c.lapTimesN = 0;
-		c.pathT = (float)i * 0.012f; if(c.pathT>0.9f)c.pathT=0.01f;
+		// 短いコースでも追いつけるよう、スタート隊列は密着（旧0.012は長すぎ）
+		const float packT = 0.0034f;
+		c.pathT = (float)i * packT; if(c.pathT>0.9f)c.pathT=0.01f;
 		float px,py,pz,tx,ty,tz,nx,ny,nz,bx,by,bz; SplineFrame(c.pathT,px,py,pz,tx,ty,tz,nx,ny,nz,bx,by,bz);
-		float lane=(i-(m_craftN-1)*0.5f)*1.2f;
+		float lane=(i-(m_craftN-1)*0.5f)*0.52f;
 		c.x=px+bx*lane; c.y=py+by*lane; c.z=pz+bz*lane;
 		AlignCraftToPath(c, 0.06f);
 		if (c.isPlayer) {
@@ -2018,7 +2066,7 @@ void CSoft3DRaceDlg::ResetRaceState()
 		} else {
 			float tier = (m_craftN <= 2) ? 0.5f : (float)(i - 1) / (float)(m_craftN - 2);
 			float base = aiLineTable[aiLv];
-			c.aiSkill = S3rClamp(base + (tier - 0.5f) * 0.04f + (S3rRand01(m_rng) - 0.5f) * 0.03f, 0.45f, 0.95f);
+			c.aiSkill = S3rClamp(base + (tier - 0.5f) * 0.05f + (S3rRand01(m_rng) - 0.5f) * 0.02f, 0.42f, 0.92f);
 		}
 		// レーン好みは弱め（端寄り暴走→帯外ループを減らす）
 		c.aiSteerBias=(S3rRand01(m_rng)*2.f-1.f) * 0.55f;
@@ -2220,12 +2268,17 @@ void CSoft3DRaceDlg::UpdateRanks()
 	for (int i=0;i<m_craftN;i++){
 		S3rCraft& c=m_crafts[i];
 		c.lapProgress = (float)c.lap + c.pathT;
-		prog[i]=c.alive?(c.finished?1000.f+c.finishTime:c.lapProgress):-1.f;
+		prog[i]=c.alive?(c.finished?1000.f+(c.retired?1e6f:0.f)+c.finishTime:c.lapProgress):-1.f;
 		order[i]=i;
 	}
 	for (int i=0;i<m_craftN;i++) for (int j=i+1;j<m_craftN;j++){
 		BOOL swap=FALSE;
-		if (m_crafts[order[i]].finished && m_crafts[order[j]].finished) swap = m_crafts[order[i]].finishTime > m_crafts[order[j]].finishTime;
+		if (m_crafts[order[i]].finished && m_crafts[order[j]].finished) {
+			const int ri = m_crafts[order[i]].retired ? 1 : 0;
+			const int rj = m_crafts[order[j]].retired ? 1 : 0;
+			if (ri != rj) swap = ri > rj; // リタイアは完走の後ろ
+			else swap = m_crafts[order[i]].finishTime > m_crafts[order[j]].finishTime;
+		}
 		else if (m_crafts[order[i]].finished) swap=FALSE;
 		else if (m_crafts[order[j]].finished) swap=TRUE;
 		else swap = prog[order[i]] < prog[order[j]];
@@ -2244,7 +2297,7 @@ void CSoft3DRaceDlg::TickCountdown(float dt)
 		if (!c.alive) continue;
 		float px, py, pz, tx, ty, tz, nx, ny, nz, bx, by, bz;
 		SplineFrame(c.pathT, px, py, pz, tx, ty, tz, nx, ny, nz, bx, by, bz);
-		float lane = (i - (m_craftN - 1) * 0.5f) * 1.2f;
+		float lane = (i - (m_craftN - 1) * 0.5f) * 0.52f;
 		c.x = px + bx * lane;
 		c.y = py + by * lane;
 		c.z = pz + bz * lane;
@@ -2282,7 +2335,7 @@ void CSoft3DRaceDlg::TickCountdown(float dt)
 				S3rCraft& c = m_crafts[i];
 				float px, py, pz, tx, ty, tz, nx, ny, nz, bx, by, bz;
 				SplineFrame(c.pathT, px, py, pz, tx, ty, tz, nx, ny, nz, bx, by, bz);
-				float lane = (i - (m_craftN - 1) * 0.5f) * 1.2f;
+				float lane = (i - (m_craftN - 1) * 0.5f) * 0.52f;
 				c.x = px + bx * lane; c.y = py + by * lane; c.z = pz + bz * lane;
 				AlignCraftToPath(c, 0.06f);
 				float ax, ay, az; SplinePoint(c.pathT + 0.06f, ax, ay, az);
@@ -2319,7 +2372,7 @@ void CSoft3DRaceDlg::TickPodium(float dt)
 		c.y = m_podiumBaseY + ph[s] + 1.15f;
 		c.z = m_podiumBaseZ;
 		c.vx = c.vy = c.vz = 0.f;
-		c.yaw = 0.f; // カメラ（+Z）を向く
+		c.yaw = 0.f; // 機首 +Z＝カメラ側を向く
 		c.pitch = 0.f;
 		c.offBand = 0;
 	}
@@ -2339,11 +2392,74 @@ void CSoft3DRaceDlg::TickPodium(float dt)
 	}
 }
 
+float CSoft3DRaceDlg::AiPaceIndep(float sk) const
+{
+	// 難易度が高いほど自機ペースから独立（全体を約10%弱め）
+	static const float kIndep[5] = { 0.07f, 0.16f, 0.36f, 0.65f, 0.85f };
+	int lv = m_aiRaceLv;
+	if (lv < 0) lv = 0;
+	if (lv > 4) lv = 4;
+	float indep = kIndep[lv];
+	indep = S3rClamp(indep + (sk - 0.78f) * 0.15f, 0.f, 0.92f);
+	return indep;
+}
+
+BOOL CSoft3DRaceDlg::AllAliveFinished() const
+{
+	for (int i = 0; i < m_craftN; i++) {
+		const S3rCraft& c = m_crafts[i];
+		if (c.alive && !c.finished && !c.retired) return FALSE;
+	}
+	return TRUE;
+}
+
+void CSoft3DRaceDlg::RetireCraft(S3rCraft& c)
+{
+	if (!c.alive || c.finished || c.retired) return;
+	c.retired = 1;
+	c.finished = 1; // シミュ停止。偽ラップは付けない
+	c.finishTime = 1e6f + m_raceClock; // 完走者の後ろ
+	c.vx = c.vy = c.vz = 0.f;
+	m_standDirty = 1;
+}
+
+void CSoft3DRaceDlg::EnterPodium()
+{
+	m_podiumT = 0.f;
+	m_phase = PHASE_PODIUM;
+	int order[S3R_MAX_CRAFT];
+	int nOrd = 0;
+	// 完走者のみ表彰候補（リタイア除外）
+	for (int i = 0; i < m_craftN; i++) {
+		if (m_crafts[i].finished && !m_crafts[i].retired)
+			order[nOrd++] = i;
+	}
+	if (nOrd < 1) {
+		for (int i = 0; i < m_craftN; i++) order[nOrd++] = i;
+	}
+	for (int i = 0; i < nOrd; i++)
+		for (int j = i + 1; j < nOrd; j++)
+			if (m_crafts[order[i]].rank > m_crafts[order[j]].rank) {
+				int tmp = order[i]; order[i] = order[j]; order[j] = tmp;
+			}
+	m_podiumOrder[0] = order[0];
+	m_podiumOrder[1] = nOrd > 1 ? order[1] : order[0];
+	m_podiumOrder[2] = nOrd > 2 ? order[2] : order[0];
+	SplinePoint(0.f, m_podiumBaseX, m_podiumBaseY, m_podiumBaseZ);
+	m_podiumBaseY += 2.5f;
+	m_camSmoothInit = 0;
+	m_clearBakeText = LL14(L"表彰式", L"Podium", L"Podium", L"Podio", L"Podio", L"시상식", L"领奖台", L"منصة", L"Подиум", L"Podium", L"Pódio", L"Podium", L"Podium", L"Podyum");
+	m_clearBakeA = 1.f; m_clearDirty = 1;
+	m_standDirty = 1;
+	for (int i = 0; i < 96; i++) m_confetti[i][5] = 0.f;
+}
+
 void CSoft3DRaceDlg::TickAi(float dt)
 {
 	const float scv = SpeedScale();
 	const int demo = (m_phase == PHASE_DEMO) ? 1 : 0;
-	if (!demo && m_phase != PHASE_RACE) return;
+	const int finishRush = (!demo && m_phase == PHASE_FINISH) ? 1 : 0;
+	if (!demo && m_phase != PHASE_RACE && !finishRush) return;
 	const S3rCraft& pl = m_crafts[0];
 	const float plProg = (float)pl.lap + pl.pathT;
 	const float plNow = sqrtf(pl.vx*pl.vx + pl.vy*pl.vy + pl.vz*pl.vz);
@@ -2354,6 +2470,9 @@ void CSoft3DRaceDlg::TickAi(float dt)
 	if (demo) {
 		// デモは自機ペースに依存せず見やすい巡航速度で
 		paceRef = RaceSpeedCap(0) * 0.58f;
+	} else if (finishRush) {
+		// 自機ゴール後：残り機は上限付近で駆け込む
+		paceRef = RaceSpeedCap(0) * 0.96f;
 	}
 
 	const int i0 = demo ? 0 : 1;
@@ -2401,8 +2520,8 @@ void CSoft3DRaceDlg::TickAi(float dt)
 		}
 
 		// ライン固定中はカット禁止。クール明け＆技能高め＆燃料余裕のときだけ再挑戦
-		if (!cutting && !lineLock && !c.offBand && c.fuel > 75.f && sk >= 0.86f) {
-			float spans[2] = { 0.055f + 0.025f * sk, 0.08f + 0.035f * sk };
+		if (!cutting && !lineLock && !c.offBand && c.fuel > (finishRush ? 40.f : 68.f) && sk >= (finishRush ? 0.55f : 0.78f)) {
+			float spans[2] = { 0.050f + 0.030f * sk, 0.075f + 0.040f * sk };
 			float bestSave = 0.f, bestT = -1.f;
 			for (int s = 0; s < 2; s++) {
 				float tJoin = c.pathT + spans[s];
@@ -2492,33 +2611,46 @@ void CSoft3DRaceDlg::TickAi(float dt)
 		c.pitch = S3rLerp(c.pitch, wantPitch, min(1.f, turnRate * dt));
 		c.pitch = S3rClamp(c.pitch, -1.05f, 1.05f);
 
-		float targetSpd = paceRef * (0.88f + 0.16f * sk);
-		float hardCap = max(plNow, m_playerSpdEma) * (1.02f + 0.14f * sk);
-		if (hardCap < 9.f) hardCap = 9.f;
 		float raceCap = RaceSpeedCap(c.boostT > 0.f ? 1 : 0);
-		float softFloor = raceCap * (0.20f + 0.28f * sk);
+		float indep = finishRush ? 0.92f : AiPaceIndep(sk);
+		float rubber = paceRef * (0.86f + 0.18f * sk);
+		float freeT = raceCap * (0.66f + 0.22f * sk);
+		float targetSpd = S3rLerp(rubber, freeT, indep);
+		float hardCap = S3rLerp(
+			max(plNow, m_playerSpdEma) * (1.02f + 0.14f * sk),
+			raceCap * (0.88f + 0.06f * sk),
+			indep);
+		if (hardCap < 9.f) hardCap = 9.f;
+		float softFloor = raceCap * (0.24f + 0.32f * sk);
+		if (finishRush) softFloor = raceCap * (0.72f + 0.12f * sk);
 		if (targetSpd < softFloor) targetSpd = softFloor;
 		if (hardCap < softFloor) hardCap = softFloor;
 		if (hardCap > raceCap) hardCap = raceCap;
 		if (targetSpd > hardCap) targetSpd = hardCap;
 
 		float lead = ((float)c.lap + c.pathT) - plProg;
-		if (lead > 0.08f) {
-			float cut = S3rSaturate((lead - 0.08f) / 0.30f);
-			targetSpd *= (1.f - cut * (0.40f - 0.10f * sk));
-		} else if (lead < -0.08f) {
-			float catchUp = S3rSaturate((-lead - 0.08f) / 0.35f);
-			targetSpd *= (1.f + catchUp * (0.08f + 0.10f * sk));
+		// 高難易度は先行をあまり抑えない（強烈はリード維持可）
+		if (!finishRush && lead > 0.10f && indep < 0.85f) {
+			float cut = S3rSaturate((lead - 0.10f) / 0.35f);
+			targetSpd *= (1.f - cut * (0.30f - 0.16f * indep) * (1.f - 0.50f * sk));
+		} else if (lead < -0.04f) {
+			float catchUp = S3rSaturate((-lead - 0.04f) / 0.30f);
+			targetSpd *= (1.f + catchUp * (0.12f + 0.22f * sk + 0.18f * indep));
+			if (finishRush) targetSpd = max(targetSpd, raceCap * 0.82f);
 			if (targetSpd > hardCap) targetSpd = hardCap;
 		}
 
-		float thrust = (44.f + 28.f * sk) * scv;
+		float thrust = (46.f + 42.f * sk) * scv;
+		if (finishRush) thrust *= 1.20f;
 		if (cutting) {
-			thrust *= 1.08f;
-			targetSpd = min(max(targetSpd, raceCap * (0.62f + 0.16f * sk)), raceCap * 0.90f);
+			thrust *= 1.12f;
+			targetSpd = min(max(targetSpd, raceCap * (0.66f + 0.18f * sk)), raceCap * 0.94f);
 		} else if (c.offBand) {
 			thrust *= 0.12f;
 			targetSpd = min(targetSpd, 30.f / 3.6f);
+		} else {
+			thrust *= BandSpeedFactor(lat, vert);
+			targetSpd *= BandSpeedFactor(lat, vert);
 		}
 		float spdNow = sqrtf(c.vx*c.vx + c.vy*c.vy + c.vz*c.vz);
 		if (spdNow > targetSpd) thrust *= 0.06f;
@@ -2625,13 +2757,18 @@ void CSoft3DRaceDlg::TickPhysics(float dt)
 		BOOL brake = m_brakeHeld || (joy.connected && (joy.lt > 0.15f || (joy.buttons & 2)));
 		float fx=sinf(pl.yaw)*cosf(pl.pitch), fy=sinf(pl.pitch), fz=cosf(pl.yaw)*cosf(pl.pitch);
 		const float scv = SpeedScale();
-		// 直線で約120km/h付近に届く推力（キャップと対）
+		// 直線で物理上限付近に届く推力（表示は×20）
 		float thrust = accel ? (72.f * scv) : 0.f;
 		if (pl.boostT>0) thrust *= 1.25f;
 		if (pl.slowT>0) thrust *= 0.55f;
 		if (pl.fuel < 5.f) thrust *= 0.25f;
 		if (pl.fuel <= 0.01f) thrust = 0.f;
 		if (pl.offBand) thrust *= 0.55f;
+		else {
+			float plat, pvert, pcx, pcy, pcz;
+			BandLocal(pl.x, pl.y, pl.z, pl.pathT, plat, pvert, pcx, pcy, pcz);
+			thrust *= BandSpeedFactor(plat, pvert);
+		}
 		if (accel) { pl.vx+=fx*thrust*dt; pl.vy+=fy*thrust*dt; pl.vz+=fz*thrust*dt; }
 		// 急勾配：アクセル中はコース接線の上昇成分を補助（ピッチ制限だけでは足りない対策）
 		if (accel && thrust > 1.f && !pl.offBand) {
@@ -2705,23 +2842,35 @@ void CSoft3DRaceDlg::TickPhysics(float dt)
 			float damp = lin + quad * spd + curveDrag;
 			c.vx*=(1.f-damp*dt); c.vy*=(1.f-damp*dt); c.vz*=(1.f-damp*dt);
 		}
-		// 絶対上限 ≈120km/h（ブースト時やや上）。敵も同じ世界の法則
+		// 絶対上限（帯横軸中央で最大。上下に浮くと落ちる）
 		float maxSpd = RaceSpeedCap(c.boostT > 0.f ? 1 : 0);
 		if (!c.isPlayer || demo) {
 			const float plNow = sqrtf(m_crafts[0].vx*m_crafts[0].vx + m_crafts[0].vy*m_crafts[0].vy + m_crafts[0].vz*m_crafts[0].vz);
-			float pace = demo ? (RaceSpeedCap(0) * 0.58f) : m_playerSpdEma;
-			if (!demo && pace < plNow) pace = plNow;
+			const int finishRush = (!demo && m_phase == PHASE_FINISH) ? 1 : 0;
+			float pace = demo ? (RaceSpeedCap(0) * 0.58f) : (finishRush ? RaceSpeedCap(0) * 0.96f : m_playerSpdEma);
+			if (!demo && !finishRush && pace < plNow) pace = plNow;
 			if (pace < 6.f) pace = 6.f;
 			float sk = c.aiSkill;
 			if (demo && c.isPlayer && sk < 0.45f) sk = 0.70f;
-			float aiCap = pace * (0.88f + 0.16f * sk);
-			float hardCap = demo ? (pace * (1.05f + 0.12f * sk)) : (max(plNow, m_playerSpdEma) * (1.02f + 0.14f * sk));
-			float softFloor = RaceSpeedCap(0) * (0.20f + 0.28f * sk);
+			float indep = demo ? 0.50f : (finishRush ? 0.92f : AiPaceIndep(sk));
+			float rubber = pace * (0.86f + 0.18f * sk);
+			float freeT = maxSpd * (0.66f + 0.22f * sk);
+			float aiCap = S3rLerp(rubber, freeT, indep);
+			float hardCap = demo
+				? (pace * (1.05f + 0.12f * sk))
+				: S3rLerp(max(plNow, m_playerSpdEma) * (1.02f + 0.14f * sk), maxSpd * (0.88f + 0.06f * sk), indep);
+			float softFloor = maxSpd * (0.24f + 0.32f * sk);
+			if (finishRush) softFloor = maxSpd * (0.72f + 0.12f * sk);
 			if (aiCap < softFloor) aiCap = softFloor;
 			if (hardCap < softFloor) hardCap = softFloor;
 			if (hardCap < 9.f) hardCap = 9.f;
 			if (aiCap > hardCap) aiCap = hardCap;
 			if (aiCap < maxSpd) maxSpd = aiCap;
+		}
+		{
+			float blat, bvert, bcx, bcy, bcz;
+			BandLocal(c.x, c.y, c.z, c.pathT, blat, bvert, bcx, bcy, bcz);
+			maxSpd *= BandSpeedFactor(blat, bvert);
 		}
 		if (c.offBand) {
 			// 計画カット中だけ帯外でもレース速度を維持（事故帯外は≈30km/h）
@@ -2880,13 +3029,21 @@ void CSoft3DRaceDlg::TickPhysics(float dt)
 			while (dT < -0.5f) dT += 1.f;
 			float minLap = (m_pathLen > 1.f) ? (m_pathLen / 220.f) : 12.f;
 			if (minLap < 10.f) minLap = 10.f;
+			// 物理上限付近でも届かない短タイムは誤ラップ／高速シミュ飛越し
+			float honestMin = (m_pathLen > 1.f) ? (m_pathLen / max(1.f, RaceSpeedCap(1) * 1.25f)) : minLap;
+			if (honestMin < minLap) honestMin = minLap;
+			if (m_phase == PHASE_FINISH) {
+				float rushMin = (m_pathLen > 1.f) ? (m_pathLen / max(1.f, RaceSpeedCap(1) * 1.40f)) : 25.f;
+				if (rushMin < 25.f) rushMin = 25.f;
+				if (honestMin < rushMin) honestMin = rushMin;
+			}
 			BOOL crossed = (prevT > 0.82f && c.pathT < 0.18f && dT > 0.f && dT < 0.35f);
 			// スタート付近に実在することも要求（pathTだけ飛んでも無効）
 			float sx,sy,sz; SplinePoint(0.f, sx,sy,sz);
 			float dx=c.x-sx, dy=c.y-sy, dz=c.z-sz;
 			float nearStart = dx*dx+dy*dy+dz*dz;
 			float startR = BandHalfWidth() * 3.5f;
-			if (crossed && c.raceTime >= minLap && nearStart < startR*startR) {
+			if (crossed && c.raceTime >= honestMin && nearStart < startR*startR) {
 				if (c.lapTimesN < 12) {
 					c.lapTimes[c.lapTimesN] = c.raceTime;
 					c.lapTimesN++;
@@ -2901,7 +3058,7 @@ void CSoft3DRaceDlg::TickPhysics(float dt)
 					} else {
 						c.finished = 1; c.finishTime = m_raceClock;
 						if (c.isPlayer) {
-							m_phase = PHASE_FINISH; m_podiumT = 0.f;
+							m_phase = PHASE_FINISH; m_podiumT = 0.f; m_finishSimT = 0.f;
 							m_clearBakeText = LL14(L"FINISH!", L"FINISH!", L"ARRIVÉE!", L"ARRIVO!", L"¡META!", L"피니시!", L"完赛!", L"نهاية!", L"ФИНИШ!", L"ZIEL!", L"CHEGADA!", L"FINISH!", L"META!", L"BİTİŞ!");
 							m_clearBakeA=1.f; m_clearDirty=1; m_overlayHold = 99.f;
 						}
@@ -2965,14 +3122,14 @@ void CSoft3DRaceDlg::TickPhysics(float dt)
 		if (c.hp <= 0.f) {
 			c.hp=0; c.alive=0; c.smokeT=8.f;
 			if (c.isPlayer) {
-				m_phase = PHASE_FINISH; m_podiumT = 0.f;
+				m_phase = PHASE_FINISH; m_podiumT = 0.f; m_finishSimT = 0.f;
 				m_clearBakeText = LL14(L"GAME OVER", L"GAME OVER", L"GAME OVER", L"GAME OVER", L"GAME OVER", L"게임 오버", L"游戏结束", L"انتهت", L"КОНЕЦ", L"GAME OVER", L"FIM DE JOGO", L"GAME OVER", L"KONIEC", L"OYUN BİTTİ");
 				m_clearBakeA=1.f; m_clearDirty=1;
 			}
 		}
 	}
 
-	if (m_phase == PHASE_RACE) m_raceClock += dt;
+	if (m_phase == PHASE_RACE || m_phase == PHASE_FINISH) m_raceClock += dt;
 	else if (demo) m_raceClock += dt;
 	UpdateRanks();
 }
@@ -3047,6 +3204,7 @@ void CSoft3DRaceDlg::EnsureStandingsBake()
 		r.cr = kCraftColors[c.colorIdx][0];
 		r.cg = kCraftColors[c.colorIdx][1];
 		r.cb = kCraftColors[c.colorIdx][2];
+		r.retired = c.retired ? 1 : 0;
 		// 常に直近3枠（未計測は ----）。4周目以降は枠が LAP2/3/4… とずれる
 		int nDone = c.lapTimesN;
 		int start = 0;
@@ -3186,7 +3344,7 @@ void CSoft3DRaceDlg::RenderScene()
 
 	// course ribbon patches along spline
 	phase=0;
-	const int segs = 220;
+	const int segs = (m_phase == PHASE_PODIUM) ? 48 : 220;
 	float half = BandHalfWidth();
 	for (int i=0;i<segs;i++){
 		float t0=(float)i/segs, t1=(float)(i+1)/segs;
@@ -3280,13 +3438,16 @@ void CSoft3DRaceDlg::RenderScene()
 	// 景色オブジェクト（VB残量から描画数を決める — 途中切断＝破綻を防ぐ）
 	{
 		int order[S3R_MAX_OBS]; float dist2[S3R_MAX_OBS]; int nCand=0;
-		for (int i=0;i<m_obsN && nCand<S3R_MAX_OBS;i++){
+		const int skipDecor = (m_phase == PHASE_PODIUM) ? 1 : 0;
+		for (int i=0;!skipDecor && i<m_obsN && nCand<S3R_MAX_OBS;i++){
 			float odx=m_obs[i].x-cx,ody=m_obs[i].y-cy,odz=m_obs[i].z-cz;
 			float d2=odx*odx+ody*ody+odz*odz;
 			if (d2 > 420.f*420.f) continue;
 			order[nCand]=i; dist2[nCand]=d2; nCand++;
 		}
-		const int craftReserve = (m_craftN > 0 ? m_craftN : 6) * (m_craftNi > 0 ? m_craftNi : 4000) + 8000;
+		const int craftReserve = (m_phase == PHASE_PODIUM)
+			? (3 * (m_craftNi > 0 ? m_craftNi : 4000) + 12000)
+			: ((m_craftN > 0 ? m_craftN : 6) * (m_craftNi > 0 ? m_craftNi : 4000) + 8000);
 		UINT usedNow = nBand + nWorld + nCraft + nTrans;
 		UINT room = (maxV > usedNow + (UINT)craftReserve) ? (maxV - usedNow - (UINT)craftReserve) : 0;
 		int perObs = m_obsNi > 0 ? m_obsNi : 1;
@@ -3306,17 +3467,29 @@ void CSoft3DRaceDlg::RenderScene()
 	}
 	// crafts — キャラ専用テクスチャパス
 	phase=2;
-	// 表彰台（1位中央・2位左・3位右）
+	// 表彰台（1位中央・2位左・3位右）— ワールドは TRIANGLELIST なので 6頂点/面
 	if (m_phase == PHASE_PODIUM) {
+		auto tri = [&](float ax, float ay, float az, float bx, float by, float bz, float cx2, float cy2, float cz2,
+			float nx, float ny, float nz, float r, float g, float b) {
+			put(ax, ay, az, nx, ny, nz, 0, 0, r, g, b, 1);
+			put(bx, by, bz, nx, ny, nz, 1, 0, r, g, b, 1);
+			put(cx2, cy2, cz2, nx, ny, nz, .5f, 1, r, g, b, 1);
+		};
 		auto box = [&](float x, float y0, float z, float hx, float hy, float hz, float r, float g, float b) {
 			float y1 = y0 + hy;
+			float x0 = x - hx, x1 = x + hx, z0 = z - hz, z1 = z + hz;
 			// top
-			patch(x-hx,y1,z-hz, x+hx,y1,z-hz, x+hx,y1,z+hz, x-hx,y1,z+hz, 0,1,0, 0,0,1,1, r,g,b,1);
-			// sides
-			patch(x-hx,y0,z+hz, x+hx,y0,z+hz, x+hx,y1,z+hz, x-hx,y1,z+hz, 0,0,1, 0,0,1,1, r*.85f,g*.85f,b*.85f,1);
-			patch(x+hx,y0,z-hz, x-hx,y0,z-hz, x-hx,y1,z-hz, x+hx,y1,z-hz, 0,0,-1, 0,0,1,1, r*.75f,g*.75f,b*.75f,1);
-			patch(x-hx,y0,z-hz, x-hx,y0,z+hz, x-hx,y1,z+hz, x-hx,y1,z-hz, -1,0,0, 0,0,1,1, r*.7f,g*.7f,b*.7f,1);
-			patch(x+hx,y0,z+hz, x+hx,y0,z-hz, x+hx,y1,z-hz, x+hx,y1,z+hz, 1,0,0, 0,0,1,1, r*.9f,g*.9f,b*.9f,1);
+			tri(x0, y1, z0, x1, y1, z0, x1, y1, z1, 0, 1, 0, r, g, b);
+			tri(x0, y1, z0, x1, y1, z1, x0, y1, z1, 0, 1, 0, r, g, b);
+			// +Z / -Z / -X / +X
+			tri(x0, y0, z1, x1, y0, z1, x1, y1, z1, 0, 0, 1, r * .85f, g * .85f, b * .85f);
+			tri(x0, y0, z1, x1, y1, z1, x0, y1, z1, 0, 0, 1, r * .85f, g * .85f, b * .85f);
+			tri(x1, y0, z0, x0, y0, z0, x0, y1, z0, 0, 0, -1, r * .75f, g * .75f, b * .75f);
+			tri(x1, y0, z0, x0, y1, z0, x1, y1, z0, 0, 0, -1, r * .75f, g * .75f, b * .75f);
+			tri(x0, y0, z0, x0, y0, z1, x0, y1, z1, -1, 0, 0, r * .7f, g * .7f, b * .7f);
+			tri(x0, y0, z0, x0, y1, z1, x0, y1, z0, -1, 0, 0, r * .7f, g * .7f, b * .7f);
+			tri(x1, y0, z1, x1, y0, z0, x1, y1, z0, 1, 0, 0, r * .9f, g * .9f, b * .9f);
+			tri(x1, y0, z1, x1, y1, z0, x1, y1, z1, 1, 0, 0, r * .9f, g * .9f, b * .9f);
 		};
 		phase = 1;
 		float y0 = m_podiumBaseY;
@@ -3324,12 +3497,22 @@ void CSoft3DRaceDlg::RenderScene()
 		box(m_podiumBaseX-5.2f, y0, m_podiumBaseZ, 1.5f, 2.8f, 1.5f, .72f, .76f, .82f); // 2nd silver
 		box(m_podiumBaseX+5.2f, y0, m_podiumBaseZ, 1.5f, 1.8f, 1.5f, .78f, .48f, .28f); // 3rd bronze
 		phase = 2;
-	}
-	for (int i=0;i<m_craftN;i++){
-		S3rCraft& c=m_crafts[i];
-		float cr=kCraftColors[c.colorIdx][0], cg=kCraftColors[c.colorIdx][1], cb=kCraftColors[c.colorIdx][2];
-		float a = c.alive ? 1.f : 0.35f;
-		if(!emitIndexed(m_craftVert, m_craftIdx, m_craftNv, m_craftNi, c.x,c.y,c.z, c.yaw,c.pitch, 1.1f,1.1f,1.1f, cr,cg,cb,a)) break;
+		// 表彰中は台の3機だけ完全描画（他機でVBが切れて機体が欠けるのを防ぐ）
+		for (int s = 0; s < 3; s++) {
+			int ci = m_podiumOrder[s];
+			if (ci < 0 || ci >= m_craftN) continue;
+			S3rCraft& c = m_crafts[ci];
+			float cr = kCraftColors[c.colorIdx][0], cg = kCraftColors[c.colorIdx][1], cb = kCraftColors[c.colorIdx][2];
+			if (!emitIndexed(m_craftVert, m_craftIdx, m_craftNv, m_craftNi, c.x, c.y, c.z, c.yaw, c.pitch, 1.25f, 1.25f, 1.25f, cr, cg, cb, 1.f))
+				break;
+		}
+	} else {
+		for (int i = 0; i < m_craftN; i++) {
+			S3rCraft& c = m_crafts[i];
+			float cr = kCraftColors[c.colorIdx][0], cg = kCraftColors[c.colorIdx][1], cb = kCraftColors[c.colorIdx][2];
+			float a = c.alive ? 1.f : 0.35f;
+			if (!emitIndexed(m_craftVert, m_craftIdx, m_craftNv, m_craftNi, c.x, c.y, c.z, c.yaw, c.pitch, 1.1f, 1.1f, 1.1f, cr, cg, cb, a)) break;
+		}
 	}
 	// sky cards + items（深度書き込みなし）
 	phase=3;
@@ -3600,7 +3783,7 @@ void CSoft3DRaceDlg::RenderScene()
 			float panelH = slotH * (float)n;
 			float sy1 = availTop;
 			float sy0 = sy1 - panelH;
-			ht(0.58f, sy0, 0.99f, sy1, 0.98f);
+			ht(0.54f, sy0, 0.995f, sy1, 0.98f);
 			flushHud(m_view.m_srvStand);
 		}
 
@@ -3912,25 +4095,32 @@ void CSoft3DRaceDlg::TickFrame()
 	else if (m_phase == PHASE_DEMO) {
 		TickDemo(dt);
 	} else if (m_phase == PHASE_RACE || m_phase == PHASE_FINISH) {
-		TickPhysics(dt);
-		TickItems(dt);
-		// transition to podium
-		if (m_phase == PHASE_FINISH && (m_crafts[0].finished || !m_crafts[0].alive)) {
-			m_podiumT += dt;
-			if (m_podiumT > 2.2f) {
-				m_podiumT = 0.f;
-				m_phase = PHASE_PODIUM;
-				int order[S3R_MAX_CRAFT]; for (int i=0;i<m_craftN;i++) order[i]=i;
-				for (int i=0;i<m_craftN;i++) for (int j=i+1;j<m_craftN;j++) if (m_crafts[order[i]].rank > m_crafts[order[j]].rank) { int t=order[i]; order[i]=order[j]; order[j]=t; }
-				m_podiumOrder[0]=order[0]; m_podiumOrder[1]=m_craftN>1?order[1]:order[0]; m_podiumOrder[2]=m_craftN>2?order[2]:order[0];
-				SplinePoint(0.f, m_podiumBaseX, m_podiumBaseY, m_podiumBaseZ);
-				m_podiumBaseY += 2.5f;
-				m_camSmoothInit = 0;
-				m_clearBakeText = LL14(L"表彰式", L"Podium", L"Podium", L"Podio", L"Podio", L"시상식", L"领奖台", L"منصة", L"Подиум", L"Podium", L"Pódio", L"Podium", L"Podium", L"Podyum");
-				m_clearBakeA=1.f; m_clearDirty=1;
-				m_standDirty=1;
-				for (int i = 0; i < 96; i++) m_confetti[i][5] = 0.f;
+		if (m_phase == PHASE_FINISH) {
+			// 自機ゴール後：残り生存機を裏で高速シミュして全LAP埋め → 表彰
+			if (AllAliveFinished()) {
+				m_podiumT += dt;
+				if (m_podiumT > 0.85f) EnterPodium();
+			} else {
+				const int steps = 10;
+				const float stepDt = 0.045f; // ≈10x 実時間
+				for (int s = 0; s < steps; s++) {
+					TickPhysics(stepDt);
+					TickItems(stepDt);
+					m_finishSimT += stepDt;
+					if (AllAliveFinished()) break;
+				}
+				// 詰まった場合はリタイア（偽ラップは付けない）
+				if (!AllAliveFinished() && m_finishSimT > 75.f) {
+					for (int i = 0; i < m_craftN; i++)
+						if (m_crafts[i].alive && !m_crafts[i].finished && !m_crafts[i].retired)
+							RetireCraft(m_crafts[i]);
+					UpdateRanks();
+				}
+				m_standDirty = 1;
 			}
+		} else {
+			TickPhysics(dt);
+			TickItems(dt);
 		}
 	} else if (m_phase == PHASE_PODIUM) {
 		TickPodium(dt);
