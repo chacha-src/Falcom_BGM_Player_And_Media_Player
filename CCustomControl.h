@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "stdafx.h"
 #include "afxdialogex.h"
@@ -54,6 +54,8 @@ struct CCC_ChromaBlitCache {
     void ScrollRows(int y, int height, int scrollPx);
     void ScrollCols(int x, int y, int width, int height, int scrollPx);
     BOOL UpdateRect(HDC hdcSrc, int srcX, int srcY, int dx, int dy, int rw, int rh, COLORREF clrKey);
+    // クロマ無し: BitBlt + α=255。キャプションガラス下の本文提示用（差分更新向き）
+    BOOL UpdateOpaqueRect(HDC hdcSrc, int srcX, int srcY, int dx, int dy, int rw, int rh);
     BOOL FillOpaqueRect(int x, int y, int rw, int rh, COLORREF color, COLORREF chromaKey);
     BOOL BlitRect(HDC hdcDest, int x, int y, int w, int h);
     BOOL BlitFull(HDC hdcDest, int x, int y, int w, int h);
@@ -874,6 +876,8 @@ public:
         m_bAeroMode = b;
         if (GetSafeHwnd()) Invalidate();
     }
+
+    virtual BOOL PreTranslateMessage(MSG* pMsg);
 
     // CCustomOpaqueFixer 用: 外側の BufferedPaint バッファへ直接描画
     void PaintOpaqueIntoBuffer(HDC hdcBuf);

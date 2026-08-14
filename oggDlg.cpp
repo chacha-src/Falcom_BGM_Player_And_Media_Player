@@ -22389,6 +22389,23 @@ void COggDlg::timerp()
 	}
 
 
+	// ピアノ/アナライザは Speana より前に同期する。
+	// PostMessage だと Speana(TRUE)/Soft3D バナーFFT が終わるまでキューに残り、
+	// 履歴スクロール・dB だけ「間隔が長い」体感になる（リサイズが軽い理由と同根）。
+	// Invalidate だけだと描画も Speana 後になるので、ここで UpdateWindow まで消化する。
+	if (plf == 1 && ::IsWindow(m_PianoRollDlg->GetSafeHwnd()) && Ms2DrawDue(ms2)) {
+		m_PianoRollDlg->PumpSyncNow();
+		if (::IsWindow(m_PianoRollDlg->GetSafeHwnd())
+			&& m_PianoRollDlg->IsWindowVisible() && !m_PianoRollDlg->IsIconic())
+			m_PianoRollDlg->UpdateWindow();
+	}
+	if (plf == 1 && ::IsWindow(m_AnalyzerDlg->GetSafeHwnd()) && Ms2DrawDue(ms2)) {
+		m_AnalyzerDlg->PumpSyncNow();
+		if (::IsWindow(m_AnalyzerDlg->GetSafeHwnd())
+			&& m_AnalyzerDlg->IsWindowVisible() && !m_AnalyzerDlg->IsIconic())
+			m_AnalyzerDlg->UpdateWindow();
+	}
+
 	// スペアナは XOR バナー文字(name/arti/albu)より先に dc へ描く。
 	// 非同期(WM_SPEANA_TICK)化すると Speana() が文字の後に不透明の棒を上書きし、
 	// XOR 合成が棒に覆われて無効化される（バナー文字が見えなくなるデグレ）。
@@ -22407,10 +22424,6 @@ void COggDlg::timerp()
 		if (!menuTracking && soft3dBanner && plf == 1 && (wav || ogg || m_dsb))
 			Speana(FALSE, TRUE);
 	}
-	if (plf == 1 && ::IsWindow(m_PianoRollDlg->GetSafeHwnd()) && Ms2DrawDue(ms2))
-		m_PianoRollDlg->RequestSyncFromMainUi();
-	if (plf == 1 && ::IsWindow(m_AnalyzerDlg->GetSafeHwnd()) && Ms2DrawDue(ms2))
-		m_AnalyzerDlg->RequestSyncFromMainUi();
 	s = L""; ss = L"";
 	s = "name:";
 	int nameLabelW = moji(s, 1, 0, 0xffffff);

@@ -30,6 +30,8 @@ public:
     virtual ~CPianoRoll();
 
     void RequestSyncFromMainUi();
+    // timerp から Speana より前に呼ぶ。Post だと Speana/Soft3D 終了まで届かず間隔だけ伸びる。
+    void PumpSyncNow();
 
 #ifdef AFX_DESIGN_TIME
     enum { IDD = IDD_PIANOROLL };

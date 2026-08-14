@@ -213,8 +213,24 @@ void CListCtrlA::PreSubclassWindow()
 
 BOOL CListCtrlA::PreTranslateMessage(MSG* pMsg) 
 {
-	// TODO: この位置に固有の処理を追加するか、または基本クラスを呼び出してください
-//	::SendMessage(m_hWnd, TTM_RELAYEVENT, 0, (LPARAM)pMsg);
+	// 親がツールチップ用にリレーしても、フォーカスがこのリストのときだけ扱う
+	if (pMsg && pMsg->hwnd == m_hWnd) {
+		if (pMsg->message == WM_KEYDOWN
+			&& (pMsg->wParam == 'A' || pMsg->wParam == 'a')
+			&& (GetKeyState(VK_CONTROL) & 0x8000) != 0
+			&& (GetKeyState(VK_MENU) & 0x8000) == 0) {
+			if ((GetStyle() & LVS_SINGLESEL) == 0 && GetItemCount() > 0) {
+				SetRedraw(FALSE);
+				SetItemState(-1, LVIS_SELECTED, LVIS_SELECTED);
+				SetRedraw(TRUE);
+				Invalidate(FALSE);
+			}
+			return TRUE;
+		}
+		// Ctrl+A の WM_CHAR(1) でシステムビープしない
+		if (pMsg->message == WM_CHAR && pMsg->wParam == 1)
+			return TRUE;
+	}
 	return CListCtrl::PreTranslateMessage(pMsg);
 }
 

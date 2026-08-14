@@ -974,7 +974,9 @@ BOOL COggApp::InitInstance()
 			if (savedata.s3m_minimap < 8 || savedata.s3m_minimap > 16) savedata.s3m_minimap = 10;
 			if (savedata.s3m_minimap & 1) savedata.s3m_minimap++;
 			if (savedata.s3m_show_map) savedata.s3m_show_map = 1;
-			if (savedata.s3m_item_mask <= 0)
+			if (savedata.s3m_item_mask < 0)
+				savedata.s3m_item_mask = -1; // 全OFF
+			else if (savedata.s3m_item_mask == 0)
 				savedata.s3m_item_mask = 16383;
 			else if (savedata.s3m_item_mask == 63)
 				savedata.s3m_item_mask = 16383; // 旧「全アイテム」→新種含む

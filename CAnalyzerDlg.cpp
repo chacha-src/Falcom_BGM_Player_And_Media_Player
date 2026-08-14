@@ -1169,6 +1169,28 @@ void CAnalyzerDlg::RequestSyncFromMainUi()
 	PostMessage(WM_ANALYZER_SYNC, 0, 0);
 }
 
+void CAnalyzerDlg::PumpSyncNow()
+{
+	if (!::IsWindow(m_hWnd) || !IsWindowVisible() || IsIconic()) return;
+	int minMs = savedata.ms2;
+	if (minMs < 16) minMs = 16;
+	if (minMs > 960) minMs = 960;
+	if (tempo != 200 || pitch != 200) {
+		minMs *= 2;
+		if (minMs < 32) minMs = 32;
+	}
+	const DWORD now = GetTickCount();
+	if (m_lastSyncPostTick != 0 && (now - m_lastSyncPostTick) < (DWORD)minMs)
+		return;
+	if (InterlockedCompareExchange(&m_syncPosted, 0, 0) != 0) {
+		MSG msg;
+		while (::PeekMessage(&msg, m_hWnd, WM_ANALYZER_SYNC, WM_ANALYZER_SYNC, PM_REMOVE)) {}
+		InterlockedExchange(&m_syncPosted, 0);
+	}
+	m_lastSyncPostTick = now;
+	COggDlg_SyncAnalyzerFast();
+}
+
 LRESULT CAnalyzerDlg::OnSyncRequest(WPARAM, LPARAM)
 {
 	InterlockedExchange(&m_syncPosted, 0);

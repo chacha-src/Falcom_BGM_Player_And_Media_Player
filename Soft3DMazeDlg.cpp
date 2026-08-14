@@ -713,11 +713,17 @@ static int S3mClampMapSize(int n)
 static int S3mItemMask()
 {
 	int m = savedata.s3m_item_mask;
-	if (m <= 0) m = CSoft3DMazeDlg::ITEM_ALL;
+	if (m < 0) return 0; // 明示的に全OFF
+	if (m == 0) m = CSoft3DMazeDlg::ITEM_ALL;
 	// 旧マスク(0x3F=全旧アイテム)は新種も有効にする
 	if ((m & 0x3F) == 0x3F && (m & ~0x3F) == 0)
 		m = CSoft3DMazeDlg::ITEM_ALL;
 	return m & CSoft3DMazeDlg::ITEM_ALL;
+}
+static void S3mSetItemMask(int m)
+{
+	m &= CSoft3DMazeDlg::ITEM_ALL;
+	savedata.s3m_item_mask = (m == 0) ? -1 : m;
 }
 
 static int S3mNormalizeSavedSize(int sz)
@@ -2000,6 +2006,7 @@ void CSoft3DMazeDlg::PersistUi()
 	savedata.s3m_minimap = S3mClampMapSize(savedata.s3m_minimap);
 	if (savedata.s3m_show_map != 0) savedata.s3m_show_map = 1;
 	savedata.s3m_item_mask = S3mItemMask();
+	if (savedata.s3m_item_mask == 0) savedata.s3m_item_mask = -1;
 	savedata.s3m_bob = savedata.s3m_bob ? 1 : 0;
 	if (savedata.s3m_fov < 0 || savedata.s3m_fov > 2) savedata.s3m_fov = 1;
 	if (savedata.s3m_zoom < 50 || savedata.s3m_zoom > 250) savedata.s3m_zoom = 100;
@@ -3000,8 +3007,8 @@ void CSoft3DMazeDlg::GenerateMazeWithSeed(DWORD seed, int forceSize)
 	m_rng=seed;
 
 	const int diff = savedata.s3m_difficulty;
-	// アイテムは効果用：難しい側でも減らさない（やや多め）
-	static const float kItemScale[DIFF_COUNT] = { 1.5f, 1.35f, 1.25f, 1.4f, 1.6f };
+	// アイテムは効果用。過密にならないよう難易度差は小さめ
+	static const float kItemScale[DIFF_COUNT] = { 0.85f, 0.95f, 1.0f, 1.05f, 1.1f };
 	static const float kWinScale[DIFF_COUNT] = { 0.5f, 0.75f, 1.0f, 1.2f, 1.4f };
 	const float itemSc = (diff >= 0 && diff < DIFF_COUNT) ? kItemScale[diff] : 1.f;
 	const float winSc = (diff >= 0 && diff < DIFF_COUNT) ? kWinScale[diff] : 1.f;
@@ -3061,13 +3068,27 @@ void CSoft3DMazeDlg::GenerateMazeWithSeed(DWORD seed, int forceSize)
 	if (mask & ITEM_XFADE) kinds[nk++] = CELL_XFADE;
 	if (mask & ITEM_EQ_FLAT) kinds[nk++] = CELL_EQ_FLAT;
 	if (mask & ITEM_RANDOM) kinds[nk++] = CELL_RANDOM;
-	int itemBudget = nk > 0 ? (10 + m_n / 6 + nk) : 0;
-	itemBudget = (int)((float)itemBudget * itemSc + 0.5f);
-	itemBudget = min(320, itemBudget * max(1, m_nFloors));
-	if (itemBudget < 0) itemBudget = 0;
+	// 通路マスの約2〜4%（全階層合計）。小マップで全マス埋めにならないよう上限も通路比率で
 	const int halfSlots = max(1, (m_n - 1) / 2);
+	const int passApprox = max(1, halfSlots * halfSlots);
+	const int passAll = passApprox * max(1, m_nFloors);
+	int itemBudget = 0;
+	if (nk > 0) {
+		itemBudget = (int)((float)passAll * 0.028f * itemSc + 0.5f);
+		if (itemBudget < min(3, nk)) itemBudget = min(3, nk);
+		const int capSoft = max(3, (int)((float)passAll * 0.04f + 0.5f));
+		if (itemBudget > capSoft) itemBudget = capSoft;
+		if (itemBudget > 64) itemBudget = 64;
+	}
+	// スタート側の外周帯（x/z≤2）は壁に埋まるので禁止。反対側の端-2は隅配置用に許可
+	auto isAwayFromOuter = [&](int x, int z) -> BOOL {
+		return (x >= 3 && z >= 3 && x <= m_n - 2 && z <= m_n - 2) ? TRUE : FALSE;
+	};
 	auto isPassOdd = [&](int x, int z) -> BOOL {
 		return ((x & 1) != 0 && (z & 1) != 0 && x > 0 && z > 0 && x < m_n - 1 && z < m_n - 1) ? TRUE : FALSE;
+	};
+	auto canPlaceSpecial = [&](int x, int z) -> BOOL {
+		return (isPassOdd(x, z) && isAwayFromOuter(x, z)) ? TRUE : FALSE;
 	};
 	for (int tries = 0; tries < 8000 && itemBudget > 0 && nk > 0; tries++) {
 		m_rng = m_rng * 1664525u + 1013904223u;
@@ -3076,7 +3097,7 @@ void CSoft3DMazeDlg::GenerateMazeWithSeed(DWORD seed, int forceSize)
 		const int x = 1 + 2 * (int)(m_rng % (DWORD)halfSlots);
 		m_rng = m_rng * 1664525u + 1013904223u;
 		const int z = 1 + 2 * (int)(m_rng % (DWORD)halfSlots);
-		if (!isPassOdd(x, z)) continue;
+		if (!canPlaceSpecial(x, z)) continue;
 		if (CellAtF(f, x, z) != CELL_FLOOR) continue;
 		CellF(f, x, z) = kinds[m_rng % (DWORD)nk];
 		itemBudget--;
@@ -3087,8 +3108,9 @@ void CSoft3DMazeDlg::GenerateMazeWithSeed(DWORD seed, int forceSize)
 	{
 		static const float kTrapScale[DIFF_COUNT] = { 0.35f, 0.55f, 0.85f, 1.2f, 1.55f };
 		const float tsc = (diff >= 0 && diff < DIFF_COUNT) ? kTrapScale[diff] : 1.f;
-		int trapBudget = (int)((4 + m_n / 10 + m_nFloors * 3) * tsc + 0.5f);
-		trapBudget = min(180, trapBudget);
+		int trapBudget = (int)((float)passAll * 0.015f * tsc + 0.5f);
+		if (trapBudget < 1) trapBudget = (diff >= DIFF_NORMAL) ? 1 : 0;
+		if (trapBudget > 36) trapBudget = 36;
 		BYTE traps[4] = { CELL_SLIME, CELL_SPIKE, CELL_ICE, CELL_DARK };
 		for (int tries = 0; tries < 6000 && trapBudget > 0; tries++) {
 			m_rng = m_rng * 1664525u + 1013904223u;
@@ -3100,7 +3122,7 @@ void CSoft3DMazeDlg::GenerateMazeWithSeed(DWORD seed, int forceSize)
 			const int x = 1 + 2 * (int)(m_rng % (DWORD)halfSlots);
 			m_rng = m_rng * 1664525u + 1013904223u;
 			const int z = 1 + 2 * (int)(m_rng % (DWORD)halfSlots);
-			if (!isPassOdd(x, z)) continue;
+			if (!canPlaceSpecial(x, z)) continue;
 			if (CellAtF(f, x, z) != CELL_FLOOR) continue;
 			CellF(f, x, z) = traps[m_rng % 4u];
 			trapBudget--;
@@ -3112,8 +3134,8 @@ void CSoft3DMazeDlg::GenerateMazeWithSeed(DWORD seed, int forceSize)
 		for (int z = 0; z < m_n; z++) for (int x = 0; x < m_n; x++) {
 			const BYTE c = CellAtF(f, x, z);
 			if (!S3mIsPickupCell(c) && !S3mIsTrapCell(c)) continue;
-			if (isPassOdd(x, z)) continue;
-			CellF(f, x, z) = CELL_WALL;
+			if (canPlaceSpecial(x, z)) continue;
+			CellF(f, x, z) = isPassOdd(x, z) ? CELL_FLOOR : CELL_WALL;
 			if (S3mIsPickupCell(c) && m_itemsLeft > 0) m_itemsLeft--;
 		}
 	}
@@ -3150,7 +3172,7 @@ void CSoft3DMazeDlg::GenerateMazeWithSeed(DWORD seed, int forceSize)
 				const int x = 1 + 2 * (int)(m_rng % (DWORD)halfSlots);
 				m_rng = m_rng * 1664525u + 1013904223u;
 				const int z = 1 + 2 * (int)(m_rng % (DWORD)halfSlots);
-				if (!isPassOdd(x, z)) continue;
+				if (!canPlaceSpecial(x, z)) continue;
 				if (CellAtF(f, x, z) != CELL_FLOOR) continue;
 				CellF(f, x, z) = CELL_MIRROR_FLOOR;
 				floorBudget--;
@@ -3179,7 +3201,7 @@ void CSoft3DMazeDlg::GenerateMazeWithSeed(DWORD seed, int forceSize)
 					const int x2 = 1 + 2 * (int)(m_rng % (DWORD)halfSlots);
 					m_rng = m_rng * 1664525u + 1013904223u;
 					const int z2 = 1 + 2 * (int)(m_rng % (DWORD)halfSlots);
-					if (!isPassOdd(x1, z1) || !isPassOdd(x2, z2)) continue;
+					if (!canPlaceSpecial(x1, z1) || !canPlaceSpecial(x2, z2)) continue;
 					if (CellAtF(f, x1, z1) != CELL_FLOOR || CellAtF(f, x2, z2) != CELL_FLOOR) continue;
 					const int d = abs(x1 - x2) + abs(z1 - z2);
 					if (d < m_n / 4) continue;
@@ -3244,6 +3266,7 @@ void CSoft3DMazeDlg::GenerateMazeWithSeed(DWORD seed, int forceSize)
 						const int x = 1 + (int)(m_rng % (DWORD)(m_n - 2));
 						m_rng = m_rng * 1664525u + 1013904223u;
 						const int z = 1 + (int)(m_rng % (DWORD)(m_n - 2));
+						if (!isAwayFromOuter(x, z)) continue;
 						if (CellAtF(f, x, z) != CELL_FLOOR) continue;
 						int openN = 0;
 						for (int i = 0; i < 4; i++) {
@@ -3268,7 +3291,7 @@ void CSoft3DMazeDlg::GenerateMazeWithSeed(DWORD seed, int forceSize)
 							const size_t rem = cur - (size_t)cf * stride;
 							const int cz = (int)(rem / (size_t)m_n);
 							const int cx = (int)(rem - (size_t)cz * (size_t)m_n);
-							if (cf == f && CellAtF(cf, cx, cz) == CELL_FLOOR) {
+							if (cf == f && CellAtF(cf, cx, cz) == CELL_FLOOR && isAwayFromOuter(cx, cz)) {
 								const int man = abs(cx - x) + abs(cz - z);
 								if (man >= minMan) {
 									const int sc = man + (int)dist[cur];
@@ -3324,6 +3347,22 @@ void CSoft3DMazeDlg::GenerateMazeWithSeed(DWORD seed, int forceSize)
 		}
 		m_keysHeld = 0;
 		(void)kh;
+	}
+	// 外周帯に残った特殊マスを内側へ退避（埋まり防止の最終掃除）
+	{
+		auto clearOuterSpecial = [&](int f, int x, int z, BYTE c) {
+			if (isAwayFromOuter(x, z)) return;
+			if (c == CELL_KEY || c == CELL_DOOR || c == CELL_PORTAL || c == CELL_MIRROR_FLOOR
+				|| S3mIsPickupCell(c) || S3mIsTrapCell(c)) {
+				CellF(f, x, z) = isPassOdd(x, z) ? CELL_FLOOR : CELL_WALL;
+				if (S3mIsPickupCell(c) && m_itemsLeft > 0) m_itemsLeft--;
+			}
+		};
+		for (int f = 0; f < m_nFloors; f++) {
+			if (!m_grids[f]) continue;
+			for (int z = 0; z < m_n; z++) for (int x = 0; x < m_n; x++)
+				clearOuterSpecial(f, x, z, CellAtF(f, x, z));
+		}
 	}
 	RefreshGoalCache();
 	RecountExploreStats();
@@ -6823,6 +6862,10 @@ void CSoft3DMazeDlg::ShowContextMenu(CPoint screenPt)
 		savedata.s3m_show_map != 0);
 	menu.AddSeparator();
 	const int mask = S3mItemMask();
+	menu.AddCommand(28, LL14(L"アイテムをすべてON", L"Enable all items", L"Activer tous les objets", L"Attiva tutti gli oggetti", L"Activar todos los objetos",
+		L"아이템 모두 ON", L"全部道具开启", L"تفعيل كل العناصر", L"Включить все предметы", L"Alle Items ein", L"Ativar todos os itens", L"Alle items aan", L"Włącz wszystkie przedmioty", L"Tüm öğeleri aç"));
+	menu.AddCommand(29, LL14(L"アイテムをすべてOFF", L"Disable all items", L"Désactiver tous les objets", L"Disattiva tutti gli oggetti", L"Desactivar todos los objetos",
+		L"아이템 모두 OFF", L"全部道具关闭", L"تعطيل كل العناصر", L"Выключить все предметы", L"Alle Items aus", L"Desativar todos os itens", L"Alle items uit", L"Wyłącz wszystkie przedmioty", L"Tüm öğeleri kapat"));
 	menu.AddCheck(30, LL14(L"アイテム: テンポ↑", L"Item: tempo↑", L"Objet: tempo↑", L"Oggetto: tempo↑", L"Objeto: tempo↑", L"아이템: 템포↑", L"道具：速度↑", L"عنصر: إيقاع↑", L"Предмет: темп↑", L"Item: Tempo↑", L"Item: tempo↑", L"Item: tempo↑", L"Przedmiot: tempo↑", L"Öğe: tempo↑"), (mask & ITEM_TEMPO) != 0);
 	menu.AddCheck(31, LL14(L"アイテム: ピッチ↑", L"Item: pitch↑", L"Objet: hauteur↑", L"Oggetto: pitch↑", L"Objeto: tono↑", L"아이템: 피치↑", L"道具：音高↑", L"عنصر: طبقة↑", L"Предмет: высота↑", L"Item: Tonhöhe↑", L"Item: tom↑", L"Item: toon↑", L"Przedmiot: wysokość↑", L"Öğe: perde↑"), (mask & ITEM_PITCH_UP) != 0);
 	menu.AddCheck(32, LL14(L"アイテム: ピッチ↓", L"Item: pitch↓", L"Objet: hauteur↓", L"Oggetto: pitch↓", L"Objeto: tono↓", L"아이템: 피치↓", L"道具：音高↓", L"عنصر: طبقة↓", L"Предмет: высота↓", L"Item: Tonhöhe↓", L"Item: tom↓", L"Item: toon↓", L"Przedmiot: wysokość↓", L"Öğe: perde↓"), (mask & ITEM_PITCH_DN) != 0);
@@ -6866,12 +6909,21 @@ void CSoft3DMazeDlg::ShowContextMenu(CPoint screenPt)
 		PersistUi();
 		return;
 	}
+	if (cmd == 28) {
+		S3mSetItemMask(ITEM_ALL);
+		PersistUi();
+		return;
+	}
+	if (cmd == 29) {
+		S3mSetItemMask(0);
+		PersistUi();
+		return;
+	}
 	if (cmd >= 30 && cmd <= 43) {
 		const int bit = 1 << (cmd - 30);
 		int m = S3mItemMask();
 		if (m & bit) m &= ~bit; else m |= bit;
-		if (m == 0) m = ITEM_TEMPO;
-		savedata.s3m_item_mask = m;
+		S3mSetItemMask(m);
 		PersistUi();
 		return;
 	}
@@ -6924,7 +6976,9 @@ BOOL CSoft3DMazeDlg::OnInitDialog()
 	if (savedata.s3m_minimap < 8 || savedata.s3m_minimap > 16)
 		savedata.s3m_minimap = 10;
 	savedata.s3m_minimap = S3mClampMapSize(savedata.s3m_minimap);
-	if (savedata.s3m_item_mask <= 0)
+	if (savedata.s3m_item_mask < 0)
+		savedata.s3m_item_mask = -1;
+	else if (savedata.s3m_item_mask == 0)
 		savedata.s3m_item_mask = ITEM_ALL;
 	if (savedata.s3m_show_map != 0)
 		savedata.s3m_show_map = 1;

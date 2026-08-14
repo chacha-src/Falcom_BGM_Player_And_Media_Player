@@ -711,7 +711,7 @@ struct save{
 	int s3m_seed;               // 0=時刻
 	int s3m_minimap;            // 8/10/12/14/16（近傍マス数）
 	int s3m_show_map;           // 1=ミニマップ表示
-	int s3m_item_mask;          // bit0..=tempo↑…window…tempo↓/prev/vol/reverb/xfade/eqflat/random (ITEM_ALL=16383)
+	int s3m_item_mask;          // bit0..=tempo↑…window… (ITEM_ALL=16383, -1=全OFF)
 	int s3m_have_run;           // 1=自動保存された進行あり（本体は別ファイル）
 	int s3m_run_n;
 	float s3m_run_px, s3m_run_pz, s3m_run_yaw;

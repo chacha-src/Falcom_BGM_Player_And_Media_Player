@@ -2318,6 +2318,34 @@ BOOL CMediaPlayerDlg::RelayPreTranslateMessage(MSG* pMsg)
 			return TRUE;
 		}
 	}
+	if (pMsg->message == WM_KEYDOWN
+		&& m_list.GetSafeHwnd() && pMsg->hwnd == m_list.GetSafeHwnd()
+		&& pl && ::IsWindow(pl->GetSafeHwnd())
+		&& (GetKeyState(VK_CONTROL) & 0x8000) != 0
+		&& (GetKeyState(VK_MENU) & 0x8000) == 0) {
+		const WPARAM k = pMsg->wParam;
+		if (k == 'C' || k == 'c' || k == 'X' || k == 'x' || k == 'V' || k == 'v'
+			|| k == 'Z' || k == 'z' || k == 'Y' || k == 'y') {
+			SyncSelectionToPlaylist();
+			if (pl->HandleListEditKeys(pMsg)) {
+				if (::IsWindow(m_list.GetSafeHwnd()) && ::IsWindow(pl->m_lc.GetSafeHwnd())) {
+					const int n = m_list.GetItemCount();
+					m_list.SetRedraw(FALSE);
+					for (int i = 0; i < n; i++) {
+						const int pcIdx = MpDispToPc(this, i);
+						UINT on = 0;
+						if (pcIdx >= 0
+							&& (pl->m_lc.GetItemState(pcIdx, LVIS_SELECTED) & LVIS_SELECTED))
+							on = LVIS_SELECTED;
+						m_list.SetItemState(i, on, LVIS_SELECTED);
+					}
+					m_list.SetRedraw(TRUE);
+					m_list.Invalidate(FALSE);
+				}
+				return TRUE;
+			}
+		}
+	}
 	// ? / で操作ガイド(入力欄フォーカス時は文字入力を優先)
 	if (pMsg->message == WM_KEYDOWN && (pMsg->wParam == '?' || pMsg->wParam == VK_OEM_2)) {
 		CWnd* pFocus = GetFocus();
@@ -2484,6 +2512,10 @@ BOOL CMediaPlayerDlg::DestroyWindow()
 	return CCustomBlurDialogExBase::DestroyWindow();
 }
 
+// リサイズドラッグ中: DeferWindowPos + NOREDRAW で一括移動し、毎 WM_SIZE の同期描画を避ける。
+static HDWP s_mpLayoutDefer = nullptr;
+static BOOL s_mpLayoutLive = FALSE;
+
 // 1コントロールを移動するヘルパ。
 // w/h が 0 以下だと MoveWindow/SetWindowPos が ERROR_INVALID_PARAMETER
 // （「引数が正しくありません」）を立てるため、その場合は移動しない。
@@ -2491,6 +2523,22 @@ static void MoveCtl(CWnd* p, int x, int y, int w, int h)
 {
 	if (!p || !p->GetSafeHwnd()) return;
 	if (w <= 0 || h <= 0) return;
+	const UINT flags = SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOREDRAW;
+	if (s_mpLayoutDefer) {
+		HDWP next = ::DeferWindowPos(s_mpLayoutDefer, p->m_hWnd, nullptr, x, y, w, h, flags);
+		if (next)
+			s_mpLayoutDefer = next;
+		else {
+			// Defer 失敗時は残りを個別 NOREDRAW へフォールバック
+			s_mpLayoutDefer = nullptr;
+			p->SetWindowPos(nullptr, x, y, w, h, flags);
+		}
+		return;
+	}
+	if (s_mpLayoutLive) {
+		p->SetWindowPos(nullptr, x, y, w, h, flags);
+		return;
+	}
 	p->MoveWindow(x, y, w, h);
 }
 
@@ -2621,6 +2669,11 @@ void CMediaPlayerDlg::DoLayout()
 	CRect rc; GetClientRect(&rc);
 	const int W = rc.Width(), H = rc.Height();
 	if (W < 32 || H < 32) return;   // 初期化途中の極小クライアントでは触らない
+	const bool liveResize = m_inSizeMove;
+	s_mpLayoutLive = liveResize ? TRUE : FALSE;
+	s_mpLayoutDefer = nullptr;
+	if (liveResize)
+		s_mpLayoutDefer = ::BeginDeferWindowPos(96);
 	const float s = hD2;
 	const int M = (int)(10 * s);             // マージン
 	const int topM = M + CCC_GetCustomCaptionHeight(m_hWnd);
@@ -3157,7 +3210,7 @@ void CMediaPlayerDlg::DoLayout()
 		if (m_libAddRoot.GetSafeHwnd()) m_libAddRoot.ShowWindow(SW_SHOW);
 		if (m_libAddPl.GetSafeHwnd()) m_libAddPl.ShowWindow(SW_SHOW);
 		if (m_libAlbums.GetSafeHwnd())
-			LibFitNoHScroll(&m_libAlbums);
+			if (!liveResize) LibFitNoHScroll(&m_libAlbums);
 		if (!m_libTreeBuilt && !m_libBuildPosted) {
 			m_libBuildPosted = 1;
 			if (m_libTree.GetSafeHwnd() && m_libTree.GetCount() == 0) {
@@ -3173,7 +3226,7 @@ void CMediaPlayerDlg::DoLayout()
 			MoveCtl(&m_histList, M + gPad, bodyTop, libPanel, bodyH);
 		if (m_histList.GetSafeHwnd()) {
 			m_histList.ShowWindow(SW_SHOW);
-			LibFitNoHScroll(&m_histList);
+			if (!liveResize) LibFitNoHScroll(&m_histList);
 		}
 		if (!m_histBuilt)
 			HistRebuildList();
@@ -3223,7 +3276,9 @@ void CMediaPlayerDlg::DoLayout()
 	}
 
 	// アルバム/コメント列(最終列=4)をリスト右端へぴたりとフィットさせる
-	FitPlaylistLastColumn();
+	// ドラッグ中はヘッダの UPDATENOW 再描画が重いので、確定時(ExitSizeMove)に任せる
+	if (!liveResize)
+		FitPlaylistLastColumn();
 
 	// 下部チェック(ツールチップ〜曲保存): 均等スロット幅に収まる最長ラベルを実測で選ぶ
 	// CCustomCheckBox::OnDrawLayer と同じ箱サイズ/余白で必要幅 = 箱 + 8 + 文字幅 + 右余白
@@ -3236,6 +3291,7 @@ void CMediaPlayerDlg::DoLayout()
 	if (boxS < 14) boxS = 14;
 	const int ckExtra = boxS + 8 + 4;
 
+	if (!liveResize) {
 	CClientDC cdc(this);
 	CFont* pOldChkF = nullptr;
 	if (m_fontChk.GetSafeHandle())
@@ -3288,6 +3344,7 @@ void CMediaPlayerDlg::DoLayout()
 
 	if (pOldChkF)
 		cdc.SelectObject(pOldChkF);
+	}
 
 	int ckx = M + gPad;
 	// マイクミックス行(チェック帯の直上)。端末コンボも同じ行に並べる
@@ -3323,19 +3380,20 @@ void CMediaPlayerDlg::DoLayout()
 	int plBottom = ckY + chkRowH + gPad;
 	MoveCtl(&m_grpPl, M, plTop, W - M * 2, plBottom - plTop);
 
-	// 最下部: 切替 / 保存リセット / 録音 / キャプチャ / ツール短カット… / 終了
-	int swW = (int)(120 * s);
-	MoveCtl(&m_switch, M, botY, swW, swH);
-	int rsW = (int)(100 * s);
-	bx = M + swW + (int)(6 * s);
-	MoveCtl(&m_resetdata, bx, botY, rsW, swH); bx += rsW + (int)(6 * s);
-	int recW = (int)(64 * s);
-	MoveCtl(&m_record, bx, botY, recW, swH); bx += recW + (int)(6 * s);
-	int capW = (int)(80 * s);
-	MoveCtl(&m_capture, bx, botY, capW, swH); bx += capW + (int)(6 * s);
+	// 最下部: ファルコム特化〜レース + 終了。再生行と同じく幅で 0=フル / 1=中 / 2=短。
+	const int gapBot = (int)(4 * s);
+	const int gapLead = (int)(6 * s);
 	int exW = (int)(80 * s);
 	const int exitLeft = W - M - exW;
-	const int gapBot = (int)(4 * s);
+
+	const int swFull = max(1, (int)(120 * s)), swMid = max(1, (int)(72 * s)), swShort = max(1, (int)(40 * s));
+	const int rsFull = max(1, (int)(100 * s)), rsMid = max(1, (int)(56 * s)), rsShort = max(1, (int)(36 * s));
+	const int recFull = max(1, (int)(64 * s)), recMid = max(1, (int)(44 * s)), recShort = max(1, (int)(28 * s));
+	const int capFull = max(1, (int)(80 * s)), capMid = max(1, (int)(48 * s)), capShort = max(1, (int)(28 * s));
+	const int leadFull = swFull + gapLead + rsFull + gapLead + recFull + gapLead + capFull + gapLead;
+	const int leadMid = swMid + gapLead + rsMid + gapLead + recMid + gapLead + capMid + gapLead;
+	const int leadShort = swShort + gapLead + rsShort + gapLead + recShort + gapLead + capShort + gapLead;
+
 	if (!savedata.mpBotToolsInited) {
 		savedata.mpBotToolsInited = 1;
 		savedata.mpBotToolsFlags = 0x30F; // DJ|Tag|BPM|Sleep|Maze|Race
@@ -3364,33 +3422,91 @@ void CMediaPlayerDlg::DoLayout()
 		needMid += wMid[i] + gapBot;
 		needShort += wShort[i] + gapBot;
 	}
-	const int freeBot = exitLeft - bx - gapBot;
+	// 「リード(切替〜キャプチャ) + 表示中ツール」が終了ボタン左に収まるかで段階を決める
+	const int freeBot = exitLeft - M - gapBot;
 	int botShortLv = 0;
-	if (needFull > freeBot) botShortLv = 1;
-	if (needMid > freeBot) botShortLv = 2;
-	if (botShortLv != m_mpBotShort) {
+	if (leadFull + needFull > freeBot)
+		botShortLv = 1;
+	if (leadMid + needMid > freeBot)
+		botShortLv = 2;
+
+	const int swW = (botShortLv >= 2) ? swShort : (botShortLv >= 1) ? swMid : swFull;
+	const int rsW = (botShortLv >= 2) ? rsShort : (botShortLv >= 1) ? rsMid : rsFull;
+	const int recW = (botShortLv >= 2) ? recShort : (botShortLv >= 1) ? recMid : recFull;
+	const int capW = (botShortLv >= 2) ? capShort : (botShortLv >= 1) ? capMid : capFull;
+
+	if (!liveResize && botShortLv != m_mpBotShort) {
 		m_mpBotShort = botShortLv;
-		if (m_botDj.GetSafeHwnd())
-			m_botDj.SetWindowText(botShortLv >= 2 ? L"DJ" : LL14(L"DJパッド", L"DJ Pad", L"Pad DJ", L"Pad DJ", L"Pad DJ", L"DJ", L"DJ垫", L"DJ", L"DJ", L"DJ-Pad", L"Pad DJ", L"DJ-pad", L"Pad DJ", L"DJ"));
-		if (m_botTag.GetSafeHwnd())
-			m_botTag.SetWindowText(botShortLv >= 2 ? L"Tag" : LL14(L"タグ", L"Tags", L"Tags", L"Tag", L"Tags", L"태그", L"标签", L"وسوم", L"Теги", L"Tags", L"Tags", L"Tags", L"Tagi", L"Etiket"));
-		if (m_botBpm.GetSafeHwnd())
-			m_botBpm.SetWindowText(L"BPM");
-		if (m_botSleep.GetSafeHwnd())
-			m_botSleep.SetWindowText(botShortLv >= 2 ? L"Slp" : LL14(L"スリープ", L"Sleep", L"Veille", L"Sleep", L"Sueño", L"슬립", L"睡眠", L"نوم", L"Сон", L"Schlaf", L"Sono", L"Slaap", L"Sen", L"Uyku"));
-		if (m_botMirror.GetSafeHwnd())
-			m_botMirror.SetWindowText(botShortLv >= 2 ? L"Mir" : LL14(L"ミラー", L"Mirror", L"Miroir", L"Mirror", L"Espejo", L"미러", L"镜像", L"مرآة", L"Зеркало", L"Spiegel", L"Espelho", L"Spiegel", L"Lustro", L"Ayna"));
-		if (m_botSsViz.GetSafeHwnd())
-			m_botSsViz.SetWindowText(L"SS");
-		if (m_botAlarm.GetSafeHwnd())
-			m_botAlarm.SetWindowText(botShortLv >= 2 ? L"Alm" : LL14(L"アラーム", L"Alarm", L"Alarme", L"Sveglia", L"Alarma", L"알람", L"闹钟", L"منبه", L"Будильник", L"Wecker", L"Alarme", L"Wekker", L"Budzik", L"Alarm"));
-		if (m_botRemote.GetSafeHwnd())
-			m_botRemote.SetWindowText(botShortLv >= 2 ? L"Rem" : LL14(L"リモート", L"Remote", L"Remote", L"Remote", L"Remoto", L"리모트", L"遥控", L"تحكم", L"Пульт", L"Remote", L"Remoto", L"Remote", L"Pilot", L"Uzaktan"));
-		if (m_botMaze.GetSafeHwnd())
-			m_botMaze.SetWindowText(botShortLv >= 2 ? L"Mz" : LL14(L"迷路", L"Maze", L"Labyrinthe", L"Labirinto", L"Laberinto", L"미로", L"迷宫", L"متاهة", L"Лабиринт", L"Labyrinth", L"Labirinto", L"Doolhof", L"Labirynt", L"Labirent"));
-		if (m_botRace.GetSafeHwnd())
-			m_botRace.SetWindowText(botShortLv >= 2 ? L"Rc" : LL14(L"レース", L"Race", L"Course", L"Gara", L"Carrera", L"레이스", L"竞速", L"سباق", L"Гонка", L"Rennen", L"Corrida", L"Race", L"Wyścig", L"Yarış"));
+		if (botShortLv >= 2) {
+			m_switch.SetWindowText(LL14(L"特化", L"Flc", L"Fal", L"Fal", L"Fal", L"팔콤", L"Fal", L"فل", L"Флк", L"Fal", L"Fal", L"Fal", L"Fal", L"Fal"));
+			m_resetdata.SetWindowText(LL14(L"リセ", L"Rst", L"Raz", L"Rst", L"Rst", L"초기", L"重置", L"صف", L"Сбр", L"Rst", L"Rst", L"Rst", L"Rst", L"Rst"));
+			m_record.SetWindowText(LL14(L"録", L"Rec", L"Enr", L"Reg", L"Gra", L"녹", L"录", L"تس", L"Зп", L"Auf", L"Grv", L"Opn", L"Nag", L"Kay"));
+			m_capture.SetWindowText(LL14(L"キャプ", L"Cap", L"Cap", L"Cat", L"Cap", L"캡", L"捕", L"الت", L"Зхв", L"Cap", L"Cap", L"Cap", L"Prz", L"Yak"));
+			if (m_botDj.GetSafeHwnd()) m_botDj.SetWindowText(L"DJ");
+			if (m_botTag.GetSafeHwnd()) m_botTag.SetWindowText(L"Tag");
+			if (m_botBpm.GetSafeHwnd()) m_botBpm.SetWindowText(L"BPM");
+			if (m_botSleep.GetSafeHwnd()) m_botSleep.SetWindowText(L"Slp");
+			if (m_botMirror.GetSafeHwnd()) m_botMirror.SetWindowText(L"Mir");
+			if (m_botSsViz.GetSafeHwnd()) m_botSsViz.SetWindowText(L"SS");
+			if (m_botAlarm.GetSafeHwnd()) m_botAlarm.SetWindowText(L"Alm");
+			if (m_botRemote.GetSafeHwnd()) m_botRemote.SetWindowText(L"Rem");
+			if (m_botMaze.GetSafeHwnd()) m_botMaze.SetWindowText(L"Mz");
+			if (m_botRace.GetSafeHwnd()) m_botRace.SetWindowText(L"Rc");
+		}
+		else if (botShortLv >= 1) {
+			m_switch.SetWindowText(LL14(L"ファルコム", L"Falcom", L"Falcom", L"Falcom", L"Falcom", L"팔콤", L"Falcom", L"Falcom", L"Falcom", L"Falcom", L"Falcom", L"Falcom", L"Falcom", L"Falcom"));
+			m_resetdata.SetWindowText(LL14(L"リセット", L"Reset", L"RAZ", L"Reset", L"Reset", L"초기화", L"重置", L"إعادة", L"Сброс", L"Reset", L"Reset", L"Reset", L"Reset", L"Sıfırla"));
+			m_record.SetWindowText(LL14(L"録音", L"Record", L"Enreg.", L"Registra", L"Grabar", L"녹음", L"录音", L"تسجيل", L"Запись", L"Aufnahme", L"Gravar", L"Opnemen", L"Nagraj", L"Kaydet"));
+			m_capture.SetWindowText(LL14(L"キャプチャ", L"Capture", L"Capture", L"Cattura", L"Captura", L"캡처", L"捕获", L"التقاط", L"Захват", L"Aufnahme", L"Captura", L"Opname", L"Przechwyt", L"Yakala"));
+			if (m_botDj.GetSafeHwnd()) m_botDj.SetWindowText(L"DJ");
+			if (m_botTag.GetSafeHwnd())
+				m_botTag.SetWindowText(LL14(L"タグ", L"Tags", L"Tags", L"Tag", L"Tags", L"태그", L"标签", L"وسوم", L"Теги", L"Tags", L"Tags", L"Tags", L"Tagi", L"Etiket"));
+			if (m_botBpm.GetSafeHwnd()) m_botBpm.SetWindowText(L"BPM");
+			if (m_botSleep.GetSafeHwnd())
+				m_botSleep.SetWindowText(LL14(L"スリープ", L"Sleep", L"Veille", L"Sleep", L"Sueño", L"슬립", L"睡眠", L"نوم", L"Сон", L"Schlaf", L"Sono", L"Slaap", L"Sen", L"Uyku"));
+			if (m_botMirror.GetSafeHwnd())
+				m_botMirror.SetWindowText(LL14(L"ミラー", L"Mirror", L"Miroir", L"Mirror", L"Espejo", L"미러", L"镜像", L"مرآة", L"Зеркало", L"Spiegel", L"Espelho", L"Spiegel", L"Lustro", L"Ayna"));
+			if (m_botSsViz.GetSafeHwnd()) m_botSsViz.SetWindowText(L"SS");
+			if (m_botAlarm.GetSafeHwnd())
+				m_botAlarm.SetWindowText(LL14(L"アラーム", L"Alarm", L"Alarme", L"Sveglia", L"Alarma", L"알람", L"闹钟", L"منبه", L"Будильник", L"Wecker", L"Alarme", L"Wekker", L"Budzik", L"Alarm"));
+			if (m_botRemote.GetSafeHwnd())
+				m_botRemote.SetWindowText(LL14(L"リモート", L"Remote", L"Remote", L"Remote", L"Remoto", L"리모트", L"遥控", L"تحكم", L"Пульт", L"Remote", L"Remoto", L"Remote", L"Pilot", L"Uzaktan"));
+			if (m_botMaze.GetSafeHwnd())
+				m_botMaze.SetWindowText(LL14(L"迷路", L"Maze", L"Labyrinthe", L"Labirinto", L"Laberinto", L"미로", L"迷宫", L"متاهة", L"Лабиринт", L"Labyrinth", L"Labirinto", L"Doolhof", L"Labirynt", L"Labirent"));
+			if (m_botRace.GetSafeHwnd())
+				m_botRace.SetWindowText(LL14(L"レース", L"Race", L"Course", L"Gara", L"Carrera", L"레이스", L"竞速", L"سباق", L"Гонка", L"Rennen", L"Corrida", L"Race", L"Wyścig", L"Yarış"));
+		}
+		else {
+			m_switch.SetWindowText(LL14(L"ファルコム特化型へ", L"To Falcom screen", L"Vers ecran Falcom", L"Alla schermata Falcom", L"A pantalla Falcom", L"팔콤 화면으로", L"切换到Falcom画面", L"إلى شاشة Falcom", L"К экрану Falcom", L"Zum Falcom-Bildschirm", L"Para tela Falcom", L"Naar Falcom-scherm", L"Do ekranu Falcom", L"Falcom ekranına"));
+			m_resetdata.SetWindowText(LL14(L"保存をリセット", L"Reset saved", L"Réinitialiser", L"Reimposta salvati", L"Restablecer", L"저장 초기화", L"重置已存", L"إعادة تعيين", L"Сброс сохран.", L"Zurücksetzen", L"Redefinir", L"Reset opgeslagen", L"Resetuj zapis", L"Kayıtı sıfırla"));
+			m_record.SetWindowText(LL14(L"録音", L"Record", L"Enreg.", L"Registra", L"Grabar", L"녹음", L"录音", L"تسجيل", L"Запись", L"Aufnahme", L"Gravar", L"Opnemen", L"Nagraj", L"Kaydet"));
+			m_capture.SetWindowText(LL14(L"キャプチャ", L"Capture", L"Capture", L"Cattura", L"Captura", L"캡처", L"捕获", L"التقاط", L"Захват", L"Aufnahme", L"Captura", L"Opname", L"Przechwyt", L"Yakala"));
+			if (m_botDj.GetSafeHwnd())
+				m_botDj.SetWindowText(LL14(L"DJパッド", L"DJ Pad", L"Pad DJ", L"Pad DJ", L"Pad DJ", L"DJ", L"DJ垫", L"DJ", L"DJ", L"DJ-Pad", L"Pad DJ", L"DJ-pad", L"Pad DJ", L"DJ"));
+			if (m_botTag.GetSafeHwnd())
+				m_botTag.SetWindowText(LL14(L"タグ", L"Tags", L"Tags", L"Tag", L"Tags", L"태그", L"标签", L"وسوم", L"Теги", L"Tags", L"Tags", L"Tags", L"Tagi", L"Etiket"));
+			if (m_botBpm.GetSafeHwnd()) m_botBpm.SetWindowText(L"BPM");
+			if (m_botSleep.GetSafeHwnd())
+				m_botSleep.SetWindowText(LL14(L"スリープ", L"Sleep", L"Veille", L"Sleep", L"Sueño", L"슬립", L"睡眠", L"نوم", L"Сон", L"Schlaf", L"Sono", L"Slaap", L"Sen", L"Uyku"));
+			if (m_botMirror.GetSafeHwnd())
+				m_botMirror.SetWindowText(LL14(L"ミラー", L"Mirror", L"Miroir", L"Mirror", L"Espejo", L"미러", L"镜像", L"مرآة", L"Зеркало", L"Spiegel", L"Espelho", L"Spiegel", L"Lustro", L"Ayna"));
+			if (m_botSsViz.GetSafeHwnd()) m_botSsViz.SetWindowText(L"SS");
+			if (m_botAlarm.GetSafeHwnd())
+				m_botAlarm.SetWindowText(LL14(L"アラーム", L"Alarm", L"Alarme", L"Sveglia", L"Alarma", L"알람", L"闹钟", L"منبه", L"Будильник", L"Wecker", L"Alarme", L"Wekker", L"Budzik", L"Alarm"));
+			if (m_botRemote.GetSafeHwnd())
+				m_botRemote.SetWindowText(LL14(L"リモート", L"Remote", L"Remote", L"Remote", L"Remoto", L"리모트", L"遥控", L"تحكم", L"Пульт", L"Remote", L"Remoto", L"Remote", L"Pilot", L"Uzaktan"));
+			if (m_botMaze.GetSafeHwnd())
+				m_botMaze.SetWindowText(LL14(L"迷路", L"Maze", L"Labyrinthe", L"Labirinto", L"Laberinto", L"미로", L"迷宫", L"متاهة", L"Лабиринт", L"Labyrinth", L"Labirinto", L"Doolhof", L"Labirynt", L"Labirent"));
+			if (m_botRace.GetSafeHwnd())
+				m_botRace.SetWindowText(LL14(L"レース", L"Race", L"Course", L"Gara", L"Carrera", L"레이스", L"竞速", L"سباق", L"Гонка", L"Rennen", L"Corrida", L"Race", L"Wyścig", L"Yarış"));
+		}
 	}
+
+	bx = M;
+	MoveCtl(&m_switch, bx, botY, swW, swH); bx += swW + gapLead;
+	MoveCtl(&m_resetdata, bx, botY, rsW, swH); bx += rsW + gapLead;
+	MoveCtl(&m_record, bx, botY, recW, swH); bx += recW + gapLead;
+	MoveCtl(&m_capture, bx, botY, capW, swH); bx += capW + gapLead;
 	for (int i = 0; i < 10; ++i) {
 		CCustomStandardButton* b = botBtn[i];
 		if (!b->GetSafeHwnd()) continue;
@@ -3409,8 +3525,20 @@ void CMediaPlayerDlg::DoLayout()
 	}
 	MoveCtl(&m_exit, exitLeft, botY, exW, swH);
 
-	CCC_GroupBoxesBack(GetSafeHwnd());   // 枠は最背面(子コントロールを覆わない)
-	Invalidate();
+	if (s_mpLayoutDefer) {
+		::EndDeferWindowPos(s_mpLayoutDefer);
+		s_mpLayoutDefer = nullptr;
+	}
+	s_mpLayoutLive = FALSE;
+
+	if (liveResize) {
+		// 座標は追従、消去なし・非同期。子は NOREDRAW 移動なので ALLCHILDREN で無効化だけ。
+		RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_NOERASE | RDW_ALLCHILDREN);
+	}
+	else {
+		CCC_GroupBoxesBack(GetSafeHwnd());   // 枠は最背面(子コントロールを覆わない)
+		Invalidate();
+	}
 }
 
 void CMediaPlayerDlg::FitPlaylistLastColumn(int dragCol, int dragWidth)
@@ -4734,7 +4862,8 @@ void CMediaPlayerDlg::OnSize(UINT nType, int cx, int cy)
 			m_savedAnalyzerVisible = 0;
 		}
 		DoLayout();
-		// リサイズ: 右/下辺連鎖は ENTERSIZEMOVE 無しでも pOld→pNew 増分で動く
+		// リサイズ: 四辺連鎖は ENTERSIZEMOVE 無しでも pOld→pNew 増分で動く
+		// （左辺リサイズで右の UI を動かさない）
 		{
 			CRect wr;
 			GetWindowRect(&wr);
@@ -4749,10 +4878,8 @@ void CMediaPlayerDlg::OnSize(UINT nType, int cx, int cy)
 			m_cascadePrevRc = wr;
 			m_cascadePrevValid = true;
 		}
-		if (m_inSizeMove) {
-			RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN);
-		}
-		else {
+		if (!m_inSizeMove) {
+			// ドラッグ中は DoLayout の NOERASE 無効化のみ。ERASE|UPDATENOW は確定時に。
 			RedrawWindow(NULL, NULL,
 				RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_UPDATENOW);
 			if (::IsWindow(m_list.GetSafeHwnd()))
@@ -8416,24 +8543,47 @@ void CMediaPlayerDlg::DrawUxStatusBand(CDC* pDC)
 	const int bandPad = max(2, (int)(2 * s));
 	CRect band(rc.left + 6, rc.bottom - bandH - bandPad, rc.right - 6, rc.bottom - bandPad);
 	if (band.top <= capH) return;
-	pDC->FillSolidRect(&band, RGB(248, 248, 252));
-	pDC->SetBkMode(TRANSPARENT);
-	CFont* old = pDC->SelectObject(GetFont());
-	pDC->SetTextColor(RGB(70, 70, 90));
+	const int bw = band.Width();
+	const int bh = band.Height();
+	if (bw <= 0 || bh <= 0) return;
+
+	CDC mem;
+	CBitmap bmp;
+	if (!mem.CreateCompatibleDC(pDC) || !bmp.CreateCompatibleBitmap(pDC, bw, bh)) {
+		pDC->FillSolidRect(&band, RGB(248, 248, 252));
+		return;
+	}
+	CBitmap* oldBmp = mem.SelectObject(&bmp);
+	mem.FillSolidRect(0, 0, bw, bh, RGB(248, 248, 252));
+	mem.SetBkMode(TRANSPARENT);
+	CFont* old = mem.SelectObject(GetFont());
+	mem.SetTextColor(RGB(70, 70, 90));
 	CString left = m_uxStatusText;
 	CString right = m_uxChipText;
-	CRect leftRc = band;
+	CRect leftRc(0, 0, bw, bh);
 	if (!right.IsEmpty()) {
-		CSize sz = pDC->GetTextExtent(right);
-		CRect chipRc(band.right - sz.cx - 10, band.top + 1, band.right - 2, band.bottom - 1);
-		pDC->FillSolidRect(&chipRc, RGB(255, 236, 210));
-		pDC->SetTextColor(RGB(120, 70, 20));
-		pDC->DrawText(right, &chipRc, DT_RIGHT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+		CSize sz = mem.GetTextExtent(right);
+		CRect chipRc(bw - sz.cx - 10, 1, bw - 2, bh - 1);
+		mem.FillSolidRect(&chipRc, RGB(255, 236, 210));
+		mem.SetTextColor(RGB(120, 70, 20));
+		mem.DrawText(right, &chipRc, DT_RIGHT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
 		leftRc.right = chipRc.left - 6;
-		pDC->SetTextColor(RGB(70, 70, 90));
+		mem.SetTextColor(RGB(70, 70, 90));
 	}
-	pDC->DrawText(left, &leftRc, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
-	if (old) pDC->SelectObject(old);
+	mem.DrawText(left, &leftRc, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
+	if (old) mem.SelectObject(old);
+
+#if CCUSTOM_AERO_SUPPORT
+	if (CCC_IsWin11() && (CCC_IsAeroEnabled() || CCC_AcrylicCaption(m_hWnd))) {
+		CCC_BlitStretchOpaque(pDC->GetSafeHdc(), band.left, band.top, bw, bh,
+			mem.GetSafeHdc(), 0, 0, bw, bh);
+	}
+	else
+#endif
+	{
+		pDC->BitBlt(band.left, band.top, bw, bh, &mem, 0, 0, SRCCOPY);
+	}
+	mem.SelectObject(oldBmp);
 }
 
 LRESULT CMediaPlayerDlg::OnLibBuildLazy(WPARAM, LPARAM)

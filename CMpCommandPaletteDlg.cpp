@@ -394,6 +394,22 @@ CString PalBuildShortcutText()
 	s += LL14(L"検索欄では次の候補へ", L"Next match in the search box", L"Occurrence suivante", L"Prossima corrispondenza", L"Siguiente coincidencia",
 		L"검색란에서 다음 후보", L"搜索框中跳到下一个", L"التالي في مربع البحث", L"Следующее совпадение в поиске", L"Naechster Treffer im Suchfeld",
 		L"Proxima correspondencia", L"Volgende overeenkomst", L"Nastepne dopasowanie", L"Arama kutusunda sonraki");
+	s += L"\r\nDelete\t";
+	s += LL14(L"リストから外す", L"Remove from the list", L"Retirer de la liste", L"Rimuovi dall'elenco", L"Quitar de la lista",
+		L"목록에서 제거", L"从列表移除", L"إزالة من القائمة", L"Убрать из списка", L"Aus der Liste entfernen",
+		L"Remover da lista", L"Uit de lijst", L"Usun z listy", L"Listeden cikar");
+	s += L"\r\nCtrl+A\t";
+	s += LL14(L"全選択", L"Select all", L"Tout selectionner", L"Seleziona tutto", L"Seleccionar todo",
+		L"모두 선택", L"全选", L"تحديد الكل", L"Выбрать все", L"Alles auswaehlen",
+		L"Selecionar tudo", L"Alles selecteren", L"Zaznacz wszystko", L"Tumunu sec");
+	s += L"\r\nCtrl+C / X / V\t";
+	s += LL14(L"行のコピー / 切り取り / 貼り付け", L"Copy / cut / paste rows", L"Copier / couper / coller", L"Copia / taglia / incolla", L"Copiar / cortar / pegar",
+		L"행 복사 / 잘라내기 / 붙여넣기", L"复制 / 剪切 / 粘贴行", L"نسخ / قص / لصق الصفوف", L"Копия / вырезать / вставка", L"Zeilen kopieren / ausschneiden / einfuegen",
+		L"Copiar / recortar / colar linhas", L"Rijen kopieren / knippen / plakken", L"Kopiuj / wytnij / wklej wiersze", L"Satir kopyala / kes / yapistir");
+	s += L"\r\nCtrl+Z / Y\t";
+	s += LL14(L"元に戻す / やり直し", L"Undo / redo", L"Annuler / retablir", L"Annulla / ripeti", L"Deshacer / rehacer",
+		L"실행 취소 / 다시 실행", L"撤销 / 重做", L"تراجع / إعادة", L"Отмена / повтор", L"Rueckgaengig / Wiederholen",
+		L"Desfazer / refazer", L"Ongedaan / opnieuw", L"Cofnij / ponow", L"Geri al / yinele");
 	s += L"\r\n";
 	return s;
 }

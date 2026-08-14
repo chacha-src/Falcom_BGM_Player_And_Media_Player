@@ -42,7 +42,11 @@ public:
 	void SIconTimer(int i);
 	int Add(CString name,int sub,int loop1,int loop2,CString art,CString alb,CString fol,int ret,int time,BOOL f=TRUE,BOOL ff=TRUE);
 	void Del();
-	void UndoLastDelete(); // 直近の曲削除を1段だけ戻す
+	void UndoLastDelete(); // 直近の編集を戻す(削除/貼り付け。Ctrl+Z)
+	void RedoLastEdit();   // Ctrl+Y / Ctrl+Shift+Z
+	BOOL CopySelectionToClipboard();
+	void PasteFromClipboard();
+	BOOL HandleListEditKeys(MSG* pMsg); // リストフォーカス時の Ctrl+C/X/V/Z/Y
 	// プレイリスト行をインデックス配列で削除(降順ソートして安全に後ろから)。Save あり。
 	void DelByIndices(const std::vector<int>& indices);
 	void Load(BOOL restoreSavedRow = TRUE);

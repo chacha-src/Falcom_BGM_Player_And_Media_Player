@@ -209,7 +209,7 @@ public:
 	// キャプチャ右〜終了左のツールショートカット（コンテキストでON/OFF）
 	CCustomStandardButton m_botDj, m_botTag, m_botBpm, m_botSleep;
 	CCustomStandardButton m_botMirror, m_botSsViz, m_botAlarm, m_botRemote, m_botMaze, m_botRace;
-	int m_mpBotShort; // 底バー短縮段階 0=フル 1=中 2=短
+	int m_mpBotShort; // 底バー短縮段階 0=フル 1=中 2=短（切替〜レース）
 	CCustomStatic m_kaisuuL;
 	CCustomEdit m_kaisuu;
 	// グループ枠は WS_CLIPSIBLINGS + 最背面で、内側コントロールを塗り潰さない

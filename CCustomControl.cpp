@@ -504,6 +504,22 @@ BOOL CCC_ChromaBlitCache::UpdateRect(HDC hdcSrc, int srcX, int srcY, int dx, int
     return TRUE;
 }
 
+BOOL CCC_ChromaBlitCache::UpdateOpaqueRect(HDC hdcSrc, int srcX, int srcY, int dx, int dy, int rw, int rh)
+{
+    if (!hdcSrc || rw <= 0 || rh <= 0 || !pBits || !hdcDib) return FALSE;
+    if (dx < 0 || dy < 0 || dx + rw > dibW || dy + rh > dibH) return FALSE;
+
+    {
+        CDC dcDib;
+        dcDib.Attach(hdcDib);
+        dcDib.SetStretchBltMode(COLORONCOLOR);
+        dcDib.BitBlt(dx, dy, rw, rh, CDC::FromHandle(hdcSrc), srcX, srcY, SRCCOPY);
+        dcDib.Detach();
+    }
+    MakeRectOpaque(dx, dy, rw, rh);
+    return TRUE;
+}
+
 BOOL CCC_ChromaBlitCache::FillOpaqueRect(int x, int y, int rw, int rh, COLORREF color, COLORREF chromaKey)
 {
     if (!hdcDib || !pBits || rw <= 0 || rh <= 0) return FALSE;
@@ -543,18 +559,20 @@ BOOL CCC_ChromaBlitCache::BlitRect(HDC hdcDest, int x, int y, int w, int h)
     if (!hdcDest || w <= 0 || h <= 0 || !pBits || !hdcDib || dibW <= 0 || dibH <= 0) return FALSE;
     if (x < 0 || y < 0 || x + w > dibW || y + h > dibH) return FALSE;
 
+    // BeginBufferedPaint はピアノ/アナライザ 60fps で約数倍重い。α付き DIB を直接合成する。
+    const BLENDFUNCTION bf = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
+    if (::GdiAlphaBlend(hdcDest, x, y, w, h, hdcDib, x, y, w, h, bf))
+        return TRUE;
+
     static LONG s_bpInited = 0;
     if (InterlockedCompareExchange(&s_bpInited, 1, 0) == 0)
         ::BufferedPaintInit();
-
     RECT rect = { x, y, x + w, y + h };
     BP_PAINTPARAMS params = { sizeof(BP_PAINTPARAMS) };
     HDC hdcBuf = NULL;
     HPAINTBUFFER hBP = ::BeginBufferedPaint(hdcDest, &rect, BPBF_TOPDOWNDIB, &params, &hdcBuf);
     if (!hdcBuf || !hBP) return FALSE;
-
     CCC_InitBPClear(hBP, w, h);
-    const BLENDFUNCTION bf = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
     ::GdiAlphaBlend(hdcBuf, x, y, w, h, hdcDib, x, y, w, h, bf);
     ::EndBufferedPaint(hBP, TRUE);
     return TRUE;
@@ -564,19 +582,21 @@ BOOL CCC_ChromaBlitCache::BlitFull(HDC hdcDest, int x, int y, int w, int h)
 {
     if (!hdcDest || w <= 0 || h <= 0 || !pBits || !hdcDib || dibW != w || dibH != h) return FALSE;
 
+    // キャプション下(y>0)でも dest は画面座標。BeginBufferedPaint を避けて直接合成。
+    const BLENDFUNCTION bf = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
+    if (::GdiAlphaBlend(hdcDest, x, y, w, h, hdcDib, 0, 0, w, h, bf))
+        return TRUE;
+
     static LONG s_bpInited = 0;
     if (InterlockedCompareExchange(&s_bpInited, 1, 0) == 0)
         ::BufferedPaintInit();
-
     RECT rect = { x, y, x + w, y + h };
     BP_PAINTPARAMS params = { sizeof(BP_PAINTPARAMS) };
     HDC hdcBuf = NULL;
     HPAINTBUFFER hBP = ::BeginBufferedPaint(hdcDest, &rect, BPBF_TOPDOWNDIB, &params, &hdcBuf);
     if (!hdcBuf || !hBP) return FALSE;
-
     CCC_InitBPClear(hBP, w, h);
-    const BLENDFUNCTION bf = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
-    ::GdiAlphaBlend(hdcBuf, 0, 0, w, h, hdcDib, 0, 0, w, h, bf);
+    ::GdiAlphaBlend(hdcBuf, x, y, w, h, hdcDib, 0, 0, w, h, bf);
     ::EndBufferedPaint(hBP, TRUE);
     return TRUE;
 }
@@ -600,13 +620,17 @@ static BOOL CCC_BlitChromaCachedRect(HDC hdcDest, const RECT& rect, HDC hdcSrc, 
     }
     CCC_AlphaFromChroma(cache.pBits, destW, destH, clrKey);
 
+    const BLENDFUNCTION bf = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
+    if (::GdiAlphaBlend(hdcDest, rect.left, rect.top, destW, destH,
+            cache.hdcDib, 0, 0, destW, destH, bf))
+        return TRUE;
+
     BP_PAINTPARAMS params = { sizeof(BP_PAINTPARAMS) };
     HDC hdcBuf = NULL;
     HPAINTBUFFER hBP = ::BeginBufferedPaint(hdcDest, &rect, BPBF_TOPDOWNDIB, &params, &hdcBuf);
     if (!hdcBuf || !hBP) return FALSE;
 
     CCC_InitBPClear(hBP, destW, destH);
-    const BLENDFUNCTION bf = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
     ::GdiAlphaBlend(hdcBuf, rect.left, rect.top, destW, destH, cache.hdcDib, 0, 0, destW, destH, bf);
     ::EndBufferedPaint(hBP, TRUE);
     return TRUE;
@@ -637,6 +661,15 @@ static BOOL CCC_BlitChromaNFRect(HDC hdcDest, const RECT& rect, HDC hdcSrc, int 
         dcDib.BitBlt(0, 0, destW, destH, &dcSrc, srcX, srcY, SRCCOPY);
     CCC_AlphaFromChroma(pBits, destW, destH, clrKey);
 
+    const BLENDFUNCTION bf = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
+    if (::GdiAlphaBlend(hdcDest, rect.left, rect.top, destW, destH,
+            dcDib.GetSafeHdc(), 0, 0, destW, destH, bf)) {
+        ::SelectObject(dcDib.GetSafeHdc(), hOld);
+        ::DeleteObject(hDib);
+        dcSrc.Detach();
+        return TRUE;
+    }
+
     BP_PAINTPARAMS params = { sizeof(BP_PAINTPARAMS) };
     HDC hdcBuf = NULL;
     HPAINTBUFFER hBP = ::BeginBufferedPaint(hdcDest, &rect, BPBF_TOPDOWNDIB, &params, &hdcBuf);
@@ -649,7 +682,6 @@ static BOOL CCC_BlitChromaNFRect(HDC hdcDest, const RECT& rect, HDC hdcSrc, int 
     }
 
     CCC_InitBPClear(hBP, destW, destH);
-    const BLENDFUNCTION bf = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
     // buffer DC はクライアント座標系なので rect の左上から描画する
     ::GdiAlphaBlend(hdcBuf, rect.left, rect.top, destW, destH, dcDib.GetSafeHdc(), 0, 0, destW, destH, bf);
     ::EndBufferedPaint(hBP, TRUE);
@@ -7862,6 +7894,15 @@ void CCustomListCtrl::PreSubclassWindow()
     SetTextColor(RGB(0, 0, 0));
     SetExtendedStyle(GetExtendedStyle() | LVS_EX_DOUBLEBUFFER);
 }
+
+BOOL CCustomListCtrl::PreTranslateMessage(MSG* pMsg)
+{
+    const BOOL handled = CListCtrlA::PreTranslateMessage(pMsg);
+    if (handled && pMsg && pMsg->hwnd == m_hWnd && pMsg->message == WM_KEYDOWN
+        && (pMsg->wParam == 'A' || pMsg->wParam == 'a'))
+        ScheduleOpaqueRepaint();
+    return handled;
+}
 HBRUSH CCustomListCtrl::CtlColor(CDC* pDC, UINT)
 {
     pDC->SetBkColor(COLOR_LIST_BG);
@@ -8491,8 +8532,9 @@ void CCustomListCtrl::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
                 CRect rh(noteX, noteY + CCC_ScaleDpi(2, dpiNote),
                     noteX + CCC_ScaleDpi(14, dpiNote), noteY + ih);
                 DrawSoftJkHeart(pDC, rh, (int)(::GetTickCount64() / 120), TRUE, RGB(255, 140, 188));
+                // 120ms 常時 Invalidate は再生中のピアノ提示を遅らせる。自然な再描画に任せる。
                 if (GetSafeHwnd())
-                    SetTimer(kListSoftTimerId, 120, NULL);
+                    KillTimer(kListSoftTimerId);
             }
             if (pIL && noteImg >= 0 && noteImg != 1) {
                 // ImageList は行高確保(♪相当)。♪自体は 16x16@96dpi。
@@ -9409,8 +9451,9 @@ void CCustomTabCtrl::DrawTabItem(CDC* pDC, int nItem, CRect rc, BOOL bSelected, 
 			DrawSoftJkBackdrop(pDC, rc, (int)(::GetTickCount64() / 80), bHot);
 		DrawSoftJkThumb(pDC, CRect(rc.right - 16, rc.top + 2, rc.right - 2, rc.top + 16),
 			(int)(::GetTickCount64() / 220), bHot, bHot ? 10.f : 0.f);
+		// 常時 Soft タイマーは UI スレッドを食うので張らない（描画は上で済む）
 		if (GetSafeHwnd())
-			SetTimer(kTabSoftTimerId, 220, NULL);
+			KillTimer(kTabSoftTimerId);
 	}
 	pDC->SelectClipRgn(NULL);
 
@@ -9819,14 +9862,14 @@ void CCustomStandardButton::UpdateAnimTimer()
     }
 }
 
-// Soft3D 背景の常時ゆらぎ。間引き。キャプション帯は対象外（flat でも角チップ用に回す）
-static void CCC_ButtonSoftTimerSync(HWND hWnd, BOOL bFlat)
+// Soft3D 背景の常時ゆらぎ。
+// 旧: 全 CCustom ボタンが 220ms で Invalidate → Soft3D ラスタが UI スレッドを占有し、
+// ピアノロール等の 60fps 提示が「割り込みが長い／遅い」体感になった（〜7月末は無し）。
+// Soft3D チップ自体は通常の OnPaint（ホバー／押下／親の再描画）で描く。常時タイマーは張らない。
+static void CCC_ButtonSoftTimerSync(HWND hWnd, BOOL /*bFlat*/)
 {
-    if (!hWnd) return;
-    if (!CCC_IsCaptionChromeCtrl(hWnd))
-        ::SetTimer(hWnd, kButtonSoftTimerId, bFlat ? 400 : 220, NULL);
-    else
-        ::KillTimer(hWnd, kButtonSoftTimerId);
+	if (hWnd)
+		::KillTimer(hWnd, kButtonSoftTimerId);
 }
 
 void CCustomStandardButton::OnTimer(UINT_PTR nIDEvent)
@@ -12485,7 +12528,8 @@ void CCustomGroupBox::PreSubclassWindow()
     CButton::PreSubclassWindow();
     // グループは兄弟(Edit/Static)の下に回り、かつ兄弟領域へ描画しない
     ModifyStyle(0, WS_CLIPSIBLINGS);
-    SetTimer(kGroupSoftTimerId, 500, NULL);
+    // Soft3D ゆらゆら常時タイマーはピアノ等と競合するため張らない
+    KillTimer(kGroupSoftTimerId);
 }
 
 void CCustomGroupBox::OnTimer(UINT_PTR nIDEvent)
@@ -13902,7 +13946,7 @@ static const COLORREF CCC_CAP_TEXT = RGB(255, 248, 252);
 
 static CCC_CaptionEntry* CCC_FindCaption(HWND hWnd);
 
-// キャプション専用アクリル判定。savedata.aero / m_bAeroEnabled は見ない
+// キャプション専用アクリル判定。savedata.aero / m_bAeroEnabled は見ない（帯は常時ガラス可）
 BOOL CCC_AcrylicCaption(HWND hWnd)
 {
 #if CCUSTOM_AERO_SUPPORT
@@ -14056,8 +14100,6 @@ static void CCC_CaptionHideDwmTitleChrome(HWND hWnd)
 #endif
 }
 
-// AcrylicCaption 時のホストガラス（常に全面 -1 + REDIRECTIONBITMAP_ALPHA）。
-// 本文の不透明化は描画側（FillRectOpaque / MakeOpaque / BitBlt opaque）。
 static void CCC_CaptionEnsureBackdrop(HWND hWnd)
 {
 #if CCUSTOM_AERO_SUPPORT
@@ -16135,9 +16177,10 @@ void CCC_MainLockOnMainMoving(LPRECT pMainRect)
     g_mainLockInternalMove = FALSE;
 }
 
-// ---- 右/下辺リサイズ時の隣窓連鎖押し出し（追従フラグ無関係）----
+// ---- 四辺リサイズ時の隣窓連鎖押し出し（追従フラグ無関係）----
 // ENTERSIZEMOVE 無しでも pOld→pNew の差分で動く（増分）。密着は広め＋最近傍フォールバック。
 // SINK: Winの不可視リサイズ枠で「見た目密着」が gap=-7〜-20 になりがちなので深めに許容。
+// 左/上辺リサイズでは右隣を MainLockOnMainMoving(左上相対)で動かさないこと。
 enum { CCC_CASCADE_MAX = 16, CCC_CASCADE_GAP = 280, CCC_CASCADE_NEAR = 1600, CCC_CASCADE_SINK = 56 };
 
 struct CCC_CascadeSnap {
@@ -16170,11 +16213,29 @@ static BOOL CCC_CascadeTouchRight(const RECT& a, const RECT& b)
         return TRUE;
     return FALSE;
 }
+// a の左辺に b が密着／めり込み／すぐ左
+static BOOL CCC_CascadeTouchLeft(const RECT& a, const RECT& b)
+{
+    if (!CCC_CascadeVertOverlap(a, b)) return FALSE;
+    const int gap = a.left - b.right;
+    if (gap >= -CCC_CASCADE_SINK && gap <= CCC_CASCADE_GAP)
+        return TRUE;
+    return FALSE;
+}
 // a の下辺に b が密着／めり込み／すぐ下
 static BOOL CCC_CascadeTouchBottom(const RECT& a, const RECT& b)
 {
     if (!CCC_CascadeHorzOverlap(a, b)) return FALSE;
     const int gap = b.top - a.bottom;
+    if (gap >= -CCC_CASCADE_SINK && gap <= CCC_CASCADE_GAP)
+        return TRUE;
+    return FALSE;
+}
+// a の上辺に b が密着／めり込み／すぐ上
+static BOOL CCC_CascadeTouchTop(const RECT& a, const RECT& b)
+{
+    if (!CCC_CascadeHorzOverlap(a, b)) return FALSE;
+    const int gap = a.top - b.bottom;
     if (gap >= -CCC_CASCADE_SINK && gap <= CCC_CASCADE_GAP)
         return TRUE;
     return FALSE;
@@ -16218,6 +16279,51 @@ void CCC_NeighborCascadeEnd()
     g_cascadeSnap.n = 0;
 }
 
+static void CCC_CascadeGrowReach(
+    BYTE* reach, int n, const RECT* pOldMain, const RECT* liveRc,
+    BOOL (*touchMain)(const RECT&, const RECT&),
+    BOOL (*touchPeer)(const RECT&, const RECT&),
+    int (*gapFromMain)(const RECT&, const RECT&),
+    BOOL (*overlapMain)(const RECT&, const RECT&))
+{
+    BOOL any = FALSE;
+    for (int i = 0; i < n; ++i) {
+        if (touchMain(*pOldMain, liveRc[i])) {
+            reach[i] = 1; any = TRUE;
+        }
+    }
+    if (!any) {
+        int best = -1, bestGap = CCC_CASCADE_NEAR + 1;
+        for (int i = 0; i < n; ++i) {
+            const RECT& wi = liveRc[i];
+            if (!overlapMain(*pOldMain, wi)) continue;
+            const int gap = gapFromMain(*pOldMain, wi);
+            if (gap < -CCC_CASCADE_SINK || gap > CCC_CASCADE_NEAR) continue;
+            if (gap < bestGap) { bestGap = gap; best = i; }
+        }
+        if (best >= 0) { reach[best] = 1; any = TRUE; }
+    }
+    if (!any) return;
+    BOOL grew = TRUE;
+    while (grew) {
+        grew = FALSE;
+        for (int i = 0; i < n; ++i) {
+            if (reach[i]) continue;
+            for (int j = 0; j < n; ++j) {
+                if (!reach[j]) continue;
+                if (touchPeer(liveRc[j], liveRc[i])) {
+                    reach[i] = 1; grew = TRUE; break;
+                }
+            }
+        }
+    }
+}
+
+static int CCC_CascadeGapRight(const RECT& m, const RECT& w) { return w.left - m.right; }
+static int CCC_CascadeGapLeft(const RECT& m, const RECT& w) { return m.left - w.right; }
+static int CCC_CascadeGapBottom(const RECT& m, const RECT& w) { return w.top - m.bottom; }
+static int CCC_CascadeGapTop(const RECT& m, const RECT& w) { return m.top - w.bottom; }
+
 void CCC_NeighborCascadeOnMainResize(const RECT* pOldMain, const RECT* pNewMain)
 {
     if (!pNewMain)
@@ -16237,13 +16343,10 @@ void CCC_NeighborCascadeOnMainResize(const RECT* pOldMain, const RECT* pNewMain)
         return;
     }
 
-    // 増分（毎 OnSize の旧→新）。Begin の絶対基準に依存しないので ENTERSIZEMOVE 欠落でも動く
+    const int dxL = pNewMain->left - pOldMain->left;
     const int dxR = pNewMain->right - pOldMain->right;
+    const int dyT = pNewMain->top - pOldMain->top;
     const int dyB = pNewMain->bottom - pOldMain->bottom;
-    if (dxR == 0 && dyB == 0) {
-        CCC_MainLockOnMainMoving((LPRECT)pNewMain);
-        return;
-    }
 
     HWND hMain = g_cascadeSnap.active ? g_cascadeSnap.hMain : NULL;
     if (!hMain || !::IsWindow(hMain)) {
@@ -16253,89 +16356,56 @@ void CCC_NeighborCascadeOnMainResize(const RECT* pOldMain, const RECT* pNewMain)
     if (!hMain || !::IsWindow(hMain))
         return;
 
-    // 毎回「いまの隣窓」を採取（スナップ固定だと途中で開いた窓が落ちる）
     CCC_CascadeSnap live = {};
     CCC_CascadeCollect(hMain, live, pOldMain);
     if (live.n <= 0) {
-        CCC_MainLockOnMainMoving((LPRECT)pNewMain);
+        // 隣窓なし: 密着ロックだけ更新（左辺リサイズで右相対 offset を動かさない）
+        if (g_mainLockInternalMove)
+            return;
+        g_mainLockInternalMove = TRUE;
+        g_mainLockQuickPresentUntil = GetTickCount() + 200;
+        for (int i = 0; i < g_mainLockCount; ++i) {
+            CCC_MainLockEntry& e = g_mainLocks[i];
+            if (!e.locked || !::IsWindow(e.hWnd))
+                continue;
+            // 左辺のみ動いたとき offsetH(0) は絶対Xを保つ（右の UI が一緒に来るのを防ぐ）
+            if (dxL != 0 && dxR == 0 && e.dockH == 0)
+                e.offsetX = e.offsetX - dxL;
+            if (dyT != 0 && dyB == 0 && e.dockV == 0)
+                e.offsetY = e.offsetY - dyT;
+            CCC_MainLockPlaceChild(e, pNewMain);
+        }
+        g_mainLockInternalMove = FALSE;
         return;
     }
 
-    BYTE reachR[CCC_CASCADE_MAX];
-    BYTE reachB[CCC_CASCADE_MAX];
+    BYTE reachR[CCC_CASCADE_MAX], reachL[CCC_CASCADE_MAX];
+    BYTE reachB[CCC_CASCADE_MAX], reachT[CCC_CASCADE_MAX];
     ZeroMemory(reachR, sizeof(reachR));
+    ZeroMemory(reachL, sizeof(reachL));
     ZeroMemory(reachB, sizeof(reachB));
+    ZeroMemory(reachT, sizeof(reachT));
     const int n = live.n;
 
     if (dxR != 0) {
-        // 旧右辺のすぐ右／密着／めり込み → 種。無ければ右方向の最近傍を種に。
-        BOOL any = FALSE;
-        for (int i = 0; i < n; ++i) {
-            if (CCC_CascadeTouchRight(*pOldMain, live.rc[i])) {
-                reachR[i] = 1; any = TRUE;
-            }
-        }
-        if (!any) {
-            int best = -1, bestGap = CCC_CASCADE_NEAR + 1;
-            for (int i = 0; i < n; ++i) {
-                const RECT& wi = live.rc[i];
-                const int gap = wi.left - pOldMain->right;
-                if (gap < -CCC_CASCADE_SINK || gap > CCC_CASCADE_NEAR) continue;
-                if (!CCC_CascadeVertOverlap(*pOldMain, wi)) continue;
-                if (gap < bestGap) { bestGap = gap; best = i; }
-            }
-            if (best >= 0) { reachR[best] = 1; any = TRUE; }
-        }
-        if (any) {
-            BOOL grew = TRUE;
-            while (grew) {
-                grew = FALSE;
-                for (int i = 0; i < n; ++i) {
-                    if (reachR[i]) continue;
-                    for (int j = 0; j < n; ++j) {
-                        if (!reachR[j]) continue;
-                        if (CCC_CascadeTouchRight(live.rc[j], live.rc[i])) {
-                            reachR[i] = 1; grew = TRUE; break;
-                        }
-                    }
-                }
-            }
-        }
+        CCC_CascadeGrowReach(reachR, n, pOldMain, live.rc,
+            CCC_CascadeTouchRight, CCC_CascadeTouchRight,
+            CCC_CascadeGapRight, CCC_CascadeVertOverlap);
     }
-
+    if (dxL != 0) {
+        CCC_CascadeGrowReach(reachL, n, pOldMain, live.rc,
+            CCC_CascadeTouchLeft, CCC_CascadeTouchLeft,
+            CCC_CascadeGapLeft, CCC_CascadeVertOverlap);
+    }
     if (dyB != 0) {
-        BOOL any = FALSE;
-        for (int i = 0; i < n; ++i) {
-            if (CCC_CascadeTouchBottom(*pOldMain, live.rc[i])) {
-                reachB[i] = 1; any = TRUE;
-            }
-        }
-        if (!any) {
-            int best = -1, bestGap = CCC_CASCADE_NEAR + 1;
-            for (int i = 0; i < n; ++i) {
-                const RECT& wi = live.rc[i];
-                const int gap = wi.top - pOldMain->bottom;
-                if (gap < -CCC_CASCADE_SINK || gap > CCC_CASCADE_NEAR) continue;
-                if (!CCC_CascadeHorzOverlap(*pOldMain, wi)) continue;
-                if (gap < bestGap) { bestGap = gap; best = i; }
-            }
-            if (best >= 0) { reachB[best] = 1; any = TRUE; }
-        }
-        if (any) {
-            BOOL grew = TRUE;
-            while (grew) {
-                grew = FALSE;
-                for (int i = 0; i < n; ++i) {
-                    if (reachB[i]) continue;
-                    for (int j = 0; j < n; ++j) {
-                        if (!reachB[j]) continue;
-                        if (CCC_CascadeTouchBottom(live.rc[j], live.rc[i])) {
-                            reachB[i] = 1; grew = TRUE; break;
-                        }
-                    }
-                }
-            }
-        }
+        CCC_CascadeGrowReach(reachB, n, pOldMain, live.rc,
+            CCC_CascadeTouchBottom, CCC_CascadeTouchBottom,
+            CCC_CascadeGapBottom, CCC_CascadeHorzOverlap);
+    }
+    if (dyT != 0) {
+        CCC_CascadeGrowReach(reachT, n, pOldMain, live.rc,
+            CCC_CascadeTouchTop, CCC_CascadeTouchTop,
+            CCC_CascadeGapTop, CCC_CascadeHorzOverlap);
     }
 
     if (g_mainLockInternalMove)
@@ -16344,16 +16414,15 @@ void CCC_NeighborCascadeOnMainResize(const RECT* pOldMain, const RECT* pNewMain)
     g_mainLockQuickPresentUntil = GetTickCount() + 200;
 
     for (int i = 0; i < n; ++i) {
-        if (!reachR[i] && !reachB[i])
+        if (!reachR[i] && !reachL[i] && !reachB[i] && !reachT[i])
             continue;
         HWND h = live.hWnd[i];
         if (!::IsWindow(h))
             continue;
-        const int ox = reachR[i] ? dxR : 0;
-        const int oy = reachB[i] ? dyB : 0;
+        const int ox = (reachR[i] ? dxR : 0) + (reachL[i] ? dxL : 0);
+        const int oy = (reachB[i] ? dyB : 0) + (reachT[i] ? dyT : 0);
         if (ox == 0 && oy == 0)
             continue;
-        // 増分: 現座標 + デルタ（毎フレーム積み上がる）
         RECT cur;
         ::GetWindowRect(h, &cur);
         ::SetWindowPos(h, NULL, cur.left + ox, cur.top + oy, 0, 0,
@@ -16373,12 +16442,22 @@ void CCC_NeighborCascadeOnMainResize(const RECT* pOldMain, const RECT* pNewMain)
         for (int s = 0; s < n; ++s) {
             if (live.hWnd[s] == e.hWnd) { snapIdx = s; break; }
         }
-        if (snapIdx >= 0 && (reachR[snapIdx] || reachB[snapIdx]))
+        if (snapIdx >= 0 && (reachR[snapIdx] || reachL[snapIdx] || reachB[snapIdx] || reachT[snapIdx]))
             continue;
+        // 右辺リサイズ時の右密着は増分押し出し済み
         if (dxR != 0 && e.dockH == 1)
+            continue;
+        if (dxL != 0 && e.dockH == 2)
             continue;
         if (dyB != 0 && e.dockV == 1)
             continue;
+        if (dyT != 0 && e.dockV == 2)
+            continue;
+        // 左辺だけ動かしたとき、offset 相対(dockH=0)は絶対Xを保つ
+        if (dxL != 0 && dxR == 0 && e.dockH == 0)
+            e.offsetX = e.offsetX - dxL;
+        if (dyT != 0 && dyB == 0 && e.dockV == 0)
+            e.offsetY = e.offsetY - dyT;
         CCC_MainLockPlaceChild(e, pNewMain);
     }
 

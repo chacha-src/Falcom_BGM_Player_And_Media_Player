@@ -1443,8 +1443,12 @@ void CPianoRoll::SetChannelMeterDb(const float* dbPerChannel, int channelCount)
                 meterChanged = true;
         }
     }
-    if (meterChanged)
+    if (meterChanged) {
         m_meterDirty = true;
+        // Sync は Invalidate しない。解析完了待ちにメーターだけ遅れるのを防ぐ。
+        if (::IsWindow(m_hWnd) && !m_paintDisabled)
+            ApplySyncInvalidate();
+    }
 }
 
 // 窓掛け済みバッファから Goertzel 解析を実行し m_rawStrengths を更新する。
@@ -2189,7 +2193,8 @@ void CPianoRoll::InvalidateRegions(bool roll, bool key)
     if (keyH < 50) keyH = 50;
     if (keyH > 100) keyH = 100;
     // 簡易3D はクライアント全面が1枚のシーン(鍵盤帯を分けない)
-    const int rollH = IsView3D() ? h : (h - keyH);
+    const int chordH = IsView3D() ? 0 : ChordPanelHeightPx();
+    const int rollH = IsView3D() ? h : (h - keyH - chordH);
     if (rollH <= 0) return;
 
     if ((roll && key) || IsView3D()) {
@@ -2198,8 +2203,10 @@ void CPianoRoll::InvalidateRegions(bool roll, bool key)
     }
     if (roll)
         CCC_InvalidateRectMinusOverlay(m_hWnd, CRect(cr.left, cr.top, cr.left + w, cr.top + rollH));
-    if (key)
-        InvalidateRect(CRect(cr.left, cr.top + rollH, cr.left + w, cr.bottom), FALSE);
+    if (key) {
+        const int keyTop = cr.top + rollH + chordH;
+        InvalidateRect(CRect(cr.left, keyTop, cr.left + w, cr.bottom), FALSE);
+    }
 }
 
 void CPianoRoll::BuildLiveNoteFrame(NoteFrame& frame) const
@@ -4486,11 +4493,14 @@ void CPianoRoll::RequestSyncFromMainUi()
 {
     if (!::IsWindow(m_hWnd)) return;
     const DWORD now = GetTickCount();
-    // 提示フラグ固着の回復のみ。PCM/メーター同期は止めない（アナライザと同じ分離）。
-    // 旧実装は analysisDonePosted 中に Sync 全体を return し、描画が重いほど
-    // 供給が止まり、長時間後に 150ms UpdateWindow 回復サイクルで体感が落ちた。
+    int minMs = savedata.ms2;
+    if (minMs < 16) minMs = 16;
+    if (minMs > 960) minMs = 960;
     if (InterlockedCompareExchange(&m_analysisDonePosted, 0, 0) != 0) {
-        if (m_lastAnalysisDonePostTick != 0 && (now - m_lastAnalysisDonePostTick) >= 150u) {
+        DWORD stuckMs = (DWORD)minMs * 2u;
+        if (stuckMs < 32u) stuckMs = 32u;
+        if (stuckMs > 96u) stuckMs = 96u;
+        if (m_lastAnalysisDonePostTick != 0 && (now - m_lastAnalysisDonePostTick) >= stuckMs) {
             MSG msg;
             while (::PeekMessage(&msg, m_hWnd, WM_PIANOROLL_ANALYSIS_DONE, WM_PIANOROLL_ANALYSIS_DONE, PM_REMOVE)) {}
             InterlockedExchange(&m_analysisDonePosted, 0);
@@ -4499,16 +4509,39 @@ void CPianoRoll::RequestSyncFromMainUi()
         }
     }
     if (InterlockedCompareExchange(&m_syncPosted, 0, 0) != 0) return;
-    // 実時間スロットル（paint 遅延で ms2 が伸びても 60Hz 同期にしない）
-    int minMs = savedata.ms2;
-    if (minMs < 16) minMs = 16;
-    if (minMs > 960) minMs = 960;
     if (m_lastSyncPostTick != 0 && (now - m_lastSyncPostTick) < (DWORD)minMs)
         return;
     if (InterlockedCompareExchange(&m_syncPosted, 1, 0) != 0) return;
     m_lastSyncPostTick = now;
     if (!PostMessage(WM_PIANOROLL_SYNC, 0, 0))
         InterlockedExchange(&m_syncPosted, 0);
+}
+
+void CPianoRoll::PumpSyncNow()
+{
+    // Speana より前の同期。PostMessage を挟まないので timerp 内でメーター/解析供給が完了する。
+    if (!::IsWindow(m_hWnd) || m_paintDisabled) return;
+    const DWORD now = GetTickCount();
+    int minMs = savedata.ms2;
+    if (minMs < 16) minMs = 16;
+    if (minMs > 960) minMs = 960;
+    if (m_lastSyncPostTick != 0 && (now - m_lastSyncPostTick) < (DWORD)minMs)
+        return;
+    // 滞留している Post 同期は破棄（この直後にインライン実行する）
+    if (InterlockedCompareExchange(&m_syncPosted, 0, 0) != 0) {
+        MSG msg;
+        while (::PeekMessage(&msg, m_hWnd, WM_PIANOROLL_SYNC, WM_PIANOROLL_SYNC, PM_REMOVE)) {}
+        InterlockedExchange(&m_syncPosted, 0);
+    }
+    m_lastSyncPostTick = now;
+    COggDlg_SyncPianoRollFast();
+    int pending = 0;
+    EnterCriticalSection(&m_cs);
+    pending = m_framesPending;
+    LeaveCriticalSection(&m_cs);
+    if (pending > 0 || m_meterDirty || m_historyDirty || m_keyDirty
+        || InterlockedCompareExchange(&m_analysisPresentDirty, 0, 0) != 0)
+        ApplySyncInvalidate();
 }
 
 void CPianoRoll::ApplySyncInvalidate()
@@ -4544,15 +4577,16 @@ LRESULT CPianoRoll::OnSyncRequest(WPARAM, LPARAM)
 
 LRESULT CPianoRoll::OnAnalysisDone(WPARAM, LPARAM)
 {
-    // ロール描画の唯一の起動点。
-    // UpdateWindow を毎回来すとピアノ/アナライザが UI を占有し、
-    // MP の GDI スクロール(Invalidate のみ)が余波で飢える。
-    // 通常は Invalidate のみ。固着時は RequestSync 側 150ms 監視で UpdateWindow 回復。
+    // ロール描画の起動点。Invalidate のみ（UpdateWindow は UI 独占の元）。
+    // analysisDonePosted はここで解放する。Paint 完了まで握ると、メインの Speana/Soft3D 等で
+    // WM_PAINT が遅延したとき次のキックが止まり、履歴スクロール／dB が「遅い」体感になる。
+    // （リサイズが軽いのは Size→Invalidate が解析フラグと無関係に来るため）
     if (m_paintDisabled || !::IsWindow(m_hWnd)) {
         InterlockedExchange(&m_analysisDonePosted, 0);
         return 0;
     }
     ApplySyncInvalidate();
+    InterlockedExchange(&m_analysisDonePosted, 0);
     return 0;
 }
 
@@ -5441,42 +5475,50 @@ void CPianoRoll::PresentFinalFrame(CDC& dc, int w, int h, int rollH, int keySect
     const bool haveLegend = wantLegend && !lgPanel.IsRectEmpty();
 
 #if CCUSTOM_AERO_SUPPORT
-    if (savedata.aero == 1 && CCC_IsWin11() && m_chromaReady && m_chromaCache.hdcDib) {
-        // 追従オーバーレイのヘッダー復元が凡例矩形を潰すため、凡例は Bake の後に載せる。
+    // 本文アクリル、または本文OFF+キャプションガラス: 差分済み m_chromaCache を AlphaBlend するだけ。
+    // （本文OFF時に毎フレ BlitStretchOpaque=全面コピー+MakeOpaque していたのが 16ms でも重い主因）
+    if (CCC_IsWin11() && m_chromaReady && m_chromaCache.hdcDib
+        && (savedata.aero == 1 || CCC_AcrylicCaption(m_hWnd))) {
         BakeMainFollowOverlayIntoChroma(w, h, rollH, keySectionH);
         if (haveLegend) {
             DrawExprLegend(dc, w, rollH, false);
             if (m_legendBgDC.GetSafeHdc() && lgPanel.Width() > 0 && lgPanel.Height() > 0) {
-                m_chromaCache.UpdateRect(m_legendBgDC.GetSafeHdc(),
-                    0, 0, lgPanel.left, lgPanel.top,
-                    lgPanel.Width(), lgPanel.Height(), PIANO_CHROMA_KEY);
+                if (savedata.aero == 1) {
+                    m_chromaCache.UpdateRect(m_legendBgDC.GetSafeHdc(),
+                        0, 0, lgPanel.left, lgPanel.top,
+                        lgPanel.Width(), lgPanel.Height(), PIANO_CHROMA_KEY);
+                } else {
+                    m_chromaCache.UpdateOpaqueRect(m_legendBgDC.GetSafeHdc(),
+                        0, 0, lgPanel.left, lgPanel.top,
+                        lgPanel.Width(), lgPanel.Height());
+                }
                 m_chromaCache.MakeRectOpaque(lgPanel.left, lgPanel.top, lgPanel.Width(), lgPanel.Height());
             }
         }
         const int yOff = CCC_GetCustomCaptionHeight(m_hWnd);
-        // 簡易3Dは鍵盤帯が無いので全面 Blit。2Dはロール+鍵盤が揃っていれば全面。
         if (m_rollReady && (m_keyBufReady || keySectionH <= 0) && chordH <= 0) {
             m_chromaCache.BlitFull(dc.GetSafeHdc(), 0, yOff, w, h);
             CCC_CaptionPaint(dc, m_hWnd);
             return;
         }
         if (m_rollReady && (m_keyBufReady || keySectionH <= 0) && chordH > 0) {
+            const BLENDFUNCTION bf = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
             if (yOff <= 0) {
                 m_chromaCache.BlitRect(dc.GetSafeHdc(), 0, 0, w, rollH);
                 if (m_keyBufReady)
                     m_chromaCache.BlitRect(dc.GetSafeHdc(), 0, rollH + chordH, w, keySectionH);
             }
             else if (m_chromaCache.hdcDib) {
-                CCC_BlitStretchOpaque(dc.GetSafeHdc(), 0, yOff, w, rollH, m_chromaCache.hdcDib, 0, 0, w, rollH);
+                ::GdiAlphaBlend(dc.GetSafeHdc(), 0, yOff, w, rollH,
+                    m_chromaCache.hdcDib, 0, 0, w, rollH, bf);
                 if (m_keyBufReady)
-                    CCC_BlitStretchOpaque(dc.GetSafeHdc(), 0, yOff + rollH + chordH, w, keySectionH,
-                        m_chromaCache.hdcDib, 0, rollH, w, keySectionH);
+                    ::GdiAlphaBlend(dc.GetSafeHdc(), 0, yOff + rollH + chordH, w, keySectionH,
+                        m_chromaCache.hdcDib, 0, rollH, w, keySectionH, bf);
             }
             DrawChordPanel(dc, 0, yOff + rollH, w, chordH);
             CCC_CaptionPaint(dc, m_hWnd);
             return;
         }
-        // BlitRect は dest=src 座標前提のため、キャプションオフセット時は Opaque 転送
         if (yOff <= 0) {
             if (m_rollReady)
                 m_chromaCache.BlitRect(dc.GetSafeHdc(), 0, 0, w, rollH);
@@ -5484,12 +5526,13 @@ void CPianoRoll::PresentFinalFrame(CDC& dc, int w, int h, int rollH, int keySect
                 m_chromaCache.BlitRect(dc.GetSafeHdc(), 0, rollH, w, keySectionH);
         }
         else if (m_chromaCache.hdcDib) {
+            const BLENDFUNCTION bf = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
             if (m_rollReady)
-                CCC_BlitStretchOpaque(dc.GetSafeHdc(), 0, yOff, w, rollH,
-                    m_chromaCache.hdcDib, 0, 0, w, rollH);
+                ::GdiAlphaBlend(dc.GetSafeHdc(), 0, yOff, w, rollH,
+                    m_chromaCache.hdcDib, 0, 0, w, rollH, bf);
             if (m_keyBufReady)
-                CCC_BlitStretchOpaque(dc.GetSafeHdc(), 0, yOff + rollH, w, keySectionH,
-                    m_chromaCache.hdcDib, 0, rollH, w, keySectionH);
+                ::GdiAlphaBlend(dc.GetSafeHdc(), 0, yOff + rollH, w, keySectionH,
+                    m_chromaCache.hdcDib, 0, rollH, w, keySectionH, bf);
         }
         CCC_CaptionPaint(dc, m_hWnd);
         return;
@@ -5576,6 +5619,9 @@ void CPianoRoll::BakeMainFollowOverlayIntoChroma(int w, int h, int rollH, int ke
     // ヘッダー行全幅を下地へ戻してから焼き直す（アナライザと同方針）。
     CRect lockRc;
     CCC_MainLockGetOverlayRect(m_hWnd, lockRc);
+    if (lockRc.IsRectEmpty() && !m_frozen)
+        return;
+
     if (!lockRc.IsRectEmpty()) {
         CRect headerRow(0, lockRc.top, w, lockRc.bottom);
         if (headerRow.top < 0)
@@ -5583,13 +5629,20 @@ void CPianoRoll::BakeMainFollowOverlayIntoChroma(int w, int h, int rollH, int ke
         if (headerRow.bottom > h)
             headerRow.bottom = h;
 
+        const bool bodyAero = (savedata.aero == 1);
         CRect rollPart = headerRow;
         if (rollPart.bottom > rollH)
             rollPart.bottom = rollH;
         if (rollPart.top < rollPart.bottom && m_rollReady && m_rollDC.GetSafeHdc()) {
-            m_chromaCache.UpdateRect(m_rollDC.GetSafeHdc(),
-                rollPart.left, rollPart.top, rollPart.left, rollPart.top,
-                rollPart.Width(), rollPart.Height(), PIANO_CHROMA_KEY);
+            if (bodyAero) {
+                m_chromaCache.UpdateRect(m_rollDC.GetSafeHdc(),
+                    rollPart.left, rollPart.top, rollPart.left, rollPart.top,
+                    rollPart.Width(), rollPart.Height(), PIANO_CHROMA_KEY);
+            } else {
+                m_chromaCache.UpdateOpaqueRect(m_rollDC.GetSafeHdc(),
+                    rollPart.left, rollPart.top, rollPart.left, rollPart.top,
+                    rollPart.Width(), rollPart.Height());
+            }
         }
         CRect keyPart = headerRow;
         if (keyPart.top < rollH)
@@ -5597,9 +5650,15 @@ void CPianoRoll::BakeMainFollowOverlayIntoChroma(int w, int h, int rollH, int ke
         if (keyPart.bottom > rollH + keySectionH)
             keyPart.bottom = rollH + keySectionH;
         if (keyPart.top < keyPart.bottom && m_keyBufReady && m_keyDC.GetSafeHdc()) {
-            m_chromaCache.UpdateRect(m_keyDC.GetSafeHdc(),
-                keyPart.left, keyPart.top - rollH, keyPart.left, keyPart.top,
-                keyPart.Width(), keyPart.Height(), PIANO_CHROMA_KEY);
+            if (bodyAero) {
+                m_chromaCache.UpdateRect(m_keyDC.GetSafeHdc(),
+                    keyPart.left, keyPart.top - rollH, keyPart.left, keyPart.top,
+                    keyPart.Width(), keyPart.Height(), PIANO_CHROMA_KEY);
+            } else {
+                m_chromaCache.UpdateOpaqueRect(m_keyDC.GetSafeHdc(),
+                    keyPart.left, keyPart.top - rollH, keyPart.left, keyPart.top,
+                    keyPart.Width(), keyPart.Height());
+            }
         }
     }
 
@@ -5728,6 +5787,7 @@ void CPianoRoll::OnPaint()
     const bool needKeyDraw = !view3D && (m_keyDirty || !m_keyBufReady);
     bool didRollUpdate = false;
     bool didRollScroll = false;
+    bool didPlayheadOnly = false;
     bool needAnotherRollFrame = false;
     bool didMeterOnly = false;
 
@@ -5862,6 +5922,7 @@ void CPianoRoll::OnPaint()
     else if (m_rollReady) {
         DrawPlayheadRow(m_rollDC, w, rollH, liveSnap);
         didRollUpdate = true;
+        didPlayheadOnly = true;
     }
 
     if (needKeyDraw) {
@@ -5902,7 +5963,11 @@ void CPianoRoll::OnPaint()
     // 旧: 毎フレーム AlphaBlend+TransparentBlt+書き戻し → 長時間で GDI 劣化し EQ 飢餓。
 
 #if CCUSTOM_AERO_SUPPORT
-    if (savedata.aero == 1 && CCC_IsWin11()) {
+    // 本文アクリル: クロマDIB。本文OFF+キャプションガラス: 不透明DIBを差分更新し、
+    // Present は BlitFull のみ（毎フレ全面 BlitStretchOpaque=MakeOpaque+再コピーを避ける）。
+    const bool bodyAero = (savedata.aero == 1 && CCC_IsWin11());
+    const bool capGlassBody = (!bodyAero && CCC_AcrylicCaption(m_hWnd) && CCC_IsWin11());
+    if (bodyAero || capGlassBody) {
         if (m_chromaW != w || m_chromaH != h) {
             m_chromaCache.Release();
             m_chromaReady = false;
@@ -5910,10 +5975,16 @@ void CPianoRoll::OnPaint()
             m_chromaH = h;
         }
         if (m_chromaCache.Ensure(dc.GetSafeHdc(), w, h)) {
+            auto upd = [&](HDC hdcSrc, int sx, int sy, int dx, int dy, int rw, int rh) {
+                if (rw <= 0 || rh <= 0 || !hdcSrc) return;
+                if (bodyAero)
+                    m_chromaCache.UpdateRect(hdcSrc, sx, sy, dx, dy, rw, rh, PIANO_CHROMA_KEY);
+                else
+                    m_chromaCache.UpdateOpaqueRect(hdcSrc, sx, sy, dx, dy, rw, rh);
+            };
             if (m_rollReady && didRollUpdate) {
                 if (didRollScroll && m_lastScrollPx > 0 && m_chromaReady
                     && m_lastScrollPx < rollH) {
-                    // m_rollDC は凡例非含み。ScrollRows 前の凡例下地戻しは不要。
                     {
                         CRect lockRc;
                         CCC_MainLockGetOverlayRect(m_hWnd, lockRc);
@@ -5924,9 +5995,9 @@ void CPianoRoll::OnPaint()
                             if (headerRow.bottom > rollH)
                                 headerRow.bottom = rollH;
                             if (headerRow.top < headerRow.bottom) {
-                                m_chromaCache.UpdateRect(m_rollDC.GetSafeHdc(),
+                                upd(m_rollDC.GetSafeHdc(),
                                     headerRow.left, headerRow.top, headerRow.left, headerRow.top,
-                                    headerRow.Width(), headerRow.Height(), PIANO_CHROMA_KEY);
+                                    headerRow.Width(), headerRow.Height());
                             }
                         }
                     }
@@ -5939,22 +6010,27 @@ void CPianoRoll::OnPaint()
                     if (bandTop < 0) bandTop = 0;
                     const int bandH = rollH - bandTop;
                     if (bandH > 0)
-                        m_chromaCache.UpdateRect(m_rollDC.GetSafeHdc(), 0, bandTop, 0, bandTop, w, bandH, PIANO_CHROMA_KEY);
+                        upd(m_rollDC.GetSafeHdc(), 0, bandTop, 0, bandTop, w, bandH);
+                }
+                else if (didPlayheadOnly && m_chromaReady) {
+                    int yTop = 0, yBot = 0;
+                    GetHistoryRowBounds(rollH, 0, yTop, yBot);
+                    if (yBot > yTop)
+                        upd(m_rollDC.GetSafeHdc(), 0, yTop, 0, yTop, w, yBot - yTop);
                 }
                 else {
-                    m_chromaCache.UpdateRect(m_rollDC.GetSafeHdc(), 0, 0, 0, 0, w, rollH, PIANO_CHROMA_KEY);
+                    upd(m_rollDC.GetSafeHdc(), 0, 0, 0, 0, w, rollH);
                 }
             }
             if (keySectionH <= 0) {
-                // 簡易3D: 鍵盤帯を持たないので更新するのはロール面(=全面)だけ
             }
             else if (needKeyDraw || !m_chromaReady)
-                m_chromaCache.UpdateRect(m_keyDC.GetSafeHdc(), 0, 0, 0, rollH, w, keySectionH, PIANO_CHROMA_KEY);
+                upd(m_keyDC.GetSafeHdc(), 0, 0, 0, rollH, w, keySectionH);
             else if (didMeterOnly) {
                 const int labelH = min(16, keyH / 4);
                 const int meterH = labelH + 2;
                 if (meterH > 0)
-                    m_chromaCache.UpdateRect(m_keyDC.GetSafeHdc(), 0, 0, 0, rollH, w, meterH, PIANO_CHROMA_KEY);
+                    upd(m_keyDC.GetSafeHdc(), 0, 0, 0, rollH, w, meterH);
             }
             m_chromaReady = true;
         }
@@ -6058,6 +6134,11 @@ void CPianoRoll::OnTimer(UINT_PTR nIDEvent)
         if (!IsIconic()) {
             savedata.pianorollx = rc.left; savedata.pianorolly = rc.top;
             savedata.pianorollw = rc.Width(); savedata.pianorollh = rc.Height();
+        }
+        // 自前 ms2 周期で同期＋提示。メイン timerp 経由だけだと Speana/他 Post に
+        // 挟まれて「描画は軽いのに間隔だけ長い」状態になる。
+        if (!IsIconic() && IsWindowVisible() && !m_paintDisabled) {
+            PumpSyncNow();
         }
     }
     CCustomBlurDialogExBase::OnTimer(nIDEvent);

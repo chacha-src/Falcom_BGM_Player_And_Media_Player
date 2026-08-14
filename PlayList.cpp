@@ -23,6 +23,7 @@
 #include "MpPlayerAddons.h"
 #include "CDesktopLyricsWnd.h"
 #include <regex>
+#include <shellapi.h>
 
 static CWnd* GetPlaylistModalOwner(CPlayList* plDlg)
 {
@@ -1208,6 +1209,9 @@ BOOL CPlayList::PreTranslateMessage(MSG* pMsg)
 			return TRUE;
 		}
 	}
+	if (m_lc.GetSafeHwnd() && pMsg->hwnd == m_lc.GetSafeHwnd()
+		&& HandleListEditKeys(pMsg))
+		return TRUE;
 	if (m_lc.GetSafeHwnd() && m_tool.GetCheck())
 	{
 		if (m_lc.PreTranslateMessage(pMsg))
@@ -3907,6 +3911,174 @@ int CPlayList::Add(CString name,int sub,int loop1,int loop2,CString art,CString 
 	return -1;
 }
 
+enum { kPlUndoDepth = 16 };
+enum { kPlUndoDel = 0, kPlUndoIns = 1 };
+#define PL_CLIP_MAGIC 0x4C50474F
+
+struct PlUndoRec {
+	int op;
+	int at;
+	int n;
+	playlistdata0* items;
+};
+
+static PlUndoRec s_plUndo[kPlUndoDepth];
+static int s_plUndoLen = 0;
+static int s_plUndoCur = 0;
+
+static UINT PlTracksClipFormat()
+{
+	static UINT s_fmt = 0;
+	if (!s_fmt)
+		s_fmt = RegisterClipboardFormat(_T("oggYSED_PlaylistTracks"));
+	return s_fmt;
+}
+
+static void PlUndoFreeRec(PlUndoRec& r)
+{
+	if (r.items) { free(r.items); r.items = NULL; }
+	r.n = 0;
+	r.at = 0;
+	r.op = 0;
+}
+
+static void PlUndoClearFrom(int from)
+{
+	if (from < 0) from = 0;
+	for (int i = from; i < s_plUndoLen; ++i)
+		PlUndoFreeRec(s_plUndo[i]);
+	s_plUndoLen = from;
+	if (s_plUndoCur > s_plUndoLen)
+		s_plUndoCur = s_plUndoLen;
+}
+
+static void PlUndoPush(int op, int at, const playlistdata0* items, int n)
+{
+	if (!items || n <= 0) return;
+	PlUndoClearFrom(s_plUndoCur);
+	if (s_plUndoLen >= kPlUndoDepth) {
+		PlUndoFreeRec(s_plUndo[0]);
+		for (int i = 1; i < s_plUndoLen; ++i)
+			s_plUndo[i - 1] = s_plUndo[i];
+		s_plUndoLen--;
+		s_plUndo[s_plUndoLen].items = NULL;
+		s_plUndoCur = s_plUndoLen;
+	}
+	playlistdata0* copy = (playlistdata0*)malloc(sizeof(playlistdata0) * (size_t)n);
+	if (!copy) return;
+	memcpy(copy, items, sizeof(playlistdata0) * (size_t)n);
+	s_plUndo[s_plUndoLen].op = op;
+	s_plUndo[s_plUndoLen].at = at;
+	s_plUndo[s_plUndoLen].n = n;
+	s_plUndo[s_plUndoLen].items = copy;
+	s_plUndoLen++;
+	s_plUndoCur = s_plUndoLen;
+}
+
+static void PlRefreshAfterEdit(CPlayList* pl)
+{
+	if (!pl) return;
+	pl->m_lc.pc = pl->pc;
+	if (::IsWindow(pl->m_lc.GetSafeHwnd())) {
+		pl->m_lc.SetItemCount(pl->playcnt);
+		if (pl->pc) {
+			for (int j = 0; j < pl->playcnt; j++)
+				pl->pc[j].icon = 1;
+		}
+		pl->m_lc.RedrawWindow();
+	}
+	pl->Save();
+	extern CMediaPlayerDlg* mp;
+	if (mp && ::IsWindow(mp->GetSafeHwnd()))
+		mp->RefreshList(TRUE);
+}
+
+static void PlAdjustAfterInsert(CPlayList* pl, int at, int n)
+{
+	extern int plcnt;
+	extern CMediaPlayerDlg* mp;
+	if (plcnt >= at) plcnt += n;
+	if (pl->pnt >= at) pl->pnt += n;
+	if (pl->pnt1 >= at) pl->pnt1 += n;
+	if (mp) {
+		for (int i = 0; i < mp->m_queueN; ++i) {
+			if (mp->m_queue[i] >= at)
+				mp->m_queue[i] += n;
+		}
+	}
+}
+
+static BOOL PlInsertTracksRaw(CPlayList* pl, int at, const playlistdata0* items, int n)
+{
+	if (!pl || !items || n <= 0) return FALSE;
+	if (at < 0) at = 0;
+	if (at > pl->playcnt) at = pl->playcnt;
+	playlistdata0* np = NULL;
+	if (!pl->pc) {
+		np = (playlistdata0*)malloc(sizeof(playlistdata0) * (size_t)(n + 2));
+		if (!np) return FALSE;
+		pl->pc = np;
+		pl->playcnt = 0;
+		at = 0;
+	}
+	else {
+		np = (playlistdata0*)realloc(pl->pc, sizeof(playlistdata0) * (size_t)(pl->playcnt + n + 2));
+		if (!np) return FALSE;
+		pl->pc = np;
+	}
+	for (int i = pl->playcnt - 1; i >= at; --i)
+		memcpy(&pl->pc[i + n], &pl->pc[i], sizeof(playlistdata0));
+	for (int i = 0; i < n; ++i) {
+		memcpy(&pl->pc[at + i], &items[i], sizeof(playlistdata0));
+		pl->pc[at + i].icon = 1;
+	}
+	pl->playcnt += n;
+	PlAdjustAfterInsert(pl, at, n);
+	if (::IsWindow(pl->m_lc.GetSafeHwnd())) {
+		pl->m_lc.SetItemCount(pl->playcnt);
+		pl->m_lc.SetRedraw(FALSE);
+		pl->m_lc.SetItemState(-1, 0, LVIS_SELECTED | LVIS_FOCUSED);
+		for (int i = 0; i < n; ++i)
+			pl->m_lc.SetItemState(at + i, LVIS_SELECTED, LVIS_SELECTED);
+		pl->m_lc.SetItemState(at, LVIS_FOCUSED, LVIS_FOCUSED);
+		pl->m_lc.SetRedraw(TRUE);
+		pl->m_lc.EnsureVisible(at, FALSE);
+	}
+	return TRUE;
+}
+
+static void PlRemoveTracksRaw(CPlayList* pl, const std::vector<int>& indices)
+{
+	if (!pl || !pl->pc || pl->playcnt <= 0 || indices.empty()) return;
+	std::vector<int> sel = indices;
+	std::sort(sel.begin(), sel.end());
+	sel.erase(std::unique(sel.begin(), sel.end()), sel.end());
+	std::vector<int> selAsc = sel;
+	std::sort(sel.begin(), sel.end(), std::greater<int>());
+	for (int i : sel) {
+		if (i < 0 || i >= pl->playcnt) continue;
+		for (int j = i + 1; j < pl->playcnt; ++j)
+			memcpy(&pl->pc[j - 1], &pl->pc[j], sizeof(playlistdata0));
+		pl->playcnt--;
+	}
+	playlistdata0* newPc = (playlistdata0*)realloc(pl->pc, (size_t)sizeof(playlistdata0) * (pl->playcnt + 2));
+	if (newPc) pl->pc = newPc;
+	extern int plcnt;
+	extern CMediaPlayerDlg* mp;
+	plcnt = PlAdjustIndexAfterRemovals(plcnt, selAsc);
+	pl->pnt = PlAdjustIndexAfterRemovals(pl->pnt, selAsc);
+	pl->pnt1 = PlAdjustIndexAfterRemovals(pl->pnt1, selAsc);
+	if (mp) {
+		int w = 0;
+		for (int i = 0; i < mp->m_queueN; ++i) {
+			const int adj = PlAdjustIndexAfterRemovals(mp->m_queue[i], selAsc);
+			if (adj >= 0)
+				mp->m_queue[w++] = adj;
+		}
+		mp->m_queueN = w;
+	}
+}
+
 void CPlayList::Del()
 {
 	if (!pc || playcnt <= 0) return;
@@ -3919,34 +4091,46 @@ void CPlayList::Del()
 	DelByIndices(sel);
 }
 
-static playlistdata0 s_plDelUndo[64];
-static int s_plDelUndoN = 0;
-static int s_plDelUndoAt = 0; // 挿入位置（削除前の先頭 index）
-
 void CPlayList::UndoLastDelete()
 {
-	if (s_plDelUndoN <= 0 || !pc) return;
-	int at = s_plDelUndoAt;
-	if (at < 0) at = 0;
-	if (at > playcnt) at = playcnt;
-	const int need = playcnt + s_plDelUndoN;
-	playlistdata0* np = (playlistdata0*)realloc(pc, (size_t)sizeof(playlistdata0) * (need + 2));
-	if (!np) return;
-	pc = np;
-	for (int i = playcnt - 1; i >= at; --i)
-		memcpy(&pc[i + s_plDelUndoN], &pc[i], sizeof(playlistdata0));
-	for (int i = 0; i < s_plDelUndoN; ++i)
-		memcpy(&pc[at + i], &s_plDelUndo[i], sizeof(playlistdata0));
-	playcnt += s_plDelUndoN;
-	s_plDelUndoN = 0;
-	if (::IsWindow(m_lc.GetSafeHwnd())) {
-		m_lc.SetItemCount(playcnt);
-		m_lc.RedrawWindow();
+	if (s_plUndoCur <= 0) return;
+	s_plUndoCur--;
+	const PlUndoRec& r = s_plUndo[s_plUndoCur];
+	if (r.n <= 0 || !r.items) return;
+	if (r.op == kPlUndoDel) {
+		if (!PlInsertTracksRaw(this, r.at, r.items, r.n)) {
+			s_plUndoCur++;
+			return;
+		}
 	}
-	Save();
-	extern CMediaPlayerDlg* mp;
-	if (mp && ::IsWindow(mp->GetSafeHwnd()))
-		mp->RefreshList(TRUE);
+	else {
+		std::vector<int> idx;
+		idx.reserve((size_t)r.n);
+		for (int i = 0; i < r.n; ++i)
+			idx.push_back(r.at + i);
+		PlRemoveTracksRaw(this, idx);
+	}
+	PlRefreshAfterEdit(this);
+}
+
+void CPlayList::RedoLastEdit()
+{
+	if (s_plUndoCur >= s_plUndoLen) return;
+	const PlUndoRec& r = s_plUndo[s_plUndoCur];
+	if (r.n <= 0 || !r.items) return;
+	if (r.op == kPlUndoDel) {
+		std::vector<int> idx;
+		idx.reserve((size_t)r.n);
+		for (int i = 0; i < r.n; ++i)
+			idx.push_back(r.at + i);
+		PlRemoveTracksRaw(this, idx);
+	}
+	else {
+		if (!PlInsertTracksRaw(this, r.at, r.items, r.n))
+			return;
+	}
+	s_plUndoCur++;
+	PlRefreshAfterEdit(this);
 }
 
 void CPlayList::DelByIndices(const std::vector<int>& indices)
@@ -3955,48 +4139,288 @@ void CPlayList::DelByIndices(const std::vector<int>& indices)
 	std::vector<int> sel = indices;
 	std::sort(sel.begin(), sel.end());
 	sel.erase(std::unique(sel.begin(), sel.end()), sel.end());
-	// 1段 Undo: 昇順で最大64件を保存
-	s_plDelUndoN = 0;
-	s_plDelUndoAt = sel.empty() ? 0 : sel.front();
-	for (size_t k = 0; k < sel.size() && s_plDelUndoN < 64; ++k) {
-		const int i = sel[k];
-		if (i < 0 || i >= playcnt) continue;
-		memcpy(&s_plDelUndo[s_plDelUndoN++], &pc[i], sizeof(playlistdata0));
-	}
-	std::sort(sel.begin(), sel.end(), std::greater<int>());
+	int nStore = 0;
 	for (int i : sel) {
-		if (i < 0 || i >= playcnt) continue;
-		for (int j = i + 1; j < playcnt; ++j)
-			memcpy(&pc[j - 1], &pc[j], sizeof(playlistdata0));
-		playcnt--;
+		if (i >= 0 && i < playcnt) nStore++;
 	}
-	playlistdata0* newPc = (playlistdata0*)realloc(pc, (size_t)sizeof(playlistdata0) * (playcnt + 2));
-	if (newPc) pc = newPc;
-	extern int plcnt;
-	std::vector<int> selAsc = indices;
-	std::sort(selAsc.begin(), selAsc.end());
-	selAsc.erase(std::unique(selAsc.begin(), selAsc.end()), selAsc.end());
-	plcnt = PlAdjustIndexAfterRemovals(plcnt, selAsc);
-	pnt = PlAdjustIndexAfterRemovals(pnt, selAsc);
-	pnt1 = PlAdjustIndexAfterRemovals(pnt1, selAsc);
-	extern CMediaPlayerDlg* mp;
-	if (mp) {
+	if (nStore <= 0) return;
+	playlistdata0* store = (playlistdata0*)malloc(sizeof(playlistdata0) * (size_t)nStore);
+	if (store) {
 		int w = 0;
-		for (int i = 0; i < mp->m_queueN; ++i) {
-			const int adj = PlAdjustIndexAfterRemovals(mp->m_queue[i], selAsc);
-			if (adj >= 0)
-				mp->m_queue[w++] = adj;
+		for (int i : sel) {
+			if (i < 0 || i >= playcnt) continue;
+			memcpy(&store[w++], &pc[i], sizeof(playlistdata0));
 		}
-		mp->m_queueN = w;
+		PlUndoPush(kPlUndoDel, sel.front(), store, w);
+		free(store);
 	}
+	PlRemoveTracksRaw(this, sel);
+	PlRefreshAfterEdit(this);
+}
+
+BOOL CPlayList::CopySelectionToClipboard()
+{
+	if (!pc || playcnt <= 0 || !::IsWindow(m_lc.GetSafeHwnd())) return FALSE;
+	std::vector<int> sel;
+	int idx = -1;
+	while ((idx = m_lc.GetNextItem(idx, LVNI_ALL | LVNI_SELECTED)) >= 0) {
+		if (idx < playcnt) sel.push_back(idx);
+	}
+	if (sel.empty()) return FALSE;
+
+	HWND hOwner = GetSafeHwnd();
+	if (!hOwner) hOwner = AfxGetMainWnd() ? AfxGetMainWnd()->GetSafeHwnd() : NULL;
+	if (!::OpenClipboard(hOwner)) return FALSE;
+	::EmptyClipboard();
+
+	const int n = (int)sel.size();
+	const UINT fmt = PlTracksClipFormat();
+	if (fmt) {
+		const SIZE_T bytes = sizeof(DWORD) * 2 + sizeof(int) + sizeof(playlistdata0) * (size_t)n;
+		HGLOBAL hBin = ::GlobalAlloc(GMEM_MOVEABLE, bytes);
+		if (hBin) {
+			BYTE* p = (BYTE*)::GlobalLock(hBin);
+			if (p) {
+				DWORD magic = PL_CLIP_MAGIC;
+				DWORD recSize = (DWORD)sizeof(playlistdata0);
+				memcpy(p, &magic, sizeof(DWORD));
+				memcpy(p + sizeof(DWORD), &recSize, sizeof(DWORD));
+				memcpy(p + sizeof(DWORD) * 2, &n, sizeof(int));
+				playlistdata0* rec = (playlistdata0*)(p + sizeof(DWORD) * 2 + sizeof(int));
+				for (int i = 0; i < n; ++i)
+					memcpy(&rec[i], &pc[sel[i]], sizeof(playlistdata0));
+				::GlobalUnlock(hBin);
+				if (!::SetClipboardData(fmt, hBin))
+					::GlobalFree(hBin);
+			}
+			else
+				::GlobalFree(hBin);
+		}
+	}
+
+	CString text;
+	for (int i = 0; i < n; ++i) {
+		const playlistdata0& r = pc[sel[i]];
+		text += r.name;
+		text += _T('\t');
+		text += r.art;
+		text += _T('\t');
+		text += r.alb;
+		text += _T('\t');
+		text += r.fol;
+		text += _T("\r\n");
+	}
+	{
+		const SIZE_T bytes = ((size_t)text.GetLength() + 1) * sizeof(TCHAR);
+		HGLOBAL hTxt = ::GlobalAlloc(GMEM_MOVEABLE, bytes);
+		if (hTxt) {
+			void* p = ::GlobalLock(hTxt);
+			if (p) {
+				memcpy(p, (LPCTSTR)text, bytes);
+				::GlobalUnlock(hTxt);
+#ifdef _UNICODE
+				if (!::SetClipboardData(CF_UNICODETEXT, hTxt))
+#else
+				if (!::SetClipboardData(CF_TEXT, hTxt))
+#endif
+					::GlobalFree(hTxt);
+			}
+			else
+				::GlobalFree(hTxt);
+		}
+	}
+
+	size_t pathChars = 1;
+	int dropN = 0;
+	for (int i = 0; i < n; ++i) {
+		CString phys = PlPhysicalMediaPath(pc[sel[i]].fol);
+		if (phys.IsEmpty() || !PathFileExists(phys)) continue;
+		pathChars += (size_t)phys.GetLength() + 1;
+		dropN++;
+	}
+	if (dropN > 0) {
+		const SIZE_T bytes = sizeof(DROPFILES) + pathChars * sizeof(TCHAR);
+		HGLOBAL hDrop = ::GlobalAlloc(GHND, bytes);
+		if (hDrop) {
+			DROPFILES* df = (DROPFILES*)::GlobalLock(hDrop);
+			if (df) {
+				df->pFiles = sizeof(DROPFILES);
+#ifdef _UNICODE
+				df->fWide = TRUE;
+#else
+				df->fWide = FALSE;
+#endif
+				TCHAR* dest = (TCHAR*)(df + 1);
+				for (int i = 0; i < n; ++i) {
+					CString phys = PlPhysicalMediaPath(pc[sel[i]].fol);
+					if (phys.IsEmpty() || !PathFileExists(phys)) continue;
+					const int len = phys.GetLength();
+					memcpy(dest, (LPCTSTR)phys, sizeof(TCHAR) * (size_t)len);
+					dest[len] = 0;
+					dest += len + 1;
+				}
+				*dest = 0;
+				::GlobalUnlock(hDrop);
+				if (!::SetClipboardData(CF_HDROP, hDrop))
+					::GlobalFree(hDrop);
+			}
+			else
+				::GlobalFree(hDrop);
+		}
+	}
+	::CloseClipboard();
+	return TRUE;
+}
+
+void CPlayList::PasteFromClipboard()
+{
+	HWND hOwner = GetSafeHwnd();
+	if (!hOwner) hOwner = AfxGetMainWnd() ? AfxGetMainWnd()->GetSafeHwnd() : NULL;
+	if (!::OpenClipboard(hOwner)) return;
+
+	int at = playcnt;
 	if (::IsWindow(m_lc.GetSafeHwnd())) {
-		m_lc.SetItemCount(playcnt);
-		for (int j = 0; j < playcnt; j++) pc[j].icon = 1;
-		m_lc.RedrawWindow();
+		int lastSel = -1, i = -1;
+		while ((i = m_lc.GetNextItem(i, LVNI_SELECTED)) >= 0)
+			lastSel = i;
+		const int foc = m_lc.GetNextItem(-1, LVNI_FOCUSED);
+		if (lastSel >= 0) at = lastSel + 1;
+		else if (foc >= 0) at = foc + 1;
 	}
-	Save();
-	if (mp && ::IsWindow(mp->GetSafeHwnd()))
-		mp->RefreshList(TRUE);
+	if (at < 0) at = 0;
+	if (at > playcnt) at = playcnt;
+
+	const UINT fmt = PlTracksClipFormat();
+	HANDLE hBin = fmt ? ::GetClipboardData(fmt) : NULL;
+	if (hBin) {
+		const SIZE_T sz = ::GlobalSize(hBin);
+		BYTE* p = (BYTE*)::GlobalLock(hBin);
+		if (p && sz >= sizeof(DWORD) * 2 + sizeof(int)) {
+			DWORD magic = 0, recSize = 0;
+			int n = 0;
+			memcpy(&magic, p, sizeof(DWORD));
+			memcpy(&recSize, p + sizeof(DWORD), sizeof(DWORD));
+			memcpy(&n, p + sizeof(DWORD) * 2, sizeof(int));
+			if (magic == PL_CLIP_MAGIC && recSize == (DWORD)sizeof(playlistdata0)
+				&& n > 0 && n < 100000
+				&& sz >= sizeof(DWORD) * 2 + sizeof(int) + sizeof(playlistdata0) * (size_t)n) {
+				playlistdata0* rec = (playlistdata0*)malloc(sizeof(playlistdata0) * (size_t)n);
+				if (rec) {
+					memcpy(rec, p + sizeof(DWORD) * 2 + sizeof(int), sizeof(playlistdata0) * (size_t)n);
+					::GlobalUnlock(hBin);
+					::CloseClipboard();
+					if (PlInsertTracksRaw(this, at, rec, n)) {
+						PlUndoPush(kPlUndoIns, at, rec, n);
+						PlRefreshAfterEdit(this);
+					}
+					free(rec);
+					return;
+				}
+			}
+		}
+		if (p) ::GlobalUnlock(hBin);
+	}
+
+	HDROP hDrop = (HDROP)::GetClipboardData(CF_HDROP);
+	if (hDrop) {
+		UINT cnt = DragQueryFile(hDrop, (UINT)-1, NULL, 0);
+		TCHAR path[MAX_PATH];
+		std::vector<CString> files;
+		files.reserve(cnt);
+		for (UINT i = 0; i < cnt; ++i) {
+			if (DragQueryFile(hDrop, i, path, MAX_PATH))
+				files.push_back(path);
+		}
+		::CloseClipboard();
+		if (!files.empty()) {
+			TCHAR cwd[1024];
+			_tgetcwd(cwd, 1000);
+			syo = 0; syos = _T(""); syomode = 0;
+			m_lc.SetRedraw(FALSE);
+			for (size_t i = 0; i < files.size(); ++i)
+				Fol(files[i]);
+			m_lc.SetRedraw(TRUE);
+			PlRefreshAfterEdit(this);
+			_tchdir(cwd);
+		}
+		return;
+	}
+
+	HANDLE hTxt = ::GetClipboardData(CF_UNICODETEXT);
+	CString text;
+	if (hTxt) {
+		const wchar_t* p = (const wchar_t*)::GlobalLock(hTxt);
+		if (p) {
+			text = p;
+			::GlobalUnlock(hTxt);
+		}
+	}
+	::CloseClipboard();
+	if (text.IsEmpty()) return;
+
+	TCHAR cwd[1024];
+	_tgetcwd(cwd, 1000);
+	syo = 0; syos = _T(""); syomode = 0;
+	BOOL any = FALSE;
+	m_lc.SetRedraw(FALSE);
+	int start = 0;
+	while (start < text.GetLength()) {
+		int end = text.Find(_T('\n'), start);
+		if (end < 0) end = text.GetLength();
+		CString line = text.Mid(start, end - start);
+		line.Trim();
+		if (!line.IsEmpty() && line[line.GetLength() - 1] == _T('\r'))
+			line = line.Left(line.GetLength() - 1);
+		line.Trim();
+		int tab = line.ReverseFind(_T('\t'));
+		if (tab >= 0)
+			line = line.Mid(tab + 1);
+		line.Trim();
+		if (line.GetLength() >= 2 && line[0] == _T('"') && line[line.GetLength() - 1] == _T('"'))
+			line = line.Mid(1, line.GetLength() - 2);
+		if (PlIsAbsoluteMediaPath(line) || PathFileExists(line)) {
+			Fol(line);
+			any = TRUE;
+		}
+		start = end + 1;
+	}
+	m_lc.SetRedraw(TRUE);
+	if (any)
+		PlRefreshAfterEdit(this);
+	_tchdir(cwd);
+}
+
+BOOL CPlayList::HandleListEditKeys(MSG* pMsg)
+{
+	if (!pMsg || pMsg->message != WM_KEYDOWN) return FALSE;
+	if ((GetKeyState(VK_CONTROL) & 0x8000) == 0) return FALSE;
+	if ((GetKeyState(VK_MENU) & 0x8000) != 0) return FALSE;
+	const WPARAM k = pMsg->wParam;
+	if (k == 'C' || k == 'c') {
+		CopySelectionToClipboard();
+		return TRUE;
+	}
+	if (k == 'X' || k == 'x') {
+		if (CopySelectionToClipboard())
+			Del();
+		return TRUE;
+	}
+	if (k == 'V' || k == 'v') {
+		PasteFromClipboard();
+		return TRUE;
+	}
+	if (k == 'Z' || k == 'z') {
+		if (GetKeyState(VK_SHIFT) & 0x8000)
+			RedoLastEdit();
+		else
+			UndoLastDelete();
+		return TRUE;
+	}
+	if (k == 'Y' || k == 'y') {
+		RedoLastEdit();
+		return TRUE;
+	}
+	return FALSE;
 }
 
 void CPlayList::OnSUP()
@@ -9829,12 +10253,6 @@ void timerpl1(UINT nIDEvent,CPlayList* pl)
 				ret2=pl->pc[Lindex].ret2;
 				plcnt=i;
 				RequestPlaylistRestartAsync();
-			}
-			if((GetKeyState(VK_CONTROL)&0x8000) && (GetKeyState('A')&0x8000)){
-				int i=pl->m_lc.GetItemCount();
-				for(int j=0;j<i;j++){
-					pl->m_lc.SetItemState(j,LVIS_SELECTED,LVIS_SELECTED);
-				}
 			}
 		}
 		int tl=pl->m_tool.GetCheck();

@@ -78,6 +78,8 @@ public:
 	void ResetPlaybackState();
 	void DetachForDestroy();
 	void RequestSyncFromMainUi();
+	// timerp から Speana より前に呼ぶ（Post 滞留で間隔が伸びるのを防ぐ）
+	void PumpSyncNow();
 	// 曲ごと保存パラメータからの周波数表示モード適用(外部から)
 	void ApplySpecStyleExternal(int style) { SetSpecStyle(style); }
 	// ローカルリモート用: スペクトルを ch×64 バー(0..96)へ間引き。ch は 1..8
