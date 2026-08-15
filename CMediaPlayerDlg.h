@@ -100,6 +100,7 @@ public:
 	void LayoutPlselCombo(CCustomComboBox& cb, int& dropExtent, float& layoutDpi, int x, int y, int w, int tbH, float s);
 	void RefreshListAfterLayout(); // レイアウト変更後に仮想リストの描画範囲を再確定
 	void RefreshList(BOOL bForce = FALSE);  // pl->pc をそのまま反映
+	void SyncSortModeButtons(); // 名前/Art/Alb/時間の押下状態と↑↓表示
 	void FollowPlayingRow();                // 再生中(♪)の行へカーソル追従(項目挿入後に呼ぶ)
 	void HistRebuildList();                 // 再生履歴リストを再構築(og からも呼ぶ)
 	void NotifyPlayIconChanged();          // SIconTimer 直後に♪点滅を即反映(250ms待ちしない)

@@ -3081,6 +3081,10 @@ void ShowOggAboutDialog(CWnd* pParent)
 #define MDC_LABEL_FIXED (8*5*4)
 #define MDC (MDC_TOTAL - MDC_LABEL_FIXED)
 #define MDCP (88*2+175)*4
+// 相違メーター: 右端に φ/LR 縦積み。スペアナと隙間なく密着
+#define BANNER_CORR_METER_W  72
+#define BANNER_CORR_PAD      2   // バナー右端の余白のみ（スペアナ側の隙間は無し）
+#define BANNER_CORR_RESERVE_PX (BANNER_CORR_METER_W + BANNER_CORR_PAD)
 
 // もしダイアログボックスに最小化ボタンを追加するならば、アイコンを描画する
 // コードを以下に記述する必要があります。MFC アプリケーションは document/view
@@ -21877,11 +21881,18 @@ static int BannerTextWidthPx(CDC& cdc, LPCTSTR text)
 }
 
 // ラベル実測幅から値の描画 X とスクロール枠幅を求める（固定ピッチ時は従来の 8*5*4 / MDC と一致）
+// 相違メーター ON 時は右端予約を引いて、メーター手前でマーキー開始・クリップする
+static int BannerCorrMeterReservePx()
+{
+	return savedata.pro_corr_meter ? BANNER_CORR_RESERVE_PX : 0;
+}
+
 static void BannerValueLayout(int labelW_px, int& valueX_px, int& viewW_px)
 {
 	valueX_px = labelW_px;
 	if (valueX_px < 0) valueX_px = 0;
-	viewW_px = MDC_TOTAL - valueX_px;
+	const int textRight = MDC_TOTAL - BannerCorrMeterReservePx();
+	viewW_px = textRight - valueX_px;
 	if (viewW_px < 8 * 4) viewW_px = 8 * 4;
 }
 
@@ -21900,16 +21911,26 @@ static void BannerScrollResetIfLayoutChanged(int rowId, int valueX_px, int viewW
 	}
 }
 
-// dcsub 上の値テキストをバナーへ BitBlt。はみ出し時は従来どおり 4px/frame でマーキー。
+// dcsub 上の値テキストをバナーへ BitBlt（SRCINVERT = スペアナ上で XOR 反転）。
+// スクロール開始判定は viewW_px（メーター手前）。
+// 実際の XOR 描画幅はスペアナを含むメーター手前まで（旧 blitW 相当）。メーターには食い込ませない。
 static void BannerBlitScrollValue(CDC& dst, CDC& src, int valueX_px, int viewW_px,
 	int y_px, int blitH_px, int& mcnt_scroll, int& mcnt_wrap, int si_px)
 {
-	const int blitW = 88 * 2 * 4 + 1000;
+	if (viewW_px < 1) return;
+	const int xorRight = (MDCP + 5) - BannerCorrMeterReservePx();
+	int xorW = xorRight - valueX_px;
+	if (xorW < viewW_px) xorW = viewW_px;
+	if (xorW < 8 * 4) xorW = 8 * 4;
+
 	if (si_px > viewW_px) {
-		dst.BitBlt(valueX_px, y_px, blitW, blitH_px, &src, mcnt_scroll, 0, SRCINVERT);
+		dst.BitBlt(valueX_px, y_px, xorW, blitH_px, &src, mcnt_scroll, 0, SRCINVERT);
 		if (si_px - mcnt_scroll < viewW_px) {
 			mcnt_wrap += 4;
-			dst.BitBlt(viewW_px - mcnt_wrap + valueX_px, y_px, blitW, blitH_px, &src, 0, 0, SRCINVERT);
+			const int x2 = viewW_px - mcnt_wrap + valueX_px;
+			const int w2 = valueX_px + xorW - x2;
+			if (w2 > 0)
+				dst.BitBlt(x2, y_px, w2, blitH_px, &src, 0, 0, SRCINVERT);
 			if (viewW_px - mcnt_wrap <= 0) { mcnt_wrap = 0; mcnt_scroll = 0; }
 		}
 		else {
@@ -21918,8 +21939,82 @@ static void BannerBlitScrollValue(CDC& dst, CDC& src, int valueX_px, int viewW_p
 		mcnt_scroll += 4;
 	}
 	else {
-		dst.BitBlt(valueX_px, y_px, blitW, blitH_px, &src, 0, 0, SRCINVERT);
+		// 短文でも xorW 分 SRCINVERT（ソースの黒は無変化、文字画素だけスペアナを反転）
+		dst.BitBlt(valueX_px, y_px, xorW, blitH_px, &src, 0, 0, SRCINVERT);
 	}
+}
+
+// メイン GDI バナー右端: φ / LR を上下に縦積み（スペアナのすぐ右・隙間あり）
+static void BannerDrawCorrMeter(CDC& dst)
+{
+	if (!savedata.pro_corr_meter) return;
+	const int srcW = MDCP + 5;
+	const int srcH = (81 + 16) * 4;
+	const int reserve = BannerCorrMeterReservePx();
+	if (reserve < BANNER_CORR_METER_W) return;
+
+	const int mw = BANNER_CORR_METER_W;
+	const int x = srcW - BANNER_CORR_PAD - mw;
+	const int padY = 6;
+	const int lblH = 36; // バナー文字に近い視認サイズ（旧16は潰れて読めない）
+	const int gapY = 8;
+	const int usable = srcH - padY * 2 - gapY;
+	if (usable < 100) return;
+	const int mh = (usable - lblH * 2) / 2;
+	if (mh < 40) return;
+
+	const int yPhi = padY;
+	const int yLr = yPhi + mh + lblH + gapY;
+
+	const COLORREF bg = RGB(28, 32, 44);
+	const COLORREF edgeHi = RGB(90, 100, 120);
+	const COLORREF edgeLo = RGB(40, 45, 60);
+	dst.FillSolidRect(x, yPhi, mw, mh, bg);
+	dst.FillSolidRect(x, yLr, mw, mh, bg);
+	dst.Draw3dRect(x, yPhi, mw, mh, edgeHi, edgeLo);
+	dst.Draw3dRect(x, yLr, mw, mh, edgeHi, edgeLo);
+
+	const float corr = ProAudio_CorrValue();
+	const float bal = ProAudio_CorrBalance();
+
+	// φ: 縦方向の相関針（上=+1 / 下=-1）
+	{
+		const int midY = yPhi + mh / 2;
+		dst.FillSolidRect(x + 3, midY, mw - 6, 2, RGB(90, 100, 120));
+		int cy = midY - (int)(corr * ((mh / 2) - 8));
+		if (cy < yPhi + 4) cy = yPhi + 4;
+		if (cy > yPhi + mh - 5) cy = yPhi + mh - 5;
+		dst.FillSolidRect(x + 4, cy - 4, mw - 8, 9, RGB(100, 230, 150));
+	}
+	// LR: 横位置がバランス（左L…右R）＋縦バーで視認性確保
+	{
+		const int midY = yLr + mh / 2;
+		dst.FillSolidRect(x + 3, midY, mw - 6, 2, RGB(90, 100, 120));
+		int bx = x + mw / 2 + (int)(bal * (mw / 2 - 6));
+		if (bx < x + 4) bx = x + 4;
+		if (bx > x + mw - 5) bx = x + mw - 5;
+		dst.FillSolidRect(bx - 3, yLr + 6, 7, mh - 12, RGB(255, 160, 60));
+		dst.FillSolidRect(bx - 4, yLr + mh - 12, 9, 10, RGB(255, 200, 100));
+	}
+
+	// ラベルは専用太字フォント（DC 既定だと潰れる。毎フレ Create しない）
+	static CFont s_corrLblFont;
+	static bool s_corrLblInit = false;
+	if (!s_corrLblInit) {
+		s_corrLblFont.CreateFont(
+			32, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
+			DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+			CLEARTYPE_QUALITY, VARIABLE_PITCH | FF_SWISS, _T("Segoe UI"));
+		s_corrLblInit = true;
+	}
+	CFont* oldF = dst.SelectObject(&s_corrLblFont);
+	dst.SetBkMode(TRANSPARENT);
+	dst.SetTextColor(RGB(230, 245, 235));
+	CRect rPhi(x - 2, yPhi + mh + 1, x + mw + 2, yPhi + mh + 1 + lblH);
+	CRect rLr(x - 2, yLr + mh + 1, x + mw + 2, yLr + mh + 1 + lblH);
+	dst.DrawText(_T("φ"), &rPhi, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+	dst.DrawText(_T("LR"), &rLr, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+	dst.SelectObject(oldF);
 }
 
 // GDI バナー時間表示(timerp の t3)と同じ実再生位置(秒)。プロンプト実行の基準時刻。
@@ -22524,21 +22619,14 @@ void COggDlg::timerp()
 			m_AnalyzerDlg->UpdateWindow();
 	}
 
-	// スペアナは XOR バナー文字(name/arti/albu)より先に dc へ描く。
-	// 非同期(WM_SPEANA_TICK)化すると Speana() が文字の後に不透明の棒を上書きし、
-	// XOR 合成が棒に覆われて無効化される（バナー文字が見えなくなるデグレ）。
-	// ここで TRUE 指定すると EQ 供給も同梱（上の Speana(FALSE) と二重にならない）。
-	// SSビジュアライザは spelv 依存のためスペアナOFFでも解析を回す。
-	// ローカルリモートは !bGdiFrame 側で Speana(FALSE,TRUE) のみ（GDI二重実行で UI ハングしない）。
+	// スペアナは不透明で先に描く（ピーク／現在を保持）。バナー文字は後から SRCINVERT（XOR）。
 	{
 		extern BOOL MpSsVizIsOpen();
 		extern CMediaPlayerDlg* mp;
 		const bool soft3dBanner = (mp && ::IsWindow(mp->GetSafeHwnd()) && mp->IsBannerSoft3D());
 		const bool menuTracking = (CCustomPopupMenu::GetTrackingRoot() != NULL);
-		// メニュー Track／退場中に Speana+Soft3D を回すと Peek/Dispatch で数秒固まる
 		if (!menuTracking && (m_supe.GetCheck() == TRUE || MpSsVizIsOpen()) && plf == 1 && (wav || ogg || m_dsb))
 			Speana(TRUE);
-		// Soft3Dバナーは毎フレーム軽量FFTで speanaFft* を更新（validゲートすると再演奏で凍る）
 		if (!menuTracking && soft3dBanner && plf == 1 && (wav || ogg || m_dsb))
 			Speana(FALSE, TRUE);
 	}
@@ -22878,6 +22966,9 @@ void COggDlg::timerp()
 		ss = s;
 		//			m_11.SetWindowText(s);
 	}
+
+	// 相違メーターはスペアナ・XOR 文字の上（不透明）
+	BannerDrawCorrMeter(dc);
 
 	if (!draw_jacket_early && jx != -1 && !img.IsNull() && !g_mpSideJacket) {
 		int h_dest = 388;
@@ -27134,6 +27225,33 @@ void SpeanaEnsureBandCache(int cacheKey, bool mode1_Low, bool mode3_High, int ff
 
 static int g_speanaDrawEnable = 1;
 
+// スペアナ帯: 右端メーター＋隙間の直前まで。青線は 2px。バー幅は圧縮せず左へずらす（時間と重なっても可）。
+static void SpeanaBarGeom(int& leftPx, int& barWMono, int& barWSt, int& gapSt)
+{
+	leftPx = (21 * 8) * 4;
+	const int rightPx = (MDCP + 5) - BannerCorrMeterReservePx();
+	gapSt = 2;
+	barWMono = 8;
+	barWSt = 4;
+	const int needSt = 88 * barWSt * 2 + gapSt;
+	const int needMono = 88 * barWMono;
+	int avail = rightPx - leftPx;
+	if (avail < needSt) {
+		leftPx = rightPx - needSt;
+		if (leftPx < 8 * 4)
+			leftPx = 8 * 4;
+		avail = rightPx - leftPx;
+	}
+	if (avail < needMono) {
+		barWMono = avail / 88;
+		if (barWMono < 2) barWMono = 2;
+	}
+	if (avail < needSt) {
+		barWSt = (avail - gapSt) / 176;
+		if (barWSt < 2) barWSt = 2;
+	}
+}
+
 inline void SpeanaDrawBar(CDC& dc, int x, int bar_w, int idx, int d)
 {
 	if (idx >= 0 && idx < 400)
@@ -27145,8 +27263,8 @@ inline void SpeanaDrawBar(CDC& dc, int x, int bar_w, int idx, int d)
 	if (spelv[idx] <= 0 && d <= 0) return;
 
 	if (savedata.mpSpeanaStyle == 1) {
-		// ミラー: 中央から上下に伸びる
-		const int midY = 96 * 2; // スペアナ領域の垂直中央(px)
+		// ミラー: 中央から上下に伸びる（不透明＝ピークと現在を区別）
+		const int midY = 96 * 2;
 		const int hPeak = (spelv[idx] + 1) * 2;
 		const int hNow = (d + 1) * 2;
 		if (hPeak > 0)
@@ -27158,7 +27276,7 @@ inline void SpeanaDrawBar(CDC& dc, int x, int bar_w, int idx, int d)
 		return;
 	}
 
-	// 通常バー
+	// 通常バー（不透明。XOR はテキスト側）
 	dc.FillSolidRect(x, (96 - spelv[idx]) * 4, bar_w, (spelv[idx] + 1) * 4, RGB(0, 128, 0));
 	dc.FillSolidRect(x, (96 - d) * 4, bar_w, (d + 1) * 4, RGB(0, 255, 0));
 	dc.FillSolidRect(x, (96 - spelv[idx]) * 4, bar_w, 4, RGB(255, 255, 0));
@@ -27832,8 +27950,10 @@ void COggDlg::Speana(BOOL bPaintBars, BOOL bFillLevels)
 
 	// 波形モード: FFTせず振幅タイムラインを描画（レベルのみ要求時は簡易スペクトルへ）
 	if (savedata.mpSpeanaStyle == 2 && bPaintBars) {
-		const int x0 = (21 * 8) * 4;
-		const int wPx = stereoSpeana ? (178 * 4) : (176 * 4);
+		int spLeft = 0, barWm = 8, barWs = 4, gapS = 4;
+		SpeanaBarGeom(spLeft, barWm, barWs, gapS);
+		const int x0 = spLeft;
+		const int wPx = stereoSpeana ? (88 * barWs * 2 + gapS) : (88 * barWm);
 		const int y0 = 20;
 		const int hPx = 368;
 		const int mid = y0 + hPx / 2;
@@ -27967,9 +28087,11 @@ void COggDlg::Speana(BOOL bPaintBars, BOOL bFillLevels)
 		}
 
 		// 描画ループ (FFT)
+		int spLeft = 0, barWm = 8, barWs = 4, gapS = 4;
+		SpeanaBarGeom(spLeft, barWm, barWs, gapS);
 		if (!stereoSpeana) {
 			for (i = 0; i < DISP_KEYS; i++)
-				SpeanaDrawBar(dc, (21 * 8 + i * 2) * 4, 8, i, dtbl[i]);
+				SpeanaDrawBar(dc, spLeft + i * barWm, barWm, i, dtbl[i]);
 			speanaLiveStereo = 0;
 			for (i = 0; i < DISP_KEYS; i++) {
 				speanaFftL[i] = dtbl[i];
@@ -27980,8 +28102,8 @@ void COggDlg::Speana(BOOL bPaintBars, BOOL bFillLevels)
 		}
 		else {
 			for (i = 0; i < DISP_KEYS; i++) {
-				SpeanaDrawBar(dc, (21 * 8 + i) * 4, 4, 100 + i, dtbl[i]);
-				SpeanaDrawBar(dc, (21 * 8 + 89 + i) * 4, 4, 200 + i, dtatbl[i]);
+				SpeanaDrawBar(dc, spLeft + i * barWs, barWs, 100 + i, dtbl[i]);
+				SpeanaDrawBar(dc, spLeft + 88 * barWs + gapS + i * barWs, barWs, 200 + i, dtatbl[i]);
 			}
 			speanaLiveStereo = 1;
 			for (i = 0; i < DISP_KEYS; i++) {
@@ -27991,7 +28113,7 @@ void COggDlg::Speana(BOOL bPaintBars, BOOL bFillLevels)
 			speanaFftStereo = 1;
 			speanaFftValid = 1;
 			if (g_speanaDrawEnable)
-				dc.FillSolidRect((21 * 8 + 88) * 4, 20, 4, 368, RGB(0, 255, 255));
+				dc.FillSolidRect(spLeft + 88 * barWs, 20, gapS, 368, RGB(0, 255, 255));
 		}
 	}
 
@@ -28010,6 +28132,8 @@ void COggDlg::Speana(BOOL bPaintBars, BOOL bFillLevels)
 		// 検出のactiveが一瞬落ちても緑本体が即消えないよう、立ち上がりは即時・
 		// 下降のみ緩やかにする（スペアナ定石。簡易ピアノロールの履歴帯に相当）。
 		static int s_barHold[3][DISP_KEYS] = {};
+		int spLeft = 0, barWm = 8, barWs = 4, gapS = 4;
+		SpeanaBarGeom(spLeft, barWm, barWs, gapS);
 		auto DrawDetected = [&](const SpeanaNoteDetector& det, int offset_idx, bool isRight) {
 			const bool* act = det.Active();
 			const float* st = det.Strength();
@@ -28030,9 +28154,9 @@ void COggDlg::Speana(BOOL bPaintBars, BOOL bFillLevels)
 
 				const int idx = offset_idx + i;
 				int x, w;
-				if (!isRight && !stereoSpeana) { x = (21 * 8 + i * 2) * 4; w = 8; }
-				else if (!isRight) { x = (21 * 8 + i) * 4; w = 4; }
-				else { x = (21 * 8 + 89 + i) * 4; w = 4; }
+				if (!isRight && !stereoSpeana) { x = spLeft + i * barWm; w = barWm; }
+				else if (!isRight) { x = spLeft + i * barWs; w = barWs; }
+				else { x = spLeft + 88 * barWs + gapS + i * barWs; w = barWs; }
 				SpeanaDrawBar(dc, x, w, idx, held);
 			}
 			};
@@ -28049,7 +28173,7 @@ void COggDlg::Speana(BOOL bPaintBars, BOOL bFillLevels)
 			DrawDetected(s_detL, 100, false);
 			DrawDetected(s_detR, 200, true);
 			if (g_speanaDrawEnable)
-				dc.FillSolidRect((21 * 8 + 88) * 4, 20, 4, 368, RGB(0, 255, 255));
+				dc.FillSolidRect(spLeft + 88 * barWs, 20, gapS, 368, RGB(0, 255, 255));
 		}
 	}
 	g_speanaDrawEnable = prevDrawEnable;
@@ -28120,14 +28244,22 @@ int COggDlg::mojiPx(CString s, int x_px, int y, COLORREF rgb)
 	double factor = 1.0 - (0.7 * m_jacketFocus);
 	rgb = RGB((BYTE)(r * factor), (BYTE)(g * factor), (BYTE)(b * factor));
 
-	SetTextColor(dc, rgb);
-	SetBkColor(dc, RGB(0, 0, 0));
-	dc.SetBkMode(TRANSPARENT);
 	GetTextExtentPoint32(dc, s, s.GetLength(), &szinfo);
-	if (Ms2DrawDue(ms2)) {
-		dc.TextOut(x_px, y * 4, s, s.GetLength());
-	}
 	SelectObject(dc, fo);
+	if (!Ms2DrawDue(ms2))
+		return szinfo.cx;
+
+	// スペアナ（不透明）の上に載せるため SRCINVERT。黒地に色文字→BitBlt XOR。
+	const int th = 24 * 4;
+	const int tw = szinfo.cx + 8;
+	fo = (HFONT)SelectObject(dcsub, hFont);
+	dcsub.FillSolidRect(0, 0, tw, th, RGB(0, 0, 0));
+	SetTextColor(dcsub, rgb);
+	SetBkColor(dcsub, RGB(0, 0, 0));
+	SetBkMode(dcsub, TRANSPARENT);
+	dcsub.TextOut(0, 0, s, s.GetLength());
+	SelectObject(dcsub, fo);
+	dc.BitBlt(x_px, y * 4, tw, th, &dcsub, 0, 0, SRCINVERT);
 	return szinfo.cx;
 }
 

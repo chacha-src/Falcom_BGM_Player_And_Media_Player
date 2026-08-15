@@ -2912,26 +2912,30 @@ int CPlayList::ShowTrackContextMenu(CPoint pt, CWnd* pOwner)
 				L"Сортирует весь плейлист по имени, исполнителю, альбому или длительности", L"Sortiert die ganze Playlist nach Name, Interpret, Album oder Dauer", L"Ordena toda a lista por nome, artista, album ou duracao", L"Sorteert de hele lijst op naam, artiest, album of duur",
 				L"Sortuje cala liste wg nazwy, artysty, albumu lub czasu", L"Tum listeyi ad/sanatci/album/sureye gore siralar"));
 		if (subSort) {
-			subSort->AddCommand(PL_CTX_SORT_NAME,
+			subSort->AddCheck(PL_CTX_SORT_NAME,
 				LL14(L"名前", L"Name", L"Nom", L"Nome", L"Nombre", L"이름", L"名称", L"الاسم", L"Имя", L"Name", L"Nome", L"Naam", L"Nazwa", L"Ad"),
+				savedata.mpSortKey == 1,
 				LL14(L"ファイル名／タイトル順に並べ替えます", L"Sort by file name / title", L"Trier par nom de fichier / titre", L"Ordina per nome file / titolo",
 					L"Ordenar por nombre de archivo / titulo", L"파일명/제목 순으로 정렬합니다", L"按文件名/标题排序", L"يرتب حسب اسم الملف / العنوان",
 					L"Сортировка по имени файла / названию", L"Nach Dateiname / Titel sortieren", L"Ordenar por nome de arquivo / titulo", L"Sorteren op bestandsnaam / titel",
 					L"Sortuj wg nazwy pliku / tytulu", L"Dosya adi / basliga gore sirala"));
-			subSort->AddCommand(PL_CTX_SORT_ART,
+			subSort->AddCheck(PL_CTX_SORT_ART,
 				LL14(L"アーティスト", L"Artist", L"Artiste", L"Artista", L"Artista", L"아티스트", L"艺术家", L"الفنان", L"Исполнитель", L"Interpret", L"Artista", L"Artiest", L"Artysta", L"Sanatci"),
+				savedata.mpSortKey == 2,
 				LL14(L"アーティスト名順に並べ替えます", L"Sort by artist name", L"Trier par nom d'artiste", L"Ordina per nome artista",
 					L"Ordenar por nombre de artista", L"아티스트 이름 순으로 정렬합니다", L"按艺术家名排序", L"يرتب حسب اسم الفنان",
 					L"Сортировка по имени исполнителя", L"Nach Interpret sortieren", L"Ordenar por nome do artista", L"Sorteren op artiestnaam",
 					L"Sortuj wg artysty", L"Sanatci adina gore sirala"));
-			subSort->AddCommand(PL_CTX_SORT_ALB,
+			subSort->AddCheck(PL_CTX_SORT_ALB,
 				LL14(L"アルバム", L"Album", L"Album", L"Album", L"Album", L"앨범", L"专辑", L"الألبوم", L"Альбом", L"Album", L"Album", L"Album", L"Album", L"Album"),
+				savedata.mpSortKey == 3,
 				LL14(L"アルバム名順に並べ替えます", L"Sort by album name", L"Trier par nom d'album", L"Ordina per nome album",
 					L"Ordenar por nombre de album", L"앨범 이름 순으로 정렬합니다", L"按专辑名排序", L"يرتب حسب اسم الألبوم",
 					L"Сортировка по названию альбома", L"Nach Album sortieren", L"Ordenar por nome do album", L"Sorteren op albumnaam",
 					L"Sortuj wg albumu", L"Album adina gore sirala"));
-			subSort->AddCommand(PL_CTX_SORT_TIME,
+			subSort->AddCheck(PL_CTX_SORT_TIME,
 				LL14(L"時間", L"Time", L"Duree", L"Durata", L"Duracion", L"시간", L"时间", L"الوقت", L"Время", L"Zeit", L"Duracao", L"Tijd", L"Czas", L"Sure"),
+				savedata.mpSortKey == 4,
 				LL14(L"再生時間の短い／長い順に並べ替えます", L"Sort by track duration", L"Trier par duree de piste", L"Ordina per durata traccia",
 					L"Ordenar por duracion de pista", L"재생 시간 순으로 정렬합니다", L"按曲目时长排序", L"يرتب حسب مدة المقطع",
 					L"Сортировка по длительности трека", L"Nach Spieldauer sortieren", L"Ordenar por duracao da faixa", L"Sorteren op speelduur",
@@ -4700,6 +4704,27 @@ void CPlayList::OnDropFiles(HDROP hDropInfo)
 		if (playIdx < 0 && ii >= 0 && ii < playcnt)
 			playIdx = ii;
 	}
+	TCHAR keepFol[1024]; keepFol[0] = 0;
+	if (playIdx >= 0 && playIdx < playcnt)
+		_tcsncpy_s(keepFol, pc[playIdx].fol, _TRUNCATE);
+
+	// ソートモード中は追加直後にも並べ替えを適用（終了後に突然並ぶのを防ぐ）
+	if (savedata.mpSortKey >= 1 && savedata.mpSortKey <= 4) {
+		MpPlaylistApplySavedSort();
+		if (keepFol[0]) {
+			for (int i = 0; i < playcnt; ++i) {
+				if (_tcsicmp(pc[i].fol, keepFol) == 0) {
+					playIdx = i;
+					break;
+				}
+			}
+		}
+		m_lc.Invalidate(FALSE);
+		extern CMediaPlayerDlg* mp;
+		if (mp && ::IsWindow(mp->GetSafeHwnd()))
+			mp->RefreshList(TRUE);
+	}
+
 	if (playIdx >= 0 && playIdx < playcnt) {
 		// ドロップは「この曲を鳴らす」意図。既存曲でも再生する。
 		// 連続ONかつ再生中でも、落とした曲へ切り替える。

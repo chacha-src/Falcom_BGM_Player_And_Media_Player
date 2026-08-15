@@ -98,6 +98,7 @@ public:
 	CCustomStandardButton m_loopOutBtn;
 	CCustomStandardButton m_writeTag;
 	CCustomSliderCtrl m_vocalCenter;
+	CCustomStatic m_vocalLab;
 	CCustomStatic m_vocalVal;
 	BOOL m_vocalUiReady;
 	CRect m_waveRc;

@@ -244,6 +244,7 @@ namespace {
 		IDM_PT_MS_RESET = 42216,
 		IDC_PT_VOCAL_SLIDER = 42217,
 		IDC_PT_VOCAL_LBL = 42218,
+		IDC_PT_VOCAL_NAME = 42219,
 		IDM_PT_GAPLESS = 42313,
 		IDM_PT_CORR = 42314,
 		IDM_PT_EXPLIMIT = 42315,
@@ -519,17 +520,55 @@ BOOL CProToolsDlg::OnInitDialog()
 	SetupToolTips();
 
 	if (!m_vocalUiReady && m_msWidth.GetSafeHwnd()) {
-		CRect rcMs, rcLab;
+		// M/S 直下に Vocal Mid 行を差し込み、モノ互換/相関/書き出し行をその下へ退避
+		// （以前は M/S と同じ X 帯に Vocal を重ね、相関メーターがスライダーに被っていた）
+		auto offsetCtrl = [this](int id, int dy) {
+			CWnd* w = GetDlgItem(id);
+			if (!w || !w->GetSafeHwnd() || dy == 0) return;
+			CRect r; w->GetWindowRect(&r); ScreenToClient(&r);
+			r.OffsetRect(0, dy);
+			w->MoveWindow(&r);
+		};
+		auto growBottom = [this](int id, int dy) {
+			CWnd* w = GetDlgItem(id);
+			if (!w || !w->GetSafeHwnd() || dy == 0) return;
+			CRect r; w->GetWindowRect(&r); ScreenToClient(&r);
+			r.bottom += dy;
+			w->MoveWindow(&r);
+		};
+
+		CRect rcMs, rcMsLab, rcMsVal;
 		m_msWidth.GetWindowRect(&rcMs);
 		ScreenToClient(&rcMs);
-		rcLab = rcMs;
-		rcLab.OffsetRect(0, rcMs.Height() + 2);
-		rcLab.bottom = rcLab.top + 14;
-		rcLab.right = rcLab.left + 120;
-		m_vocalVal.Create(_T(""), WS_CHILD | WS_VISIBLE | SS_LEFT, rcLab, this, IDC_PT_VOCAL_LBL);
+		if (CWnd* w = GetDlgItem(IDC_PRO_MSWIDTH_L)) {
+			w->GetWindowRect(&rcMsLab); ScreenToClient(&rcMsLab);
+		} else {
+			rcMsLab.SetRect(rcMs.left - 40, rcMs.top + 2, rcMs.left - 4, rcMs.top + 16);
+		}
+		if (m_msVal.GetSafeHwnd()) {
+			m_msVal.GetWindowRect(&rcMsVal); ScreenToClient(&rcMsVal);
+		} else {
+			rcMsVal.SetRect(rcMs.right + 4, rcMs.top + 2, rcMs.right + 34, rcMs.top + 16);
+		}
+
+		const int gap = 6;
+		const int rowH = max(22, rcMs.Height());
+		const int dy = rowH + gap;
+
 		CRect rcSl = rcMs;
-		rcSl.OffsetRect(0, rcMs.Height() + 4);
-		rcSl.bottom = rcSl.top + 22;
+		rcSl.OffsetRect(0, rcMs.Height() + gap);
+		rcSl.bottom = rcSl.top + rowH;
+		CRect rcLab = rcMsLab;
+		rcLab.OffsetRect(0, rcMs.Height() + gap);
+		CRect rcVal = rcMsVal;
+		rcVal.OffsetRect(0, rcMs.Height() + gap);
+
+		m_vocalLab.Create(
+			LL14(L"ボーカルMid", L"Vocal Mid", L"Vocal Mid", L"Vocal Mid", L"Vocal Mid",
+				L"보컬 Mid", L"人声 Mid", L"Vocal Mid", L"Vocal Mid", L"Vocal Mid",
+				L"Vocal Mid", L"Vocal Mid", L"Vocal Mid", L"Vocal Mid"),
+			WS_CHILD | WS_VISIBLE | SS_LEFT, rcLab, this, IDC_PT_VOCAL_NAME);
+		m_vocalVal.Create(_T(""), WS_CHILD | WS_VISIBLE | SS_LEFT, rcVal, this, IDC_PT_VOCAL_LBL);
 		m_vocalCenter.Create(WS_CHILD | WS_VISIBLE | TBS_HORZ | TBS_NOTICKS, rcSl, this, IDC_PT_VOCAL_SLIDER);
 		m_vocalCenter.SetRange(0, 200);
 		m_vocalCenter.SetPos(ProClampI(savedata.mpVocalCenter, 0, 200));
@@ -538,6 +577,47 @@ BOOL CProToolsDlg::OnInitDialog()
 		CString vs;
 		vs.Format(_T("%d"), m_vocalCenter.GetPos());
 		m_vocalVal.SetWindowText(vs);
+
+		// モノ互換 / 相関 / 書き出し行を Vocal 行の下へ
+		offsetCtrl(IDC_PRO_MSMONO, dy);
+		offsetCtrl(IDC_PRO_CORR, dy);
+		offsetCtrl(IDC_PRO_EXPLIMIT, dy);
+		offsetCtrl(IDC_PRO_EXPCEIL, dy);
+		offsetCtrl(IDC_PRO_EXPTP, dy);
+		growBottom(IDC_PRO_GRP_PLAY, dy);
+
+		// タグ枠と下部ボタンも同じだけ下げ、ダイアログ高さを確保
+		CRect tagRc0;
+		if (CWnd* tg = GetDlgItem(IDC_PRO_GRP_TAG)) {
+			tg->GetWindowRect(&tagRc0); ScreenToClient(&tagRc0);
+			// Year/Track/Genre/Comment 左ラベルは IDC_STATIC 共用
+			for (CWnd* ch = GetWindow(GW_CHILD); ch; ch = ch->GetWindow(GW_HWNDNEXT)) {
+				if (ch->GetDlgCtrlID() != IDC_STATIC) continue;
+				CRect r; ch->GetWindowRect(&r); ScreenToClient(&r);
+				if (r.top >= tagRc0.top - 4 && r.left >= tagRc0.left && r.right <= tagRc0.right + 8) {
+					r.OffsetRect(0, dy);
+					ch->MoveWindow(&r);
+				}
+			}
+		}
+		offsetCtrl(IDC_PRO_GRP_TAG, dy);
+		offsetCtrl(IDC_PRO_TAG_TITLE_L, dy);
+		offsetCtrl(IDC_PRO_TAG_TITLE, dy);
+		offsetCtrl(IDC_PRO_TAG_ARTIST_L, dy);
+		offsetCtrl(IDC_PRO_TAG_ARTIST, dy);
+		offsetCtrl(IDC_PRO_TAG_ALBUM_L, dy);
+		offsetCtrl(IDC_PRO_TAG_ALBUM, dy);
+		offsetCtrl(IDC_PRO_TAG_YEAR, dy);
+		offsetCtrl(IDC_PRO_TAG_TRACK, dy);
+		offsetCtrl(IDC_PRO_TAG_GENRE, dy);
+		offsetCtrl(IDC_PRO_TAG_COMMENT, dy);
+		offsetCtrl(IDC_PRO_WRITETAG, dy);
+		offsetCtrl(IDC_PRO_APPLY, dy);
+		offsetCtrl(IDOK, dy);
+
+		CRect wr; GetWindowRect(&wr);
+		SetWindowPos(NULL, 0, 0, wr.Width(), wr.Height() + dy,
+			SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
 	}
 
 	CCC_CaptionLayout(m_hWnd);

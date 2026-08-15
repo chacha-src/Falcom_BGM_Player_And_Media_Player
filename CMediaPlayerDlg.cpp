@@ -1656,6 +1656,10 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 		m_sortArt.SetGradation(RGB(230, 245, 255), RGB(190, 220, 245), 0, TRUE);
 		m_sortAlb.SetGradation(RGB(230, 245, 255), RGB(190, 220, 245), 0, TRUE);
 		m_sortTime.SetGradation(RGB(230, 245, 255), RGB(190, 220, 245), 0, TRUE);
+		MpMakePushToggle(&m_sortName);
+		MpMakePushToggle(&m_sortArt);
+		MpMakePushToggle(&m_sortAlb);
+		MpMakePushToggle(&m_sortTime);
 		m_addFolder.SetGradation(RGB(220, 240, 230), RGB(180, 220, 200), 0, TRUE);
 		if (m_editSelAll.GetSafeHwnd()) m_editSelAll.SetGradation(RGB(235, 245, 255), RGB(190, 215, 245), 0, TRUE);
 		if (m_editCopy.GetSafeHwnd()) m_editCopy.SetGradation(RGB(235, 245, 255), RGB(190, 215, 245), 0, TRUE);
@@ -1729,6 +1733,7 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 		m_sortAlb.SetWindowText(LL14(L"Alb", L"Alb", L"Alb", L"Alb", L"Alb", L"Alb", L"专", L"ألب", L"Альб", L"Alb", L"Alb", L"Alb", L"Alb", L"Alb"));
 	if (m_sortTime.GetSafeHwnd())
 		m_sortTime.SetWindowText(LL14(L"時間", L"Time", L"Duree", L"Durata", L"Tiempo", L"시간", L"时间", L"وقت", L"Время", L"Zeit", L"Tempo", L"Tijd", L"Czas", L"Sure"));
+	SyncSortModeButtons();
 	if (m_addFolder.GetSafeHwnd())
 		m_addFolder.SetWindowText(LL14(L"フォルダ追加", L"Add folder", L"Ajouter dossier", L"Aggiungi cartella", L"Anadir carpeta", L"폴더 추가", L"添加文件夹", L"إضافة مجلد", L"Добавить папку", L"Ordner hinzu", L"Add pasta", L"Map toevoegen", L"Dodaj folder", L"Klasor ekle"));
 	m_mpEditShort = -1;
@@ -2138,7 +2143,7 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 	addTip(m_loop, LL14(L"選択した曲をループ再生します。", L"Loop the selected track.", L"Lire la piste en boucle.", L"Ripeti la traccia.", L"Repetir la pista.", L"선택한 곡을 반복 재생.", L"循环播放所选曲目。", L"تكرار المقطع المحدد.", L"Зациклить выбранный трек.", L"Ausgewahlten Titel wiederholen.", L"Repetir a faixa selecionada.", L"Geselecteerde track herhalen.", L"Zapętl wybrany utwór.", L"Seçili parçayı döngüye al."));
 	addTip(m_random, LL14(L"リスト内の曲をランダムに再生します（同じ曲が連続しないようにします）。", L"Play tracks in the list at random (avoids repeating the same track).", L"Lire les pistes au hasard (sans repetter la meme).", L"Riproduce i brani a caso (evita lo stesso brano di seguito).", L"Reproduce pistas al azar (evita repetir la misma).", L"목록의 곡을 무작위로 재생합니다(같은 곡이 연속되지 않음).", L"随机播放列表中的曲目（避免连续同一曲）。", L"تشغيل عشوائي من القائمة (بدون تكرار نفس المقطع).", L"Случайное воспроизведение списка (без повтора того же трека).", L"Titel der Liste zufaellig (nicht denselben hintereinander).", L"Tocar faixas da lista aleatoriamente (sem repetir a mesma).", L"Speel nummers willekeurig (niet hetzelfde achter elkaar).", L"Odtwarzaj utwory z listy losowo (bez powtarzania tego samego).", L"Listedeki parcayi rastgele cal (ayni parcayi ust uste getirme)."));
 	addTip(m_xfade, LL14(L"連続再生時、曲のつなぎでフェードアウト／インします。ループ曲は5分時点でもクロスフェードします。", L"During continuous play, fade between tracks. Looped tracks also crossfade at 5 minutes.", L"En lecture continue, fondu entre pistes. Pistes en boucle: fondu a 5 min.", L"In riproduzione continua, dissolve tra brani. Loop: crossfade a 5 min.", L"En reproduccion continua, fundido entre pistas. Bucles: fundido a 5 min.", L"연속 재생 시 곡 전환 페이드. 루프 곡은 5분에도 크로스페이드.", L"连续播放时曲间淡入淡出。循环曲在5分钟时也交叉淡化。", L"تلاشي بين المقاطع أثناء التشغيل المتتابع. الحلقات عند 5 دقائق أيضاً.", L"При непрерывном воспроизведении — кроссфейд. Зацикленные — также на 5-й минуте.", L"Bei Dauerwiedergabe zwischen Titeln überblenden. Loops auch nach 5 Min.", L"Na reproducao continua, crossfade entre faixas. Loops tambem aos 5 min.", L"Bij doorlopend afspelen crossfaden. Loops ook na 5 min.", L"Przy ciaglym odtwarzaniu przenikanie. Petle tez po 5 min.", L"Surekli calmada parcilar arasi crossfade. Dongulu parcilar 5 dakikada da."));
-	addTip(m_seek, LL14(L"再生位置。ピンク帯=ループ。青つまみ=A-B。⇔カーソルでつまみ移動、他はシーク。", L"Position. Pink=loop. Blue thumbs=A-B. Size cursor moves thumbs; else seek.", L"Position. Rose=boucle. Bleu=A-B. Curseur⇔=poignees.", L"Posizione. Rosa=loop. Blu=A-B. Cursore⇔=maniglie.", L"Posicion. Rosa=bucle. Azul=A-B. Cursor⇔=asas.", L"재생 위치. 분홍=루프. 파랑=A-B. ⇔커서=손잡이.", L"播放位置。粉=循环。蓝=A-B。⇔光标移动端点。", L"الموضع. وردي=حلقة. أزرق=A-B. مؤشر⇔=مقابض.", L"Позиция. Розовый=цикл. Синий=A-B. Курсор⇔=ручки.", L"Position. Rosa=Schleife. Blau=A-B. Cursor⇔=Griffe.", L"Posicao. Rosa=loop. Azul=A-B. Cursor⇔=alças.", L"Positie. Roze=lus. Blauw=A-B. Cursor⇔=grepen.", L"Pozycja. Rozowy=petla. Niebieski=A-B. Kursor⇔=uchwyty.", L"Konum. Pembe=dongu. Mavi=A-B. Imlec⇔=tutamac."));
+	addTip(m_seek, LL14(L"再生位置。ピンク帯=ループ。青つまみ=A-B。⇔カーソルでつまみ移動、他はシーク。右クリックで loop1/loop2/A/B サンプル数をコピー。", L"Position. Pink=loop. Blue thumbs=A-B. Size cursor moves thumbs; else seek. RMB copies loop1/loop2/A/B sample counts.", L"Position. Rose=boucle. Bleu=A-B. Clic droit copie loop1/loop2/A/B.", L"Posizione. Rosa=loop. Blu=A-B. Tasto destro copia loop1/loop2/A/B.", L"Posicion. Rosa=bucle. Azul=A-B. Clic der. copia loop1/loop2/A/B.", L"재생 위치. 분홍=루프. 파랑=A-B. 우클릭으로 loop1/loop2/A/B 샘플 수 복사.", L"播放位置。粉=循环。蓝=A-B。右键复制 loop1/loop2/A/B 采样数。", L"الموضع. وردي=حلقة. أزرق=A-B. زر أيمن ينسخ loop1/loop2/A/B.", L"Позиция. Розовый=цикл. Синий=A-B. ПКМ копирует loop1/loop2/A/B.", L"Position. Rosa=Schleife. Blau=A-B. RMB kopiert loop1/loop2/A/B.", L"Posicao. Rosa=loop. Azul=A-B. Botao dir. copia loop1/loop2/A/B.", L"Positie. Roze=lus. Blauw=A-B. RMB kopieert loop1/loop2/A/B.", L"Pozycja. Rozowy=petla. Niebieski=A-B. PPM kopiuje loop1/loop2/A/B.", L"Konum. Pembe=dongu. Mavi=A-B. Sag tik loop1/loop2/A/B ornek sayisini kopyalar."));
 	addTip(m_time, _T("%"));
 	if (m_seekLock.GetSafeHwnd())
 		addTip(m_seekLock, LL14(L"ONでループ(loop1/2)つまみを固定。OFFで可動。A-Bつまみは常に動かせます。", L"ON locks loop thumbs. OFF unlocks them. A-B thumbs always move.", L"ON verrouille les poignees de boucle. A-B toujours mobiles.", L"ON blocca le maniglie loop. A-B sempre mobili.", L"ON bloque asas de bucle. A-B siempre moviles.", L"ON이면 루프 손잡이 고정. A-B는 항상 이동 가능.", L"ON锁定循环端点。A-B端点始终可调。", L"ON يقفل مقابض الحلقة. A-B دائماً قابلة للتحريك.", L"ON блокирует ручки цикла. A-B всегда подвижны.", L"ON sperrt Schleifengriffe. A-B immer beweglich.", L"ON trava alças de loop. A-B sempre moveis.", L"ON vergrendelt lusgrepen. A-B altijd beweegbaar.", L"ON blokuje uchwyty petli. A-B zawsze ruchome.", L"ON dongu tutamaclarini kilitler. A-B her zaman hareket eder."));
@@ -2235,13 +2240,13 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 	if (m_tempToggle.GetSafeHwnd())
 		addTip(m_tempToggle, LL14(L"一時プレイリスト。ON(凹み)中の曲は保存されず、アプリ終了で破棄されます。", L"Temporary playlist. While pressed(ON), tracks are not saved and are discarded when the app closes.", L"Liste temporaire. Enfonce(ON): non enregistree, effacee a la fermeture.", L"Playlist temporanea. Premuto(ON): non salvata, scartata alla chiusura.", L"Lista temporal. Hundido(ON): no se guarda; se descarta al cerrar.", L"임시 재생목록. 눌림(ON) 중에는 저장되지 않으며 종료 시 버려집니다.", L"临时播放列表。按下(ON)时不保存，关闭应用后丢弃。", L"قائمة مؤقتة. مضغوط(ON): لا تُحفظ وتُهمل عند الإغلاق.", L"Временный плейлист. Нажат(ON): не сохраняется, сбрасывается при выходе.", L"Temporaere Playlist. Gedrueckt(ON): wird nicht gespeichert und beim Beenden verworfen.", L"Lista temporaria. Pressionado(ON): nao e salva; descartada ao fechar.", L"Tijdelijke playlist. Ingedrukt(ON): niet opgeslagen; weg bij afsluiten.", L"Lista tymczasowa. Wcisniety(ON): bez zapisu; znika po zamknieciu.", L"Gecici liste. Basili(ON): kaydedilmez; kapaninca silinir."));
 	if (m_sortName.GetSafeHwnd())
-		addTip(m_sortName, LL14(L"名前で並べ替え(再クリックで昇順/降順)。", L"Sort by name (click again to toggle asc/desc).", L"Trier par nom.", L"Ordina per nome.", L"Ordenar por nombre.", L"이름으로 정렬.", L"按名称排序。", L"ترتيب حسب الاسم.", L"Сортировка по имени.", L"Nach Name sortieren.", L"Ordenar por nome.", L"Sorteren op naam.", L"Sortuj wg nazwy.", L"Ada gore sirala."));
+		addTip(m_sortName, LL14(L"名前で並べ替え。押下中=有効。再クリックで昇順→降順→解除。", L"Sort by name. Pressed=active. Click again: asc→desc→off.", L"Trier par nom. Enfonce=actif. Reclic: asc→desc→off.", L"Ordina per nome. Premuto=attivo. Di nuovo: asc→desc→off.", L"Ordenar por nombre. Hundido=activo. Clic otra vez: asc→desc→off.", L"이름 정렬. 눌림=유효. 다시 클릭: 오름→내림→해제.", L"按名称排序。按下=有效。再点：升→降→关。", L"ترتيب بالاسم. مضغوط=نشط. إعادة النقر: تصاعدي→تنازلي→إيقاف.", L"Сортировка по имени. Нажат=вкл. Снова: возр→убыв→выкл.", L"Nach Name. Gedrueckt=aktiv. Nochmal: auf→ab→aus.", L"Ordenar por nome. Pressionado=ativo. Clique de novo: asc→desc→off.", L"Sorteren op naam. Ingedrukt=actief. Opnieuw: oplopend→aflopend→uit.", L"Sortuj wg nazwy. Wcisniety=wl. Ponownie: rosn→malej→off.", L"Ada gore sirala. Basili=aktif. Tekrar: artan→azalan→kapat."));
 	if (m_sortArt.GetSafeHwnd())
-		addTip(m_sortArt, LL14(L"アーティストで並べ替え(再クリックで昇順/降順)。", L"Sort by artist (click again to toggle asc/desc).", L"Trier par artiste.", L"Ordina per artista.", L"Ordenar por artista.", L"아티스트로 정렬.", L"按艺术家排序。", L"ترتيب حسب الفنان.", L"Сортировка по исполнителю.", L"Nach Interpret sortieren.", L"Ordenar por artista.", L"Sorteren op artiest.", L"Sortuj wg artysty.", L"Sanatciya gore sirala."));
+		addTip(m_sortArt, LL14(L"アーティストで並べ替え。押下中=有効。再クリックで昇順→降順→解除。", L"Sort by artist. Pressed=active. Click again: asc→desc→off.", L"Trier par artiste. Enfonce=actif. Reclic: asc→desc→off.", L"Ordina per artista. Premuto=attivo. Di nuovo: asc→desc→off.", L"Ordenar por artista. Hundido=activo. Clic otra vez: asc→desc→off.", L"아티스트 정렬. 눌림=유효. 다시 클릭: 오름→내림→해제.", L"按艺术家排序。按下=有效。再点：升→降→关。", L"ترتيب بالفنان. مضغوط=نشط. إعادة النقر: تصاعدي→تنازلي→إيقاف.", L"Сортировка по исполнителю. Нажат=вкл. Снова: возр→убыв→выкл.", L"Nach Interpret. Gedrueckt=aktiv. Nochmal: auf→ab→aus.", L"Ordenar por artista. Pressionado=ativo. Clique de novo: asc→desc→off.", L"Sorteren op artiest. Ingedrukt=actief. Opnieuw: oplopend→aflopend→uit.", L"Sortuj wg artysty. Wcisniety=wl. Ponownie: rosn→malej→off.", L"Sanatciya gore sirala. Basili=aktif. Tekrar: artan→azalan→kapat."));
 	if (m_sortAlb.GetSafeHwnd())
-		addTip(m_sortAlb, LL14(L"アルバムで並べ替え(再クリックで昇順/降順)。", L"Sort by album (click again to toggle asc/desc).", L"Trier par album.", L"Ordina per album.", L"Ordenar por album.", L"앨범으로 정렬.", L"按专辑排序。", L"ترتيب حسب الألبوم.", L"Сортировка по альбому.", L"Nach Album sortieren.", L"Ordenar por album.", L"Sorteren op album.", L"Sortuj wg albumu.", L"Albume gore sirala."));
+		addTip(m_sortAlb, LL14(L"アルバムで並べ替え。押下中=有効。再クリックで昇順→降順→解除。", L"Sort by album. Pressed=active. Click again: asc→desc→off.", L"Trier par album. Enfonce=actif. Reclic: asc→desc→off.", L"Ordina per album. Premuto=attivo. Di nuovo: asc→desc→off.", L"Ordenar por album. Hundido=activo. Clic otra vez: asc→desc→off.", L"앨범 정렬. 눌림=유효. 다시 클릭: 오름→내림→해제.", L"按专辑排序。按下=有效。再点：升→降→关。", L"ترتيب بالألبوم. مضغوط=نشط. إعادة النقر: تصاعدي→تنازلي→إيقاف.", L"Сортировка по альбому. Нажат=вкл. Снова: возр→убыв→выкл.", L"Nach Album. Gedrueckt=aktiv. Nochmal: auf→ab→aus.", L"Ordenar por album. Pressionado=ativo. Clique de novo: asc→desc→off.", L"Sorteren op album. Ingedrukt=actief. Opnieuw: oplopend→aflopend→uit.", L"Sortuj wg albumu. Wcisniety=wl. Ponownie: rosn→malej→off.", L"Albume gore sirala. Basili=aktif. Tekrar: artan→azalan→kapat."));
 	if (m_sortTime.GetSafeHwnd())
-		addTip(m_sortTime, LL14(L"時間で並べ替え(再クリックで昇順/降順)。", L"Sort by duration (click again to toggle asc/desc).", L"Trier par duree.", L"Ordina per durata.", L"Ordenar por duracion.", L"시간으로 정렬.", L"按时长排序。", L"ترتيب حسب المدة.", L"Сортировка по длительности.", L"Nach Dauer sortieren.", L"Ordenar por duracao.", L"Sorteren op duur.", L"Sortuj wg czasu.", L"Sureye gore sirala."));
+		addTip(m_sortTime, LL14(L"時間で並べ替え。押下中=有効。再クリックで昇順→降順→解除。", L"Sort by duration. Pressed=active. Click again: asc→desc→off.", L"Trier par duree. Enfonce=actif. Reclic: asc→desc→off.", L"Ordina per durata. Premuto=attivo. Di nuovo: asc→desc→off.", L"Ordenar por duracion. Hundido=activo. Clic otra vez: asc→desc→off.", L"시간 정렬. 눌림=유효. 다시 클릭: 오름→내림→해제.", L"按时长排序。按下=有效。再点：升→降→关。", L"ترتيب بالمدة. مضغوط=نشط. إعادة النقر: تصاعدي→تنازلي→إيقاف.", L"Сортировка по длительности. Нажат=вкл. Снова: возр→убыв→выкл.", L"Nach Dauer. Gedrueckt=aktiv. Nochmal: auf→ab→aus.", L"Ordenar por duracao. Pressionado=ativo. Clique de novo: asc→desc→off.", L"Sorteren op duur. Ingedrukt=actief. Opnieuw: oplopend→aflopend→uit.", L"Sortuj wg czasu. Wcisniety=wl. Ponownie: rosn→malej→off.", L"Sureye gore sirala. Basili=aktif. Tekrar: artan→azalan→kapat."));
 	addTip(m_findup, LL14(L"下方向(リスト後方)に検索します。", L"Search downward in the list.", L"Chercher vers le bas.", L"Cerca in basso.", L"Buscar abajo.", L"아래로 검색.", L"向下搜索。", L"بحث للأسفل.", L"Искать вниз.", L"Abwarts suchen.", L"Buscar abaixo.", L"Omlaag zoeken.", L"Szukaj w dol.", L"Asagi ara."));
 	addTip(m_finddown, LL14(L"上方向(リスト前方)に検索します。", L"Search upward in the list.", L"Chercher vers le haut.", L"Cerca in alto.", L"Buscar arriba.", L"위로 검색.", L"向上搜索。", L"بحث للأعلى.", L"Искать вверх.", L"Aufwarts suchen.", L"Buscar acima.", L"Omhoog zoeken.", L"Szukaj w gore.", L"Yukari ara."));
 	addTip(m_lsup, LL14(L"選択曲を一番上へ移動。", L"Move to top.", L"Tout en haut.", L"In cima.", L"Al principio.", L"맨 위로.", L"移到顶部。", L"إلى الأعلى.", L"В начало.", L"Ganz nach oben.", L"Para o topo.", L"Naar boven.", L"Na gore.", L"En uste."));
@@ -5258,7 +5263,7 @@ void CMediaPlayerDlg::BlitVisualizer(CDC* pDC)
 	::SetBrushOrgEx(m_memBanner.GetSafeHdc(), 0, 0, NULL);
 	::StretchBlt(m_memBanner.GetSafeHdc(), 0, 0, dw, dh, dc.GetSafeHdc(), 0, 0, MP_SRCW, MP_SRCH, SRCCOPY);
 	::SetStretchBltMode(m_memBanner.GetSafeHdc(), oldMode);
-	DrawBannerMeters(&m_memBanner, dw, dh);
+	// φ/LR は og GDI バナー側で右上予約帯に描画済み（二重描画・高域隠れ防止）
 
 #if CCUSTOM_AERO_SUPPORT
 	if (savedata.aero == 1 && CCC_IsWin11()) {
@@ -8448,6 +8453,33 @@ void CMediaPlayerDlg::OnSortArt()  { MpSortPlaylistByKey(2); RefreshList(TRUE); 
 void CMediaPlayerDlg::OnSortAlb()  { MpSortPlaylistByKey(3); RefreshList(TRUE); MpPersistSavedataQuick(); }
 void CMediaPlayerDlg::OnSortTime() { MpSortPlaylistByKey(4); RefreshList(TRUE); MpPersistSavedataQuick(); }
 
+void CMediaPlayerDlg::SyncSortModeButtons()
+{
+	const int key = savedata.mpSortKey;
+	const BOOL asc = savedata.mpSortAsc != 0;
+	const COLORREF onS = RGB(120, 190, 255), onE = RGB(60, 140, 230);
+	const COLORREF offS = RGB(230, 245, 255), offE = RGB(190, 220, 245);
+	auto base = [](int k) -> CString {
+		if (k == 1) return LL14(L"名前", L"Name", L"Nom", L"Nome", L"Nombre", L"이름", L"名称", L"الاسم", L"Имя", L"Name", L"Nome", L"Naam", L"Nazwa", L"Ad");
+		if (k == 2) return LL14(L"Art", L"Art", L"Art", L"Art", L"Art", L"Art", L"艺", L"فن", L"Исп", L"Art", L"Art", L"Art", L"Art", L"San");
+		if (k == 3) return LL14(L"Alb", L"Alb", L"Alb", L"Alb", L"Alb", L"Alb", L"专", L"ألب", L"Альб", L"Alb", L"Alb", L"Alb", L"Alb", L"Alb");
+		return LL14(L"時間", L"Time", L"Duree", L"Durata", L"Tiempo", L"시간", L"时间", L"وقت", L"Время", L"Zeit", L"Tempo", L"Tijd", L"Czas", L"Sure");
+	};
+	auto apply = [&](CCustomStandardButton& btn, int k) {
+		if (!btn.GetSafeHwnd()) return;
+		const BOOL on = (key == k);
+		CString t = base(k);
+		if (on) t += asc ? _T("↑") : _T("↓");
+		CString cur; btn.GetWindowText(cur);
+		if (cur != t) btn.SetWindowText(t);
+		MpSetPushToggle(btn, on, onS, onE, offS, offE);
+	};
+	apply(m_sortName, 1);
+	apply(m_sortArt, 2);
+	apply(m_sortAlb, 3);
+	apply(m_sortTime, 4);
+}
+
 void CMediaPlayerDlg::OnAddFolder()
 {
 	if (!pl) return;
@@ -9761,6 +9793,40 @@ void CMediaPlayerDlg::OnRButtonUp(UINT nFlags, CPoint point)
 		onSeek = sr.PtInRect(point);
 	}
 	if (onSeek) {
+		// 右クリックで loop1 / loop2(長さ) / A / B のサンプル位置をクリップボードへ
+		{
+			extern int loop1, loop2;
+			int l1 = loop1, l2 = loop2, abA = m_abApos, abB = m_abBpos;
+			if (m_seek.GetSafeHwnd()) {
+				int selMn = 0, selMx = 0;
+				m_seek.GetSelection(selMn, selMx);
+				l1 = selMn;
+				l2 = (selMx > selMn) ? (selMx - selMn) : 0;
+				m_seek.GetAB(abA, abB);
+			}
+			CString s;
+			s.Format(_T("%d\t%d\t%d\t%d"), l1, l2, abA, abB);
+			if (OpenClipboard()) {
+				EmptyClipboard();
+				const size_t bytes = ((size_t)s.GetLength() + 1) * sizeof(TCHAR);
+				HGLOBAL h = GlobalAlloc(GMEM_MOVEABLE, bytes);
+				if (h) {
+					void* p = GlobalLock(h);
+					if (p) {
+						memcpy(p, (LPCTSTR)s, bytes);
+						GlobalUnlock(h);
+#ifdef _UNICODE
+						SetClipboardData(CF_UNICODETEXT, h);
+#else
+						SetClipboardData(CF_TEXT, h);
+#endif
+					} else {
+						GlobalFree(h);
+					}
+				}
+				CloseClipboard();
+			}
+		}
 		CCustomPopupMenu menu;
 		menu.SetAeroMode(FALSE);
 		AppendSeekExtrasToMenu(menu, MP_SEEK_MENU_BAR);

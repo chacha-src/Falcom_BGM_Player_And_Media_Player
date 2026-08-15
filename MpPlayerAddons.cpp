@@ -9044,10 +9044,16 @@ static int MpCmpIdxAsc(const void* a, const void* b)
 
 void MpPlaylistApplySavedSort()
 {
-	if (!pl || !pl->pc || pl->playcnt <= 1) return;
+	if (!pl || !pl->pc || pl->playcnt <= 1) {
+		if (mp && ::IsWindow(mp->GetSafeHwnd()))
+			mp->SyncSortModeButtons();
+		return;
+	}
 	const int key = savedata.mpSortKey;
 	if (key < 1 || key > 4) {
 		MpPlaylistRestoreNaturalOrder();
+		if (mp && ::IsWindow(mp->GetSafeHwnd()))
+			mp->SyncSortModeButtons();
 		return;
 	}
 	MpPlaylistNatOrdEnsure();
@@ -9084,19 +9090,50 @@ void MpPlaylistApplySavedSort()
 	memcpy(s_plNatOrd, natTmp, (size_t)n * sizeof(int));
 	free(idx); free(tmp); free(natTmp);
 	MpPlaylistRemapIndicesByFol(keep);
+	if (mp && ::IsWindow(mp->GetSafeHwnd()))
+		mp->SyncSortModeButtons();
 }
 
 void MpSortPlaylistByKey(int key)
 {
-	if (!pl || !pl->pc || pl->playcnt <= 1) return;
-	if (key < 1 || key > 4) return;
-	MpPlaylistNatOrdEnsure();
-	if (savedata.mpSortKey == key)
-		savedata.mpSortAsc = savedata.mpSortAsc ? 0 : 1;
-	else {
+	if (!pl || !pl->pc) return;
+	if (key < 0 || key > 4) return;
+
+	if (key == 0) {
+		if (savedata.mpSortKey != 0) {
+			savedata.mpSortKey = 0;
+			savedata.mpSortAsc = 1;
+			MpPlaylistRestoreNaturalOrder();
+		}
+	} else if (pl->playcnt <= 1) {
+		// 1曲以下でもモードだけ保持（追加後に効く）
+		if (savedata.mpSortKey == key) {
+			if (savedata.mpSortAsc) {
+				savedata.mpSortAsc = 0;
+			} else {
+				savedata.mpSortKey = 0;
+				savedata.mpSortAsc = 1;
+			}
+		} else {
+			savedata.mpSortKey = key;
+			savedata.mpSortAsc = 1;
+		}
+	} else if (savedata.mpSortKey == key) {
+		// 同一キー: 昇順 → 降順 → 解除（自然順）
+		if (savedata.mpSortAsc) {
+			savedata.mpSortAsc = 0;
+			MpPlaylistApplySavedSort();
+		} else {
+			savedata.mpSortKey = 0;
+			savedata.mpSortAsc = 1;
+			MpPlaylistRestoreNaturalOrder();
+		}
+	} else {
 		savedata.mpSortKey = key;
 		savedata.mpSortAsc = 1;
+		MpPlaylistApplySavedSort();
 	}
-	MpPlaylistApplySavedSort();
 	// ソート順は savedata のみ。プレイリスト本体は自然順のまま Save される。
+	if (mp && ::IsWindow(mp->GetSafeHwnd()))
+		mp->SyncSortModeButtons();
 }

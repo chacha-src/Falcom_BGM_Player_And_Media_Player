@@ -12,6 +12,62 @@ CListCtrlA::~CListCtrlA(void)
 {
 }
 
+// 名前列に埋め込まれた [SAV]/[LRC]/[MONO]|[LR]|[2.1]… を除き曲名だけ残す（チップ表示用）
+static void StripRowMarkPrefixes(CString& text)
+{
+	if (text.IsEmpty()) return;
+	CString head;
+	int i = 0;
+	const int n = text.GetLength();
+	while (i < n && text[i] != _T('[')) {
+		head.AppendChar(text[i]);
+		++i;
+	}
+	CString rest = (i < n) ? text.Mid(i) : CString();
+	for (;;) {
+		if (rest.GetLength() >= 5 && rest.Left(5) == _T("[SAV]")) {
+			rest = rest.Mid(5);
+			continue;
+		}
+		if (rest.GetLength() >= 5 && rest.Left(5) == _T("[LRC]")) {
+			rest = rest.Mid(5);
+			continue;
+		}
+		if (!rest.IsEmpty() && rest[0] == _T('[')) {
+			const int end = rest.Find(_T(']'));
+			if (end >= 2) {
+				const CString inner = rest.Mid(1, end - 1);
+				if (inner != _T("SAV") && inner != _T("LRC") && !inner.IsEmpty()) {
+					BOOL ok = TRUE;
+					for (int k = 0; k < inner.GetLength(); ++k) {
+						const TCHAR c = inner[k];
+						if (!((c >= _T('0') && c <= _T('9'))
+							|| (c >= _T('A') && c <= _T('Z'))
+							|| (c >= _T('a') && c <= _T('z'))
+							|| c == _T('.'))) {
+							ok = FALSE;
+							break;
+						}
+					}
+					if (ok) {
+						rest = rest.Mid(end + 1);
+						continue;
+					}
+				}
+			}
+		}
+		if (!rest.IsEmpty() && (rest[0] == _T(' ') || rest[0] == _T('\t'))) {
+			rest = rest.Mid(1);
+			continue;
+		}
+		break;
+	}
+	while (!rest.IsEmpty() && (rest[0] == _T(' ') || rest[0] == _T('\t')))
+		rest = rest.Mid(1);
+	text = head + rest;
+	text.TrimLeft();
+}
+
 BEGIN_MESSAGE_MAP(CListCtrlA, CListCtrl)
 	//{{AFX_MSG_MAP(CListCtrls)
 	ON_WM_CREATE()
@@ -36,6 +92,7 @@ void CListCtrlA::BuildToolTipText(int row, int col, CString& out)
 	CString i, j, k, l, m;
 	// 列: 0=名前 1=★ 2=ゲーム 3=時間 4=アーティスト 5=アルバム(/フォルダはPLのみ)
 	i = GetItemText(row, 0);
+	StripRowMarkPrefixes(i); // チップには SAV/LRC/LR 等のバッチを出さない
 	j = GetItemText(row, 4);
 	k = GetItemText(row, 5);
 	l = GetItemText(row, 3);
