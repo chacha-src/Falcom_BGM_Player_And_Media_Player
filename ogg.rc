@@ -1,4 +1,4 @@
-// Microsoft Visual C++ generated resource script.
+﻿// Microsoft Visual C++ generated resource script.
 //
 #pragma code_page(65001)
 
@@ -1562,6 +1562,26 @@ BEGIN
     PUSHBUTTON      "BPM",IDC_DJPAD_BPM_DET,336,192,60,24
 END
 
+IDD_MP_BPM DIALOGEX 0, 0, 320, 220
+STYLE DS_SETFONT | DS_FIXEDSYS | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "BPM"
+FONT 8, "MS Shell Dlg", 400, 0, 0x1
+BEGIN
+    PUSHBUTTON      "?",IDC_MP_BPM_HELP,292,2,24,16
+    LTEXT           "",IDC_MP_BPM_STATUS,12,28,296,24,SS_NOPREFIX
+    LTEXT           "BPM --",IDC_MP_BPM_VAL,12,56,296,16,SS_NOPREFIX
+    LTEXT           "",IDC_MP_BPM_METER,12,76,140,14,SS_NOPREFIX
+    LTEXT           "",IDC_MP_BPM_PULSE,160,76,148,14,SS_NOPREFIX
+    LTEXT           "",IDC_MP_BPM_PASS,12,96,140,14,SS_NOPREFIX
+    LTEXT           "",IDC_MP_BPM_CONF,160,96,148,14,SS_NOPREFIX
+    PUSHBUTTON      "--",IDC_MP_BPM_CAND1,12,128,60,24
+    PUSHBUTTON      "--",IDC_MP_BPM_CAND2,80,128,60,24
+    PUSHBUTTON      "--",IDC_MP_BPM_CAND3,148,128,60,24
+    PUSHBUTTON      "Remeasure",IDC_MP_BPM_REMEAS,12,168,92,24
+    PUSHBUTTON      "Abort",IDC_MP_BPM_ABORT,112,168,92,24
+    PUSHBUTTON      "Close",IDC_MP_BPM_CLOSE,216,168,92,24
+END
+
 IDD_MP_ALARM DIALOGEX 0, 0, 240, 100
 STYLE DS_SETFONT | DS_FIXEDSYS | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "Alarm"
@@ -2069,7 +2089,7 @@ END
 //
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 0,9,1,775
+ FILEVERSION 0,9,1,800
  PRODUCTVERSION 1,0,0,1
  FILEFLAGSMASK 0x3fL
 #ifdef _DEBUG
@@ -2088,7 +2108,7 @@ BEGIN
             VALUE "Comments", "Falcom BGM Player & Media Player"
             VALUE "CompanyName", "Pre Prayer Power Soft"
             VALUE "FileDescription", "Falcom BGM Player & Media Player Ver 0.9a Rel.2026.08.15"
-            VALUE "FileVersion", "0.9.1.775"
+            VALUE "FileVersion", "0.9.1.800"
             VALUE "InternalName", "ogg YS/ED bgm"
             VALUE "LegalCopyright", "Copyright (C) 2026.08.15"
             VALUE "LegalTrademarks", "Pre Prayer Power Soft"

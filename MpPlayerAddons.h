@@ -26,6 +26,17 @@ void OpenMpRemoteDlgModeless(CWnd* parent);
 void OpenMpSsVizModeless(CWnd* parent);
 
 void MpSortPlaylistByKey(int key);
+// 表示ソートは一時的。ファイルへ書く前に自然順へ戻し、読込後に再適用する。
+void MpPlaylistNatOrdClear();
+void MpPlaylistNatOrdOnLoaded(int n);
+void MpPlaylistNatOrdNotifyAdded();
+void MpPlaylistNatOrdNotifyInserted(int at, int n);
+void MpPlaylistNatOrdNotifyRemovedAt(int idx); // 降順削除ループから1件ずつ
+void MpPlaylistNatOrdNotifySwap(int i, int j);
+void MpPlaylistRestoreNaturalOrder();
+void MpPlaylistApplySavedSort();
+BOOL MpPlaylistBuildNaturalIndex(int* outIdx, int n); // outIdx[nat]=visual
+int MpPlaylistNaturalIndexOfVisual(int visual);
 
 void MpMirrorWritePcm(const BYTE* pcm, int bytes);
 void MpMirrorShutdown();

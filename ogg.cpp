@@ -278,6 +278,9 @@ BOOL COggApp::InitInstance()
 	savedata.mpAlarmMin = 0;
 	savedata.mpSsVizOn = 0;
 	savedata.mpDetectedBpm = 0;
+	savedata.mpDetectedMeterNum = 0;
+	savedata.mpDetectedMeterDen = 0;
+	savedata.mpDetectedPulse = 0;
 	savedata.mpDjPadwindow = 0;
 	savedata.mpNormTargetLufs = -14;
 	savedata.mpKeyEqSuggest = 0;
@@ -1091,6 +1094,19 @@ BOOL COggApp::InitInstance()
 	}
 	if (savedata.vc_preset < 0 || savedata.vc_preset > 22)
 		savedata.vc_preset = 0;
+	if (datFileSize < (int)(offsetof(save, mpDetectedMeterNum) + sizeof(savedata.mpDetectedMeterNum))) {
+		savedata.mpDetectedMeterNum = 0;
+		savedata.mpDetectedMeterDen = 0;
+		savedata.mpDetectedPulse = 0;
+	} else {
+		if (savedata.mpDetectedMeterNum < 0 || savedata.mpDetectedMeterNum > 16)
+			savedata.mpDetectedMeterNum = 0;
+		if (savedata.mpDetectedMeterDen != 0 && savedata.mpDetectedMeterDen != 4 && savedata.mpDetectedMeterDen != 8)
+			savedata.mpDetectedMeterDen = 4;
+		if (savedata.mpDetectedPulse != 0 && savedata.mpDetectedPulse != 4 && savedata.mpDetectedPulse != 8
+			&& savedata.mpDetectedPulse != 16 && savedata.mpDetectedPulse != 32 && savedata.mpDetectedPulse != 64)
+			savedata.mpDetectedPulse = 0;
+	}
 	if (datFileSize < (int)(offsetof(save, sm_response) + sizeof(savedata.sm_response))) {
 		savedata.sm_mic_device[0] = 0;
 		savedata.sm_response = 1;

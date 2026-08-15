@@ -679,38 +679,6 @@ LRESULT CMediaPlayerDlg::OnJakLoadDone(WPARAM wParam, LPARAM lParam)
 	return 0;
 }
 
-static int MpCmpNameAsc(const void* a, const void* b)
-{
-	const playlistdata0* pa = (const playlistdata0*)a;
-	const playlistdata0* pb = (const playlistdata0*)b;
-	return _tcsicmp(pa->name, pb->name);
-}
-static int MpCmpNameDesc(const void* a, const void* b) { return -MpCmpNameAsc(a, b); }
-static int MpCmpArtAsc(const void* a, const void* b)
-{
-	const playlistdata0* pa = (const playlistdata0*)a;
-	const playlistdata0* pb = (const playlistdata0*)b;
-	int c = _tcsicmp(pa->art, pb->art);
-	return c ? c : _tcsicmp(pa->name, pb->name);
-}
-static int MpCmpArtDesc(const void* a, const void* b) { return -MpCmpArtAsc(a, b); }
-static int MpCmpAlbAsc(const void* a, const void* b)
-{
-	const playlistdata0* pa = (const playlistdata0*)a;
-	const playlistdata0* pb = (const playlistdata0*)b;
-	int c = _tcsicmp(pa->alb, pb->alb);
-	return c ? c : _tcsicmp(pa->name, pb->name);
-}
-static int MpCmpAlbDesc(const void* a, const void* b) { return -MpCmpAlbAsc(a, b); }
-static int MpCmpTimeAsc(const void* a, const void* b)
-{
-	const playlistdata0* pa = (const playlistdata0*)a;
-	const playlistdata0* pb = (const playlistdata0*)b;
-	if (pa->time != pb->time) return (pa->time < pb->time) ? -1 : 1;
-	return _tcsicmp(pa->name, pb->name);
-}
-static int MpCmpTimeDesc(const void* a, const void* b) { return -MpCmpTimeAsc(a, b); }
-
 #pragma comment(lib, "version.lib")
 
 // 実行ファイルのバージョンリソースからキャプション末尾「 Ver 0.9a Rel.xxxx.xx.xx」を作る。
@@ -952,6 +920,7 @@ CMediaPlayerDlg::CMediaPlayerDlg(CWnd* pParent)
 	m_dsvolSlW = 0;
 	m_mpBtnShort = -1;
 	m_mpBotShort = -1;
+	m_mpEditShort = -1;
 	m_mpPromptShort = -1;
 	m_mpCmdRollShort = -1;
 	for (int i = 0; i < 6; ++i)
@@ -1319,6 +1288,12 @@ BEGIN_MESSAGE_MAP(CMediaPlayerDlg, CCustomBlurDialogExBase)
 	ON_BN_CLICKED(IDC_MP_SORTALB, &CMediaPlayerDlg::OnSortAlb)
 	ON_BN_CLICKED(IDC_MP_SORTTIME, &CMediaPlayerDlg::OnSortTime)
 	ON_BN_CLICKED(IDC_MP_ADDFOLDER, &CMediaPlayerDlg::OnAddFolder)
+	ON_BN_CLICKED(IDC_MP_EDIT_SELALL, &CMediaPlayerDlg::OnEditSelAll)
+	ON_BN_CLICKED(IDC_MP_EDIT_COPY, &CMediaPlayerDlg::OnEditCopy)
+	ON_BN_CLICKED(IDC_MP_EDIT_CUT, &CMediaPlayerDlg::OnEditCut)
+	ON_BN_CLICKED(IDC_MP_EDIT_PASTE, &CMediaPlayerDlg::OnEditPaste)
+	ON_BN_CLICKED(IDC_MP_EDIT_UNDO, &CMediaPlayerDlg::OnEditUndo)
+	ON_BN_CLICKED(IDC_MP_EDIT_REDO, &CMediaPlayerDlg::OnEditRedo)
 	ON_BN_CLICKED(IDC_MP_FINDFILTER, &CMediaPlayerDlg::OnFindFilter)
 	ON_BN_CLICKED(IDC_MP_FINDREGEX, &CMediaPlayerDlg::OnFindRegex)
 	ON_BN_CLICKED(IDC_MP_LIBTOGGLE, &CMediaPlayerDlg::OnLibToggle)
@@ -1536,6 +1511,18 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 			m_sortTime.Create(_T("Time"), WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | WS_TABSTOP, rc, this, IDC_MP_SORTTIME);
 		if (!m_addFolder.GetSafeHwnd())
 			m_addFolder.Create(_T("Folder+"), WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | WS_TABSTOP, rc, this, IDC_MP_ADDFOLDER);
+		if (!m_editSelAll.GetSafeHwnd())
+			m_editSelAll.Create(_T("All"), WS_CHILD | BS_PUSHBUTTON | WS_TABSTOP, rc, this, IDC_MP_EDIT_SELALL);
+		if (!m_editCopy.GetSafeHwnd())
+			m_editCopy.Create(_T("Copy"), WS_CHILD | BS_PUSHBUTTON | WS_TABSTOP, rc, this, IDC_MP_EDIT_COPY);
+		if (!m_editCut.GetSafeHwnd())
+			m_editCut.Create(_T("Cut"), WS_CHILD | BS_PUSHBUTTON | WS_TABSTOP, rc, this, IDC_MP_EDIT_CUT);
+		if (!m_editPaste.GetSafeHwnd())
+			m_editPaste.Create(_T("Paste"), WS_CHILD | BS_PUSHBUTTON | WS_TABSTOP, rc, this, IDC_MP_EDIT_PASTE);
+		if (!m_editUndo.GetSafeHwnd())
+			m_editUndo.Create(_T("Undo"), WS_CHILD | BS_PUSHBUTTON | WS_TABSTOP, rc, this, IDC_MP_EDIT_UNDO);
+		if (!m_editRedo.GetSafeHwnd())
+			m_editRedo.Create(_T("Redo"), WS_CHILD | BS_PUSHBUTTON | WS_TABSTOP, rc, this, IDC_MP_EDIT_REDO);
 		if (!m_botDj.GetSafeHwnd())
 			m_botDj.Create(_T("DJ"), WS_CHILD | BS_PUSHBUTTON | WS_TABSTOP, rc, this, IDC_MP_BOT_DJ);
 		if (!m_botTag.GetSafeHwnd())
@@ -1604,6 +1591,12 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 		m_sortAlb.SetGradation(RGB(230, 245, 255), RGB(190, 220, 245), 0, TRUE);
 		m_sortTime.SetGradation(RGB(230, 245, 255), RGB(190, 220, 245), 0, TRUE);
 		m_addFolder.SetGradation(RGB(220, 240, 230), RGB(180, 220, 200), 0, TRUE);
+		if (m_editSelAll.GetSafeHwnd()) m_editSelAll.SetGradation(RGB(235, 245, 255), RGB(190, 215, 245), 0, TRUE);
+		if (m_editCopy.GetSafeHwnd()) m_editCopy.SetGradation(RGB(235, 245, 255), RGB(190, 215, 245), 0, TRUE);
+		if (m_editCut.GetSafeHwnd()) m_editCut.SetGradation(RGB(255, 240, 230), RGB(245, 200, 170), 0, TRUE);
+		if (m_editPaste.GetSafeHwnd()) m_editPaste.SetGradation(RGB(230, 250, 235), RGB(175, 225, 195), 0, TRUE);
+		if (m_editUndo.GetSafeHwnd()) m_editUndo.SetGradation(RGB(245, 235, 255), RGB(210, 185, 245), 0, TRUE);
+		if (m_editRedo.GetSafeHwnd()) m_editRedo.SetGradation(RGB(245, 235, 255), RGB(210, 185, 245), 0, TRUE);
 		if (m_findFilter.GetSafeHwnd())
 			m_findFilter.SetCheck(savedata.mpFindFilter ? BST_CHECKED : BST_UNCHECKED);
 		if (m_findRegex.GetSafeHwnd())
@@ -1672,6 +1665,19 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 		m_sortTime.SetWindowText(LL14(L"時間", L"Time", L"Duree", L"Durata", L"Tiempo", L"시간", L"时间", L"وقت", L"Время", L"Zeit", L"Tempo", L"Tijd", L"Czas", L"Sure"));
 	if (m_addFolder.GetSafeHwnd())
 		m_addFolder.SetWindowText(LL14(L"フォルダ追加", L"Add folder", L"Ajouter dossier", L"Aggiungi cartella", L"Anadir carpeta", L"폴더 추가", L"添加文件夹", L"إضافة مجلد", L"Добавить папку", L"Ordner hinzu", L"Add pasta", L"Map toevoegen", L"Dodaj folder", L"Klasor ekle"));
+	m_mpEditShort = -1;
+	if (m_editSelAll.GetSafeHwnd())
+		m_editSelAll.SetWindowText(LL14(L"全選択", L"Select all", L"Tout", L"Tutto", L"Todo", L"모두", L"全选", L"الكل", L"Все", L"Alles", L"Tudo", L"Alles", L"Wszystko", L"Tumu"));
+	if (m_editCopy.GetSafeHwnd())
+		m_editCopy.SetWindowText(LL14(L"コピー", L"Copy", L"Copier", L"Copia", L"Copiar", L"복사", L"复制", L"نسخ", L"Копия", L"Kopieren", L"Copiar", L"Kopieren", L"Kopiuj", L"Kopyala"));
+	if (m_editCut.GetSafeHwnd())
+		m_editCut.SetWindowText(LL14(L"切り取り", L"Cut", L"Couper", L"Taglia", L"Cortar", L"잘라내기", L"剪切", L"قص", L"Вырезать", L"Ausschneiden", L"Recortar", L"Knippen", L"Wytnij", L"Kes"));
+	if (m_editPaste.GetSafeHwnd())
+		m_editPaste.SetWindowText(LL14(L"貼り付け", L"Paste", L"Coller", L"Incolla", L"Pegar", L"붙여넣기", L"粘贴", L"لصق", L"Вставка", L"Einfugen", L"Colar", L"Plakken", L"Wklej", L"Yapistir"));
+	if (m_editUndo.GetSafeHwnd())
+		m_editUndo.SetWindowText(LL14(L"元に戻す", L"Undo", L"Annuler", L"Annulla", L"Deshacer", L"실행 취소", L"撤销", L"تراجع", L"Отмена", L"Ruckgangig", L"Desfazer", L"Ongedaan", L"Cofnij", L"Geri al"));
+	if (m_editRedo.GetSafeHwnd())
+		m_editRedo.SetWindowText(LL14(L"やり直し", L"Redo", L"Retablir", L"Ripeti", L"Rehacer", L"다시 실행", L"重做", L"إعادة", L"Повтор", L"Wiederholen", L"Refazer", L"Opnieuw", L"Ponow", L"Yinele"));
 	if (m_findFilter.GetSafeHwnd())
 		m_findFilter.SetWindowText(LL14(L"絞り込み", L"Filter", L"Filtrer", L"Filtra", L"Filtrar", L"필터", L"筛选", L"تصفية", L"Фильтр", L"Filter", L"Filtrar", L"Filteren", L"Filtruj", L"Filtrele"));
 	if (m_findRegex.GetSafeHwnd())
@@ -1945,6 +1951,12 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 	if (m_sortAlb.GetSafeHwnd()) m_sortAlb.SetFont(&m_fontChk, TRUE);
 	if (m_sortTime.GetSafeHwnd()) m_sortTime.SetFont(&m_fontChk, TRUE);
 	if (m_addFolder.GetSafeHwnd()) m_addFolder.SetFont(&m_fontChk, TRUE);
+	if (m_editSelAll.GetSafeHwnd()) m_editSelAll.SetFont(&m_fontChk, TRUE);
+	if (m_editCopy.GetSafeHwnd()) m_editCopy.SetFont(&m_fontChk, TRUE);
+	if (m_editCut.GetSafeHwnd()) m_editCut.SetFont(&m_fontChk, TRUE);
+	if (m_editPaste.GetSafeHwnd()) m_editPaste.SetFont(&m_fontChk, TRUE);
+	if (m_editUndo.GetSafeHwnd()) m_editUndo.SetFont(&m_fontChk, TRUE);
+	if (m_editRedo.GetSafeHwnd()) m_editRedo.SetFont(&m_fontChk, TRUE);
 	if (m_libToggle.GetSafeHwnd()) m_libToggle.SetFont(&m_fontChk, TRUE);
 	if (m_histToggle.GetSafeHwnd()) m_histToggle.SetFont(&m_fontChk, TRUE);
 	if (m_tempToggle.GetSafeHwnd()) m_tempToggle.SetFont(&m_fontChk, TRUE);
@@ -2132,6 +2144,18 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 		addTip(m_lrcBadge, LL14(L"歌詞の有無。LRC●=ローカル、net=取得、—=なし。", L"Lyrics status. LRC●=local, net=fetched, —=none.", L"Paroles: LRC●/net/—.", L"Testi: LRC●/net/—.", L"Letra: LRC●/net/—.", L"가사: LRC●/net/—.", L"歌词: LRC●/net/—.", L"كلمات: LRC●/net/—.", L"Текст: LRC●/net/—.", L"Text: LRC●/net/—.", L"Letra: LRC●/net/—.", L"Tekst: LRC●/net/—.", L"Tekst: LRC●/net/—.", L"Soz: LRC●/net/—."));
 	if (m_addFolder.GetSafeHwnd())
 		addTip(m_addFolder, LL14(L"フォルダを選んで配下の音源をプレイリストへ追加します。", L"Browse a folder and add audio files under it.", L"Ajouter les fichiers audio d'un dossier.", L"Aggiungi audio da cartella.", L"Anadir audio de una carpeta.", L"폴더의 음원을 목록에 추가.", L"选择文件夹并添加其下音频。", L"إضافة ملفات الصوت من مجلد.", L"Добавить аудио из папки.", L"Audio aus Ordner hinzufugen.", L"Adicionar audio de pasta.", L"Audio uit map toevoegen.", L"Dodaj audio z folderu.", L"Klasorden ses ekle."));
+	if (m_editSelAll.GetSafeHwnd())
+		addTip(m_editSelAll, LL14(L"一覧の全曲を選択します（Ctrl+A）。", L"Select all tracks in the list (Ctrl+A).", L"Tout selectionner (Ctrl+A).", L"Seleziona tutto (Ctrl+A).", L"Seleccionar todo (Ctrl+A).", L"목록 전체 선택(Ctrl+A).", L"全选列表曲目（Ctrl+A）。", L"تحديد الكل (Ctrl+A).", L"Выбрать все (Ctrl+A).", L"Alles auswahlen (Ctrl+A).", L"Selecionar tudo (Ctrl+A).", L"Alles selecteren (Ctrl+A).", L"Zaznacz wszystko (Ctrl+A).", L"Tumunu sec (Ctrl+A)."));
+	if (m_editCopy.GetSafeHwnd())
+		addTip(m_editCopy, LL14(L"選択曲をクリップボードへコピーします（Ctrl+C）。", L"Copy selected tracks to the clipboard (Ctrl+C).", L"Copier la selection (Ctrl+C).", L"Copia selezione (Ctrl+C).", L"Copiar seleccion (Ctrl+C).", L"선택 곡 복사(Ctrl+C).", L"复制所选曲目（Ctrl+C）。", L"نسخ التحديد (Ctrl+C).", L"Копировать выбранное (Ctrl+C).", L"Auswahl kopieren (Ctrl+C).", L"Copiar selecao (Ctrl+C).", L"Selectie kopieren (Ctrl+C).", L"Kopiuj zaznaczenie (Ctrl+C).", L"Secimi kopyala (Ctrl+C)."));
+	if (m_editCut.GetSafeHwnd())
+		addTip(m_editCut, LL14(L"選択曲を切り取ります（Ctrl+X）。ファイルは残ります。", L"Cut selected tracks (Ctrl+X). Files are kept.", L"Couper la selection (Ctrl+X).", L"Taglia selezione (Ctrl+X).", L"Cortar seleccion (Ctrl+X).", L"선택 곡 잘라내기(Ctrl+X). 파일은 유지.", L"剪切所选曲目（Ctrl+X）。文件保留。", L"قص التحديد (Ctrl+X).", L"Вырезать выбранное (Ctrl+X).", L"Auswahl ausschneiden (Ctrl+X).", L"Recortar selecao (Ctrl+X).", L"Selectie knippen (Ctrl+X).", L"Wytnij zaznaczenie (Ctrl+X).", L"Secimi kes (Ctrl+X)."));
+	if (m_editPaste.GetSafeHwnd())
+		addTip(m_editPaste, LL14(L"クリップボードの曲を貼り付けます（Ctrl+V）。", L"Paste tracks from the clipboard (Ctrl+V).", L"Coller depuis le presse-papiers (Ctrl+V).", L"Incolla dagli appunti (Ctrl+V).", L"Pegar desde el portapapeles (Ctrl+V).", L"클립보드에서 붙여넣기(Ctrl+V).", L"从剪贴板粘贴曲目（Ctrl+V）。", L"لصق من الحافظة (Ctrl+V).", L"Вставить из буфера (Ctrl+V).", L"Aus Zwischenablage einfugen (Ctrl+V).", L"Colar da area de transferencia (Ctrl+V).", L"Plakken uit klembord (Ctrl+V).", L"Wklej ze schowka (Ctrl+V).", L"Panodan yapistir (Ctrl+V)."));
+	if (m_editUndo.GetSafeHwnd())
+		addTip(m_editUndo, LL14(L"直前の削除／貼り付けを元に戻します（Ctrl+Z）。", L"Undo the last delete/paste (Ctrl+Z).", L"Annuler la derniere suppression/collage (Ctrl+Z).", L"Annulla ultima elimina/incolla (Ctrl+Z).", L"Deshacer ultimo eliminar/pegar (Ctrl+Z).", L"직전 삭제/붙여넣기 취소(Ctrl+Z).", L"撤销上次删除/粘贴（Ctrl+Z）。", L"تراجع عن آخر حذف/لصق (Ctrl+Z).", L"Отменить последнее удаление/вставку (Ctrl+Z).", L"Letztes Loschen/Einfugen ruckgangig (Ctrl+Z).", L"Desfazer ultima exclusao/cola (Ctrl+Z).", L"Laatste verwijderen/plakken ongedaan (Ctrl+Z).", L"Cofnij ostatnie usuniecie/wklejenie (Ctrl+Z).", L"Son silme/yapistirmayi geri al (Ctrl+Z)."));
+	if (m_editRedo.GetSafeHwnd())
+		addTip(m_editRedo, LL14(L"元に戻した操作をやり直します（Ctrl+Y / Ctrl+Shift+Z）。", L"Redo the undone edit (Ctrl+Y / Ctrl+Shift+Z).", L"Retablir (Ctrl+Y / Ctrl+Shift+Z).", L"Ripeti (Ctrl+Y / Ctrl+Shift+Z).", L"Rehacer (Ctrl+Y / Ctrl+Shift+Z).", L"실행 취소한 작업을 다시(Ctrl+Y / Ctrl+Shift+Z).", L"重做已撤销的操作（Ctrl+Y / Ctrl+Shift+Z）。", L"إعادة (Ctrl+Y / Ctrl+Shift+Z).", L"Повторить (Ctrl+Y / Ctrl+Shift+Z).", L"Wiederholen (Ctrl+Y / Ctrl+Shift+Z).", L"Refazer (Ctrl+Y / Ctrl+Shift+Z).", L"Opnieuw (Ctrl+Y / Ctrl+Shift+Z).", L"Ponow (Ctrl+Y / Ctrl+Shift+Z).", L"Yinele (Ctrl+Y / Ctrl+Shift+Z)."));
 	if (m_libToggle.GetSafeHwnd())
 		addTip(m_libToggle, LL14(L"ライブラリ(フォルダツリー＋アルバム)を開閉します。", L"Toggle library (folder tree + albums).", L"Afficher/masquer la bibliotheque.", L"Apri/chiudi libreria.", L"Abrir/cerrar biblioteca.", L"라이브러리 열기/닫기.", L"打开/关闭库。", L"فتح/إغلاق المكتبة.", L"Открыть/закрыть библиотеку.", L"Bibliothek ein-/ausblenden.", L"Abrir/fechar biblioteca.", L"Bibliotheek openen/sluiten.", L"Otwórz/zamknij bibliotekę.", L"Kitapligi ac/kapat."));
 	if (m_histToggle.GetSafeHwnd())
@@ -2186,7 +2210,7 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 	if (m_botTag.GetSafeHwnd())
 		addTip(m_botTag, LL14(L"選択曲のタグを編集します (F2)。", L"Edit tags of the selection (F2).", L"Editer les tags (F2).", L"Modifica tag (F2).", L"Editar etiquetas (F2).", L"선택 곡 태그 편집 (F2).", L"编辑所选标签 (F2)。", L"تحرير وسوم التحديد (F2).", L"Править теги выбранного (F2).", L"Tags der Auswahl bearbeiten (F2).", L"Editar tags da selecao (F2).", L"Tags van selectie bewerken (F2).", L"Edytuj tagi zaznaczenia (F2).", L"Secimin etiketlerini duzenle (F2)."));
 	if (m_botBpm.GetSafeHwnd())
-		addTip(m_botBpm, LL14(L"BPM を計測／確定します。", L"Measure / confirm BPM.", L"Mesurer / confirmer le BPM.", L"Misura / conferma BPM.", L"Medir / confirmar BPM.", L"BPM 측정/확정.", L"测量/确认 BPM。", L"قياس/تأكيد BPM.", L"Измерить/подтвердить BPM.", L"BPM messen/bestätigen.", L"Medir/confirmar BPM.", L"BPM meten/bevestigen.", L"Zmierz/potwierdz BPM.", L"BPM olc/onayla."));
+		addTip(m_botBpm, LL14(L"BPM を多段計測します（拍子・音符価も推定）。", L"Multipass BPM measure (also meter and note value).", L"Mesure BPM multipasse (mesure et valeur de note).", L"Misura BPM multipass (metro e valore nota).", L"Medir BPM multipase (compas y valor de nota).", L"BPM 다단 측정(박자·음표도 추정).", L"多段测量 BPM（并估计拍号与音符）。", L"قياس BPM متعدد (وميزان وقيمة نغمة).", L"Многопроходное BPM (также размер и длительность).", L"BPM mehrfach messen (auch Taktart und Notenwert).", L"Medir BPM multipasse (compasso e valor de nota).", L"BPM multipass meten (ook maatsoort en nootwaarde).", L"Wieloprzebiegowy BPM (tez metrum i wartosc nuty).", L"Cok gecisli BPM olc (olcu ve nota degeri de)."));
 	if (m_botSleep.GetSafeHwnd())
 		addTip(m_botSleep, LL14(L"スリープタイマーを設定します。", L"Set sleep timer.", L"Regler la minuterie de veille.", L"Imposta timer sleep.", L"Configurar temporizador de sueño.", L"슬립 타이머 설정.", L"设置睡眠定时器。", L"ضبط مؤقت النوم.", L"Настроить таймер сна.", L"Schlaf-Timer setzen.", L"Definir temporizador de sono.", L"Slaaptimer instellen.", L"Ustaw timer snu.", L"Uyku zamanlayicisini ayarla."));
 	if (m_botMirror.GetSafeHwnd())
@@ -2360,8 +2384,12 @@ BOOL CMediaPlayerDlg::RelayPreTranslateMessage(MSG* pMsg)
 		&& (GetKeyState(VK_CONTROL) & 0x8000) != 0
 		&& (GetKeyState(VK_MENU) & 0x8000) == 0) {
 		const WPARAM k = pMsg->wParam;
-		if (k == 'C' || k == 'c' || k == 'X' || k == 'x' || k == 'V' || k == 'v'
+		if (k == 'A' || k == 'a' || k == 'C' || k == 'c' || k == 'X' || k == 'x' || k == 'V' || k == 'v'
 			|| k == 'Z' || k == 'z' || k == 'Y' || k == 'y') {
+			if (k == 'A' || k == 'a') {
+				OnEditSelAll();
+				return TRUE;
+			}
 			SyncSelectionToPlaylist();
 			if (pl->HandleListEditKeys(pMsg)) {
 				if (::IsWindow(m_list.GetSafeHwnd()) && ::IsWindow(pl->m_lc.GetSafeHwnd())) {
@@ -3121,12 +3149,15 @@ void CMediaPlayerDlg::DoLayout()
 	MoveCtl(&m_up, moveRight - ibw * 3 - (int)(2 * s), by4, ibw, tbH);
 	MoveCtl(&m_lsup, moveRight - ibw * 4 - (int)(3 * s), by4, ibw, tbH);
 
-	// 折りたたみ: 並べ替え / フォルダ追加（開閉はツールメニューから）
+	// 折りたたみ: 並べ替え / フォルダ追加 / 編集ボタン（開閉はツールメニューから）
 	int toolsH = 0;
 	int byTools = by4 + tbH + (int)(2 * s);
 	{
 		if (m_cheatBtn.GetSafeHwnd())
 			CCC_CaptionPlaceHelpBtn(m_hWnd, &m_cheatBtn);
+		CCustomStandardButton* editBtns[6] = {
+			&m_editSelAll, &m_editCopy, &m_editCut, &m_editPaste, &m_editUndo, &m_editRedo
+		};
 		if (savedata.mpToolsOpen) {
 			toolsH = tbH + (int)(2 * s);
 			int sx = M + gPad;
@@ -3135,12 +3166,84 @@ void CMediaPlayerDlg::DoLayout()
 			MoveCtl(&m_sortArt, sx, byTools, sw, tbH); sx += sw + (int)(2 * s);
 			MoveCtl(&m_sortAlb, sx, byTools, sw, tbH); sx += sw + (int)(2 * s);
 			MoveCtl(&m_sortTime, sx, byTools, sw, tbH); sx += sw + (int)(6 * s);
-			MoveCtl(&m_addFolder, sx, byTools, (int)(88 * s), tbH);
+			const int addW = (int)(88 * s);
+			MoveCtl(&m_addFolder, sx, byTools, addW, tbH);
+			sx += addW + (int)(8 * s);
 			if (m_sortName.GetSafeHwnd()) m_sortName.ShowWindow(SW_SHOW);
 			if (m_sortArt.GetSafeHwnd()) m_sortArt.ShowWindow(SW_SHOW);
 			if (m_sortAlb.GetSafeHwnd()) m_sortAlb.ShowWindow(SW_SHOW);
 			if (m_sortTime.GetSafeHwnd()) m_sortTime.ShowWindow(SW_SHOW);
 			if (m_addFolder.GetSafeHwnd()) m_addFolder.ShowWindow(SW_SHOW);
+
+			// フォルダ追加より右: 全選択/コピー/切取/貼付/戻す/やり直し（3段階収縮）
+			const int editRight = W - M - gPad;
+			const int editGap = (int)(2 * s);
+			const int wFull[6] = {
+				(int)(56 * s), (int)(52 * s), (int)(60 * s), (int)(60 * s), (int)(68 * s), (int)(60 * s)
+			};
+			const int wMid[6] = {
+				(int)(40 * s), (int)(40 * s), (int)(40 * s), (int)(40 * s), (int)(40 * s), (int)(40 * s)
+			};
+			const int wTiny[6] = {
+				(int)(26 * s), (int)(26 * s), (int)(26 * s), (int)(26 * s), (int)(26 * s), (int)(26 * s)
+			};
+			int needFull = 0, needMid = 0, needTiny = 0;
+			for (int i = 0; i < 6; ++i) {
+				needFull += wFull[i] + editGap;
+				needMid += wMid[i] + editGap;
+				needTiny += wTiny[i] + editGap;
+			}
+			const int avail = editRight - sx;
+			int editLv = 0;
+			if (needFull > avail) editLv = 1;
+			if (needMid > avail) editLv = 2;
+			const int* ww = (editLv >= 2) ? wTiny : (editLv >= 1) ? wMid : wFull;
+			if (!liveResize && editLv != m_mpEditShort) {
+				m_mpEditShort = editLv;
+				if (editLv >= 2) {
+					if (m_editSelAll.GetSafeHwnd()) m_editSelAll.SetWindowText(L"A");
+					if (m_editCopy.GetSafeHwnd()) m_editCopy.SetWindowText(L"C");
+					if (m_editCut.GetSafeHwnd()) m_editCut.SetWindowText(L"X");
+					if (m_editPaste.GetSafeHwnd()) m_editPaste.SetWindowText(L"V");
+					if (m_editUndo.GetSafeHwnd()) m_editUndo.SetWindowText(L"↶");
+					if (m_editRedo.GetSafeHwnd()) m_editRedo.SetWindowText(L"↷");
+				}
+				else if (editLv >= 1) {
+					if (m_editSelAll.GetSafeHwnd())
+						m_editSelAll.SetWindowText(LL14(L"全選", L"All", L"Tout", L"Tutti", L"Todo", L"모두", L"全选", L"الكل", L"Все", L"Alles", L"Tudo", L"Alles", L"Wszyst.", L"Tumu"));
+					if (m_editCopy.GetSafeHwnd())
+						m_editCopy.SetWindowText(LL14(L"コピー", L"Copy", L"Copier", L"Copia", L"Copiar", L"복사", L"复制", L"نسخ", L"Коп.", L"Kop.", L"Copiar", L"Kop.", L"Kopiuj", L"Kopya"));
+					if (m_editCut.GetSafeHwnd())
+						m_editCut.SetWindowText(LL14(L"切取", L"Cut", L"Coup.", L"Taglia", L"Cortar", L"자르기", L"剪切", L"قص", L"Выр.", L"Ausschn.", L"Recort.", L"Knip", L"Wytnij", L"Kes"));
+					if (m_editPaste.GetSafeHwnd())
+						m_editPaste.SetWindowText(LL14(L"貼付", L"Paste", L"Coller", L"Incolla", L"Pegar", L"붙여넣기", L"粘贴", L"لصق", L"Вст.", L"Einf.", L"Colar", L"Plak", L"Wklej", L"Yapist."));
+					if (m_editUndo.GetSafeHwnd())
+						m_editUndo.SetWindowText(LL14(L"戻す", L"Undo", L"Annul.", L"Annulla", L"Deshac.", L"취소", L"撤销", L"تراجع", L"Отм.", L"Ruckg.", L"Desfaz.", L"Onged.", L"Cofnij", L"Geri"));
+					if (m_editRedo.GetSafeHwnd())
+						m_editRedo.SetWindowText(LL14(L"進む", L"Redo", L"Retabl.", L"Ripeti", L"Rehac.", L"다시", L"重做", L"إعادة", L"Повт.", L"Wdh.", L"Refaz.", L"Opn.", L"Ponow", L"Yinele"));
+				}
+				else {
+					if (m_editSelAll.GetSafeHwnd())
+						m_editSelAll.SetWindowText(LL14(L"全選択", L"Select all", L"Tout", L"Tutto", L"Todo", L"모두", L"全选", L"الكل", L"Все", L"Alles", L"Tudo", L"Alles", L"Wszystko", L"Tumu"));
+					if (m_editCopy.GetSafeHwnd())
+						m_editCopy.SetWindowText(LL14(L"コピー", L"Copy", L"Copier", L"Copia", L"Copiar", L"복사", L"复制", L"نسخ", L"Копия", L"Kopieren", L"Copiar", L"Kopieren", L"Kopiuj", L"Kopyala"));
+					if (m_editCut.GetSafeHwnd())
+						m_editCut.SetWindowText(LL14(L"切り取り", L"Cut", L"Couper", L"Taglia", L"Cortar", L"잘라내기", L"剪切", L"قص", L"Вырезать", L"Ausschneiden", L"Recortar", L"Knippen", L"Wytnij", L"Kes"));
+					if (m_editPaste.GetSafeHwnd())
+						m_editPaste.SetWindowText(LL14(L"貼り付け", L"Paste", L"Coller", L"Incolla", L"Pegar", L"붙여넣기", L"粘贴", L"لصق", L"Вставка", L"Einfugen", L"Colar", L"Plakken", L"Wklej", L"Yapistir"));
+					if (m_editUndo.GetSafeHwnd())
+						m_editUndo.SetWindowText(LL14(L"元に戻す", L"Undo", L"Annuler", L"Annulla", L"Deshacer", L"실행 취소", L"撤销", L"تراجع", L"Отмена", L"Ruckgangig", L"Desfazer", L"Ongedaan", L"Cofnij", L"Geri al"));
+					if (m_editRedo.GetSafeHwnd())
+						m_editRedo.SetWindowText(LL14(L"やり直し", L"Redo", L"Retablir", L"Ripeti", L"Rehacer", L"다시 실행", L"重做", L"إعادة", L"Повтор", L"Wiederholen", L"Refazer", L"Opnieuw", L"Ponow", L"Yinele"));
+				}
+			}
+			for (int i = 0; i < 6; ++i) {
+				CCustomStandardButton* b = editBtns[i];
+				if (!b->GetSafeHwnd()) continue;
+				MoveCtl(b, sx, byTools, ww[i], tbH);
+				if (!b->IsWindowVisible()) b->ShowWindow(SW_SHOW);
+				sx += ww[i] + editGap;
+			}
 		}
 		else {
 			toolsH = 0;
@@ -3149,6 +3252,10 @@ void CMediaPlayerDlg::DoLayout()
 			if (m_sortAlb.GetSafeHwnd()) m_sortAlb.ShowWindow(SW_HIDE);
 			if (m_sortTime.GetSafeHwnd()) m_sortTime.ShowWindow(SW_HIDE);
 			if (m_addFolder.GetSafeHwnd()) m_addFolder.ShowWindow(SW_HIDE);
+			for (int i = 0; i < 6; ++i) {
+				if (editBtns[i]->GetSafeHwnd() && editBtns[i]->IsWindowVisible())
+					editBtns[i]->ShowWindow(SW_HIDE);
+			}
 		}
 	}
 
@@ -4476,7 +4583,8 @@ void CMediaPlayerDlg::MirrorSeekVol()
 			m_seek.SetTimeBaseHz(tb);
 		}
 		m_seek.SetBeatGrid(savedata.mpDetectedBpm > 0 ? (float)savedata.mpDetectedBpm : 120.f,
-			savedata.mpBeatGrid ? TRUE : FALSE, savedata.mpBeatGridOffsetMs);
+			savedata.mpBeatGrid ? TRUE : FALSE, savedata.mpBeatGridOffsetMs,
+			savedata.mpDetectedMeterNum >= 2 ? savedata.mpDetectedMeterNum : 4);
 		{
 			int xms = 0;
 			if (savedata.mpXfadePreview)
@@ -7206,6 +7314,11 @@ void CMediaPlayerDlg::OnRclickList(NMHDR* pNMHDR, LRESULT* pResult)
 	if (cmd == PL_CTX_SORT_ALB) { OnSortAlb(); return; }
 	if (cmd == PL_CTX_SORT_TIME) { OnSortTime(); return; }
 	if (cmd == PL_CTX_ADD_FOLDER) { OnAddFolder(); return; }
+	if (cmd == PL_CTX_EDIT_SELALL) { OnEditSelAll(); return; }
+	if (cmd == PL_CTX_EDIT_COPY) { OnEditCopy(); return; }
+	if (cmd == PL_CTX_EDIT_CUT) { OnEditCut(); return; }
+	if (cmd == PL_CTX_EDIT_PASTE) { OnEditPaste(); return; }
+	if (cmd == PL_CTX_EDIT_REDO) { OnEditRedo(); return; }
 	if (cmd == PL_CTX_COPY_TITLEART) {
 		int sel = m_list.GetNextItem(-1, LVNI_SELECTED);
 		int i = MpDispToPc(this, sel);
@@ -8188,37 +8301,6 @@ void CMediaPlayerDlg::OnFindRegex()
 	MpPersistSavedataQuick();
 }
 
-void MpSortPlaylistByKey(int key)
-{
-	if (!pl || !pl->pc || pl->playcnt <= 1) return;
-	// 再生中パスを保持して並べ替え後にインデックスを戻す
-	TCHAR keep[1024]; keep[0] = 0;
-	int keepPnt = pl->pnt;
-	if (keepPnt >= 0 && keepPnt < pl->playcnt)
-		_tcsncpy_s(keep, pl->pc[keepPnt].fol, _TRUNCATE);
-	if (savedata.mpSortKey == key)
-		savedata.mpSortAsc = savedata.mpSortAsc ? 0 : 1;
-	else {
-		savedata.mpSortKey = key;
-		savedata.mpSortAsc = 1;
-	}
-	int (*cmp)(const void*, const void*) = NULL;
-	if (key == 1) cmp = savedata.mpSortAsc ? MpCmpNameAsc : MpCmpNameDesc;
-	else if (key == 2) cmp = savedata.mpSortAsc ? MpCmpArtAsc : MpCmpArtDesc;
-	else if (key == 3) cmp = savedata.mpSortAsc ? MpCmpAlbAsc : MpCmpAlbDesc;
-	else if (key == 4) cmp = savedata.mpSortAsc ? MpCmpTimeAsc : MpCmpTimeDesc;
-	if (!cmp) return;
-	qsort(pl->pc, (size_t)pl->playcnt, sizeof(playlistdata0), cmp);
-	if (keep[0]) {
-		for (int i = 0; i < pl->playcnt; ++i) {
-			if (_tcsicmp(pl->pc[i].fol, keep) == 0) {
-				pl->pnt = i; plcnt = i; break;
-			}
-		}
-	}
-	pl->Save();
-}
-
 void CMediaPlayerDlg::OnSortName() { MpSortPlaylistByKey(1); RefreshList(TRUE); MpPersistSavedataQuick(); }
 void CMediaPlayerDlg::OnSortArt()  { MpSortPlaylistByKey(2); RefreshList(TRUE); MpPersistSavedataQuick(); }
 void CMediaPlayerDlg::OnSortAlb()  { MpSortPlaylistByKey(3); RefreshList(TRUE); MpPersistSavedataQuick(); }
@@ -8239,6 +8321,52 @@ void CMediaPlayerDlg::OnAddFolder()
 		pl->Fol(path);
 	CoTaskMemFree(pidl);
 	RefreshList(TRUE);
+}
+
+void CMediaPlayerDlg::OnEditSelAll()
+{
+	if (!m_list.GetSafeHwnd()) return;
+	const int n = m_list.GetItemCount();
+	m_list.SetRedraw(FALSE);
+	for (int i = 0; i < n; ++i)
+		m_list.SetItemState(i, LVIS_SELECTED, LVIS_SELECTED);
+	m_list.SetRedraw(TRUE);
+	m_list.Invalidate(FALSE);
+	SyncSelectionToPlaylist();
+}
+
+void CMediaPlayerDlg::OnEditCopy()
+{
+	if (!pl || !::IsWindow(pl->GetSafeHwnd())) return;
+	SyncSelectionToPlaylist();
+	pl->CopySelectionToClipboard();
+}
+
+void CMediaPlayerDlg::OnEditCut()
+{
+	if (!pl || !::IsWindow(pl->GetSafeHwnd())) return;
+	SyncSelectionToPlaylist();
+	if (pl->CopySelectionToClipboard())
+		pl->Del();
+}
+
+void CMediaPlayerDlg::OnEditPaste()
+{
+	if (!pl || !::IsWindow(pl->GetSafeHwnd())) return;
+	SyncSelectionToPlaylist();
+	pl->PasteFromClipboard();
+}
+
+void CMediaPlayerDlg::OnEditUndo()
+{
+	if (!pl || !::IsWindow(pl->GetSafeHwnd())) return;
+	pl->UndoLastDelete();
+}
+
+void CMediaPlayerDlg::OnEditRedo()
+{
+	if (!pl || !::IsWindow(pl->GetSafeHwnd())) return;
+	pl->RedoLastEdit();
 }
 
 void CMediaPlayerDlg::EnsureLibControls()
@@ -10741,13 +10869,17 @@ void CMediaPlayerDlg::ShowToolsExtrasMenu(CPoint screenPt)
 			bpmItem = LL14(L"BPM 計測中…（再クリックで確定）", L"Measuring BPM… (click again to finish)", L"Mesure BPM… (recliquer pour finir)", L"Misura BPM… (clic di nuovo)", L"Midiendo BPM… (clic otra vez)", L"BPM 측정 중… (다시 클릭으로 확정)", L"正在测 BPM…（再点确定）", L"قياس BPM… (انقر مجدداً)", L"Измерение BPM… (клик снова)", L"BPM messen… (nochmals klicken)", L"Medindo BPM… (clique de novo)", L"BPM meten… (opnieuw klikken)", L"Pomiar BPM… (klik ponownie)", L"BPM olculuyor… (bitirmek icin tekrar)");
 		}
 		else if (savedata.mpDetectedBpm > 0) {
-			bpmItem.Format(LL14(L"BPM 再計測（現在 %d）", L"Remeasure BPM (now %d)", L"Remesurer BPM (actuel %d)", L"Rimisura BPM (ora %d)", L"Volver a medir BPM (ahora %d)", L"BPM 재측정 (현재 %d)", L"重新测 BPM（当前 %d）", L"إعادة قياس BPM (الآن %d)", L"Перемерить BPM (сейчас %d)", L"BPM neu messen (jetzt %d)", L"Remedir BPM (agora %d)", L"BPM opnieuw (nu %d)", L"Ponownie BPM (teraz %d)", L"BPM yeniden olc (simdi %d)"),
-				savedata.mpDetectedBpm);
+			if (savedata.mpDetectedMeterNum >= 2)
+				bpmItem.Format(LL14(L"BPM 再計測（現在 %d・%d/%d）", L"Remeasure BPM (now %d · %d/%d)", L"Remesurer BPM (actuel %d · %d/%d)", L"Rimisura BPM (ora %d · %d/%d)", L"Volver a medir BPM (ahora %d · %d/%d)", L"BPM 재측정 (현재 %d·%d/%d)", L"重新测 BPM（当前 %d·%d/%d）", L"إعادة قياس BPM (الآن %d · %d/%d)", L"Перемерить BPM (сейчас %d · %d/%d)", L"BPM neu messen (jetzt %d · %d/%d)", L"Remedir BPM (agora %d · %d/%d)", L"BPM opnieuw (nu %d · %d/%d)", L"Ponownie BPM (teraz %d · %d/%d)", L"BPM yeniden olc (simdi %d · %d/%d)"),
+					savedata.mpDetectedBpm, savedata.mpDetectedMeterNum, savedata.mpDetectedMeterDen > 0 ? savedata.mpDetectedMeterDen : 4);
+			else
+				bpmItem.Format(LL14(L"BPM 再計測（現在 %d）", L"Remeasure BPM (now %d)", L"Remesurer BPM (actuel %d)", L"Rimisura BPM (ora %d)", L"Volver a medir BPM (ahora %d)", L"BPM 재측정 (현재 %d)", L"重新测 BPM（当前 %d）", L"إعادة قياس BPM (الآن %d)", L"Перемерить BPM (сейчас %d)", L"BPM neu messen (jetzt %d)", L"Remedir BPM (agora %d)", L"BPM opnieuw (nu %d)", L"Ponownie BPM (teraz %d)", L"BPM yeniden olc (simdi %d)"),
+					savedata.mpDetectedBpm);
 		}
 		else {
 			bpmItem = LL14(L"BPM 計測開始（再生/PC音で数秒→再クリック）", L"Start BPM measure (play/PC audio a few sec → click again)", L"Demarrer BPM (lecture/PC quelques sec → recliquer)", L"Avvia BPM (riproduci/PC pochi sec → clic)", L"Iniciar BPM (reproduccion/PC unos seg → clic)", L"BPM 측정 시작 (재생/PC 소리 수초→다시 클릭)", L"开始测 BPM（播放/PC声数秒→再点）", L"بدء قياس BPM (تشغيل/صوت الجهاز ثم انقر)", L"Начать BPM (воспроизведение/ПК сек → клик)", L"BPM starten (Wiedergabe/PC einige Sek → Klick)", L"Iniciar BPM (reproducao/PC alguns seg → clique)", L"Start BPM (afspelen/pc enkele sec → klik)", L"Start BPM (odtwarzanie/PC kilka sek → klik)", L"BPM baslat (cal/PC birkac sn → tekrar)");
 		}
-		menu.AddCheck(ID_MP_BPM_DETECT, bpmItem, MpBpmIsMeasuring(), LL14(L"再生中のテンポを計測します（再クリックで確定）", L"Measure tempo while playing (click again to confirm)", L"Mesurer le tempo en lecture (recliquer pour confirmer)", L"Misura il tempo in riproduzione (clic di nuovo)", L"Medir el tempo al reproducir (clic otra vez)", L"재생 중 템포를 측정(다시 클릭으로 확정)", L"在播放中测量速度（再点确认）", L"قياس الإيقاع أثناء التشغيل (انقر مجدداً)", L"Измерить темп во время воспроизведения (клик снова)", L"Tempo wahrend Wiedergabe messen (nochmals klicken)", L"Medir o tempo durante a reproducao (clique de novo)", L"Tempo tijdens afspelen meten (opnieuw klikken)", L"Zmierz tempo podczas odtwarzania (klik ponownie)", L"Calarken temposu olc (onay icin tekrar tikla)"));
+		menu.AddCheck(ID_MP_BPM_DETECT, bpmItem, MpBpmIsMeasuring(), LL14(L"アタックと拍子を多段計測します（再クリックで確定）", L"Multipass onset/meter measure (click again to confirm)", L"Mesure multipasse attaque/mesure (recliquer)", L"Misura multipass attacco/metro (clic di nuovo)", L"Medicion multipase ataque/compas (clic otra vez)", L"어택·박자 다단 측정(다시 클릭으로 확정)", L"多段起音/拍号测量（再点确认）", L"قياس هجوم/ميزان متعدد (انقر مجدداً)", L"Многопроходная атака/размер (клик снова)", L"Mehrfach Anschlag/Taktart messen (nochmals klicken)", L"Medicao multipasse ataque/compasso (clique de novo)", L"Multipass aanslag/maatsoort (opnieuw klikken)", L"Wieloprzebiegowy atak/metrum (klik ponownie)", L"Cok gecisli atak/olcu olcumu (tekrar tikla)"));
 		if (!MpBpmIsMeasuring() && (savedata.mpDetectedBpm > 0 || savedata.mpBpmCand[0] > 0)) {
 			MpBpmEnsureCandList();
 			CCustomPopupMenu* candSub = NULL;
@@ -12252,7 +12384,8 @@ void CMediaPlayerDlg::OnBeatGridToggle()
 	MpPersistSavedataQuick();
 	if (m_seek.GetSafeHwnd()) {
 		const float bpm = savedata.mpDetectedBpm > 0 ? (float)savedata.mpDetectedBpm : 120.f;
-		m_seek.SetBeatGrid(bpm, savedata.mpBeatGrid ? TRUE : FALSE, savedata.mpBeatGridOffsetMs);
+		m_seek.SetBeatGrid(bpm, savedata.mpBeatGrid ? TRUE : FALSE, savedata.mpBeatGridOffsetMs,
+			savedata.mpDetectedMeterNum >= 2 ? savedata.mpDetectedMeterNum : 4);
 		m_seek.Invalidate(FALSE);
 	}
 	if (savedata.mpDetectedBpm > 0)
@@ -12799,10 +12932,10 @@ void CMpCheatSheetDlg::OnPaint()
 		L"· LRC ±ms·guardar / ventana letra (opacidad·lineas·fuente·clic der.) / exportar rango A-B", L"· LRC ±ms·저장 / 가사 창(불투명도·표시행수·글꼴·우클릭) / A-B 내보내기 범위", L"· LRC ±ms·保存 / 歌词窗口(不透明度·显示行数·字号·右键) / 将A-B设为导出范围", L"· LRC ±ms·حفظ / نافذة الكلمات (عتامة·أسطر·خط·يمين) / تصدير نطاق A-B",
 		L"· LRC ±мс·сохранить / окно текста (непрозрачность·строки·шрифт·ПКМ) / экспорт A-B", L"· LRC ±ms·speichern / Textfenster (Deckkraft·Zeilen·Schrift·RMB) / A-B exportieren", L"· LRC ±ms·salvar / janela de letra (opacidade·linhas·fonte·botao dir.) / exportar faixa A-B", L"· LRC ±ms·opslaan / songtekstvenster (dekking·regels·lettertype·RMB) / A-B-bereik exporteren",
 		L"· LRC ±ms·zapisz / okno tekstu (nieprzezroczystosc·wiersze·czcionka·PPM) / eksport zakresu A-B", L"· LRC ±ms·kaydet / soz penceresi (opaklik·satir·yazi·sag tik) / A-B aralığını dışa aktar")); yR += lh;
-	body(R, yR, LL14(L"・BPM計測 …… 開始→再生数秒→再クリックで確定。BPMはダイアログとシーク拍グリッドへ", L"· BPM …… start → play a few sec → click again. Shows dialog + seek beat grid", L"· BPM …… demarrer → lire → recliquer. Dialogue + grille", L"· BPM …… avvia → riproduci → clic. Dialogo + griglia",
-		L"· BPM …… iniciar → reproducir → clic. Dialogo + rejilla", L"· BPM 측정 …… 시작→재생 수초→다시 클릭 확정. 대화상자+비트 그리드", L"· BPM测量 …… 开始→播放数秒→再点确定。对话框+拍网格", L"· قياس BPM …… ابدأ→شغّل→انقر. حوار+شبكة",
-		L"· BPM …… старт→воспроизведение→клик. Диалог+сетка", L"· BPM …… Start→Wiedergabe→Klick. Dialog+Raster", L"· BPM …… iniciar→reproduzir→clique. Dialogo+grade", L"· BPM …… start→afspelen→klik. Dialoog+raster",
-		L"· BPM …… start→odtwarzanie→klik. Okno+siatka", L"· BPM …… baslat→cal→tekrar. Diyalog+izgara")); yR += lh;
+	body(R, yR, LL14(L"・BPM計測 …… 開始→再生数秒→ダイアログで多段合意。拍子・音符価も推定し拍グリッドへ", L"· BPM …… start → play → multipass dialog. Estimates meter/note value → beat grid", L"· BPM …… demarrer → lire → dialogue multipasse. Mesure/valeur → grille", L"· BPM …… avvia → riproduci → dialogo multipass. Metro/valore → griglia",
+		L"· BPM …… iniciar → reproducir → dialogo multipase. Compas/valor → rejilla", L"· BPM 측정 …… 시작→재생→다단 합의 대화상자. 박자·음표 추정→비트 그리드", L"· BPM测量 …… 开始→播放→多段合意对话框。估计拍号/音符→拍网格", L"· قياس BPM …… ابدأ→شغّل→حوار متعدد. ميزان/نغمة→شبكة",
+		L"· BPM …… старт→воспроизведение→многопроходный диалог. Размер/длительность→сетка", L"· BPM …… Start→Wiedergabe→Mehrfach-Dialog. Taktart/Notenwert→Raster", L"· BPM …… iniciar→reproduzir→dialogo multipasse. Compasso/valor→grade", L"· BPM …… start→afspelen→multipass-dialoog. Maatsoort/noot→raster",
+		L"· BPM …… start→odtwarzanie→dialog wieloprzebiegowy. Metrum/nuta→siatka", L"· BPM …… baslat→cal→cok gecisli diyalog. Olcu/nota→izgara")); yR += lh;
 	body(R, yR, LL14(L"・MIDI In …… 鍵盤/CCで再生操作。譜面のMIDI録りはピアノロール右クリック", L"· MIDI In …… keys/CC control playback. Score MIDI capture is piano-roll RMB", L"· MIDI In …… touches/CC. Enreg. partition = clic droit piano roll", L"· MIDI In …… tasti/CC. Registrazione partitura = destro piano roll",
 		L"· MIDI In …… teclas/CC. Captura de partitura = clic der. piano", L"· MIDI In …… 건반/CC로 재생 조작. 악보 MIDI 녹음은 피아노롤 우클릭", L"· MIDI In …… 琴键/CC 控制播放。谱面 MIDI 录制在钢琴卷右键", L"· MIDI In …… مفاتيح/CC. تسجيل النوتة = يمين لفة البيانو",
 		L"· MIDI In …… клавиши/CC. Запись партитуры = ПКМ пианоролла", L"· MIDI In …… Tasten/CC. Partitur-Aufnahme = RMB Klavierrolle", L"· MIDI In …… teclas/CC. Captura de partitura = direito no piano", L"· MIDI In …… toetsen/CC. Partituuropname = RMB pianorol",

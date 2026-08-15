@@ -253,9 +253,9 @@ const wchar_t* PalCmdName(int id)
 			L"태그 편집", L"编辑标签", L"تحرير الوسوم", L"Правка тегов", L"Tags bearbeiten",
 			L"Editar tags", L"Tags bewerken", L"Edytuj tagi", L"Etiket duzenle");
 	case PAL_BPM:
-		return LL14(L"BPM 検出", L"Detect BPM", L"Detecter le BPM", L"Rileva BPM", L"Detectar BPM",
-			L"BPM 검출", L"检测 BPM", L"كشف BPM", L"Определить BPM", L"BPM erkennen",
-			L"Detectar BPM", L"BPM detecteren", L"Wykryj BPM", L"BPM algila");
+		return LL14(L"BPM 多段検出（拍子・音符価）", L"Multipass BPM (meter / note value)", L"BPM multipasse (mesure / valeur)", L"BPM multipass (metro / valore)", L"BPM multipase (compas / valor)",
+			L"BPM 다단 검출(박자·음표)", L"多段检测 BPM（拍号/音符）", L"كشف BPM متعدد (ميزان/نغمة)", L"Многопроходный BPM (размер/длительность)", L"BPM mehrfach (Taktart/Notenwert)",
+			L"BPM multipasse (compasso/valor)", L"BPM multipass (maatsoort/noot)", L"Wieloprzebiegowy BPM (metrum/nuta)", L"Cok gecisli BPM (olcu/nota)");
 	case PAL_EXPORT_AB:
 		return LL14(L"A-B 区間を WAV 書き出し", L"Export A-B range to WAV", L"Exporter A-B en WAV", L"Esporta A-B in WAV", L"Exportar A-B a WAV",
 			L"A-B 구간 WAV 내보내기", L"将 A-B 区间导出为 WAV", L"تصدير مقطع A-B إلى WAV", L"Экспорт участка A-B в WAV", L"A-B-Bereich als WAV",

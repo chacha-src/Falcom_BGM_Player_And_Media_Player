@@ -1336,12 +1336,12 @@ BOOL CS3mView::BakeTipTexture(const wchar_t* text)
 {
 	if (!m_dev || !text) return FALSE;
 	ReleaseTipTexture();
-	const int w = 960, h = 260;
+	const int w = 960, h = 320;
 	Soft3DTextD2DCanvas* cv = Soft3DTextD2D_Begin(w, h);
 	if (!cv) return FALSE;
 	Soft3DTextD2D_FillRect(cv, 0, 0, (float)w, (float)h, 100, 8, 10, 16);
-	Soft3DTextD2D_DrawTextShadow(cv, text, 18.f, 16.f, (float)(w - 32), (float)(h - 28),
-		40.f, 1, 0, 0, 250, 240, 245, 255, 2.f, 2.f, 150, 0, 0, 0);
+	Soft3DTextD2D_DrawTextShadow(cv, text, 16.f, 12.f, (float)(w - 28), (float)(h - 22),
+		30.f, 1, 0, 0, 250, 240, 245, 255, 2.f, 2.f, 150, 0, 0, 0, 1);
 	const BYTE* bits = NULL; UINT stride = 0;
 	if (!Soft3DTextD2D_End(cv, &bits, &stride) || !bits) { Soft3DTextD2D_Release(cv); return FALSE; }
 	D3D11_TEXTURE2D_DESC d = {};
@@ -4322,9 +4322,14 @@ void CSoft3DMazeDlg::LayoutOverviewFloorUi(int viewW, int viewH)
 		return;
 	float tw = (float)m_view.m_floorBarW, th = (float)m_view.m_floorBarH;
 	const float pad = 10.f;
-	const float tipReserve = (m_view.m_srvTip && m_view.m_tipH > 0)
-		? min(120.f, (float)m_view.m_tipH * ((float)viewW - pad * 2.f) / max(1.f, (float)m_view.m_tipW) + 8.f)
-		: 72.f;
+	float tipReserve = 72.f;
+	if (m_view.m_srvTip && m_view.m_tipH > 0 && m_view.m_tipW > 0) {
+		float tw = (float)m_view.m_tipW, th = (float)m_view.m_tipH;
+		const float maxW = (float)viewW - pad * 2.f;
+		if (tw > maxW) { const float s = maxW / tw; tw *= s; th *= s; }
+		if (th > 180.f) th = 180.f;
+		tipReserve = th + 8.f;
+	}
 	const float maxW = (float)viewW - pad * 2.f;
 	if (tw > maxW) {
 		const float s = maxW / tw;
@@ -6775,6 +6780,7 @@ void CSoft3DMazeDlg::RenderScene()
 		}else{
 			// 通常: ミニマップ／階層ラベルの左側までに収める。狭いときはミニマップ下へ
 			const float pad=8.f;
+			const float maxH=220.f;
 			float badgeW=0.f;
 			if(drawBadge&&m_view.m_badgeW>0){
 				badgeW=(float)m_view.m_badgeW;
@@ -6786,6 +6792,7 @@ void CSoft3DMazeDlg::RenderScene()
 				maxW=min(maxW,max(180.f,stopX-pad));
 			}
 			if(tw>maxW){const float s=maxW/tw;tw*=s;th*=s;}
+			if(th>maxH){const float s=maxH/th;tw*=s;th*=s;}
 			tipX=pad;
 			tipY=pad;
 			if(haveMini){
@@ -6796,6 +6803,7 @@ void CSoft3DMazeDlg::RenderScene()
 					maxW=min((float)w-pad*2.f,780.f);
 					tw=(float)m_view.m_tipW;th=(float)m_view.m_tipH;
 					if(tw>maxW){const float s=maxW/tw;tw*=s;th*=s;}
+					if(th>maxH){const float s=maxH/th;tw*=s;th*=s;}
 					tipX=pad;
 				}
 			}
@@ -7097,6 +7105,12 @@ BOOL CSoft3DMazeDlg::OnInitDialog()
 			L"지하 층수(0~3). 계단으로 연결되고 골 위치는 난이도에 따라 달라집니다.", L"地下层数（0–3）。楼梯连接各层，终点位置随难度变化。", L"عدد الأقبية (0–3). السلالم تربط والطابق الهدف يعتمد على الصعوبة.", L"Число подземных этажей (0–3). Лестницы связывают; этаж цели зависит от сложности.", L"Anzahl Kellergeschosse (0–3). Treppen verbinden; Zielétage hängt von der Schwierigkeit ab.", L"Número de subsolos (0–3). Escadas ligam; o piso do gol depende da dificuldade.", L"Aantal kelders (0–3). Trappen verbinden; doelverdieping hangt van moeilijkheid af.", L"Liczba piwnic (0–3). Schody łączą; piętro celu zależy od trudności.", L"Bodrum sayısı (0–3). Merdivenler bağlar; hedef katı zorluğa göre değişir."));
 		m_tooltip.AddTool(&m_diff, LL14(L"難易度。難しいほど通路が細く、階段が多く上下往復し、ゴールは階をまたいだ遠い位置になります。アイテムは多めです。", L"Difficulty. Harder = thinner corridors, more stairs (floor zigzags), farther multi-floor goal. Items stay plentiful.", L"Difficulté. Plus difficile = couloirs fins, plus d'escaliers, but lointain. Objets nombreux.", L"Difficoltà. Più difficile = corridoi stretti, più scale, traguardo lontano. Molti oggetti.", L"Dificultad. Más difícil = pasillos estrechos, más escaleras, meta lejana. Muchos objetos.",
 			L"난이도. 어려울수록 좁은 통로·계단 많음(층 왕복)·먼 골. 아이템은 많음.", L"难度。越难通道越窄、楼梯越多（上下往返）、终点越远。道具偏多。", L"Harder: thinner corridors, more stairs, farther goal, plentiful items.", L"Harder: thinner corridors, more stairs, farther goal, plentiful items.", L"Harder: thinner corridors, more stairs, farther goal, plentiful items.", L"Harder: thinner corridors, more stairs, farther goal, plentiful items.", L"Harder: thinner corridors, more stairs, farther goal, plentiful items.", L"Harder: thinner corridors, more stairs, farther goal, plentiful items.", L"Harder: thinner corridors, more stairs, farther goal, plentiful items."));
+		if (m_hint.GetSafeHwnd()) {
+			CString ht;
+			m_hint.GetWindowText(ht);
+			if (!ht.IsEmpty())
+				m_tooltip.AddTool(&m_hint, ht);
+		}
 	}
 
 	CaptureAudioBaseline();
@@ -7112,35 +7126,35 @@ BOOL CSoft3DMazeDlg::OnInitDialog()
 		return FALSE;
 	}
 	m_playTipText = LL14(
-		L"WASD / QE / パッド：移動・旋回　ホイール：拡大縮小（Shift+で旋回）\nSPACE／A・Start／ホイールクリック：全体マップ切替（ホイール=ズーム・ドラッグ=スクロール・Shift+ホイール/←→=階層）\n橙の階段=地下へ／水色=地上へ。ゴールは難易度で階が変わる",
-		L"WASD / QE / pad: move / turn  Wheel: zoom (Shift+=turn)\nSPACE / A·Start / wheel-click: toggle map (wheel=zoom · drag=scroll · Shift+wheel/←→=floor)\nOrange stairs down, cyan up. Goal floor depends on difficulty",
-		L"WASD / QE : bouger / tourner  Molette : zoom (Maj+=tourner)\nEspace / clic molette : carte (molette=zoom · glisser=défiler · Maj+molette/←→=étage)\nEscaliers orange : descendre, cyan : monter. But selon difficulté",
-		L"WASD / QE: muovi / gira  Rotella: zoom (Maiusc+=gira)\nSPAZIO / clic rotella: mappa (rotella=zoom · trascina=scorri · Maiusc+rotella/←→=piano)\nScale arancioni giù, ciano su. Traguardo secondo difficoltà",
-		L"WASD / QE: mover / girar  Rueda: zoom (Mayús+=girar)\nEspacio / clic rueda: mapa (rueda=zoom · arrastrar=desplazar · Mayús+rueda/←→=planta)\nEscaleras naranjas bajan, cian suben. Meta según dificultad",
-		L"WASD / QE: 이동 / 선회  휠: 줌 (Shift+=회전)\nSPACE / 휠 클릭: 전체 맵 토글 (휠=줌 · 드래그=스크롤 · Shift+휠/←→=층)\n주황 계단=지하로, 하늘색=지상으로. 골 층은 난이도에 따라",
-		L"WASD / QE：移动 / 转向  滚轮：缩放（Shift+=转向）\n空格 / 滚轮点击：全图开关（滚轮=缩放 · 拖动=滚动 · Shift+滚轮/←→=层）\n橙色楼梯下行，水色上行。终点层随难度变化",
-		L"WASD / QE: حركة / دوران  عجلة: تكبير (Shift+=دوران)\nمسافة / نقر عجلة: خريطة (عجلة=تكبير · سحب=تمرير · Shift+عجلة/←→=طابق)\nالسلالم البرتقالية للأسفل والسماوية للأعلى",
-		L"WASD / QE: ход / поворот  Колесо: зум (Shift+=поворот)\nПробел / клик колёсиком: карта (колесо=зум · перетаскивание=прокрутка · Shift+колесо/←→=этаж)\nОранжевые лестницы вниз, голубые вверх",
-		L"WASD / QE: bewegen / drehen  Rad: Zoom (Umschalt+=drehen)\nLeertaste / Radklick: Karte (Rad=Zoom · Ziehen=Scrollen · Umschalt+Rad/←→=Etage)\nOrange Treppen abwärts, Cyan aufwärts",
-		L"WASD / QE: mover / girar  Roda: zoom (Shift+=girar)\nEspaço / clique da roda: mapa (roda=zoom · arrastar=rolar · Shift+roda/←→=piso)\nEscadas laranja descem, ciano sobem",
-		L"WASD / QE: bewegen / draaien  Wiel: zoom (Shift+=draaien)\nSpatie / wielklik: kaart (wiel=zoom · slepen=scrollen · Shift+wiel/←→=verdieping)\nOranje trappen omlaag, cyaan omhoog",
-		L"WASD / QE: ruch / obrót  Kółko: zoom (Shift+=obrót)\nSpacja / klik kółkiem: mapa (kółko=zoom · przeciąganie=przewijanie · Shift+kółko/←→=piętro)\nPomarańczowe schody w dół, cyjanowe w górę",
-		L"WASD / QE: hareket / dönüş  Teker: zoom (Shift+=dönüş)\nSPACE / teker tık: harita (teker=zoom · sürükle=kaydır · Shift+teker/←→=kat)\nTuruncu merdiven aşağı, camgöbeği yukarı");
+		L"WASD / QE / パッド：移動・旋回\nホイール：拡大縮小（Shift+で旋回）\nSPACE／A・Start／ホイールクリック：全体マップ切替\n（ホイール=ズーム・ドラッグ=スクロール・Shift+ホイール/←→=階層）\n橙の階段=地下へ／水色=地上へ。ゴールは難易度で階が変わる",
+		L"WASD / QE / pad: move / turn\nWheel: zoom (Shift+=turn)\nSPACE / A·Start / wheel-click: toggle map\n(wheel=zoom · drag=scroll · Shift+wheel/←→=floor)\nOrange stairs down, cyan up. Goal floor depends on difficulty",
+		L"WASD / QE : bouger / tourner\nMolette : zoom (Maj+=tourner)\nEspace / clic molette : carte\n(molette=zoom · glisser=défiler · Maj+molette/←→=étage)\nEscaliers orange : descendre, cyan : monter. But selon difficulté",
+		L"WASD / QE: muovi / gira\nRotella: zoom (Maiusc+=gira)\nSPAZIO / clic rotella: mappa\n(rotella=zoom · trascina=scorri · Maiusc+rotella/←→=piano)\nScale arancioni giù, ciano su. Traguardo secondo difficoltà",
+		L"WASD / QE: mover / girar\nRueda: zoom (Mayús+=girar)\nEspacio / clic rueda: mapa\n(rueda=zoom · arrastrar=desplazar · Mayús+rueda/←→=planta)\nEscaleras naranjas bajan, cian suben. Meta según dificultad",
+		L"WASD / QE: 이동 / 선회\n휠: 줌 (Shift+=회전)\nSPACE / 휠 클릭: 전체 맵 토글\n(휠=줌 · 드래그=스크롤 · Shift+휠/←→=층)\n주황 계단=지하로, 하늘색=지상으로. 골 층은 난이도에 따라",
+		L"WASD / QE：移动 / 转向\n滚轮：缩放（Shift+=转向）\n空格 / 滚轮点击：全图开关\n（滚轮=缩放 · 拖动=滚动 · Shift+滚轮/←→=层）\n橙色楼梯下行，水色上行。终点层随难度变化",
+		L"WASD / QE: حركة / دوران\nعجلة: تكبير (Shift+=دوران)\nمسافة / نقر عجلة: خريطة\n(عجلة=تكبير · سحب=تمرير · Shift+عجلة/←→=طابق)\nالسلالم البرتقالية للأسفل والسماوية للأعلى",
+		L"WASD / QE: ход / поворот\nКолесо: зум (Shift+=поворот)\nПробел / клик колёсиком: карта\n(колесо=зум · перетаскивание=прокрутка · Shift+колесо/←→=этаж)\nОранжевые лестницы вниз, голубые вверх",
+		L"WASD / QE: bewegen / drehen\nRad: Zoom (Umschalt+=drehen)\nLeertaste / Radklick: Karte\n(Rad=Zoom · Ziehen=Scrollen · Umschalt+Rad/←→=Etage)\nOrange Treppen abwärts, Cyan aufwärts",
+		L"WASD / QE: mover / girar\nRoda: zoom (Shift+=girar)\nEspaço / clique da roda: mapa\n(roda=zoom · arrastar=rolar · Shift+roda/←→=piso)\nEscadas laranja descem, ciano sobem",
+		L"WASD / QE: bewegen / draaien\nWiel: zoom (Shift+=draaien)\nSpatie / wielklik: kaart\n(wiel=zoom · slepen=scrollen · Shift+wiel/←→=verdieping)\nOranje trappen omlaag, cyaan omhoog",
+		L"WASD / QE: ruch / obrót\nKółko: zoom (Shift+=obrót)\nSpacja / klik kółkiem: mapa\n(kółko=zoom · przeciąganie=przewijanie · Shift+kółko/←→=piętro)\nPomarańczowe schody w dół, cyjanowe w górę",
+		L"WASD / QE: hareket / dönüş\nTeker: zoom (Shift+=dönüş)\nSPACE / teker tık: harita\n(teker=zoom · sürükle=kaydır · Shift+teker/←→=kat)\nTuruncu merdiven aşağı, camgöbeği yukarı");
 	m_overviewTipText = LL14(
-		L"全体マップ\n下の階層タブをクリック／◎自機へ　Shift+ホイール / ←→ / A D / パッド左右：階層\nホイール：ズーム　ドラッグ：スクロール　SPACE / A・Start / Esc / B：閉じる",
-		L"Full map\nClick floor tabs / ◎ recenter  Shift+wheel / ←→ / A D / pad L-R: floor\nWheel: zoom  Drag: scroll  SPACE / A·Start / Esc / B: close",
-		L"Carte\nOnglets d'étage / ◎ recentrer  Maj+molette / ←→ / A D : étage\nMolette : zoom  Glisser : défiler  Espace / Échap : fermer",
-		L"Mappa\nSchede piano / ◎ centra  Maiusc+rotella / ←→ / A D: piano\nRotella: zoom  Trascina: scorri  SPAZIO / Esc: chiudi",
-		L"Mapa\nPestañas de planta / ◎ centrar  Mayús+rueda / ←→ / A D: planta\nRueda: zoom  Arrastrar: desplazar  Espacio / Esc: cerrar",
-		L"전체 맵\n아래 층 탭 클릭 / ◎ 자기로  Shift+휠 / ←→ / A D: 층\n휠: 줌  드래그: 스크롤  SPACE / Esc: 닫기",
-		L"全图\n点击下方层标签 / ◎回自身  Shift+滚轮 / ←→ / A D：换层\n滚轮：缩放  拖动：滚动  空格 / Esc：关闭",
-		L"الخريطة\nانقر تبويبات الطابق / ◎ إعادة التمركز\nعجلة: تكبير  سحب: تمرير  مسافة / Esc: إغلاق",
-		L"Карта\nВкладки этажа / ◎ к себе  Shift+колесо / ←→ / A D: этаж\nКолесо: зум  Перетаскивание: прокрутка  Пробел / Esc: закрыть",
-		L"Karte\nEtagen-Tabs / ◎ zentrieren  Umschalt+Rad / ←→ / A D: Etage\nRad: Zoom  Ziehen: Scrollen  Leertaste / Esc: schließen",
-		L"Mapa\nAbas de piso / ◎ recentrar  Shift+roda / ←→ / A D: piso\nRoda: zoom  Arrastar: rolar  Espaço / Esc: fechar",
-		L"Kaart\nVerdiepingstabbladen / ◎ centreren  Shift+wiel / ←→ / A D: verdieping\nWiel: zoom  Slepen: scrollen  Spatie / Esc: sluiten",
-		L"Mapa\nKarty pięter / ◎ wyśrodkuj  Shift+kółko / ←→ / A D: piętro\nKółko: zoom  Przeciąganie: przewijanie  Spacja / Esc: zamknij",
-		L"Harita\nKat sekmeleri / ◎ ortala  Shift+teker / ←→ / A D: kat\nTeker: zoom  Sürükle: kaydır  SPACE / Esc: kapat");
+		L"全体マップ\n下の階層タブをクリック／◎自機へ\nShift+ホイール / ←→ / A D / パッド左右：階層\nホイール：ズーム　ドラッグ：スクロール\nSPACE / A・Start / Esc / B：閉じる",
+		L"Full map\nClick floor tabs / ◎ recenter\nShift+wheel / ←→ / A D / pad L-R: floor\nWheel: zoom  Drag: scroll\nSPACE / A·Start / Esc / B: close",
+		L"Carte\nOnglets d'étage / ◎ recentrer\nMaj+molette / ←→ / A D : étage\nMolette : zoom  Glisser : défiler\nEspace / Échap : fermer",
+		L"Mappa\nSchede piano / ◎ centra\nMaiusc+rotella / ←→ / A D: piano\nRotella: zoom  Trascina: scorri\nSPAZIO / Esc: chiudi",
+		L"Mapa\nPestañas de planta / ◎ centrar\nMayús+rueda / ←→ / A D: planta\nRueda: zoom  Arrastrar: desplazar\nEspacio / Esc: cerrar",
+		L"전체 맵\n아래 층 탭 클릭 / ◎ 자기로\nShift+휠 / ←→ / A D: 층\n휠: 줌  드래그: 스크롤\nSPACE / Esc: 닫기",
+		L"全图\n点击下方层标签 / ◎回自身\nShift+滚轮 / ←→ / A D：换层\n滚轮：缩放  拖动：滚动\n空格 / Esc：关闭",
+		L"الخريطة\nانقر تبويبات الطابق / ◎ إعادة التمركز\nShift+عجلة / ←→ / A D: طابق\nعجلة: تكبير  سحب: تمرير\nمسافة / Esc: إغلاق",
+		L"Карта\nВкладки этажа / ◎ к себе\nShift+колесо / ←→ / A D: этаж\nКолесо: зум  Перетаскивание: прокрутка\nПробел / Esc: закрыть",
+		L"Karte\nEtagen-Tabs / ◎ zentrieren\nUmschalt+Rad / ←→ / A D: Etage\nRad: Zoom  Ziehen: Scrollen\nLeertaste / Esc: schließen",
+		L"Mapa\nAbas de piso / ◎ recentrar\nShift+roda / ←→ / A D: piso\nRoda: zoom  Arrastar: rolar\nEspaço / Esc: fechar",
+		L"Kaart\nVerdiepingstabbladen / ◎ centreren\nShift+wiel / ←→ / A D: verdieping\nWiel: zoom  Slepen: scrollen\nSpatie / Esc: sluiten",
+		L"Mapa\nKarty pięter / ◎ wyśrodkuj\nShift+kółko / ←→ / A D: piętro\nKółko: zoom  Przeciąganie: przewijanie\nSpacja / Esc: zamknij",
+		L"Harita\nKat sekmeleri / ◎ ortala\nShift+teker / ←→ / A D: kat\nTeker: zoom  Sürükle: kaydır\nSPACE / Esc: kapat");
 	m_tipIsOverview = -1;
 	m_mapBadgeText.Empty();
 	EnsureTipTexture(FALSE);

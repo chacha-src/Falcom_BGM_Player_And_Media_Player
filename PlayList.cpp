@@ -2638,8 +2638,13 @@ int CPlayList::ShowTrackContextMenu(CPoint pt, CWnd* pOwner)
 		CString bpmLbl;
 		if (MpBpmIsMeasuring())
 			bpmLbl = LL14(L"BPM 計測中…（再クリックで確定）", L"Measuring BPM… (click again)", L"Mesure BPM…", L"Misura BPM…", L"Midiendo BPM…", L"BPM 측정 중…", L"正在测 BPM…", L"قياس BPM…", L"Измерение BPM…", L"BPM messen…", L"Medindo BPM…", L"BPM meten…", L"Pomiar BPM…", L"BPM olculuyor…");
-		else if (savedata.mpDetectedBpm > 0)
-			bpmLbl.Format(LL14(L"BPM 計測（現在 %d）", L"Measure BPM (now %d)", L"Mesurer BPM (%d)", L"Misura BPM (%d)", L"Medir BPM (%d)", L"BPM 측정 (현재 %d)", L"测量 BPM（当前 %d）", L"قياس BPM (%d)", L"BPM (%d)", L"BPM messen (%d)", L"Medir BPM (%d)", L"BPM meten (%d)", L"Mierz BPM (%d)", L"BPM olc (%d)"), savedata.mpDetectedBpm);
+		else if (savedata.mpDetectedBpm > 0) {
+			if (savedata.mpDetectedMeterNum >= 2)
+				bpmLbl.Format(LL14(L"BPM 計測（現在 %d・%d/%d）", L"Measure BPM (now %d · %d/%d)", L"Mesurer BPM (%d · %d/%d)", L"Misura BPM (%d · %d/%d)", L"Medir BPM (%d · %d/%d)", L"BPM 측정 (현재 %d·%d/%d)", L"测量 BPM（当前 %d·%d/%d）", L"قياس BPM (%d · %d/%d)", L"BPM (%d · %d/%d)", L"BPM messen (%d · %d/%d)", L"Medir BPM (%d · %d/%d)", L"BPM meten (%d · %d/%d)", L"Mierz BPM (%d · %d/%d)", L"BPM olc (%d · %d/%d)"),
+					savedata.mpDetectedBpm, savedata.mpDetectedMeterNum, savedata.mpDetectedMeterDen > 0 ? savedata.mpDetectedMeterDen : 4);
+			else
+				bpmLbl.Format(LL14(L"BPM 計測（現在 %d）", L"Measure BPM (now %d)", L"Mesurer BPM (%d)", L"Misura BPM (%d)", L"Medir BPM (%d)", L"BPM 측정 (현재 %d)", L"测量 BPM（当前 %d）", L"قياس BPM (%d)", L"BPM (%d)", L"BPM messen (%d)", L"Medir BPM (%d)", L"BPM meten (%d)", L"Mierz BPM (%d)", L"BPM olc (%d)"), savedata.mpDetectedBpm);
+		}
 		else
 			bpmLbl = LL14(L"BPM 計測", L"Measure BPM", L"Mesurer BPM", L"Misura BPM", L"Medir BPM", L"BPM 측정", L"测量 BPM", L"قياس BPM", L"Измерить BPM", L"BPM messen", L"Medir BPM", L"BPM meten", L"Mierz BPM", L"BPM olc");
 		menu.AddCheck(PL_CTX_BPM, bpmLbl, MpBpmIsMeasuring() ? TRUE : FALSE,
@@ -2759,14 +2764,54 @@ int CPlayList::ShowTrackContextMenu(CPoint pt, CWnd* pOwner)
 			L"Quitar de la lista", L"목록에서 선택 곡 삭제(파일 유지)", L"从列表删除所选（保留文件）", L"إزالة من القائمة",
 			L"Удалить из списка", L"Aus Liste entfernen", L"Remover da lista", L"Uit lijst verwijderen",
 			L"Usun z listy", L"Listeden kaldir (dosya kalir)"));
+	menu.AddCommand(PL_CTX_EDIT_SELALL,
+		LL14(L"全選択", L"Select all", L"Tout selectionner", L"Seleziona tutto", L"Seleccionar todo",
+			L"모두 선택", L"全选", L"تحديد الكل", L"Выбрать все", L"Alles auswahlen",
+			L"Selecionar tudo", L"Alles selecteren", L"Zaznacz wszystko", L"Tumunu sec"),
+		LL14(L"一覧の全曲を選択します（Ctrl+A）", L"Select all tracks (Ctrl+A)", L"Tout selectionner (Ctrl+A)", L"Seleziona tutto (Ctrl+A)",
+			L"Seleccionar todo (Ctrl+A)", L"목록 전체 선택(Ctrl+A)", L"全选曲目（Ctrl+A）", L"تحديد الكل (Ctrl+A)",
+			L"Выбрать все (Ctrl+A)", L"Alles auswahlen (Ctrl+A)", L"Selecionar tudo (Ctrl+A)", L"Alles selecteren (Ctrl+A)",
+			L"Zaznacz wszystko (Ctrl+A)", L"Tumunu sec (Ctrl+A)"));
+	menu.AddCommand(PL_CTX_EDIT_COPY,
+		LL14(L"コピー", L"Copy", L"Copier", L"Copia", L"Copiar",
+			L"복사", L"复制", L"نسخ", L"Копировать", L"Kopieren",
+			L"Copiar", L"Kopieren", L"Kopiuj", L"Kopyala"),
+		LL14(L"選択曲をクリップボードへ（Ctrl+C）", L"Copy selection to clipboard (Ctrl+C)", L"Copier (Ctrl+C)", L"Copia (Ctrl+C)",
+			L"Copiar (Ctrl+C)", L"선택 곡 복사(Ctrl+C)", L"复制所选（Ctrl+C）", L"نسخ (Ctrl+C)",
+			L"Копировать (Ctrl+C)", L"Kopieren (Ctrl+C)", L"Copiar (Ctrl+C)", L"Kopieren (Ctrl+C)",
+			L"Kopiuj (Ctrl+C)", L"Kopyala (Ctrl+C)"));
+	menu.AddCommand(PL_CTX_EDIT_CUT,
+		LL14(L"切り取り", L"Cut", L"Couper", L"Taglia", L"Cortar",
+			L"잘라내기", L"剪切", L"قص", L"Вырезать", L"Ausschneiden",
+			L"Recortar", L"Knippen", L"Wytnij", L"Kes"),
+		LL14(L"選択曲を切り取り（Ctrl+X）。ファイルは残る", L"Cut selection (Ctrl+X). Files kept", L"Couper (Ctrl+X)", L"Taglia (Ctrl+X)",
+			L"Cortar (Ctrl+X)", L"선택 곡 잘라내기(Ctrl+X)", L"剪切所选（Ctrl+X）", L"قص (Ctrl+X)",
+			L"Вырезать (Ctrl+X)", L"Ausschneiden (Ctrl+X)", L"Recortar (Ctrl+X)", L"Knippen (Ctrl+X)",
+			L"Wytnij (Ctrl+X)", L"Kes (Ctrl+X)"));
+	menu.AddCommand(PL_CTX_EDIT_PASTE,
+		LL14(L"貼り付け", L"Paste", L"Coller", L"Incolla", L"Pegar",
+			L"붙여넣기", L"粘贴", L"لصق", L"Вставить", L"Einfugen",
+			L"Colar", L"Plakken", L"Wklej", L"Yapistir"),
+		LL14(L"クリップボードから貼り付け（Ctrl+V）", L"Paste from clipboard (Ctrl+V)", L"Coller (Ctrl+V)", L"Incolla (Ctrl+V)",
+			L"Pegar (Ctrl+V)", L"붙여넣기(Ctrl+V)", L"粘贴（Ctrl+V）", L"لصق (Ctrl+V)",
+			L"Вставить (Ctrl+V)", L"Einfugen (Ctrl+V)", L"Colar (Ctrl+V)", L"Plakken (Ctrl+V)",
+			L"Wklej (Ctrl+V)", L"Yapistir (Ctrl+V)"));
 	menu.AddCommand(PL_CTX_UNDO_DEL,
 		LL14(L"削除を元に戻す", L"Undo delete", L"Annuler suppression", L"Annulla elimina", L"Deshacer eliminar",
 			L"삭제 실행 취소", L"撤销删除", L"تراجع عن الحذف", L"Отменить удаление", L"Löschen rückgängig",
 			L"Desfazer exclusao", L"Verwijderen ongedaan", L"Cofnij usuwanie", L"Silmeyi geri al"),
-		LL14(L"直前に一覧から削除した曲をリストへ戻します", L"Restore the track(s) most recently removed from the list", L"Restaure la/les piste(s) retiree(s) en dernier de la liste", L"Ripristina la/e traccia/e rimossa/e per ultima dall'elenco",
-			L"Restaura la(s) pista(s) quitada(s) mas recientemente de la lista", L"방금 목록에서 삭제한 곡을 다시 넣습니다", L"将最近从列表删除的曲目恢复回来", L"يعيد المقطع(ات) التي أُزيلت أخيراً من القائمة",
+		LL14(L"直前に一覧から削除した曲をリストへ戻します（Ctrl+Z）", L"Restore the track(s) most recently removed from the list (Ctrl+Z)", L"Restaure la/les piste(s) retiree(s) en dernier de la liste", L"Ripristina la/e traccia/e rimossa/e per ultima dall'elenco",
+			L"Restaura la(s) pista(s) quitada(s) mas recientemente de la lista", L"방금 목록에서 삭제한 곡을 다시 넣습니다(Ctrl+Z)", L"将最近从列表删除的曲目恢复回来（Ctrl+Z）", L"يعيد المقطع(ات) التي أُزيلت أخيراً من القائمة",
 			L"Возвращает трек(и), недавно удалённые из списка", L"Stellt die zuletzt aus der Liste entfernten Titel wieder her", L"Restaura a(s) faixa(s) removida(s) por ultimo da lista", L"Zet de laatst uit de lijst verwijderde nummers terug",
 			L"Przywrca utwor(y) niedawno usuniete z listy", L"Listeden en son silinen parcayi/parcalari geri getirir"));
+	menu.AddCommand(PL_CTX_EDIT_REDO,
+		LL14(L"やり直し", L"Redo", L"Retablir", L"Ripeti", L"Rehacer",
+			L"다시 실행", L"重做", L"إعادة", L"Повторить", L"Wiederholen",
+			L"Refazer", L"Opnieuw", L"Ponow", L"Yinele"),
+		LL14(L"元に戻した編集をやり直します（Ctrl+Y）", L"Redo the undone edit (Ctrl+Y)", L"Retablir (Ctrl+Y)", L"Ripeti (Ctrl+Y)",
+			L"Rehacer (Ctrl+Y)", L"다시 실행(Ctrl+Y)", L"重做（Ctrl+Y）", L"إعادة (Ctrl+Y)",
+			L"Повторить (Ctrl+Y)", L"Wiederholen (Ctrl+Y)", L"Refazer (Ctrl+Y)", L"Opnieuw (Ctrl+Y)",
+			L"Ponow (Ctrl+Y)", L"Yinele (Ctrl+Y)"));
 	menu.AddCommand(PL_CTX_CLEAR_SONGPARAM,
 		LL14(L"選択曲の記憶パラメータを削除", L"Clear saved params for selection",
 			L"Effacer les parametres enregistres de la selection", L"Cancella parametri salvati della selezione",
@@ -3134,7 +3179,15 @@ void CPlayList::HandleTrackContextCmd(int cmd)
 	else if (cmd == PL_CTX_TRANSCODE) OnPopTranscode();
 	else if (cmd == PL_CTX_TAG_EDIT) OnPopTagEdit();
 	else if (cmd == PL_CTX_DEL) Del();
+	else if (cmd == PL_CTX_EDIT_SELALL) SelectAllTracks();
+	else if (cmd == PL_CTX_EDIT_COPY) CopySelectionToClipboard();
+	else if (cmd == PL_CTX_EDIT_CUT) {
+		if (CopySelectionToClipboard())
+			Del();
+	}
+	else if (cmd == PL_CTX_EDIT_PASTE) PasteFromClipboard();
 	else if (cmd == PL_CTX_UNDO_DEL) UndoLastDelete();
+	else if (cmd == PL_CTX_EDIT_REDO) RedoLastEdit();
 	else if (cmd == PL_CTX_REMOVE_MISSING) RemoveMissingFiles();
 	else if (cmd == PL_CTX_RESCAN_MISS) {
 		if (pc && playcnt > 0) {
@@ -3906,6 +3959,7 @@ int CPlayList::Add(CString name,int sub,int loop1,int loop2,CString art,CString 
 //		m_lc.GetItemRect(playcnt,&r,LVIR_BOUNDS);
 //		m_lc.RedrawWindow(&r);	
 		playcnt++;
+		MpPlaylistNatOrdNotifyAdded();
 //	}		
 		
 	return -1;
@@ -4033,6 +4087,7 @@ static BOOL PlInsertTracksRaw(CPlayList* pl, int at, const playlistdata0* items,
 		pl->pc[at + i].icon = 1;
 	}
 	pl->playcnt += n;
+	MpPlaylistNatOrdNotifyInserted(at, n);
 	PlAdjustAfterInsert(pl, at, n);
 	if (::IsWindow(pl->m_lc.GetSafeHwnd())) {
 		pl->m_lc.SetItemCount(pl->playcnt);
@@ -4057,6 +4112,7 @@ static void PlRemoveTracksRaw(CPlayList* pl, const std::vector<int>& indices)
 	std::sort(sel.begin(), sel.end(), std::greater<int>());
 	for (int i : sel) {
 		if (i < 0 || i >= pl->playcnt) continue;
+		MpPlaylistNatOrdNotifyRemovedAt(i);
 		for (int j = i + 1; j < pl->playcnt; ++j)
 			memcpy(&pl->pc[j - 1], &pl->pc[j], sizeof(playlistdata0));
 		pl->playcnt--;
@@ -4396,6 +4452,10 @@ BOOL CPlayList::HandleListEditKeys(MSG* pMsg)
 	if ((GetKeyState(VK_CONTROL) & 0x8000) == 0) return FALSE;
 	if ((GetKeyState(VK_MENU) & 0x8000) != 0) return FALSE;
 	const WPARAM k = pMsg->wParam;
+	if (k == 'A' || k == 'a') {
+		SelectAllTracks();
+		return TRUE;
+	}
 	if (k == 'C' || k == 'c') {
 		CopySelectionToClipboard();
 		return TRUE;
@@ -4423,6 +4483,16 @@ BOOL CPlayList::HandleListEditKeys(MSG* pMsg)
 	return FALSE;
 }
 
+void CPlayList::SelectAllTracks()
+{
+	if (!::IsWindow(m_lc.GetSafeHwnd()) || playcnt <= 0) return;
+	m_lc.SetRedraw(FALSE);
+	for (int i = 0; i < playcnt; ++i)
+		m_lc.SetItemState(i, LVIS_SELECTED, LVIS_SELECTED);
+	m_lc.SetRedraw(TRUE);
+	m_lc.Invalidate(FALSE);
+}
+
 void CPlayList::OnSUP()
 {
 	// TODO: ここにコントロール通知ハンドラ コードを追加します。
@@ -4435,6 +4505,7 @@ void CPlayList::OnSUP()
 			memcpy(&ppp,&pc[j+1],sizeof(playlistdata0));
 			memcpy(&pc[j+1],&pc[j],sizeof(playlistdata0));
 			memcpy(&pc[j],&ppp,sizeof(playlistdata0));
+			MpPlaylistNatOrdNotifySwap(j, j + 1);
 			m_lc.RedrawItems(j,j+1);
 			m_lc.SetItemState(j  ,m_lc.GetItemState(j  ,LVIS_SELECTED)|LVIS_SELECTED,LVIS_SELECTED);
 			m_lc.SetItemState(j+1,m_lc.GetItemState(j+1,LVIS_SELECTED)&~LVIS_SELECTED,LVIS_SELECTED);
@@ -4457,6 +4528,7 @@ void CPlayList::OnUP()
 			memcpy(&ppp,&pc[j+1],sizeof(playlistdata0));
 			memcpy(&pc[j+1],&pc[j],sizeof(playlistdata0));
 			memcpy(&pc[j],&ppp,sizeof(playlistdata0));
+			MpPlaylistNatOrdNotifySwap(j, j + 1);
 			m_lc.RedrawItems(j,j+1);
 				m_lc.SetItemState(j  ,m_lc.GetItemState(j  ,LVIS_SELECTED)|LVIS_SELECTED,LVIS_SELECTED);
 				m_lc.SetItemState(j+1,m_lc.GetItemState(j+1,LVIS_SELECTED)&~LVIS_SELECTED,LVIS_SELECTED);
@@ -4482,6 +4554,7 @@ void CPlayList::OnSDOWN()
 			memcpy(&ppp,&pc[j-1],sizeof(playlistdata0));
 			memcpy(&pc[j-1],&pc[j],sizeof(playlistdata0));
 			memcpy(&pc[j],&ppp,sizeof(playlistdata0));
+			MpPlaylistNatOrdNotifySwap(j - 1, j);
 			m_lc.RedrawItems(j-1,j);
 				m_lc.SetItemState(j  ,m_lc.GetItemState(j  ,LVIS_SELECTED)|LVIS_SELECTED,LVIS_SELECTED);
 				m_lc.SetItemState(j-1,m_lc.GetItemState(j-1,LVIS_SELECTED)&~LVIS_SELECTED,LVIS_SELECTED);
@@ -4506,6 +4579,7 @@ void CPlayList::OnDOWN()
 			memcpy(&ppp,&pc[j-1],sizeof(playlistdata0));
 			memcpy(&pc[j-1],&pc[j],sizeof(playlistdata0));
 			memcpy(&pc[j],&ppp,sizeof(playlistdata0));
+			MpPlaylistNatOrdNotifySwap(j - 1, j);
 			m_lc.RedrawItems(j-1,j);
 
 			m_lc.SetItemState(j  ,m_lc.GetItemState(j  ,LVIS_SELECTED)|LVIS_SELECTED,LVIS_SELECTED);
@@ -4524,6 +4598,7 @@ void CPlayList::OnXCHG(int i,int j)
 			memcpy(&ppp,&pc[i],sizeof(playlistdata0));
 			memcpy(&pc[i],&pc[j],sizeof(playlistdata0));
 			memcpy(&pc[j],&ppp,sizeof(playlistdata0));
+			MpPlaylistNatOrdNotifySwap(i, j);
 }
 
 extern COggDlg *og;
@@ -9908,25 +9983,43 @@ void CPlayList::Save()
 		c=m_lc.GetColumnWidth(5);f.Write(&c,4); // アルバム(旧 col4)
 		c=m_lc.GetColumnWidth(1);f.Write(&c,4); // ★(旧未使用 col7 スロットへ)
 		playlistdata pld;
-		for(int i=0;i<cnt;i++){ZeroMemory(&pld,sizeof(pld));
-			_tcscpy(pld.alb,pc[i].alb);
-			_tcscpy(pld.art,pc[i].art);
-			_tcscpy(pld.fol,pc[i].fol);
-			_tcscpy(pld.name,pc[i].name);
-			pld.loop1=pc[i].loop1;
-			pld.loop2=pc[i].loop2;
-			pld.sub=pc[i].sub;
-			pld.ret2=pc[i].ret2;
-			pld.time=pc[i].time;
+		// 表示ソート中でもディスクへは自然順で書く
+		int* natIdx = NULL;
+		if (cnt > 0) {
+			natIdx = (int*)malloc((size_t)cnt * sizeof(int));
+			if (natIdx && !MpPlaylistBuildNaturalIndex(natIdx, cnt)) {
+				free(natIdx);
+				natIdx = NULL;
+			}
+		}
+		for(int i=0;i<cnt;i++){
+			const int vi = (natIdx && natIdx[i] >= 0 && natIdx[i] < cnt) ? natIdx[i] : i;
+			ZeroMemory(&pld,sizeof(pld));
+			_tcscpy(pld.alb,pc[vi].alb);
+			_tcscpy(pld.art,pc[vi].art);
+			_tcscpy(pld.fol,pc[vi].fol);
+			_tcscpy(pld.name,pc[vi].name);
+			pld.loop1=pc[vi].loop1;
+			pld.loop2=pc[vi].loop2;
+			pld.sub=pc[vi].sub;
+			pld.ret2=pc[vi].ret2;
+			pld.time=pc[vi].time;
 			f.Write(&pld,sizeof(pld));
 		}
+		if (natIdx) free(natIdx);
 		c=m_loop.GetCheck();f.Write(&c,4);
 		c=m_renzoku.GetCheck();f.Write(&c,4);
 		c=m_tool.GetCheck();f.Write(&c,4);
 		c=m_saisyo.GetCheck();f.Write(&c,4);
 		c=m_lc.GetColumnWidth(3);f.Write(&c,4); // 時間(旧 col2)
 		c=m_lc.GetColumnWidth(6);f.Write(&c,4); // フォルダ(旧 col5)
-		f.Write(&pnt,4);
+		{
+			// pnt はファイル上も自然順インデックス
+			int pntNat = pnt;
+			if (pnt >= 0 && pnt < playcnt)
+				pntNat = MpPlaylistNaturalIndexOfVisual(pnt);
+			f.Write(&pntNat,4);
+		}
 		f.Close();
 
 		savedata.saveloop = m_loop.GetCheck();
@@ -9955,6 +10048,7 @@ void CPlayList::Load(BOOL restoreSavedRow)
 	TCHAR tmp[1024];int cnt;
 	int cx,cy,x=-10000,y,c;
 	playcnt = 0;
+	MpPlaylistNatOrdClear();
 	if (pc) {
 		free(pc);
 		pc = NULL;
@@ -10006,6 +10100,8 @@ void CPlayList::Load(BOOL restoreSavedRow)
 		f.Read(&pnt, 4);
 		f.Close();
 	}
+	MpPlaylistNatOrdOnLoaded(playcnt);
+	MpPlaylistApplySavedSort();
 	ClampPlaylistSelectionIndices(this);
 	if (restoreSavedRow)
 		RestoreSavedPlaybackRow();
@@ -10021,9 +10117,9 @@ void CPlayList::Load(BOOL restoreSavedRow)
 	}
 	// Load/realloc 後の実体ポインタをリストへ再同期(ツールチップ等が参照)
 	m_lc.pc = pc;
-	// ディスク済ジャケを一括メモリ化(順々表示に見せない)
+	// 可視行のディスク済ジャケのみ(全件 bulk は切替を極端に遅くする)
 	if (::IsWindow(m_lc.GetSafeHwnd()) && playcnt > 0)
-		PlJacketLoadVisible(this, FALSE, TRUE);
+		PlJacketLoadVisible(this, FALSE, FALSE);
 }
 int SC=0;
 void CPlayList::SIcon(int i){
@@ -11277,12 +11373,15 @@ void CPlayList::OnCbnSelchangeCombo1()
 		keepLoop2 = loop2;
 		keepRet2 = ret2;
 	}
+	// Save×2 + 全dat再zstd が切替遅延の主因。ステージ書込をまとめ、アーカイブ再生成は1回。
+	DatArc_FlushSuspend(TRUE);
 	if (pc != NULL && playcnt > 0)
 		Save();
 	savedata.playlistnum = num;
 	playcnt = 0;
 	pnt = -1;
 	pnt1 = -1;
+	MpPlaylistNatOrdClear();
 	playlistdata0* tmp; tmp = pc;
 	free(pc);
 	pc = NULL;
@@ -11318,9 +11417,10 @@ void CPlayList::OnCbnSelchangeCombo1()
 	}
 	ClampPlaylistSelectionIndices(this);
 	m_lc.RedrawWindow();
-	Save();
-
-	loadplaylistname();
+	// 新 playlistnum だけ設定へ。読み直したPL本体の再Saveは不要。
+	MpPersistSavedataQuick();
+	DatArc_FlushSuspend(FALSE);
+	// コンボ項目は変わっていないので loadplaylistname() は省略
 }
 
 void CPlayList::loadplaylistname()

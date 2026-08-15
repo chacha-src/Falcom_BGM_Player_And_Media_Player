@@ -1,4 +1,4 @@
-// SongParams.cpp : 曲ごとのオーディオ/DSP パラメータ 保持・復元
+﻿// SongParams.cpp : 曲ごとのオーディオ/DSP パラメータ 保持・復元
 #include "stdafx.h"
 #include "SongParams.h"
 #include "ProAudio.h"
@@ -50,12 +50,13 @@ static bool SongParams_IsStopping()
 #else
 #define SONGPARAM_DAT_NAME "oggYSEDbgm_AudioData.dat"
 #endif
-static const int SONGPARAM_FILE_VERSION = 4;
+static const int SONGPARAM_FILE_VERSION = 5;
 // ver1 レコード末尾(mode/ret2 無し)のサイズ
 static const size_t SONGPARAM_V1_SIZE = offsetof(SongParam, mode);
 // ver2 レコード末尾(BPM 無し)のサイズ
 static const size_t SONGPARAM_V2_SIZE = offsetof(SongParam, detectedBpm);
 static const size_t SONGPARAM_V3_SIZE = offsetof(SongParam, keyRoot);
+static const size_t SONGPARAM_V4_SIZE = offsetof(SongParam, meterNum);
 
 // ---- メモリ内テーブル(g_cs で保護) ----
 // g_tbl: レコード本体(ファイルI/O用)。順序は問わない。
@@ -183,6 +184,7 @@ static bool ParamsEqual(const SongParam& a, const SongParam& b)
 	for (int i = 0; i < 3; i++) if (a.bpmCand[i] != b.bpmCand[i]) return false;
 	if (a.keyRoot != b.keyRoot || a.keyMinor != b.keyMinor || a.camelot != b.camelot) return false;
 	if (a.beatGridOffsetMs != b.beatGridOffsetMs) return false;
+	if (a.meterNum != b.meterNum || a.meterDen != b.meterDen || a.pulse != b.pulse) return false;
 	return true;
 }
 
@@ -223,6 +225,9 @@ static void SnapshotCurrent(SongParam& p)
 	p.keyMinor = savedata.mpKeyMinor ? 1 : 0;
 	p.camelot = savedata.mpCamelot;
 	p.beatGridOffsetMs = savedata.mpBeatGridOffsetMs;
+	p.meterNum = savedata.mpDetectedMeterNum;
+	p.meterDen = savedata.mpDetectedMeterDen;
+	p.pulse = savedata.mpDetectedPulse;
 }
 
 // プレイリストの fol / filen をキー用に整える。
@@ -379,14 +384,20 @@ void SongParams_LoadFile()
 		for (int i = 0; i < cnt; i++) {
 			SongParam e;
 			ZeroMemory(&e, sizeof(e));
-			if (ver >= 4) {
+			if (ver >= 5) {
 				UINT got = f.Read(&e, sizeof(SongParam));
 				if (got != sizeof(SongParam)) break;
+			}
+			else if (ver >= 4) {
+				UINT got = f.Read(&e, (UINT)SONGPARAM_V4_SIZE);
+				if (got != (UINT)SONGPARAM_V4_SIZE) break;
+				e.meterNum = 0; e.meterDen = 0; e.pulse = 0;
 			}
 			else if (ver >= 3) {
 				UINT got = f.Read(&e, (UINT)SONGPARAM_V3_SIZE);
 				if (got != (UINT)SONGPARAM_V3_SIZE) break;
 				e.keyRoot = -1; e.keyMinor = 0; e.camelot = 0; e.beatGridOffsetMs = 0;
+				e.meterNum = 0; e.meterDen = 0; e.pulse = 0;
 			}
 			else if (ver >= 2) {
 				UINT got = f.Read(&e, (UINT)SONGPARAM_V2_SIZE);
@@ -395,6 +406,7 @@ void SongParams_LoadFile()
 				e.bpmCand[0] = e.bpmCand[1] = e.bpmCand[2] = 0;
 				e.beatGrid = 0;
 				e.keyRoot = -1; e.keyMinor = 0; e.camelot = 0; e.beatGridOffsetMs = 0;
+				e.meterNum = 0; e.meterDen = 0; e.pulse = 0;
 			}
 			else {
 				// ver1: mode/ret2 無し
@@ -405,6 +417,7 @@ void SongParams_LoadFile()
 				e.detectedBpm = 0;
 				e.bpmCand[0] = e.bpmCand[1] = e.bpmCand[2] = 0;
 				e.beatGrid = 0;
+				e.meterNum = 0; e.meterDen = 0; e.pulse = 0;
 			}
 			e.listName[255] = 0;
 			e.path[1023] = 0;
@@ -700,6 +713,9 @@ static bool Upsert(LPCTSTR listName, LPCTSTR path, int mode, int ret2Val, const 
 		e.keyMinor = params.keyMinor ? 1 : 0;
 		e.camelot = params.camelot;
 		e.beatGridOffsetMs = params.beatGridOffsetMs;
+		e.meterNum = params.meterNum;
+		e.meterDen = params.meterDen;
+		e.pulse = params.pulse;
 		SpReindexRowLocked((size_t)idx, oldKey);
 		return false;
 	}
@@ -744,6 +760,9 @@ void SongParams_SaveBpmForCurrentSong()
 	e.keyMinor = savedata.mpKeyMinor ? 1 : 0;
 	e.camelot = savedata.mpCamelot;
 	e.beatGridOffsetMs = savedata.mpBeatGridOffsetMs;
+	e.meterNum = savedata.mpDetectedMeterNum;
+	e.meterDen = savedata.mpDetectedMeterDen;
+	e.pulse = savedata.mpDetectedPulse;
 	const bool added = Upsert(list, path, md, r2, e);
 	s_lastSaved = e;
 	s_baselineValid = true;
@@ -776,8 +795,12 @@ void SongParams_RestoreBpmForCurrentSong()
 	savedata.mpKeyMinor = e.keyMinor ? 1 : 0;
 	savedata.mpCamelot = e.camelot;
 	savedata.mpBeatGridOffsetMs = e.beatGridOffsetMs;
+	savedata.mpDetectedMeterNum = e.meterNum;
+	savedata.mpDetectedMeterDen = e.meterDen;
+	savedata.mpDetectedPulse = e.pulse;
 	if (mp && ::IsWindow(mp->GetSafeHwnd()) && mp->m_seek.GetSafeHwnd()) {
-		mp->m_seek.SetBeatGrid((float)savedata.mpDetectedBpm, savedata.mpBeatGrid ? TRUE : FALSE, savedata.mpBeatGridOffsetMs);
+		const int meter = savedata.mpDetectedMeterNum >= 2 ? savedata.mpDetectedMeterNum : 4;
+		mp->m_seek.SetBeatGrid((float)savedata.mpDetectedBpm, savedata.mpBeatGrid ? TRUE : FALSE, savedata.mpBeatGridOffsetMs, meter);
 		mp->m_seek.Invalidate(FALSE);
 	}
 }
@@ -806,6 +829,9 @@ void SongParams_SaveKeyGridForCurrentSong()
 		e.bpmCand[0] = savedata.mpBpmCand[0];
 		e.bpmCand[1] = savedata.mpBpmCand[1];
 		e.bpmCand[2] = savedata.mpBpmCand[2];
+		e.meterNum = savedata.mpDetectedMeterNum;
+		e.meterDen = savedata.mpDetectedMeterDen;
+		e.pulse = savedata.mpDetectedPulse;
 	}
 	const bool added = Upsert(list, path, md, r2, e);
 	s_lastSaved = e;
@@ -1096,6 +1122,9 @@ void SongParams_ApplyEntryToMain(const SongParam& e)
 		savedata.mpBpmCand[1] = ClampI(e.bpmCand[1], 0, 300);
 		savedata.mpBpmCand[2] = ClampI(e.bpmCand[2], 0, 300);
 		savedata.mpBeatGrid = e.beatGrid ? 1 : 0;
+		savedata.mpDetectedMeterNum = e.meterNum;
+		savedata.mpDetectedMeterDen = e.meterDen;
+		savedata.mpDetectedPulse = e.pulse;
 	}
 	savedata.mpKeyRoot = e.keyRoot;
 	savedata.mpKeyMinor = e.keyMinor ? 1 : 0;
@@ -1127,7 +1156,8 @@ void SongParams_ApplyEntryToMain(const SongParam& e)
 
 	if (mp && ::IsWindow(mp->GetSafeHwnd()) && mp->m_seek.GetSafeHwnd()) {
 		const float bpm = savedata.mpDetectedBpm > 0 ? (float)savedata.mpDetectedBpm : 120.f;
-		mp->m_seek.SetBeatGrid(bpm, savedata.mpBeatGrid ? TRUE : FALSE, savedata.mpBeatGridOffsetMs);
+		const int meter = savedata.mpDetectedMeterNum >= 2 ? savedata.mpDetectedMeterNum : 4;
+		mp->m_seek.SetBeatGrid(bpm, savedata.mpBeatGrid ? TRUE : FALSE, savedata.mpBeatGridOffsetMs, meter);
 		mp->m_seek.Invalidate(FALSE);
 	}
 }
@@ -1466,6 +1496,11 @@ CString SongParams_BuildTipExtra(LPCTSTR listName, LPCTSTR path, int mode, int r
 			CString c3;
 			c3.Format(L" (%d/%d/%d)", e.bpmCand[0], e.bpmCand[1], e.bpmCand[2]);
 			cand += c3;
+		}
+		if (e.meterNum >= 2) {
+			CString m;
+			m.Format(L" %d/%d", e.meterNum, e.meterDen > 0 ? e.meterDen : 4);
+			cand += m;
 		}
 		tmp.Format(L"%s=%s", LL14(L"BPM", L"BPM", L"BPM", L"BPM", L"BPM", L"BPM", L"BPM", L"BPM", L"BPM", L"BPM", L"BPM", L"BPM", L"BPM", L"BPM"), cand);
 		TipAppend(body, tmp);

@@ -20,8 +20,8 @@
 //            AudioData.dat ファイル ver: 1=pathのみ / 2=mode+ret2 / 3=BPM(選択+候補3+グリッド)
 //   リスト : 名前変更/削除/曲の他リスト移動・コピー時に listName キーを追従
 //            コンテキストメニューから選択曲の記憶パラメータだけ削除も可
-//   BPM    : detectedBpm / bpmCand[3] / beatGrid は「曲ごと保存」OFFでも曲単位で保存・再生時復元
-//   AudioData.dat ファイル ver: 1=pathのみ / 2=mode+ret2 / 3=BPM / 4=key+Camelot+gridOffset
+//   AudioData.dat ファイル ver: 1=pathのみ / 2=mode+ret2 / 3=BPM / 4=key+Camelot+gridOffset / 5=meter+pulse
+//   BPM    : detectedBpm / bpmCand[3] / beatGrid / meter / pulse は「曲ごと保存」OFFでも曲単位で保存・再生時復元
 //   索引   : メモリ上は主キー(list+path+mode+ret2)ハッシュで検索。削除は末尾入替。
 // ============================================================================
 
@@ -62,6 +62,10 @@ struct SongParam {
 	int keyMinor;          // 0=major 1=minor
 	int camelot;           // 1..24 (1A..12A=1..12, 1B..12B=13..24), 0=未
 	int beatGridOffsetMs;  // 拍グリッド位相オフセット(ms)。正=右へ
+	// --- ver5 追記: 拍子・音符価 ---
+	int meterNum;          // 0=未, 2..12
+	int meterDen;          // 0=未, 4 or 8
+	int pulse;             // 0=未, 4/8/16/32/64
 };
 
 // 起動時に 1 度だけ読み込む

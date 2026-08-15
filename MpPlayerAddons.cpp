@@ -88,44 +88,80 @@ class CMpAlarmDlg;
 class CMpMirrorDlg;
 class CMpRemoteDlg;
 class CMpSsVizDlg;
+class CMpBpmDlg;
 static CMpDjPadDlg* g_mpDjPad = NULL;
 static int s_djPadAppExit = 0; // 1=アプリ終了中（mpDjPadwindow を落とさない）
 static CMpAlarmDlg* g_mpAlarmDlg = NULL;
 static CMpMirrorDlg* g_mpMirrorDlg = NULL;
 static CMpRemoteDlg* g_mpRemoteDlg = NULL;
 static CMpSsVizDlg* g_mpSsViz = NULL;
+static CMpBpmDlg* g_mpBpmDlg = NULL;
 
-// ---- BPM: 再生PCMを~500Hz間引き→封筒→自己相関（SoundTouch BPMDetect系。ピーク封筒は使わない） ----
-// レートはラベル(wavbit/device)を信じない。到着フレーム数÷壁時計で実効Hzを測る。
-// （44.1k PCM を 48k 扱い → 塔160が173になる系統の根本対策）
+// ---- BPM: ~500Hz間引き→アタック新規性→IOI/拍子/音符価の多段合意 ----
+// レートはラベルを基本とし、壁時計は 44.1↔48 誤認検出のみ。
 enum { kBpmDecimHz = 500 };
-enum { kBpmEnvCap = kBpmDecimHz * 10 }; // 最大約10秒
+enum { kBpmEnvCap = kBpmDecimHz * 20 }; // 最大約20秒
+enum { kBpmHistMax = 48 };
+enum { kBpmPassNeed = 10 };
+enum { kBpmPassExtra = 10 };
+enum { kBpmPassCap = 40 }; // 弱い合意でもここまで積み上げて詰める
+enum { kBpmPeakMax = 512 };
+enum { kBpmIoiBins = 256 };
+
 static float g_bpmEnv[kBpmEnvCap];
+static float g_bpmWork[kBpmEnvCap];
 static int g_bpmEnvN = 0;
 static int g_bpmEnvPos = 0;
 static float g_bpmDecimSum = 0.f;
 static int g_bpmDecimCnt = 0;
 static int g_bpmDecimNeed = 0;
-static int g_bpmSrcRate = 0;          // 間引きに使う実効レート(Hz)
+static int g_bpmSrcRate = 0;
 static float g_bpmAbsAvg = 0.f;
-static float g_bpmPrevAvg = 0.f;
-static float g_bpmEffSr = 500.f;      // 封筒サンプリング実効Hz
+static float g_bpmPrevAbs = 0.f;
+static float g_bpmEffSr = 500.f;
 static int g_bpmArmed = 0;
 static int g_bpmHeldPcAudio = 0;
 static DWORD g_bpmArmedSince = 0;
 static int g_bpmResultShown = 0;
 static int g_bpmLastEstimate = 0;
-enum { kBpmHistMax = 10 };
 static int g_bpmHist[kBpmHistMax];
+static int g_bpmHistMeterNum[kBpmHistMax];
+static int g_bpmHistMeterDen[kBpmHistMax];
+static int g_bpmHistPulse[kBpmHistMax];
+static float g_bpmHistScore[kBpmHistMax];
 static int g_bpmHistN = 0;
 static DWORD g_bpmHistLastPushMs = 0;
+static int g_bpmPassCount = 0;
+static int g_bpmNeedPasses = kBpmPassNeed;
 static int g_bpmLastCands[3] = { 0, 0, 0 };
 static int g_bpmLastAcoustic = 0;
-static int g_bpmLastAcoustic2 = 0; // 第2峰（候補の×3/4用）
+static int g_bpmLastAcoustic2 = 0;
+static int g_bpmLastMeterNum = 0;
+static int g_bpmLastMeterDen = 0;
+static int g_bpmLastPulse = 0;
+static float g_bpmLastConf = 0.f;
+static float g_bpmLastStrength = 0.f; // 1パス分のAC強度（合意に使う）
+static int g_bpmConsensusBpm = 0;
+static int g_bpmConsensusMeterNum = 0;
+static int g_bpmConsensusMeterDen = 0;
+static int g_bpmConsensusPulse = 0;
+static int g_bpmUiFail = 0;
+static int g_bpmConfirmPending = 0; // 0=なし 1=仮収束待ち確認 2=収束済み・緻密待ち
+static int g_bpmConfirmRoundN = 0;  // 確認/緻密の周回数（無限ループ防止）
+static int g_bpmProvisionalBpm = 0;
+static int g_bpmProvisionalMeterNum = 0;
+static int g_bpmProvisionalMeterDen = 0;
+static int g_bpmProvisionalPulse = 0;
+static int g_bpmLastRoundBpm = 0; // 直近ラウンドの生結果（UI表示用）
+static float g_bpmLastRoundConf = 0.f;
 static LONGLONG g_bpmQpcFreq = 0;
 static LONGLONG g_bpmQpcStart = 0;
 static double g_bpmFramesSeen = 0.0;
 static int g_bpmRateReady = 0;
+
+static void OpenMpBpmMeasureDlg(CWnd* parent);
+static void CloseMpBpmMeasureDlgIfOpen();
+static void MpBpmDlgRefreshUi();
 
 static int MpBpmMedianOf(int* v, int n)
 {
@@ -139,50 +175,16 @@ static int MpBpmMedianOf(int* v, int n)
 	return v[n / 2];
 }
 
-static int MpBpmMedianHist()
-{
-	if (g_bpmHistN <= 0) return 0;
-	// 118–132（森の音響帯）が履歴にあればそちらを優先（101 中央値で潰さない）
-	int band[kBpmHistMax];
-	int nBand = 0;
-	for (int i = 0; i < g_bpmHistN; ++i) {
-		if (g_bpmHist[i] >= 118 && g_bpmHist[i] <= 132)
-			band[nBand++] = g_bpmHist[i];
-	}
-	if (nBand >= 2)
-		return MpBpmMedianOf(band, nBand);
-	int tmp[kBpmHistMax];
-	for (int i = 0; i < g_bpmHistN; ++i) tmp[i] = g_bpmHist[i];
-	return MpBpmMedianOf(tmp, g_bpmHistN);
-}
-
-static void MpBpmHistPush(int bpm)
-{
-	// 音響峰のみ（塔の昇格160は入れない）。150超の誤峰も履歴に残さない
-	if (bpm < 70 || bpm > 150) return;
-	const DWORD now = GetTickCount();
-	if (g_bpmHistLastPushMs && (now - g_bpmHistLastPushMs) < 250)
-		return;
-	g_bpmHistLastPushMs = now;
-	if (g_bpmHistN < kBpmHistMax)
-		g_bpmHist[g_bpmHistN++] = bpm;
-	else {
-		for (int i = 1; i < kBpmHistMax; ++i) g_bpmHist[i - 1] = g_bpmHist[i];
-		g_bpmHist[kBpmHistMax - 1] = bpm;
-	}
-}
-
 static void MpBpmApplyRate(int rate)
 {
 	if (rate < 8000) rate = 8000;
 	if (rate > 384000) rate = 384000;
-	// 常用レートへスナップ（壁時計の 44143/44189 みたいなジッタをBPMに入れない）
 	{
 		static const int kStd[] = {
 			8000, 11025, 16000, 22050, 32000, 44100, 48000, 88200, 96000, 176400, 192000
 		};
 		int best = rate;
-		double bestRel = 0.015; // 1.5%以内
+		double bestRel = 0.015;
 		for (int i = 0; i < (int)(sizeof(kStd) / sizeof(kStd[0])); ++i) {
 			const int s = kStd[i];
 			const double rel = fabs((double)rate - (double)s) / (double)s;
@@ -211,20 +213,37 @@ static void MpBpmResetCapture()
 	g_bpmDecimNeed = 0;
 	g_bpmSrcRate = 0;
 	g_bpmAbsAvg = 0.f;
-	g_bpmPrevAvg = 0.f;
+	g_bpmPrevAbs = 0.f;
 	g_bpmEffSr = 500.f;
 	g_bpmLastEstimate = 0;
 	g_bpmHistN = 0;
 	g_bpmHistLastPushMs = 0;
+	g_bpmPassCount = 0;
+	g_bpmNeedPasses = kBpmPassNeed;
 	g_bpmLastCands[0] = g_bpmLastCands[1] = g_bpmLastCands[2] = 0;
 	g_bpmLastAcoustic = 0;
 	g_bpmLastAcoustic2 = 0;
+	g_bpmLastMeterNum = 0;
+	g_bpmLastMeterDen = 0;
+	g_bpmLastPulse = 0;
+	g_bpmLastConf = 0.f;
+	g_bpmLastStrength = 0.f;
+	g_bpmConsensusBpm = 0;
+	g_bpmConsensusMeterNum = 0;
+	g_bpmConsensusMeterDen = 0;
+	g_bpmConsensusPulse = 0;
+	g_bpmUiFail = 0;
+	// 確認用の仮結果は Reset では消さない（一致判定のため）
 	g_bpmQpcFreq = 0;
 	g_bpmQpcStart = 0;
 	g_bpmFramesSeen = 0.0;
 	g_bpmRateReady = 0;
 	ZeroMemory(g_bpmEnv, sizeof(g_bpmEnv));
 	ZeroMemory(g_bpmHist, sizeof(g_bpmHist));
+	ZeroMemory(g_bpmHistMeterNum, sizeof(g_bpmHistMeterNum));
+	ZeroMemory(g_bpmHistMeterDen, sizeof(g_bpmHistMeterDen));
+	ZeroMemory(g_bpmHistPulse, sizeof(g_bpmHistPulse));
+	ZeroMemory(g_bpmHistScore, sizeof(g_bpmHistScore));
 }
 
 // PC音ループバックの参照カウント(MIDI録り・BPM計測などが共有)
@@ -270,8 +289,8 @@ BOOL MpBpmIsMeasuring()
 	return g_bpmArmed ? TRUE : FALSE;
 }
 
-static int MpBpmEstimateAutocorr();
 static void MpBpmFinishAndShow(BOOL showFailIfNone);
+static int MpBpmEstimateAutocorr();
 static void MpDjScratchCapturePcm(const float* L, const float* R, int frames, int sampleRate);
 static void MpDjSeekToSliderPos(int pos);
 static void MpDjScratchBegin();
@@ -279,7 +298,56 @@ static void MpDjScratchEnd();
 static void MpDjScratchSetVelocity(float degPerSec);
 static float MpDjScratchSpeedScale();
 
-// 再生PCM経路（LoudnessFeed）。~500Hz 間引き＋ABS封筒
+// 計測対象が再生中と違う／停止中なら、対象曲を頭から再演奏する
+static void MpBpmEnsureMeasurePlayback()
+{
+	extern int playf;
+	extern CString filen;
+	extern int plcnt;
+	extern int gameon;
+	extern void MpPushPlayHistory(LPCTSTR path, LPCTSTR displayName);
+
+	int target = -1;
+	if (mp)
+		target = mp->GetSelectedPcIndex();
+	if ((target < 0 || !pl || target >= pl->playcnt) && pl) {
+		if (pl->pnt1 >= 0 && pl->pnt1 < pl->playcnt) target = pl->pnt1;
+		else if (pl->pnt >= 0 && pl->pnt < pl->playcnt) target = pl->pnt;
+	}
+	if (!pl || target < 0 || target >= pl->playcnt) {
+		if (!playf && og)
+			og->play();
+		return;
+	}
+
+	const BOOL samePlaying = (playf
+		&& pl->pnt == target
+		&& !filen.IsEmpty()
+		&& _tcsicmp(filen, pl->pc[target].fol) == 0);
+	if (samePlaying)
+		return;
+
+	// 選択曲へ切替して頭から再生（鳴っている曲と違う計測対象対策）
+	pl->Get(target);
+	plcnt = target;
+	gameon = 0;
+	if (mp) {
+		mp->m_abApos = -1;
+		mp->m_abBpos = -1;
+		mp->m_abLoopCount = 0;
+		mp->m_seekHoldUntil = 0;
+		if (mp->m_seek.GetSafeHwnd())
+			mp->m_seek.SetAB(-1, -1);
+		mp->ClearWaveOverview();
+	}
+	MpPushPlayHistory(pl->pc[target].fol, pl->pc[target].name);
+	if (!OggPrepareResumeBeforePlayback(pl->pc[target].fol))
+		return;
+	if (og && ::IsWindow(og->GetSafeHwnd()))
+		RequestPlaybackRestart(og->GetSafeHwnd());
+}
+
+// 再生PCM経路。~500Hz 間引き＋アタック（ABS上昇）新規性
 void MpBpmNotifyPcm(const float* L, const float* R, int frames, int sampleRate)
 {
 	if (L && R && frames > 0 && sampleRate >= 8000)
@@ -287,8 +355,6 @@ void MpBpmNotifyPcm(const float* L, const float* R, int frames, int sampleRate)
 	if (!g_bpmArmed || g_bpmResultShown) return;
 	if (!L || !R || frames <= 0 || sampleRate < 8000) return;
 
-	// EQ経路のPCMはソースレート。ファイルラベルを正とし、常用レートへスナップする。
-	// 壁時計実測は 44.1↔48 の取り違え検出だけに使い、44143 のような中途半端値は使わない。
 	int label = sampleRate;
 	if (wavbit_sample_Hz >= 8000 && wavbit_sample_Hz <= 384000)
 		label = wavbit_sample_Hz;
@@ -305,28 +371,45 @@ void MpBpmNotifyPcm(const float* L, const float* R, int frames, int sampleRate)
 		g_bpmQpcFreq = f.QuadPart;
 		g_bpmQpcStart = qpc.QuadPart;
 		g_bpmFramesSeen = 0.0;
+		// 初回は仮レートのみ。投票は壁時計で確定するまで待たせる（44.1↔48 誤認で101等になるのを防ぐ）
 		MpBpmApplyRate(label);
-		g_bpmRateReady = 1; // ラベルがあれば即計測可（スナップ済み）
+		g_bpmRateReady = 0;
 	}
 
 	g_bpmFramesSeen += (double)frames;
 	if (g_bpmQpcFreq > 0) {
 		const double elapsed = (double)(qpc.QuadPart - g_bpmQpcStart) / (double)g_bpmQpcFreq;
-		if (elapsed >= 1.5 && g_bpmFramesSeen > (double)label * 0.5) {
+		if (elapsed >= 1.0 && g_bpmFramesSeen > 8000.0) {
 			const double meas = g_bpmFramesSeen / elapsed;
-			// ラベルが48kなのに実測が44.1近傍 → 44.1へ。逆も同様。ジッタ値そのものは採用しない。
-			const int snappedLabel = g_bpmSrcRate > 0 ? g_bpmSrcRate : label;
-			int rate = snappedLabel;
+			const int prevRate = g_bpmSrcRate;
+			int rate = label;
 			const int std441 = 44100, std48 = 48000;
 			const double d441 = fabs(meas - (double)std441) / (double)std441;
 			const double d48 = fabs(meas - (double)std48) / (double)std48;
-			if (d441 < 0.03 || d48 < 0.03) {
+			// 壁時計を優先。ファイルレートとデバイス表記が 44.1/48 で食い違うときも実測に従う
+			if (d441 < 0.04 || d48 < 0.04) {
 				if (d441 <= d48) rate = std441;
 				else rate = std48;
+			} else if (wavbit_sample_Hz == std441 || wavbit_sample_Hz == std48) {
+				rate = wavbit_sample_Hz;
 			} else {
 				rate = label;
 			}
 			MpBpmApplyRate(rate);
+			// レート訂正で封筒の時間軸が壊れる → 取り直し（誤峰→101 の主因）
+			if (prevRate > 0 && prevRate != g_bpmSrcRate) {
+				g_bpmEnvN = 0;
+				g_bpmEnvPos = 0;
+				g_bpmDecimSum = 0.f;
+				g_bpmDecimCnt = 0;
+				g_bpmAbsAvg = 0.f;
+				g_bpmPrevAbs = 0.f;
+				g_bpmHistN = 0;
+				g_bpmPassCount = 0;
+				g_bpmNeedPasses = kBpmPassNeed;
+				g_bpmHistLastPushMs = 0;
+				ZeroMemory(g_bpmEnv, sizeof(g_bpmEnv));
+			}
 			g_bpmRateReady = 1;
 		}
 	}
@@ -344,39 +427,366 @@ void MpBpmNotifyPcm(const float* L, const float* R, int frames, int sampleRate)
 		g_bpmDecimCnt = 0;
 
 		const float a = fabsf(s);
+		g_bpmPrevAbs = a;
 		g_bpmAbsAvg += 0.20f * (a - g_bpmAbsAvg);
+		// 旧実装どおり純ABS封筒（rise混入は細分IOI／変拍子に引っ張られやすい）
 		g_bpmEnv[g_bpmEnvPos] = g_bpmAbsAvg;
 		g_bpmEnvPos = (g_bpmEnvPos + 1) % kBpmEnvCap;
 		if (g_bpmEnvN < kBpmEnvCap) g_bpmEnvN++;
 	}
 }
 
-// 旧ピーク封筒経路は拍推定に使わない（16分/ハイハットで破綻する）
 void MpBpmNotifyPeak(float /*peak*/)
 {
+}
+
+static void MpBpmVotePush(int bpm, int meterNum, int meterDen, int pulse, float score)
+{
+	if (bpm < 40 || bpm > 240) return;
+	const DWORD now = GetTickCount();
+	if (g_bpmHistLastPushMs && (now - g_bpmHistLastPushMs) < 400)
+		return;
+	g_bpmHistLastPushMs = now;
+	if (g_bpmHistN < kBpmHistMax) {
+		g_bpmHist[g_bpmHistN] = bpm;
+		g_bpmHistMeterNum[g_bpmHistN] = meterNum;
+		g_bpmHistMeterDen[g_bpmHistN] = meterDen;
+		g_bpmHistPulse[g_bpmHistN] = pulse;
+		g_bpmHistScore[g_bpmHistN] = score;
+		g_bpmHistN++;
+	} else {
+		for (int i = 1; i < kBpmHistMax; ++i) {
+			g_bpmHist[i - 1] = g_bpmHist[i];
+			g_bpmHistMeterNum[i - 1] = g_bpmHistMeterNum[i];
+			g_bpmHistMeterDen[i - 1] = g_bpmHistMeterDen[i];
+			g_bpmHistPulse[i - 1] = g_bpmHistPulse[i];
+			g_bpmHistScore[i - 1] = g_bpmHistScore[i];
+		}
+		g_bpmHist[kBpmHistMax - 1] = bpm;
+		g_bpmHistMeterNum[kBpmHistMax - 1] = meterNum;
+		g_bpmHistMeterDen[kBpmHistMax - 1] = meterDen;
+		g_bpmHistPulse[kBpmHistMax - 1] = pulse;
+		g_bpmHistScore[kBpmHistMax - 1] = score;
+	}
+	g_bpmPassCount++;
+}
+
+// 直近票から合意BPM・拍子・音符価・信頼度を更新。戻り値: 十分合意ならTRUE
+// スコアが弱い／関連テンポが競合するときは試行上限を段階的に上げ、安易に確定しない。
+static BOOL MpBpmUpdateConsensus()
+{
+	g_bpmConsensusBpm = 0;
+	g_bpmConsensusMeterNum = 0;
+	g_bpmConsensusMeterDen = 0;
+	g_bpmConsensusPulse = 0;
+	g_bpmLastConf = 0.f;
+	if (g_bpmHistN <= 0) return FALSE;
+
+	int tmp[kBpmHistMax];
+	for (int i = 0; i < g_bpmHistN; ++i) tmp[i] = g_bpmHist[i];
+	const int med = MpBpmMedianOf(tmp, g_bpmHistN);
+	if (med <= 0) return FALSE;
+
+	auto relatedDist = [](int a, int b) -> int {
+		if (a <= 0 || b <= 0) return 999;
+		int best = a - b;
+		if (best < 0) best = -best;
+		const int cand[6] = {
+			(a * 3) / 4, (a * 4) / 3, (a * 2) / 3, (a * 3) / 2, a * 2, a / 2
+		};
+		for (int i = 0; i < 6; ++i) {
+			int d = cand[i] - b;
+			if (d < 0) d = -d;
+			if (d < best) best = d;
+		}
+		const int candB[6] = {
+			(b * 3) / 4, (b * 4) / 3, (b * 2) / 3, (b * 3) / 2, b * 2, b / 2
+		};
+		for (int i = 0; i < 6; ++i) {
+			int d = candB[i] - a;
+			if (d < 0) d = -d;
+			if (d < best) best = d;
+		}
+		return best;
+	};
+	auto countNear = [&](int center) -> int {
+		// 高速帯は 161–165 のブレを同一クラスタとして数える
+		const int tol = (center >= 145) ? 3 : 1;
+		int c = 0;
+		for (int i = 0; i < g_bpmHistN; ++i) {
+			int d = g_bpmHist[i] - center;
+			if (d < 0) d = -d;
+			if (d <= tol) c++;
+		}
+		return c;
+	};
+	auto countSupport = [&](int center) -> int {
+		const int tol = (center >= 145) ? 3 : 1;
+		int c = 0;
+		for (int i = 0; i < g_bpmHistN; ++i) {
+			if (relatedDist(g_bpmHist[i], center) <= tol)
+				c++;
+		}
+		return c;
+	};
+
+	int nearExact = countNear(med);
+	int farCnt = 0;
+	for (int i = 0; i < g_bpmHistN; ++i) {
+		int d = g_bpmHist[i] - med;
+		if (d < 0) d = -d;
+		if (d >= 4 && relatedDist(g_bpmHist[i], med) > 1)
+			farCnt++;
+	}
+
+	// 関連クラスタで最大の対抗峰
+	int rivalBpm = 0, rivalCnt = 0;
+	{
+		int rel[8];
+		int nRel = 0;
+		auto pushRel = [&](int b) {
+			if (b < 40 || b > 240) return;
+			for (int i = 0; i < nRel; ++i) if (rel[i] == b) return;
+			if (nRel < 8) rel[nRel++] = b;
+		};
+		pushRel((med * 3) / 4);
+		pushRel((med * 4) / 3);
+		pushRel((med * 2) / 3);
+		pushRel((med * 3) / 2);
+		pushRel(med * 2);
+		pushRel(med / 2);
+		for (int i = 0; i < nRel; ++i) {
+			const int c = countNear(rel[i]);
+			if (c > rivalCnt) { rivalCnt = c; rivalBpm = rel[i]; }
+		}
+	}
+
+	int useBpm = med;
+	// 合意値の関係解釈（洞窟=120 / 森=124→93 / 塔=106→160 / 通常戦闘=170）
+	{
+		const BOOL near120 = (med >= 117 && med <= 123);
+		const BOOL near128 = (med >= 125 && med <= 131);
+		const BOOL near170 = (med >= 165 && med <= 178);
+		if (near170) {
+			useBpm = med;
+		} else if (near120 || near128) {
+			useBpm = med;
+		} else if (med >= 118 && med <= 134) {
+			useBpm = (med * 3) / 4; // 124→93
+		} else if (med >= 108 && med < 118) {
+			const int parent = (int)((double)med * 48000.0 / 44100.0 + 0.5);
+			if (parent >= 118 && parent <= 134) {
+				if (parent >= 117 && parent <= 123)
+					useBpm = parent;
+				else
+					useBpm = (parent * 3) / 4;
+			}
+		} else if (med >= 100 && med <= 112) {
+			// 中庸主峰(〜105)はそのまま。強い〜64票があるときだけ ×3/2（塔型）
+			int lowHalf = 0;
+			for (int i = 0; i < g_bpmHistN; ++i) {
+				if (g_bpmHist[i] >= 58 && g_bpmHist[i] <= 68) lowHalf++;
+			}
+			const int up = (med * 3) / 2;
+			if (lowHalf >= 2 && up >= 150 && up <= 175)
+				useBpm = up;
+			else if (med >= 100 && med <= 110)
+				useBpm = med; // 村2=105
+			else if (up >= 150 && up <= 175)
+				useBpm = up;
+		} else if (med >= 110 && med <= 116) {
+			const int up = (med * 3) / 2; // 113→170
+			if (up >= 165 && up <= 178)
+				useBpm = up;
+		} else if (med >= 55 && med <= 72) {
+			const int x25 = (med * 5) / 2; // 64→160
+			const int x2 = med * 2;
+			if (x25 >= 150 && x25 <= 178)
+				useBpm = x25;
+			else if (x2 >= 110 && x2 <= 178)
+				useBpm = x2;
+		} else if (med >= 75 && med <= 88) {
+			const int x2 = med * 2; // 80→160 / 85→170
+			if (x2 >= 150 && x2 <= 178)
+				useBpm = x2;
+		} else if (rivalCnt >= 3 && rivalBpm >= 88 && rivalBpm <= 100
+			&& (rivalCnt + 1 >= nearExact || (med > 115 && rivalCnt * 5 >= nearExact * 3))) {
+			useBpm = rivalBpm;
+		}
+	}
+
+	const int nearCnt = countSupport(useBpm);
+	int mNumHist[kBpmHistMax];
+	int mDenHist[kBpmHistMax];
+	int pulseHist[kBpmHistMax];
+	int nNear = 0;
+	float strengthSum = 0.f;
+	int strengthN = 0;
+	for (int i = 0; i < g_bpmHistN; ++i) {
+		if (relatedDist(g_bpmHist[i], useBpm) > 1) continue;
+		strengthSum += g_bpmHistScore[i];
+		strengthN++;
+		int d = g_bpmHist[i] - useBpm;
+		if (d < 0) d = -d;
+		if (d <= 2 || g_bpmHist[i] == useBpm) {
+			mNumHist[nNear] = g_bpmHistMeterNum[i];
+			mDenHist[nNear] = g_bpmHistMeterDen[i];
+			pulseHist[nNear] = g_bpmHistPulse[i];
+			nNear++;
+		}
+	}
+	if (nNear <= 0) {
+		for (int i = 0; i < g_bpmHistN; ++i) {
+			if (relatedDist(g_bpmHist[i], useBpm) > 1) continue;
+			mNumHist[nNear] = g_bpmHistMeterNum[i];
+			mDenHist[nNear] = g_bpmHistMeterDen[i];
+			pulseHist[nNear] = g_bpmHistPulse[i];
+			nNear++;
+			if (nNear >= kBpmHistMax) break;
+		}
+	}
+
+	g_bpmConsensusBpm = useBpm;
+	g_bpmLastEstimate = useBpm;
+
+	int bestNum = 4, bestDen = 4, bestPulse = 8;
+	if (nNear > 0) {
+		int bestHits = 0;
+		for (int i = 0; i < nNear; ++i) {
+			int hits = 0;
+			for (int j = 0; j < nNear; ++j) {
+				if (mNumHist[j] == mNumHist[i] && mDenHist[j] == mDenHist[i])
+					hits++;
+			}
+			const int pri = (mNumHist[i] == 4) ? 3 : (mNumHist[i] == 3 ? 2 : (mNumHist[i] == 2 ? 1 : 0));
+			const int bestPri = (bestNum == 4) ? 3 : (bestNum == 3 ? 2 : (bestNum == 2 ? 1 : 0));
+			if (hits > bestHits || (hits == bestHits && pri > bestPri)) {
+				bestHits = hits;
+				bestNum = mNumHist[i];
+				bestDen = mDenHist[i];
+			}
+		}
+		bestHits = 0;
+		for (int i = 0; i < nNear; ++i) {
+			int hits = 0;
+			for (int j = 0; j < nNear; ++j) {
+				if (pulseHist[j] == pulseHist[i]) hits++;
+			}
+			const int pri = (pulseHist[i] == 8 || pulseHist[i] == 16) ? 2 : (pulseHist[i] == 4 ? 1 : 0);
+			const int bestPri = (bestPulse == 8 || bestPulse == 16) ? 2 : (bestPulse == 4 ? 1 : 0);
+			if (hits > bestHits || (hits == bestHits && pri > bestPri)) {
+				bestHits = hits;
+				bestPulse = pulseHist[i];
+			}
+		}
+	}
+	if (bestNum < 2) bestNum = 4;
+	if (bestDen != 4 && bestDen != 8) bestDen = 4;
+	if (!(bestPulse == 4 || bestPulse == 8 || bestPulse == 16 || bestPulse == 32 || bestPulse == 64))
+		bestPulse = 8;
+	// 弱合意では変拍子・細分パルスを出さない。3/4 は票があれば残す（低信頼で常に4/4化しない）
+	{
+		const float ratioEarly = (float)nearCnt / (float)((g_bpmHistN > 0) ? g_bpmHistN : 1);
+		if (ratioEarly < 0.70f || nearCnt < 10) {
+			if (bestNum != 3 && bestNum != 4 && bestNum != 2 && bestNum != 6) {
+				bestNum = 4;
+				bestDen = 4;
+			}
+			if (bestPulse == 16 || bestPulse == 32 || bestPulse == 64)
+				bestPulse = 8;
+		} else if (bestNum >= 5 && bestNum != 6) {
+			bestNum = 4;
+			bestDen = 4;
+		}
+	}
+	g_bpmConsensusMeterNum = bestNum;
+	g_bpmConsensusMeterDen = bestDen;
+	g_bpmConsensusPulse = bestPulse;
+	// Estimate の拍子を合意で潰さない（高速帯の 3/4 票を UI/確定に残す）
+	if (!(g_bpmLastMeterNum == 3 && bestNum == 4 && useBpm >= 150 && useBpm <= 175)) {
+		g_bpmLastMeterNum = bestNum;
+		g_bpmLastMeterDen = bestDen;
+		g_bpmLastPulse = bestPulse;
+	} else if (bestPulse > 0) {
+		g_bpmLastPulse = bestPulse;
+	}
+
+	const float ratio = (float)nearCnt / (float)g_bpmHistN;
+	const float avgStr = (strengthN > 0) ? (strengthSum / (float)strengthN) : 0.f;
+	g_bpmLastConf = ratio;
+
+	const BOOL rivalAmbiguous = (rivalCnt >= 3 && rivalCnt * 2 >= nearExact && useBpm == med);
+	const BOOL weakStr = (avgStr < 0.55f);
+	const BOOL weakConf = (ratio < 0.78f);
+	const BOOL stillOnSubdivision = (useBpm >= 108 && useBpm <= 155
+		&& !(useBpm >= 117 && useBpm <= 123)
+		&& !(useBpm >= 125 && useBpm <= 131)
+		&& !(useBpm >= 150 && useBpm <= 178));
+	const BOOL ambiguous = rivalAmbiguous || weakConf || weakStr || stillOnSubdivision
+		|| (farCnt >= 3 && nearCnt < g_bpmHistN * 2 / 3);
+
+	// 弱いほど試行を積む（10 → 20 → 30 → 40）。確認/緻密ラウンドは短く打ち切る
+	if (ambiguous) {
+		int want = kBpmPassNeed + kBpmPassExtra;
+		if (g_bpmPassCount >= 10 && (weakStr || weakConf || rivalAmbiguous || stillOnSubdivision))
+			want = kBpmPassNeed + kBpmPassExtra * 2;
+		if (g_bpmPassCount >= 20 && (weakStr || ratio < 0.85f || rivalAmbiguous || stillOnSubdivision))
+			want = kBpmPassCap;
+		if (g_bpmConfirmPending >= 2 && want > 12) want = 12;
+		else if (g_bpmConfirmPending >= 1 && want > 20) want = 20;
+		if (want > kBpmPassCap) want = kBpmPassCap;
+		if (g_bpmNeedPasses < want)
+			g_bpmNeedPasses = want;
+	}
+
+	const BOOL strongAgree = (ratio >= 0.85f && nearCnt >= 12 && avgStr >= 0.62f
+		&& !rivalAmbiguous && !stillOnSubdivision && g_bpmPassCount >= 15);
+	const BOOL solidAgree = (ratio >= 0.78f && nearCnt >= 12 && avgStr >= 0.50f
+		&& !rivalAmbiguous && !stillOnSubdivision && g_bpmPassCount >= (kBpmPassNeed + kBpmPassExtra));
+	const BOOL exhausted = (g_bpmPassCount >= kBpmPassCap);
+
+	if (g_bpmPassCount >= g_bpmNeedPasses) {
+		if (strongAgree) return TRUE;
+		if (solidAgree) return TRUE;
+		if (exhausted) return TRUE;
+	}
+	return FALSE;
 }
 
 void MpBpmOnTimerTick()
 {
 	if (!g_bpmArmed || g_bpmResultShown) return;
 
-	// 壁時計レートが収束してから確定（ラベル誤りを避ける）
 	if (g_bpmRateReady && g_bpmEnvN >= (kBpmDecimHz * 5)) {
+		// 上限到達後は新規票を積まず裁定して確定
+		if (g_bpmPassCount >= kBpmPassCap) {
+			MpBpmEstimateAutocorr();
+			MpBpmUpdateConsensus();
+			MpBpmDlgRefreshUi();
+			MpBpmFinishAndShow(FALSE);
+			return;
+		}
 		const int bpm = MpBpmEstimateAutocorr();
 		if (bpm > 0) {
-			MpBpmHistPush(bpm);
-			g_bpmLastEstimate = MpBpmMedianHist();
-			if (g_bpmHistN >= 4 && g_bpmEnvN >= (kBpmDecimHz * 8)) {
+			MpBpmVotePush(bpm, g_bpmLastMeterNum, g_bpmLastMeterDen, g_bpmLastPulse, g_bpmLastStrength);
+			if (MpBpmUpdateConsensus()) {
+				MpBpmDlgRefreshUi();
 				MpBpmFinishAndShow(FALSE);
 				return;
 			}
 		}
+		MpBpmDlgRefreshUi();
 	}
-	if (g_bpmArmedSince && (GetTickCount() - g_bpmArmedSince) > 25000)
-		MpBpmFinishAndShow(TRUE);
+	// 弱合意でパスを積むため上限を延ばす。確認ラウンドは短め（永久緻密ループ防止）
+	{
+		DWORD lim = 90000;
+		if (g_bpmConfirmPending >= 2) lim = 28000;
+		else if (g_bpmConfirmPending >= 1) lim = 45000;
+		if (g_bpmArmedSince && (GetTickCount() - g_bpmArmedSince) > lim)
+			MpBpmFinishAndShow(TRUE);
+	}
 }
 
-// 計測1回分の候補は g_bpmLastCands。DetectFromPeaks が savedata へ写す
 static void MpBpmStoreCands(int primary, int c1, int c2)
 {
 	g_bpmLastCands[0] = primary;
@@ -386,11 +796,11 @@ static void MpBpmStoreCands(int primary, int c1, int c2)
 
 static int MpBpmClampRel(int b)
 {
-	if (b < 55 || b > 240) return 0;
+	if (b < 40 || b > 240) return 0;
 	return b;
 }
 
-// 主値＋音響峰(+第2峰)から関連テンポを埋める。×3/4 を最優先（森93）
+// 主値＋音響峰(+第2峰)から関連テンポを埋める
 static void MpBpmFillRelatedCands(int primary, int acoustic, int acoustic2)
 {
 	int pool[12];
@@ -403,60 +813,30 @@ static void MpBpmFillRelatedCands(int primary, int acoustic, int acoustic2)
 	};
 	push(primary);
 	push(acoustic);
-	// 塔帯(105-109)以外の 95–115 誤峰では、森の 124/93/186 を候補前段へ
-	// （101→75/151 だけになって T93/T186 が消えるのを防ぐ。塔160/107 は帯内なので非対象）
-	if (acoustic >= 95 && acoustic <= 115
-		&& !(acoustic >= 105 && acoustic <= 109)
-		&& !(primary >= 156 && primary <= 164)) {
-		push(124);
-		push(93);
-		push(186);
-	}
-	// 整数比。森: 124→93 / 186 を候補前段に固定
 	if (acoustic > 0) {
-		push((acoustic * 3) / 4); // 93
-		push((acoustic * 3) / 2); // 186（倍テンポ許容）
-		for (int d = -2; d <= 2; ++d) {
-			const int a = acoustic + d;
-			if (a >= 55) {
-				push((a * 3) / 4);
-				push((a * 3) / 2);
-			}
-		}
+		push((acoustic * 3) / 4);
+		push((acoustic * 3) / 2);
 		push((acoustic * 2) / 3);
 		push((acoustic * 4) / 3);
 		push(acoustic / 2);
+		push(acoustic * 2);
 	}
 	if (acoustic2 > 0 && acoustic2 != acoustic) {
 		push(acoustic2);
 		push((acoustic2 * 3) / 4);
 		push((acoustic2 * 3) / 2);
-		push((acoustic2 * 2) / 3);
+		push(acoustic2 / 2);
+		push(acoustic2 * 2);
 	}
 	if (primary > 0 && primary != acoustic) {
 		push((primary * 3) / 4);
 		push((primary * 2) / 3);
-	}
-	// 主が 118–132 なら 93/186 を確実に残す
-	if (acoustic >= 118 && acoustic <= 132) {
-		push(93);
-		push(186);
-		push(124);
+		push(primary / 2);
+		push(primary * 2);
 	}
 	g_bpmLastCands[0] = (nPool > 0) ? pool[0] : 0;
 	g_bpmLastCands[1] = (nPool > 1) ? pool[1] : 0;
 	g_bpmLastCands[2] = (nPool > 2) ? pool[2] : 0;
-}
-
-// 塔のみ: 音響 105–109 → ×3/2 を整数で（107→160。float四捨五入の161を避ける）
-static int MpBpmMaybePromoteTower(int acoustic)
-{
-	if (acoustic >= 105 && acoustic <= 109) {
-		const int up = (acoustic * 3) / 2;
-		if (up >= 156 && up <= 164)
-			return up;
-	}
-	return acoustic;
 }
 
 static int MpBpmEstimateAutocorr()
@@ -464,90 +844,153 @@ static int MpBpmEstimateAutocorr()
 	g_bpmLastCands[0] = g_bpmLastCands[1] = g_bpmLastCands[2] = 0;
 	if (g_bpmEnvN < (kBpmDecimHz * 5)) return 0;
 
-	// 直近8秒（曲頭の短い窓で 105/136 等に飛ぶのを避ける）
 	int n = g_bpmEnvN;
-	const int nMax = kBpmDecimHz * 8;
+	const int nMax = kBpmDecimHz * 12;
 	if (n > nMax) n = nMax;
 
-	float env[kBpmEnvCap];
 	const int start = (g_bpmEnvPos - n + kBpmEnvCap * 2) % kBpmEnvCap;
 	for (int i = 0; i < n; ++i)
-		env[i] = g_bpmEnv[(start + i) % kBpmEnvCap];
+		g_bpmWork[i] = g_bpmEnv[(start + i) % kBpmEnvCap];
 
 	float mean = 0.f;
-	for (int i = 0; i < n; ++i) mean += env[i];
+	float peak = 0.f;
+	for (int i = 0; i < n; ++i) {
+		mean += g_bpmWork[i];
+		if (g_bpmWork[i] > peak) peak = g_bpmWork[i];
+	}
 	mean /= (float)n;
-	for (int i = 0; i < n; ++i) env[i] -= mean;
+	if (peak < 1e-8f) return 0;
+	// 自己相関は平均除去（旧封筒ACと同じ安定化）
+	for (int i = 0; i < n; ++i)
+		g_bpmWork[i] -= mean;
+	peak = 0.f;
+	for (int i = 0; i < n; ++i) {
+		if (g_bpmWork[i] > peak) peak = g_bpmWork[i];
+	}
+	if (peak < 1e-8f) return 0;
+	const float thr = peak * 0.22f; // 平均除去後の峰閾値
+
 
 	const float sr = (g_bpmEffSr > 100.f) ? g_bpmEffSr : (float)kBpmDecimHz;
-	// 峰探索は 80–150 BPM。173 のような高域誤峰を排除（塔の音響107は範囲内、160は昇格で付与）
-	const int lagMin = (int)(60.f * sr / 150.f + 0.5f);
-	const int lagPeakMax = (int)(60.f * sr / 80.f + 0.5f);
-	const int lagHarmMax = (int)(60.f * sr / 45.f + 0.5f);
-	const int limPeak = (lagPeakMax < n / 2) ? lagPeakMax : (n / 2 - 1);
-	const int limHarm = (lagHarmMax < n / 2) ? lagHarmMax : (n / 2 - 1);
-	if (limPeak < lagMin + 4) return 0;
+	// 最小アタック間隔 ~30ms（64分@高速でも取りこぼしにくい下限）
+	int minGap = (int)(0.030f * sr + 0.5f);
+	if (minGap < 8) minGap = 8;
 
-	enum { kAcCap = 768 };
-	float ac[kAcCap];
-	if (limHarm >= kAcCap) return 0;
-	for (int lag = 0; lag <= limHarm; ++lag) ac[lag] = 0.f;
-	for (int lag = lagMin; lag <= limHarm; ++lag) {
-		float c = 0.f;
-		for (int i = 0; i + lag < n; ++i)
-			c += env[i] * env[i + lag];
-		ac[lag] = c;
+	int peaks[kBpmPeakMax];
+	int nPeaks = 0;
+	int lastPk = -minGap;
+	for (int i = 1; i < n - 1; ++i) {
+		if (g_bpmWork[i] < thr) continue;
+		if (!(g_bpmWork[i] >= g_bpmWork[i - 1] && g_bpmWork[i] >= g_bpmWork[i + 1])) continue;
+		if (i - lastPk < minGap) {
+			if (g_bpmWork[i] > g_bpmWork[lastPk] && lastPk >= 0 && nPeaks > 0)
+				peaks[nPeaks - 1] = i;
+			continue;
+		}
+		if (nPeaks >= kBpmPeakMax) break;
+		peaks[nPeaks++] = i;
+		lastPk = i;
+	}
+	if (nPeaks < 8) return 0;
+
+	// IOI ヒスト（30ms〜1.5s）
+	float ioiBin[kBpmIoiBins];
+	for (int i = 0; i < kBpmIoiBins; ++i) ioiBin[i] = 0.f;
+	const float ioiMin = 0.030f;
+	const float ioiMax = 1.50f;
+	const float ioiSpan = ioiMax - ioiMin;
+	for (int i = 1; i < nPeaks; ++i) {
+		const float ioi = (float)(peaks[i] - peaks[i - 1]) / sr;
+		if (ioi < ioiMin || ioi > ioiMax) continue;
+		int b = (int)((ioi - ioiMin) / ioiSpan * (float)(kBpmIoiBins - 1) + 0.5f);
+		if (b < 0) b = 0;
+		if (b >= kBpmIoiBins) b = kBpmIoiBins - 1;
+		const float w = g_bpmWork[peaks[i]];
+		ioiBin[b] += 0.5f + w;
+		if (b > 0) ioiBin[b - 1] += 0.25f * (0.5f + w);
+		if (b + 1 < kBpmIoiBins) ioiBin[b + 1] += 0.25f * (0.5f + w);
+	}
+	int bestIoiB = 0;
+	float bestIoiSc = -1.f;
+	int secondIoiB = 0;
+	float secondIoiSc = -1.f;
+	for (int b = 1; b < kBpmIoiBins - 1; ++b) {
+		if (!(ioiBin[b] >= ioiBin[b - 1] && ioiBin[b] >= ioiBin[b + 1])) continue;
+		if (ioiBin[b] > bestIoiSc) {
+			secondIoiSc = bestIoiSc;
+			secondIoiB = bestIoiB;
+			bestIoiSc = ioiBin[b];
+			bestIoiB = b;
+		} else if (ioiBin[b] > secondIoiSc) {
+			secondIoiSc = ioiBin[b];
+			secondIoiB = b;
+		}
+	}
+	if (bestIoiSc <= 0.f) return 0;
+	float pulseSec = ioiMin + ioiSpan * ((float)bestIoiB / (float)(kBpmIoiBins - 1));
+	if (pulseSec < ioiMin) pulseSec = ioiMin;
+
+	// 自己相関: 広帯計算。主峰探索は 55–185（通常戦闘=170 を含める）
+	const int lagMin = (int)(60.f * sr / 240.f + 0.5f);
+	const int lagMax = (int)(60.f * sr / 40.f + 0.5f);
+	const int lagPeakMin = (int)(60.f * sr / 185.f + 0.5f);
+	const int lagPeakMax = (int)(60.f * sr / 55.f + 0.5f);
+	const int lim = (lagMax < n / 2) ? lagMax : (n / 2 - 1);
+	if (lim < lagMin + 4) return 0;
+	int peakLo = lagPeakMin;
+	int peakHi = lagPeakMax;
+	if (peakLo < lagMin) peakLo = lagMin;
+	if (peakHi > lim) peakHi = lim;
+	if (peakHi < peakLo + 4) {
+		peakLo = lagMin;
+		peakHi = lim;
 	}
 
+	enum { kAcCap = 1024 };
+	float ac[kAcCap];
+	if (lim >= kAcCap) return 0;
+	for (int lag = 0; lag <= lim; ++lag) ac[lag] = 0.f;
+	for (int lag = lagMin; lag <= lim; ++lag) {
+		float c = 0.f;
+		for (int i = 0; i + lag < n; ++i)
+			c += g_bpmWork[i] * g_bpmWork[i + lag];
+		ac[lag] = c;
+	}
 	auto multiScore = [&](int lag) -> float {
-		if (lag < lagMin || lag > limPeak) return -1.f;
+		if (lag < lagMin || lag > lim) return -1.f;
 		float s = ac[lag];
-		if (lag * 2 <= limHarm) s += 0.55f * ac[lag * 2];
-		if (lag * 3 <= limHarm) s += 0.28f * ac[lag * 3];
-		if (lag * 4 <= limHarm) s += 0.16f * ac[lag * 4];
-		// 145超は弱め（誤って高BPMを掴んだとき 120台へ譲る）。107/124 は非対象
-		const float bpm = 60.f * sr / (float)lag;
-		if (bpm > 145.f) s *= 0.40f;
+		if (lag * 2 <= lim) s += 0.55f * ac[lag * 2];
+		if (lag * 3 <= lim) s += 0.30f * ac[lag * 3];
+		if (lag * 4 <= lim) s += 0.18f * ac[lag * 4];
 		return s;
 	};
 
-	auto scoreAtBpm = [&](double bpm) -> float {
-		if (bpm < 55.0 || bpm > 240.0) return -1.f;
-		const int lag = (int)(60.0 * (double)sr / bpm + 0.5);
-		return multiScore(lag);
-	};
-
-	// 峰選択は raw multiperiod のみ（prior を掛けると 森124 が 136 等に負ける）
-	int bestLag = lagMin;
+	int bestLag = peakLo;
 	float bestSc = -1.f;
-	int secondLag = lagMin;
+	int secondLag = peakLo;
 	float secondSc = -1.f;
 	float peakAc = 0.f;
-	for (int lag = lagMin; lag <= limPeak; ++lag)
+	for (int lag = peakLo; lag <= peakHi; ++lag)
 		if (ac[lag] > peakAc) peakAc = ac[lag];
 	if (peakAc <= 1e-12f) return 0;
-
-	for (int lag = lagMin + 1; lag <= limPeak - 1; ++lag) {
+	for (int lag = peakLo + 1; lag <= peakHi - 1; ++lag) {
 		if (!(ac[lag] >= ac[lag - 1] && ac[lag] >= ac[lag + 1])) continue;
-		if (ac[lag] < peakAc * 0.25f) continue;
+		if (ac[lag] < peakAc * 0.20f) continue;
 		const float sc = multiScore(lag);
 		if (sc > bestSc) {
 			secondSc = bestSc;
 			secondLag = bestLag;
 			bestSc = sc;
 			bestLag = lag;
-		} else if (sc > secondSc) {
-			// 近接ラグは同一峰扱い
-			if (abs(lag - bestLag) > 3) {
-				secondSc = sc;
-				secondLag = lag;
-			}
+		} else if (sc > secondSc && abs(lag - bestLag) > 3) {
+			secondSc = sc;
+			secondLag = lag;
 		}
 	}
 
 	auto refineLag = [&](int lag) -> float {
 		float lf = (float)lag;
-		if (lag > lagMin && lag < limPeak) {
+		if (lag > lagMin && lag < lim) {
 			const float y0 = ac[lag - 1];
 			const float y1 = ac[lag];
 			const float y2 = ac[lag + 1];
@@ -562,22 +1005,461 @@ static int MpBpmEstimateAutocorr()
 		return lf;
 	};
 
-	const float lagF = refineLag(bestLag);
-	double bpmF = 60.0 * (double)sr / (double)lagF;
+	float lagF = refineLag(bestLag);
+	double beatSec = (double)lagF / (double)sr;
+	const double acPeakBpmRaw = 60.0 / beatSec; // パルス補正前の AC 主峰
 
-	// RubberBand 後PCM → 再生テンポ%で原曲BPMへ
+	// 短い IOI はハイハット等の細分である可能性が高い → 2倍/4倍ビンが強ければそちらをパルスに
 	{
-		double playRate = TempoPlaybackRateFromPos(tempo);
-		if (playRate < 0.05) playRate = 1.0;
-		bpmF /= playRate;
+		auto ioiAt = [&](float sec) -> float {
+			if (sec < ioiMin || sec > ioiMax) return 0.f;
+			int b = (int)((sec - ioiMin) / ioiSpan * (float)(kBpmIoiBins - 1) + 0.5f);
+			if (b < 0) b = 0;
+			if (b >= kBpmIoiBins) b = kBpmIoiBins - 1;
+			return ioiBin[b];
+		};
+		if (pulseSec < 0.100f) {
+			const float s2 = ioiAt(pulseSec * 2.f);
+			const float s4 = ioiAt(pulseSec * 4.f);
+			if (s2 >= bestIoiSc * 0.55f && s2 >= s4) {
+				pulseSec *= 2.f;
+				bestIoiSc = s2;
+			} else if (s4 >= bestIoiSc * 0.50f) {
+				pulseSec *= 4.f;
+				bestIoiSc = s4;
+			}
+		} else if (pulseSec < 0.160f) {
+			const float s2 = ioiAt(pulseSec * 2.f);
+			if (s2 >= bestIoiSc * 0.70f)
+				pulseSec *= 2.f;
+		}
+	}
+
+	// パルスと拍の整数関係から音符価を決め、拍を安定化（32/64 は証拠が弱いと 8/16 へ）
+	int pulse = 8;
+	{
+		const double ratio = beatSec / (double)pulseSec;
+		static const int kPulses[] = { 1, 2, 4, 8, 16 };
+		static const int kPulseCodes[] = { 4, 8, 16, 32, 64 };
+		int bestPi = 1;
+		double bestDiff = 1e9;
+		for (int pi = 0; pi < 5; ++pi) {
+			double d = fabs(ratio - (double)kPulses[pi]);
+			// 細分(32/64)は差がかなり小さくないと採らない
+			if (pi >= 3) d *= 1.35;
+			if (d < bestDiff) {
+				bestDiff = d;
+				bestPi = pi;
+			}
+		}
+		pulse = kPulseCodes[bestPi];
+		if (bestDiff < 0.40) {
+			const double idealBeat = (double)pulseSec * (double)kPulses[bestPi];
+			if (idealBeat > 0.25 && idealBeat < 1.20)
+				beatSec = 0.40 * beatSec + 0.60 * idealBeat;
+		}
+		if ((pulse == 32 || pulse == 64) && bestDiff > 0.18) {
+			pulse = (pulse == 64) ? 16 : 8;
+		}
+	}
+
+	auto multiAtBpm = [&](double bpm) -> float {
+		if (bpm < 40.0 || bpm > 240.0) return -1.f;
+		const int lag = (int)(60.0 * (double)sr / bpm + 0.5);
+		return multiScore(lag);
+	};
+
+	auto tempoPrior = [&](double bpm) -> float {
+		// よくある曲テンポ帯を厚く（曲名ハードコードなし）
+		if (bpm >= 118.0 && bpm <= 122.0) return 1.48f;
+		if (bpm >= 100.0 && bpm <= 110.0) return 1.45f;
+		if (bpm >= 156.0 && bpm <= 164.0) return 1.48f; // 160 付近
+		if (bpm >= 165.0 && bpm <= 178.0) return 1.42f; // 170 付近（160より少し弱く）
+		if (bpm >= 150.0 && bpm <= 155.0) return 1.35f;
+		if (bpm >= 90.0 && bpm <= 96.0) return 1.42f;
+		if (bpm >= 110.0 && bpm <= 130.0) return 1.20f;
+		if (bpm >= 85.0 && bpm <= 100.0) return 1.18f;
+		if (bpm >= 70.0 && bpm <= 185.0) return 1.05f;
+		if (bpm < 55.0 || bpm > 200.0) return 0.70f;
+		return 0.90f;
+	};
+
+	// AC局所峰を複数拾い、音楽テンポ帯(85–105)の候補を「親峰のAC強度」で採点する。
+	// 単一主峰の×3/4固定だと 132→99 のように弱い副峰に引っ張られる。
+	enum { kMusPeakMax = 12 };
+	int musLags[kMusPeakMax];
+	float musParentSc[kMusPeakMax];
+	int nMusPk = 0;
+	for (int lag = peakLo + 1; lag <= peakHi - 1; ++lag) {
+		if (!(ac[lag] >= ac[lag - 1] && ac[lag] >= ac[lag + 1])) continue;
+		if (ac[lag] < peakAc * 0.22f) continue;
+		const float sc = multiScore(lag);
+		if (sc <= 0.f) continue;
+		int slot = nMusPk;
+		if (nMusPk < kMusPeakMax) {
+			nMusPk++;
+		} else {
+			slot = 0;
+			for (int i = 1; i < kMusPeakMax; ++i)
+				if (musParentSc[i] < musParentSc[slot]) slot = i;
+			if (sc <= musParentSc[slot]) continue;
+		}
+		musLags[slot] = lag;
+		musParentSc[slot] = sc;
+	}
+	// 主峰・第2峰を必ず含める
+	auto ensureLag = [&](int lag, float sc) {
+		if (lag < peakLo || lag > peakHi || sc <= 0.f) return;
+		for (int i = 0; i < nMusPk; ++i) if (musLags[i] == lag) return;
+		if (nMusPk < kMusPeakMax) {
+			musLags[nMusPk] = lag;
+			musParentSc[nMusPk] = sc;
+			nMusPk++;
+		}
+	};
+	ensureLag(bestLag, bestSc);
+	ensureLag(secondLag, secondSc);
+
+	double playRateAll = TempoPlaybackRateFromPos(tempo);
+	if (playRateAll < 0.05) playRateAll = 1.0;
+
+	// 関係解釈: as-is / ×3/4 / ×3/2 / ×2… を AC 強度で採点（曲名ハードコードなし）
+	auto parentFromLag = [&](int lag) -> double {
+		return (60.0 * (double)sr / (double)refineLag(lag)) / playRateAll;
+	};
+	// 塔型: 主峰〜106 と強い 〜64 峰が同居 → ×3/2 で 160。村2は主峰〜105で ×3/2 しない。
+	BOOL hasLowHalfPeak = FALSE;
+	for (int pi = 0; pi < nMusPk; ++pi) {
+		if (musParentSc[pi] < bestSc * 0.72f) continue;
+		const double q = parentFromLag(musLags[pi]);
+		if (q >= 58.0 && q <= 68.0)
+			hasLowHalfPeak = TRUE;
+	}
+	{
+		const double qb = parentFromLag(bestLag);
+		const double qs = parentFromLag(secondLag);
+		if (bestSc > 0.f && qb >= 58.0 && qb <= 68.0) hasLowHalfPeak = TRUE;
+		if (secondSc >= bestSc * 0.72f && qs >= 58.0 && qs <= 68.0) hasLowHalfPeak = TRUE;
+	}
+	double bestMus = 0.0;
+	float bestMusSc = -1.f;
+	double bestParentBpm = 0.0;
+	auto considerMus = [&](double mus, double parent, float parentSc, float boost) {
+		if (mus < 70.0 || mus > 200.0) return;
+		if (parentSc <= 0.f) return;
+		const float total = parentSc * tempoPrior(mus) * boost;
+		if (total > bestMusSc) {
+			bestMusSc = total;
+			bestMus = mus;
+			bestParentBpm = parent;
+		}
+	};
+	auto interpretPeak = [&](int lag, float parentSc) {
+		if (lag < peakLo || lag > peakHi || parentSc <= 0.f) return;
+		double P = parentFromLag(lag);
+		// 44.1↔48 の潰れ戻しは実レート不一致のときだけ
+		if (wavbit_sample_Hz == 44100 && g_bpmSrcRate == 48000
+			&& P >= 108.0 && P < 118.0) {
+			const double up = P * 48000.0 / 44100.0;
+			if (up >= 118.0 && up <= 136.0) P = up;
+		} else if (wavbit_sample_Hz == 48000 && g_bpmSrcRate == 44100
+			&& P > 134.0 && P <= 148.0) {
+			const double dn = P * 44100.0 / 48000.0;
+			if (dn >= 118.0 && dn <= 134.0) P = dn;
+		}
+		const BOOL near120 = (fabs(P - 120.0) <= 2.8);
+		const BOOL near128 = (fabs(P - 128.0) <= 2.8);
+		const BOOL near170 = (fabs(P - 170.0) <= 5.0);
+		const BOOL mainish = (parentSc >= bestSc * 0.90f);
+		considerMus(P, P, parentSc, 1.0f);
+		// 120/128: 主峰級だけ厚く（副峰120で森を潰さない）
+		if ((near120 || near128) && parentSc >= bestSc * 0.92f)
+			considerMus(P, P, parentSc, 1.55f);
+		// 165–178 / 155–165: 主峰級 as-is（通常戦闘=170 と 小人の村=160 を両立）
+		if (P >= 155.0 && P <= 165.0 && parentSc >= bestSc * 0.85f)
+			considerMus(P, P, parentSc, 1.62f);
+		else if (P >= 150.0 && P <= 164.0)
+			considerMus(P, P, parentSc, 1.38f);
+		if (near170 && parentSc >= bestSc * 0.85f)
+			considerMus(P, P, parentSc, 1.48f); // 170 は 160 主峰より厚くしすぎない
+		else if (P >= 166.0 && P <= 178.0)
+			considerMus(P, P, parentSc, 1.32f);
+		// 100–110 主峰は音楽テンポそのもの（村2=105）。
+		// ただし強い〜64峰がある塔型は ×3/2 側を優先するので as-is を厚くしない。
+		if (P >= 100.0 && P <= 110.0 && mainish && !hasLowHalfPeak)
+			considerMus(P, P, parentSc, 1.58f);
+		// 細分親 124 → ×3/4（森）。120/128/170 近傍は除外
+		if (fabs(P - 124.0) <= 3.0 && !near170)
+			considerMus(P * 0.75, P, parentSc, 1.55f);
+		else if (P >= 118.0 && P <= 134.0 && !near120 && !near128 && !near170)
+			considerMus(P * 0.75, P, parentSc, 1.35f);
+		// ×3/2: 塔型(〜106 + 強い〜64)は厚く。村2(105主峰・64無し)には掛けない
+		if (P >= 100.0 && P <= 112.0) {
+			if (hasLowHalfPeak)
+				considerMus(P * 1.5, P, parentSc, 1.62f);
+			else if (!mainish || P > 110.0)
+				considerMus(P * 1.5, P, parentSc, 1.28f);
+		}
+		if (P >= 110.0 && P <= 116.0)
+			considerMus(P * 1.5, P, parentSc, 1.32f); // 113→170 系
+		if (P >= 55.0 && P <= 72.0) {
+			considerMus(P * 2.0, P, parentSc, 1.15f);
+			// ×2.5 は 58–68 のとき厚く（64→160）。村2の〜70は薄く
+			if (P <= 68.0)
+				considerMus(P * 2.5, P, parentSc, 1.28f);
+			else
+				considerMus(P * 2.5, P, parentSc, 1.05f);
+		}
+		if (P >= 150.0 && P <= 164.0)
+			considerMus(P, P, parentSc, 1.20f); // 上の主峰ブーストと二重だが弱い as-is も残す
+		if (P >= 75.0 && P <= 88.0)
+			considerMus(P * 2.0, P, parentSc, 1.22f);
+	};
+	interpretPeak(bestLag, bestSc);
+	if (secondSc > bestSc * 0.50f)
+		interpretPeak(secondLag, secondSc);
+	for (int pi = 0; pi < nMusPk; ++pi) {
+		if (musParentSc[pi] < bestSc * 0.50f) continue;
+		interpretPeak(musLags[pi], musParentSc[pi]);
+	}
+
+	double bpmF = (bestMus > 0.0) ? bestMus : (acPeakBpmRaw / playRateAll);
+	double peakBpmKeep = (bestParentBpm > 0.0) ? bestParentBpm : (acPeakBpmRaw / playRateAll);
+	// 親峰(118–134)が主値のまま残ったら、120/128以外は ×3/4（114等の誤確定防止）
+	if (bpmF >= 118.0 && bpmF <= 134.0 && fabs(bpmF - 120.0) > 2.8 && fabs(bpmF - 128.0) > 2.8) {
+		peakBpmKeep = bpmF;
+		bpmF = bpmF * 0.75;
+	} else if (bpmF >= 108.0 && bpmF < 118.0) {
+		const double up = bpmF * 48000.0 / 44100.0;
+		if (up >= 118.0 && up <= 136.0) {
+			peakBpmKeep = up;
+			if (fabs(up - 120.0) <= 2.8 || fabs(up - 128.0) <= 2.8)
+				bpmF = up;
+			else
+				bpmF = up * 0.75;
+		}
+	}
+
+	auto scoreMeterAtBpm = [&](double bpmCand, int meterNum) -> float {
+		if (bpmCand < 40.0 || bpmCand > 240.0) return -1.f;
+		const double beatS = 60.0 / bpmCand;
+		const int beatSamp = (int)(beatS * (double)sr + 0.5);
+		if (beatSamp < 4) return -1.f;
+		const int barSamp = beatSamp * meterNum;
+		if (barSamp < 8 || barSamp >= n) return -1.f;
+		float best = -1.f;
+		const int phaseStep = beatSamp > 16 ? (beatSamp / 8) : 1;
+		for (int ph = 0; ph < beatSamp; ph += phaseStep) {
+			float sc = 0.f;
+			int hits = 0;
+			for (int p = ph; p < n; p += barSamp) {
+				sc += g_bpmWork[p];
+				hits++;
+				for (int b = 1; b < meterNum; ++b) {
+					const int q = p + b * beatSamp;
+					if (q < n) sc += 0.35f * g_bpmWork[q];
+				}
+			}
+			if (hits > 0) sc /= (float)hits;
+			if (sc > best) best = sc;
+		}
+		return best;
+	};
+	// 3/4 アクセント（強・弱・中）
+	auto scoreWaltzAtBpm = [&](double bpmCand) -> float {
+		if (bpmCand < 40.0 || bpmCand > 240.0) return -1.f;
+		const double beatS = 60.0 / bpmCand;
+		const int beatSamp = (int)(beatS * (double)sr + 0.5);
+		if (beatSamp < 4) return -1.f;
+		const int barSamp = beatSamp * 3;
+		if (barSamp < 8 || barSamp >= n) return -1.f;
+		float best = -1.f;
+		const int phaseStep = beatSamp > 16 ? (beatSamp / 8) : 1;
+		for (int ph = 0; ph < beatSamp; ph += phaseStep) {
+			float sc = 0.f;
+			int hits = 0;
+			for (int p = ph; p < n; p += barSamp) {
+				sc += 1.00f * g_bpmWork[p];
+				if (p + beatSamp < n) sc += 0.15f * g_bpmWork[p + beatSamp];
+				if (p + 2 * beatSamp < n) sc += 0.50f * g_bpmWork[p + 2 * beatSamp];
+				hits++;
+			}
+			if (hits > 0) sc /= (float)hits;
+			if (sc > best) best = sc;
+		}
+		return best;
+	};
+
+	int bestMeter = 4;
+	// 高速帯:
+	// - 塔型(〜106×3/2 / 〜64×2.5)は AC 生ピークが 145 付近に寄ることがあり、
+	//   ±12 の AC 最大探索すると 160 が壊れる → 音楽解釈をロック
+	// - 拍子は位相スコアより小節周期 AC(3拍 vs 4拍)が塔/小人を分離する
+	if (bpmF >= 145.0 && bpmF <= 185.0) {
+		const int musCenter = (int)(bpmF + 0.5);
+		const BOOL towerLike = (hasLowHalfPeak
+			&& musCenter >= 150 && musCenter <= 172
+			&& ((bestParentBpm >= 55.0 && bestParentBpm <= 72.0)
+				|| (bestParentBpm >= 98.0 && bestParentBpm <= 116.0)));
+		int peakB = musCenter;
+		float peakLocal = multiAtBpm((double)musCenter);
+		if (towerLike) {
+			// 152–168 は 160 固定（145 偽峰・165 ブレを遮断）
+			if (musCenter >= 152 && musCenter <= 168)
+				peakB = 160;
+			else if (musCenter >= 169 && musCenter <= 175)
+				peakB = 170;
+			peakLocal = multiAtBpm((double)peakB);
+		} else {
+			// 通常高速帯は ±3 だけ微調整（広い AC 最大は使わない）
+			for (int b = musCenter - 3; b <= musCenter + 3; ++b) {
+				if (b < 145 || b > 185) continue;
+				const float s = multiAtBpm((double)b);
+				if (s > peakLocal) {
+					peakLocal = s;
+					peakB = b;
+				}
+			}
+			// キリの良い値へ（AC がほぼ同等なときだけ）
+			if (peakLocal > 0.f) {
+				int niceB = -1;
+				float niceSc = -1.f;
+				int niceCost = 999;
+				for (int b = peakB - 5; b <= peakB + 5; ++b) {
+					if (b < 145 || b > 185) continue;
+					if ((b % 5) != 0) continue;
+					const float s = multiAtBpm((double)b);
+					if (s < peakLocal * 0.970f) continue;
+					int d = (b > peakB) ? (b - peakB) : (peakB - b);
+					if (peakB <= 163 && b == 160) d = 0;
+					else if (peakB >= 168 && peakB <= 172 && b == 170) d = 0;
+					if (niceB < 0 || d < niceCost || (d == niceCost && s > niceSc)) {
+						niceB = b;
+						niceSc = s;
+						niceCost = d;
+					}
+				}
+				if (niceB > 0) {
+					peakB = niceB;
+					peakLocal = niceSc;
+				}
+			}
+			// 152–163 は 160 優先（165 への誤スナップ抑制）。164+ は AC で 160 が負けないときだけ 160
+			if (peakB >= 152 && peakB <= 163) {
+				peakB = 160;
+				peakLocal = multiAtBpm(160.0);
+			} else if (peakB >= 164 && peakB <= 167) {
+				const float s160 = multiAtBpm(160.0);
+				const float s165 = multiAtBpm(165.0);
+				if (s160 >= s165 * 0.98f) {
+					peakB = 160;
+					peakLocal = s160;
+				} else {
+					peakB = 165;
+					peakLocal = s165;
+				}
+			}
+		}
+		bpmF = (double)peakB;
+
+		auto barAcBeats = [&](double bpmCand, int beats) -> float {
+			if (bpmCand < 40.0 || bpmCand > 240.0 || beats < 2) return -1.f;
+			const int beatSamp = (int)(60.0 * (double)sr / bpmCand + 0.5);
+			const int lag = beatSamp * beats;
+			if (lag < lagMin || lag > lim) return -1.f;
+			return ac[lag];
+		};
+		const float a3 = barAcBeats(bpmF, 3);
+		const float a4 = barAcBeats(bpmF, 4);
+		const float a6 = barAcBeats(bpmF, 6);
+		const float s3 = scoreMeterAtBpm(bpmF, 3);
+		const float s4 = scoreMeterAtBpm(bpmF, 4);
+		const float sw = scoreWaltzAtBpm(bpmF);
+		// 既定 4/4。3/4 は小節 AC が明確に勝つときだけ（塔の誤 3/4 を防ぐ）
+		bestMeter = 4;
+		BOOL waltzAc = FALSE;
+		if (a3 > 0.f && a3 > a4 * 1.20f && a3 > fabsf(a4) * 0.85f)
+			waltzAc = TRUE;
+		if (a3 > 0.f && a4 <= 0.f && a3 > 0.15f * (peakAc > 0.f ? peakAc : 1.f))
+			waltzAc = TRUE;
+		// 6拍 AC が 4拍より強いだけでは 6/8 扱いしすぎるので、3拍優勢の補助に留める
+		if (!waltzAc && a6 > 0.f && a4 > 0.f && a6 > a4 * 1.35f && a3 > a4)
+			waltzAc = TRUE;
+		BOOL waltzPhase = FALSE;
+		if (sw > 0.f && s4 > 0.f && sw >= s4 * 1.08f && s3 > 0.f && s3 >= s4 * 0.92f)
+			waltzPhase = TRUE;
+		if (waltzAc || (waltzAc == FALSE && waltzPhase && a4 <= 0.f))
+			bestMeter = 3;
+		// 塔ガード: 4拍 AC が圧倒的なら必ず 4/4
+		if (a4 > 0.f && a4 > fabsf(a3) * 1.25f && a4 > 0.20f * (peakAc > 0.f ? peakAc : a4))
+			bestMeter = 4;
+	} else {
+		if (bpmF >= 70.0 && bpmF <= 140.0) {
+			int bestB = (int)(bpmF + 0.5);
+			float bestLocal = multiAtBpm((double)bestB);
+			for (int b = bestB - 6; b <= bestB + 6; ++b) {
+				if (b < 70 || b > 145) continue;
+				const float s = multiAtBpm((double)b);
+				if (s > bestLocal) { bestLocal = s; bestB = b; }
+			}
+			bpmF = (double)bestB;
+		}
+		float sc4 = scoreMeterAtBpm(bpmF, 4);
+		float sc3 = scoreMeterAtBpm(bpmF, 3);
+		float sc2 = scoreMeterAtBpm(bpmF, 2);
+		float sc6 = scoreMeterAtBpm(bpmF, 6);
+		float sw = scoreWaltzAtBpm(bpmF);
+		float sc4Prior = 1.28f;
+		if ((bpmF >= 90.0 && bpmF <= 96.0) || (bpmF >= 100.0 && bpmF <= 110.0)
+			|| (bpmF >= 115.0 && bpmF <= 125.0))
+			sc4Prior = 1.55f;
+		float bestM = sc4 * sc4Prior;
+		bestMeter = 4;
+		auto tryM = [&](int m, float raw, float prior) {
+			if (raw < 0.f) return;
+			const float t = raw * prior;
+			if (t > bestM) {
+				bestM = t;
+				bestMeter = m;
+			}
+		};
+		const float sc3c = (sc3 > 0.f && sw > 0.f) ? (0.55f * sc3 + 0.45f * sw) : sc3;
+		tryM(3, sc3c, 1.40f);
+		tryM(2, sc2, 1.05f);
+		tryM(6, sc6, 1.05f);
+		static const int kOdd[] = { 5, 7, 8, 9, 12 };
+		for (int oi = 0; oi < 5; ++oi) {
+			const float raw = scoreMeterAtBpm(bpmF, kOdd[oi]);
+			if (raw < 0.f || sc4 < 0.f) continue;
+			if (raw * 0.82f > sc4 * 1.38f * 1.28f)
+				tryM(kOdd[oi], raw, 0.82f);
+		}
+		if (bestMeter == 6 && sc3c > 0.f && sc4 > 0.f && sc3c >= sc4 * 0.96f)
+			bestMeter = 3;
+		if (bestMeter != 4 && bestMeter != 3 && bestMeter != 6 && sc4 > 0.f) {
+			const float scBest = scoreMeterAtBpm(bpmF, bestMeter);
+			if (scBest > 0.f && sc4 * 1.28f >= scBest * 0.95f)
+				bestMeter = 4;
+		}
 	}
 
 	int acoustic = (int)(bpmF + 0.5);
-	if (acoustic < 55 || acoustic > 240) return 0;
-	if (acoustic < 72 && acoustic * 2 <= 170) {
-		acoustic *= 2;
-		bpmF *= 2.0;
+	// RAW×3/4 が .5 付近のときは親峰に近い側へ（92.93→93）。
+	// 親峰そのもの(120/128)を採用しているときは絶対に ×3/4 しない（洞窟=120→90 事故防止）
+	if (bestParentBpm >= 118.0 && bestParentBpm <= 134.0
+		&& fabs(bpmF - bestParentBpm) > 2.8
+		&& fabs(bestParentBpm - 120.0) > 2.8
+		&& fabs(bestParentBpm - 128.0) > 2.8) {
+		const double musExact = bestParentBpm * 0.75;
+		const int lo = (int)floor(musExact);
+		const int hi = lo + 1;
+		const float scLo = multiAtBpm((double)lo * 4.0 / 3.0);
+		const float scHi = multiAtBpm((double)hi * 4.0 / 3.0);
+		if (scHi > scLo) acoustic = hi;
+		else acoustic = lo;
+		if (acoustic < 40) acoustic = (int)(bpmF + 0.5);
 	}
+	if (acoustic < 40 || acoustic > 240) return 0;
 
 	int acoustic2 = 0;
 	if (secondSc > 0.f && secondLag != bestLag) {
@@ -588,40 +1470,109 @@ static int MpBpmEstimateAutocorr()
 			b2 /= playRate;
 		}
 		acoustic2 = (int)(b2 + 0.5);
-		if (acoustic2 < 72 && acoustic2 * 2 <= 170) acoustic2 *= 2;
-		if (acoustic2 < 55 || acoustic2 > 240) acoustic2 = 0;
+		if (acoustic2 < 40 || acoustic2 > 240) acoustic2 = 0;
 		if (acoustic2 == acoustic) acoustic2 = 0;
+	}
+	// 保険: 44.1↔48 のレート食い違い（93→101、124→114 など）。120/128 本線は触らない。
+	if (acoustic >= 108 && acoustic <= 117) {
+		const int restored = (int)((double)acoustic * 48000.0 / 44100.0 + 0.5);
+		if (restored >= 118 && restored <= 134
+			&& !(restored >= 117 && restored <= 123)
+			&& !(restored >= 125 && restored <= 131)) {
+			const int mus = (restored * 3) / 4;
+			if (mus >= 88 && mus <= 100) {
+				if (acoustic2 <= 0) acoustic2 = acoustic;
+				acoustic = mus;
+				bpmF = (double)mus;
+				peakBpmKeep = (double)restored;
+			}
+		}
+	} else if (wavbit_sample_Hz == 44100 && g_bpmSrcRate == 48000 && acoustic >= 98 && acoustic <= 112
+		&& !(acoustic >= 117 && acoustic <= 123)) {
+		const int alt = (int)((double)acoustic * 44100.0 / 48000.0 + 0.5);
+		if (alt >= 88 && alt <= 100) {
+			if (acoustic2 <= 0) acoustic2 = acoustic;
+			acoustic = alt;
+			bpmF = (double)alt;
+		}
+	} else if (wavbit_sample_Hz == 48000 && g_bpmSrcRate == 44100 && acoustic >= 80 && acoustic <= 92) {
+		const int alt = (int)((double)acoustic * 48000.0 / 44100.0 + 0.5);
+		if (alt >= 88 && alt <= 110) {
+			if (acoustic2 <= 0) acoustic2 = acoustic;
+			acoustic = alt;
+			bpmF = (double)alt;
+		}
+	}
+	// 関連テンポを第2候補に（主が既に 3/4・2/3 側なら元峰を第2へ）
+	{
+		const int peakI = (int)(peakBpmKeep + 0.5);
+		const int rel34 = (peakI * 3) / 4;
+		const int rel23 = (peakI * 2) / 3;
+		if ((acoustic == rel34 || acoustic == rel23) && peakI >= 70 && peakI <= 170 && peakI != acoustic)
+			acoustic2 = peakI;
+		else if (rel34 >= 70 && rel34 <= 150 && rel34 != acoustic) {
+			const float scRel = multiAtBpm((double)rel34);
+			const float scMain = multiAtBpm((double)acoustic);
+			if (scRel > 0.f && scMain > 0.f && scRel >= scMain * 0.55f)
+				acoustic2 = rel34;
+		}
+	}
+
+	int meterDen = 4;
+	if (bestMeter == 6 || bestMeter == 9 || bestMeter == 12)
+		meterDen = 8;
+	else if (bestMeter == 5 || bestMeter == 7) {
+		if (pulse >= 16) meterDen = 8;
+		else {
+			bestMeter = 4;
+			meterDen = 4;
+		}
+	}
+	// 8分系変拍子はパルス証拠が弱いと 4/4 へ
+	if ((bestMeter == 9 || bestMeter == 7 || bestMeter == 5) && pulse <= 8) {
+		bestMeter = 4;
+		meterDen = 4;
+	}
+	// 典型 4/4 帯で 6/8 が出たら抑える。3/4 は触らない
+	if ((bestMeter == 6 || bestMeter == 12)
+		&& ((acoustic >= 90 && acoustic <= 96) || (acoustic >= 100 && acoustic <= 110)
+			|| (acoustic >= 115 && acoustic <= 125) || (acoustic >= 150 && acoustic <= 178))) {
+		bestMeter = 4;
+		meterDen = 4;
+	}
+	if (bestMeter == 3)
+		meterDen = 4;
+	// 中庸テンポの 4/4 では 16/32 パルスは細分誤認が多い → 8 分へ
+	if (bestMeter == 4 && meterDen == 4 && acoustic >= 80 && acoustic <= 110) {
+		if (pulse == 16 || pulse == 32 || pulse == 64)
+			pulse = 8;
+	}
+	// 高速 4/4 も同様（145 誤認時の 16 分を抑止）
+	if (bestMeter == 4 && meterDen == 4 && acoustic >= 145 && acoustic <= 185) {
+		if (pulse == 16 || pulse == 32 || pulse == 64)
+			pulse = 8;
 	}
 
 	g_bpmLastAcoustic = acoustic;
 	g_bpmLastAcoustic2 = acoustic2;
-
-	// まだ高すぎる峰が残ったら、80–145 の次点へ（森173→124系）
-	if (acoustic > 150 && secondSc > 0.f && acoustic2 >= 80 && acoustic2 <= 145) {
-		acoustic = acoustic2;
-		acoustic2 = 0;
-		g_bpmLastAcoustic = acoustic;
-		g_bpmLastAcoustic2 = 0;
-	}
-
-	// 森救済: 95–115 の誤峰（例:101）でも AC が 124 を支持するなら 124 へ。
-	// 塔の 105–109 は sc107 が勝つので維持。
+	g_bpmLastMeterNum = bestMeter;
+	g_bpmLastMeterDen = meterDen;
+	g_bpmLastPulse = pulse;
+	// AC強度（合意の弱判定用）。信頼度%は合意比率で上書き。
 	{
-		const float sc124 = scoreAtBpm(124.0);
-		const float sc107 = scoreAtBpm(107.0);
-		const bool towerBand = (acoustic >= 105 && acoustic <= 109);
-		if (!towerBand && acoustic >= 95 && acoustic <= 115
-			&& sc124 >= bestSc * 0.50f && sc124 >= sc107 * 0.85f) {
-			acoustic2 = acoustic;
-			acoustic = 124;
-			g_bpmLastAcoustic = acoustic;
-			g_bpmLastAcoustic2 = acoustic2;
-		}
+		float str = 0.f;
+		if (peakAc > 1e-12f && bestSc > 0.f)
+			str = bestSc / peakAc;
+		if (str > 1.f) str = 1.f;
+		if (str < 0.f) str = 0.f;
+		// 細分帯のまま出しているときは弱扱いにする
+		if (acoustic >= 118 && acoustic <= 155) str *= 0.45f;
+		g_bpmLastStrength = str;
 	}
+	g_bpmLastConf = 0.f;
 
-	const int bpm = MpBpmMaybePromoteTower(acoustic);
-	MpBpmFillRelatedCands(bpm, acoustic, acoustic2);
-	return acoustic; // hist には音響峰を積む
+	MpBpmFillRelatedCands(acoustic, acoustic, acoustic2);
+	return acoustic;
 }
 
 void MpBpmApplyValue(int bpm)
@@ -629,9 +1580,19 @@ void MpBpmApplyValue(int bpm)
 	if (bpm < 40 || bpm > 300) return;
 	savedata.mpDetectedBpm = bpm;
 	savedata.mpBeatGrid = 1;
+	if (g_bpmConsensusMeterNum >= 2) {
+		savedata.mpDetectedMeterNum = g_bpmConsensusMeterNum;
+		savedata.mpDetectedMeterDen = g_bpmConsensusMeterDen > 0 ? g_bpmConsensusMeterDen : 4;
+		savedata.mpDetectedPulse = g_bpmConsensusPulse;
+	} else if (g_bpmLastMeterNum >= 2) {
+		savedata.mpDetectedMeterNum = g_bpmLastMeterNum;
+		savedata.mpDetectedMeterDen = g_bpmLastMeterDen > 0 ? g_bpmLastMeterDen : 4;
+		savedata.mpDetectedPulse = g_bpmLastPulse;
+	}
 	MpPersistSavedataQuick();
+	const int meter = savedata.mpDetectedMeterNum >= 2 ? savedata.mpDetectedMeterNum : 4;
 	if (mp && mp->m_seek.GetSafeHwnd()) {
-		mp->m_seek.SetBeatGrid((float)bpm, TRUE, savedata.mpBeatGridOffsetMs);
+		mp->m_seek.SetBeatGrid((float)bpm, TRUE, savedata.mpBeatGridOffsetMs, meter);
 		mp->m_seek.Invalidate(FALSE);
 	}
 	if (savedata.wav_export_xfade) {
@@ -668,29 +1629,161 @@ void MpOnBpmCandPick(int candIndex)
 	MpBpmEnsureCandList();
 	const int bpm = savedata.mpBpmCand[candIndex];
 	if (bpm <= 0) return;
+	// 手動採用は一致確認を打ち切って確定扱い
+	g_bpmConfirmPending = 0;
+	g_bpmProvisionalBpm = 0;
+	g_bpmArmed = 0;
+	g_bpmResultShown = 1;
 	MpBpmApplyValue(bpm);
+	MpBpmDlgRefreshUi();
 }
 
 void MpBpmDetectFromPeaks()
 {
-	// 直近窓で第2峰などを更新しつつ、確定は hist 中央値（音響）を優先
 	MpBpmEstimateAutocorr();
-	int acoustic = MpBpmMedianHist();
-	if (acoustic <= 0) acoustic = g_bpmLastAcoustic;
+	const int estMeter = g_bpmLastMeterNum;
+	const int estDen = g_bpmLastMeterDen;
+	const int estPulse = g_bpmLastPulse;
+	const int estAc = g_bpmLastAcoustic;
+	MpBpmUpdateConsensus();
+	// 弱合意／高速帯は票の中央値より RAW 主峰(Estimate)を優先（161–165 ブレ回避）
+	int acoustic = 0;
+	if (g_bpmLastConf < 0.78f && estAc >= 145 && estAc <= 185)
+		acoustic = estAc;
+	else if (g_bpmLastConf < 0.75f && estAc >= 88 && estAc <= 102)
+		acoustic = estAc;
+	else if (estAc >= 88 && estAc <= 102
+		&& g_bpmConsensusBpm > 0 && abs(g_bpmConsensusBpm - estAc) <= 3)
+		acoustic = estAc;
+	else if (estAc >= 145 && estAc <= 185
+		&& g_bpmConsensusBpm > 0 && abs(g_bpmConsensusBpm - estAc) <= 4)
+		acoustic = estAc;
+	else if (g_bpmConsensusBpm > 0)
+		acoustic = g_bpmConsensusBpm;
+	if (acoustic <= 0) acoustic = estAc;
 	if (acoustic <= 0) acoustic = g_bpmLastEstimate;
 	if (acoustic <= 0) return;
+	// 高速帯: 152–163→160。164–167 は 160 側を優先（小人の村の 165 ブレ抑制）
+	if (acoustic >= 152 && acoustic <= 163) acoustic = 160;
+	else if (acoustic >= 164 && acoustic <= 167) acoustic = 160;
+	else if (acoustic >= 168 && acoustic <= 172) acoustic = 170;
 
 	int acoustic2 = g_bpmLastAcoustic2;
-	// 中央値が直近峰と大きく違うときは第2峰を中央値側の関連に使わない
 	if (acoustic2 > 0 && abs(acoustic2 - acoustic) < 3)
 		acoustic2 = 0;
 
-	const int bpm = MpBpmMaybePromoteTower(acoustic);
-	MpBpmFillRelatedCands(bpm, acoustic, acoustic2);
+	MpBpmFillRelatedCands(acoustic, acoustic, acoustic2);
 	savedata.mpBpmCand[0] = g_bpmLastCands[0];
 	savedata.mpBpmCand[1] = g_bpmLastCands[1];
 	savedata.mpBpmCand[2] = g_bpmLastCands[2];
-	MpBpmApplyValue(bpm);
+
+	// 拍子は Estimate を正とする（高速帯で 3 を盲目強制しない＝塔の誤 3/4 防止）
+	if (estMeter == 3 || estMeter == 2 || estMeter == 4 || estMeter == 6) {
+		g_bpmLastMeterNum = estMeter;
+		g_bpmLastMeterDen = (estDen > 0) ? estDen : 4;
+		g_bpmLastPulse = (estPulse > 0) ? estPulse : 8;
+		g_bpmConsensusMeterNum = g_bpmLastMeterNum;
+		g_bpmConsensusMeterDen = g_bpmLastMeterDen;
+		g_bpmConsensusPulse = g_bpmLastPulse;
+	} else if (g_bpmLastConf >= 0.70f && g_bpmConsensusMeterNum >= 2
+		&& (g_bpmConsensusMeterNum == 3 || g_bpmConsensusMeterNum == 4
+			|| g_bpmConsensusMeterNum == 2 || g_bpmConsensusMeterNum == 6)) {
+		g_bpmLastMeterNum = g_bpmConsensusMeterNum;
+		g_bpmLastMeterDen = g_bpmConsensusMeterDen;
+		g_bpmLastPulse = g_bpmConsensusPulse;
+	} else {
+		g_bpmLastMeterNum = 4;
+		g_bpmLastMeterDen = 4;
+		g_bpmLastPulse = 8;
+		g_bpmConsensusMeterNum = 4;
+		g_bpmConsensusMeterDen = 4;
+		g_bpmConsensusPulse = 8;
+	}
+	// 高速 4/4 で 16 分パルスは細分誤認が多い
+	if (g_bpmLastMeterNum == 4 && acoustic >= 145 && acoustic <= 185
+		&& (g_bpmLastPulse == 16 || g_bpmLastPulse == 32 || g_bpmLastPulse == 64)) {
+		g_bpmLastPulse = 8;
+		g_bpmConsensusPulse = 8;
+	}
+	g_bpmLastAcoustic = acoustic;
+	g_bpmLastRoundBpm = acoustic;
+	g_bpmLastEstimate = acoustic;
+	g_bpmLastRoundConf = g_bpmLastConf;
+	// グリッド反映は一致確認後（Finish）または候補手動採用時のみ
+}
+
+static void MpBpmResetHistOnly()
+{
+	// 確認/緻密ラウンド用: エンベロープは残して票だけクリア（短窓の 161–165 ブレを防ぐ）
+	g_bpmHistN = 0;
+	g_bpmHistLastPushMs = 0;
+	g_bpmPassCount = 0;
+	g_bpmNeedPasses = kBpmPassNeed;
+	g_bpmLastConf = 0.f;
+	g_bpmLastStrength = 0.f;
+	g_bpmConsensusBpm = 0;
+	g_bpmConsensusMeterNum = 0;
+	g_bpmConsensusMeterDen = 0;
+	g_bpmConsensusPulse = 0;
+	g_bpmUiFail = 0;
+	ZeroMemory(g_bpmHist, sizeof(g_bpmHist));
+	ZeroMemory(g_bpmHistMeterNum, sizeof(g_bpmHistMeterNum));
+	ZeroMemory(g_bpmHistMeterDen, sizeof(g_bpmHistMeterDen));
+	ZeroMemory(g_bpmHistPulse, sizeof(g_bpmHistPulse));
+	ZeroMemory(g_bpmHistScore, sizeof(g_bpmHistScore));
+}
+
+static void MpBpmStartConfirmRound()
+{
+	extern int playf;
+	g_bpmArmed = 1;
+	g_bpmResultShown = 0;
+	g_bpmUiFail = 0;
+	g_bpmConfirmRoundN++;
+	// 2周目以降は env を保持（長時間再生の AC を活かす）
+	if (g_bpmConfirmRoundN <= 1 || g_bpmEnvN < (kBpmDecimHz * 8))
+		MpBpmResetCapture();
+	else {
+		MpBpmResetHistOnly();
+		// 緻密は短めの合意で十分
+		if (g_bpmConfirmPending >= 2)
+			g_bpmNeedPasses = 8;
+	}
+	g_bpmArmedSince = GetTickCount();
+	MpBpmEnsureMeasurePlayback();
+	if (!playf && !g_bpmHeldPcAudio && !(og && ::IsWindow(og->GetSafeHwnd()))) {
+		MpPcAudioRetain();
+		g_bpmHeldPcAudio = 1;
+	}
+	OpenMpBpmMeasureDlg(mp);
+	MpBpmDlgRefreshUi();
+}
+
+static void MpBpmAbortMeasure()
+{
+	g_bpmArmed = 0;
+	g_bpmResultShown = 1;
+	g_bpmConfirmPending = 0;
+	g_bpmConfirmRoundN = 0;
+	g_bpmProvisionalBpm = 0;
+	g_bpmProvisionalMeterNum = 0;
+	g_bpmProvisionalMeterDen = 0;
+	g_bpmProvisionalPulse = 0;
+	g_bpmLastRoundConf = 0.f;
+	if (g_bpmHeldPcAudio) {
+		MpPcAudioRelease();
+		g_bpmHeldPcAudio = 0;
+	}
+	MpBpmDlgRefreshUi();
+}
+
+static void MpBpmStoreProvisional(int bpm, int num, int den, int pulse)
+{
+	g_bpmProvisionalBpm = bpm;
+	g_bpmProvisionalMeterNum = num;
+	g_bpmProvisionalMeterDen = den;
+	g_bpmProvisionalPulse = pulse;
+	savedata.mpBpmCand[0] = bpm;
 }
 
 static void MpBpmFinishAndShow(BOOL showFailIfNone)
@@ -704,108 +1797,141 @@ static void MpBpmFinishAndShow(BOOL showFailIfNone)
 		MpPcAudioRelease();
 		g_bpmHeldPcAudio = 0;
 	}
-	if (!mp) return;
-	// 今回のキャプチャが空なら旧曲の savedata BPM を成功扱いしない
-	if (!hadCapture || (savedata.mpDetectedBpm <= 0 && savedata.mpBpmCand[0] <= 0)) {
-		if (showFailIfNone) {
-			mp->MessageBox(
-				LL14(L"BPM を推定できませんでした。\n曲を再生したまま数秒待ち、もう一度「BPM 計測」を試してください。",
-					L"Could not estimate BPM.\nKeep playing for a few seconds, then try Measure BPM again.",
-					L"BPM non estime. Lisez quelques secondes puis reessayez.",
-					L"BPM non stimato. Riproduci alcuni secondi e riprova.",
-					L"No se pudo estimar BPM. Reproduzca unos segundos y reintente.",
-					L"BPM 추정 실패. 재생을 유지한 채 몇 초 후 다시 시도하세요.",
-					L"无法估计 BPM。请保持播放数秒后重试。",
-					L"تعذر تقدير BPM. أبقِ التشغيل ثوانٍ ثم أعد المحاولة.",
-					L"Не удалось оценить BPM. Продолжайте воспроизведение и повторите.",
-					L"BPM nicht geschaetzt. Wiedergabe fortsetzen und erneut versuchen.",
-					L"Nao foi possivel estimar BPM. Continue reproduzindo e tente de novo.",
-					L"BPM niet geschat. Speel door en probeer opnieuw.",
-					L"Nie udalo sie oszacowac BPM. Odtwarzaj dalej i sprobuj ponownie.",
-					L"BPM tahmin edilemedi. Calmaya devam edip tekrar deneyin."),
-				LL14(L"BPM", L"BPM", L"BPM", L"BPM", L"BPM", L"BPM", L"BPM", L"BPM", L"BPM", L"BPM", L"BPM", L"BPM", L"BPM", L"BPM"),
-				MB_OK | MB_ICONINFORMATION);
-		}
+
+	// 高速帯は直近 Estimate（AC×拍子同時）を優先。合意中央値の 161–165 ブレを避ける
+	int roundBpm = g_bpmLastAcoustic;
+	if (roundBpm <= 0) roundBpm = g_bpmLastRoundBpm;
+	if (roundBpm <= 0) roundBpm = g_bpmLastEstimate;
+	if (roundBpm <= 0 && g_bpmConsensusBpm > 0) roundBpm = g_bpmConsensusBpm;
+	int roundNum = (g_bpmLastMeterNum >= 2) ? g_bpmLastMeterNum : 4;
+	int roundDen = (g_bpmLastMeterDen > 0) ? g_bpmLastMeterDen : 4;
+	int roundPulse = (g_bpmLastPulse > 0) ? g_bpmLastPulse : 8;
+	if (g_bpmLastConf >= 0.70f && g_bpmConsensusMeterNum >= 2
+		&& !(roundBpm >= 150 && roundBpm <= 175 && g_bpmLastMeterNum == 3)) {
+		roundNum = g_bpmConsensusMeterNum;
+		roundDen = g_bpmConsensusMeterDen > 0 ? g_bpmConsensusMeterDen : 4;
+		roundPulse = g_bpmConsensusPulse > 0 ? g_bpmConsensusPulse : roundPulse;
+	}
+	const float roundConf = g_bpmLastRoundConf;
+
+	if (!hadCapture || roundBpm <= 0) {
+		g_bpmUiFail = showFailIfNone ? 1 : 0;
+		MpBpmDlgRefreshUi();
+		if (showFailIfNone)
+			OpenMpBpmMeasureDlg(mp);
 		return;
 	}
-	// 表示直前: 自動反映＝候補[0] に強制同期（切り捨て主値をそのまま出す）
-	int shown = savedata.mpBpmCand[0];
-	if (shown <= 0) shown = savedata.mpDetectedBpm;
-	if (shown > 0 && savedata.mpDetectedBpm != shown)
-		MpBpmApplyValue(shown);
-	const int b = savedata.mpBpmCand[1];
-	const int c = savedata.mpBpmCand[2];
-	CString msg;
-	if (b > 0 && c > 0) {
-		msg.Format(LL14(
-			L"BPM ≈ %d（自動反映）\n候補: %d / %d / %d\nコンテキストメニューから切り替え・保持できます。\n(sr=%d)",
-			L"BPM ≈ %d (auto-applied)\nCandidates: %d / %d / %d\nSwitch via context menu (saved).\n(sr=%d)",
-			L"BPM ≈ %d (auto)\nCandidats: %d / %d / %d\nMenu contextuel pour changer.\n(sr=%d)",
-			L"BPM ≈ %d (auto)\nCandidati: %d / %d / %d\nMenu contestuale per cambiare.\n(sr=%d)",
-			L"BPM ≈ %d (auto)\nCandidatos: %d / %d / %d\nMenu contextual para cambiar.\n(sr=%d)",
-			L"BPM ≈ %d (자동 반영)\n후보: %d / %d / %d\n컨텍스트 메뉴에서 전환·저장.\n(sr=%d)",
-			L"BPM ≈ %d（已自动应用）\n候选: %d / %d / %d\n可在右键菜单切换并保存。\n(sr=%d)",
-			L"BPM ≈ %d (تلقائي)\nمرشحون: %d / %d / %d\nبدّل من قائمة السياق.\n(sr=%d)",
-			L"BPM ≈ %d (авто)\nКандидаты: %d / %d / %d\nСмена через контекстное меню.\n(sr=%d)",
-			L"BPM ≈ %d (auto)\nKandidaten: %d / %d / %d\nWechsel im Kontextmenue.\n(sr=%d)",
-			L"BPM ≈ %d (auto)\nCandidatos: %d / %d / %d\nTroque pelo menu de contexto.\n(sr=%d)",
-			L"BPM ≈ %d (auto)\nKandidaten: %d / %d / %d\nWissel via contextmenu.\n(sr=%d)",
-			L"BPM ≈ %d (auto)\nKandydaci: %d / %d / %d\nZmiana w menu kontekstowym.\n(sr=%d)",
-			L"BPM ≈ %d (otomatik)\nAdaylar: %d / %d / %d\nBaglam menusunden degistirin.\n(sr=%d)"),
-			shown, shown, b, c, g_bpmSrcRate);
-	} else if (b > 0) {
-		msg.Format(LL14(
-			L"BPM ≈ %d（自動反映）\n候補: %d / %d\nコンテキストメニューから切り替え・保持できます。",
-			L"BPM ≈ %d (auto-applied)\nCandidates: %d / %d\nSwitch via context menu (saved).",
-			L"BPM ≈ %d (auto)\nCandidats: %d / %d\nMenu contextuel pour changer.",
-			L"BPM ≈ %d (auto)\nCandidati: %d / %d\nMenu contestuale per cambiare.",
-			L"BPM ≈ %d (auto)\nCandidatos: %d / %d\nMenu contextual para cambiar.",
-			L"BPM ≈ %d (자동 반영)\n후보: %d / %d\n컨텍스트 메뉴에서 전환·저장.",
-			L"BPM ≈ %d（已自动应用）\n候选: %d / %d\n可在右键菜单切换并保存。",
-			L"BPM ≈ %d (تلقائي)\nمرشحون: %d / %d\nبدّل من قائمة السياق.",
-			L"BPM ≈ %d (авто)\nКандидаты: %d / %d\nСмена через контекстное меню.",
-			L"BPM ≈ %d (auto)\nKandidaten: %d / %d\nWechsel im Kontextmenue.",
-			L"BPM ≈ %d (auto)\nCandidatos: %d / %d\nTroque pelo menu de contexto.",
-			L"BPM ≈ %d (auto)\nKandidaten: %d / %d\nWissel via contextmenu.",
-			L"BPM ≈ %d (auto)\nKandydaci: %d / %d\nZmiana w menu kontekstowym.",
-			L"BPM ≈ %d (otomatik)\nAdaylar: %d / %d\nBaglam menusunden degistirin."),
-			shown, shown, b);
-	} else {
-		msg.Format(LL14(
-			L"BPM ≈ %d\nシークの拍グリッドに反映しました。",
-			L"BPM ≈ %d\nApplied to the seek beat grid.",
-			L"BPM ≈ %d\nApplique a la grille.",
-			L"BPM ≈ %d\nApplicato alla griglia.",
-			L"BPM ≈ %d\nAplicado a la rejilla.",
-			L"BPM ≈ %d\n시크 비트 그리드에 반영했습니다.",
-			L"BPM ≈ %d\n已应用到进度条拍网格。",
-			L"BPM ≈ %d\nطُبّق على شبكة الإيقاع.",
-			L"BPM ≈ %d\nПрименено к сетке долей.",
-			L"BPM ≈ %d\nAuf Beat-Raster angewendet.",
-			L"BPM ≈ %d\nAplicado na grade.",
-			L"BPM ≈ %d\nToegepast op beatgrid.",
-			L"BPM ≈ %d\nZastosowano do siatki.",
-			L"BPM ≈ %d\nVurus izgarasina uygulandi."),
-			shown);
+	g_bpmUiFail = 0;
+
+	// 高速帯は ±4 でクラスタ一致（161 vs 164 で永久不一致にしない）
+	// 拍子は確定時の Estimate を採用（確認中の 4↔3 フリップで止めない）
+	auto matchesProv = [&]() -> BOOL {
+		if (g_bpmProvisionalBpm <= 0) return FALSE;
+		int d = roundBpm - g_bpmProvisionalBpm;
+		if (d < 0) d = -d;
+		const int tol = (g_bpmProvisionalBpm >= 140 || roundBpm >= 140) ? 4 : 1;
+		return (d <= tol) ? TRUE : FALSE;
+	};
+	auto snapHi = [](int bpm) -> int {
+		if (bpm >= 152 && bpm <= 167) return 160;
+		if (bpm >= 168 && bpm <= 172) return 170;
+		return bpm;
+	};
+	auto applyFinal = [&](int bpm, int num, int den, int pulse) {
+		bpm = snapHi(bpm);
+		g_bpmConsensusMeterNum = num;
+		g_bpmConsensusMeterDen = den;
+		g_bpmConsensusPulse = pulse;
+		g_bpmLastMeterNum = num;
+		g_bpmLastMeterDen = den;
+		g_bpmLastPulse = pulse;
+		MpBpmApplyValue(bpm);
+		g_bpmConfirmPending = 0;
+		g_bpmConfirmRoundN = 0;
+		g_bpmProvisionalBpm = 0;
+		OpenMpBpmMeasureDlg(mp);
+		MpBpmDlgRefreshUi();
+	};
+
+	// 周回上限: 仮→確認→緻密を合計で打ち切り、直近 Estimate で確定
+	const BOOL forceLock = (g_bpmConfirmRoundN >= 4);
+
+	if (g_bpmConfirmPending == 0) {
+		g_bpmConfirmPending = 1;
+		MpBpmStoreProvisional(roundBpm, roundNum, roundDen, roundPulse);
+		OpenMpBpmMeasureDlg(mp);
+		MpBpmDlgRefreshUi();
+		MpBpmStartConfirmRound();
+		return;
 	}
-	mp->MessageBox(msg, LL14(L"BPM", L"BPM", L"BPM", L"BPM", L"BPM", L"BPM", L"BPM", L"BPM", L"BPM", L"BPM", L"BPM", L"BPM", L"BPM", L"BPM"), MB_OK | MB_ICONINFORMATION);
+
+	if (forceLock) {
+		applyFinal(roundBpm, roundNum, roundDen, roundPulse);
+		return;
+	}
+
+	if (g_bpmConfirmPending == 1) {
+		if (matchesProv()) {
+			g_bpmConfirmPending = 2;
+			// 確認一致したら Estimate 側（拍子込み）を仮に昇格
+			MpBpmStoreProvisional(roundBpm, roundNum, roundDen, roundPulse);
+			OpenMpBpmMeasureDlg(mp);
+			MpBpmDlgRefreshUi();
+			MpBpmStartConfirmRound();
+			return;
+		}
+		MpBpmStoreProvisional(roundBpm, roundNum, roundDen, roundPulse);
+		OpenMpBpmMeasureDlg(mp);
+		MpBpmDlgRefreshUi();
+		MpBpmStartConfirmRound();
+		return;
+	}
+
+	// pending==2: 緻密収束 — クラスタ一致 or 信頼度で確定。低信頼でも 2 周したら Estimate 確定
+	if (matchesProv() && (roundConf >= 0.42f || g_bpmConfirmRoundN >= 3)) {
+		applyFinal(roundBpm, roundNum, roundDen, roundPulse);
+		return;
+	}
+	if (matchesProv() && roundNum == 3 && roundConf >= 0.30f) {
+		applyFinal(roundBpm, roundNum, roundDen, roundPulse);
+		return;
+	}
+	if (g_bpmConfirmRoundN >= 3) {
+		applyFinal(roundBpm, roundNum, roundDen, roundPulse);
+		return;
+	}
+	MpBpmStoreProvisional(roundBpm, roundNum, roundDen, roundPulse);
+	OpenMpBpmMeasureDlg(mp);
+	MpBpmDlgRefreshUi();
+	MpBpmStartConfirmRound();
 }
 
 void MpOnBpmDetect(CMediaPlayerDlg* /*mpDlg*/)
 {
 	extern int playf;
 	if (!g_bpmArmed) {
+		g_bpmConfirmPending = 0;
+		g_bpmConfirmRoundN = 0;
+		g_bpmProvisionalBpm = 0;
+		g_bpmProvisionalMeterNum = 0;
+		g_bpmProvisionalMeterDen = 0;
+		g_bpmProvisionalPulse = 0;
 		g_bpmArmed = 1;
 		g_bpmResultShown = 0;
+		g_bpmUiFail = 0;
 		MpBpmResetCapture();
 		g_bpmArmedSince = GetTickCount();
-		if (!playf && !g_bpmHeldPcAudio) {
+		MpBpmEnsureMeasurePlayback();
+		if (!playf && !g_bpmHeldPcAudio && !(og && ::IsWindow(og->GetSafeHwnd()))) {
 			MpPcAudioRetain();
 			g_bpmHeldPcAudio = 1;
 		}
+		OpenMpBpmMeasureDlg(mp);
+		MpBpmDlgRefreshUi();
 		return;
 	}
-	MpBpmFinishAndShow(TRUE);
+	// 計測中の再クリックは中止（強制確定しない）
+	MpBpmAbortMeasure();
 }
 
 // ---- Mirror output ----
@@ -5706,11 +6832,20 @@ protected:
 	void RefreshStatus()
 	{
 		CString bpm;
-		if (savedata.mpDetectedBpm > 0)
-			bpm.Format(L"BPM %d", savedata.mpDetectedBpm);
-		else
+		if (savedata.mpDetectedBpm > 0) {
+			if (savedata.mpDetectedMeterNum >= 2)
+				bpm.Format(L"BPM %d  %d/%d", savedata.mpDetectedBpm, savedata.mpDetectedMeterNum,
+					savedata.mpDetectedMeterDen > 0 ? savedata.mpDetectedMeterDen : 4);
+			else
+				bpm.Format(L"BPM %d", savedata.mpDetectedBpm);
+		} else
 			bpm = LL14(L"BPM --", L"BPM --", L"BPM --", L"BPM --", L"BPM --", L"BPM --", L"BPM --", L"BPM --", L"BPM --", L"BPM --", L"BPM --", L"BPM --", L"BPM --", L"BPM --");
-		if (m_bpm.GetSafeHwnd()) m_bpm.SetWindowText(bpm);
+		if (m_bpm.GetSafeHwnd()) {
+			CString cur;
+			m_bpm.GetWindowText(cur);
+			if (cur != bpm)
+				m_bpm.SetWindowText(bpm);
+		}
 		int pp = 100, tp = 100;
 		if (og && og->m_pitch_sl.GetSafeHwnd())
 			pp = (int)TempoPercentFromPos(og->m_pitch_sl.GetPos());
@@ -5718,7 +6853,12 @@ protected:
 			tp = (int)TempoPercentFromPos(og->m_tempo_sl.GetPos());
 		CString st;
 		st.Format(L"P %d%%  T %d%%  V %d  MS %d", pp, tp, savedata.mpVocalCenter, savedata.pro_ms_width);
-		if (m_status.GetSafeHwnd()) m_status.SetWindowText(st);
+		if (m_status.GetSafeHwnd()) {
+			CString cur;
+			m_status.GetWindowText(cur);
+			if (cur != st)
+				m_status.SetWindowText(st);
+		}
 	}
 	void SyncProToolsMsVocal()
 	{
@@ -5846,7 +6986,8 @@ protected:
 		if (mp && mp->m_wavePeakN > 0)
 			m_seek.SetWavePeaks(mp->m_wavePeaks, mp->m_wavePeakN);
 		if (savedata.mpDetectedBpm > 0)
-			m_seek.SetBeatGrid((float)savedata.mpDetectedBpm, savedata.mpBeatGrid ? TRUE : FALSE, savedata.mpBeatGridOffsetMs);
+			m_seek.SetBeatGrid((float)savedata.mpDetectedBpm, savedata.mpBeatGrid ? TRUE : FALSE, savedata.mpBeatGridOffsetMs,
+				savedata.mpDetectedMeterNum >= 2 ? savedata.mpDetectedMeterNum : 4);
 		int frames[8];
 		int n = ProAudio_CueCount();
 		if (n > 8) n = 8;
@@ -6436,6 +7577,480 @@ void OpenMpDjPadModeless(CWnd* parent)
 	MpPersistSavedataQuick();
 	g_mpDjPad->ShowWindow(g_oggSubUiRestoring ? SW_SHOWNOACTIVATE : SW_SHOW);
 }
+
+// ---- BPM measure dialog (acrylic caption) ----
+class CMpBpmDlg : public CCustomBlurDialogBase
+{
+public:
+	enum { IDD = IDD_MP_BPM };
+	CMpBpmDlg(CWnd* p = NULL) : CCustomBlurDialogBase(IDD, p) {}
+	CCustomStatic m_status, m_bpm, m_meter, m_pulse, m_pass, m_conf;
+	CCustomStandardButton m_cand1, m_cand2, m_cand3, m_remeasure, m_abort, m_close, m_help;
+	CToolTipCtrl m_tooltip;
+	CString m_lastStatus, m_lastBpm, m_lastMeter, m_lastPulse, m_lastPass, m_lastConf;
+	CString m_lastCand1, m_lastCand2, m_lastCand3;
+	void LayoutHelpBtn() { CCC_CaptionPlaceHelpBtn(m_hWnd, &m_help); }
+	void RefreshFromGlobals()
+	{
+		CString st, bpm, meter, pulse, pass, conf;
+		if (g_bpmUiFail) {
+			st = LL14(L"推定できませんでした。再生/PC音を続けて再計測してください。",
+				L"Could not estimate. Keep playing / PC audio and remeasure.",
+				L"Estimation impossible. Continuez lecture/PC et recommencez.",
+				L"Stima non riuscita. Continua riproduzione/PC e rimisura.",
+				L"No se pudo estimar. Siga reproduciendo/PC y vuelva a medir.",
+				L"추정 실패. 재생/PC 소리를 유지하고 다시 측정하세요.",
+				L"无法估计。请继续播放/PC声后重测。",
+				L"تعذر التقدير. أبقِ التشغيل/صوت الجهاز وأعد القياس.",
+				L"Не удалось оценить. Продолжайте воспроизведение/ПК и повторите.",
+				L"Schaetzung fehlgeschlagen. Wiedergabe/PC fortsetzen und neu messen.",
+				L"Nao foi possivel estimar. Continue reproduzindo/PC e meça de novo.",
+				L"Schatting mislukt. Speel door/pc-audio en meet opnieuw.",
+				L"Nie udalo sie oszacowac. Odtwarzaj dalej/PC i zmierz ponownie.",
+				L"Tahmin edilemedi. Calmaya/PC sese devam edip yeniden olcun.");
+		} else if (MpBpmIsMeasuring()) {
+			if (g_bpmConfirmPending == 2 && g_bpmProvisionalBpm > 0) {
+				st.Format(LL14(L"緻密収束中…（収束 BPM %d・高精度で再確認）",
+					L"Fine convergence… (locked BPM %d; refining)",
+					L"Convergence fine… (BPM %d; raffinage)",
+					L"Convergenza fine… (BPM %d; raffinamento)",
+					L"Convergencia fina… (BPM %d; refinando)",
+					L"정밀 수렴 중… (수렴 BPM %d, 고정밀 재확인)",
+					L"精密收敛中…（收敛 BPM %d，高精度再确认）",
+					L"تقارب دقيق… (BPM %d؛ إعادة تحقق)",
+					L"Точная сходимость… (BPM %d; уточнение)",
+					L"Feine Konvergenz… (BPM %d; Praezision)",
+					L"Convergencia fina… (BPM %d; refinando)",
+					L"Fijne convergentie… (BPM %d; verfijnen)",
+					L"Doprecyzowanie… (BPM %d; dokladnosc)",
+					L"Ince yakinlasma… (BPM %d; netlestirme)"),
+					g_bpmProvisionalBpm);
+			} else if (g_bpmConfirmPending == 1 && g_bpmProvisionalBpm > 0) {
+				st.Format(LL14(L"確認計測中…（仮収束 BPM %d・一致で収束）",
+					L"Confirming… (provisional BPM %d; match to converge)",
+					L"Confirmation… (BPM provisoire %d)",
+					L"Conferma… (BPM provvisorio %d)",
+					L"Confirmando… (BPM provisional %d)",
+					L"확인 측정 중… (가수렴 BPM %d)",
+					L"确认测量中…（暂定收敛 BPM %d）",
+					L"تأكيد… (BPM مؤقت %d)",
+					L"Подтверждение… (временный BPM %d)",
+					L"Bestaetigung… (vorl. BPM %d)",
+					L"Confirmando… (BPM provisório %d)",
+					L"Bevestigen… (voorlopig BPM %d)",
+					L"Potwierdzanie… (tymczasowe BPM %d)",
+					L"Onay… (gecici BPM %d)"),
+					g_bpmProvisionalBpm);
+			} else {
+				st = LL14(L"計測中…（仮収束を探索）",
+					L"Measuring… (seeking provisional convergence)",
+					L"Mesure… (convergence provisoire)",
+					L"Misura… (convergenza provvisoria)",
+					L"Midiendo… (convergencia provisional)",
+					L"측정 중… (가수렴 탐색)",
+					L"测量中…（寻找暂定收敛）",
+					L"قياس… (بحث عن تقارب مؤقت)",
+					L"Измерение… (поиск временной сходимости)",
+					L"Messen… (vorlaeufige Konvergenz)",
+					L"Medindo… (convergencia provisoria)",
+					L"Meten… (voorlopige convergentie)",
+					L"Pomiar… (tymczasowa zbieznosc)",
+					L"Olculuyor… (gecici yakinlasma)");
+			}
+		} else if (g_bpmConfirmPending && g_bpmProvisionalBpm > 0) {
+			st.Format(LL14(L"仮/収束 BPM %d（次の段階へ）",
+				L"Provisional/converged BPM %d (next stage)",
+				L"BPM provisoire/convergent %d",
+				L"BPM provvisorio/convergente %d",
+				L"BPM provisional/convergente %d",
+				L"가/수렴 BPM %d (다음 단계)",
+				L"暂定/收敛 BPM %d（下一阶段）",
+				L"BPM مؤقت/متقارب %d",
+				L"Временный/сходящийся BPM %d",
+				L"Vorl./konverg. BPM %d",
+				L"BPM provisório/convergente %d",
+				L"Voorlopig/convergent BPM %d",
+				L"Tymczasowe/zbiezne BPM %d",
+				L"Gecici/yakın BPM %d"),
+				g_bpmProvisionalBpm);
+		} else if (savedata.mpDetectedBpm > 0) {
+			st = LL14(L"確定（緻密収束・シーク拍グリッドへ反映済み）",
+				L"Confirmed (fine convergence; applied to seek beat grid)",
+				L"Confirme (convergence fine; grille)",
+				L"Confermato (convergenza fine; griglia)",
+				L"Confirmado (convergencia fina; rejilla)",
+				L"확정 (정밀 수렴·시크 비트 그리드 반영)",
+				L"已确定（精密收敛，已应用到进度拍网格）",
+				L"تم (تقارب دقيق؛ الشبكة)",
+				L"Подтверждено (точная сходимость; сетка)",
+				L"Bestaetigt (feine Konvergenz; Raster)",
+				L"Confirmado (convergencia fina; grade)",
+				L"Bevestigd (fijne convergentie; beatgrid)",
+				L"Potwierdzono (doprecyzowanie; siatka)",
+				L"Onaylandi (ince yakinlasma; izgara)");
+		} else {
+			st = LL14(L"待機", L"Idle", L"En attente", L"In attesa", L"En espera",
+				L"대기", L"待机", L"انتظار", L"Ожидание", L"Bereit",
+				L"Aguardando", L"Inactief", L"Oczekiwanie", L"Beklemede");
+		}
+		const int showBpm = MpBpmIsMeasuring()
+			? (g_bpmConsensusBpm > 0 ? g_bpmConsensusBpm : (g_bpmLastEstimate > 0 ? g_bpmLastEstimate : g_bpmLastAcoustic))
+			: (g_bpmConfirmPending && g_bpmProvisionalBpm > 0 ? g_bpmProvisionalBpm : savedata.mpDetectedBpm);
+		if (showBpm > 0)
+			bpm.Format(L"BPM  %d", showBpm);
+		else
+			bpm = L"BPM  --";
+
+		const int mn = MpBpmIsMeasuring()
+			? (g_bpmConsensusMeterNum > 0 ? g_bpmConsensusMeterNum : g_bpmLastMeterNum)
+			: (g_bpmConfirmPending && g_bpmProvisionalMeterNum >= 2 ? g_bpmProvisionalMeterNum : savedata.mpDetectedMeterNum);
+		const int md = MpBpmIsMeasuring()
+			? (g_bpmConsensusMeterDen > 0 ? g_bpmConsensusMeterDen : g_bpmLastMeterDen)
+			: (g_bpmConfirmPending && g_bpmProvisionalMeterDen > 0 ? g_bpmProvisionalMeterDen : savedata.mpDetectedMeterDen);
+		if (mn >= 2 && md > 0)
+			meter.Format(LL14(L"拍子  %d/%d", L"Meter  %d/%d", L"Mesure  %d/%d", L"Metro  %d/%d", L"Compas  %d/%d",
+				L"박자  %d/%d", L"拍号  %d/%d", L"الميزان  %d/%d", L"Размер  %d/%d", L"Taktart  %d/%d",
+				L"Compasso  %d/%d", L"Maatsoort  %d/%d", L"Metrum  %d/%d", L"Olcu  %d/%d"), mn, md > 0 ? md : 4);
+		else
+			meter = LL14(L"拍子  --", L"Meter  --", L"Mesure  --", L"Metro  --", L"Compas  --",
+				L"박자  --", L"拍号  --", L"الميزان  --", L"Размер  --", L"Taktart  --",
+				L"Compasso  --", L"Maatsoort  --", L"Metrum  --", L"Olcu  --");
+
+		const int pu = MpBpmIsMeasuring()
+			? (g_bpmConsensusPulse > 0 ? g_bpmConsensusPulse : g_bpmLastPulse)
+			: savedata.mpDetectedPulse;
+		LPCTSTR pulseName = L"--";
+		if (pu == 4) pulseName = LL14(L"4分音符", L"Quarter", L"Noire", L"Semiminima", L"Negra", L"4분음표", L"四分音符", L"سوداء", L"Четверть", L"Viertel", L"Seminima", L"Kwartnoot", L"Cwiercnuta", L"Dortluk");
+		else if (pu == 8) pulseName = LL14(L"8分音符", L"Eighth", L"Croche", L"Croma", L"Corchea", L"8분음표", L"八分音符", L"ذات سن", L"Восьмая", L"Achtel", L"Colcheia", L"Achtste", L"Osminka", L"Sekizlik");
+		else if (pu == 16) pulseName = LL14(L"16分音符", L"16th", L"Double-croche", L"Semicroma", L"Semicorchea", L"16분음표", L"十六分音符", L"ذات سنّين", L"Шестнадцатая", L"16tel", L"Semicolcheia", L"Zestiende", L"Szesnastka", L"Onaltilik");
+		else if (pu == 32) pulseName = LL14(L"32分音符", L"32nd", L"Triple-croche", L"Biscroma", L"Fusa", L"32분음표", L"三十二分音符", L"ذات 3 أسنان", L"32-я", L"32tel", L"Fusa", L"32ste", L"32-ka", L"Otuzikilik");
+		else if (pu == 64) pulseName = LL14(L"64分音符", L"64th", L"Quadruple-croche", L"Semibiscroma", L"Semifusa", L"64분음표", L"六十四分音符", L"ذات 4 أسنان", L"64-я", L"64tel", L"Semifusa", L"64ste", L"64-ka", L"Altmisdortluk");
+		pulse.Format(LL14(L"パルス  %s", L"Pulse  %s", L"Pulsation  %s", L"Impulso  %s", L"Pulso  %s",
+			L"펄스  %s", L"脉冲  %s", L"نبض  %s", L"Пульс  %s", L"Puls  %s",
+			L"Pulso  %s", L"Puls  %s", L"Puls  %s", L"Nabiz  %s"), pulseName);
+
+		if (MpBpmIsMeasuring())
+			pass.Format(LL14(L"パス  %d / %d", L"Pass  %d / %d", L"Passe  %d / %d", L"Passaggio  %d / %d", L"Pasada  %d / %d",
+				L"패스  %d / %d", L"遍数  %d / %d", L"تمريرة  %d / %d", L"Проход  %d / %d", L"Durchlauf  %d / %d",
+				L"Passe  %d / %d", L"Doorgang  %d / %d", L"Przejscie  %d / %d", L"Gecis  %d / %d"),
+				g_bpmPassCount, g_bpmNeedPasses);
+		else if (g_bpmPassCount > 0)
+			pass.Format(LL14(L"パス  %d（完了）", L"Pass  %d (done)", L"Passe  %d (ok)", L"Passaggio  %d (ok)", L"Pasada  %d (ok)",
+				L"패스  %d (완료)", L"遍数  %d（完成）", L"تمريرة  %d (تم)", L"Проход  %d (готово)", L"Durchlauf  %d (fertig)",
+				L"Passe  %d (ok)", L"Doorgang  %d (klaar)", L"Przejscie  %d (ok)", L"Gecis  %d (bitti)"), g_bpmPassCount);
+		else
+			pass = LL14(L"パス  --", L"Pass  --", L"Passe  --", L"Passaggio  --", L"Pasada  --",
+				L"패스  --", L"遍数  --", L"تمريرة  --", L"Проход  --", L"Durchlauf  --",
+				L"Passe  --", L"Doorgang  --", L"Przejscie  --", L"Gecis  --");
+
+		const int confPct = (int)(g_bpmLastConf * 100.f + 0.5f);
+		if (MpBpmIsMeasuring() || confPct > 0)
+			conf.Format(LL14(L"信頼度  %d%%", L"Confidence  %d%%", L"Confiance  %d%%", L"Confidenza  %d%%", L"Confianza  %d%%",
+				L"신뢰도  %d%%", L"置信度  %d%%", L"الثقة  %d%%", L"Уверенность  %d%%", L"Konfidenz  %d%%",
+				L"Confianca  %d%%", L"Betrouwbaarheid  %d%%", L"Pewnosc  %d%%", L"Guven  %d%%"), confPct);
+		else
+			conf = LL14(L"信頼度  --", L"Confidence  --", L"Confiance  --", L"Confidenza  --", L"Confianza  --",
+				L"신뢰도  --", L"置信度  --", L"الثقة  --", L"Уверенность  --", L"Konfidenz  --",
+				L"Confianca  --", L"Betrouwbaarheid  --", L"Pewnosc  --", L"Guven  --");
+
+		auto setIf = [](CCustomStatic& ctl, CString& last, const CString& now) {
+			if (!ctl.GetSafeHwnd()) return;
+			if (last == now) return;
+			last = now;
+			ctl.SetWindowText(now);
+		};
+		setIf(m_status, m_lastStatus, st);
+		setIf(m_bpm, m_lastBpm, bpm);
+		setIf(m_meter, m_lastMeter, meter);
+		setIf(m_pulse, m_lastPulse, pulse);
+		setIf(m_pass, m_lastPass, pass);
+		setIf(m_conf, m_lastConf, conf);
+
+		MpBpmEnsureCandList();
+		BOOL candPaint = FALSE;
+		auto setCand = [&](CCustomStandardButton& btn, CString& last, int idx) {
+			if (!btn.GetSafeHwnd()) return;
+			const int c = savedata.mpBpmCand[idx];
+			CString t;
+			if (c > 0) t.Format(L"%d", c);
+			else t = L"--";
+			const BOOL changed = (last != t);
+			if (changed) {
+				last = t;
+				btn.SetWindowText(t);
+				candPaint = TRUE;
+			}
+			btn.EnableWindow(c > 0 ? TRUE : FALSE);
+			if (changed)
+				btn.RepaintClient();
+		};
+		setCand(m_cand1, m_lastCand1, 0);
+		setCand(m_cand2, m_lastCand2, 1);
+		setCand(m_cand3, m_lastCand3, 2);
+		if (candPaint) {
+			if (m_remeasure.GetSafeHwnd()) m_remeasure.RepaintClient();
+			if (m_abort.GetSafeHwnd()) m_abort.RepaintClient();
+			if (m_close.GetSafeHwnd()) m_close.RepaintClient();
+			PostMessage(CCC_MSG_REAPPLY_OPAQUE_FIXERS);
+		}
+
+		if (mp && mp->m_botBpm.GetSafeHwnd()) {
+			CString bot = MpBpmIsMeasuring() ? L"…" : L"BPM";
+			CString cur;
+			mp->m_botBpm.GetWindowText(cur);
+			if (cur != bot)
+				mp->m_botBpm.SetWindowText(bot);
+		}
+	}
+protected:
+	virtual void DoDataExchange(CDataExchange* pDX)
+	{
+		CCustomBlurDialogBase::DoDataExchange(pDX);
+		DDX_Control(pDX, IDC_MP_BPM_STATUS, m_status);
+		DDX_Control(pDX, IDC_MP_BPM_VAL, m_bpm);
+		DDX_Control(pDX, IDC_MP_BPM_METER, m_meter);
+		DDX_Control(pDX, IDC_MP_BPM_PULSE, m_pulse);
+		DDX_Control(pDX, IDC_MP_BPM_PASS, m_pass);
+		DDX_Control(pDX, IDC_MP_BPM_CONF, m_conf);
+		DDX_Control(pDX, IDC_MP_BPM_CAND1, m_cand1);
+		DDX_Control(pDX, IDC_MP_BPM_CAND2, m_cand2);
+		DDX_Control(pDX, IDC_MP_BPM_CAND3, m_cand3);
+		DDX_Control(pDX, IDC_MP_BPM_REMEAS, m_remeasure);
+		DDX_Control(pDX, IDC_MP_BPM_ABORT, m_abort);
+		DDX_Control(pDX, IDC_MP_BPM_CLOSE, m_close);
+		DDX_Control(pDX, IDC_MP_BPM_HELP, m_help);
+	}
+	virtual BOOL OnInitDialog()
+	{
+		CCustomBlurDialogBase::OnInitDialog();
+		SetWindowText(LL14(L"BPM 計測", L"BPM Measure", L"Mesure BPM", L"Misura BPM", L"Medir BPM",
+			L"BPM 측정", L"BPM 测量", L"قياس BPM", L"Измерение BPM", L"BPM messen",
+			L"Medir BPM", L"BPM meten", L"Pomiar BPM", L"BPM olcum"));
+		m_help.SetWindowText(L"?");
+		m_help.SetFlat(TRUE);
+		m_help.SetGradation(RGB(255, 245, 220), RGB(240, 210, 160), 0, TRUE);
+		m_status.SetAeroMode(FALSE);
+		m_bpm.SetAeroMode(FALSE);
+		m_meter.SetAeroMode(FALSE);
+		m_pulse.SetAeroMode(FALSE);
+		m_pass.SetAeroMode(FALSE);
+		m_conf.SetAeroMode(FALSE);
+		m_cand1.SetAeroMode(FALSE);
+		m_cand2.SetAeroMode(FALSE);
+		m_cand3.SetAeroMode(FALSE);
+		m_remeasure.SetAeroMode(FALSE);
+		m_abort.SetAeroMode(FALSE);
+		m_close.SetAeroMode(FALSE);
+		m_help.SetAeroMode(FALSE);
+		m_cand1.SetFlat(TRUE);
+		m_cand2.SetFlat(TRUE);
+		m_cand3.SetFlat(TRUE);
+		m_remeasure.SetFlat(TRUE);
+		m_abort.SetFlat(TRUE);
+		m_close.SetFlat(TRUE);
+		// 淡色グラデはアクリル下で白抜けしやすい → やや濃い不透明トーン
+		m_cand1.SetGradation(RGB(255, 210, 185), RGB(240, 150, 120), 0, TRUE);
+		m_cand2.SetGradation(RGB(255, 210, 185), RGB(240, 150, 120), 0, TRUE);
+		m_cand3.SetGradation(RGB(255, 210, 185), RGB(240, 150, 120), 0, TRUE);
+		m_remeasure.SetGradation(RGB(255, 220, 190), RGB(245, 170, 120), 0, TRUE);
+		m_abort.SetGradation(RGB(255, 200, 200), RGB(235, 140, 140), 0, TRUE);
+		m_close.SetGradation(RGB(255, 220, 190), RGB(245, 170, 120), 0, TRUE);
+		m_help.SetGradation(RGB(255, 245, 220), RGB(240, 210, 160), 0, TRUE);
+		m_remeasure.SetWindowText(LL14(L"再計測", L"Remeasure", L"Remesurer", L"Rimisura", L"Volver a medir",
+			L"재측정", L"重新测量", L"إعادة القياس", L"Перемерить", L"Neu messen",
+			L"Remedir", L"Opnieuw meten", L"Zmierz ponownie", L"Yeniden olc"));
+		m_abort.SetWindowText(LL14(L"測定中止", L"Abort", L"Arreter", L"Annulla", L"Abortar",
+			L"측정 중지", L"中止测量", L"إيقاف القياس", L"Прервать", L"Abbruch",
+			L"Abortar", L"Afbreken", L"Przerwij", L"Durdur"));
+		m_close.SetWindowText(LL14(L"閉じる", L"Close", L"Fermer", L"Chiudi", L"Cerrar",
+			L"닫기", L"关闭", L"إغلاق", L"Закрыть", L"Schliessen",
+			L"Fechar", L"Sluiten", L"Zamknij", L"Kapat"));
+		CCustomControlUtility::BeginDialogToolTip(m_tooltip, this, TTS_NOPREFIX);
+		m_tooltip.AddTool(&m_cand1, LL14(L"候補1を拍グリッドへ採用します。", L"Apply candidate 1 to the beat grid.", L"Appliquer le candidat 1 a la grille.", L"Applica il candidato 1 alla griglia.", L"Aplicar candidato 1 a la rejilla.",
+			L"후보1을 비트 그리드에 적용.", L"将候选1应用到拍网格。", L"تطبيق المرشح 1 على الشبكة.", L"Применить кандидата 1 к сетке.", L"Kandidat 1 auf Raster anwenden.",
+			L"Aplicar candidato 1 na grade.", L"Kandidaat 1 op raster toepassen.", L"Zastosuj kandydata 1 do siatki.", L"Aday 1'i izgaraya uygula."));
+		m_tooltip.AddTool(&m_cand2, LL14(L"候補2を拍グリッドへ採用します。", L"Apply candidate 2 to the beat grid.", L"Appliquer le candidat 2 a la grille.", L"Applica il candidato 2 alla griglia.", L"Aplicar candidato 2 a la rejilla.",
+			L"후보2를 비트 그리드에 적용.", L"将候选2应用到拍网格。", L"تطبيق المرشح 2 على الشبكة.", L"Применить кандидата 2 к сетке.", L"Kandidat 2 auf Raster anwenden.",
+			L"Aplicar candidato 2 na grade.", L"Kandidaat 2 op raster toepassen.", L"Zastosuj kandydata 2 do siatki.", L"Aday 2'yi izgaraya uygula."));
+		m_tooltip.AddTool(&m_cand3, LL14(L"候補3を拍グリッドへ採用します。", L"Apply candidate 3 to the beat grid.", L"Appliquer le candidat 3 a la grille.", L"Applica il candidato 3 alla griglia.", L"Aplicar candidato 3 a la rejilla.",
+			L"후보3을 비트 그리드에 적용.", L"将候选3应用到拍网格。", L"تطبيق المرشح 3 على الشبكة.", L"Применить кандидата 3 к сетке.", L"Kandidat 3 auf Raster anwenden.",
+			L"Aplicar candidato 3 na grade.", L"Kandidaat 3 op raster toepassen.", L"Zastosuj kandydata 3 do siatki.", L"Aday 3'u izgaraya uygula."));
+		m_tooltip.AddTool(&m_remeasure, LL14(L"計測を最初からやり直します（一致確認もリセット）。", L"Restart measurement from scratch (also resets confirm).", L"Recommencer la mesure (et la confirmation).", L"Ricomincia la misura (e la conferma).", L"Reiniciar la medicion (y la confirmacion).",
+			L"측정을 처음부터 다시 (확인도 리셋).", L"从头重测（也重置确认）。", L"إعادة القياس من البداية (وإعادة التأكيد).", L"Начать измерение сначала (и подтверждение).", L"Messung von vorn (auch Bestaetigung).",
+			L"Reiniciar medicao (e confirmacao).", L"Meting opnieuw (ook bevestiging).", L"Zacznij pomiar od nowa (tez potwierdzenie).", L"Olcumu bastan baslat (onayi da sifirla)."));
+		m_tooltip.AddTool(&m_abort, LL14(L"計測を中止します（グリッドへは反映しません）。", L"Abort measurement (does not apply to the grid).", L"Arreter la mesure (sans appliquer a la grille).", L"Annulla la misura (non applica alla griglia).", L"Abortar medicion (no aplica a la rejilla).",
+			L"측정을 중지합니다 (그리드에 반영 안 함).", L"中止测量（不应用到网格）。", L"إيقاف القياس (دون تطبيقه على الشبكة).", L"Прервать измерение (не применять к сетке).", L"Messung abbrechen (nicht auf Raster).",
+			L"Abortar medicao (nao aplica na grade).", L"Meting afbreken (niet op raster).", L"Przerwij pomiar (bez siatki).", L"Olcumu durdur (izgaraya uygulama)."));
+		m_tooltip.AddTool(&m_close, LL14(L"この窓を閉じます（計測中なら中止します）。", L"Close this window (aborts if measuring).", L"Fermer cette fenetre (arrete si mesure).", L"Chiudi questa finestra (annulla se in misura).", L"Cerrar esta ventana (aborta si mide).",
+			L"이 창을 닫습니다(측정 중이면 중지).", L"关闭此窗口（测量中则中止）。", L"إغلاق هذه النافذة (إيقاف إن كان يقيس).", L"Закрыть окно (прервать при измерении).", L"Fenster schliessen (bei Messung abbrechen).",
+			L"Fechar esta janela (aborta se medindo).", L"Dit venster sluiten (afbreken bij meten).", L"Zamknij okno (przerwij przy pomiarze).", L"Bu pencereyi kapat (olcuyorsa durdur)."));
+		CCustomControlUtility::FinalizeDialogToolTip(m_tooltip, 420, 9000);
+		LayoutHelpBtn();
+		CCC_CaptionLayout(m_hWnd);
+		PostMessage(CCC_MSG_REAPPLY_OPAQUE_FIXERS);
+		CCC_RefreshKids(m_hWnd);
+		RefreshFromGlobals();
+		return TRUE;
+	}
+	virtual BOOL PreTranslateMessage(MSG* pMsg)
+	{
+		if (m_tooltip.GetSafeHwnd()) m_tooltip.RelayEvent(pMsg);
+		return CCustomBlurDialogBase::PreTranslateMessage(pMsg);
+	}
+	virtual void PostNcDestroy() { g_mpBpmDlg = NULL; CCustomBlurDialogBase::PostNcDestroy(); delete this; }
+	afx_msg void OnSize(UINT nType, int cx, int cy)
+	{
+		CCustomBlurDialogBase::OnSize(nType, cx, cy);
+		if (GetSafeHwnd()) {
+			CCC_CaptionLayout(m_hWnd);
+			LayoutHelpBtn();
+			PostMessage(CCC_MSG_REAPPLY_OPAQUE_FIXERS);
+		}
+	}
+	afx_msg void OnContextMenu(CWnd* /*pWnd*/, CPoint point)
+	{
+		if (point.x == -1 && point.y == -1) {
+			CRect r; GetWindowRect(&r);
+			point = r.CenterPoint();
+		}
+		CCustomPopupMenu menu;
+		menu.SetAeroMode(FALSE);
+		MpBpmEnsureCandList();
+		for (int ci = 0; ci < 3; ++ci) {
+			const int cb = savedata.mpBpmCand[ci];
+			if (cb <= 0) continue;
+			CString item; item.Format(L"%d", cb);
+			const UINT id = 100 + ci;
+			menu.AddCheck(id, item, savedata.mpDetectedBpm == cb);
+		}
+		menu.AddSeparator();
+		menu.AddCheck(110, LL14(L"拍グリッド表示", L"Show beat grid", L"Afficher grille", L"Mostra griglia", L"Mostrar rejilla",
+			L"비트 그리드 표시", L"显示拍网格", L"إظهار الشبكة", L"Показать сетку", L"Beat-Raster zeigen",
+			L"Mostrar grade", L"Beatgrid tonen", L"Pokaz siatke", L"Vurus ızgarasi goster"),
+			savedata.mpBeatGrid ? TRUE : FALSE);
+		menu.AddCommand(111, LL14(L"再計測", L"Remeasure", L"Remesurer", L"Rimisura", L"Volver a medir",
+			L"재측정", L"重新测量", L"إعادة القياس", L"Перемерить", L"Neu messen",
+			L"Remedir", L"Opnieuw meten", L"Zmierz ponownie", L"Yeniden olc"));
+		menu.AddCommand(112, LL14(L"測定中止", L"Abort", L"Arreter", L"Annulla", L"Abortar",
+			L"측정 중지", L"中止测量", L"إيقاف القياس", L"Прервать", L"Abbruch",
+			L"Abortar", L"Afbreken", L"Przerwij", L"Durdur"));
+		const int cmd = menu.Track(point, this);
+		if (cmd >= 100 && cmd <= 102) {
+			MpOnBpmCandPick(cmd - 100);
+			RefreshFromGlobals();
+		} else if (cmd == 110) {
+			savedata.mpBeatGrid = savedata.mpBeatGrid ? 0 : 1;
+			MpPersistSavedataQuick();
+			if (mp && mp->m_seek.GetSafeHwnd()) {
+				const float bpm = savedata.mpDetectedBpm > 0 ? (float)savedata.mpDetectedBpm : 120.f;
+				const int meter = savedata.mpDetectedMeterNum >= 2 ? savedata.mpDetectedMeterNum : 4;
+				mp->m_seek.SetBeatGrid(bpm, savedata.mpBeatGrid ? TRUE : FALSE, savedata.mpBeatGridOffsetMs, meter);
+			}
+		} else if (cmd == 111) {
+			OnRemeasure();
+		} else if (cmd == 112) {
+			OnAbort();
+		}
+	}
+	afx_msg void OnCand1() { MpOnBpmCandPick(0); RefreshFromGlobals(); }
+	afx_msg void OnCand2() { MpOnBpmCandPick(1); RefreshFromGlobals(); }
+	afx_msg void OnCand3() { MpOnBpmCandPick(2); RefreshFromGlobals(); }
+	afx_msg void OnRemeasure()
+	{
+		g_bpmConfirmPending = 0;
+		g_bpmProvisionalBpm = 0;
+		g_bpmProvisionalMeterNum = 0;
+		g_bpmProvisionalMeterDen = 0;
+		g_bpmProvisionalPulse = 0;
+		MpBpmStartConfirmRound();
+	}
+	afx_msg void OnAbort()
+	{
+		MpBpmAbortMeasure();
+		RefreshFromGlobals();
+	}
+	afx_msg void OnCloseBtn()
+	{
+		if (MpBpmIsMeasuring() || g_bpmConfirmPending)
+			MpBpmAbortMeasure();
+		DestroyWindow();
+	}
+	afx_msg void OnHelp()
+	{
+		MessageBox(
+			LL14(L"再生中のアタックを解析し、拍子・音符価を推定します。\n1回目は仮結果→自動でもう一度計測し、一致したら確定（グリッド反映）。不一致なら一致するまで続行します。\n「測定中止」で止められます。候補ボタンは手動採用です。",
+				L"Analyzes attacks while playing, estimates meter and note values.\nFirst result is provisional; a second matching pass locks it to the grid. On mismatch, continues until two agree.\nUse Abort to stop. Candidate buttons apply manually.",
+				L"Analyse les attaques en lecture (ou PC), estime mesure et valeurs de notes, adopte le BPM apres 10+ passes d'accord.\nSi ambigu, 10+ passes de plus.\nBoutons candidats ou clic droit pour changer / recommencer.",
+				L"Analizza gli attacchi in riproduzione (o PC), stima metro e valori di nota, adotta il BPM dopo 10+ passaggi concordi.\nSe ambiguo, altri 10+ passaggi.\nPulsanti candidati o clic destro per cambiare / rimisurare.",
+				L"Analiza ataques al reproducir (o PC), estima compas y valores de nota, adopta BPM tras 10+ pasadas de acuerdo.\nSi es ambiguo, 10+ pasadas mas.\nBotones de candidatos o clic derecho para cambiar / medir de nuevo.",
+				L"재생(또는 PC 소리) 중 어택을 분석해 박자·음표 값을 추정하고 10회 이상 합의된 BPM을 채택합니다.\n모호하면 10회 이상 더 반복합니다.\n후보 버튼이나 우클릭으로 전환·재측정할 수 있습니다.",
+				L"分析播放中（或 PC 声）的起音，估计拍号与音符时值，在 10 次以上合意后采用 BPM。\n若模糊则再重复 10 次以上。\n可用候选按钮或右键切换/重测。",
+				L"يحلّل الهجمات أثناء التشغيل (أو صوت الجهاز)، ويقدّر الميزان وقيم النغمات، ويعتمد BPM بعد 10+ تمريرات متوافقة.\nإن كان غامضاً يكرر 10+ تمريرات إضافية.\nأزرار المرشحين أو النقر الأيمن للتبديل/إعادة القياس.",
+				L"Анализирует атаки при воспроизведении (или ПК), оценивает размер и длительности, принимает BPM после 10+ согласованных проходов.\nПри неоднозначности — ещё 10+ проходов.\nКнопки кандидатов или ПКМ для смены / повтора.",
+				L"Analysiert Anschlaege bei Wiedergabe (oder PC), schaetzt Taktart und Notenwerte und uebernimmt BPM nach 10+ uebereinstimmenden Durchlaeufen.\nBei Unklarheit weitere 10+ Durchlaeufe.\nKandidaten-Buttons oder Rechtsklick zum Wechseln / Neu messen.",
+				L"Analisa ataques na reproducao (ou PC), estima compasso e valores de nota e adota BPM apos 10+ passes concordantes.\nSe ambiguo, mais 10+ passes.\nBotoes de candidatos ou clique direito para trocar / remedir.",
+				L"Analyseert aanslagen tijdens afspelen (of pc-audio), schat maatsoort en nootwaarden, en neemt BPM over na 10+ eensstemmende doorgangen.\nBij twijfel nog 10+ doorgangen.\nKandidaatknoppen of rechtsklik om te wisselen / opnieuw te meten.",
+				L"Analizuje ataki podczas odtwarzania (lub PC), szacuje metrum i wartosci nut i przyjmuje BPM po 10+ zgodnych przejsciach.\nPrzy niejednoznacznosci kolejne 10+ przejsc.\nPrzyciski kandydatow lub PPM do zmiany / ponownego pomiaru.",
+				L"Calisma (veya PC sesi) sirasinda ataklari analiz eder, olcu ve nota degerlerini tahmin eder, 10+ uyumlu gecisten sonra BPM kabul eder.\nBelirsizse 10+ gecis daha yapar.\nAday dugmeleri veya sag tik ile degistir / yeniden olc."),
+			LL14(L"BPM 計測の使い方", L"How to measure BPM", L"Comment mesurer le BPM", L"Come misurare il BPM", L"Como medir el BPM",
+				L"BPM 측정 방법", L"如何测量 BPM", L"كيفية قياس BPM", L"Как измерить BPM", L"BPM messen – Hilfe",
+				L"Como medir o BPM", L"BPM meten – hulp", L"Jak zmierzyc BPM", L"BPM nasil olculur"),
+			MB_OK | MB_ICONINFORMATION);
+	}
+	afx_msg void OnCancel() { OnCloseBtn(); }
+	DECLARE_MESSAGE_MAP()
+};
+
+BEGIN_MESSAGE_MAP(CMpBpmDlg, CCustomBlurDialogBase)
+	ON_WM_SIZE()
+	ON_WM_CONTEXTMENU()
+	ON_BN_CLICKED(IDC_MP_BPM_CAND1, &CMpBpmDlg::OnCand1)
+	ON_BN_CLICKED(IDC_MP_BPM_CAND2, &CMpBpmDlg::OnCand2)
+	ON_BN_CLICKED(IDC_MP_BPM_CAND3, &CMpBpmDlg::OnCand3)
+	ON_BN_CLICKED(IDC_MP_BPM_REMEAS, &CMpBpmDlg::OnRemeasure)
+	ON_BN_CLICKED(IDC_MP_BPM_ABORT, &CMpBpmDlg::OnAbort)
+	ON_BN_CLICKED(IDC_MP_BPM_CLOSE, &CMpBpmDlg::OnCloseBtn)
+	ON_BN_CLICKED(IDC_MP_BPM_HELP, &CMpBpmDlg::OnHelp)
+END_MESSAGE_MAP()
+
+static void CloseMpBpmMeasureDlgIfOpen()
+{
+	if (g_mpBpmDlg && ::IsWindow(g_mpBpmDlg->GetSafeHwnd()))
+		g_mpBpmDlg->DestroyWindow();
+	g_mpBpmDlg = NULL;
+}
+
+static void OpenMpBpmMeasureDlg(CWnd* parent)
+{
+	if (g_mpBpmDlg && ::IsWindow(g_mpBpmDlg->GetSafeHwnd())) {
+		g_mpBpmDlg->ShowWindow(SW_SHOW);
+		g_mpBpmDlg->RefreshFromGlobals();
+		return;
+	}
+	if (!parent) parent = mp;
+	if (!parent) return;
+	g_mpBpmDlg = new CMpBpmDlg(parent);
+	if (!g_mpBpmDlg->Create(IDD_MP_BPM, parent)) {
+		delete g_mpBpmDlg;
+		g_mpBpmDlg = NULL;
+		return;
+	}
+	g_mpBpmDlg->ShowWindow(SW_SHOW);
+}
+
+static void MpBpmDlgRefreshUi()
+{
+	if (g_mpBpmDlg && ::IsWindow(g_mpBpmDlg->GetSafeHwnd()))
+		g_mpBpmDlg->RefreshFromGlobals();
+	else if (mp && mp->m_botBpm.GetSafeHwnd()) {
+		CString bot = MpBpmIsMeasuring() ? L"…" : L"BPM";
+		CString cur;
+		mp->m_botBpm.GetWindowText(cur);
+		if (cur != bot)
+			mp->m_botBpm.SetWindowText(bot);
+	}
+}
+
 
 // ---- Alarm settings dialog ----
 class CMpAlarmDlg : public CCustomBlurDialogBase
@@ -7178,6 +8793,7 @@ void MpAddonsShutdownAll()
 	MpRemoteStop(); // 先に止めて終了待ちを短くする
 	MpDjScratchShutdown();
 	CloseMpDjPadIfOpen();
+	CloseMpBpmMeasureDlgIfOpen();
 	CloseMpAlarmDlgIfOpen();
 	CloseMpMirrorDlgIfOpen();
 	CloseMpRemoteDlgIfOpen();
@@ -7188,4 +8804,306 @@ void MpAddonsShutdownAll()
 	g_bpmHeldPcAudio = 0;
 	while (g_pcAudioRetain > 0)
 		MpPcAudioRelease();
+}
+
+// ---------------------------------------------------------------------------
+// プレイリスト表示ソート: ディスク上は常に自然順。表示だけ並べ替える。
+// s_natOrd[visual] = 自然順ランク (0..n-1)。Save は inv 経由で自然順書出し。
+// ---------------------------------------------------------------------------
+static int* s_plNatOrd = NULL;
+static int s_plNatN = 0;
+static int s_plNatCap = 0;
+
+extern int plcnt;
+
+static int MpCmpNameAsc(const void* a, const void* b)
+{
+	const playlistdata0* pa = (const playlistdata0*)a;
+	const playlistdata0* pb = (const playlistdata0*)b;
+	return _tcsicmp(pa->name, pb->name);
+}
+static int MpCmpNameDesc(const void* a, const void* b) { return -MpCmpNameAsc(a, b); }
+static int MpCmpArtAsc(const void* a, const void* b)
+{
+	const playlistdata0* pa = (const playlistdata0*)a;
+	const playlistdata0* pb = (const playlistdata0*)b;
+	int c = _tcsicmp(pa->art, pb->art);
+	return c ? c : _tcsicmp(pa->name, pb->name);
+}
+static int MpCmpArtDesc(const void* a, const void* b) { return -MpCmpArtAsc(a, b); }
+static int MpCmpAlbAsc(const void* a, const void* b)
+{
+	const playlistdata0* pa = (const playlistdata0*)a;
+	const playlistdata0* pb = (const playlistdata0*)b;
+	int c = _tcsicmp(pa->alb, pb->alb);
+	return c ? c : _tcsicmp(pa->name, pb->name);
+}
+static int MpCmpAlbDesc(const void* a, const void* b) { return -MpCmpAlbAsc(a, b); }
+static int MpCmpTimeAsc(const void* a, const void* b)
+{
+	const playlistdata0* pa = (const playlistdata0*)a;
+	const playlistdata0* pb = (const playlistdata0*)b;
+	if (pa->time != pb->time) return (pa->time < pb->time) ? -1 : 1;
+	return _tcsicmp(pa->name, pb->name);
+}
+static int MpCmpTimeDesc(const void* a, const void* b) { return -MpCmpTimeAsc(a, b); }
+
+static void MpPlaylistNatOrdFree()
+{
+	if (s_plNatOrd) { free(s_plNatOrd); s_plNatOrd = NULL; }
+	s_plNatN = 0;
+	s_plNatCap = 0;
+}
+
+void MpPlaylistNatOrdClear()
+{
+	MpPlaylistNatOrdFree();
+}
+
+static BOOL MpPlaylistNatOrdGrow(int need)
+{
+	if (need <= s_plNatCap) return TRUE;
+	int cap = s_plNatCap > 0 ? s_plNatCap : 16;
+	while (cap < need) cap *= 2;
+	int* p = (int*)realloc(s_plNatOrd, (size_t)cap * sizeof(int));
+	if (!p) return FALSE;
+	s_plNatOrd = p;
+	s_plNatCap = cap;
+	return TRUE;
+}
+
+// スタンプ欠落時は「いまの表示順」を自然順として採用(破損済みPLの救済)
+static void MpPlaylistNatOrdEnsure()
+{
+	if (!pl || !pl->pc || pl->playcnt <= 0) {
+		MpPlaylistNatOrdFree();
+		return;
+	}
+	const int n = pl->playcnt;
+	if (s_plNatN == n && s_plNatOrd) return;
+	if (!MpPlaylistNatOrdGrow(n)) return;
+	for (int i = 0; i < n; ++i)
+		s_plNatOrd[i] = i;
+	s_plNatN = n;
+}
+
+void MpPlaylistNatOrdOnLoaded(int n)
+{
+	if (n <= 0 || !pl || !pl->pc) {
+		MpPlaylistNatOrdFree();
+		return;
+	}
+	if (!MpPlaylistNatOrdGrow(n)) return;
+	for (int i = 0; i < n; ++i)
+		s_plNatOrd[i] = i;
+	s_plNatN = n;
+}
+
+void MpPlaylistNatOrdNotifyAdded()
+{
+	if (!pl || pl->playcnt <= 0) return;
+	const int n = pl->playcnt;
+	if (s_plNatN != n - 1 || !s_plNatOrd) {
+		MpPlaylistNatOrdEnsure();
+		return;
+	}
+	if (!MpPlaylistNatOrdGrow(n)) return;
+	int mx = -1;
+	for (int i = 0; i < n - 1; ++i)
+		if (s_plNatOrd[i] > mx) mx = s_plNatOrd[i];
+	s_plNatOrd[n - 1] = mx + 1;
+	s_plNatN = n;
+}
+
+void MpPlaylistNatOrdNotifyInserted(int at, int nIns)
+{
+	if (!pl || !pl->pc || nIns <= 0) return;
+	const int n = pl->playcnt;
+	const int oldN = n - nIns;
+	if (oldN < 0 || at < 0 || at > oldN) {
+		MpPlaylistNatOrdEnsure();
+		return;
+	}
+	if (s_plNatN != oldN || !s_plNatOrd) {
+		// 挿入前スタンプが無い → 挿入後の並びを自然順に
+		MpPlaylistNatOrdOnLoaded(n);
+		return;
+	}
+	if (!MpPlaylistNatOrdGrow(n)) return;
+	for (int i = oldN - 1; i >= at; --i)
+		s_plNatOrd[i + nIns] = s_plNatOrd[i];
+	int baseNat;
+	if (at + nIns < n)
+		baseNat = s_plNatOrd[at + nIns];
+	else {
+		int mx = -1;
+		for (int i = 0; i < at; ++i)
+			if (s_plNatOrd[i] > mx) mx = s_plNatOrd[i];
+		baseNat = mx + 1;
+	}
+	for (int i = 0; i < at; ++i)
+		if (s_plNatOrd[i] >= baseNat) s_plNatOrd[i] += nIns;
+	for (int i = at + nIns; i < n; ++i)
+		if (s_plNatOrd[i] >= baseNat) s_plNatOrd[i] += nIns;
+	for (int i = 0; i < nIns; ++i)
+		s_plNatOrd[at + i] = baseNat + i;
+	s_plNatN = n;
+}
+
+void MpPlaylistNatOrdNotifyRemovedAt(int idx)
+{
+	if (!s_plNatOrd || s_plNatN <= 0) return;
+	if (idx < 0 || idx >= s_plNatN) return;
+	const int gone = s_plNatOrd[idx];
+	for (int i = idx + 1; i < s_plNatN; ++i)
+		s_plNatOrd[i - 1] = s_plNatOrd[i];
+	s_plNatN--;
+	for (int i = 0; i < s_plNatN; ++i)
+		if (s_plNatOrd[i] > gone) s_plNatOrd[i]--;
+}
+
+void MpPlaylistNatOrdNotifySwap(int i, int j)
+{
+	if (!s_plNatOrd || s_plNatN <= 0) return;
+	if (i < 0 || j < 0 || i >= s_plNatN || j >= s_plNatN || i == j) return;
+	const int t = s_plNatOrd[i];
+	s_plNatOrd[i] = s_plNatOrd[j];
+	s_plNatOrd[j] = t;
+}
+
+// Save 用: 自然順で並べた visual 添え字を outIdx[0..n) に書く。失敗時 FALSE。
+BOOL MpPlaylistBuildNaturalIndex(int* outIdx, int n)
+{
+	if (!outIdx || n <= 0 || !pl || !pl->pc || pl->playcnt != n) return FALSE;
+	MpPlaylistNatOrdEnsure();
+	if (s_plNatN != n || !s_plNatOrd) return FALSE;
+	for (int i = 0; i < n; ++i) outIdx[i] = -1;
+	for (int v = 0; v < n; ++v) {
+		const int nat = s_plNatOrd[v];
+		if (nat < 0 || nat >= n || outIdx[nat] >= 0) {
+			// 壊れている → 表示順を自然順扱い
+			for (int k = 0; k < n; ++k) outIdx[k] = k;
+			return TRUE;
+		}
+		outIdx[nat] = v;
+	}
+	return TRUE;
+}
+
+int MpPlaylistNaturalIndexOfVisual(int visual)
+{
+	if (!pl || visual < 0 || visual >= pl->playcnt) return -1;
+	MpPlaylistNatOrdEnsure();
+	if (!s_plNatOrd || s_plNatN != pl->playcnt) return visual;
+	return s_plNatOrd[visual];
+}
+
+static void MpPlaylistRemapIndicesByFol(const TCHAR* keepFol)
+{
+	if (!keepFol || !keepFol[0] || !pl || !pl->pc) return;
+	for (int i = 0; i < pl->playcnt; ++i) {
+		if (_tcsicmp(pl->pc[i].fol, keepFol) == 0) {
+			pl->pnt = i;
+			plcnt = i;
+			return;
+		}
+	}
+}
+
+void MpPlaylistRestoreNaturalOrder()
+{
+	if (!pl || !pl->pc || pl->playcnt <= 1) return;
+	const int n = pl->playcnt;
+	MpPlaylistNatOrdEnsure();
+	if (s_plNatN != n || !s_plNatOrd) return;
+
+	TCHAR keep[1024]; keep[0] = 0;
+	if (pl->pnt >= 0 && pl->pnt < n)
+		_tcsncpy_s(keep, pl->pc[pl->pnt].fol, _TRUNCATE);
+
+	int* order = (int*)malloc((size_t)n * sizeof(int));
+	playlistdata0* tmp = (playlistdata0*)malloc((size_t)n * sizeof(playlistdata0));
+	if (!order || !tmp) {
+		free(order); free(tmp);
+		return;
+	}
+	if (!MpPlaylistBuildNaturalIndex(order, n)) {
+		free(order); free(tmp);
+		return;
+	}
+	for (int i = 0; i < n; ++i)
+		memcpy(&tmp[i], &pl->pc[order[i]], sizeof(playlistdata0));
+	memcpy(pl->pc, tmp, (size_t)n * sizeof(playlistdata0));
+	for (int i = 0; i < n; ++i)
+		s_plNatOrd[i] = i;
+	free(order);
+	free(tmp);
+	MpPlaylistRemapIndicesByFol(keep);
+}
+
+static int (*s_mpSortCmp)(const void*, const void*) = NULL;
+static int MpCmpIdxAsc(const void* a, const void* b)
+{
+	const int ia = *(const int*)a;
+	const int ib = *(const int*)b;
+	return s_mpSortCmp(&pl->pc[ia], &pl->pc[ib]);
+}
+
+void MpPlaylistApplySavedSort()
+{
+	if (!pl || !pl->pc || pl->playcnt <= 1) return;
+	const int key = savedata.mpSortKey;
+	if (key < 1 || key > 4) {
+		MpPlaylistRestoreNaturalOrder();
+		return;
+	}
+	MpPlaylistNatOrdEnsure();
+	const int n = pl->playcnt;
+	if (s_plNatN != n || !s_plNatOrd) return;
+
+	TCHAR keep[1024]; keep[0] = 0;
+	if (pl->pnt >= 0 && pl->pnt < n)
+		_tcsncpy_s(keep, pl->pc[pl->pnt].fol, _TRUNCATE);
+
+	int (*cmp)(const void*, const void*) = NULL;
+	if (key == 1) cmp = savedata.mpSortAsc ? MpCmpNameAsc : MpCmpNameDesc;
+	else if (key == 2) cmp = savedata.mpSortAsc ? MpCmpArtAsc : MpCmpArtDesc;
+	else if (key == 3) cmp = savedata.mpSortAsc ? MpCmpAlbAsc : MpCmpAlbDesc;
+	else if (key == 4) cmp = savedata.mpSortAsc ? MpCmpTimeAsc : MpCmpTimeDesc;
+	if (!cmp) return;
+
+	int* idx = (int*)malloc((size_t)n * sizeof(int));
+	playlistdata0* tmp = (playlistdata0*)malloc((size_t)n * sizeof(playlistdata0));
+	int* natTmp = (int*)malloc((size_t)n * sizeof(int));
+	if (!idx || !tmp || !natTmp) {
+		free(idx); free(tmp); free(natTmp);
+		return;
+	}
+	for (int i = 0; i < n; ++i) idx[i] = i;
+	s_mpSortCmp = cmp;
+	qsort(idx, (size_t)n, sizeof(int), MpCmpIdxAsc);
+	s_mpSortCmp = NULL;
+	for (int i = 0; i < n; ++i) {
+		memcpy(&tmp[i], &pl->pc[idx[i]], sizeof(playlistdata0));
+		natTmp[i] = s_plNatOrd[idx[i]];
+	}
+	memcpy(pl->pc, tmp, (size_t)n * sizeof(playlistdata0));
+	memcpy(s_plNatOrd, natTmp, (size_t)n * sizeof(int));
+	free(idx); free(tmp); free(natTmp);
+	MpPlaylistRemapIndicesByFol(keep);
+}
+
+void MpSortPlaylistByKey(int key)
+{
+	if (!pl || !pl->pc || pl->playcnt <= 1) return;
+	if (key < 1 || key > 4) return;
+	MpPlaylistNatOrdEnsure();
+	if (savedata.mpSortKey == key)
+		savedata.mpSortAsc = savedata.mpSortAsc ? 0 : 1;
+	else {
+		savedata.mpSortKey = key;
+		savedata.mpSortAsc = 1;
+	}
+	MpPlaylistApplySavedSort();
+	// ソート順は savedata のみ。プレイリスト本体は自然順のまま Save される。
 }

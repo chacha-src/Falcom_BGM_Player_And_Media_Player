@@ -754,6 +754,11 @@ struct save{
 	int vc_style;               // 0=通常 1=ロボット 2=ラジオ/電話
 	int vc_mic_apply;           // 1=MP/画面キャプチャのマイクミックスにVC設定を適用
 	int vc_preset_rev;          // プリセットカタログ版（0=旧10種, 1=現行）
+
+	// --- BPM 拍子・音符価（末尾追記。旧.datは0）---
+	int mpDetectedMeterNum;     // 0=未, 2..12
+	int mpDetectedMeterDen;     // 0=未, 4 or 8
+	int mpDetectedPulse;        // 0=未, 4/8/16/32/64
 };
 extern save savedata;
 /* コード間隔(ms)。16..500。旧.dat や未設定は 25。 */

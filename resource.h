@@ -121,6 +121,7 @@
 #define IDD_MP_QUEUE                    243
 #define IDD_MP_MBPICK                   244
 #define IDD_MP_CMDPAL                   246
+#define IDD_MP_BPM                      247
 #define IDD_SC_LIVESETTINGS             249
 #define IDD_SOUNDMETER                  250
 #define IDD_SM_HELP                     251
@@ -1211,6 +1212,12 @@
 #define IDC_SC_VC_OPEN                  4174
 #define IDC_MP_VC_APPLY                 4175
 #define IDC_MP_VC_OPEN                  4176
+#define IDC_MP_EDIT_SELALL              4177
+#define IDC_MP_EDIT_COPY                4178
+#define IDC_MP_EDIT_CUT                 4179
+#define IDC_MP_EDIT_PASTE               4180
+#define IDC_MP_EDIT_UNDO                4181
+#define IDC_MP_EDIT_REDO                4182
 #define IDC_TN_HELP                     4090
 #define IDC_TN_MIC_L                    4091
 #define IDC_TN_MIC                      4092
@@ -1670,13 +1677,27 @@
 #define ID_ETC40                        40089
 #define ID_DOUGA_SUBOFF                 40090
 
+#define IDC_MP_BPM_HELP                 4183
+#define IDC_MP_BPM_STATUS               4184
+#define IDC_MP_BPM_VAL                  4185
+#define IDC_MP_BPM_METER                4186
+#define IDC_MP_BPM_PULSE                4187
+#define IDC_MP_BPM_PASS                 4188
+#define IDC_MP_BPM_CONF                 4189
+#define IDC_MP_BPM_CAND1                4190
+#define IDC_MP_BPM_CAND2                4191
+#define IDC_MP_BPM_CAND3                4192
+#define IDC_MP_BPM_REMEAS               4193
+#define IDC_MP_BPM_CLOSE                4194
+#define IDC_MP_BPM_ABORT                4195
+
 // Next default values for new objects
 // 
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
-#define _APS_NEXT_RESOURCE_VALUE        268
-#define _APS_NEXT_COMMAND_VALUE         33254
-#define _APS_NEXT_CONTROL_VALUE         4177
+#define _APS_NEXT_RESOURCE_VALUE        269
+#define _APS_NEXT_COMMAND_VALUE         33256
+#define _APS_NEXT_CONTROL_VALUE         4196
 #define _APS_NEXT_SYMED_VALUE           104
 #endif
 #endif

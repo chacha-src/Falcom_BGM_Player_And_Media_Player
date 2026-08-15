@@ -146,6 +146,9 @@ public:
 	CCustomStandardButton m_cheatBtn;    // 操作ガイド(?)
 	CCustomStandardButton m_sortName, m_sortArt, m_sortAlb, m_sortTime;
 	CCustomStandardButton m_addFolder; // フォルダから追加(ライブラリ)
+	// フォルダ追加右: リスト編集(Ctrl+A/C/X/V/Z/Y)。3段階収縮
+	CCustomStandardButton m_editSelAll, m_editCopy, m_editCut, m_editPaste, m_editUndo, m_editRedo;
+	int m_mpEditShort; // 0=フル 1=中 2=記号/キー文字
 	CCustomCheckBox m_findFilter;      // 検索=絞り込み
 	CCustomCheckBox m_findRegex;       // 検索=正規表現
 	CCustomStatic m_lrcBadge;          // LRC状態バッジ
@@ -671,6 +674,12 @@ protected:
 	afx_msg void OnSortAlb();
 	afx_msg void OnSortTime();
 	afx_msg void OnAddFolder();
+	afx_msg void OnEditSelAll();
+	afx_msg void OnEditCopy();
+	afx_msg void OnEditCut();
+	afx_msg void OnEditPaste();
+	afx_msg void OnEditUndo();
+	afx_msg void OnEditRedo();
 	afx_msg void OnFindFilter();
 	afx_msg void OnFindRegex();
 	afx_msg void OnLibToggle();

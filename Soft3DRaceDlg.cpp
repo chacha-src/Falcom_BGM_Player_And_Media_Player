@@ -968,7 +968,7 @@ BOOL CS3rView::BakeHudTexture(const wchar_t* text)
 	if (!cv) return FALSE;
 	Soft3DTextD2D_FillRect(cv, 0, 0, (float)w, (float)h, 140, 8, 10, 18);
 	Soft3DTextD2D_DrawTextShadow(cv, text, 16.f, 14.f, (float)(w - 28), (float)(h - 24),
-		40.f, 1, 0, 0, 255, 245, 250, 255, 2.f, 2.f, 160, 0, 0, 0);
+		40.f, 1, 0, 0, 255, 245, 250, 255, 2.f, 2.f, 160, 0, 0, 0, 1);
 	const BYTE* bits = NULL; UINT stride = 0;
 	if (!Soft3DTextD2D_End(cv, &bits, &stride) || !bits) { Soft3DTextD2D_Release(cv); return FALSE; }
 	D3D11_TEXTURE2D_DESC d = {};

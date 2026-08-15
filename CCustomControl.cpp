@@ -6807,7 +6807,7 @@ CCustomRangeSliderCtrl::CCustomRangeSliderCtrl()
     m_wavePeakCount(0), m_cueCount(0), m_nCueClick(-1),
     m_lrcCount(0), m_nLrcClick(-1), m_bHoverZoom(TRUE), m_hoverZoomX(-1),
     m_ribbonN(0), m_xfadePreviewMs(0), m_timeBaseHz(44100),
-    m_beatBpm(120.f), m_bBeatGrid(FALSE), m_beatOffsetMs(0), m_bHoverTracking(FALSE),
+    m_beatBpm(120.f), m_bBeatGrid(FALSE), m_beatOffsetMs(0), m_beatMeter(4), m_bHoverTracking(FALSE),
     m_backstoreW(0), m_backstoreH(0)
 {
     ZeroMemory(m_wavePeaks, sizeof(m_wavePeaks));
@@ -7099,17 +7099,25 @@ void CCustomRangeSliderCtrl::SetTimeBaseHz(int hz)
 
 void CCustomRangeSliderCtrl::SetBeatGrid(float bpm, BOOL enabled)
 {
-	SetBeatGrid(bpm, enabled, m_beatOffsetMs);
+	SetBeatGrid(bpm, enabled, m_beatOffsetMs, m_beatMeter);
 }
 
 void CCustomRangeSliderCtrl::SetBeatGrid(float bpm, BOOL enabled, int offsetMs)
 {
+	SetBeatGrid(bpm, enabled, offsetMs, m_beatMeter);
+}
+
+void CCustomRangeSliderCtrl::SetBeatGrid(float bpm, BOOL enabled, int offsetMs, int beatsPerBar)
+{
     if (bpm <= 1.f) bpm = 120.f;
+    if (beatsPerBar < 2) beatsPerBar = 4;
+    if (beatsPerBar > 16) beatsPerBar = 16;
     const BOOL en = enabled ? TRUE : FALSE;
-    if (en == m_bBeatGrid && fabsf(bpm - m_beatBpm) < 0.01f && offsetMs == m_beatOffsetMs) return;
+    if (en == m_bBeatGrid && fabsf(bpm - m_beatBpm) < 0.01f && offsetMs == m_beatOffsetMs && beatsPerBar == m_beatMeter) return;
     m_bBeatGrid = en;
     m_beatBpm = bpm;
     m_beatOffsetMs = offsetMs;
+    m_beatMeter = beatsPerBar;
     if (::IsWindow(m_hWnd) && ::IsWindowVisible(m_hWnd))
         Invalidate(FALSE);
 }
@@ -7387,7 +7395,7 @@ void CCustomRangeSliderCtrl::DrawRangeSlider(CDC* pDC)
         }
     }
 
-    // 拍グリッド(薄い縦線)
+    // 拍グリッド(薄い縦線、小節頭はアクセント)
     if (m_bBeatGrid && m_timeBaseHz > 0) {
         const float bpm = (m_beatBpm > 1.f) ? m_beatBpm : 120.f;
         const double framesPerBeat = (double)m_timeBaseHz * 60.0 / (double)bpm;
@@ -7395,14 +7403,20 @@ void CCustomRangeSliderCtrl::DrawRangeSlider(CDC* pDC)
             const int span = m_nMax - m_nMin;
             int maxLines = (int)(span / framesPerBeat) + 2;
             if (maxLines > 256) maxLines = 256;
+            const int meter = (m_beatMeter >= 2 && m_beatMeter <= 16) ? m_beatMeter : 4;
             COLORREF gc = m_bAeroMode ? RGB(60, 60, 70) : RGB(210, 215, 225);
+            COLORREF gcBar = m_bAeroMode ? RGB(90, 90, 110) : RGB(160, 170, 190);
             for (int i = 0; i < maxLines; ++i) {
                 const int offFrames = (int)(((__int64)m_beatOffsetMs * m_timeBaseHz) / 1000);
                 int fv = m_nMin + offFrames + (int)(i * framesPerBeat + 0.5);
                 if (fv < m_nMin) continue;
                 if (fv > m_nMax) break;
                 int x = ValueToPixel(fv);
-                pDC->FillSolidRect(x, cy - 10, 1, 20, gc);
+                const BOOL bar = ((i % meter) == 0);
+                if (bar)
+                    pDC->FillSolidRect(x, cy - 14, 2, 28, gcBar);
+                else
+                    pDC->FillSolidRect(x, cy - 10, 1, 20, gc);
             }
         }
     }
@@ -13505,7 +13519,9 @@ static BOOL CCC_PaintChildDirect(HWND hWnd, HDC hdcBuf)
     BOOL painted = FALSE;
     if (auto* p = dynamic_cast<CCustomStandardButton*>(pw))
     {
-        p->PaintClient(dc, r);
+        // アクリル/ExtendFrame 下は素 PaintClient(BitBlt) だと α=0 のまま穴になる。
+        // PaintOpaqueClient で α=255 合成する（候補ボタンの白抜け対策）。
+        p->PaintOpaqueClient(dc);
         painted = TRUE;
     }
     else if (auto* pEdit = dynamic_cast<CCustomEdit*>(pw))
@@ -13981,7 +13997,7 @@ static BOOL CCC_IsCaptionChromeCtrl(HWND hWnd)
         IDC_TE_HELP, IDC_FD_HELP, IDC_KPI_HELP, IDC_SY_HELP, IDC_PRT_HELP,
         IDC_OGG_HELP, IDC_MP_CHEATBTN,
         IDC_SM_HELP, IDC_DIG_HELP, IDC_VC_HELP, IDC_TN_HELP, IDC_PF_HELP,
-        IDC_S3M_HELP, IDC_S3R_HELP
+        IDC_S3M_HELP, IDC_S3R_HELP, IDC_MP_BPM_HELP
     };
     for (int i = 0; i < (int)_countof(kHelpChromeIds); ++i) {
         if (id == kHelpChromeIds[i])
@@ -13998,7 +14014,7 @@ static BOOL CCC_IsCaptionHelpChromeId(UINT id)
         IDC_TE_HELP, IDC_FD_HELP, IDC_KPI_HELP, IDC_SY_HELP, IDC_PRT_HELP,
         IDC_OGG_HELP, IDC_MP_CHEATBTN,
         IDC_SM_HELP, IDC_DIG_HELP, IDC_VC_HELP, IDC_TN_HELP, IDC_PF_HELP,
-        IDC_S3M_HELP, IDC_S3R_HELP
+        IDC_S3M_HELP, IDC_S3R_HELP, IDC_MP_BPM_HELP
     };
     for (int i = 0; i < (int)_countof(kHelpChromeIds); ++i) {
         if (id == kHelpChromeIds[i])
@@ -14016,7 +14032,7 @@ static HWND CCC_FindCaptionHelpChrome(HWND hDlg)
         IDC_TE_HELP, IDC_FD_HELP, IDC_KPI_HELP, IDC_SY_HELP, IDC_PRT_HELP,
         IDC_OGG_HELP, IDC_MP_CHEATBTN,
         IDC_SM_HELP, IDC_DIG_HELP, IDC_VC_HELP, IDC_TN_HELP, IDC_PF_HELP,
-        IDC_S3M_HELP, IDC_S3R_HELP
+        IDC_S3M_HELP, IDC_S3R_HELP, IDC_MP_BPM_HELP
     };
     for (int i = 0; i < (int)_countof(kHelpChromeIds); ++i) {
         HWND h = ::GetDlgItem(hDlg, kHelpChromeIds[i]);
@@ -14535,7 +14551,7 @@ void CCC_CaptionLayout(HWND hDlg)
         IDC_TE_HELP, IDC_FD_HELP, IDC_KPI_HELP, IDC_SY_HELP, IDC_PRT_HELP,
         IDC_OGG_HELP, IDC_MP_CHEATBTN,
         IDC_SM_HELP, IDC_DIG_HELP, IDC_VC_HELP, IDC_TN_HELP, IDC_PF_HELP,
-        IDC_S3M_HELP, IDC_S3R_HELP
+        IDC_S3M_HELP, IDC_S3R_HELP, IDC_MP_BPM_HELP
     };
     for (int i = 0; i < (int)_countof(kHelpChromeIds); ++i) {
         HWND hHelp = ::GetDlgItem(hDlg, kHelpChromeIds[i]);

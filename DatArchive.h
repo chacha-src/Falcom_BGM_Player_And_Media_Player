@@ -21,4 +21,7 @@ BOOL DatArc_Delete(LPCTSTR leaf);
 BOOL DatArc_Rename(LPCTSTR fromLeaf, LPCTSTR toLeaf);
 BOOL DatArc_FlushAll();
 
+// 連続 Save 時に全アーカイブ再圧縮を1回にまとめる (TRUEで保留、FALSEで保留分を flush)
+void DatArc_FlushSuspend(BOOL suspend);
+
 #endif

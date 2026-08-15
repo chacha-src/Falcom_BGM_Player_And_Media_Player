@@ -38,6 +38,9 @@ struct DatArcMemEnt {
 	ULONGLONG cmpSize;
 	ULONGLONG offset;
 	BYTE inIndex;
+	FILETIME stageMtime;
+	ULONGLONG stageSize;
+	BYTE stageFpValid;
 };
 
 static TCHAR g_exeDir[MAX_PATH] = { 0 };
@@ -48,6 +51,8 @@ static int g_n = 0;
 static BOOL g_ready = FALSE;
 static BYTE* g_arcMap = NULL;
 static ULONGLONG g_arcMapSize = 0;
+static int g_flushSuspend = 0;
+static BOOL g_flushDirty = FALSE;
 
 static void DatArc_FreeMap()
 {
@@ -259,6 +264,43 @@ static BOOL DatArc_ExtractAll()
 	return TRUE;
 }
 
+static void DatArc_RefreshStageFingerprints()
+{
+	for (int i = 0; i < g_n; ++i) {
+		g_ent[i].stageFpValid = 0;
+		WIN32_FILE_ATTRIBUTE_DATA fad = {};
+		const CString path = DatArc_StagePath(g_ent[i].nameW);
+		if (!::GetFileAttributesEx(path, GetFileExInfoStandard, &fad))
+			continue;
+		ULARGE_INTEGER sz;
+		sz.LowPart = fad.nFileSizeLow;
+		sz.HighPart = fad.nFileSizeHigh;
+		g_ent[i].stageSize = sz.QuadPart;
+		g_ent[i].stageMtime = fad.ftLastWriteTime;
+		g_ent[i].stageFpValid = 1;
+	}
+}
+
+static BOOL DatArc_StageMatchesEnt(int ei, const WIN32_FILE_ATTRIBUTE_DATA& fad)
+{
+	if (ei < 0 || ei >= g_n || !g_ent[ei].stageFpValid)
+		return FALSE;
+	ULARGE_INTEGER sz;
+	sz.LowPart = fad.nFileSizeLow;
+	sz.HighPart = fad.nFileSizeHigh;
+	if (sz.QuadPart != g_ent[ei].stageSize)
+		return FALSE;
+	if (::CompareFileTime(&fad.ftLastWriteTime, &g_ent[ei].stageMtime) != 0)
+		return FALSE;
+	if (!g_arcMap || g_ent[ei].cmpSize == 0) {
+		// 空ファイルはサイズ0一致で再利用可
+		return sz.QuadPart == 0 && g_ent[ei].uncSize == 0;
+	}
+	if (g_ent[ei].offset + g_ent[ei].cmpSize > g_arcMapSize)
+		return FALSE;
+	return TRUE;
+}
+
 static BOOL DatArc_RebuildFromStage()
 {
 	if (!DatArc_EnsureStageDir()) return FALSE;
@@ -282,19 +324,49 @@ static BOOL DatArc_RebuildFromStage()
 		::FindClose(h);
 	}
 
-	// 圧縮バッファと生データ
+	// 変更が無ければアーカイブ再生成を省略
+	if (nNames == g_n && g_arcMap && ::PathFileExists(g_arcPath)) {
+		BOOL allSame = TRUE;
+		for (int i = 0; i < nNames; ++i) {
+			const int oi = DatArc_FindIndex(names[i]);
+			if (oi < 0) { allSame = FALSE; break; }
+			WIN32_FILE_ATTRIBUTE_DATA fad = {};
+			if (!::GetFileAttributesEx(DatArc_StagePath(names[i]), GetFileExInfoStandard, &fad)
+				|| !DatArc_StageMatchesEnt(oi, fad)) {
+				allSame = FALSE;
+				break;
+			}
+		}
+		if (allSame)
+			return TRUE;
+	}
+
+	// 圧縮バッファと生データ (未変更分は旧マップの圧縮塊を流用)
 	BYTE* unc[DATARC_MAX];
 	BYTE* cmp[DATARC_MAX];
 	ULONGLONG uncSz[DATARC_MAX];
 	ULONGLONG cmpSz[DATARC_MAX];
+	BYTE cmpOwned[DATARC_MAX]; // 1=malloc、0=旧マップ参照
 	ZeroMemory(unc, sizeof(unc));
 	ZeroMemory(cmp, sizeof(cmp));
 	ZeroMemory(uncSz, sizeof(uncSz));
 	ZeroMemory(cmpSz, sizeof(cmpSz));
+	ZeroMemory(cmpOwned, sizeof(cmpOwned));
 
 	BOOL ok = TRUE;
 	for (int i = 0; i < nNames && ok; ++i) {
 		const CString path = DatArc_StagePath(names[i]);
+		WIN32_FILE_ATTRIBUTE_DATA fad = {};
+		const BOOL gotFad = ::GetFileAttributesEx(path, GetFileExInfoStandard, &fad) != 0;
+		const int oi = DatArc_FindIndex(names[i]);
+		if (gotFad && oi >= 0 && DatArc_StageMatchesEnt(oi, fad)) {
+			uncSz[i] = g_ent[oi].uncSize;
+			cmpSz[i] = g_ent[oi].cmpSize;
+			if (cmpSz[i] > 0)
+				cmp[i] = g_arcMap + (size_t)g_ent[oi].offset;
+			cmpOwned[i] = 0;
+			continue;
+		}
 		if (!DatArc_ReadWholeFile(path, &unc[i], &uncSz[i])) {
 			ok = FALSE;
 			break;
@@ -302,6 +374,7 @@ static BOOL DatArc_RebuildFromStage()
 		const size_t bound = ZSTD_compressBound((size_t)uncSz[i]);
 		cmp[i] = (BYTE*)malloc(bound ? bound : 1);
 		if (!cmp[i]) { ok = FALSE; break; }
+		cmpOwned[i] = 1;
 		const size_t csz = ZSTD_compress(cmp[i], bound, unc[i], (size_t)uncSz[i], DATARC_ZSTD_LEVEL);
 		if (ZSTD_isError(csz)) { ok = FALSE; break; }
 		cmpSz[i] = (ULONGLONG)csz;
@@ -330,7 +403,7 @@ static BOOL DatArc_RebuildFromStage()
 				idx[i].uncSize = uncSz[i];
 				idx[i].cmpSize = cmpSz[i];
 				idx[i].offset = off;
-				if (cmpSz[i] > 0)
+				if (cmpSz[i] > 0 && cmp[i])
 					memcpy(out + (size_t)off, cmp[i], (size_t)cmpSz[i]);
 				off += cmpSz[i];
 			}
@@ -361,7 +434,7 @@ static BOOL DatArc_RebuildFromStage()
 
 	for (int i = 0; i < nNames; ++i) {
 		if (unc[i]) free(unc[i]);
-		if (cmp[i]) free(cmp[i]);
+		if (cmpOwned[i] && cmp[i]) free(cmp[i]);
 	}
 
 	if (!ok) return FALSE;
@@ -369,6 +442,8 @@ static BOOL DatArc_RebuildFromStage()
 	// メモリ上のインデックスを再読込
 	if (!DatArc_LoadArcIntoMemory() || !DatArc_ParseIndexFromMap())
 		return FALSE;
+	DatArc_RefreshStageFingerprints();
+	g_flushDirty = FALSE;
 	return TRUE;
 }
 
@@ -475,6 +550,7 @@ BOOL DatArc_Init(LPCTSTR exeDirWithSlash)
 			return FALSE;
 		if (!DatArc_ExtractAll())
 			return FALSE;
+		DatArc_RefreshStageFingerprints();
 	} else {
 		// 無ければバラ .dat を集めて作成し、古いのは削除
 		if (!DatArc_MigrateLooseFromExeDir())
@@ -486,6 +562,7 @@ BOOL DatArc_Init(LPCTSTR exeDirWithSlash)
 		} else {
 			if (!DatArc_LoadArcIntoMemory() || !DatArc_ParseIndexFromMap())
 				return FALSE;
+			DatArc_RefreshStageFingerprints();
 		}
 	}
 
@@ -548,6 +625,10 @@ BOOL DatArc_Commit(LPCTSTR leaf)
 	if (!g_ready || !leaf || !leaf[0]) return FALSE;
 	if (!DatArc_IsPackableLeaf(leaf)) return FALSE;
 	DatArc_AddIndex(leaf);
+	if (g_flushSuspend > 0) {
+		g_flushDirty = TRUE;
+		return TRUE;
+	}
 	return DatArc_RebuildFromStage();
 }
 
@@ -562,6 +643,10 @@ BOOL DatArc_Delete(LPCTSTR leaf)
 		for (int j = i; j < g_n - 1; ++j)
 			g_ent[j] = g_ent[j + 1];
 		--g_n;
+	}
+	if (g_flushSuspend > 0) {
+		g_flushDirty = TRUE;
+		return TRUE;
 	}
 	return DatArc_RebuildFromStage();
 }
@@ -582,8 +667,13 @@ BOOL DatArc_Rename(LPCTSTR fromLeaf, LPCTSTR toLeaf)
 		_tcsncpy(g_ent[i].nameW, toLeaf, DATARC_NAME - 1);
 		g_ent[i].nameW[DATARC_NAME - 1] = 0;
 		DatArc_NameToUtf8(toLeaf, g_ent[i].nameU8, DATARC_NAME);
+		g_ent[i].stageFpValid = 0;
 	} else {
 		DatArc_AddIndex(toLeaf);
+	}
+	if (g_flushSuspend > 0) {
+		g_flushDirty = TRUE;
+		return TRUE;
 	}
 	return DatArc_RebuildFromStage();
 }
@@ -591,5 +681,21 @@ BOOL DatArc_Rename(LPCTSTR fromLeaf, LPCTSTR toLeaf)
 BOOL DatArc_FlushAll()
 {
 	if (!g_ready) return FALSE;
+	if (g_flushSuspend > 0) {
+		g_flushDirty = TRUE;
+		return TRUE;
+	}
 	return DatArc_RebuildFromStage();
+}
+
+void DatArc_FlushSuspend(BOOL suspend)
+{
+	if (suspend) {
+		++g_flushSuspend;
+		return;
+	}
+	if (g_flushSuspend > 0)
+		--g_flushSuspend;
+	if (g_flushSuspend == 0 && g_flushDirty && g_ready)
+		DatArc_RebuildFromStage();
 }

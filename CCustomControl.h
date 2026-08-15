@@ -1080,6 +1080,7 @@ public:
     void SetAeroMode(BOOL b);
 
     void PaintClient(CDC& dc, const CRect& r);
+    void PaintOpaqueClient(CDC& dc); // アクリル下の OpaqueFixer 用（α=255）
     void RepaintClient();
     void EnsureAnimTimer();   // 押下状態変化後に流れるアニメを再開
 
@@ -1108,7 +1109,6 @@ private:
     UINT m_nAnimTick;      // アニメーション用カウンタ(流れるツヤ・鼓動パルス)
     BOOL m_bAnimRunning;   // アニメーションタイマー動作中か
     void UpdateAnimTimer(); // ホバー/フォーカス/残点に応じてタイマーを開始/停止
-    void PaintOpaqueClient(CDC& dc);
     void SparkleTick(BOOL bSpawn); // 点を進め、必要なら発生。全滅で FALSE 相当は N==0
 
     enum { kBtnSparkleMax = 48 };
@@ -1288,9 +1288,10 @@ public:
     void SetXfadePreviewMs(int ms);
     void SetTimeBaseHz(int hz);
 
-    // 拍グリッド。bpm<=0 は 120 扱い。
+    // 拍グリッド。bpm<=0 は 120 扱い。beatsPerBar は小節頭アクセント（2..16、既定4）。
     void SetBeatGrid(float bpm, BOOL enabled);
     void SetBeatGrid(float bpm, BOOL enabled, int offsetMs);
+    void SetBeatGrid(float bpm, BOOL enabled, int offsetMs, int beatsPerBar);
     int GetBeatGridOffsetMs() const { return m_beatOffsetMs; }
 
     // アクリルモードの設定
@@ -1357,6 +1358,7 @@ private:
     float m_beatBpm;
     BOOL m_bBeatGrid;
     int m_beatOffsetMs;
+    int m_beatMeter; // 小節内拍数（アクセント用）
     BOOL m_bHoverTracking;
     CToolTipCtrl m_hoverTip;
     CString m_hoverTipText;

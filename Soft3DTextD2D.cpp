@@ -238,11 +238,13 @@ void Soft3DTextD2D_FillTriangle(Soft3DTextD2DCanvas* c, float x0, float y0, floa
 }
 
 void Soft3DTextD2D_DrawText(Soft3DTextD2DCanvas* c, const wchar_t* text, float x, float y, float w, float h,
-	float fontPx, int bold, int align, int vCenter, BYTE a, BYTE r, BYTE g, BYTE b)
+	float fontPx, int bold, int align, int vCenter, BYTE a, BYTE r, BYTE g, BYTE b, int wrap)
 {
 	if (!c || !c->rt || !text || !text[0]) return;
 	IDWriteTextFormat* fmt = Soft3DTextD2D_GetFormat(fontPx, bold, align, vCenter);
 	if (!fmt) return;
+	// キャッシュ共有のため毎 Draw で設定（wrap=0 の呼び出しが前の wrap=1 を残さない）
+	fmt->SetWordWrapping(wrap ? DWRITE_WORD_WRAPPING_EMERGENCY_BREAK : DWRITE_WORD_WRAPPING_NO_WRAP);
 	ID2D1SolidColorBrush* br = NULL;
 	if (SUCCEEDED(c->rt->CreateSolidColorBrush(D2D1::ColorF(r / 255.f, g / 255.f, b / 255.f, a / 255.f), &br)) && br) {
 		c->rt->DrawText(text, (UINT32)wcslen(text), fmt, D2D1::RectF(x, y, x + w, y + h), br,
@@ -254,10 +256,10 @@ void Soft3DTextD2D_DrawText(Soft3DTextD2DCanvas* c, const wchar_t* text, float x
 
 void Soft3DTextD2D_DrawTextShadow(Soft3DTextD2DCanvas* c, const wchar_t* text, float x, float y, float w, float h,
 	float fontPx, int bold, int align, int vCenter,
-	BYTE fa, BYTE fr, BYTE fg, BYTE fb, float shadowDx, float shadowDy, BYTE sa, BYTE sr, BYTE sg, BYTE sb)
+	BYTE fa, BYTE fr, BYTE fg, BYTE fb, float shadowDx, float shadowDy, BYTE sa, BYTE sr, BYTE sg, BYTE sb, int wrap)
 {
-	Soft3DTextD2D_DrawText(c, text, x + shadowDx, y + shadowDy, w, h, fontPx, bold, align, vCenter, sa, sr, sg, sb);
-	Soft3DTextD2D_DrawText(c, text, x, y, w, h, fontPx, bold, align, vCenter, fa, fr, fg, fb);
+	Soft3DTextD2D_DrawText(c, text, x + shadowDx, y + shadowDy, w, h, fontPx, bold, align, vCenter, sa, sr, sg, sb, wrap);
+	Soft3DTextD2D_DrawText(c, text, x, y, w, h, fontPx, bold, align, vCenter, fa, fr, fg, fb, wrap);
 }
 
 BOOL Soft3DTextD2D_End(Soft3DTextD2DCanvas* c, const BYTE** outBits, UINT* outStride)

@@ -46,7 +46,8 @@ public:
 	void RedoLastEdit();   // Ctrl+Y / Ctrl+Shift+Z
 	BOOL CopySelectionToClipboard();
 	void PasteFromClipboard();
-	BOOL HandleListEditKeys(MSG* pMsg); // リストフォーカス時の Ctrl+C/X/V/Z/Y
+	void SelectAllTracks(); // Ctrl+A
+	BOOL HandleListEditKeys(MSG* pMsg); // リストフォーカス時の Ctrl+A/C/X/V/Z/Y
 	// プレイリスト行をインデックス配列で削除(降順ソートして安全に後ろから)。Save あり。
 	void DelByIndices(const std::vector<int>& indices);
 	void Load(BOOL restoreSavedRow = TRUE);
@@ -258,6 +259,11 @@ enum {
 	PL_CTX_TEMP_CLEAR = 42,
 	PL_CTX_TEMP_EXIT = 43,
 	PL_CTX_UNDO_DEL = 44,
+	PL_CTX_EDIT_SELALL = 45,
+	PL_CTX_EDIT_COPY = 46,
+	PL_CTX_EDIT_CUT = 47,
+	PL_CTX_EDIT_PASTE = 48,
+	PL_CTX_EDIT_REDO = 49,
 	PL_CTX_MOVE_BASE = 42500,
 	PL_CTX_COPY_BASE = 43500,
 	PL_CTX_MOVE_MAX = PL_CTX_MOVE_BASE + 999,
