@@ -249,6 +249,8 @@ BOOL wavwait, thend;
 static volatile LONG g_cwreadEpoch = 0;
 static volatile LONG g_cwreadWorkerEpoch = 0;
 int wavchannel = 2;
+// YsX 元曲+_s1: ソースは常に 7.1。ピアノ解析は LR、チャンネルメーターは L/R/LFE の3本
+int g_ysxS1LrOnly = 0;
 // MP3 デコード出力のビット深度（mp3_.m_dwBitsPerSample と一致させる。wavsam_depth との不一致で playb が 16/24=1.5 倍ずれるのを防ぐ）
 int g_mp3_decoder_bps = 16;
 int muon;
@@ -2139,6 +2141,33 @@ static int PcmOutBytesPerFrame()
 		ch = 2;
 	const int bpf = ch * (bits / 8);
 	return (bpf > 0) ? bpf : 4;
+}
+
+// PCM バイト長 → フレーム数（旧 oggsize/4 は 16bit stereo 専用で 7.1 で 4 倍になる）
+static int PcmFramesFromBytes(int bytes)
+{
+	const int bpf = PcmOutBytesPerFrame();
+	if (bpf <= 0 || bytes <= 0)
+		return 0;
+	return (int)((__int64)bytes / (__int64)bpf);
+}
+
+// バナー総時間: oggsize(バイト)→秒の ch 係数（旧 wavv[]）。7–8ch は標準 PCM（YsX 7.1 用）
+static double WavBannerChFromBytes(int ch)
+{
+	static const double k[] = { 0, 1.0, 2.0, 3.0 / 0.75, 4.0 / 0.75, 5.0 / 0.75, 6.0 / 0.75, 7.0, 8.0 };
+	if (ch < 1) ch = 2;
+	if (ch > 8) ch = 8;
+	return k[ch];
+}
+
+// バナー経過: playb(PCMフレーム)→秒の ch 係数（旧 wavv2[]）
+static double WavBannerChFromFrames(int ch)
+{
+	static const double k[] = { 0, 2.0, 1.0, 2.0 / 3.0, 2.0 / 4.0, 2.0 / 5.0, 2.0 / 6.0, 1.0, 1.0 };
+	if (ch < 1) ch = 2;
+	if (ch > 8) ch = 8;
+	return k[ch];
 }
 
 // bufkpi3 リングバッファ。poss が bufSize に達すると従来コードは OOB memcpy になるため pos>=bufSize で 0 に戻す。
@@ -4472,6 +4501,7 @@ BOOL COggDlg::OnInitDialog()
 	pi.dwProcessId = -1;
 	randomf = 0; hsc = 0; spc = 0;
 	wavbit_sample_Hz = 44100; wavbit2 = 44100; wavchannel = 2;
+	g_ysxS1LrOnly = 0;
 	g_ds_pcm_ch = 2; g_ds_pcm_rate = 44100; g_ds_pcm_bits = 16;
 	fade1 = 0;
 	thend1 = TRUE;
@@ -9416,6 +9446,7 @@ void COggDlg::play()
 	//		return;
 	//	f.Close();
 	wavchannel = 2;
+	g_ysxS1LrOnly = 0;
 	wavsam_depth = 16;
 	if (!xfSoftOpen)
 		ZeroMemory(bufwav3, sizeof(bufwav3));
@@ -9560,7 +9591,7 @@ void COggDlg::play()
 				return;
 			}
 			if (loop1 != 0 || loop2 != 0) {
-				const int ts = (data_size > 0) ? (data_size / 4) : ((oggsize > 0) ? (oggsize / 4) : 0);
+				const int ts = (data_size > 0) ? PcmFramesFromBytes(data_size) : PcmFramesFromBytes(oggsize);
 				const __int64 endSamp = (__int64)loop1 + (__int64)loop2;
 				if (ts <= 0 || loop1 < 0 || loop2 <= 0 || loop1 >= ts || loop2 > ts
 					|| endSamp > (__int64)ts + 8 || loop1 == loop2) {
@@ -11091,13 +11122,12 @@ void COggDlg::play()
 		if (savedata.lrc_net && (filen.Right(4).MakeLower() == L".mp3" || filen.Right(4).MakeLower() == L".mp2" || filen.Right(4).MakeLower() == L".mp1" || filen.Right(4).MakeLower() == L".rmp"
 			|| filen.Right(4).MakeLower() == L".m4a" || filen.Right(4).MakeLower() == L".aac" || filen.Right(5).MakeLower() == L".flac" || filen.Right(4).MakeLower() == L".tta" || filen.Right(4).MakeLower() == L".ape"
 			|| filen.Right(4).MakeLower() == L".dsf" || filen.Right(4).MakeLower() == L".dff" || filen.Right(4).MakeLower() == L".wav" || filen.Right(4).MakeLower() == L".ogg" || filen.Right(5).MakeLower() == L".opus")) {
-			double wavv[] = { 0,1.0,2.0,3.0 / 0.75,4.0 / 0.75,5.0 / 0.75,6.0 / 0.75 };//(double)(wavbit2/wavv[wavchannel])
-			double wavv2[] = { 0,2.0,1.0,2.0 / 3.0,2.0 / 4.0,2.0 / 5.0,2.0 / 6.0 };//(double)(wavbit2/wavv[wavchannel])
+			const double wavv = WavBannerChFromBytes(wavchannel);
 			double t3;
 			if (mode == -10)
 				t3 = (double)oggsize / (double)wavbit_sample_Hz;
 			else {
-				t3 = (double)oggsize / (double)(wavbit_sample_Hz * 2.0 * wavv[wavchannel]) / (double)(wavsam_depth / 16.0f);
+				t3 = (double)oggsize / (double)(wavbit_sample_Hz * 2.0 * wavv) / (double)(wavsam_depth / 16.0f);
 			}
 			if ((mode == -9) && wavchannel > 2) t3 *= wavchannel / 2.0;
 			t3 *= 1000.0; int tt = (int)t3;
@@ -11796,10 +11826,10 @@ void COggDlg::play()
 			reset = TRUE;
 			endflg = 0;
 			endf = 0;
-			if (pl && plw) { if (pl->m_loop.GetCheck() == TRUE) { if (loop2 == 0)loop2 = oggsize / 4; } }
+			if (pl && plw) { if (pl->m_loop.GetCheck() == TRUE) { if (loop2 == 0)loop2 = PcmFramesFromBytes(oggsize); } }
 			if (loop2 == 0) endf = 1;
 			if (mode == 30 && (loop1 != 0 || loop2 != 0)) {
-				const int ts = (data_size > 0) ? (data_size / 4) : ((oggsize > 0) ? (oggsize / 4) : 0);
+				const int ts = (data_size > 0) ? PcmFramesFromBytes(data_size) : PcmFramesFromBytes(oggsize);
 				const __int64 endSamp = (__int64)loop1 + (__int64)loop2;
 				if (ts <= 0 || loop1 < 0 || loop2 <= 0 || loop1 >= ts || loop2 > ts
 					|| endSamp > (__int64)ts + 8 || loop1 == loop2) {
@@ -11856,11 +11886,11 @@ void COggDlg::play()
 		endflg = 0;
 		// 連続再生用 timer 9000 は export 中に立てない（DoEvent 再入で次曲 Restart）
 	endf = 0;
-	if (pl && plw) { if (pl->m_loop.GetCheck() == TRUE) { if (loop2 == 0)loop2 = oggsize / 4; } }
+	if (pl && plw) { if (pl->m_loop.GetCheck() == TRUE) { if (loop2 == 0)loop2 = PcmFramesFromBytes(oggsize); } }
 	if (loop2 == 0) endf = 1;
 	// mode 30: 曲長外 / loop1==loop2 は画面に出さず破棄（CWread 代入漏れ・孤児上書きの最終防衛）
 	if (mode == 30 && (loop1 != 0 || loop2 != 0)) {
-		const int ts = (data_size > 0) ? (data_size / 4) : ((oggsize > 0) ? (oggsize / 4) : 0);
+		const int ts = (data_size > 0) ? PcmFramesFromBytes(data_size) : PcmFramesFromBytes(oggsize);
 		const __int64 endSamp = (__int64)loop1 + (__int64)loop2;
 		if (ts <= 0 || loop1 < 0 || loop2 <= 0 || loop1 >= ts || loop2 > ts
 			|| endSamp > (__int64)ts + 8 || loop1 == loop2) {
@@ -12259,10 +12289,10 @@ void COggDlg::play()
 	// 旧: Play 後に設定 → 先読み中に endf==0（前曲のゲームループ残）だと
 	// playwavkpi の短読みが Seek(0) し「頭の巻き戻り」になる（特に KPI）。
 	endf = 0;
-	if (pl && plw) { if (pl->m_loop.GetCheck() == TRUE) { if (loop2 == 0)loop2 = oggsize / 4; } }
+	if (pl && plw) { if (pl->m_loop.GetCheck() == TRUE) { if (loop2 == 0)loop2 = PcmFramesFromBytes(oggsize); } }
 	if (loop2 == 0) endf = 1;
 	if (mode == 30 && (loop1 != 0 || loop2 != 0)) {
-		const int ts = (data_size > 0) ? (data_size / 4) : ((oggsize > 0) ? (oggsize / 4) : 0);
+		const int ts = (data_size > 0) ? PcmFramesFromBytes(data_size) : PcmFramesFromBytes(oggsize);
 		const __int64 endSamp = (__int64)loop1 + (__int64)loop2;
 		if (ts <= 0 || loop1 < 0 || loop2 <= 0 || loop1 >= ts || loop2 > ts
 			|| endSamp > (__int64)ts + 8 || loop1 == loop2) {
@@ -12301,13 +12331,10 @@ void COggDlg::play()
 			sec = (double)oggsize / (double)wavbit_sample_Hz;
 		}
 		else {
-			double wavv[] = { 0, 1.0, 2.0, 3.0 / 0.75, 4.0 / 0.75, 5.0 / 0.75, 6.0 / 0.75 };
-			int ch = wavchannel;
-			if (ch < 1) ch = 1;
-			if (ch > 6) ch = 6;
+			const double wavv = WavBannerChFromBytes(wavchannel);
 			double depth = (wavsam_depth > 0) ? (double)wavsam_depth / 16.0 : 1.0;
 			if (depth < 0.25) depth = 0.25;
-			sec = (double)oggsize / ((double)wavbit_sample_Hz * 2.0 * wavv[ch] * depth);
+			sec = (double)oggsize / ((double)wavbit_sample_Hz * 2.0 * wavv * depth);
 			if (mode == -9 && wavchannel > 2)
 				sec *= (double)wavchannel / 2.0;
 		}
@@ -12533,10 +12560,10 @@ void COggDlg::play()
 	SetTimer(9000, 10, NULL);
 	XfCaptureGlobalsToSlot(XfActiveSlot());
 	// endf はプリフィル前に設定済み。ここは loop チェック後の再同期のみ。
-	if (pl && plw) { if (pl->m_loop.GetCheck() == TRUE) { if (loop2 == 0)loop2 = oggsize / 4; } }
+	if (pl && plw) { if (pl->m_loop.GetCheck() == TRUE) { if (loop2 == 0)loop2 = PcmFramesFromBytes(oggsize); } }
 	if (loop2 == 0) endf = 1;
 	if (mode == 30 && (loop1 != 0 || loop2 != 0)) {
-		const int ts = (data_size > 0) ? (data_size / 4) : ((oggsize > 0) ? (oggsize / 4) : 0);
+		const int ts = (data_size > 0) ? PcmFramesFromBytes(data_size) : PcmFramesFromBytes(oggsize);
 		const __int64 endSamp = (__int64)loop1 + (__int64)loop2;
 		if (ts <= 0 || loop1 < 0 || loop2 <= 0 || loop1 >= ts || loop2 > ts
 			|| endSamp > (__int64)ts + 8 || loop1 == loop2) {
@@ -16181,7 +16208,8 @@ if (fff == 0)
 		if (adbuf2) {
 			free(adbuf2); adbuf2 = NULL;
 		}
-		adbuf2 = (char*)calloc((size_t)totalSamples * 6 * 2, 1);
+		// 最大 7.1 (8ch) 16bit まで（_s1 時に C/リア/サイドへ展開するため）
+		adbuf2 = (char*)calloc((size_t)totalSamples * 8 * 2, 1);
 
 		// loops=メタデータは44.1kHz基準のことが多い。Opus出力は48kHzなので変換
 		{
@@ -16226,15 +16254,9 @@ if (fff == 0)
 
 		int i = 0;
 		lenl = 0;
-		data_size = oggsize = totalSamples * 4;
-		og->m_time.SetRange(0, (data_size) / 4, TRUE);
-		og->m_time.SetSelection(loop1, loop2);
-		wavwait = 1;
-		if (wav)free(wav);
-		wav_start();
 
-		// Ys X 重低音: 通常曲再生時は同名_s1.opus を仮想ストリームで読んで adbuf2 へ加算ミックス。
-		// _s1 単体再生時はそのまま（ミックスしない）。
+		// Ys X 重低音: 同名_s1.opus があれば LFE へ。LR は Center / Rear / Side（出力にある分）にも流す。
+		// _s1 単体再生時はそのまま（ステレオのまま・ミックスしない）。
 		OggOpusFile* pOpusS1 = NULL;
 		{
 			CString bn = filen.Right(filen.GetLength() - filen.ReverseFind(L'\\') - 1);
@@ -16254,6 +16276,87 @@ if (fff == 0)
 			}
 		}
 
+		auto ysxClip16 = [](int v) -> opus_int16 {
+			if (v > 32767) return (opus_int16)32767;
+			if (v < -32768) return (opus_int16)-32768;
+			return (opus_int16)v;
+		};
+		// L/R/_s1(LFE) → 7.1 固定でパック。アップスケール OFF はそのまま、ON はアップスケーラが設定レイアウトへ変換。
+		auto ysxPackFrame = [&](opus_int16* dst, int och, int L, int R, int lfe) {
+			const float s2 = 0.70710678f;
+			const float kSur = 0.85f;
+			const float kSide = 0.85f;
+			if (och <= 3) {
+				dst[0] = ysxClip16(L);
+				dst[1] = ysxClip16(R);
+				dst[2] = ysxClip16(lfe);
+				return;
+			}
+			if (och == 4) {
+				// FL FR BL BR（LFE スロット無し → 前面へ折込、LR をリアにも）
+				dst[0] = ysxClip16(L + lfe / 2);
+				dst[1] = ysxClip16(R + lfe / 2);
+				dst[2] = ysxClip16((int)((float)L * kSur));
+				dst[3] = ysxClip16((int)((float)R * kSur));
+				return;
+			}
+			// 5.1 / 7.1: FL FR FC LFE BL BR [SL SR]
+			dst[0] = ysxClip16(L);
+			dst[1] = ysxClip16(R);
+			dst[2] = ysxClip16((int)((float)(L + R) * s2)); // Center ← LR
+			dst[3] = ysxClip16(lfe); // LFE ← _s1
+			if (och >= 6) {
+				dst[4] = ysxClip16((int)((float)L * kSur)); // BL ← L
+				dst[5] = ysxClip16((int)((float)R * kSur)); // BR ← R
+			}
+			if (och >= 8) {
+				dst[6] = ysxClip16((int)((float)L * kSide)); // SL ← L
+				dst[7] = ysxClip16((int)((float)R * kSide)); // SR ← R
+			}
+			for (int c = (och >= 8 ? 8 : (och >= 6 ? 6 : 4)); c < och; ++c)
+				dst[c] = 0;
+		};
+
+		int outCh = 2;
+		g_ysxS1LrOnly = 0;
+		if (pOpusS1) {
+			g_ysxS1LrOnly = 1;
+			// 設定に依らずソースは常に 7.1。アップスケールOFF=そのまま再生、ON=設定の ch/Hz/bit へ変換
+			outCh = 8;
+		}
+		wavchannel = outCh;
+		const int bpfSrc = outCh * 2; // 16-bit interleaved
+		{
+			const __int64 bytesTotal = totalSamples * (__int64)bpfSrc;
+			if (bytesTotal > 0 && bytesTotal <= 0x7fffffff)
+				data_size = oggsize = (int)bytesTotal;
+			else if (bytesTotal > 0x7fffffff)
+				data_size = oggsize = 0x7fffffff;
+			else
+				data_size = oggsize = 0;
+		}
+		// 7.1 展開後も loop は PCM フレーム基準。曲長を超えた loop2 はバナー G:/Loop を壊すのでクランプ
+		{
+			const int ts = (totalSamples > 0 && totalSamples <= 0x7fffffff) ? (int)totalSamples : 0;
+			if (ts > 0) {
+				if (loop1 < 0) loop1 = 0;
+				if (loop2 < 0) loop2 = 0;
+				if (loop1 >= ts) {
+					loop1 = 0;
+					loop2 = 0;
+				}
+				else if ((__int64)loop1 + (__int64)loop2 > (__int64)ts + 8) {
+					loop2 = ts - loop1;
+					if (loop2 < 0) loop2 = 0;
+				}
+			}
+		}
+		og->m_time.SetRange(0, (int)totalSamples, TRUE);
+		og->m_time.SetSelection(loop1, loop2);
+		wavwait = 1;
+		if (wav)free(wav);
+		wav_start();
+
 		int iii = 0;
 		for (;; iii++) {
 			BYTE budf[5760 * 4];
@@ -16265,19 +16368,22 @@ if (fff == 0)
 				BYTE budfS1[5760 * 4];
 				ZeroMemory(budfS1, sizeof(budfS1));
 				const int retS1 = op_read_stereo(pOpusS1, (opus_int16*)budfS1, ret);
-				opus_int16* dst = (opus_int16*)budf;
-				opus_int16* src = (opus_int16*)budfS1;
-				const int nMix = (retS1 > 0) ? retS1 : 0;
-				for (int k = 0; k < ret * 2; ++k) {
-					int v = (int)dst[k];
-					if (k < nMix * 2)
-						v += (int)src[k];
-					if (v > 32767) v = 32767;
-					if (v < -32768) v = -32768;
-					dst[k] = (opus_int16)v;
+				opus_int16* srcMain = (opus_int16*)budf;
+				opus_int16* srcS1 = (opus_int16*)budfS1;
+				opus_int16* dst = (opus_int16*)(adbuf2 + (__int64)i * bpfSrc);
+				const int nS1 = (retS1 > 0) ? retS1 : 0;
+				for (int f = 0; f < ret; ++f) {
+					const int L = (int)srcMain[f * 2 + 0];
+					const int R = (int)srcMain[f * 2 + 1];
+					int lfe = 0;
+					if (f < nS1)
+						lfe = ((int)srcS1[f * 2 + 0] + (int)srcS1[f * 2 + 1]) / 2;
+					ysxPackFrame(dst + f * outCh, outCh, L, R, lfe);
 				}
 			}
-			memcpy(adbuf2 + i * 4, budf, ret * 4);
+			else {
+				memcpy(adbuf2 + (__int64)i * 4, budf, (size_t)ret * 4);
+			}
 			if (thend1 == TRUE) {
 				thend = 1;
 				if (pOpusS1) op_free(pOpusS1);
@@ -16849,7 +16955,7 @@ if (fff == 0)
 			loop2 = 0;
 		}
 		else {
-			loop2 = oggsize / 4;
+			loop2 = PcmFramesFromBytes(oggsize);
 		}
 		wavwait = 1;
 		si -= dwDataLen;
@@ -17232,7 +17338,7 @@ BOOL playwavBuffwav(BYTE* bw, int old, int l1, int l2)
 			// 壊れた loop 点で 0 バイト→seek(loop1)→また 0 の永久回りを止める
 			// （曲長を超えた loop1 / 長さ0 / 誤読の loop1==loop2）
 			if (rrr == 0 && (loop2 <= 0 || loop1 == loop2
-				|| (data_size > 0 && (__int64)loop1 * 4 >= (__int64)data_size))) {
+				|| (data_size > 0 && (__int64)loop1 * PcmOutBytesPerFrame() >= (__int64)data_size))) {
 				endf = 1;
 				if (savedata.saverenzoku == 0) fade1 = 1; else endflg = 1;
 				return FALSE;
@@ -17265,7 +17371,7 @@ BOOL playwavBuffwav(BYTE* bw, int old, int l1, int l2)
 			}
 			else {
 				if (rrr == 0 && (loop2 <= 0 || loop1 == loop2
-					|| (data_size > 0 && (__int64)loop1 * 4 >= (__int64)data_size))) {
+					|| (data_size > 0 && (__int64)loop1 * PcmOutBytesPerFrame() >= (__int64)data_size))) {
 					endf = 1;
 					if (savedata.saverenzoku == 0) fade1 = 1; else endflg = 1;
 					return FALSE;
@@ -21820,10 +21926,8 @@ static void BannerBlitScrollValue(CDC& dst, CDC& src, int valueX_px, int viewW_p
 double OggGetGdiPlaybackTimeSec()
 {
 	if (wavbit_sample_Hz <= 0) return 0.0;
-	static const double wavv2[] = { 0, 2.0, 1.0, 2.0 / 3.0, 2.0 / 4.0, 2.0 / 5.0, 2.0 / 6.0 };
-	int ch = wavchannel;
-	if (ch < 0 || ch > 6) ch = 2;
-	const double rateDiv = (double)wavbit_sample_Hz / wavv2[ch];
+	const double wavv2 = WavBannerChFromFrames(wavchannel);
+	const double rateDiv = (double)wavbit_sample_Hz / wavv2;
 	if (rateDiv <= 0.0) return 0.0;
 
 	__int64 pb = 0;
@@ -22064,7 +22168,7 @@ void COggDlg::timerp()
 	}
 	// mode 30: 曲長外の loop は表示だけ 0 に（孤児上書きで変な数字が残るのを防ぐ）
 	if (mode == 30 && (snap_loop1 != 0 || snap_loop2 != 0)) {
-		const int ts = (snap_oggsize > 0) ? (snap_oggsize / 4) : 0;
+		const int ts = PcmFramesFromBytes(snap_oggsize);
 		const __int64 endSamp = (__int64)snap_loop1 + (__int64)snap_loop2;
 		if (ts <= 0 || snap_loop1 < 0 || snap_loop2 <= 0 || snap_loop1 >= ts || snap_loop2 > ts
 			|| endSamp > (__int64)ts + 8 || snap_loop1 == snap_loop2) {
@@ -22145,13 +22249,13 @@ void COggDlg::timerp()
 		ttt = (UINT)tt;
 	}
 	else {
-		double wavv[] = { 0,1.0,2.0,3.0 / 0.75,4.0 / 0.75,5.0 / 0.75,6.0 / 0.75 };//(double)(wavbit2/wavv[wavchannel])
-		double wavv2[] = { 0,2.0,1.0,2.0 / 3.0,2.0 / 4.0,2.0 / 5.0,2.0 / 6.0 };//(double)(wavbit2/wavv[wavchannel])
+		const double wavv = WavBannerChFromBytes(wavchannel);
+		const double wavv2 = WavBannerChFromFrames(wavchannel);
 		// MP3: oggsize / playb はいずれも「PCM フレーム数」（秒 = /wavbit_sample_Hz）。スライダー範囲は m_time.SetRange(F/100) と OnHScroll の curpos×100 で対応。
 		if (mode == -10)
 			t3 = (double)snap_oggsize / (double)wavbit_sample_Hz;
 		else {
-			t3 = (double)snap_oggsize / (double)(wavbit_sample_Hz * 2.0 * wavv[wavchannel]) / (double)(wavsam_depth / 16.0f);
+			t3 = (double)snap_oggsize / (double)(wavbit_sample_Hz * 2.0 * wavv) / (double)(wavsam_depth / 16.0f);
 		}
 		if ((mode == -9) && wavchannel > 2) t3 *= wavchannel / 2.0;
 		tt = (int)(t3 * 100.0);
@@ -22160,12 +22264,12 @@ void COggDlg::timerp()
 		ta = t1 / 60;
 		tb = t1 % 60;
 		tc = tt % 100;
-		t3 = (double)snap_playb / (double)(wavbit_sample_Hz / wavv2[wavchannel]);// / (double)(wavsam_depth / 16.0f);
+		t3 = (double)snap_playb / (double)(wavbit_sample_Hz / wavv2);// / (double)(wavsam_depth / 16.0f);
 		//先読み分を除去: playb はデコード先頭、実際に聴こえる位置は DS キュー分だけ過去
 		// playb は PcmOutBytesPerFrame 基準のフレーム数。MP3 はシークも含めフレーム単位に統一（旧×4は廃止）。
 		// 全 DS 出力モード（FLAC/ゲーム系含む）で実再生カーソル基準に統一する。
 		if (qSamplesHeard > 0 && snap_playb > qSamplesHeard)
-			t3 = (double)(snap_playb - qSamplesHeard) / (double)(wavbit_sample_Hz / wavv2[wavchannel]);
+			t3 = (double)(snap_playb - qSamplesHeard) / (double)(wavbit_sample_Hz / wavv2);
 		if ((mode == -9) && wavchannel > 2) t3 *= wavchannel / 2.0;
 		if (t3 < 0.0) t3 = 0.0;
 		tt = (int)(t3 * 100.0);
@@ -22175,8 +22279,10 @@ void COggDlg::timerp()
 		tb1 = t1 % 60;
 		tc1 = tt % 100;
 		ttt = (UINT)tt;
-		t3 = (double)snap_wl / (double)(wavbit_sample_Hz * 2 * wavv[wavchannel]) / (double)(wavsam_depth / 16.0f);
+		t3 = (double)snap_wl / (double)(wavbit_sample_Hz * 2.0 * wavv) / (double)(wavsam_depth / 16.0f);
+		if (t3 < 0.0) t3 = 0.0;
 		tt = (int)(t3 * 100.0);
+		if (tt < 0) tt = 0;
 		t1 = tt / 100;
 		tag = t1 / 60;
 		tbg = t1 % 60;
@@ -27186,8 +27292,35 @@ void COggDlg::SyncAnalyzerFromPlayCursor()
 	m_analyzerSyncEndPos = endPos;
 	m_AnalyzerDlg->ResumePlaybackFeed();
 	const int frames = (int)(advance / (ULONG)bytesPerFrame);
-	if (frames > 0)
-		m_AnalyzerDlg->FeedPCM(anaRaw, frames, (int)(sampleRate + 0.5), bitDepth, channels);
+	if (frames > 0) {
+		// YsX+_s1 + アップスケールOFF: アナライザは L/R/LFE の3chだけ
+		// アップスケールON時は出力ch（6/8 等）のまま出す
+		extern int g_ysxS1LrOnly;
+		const void* feedPtr = anaRaw;
+		int feedCh = channels;
+		static char anaYsx[kAnaRawMax];
+		if (g_ysxS1LrOnly && !g_pcm_upscale_active && channels >= 3 && bitDepth >= 8) {
+			const int bps = bitDepth / 8;
+			const int lfeSrc = (channels >= 6) ? 3 : 2;
+			const int srcBpf = channels * bps;
+			const int dstBpf = 3 * bps;
+			const ULONG maxFrames = (ULONG)kAnaRawMax / (ULONG)dstBpf;
+			const int n = (frames > (int)maxFrames) ? (int)maxFrames : frames;
+			for (int f = 0; f < n; ++f) {
+				const char* s = anaRaw + f * srcBpf;
+				char* d = anaYsx + f * dstBpf;
+				memcpy(d + 0 * bps, s + 0 * bps, (size_t)bps); // L
+				memcpy(d + 1 * bps, s + 1 * bps, (size_t)bps); // R
+				memcpy(d + 2 * bps, s + lfeSrc * bps, (size_t)bps); // LFE
+			}
+			feedPtr = anaYsx;
+			feedCh = 3;
+			m_AnalyzerDlg->FeedPCM(feedPtr, n, (int)(sampleRate + 0.5), bitDepth, feedCh);
+		}
+		else {
+			m_AnalyzerDlg->FeedPCM(feedPtr, frames, (int)(sampleRate + 0.5), bitDepth, feedCh);
+		}
+	}
 }
 
 void COggDlg::SyncPianoRollFromPlayCursor()
@@ -27280,7 +27413,27 @@ void COggDlg::SyncPianoRollFromPlayCursor()
 
 	// メーターは軽量窓のみ。解析ジョブ受付不可時でも UI メーターは更新する。
 	// 窓時間は解析と同じ CapAnalyzeSampleRate 基準（hi-res/伸縮時の肥大を防ぐ）。
-	const int meterCh = (channels < 1) ? 1 : ((channels > CPianoRoll::PIANO_METER_CH_MAX) ? CPianoRoll::PIANO_METER_CH_MAX : channels);
+	// YsX+_s1 + アップスケールOFF: チャンネルメーターは L/R/LFE の3本のみ
+	// アップスケールON時は出力chどおり（6/8本など）
+	extern int g_ysxS1LrOnly;
+	const BOOL ysxMeter = (g_ysxS1LrOnly != 0 && !g_pcm_upscale_active);
+	// 7.1/5.1: LFE=ch3 / 2.1: LFE=ch2 / それ以外は LFE 無し
+	const int ysxLfeSrc = ysxMeter
+		? ((channels >= 6) ? 3 : ((channels == 3) ? 2 : -1))
+		: -1;
+	const int meterChCap = ysxMeter ? 3 : CPianoRoll::PIANO_METER_CH_MAX;
+	int meterCh = (channels < 1) ? 1 : ((channels > meterChCap) ? meterChCap : channels);
+	if (ysxMeter) {
+		meterCh = 2 + ((ysxLfeSrc >= 0) ? 1 : 0);
+		if (meterCh > channels && channels >= 2) meterCh = 2;
+		if (meterCh > channels) meterCh = channels;
+	}
+	auto meterSrcCh = [&](int meterSlot) -> int {
+		if (!ysxMeter) return meterSlot;
+		if (meterSlot == 0) return 0;
+		if (meterSlot == 1) return (channels > 1) ? 1 : 0;
+		return (ysxLfeSrc >= 0) ? ysxLfeSrc : 0;
+	};
 	const int meterRate = CPianoRoll::CapAnalyzeSampleRate(srInt);
 	const int meterFramesWant = CPianoRoll::ScaleWinSamples(2048, meterRate);
 	const int meterFrames = CPianoRoll::SourceFramesForAnalyze(meterFramesWant, srInt, meterRate);
@@ -27297,7 +27450,7 @@ void COggDlg::SyncPianoRollFromPlayCursor()
 			meterN = meterFrames;
 			for (int i = 0; i < meterFrames; ++i) {
 				for (int ch = 0; ch < meterCh; ++ch) {
-					const double a = fabs(GetSampleValueFrom(mDst, i, ch));
+					const double a = fabs(GetSampleValueFrom(mDst, i, meterSrcCh(ch)));
 					if (a > chPeak[ch]) chPeak[ch] = a;
 					chSumSq[ch] += a * a;
 				}
@@ -27371,7 +27524,12 @@ void COggDlg::SyncPianoRollFromPlayCursor()
 
 	for (int i = 0; i < prFrames; ++i) {
 		double smpL = 0.0, smpR = 0.0;
-		if (channels <= 2) {
+		// YsX 元曲+_s1: 解析は LR のみ（C/LFE/サラウンドは元曲の複製や重低音）
+		if (g_ysxS1LrOnly) {
+			smpL = GetSampleValue(i, 0);
+			smpR = (channels > 1) ? GetSampleValue(i, 1) : smpL;
+		}
+		else if (channels <= 2) {
 			smpL = GetSampleValue(i, 0);
 			smpR = (channels > 1) ? GetSampleValue(i, 1) : smpL;
 		}
@@ -27585,6 +27743,7 @@ void COggDlg::Speana(BOOL bPaintBars, BOOL bFillLevels)
 	// サンプル抽出
 	// ---------------------------------------------------------
 	if (readSuccess) {
+		extern int g_ysxS1LrOnly;
 		auto GetSampleValue = [&](int sampleIndex, int chIndex) -> double {
 			int offset = sampleIndex * bytesPerFrame + chIndex * bytesPerSample;
 			if (bitDepth == 16) return (double)(*(short*)(dstRaw + offset)) / 32768.0;
@@ -27601,7 +27760,12 @@ void COggDlg::Speana(BOOL bPaintBars, BOOL bFillLevels)
 
 		for (i = 0; i < framesToRead; i++) {
 			double smpL = 0.0, smpR = 0.0;
-			if (channels <= 2) {
+			// YsX 元曲+_s1: スペアナ／EQ供給も LR のみ
+			if (g_ysxS1LrOnly) {
+				smpL = GetSampleValue(i, 0);
+				smpR = (channels > 1) ? GetSampleValue(i, 1) : smpL;
+			}
+			else if (channels <= 2) {
 				smpL = GetSampleValue(i, 0);
 				smpR = (channels > 1) ? GetSampleValue(i, 1) : smpL;
 			}

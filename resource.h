@@ -1002,15 +1002,16 @@
 #define IDC_MPQ_REMOVE                  3898
 #define IDC_MPQ_CLEAR                   3899
 #define IDC_MPQ_CLOSE                   3900
-#define IDC_CAP_CLOSE                   3901
 #define IDC_MP_PLRAILBG                 3901
-#define IDC_CAP_MIN                     3902
 #define IDC_MP_TEMPTOGGLE               3902
-#define IDC_CAP_MAX                     3903
 #define IDC_MP_TEMPCLEAR                3903
-#define IDC_CAP_SETTINGS                3904
 #define IDC_MP_TEMPHINT                 3904
-#define IDC_CAP_PIN                     3905
+// CAP 系は MP Temp/Rail と衝突しない専用帯（以前 3901-3905 が同一で最大化が OnTempClear に吸われていた）
+#define IDC_CAP_CLOSE                   12000
+#define IDC_CAP_MIN                     12001
+#define IDC_CAP_MAX                     12002
+#define IDC_CAP_SETTINGS                12003
+#define IDC_CAP_PIN                     12004
 #define IDC_MPH_TABS                    3906
 #define IDC_MPH_COPY                    3907
 #define IDC_MPH_BODY                    3908

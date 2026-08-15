@@ -4666,45 +4666,47 @@ void CPlayList::OnDropFiles(HDROP hDropInfo)
 	// TODO: ここにメッセージ ハンドラ コードを追加するか、既定の処理を呼び出します。
 	TCHAR filen_c[1024];
 	syo = 0; syos = ""; syomode = 0;
-	int ii=m_lc.GetItemCount();
-	UINT cnt = DragQueryFile(hDropInfo,(UINT)-1,filen_c,sizeof(filen_c));
+	const int ii = playcnt; // 新規追加時の先頭インデックス
+	int playIdx = -1;       // 再生対象(新規 or 既存)
+	UINT cnt = DragQueryFile(hDropInfo, (UINT)-1, filen_c, sizeof(filen_c));
 	TCHAR tmp[1024];
-	_tgetcwd(tmp,1000);
+	_tgetcwd(tmp, 1000);
 	m_lc.SetRedraw(FALSE);
-		for(UINT i=0;i<cnt;i++){
-			DragQueryFile(hDropInfo,(UINT)i,filen_c,sizeof(filen_c));
-			Fol(filen_c);
+	for (UINT i = 0; i < cnt; i++) {
+		DragQueryFile(hDropInfo, (UINT)i, filen_c, sizeof(filen_c));
+		const CString dropped = filen_c;
+		int existing = -1;
+		if (PathIsDirectory(dropped) == FALSE) {
+			const CString norm = NormalizePlaylistPath(dropped);
+			if (!norm.IsEmpty())
+				existing = FindByPath(norm);
 		}
+		const int before = playcnt;
+		Fol(filen_c);
+		if (playIdx < 0) {
+			if (existing >= 0)
+				playIdx = existing; // 既にリストにある → その曲を再生
+			else if (playcnt > before)
+				playIdx = before;   // 新規追加された先頭
+		}
+	}
 	m_lc.SetRedraw(TRUE);
 	m_lc.Invalidate();
 	m_lc.UpdateWindow();
 	_tchdir(tmp);
-	if (syo == 1) {
-		BOOL requestPlay = FALSE;
-		if (m_renzoku.GetCheck() == FALSE) {
-			requestPlay = TRUE;
-		}
-		if (pMediaPosition && (mode == -2 || videoonly == TRUE)) {
-			REFTIME aa, bb;
-			pMediaPosition->get_CurrentPosition(&aa);
-			pMediaPosition->get_Duration(&bb);
-			if (aa >= bb) {
-				requestPlay = TRUE;
-			}
-		}
-		if ((fade1 == 1 || playf == 0) && !pMediaPosition) {
-			requestPlay = TRUE;
-		}
-		if (requestPlay && ii >= 0 && ii < playcnt) {
-			plcnt = ii;
-			Get(plcnt);
-			gameon = 0;
-			RequestPlaylistRestartAsync();
-		}
-		else if ((fade1 == 1 || playf == 0) && !pMediaPosition && ii >= 0 && ii < playcnt) {
-			plcnt = ii;
-			SIcon(ii);
-		}
+	if (playIdx < 0 && syo == 1) {
+		if (!syos.IsEmpty())
+			playIdx = FindByPath(syos);
+		if (playIdx < 0 && ii >= 0 && ii < playcnt)
+			playIdx = ii;
+	}
+	if (playIdx >= 0 && playIdx < playcnt) {
+		// ドロップは「この曲を鳴らす」意図。既存曲でも再生する。
+		// 連続ONかつ再生中でも、落とした曲へ切り替える。
+		plcnt = playIdx;
+		Get(plcnt);
+		gameon = 0;
+		RequestPlaylistRestartAsync();
 	}
 	Save();
 	CCustomBlurDialogBase::OnDropFiles(hDropInfo);
@@ -4762,14 +4764,19 @@ void CPlayList::Fol(CString fname)
 	CString s, ss;
 	playlistdata p; ZeroMemory(&p, sizeof(p));
 	CFileFind f;
+	// 単一ファイルはフルパスで FindFile（chdir 失敗でもドロップを黙殺しない）
+	CString findSpec = fname1;
+	if (PathIsDirectory(fname1))
+		findSpec = fname1 + _T("\\*.*");
 	if (PathIsDirectory(fname) == FALSE) {
 		CString ff = fname.Left(fname.ReverseFind('\\'));
-		_tchdir(ff);
+		if (!ff.IsEmpty())
+			_tchdir(ff);
 	}
 	else {
 		_tchdir(fname);
 	}
-	if (f.FindFile(ft)) {
+	if (f.FindFile(findSpec)) {
 		int b = 1;
 		for (; b;) {
 			b = f.FindNextFile();

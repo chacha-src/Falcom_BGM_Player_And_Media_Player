@@ -72,9 +72,8 @@ std::uint32_t DirectSoundChannelMaskForOutput(int outCh, int speaker_layout)
 	case 2:
 		return SPEAKER_FRONT_LEFT | SPEAKER_FRONT_RIGHT;
 	case 3:
-		if (speaker_layout == 1)
-			return SPEAKER_FRONT_LEFT | SPEAKER_FRONT_RIGHT | SPEAKER_LOW_FREQUENCY;
-		return SPEAKER_FRONT_LEFT | SPEAKER_FRONT_RIGHT | SPEAKER_FRONT_CENTER;
+		// 本アプリでは 3ch = 2.1 (L/R/LFE)。LRC にはしない。
+		return SPEAKER_FRONT_LEFT | SPEAKER_FRONT_RIGHT | SPEAKER_LOW_FREQUENCY;
 	case 4:
 		// 4 出力は常にクアッド4マスク（従来の else 枝は5ビットになり nChannels と g_ds_pcm_ch が食い違って落ちる）
 		return SPEAKER_FRONT_LEFT | SPEAKER_FRONT_RIGHT | SPEAKER_BACK_LEFT | SPEAKER_BACK_RIGHT;
@@ -98,7 +97,7 @@ CString ChannelLayoutLabel(int ch)
 	switch (ch) {
 	case 1: return L"mono";
 	case 2: return L"stereo";
-	case 3: return L"3ch";
+	case 3: return L"2.1ch";
 	case 4: return L"4ch";
 	case 5: return L"4.1ch";
 	case 6: return L"5.1ch";
@@ -582,8 +581,44 @@ void AudioUpscaler::BuildOutputFrame(double posInSrcFrames, float* dstCh) const
 	}
 
 	if (m_srcCh == 3 && m_dstCh == 2) {
+		// 2.1(L,R,LFE) → stereo: LFE を両chへ折りたたむ
+		dstCh[0] = clip1(srcSamp[0] + srcSamp[2] * 0.5f);
+		dstCh[1] = clip1(srcSamp[1] + srcSamp[2] * 0.5f);
+		return;
+	}
+
+	// 2.1(L,R,LFE) → 多ch: _s1=LFE、LR を Center / Rear / Side にも
+	if (m_srcCh == 3 && m_dstCh == 4) {
+		const float kSur = 0.85f;
+		dstCh[0] = clip1(srcSamp[0] + srcSamp[2] * 0.5f);
+		dstCh[1] = clip1(srcSamp[1] + srcSamp[2] * 0.5f);
+		dstCh[2] = clip1(srcSamp[0] * kSur);
+		dstCh[3] = clip1(srcSamp[1] * kSur);
+		return;
+	}
+	if (m_srcCh == 3 && m_dstCh == 6) {
+		const float kSur = 0.85f;
 		dstCh[0] = clip1(srcSamp[0]);
 		dstCh[1] = clip1(srcSamp[1]);
+		dstCh[2] = clip1((srcSamp[0] + srcSamp[1]) * s2); // Center ← LR
+		dstCh[3] = clip1(srcSamp[2]); // LFE ← _s1
+		dstCh[4] = clip1(srcSamp[0] * kSur);
+		dstCh[5] = clip1(srcSamp[1] * kSur);
+		return;
+	}
+	if (m_srcCh == 3 && m_dstCh >= 8) {
+		const float kSur = 0.85f;
+		const float kSide = 0.85f;
+		dstCh[0] = clip1(srcSamp[0]);
+		dstCh[1] = clip1(srcSamp[1]);
+		dstCh[2] = clip1((srcSamp[0] + srcSamp[1]) * s2);
+		dstCh[3] = clip1(srcSamp[2]);
+		dstCh[4] = clip1(srcSamp[0] * kSur);
+		dstCh[5] = clip1(srcSamp[1] * kSur);
+		dstCh[6] = clip1(srcSamp[0] * kSide);
+		dstCh[7] = clip1(srcSamp[1] * kSide);
+		for (int d = 8; d < m_dstCh; ++d)
+			dstCh[d] = 0.0f;
 		return;
 	}
 

@@ -2141,10 +2141,12 @@ void CAnalyzerDlg::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
 LPCTSTR CAnalyzerDlg::ChannelLabel(int ch, int channels)
 {
 	static const TCHAR* stereo[] = { _T("L"), _T("R") };
+	static const TCHAR* ch21[] = { _T("L"), _T("R"), _T("LFE") };
 	static const TCHAR* ch51[] = { _T("L"), _T("R"), _T("C"), _T("LFE"), _T("SL"), _T("SR") };
 	static const TCHAR* ch71[] = { _T("L"), _T("R"), _T("C"), _T("LFE"), _T("SL"), _T("SR"), _T("BL"), _T("BR") };
 	static TCHAR generic[8][8];
 	if (channels == 2 && ch < 2) return stereo[ch];
+	if (channels == 3 && ch < 3) return ch21[ch];
 	if (channels == 6 && ch < 6) return ch51[ch];
 	if (channels >= 8 && ch < 8) return ch71[ch];
 	_stprintf_s(generic[ch], _T("Ch%d"), ch + 1);

@@ -243,6 +243,7 @@ public:
 	int  m_savedAnalyzerVisible; // 最小化連動: 最小化前にアナライザーが表示されていたか
 	bool m_inSizeMove;        // ユーザーが枠をドラッグしてリサイズ中(重い同期再描画を抑制)
 	bool m_cascadePrevValid;  // 隣窓連鎖用の直前矩形が有効
+	bool m_mpWasMaximized;    // 直前が最大化（解除時に追随を再開するため）
 	CRect m_cascadePrevRc;    // リサイズ中の直前メイン矩形
 	bool m_uiReady;           // OnInitDialog 完了前の WM_SIZE では GetCheck/DoLayout しない
 	float hD2;           // DPI スケール係数(96dpi = 1.0)
@@ -495,6 +496,7 @@ protected:
 	afx_msg BOOL OnEraseBkgnd(CDC* pDC);
 	afx_msg HBRUSH OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor);
 	afx_msg void OnDropFiles(HDROP hDropInfo);
+	afx_msg void OnShowWindow(BOOL bShow, UINT nStatus);
 	afx_msg void OnDestroy();
 	afx_msg void OnClose();
 	afx_msg void OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar);

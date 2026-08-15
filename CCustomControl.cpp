@@ -7913,6 +7913,8 @@ void CCustomListCtrl::PreSubclassWindow()
     SetTextBkColor(COLOR_LIST_BG);
     SetTextColor(RGB(0, 0, 0));
     SetExtendedStyle(GetExtendedStyle() | LVS_EX_DOUBLEBUFFER);
+    // 親の WS_EX_ACCEPTFILES だけではリスト上にドロップが届かない
+    DragAcceptFiles(TRUE);
 }
 
 BOOL CCustomListCtrl::PreTranslateMessage(MSG* pMsg)
@@ -13942,6 +13944,10 @@ struct CCC_CaptionEntry {
     BOOL installed = FALSE;
     // savedata.aero 非依存。キャプション帯は常にアクリル(1)
     BOOL acrylicCaption = TRUE;
+    // WS_POPUP では ShowWindow(SW_SHOWMAXIMIZED) が効かないことがあるので手動最大化
+    BOOL manualZoomed = FALSE;
+    BOOL haveRestore = FALSE;
+    RECT restoreRc = {};
     CCustomStandardButton* pClose = nullptr;
     CCustomStandardButton* pMin = nullptr;
     CCustomStandardButton* pMax = nullptr;
@@ -14971,6 +14977,9 @@ static void CCC_ComputeMainLockAttach(HWND hWnd, CCC_MainLockEntry* e)
 static void CCC_MainLockPlaceChild(CCC_MainLockEntry& e, const RECT* pMainRect)
 {
     if (!pMainRect || !::IsWindow(e.hWnd))
+        return;
+    // 最大化中の子は動かさない（最大化窓は移動不可／追随対象外）
+    if (::IsZoomed(e.hWnd))
         return;
     CRect selfRc;
     ::GetWindowRect(e.hWnd, &selfRc);
@@ -16076,7 +16085,11 @@ static void CCC_CaptionInstallCore(CWnd* pDlg, CToolTipCtrl* pTip)
         return;
     e->height = capH;
     e->hasMin = (style & WS_MINIMIZEBOX) != 0;
-    e->hasMax = (style & WS_MAXIMIZEBOX) != 0;
+    // WS_POPUP は SC_MAXIMIZE が効きにくいが、ボタン自体は MAXIMIZEBOX または
+    // リサイズ可能(MIN+THICKFRAME)なら出す（ShowWindow で切り替える）
+    e->hasMax = (style & WS_MAXIMIZEBOX) != 0
+        || ((style & (WS_POPUP | WS_THICKFRAME | WS_MINIMIZEBOX))
+            == (WS_POPUP | WS_THICKFRAME | WS_MINIMIZEBOX));
     e->hasSettings = !CCC_CaptionIsRenderClass(pDlg);
     e->topmost = (::GetWindowLong(hWnd, GWL_EXSTYLE) & WS_EX_TOPMOST) != 0;
 
@@ -16439,7 +16452,7 @@ void CCC_NeighborCascadeOnMainResize(const RECT* pOldMain, const RECT* pNewMain)
         if (!reachR[i] && !reachL[i] && !reachB[i] && !reachT[i])
             continue;
         HWND h = live.hWnd[i];
-        if (!::IsWindow(h))
+        if (!::IsWindow(h) || ::IsZoomed(h) || ::IsIconic(h))
             continue;
         const int ox = (reachR[i] ? dxR : 0) + (reachL[i] ? dxL : 0);
         const int oy = (reachB[i] ? dyB : 0) + (reachT[i] ? dyT : 0);
@@ -16703,6 +16716,7 @@ void CCC_MainLockOnChildMoving(CWnd* pDlg, LPRECT pRect)
 static void CCC_CaptionTrackContextMenu(CWnd* pDlg, CPoint ptClient, int* pMainLockSave);
 static void CCC_CaptionOpenSettings(CWnd* pDlg);
 static void CCC_CaptionTogglePin(CWnd* pDlg);
+static void CCC_CaptionToggleMaximize(CWnd* pDlg);
 
 // ============================================================================
 // アクリルぼかし適用済みカスタムダイアログ (CDialog版)
@@ -16935,8 +16949,13 @@ void CCustomBlurDialogBase::OnSize(UINT nType, int cx, int cy)
     if (m_pMainLockSave)
         CCC_MainLockBringToFront(m_hWnd);
     if (CCC_CaptionEntry* e = CCC_FindCaption(m_hWnd)) {
-        if (e->installed && e->pMax && ::IsWindow(e->pMax->GetSafeHwnd()))
-            e->pMax->SetWindowText(IsZoomed() ? L"\u2752" : L"\u25A1");
+        if (e->installed && e->pMax && ::IsWindow(e->pMax->GetSafeHwnd())) {
+            if (nType == SIZE_RESTORED)
+                e->manualZoomed = FALSE;
+            else if (nType == SIZE_MAXIMIZED)
+                e->manualZoomed = TRUE;
+            e->pMax->SetWindowText((IsZoomed() || e->manualZoomed) ? L"\u2752" : L"\u25A1");
+        }
     }
 }
 
@@ -16988,6 +17007,10 @@ void CCustomBlurDialogBase::OnLButtonDown(UINT nFlags, CPoint point)
     if (capH > 0 && point.y >= 0 && point.y < capH) {
         CWnd* pHit = ChildWindowFromPoint(point, CWP_SKIPINVISIBLE | CWP_SKIPTRANSPARENT);
         if (!pHit || pHit == this) {
+            // 最大化中のタイトルドラッグで元サイズへ戻す
+            CCC_CaptionEntry* e = CCC_FindCaption(m_hWnd);
+            if (IsZoomed() || (e && e->manualZoomed))
+                CCC_CaptionToggleMaximize(this);
             SendMessage(WM_NCLBUTTONDOWN, HTCAPTION, MAKELPARAM(point.x, point.y));
             return;
         }
@@ -17032,7 +17055,7 @@ void CCustomBlurDialogBase::OnCapMin()
 
 void CCustomBlurDialogBase::OnCapMax()
 {
-    SendMessage(WM_SYSCOMMAND, IsZoomed() ? SC_RESTORE : SC_MAXIMIZE, 0);
+    CCC_CaptionToggleMaximize(this);
 }
 
 void CCustomBlurDialogBase::OnCapSettings()
@@ -17288,6 +17311,8 @@ static void CCC_CaptionTrackContextMenu(CWnd* pDlg, CPoint ptClient, int* pMainL
         pDlg->SendMessage(WM_COMMAND, MAKEWPARAM(IDC_CAP_PIN, BN_CLICKED), 0);
     else if (cmd == IDC_MAINWIN_LOCK)
         CCC_MainLockOverlayToggle(hWnd);
+    else if (cmd == SC_MAXIMIZE || cmd == SC_RESTORE)
+        CCC_CaptionToggleMaximize(pDlg);
     else if (cmd)
         pDlg->SendMessage(WM_SYSCOMMAND, cmd, 0);
 }
@@ -17301,6 +17326,63 @@ static void CCC_CaptionOpenSettings(CWnd* pDlg)
         pDlg->SendMessage(WM_COMMAND, MAKEWPARAM(IDC_BUTTON21, BN_CLICKED), 0);
     else
         pMain->SendMessage(WM_COMMAND, MAKEWPARAM(IDC_BUTTON21, BN_CLICKED), 0);
+}
+
+static void CCC_CaptionToggleMaximize(CWnd* pDlg)
+{
+    if (!pDlg || !::IsWindow(pDlg->GetSafeHwnd()))
+        return;
+    HWND h = pDlg->GetSafeHwnd();
+    CCC_CaptionEntry* e = CCC_FindCaption(h);
+    const BOOL zoomed = pDlg->IsZoomed() || (e && e->manualZoomed);
+
+    if (zoomed) {
+        if (e && e->haveRestore) {
+            const LONG st = ::GetWindowLong(h, GWL_STYLE);
+            if (st & WS_MAXIMIZE)
+                ::SetWindowLong(h, GWL_STYLE, st & ~WS_MAXIMIZE);
+            ::SetWindowPos(h, NULL,
+                e->restoreRc.left, e->restoreRc.top,
+                e->restoreRc.right - e->restoreRc.left,
+                e->restoreRc.bottom - e->restoreRc.top,
+                SWP_NOZORDER | SWP_FRAMECHANGED | SWP_NOACTIVATE);
+            e->haveRestore = FALSE;
+            e->manualZoomed = FALSE;
+        } else {
+            pDlg->ShowWindow(SW_RESTORE);
+            if (e)
+                e->manualZoomed = FALSE;
+        }
+    } else {
+        CRect wr;
+        pDlg->GetWindowRect(&wr);
+        if (e) {
+            e->restoreRc = wr;
+            e->haveRestore = TRUE;
+        }
+        MONITORINFO mi = { sizeof(mi) };
+        const HMONITOR mon = ::MonitorFromWindow(h, MONITOR_DEFAULTTONEAREST);
+        if (::GetMonitorInfo(mon, &mi)) {
+            // WS_POPUP でも IsZoomed() が真になるよう WS_MAXIMIZE を立て、作業領域へ広げる
+            const LONG st = ::GetWindowLong(h, GWL_STYLE);
+            ::SetWindowLong(h, GWL_STYLE, st | WS_MAXIMIZE);
+            ::SetWindowPos(h, NULL,
+                mi.rcWork.left, mi.rcWork.top,
+                mi.rcWork.right - mi.rcWork.left,
+                mi.rcWork.bottom - mi.rcWork.top,
+                SWP_NOZORDER | SWP_FRAMECHANGED | SWP_NOACTIVATE);
+            if (e)
+                e->manualZoomed = TRUE;
+        } else {
+            pDlg->ShowWindow(SW_SHOWMAXIMIZED);
+            if (e)
+                e->manualZoomed = pDlg->IsZoomed() ? TRUE : FALSE;
+        }
+    }
+    if (e && e->pMax && ::IsWindow(e->pMax->GetSafeHwnd())) {
+        const BOOL z = pDlg->IsZoomed() || e->manualZoomed;
+        e->pMax->SetWindowText(z ? L"\u2752" : L"\u25A1");
+    }
 }
 
 static void CCC_CaptionTogglePin(CWnd* pDlg)
@@ -17520,8 +17602,13 @@ void CCustomBlurDialogExBase::OnSize(UINT nType, int cx, int cy)
     if (m_pMainLockSave)
         CCC_MainLockBringToFront(m_hWnd);
     if (CCC_CaptionEntry* e = CCC_FindCaption(m_hWnd)) {
-        if (e->installed && e->pMax && ::IsWindow(e->pMax->GetSafeHwnd()))
-            e->pMax->SetWindowText(IsZoomed() ? L"\u2752" : L"\u25A1");
+        if (e->installed && e->pMax && ::IsWindow(e->pMax->GetSafeHwnd())) {
+            if (nType == SIZE_RESTORED)
+                e->manualZoomed = FALSE;
+            else if (nType == SIZE_MAXIMIZED)
+                e->manualZoomed = TRUE;
+            e->pMax->SetWindowText((IsZoomed() || e->manualZoomed) ? L"\u2752" : L"\u25A1");
+        }
     }
 }
 
@@ -17574,6 +17661,9 @@ void CCustomBlurDialogExBase::OnLButtonDown(UINT nFlags, CPoint point)
     if (capH > 0 && point.y >= 0 && point.y < capH) {
         CWnd* pHit = ChildWindowFromPoint(point, CWP_SKIPINVISIBLE | CWP_SKIPTRANSPARENT);
         if (!pHit || pHit == this) {
+            CCC_CaptionEntry* e = CCC_FindCaption(m_hWnd);
+            if (IsZoomed() || (e && e->manualZoomed))
+                CCC_CaptionToggleMaximize(this);
             SendMessage(WM_NCLBUTTONDOWN, HTCAPTION, MAKELPARAM(point.x, point.y));
             return;
         }
@@ -17618,7 +17708,7 @@ void CCustomBlurDialogExBase::OnCapMin()
 
 void CCustomBlurDialogExBase::OnCapMax()
 {
-    SendMessage(WM_SYSCOMMAND, IsZoomed() ? SC_RESTORE : SC_MAXIMIZE, 0);
+    CCC_CaptionToggleMaximize(this);
 }
 
 void CCustomBlurDialogExBase::OnCapSettings()

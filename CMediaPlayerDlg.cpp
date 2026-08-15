@@ -832,6 +832,70 @@ IMPLEMENT_DYNAMIC(CMediaPlayerDlg, CCustomBlurDialogExBase)
 namespace {
 const UINT_PTR kTimerListHdrDrag = 7;
 const UINT_PTR kMpListHdrSubclassId = 4207;
+const UINT_PTR kMpDropFwdSubclassId = 4208;
+
+#ifndef MSGFLT_ALLOW
+#define MSGFLT_ALLOW 1
+#endif
+
+static void MpAllowDropMessages(HWND h)
+{
+	if (!h || !::IsWindow(h)) return;
+	typedef BOOL(WINAPI* PFN_CWMFEx)(HWND, UINT, DWORD, void*);
+	static PFN_CWMFEx s_fn = nullptr;
+	static BOOL s_tried = FALSE;
+	if (!s_tried) {
+		s_tried = TRUE;
+		HMODULE hUser = ::GetModuleHandleW(L"user32.dll");
+		if (hUser)
+			s_fn = (PFN_CWMFEx)::GetProcAddress(hUser, "ChangeWindowMessageFilterEx");
+	}
+	if (!s_fn) return;
+	s_fn(h, WM_DROPFILES, MSGFLT_ALLOW, nullptr);
+	s_fn(h, WM_COPYDATA, MSGFLT_ALLOW, nullptr);
+	s_fn(h, 0x0049 /* WM_COPYGLOBALDATA */, MSGFLT_ALLOW, nullptr);
+}
+
+static void MpArmFileDrop(CWnd* w)
+{
+	if (!w || !w->GetSafeHwnd()) return;
+	w->DragAcceptFiles(TRUE);
+	MpAllowDropMessages(w->GetSafeHwnd());
+}
+
+// 空PL案内ボタン等: 子が WS_EX_ACCEPTFILES を持たないと Explorer が拒否する。
+// 受け取った WM_DROPFILES を親ダイアログへ中継する。
+static LRESULT CALLBACK MpDropForwardSubclassProc(
+	HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam,
+	UINT_PTR uIdSubclass, DWORD_PTR dwRefData)
+{
+	if (uMsg == WM_DROPFILES) {
+		HWND hParent = reinterpret_cast<HWND>(dwRefData);
+		if (hParent && ::IsWindow(hParent))
+			return ::SendMessage(hParent, WM_DROPFILES, wParam, lParam);
+	}
+	return ::DefSubclassProc(hWnd, uMsg, wParam, lParam);
+}
+
+static void MpArmFileDropForward(CWnd* child, CWnd* parent)
+{
+	if (!child || !child->GetSafeHwnd() || !parent || !parent->GetSafeHwnd()) return;
+	MpArmFileDrop(child);
+	::RemoveWindowSubclass(child->GetSafeHwnd(), MpDropForwardSubclassProc, kMpDropFwdSubclassId);
+	::SetWindowSubclass(child->GetSafeHwnd(), MpDropForwardSubclassProc, kMpDropFwdSubclassId,
+		(DWORD_PTR)parent->GetSafeHwnd());
+}
+
+static void MpArmAllFileDrops(CMediaPlayerDlg* self)
+{
+	if (!self || !self->GetSafeHwnd()) return;
+	MpArmFileDrop(self);
+	MpArmFileDrop(&self->m_list);
+	MpArmFileDropForward(&self->m_emptyFolder, self);
+	MpArmFileDropForward(&self->m_emptyM3u, self);
+	if (self->m_libAlbums.GetSafeHwnd())
+		MpArmFileDrop(&self->m_libAlbums);
+}
 }
 
 LRESULT CALLBACK CMediaPlayerDlg::ListHeaderNotifySubclassProc(
@@ -883,6 +947,7 @@ CMediaPlayerDlg::CMediaPlayerDlg(CWnd* pParent)
 	m_savedAnalyzerVisible = 0;
 	m_inSizeMove = false;
 	m_cascadePrevValid = false;
+	m_mpWasMaximized = false;
 	m_uiReady = false;
 	m_dragging = 0;
 	m_dragSrc = -1;
@@ -1101,6 +1166,7 @@ BEGIN_MESSAGE_MAP(CMediaPlayerDlg, CCustomBlurDialogExBase)
 	ON_WM_ERASEBKGND()
 	ON_WM_CTLCOLOR()
 	ON_WM_DROPFILES()
+	ON_WM_SHOWWINDOW()
 	ON_WM_DESTROY()
 	ON_WM_CLOSE()
 	ON_WM_HSCROLL()
@@ -1856,6 +1922,8 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 	// メディアプレイヤー側リストも pl->pc を参照してツールチップに保存パラメータを付記
 	if (pl) m_list.pc = pl->pc;
 	m_list.m_bSongParamTip = true;
+	// リスト／空案内／UIPI をまとめて武装（キャプション後にも再武装する）
+	MpArmAllFileDrops(this);
 
 	// 保存済みの列幅を復元(0=未設定なら上で設定した既定値のまま)
 	// mpcol の意味スロットは ★挿入前と同じ: [0]=名前 [1]=ゲーム [2]=時間 [3]=アーティスト [4]=未使用
@@ -2256,6 +2324,7 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 		if (m_pldelete.GetSafeHwnd()) m_pldelete.EnableWindow(FALSE);
 	}
 	RefreshList(TRUE);
+	MpArmAllFileDrops(this);
 	// SyncFromMain / Timer の GetCheck 前に立てる。これより前の WM_SIZE は抑止のまま。
 	m_uiReady = true;
 	SyncFromMain();
@@ -2325,6 +2394,7 @@ BOOL CMediaPlayerDlg::PreCreateWindow(CREATESTRUCT& cs)
 	if (!CCustomBlurDialogExBase::PreCreateWindow(cs))
 		return FALSE;
 	cs.dwExStyle |= WS_EX_APPWINDOW;
+	cs.style |= WS_MAXIMIZEBOX;
 	return TRUE;
 }
 
@@ -2553,6 +2623,10 @@ BOOL CMediaPlayerDlg::DestroyWindow()
 	KillTimer(9);
 	if (::IsWindow(m_list.GetSafeHwnd()))
 		RemoveWindowSubclass(m_list.GetSafeHwnd(), ListHeaderNotifySubclassProc, kMpListHdrSubclassId);
+	if (m_emptyFolder.GetSafeHwnd())
+		RemoveWindowSubclass(m_emptyFolder.GetSafeHwnd(), MpDropForwardSubclassProc, kMpDropFwdSubclassId);
+	if (m_emptyM3u.GetSafeHwnd())
+		RemoveWindowSubclass(m_emptyM3u.GetSafeHwnd(), MpDropForwardSubclassProc, kMpDropFwdSubclassId);
 	if (m_bmpBanner.GetSafeHandle()) m_bmpBanner.DeleteObject();
 	if (m_memBanner.GetSafeHdc()) m_memBanner.DeleteDC();
 	for (int i = 0; i < kInfoRows; i++) {
@@ -3399,7 +3473,7 @@ void CMediaPlayerDlg::DoLayout()
 		m_plRailBg.ShowWindow(SW_HIDE);
 	}
 
-	// 空PL案内(本当に0曲のときだけ)
+	// 空PL案内(本当に0曲のときだけ)。リストより前面にして「ドロップ」表記どおり受け取れるようにする
 	{
 		const BOOL emptyPl = (pl == NULL || pl->pc == NULL || pl->playcnt <= 0);
 		const int btnW = (int)(200 * s);
@@ -3411,10 +3485,18 @@ void CMediaPlayerDlg::DoLayout()
 		if (m_emptyFolder.GetSafeHwnd()) {
 			MoveCtl(&m_emptyFolder, ex, ey, btnW, btnH);
 			m_emptyFolder.ShowWindow(emptyPl ? SW_SHOW : SW_HIDE);
+			if (emptyPl)
+				m_emptyFolder.SetWindowPos(&CWnd::wndTop, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 		}
 		if (m_emptyM3u.GetSafeHwnd()) {
 			MoveCtl(&m_emptyM3u, ex, ey + btnH + gap, btnW, btnH);
 			m_emptyM3u.ShowWindow(emptyPl ? SW_SHOW : SW_HIDE);
+			if (emptyPl)
+				m_emptyM3u.SetWindowPos(&CWnd::wndTop, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+		}
+		if (emptyPl) {
+			MpArmFileDropForward(&m_emptyFolder, this);
+			MpArmFileDropForward(&m_emptyM3u, this);
 		}
 	}
 
@@ -3898,6 +3980,16 @@ void CMediaPlayerDlg::RefreshListAfterLayout()
 			RestoreListScrollAnchor(anchor);
 	}
 	m_list.SetWindowPos(&CWnd::wndTop, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+	// 空案内はリストより前（RefreshListAfterLayout が list を前面にしたあと戻す）
+	{
+		const BOOL emptyPl = (pl == NULL || pl->pc == NULL || pl->playcnt <= 0);
+		if (emptyPl) {
+			if (m_emptyFolder.GetSafeHwnd() && m_emptyFolder.IsWindowVisible())
+				m_emptyFolder.SetWindowPos(&CWnd::wndTop, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+			if (m_emptyM3u.GetSafeHwnd() && m_emptyM3u.IsWindowVisible())
+				m_emptyM3u.SetWindowPos(&CWnd::wndTop, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+		}
+	}
 	m_list.RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_FRAME | RDW_UPDATENOW);
 }
 
@@ -4674,7 +4766,7 @@ void CMediaPlayerDlg::MirrorSeekVol()
 void CMediaPlayerDlg::SavePos()
 {
 	if (!::IsWindow(GetSafeHwnd())) return;
-	if (IsIconic()) return;
+	if (IsIconic() || IsZoomed()) return; // 最大化中は通常サイズを潰さない
 	RECT r; GetWindowRect(&r);
 	int x = r.left, y = r.top;
 	int w = r.right - r.left, h = r.bottom - r.top;
@@ -5037,19 +5129,36 @@ void CMediaPlayerDlg::OnSize(UINT nType, int cx, int cy)
 		DoLayout();
 		// リサイズ: 四辺連鎖は ENTERSIZEMOVE 無しでも pOld→pNew 増分で動く
 		// （左辺リサイズで右の UI を動かさない）
+		// 最大化中はメイン追随・リサイズ追随を動かさない（最大化窓は移動不可のため）
 		{
 			CRect wr;
 			GetWindowRect(&wr);
-			if (m_cascadePrevValid) {
-				const int dw = wr.Width() - m_cascadePrevRc.Width();
-				const int dh = wr.Height() - m_cascadePrevRc.Height();
-				if (dw != 0 || dh != 0)
-					CCC_NeighborCascadeOnMainResize(&m_cascadePrevRc, &wr);
-				else if (wr.left != m_cascadePrevRc.left || wr.top != m_cascadePrevRc.top)
-					CCC_MainLockOnMainMoving(&wr);
+			if (nType == SIZE_MAXIMIZED) {
+				m_mpWasMaximized = true;
+				m_cascadePrevRc = wr;
+				m_cascadePrevValid = true;
+			} else if (nType == SIZE_RESTORED && m_mpWasMaximized) {
+				// 最大化解除（ボタン／タイトルドラッグ）→ 追随を再開
+				m_mpWasMaximized = false;
+				CCC_MainLockRefreshOffsetsFor(this, NULL);
+				CCC_MainLockOnMainMoving(&wr);
+				m_cascadePrevRc = wr;
+				m_cascadePrevValid = true;
+			} else if (!IsZoomed()) {
+				if (m_cascadePrevValid) {
+					const int dw = wr.Width() - m_cascadePrevRc.Width();
+					const int dh = wr.Height() - m_cascadePrevRc.Height();
+					if (dw != 0 || dh != 0)
+						CCC_NeighborCascadeOnMainResize(&m_cascadePrevRc, &wr);
+					else if (wr.left != m_cascadePrevRc.left || wr.top != m_cascadePrevRc.top)
+						CCC_MainLockOnMainMoving(&wr);
+				}
+				m_cascadePrevRc = wr;
+				m_cascadePrevValid = true;
+			} else {
+				m_cascadePrevRc = wr;
+				m_cascadePrevValid = true;
 			}
-			m_cascadePrevRc = wr;
-			m_cascadePrevValid = true;
 		}
 		if (!m_inSizeMove) {
 			// ドラッグ中は DoLayout の NOERASE 無効化のみ。ERASE|UPDATENOW は確定時に。
@@ -5084,11 +5193,21 @@ void CMediaPlayerDlg::OnExitSizeMove()
 		{
 			CRect wr;
 			GetWindowRect(&wr);
-			if (m_cascadePrevValid)
-				CCC_NeighborCascadeOnMainResize(&m_cascadePrevRc, &wr);
-			else
+			if (IsZoomed()) {
+				m_mpWasMaximized = true;
+				m_cascadePrevRc = wr;
+			} else if (m_mpWasMaximized) {
+				m_mpWasMaximized = false;
+				CCC_MainLockRefreshOffsetsFor(this, NULL);
 				CCC_MainLockOnMainMoving(&wr);
-			m_cascadePrevRc = wr;
+				m_cascadePrevRc = wr;
+			} else if (m_cascadePrevValid) {
+				CCC_NeighborCascadeOnMainResize(&m_cascadePrevRc, &wr);
+				m_cascadePrevRc = wr;
+			} else {
+				CCC_MainLockOnMainMoving(&wr);
+				m_cascadePrevRc = wr;
+			}
 		}
 		CCC_NeighborCascadeEnd();
 		m_cascadePrevValid = false;
@@ -5104,7 +5223,9 @@ void CMediaPlayerDlg::OnExitSizeMove()
 void CMediaPlayerDlg::OnMoving(UINT fwSide, LPRECT pRect)
 {
 	CCustomBlurDialogExBase::OnMoving(fwSide, pRect);
-	CCC_MainLockOnMainMoving(pRect);
+	// 最大化中は追随しない（解除後の OnSize / 通常移動で再開）
+	if (!IsZoomed())
+		CCC_MainLockOnMainMoving(pRect);
 	SavePos();
 }
 
@@ -6173,10 +6294,27 @@ void CMediaPlayerDlg::OnDropFiles(HDROP hDropInfo)
 			}
 		}
 	}
-	if (pl)
+	if (pl) {
+		// pl->OnDropFiles 内で DragFinish まで完結する（ここで二重解放しない）
 		pl->OnDropFiles(hDropInfo);
+		RefreshList(TRUE);
+		// ドロップで選ばれた再生曲へ MP リストも追従
+		if (pl->pnt >= 0 && pl->pnt < pl->playcnt) {
+			m_lastFollowPnt = -1;
+			FollowPlayingRow();
+		}
+		return;
+	}
 	RefreshList(TRUE);
 	::DragFinish(hDropInfo);
+}
+
+void CMediaPlayerDlg::OnShowWindow(BOOL bShow, UINT nStatus)
+{
+	CCustomBlurDialogExBase::OnShowWindow(bShow, nStatus);
+	// キャプション／アクリル適用後に ACCEPTFILES が落ちることがあるので再武装
+	if (bShow)
+		MpArmAllFileDrops(this);
 }
 
 void CMediaPlayerDlg::OnDestroy()
@@ -6192,6 +6330,10 @@ void CMediaPlayerDlg::OnDestroy()
 	KillTimer(9);
 	if (::IsWindow(m_list.GetSafeHwnd()))
 		RemoveWindowSubclass(m_list.GetSafeHwnd(), ListHeaderNotifySubclassProc, kMpListHdrSubclassId);
+	if (m_emptyFolder.GetSafeHwnd())
+		RemoveWindowSubclass(m_emptyFolder.GetSafeHwnd(), MpDropForwardSubclassProc, kMpDropFwdSubclassId);
+	if (m_emptyM3u.GetSafeHwnd())
+		RemoveWindowSubclass(m_emptyM3u.GetSafeHwnd(), MpDropForwardSubclassProc, kMpDropFwdSubclassId);
 	if (g_mpHelpDlg && ::IsWindow(g_mpHelpDlg->GetSafeHwnd()))
 		g_mpHelpDlg->DestroyWindow();
 	if (CMpHelpDlg* help = CMpHelpDlg::Instance()) {
@@ -8445,12 +8587,14 @@ void CMediaPlayerDlg::EnsureLibControls()
 		m_emptyFolder.Create(LL14(L"フォルダをドロップ / 開く", L"Drop or open a folder", L"Deposer/ouvrir un dossier", L"Trascina/apri cartella", L"Soltar/abrir carpeta", L"폴더 드롭 / 열기", L"拖放/打开文件夹", L"إسقاط/فتح مجلد", L"Перетащите/откройте папку", L"Ordner ablegen/offnen", L"Soltar/abrir pasta", L"Map neerzetten/openen", L"Upuść/otwórz folder", L"Klasor birak/ac"),
 			WS_CHILD | BS_PUSHBUTTON | WS_TABSTOP, rc, this, IDC_MP_EMPTYFOLDER);
 		m_emptyFolder.SetGradation(RGB(220, 245, 230), RGB(170, 220, 190), 0, TRUE);
+		MpArmFileDropForward(&m_emptyFolder, this);
 		createdLibChild = TRUE;
 	}
 	if (!m_emptyM3u.GetSafeHwnd()) {
 		m_emptyM3u.Create(LL14(L"m3u を開く", L"Open m3u", L"Ouvrir m3u", L"Apri m3u", L"Abrir m3u", L"m3u 열기", L"打开 m3u", L"فتح m3u", L"Открыть m3u", L"m3u offnen", L"Abrir m3u", L"m3u openen", L"Otwórz m3u", L"m3u ac"),
 			WS_CHILD | BS_PUSHBUTTON | WS_TABSTOP, rc, this, IDC_MP_EMPTYM3U);
 		m_emptyM3u.SetGradation(RGB(230, 240, 255), RGB(180, 205, 240), 0, TRUE);
+		MpArmFileDropForward(&m_emptyM3u, this);
 		createdLibChild = TRUE;
 	}
 	if (m_fontChk.GetSafeHandle()) {
