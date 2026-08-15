@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include "afxwin.h"
 #include "CCustomControl.h"
 #include "resource.h"
@@ -36,6 +36,8 @@ public:
 	afx_msg void OnTimer(UINT_PTR nIDEvent);
 	afx_msg void OnSize(UINT nType, int cx, int cy);
 	afx_msg void OnDestroy();
+	afx_msg void OnMicDevRefresh();
+	afx_msg LRESULT OnAudioDevChanged(WPARAM, LPARAM);
 	afx_msg void OnContextMenu(CWnd* pWnd, CPoint point);
 	virtual void OnCancel();
 	virtual void OnOK();
@@ -43,6 +45,7 @@ public:
 	CCustomStandardButton m_help;
 	CCustomStatic m_micL;
 	CCustomComboBox m_mic;
+	CCustomStandardButton m_micRefresh;
 	CCustomStatic m_dbfs;
 	CCustomStatic m_hold;
 	CCustomStatic m_meterL;

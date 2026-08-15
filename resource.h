@@ -1087,6 +1087,16 @@
 #define IDC_DOUGA_RATEVAL               3980
 #define IDC_OGG_MICDEV                  3981
 #define IDC_MP_MICDEV                   3982
+#define IDC_MP_MICDEV_REFRESH           4150
+#define IDC_OGG_MICDEV_REFRESH          4151
+#define IDC_DR_MICDEV_REFRESH           4152
+#define IDC_SC_MICDEV_REFRESH           4153
+#define IDC_DJPAD_MICDEV_REFRESH        4154
+#define IDC_COMBO_MICDEV_REFRESH        4155
+#define IDC_SM_MIC_REFRESH              4156
+#define IDC_VC_MIC_REFRESH              4157
+#define IDC_TN_MIC_REFRESH              4158
+#define IDC_DIG_CAP_REFRESH             4159
 #define IDC_DR_MICDEV                   3983
 #define IDC_DR_MICDEV_L                 3984
 #define IDC_SC_MICDEV                   3985
@@ -1184,6 +1194,23 @@
 #define IDC_VC_START                    4086
 #define IDC_VC_CLOSE                    4087
 #define IDC_VC_STATUS                   4088
+#define IDC_VC_BRIGHT_L                 4160
+#define IDC_VC_BRIGHT                   4161
+#define IDC_VC_BREATH_L                 4162
+#define IDC_VC_BREATH                   4163
+#define IDC_VC_QUAL_L                   4164
+#define IDC_VC_QUAL                     4165
+#define IDC_VC_STYLE_L                  4166
+#define IDC_VC_STYLE                    4167
+#define IDC_VC_OUT_REFRESH              4168
+#define IDC_TN_OUT_REFRESH              4169
+#define IDC_DIG_MON_REFRESH             4170
+#define IDC_MP_LOOPDEV                  4171
+#define IDC_MP_LOOPDEV_REFRESH          4172
+#define IDC_SC_VC_APPLY                 4173
+#define IDC_SC_VC_OPEN                  4174
+#define IDC_MP_VC_APPLY                 4175
+#define IDC_MP_VC_OPEN                  4176
 #define IDC_TN_HELP                     4090
 #define IDC_TN_MIC_L                    4091
 #define IDC_TN_MIC                      4092
@@ -1649,7 +1676,7 @@
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NEXT_RESOURCE_VALUE        268
 #define _APS_NEXT_COMMAND_VALUE         33254
-#define _APS_NEXT_CONTROL_VALUE         4150
+#define _APS_NEXT_CONTROL_VALUE         4177
 #define _APS_NEXT_SYMED_VALUE           104
 #endif
 #endif

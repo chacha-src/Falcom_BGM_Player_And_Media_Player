@@ -808,7 +808,12 @@ public:
 
     // 物理インデックス（ComboBox本来の全アイテムに対するインデックス）の取得と設定
     int GetCurSelPhysical() const { return CComboBox::GetCurSel(); }
-    int SetCurSelPhysical(int n) { return CComboBox::SetCurSel(n); }
+    int SetCurSelPhysical(int n)
+    {
+        const int r = CComboBox::SetCurSel(n);
+        if (m_hWnd) ::PostMessage(m_hWnd, CCC_WM_POST_OPAQUE_PAINT, 0, 0);
+        return r;
+    }
 
     // 無効化アイテム用のラベル色設定と取得
     void SetLabelColor(COLORREF ct, COLORREF cb);

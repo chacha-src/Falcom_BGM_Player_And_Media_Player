@@ -1,11 +1,16 @@
 ﻿#pragma once
 // WASAPI マイク(eCapture) / ループバック元再生端末(eRender) の共通選択・同期。
 // 真実は savedata.mic_device / loop_device（*_cur は補助）。
+// 端末の挿抜は IMMNotificationClient → WM_AUDIODEV_CHANGED で UI スレッドへ。
 
 class CCustomComboBox;
 class CCustomPopupMenu;
 
 enum { AUDIODEV_MAX = 32 };
+
+#ifndef WM_AUDIODEV_CHANGED
+#define WM_AUDIODEV_CHANGED (WM_APP + 731)
+#endif
 
 // --- マイク ---
 void AudioMicDevRefresh();
@@ -38,3 +43,14 @@ void AudioLoopDevRegisterCombo(CCustomComboBox* cb);
 void AudioLoopDevUnregisterCombo(CCustomComboBox* cb);
 void AudioLoopDevAppendMenu(CCustomPopupMenu& menu);
 BOOL AudioLoopDevHandleMenuCmd(UINT cmd);
+
+// --- 挿抜監視 / 再構築 ---
+// hwndUi: WM_AUDIODEV_CHANGED を受ける UI スレッド窓（通常は COggDlg）
+void AudioDevWatchEnsure(HWND hwndUi);
+void AudioDevWatchShutdown();
+// 再列挙して登録済みコンボを全部作り直し。独自 Fill の窓へも WM_AUDIODEV_CHANGED を配送。
+void AudioDevRebuildAll();
+void AudioDevRegisterNotifyHwnd(HWND h);
+void AudioDevUnregisterNotifyHwnd(HWND h);
+CString AudioDevRescanButtonLabel();
+void AudioDevApplyRescanButton(CWnd* btn);

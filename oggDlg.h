@@ -246,9 +246,12 @@ public:
 	CCustomSliderCtrl	m_miclev;
 	CCustomStatic	m_miclevs;
 	CCustomComboBox m_micdev;
+	CCustomStandardButton m_micdevRefresh;
 	afx_msg void OnMicMixCheck();
 	afx_msg void OnMicLevRelease(NMHDR* pNMHDR, LRESULT* pResult);
 	afx_msg void OnCbnSelchangeMicDev();
+	afx_msg void OnMicDevRefresh();
+	afx_msg LRESULT OnAudioDevChanged(WPARAM wParam, LPARAM lParam);
 	void SyncMicMixUiFromSavedata();
 	void ApplyMicMixLevelLabel();
 	CCustomStatic	m_11;

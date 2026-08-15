@@ -684,11 +684,11 @@ struct save{
 	TCHAR dig_last_path[1024];
 	TCHAR vc_mic_device[256];
 	TCHAR vc_out_device[256];   // 仮想ケーブル等 eRender
-	int vc_pitch;               // 50..200 (100=等倍)
+	int vc_pitch;               // 50..250 (100=等倍)
 	int vc_formant;             // 50..200 (簡易)
 	int vc_gain;                // 0..200
 	int vc_monitor;             // 1=自分にもモニタ
-	int vc_preset;              // 0..4
+	int vc_preset;              // ボイスチェンジャー・プリセット index（カタログは vc_preset_rev）
 	TCHAR tn_mic_device[256];
 	TCHAR tn_out_device[256];   // メトロノーム出力
 	int tn_bpm;                 // 40..240
@@ -746,6 +746,14 @@ struct save{
 	int s3r_zoom;              // 視点ズーム×100（50..250）
 	int s3r_win_x, s3r_win_y, s3r_win_w, s3r_win_h; // 0幅=未保存
 	int s3r_invert_y;          // 0=通常 1=マウス/パッド上下反転
+
+	// --- ボイスチェンジャー拡張（末尾追記。旧.datは offsetof で初期化）---
+	int vc_bright;              // 50..150 (100=平坦。存在感/明るさ)
+	int vc_breath;              // 0..100 (息成分)
+	int vc_quality;             // 0=低遅延 1=高音質
+	int vc_style;               // 0=通常 1=ロボット 2=ラジオ/電話
+	int vc_mic_apply;           // 1=MP/画面キャプチャのマイクミックスにVC設定を適用
+	int vc_preset_rev;          // プリセットカタログ版（0=旧10種, 1=現行）
 };
 extern save savedata;
 /* コード間隔(ms)。16..500。旧.dat や未設定は 25。 */

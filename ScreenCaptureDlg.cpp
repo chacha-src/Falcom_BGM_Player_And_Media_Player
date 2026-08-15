@@ -1,4 +1,4 @@
-// ScreenCaptureDlg.cpp
+﻿// ScreenCaptureDlg.cpp
 // 画面キャプチャ → MP4 (H.264 + AAC)
 // プライマリ / 全モニタ / ウィンドウ合成(配置・拡大縮小・Z順)
 
@@ -10,6 +10,8 @@
 #include "AudioDevSync.h"
 #include "ScWgcCapture.h"
 #include "CMediaPlayerDlg.h"
+#include "VcVocalTract.h"
+#include "VoiceChangerDlg.h"
 #include <mmdeviceapi.h>
 #include <Audioclient.h>
 #include <FunctionDiscoveryKeys_devpkey.h>
@@ -121,6 +123,7 @@ static volatile LONG s_micR = 0;
 static CRITICAL_SECTION s_micCs;
 static volatile LONG s_micCsInit = 0;
 static volatile LONG s_micCapRate = 0;
+static VcVocalTract s_scMicVc;
 
 static void ScMicEnsureCs()
 {
@@ -131,12 +134,23 @@ static void ScMicEnsureCs()
 static void ScMicRingWrite(const float* interleaved, int frames)
 {
 	if (!interleaved || frames <= 0) return;
+
+	float vcBuf[4096 * 2];
+	const float* src = interleaved;
+	VcVocalParams vp;
+	if (frames <= 4096 && VcParamsFromSavedata(vp)) {
+		memcpy(vcBuf, interleaved, sizeof(float) * (size_t)frames * 2);
+		const int rate = (int)InterlockedCompareExchange(&s_micCapRate, 0, 0);
+		VcProcessInterleavedStereo(s_scMicVc, vcBuf, frames, rate > 8000 ? rate : 48000, vp);
+		src = vcBuf;
+	}
+
 	EnterCriticalSection(&s_micCs);
 	LONG w = s_micW;
 	for (int i = 0; i < frames; ++i) {
 		const int wi = (int)(w % SC_MIC_FRAMES);
-		s_micRing[wi * SC_MIC_CH + 0] = interleaved[i * 2 + 0];
-		s_micRing[wi * SC_MIC_CH + 1] = interleaved[i * 2 + 1];
+		s_micRing[wi * SC_MIC_CH + 0] = src[i * 2 + 0];
+		s_micRing[wi * SC_MIC_CH + 1] = src[i * 2 + 1];
 		w++;
 	}
 	s_micW = w;
@@ -2835,6 +2849,9 @@ void CScreenCaptureDlg::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDC_SC_MIC, m_mic);
 	DDX_Control(pDX, IDC_SC_MICDEV_L, m_micDevLabel);
 	DDX_Control(pDX, IDC_SC_MICDEV, m_micDev);
+	DDX_Control(pDX, IDC_SC_MICDEV_REFRESH, m_micDevRefresh);
+	DDX_Control(pDX, IDC_SC_VC_APPLY, m_vcApply);
+	DDX_Control(pDX, IDC_SC_VC_OPEN, m_vcOpen);
 	DDX_Control(pDX, IDC_SC_LOOPDEV_L, m_loopDevLabel);
 	DDX_Control(pDX, IDC_SC_LOOPDEV, m_loopDev);
 	DDX_Control(pDX, IDC_SC_METER_MIC_L, m_meterMicL);
@@ -2903,7 +2920,10 @@ BEGIN_MESSAGE_MAP(CScreenCaptureDlg, CCustomBlurDialogBase)
 	ON_BN_CLICKED(IDC_SC_LIVE, &CScreenCaptureDlg::OnBnClickedLive)
 	ON_BN_CLICKED(IDC_SC_LIVE_CFG, &CScreenCaptureDlg::OnBnClickedLiveCfg)
 	ON_BN_CLICKED(IDC_SC_MIC, &CScreenCaptureDlg::OnBnClickedMic)
+	ON_BN_CLICKED(IDC_SC_VC_APPLY, &CScreenCaptureDlg::OnBnClickedVcApply)
+	ON_BN_CLICKED(IDC_SC_VC_OPEN, &CScreenCaptureDlg::OnBnClickedVcOpen)
 	ON_CBN_SELCHANGE(IDC_SC_MICDEV, &CScreenCaptureDlg::OnCbnSelchangeMicDev)
+	ON_BN_CLICKED(IDC_SC_MICDEV_REFRESH, &CScreenCaptureDlg::OnMicDevRefresh)
 	ON_CBN_SELCHANGE(IDC_SC_LOOPDEV, &CScreenCaptureDlg::OnCbnSelchangeLoopDev)
 	ON_CBN_SELCHANGE(IDC_SC_MODE, &CScreenCaptureDlg::OnCbnSelchangeMode)
 	ON_CBN_SELCHANGE(IDC_SC_CANVAS, &CScreenCaptureDlg::OnCbnSelchangeCanvas)
@@ -4818,6 +4838,11 @@ void CScreenCaptureDlg::OnCbnSelchangeMicDev()
 	AudioMicDevApplyFromCombo(m_micDev);
 }
 
+void CScreenCaptureDlg::OnMicDevRefresh()
+{
+	AudioDevRebuildAll();
+}
+
 void CScreenCaptureDlg::OnCbnSelchangeLoopDev()
 {
 	AudioLoopDevApplyFromCombo(m_loopDev);
@@ -4832,6 +4857,18 @@ void CScreenCaptureDlg::OnBnClickedMic()
 		StopPeakMonitor();
 		StartPeakMonitor();
 	}
+}
+
+void CScreenCaptureDlg::OnBnClickedVcApply()
+{
+	if (m_uiLocked) return;
+	savedata.vc_mic_apply = m_vcApply.GetCheck() ? 1 : 0;
+	MpPersistSavedataQuick();
+}
+
+void CScreenCaptureDlg::OnBnClickedVcOpen()
+{
+	OpenVoiceChangerModeless(this);
 }
 
 void CScreenCaptureDlg::ToggleLayerHidden(int layerIdx)
@@ -5563,7 +5600,11 @@ BOOL CScreenCaptureDlg::OnInitDialog()
 
 	m_audio.SetCheck(savedata.cap_with_audio ? BST_CHECKED : BST_UNCHECKED);
 	m_mic.SetCheck(savedata.cap_with_mic ? BST_CHECKED : BST_UNCHECKED);
+	m_vcApply.SetCheck(savedata.vc_mic_apply ? BST_CHECKED : BST_UNCHECKED);
+	m_vcApply.SetWindowText(LL14(L"VC適用", L"Apply VC", L"Appliquer VC", L"Applica VC", L"Aplicar VC", L"VC 적용", L"应用变声", L"تطبيق VC", L"Применить VC", L"VC anwenden", L"Aplicar VC", L"VC toepassen", L"Zastosuj VC", L"VC uygula"));
+	m_vcOpen.SetWindowText(LL14(L"VC設定", L"VC setup", L"Réglages VC", L"Impost. VC", L"Ajustes VC", L"VC 설정", L"变声设置", L"إعداد VC", L"Настройки VC", L"VC-Einst.", L"Ajustes VC", L"VC-instel.", L"Ustaw. VC", L"VC ayar"));
 	AudioMicDevFillCombo(m_micDev);
+	AudioDevApplyRescanButton(&m_micDevRefresh);
 	AudioLoopDevFillCombo(m_loopDev);
 	m_micDevLabel.SetWindowText(LL14(L"マイク", L"Mic", L"Micro", L"Micro", L"Micro", L"마이크", L"麦克风", L"ميكروفون", L"Микрофон", L"Mikrofon", L"Microfone", L"Microfoon", L"Mikrofon", L"Mikrofon"));
 	m_loopDevLabel.SetWindowText(LL14(L"システム", L"System", L"Système", L"Sistema", L"Sistema", L"시스템", L"系统", L"النظام", L"Система", L"System", L"Sistema", L"Systeem", L"System", L"Sistem"));
@@ -5919,6 +5960,8 @@ BOOL CScreenCaptureDlg::OnInitDialog()
 		m_tooltip.AddTool(&m_meterMic, LL14(L"マイク入力レベル(リアルタイム)", L"Mic level (live)", L"Niveau micro (live)", L"Livello microfono (live)", L"Nivel de micrófono (en vivo)", L"마이크 레벨(실시간)", L"麦克风电平(实时)", L"مستوى الميكروفون (مباشر)", L"Уровень микрофона (live)", L"Mikrofonpegel (live)", L"Nível do microfone (ao vivo)", L"Microfoonniveau (live)", L"Poziom mikrofonu (na żywo)", L"Mikrofon seviyesi (canlı)"));
 		m_tooltip.AddTool(&m_meterSys, LL14(L"システム音レベル(ループバック=演奏込み)", L"System audio level (loopback incl. playback)", L"Niveau système (lecture incluse)", L"Livello sistema (include riproduzione)", L"Nivel del sistema (incluye reproducción)", L"시스템 소리 레벨(재생 포함)", L"系统声音电平(含播放)", L"مستوى صوت النظام (يشمل التشغيل)", L"Уровень системного звука (с воспроизведением)", L"Systemtonpegel inkl. Wiedergabe", L"Nível do sistema (inclui reprodução)", L"Systeemniveau (inclusief afspelen)", L"Poziom dźwięku systemu (z odtwarzaniem)", L"Sistem sesi seviyesi (oynatma dahil)"));
 		m_tooltip.AddTool(&m_meterMix, LL14(L"プレビュー用ピーク(システム相当)", L"Preview peak (system-equivalent)", L"Pic d'aperçu (système)", L"Picco anteprima (sistema)", L"Pico de vista previa (sistema)", L"미리보기 피크(시스템 상당)", L"预览峰值(系统相当)", L"ذروة المعاينة (مكافئ النظام)", L"Пик превью (как система)", L"Vorschau-Peak (System)", L"Pico da prévia (sistema)", L"Voorbeeldpiek (systeem)", L"Szczyt podglądu (system)", L"Önizleme tepe (sistem)"));
+		m_tooltip.AddTool(&m_vcApply, LL14(L"ONでボイスチェンジャー設定をマイクミックスへ適用", L"When ON, apply Voice Changer settings to mic mix", L"ON = appliquer les réglages VC au mix micro", L"ON = applica impostazioni VC al mix micro", L"ON = aplicar ajustes VC a la mezcla de mic", L"ON이면 VC 설정을 마이크 믹스에 적용", L"开启后将变声设置应用到麦克风混音", L"عند التشغيل تُطبق إعدادات VC على مزج الميك", L"ON — применить настройки VC к миксу микрофона", L"EIN = VC-Einstellungen auf Mic-Mix anwenden", L"ON = aplicar ajustes de VC ao mix do micro", L"AAN = VC-instellingen op mic-mix toepassen", L"ON = zastosuj ustawienia VC do miksu mikrofonu", L"Açıkken VC ayarlarını mik karışımına uygula"));
+		m_tooltip.AddTool(&m_vcOpen, LL14(L"ボイスチェンジャー設定画面を開く", L"Open Voice Changer settings", L"Ouvrir les réglages du changeur de voix", L"Apri impostazioni cambia voce", L"Abrir ajustes del cambiador de voz", L"보이스 체인저 설정 열기", L"打开变声器设置", L"فتح إعدادات مغير الصوت", L"Открыть настройки изменения голоса", L"Stimmenwandler-Einstellungen öffnen", L"Abrir ajustes do modificador de voz", L"Stemvervormer-instellingen openen", L"Otwórz ustawienia zmiany głosu", L"Ses değiştirici ayarlarını aç"));
 		CCustomControlUtility::FinalizeDialogToolTip(m_tooltip, 420, 12000);
 	}
 
@@ -8280,8 +8323,10 @@ void CScreenCaptureDlg::ApplySavedataToUi(BOOL gameGuide)
 		m_audio.SetCheck(savedata.cap_with_audio ? BST_CHECKED : BST_UNCHECKED);
 	if (m_mic.GetSafeHwnd())
 		m_mic.SetCheck(savedata.cap_with_mic ? BST_CHECKED : BST_UNCHECKED);
-		AudioMicDevSyncComboSel(m_micDev);
-		AudioLoopDevSyncComboSel(m_loopDev);
+	if (m_vcApply.GetSafeHwnd())
+		m_vcApply.SetCheck(savedata.vc_mic_apply ? BST_CHECKED : BST_UNCHECKED);
+	AudioMicDevSyncComboSel(m_micDev);
+	AudioLoopDevSyncComboSel(m_loopDev);
 	if (m_includeMp.GetSafeHwnd())
 		m_includeMp.SetCheck(savedata.cap_include_mp ? BST_CHECKED : BST_UNCHECKED);
 	if (m_showCursor.GetSafeHwnd())

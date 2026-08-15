@@ -5342,6 +5342,7 @@ public:
 	CCustomLevelMeter m_meter;
 	CCustomStatic m_micDevL;
 	CCustomComboBox m_micDev;
+	CCustomStandardButton m_micDevRefresh;
 	CCustomStatic m_loopDevL;
 	CCustomComboBox m_loopDev;
 	CToolTipCtrl m_tooltip;
@@ -5411,6 +5412,7 @@ protected:
 		DDX_Control(pDX, IDC_DJPAD_METER, m_meter);
 		DDX_Control(pDX, IDC_DJPAD_MICDEV_L, m_micDevL);
 		DDX_Control(pDX, IDC_DJPAD_MICDEV, m_micDev);
+		DDX_Control(pDX, IDC_DJPAD_MICDEV_REFRESH, m_micDevRefresh);
 		DDX_Control(pDX, IDC_DJPAD_LOOPDEV_L, m_loopDevL);
 		DDX_Control(pDX, IDC_DJPAD_LOOPDEV, m_loopDev);
 	}
@@ -5478,6 +5480,7 @@ protected:
 		SetDlgItemText(IDC_DJPAD_VOL_L, LL14(L"音量", L"Vol", L"Vol", L"Vol", L"Vol",
 			L"볼륨", L"音量", L"صوت", L"Громк.", L"Laut", L"Vol", L"Vol", L"Glosn.", L"Ses"));
 		AudioMicDevFillCombo(m_micDev);
+		AudioDevApplyRescanButton(&m_micDevRefresh);
 		AudioLoopDevFillCombo(m_loopDev);
 		m_micDevL.SetWindowText(LL14(L"マイク", L"Mic", L"Micro", L"Micro", L"Micro", L"마이크", L"麦克风", L"ميكروفون", L"Микрофон", L"Mikrofon", L"Microfone", L"Microfoon", L"Mikrofon", L"Mikrofon"));
 		m_loopDevL.SetWindowText(LL14(L"システム", L"System", L"Système", L"Sistema", L"Sistema", L"시스템", L"系统", L"النظام", L"Система", L"System", L"Sistema", L"Systeem", L"System", L"Sistem"));
@@ -6322,6 +6325,7 @@ protected:
 		MpPersistSavedataQuick();
 	}
 	afx_msg void OnMicDev() { AudioMicDevApplyFromCombo(m_micDev); }
+	afx_msg void OnMicDevRefresh() { AudioDevRebuildAll(); }
 	afx_msg void OnLoopDev() { AudioLoopDevApplyFromCombo(m_loopDev); }
 	DECLARE_MESSAGE_MAP()
 };
@@ -6369,6 +6373,7 @@ BEGIN_MESSAGE_MAP(CMpDjPadDlg, CCustomBlurDialogBase)
 	ON_BN_CLICKED(IDC_DJPAD_KILL_M, &CMpDjPadDlg::OnKillM)
 	ON_BN_CLICKED(IDC_DJPAD_KILL_H, &CMpDjPadDlg::OnKillH)
 	ON_CBN_SELCHANGE(IDC_DJPAD_MICDEV, &CMpDjPadDlg::OnMicDev)
+	ON_BN_CLICKED(IDC_DJPAD_MICDEV_REFRESH, &CMpDjPadDlg::OnMicDevRefresh)
 	ON_CBN_SELCHANGE(IDC_DJPAD_LOOPDEV, &CMpDjPadDlg::OnLoopDev)
 END_MESSAGE_MAP()
 

@@ -12,7 +12,7 @@
 extern void MpPersistSavedataQuick();
 extern void MpMicMixRestartIfRunning();
 
-enum { kComboRegMax = 24 };
+enum { kComboRegMax = 24, kNotifyHwndMax = 16 };
 
 static TCHAR s_micIds[AUDIODEV_MAX][256];
 static CString s_micNames[AUDIODEV_MAX];
@@ -29,8 +29,67 @@ static int s_micComboN = 0;
 static CCustomComboBox* s_loopCombos[kComboRegMax];
 static int s_loopComboN = 0;
 
+static HWND s_notifyHwnds[kNotifyHwndMax];
+static int s_notifyHwndN = 0;
+
 static int s_micGuard = 0;
 static int s_loopGuard = 0;
+
+static HWND s_watchHwnd = NULL;
+static volatile LONG s_watchPosted = 0;
+static IMMDeviceEnumerator* s_watchEnum = NULL;
+
+class AudioDevEndpointNotify : public IMMNotificationClient
+{
+	LONG m_ref;
+public:
+	AudioDevEndpointNotify() : m_ref(1) {}
+	virtual ~AudioDevEndpointNotify() {}
+
+	STDMETHODIMP QueryInterface(REFIID riid, void** ppv)
+	{
+		if (!ppv) return E_POINTER;
+		if (riid == IID_IUnknown || riid == __uuidof(IMMNotificationClient)) {
+			*ppv = static_cast<IMMNotificationClient*>(this);
+			AddRef();
+			return S_OK;
+		}
+		*ppv = NULL;
+		return E_NOINTERFACE;
+	}
+	STDMETHODIMP_(ULONG) AddRef() { return (ULONG)InterlockedIncrement(&m_ref); }
+	STDMETHODIMP_(ULONG) Release()
+	{
+		const LONG c = InterlockedDecrement(&m_ref);
+		if (c == 0) { delete this; return 0; }
+		return (ULONG)c;
+	}
+
+	void PostChanged()
+	{
+		// デバウンス: 連続挿抜でも1回。watch が AudioDevRebuildAll → 他窓へ配送。
+		HWND h = s_watchHwnd;
+		if (!h || !::IsWindow(h)) {
+			// watch 未準備でも登録 UI へ直接通知
+			for (int i = 0; i < s_notifyHwndN; ++i) {
+				HWND n = s_notifyHwnds[i];
+				if (n && ::IsWindow(n))
+					::PostMessage(n, WM_AUDIODEV_CHANGED, 0, 0);
+			}
+			return;
+		}
+		if (InterlockedCompareExchange(&s_watchPosted, 1, 0) == 0)
+			::PostMessage(h, WM_AUDIODEV_CHANGED, 0, 0);
+	}
+
+	STDMETHODIMP OnDeviceStateChanged(LPCWSTR, DWORD) { PostChanged(); return S_OK; }
+	STDMETHODIMP OnDeviceAdded(LPCWSTR) { PostChanged(); return S_OK; }
+	STDMETHODIMP OnDeviceRemoved(LPCWSTR) { PostChanged(); return S_OK; }
+	STDMETHODIMP OnDefaultDeviceChanged(EDataFlow, ERole, LPCWSTR) { PostChanged(); return S_OK; }
+	STDMETHODIMP OnPropertyValueChanged(LPCWSTR, const PROPERTYKEY) { return S_OK; }
+};
+
+static AudioDevEndpointNotify* s_watchCb = NULL;
 
 static CString AudioDevDefaultMicLabel()
 {
@@ -59,6 +118,28 @@ static void RegDel(CCustomComboBox** arr, int* pn, CCustomComboBox* cb)
 		if (arr[i] != cb) continue;
 		for (int j = i; j < *pn - 1; ++j) arr[j] = arr[j + 1];
 		(*pn)--;
+		return;
+	}
+}
+
+static void NotifyHwndAdd(HWND h)
+{
+	if (!h || !::IsWindow(h)) return;
+	for (int i = 0; i < s_notifyHwndN; ++i) {
+		if (s_notifyHwnds[i] == h) return;
+	}
+	if (s_notifyHwndN >= kNotifyHwndMax) return;
+	s_notifyHwnds[s_notifyHwndN++] = h;
+}
+
+static void NotifyHwndDel(HWND h)
+{
+	if (!h) return;
+	for (int i = 0; i < s_notifyHwndN; ++i) {
+		if (s_notifyHwnds[i] != h) continue;
+		for (int j = i; j < s_notifyHwndN - 1; ++j)
+			s_notifyHwnds[j] = s_notifyHwnds[j + 1];
+		s_notifyHwndN--;
 		return;
 	}
 }
@@ -139,6 +220,109 @@ static void SyncComboSelOnly(CCustomComboBox& cb, int sel)
 		cb.SetCurSelPhysical(sel);
 }
 
+void AudioDevWatchEnsure(HWND hwndUi)
+{
+	if (hwndUi && ::IsWindow(hwndUi))
+		s_watchHwnd = hwndUi;
+	if (s_watchCb && s_watchEnum)
+		return;
+	IMMDeviceEnumerator* enumer = NULL;
+	HRESULT hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), NULL, CLSCTX_ALL,
+		__uuidof(IMMDeviceEnumerator), (void**)&enumer);
+	if (FAILED(hr) || !enumer) return;
+	AudioDevEndpointNotify* cb = new AudioDevEndpointNotify();
+	hr = enumer->RegisterEndpointNotificationCallback(cb);
+	if (FAILED(hr)) {
+		cb->Release();
+		enumer->Release();
+		return;
+	}
+	s_watchEnum = enumer;
+	s_watchCb = cb;
+}
+
+void AudioDevWatchShutdown()
+{
+	if (s_watchEnum && s_watchCb) {
+		s_watchEnum->UnregisterEndpointNotificationCallback(s_watchCb);
+	}
+	if (s_watchCb) {
+		s_watchCb->Release();
+		s_watchCb = NULL;
+	}
+	if (s_watchEnum) {
+		s_watchEnum->Release();
+		s_watchEnum = NULL;
+	}
+	s_watchHwnd = NULL;
+	InterlockedExchange(&s_watchPosted, 0);
+}
+
+void AudioDevRegisterNotifyHwnd(HWND h) { NotifyHwndAdd(h); }
+void AudioDevUnregisterNotifyHwnd(HWND h) { NotifyHwndDel(h); }
+
+CString AudioDevRescanButtonLabel()
+{
+	return LL14(L"再検出", L"Rescan", L"Rescan", L"Rileva", L"Redetectar",
+		L"재검색", L"重新检测", L"إعادة الفحص", L"Обновить", L"Neu erkennen",
+		L"Redetectar", L"Opnieuw", L"Wykryj ponownie", L"Yeniden tara");
+}
+
+void AudioDevApplyRescanButton(CWnd* btn)
+{
+	if (!btn || !btn->GetSafeHwnd()) return;
+	btn->SetWindowText(AudioDevRescanButtonLabel());
+}
+
+static void RebuildMicCombos()
+{
+	const int sel = AudioMicDevCurSel();
+	for (int i = 0; i < s_micComboN; ++i) {
+		CCustomComboBox* p = s_micCombos[i];
+		if (!p || !p->GetSafeHwnd()) continue;
+		FillComboFrom(*p, s_micNames, s_micCnt, sel);
+	}
+}
+
+static void RebuildLoopCombos()
+{
+	const int sel = AudioLoopDevCurSel();
+	for (int i = 0; i < s_loopComboN; ++i) {
+		CCustomComboBox* p = s_loopCombos[i];
+		if (!p || !p->GetSafeHwnd()) continue;
+		FillComboFrom(*p, s_loopNames, s_loopCnt, sel);
+	}
+}
+
+void AudioDevRebuildAll()
+{
+	InterlockedExchange(&s_watchPosted, 0);
+
+	TCHAR prevMic[256];
+	_tcsncpy(prevMic, savedata.mic_device, 255);
+	prevMic[255] = 0;
+
+	AudioMicDevRefresh();
+	AudioLoopDevRefresh();
+
+	s_micGuard = 1;
+	s_loopGuard = 1;
+	RebuildMicCombos();
+	RebuildLoopCombos();
+	s_micGuard = 0;
+	s_loopGuard = 0;
+
+	if (_tcscmp(prevMic, savedata.mic_device) != 0)
+		MpMicMixRestartIfRunning();
+
+	HWND watch = s_watchHwnd;
+	for (int i = 0; i < s_notifyHwndN; ++i) {
+		HWND h = s_notifyHwnds[i];
+		if (!h || !::IsWindow(h) || h == watch) continue;
+		::PostMessage(h, WM_AUDIODEV_CHANGED, 0, 0);
+	}
+}
+
 // ---- Mic ----
 
 void AudioMicDevRefresh()
@@ -198,7 +382,6 @@ void AudioMicDevSyncAllUi()
 	for (int i = 0; i < s_micComboN; ++i) {
 		CCustomComboBox* p = s_micCombos[i];
 		if (!p || !p->GetSafeHwnd()) continue;
-		// 空なら再 Fill（初回同期や再作成）
 		if (p->GetCount() != s_micCnt)
 			FillComboFrom(*p, s_micNames, s_micCnt, sel);
 		else
@@ -214,13 +397,11 @@ void AudioMicDevApplySel(int sel)
 	savedata.mic_device_cur = sel;
 	_tcsncpy(savedata.mic_device, s_micIds[sel], _countof(savedata.mic_device) - 1);
 	savedata.mic_device[_countof(savedata.mic_device) - 1] = 0;
-	// MRU: 先頭へ
 	{
 		TCHAR cur[256];
 		_tcsncpy(cur, savedata.mic_device, 255); cur[255] = 0;
 		for (int i = 0; i < 2; ++i) {
 			if (_tcsicmp(savedata.mpMicMru[i], cur) == 0) {
-				// 詰め
 				for (int j = i; j < 2; ++j)
 					_tcscpy_s(savedata.mpMicMru[j], savedata.mpMicMru[j + 1]);
 				savedata.mpMicMru[2][0] = 0;

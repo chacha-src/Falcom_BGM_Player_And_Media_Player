@@ -441,6 +441,9 @@
     <ClCompile Include="VoiceChangerDlg.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="VcVocalTract.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="TunerPracticeDlg.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -1067,6 +1070,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="VoiceChangerDlg.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="VcVocalTract.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="TunerPracticeDlg.h">

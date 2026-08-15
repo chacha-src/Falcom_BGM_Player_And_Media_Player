@@ -474,6 +474,7 @@ void CRender::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDC_STATIC_EQCODE_MS, m_eqCodeMs);
 	DDX_Control(pDX, IDC_COMBO2, m_soundlist);
 	DDX_Control(pDX, IDC_COMBO_MICDEV, m_miclist);
+	DDX_Control(pDX, IDC_COMBO_MICDEV_REFRESH, m_micRefresh);
 	DDX_Control(pDX, IDC_STATIC_R_MIC, m_micLabel);
 	DDX_Control(pDX, IDC_BUTTON1, m_ao);
 	DDX_Control(pDX, IDC_COMBO3, m_Hz);
@@ -525,6 +526,7 @@ BEGIN_MESSAGE_MAP(CRender, CCustomBlurDialogExBase)
 	ON_WM_TIMER()
 	ON_CBN_SELCHANGE(IDC_COMBO2, &CRender::OnCbnSelchangeCombo2)
 	ON_CBN_SELCHANGE(IDC_COMBO_MICDEV, &CRender::OnCbnSelchangeMic)
+	ON_BN_CLICKED(IDC_COMBO_MICDEV_REFRESH, &CRender::OnMicDevRefresh)
 	ON_BN_CLICKED(IDC_BUTTON1, &CRender::OnBnClickedButton1)
 	ON_CBN_SELCHANGE(IDC_COMBO3, &CRender::OnCbnSelchangeCombo3)
 	ON_CBN_SELCHANGE(IDC_COMBO_SPEAKER, &CRender::OnCbnSelchangeSpeaker)
@@ -859,6 +861,7 @@ BOOL CRender::OnInitDialog()
 
 	// マイク(録音)端末: 共通列挙（savedata.mic_device）
 	AudioMicDevFillCombo(m_miclist);
+	AudioDevApplyRescanButton(&m_micRefresh);
 
 	if (!pGraphBuilder)
 		m_l.EnableWindow(FALSE);
@@ -1370,6 +1373,11 @@ void CRender::OnBnClickedOk()
 void CRender::OnCbnSelchangeMic()
 {
 	AudioMicDevApplyFromCombo(m_miclist);
+}
+
+void CRender::OnMicDevRefresh()
+{
+	AudioDevRebuildAll();
 }
 
 

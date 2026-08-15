@@ -18,6 +18,8 @@ protected:
 	DECLARE_MESSAGE_MAP()
 
 	void FillDevices();
+	afx_msg void OnMicDevRefresh();
+	afx_msg LRESULT OnAudioDevChanged(WPARAM, LPARAM);
 	void FillSettings();
 	void PersistUi();
 	void SetRecordingUi(BOOL on);
@@ -45,6 +47,7 @@ public:
 	CCustomStatic m_capL, m_monL, m_fmtL, m_qualL, m_pathL;
 	CCustomStatic m_hpfL, m_gainL, m_gateL, m_meterL, m_time, m_status;
 	CCustomComboBox m_cap, m_mon, m_fmt, m_qual, m_hpf, m_gain, m_gate;
+	CCustomStandardButton m_capRefresh,m_monRefresh;
 	CCustomEdit m_path;
 	CCustomCheckBox m_monitor;
 	CCustomLevelMeter m_meter;

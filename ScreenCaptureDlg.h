@@ -226,9 +226,12 @@ public:
 	afx_msg void OnBnClickedIncludeMp();
 	afx_msg void OnBnClickedShowCursor();
 	afx_msg void OnBnClickedMic();
+	afx_msg void OnBnClickedVcApply();
+	afx_msg void OnBnClickedVcOpen();
 	afx_msg void OnBnClickedLive();
 	afx_msg void OnBnClickedLiveCfg();
 	afx_msg void OnCbnSelchangeMicDev();
+	afx_msg void OnMicDevRefresh();
 	afx_msg void OnCbnSelchangeLoopDev();
 	afx_msg void OnCbnSelchangeMode();
 	afx_msg void OnCbnSelchangeCanvas();
@@ -275,10 +278,13 @@ public:
 	CCustomCheckBox m_mic;
 	CCustomStatic m_micDevLabel;
 	CCustomComboBox m_micDev;
+	CCustomStandardButton m_micDevRefresh;
 	CCustomStatic m_loopDevLabel;
 	CCustomComboBox m_loopDev;
 	CCustomCheckBox m_includeMp;
 	CCustomCheckBox m_showCursor;
+	CCustomCheckBox m_vcApply;
+	CCustomStandardButton m_vcOpen;
 	CCustomCheckBox m_live;
 	CCustomStandardButton m_liveCfg;
 	CCustomStandardButton m_pick;

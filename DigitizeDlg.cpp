@@ -109,7 +109,7 @@ CDigitizeDlg::~CDigitizeDlg(){InterlockedExchange(&m_stop,1);if(m_thread){WaitFo
 void CDigitizeDlg::DoDataExchange(CDataExchange* p)
 {
 	CCustomBlurDialogBase::DoDataExchange(p);
-	DDX_Control(p,IDC_DIG_HELP,m_help);DDX_Control(p,IDC_DIG_CAP_L,m_capL);DDX_Control(p,IDC_DIG_CAP,m_cap);
+	DDX_Control(p,IDC_DIG_HELP,m_help);DDX_Control(p,IDC_DIG_CAP_L,m_capL);DDX_Control(p,IDC_DIG_CAP,m_cap);DDX_Control(p,IDC_DIG_CAP_REFRESH,m_capRefresh);DDX_Control(p,IDC_DIG_MON_REFRESH,m_monRefresh);
 	DDX_Control(p,IDC_DIG_MON_L,m_monL);DDX_Control(p,IDC_DIG_MON,m_mon);DDX_Control(p,IDC_DIG_MONITOR,m_monitor);
 	DDX_Control(p,IDC_DIG_FMT_L,m_fmtL);DDX_Control(p,IDC_DIG_FMT,m_fmt);DDX_Control(p,IDC_DIG_QUAL_L,m_qualL);DDX_Control(p,IDC_DIG_QUAL,m_qual);
 	DDX_Control(p,IDC_DIG_PATH_L,m_pathL);DDX_Control(p,IDC_DIG_PATH,m_path);DDX_Control(p,IDC_DIG_BROWSE,m_browse);
@@ -119,6 +119,7 @@ void CDigitizeDlg::DoDataExchange(CDataExchange* p)
 }
 BEGIN_MESSAGE_MAP(CDigitizeDlg,CCustomBlurDialogBase)
 	ON_BN_CLICKED(IDC_DIG_BROWSE,OnBrowse) ON_BN_CLICKED(IDC_DIG_START,OnStart) ON_BN_CLICKED(IDC_DIG_CLOSE,OnCloseBtn) ON_BN_CLICKED(IDC_DIG_HELP,OnHelp)
+	ON_BN_CLICKED(IDC_DIG_CAP_REFRESH,OnMicDevRefresh) ON_BN_CLICKED(IDC_DIG_MON_REFRESH,OnMicDevRefresh) ON_MESSAGE(WM_AUDIODEV_CHANGED,OnAudioDevChanged)
 	ON_CBN_SELCHANGE(IDC_DIG_FMT,OnFormat) ON_CBN_SELCHANGE(IDC_DIG_CAP,OnControlChanged) ON_CBN_SELCHANGE(IDC_DIG_MON,OnControlChanged)
 	ON_CBN_SELCHANGE(IDC_DIG_HPF,OnControlChanged) ON_CBN_SELCHANGE(IDC_DIG_GAIN,OnControlChanged) ON_CBN_SELCHANGE(IDC_DIG_GATE,OnControlChanged)
 	ON_BN_CLICKED(IDC_DIG_MONITOR,OnControlChanged) ON_WM_TIMER() ON_WM_SIZE() ON_WM_DESTROY()
@@ -129,10 +130,10 @@ void CDigitizeDlg::LayoutHelpBtn(){CCC_CaptionPlaceHelpBtn(m_hWnd,&m_help);}
 void CDigitizeDlg::FillDevices()
 {
 	AudioMicDevRefresh();m_cap.ResetContent();m_capCnt=0;int sel=0;
-	for(int i=0;i<AudioMicDevCount()&&m_capCnt<DIG_DEV_MAX;i++){LPCTSTR id=AudioMicDevId(i);if(!id||!*id)continue;_tcsncpy(m_capIds[m_capCnt],id,255);m_capIds[m_capCnt][255]=0;m_cap.AddString(AudioMicDevName(i));if(!_tcsicmp(savedata.dig_cap_device,id))sel=m_capCnt++ ;else m_capCnt++;}
+	for(int i=0;i<AudioMicDevCount()&&m_capCnt<DIG_DEV_MAX;i++){LPCTSTR id=AudioMicDevId(i);if(i>0&&(!id||!*id))continue;_tcsncpy(m_capIds[m_capCnt],id,255);m_capIds[m_capCnt][255]=0;m_cap.AddString(AudioMicDevName(i));if(!_tcsicmp(savedata.dig_cap_device,id))sel=m_capCnt++ ;else m_capCnt++;}
 	if(m_capCnt)m_cap.SetCurSel(sel);
 	AudioLoopDevRefresh();m_mon.ResetContent();m_monCnt=0;sel=0;
-	for(int i=0;i<AudioLoopDevCount()&&m_monCnt<DIG_DEV_MAX;i++){LPCTSTR id=AudioLoopDevId(i);if(!id||!*id)continue;_tcsncpy(m_monIds[m_monCnt],id,255);m_monIds[m_monCnt][255]=0;m_mon.AddString(AudioLoopDevName(i));if(!_tcsicmp(savedata.dig_mon_device,id))sel=m_monCnt;m_monCnt++;}
+	for(int i=0;i<AudioLoopDevCount()&&m_monCnt<DIG_DEV_MAX;i++){LPCTSTR id=AudioLoopDevId(i);if(i>0&&(!id||!*id))continue;_tcsncpy(m_monIds[m_monCnt],id,255);m_monIds[m_monCnt][255]=0;m_mon.AddString(AudioLoopDevName(i));if(!_tcsicmp(savedata.dig_mon_device,id))sel=m_monCnt;m_monCnt++;}
 	if(m_monCnt)m_mon.SetCurSel(sel);
 }
 void CDigitizeDlg::FillSettings()
@@ -176,7 +177,7 @@ BOOL CDigitizeDlg::OnInitDialog()
 	m_pathL.SetWindowText(LL14(L"保存先",L"Save path",L"Chemin",L"Percorso",L"Ruta",L"저장 위치",L"保存路径",L"مسار الحفظ",L"Путь",L"Speicherpfad",L"Caminho",L"Opslagpad",L"Ścieżka",L"Kayıt yolu"));
 	m_hpfL.SetWindowText(L"HPF");m_gainL.SetWindowText(L"Gain");m_gateL.SetWindowText(L"Gate");m_meterL.SetWindowText(L"In");
 	m_start.SetWindowText(DigText(2));m_close.SetWindowText(LL14(L"閉じる",L"Close",L"Fermer",L"Chiudi",L"Cerrar",L"닫기",L"关闭",L"إغلاق",L"Закрыть",L"Schließen",L"Fechar",L"Sluiten",L"Zamknij",L"Kapat"));
-	FillDevices();FillSettings();
+	FillDevices();FillSettings();AudioDevApplyRescanButton(&m_capRefresh);AudioDevApplyRescanButton(&m_monRefresh);AudioDevRegisterNotifyHwnd(m_hWnd);
 	if(CCustomControlUtility::BeginDialogToolTip(m_tooltip,this)){m_tooltip.AddTool(&m_cap,LL14(L"録音する入力端末",L"Input device to record",L"Entrée à enregistrer",L"Ingresso da registrare",L"Entrada a grabar",L"녹음할 입력",L"要录制的输入设备",L"جهاز الإدخال للتسجيل",L"Вход для записи",L"Aufnahmeeingang",L"Entrada a gravar",L"Op te nemen invoer",L"Wejście do nagrania",L"Kaydedilecek giriş"));m_tooltip.AddTool(&m_meter,LL14(L"処理後のピークレベル",L"Processed peak level",L"Niveau traité",L"Livello elaborato",L"Nivel procesado",L"처리 후 피크",L"处理后峰值",L"ذروة بعد المعالجة",L"Пик после обработки",L"Verarbeiteter Spitzenpegel",L"Pico processado",L"Verwerkt piekniveau",L"Szczyt po przetwarzaniu",L"İşlenmiş tepe seviyesi"));m_tooltip.AddTool(&m_start,LL14(L"録音を開始または停止",L"Start or stop recording",L"Démarrer ou arrêter",L"Avvia o ferma",L"Iniciar o detener",L"녹음 시작/중지",L"开始或停止录音",L"بدء التسجيل أو إيقافه",L"Начать или остановить",L"Aufnahme starten/stoppen",L"Iniciar ou parar",L"Opname starten/stoppen",L"Rozpocznij lub zatrzymaj",L"Kaydı başlat/durdur"));CCustomControlUtility::FinalizeDialogToolTip(m_tooltip,340,9000);}
 	CCC_CaptionLayout(m_hWnd);LayoutHelpBtn();PostMessage(CCC_MSG_REAPPLY_OPAQUE_FIXERS);return TRUE;
 }
@@ -218,6 +219,8 @@ done: if(ac)ac->Stop();if(rc)rc->Stop();if(ren)ren->Release();if(cap)cap->Releas
 void CDigitizeDlg::ShowHelpSheet(){if(g_help&&g_help->GetSafeHwnd()){g_help->SetForegroundWindow();return;}g_help=new CDigHelp(this);if(!g_help->Create(IDD_DIG_HELP,this)){delete g_help;g_help=NULL;return;}CCC_PresentOwnedHelp(this,g_help);}
 void CDigitizeDlg::OnHelp(){ShowHelpSheet();}void CDigitizeDlg::OnCloseBtn(){DestroyWindow();}void CDigitizeDlg::OnOK(){}void CDigitizeDlg::OnCancel(){DestroyWindow();}
 void CDigitizeDlg::OnSize(UINT t,int x,int y){CCustomBlurDialogBase::OnSize(t,x,y);if(GetSafeHwnd()){CCC_CaptionLayout(m_hWnd);LayoutHelpBtn();}}
-void CDigitizeDlg::OnDestroy(){if(m_thread)StopRecording(FALSE);PersistUi();CCustomBlurDialogBase::OnDestroy();}
+void CDigitizeDlg::OnDestroy(){AudioDevUnregisterNotifyHwnd(m_hWnd);if(m_thread)StopRecording(FALSE);PersistUi();CCustomBlurDialogBase::OnDestroy();}
+void CDigitizeDlg::OnMicDevRefresh(){AudioDevRebuildAll();FillDevices();}
+LRESULT CDigitizeDlg::OnAudioDevChanged(WPARAM,LPARAM){FillDevices();return 0;}
 void OpenDigitizeModeless(CWnd* p){if(g_digitize&&g_digitize->GetSafeHwnd()){g_digitize->SetForegroundWindow();return;}g_digitize=new CDigitizeDlg(p);if(!g_digitize->Create(IDD_DIGITIZE,p)){delete g_digitize;g_digitize=NULL;return;}g_digitize->ShowWindow(SW_SHOW);}
 void CloseDigitizeIfOpen(){if(g_digitize&&g_digitize->GetSafeHwnd())g_digitize->DestroyWindow();}

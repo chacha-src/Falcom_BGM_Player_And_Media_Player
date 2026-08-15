@@ -5711,13 +5711,19 @@ int CCustomComboBox::GetCurSel() const
 
 int CCustomComboBox::SetCurSel(int n)
 {
-    if (n < 0) return CComboBox::SetCurSel(-1);
+    if (n < 0) {
+        int r = CComboBox::SetCurSel(-1);
+        if (m_hWnd) ::PostMessage(m_hWnd, CCC_WM_POST_OPAQUE_PAINT, 0, 0);
+        return r;
+    }
     if (n >= (int)m_vSelectableIndices.size())
     {
         if (m_vSelectableIndices.empty()) return CB_ERR;
         n = (int)m_vSelectableIndices.size() - 1;
     }
-    return CComboBox::SetCurSel(m_vSelectableIndices[n]);
+    const int r = CComboBox::SetCurSel(m_vSelectableIndices[n]);
+    if (m_hWnd) ::PostMessage(m_hWnd, CCC_WM_POST_OPAQUE_PAINT, 0, 0);
+    return r;
 }
 
 void CCustomComboBox::SetLabelColor(COLORREF ct, COLORREF cb)
@@ -5962,7 +5968,7 @@ void CCustomComboBox::DrawItem(LPDRAWITEMSTRUCT lp)
 
     // 閉じた選択欄: 素の項目塗りは枠・王冠を消し、アクリル下では α=0 穴になる。
     // チェンジ直後の WM_DRAWITEM(ODS_COMBOBOXEDIT) が主因。OnPaint と同じ不透明経路へ。
-    if (lp->itemState & ODS_COMBOBOXEDIT)
+        if (lp->itemState & ODS_COMBOBOXEDIT)
     {
         CRect r;
         GetClientRect(&r);
@@ -5970,7 +5976,7 @@ void CCustomComboBox::DrawItem(LPDRAWITEMSTRUCT lp)
         if (selH > 0 && r.Height() > selH + 1)
             r.bottom = r.top + selH;
         if (r.Width() <= 0 || r.Height() <= 0) return;
-        if (CCC_HostNeedsChildOpaque(m_hWnd))
+        // アクリル下では常に α=255。HostNeeds 判定に頼ると初回/選択直後に白抜けする
         {
             BP_PAINTPARAMS params = { sizeof(BP_PAINTPARAMS) };
             params.dwFlags = BPPF_ERASE;

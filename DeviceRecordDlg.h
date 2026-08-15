@@ -50,6 +50,7 @@ public:
 	afx_msg void OnCbnSelchangeFormat();
 	afx_msg void OnCbnSelchangeDev();
 	afx_msg void OnCbnSelchangeMicDev();
+	afx_msg void OnMicDevRefresh();
 	afx_msg void OnTimer(UINT_PTR nIDEvent);
 	afx_msg void OnSize(UINT nType, int cx, int cy);
 	afx_msg void OnDestroy();
@@ -69,6 +70,7 @@ public:
 	CCustomCheckBox m_mixMic;
 	CCustomStatic m_micDevLabel;
 	CCustomComboBox m_micDev;
+	CCustomStandardButton m_micDevRefresh;
 	CCustomStandardButton m_start;
 	CCustomStandardButton m_close;
 	CCustomStatic m_status;

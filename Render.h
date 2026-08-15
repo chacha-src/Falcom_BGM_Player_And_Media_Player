@@ -122,9 +122,11 @@ public:
 	CCustomStatic m_eqCodeMs;
 	CCustomComboBox m_soundlist;
 	CCustomComboBox m_miclist;
+	CCustomStandardButton m_micRefresh;
 	CCustomStatic m_micLabel;
 	afx_msg void OnCbnSelchangeCombo2();
 	afx_msg void OnCbnSelchangeMic();
+	afx_msg void OnMicDevRefresh();
 	CCustomStandardButton m_ao;
 	afx_msg void OnBnClickedButton1();
 	CCustomComboBox m_Hz;

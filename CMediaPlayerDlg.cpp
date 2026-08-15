@@ -1103,10 +1103,15 @@ void CMediaPlayerDlg::DoDataExchange(CDataExchange* pDX)
 	MpDdxControl(pDX, IDC_MP_SAVEDS, m_saveds);
 	MpDdxControl(pDX, IDC_MP_SAVEWAV, m_savewav);
 	MpDdxControl(pDX, IDC_MP_MICMIX, m_micmix);
+	MpDdxControl(pDX, IDC_MP_VC_APPLY, m_vcApply);
+	MpDdxControl(pDX, IDC_MP_VC_OPEN, m_vcOpen);
 	MpDdxControl(pDX, IDC_MP_MICLEV, m_miclev);
 	MpDdxControl(pDX, IDC_MP_MICLEV_L, m_miclevL);
 	MpDdxControl(pDX, IDC_MP_MICMETER, m_micMeter);
 	MpDdxControl(pDX, IDC_MP_MICDEV, m_micdev);
+	MpDdxControl(pDX, IDC_MP_MICDEV_REFRESH, m_micdevRefresh);
+	MpDdxControl(pDX, IDC_MP_LOOPDEV, m_loopdev);
+	MpDdxControl(pDX, IDC_MP_LOOPDEV_REFRESH, m_loopdevRefresh);
 	MpDdxControl(pDX, IDC_MP_SAVEPARAM, m_saveparam);
 	MpDdxControl(pDX, IDC_MP_RECORD, m_record);
 	MpDdxControl(pDX, IDC_MP_CAPTURE, m_capture);
@@ -1176,7 +1181,12 @@ BEGIN_MESSAGE_MAP(CMediaPlayerDlg, CCustomBlurDialogExBase)
 	ON_BN_CLICKED(IDC_MP_SAVEDS, &CMediaPlayerDlg::OnSaveDs)
 	ON_BN_CLICKED(IDC_MP_SAVEWAV, &CMediaPlayerDlg::OnSaveWav)
 	ON_BN_CLICKED(IDC_MP_MICMIX, &CMediaPlayerDlg::OnMicMix)
+	ON_BN_CLICKED(IDC_MP_VC_APPLY, &CMediaPlayerDlg::OnVcApply)
+	ON_BN_CLICKED(IDC_MP_VC_OPEN, &CMediaPlayerDlg::OnVcOpen)
 	ON_CBN_SELCHANGE(IDC_MP_MICDEV, &CMediaPlayerDlg::OnCbnSelchangeMicDev)
+	ON_BN_CLICKED(IDC_MP_MICDEV_REFRESH, &CMediaPlayerDlg::OnMicDevRefresh)
+	ON_CBN_SELCHANGE(IDC_MP_LOOPDEV, &CMediaPlayerDlg::OnCbnSelchangeLoopDev)
+	ON_BN_CLICKED(IDC_MP_LOOPDEV_REFRESH, &CMediaPlayerDlg::OnLoopDevRefresh)
 	ON_NOTIFY(NM_RELEASEDCAPTURE, IDC_MP_MICLEV, &CMediaPlayerDlg::OnMicLevRelease)
 	ON_BN_CLICKED(IDC_MP_RECORD, &CMediaPlayerDlg::OnRecord)
 	ON_BN_CLICKED(IDC_MP_CAPTURE, &CMediaPlayerDlg::OnCapture)
@@ -1704,8 +1714,17 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 	m_saveds.SetWindowText(LL14(L"DShow途中保存", L"DShow resume", L"DShow reprise", L"DShow ripresa", L"DShow reanudar", L"DShow 위치저장", L"DShow续播", L"حفظ موضع DShow", L"DShow позиция", L"DShow Position", L"DShow retomar", L"DShow hervat", L"DShow wznow", L"DShow sürdür"));
 	m_savewav.SetWindowText(LL14(L"WAVファイルへ保存", L"Save to WAV file", L"Enregistrer en WAV", L"Salva come WAV", L"Guardar como WAV", L"WAV 파일로 저장", L"保存到WAV文件", L"حفظ كـ WAV", L"Сохранить в WAV", L"Als WAV speichern", L"Salvar como WAV", L"Opslaan als WAV", L"Zapisz jako WAV", L"WAV olarak kaydet"));
 	m_micmix.SetWindowText(LL14(L"マイクミックス", L"Mic mix", L"Mix micro", L"Mix microfono", L"Mezcla micro", L"마이크 믹스", L"麦克风混音", L"مزج الميكروفون", L"Микс микрофона", L"Mikrofon-Mix", L"Mix microfone", L"Mic-mix", L"Mix mikrofonu", L"Mikrofon karışımı"));
+	if (m_vcApply.GetSafeHwnd())
+		m_vcApply.SetWindowText(LL14(L"VC", L"VC", L"VC", L"VC", L"VC", L"VC", L"VC", L"VC", L"VC", L"VC", L"VC", L"VC", L"VC", L"VC"));
+	if (m_vcOpen.GetSafeHwnd())
+		m_vcOpen.SetWindowText(LL14(L"VC…", L"VC…", L"VC…", L"VC…", L"VC…", L"VC…", L"VC…", L"VC…", L"VC…", L"VC…", L"VC…", L"VC…", L"VC…", L"VC…"));
 	m_miclevL.SetWindowText(LL14(L"マイク", L"Mic", L"Micro", L"Micro", L"Micro", L"마이크", L"麦克风", L"ميكروفون", L"Микрофон", L"Mikrofon", L"Microfone", L"Microfoon", L"Mikrofon", L"Mikrofon"));
 	AudioMicDevFillCombo(m_micdev);
+	AudioLoopDevFillCombo(m_loopdev);
+	if (m_micdevRefresh.GetSafeHwnd())
+		AudioDevApplyRescanButton(&m_micdevRefresh);
+	if (m_loopdevRefresh.GetSafeHwnd())
+		AudioDevApplyRescanButton(&m_loopdevRefresh);
 	m_record.SetWindowText(LL14(L"録音", L"Record", L"Enreg.", L"Registra", L"Grabar", L"녹음", L"录音", L"تسجيل", L"Запись", L"Aufnahme", L"Gravar", L"Opnemen", L"Nagraj", L"Kaydet"));
 	m_capture.SetWindowText(LL14(L"キャプチャ", L"Capture", L"Capture", L"Cattura", L"Captura", L"캡처", L"捕获", L"التقاط", L"Захват", L"Aufnahme", L"Captura", L"Opname", L"Przechwyt", L"Yakala"));
 	m_saveparam.SetWindowText(LL14(L"曲ごとに設定保存", L"Save per-song", L"Réglages/morceau", L"Impost. per brano", L"Ajustes por pista", L"곡별 설정 저장", L"逐曲保存设置", L"حفظ لكل أغنية", L"Настройки на трек", L"Pro Titel speichern", L"Config. por faixa", L"Per nummer opslaan", L"Ustaw. na utwor", L"Parça başına kaydet"));
@@ -1984,13 +2003,15 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 	}
 	if (m_micmix.GetSafeHwnd())
 		m_micmix.SetCheck(savedata.mic_mix ? BST_CHECKED : BST_UNCHECKED);
+	if (m_vcApply.GetSafeHwnd())
+		m_vcApply.SetCheck(savedata.vc_mic_apply ? BST_CHECKED : BST_UNCHECKED);
 	if (m_micmix.GetSafeHwnd()) m_micmix.SetFont(&m_fontChk, TRUE);
+	if (m_vcApply.GetSafeHwnd()) m_vcApply.SetFont(&m_fontChk, TRUE);
 	if (m_miclevL.GetSafeHwnd()) m_miclevL.SetFont(&m_fontChk, TRUE);
-	// 起動時からマイクミックスONでも、キャプチャは WAV 保存中のみ開始する。
-	// (常時 eCapture はマイク付き PC で UI 全体を重くする)
-	if (savedata.mic_mix && og && ::IsWindow(og->GetSafeHwnd())) {
+	// マイクミックスONなら起動時からキャプチャ（メーター確認用）。OFFなら止める。
+	if (og && ::IsWindow(og->GetSafeHwnd())) {
 		if (og->m_micmix.GetSafeHwnd())
-			og->m_micmix.SetCheck(BST_CHECKED);
+			og->m_micmix.SetCheck(savedata.mic_mix ? BST_CHECKED : BST_UNCHECKED);
 		og->OnMicMixCheck();
 	}
 
@@ -2140,9 +2161,24 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 	addTip(m_savemp3, LL14(L"内蔵音源の再生時に途中保存を有効にします。", L"Enable resume save for built-in audio formats.", L"Reprise pour les formats audio integres.", L"Ripresa per i formati audio interni.", L"Reanudar para formatos de audio internos.", L"내장 음원 재생 시 위치 저장.", L"内置音源续播保存。", L"حفظ موضع للصيغ الصوتية المدمجة.", L"Сохранение позиции для встроенных форматов.", L"Position fur eingebaute Audioformate speichern.", L"Retomar formatos de audio internos.", L"Hervatten voor ingebouwde audio.", L"Wznawianie wbudowanych formatow.", L"Dahili ses formatlari icin konum kaydi."));
 	addTip(m_saveds, LL14(L"DirectShow(動画等)で途中保存を有効にします。", L"Enable resume save for DirectShow.", L"Reprise pour DirectShow.", L"Ripresa per DirectShow.", L"Reanudar para DirectShow.", L"DirectShow 위치 저장.", L"DirectShow续播保存。", L"حفظ موضع DirectShow.", L"Сохранение позиции DirectShow.", L"DirectShow-Position.", L"Retomar DirectShow.", L"DirectShow hervatten.", L"Wznawianie DirectShow.", L"DirectShow surdurme."));
 	addTip(m_savewav, LL14(L"再生中の音声をWAVファイルへ保存します。", L"Save playback audio to a WAV file.", L"Enregistrer l'audio en WAV.", L"Salva l'audio in WAV.", L"Guardar audio en WAV.", L"재생 음을 WAV로 저장.", L"将播放音频保存为WAV。", L"حفظ الصوت كـ WAV.", L"Сохранить звук в WAV.", L"Audio als WAV speichern.", L"Salvar audio em WAV.", L"Audio opslaan als WAV.", L"Zapis audio jako WAV.", L"Sesi WAV olarak kaydet."));
-	addTip(m_micmix, LL14(L"WAV保存ONのとき、マイクを再生PCMにミックスして書き出します。", L"With Save WAV on, mix microphone into the saved PCM.", L"Si Sauver WAV est ON, mixer le micro dans le PCM.", L"Con Salva WAV, mixa il microfono nel PCM.", L"Con Guardar WAV, mezcla el micro en el PCM.", L"WAV 저장 ON이면 마이크를 PCM에 믹스.", L"WAV保存开启时将麦克风混入PCM。", L"مع حفظ WAV يُمزج الميكروفون في PCM.", L"При WAV — микс микрофона в PCM.", L"Bei WAV-Speichern Mikrofon in PCM mischen.", L"Com Salvar WAV, misturar microfone no PCM.", L"Bij WAV-opslaan microfoon in PCM mixen.", L"Przy zapisie WAV zmiksuj mikrofon do PCM.", L"WAV kaydı açıkken mikrofonu PCM'e karıştır."));
+	addTip(m_micmix, LL14(L"WAV保存ONのとき、マイクを再生PCMにミックスして書き出します。VCチェックONならボイスチェンジャー設定も適用。", L"With Save WAV on, mix microphone into the saved PCM. VC check applies Voice Changer settings.", L"Si Sauver WAV est ON, mixer le micro dans le PCM. Case VC = réglages changeur de voix.", L"Con Salva WAV, mixa il microfono nel PCM. Spunta VC = impostazioni cambia voce.", L"Con Guardar WAV, mezcla el micro en el PCM. Casilla VC = ajustes del cambiador.", L"WAV 저장 ON이면 마이크를 PCM에 믹스. VC 체크 시 보이스 체인저 적용.", L"WAV保存开启时将麦克风混入PCM。勾选VC则应用变声设置。", L"مع حفظ WAV يُمزج الميكروفون في PCM. تأشير VC يطبق إعدادات مغير الصوت.", L"При WAV — микс микрофона в PCM. Галочка VC — настройки изменения голоса.", L"Bei WAV-Speichern Mikrofon in PCM mischen. VC-Haken = Stimmenwandler.", L"Com Salvar WAV, misturar microfone no PCM. Marca VC = ajustes do modificador.", L"Bij WAV-opslaan microfoon in PCM mixen. VC-vink = stemvervormer.", L"Przy zapisie WAV zmiksuj mikrofon do PCM. Zaznaczenie VC = zmiana głosu.", L"WAV kaydı açıkken mikrofonu PCM'e karıştır. VC işareti ses değiştirici ayarlarını uygular."));
+	if (m_vcApply.GetSafeHwnd())
+		addTip(m_vcApply, LL14(L"ONでボイスチェンジャー設定をマイクミックスへ適用", L"When ON, apply Voice Changer settings to mic mix", L"ON = appliquer les réglages VC au mix micro", L"ON = applica impostazioni VC al mix micro", L"ON = aplicar ajustes VC a la mezcla de mic", L"ON이면 VC 설정을 마이크 믹스에 적용", L"开启后将变声设置应用到麦克风混音", L"عند التشغيل تُطبق إعدادات VC على مزج الميك", L"ON — применить настройки VC к миксу микрофона", L"EIN = VC-Einstellungen auf Mic-Mix anwenden", L"ON = aplicar ajustes de VC ao mix do micro", L"AAN = VC-instellingen op mic-mix toepassen", L"ON = zastosuj ustawienia VC do miksu mikrofonu", L"Açıkken VC ayarlarını mik karışımına uygula"));
+	if (m_vcOpen.GetSafeHwnd())
+		addTip(m_vcOpen, LL14(L"ボイスチェンジャー設定画面を開く", L"Open Voice Changer settings", L"Ouvrir les réglages du changeur de voix", L"Apri impostazioni cambia voce", L"Abrir ajustes del cambiador de voz", L"보이스 체인저 설정 열기", L"打开变声器设置", L"فتح إعدادات مغير الصوت", L"Открыть настройки изменения голоса", L"Stimmenwandler-Einstellungen öffnen", L"Abrir ajustes do modificador de voz", L"Stemvervormer-instellingen openen", L"Otwórz ustawienia zmiany głosu", L"Ses değiştirici ayarlarını aç"));
 	addTip(m_miclev, LL14(L"マイクのミックスレベル(0〜200%)。端末は設定画面で選択。", L"Mic mix level (0-200%). Device is selected in Settings.", L"Niveau mix micro (0-200%). Périphérique dans Paramètres.", L"Livello mix micro (0-200%). Dispositivo in Impostazioni.", L"Nivel mix micro (0-200%). Dispositivo en Ajustes.", L"마이크 믹스 레벨(0~200%). 장치는 설정에서 선택.", L"麦克风混音电平(0–200%)。设备在设置中选择。", L"مستوى مزج الميكروفون (0-200%). الجهاز من الإعدادات.", L"Уровень микса (0–200%). Устройство — в настройках.", L"Mikrofon-Mixpegel (0–200%). Gerät in den Einstellungen.", L"Nível de mix (0-200%). Dispositivo em Configurações.", L"Microfoon-mixniveau (0-200%). Apparaat in Instellingen.", L"Poziom miksu (0–200%). Urządzenie w Ustawieniach.", L"Mikrofon karışım seviyesi (0-200%). Aygıt Ayarlar'da."));
-	addTip(m_micMeter, LL14(L"マイク入力レベル。WAV保存＋マイクミックスONのとき反応します。", L"Mic level. Moves when Save-to-WAV and Mic mix are ON.", L"Niveau micro. Réagit si Enregistrer WAV + Mix micro ON.", L"Livello micro. Reagisce con Salva WAV + Mix micro ON.", L"Nivel de micro. Reacciona con Guardar WAV + Mezcla micro ON.", L"마이크 레벨. WAV 저장+마이크 믹스 ON일 때 반응.", L"麦克风电平。保存WAV且麦克风混音开启时会动。", L"مستوى الميكروفون. يتحرك عند حفظ WAV ومزج الميكروفون.", L"Уровень микрофона. Реагирует при WAV+микс ON.", L"Mikrofonpegel. Reagiert bei WAV-Speichern + Mix ON.", L"Nível do microfone. Reage com Salvar WAV + Mix ON.", L"Microfoonniveau. Reageert bij WAV opslaan + Mix ON.", L"Poziom mikrofonu. Reaguje przy WAV+Mix ON.", L"Mikrofon seviyesi. WAV kaydet + Karışım açıkken tepki verir."));
+	addTip(m_micMeter, LL14(L"マイク入力レベル。マイクミックスONで反応します（音量確認用）。", L"Mic level. Moves when Mic mix is ON (for level check).", L"Niveau micro. Réagit si Mix micro ON (controle niveau).", L"Livello micro. Reagisce con Mix micro ON (controllo livello).", L"Nivel de micro. Reacciona con Mezcla micro ON (comprobar nivel).", L"마이크 레벨. 마이크 믹스 ON이면 반응(음량 확인용).", L"麦克风电平。麦克风混音开启时会动（用于确认音量）。", L"مستوى الميكروفون. يتحرك عند مزج الميكروفون (لفحص المستوى).", L"Уровень микрофона. Реагирует при микс ON (проверка уровня).", L"Mikrofonpegel. Reagiert bei Mix ON (Pegelprufung).", L"Nível do microfone. Reage com Mix ON (checagem de nível).", L"Microfoonniveau. Reageert bij Mix ON (niveaucheck).", L"Poziom mikrofonu. Reaguje przy Mix ON (kontrola poziomu).", L"Mikrofon seviyesi. Karışım açıkken tepki verir (seviye kontrolü)."));
+	addTip(m_micdevRefresh, LL14(L"マイク端末を再列挙します。挿抜が反映されないとき用（通常は自動）。", L"Rescan mic devices. Use if hot-plug was missed (usually automatic).", L"Rescanner le micro si le branche a ete rate (sinon auto).", L"Rileva micro se l'inserimento e stato perso (di solito auto).", L"Redetectar micro si fallo el hot-plug (normalmente auto).",
+		L"마이크 장치를 다시 검색. 자동 반영이 안 될 때.", L"重新枚举麦克风。热插拔未反映时用（通常自动）。", L"إعادة تعداد الميكروفون إن فات الإدراج (عادة تلقائي).", L"Пересканировать микрофон, если вставка не подхватилась.", L"Mikrofon neu auflisten, falls Hotplug verpasst (sonst auto).",
+		L"Reenumerar microfone se o hot-plug falhou (normalmente auto).", L"Micro opnieuw scannen als hot-plug miste (meestal auto).", L"Wykryj mikrofon ponownie, gdy hot-plug nie zadziałał.", L"Mikrofon hot-plug kaçtıysa yeniden tara (genelde otomatik)."));
+	if (m_loopdev.GetSafeHwnd())
+		addTip(m_loopdev, LL14(L"システム音／録音の再生端末（ループバック元）。挿抜は自動反映。", L"Playback device for system/loopback capture. Hot-plug updates automatically.", L"Peripherique de lecture pour la capture systeme. Hot-plug auto.", L"Dispositivo di riproduzione per cattura di sistema. Hot-plug auto.", L"Dispositivo de reproduccion para captura del sistema. Hot-plug auto.",
+			L"시스템/루프백 녹음용 재생 장치. 삽탈 자동 반영.", L"系统音/环回录音的播放设备。热插拔自动更新。", L"جهاز التشغيل لالتقاط صوت النظام. تحديث تلقائي.", L"Устройство воспроизведения для системного захвата. Авто-обновление.", L"Wiedergabegerät für System-/Loopback-Aufnahme. Hotplug automatisch.",
+			L"Dispositivo de reprodução para captura do sistema. Hot-plug auto.", L"Afspeelapparaat voor systeem/loopback-opname. Hot-plug auto.", L"Urządzenie odtwarzania do przechwytywania systemu. Hot-plug auto.", L"Sistem/loopback kayıt için oynatma aygıtı. Hot-plug otomatik."));
+	if (m_loopdevRefresh.GetSafeHwnd())
+		addTip(m_loopdevRefresh, LL14(L"再生端末を再列挙します。挿抜が反映されないとき用（通常は自動）。", L"Rescan playback devices. Use if hot-plug was missed (usually automatic).", L"Rescanner la lecture si le branche a ete rate (sinon auto).", L"Rileva riproduzione se l'inserimento e stato perso (di solito auto).", L"Redetectar reproduccion si fallo el hot-plug (normalmente auto).",
+			L"재생 장치를 다시 검색. 자동 반영이 안 될 때.", L"重新枚举播放设备。热插拔未反映时用（通常自动）。", L"إعادة تعداد التشغيل إن فات الإدراج (عادة تلقائي).", L"Пересканировать вывод, если вставка не подхватилась.", L"Wiedergabe neu auflisten, falls Hotplug verpasst (sonst auto).",
+			L"Reenumerar reprodução se o hot-plug falhou (normalmente auto).", L"Afspeel opnieuw scannen als hot-plug miste (meestal auto).", L"Wykryj odtwarzanie ponownie, gdy hot-plug nie zadziałał.", L"Oynatma hot-plug kaçtıysa yeniden tara (genelde otomatik)."));
 	addTip(m_record, LL14(L"他デバイスの音を録音して WAV/mp3/FLAC を作ります。", L"Record other device audio to WAV/mp3/FLAC.", L"Enregistrer l'audio d'un autre périphérique en WAV/mp3/FLAC.", L"Registra audio da altro dispositivo in WAV/mp3/FLAC.", L"Grabar audio de otro dispositivo a WAV/mp3/FLAC.", L"다른 장치 음을 WAV/mp3/FLAC로 녹음.", L"录制其他设备音频为 WAV/mp3/FLAC。", L"تسجيل صوت جهاز آخر إلى WAV/mp3/FLAC.", L"Запись звука другого устройства в WAV/mp3/FLAC.", L"Audio eines anderen Geräts als WAV/mp3/FLAC aufnehmen.", L"Gravar áudio de outro dispositivo em WAV/mp3/FLAC.", L"Audio van ander apparaat opnemen als WAV/mp3/FLAC.", L"Nagraj dźwięk innego urządzenia do WAV/mp3/FLAC.", L"Başka aygıt sesini WAV/mp3/FLAC olarak kaydet."));
 	addTip(m_capture, LL14(L"画面と音声をキャプチャします（プレビュー付き）。", L"Capture screen and audio (with preview).", L"Capturer l'écran et l'audio (avec aperçu).", L"Cattura schermo e audio (con anteprima).", L"Capturar pantalla y audio (con vista previa).", L"화면과 음성을 캡처합니다(미리보기 포함).", L"捕获画面与音频（含预览）。", L"التقاط الشاشة والصوت (مع معاينة).", L"Захват экрана и звука (с предпросмотром).", L"Bildschirm und Audio aufnehmen (mit Vorschau).", L"Capturar tela e áudio (com prévia).", L"Scherm en audio opnemen (met voorbeeld).", L"Przechwyć ekran i dźwięk (z podglądem).", L"Ekran ve sesi yakala (önizlemeli)."));
 	if (m_botDj.GetSafeHwnd())
@@ -3350,26 +3386,55 @@ void CMediaPlayerDlg::DoLayout()
 	// マイクミックス行(チェック帯の直上)。端末コンボも同じ行に並べる
 	{
 		int mx = M + gPad;
-		const int micChkW = (int)(100 * s);
+		const int micChkW = (int)(88 * s);
+		const int vcChkW = (m_vcApply.GetSafeHwnd()) ? (int)(36 * s) : 0;
+		const int vcBtnW = (m_vcOpen.GetSafeHwnd()) ? (int)(36 * s) : 0;
 		const int micLabW = (int)(36 * s);
-		const int micSlW = (int)(100 * s);
+		const int micSlW = (int)(88 * s);
 		const int micMeterW = (int)(10 * s);
 		const int gapMic = (int)(4 * s);
 		MoveCtl(&m_micmix, mx, micY, micChkW, chkRowH); mx += micChkW + gapCk;
+		if (vcChkW > 0) {
+			MoveCtl(&m_vcApply, mx, micY, vcChkW, chkRowH);
+			mx += vcChkW + (int)(2 * s);
+		}
+		if (vcBtnW > 0) {
+			MoveCtl(&m_vcOpen, mx, micY, vcBtnW, chkRowH);
+			mx += vcBtnW + gapMic;
+		}
 		MoveCtl(&m_miclevL, mx, micY, micLabW, chkRowH); mx += micLabW + (int)(2 * s);
 		MoveCtl(&m_miclev, mx, micY, micSlW - micMeterW - (int)(4 * s), chkRowH);
 		mx += micSlW - micMeterW - (int)(2 * s);
 		MoveCtl(&m_micMeter, mx, micY, micMeterW, chkRowH);
 		mx += micMeterW + gapMic;
-		// 右端（終了ボタン手前）まで。下部ツール列には載せない
+		// マイク端末 | 再検出 | 出力(ループ)端末 | 再検出
 		const int micDevRight = W - M - gPad;
-		int micDevW = micDevRight - mx;
-		if (micDevW > (int)(280 * s)) micDevW = (int)(280 * s);
-		if (micDevW < (int)(100 * s)) micDevW = (int)(100 * s);
-		if (mx + micDevW > micDevRight)
-			micDevW = micDevRight - mx;
-		if (micDevW > (int)(60 * s) && m_micdev.GetSafeHwnd())
+		const int refreshW = (m_micdevRefresh.GetSafeHwnd()) ? (int)(48 * s) : 0;
+		const int refreshGap = refreshW ? gapMic : 0;
+		const int loopRefreshW = (m_loopdevRefresh.GetSafeHwnd()) ? (int)(48 * s) : 0;
+		const int loopRefreshGap = loopRefreshW ? gapMic : 0;
+		int remain = micDevRight - mx - refreshW - refreshGap - loopRefreshW - loopRefreshGap;
+		int micDevW = remain * 45 / 100;
+		int loopDevW = remain - micDevW - gapMic;
+		if (micDevW < (int)(56 * s)) micDevW = (int)(56 * s);
+		if (loopDevW < (int)(56 * s)) loopDevW = (int)(56 * s);
+		if (mx + micDevW + refreshW + refreshGap + gapMic + loopDevW + loopRefreshW + loopRefreshGap > micDevRight) {
+			remain = micDevRight - mx - refreshW - refreshGap - loopRefreshW - loopRefreshGap - gapMic;
+			if (remain < (int)(100 * s)) remain = (int)(100 * s);
+			micDevW = remain / 2;
+			loopDevW = remain - micDevW;
+		}
+		if (micDevW > (int)(40 * s) && m_micdev.GetSafeHwnd())
 			MoveCtl(&m_micdev, mx, micY, micDevW, chkRowH);
+		mx += micDevW + refreshGap;
+		if (refreshW > 0 && m_micdevRefresh.GetSafeHwnd())
+			MoveCtl(&m_micdevRefresh, mx, micY, refreshW, chkRowH);
+		mx += refreshW + gapMic;
+		if (loopDevW > (int)(40 * s) && m_loopdev.GetSafeHwnd())
+			MoveCtl(&m_loopdev, mx, micY, loopDevW, chkRowH);
+		mx += loopDevW + loopRefreshGap;
+		if (loopRefreshW > 0 && m_loopdevRefresh.GetSafeHwnd())
+			MoveCtl(&m_loopdevRefresh, mx, micY, loopRefreshW, chkRowH);
 	}
 	MoveCtl(&m_tip, ckx, ckY, ckW, chkRowH); ckx += ckW + gapCk;
 	MoveCtl(&m_mini, ckx, ckY, ckW, chkRowH); ckx += ckW + gapCk;
@@ -6027,6 +6092,8 @@ void CMediaPlayerDlg::OnDestroy()
 	}
 	MpAddonsShutdownAll();
 	CloseDeviceRecordIfOpen();
+	AudioMicDevUnregisterCombo(&m_micdev);
+	AudioLoopDevUnregisterCombo(&m_loopdev);
 	CCustomBlurDialogExBase::OnDestroy();
 }
 
@@ -6889,6 +6956,21 @@ void CMediaPlayerDlg::OnCbnSelchangeMicDev()
 	AudioMicDevApplyFromCombo(m_micdev);
 }
 
+void CMediaPlayerDlg::OnMicDevRefresh()
+{
+	AudioDevRebuildAll();
+}
+
+void CMediaPlayerDlg::OnCbnSelchangeLoopDev()
+{
+	AudioLoopDevApplyFromCombo(m_loopdev);
+}
+
+void CMediaPlayerDlg::OnLoopDevRefresh()
+{
+	AudioDevRebuildAll();
+}
+
 void CMediaPlayerDlg::OnAudioDevMenuRange(UINT nID)
 {
 	if (!AudioMicDevHandleMenuCmd(nID))
@@ -6905,6 +6987,17 @@ void CMediaPlayerDlg::OnMicMix()
 	} else {
 		MpPersistSavedataQuick();
 	}
+}
+
+void CMediaPlayerDlg::OnVcApply()
+{
+	savedata.vc_mic_apply = (m_vcApply.GetCheck() == BST_CHECKED) ? 1 : 0;
+	MpPersistSavedataQuick();
+}
+
+void CMediaPlayerDlg::OnVcOpen()
+{
+	OpenVoiceChangerModeless(this);
 }
 
 void CMediaPlayerDlg::OnMicMixMenuToggle()

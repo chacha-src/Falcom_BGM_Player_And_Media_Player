@@ -563,6 +563,12 @@ BOOL COggApp::InitInstance()
 	savedata.vc_gain = 100;
 	savedata.vc_monitor = 0;
 	savedata.vc_preset = 0;
+	savedata.vc_bright = 100;
+	savedata.vc_breath = 0;
+	savedata.vc_quality = 1;
+	savedata.vc_style = 0;
+	savedata.vc_mic_apply = 0;
+	savedata.vc_preset_rev = 1;
 	savedata.tn_mic_device[0] = 0;
 	savedata.tn_out_device[0] = 0;
 	savedata.tn_bpm = 120;
@@ -1061,6 +1067,30 @@ BOOL COggApp::InitInstance()
 	} else {
 		savedata.s3r_invert_y = savedata.s3r_invert_y ? 1 : 0;
 	}
+	if (datFileSize < (int)(offsetof(save, vc_bright) + sizeof(savedata.vc_bright))) {
+		savedata.vc_bright = 100;
+		savedata.vc_breath = 0;
+		savedata.vc_quality = 1;
+		savedata.vc_style = 0;
+	} else {
+		if (savedata.vc_bright < 50 || savedata.vc_bright > 150) savedata.vc_bright = 100;
+		if (savedata.vc_breath < 0 || savedata.vc_breath > 100) savedata.vc_breath = 0;
+		savedata.vc_quality = savedata.vc_quality ? 1 : 0;
+		if (savedata.vc_style < 0 || savedata.vc_style > 2) savedata.vc_style = 0;
+	}
+	if (datFileSize < (int)(offsetof(save, vc_mic_apply) + sizeof(savedata.vc_mic_apply)))
+		savedata.vc_mic_apply = 0;
+	else
+		savedata.vc_mic_apply = savedata.vc_mic_apply ? 1 : 0;
+	if (datFileSize < (int)(offsetof(save, vc_preset_rev) + sizeof(savedata.vc_preset_rev))
+		|| savedata.vc_preset_rev < 1) {
+		// 旧カタログ: 0..8 名前付き / 9=カスタム → 現行は末尾がカスタム
+		if (savedata.vc_preset == 9)
+			savedata.vc_preset = 22; // CVoiceChangerDlg::VC_PRESET_N - 1
+		savedata.vc_preset_rev = 1;
+	}
+	if (savedata.vc_preset < 0 || savedata.vc_preset > 22)
+		savedata.vc_preset = 0;
 	if (datFileSize < (int)(offsetof(save, sm_response) + sizeof(savedata.sm_response))) {
 		savedata.sm_mic_device[0] = 0;
 		savedata.sm_response = 1;
@@ -1097,9 +1127,11 @@ BOOL COggApp::InitInstance()
 		if (savedata.dig_format < 0 || savedata.dig_format > 2) savedata.dig_format = 0;
 		if (savedata.dig_gain < 0 || savedata.dig_gain > 200) savedata.dig_gain = 100;
 		if (savedata.dig_gate < 0 || savedata.dig_gate > 100) savedata.dig_gate = 0;
-		if (savedata.vc_pitch < 50 || savedata.vc_pitch > 200) savedata.vc_pitch = 100;
+		if (savedata.vc_pitch < 50 || savedata.vc_pitch > 250) savedata.vc_pitch = 100;
 		if (savedata.vc_formant < 50 || savedata.vc_formant > 200) savedata.vc_formant = 100;
 		if (savedata.vc_gain < 0 || savedata.vc_gain > 200) savedata.vc_gain = 100;
+		if (savedata.vc_preset < 0 || savedata.vc_preset > 22) savedata.vc_preset = 0;
+		savedata.vc_monitor = savedata.vc_monitor ? 1 : 0;
 		if (savedata.tn_bpm < 40 || savedata.tn_bpm > 240) savedata.tn_bpm = 120;
 		if (savedata.tn_beats < 2 || savedata.tn_beats > 8) savedata.tn_beats = 4;
 		if (savedata.tn_a4_hz < 430 || savedata.tn_a4_hz > 450) savedata.tn_a4_hz = 440;

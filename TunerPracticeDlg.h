@@ -28,6 +28,8 @@ protected:
 	virtual void PostNcDestroy();
 	DECLARE_MESSAGE_MAP()
 	void FillDevices();
+	afx_msg void OnMicDevRefresh();
+	afx_msg LRESULT OnAudioDevChanged(WPARAM, LPARAM);
 	void FillValues();
 	void PersistUi();
 	void StartAudio();
@@ -51,6 +53,7 @@ public:
 	CCustomStandardButton m_help,m_click,m_phrase,m_close;
 	CCustomStatic m_micL,m_outL,m_note,m_cents,m_bpmL,m_beatsL,m_a4L,m_status;
 	CCustomComboBox m_mic,m_out,m_bpm,m_beats,m_a4;
+	CCustomStandardButton m_micRefresh,m_outRefresh;
 	CCustomCheckBox m_mute;
 	CTnNeedlePanel m_needle;
 	CToolTipCtrl m_tooltip;

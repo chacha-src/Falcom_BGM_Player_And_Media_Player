@@ -155,7 +155,7 @@
       <LanguageStandard>stdcpp17</LanguageStandard>
       <LanguageStandard_C>Default</LanguageStandard_C>
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
-      <AdditionalIncludeDirectories>$(ProjectDir)zstd;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)zstd;$(ProjectDir)third_party\signalsmith-stretch\include;$(ProjectDir)third_party\signalsmith-linear\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <ResourceCompile>
       <PreprocessorDefinitions>NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
@@ -569,6 +569,14 @@
     <ClCompile Include="DeviceRecordDlg.cpp" />
     <ClCompile Include="DigitizeDlg.cpp" />
     <ClCompile Include="VoiceChangerDlg.cpp" />
+    <ClCompile Include="VcVocalTract.cpp">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <AdditionalOptions>/utf-8 /DNOMINMAX %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalIncludeDirectories>$(ProjectDir)third_party\signalsmith-stretch\include;$(ProjectDir)third_party\signalsmith-linear\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>NOMINMAX;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
     <ClCompile Include="TunerPracticeDlg.cpp" />
     <ClCompile Include="PhotoFrameDlg.cpp" />
     <ClCompile Include="Soft3DMazeDlg.cpp" />
@@ -723,6 +731,7 @@
     <ClInclude Include="DeviceRecordDlg.h" />
     <ClInclude Include="DigitizeDlg.h" />
     <ClInclude Include="VoiceChangerDlg.h" />
+    <ClInclude Include="VcVocalTract.h" />
     <ClInclude Include="TunerPracticeDlg.h" />
     <ClInclude Include="PhotoFrameDlg.h" />
     <ClInclude Include="Soft3DMazeDlg.h" />

@@ -1,0 +1,15 @@
+﻿Third-party licenses used by the Voice Changer core (VcVocalTract)
+=================================================================
+
+1) Signalsmith Stretch
+   Path: third_party/signalsmith-stretch/
+   License: MIT
+   Copyright (c) 2022 Geraint Luff / Signalsmith Audio Ltd.
+   https://github.com/Signalsmith-Audio/signalsmith-stretch
+
+2) Signalsmith Linear
+   Path: third_party/signalsmith-linear/
+   License: MIT
+   https://github.com/Signalsmith-Audio/linear
+
+Full MIT license texts are in each package's LICENSE.txt.

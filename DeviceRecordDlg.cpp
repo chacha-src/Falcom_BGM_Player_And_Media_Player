@@ -584,6 +584,7 @@ void CDeviceRecordDlg::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDC_DR_MIXMIC, m_mixMic);
 	DDX_Control(pDX, IDC_DR_MICDEV_L, m_micDevLabel);
 	DDX_Control(pDX, IDC_DR_MICDEV, m_micDev);
+	DDX_Control(pDX, IDC_DR_MICDEV_REFRESH, m_micDevRefresh);
 	DDX_Control(pDX, IDC_DR_METER_MIC_L, m_meterMicL);
 	DDX_Control(pDX, IDC_DR_METER_SYS_L, m_meterSysL);
 	DDX_Control(pDX, IDC_DR_METER_MIX_L, m_meterMixL);
@@ -604,6 +605,7 @@ BEGIN_MESSAGE_MAP(CDeviceRecordDlg, CCustomBlurDialogBase)
 	ON_CBN_SELCHANGE(IDC_DR_FMT, &CDeviceRecordDlg::OnCbnSelchangeFormat)
 	ON_CBN_SELCHANGE(IDC_DR_DEV, &CDeviceRecordDlg::OnCbnSelchangeDev)
 	ON_CBN_SELCHANGE(IDC_DR_MICDEV, &CDeviceRecordDlg::OnCbnSelchangeMicDev)
+	ON_BN_CLICKED(IDC_DR_MICDEV_REFRESH, &CDeviceRecordDlg::OnMicDevRefresh)
 	ON_WM_TIMER()
 	ON_WM_SIZE()
 	ON_WM_DESTROY()
@@ -841,6 +843,7 @@ BOOL CDeviceRecordDlg::OnInitDialog()
 
 	FillDeviceCombo();
 	AudioMicDevFillCombo(m_micDev);
+	AudioDevApplyRescanButton(&m_micDevRefresh);
 	m_micDevLabel.SetWindowText(LL14(
 		L"マイク", L"Mic", L"Micro", L"Micro", L"Micro",
 		L"마이크", L"麦克风", L"ميكروفون", L"Микрофон", L"Mikrofon",
@@ -1004,6 +1007,11 @@ void CDeviceRecordDlg::OnCbnSelchangeDev()
 void CDeviceRecordDlg::OnCbnSelchangeMicDev()
 {
 	AudioMicDevApplyFromCombo(m_micDev);
+}
+
+void CDeviceRecordDlg::OnMicDevRefresh()
+{
+	AudioDevRebuildAll();
 }
 
 void CDeviceRecordDlg::OnCbnSelchangeFormat()

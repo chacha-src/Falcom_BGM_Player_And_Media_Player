@@ -1,4 +1,4 @@
-// SoundMeterDlg.cpp — 相対 dBFS マイクメータ（校正 SPL ではない）
+﻿// SoundMeterDlg.cpp — 相対 dBFS マイクメータ（校正 SPL ではない）
 
 #include "stdafx.h"
 #include "ogg.h"
@@ -197,6 +197,7 @@ void CSoundMeterDlg::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDC_SM_HELP, m_help);
 	DDX_Control(pDX, IDC_SM_MIC_L, m_micL);
 	DDX_Control(pDX, IDC_SM_MIC, m_mic);
+	DDX_Control(pDX, IDC_SM_MIC_REFRESH, m_micRefresh);
 	DDX_Control(pDX, IDC_SM_DBFS, m_dbfs);
 	DDX_Control(pDX, IDC_SM_HOLD, m_hold);
 	DDX_Control(pDX, IDC_SM_METER_L, m_meterL);
@@ -210,6 +211,8 @@ BEGIN_MESSAGE_MAP(CSoundMeterDlg, CCustomBlurDialogBase)
 	ON_BN_CLICKED(IDC_SM_CLOSE, &CSoundMeterDlg::OnBnClickedClose)
 	ON_BN_CLICKED(IDC_SM_HELP, &CSoundMeterDlg::OnBnClickedHelp)
 	ON_CBN_SELCHANGE(IDC_SM_MIC, &CSoundMeterDlg::OnCbnSelchangeMic)
+	ON_BN_CLICKED(IDC_SM_MIC_REFRESH, &CSoundMeterDlg::OnMicDevRefresh)
+	ON_MESSAGE(WM_AUDIODEV_CHANGED, &CSoundMeterDlg::OnAudioDevChanged)
 	ON_WM_TIMER()
 	ON_WM_SIZE()
 	ON_WM_DESTROY()
@@ -330,6 +333,8 @@ BOOL CSoundMeterDlg::OnInitDialog()
 		L"Göreli dBFS (kalibre SPL değil)"));
 
 	FillMicCombo();
+	AudioDevApplyRescanButton(&m_micRefresh);
+	AudioDevRegisterNotifyHwnd(m_hWnd);
 	if (CCustomControlUtility::BeginDialogToolTip(m_tooltip, this)) {
 		m_tooltip.AddTool(&m_mic, LL14(
 			L"測定するマイク入力端末", L"Microphone input to measure", L"Micro à mesurer", L"Micro da misurare",
@@ -563,9 +568,22 @@ void CSoundMeterDlg::OnSize(UINT nType, int cx, int cy)
 
 void CSoundMeterDlg::OnDestroy()
 {
+	AudioDevUnregisterNotifyHwnd(m_hWnd);
 	PersistUi();
 	StopCapture();
 	CCustomBlurDialogBase::OnDestroy();
+}
+
+void CSoundMeterDlg::OnMicDevRefresh()
+{
+	AudioDevRebuildAll();
+	FillMicCombo();
+}
+
+LRESULT CSoundMeterDlg::OnAudioDevChanged(WPARAM, LPARAM)
+{
+	FillMicCombo();
+	return 0;
 }
 
 void CSoundMeterDlg::OnContextMenu(CWnd* pWnd, CPoint point)

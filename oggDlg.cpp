@@ -38,6 +38,7 @@ int flacmode = 0;
 #include "DecodeProgress.h"
 #include "CMediaPlayerDlg.h"
 #include "CDesktopLyricsWnd.h"
+#include "VcVocalTract.h"
 #include "MpPlayerAddons.h"
 #include "FileTagInfo.h"
 #include "NoteFundamentalPick.h"
@@ -1883,6 +1884,7 @@ void COggDlg::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDC_SLIDER_MICLEV, m_miclev);
 	DDX_Control(pDX, IDC_STATIC_MICLEV, m_miclevs);
 	DDX_Control(pDX, IDC_OGG_MICDEV, m_micdev);
+	DDX_Control(pDX, IDC_OGG_MICDEV_REFRESH, m_micdevRefresh);
 	DDX_Control(pDX, IDC_STATIC11, m_11);
 	//}}AFX_DATA_MAP
 	DDX_Control(pDX, IDC_CHECK16, m_xa);
@@ -2042,6 +2044,8 @@ BEGIN_MESSAGE_MAP(COggDlg, CCustomBlurDialogBase)
 	ON_BN_CLICKED(IDC_BUTTON58, &COggDlg::OnBnmp3jake)
 	ON_BN_CLICKED(IDC_CHECK_MICMIX, &COggDlg::OnMicMixCheck)
 	ON_CBN_SELCHANGE(IDC_OGG_MICDEV, &COggDlg::OnCbnSelchangeMicDev)
+	ON_BN_CLICKED(IDC_OGG_MICDEV_REFRESH, &COggDlg::OnMicDevRefresh)
+	ON_MESSAGE(WM_AUDIODEV_CHANGED, &COggDlg::OnAudioDevChanged)
 	ON_NOTIFY(NM_RELEASEDCAPTURE, IDC_SLIDER_MICLEV, &COggDlg::OnMicLevRelease)
 	ON_WM_DESTROY()
 	ON_WM_CREATE()
@@ -4814,6 +4818,8 @@ BOOL COggDlg::OnInitDialog()
 	tempo = 200;
 	pitch = 200;
 	SyncMicMixUiFromSavedata();
+	AudioDevWatchEnsure(m_hWnd);
+	AudioDevApplyRescanButton(&m_micdevRefresh);
 
 	ttt_ = 5;
 	//	uTimerId = timeSetEvent(1, 0, TimeCallback, NULL, TIME_PERIODIC);
@@ -11873,7 +11879,9 @@ void COggDlg::play()
 			cc.Close();
 			cc1 = 0;
 			PlaybackCcClearFormat();
-			MicMixCaptureStop();
+			// WAV保存終了後もマイクミックスONならメーター用にキャプチャ継続
+			if (!savedata.mic_mix)
+				MicMixCaptureStop();
 		}
 		stop1();
 		m_saisai.EnableWindow(TRUE);
@@ -20993,6 +21001,8 @@ void COggDlg::stop()
 				PlaybackCcCloseIfNeeded(true);
 			}
 		MicMixCaptureStop();
+		if (savedata.mic_mix)
+			MicMixCaptureStart();
 		CCriticalLock _ccl(&cs);
 		stf = 1;
 		_ccl.Leave();
@@ -21152,6 +21162,8 @@ BOOL COggDlg::stop1()
 			PlaybackCcCloseIfNeeded(false);
 		}
 	MicMixCaptureStop();
+	if (savedata.mic_mix)
+		MicMixCaptureStart();
 	{
 		CCriticalLock _ccl(&cs);
 		stf = 1;
@@ -26194,6 +26206,7 @@ static HANDLE g_micThread = NULL;
 static CRITICAL_SECTION g_micCs;
 static volatile LONG g_micCsInit = 0;
 static BYTE g_micMixScratch[MIC_MIX_SCRATCH];
+static VcVocalTract g_mpMicVc;
 
 int MpMicPeakLevel()
 {
@@ -26218,12 +26231,31 @@ static void MicMixRingWrite(const float* interleaved, int frames, int ch)
 	if (!interleaved || frames <= 0) return;
 	if (ch < 1) ch = 1;
 	if (ch > MIC_RING_CH) ch = MIC_RING_CH;
+
+	// ボイスチェンジャー設定が有効なら、ミックス前にマイクへ適用
+	float vcBuf[4096 * 2];
+	const float* src = interleaved;
+	int srcCh = ch;
+	VcVocalParams vp;
+	if (frames <= 4096 && VcParamsFromSavedata(vp)) {
+		for (int i = 0; i < frames; ++i) {
+			const float L = interleaved[i * ch];
+			const float R = (ch >= 2) ? interleaved[i * ch + 1] : L;
+			vcBuf[i * 2 + 0] = L;
+			vcBuf[i * 2 + 1] = R;
+		}
+		const int rate = (g_micCapRate > 8000) ? g_micCapRate : 48000;
+		VcProcessInterleavedStereo(g_mpMicVc, vcBuf, frames, rate, vp);
+		src = vcBuf;
+		srcCh = 2;
+	}
+
 	EnterCriticalSection(&g_micCs);
 	LONG w = g_micW;
 	for (int i = 0; i < frames; ++i) {
 		const int wi = (int)(w % MIC_RING_FRAMES);
-		float L = interleaved[i * ch];
-		float R = (ch >= 2) ? interleaved[i * ch + 1] : L;
+		float L = src[i * srcCh];
+		float R = (srcCh >= 2) ? src[i * srcCh + 1] : L;
 		g_micRing[wi * MIC_RING_CH + 0] = L;
 		g_micRing[wi * MIC_RING_CH + 1] = R;
 		w++;
@@ -26425,8 +26457,7 @@ void MpMicMixRestartIfRunning()
 {
 	if (!savedata.mic_mix) return;
 	MicMixCaptureStop();
-	if (cc1 == 1 && wavExportPath.GetLength() == 0 && !g_isWavExportRendering)
-		MicMixCaptureStart();
+	MicMixCaptureStart();
 }
 
 static void MicMixIntoPcm(BYTE* p, UINT n, int rate, int ch, int bits)
@@ -28184,12 +28215,24 @@ void COggDlg::OnCbnSelchangeMicDev()
 	AudioMicDevApplyFromCombo(m_micdev);
 }
 
+void COggDlg::OnMicDevRefresh()
+{
+	AudioDevRebuildAll();
+}
+
+LRESULT COggDlg::OnAudioDevChanged(WPARAM, LPARAM)
+{
+	AudioDevRebuildAll();
+	return 0;
+}
+
 void COggDlg::OnMicMixCheck()
 {
 	savedata.mic_mix = (m_micmix.GetCheck() == BST_CHECKED) ? 1 : 0;
-	if (savedata.mic_mix && cc1 == 1 && wavExportPath.GetLength() == 0 && !g_isWavExportRendering)
+	// チェックONでメーター確認できるよう、WAV保存中でなくてもキャプチャを開始する
+	if (savedata.mic_mix)
 		MicMixCaptureStart();
-	else if (!savedata.mic_mix)
+	else
 		MicMixCaptureStop();
 	MpPersistSavedataQuick();
 	extern CMediaPlayerDlg* mp;
@@ -30954,6 +30997,7 @@ void COggDlg::OnBnClickedHelp()
 
 void COggDlg::OnDestroy()
 {
+	AudioDevWatchShutdown();
 	if (g_oggHelpDlg && ::IsWindow(g_oggHelpDlg->GetSafeHwnd()))
 		g_oggHelpDlg->DestroyWindow();
 	MpPromptFlushHistoryOnExit();
