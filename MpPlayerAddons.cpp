@@ -246,23 +246,20 @@ static void MpBpmResetCapture()
 	ZeroMemory(g_bpmHistScore, sizeof(g_bpmHistScore));
 }
 
-// PC音ループバックの参照カウント(MIDI録り・BPM計測などが共有)
+// PC音ループバックの参照カウント(BPM計測など)。ピアノ譜面化フラグは触らない。
 static int g_pcAudioRetain = 0;
-static int g_pcAudioPrevOff = 0;
 
 void MpPcAudioRetain()
 {
-	if (g_pcAudioRetain == 0)
-		g_pcAudioPrevOff = savedata.mpLoopbackScore ? 0 : 1;
-	if (!savedata.mpLoopbackScore)
-		savedata.mpLoopbackScore = 1;
+	// 旧: savedata.mpLoopbackScore を強制 ON + ResumePlaybackFeed →
+	// 演奏中でもループバックがピアノに混入し、再生 PCM 経路が抑制された。
+	// BPM は MpBpmNotifyPcm だけで足りる。譜面化はユーザーチェック時のみ。
 	g_pcAudioRetain++;
+	if (g_pcAudioRetain != 1) return;
 	CWnd* parent = NULL;
 	if (og) parent = og;
 	else if (mp) parent = mp;
 	EnsureDeviceRecordLoopbackFeed(parent);
-	if (og && og->m_PianoRollDlg && ::IsWindow(og->m_PianoRollDlg->GetSafeHwnd()))
-		og->m_PianoRollDlg->ResumePlaybackFeed();
 }
 
 void MpPcAudioRelease()
@@ -270,18 +267,14 @@ void MpPcAudioRelease()
 	if (g_pcAudioRetain <= 0) return;
 	g_pcAudioRetain--;
 	if (g_pcAudioRetain > 0) return;
-	if (!g_pcAudioPrevOff) return;
-	g_pcAudioPrevOff = 0;
-	savedata.mpLoopbackScore = 0;
-	StopDeviceRecordLoopbackFeed();
-	extern int playf;
-	if (!playf && og && og->m_PianoRollDlg && ::IsWindow(og->m_PianoRollDlg->GetSafeHwnd()))
-		og->m_PianoRollDlg->PauseAnalysis();
+	// ユーザーが「PC音を譜面化」ON のときはデバイスを維持
+	if (!savedata.mpLoopbackScore)
+		StopDeviceRecordLoopbackFeed();
 }
 
 void MpPcAudioMarkUserOwned()
 {
-	g_pcAudioPrevOff = 0;
+	// 互換: 明示トグルは savedata.mpLoopbackScore 自体が正。Retain は譜面フラグを触らない。
 }
 
 BOOL MpBpmIsMeasuring()

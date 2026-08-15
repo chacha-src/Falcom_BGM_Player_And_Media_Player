@@ -866,6 +866,107 @@ void CPianoRoll::PauseAnalysis()
         Sleep(1);
     }
     InterlockedExchange(&m_jobPending, 0);
+
+    // 停止中にループバック／ノイズ床でメーターがちらつかないよう沈黙させる
+    m_chMeterCount = 0;
+    for (int i = 0; i < PIANO_METER_CH_MAX; ++i) {
+        m_chMeterDb[i] = -60.0f;
+        m_chMeterFill[i] = 0.0f;
+        m_chMeterAutoPeak[i] = 0.02f;
+    }
+    m_meterDirty = true;
+    if (::IsWindow(m_hWnd) && !m_paintDisabled)
+        ApplySyncInvalidate();
+}
+
+void CPianoRoll::SetChannelMeterDb(const float* dbPerChannel, int channelCount)
+{
+    // UI スレッド専用。m_cs(Goertzel)を取ると解析中にメーターが遅延する。
+    static constexpr float kPeakDecay = 0.994f;
+    static constexpr float kFillAttack = 0.55f;
+    static constexpr float kFillRelease = 0.18f;
+    // オートピーク下限を上げ、無音ノイズ床をバー全長に正規化しない（停止時ちらつき対策）
+    static constexpr float kMinDisplayPeak = 0.02f;
+    static constexpr float kSilenceLin = 0.004f; // 約 -48 dBFS
+
+    // 解析フィード停止中は更新を受け付けない（PC譜面化ループバックの床ノイズ含む）
+    if (!m_feedEnabled) {
+        bool decaying = false;
+        for (int i = 0; i < PIANO_METER_CH_MAX; ++i) {
+            m_chMeterDb[i] = -60.0f;
+            if (m_chMeterFill[i] > 0.005f) {
+                m_chMeterFill[i] *= 0.70f;
+                if (m_chMeterFill[i] < 0.005f)
+                    m_chMeterFill[i] = 0.0f;
+                decaying = true;
+            } else {
+                m_chMeterFill[i] = 0.0f;
+            }
+            m_chMeterAutoPeak[i] = kMinDisplayPeak;
+        }
+        m_chMeterCount = 0;
+        if (decaying) {
+            m_meterDirty = true;
+            if (::IsWindow(m_hWnd) && !m_paintDisabled)
+                ApplySyncInvalidate();
+        }
+        return;
+    }
+
+    m_chMeterCount = channelCount;
+    if (m_chMeterCount < 0) m_chMeterCount = 0;
+    if (m_chMeterCount > PIANO_METER_CH_MAX) m_chMeterCount = PIANO_METER_CH_MAX;
+    bool meterChanged = false;
+    for (int i = 0; i < PIANO_METER_CH_MAX; ++i) {
+        if (i < m_chMeterCount && dbPerChannel) {
+            const float in = dbPerChannel[i];
+            m_chMeterDb[i] = in;
+            float lin = (in <= -59.0f) ? 0.0f : powf(10.0f, in / 20.0f);
+            if (lin < kSilenceLin)
+                lin = 0.0f;
+
+            float& peak = m_chMeterAutoPeak[i];
+            if (lin > 0.0f) {
+                if (lin > peak)
+                    peak = lin;
+                else
+                    peak = peak * kPeakDecay + lin * (1.0f - kPeakDecay);
+            } else {
+                peak = peak * kPeakDecay;
+            }
+            if (peak < kMinDisplayPeak) peak = kMinDisplayPeak;
+
+            float norm = (lin > 0.0f) ? (lin / peak) : 0.0f;
+            if (norm < 0.0f) norm = 0.0f;
+            if (norm > 1.0f) norm = 1.0f;
+
+            float& fill = m_chMeterFill[i];
+            const float prevFill = fill;
+            const float rate = (norm >= fill) ? kFillAttack : kFillRelease;
+            fill += (norm - fill) * rate;
+            if (fill < 0.005f) fill = 0.0f;
+            if (!meterChanged && fabsf(fill - prevFill) > 0.02f
+                && (fill > 0.02f || prevFill > 0.02f))
+                meterChanged = true;
+        }
+        else {
+            const float prevFill = m_chMeterFill[i];
+            m_chMeterDb[i] = -60.0f;
+            m_chMeterFill[i] *= 0.85f;
+            if (m_chMeterFill[i] < 0.005f)
+                m_chMeterFill[i] = 0.0f;
+            m_chMeterAutoPeak[i] = kMinDisplayPeak;
+            if (!meterChanged && (m_chMeterFill[i] > 0.02f || prevFill > 0.02f)
+                && fabsf(m_chMeterFill[i] - prevFill) > 0.02f)
+                meterChanged = true;
+        }
+    }
+    if (meterChanged) {
+        m_meterDirty = true;
+        // Sync は Invalidate しない。解析完了待ちにメーターだけ遅れるのを防ぐ。
+        if (::IsWindow(m_hWnd) && !m_paintDisabled)
+            ApplySyncInvalidate();
+    }
 }
 
 // flac⇔wav: 旧形式のワーカー/係数が残ると壊れる。
@@ -1119,8 +1220,9 @@ BOOL CPianoRoll::OnInitDialog()
     m_viewMode = (savedata.pianorollviewmode == 1) ? 1 : 0;
     m_keyRange = (savedata.pianorollkeyrange == 88) ? 88 : 108;
     m_showNoteNames = (savedata.pianorollnotename != 0);
+    // PC音譜面化が保存 ON でも、起動直後はフィードしない（停止相当＝Windows音を拾わない）。
+    // デバイスだけ起こし、再生開始またはメニュー再ONで ResumePlaybackFeed する。
     if (savedata.mpLoopbackScore) {
-        ResumePlaybackFeed();
         CWnd* parent = CCC_GetActiveMainWindow();
         if (!parent) parent = this;
         EnsureDeviceRecordLoopbackFeed(parent);
@@ -1157,7 +1259,14 @@ BOOL CPianoRoll::OnInitDialog()
     EnsureAnalysisTables(m_inputSampleRate);
     StartAnalysisWorker();
     UpdatePianoRollTimer();
-    m_feedEnabled = true;
+    // 無条件 true にすると停止中でもループバック更新を受け付ける
+    m_feedEnabled = false;
+    {
+        extern int playf;
+        extern int plf;
+        if (playf && plf == 1)
+            ResumePlaybackFeed();
+    }
     m_paintDisabled = false;
     m_historyDirty = true;
 
@@ -1397,58 +1506,6 @@ bool CPianoRoll::ShouldCaptureAnalyzeJob()
             return false;
     }
     return true;
-}
-
-void CPianoRoll::SetChannelMeterDb(const float* dbPerChannel, int channelCount)
-{
-    // UI スレッド専用。m_cs(Goertzel)を取ると解析中にメーターが遅延する。
-    static constexpr float kPeakDecay = 0.994f;
-    static constexpr float kFillAttack = 0.55f;
-    static constexpr float kFillRelease = 0.18f;
-
-    m_chMeterCount = channelCount;
-    if (m_chMeterCount < 0) m_chMeterCount = 0;
-    if (m_chMeterCount > PIANO_METER_CH_MAX) m_chMeterCount = PIANO_METER_CH_MAX;
-    bool meterChanged = false;
-    for (int i = 0; i < PIANO_METER_CH_MAX; ++i) {
-        if (i < m_chMeterCount && dbPerChannel) {
-            const float in = dbPerChannel[i];
-            m_chMeterDb[i] = in;
-            float lin = (in <= -59.0f) ? 0.0f : powf(10.0f, in / 20.0f);
-
-            float& peak = m_chMeterAutoPeak[i];
-            if (lin > peak)
-                peak = lin;
-            else
-                peak = peak * kPeakDecay + lin * (1.0f - kPeakDecay);
-            if (peak < 0.002f) peak = 0.002f;
-
-            float norm = lin / peak;
-            if (norm < 0.0f) norm = 0.0f;
-            if (norm > 1.0f) norm = 1.0f;
-
-            float& fill = m_chMeterFill[i];
-            const float prevFill = fill;
-            const float rate = (norm >= fill) ? kFillAttack : kFillRelease;
-            fill += (norm - fill) * rate;
-            if (!meterChanged && fabsf(fill - prevFill) > 0.02f)
-                meterChanged = true;
-        }
-        else {
-            const float prevFill = m_chMeterFill[i];
-            m_chMeterDb[i] = -60.0f;
-            m_chMeterFill[i] *= 0.85f;
-            m_chMeterAutoPeak[i] = 0.02f;
-            if (!meterChanged && m_chMeterFill[i] > 0.01f && prevFill > 0.01f)
-                meterChanged = true;
-        }
-    }
-    if (meterChanged) {
-        m_meterDirty = true;
-        // Sync は Invalidate しない。解析完了待ちにメーターだけ遅れるのを防ぐ。
-        if (::IsWindow(m_hWnd) && !m_paintDisabled)
-            ApplySyncInvalidate();
-    }
 }
 
 // 窓掛け済みバッファから Goertzel 解析を実行し m_rawStrengths を更新する。
@@ -2602,7 +2659,9 @@ void CPianoRoll::FeedLoopbackMono(const double* mono, int frameCount, int sample
 {
     // PC音はWASAPIの短いパケットで来る。MinAnalyze(~8192@44.1k)未満だと
     // AnalyzePlayCursorMono が即 return し、メーターだけ一瞬動いてロールが流れない。
-    if (!m_feedEnabled && !savedata.mpLoopbackScore) return;
+    // 「PC音を譜面化」チェック時のみ受理。通常再生中のループバック混入を禁止。
+    if (!savedata.mpLoopbackScore) return;
+    if (!m_feedEnabled) return;
     if (!mono || frameCount <= 0) return;
     if (sampleRate < 8000) sampleRate = 48000;
     if (sampleRate != m_loopbackAccumRate) {
@@ -2941,18 +3000,24 @@ void CPianoRoll::OnToggleCaptureMusicXml()
 
 void CPianoRoll::OnPlayerFeedStopping(bool fullReset)
 {
-    if (savedata.mpLoopbackScore || m_scoreCapMidi || m_scoreCapXml) {
-        if (!savedata.mpLoopbackScore && (m_scoreCapMidi || m_scoreCapXml) && !m_scoreCapHeldPcAudio) {
-            MpPcAudioRetain();
-            m_scoreCapHeldPcAudio = true;
-        }
-        ResumePlaybackFeed();
-        return;
-    }
-    if (fullReset)
-        ResetPlaybackState();
-    else
-        PauseAnalysis();
+	// MIDI/MusicXML 録り中のみ停止後も PC 音フィードを維持（録り落とし防止）
+	if (m_scoreCapMidi || m_scoreCapXml) {
+		if (!savedata.mpLoopbackScore) {
+			savedata.mpLoopbackScore = 1;
+			m_scoreCapForcedLoopbackScore = true;
+		}
+		if (!m_scoreCapHeldPcAudio) {
+			MpPcAudioRetain();
+			m_scoreCapHeldPcAudio = true;
+		}
+		ResumePlaybackFeed();
+		return;
+	}
+	// 演奏停止で沈黙（PC音譜面化 ON でも停止中は拾わない）
+	if (fullReset)
+		ResetPlaybackState();
+	else
+		PauseAnalysis();
 }
 
 void CPianoRoll::HoldPcAudioForScoreCapture()
@@ -2960,11 +3025,16 @@ void CPianoRoll::HoldPcAudioForScoreCapture()
     extern int playf;
     if (m_scoreCapHeldPcAudio)
         return;
-    // ローカル再生中は既存フィードで足りる。停止中のみ PC 音を確保。
+    // ローカル再生中は再生 PCM のみ。ループバックは使わない。
     if (playf)
         return;
+    if (!savedata.mpLoopbackScore) {
+        savedata.mpLoopbackScore = 1;
+        m_scoreCapForcedLoopbackScore = true;
+    }
     MpPcAudioRetain();
     m_scoreCapHeldPcAudio = true;
+    ResumePlaybackFeed();
 }
 
 void CPianoRoll::ReleasePcAudioForScoreCaptureIfHeld()
@@ -2975,6 +3045,15 @@ void CPianoRoll::ReleasePcAudioForScoreCaptureIfHeld()
         return;
     MpPcAudioRelease();
     m_scoreCapHeldPcAudio = false;
+    if (m_scoreCapForcedLoopbackScore) {
+        m_scoreCapForcedLoopbackScore = false;
+        savedata.mpLoopbackScore = 0;
+        extern void StopDeviceRecordLoopbackFeed();
+        StopDeviceRecordLoopbackFeed();
+    }
+    extern int playf;
+    if (!playf)
+        PauseAnalysis();
 }
 
 

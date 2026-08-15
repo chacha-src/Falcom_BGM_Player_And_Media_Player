@@ -1558,6 +1558,7 @@ UINT __stdcall CDeviceRecordDlg::CaptureThread(void* p)
 							}
 							if (pkL > 1e-8f) chDb[0] = 20.f * (float)log10(pkL);
 							if (pkR > 1e-8f) chDb[1] = 20.f * (float)log10(pkR);
+							// 譜面化チェック ON のときだけピアノへ。BPM Retain ではフラグを立てない。
 							og->m_PianoRollDlg->SetChannelMeterDb(chDb, 2);
 							og->m_PianoRollDlg->FeedLoopbackMono(mono, nf, 48000);
 						}

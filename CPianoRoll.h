@@ -365,7 +365,7 @@ private:
     double           m_goertzelRawScratch[KEY_COUNT];
 
     // ---- 描画制御フラグ ----
-    bool m_feedEnabled = true;       // false にすると FeedPCM が即リターン(破棄前のシャットダウン用)
+    bool m_feedEnabled = false;      // false のあいだ FeedPCM/ループバック解析しない（停止＝沈黙）
     bool m_paintDisabled = false;
     bool m_historyDirty = true;      // ロールバッファ再描画が必要か
     bool m_keyDirty = true;          // 鍵盤バッファ再描画が必要か
@@ -529,6 +529,7 @@ private:
     bool  m_scoreCapMidi = false;
     bool  m_scoreCapXml = false;
     bool  m_scoreCapHeldPcAudio = false; // MpPcAudioRetain を録り側で保持中
+    bool  m_scoreCapForcedLoopbackScore = false; // 録りのため一時的に mpLoopbackScore を立てた
     // コード進行パネル(実験的・キー検出と履歴から簡易表示)
     static constexpr int CHORD_HIST_MAX = 48;
     WCHAR m_chordHist[CHORD_HIST_MAX][24] = {};
