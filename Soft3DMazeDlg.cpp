@@ -762,7 +762,9 @@ BEGIN_MESSAGE_MAP(CS3mView, CCustomStatic)
 END_MESSAGE_MAP()
 
 CS3mView::CS3mView()
-	: m_ready(FALSE), m_vw(0), m_vh(0), m_dev(NULL), m_imm(NULL), m_swap(NULL), m_bbRtv(NULL)
+	: m_ready(FALSE), m_vw(0), m_vh(0), m_dxFailStage(0), m_dxFailHr(S_OK)
+	, m_mirrorSize(S3M_MIRROR_SIZE)
+	, m_dev(NULL), m_imm(NULL), m_swap(NULL), m_bbRtv(NULL)
 	, m_dsTex(NULL), m_dsv(NULL), m_dsSrv(NULL), m_sceneTex(NULL), m_sceneRtv(NULL), m_sceneSrv(NULL)
 	, m_postTex(NULL), m_postRtv(NULL), m_postSrv(NULL), m_shadowTex(NULL), m_shadowDsv(NULL), m_shadowSrv(NULL)
 	, m_mirrorDs(NULL), m_mirrorDsv(NULL)
@@ -1099,54 +1101,93 @@ BOOL CS3mView::CreateProcTextures()
 BOOL CS3mView::InitDx()
 {
 	ReleaseDx();
+	m_dxFailStage = 0; m_dxFailHr = S_OK;
+	if (!m_hWnd || !::IsWindow(m_hWnd)) { m_dxFailStage = 1; return FALSE; }
 	UINT flags=D3D11_CREATE_DEVICE_BGRA_SUPPORT;
 #ifdef _DEBUG
 	flags|=D3D11_CREATE_DEVICE_DEBUG;
 #endif
+	// レース同様: 11_0 要求、戻りは >=11_0 で受理（旧コードの !=11_0 は環境差で誤爆しうる）
 	D3D_FEATURE_LEVEL req=D3D_FEATURE_LEVEL_11_0, got=(D3D_FEATURE_LEVEL)0;
 	HRESULT hr=D3D11CreateDevice(NULL,D3D_DRIVER_TYPE_HARDWARE,NULL,flags,&req,1,D3D11_SDK_VERSION,&m_dev,&got,&m_imm);
+	if(FAILED(hr) && (flags & D3D11_CREATE_DEVICE_DEBUG)) {
+		flags &= ~D3D11_CREATE_DEVICE_DEBUG;
+		hr=D3D11CreateDevice(NULL,D3D_DRIVER_TYPE_HARDWARE,NULL,flags,&req,1,D3D11_SDK_VERSION,&m_dev,&got,&m_imm);
+	}
 	if(FAILED(hr)) hr=D3D11CreateDevice(NULL,D3D_DRIVER_TYPE_WARP,NULL,flags&~D3D11_CREATE_DEVICE_DEBUG,&req,1,D3D11_SDK_VERSION,&m_dev,&got,&m_imm);
-	if(FAILED(hr)||got!=D3D_FEATURE_LEVEL_11_0) return FALSE;
+	if(FAILED(hr) || got < D3D_FEATURE_LEVEL_11_0) { m_dxFailStage = 2; m_dxFailHr = hr; return FALSE; }
 	IDXGIDevice* xd=NULL;IDXGIAdapter* xa=NULL;IDXGIFactory2* f2=NULL;IDXGIFactory* f1=NULL;
-	if(FAILED(m_dev->QueryInterface(__uuidof(IDXGIDevice),(void**)&xd))||FAILED(xd->GetAdapter(&xa))) {S3M_RELEASE(xd);return FALSE;}
+	if(FAILED(hr=m_dev->QueryInterface(__uuidof(IDXGIDevice),(void**)&xd))||FAILED(hr=xd->GetAdapter(&xa))) { m_dxFailStage = 3; m_dxFailHr = hr; S3M_RELEASE(xd); return FALSE; }
 	xa->GetParent(__uuidof(IDXGIFactory2),(void**)&f2);
-	DXGI_SWAP_CHAIN_DESC1 s={};s.Width=0;s.Height=0;s.Format=DXGI_FORMAT_B8G8R8A8_UNORM;s.SampleDesc.Count=1;s.BufferUsage=DXGI_USAGE_RENDER_TARGET_OUTPUT;s.BufferCount=2;s.SwapEffect=DXGI_SWAP_EFFECT_FLIP_DISCARD;s.AlphaMode=DXGI_ALPHA_MODE_IGNORE;
-	if(f2){IDXGISwapChain1* sc1=NULL;hr=f2->CreateSwapChainForHwnd(m_dev,m_hWnd,&s,NULL,NULL,&sc1);if(SUCCEEDED(hr))m_swap=sc1;}else hr=E_FAIL;
+	// FLIP_DISCARD 非対応環境向けにレース同様フォールバック
+	DXGI_SWAP_CHAIN_DESC1 s={};s.Width=0;s.Height=0;s.Format=DXGI_FORMAT_B8G8R8A8_UNORM;s.SampleDesc.Count=1;s.BufferUsage=DXGI_USAGE_RENDER_TARGET_OUTPUT;s.BufferCount=2;s.SwapEffect=DXGI_SWAP_EFFECT_FLIP_DISCARD;s.AlphaMode=DXGI_ALPHA_MODE_IGNORE;s.Scaling=DXGI_SCALING_STRETCH;
+	if(f2){IDXGISwapChain1* sc1=NULL;hr=f2->CreateSwapChainForHwnd(m_dev,m_hWnd,&s,NULL,NULL,&sc1);if(FAILED(hr)){s.SwapEffect=DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL;hr=f2->CreateSwapChainForHwnd(m_dev,m_hWnd,&s,NULL,NULL,&sc1);}if(FAILED(hr)){s.SwapEffect=DXGI_SWAP_EFFECT_DISCARD;s.BufferCount=1;hr=f2->CreateSwapChainForHwnd(m_dev,m_hWnd,&s,NULL,NULL,&sc1);}if(SUCCEEDED(hr))m_swap=sc1;}else hr=E_FAIL;
 	if(FAILED(hr)){xa->GetParent(__uuidof(IDXGIFactory),(void**)&f1);DXGI_SWAP_CHAIN_DESC o={};o.BufferDesc.Format=DXGI_FORMAT_B8G8R8A8_UNORM;o.SampleDesc.Count=1;o.BufferUsage=DXGI_USAGE_RENDER_TARGET_OUTPUT;o.BufferCount=1;o.OutputWindow=m_hWnd;o.Windowed=TRUE;o.SwapEffect=DXGI_SWAP_EFFECT_DISCARD;hr=f1?f1->CreateSwapChain(m_dev,&o,&m_swap):E_FAIL;}
-	S3M_RELEASE(f1);S3M_RELEASE(f2);S3M_RELEASE(xa);S3M_RELEASE(xd);if(FAILED(hr))return FALSE;
-	if(!CreateShaders()||!CreateProcTextures())return FALSE;
-	D3D11_BUFFER_DESC bd={};bd.ByteWidth=sizeof(S3MFrameCB);bd.Usage=D3D11_USAGE_DYNAMIC;bd.BindFlags=D3D11_BIND_CONSTANT_BUFFER;bd.CPUAccessFlags=D3D11_CPU_ACCESS_WRITE;if(FAILED(m_dev->CreateBuffer(&bd,NULL,&m_cbFrame)))return FALSE;
-	bd.ByteWidth=m_vbDynBytes;bd.BindFlags=D3D11_BIND_VERTEX_BUFFER;if(FAILED(m_dev->CreateBuffer(&bd,NULL,&m_vbDyn)))return FALSE;bd.ByteWidth=m_vbHudBytes;if(FAILED(m_dev->CreateBuffer(&bd,NULL,&m_vbHud)))return FALSE;
+	S3M_RELEASE(f1);S3M_RELEASE(f2);S3M_RELEASE(xa);S3M_RELEASE(xd);
+	if(FAILED(hr)||!m_swap){ m_dxFailStage = 4; m_dxFailHr = hr; return FALSE; }
+	D3D11_BUFFER_DESC bd={};bd.ByteWidth=((sizeof(S3MFrameCB)+15)/16)*16;bd.Usage=D3D11_USAGE_DYNAMIC;bd.BindFlags=D3D11_BIND_CONSTANT_BUFFER;bd.CPUAccessFlags=D3D11_CPU_ACCESS_WRITE;
+	if(FAILED(hr=m_dev->CreateBuffer(&bd,NULL,&m_cbFrame))){ m_dxFailStage = 5; m_dxFailHr = hr; return FALSE; }
+	if(!CreateShaders()){ m_dxFailStage = 6; if(m_dxFailHr==S_OK) m_dxFailHr = E_FAIL; return FALSE; }
+	if(!CreateProcTextures()){ m_dxFailStage = 7; m_dxFailHr = E_FAIL; return FALSE; }
+	bd.ByteWidth=m_vbDynBytes;bd.BindFlags=D3D11_BIND_VERTEX_BUFFER;bd.CPUAccessFlags=D3D11_CPU_ACCESS_WRITE;
+	if(FAILED(hr=m_dev->CreateBuffer(&bd,NULL,&m_vbDyn))){
+		static const UINT kVbTry[]={6u*1024u*1024u,4u*1024u*1024u,3u*1024u*1024u,2u*1024u*1024u};
+		hr=E_FAIL;
+		for(int ti=0;ti<4 && FAILED(hr);ti++){
+			m_vbDynBytes=kVbTry[ti]; bd.ByteWidth=m_vbDynBytes;
+			hr=m_dev->CreateBuffer(&bd,NULL,&m_vbDyn);
+		}
+		if(FAILED(hr)){ m_dxFailStage = 8; m_dxFailHr = hr; return FALSE; }
+	}
+	bd.ByteWidth=m_vbHudBytes;
+	if(FAILED(hr=m_dev->CreateBuffer(&bd,NULL,&m_vbHud))){ m_dxFailStage = 9; m_dxFailHr = hr; return FALSE; }
 	D3D11_SAMPLER_DESC ss={};ss.Filter=D3D11_FILTER_MIN_MAG_MIP_LINEAR;ss.AddressU=ss.AddressV=ss.AddressW=D3D11_TEXTURE_ADDRESS_WRAP;ss.MaxLOD=D3D11_FLOAT32_MAX;m_dev->CreateSamplerState(&ss,&m_sampLin);ss.Filter=D3D11_FILTER_MIN_MAG_MIP_POINT;ss.AddressU=ss.AddressV=ss.AddressW=D3D11_TEXTURE_ADDRESS_CLAMP;m_dev->CreateSamplerState(&ss,&m_sampPoint);
 	ss.Filter=D3D11_FILTER_COMPARISON_MIN_MAG_LINEAR_MIP_POINT;ss.AddressU=ss.AddressV=ss.AddressW=D3D11_TEXTURE_ADDRESS_BORDER;ss.ComparisonFunc=D3D11_COMPARISON_LESS;ss.BorderColor[0]=ss.BorderColor[1]=ss.BorderColor[2]=ss.BorderColor[3]=1.f;m_dev->CreateSamplerState(&ss,&m_sampCmp);
 	D3D11_RASTERIZER_DESC rs={};rs.FillMode=D3D11_FILL_SOLID;rs.CullMode=D3D11_CULL_BACK;rs.DepthClipEnable=TRUE;m_dev->CreateRasterizerState(&rs,&m_rsSolid);
 	rs.CullMode=D3D11_CULL_NONE;m_dev->CreateRasterizerState(&rs,&m_rsNoCull);
-	// 影は薄い壁の両面を落とすためカリングなし（DepthBiasは弱め、主体はシェーダ側）
 	D3D11_RASTERIZER_DESC rss={};rss.FillMode=D3D11_FILL_SOLID;rss.CullMode=D3D11_CULL_NONE;rss.DepthClipEnable=TRUE;
 	rss.DepthBias=1000;rss.SlopeScaledDepthBias=1.5f;rss.DepthBiasClamp=0.f;m_dev->CreateRasterizerState(&rss,&m_rsShadow);
 	D3D11_DEPTH_STENCIL_DESC ds={};ds.DepthEnable=TRUE;ds.DepthWriteMask=D3D11_DEPTH_WRITE_MASK_ALL;ds.DepthFunc=D3D11_COMPARISON_LESS_EQUAL;m_dev->CreateDepthStencilState(&ds,&m_dssWrite);ds.DepthWriteMask=D3D11_DEPTH_WRITE_MASK_ZERO;m_dev->CreateDepthStencilState(&ds,&m_dssRead);ds.DepthEnable=FALSE;m_dev->CreateDepthStencilState(&ds,&m_dssOff);
 	D3D11_BLEND_DESC bl={};bl.RenderTarget[0].RenderTargetWriteMask=D3D11_COLOR_WRITE_ENABLE_ALL;m_dev->CreateBlendState(&bl,&m_bsOpaque);bl.RenderTarget[0].BlendEnable=TRUE;bl.RenderTarget[0].SrcBlend=D3D11_BLEND_SRC_ALPHA;bl.RenderTarget[0].DestBlend=D3D11_BLEND_INV_SRC_ALPHA;bl.RenderTarget[0].BlendOp=D3D11_BLEND_OP_ADD;bl.RenderTarget[0].SrcBlendAlpha=D3D11_BLEND_ONE;bl.RenderTarget[0].DestBlendAlpha=D3D11_BLEND_INV_SRC_ALPHA;bl.RenderTarget[0].BlendOpAlpha=D3D11_BLEND_OP_ADD;m_dev->CreateBlendState(&bl,&m_bsAlpha);bl.RenderTarget[0].SrcBlend=D3D11_BLEND_SRC_ALPHA;bl.RenderTarget[0].DestBlend=D3D11_BLEND_ONE;m_dev->CreateBlendState(&bl,&m_bsAdd);
 	{
 		D3D11_TEXTURE2D_DESC td={};td.Width=S3M_SHADOW_SIZE;td.Height=S3M_SHADOW_SIZE;td.MipLevels=1;td.ArraySize=1;td.Format=DXGI_FORMAT_R24G8_TYPELESS;td.SampleDesc.Count=1;td.BindFlags=D3D11_BIND_DEPTH_STENCIL|D3D11_BIND_SHADER_RESOURCE;
-		if(FAILED(m_dev->CreateTexture2D(&td,NULL,&m_shadowTex)))return FALSE;
+		if(FAILED(hr=m_dev->CreateTexture2D(&td,NULL,&m_shadowTex))){ m_dxFailStage = 10; m_dxFailHr = hr; return FALSE; }
 		D3D11_DEPTH_STENCIL_VIEW_DESC dd={};dd.Format=DXGI_FORMAT_D24_UNORM_S8_UINT;dd.ViewDimension=D3D11_DSV_DIMENSION_TEXTURE2D;
-		if(FAILED(m_dev->CreateDepthStencilView(m_shadowTex,&dd,&m_shadowDsv)))return FALSE;
+		if(FAILED(hr=m_dev->CreateDepthStencilView(m_shadowTex,&dd,&m_shadowDsv))){ m_dxFailStage = 10; m_dxFailHr = hr; return FALSE; }
 		D3D11_SHADER_RESOURCE_VIEW_DESC sd={};sd.Format=DXGI_FORMAT_R24_UNORM_X8_TYPELESS;sd.ViewDimension=D3D11_SRV_DIMENSION_TEXTURE2D;sd.Texture2D.MipLevels=1;
-		if(FAILED(m_dev->CreateShaderResourceView(m_shadowTex,&sd,&m_shadowSrv)))return FALSE;
+		if(FAILED(hr=m_dev->CreateShaderResourceView(m_shadowTex,&sd,&m_shadowSrv))){ m_dxFailStage = 10; m_dxFailHr = hr; return FALSE; }
 	}
 	{
-		D3D11_TEXTURE2D_DESC td={};td.Width=S3M_MIRROR_SIZE;td.Height=S3M_MIRROR_SIZE;td.MipLevels=1;td.ArraySize=1;td.Format=DXGI_FORMAT_B8G8R8A8_UNORM;td.SampleDesc.Count=1;td.BindFlags=D3D11_BIND_RENDER_TARGET|D3D11_BIND_SHADER_RESOURCE;
-		for(int i=0;i<S3M_MIRROR_N;i++){
-			if(FAILED(m_dev->CreateTexture2D(&td,NULL,&m_mirrorTex[i])))return FALSE;
-			if(FAILED(m_dev->CreateRenderTargetView(m_mirrorTex[i],NULL,&m_mirrorRtv[i])))return FALSE;
-			if(FAILED(m_dev->CreateShaderResourceView(m_mirrorTex[i],NULL,&m_mirrorSrv[i])))return FALSE;
+		// 鏡用 RT（レースに無い迷路専用）。連番 RT が弾かれる環境向けにサイズ縮退
+		static const int kMirSz[] = { S3M_MIRROR_SIZE, 256, 192, 128, 64 };
+		HRESULT mirHr = E_FAIL;
+		m_mirrorSize = S3M_MIRROR_SIZE;
+		for (int si = 0; si < 5; si++) {
+			const int mirSz = kMirSz[si];
+			for (int i = 0; i < S3M_MIRROR_N; i++) {
+				S3M_RELEASE(m_mirrorSrv[i]); S3M_RELEASE(m_mirrorRtv[i]); S3M_RELEASE(m_mirrorTex[i]);
+			}
+			S3M_RELEASE(m_mirrorDsv); S3M_RELEASE(m_mirrorDs);
+			D3D11_TEXTURE2D_DESC td={};td.Width=mirSz;td.Height=mirSz;td.MipLevels=1;td.ArraySize=1;td.Format=DXGI_FORMAT_B8G8R8A8_UNORM;td.SampleDesc.Count=1;td.BindFlags=D3D11_BIND_RENDER_TARGET|D3D11_BIND_SHADER_RESOURCE;
+			mirHr = S_OK;
+			for(int i=0;i<S3M_MIRROR_N;i++){
+				if(FAILED(mirHr=m_dev->CreateTexture2D(&td,NULL,&m_mirrorTex[i]))) break;
+				if(FAILED(mirHr=m_dev->CreateRenderTargetView(m_mirrorTex[i],NULL,&m_mirrorRtv[i]))) break;
+				if(FAILED(mirHr=m_dev->CreateShaderResourceView(m_mirrorTex[i],NULL,&m_mirrorSrv[i]))) break;
+			}
+			if (FAILED(mirHr)) continue;
+			td.Format=DXGI_FORMAT_R24G8_TYPELESS;td.BindFlags=D3D11_BIND_DEPTH_STENCIL;
+			if(FAILED(mirHr=m_dev->CreateTexture2D(&td,NULL,&m_mirrorDs))) continue;
+			D3D11_DEPTH_STENCIL_VIEW_DESC dd={};dd.Format=DXGI_FORMAT_D24_UNORM_S8_UINT;dd.ViewDimension=D3D11_DSV_DIMENSION_TEXTURE2D;
+			if(FAILED(mirHr=m_dev->CreateDepthStencilView(m_mirrorDs,&dd,&m_mirrorDsv))) continue;
+			m_mirrorSize = mirSz;
+			break;
 		}
-		td.Format=DXGI_FORMAT_R24G8_TYPELESS;td.BindFlags=D3D11_BIND_DEPTH_STENCIL;
-		if(FAILED(m_dev->CreateTexture2D(&td,NULL,&m_mirrorDs)))return FALSE;
-		D3D11_DEPTH_STENCIL_VIEW_DESC dd={};dd.Format=DXGI_FORMAT_D24_UNORM_S8_UINT;dd.ViewDimension=D3D11_DSV_DIMENSION_TEXTURE2D;
-		if(FAILED(m_dev->CreateDepthStencilView(m_mirrorDs,&dd,&m_mirrorDsv)))return FALSE;
+		if(FAILED(mirHr)){ m_dxFailStage = 11; m_dxFailHr = mirHr; return FALSE; }
 	}
-	CRect rc;GetClientRect(&rc);return ResizeDx(max(8,rc.Width()),max(8,rc.Height()));
+	CRect rc;GetClientRect(&rc);
+	if(!ResizeDx(max(8,rc.Width()),max(8,rc.Height()))){ m_dxFailStage = 12; m_dxFailHr = E_FAIL; return FALSE; }
+	return TRUE;
 }
 
 BOOL CS3mView::EnsureSceneTargets(int w,int h)
@@ -1835,13 +1876,8 @@ void CSoft3DMazeDlg::LayoutAll()
 		if (d >= DIFF_COUNT) d = DIFF_COUNT - 1;
 		m_diff.CComboBox::SetCurSel(d);
 	}
-	if (m_size.GetSafeHwnd() && savedata.s3m_size >= S3M_MIN) {
-		CString s;
-		s.Format(_T("%d"), savedata.s3m_size);
-		m_size.SetWindowText(s);
-		const int found = m_size.FindStringExact(-1, s);
-		m_size.CComboBox::SetCurSel(found == CB_ERR ? -1 : found);
-	}
+	if (m_size.GetSafeHwnd() && savedata.s3m_size >= S3M_MIN)
+		SetSizeToUi(savedata.s3m_size);
 
 	CCC_CaptionLayout(m_hWnd);
 	LayoutHelpBtn();
@@ -1950,8 +1986,15 @@ void CSoft3DMazeDlg::SetSizeToUi(int n)
 	// OWNERDRAW の DROPDOWN は描画が GetWindowText 依存 → 編集欄を先に同期
 	m_size.SetWindowText(s);
 	// FindStringExact は物理 index。CCustomComboBox::SetCurSel は論理 index なので基底を使う
-	const int found = m_size.FindStringExact(-1, s);
-	m_size.CComboBox::SetCurSel(found == CB_ERR ? -1 : found);
+	int found = m_size.FindStringExact(-1, s);
+	if (found == CB_ERR) {
+		// クリア+10 等でプリセット外になった値はリストへ追加（SetCurSel(-1) だけだと編集欄が空になる）
+		found = (int)m_size.AddString(s);
+	}
+	if (found != CB_ERR)
+		m_size.CComboBox::SetCurSel(found);
+	// SetCurSel 後も編集欄を再同期（DROPDOWN で選択解除時に消える対策）
+	m_size.SetWindowText(s);
 	m_size.Invalidate(FALSE);
 }
 
@@ -5983,7 +6026,7 @@ void CSoft3DMazeDlg::RenderScene()
 	cb.lightDir.w=0.f;dc->PSSetShaderResources(0,7,ns);
 	auto drawMirrorSlot=[&](int slot,const MirPick& pick,BOOL ok,S3MMat* storeVP,float fovMul){
 		float mbg[4]={.42f,.58f,.78f,1};if(fxFloor>0){mbg[0]=.06f;mbg[1]=.07f;mbg[2]=.09f;}
-		D3D11_VIEWPORT mvp={0,0,(float)CS3mView::S3M_MIRROR_SIZE,(float)CS3mView::S3M_MIRROR_SIZE,0,1};
+		D3D11_VIEWPORT mvp={0,0,(float)m_view.m_mirrorSize,(float)m_view.m_mirrorSize,0,1};
 		dc->RSSetViewports(1,&mvp);dc->RSSetState(m_view.m_rsSolid);
 		dc->OMSetRenderTargets(1,&m_view.m_mirrorRtv[slot],m_view.m_mirrorDsv);
 		dc->ClearRenderTargetView(m_view.m_mirrorRtv[slot],mbg);dc->ClearDepthStencilView(m_view.m_mirrorDsv,D3D11_CLEAR_DEPTH,1.f,0);
@@ -7060,7 +7103,11 @@ BOOL CSoft3DMazeDlg::OnInitDialog()
 	ApplySavedWindowRect();
 	LayoutAll();
 	if(!m_view.InitDx()){
-		MessageBox(LL14(L"DirectX 11 の初期化に失敗しました。",L"DirectX 11 initialization failed.",L"Échec de l'initialisation de DirectX 11.",L"Inizializzazione DirectX 11 non riuscita.",L"Error al iniciar DirectX 11.",L"DirectX 11 초기화에 실패했습니다.",L"DirectX 11 初始化失败。",L"فشل تهيئة DirectX 11.",L"Не удалось инициализировать DirectX 11.",L"DirectX 11 konnte nicht initialisiert werden.",L"Falha ao iniciar o DirectX 11.",L"Initialisatie van DirectX 11 mislukt.",L"Nie udało się zainicjować DirectX 11.",L"DirectX 11 başlatılamadı."),NULL,MB_OK|MB_ICONERROR);
+		CString msg;
+		msg.Format(L"%s\n(stage=%d hr=0x%08X)",
+			LL14(L"DirectX 11 の初期化に失敗しました。",L"DirectX 11 initialization failed.",L"Échec de l'initialisation de DirectX 11.",L"Inizializzazione DirectX 11 non riuscita.",L"Error al iniciar DirectX 11.",L"DirectX 11 초기화에 실패했습니다.",L"DirectX 11 初始化失败。",L"فشل تهيئة DirectX 11.",L"Не удалось инициализировать DirectX 11.",L"DirectX 11 konnte nicht initialisiert werden.",L"Falha ao iniciar o DirectX 11.",L"Initialisatie van DirectX 11 mislukt.",L"Nie udało się zainicjować DirectX 11.",L"DirectX 11 başlatılamadı."),
+			m_view.m_dxFailStage, (unsigned)m_view.m_dxFailHr);
+		MessageBox(msg, NULL, MB_OK|MB_ICONERROR);
 		DestroyWindow();
 		return FALSE;
 	}

@@ -37,6 +37,8 @@ public:
 	void PresentFrame();
 	BOOL m_ready;
 	int m_vw, m_vh;
+	int m_dxFailStage; // InitDx 失敗段階（デバッグ用）
+	HRESULT m_dxFailHr;
 
 	ID3D11Device* m_dev;
 	ID3D11DeviceContext* m_imm;
@@ -57,6 +59,7 @@ public:
 	enum { S3M_SHADOW_SIZE = 1024 };
 	// 0=壁鏡 1=床鏡 2.. =窓・アイテム等（NDC軽量なので多めに持つ）
 	enum { S3M_MIRROR_N = 20, S3M_MIRROR_SIZE = 384, S3M_MIRROR_FX0 = 2, S3M_MIRROR_FX_N = 18 };
+	int m_mirrorSize; // 実確保サイズ（環境により縮退）
 	ID3D11Texture2D* m_mirrorTex[S3M_MIRROR_N];
 	ID3D11RenderTargetView* m_mirrorRtv[S3M_MIRROR_N];
 	ID3D11ShaderResourceView* m_mirrorSrv[S3M_MIRROR_N];
