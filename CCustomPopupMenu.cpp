@@ -2793,7 +2793,8 @@ void CCustomPopupMenu::SnapAnimToIdle()
 		if (idx != m_hot)
 			SetHot(idx);
 	}
-	SetTimer(kAnimTimer, 50, NULL);
+	// idle 背景アニメ用（ストライプ周期 ~66ms に合わせてやや速め）
+	SetTimer(kAnimTimer, 33, NULL);
 }
 
 void CCustomPopupMenu::OpenSubAt(int idx)
@@ -3731,10 +3732,9 @@ void CCustomPopupMenu::OnTimer(UINT_PTR nIDEvent)
 				InvalidateBgOnly();
 			return;
 		}
-		// idle: ホバー追従は冒頭の SyncHotFromCursor のみ。
-		// 毎ティック Invalidate すると BufferedPaint が子を潰して点滅する。
-		if (CCC_IsInwoman())
-			InvalidateBgOnly();
+		// idle: 斜めストライプ／Softプレート／リボンは時間ベース。再描画しないと止まる。
+		// InvalidateBgOnly は子 HWND を除外するので点滅しにくい。
+		InvalidateBgOnly();
 		return;
 	}
 	if (nIDEvent == kSettleTimer) {

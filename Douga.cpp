@@ -585,6 +585,15 @@ BOOL CDougaBarHost::PreTranslateMessage(MSG* pMsg)
 {
 	if (m_tip.GetSafeHwnd())
 		m_tip.RelayEvent(pMsg);
+	if (pMsg && pMsg->message == WM_KEYDOWN
+		&& (pMsg->wParam == VK_OEM_4 || pMsg->wParam == VK_OEM_6
+			|| pMsg->wParam == '[' || pMsg->wParam == ']')) {
+		extern CMediaPlayerDlg* mp;
+		if (mp && ::IsWindow(mp->GetSafeHwnd()) && mp->HandleAbBracketKey(pMsg->wParam)) {
+			SyncSeekVol();
+			return TRUE;
+		}
+	}
 	// 速度つまみ: HSCROLL より先にドラッグ中フラグを立て、タイマー同期の上書きを防ぐ
 	if (pMsg && m_rate.GetSafeHwnd() && pMsg->hwnd == m_rate.m_hWnd) {
 		if (pMsg->message == WM_LBUTTONDOWN || pMsg->message == WM_LBUTTONDBLCLK)
@@ -856,7 +865,13 @@ void CDougaBarHost::SyncSeekVol()
 		int selMn = 0, selMx = 0;
 		og->m_time.GetSelection(selMn, selMx);
 		int psPos = og->m_time.GetPos();
-		m_seek.SetPlaybackMirror(psPos, selMn, selMx, mn, mx);
+		int abA = -1, abB = -1;
+		extern CMediaPlayerDlg* mp;
+		if (mp) {
+			abA = mp->m_abApos;
+			abB = mp->m_abBpos;
+		}
+		m_seek.SetPlaybackMirror(psPos, selMn, selMx, mn, mx, abA, abB);
 		if (::IsWindowVisible(m_seek.GetSafeHwnd()))
 			m_seek.Invalidate(FALSE);
 
@@ -1483,6 +1498,16 @@ BOOL CDouga::PreTranslateMessage(MSG* pMsg)
 {
 	if (m_bar.IsBarReady() && m_bar.m_tip.GetSafeHwnd())
 		m_bar.m_tip.RelayEvent(pMsg);
+	// [ / ] A-B（音楽と同じ。動画前面でも効く）
+	if (pMsg && pMsg->message == WM_KEYDOWN
+		&& (pMsg->wParam == VK_OEM_4 || pMsg->wParam == VK_OEM_6
+			|| pMsg->wParam == '[' || pMsg->wParam == ']')) {
+		extern CMediaPlayerDlg* mp;
+		if (mp && ::IsWindow(mp->GetSafeHwnd()) && mp->HandleAbBracketKey(pMsg->wParam)) {
+			m_bar.SyncSeekVol();
+			return TRUE;
+		}
+	}
 	return CFrameWnd::PreTranslateMessage(pMsg);
 }
 

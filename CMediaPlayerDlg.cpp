@@ -2148,11 +2148,11 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 	if (m_seekLock.GetSafeHwnd())
 		addTip(m_seekLock, LL14(L"ONでループ(loop1/2)つまみを固定。OFFで可動。A-Bつまみは常に動かせます。", L"ON locks loop thumbs. OFF unlocks them. A-B thumbs always move.", L"ON verrouille les poignees de boucle. A-B toujours mobiles.", L"ON blocca le maniglie loop. A-B sempre mobili.", L"ON bloque asas de bucle. A-B siempre moviles.", L"ON이면 루프 손잡이 고정. A-B는 항상 이동 가능.", L"ON锁定循环端点。A-B端点始终可调。", L"ON يقفل مقابض الحلقة. A-B دائماً قابلة للتحريك.", L"ON блокирует ручки цикла. A-B всегда подвижны.", L"ON sperrt Schleifengriffe. A-B immer beweglich.", L"ON trava alças de loop. A-B sempre moveis.", L"ON vergrendelt lusgrepen. A-B altijd beweegbaar.", L"ON blokuje uchwyty petli. A-B zawsze ruchome.", L"ON dongu tutamaclarini kilitler. A-B her zaman hareket eder."));
 	if (m_abA.GetSafeHwnd())
-		addTip(m_abA, LL14(L"現在の再生位置をA点に設定します。", L"Set A point to the current position.", L"Definir le point A.", L"Imposta il punto A.", L"Fijar el punto A.", L"현재 위치를 A로.", L"将当前位置设为A点。", L"تعيين النقطة A.", L"Задать точку A.", L"Punkt A setzen.", L"Definir ponto A.", L"Punt A instellen.", L"Ustaw punkt A.", L"A noktasini ayarla."));
+		addTip(m_abA, LL14(L"現在の再生位置をA点に設定します。[ キーでも可。", L"Set A point to the current position. Also [ key.", L"Definir le point A. Touche [ aussi.", L"Imposta il punto A. Anche tasto [.", L"Fijar el punto A. Tambien tecla [.", L"현재 위치를 A로. [ 키도 가능.", L"将当前位置设为A点。也可用 [ 键。", L"تعيين النقطة A. أيضاً مفتاح [.", L"Задать точку A. Также клавиша [.", L"Punkt A setzen. Auch Taste [.", L"Definir ponto A. Tambem tecla [.", L"Punt A instellen. Ook toets [.", L"Ustaw punkt A. Takze klawisz [.", L"A noktasini ayarla. [ tusu da olur."));
 	if (m_abB.GetSafeHwnd())
-		addTip(m_abB, LL14(L"現在の再生位置をB点に設定し、A-Bリピートを有効にします。", L"Set B point and enable A-B repeat.", L"Definir B et activer A-B.", L"Imposta B e attiva A-B.", L"Fijar B y activar A-B.", L"B로 설정 후 A-B 반복.", L"设置B点并启用A-B重复。", L"تعيين B وتفعيل A-B.", L"Задать B и включить A-B.", L"Punkt B setzen und A-B aktivieren.", L"Definir B e ativar A-B.", L"Punt B en A-B inschakelen.", L"Ustaw B i wlacz A-B.", L"B ayarla ve A-B ac."));
+		addTip(m_abB, LL14(L"現在の再生位置をB点に設定し、A-Bリピートを有効にします。] キーでも可。", L"Set B point and enable A-B repeat. Also ] key.", L"Definir B et activer A-B. Touche ] aussi.", L"Imposta B e attiva A-B. Anche tasto ].", L"Fijar B y activar A-B. Tambien tecla ].", L"B로 설정 후 A-B 반복. ] 키도 가능.", L"设置B点并启用A-B重复。也可用 ] 键。", L"تعيين B وتفعيل A-B. أيضاً مفتاح ].", L"Задать B и включить A-B. Также клавиша ].", L"Punkt B setzen und A-B aktivieren. Auch Taste ].", L"Definir B e ativar A-B. Tambem tecla ].", L"Punt B en A-B inschakelen. Ook toets ].", L"Ustaw B i wlacz A-B. Takze klawisz ].", L"B ayarla ve A-B ac. ] tusu da olur."));
 	if (m_abClr.GetSafeHwnd())
-		addTip(m_abClr, LL14(L"A-Bリピートを解除します。", L"Clear A-B repeat.", L"Effacer A-B.", L"Cancella A-B.", L"Borrar A-B.", L"A-B 반복 해제.", L"清除A-B重复。", L"مسح تكرار A-B.", L"Сбросить A-B.", L"A-B aufheben.", L"Limpar A-B.", L"A-B wissen.", L"Wyczysc A-B.", L"A-B temizle."));
+		addTip(m_abClr, LL14(L"A-Bリピートを解除します。[ または ] でも解除。", L"Clear A-B repeat. Also [ or ] while looping.", L"Effacer A-B. Aussi [ ou ] en boucle.", L"Cancella A-B. Anche [ o ] in loop.", L"Borrar A-B. Tambien [ o ] en bucle.", L"A-B 반복 해제. 루프 중 [ 또는 ] 로도 해제.", L"清除A-B重复。循环中也可用 [ 或 ]。", L"مسح تكرار A-B. أيضاً [ أو ] أثناء الحلقة.", L"Сбросить A-B. Также [ или ] во время цикла.", L"A-B aufheben. Auch [ oder ] wahrend Loop.", L"Limpar A-B. Tambem [ ou ] em loop.", L"A-B wissen. Ook [ of ] tijdens lus.", L"Wyczysc A-B. Takze [ lub ] w petli.", L"A-B temizle. Dongude [ veya ] de olur."));
 	addTip(m_vol, LL14(L"音量を調整します。", L"Adjust volume.", L"Regler le volume.", L"Regola il volume.", L"Ajustar el volumen.", L"음량을 조절합니다.", L"调整音量。", L"ضبط مستوى الصوت.", L"Регулировка громкости.", L"Lautstarke einstellen.", L"Ajustar o volume.", L"Volume aanpassen.", L"Reguluj głośność.", L"Sesi ayarla."));
 	addTip(m_eq, LL14(L"イコライザーを開きます。右クリックでプリセット等。", L"Open the equalizer. Right-click for presets.", L"Ouvrir l'egaliseur. Clic droit: presets.", L"Apri l'equalizzatore. Tasto destro: preset.", L"Abrir el ecualizador. Clic derecho: presets.", L"이퀄라이저를 엽니다. 우클릭으로 프리셋.", L"打开均衡器。右键预设。", L"فتح المعادل. زر يمين: إعدادات.", L"Открыть эквалайзер. ПКМ — пресеты.", L"Equalizer offnen. RMB: Presets.", L"Abrir o equalizador. Clique direito: presets.", L"Equalizer openen. Rechtsklik: presets.", L"Otworz korektor. PPM: presety.", L"Ekolayzeri ac. Sag tik: onayarlar."));
 	addTip(m_piano, LL14(L"簡易ピアノロールを開きます。", L"Open the simple piano roll.", L"Ouvrir le rouleau piano simple.", L"Apri il piano roll semplice.", L"Abrir el rollo de piano simple.", L"간이 피아노 롤을 엽니다.", L"打开简易钢琴卷帘。", L"فتح لوحة البيانو البسيطة.", L"Открыть простой пианоролл.", L"Einfache Klavierrolle offnen.", L"Abrir o piano roll simples.", L"Eenvoudige pianorol openen.", L"Otworz prosta rolke pianina.", L"Basit piyano rulosunu ac."));
@@ -2550,6 +2550,16 @@ BOOL CMediaPlayerDlg::RelayPreTranslateMessage(MSG* pMsg)
 			SetPhraseAbAroundNow();
 			return TRUE;
 		}
+	}
+	// [ = A、] = B→A-B開始。有効中にもう一度で解除
+	if (pMsg->message == WM_KEYDOWN
+		&& (pMsg->wParam == VK_OEM_4 || pMsg->wParam == VK_OEM_6
+			|| pMsg->wParam == '[' || pMsg->wParam == ']')) {
+		CWnd* pFocus = GetFocus();
+		const BOOL inEdit = (pFocus && (pFocus->GetSafeHwnd() == m_find.GetSafeHwnd()
+			|| pFocus->IsKindOf(RUNTIME_CLASS(CEdit))));
+		if (!inEdit && HandleAbBracketKey(pMsg->wParam))
+			return TRUE;
 	}
 	// 1-8 = キュージャンプ（編集中以外）
 	if (pMsg->message == WM_KEYDOWN && pMsg->wParam >= '1' && pMsg->wParam <= '8') {
@@ -7649,6 +7659,26 @@ void CMediaPlayerDlg::OnAbSetA()
 	m_abLoopCount = 0;
 	m_seek.SetAB(m_abApos, m_abBpos);
 	MirrorSeekVol();
+}
+
+BOOL CMediaPlayerDlg::HandleAbBracketKey(WPARAM vk)
+{
+	const BOOL isA = (vk == VK_OEM_4 || vk == (WPARAM)'[');
+	const BOOL isB = (vk == VK_OEM_6 || vk == (WPARAM)']');
+	if (!isA && !isB) return FALSE;
+	if (!og || !::IsWindow(og->GetSafeHwnd())) return FALSE;
+	// A-B ループ中なら [ でも ] でも解除
+	if (m_abApos >= 0 && m_abBpos > m_abApos) {
+		OnAbClear();
+		return TRUE;
+	}
+	if (isA) {
+		OnAbSetA();
+		return TRUE;
+	}
+	// ] → B 設定と同時に A-B ループ開始
+	OnAbSetB();
+	return TRUE;
 }
 
 void CMediaPlayerDlg::OnAbSetB()

@@ -119,6 +119,8 @@ public:
 	// pl->pc を直接並べ替え、再生インデックス(plcnt/pnt/pnt1)と選択を追従させる。
 	void MoveSelected(int mode);
 	BOOL RelayPreTranslateMessage(MSG* pMsg);  // og::DoModal 中の Enter 等を中継
+	// [ = A、] = B（ループ開始）。A-B 有効中にもう一度 [ か ] で解除。
+	BOOL HandleAbBracketKey(WPARAM vk);
 	void RequestAppShutdown();
 
 	// ---- 情報表示スタティック(バナー GDI に隠れているものは SW_HIDE してある) ----
