@@ -5337,11 +5337,8 @@ void CMediaPlayerDlg::BannerSoft3dZoomCb(void* ctx, int value)
 void CMediaPlayerDlg::PresentBannerSoft3D(CDC* pDC)
 {
 	if (!pDC || m_bannerRect.IsRectEmpty()) return;
-	// コンテキストメニュー Track 中は重い Soft3D+Speana を止める（退場／再オープンで UI フリーズする）
-	if (CCustomPopupMenu::GetTrackingRoot() != NULL) {
-		pDC->FillSolidRect(&m_bannerRect, RGB(8, 10, 16));
-		return;
-	}
+	// Soft3D 本体はメニュー Track 中は重いので止めるが、Speana 供給＋2D 棒は継続する
+	const BOOL menuTrack = (CCustomPopupMenu::GetTrackingRoot() != NULL);
 	// アナライザ/ピアノと同様: Soft3D はバナー矩形だけ。ジャケ/情報は 2D サイドパネル。
 	// （旧: 3領域を1枚に載せてバーがジャケ・情報の下に食い込み、クリップで中心帯だけ見えて壊れて見えた）
 	const int sw = m_bannerRect.Width(), sh = m_bannerRect.Height();
@@ -5419,6 +5416,45 @@ void CMediaPlayerDlg::PresentBannerSoft3D(CDC* pDC)
 			if (levL[i] > 0.01f || levR[i] > 0.01f) ++nz;
 		}
 		have = (nz > 0);
+	}
+
+	if (menuTrack) {
+		// メニュー中: Soft3D を避けつつスペアナ棒だけ更新
+		if (have) {
+			const int pad = max(2, sw / 80);
+			const int gap = max(1, sw / 200);
+			const int baseY = sh - pad;
+			if (stereo) {
+				const int half = (sw - pad * 2 - gap) / 2;
+				const float bw = (float)half / (float)barN;
+				for (int i = 0; i < barN; ++i) {
+					int hL = (int)(levL[i] * (float)(sh - pad * 2));
+					int hR = (int)(levR[i] * (float)(sh - pad * 2));
+					if (hL < 0) hL = 0; if (hR < 0) hR = 0;
+					int x0 = pad + (int)(i * bw);
+					int x1 = pad + (int)((i + 1) * bw) - 1;
+					if (x1 < x0) x1 = x0;
+					if (hL > 0) m_memBanner.FillSolidRect(x0, baseY - hL, x1 - x0 + 1, hL, RGB(80, 210, 255));
+					int xr0 = pad + half + gap + (int)(i * bw);
+					int xr1 = pad + half + gap + (int)((i + 1) * bw) - 1;
+					if (xr1 < xr0) xr1 = xr0;
+					if (hR > 0) m_memBanner.FillSolidRect(xr0, baseY - hR, xr1 - xr0 + 1, hR, RGB(255, 140, 90));
+				}
+			} else {
+				const float bw = (float)(sw - pad * 2) / (float)barN;
+				for (int i = 0; i < barN; ++i) {
+					int h = (int)(levL[i] * (float)(sh - pad * 2));
+					if (h < 0) h = 0;
+					int x0 = pad + (int)(i * bw);
+					int x1 = pad + (int)((i + 1) * bw) - 1;
+					if (x1 < x0) x1 = x0;
+					if (h > 0) m_memBanner.FillSolidRect(x0, baseY - h, x1 - x0 + 1, h, RGB(80, 210, 255));
+				}
+			}
+		}
+		pDC->BitBlt(m_bannerRect.left, m_bannerRect.top, sw, sh, &m_memBanner, 0, 0, SRCCOPY);
+		::SelectObject(m_memBanner.GetSafeHdc(), oldBmp);
+		return;
 	}
 
 	const float boxes[1][6] = { { -1.15f, 1.15f, -0.02f, 0.72f, 0.0f, 0.95f } };

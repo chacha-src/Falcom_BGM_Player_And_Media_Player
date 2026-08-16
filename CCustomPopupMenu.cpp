@@ -3855,8 +3855,9 @@ void CCustomPopupMenu::RunModalLoop()
 
 		// 定着後: GetMessage 無限待ちだと他アプリ切替を検知できない。
 		// WM_ACTIVATEAPP は SendMessage 経由でキューに乗らないため、短周期で
-		// IsForegroundOurs を見る（タイマ合成のため Peek も回す）。
-		const DWORD wake = ::MsgWaitForMultipleObjects(0, NULL, FALSE, 100, QS_ALLINPUT);
+		// IsForegroundOurs を見る。スペアナ／EQ コード用 WM_TIMER・PostMessage も
+		// ここで起こすため、待ちは ~33ms（旧 100ms だと描画・コードが間延びする）。
+		const DWORD wake = ::MsgWaitForMultipleObjects(0, NULL, FALSE, 33, QS_ALLINPUT);
 		if (wake == WAIT_TIMEOUT) {
 			if (!IsForegroundOurs())
 				dismissForForeignFocus();

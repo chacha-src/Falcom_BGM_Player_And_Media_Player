@@ -22620,14 +22620,14 @@ void COggDlg::timerp()
 	}
 
 	// スペアナは不透明で先に描く（ピーク／現在を保持）。バナー文字は後から SRCINVERT（XOR）。
+	// コンテキストメニュー Track 中もスペアナ／EQコード供給は止めない（見た目とコード更新を維持）。
 	{
 		extern BOOL MpSsVizIsOpen();
 		extern CMediaPlayerDlg* mp;
 		const bool soft3dBanner = (mp && ::IsWindow(mp->GetSafeHwnd()) && mp->IsBannerSoft3D());
-		const bool menuTracking = (CCustomPopupMenu::GetTrackingRoot() != NULL);
-		if (!menuTracking && (m_supe.GetCheck() == TRUE || MpSsVizIsOpen()) && plf == 1 && (wav || ogg || m_dsb))
+		if ((m_supe.GetCheck() == TRUE || MpSsVizIsOpen()) && plf == 1 && (wav || ogg || m_dsb))
 			Speana(TRUE);
-		if (!menuTracking && soft3dBanner && plf == 1 && (wav || ogg || m_dsb))
+		if (soft3dBanner && plf == 1 && (wav || ogg || m_dsb))
 			Speana(FALSE, TRUE);
 	}
 	s = L""; ss = L"";

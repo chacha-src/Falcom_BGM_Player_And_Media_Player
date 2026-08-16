@@ -4010,10 +4010,6 @@ void CAnalyzerDlg::PresentSoft3DTop(CDC& dc, const CRect& pane)
 {
 	const int pw = pane.Width(), ph = pane.Height();
 	if (pw < 8 || ph < 8) return;
-	if (CCustomPopupMenu::GetTrackingRoot() != NULL) {
-		dc.FillSolidRect(&pane, ANALYZER_BG);
-		return;
-	}
 	CDC clip; clip.CreateCompatibleDC(&dc);
 	CBitmap bm; bm.CreateCompatibleBitmap(&dc, pw, ph);
 	CBitmap* ob = clip.SelectObject(&bm);
@@ -4160,10 +4156,6 @@ void CAnalyzerDlg::PresentSoft3DBot(CDC& dc, const CRect& pane)
 {
 	const int pw = pane.Width(), ph = pane.Height();
 	if (pw < 8 || ph < 8) return;
-	if (CCustomPopupMenu::GetTrackingRoot() != NULL) {
-		dc.FillSolidRect(&pane, ANALYZER_BG);
-		return;
-	}
 	CDC clip; clip.CreateCompatibleDC(&dc);
 	CBitmap bm; bm.CreateCompatibleBitmap(&dc, pw, ph);
 	CBitmap* ob = clip.SelectObject(&bm);

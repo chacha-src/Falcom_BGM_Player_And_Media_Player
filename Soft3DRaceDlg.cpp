@@ -1586,6 +1586,28 @@ void CSoft3DRaceDlg::GenerateCourseWithSeed(DWORD seed)
 		m_knots[i].z = sinf(a) * rad + sinf(a * 1.3f) * wob;
 		m_knots[i].y = 0.f; // 後で高さ付け
 	}
+	// 長いコースでも地形枠内に収める（距離差はノット数＝経路長で出す）
+	{
+		float cx = 0.f, cz = 0.f;
+		for (int i = 0; i < knots; i++) { cx += m_knots[i].x; cz += m_knots[i].z; }
+		const float invK = 1.f / (float)knots;
+		cx *= invK; cz *= invK;
+		float maxR = 1.f;
+		for (int i = 0; i < knots; i++) {
+			const float dx = m_knots[i].x - cx, dz = m_knots[i].z - cz;
+			const float r = sqrtf(dx * dx + dz * dz);
+			if (r > maxR) maxR = r;
+		}
+		// 帯半幅を含めて地面デフォルト半幅(280)より内側へ
+		const float arenaR = 220.f - m_bandHalf;
+		if (arenaR > 40.f && maxR > arenaR) {
+			const float fit = arenaR / maxR;
+			for (int i = 0; i < knots; i++) {
+				m_knots[i].x = cx + (m_knots[i].x - cx) * fit;
+				m_knots[i].z = cz + (m_knots[i].z - cz) * fit;
+			}
+		}
+	}
 	// --- 高さ：乱雑上下ではなく「巡航＋所々の突起／くぼみ」（3D酔い対策）---
 	{
 		float baseY[S3R_SPLINE_MAX];
@@ -3381,9 +3403,12 @@ void CSoft3DRaceDlg::RenderScene()
 		else if (m_themeActive==THEME_MESA){gr=.85f;gg=.45f;gb=.28f;}
 		else {gr=.75f;gg=.8f;gb=.95f;}
 		const int gN = 40;
-		const float extent = 280.f;
+		// コース全体が枠内に載るよう、中心＋半径から地形パッチを決める
+		float extent = m_demoRad + m_bandHalf + 56.f;
+		if (extent < 280.f) extent = 280.f;
+		if (extent > 480.f) extent = 480.f;
 		float step = extent * 2.f / (float)gN;
-		float x0 = pl.x - extent, z0 = pl.z - extent;
+		float x0 = m_demoMidX - extent, z0 = m_demoMidZ - extent;
 		for (int gz=0; gz<gN; gz++) for (int gx=0; gx<gN; gx++) {
 			float xa = x0 + gx * step, za = z0 + gz * step;
 			float xb = xa + step, zb = za + step;
