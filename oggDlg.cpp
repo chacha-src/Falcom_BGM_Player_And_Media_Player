@@ -1612,6 +1612,25 @@ static CString OggKpiAskDownloadMsg()
 		L"KPI eklentisi bulunamadi.\nIndirilsin mi?");
 }
 
+// TOPMOST の KPI 読み込み窓が MessageBox のボタンを覆うのを防ぐ。
+static int OggKpiAfxMessageBox(LPCTSTR text, UINT type)
+{
+	CKpiLoadingWnd* load = g_pActiveLoadingWnd;
+	HWND hLoad = (load && load->GetSafeHwnd()) ? load->GetSafeHwnd() : NULL;
+	const BOOL wasVisible = (hLoad != NULL && ::IsWindowVisible(hLoad));
+	if (wasVisible)
+		::ShowWindow(hLoad, SW_HIDE);
+
+	const int ans = AfxMessageBox(text, type | MB_SETFOREGROUND | MB_TOPMOST);
+
+	if (wasVisible && hLoad && ::IsWindow(hLoad)) {
+		::ShowWindow(hLoad, SW_SHOW);
+		::SetWindowPos(hLoad, HWND_TOPMOST, 0, 0, 0, 0,
+			SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+	}
+	return ans;
+}
+
 // confirm=TRUE で確認ダイアログ。startupEmpty=TRUE のとき「いいえ」で再尋ねないフラグを保存。
 // reloadAfter=TRUE のとき展開後に plug+KPI適用（起動時 plug 内からは FALSE）。
 BOOL OggKpiDownloadPlugins(CWnd* owner, BOOL confirm, BOOL startupEmpty, BOOL reloadAfter)
@@ -1624,7 +1643,7 @@ BOOL OggKpiDownloadPlugins(CWnd* owner, BOOL confirm, BOOL startupEmpty, BOOL re
 	return FALSE;
 #else
 	if (confirm) {
-		const int ans = AfxMessageBox(OggKpiAskDownloadMsg(), MB_YESNO | MB_ICONQUESTION);
+		const int ans = OggKpiAfxMessageBox(OggKpiAskDownloadMsg(), MB_YESNO | MB_ICONQUESTION);
 		if (ans != IDYES) {
 			if (startupEmpty) {
 				savedata.kpi_plugin_dl_skip = 1;
@@ -1659,7 +1678,7 @@ BOOL OggKpiDownloadPlugins(CWnd* owner, BOOL confirm, BOOL startupEmpty, BOOL re
 				L"KPI-plugins ophalen mislukt.", L"Nie udalo sie pobrac wtyczek KPI.",
 				L"KPI eklentileri alinamadi.");
 		}
-		AfxMessageBox(err, MB_ICONERROR);
+		OggKpiAfxMessageBox(err, MB_ICONERROR);
 	} else if (reloadAfter) {
 		wnd->SetStatusText(LL14(
 			L"KPI読み込み中…\n（ダウンロード完了・再読込）",

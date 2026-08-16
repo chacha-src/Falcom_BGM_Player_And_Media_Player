@@ -330,6 +330,7 @@ public:
 	int  m_mpBtnShort;       // 0=フル 1=EQ系短縮 2=フェード/JK等短縮 3=最小幅用の超短縮
 	int  m_mpPromptShort;    // 0=プロンプト 1=指示(幅不足時)
 	int  m_mpCmdRollShort;   // 0=ロール 1=短縮
+	int  m_mpOptShort;       // オプション行: 0=フル 1=右短縮 2=左右短縮
 	int  m_mpChkShort[6];    // 下部チェック tip..saveparam: 0=フル 1=中 2=短 (-1=未設定)
 
 	// ---- A-Bリピート(PCMフレーム。両方>=0で有効) ----

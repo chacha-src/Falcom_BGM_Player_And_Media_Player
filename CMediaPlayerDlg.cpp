@@ -988,6 +988,7 @@ CMediaPlayerDlg::CMediaPlayerDlg(CWnd* pParent)
 	m_mpEditShort = -1;
 	m_mpPromptShort = -1;
 	m_mpCmdRollShort = -1;
+	m_mpOptShort = -1;
 	for (int i = 0; i < 6; ++i)
 		m_mpChkShort[i] = -1;
 	m_abApos = -1;
@@ -1737,6 +1738,9 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 	if (m_addFolder.GetSafeHwnd())
 		m_addFolder.SetWindowText(LL14(L"フォルダ追加", L"Add folder", L"Ajouter dossier", L"Aggiungi cartella", L"Anadir carpeta", L"폴더 추가", L"添加文件夹", L"إضافة مجلد", L"Добавить папку", L"Ordner hinzu", L"Add pasta", L"Map toevoegen", L"Dodaj folder", L"Klasor ekle"));
 	m_mpEditShort = -1;
+	m_mpPromptShort = -1;
+	m_mpCmdRollShort = -1;
+	m_mpOptShort = -1;
 	if (m_editSelAll.GetSafeHwnd())
 		m_editSelAll.SetWindowText(LL14(L"全選択", L"Select all", L"Tout", L"Tutto", L"Todo", L"모두", L"全选", L"الكل", L"Все", L"Alles", L"Tudo", L"Alles", L"Wszystko", L"Tumu"));
 	if (m_editCopy.GetSafeHwnd())
@@ -3126,57 +3130,127 @@ void CMediaPlayerDlg::DoLayout()
 	MoveCtl(&m_vol, volSlX, by + (int)(4 * s), volSlW, (int)(16 * s));
 	MoveCtl(&m_volval, volvalX, by + (int)(5 * s), volValW, (int)(16 * s));
 
-	// ===== オプション行(1段): 連続/ループ/回数/ランダム + スペアナ/ST/フォルダ =====
-	// chkRowH は 12px フォント(約 tmHeight≈16)が DrawSmartText2 で縮小されない高さにする。
+	// ===== オプション行(1段): 連続/ループ/…/クロスフェード + 巻/指示/スペアナ/ST/フォルダ =====
+	// 左固定＋右固定だと狭幅で秒数と「巻」が重なる。左右まとめて短縮レベルを選ぶ。
 	int by2 = by + bh + (int)(4 * s);
 	int ch = (int)(24 * s);
 	int chkRowH = (int)(20 * s);
 	int optY = by2 + (ch - chkRowH) / 2;
-	int cx = M;
-	MoveCtl(&m_renzoku, cx, optY, (int)(86 * s), chkRowH); cx += (int)(90 * s);
-	MoveCtl(&m_loop, cx, optY, (int)(92 * s), chkRowH); cx += (int)(96 * s);
-	MoveCtl(&m_kaisuuL, cx, optY, (int)(80 * s), chkRowH); cx += (int)(82 * s);
-	MoveCtl(&m_kaisuu, cx, optY, (int)(52 * s), chkRowH); cx += (int)(56 * s);
-	MoveCtl(&m_random, cx, optY, (int)(88 * s), chkRowH); cx += (int)(92 * s);
-	MoveCtl(&m_xfade, cx, optY, (int)(100 * s), chkRowH); cx += (int)(104 * s);
-	MoveCtl(&m_xfadeSec, cx, optY, (int)(40 * s), chkRowH); cx += (int)(42 * s);
-	MoveCtl(&m_xfadeL, cx, optY, (int)(24 * s), chkRowH); cx += (int)(28 * s);
-	int folW = (int)(54 * s), stW = (int)(72 * s), supeW = (int)(62 * s);
-	const int prWFull = max(1, (int)(76 * s));
-	const int prWShort = max(1, (int)(36 * s));
-	const int rollWFull = max(1, (int)(56 * s));
-	const int rollWShort = max(1, (int)(36 * s));
-	const int randomEndX = cx;
 	int btnRowH = (int)(24 * s);
 	int btnY1 = by2 + (ch - btnRowH) / 2;
-	int rcx = W - M - folW;
-	MoveCtl(&m_folder, rcx, by2, folW, ch); rcx -= (int)(4 * s) + stW;
-	MoveCtl(&m_st, rcx, btnY1, stW, btnRowH); rcx -= (int)(4 * s) + supeW;
-	MoveCtl(&m_supe, rcx, btnY1, supeW, btnRowH);
-	const int prGap = (int)(8 * s);
-	const bool prUseFull = (rcx - prGap - prWFull - (int)(4 * s) - rollWFull >= randomEndX);
-	const int prW = prUseFull ? prWFull : prWShort;
-	const int rollW = prUseFull ? rollWFull : rollWShort;
-	if (m_prompt.GetSafeHwnd()) {
-		const int prShortLv = prUseFull ? 0 : 1;
-		if (prShortLv != m_mpPromptShort) {
-			m_mpPromptShort = prShortLv;
-			m_prompt.SetWindowText(prUseFull
-				? LL14(L"プロンプト", L"Prompt", L"Prompt", L"Prompt", L"Prompt", L"프롬프트", L"提示", L"موجه", L"Промпт", L"Prompt", L"Prompt", L"Prompt", L"Prompt", L"Istem")
-				: LL14(L"指示", L"Pmt", L"Pmt", L"Pmt", L"Pmt", L"지시", L"指示", L"توجيه", L"Прм", L"Pmt", L"Pmt", L"Pmt", L"Pmt", L"Pmt"));
+	const int optGap = (int)(4 * s);
+	const int optAvail = W - M * 2;
+	const int midGap = (int)(8 * s);
+
+	auto leftNeed = [&](int lv) -> int {
+		// renzoku, loop, kaisuuL, kaisuu, random, xfade, xfadeSec, xfadeL
+		const int w0[] = { 86, 92, 80, 52, 88, 100, 40, 24 };
+		const int w1[] = { 86, 92, 80, 52, 88, 100, 40, 24 }; // 右だけ縮む段階では左は据え置き
+		const int w2[] = { 56, 56, 44, 40, 56, 48, 36, 16 };
+		const int* ww = (lv >= 2) ? w2 : (lv >= 1) ? w1 : w0;
+		int sum = 0;
+		for (int i = 0; i < 8; ++i)
+			sum += (int)(ww[i] * s) + ((i < 7) ? optGap : 0);
+		return sum;
+	};
+	auto rightNeed = [&](int lv) -> int {
+		// folder, st, supe, prompt?, cmdroll?
+		const int fol = (int)((lv >= 2 ? 40 : 54) * s);
+		const int st = (int)((lv >= 1 ? 36 : 72) * s);
+		const int supe = (int)((lv >= 1 ? 40 : 62) * s);
+		const int pr = m_prompt.GetSafeHwnd() ? (int)((lv >= 1 ? 36 : 76) * s) : 0;
+		const int roll = m_cmdroll.GetSafeHwnd() ? (int)((lv >= 1 ? 36 : 56) * s) : 0;
+		int n = 1 + (st > 0 ? 1 : 0) + (supe > 0 ? 1 : 0) + (pr > 0 ? 1 : 0) + (roll > 0 ? 1 : 0);
+		return fol + st + supe + pr + roll + optGap * max(0, n - 1);
+	};
+	int optLv = 0;
+	while (optLv < 2 && leftNeed(optLv) + midGap + rightNeed(optLv) > optAvail)
+		++optLv;
+
+	if (!liveResize && optLv != m_mpOptShort) {
+		m_mpOptShort = optLv;
+		m_mpPromptShort = (optLv >= 1) ? 1 : 0;
+		m_mpCmdRollShort = (optLv >= 1) ? 1 : 0;
+		if (optLv >= 2) {
+			m_renzoku.SetWindowText(LL14(L"連続", L"Cont", L"Cont", L"Cont", L"Cont", L"연속", L"连续", L"متتابع", L"Подр.", L"Folge", L"Cont", L"Doorl.", L"Ciagle", L"Surekli"));
+			m_loop.SetWindowText(LL14(L"ループ", L"Loop", L"Boucle", L"Loop", L"Bucle", L"루프", L"循环", L"حلقة", L"Цикл", L"Loop", L"Loop", L"Lus", L"Petla", L"Dongu"));
+			m_random.SetWindowText(LL14(L"ランダム", L"Random", L"Aleat.", L"Casuale", L"Aleat.", L"랜덤", L"随机", L"عشوائي", L"Случ.", L"Zufall", L"Aleat.", L"Willek.", L"Losowo", L"Rastgele"));
+			m_xfade.SetWindowText(LL14(L"XF", L"XF", L"XF", L"XF", L"XF", L"XF", L"XF", L"XF", L"XF", L"XF", L"XF", L"XF", L"XF", L"XF"));
+			m_kaisuuL.SetWindowText(LL14(L"回数", L"Count", L"Fois", L"Volte", L"Veces", L"횟수", L"次数", L"مرات", L"Раз", L"Anz.", L"Vezes", L"Aantal", L"Razy", L"Sayi"));
+			m_xfadeL.SetWindowText(LL14(L"秒", L"s", L"s", L"s", L"s", L"초", L"秒", L"ث", L"с", L"s", L"s", L"s", L"s", L"sn"));
+		} else {
+			m_renzoku.SetWindowText(LL14(L"連続再生", L"Continuous", L"Lect. continue", L"Continua", L"Continua", L"연속 재생", L"连续播放", L"تشغيل متتابع", L"Подряд", L"Folge", L"Continuo", L"Doorlopend", L"Ciągłe", L"Sürekli çal"));
+			m_loop.SetWindowText(LL14(L"ループ再生", L"Loop play", L"Lecture boucle", L"Riproduci loop", L"Repetir", L"루프 재생", L"循环播放", L"تشغيل متكرر", L"Цикл", L"Schleife", L"Repetir", L"Lus afspelen", L"Odtwarz. pętli", L"Donguye al"));
+			m_random.SetWindowText(LL14(L"ランダム再生", L"Random play", L"Lect. aleatoire", L"Casuale", L"Aleatorio", L"랜덤 재생", L"随机播放", L"تشغيل عشوائي", L"Случайно", L"Zufall", L"Aleatorio", L"Willekeurig", L"Losowo", L"Rastgele cal"));
+			m_xfade.SetWindowText(LL14(L"クロスフェード", L"Crossfade", L"Fondu croise", L"Crossfade", L"Fundido cruzado",
+				L"크로스페이드", L"交叉淡化", L"تلاشي متقاطع", L"Кроссфейд", L"Crossfade",
+				L"Crossfade", L"Crossfade", L"Przenikanie", L"Capraz gechis"));
+			m_kaisuuL.SetWindowText(LL14(L"ループ回数", L"Loop count", L"Nb boucles", L"N. loop", L"N. bucles", L"루프 횟수", L"循环次数", L"عدد الحلقات", L"Число циклов", L"Schleifenanzahl", L"N. loops", L"Aantal lussen", L"Liczba petli", L"Dongu sayisi"));
+			m_xfadeL.SetWindowText(LL14(L"秒", L"sec", L"s", L"s", L"s", L"초", L"秒", L"ث", L"с", L"s", L"s", L"s", L"s", L"sn"));
 		}
-		rcx -= (int)(4 * s) + prW;
+		if (m_st.GetSafeHwnd()) {
+			m_st.SetWindowText(optLv >= 1
+				? LL14(L"ST", L"ST", L"ST", L"ST", L"ST", L"ST", L"立体", L"ST", L"СТ", L"ST", L"ST", L"ST", L"ST", L"ST")
+				: LL14(L"ステレオ表示", L"Stereo view", L"Vue stereo", L"Vista stereo", L"Vista estereo", L"스테레오 표시", L"立体声显示", L"عرض ستيريو", L"Стерео", L"Stereo", L"Visao stereo", L"Stereo", L"Widok stereo", L"Stereo gosterim"));
+		}
+		if (m_supe.GetSafeHwnd()) {
+			m_supe.SetWindowText(optLv >= 1
+				? LL14(L"SPA", L"SPA", L"SPA", L"SPA", L"SPA", L"SPA", L"频谱", L"SPA", L"СП", L"SPA", L"SPA", L"SPA", L"SPA", L"SPA")
+				: LL14(L"スペアナ", L"Spectrum", L"Spectre", L"Spettro", L"Espectro", L"스펙트럼", L"频谱", L"الطيف", L"Спектр", L"Spektrum", L"Espectro", L"Spectrum", L"Widmo", L"Spektrum"));
+		}
+		if (m_folder.GetSafeHwnd() && optLv >= 2)
+			m_folder.SetWindowText(LL14(L"Fol", L"Fol", L"Dos", L"Cart", L"Carp", L"폴더", L"文件夹", L"مجلد", L"Пап", L"Ord", L"Past", L"Map", L"Fol", L"Klas"));
+		else if (m_folder.GetSafeHwnd())
+			m_folder.SetWindowText(LL14(L"フォルダ", L"Folder", L"Dossier", L"Cartella", L"Carpeta", L"폴더", L"文件夹", L"مجلد", L"Папка", L"Ordner", L"Pasta", L"Map", L"Folder", L"Klasor"));
+		if (m_prompt.GetSafeHwnd()) {
+			m_prompt.SetWindowText(optLv >= 1
+				? LL14(L"指示", L"Pmt", L"Pmt", L"Pmt", L"Pmt", L"지시", L"指示", L"توجيه", L"Прм", L"Pmt", L"Pmt", L"Pmt", L"Pmt", L"Pmt")
+				: LL14(L"プロンプト", L"Prompt", L"Prompt", L"Prompt", L"Prompt", L"프롬프트", L"提示", L"موجه", L"Промпт", L"Prompt", L"Prompt", L"Prompt", L"Prompt", L"Istem"));
+		}
+		if (m_cmdroll.GetSafeHwnd()) {
+			m_cmdroll.SetWindowText(optLv >= 1
+				? LL14(L"巻", L"Rol", L"Rol", L"Rol", L"Rol", L"롤", L"卷", L"Rol", L"Rol", L"Rol", L"Rol", L"Rol", L"Rol", L"Rol")
+				: LL14(L"ロール", L"Roll", L"Rouleau", L"Roll", L"Roll", L"롤", L"卷轴", L"Roll", L"Roll", L"Roll", L"Roll", L"Roll", L"Roll", L"Rulo"));
+		}
+	}
+
+	const int lw[] = {
+		(int)((optLv >= 2 ? 56 : 86) * s),
+		(int)((optLv >= 2 ? 56 : 92) * s),
+		(int)((optLv >= 2 ? 44 : 80) * s),
+		(int)((optLv >= 2 ? 40 : 52) * s),
+		(int)((optLv >= 2 ? 56 : 88) * s),
+		(int)((optLv >= 2 ? 48 : 100) * s),
+		(int)((optLv >= 2 ? 36 : 40) * s),
+		(int)((optLv >= 2 ? 16 : 24) * s)
+	};
+	int cx = M;
+	MoveCtl(&m_renzoku, cx, optY, lw[0], chkRowH); cx += lw[0] + optGap;
+	MoveCtl(&m_loop, cx, optY, lw[1], chkRowH); cx += lw[1] + optGap;
+	MoveCtl(&m_kaisuuL, cx, optY, lw[2], chkRowH); cx += lw[2] + optGap;
+	MoveCtl(&m_kaisuu, cx, optY, lw[3], chkRowH); cx += lw[3] + optGap;
+	MoveCtl(&m_random, cx, optY, lw[4], chkRowH); cx += lw[4] + optGap;
+	MoveCtl(&m_xfade, cx, optY, lw[5], chkRowH); cx += lw[5] + optGap;
+	MoveCtl(&m_xfadeSec, cx, optY, lw[6], chkRowH); cx += lw[6] + optGap;
+	MoveCtl(&m_xfadeL, cx, optY, lw[7], chkRowH);
+
+	const int folW = (int)((optLv >= 2 ? 40 : 54) * s);
+	const int stW = (int)((optLv >= 1 ? 36 : 72) * s);
+	const int supeW = (int)((optLv >= 1 ? 40 : 62) * s);
+	const int prW = (int)((optLv >= 1 ? 36 : 76) * s);
+	const int rollW = (int)((optLv >= 1 ? 36 : 56) * s);
+	int rcx = W - M - folW;
+	MoveCtl(&m_folder, rcx, by2, folW, ch);
+	rcx -= optGap + stW;
+	MoveCtl(&m_st, rcx, btnY1, stW, btnRowH);
+	rcx -= optGap + supeW;
+	MoveCtl(&m_supe, rcx, btnY1, supeW, btnRowH);
+	if (m_prompt.GetSafeHwnd()) {
+		rcx -= optGap + prW;
 		MoveCtl(&m_prompt, rcx, btnY1, prW, btnRowH);
 	}
 	if (m_cmdroll.GetSafeHwnd()) {
-		const int rollShortLv = prUseFull ? 0 : 1;
-		if (rollShortLv != m_mpCmdRollShort) {
-			m_mpCmdRollShort = rollShortLv;
-			m_cmdroll.SetWindowText(prUseFull
-				? LL14(L"ロール", L"Roll", L"Rouleau", L"Roll", L"Roll", L"롤", L"卷轴", L"Roll", L"Roll", L"Roll", L"Roll", L"Roll", L"Roll", L"Rulo")
-				: LL14(L"巻", L"Rol", L"Rol", L"Rol", L"Rol", L"롤", L"卷", L"Rol", L"Rol", L"Rol", L"Rol", L"Rol", L"Rol", L"Rol"));
-		}
-		rcx -= (int)(4 * s) + rollW;
+		rcx -= optGap + rollW;
 		MoveCtl(&m_cmdroll, rcx, btnY1, rollW, btnRowH);
 	}
 
