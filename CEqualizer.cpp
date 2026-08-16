@@ -1,4 +1,4 @@
-// CEqualizer.cpp : 実装ファイル
+﻿// CEqualizer.cpp : 実装ファイル
 //
 
 #include "stdafx.h"
@@ -1405,53 +1405,71 @@ void CEqualizer::OnToggleKeyEqAuto()
 void CEqualizer::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
 {
 	CCustomPopupMenu menu;
-	menu.AddCommand(IDM_EQ_SUGGEST_KEY,
-		LL14(L"キーからEQを提案", L"Suggest EQ from key", L"Suggérer EQ depuis la tonalité", L"Suggerisci EQ dalla tonalità", L"Sugerir EQ desde tonalidad", L"키에서 EQ 제안", L"根据调性建议 EQ", L"اقتراح EQ من المفتاح", L"Предложить EQ по тональности", L"EQ aus Tonart vorschlagen", L"Sugerir EQ pela tonalidade", L"EQ voorstellen uit toonsoort", L"Zaproponuj EQ z tonacji", L"Anahtardan EQ oner"),
-		LL14(L"検出中のキーに合わせたEQカーブを提案する", L"Suggest an EQ curve matching the detected key",
-			L"Proposer une courbe EQ selon la tonalité détectée", L"Suggerisci una curva EQ per la tonalità rilevata",
-			L"Sugerir una curva EQ según la tonalidad detectada", L"감지된 키에 맞는 EQ 커브 제안",
-			L"按检测到的调性建议 EQ 曲线", L"اقتراح منحنى EQ حسب المفتاح المكتشف",
-			L"Предложить кривую EQ по обнаруженной тональности", L"EQ-Kurve zur erkannten Tonart vorschlagen",
-			L"Sugerir curva EQ conforme a tonalidade detectada", L"EQ-curve voorstellen bij gedetecteerde toonsoort",
-			L"Zaproponuj krzywą EQ dla wykrytej tonacji", L"Algılanan anahtara uygun EQ eğrisi öner"));
-	menu.AddCheck(IDM_EQ_KEY_AUTO,
-		LL14(L"キー検出時に自動提案", L"Auto-suggest on key detect", L"Suggestion auto sur détection", L"Suggerimento auto su rilevamento", L"Sugerencia auto al detectar", L"키 검출 시 자동 제안", L"检测到调性时自动建议", L"اقتراح تلقائي عند الكشف", L"Авто-предложение по ключу", L"Auto-Vorschlag bei Erkennung", L"Sugestao auto na deteccao", L"Auto-voorstel bij detectie", L"Auto-propozycja przy wykryciu", L"Algilamada otomatik oneri"),
-		savedata.mpKeyEqSuggest != 0,
-		LL14(L"キーが変わると自動でEQを提案", L"Auto-suggest EQ when the key changes", L"Suggérer EQ auto si la tonalité change", L"Suggerisci EQ auto al cambio tonalità", L"Sugerir EQ auto al cambiar tonalidad", L"키가 바뀌면 EQ 자동 제안", L"调性变化时自动建议 EQ", L"اقتراح EQ تلقائياً عند تغير المفتاح", L"Авто-предлагать EQ при смене ключа", L"EQ auto vorschlagen bei Tonartwechsel", L"Sugerir EQ auto ao mudar tonalidade", L"EQ auto voorstellen bij toonsoortwissel", L"Auto-proponuj EQ przy zmianie tonacji", L"Anahtar degisince EQ otomatik oner"));
+	{
+		CCustomPopupMenu* keySub = menu.AddSubMenu(
+			LL14(L"キー提案", L"Key suggest", L"Suggestion tonalite", L"Suggerimento tonalita", L"Sugerencia tonalidad",
+				L"키 제안", L"调性建议", L"اقتراح المفتاح", L"Предложение тональности", L"Tonart-Vorschlag",
+				L"Sugestao de tonalidade", L"Toonsoort-voorstel", L"Propozycja tonacji", L"Anahtar onerisi"),
+			LL14(L"検出キーに合わせたEQ提案と自動提案。", L"EQ suggestions from detected key and auto-suggest.", L"Suggestions EQ selon la tonalite detectee.", L"Suggerimenti EQ dalla tonalita rilevata.", L"Sugerencias EQ segun la tonalidad detectada.", L"감지 키 기반 EQ 제안과 자동 제안.", L"按检测调性建议 EQ 及自动建议。", L"اقتراحات EQ حسب المفتاح المكتشف والاقتراح التلقائي.", L"Предложения EQ по ключу и авто-предложение.", L"EQ-Vorschlage aus erkannter Tonart und Auto.", L"Sugestoes de EQ pela tonalidade e auto.", L"EQ-voorstellen uit toonsoort en auto.", L"Propozycje EQ z tonacji i auto.", L"Algilanan anahtardan EQ onerisi ve otomatik."));
+		if (keySub) {
+			keySub->AddCommand(IDM_EQ_SUGGEST_KEY,
+				LL14(L"キーからEQを提案", L"Suggest EQ from key", L"Suggérer EQ depuis la tonalité", L"Suggerisci EQ dalla tonalità", L"Sugerir EQ desde tonalidad", L"키에서 EQ 제안", L"根据调性建议 EQ", L"اقتراح EQ من المفتاح", L"Предложить EQ по тональности", L"EQ aus Tonart vorschlagen", L"Sugerir EQ pela tonalidade", L"EQ voorstellen uit toonsoort", L"Zaproponuj EQ z tonacji", L"Anahtardan EQ oner"),
+				LL14(L"検出中のキーに合わせたEQカーブを提案する", L"Suggest an EQ curve matching the detected key",
+					L"Proposer une courbe EQ selon la tonalité détectée", L"Suggerisci una curva EQ per la tonalità rilevata",
+					L"Sugerir una curva EQ según la tonalidad detectada", L"감지된 키에 맞는 EQ 커브 제안",
+					L"按检测到的调性建议 EQ 曲线", L"اقتراح منحنى EQ حسب المفتاح المكتشف",
+					L"Предложить кривую EQ по обнаруженной тональности", L"EQ-Kurve zur erkannten Tonart vorschlagen",
+					L"Sugerir curva EQ conforme a tonalidade detectada", L"EQ-curve voorstellen bij gedetecteerde toonsoort",
+					L"Zaproponuj krzywą EQ dla wykrytej tonacji", L"Algılanan anahtara uygun EQ eğrisi öner"));
+			keySub->AddCheck(IDM_EQ_KEY_AUTO,
+				LL14(L"キー検出時に自動提案", L"Auto-suggest on key detect", L"Suggestion auto sur détection", L"Suggerimento auto su rilevamento", L"Sugerencia auto al detectar", L"키 검출 시 자동 제안", L"检测到调性时自动建议", L"اقتراح تلقائي عند الكشف", L"Авто-предложение по ключу", L"Auto-Vorschlag bei Erkennung", L"Sugestao auto na deteccao", L"Auto-voorstel bij detectie", L"Auto-propozycja przy wykryciu", L"Algilamada otomatik oneri"),
+				savedata.mpKeyEqSuggest != 0,
+				LL14(L"キーが変わると自動でEQを提案", L"Auto-suggest EQ when the key changes", L"Suggérer EQ auto si la tonalité change", L"Suggerisci EQ auto al cambio tonalità", L"Sugerir EQ auto al cambiar tonalidad", L"키가 바뀌면 EQ 자동 제안", L"调性变化时自动建议 EQ", L"اقتراح EQ تلقائياً عند تغير المفتاح", L"Авто-предлагать EQ при смене ключа", L"EQ auto vorschlagen bei Tonartwechsel", L"Sugerir EQ auto ao mudar tonalidade", L"EQ auto voorstellen bij toonsoortwissel", L"Auto-proponuj EQ przy zmianie tonacji", L"Anahtar degisince EQ otomatik oner"));
+		}
+	}
 	menu.AddSeparator();
-	menu.AddCommand(IDM_EQ_ABA,
-		LL14(L"A に保存", L"Store to A", L"Enregistrer dans A", L"Salva in A", L"Guardar en A",
-			L"A에 저장", L"保存到 A", L"حفظ في A", L"Сохранить в A", L"In A speichern",
-			L"Salvar em A", L"Opslaan in A", L"Zapisz w A", L"A'ya kaydet"),
-		LL14(L"現在のEQカーブをスロットAに保存します。", L"Store the current EQ curve into slot A.",
-			L"Enregistrer la courbe EQ actuelle dans A.", L"Salva la curva EQ attuale nello slot A.",
-			L"Guardar la curva EQ actual en la ranura A.", L"현재 EQ 커브를 슬롯 A에 저장합니다.",
-			L"将当前 EQ 曲线保存到插槽 A。", L"حفظ منحنى EQ الحالي في الفتحة A.",
-			L"Сохранить текущую кривую EQ в слот A.", L"Aktuelle EQ-Kurve in Slot A speichern.",
-			L"Salvar a curva EQ atual no slot A.", L"Huidige EQ-curve opslaan in slot A.",
-			L"Zapisz biezaca krzywa EQ w slocie A.", L"Gecerli EQ egirisini A yuvasina kaydet"));
-	menu.AddCommand(IDM_EQ_ABB,
-		LL14(L"B に保存", L"Store to B", L"Enregistrer dans B", L"Salva in B", L"Guardar en B",
-			L"B에 저장", L"保存到 B", L"حفظ في B", L"Сохранить в B", L"In B speichern",
-			L"Salvar em B", L"Opslaan in B", L"Zapisz w B", L"B'ye kaydet"),
-		LL14(L"現在のEQカーブをスロットBに保存します。", L"Store the current EQ curve into slot B.",
-			L"Enregistrer la courbe EQ actuelle dans B.", L"Salva la curva EQ attuale nello slot B.",
-			L"Guardar la curva EQ actual en la ranura B.", L"현재 EQ 커브를 슬롯 B에 저장합니다.",
-			L"将当前 EQ 曲线保存到插槽 B。", L"حفظ منحنى EQ الحالي في الفتحة B.",
-			L"Сохранить текущую кривую EQ в слот B.", L"Aktuelle EQ-Kurve in Slot B speichern.",
-			L"Salvar a curva EQ atual no slot B.", L"Huidige EQ-curve opslaan in slot B.",
-			L"Zapisz biezaca krzywa EQ w slocie B.", L"Gecerli EQ egirisini B yuvasina kaydet"));
-	menu.AddCommand(IDM_EQ_ABTOG,
-		LL14(L"A ↔ B 切替", L"Toggle A ↔ B", L"Basculer A ↔ B", L"Alterna A ↔ B", L"Alternar A ↔ B",
-			L"A ↔ B 전환", L"切换 A ↔ B", L"تبديل A ↔ B", L"Переключить A ↔ B", L"A ↔ B umschalten",
-			L"Alternar A ↔ B", L"Wissel A ↔ B", L"Przelacz A ↔ B", L"A ↔ B gec"),
-		LL14(L"保存したAとBのEQを切り替えて聴き比べます。", L"Toggle between saved EQ slots A and B to compare.",
-			L"Basculer entre les EQ A et B pour comparer.", L"Alterna tra EQ A e B per confrontare.",
-			L"Alternar entre EQ A y B para comparar.", L"저장한 A/B EQ를 전환해 비교 청취합니다.",
-			L"在已保存的 A/B EQ 之间切换以便对比试听。", L"التبديل بين EQ A وB للمقارنة.",
-			L"Переключать сохранённые EQ A и B для сравнения.", L"Zwischen EQ A und B umschalten zum Vergleich.",
-			L"Alternar entre EQ A e B para comparar.", L"Wissel tussen EQ A en B om te vergelijken.",
-			L"Przelacz miedzy EQ A i B do porownania.", L"Kayitli A/B EQ arasinda gecis yapip karsilastir"));
+	{
+		CCustomPopupMenu* abSub = menu.AddSubMenu(
+			LL14(L"A/B", L"A/B", L"A/B", L"A/B", L"A/B",
+				L"A/B", L"A/B", L"A/B", L"A/B", L"A/B",
+				L"A/B", L"A/B", L"A/B", L"A/B"),
+			LL14(L"EQカーブをA/Bスロットに保存して切替比較。", L"Store EQ curves in A/B slots and toggle to compare.", L"Enregistrer les courbes EQ en A/B et basculer.", L"Salva curve EQ in A/B e alterna.", L"Guardar curvas EQ en A/B y alternar.", L"EQ 커브를 A/B에 저장하고 전환 비교.", L"将 EQ 曲线存到 A/B 并切换对比。", L"حفظ منحنيات EQ في A/B والتبديل.", L"Сохранять EQ в A/B и переключать.", L"EQ-Kurven in A/B speichern und umschalten.", L"Salvar curvas EQ em A/B e alternar.", L"EQ-curves in A/B opslaan en wisselen.", L"Zapisz krzywe EQ w A/B i przelacz.", L"EQ egirilerini A/B'ye kaydedip karsilastir."));
+		if (abSub) {
+			abSub->AddCommand(IDM_EQ_ABA,
+				LL14(L"A に保存", L"Store to A", L"Enregistrer dans A", L"Salva in A", L"Guardar en A",
+					L"A에 저장", L"保存到 A", L"حفظ في A", L"Сохранить в A", L"In A speichern",
+					L"Salvar em A", L"Opslaan in A", L"Zapisz w A", L"A'ya kaydet"),
+				LL14(L"現在のEQカーブをスロットAに保存します。", L"Store the current EQ curve into slot A.",
+					L"Enregistrer la courbe EQ actuelle dans A.", L"Salva la curva EQ attuale nello slot A.",
+					L"Guardar la curva EQ actual en la ranura A.", L"현재 EQ 커브를 슬롯 A에 저장합니다.",
+					L"将当前 EQ 曲线保存到插槽 A。", L"حفظ منحنى EQ الحالي في الفتحة A.",
+					L"Сохранить текущую кривую EQ в слот A.", L"Aktuelle EQ-Kurve in Slot A speichern.",
+					L"Salvar a curva EQ atual no slot A.", L"Huidige EQ-curve opslaan in slot A.",
+					L"Zapisz biezaca krzywa EQ w slocie A.", L"Gecerli EQ egirisini A yuvasina kaydet"));
+			abSub->AddCommand(IDM_EQ_ABB,
+				LL14(L"B に保存", L"Store to B", L"Enregistrer dans B", L"Salva in B", L"Guardar en B",
+					L"B에 저장", L"保存到 B", L"حفظ في B", L"Сохранить в B", L"In B speichern",
+					L"Salvar em B", L"Opslaan in B", L"Zapisz w B", L"B'ye kaydet"),
+				LL14(L"現在のEQカーブをスロットBに保存します。", L"Store the current EQ curve into slot B.",
+					L"Enregistrer la courbe EQ actuelle dans B.", L"Salva la curva EQ attuale nello slot B.",
+					L"Guardar la curva EQ actual en la ranura B.", L"현재 EQ 커브를 슬롯 B에 저장합니다.",
+					L"将当前 EQ 曲线保存到插槽 B。", L"حفظ منحنى EQ الحالي في الفتحة B.",
+					L"Сохранить текущую кривую EQ в слот B.", L"Aktuelle EQ-Kurve in Slot B speichern.",
+					L"Salvar a curva EQ atual no slot B.", L"Huidige EQ-curve opslaan in slot B.",
+					L"Zapisz biezaca krzywa EQ w slocie B.", L"Gecerli EQ egirisini B yuvasina kaydet"));
+			abSub->AddCommand(IDM_EQ_ABTOG,
+				LL14(L"A ↔ B 切替", L"Toggle A ↔ B", L"Basculer A ↔ B", L"Alterna A ↔ B", L"Alternar A ↔ B",
+					L"A ↔ B 전환", L"切换 A ↔ B", L"تبديل A ↔ B", L"Переключить A ↔ B", L"A ↔ B umschalten",
+					L"Alternar A ↔ B", L"Wissel A ↔ B", L"Przelacz A ↔ B", L"A ↔ B gec"),
+				LL14(L"保存したAとBのEQを切り替えて聴き比べます。", L"Toggle between saved EQ slots A and B to compare.",
+					L"Basculer entre les EQ A et B pour comparer.", L"Alterna tra EQ A e B per confrontare.",
+					L"Alternar entre EQ A y B para comparar.", L"저장한 A/B EQ를 전환해 비교 청취합니다.",
+					L"在已保存的 A/B EQ 之间切换以便对比试听。", L"التبديل بين EQ A وB للمقارنة.",
+					L"Переключать сохранённые EQ A и B для сравнения.", L"Zwischen EQ A und B umschalten zum Vergleich.",
+					L"Alternar entre EQ A e B para comparar.", L"Wissel tussen EQ A en B om te vergelijken.",
+					L"Przelacz miedzy EQ A i B do porownania.", L"Kayitli A/B EQ arasinda gecis yapip karsilastir"));
+		}
+	}
 	menu.AddSeparator();
 	{
 		static const int kQuickPresets[] = {
@@ -1483,86 +1501,99 @@ void CEqualizer::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
 	}
 	menu.AddSeparator();
 	{
-		int eff = savedata.eqsoundeffect * 2;
-		if (eff < 0) eff = 0;
-		if (eff > 200) eff = 200;
-		menu.AddSlider(
-			LL14(L"エフェクト", L"Effect", L"Effet", L"Effetto", L"Efecto",
-				L"이펙트", L"效果", L"تأثير", L"Эффект", L"Effekt",
-				L"Efeito", L"Effect", L"Efekt", L"Efekt"),
-			0, 200, eff, EqEffSliderCb, this,
-			LL14(L"エフェクト Wet 量（ドラッグ中に反映）", L"Effect wet amount (live)", L"Quantite wet effet (direct)", L"Quantita wet effetto (live)", L"Cantidad wet efecto (en vivo)",
-				L"이펙트 Wet 양(즉시)", L"效果 Wet 量（即时）", L"مقدار Wet للتأثير (مباشر)", L"Wet эффекта (сразу)", L"Effekt-Wet (live)",
-				L"Quantidade wet do efeito (ao vivo)", L"Effect-wet (live)", L"Wet efektu (na zywo)", L"Efekt wet (anlik)"));
-		int masterUi = savedata.eq[15];
-		if (masterUi < 0) masterUi = 0;
-		if (masterUi > 200) masterUi = 200;
-		menu.AddSlider(
-			LL14(L"マスター", L"Master", L"Master", L"Master", L"Master",
-				L"마스터", L"主音量", L"الماستر", L"Мастер", L"Master",
-				L"Master", L"Master", L"Master", L"Master"),
-			0, 200, masterUi, EqMasterSliderCb, this,
-			LL14(L"マスター音量（ドラッグ中に反映）", L"Master volume (live)", L"Volume master (direct)", L"Volume master (live)", L"Volumen master (en vivo)",
-				L"마스터 볼륨(즉시)", L"主音量（即时）", L"مستوى الماستر (مباشر)", L"Громкость мастера (сразу)", L"Masterlautstarke (live)",
-				L"Volume master (ao vivo)", L"Mastervolume (live)", L"Glosnosc master (na zywo)", L"Master ses (anlik)"));
-		int revUi = savedata.eq_reverb;
-		if (revUi < 0) revUi = 0;
-		if (revUi > 200) revUi = 200;
-		menu.AddSlider(
-			LL14(L"リバーブ", L"Reverb", L"Reverb", L"Riverbero", L"Reverb",
-				L"리버브", L"混响", L"صدى", L"Реверб", L"Hall",
-				L"Reverb", L"Galm", L"Poglos", L"Reverb"),
-			0, 200, revUi, EqReverbSliderCb, this,
-			LL14(L"リバーブ量（ドラッグ中に反映）", L"Reverb amount (live)", L"Quantite reverb (direct)", L"Quantita riverbero (live)", L"Cantidad reverb (en vivo)",
-				L"리버브 양(즉시)", L"混响量（即时）", L"مقدار الصدى (مباشر)", L"Количество реверба (сразу)", L"Hallanteil (live)",
-				L"Quantidade de reverb (ao vivo)", L"Galmhoeveelheid (live)", L"Ilosc poglosu (na zywo)", L"Reverb miktari (anlik)"));
-		int chUi = savedata.eq_chorus;
-		if (chUi < 0) chUi = 0;
-		if (chUi > 200) chUi = 200;
-		menu.AddSlider(
-			LL14(L"コーラス", L"Chorus", L"Chorus", L"Chorus", L"Chorus",
-				L"코러스", L"合唱", L"كورس", L"Хорус", L"Chorus",
-				L"Chorus", L"Chorus", L"Chorus", L"Chorus"),
-			0, 200, chUi, EqChorusSliderCb, this,
-			LL14(L"コーラス量（ドラッグ中に反映）", L"Chorus amount (live)", L"Quantite chorus (direct)", L"Quantita chorus (live)", L"Cantidad chorus (en vivo)",
-				L"코러스 양(즉시)", L"合唱量（即时）", L"مقدار الكورس (مباشر)", L"Количество хоруса (сразу)", L"Chorusanteil (live)",
-				L"Quantidade de chorus (ao vivo)", L"Chorushoeveelheid (live)", L"Ilosc chorus (na zywo)", L"Chorus miktari (anlik)"));
-		int dlUi = savedata.eq_delay;
-		if (dlUi < 0) dlUi = 0;
-		if (dlUi > 200) dlUi = 200;
-		menu.AddSlider(
-			LL14(L"ディレイ", L"Delay", L"Delay", L"Delay", L"Delay",
-				L"딜레이", L"延迟", L"تأخير", L"Дилей", L"Delay",
-				L"Delay", L"Delay", L"Delay", L"Delay"),
-			0, 200, dlUi, EqDelaySliderCb, this,
-			LL14(L"ディレイ量（ドラッグ中に反映）", L"Delay amount (live)", L"Quantite delay (direct)", L"Quantita delay (live)", L"Cantidad delay (en vivo)",
-				L"딜레이 양(즉시)", L"延迟量（即时）", L"مقدار التأخير (مباشر)", L"Количество дилея (сразу)", L"Delayanteil (live)",
-				L"Quantidade de delay (ao vivo)", L"Delayhoeveelheid (live)", L"Ilosc delay (na zywo)", L"Delay miktari (anlik)"));
+		CCustomPopupMenu* fxSub = menu.AddSubMenu(
+			LL14(L"FX", L"FX", L"FX", L"FX", L"FX",
+				L"FX", L"FX", L"FX", L"FX", L"FX",
+				L"FX", L"FX", L"FX", L"FX"),
+			LL14(L"エフェクト／マスター／リバーブ／コーラス／ディレイ。", L"Effect / Master / Reverb / Chorus / Delay.", L"Effet / Master / Reverb / Chorus / Delay.", L"Effetto / Master / Riverbero / Chorus / Delay.", L"Efecto / Master / Reverb / Chorus / Delay.", L"이펙트/마스터/리버브/코러스/딜레이.", L"效果/主音量/混响/合唱/延迟。", L"تأثير / ماستر / صدى / كورس / تأخير.", L"Эффект / Мастер / Реверб / Хорус / Дилей.", L"Effekt / Master / Hall / Chorus / Delay.", L"Efeito / Master / Reverb / Chorus / Delay.", L"Effect / Master / Galm / Chorus / Delay.", L"Efekt / Master / Poglos / Chorus / Delay.", L"Efekt / Master / Reverb / Chorus / Delay."));
+		if (fxSub) {
+			int eff = savedata.eqsoundeffect * 2;
+			if (eff < 0) eff = 0;
+			if (eff > 200) eff = 200;
+			fxSub->AddSlider(
+				LL14(L"エフェクト", L"Effect", L"Effet", L"Effetto", L"Efecto",
+					L"이펙트", L"效果", L"تأثير", L"Эффект", L"Effekt",
+					L"Efeito", L"Effect", L"Efekt", L"Efekt"),
+				0, 200, eff, EqEffSliderCb, this,
+				LL14(L"エフェクト Wet 量（ドラッグ中に反映）", L"Effect wet amount (live)", L"Quantite wet effet (direct)", L"Quantita wet effetto (live)", L"Cantidad wet efecto (en vivo)",
+					L"이펙트 Wet 양(즉시)", L"效果 Wet 量（即时）", L"مقدار Wet للتأثير (مباشر)", L"Wet эффекта (сразу)", L"Effekt-Wet (live)",
+					L"Quantidade wet do efeito (ao vivo)", L"Effect-wet (live)", L"Wet efektu (na zywo)", L"Efekt wet (anlik)"));
+			int masterUi = savedata.eq[15];
+			if (masterUi < 0) masterUi = 0;
+			if (masterUi > 200) masterUi = 200;
+			fxSub->AddSlider(
+				LL14(L"マスター", L"Master", L"Master", L"Master", L"Master",
+					L"마스터", L"主音量", L"الماستر", L"Мастер", L"Master",
+					L"Master", L"Master", L"Master", L"Master"),
+				0, 200, masterUi, EqMasterSliderCb, this,
+				LL14(L"マスター音量（ドラッグ中に反映）", L"Master volume (live)", L"Volume master (direct)", L"Volume master (live)", L"Volumen master (en vivo)",
+					L"마스터 볼륨(즉시)", L"主音量（即时）", L"مستوى الماستر (مباشر)", L"Громкость мастера (сразу)", L"Masterlautstarke (live)",
+					L"Volume master (ao vivo)", L"Mastervolume (live)", L"Glosnosc master (na zywo)", L"Master ses (anlik)"));
+			int revUi = savedata.eq_reverb;
+			if (revUi < 0) revUi = 0;
+			if (revUi > 200) revUi = 200;
+			fxSub->AddSlider(
+				LL14(L"リバーブ", L"Reverb", L"Reverb", L"Riverbero", L"Reverb",
+					L"리버브", L"混响", L"صدى", L"Реверб", L"Hall",
+					L"Reverb", L"Galm", L"Poglos", L"Reverb"),
+				0, 200, revUi, EqReverbSliderCb, this,
+				LL14(L"リバーブ量（ドラッグ中に反映）", L"Reverb amount (live)", L"Quantite reverb (direct)", L"Quantita riverbero (live)", L"Cantidad reverb (en vivo)",
+					L"리버브 양(즉시)", L"混响量（即时）", L"مقدار الصدى (مباشر)", L"Количество реверба (сразу)", L"Hallanteil (live)",
+					L"Quantidade de reverb (ao vivo)", L"Galmhoeveelheid (live)", L"Ilosc poglosu (na zywo)", L"Reverb miktari (anlik)"));
+			int chUi = savedata.eq_chorus;
+			if (chUi < 0) chUi = 0;
+			if (chUi > 200) chUi = 200;
+			fxSub->AddSlider(
+				LL14(L"コーラス", L"Chorus", L"Chorus", L"Chorus", L"Chorus",
+					L"코러스", L"合唱", L"كورس", L"Хорус", L"Chorus",
+					L"Chorus", L"Chorus", L"Chorus", L"Chorus"),
+				0, 200, chUi, EqChorusSliderCb, this,
+				LL14(L"コーラス量（ドラッグ中に反映）", L"Chorus amount (live)", L"Quantite chorus (direct)", L"Quantita chorus (live)", L"Cantidad chorus (en vivo)",
+					L"코러스 양(즉시)", L"合唱量（即时）", L"مقدار الكورس (مباشر)", L"Количество хоруса (сразу)", L"Chorusanteil (live)",
+					L"Quantidade de chorus (ao vivo)", L"Chorushoeveelheid (live)", L"Ilosc chorus (na zywo)", L"Chorus miktari (anlik)"));
+			int dlUi = savedata.eq_delay;
+			if (dlUi < 0) dlUi = 0;
+			if (dlUi > 200) dlUi = 200;
+			fxSub->AddSlider(
+				LL14(L"ディレイ", L"Delay", L"Delay", L"Delay", L"Delay",
+					L"딜레이", L"延迟", L"تأخير", L"Дилей", L"Delay",
+					L"Delay", L"Delay", L"Delay", L"Delay"),
+				0, 200, dlUi, EqDelaySliderCb, this,
+				LL14(L"ディレイ量（ドラッグ中に反映）", L"Delay amount (live)", L"Quantite delay (direct)", L"Quantita delay (live)", L"Cantidad delay (en vivo)",
+					L"딜레이 양(즉시)", L"延迟量（即时）", L"مقدار التأخير (مباشر)", L"Количество дилея (сразу)", L"Delayanteil (live)",
+					L"Quantidade de delay (ao vivo)", L"Delayhoeveelheid (live)", L"Ilosc delay (na zywo)", L"Delay miktari (anlik)"));
+		}
 	}
 	menu.AddSeparator();
-	menu.AddCommand(IDM_EQ_OPEN_ANALYZER,
-		LL14(L"アナライザを開く", L"Open analyzer", L"Ouvrir l'analyseur", L"Apri analizzatore", L"Abrir analizador",
-			L"분석기 열기", L"打开分析器", L"فتح المحلل", L"Открыть анализатор", L"Analyzer öffnen",
-			L"Abrir analisador", L"Analyzer openen", L"Otworz analizator", L"Analizoru ac"),
-		LL14(L"アナライザウィンドウを開きます。", L"Open the analyzer window.", L"Ouvrir la fenetre de l'analyseur.", L"Apri la finestra dell'analizzatore.", L"Abrir la ventana del analizador.",
-			L"분석기 창을 엽니다.", L"打开分析器窗口。", L"فتح نافذة المحلل.", L"Открыть окно анализатора.", L"Analyzer-Fenster öffnen.",
-			L"Abrir a janela do analisador.", L"Open het analyzer-venster.", L"Otworz okno analizatora.", L"Analizor penceresini ac."));
-	menu.AddCommand(IDM_EQ_OPEN_PIANO,
-		LL14(L"ピアノロールを開く", L"Open piano roll", L"Ouvrir le piano roll", L"Apri piano roll", L"Abrir piano roll",
-			L"피아노 롤 열기", L"打开钢琴卷帘", L"فتح لفافة البيانو", L"Открыть пианоролл", L"Piano-Roll öffnen",
-			L"Abrir piano roll", L"Piano-roll openen", L"Otworz piano roll", L"Piyano rolunu ac"),
-		LL14(L"ピアノロールウィンドウを開きます。", L"Open the piano roll window.", L"Ouvrir la fenetre du piano roll.", L"Apri la finestra del piano roll.", L"Abrir la ventana del piano roll.",
-			L"피아노 롤 창을 엽니다.", L"打开钢琴卷帘窗口。", L"فتح نافذة لفافة البيانو.", L"Открыть окно пианоролла.", L"Piano-Roll-Fenster öffnen.",
-			L"Abrir a janela do piano roll.", L"Open het piano-roll-venster.", L"Otworz okno piano roll.", L"Piyano rulosu penceresini ac."));
-	menu.AddSeparator();
-	menu.AddCommand(ID_HELP_SHOWSHEET,
-		LL14(L"操作ガイド", L"Operation guide", L"Guide d'utilisation", L"Guida operativa",
-			L"Guía de operación", L"조작 가이드", L"操作指南", L"دليل التشغيل",
-			L"Руководство", L"Bedienungsanleitung", L"Guia de operação", L"Handleiding",
-			L"Przewodnik", L"İşlem kılavuzu"),
-		LL14(L"この画面の操作ガイドを表示します。", L"Show the operation guide for this window.", L"Afficher le guide d'utilisation de cette fenetre.", L"Mostra la guida operativa di questa finestra.", L"Mostrar la guia de operacion de esta ventana.",
-			L"이 화면의 조작 가이드를 표시합니다.", L"显示此窗口的操作指南。", L"عرض دليل تشغيل هذه النافذة.", L"Показать руководство по этому окну.", L"Bedienungsanleitung für dieses Fenster anzeigen.",
-			L"Mostrar o guia de operacao desta janela.", L"Toon de handleiding voor dit venster.", L"Pokaz przewodnik po tym oknie.", L"Bu pencerenin islem kilavuzunu goster."));
+	{
+		CCustomPopupMenu* openSub = menu.AddSubMenu(
+			LL14(L"開く", L"Open", L"Ouvrir", L"Apri", L"Abrir", L"열기", L"打开", L"فتح", L"Открыть", L"Offnen", L"Abrir", L"Openen", L"Otworz", L"Ac"),
+			LL14(L"アナライザ／ピアノロール／操作ガイドを開きます。", L"Open analyzer, piano roll, or the operation guide.", L"Ouvrir analyseur, piano roll ou le guide.", L"Apri analizzatore, piano roll o la guida.", L"Abrir analizador, piano roll o la guia.", L"분석기/피아노 롤/조작 가이드를 엽니다.", L"打开分析器/钢琴卷帘/操作指南。", L"فتح المحلل أو لفافة البيانو أو الدليل.", L"Открыть анализатор, пианоролл или руководство.", L"Analyzer, Piano-Roll oder Bedienungsanleitung offnen.", L"Abrir analisador, piano roll ou o guia.", L"Open analyzer, piano-roll of handleiding.", L"Otworz analizator, piano roll lub przewodnik.", L"Analizor, piyano roll veya kilavuzu ac."));
+		if (openSub) {
+			openSub->AddCommand(IDM_EQ_OPEN_ANALYZER,
+				LL14(L"アナライザを開く", L"Open analyzer", L"Ouvrir l'analyseur", L"Apri analizzatore", L"Abrir analizador",
+					L"분석기 열기", L"打开分析器", L"فتح المحلل", L"Открыть анализатор", L"Analyzer öffnen",
+					L"Abrir analisador", L"Analyzer openen", L"Otworz analizator", L"Analizoru ac"),
+				LL14(L"アナライザウィンドウを開きます。", L"Open the analyzer window.", L"Ouvrir la fenetre de l'analyseur.", L"Apri la finestra dell'analizzatore.", L"Abrir la ventana del analizador.",
+					L"분석기 창을 엽니다.", L"打开分析器窗口。", L"فتح نافذة المحلل.", L"Открыть окно анализатора.", L"Analyzer-Fenster öffnen.",
+					L"Abrir a janela do analisador.", L"Open het analyzer-venster.", L"Otworz okno analizatora.", L"Analizor penceresini ac."));
+			openSub->AddCommand(IDM_EQ_OPEN_PIANO,
+				LL14(L"ピアノロールを開く", L"Open piano roll", L"Ouvrir le piano roll", L"Apri piano roll", L"Abrir piano roll",
+					L"피아노 롤 열기", L"打开钢琴卷帘", L"فتح لفافة البيانو", L"Открыть пианоролл", L"Piano-Roll öffnen",
+					L"Abrir piano roll", L"Piano-roll openen", L"Otworz piano roll", L"Piyano rolunu ac"),
+				LL14(L"ピアノロールウィンドウを開きます。", L"Open the piano roll window.", L"Ouvrir la fenetre du piano roll.", L"Apri la finestra del piano roll.", L"Abrir la ventana del piano roll.",
+					L"피아노 롤 창을 엽니다.", L"打开钢琴卷帘窗口。", L"فتح نافذة لفافة البيانو.", L"Открыть окно пианоролла.", L"Piano-Roll-Fenster öffnen.",
+					L"Abrir a janela do piano roll.", L"Open het piano-roll-venster.", L"Otworz okno piano roll.", L"Piyano rulosu penceresini ac."));
+			openSub->AddCommand(ID_HELP_SHOWSHEET,
+				LL14(L"操作ガイド", L"Operation guide", L"Guide d'utilisation", L"Guida operativa",
+					L"Guía de operación", L"조작 가이드", L"操作指南", L"دليل التشغيل",
+					L"Руководство", L"Bedienungsanleitung", L"Guia de operação", L"Handleiding",
+					L"Przewodnik", L"İşlem kılavuzu"),
+				LL14(L"この画面の操作ガイドを表示します。", L"Show the operation guide for this window.", L"Afficher le guide d'utilisation de cette fenetre.", L"Mostra la guida operativa di questa finestra.", L"Mostrar la guia de operacion de esta ventana.",
+					L"이 화면의 조작 가이드를 표시합니다.", L"显示此窗口的操作指南。", L"عرض دليل تشغيل هذه النافذة.", L"Показать руководство по этому окну.", L"Bedienungsanleitung für dieses Fenster anzeigen.",
+					L"Mostrar o guia de operacao desta janela.", L"Toon de handleiding voor dit venster.", L"Pokaz przewodnik po tym oknie.", L"Bu pencerenin islem kilavuzunu goster."));
+		}
+	}
 	if (point.x == -1 && point.y == -1) {
 		CRect rc; GetClientRect(&rc); ClientToScreen(&rc);
 		point = CPoint(rc.left + 8, rc.top + 8);

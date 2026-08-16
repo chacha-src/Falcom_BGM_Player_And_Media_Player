@@ -688,8 +688,60 @@ done:
 void CVoiceChangerDlg::OnContextMenu(CWnd*, CPoint p)
 {
 	CCustomPopupMenu m;
-	for (int i = 0; i < VC_PRESET_N; i++)
-		m.AddCheck(100 + i, VcPresetName(i), m_preset.GetCurSel() == i);
+	const int cur = m_preset.GetCurSel();
+	{
+		CCustomPopupMenu* basic = m.AddSubMenu(
+			LL14(L"基本", L"Basic", L"Base", L"Base", L"Basico", L"기본", L"基本", L"أساسي",
+				L"Базовые", L"Basis", L"Basico", L"Basis", L"Podstawowe", L"Temel"),
+			LL14(L"標準・男女標準・年齢・特殊効果・カスタム", L"Normal, gender std, age, FX, and custom",
+				L"Normal, genre std, age, FX et perso", L"Normale, genere std, eta, FX e personalizzato",
+				L"Normal, genero std, edad, FX y personalizado", L"표준·성별 표준·나이·특수효과·사용자",
+				L"标准、性别标准、年龄、特效与自定义", L"عادي وجنس قياسي وعمر وتأثيرات ومخصص",
+				L"Обычный, пол std, возраст, FX и свой", L"Normal, Geschlecht std, Alter, FX und benutzerdefiniert",
+				L"Normal, genero padrao, idade, FX e personalizado", L"Normaal, geslacht std, leeftijd, FX en aangepast",
+				L"Normalny, plec std, wiek, FX i wlasny", L"Normal, cinsiyet std, yas, FX ve ozel"));
+		if (basic) {
+			static const int kBasic[] = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 22 };
+			for (int bi = 0; bi < (int)(sizeof(kBasic) / sizeof(kBasic[0])); ++bi) {
+				const int i = kBasic[bi];
+				basic->AddCheck(100 + i, VcPresetName(i), cur == i);
+			}
+		}
+	}
+	{
+		CCustomPopupMenu* m2f = m.AddSubMenu(
+			LL14(L"男→女バリエ", L"Male→Female variants", L"Variantes H→F", L"Varianti U→D", L"Variantes H→M",
+				L"남→여 변형", L"男→女变体", L"تنويعات ذكر→أنثى", L"Варианты М→Ж", L"M→F Varianten",
+				L"Variantes H→M", L"M→V varianten", L"Warianty M→K", L"E→K varyantlari"),
+			LL14(L"男声から女声へのバリエーション", L"Male-to-female voice variants",
+				L"Variantes homme vers femme", L"Varianti da uomo a donna",
+				L"Variantes de hombre a mujer", L"남성의 여성 변형",
+				L"男声转女声的变体", L"تنويعات من ذكر إلى أنثى",
+				L"Варианты мужского в женский", L"Varianten von Mann zu Frau",
+				L"Variantes de homem para mulher", L"Varianten van man naar vrouw",
+				L"Warianty z meskiego na zenski", L"Erkekten kadina varyantlar"));
+		if (m2f) {
+			for (int i = 9; i <= 15; ++i)
+				m2f->AddCheck(100 + i, VcPresetName(i), cur == i);
+		}
+	}
+	{
+		CCustomPopupMenu* f2m = m.AddSubMenu(
+			LL14(L"女→男バリエ", L"Female→Male variants", L"Variantes F→H", L"Varianti D→U", L"Variantes M→H",
+				L"여→남 변형", L"女→男变体", L"تنويعات أنثى→ذكر", L"Варианты Ж→М", L"F→M Varianten",
+				L"Variantes M→H", L"V→M varianten", L"Warianty K→M", L"K→E varyantlari"),
+			LL14(L"女声から男声へのバリエーション", L"Female-to-male voice variants",
+				L"Variantes femme vers homme", L"Varianti da donna a uomo",
+				L"Variantes de mujer a hombre", L"여성의 남성 변형",
+				L"女声转男声的变体", L"تنويعات من أنثى إلى ذكر",
+				L"Варианты женского в мужской", L"Varianten von Frau zu Mann",
+				L"Variantes de mulher para homem", L"Varianten van vrouw naar man",
+				L"Warianty z zenskiego na meski", L"Kadindan erkege varyantlar"));
+		if (f2m) {
+			for (int i = 16; i <= 21; ++i)
+				f2m->AddCheck(100 + i, VcPresetName(i), cur == i);
+		}
+	}
 	if (p.x < 0) { CRect r; GetWindowRect(r); p = r.TopLeft() + CPoint(40, 40); }
 	UINT c = m.Track(p, this);
 	if (c >= 100 && c < 100 + (UINT)VC_PRESET_N) ApplyPreset((int)c - 100);

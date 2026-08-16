@@ -2536,527 +2536,615 @@ int CPlayList::ShowTrackContextMenu(CPoint pt, CWnd* pOwner)
 	Lindex = m_lc.GetNextItem(Lindex, LVNI_ALL | LVNI_SELECTED);
 	if (Lindex < 0) return 0;
 
+	extern CMediaPlayerDlg* mp;
+	const BOOL hasMp = (mp && ::IsWindow(mp->GetSafeHwnd())) ? TRUE : FALSE;
+
 	CCustomPopupMenu menu;
 	menu.AddCommand(PL_CTX_INFO,
-		LL14(L"ファイル情報", L"File Info", L"Infos fichier", L"Info file",
-			L"Info. de archivo", L"파일 정보", L"文件信息", L"معلومات الملف",
-			L"Сведения о файле", L"Dateiinfo", L"Info. do arquivo", L"Bestandsinfo",
-			L"Informacje o pliku", L"Dosya bilgisi"),
-		LL14(L"選択曲のパス・時間・タグなどの詳細情報ダイアログを開きます", L"Open a details dialog for the selection (path, duration, tags, etc.)", L"Ouvre les details de la selection (chemin, duree, tags…)", L"Apre i dettagli della selezione (percorso, durata, tag…)",
-			L"Abre detalles de la seleccion (ruta, duracion, etiquetas…)", L"선택 곡의 경로·시간·태그 등 상세 정보 대화상자를 엽니다", L"打开所选曲目的详细信息（路径、时长、标签等）", L"يفتح تفاصيل التحديد (المسار والمدة والوسوم…)",
-			L"Открывает сведения о выборе (путь, длительность, теги…)", L"Oeffnet Details zur Auswahl (Pfad, Dauer, Tags usw.)", L"Abre detalhes da selecao (caminho, duracao, tags…)", L"Opent details van de selectie (pad, duur, tags…)",
-			L"Otwiera szczegoly zaznaczenia (sciezka, czas, tagi…)", L"Secimin ayrintilarini acar (yol, sure, etiket…)"));
-	menu.AddCommand(PL_CTX_WAV,
-		LL14(L"音声書き出し…", L"Audio export...", L"Export audio...", L"Esporta audio...",
-			L"Exportar audio...", L"오디오 내보내기...", L"音频导出…", L"تصدير الصوت...",
-			L"Экспорт аудио...", L"Audio exportieren...", L"Exportar audio...", L"Audio exporteren...",
-			L"Eksport audio...", L"Ses disa aktar..."),
-		LL14(L"選択曲を WAV などに書き出します（変換ダイアログを開く）", L"Export the selection to WAV or similar (opens the export dialog)", L"Exporte la selection en WAV etc. (ouvre la boite d'export)", L"Esporta la selezione in WAV ecc. (apre la finestra di export)",
-			L"Exporta la seleccion a WAV u otro (abre el dialogo)", L"선택 곡을 WAV 등으로 내보냅니다(내보내기 대화상자)", L"将所选导出为 WAV 等（打开导出对话框）", L"يصدّر التحديد إلى WAV وغيره (يفتح مربع التصدير)",
-			L"Экспортирует выбор в WAV и т.п. (откроет диалог)", L"Exportiert die Auswahl als WAV usw. (Export-Dialog)", L"Exporta a selecao para WAV etc. (abre o dialogo)", L"Exporteert de selectie naar WAV e.d. (opent exportdialoog)",
-			L"Eksportuje wybor do WAV itd. (otwiera okno eksportu)", L"Secimi WAV vb. olarak aktarir (disa aktarma penceresi)"));
-	menu.AddCommand(PL_CTX_TRANSCODE,
-		LL14(L"mp3/FLAC 変換…", L"Convert to mp3/FLAC…", L"Convertir en mp3/FLAC…", L"Converti in mp3/FLAC…",
-			L"Convertir a mp3/FLAC…", L"mp3/FLAC 변환…", L"转换为 mp3/FLAC…", L"تحويل إلى mp3/FLAC…",
-			L"Конвертировать в mp3/FLAC…", L"Nach mp3/FLAC konvertieren…", L"Converter para mp3/FLAC…", L"Converteren naar mp3/FLAC…",
-			L"Konwertuj do mp3/FLAC…", L"mp3/FLAC donustur…"),
-		LL14(L"選択曲を mp3 または FLAC に変換して別ファイルとして書き出します", L"Convert the selection to mp3 or FLAC and write a new file", L"Convertit la selection en mp3/FLAC et ecrit un nouveau fichier", L"Converte la selezione in mp3/FLAC e scrive un nuovo file",
-			L"Convierte la seleccion a mp3/FLAC y escribe un archivo nuevo", L"선택 곡을 mp3/FLAC로 변환해 새 파일로 내보냅니다", L"将所选转为 mp3/FLAC 并写出新文件", L"يحوّل التحديد إلى mp3/FLAC ويكتب ملفاً جديداً",
-			L"Конвертирует выбор в mp3/FLAC и сохраняет новый файл", L"Konvertiert die Auswahl nach mp3/FLAC und schreibt eine neue Datei", L"Converte a selecao para mp3/FLAC e grava um arquivo novo", L"Converteert de selectie naar mp3/FLAC en schrijft een nieuw bestand",
-			L"Konwertuje wybor do mp3/FLAC i zapisuje nowy plik", L"Secimi mp3/FLAC'a donusturup yeni dosya yazar"));
-	if (Lindex >= 0 && Lindex < playcnt && (pc[Lindex].sub == -2 || IsDougaVideoFile(pc[Lindex].fol))) {
-		menu.AddCommand(PL_CTX_VIDEO_EXTRACT,
-			LL14(L"動画→音声抽出…", L"Extract audio from video…", L"Extraire audio de la video…", L"Estrai audio dal video…",
-				L"Extraer audio del video…", L"동영상→오디오 추출…", L"从视频提取音频…", L"استخراج صوت من الفيديو…",
-				L"Извлечь аудио из видео…", L"Audio aus Video extrahieren…", L"Extrair audio do video…", L"Audio uit video…",
-				L"Wyodrebnij audio z wideo…", L"Videodan ses cikar…"),
-			LL14(L"動画ファイルから音声だけを取り出して保存します", L"Extract and save only the audio track from the video file", L"Extrait et enregistre uniquement la piste audio de la video", L"Estrae e salva solo la traccia audio dal file video",
-			L"Extrae y guarda solo la pista de audio del video", L"동영상에서 오디오만 추출해 저장합니다", L"仅从视频提取并保存音轨", L"يستخرج صوت الفيديو فقط ويحفظه",
-			L"Извлекает и сохраняет только звуковую дорожку видео", L"Extrahiert und speichert nur die Audiospur des Videos", L"Extrai e salva apenas o audio do video", L"Haalt alleen de audio uit de video en slaat die op",
-			L"Wyodrebnia i zapisuje tylko sciezke audio z wideo", L"Videodan yalnizca sesi cikarip kaydeder"));
+			LL14(L"ファイル情報", L"File Info", L"Infos fichier", L"Info file",
+				L"Info. de archivo", L"파일 정보", L"文件信息", L"معلومات الملف",
+				L"Сведения о файле", L"Dateiinfo", L"Info. do arquivo", L"Bestandsinfo",
+				L"Informacje o pliku", L"Dosya bilgisi"),
+			LL14(L"選択曲のパス・時間・タグなどの詳細情報ダイアログを開きます", L"Open a details dialog for the selection (path, duration, tags, etc.)", L"Ouvre les details de la selection (chemin, duree, tags…)", L"Apre i dettagli della selezione (percorso, durata, tag…)",
+				L"Abre detalles de la seleccion (ruta, duracion, etiquetas…)", L"선택 곡의 경로·시간·태그 등 상세 정보 대화상자를 엽니다", L"打开所选曲目的详细信息（路径、时长、标签等）", L"يفتح تفاصيل التحديد (المسار والمدة والوسوم…)",
+				L"Открывает сведения о выборе (путь, длительность, теги…)", L"Oeffnet Details zur Auswahl (Pfad, Dauer, Tags usw.)", L"Abre detalhes da selecao (caminho, duracao, tags…)", L"Opent details van de selectie (pad, duur, tags…)",
+				L"Otwiera szczegoly zaznaczenia (sciezka, czas, tagi…)", L"Secimin ayrintilarini acar (yol, sure, etiket…)"));
+	menu.AddSeparator();
+	CCustomPopupMenu* subEdit = menu.AddSubMenu(
+		LL14(L"編集", L"Edit", L"Edition", L"Modifica",
+			L"Editar", L"편집", L"编辑", L"تحرير",
+			L"Правка", L"Bearbeiten", L"Editar", L"Bewerken",
+			L"Edycja", L"Duzenle"),
+		LL14(L"選択・コピー・削除などの編集", L"Select, copy, delete, and other edits", L"Selection, copie, suppression…", L"Selezione, copia, elimina…",
+			L"Seleccionar, copiar, eliminar…", L"선택·복사·삭제 등 편집", L"选择、复制、删除等编辑", L"تحديد ونسخ وحذف…",
+			L"Выбор, копирование, удаление…", L"Auswaehlen, kopieren, loeschen…", L"Selecionar, copiar, excluir…", L"Selecteren, kopieren, verwijderen…",
+			L"Zaznaczanie, kopiowanie, usuwanie…", L"Sec, kopyala, sil…"));
+	if (subEdit) {
+		subEdit->AddCommand(PL_CTX_EDIT_SELALL,
+				LL14(L"全選択", L"Select all", L"Tout selectionner", L"Seleziona tutto", L"Seleccionar todo",
+					L"모두 선택", L"全选", L"تحديد الكل", L"Выбрать все", L"Alles auswahlen",
+					L"Selecionar tudo", L"Alles selecteren", L"Zaznacz wszystko", L"Tumunu sec"),
+				LL14(L"一覧の全曲を選択します（Ctrl+A）", L"Select all tracks (Ctrl+A)", L"Tout selectionner (Ctrl+A)", L"Seleziona tutto (Ctrl+A)",
+					L"Seleccionar todo (Ctrl+A)", L"목록 전체 선택(Ctrl+A)", L"全选曲目（Ctrl+A）", L"تحديد الكل (Ctrl+A)",
+					L"Выбрать все (Ctrl+A)", L"Alles auswahlen (Ctrl+A)", L"Selecionar tudo (Ctrl+A)", L"Alles selecteren (Ctrl+A)",
+					L"Zaznacz wszystko (Ctrl+A)", L"Tumunu sec (Ctrl+A)"));
+		subEdit->AddCommand(PL_CTX_EDIT_COPY,
+				LL14(L"コピー", L"Copy", L"Copier", L"Copia", L"Copiar",
+					L"복사", L"复制", L"نسخ", L"Копировать", L"Kopieren",
+					L"Copiar", L"Kopieren", L"Kopiuj", L"Kopyala"),
+				LL14(L"選択曲をクリップボードへ（Ctrl+C）", L"Copy selection to clipboard (Ctrl+C)", L"Copier (Ctrl+C)", L"Copia (Ctrl+C)",
+					L"Copiar (Ctrl+C)", L"선택 곡 복사(Ctrl+C)", L"复制所选（Ctrl+C）", L"نسخ (Ctrl+C)",
+					L"Копировать (Ctrl+C)", L"Kopieren (Ctrl+C)", L"Copiar (Ctrl+C)", L"Kopieren (Ctrl+C)",
+					L"Kopiuj (Ctrl+C)", L"Kopyala (Ctrl+C)"));
+		subEdit->AddCommand(PL_CTX_EDIT_CUT,
+				LL14(L"切り取り", L"Cut", L"Couper", L"Taglia", L"Cortar",
+					L"잘라내기", L"剪切", L"قص", L"Вырезать", L"Ausschneiden",
+					L"Recortar", L"Knippen", L"Wytnij", L"Kes"),
+				LL14(L"選択曲を切り取り（Ctrl+X）。ファイルは残る", L"Cut selection (Ctrl+X). Files kept", L"Couper (Ctrl+X)", L"Taglia (Ctrl+X)",
+					L"Cortar (Ctrl+X)", L"선택 곡 잘라내기(Ctrl+X)", L"剪切所选（Ctrl+X）", L"قص (Ctrl+X)",
+					L"Вырезать (Ctrl+X)", L"Ausschneiden (Ctrl+X)", L"Recortar (Ctrl+X)", L"Knippen (Ctrl+X)",
+					L"Wytnij (Ctrl+X)", L"Kes (Ctrl+X)"));
+		subEdit->AddCommand(PL_CTX_EDIT_PASTE,
+				LL14(L"貼り付け", L"Paste", L"Coller", L"Incolla", L"Pegar",
+					L"붙여넣기", L"粘贴", L"لصق", L"Вставить", L"Einfugen",
+					L"Colar", L"Plakken", L"Wklej", L"Yapistir"),
+				LL14(L"クリップボードから貼り付け（Ctrl+V）", L"Paste from clipboard (Ctrl+V)", L"Coller (Ctrl+V)", L"Incolla (Ctrl+V)",
+					L"Pegar (Ctrl+V)", L"붙여넣기(Ctrl+V)", L"粘贴（Ctrl+V）", L"لصق (Ctrl+V)",
+					L"Вставить (Ctrl+V)", L"Einfugen (Ctrl+V)", L"Colar (Ctrl+V)", L"Plakken (Ctrl+V)",
+					L"Wklej (Ctrl+V)", L"Yapistir (Ctrl+V)"));
+		subEdit->AddCommand(PL_CTX_UNDO_DEL,
+				LL14(L"削除を元に戻す", L"Undo delete", L"Annuler suppression", L"Annulla elimina", L"Deshacer eliminar",
+					L"삭제 실행 취소", L"撤销删除", L"تراجع عن الحذف", L"Отменить удаление", L"Löschen rückgängig",
+					L"Desfazer exclusao", L"Verwijderen ongedaan", L"Cofnij usuwanie", L"Silmeyi geri al"),
+				LL14(L"直前に一覧から削除した曲をリストへ戻します（Ctrl+Z）", L"Restore the track(s) most recently removed from the list (Ctrl+Z)", L"Restaure la/les piste(s) retiree(s) en dernier de la liste", L"Ripristina la/e traccia/e rimossa/e per ultima dall'elenco",
+					L"Restaura la(s) pista(s) quitada(s) mas recientemente de la lista", L"방금 목록에서 삭제한 곡을 다시 넣습니다(Ctrl+Z)", L"将最近从列表删除的曲目恢复回来（Ctrl+Z）", L"يعيد المقطع(ات) التي أُزيلت أخيراً من القائمة",
+					L"Возвращает трек(и), недавно удалённые из списка", L"Stellt die zuletzt aus der Liste entfernten Titel wieder her", L"Restaura a(s) faixa(s) removida(s) por ultimo da lista", L"Zet de laatst uit de lijst verwijderde nummers terug",
+					L"Przywrca utwor(y) niedawno usuniete z listy", L"Listeden en son silinen parcayi/parcalari geri getirir"));
+		subEdit->AddCommand(PL_CTX_EDIT_REDO,
+				LL14(L"やり直し", L"Redo", L"Retablir", L"Ripeti", L"Rehacer",
+					L"다시 실행", L"重做", L"إعادة", L"Повторить", L"Wiederholen",
+					L"Refazer", L"Opnieuw", L"Ponow", L"Yinele"),
+				LL14(L"元に戻した編集をやり直します（Ctrl+Y）", L"Redo the undone edit (Ctrl+Y)", L"Retablir (Ctrl+Y)", L"Ripeti (Ctrl+Y)",
+					L"Rehacer (Ctrl+Y)", L"다시 실행(Ctrl+Y)", L"重做（Ctrl+Y）", L"إعادة (Ctrl+Y)",
+					L"Повторить (Ctrl+Y)", L"Wiederholen (Ctrl+Y)", L"Refazer (Ctrl+Y)", L"Opnieuw (Ctrl+Y)",
+					L"Ponow (Ctrl+Y)", L"Yinele (Ctrl+Y)"));
+		subEdit->AddCommand(PL_CTX_DEL,
+				LL14(L"削除", L"Delete", L"Supprimer", L"Elimina",
+					L"Eliminar", L"삭제", L"删除", L"حذف",
+					L"Удалить", L"Löschen", L"Excluir", L"Verwijderen",
+					L"Usuń", L"Sil"),
+				LL14(L"一覧から選択曲を削除（ファイルは残る）", L"Remove selection from list (files kept)", L"Retirer de la liste", L"Rimuovi dall'elenco",
+					L"Quitar de la lista", L"목록에서 선택 곡 삭제(파일 유지)", L"从列表删除所选（保留文件）", L"إزالة من القائمة",
+					L"Удалить из списка", L"Aus Liste entfernen", L"Remover da lista", L"Uit lijst verwijderen",
+					L"Usun z listy", L"Listeden kaldir (dosya kalir)"));
+		subEdit->AddCommand(PL_CTX_CLEAR_SONGPARAM,
+				LL14(L"選択曲の記憶パラメータを削除", L"Clear saved params for selection",
+					L"Effacer les parametres enregistres de la selection", L"Cancella parametri salvati della selezione",
+					L"Borrar parametros guardados de la seleccion", L"선택 곡의 저장 파라미터 삭제",
+					L"删除所选曲目的已存参数", L"مسح المعلمات المحفوظة للتحديد",
+					L"Удалить сохранённые параметры выбранного", L"Gespeicherte Parameter der Auswahl loeschen",
+					L"Limpar parametros salvos da selecao", L"Opgeslagen parameters van selectie wissen",
+					L"Usun zapisane parametry zaznaczenia", L"Secimin kayitli parametrelerini sil"),
+				LL14(L"選択曲に保存された再生位置・音量などの記憶データを消します", L"Clear remembered playback position, volume, and similar per-track data", L"Efface position, volume et autres donnees memorisees de la piste", L"Cancella posizione, volume e altri dati memorizzati della traccia",
+					L"Borra posicion, volumen y otros datos recordados de la pista", L"선택 곡에 저장된 재생 위치·볼륨 등 기억 데이터를 지웁니다", L"清除所选曲目已保存的播放位置、音量等记忆数据", L"يمسح موضع التشغيل والحجم وبيانات محفوظة أخرى للمقطع",
+					L"Удаляет сохранённые позицию, громкость и др. данные трека", L"Loescht gespeicherte Position, Lautstaerke u.a. Titeldaten", L"Limpa posicao, volume e outros dados lembrados da faixa", L"Wist opgeslagen positie, volume en soortgelijke trackgegevens",
+					L"Kasuje zapamietana pozycje, glosnosc i podobne dane utworu", L"Secime kaydedilmis oynatma konumu, ses vb. verileri siler"));
+		subEdit->AddCommand(PL_CTX_COPY_TITLEART,
+				LL14(L"タイトル - アーティストをコピー", L"Copy Title - Artist", L"Copier Titre - Artiste", L"Copia Titolo - Artista",
+					L"Copiar Titulo - Artista", L"제목 - 아티스트 복사", L"复制 标题 - 艺术家", L"نسخ العنوان - الفنان",
+					L"Копировать Название - Исполнитель", L"Titel - Interpret kopieren", L"Copiar Titulo - Artista", L"Kopieer Titel - Artiest",
+					L"Kopiuj Tytul - Artysta", L"Baslik - Sanatciyi kopyala"),
+				LL14(L"「タイトル - アーティスト」形式でクリップボードにコピーします", L"Copy Title - Artist text to the clipboard", L"Copie Titre - Artiste dans le presse-papiers", L"Copia Titolo - Artista negli appunti",
+					L"Copia Titulo - Artista al portapapeles", L"제목 - 아티스트 형식으로 클립보드에 복사합니다", L"以「标题 - 艺术家」格式复制到剪贴板", L"ينسخ العنوان - الفنان إلى الحافظة",
+					L"Копирует «Название - Исполнитель» в буфер обмена", L"Kopiert Titel - Interpret in die Zwischenablage", L"Copia Titulo - Artista para a area de transferencia", L"Kopieert Titel - Artiest naar het klembord",
+					L"Kopiuje Tytul - Artysta do schowka", L"Baslik - Sanatci metnini panoya kopyalar"));
 	}
-	menu.AddCheck(PL_CTX_MICMIX,
-		LL14(L"WAV保存時にマイクをミックス", L"Mix mic when saving WAV", L"Mixer le micro à l'enregistrement WAV", L"Mix microfono al salvataggio WAV",
-			L"Mezclar micro al guardar WAV", L"WAV 저장 시 마이크 믹스", L"保存WAV时混合麦克风", L"مزج الميكروفون عند حفظ WAV",
-			L"Микшировать микрофон при сохранении WAV", L"Mikrofon beim WAV-Speichern mischen", L"Misturar microfone ao salvar WAV", L"Microfoon mixen bij WAV-opslag",
-			L"Miksuj mikrofon przy zapisie WAV", L"WAV kaydında mikrofonu karıştır"),
-		savedata.mic_mix ? TRUE : FALSE,
-		LL14(L"WAV書き出し時にマイク入力を重ねて録音します（下のレベルと併用）", L"When exporting WAV, mix the microphone input into the file (use level below)", L"Lors de l'export WAV, mixe le micro dans le fichier (niveau ci-dessous)", L"In export WAV, mixa il microfono nel file (usa il livello sotto)",
-			L"Al exportar WAV, mezcla el micro en el archivo (nivel abajo)", L"WAV 내보내기 시 마이크 입력을 파일에 섞습니다(아래 레벨과 함께)", L"导出 WAV 时将麦克风混入文件（配合下方电平）", L"عند تصدير WAV يمزج الميكروفون في الملف (مع المستوى أدناه)",
-			L"При экспорте WAV микширует микрофон в файл (уровень ниже)", L"Mischt beim WAV-Export das Mikrofon in die Datei (Pegel unten)", L"Ao exportar WAV, mistura o microfone no arquivo (nivel abaixo)", L"Mixte bij WAV-export de microfoon in het bestand (niveau hieronder)",
-			L"Przy eksporcie WAV miksuje mikrofon do pliku (poziom ponizej)", L"WAV aktariminda mikrofonu dosyaya karistirir (asagidaki seviye)"));
-	{
-		int lv = savedata.mic_mix_level;
-		if (lv < 0) lv = 0;
-		if (lv > 200) lv = 200;
-		menu.AddSlider(
-			LL14(L"マイクレベル", L"Mic level", L"Niveau micro", L"Livello microfono", L"Nivel micro",
-				L"마이크 레벨", L"麦克风电平", L"مستوى الميكروفون", L"Уровень микрофона", L"Mikrofonpegel",
-				L"Nivel do microfone", L"Mic-niveau", L"Poziom mikrofonu", L"Mikrofon seviyesi"),
-			0, 200, lv, PlMicLevSliderCb, NULL,
-			LL14(L"マイクミックスの音量 0〜200（ドラッグ中に反映）", L"Mic mix level 0–200 (live)", L"Niveau mix micro 0–200 (direct)", L"Livello mix microfono 0–200 (live)", L"Nivel mezcla micro 0–200 (en vivo)",
-				L"마이크 믹스 볼륨 0–200(즉시)", L"麦克风混音音量 0–200（即时）", L"مستوى مزج الميكروفون 0–200 (مباشر)", L"Громкость микса микрофона 0–200 (сразу)", L"Mikrofon-Mix-Pegel 0–200 (live)",
-				L"Nivel do mix de microfone 0–200 (ao vivo)", L"Mic-mixniveau 0–200 (live)", L"Poziom mixu mikrofonu 0–200 (na zywo)", L"Mikrofon mix seviyesi 0–200 (anlik)"));
-	}
-	{
-		int selCount = 0;
-		int idx = -1;
-		while ((idx = m_lc.GetNextItem(idx, LVNI_ALL | LVNI_SELECTED)) >= 0) {
-			if (idx < playcnt) ++selCount;
+	menu.AddSeparator();
+	CCustomPopupMenu* subExport = menu.AddSubMenu(
+		LL14(L"書き出し", L"Export", L"Export", L"Esporta",
+			L"Exportar", L"내보내기", L"导出", L"تصدير",
+			L"Экспорт", L"Export", L"Exportar", L"Exporteren",
+			L"Eksport", L"Disa aktar"),
+		LL14(L"音声書き出し・変換・ラウドネスなど", L"Audio export, convert, loudness, and more", L"Export audio, conversion, loudness…", L"Esporta audio, conversione, loudness…",
+			L"Exportar audio, convertir, loudness…", L"오디오 내보내기·변환·라우드니스 등", L"音频导出、转换、响度等", L"تصدير صوت وتحويل وجهارة…",
+			L"Экспорт аудио, конвертация, громкость…", L"Audio-Export, Konvertierung, Lautheit…", L"Exportar audio, converter, loudness…", L"Audio-export, converteren, loudness…",
+			L"Eksport audio, konwersja, glosnosc…", L"Ses aktarimi, donusum, loudness…"));
+	if (subExport) {
+		subExport->AddCommand(PL_CTX_WAV,
+				LL14(L"音声書き出し…", L"Audio export...", L"Export audio...", L"Esporta audio...",
+					L"Exportar audio...", L"오디오 내보내기...", L"音频导出…", L"تصدير الصوت...",
+					L"Экспорт аудио...", L"Audio exportieren...", L"Exportar audio...", L"Audio exporteren...",
+					L"Eksport audio...", L"Ses disa aktar..."),
+				LL14(L"選択曲を WAV などに書き出します（変換ダイアログを開く）", L"Export the selection to WAV or similar (opens the export dialog)", L"Exporte la selection en WAV etc. (ouvre la boite d'export)", L"Esporta la selezione in WAV ecc. (apre la finestra di export)",
+					L"Exporta la seleccion a WAV u otro (abre el dialogo)", L"선택 곡을 WAV 등으로 내보냅니다(내보내기 대화상자)", L"将所选导出为 WAV 等（打开导出对话框）", L"يصدّر التحديد إلى WAV وغيره (يفتح مربع التصدير)",
+					L"Экспортирует выбор в WAV и т.п. (откроет диалог)", L"Exportiert die Auswahl als WAV usw. (Export-Dialog)", L"Exporta a selecao para WAV etc. (abre o dialogo)", L"Exporteert de selectie naar WAV e.d. (opent exportdialoog)",
+					L"Eksportuje wybor do WAV itd. (otwiera okno eksportu)", L"Secimi WAV vb. olarak aktarir (disa aktarma penceresi)"));
+		subExport->AddCommand(PL_CTX_TRANSCODE,
+				LL14(L"mp3/FLAC 変換…", L"Convert to mp3/FLAC…", L"Convertir en mp3/FLAC…", L"Converti in mp3/FLAC…",
+					L"Convertir a mp3/FLAC…", L"mp3/FLAC 변환…", L"转换为 mp3/FLAC…", L"تحويل إلى mp3/FLAC…",
+					L"Конвертировать в mp3/FLAC…", L"Nach mp3/FLAC konvertieren…", L"Converter para mp3/FLAC…", L"Converteren naar mp3/FLAC…",
+					L"Konwertuj do mp3/FLAC…", L"mp3/FLAC donustur…"),
+				LL14(L"選択曲を mp3 または FLAC に変換して別ファイルとして書き出します", L"Convert the selection to mp3 or FLAC and write a new file", L"Convertit la selection en mp3/FLAC et ecrit un nouveau fichier", L"Converte la selezione in mp3/FLAC e scrive un nuovo file",
+					L"Convierte la seleccion a mp3/FLAC y escribe un archivo nuevo", L"선택 곡을 mp3/FLAC로 변환해 새 파일로 내보냅니다", L"将所选转为 mp3/FLAC 并写出新文件", L"يحوّل التحديد إلى mp3/FLAC ويكتب ملفاً جديداً",
+					L"Конвертирует выбор в mp3/FLAC и сохраняет новый файл", L"Konvertiert die Auswahl nach mp3/FLAC und schreibt eine neue Datei", L"Converte a selecao para mp3/FLAC e grava um arquivo novo", L"Converteert de selectie naar mp3/FLAC en schrijft een nieuw bestand",
+					L"Konwertuje wybor do mp3/FLAC i zapisuje nowy plik", L"Secimi mp3/FLAC'a donusturup yeni dosya yazar"));
+		if (Lindex >= 0 && Lindex < playcnt && (pc[Lindex].sub == -2 || IsDougaVideoFile(pc[Lindex].fol))) {
+			subExport->AddCommand(PL_CTX_VIDEO_EXTRACT,
+						LL14(L"動画→音声抽出…", L"Extract audio from video…", L"Extraire audio de la video…", L"Estrai audio dal video…",
+							L"Extraer audio del video…", L"동영상→오디오 추출…", L"从视频提取音频…", L"استخراج صوت من الفيديو…",
+							L"Извлечь аудио из видео…", L"Audio aus Video extrahieren…", L"Extrair audio do video…", L"Audio uit video…",
+							L"Wyodrebnij audio z wideo…", L"Videodan ses cikar…"),
+						LL14(L"動画ファイルから音声だけを取り出して保存します", L"Extract and save only the audio track from the video file", L"Extrait et enregistre uniquement la piste audio de la video", L"Estrae e salva solo la traccia audio dal file video",
+						L"Extrae y guarda solo la pista de audio del video", L"동영상에서 오디오만 추출해 저장합니다", L"仅从视频提取并保存音轨", L"يستخرج صوت الفيديو فقط ويحفظه",
+						L"Извлекает и сохраняет только звуковую дорожку видео", L"Extrahiert und speichert nur die Audiospur des Videos", L"Extrai e salva apenas o audio do video", L"Haalt alleen de audio uit de video en slaat die op",
+						L"Wyodrebnia i zapisuje tylko sciezke audio z wideo", L"Videodan yalnizca sesi cikarip kaydeder"));
 		}
-		if (selCount >= 2) {
-			menu.AddCommand(PL_CTX_XFADE,
-				LL14(L"クロスフェード書き出し…", L"Crossfade export...", L"Export fondu enchaine...", L"Esporta con crossfade...",
-					L"Exportar con fundido cruzado...", L"크로스페이드 내보내기...", L"交叉淡入淡出导出…", L"تصدير بتلاشي متقاطع...",
-					L"Экспорт с кроссфейдом...", L"Ueberblend-Export...", L"Exportar com crossfade...", L"Crossfade-export...",
-					L"Eksport z przejsciem...", L"Capraz solma disa aktar..."),
-				LL14(L"選択した複数曲をクロスフェードで書き出し", L"Export selection with crossfade", L"Exporter avec fondu", L"Esporta con crossfade",
-					L"Exportar con fundido", L"선택 곡을 크로스페이드로 내보내기", L"交叉淡入淡出导出所选", L"تصدير بتلاشي متقاطع",
-					L"Экспорт с кроссфейдом", L"Mit Ueberblendung exportieren", L"Exportar com crossfade", L"Exporteren met crossfade",
-					L"Eksport z przejsciem", L"Capraz solma ile aktar"));
+		subExport->AddCheck(PL_CTX_MICMIX,
+				LL14(L"WAV保存時にマイクをミックス", L"Mix mic when saving WAV", L"Mixer le micro à l'enregistrement WAV", L"Mix microfono al salvataggio WAV",
+					L"Mezclar micro al guardar WAV", L"WAV 저장 시 마이크 믹스", L"保存WAV时混合麦克风", L"مزج الميكروفون عند حفظ WAV",
+					L"Микшировать микрофон при сохранении WAV", L"Mikrofon beim WAV-Speichern mischen", L"Misturar microfone ao salvar WAV", L"Microfoon mixen bij WAV-opslag",
+					L"Miksuj mikrofon przy zapisie WAV", L"WAV kaydında mikrofonu karıştır"),
+				savedata.mic_mix ? TRUE : FALSE,
+				LL14(L"WAV書き出し時にマイク入力を重ねて録音します（下のレベルと併用）", L"When exporting WAV, mix the microphone input into the file (use level below)", L"Lors de l'export WAV, mixe le micro dans le fichier (niveau ci-dessous)", L"In export WAV, mixa il microfono nel file (usa il livello sotto)",
+					L"Al exportar WAV, mezcla el micro en el archivo (nivel abajo)", L"WAV 내보내기 시 마이크 입력을 파일에 섞습니다(아래 레벨과 함께)", L"导出 WAV 时将麦克风混入文件（配合下方电平）", L"عند تصدير WAV يمزج الميكروفون في الملف (مع المستوى أدناه)",
+					L"При экспорте WAV микширует микрофон в файл (уровень ниже)", L"Mischt beim WAV-Export das Mikrofon in die Datei (Pegel unten)", L"Ao exportar WAV, mistura o microfone no arquivo (nivel abaixo)", L"Mixte bij WAV-export de microfoon in het bestand (niveau hieronder)",
+					L"Przy eksporcie WAV miksuje mikrofon do pliku (poziom ponizej)", L"WAV aktariminda mikrofonu dosyaya karistirir (asagidaki seviye)"));
+		{
+			int lv = savedata.mic_mix_level;
+			if (lv < 0) lv = 0;
+			if (lv > 200) lv = 200;
+			subExport->AddSlider(
+				LL14(L"マイクレベル", L"Mic level", L"Niveau micro", L"Livello microfono", L"Nivel micro",
+					L"마이크 레벨", L"麦克风电平", L"مستوى الميكروفون", L"Уровень микрофона", L"Mikrofonpegel",
+					L"Nivel do microfone", L"Mic-niveau", L"Poziom mikrofonu", L"Mikrofon seviyesi"),
+				0, 200, lv, PlMicLevSliderCb, NULL,
+				LL14(L"マイクミックスの音量 0〜200（ドラッグ中に反映）", L"Mic mix level 0–200 (live)", L"Niveau mix micro 0–200 (direct)", L"Livello mix microfono 0–200 (live)", L"Nivel mezcla micro 0–200 (en vivo)",
+					L"마이크 믹스 볼륨 0–200(즉시)", L"麦克风混音音量 0–200（即时）", L"مستوى مزج الميكروفون 0–200 (مباشر)", L"Громкость микса микрофона 0–200 (сразу)", L"Mikrofon-Mix-Pegel 0–200 (live)",
+					L"Nivel do mix de microfone 0–200 (ao vivo)", L"Mic-mixniveau 0–200 (live)", L"Poziom mixu mikrofonu 0–200 (na zywo)", L"Mikrofon mix seviyesi 0–200 (anlik)"));
 		}
-	}
-	menu.AddCommand(PL_CTX_TAG_EDIT,
-		LL14(L"タグ編集…", L"Edit tags...", L"Modifier les tags...", L"Modifica tag...",
-			L"Editar etiquetas...", L"태그 편집...", L"编辑标签…", L"تحرير الوسوم...",
-			L"Редактировать теги...", L"Tags bearbeiten...", L"Editar tags...", L"Tags bewerken...",
-			L"Edytuj tagi...", L"Etiketleri duzenle..."),
-		LL14(L"選択曲のタイトル・アーティスト等のタグを編集します", L"Edit title, artist, and other tags for the selection", L"Modifie titre, artiste et autres tags de la selection", L"Modifica titolo, artista e altri tag della selezione",
-			L"Edita titulo, artista y otras etiquetas de la seleccion", L"선택 곡의 제목·아티스트 등 태그를 편집합니다", L"编辑所选曲目的标题、艺术家等标签", L"يحرّر عنوان الفنان ووسوم أخرى للتحديد",
-			L"Редактирует название, исполнителя и другие теги", L"Bearbeitet Titel, Interpret und andere Tags der Auswahl", L"Edita titulo, artista e outras tags da selecao", L"Bewerkt titel, artiest en andere tags van de selectie",
-			L"Edytuje tytul, artyste i inne tagi zaznaczenia", L"Secimin baslik, sanatci ve diger etiketlerini duzenler"));
-	if (mp && ::IsWindow(mp->GetSafeHwnd())) {
-		menu.AddCommand(PL_CTX_MB_AUTOTAG,
-			LL14(L"MusicBrainz 自動タグ", L"MusicBrainz auto-tag", L"Auto-tag MusicBrainz", L"Auto-tag MusicBrainz",
-				L"Auto-etiqueta MusicBrainz", L"MusicBrainz 자동 태그", L"MusicBrainz 自动标签", L"وسم تلقائي MusicBrainz",
-				L"Автотег MusicBrainz", L"MusicBrainz Auto-Tag", L"Auto-tag MusicBrainz", L"MusicBrainz auto-tag",
-				L"Auto-tag MusicBrainz", L"MusicBrainz otomatik etiket"),
-			LL14(L"MusicBrainz からメタデータを検索してタグを自動入力します", L"Look up MusicBrainz metadata and fill tags automatically", L"Recherche MusicBrainz et remplit les tags automatiquement", L"Cerca su MusicBrainz e compila i tag automaticamente",
-				L"Busca en MusicBrainz y rellena etiquetas automaticamente", L"MusicBrainz에서 메타데이터를 찾아 태그를 자동 입력합니다", L"从 MusicBrainz 查找元数据并自动填写标签", L"يبحث في MusicBrainz ويملأ الوسوم تلقائياً",
-				L"Ищет метаданные в MusicBrainz и заполняет теги", L"Sucht MusicBrainz-Metadaten und fuellt Tags automatisch", L"Consulta MusicBrainz e preenche tags automaticamente", L"Zoekt MusicBrainz-metadata en vult tags automatisch",
-				L"Szuka w MusicBrainz i wypelnia tagi automatycznie", L"MusicBrainz'den meta veri bulup etiketleri otomatik doldurur"));
-		CString bpmLbl;
-		if (MpBpmIsMeasuring())
-			bpmLbl = LL14(L"BPM 計測中…（再クリックで確定）", L"Measuring BPM… (click again)", L"Mesure BPM…", L"Misura BPM…", L"Midiendo BPM…", L"BPM 측정 중…", L"正在测 BPM…", L"قياس BPM…", L"Измерение BPM…", L"BPM messen…", L"Medindo BPM…", L"BPM meten…", L"Pomiar BPM…", L"BPM olculuyor…");
-		else if (savedata.mpDetectedBpm > 0) {
-			if (savedata.mpDetectedMeterNum >= 2)
-				bpmLbl.Format(LL14(L"BPM 計測（現在 %d・%d/%d）", L"Measure BPM (now %d · %d/%d)", L"Mesurer BPM (%d · %d/%d)", L"Misura BPM (%d · %d/%d)", L"Medir BPM (%d · %d/%d)", L"BPM 측정 (현재 %d·%d/%d)", L"测量 BPM（当前 %d·%d/%d）", L"قياس BPM (%d · %d/%d)", L"BPM (%d · %d/%d)", L"BPM messen (%d · %d/%d)", L"Medir BPM (%d · %d/%d)", L"BPM meten (%d · %d/%d)", L"Mierz BPM (%d · %d/%d)", L"BPM olc (%d · %d/%d)"),
-					savedata.mpDetectedBpm, savedata.mpDetectedMeterNum, savedata.mpDetectedMeterDen > 0 ? savedata.mpDetectedMeterDen : 4);
-			else
-				bpmLbl.Format(LL14(L"BPM 計測（現在 %d）", L"Measure BPM (now %d)", L"Mesurer BPM (%d)", L"Misura BPM (%d)", L"Medir BPM (%d)", L"BPM 측정 (현재 %d)", L"测量 BPM（当前 %d）", L"قياس BPM (%d)", L"BPM (%d)", L"BPM messen (%d)", L"Medir BPM (%d)", L"BPM meten (%d)", L"Mierz BPM (%d)", L"BPM olc (%d)"), savedata.mpDetectedBpm);
-		}
-		else
-			bpmLbl = LL14(L"BPM 計測", L"Measure BPM", L"Mesurer BPM", L"Misura BPM", L"Medir BPM", L"BPM 측정", L"测量 BPM", L"قياس BPM", L"Измерить BPM", L"BPM messen", L"Medir BPM", L"BPM meten", L"Mierz BPM", L"BPM olc");
-		menu.AddCheck(PL_CTX_BPM, bpmLbl, MpBpmIsMeasuring() ? TRUE : FALSE,
-			LL14(L"再生中のテンポを計測／確定", L"Measure / confirm tempo while playing", L"Mesurer / confirmer le tempo", L"Misura / conferma il tempo",
-				L"Medir / confirmar tempo", L"재생 중 템포 측정/확정", L"测量/确认播放中的速度", L"قياس/تأكيد الإيقاع",
-				L"Измерить / подтвердить темп", L"Tempo messen / bestaetigen", L"Medir / confirmar o tempo", L"Tempo meten / bevestigen",
-				L"Zmierz / potwierdz tempo", L"Temposu olc / onayla"));
-		if (!MpBpmIsMeasuring() && (savedata.mpDetectedBpm > 0 || savedata.mpBpmCand[0] > 0)) {
-			MpBpmEnsureCandList();
-			int nSub = 0;
-			for (int ci = 0; ci < 3; ++ci) {
-				if (savedata.mpBpmCand[ci] > 0) ++nSub;
+		{
+			int selCount = 0;
+			int idx = -1;
+			while ((idx = m_lc.GetNextItem(idx, LVNI_ALL | LVNI_SELECTED)) >= 0) {
+				if (idx < playcnt) ++selCount;
 			}
-			if (nSub > 0) {
-				CCustomPopupMenu* candSub = menu.AddSubMenu(
-					LL14(L"BPM 候補", L"BPM candidates", L"Candidats BPM", L"Candidati BPM",
-						L"Candidatos BPM", L"BPM 후보", L"BPM 候选", L"مرشحو BPM",
-						L"Кандидаты BPM", L"BPM-Kandidaten", L"Candidatos BPM", L"BPM-kandidaten",
-						L"Kandydaci BPM", L"BPM adaylari"),
-					LL14(L"検出された候補BPMを選択", L"Pick a detected BPM candidate", L"Choisir un candidat BPM", L"Scegli un candidato BPM",
-						L"Elegir candidato BPM", L"감지된 BPM 후보 선택", L"选择检测到的 BPM 候选", L"اختر مرشح BPM",
-						L"Выбрать кандидата BPM", L"BPM-Kandidat waehlen", L"Escolher candidato BPM", L"BPM-kandidaat kiezen",
-						L"Wybierz kandydata BPM", L"BPM adayi sec"));
-				if (candSub) {
-					for (int ci = 0; ci < 3; ++ci) {
-						const int cb = savedata.mpBpmCand[ci];
-						if (cb <= 0) continue;
-						CString candItem;
-						candItem.Format(L"%d", cb);
-						const UINT id = (ci == 0) ? PL_CTX_BPM_CAND1 : (ci == 1) ? PL_CTX_BPM_CAND2 : PL_CTX_BPM_CAND3;
-						candSub->AddCheck(id, candItem, savedata.mpDetectedBpm == cb ? TRUE : FALSE,
-							LL14(L"この候補BPMを現在のテンポとして採用します", L"Apply this BPM candidate as the current tempo", L"Applique ce candidat BPM comme tempo actuel", L"Applica questo candidato BPM come tempo corrente",
-								L"Aplica este candidato BPM como tempo actual", L"이 BPM 후보를 현재 템포로 적용합니다", L"将此 BPM 候选设为当前速度", L"يعتمد مرشح BPM هذا كإيقاع حالي",
-								L"Применяет этот кандидат BPM как текущий темп", L"Uebernimmt diesen BPM-Kandidaten als aktuelles Tempo", L"Aplica este candidato BPM como tempo atual", L"Past deze BPM-kandidaat toe als huidige tempo",
-								L"Ustawia tego kandydata BPM jako biezace tempo", L"Bu BPM adayini gecerli tempo olarak uygular"));
+			if (selCount >= 2) {
+				subExport->AddCommand(PL_CTX_XFADE,
+					LL14(L"クロスフェード書き出し…", L"Crossfade export...", L"Export fondu enchaine...", L"Esporta con crossfade...",
+						L"Exportar con fundido cruzado...", L"크로스페이드 내보내기...", L"交叉淡入淡出导出…", L"تصدير بتلاشي متقاطع...",
+						L"Экспорт с кроссфейдом...", L"Ueberblend-Export...", L"Exportar com crossfade...", L"Crossfade-export...",
+						L"Eksport z przejsciem...", L"Capraz solma disa aktar..."),
+					LL14(L"選択した複数曲をクロスフェードで書き出し", L"Export selection with crossfade", L"Exporter avec fondu", L"Esporta con crossfade",
+						L"Exportar con fundido", L"선택 곡을 크로스페이드로 내보내기", L"交叉淡入淡出导出所选", L"تصدير بتلاشي متقاطع",
+						L"Экспорт с кроссфейдом", L"Mit Ueberblendung exportieren", L"Exportar com crossfade", L"Exporteren met crossfade",
+						L"Eksport z przejsciem", L"Capraz solma ile aktar"));
+			}
+		}
+		if (hasMp) {
+			subExport->AddCommand(PL_CTX_EXPORT_AB,
+						LL14(L"A-B を WAV 書き出し", L"Export A-B to WAV", L"Exporter A-B en WAV", L"Esporta A-B in WAV", L"Exportar A-B a WAV", L"A-B를 WAV로 내보내기", L"将 A-B 导出为 WAV", L"تصدير A-B إلى WAV", L"Экспорт A-B в WAV", L"A-B als WAV exportieren", L"Exportar A-B para WAV", L"A-B naar WAV", L"Eksport A-B do WAV", L"A-B WAV aktar"),
+						LL14(L"設定した A-B 区間だけを WAV ファイルに書き出します", L"Export only the set A-B range to a WAV file", L"Exporte uniquement la plage A-B definie en fichier WAV", L"Esporta solo l'intervallo A-B impostato in un file WAV",
+							L"Exporta solo el rango A-B definido a un archivo WAV", L"설정한 A-B 구간만 WAV 파일로 내보냅니다", L"仅将设定的 A-B 区间导出为 WAV 文件", L"يصدّر نطاق A-B المحدد فقط إلى ملف WAV",
+							L"Экспортирует только заданный диапазон A-B в WAV", L"Exportiert nur den gesetzten A-B-Bereich als WAV-Datei", L"Exporta apenas o intervalo A-B definido para um WAV", L"Exporteert alleen het ingestelde A-B-bereik naar een WAV",
+							L"Eksportuje tylko ustawiony zakres A-B do pliku WAV", L"Ayarlanan A-B araligini yalnizca WAV dosyasina aktarir"));
+			subExport->AddCommand(PL_CTX_NORM_SCAN,
+						LL14(L"ラウドネス計測", L"Measure loudness", L"Mesurer loudness", L"Misura loudness", L"Medir loudness", L"라우드니스 측정", L"响度测量", L"قياس الجهارة", L"Измерить громкость", L"Lautheit messen", L"Medir loudness", L"Loudness meten", L"Zmierz glosnosc", L"Loudness olc"),
+						LL14(L"選択曲のラウドネス(LUFS等)を計測して音量合わせの参考にします", L"Measure loudness (LUFS etc.) of the selection for level matching", L"Mesure la loudness (LUFS…) de la selection pour caler le niveau", L"Misura la loudness (LUFS…) della selezione per allineare il livello",
+							L"Mide la loudness (LUFS…) de la seleccion para igualar nivel", L"선택 곡의 라우드니스(LUFS 등)를 측정해 음량 맞춤에 씁니다", L"测量所选响度(LUFS等)用于音量对齐", L"يقيس جهارة التحديد (LUFS…) لمعادلة المستوى",
+							L"Измеряет громкость (LUFS…) выбора для выравнивания уровня", L"Misst die Lautheit (LUFS usw.) der Auswahl zum Pegelangleich", L"Mede a loudness (LUFS…) da selecao para alinhar o nivel", L"Meet de loudness (LUFS…) van de selectie voor niveau-afstemming",
+							L"Mierzy glosnosc (LUFS…) zaznaczenia do wyrownania poziomu", L"Secimin loudness'ini (LUFS…) olcup seviye esitlemeye kullanir"));
+		}
+	}
+	menu.AddSeparator();
+	CCustomPopupMenu* subTag = menu.AddSubMenu(
+		LL14(L"タグ", L"Tags", L"Tags", L"Tag",
+			L"Etiquetas", L"태그", L"标签", L"الوسوم",
+			L"Теги", L"Tags", L"Tags", L"Tags",
+			L"Tagi", L"Etiketler"),
+		LL14(L"タグ編集・BPM・章など", L"Tag edit, BPM, chapters, and more", L"Tags, BPM, chapitres…", L"Tag, BPM, capitoli…",
+			L"Etiquetas, BPM, capitulos…", L"태그 편집·BPM·구간 등", L"标签编辑、BPM、章节等", L"تحرير وسوم وBPM وفصول…",
+			L"Теги, BPM, главы…", L"Tags, BPM, Kapitel…", L"Tags, BPM, capitulos…", L"Tags, BPM, hoofdstukken…",
+			L"Tagi, BPM, rozdzialy…", L"Etiket, BPM, bolum…"));
+	if (subTag) {
+		subTag->AddCommand(PL_CTX_TAG_EDIT,
+				LL14(L"タグ編集…", L"Edit tags...", L"Modifier les tags...", L"Modifica tag...",
+					L"Editar etiquetas...", L"태그 편집...", L"编辑标签…", L"تحرير الوسوم...",
+					L"Редактировать теги...", L"Tags bearbeiten...", L"Editar tags...", L"Tags bewerken...",
+					L"Edytuj tagi...", L"Etiketleri duzenle..."),
+				LL14(L"選択曲のタイトル・アーティスト等のタグを編集します", L"Edit title, artist, and other tags for the selection", L"Modifie titre, artiste et autres tags de la selection", L"Modifica titolo, artista e altri tag della selezione",
+					L"Edita titulo, artista y otras etiquetas de la seleccion", L"선택 곡의 제목·아티스트 등 태그를 편집합니다", L"编辑所选曲目的标题、艺术家等标签", L"يحرّر عنوان الفنان ووسوم أخرى للتحديد",
+					L"Редактирует название, исполнителя и другие теги", L"Bearbeitet Titel, Interpret und andere Tags der Auswahl", L"Edita titulo, artista e outras tags da selecao", L"Bewerkt titel, artiest en andere tags van de selectie",
+					L"Edytuje tytul, artyste i inne tagi zaznaczenia", L"Secimin baslik, sanatci ve diger etiketlerini duzenler"));
+		if (hasMp) {
+			subTag->AddCommand(PL_CTX_MB_AUTOTAG,
+						LL14(L"MusicBrainz 自動タグ", L"MusicBrainz auto-tag", L"Auto-tag MusicBrainz", L"Auto-tag MusicBrainz",
+							L"Auto-etiqueta MusicBrainz", L"MusicBrainz 자동 태그", L"MusicBrainz 自动标签", L"وسم تلقائي MusicBrainz",
+							L"Автотег MusicBrainz", L"MusicBrainz Auto-Tag", L"Auto-tag MusicBrainz", L"MusicBrainz auto-tag",
+							L"Auto-tag MusicBrainz", L"MusicBrainz otomatik etiket"),
+						LL14(L"MusicBrainz からメタデータを検索してタグを自動入力します", L"Look up MusicBrainz metadata and fill tags automatically", L"Recherche MusicBrainz et remplit les tags automatiquement", L"Cerca su MusicBrainz e compila i tag automaticamente",
+							L"Busca en MusicBrainz y rellena etiquetas automaticamente", L"MusicBrainz에서 메타데이터를 찾아 태그를 자동 입력합니다", L"从 MusicBrainz 查找元数据并自动填写标签", L"يبحث في MusicBrainz ويملأ الوسوم تلقائياً",
+							L"Ищет метаданные в MusicBrainz и заполняет теги", L"Sucht MusicBrainz-Metadaten und fuellt Tags automatisch", L"Consulta MusicBrainz e preenche tags automaticamente", L"Zoekt MusicBrainz-metadata en vult tags automatisch",
+							L"Szuka w MusicBrainz i wypelnia tagi automatycznie", L"MusicBrainz'den meta veri bulup etiketleri otomatik doldurur"));
+			CString bpmLbl;
+			if (MpBpmIsMeasuring())
+				bpmLbl = LL14(L"BPM 計測中…（再クリックで確定）", L"Measuring BPM… (click again)", L"Mesure BPM…", L"Misura BPM…", L"Midiendo BPM…", L"BPM 측정 중…", L"正在测 BPM…", L"قياس BPM…", L"Измерение BPM…", L"BPM messen…", L"Medindo BPM…", L"BPM meten…", L"Pomiar BPM…", L"BPM olculuyor…");
+			else if (savedata.mpDetectedBpm > 0) {
+				if (savedata.mpDetectedMeterNum >= 2)
+					bpmLbl.Format(LL14(L"BPM 計測（現在 %d・%d/%d）", L"Measure BPM (now %d · %d/%d)", L"Mesurer BPM (%d · %d/%d)", L"Misura BPM (%d · %d/%d)", L"Medir BPM (%d · %d/%d)", L"BPM 측정 (현재 %d·%d/%d)", L"测量 BPM（当前 %d·%d/%d）", L"قياس BPM (%d · %d/%d)", L"BPM (%d · %d/%d)", L"BPM messen (%d · %d/%d)", L"Medir BPM (%d · %d/%d)", L"BPM meten (%d · %d/%d)", L"Mierz BPM (%d · %d/%d)", L"BPM olc (%d · %d/%d)"),
+						savedata.mpDetectedBpm, savedata.mpDetectedMeterNum, savedata.mpDetectedMeterDen > 0 ? savedata.mpDetectedMeterDen : 4);
+				else
+					bpmLbl.Format(LL14(L"BPM 計測（現在 %d）", L"Measure BPM (now %d)", L"Mesurer BPM (%d)", L"Misura BPM (%d)", L"Medir BPM (%d)", L"BPM 측정 (현재 %d)", L"测量 BPM（当前 %d）", L"قياس BPM (%d)", L"BPM (%d)", L"BPM messen (%d)", L"Medir BPM (%d)", L"BPM meten (%d)", L"Mierz BPM (%d)", L"BPM olc (%d)"), savedata.mpDetectedBpm);
+			}
+			else
+				bpmLbl = LL14(L"BPM 計測", L"Measure BPM", L"Mesurer BPM", L"Misura BPM", L"Medir BPM", L"BPM 측정", L"测量 BPM", L"قياس BPM", L"Измерить BPM", L"BPM messen", L"Medir BPM", L"BPM meten", L"Mierz BPM", L"BPM olc");
+			subTag->AddCheck(PL_CTX_BPM, bpmLbl, MpBpmIsMeasuring() ? TRUE : FALSE,
+				LL14(L"再生中のテンポを計測／確定", L"Measure / confirm tempo while playing", L"Mesurer / confirmer le tempo", L"Misura / conferma il tempo",
+					L"Medir / confirmar tempo", L"재생 중 템포 측정/확정", L"测量/确认播放中的速度", L"قياس/تأكيد الإيقاع",
+					L"Измерить / подтвердить темп", L"Tempo messen / bestaetigen", L"Medir / confirmar o tempo", L"Tempo meten / bevestigen",
+					L"Zmierz / potwierdz tempo", L"Temposu olc / onayla"));
+			if (!MpBpmIsMeasuring() && (savedata.mpDetectedBpm > 0 || savedata.mpBpmCand[0] > 0)) {
+				MpBpmEnsureCandList();
+				int nSub = 0;
+				for (int ci = 0; ci < 3; ++ci) {
+					if (savedata.mpBpmCand[ci] > 0) ++nSub;
+				}
+				if (nSub > 0) {
+					CCustomPopupMenu* candSub = subTag->AddSubMenu(
+						LL14(L"BPM 候補", L"BPM candidates", L"Candidats BPM", L"Candidati BPM",
+							L"Candidatos BPM", L"BPM 후보", L"BPM 候选", L"مرشحو BPM",
+							L"Кандидаты BPM", L"BPM-Kandidaten", L"Candidatos BPM", L"BPM-kandidaten",
+							L"Kandydaci BPM", L"BPM adaylari"),
+						LL14(L"検出された候補BPMを選択", L"Pick a detected BPM candidate", L"Choisir un candidat BPM", L"Scegli un candidato BPM",
+							L"Elegir candidato BPM", L"감지된 BPM 후보 선택", L"选择检测到的 BPM 候选", L"اختر مرشح BPM",
+							L"Выбрать кандидата BPM", L"BPM-Kandidat waehlen", L"Escolher candidato BPM", L"BPM-kandidaat kiezen",
+							L"Wybierz kandydata BPM", L"BPM adayi sec"));
+					if (candSub) {
+						for (int ci = 0; ci < 3; ++ci) {
+							const int cb = savedata.mpBpmCand[ci];
+							if (cb <= 0) continue;
+							CString candItem;
+							candItem.Format(L"%d", cb);
+							const UINT id = (ci == 0) ? PL_CTX_BPM_CAND1 : (ci == 1) ? PL_CTX_BPM_CAND2 : PL_CTX_BPM_CAND3;
+							candSub->AddCheck(id, candItem, savedata.mpDetectedBpm == cb ? TRUE : FALSE,
+								LL14(L"この候補BPMを現在のテンポとして採用します", L"Apply this BPM candidate as the current tempo", L"Applique ce candidat BPM comme tempo actuel", L"Applica questo candidato BPM come tempo corrente",
+									L"Aplica este candidato BPM como tempo actual", L"이 BPM 후보를 현재 템포로 적용합니다", L"将此 BPM 候选设为当前速度", L"يعتمد مرشح BPM هذا كإيقاع حالي",
+									L"Применяет этот кандидат BPM как текущий темп", L"Uebernimmt diesen BPM-Kandidaten als aktuelles Tempo", L"Aplica este candidato BPM como tempo atual", L"Past deze BPM-kandidaat toe als huidige tempo",
+									L"Ustawia tego kandydata BPM jako biezace tempo", L"Bu BPM adayini gecerli tempo olarak uygular"));
+						}
 					}
 				}
 			}
-		}
-		menu.AddCommand(PL_CTX_NORM_SCAN,
-			LL14(L"ラウドネス計測", L"Measure loudness", L"Mesurer loudness", L"Misura loudness", L"Medir loudness", L"라우드니스 측정", L"响度测量", L"قياس الجهارة", L"Измерить громкость", L"Lautheit messen", L"Medir loudness", L"Loudness meten", L"Zmierz glosnosc", L"Loudness olc"),
-			LL14(L"選択曲のラウドネス(LUFS等)を計測して音量合わせの参考にします", L"Measure loudness (LUFS etc.) of the selection for level matching", L"Mesure la loudness (LUFS…) de la selection pour caler le niveau", L"Misura la loudness (LUFS…) della selezione per allineare il livello",
-				L"Mide la loudness (LUFS…) de la seleccion para igualar nivel", L"선택 곡의 라우드니스(LUFS 등)를 측정해 음량 맞춤에 씁니다", L"测量所选响度(LUFS等)用于音量对齐", L"يقيس جهارة التحديد (LUFS…) لمعادلة المستوى",
-				L"Измеряет громкость (LUFS…) выбора для выравнивания уровня", L"Misst die Lautheit (LUFS usw.) der Auswahl zum Pegelangleich", L"Mede a loudness (LUFS…) da selecao para alinhar o nivel", L"Meet de loudness (LUFS…) van de selectie voor niveau-afstemming",
-				L"Mierzy glosnosc (LUFS…) zaznaczenia do wyrownania poziomu", L"Secimin loudness'ini (LUFS…) olcup seviye esitlemeye kullanir"));
-		menu.AddCommand(PL_CTX_EXPORT_AB,
-			LL14(L"A-B を WAV 書き出し", L"Export A-B to WAV", L"Exporter A-B en WAV", L"Esporta A-B in WAV", L"Exportar A-B a WAV", L"A-B를 WAV로 내보내기", L"将 A-B 导出为 WAV", L"تصدير A-B إلى WAV", L"Экспорт A-B в WAV", L"A-B als WAV exportieren", L"Exportar A-B para WAV", L"A-B naar WAV", L"Eksport A-B do WAV", L"A-B WAV aktar"),
-			LL14(L"設定した A-B 区間だけを WAV ファイルに書き出します", L"Export only the set A-B range to a WAV file", L"Exporte uniquement la plage A-B definie en fichier WAV", L"Esporta solo l'intervallo A-B impostato in un file WAV",
-				L"Exporta solo el rango A-B definido a un archivo WAV", L"설정한 A-B 구간만 WAV 파일로 내보냅니다", L"仅将设定的 A-B 区间导出为 WAV 文件", L"يصدّر نطاق A-B المحدد فقط إلى ملف WAV",
-				L"Экспортирует только заданный диапазон A-B в WAV", L"Exportiert nur den gesetzten A-B-Bereich als WAV-Datei", L"Exporta apenas o intervalo A-B definido para um WAV", L"Exporteert alleen het ingestelde A-B-bereik naar een WAV",
-				L"Eksportuje tylko ustawiony zakres A-B do pliku WAV", L"Ayarlanan A-B araligini yalnizca WAV dosyasina aktarir"));
-		extern void MpFeatAppendChapterMenu(CCustomPopupMenu& menu, int row);
-		MpFeatAppendChapterMenu(menu, Lindex);
-		menu.AddCommand(PL_CTX_SSVIZ,
-			LL14(L"SS ビジュアライザ", L"SS visualizer", L"Visualiseur SS", L"Visualizzatore SS", L"Visualizador SS", L"SS 비주얼", L"SS 可视化", L"عارض SS", L"SS-визуализатор", L"SS-Visualizer", L"Visual SS", L"SS-visualizer", L"Wizual SS", L"SS gorsel"),
-			LL14(L"スクリーンセーバー風のビジュアライザを開きます", L"Open the screensaver-style visualizer", L"Ouvre le visualiseur style ecran de veille", L"Apre il visualizzatore stile screensaver",
-				L"Abre el visualizador estilo salvapantallas", L"화면 보호기 스타일 비주얼라이저를 엽니다", L"打开屏保风格可视化器", L"يفتح عارضاً بصرياً بأسلوب شاشة التوقف",
-				L"Открывает визуализатор в стиле скринсейвера", L"Oeffnet den Visualizer im Bildschirmschoner-Stil", L"Abre o visualizador estilo protetor de tela", L"Opent de visualizer in screensaverstijl",
-				L"Otwiera wizualizer w stylu wygaszacza", L"Ekran koruyucu tarzinda gorsellestiriciyi acar"));
-		menu.AddCheck(PL_CTX_DESK_LRC,
-			LL14(L"歌詞ウィンドウを表示", L"Show lyrics window", L"Afficher fenetre paroles", L"Mostra finestra testi", L"Mostrar ventana de letra",
-				L"가사 창 표시", L"显示歌词窗口", L"عرض نافذة الكلمات", L"Показать окно текста", L"Textfenster anzeigen",
-				L"Mostrar janela de letra", L"Songtekstvenster tonen", L"Pokaz okno tekstu", L"Soz penceresini goster"),
-			IsDesktopLyricsOpen(),
-			LL14(L"デスクトップ歌詞ウィンドウの表示／非表示を切り替えます", L"Toggle the desktop lyrics window on or off", L"Affiche ou masque la fenetre de paroles bureau", L"Mostra o nasconde la finestra testi sul desktop",
-				L"Muestra u oculta la ventana de letra en el escritorio", L"데스크톱 가사 창을 표시/숨김 전환합니다", L"切换桌面歌词窗口的显示/隐藏", L"يبدّل عرض نافذة كلمات سطح المكتب",
-				L"Включает или скрывает окно текста на рабочем столе", L"Schaltet das Desktop-Textfenster ein oder aus", L"Alterna a janela de letra na area de trabalho", L"Toont of verbergt het desktop-songtekstvenster",
-				L"Wlacza lub ukrywa okno tekstu na pulpicie", L"Masaustu soz penceresini acar/kapatir"));
-		menu.AddCommand(PL_CTX_DUPES,
-			LL14(L"重複スキャン", L"Scan duplicates", L"Detecter doublons", L"Scansiona duplicati", L"Buscar duplicados", L"중복 스캔", L"扫描重复", L"فحص التكرار", L"Поиск дублей", L"Duplikate scannen", L"Procurar duplicatas", L"Duplicaten scannen", L"Skanuj duplikaty", L"Kopyalari tara"),
-			LL14(L"リスト内の重複ファイルを検出して整理しやすくします", L"Find duplicate files in the list so you can clean them up", L"Detecte les fichiers en double dans la liste pour les nettoyer", L"Trova file duplicati nell'elenco per ripulirli",
-				L"Busca archivos duplicados en la lista para limpiarlos", L"목록 내 중복 파일을 찾아 정리하기 쉽게 합니다", L"扫描列表中的重复文件以便清理", L"يكتشف الملفات المكررة في القائمة لتسهيل التنظيف",
-				L"Находит дубликаты в списке для удобной очистки", L"Findet Duplikate in der Liste zur leichteren Bereinigung", L"Encontra duplicatas na lista para facilitar a limpeza", L"Vindt duplicaten in de lijst om op te schonen",
-				L"Wyszukuje duplikaty na liscie, by latwiej je usunac", L"Listedeki yinelenen dosyalari bulup temizlemeyi kolaylastirir"));
-		menu.AddCommand(PL_CTX_FOLDER_SYNC,
-			LL14(L"フォルダ差分", L"Folder sync diff", L"Diff dossier", L"Diff cartella", L"Diff carpeta", L"폴더 차이", L"文件夹差异", L"فرق المجلد", L"Разница папки", L"Ordner-Diff", L"Diff pasta", L"Mapverschil", L"Roznica folderu", L"Klasor farki"),
-			LL14(L"フォルダとリストの差分を調べ、未追加／欠落を確認します", L"Compare folder vs list to see missing or not-yet-added files", L"Compare dossier et liste pour voir manquants / non ajoutes", L"Confronta cartella e elenco per file mancanti / non aggiunti",
-				L"Compara carpeta y lista para ver faltantes / no anadidos", L"폴더와 목록의 차이를 확인해 미추가/결손을 봅니다", L"比较文件夹与列表，查看未添加或缺失项", L"يقارن المجلد والقائمة لمعرفة الناقص/غير المضاف",
-				L"Сравнивает папку и список (отсутствующие / ещё не добавленные)", L"Vergleicht Ordner und Liste (fehlend / noch nicht hinzugefuegt)", L"Compara pasta e lista (ausentes / ainda nao adicionados)", L"Vergelijkt map en lijst (ontbrekend / nog niet toegevoegd)",
-				L"Porownuje folder i liste (brakujace / jeszcze niedodane)", L"Klasor ile listeyi karsilastirip eksik/eklenmemisleri gosterir"));
-	}
-	menu.AddSeparator();
-	menu.AddCommand(PL_CTX_REMOVE_MISSING,
-		LL14(L"存在しないファイルを一覧から削除", L"Remove missing files from list",
-			L"Supprimer les fichiers manquants", L"Rimuovi file mancanti", L"Eliminar archivos inexistentes",
-			L"없는 파일을 목록에서 삭제", L"从列表中删除不存在的文件", L"إزالة الملفات المفقودة",
-			L"Удалить отсутствующие файлы", L"Fehlende Dateien entfernen", L"Remover arquivos ausentes",
-			L"Ontbrekende bestanden verwijderen", L"Usuń brakujące pliki", L"Eksik dosyalari kaldir"),
-		LL14(L"ディスク上に無い項目だけを一覧から外します（実ファイルは触れません）", L"Remove only items missing on disk from the list (files on disk untouched)", L"Retire de la liste seuls les elements absents du disque (fichiers intacts)", L"Rimuove dall'elenco solo voci assenti sul disco (file intatti)",
-			L"Quita de la lista solo elementos ausentes en disco (archivos intactos)", L"디스크에 없는 항목만 목록에서 제거합니다(실제 파일은 건드리지 않음)", L"仅从列表移除磁盘上不存在的项（不触碰实际文件）", L"يزيل من القائمة فقط العناصر غير الموجودة على القرص (الملفات كما هي)",
-			L"Убирает из списка только отсутствующие на диске (файлы не трогает)", L"Entfernt nur fehlende Eintraege aus der Liste (Dateien unberuehrt)", L"Remove da lista so itens ausentes no disco (arquivos intactos)", L"Verwijdert alleen ontbrekende items uit de lijst (bestanden onaangeroerd)",
-			L"Usuwa z listy tylko brakujace na dysku (plikow nie rusza)", L"Diskte olmayanlari listeden cikarir (dosyalara dokunmaz)"));
-	menu.AddCommand(PL_CTX_RESCAN_MISS,
-		LL14(L"欠損マークを再スキャン", L"Rescan missing marks", L"Rescanner les manquants", L"Ricontrolla mancanti",
-			L"Reexaminar faltantes", L"결손 표시 재스캔", L"重新扫描缺失标记", L"إعادة فحص المفقود",
-			L"Пересканировать отсутствующие", L"Fehlend-Markierungen erneut pruefen", L"Verificar ausentes de novo",
-			L"Ontbrekende markeringen opnieuw scannen", L"Ponownie skanuj brakujace", L"Eksik isaretlerini yeniden tara"),
-		LL14(L"各曲の有無を再チェックし、欠損マーク表示を更新します", L"Recheck which tracks exist and refresh missing-file marks", L"Revérifie l'existence des pistes et met a jour les marques manquantes", L"Ricontrolla l'esistenza delle tracce e aggiorna i segni mancanti",
-			L"Vuelve a comprobar existencia y actualiza marcas de faltantes", L"각 곡 존재 여부를 다시 확인해 결손 표시를 갱신합니다", L"重新检查各曲是否存在并更新缺失标记", L"يعيد فحص وجود المقاطع ويحدّث علامات المفقود",
-			L"Снова проверяет наличие треков и обновляет метки отсутствия", L"Prueft erneut die Existenz und aktualisiert Fehlend-Markierungen", L"Verifica de novo a existencia e atualiza marcas de ausentes", L"Controleert opnieuw bestaan en vernieuwt ontbrekende markeringen",
-			L"Ponownie sprawdza istnienie i odswieza oznaczenia brakujacych", L"Parcalarin varligini yeniden kontrol edip eksik isaretlerini gunceller"));
-	menu.AddCommand(PL_CTX_REFRESH_JAK,
-		LL14(L"選択曲のジャケを再取得", L"Refresh jacket for selection", L"Rafraichir la pochette", L"Aggiorna copertina",
-			L"Actualizar caratula", L"선택 곡 재킷 다시 가져오기", L"重新获取所选封面", L"تحديث الغلاف للتحديد",
-			L"Обновить обложку выбранного", L"Cover der Auswahl neu laden", L"Atualizar capa da selecao",
-			L"Hoes van selectie vernieuwen", L"Odswiez okladke zaznaczenia", L"Secimin kapagini yenile"),
-		LL14(L"選択曲のジャケット画像をファイル／埋め込みから読み直します", L"Reload the selection's cover art from file or embedded tags", L"Recharge la pochette depuis le fichier ou les tags integres", L"Ricarica la copertina da file o tag incorporati",
-			L"Recarga la caratula desde archivo o etiquetas incrustadas", L"선택 곡 재킷 이미지를 파일/임베드에서 다시 읽습니다", L"从文件或内嵌标签重新加载所选封面", L"يعيد تحميل غلاف التحديد من الملف أو الوسوم المضمّنة",
-			L"Перезагружает обложку из файла или встроенных тегов", L"Laedt das Cover der Auswahl neu aus Datei oder Tags", L"Recarrega a capa da selecao do arquivo ou tags embutidas", L"Herlaadt de hoes van de selectie uit bestand of tags",
-			L"Ponownie wczytuje okladke z pliku lub tagow", L"Secimin kapagini dosya veya gomulu etiketlerden yeniden yukler"));
-	menu.AddCommand(PL_CTX_DEL,
-		LL14(L"削除", L"Delete", L"Supprimer", L"Elimina",
-			L"Eliminar", L"삭제", L"删除", L"حذف",
-			L"Удалить", L"Löschen", L"Excluir", L"Verwijderen",
-			L"Usuń", L"Sil"),
-		LL14(L"一覧から選択曲を削除（ファイルは残る）", L"Remove selection from list (files kept)", L"Retirer de la liste", L"Rimuovi dall'elenco",
-			L"Quitar de la lista", L"목록에서 선택 곡 삭제(파일 유지)", L"从列表删除所选（保留文件）", L"إزالة من القائمة",
-			L"Удалить из списка", L"Aus Liste entfernen", L"Remover da lista", L"Uit lijst verwijderen",
-			L"Usun z listy", L"Listeden kaldir (dosya kalir)"));
-	menu.AddCommand(PL_CTX_EDIT_SELALL,
-		LL14(L"全選択", L"Select all", L"Tout selectionner", L"Seleziona tutto", L"Seleccionar todo",
-			L"모두 선택", L"全选", L"تحديد الكل", L"Выбрать все", L"Alles auswahlen",
-			L"Selecionar tudo", L"Alles selecteren", L"Zaznacz wszystko", L"Tumunu sec"),
-		LL14(L"一覧の全曲を選択します（Ctrl+A）", L"Select all tracks (Ctrl+A)", L"Tout selectionner (Ctrl+A)", L"Seleziona tutto (Ctrl+A)",
-			L"Seleccionar todo (Ctrl+A)", L"목록 전체 선택(Ctrl+A)", L"全选曲目（Ctrl+A）", L"تحديد الكل (Ctrl+A)",
-			L"Выбрать все (Ctrl+A)", L"Alles auswahlen (Ctrl+A)", L"Selecionar tudo (Ctrl+A)", L"Alles selecteren (Ctrl+A)",
-			L"Zaznacz wszystko (Ctrl+A)", L"Tumunu sec (Ctrl+A)"));
-	menu.AddCommand(PL_CTX_EDIT_COPY,
-		LL14(L"コピー", L"Copy", L"Copier", L"Copia", L"Copiar",
-			L"복사", L"复制", L"نسخ", L"Копировать", L"Kopieren",
-			L"Copiar", L"Kopieren", L"Kopiuj", L"Kopyala"),
-		LL14(L"選択曲をクリップボードへ（Ctrl+C）", L"Copy selection to clipboard (Ctrl+C)", L"Copier (Ctrl+C)", L"Copia (Ctrl+C)",
-			L"Copiar (Ctrl+C)", L"선택 곡 복사(Ctrl+C)", L"复制所选（Ctrl+C）", L"نسخ (Ctrl+C)",
-			L"Копировать (Ctrl+C)", L"Kopieren (Ctrl+C)", L"Copiar (Ctrl+C)", L"Kopieren (Ctrl+C)",
-			L"Kopiuj (Ctrl+C)", L"Kopyala (Ctrl+C)"));
-	menu.AddCommand(PL_CTX_EDIT_CUT,
-		LL14(L"切り取り", L"Cut", L"Couper", L"Taglia", L"Cortar",
-			L"잘라내기", L"剪切", L"قص", L"Вырезать", L"Ausschneiden",
-			L"Recortar", L"Knippen", L"Wytnij", L"Kes"),
-		LL14(L"選択曲を切り取り（Ctrl+X）。ファイルは残る", L"Cut selection (Ctrl+X). Files kept", L"Couper (Ctrl+X)", L"Taglia (Ctrl+X)",
-			L"Cortar (Ctrl+X)", L"선택 곡 잘라내기(Ctrl+X)", L"剪切所选（Ctrl+X）", L"قص (Ctrl+X)",
-			L"Вырезать (Ctrl+X)", L"Ausschneiden (Ctrl+X)", L"Recortar (Ctrl+X)", L"Knippen (Ctrl+X)",
-			L"Wytnij (Ctrl+X)", L"Kes (Ctrl+X)"));
-	menu.AddCommand(PL_CTX_EDIT_PASTE,
-		LL14(L"貼り付け", L"Paste", L"Coller", L"Incolla", L"Pegar",
-			L"붙여넣기", L"粘贴", L"لصق", L"Вставить", L"Einfugen",
-			L"Colar", L"Plakken", L"Wklej", L"Yapistir"),
-		LL14(L"クリップボードから貼り付け（Ctrl+V）", L"Paste from clipboard (Ctrl+V)", L"Coller (Ctrl+V)", L"Incolla (Ctrl+V)",
-			L"Pegar (Ctrl+V)", L"붙여넣기(Ctrl+V)", L"粘贴（Ctrl+V）", L"لصق (Ctrl+V)",
-			L"Вставить (Ctrl+V)", L"Einfugen (Ctrl+V)", L"Colar (Ctrl+V)", L"Plakken (Ctrl+V)",
-			L"Wklej (Ctrl+V)", L"Yapistir (Ctrl+V)"));
-	menu.AddCommand(PL_CTX_UNDO_DEL,
-		LL14(L"削除を元に戻す", L"Undo delete", L"Annuler suppression", L"Annulla elimina", L"Deshacer eliminar",
-			L"삭제 실행 취소", L"撤销删除", L"تراجع عن الحذف", L"Отменить удаление", L"Löschen rückgängig",
-			L"Desfazer exclusao", L"Verwijderen ongedaan", L"Cofnij usuwanie", L"Silmeyi geri al"),
-		LL14(L"直前に一覧から削除した曲をリストへ戻します（Ctrl+Z）", L"Restore the track(s) most recently removed from the list (Ctrl+Z)", L"Restaure la/les piste(s) retiree(s) en dernier de la liste", L"Ripristina la/e traccia/e rimossa/e per ultima dall'elenco",
-			L"Restaura la(s) pista(s) quitada(s) mas recientemente de la lista", L"방금 목록에서 삭제한 곡을 다시 넣습니다(Ctrl+Z)", L"将最近从列表删除的曲目恢复回来（Ctrl+Z）", L"يعيد المقطع(ات) التي أُزيلت أخيراً من القائمة",
-			L"Возвращает трек(и), недавно удалённые из списка", L"Stellt die zuletzt aus der Liste entfernten Titel wieder her", L"Restaura a(s) faixa(s) removida(s) por ultimo da lista", L"Zet de laatst uit de lijst verwijderde nummers terug",
-			L"Przywrca utwor(y) niedawno usuniete z listy", L"Listeden en son silinen parcayi/parcalari geri getirir"));
-	menu.AddCommand(PL_CTX_EDIT_REDO,
-		LL14(L"やり直し", L"Redo", L"Retablir", L"Ripeti", L"Rehacer",
-			L"다시 실행", L"重做", L"إعادة", L"Повторить", L"Wiederholen",
-			L"Refazer", L"Opnieuw", L"Ponow", L"Yinele"),
-		LL14(L"元に戻した編集をやり直します（Ctrl+Y）", L"Redo the undone edit (Ctrl+Y)", L"Retablir (Ctrl+Y)", L"Ripeti (Ctrl+Y)",
-			L"Rehacer (Ctrl+Y)", L"다시 실행(Ctrl+Y)", L"重做（Ctrl+Y）", L"إعادة (Ctrl+Y)",
-			L"Повторить (Ctrl+Y)", L"Wiederholen (Ctrl+Y)", L"Refazer (Ctrl+Y)", L"Opnieuw (Ctrl+Y)",
-			L"Ponow (Ctrl+Y)", L"Yinele (Ctrl+Y)"));
-	menu.AddCommand(PL_CTX_CLEAR_SONGPARAM,
-		LL14(L"選択曲の記憶パラメータを削除", L"Clear saved params for selection",
-			L"Effacer les parametres enregistres de la selection", L"Cancella parametri salvati della selezione",
-			L"Borrar parametros guardados de la seleccion", L"선택 곡의 저장 파라미터 삭제",
-			L"删除所选曲目的已存参数", L"مسح المعلمات المحفوظة للتحديد",
-			L"Удалить сохранённые параметры выбранного", L"Gespeicherte Parameter der Auswahl loeschen",
-			L"Limpar parametros salvos da selecao", L"Opgeslagen parameters van selectie wissen",
-			L"Usun zapisane parametry zaznaczenia", L"Secimin kayitli parametrelerini sil"),
-		LL14(L"選択曲に保存された再生位置・音量などの記憶データを消します", L"Clear remembered playback position, volume, and similar per-track data", L"Efface position, volume et autres donnees memorisees de la piste", L"Cancella posizione, volume e altri dati memorizzati della traccia",
-			L"Borra posicion, volumen y otros datos recordados de la pista", L"선택 곡에 저장된 재생 위치·볼륨 등 기억 데이터를 지웁니다", L"清除所选曲目已保存的播放位置、音量等记忆数据", L"يمسح موضع التشغيل والحجم وبيانات محفوظة أخرى للمقطع",
-			L"Удаляет сохранённые позицию, громкость и др. данные трека", L"Loescht gespeicherte Position, Lautstaerke u.a. Titeldaten", L"Limpa posicao, volume e outros dados lembrados da faixa", L"Wist opgeslagen positie, volume en soortgelijke trackgegevens",
-			L"Kasuje zapamietana pozycje, glosnosc i podobne dane utworu", L"Secime kaydedilmis oynatma konumu, ses vb. verileri siler"));
-	menu.AddCommand(PL_CTX_PROTOOLS,
-		LL14(L"再生詳細...", L"Playback details...", L"Details lecture...", L"Dettagli riproduzione...",
-			L"Detalles de reproduccion...", L"재생 상세...", L"播放详情...", L"تفاصيل التشغيل...",
-			L"Параметры воспроизведения...", L"Wiedergabedetails...", L"Detalhes de reproducao...", L"Afspeeldetails...",
-			L"Szczegoly odtwarzania...", L"Oynatma ayrintilari..."),
-		LL14(L"ギャップレスや相関など、再生まわりの詳細ツールを開きます", L"Open advanced playback tools (gapless, correlation, and more)", L"Ouvre les outils avances de lecture (gapless, correlation…)", L"Apre gli strumenti avanzati di riproduzione (gapless, correlazione…)",
-			L"Abre herramientas avanzadas de reproduccion (gapless, correlacion…)", L"갭리스·상관 등 재생 관련 상세 도구를 엽니다", L"打开播放相关高级工具（无缝、相关等）", L"يفتح أدوات تشغيل متقدمة (بلا فجوات، ارتباط…)",
-			L"Открывает доп. инструменты воспроизведения (gapless, корреляция…)", L"Oeffnet erweiterte Wiedergabe-Tools (Gapless, Korrelation…)", L"Abre ferramentas avancadas de reproducao (gapless, correlacao…)", L"Opent geavanceerde afspeelhulpmiddelen (gapless, correlatie…)",
-			L"Otwiera zaawansowane narzedzia odtwarzania (gapless, korelacja…)", L"Gelismis oynatma araclarini acar (gapless, korelasyon…)"));
-	menu.AddCheck(PL_CTX_EQ,
-		LL14(L"イコライザーを開く", L"Open Equalizer", L"Ouvrir l'egaliseur", L"Apri equalizzatore",
-			L"Abrir ecualizador", L"이퀄라이저 열기", L"打开均衡器", L"فتح المعادل",
-			L"Открыть эквалайзер", L"Equalizer offnen", L"Abrir equalizador", L"Equalizer openen",
-			L"Otworz equalizer", L"Equalizeri ac"),
-		savedata.eqwindow ? TRUE : FALSE,
-		LL14(L"イコライザーウィンドウを開く／閉じる", L"Show or hide the equalizer window", L"Affiche ou masque la fenetre egaliseur", L"Mostra o nasconde la finestra equalizzatore",
-			L"Muestra u oculta la ventana del ecualizador", L"이퀄라이저 창을 열거나 닫습니다", L"打开或关闭均衡器窗口", L"يظهر أو يخفي نافذة المعادل",
-			L"Показывает или скрывает окно эквалайзера", L"Blendet das Equalizer-Fenster ein oder aus", L"Mostra ou oculta a janela do equalizador", L"Toont of verbergt het equalizervenster",
-			L"Pokazuje lub ukrywa okno equalizera", L"Equalizer penceresini acar veya kapatir"));
-	menu.AddCheck(PL_CTX_ANALYZER,
-		LL14(L"アナライザーを開く", L"Open Analyzer", L"Ouvrir l'analyseur", L"Apri analizzatore",
-			L"Abrir analizador", L"애널라이저 열기", L"打开分析器", L"فتح المحلل",
-			L"Открыть анализатор", L"Analyzer offnen", L"Abrir analisador", L"Analyser openen",
-			L"Otworz analizator", L"Analizoru ac"),
-		savedata.analyzerwindow ? TRUE : FALSE,
-		LL14(L"スペクトラム・アナライザーを開く／閉じる", L"Show or hide the spectrum analyzer", L"Affiche ou masque l'analyseur de spectre", L"Mostra o nasconde l'analizzatore di spettro",
-			L"Muestra u oculta el analizador de espectro", L"스펙트럼 애널라이저를 열거나 닫습니다", L"打开或关闭频谱分析器", L"يظهر أو يخفي محلل الطيف",
-			L"Показывает или скрывает спектр-анализатор", L"Blendet den Spektrum-Analyzer ein oder aus", L"Mostra ou oculta o analisador de espectro", L"Toont of verbergt de spectrumanalyzer",
-			L"Pokazuje lub ukrywa analizator widma", L"Spektrum analizorunu acar veya kapatir"));
-	menu.AddCheck(PL_CTX_PIANOROLL,
-		LL14(L"ピアノロールを開く", L"Open Piano Roll", L"Ouvrir le piano roll", L"Apri piano roll",
-			L"Abrir piano roll", L"피아노 롤 열기", L"打开钢琴卷帘", L"فتح لفة البيانو",
-			L"Открыть пианоролл", L"Piano Roll offnen", L"Abrir piano roll", L"Piano roll openen",
-			L"Otworz piano roll", L"Piano roll'u ac"),
-		savedata.pianorollwindow ? TRUE : FALSE,
-		LL14(L"ピアノロール（音程表示）を開く／閉じる", L"Show or hide the piano-roll pitch display", L"Affiche ou masque le piano roll (hauteur)", L"Mostra o nasconde il piano roll (altezza)",
-			L"Muestra u oculta el piano roll (altura)", L"피아노 롤(음정 표시)을 열거나 닫습니다", L"打开或关闭钢琴卷帘（音高显示）", L"يظهر أو يخفي لفة البيانو (عرض الطبقة)",
-			L"Показывает или скрывает пианоролл (высота тона)", L"Blendet die Piano-Roll (Tonhoehe) ein oder aus", L"Mostra ou oculta o piano roll (altura)", L"Toont of verbergt de piano-roll (toonhoogte)",
-			L"Pokazuje lub ukrywa piano roll (wysokosc dzwieku)", L"Piano roll (perde gosterimi) acar veya kapatir"));
-	menu.AddSeparator();
-	menu.AddCommand(PL_CTX_COPY_TITLEART,
-		LL14(L"タイトル - アーティストをコピー", L"Copy Title - Artist", L"Copier Titre - Artiste", L"Copia Titolo - Artista",
-			L"Copiar Titulo - Artista", L"제목 - 아티스트 복사", L"复制 标题 - 艺术家", L"نسخ العنوان - الفنان",
-			L"Копировать Название - Исполнитель", L"Titel - Interpret kopieren", L"Copiar Titulo - Artista", L"Kopieer Titel - Artiest",
-			L"Kopiuj Tytul - Artysta", L"Baslik - Sanatciyi kopyala"),
-		LL14(L"「タイトル - アーティスト」形式でクリップボードにコピーします", L"Copy Title - Artist text to the clipboard", L"Copie Titre - Artiste dans le presse-papiers", L"Copia Titolo - Artista negli appunti",
-			L"Copia Titulo - Artista al portapapeles", L"제목 - 아티스트 형식으로 클립보드에 복사합니다", L"以「标题 - 艺术家」格式复制到剪贴板", L"ينسخ العنوان - الفنان إلى الحافظة",
-			L"Копирует «Название - Исполнитель» в буфер обмена", L"Kopiert Titel - Interpret in die Zwischenablage", L"Copia Titulo - Artista para a area de transferencia", L"Kopieert Titel - Artiest naar het klembord",
-			L"Kopiuje Tytul - Artysta do schowka", L"Baslik - Sanatci metnini panoya kopyalar"));
-	menu.AddCommand(PL_CTX_ADD_FOLDER,
-		LL14(L"フォルダから追加...", L"Add from folder...", L"Ajouter depuis un dossier...", L"Aggiungi da cartella...",
-			L"Anadir desde carpeta...", L"폴더에서 추가...", L"从文件夹添加...", L"إضافة من مجلد...",
-			L"Добавить из папки...", L"Aus Ordner hinzufugen...", L"Adicionar da pasta...", L"Toevoegen uit map...",
-			L"Dodaj z folderu...", L"Klasorden ekle..."),
-		LL14(L"フォルダを選んで、その中の曲をリストへ追加します", L"Pick a folder and add its tracks to the playlist", L"Choisit un dossier et ajoute ses pistes a la liste", L"Scegli una cartella e aggiungi le sue tracce all'elenco",
-			L"Elige una carpeta y anade sus pistas a la lista", L"폴더를 골라 그 안의 곡을 목록에 추가합니다", L"选择文件夹并将其曲目添加到列表", L"يختار مجلداً ويضيف مقاطعه إلى القائمة",
-			L"Выбирает папку и добавляет её треки в список", L"Waehlt einen Ordner und fuegt dessen Titel zur Liste hinzu", L"Escolhe uma pasta e adiciona suas faixas a lista", L"Kiest een map en voegt de nummers toe aan de lijst",
-			L"Wybiera folder i dodaje jego utwory do listy", L"Bir klasor secip icindeki parcalari listeye ekler"));
-	menu.AddCommand(PL_CTX_ADD_SAME_FOLDER,
-		LL14(L"同じフォルダの曲を追加", L"Add tracks from same folder", L"Ajouter les pistes du meme dossier",
-			L"Aggiungi brani dalla stessa cartella", L"Anadir pistas de la misma carpeta",
-			L"같은 폴더의 곡 추가", L"添加同一文件夹的曲目", L"إضافة مقاطع من نفس المجلد",
-			L"Добавить треки из этой же папки", L"Titel aus demselben Ordner hinzufugen",
-			L"Adicionar faixas da mesma pasta", L"Nummers uit dezelfde map toevoegen",
-			L"Dodaj utwory z tego samego folderu", L"Ayni klasordeki parcalari ekle"),
-		LL14(L"選択曲と同じフォルダ内の他の曲をまとめて追加します", L"Add other tracks from the same folder as the selection", L"Ajoute les autres pistes du meme dossier que la selection", L"Aggiunge le altre tracce della stessa cartella della selezione",
-			L"Anade otras pistas de la misma carpeta que la seleccion", L"선택 곡과 같은 폴더의 다른 곡을 한꺼번에 추가합니다", L"添加与所选同一文件夹中的其他曲目", L"يضيف مقاطع أخرى من نفس مجلد التحديد",
-			L"Добавляет другие треки из той же папки, что и выбор", L"Fuegt weitere Titel aus demselben Ordner wie die Auswahl hinzu", L"Adiciona outras faixas da mesma pasta da selecao", L"Voegt andere nummers uit dezelfde map als de selectie toe",
-			L"Dodaje inne utwory z tego samego folderu co zaznaczenie", L"Secimle ayni klasordeki diger parcalari topluca ekler"));
-	menu.AddCommand(PL_CTX_OPEN_FOLDER,
-		LL14(L"エクスプローラーで開く", L"Open containing folder", L"Ouvrir le dossier du fichier",
-			L"Apri cartella del file", L"Abrir la carpeta del archivo",
-			L"파일 위치 열기", L"打开所在文件夹", L"فتح المجلد الحاوي",
-			L"Открыть папку с файлом", L"Ordner im Explorer offnen",
-			L"Abrir a pasta do arquivo", L"Map van bestand openen",
-			L"Otworz folder pliku", L"Dosya klasorunu ac"),
-		LL14(L"選択曲のファイルがあるフォルダをエクスプローラーで開きます", L"Open Explorer to the folder that contains the selected file", L"Ouvre l'Explorateur sur le dossier contenant le fichier", L"Apre Esplora risorse sulla cartella del file selezionato",
-			L"Abre el Explorador en la carpeta del archivo seleccionado", L"선택 곡 파일이 있는 폴더를 탐색기로 엽니다", L"在资源管理器中打开所选文件所在文件夹", L"يفتح المستكشف على مجلد الملف المحدد",
-			L"Открывает проводник в папке выбранного файла", L"Oeffnet den Explorer im Ordner der ausgewaehlten Datei", L"Abre o Explorer na pasta do arquivo selecionado", L"Opent Verkenner in de map van het geselecteerde bestand",
-			L"Otwiera Eksplorator w folderze wybranego pliku", L"Secili dosyanin klasorunu Gezgin'de acar"));
-	{
-		CCustomPopupMenu* subSort = menu.AddSubMenu(
-			LL14(L"並べ替え", L"Sort", L"Trier", L"Ordina", L"Ordenar", L"정렬", L"排序", L"ترتيب", L"Сортировка", L"Sortieren", L"Ordenar", L"Sorteren", L"Sortuj", L"Sirala"),
-			LL14(L"プレイリスト全体を名前／アーティスト／アルバム／時間で並べ替えます", L"Sort the whole playlist by name, artist, album, or duration", L"Trie toute la liste par nom, artiste, album ou duree", L"Ordina tutta la playlist per nome, artista, album o durata",
-				L"Ordena toda la lista por nombre, artista, album o duracion", L"재생목록 전체를 이름/아티스트/앨범/시간으로 정렬합니다", L"按名称/艺术家/专辑/时长对整个播放列表排序", L"يرتب القائمة كلها حسب الاسم/الفنان/الألبوم/المدة",
-				L"Сортирует весь плейлист по имени, исполнителю, альбому или длительности", L"Sortiert die ganze Playlist nach Name, Interpret, Album oder Dauer", L"Ordena toda a lista por nome, artista, album ou duracao", L"Sorteert de hele lijst op naam, artiest, album of duur",
-				L"Sortuje cala liste wg nazwy, artysty, albumu lub czasu", L"Tum listeyi ad/sanatci/album/sureye gore siralar"));
-		if (subSort) {
-			subSort->AddCheck(PL_CTX_SORT_NAME,
-				LL14(L"名前", L"Name", L"Nom", L"Nome", L"Nombre", L"이름", L"名称", L"الاسم", L"Имя", L"Name", L"Nome", L"Naam", L"Nazwa", L"Ad"),
-				savedata.mpSortKey == 1,
-				LL14(L"ファイル名／タイトル順に並べ替えます", L"Sort by file name / title", L"Trier par nom de fichier / titre", L"Ordina per nome file / titolo",
-					L"Ordenar por nombre de archivo / titulo", L"파일명/제목 순으로 정렬합니다", L"按文件名/标题排序", L"يرتب حسب اسم الملف / العنوان",
-					L"Сортировка по имени файла / названию", L"Nach Dateiname / Titel sortieren", L"Ordenar por nome de arquivo / titulo", L"Sorteren op bestandsnaam / titel",
-					L"Sortuj wg nazwy pliku / tytulu", L"Dosya adi / basliga gore sirala"));
-			subSort->AddCheck(PL_CTX_SORT_ART,
-				LL14(L"アーティスト", L"Artist", L"Artiste", L"Artista", L"Artista", L"아티스트", L"艺术家", L"الفنان", L"Исполнитель", L"Interpret", L"Artista", L"Artiest", L"Artysta", L"Sanatci"),
-				savedata.mpSortKey == 2,
-				LL14(L"アーティスト名順に並べ替えます", L"Sort by artist name", L"Trier par nom d'artiste", L"Ordina per nome artista",
-					L"Ordenar por nombre de artista", L"아티스트 이름 순으로 정렬합니다", L"按艺术家名排序", L"يرتب حسب اسم الفنان",
-					L"Сортировка по имени исполнителя", L"Nach Interpret sortieren", L"Ordenar por nome do artista", L"Sorteren op artiestnaam",
-					L"Sortuj wg artysty", L"Sanatci adina gore sirala"));
-			subSort->AddCheck(PL_CTX_SORT_ALB,
-				LL14(L"アルバム", L"Album", L"Album", L"Album", L"Album", L"앨범", L"专辑", L"الألبوم", L"Альбом", L"Album", L"Album", L"Album", L"Album", L"Album"),
-				savedata.mpSortKey == 3,
-				LL14(L"アルバム名順に並べ替えます", L"Sort by album name", L"Trier par nom d'album", L"Ordina per nome album",
-					L"Ordenar por nombre de album", L"앨범 이름 순으로 정렬합니다", L"按专辑名排序", L"يرتب حسب اسم الألبوم",
-					L"Сортировка по названию альбома", L"Nach Album sortieren", L"Ordenar por nome do album", L"Sorteren op albumnaam",
-					L"Sortuj wg albumu", L"Album adina gore sirala"));
-			subSort->AddCheck(PL_CTX_SORT_TIME,
-				LL14(L"時間", L"Time", L"Duree", L"Durata", L"Duracion", L"시간", L"时间", L"الوقت", L"Время", L"Zeit", L"Duracao", L"Tijd", L"Czas", L"Sure"),
-				savedata.mpSortKey == 4,
-				LL14(L"再生時間の短い／長い順に並べ替えます", L"Sort by track duration", L"Trier par duree de piste", L"Ordina per durata traccia",
-					L"Ordenar por duracion de pista", L"재생 시간 순으로 정렬합니다", L"按曲目时长排序", L"يرتب حسب مدة المقطع",
-					L"Сортировка по длительности трека", L"Nach Spieldauer sortieren", L"Ordenar por duracao da faixa", L"Sorteren op speelduur",
-					L"Sortuj wg czasu trwania", L"Parca suresine gore sirala"));
+			extern void MpFeatAppendChapterMenu(CCustomPopupMenu& menu, int row);
+			MpFeatAppendChapterMenu(*subTag, Lindex);
 		}
 	}
 	menu.AddSeparator();
-	menu.AddCommand(PL_CTX_AB_SET_A,
-		LL14(L"A-B: 現在位置をAに", L"A-B: Set A at position", L"A-B: Definir A", L"A-B: Imposta A", L"A-B: Fijar A", L"A-B: 현재 위치를 A로", L"A-B: 将当前位置设为A", L"A-B: تعيين A", L"A-B: Задать A", L"A-B: A setzen", L"A-B: Definir A", L"A-B: Stel A in", L"A-B: Ustaw A", L"A-B: A ayarla"),
-		LL14(L"現在の再生位置を A-B リピートの開始点 A にします", L"Set the current playback position as A-B repeat start (A)", L"Definit la position actuelle comme debut A du repeat A-B", L"Imposta la posizione attuale come inizio A del repeat A-B",
-			L"Fija la posicion actual como inicio A del repeat A-B", L"현재 재생 위치를 A-B 반복의 시작점 A로 설정합니다", L"将当前播放位置设为 A-B 循环起点 A", L"يعين موضع التشغيل الحالي كنقطة بداية A لتكرار A-B",
-			L"Задаёт текущую позицию как начало A для A-B повтора", L"Setzt die aktuelle Position als A-B-Startpunkt A", L"Define a posicao atual como inicio A do repeat A-B", L"Stelt de huidige positie in als A-B-startpunt A",
-			L"Ustawia biezaca pozycje jako poczatek A powtarzania A-B", L"Gecerli oynatma konumunu A-B tekrarinin A baslangici yapar"));
-	menu.AddCommand(PL_CTX_AB_SET_B,
-		LL14(L"A-B: 現在位置をBに", L"A-B: Set B at position", L"A-B: Definir B", L"A-B: Imposta B", L"A-B: Fijar B", L"A-B: 현재 위치를 B로", L"A-B: 将当前位置设为B", L"A-B: تعيين B", L"A-B: Задать B", L"A-B: B setzen", L"A-B: Definir B", L"A-B: Stel B in", L"A-B: Ustaw B", L"A-B: B ayarla"),
-		LL14(L"現在の再生位置を A-B リピートの終了点 B にします", L"Set the current playback position as A-B repeat end (B)", L"Definit la position actuelle comme fin B du repeat A-B", L"Imposta la posizione attuale come fine B del repeat A-B",
-			L"Fija la posicion actual como fin B del repeat A-B", L"현재 재생 위치를 A-B 반복의 끝점 B로 설정합니다", L"将当前播放位置设为 A-B 循环终点 B", L"يعين موضع التشغيل الحالي كنقطة نهاية B لتكرار A-B",
-			L"Задаёт текущую позицию как конец B для A-B повтора", L"Setzt die aktuelle Position als A-B-Endpunkt B", L"Define a posicao atual como fim B do repeat A-B", L"Stelt de huidige positie in als A-B-eindpunt B",
-			L"Ustawia biezaca pozycje jako koniec B powtarzania A-B", L"Gecerli oynatma konumunu A-B tekrarinin B bitisi yapar"));
-	menu.AddCommand(PL_CTX_AB_CLEAR,
-		LL14(L"A-Bリピート解除", L"Clear A-B repeat", L"Effacer A-B", L"Cancella A-B", L"Borrar A-B", L"A-B 반복 해제", L"清除A-B重复", L"مسح تكرار A-B", L"Сбросить A-B", L"A-B aufheben", L"Limpar A-B", L"A-B wissen", L"Wyczysc A-B", L"A-B temizle"),
-		LL14(L"A-B リピート区間を解除して通常再生に戻します", L"Clear the A-B loop range and return to normal playback", L"Efface la plage A-B et revient a la lecture normale", L"Cancella l'intervallo A-B e torna alla riproduzione normale",
-			L"Borra el rango A-B y vuelve a la reproduccion normal", L"A-B 반복 구간을 해제하고 일반 재생으로 돌립니다", L"清除 A-B 循环区间并恢复普通播放", L"يمسح نطاق تكرار A-B ويعود للتشغيل العادي",
-			L"Сбрасывает диапазон A-B и возвращает обычное воспроизведение", L"Hebt den A-B-Bereich auf und kehrt zur normalen Wiedergabe zurueck", L"Limpa o intervalo A-B e volta a reproducao normal", L"Wist het A-B-bereik en keert terug naar normaal afspelen",
-			L"Kasuje zakres A-B i wraca do normalnego odtwarzania", L"A-B tekrar araligini temizleyip normal oynatmaya doner"));
-	if (mp && ::IsWindow(mp->GetSafeHwnd())) {
-		CCustomPopupMenu* seekSub = menu.AddSubMenu(
-			LL14(L"シーク / 練習 / キュー", L"Seek / practice / cues", L"Seek / pratique / cues", L"Seek / pratica / cue",
-				L"Seek / practica / cues", L"시크 / 연습 / 큐", L"定位 / 练习 / 标记", L"تقديم / تدريب / إشارات",
-				L"Поиск / практика / метки", L"Suche / Ubung / Cues", L"Seek / pratica / cues", L"Zoek / oefenen / cues",
-				L"Seek / cwiczenie / cue", L"Seek / alistirma / cue"),
-			LL14(L"シークバー右クリックと同系統の操作", L"Same family of actions as seek-bar RMB", L"Memes actions que le clic droit de la barre", L"Stesse azioni del tasto destro sulla barra",
-				L"Mismas acciones que el clic der. de la barra", L"시크바 우클릭과 같은 계열", L"与定位条右键同类操作", L"نفس عمليات زر يمين شريط التقديم",
-				L"Те же действия, что ПКМ по полосе", L"Wie RMB auf der Suchleiste", L"Mesmas acoes do botao dir. da barra", L"Zelfde als RMB op zoekbalk",
-				L"Jak PPM na pasku seek", L"Seek cubugu sag tik ile ayni"));
-		if (seekSub)
-			mp->AppendSeekExtrasToMenu(*seekSub, CMediaPlayerDlg::MP_SEEK_MENU_LIST);
-		menu.AddCommand(ID_MP_QUEUE_SHOW,
-			LL14(L"Up Next を表示", L"Show Up Next", L"Afficher Up Next", L"Mostra Up Next", L"Mostrar Up Next",
-				L"Up Next 표시", L"显示 Up Next", L"عرض Up Next", L"Показать Up Next", L"Up Next anzeigen",
-				L"Mostrar Up Next", L"Up Next tonen", L"Pokaz Up Next", L"Up Next goster"),
-			LL14(L"これから再生する Up Next（キュー）一覧を表示します", L"Show the Up Next queue of upcoming tracks", L"Affiche la file Up Next des pistes a venir", L"Mostra la coda Up Next delle tracce successive",
-				L"Muestra la cola Up Next de pistas siguientes", L"다음에 재생할 Up Next(큐) 목록을 표시합니다", L"显示即将播放的 Up Next（队列）列表", L"يعرض قائمة Up Next للمقاطع القادمة",
-				L"Показывает очередь Up Next следующих треков", L"Zeigt die Up-Next-Warteschlange kommender Titel", L"Mostra a fila Up Next das proximas faixas", L"Toont de Up Next-wachtrij van komende nummers",
-				L"Pokazuje kolejke Up Next nadchodzacych utworow", L"Siradaki parcalarin Up Next kuyrugunu gosterir"));
-		CCustomPopupMenu* lrcSub = menu.AddSubMenu(
-			LL14(L"歌詞タイミング", L"Lyrics timing", L"Timing paroles", L"Timing testi", L"Temporizacion letra",
-				L"가사 타이밍", L"歌词时序", L"توقيت الكلمات", L"Тайминг текста", L"Text-Timing",
-				L"Timing da letra", L"Songtekst-timing", L"Timing tekstu", L"Soz zamanlama"),
-			LL14(L"LRC 歌詞の表示タイミングを前後に微調整します", L"Fine-tune LRC lyrics display timing forward or back", L"Ajuste finement le timing d'affichage des paroles LRC", L"Regola finemente il timing di visualizzazione LRC",
-				L"Ajusta con precision el timing de visualizacion LRC", L"LRC 가사 표시 타이밍을 앞뒤로 미세 조정합니다", L"微调 LRC 歌词显示时序（提前或延后）", L"يضبط بدقة توقيت عرض كلمات LRC للأمام أو للخلف",
-				L"Тонко сдвигает тайминг отображения LRC вперёд или назад", L"Feinjustiert das LRC-Text-Timing vor oder zurueck", L"Ajusta finamente o timing de exibicao LRC para frente ou atras", L"Stelt LRC-songtekst-timing fijn bij vooruit of terug",
-				L"Precyzyjnie przesuwa timing wyswietlania LRC do przodu lub tylu", L"LRC soz gosterim zamanlamasini ileri/geri ince ayarlar"));
-		if (lrcSub) {
-			lrcSub->AddCommand(ID_MP_LRC_MINUS100, L"-100 ms",
-				LL14(L"歌詞表示を 100 ms 早めます（タイミングを前へずらす）", L"Shift lyrics timing earlier by 100 ms", L"Avance le timing des paroles de 100 ms", L"Anticipa il timing dei testi di 100 ms",
-					L"Adelanta el timing de la letra 100 ms", L"가사 표시를 100 ms 앞당깁니다", L"将歌词时序提前 100 ms", L"يقدّم توقيت الكلمات بمقدار 100 مللي ثانية",
-					L"Сдвигает текст на 100 мс раньше", L"Verschiebt den Text um 100 ms nach vorn", L"Adianta o timing da letra em 100 ms", L"Verschuift songtekst-timing 100 ms eerder",
-					L"Przesuwa timing tekstu o 100 ms wcześniej", L"Soz zamanlamasini 100 ms one alir"));
-			lrcSub->AddCommand(ID_MP_LRC_MINUS50, L"-50 ms",
-				LL14(L"歌詞表示を 50 ms 早めます（タイミングを前へずらす）", L"Shift lyrics timing earlier by 50 ms", L"Avance le timing des paroles de 50 ms", L"Anticipa il timing dei testi di 50 ms",
-					L"Adelanta el timing de la letra 50 ms", L"가사 표시를 50 ms 앞당깁니다", L"将歌词时序提前 50 ms", L"يقدّم توقيت الكلمات بمقدار 50 مللي ثانية",
-					L"Сдвигает текст на 50 мс раньше", L"Verschiebt den Text um 50 ms nach vorn", L"Adianta o timing da letra em 50 ms", L"Verschuift songtekst-timing 50 ms eerder",
-					L"Przesuwa timing tekstu o 50 ms wcześniej", L"Soz zamanlamasini 50 ms one alir"));
-			lrcSub->AddCommand(ID_MP_LRC_MINUS10, L"-10 ms",
-				LL14(L"歌詞表示を 10 ms 早めます（タイミングを前へずらす）", L"Shift lyrics timing earlier by 10 ms", L"Avance le timing des paroles de 10 ms", L"Anticipa il timing dei testi di 10 ms",
-					L"Adelanta el timing de la letra 10 ms", L"가사 표시를 10 ms 앞당깁니다", L"将歌词时序提前 10 ms", L"يقدّم توقيت الكلمات بمقدار 10 مللي ثانية",
-					L"Сдвигает текст на 10 мс раньше", L"Verschiebt den Text um 10 ms nach vorn", L"Adianta o timing da letra em 10 ms", L"Verschuift songtekst-timing 10 ms eerder",
-					L"Przesuwa timing tekstu o 10 ms wcześniej", L"Soz zamanlamasini 10 ms one alir"));
-			lrcSub->AddCommand(ID_MP_LRC_PLUS10, L"+10 ms",
-				LL14(L"歌詞表示を 10 ms 遅らせます（タイミングを後ろへずらす）", L"Shift lyrics timing later by 10 ms", L"Retarde le timing des paroles de 10 ms", L"Ritarda il timing dei testi di 10 ms",
-					L"Retrasa el timing de la letra 10 ms", L"가사 표시를 10 ms 늦춥니다", L"将歌词时序延后 10 ms", L"يؤخّر توقيت الكلمات بمقدار 10 مللي ثانية",
-					L"Сдвигает текст на 10 мс позже", L"Verschiebt den Text um 10 ms nach hinten", L"Atrasa o timing da letra em 10 ms", L"Verschuift songtekst-timing 10 ms later",
-					L"Przesuwa timing tekstu o 10 ms pozniej", L"Soz zamanlamasini 10 ms geriye alir"));
-			lrcSub->AddCommand(ID_MP_LRC_PLUS50, L"+50 ms",
-				LL14(L"歌詞表示を 50 ms 遅らせます（タイミングを後ろへずらす）", L"Shift lyrics timing later by 50 ms", L"Retarde le timing des paroles de 50 ms", L"Ritarda il timing dei testi di 50 ms",
-					L"Retrasa el timing de la letra 50 ms", L"가사 표시를 50 ms 늦춥니다", L"将歌词时序延后 50 ms", L"يؤخّر توقيت الكلمات بمقدار 50 مللي ثانية",
-					L"Сдвигает текст на 50 мс позже", L"Verschiebt den Text um 50 ms nach hinten", L"Atrasa o timing da letra em 50 ms", L"Verschuift songtekst-timing 50 ms later",
-					L"Przesuwa timing tekstu o 50 ms pozniej", L"Soz zamanlamasini 50 ms geriye alir"));
-			lrcSub->AddCommand(ID_MP_LRC_PLUS100, L"+100 ms",
-				LL14(L"歌詞表示を 100 ms 遅らせます（タイミングを後ろへずらす）", L"Shift lyrics timing later by 100 ms", L"Retarde le timing des paroles de 100 ms", L"Ritarda il timing dei testi di 100 ms",
-					L"Retrasa el timing de la letra 100 ms", L"가사 표시를 100 ms 늦춥니다", L"将歌词时序延后 100 ms", L"يؤخّر توقيت الكلمات بمقدار 100 مللي ثانية",
-					L"Сдвигает текст на 100 мс позже", L"Verschiebt den Text um 100 ms nach hinten", L"Atrasa o timing da letra em 100 ms", L"Verschuift songtekst-timing 100 ms later",
-					L"Przesuwa timing tekstu o 100 ms pozniej", L"Soz zamanlamasini 100 ms geriye alir"));
-			lrcSub->AddSeparator();
-			lrcSub->AddCommand(ID_MP_LRC_SAVE,
-				LL14(L"LRC を保存", L"Save LRC", L"Enregistrer LRC", L"Salva LRC", L"Guardar LRC",
-					L"LRC 저장", L"保存 LRC", L"حفظ LRC", L"Сохранить LRC", L"LRC speichern",
-					L"Salvar LRC", L"LRC opslaan", L"Zapisz LRC", L"LRC kaydet"),
-				LL14(L"調整した LRC オフセットをファイルに保存します", L"Save the adjusted LRC offset to the lyrics file", L"Enregistre le decalage LRC ajuste dans le fichier", L"Salva l'offset LRC regolato nel file dei testi",
-					L"Guarda el desfase LRC ajustado en el archivo", L"조정한 LRC 오프셋을 파일에 저장합니다", L"将调整后的 LRC 偏移保存到歌词文件", L"يحفظ إزاحة LRC المضبوطة في ملف الكلمات",
-					L"Сохраняет скорректированное смещение LRC в файл", L"Speichert den angepassten LRC-Versatz in die Datei", L"Salva o offset LRC ajustado no arquivo de letra", L"Slaat de aangepaste LRC-offset op in het bestand",
-					L"Zapisuje skorygowany offset LRC do pliku", L"Ayarlanan LRC ofsetini soz dosyasina kaydeder"));
+	CCustomPopupMenu* subWin = menu.AddSubMenu(
+		LL14(L"ウィンドウ", L"Windows", L"Fenetres", L"Finestre",
+			L"Ventanas", L"창", L"窗口", L"نوافذ",
+			L"Окна", L"Fenster", L"Janelas", L"Vensters",
+			L"Okna", L"Pencereler"),
+		LL14(L"再生詳細・EQ・アナライザーなどのウィンドウ", L"Playback details, EQ, analyzer, and other windows", L"Details lecture, egaliseur, analyseur…", L"Dettagli, equalizzatore, analizzatore…",
+			L"Detalles, ecualizador, analizador…", L"재생 상세·EQ·애널라이저 등 창", L"播放详情、均衡器、分析器等窗口", L"تفاصيل التشغيل والمعادل والمحلل…",
+			L"Параметры, эквалайзер, анализатор…", L"Wiedergabedetails, Equalizer, Analyzer…", L"Detalhes, equalizador, analisador…", L"Afspeeldetails, equalizer, analyser…",
+			L"Szczegoly, equalizer, analizator…", L"Oynatma, equalizer, analizor…"));
+	if (subWin) {
+		subWin->AddCommand(PL_CTX_PROTOOLS,
+				LL14(L"再生詳細...", L"Playback details...", L"Details lecture...", L"Dettagli riproduzione...",
+					L"Detalles de reproduccion...", L"재생 상세...", L"播放详情...", L"تفاصيل التشغيل...",
+					L"Параметры воспроизведения...", L"Wiedergabedetails...", L"Detalhes de reproducao...", L"Afspeeldetails...",
+					L"Szczegoly odtwarzania...", L"Oynatma ayrintilari..."),
+				LL14(L"ギャップレスや相関など、再生まわりの詳細ツールを開きます", L"Open advanced playback tools (gapless, correlation, and more)", L"Ouvre les outils avances de lecture (gapless, correlation…)", L"Apre gli strumenti avanzati di riproduzione (gapless, correlazione…)",
+					L"Abre herramientas avanzadas de reproduccion (gapless, correlacion…)", L"갭리스·상관 등 재생 관련 상세 도구를 엽니다", L"打开播放相关高级工具（无缝、相关等）", L"يفتح أدوات تشغيل متقدمة (بلا فجوات، ارتباط…)",
+					L"Открывает доп. инструменты воспроизведения (gapless, корреляция…)", L"Oeffnet erweiterte Wiedergabe-Tools (Gapless, Korrelation…)", L"Abre ferramentas avancadas de reproducao (gapless, correlacao…)", L"Opent geavanceerde afspeelhulpmiddelen (gapless, correlatie…)",
+					L"Otwiera zaawansowane narzedzia odtwarzania (gapless, korelacja…)", L"Gelismis oynatma araclarini acar (gapless, korelasyon…)"));
+		subWin->AddCheck(PL_CTX_EQ,
+				LL14(L"イコライザーを開く", L"Open Equalizer", L"Ouvrir l'egaliseur", L"Apri equalizzatore",
+					L"Abrir ecualizador", L"이퀄라이저 열기", L"打开均衡器", L"فتح المعادل",
+					L"Открыть эквалайзер", L"Equalizer offnen", L"Abrir equalizador", L"Equalizer openen",
+					L"Otworz equalizer", L"Equalizeri ac"),
+				savedata.eqwindow ? TRUE : FALSE,
+				LL14(L"イコライザーウィンドウを開く／閉じる", L"Show or hide the equalizer window", L"Affiche ou masque la fenetre egaliseur", L"Mostra o nasconde la finestra equalizzatore",
+					L"Muestra u oculta la ventana del ecualizador", L"이퀄라이저 창을 열거나 닫습니다", L"打开或关闭均衡器窗口", L"يظهر أو يخفي نافذة المعادل",
+					L"Показывает или скрывает окно эквалайзера", L"Blendet das Equalizer-Fenster ein oder aus", L"Mostra ou oculta a janela do equalizador", L"Toont of verbergt het equalizervenster",
+					L"Pokazuje lub ukrywa okno equalizera", L"Equalizer penceresini acar veya kapatir"));
+		subWin->AddCheck(PL_CTX_ANALYZER,
+				LL14(L"アナライザーを開く", L"Open Analyzer", L"Ouvrir l'analyseur", L"Apri analizzatore",
+					L"Abrir analizador", L"애널라이저 열기", L"打开分析器", L"فتح المحلل",
+					L"Открыть анализатор", L"Analyzer offnen", L"Abrir analisador", L"Analyser openen",
+					L"Otworz analizator", L"Analizoru ac"),
+				savedata.analyzerwindow ? TRUE : FALSE,
+				LL14(L"スペクトラム・アナライザーを開く／閉じる", L"Show or hide the spectrum analyzer", L"Affiche ou masque l'analyseur de spectre", L"Mostra o nasconde l'analizzatore di spettro",
+					L"Muestra u oculta el analizador de espectro", L"스펙트럼 애널라이저를 열거나 닫습니다", L"打开或关闭频谱分析器", L"يظهر أو يخفي محلل الطيف",
+					L"Показывает или скрывает спектр-анализатор", L"Blendet den Spektrum-Analyzer ein oder aus", L"Mostra ou oculta o analisador de espectro", L"Toont of verbergt de spectrumanalyzer",
+					L"Pokazuje lub ukrywa analizator widma", L"Spektrum analizorunu acar veya kapatir"));
+		subWin->AddCheck(PL_CTX_PIANOROLL,
+				LL14(L"ピアノロールを開く", L"Open Piano Roll", L"Ouvrir le piano roll", L"Apri piano roll",
+					L"Abrir piano roll", L"피아노 롤 열기", L"打开钢琴卷帘", L"فتح لفة البيانو",
+					L"Открыть пианоролл", L"Piano Roll offnen", L"Abrir piano roll", L"Piano roll openen",
+					L"Otworz piano roll", L"Piano roll'u ac"),
+				savedata.pianorollwindow ? TRUE : FALSE,
+				LL14(L"ピアノロール（音程表示）を開く／閉じる", L"Show or hide the piano-roll pitch display", L"Affiche ou masque le piano roll (hauteur)", L"Mostra o nasconde il piano roll (altezza)",
+					L"Muestra u oculta el piano roll (altura)", L"피아노 롤(음정 표시)을 열거나 닫습니다", L"打开或关闭钢琴卷帘（音高显示）", L"يظهر أو يخفي لفة البيانو (عرض الطبقة)",
+					L"Показывает или скрывает пианоролл (высота тона)", L"Blendet die Piano-Roll (Tonhoehe) ein oder aus", L"Mostra ou oculta o piano roll (altura)", L"Toont of verbergt de piano-roll (toonhoogte)",
+					L"Pokazuje lub ukrywa piano roll (wysokosc dzwieku)", L"Piano roll (perde gosterimi) acar veya kapatir"));
+		if (hasMp) {
+			subWin->AddCheck(PL_CTX_DESK_LRC,
+						LL14(L"歌詞ウィンドウを表示", L"Show lyrics window", L"Afficher fenetre paroles", L"Mostra finestra testi", L"Mostrar ventana de letra",
+							L"가사 창 표시", L"显示歌词窗口", L"عرض نافذة الكلمات", L"Показать окно текста", L"Textfenster anzeigen",
+							L"Mostrar janela de letra", L"Songtekstvenster tonen", L"Pokaz okno tekstu", L"Soz penceresini goster"),
+						IsDesktopLyricsOpen(),
+						LL14(L"デスクトップ歌詞ウィンドウの表示／非表示を切り替えます", L"Toggle the desktop lyrics window on or off", L"Affiche ou masque la fenetre de paroles bureau", L"Mostra o nasconde la finestra testi sul desktop",
+							L"Muestra u oculta la ventana de letra en el escritorio", L"데스크톱 가사 창을 표시/숨김 전환합니다", L"切换桌面歌词窗口的显示/隐藏", L"يبدّل عرض نافذة كلمات سطح المكتب",
+							L"Включает или скрывает окно текста на рабочем столе", L"Schaltet das Desktop-Textfenster ein oder aus", L"Alterna a janela de letra na area de trabalho", L"Toont of verbergt het desktop-songtekstvenster",
+							L"Wlacza lub ukrywa okno tekstu na pulpicie", L"Masaustu soz penceresini acar/kapatir"));
+			subWin->AddCommand(PL_CTX_SSVIZ,
+						LL14(L"SS ビジュアライザ", L"SS visualizer", L"Visualiseur SS", L"Visualizzatore SS", L"Visualizador SS", L"SS 비주얼", L"SS 可视化", L"عارض SS", L"SS-визуализатор", L"SS-Visualizer", L"Visual SS", L"SS-visualizer", L"Wizual SS", L"SS gorsel"),
+						LL14(L"スクリーンセーバー風のビジュアライザを開きます", L"Open the screensaver-style visualizer", L"Ouvre le visualiseur style ecran de veille", L"Apre il visualizzatore stile screensaver",
+							L"Abre el visualizador estilo salvapantallas", L"화면 보호기 스타일 비주얼라이저를 엽니다", L"打开屏保风格可视化器", L"يفتح عارضاً بصرياً بأسلوب شاشة التوقف",
+							L"Открывает визуализатор в стиле скринсейвера", L"Oeffnet den Visualizer im Bildschirmschoner-Stil", L"Abre o visualizador estilo protetor de tela", L"Opent de visualizer in screensaverstijl",
+							L"Otwiera wizualizer w stylu wygaszacza", L"Ekran koruyucu tarzinda gorsellestiriciyi acar"));
 		}
 	}
-	if (mp && ::IsWindow(mp->GetSafeHwnd())) {
+	menu.AddSeparator();
+	CCustomPopupMenu* subLib = menu.AddSubMenu(
+		LL14(L"ライブラリ", L"Library", L"Bibliotheque", L"Libreria",
+			L"Biblioteca", L"라이브러리", L"媒体库", L"مكتبة",
+			L"Библиотека", L"Bibliothek", L"Biblioteca", L"Bibliotheek",
+			L"Biblioteka", L"Kitaplik"),
+		LL14(L"欠損処理・追加・並べ替えなど", L"Missing files, add tracks, sort, and more", L"Manquants, ajout, tri…", L"Mancanti, aggiungi, ordina…",
+			L"Faltantes, anadir, ordenar…", L"결손 처리·추가·정렬 등", L"缺失处理、添加、排序等", L"مفقود وإضافة وترتيب…",
+			L"Отсутствующие, добавление, сортировка…", L"Fehlende, hinzufuegen, sortieren…", L"Ausentes, adicionar, ordenar…", L"Ontbrekend, toevoegen, sorteren…",
+			L"Brakujace, dodawanie, sortowanie…", L"Eksik, ekleme, siralama…"));
+	if (subLib) {
+		subLib->AddCommand(PL_CTX_REMOVE_MISSING,
+				LL14(L"存在しないファイルを一覧から削除", L"Remove missing files from list",
+					L"Supprimer les fichiers manquants", L"Rimuovi file mancanti", L"Eliminar archivos inexistentes",
+					L"없는 파일을 목록에서 삭제", L"从列表中删除不存在的文件", L"إزالة الملفات المفقودة",
+					L"Удалить отсутствующие файлы", L"Fehlende Dateien entfernen", L"Remover arquivos ausentes",
+					L"Ontbrekende bestanden verwijderen", L"Usuń brakujące pliki", L"Eksik dosyalari kaldir"),
+				LL14(L"ディスク上に無い項目だけを一覧から外します（実ファイルは触れません）", L"Remove only items missing on disk from the list (files on disk untouched)", L"Retire de la liste seuls les elements absents du disque (fichiers intacts)", L"Rimuove dall'elenco solo voci assenti sul disco (file intatti)",
+					L"Quita de la lista solo elementos ausentes en disco (archivos intactos)", L"디스크에 없는 항목만 목록에서 제거합니다(실제 파일은 건드리지 않음)", L"仅从列表移除磁盘上不存在的项（不触碰实际文件）", L"يزيل من القائمة فقط العناصر غير الموجودة على القرص (الملفات كما هي)",
+					L"Убирает из списка только отсутствующие на диске (файлы не трогает)", L"Entfernt nur fehlende Eintraege aus der Liste (Dateien unberuehrt)", L"Remove da lista so itens ausentes no disco (arquivos intactos)", L"Verwijdert alleen ontbrekende items uit de lijst (bestanden onaangeroerd)",
+					L"Usuwa z listy tylko brakujace na dysku (plikow nie rusza)", L"Diskte olmayanlari listeden cikarir (dosyalara dokunmaz)"));
+		subLib->AddCommand(PL_CTX_RESCAN_MISS,
+				LL14(L"欠損マークを再スキャン", L"Rescan missing marks", L"Rescanner les manquants", L"Ricontrolla mancanti",
+					L"Reexaminar faltantes", L"결손 표시 재스캔", L"重新扫描缺失标记", L"إعادة فحص المفقود",
+					L"Пересканировать отсутствующие", L"Fehlend-Markierungen erneut pruefen", L"Verificar ausentes de novo",
+					L"Ontbrekende markeringen opnieuw scannen", L"Ponownie skanuj brakujace", L"Eksik isaretlerini yeniden tara"),
+				LL14(L"各曲の有無を再チェックし、欠損マーク表示を更新します", L"Recheck which tracks exist and refresh missing-file marks", L"Revérifie l'existence des pistes et met a jour les marques manquantes", L"Ricontrolla l'esistenza delle tracce e aggiorna i segni mancanti",
+					L"Vuelve a comprobar existencia y actualiza marcas de faltantes", L"각 곡 존재 여부를 다시 확인해 결손 표시를 갱신합니다", L"重新检查各曲是否存在并更新缺失标记", L"يعيد فحص وجود المقاطع ويحدّث علامات المفقود",
+					L"Снова проверяет наличие треков и обновляет метки отсутствия", L"Prueft erneut die Existenz und aktualisiert Fehlend-Markierungen", L"Verifica de novo a existencia e atualiza marcas de ausentes", L"Controleert opnieuw bestaan en vernieuwt ontbrekende markeringen",
+					L"Ponownie sprawdza istnienie i odswieza oznaczenia brakujacych", L"Parcalarin varligini yeniden kontrol edip eksik isaretlerini gunceller"));
+		subLib->AddCommand(PL_CTX_REFRESH_JAK,
+				LL14(L"選択曲のジャケを再取得", L"Refresh jacket for selection", L"Rafraichir la pochette", L"Aggiorna copertina",
+					L"Actualizar caratula", L"선택 곡 재킷 다시 가져오기", L"重新获取所选封面", L"تحديث الغلاف للتحديد",
+					L"Обновить обложку выбранного", L"Cover der Auswahl neu laden", L"Atualizar capa da selecao",
+					L"Hoes van selectie vernieuwen", L"Odswiez okladke zaznaczenia", L"Secimin kapagini yenile"),
+				LL14(L"選択曲のジャケット画像をファイル／埋め込みから読み直します", L"Reload the selection's cover art from file or embedded tags", L"Recharge la pochette depuis le fichier ou les tags integres", L"Ricarica la copertina da file o tag incorporati",
+					L"Recarga la caratula desde archivo o etiquetas incrustadas", L"선택 곡 재킷 이미지를 파일/임베드에서 다시 읽습니다", L"从文件或内嵌标签重新加载所选封面", L"يعيد تحميل غلاف التحديد من الملف أو الوسوم المضمّنة",
+					L"Перезагружает обложку из файла или встроенных тегов", L"Laedt das Cover der Auswahl neu aus Datei oder Tags", L"Recarrega a capa da selecao do arquivo ou tags embutidas", L"Herlaadt de hoes van de selectie uit bestand of tags",
+					L"Ponownie wczytuje okladke z pliku lub tagow", L"Secimin kapagini dosya veya gomulu etiketlerden yeniden yukler"));
+		if (hasMp) {
+			subLib->AddCommand(PL_CTX_DUPES,
+						LL14(L"重複スキャン", L"Scan duplicates", L"Detecter doublons", L"Scansiona duplicati", L"Buscar duplicados", L"중복 스캔", L"扫描重复", L"فحص التكرار", L"Поиск дублей", L"Duplikate scannen", L"Procurar duplicatas", L"Duplicaten scannen", L"Skanuj duplikaty", L"Kopyalari tara"),
+						LL14(L"リスト内の重複ファイルを検出して整理しやすくします", L"Find duplicate files in the list so you can clean them up", L"Detecte les fichiers en double dans la liste pour les nettoyer", L"Trova file duplicati nell'elenco per ripulirli",
+							L"Busca archivos duplicados en la lista para limpiarlos", L"목록 내 중복 파일을 찾아 정리하기 쉽게 합니다", L"扫描列表中的重复文件以便清理", L"يكتشف الملفات المكررة في القائمة لتسهيل التنظيف",
+							L"Находит дубликаты в списке для удобной очистки", L"Findet Duplikate in der Liste zur leichteren Bereinigung", L"Encontra duplicatas na lista para facilitar a limpeza", L"Vindt duplicaten in de lijst om op te schonen",
+							L"Wyszukuje duplikaty na liscie, by latwiej je usunac", L"Listedeki yinelenen dosyalari bulup temizlemeyi kolaylastirir"));
+			subLib->AddCommand(PL_CTX_FOLDER_SYNC,
+						LL14(L"フォルダ差分", L"Folder sync diff", L"Diff dossier", L"Diff cartella", L"Diff carpeta", L"폴더 차이", L"文件夹差异", L"فرق المجلد", L"Разница папки", L"Ordner-Diff", L"Diff pasta", L"Mapverschil", L"Roznica folderu", L"Klasor farki"),
+						LL14(L"フォルダとリストの差分を調べ、未追加／欠落を確認します", L"Compare folder vs list to see missing or not-yet-added files", L"Compare dossier et liste pour voir manquants / non ajoutes", L"Confronta cartella e elenco per file mancanti / non aggiunti",
+							L"Compara carpeta y lista para ver faltantes / no anadidos", L"폴더와 목록의 차이를 확인해 미추가/결손을 봅니다", L"比较文件夹与列表，查看未添加或缺失项", L"يقارن المجلد والقائمة لمعرفة الناقص/غير المضاف",
+							L"Сравнивает папку и список (отсутствующие / ещё не добавленные)", L"Vergleicht Ordner und Liste (fehlend / noch nicht hinzugefuegt)", L"Compara pasta e lista (ausentes / ainda nao adicionados)", L"Vergelijkt map en lijst (ontbrekend / nog niet toegevoegd)",
+							L"Porownuje folder i liste (brakujace / jeszcze niedodane)", L"Klasor ile listeyi karsilastirip eksik/eklenmemisleri gosterir"));
+		}
+		subLib->AddCommand(PL_CTX_ADD_FOLDER,
+				LL14(L"フォルダから追加...", L"Add from folder...", L"Ajouter depuis un dossier...", L"Aggiungi da cartella...",
+					L"Anadir desde carpeta...", L"폴더에서 추가...", L"从文件夹添加...", L"إضافة من مجلد...",
+					L"Добавить из папки...", L"Aus Ordner hinzufugen...", L"Adicionar da pasta...", L"Toevoegen uit map...",
+					L"Dodaj z folderu...", L"Klasorden ekle..."),
+				LL14(L"フォルダを選んで、その中の曲をリストへ追加します", L"Pick a folder and add its tracks to the playlist", L"Choisit un dossier et ajoute ses pistes a la liste", L"Scegli una cartella e aggiungi le sue tracce all'elenco",
+					L"Elige una carpeta y anade sus pistas a la lista", L"폴더를 골라 그 안의 곡을 목록에 추가합니다", L"选择文件夹并将其曲目添加到列表", L"يختار مجلداً ويضيف مقاطعه إلى القائمة",
+					L"Выбирает папку и добавляет её треки в список", L"Waehlt einen Ordner und fuegt dessen Titel zur Liste hinzu", L"Escolhe uma pasta e adiciona suas faixas a lista", L"Kiest een map en voegt de nummers toe aan de lijst",
+					L"Wybiera folder i dodaje jego utwory do listy", L"Bir klasor secip icindeki parcalari listeye ekler"));
+		subLib->AddCommand(PL_CTX_ADD_SAME_FOLDER,
+				LL14(L"同じフォルダの曲を追加", L"Add tracks from same folder", L"Ajouter les pistes du meme dossier",
+					L"Aggiungi brani dalla stessa cartella", L"Anadir pistas de la misma carpeta",
+					L"같은 폴더의 곡 추가", L"添加同一文件夹的曲目", L"إضافة مقاطع من نفس المجلد",
+					L"Добавить треки из этой же папки", L"Titel aus demselben Ordner hinzufugen",
+					L"Adicionar faixas da mesma pasta", L"Nummers uit dezelfde map toevoegen",
+					L"Dodaj utwory z tego samego folderu", L"Ayni klasordeki parcalari ekle"),
+				LL14(L"選択曲と同じフォルダ内の他の曲をまとめて追加します", L"Add other tracks from the same folder as the selection", L"Ajoute les autres pistes du meme dossier que la selection", L"Aggiunge le altre tracce della stessa cartella della selezione",
+					L"Anade otras pistas de la misma carpeta que la seleccion", L"선택 곡과 같은 폴더의 다른 곡을 한꺼번에 추가합니다", L"添加与所选同一文件夹中的其他曲目", L"يضيف مقاطع أخرى من نفس مجلد التحديد",
+					L"Добавляет другие треки из той же папки, что и выбор", L"Fuegt weitere Titel aus demselben Ordner wie die Auswahl hinzu", L"Adiciona outras faixas da mesma pasta da selecao", L"Voegt andere nummers uit dezelfde map als de selectie toe",
+					L"Dodaje inne utwory z tego samego folderu co zaznaczenie", L"Secimle ayni klasordeki diger parcalari topluca ekler"));
+		subLib->AddCommand(PL_CTX_OPEN_FOLDER,
+				LL14(L"エクスプローラーで開く", L"Open containing folder", L"Ouvrir le dossier du fichier",
+					L"Apri cartella del file", L"Abrir la carpeta del archivo",
+					L"파일 위치 열기", L"打开所在文件夹", L"فتح المجلد الحاوي",
+					L"Открыть папку с файлом", L"Ordner im Explorer offnen",
+					L"Abrir a pasta do arquivo", L"Map van bestand openen",
+					L"Otworz folder pliku", L"Dosya klasorunu ac"),
+				LL14(L"選択曲のファイルがあるフォルダをエクスプローラーで開きます", L"Open Explorer to the folder that contains the selected file", L"Ouvre l'Explorateur sur le dossier contenant le fichier", L"Apre Esplora risorse sulla cartella del file selezionato",
+					L"Abre el Explorador en la carpeta del archivo seleccionado", L"선택 곡 파일이 있는 폴더를 탐색기로 엽니다", L"在资源管理器中打开所选文件所在文件夹", L"يفتح المستكشف على مجلد الملف المحدد",
+					L"Открывает проводник в папке выбранного файла", L"Oeffnet den Explorer im Ordner der ausgewaehlten Datei", L"Abre o Explorer na pasta do arquivo selecionado", L"Opent Verkenner in de map van het geselecteerde bestand",
+					L"Otwiera Eksplorator w folderze wybranego pliku", L"Secili dosyanin klasorunu Gezgin'de acar"));
+		{
+			CCustomPopupMenu* subSort = subLib->AddSubMenu(
+				LL14(L"並べ替え", L"Sort", L"Trier", L"Ordina", L"Ordenar", L"정렬", L"排序", L"ترتيب", L"Сортировка", L"Sortieren", L"Ordenar", L"Sorteren", L"Sortuj", L"Sirala"),
+				LL14(L"プレイリスト全体を名前／アーティスト／アルバム／時間で並べ替えます", L"Sort the whole playlist by name, artist, album, or duration", L"Trie toute la liste par nom, artiste, album ou duree", L"Ordina tutta la playlist per nome, artista, album o durata",
+					L"Ordena toda la lista por nombre, artista, album o duracion", L"재생목록 전체를 이름/아티스트/앨범/시간으로 정렬합니다", L"按名称/艺术家/专辑/时长对整个播放列表排序", L"يرتب القائمة كلها حسب الاسم/الفنان/الألبوم/المدة",
+					L"Сортирует весь плейлист по имени, исполнителю, альбому или длительности", L"Sortiert die ganze Playlist nach Name, Interpret, Album oder Dauer", L"Ordena toda a lista por nome, artista, album ou duracao", L"Sorteert de hele lijst op naam, artiest, album of duur",
+					L"Sortuje cala liste wg nazwy, artysty, albumu lub czasu", L"Tum listeyi ad/sanatci/album/sureye gore siralar"));
+			if (subSort) {
+				subSort->AddCheck(PL_CTX_SORT_NAME,
+					LL14(L"名前", L"Name", L"Nom", L"Nome", L"Nombre", L"이름", L"名称", L"الاسم", L"Имя", L"Name", L"Nome", L"Naam", L"Nazwa", L"Ad"),
+					savedata.mpSortKey == 1,
+					LL14(L"ファイル名／タイトル順に並べ替えます", L"Sort by file name / title", L"Trier par nom de fichier / titre", L"Ordina per nome file / titolo",
+						L"Ordenar por nombre de archivo / titulo", L"파일명/제목 순으로 정렬합니다", L"按文件名/标题排序", L"يرتب حسب اسم الملف / العنوان",
+						L"Сортировка по имени файла / названию", L"Nach Dateiname / Titel sortieren", L"Ordenar por nome de arquivo / titulo", L"Sorteren op bestandsnaam / titel",
+						L"Sortuj wg nazwy pliku / tytulu", L"Dosya adi / basliga gore sirala"));
+				subSort->AddCheck(PL_CTX_SORT_ART,
+					LL14(L"アーティスト", L"Artist", L"Artiste", L"Artista", L"Artista", L"아티스트", L"艺术家", L"الفنان", L"Исполнитель", L"Interpret", L"Artista", L"Artiest", L"Artysta", L"Sanatci"),
+					savedata.mpSortKey == 2,
+					LL14(L"アーティスト名順に並べ替えます", L"Sort by artist name", L"Trier par nom d'artiste", L"Ordina per nome artista",
+						L"Ordenar por nombre de artista", L"아티스트 이름 순으로 정렬합니다", L"按艺术家名排序", L"يرتب حسب اسم الفنان",
+						L"Сортировка по имени исполнителя", L"Nach Interpret sortieren", L"Ordenar por nome do artista", L"Sorteren op artiestnaam",
+						L"Sortuj wg artysty", L"Sanatci adina gore sirala"));
+				subSort->AddCheck(PL_CTX_SORT_ALB,
+					LL14(L"アルバム", L"Album", L"Album", L"Album", L"Album", L"앨범", L"专辑", L"الألبوم", L"Альбом", L"Album", L"Album", L"Album", L"Album", L"Album"),
+					savedata.mpSortKey == 3,
+					LL14(L"アルバム名順に並べ替えます", L"Sort by album name", L"Trier par nom d'album", L"Ordina per nome album",
+						L"Ordenar por nombre de album", L"앨범 이름 순으로 정렬합니다", L"按专辑名排序", L"يرتب حسب اسم الألبوم",
+						L"Сортировка по названию альбома", L"Nach Album sortieren", L"Ordenar por nome do album", L"Sorteren op albumnaam",
+						L"Sortuj wg albumu", L"Album adina gore sirala"));
+				subSort->AddCheck(PL_CTX_SORT_TIME,
+					LL14(L"時間", L"Time", L"Duree", L"Durata", L"Duracion", L"시간", L"时间", L"الوقت", L"Время", L"Zeit", L"Duracao", L"Tijd", L"Czas", L"Sure"),
+					savedata.mpSortKey == 4,
+					LL14(L"再生時間の短い／長い順に並べ替えます", L"Sort by track duration", L"Trier par duree de piste", L"Ordina per durata traccia",
+						L"Ordenar por duracion de pista", L"재생 시간 순으로 정렬합니다", L"按曲目时长排序", L"يرتب حسب مدة المقطع",
+						L"Сортировка по длительности трека", L"Nach Spieldauer sortieren", L"Ordenar por duracao da faixa", L"Sorteren op speelduur",
+						L"Sortuj wg czasu trwania", L"Parca suresine gore sirala"));
+			}
+		}
+	}
+	menu.AddSeparator();
+	CCustomPopupMenu* subPlay = menu.AddSubMenu(
+		LL14(L"再生", L"Playback", L"Lecture", L"Riproduzione",
+			L"Reproduccion", L"재생", L"播放", L"تشغيل",
+			L"Воспроизведение", L"Wiedergabe", L"Reproducao", L"Afspelen",
+			L"Odtwarzanie", L"Oynatma"),
+		LL14(L"A-B・シーク・歌詞タイミングなど", L"A-B, seek, lyrics timing, and more", L"A-B, seek, timing paroles…", L"A-B, seek, timing testi…",
+			L"A-B, seek, timing letra…", L"A-B·시크·가사 타이밍 등", L"A-B、定位、歌词时序等", L"A-B وتقديم وتوقيت كلمات…",
+			L"A-B, поиск, тайминг текста…", L"A-B, Suche, Text-Timing…", L"A-B, seek, timing da letra…", L"A-B, zoeken, songtekst-timing…",
+			L"A-B, seek, timing tekstu…", L"A-B, seek, soz zamanlama…"));
+	if (subPlay) {
+		subPlay->AddCommand(PL_CTX_AB_SET_A,
+				LL14(L"A-B: 現在位置をAに", L"A-B: Set A at position", L"A-B: Definir A", L"A-B: Imposta A", L"A-B: Fijar A", L"A-B: 현재 위치를 A로", L"A-B: 将当前位置设为A", L"A-B: تعيين A", L"A-B: Задать A", L"A-B: A setzen", L"A-B: Definir A", L"A-B: Stel A in", L"A-B: Ustaw A", L"A-B: A ayarla"),
+				LL14(L"現在の再生位置を A-B リピートの開始点 A にします", L"Set the current playback position as A-B repeat start (A)", L"Definit la position actuelle comme debut A du repeat A-B", L"Imposta la posizione attuale come inizio A del repeat A-B",
+					L"Fija la posicion actual como inicio A del repeat A-B", L"현재 재생 위치를 A-B 반복의 시작점 A로 설정합니다", L"将当前播放位置设为 A-B 循环起点 A", L"يعين موضع التشغيل الحالي كنقطة بداية A لتكرار A-B",
+					L"Задаёт текущую позицию как начало A для A-B повтора", L"Setzt die aktuelle Position als A-B-Startpunkt A", L"Define a posicao atual como inicio A do repeat A-B", L"Stelt de huidige positie in als A-B-startpunt A",
+					L"Ustawia biezaca pozycje jako poczatek A powtarzania A-B", L"Gecerli oynatma konumunu A-B tekrarinin A baslangici yapar"));
+		subPlay->AddCommand(PL_CTX_AB_SET_B,
+				LL14(L"A-B: 現在位置をBに", L"A-B: Set B at position", L"A-B: Definir B", L"A-B: Imposta B", L"A-B: Fijar B", L"A-B: 현재 위치를 B로", L"A-B: 将当前位置设为B", L"A-B: تعيين B", L"A-B: Задать B", L"A-B: B setzen", L"A-B: Definir B", L"A-B: Stel B in", L"A-B: Ustaw B", L"A-B: B ayarla"),
+				LL14(L"現在の再生位置を A-B リピートの終了点 B にします", L"Set the current playback position as A-B repeat end (B)", L"Definit la position actuelle comme fin B du repeat A-B", L"Imposta la posizione attuale come fine B del repeat A-B",
+					L"Fija la posicion actual como fin B del repeat A-B", L"현재 재생 위치를 A-B 반복의 끝점 B로 설정합니다", L"将当前播放位置设为 A-B 循环终点 B", L"يعين موضع التشغيل الحالي كنقطة نهاية B لتكرار A-B",
+					L"Задаёт текущую позицию как конец B для A-B повтора", L"Setzt die aktuelle Position als A-B-Endpunkt B", L"Define a posicao atual como fim B do repeat A-B", L"Stelt de huidige positie in als A-B-eindpunt B",
+					L"Ustawia biezaca pozycje jako koniec B powtarzania A-B", L"Gecerli oynatma konumunu A-B tekrarinin B bitisi yapar"));
+		subPlay->AddCommand(PL_CTX_AB_CLEAR,
+				LL14(L"A-Bリピート解除", L"Clear A-B repeat", L"Effacer A-B", L"Cancella A-B", L"Borrar A-B", L"A-B 반복 해제", L"清除A-B重复", L"مسح تكرار A-B", L"Сбросить A-B", L"A-B aufheben", L"Limpar A-B", L"A-B wissen", L"Wyczysc A-B", L"A-B temizle"),
+				LL14(L"A-B リピート区間を解除して通常再生に戻します", L"Clear the A-B loop range and return to normal playback", L"Efface la plage A-B et revient a la lecture normale", L"Cancella l'intervallo A-B e torna alla riproduzione normale",
+					L"Borra el rango A-B y vuelve a la reproduccion normal", L"A-B 반복 구간을 해제하고 일반 재생으로 돌립니다", L"清除 A-B 循环区间并恢复普通播放", L"يمسح نطاق تكرار A-B ويعود للتشغيل العادي",
+					L"Сбрасывает диапазон A-B и возвращает обычное воспроизведение", L"Hebt den A-B-Bereich auf und kehrt zur normalen Wiedergabe zurueck", L"Limpa o intervalo A-B e volta a reproducao normal", L"Wist het A-B-bereik en keert terug naar normaal afspelen",
+					L"Kasuje zakres A-B i wraca do normalnego odtwarzania", L"A-B tekrar araligini temizleyip normal oynatmaya doner"));
+		if (hasMp) {
+			CCustomPopupMenu* seekSub = subPlay->AddSubMenu(
+				LL14(L"シーク / 練習 / キュー", L"Seek / practice / cues", L"Seek / pratique / cues", L"Seek / pratica / cue",
+					L"Seek / practica / cues", L"시크 / 연습 / 큐", L"定位 / 练习 / 标记", L"تقديم / تدريب / إشارات",
+					L"Поиск / практика / метки", L"Suche / Ubung / Cues", L"Seek / pratica / cues", L"Zoek / oefenen / cues",
+					L"Seek / cwiczenie / cue", L"Seek / alistirma / cue"),
+				LL14(L"シークバー右クリックと同系統の操作", L"Same family of actions as seek-bar RMB", L"Memes actions que le clic droit de la barre", L"Stesse azioni del tasto destro sulla barra",
+					L"Mismas acciones que el clic der. de la barra", L"시크바 우클릭과 같은 계열", L"与定位条右键同类操作", L"نفس عمليات زر يمين شريط التقديم",
+					L"Те же действия, что ПКМ по полосе", L"Wie RMB auf der Suchleiste", L"Mesmas acoes do botao dir. da barra", L"Zelfde als RMB op zoekbalk",
+					L"Jak PPM na pasku seek", L"Seek cubugu sag tik ile ayni"));
+			if (seekSub)
+				mp->AppendSeekExtrasToMenu(*seekSub, CMediaPlayerDlg::MP_SEEK_MENU_LIST);
+			subPlay->AddCommand(ID_MP_QUEUE_SHOW,
+				LL14(L"Up Next を表示", L"Show Up Next", L"Afficher Up Next", L"Mostra Up Next", L"Mostrar Up Next",
+					L"Up Next 표시", L"显示 Up Next", L"عرض Up Next", L"Показать Up Next", L"Up Next anzeigen",
+					L"Mostrar Up Next", L"Up Next tonen", L"Pokaz Up Next", L"Up Next goster"),
+				LL14(L"これから再生する Up Next（キュー）一覧を表示します", L"Show the Up Next queue of upcoming tracks", L"Affiche la file Up Next des pistes a venir", L"Mostra la coda Up Next delle tracce successive",
+					L"Muestra la cola Up Next de pistas siguientes", L"다음에 재생할 Up Next(큐) 목록을 표시합니다", L"显示即将播放的 Up Next（队列）列表", L"يعرض قائمة Up Next للمقاطع القادمة",
+					L"Показывает очередь Up Next следующих треков", L"Zeigt die Up-Next-Warteschlange kommender Titel", L"Mostra a fila Up Next das proximas faixas", L"Toont de Up Next-wachtrij van komende nummers",
+					L"Pokazuje kolejke Up Next nadchodzacych utworow", L"Siradaki parcalarin Up Next kuyrugunu gosterir"));
+			CCustomPopupMenu* lrcSub = subPlay->AddSubMenu(
+				LL14(L"歌詞タイミング", L"Lyrics timing", L"Timing paroles", L"Timing testi", L"Temporizacion letra",
+					L"가사 타이밍", L"歌词时序", L"توقيت الكلمات", L"Тайминг текста", L"Text-Timing",
+					L"Timing da letra", L"Songtekst-timing", L"Timing tekstu", L"Soz zamanlama"),
+				LL14(L"LRC 歌詞の表示タイミングを前後に微調整します", L"Fine-tune LRC lyrics display timing forward or back", L"Ajuste finement le timing d'affichage des paroles LRC", L"Regola finemente il timing di visualizzazione LRC",
+					L"Ajusta con precision el timing de visualizacion LRC", L"LRC 가사 표시 타이밍을 앞뒤로 미세 조정합니다", L"微调 LRC 歌词显示时序（提前或延后）", L"يضبط بدقة توقيت عرض كلمات LRC للأمام أو للخلف",
+					L"Тонко сдвигает тайминг отображения LRC вперёд или назад", L"Feinjustiert das LRC-Text-Timing vor oder zurueck", L"Ajusta finamente o timing de exibicao LRC para frente ou atras", L"Stelt LRC-songtekst-timing fijn bij vooruit of terug",
+					L"Precyzyjnie przesuwa timing wyswietlania LRC do przodu lub tylu", L"LRC soz gosterim zamanlamasini ileri/geri ince ayarlar"));
+			if (lrcSub) {
+				lrcSub->AddCommand(ID_MP_LRC_MINUS100, L"-100 ms",
+					LL14(L"歌詞表示を 100 ms 早めます（タイミングを前へずらす）", L"Shift lyrics timing earlier by 100 ms", L"Avance le timing des paroles de 100 ms", L"Anticipa il timing dei testi di 100 ms",
+						L"Adelanta el timing de la letra 100 ms", L"가사 표시를 100 ms 앞당깁니다", L"将歌词时序提前 100 ms", L"يقدّم توقيت الكلمات بمقدار 100 مللي ثانية",
+						L"Сдвигает текст на 100 мс раньше", L"Verschiebt den Text um 100 ms nach vorn", L"Adianta o timing da letra em 100 ms", L"Verschuift songtekst-timing 100 ms eerder",
+						L"Przesuwa timing tekstu o 100 ms wcześniej", L"Soz zamanlamasini 100 ms one alir"));
+				lrcSub->AddCommand(ID_MP_LRC_MINUS50, L"-50 ms",
+					LL14(L"歌詞表示を 50 ms 早めます（タイミングを前へずらす）", L"Shift lyrics timing earlier by 50 ms", L"Avance le timing des paroles de 50 ms", L"Anticipa il timing dei testi di 50 ms",
+						L"Adelanta el timing de la letra 50 ms", L"가사 표시를 50 ms 앞당깁니다", L"将歌词时序提前 50 ms", L"يقدّم توقيت الكلمات بمقدار 50 مللي ثانية",
+						L"Сдвигает текст на 50 мс раньше", L"Verschiebt den Text um 50 ms nach vorn", L"Adianta o timing da letra em 50 ms", L"Verschuift songtekst-timing 50 ms eerder",
+						L"Przesuwa timing tekstu o 50 ms wcześniej", L"Soz zamanlamasini 50 ms one alir"));
+				lrcSub->AddCommand(ID_MP_LRC_MINUS10, L"-10 ms",
+					LL14(L"歌詞表示を 10 ms 早めます（タイミングを前へずらす）", L"Shift lyrics timing earlier by 10 ms", L"Avance le timing des paroles de 10 ms", L"Anticipa il timing dei testi di 10 ms",
+						L"Adelanta el timing de la letra 10 ms", L"가사 표시를 10 ms 앞당깁니다", L"将歌词时序提前 10 ms", L"يقدّم توقيت الكلمات بمقدار 10 مللي ثانية",
+						L"Сдвигает текст на 10 мс раньше", L"Verschiebt den Text um 10 ms nach vorn", L"Adianta o timing da letra em 10 ms", L"Verschuift songtekst-timing 10 ms eerder",
+						L"Przesuwa timing tekstu o 10 ms wcześniej", L"Soz zamanlamasini 10 ms one alir"));
+				lrcSub->AddCommand(ID_MP_LRC_PLUS10, L"+10 ms",
+					LL14(L"歌詞表示を 10 ms 遅らせます（タイミングを後ろへずらす）", L"Shift lyrics timing later by 10 ms", L"Retarde le timing des paroles de 10 ms", L"Ritarda il timing dei testi di 10 ms",
+						L"Retrasa el timing de la letra 10 ms", L"가사 표시를 10 ms 늦춥니다", L"将歌词时序延后 10 ms", L"يؤخّر توقيت الكلمات بمقدار 10 مللي ثانية",
+						L"Сдвигает текст на 10 мс позже", L"Verschiebt den Text um 10 ms nach hinten", L"Atrasa o timing da letra em 10 ms", L"Verschuift songtekst-timing 10 ms later",
+						L"Przesuwa timing tekstu o 10 ms pozniej", L"Soz zamanlamasini 10 ms geriye alir"));
+				lrcSub->AddCommand(ID_MP_LRC_PLUS50, L"+50 ms",
+					LL14(L"歌詞表示を 50 ms 遅らせます（タイミングを後ろへずらす）", L"Shift lyrics timing later by 50 ms", L"Retarde le timing des paroles de 50 ms", L"Ritarda il timing dei testi di 50 ms",
+						L"Retrasa el timing de la letra 50 ms", L"가사 표시를 50 ms 늦춥니다", L"将歌词时序延后 50 ms", L"يؤخّر توقيت الكلمات بمقدار 50 مللي ثانية",
+						L"Сдвигает текст на 50 мс позже", L"Verschiebt den Text um 50 ms nach hinten", L"Atrasa o timing da letra em 50 ms", L"Verschuift songtekst-timing 50 ms later",
+						L"Przesuwa timing tekstu o 50 ms pozniej", L"Soz zamanlamasini 50 ms geriye alir"));
+				lrcSub->AddCommand(ID_MP_LRC_PLUS100, L"+100 ms",
+					LL14(L"歌詞表示を 100 ms 遅らせます（タイミングを後ろへずらす）", L"Shift lyrics timing later by 100 ms", L"Retarde le timing des paroles de 100 ms", L"Ritarda il timing dei testi di 100 ms",
+						L"Retrasa el timing de la letra 100 ms", L"가사 표시를 100 ms 늦춥니다", L"将歌词时序延后 100 ms", L"يؤخّر توقيت الكلمات بمقدار 100 مللي ثانية",
+						L"Сдвигает текст на 100 мс позже", L"Verschiebt den Text um 100 ms nach hinten", L"Atrasa o timing da letra em 100 ms", L"Verschuift songtekst-timing 100 ms later",
+						L"Przesuwa timing tekstu o 100 ms pozniej", L"Soz zamanlamasini 100 ms geriye alir"));
+				lrcSub->AddSeparator();
+				lrcSub->AddCommand(ID_MP_LRC_SAVE,
+					LL14(L"LRC を保存", L"Save LRC", L"Enregistrer LRC", L"Salva LRC", L"Guardar LRC",
+						L"LRC 저장", L"保存 LRC", L"حفظ LRC", L"Сохранить LRC", L"LRC speichern",
+						L"Salvar LRC", L"LRC opslaan", L"Zapisz LRC", L"LRC kaydet"),
+					LL14(L"調整した LRC オフセットをファイルに保存します", L"Save the adjusted LRC offset to the lyrics file", L"Enregistre le decalage LRC ajuste dans le fichier", L"Salva l'offset LRC regolato nel file dei testi",
+						L"Guarda el desfase LRC ajustado en el archivo", L"조정한 LRC 오프셋을 파일에 저장합니다", L"将调整后的 LRC 偏移保存到歌词文件", L"يحفظ إزاحة LRC المضبوطة في ملف الكلمات",
+						L"Сохраняет скорректированное смещение LRC в файл", L"Speichert den angepassten LRC-Versatz in die Datei", L"Salva o offset LRC ajustado no arquivo de letra", L"Slaat de aangepaste LRC-offset op in het bestand",
+						L"Zapisuje skorygowany offset LRC do pliku", L"Ayarlanan LRC ofsetini soz dosyasina kaydeder"));
+			}
+		}
+	}
+	if (hasMp) {
 		menu.AddSeparator();
-		menu.AddCommand(PL_CTX_QUEUE_ADD,
-			LL14(L"Up Next に追加", L"Add to Up Next", L"Ajouter a Up Next", L"Aggiungi a Up Next", L"Anadir a Up Next", L"Up Next에 추가", L"加入 Up Next", L"إضافة إلى Up Next", L"В Up Next", L"Zu Up Next", L"Adicionar a Up Next", L"Toevoegen aan Up Next", L"Dodaj do Up Next", L"Up Next'e ekle"),
-			LL14(L"選択曲を Up Next キューの末尾に追加します", L"Append the selection to the end of the Up Next queue", L"Ajoute la selection a la fin de la file Up Next", L"Aggiunge la selezione in coda a Up Next",
-				L"Anade la seleccion al final de la cola Up Next", L"선택 곡을 Up Next 큐 끝에 추가합니다", L"将所选追加到 Up Next 队列末尾", L"يضيف التحديد إلى نهاية طابور Up Next",
-				L"Добавляет выбор в конец очереди Up Next", L"Haengt die Auswahl an das Ende der Up-Next-Warteschlange an", L"Adiciona a selecao ao fim da fila Up Next", L"Voegt de selectie toe aan het einde van de Up Next-wachtrij",
-				L"Dodaje zaznaczenie na koniec kolejki Up Next", L"Secimi Up Next kuyrugunun sonuna ekler"));
-		menu.AddCommand(PL_CTX_QUEUE_PLAYNEXT,
-			LL14(L"次に再生", L"Play Next", L"Lire ensuite", L"Riproduci dopo", L"Reproducir despues", L"다음에 재생", L"下一首播放", L"تشغيل التالي", L"Играть следующим", L"Als Nachstes", L"Tocar a seguir", L"Speel hierna", L"Odtworz nastepnie", L"Sonraki oynat"),
-			LL14(L"選択曲を次に再生する曲としてキュー先頭へ入れます", L"Insert the selection to play next (front of the queue)", L"Insere la selection pour la lire ensuite (tete de file)", L"Inserisce la selezione da riprodurre dopo (in cima alla coda)",
-				L"Inserta la seleccion para reproducir despues (frente de cola)", L"선택 곡을 다음에 재생하도록 큐 앞에 넣습니다", L"将所选插入为下一首（队列最前）", L"يدرج التحديد ليُشغَّل التالي (مقدمة الطابور)",
-				L"Вставляет выбор следующим (в начало очереди)", L"Setzt die Auswahl als Naechstes (an den Anfang der Warteschlange)", L"Insere a selecao para tocar a seguir (frente da fila)", L"Zet de selectie als volgende (vooraan in de wachtrij)",
-				L"Wstawia zaznaczenie jako nastepne (na poczatek kolejki)", L"Secimi sonraki olarak kuyruk basina koyar"));
-		CString qclr;
-		qclr.Format(LL14(L"キューをクリア (%d)", L"Clear Queue (%d)", L"Vider la file (%d)", L"Svuota coda (%d)", L"Vaciar cola (%d)", L"큐 비우기 (%d)", L"清空队列 (%d)", L"مسح الطابور (%d)", L"Очистить очередь (%d)", L"Warteschlange leeren (%d)", L"Limpar fila (%d)", L"Wachtrij wissen (%d)", L"Wyczysc kolejke (%d)", L"Kuyrugu temizle (%d)"),
-			mp->m_queueN);
-		menu.AddCommand(PL_CTX_QUEUE_CLEAR, qclr,
-			LL14(L"Up Next キュー内の曲をすべて取り除きます（リスト本体は残る）", L"Remove all tracks from the Up Next queue (playlist itself stays)", L"Vide toute la file Up Next (la liste principale reste)", L"Svuota tutta la coda Up Next (la playlist resta)",
-				L"Vacia toda la cola Up Next (la lista principal permanece)", L"Up Next 큐의 곡을 모두 제거합니다(목록 본체는 유지)", L"清空 Up Next 队列中的全部曲目（播放列表本身保留）", L"يزيل كل المقاطع من طابور Up Next (القائمة الأساسية تبقى)",
-				L"Очищает всю очередь Up Next (сам плейлист остаётся)", L"Leert die gesamte Up-Next-Warteschlange (Playlist bleibt)", L"Remove todas as faixas da fila Up Next (a lista permanece)", L"Wist alle nummers uit de Up Next-wachtrij (lijst blijft)",
-				L"Usuwa wszystkie utwory z kolejki Up Next (lista zostaje)", L"Up Next kuyrugundaki tum parcalari kaldirir (liste kalir)"),
-			mp->m_queueN > 0 ? TRUE : FALSE);
+		CCustomPopupMenu* subQueue = menu.AddSubMenu(
+			LL14(L"キュー", L"Queue", L"File", L"Coda",
+				L"Cola", L"큐", L"队列", L"طابور",
+				L"Очередь", L"Warteschlange", L"Fila", L"Wachtrij",
+				L"Kolejka", L"Kuyruk"),
+			LL14(L"Up Next キュー操作", L"Up Next queue actions", L"Actions file Up Next", L"Azioni coda Up Next",
+				L"Acciones cola Up Next", L"Up Next 큐 조작", L"Up Next 队列操作", L"عمليات طابور Up Next",
+				L"Действия очереди Up Next", L"Up-Next-Warteschlangenaktionen", L"Acoes da fila Up Next", L"Up Next-wachtrijacties",
+				L"Operacje kolejki Up Next", L"Up Next kuyruk islemleri"));
+		if (subQueue) {
+			subQueue->AddCommand(PL_CTX_QUEUE_ADD,
+						LL14(L"Up Next に追加", L"Add to Up Next", L"Ajouter a Up Next", L"Aggiungi a Up Next", L"Anadir a Up Next", L"Up Next에 추가", L"加入 Up Next", L"إضافة إلى Up Next", L"В Up Next", L"Zu Up Next", L"Adicionar a Up Next", L"Toevoegen aan Up Next", L"Dodaj do Up Next", L"Up Next'e ekle"),
+						LL14(L"選択曲を Up Next キューの末尾に追加します", L"Append the selection to the end of the Up Next queue", L"Ajoute la selection a la fin de la file Up Next", L"Aggiunge la selezione in coda a Up Next",
+							L"Anade la seleccion al final de la cola Up Next", L"선택 곡을 Up Next 큐 끝에 추가합니다", L"将所选追加到 Up Next 队列末尾", L"يضيف التحديد إلى نهاية طابور Up Next",
+							L"Добавляет выбор в конец очереди Up Next", L"Haengt die Auswahl an das Ende der Up-Next-Warteschlange an", L"Adiciona a selecao ao fim da fila Up Next", L"Voegt de selectie toe aan het einde van de Up Next-wachtrij",
+							L"Dodaje zaznaczenie na koniec kolejki Up Next", L"Secimi Up Next kuyrugunun sonuna ekler"));
+			subQueue->AddCommand(PL_CTX_QUEUE_PLAYNEXT,
+						LL14(L"次に再生", L"Play Next", L"Lire ensuite", L"Riproduci dopo", L"Reproducir despues", L"다음에 재생", L"下一首播放", L"تشغيل التالي", L"Играть следующим", L"Als Nachstes", L"Tocar a seguir", L"Speel hierna", L"Odtworz nastepnie", L"Sonraki oynat"),
+						LL14(L"選択曲を次に再生する曲としてキュー先頭へ入れます", L"Insert the selection to play next (front of the queue)", L"Insere la selection pour la lire ensuite (tete de file)", L"Inserisce la selezione da riprodurre dopo (in cima alla coda)",
+							L"Inserta la seleccion para reproducir despues (frente de cola)", L"선택 곡을 다음에 재생하도록 큐 앞에 넣습니다", L"将所选插入为下一首（队列最前）", L"يدرج التحديد ليُشغَّل التالي (مقدمة الطابور)",
+							L"Вставляет выбор следующим (в начало очереди)", L"Setzt die Auswahl als Naechstes (an den Anfang der Warteschlange)", L"Insere a selecao para tocar a seguir (frente da fila)", L"Zet de selectie als volgende (vooraan in de wachtrij)",
+							L"Wstawia zaznaczenie jako nastepne (na poczatek kolejki)", L"Secimi sonraki olarak kuyruk basina koyar"));
+			CString qclr;
+			qclr.Format(LL14(L"キューをクリア (%d)", L"Clear Queue (%d)", L"Vider la file (%d)", L"Svuota coda (%d)", L"Vaciar cola (%d)", L"큐 비우기 (%d)", L"清空队列 (%d)", L"مسح الطابور (%d)", L"Очистить очередь (%d)", L"Warteschlange leeren (%d)", L"Limpar fila (%d)", L"Wachtrij wissen (%d)", L"Wyczysc kolejke (%d)", L"Kuyrugu temizle (%d)"),
+				mp->m_queueN);
+			subQueue->AddCommand(PL_CTX_QUEUE_CLEAR, qclr,
+				LL14(L"Up Next キュー内の曲をすべて取り除きます（リスト本体は残る）", L"Remove all tracks from the Up Next queue (playlist itself stays)", L"Vide toute la file Up Next (la liste principale reste)", L"Svuota tutta la coda Up Next (la playlist resta)",
+					L"Vacia toda la cola Up Next (la lista principal permanece)", L"Up Next 큐의 곡을 모두 제거합니다(목록 본체는 유지)", L"清空 Up Next 队列中的全部曲目（播放列表本身保留）", L"يزيل كل المقاطع من طابور Up Next (القائمة الأساسية تبقى)",
+					L"Очищает всю очередь Up Next (сам плейлист остаётся)", L"Leert die gesamte Up-Next-Warteschlange (Playlist bleibt)", L"Remove todas as faixas da fila Up Next (a lista permanece)", L"Wist alle nummers uit de Up Next-wachtrij (lijst blijft)",
+					L"Usuwa wszystkie utwory z kolejki Up Next (lista zostaje)", L"Up Next kuyrugundaki tum parcalari kaldirir (liste kalir)"),
+				mp->m_queueN > 0 ? TRUE : FALSE);
+		}
 	}
 	menu.AddSeparator();
-
 	const int plCnt = GetPlaylistFileCount();
 	if (!m_tempMode && plCnt > 1) {
 		int otherN = 0;
@@ -3104,35 +3192,35 @@ int CPlayList::ShowTrackContextMenu(CPoint pt, CWnd* pOwner)
 	if (m_tempMode) {
 		menu.AddSeparator();
 		menu.AddCommand(PL_CTX_TEMP_CLEAR,
-			LL14(L"一時リストをクリア", L"Clear temporary list", L"Vider la liste temporaire", L"Svuota lista temporanea",
-				L"Vaciar lista temporal", L"임시 목록 비우기", L"清空临时列表", L"مسح القائمة المؤقتة",
-				L"Очистить временный список", L"Templiste leeren", L"Limpar lista temporaria", L"Tijdelijke lijst wissen",
-				L"Wyczysc liste tymczasowa", L"Gecici listeyi temizle"),
-			LL14(L"一時プレイリストの曲をすべて削除(保存されません)", L"Remove all tracks from the temporary playlist (not saved)", L"Supprimer toutes les pistes temporaires (non enregistrees)", L"Rimuovi tutte le tracce temporanee (non salvate)",
-				L"Quitar todas las pistas temporales (no se guardan)", L"임시 재생목록의 모든 곡 삭제(저장 안 됨)", L"删除临时列表全部曲目（不保存）", L"إزالة كل المقاطع المؤقتة (غير محفوظة)",
-				L"Удалить все временные треки (не сохраняется)", L"Alle Titel der Templiste entfernen (wird nicht gespeichert)", L"Remover todas as faixas temporarias (nao salvas)", L"Alle tijdelijke nummers verwijderen (niet opgeslagen)",
-				L"Usun wszystkie utwory tymczasowe (bez zapisu)", L"Gecici listedeki tum parcalari sil (kaydedilmez)"));
+					LL14(L"一時リストをクリア", L"Clear temporary list", L"Vider la liste temporaire", L"Svuota lista temporanea",
+						L"Vaciar lista temporal", L"임시 목록 비우기", L"清空临时列表", L"مسح القائمة المؤقتة",
+						L"Очистить временный список", L"Templiste leeren", L"Limpar lista temporaria", L"Tijdelijke lijst wissen",
+						L"Wyczysc liste tymczasowa", L"Gecici listeyi temizle"),
+					LL14(L"一時プレイリストの曲をすべて削除(保存されません)", L"Remove all tracks from the temporary playlist (not saved)", L"Supprimer toutes les pistes temporaires (non enregistrees)", L"Rimuovi tutte le tracce temporanee (non salvate)",
+						L"Quitar todas las pistas temporales (no se guardan)", L"임시 재생목록의 모든 곡 삭제(저장 안 됨)", L"删除临时列表全部曲目（不保存）", L"إزالة كل المقاطع المؤقتة (غير محفوظة)",
+						L"Удалить все временные треки (не сохраняется)", L"Alle Titel der Templiste entfernen (wird nicht gespeichert)", L"Remover todas as faixas temporarias (nao salvas)", L"Alle tijdelijke nummers verwijderen (niet opgeslagen)",
+						L"Usun wszystkie utwory tymczasowe (bez zapisu)", L"Gecici listedeki tum parcalari sil (kaydedilmez)"));
 		menu.AddCommand(PL_CTX_TEMP_EXIT,
-			LL14(L"一時モード終了", L"Exit temporary mode", L"Quitter le mode temporaire", L"Esci modalita temporanea",
-				L"Salir del modo temporal", L"임시 모드 종료", L"退出临时模式", L"إنهاء الوضع المؤقت",
-				L"Выйти из временного режима", L"Tempmodus beenden", L"Sair do modo temporario", L"Tijdelijke modus verlaten",
-				L"Zakoncz tryb tymczasowy", L"Gecici moddan cik"),
-			LL14(L"一時リストを破棄し、保存済みプレイリストへ戻る", L"Discard the temporary list and restore the saved playlist", L"Abandonner la liste temporaire et restaurer la liste enregistree", L"Scarta la lista temporanea e ripristina quella salvata",
-				L"Descartar la lista temporal y restaurar la guardada", L"임시 목록을 버리고 저장된 재생목록으로 복원", L"丢弃临时列表并恢复已保存列表", L"تجاهل القائمة المؤقتة واستعادة المحفوظة",
-				L"Сбросить временный список и восстановить сохранённый", L"Templiste verwerfen und gespeicherte Playlist wiederherstellen", L"Descartar a lista temporaria e restaurar a salva", L"Tijdelijke lijst verwerpen en opgeslagen herstellen",
-				L"Odrzuc liste tymczasowa i przywroc zapisana", L"Gecici listeyi at ve kayitli listeye don"));
+					LL14(L"一時モード終了", L"Exit temporary mode", L"Quitter le mode temporaire", L"Esci modalita temporanea",
+						L"Salir del modo temporal", L"임시 모드 종료", L"退出临时模式", L"إنهاء الوضع المؤقت",
+						L"Выйти из временного режима", L"Tempmodus beenden", L"Sair do modo temporario", L"Tijdelijke modus verlaten",
+						L"Zakoncz tryb tymczasowy", L"Gecici moddan cik"),
+					LL14(L"一時リストを破棄し、保存済みプレイリストへ戻る", L"Discard the temporary list and restore the saved playlist", L"Abandonner la liste temporaire et restaurer la liste enregistree", L"Scarta la lista temporanea e ripristina quella salvata",
+						L"Descartar la lista temporal y restaurar la guardada", L"임시 목록을 버리고 저장된 재생목록으로 복원", L"丢弃临时列表并恢复已保存列表", L"تجاهل القائمة المؤقتة واستعادة المحفوظة",
+						L"Сбросить временный список и восстановить сохранённый", L"Templiste verwerfen und gespeicherte Playlist wiederherstellen", L"Descartar a lista temporaria e restaurar a salva", L"Tijdelijke lijst verwerpen en opgeslagen herstellen",
+						L"Odrzuc liste tymczasowa i przywroc zapisana", L"Gecici listeyi at ve kayitli listeye don"));
 	}
 
 	menu.AddSeparator();
 	menu.AddCommand(ID_HELP_SHOWSHEET,
-		LL14(L"操作ガイド", L"Operation guide", L"Guide d'utilisation", L"Guida operativa",
-			L"Guía de operación", L"조작 가이드", L"操作指南", L"دليل التشغيل",
-			L"Руководство", L"Bedienungsanleitung", L"Guia de operação", L"Handleiding",
-			L"Przewodnik", L"İşlem kılavuzu"),
-		LL14(L"プレイリスト操作の説明シートを表示します", L"Show the playlist operation guide sheet", L"Affiche la feuille-guide des operations de la liste", L"Mostra il foglio guida delle operazioni della playlist",
-			L"Muestra la hoja guia de operaciones de la lista", L"재생목록 조작 설명 시트를 표시합니다", L"显示播放列表操作说明页", L"يعرض ورقة دليل تشغيل قائمة التشغيل",
-			L"Показывает лист-справку по операциям плейлиста", L"Zeigt das Bedienungsblatt fuer Playlist-Aktionen", L"Mostra a folha-guia de operacoes da playlist", L"Toont het bedieningsblad voor playlist-acties",
-			L"Pokazuje arkusz przewodnika po operacjach playlisty", L"Oynatma listesi islem kilavuzu sayfasini gosterir"));
+			LL14(L"操作ガイド", L"Operation guide", L"Guide d'utilisation", L"Guida operativa",
+				L"Guía de operación", L"조작 가이드", L"操作指南", L"دليل التشغيل",
+				L"Руководство", L"Bedienungsanleitung", L"Guia de operação", L"Handleiding",
+				L"Przewodnik", L"İşlem kılavuzu"),
+			LL14(L"プレイリスト操作の説明シートを表示します", L"Show the playlist operation guide sheet", L"Affiche la feuille-guide des operations de la liste", L"Mostra il foglio guida delle operazioni della playlist",
+				L"Muestra la hoja guia de operaciones de la lista", L"재생목록 조작 설명 시트를 표시합니다", L"显示播放列表操作说明页", L"يعرض ورقة دليل تشغيل قائمة التشغيل",
+				L"Показывает лист-справку по операциям плейлиста", L"Zeigt das Bedienungsblatt fuer Playlist-Aktionen", L"Mostra a folha-guia de operacoes da playlist", L"Toont het bedieningsblad voor playlist-acties",
+				L"Pokazuje arkusz przewodnika po operacjach playlisty", L"Oynatma listesi islem kilavuzu sayfasini gosterir"));
 
 	return (int)menu.Track(pt, pOwner ? pOwner : this);
 }
@@ -3182,7 +3270,33 @@ void CPlayList::HandleTrackContextCmd(int cmd)
 	else if (cmd == PL_CTX_XFADE) OnPopXfadeExport();
 	else if (cmd == PL_CTX_TRANSCODE) OnPopTranscode();
 	else if (cmd == PL_CTX_TAG_EDIT) OnPopTagEdit();
-	else if (cmd == PL_CTX_DEL) Del();
+	else if (cmd == PL_CTX_DEL) {
+		int selCount = 0;
+		int idx = -1;
+		while ((idx = m_lc.GetNextItem(idx, LVNI_ALL | LVNI_SELECTED)) >= 0) {
+			if (idx < playcnt) ++selCount;
+		}
+		if (selCount <= 0) return;
+		CString msg;
+		if (playcnt > 0 && selCount >= playcnt)
+			msg = LL14(L"全件削除しますか？", L"Delete all items?", L"Tout supprimer ?", L"Eliminare tutto?",
+				L"¿Eliminar todo?", L"모두 삭제할까요?", L"要全部删除吗？", L"حذف الكل؟",
+				L"Удалить все?", L"Alles loeschen?", L"Excluir tudo?", L"Alles verwijderen?",
+				L"Usunac wszystko?", L"Tumunu sil?");
+		else if (selCount == 1)
+			msg = LL14(L"削除しますか？", L"Delete?", L"Supprimer ?", L"Eliminare?",
+				L"¿Eliminar?", L"삭제할까요?", L"要删除吗？", L"حذف؟",
+				L"Удалить?", L"Loeschen?", L"Excluir?", L"Verwijderen?",
+				L"Usunac?", L"Sil?");
+		else
+			msg.Format(LL14(L"%d件削除しますか？", L"Delete %d items?", L"Supprimer %d ?", L"Eliminare %d?",
+				L"¿Eliminar %d?", L"%d개 삭제할까요?", L"要删除 %d 项吗？", L"حذف %d؟",
+				L"Удалить %d?", L"%d loeschen?", L"Excluir %d?", L"%d verwijderen?",
+				L"Usunac %d?", L"%d sil?"), selCount);
+		if (AfxMessageBox(msg, MB_YESNO | MB_ICONQUESTION) != IDYES)
+			return;
+		Del();
+	}
 	else if (cmd == PL_CTX_EDIT_SELALL) SelectAllTracks();
 	else if (cmd == PL_CTX_EDIT_COPY) CopySelectionToClipboard();
 	else if (cmd == PL_CTX_EDIT_CUT) {

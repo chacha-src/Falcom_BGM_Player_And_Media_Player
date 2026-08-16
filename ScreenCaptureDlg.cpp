@@ -1423,123 +1423,145 @@ void CScPreviewCtrl::OnRButtonUp(UINT nFlags, CPoint point)
 			CCustomPopupMenu menu;
 			addLiveToggle(menu);
 			menu.AddSeparator();
-			menu.AddCommand(ID_SC_LAYER_HIDE,
-				hidden
-				? LL14(L"表示する", L"Show", L"Afficher", L"Mostra", L"Mostrar", L"표시", L"显示", L"إظهار",
-					L"Показать", L"Einblenden", L"Mostrar", L"Tonen", L"Pokaż", L"Göster")
-				: LL14(L"非表示にする", L"Hide", L"Masquer", L"Nascondi", L"Ocultar", L"숨기기", L"隐藏", L"إخفاء",
-					L"Скрыть", L"Ausblenden", L"Ocultar", L"Verbergen", L"Ukryj", L"Gizle"),
-				hidden
-				? LL14(L"このレイヤの映像を再表示（音はそのまま）", L"Show this layer's video again (audio unchanged)",
-					L"Reafficher la video de ce calque (audio inchange)", L"Mostra di nuovo il video del livello (audio invariato)",
-					L"Volver a mostrar el video de esta capa (audio igual)", L"이 레이어 영상을 다시 표시(소리는 그대로)",
-					L"重新显示此层画面（音频不变）", L"إظهار فيديو هذه الطبقة مجدداً (الصوت كما هو)",
-					L"Снова показать видео слоя (звук без изменений)", L"Video dieser Ebene wieder einblenden (Audio gleich)",
-					L"Mostrar de novo o video desta camada (audio igual)", L"Video van deze laag weer tonen (audio ongewijzigd)",
-					L"Pokaz ponownie wideo warstwy (audio bez zmian)", L"Bu katmanin videosunu tekrar goster (ses ayni)")
-				: LL14(L"このレイヤの映像を隠す（音だけ載せたいときに）", L"Hide this layer's video (keep audio if needed)",
-					L"Masquer la video de ce calque (garder l'audio)", L"Nascondi il video del livello (tieni l'audio)",
-					L"Ocultar el video de esta capa (mantener audio)", L"이 레이어 영상을 숨김(소리만 남길 때)",
-					L"隐藏此层画面（需要时可保留音频）", L"إخفاء فيديو هذه الطبقة (مع الإبقاء على الصوت)",
-					L"Скрыть видео слоя (звук можно оставить)", L"Video dieser Ebene ausblenden (Audio behalten)",
-					L"Ocultar o video desta camada (manter audio)", L"Video van deze laag verbergen (audio behouden)",
-					L"Ukryj wideo warstwy (audio mozna zostawic)", L"Bu katmanin videosunu gizle (sesi tut)"));
+			{
+				CCustomPopupMenu* sizeSub = menu.AddSubMenu(
+					LL14(L"サイズ", L"Size", L"Taille", L"Dimensione", L"Tamano", L"크기", L"大小", L"الحجم",
+						L"Размер", L"Grosse", L"Tamanho", L"Grootte", L"Rozmiar", L"Boyut"),
+					LL14(L"選択レイヤのフィット／縮小／実寸。", L"Fit, 50%, or actual size for the selected layer.", L"Ajuster, 50% ou taille reelle du calque.", L"Adatta, 50% o dimensione reale del livello.", L"Ajustar, 50% o tamano real de la capa.", L"선택 레이어 맞춤/50%/실측.", L"所选层铺满/50%/实际大小。", L"ملاءمة الطبقة أو 50٪ أو الحجم الفعلي.", L"Вписать, 50% или реальный размер слоя.", L"Ebene einpassen, 50% oder Originalgroesse.", L"Ajustar, 50% ou tamanho real da camada.", L"Laag passen, 50% of ware grootte.", L"Dopasuj, 50% lub rzeczywisty rozmiar warstwy.", L"Katmani sigdir, %50 veya gercek boyut."));
+				if (sizeSub) {
+					sizeSub->AddCommand(ID_SC_LAYER_FIT,
+						LL14(L"キャンバスにフィット", L"Fit to canvas", L"Ajuster au canevas", L"Adatta al canvas",
+							L"Ajustar al lienzo", L"캔버스에 맞춤", L"铺满画布", L"ملاءمة اللوحة",
+							L"Вписать в холст", L"In Fläche einpassen", L"Ajustar à tela", L"Passen op canvas",
+							L"Dopasuj do płótna", L"Tuvale sığdır"),
+						LL14(L"選択レイヤをキャンバス全体に合わせる", L"Fit selected layer to the whole canvas",
+							L"Ajuster le calque au canevas", L"Adatta il livello al canvas", L"Ajustar capa al lienzo",
+							L"선택 레이어를 캔버스에 맞춤", L"将所选层铺满画布", L"ملاءمة الطبقة للوحة",
+							L"Вписать слой в холст", L"Ebene an Fläche anpassen", L"Ajustar camada à tela",
+							L"Laag op canvas passen", L"Dopasuj warstwę do płótna", L"Katmanı tuvale sığdır"));
+					sizeSub->AddCommand(ID_SC_LAYER_SCALE50,
+						LL14(L"50% サイズ", L"50% size", L"Taille 50%", L"Dimensione 50%",
+							L"Tamaño 50%", L"50% 크기", L"50% 大小", L"حجم 50٪",
+							L"Размер 50%", L"50% Größe", L"Tamanho 50%", L"50% grootte",
+							L"Rozmiar 50%", L"%50 boyut"),
+						LL14(L"選択レイヤをキャンバスの約50%サイズに", L"Scale selected layer to about 50% of the canvas",
+							L"Mettre le calque a environ 50% du canevas", L"Scala il livello a circa il 50% del canvas",
+							L"Escalar la capa a unos 50% del lienzo", L"선택 레이어를 캔버스 약 50% 크기로",
+							L"将所选层缩放到画布约 50%", L"تغيير حجم الطبقة إلى نحو 50٪ من اللوحة",
+							L"Масштаб слоя примерно 50% холста", L"Ebene auf ca. 50% der Fläche skalieren",
+							L"Dimensionar a camada a cerca de 50% da tela", L"Laag schalen naar ongeveer 50% van het canvas",
+							L"Skaluj warstwe do ok. 50% plotna", L"Secili katmani tuvalin yaklasik %50 boyutuna"));
+					sizeSub->AddCommand(ID_SC_LAYER_SCALE100,
+						LL14(L"実寸 (100%)", L"Actual size (100%)", L"Taille réelle (100%)", L"Dimensione reale (100%)",
+							L"Tamaño real (100%)", L"실측 (100%)", L"实际大小 (100%)", L"الحجم الفعلي (100٪)",
+							L"Реальный размер (100%)", L"Originalgröße (100%)", L"Tamanho real (100%)", L"Ware grootte (100%)",
+							L"Rzeczywisty rozmiar (100%)", L"Gerçek boyut (%100)"),
+						LL14(L"選択レイヤを実寸（100%）に戻す", L"Reset selected layer to actual size (100%)",
+							L"Remettre le calque a la taille reelle (100%)", L"Ripristina il livello a dimensione reale (100%)",
+							L"Restablecer la capa a tamano real (100%)", L"선택 레이어를 실측(100%)으로",
+							L"将所选层恢复为实际大小（100%）", L"إعادة الطبقة إلى الحجم الفعلي (100٪)",
+							L"Вернуть слой к реальному размеру (100%)", L"Ebene auf Originalgroesse (100%) setzen",
+							L"Redefinir a camada para tamanho real (100%)", L"Laag terugzetten naar ware grootte (100%)",
+							L"Przywroc warstwe do rzeczywistego rozmiaru (100%)", L"Secili katmani gercek boyuta (%100) al"));
+				}
+			}
 			menu.AddSeparator();
-			menu.AddCommand(ID_SC_LAYER_FIT,
-				LL14(L"キャンバスにフィット", L"Fit to canvas", L"Ajuster au canevas", L"Adatta al canvas",
-					L"Ajustar al lienzo", L"캔버스에 맞춤", L"铺满画布", L"ملاءمة اللوحة",
-					L"Вписать в холст", L"In Fläche einpassen", L"Ajustar à tela", L"Passen op canvas",
-					L"Dopasuj do płótna", L"Tuvale sığdır"),
-				LL14(L"選択レイヤをキャンバス全体に合わせる", L"Fit selected layer to the whole canvas",
-					L"Ajuster le calque au canevas", L"Adatta il livello al canvas", L"Ajustar capa al lienzo",
-					L"선택 레이어를 캔버스에 맞춤", L"将所选层铺满画布", L"ملاءمة الطبقة للوحة",
-					L"Вписать слой в холст", L"Ebene an Fläche anpassen", L"Ajustar camada à tela",
-					L"Laag op canvas passen", L"Dopasuj warstwę do płótna", L"Katmanı tuvale sığdır"));
-			menu.AddCommand(ID_SC_LAYER_SCALE50,
-				LL14(L"50% サイズ", L"50% size", L"Taille 50%", L"Dimensione 50%",
-					L"Tamaño 50%", L"50% 크기", L"50% 大小", L"حجم 50٪",
-					L"Размер 50%", L"50% Größe", L"Tamanho 50%", L"50% grootte",
-					L"Rozmiar 50%", L"%50 boyut"),
-				LL14(L"選択レイヤをキャンバスの約50%サイズに", L"Scale selected layer to about 50% of the canvas",
-					L"Mettre le calque a environ 50% du canevas", L"Scala il livello a circa il 50% del canvas",
-					L"Escalar la capa a unos 50% del lienzo", L"선택 레이어를 캔버스 약 50% 크기로",
-					L"将所选层缩放到画布约 50%", L"تغيير حجم الطبقة إلى نحو 50٪ من اللوحة",
-					L"Масштаб слоя примерно 50% холста", L"Ebene auf ca. 50% der Fläche skalieren",
-					L"Dimensionar a camada a cerca de 50% da tela", L"Laag schalen naar ongeveer 50% van het canvas",
-					L"Skaluj warstwe do ok. 50% plotna", L"Secili katmani tuvalin yaklasik %50 boyutuna"));
-			menu.AddCommand(ID_SC_LAYER_SCALE100,
-				LL14(L"実寸 (100%)", L"Actual size (100%)", L"Taille réelle (100%)", L"Dimensione reale (100%)",
-					L"Tamaño real (100%)", L"실측 (100%)", L"实际大小 (100%)", L"الحجم الفعلي (100٪)",
-					L"Реальный размер (100%)", L"Originalgröße (100%)", L"Tamanho real (100%)", L"Ware grootte (100%)",
-					L"Rzeczywisty rozmiar (100%)", L"Gerçek boyut (%100)"),
-				LL14(L"選択レイヤを実寸（100%）に戻す", L"Reset selected layer to actual size (100%)",
-					L"Remettre le calque a la taille reelle (100%)", L"Ripristina il livello a dimensione reale (100%)",
-					L"Restablecer la capa a tamano real (100%)", L"선택 레이어를 실측(100%)으로",
-					L"将所选层恢复为实际大小（100%）", L"إعادة الطبقة إلى الحجم الفعلي (100٪)",
-					L"Вернуть слой к реальному размеру (100%)", L"Ebene auf Originalgroesse (100%) setzen",
-					L"Redefinir a camada para tamanho real (100%)", L"Laag terugzetten naar ware grootte (100%)",
-					L"Przywroc warstwe do rzeczywistego rozmiaru (100%)", L"Secili katmani gercek boyuta (%100) al"));
+			{
+				CCustomPopupMenu* zSub = menu.AddSubMenu(
+					LL14(L"Z順", L"Z-order", L"Ordre Z", L"Ordine Z", L"Orden Z", L"Z순서", L"Z顺序", L"ترتيب Z",
+						L"Порядок Z", L"Z-Reihenfolge", L"Ordem Z", L"Z-volgorde", L"Kolejnosc Z", L"Z sirasi"),
+					LL14(L"レイヤの重ね順（手前／奥）を変更。", L"Change layer stacking (bring forward / send back).", L"Changer l'ordre d'empilement du calque.", L"Cambia l'ordine di sovrapposizione del livello.", L"Cambiar el orden de apilado de la capa.", L"레이어 겹침 순서(앞/뒤) 변경.", L"更改层叠放顺序（前/后）。", L"تغيير ترتيب تكديس الطبقة.", L"Изменить порядок наложения слоя.", L"Stapelreihenfolge der Ebene andern.", L"Alterar a ordem de empilhamento da camada.", L"Wijzig de stapelvolgorde van de laag.", L"Zmien kolejnosc warstw.", L"Katman yigilma sirasini degistir."));
+				if (zSub) {
+					zSub->AddCommand(ID_SC_LAYER_ZUP,
+						LL14(L"手前へ (Z+)", L"Bring forward (Z+)", L"Vers l'avant (Z+)", L"Porta avanti (Z+)",
+							L"Traer al frente (Z+)", L"앞으로 (Z+)", L"前移 (Z+)", L"تقديم (Z+)",
+							L"Вперёд (Z+)", L"Nach vorne (Z+)", L"Para frente (Z+)", L"Naar voren (Z+)",
+							L"Do przodu (Z+)", L"Öne getir (Z+)"),
+						LL14(L"重ね順を1つ手前へ（Zオーダー＋）", L"Bring the layer one step forward (Z-order +)",
+							L"Avancer d'un cran dans l'ordre Z", L"Porta avanti di un passo nell'ordine Z",
+							L"Traer un paso al frente (orden Z +)", L"겹침 순서를 한 단계 앞으로(Z+)",
+							L"将叠放顺序前移一层（Z+）", L"تقديم الطبقة خطوة في ترتيب Z",
+							L"Сдвинуть слой на один шаг вперёд (Z+)", L"Ebene eine Stufe nach vorne (Z+)",
+							L"Trazer a camada um passo a frente (Z+)", L"Laag een stap naar voren (Z+)",
+							L"Przesun warstwe o jeden w przod (Z+)", L"Katmani bir adim one getir (Z+)"),
+						layer > 0);
+					zSub->AddCommand(ID_SC_LAYER_ZDOWN,
+						LL14(L"奥へ (Z-)", L"Send back (Z-)", L"Vers l'arrière (Z-)", L"Porta indietro (Z-)",
+							L"Enviar atrás (Z-)", L"뒤로 (Z-)", L"后移 (Z-)", L"تأخير (Z-)",
+							L"Назад (Z-)", L"Nach hinten (Z-)", L"Para trás (Z-)", L"Naar achteren (Z-)",
+							L"Do tyłu (Z-)", L"Geriye gönder (Z-)"),
+						LL14(L"重ね順を1つ奥へ（Zオーダー−）", L"Send the layer one step back (Z-order −)",
+							L"Reculer d'un cran dans l'ordre Z", L"Porta indietro di un passo nell'ordine Z",
+							L"Enviar un paso atras (orden Z −)", L"겹침 순서를 한 단계 뒤로(Z−)",
+							L"将叠放顺序后移一层（Z−）", L"تأخير الطبقة خطوة في ترتيب Z",
+							L"Сдвинуть слой на один шаг назад (Z−)", L"Ebene eine Stufe nach hinten (Z−)",
+							L"Enviar a camada um passo para tras (Z−)", L"Laag een stap naar achteren (Z−)",
+							L"Przesun warstwe o jeden w tyl (Z−)", L"Katmani bir adim geriye gonder (Z−)"),
+						layer < m_owner->m_layerCnt - 1);
+				}
+			}
 			menu.AddSeparator();
-			menu.AddCommand(ID_SC_LAYER_ZUP,
-				LL14(L"手前へ (Z+)", L"Bring forward (Z+)", L"Vers l'avant (Z+)", L"Porta avanti (Z+)",
-					L"Traer al frente (Z+)", L"앞으로 (Z+)", L"前移 (Z+)", L"تقديم (Z+)",
-					L"Вперёд (Z+)", L"Nach vorne (Z+)", L"Para frente (Z+)", L"Naar voren (Z+)",
-					L"Do przodu (Z+)", L"Öne getir (Z+)"),
-				LL14(L"重ね順を1つ手前へ（Zオーダー＋）", L"Bring the layer one step forward (Z-order +)",
-					L"Avancer d'un cran dans l'ordre Z", L"Porta avanti di un passo nell'ordine Z",
-					L"Traer un paso al frente (orden Z +)", L"겹침 순서를 한 단계 앞으로(Z+)",
-					L"将叠放顺序前移一层（Z+）", L"تقديم الطبقة خطوة في ترتيب Z",
-					L"Сдвинуть слой на один шаг вперёд (Z+)", L"Ebene eine Stufe nach vorne (Z+)",
-					L"Trazer a camada um passo a frente (Z+)", L"Laag een stap naar voren (Z+)",
-					L"Przesun warstwe o jeden w przod (Z+)", L"Katmani bir adim one getir (Z+)"),
-				layer > 0);
-			menu.AddCommand(ID_SC_LAYER_ZDOWN,
-				LL14(L"奥へ (Z-)", L"Send back (Z-)", L"Vers l'arrière (Z-)", L"Porta indietro (Z-)",
-					L"Enviar atrás (Z-)", L"뒤로 (Z-)", L"后移 (Z-)", L"تأخير (Z-)",
-					L"Назад (Z-)", L"Nach hinten (Z-)", L"Para trás (Z-)", L"Naar achteren (Z-)",
-					L"Do tyłu (Z-)", L"Geriye gönder (Z-)"),
-				LL14(L"重ね順を1つ奥へ（Zオーダー−）", L"Send the layer one step back (Z-order −)",
-					L"Reculer d'un cran dans l'ordre Z", L"Porta indietro di un passo nell'ordine Z",
-					L"Enviar un paso atras (orden Z −)", L"겹침 순서를 한 단계 뒤로(Z−)",
-					L"将叠放顺序后移一层（Z−）", L"تأخير الطبقة خطوة في ترتيب Z",
-					L"Сдвинуть слой на один шаг назад (Z−)", L"Ebene eine Stufe nach hinten (Z−)",
-					L"Enviar a camada um passo para tras (Z−)", L"Laag een stap naar achteren (Z−)",
-					L"Przesun warstwe o jeden w tyl (Z−)", L"Katmani bir adim geriye gonder (Z−)"),
-				layer < m_owner->m_layerCnt - 1);
-			menu.AddSeparator();
-			menu.AddCommand(ID_SC_LAYER_CROP_FULL,
-				LL14(L"切出を解除", L"Clear crop", L"Annuler le rognage", L"Annulla ritaglio",
-					L"Quitar recorte", L"잘라내기 해제", L"清除裁剪", L"إلغاء القص",
-					L"Сбросить вырез", L"Ausschnitt aufheben", L"Limpar recorte", L"Uitsnede wissen",
-					L"Wyczyść wycinek", L"Kırpmayı temizle"),
-				LL14(L"選択レイヤの切出（クロップ）を解除し全体を表示", L"Clear crop on the selected layer and show the full window",
-					L"Annuler le rognage et afficher toute la fenetre", L"Annulla il ritaglio e mostra tutta la finestra",
-					L"Quitar el recorte y mostrar toda la ventana", L"선택 레이어의 잘라내기를 해제하고 전체 표시",
-					L"清除所选层的裁剪并显示整个窗口", L"إلغاء القص وعرض النافذة كاملة",
-					L"Сбросить вырез и показать всё окно", L"Ausschnitt aufheben und ganzes Fenster zeigen",
-					L"Limpar o recorte e mostrar a janela inteira", L"Uitsnede wissen en hele venster tonen",
-					L"Wyczysc wycinek i pokaz cale okno", L"Kirpmayi temizle ve tum pencereyi goster"));
-			menu.AddSeparator();
-			menu.AddCommand(ID_SC_LAYER_TILE,
-				LL14(L"レイヤを整列", L"Tile layers", L"Aligner les calques", L"Allinea livelli",
-					L"Alinear capas", L"레이어 정렬", L"排列图层", L"ترتيب الطبقات",
-					L"Упорядочить слои", L"Ebenen anordnen", L"Alinhar camadas", L"Lagen tegelen",
-					L"Uloz warstwy", L"Katmanlari diz"),
-				LL14(L"全レイヤをキャンバス内に並べます。", L"Arrange all layers on the canvas.", L"Disposer tous les calques sur le canevas.", L"Disponi tutti i livelli sul canvas.", L"Disponer todas las capas en el lienzo.",
-					L"모든 레이어를 캔버스에 배치합니다.", L"将所有层排列到画布上。", L"ترتيب كل الطبقات على اللوحة.", L"Разместить все слои на холсте.", L"Alle Ebenen auf der Flache anordnen.",
-					L"Organizar todas as camadas na tela.", L"Alle lagen op het canvas schikken.", L"Uloz wszystkie warstwy na plotnie.", L"Tum katmanlari tuvalde diz."));
-			menu.AddCommand(ID_SC_LAYER_REMOVE,
-				LL14(L"レイヤを削除", L"Remove layer", L"Retirer le calque", L"Rimuovi livello",
-					L"Quitar capa", L"레이어 삭제", L"删除层", L"إزالة الطبقة",
-					L"Удалить слой", L"Ebene entfernen", L"Remover camada", L"Laag verwijderen",
-					L"Usuń warstwę", L"Katmanı kaldır"),
-				LL14(L"このレイヤをリストから削除します", L"Remove this layer from the list",
-					L"Retirer ce calque de la liste", L"Rimuovi questo livello dall'elenco",
-					L"Quitar esta capa de la lista", L"이 레이어를 목록에서 삭제",
-					L"从此列表中删除该层", L"إزالة هذه الطبقة من القائمة",
-					L"Удалить этот слой из списка", L"Diese Ebene aus der Liste entfernen",
-					L"Remover esta camada da lista", L"Deze laag uit de lijst verwijderen",
-					L"Usun te warstwe z listy", L"Bu katmani listeden kaldir"));
+			{
+				CCustomPopupMenu* mgmtSub = menu.AddSubMenu(
+					LL14(L"管理", L"Manage", L"Gerer", L"Gestisci", L"Gestionar", L"관리", L"管理", L"إدارة",
+						L"Управление", L"Verwalten", L"Gerenciar", L"Beheren", L"Zarzadzaj", L"Yonet"),
+					LL14(L"表示切替、切出解除、整列、削除。", L"Show/hide, clear crop, tile, or remove the layer.", L"Afficher/masquer, annuler rognage, aligner, retirer.", L"Mostra/nascondi, annulla ritaglio, allinea, rimuovi.", L"Mostrar/ocultar, quitar recorte, alinear, quitar.", L"표시/숨김, 잘라내기 해제, 정렬, 삭제.", L"显示/隐藏、清除裁剪、排列、删除。", L"إظهار/إخفاء وإلغاء القص وترتيب وإزالة.", L"Показать/скрыть, сброс выреза, упорядочить, удалить.", L"Ein-/ausblenden, Ausschnitt aufheben, anordnen, entfernen.", L"Mostrar/ocultar, limpar recorte, alinhar, remover.", L"Tonen/verbergen, uitsnede wissen, tegelen, verwijderen.", L"Pokaz/ukryj, wyczysc wycinek, uloz, usun.", L"Goster/gizle, kirpmayi temizle, diz, kaldir."));
+				if (mgmtSub) {
+					mgmtSub->AddCommand(ID_SC_LAYER_HIDE,
+						hidden
+						? LL14(L"表示する", L"Show", L"Afficher", L"Mostra", L"Mostrar", L"표시", L"显示", L"إظهار",
+							L"Показать", L"Einblenden", L"Mostrar", L"Tonen", L"Pokaż", L"Göster")
+						: LL14(L"非表示にする", L"Hide", L"Masquer", L"Nascondi", L"Ocultar", L"숨기기", L"隐藏", L"إخفاء",
+							L"Скрыть", L"Ausblenden", L"Ocultar", L"Verbergen", L"Ukryj", L"Gizle"),
+						hidden
+						? LL14(L"このレイヤの映像を再表示（音はそのまま）", L"Show this layer's video again (audio unchanged)",
+							L"Reafficher la video de ce calque (audio inchange)", L"Mostra di nuovo il video del livello (audio invariato)",
+							L"Volver a mostrar el video de esta capa (audio igual)", L"이 레이어 영상을 다시 표시(소리는 그대로)",
+							L"重新显示此层画面（音频不变）", L"إظهار فيديو هذه الطبقة مجدداً (الصوت كما هو)",
+							L"Снова показать видео слоя (звук без изменений)", L"Video dieser Ebene wieder einblenden (Audio gleich)",
+							L"Mostrar de novo o video desta camada (audio igual)", L"Video van deze laag weer tonen (audio ongewijzigd)",
+							L"Pokaz ponownie wideo warstwy (audio bez zmian)", L"Bu katmanin videosunu tekrar goster (ses ayni)")
+						: LL14(L"このレイヤの映像を隠す（音だけ載せたいときに）", L"Hide this layer's video (keep audio if needed)",
+							L"Masquer la video de ce calque (garder l'audio)", L"Nascondi il video del livello (tieni l'audio)",
+							L"Ocultar el video de esta capa (mantener audio)", L"이 레이어 영상을 숨김(소리만 남길 때)",
+							L"隐藏此层画面（需要时可保留音频）", L"إخفاء فيديو هذه الطبقة (مع الإبقاء على الصوت)",
+							L"Скрыть видео слоя (звук можно оставить)", L"Video dieser Ebene ausblenden (Audio behalten)",
+							L"Ocultar o video desta camada (manter audio)", L"Video van deze laag verbergen (audio behouden)",
+							L"Ukryj wideo warstwy (audio mozna zostawic)", L"Bu katmanin videosunu gizle (sesi tut)"));
+					mgmtSub->AddCommand(ID_SC_LAYER_CROP_FULL,
+						LL14(L"切出を解除", L"Clear crop", L"Annuler le rognage", L"Annulla ritaglio",
+							L"Quitar recorte", L"잘라내기 해제", L"清除裁剪", L"إلغاء القص",
+							L"Сбросить вырез", L"Ausschnitt aufheben", L"Limpar recorte", L"Uitsnede wissen",
+							L"Wyczyść wycinek", L"Kırpmayı temizle"),
+						LL14(L"選択レイヤの切出（クロップ）を解除し全体を表示", L"Clear crop on the selected layer and show the full window",
+							L"Annuler le rognage et afficher toute la fenetre", L"Annulla il ritaglio e mostra tutta la finestra",
+							L"Quitar el recorte y mostrar toda la ventana", L"선택 레이어의 잘라내기를 해제하고 전체 표시",
+							L"清除所选层的裁剪并显示整个窗口", L"إلغاء القص وعرض النافذة كاملة",
+							L"Сбросить вырез и показать всё окно", L"Ausschnitt aufheben und ganzes Fenster zeigen",
+							L"Limpar o recorte e mostrar a janela inteira", L"Uitsnede wissen en hele venster tonen",
+							L"Wyczysc wycinek i pokaz cale okno", L"Kirpmayi temizle ve tum pencereyi goster"));
+					mgmtSub->AddCommand(ID_SC_LAYER_TILE,
+						LL14(L"レイヤを整列", L"Tile layers", L"Aligner les calques", L"Allinea livelli",
+							L"Alinear capas", L"레이어 정렬", L"排列图层", L"ترتيب الطبقات",
+							L"Упорядочить слои", L"Ebenen anordnen", L"Alinhar camadas", L"Lagen tegelen",
+							L"Uloz warstwy", L"Katmanlari diz"),
+						LL14(L"全レイヤをキャンバス内に並べます。", L"Arrange all layers on the canvas.", L"Disposer tous les calques sur le canevas.", L"Disponi tutti i livelli sul canvas.", L"Disponer todas las capas en el lienzo.",
+							L"모든 레이어를 캔버스에 배치합니다.", L"将所有层排列到画布上。", L"ترتيب كل الطبقات على اللوحة.", L"Разместить все слои на холсте.", L"Alle Ebenen auf der Flache anordnen.",
+							L"Organizar todas as camadas na tela.", L"Alle lagen op het canvas schikken.", L"Uloz wszystkie warstwy na plotnie.", L"Tum katmanlari tuvalde diz."));
+					mgmtSub->AddCommand(ID_SC_LAYER_REMOVE,
+						LL14(L"レイヤを削除", L"Remove layer", L"Retirer le calque", L"Rimuovi livello",
+							L"Quitar capa", L"레이어 삭제", L"删除层", L"إزالة الطبقة",
+							L"Удалить слой", L"Ebene entfernen", L"Remover camada", L"Laag verwijderen",
+							L"Usuń warstwę", L"Katmanı kaldır"),
+						LL14(L"このレイヤをリストから削除します", L"Remove this layer from the list",
+							L"Retirer ce calque de la liste", L"Rimuovi questo livello dall'elenco",
+							L"Quitar esta capa de la lista", L"이 레이어를 목록에서 삭제",
+							L"从此列表中删除该层", L"إزالة هذه الطبقة من القائمة",
+							L"Удалить этот слой из списка", L"Diese Ebene aus der Liste entfernen",
+							L"Remover esta camada da lista", L"Deze laag uit de lijst verwijderen",
+							L"Usun te warstwe z listy", L"Bu katmani listeden kaldir"));
+				}
+			}
 			CPoint sp = point;
 			ClientToScreen(&sp);
 			const UINT cmd = menu.Track(sp, m_owner);

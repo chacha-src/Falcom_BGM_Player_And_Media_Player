@@ -1026,7 +1026,12 @@ BOOL CCustomPopupMenu::AddCheck(UINT id, LPCTSTR text, BOOL checked, LPCTSTR tip
 { return AddItemBase(CCUSTOM_POPUP_CHECK, id, text, tip, enabled, checked); }
 
 BOOL CCustomPopupMenu::AddSeparator()
-{ return AddItemBase(CCUSTOM_POPUP_SEP, 0, NULL, NULL, TRUE, FALSE); }
+{
+	// 連続セパレータは見た目が二重線になるので弾く
+	if (m_itemCount > 0 && m_items[m_itemCount - 1].kind == CCUSTOM_POPUP_SEP)
+		return TRUE;
+	return AddItemBase(CCUSTOM_POPUP_SEP, 0, NULL, NULL, TRUE, FALSE);
+}
 
 CCustomPopupMenu* CCustomPopupMenu::AddSubMenu(LPCTSTR text, LPCTSTR tip)
 {

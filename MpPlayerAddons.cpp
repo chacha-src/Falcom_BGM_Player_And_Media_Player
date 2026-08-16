@@ -7114,27 +7114,36 @@ protected:
 				L"메인 플레이어를 움직이면 DJ 패드도 함께 이동. 멀티 모니터에 유용.", L"移动主播放器时 DJ 面板跟随。适合多显示器。", L"عند تحريك المشغل الرئيسي تتحرك لوحة DJ معه. مفيد مع شاشات متعددة.", L"При перемещении главного плеера DJ-пад следует за ним. Удобно на нескольких мониторах.", L"Beim Verschieben des Hauptplayers folgt das DJ-Pad. Praktisch bei mehreren Monitoren.",
 				L"Ao mover o player principal, o pad DJ acompanha. Util em multi-monitor.", L"Als je de hoofdspeler verplaatst, beweegt het DJ-pad mee. Handig bij meerdere monitoren.", L"Przesuwajac glowny odtwarzacz, pad DJ podaza za nim. Przydatne na wielu monitorach.", L"Ana oynaticiyi tasirken DJ padi birlikte gelir. Coklu monitörde kullanisli."));
 		menu.AddSeparator();
-		menu.AddCommand(12,
-			LL14(L"音程/テンポをリセット", L"Reset pitch/tempo", L"Reinit hauteur/tempo", L"Reset pitch/tempo",
-				L"Restablecer tono/tempo", L"음정/템포 초기화", L"重置音高/速度", L"إعادة الدرجة/الإيقاع", L"Сброс тона/темпа", L"Tonhöhe/Tempo zurücksetzen",
-				L"Redefinir tom/tempo", L"Toonhoogte/tempo resetten", L"Reset wysokosci/tempa", L"Perde/tempo sifirla"),
-			LL14(L"音程とテンポを両方とも100%に戻します。キー合わせ後の復帰用。", L"Reset both pitch and tempo to 100%. Use after key/tempo matching.", L"Remet hauteur et tempo a 100%. Apres accordage.", L"Ripristina pitch e tempo al 100%. Dopo l'accordatura.", L"Restablece tono y tempo al 100%. Tras afinar.",
-				L"음정과 템포를 모두 100%로 되돌립니다. 키 맞춘 뒤 복귀용.", L"将音高和速度都恢复为 100%。调键后还原用。", L"إعادة الدرجة والإيقاع إلى 100%. بعد مطابقة المفتاح.", L"Сбросить тон и темп до 100%. После подстройки ключа.", L"Tonhöhe und Tempo auf 100% zurücksetzen. Nach Key-Anpassung.",
-				L"Redefinir tom e tempo para 100%. Apos ajustar a tonalidade.", L"Zet toonhoogte en tempo terug op 100%. Na toonsoort-matching.", L"Reset wysokosci i tempa do 100%. Po dopasowaniu tonacji.", L"Perde ve tempoyu %100'e sifirla. Ton eslestirmeden sonra."));
-		menu.AddCommand(13,
-			LL14(L"EQ/フィルタをリセット", L"Reset EQ/filter", L"Reinit EQ/filtre", L"Reset EQ/filtro",
-				L"Restablecer EQ/filtro", L"EQ/필터 초기화", L"重置 EQ/滤镜", L"إعادة EQ/المرشح", L"Сброс EQ/фильтра", L"EQ/Filter zurücksetzen",
-				L"Redefinir EQ/filtro", L"EQ/filter resetten", L"Reset EQ/filtra", L"EQ/filtre sifirla"),
-			LL14(L"Low/Mid/High EQ・フィルタ・Killをすべて平坦(100%)に戻します。", L"Reset Low/Mid/High EQ, filter, and Kill bands all flat to 100%.", L"Remet EQ Low/Mid/High, filtre et Kill a 100%.", L"Ripristina EQ Low/Mid/High, filtro e Kill al 100%.", L"Restablece EQ Low/Mid/High, filtro y Kill al 100%.",
-				L"Low/Mid/High EQ·필터·Kill을 모두 평탄(100%)으로 되돌립니다.", L"将 Low/Mid/High EQ、滤镜和 Kill 全部恢复为平坦 100%。", L"إعادة EQ Low/Mid/High والمرشح وKill كلها إلى 100%.", L"Сбросить EQ Low/Mid/High, фильтр и Kill до 100%.", L"EQ Low/Mid/High, Filter und Kill auf 100% flach setzen.",
-				L"Redefinir EQ Low/Mid/High, filtro e Kill para 100%.", L"Zet Low/Mid/High-EQ, filter en Kill terug op 100%.", L"Reset EQ Low/Mid/High, filtra i Kill do 100%.", L"Low/Mid/High EQ, filtre ve Kill'i %100'e sifirla."));
-		menu.AddCommand(14,
-			LL14(L"スクラッチ設定をリセット", L"Reset scratch settings", L"Reinit scratch", L"Reset scratch",
-				L"Restablecer scratch", L"스크래치 초기화", L"重置刮盘设置", L"إعادة إعدادات الخدش", L"Сброс скретча", L"Scratch zurücksetzen",
-				L"Redefinir scratch", L"Scratch resetten", L"Reset scratch", L"Scratch sifirla"),
-			LL14(L"スクラッチ効果量と速度感度を既定(100%)に戻します。", L"Reset scratch effect amount and speed sensitivity to defaults (100%).", L"Remet effet et sensibilite scratch a 100%.", L"Ripristina effetto e sensibilita scratch al 100%.", L"Restablece efecto y sensibilidad scratch al 100%.",
-				L"스크래치 효과량과 속도 감도를 기본(100%)으로 되돌립니다.", L"将刮盘效果量和速度灵敏度恢复为默认 100%。", L"إعادة مقدار تأثير الخدش وحساسية السرعة إلى 100%.", L"Сбросить силу эффекта и чувствительность скретча до 100%.", L"Scratch-Effektstärke und Geschwindigkeitsempfindlichkeit auf 100% setzen.",
-				L"Redefinir efeito e sensibilidade do scratch para 100%.", L"Zet scratch-effect en snelheidsgevoeligheid terug op 100%.", L"Reset sily efektu i czulosci scratch do 100%.", L"Scratch efekt miktari ve hiz duyarliligini %100'e sifirla."));
+		{
+			CCustomPopupMenu* resetSub = menu.AddSubMenu(
+				LL14(L"リセット", L"Reset", L"Reinit", L"Reset", L"Restablecer",
+					L"초기화", L"重置", L"إعادة", L"Сброс", L"Zurucksetzen",
+					L"Redefinir", L"Resetten", L"Reset", L"Sifirla"),
+				LL14(L"音程/テンポ、EQ/フィルタ、スクラッチを既定に戻す。", L"Reset pitch/tempo, EQ/filter, and scratch to defaults.", L"Remettre hauteur/tempo, EQ/filtre et scratch.", L"Ripristina pitch/tempo, EQ/filtro e scratch.", L"Restablecer tono/tempo, EQ/filtro y scratch.", L"음정/템포, EQ/필터, 스크래치를 기본값으로.", L"将音高/速度、EQ/滤镜、刮盘恢复默认。", L"إعادة الدرجة/الإيقاع وEQ/المرشح والخدش.", L"Сбросить тон/темп, EQ/фильтр и скретч.", L"Tonhohe/Tempo, EQ/Filter und Scratch zurucksetzen.", L"Redefinir tom/tempo, EQ/filtro e scratch.", L"Toonhoogte/tempo, EQ/filter en scratch resetten.", L"Reset wysokosci/tempa, EQ/filtra i scratch.", L"Perde/tempo, EQ/filtre ve scratch sifirla."));
+			if (resetSub) {
+				resetSub->AddCommand(12,
+					LL14(L"音程/テンポをリセット", L"Reset pitch/tempo", L"Reinit hauteur/tempo", L"Reset pitch/tempo",
+						L"Restablecer tono/tempo", L"음정/템포 초기화", L"重置音高/速度", L"إعادة الدرجة/الإيقاع", L"Сброс тона/темпа", L"Tonhöhe/Tempo zurücksetzen",
+						L"Redefinir tom/tempo", L"Toonhoogte/tempo resetten", L"Reset wysokosci/tempa", L"Perde/tempo sifirla"),
+					LL14(L"音程とテンポを両方とも100%に戻します。キー合わせ後の復帰用。", L"Reset both pitch and tempo to 100%. Use after key/tempo matching.", L"Remet hauteur et tempo a 100%. Apres accordage.", L"Ripristina pitch e tempo al 100%. Dopo l'accordatura.", L"Restablece tono y tempo al 100%. Tras afinar.",
+						L"음정과 템포를 모두 100%로 되돌립니다. 키 맞춘 뒤 복귀용.", L"将音高和速度都恢复为 100%。调键后还原用。", L"إعادة الدرجة والإيقاع إلى 100%. بعد مطابقة المفتاح.", L"Сбросить тон и темп до 100%. После подстройки ключа.", L"Tonhöhe und Tempo auf 100% zurücksetzen. Nach Key-Anpassung.",
+						L"Redefinir tom e tempo para 100%. Apos ajustar a tonalidade.", L"Zet toonhoogte en tempo terug op 100%. Na toonsoort-matching.", L"Reset wysokosci i tempa do 100%. Po dopasowaniu tonacji.", L"Perde ve tempoyu %100'e sifirla. Ton eslestirmeden sonra."));
+				resetSub->AddCommand(13,
+					LL14(L"EQ/フィルタをリセット", L"Reset EQ/filter", L"Reinit EQ/filtre", L"Reset EQ/filtro",
+						L"Restablecer EQ/filtro", L"EQ/필터 초기화", L"重置 EQ/滤镜", L"إعادة EQ/المرشح", L"Сброс EQ/фильтра", L"EQ/Filter zurücksetzen",
+						L"Redefinir EQ/filtro", L"EQ/filter resetten", L"Reset EQ/filtra", L"EQ/filtre sifirla"),
+					LL14(L"Low/Mid/High EQ・フィルタ・Killをすべて平坦(100%)に戻します。", L"Reset Low/Mid/High EQ, filter, and Kill bands all flat to 100%.", L"Remet EQ Low/Mid/High, filtre et Kill a 100%.", L"Ripristina EQ Low/Mid/High, filtro e Kill al 100%.", L"Restablece EQ Low/Mid/High, filtro y Kill al 100%.",
+						L"Low/Mid/High EQ·필터·Kill을 모두 평탄(100%)으로 되돌립니다.", L"将 Low/Mid/High EQ、滤镜和 Kill 全部恢复为平坦 100%。", L"إعادة EQ Low/Mid/High والمرشح وKill كلها إلى 100%.", L"Сбросить EQ Low/Mid/High, фильтр и Kill до 100%.", L"EQ Low/Mid/High, Filter und Kill auf 100% flach setzen.",
+						L"Redefinir EQ Low/Mid/High, filtro e Kill para 100%.", L"Zet Low/Mid/High-EQ, filter en Kill terug op 100%.", L"Reset EQ Low/Mid/High, filtra i Kill do 100%.", L"Low/Mid/High EQ, filtre ve Kill'i %100'e sifirla."));
+				resetSub->AddCommand(14,
+					LL14(L"スクラッチ設定をリセット", L"Reset scratch settings", L"Reinit scratch", L"Reset scratch",
+						L"Restablecer scratch", L"스크래치 초기화", L"重置刮盘设置", L"إعادة إعدادات الخدش", L"Сброс скретча", L"Scratch zurücksetzen",
+						L"Redefinir scratch", L"Scratch resetten", L"Reset scratch", L"Scratch sifirla"),
+					LL14(L"スクラッチ効果量と速度感度を既定(100%)に戻します。", L"Reset scratch effect amount and speed sensitivity to defaults (100%).", L"Remet effet et sensibilite scratch a 100%.", L"Ripristina effetto e sensibilita scratch al 100%.", L"Restablece efecto y sensibilidad scratch al 100%.",
+						L"스크래치 효과량과 속도 감도를 기본(100%)으로 되돌립니다.", L"将刮盘效果量和速度灵敏度恢复为默认 100%。", L"إعادة مقدار تأثير الخدش وحساسية السرعة إلى 100%.", L"Сбросить силу эффекта и чувствительность скретча до 100%.", L"Scratch-Effektstärke und Geschwindigkeitsempfindlichkeit auf 100% setzen.",
+						L"Redefinir efeito e sensibilidade do scratch para 100%.", L"Zet scratch-effect en snelheidsgevoeligheid terug op 100%.", L"Reset sily efektu i czulosci scratch do 100%.", L"Scratch efekt miktari ve hiz duyarliligini %100'e sifirla."));
+			}
+		}
 		menu.AddCommand(15,
 			LL14(L"BPM計測", L"Detect BPM", L"Detecter BPM", L"Rileva BPM", L"Detectar BPM",
 				L"BPM 측정", L"检测 BPM", L"اكتشاف BPM", L"Определить BPM", L"BPM erkennen",

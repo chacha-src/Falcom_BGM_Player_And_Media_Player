@@ -6902,13 +6902,14 @@ void CSoft3DMazeDlg::ShowContextMenu(CPoint screenPt)
 		L"Создать с тем же зерном", L"Mit gleichem Seed erzeugen", L"Gerar com a mesma semente", L"Opnieuw met dezelfde seed",
 		L"Generuj z tym samym ziarnem", L"Aynı tohumla yeniden oluştur"));
 	menu.AddSeparator();
-	{
+	if (CCustomPopupMenu* sizeSub = menu.AddSubMenu(LL14(L"大きさ", L"Size", L"Taille", L"Dimensione", L"Tamaño",
+		L"크기", L"大小", L"الحجم", L"Размер", L"Größe", L"Tamanho", L"Grootte", L"Rozmiar", L"Boyut"))) {
 		CString sizeFmt = LL14(L"大きさ: %d", L"Size: %d", L"Taille: %d", L"Dimensione: %d", L"Tamaño: %d",
 			L"크기: %d", L"大小：%d", L"الحجم: %d", L"Размер: %d", L"Größe: %d", L"Tamanho: %d", L"Grootte: %d", L"Rozmiar: %d", L"Boyut: %d");
 		for (int i = 0; i < kPresetCnt; i++) {
 			CString lab;
 			lab.Format(sizeFmt, kPresets[i]);
-			menu.AddCheck(S3M_MENU_SIZE0 + i, lab, curSz == kPresets[i]);
+			sizeSub->AddCheck(S3M_MENU_SIZE0 + i, lab, curSz == kPresets[i]);
 		}
 	}
 	menu.AddSeparator();
@@ -6917,35 +6918,41 @@ void CSoft3DMazeDlg::ShowContextMenu(CPoint screenPt)
 		savedata.s3m_show_map != 0);
 	menu.AddSeparator();
 	const int mask = S3mItemMask();
-	menu.AddCommand(28, LL14(L"アイテムをすべてON", L"Enable all items", L"Activer tous les objets", L"Attiva tutti gli oggetti", L"Activar todos los objetos",
-		L"아이템 모두 ON", L"全部道具开启", L"تفعيل كل العناصر", L"Включить все предметы", L"Alle Items ein", L"Ativar todos os itens", L"Alle items aan", L"Włącz wszystkie przedmioty", L"Tüm öğeleri aç"));
-	menu.AddCommand(29, LL14(L"アイテムをすべてOFF", L"Disable all items", L"Désactiver tous les objets", L"Disattiva tutti gli oggetti", L"Desactivar todos los objetos",
-		L"아이템 모두 OFF", L"全部道具关闭", L"تعطيل كل العناصر", L"Выключить все предметы", L"Alle Items aus", L"Desativar todos os itens", L"Alle items uit", L"Wyłącz wszystkie przedmioty", L"Tüm öğeleri kapat"));
-	menu.AddCheck(30, LL14(L"アイテム: テンポ↑", L"Item: tempo↑", L"Objet: tempo↑", L"Oggetto: tempo↑", L"Objeto: tempo↑", L"아이템: 템포↑", L"道具：速度↑", L"عنصر: إيقاع↑", L"Предмет: темп↑", L"Item: Tempo↑", L"Item: tempo↑", L"Item: tempo↑", L"Przedmiot: tempo↑", L"Öğe: tempo↑"), (mask & ITEM_TEMPO) != 0);
-	menu.AddCheck(31, LL14(L"アイテム: ピッチ↑", L"Item: pitch↑", L"Objet: hauteur↑", L"Oggetto: pitch↑", L"Objeto: tono↑", L"아이템: 피치↑", L"道具：音高↑", L"عنصر: طبقة↑", L"Предмет: высота↑", L"Item: Tonhöhe↑", L"Item: tom↑", L"Item: toon↑", L"Przedmiot: wysokość↑", L"Öğe: perde↑"), (mask & ITEM_PITCH_UP) != 0);
-	menu.AddCheck(32, LL14(L"アイテム: ピッチ↓", L"Item: pitch↓", L"Objet: hauteur↓", L"Oggetto: pitch↓", L"Objeto: tono↓", L"아이템: 피치↓", L"道具：音高↓", L"عنصر: طبقة↓", L"Предмет: высота↓", L"Item: Tonhöhe↓", L"Item: tom↓", L"Item: toon↓", L"Przedmiot: wysokość↓", L"Öğe: perde↓"), (mask & ITEM_PITCH_DN) != 0);
-	menu.AddCheck(33, LL14(L"アイテム: 次の曲", L"Item: next track", L"Objet: piste suivante", L"Oggetto: brano successivo", L"Objeto: pista siguiente", L"아이템: 다음 곡", L"道具：下一曲", L"عنصر: المسار التالي", L"Предмет: следующий трек", L"Item: nächster Titel", L"Item: próxima faixa", L"Item: volgend nummer", L"Przedmiot: następny utwór", L"Öğe: sonraki parça"), (mask & ITEM_NEXT) != 0);
-	menu.AddCheck(34, LL14(L"アイテム: EQ", L"Item: EQ", L"Objet: EQ", L"Oggetto: EQ", L"Objeto: EQ", L"아이템: EQ", L"道具：EQ", L"عنصر: EQ", L"Предмет: EQ", L"Item: EQ", L"Item: EQ", L"Item: EQ", L"Przedmiot: EQ", L"Öğe: EQ"), (mask & ITEM_EQ) != 0);
-	menu.AddCheck(35, LL14(L"窓を配置", L"Place windows", L"Placer des fenêtres", L"Posiziona finestre", L"Colocar ventanas",
-		L"창 배치", L"放置窗户", L"وضع نوافذ", L"Размещать окна", L"Fenster platzieren", L"Colocar janelas", L"Ramen plaatsen", L"Umieść okna", L"Pencere yerleştir"), (mask & ITEM_WINDOW) != 0);
-	menu.AddCheck(36, LL14(L"アイテム: テンポ↓", L"Item: tempo↓", L"Objet: tempo↓", L"Oggetto: tempo↓", L"Objeto: tempo↓", L"아이템: 템포↓", L"道具：速度↓", L"Item: tempo↓", L"Item: tempo↓", L"Item: Tempo↓", L"Item: tempo↓", L"Item: tempo↓", L"Przedmiot: tempo↓", L"Öğe: tempo↓"), (mask & ITEM_TEMPO_DN) != 0);
-	menu.AddCheck(37, LL14(L"アイテム: 前の曲", L"Item: previous track", L"Objet: piste précédente", L"Oggetto: brano precedente", L"Objeto: pista anterior", L"아이템: 이전 곡", L"道具：上一曲", L"Item: prev", L"Item: prev", L"Item: vorheriger Titel", L"Item: faixa anterior", L"Item: vorig nummer", L"Przedmiot: poprzedni", L"Öğe: önceki"), (mask & ITEM_PREV) != 0);
-	menu.AddCheck(38, LL14(L"アイテム: 音量↑", L"Item: volume↑", L"Objet: volume↑", L"Oggetto: volume↑", L"Objeto: volumen↑", L"아이템: 볼륨↑", L"道具：音量↑", L"Item: vol↑", L"Item: vol↑", L"Item: Lautstärke↑", L"Item: volume↑", L"Item: volume↑", L"Przedmiot: głośność↑", L"Öğe: ses↑"), (mask & ITEM_VOL_UP) != 0);
-	menu.AddCheck(39, LL14(L"アイテム: 音量↓", L"Item: volume↓", L"Objet: volume↓", L"Oggetto: volume↓", L"Objeto: volumen↓", L"아이템: 볼륨↓", L"道具：音量↓", L"Item: vol↓", L"Item: vol↓", L"Item: Lautstärke↓", L"Item: volume↓", L"Item: volume↓", L"Przedmiot: głośność↓", L"Öğe: ses↓"), (mask & ITEM_VOL_DN) != 0);
-	menu.AddCheck(40, LL14(L"アイテム: リバーブ", L"Item: reverb", L"Objet: réverb", L"Oggetto: reverb", L"Objeto: reverb", L"아이템: 리버브", L"道具：混响", L"Item: reverb", L"Item: reverb", L"Item: Hall", L"Item: reverb", L"Item: reverb", L"Przedmiot: pogłos", L"Öğe: reverb"), (mask & ITEM_REVERB) != 0);
-	menu.AddCheck(41, LL14(L"アイテム: クロスフェード", L"Item: crossfade", L"Objet: fondu croisé", L"Oggetto: crossfade", L"Objeto: fundido", L"아이템: 크로스페이드", L"道具：交叉淡化", L"Item: crossfade", L"Item: crossfade", L"Item: Crossfade", L"Item: crossfade", L"Item: crossfade", L"Przedmiot: crossfade", L"Öğe: crossfade"), (mask & ITEM_XFADE) != 0);
-	menu.AddCheck(42, LL14(L"アイテム: EQ平坦化", L"Item: EQ flatten", L"Objet: EQ plat", L"Oggetto: EQ flat", L"Objeto: EQ plano", L"아이템: EQ 평탄", L"道具：EQ平坦", L"Item: EQ flat", L"Item: EQ flat", L"Item: EQ flach", L"Item: EQ flat", L"Item: EQ flat", L"Przedmiot: EQ flat", L"Öğe: EQ düz"), (mask & ITEM_EQ_FLAT) != 0);
-	menu.AddCheck(43, LL14(L"アイテム: ランダム再生切替", L"Item: toggle random play", L"Objet: aléatoire on/off", L"Oggetto: casuale on/off", L"Objeto: aleatorio on/off", L"아이템: 랜덤 재생 전환", L"道具：随机播放切换", L"Item: random", L"Item: random", L"Item: Zufall umschalten", L"Item: aleatório", L"Item: willekeurig", L"Przedmiot: losowo", L"Öğe: rastgele"), (mask & ITEM_RANDOM) != 0);
+	if (CCustomPopupMenu* itemSub = menu.AddSubMenu(LL14(L"アイテム", L"Items", L"Objets", L"Oggetti", L"Objetos",
+		L"아이템", L"道具", L"عناصر", L"Предметы", L"Items", L"Itens", L"Items", L"Przedmioty", L"Öğeler"))) {
+		itemSub->AddCommand(28, LL14(L"アイテムをすべてON", L"Enable all items", L"Activer tous les objets", L"Attiva tutti gli oggetti", L"Activar todos los objetos",
+			L"아이템 모두 ON", L"全部道具开启", L"تفعيل كل العناصر", L"Включить все предметы", L"Alle Items ein", L"Ativar todos os itens", L"Alle items aan", L"Włącz wszystkie przedmioty", L"Tüm öğeleri aç"));
+		itemSub->AddCommand(29, LL14(L"アイテムをすべてOFF", L"Disable all items", L"Désactiver tous les objets", L"Disattiva tutti gli oggetti", L"Desactivar todos los objetos",
+			L"아이템 모두 OFF", L"全部道具关闭", L"تعطيل كل العناصر", L"Выключить все предметы", L"Alle Items aus", L"Desativar todos os itens", L"Alle items uit", L"Wyłącz wszystkie przedmioty", L"Tüm öğeleri kapat"));
+		itemSub->AddCheck(30, LL14(L"アイテム: テンポ↑", L"Item: tempo↑", L"Objet: tempo↑", L"Oggetto: tempo↑", L"Objeto: tempo↑", L"아이템: 템포↑", L"道具：速度↑", L"عنصر: إيقاع↑", L"Предмет: темп↑", L"Item: Tempo↑", L"Item: tempo↑", L"Item: tempo↑", L"Przedmiot: tempo↑", L"Öğe: tempo↑"), (mask & ITEM_TEMPO) != 0);
+		itemSub->AddCheck(31, LL14(L"アイテム: ピッチ↑", L"Item: pitch↑", L"Objet: hauteur↑", L"Oggetto: pitch↑", L"Objeto: tono↑", L"아이템: 피치↑", L"道具：音高↑", L"عنصر: طبقة↑", L"Предмет: высота↑", L"Item: Tonhöhe↑", L"Item: tom↑", L"Item: toon↑", L"Przedmiot: wysokość↑", L"Öğe: perde↑"), (mask & ITEM_PITCH_UP) != 0);
+		itemSub->AddCheck(32, LL14(L"アイテム: ピッチ↓", L"Item: pitch↓", L"Objet: hauteur↓", L"Oggetto: pitch↓", L"Objeto: tono↓", L"아이템: 피치↓", L"道具：音高↓", L"عنصر: طبقة↓", L"Предмет: высота↓", L"Item: Tonhöhe↓", L"Item: tom↓", L"Item: toon↓", L"Przedmiot: wysokość↓", L"Öğe: perde↓"), (mask & ITEM_PITCH_DN) != 0);
+		itemSub->AddCheck(33, LL14(L"アイテム: 次の曲", L"Item: next track", L"Objet: piste suivante", L"Oggetto: brano successivo", L"Objeto: pista siguiente", L"아이템: 다음 곡", L"道具：下一曲", L"عنصر: المسار التالي", L"Предмет: следующий трек", L"Item: nächster Titel", L"Item: próxima faixa", L"Item: volgend nummer", L"Przedmiot: następny utwór", L"Öğe: sonraki parça"), (mask & ITEM_NEXT) != 0);
+		itemSub->AddCheck(34, LL14(L"アイテム: EQ", L"Item: EQ", L"Objet: EQ", L"Oggetto: EQ", L"Objeto: EQ", L"아이템: EQ", L"道具：EQ", L"عنصر: EQ", L"Предмет: EQ", L"Item: EQ", L"Item: EQ", L"Item: EQ", L"Przedmiot: EQ", L"Öğe: EQ"), (mask & ITEM_EQ) != 0);
+		itemSub->AddCheck(35, LL14(L"窓を配置", L"Place windows", L"Placer des fenêtres", L"Posiziona finestre", L"Colocar ventanas",
+			L"창 배치", L"放置窗户", L"وضع نوافذ", L"Размещать окна", L"Fenster platzieren", L"Colocar janelas", L"Ramen plaatsen", L"Umieść okna", L"Pencere yerleştir"), (mask & ITEM_WINDOW) != 0);
+		itemSub->AddCheck(36, LL14(L"アイテム: テンポ↓", L"Item: tempo↓", L"Objet: tempo↓", L"Oggetto: tempo↓", L"Objeto: tempo↓", L"아이템: 템포↓", L"道具：速度↓", L"Item: tempo↓", L"Item: tempo↓", L"Item: Tempo↓", L"Item: tempo↓", L"Item: tempo↓", L"Przedmiot: tempo↓", L"Öğe: tempo↓"), (mask & ITEM_TEMPO_DN) != 0);
+		itemSub->AddCheck(37, LL14(L"アイテム: 前の曲", L"Item: previous track", L"Objet: piste précédente", L"Oggetto: brano precedente", L"Objeto: pista anterior", L"아이템: 이전 곡", L"道具：上一曲", L"Item: prev", L"Item: prev", L"Item: vorheriger Titel", L"Item: faixa anterior", L"Item: vorig nummer", L"Przedmiot: poprzedni", L"Öğe: önceki"), (mask & ITEM_PREV) != 0);
+		itemSub->AddCheck(38, LL14(L"アイテム: 音量↑", L"Item: volume↑", L"Objet: volume↑", L"Oggetto: volume↑", L"Objeto: volumen↑", L"아이템: 볼륨↑", L"道具：音量↑", L"Item: vol↑", L"Item: vol↑", L"Item: Lautstärke↑", L"Item: volume↑", L"Item: volume↑", L"Przedmiot: głośność↑", L"Öğe: ses↑"), (mask & ITEM_VOL_UP) != 0);
+		itemSub->AddCheck(39, LL14(L"アイテム: 音量↓", L"Item: volume↓", L"Objet: volume↓", L"Oggetto: volume↓", L"Objeto: volumen↓", L"아이템: 볼륨↓", L"道具：音量↓", L"Item: vol↓", L"Item: vol↓", L"Item: Lautstärke↓", L"Item: volume↓", L"Item: volume↓", L"Przedmiot: głośność↓", L"Öğe: ses↓"), (mask & ITEM_VOL_DN) != 0);
+		itemSub->AddCheck(40, LL14(L"アイテム: リバーブ", L"Item: reverb", L"Objet: réverb", L"Oggetto: reverb", L"Objeto: reverb", L"아이템: 리버브", L"道具：混响", L"Item: reverb", L"Item: reverb", L"Item: Hall", L"Item: reverb", L"Item: reverb", L"Przedmiot: pogłos", L"Öğe: reverb"), (mask & ITEM_REVERB) != 0);
+		itemSub->AddCheck(41, LL14(L"アイテム: クロスフェード", L"Item: crossfade", L"Objet: fondu croisé", L"Oggetto: crossfade", L"Objeto: fundido", L"아이템: 크로스페이드", L"道具：交叉淡化", L"Item: crossfade", L"Item: crossfade", L"Item: Crossfade", L"Item: crossfade", L"Item: crossfade", L"Przedmiot: crossfade", L"Öğe: crossfade"), (mask & ITEM_XFADE) != 0);
+		itemSub->AddCheck(42, LL14(L"アイテム: EQ平坦化", L"Item: EQ flatten", L"Objet: EQ plat", L"Oggetto: EQ flat", L"Objeto: EQ plano", L"아이템: EQ 평탄", L"道具：EQ平坦", L"Item: EQ flat", L"Item: EQ flat", L"Item: EQ flach", L"Item: EQ flat", L"Item: EQ flat", L"Przedmiot: EQ flat", L"Öğe: EQ düz"), (mask & ITEM_EQ_FLAT) != 0);
+		itemSub->AddCheck(43, LL14(L"アイテム: ランダム再生切替", L"Item: toggle random play", L"Objet: aléatoire on/off", L"Oggetto: casuale on/off", L"Objeto: aleatorio on/off", L"아이템: 랜덤 재생 전환", L"道具：随机播放切换", L"Item: random", L"Item: random", L"Item: Zufall umschalten", L"Item: aleatório", L"Item: willekeurig", L"Przedmiot: losowo", L"Öğe: rastgele"), (mask & ITEM_RANDOM) != 0);
+	}
 	menu.AddSeparator();
 	menu.AddCommand(45, LL14(L"テンポ／ピッチを開いた時に戻す", L"Reset tempo/pitch to opening values", L"Remettre tempo/hauteur d'ouverture", L"Ripristina tempo/pitch iniziali", L"Restablecer tempo/tono iniciales",
 		L"템포/피치를 열 때 값으로", L"将速度/音高恢复为打开时", L"إعادة الإيقاع/الطبقة لقيم الفتح", L"Вернуть темп/высоту к открытию", L"Tempo/Tonhöhe auf Öffnungswerte", L"Restaurar tempo/tom de abertura", L"Tempo/toonhoogte naar openingswaarden", L"Przywróć tempo/wysokość z otwarcia", L"Tempo/perdeyi açılış değerine al"));
 	menu.AddSeparator();
-	menu.AddCheck(50,LL14(L"歩行時の揺れ",L"Walking bob",L"Balancement de marche",L"Oscillazione camminata",L"Balanceo al caminar",L"걷기 흔들림",L"行走晃动",L"تمايل المشي",L"Покачивание при ходьбе",L"Kamerawippen",L"Balanço ao andar",L"Loopbeweging",L"Kołysanie chodu",L"Yürüme sallantısı"),savedata.s3m_bob!=0);
-	menu.AddCheck(51,L"FOV 55°",savedata.s3m_fov==0);
-	menu.AddCheck(52,L"FOV 70°",savedata.s3m_fov==1);
-	menu.AddCheck(53,L"FOV 90°",savedata.s3m_fov==2);
-	menu.AddCommand(54,LL14(L"ズームをリセット（視点・地図）",L"Reset zoom (view & maps)",L"Réinitialiser le zoom",L"Reimposta zoom",L"Restablecer zoom",
-		L"줌 리셋(시점·지도)",L"重置缩放（视角与地图）",L"إعادة التكبير",L"Сбросить зум",L"Zoom zurücksetzen",L"Redefinir zoom",L"Zoom resetten",L"Resetuj zoom",L"Zoomu sıfırla"));
+	if (CCustomPopupMenu* viewSub = menu.AddSubMenu(LL14(L"視点", L"View", L"Vue", L"Vista", L"Vista",
+		L"시점", L"视角", L"منظور", L"Вид", L"Ansicht", L"Vista", L"Weergave", L"Widok", L"Görünüm"))) {
+		viewSub->AddCheck(50,LL14(L"歩行時の揺れ",L"Walking bob",L"Balancement de marche",L"Oscillazione camminata",L"Balanceo al caminar",L"걷기 흔들림",L"行走晃动",L"تمايل المشي",L"Покачивание при ходьбе",L"Kamerawippen",L"Balanço ao andar",L"Loopbeweging",L"Kołysanie chodu",L"Yürüme sallantısı"),savedata.s3m_bob!=0);
+		viewSub->AddCheck(51,L"FOV 55°",savedata.s3m_fov==0);
+		viewSub->AddCheck(52,L"FOV 70°",savedata.s3m_fov==1);
+		viewSub->AddCheck(53,L"FOV 90°",savedata.s3m_fov==2);
+		viewSub->AddCommand(54,LL14(L"ズームをリセット（視点・地図）",L"Reset zoom (view & maps)",L"Réinitialiser le zoom",L"Reimposta zoom",L"Restablecer zoom",
+			L"줌 리셋(시점·지도)",L"重置缩放（视角与地图）",L"إعادة التكبير",L"Сбросить зум",L"Zoom zurücksetzen",L"Redefinir zoom",L"Zoom resetten",L"Resetuj zoom",L"Zoomu sıfırla"));
+	}
 
 	UINT cmd = menu.Track(screenPt, this);
 	if (cmd == 1) {

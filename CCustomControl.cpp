@@ -12402,56 +12402,63 @@ void CCustomSysPerfCtrl::CopyStatsToClipboard()
 void CCustomSysPerfCtrl::ShowCtxMenu(CPoint screenPt)
 {
 	CCustomPopupMenu menu;
-	menu.AddCheck(kCmdViewAll,
-		LL14(L"すべて表示", L"Show all", L"Tout afficher", L"Mostra tutto", L"Mostrar todo", L"모두 표시", L"全部显示", L"عرض الكل", L"Показать все", L"Alles anzeigen", L"Mostrar tudo", L"Alles tonen", L"Pokaz wszystko", L"Tumunu goster"),
-		m_viewMode == VIEW_ALL,
-		LL14(L"メモリ＋CPU全体＋コアグリッドをまとめて表示", L"Show memory + overall CPU + per-core grid together",
-			L"Afficher memoire + CPU global + grille", L"Mostra memoria + CPU totale + griglia",
-			L"Mostrar memoria + CPU total + cuadrícula", L"메모리+CPU 전체+코어 그리드를 함께 표시",
-			L"同时显示内存+CPU总体+核心网格", L"عرض الذاكرة + المعالج الكلي + الشبكة",
-			L"Показать память + общий CPU + сетку ядер", L"Speicher + Gesamt-CPU + Kernraster zusammen",
-			L"Mostrar memoria + CPU geral + grade", L"Geheugen + totale CPU + kernraster tonen",
-			L"Pokaz pamiec + CPU ogolne + siatke rdzeni", L"Bellek + genel CPU + cekirdek ızgarasini goster"));
-	menu.AddCheck(kCmdViewMem,
-		LL14(L"メモリのみ", L"Memory only", L"Memoire seule", L"Solo memoria", L"Solo memoria", L"메모리만", L"仅内存", L"الذاكرة فقط", L"Только память", L"Nur Speicher", L"Somente memoria", L"Alleen geheugen", L"Tylko pamiec", L"Yalniz bellek"),
-		m_viewMode == VIEW_MEM,
-		LL14(L"メモリ使用量グラフだけを表示（CPUは非表示）", L"Show only the memory graph (hide CPU)",
-			L"Afficher seulement le graphe memoire (masquer CPU)", L"Solo grafico memoria (nascondi CPU)",
-			L"Solo grafico de memoria (ocultar CPU)", L"메모리 그래프만 표시(CPU 숨김)",
-			L"仅显示内存图（隐藏 CPU）", L"عرض رسم الذاكرة فقط (إخفاء المعالج)",
-			L"Только график памяти (скрыть CPU)", L"Nur Speicherdiagramm (CPU aus)",
-			L"Somente grafico de memoria (ocultar CPU)", L"Alleen geheugengrafiek (CPU verbergen)",
-			L"Tylko wykres pamieci (ukryj CPU)", L"Yalniz bellek grafigi (CPU gizle)"));
-	menu.AddCheck(kCmdViewCpuOverall,
-		LL14(L"CPU 全体のみ", L"CPU overall only", L"CPU global seul", L"Solo CPU totale", L"Solo CPU total", L"CPU 전체만", L"仅 CPU 总体", L"وحدة المعالجة فقط", L"Только CPU общий", L"Nur CPU gesamt", L"Somente CPU geral", L"Alleen CPU totaal", L"Tylko CPU ogolne", L"Yalniz CPU genel"),
-		m_viewMode == VIEW_CPU_OVERALL,
-		LL14(L"全体CPU使用率グラフだけを表示", L"Show only the overall CPU usage graph",
-			L"Afficher seulement le graphe CPU global", L"Solo grafico CPU totale",
-			L"Solo grafico CPU total", L"전체 CPU 사용률 그래프만 표시",
-			L"仅显示总体 CPU 使用率图", L"عرض رسم استخدام المعالج الكلي فقط",
-			L"Только график общей загрузки CPU", L"Nur Gesamt-CPU-Diagramm",
-			L"Somente grafico CPU geral", L"Alleen totale CPU-grafiek",
-			L"Tylko wykres ogolnego CPU", L"Yalniz genel CPU kullanim grafigi"));
-	menu.AddCheck(kCmdViewCpuGrid,
-		LL14(L"CPU グリッドのみ", L"CPU grid only", L"Grille CPU seule", L"Solo griglia CPU", L"Solo cuadrícula CPU", L"CPU 그리드만", L"仅 CPU 网格", L"شبكة المعالج فقط", L"Только сетка CPU", L"Nur CPU-Raster", L"Somente grade CPU", L"Alleen CPU-raster", L"Tylko siatka CPU", L"Yalniz CPU izgarasi"),
-		m_viewMode == VIEW_CPU_GRID,
-		LL14(L"コア別CPUグリッドだけを表示", L"Show only the per-core CPU grid",
-			L"Afficher seulement la grille CPU par coeur", L"Solo griglia CPU per core",
-			L"Solo cuadrícula CPU por nucleo", L"코어별 CPU 그리드만 표시",
-			L"仅显示每核 CPU 网格", L"عرض شبكة المعالج لكل نواة فقط",
-			L"Только сетка CPU по ядрам", L"Nur per-Kern-CPU-Raster",
-			L"Somente grade CPU por nucleo", L"Alleen CPU-raster per kern",
-			L"Tylko siatka CPU per rdzen", L"Yalniz cekirdek basina CPU ızgarasi"));
-	menu.AddCheck(kCmdViewCpuBoth,
-		LL14(L"CPU のみ (全体+グリッド)", L"CPU only (overall+grid)", L"CPU seul (global+grille)", L"Solo CPU (totale+griglia)", L"Solo CPU (total+cuadrícula)", L"CPU만 (전체+그리드)", L"仅 CPU（总体+网格）", L"المعالج فقط (كلي+شبكة)", L"Только CPU (общий+сетка)", L"Nur CPU (gesamt+Raster)", L"Somente CPU (geral+grade)", L"Alleen CPU (totaal+raster)", L"Tylko CPU (ogolne+siatka)", L"Yalniz CPU (genel+izgara)"),
-		m_viewMode == VIEW_CPU_BOTH,
-		LL14(L"CPU全体＋コアグリッドのみ（メモリは非表示）", L"Overall CPU + per-core grid only (hide memory)",
-			L"CPU global + grille seulement (masquer memoire)", L"Solo CPU totale + griglia (nascondi memoria)",
-			L"Solo CPU total + cuadrícula (ocultar memoria)", L"CPU 전체+코어 그리드만(메모리 숨김)",
-			L"仅总体 CPU+核心网格（隐藏内存）", L"المعالج الكلي + الشبكة فقط (إخفاء الذاكرة)",
-			L"Только общий CPU + сетка (скрыть память)", L"Nur Gesamt-CPU + Raster (Speicher aus)",
-			L"Somente CPU geral + grade (ocultar memoria)", L"Alleen totale CPU + raster (geheugen uit)",
-			L"Tylko CPU ogolne + siatka (ukryj pamiec)", L"Yalniz genel CPU + izgara (bellek gizle)"));
+	{
+		CCustomPopupMenu* viewSub = menu.AddSubMenu(
+			LL14(L"表示モード", L"View mode", L"Mode d'affichage", L"Modalita di visualizzazione", L"Modo de visualizacion", L"표시 모드", L"显示模式", L"وضع العرض", L"Режим отображения", L"Anzeigemodus", L"Modo de exibicao", L"Weergavemodus", L"Tryb wyswietlania", L"Goruntuleme modu"),
+			LL14(L"メモリ／CPU全体／グリッドなどの表示切替。", L"Switch memory / overall CPU / grid display modes.", L"Basculer memoire / CPU global / grille.", L"Alterna memoria / CPU totale / griglia.", L"Alternar memoria / CPU total / cuadrícula.", L"메모리/CPU 전체/그리드 표시 전환.", L"切换内存/总体 CPU/网格等显示。", L"تبديل عرض الذاكرة / المعالج الكلي / الشبكة.", L"Переключать память / общий CPU / сетку.", L"Speicher / Gesamt-CPU / Raster umschalten.", L"Alternar memoria / CPU geral / grade.", L"Schakel geheugen / totale CPU / raster om.", L"Przelacz pamiec / CPU ogolne / siatke.", L"Bellek / genel CPU / izgara gorunumunu degistir."));
+		if (viewSub) {
+			viewSub->AddCheck(kCmdViewAll,
+				LL14(L"すべて表示", L"Show all", L"Tout afficher", L"Mostra tutto", L"Mostrar todo", L"모두 표시", L"全部显示", L"عرض الكل", L"Показать все", L"Alles anzeigen", L"Mostrar tudo", L"Alles tonen", L"Pokaz wszystko", L"Tumunu goster"),
+				m_viewMode == VIEW_ALL,
+				LL14(L"メモリ＋CPU全体＋コアグリッドをまとめて表示", L"Show memory + overall CPU + per-core grid together",
+					L"Afficher memoire + CPU global + grille", L"Mostra memoria + CPU totale + griglia",
+					L"Mostrar memoria + CPU total + cuadrícula", L"메모리+CPU 전체+코어 그리드를 함께 표시",
+					L"同时显示内存+CPU总体+核心网格", L"عرض الذاكرة + المعالج الكلي + الشبكة",
+					L"Показать память + общий CPU + сетку ядер", L"Speicher + Gesamt-CPU + Kernraster zusammen",
+					L"Mostrar memoria + CPU geral + grade", L"Geheugen + totale CPU + kernraster tonen",
+					L"Pokaz pamiec + CPU ogolne + siatke rdzeni", L"Bellek + genel CPU + cekirdek ızgarasini goster"));
+			viewSub->AddCheck(kCmdViewMem,
+				LL14(L"メモリのみ", L"Memory only", L"Memoire seule", L"Solo memoria", L"Solo memoria", L"메모리만", L"仅内存", L"الذاكرة فقط", L"Только память", L"Nur Speicher", L"Somente memoria", L"Alleen geheugen", L"Tylko pamiec", L"Yalniz bellek"),
+				m_viewMode == VIEW_MEM,
+				LL14(L"メモリ使用量グラフだけを表示（CPUは非表示）", L"Show only the memory graph (hide CPU)",
+					L"Afficher seulement le graphe memoire (masquer CPU)", L"Solo grafico memoria (nascondi CPU)",
+					L"Solo grafico de memoria (ocultar CPU)", L"메모리 그래프만 표시(CPU 숨김)",
+					L"仅显示内存图（隐藏 CPU）", L"عرض رسم الذاكرة فقط (إخفاء المعالج)",
+					L"Только график памяти (скрыть CPU)", L"Nur Speicherdiagramm (CPU aus)",
+					L"Somente grafico de memoria (ocultar CPU)", L"Alleen geheugengrafiek (CPU verbergen)",
+					L"Tylko wykres pamieci (ukryj CPU)", L"Yalniz bellek grafigi (CPU gizle)"));
+			viewSub->AddCheck(kCmdViewCpuOverall,
+				LL14(L"CPU 全体のみ", L"CPU overall only", L"CPU global seul", L"Solo CPU totale", L"Solo CPU total", L"CPU 전체만", L"仅 CPU 总体", L"وحدة المعالجة فقط", L"Только CPU общий", L"Nur CPU gesamt", L"Somente CPU geral", L"Alleen CPU totaal", L"Tylko CPU ogolne", L"Yalniz CPU genel"),
+				m_viewMode == VIEW_CPU_OVERALL,
+				LL14(L"全体CPU使用率グラフだけを表示", L"Show only the overall CPU usage graph",
+					L"Afficher seulement le graphe CPU global", L"Solo grafico CPU totale",
+					L"Solo grafico CPU total", L"전체 CPU 사용률 그래프만 표시",
+					L"仅显示总体 CPU 使用率图", L"عرض رسم استخدام المعالج الكلي فقط",
+					L"Только график общей загрузки CPU", L"Nur Gesamt-CPU-Diagramm",
+					L"Somente grafico CPU geral", L"Alleen totale CPU-grafiek",
+					L"Tylko wykres ogolnego CPU", L"Yalniz genel CPU kullanim grafigi"));
+			viewSub->AddCheck(kCmdViewCpuGrid,
+				LL14(L"CPU グリッドのみ", L"CPU grid only", L"Grille CPU seule", L"Solo griglia CPU", L"Solo cuadrícula CPU", L"CPU 그리드만", L"仅 CPU 网格", L"شبكة المعالج فقط", L"Только сетка CPU", L"Nur CPU-Raster", L"Somente grade CPU", L"Alleen CPU-raster", L"Tylko siatka CPU", L"Yalniz CPU izgarasi"),
+				m_viewMode == VIEW_CPU_GRID,
+				LL14(L"コア別CPUグリッドだけを表示", L"Show only the per-core CPU grid",
+					L"Afficher seulement la grille CPU par coeur", L"Solo griglia CPU per core",
+					L"Solo cuadrícula CPU por nucleo", L"코어별 CPU 그리드만 표시",
+					L"仅显示每核 CPU 网格", L"عرض شبكة المعالج لكل نواة فقط",
+					L"Только сетка CPU по ядрам", L"Nur per-Kern-CPU-Raster",
+					L"Somente grade CPU por nucleo", L"Alleen CPU-raster per kern",
+					L"Tylko siatka CPU per rdzen", L"Yalniz cekirdek basina CPU ızgarasi"));
+			viewSub->AddCheck(kCmdViewCpuBoth,
+				LL14(L"CPU のみ (全体+グリッド)", L"CPU only (overall+grid)", L"CPU seul (global+grille)", L"Solo CPU (totale+griglia)", L"Solo CPU (total+cuadrícula)", L"CPU만 (전체+그리드)", L"仅 CPU（总体+网格）", L"المعالج فقط (كلي+شبكة)", L"Только CPU (общий+сетка)", L"Nur CPU (gesamt+Raster)", L"Somente CPU (geral+grade)", L"Alleen CPU (totaal+raster)", L"Tylko CPU (ogolne+siatka)", L"Yalniz CPU (genel+izgara)"),
+				m_viewMode == VIEW_CPU_BOTH,
+				LL14(L"CPU全体＋コアグリッドのみ（メモリは非表示）", L"Overall CPU + per-core grid only (hide memory)",
+					L"CPU global + grille seulement (masquer memoire)", L"Solo CPU totale + griglia (nascondi memoria)",
+					L"Solo CPU total + cuadrícula (ocultar memoria)", L"CPU 전체+코어 그리드만(메모리 숨김)",
+					L"仅总体 CPU+核心网格（隐藏内存）", L"المعالج الكلي + الشبكة فقط (إخفاء الذاكرة)",
+					L"Только общий CPU + сетка (скрыть память)", L"Nur Gesamt-CPU + Raster (Speicher aus)",
+					L"Somente CPU geral + grade (ocultar memoria)", L"Alleen totale CPU + raster (geheugen uit)",
+					L"Tylko CPU ogolne + siatka (ukryj pamiec)", L"Yalniz genel CPU + izgara (bellek gizle)"));
+		}
+	}
 	menu.AddSeparator();
 	menu.AddCheck(kCmdPause,
 		m_bPaused

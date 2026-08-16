@@ -1274,22 +1274,29 @@ void CPromptDlg::OnContextMenu(CWnd* pWnd, CPoint point)
 		IDM_SAVEHIST, IDM_CLEAR, IDM_RUN, IDM_ANALYZE
 	};
 	CCustomPopupMenu menu;
-	menu.AddCommand(IDM_CUT, LL14(L"切り取り", L"Cut", L"Couper", L"Taglia", L"Cortar", L"잘라내기", L"剪切", L"Cut", L"Вырезать", L"Ausschneiden", L"Recortar", L"Knippen", L"Wytnij", L"Kes"),
-		LL14(L"選択範囲を切り取り、クリップボードへ移します。", L"Cut the selection to the clipboard.", L"Coupe la selection vers le presse-papiers.", L"Taglia la selezione negli appunti.", L"Corta la seleccion al portapapeles.",
-			L"선택 범위를 잘라 클립보드로 옮깁니다.", L"剪切所选内容到剪贴板。", L"قص التحديد إلى الحافظة.", L"Вырезать выделение в буфер обмена.", L"Auswahl ausschneiden und in die Zwischenablage legen.",
-			L"Recortar a selecao para a area de transferencia.", L"Knip de selectie naar het klembord.", L"Wytnij zaznaczenie do schowka.", L"Secimi kesip panoya tasi."));
-	menu.AddCommand(IDM_COPY, LL14(L"コピー", L"Copy", L"Copier", L"Copia", L"Copiar", L"복사", L"复制", L"Copy", L"Копировать", L"Kopieren", L"Copiar", L"Kopieren", L"Kopiuj", L"Kopyala"),
-		LL14(L"選択範囲をクリップボードへコピーします。", L"Copy the selection to the clipboard.", L"Copie la selection vers le presse-papiers.", L"Copia la selezione negli appunti.", L"Copia la seleccion al portapapeles.",
-			L"선택 범위를 클립보드에 복사합니다.", L"将所选内容复制到剪贴板。", L"نسخ التحديد إلى الحافظة.", L"Скопировать выделение в буфер обмена.", L"Auswahl in die Zwischenablage kopieren.",
-			L"Copiar a selecao para a area de transferencia.", L"Kopieer de selectie naar het klembord.", L"Kopiuj zaznaczenie do schowka.", L"Secimi panoya kopyala."));
-	menu.AddCommand(IDM_PASTE, LL14(L"貼り付け", L"Paste", L"Coller", L"Incolla", L"Pegar", L"붙여넣기", L"粘贴", L"Paste", L"Вставить", L"Einfuegen", L"Colar", L"Plakken", L"Wklej", L"Yapistir"),
-		LL14(L"クリップボードの内容をカーソル位置へ貼り付けます。", L"Paste clipboard text at the caret.", L"Colle le contenu du presse-papiers a la position du curseur.", L"Incolla il contenuto degli appunti alla posizione del cursore.", L"Pega el contenido del portapapeles en el cursor.",
-			L"클립보드 내용을 커서 위치에 붙여넣습니다.", L"在光标处粘贴剪贴板内容。", L"لصق محتوى الحافظة عند المؤشر.", L"Вставить содержимое буфера в позицию курсора.", L"Zwischenablage an der Cursorposition einfügen.",
-			L"Colar o conteudo da area de transferencia na posicao do cursor.", L"Plak de klembordinhoud op de cursorpositie.", L"Wklej zawartosc schowka w pozycji kursora.", L"Pano icerigini imlec konumuna yapistir."));
-	menu.AddCommand(IDM_SELALL, LL14(L"すべて選択", L"Select All", L"Tout selectionner", L"Seleziona tutto", L"Seleccionar todo", L"모두 선택", L"全选", L"Select All", L"Выделить всё", L"Alles auswaehlen", L"Selecionar tudo", L"Alles selecteren", L"Zaznacz wszystko", L"Tumunu sec"),
-		LL14(L"プロンプト編集欄の全文を選択します。", L"Select all text in the prompt editor.", L"Selectionne tout le texte de l'editeur de prompt.", L"Seleziona tutto il testo nell'editor del prompt.", L"Selecciona todo el texto del editor de prompt.",
-			L"프롬프트 편집란의 전체 텍스트를 선택합니다.", L"全选提示编辑框中的文字。", L"تحديد كل النص في محرر الموجه.", L"Выделить весь текст в редакторе промпта.", L"Gesamten Text im Prompt-Editor auswählen.",
-			L"Selecionar todo o texto no editor de prompt.", L"Selecteer alle tekst in de prompt-editor.", L"Zaznacz caly tekst w edytorze promptu.", L"Istem duzenleyicideki tum metni sec."));
+	{
+		CCustomPopupMenu* editSub = menu.AddSubMenu(
+			LL14(L"編集", L"Edit", L"Edition", L"Modifica", L"Editar", L"편집", L"编辑", L"تحرير", L"Правка", L"Bearbeiten", L"Editar", L"Bewerken", L"Edycja", L"Duzenle"),
+			LL14(L"切り取り／コピー／貼り付け／すべて選択。", L"Cut / Copy / Paste / Select All.", L"Couper / Copier / Coller / Tout selectionner.", L"Taglia / Copia / Incolla / Seleziona tutto.", L"Cortar / Copiar / Pegar / Seleccionar todo.", L"잘라내기/복사/붙여넣기/모두 선택.", L"剪切/复制/粘贴/全选。", L"قص / نسخ / لصق / تحديد الكل.", L"Вырезать / Копировать / Вставить / Выделить всё.", L"Ausschneiden / Kopieren / Einfugen / Alles.", L"Recortar / Copiar / Colar / Selecionar tudo.", L"Knippen / Kopieren / Plakken / Alles.", L"Wytnij / Kopiuj / Wklej / Zaznacz wszystko.", L"Kes / Kopyala / Yapistir / Tumunu sec."));
+		if (editSub) {
+			editSub->AddCommand(IDM_CUT, LL14(L"切り取り", L"Cut", L"Couper", L"Taglia", L"Cortar", L"잘라내기", L"剪切", L"Cut", L"Вырезать", L"Ausschneiden", L"Recortar", L"Knippen", L"Wytnij", L"Kes"),
+				LL14(L"選択範囲を切り取り、クリップボードへ移します。", L"Cut the selection to the clipboard.", L"Coupe la selection vers le presse-papiers.", L"Taglia la selezione negli appunti.", L"Corta la seleccion al portapapeles.",
+					L"선택 범위를 잘라 클립보드로 옮깁니다.", L"剪切所选内容到剪贴板。", L"قص التحديد إلى الحافظة.", L"Вырезать выделение в буфер обмена.", L"Auswahl ausschneiden und in die Zwischenablage legen.",
+					L"Recortar a selecao para a area de transferencia.", L"Knip de selectie naar het klembord.", L"Wytnij zaznaczenie do schowka.", L"Secimi kesip panoya tasi."));
+			editSub->AddCommand(IDM_COPY, LL14(L"コピー", L"Copy", L"Copier", L"Copia", L"Copiar", L"복사", L"复制", L"Copy", L"Копировать", L"Kopieren", L"Copiar", L"Kopieren", L"Kopiuj", L"Kopyala"),
+				LL14(L"選択範囲をクリップボードへコピーします。", L"Copy the selection to the clipboard.", L"Copie la selection vers le presse-papiers.", L"Copia la selezione negli appunti.", L"Copia la seleccion al portapapeles.",
+					L"선택 범위를 클립보드에 복사합니다.", L"将所选内容复制到剪贴板。", L"نسخ التحديد إلى الحافظة.", L"Скопировать выделение в буфер обмена.", L"Auswahl in die Zwischenablage kopieren.",
+					L"Copiar a selecao para a area de transferencia.", L"Kopieer de selectie naar het klembord.", L"Kopiuj zaznaczenie do schowka.", L"Secimi panoya kopyala."));
+			editSub->AddCommand(IDM_PASTE, LL14(L"貼り付け", L"Paste", L"Coller", L"Incolla", L"Pegar", L"붙여넣기", L"粘贴", L"Paste", L"Вставить", L"Einfuegen", L"Colar", L"Plakken", L"Wklej", L"Yapistir"),
+				LL14(L"クリップボードの内容をカーソル位置へ貼り付けます。", L"Paste clipboard text at the caret.", L"Colle le contenu du presse-papiers a la position du curseur.", L"Incolla il contenuto degli appunti alla posizione del cursore.", L"Pega el contenido del portapapeles en el cursor.",
+					L"클립보드 내용을 커서 위치에 붙여넣습니다.", L"在光标处粘贴剪贴板内容。", L"لصق محتوى الحافظة عند المؤشر.", L"Вставить содержимое буфера в позицию курсора.", L"Zwischenablage an der Cursorposition einfügen.",
+					L"Colar o conteudo da area de transferencia na posicao do cursor.", L"Plak de klembordinhoud op de cursorpositie.", L"Wklej zawartosc schowka w pozycji kursora.", L"Pano icerigini imlec konumuna yapistir."));
+			editSub->AddCommand(IDM_SELALL, LL14(L"すべて選択", L"Select All", L"Tout selectionner", L"Seleziona tutto", L"Seleccionar todo", L"모두 선택", L"全选", L"Select All", L"Выделить всё", L"Alles auswaehlen", L"Selecionar tudo", L"Alles selecteren", L"Zaznacz wszystko", L"Tumunu sec"),
+				LL14(L"プロンプト編集欄の全文を選択します。", L"Select all text in the prompt editor.", L"Selectionne tout le texte de l'editeur de prompt.", L"Seleziona tutto il testo nell'editor del prompt.", L"Selecciona todo el texto del editor de prompt.",
+					L"프롬프트 편집란의 전체 텍스트를 선택합니다.", L"全选提示编辑框中的文字。", L"تحديد كل النص في محرر الموجه.", L"Выделить весь текст в редакторе промпта.", L"Gesamten Text im Prompt-Editor auswählen.",
+					L"Selecionar todo o texto no editor de prompt.", L"Selecteer alle tekst in de prompt-editor.", L"Zaznacz caly tekst w edytorze promptu.", L"Istem duzenleyicideki tum metni sec."));
+		}
+	}
 	menu.AddSeparator();
 	menu.AddCommand(IDM_RUN,
 		LL14(L"実行", L"Run", L"Executer", L"Esegui", L"Ejecutar",
@@ -1330,14 +1337,21 @@ void CPromptDlg::OnContextMenu(CWnd* pWnd, CPoint point)
 				L"Inserir um exemplo de seek para a posicao de drop.", L"Voeg een seek-naar-drop-voorbeeld in.", L"Wstaw przyklad seek do pozycji drop.", L"Drop konumuna seek ornegi ekle."));
 	}
 	menu.AddSeparator();
-	menu.AddCommand(IDM_SAVEHIST, LL14(L"履歴へ保存", L"Save to history", L"Enregistrer historique", L"Salva in cronologia", L"Guardar en historial", L"기록에 저장", L"保存到历史", L"Save history", L"В историю", L"In Verlauf", L"Salvar historico", L"Naar geschiedenis", L"Do historii", L"Gecmise kaydet"),
-		LL14(L"現在のプロンプト文を履歴に保存し、後で再利用できます。", L"Save the current prompt text to history for later reuse.", L"Enregistre le prompt actuel dans l'historique pour reutilisation.", L"Salva il prompt attuale nella cronologia per riutilizzo.", L"Guarda el prompt actual en el historial para reutilizarlo.",
-			L"현재 프롬프트 문을 기록에 저장해 나중에 다시 쓸 수 있습니다.", L"将当前提示文本保存到历史，便于稍后复用。", L"حفظ نص الموجه الحالي في السجل لإعادة الاستخدام لاحقاً.", L"Сохранить текущий промпт в историю для повторного использования.", L"Aktuellen Prompt-Text im Verlauf speichern zur Wiederverwendung.",
-			L"Salvar o texto do prompt atual no historico para reutilizar depois.", L"Sla de huidige prompttekst op in de geschiedenis voor hergebruik.", L"Zapisz biezacy tekst promptu w historii do pozniejszego uzycia.", L"Gecerli istem metnini gecmise kaydet; sonra tekrar kullan."));
-	menu.AddCommand(IDM_CLEAR, LL14(L"クリア", L"Clear", L"Effacer", L"Cancella", L"Borrar", L"지우기", L"清除", L"Clear", L"Очистить", L"Loeschen", L"Limpar", L"Wissen", L"Wyczysc", L"Temizle"),
-		LL14(L"編集欄のプロンプト文をすべて消します。履歴は残りません（履歴保存とは別）。", L"Clear all prompt text in the editor. Does not erase saved history.", L"Efface tout le texte du prompt. N'efface pas l'historique enregistre.", L"Cancella tutto il testo del prompt. Non cancella la cronologia salvata.", L"Borra todo el texto del prompt. No borra el historial guardado.",
-			L"편집란의 프롬프트 문을 모두 지웁니다. 저장된 기록은 지우지 않습니다.", L"清空编辑框中的提示文字。不会删除已保存的历史。", L"مسح كل نص الموجه في المحرر. لا يحذف السجل المحفوظ.", L"Очистить весь текст промпта. Сохранённую историю не удаляет.", L"Gesamten Prompt-Text löschen. Gespeicherten Verlauf nicht.",
-			L"Limpar todo o texto do prompt. Nao apaga o historico salvo.", L"Wis alle prompttekst in de editor. Wis opgeslagen geschiedenis niet.", L"Wyczysc caly tekst promptu. Nie usuwa zapisanej historii.", L"Duzenleyicideki tum istem metnini sil. Kayitli gecmisi silmez."));
+	{
+		CCustomPopupMenu* histSub = menu.AddSubMenu(
+			LL14(L"履歴", L"History", L"Historique", L"Cronologia", L"Historial", L"기록", L"历史", L"السجل", L"История", L"Verlauf", L"Historico", L"Geschiedenis", L"Historia", L"Gecmis"),
+			LL14(L"履歴へ保存／編集欄クリア。", L"Save to history / clear the editor.", L"Enregistrer dans l'historique / effacer.", L"Salva in cronologia / cancella.", L"Guardar en historial / borrar.", L"기록에 저장 / 편집란 지우기.", L"保存到历史 / 清空编辑框。", L"حفظ في السجل / مسح المحرر.", L"Сохранить в историю / очистить.", L"In Verlauf speichern / Editor leeren.", L"Salvar no historico / limpar.", L"Naar geschiedenis / wissen.", L"Do historii / wyczysc.", L"Gecmise kaydet / temizle."));
+		if (histSub) {
+			histSub->AddCommand(IDM_SAVEHIST, LL14(L"履歴へ保存", L"Save to history", L"Enregistrer historique", L"Salva in cronologia", L"Guardar en historial", L"기록에 저장", L"保存到历史", L"Save history", L"В историю", L"In Verlauf", L"Salvar historico", L"Naar geschiedenis", L"Do historii", L"Gecmise kaydet"),
+				LL14(L"現在のプロンプト文を履歴に保存し、後で再利用できます。", L"Save the current prompt text to history for later reuse.", L"Enregistre le prompt actuel dans l'historique pour reutilisation.", L"Salva il prompt attuale nella cronologia per riutilizzo.", L"Guarda el prompt actual en el historial para reutilizarlo.",
+					L"현재 프롬프트 문을 기록에 저장해 나중에 다시 쓸 수 있습니다.", L"将当前提示文本保存到历史，便于稍后复用。", L"حفظ نص الموجه الحالي في السجل لإعادة الاستخدام لاحقاً.", L"Сохранить текущий промпт в историю для повторного использования.", L"Aktuellen Prompt-Text im Verlauf speichern zur Wiederverwendung.",
+					L"Salvar o texto do prompt atual no historico para reutilizar depois.", L"Sla de huidige prompttekst op in de geschiedenis voor hergebruik.", L"Zapisz biezacy tekst promptu w historii do pozniejszego uzycia.", L"Gecerli istem metnini gecmise kaydet; sonra tekrar kullan."));
+			histSub->AddCommand(IDM_CLEAR, LL14(L"クリア", L"Clear", L"Effacer", L"Cancella", L"Borrar", L"지우기", L"清除", L"Clear", L"Очистить", L"Loeschen", L"Limpar", L"Wissen", L"Wyczysc", L"Temizle"),
+				LL14(L"編集欄のプロンプト文をすべて消します。履歴は残りません（履歴保存とは別）。", L"Clear all prompt text in the editor. Does not erase saved history.", L"Efface tout le texte du prompt. N'efface pas l'historique enregistre.", L"Cancella tutto il testo del prompt. Non cancella la cronologia salvata.", L"Borra todo el texto del prompt. No borra el historial guardado.",
+					L"편집란의 프롬프트 문을 모두 지웁니다. 저장된 기록은 지우지 않습니다.", L"清空编辑框中的提示文字。不会删除已保存的历史。", L"مسح كل نص الموجه في المحرر. لا يحذف السجل المحفوظ.", L"Очистить весь текст промпта. Сохранённую историю не удаляет.", L"Gesamten Prompt-Text löschen. Gespeicherten Verlauf nicht.",
+					L"Limpar todo o texto do prompt. Nao apaga o historico salvo.", L"Wis alle prompttekst in de editor. Wis opgeslagen geschiedenis niet.", L"Wyczysc caly tekst promptu. Nie usuwa zapisanej historii.", L"Duzenleyicideki tum istem metnini sil. Kayitli gecmisi silmez."));
+		}
+	}
 	menu.AddSeparator();
 	menu.AddCommand(ID_HELP_SHOWSHEET,
 		LL14(L"操作ガイド", L"Operation guide", L"Guide d'utilisation", L"Guida operativa",
