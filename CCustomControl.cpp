@@ -2707,9 +2707,41 @@ static void DrawSoftJkSwayCorner(CDC* pDC, const CRect& rc, int animTick, float 
 // ぷるんとした濡れツヤ(ガラス/リップグロス風)を上半分にのせる。
 // 不透明な面の上にのみ使用すること（クロマキー透過領域には使わない）。
 // ※ Soft* はここへ入れない。リスト選択行の♡白飛びを防ぐため GDI ツヤのみ。
-static void DrawGlossHighlight(CDC* pDC, const CRect& rc, int radius)
+// baseBg!=CLR_NONE: アクリルDIB向け。AlphaBlend せず不透明縦グラデで塗る
+// （POST_OPAQUE では 1x1 AlphaBlend が失敗しフラットになる）。
+static void DrawGlossHighlight(CDC* pDC, const CRect& rc, int radius, COLORREF baseBg = CLR_NONE)
 {
     if (!pDC || rc.Width() <= 4 || rc.Height() <= 6) return;
+#if CCUSTOM_AERO_SUPPORT
+    if (baseBg != CLR_NONE) {
+        const COLORREF cTop = CCC_Lighten(baseBg, 48);
+        const COLORREF cBot = CCC_Darken(baseBg, 90);
+        const int hgt = rc.Height();
+        int bands = (hgt < 8) ? hgt : 8;
+        if (bands < 2) bands = 2;
+        HDC hdc = pDC->GetSafeHdc();
+        for (int i = 0; i < bands; ++i) {
+            RECT b = { rc.left, rc.top + hgt * i / bands, rc.right, rc.top + hgt * (i + 1) / bands };
+            if (b.bottom <= b.top) continue;
+            const int t = i * 100 / (bands - 1);
+            const COLORREF c = RGB(
+                GetRValue(cTop) + (GetRValue(cBot) - GetRValue(cTop)) * t / 100,
+                GetGValue(cTop) + (GetGValue(cBot) - GetGValue(cTop)) * t / 100,
+                GetBValue(cTop) + (GetBValue(cBot) - GetBValue(cTop)) * t / 100);
+            CCC_FillRectOpaqueBits(hdc, b, c);
+        }
+        CRect line = rc;
+        const int rad = max(2, radius);
+        line.DeflateRect(rad, 0);
+        line.top += max(1, hgt / 14);
+        line.bottom = line.top + max(1, hgt / 12);
+        if (line.Width() > 2 && line.Height() > 0)
+            CCC_FillRectOpaqueBits(hdc, line, CCC_Lighten(baseBg, 72));
+        return;
+    }
+#else
+    UNREFERENCED_PARAMETER(baseBg);
+#endif
     CRgn rgn;
     const int d = max(2, radius * 2);
     if (!rgn.CreateRoundRectRgn(rc.left, rc.top, rc.right + 1, rc.bottom + 1, d, d))
@@ -7957,7 +7989,7 @@ void CCustomListCtrl::ScheduleOpaqueRepaint()
 LRESULT CCustomListCtrl::OnPostOpaquePaint(WPARAM, LPARAM)
 {
 #if CCUSTOM_AERO_SUPPORT
-    if (CCC_IsAeroEnabled() && CCC_IsWin11())
+    if (CCC_HostNeedsChildOpaque(m_hWnd))
     {
         CClientDC dc(this);
         PaintOpaqueClient(dc);
@@ -8031,13 +8063,9 @@ void CCustomListCtrl::UpdateHotItem(int n)
     if (m_nHotItem == n) return;
     const int o = m_nHotItem;
     m_nHotItem = n;
-    // プレイリスト系(ジャケ/♪): ホット Invalidate → OpaqueFixer 全面描画で名前列がちらつく。
-    // キャプション常時アクリル下では部分 MakeOpaque も本文透過になるため使えない。
-    // 索引のみ更新し、見た目はスクロール等の全面描画時に合わせる。
-    if (m_mpNoteIconGet || m_mpJacketPx > 0)
-        return;
     // アクリル/キャプションガラス: 部分 Invalidate の素塗りは α=0 穴→ホバーで透過。
-    // 連続 WM_MOUSEMOVE は Post で1回にまとめ、全面不透明再描画する。
+    // 連続ホバー行変更は Post でキューに載せ、OpaqueFixer が全面不透明再描画する。
+    // 旧: ジャケ/♪リストはここで return し、♪点滅(SIconTimer)まで見た目が止まっていた。
     if (CCC_HostNeedsChildOpaque(m_hWnd)) {
         PostMessage(CCC_WM_POST_OPAQUE_PAINT);
         return;
@@ -8409,9 +8437,17 @@ void CCustomListCtrl::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
 
         BOOL bS = (GetItemState(ni, LVIS_SELECTED) & LVIS_SELECTED);
         BOOL bH = (ni == m_nHotItem);
+        // 再生行(♪ 0/2)は選択が外れてもツヤグラデを残す。ホバー再描画で消えないように
+        // 名前列以外のセルでも同じ判定が要るので、ここで先に取る。
+        int noteImg = 1;
+        if (m_mpNoteIconGet)
+            noteImg = m_mpNoteIconGet(m_mpJacketCtx, ni);
+        const BOOL bPlay = (noteImg == 0 || noteImg == 2);
         COLORREF bg = bS ? COLOR_SEL_BG : (ni % 2 == 0 ? COLOR_LIST_BG : COLOR_LIST_ALT);
-        if (bH && !bS) bg = RGB(210, 228, 248);
-        if (!bS && m_mpRowMissGet && m_mpRowMissGet(m_mpJacketCtx, ni))
+        if (bPlay && !bS)
+            bg = RGB(214, 186, 232); // 再生行(非選択): 選択紫より少し明るい下地
+        if (bH && !bS && !bPlay) bg = RGB(210, 228, 248);
+        if (!bS && !bPlay && m_mpRowMissGet && m_mpRowMissGet(m_mpJacketCtx, ni))
             bg = RGB(255, 214, 214); // 欠損行: 薄い赤
 
         // アクリル/キャプションガラス下の素 FillRect は α=0→ホバー・選択で透過穴になる。
@@ -8422,22 +8458,27 @@ void CCustomListCtrl::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
         const BOOL bCapGlass = FALSE;
 #endif
         const BOOL bLvAero = m_bAeroMode && !CCC_IsBlurDialogChild(m_hWnd);
-        if (bCapGlass || CCC_HostNeedsChildOpaque(m_hWnd))
+        const BOOL bOpaqueHost = bCapGlass || CCC_HostNeedsChildOpaque(m_hWnd);
+        const BOOL bHi = (bS || bPlay || bH);
+        if (bOpaqueHost)
         {
 #if CCUSTOM_AERO_SUPPORT
-            CCC_FillRectOpaqueBits(pDC->GetSafeHdc(), r, bg);
+            if (bHi)
+                DrawGlossHighlight(pDC, r, 6, bg);
+            else
+                CCC_FillRectOpaqueBits(pDC->GetSafeHdc(), r, bg);
 #endif
         }
         else if (bLvAero)
         {
             pDC->FillSolidRect(&r, RGB(0, 0, 0));
-            FillRectAlpha(pDC, r, bg, bS ? 180 : bH ? 140 : AERO_ALPHA_SEMI);
+            FillRectAlpha(pDC, r, bg, (bS || bPlay) ? 180 : bH ? 140 : AERO_ALPHA_SEMI);
         }
         else
             pDC->FillSolidRect(&r, bg);
 
         // 欠損ヒート: 名前列左に 4px ストライプ
-        if (ns == 0 && !bS && m_mpRowMissGet && m_mpRowMissGet(m_mpJacketCtx, ni))
+        if (ns == 0 && !bS && !bPlay && m_mpRowMissGet && m_mpRowMissGet(m_mpJacketCtx, ni))
         {
             CRect rs(r.left, r.top, r.left + 4, r.bottom);
             if (CCC_HostNeedsChildOpaque(m_hWnd))
@@ -8446,12 +8487,11 @@ void CCustomListCtrl::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
                 pDC->FillSolidRect(&rs, RGB(220, 60, 60));
         }
 
-        if (bS && !bLvAero)
+        if (bHi && !bLvAero && !bOpaqueHost)
             DrawGlossHighlight(pDC, r, 6);
 
         // プレイリスト系は m_mpNoteIconGet で実♪を取得(GetDispInfo の iImage は空のまま)。
         // テキスト左余白計算でも同じ値を使う。
-        int noteImg = 1;
         int checkPad = 0; // LVS_EX_CHECKBOXES 時、文字開始をチェック右へずらす
         if (ns == 0)
         {
@@ -8483,9 +8523,7 @@ void CCustomListCtrl::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
             // ♡ は選択装飾だが ♪ を隠さないよう、♪ の下(奥)に先に描く。
             CRect ri;
             const BOOL hasIconRect = GetItemRect(ni, &ri, LVIR_ICON);
-            if (m_mpNoteIconGet)
-                noteImg = m_mpNoteIconGet(m_mpJacketCtx, ni);
-            else {
+            if (!m_mpNoteIconGet) {
                 LVITEM lvi = { 0 };
                 lvi.mask = LVIF_IMAGE;
                 lvi.iItem = ni;
