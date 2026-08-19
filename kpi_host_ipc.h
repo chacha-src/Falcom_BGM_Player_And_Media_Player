@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include <stdint.h>
 
@@ -14,7 +14,16 @@ enum KPIHOST64_CMD : uint32_t
 	KPIHOST64_CMD_OPEN = 3,      // input: kpiPath, mediaPath, request(KPI_MEDIAINFO), songNo
 	KPIHOST64_CMD_RENDER = 4,    // input: sessionId, bytesWanted
 	KPIHOST64_CMD_SEEK = 5,      // input: sessionId, posSample, flag
-	KPIHOST64_CMD_CLOSE = 6      // input: sessionId
+	KPIHOST64_CMD_CLOSE = 6,     // input: sessionId
+	KPIHOST64_CMD_FOREIGN_LIST_EXTS = 10, // input: pluginKind + path
+	KPIHOST64_CMD_FOREIGN_OPEN = 11,
+	KPIHOST64_CMD_FOREIGN_RENDER = 12,
+	KPIHOST64_CMD_FOREIGN_SEEK = 13,
+	KPIHOST64_CMD_FOREIGN_CLOSE = 14,
+	KPIHOST64_CMD_VST_OPEN = 20,   // [u32 midChars][mid][u32 dllChars][dll]
+	KPIHOST64_CMD_VST_RENDER = 21,
+	KPIHOST64_CMD_VST_SEEK = 22,
+	KPIHOST64_CMD_VST_CLOSE = 23
 };
 
 enum KPIHOST64_STATUS : uint32_t
@@ -94,6 +103,28 @@ struct KPIHOST64_SeekReply
 {
 	uint32_t sessionId;
 	uint64_t newPosSample;
+};
+
+struct KPIHOST64_ForeignListReq
+{
+	uint32_t pluginKind; // 1=winamp 2=xmplay 3=aimp
+	// followed by: [u32 pathChars][wchar_t[]]
+};
+
+struct KPIHOST64_ForeignOpenReq
+{
+	uint32_t pluginKind;
+	// followed by: [u32 dllPathChars][wchar_t[]]
+	//             [u32 mediaPathChars][wchar_t[]]
+};
+
+struct KPIHOST64_ForeignOpenReply
+{
+	uint32_t sessionId;
+	uint32_t sampleRate;
+	uint32_t channels;
+	int32_t bitsPerSample;
+	uint64_t lengthSamples;
 };
 #pragma pack(pop)
 

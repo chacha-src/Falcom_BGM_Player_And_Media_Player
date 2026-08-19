@@ -155,7 +155,7 @@
       <LanguageStandard>stdcpp17</LanguageStandard>
       <LanguageStandard_C>Default</LanguageStandard_C>
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
-      <AdditionalIncludeDirectories>$(ProjectDir)zstd;$(ProjectDir)third_party\signalsmith-stretch\include;$(ProjectDir)third_party\signalsmith-linear\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)zstd;$(ProjectDir)third_party\signalsmith-stretch\include;$(ProjectDir)third_party\signalsmith-linear\include;$(ProjectDir)third_party\aimp;$(ProjectDir)third_party\vst3sdk;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <ResourceCompile>
       <PreprocessorDefinitions>NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
@@ -380,6 +380,9 @@
     </Bscmake>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="Vst3Host.cpp" />
+    <ClCompile Include="VstMidiEngine.cpp" />
+    <ClCompile Include="VstHostDlg.cpp" />
     <ClCompile Include="CPianoRoll.cpp" />
     <ClCompile Include="GdiSoft3D.cpp" />
     <ClCompile Include="GdiSoft2D.cpp" />
@@ -393,6 +396,10 @@
     <ClCompile Include="CPianoRollTuneDlg.cpp" />
     <ClCompile Include="PianoRollGoertzelAvx2.cpp" />
     <ClCompile Include="KpiHostClient.cpp" />
+    <ClCompile Include="PluginWinamp.cpp" />
+    <ClCompile Include="PluginXmplay.cpp" />
+    <ClCompile Include="PluginAimp.cpp" />
+    <ClCompile Include="PluginForeignEnum.cpp" />
     <ClCompile Include="DatArchive.cpp" />
     <ClCompile Include="Arc.cpp" />
     <ClCompile Include="AudioUpscaler.cpp" />
@@ -453,6 +460,9 @@
     <ClCompile Include="minizip\iowin32.c" />
     <ClCompile Include="KpiPluginInstall.cpp" />
     <ClCompile Include="UpdateCheck.cpp">
+      <PreprocessorDefinitions>NOUNCRYPT;USEWIN32IOAPI;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+    <ClCompile Include="OfflineHelp.cpp">
       <PreprocessorDefinitions>NOUNCRYPT;USEWIN32IOAPI;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <ClCompile Include="codec\sbr_dct.c" />
@@ -574,7 +584,7 @@
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
       <LanguageStandard>stdcpp17</LanguageStandard>
       <AdditionalOptions>/utf-8 /DNOMINMAX %(AdditionalOptions)</AdditionalOptions>
-      <AdditionalIncludeDirectories>$(ProjectDir)third_party\signalsmith-stretch\include;$(ProjectDir)third_party\signalsmith-linear\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)third_party\signalsmith-stretch\include;$(ProjectDir)third_party\signalsmith-linear\include;$(ProjectDir)third_party\vst3sdk;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>NOMINMAX;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <ClCompile Include="TunerPracticeDlg.cpp" />
@@ -592,6 +602,7 @@
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <ClCompile Include="TagEditDlg.cpp" />
+    <ClCompile Include="TagBatchEditDlg.cpp" />
     <ClCompile Include="Folder.cpp" />
     <ClCompile Include="Graph.cpp" />
     <ClCompile Include="Gurumin.cpp" />
@@ -741,6 +752,7 @@
     <ClInclude Include="ScLiveSettingsDlg.h" />
     <ClInclude Include="ScWgcCapture.h" />
     <ClInclude Include="TagEditDlg.h" />
+    <ClInclude Include="TagBatchEditDlg.h" />
     <ClInclude Include="flac.h" />
     <ClInclude Include="Folder.h" />
     <ClInclude Include="Graph.h" />

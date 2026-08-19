@@ -1323,7 +1323,7 @@ void CEqualizer::LayoutToneColumns()
 		ps->GetWindowRect(&s);
 		ScreenToClient(&s);
 		ps->SetWindowPos(NULL, s.left, rs.top, s.Width(), rs.Height(),
-			SWP_NOZORDER | SWP_NOACTIVATE);
+			SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOREDRAW);
 		s.top = rs.top;
 		s.bottom = rs.top + rs.Height();
 		const int cx = (s.left + s.right) / 2;
@@ -1346,7 +1346,7 @@ void CEqualizer::LayoutToneColumns()
 			}
 			int lw = max(s.Width() + 4, min(sz.cx + 4, pitch));
 			pl->SetWindowPos(NULL, cx - lw / 2, labTop, lw, labH,
-				SWP_NOZORDER | SWP_NOACTIVATE);
+				SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOREDRAW);
 		}
 
 		CWnd* pv = GetDlgItem(cols[i].valueId);
@@ -1355,7 +1355,7 @@ void CEqualizer::LayoutToneColumns()
 			pv->GetWindowRect(&v);
 			ScreenToClient(&v);
 			pv->SetWindowPos(NULL, cx - v.Width() / 2, rv.top, v.Width(), rv.Height(),
-				SWP_NOZORDER | SWP_NOACTIVATE);
+				SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOREDRAW);
 		}
 	}
 

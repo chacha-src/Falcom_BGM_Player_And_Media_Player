@@ -1589,9 +1589,9 @@ void MpBpmApplyValue(int bpm)
 		mp->m_seek.Invalidate(FALSE);
 	}
 	if (savedata.wav_export_xfade) {
-		int sec = (int)(240000.0 / (double)bpm + 0.5);
-		if (sec < 1) sec = 1;
-		if (sec > 30) sec = 30;
+		float sec = (float)(240000.0 / (double)bpm);
+		if (sec < 1.f) sec = 1.f;
+		if (sec > 30.f) sec = 30.f;
 		savedata.wav_export_xfade_sec = sec;
 		MpPersistSavedataQuick();
 	}

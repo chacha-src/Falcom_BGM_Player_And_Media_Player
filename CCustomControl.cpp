@@ -4,6 +4,7 @@
 #include "CImageBase.h"
 #include "GdiSoft2D.h"
 #include "GdiSoft3D.h"
+#include "OfflineHelp.h"
 #include <algorithm>
 #include <cmath>
 #include <functional>
@@ -4176,8 +4177,12 @@ BOOL CCustomEdit::GetCaretClientPos(CPoint& pt, int& lineH)
 
     CRect r;
     GetClientRect(&r);
-    CRect rc = r;
-    rc.DeflateRect(3, 1);
+    CRect fmt;
+    SendMessage(EM_GETRECT, 0, (LPARAM)&fmt);
+    if (fmt.Width() <= 0 || fmt.Height() <= 0) {
+        fmt = r;
+        fmt.DeflateRect(3, 1);
+    }
 
     HDC hdcRaw = ::GetDC(m_hWnd);
     if (!hdcRaw)
@@ -4190,69 +4195,139 @@ BOOL CCustomEdit::GetCaretClientPos(CPoint& pt, int& lineH)
     dc.GetTextMetrics(&tm);
     lineH = tm.tmHeight + tm.tmExternalLeading;
     if (lineH < 1) lineH = 16;
+    const int aveW = (tm.tmAveCharWidth > 0) ? tm.tmAveCharWidth : 8;
 
     CString text;
     GetWindowText(text);
+    const DWORD style = (DWORD)GetStyle();
+    if (style & ES_PASSWORD) {
+        const TCHAR bullet = (TCHAR)0x25CF;
+        const int n = text.GetLength();
+        CString bullets;
+        for (int i = 0; i < n; ++i)
+            bullets += bullet;
+        text = bullets;
+    }
     const int tlen = text.GetLength();
     int sel0 = 0, sel1 = 0;
     GetSel(sel0, sel1);
-    // 挿入位置（選択中は先頭側）
     int idx = sel0;
     if (idx < 0) idx = 0;
     if (idx > tlen) idx = tlen;
 
-    const DWORD style = (DWORD)GetStyle();
-    BOOL ok = FALSE;
+    auto posOf = [&](int i) -> LRESULT {
+        if (tlen <= 0) return (LRESULT)-1;
+        if (i < 0) i = 0;
+        if (i >= tlen) i = tlen - 1;
+        return SendMessage(EM_POSFROMCHAR, (WPARAM)i, 0);
+    };
+    auto applyLr = [&](LRESULT lr) {
+        pt.x = (short)LOWORD(lr);
+        pt.y = (short)HIWORD(lr);
+    };
+    auto extentAt = [&](int i) -> int {
+        if (i < 0 || i >= tlen) return aveW;
+        CSize ch = dc.GetTextExtent(text.Mid(i, 1));
+        return (ch.cx > 0) ? ch.cx : aveW;
+    };
+
     if (tlen <= 0) {
-        pt.x = rc.left;
+        pt.x = fmt.left;
         if (style & ES_MULTILINE)
-            pt.y = rc.top;
+            pt.y = fmt.top;
         else
-            pt.y = rc.top + (rc.Height() - lineH) / 2;
-        if (pt.y < rc.top) pt.y = rc.top;
-        ok = TRUE;
-    } else {
-        BOOL pastEnd = FALSE;
-        int q = idx;
-        if (q >= tlen) {
-            q = tlen - 1;
-            pastEnd = TRUE;
-        }
-        LRESULT lr = SendMessage(EM_POSFROMCHAR, (WPARAM)q, 0);
-        if (lr != (LRESULT)-1) {
-            pt.x = (short)LOWORD(lr);
-            pt.y = (short)HIWORD(lr);
-            if (pastEnd) {
-                CSize ch = dc.GetTextExtent(text.Mid(q, 1));
-                pt.x += ch.cx;
+            pt.y = fmt.top + (fmt.Height() - lineH) / 2;
+    } else if (style & ES_MULTILINE) {
+        const int line = (int)SendMessage(EM_LINEFROMCHAR,
+            (WPARAM)((idx < tlen) ? idx : (tlen - 1)), 0);
+        int lineStart = (int)SendMessage(EM_LINEINDEX, (WPARAM)line, 0);
+        if (lineStart < 0) lineStart = 0;
+        int lineLen = (int)SendMessage(EM_LINELENGTH, (WPARAM)lineStart, 0);
+        if (lineLen < 0) lineLen = 0;
+        const int first = (int)SendMessage(EM_GETFIRSTVISIBLELINE, 0, 0);
+
+        if (lineLen <= 0) {
+            // 空行: 行頭で点滅
+            pt.x = fmt.left;
+            LRESULT lr = (lineStart < tlen) ? SendMessage(EM_POSFROMCHAR, (WPARAM)lineStart, 0) : (LRESULT)-1;
+            if (lr != (LRESULT)-1) {
+                applyLr(lr);
+                pt.x = fmt.left;
+            } else {
+                lr = (lineStart > 0) ? posOf(lineStart - 1) : (LRESULT)-1;
+                if (lr != (LRESULT)-1) {
+                    applyLr(lr);
+                    pt.x = fmt.left;
+                    pt.y += lineH;
+                } else {
+                    pt.y = fmt.top + (line - first) * lineH;
+                }
             }
-            ok = TRUE;
+        } else if (idx >= lineStart + lineLen) {
+            // 行末（文字の右側）。CR/LF の POSFROMCHAR は -1 になりやすい
+            const int last = lineStart + lineLen - 1;
+            LRESULT lr = posOf(last);
+            if (lr != (LRESULT)-1) {
+                applyLr(lr);
+                pt.x += extentAt(last);
+            } else {
+                pt.x = fmt.left;
+                pt.y = fmt.top + (line - first) * lineH;
+            }
         } else {
-            // フォールバック: 先頭からの幅
+            LRESULT lr = posOf(idx);
+            if (lr != (LRESULT)-1) {
+                applyLr(lr);
+            } else {
+                pt.x = fmt.left;
+                pt.y = fmt.top + (line - first) * lineH;
+            }
+        }
+    } else if (idx >= tlen) {
+        const int last = tlen - 1;
+        LRESULT lr = posOf(last);
+        if (lr != (LRESULT)-1) {
+            applyLr(lr);
+            pt.x += extentAt(last);
+        } else {
+            CSize all = dc.GetTextExtent(text);
+            pt.x = fmt.left + all.cx;
+            pt.y = fmt.top + (fmt.Height() - lineH) / 2;
+            if (style & ES_CENTER)
+                pt.x = fmt.left + (fmt.Width() + all.cx) / 2;
+            else if (style & ES_RIGHT)
+                pt.x = fmt.right;
+        }
+    } else {
+        LRESULT lr = posOf(idx);
+        if (lr != (LRESULT)-1) {
+            applyLr(lr);
+        } else {
             CSize pre = dc.GetTextExtent(text.Left(idx));
             CSize all = dc.GetTextExtent(text);
-            pt.x = rc.left + pre.cx;
+            pt.x = fmt.left + pre.cx;
             if (style & ES_CENTER)
-                pt.x = rc.left + (rc.Width() - all.cx) / 2 + pre.cx;
+                pt.x = fmt.left + (fmt.Width() - all.cx) / 2 + pre.cx;
             else if (style & ES_RIGHT)
-                pt.x = rc.right - all.cx + pre.cx;
-            if (style & ES_MULTILINE)
-                pt.y = rc.top;
-            else
-                pt.y = rc.top + (rc.Height() - lineH) / 2;
-            ok = TRUE;
+                pt.x = fmt.right - all.cx + pre.cx;
+            pt.y = fmt.top + (fmt.Height() - lineH) / 2;
         }
     }
 
     if (pOld) dc.SelectObject(pOld);
     dc.Detach();
     ::ReleaseDC(m_hWnd, hdcRaw);
-    if (pt.x < rc.left) pt.x = rc.left;
-    if (pt.x > rc.right) pt.x = rc.right;
-    if (pt.y < rc.top) pt.y = rc.top;
-    if (pt.y + lineH > rc.bottom && !(style & ES_MULTILINE))
-        pt.y = rc.bottom - lineH;
-    return ok;
+
+    const UINT dpi = CCC_GetControlDpi(m_hWnd);
+    int cw = CCC_ScaleDpi(2, dpi);
+    if (cw < 2) cw = 2;
+    if (pt.x < r.left) pt.x = r.left;
+    if (pt.x > r.right - cw) pt.x = r.right - cw;
+    if (pt.y < r.top) pt.y = r.top;
+    if (!(style & ES_MULTILINE) && pt.y + lineH > r.bottom)
+        pt.y = r.bottom - lineH;
+    if (pt.y < r.top) pt.y = r.top;
+    return TRUE;
 }
 
 void CCustomEdit::DrawCaretIfNeeded(CDC& dc)
@@ -4276,6 +4351,16 @@ void CCustomEdit::DrawCaretIfNeeded(CDC& dc)
     int w = CCC_ScaleDpi(2, dpi);
     if (w < 2) w = 2;
     CRect caret(pt.x, pt.y, pt.x + w, pt.y + lineH);
+    if (caret.right > r.right) {
+        caret.right = r.right;
+        caret.left = caret.right - w;
+        if (caret.left < r.left) caret.left = r.left;
+    }
+    if (caret.bottom > r.bottom) {
+        caret.bottom = r.bottom;
+        caret.top = caret.bottom - lineH;
+        if (caret.top < r.top) caret.top = r.top;
+    }
     if (!caret.IntersectRect(&caret, &r) || caret.Width() <= 0 || caret.Height() <= 0)
         return;
     dc.FillSolidRect(&caret, RGB(80, 20, 40));
@@ -4605,7 +4690,14 @@ void CCustomEdit::OnLButtonDown(UINT nFlags, CPoint point)
     CEdit::OnLButtonDown(nFlags, point);
     m_bSelDrag = TRUE;
     SetTimer(kEditSelTimerId, 33, NULL);
-    RepaintIfSelChanged();
+    m_bCaretOn = TRUE;
+    {
+        const int prev0 = m_lastSel0, prev1 = m_lastSel1;
+        RepaintIfSelChanged();
+        // 行末クリックで挿入位置が変わらないときもキャレットを点灯し直す
+        if (m_lastSel0 == prev0 && m_lastSel1 == prev1)
+            RepaintClient();
+    }
 #if CCUSTOM_AERO_SUPPORT
     if (CCC_HostNeedsChildOpaque(m_hWnd))
         ScheduleOpaqueRepaint();
@@ -12963,6 +13055,25 @@ static void CCC_ForcePaintButtonST(HWND hWnd, CButtonST* pBtn)
 // Win11: 子ウィンドウの GDI はアルファ0のまま DWM に合成される。
 // BufferedPaint で全面 alpha=255 にしてから WM_PRINTCLIENT で CCustom* を描く。
 // ※WM_PRINTCLIENT を再帰的に PaintOpaque へ渡すと OnPrintClient が呼ばれず全面透過になる。
+static BOOL CCC_FixerNeedsNcOpaque(HWND hWnd)
+{
+    if (!hWnd || !::IsWindow(hWnd))
+        return FALSE;
+    const LONG style = ::GetWindowLong(hWnd, GWL_STYLE);
+    if (style & (WS_VSCROLL | WS_HSCROLL))
+        return TRUE;
+    wchar_t cls[32] = {};
+    ::GetClassNameW(hWnd, cls, 32);
+    if (::_wcsicmp(cls, L"SysListView32") == 0) return TRUE;
+    if (::_wcsicmp(cls, L"SysTreeView32") == 0) return TRUE;
+    if (::_wcsicmp(cls, L"SysTabControl32") == 0) return TRUE;
+    if (::_wcsicmp(cls, L"SysHeader32") == 0) return TRUE;
+    if (::_wcsicmp(cls, L"Edit") == 0) return TRUE;
+    if (::_wcsicmp(cls, L"ComboBox") == 0) return TRUE;
+    if (::_wcsicmp(cls, L"ListBox") == 0) return TRUE;
+    return FALSE;
+}
+
 class CCustomOpaqueFixer
 {
 public:
@@ -12982,6 +13093,7 @@ public:
         if (m_hWnd && ::IsWindow(m_hWnd))
             ::RemoveWindowSubclass(m_hWnd, SubclassProc, (UINT_PTR)this);
         m_hWnd = NULL;
+        m_dib.Release();
     }
 
 private:
@@ -12989,6 +13101,7 @@ private:
     BOOL m_bPrinting;
     COLORREF m_clrBg;
     BOOL m_bChroma;
+    CCC_ChromaBlitCache m_dib;
 
     static LRESULT CALLBACK SubclassProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam,
         UINT_PTR uIdSubclass, DWORD_PTR dwRefData)
@@ -12997,8 +13110,13 @@ private:
         switch (uMsg)
         {
         case WM_ERASEBKGND:
-            // 空返しだと α=0 のまま残り完全透過になる（ホバーで WM_PAINT すると戻る）
+            // 空返しだと α=0 のまま残り完全透過になる（ホバーで WM_PAINT すると戻る）。
+            // ただし更新矩形があるときは直後の WM_PAINT が全面 PaintOpaque するので、
+            // ここで描くとリスト等で 2 回分の不透明化になる。
             if (!pThis->m_bPrinting) {
+                RECT ur = {};
+                if (::GetUpdateRect(hWnd, &ur, FALSE) && (ur.right > ur.left) && (ur.bottom > ur.top))
+                    return TRUE;
                 if (wParam)
                     pThis->PaintOpaque(hWnd, (HDC)wParam);
                 return TRUE;
@@ -13026,11 +13144,10 @@ private:
         }
         case WM_NCPAINT:
         {
-            // 非クライアント(スクロールバー/枠)は既定描画だとアクリル(ガラス)上で
-            // アルファ0になり透過して見えなくなる。既定描画後にウィンドウ全体の
-            // アルファを不透明化して、スクロールバーを確実に表示させる。
-            // ※ホバー等の NC 再描画でクライアントも α=0 になることがあるので、
-            //   MakeOpaque の前にクライアントを不透明再描画する（Edit 透過の主因）。
+            // スクロールバー/枠付きだけ NC 不透明化。Button/Slider まで全面 PaintOpaque
+            // すると最大化で子が1個ずつ描画されて見える。
+            if (!CCC_FixerNeedsNcOpaque(hWnd))
+                return ::DefSubclassProc(hWnd, uMsg, wParam, lParam);
             LRESULT lRes = ::DefSubclassProc(hWnd, uMsg, wParam, lParam);
             HDC hDC = ::GetDC(hWnd);
             if (hDC) {
@@ -13254,10 +13371,9 @@ private:
         }
         case WM_SHOWWINDOW:
         {
-            LRESULT lRes = ::DefSubclassProc(hWnd, uMsg, wParam, lParam);
-            if (wParam)
-                ::SendMessage(hWnd, CCC_WM_POST_OPAQUE_PAINT, 0, 0);
-            return lRes;
+            // SHOW は通常 Invalidate→WM_PAINT。ここで Send POST_OPAQUE すると
+            // PaintOpaque が 2 回走る。WM_PAINT 側に任せる。
+            return ::DefSubclassProc(hWnd, uMsg, wParam, lParam);
         }
         case WM_DESTROY:
             ::RemoveWindowSubclass(hWnd, SubclassProc, uIdSubclass);
@@ -13330,28 +13446,14 @@ private:
 
         // キャプション常時アクリル(ExtendFrame -1)下では本文コントロールを
         // 必ず全面 α=255 にする。部分 MakeOpaque は周囲が透過して見える。
-        // BeginBufferedPaint 毎回は重いので、再利用DIB + AlphaBlend を先に試す。
+        // 16枠の共有DIBだとボタンとリストがサイズ衝突して毎回 CreateDIB になる。
         {
-            static CCC_ChromaBlitCache s_fixCaches[16];
-            static unsigned s_fixNext = 0;
-            CCC_ChromaBlitCache* pCache = nullptr;
-            for (auto& c : s_fixCaches) {
-                if (c.pBits && c.dibW == width && c.dibH == height) {
-                    pCache = &c;
-                    break;
-                }
-            }
-            if (!pCache) {
-                pCache = &s_fixCaches[s_fixNext++ % 16];
-                if (!pCache->Ensure(hDestDC, width, height))
-                    pCache = nullptr;
-            }
-            if (pCache && pCache->pBits && pCache->hdcDib) {
+            if (m_dib.Ensure(hDestDC, width, height) && m_dib.pBits && m_dib.hdcDib) {
                 CBrush brush(m_clrBg);
                 RECT zr = { 0, 0, width, height };
-                ::FillRect(pCache->hdcDib, &zr, (HBRUSH)brush.GetSafeHandle());
-                PaintClientIntoBuffer(hWnd, pCache->hdcDib);
-                pCache->MakeRectOpaque(0, 0, width, height);
+                ::FillRect(m_dib.hdcDib, &zr, (HBRUSH)brush.GetSafeHandle());
+                PaintClientIntoBuffer(hWnd, m_dib.hdcDib);
+                m_dib.MakeRectOpaque(0, 0, width, height);
                 if (CCC_IsInwoman()) {
                     int ox = 0, oy = 0;
                     CCC_InwomanGetShake(ox, oy);
@@ -13360,12 +13462,12 @@ private:
                         RECT zr = { 0, 0, width, height };
                         ::FillRect(hDestDC, &zr, (HBRUSH)brush.GetSafeHandle());
                     }
-                    CCC_InwomanAlphaBlend(hDestDC, width, height, pCache->hdcDib);
+                    CCC_InwomanAlphaBlend(hDestDC, width, height, m_dib.hdcDib);
                     return;
                 }
                 const BLENDFUNCTION bf = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
                 if (::GdiAlphaBlend(hDestDC, 0, 0, width, height,
-                        pCache->hdcDib, 0, 0, width, height, bf))
+                        m_dib.hdcDib, 0, 0, width, height, bf))
                     return;
             }
         }
@@ -13566,9 +13668,9 @@ static BOOL CCC_PaintChildDirect(HWND hWnd, HDC hdcBuf)
     BOOL painted = FALSE;
     if (auto* p = dynamic_cast<CCustomStandardButton*>(pw))
     {
-        // アクリル/ExtendFrame 下は素 PaintClient(BitBlt) だと α=0 のまま穴になる。
-        // PaintOpaqueClient で α=255 合成する（候補ボタンの白抜け対策）。
-        p->PaintOpaqueClient(dc);
+        // fixer の DIB へ素の PaintClient。α=255 は直後の MakeRectOpaque が担う。
+        // ここで PaintOpaqueClient すると AlphaBlend が二重になりボタンが重い。
+        p->PaintClient(dc, r);
         painted = TRUE;
     }
     else if (auto* pEdit = dynamic_cast<CCustomEdit*>(pw))
@@ -13823,19 +13925,9 @@ static void CCC_FinishBlurDlg(CWnd* pDlg, BOOL bAero, BOOL& bBlurApplied,
 
     pDlg->SetWindowPos(NULL, 0, 0, 0, 0,
         SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED | SWP_DRAWFRAME);
-    pDlg->RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_ERASE | RDW_FRAME);
-    if (CCC_IsWin11())
-        pDlg->PostMessage(CCC_MSG_REAPPLY_OPAQUE_FIXERS, 0, 0);
-}
-
-static void CCC_PostOpaqueRepaint(HWND hWnd)
-{
-    for (HWND hChild = ::GetWindow(hWnd, GW_CHILD); hChild; hChild = ::GetWindow(hChild, GW_HWNDNEXT))
-    {
-        if (CCC_ShouldOpaqueFix(hChild))
-            ::PostMessage(hChild, CCC_WM_POST_OPAQUE_PAINT, 0, 0);
-        CCC_PostOpaqueRepaint(hChild);
-    }
+    pDlg->RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_FRAME);
+    // REAPPLY は直後の CaptionApplyGlassAndFixers / 初回 OnShowWindow が fixer を載せる。
+    // ここで Post すると ALLCHILDREN 不透明化がもう一周する。
 }
 
 static void CCC_ReapplyOpaqueFix(CWnd* pDlg, CTypedPtrList<CPtrList, CCustomOpaqueFixer*>& fixers)
@@ -13845,8 +13937,8 @@ static void CCC_ReapplyOpaqueFix(CWnd* pDlg, CTypedPtrList<CPtrList, CCustomOpaq
     if (!CCC_IsAeroEnabled() && !CCC_AcrylicCaption(pDlg->m_hWnd)) return;
     CCC_ClearOpaqueFixerList(fixers);
     CCC_InstallOpaqueFixers(pDlg->m_hWnd, fixers);
-    CCC_PostOpaqueRepaint(pDlg->m_hWnd);
-    pDlg->RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW | RDW_ERASE | RDW_ALLCHILDREN);
+    // PostOpaque + RedrawWindow(ALLCHILDREN) は各子 PaintOpaque が 2 回。Invalidate 1 回に任せる。
+    pDlg->RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_ALLCHILDREN);
 }
 
 void CCC_ForceRepaintHwnd(HWND hWnd)
@@ -13998,6 +14090,8 @@ struct CCC_CaptionEntry {
     CCustomStandardButton* pMax = nullptr;
     CCustomStandardButton* pSettings = nullptr;
     CCustomStandardButton* pPin = nullptr;
+    CCustomStandardButton* pOfflineHelp = nullptr;
+    CToolTipCtrl* pCapTip = nullptr;
     // 帯の見た目キャッシュ（本文60fps再描画で帯を毎回作り直さない）
     BOOL paintValid = FALSE;
     BOOL paintActive = FALSE;
@@ -14039,7 +14133,7 @@ static BOOL CCC_IsCaptionChromeCtrl(HWND hWnd)
     const UINT id = (UINT)::GetDlgCtrlID(hWnd);
     if (id == IDC_MAINWIN_LOCK
         || id == IDC_CAP_CLOSE || id == IDC_CAP_MIN || id == IDC_CAP_MAX
-        || id == IDC_CAP_SETTINGS || id == IDC_CAP_PIN)
+        || id == IDC_CAP_SETTINGS || id == IDC_CAP_PIN || id == IDC_CAP_OFFLINE_HELP)
         return TRUE;
     // キャプション隣の「?」操作ガイド（アクリル帯で欠けないよう chrome 扱い）
     static const UINT kHelpChromeIds[] = {
@@ -14048,7 +14142,7 @@ static BOOL CCC_IsCaptionChromeCtrl(HWND hWnd)
         IDC_TE_HELP, IDC_FD_HELP, IDC_KPI_HELP, IDC_SY_HELP, IDC_PRT_HELP,
         IDC_OGG_HELP, IDC_MP_CHEATBTN,
         IDC_SM_HELP, IDC_DIG_HELP, IDC_VC_HELP, IDC_TN_HELP, IDC_PF_HELP,
-        IDC_S3M_HELP, IDC_S3R_HELP, IDC_MP_BPM_HELP
+        IDC_S3M_HELP, IDC_S3R_HELP, IDC_MP_BPM_HELP, IDC_TB_HELP, IDC_VST_HELP
     };
     for (int i = 0; i < (int)_countof(kHelpChromeIds); ++i) {
         if (id == kHelpChromeIds[i])
@@ -14065,7 +14159,7 @@ static BOOL CCC_IsCaptionHelpChromeId(UINT id)
         IDC_TE_HELP, IDC_FD_HELP, IDC_KPI_HELP, IDC_SY_HELP, IDC_PRT_HELP,
         IDC_OGG_HELP, IDC_MP_CHEATBTN,
         IDC_SM_HELP, IDC_DIG_HELP, IDC_VC_HELP, IDC_TN_HELP, IDC_PF_HELP,
-        IDC_S3M_HELP, IDC_S3R_HELP, IDC_MP_BPM_HELP
+        IDC_S3M_HELP, IDC_S3R_HELP, IDC_MP_BPM_HELP, IDC_TB_HELP, IDC_VST_HELP
     };
     for (int i = 0; i < (int)_countof(kHelpChromeIds); ++i) {
         if (id == kHelpChromeIds[i])
@@ -14083,7 +14177,7 @@ static HWND CCC_FindCaptionHelpChrome(HWND hDlg)
         IDC_TE_HELP, IDC_FD_HELP, IDC_KPI_HELP, IDC_SY_HELP, IDC_PRT_HELP,
         IDC_OGG_HELP, IDC_MP_CHEATBTN,
         IDC_SM_HELP, IDC_DIG_HELP, IDC_VC_HELP, IDC_TN_HELP, IDC_PF_HELP,
-        IDC_S3M_HELP, IDC_S3R_HELP, IDC_MP_BPM_HELP
+        IDC_S3M_HELP, IDC_S3R_HELP, IDC_MP_BPM_HELP, IDC_TB_HELP, IDC_VST_HELP
     };
     for (int i = 0; i < (int)_countof(kHelpChromeIds); ++i) {
         HWND h = ::GetDlgItem(hDlg, kHelpChromeIds[i]);
@@ -14093,10 +14187,10 @@ static HWND CCC_FindCaptionHelpChrome(HWND hDlg)
     return NULL;
 }
 
-// 表示前でも HWND があれば「?」1 枠分を確保（追随が P/? に被るのを防ぐ）
+// 表示前でも HWND があれば「本」+「?」2 枠分を確保（追随が被るのを防ぐ）
 static int CCC_CaptionHelpChromeReserve(HWND hDlg)
 {
-    return CCC_FindCaptionHelpChrome(hDlg) ? (CCC_CAP_BTN + CCC_CAP_GAP) : 0;
+    return CCC_FindCaptionHelpChrome(hDlg) ? (2 * (CCC_CAP_BTN + CCC_CAP_GAP)) : 0;
 }
 
 // PROPAGATE 後もキャプション帯は透過描画（チェック等）。ボタンは Opaque 経路。
@@ -14296,9 +14390,9 @@ static void CCC_CaptionApplyGlassAndFixers(CWnd* pDlg,
     CCC_ClearOpaqueFixerList(fixers);
     CCC_InstallOpaqueFixers(pDlg->m_hWnd, fixers);
     CCC_GroupBoxesBack(pDlg->m_hWnd);
-    CCC_PostOpaqueRepaint(pDlg->m_hWnd);
+    // PostOpaque は直後の ALLCHILDREN と二重。ERASE も fixer の WM_PAINT と二重になる。
     pDlg->RedrawWindow(NULL, NULL,
-        RDW_INVALIDATE | RDW_ERASE | RDW_UPDATENOW | RDW_ALLCHILDREN);
+        RDW_INVALIDATE | RDW_UPDATENOW | RDW_ALLCHILDREN);
 #else
     UNREFERENCED_PARAMETER(pDlg);
     UNREFERENCED_PARAMETER(fixers);
@@ -14415,6 +14509,7 @@ void CCC_CaptionUnregister(HWND hWnd)
         CCC_CaptionDestroyBtn(g_captions[i].pMax);
         CCC_CaptionDestroyBtn(g_captions[i].pSettings);
         CCC_CaptionDestroyBtn(g_captions[i].pPin);
+        CCC_CaptionDestroyBtn(g_captions[i].pOfflineHelp);
         for (int j = i + 1; j < g_captionCount; ++j)
             g_captions[j - 1] = g_captions[j];
         --g_captionCount;
@@ -14524,22 +14619,55 @@ void CCC_CaptionPlaceHelpBtn(HWND hDlg, CWnd* pHelp)
     const int gap = CCC_CAP_GAP;
     const int pinLeft = CCC_CaptionPinLeft(hDlg, e);
     const int y = (e->height > btn) ? (e->height - btn) / 2 : 2;
-    // 右から: × Max? Min? ⚙? P ←?← メインに追従
-    int x = pinLeft - gap - btn;
-    if (x < 4) x = 4;
+    // 右から: × Max? Min? ⚙? P ←?←本← メインに追従
+    int xHelp = pinLeft - gap - btn;
+    if (xHelp < 4) xHelp = 4;
+    int xChm = xHelp - gap - btn;
+    if (xChm < 4) xChm = 4;
 
-    CRect cur;
-    pHelp->GetWindowRect(&cur);
-    ::ScreenToClient(hDlg, &cur.TopLeft());
-    ::ScreenToClient(hDlg, &cur.BottomRight());
-    if (cur.left == x && cur.top == y && cur.Width() == btn && cur.Height() == btn) {
-        // 位置は合っていても P の下に沈んでいることがあるので前面へ
-        pHelp->SetWindowPos(&CWnd::wndTop, 0, 0, 0, 0,
-            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
-        return;
+    CWnd* pDlg = CWnd::FromHandle(hDlg);
+    if (pDlg && (!e->pOfflineHelp || !::IsWindow(e->pOfflineHelp->GetSafeHwnd())))
+    {
+        e->pOfflineHelp = CCC_CaptionMakeBtn(pDlg, IDC_CAP_OFFLINE_HELP, L"\u672C");
+        if (e->pOfflineHelp && e->pCapTip && e->pCapTip->GetSafeHwnd())
+        {
+            e->pCapTip->AddTool(e->pOfflineHelp, LL14(
+                L"オフラインヘルプを開く（F1）",
+                L"Open offline help (F1)",
+                L"Ouvrir l'aide hors ligne (F1)",
+                L"Apri guida offline (F1)",
+                L"Abrir ayuda sin conexion (F1)",
+                L"오프라인 도움말 열기(F1)",
+                L"打开离线帮助（F1）",
+                L"فتح التعليمات دون اتصال (F1)",
+                L"Открыть офлайн-справку (F1)",
+                L"Offline-Hilfe offnen (F1)",
+                L"Abrir ajuda offline (F1)",
+                L"Offline-help openen (F1)",
+                L"Otworz pomoc offline (F1)",
+                L"Cevrimdisi yardimi ac (F1)"));
+        }
     }
-    pHelp->SetWindowPos(&CWnd::wndTop, x, max(0, y), btn, btn,
-        SWP_NOACTIVATE | SWP_SHOWWINDOW);
+
+    CWnd* placeTargets[2] = { pHelp, e->pOfflineHelp };
+    const int placeXs[2] = { xHelp, xChm };
+    for (int i = 0; i < 2; ++i) {
+        CWnd* p = placeTargets[i];
+        if (!p || !p->GetSafeHwnd())
+            continue;
+        const int x = placeXs[i];
+        CRect cur;
+        p->GetWindowRect(&cur);
+        ::ScreenToClient(hDlg, &cur.TopLeft());
+        ::ScreenToClient(hDlg, &cur.BottomRight());
+        if (cur.left == x && cur.top == y && cur.Width() == btn && cur.Height() == btn) {
+            p->SetWindowPos(&CWnd::wndTop, 0, 0, 0, 0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+            continue;
+        }
+        p->SetWindowPos(&CWnd::wndTop, x, max(0, y), btn, btn,
+            SWP_NOACTIVATE | SWP_SHOWWINDOW);
+    }
 }
 
 void CCC_CaptionRefreshDpi(HWND hDlg)
@@ -14602,7 +14730,7 @@ void CCC_CaptionLayout(HWND hDlg)
         IDC_TE_HELP, IDC_FD_HELP, IDC_KPI_HELP, IDC_SY_HELP, IDC_PRT_HELP,
         IDC_OGG_HELP, IDC_MP_CHEATBTN,
         IDC_SM_HELP, IDC_DIG_HELP, IDC_VC_HELP, IDC_TN_HELP, IDC_PF_HELP,
-        IDC_S3M_HELP, IDC_S3R_HELP, IDC_MP_BPM_HELP
+        IDC_S3M_HELP, IDC_S3R_HELP, IDC_MP_BPM_HELP, IDC_TB_HELP, IDC_VST_HELP
     };
     for (int i = 0; i < (int)_countof(kHelpChromeIds); ++i) {
         HWND hHelp = ::GetDlgItem(hDlg, kHelpChromeIds[i]);
@@ -15085,12 +15213,20 @@ static void CCC_MainLockGetClientRect(HWND hDlg, CRect& rc)
     const int w = CCC_MainLockMeasureWidth(pDlg);
     const int capH = CCC_GetCustomCaptionHeight(hDlg);
     if (capH > 0) {
-        // キャプション帯: [追従][?][P][⚙?][Min?][Max?][×]
-        // 右端は「?」左端 − gap。無ければ Pin 左端 − gap。
+        // キャプション帯: [追従][本][?][P][⚙?][Min?][Max?][×]
+        // 右端は「本」(無ければ「?」)左端 − gap。無ければ Pin 左端 − gap − 予約。
         CCC_CaptionEntry* ce = CCC_FindCaption(hDlg);
         int right = 0;
+        if (ce && ce->pOfflineHelp && ::IsWindow(ce->pOfflineHelp->GetSafeHwnd())) {
+            CRect orc;
+            ce->pOfflineHelp->GetWindowRect(&orc);
+            ::ScreenToClient(hDlg, &orc.TopLeft());
+            ::ScreenToClient(hDlg, &orc.BottomRight());
+            if (orc.Width() == CCC_CAP_BTN && orc.Height() == CCC_CAP_BTN && orc.left > 0)
+                right = orc.left - CCC_CAP_GAP;
+        }
         HWND hHelp = CCC_FindCaptionHelpChrome(hDlg);
-        if (hHelp) {
+        if (right <= 0 && hHelp) {
             CRect hr;
             ::GetWindowRect(hHelp, &hr);
             ::ScreenToClient(hDlg, &hr.TopLeft());
@@ -16199,6 +16335,7 @@ static void CCC_CaptionInstallCore(CWnd* pDlg, CToolTipCtrl* pTip)
     CCC_CaptionEnsureBackdrop(hWnd);
 
     if (pTip) {
+        e->pCapTip = pTip;
         CCustomControlUtility::BeginDialogToolTip(*pTip, pDlg, TTS_NOPREFIX);
         if (e->pClose)
             pTip->AddTool(e->pClose, LL14(L"閉じる", L"Close", L"Fermer", L"Chiudi", L"Cerrar", L"닫기", L"关闭", L"إغلاق", L"Закрыть", L"Schliessen", L"Fechar", L"Sluiten", L"Zamknij", L"Kapat"));
@@ -16782,6 +16919,7 @@ BEGIN_MESSAGE_MAP(CCustomBlurDialogBase, CCustomDialog)
     ON_COMMAND(IDC_CAP_MAX, OnCapMax)
     ON_COMMAND(IDC_CAP_SETTINGS, OnCapSettings)
     ON_COMMAND(IDC_CAP_PIN, OnCapPin)
+    ON_COMMAND(IDC_CAP_OFFLINE_HELP, OnCapOfflineHelp)
     ON_WM_LBUTTONDOWN()
     ON_WM_LBUTTONDBLCLK()
     ON_WM_RBUTTONUP()
@@ -16886,8 +17024,9 @@ void CCustomBlurDialogBase::ApplyDwmBlurCore(BOOL bForce)
         }
         m_bAeroEnabled = TRUE;
         CCC_FinishBlurDlg(this, TRUE, m_bBlurApplied, m_opaqueFixers);
-        // FinishBlur の FRAMECHANGED 後に帯ガラス＋fixer を載せる
-        CCC_CaptionApplyGlassAndFixers(this, m_opaqueFixers);
+        // キャプション未導入時は初回 OnShowWindow で帯＋fixer を一度だけ載せる
+        if (CCC_GetCustomCaptionHeight(m_hWnd) > 0)
+            CCC_CaptionApplyGlassAndFixers(this, m_opaqueFixers);
         if (m_pMainLockSave)
             CCC_MainLockBringToFront(m_hWnd);
         m_bInApplyBlur = FALSE;
@@ -16896,7 +17035,8 @@ void CCustomBlurDialogBase::ApplyDwmBlurCore(BOOL bForce)
 
     m_bAeroEnabled = FALSE;
     if (!m_bBlurApplied && !bForce) {
-        CCC_CaptionApplyGlassAndFixers(this, m_opaqueFixers);
+        if (CCC_GetCustomCaptionHeight(m_hWnd) > 0)
+            CCC_CaptionApplyGlassAndFixers(this, m_opaqueFixers);
         m_bInApplyBlur = FALSE;
         return;
     }
@@ -16907,8 +17047,8 @@ void CCustomBlurDialogBase::ApplyDwmBlurCore(BOOL bForce)
     CCC_PrepareDialogSurface(m_hWnd, FALSE);
     PROPAGATE_AERO_TO_CHILDREN(m_hWnd, FALSE);
     m_bBlurApplied = FALSE;
-    CCC_CaptionApplyGlassAndFixers(this, m_opaqueFixers);
-    RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN);
+    if (CCC_GetCustomCaptionHeight(m_hWnd) > 0)
+        CCC_CaptionApplyGlassAndFixers(this, m_opaqueFixers);
     m_bInApplyBlur = FALSE;
 #else
     UNREFERENCED_PARAMETER(bForce);
@@ -16937,12 +17077,8 @@ void CCustomBlurDialogBase::OnShowWindow(BOOL bShow, UINT nStatus)
         CCC_RefreshDwmBlur(m_hWnd);
         CCC_CaptionEnsureBackdrop(m_hWnd);
     }
-    else {
-        // 本文 off・キャプション on の同居パス
-        // RefreshDwmBlur(ExtendFrame) を後段で呼ぶと本文不透明塗りがガラスに戻るので、
-        // ApplyGlassAndFixers（内部で EnsureBackdrop + UPDATENOW）だけにする
-        CCC_CaptionApplyGlassAndFixers(this, m_opaqueFixers);
-    }
+    // 本文 off は CaptionInstall 直後の ApplyGlassAndFixers 1 回。
+    // RefreshDwmBlur を後段で呼ぶと本文不透明塗りがガラスに戻るので呼ばない。
 #endif
     UNREFERENCED_PARAMETER(nStatus);
 }
@@ -17113,6 +17249,11 @@ void CCustomBlurDialogBase::OnCapPin()
     CCC_CaptionTogglePin(this);
 }
 
+void CCustomBlurDialogBase::OnCapOfflineHelp()
+{
+    OfflineHelpOpen(m_hWnd);
+}
+
 BOOL CCustomBlurDialogBase::OnTtnNeedText(UINT, NMHDR*, LRESULT* pResult)
 {
     *pResult = 0;
@@ -17121,6 +17262,11 @@ BOOL CCustomBlurDialogBase::OnTtnNeedText(UINT, NMHDR*, LRESULT* pResult)
 
 BOOL CCustomBlurDialogBase::PreTranslateMessage(MSG* pMsg)
 {
+    if (pMsg && pMsg->message == WM_KEYDOWN && pMsg->wParam == VK_F1)
+    {
+        OfflineHelpOpen(m_hWnd);
+        return TRUE;
+    }
     if (m_capTip.GetSafeHwnd())
         m_capTip.RelayEvent(pMsg);
     return CCustomDialog::PreTranslateMessage(pMsg);
@@ -17461,6 +17607,7 @@ BEGIN_MESSAGE_MAP(CCustomBlurDialogExBase, CCustomDialogEx)
     ON_COMMAND(IDC_CAP_MAX, OnCapMax)
     ON_COMMAND(IDC_CAP_SETTINGS, OnCapSettings)
     ON_COMMAND(IDC_CAP_PIN, OnCapPin)
+    ON_COMMAND(IDC_CAP_OFFLINE_HELP, OnCapOfflineHelp)
     ON_WM_LBUTTONDOWN()
     ON_WM_LBUTTONDBLCLK()
     ON_WM_RBUTTONUP()
@@ -17546,7 +17693,8 @@ void CCustomBlurDialogExBase::ApplyDwmBlurCore(BOOL bForce)
         }
         m_bAeroEnabled = TRUE;
         CCC_FinishBlurDlg(this, TRUE, m_bBlurApplied, m_opaqueFixers);
-        CCC_CaptionApplyGlassAndFixers(this, m_opaqueFixers);
+        if (CCC_GetCustomCaptionHeight(m_hWnd) > 0)
+            CCC_CaptionApplyGlassAndFixers(this, m_opaqueFixers);
         if (m_pMainLockSave)
             CCC_MainLockBringToFront(m_hWnd);
         m_bInApplyBlur = FALSE;
@@ -17555,7 +17703,8 @@ void CCustomBlurDialogExBase::ApplyDwmBlurCore(BOOL bForce)
 
     m_bAeroEnabled = FALSE;
     if (!m_bBlurApplied && !bForce) {
-        CCC_CaptionApplyGlassAndFixers(this, m_opaqueFixers);
+        if (CCC_GetCustomCaptionHeight(m_hWnd) > 0)
+            CCC_CaptionApplyGlassAndFixers(this, m_opaqueFixers);
         m_bInApplyBlur = FALSE;
         return;
     }
@@ -17564,8 +17713,8 @@ void CCustomBlurDialogExBase::ApplyDwmBlurCore(BOOL bForce)
     CCC_PrepareDialogSurface(m_hWnd, FALSE);
     PROPAGATE_AERO_TO_CHILDREN(m_hWnd, FALSE);
     m_bBlurApplied = FALSE;
-    CCC_CaptionApplyGlassAndFixers(this, m_opaqueFixers);
-    RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN);
+    if (CCC_GetCustomCaptionHeight(m_hWnd) > 0)
+        CCC_CaptionApplyGlassAndFixers(this, m_opaqueFixers);
     m_bInApplyBlur = FALSE;
 #else
     UNREFERENCED_PARAMETER(bForce);
@@ -17593,10 +17742,8 @@ void CCustomBlurDialogExBase::OnShowWindow(BOOL bShow, UINT nStatus)
         CCC_RefreshDwmBlur(m_hWnd);
         CCC_CaptionEnsureBackdrop(m_hWnd);
     }
-    else {
-        // 本文 off・キャプション on。後段 RefreshDwmBlur は本文不透明を潰すので呼ばない
-        CCC_CaptionApplyGlassAndFixers(this, m_opaqueFixers);
-    }
+    // 本文 off は CaptionInstall 直後の ApplyGlassAndFixers 1 回。
+    // 後段 RefreshDwmBlur は本文不透明を潰すので呼ばない。
 #endif
     UNREFERENCED_PARAMETER(nStatus);
 }
@@ -17766,6 +17913,11 @@ void CCustomBlurDialogExBase::OnCapPin()
     CCC_CaptionTogglePin(this);
 }
 
+void CCustomBlurDialogExBase::OnCapOfflineHelp()
+{
+    OfflineHelpOpen(m_hWnd);
+}
+
 BOOL CCustomBlurDialogExBase::OnTtnNeedText(UINT, NMHDR*, LRESULT* pResult)
 {
     *pResult = 0;
@@ -17774,6 +17926,11 @@ BOOL CCustomBlurDialogExBase::OnTtnNeedText(UINT, NMHDR*, LRESULT* pResult)
 
 BOOL CCustomBlurDialogExBase::PreTranslateMessage(MSG* pMsg)
 {
+    if (pMsg && pMsg->message == WM_KEYDOWN && pMsg->wParam == VK_F1)
+    {
+        OfflineHelpOpen(m_hWnd);
+        return TRUE;
+    }
     if (m_capTip.GetSafeHwnd())
         m_capTip.RelayEvent(pMsg);
     return CCustomDialogEx::PreTranslateMessage(pMsg);

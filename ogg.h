@@ -24,6 +24,7 @@ class COggApp : public CWinApp
 public:
 	COggApp();
 	void convert();
+	afx_msg void OnAppOfflineHelp();
 // オーバーライド
 	// ClassWizard は仮想関数のオーバーライドを生成します。
 	//{{AFX_VIRTUAL(COggApp)

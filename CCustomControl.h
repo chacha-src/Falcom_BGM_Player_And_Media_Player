@@ -1767,6 +1767,7 @@ protected:
     afx_msg void OnCapMax();
     afx_msg void OnCapSettings();
     afx_msg void OnCapPin();
+    afx_msg void OnCapOfflineHelp();
     afx_msg BOOL OnTtnNeedText(UINT id, NMHDR* pNMHDR, LRESULT* pResult);
 
     DECLARE_MESSAGE_MAP()
@@ -1864,6 +1865,7 @@ protected:
     afx_msg void OnCapMax();
     afx_msg void OnCapSettings();
     afx_msg void OnCapPin();
+    afx_msg void OnCapOfflineHelp();
     afx_msg BOOL OnTtnNeedText(UINT id, NMHDR* pNMHDR, LRESULT* pResult);
 
     DECLARE_MESSAGE_MAP()

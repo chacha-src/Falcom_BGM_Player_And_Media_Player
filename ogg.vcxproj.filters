@@ -477,6 +477,9 @@
     <ClCompile Include="TagEditDlg.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="TagBatchEditDlg.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="KpiHostClient.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -1097,6 +1100,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="TagEditDlg.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="TagBatchEditDlg.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="KpiHostClient.h">

@@ -2,6 +2,7 @@
 #include "ogg.h"
 #include "oggDlg.h"
 #include "TagEditDlg.h"
+#include "TagBatchEditDlg.h"
 #include "ExportTagUi.h"
 #include "FileTagInfo.h"
 #include "PlayList.h"
@@ -21,6 +22,8 @@ CTagEditDlg::CTagEditDlg(CWnd* pParent)
 	: CCustomBlurDialogBase(CTagEditDlg::IDD, pParent)
 	, multiFile(false)
 	, m_coverBmp(NULL)
+	, m_selN(0)
+	, m_selIdx(NULL)
 {
 }
 
@@ -29,6 +32,11 @@ CTagEditDlg::~CTagEditDlg()
 	if (m_coverBmp) {
 		::DeleteObject(m_coverBmp);
 		m_coverBmp = NULL;
+	}
+	if (m_selIdx) {
+		free(m_selIdx);
+		m_selIdx = NULL;
+		m_selN = 0;
 	}
 }
 
@@ -57,12 +65,14 @@ void CTagEditDlg::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDC_TAGEDIT_STATUS, m_status);
 	DDX_Control(pDX, IDC_TAGEDIT_SAVE, m_save);
 	DDX_Control(pDX, IDC_TAGEDIT_CLOSE, m_close);
+	DDX_Control(pDX, IDC_TAGEDIT_BATCH, m_batch);
 	DDX_Control(pDX, IDC_TE_HELP, m_help);
 }
 
 BEGIN_MESSAGE_MAP(CTagEditDlg, CCustomBlurDialogBase)
 	ON_BN_CLICKED(IDC_TAGEDIT_SAVE, &CTagEditDlg::OnBnClickedSave)
 	ON_BN_CLICKED(IDC_TAGEDIT_CLOSE, &CTagEditDlg::OnBnClickedClose)
+	ON_BN_CLICKED(IDC_TAGEDIT_BATCH, &CTagEditDlg::OnBnClickedBatch)
 	ON_BN_CLICKED(IDC_TAGEDIT_COVER_CLEAR, &CTagEditDlg::OnBnClickedCoverClear)
 	ON_BN_CLICKED(IDC_TE_HELP, &CTagEditDlg::OnBnClickedHelp)
 	ON_WM_DROPFILES()
@@ -188,6 +198,14 @@ BOOL CTagEditDlg::OnInitDialog()
 		L"Сохранить", L"Speichern", L"Salvar", L"Opslaan", L"Zapisz", L"Kaydet"));
 	m_close.SetWindowText(LL14(L"閉じる", L"Close", L"Fermer", L"Chiudi", L"Cerrar", L"닫기", L"关闭", L"Close",
 		L"Закрыть", L"Schliessen", L"Fechar", L"Sluiten", L"Zamknij", L"Kapat"));
+	m_batch.SetWindowText(LL14(L"まとめて編集", L"Batch edit", L"Edition groupée", L"Modifica in blocco",
+		L"Edición por lote", L"일괄 편집", L"批量编辑", L"تحرير دفعي",
+		L"Пакетное правки", L"Sammelbearbeitung", L"Edicao em lote", L"Batch bewerken",
+		L"Edycja zbiorcza", L"Toplu duzenleme"));
+	if (multiFile && m_selIdx && m_selN >= 2)
+		m_batch.ShowWindow(SW_SHOW);
+	else
+		m_batch.ShowWindow(SW_HIDE);
 
 	ExportTagUi_InitFields(multiFile, pc,
 		m_title, m_artist, m_album,
@@ -246,6 +264,8 @@ BOOL CTagEditDlg::OnInitDialog()
 		y += (std::max)(heightOf(m_hint), 14) + 6;
 		placeY(m_save, y);
 		placeY(m_close, y);
+		if (m_batch.GetSafeHwnd() && m_batch.IsWindowVisible())
+			placeY(m_batch, y);
 		y += heightOf(m_save) + 6;
 		placeY(m_status, y);
 		y += heightOf(m_status) + 8;
@@ -302,6 +322,23 @@ BOOL CTagEditDlg::OnInitDialog()
 			L"Bewerkingen naar bestandstags schrijven",
 			L"Zapisz edycje do tagow pliku",
 			L"Duzenlemeleri dosya etiketlerine yazar"));
+		if (m_batch.GetSafeHwnd() && m_batch.IsWindowVisible()) {
+			addTip(m_batch, LL14(
+				L"選択曲のファイル名・アーティスト・アルバムを6つの連動欄でまとめて書き換えます",
+				L"Rewrite filename, artist, and album for the selection in six linked boxes",
+				L"Reecrire nom, artiste et album de la selection dans 6 zones liees",
+				L"Riscrivi nome, artista e album della selezione in 6 caselle collegate",
+				L"Reescribir nombre, artista y album de la seleccion en 6 cajas enlazadas",
+				L"선택 곡의 파일명·아티스트·앨범을 연동 6칸에서 한꺼번에 고칩니다",
+				L"用六个联动栏一次改写所选的文件名、艺术家、专辑",
+				L"إعادة كتابة الاسم والفنان والألبوم في 6 حقول مرتبطة",
+				L"Правка имени, исполнителя и альбома выбора в 6 связанных полях",
+				L"Dateiname, Artist und Album der Auswahl in 6 gekoppelten Feldern aendern",
+				L"Reescrever nome, artista e album da selecao em 6 caixas ligadas",
+				L"Bestandsnaam, artiest en album van de selectie in 6 gekoppelde vakken",
+				L"Zmien nazwe, artyste i album zaznaczenia w 6 polach",
+				L"Secimin ad, sanatci ve albumunu 6 bagli kutuda toplu duzenle"));
+		}
 		addTip(m_close, LL14(
 			L"保存せずに閉じます",
 			L"Close without saving",
@@ -345,6 +382,17 @@ void CTagEditDlg::OnDropFiles(HDROP hDropInfo)
 void CTagEditDlg::OnBnClickedClose()
 {
 	EndDialog(IDCANCEL);
+}
+
+void CTagEditDlg::OnBnClickedBatch()
+{
+	if (!m_selIdx || m_selN < 2)
+		return;
+	CTagBatchEditDlg dlg(this);
+	dlg.m_idx = m_selIdx;
+	dlg.m_n = m_selN;
+	dlg.m_te = this;
+	dlg.DoModal();
 }
 
 void CTagEditDlg::OnBnClickedSave()
@@ -405,9 +453,9 @@ void CTagEditDlg::OnBnClickedSave()
 
 		FileTagFields fields;
 		if (multiFile) {
-			// 空欄=変更なし → 既存を読み、入力ありだけ上書き
+			// 空欄=変更なし → 既存を読み、入力ありだけ上書き。
+			// タイトルは複数時プレースホルダのため書かない。
 			ReadFileTagFields(path, fields);
-			if (!title.IsEmpty()) fields.title = title;
 			if (!artist.IsEmpty()) fields.artist = artist;
 			if (!album.IsEmpty()) fields.album = album;
 			if (!year.IsEmpty()) fields.year = year;
@@ -427,7 +475,7 @@ void CTagEditDlg::OnBnClickedSave()
 
 		bool textOk = true;
 		if (multiFile) {
-			const bool anyInput = !title.IsEmpty() || !artist.IsEmpty() || !album.IsEmpty()
+			const bool anyInput = !artist.IsEmpty() || !album.IsEmpty()
 				|| !year.IsEmpty() || !track.IsEmpty() || !genre.IsEmpty() || !comment.IsEmpty();
 			if (anyInput)
 				textOk = WriteFileTagFields(path, fields);
@@ -445,7 +493,7 @@ void CTagEditDlg::OnBnClickedSave()
 			okN++;
 			TagEdit_ForgetJacket(fol);
 			playlistdata0* t = targets[i];
-			if (!title.IsEmpty()) {
+			if (!multiFile && !title.IsEmpty()) {
 				_tcsncpy(t->name, title, _countof(t->name) - 1);
 				t->name[_countof(t->name) - 1] = 0;
 			}
@@ -714,6 +762,22 @@ void CTeHelpDlg::OnPaint()
 		L"Multi: lege velden ongewijzigd; ingevuld = voor allen.",
 		L"Wiele: puste bez zmian; wypełnione = do wszystkich.",
 		L"Çoklu seçimde boş alanlar değişmez; dolular hepsine uygulanır."));
+	y += lh;
+	body(L, y, LL14(
+		L"・まとめて編集 …… 複数選択時、左右6つの連動欄で TITLE / アーティスト / アルバムを一括書き換え",
+		L"· Batch edit …… with a multi-select, rewrite TITLE / artist / album in six linked boxes",
+		L"· Edition groupée …… en multi-sélection, réécrire TITLE / artiste / album dans 6 zones liées",
+		L"· Modifica in blocco …… in selezione multipla, riscrivi TITLE / artista / album in 6 caselle",
+		L"· Edición por lote …… en multiselección, reescribe TITLE / artista / álbum en 6 cajas",
+		L"· 일괄 편집 …… 다중 선택 시 연동 6칸에서 TITLE/아티스트/앨범을 한꺼번에 고칩니다",
+		L"· 批量编辑 …… 多选时用六个联动栏一次改写 TITLE/艺术家/专辑",
+		L"· تحرير دفعي …… عند التحديد المتعدد، أعد كتابة TITLE/الفنان/الألبوم في 6 حقول",
+		L"· Пакетное правки …… при множественном выборе правьте TITLE / исполнителя / альбом в 6 полях",
+		L"· Sammelbearbeitung …… bei Mehrfachauswahl TITLE / Artist / Album in 6 Feldern aendern",
+		L"· Edicao em lote …… na selecao multipla, reescreva TITLE / artista / album em 6 caixas",
+		L"· Batch bewerken …… bij multi-selectie TITLE / artiest / album in 6 vakken herschrijven",
+		L"· Edycja zbiorcza …… przy wielokrotnym zaznaczeniu zmien TITLE / artyste / album w 6 polach",
+		L"· Toplu duzenleme …… coklu secimde TITLE / sanatci / albumu 6 kutuda birden yaz"));
 
 	dc.SelectObject(oldFont);
 	CCC_GdiHelpEndPaint(hp);

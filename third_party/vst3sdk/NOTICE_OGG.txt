@@ -1,0 +1,3 @@
+# VST3 SDK (Steinberg)
+# Source: https://github.com/steinbergmedia/vst3sdk
+# See LICENSE.txt in this directory. Accept Steinberg terms before redistribution.

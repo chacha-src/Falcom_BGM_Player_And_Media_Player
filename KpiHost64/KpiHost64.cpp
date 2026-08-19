@@ -10,6 +10,8 @@
 #include "..\kmp_pi.h"
 #include "..\kpi_host_ipc.h"
 #include "..\KpiV5ConfigStore.h"
+#include "KpiHost64Foreign.h"
+#include "KpiHost64Vst.h"
 
 static std::wstring DirNameOf(const std::wstring& path)
 {
@@ -962,6 +964,145 @@ static void ServeOnce(HANDLE pipe)
 			if ((size_t)(end - p) != sizeof(KPIHOST64_U32)) { status = KPIHOST64_STATUS_BAD_REQUEST; break; }
 			auto* u = (const KPIHOST64_U32*)p;
 			status = Cmd_Close(u->v);
+			break;
+		}
+		case KPIHOST64_CMD_FOREIGN_LIST_EXTS: {
+			if (end - p < 4) { status = KPIHOST64_STATUS_BAD_REQUEST; break; }
+			uint32_t kind = *(const uint32_t*)p; p += 4;
+			std::wstring path;
+			if (!ReadWString(p, end, path) || p != end) { status = KPIHOST64_STATUS_BAD_REQUEST; break; }
+			std::wstring exts;
+			status = ForeignHost_ListExts(kind, path, exts);
+			if (status == KPIHOST64_STATUS_OK) {
+				KPIHOST64_ListExtsReply lr{};
+				lr.kpiVer = 0;
+				reply.resize(sizeof(lr));
+				memcpy(reply.data(), &lr, sizeof(lr));
+				uint32_t n = (uint32_t)exts.size();
+				size_t off = reply.size();
+				reply.resize(off + 4 + n * sizeof(wchar_t));
+				memcpy(reply.data() + off, &n, 4);
+				if (n) memcpy(reply.data() + off + 4, exts.data(), n * sizeof(wchar_t));
+			}
+			break;
+		}
+		case KPIHOST64_CMD_FOREIGN_OPEN: {
+			if (end - p < 4) { status = KPIHOST64_STATUS_BAD_REQUEST; break; }
+			uint32_t kind = *(const uint32_t*)p; p += 4;
+			std::wstring dll, media;
+			if (!ReadWString(p, end, dll)) { status = KPIHOST64_STATUS_BAD_REQUEST; break; }
+			if (!ReadWString(p, end, media) || p != end) { status = KPIHOST64_STATUS_BAD_REQUEST; break; }
+			KPIHOST64_ForeignOpenReply fr{};
+			status = ForeignHost_Open(kind, dll, media, fr);
+			if (status == KPIHOST64_STATUS_OK) {
+				reply.resize(sizeof(fr));
+				memcpy(reply.data(), &fr, sizeof(fr));
+			}
+			break;
+		}
+		case KPIHOST64_CMD_FOREIGN_RENDER: {
+			if ((size_t)(end - p) != sizeof(KPIHOST64_RenderReq)) { status = KPIHOST64_STATUS_BAD_REQUEST; break; }
+			auto* rr = (const KPIHOST64_RenderReq*)p;
+			std::vector<uint8_t> pcm;
+			uint32_t eof = 0;
+			status = ForeignHost_Render(rr->sessionId, rr->bytesWanted, pcm, eof);
+			if (status == KPIHOST64_STATUS_OK) {
+				KPIHOST64_RenderReply rrep{};
+				rrep.sessionId = rr->sessionId;
+				rrep.bytesReturned = (uint32_t)pcm.size();
+				rrep.eof = eof;
+				reply.resize(sizeof(rrep) + pcm.size());
+				memcpy(reply.data(), &rrep, sizeof(rrep));
+				if (!pcm.empty()) memcpy(reply.data() + sizeof(rrep), pcm.data(), pcm.size());
+			}
+			break;
+		}
+		case KPIHOST64_CMD_FOREIGN_SEEK: {
+			if ((size_t)(end - p) != sizeof(KPIHOST64_SeekReq)) { status = KPIHOST64_STATUS_BAD_REQUEST; break; }
+			auto* sr = (const KPIHOST64_SeekReq*)p;
+			status = ForeignHost_Seek(sr->sessionId, sr->posSample);
+			if (status == KPIHOST64_STATUS_OK) {
+				KPIHOST64_SeekReply srep{};
+				srep.sessionId = sr->sessionId;
+				srep.newPosSample = sr->posSample;
+				reply.resize(sizeof(srep));
+				memcpy(reply.data(), &srep, sizeof(srep));
+			}
+			break;
+		}
+		case KPIHOST64_CMD_FOREIGN_CLOSE: {
+			if ((size_t)(end - p) != sizeof(KPIHOST64_U32)) { status = KPIHOST64_STATUS_BAD_REQUEST; break; }
+			auto* u = (const KPIHOST64_U32*)p;
+			status = ForeignHost_Close(u->v);
+			break;
+		}
+		case KPIHOST64_CMD_VST_OPEN: {
+			// payload: [u32 midChars][mid][u32 dllChars][dll][u32 extraChars][extra]
+			if ((size_t)(end - p) < sizeof(uint32_t)) { status = KPIHOST64_STATUS_BAD_REQUEST; break; }
+			uint32_t nMid = *(const uint32_t*)p; p += sizeof(uint32_t);
+			if ((size_t)(end - p) < nMid * sizeof(wchar_t)) { status = KPIHOST64_STATUS_BAD_REQUEST; break; }
+			std::wstring mid((const wchar_t*)p, (const wchar_t*)p + nMid);
+			p += nMid * sizeof(wchar_t);
+			std::wstring dll, extra;
+			if ((size_t)(end - p) >= sizeof(uint32_t)) {
+				uint32_t nDll = *(const uint32_t*)p; p += sizeof(uint32_t);
+				if ((size_t)(end - p) < nDll * sizeof(wchar_t)) { status = KPIHOST64_STATUS_BAD_REQUEST; break; }
+				dll.assign((const wchar_t*)p, (const wchar_t*)p + nDll);
+				p += nDll * sizeof(wchar_t);
+			}
+			if ((size_t)(end - p) >= sizeof(uint32_t)) {
+				uint32_t nEx = *(const uint32_t*)p; p += sizeof(uint32_t);
+				if ((size_t)(end - p) < nEx * sizeof(wchar_t)) { status = KPIHOST64_STATUS_BAD_REQUEST; break; }
+				extra.assign((const wchar_t*)p, (const wchar_t*)p + nEx);
+			}
+			status = VstHost64_Open(mid.c_str(),
+				dll.empty() ? nullptr : dll.c_str(),
+				extra.empty() ? nullptr : extra.c_str());
+			if (status == KPIHOST64_STATUS_OK) {
+				KPIHOST64_ForeignOpenReply orp{};
+				orp.sessionId = 1;
+				orp.sampleRate = (uint32_t)VstHost64_Rate();
+				orp.channels = (uint32_t)VstHost64_Channels();
+				orp.bitsPerSample = VstHost64_Bits();
+				orp.lengthSamples = VstHost64_Length();
+				reply.resize(sizeof(orp));
+				memcpy(reply.data(), &orp, sizeof(orp));
+			}
+			break;
+		}
+		case KPIHOST64_CMD_VST_RENDER: {
+			if ((size_t)(end - p) < sizeof(KPIHOST64_RenderReq)) { status = KPIHOST64_STATUS_BAD_REQUEST; break; }
+			auto* rr = (const KPIHOST64_RenderReq*)p;
+			std::vector<uint8_t> pcm;
+			uint32_t eof = 0;
+			status = VstHost64_Render(rr->bytesWanted, pcm, eof);
+			if (status == KPIHOST64_STATUS_OK) {
+				KPIHOST64_RenderReply rrep{};
+				rrep.sessionId = rr->sessionId;
+				rrep.bytesReturned = (uint32_t)pcm.size();
+				rrep.eof = eof;
+				reply.resize(sizeof(rrep) + pcm.size());
+				memcpy(reply.data(), &rrep, sizeof(rrep));
+				if (!pcm.empty())
+					memcpy(reply.data() + sizeof(rrep), pcm.data(), pcm.size());
+			}
+			break;
+		}
+		case KPIHOST64_CMD_VST_SEEK: {
+			if ((size_t)(end - p) < sizeof(KPIHOST64_SeekReq)) { status = KPIHOST64_STATUS_BAD_REQUEST; break; }
+			auto* sr = (const KPIHOST64_SeekReq*)p;
+			status = VstHost64_Seek(sr->posSample);
+			if (status == KPIHOST64_STATUS_OK) {
+				KPIHOST64_SeekReply srep{};
+				srep.sessionId = sr->sessionId;
+				srep.newPosSample = sr->posSample;
+				reply.resize(sizeof(srep));
+				memcpy(reply.data(), &srep, sizeof(srep));
+			}
+			break;
+		}
+		case KPIHOST64_CMD_VST_CLOSE: {
+			status = VstHost64_Close();
 			break;
 		}
 		default:

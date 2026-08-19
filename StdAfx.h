@@ -1,4 +1,4 @@
-﻿// stdafx.h : 標準のシステム インクルード ファイルのインクルード ファイル、または
+// stdafx.h : 標準のシステム インクルード ファイルのインクルード ファイル、または
 // 参照回数が多く、かつあまり変更されない、プロジェクト専用のインクルード ファイル
 // を記述します。
 
@@ -228,7 +228,7 @@ struct save{
 
 
 
-	int saveversion; // 0=旧(ms2=スライダー1..60) 1=新(ms2=16..960ms)
+	int saveversion; // 0=旧(ms2=スライダー1..60) 1=新(ms2=16..960ms) 2=MP修復済 3=書き出し秒がfloat
 
 	int eq_reverb; // 0-100 リバーブ 101-200 パンリバーブ
 	int eq_chorus; // 0-100 コーラス 101-200 コーラスディストーション
@@ -247,11 +247,11 @@ struct save{
 
 	int mpcol[5];      // MPリスト列幅の意味スロット: [0]名前 [1]ゲーム [2]時間 [3]アーティスト [4]未使用(★/最終列は永続化しない)
 
-	// WAV出力オプション(末尾追記)
+	// WAV出力オプション(末尾追記)。秒欄は同一オフセット: saveversion<3 は int、>=3 は float
 	int wav_export_fade;           // 1=フェードアウト有効
-	int wav_export_fade_sec;       // フェード秒数(既定15)
+	union { int wav_export_fade_sec_i; float wav_export_fade_sec; }; // フェード秒数(既定15)
 	int wav_export_trim_lead;      // 1=先頭無音を指定秒に揃える（長い→カット／短い→パッド）
-	int wav_export_trim_keep_sec;  // 先頭無音の目標秒数(既定1)
+	union { int wav_export_trim_keep_sec_i; float wav_export_trim_keep_sec; }; // 先頭無音の目標秒数(既定1)
 
 	// 最近再生履歴(ジャンプリスト)。analyzer 等の新規フィールドはさらに末尾へ追記すること
 	int mpHistCnt;
@@ -429,8 +429,8 @@ struct save{
 	// --- プロンプトバックアップ: EQプリセット番号(末尾追記) ---
 	int mpPromptBackupEqSoundEq; // eqsoundeq
 
-	// --- KPI(mode==-3) 書き出し秒数(末尾追記。旧.datは0→起動時240=4分へ) ---
-	int wav_export_kpi_sec;
+	// --- KPI(mode==-3) 書き出し秒数(末尾追記。旧.datは0→起動時240=4分へ)。saveversion<3 は int ---
+	union { int wav_export_kpi_sec_i; float wav_export_kpi_sec; };
 
 	// --- 書き出しサンプリングレート(0=ソースのまま, 44100/48000/96000/192000) ---
 	int wav_export_sample_rate;
@@ -448,7 +448,7 @@ struct save{
 	int wav_export_apply_prompt; // 1=書き出し時にプロンプト実行を適用
 	// --- 複数書き出しクロスフェード(末尾追記。旧.datは0/5へ) ---
 	int wav_export_xfade;     // 1=複数選択時に1ファイルへクロスフェード結合
-	int wav_export_xfade_sec; // クロスフェード秒(既定5)
+	union { int wav_export_xfade_sec_i; float wav_export_xfade_sec; }; // クロスフェード秒(既定5)。saveversion<3 は int
 	// --- 同時ミックス書き出し(末尾追記) ---
 	int wav_export_mix;       // 1=同時ミックス＋クロスフェード補充
 	int wav_export_mix_n;     // 同時曲数(2..)
@@ -585,7 +585,7 @@ struct save{
 	int mpTempOpen;
 
 	// --- MP底バー: ツール由来ショートカットボタン(末尾追記。旧.datは0→起動時既定) ---
-	// mpBotToolsInited=1 なら mpBotToolsFlags 有効。bit: DJ/Tag/BPM/Sleep/Mirror/SsViz/Alarm/Remote/Maze/Race
+	// mpBotToolsInited=1 なら mpBotToolsFlags 有効。bit: DJ/Tag/BPM/Sleep/Mirror/SsViz/Alarm/Remote/VST(1024)/Maze/Race
 	int mpBotToolsInited;
 	int mpBotToolsFlags;
 
@@ -759,6 +759,24 @@ struct save{
 	int mpDetectedMeterNum;     // 0=未, 2..12
 	int mpDetectedMeterDen;     // 0=未, 4 or 8
 	int mpDetectedPulse;        // 0=未, 4/8/16/32/64
+
+	// --- タグ一括編集ダイアログ(末尾追記。旧.datは offsetof で初期化) ---
+	int teBatchHasPos;          // 1=保存座標あり
+	int teBatchX;
+	int teBatchY;
+	int teBatchW;
+	int teBatchH;
+	int teBatchMainLock;        // 1=メインに追随
+
+	// --- MIDI再生: KPI優先 / VST優先(末尾追記。旧.datは0=KPI) ---
+	int midPlayPrefer;          // 0=KPIプラグイン優先 1=自前VST2/3ホスト優先
+	TCHAR vstExtraPath[520];    // 追加VST検索フォルダ(空可)
+	int vstHostMainLock;        // 1=VSTホスト画面をメインに追随
+	int vstHostWinX, vstHostWinY, vstHostWinW, vstHostWinH; // 0幅=未保存
+	// --- マルチティンバー音源(SC-VA / SGP2 等。末尾追記) ---
+	TCHAR vstMultiDll[520];     // 明示DLL/パス（空=MIDI出力コンボ）
+	TCHAR vstMultiName[128];    // コンボ表示用名（空可）
+	TCHAR midiOutName[32];      // 空=Windows MIDIマッパー。MIDIOUTCAPS.szPname
 };
 extern save savedata;
 /* コード間隔(ms)。16..500。旧.dat や未設定は 25。 */

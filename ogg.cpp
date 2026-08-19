@@ -7,6 +7,7 @@
 #include "oggDlg.h"
 #include "CMediaPlayerDlg.h"
 #include "UpdateCheck.h"
+#include "OfflineHelp.h"
 #include "SongParams.h"
 #include "ProAudio.h"
 #include "MpSidecar.h"
@@ -26,7 +27,7 @@ BEGIN_MESSAGE_MAP(COggApp, CWinApp)
 		// メモ - ClassWizard はこの位置にマッピング用のマクロを追加または削除します。
 		//        この位置に生成されるコードを編集しないでください。
 	//}}AFX_MSG
-	ON_COMMAND(ID_HELP, CWinApp::OnHelp)
+	ON_COMMAND(ID_HELP, OnAppOfflineHelp)
 END_MESSAGE_MAP()
 
 /////////////////////////////////////////////////////////////////////////////
@@ -36,6 +37,14 @@ COggApp::COggApp()
 {
 	// TODO: この位置に構築用のコードを追加してください。
 	// ここに InitInstance 中の重要な初期化処理をすべて記述してください。
+}
+
+void COggApp::OnAppOfflineHelp()
+{
+	HWND hwnd = NULL;
+	if (m_pMainWnd && ::IsWindow(m_pMainWnd->GetSafeHwnd()))
+		hwnd = m_pMainWnd->GetSafeHwnd();
+	OfflineHelpOpen(hwnd);
 }
 
 /////////////////////////////////////////////////////////////////////////////
@@ -281,6 +290,19 @@ BOOL COggApp::InitInstance()
 	savedata.mpDetectedMeterNum = 0;
 	savedata.mpDetectedMeterDen = 0;
 	savedata.mpDetectedPulse = 0;
+	savedata.teBatchHasPos = 0;
+	savedata.teBatchX = -10000;
+	savedata.teBatchY = -10000;
+	savedata.teBatchW = 780;
+	savedata.teBatchH = 560;
+	savedata.midPlayPrefer = 0;
+	savedata.vstExtraPath[0] = 0;
+	savedata.vstHostMainLock = 0;
+	savedata.vstHostWinW = 0;
+	savedata.vstMultiDll[0] = 0;
+	savedata.vstMultiName[0] = 0;
+	savedata.midiOutName[0] = 0;
+	savedata.teBatchMainLock = 0;
 	savedata.mpDjPadwindow = 0;
 	savedata.mpNormTargetLufs = -14;
 	savedata.mpKeyEqSuggest = 0;
@@ -360,7 +382,7 @@ BOOL COggApp::InitInstance()
 	savedata.analyzerspecdiff = 0;
 	savedata.analyzerfreqzoom = 0;
 	ZeroMemory(savedata.analyzermarkers, sizeof(savedata.analyzermarkers));
-	savedata.saveversion = 2;
+	savedata.saveversion = 3;
 	savedata.prTuneSilencePct = 100;
 	savedata.prTuneBandSilBassPct = 100;
 	savedata.prTuneBandSilMidPct = 100;
@@ -401,11 +423,11 @@ BOOL COggApp::InitInstance()
 	savedata.mpw = 0;
 	savedata.mph = 0;
 	savedata.wav_export_fade = 0;
-	savedata.wav_export_fade_sec = 15;
+	savedata.wav_export_fade_sec = 15.f;
 	savedata.wav_export_trim_lead = 0;
-	savedata.wav_export_trim_keep_sec = 1;
+	savedata.wav_export_trim_keep_sec = 1.f;
 	savedata.wav_export_copy_tags = 1;
-	savedata.wav_export_kpi_sec = 240;
+	savedata.wav_export_kpi_sec = 240.f;
 	savedata.wav_export_sample_rate = 48000;
 	savedata.mpPromptwindow = 0;
 	savedata.mpCmdRollwindow = 0;
@@ -418,7 +440,7 @@ BOOL COggApp::InitInstance()
 	savedata.mpCmdRollPxPerSec10 = 120; // 12.0 px/s
 	savedata.wav_export_apply_prompt = 0;
 	savedata.wav_export_xfade = 0;
-	savedata.wav_export_xfade_sec = 5;
+	savedata.wav_export_xfade_sec = 5.f;
 	savedata.wav_export_mix = 0;
 	savedata.wav_export_mix_n = 2;
 	savedata.mic_mix = 0;
@@ -636,10 +658,7 @@ BOOL COggApp::InitInstance()
 	}
 	if (savedata.speaker_layout < 0 || savedata.speaker_layout > 5)
 		savedata.speaker_layout = 0;
-	if (savedata.wav_export_fade_sec <= 0)
-		savedata.wav_export_fade_sec = 15;
-	if (savedata.wav_export_trim_keep_sec <= 0)
-		savedata.wav_export_trim_keep_sec = 1;
+	// wav_export_*_sec の正規化は saveversion 3 コンバート後に行う（intビットをfloatとして読まない）
 	// アナライザー窓: 必ず構造体末尾に追記(旧.datは部分読込で未設定のまま→既定値)
 	if (datFileSize < (int)(offsetof(save, analyzerwindow) + sizeof(savedata.analyzerwindow))) {
 		savedata.analyzerwindow = 0;
@@ -1051,6 +1070,7 @@ BOOL COggApp::InitInstance()
 		savedata.s3r_win_w = savedata.s3r_win_h = 0;
 		savedata.s3r_invert_y = 0;
 		savedata.mpBotToolsFlags |= 512; // Soft3D空中レースボタン
+	savedata.mpBotToolsFlags |= 1024; // VSTホストボタン
 	} else {
 		if (savedata.s3r_ai < 0 || savedata.s3r_ai > 4) savedata.s3r_ai = 2;
 		if (savedata.s3r_opponents < 1 || savedata.s3r_opponents > 11) savedata.s3r_opponents = 5;
@@ -1106,6 +1126,25 @@ BOOL COggApp::InitInstance()
 		if (savedata.mpDetectedPulse != 0 && savedata.mpDetectedPulse != 4 && savedata.mpDetectedPulse != 8
 			&& savedata.mpDetectedPulse != 16 && savedata.mpDetectedPulse != 32 && savedata.mpDetectedPulse != 64)
 			savedata.mpDetectedPulse = 0;
+	}
+	if (datFileSize < (int)(offsetof(save, teBatchHasPos) + sizeof(savedata.teBatchHasPos))) {
+		savedata.teBatchHasPos = 0;
+		savedata.teBatchX = -10000;
+		savedata.teBatchY = -10000;
+		savedata.teBatchW = 780;
+		savedata.teBatchH = 560;
+		savedata.teBatchMainLock = 0;
+	} else {
+		savedata.teBatchHasPos = savedata.teBatchHasPos ? 1 : 0;
+		savedata.teBatchMainLock = savedata.teBatchMainLock ? 1 : 0;
+		if (savedata.teBatchW < 480 || savedata.teBatchH < 320
+			|| savedata.teBatchW > 10000 || savedata.teBatchH > 10000) {
+			savedata.teBatchHasPos = 0;
+			savedata.teBatchX = -10000;
+			savedata.teBatchY = -10000;
+			savedata.teBatchW = 780;
+			savedata.teBatchH = 560;
+		}
 	}
 	if (datFileSize < (int)(offsetof(save, sm_response) + sizeof(savedata.sm_response))) {
 		savedata.sm_mic_device[0] = 0;
@@ -1293,6 +1332,23 @@ BOOL COggApp::InitInstance()
 			savedata.ms2 /= 16;
 		savedata.saveversion = 2;
 	}
+	// saveversion 2→3: 書き出し秒欄を int 秒から同一オフセットの float 秒へ。
+	// フィールドが.datに無い場合は起動時デフォルト(float)を残す。
+	if (savedata.saveversion < 3) {
+		if (datFileSize >= (int)(offsetof(save, wav_export_fade_sec) + 4))
+			savedata.wav_export_fade_sec = (float)savedata.wav_export_fade_sec_i;
+		if (datFileSize >= (int)(offsetof(save, wav_export_trim_keep_sec) + 4))
+			savedata.wav_export_trim_keep_sec = (float)savedata.wav_export_trim_keep_sec_i;
+		if (datFileSize >= (int)(offsetof(save, wav_export_kpi_sec) + 4))
+			savedata.wav_export_kpi_sec = (float)savedata.wav_export_kpi_sec_i;
+		if (datFileSize >= (int)(offsetof(save, wav_export_xfade_sec) + 4))
+			savedata.wav_export_xfade_sec = (float)savedata.wav_export_xfade_sec_i;
+		savedata.saveversion = 3;
+	}
+	if (savedata.wav_export_fade_sec <= 0.f)
+		savedata.wav_export_fade_sec = 15.f;
+	if (savedata.wav_export_trim_keep_sec < 0.f)
+		savedata.wav_export_trim_keep_sec = 1.f;
 	if (savedata.ms2 < 16) savedata.ms2 = 16;
 	if (savedata.ms2 > 960) savedata.ms2 = 960;
 	if (savedata.eqCodeMs < 16 || savedata.eqCodeMs > 500)
@@ -1320,8 +1376,8 @@ BOOL COggApp::InitInstance()
 	else if (savedata.wav_export_copy_tags != 0)
 		savedata.wav_export_copy_tags = 1;
 	if (datFileSize < (int)(offsetof(save, wav_export_kpi_sec) + sizeof(savedata.wav_export_kpi_sec))
-		|| savedata.wav_export_kpi_sec < 1 || savedata.wav_export_kpi_sec > 36000)
-		savedata.wav_export_kpi_sec = 240;
+		|| savedata.wav_export_kpi_sec < 1.f || savedata.wav_export_kpi_sec > 36000.f)
+		savedata.wav_export_kpi_sec = 240.f;
 	if (datFileSize < (int)(offsetof(save, wav_export_sample_rate) + sizeof(savedata.wav_export_sample_rate)))
 		savedata.wav_export_sample_rate = 48000;
 	else {
@@ -1371,8 +1427,8 @@ BOOL COggApp::InitInstance()
 	else if (savedata.wav_export_xfade != 0)
 		savedata.wav_export_xfade = 1;
 	if (datFileSize < (int)(offsetof(save, wav_export_xfade_sec) + sizeof(savedata.wav_export_xfade_sec))
-		|| savedata.wav_export_xfade_sec < 1 || savedata.wav_export_xfade_sec > 120)
-		savedata.wav_export_xfade_sec = 5;
+		|| savedata.wav_export_xfade_sec < 0.1f || savedata.wav_export_xfade_sec > 120.f)
+		savedata.wav_export_xfade_sec = 5.f;
 	if (datFileSize < (int)(offsetof(save, wav_export_mix) + sizeof(savedata.wav_export_mix)))
 		savedata.wav_export_mix = 0;
 	else if (savedata.wav_export_mix != 0)
@@ -1911,6 +1967,7 @@ BOOL COggApp::InitInstance()
 	// モード選択画面やメイン画面を開く前に更新を確認する。
 	// 更新があればそのまま適用・再起動し、なければ通常の起動を続ける。
 	RunStartupUpdateCheck();
+	OfflineHelpEnsureAvailable();
 
 	// 起動時のモード選択(ファルコムbgm特化型画面 / メディアプレイヤー画面)
 	if (savedata.startupAsk) {

@@ -1,4 +1,4 @@
-﻿// oggDlg.cpp : インプリメンテーション ファイル
+// oggDlg.cpp : インプリメンテーション ファイル
 //
 //#define _DLL
 #include "stdafx.h"
@@ -48,6 +48,12 @@ int flacmode = 0;
 #include <MMSystem.h>
 #include "dsound.h"
 #include "Douga.h"
+#include "PluginKinds.h"
+#include "VstMidiEngine.h"
+#include "PluginWinamp.h"
+#include "PluginXmplay.h"
+#include "PluginAimp.h"
+#include "PluginForeignEnum.h"
 #include "ScWgcCapture.h"
 #include "itiran.h"
 #include "itiran_FC.h"
@@ -725,7 +731,12 @@ extern IAudioRenderClient* pRenderClient;
 
 int randomno;
 int playwavkpi(BYTE* bw, int old, int l1, int l2);
+int playwavvst(BYTE* bw, int old, int l1, int l2);
 int readkpi(BYTE* bw, int cnt);
+int readvst(BYTE* bw, int cnt);
+int playwavwinamp(BYTE* bw, int old, int l1, int l2);
+int playwavxmplay(BYTE* bw, int old, int l1, int l2);
+int playwavaimp(BYTE* bw, int old, int l1, int l2);
 int playwavflac(BYTE* bw, int old, int l1, int l2);
 int readflac(BYTE* bw, int cnt);
 static double GetFloatToInt16Scale(double maxAbs, double meanAbs)
@@ -1204,6 +1215,7 @@ static BOOL g_kpiLoadDeferredPlay = FALSE;
 // 起動時サブUI復元中(1メッセージ=1 Create)。MP Timer3 の SyncPushToggleButtons 再入を抑止。
 int g_oggSubUiRestoring = 0;
 
+// KPI(.kpi) + Winamp/XMPlay/AIMP 候補 DLL を同じ再帰で数える（進捗バー総量用）
 static int CountKpiFiles(CString ff)
 {
 	int count = 0;
@@ -1228,6 +1240,8 @@ static int CountKpiFiles(CString ff)
 	}
 	f.Close();
 
+	count += PluginForeign_CountCandidatesInDir(ff);
+
 	CFileFind cf1;
 	if (cf1.FindFile(_T("*.*")) != 0) {
 		int h = 1;
@@ -1251,6 +1265,9 @@ static int CountKpiFiles(CString ff)
 	return count;
 }
 
+void OggPluginLoadOnOneFileDone(); // CKpiLoadingWnd 定義後に実装
+
+
 class CKpiLoadingWnd : public CWnd
 {
 public:
@@ -1260,20 +1277,20 @@ public:
 		: m_bAero(FALSE)
 	{
 		m_strText = LL14(
-			L"KPI読み込み中…\n（しばらく時間がかかる場合があります）",
-			L"Reading KPI list…\n(This may take some time)",
-			L"Lecture de la liste KPI…\n(Cela peut prendre du temps)",
-			L"Lettura della lista KPI…\n(Questo potrebbe richiedere del tempo)",
-			L"Leyendo la lista KPI…\n(Esto puede tardar un poco)",
-			L"KPI 목록을 읽는 중…\n(시간이 다소 걸릴 수 있습니다)",
-			L"正在读取KPI列表…\n（可能需要一些时间）",
-			L"جاري قراءة قائمة KPI…\n(قد يستغرق هذا بعض الوقت)",
-			L"Чтение списка KPI…\n(Это может занять некоторое время)",
-			L"KPI-Liste wird gelesen…\n(Dies kann einige Zeit dauern)",
-			L"Lendo a lista KPI…\n(Isso pode levar algum tempo)",
-			L"KPI-lijst lezen…\n(Dit kan even duren)",
-			L"Odczytywanie listy KPI…\n(Może to zająć trochę czasu)",
-			L"KPI listesi okunuyor…\n(Bu biraz zaman alabilir)"
+			L"プラグイン読み込み中…\n（しばらく時間がかかる場合があります）",
+			L"Loading plugins…\n(This may take some time)",
+			L"Chargement des plugins…\n(Cela peut prendre du temps)",
+			L"Caricamento plugin…\n(Questo potrebbe richiedere del tempo)",
+			L"Cargando plugins…\n(Esto puede tardar un poco)",
+			L"플러그인 읽는 중…\n(시간이 다소 걸릴 수 있습니다)",
+			L"正在读取插件…\n（可能需要一些时间）",
+			L"جاري تحميل الإضافات…\n(قد يستغرق هذا بعض الوقت)",
+			L"Загрузка плагинов…\n(Это может занять некоторое время)",
+			L"Plugins werden geladen…\n(Dies kann einige Zeit dauern)",
+			L"A carregar plugins…\n(Isso pode levar algum tempo)",
+			L"Plugins laden…\n(Dit kan even duren)",
+			L"Wczytywanie wtyczek…\n(Może to zająć trochę czasu)",
+			L"Eklentiler yükleniyor…\n(Bu biraz zaman alabilir)"
 		);
 	}
 
@@ -1554,6 +1571,27 @@ BEGIN_MESSAGE_MAP(CKpiLoadingWnd, CWnd)
 	ON_WM_ERASEBKGND()
 END_MESSAGE_MAP()
 
+// 1 プラグイン（KPI/外部）処理後の進捗更新＋メッセージポンプ（チラつき・固着防止）
+void OggPluginLoadOnOneFileDone()
+{
+	if (g_pActiveLoadingWnd != NULL) {
+		g_nCurrentKpiIndex++;
+		g_pActiveLoadingWnd->SetPos(g_nCurrentKpiIndex);
+	}
+	MSG msg;
+	while (::PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
+		if (msg.message == WM_QUIT) {
+			::PostQuitMessage((int)msg.wParam);
+			break;
+		}
+		// InitDialog 中のネスト Create 防止のため TIMER は捨てる
+		if (msg.message == WM_TIMER)
+			continue;
+		::TranslateMessage(&msg);
+		::DispatchMessage(&msg);
+	}
+}
+
 #include "KpiPluginInstall.h"
 
 extern void COgg_KickTimerp();
@@ -1681,40 +1719,40 @@ BOOL OggKpiDownloadPlugins(CWnd* owner, BOOL confirm, BOOL startupEmpty, BOOL re
 		OggKpiAfxMessageBox(err, MB_ICONERROR);
 	} else if (reloadAfter) {
 		wnd->SetStatusText(LL14(
-			L"KPI読み込み中…\n（ダウンロード完了・再読込）",
-			L"Reading KPI list…\n(Download done — reloading)",
-			L"Lecture KPI…\n(Telechargement OK — relecture)",
-			L"Lettura KPI…\n(Download OK — ricarica)",
-			L"Leyendo KPI…\n(Descarga OK — recarga)",
-			L"KPI 목록 읽는 중…\n(다운로드 완료·다시 읽기)",
-			L"正在读取 KPI…\n（下载完成·重新加载）",
-			L"قراءة KPI…\n(اكتمل التنزيل — إعادة)",
-			L"Чтение KPI…\n(Загрузка OK — перечитывание)",
-			L"KPI-Liste lesen…\n(Download fertig — neu laden)",
-			L"A ler KPI…\n(Download OK — a recarregar)",
-			L"KPI lezen…\n(Download klaar — herladen)",
-			L"Odczyt KPI…\n(Pobrano — ponowne wczytanie)",
-			L"KPI okunuyor…\n(Indirme bitti — yeniden)"));
+			L"プラグイン読み込み中…\n（ダウンロード完了・再読込）",
+			L"Loading plugins…\n(Download done — reloading)",
+			L"Chargement plugins…\n(Telechargement OK — relecture)",
+			L"Caricamento plugin…\n(Download OK — ricarica)",
+			L"Cargando plugins…\n(Descarga OK — recarga)",
+			L"플러그인 읽는 중…\n(다운로드 완료·다시 읽기)",
+			L"正在读取插件…\n（下载完成·重新加载）",
+			L"تحميل الإضافات…\n(اكتمل التنزيل — إعادة)",
+			L"Загрузка плагинов…\n(Загрузка OK — перечитывание)",
+			L"Plugins laden…\n(Download fertig — neu laden)",
+			L"A carregar plugins…\n(Download OK — a recarregar)",
+			L"Plugins laden…\n(Download klaar — herladen)",
+			L"Wczytywanie wtyczek…\n(Pobrano — ponowne wczytanie)",
+			L"Eklentiler yükleniyor…\n(Indirme bitti — yeniden)"));
 		g_nCurrentKpiIndex = 0;
 		if (og && ::IsWindow(og->GetSafeHwnd()))
 			og->plug(karento2, NULL);
 		OggKpiApplyAfterPlug();
 	} else if (wnd) {
 		wnd->SetStatusText(LL14(
-			L"KPI読み込み中…\n（しばらく時間がかかる場合があります）",
-			L"Reading KPI list…\n(This may take some time)",
-			L"Lecture de la liste KPI…\n(Cela peut prendre du temps)",
-			L"Lettura della lista KPI…\n(Questo potrebbe richiedere del tempo)",
-			L"Leyendo la lista KPI…\n(Esto puede tardar un poco)",
-			L"KPI 목록을 읽는 중…\n(시간이 다소 걸릴 수 있습니다)",
-			L"正在读取KPI列表…\n（可能需要一些时间）",
-			L"جاري قراءة قائمة KPI…\n(قد يستغرق هذا بعض الوقت)",
-			L"Чтение списка KPI…\n(Это может занять некоторое время)",
-			L"KPI-Liste wird gelesen…\n(Dies kann einige Zeit dauern)",
-			L"Lendo a lista KPI…\n(Isso pode levar algum tempo)",
-			L"KPI-lijst lezen…\n(Dit kan even duren)",
-			L"Odczytywanie listy KPI…\n(Może to zająć trochę czasu)",
-			L"KPI listesi okunuyor…\n(Bu biraz zaman alabilir)"));
+			L"プラグイン読み込み中…\n（しばらく時間がかかる場合があります）",
+			L"Loading plugins…\n(This may take some time)",
+			L"Chargement des plugins…\n(Cela peut prendre du temps)",
+			L"Caricamento plugin…\n(Questo potrebbe richiedere del tempo)",
+			L"Cargando plugins…\n(Esto puede tardar un poco)",
+			L"플러그인 읽는 중…\n(시간이 다소 걸릴 수 있습니다)",
+			L"正在读取插件…\n（可能需要一些时间）",
+			L"جاري تحميل الإضافات…\n(قد يستغرق هذا بعض الوقت)",
+			L"Загрузка плагинов…\n(Это может занять некоторое время)",
+			L"Plugins werden geladen…\n(Dies kann einige Zeit dauern)",
+			L"A carregar plugins…\n(Isso pode levar algum tempo)",
+			L"Plugins laden…\n(Dit kan even duren)",
+			L"Wczytywanie wtyczek…\n(Może to zająć trochę czasu)",
+			L"Eklentiler yükleniyor…\n(Bu biraz zaman alabilir)"));
 	}
 
 	if (ownWnd) {
@@ -1748,20 +1786,20 @@ BOOL OggKpiReloadPlugins(CWnd* owner)
 		g_oggKpiLoading = 1;
 	}
 	wnd->SetStatusText(LL14(
-		L"KPI読み込み中…\n（再読込）",
-		L"Reading KPI list…\n(Reload)",
-		L"Lecture KPI…\n(Relecture)",
-		L"Lettura KPI…\n(Ricarica)",
-		L"Leyendo KPI…\n(Recarga)",
-		L"KPI 목록 읽는 중…\n(다시 읽기)",
-		L"正在读取 KPI…\n（重新加载）",
-		L"قراءة KPI…\n(إعادة)",
-		L"Чтение KPI…\n(Перечитывание)",
-		L"KPI-Liste lesen…\n(Neu laden)",
-		L"A ler KPI…\n(Recarregar)",
-		L"KPI lezen…\n(Herladen)",
-		L"Odczyt KPI…\n(Ponowne wczytanie)",
-		L"KPI okunuyor…\n(Yeniden)"));
+		L"プラグイン読み込み中…\n（再読込）",
+		L"Loading plugins…\n(Reload)",
+		L"Chargement plugins…\n(Relecture)",
+		L"Caricamento plugin…\n(Ricarica)",
+		L"Cargando plugins…\n(Recarga)",
+		L"플러그인 읽는 중…\n(다시 읽기)",
+		L"正在读取插件…\n（重新加载）",
+		L"تحميل الإضافات…\n(إعادة)",
+		L"Загрузка плагинов…\n(Перечитывание)",
+		L"Plugins laden…\n(Neu laden)",
+		L"A carregar plugins…\n(Recarregar)",
+		L"Plugins laden…\n(Herladen)",
+		L"Wczytywanie wtyczek…\n(Ponowne wczytanie)",
+		L"Eklentiler yükleniyor…\n(Yeniden)"));
 	g_nCurrentKpiIndex = 0;
 	og->plug(karento2, NULL);
 	OggKpiApplyAfterPlug();
@@ -2314,7 +2352,7 @@ static void DecodeSourceIntoScratch(uint8_t* scratch, int sb)
 	const int dm = ActiveDecodeMode();
 	if (dm == INT_MIN)
 		return;
-	if ((dm >= 10 && dm <= 21) || dm < -10 || dm == -6 || dm == 34 || dm == 35 || dm == 30 || (dm == 999 && wav999_use_adbuf))
+	if ((dm >= 10 && dm <= 21) || IsBuffwavNegMode(dm) || dm == -6 || dm == 34 || dm == 35 || dm == 30 || (dm == 999 && wav999_use_adbuf))
 		playwavBuffwav(scratch, 0, sb, 0);
 	else if (dm == -10)
 		playwavmp3(scratch, 0, sb, 0);
@@ -2322,6 +2360,14 @@ static void DecodeSourceIntoScratch(uint8_t* scratch, int sb)
 		playwavwav(scratch, 0, sb, 0);
 	else if (dm == -3)
 		playwavkpi(scratch, 0, sb, 0);
+	else if (dm == MODE_VST_MIDI)
+		playwavvst(scratch, 0, sb, 0);
+	else if (dm == MODE_PLUGIN_WINAMP)
+		playwavwinamp(scratch, 0, sb, 0);
+	else if (dm == MODE_PLUGIN_XMPLAY)
+		playwavxmplay(scratch, 0, sb, 0);
+	else if (dm == MODE_PLUGIN_AIMP)
+		playwavaimp(scratch, 0, sb, 0);
 	else if (dm == -7)
 		playwavdsd(scratch, 0, sb, 0);
 	else if (dm == -8)
@@ -2391,7 +2437,7 @@ void DispatchPlaywavFill(BYTE* bufwav3, ULONG oldw, int len1, int len2)
 	if (dm == INT_MIN)
 		return;
 	if (!g_pcm_upscale_active || len1 + len2 <= 0) {
-		if ((dm >= 10 && dm <= 21) || dm < -10 || dm == -6 || dm == 34 || dm == 35 || dm == 30 || (dm == 999 && wav999_use_adbuf))
+		if ((dm >= 10 && dm <= 21) || IsBuffwavNegMode(dm) || dm == -6 || dm == 34 || dm == 35 || dm == 30 || (dm == 999 && wav999_use_adbuf))
 			playwavBuffwav(bufwav3, oldw, len1, len2);
 		else if (dm == -10)
 			playwavmp3(bufwav3, oldw, len1, len2);
@@ -2399,6 +2445,14 @@ void DispatchPlaywavFill(BYTE* bufwav3, ULONG oldw, int len1, int len2)
 			playwavwav(bufwav3, oldw, len1, len2);
 		else if (dm == -3)
 			playwavkpi(bufwav3, oldw, len1, len2);
+		else if (dm == MODE_VST_MIDI)
+			playwavvst(bufwav3, oldw, len1, len2);
+		else if (dm == MODE_PLUGIN_WINAMP)
+			playwavwinamp(bufwav3, oldw, len1, len2);
+		else if (dm == MODE_PLUGIN_XMPLAY)
+			playwavxmplay(bufwav3, oldw, len1, len2);
+		else if (dm == MODE_PLUGIN_AIMP)
+			playwavaimp(bufwav3, oldw, len1, len2);
 		else if (dm == -7)
 			playwavdsd(bufwav3, oldw, len1, len2);
 		else if (dm == -8)
@@ -2530,6 +2584,7 @@ int killw1 = 0, ttt_;
 CString ext[150][300];
 BYTE kvar[150][300];
 BYTE kpiarch[150];
+BYTE plugkind[150];
 IKpiDecoderModule* v5mo;
 CString kpif[400];
 TCHAR kpifs[200][64];
@@ -3204,9 +3259,58 @@ const KPI_DECODER_MODULEINFO* m_ModuleInfo5;
 const KPI_MEDIAINFO* pMediaInfo = NULL;
 KPI_MEDIAINFO me5;
 IKpiDecoder* kpidec = NULL;
-static bool g_kpiRemote = false;
-static int g_kpiPlaybackArch = 0;   // 0=不明 32=x86 64=x64（再生中の KPI arch 表示用）
-static KpiHost64Client g_kpiHost;
+bool g_kpiRemote = false;
+int g_kpiPlaybackArch = 0;   // 0=不明 32=x86 64=x64（再生中の KPI arch 表示用）
+KpiHost64Client g_kpiHost;
+static int g_vstRemote64 = 0; // 1=x64 VST MIDI via KpiHost64 (SC-VA 等)
+
+static void CloseVstMidiSession()
+{
+	if (g_vstRemote64) {
+		g_kpiHost.VstClose();
+		g_vstRemote64 = 0;
+	} else {
+		VstMidiClose();
+	}
+}
+
+static HWND ShowVstWaitPopup(HWND owner)
+{
+	RECT r = {};
+	if (owner && IsWindow(owner)) GetWindowRect(owner, &r);
+	else {
+		r.left = 0; r.top = 0;
+		r.right = GetSystemMetrics(SM_CXSCREEN);
+		r.bottom = GetSystemMetrics(SM_CYSCREEN);
+	}
+	UINT dpi = 96;
+	{
+		typedef UINT (WINAPI* PFN)(HWND);
+		HMODULE u = GetModuleHandleW(L"user32.dll");
+		PFN fn = u ? (PFN)GetProcAddress(u, "GetDpiForWindow") : NULL;
+		if (owner && fn) dpi = fn(owner);
+		if (!dpi) {
+			HDC dc = GetDC(owner);
+			dpi = dc ? (UINT)GetDeviceCaps(dc, LOGPIXELSX) : 96;
+			if (dc) ReleaseDC(owner, dc);
+		}
+		if (!dpi) dpi = 96;
+	}
+	const int w = MulDiv(520, (int)dpi, 96);
+	const int h = MulDiv(112, (int)dpi, 96);
+	HWND wnd = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_TOPMOST, L"STATIC",
+		L"VSTプラグインを検索しています…\nSearching VST plug-ins…",
+		WS_POPUP | WS_BORDER | SS_CENTER,
+		r.left + ((r.right - r.left) - w) / 2,
+		r.top + ((r.bottom - r.top) - h) / 2, w, h,
+		owner, NULL, AfxGetInstanceHandle(), NULL);
+	if (wnd) {
+		SendMessage(wnd, WM_SETFONT, (WPARAM)GetStockObject(DEFAULT_GUI_FONT), TRUE);
+		ShowWindow(wnd, SW_SHOWNOACTIVATE);
+		UpdateWindow(wnd);
+	}
+	return wnd;
+}
 static KpiHost64Session g_kpiSession;
 static std::vector<uint8_t> g_kpiRemoteCache;
 static size_t g_kpiRemoteCachePos = 0;
@@ -4296,7 +4400,7 @@ int XfStartCrossfadeFromNotify()
 // WAV出力（再生なし）用
 CString wavExportPath;
 int wavExportLoopCount = 0;
-int g_wavExportMaxSec = 0; // KPI等: 書き出し上限秒(0=無制限)
+float g_wavExportMaxSec = 0; // KPI等: 書き出し上限秒(0=無制限)
 int g_wavExportSampleRate = 0; // 書き出し先Hz(0=ソースのまま)
 int g_wavExportChannels = 0; // 書き出しch(0=ソース。クロスフェード追従)
 int g_wavExportBits = 0; // 書き出しbit(0=ソース。16/24/32)
@@ -5541,9 +5645,9 @@ static void WavExportApplyGainToFrame(BYTE* frame, int blockAlign, int bits, flo
 	}
 }
 
-static BOOL ApplyTailFadeOutWavFile(const CString& path, int fadeSec)
+static BOOL ApplyTailFadeOutWavFile(const CString& path, float fadeSec)
 {
-	if (fadeSec <= 0) return TRUE;
+	if (fadeSec <= 0.f) return TRUE;
 	CFile f;
 	if (!f.Open(path, CFile::modeReadWrite | CFile::shareExclusive, NULL))
 		return FALSE;
@@ -5552,7 +5656,7 @@ static BOOL ApplyTailFadeOutWavFile(const CString& path, int fadeSec)
 		f.Close();
 		return FALSE;
 	}
-	__int64 fadeFrames = (__int64)fadeSec * (__int64)info.hz;
+	__int64 fadeFrames = (__int64)((double)fadeSec * (double)info.hz + 0.5);
 	if (fadeFrames > info.totalFrames) fadeFrames = info.totalFrames;
 	if (fadeFrames <= 1) {
 		f.Close();
@@ -5706,9 +5810,9 @@ static bool WavExportFrameIsSilent(const BYTE* frame, int blockAlign, int bits, 
 }
 
 // 先頭無音を keepSec 秒に揃える（長い→カット、短い→無音パッド）
-static BOOL TrimLeadingSilenceWavFile(const CString& path, int keepSec)
+static BOOL TrimLeadingSilenceWavFile(const CString& path, float keepSec)
 {
-	if (keepSec < 0) keepSec = 0;
+	if (keepSec < 0.f) keepSec = 0.f;
 	CFile f;
 	if (!f.Open(path, CFile::modeReadWrite | CFile::shareExclusive, NULL))
 		return FALSE;
@@ -5741,7 +5845,7 @@ static BOOL TrimLeadingSilenceWavFile(const CString& path, int keepSec)
 		++leadingSilentFrames;
 	}
 
-	const __int64 keepFrames = (__int64)keepSec * (__int64)hz;
+	const __int64 keepFrames = (__int64)((double)keepSec * (double)hz + 0.5);
 	const __int64 deltaFrames = leadingSilentFrames - keepFrames;
 	const int bufSize = 65536;
 	std::vector<BYTE> buf(bufSize);
@@ -9473,7 +9577,7 @@ void COggDlg::play()
 	wavsam_depth = 16;
 	if (!xfSoftOpen)
 		ZeroMemory(bufwav3, sizeof(bufwav3));
-	if (((mode >= 10 && mode <= 21) || mode <= -10) && mode != -10 || mode == -6 || mode == 34 || mode == 35 || mode == 30) {
+	if (((mode >= 10 && mode <= 21) || IsBuffwavNegMode(mode)) && mode != -10 || mode == -6 || mode == 34 || mode == 35 || mode == 30) {
 		thend1 = FALSE;
 		wavwait = 0;
 		if (mode == 30) {
@@ -9519,8 +9623,10 @@ void COggDlg::play()
 		for (int k = 0; k < 100; k++)
 			DoEvent();
 	}
-	else if (mode == -3 || mode == -10 || mode == -9 || mode == -8 || mode == -7 || mode == -6 || mode == 34 || mode == 35 || mode == 30 || mode == 999) {
+	else if (mode == -3 || mode == -10 || mode == -9 || mode == -8 || mode == -7 || mode == -6 || mode == 34 || mode == 35 || mode == 30 || mode == 999
+		|| mode == MODE_VST_MIDI || IsForeignPluginMode(mode)) {
 		// 孤児 CWread が古い loop1/2 で SetSelection しないよう世代を進める
+		// VST MIDI / 外部プラグインは Ogg ロードに落とさない（.mid で LoadOggVorbis 失敗→即 return していた）
 		InterlockedIncrement(&g_cwreadEpoch);
 	}
 	else {
@@ -9638,7 +9744,9 @@ void COggDlg::play()
 	playb = 0;
 	if (!xfSoftOpen) {
 		m_time.SetPos((int)playb);
-		if (ogg) ov_pcm_seek_lap(&vf, (ogg_int64_t)0);
+		if (ogg && mode != MODE_VST_MIDI && !IsForeignPluginMode(mode)
+			&& mode != -3 && mode != -10 && mode != -9 && mode != -8 && mode != -7 && mode != 999)
+			ov_pcm_seek_lap(&vf, (ogg_int64_t)0);
 	}
 	poss = 0; poss2 = 0; poss3 = 0; poss4 = 0; poss5 = 0; poss6 = 0;
 	g_oggPcmDecodePos = 0;
@@ -10066,7 +10174,7 @@ void COggDlg::play()
 		ZeroMemory(bufwav3, sizeof(bufwav3));
 	}
 	DWORD  dwDataLen = WAVDALen / OUTPUT_BUFFER_NUM;
-	if (((mode >= 10 && mode <= 21) || mode <= -10) && mode != -10 || mode == -6 || mode == 34 || mode == 35 || mode == 30) {
+	if (((mode >= 10 && mode <= 21) || IsBuffwavNegMode(mode)) && mode != -10 || mode == -6 || mode == 34 || mode == 35 || mode == 30) {
 		// mode 30 は ys8 ブロック前に CWread 完了済み
 		if (mode != 30) {
 			// wavwait はデコード用ワーカースレッド(CWread)が立てる。
@@ -11037,6 +11145,234 @@ void COggDlg::play()
 			}ff.Close();
 		}
 	}
+	else if (mode == MODE_VST_MIDI) {
+		ret2 = 0;
+		wchar_t mid[VST_PATH_CHARS]; mid[0] = 0;
+		wchar_t hints[32][128]; int hc = 0;
+		CString src = filen;
+		if (kpi[0]) src = kpi; // plugs が解決済み mid を kpi に入れた場合
+		if (!VstResolvePlayPath(filen, mid, VST_PATH_CHARS, hints, 32, &hc)) {
+			MessageBox(LL14(
+				L"MIDIが見つかりません。同フォルダに .mid をエクスポートしてください。",
+				L"MIDI not found. Export a .mid next to the project.",
+				L"MIDI introuvable. Exportez un .mid a cote du projet.",
+				L"MIDI non trovato. Esporta un .mid accanto al progetto.",
+				L"No se encontro MIDI. Exporte un .mid junto al proyecto.",
+				L"MIDI를 찾을 수 없습니다. 프로젝트 옆에 .mid를 내보내세요.",
+				L"未找到MIDI。请在项目旁导出 .mid。",
+				L"لم يتم العثور على MIDI. صدّر .mid بجانب المشروع.",
+				L"MIDI не найден. Экспортируйте .mid рядом с проектом.",
+				L"MIDI nicht gefunden. Exportieren Sie eine .mid neben dem Projekt.",
+				L"MIDI nao encontrado. Exporte um .mid ao lado do projeto.",
+				L"MIDI niet gevonden. Exporteer een .mid naast het project.",
+				L"Nie znaleziono MIDI. Wyeksportuj .mid obok projektu.",
+				L"MIDI bulunamadi. Projenin yanina .mid disa aktarin."),
+				LL14(L"VST MIDI", L"VST MIDI", L"VST MIDI", L"VST MIDI", L"VST MIDI", L"VST MIDI", L"VST MIDI", L"VST MIDI", L"VST MIDI", L"VST MIDI", L"VST MIDI", L"VST MIDI", L"VST MIDI", L"VST MIDI"),
+				MB_ICONERROR | MB_OK);
+			m_saisai.EnableWindow(TRUE); endflg = 0; return;
+		}
+		CloseVstMidiSession();
+		wchar_t vstPlug[VST_PATH_CHARS]; vstPlug[0] = 0;
+		int vstOk = 0;
+#if !defined(_WIN64)
+		int triedRemote = 0;
+		const int useRemote = VstShouldOpenRemote64(vstPlug, VST_PATH_CHARS);
+		if (useRemote) {
+			triedRemote = 1;
+			KPIHOST64_ForeignOpenReply orp{};
+			if (g_kpiHost.VstOpen(std::wstring(mid), std::wstring(vstPlug),
+				std::wstring(savedata.vstExtraPath), orp)) {
+				g_vstRemote64 = 1;
+				wavbit_sample_Hz = (int)orp.sampleRate;
+				wavchannel = (int)orp.channels;
+				wavsam_src = orp.bitsPerSample;
+				wavsam_depth = wavsam_src;
+				NormalizePlaybackWaveFormat();
+				loop1 = 0;
+				loop2 = (int)orp.lengthSamples;
+				SetPcmByteLengthFromSamples(loop2, wavsam_depth, wavchannel);
+				m_time.SetRange(0, (loop2 > 0) ? loop2 : 1, TRUE);
+				g_openDecoderMode = mode;
+				vstOk = 1;
+				wav_start();
+			}
+		}
+#endif
+#if !defined(_WIN64)
+		if (!vstOk && triedRemote) {
+			MessageBox(LL14(
+				L"x64 VSTホストを開けませんでした。KpiHost64.exe を確認してください。",
+				L"Could not open the x64 VST host. Check KpiHost64.exe.",
+				L"Impossible d'ouvrir l'hote VST x64.",
+				L"Impossibile aprire l'host VST x64.",
+				L"No se pudo abrir el host VST x64.",
+				L"x64 VST 호스트를 열 수 없습니다.",
+				L"无法打开 x64 VST 主机。",
+				L"تعذر فتح مضيف VST x64.",
+				L"Не удалось открыть x64 VST-хост.",
+				L"x64-VST-Host konnte nicht geöffnet werden.",
+				L"Nao foi possivel abrir o host VST x64.",
+				L"Kan de x64 VST-host niet openen.",
+				L"Nie mozna otworzyc hosta VST x64.",
+				L"x64 VST host acilamadi."),
+				LL14(L"VST MIDI", L"VST MIDI", L"VST MIDI", L"VST MIDI", L"VST MIDI", L"VST MIDI", L"VST MIDI", L"VST MIDI", L"VST MIDI", L"VST MIDI", L"VST MIDI", L"VST MIDI", L"VST MIDI", L"VST MIDI"),
+				MB_ICONERROR | MB_OK);
+			m_saisai.EnableWindow(TRUE); endflg = 0; return;
+		}
+#endif
+		if (!vstOk) {
+			if (VstMidiOpen(mid, hints, hc, m_hWnd) != 0) {
+				MessageBox(LL14(
+					L"VST MIDIを開けませんでした。",
+					L"Could not open VST MIDI.",
+					L"Impossible d'ouvrir VST MIDI.",
+					L"Impossibile aprire VST MIDI.",
+					L"No se pudo abrir VST MIDI.",
+					L"VST MIDI를 열 수 없습니다.",
+					L"无法打开 VST MIDI。",
+					L"تعذر فتح VST MIDI.",
+					L"Не удалось открыть VST MIDI.",
+					L"VST-MIDI konnte nicht geöffnet werden.",
+					L"Nao foi possivel abrir VST MIDI.",
+					L"Kan VST MIDI niet openen.",
+					L"Nie mozna otworzyc VST MIDI.",
+					L"VST MIDI acilamadi."),
+					LL14(L"VST MIDI", L"VST MIDI", L"VST MIDI", L"VST MIDI", L"VST MIDI", L"VST MIDI", L"VST MIDI", L"VST MIDI", L"VST MIDI", L"VST MIDI", L"VST MIDI", L"VST MIDI", L"VST MIDI", L"VST MIDI"),
+					MB_ICONERROR | MB_OK);
+				m_saisai.EnableWindow(TRUE); endflg = 0; return;
+			}
+			g_vstRemote64 = 0;
+			wavbit_sample_Hz = VstMidiGetRate();
+			wavchannel = VstMidiGetChannels();
+			wavsam_src = VstMidiGetBits();
+			wavsam_depth = wavsam_src;
+			NormalizePlaybackWaveFormat();
+			loop1 = 0;
+			loop2 = (int)VstMidiGetLengthSamples();
+			SetPcmByteLengthFromSamples(loop2, wavsam_depth, wavchannel);
+			m_time.SetRange(0, (loop2 > 0) ? loop2 : 1, TRUE);
+			g_openDecoderMode = mode;
+			wav_start();
+		}
+	}
+	else if (mode == MODE_PLUGIN_WINAMP) {
+		ret2 = 0;
+		const WORD km = GetPeMachine(kpi);
+		int ok = 0;
+		if (km == IMAGE_FILE_MACHINE_AMD64 || km == IMAGE_FILE_MACHINE_ARM64)
+			ok = PluginWinamp_OpenRemote(kpi, filen);
+		else
+			ok = PluginWinamp_Open(kpi, filen, m_hWnd);
+		if (!ok) {
+			MessageBox(LL14(
+				L"Winampプラグインを開けませんでした。",
+				L"Could not open Winamp plugin.",
+				L"Impossible d'ouvrir le plugin Winamp.",
+				L"Impossibile aprire il plugin Winamp.",
+				L"No se pudo abrir el plugin de Winamp.",
+				L"Winamp 플러그인을 열 수 없습니다.",
+				L"无法打开Winamp插件。",
+				L"تعذر فتح مكوّن Winamp.",
+				L"Не удалось открыть плагин Winamp.",
+				L"Winamp-Plugin konnte nicht geöffnet werden.",
+				L"Não foi possível abrir o plugin Winamp.",
+				L"Kan Winamp-plug-in niet openen.",
+				L"Nie można otworzyć wtyczki Winamp.",
+				L"Winamp eklentisi açılamadı."),
+				LL14(L"プラグイン", L"Plugin", L"Plugin", L"Plugin", L"Complemento", L"플러그인", L"插件", L"إضافة", L"Плагин", L"Plugin", L"Plugin", L"Plug-in", L"Wtyczka", L"Eklenti"),
+				MB_ICONERROR | MB_OK);
+			m_saisai.EnableWindow(TRUE); endflg = 0; return;
+		}
+		wavbit_sample_Hz = PluginWinamp_SampleRate();
+		wavchannel = PluginWinamp_Channels();
+		wavsam_src = PluginWinamp_Bits();
+		wavsam_depth = wavsam_src;
+		NormalizePlaybackWaveFormat();
+		loop1 = 0;
+		{
+			int ms = PluginWinamp_LengthMs();
+			loop2 = (ms > 0 && wavbit_sample_Hz > 0) ? (int)((__int64)ms * wavbit_sample_Hz / 1000) : 0;
+		}
+		SetPcmByteLengthFromSamples(loop2, wavsam_depth, wavchannel);
+		m_time.SetRange(0, (loop2 > 0) ? loop2 : 1, TRUE);
+		g_openDecoderMode = mode;
+		wav_start();
+	}
+	else if (mode == MODE_PLUGIN_XMPLAY) {
+		ret2 = 0;
+		if (!PluginXmplay_Open(kpi, filen)) {
+			MessageBox(LL14(
+				L"XMPlayプラグインを開けませんでした。",
+				L"Could not open XMPlay plugin.",
+				L"Impossible d'ouvrir le plugin XMPlay.",
+				L"Impossibile aprire il plugin XMPlay.",
+				L"No se pudo abrir el plugin de XMPlay.",
+				L"XMPlay 플러그인을 열 수 없습니다.",
+				L"无法打开XMPlay插件。",
+				L"تعذر فتح مكوّن XMPlay.",
+				L"Не удалось открыть плагин XMPlay.",
+				L"XMPlay-Plugin konnte nicht geöffnet werden.",
+				L"Não foi possível abrir o plugin XMPlay.",
+				L"Kan XMPlay-plug-in niet openen.",
+				L"Nie można otworzyć wtyczki XMPlay.",
+				L"XMPlay eklentisi açılamadı."),
+				LL14(L"プラグイン", L"Plugin", L"Plugin", L"Plugin", L"Complemento", L"플러그인", L"插件", L"إضافة", L"Плагин", L"Plugin", L"Plugin", L"Plug-in", L"Wtyczka", L"Eklenti"),
+				MB_ICONERROR | MB_OK);
+			m_saisai.EnableWindow(TRUE); endflg = 0; return;
+		}
+		wavbit_sample_Hz = PluginXmplay_SampleRate();
+		wavchannel = PluginXmplay_Channels();
+		wavsam_src = PluginXmplay_Bits();
+		wavsam_depth = wavsam_src;
+		NormalizePlaybackWaveFormat();
+		loop1 = 0;
+		{
+			double sec = PluginXmplay_LengthSec();
+			loop2 = (sec > 0 && wavbit_sample_Hz > 0) ? (int)(sec * wavbit_sample_Hz) : 0;
+		}
+		SetPcmByteLengthFromSamples(loop2, wavsam_depth, wavchannel);
+		m_time.SetRange(0, (loop2 > 0) ? loop2 : 1, TRUE);
+		g_openDecoderMode = mode;
+		wav_start();
+	}
+	else if (mode == MODE_PLUGIN_AIMP) {
+		ret2 = 0;
+		if (!PluginAimp_Open(kpi, filen)) {
+			MessageBox(LL14(
+				L"AIMPプラグインを開けませんでした。",
+				L"Could not open AIMP plugin.",
+				L"Impossible d'ouvrir le plugin AIMP.",
+				L"Impossibile aprire il plugin AIMP.",
+				L"No se pudo abrir el plugin de AIMP.",
+				L"AIMP 플러그인을 열 수 없습니다.",
+				L"无法打开AIMP插件。",
+				L"تعذر فتح مكوّن AIMP.",
+				L"Не удалось открыть плагин AIMP.",
+				L"AIMP-Plugin konnte nicht geöffnet werden.",
+				L"Não foi possível abrir o plugin AIMP.",
+				L"Kan AIMP-plug-in niet openen.",
+				L"Nie można otworzyć wtyczki AIMP.",
+				L"AIMP eklentisi açılamadı."),
+				LL14(L"プラグイン", L"Plugin", L"Plugin", L"Plugin", L"Complemento", L"플러그인", L"插件", L"إضافة", L"Плагин", L"Plugin", L"Plugin", L"Plug-in", L"Wtyczka", L"Eklenti"),
+				MB_ICONERROR | MB_OK);
+			m_saisai.EnableWindow(TRUE); endflg = 0; return;
+		}
+		wavbit_sample_Hz = PluginAimp_SampleRate();
+		wavchannel = PluginAimp_Channels();
+		wavsam_src = PluginAimp_Bits();
+		wavsam_depth = wavsam_src;
+		NormalizePlaybackWaveFormat();
+		loop1 = 0;
+		{
+			INT64 sz = PluginAimp_SizeBytes();
+			int bpf = (wavsam_depth / 8) * wavchannel;
+			loop2 = (sz > 0 && bpf > 0) ? (int)(sz / bpf) : 0;
+		}
+		SetPcmByteLengthFromSamples(loop2, wavsam_depth, wavchannel);
+		m_time.SetRange(0, (loop2 > 0) ? loop2 : 1, TRUE);
+		g_openDecoderMode = mode;
+		wav_start();
+	}
 	else if (mode == -2) {
 		CFile ff;
 		CString ss11 = ss; ss11.MakeLower();
@@ -11859,7 +12195,7 @@ void COggDlg::play()
 					loop1 = 0; loop2 = 0; endf = 1;
 				}
 			}
-			if (mode == -3 || mode == -7 || mode == -8 || mode == -9 || mode == -10 || mode == 999) endf = 1;
+			if (mode == -3 || mode == -7 || mode == -8 || mode == -9 || mode == -10 || mode == 999 || IsForeignPluginMode(mode) || mode == MODE_VST_MIDI) endf = 1;
 			loopcnt = 0;
 			if (g_openDecoderMode == INT_MIN)
 				g_openDecoderMode = mode;
@@ -11920,7 +12256,7 @@ void COggDlg::play()
 			loop1 = 0; loop2 = 0; endf = 1;
 		}
 	}
-	if (mode == -3 || mode == -7 || mode == -8 || mode == -9 || mode == -10 || mode == 999) endf = 1;
+	if (mode == -3 || mode == -7 || mode == -8 || mode == -9 || mode == -10 || mode == 999 || IsForeignPluginMode(mode) || mode == MODE_VST_MIDI) endf = 1;
 	loopcnt = 0;
 	if (g_openDecoderMode == INT_MIN)
 		g_openDecoderMode = mode;
@@ -12322,7 +12658,7 @@ void COggDlg::play()
 			loop1 = 0; loop2 = 0; endf = 1;
 		}
 	}
-	if (mode == -3 || mode == -7 || mode == -8 || mode == -9 || mode == -10 || mode == 999) endf = 1;
+	if (mode == -3 || mode == -7 || mode == -8 || mode == -9 || mode == -10 || mode == 999 || IsForeignPluginMode(mode) || mode == MODE_VST_MIDI) endf = 1;
 
 	if (loop1 == 0 && loop2 == 0) {
 		const int fullLen = m_time.GetMaxValue();
@@ -12348,7 +12684,10 @@ void COggDlg::play()
 	g_outBytesPerFrame = PcmOutBytesPerFrame();
 	// クロスフェード早期終端用: 曲長→想定 DS バイト（実際の DS 出力フォーマット基準）。
 	g_expectedDsBytes = 0;
-	if (wavbit_sample_Hz > 0 && oggsize > 0) {
+	// KPI/外部: メタデータ長は目安。expected に載せると表示長ちょうどで atEof→プツリ切れになる。
+	const bool kpiLenHintOnly = (mode == -3 || IsForeignPluginMode(mode)
+		|| g_openDecoderMode == -3 || IsForeignPluginMode(g_openDecoderMode));
+	if (!kpiLenHintOnly && wavbit_sample_Hz > 0 && oggsize > 0) {
 		double sec = 0.0;
 		if (mode == -10) {
 			sec = (double)oggsize / (double)wavbit_sample_Hz;
@@ -12370,7 +12709,7 @@ void COggDlg::play()
 		}
 	}
 	/* oggsize 未確定時: loop3（FLAC 等の総サンプル）→ スライダー */
-	if (g_expectedDsBytes == 0 && loop3 > 0) {
+	if (!kpiLenHintOnly && g_expectedDsBytes == 0 && loop3 > 0) {
 		const int dsRate = (g_ds_pcm_rate > 0) ? g_ds_pcm_rate : wavbit_sample_Hz;
 		const int dsCh = (g_ds_pcm_ch > 0) ? g_ds_pcm_ch : ((wavchannel > 0) ? wavchannel : 2);
 		const int dsBits = (g_ds_pcm_bits >= 8) ? g_ds_pcm_bits : 16;
@@ -12383,7 +12722,7 @@ void COggDlg::play()
 			g_expectedDsBytes = outFrames * (__int64)dsBpf;
 		}
 	}
-	if (g_expectedDsBytes == 0 && m_time.GetSafeHwnd()) {
+	if (!kpiLenHintOnly && g_expectedDsBytes == 0 && m_time.GetSafeHwnd()) {
 		const int mx = m_time.GetMaxValue();
 		const int dsRate = (g_ds_pcm_rate > 0) ? g_ds_pcm_rate : wavbit_sample_Hz;
 		const int dsCh = (g_ds_pcm_ch > 0) ? g_ds_pcm_ch : ((wavchannel > 0) ? wavchannel : 2);
@@ -12593,7 +12932,7 @@ void COggDlg::play()
 			loop1 = 0; loop2 = 0; endf = 1;
 		}
 	}
-	if (mode == -3 || mode == -7 || mode == -8 || mode == -9 || mode == -10 || mode == 999) endf = 1;
+	if (mode == -3 || mode == -7 || mode == -8 || mode == -9 || mode == -10 || mode == 999 || IsForeignPluginMode(mode) || mode == MODE_VST_MIDI) endf = 1;
 	loopcnt = 0;
 	if (pl && plw && !pl->m_tempMode) {
 		int plc = 1;
@@ -12711,9 +13050,9 @@ BOOL COggDlg::ExportToWav(playlistdata0* pc, CString outputPath, int loopCount, 
 	if (opts) localOpts = *opts;
 	else {
 		localOpts.fadeEnable = savedata.wav_export_fade;
-		localOpts.fadeSec = savedata.wav_export_fade_sec > 0 ? savedata.wav_export_fade_sec : 15;
+		localOpts.fadeSec = savedata.wav_export_fade_sec > 0.f ? savedata.wav_export_fade_sec : 15.f;
 		localOpts.trimLeadEnable = savedata.wav_export_trim_lead;
-		localOpts.trimKeepSec = savedata.wav_export_trim_keep_sec > 0 ? savedata.wav_export_trim_keep_sec : 1;
+		localOpts.trimKeepSec = savedata.wav_export_trim_keep_sec > 0.f ? savedata.wav_export_trim_keep_sec : 1.f;
 		localOpts.copyTags = savedata.wav_export_copy_tags ? 1 : 0;
 		localOpts.applyPrompt = savedata.wav_export_apply_prompt ? 1 : 0;
 	}
@@ -12805,10 +13144,10 @@ BOOL COggDlg::ExportToWav(playlistdata0* pc, CString outputPath, int loopCount, 
 				}
 			}
 		}
-		int sec = localOpts.kpiDurationSec;
-		if (sec < 1) sec = savedata.wav_export_kpi_sec;
-		if (sec < 1) sec = 240;
-		if (sec > 36000) sec = 36000;
+		float sec = localOpts.kpiDurationSec;
+		if (sec < 1.f) sec = savedata.wav_export_kpi_sec;
+		if (sec < 1.f) sec = 240.f;
+		if (sec > 36000.f) sec = 36000.f;
 		g_wavExportMaxSec = sec;
 	}
 	int saveloop_bak = savedata.saveloop;
@@ -12837,7 +13176,7 @@ BOOL COggDlg::ExportToWav(playlistdata0* pc, CString outputPath, int loopCount, 
 	if (ok && localOpts.trimLeadEnable)
 		ok = TrimLeadingSilenceWavFile(outputPath, localOpts.trimKeepSec);
 	if (ok && localOpts.fadeEnable) {
-		const int fadeSec = localOpts.fadeSec > 0 ? localOpts.fadeSec : 15;
+		const float fadeSec = localOpts.fadeSec > 0.f ? localOpts.fadeSec : 15.f;
 		ok = ApplyTailFadeOutWavFile(outputPath, fadeSec);
 	}
 	if (ok)
@@ -17546,10 +17885,15 @@ static int PlaybackSrcTotalSamples()
 
 // 短読みを曲終端にしてよいか。途中の RB待ち・デコード端数では false（誤停止防止）。
 // gotBytes<=0 は真の欠落/EOF。総長が信頼できるときだけ位置で判定（DSD/MP3既存方針と揃える）。
+// KPI(mode==-3): dwLength/loop3 は UI 目安で実デコードより短いことが多い（OPI/FM 等）。
+// 位置比較で止めると表示長ちょうどでプツリ切れになるので、ゼロ返却だけを EOF にする。
 static bool PlaybackShortMeansEof(int gotBytes)
 {
 	if (gotBytes <= 0)
 		return true;
+	const int dm = ActiveDecodeMode();
+	if (dm == -3 || IsForeignPluginMode(dm))
+		return false;
 	const int total = PlaybackSrcTotalSamples();
 	const int hz = (wavbit_sample_Hz > 0) ? wavbit_sample_Hz : 44100;
 	if (total < hz)
@@ -18407,6 +18751,117 @@ int playwavkpi(BYTE* bw, int old, int l1, int l2)
 	return l1 + l2;
 }
 
+static int playwavForeignPull(BYTE* bw, int old, int l1, int l2, int (*readfn)(BYTE*, int), int (*seek0)())
+{
+	if (!readfn) return 0;
+	const bool exporting = (wavExportPath.GetLength() > 0 || g_isWavExportRendering);
+	int rrr = readfn(bw + old, l1);
+	{
+		const int bpf = PcmOutBytesPerFrame();
+		if (bpf > 0)
+			AdvanceOutAndSrcPos(rrr / bpf);
+	}
+	if (l1 != rrr) {
+		if (endf == 1 && !exporting) {
+			if (rrr < l1)
+				ZeroMemory(bw + old + rrr, (SIZE_T)(l1 - rrr));
+			if (PlaybackShortMeansEof(rrr)) {
+				l1 = rrr;
+				if (savedata.saverenzoku == 0)
+					fade1 = 1;
+				else
+					endflg = 1;
+			}
+		}
+		else if (endf == 1 && exporting && rrr <= 0 && fade1) {
+			l1 = rrr;
+		}
+		else if (!(endf == 1 && exporting)) {
+			PlaybackNoteLoop(loop1);
+			if (seek0) seek0();
+			poss2 = poss3 = poss4 = poss6 = 0; poss5 = loop1;
+			cnt3 = 0;
+			RubberBand_DestroyBank(0);
+			reset = TRUE;
+			const int got = readfn(bw + old + rrr, l1 - rrr);
+			{
+				const int bpf = PcmOutBytesPerFrame();
+				if (bpf > 0)
+					AdvanceOutAndSrcPos(got / bpf);
+			}
+			rrr += got;
+			l1 = rrr;
+		}
+		else {
+			l1 = rrr;
+		}
+	}
+	if (l2) {
+		rrr = readfn(bw, l2);
+		{
+			const int bpf = PcmOutBytesPerFrame();
+			if (bpf > 0)
+				AdvanceOutAndSrcPos(rrr / bpf);
+		}
+		if (l2 != rrr) {
+			if (endf == 1 && !exporting) {
+				if (rrr < l2)
+					ZeroMemory(bw + rrr, (SIZE_T)(l2 - rrr));
+				if (PlaybackShortMeansEof(rrr)) {
+					l2 = rrr;
+					if (savedata.saverenzoku == 0)
+						fade1 = 1;
+					else
+						endflg = 1;
+				}
+			}
+			else if (endf == 1 && exporting && rrr <= 0 && fade1) {
+				l2 = rrr;
+			}
+			else if (!(endf == 1 && exporting)) {
+				PlaybackNoteLoop(loop1);
+				if (seek0) seek0();
+				poss2 = poss3 = poss4 = poss6 = 0; poss5 = loop1;
+				cnt3 = 0;
+				RubberBand_DestroyBank(0);
+				reset = TRUE;
+				const int got = readfn(bw + rrr, l2 - rrr);
+				{
+					const int bpf = PcmOutBytesPerFrame();
+					if (bpf > 0)
+						AdvanceOutAndSrcPos(got / bpf);
+				}
+				rrr += got;
+				l2 = rrr;
+			}
+			else {
+				l2 = rrr;
+			}
+		}
+	}
+	return l1 + l2;
+}
+
+static int ForeignSeekWinamp0() { return PluginWinamp_SeekMs(0); }
+static int ForeignSeekXmplay0() { return PluginXmplay_SeekSec(0.0); }
+static int ForeignSeekAimp0() { return PluginAimp_SeekBytes(0); }
+
+int playwavwinamp(BYTE* bw, int old, int l1, int l2)
+{
+	if (!PluginWinamp_IsOpen()) return 0;
+	return playwavForeignPull(bw, old, l1, l2, readwinamp, ForeignSeekWinamp0);
+}
+int playwavxmplay(BYTE* bw, int old, int l1, int l2)
+{
+	if (!PluginXmplay_IsOpen()) return 0;
+	return playwavForeignPull(bw, old, l1, l2, readxmplay, ForeignSeekXmplay0);
+}
+int playwavaimp(BYTE* bw, int old, int l1, int l2)
+{
+	if (!PluginAimp_IsOpen()) return 0;
+	return playwavForeignPull(bw, old, l1, l2, readaimp, ForeignSeekAimp0);
+}
+
 
 
 // 16bit, 24bit, 32bit 全ての出力に対応し、巨大なfloat値にも自動対応する万能変換関数ですわ！
@@ -18517,6 +18972,41 @@ static bool IsBlockSilent(const BYTE* buffer, int bytes, int bitDepth)
 	return true;
 }
 
+int readvst(BYTE* bw, int cnt)
+{
+	if (!bw || cnt <= 0) return 0;
+	if (g_vstRemote64) {
+		std::vector<uint8_t> pcm;
+		bool eof = false;
+		if (!g_kpiHost.VstRender((uint32_t)cnt, pcm, eof)) return 0;
+		int n = (int)pcm.size();
+		if (n > cnt) n = cnt;
+		if (n > 0) memcpy(bw, pcm.data(), (size_t)n);
+		return n;
+	}
+	return VstMidiRead(bw, cnt);
+}
+
+int playwavvst(BYTE* bw, int old, int l1, int l2)
+{
+	int rrr = readvst(bw + old, l1);
+	if (rrr < 0) rrr = 0;
+	if (rrr < l1) {
+		if (rrr > 0) ZeroMemory(bw + old + rrr, l1 - rrr);
+		else ZeroMemory(bw + old, l1);
+	}
+	if (l2 > 0) {
+		int r2 = readvst(bw, l2);
+		if (r2 < 0) r2 = 0;
+		if (r2 < l2) {
+			if (r2 > 0) ZeroMemory(bw + r2, l2 - r2);
+			else ZeroMemory(bw, l2);
+		}
+		rrr += r2;
+	}
+	return rrr;
+}
+
 int readkpi(BYTE* bw, int cnt)
 {
 	if (cnt == 0) return 0;
@@ -18533,6 +19023,8 @@ int readkpi(BYTE* bw, int cnt)
 	try {
 		int len3 = 0, len4 = 0;
 		int max_buffer_size = OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3;
+		// プラグイン EOF と再生停止(fade1)を分離。排水完了まで fade1 を立てない。
+		int kpiDecEof = (fade1 == 1) ? 1 : 0;
 		if (poss4 <= cnt) {
 			r = 0;
 			// RB プライミング等で readtempo が 0 を返す間、旧実装はリングを無理読みしていた。
@@ -18624,7 +19116,7 @@ int readkpi(BYTE* bw, int cnt)
 								rIsBytes = true;
 								requestBytes = remainBytes;
 							}
-							if (g_kpiRemoteEof && copyBytes < requestBytesLocal) fade1 = 1;
+							if (g_kpiRemoteEof && copyBytes < requestBytesLocal) kpiDecEof = 1;
 						}
 						else
 						{
@@ -18665,9 +19157,10 @@ int readkpi(BYTE* bw, int cnt)
 							r = (DWORD)(r * dstBytesPerFrame);
 						}
 					}
-					if (r > 0 && fade1 != 1) {
-						// 書き出し中は無音打ち切りしない（KSS等は先頭無音や弱い音量が続きやすい）
-						if (!(wavExportPath.GetLength() > 0 || g_isWavExportRendering)) {
+					if (r > 0 && !kpiDecEof) {
+						// 不定長（loop2==0）のゲーム系など、Render が止まらないときの保険。
+						// 総長が分かる曲では末尾の弱い音量を誤って切らない。
+						if (loop2 == 0 && !(wavExportPath.GetLength() > 0 || g_isWavExportRendering)) {
 							if (IsBlockSilent((const BYTE*)bufkpi + cnt3, (int)r, abs(wavsam_depth))) {
 								kpi_silence_bytes += r;
 							} else {
@@ -18675,13 +19168,13 @@ int readkpi(BYTE* bw, int cnt)
 							}
 							int maxSilentBytes = (int)((double)wavbit_sample_Hz * (double)wavchannel * (double)(abs(wavsam_depth) / 8) * 4.0);
 							if (maxSilentBytes > 0 && kpi_silence_bytes >= maxSilentBytes) {
-								fade1 = 1;
+								kpiDecEof = 1;
 							}
 						}
 					}
-					if (r == 0) fade1 = 1;
+					if (r == 0) kpiDecEof = 1;
 
-					if (fade1 == 1) {
+					if (kpiDecEof) {
 						if (muon != 0) {
 							if (savedata.saverenzoku == 0) {
 								int fill_size = (int)requestBytes;
@@ -18709,7 +19202,13 @@ int readkpi(BYTE* bw, int cnt)
 				}
 				if (IsPlaybackStopRequested())
 					break;
-				int len2 = readtempo(bufkpi, cnt);
+				// EOF 途中ブロックは有効バイトだけ RB へ（ゴミ領域を読まない）
+				int tempoIn = 0;
+				if (cnt3 >= (DWORD)cnt)
+					tempoIn = cnt;
+				else if (cnt3 > 0)
+					tempoIn = (int)cnt3;
+				int len2 = (tempoIn > 0) ? readtempo(bufkpi, tempoIn) : 0;
 
 				if (len2 > 0) {
 					kpiRbStallIters = 0;
@@ -18721,13 +19220,26 @@ int readkpi(BYTE* bw, int cnt)
 						cnt3 -= cnt2;
 						if (cnt3 != 0)	memcpy(bufkpi, bufkpi + cnt2, cnt3);
 					}
+					else if (kpiDecEof && tempoIn > 0 && tempoIn == (int)cnt3) {
+						cnt3 = 0; // 末尾部分ブロックは消費済み
+					}
 				}
-				else if (++kpiRbStallIters >= kKpiRbStallMax) {
+				else if (tempoIn > 0 && ++kpiRbStallIters >= kKpiRbStallMax) {
 					break;
 				}
+				// デコード EOF: FLAC/MP3 と同じく readtempo(0) で RB 尻尾を吐き切る
+				if (kpiDecEof && muon == 0) {
+					for (int fi = 0; fi < 64; fi++) {
+						int tailLen = readtempo(bufkpi, 0);
+						if (tailLen <= 0)
+							break;
+						RingBufWrite(bufkpi3, max_buffer_size, poss2, outputRawBytesData.data(), tailLen);
+						poss4 += tailLen;
+					}
+				}
 				if (poss4 > cnt) break;
-				// デコーダが既に EOF（fade1&muon尽）でリングも空なら打ち切り
-				if (fade1 == 1 && muon == 0 && poss4 <= 0)
+				// デコーダ EOF かつ RB 吐き出し済み・リング空なら打ち切り
+				if (kpiDecEof && muon == 0 && poss4 <= 0)
 					break;
 			}
 		}
@@ -18744,16 +19256,20 @@ int readkpi(BYTE* bw, int cnt)
 		if (to_read < cnt)
 			ZeroMemory(bw + to_read, (SIZE_T)(cnt - to_read));
 
-		// DSD と同じ: リング不足や RB 待ちの短読みは EOF にしない。
-		// 真の終端（デコーダ EOF かつリング空）のときだけ 0。
-		const bool kpiTrueEof = (fade1 == 1 && muon == 0) || (r == 0 && to_read == 0 && poss4 <= 0);
+		// 真の終端は「デコーダ終了 + muon 尽 + リング空」。残 PCM がある間はフル長を返す。
+		const bool kpiDecoderDone = (kpiDecEof && muon == 0);
+		const bool kpiTrueEof = (kpiDecoderDone && poss4 <= 0 && to_read == 0);
 		int ret = to_read;
-		if (to_read > 0 && !kpiTrueEof)
+		if (to_read > 0)
 			ret = cnt;
-		else if (to_read == 0 && !kpiTrueEof)
-			ret = cnt; // 無音パッドでフレームを維持（誤停止・解放レース防止）
+		else if (!kpiTrueEof)
+			ret = cnt;
 		else
-			ret = to_read;
+			ret = 0;
+		// readme は DS の「最終短読みバイト」専用（毎サイクル立てると bufwav3 を誤 ZeroMemory して即クラッシュする）。
+		// 排水中はフル長を返し、吐き切り後に初めて fade1。終端位置は DS が writtenBefore で確定する。
+		if (kpiTrueEof && ret == 0)
+			fade1 = 1;
 		cnt = ret;
 
 		equaliser(bw, cnt, reset);
@@ -20704,6 +21220,16 @@ void COggDlg::dp(CString a)
 				play();
 				return;
 			}
+			if (p.sub == MODE_VST_MIDI) {
+				mode = modesub = MODE_VST_MIDI;
+				play();
+				return;
+			}
+			if (IsForeignPluginMode(p.sub)) {
+				mode = modesub = p.sub;
+				play();
+				return;
+			}
 		}
 		fnn = ti;
 		mode = -2; modesub = -2;
@@ -20995,12 +21521,35 @@ static void ResumeApplyPlaybSeek(__int64 pb)
 		}
 		return;
 	}
+	if (mode == MODE_VST_MIDI) {
+		if (g_vstRemote64)
+			g_kpiHost.VstSeek((uint64_t)playb);
+		else
+			VstMidiSeekSamples((__int64)playb);
+		return;
+	}
+	if (mode == MODE_PLUGIN_WINAMP) {
+		if (wavbit_sample_Hz > 0)
+			PluginWinamp_SeekMs((int)((playb * 1000) / wavbit_sample_Hz));
+		return;
+	}
+	if (mode == MODE_PLUGIN_XMPLAY) {
+		if (wavbit_sample_Hz > 0)
+			PluginXmplay_SeekSec((double)playb / (double)wavbit_sample_Hz);
+		return;
+	}
+	if (mode == MODE_PLUGIN_AIMP) {
+		const int bpf = (wavsam_depth / 8) * wavchannel;
+		if (bpf > 0)
+			PluginAimp_SeekBytes((__int64)playb * bpf);
+		return;
+	}
 	if (mode == -1) {
 		SeekAndWarmupRubberBand((int)playb, false);
 		return;
 	}
 	// opus / ゲームBGM / adbuf 系
-	if (((mode >= 1 && mode <= 21) || mode <= -10 || mode == -6 || mode == 34 || mode == 35 || mode == 30) && mode != -10) {
+	if (((mode >= 1 && mode <= 21) || IsBuffwavNegMode(mode) || mode == -6 || mode == 34 || mode == 35 || mode == 30) && mode != -10) {
 		seekadpcm((int)playb);
 		return;
 	}
@@ -21012,6 +21561,8 @@ static inline bool PlaybackNotifyThreadMayBeActive()
 	return plf != 0 || playf != 0 || ogg != NULL || adbuf2 != NULL || (og && og->mod != NULL)
 		|| wav != NULL || mode == 999 || mode == -10 || mode == -9 || mode == -8
 		|| mode == -7 || mode == -6 || mode == 34 || mode == 35 || mode == -3 || mode == -1 || mode == 30
+		|| mode == MODE_PLUGIN_WINAMP || mode == MODE_PLUGIN_XMPLAY || mode == MODE_PLUGIN_AIMP
+		|| mode == MODE_VST_MIDI
 		|| (mode > 0 && mode <= 21);
 }
 
@@ -21168,6 +21719,10 @@ void COggDlg::stop()
 		if (stoppingMode == -9) m4a_.Close(og->kmp);
 		if (stoppingMode == -7) dsd_.kpiClose(og->kmp);
 		if (stoppingMode == 999) wav_.Close();
+		if (stoppingMode == MODE_VST_MIDI) CloseVstMidiSession();
+		if (stoppingMode == MODE_PLUGIN_WINAMP) PluginWinamp_Close();
+		if (stoppingMode == MODE_PLUGIN_XMPLAY) PluginXmplay_Close();
+		if (stoppingMode == MODE_PLUGIN_AIMP) PluginAimp_Close();
 		kmp = NULL;
 		ClearOpenDecoderMode();
 		ReleaseKpiPlaybackAsync(mod, kmp1, hDLLk);
@@ -21347,6 +21902,10 @@ BOOL COggDlg::stop1()
 	if (stoppingMode == -9 && kmp) { m4a_.Close(kmp); }
 	if (stoppingMode == -7 && kmp) { dsd_.kpiClose(kmp); }
 	if (stoppingMode == 999) wav_.Close();
+	if (stoppingMode == MODE_VST_MIDI) CloseVstMidiSession();
+	if (stoppingMode == MODE_PLUGIN_WINAMP) PluginWinamp_Close();
+	if (stoppingMode == MODE_PLUGIN_XMPLAY) PluginXmplay_Close();
+	if (stoppingMode == MODE_PLUGIN_AIMP) PluginAimp_Close();
 	kmp = NULL;
 	ClearOpenDecoderMode();
 	ReleaseKpiPlaybackAsync(mod, kmp1, hDLLk);
@@ -22656,6 +23215,10 @@ void COggDlg::timerp()
 	BannerValueLayout(nameLabelW, nameValueX, nameViewW);
 	BannerScrollResetIfLayoutChanged(0, nameValueX, nameViewW, mcnt, mcnt2);
 	if (fnn != L"")		sss = fnn;
+	if (sss.IsEmpty() && (mode == MODE_VST_MIDI || modesub == MODE_VST_MIDI)) {
+		const int slash = max(filen.ReverseFind(_T('\\')), filen.ReverseFind(_T('/')));
+		sss = (slash >= 0) ? filen.Mid(slash + 1) : filen;
+	}
 	if (mode == -10 || mode == -9 || mode == -8 || mode == -7) {
 		if (!tagfile.IsEmpty()) sss = tagfile;
 	}
@@ -22677,20 +23240,20 @@ void COggDlg::timerp()
 	//mcnt1++;
 	if (g_pActiveLoadingWnd != NULL) {
 		s.Format(LL14(
-			L"file:KPI読み込み中…",
-			L"file:Loading KPI…",
-			L"file:Chargement KPI…",
-			L"file:Caricamento KPI…",
-			L"file:Cargando KPI…",
-			L"file:KPI 로딩 중…",
-			L"file:正在加载KPI…",
-			L"file:جاري تحميل KPI…",
-			L"file:Загрузка KPI…",
-			L"file:KPI wird geladen…",
-			L"file:Carregando KPI…",
-			L"file:KPI laden…",
-			L"file:Ładowanie KPI…",
-			L"file:KPI yükleniyor…"));
+			L"file:プラグイン読み込み中…",
+			L"file:Loading plugins…",
+			L"file:Chargement des plugins…",
+			L"file:Caricamento plugin…",
+			L"file:Cargando plugins…",
+			L"file:플러그인 로딩 중…",
+			L"file:正在加载插件…",
+			L"file:جاري تحميل الإضافات…",
+			L"file:Загрузка плагинов…",
+			L"file:Plugins werden geladen…",
+			L"file:A carregar plugins…",
+			L"file:Plugins laden…",
+			L"file:Ładowanie wtyczek…",
+			L"file:Eklentiler yükleniyor…"));
 	}
 	else if ((modesub >= 1 && modesub <= 21) || modesub == 30 ||
 		modesub == -11 || modesub == -12 || modesub == -13 || modesub == -14 || modesub == -15) {
@@ -22751,13 +23314,34 @@ void COggDlg::timerp()
 		if (g.Right(4) == L".wav") g = L"(wav)";
 		s.Format(LL14(L"file:音声ファイル%s", L"file:Audio %s", L"file:Audio %s", L"file:Audio %s", L"file:Audio %s", L"file:오디오 %s", L"file:音频 %s", L"file:صوت %s", L"file:Аудио %s", L"file:Audio %s", L"file:Áudio %s", L"file:Audio %s", L"file:Audio %s", L"file:Ses %s"), g);
 	}
-	if (mode == -2 || mode == -3) sss = filen.Right(filen.GetLength() - filen.ReverseFind('.') - 1);
+	if (mode == -2 || mode == -3 || IsForeignPluginMode(mode)) sss = filen.Right(filen.GetLength() - filen.ReverseFind('.') - 1);
 	if (mode == -3) {
 		int archBits = g_kpiPlaybackArch;
 		if (!archBits)
 			archBits = ResolveKpiArchBits(CString(kpi), filen);
 		const CString arch = KpiArchLabel(archBits);
 		s.Format(LL14(L"file:kpiプラグイン(%s %s)", L"file:kpi plugin (%s %s)", L"file:Plugin kpi (%s %s)", L"file:Plugin kpi (%s %s)", L"file:Plugin kpi (%s %s)", L"file:kpi 플러그인(%s %s)", L"file:kpi 插件(%s %s)", L"file:إضافة kpi (%s %s)", L"file:Плагин kpi (%s %s)", L"file:kpi-Plugin (%s %s)", L"file:Plugin kpi (%s %s)", L"file:kpi-plugin (%s %s)", L"file:Wtyczka kpi (%s %s)", L"file:kpi eklentisi (%s %s)"), sss, arch);
+	}
+	if (mode == MODE_PLUGIN_WINAMP) {
+		const CString arch = KpiArchLabel(ResolveKpiArchBits(CString(kpi), filen));
+		s.Format(LL14(L"file:winampプラグイン(%s %s)", L"file:winamp plugin (%s %s)", L"file:Plugin winamp (%s %s)", L"file:Plugin winamp (%s %s)", L"file:Plugin winamp (%s %s)", L"file:winamp 플러그인(%s %s)", L"file:winamp 插件(%s %s)", L"file:إضافة winamp (%s %s)", L"file:Плагин winamp (%s %s)", L"file:winamp-Plugin (%s %s)", L"file:Plugin winamp (%s %s)", L"file:winamp-plugin (%s %s)", L"file:Wtyczka winamp (%s %s)", L"file:winamp eklentisi (%s %s)"), sss, arch);
+	}
+	if (mode == MODE_PLUGIN_XMPLAY) {
+		const CString arch = KpiArchLabel(ResolveKpiArchBits(CString(kpi), filen));
+		s.Format(LL14(L"file:xmplayプラグイン(%s %s)", L"file:xmplay plugin (%s %s)", L"file:Plugin xmplay (%s %s)", L"file:Plugin xmplay (%s %s)", L"file:Plugin xmplay (%s %s)", L"file:xmplay 플러그인(%s %s)", L"file:xmplay 插件(%s %s)", L"file:إضافة xmplay (%s %s)", L"file:Плагин xmplay (%s %s)", L"file:xmplay-Plugin (%s %s)", L"file:Plugin xmplay (%s %s)", L"file:xmplay-plugin (%s %s)", L"file:Wtyczka xmplay (%s %s)", L"file:xmplay eklentisi (%s %s)"), sss, arch);
+	}
+	if (mode == MODE_PLUGIN_AIMP) {
+		const CString arch = KpiArchLabel(ResolveKpiArchBits(CString(kpi), filen));
+		s.Format(LL14(L"file:aimpプラグイン(%s %s)", L"file:aimp plugin (%s %s)", L"file:Plugin aimp (%s %s)", L"file:Plugin aimp (%s %s)", L"file:Plugin aimp (%s %s)", L"file:aimp 플러그인(%s %s)", L"file:aimp 插件(%s %s)", L"file:إضافة aimp (%s %s)", L"file:Плагин aimp (%s %s)", L"file:aimp-Plugin (%s %s)", L"file:Plugin aimp (%s %s)", L"file:aimp-plugin (%s %s)", L"file:Wtyczka aimp (%s %s)", L"file:aimp eklentisi (%s %s)"), sss, arch);
+	}
+	if (mode == MODE_VST_MIDI) {
+		if (!savedata.vstMultiDll[0]) {
+			s.Format(LL14(L"file:mid %s", L"file:mid %s", L"file:mid %s", L"file:mid %s", L"file:mid %s", L"file:mid %s", L"file:mid %s", L"file:mid %s", L"file:mid %s", L"file:mid %s", L"file:mid %s", L"file:mid %s", L"file:mid %s", L"file:mid %s"),
+				savedata.midiOutName[0] ? savedata.midiOutName : L"MIDI Mapper");
+		} else {
+			const CString arch = KpiArchLabel(g_vstRemote64 ? 64 : 32);
+			s.Format(LL14(L"file:mid VST (%s)", L"file:mid VST (%s)", L"file:mid VST (%s)", L"file:mid VST (%s)", L"file:mid VST (%s)", L"file:mid VST (%s)", L"file:mid VST (%s)", L"file:mid VST (%s)", L"file:mid VST (%s)", L"file:mid VST (%s)", L"file:mid VST (%s)", L"file:mid VST (%s)", L"file:mid VST (%s)", L"file:mid VST (%s)"), arch);
+		}
 	}
 	if (mode == -1) s.Format(LL14(L"file:oggファイル", L"file:ogg", L"file:ogg", L"file:ogg", L"file:ogg", L"file:ogg 파일", L"file:ogg文件", L"file:ogg", L"file:ogg", L"file:ogg-Datei", L"file:ogg", L"file:ogg", L"file:ogg", L"file:ogg"));
 	if (mode == -2 && rate == 0.0) s.Format(LL14(L"file:音声ファイル(%s)", L"file:Audio (%s)", L"file:Fichier audio (%s)", L"file:File audio (%s)", L"file:Archivo de audio (%s)", L"file:오디오 파일(%s)", L"file:音频文件(%s)", L"file:ملف صوت (%s)", L"file:Аудиофайл (%s)", L"file:Audiodatei (%s)", L"file:Arquivo de áudio (%s)", L"file:Audiobestand (%s)", L"file:Plik audio (%s)", L"file:Ses dosyası (%s)"), sss);
@@ -22888,6 +23472,36 @@ void COggDlg::timerp()
 		moji(s, 1, 48, 0x7fffff);
 		sss = kpi;
 		s.Format(_T("kpi :%s"), sss.Right(sss.GetLength() - sss.ReverseFind('\\') - 1));
+		moji(s, 1, 64, 0x7fffff);
+	}
+	else if (mode == MODE_PLUGIN_WINAMP) {
+		s = FormatBannerDataAudioLine();
+		moji(s, 1, 48, 0x7fffff);
+		sss = kpi;
+		s.Format(_T("winamp :%s"), sss.Right(sss.GetLength() - sss.ReverseFind('\\') - 1));
+		moji(s, 1, 64, 0x7fffff);
+	}
+	else if (mode == MODE_PLUGIN_XMPLAY) {
+		s = FormatBannerDataAudioLine();
+		moji(s, 1, 48, 0x7fffff);
+		sss = kpi;
+		s.Format(_T("xmplay :%s"), sss.Right(sss.GetLength() - sss.ReverseFind('\\') - 1));
+		moji(s, 1, 64, 0x7fffff);
+	}
+	else if (mode == MODE_PLUGIN_AIMP) {
+		s = FormatBannerDataAudioLine();
+		moji(s, 1, 48, 0x7fffff);
+		sss = kpi;
+		s.Format(_T("aimp :%s"), sss.Right(sss.GetLength() - sss.ReverseFind('\\') - 1));
+		moji(s, 1, 64, 0x7fffff);
+	}
+	else if (mode == MODE_VST_MIDI) {
+		s = FormatBannerDataAudioLine();
+		moji(s, 1, 48, 0x7fffff);
+		if (!savedata.vstMultiDll[0])
+			s.Format(_T("midi :%s"), savedata.midiOutName[0] ? savedata.midiOutName : L"MIDI Mapper");
+		else
+			s.Format(_T("vst :%s"), g_vstRemote64 ? L"x64" : L"x86");
 		moji(s, 1, 64, 0x7fffff);
 	}
 	else if (mode == -8 || mode == -7 || mode == 999) {
@@ -23121,7 +23735,7 @@ void COggDlg::timerp()
 	if (s != ss)
 		m_vol.SetWindowText(s);
 	//時間表示
-	if (pMediaPosition && ((mode == -2 && hsc == 0) || ((mode > 0 || mode < -10) && videoonly == TRUE && hsc == 0))) {
+	if (pMediaPosition && ((mode == -2 && hsc == 0) || ((mode > 0 || IsBuffwavNegMode(mode)) && videoonly == TRUE && hsc == 0))) {
 		REFTIME aa;
 		pMediaPosition->get_CurrentPosition(&aa);
 		m_time.SetPos((int)(aa * 100));
@@ -24522,6 +25136,10 @@ LRESULT COggDlg::OnPlaybackAutoStopped(WPARAM, LPARAM)
 	if (stoppingMode == -9 && og) m4a_.Close(og->kmp);
 	if (stoppingMode == -7 && og) dsd_.kpiClose(og->kmp);
 	if (stoppingMode == 999) wav_.Close();
+	if (stoppingMode == MODE_VST_MIDI) CloseVstMidiSession();
+	if (stoppingMode == MODE_PLUGIN_WINAMP) PluginWinamp_Close();
+	if (stoppingMode == MODE_PLUGIN_XMPLAY) PluginXmplay_Close();
+	if (stoppingMode == MODE_PLUGIN_AIMP) PluginAimp_Close();
 	kmp = NULL;
 	ClearOpenDecoderMode();
 	ReleaseKpiPlaybackAsync(mod, kmp1, hDLLk);
@@ -28704,7 +29322,7 @@ void COggDlg::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
 			poss = 0;
 
 			// adbuf2 全量読み込み形式(mode 10-21, -6, 30, -11〜 等)は seekadpcm
-			if (((mode >= 10 && mode <= 21) || mode <= -10 || mode == 999 || mode == -6 || mode == 34 || mode == 35 || mode == 30)) {
+			if (((mode >= 10 && mode <= 21) || IsBuffwavNegMode(mode) || mode == 999 || mode == -6 || mode == 34 || mode == 35 || mode == 30)) {
 				if (mode == -10) {
 					hsc = 2;
 					// m_time は壁時計。ソースフレーム = srcCur×100
@@ -28902,7 +29520,7 @@ LRESULT COggDlg::OnHotKey(WPARAM wp, LPARAM a)
 		int dualSlot = -1;
 		bool slotSeek = false;
 
-		if (pMediaPosition && ((mode == -2 && hsc == 0) || ((mode > 0 || mode < -10) && videoonly == TRUE && hsc == 0))) {
+		if (pMediaPosition && ((mode == -2 && hsc == 0) || ((mode > 0 || IsBuffwavNegMode(mode)) && videoonly == TRUE && hsc == 0))) {
 			int curpos = m_time.GetPos() + dir * 10 * 100;
 			if (curpos < minpos) curpos = minpos;
 			if (curpos > maxpos) curpos = maxpos;
@@ -28965,7 +29583,7 @@ void COggDlg::rl(int a)
 	if (pMainFrame1) {
 		pMainFrame1->seek((LONGLONG)(((float)((float)playb) * 10000000.0f) / (float)wavbit_sample_Hz));
 	}
-	if (((mode >= 10 && mode <= 21) || mode <= -10 || mode == 999 || mode == -6 || mode == 34 || mode == 35 || mode == 30)) {
+	if (((mode >= 10 && mode <= 21) || IsBuffwavNegMode(mode) || mode == 999 || mode == -6 || mode == 34 || mode == 35 || mode == 30)) {
 		if (mode != -10)
 			seekadpcm((int)playb);
 		sek = TRUE;
@@ -29942,6 +30560,7 @@ void plus2(int& c)
 	if (machine == IMAGE_FILE_MACHINE_AMD64 || machine == IMAGE_FILE_MACHINE_ARM64) {
 		// x86プロセスではLoadLibraryできないため、一覧だけ作る（実処理は別プロセスに委譲する想定）
 		kpiarch[kpicnt] = 64;
+		plugkind[kpicnt] = PLUGKIND_KPI;
 		kpif[kpicnt] = ss;
 		std::wstring exts;
 		uint32_t ver = 0;
@@ -29973,6 +30592,7 @@ void plus2(int& c)
 		if (pFunck[kpicnt] || cr) {
 			if (cr) { // kpi 5
 				kpiarch[kpicnt] = 32;
+				plugkind[kpicnt] = PLUGKIND_KPI;
 				IKpiDecoderModule* ob = NULL;
 				IUnknown* pMyObject = new CMyHost((const wchar_t*)ss);
 				HRESULT hr = cr(IID_IKpiDecoderModule, (void**)&ob, pMyObject);
@@ -30006,6 +30626,7 @@ void plus2(int& c)
 			else { // kpi 2
 				{
 					kpiarch[kpicnt] = 32;
+					plugkind[kpicnt] = PLUGKIND_KPI;
 					mod1[kpicnt] = pFunck[kpicnt]();
 					kpif[kpicnt] = ss;
 					for (int i = 0; i < 299; i++) {
@@ -30072,34 +30693,14 @@ void COggDlg::plugloop(CString ff)
 					ss = f.GetFilePath();
 					sswk = ss;
 					plus1(c);
-
-					if (g_pActiveLoadingWnd != NULL) {
-						g_nCurrentKpiIndex++;
-						g_pActiveLoadingWnd->SetPos(g_nCurrentKpiIndex);
-					}
-
-					// Pump messages to keep loading window responsive!
-					// ただし親 COggDlg の WM_INITDIALOG 中なので、WM_TIMER で
-					// pl->Create / 他ダイアログをネスト CreateDialog すると
-					// ERROR_INVALID_PARAMETER→「引数が正しくありません」になり得る。
-					// 進捗表示は SetPos の Invalidate で足りるため TIMER は後回し。
-					// Posted oneshot(WM_TIMERP_VSYNC_TICK 等)は捨てない（フラグ固着防止）。
-					MSG msg;
-					while (::PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
-						if (msg.message == WM_QUIT) {
-							::PostQuitMessage((int)msg.wParam);
-							break;
-						}
-						if (msg.message == WM_TIMER)
-							continue;
-						::TranslateMessage(&msg);
-						::DispatchMessage(&msg);
-					}
+					// 進捗＋ポンプ（WM_TIMER は捨てる：InitDialog 中のネスト Create 防止）
+					OggPluginLoadOnOneFileDone();
 				}
 			}
 		} while (b);
 	}
 	f.Close();
+	PluginForeign_EnumInDir(ff);
 	CFileFind cf1;
 	if (cf1.FindFile(_T("*.*")) != 0) {
 		int h = 1;

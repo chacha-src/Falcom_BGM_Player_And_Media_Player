@@ -219,7 +219,7 @@ public:
 	CCustomStandardButton m_capture;   // 画面キャプチャ UI
 	// キャプチャ右〜終了左のツールショートカット（コンテキストでON/OFF）
 	CCustomStandardButton m_botDj, m_botTag, m_botBpm, m_botSleep;
-	CCustomStandardButton m_botMirror, m_botSsViz, m_botAlarm, m_botRemote, m_botMaze, m_botRace;
+	CCustomStandardButton m_botMirror, m_botSsViz, m_botAlarm, m_botRemote, m_botVst, m_botMaze, m_botRace;
 	int m_mpBotShort; // 底バー短縮段階 0=フル 1=中 2=短（切替〜レース）
 	CCustomStatic m_kaisuuL;
 	CCustomEdit m_kaisuu;
@@ -397,6 +397,7 @@ public:
 	static BOOL IsSeekExtrasCommand(UINT cmd);
 	void ApplySleepTimer(int minutes);       // 0=Off
 	void OpenTagEditForSelection();
+	void OpenTagBatchForSelection();
 	void CycleRatingForDisp(int disp);
 	void ShiftLrcMs(int deltaMs);
 	void DrawBannerMeters(CDC* pDC, int bannerW, int bannerH);
@@ -575,6 +576,7 @@ protected:
 	afx_msg void OnBotVisAlarm();
 	afx_msg void OnBotVisRemote();
 	afx_msg void OnBotVisMaze();
+	afx_msg void OnBotVisVst();
 	afx_msg void OnBotVisRace();
 	afx_msg void OnSaveParam();
 	afx_msg void OnResetData();
@@ -621,6 +623,7 @@ protected:
 	afx_msg void OnLrcSave();
 	afx_msg void OnDeskLrcToggle();
 	afx_msg void OnTagEdit();
+	afx_msg void OnTagBatch();
 	afx_msg void OnJacketReloadAlt();
 	afx_msg void OnJacketPickCover();
 	afx_msg void OnJacketSaveCover();
@@ -661,6 +664,7 @@ protected:
 	afx_msg void OnMpPhotoFrame();
 	afx_msg void OnMpSoft3DMaze();
 	afx_msg void OnMpSoft3DRace();
+	afx_msg void OnMpVstHost();
 	afx_msg void OnMpRemote();
 	afx_msg void OnMpRemoteDlg();
 	afx_msg void OnMpRemoteBrowser();

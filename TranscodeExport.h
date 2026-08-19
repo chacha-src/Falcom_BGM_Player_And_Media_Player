@@ -34,8 +34,9 @@ protected:
 	void RebuildMixVolList();
 	void NormalizeMixPercents();
 	BOOL SelectionHasKpi() const;
-	int  DefaultKpiDurationSec() const;
+	float DefaultKpiDurationSec() const;
 	void PersistKpiDurationFromUi();
+	void PersistOptionsFromUi(BOOL clamp);
 	int  CurrentFormat() const; // -1=WAV, 0=mp3, 1=FLAC
 	bool IsXfadeMode();
 	bool IsMixMode();
@@ -59,6 +60,8 @@ public:
 	afx_msg void OnBnClickedXfade();
 	afx_msg void OnBnClickedMix();
 	afx_msg void OnCbnSelchangeMixN();
+	afx_msg void OnExportOptChanged();
+	afx_msg void OnExportSecKillFocus();
 	afx_msg void OnDropFiles(HDROP hDropInfo);
 	afx_msg void OnSize(UINT nType, int cx, int cy);
 	afx_msg void OnDestroy();
@@ -117,6 +120,7 @@ protected:
 	CString m_coverPath;
 	HBITMAP m_coverBmp;
 	CToolTipCtrl m_tooltip;
+	BOOL m_persistReady;
 	int m_mixPct[64]; // 選択曲ごとの音量％（合計は正規化）
 	int m_mixPctCount;
 	int m_mixEditRow; // 割合インライン編集中の行

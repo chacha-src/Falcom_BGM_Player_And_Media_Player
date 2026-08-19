@@ -1,4 +1,4 @@
-﻿// CMediaPlayerDlg.cpp : メディアプレイヤーモード画面(張りぼて)とモード選択ダイアログ
+// CMediaPlayerDlg.cpp : メディアプレイヤーモード画面(張りぼて)とモード選択ダイアログ
 //
 // 実体は COggDlg(og->) と CPlayList(pl->)。ここは表示と操作の取り次ぎだけを行う。
 // メディアプレイヤーモード中は og / pl のウィンドウを非表示にして裏で生かしておく。
@@ -38,12 +38,14 @@
 #include "TunerPracticeDlg.h"
 #include "PhotoFrameDlg.h"
 #include "Soft3DMazeDlg.h"
+#include "VstHostDlg.h"
 #include "Soft3DRaceDlg.h"
 #include "CDesktopLyricsWnd.h"
 #include "Douga.h"
 #include "MpPlayerAddons.h"
 #include "MpFeatureExtras.h"
 #include "TagEditDlg.h"
+#include "TagBatchEditDlg.h"
 #include "FileTagInfo.h"
 #include "Render.h"
 #include <direct.h>
@@ -1234,6 +1236,7 @@ BEGIN_MESSAGE_MAP(CMediaPlayerDlg, CCustomBlurDialogExBase)
 	ON_BN_CLICKED(IDC_MP_BOT_SSVIZ, &CMediaPlayerDlg::OnMpSsViz)
 	ON_BN_CLICKED(IDC_MP_BOT_ALARM, &CMediaPlayerDlg::OnMpAlarm)
 	ON_BN_CLICKED(IDC_MP_BOT_REMOTE, &CMediaPlayerDlg::OnMpRemote)
+	ON_BN_CLICKED(IDC_MP_BOT_VST, &CMediaPlayerDlg::OnMpVstHost)
 	ON_BN_CLICKED(IDC_MP_BOT_MAZE, &CMediaPlayerDlg::OnMpSoft3DMaze)
 	ON_BN_CLICKED(IDC_MP_BOT_RACE, &CMediaPlayerDlg::OnMpSoft3DRace)
 	ON_COMMAND(ID_MP_BOTVIS_DJ, &CMediaPlayerDlg::OnBotVisDj)
@@ -1244,6 +1247,7 @@ BEGIN_MESSAGE_MAP(CMediaPlayerDlg, CCustomBlurDialogExBase)
 	ON_COMMAND(ID_MP_BOTVIS_SSVIZ, &CMediaPlayerDlg::OnBotVisSsViz)
 	ON_COMMAND(ID_MP_BOTVIS_ALARM, &CMediaPlayerDlg::OnBotVisAlarm)
 	ON_COMMAND(ID_MP_BOTVIS_REMOTE, &CMediaPlayerDlg::OnBotVisRemote)
+	ON_COMMAND(ID_MP_BOTVIS_VST, &CMediaPlayerDlg::OnBotVisVst)
 	ON_COMMAND(ID_MP_BOTVIS_MAZE, &CMediaPlayerDlg::OnBotVisMaze)
 	ON_COMMAND(ID_MP_BOTVIS_RACE, &CMediaPlayerDlg::OnBotVisRace)
 	ON_BN_CLICKED(IDC_MP_SAVEPARAM, &CMediaPlayerDlg::OnSaveParam)
@@ -1303,6 +1307,7 @@ BEGIN_MESSAGE_MAP(CMediaPlayerDlg, CCustomBlurDialogExBase)
 	ON_COMMAND(ID_MP_LRC_SAVE, &CMediaPlayerDlg::OnLrcSave)
 	ON_COMMAND(ID_MP_DESK_LRC, &CMediaPlayerDlg::OnDeskLrcToggle)
 	ON_COMMAND(ID_MP_TAG_EDIT, &CMediaPlayerDlg::OnTagEdit)
+	ON_COMMAND(ID_MP_TAG_BATCH, &CMediaPlayerDlg::OnTagBatch)
 	ON_COMMAND(ID_MP_JACKET_RELOAD, &CMediaPlayerDlg::OnJacketReloadAlt)
 	ON_COMMAND(ID_MP_JACKET_COVERJPG, &CMediaPlayerDlg::OnJacketPickCover)
 	ON_COMMAND(ID_MP_EXPORT_AB, &CMediaPlayerDlg::OnExportAb)
@@ -1606,16 +1611,18 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 			m_botAlarm.Create(_T("Alarm"), WS_CHILD | BS_PUSHBUTTON | WS_TABSTOP, rc, this, IDC_MP_BOT_ALARM);
 		if (!m_botRemote.GetSafeHwnd())
 			m_botRemote.Create(_T("Remote"), WS_CHILD | BS_PUSHBUTTON | WS_TABSTOP, rc, this, IDC_MP_BOT_REMOTE);
+		if (!m_botVst.GetSafeHwnd())
+			m_botVst.Create(_T("VST"), WS_CHILD | BS_PUSHBUTTON | WS_TABSTOP, rc, this, IDC_MP_BOT_VST);
 		if (!m_botMaze.GetSafeHwnd())
 			m_botMaze.Create(_T("Maze"), WS_CHILD | BS_PUSHBUTTON | WS_TABSTOP, rc, this, IDC_MP_BOT_MAZE);
 		if (!m_botRace.GetSafeHwnd())
 			m_botRace.Create(_T("Race"), WS_CHILD | BS_PUSHBUTTON | WS_TABSTOP, rc, this, IDC_MP_BOT_RACE);
 		{
 			// ショートカットは色で役割が分かるようにする（水色一色は避ける）
-			CCustomStandardButton* bots[10] = {
-				&m_botDj, &m_botTag, &m_botBpm, &m_botSleep, &m_botMirror, &m_botSsViz, &m_botAlarm, &m_botRemote, &m_botMaze, &m_botRace
+			CCustomStandardButton* bots[11] = {
+				&m_botDj, &m_botTag, &m_botBpm, &m_botSleep, &m_botMirror, &m_botSsViz, &m_botAlarm, &m_botRemote, &m_botVst, &m_botMaze, &m_botRace
 			};
-			const COLORREF botGrad[10][2] = {
+			const COLORREF botGrad[11][2] = {
 				{ RGB(240, 225, 255), RGB(200, 170, 245) }, // DJ: 紫
 				{ RGB(255, 235, 220), RGB(250, 195, 160) }, // Tag: 桃
 				{ RGB(220, 250, 235), RGB(155, 220, 190) }, // BPM: ミント
@@ -1624,10 +1631,11 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 				{ RGB(255, 250, 220), RGB(240, 215, 150) }, // SS: 金
 				{ RGB(255, 230, 240), RGB(245, 180, 205) }, // Alarm: 薔薇
 				{ RGB(225, 250, 250), RGB(160, 215, 220) }, // Remote: 青緑
+				{ RGB(245, 235, 255), RGB(190, 160, 230) }, // VST: 藤
 				{ RGB(235, 245, 255), RGB(150, 190, 230) }, // Maze: 青
 				{ RGB(255, 230, 220), RGB(245, 150, 120) }, // Race: 珊瑚
 			};
-			for (int bi = 0; bi < 10; ++bi) {
+			for (int bi = 0; bi < 11; ++bi) {
 				if (!bots[bi]->GetSafeHwnd()) continue;
 				bots[bi]->SetGradation(botGrad[bi][0], botGrad[bi][1], 0, TRUE);
 			}
@@ -2045,6 +2053,7 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 	if (m_botSsViz.GetSafeHwnd()) m_botSsViz.SetFont(&m_fontChk, TRUE);
 	if (m_botAlarm.GetSafeHwnd()) m_botAlarm.SetFont(&m_fontChk, TRUE);
 	if (m_botRemote.GetSafeHwnd()) m_botRemote.SetFont(&m_fontChk, TRUE);
+	if (m_botVst.GetSafeHwnd()) m_botVst.SetFont(&m_fontChk, TRUE);
 	if (m_botMaze.GetSafeHwnd()) m_botMaze.SetFont(&m_fontChk, TRUE);
 	if (m_botRace.GetSafeHwnd()) m_botRace.SetFont(&m_fontChk, TRUE);
 	if (m_abA.GetSafeHwnd()) m_abA.SetFont(&m_fontChk, TRUE);
@@ -2298,6 +2307,8 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 		addTip(m_botAlarm, LL14(L"アラームのON/OFFを切り替えます。", L"Toggle alarm on/off.", L"Activer/desactiver l'alarme.", L"Attiva/disattiva sveglia.", L"Activar/desactivar alarma.", L"알람 ON/OFF.", L"开关闹钟。", L"تشغيل/إيقاف المنبه.", L"Вкл/выкл будильник.", L"Wecker ein/aus.", L"Ligar/desligar alarme.", L"Wekker aan/uit.", L"Wlacz/wylacz budzik.", L"Alarm ac/kapa."));
 	if (m_botRemote.GetSafeHwnd())
 		addTip(m_botRemote, LL14(L"ローカルリモート (HTTP) を切り替えます。", L"Toggle local remote (HTTP).", L"Basculer la telecommande locale (HTTP).", L"Attiva/disattiva remote locale (HTTP).", L"Alternar remoto local (HTTP).", L"로컬 리모트(HTTP) 전환.", L"切换本地遥控 (HTTP)。", L"تبديل التحكم المحلي (HTTP).", L"Переключить локальный пульт (HTTP).", L"Lokalfernbedienung (HTTP) umschalten.", L"Alternar remoto local (HTTP).", L"Lokale bediening (HTTP) wisselen.", L"Przelacz pilot lokalny (HTTP).", L"Yerel uzaktan (HTTP) ac/kapa."));
+	if (m_botVst.GetSafeHwnd())
+		addTip(m_botVst, LL14(L"VSTホスト（配線・MIDI入力）", L"VST host (wiring / MIDI in)", L"Hote VST (cablage / entree MIDI)", L"Host VST (cablaggio / MIDI in)", L"Host VST (cableado / MIDI in)", L"VST 호스트(배선/MIDI 입력)", L"VST主机（接线/MIDI输入）", L"مضيف VST (توصيل/إدخال MIDI)", L"Хост VST (коммутация/MIDI in)", L"VST-Host (Verdrahtung/MIDI-In)", L"Host VST (cabos/MIDI in)", L"VST-host (bedrading/MIDI in)", L"Host VST (okablowanie/MIDI in)", L"VST host (kablolama/MIDI giris)"));
 	if (m_botMaze.GetSafeHwnd())
 		addTip(m_botMaze, LL14(L"Soft3D迷路で遊びます。", L"Play Soft3D maze.", L"Jouer au labyrinthe Soft3D.", L"Gioca al labirinto Soft3D.", L"Jugar al laberinto Soft3D.", L"Soft3D 미로로 놀기.", L"玩 Soft3D 迷宫。", L"اللعب بمتاهة Soft3D.", L"Играть в лабиринт Soft3D.", L"Im Soft3D-Labyrinth spielen.", L"Jogar o labirinto Soft3D.", L"Speel Soft3D-doolhof.", L"Graj w labirynt Soft3D.", L"Soft3D labirentte oyna."));
 	if (m_botRace.GetSafeHwnd())
@@ -2686,17 +2697,12 @@ static void MoveCtl(CWnd* p, int x, int y, int w, int h)
 		if (next)
 			s_mpLayoutDefer = next;
 		else {
-			// Defer 失敗時は残りを個別 NOREDRAW へフォールバック
 			s_mpLayoutDefer = nullptr;
 			p->SetWindowPos(nullptr, x, y, w, h, flags);
 		}
 		return;
 	}
-	if (s_mpLayoutLive) {
-		p->SetWindowPos(nullptr, x, y, w, h, flags);
-		return;
-	}
-	p->MoveWindow(x, y, w, h);
+	p->SetWindowPos(nullptr, x, y, w, h, flags);
 }
 
 // m_plsel: CBS_DROPDOWNLIST の MoveWindow 高さはドロップダウン領域。毎回 tbH を渡すと潰れる。
@@ -2828,9 +2834,7 @@ void CMediaPlayerDlg::DoLayout()
 	if (W < 32 || H < 32) return;   // 初期化途中の極小クライアントでは触らない
 	const bool liveResize = m_inSizeMove;
 	s_mpLayoutLive = liveResize ? TRUE : FALSE;
-	s_mpLayoutDefer = nullptr;
-	if (liveResize)
-		s_mpLayoutDefer = ::BeginDeferWindowPos(96);
+	s_mpLayoutDefer = ::BeginDeferWindowPos(160);
 	const float s = hD2;
 	const int M = (int)(10 * s);             // マージン
 	const int topM = M + CCC_GetCustomCaptionHeight(m_hWnd);
@@ -3751,27 +3755,27 @@ void CMediaPlayerDlg::DoLayout()
 
 	if (!savedata.mpBotToolsInited) {
 		savedata.mpBotToolsInited = 1;
-		savedata.mpBotToolsFlags = 0x30F; // DJ|Tag|BPM|Sleep|Maze|Race
+		savedata.mpBotToolsFlags = 0x70F; // DJ|Tag|BPM|Sleep|VST|Maze|Race
 	}
 	const int botFl = savedata.mpBotToolsFlags;
-	CCustomStandardButton* botBtn[10] = {
-		&m_botDj, &m_botTag, &m_botBpm, &m_botSleep, &m_botMirror, &m_botSsViz, &m_botAlarm, &m_botRemote, &m_botMaze, &m_botRace
+	CCustomStandardButton* botBtn[11] = {
+		&m_botDj, &m_botTag, &m_botBpm, &m_botSleep, &m_botMirror, &m_botSsViz, &m_botAlarm, &m_botRemote, &m_botVst, &m_botMaze, &m_botRace
 	};
-	const int botBit[10] = { 1, 2, 4, 8, 16, 32, 64, 128, 256, 512 };
-	const int wFull[10] = {
+	const int botBit[11] = { 1, 2, 4, 8, 16, 32, 64, 128, 1024, 256, 512 };
+	const int wFull[11] = {
 		(int)(56 * s), (int)(52 * s), (int)(48 * s), (int)(56 * s),
-		(int)(60 * s), (int)(40 * s), (int)(56 * s), (int)(64 * s), (int)(52 * s), (int)(52 * s)
+		(int)(60 * s), (int)(40 * s), (int)(56 * s), (int)(64 * s), (int)(48 * s), (int)(52 * s), (int)(52 * s)
 	};
-	const int wMid[10] = {
+	const int wMid[11] = {
 		(int)(36 * s), (int)(36 * s), (int)(36 * s), (int)(40 * s),
-		(int)(40 * s), (int)(32 * s), (int)(40 * s), (int)(44 * s), (int)(36 * s), (int)(36 * s)
+		(int)(40 * s), (int)(32 * s), (int)(40 * s), (int)(44 * s), (int)(36 * s), (int)(36 * s), (int)(36 * s)
 	};
-	const int wShort[10] = {
+	const int wShort[11] = {
 		(int)(28 * s), (int)(28 * s), (int)(28 * s), (int)(28 * s),
-		(int)(28 * s), (int)(28 * s), (int)(28 * s), (int)(28 * s), (int)(28 * s), (int)(28 * s)
+		(int)(28 * s), (int)(28 * s), (int)(28 * s), (int)(28 * s), (int)(28 * s), (int)(28 * s), (int)(28 * s)
 	};
 	int needFull = 0, needMid = 0, needShort = 0;
-	for (int i = 0; i < 10; ++i) {
+	for (int i = 0; i < 11; ++i) {
 		if (!(botFl & botBit[i])) continue;
 		needFull += wFull[i] + gapBot;
 		needMid += wMid[i] + gapBot;
@@ -3805,6 +3809,7 @@ void CMediaPlayerDlg::DoLayout()
 			if (m_botSsViz.GetSafeHwnd()) m_botSsViz.SetWindowText(L"SS");
 			if (m_botAlarm.GetSafeHwnd()) m_botAlarm.SetWindowText(L"Alm");
 			if (m_botRemote.GetSafeHwnd()) m_botRemote.SetWindowText(L"Rem");
+			if (m_botVst.GetSafeHwnd()) m_botVst.SetWindowText(L"VST");
 			if (m_botMaze.GetSafeHwnd()) m_botMaze.SetWindowText(L"Mz");
 			if (m_botRace.GetSafeHwnd()) m_botRace.SetWindowText(L"Rc");
 		}
@@ -3826,6 +3831,8 @@ void CMediaPlayerDlg::DoLayout()
 				m_botAlarm.SetWindowText(LL14(L"アラーム", L"Alarm", L"Alarme", L"Sveglia", L"Alarma", L"알람", L"闹钟", L"منبه", L"Будильник", L"Wecker", L"Alarme", L"Wekker", L"Budzik", L"Alarm"));
 			if (m_botRemote.GetSafeHwnd())
 				m_botRemote.SetWindowText(LL14(L"リモート", L"Remote", L"Remote", L"Remote", L"Remoto", L"리모트", L"遥控", L"تحكم", L"Пульт", L"Remote", L"Remoto", L"Remote", L"Pilot", L"Uzaktan"));
+			if (m_botVst.GetSafeHwnd())
+				m_botVst.SetWindowText(LL14(L"VST", L"VST", L"VST", L"VST", L"VST", L"VST", L"VST", L"VST", L"VST", L"VST", L"VST", L"VST", L"VST", L"VST"));
 			if (m_botMaze.GetSafeHwnd())
 				m_botMaze.SetWindowText(LL14(L"迷路", L"Maze", L"Labyrinthe", L"Labirinto", L"Laberinto", L"미로", L"迷宫", L"متاهة", L"Лабиринт", L"Labyrinth", L"Labirinto", L"Doolhof", L"Labirynt", L"Labirent"));
 			if (m_botRace.GetSafeHwnd())
@@ -3850,6 +3857,8 @@ void CMediaPlayerDlg::DoLayout()
 				m_botAlarm.SetWindowText(LL14(L"アラーム", L"Alarm", L"Alarme", L"Sveglia", L"Alarma", L"알람", L"闹钟", L"منبه", L"Будильник", L"Wecker", L"Alarme", L"Wekker", L"Budzik", L"Alarm"));
 			if (m_botRemote.GetSafeHwnd())
 				m_botRemote.SetWindowText(LL14(L"リモート", L"Remote", L"Remote", L"Remote", L"Remoto", L"리모트", L"遥控", L"تحكم", L"Пульт", L"Remote", L"Remoto", L"Remote", L"Pilot", L"Uzaktan"));
+			if (m_botVst.GetSafeHwnd())
+				m_botVst.SetWindowText(LL14(L"VST", L"VST", L"VST", L"VST", L"VST", L"VST", L"VST", L"VST", L"VST", L"VST", L"VST", L"VST", L"VST", L"VST"));
 			if (m_botMaze.GetSafeHwnd())
 				m_botMaze.SetWindowText(LL14(L"迷路", L"Maze", L"Labyrinthe", L"Labirinto", L"Laberinto", L"미로", L"迷宫", L"متاهة", L"Лабиринт", L"Labyrinth", L"Labirinto", L"Doolhof", L"Labirynt", L"Labirent"));
 			if (m_botRace.GetSafeHwnd())
@@ -3862,7 +3871,7 @@ void CMediaPlayerDlg::DoLayout()
 	MoveCtl(&m_resetdata, bx, botY, rsW, swH); bx += rsW + gapLead;
 	MoveCtl(&m_record, bx, botY, recW, swH); bx += recW + gapLead;
 	MoveCtl(&m_capture, bx, botY, capW, swH); bx += capW + gapLead;
-	for (int i = 0; i < 10; ++i) {
+	for (int i = 0; i < 11; ++i) {
 		CCustomStandardButton* b = botBtn[i];
 		if (!b->GetSafeHwnd()) continue;
 		if (!(botFl & botBit[i])) {
@@ -3886,14 +3895,10 @@ void CMediaPlayerDlg::DoLayout()
 	}
 	s_mpLayoutLive = FALSE;
 
-	if (liveResize) {
-		// 座標は追従、消去なし・非同期。子は NOREDRAW 移動なので ALLCHILDREN で無効化だけ。
-		RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_NOERASE | RDW_ALLCHILDREN);
-	}
-	else {
-		CCC_GroupBoxesBack(GetSafeHwnd());   // 枠は最背面(子コントロールを覆わない)
-		Invalidate();
-	}
+	if (!liveResize)
+		CCC_GroupBoxesBack(GetSafeHwnd());
+	// 最大化も NOREDRAW 移動。UPDATENOW するとボタンが1個ずつ描画される。
+	RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_NOERASE | RDW_ALLCHILDREN);
 }
 
 void CMediaPlayerDlg::FitPlaylistLastColumn(int dragCol, int dragWidth)
@@ -4781,7 +4786,7 @@ void CMediaPlayerDlg::MirrorSeekVol()
 		{
 			int xms = 0;
 			if (savedata.mpXfadePreview)
-				xms = (savedata.wav_export_xfade_sec > 0 ? savedata.wav_export_xfade_sec : 5) * 1000;
+				xms = (int)((savedata.wav_export_xfade_sec > 0.f ? savedata.wav_export_xfade_sec : 5.f) * 1000.f + 0.5f);
 			m_seek.SetXfadePreviewMs(xms);
 		}
 		KickWaveOverview();
@@ -5168,10 +5173,8 @@ void CMediaPlayerDlg::OnTimer(UINT nIDEvent)
 				m_list.SetItemCount(pl->playcnt);   // 可視状態で範囲を再確定
 				RestoreListScrollAnchor(anchor);    // SetItemCount で先頭へ戻るのを防ぐ
 			}
-			m_list.RedrawWindow(NULL, NULL,
-				RDW_INVALIDATE | RDW_FRAME | RDW_UPDATENOW | RDW_ERASE);
+			m_list.RedrawWindow(NULL, NULL, RDW_FRAME | RDW_NOERASE);
 		}
-		RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_FRAME | RDW_ALLCHILDREN);
 	}
 	else if (nIDEvent == kTimerListHdrDrag) {
 		TickListHdrDragFit();
@@ -5262,11 +5265,8 @@ void CMediaPlayerDlg::OnSize(UINT nType, int cx, int cy)
 			}
 		}
 		if (!m_inSizeMove) {
-			// ドラッグ中は DoLayout の NOERASE 無効化のみ。ERASE|UPDATENOW は確定時に。
-			RedrawWindow(NULL, NULL,
-				RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_UPDATENOW);
 			if (::IsWindow(m_list.GetSafeHwnd()))
-				m_list.RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_FRAME | RDW_UPDATENOW);
+				m_list.RedrawWindow(NULL, NULL, RDW_FRAME | RDW_NOERASE);
 		}
 	}
 	}
@@ -5312,11 +5312,11 @@ void CMediaPlayerDlg::OnExitSizeMove()
 		}
 		CCC_NeighborCascadeEnd();
 		m_cascadePrevValid = false;
-		// 確定時に一度だけ同期再描画して、ドラッグ中の簡易描画の崩れを整える。
+		// 確定時に一度だけ無効化。UPDATENOW はボタンが逐次描画されるので使わない。
 		RedrawWindow(NULL, NULL,
-			RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_UPDATENOW);
+			RDW_INVALIDATE | RDW_NOERASE | RDW_ALLCHILDREN);
 		if (::IsWindow(m_list.GetSafeHwnd()))
-			m_list.RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_FRAME | RDW_UPDATENOW);
+			m_list.RedrawWindow(NULL, NULL, RDW_FRAME | RDW_NOERASE);
 	}
 	Default();
 }
@@ -7224,13 +7224,13 @@ BOOL CMediaPlayerDlg::OnCommand(WPARAM wParam, LPARAM lParam)
 		savedata.mpTransPreset = (int)(cmd - ID_MP_TRANS_PRE_0);
 		// プリセット: EQ ハイパス気味 / ローカット / クロスフェード秒
 		if (savedata.mpTransPreset == 0) {
-			savedata.wav_export_xfade_sec = 4;
+			savedata.wav_export_xfade_sec = 4.f;
 			savedata.eq[0] = 70; savedata.eq[1] = 80; // 低域下げスイープ開始相当
 		} else if (savedata.mpTransPreset == 1) {
-			savedata.wav_export_xfade_sec = 8;
+			savedata.wav_export_xfade_sec = 8.f;
 			savedata.eq[18] = 60; // フィルタ寄り
 		} else {
-			savedata.wav_export_xfade_sec = 2;
+			savedata.wav_export_xfade_sec = 2.f;
 		}
 		MpPersistSavedataQuick();
 		MessageBox(LL14(L"次曲へトランジション設定を適用しました（クロスフェード秒・EQヒント）。",
@@ -7496,6 +7496,7 @@ void CMediaPlayerDlg::OnBotVisSsViz() { ToggleBotVisFlag(32); }
 void CMediaPlayerDlg::OnBotVisAlarm() { ToggleBotVisFlag(64); }
 void CMediaPlayerDlg::OnBotVisRemote() { ToggleBotVisFlag(128); }
 void CMediaPlayerDlg::OnBotVisMaze() { ToggleBotVisFlag(256); }
+void CMediaPlayerDlg::OnBotVisVst() { ToggleBotVisFlag(1024); }
 void CMediaPlayerDlg::OnBotVisRace() { ToggleBotVisFlag(512); }
 
 void CMediaPlayerDlg::OnSaveParam()
@@ -7638,6 +7639,10 @@ void CMediaPlayerDlg::OnRclickList(NMHDR* pNMHDR, LRESULT* pResult)
 	}
 	if (cmd == PL_CTX_TAG_EDIT) {
 		OpenTagEditForSelection();
+		return;
+	}
+	if (cmd == PL_CTX_TAG_BATCH) {
+		OpenTagBatchForSelection();
 		return;
 	}
 	if (cmd == PL_CTX_MB_AUTOTAG) { OnMbAutotag(); return; }
@@ -8812,7 +8817,8 @@ void CMediaPlayerDlg::EnsureLibControls()
 	}
 	// FinishBlur/CaptionApply より後に作られる子は OpaqueFixer が乗らない。
 	// 再適用しないと Win11 アクリル上でツリー/アルバム/履歴が透ける。
-	if (createdLibChild)
+	// 未表示時は初回 OnShowWindow の ApplyGlass が載せるので、表示後の追加分だけ再適用。
+	if (createdLibChild && IsWindowVisible())
 		PostMessage(CCC_MSG_REAPPLY_OPAQUE_FIXERS, 0, 0);
 }
 
@@ -11015,6 +11021,7 @@ void CMediaPlayerDlg::ShowToolsExtrasMenu(CPoint screenPt)
 				botSub->AddCheck(ID_MP_BOTVIS_SSVIZ, LL14(L"SS ビジュアライザ", L"SS visualizer", L"Visualiseur SS", L"Visualizzatore SS", L"Visualizador SS", L"SS 비주얼", L"SS 可视化", L"عارض SS", L"SS-визуализатор", L"SS-Visualizer", L"Visual SS", L"SS-visualizer", L"Wizual SS", L"SS gorsel"), (bf & 32) != 0);
 				botSub->AddCheck(ID_MP_BOTVIS_ALARM, LL14(L"アラーム", L"Alarm", L"Alarme", L"Sveglia", L"Alarma", L"알람", L"闹钟", L"منبه", L"Будильник", L"Wecker", L"Alarme", L"Wekker", L"Budzik", L"Alarm"), (bf & 64) != 0);
 				botSub->AddCheck(ID_MP_BOTVIS_REMOTE, LL14(L"リモート", L"Remote", L"Remote", L"Remote", L"Remoto", L"리모트", L"遥控", L"تحكم", L"Пульт", L"Remote", L"Remoto", L"Remote", L"Pilot", L"Uzaktan"), (bf & 128) != 0);
+				botSub->AddCheck(ID_MP_BOTVIS_VST, LL14(L"VSTホスト", L"VST Host", L"Hote VST", L"Host VST", L"Host VST", L"VST 호스트", L"VST主机", L"مضيف VST", L"Хост VST", L"VST-Host", L"Host VST", L"VST-host", L"Host VST", L"VST host"), (bf & 1024) != 0);
 				botSub->AddCheck(ID_MP_BOTVIS_MAZE, LL14(L"迷路", L"Maze", L"Labyrinthe", L"Labirinto", L"Laberinto", L"미로", L"迷宫", L"متاهة", L"Лабиринт", L"Labyrinth", L"Labirinto", L"Doolhof", L"Labirynt", L"Labirent"), (bf & 256) != 0);
 				botSub->AddCheck(ID_MP_BOTVIS_RACE, LL14(L"レース", L"Race", L"Course", L"Gara", L"Carrera", L"레이스", L"竞速", L"سباق", L"Гонка", L"Rennen", L"Corrida", L"Race", L"Wyścig", L"Yarış"), (bf & 512) != 0);
 			}
@@ -11115,6 +11122,20 @@ void CMediaPlayerDlg::ShowToolsExtrasMenu(CPoint screenPt)
 		sub->AddCommand(ID_MP_TAG_EDIT,
 			LL14(L"タグ編集 (F2)", L"Edit tags (F2)", L"Editer tags (F2)", L"Modifica tag (F2)", L"Editar etiquetas (F2)", L"태그 편집 (F2)", L"编辑标签 (F2)", L"تحرير الوسوم (F2)", L"Правка тегов (F2)", L"Tags bearbeiten (F2)", L"Editar tags (F2)", L"Tags bewerken (F2)", L"Edytuj tagi (F2)", L"Etiket duzenle (F2)"),
 			LL14(L"選択曲のタグを編集します（F2）", L"Edit tags for the selection (F2)", L"Editer les tags de la selection (F2)", L"Modifica i tag della selezione (F2)", L"Editar etiquetas de la seleccion (F2)", L"선택 곡의 태그를 편집(F2)", L"编辑所选曲目的标签（F2）", L"تحرير وسوم التحديد (F2)", L"Редактировать теги выбора (F2)", L"Tags der Auswahl bearbeiten (F2)", L"Editar tags da selecao (F2)", L"Tags van de selectie bewerken (F2)", L"Edytuj tagi wyboru (F2)", L"Secimin etiketlerini duzenle (F2)"));
+		if (::IsWindow(m_list.GetSafeHwnd()) && m_list.GetSelectedCount() >= 2) {
+			sub->AddCommand(ID_MP_TAG_BATCH,
+				LL14(L"まとめて編集…", L"Batch edit...", L"Edition groupée...", L"Modifica in blocco...",
+					L"Edición por lote...", L"일괄 편집...", L"批量编辑…", L"تحرير دفعي...",
+					L"Пакетное правки...", L"Sammelbearbeitung...", L"Edicao em lote...", L"Batch bewerken...",
+					L"Edycja zbiorcza...", L"Toplu duzenleme..."),
+				LL14(L"選択曲のファイル名・アーティスト・アルバムを連動テキストで一括書き換え", L"Rewrite filename, artist, and album for the selection as linked text",
+					L"Reecrire nom, artiste et album de la selection en texte lie", L"Riscrivi nome, artista e album della selezione come testo collegato",
+					L"Reescribir nombre, artista y album de la seleccion como texto enlazado", L"선택 곡의 파일명·아티스트·앨범을 연동 텍스트로 한꺼번에 고칩니다",
+					L"用联动文本一次改写所选的文件名、艺术家、专辑", L"إعادة كتابة الاسم والفنان والألبوم كنص مرتبط",
+					L"Правка имени, исполнителя и альбома выбора связанным текстом", L"Dateiname, Artist und Album der Auswahl als gekoppelten Text aendern",
+					L"Reescrever nome, artista e album da selecao como texto ligado", L"Bestandsnaam, artiest en album van de selectie als gekoppelde tekst",
+					L"Zmien nazwe, artyste i album zaznaczenia jako powiazany tekst", L"Secimin ad, sanatci ve albumunu bagli metinle toplu duzenle"));
+		}
 		sub->AddCommand(ID_MP_MB_AUTOTAG,
 			LL14(L"MusicBrainz 自動タグ…", L"MusicBrainz auto-tag…", L"Auto-tag MusicBrainz…", L"Auto-tag MusicBrainz…", L"Auto-etiqueta MusicBrainz…", L"MusicBrainz 자동 태그…", L"MusicBrainz 自动标签…", L"وسوم MusicBrainz…", L"Авто-тег MusicBrainz…", L"MusicBrainz Auto-Tag…", L"Auto-tag MusicBrainz…", L"MusicBrainz auto-tag…", L"Auto-tag MusicBrainz…", L"MusicBrainz otomatik etiket…"),
 			LL14(L"MusicBrainz からタグ情報を自動取得します", L"Auto-fill tags from MusicBrainz", L"Remplir auto les tags via MusicBrainz", L"Compila auto i tag da MusicBrainz", L"Rellenar auto etiquetas desde MusicBrainz", L"MusicBrainz에서 태그 자동 가져오기", L"从 MusicBrainz 自动填充标签", L"ملء الوسوم تلقائياً من MusicBrainz", L"Автозаполнить теги из MusicBrainz", L"Tags automatisch von MusicBrainz holen", L"Preencher tags automaticamente pelo MusicBrainz", L"Tags automatisch van MusicBrainz invullen", L"Uzupelnij tagi automatycznie z MusicBrainz", L"MusicBrainz'den etiketleri otomatik doldur"));
@@ -11723,12 +11744,103 @@ void CMediaPlayerDlg::ApplySleepTimer(int minutes)
 
 void CMediaPlayerDlg::OpenTagEditForSelection()
 {
-	const int pc = GetSelectedPcIndex();
-	if (pc < 0 || !pl || !pl->pc) return;
+	if (!pl || !pl->pc) return;
+	int cap = 0;
+	if (::IsWindow(m_list.GetSafeHwnd()))
+		cap = m_list.GetSelectedCount();
+	int n = 0;
+	int* idx = NULL;
+	if (cap > 0) {
+		idx = (int*)malloc(sizeof(int) * (size_t)cap);
+		if (idx) {
+			for (int d = -1; (d = m_list.GetNextItem(d, LVNI_SELECTED)) != -1; ) {
+				const int pc = MpDispToPc(this, d);
+				if (pc >= 0 && pc < pl->playcnt)
+					idx[n++] = pc;
+			}
+		}
+	}
 	CTagEditDlg dlg(this);
-	dlg.pc = pl->pc[pc];
-	dlg.multiFile = false;
+	if (n <= 0) {
+		if (idx) { free(idx); idx = NULL; }
+		const int pc = GetSelectedPcIndex();
+		if (pc < 0) return;
+		dlg.pc = pl->pc[pc];
+		dlg.multiFile = false;
+		if (dlg.DoModal() != IDOK) return;
+		if (pc >= 0 && pc < pl->playcnt) {
+			_tcscpy(pl->pc[pc].name, dlg.pc.name);
+			_tcscpy(pl->pc[pc].art, dlg.pc.art);
+			_tcscpy(pl->pc[pc].alb, dlg.pc.alb);
+		}
+		pl->Save();
+		RefreshList(TRUE);
+		return;
+	}
+	dlg.pc = pl->pc[idx[0]];
+	if (n == 1) {
+		dlg.multiFile = false;
+		const int pc0 = idx[0];
+		free(idx); idx = NULL;
+		if (dlg.DoModal() != IDOK) return;
+		if (pc0 >= 0 && pc0 < pl->playcnt) {
+			_tcscpy(pl->pc[pc0].name, dlg.pc.name);
+			_tcscpy(pl->pc[pc0].art, dlg.pc.art);
+			_tcscpy(pl->pc[pc0].alb, dlg.pc.alb);
+		}
+		pl->Save();
+		RefreshList(TRUE);
+		return;
+	}
+	dlg.multiFile = true;
+	dlg.pcs.reserve((size_t)n);
+	for (int i = 0; i < n; ++i)
+		dlg.pcs.push_back(pl->pc[idx[i]]);
+	dlg.m_selN = n;
+	dlg.m_selIdx = idx;
+	idx = NULL;
+	const INT_PTR ret = dlg.DoModal();
+	if (ret == IDOK && dlg.m_selIdx) {
+		const int nn = (dlg.m_selN < (int)dlg.pcs.size()) ? dlg.m_selN : (int)dlg.pcs.size();
+		for (int i = 0; i < nn; ++i) {
+			const int pc = dlg.m_selIdx[i];
+			if (pc < 0 || pc >= pl->playcnt) continue;
+			_tcscpy(pl->pc[pc].name, dlg.pcs[(size_t)i].name);
+			_tcscpy(pl->pc[pc].art, dlg.pcs[(size_t)i].art);
+			_tcscpy(pl->pc[pc].alb, dlg.pcs[(size_t)i].alb);
+		}
+		pl->Save();
+		RefreshList(TRUE);
+	}
+}
+
+void CMediaPlayerDlg::OpenTagBatchForSelection()
+{
+	if (!pl || !pl->pc) return;
+	int cap = 0;
+	if (::IsWindow(m_list.GetSafeHwnd()))
+		cap = m_list.GetSelectedCount();
+	if (cap < 2)
+		return;
+	int* idx = (int*)malloc(sizeof(int) * (size_t)cap);
+	if (!idx)
+		return;
+	int n = 0;
+	for (int d = -1; (d = m_list.GetNextItem(d, LVNI_SELECTED)) != -1; ) {
+		const int pc = MpDispToPc(this, d);
+		if (pc >= 0 && pc < pl->playcnt)
+			idx[n++] = pc;
+	}
+	if (n < 2) {
+		free(idx);
+		return;
+	}
+	CTagBatchEditDlg dlg(this);
+	dlg.m_idx = idx;
+	dlg.m_n = n;
+	dlg.m_te = NULL;
 	dlg.DoModal();
+	free(idx);
 }
 
 void CMediaPlayerDlg::CycleRatingForDisp(int disp)
@@ -12099,6 +12211,7 @@ void CMediaPlayerDlg::UpdateDeskLrcBtnChrome()
 }
 
 void CMediaPlayerDlg::OnTagEdit() { OpenTagEditForSelection(); }
+void CMediaPlayerDlg::OnTagBatch() { OpenTagBatchForSelection(); }
 
 void CMediaPlayerDlg::OnJacketReloadAlt()
 {
@@ -12848,7 +12961,7 @@ void CMediaPlayerDlg::OnXfadePreviewToggle()
 	if (m_seek.GetSafeHwnd()) {
 		int xms = 0;
 		if (savedata.mpXfadePreview)
-			xms = (savedata.wav_export_xfade_sec > 0 ? savedata.wav_export_xfade_sec : 5) * 1000;
+			xms = (int)((savedata.wav_export_xfade_sec > 0.f ? savedata.wav_export_xfade_sec : 5.f) * 1000.f + 0.5f);
 		m_seek.SetXfadePreviewMs(xms);
 		m_seek.Invalidate(FALSE);
 	}
@@ -12909,6 +13022,7 @@ void CMediaPlayerDlg::OnMpVoiceChanger() { OpenVoiceChangerModeless(this); }
 void CMediaPlayerDlg::OnMpTunerPractice() { OpenTunerPracticeModeless(this); }
 void CMediaPlayerDlg::OnMpPhotoFrame() { OpenPhotoFrameModeless(this); }
 void CMediaPlayerDlg::OnMpSoft3DMaze() { OpenSoft3DMazeModeless(this); }
+void CMediaPlayerDlg::OnMpVstHost() { OpenVstHostModeless(this); }
 void CMediaPlayerDlg::OnMpSoft3DRace() { OpenSoft3DRaceModeless(this); }
 void CMediaPlayerDlg::OnMpRemote()
 {
@@ -13210,10 +13324,10 @@ void CMpCheatSheetDlg::OnPaint()
 		L"· A / B / Borrar …… bucle de sección. Fade abajo", L"· A / B / 해제 …… 구간 루프. 페이드는 하단", L"· A / B / 清除 …… 区间循环。淡出在底部", L"· A / B / مسح …… حلقة مقطع. التلاشي في الأسفل",
 		L"· A / B / Сброс …… петля участка. Затухание внизу", L"· A / B / Aus …… Abschnittsloop. Fade unten", L"· A / B / Limpar …… loop de seção. Fade embaixo", L"· A / B / Uit …… sectielus. Fade onderaan",
 		L"· A / B / Wyczyść …… pętla odcinka. Fade na dole", L"· A / B / Sil …… bölüm döngüsü. Fade altta")); yR += lh;
-	body(R, yR, LL14(L"・R …… 現在±フレーズ秒をA-B。1-8 …… キュージャンプ。F2 …… タグ編集", L"· R …… phrase A-B. 1-8 …… cue jump. F2 …… edit tags", L"· R …… phrase A-B. 1-8 …… cues. F2 …… tags", L"· R …… frase A-B. 1-8 …… cue. F2 …… tag",
-		L"· R …… frase A-B. 1-8 …… cues. F2 …… etiquetas", L"· R …… 프레이즈 A-B. 1-8 …… 큐. F2 …… 태그", L"· R …… 乐句A-B。1-8 …… 标记。F2 …… 标签", L"· R …… عبارة A-B. 1-8 …… إشارات. F2 …… وسوم",
-		L"· R …… фраза A-B. 1-8 …… метки. F2 …… теги", L"· R …… Phrase A-B. 1-8 …… Cues. F2 …… Tags", L"· R …… frase A-B. 1-8 …… cues. F2 …… tags", L"· R …… frase A-B. 1-8 …… cues. F2 …… tags",
-		L"· R …… fraza A-B. 1-8 …… cue. F2 …… tagi", L"· R …… cumle A-B. 1-8 …… cue. F2 …… etiket")); yR += lh;
+	body(R, yR, LL14(L"・R …… 現在±フレーズ秒をA-B。1-8 …… キュージャンプ。F2 …… タグ編集（複数選択はまとめて編集）", L"· R …… phrase A-B. 1-8 …… cue jump. F2 …… edit tags (multi-select: batch edit)", L"· R …… phrase A-B. 1-8 …… cues. F2 …… tags (multi: edition groupée)", L"· R …… frase A-B. 1-8 …… cue. F2 …… tag (multi: modifica in blocco)",
+		L"· R …… frase A-B. 1-8 …… cues. F2 …… etiquetas (multi: edición por lote)", L"· R …… 프레이즈 A-B. 1-8 …… 큐. F2 …… 태그 (다중: 일괄 편집)", L"· R …… 乐句A-B。1-8 …… 标记。F2 …… 标签（多选：批量编辑）", L"· R …… عبارة A-B. 1-8 …… إشارات. F2 …… وسوم (متعدد: تحرير دفعي)",
+		L"· R …… фраза A-B. 1-8 …… метки. F2 …… теги (несколько: пакетное правки)", L"· R …… Phrase A-B. 1-8 …… Cues. F2 …… Tags (Mehrfach: Sammelbearbeitung)", L"· R …… frase A-B. 1-8 …… cues. F2 …… tags (multi: edicao em lote)", L"· R …… frase A-B. 1-8 …… cues. F2 …… tags (multi: batch bewerken)",
+		L"· R …… fraza A-B. 1-8 …… cue. F2 …… tagi (wiele: edycja zbiorcza)", L"· R …… cumle A-B. 1-8 …… cue. F2 …… etiket (coklu: toplu duzenleme)")); yR += lh;
 	body(R, yR, LL14(L"・Sleep(ツール右クリック) …… 15/30/60分後にフェード停止", L"· Sleep (tools RMB) …… fade-stop after 15/30/60 min", L"· Sleep …… arret apres 15/30/60 min", L"· Sleep …… stop dopo 15/30/60 min",
 		L"· Sleep …… parar tras 15/30/60 min", L"· Sleep …… 15/30/60분 후 페이드 정지", L"· Sleep …… 15/30/60分钟后淡出停止", L"· Sleep …… توقف بعد 15/30/60 د",
 		L"· Sleep …… стоп через 15/30/60 мин", L"· Sleep …… Stop nach 15/30/60 Min", L"· Sleep …… parar apos 15/30/60 min", L"· Sleep …… stop na 15/30/60 min",

@@ -69,9 +69,9 @@ void ApplyPlaylistRowDisplay(const playlistdata0& row);
 
 struct WavExportOptions {
 	int fadeEnable;
-	int fadeSec;
+	float fadeSec;
 	int trimLeadEnable;
-	int trimKeepSec;
+	float trimKeepSec;
 	// タグ上書き(空欄は触らない)。copyTags=1 なら元ファイルからコピーしたうえで欠損のみ埋める
 	int copyTags;
 	int multiFile; // 1=タイトルは適用しない
@@ -79,7 +79,7 @@ struct WavExportOptions {
 	CString tagArtist;
 	CString tagAlbum;
 	CString coverImagePath; // jpg/png。指定時はジャケットをこれに差し替え
-	int kpiDurationSec; // KPI(mode==-3)用の書き出し秒数。0以下は既定(240=4分)
+	float kpiDurationSec; // KPI(mode==-3)用の書き出し秒数。0以下は既定(240=4分)
 	int sampleRate; // 0=ソースのまま。44100/48000/96000/192000 でリサンプル（明示8000..384000も可）
 	int forceChannels; // 0=ソース。クロスフェード追従用 1..8
 	int forceBits; // 0=ソース。クロスフェード追従用 16/24/32

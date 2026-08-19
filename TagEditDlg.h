@@ -17,6 +17,8 @@ public:
 	playlistdata0 pc;
 	std::vector<playlistdata0> pcs;
 	bool multiFile;
+	int m_selN;
+	int* m_selIdx;
 
 protected:
 	virtual void DoDataExchange(CDataExchange* pDX);
@@ -29,6 +31,7 @@ public:
 	afx_msg void OnBnClickedClose();
 	afx_msg void OnBnClickedCoverClear();
 	afx_msg void OnBnClickedHelp();
+	afx_msg void OnBnClickedBatch();
 	afx_msg void OnDropFiles(HDROP hDropInfo);
 	afx_msg void OnSize(UINT nType, int cx, int cy);
 	afx_msg void OnDestroy();
@@ -57,6 +60,7 @@ public:
 	CCustomStatic m_status;
 	CCustomStandardButton m_save;
 	CCustomStandardButton m_close;
+	CCustomStandardButton m_batch;
 	CCustomStandardButton m_help;
 	CString m_coverPath;
 	HBITMAP m_coverBmp;

@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include <windows.h>
 #include <string>
@@ -29,6 +29,18 @@ public:
 	bool RenderBytes(uint32_t sessionId, uint32_t bytesWanted, std::vector<uint8_t>& outPcm, bool& outEof);
 	bool Seek(uint32_t sessionId, uint64_t posSample, uint32_t flag, uint64_t& outNewPosSample);
 	bool Close(uint32_t sessionId);
+
+	bool ForeignListExts(uint32_t pluginKind, const std::wstring& dllPath, std::wstring& outSupportExts);
+	bool ForeignOpen(uint32_t pluginKind, const std::wstring& dllPath, const std::wstring& mediaPath, KPIHOST64_ForeignOpenReply& out);
+	bool ForeignRender(uint32_t sessionId, uint32_t bytesWanted, std::vector<uint8_t>& outPcm, bool& outEof);
+	bool ForeignSeek(uint32_t sessionId, uint64_t posSample);
+	bool ForeignClose(uint32_t sessionId);
+
+	bool VstOpen(const std::wstring& midPath, const std::wstring& vstDllPath,
+		const std::wstring& extraScanPath, KPIHOST64_ForeignOpenReply& out);
+	bool VstRender(uint32_t bytesWanted, std::vector<uint8_t>& outPcm, bool& outEof);
+	bool VstSeek(uint64_t posSample);
+	bool VstClose();
 
 private:
 	HANDLE m_hPipe = INVALID_HANDLE_VALUE;

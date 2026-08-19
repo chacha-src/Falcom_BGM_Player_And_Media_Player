@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include "CCustomControl.h"
 
 // ============================================================================
@@ -92,7 +92,9 @@ enum {
 	// Soft 立体アクセント強め（アクリルの下）
 	CCUSTOM_POPUP_ID_SOFTBOOST = 0x00E0012A,
 	CCUSTOM_POPUP_ID_KPI_DL = 0x00E0012B,
-	CCUSTOM_POPUP_ID_KPI_RELOAD = 0x00E0012C
+	CCUSTOM_POPUP_ID_KPI_RELOAD = 0x00E0012C,
+	CCUSTOM_POPUP_ID_MID_KPI = 0x00E0012D,
+	CCUSTOM_POPUP_ID_MID_VST = 0x00E0012E
 };
 
 enum {

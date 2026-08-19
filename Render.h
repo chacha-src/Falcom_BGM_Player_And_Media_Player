@@ -1,4 +1,4 @@
-﻿#include "afxdialogex.h"
+#include "afxdialogex.h"
 #include "afxwin.h"
 #include "afxcmn.h"
 #if !defined(AFX_RENDER_H__F5FB1AA1_8545_4B26_80A3_4E0FA43C0548__INCLUDED_)
@@ -149,6 +149,20 @@ public:
 	afx_msg void OnCbnSelchangeCombo4();
 	afx_msg void OnBnClickedCancel5();
 	CCustomCheckBox m_upscale;
+	CCustomCheckBox m_midPreferKpi;
+	CCustomCheckBox m_midPreferVst;
+	CCustomComboBox m_vstMultiCombo;
+	CCustomEdit m_vstExtraPath;
+	CCustomEdit m_vstMultiDll;
+	CCustomStandardButton m_vstExtraBrowse;
+	CCustomStandardButton m_vstMultiBrowse;
+	CCustomStandardButton m_vstScanNow;
+	afx_msg void OnMidPreferKpi();
+	afx_msg void OnMidPreferVst();
+	afx_msg void OnVstExtraBrowse();
+	afx_msg void OnVstMultiBrowse();
+	afx_msg void OnVstScanNow();
+	void FillVstMultiCombo();
 	CCustomComboBox m_speaker;
 	afx_msg void OnCbnSelchangeSpeaker();
 	afx_msg void OnBnClickedCheckUpscale();

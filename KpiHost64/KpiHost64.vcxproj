@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" ToolsVersion="14.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="uni_avx2_vs2026|x64">
@@ -39,7 +39,7 @@
       <WarningLevel>Level3</WarningLevel>
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>WIN32_LEAN_AND_MEAN;NOMINMAX;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>$(ProjectDir)..\;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)..\;$(ProjectDir)..\third_party\aimp;$(ProjectDir)..\third_party\vst3sdk;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpp17</LanguageStandard>
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
       <EnableEnhancedInstructionSet Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">AdvancedVectorExtensions2</EnableEnhancedInstructionSet>
@@ -51,6 +51,11 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="KpiHost64.cpp" />
+    <ClCompile Include="KpiHost64Foreign.cpp" />
+    <ClCompile Include="KpiHost64Vst.cpp" />
+    <ClCompile Include="kpihost_savedata.cpp" />
+    <ClCompile Include="VstMidiEngine_k64.cpp" />
+    <ClCompile Include="Vst3Host_k64.cpp" />
     <ClCompile Include="..\KpiV5ConfigStore.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

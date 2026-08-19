@@ -1,4 +1,4 @@
-﻿#include "stdafx.h"
+#include "stdafx.h"
 #include "CCustomPopupMenu.h"
 #include "GdiSoft2D.h"
 #include "GdiSoft3D.h"
@@ -997,6 +997,8 @@ BOOL CCustomPopupMenu::IsChromeCommand(UINT id) const
 		|| id == CCUSTOM_POPUP_ID_FONT_FACE
 		|| id == CCUSTOM_POPUP_ID_KPI_DL
 		|| id == CCUSTOM_POPUP_ID_KPI_RELOAD
+		|| id == CCUSTOM_POPUP_ID_MID_KPI
+		|| id == CCUSTOM_POPUP_ID_MID_VST
 		|| (id >= CCUSTOM_POPUP_ID_ANIM0
 			&& id < CCUSTOM_POPUP_ID_ANIM0 + (UINT)POPUP_ANIM_COUNT);
 }
@@ -1413,16 +1415,16 @@ void CCustomPopupMenu::EnsureChromePrefix()
 			L"Wzmocnij polprzezroczyste Soft boxy/glow", L"Soft yari saydam kutu/glow guclendir"));
 
 	CCustomPopupMenu* kpiSub = AddSubMenu(
-		LL14(L"KPIプラグイン", L"KPI plugins", L"Plugins KPI", L"Plugin KPI", L"Plugins KPI",
-			L"KPI 플러그인", L"KPI 插件", L"إضافات KPI", L"KPI-плагины", L"KPI-Plugins",
-			L"Plugins KPI", L"KPI-plugins", L"Wtyczki KPI", L"KPI eklentileri"),
-		LL14(L"KPIプラグインのダウンロード／再読込", L"Download or reload KPI plugins",
-			L"Telecharger ou relire les plugins KPI", L"Scarica o ricarica i plugin KPI",
-			L"Descargar o recargar plugins KPI", L"KPI 플러그인 다운로드/다시 읽기",
-			L"下载或重新加载 KPI 插件", L"تنزيل أو إعادة تحميل إضافات KPI",
-			L"Скачать или перечитать KPI-плагины", L"KPI-Plugins herunterladen/neu laden",
-			L"Descarregar ou recarregar plugins KPI", L"KPI-plugins downloaden/herladen",
-			L"Pobierz lub wczytaj ponownie wtyczki KPI", L"KPI eklentilerini indir/yeniden yukle"));
+		LL14(L"プラグイン", L"Plugins", L"Plugins", L"Plugin", L"Plugins",
+			L"플러그인", L"插件", L"الإضافات", L"Плагины", L"Plugins",
+			L"Plugins", L"Plug-ins", L"Wtyczki", L"Eklentiler"),
+		LL14(L"プラグインのダウンロード／再読込", L"Download or reload plugins",
+			L"Telecharger ou relire les plugins", L"Scarica o ricarica i plugin",
+			L"Descargar o recargar plugins", L"플러그인 다운로드/다시 읽기",
+			L"下载或重新加载插件", L"تنزيل أو إعادة تحميل الإضافات",
+			L"Скачать или перечитать плагины", L"Plugins herunterladen/neu laden",
+			L"Descarregar ou recarregar plugins", L"Plugins downloaden/herladen",
+			L"Pobierz lub wczytaj ponownie wtyczki", L"Eklentileri indir/yeniden yukle"));
 	if (kpiSub) {
 		kpiSub->SetSkipChrome(TRUE);
 		kpiSub->AddCommand(CCUSTOM_POPUP_ID_KPI_DL,
@@ -1446,11 +1448,11 @@ void CCustomPopupMenu::EnsureChromePrefix()
 				L"Pobierz oficjalny Plugins.zip i rozpakuj obok programu",
 				L"Resmi Plugins.zip indirip programla ayni klasore ac"));
 		kpiSub->AddCommand(CCUSTOM_POPUP_ID_KPI_RELOAD,
-			LL14(L"KPIプラグイン再読み込み", L"Reload KPI plugins", L"Relire plugins KPI",
-				L"Ricarica plugin KPI", L"Recargar plugins KPI", L"KPI 플러그인 다시 읽기",
-				L"重新加载 KPI 插件", L"إعادة تحميل إضافات KPI", L"Перечитать KPI-плагины", L"KPI-Plugins neu laden",
-				L"Recarregar plugins KPI", L"KPI-plugins herladen", L"Wczytaj ponownie wtyczki KPI",
-				L"KPI eklentilerini yeniden yukle"),
+			LL14(L"プラグイン再読み込み", L"Reload plugins", L"Relire plugins",
+				L"Ricarica plugin", L"Recargar plugins", L"플러그인 다시 읽기",
+				L"重新加载插件", L"إعادة تحميل الإضافات", L"Перечитать плагины", L"Plugins neu laden",
+				L"Recarregar plugins", L"Plugins herladen", L"Wczytaj ponownie wtyczki",
+				L"Eklentileri yeniden yukle"),
 			LL14(L"exe フォルダ配下の .kpi を最初から読み直します",
 				L"Re-scan .kpi files under the exe folder from scratch",
 				L"Relire les .kpi sous le dossier exe",
@@ -1465,6 +1467,23 @@ void CCustomPopupMenu::EnsureChromePrefix()
 				L".kpi onder de exe-map opnieuw inlezen",
 				L"Wczytaj ponownie pliki .kpi w folderze exe",
 				L"exe klasorundeki .kpi dosyalarini bastan oku"));
+		kpiSub->AddSeparator();
+		kpiSub->AddCheck(CCUSTOM_POPUP_ID_MID_KPI,
+			LL14(L"MIDI再生: KPI優先", L"MIDI play: Prefer KPI", L"MIDI: Preferer KPI", L"MIDI: Preferisci KPI", L"MIDI: Preferir KPI",
+				L"MIDI 재생: KPI 우선", L"MIDI播放: 优先KPI", L"MIDI: تفضيل KPI", L"MIDI: предпочитать KPI", L"MIDI: KPI bevorzugen",
+				L"MIDI: Preferir KPI", L"MIDI: KPI verkiezen", L"MIDI: Preferuj KPI", L"MIDI: KPI tercih"),
+			savedata.midPlayPrefer == 0,
+			LL14(L".mid を KPI プラグインで再生します", L"Play .mid via KPI plugins", L"Lire .mid via plugins KPI", L"Riproduci .mid via plugin KPI", L"Reproducir .mid vía plugins KPI",
+				L".mid를 KPI 플러그인으로 재생", L"通过 KPI 插件播放 .mid", L"تشغيل .mid عبر إضافات KPI", L"Воспроизводить .mid через KPI", L".mid über KPI-Plugins wiedergeben",
+				L"Tocar .mid via plugins KPI", L".mid via KPI-plugins afspelen", L"Odtwarzaj .mid przez wtyczki KPI", L".mid dosyalarini KPI eklentisiyle cal"));
+		kpiSub->AddCheck(CCUSTOM_POPUP_ID_MID_VST,
+			LL14(L"MIDI再生: VST優先", L"MIDI play: Prefer VST", L"MIDI: Preferer VST", L"MIDI: Preferisci VST", L"MIDI: Preferir VST",
+				L"MIDI 재생: VST 우선", L"MIDI播放: 优先VST", L"MIDI: تفضيل VST", L"MIDI: предпочитать VST", L"MIDI: VST bevorzugen",
+				L"MIDI: Preferir VST", L"MIDI: VST verkiezen", L"MIDI: Preferuj VST", L"MIDI: VST tercih"),
+			savedata.midPlayPrefer == 1,
+			LL14(L".mid / プロジェクトを自前 VST ホストで再生します", L"Play .mid/projects via built-in VST host", L"Lire .mid/projets via hote VST integre", L"Riproduci .mid/progetti via host VST", L"Reproducir .mid/proyectos vía host VST",
+				L".mid/프로젝트를 내장 VST 호스트로 재생", L"通过内置 VST 主机播放 .mid/项目", L"تشغيل .mid/المشاريع عبر مضيف VST", L"Воспроизводить .mid/проекты через встроенный VST-хост", L".mid/Projekte über eingebauten VST-Host",
+				L"Tocar .mid/projetos via host VST", L".mid/projecten via ingebouwde VST-host", L"Odtwarzaj .mid/projekty przez wbudowany host VST", L".mid/projeleri dahili VST host ile cal"));
 	}
 
 	ClampPopupAnimSave();
@@ -3399,6 +3418,18 @@ BOOL CCustomPopupMenu::HandleChromeClick(int idx)
 		CWnd* main = AfxGetMainWnd();
 		if (main && ::IsWindow(main->GetSafeHwnd()))
 			main->PostMessage(WM_APP_KPI_PLUGIN, wp, 0);
+		return TRUE;
+	}
+	if (it.id == CCUSTOM_POPUP_ID_MID_KPI || it.id == CCUSTOM_POPUP_ID_MID_VST) {
+		savedata.midPlayPrefer = (it.id == CCUSTOM_POPUP_ID_MID_VST) ? 1 : 0;
+		for (int i = 0; i < m_itemCount; ++i) {
+			CCustomPopupItem& x = m_items[i];
+			if (x.id == CCUSTOM_POPUP_ID_MID_KPI) x.checked = (savedata.midPlayPrefer == 0) ? TRUE : FALSE;
+			if (x.id == CCUSTOM_POPUP_ID_MID_VST) x.checked = (savedata.midPlayPrefer == 1) ? TRUE : FALSE;
+		}
+		StartCheckBounce(idx);
+		MpPersistSavedataQuick();
+		InvalidateBgOnly();
 		return TRUE;
 	}
 	if (it.id == CCUSTOM_POPUP_ID_FONT_BOLD) {

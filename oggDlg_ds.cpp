@@ -315,7 +315,7 @@ extern IMediaControl* pMediaControl;
 
 extern CString wavExportPath;
 extern int wavExportLoopCount;
-extern int g_wavExportMaxSec;
+extern float g_wavExportMaxSec;
 extern int wavbit_sample_Hz;
 extern CFile cc;
 extern int cc1;
@@ -705,8 +705,10 @@ UINT HandleNotifications(LPVOID)
 					sflg = FALSE;
 				}
 				else {
+					// fade1 直後は KPI/RB/リング排水中。fade2 だけで無音化すると末尾約1秒が消える。
+					// 終端バイト確定後のオーバーランだけ無音で埋める。
 					stageFade = (!InterlockedCompareExchange(&g_xfInProgress, 0, 0)
-						&& (fade2 || drainSilence)) ? true : false;
+						&& drainSilence) ? true : false;
 					stageBytes = writtenThisCycle;
 					if (stageBytes > 0) {
 						if ((int)s_dsStage.size() < stageBytes)
@@ -766,13 +768,15 @@ UINT HandleNotifications(LPVOID)
 			const __int64 writtenBefore = g_dsWrittenBytes;
 			g_dsWrittenBytes += (writtenThisCycle > 0) ? writtenThisCycle : 0;
 			// EOF（fade1=停止 / endflg=連続）を最初に検出したサイクルで実音声の終端を確定。
-			// readme があれば最終チャンク内の実バイト境界が分かるのでそれを使う。無ければこのサイクル末尾。
+			// readme があれば最終チャンク内の実バイト境界。無音のみなら「直前までの書込み」を終端にする。
+			// writtenBefore==0（まだ1バイトも書いていない／誤って fade1 が立った直後）では確定しない。
+			// 同サイクルの writtenThisCycle で確定すると初回バッファ直後に AUTO_STOPPED→解放レースになる。
 			if (g_endWrittenBytes == 0 && (fade1 || endflg)
 				&& !InterlockedCompareExchange(&g_xfInProgress, 0, 0)) {
 				if (readmeThisCycle > 0 && readmeThisCycle <= writtenThisCycle)
 					g_endWrittenBytes = writtenBefore + readmeThisCycle;
-				else
-					g_endWrittenBytes = g_dsWrittenBytes;
+				else if (writtenBefore > 0)
+					g_endWrittenBytes = writtenBefore;
 			}
 			oldw = WriteCursor;
 		}
@@ -913,8 +917,8 @@ void HandleNotifications_export()
 			if (outRate < 8000) outRate = wavbit_sample_Hz;
 			if (outCh < 1) outCh = 2;
 			const int bpfOut = outCh * (outBits / 8);
-			const __int64 maxOut = (__int64)g_wavExportMaxSec * (__int64)outRate;
-			const __int64 maxSrc = (__int64)g_wavExportMaxSec * (__int64)wavbit_sample_Hz;
+			const __int64 maxOut = (__int64)((double)g_wavExportMaxSec * (double)outRate + 0.5);
+			const __int64 maxSrc = (__int64)((double)g_wavExportMaxSec * (double)wavbit_sample_Hz + 0.5);
 			const __int64 writtenFrames = (bpfOut > 0) ? (wl / bpfOut) : 0;
 			if (writtenFrames >= maxOut || playb >= maxSrc) {
 				fade1 = 1;
@@ -960,8 +964,8 @@ void HandleNotifications_export()
 			if (outRate < 8000) outRate = wavbit_sample_Hz;
 			if (outCh < 1) outCh = 2;
 			const int bpfOut = outCh * (outBits / 8);
-			const __int64 maxOut = (__int64)g_wavExportMaxSec * (__int64)outRate;
-			const __int64 maxSrc = (__int64)g_wavExportMaxSec * (__int64)wavbit_sample_Hz;
+			const __int64 maxOut = (__int64)((double)g_wavExportMaxSec * (double)outRate + 0.5);
+			const __int64 maxSrc = (__int64)((double)g_wavExportMaxSec * (double)wavbit_sample_Hz + 0.5);
 			const __int64 writtenFrames = (bpfOut > 0) ? (wl / bpfOut) : 0;
 			if (writtenFrames >= maxOut || playb >= maxSrc) {
 				fade1 = 1;

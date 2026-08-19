@@ -4,6 +4,7 @@
 #include "stdafx.h"
 #include "ogg.h"
 #include "Kpilist.h"
+#include "PluginKinds.h"
 #include <algorithm>
 
 // 先に使用するファイルスコープ関数の前方宣言
@@ -43,10 +44,10 @@ BOOL CKpiHelpDlg::OnInitDialog()
 	SetIcon(nullptr, FALSE);
 	ModifyStyleEx(0, WS_EX_DLGMODALFRAME, SWP_FRAMECHANGED);
 	SetWindowText(LL14(
-		L"KPI一覧操作ガイド", L"KPI List Guide", L"Guide liste KPI", L"Guida elenco KPI",
-		L"Guía lista KPI", L"KPI 목록 가이드", L"KPI 列表指南", L"دليل قائمة KPI",
-		L"Руководство списка KPI", L"KPI-Listen-Anleitung", L"Guia lista KPI", L"KPI-lijst gids",
-		L"Przewodnik listy KPI", L"KPI listesi kılavuzu"));
+		L"プラグイン一覧操作ガイド", L"Plugin List Guide", L"Guide liste plugins", L"Guida elenco plugin",
+		L"Guía lista de plugins", L"플러그인 목록 가이드", L"插件列表指南", L"دليل قائمة الإضافات",
+		L"Руководство списка плагинов", L"Plugin-Listen-Anleitung", L"Guia lista de plugins", L"Pluginlijst-gids",
+		L"Przewodnik listy wtyczek", L"Eklenti listesi kılavuzu"));
 	if (CWnd* pOk = GetDlgItem(IDOK))
 		pOk->SetWindowText(LL14(L"閉じる", L"Close", L"Fermer", L"Chiudi", L"Cerrar", L"닫기", L"关闭", L"إغلاق",
 			L"Закрыть", L"Schliessen", L"Fechar", L"Sluiten", L"Zamknij", L"Kapat"));
@@ -104,26 +105,42 @@ void CKpiHelpDlg::OnPaint()
 
 	int y = 6;
 	const int L = 10;
-	title(L, y, LL14(L"KPI一覧操作ガイド", L"KPI List — Guide", L"Guide liste KPI", L"Guida elenco KPI",
-		L"Guía lista KPI", L"KPI 목록 가이드", L"KPI 列表指南", L"دليل قائمة KPI",
-		L"Руководство списка KPI", L"KPI-Listen-Guide", L"Guia lista KPI", L"KPI-lijst gids",
-		L"Przewodnik KPI", L"KPI listesi kılavuzu"));
+	title(L, y, LL14(L"プラグイン一覧操作ガイド", L"Plugin List — Guide", L"Guide liste plugins", L"Guida elenco plugin",
+		L"Guía lista plugins", L"플러그인 목록 가이드", L"插件列表指南", L"دليل قائمة الإضافات",
+		L"Руководство списка плагинов", L"Plugin-Listen-Guide", L"Guia lista plugins", L"Pluginlijst gids",
+		L"Przewodnik wtyczek", L"Eklenti listesi kılavuzu"));
 	y += titleLh;
 	muted(L, y, LL14(
-		L"プラグインの有効/無効と優先順を管理します。上から順に適用されます。",
-		L"Manage plugin enable/order. Applied top-first.",
-		L"Gérer activation/ordre. Appliqué du haut vers le bas.",
-		L"Gestisci attivazione/ordine. Applicato dall'alto.",
-		L"Gestionar activación/orden. Se aplica de arriba abajo.",
-		L"플러그인 사용/우선순위를 관리합니다. 위에서부터 적용됩니다.",
-		L"管理插件启用与优先顺序。从上到下依次应用。",
-		L"إدارة التفعيل/الترتيب. يُطبَّق من الأعلى.",
-		L"Управление включением/порядком. Сверху вниз.",
-		L"Plugins aktivieren/ordnen. Oben zuerst.",
-		L"Gerenciar ativação/ordem. Aplicado de cima.",
-		L"Beheer activatie/volgorde. Boven eerst.",
-		L"Zarządzaj włączeniem/kolejnością. Od góry.",
-		L"Eklenti açık/sıra yönet. Üstten uygulanır."));
+		L"KPI / Winamp / XMPlay / AIMP の有効無効と優先順を管理します。上から順に適用。",
+		L"Manage KPI/Winamp/XMPlay/AIMP enable/order. Top-first.",
+		L"Gérer KPI/Winamp/XMPlay/AIMP. Du haut vers le bas.",
+		L"Gestisci KPI/Winamp/XMPlay/AIMP. Dall'alto.",
+		L"Gestionar KPI/Winamp/XMPlay/AIMP. De arriba abajo.",
+		L"KPI/Winamp/XMPlay/AIMP 사용과 우선순위를 관리합니다. 위에서부터.",
+		L"管理 KPI/Winamp/XMPlay/AIMP 启用与顺序。从上到下。",
+		L"إدارة KPI/Winamp/XMPlay/AIMP. من الأعلى.",
+		L"Управление KPI/Winamp/XMPlay/AIMP. Сверху вниз.",
+		L"KPI/Winamp/XMPlay/AIMP aktivieren/ordnen. Oben zuerst.",
+		L"Gerenciar KPI/Winamp/XMPlay/AIMP. De cima.",
+		L"Beheer KPI/Winamp/XMPlay/AIMP. Boven eerst.",
+		L"Zarządzaj KPI/Winamp/XMPlay/AIMP. Od góry.",
+		L"KPI/Winamp/XMPlay/AIMP açık/sıra. Üstten."));
+	y += lh;
+	muted(L, y, LL14(
+		L"配置は exe フォルダ以下どこでも可（KPI と同じ再帰走査。Plugins 限定ではない）。",
+		L"Place anywhere under the exe folder (same recursive scan as KPI; not Plugins-only).",
+		L"N'importe où sous le dossier exe (meme parcours que KPI; pas seulement Plugins).",
+		L"Ovunque sotto la cartella exe (stessa scansione di KPI; non solo Plugins).",
+		L"En cualquier sitio bajo la carpeta exe (mismo recorrido que KPI; no solo Plugins).",
+		L"exe 폴더 아래 어디든 가능(KPI와 같은 재귀. Plugins만은 아님).",
+		L"可放在 exe 目录下任意位置（与 KPI 相同递归；不限 Plugins）。",
+		L"أي مكان تحت مجلد exe (نفس مسح KPI؛ ليس Plugins فقط).",
+		L"Куда угодно под папкой exe (тот же обход, что KPI; не только Plugins).",
+		L"Überall unter dem exe-Ordner (gleiche Rekursion wie KPI; nicht nur Plugins).",
+		L"Em qualquer lugar sob a pasta exe (mesma varredura do KPI; nao so Plugins).",
+		L"Overal onder de exe-map (zelfde scan als KPI; niet alleen Plugins).",
+		L"Gdziekolwiek pod folderem exe (ten sam skan co KPI; nie tylko Plugins).",
+		L"exe klasoru altinda her yer (KPI ile ayni tarama; sadece Plugins degil)."));
 	y += lh + 4;
 	y = CCC_GdiHelpDrawSoftDemoPair(dc, L, y, rc.Width() - L * 2, min(140, max(112, rc.Height() / 5)),
 		CCC_HELPDEMO_KLIST);
@@ -304,6 +321,7 @@ extern int kpicnt;
 extern CString kpif[400];
 extern TCHAR kpifs[200][64];
 extern BOOL kpichk[200];
+extern BYTE plugkind[150];
 extern BYTE kpiarch[150];
 extern BYTE kvar[150][300];
 extern TCHAR karento2[1024];
@@ -364,9 +382,9 @@ BOOL CKpilist::OnInitDialog()
 {
 	CCustomBlurDialogBase::OnInitDialog();
 
-	SetWindowText(LL14(L"kpi一覧", L"kpi list", L"Liste kpi", L"Elenco kpi", L"Lista kpi", L"kpi 목록", L"kpi 列表", L"قائمة kpi", L"Список kpi", L"kpi-Liste", L"Lista kpi", L"kpi-lijst", L"Lista kpi", L"kpi listesi"));
+	SetWindowText(LL14(L"プラグイン一覧", L"Plugin list", L"Liste plugins", L"Elenco plugin", L"Lista de plugins", L"플러그인 목록", L"插件列表", L"قائمة الإضافات", L"Список плагинов", L"Plugin-Liste", L"Lista de plugins", L"Pluginlijst", L"Lista wtyczek", L"Eklenti listesi"));
 	if (m_extFilterLbl.GetSafeHwnd())
-		m_extFilterLbl.SetWindowText(LL14(L"拡張子", L"Ext", L"Ext", L"Est", L"Ext", L"확장자", L"扩展名", L"امتداد", L"Расш", L"Erw", L"Ext", L"Ext", L"Rozsz", L"Uzantı"));
+		m_extFilterLbl.SetWindowText(LL14(L"絞り込み", L"Filter", L"Filtrer", L"Filtro", L"Filtro", L"필터", L"筛选", L"تصفية", L"Фильтр", L"Filter", L"Filtro", L"Filter", L"Filtr", L"Filtre"));
 	m_help.SetWindowText(L"?");
 	m_help.SetFlat(TRUE);
 	m_help.SetGradation(RGB(255, 245, 220), RGB(240, 210, 160), 0, TRUE);
@@ -485,28 +503,30 @@ void CKpilist::LayoutControls()
 void CKpilist::LayoutKpiColumns()
 {
 	if (!m_lc.GetSafeHwnd()) return;
-	if (m_lc.GetHeaderCtrl() == NULL || m_lc.GetHeaderCtrl()->GetItemCount() < 4) return;
+	if (m_lc.GetHeaderCtrl() == NULL || m_lc.GetHeaderCtrl()->GetItemCount() < 5) return;
 
 	CRect rc;
-	m_lc.GetClientRect(&rc);   // 縦スクロールバー分は除かれる
+	m_lc.GetClientRect(&rc);
 	const int total = rc.Width();
 
-	const int verW = 50;
-	const int archW = 60;
-	int avail = total - verW - archW;
-	if (avail < 160) avail = 160;   // 最低限の割り当て
+	const int typeW = 70;
+	const int verW = 40;
+	const int archW = 50;
+	int avail = total - typeW - verW - archW;
+	if (avail < 160) avail = 160;
 
-	int kpiW = (int)(avail * 0.45);
-	const int minKpi = 90;
-	if (kpiW < minKpi) kpiW = minKpi;
-	int extW = avail - kpiW;        // 残り全部 → 右端までフィット
+	int nameW = (int)(avail * 0.40);
+	const int minName = 90;
+	if (nameW < minName) nameW = minName;
+	int extW = avail - nameW;
 	const int minExt = 90;
 	if (extW < minExt) extW = minExt;
 
-	m_lc.SetColumnWidth(0, kpiW);
-	m_lc.SetColumnWidth(1, verW);
-	m_lc.SetColumnWidth(2, archW);
-	m_lc.SetColumnWidth(3, extW);
+	m_lc.SetColumnWidth(0, nameW);
+	m_lc.SetColumnWidth(1, typeW);
+	m_lc.SetColumnWidth(2, verW);
+	m_lc.SetColumnWidth(3, archW);
+	m_lc.SetColumnWidth(4, extW);
 }
 
 void CKpilist::OnSize(UINT nType, int cx, int cy)
@@ -636,7 +656,7 @@ static CString KpiExtKey(CString e)
 	return e;
 }
 
-// フィルタ文字列に合う KPI か。空欄=全表示。空白/,/; 区切りは OR。
+// フィルタ: 拡張子・名前・種別(KPI/Winamp/…)を OR トークン照合。空欄=全表示。
 static bool KpiExtMatchesFilter(int kpiIdx, const CString& filterRaw)
 {
 	CString raw = filterRaw;
@@ -662,15 +682,27 @@ static bool KpiExtMatchesFilter(int kpiIdx, const CString& filterRaw)
 	if (tokens.GetCount() == 0)
 		return true;
 
+	CString kindName = L"kpi";
+	if (plugkind[kpiIdx] == PLUGKIND_WINAMP) kindName = L"winamp";
+	else if (plugkind[kpiIdx] == PLUGKIND_XMPLAY) kindName = L"xmplay";
+	else if (plugkind[kpiIdx] == PLUGKIND_AIMP) kindName = L"aimp";
+	CString base = kpif[kpiIdx];
+	const int sl = base.ReverseFind(L'\\');
+	if (sl >= 0) base = base.Mid(sl + 1);
+	base.MakeLower();
+
 	for (INT_PTR t = 0; t < tokens.GetCount(); ++t) {
 		const CString& want = tokens[t];
+		if (kindName.Find(want) >= 0 || want.Find(kindName) >= 0)
+			return true;
+		if (base.Find(want) >= 0)
+			return true;
 		for (int i = 0; ; ++i) {
 			if (ext[kpiIdx][i].IsEmpty())
 				break;
 			const CString have = KpiExtKey(ext[kpiIdx][i]);
 			if (have.IsEmpty())
 				continue;
-			// 部分一致(例: "sp" → spc)。先頭一致も許容。
 			if (have.Find(want) >= 0 || want.Find(have) >= 0)
 				return true;
 		}
@@ -805,9 +837,18 @@ void CKpilist::FillKpiList()
 
 			LvItem.mask = LVIF_TEXT;
 			LvItem.iItem = idItem;
+			CString kind = L"KPI";
+			if (plugkind[j] == PLUGKIND_WINAMP) kind = L"Winamp";
+			else if (plugkind[j] == PLUGKIND_XMPLAY) kind = L"XMPlay";
+			else if (plugkind[j] == PLUGKIND_AIMP) kind = L"AIMP";
+			_tcscpy(buf, kind);
+			LvItem.iSubItem = 1;
+			LvItem.pszText = buf;
+			m_lc.SetItem(&LvItem);
+
 			CString sss; sss.Format(L"%d", kvar[j][0]);
 			_tcscpy(buf, sss);
-			LvItem.iSubItem = 1;
+			LvItem.iSubItem = 2;
 			LvItem.pszText = buf;
 			m_lc.SetItem(&LvItem);
 
@@ -815,12 +856,12 @@ void CKpilist::FillKpiList()
 			if (kpiarch[j] == 32) arch = L"x86";
 			else if (kpiarch[j] == 64) arch = L"x64";
 			_tcscpy(buf, arch);
-			LvItem.iSubItem = 2;
+			LvItem.iSubItem = 3;
 			LvItem.pszText = buf;
 			m_lc.SetItem(&LvItem);
 
 			_tcscpy(buf, s);
-			LvItem.iSubItem = 3;
+			LvItem.iSubItem = 4;
 			LvItem.pszText = buf;
 			m_lc.SetItem(&LvItem);
 
@@ -866,10 +907,11 @@ void CKpilist::Init()
 	dwExStyle |= LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES | LVS_EX_INFOTIP | LVS_EX_CHECKBOXES;
 	m_lc.SetExtendedStyle(dwExStyle);
 	m_lc.ModifyStyle(0, LVS_REPORT);
-	m_lc.InsertColumn(0, LL14(L"kpi", L"kpi", L"kpi", L"kpi", L"kpi", L"kpi", L"kpi", L"kpi", L"kpi", L"kpi", L"kpi", L"kpi", L"kpi", L"kpi"), LVCFMT_LEFT, 100, 0);
-	m_lc.InsertColumn(1, L"Ver", LVCFMT_CENTER, 50, 0);
-	m_lc.InsertColumn(2, L"Arch", LVCFMT_CENTER, 60, 0);
-	m_lc.InsertColumn(3, LL14(L"拡張子", L"Extensions", L"Extensions", L"Estensioni", L"Extensiones", L"확장자", L"扩展名", L"الامتدادات", L"Расширения", L"Erweiterungen", L"Extensões", L"Extensies", L"Rozszerzenia", L"Uzantılar"), LVCFMT_LEFT, 340, 0);
+	m_lc.InsertColumn(0, LL14(L"名前", L"Name", L"Nom", L"Nome", L"Nombre", L"이름", L"名称", L"الاسم", L"Имя", L"Name", L"Nome", L"Naam", L"Nazwa", L"Ad"), LVCFMT_LEFT, 100, 0);
+	m_lc.InsertColumn(1, LL14(L"種別", L"Type", L"Type", L"Tipo", L"Tipo", L"종류", L"类型", L"النوع", L"Тип", L"Typ", L"Tipo", L"Type", L"Typ", L"Tür"), LVCFMT_CENTER, 70, 0);
+	m_lc.InsertColumn(2, L"Ver", LVCFMT_CENTER, 40, 0);
+	m_lc.InsertColumn(3, L"Arch", LVCFMT_CENTER, 50, 0);
+	m_lc.InsertColumn(4, LL14(L"拡張子", L"Extensions", L"Extensions", L"Estensioni", L"Extensiones", L"확장자", L"扩展名", L"الامتدادات", L"Расширения", L"Erweiterungen", L"Extensões", L"Extensies", L"Rozszerzenia", L"Uzantılar"), LVCFMT_LEFT, 280, 0);
 
 	FillKpiList();
 

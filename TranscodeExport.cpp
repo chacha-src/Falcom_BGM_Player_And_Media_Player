@@ -423,9 +423,9 @@ void TcFinalizeWavHeader(CFile& f)
 }
 
 // accum 末尾 xfadeSec 秒へ戻し、next 先頭と等パワーで混ぜてから next 残りを追記
-BOOL TcAppendCrossfadeWav(const CString& accumPath, const CString& nextPath, int xfadeSec)
+BOOL TcAppendCrossfadeWav(const CString& accumPath, const CString& nextPath, float xfadeSec)
 {
-	if (xfadeSec < 1) xfadeSec = 1;
+	if (xfadeSec < 0.1f) xfadeSec = 0.1f;
 	CFile fa, fn;
 	if (!fa.Open(accumPath, CFile::modeReadWrite | CFile::shareExclusive))
 		return FALSE;
@@ -451,7 +451,7 @@ BOOL TcAppendCrossfadeWav(const CString& accumPath, const CString& nextPath, int
 	}
 	const __int64 framesA = ia.dataBytes / bpf;
 	const __int64 framesN = in.dataBytes / bpf;
-	__int64 xfadeFrames = (__int64)xfadeSec * (__int64)ia.hz;
+	__int64 xfadeFrames = (__int64)((double)xfadeSec * (double)ia.hz + 0.5);
 	if (xfadeFrames > framesA) xfadeFrames = framesA;
 	if (xfadeFrames > framesN) xfadeFrames = framesN;
 	if (xfadeFrames < 1) {
@@ -568,7 +568,7 @@ void TcPcmFrameToFloat(const BYTE* p, int ch, int bits, float* out)
 
 // 同時K曲ミックス。終了枠は末尾 xfadeSec で次曲と等パワー交接（プツ切れ防止）。
 // gains[] は相対重み。再生中の重み合計で都度 1.0 に正規化する。
-BOOL TcConcurrentMixWav(const CString& outPath, const CString* paths, const float* gains, int n, int K, int xfadeSec)
+BOOL TcConcurrentMixWav(const CString& outPath, const CString* paths, const float* gains, int n, int K, float xfadeSec)
 {
 	enum { MAXN = 64, CHUNK = 1024 };
 	if (outPath.IsEmpty() || !paths || !gains || n < 2 || n > MAXN) return FALSE;
@@ -627,8 +627,8 @@ BOOL TcConcurrentMixWav(const CString& outPath, const CString* paths, const floa
 	fo.Write(hdr, TC_WAV_HDR);
 
 	__int64 xfadeFramesWant = 0;
-	if (xfadeSec >= 1)
-		xfadeFramesWant = (__int64)xfadeSec * (__int64)fmt.hz;
+	if (xfadeSec >= 0.1f)
+		xfadeFramesWant = (__int64)((double)xfadeSec * (double)fmt.hz + 0.5);
 
 	// slot: 現曲。xfade中は next に次曲を重ね、旧曲はフェードアウト。
 	int slotTrack[MAXN];
@@ -827,9 +827,9 @@ BOOL TcConcurrentMixWav(const CString& outPath, const CString* paths, const floa
 	return wroteAny ? TRUE : FALSE;
 }
 
-BOOL TcApplyTailFadeOutWav(const CString& path, int fadeSec)
+BOOL TcApplyTailFadeOutWav(const CString& path, float fadeSec)
 {
-	if (fadeSec <= 0) return TRUE;
+	if (fadeSec <= 0.f) return TRUE;
 	CFile f;
 	if (!f.Open(path, CFile::modeReadWrite | CFile::shareExclusive))
 		return FALSE;
@@ -839,7 +839,7 @@ BOOL TcApplyTailFadeOutWav(const CString& path, int fadeSec)
 		return FALSE;
 	}
 	const __int64 totalFrames = info.dataBytes / info.blockAlign;
-	__int64 fadeFrames = (__int64)fadeSec * (__int64)info.hz;
+	__int64 fadeFrames = (__int64)((double)fadeSec * (double)info.hz + 0.5);
 	if (fadeFrames > totalFrames) fadeFrames = totalFrames;
 	if (fadeFrames <= 1) {
 		f.Close();
@@ -1029,14 +1029,14 @@ void CTcHelpDlg::OnPaint()
 		L"· Repeticiones …… veces al exportar", L"· 반복 …… 내보내기 시 루프 횟수", L"· 循环 …… 导出时循环次数", L"· التكرار …… مرات الحلقة عند التصدير",
 		L"· Повторы …… сколько раз зациклить при экспорте", L"· Schleifen …… Wiederholungen beim Export", L"· Repetições …… vezes no export", L"· Herhalingen …… loops bij export",
 		L"· Powtórzenia …… ile razy zapętlić przy eksporcie", L"· Döngü …… dışa aktarırken tekrar sayısı")); y += lh;
-	body(L, y, LL14(L"・フェードアウト …… 末尾を指定秒でフェード", L"· Fade out …… fade the end over N seconds", L"· Fondu …… fondre la fin sur N sec", L"· Dissolvenza …… fade finale in N sec",
-		L"· Fundido …… fundir el final en N seg", L"· 페이드 아웃 …… 끝을 N초 페이드", L"· 淡出 …… 末尾用 N 秒淡出", L"· تلاشي …… تلاشي النهاية خلال N ث",
-		L"· Затухание …… затухание конца за N сек", L"· Ausblenden …… Ende ueber N Sek.", L"· Fade out …… esmaecer o fim em N seg", L"· Fade-out …… einde over N sec",
-		L"· Wyciszanie …… wycisz koniec przez N sek", L"· Solma …… sonu N sn sol")); y += lh;
-	body(L, y, LL14(L"・クロスフェード …… 曲を連結／ミックス枠へ等パワー投入", L"· Crossfade …… join tracks or equal-power refill in mix", L"· Crossfade …… enchaîner ou refill equal-power", L"· Crossfade …… unisci o refill equal-power",
-		L"· Crossfade …… unir o rellenar equal-power", L"· 크로스페이드 …… 연결 또는 믹스 등파워 보충", L"· 交叉淡入 …… 连接或混音等功率补充", L"· تلاشي متقاطع …… وصل أو إعادة تعبئة",
-		L"· Кроссфейд …… склейка или equal-power в миксе", L"· Crossfade …… verbinden oder Equal-Power-Auffuellen", L"· Crossfade …… juntar ou refill equal-power", L"· Crossfade …… aaneenschakelen of equal-power bijvullen",
-		L"· Crossfade …… łączenie lub uzupełnianie equal-power", L"· Crossfade …… birleştir veya equal-power doldur")); y += lh + 4;
+	body(L, y, LL14(L"・フェードアウト …… 末尾を指定秒でフェード（小数可。例 5.5）", L"· Fade out …… fade the end over N seconds (decimals OK, e.g. 5.5)", L"· Fondu …… fondre la fin sur N sec (decimales OK, ex. 5,5)", L"· Dissolvenza …… fade finale in N sec (decimali OK, es. 5,5)",
+		L"· Fundido …… fundir el final en N seg (decimales OK, ej. 5.5)", L"· 페이드 아웃 …… 끝을 N초 페이드 (소수 가능, 예 5.5)", L"· 淡出 …… 末尾用 N 秒淡出（可用小数，例 5.5）", L"· تلاشي …… تلاشي النهاية خلال N ث (كسور مسموحة، مثل 5.5)",
+		L"· Затухание …… затухание конца за N сек (дробные OK, напр. 5.5)", L"· Ausblenden …… Ende ueber N Sek. (Dezimal OK, z.B. 5.5)", L"· Fade out …… esmaecer o fim em N seg (decimais OK, ex. 5.5)", L"· Fade-out …… einde over N sec (decimalen OK, bijv. 5.5)",
+		L"· Wyciszanie …… wycisz koniec przez N sek (ulamki OK, np. 5.5)", L"· Solma …… sonu N sn sol (ondalik OK, orn. 5.5)")); y += lh;
+	body(L, y, LL14(L"・クロスフェード …… 曲を連結／ミックス枠へ等パワー投入（小数可。例 5.5）", L"· Crossfade …… join tracks or equal-power refill in mix (decimals OK, e.g. 5.5)", L"· Crossfade …… enchaîner ou refill equal-power (decimales OK, ex. 5,5)", L"· Crossfade …… unisci o refill equal-power (decimali OK, es. 5,5)",
+		L"· Crossfade …… unir o rellenar equal-power (decimales OK, ej. 5.5)", L"· 크로스페이드 …… 연결 또는 믹스 등파워 보충 (소수 가능, 예 5.5)", L"· 交叉淡入 …… 连接或混音等功率补充（可用小数，例 5.5）", L"· تلاشي متقاطع …… وصل أو إعادة تعبئة (كسور مسموحة، مثل 5.5)",
+		L"· Кроссфейд …… склейка или equal-power в миксе (дробные OK, напр. 5.5)", L"· Crossfade …… verbinden oder Equal-Power-Auffuellen (Dezimal OK, z.B. 5.5)", L"· Crossfade …… juntar ou refill equal-power (decimais OK, ex. 5.5)", L"· Crossfade …… aaneenschakelen of equal-power bijvullen (decimalen OK, bijv. 5.5)",
+		L"· Crossfade …… łączenie lub uzupełnianie equal-power (ulamki OK, np. 5.5)", L"· Crossfade …… birleştir veya equal-power doldur (ondalik OK, orn. 5.5)")); y += lh + 4;
 
 	const int gx = L, gy = y, gw = min(340, rc.Width() - L * 2), gh = lh * 2 + 12;
 	dc.FillSolidRect(gx, gy, gw, gh, RGB(245, 246, 250));
@@ -1406,6 +1406,7 @@ CTranscodeExport::CTranscodeExport(CWnd* pParent)
 	, m_initialTab(-1)
 	, m_preferXfade(false)
 	, m_coverBmp(NULL)
+	, m_persistReady(FALSE)
 	, m_mixPctCount(0)
 	, m_mixEditRow(-1)
 {
@@ -1479,7 +1480,21 @@ BEGIN_MESSAGE_MAP(CTranscodeExport, CCustomBlurDialogBase)
 	ON_BN_CLICKED(IDC_TC_COVER_CLEAR, &CTranscodeExport::OnBnClickedCoverClear)
 	ON_BN_CLICKED(IDC_TC_XFADE, &CTranscodeExport::OnBnClickedXfade)
 	ON_BN_CLICKED(IDC_TC_MIX, &CTranscodeExport::OnBnClickedMix)
+	ON_BN_CLICKED(IDC_TC_FADE, &CTranscodeExport::OnExportOptChanged)
+	ON_BN_CLICKED(IDC_TC_TRIM, &CTranscodeExport::OnExportOptChanged)
+	ON_BN_CLICKED(IDC_TC_COPY_TAGS, &CTranscodeExport::OnExportOptChanged)
+	ON_BN_CLICKED(IDC_TC_PROMPT, &CTranscodeExport::OnExportOptChanged)
+	ON_EN_CHANGE(IDC_TC_FADE_SEC, &CTranscodeExport::OnExportOptChanged)
+	ON_EN_CHANGE(IDC_TC_TRIM_SEC, &CTranscodeExport::OnExportOptChanged)
+	ON_EN_CHANGE(IDC_TC_XFADE_SEC, &CTranscodeExport::OnExportOptChanged)
+	ON_EN_CHANGE(IDC_TC_KPI_SEC, &CTranscodeExport::OnExportOptChanged)
+	ON_EN_KILLFOCUS(IDC_TC_FADE_SEC, &CTranscodeExport::OnExportSecKillFocus)
+	ON_EN_KILLFOCUS(IDC_TC_TRIM_SEC, &CTranscodeExport::OnExportSecKillFocus)
+	ON_EN_KILLFOCUS(IDC_TC_XFADE_SEC, &CTranscodeExport::OnExportSecKillFocus)
+	ON_EN_KILLFOCUS(IDC_TC_KPI_SEC, &CTranscodeExport::OnExportSecKillFocus)
 	ON_CBN_SELCHANGE(IDC_TC_FORMAT, &CTranscodeExport::OnCbnSelchangeFormat)
+	ON_CBN_SELCHANGE(IDC_TC_QUALITY, &CTranscodeExport::OnExportOptChanged)
+	ON_CBN_SELCHANGE(IDC_TC_SRATE, &CTranscodeExport::OnExportOptChanged)
 	ON_CBN_SELCHANGE(IDC_TC_MIX_N, &CTranscodeExport::OnCbnSelchangeMixN)
 	ON_NOTIFY(TCN_SELCHANGE, IDC_TC_TABS, &CTranscodeExport::OnTcnSelchangeTabs)
 	ON_WM_DROPFILES()
@@ -1784,6 +1799,7 @@ void CTranscodeExport::OnBnClickedXfade()
 	// ミックスと併用可: ミックス時は補充クロスフェードのON/秒、非ミックス時は連結クロスフェード
 	ApplyMixUi();
 	ApplyPathModeUi(false);
+	PersistOptionsFromUi(FALSE);
 }
 
 void CTranscodeExport::OnBnClickedMix()
@@ -1791,6 +1807,7 @@ void CTranscodeExport::OnBnClickedMix()
 	// クロスフェードと併用可（同時ONなら同時ミックス＋補充クロスフェード）
 	ApplyMixUi();
 	ApplyPathModeUi(false);
+	PersistOptionsFromUi(FALSE);
 }
 
 void CTranscodeExport::OnCbnSelchangeMixN()
@@ -1804,6 +1821,7 @@ void CTranscodeExport::OnCbnSelchangeMixN()
 	savedata.wav_export_mix_n = mixN;
 	if (IsMixMode())
 		RebuildMixVolList();
+	PersistOptionsFromUi(FALSE);
 }
 
 int CTranscodeExport::CurrentFormat() const
@@ -1847,6 +1865,7 @@ void CTranscodeExport::ApplyTabUi()
 	if (m_tabs.GetSafeHwnd())
 		m_tabs.Invalidate(FALSE);
 	ApplyKpiDurationUi();
+	PersistOptionsFromUi(FALSE);
 }
 
 BOOL CTranscodeExport::SelectionHasKpi() const
@@ -1861,14 +1880,14 @@ BOOL CTranscodeExport::SelectionHasKpi() const
 	return pc.sub == -3;
 }
 
-int CTranscodeExport::DefaultKpiDurationSec() const
+float CTranscodeExport::DefaultKpiDurationSec() const
 {
 	// プレイリストの time ではなく、ユーザーが保存した秒数を優先する
-	int sec = savedata.wav_export_kpi_sec;
-	if (sec < 1)
-		sec = 240; // 既定4分
-	if (sec > 36000)
-		sec = 36000;
+	float sec = savedata.wav_export_kpi_sec;
+	if (sec < 1.f)
+		sec = 240.f; // 既定4分
+	if (sec > 36000.f)
+		sec = 36000.f;
 	return sec;
 }
 
@@ -1888,12 +1907,211 @@ void CTranscodeExport::PersistKpiDurationFromUi()
 	// KPI以外でも欄に値があれば保存（次回KPI書き出しの既定になる）
 	CString kpiStr;
 	m_kpiSec.GetWindowText(kpiStr);
-	int kpiSec = _tstoi(kpiStr);
-	if (kpiSec < 1)
+	float kpiSec = (float)_tstof(kpiStr);
+	if (kpiSec < 1.f)
 		kpiSec = DefaultKpiDurationSec();
-	if (kpiSec > 36000)
-		kpiSec = 36000;
+	if (kpiSec > 36000.f)
+		kpiSec = 36000.f;
 	savedata.wav_export_kpi_sec = kpiSec;
+}
+
+void CTranscodeExport::PersistOptionsFromUi(BOOL clamp)
+{
+	if (!m_persistReady)
+		return;
+	BOOL dirty = FALSE;
+	if (m_fadeCheck.GetSafeHwnd()) {
+		const int v = m_fadeCheck.GetCheck() ? 1 : 0;
+		if (savedata.wav_export_fade != v) { savedata.wav_export_fade = v; dirty = TRUE; }
+	}
+	if (m_trimCheck.GetSafeHwnd()) {
+		const int v = m_trimCheck.GetCheck() ? 1 : 0;
+		if (savedata.wav_export_trim_lead != v) { savedata.wav_export_trim_lead = v; dirty = TRUE; }
+	}
+	if (m_copyTags.GetSafeHwnd()) {
+		const int v = m_copyTags.GetCheck() ? 1 : 0;
+		if (savedata.wav_export_copy_tags != v) { savedata.wav_export_copy_tags = v; dirty = TRUE; }
+	}
+	if (m_promptCheck.GetSafeHwnd()) {
+		const int v = m_promptCheck.GetCheck() ? 1 : 0;
+		if (savedata.wav_export_apply_prompt != v) { savedata.wav_export_apply_prompt = v; dirty = TRUE; }
+	}
+	if (multiFile && m_xfadeCheck.GetSafeHwnd() && m_xfadeCheck.IsWindowVisible()) {
+		const int v = m_xfadeCheck.GetCheck() ? 1 : 0;
+		if (savedata.wav_export_xfade != v) { savedata.wav_export_xfade = v; dirty = TRUE; }
+	}
+	if (multiFile && m_mixCheck.GetSafeHwnd() && m_mixCheck.IsWindowVisible()) {
+		const int v = m_mixCheck.GetCheck() ? 1 : 0;
+		if (savedata.wav_export_mix != v) { savedata.wav_export_mix = v; dirty = TRUE; }
+	}
+	if (m_mixN.GetSafeHwnd() && m_mixN.GetCount() > 0) {
+		int mixN = m_mixN.GetCurSel() + 2;
+		if (mixN < 2) mixN = 2;
+		if (savedata.wav_export_mix_n != mixN) { savedata.wav_export_mix_n = mixN; dirty = TRUE; }
+	}
+	if (m_fadeSec.GetSafeHwnd()) {
+		CString s;
+		m_fadeSec.GetWindowText(s);
+		s.Trim();
+		if (!s.IsEmpty()) {
+			const float v = (float)_tstof(s);
+			if (v >= 0.1f) {
+				if (savedata.wav_export_fade_sec != v) { savedata.wav_export_fade_sec = v; dirty = TRUE; }
+			}
+			else if (clamp && savedata.wav_export_fade_sec != 15.f) {
+				savedata.wav_export_fade_sec = 15.f;
+				dirty = TRUE;
+			}
+		}
+		else if (clamp && savedata.wav_export_fade_sec != 15.f) {
+			savedata.wav_export_fade_sec = 15.f;
+			dirty = TRUE;
+		}
+	}
+	if (m_trimSec.GetSafeHwnd()) {
+		CString s;
+		m_trimSec.GetWindowText(s);
+		s.Trim();
+		if (!s.IsEmpty()) {
+			const float v = (float)_tstof(s);
+			if (v >= 0.f) {
+				if (savedata.wav_export_trim_keep_sec != v) { savedata.wav_export_trim_keep_sec = v; dirty = TRUE; }
+			}
+			else if (clamp && savedata.wav_export_trim_keep_sec != 1.f) {
+				savedata.wav_export_trim_keep_sec = 1.f;
+				dirty = TRUE;
+			}
+		}
+		else if (clamp && savedata.wav_export_trim_keep_sec != 1.f) {
+			savedata.wav_export_trim_keep_sec = 1.f;
+			dirty = TRUE;
+		}
+	}
+	if (m_xfadeSec.GetSafeHwnd()) {
+		CString s;
+		m_xfadeSec.GetWindowText(s);
+		s.Trim();
+		if (!s.IsEmpty()) {
+			float v = (float)_tstof(s);
+			if (v >= 0.1f && v <= 120.f) {
+				if (savedata.wav_export_xfade_sec != v) { savedata.wav_export_xfade_sec = v; dirty = TRUE; }
+			}
+			else if (clamp) {
+				if (v < 0.1f) v = 5.f;
+				if (v > 120.f) v = 120.f;
+				if (savedata.wav_export_xfade_sec != v) { savedata.wav_export_xfade_sec = v; dirty = TRUE; }
+			}
+		}
+		else if (clamp && savedata.wav_export_xfade_sec != 5.f) {
+			savedata.wav_export_xfade_sec = 5.f;
+			dirty = TRUE;
+		}
+	}
+	if (m_kpiSec.GetSafeHwnd()) {
+		CString s;
+		m_kpiSec.GetWindowText(s);
+		s.Trim();
+		if (!s.IsEmpty()) {
+			float v = (float)_tstof(s);
+			if (v >= 1.f && v <= 36000.f) {
+				if (savedata.wav_export_kpi_sec != v) { savedata.wav_export_kpi_sec = v; dirty = TRUE; }
+			}
+			else if (clamp) {
+				if (v < 1.f) v = DefaultKpiDurationSec();
+				if (v > 36000.f) v = 36000.f;
+				if (savedata.wav_export_kpi_sec != v) { savedata.wav_export_kpi_sec = v; dirty = TRUE; }
+			}
+		}
+	}
+	if (m_srate.GetSafeHwnd()) {
+		static const int rates[] = { 0, 44100, 48000, 96000, 192000 };
+		int si = m_srate.GetCurSel();
+		if (si < 0 || si > 4) si = 2;
+		if (savedata.wav_export_sample_rate != rates[si]) {
+			savedata.wav_export_sample_rate = rates[si];
+			dirty = TRUE;
+		}
+	}
+	const int fmt = CurrentFormat();
+	if (fmt == TC_FMT_MP3 || fmt == TC_FMT_FLAC) {
+		if (savedata.tc_format != fmt) { savedata.tc_format = fmt; dirty = TRUE; }
+		if (fmt == TC_FMT_FLAC) {
+			int lv = m_quality.GetCurSel();
+			if (lv < 0) lv = 5;
+			if (savedata.tc_flac_level != lv) { savedata.tc_flac_level = lv; dirty = TRUE; }
+		}
+		else if (m_quality.GetSafeHwnd()) {
+			static const int kbps[] = { 128, 160, 192, 224, 256, 320 };
+			int qi = m_quality.GetCurSel();
+			if (qi < 0 || qi > 5) qi = 2;
+			if (savedata.tc_mp3_kbps != kbps[qi]) { savedata.tc_mp3_kbps = kbps[qi]; dirty = TRUE; }
+		}
+	}
+	if (dirty)
+		MpPersistSavedataQuick();
+}
+
+void CTranscodeExport::OnExportOptChanged()
+{
+	PersistOptionsFromUi(FALSE);
+}
+
+void CTranscodeExport::OnExportSecKillFocus()
+{
+	if (!m_persistReady)
+		return;
+	if (m_fadeSec.GetSafeHwnd()) {
+		CString s;
+		m_fadeSec.GetWindowText(s);
+		const float v = (float)_tstof(s);
+		if (s.IsEmpty() || v < 0.1f) {
+			CString t;
+			t.Format(L"%g", 15.0);
+			m_persistReady = FALSE;
+			m_fadeSec.SetWindowText(t);
+			m_persistReady = TRUE;
+		}
+	}
+	if (m_trimSec.GetSafeHwnd()) {
+		CString s;
+		m_trimSec.GetWindowText(s);
+		const float v = (float)_tstof(s);
+		if (s.IsEmpty() || v < 0.f) {
+			CString t;
+			t.Format(L"%g", 1.0);
+			m_persistReady = FALSE;
+			m_trimSec.SetWindowText(t);
+			m_persistReady = TRUE;
+		}
+	}
+	if (m_xfadeSec.GetSafeHwnd()) {
+		CString s;
+		m_xfadeSec.GetWindowText(s);
+		float v = (float)_tstof(s);
+		if (s.IsEmpty() || v < 0.1f || v > 120.f) {
+			if (s.IsEmpty() || v < 0.1f) v = 5.f;
+			if (v > 120.f) v = 120.f;
+			CString t;
+			t.Format(L"%g", (double)v);
+			m_persistReady = FALSE;
+			m_xfadeSec.SetWindowText(t);
+			m_persistReady = TRUE;
+		}
+	}
+	if (m_kpiSec.GetSafeHwnd()) {
+		CString s;
+		m_kpiSec.GetWindowText(s);
+		float v = (float)_tstof(s);
+		if (s.IsEmpty() || v < 1.f || v > 36000.f) {
+			v = DefaultKpiDurationSec();
+			CString t;
+			t.Format(L"%g", (double)v);
+			m_persistReady = FALSE;
+			m_kpiSec.SetWindowText(t);
+			m_persistReady = TRUE;
+		}
+	}
+	PersistOptionsFromUi(TRUE);
 }
 
 CString CTranscodeExport::ExtForFormat(int fmt) const
@@ -2159,7 +2377,7 @@ BOOL CTranscodeExport::OnInitDialog()
 			L"Длина (сек)", L"Dauer (s)", L"Duracao (s)", L"Duur (s)",
 			L"Dlugosc (s)", L"Sure (sn)"));
 		CString sec;
-		sec.Format(L"%d", DefaultKpiDurationSec());
+		sec.Format(L"%g", (double)DefaultKpiDurationSec());
 		m_kpiSec.SetWindowText(sec);
 		ApplyKpiDurationUi();
 	}
@@ -2190,18 +2408,18 @@ BOOL CTranscodeExport::OnInitDialog()
 		m_srate.SetCurSel(sel);
 		m_srate.SetAeroMode(FALSE);
 	}
-	int fadeSec = savedata.wav_export_fade_sec;
-	if (fadeSec <= 0) fadeSec = 15;
-	int trimKeep = savedata.wav_export_trim_keep_sec;
-	if (trimKeep <= 0) trimKeep = 1;
-	int xfadeSec = savedata.wav_export_xfade_sec;
-	if (xfadeSec < 1) xfadeSec = 5;
+	float fadeSec = savedata.wav_export_fade_sec;
+	if (fadeSec <= 0.f) fadeSec = 15.f;
+	float trimKeep = savedata.wav_export_trim_keep_sec;
+	if (trimKeep < 0.f) trimKeep = 1.f;
+	float xfadeSec = savedata.wav_export_xfade_sec;
+	if (xfadeSec < 0.1f) xfadeSec = 5.f;
 	CString s;
-	s.Format(L"%d", fadeSec);
+	s.Format(L"%g", (double)fadeSec);
 	m_fadeSec.SetWindowText(s);
-	s.Format(L"%d", trimKeep);
+	s.Format(L"%g", (double)trimKeep);
 	m_trimSec.SetWindowText(s);
-	s.Format(L"%d", xfadeSec);
+	s.Format(L"%g", (double)xfadeSec);
 	m_xfadeSec.SetWindowText(s);
 	m_fadeCheck.SetCheck(savedata.wav_export_fade ? BST_CHECKED : BST_UNCHECKED);
 	m_trimCheck.SetCheck(savedata.wav_export_trim_lead ? BST_CHECKED : BST_UNCHECKED);
@@ -2798,6 +3016,7 @@ BOOL CTranscodeExport::OnInitDialog()
 	}
 	CCC_CaptionLayout(m_hWnd);
 	LayoutHelpBtn();
+	m_persistReady = TRUE;
 	return TRUE;
 }
 
@@ -2839,6 +3058,7 @@ void CTranscodeExport::OnSize(UINT nType, int cx, int cy)
 
 void CTranscodeExport::OnDestroy()
 {
+	PersistOptionsFromUi(TRUE);
 	if (g_tcHelpDlg && ::IsWindow(g_tcHelpDlg->GetSafeHwnd()))
 		g_tcHelpDlg->DestroyWindow();
 	CCustomBlurDialogBase::OnDestroy();
@@ -2891,6 +3111,7 @@ void CTranscodeExport::ExportProgressThunk(int percent, LPCTSTR status, void* us
 void CTranscodeExport::OnCbnSelchangeFormat()
 {
 	RefreshQualityLabels();
+	PersistOptionsFromUi(FALSE);
 	if (multiFile && !IsXfadeMode() && !IsMixMode()) return;
 	CString path;
 	m_path.GetWindowText(path);
@@ -2973,18 +3194,17 @@ void CTranscodeExport::OnBnClickedExec()
 	if (loopCount < 1) loopCount = 1;
 	double fadeSecD = _tstof(fadeStr);
 	if (fadeSecD < 0.1) fadeSecD = 15.0;
-	int fadeSec = (int)(fadeSecD + 0.5);
-	if (fadeSec < 1) fadeSec = 1;
+	float fadeSec = (float)fadeSecD;
 	double trimKeepSecD = _tstof(trimStr);
 	if (trimKeepSecD < 0) trimKeepSecD = 1.0;
-	int trimKeepSec = (int)(trimKeepSecD + 0.5);
-	if (trimKeepSec < 0) trimKeepSec = 0;
+	float trimKeepSec = (float)trimKeepSecD;
+	if (trimKeepSec < 0.f) trimKeepSec = 0.f;
 	double xfadeSecD = _tstof(xfadeStr);
 	if (xfadeSecD < 0.1) xfadeSecD = 5.0;
 	if (xfadeSecD > 120.0) xfadeSecD = 120.0;
-	int xfadeSec = (int)(xfadeSecD + 0.5);
-	if (xfadeSec < 1) xfadeSec = 1;
-	if (xfadeSec > 120) xfadeSec = 120;
+	float xfadeSec = (float)xfadeSecD;
+	if (xfadeSec < 0.1f) xfadeSec = 0.1f;
+	if (xfadeSec > 120.f) xfadeSec = 120.f;
 
 	const int fmt = CurrentFormat();
 	int mp3Kbps = 192;
@@ -3044,6 +3264,7 @@ void CTranscodeExport::OnBnClickedExec()
 	savedata.tc_mp3_kbps = mp3Kbps;
 	savedata.tc_flac_level = flacLevel;
 	savedata.wav_export_copy_tags = m_copyTags.GetCheck() ? 1 : 0;
+	MpPersistSavedataQuick();
 	// クロスフェード／ミックスは単体出力なのでタイトルも適用対象
 	ExportTagUi_Collect(multiFile && !xfade && !mix, savedata.wav_export_copy_tags, m_title, m_artist, m_album, m_coverPath, opts);
 
@@ -3156,7 +3377,7 @@ void CTranscodeExport::OnBnClickedExec()
 			UpdateWindow();
 			MpDecodeProgressReport(75, NULL);
 			// クロスフェードONなら補充投入に秒数を使う。OFFなら即時投入。
-			const int mixXfadeSec = xfadeChecked ? xfadeSec : 0;
+			const float mixXfadeSec = xfadeChecked ? xfadeSec : 0.f;
 			ok = TcConcurrentMixWav(mixWav, temps, gains, n, K, mixXfadeSec);
 		}
 		for (int i = 0; i < n; ++i) {

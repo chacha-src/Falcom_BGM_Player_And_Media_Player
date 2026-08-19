@@ -186,37 +186,42 @@ __int64 XfPlayPosBytes()
 __int64 XfTrackEndRefBytes(__int64 endWrittenBytes)
 {
 	/* シーク後の g_dsWrittenBytes 絶対値は曲位置と一致しないことがある。
-	 * クロスフェード判定はソース総長（loop3/loop2）を優先する。 */
-	int totalSamp = 0;
-	if (loop2 > 0)
-		totalSamp = loop1 + loop2;
-	else if (loop3 > 0)
-		totalSamp = loop3;
-	else if (oggsize > 0 && wavchannel > 0 && wavsam_depth >= 8) {
-		const int bps = abs(wavsam_depth) / 8;
-		if (bps > 0) {
-			const int dm = g_openDecoderMode;
-			/* MP3: oggsize は PCM フレーム数。FLAC 等: バイト数 */
-			if (dm == -10)
-				totalSamp = oggsize;
-			else
-				totalSamp = oggsize / (wavchannel * bps);
+	 * クロスフェード判定はソース総長（loop3/loop2）を優先する。
+	 * ただし KPI/外部プラグインのメタデータ長は UI 目安で短いことが多く、
+	 * それを endRef にすると表示長ちょうどで曲が切れる。 */
+	const int dm = g_openDecoderMode;
+	const bool kpiLenHintOnly = (dm == -3 || dm == -20 || dm == -21 || dm == -22);
+	if (!kpiLenHintOnly) {
+		int totalSamp = 0;
+		if (loop2 > 0)
+			totalSamp = loop1 + loop2;
+		else if (loop3 > 0)
+			totalSamp = loop3;
+		else if (oggsize > 0 && wavchannel > 0 && wavsam_depth >= 8) {
+			const int bps = abs(wavsam_depth) / 8;
+			if (bps > 0) {
+				/* MP3: oggsize は PCM フレーム数。FLAC 等: バイト数 */
+				if (dm == -10)
+					totalSamp = oggsize;
+				else
+					totalSamp = oggsize / (wavchannel * bps);
+			}
 		}
-	}
-	if (totalSamp > 0) {
-		const int outBpf = XfDsOutBpf();
-		const int outRate = XfDsOutRate();
-		const int srcRate = (wavbit_sample_Hz > 0) ? wavbit_sample_Hz : outRate;
-		if (outBpf > 0 && srcRate > 0 && outRate > 0) {
-			const __int64 outFrames = (srcRate == outRate)
-				? (__int64)totalSamp
-				: ((__int64)totalSamp * (__int64)outRate + srcRate / 2) / srcRate;
-			return outFrames * (__int64)outBpf;
+		if (totalSamp > 0) {
+			const int outBpf = XfDsOutBpf();
+			const int outRate = XfDsOutRate();
+			const int srcRate = (wavbit_sample_Hz > 0) ? wavbit_sample_Hz : outRate;
+			if (outBpf > 0 && srcRate > 0 && outRate > 0) {
+				const __int64 outFrames = (srcRate == outRate)
+					? (__int64)totalSamp
+					: ((__int64)totalSamp * (__int64)outRate + srcRate / 2) / srcRate;
+				return outFrames * (__int64)outBpf;
+			}
 		}
 	}
 	if (endWrittenBytes > 0)
 		return endWrittenBytes;
-	if (g_expectedDsBytes > 0)
+	if (!kpiLenHintOnly && g_expectedDsBytes > 0)
 		return g_expectedDsBytes;
 	return 0;
 }

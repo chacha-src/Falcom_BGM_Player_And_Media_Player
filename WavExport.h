@@ -24,6 +24,9 @@ protected:
 	virtual BOOL PreTranslateMessage(MSG* pMsg);
 	void LayoutHelpBtn();
 	void ShowHelpSheet();
+	void PersistOptionsFromUi(BOOL clamp);
+	afx_msg void OnExportOptChanged();
+	afx_msg void OnExportSecKillFocus();
 	DECLARE_MESSAGE_MAP()
 
 public:
@@ -68,6 +71,7 @@ public:
 	CCustomStandardButton m_coverClear;
 	CString m_coverPath;
 	HBITMAP m_coverBmp;
+	BOOL m_persistReady;
 
 	static void ExportProgressThunk(int percent, LPCTSTR status, void* user);
 };

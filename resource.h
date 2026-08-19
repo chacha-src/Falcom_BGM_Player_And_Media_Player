@@ -137,6 +137,11 @@
 #define IDD_S3M_HELP                    261
 #define IDD_SOFT3DRACE                  270
 #define IDD_S3R_HELP                    271
+#define IDD_TAGBATCH                    272
+#define IDD_TB_HELP                     273
+#define IDD_VSTHOST                     274
+#define IDD_VST_HELP                    275
+#define IDD_VST_WAIT                    276
 #define IDC_CRIGHT                      263
 #define IDC_CRIGHT13                    264
 #define IDC_CLEFT                       264
@@ -1012,6 +1017,7 @@
 #define IDC_CAP_MAX                     12002
 #define IDC_CAP_SETTINGS                12003
 #define IDC_CAP_PIN                     12004
+#define IDC_CAP_OFFLINE_HELP            12005
 #define IDC_MPH_TABS                    3906
 #define IDC_MPH_COPY                    3907
 #define IDC_MPH_BODY                    3908
@@ -1283,6 +1289,7 @@
 #define IDC_S3R_STATUS                  4215
 #define IDC_S3R_CLOSE                   4216
 #define IDC_MP_BOT_RACE                 4217
+#define IDC_MP_BOT_VST                  4218
 #define IDC_S3R_INVERT_L                4218
 #define IDC_S3R_INVERT                  4219
 #define IDC_OGG_XFADE                   4142
@@ -1563,6 +1570,7 @@
 #define ID_MP_BOTVIS_MAZE               33249
 #define ID_MP_SOFT3DRACE                33254
 #define ID_MP_BOTVIS_RACE               33255
+#define ID_MP_BOTVIS_VST                33256
 #define ID_SC_LAYER_HIDE                39001
 #define ID_SC_LAYER_FIT                 39002
 #define ID_SC_LAYER_SCALE50             39003
@@ -1691,14 +1699,60 @@
 #define IDC_MP_BPM_REMEAS               4193
 #define IDC_MP_BPM_CLOSE                4194
 #define IDC_MP_BPM_ABORT                4195
+#define IDC_TAGEDIT_BATCH               4196
+#define IDC_TB_HELP                     4197
+#define IDC_TB_ORIG_L                   4198
+#define IDC_TB_EDIT_L                   4199
+#define IDC_TB_NAME_OL                  4200
+#define IDC_TB_ART_OL                   4201
+#define IDC_TB_ALB_OL                   4202
+#define IDC_TB_NAME_EL                  4203
+#define IDC_TB_ART_EL                   4204
+#define IDC_TB_ALB_EL                   4205
+#define IDC_TB_NAME_O                   4206
+#define IDC_TB_ART_O                    4207
+#define IDC_TB_ALB_O                    4208
+#define IDC_TB_NAME_E                   4209
+#define IDC_TB_ART_E                    4210
+#define IDC_TB_ALB_E                    4211
+#define IDC_TB_APPLY                    4212
+#define IDC_TB_CLOSE                    4213
+#define IDC_TB_STATUS                   4214
+#define IDC_VST_HELP                    4300
+#define IDC_VST_CLOSE                   4301
+#define IDC_VST_PRESET                  4302
+#define IDC_VST_RENAME                  4303
+#define IDC_VST_DEL                     4304
+#define IDC_VST_SAVE                    4305
+#define IDC_VST_RESCAN                  4306
+#define IDC_VST_MIDI1                   4307
+#define IDC_VST_MIDI2                   4308
+#define IDC_VST_MIDI3                   4309
+#define IDC_VST_OUT                     4310
+#define IDC_VST_WIRE                    4311
+#define IDC_VST_STATUS                  4312
+#define IDC_VST_WAIT_TXT                4313
+#define IDC_MID_PREFER_KPI              4314
+#define IDC_MID_PREFER_VST              4315
+#define IDC_STATIC_MID_PREFER           4316
+#define IDC_STATIC_VST_MULTI            4317
+#define IDC_VST_MULTI_COMBO             4318
+#define IDC_STATIC_VST_EXTRA            4319
+#define IDC_VST_EXTRA_PATH              4320
+#define IDC_VST_EXTRA_BROWSE            4321
+#define IDC_STATIC_VST_DLL              4322
+#define IDC_VST_MULTI_DLL               4323
+#define IDC_VST_MULTI_BROWSE            4324
+#define IDC_VST_SCAN_NOW                4325
+#define ID_MP_TAG_BATCH                 33256
 
 // Next default values for new objects
 // 
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
-#define _APS_NEXT_RESOURCE_VALUE        269
-#define _APS_NEXT_COMMAND_VALUE         33256
-#define _APS_NEXT_CONTROL_VALUE         4196
+#define _APS_NEXT_RESOURCE_VALUE        277
+#define _APS_NEXT_COMMAND_VALUE         33257
+#define _APS_NEXT_CONTROL_VALUE         4326
 #define _APS_NEXT_SYMED_VALUE           104
 #endif
 #endif

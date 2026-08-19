@@ -39,6 +39,7 @@ enum {
 	PAL_GUIDE,
 	PAL_COPY_SHORTCUTS,
 	PAL_TAGEDIT,
+	PAL_TAGBATCH,
 	PAL_BPM,
 	PAL_EXPORT_AB,
 	PAL_DUPES,
@@ -103,6 +104,7 @@ const MpPalCmd kCmds[] = {
 	{ PAL_GUIDE,            2 },
 	{ PAL_COPY_SHORTCUTS,   2 },
 	{ PAL_TAGEDIT,          2 },
+	{ PAL_TAGBATCH,         2 },
 	{ PAL_BPM,              2 },
 	{ PAL_EXPORT_AB,        2 },
 	{ PAL_DUPES,            2 },
@@ -252,6 +254,10 @@ const wchar_t* PalCmdName(int id)
 		return LL14(L"タグ編集", L"Edit tags", L"Editer les tags", L"Modifica tag", L"Editar etiquetas",
 			L"태그 편집", L"编辑标签", L"تحرير الوسوم", L"Правка тегов", L"Tags bearbeiten",
 			L"Editar tags", L"Tags bewerken", L"Edytuj tagi", L"Etiket duzenle");
+	case PAL_TAGBATCH:
+		return LL14(L"まとめて編集", L"Batch edit", L"Edition groupée", L"Modifica in blocco", L"Edición por lote",
+			L"일괄 편집", L"批量编辑", L"تحرير دفعي", L"Пакетное правки", L"Sammelbearbeitung",
+			L"Edicao em lote", L"Batch bewerken", L"Edycja zbiorcza", L"Toplu duzenleme");
 	case PAL_BPM:
 		return LL14(L"BPM 多段検出（拍子・音符価）", L"Multipass BPM (meter / note value)", L"BPM multipasse (mesure / valeur)", L"BPM multipass (metro / valore)", L"BPM multipase (compas / valor)",
 			L"BPM 다단 검출(박자·음표)", L"多段检测 BPM（拍号/音符）", L"كشف BPM متعدد (ميزان/نغمة)", L"Многопроходный BPM (размер/длительность)", L"BPM mehrfach (Taktart/Notenwert)",
@@ -822,6 +828,7 @@ void CMpCommandPaletteDlg::ExecCommand(int id)
 		PalCopyToClipboard(this, PalBuildShortcutText());
 		return;
 	case PAL_TAGEDIT:     PalPostToMp(ID_MP_TAG_EDIT); return;
+	case PAL_TAGBATCH:    PalPostToMp(ID_MP_TAG_BATCH); return;
 	case PAL_BPM:         PalPostToMp(ID_MP_BPM_DETECT); return;
 	case PAL_EXPORT_AB:   PalPostToMp(ID_MP_EXPORT_AB); return;
 	case PAL_DUPES:       PalPostToMp(ID_MP_DUPES); return;

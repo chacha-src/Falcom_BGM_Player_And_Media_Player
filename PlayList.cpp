@@ -1,4 +1,4 @@
-﻿// PlayList.cpp : 実装ファイル
+// PlayList.cpp : 実装ファイル
 //
 
 #include "stdafx.h"
@@ -14,9 +14,13 @@
 #include "ListSyosai.h"
 #include "TranscodeExport.h"
 #include "TagEditDlg.h"
+#include "TagBatchEditDlg.h"
 #include <vector>
 #include <algorithm>
 #include "Douga.h"
+#include "PluginKinds.h"
+#include "VstMidiEngine.h"
+#include "PluginAimp.h"
 #include "mp3image.h"
 #include "CMediaPlayerDlg.h"
 #include "CMissingFilesDlg.h"
@@ -100,6 +104,9 @@ extern 	CString ext[150][300];
 extern 	CString kpif[400];
 extern  BOOL kpichk[200];
 extern 	int kpicnt;
+extern BYTE plugkind[150];
+extern CString ext[150][300];
+extern BYTE kvar[150][300];
 extern COggDlg *og;
 extern BOOL plw;
 
@@ -2755,6 +2762,27 @@ int CPlayList::ShowTrackContextMenu(CPoint pt, CWnd* pOwner)
 					L"Edita titulo, artista y otras etiquetas de la seleccion", L"선택 곡의 제목·아티스트 등 태그를 편집합니다", L"编辑所选曲目的标题、艺术家等标签", L"يحرّر عنوان الفنان ووسوم أخرى للتحديد",
 					L"Редактирует название, исполнителя и другие теги", L"Bearbeitet Titel, Interpret und andere Tags der Auswahl", L"Edita titulo, artista e outras tags da selecao", L"Bewerkt titel, artiest en andere tags van de selectie",
 					L"Edytuje tytul, artyste i inne tagi zaznaczenia", L"Secimin baslik, sanatci ve diger etiketlerini duzenler"));
+		{
+			int tagSel = 0;
+			int tidx = -1;
+			while ((tidx = m_lc.GetNextItem(tidx, LVNI_ALL | LVNI_SELECTED)) >= 0) {
+				if (tidx < playcnt) ++tagSel;
+			}
+			if (tagSel >= 2) {
+				subTag->AddCommand(PL_CTX_TAG_BATCH,
+					LL14(L"まとめて編集…", L"Batch edit...", L"Edition groupée...", L"Modifica in blocco...",
+						L"Edición por lote...", L"일괄 편집...", L"批量编辑…", L"تحرير دفعي...",
+						L"Пакетное правки...", L"Sammelbearbeitung...", L"Edicao em lote...", L"Batch bewerken...",
+						L"Edycja zbiorcza...", L"Toplu duzenleme..."),
+					LL14(L"選択曲のファイル名・アーティスト・アルバムを連動テキストで一括書き換え", L"Rewrite filename, artist, and album for the selection as linked text",
+						L"Reecrire nom, artiste et album de la selection en texte lie", L"Riscrivi nome, artista e album della selezione come testo collegato",
+						L"Reescribir nombre, artista y album de la seleccion como texto enlazado", L"선택 곡의 파일명·아티스트·앨범을 연동 텍스트로 한꺼번에 고칩니다",
+						L"用联动文本一次改写所选的文件名、艺术家、专辑", L"إعادة كتابة الاسم والفنان والألبوم كنص مرتبط",
+						L"Правка имени, исполнителя и альбома выбора связанным текстом", L"Dateiname, Artist und Album der Auswahl als gekoppelten Text aendern",
+						L"Reescrever nome, artista e album da selecao como texto ligado", L"Bestandsnaam, artiest en album van de selectie als gekoppelde tekst",
+						L"Zmien nazwe, artyste i album zaznaczenia jako powiazany tekst", L"Secimin ad, sanatci ve albumunu bagli metinle toplu duzenle"));
+			}
+		}
 		if (hasMp) {
 			subTag->AddCommand(PL_CTX_MB_AUTOTAG,
 						LL14(L"MusicBrainz 自動タグ", L"MusicBrainz auto-tag", L"Auto-tag MusicBrainz", L"Auto-tag MusicBrainz",
@@ -3270,6 +3298,7 @@ void CPlayList::HandleTrackContextCmd(int cmd)
 	else if (cmd == PL_CTX_XFADE) OnPopXfadeExport();
 	else if (cmd == PL_CTX_TRANSCODE) OnPopTranscode();
 	else if (cmd == PL_CTX_TAG_EDIT) OnPopTagEdit();
+	else if (cmd == PL_CTX_TAG_BATCH) OnPopTagBatch();
 	else if (cmd == PL_CTX_DEL) {
 		int selCount = 0;
 		int idx = -1;
@@ -3805,7 +3834,7 @@ int CPlayList::chk(CString name,int sub,CString art,CString fol,int ret)
 	// 単体メディアファイルはパス+形式(sub)で同一判定(タグ名とプレイリスト表示名の差異を吸収)
 	const bool pathKeyOnly = (sub == -1 || sub == -6 || sub == 33 || sub == 34 || sub == 35 ||
 		sub == -7 || sub == -8 || sub == -9 ||
-		sub == -10 || sub == 999 || sub == -2 || sub == -3);
+		sub == -10 || sub == 999 || sub == -2 || sub == -3 || sub == MODE_VST_MIDI);
 	for(int j=0;j<i;j++){
 		if (pathKeyOnly) {
 			if (_tcsicmp(pc[j].fol, fol) == 0 && pc[j].sub == sub)
@@ -3813,7 +3842,7 @@ int CPlayList::chk(CString name,int sub,CString art,CString fol,int ret)
 			continue;
 		}
 		c=0;
-		if ((pc[j].sub == -10) || (pc[j].sub == -2) || (pc[j].sub == -3 || pc[j].sub == 30) || (pc[j].sub == 999)) {
+		if ((pc[j].sub == -10) || (pc[j].sub == -2) || (pc[j].sub == -3 || pc[j].sub == 30) || (pc[j].sub == 999) || (pc[j].sub == MODE_VST_MIDI)) {
 			if (_tcscmp(pc[j].fol, fol) == 0 && pc[j].sub == sub && _tcscmp(pc[j].name, name) == 0)
 				return j;
 		}else{
@@ -3907,6 +3936,9 @@ static bool IsPlaylistDropAllowedExt(const CString& pathOrName)
 		_T(".adx"), _T(".ahx"), _T(".hca"), _T(".awb"), _T(".acb"),
 		_T(".at3"), _T(".at9"), _T(".vag"), _T(".xa"), _T(".nub"),
 		_T(".bgm"), _T(".bms"), _T(".bme"), _T(".bml"),
+		_T(".mid"), _T(".midi"), _T(".kar"),
+		_T(".cpr"), _T(".lt10"), _T(".ss10"), _T(".ssw"), _T(".lt9"),
+		_T(".rpp"), _T(".als"), _T(".musicxml"), _T(".mxl"),
 		// ゲーム系コンテナ（ISO/IMG 系は不可。KPI 宣言分は下で許可）
 		_T(".dat"),
 		_T(".bik"), _T(".bk2"), _T(".bks"),
@@ -3977,6 +4009,11 @@ int CPlayList::Add(CString name,int sub,int loop1,int loop2,CString art,CString 
 		case -3:
 			ss = fol.Right(fol.GetLength() - fol.ReverseFind('.') - 1);
 			s.Format(LL14(L"%sファイル", L"%s File", L"%s fichier", L"%s file", L"%s archivo", L"%s 파일", L"%s文件", L"ملف %s", L"файл %s", L"%s-Datei", L"arquivo %s", L"%s bestand", L"plik %s", L"%s dosyası"), ss);
+			break;
+
+		case MODE_VST_MIDI:
+			ss = fol.Right(fol.GetLength() - fol.ReverseFind('.') - 1);
+			s.Format(LL14(L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)"), ss);
 			break;
 
 		case -2:
@@ -4728,6 +4765,7 @@ extern int loop1, loop2;
 void CPlayList::Get(int i)
 {
 		pnt1 = -1;  // 再生曲選択時はあいまい検索アンカーを解除
+		if (i >= 0 && i < playcnt) FixMidiMode(pc[i]);
 		fnn=pc[i].name; filen=pc[i].fol; modesub=pc[i].sub; mode=modesub;
 		loop1=pc[i].loop1; loop2=pc[i].loop2; ret2=pc[i].ret2;
 		ApplyPlaylistRowDisplay(pc[i]);
@@ -4744,6 +4782,7 @@ void CPlayList::RestoreSavedPlaybackRow()
 	if (pnt < 0 || pnt >= playcnt || !pc)
 		return;
 	plcnt = pnt;
+	FixMidiMode(pc[pnt]);
 	fnn = pc[pnt].name;
 	filen = pc[pnt].fol;
 	modesub = pc[pnt].sub;
@@ -10054,8 +10093,56 @@ if (fff == 0)
 
 
 
+void CPlayList::FixMidiMode(playlistdata0& item)
+{
+	if (!(VstIsMidiExt(item.fol) || VstIsProjectExt(item.fol))) return;
+	const int preferVst = (savedata.midPlayPrefer == 1) ? 1 : 0;
+	// VST優先で既に -30、KPI優先で既に -3 → そのまま。
+	// KPIもVSTも無い -2 は許容（KPI優先時の再試行のみ下で行う）。
+	if (preferVst && item.sub == MODE_VST_MIDI) return;
+	if (!preferVst && item.sub == -3) return;
+	if (!preferVst && item.sub == MODE_VST_MIDI) return;
+	if (!preferVst && item.sub != -2) return;
+	playlistdata p;
+	ZeroMemory(&p, sizeof(p));
+	_tcscpy(p.fol, item.fol);
+	_tcscpy(p.name, item.name);
+	p.sub = -2; // plugs が決めなければ DirectShow(-2)
+	TCHAR kpiBuf[512]; kpiBuf[0] = 0;
+	BYTE kv = 0;
+	plugs(item.fol, &p, kpiBuf, kv);
+	if (p.sub == item.sub) return;
+	item.sub = p.sub;
+	CString ss = item.fol;
+	const int dot = ss.ReverseFind(_T('.'));
+	if (dot >= 0) ss = ss.Mid(dot + 1);
+	CString game;
+	if (p.sub == MODE_VST_MIDI)
+		game.Format(LL14(L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)"), ss);
+	else
+		game.Format(LL14(L"%sファイル", L"%s File", L"%s fichier", L"%s file", L"%s archivo", L"%s 파일", L"%s文件", L"ملف %s", L"файл %s", L"%s-Datei", L"arquivo %s", L"%s bestand", L"plik %s", L"%s dosyası"), ss);
+	_tcsncpy_s(item.game, game, _TRUNCATE);
+}
+
 void CPlayList::plugs(CString fff, playlistdata *p,TCHAR* kpi, BYTE& kv)
 {
+	// MIDI/プロジェクト: 動画(-2)扱いにはしない。VST優先なら -30、否则 KPI、最後に VST へフォールバック。
+	const int isMidiOrProj = (VstIsMidiExt(fff) || VstIsProjectExt(fff)) ? 1 : 0;
+	if (p && isMidiOrProj) {
+		wchar_t mid[VST_PATH_CHARS]; mid[0] = 0;
+		wchar_t hints[32][128]; int hc = 0;
+		const int resolved = VstResolvePlayPath(fff, mid, VST_PATH_CHARS, hints, 32, &hc);
+		if (savedata.midPlayPrefer == 1 && resolved) {
+			_tcscpy(p->fol, fff);
+			p->sub = MODE_VST_MIDI;
+			CString ft = fff.Right(fff.GetLength() - fff.ReverseFind(L'\\') - 1);
+			_tcscpy(p->name, ft);
+			p->alb[0] = 0; p->art[0] = 0; p->loop1 = p->loop2 = p->ret2 = 0;
+			if (kpi) { _tcscpy(kpi, mid); }
+			kv = 0;
+			return;
+		}
+	}
 	if (IsDougaVideoFile(fff)) {
 		if (kpi)
 			kpi[0] = 0;
@@ -10067,6 +10154,7 @@ void CPlayList::plugs(CString fff, playlistdata *p,TCHAR* kpi, BYTE& kv)
 	CString ss,ft;
 	int flg=0;
 	for(int i=0;i<kpicnt;i++){
+		if (plugkind[i] != PLUGKIND_KPI) continue;
 		for(int j=0;;j++){
 			if(ext[i][j]=="") break;
 			ss=fff.Right(fff.GetLength()-fff.ReverseFind('.'));ss.MakeLower();
@@ -10088,6 +10176,90 @@ void CPlayList::plugs(CString fff, playlistdata *p,TCHAR* kpi, BYTE& kv)
 		_tcscpy(p->name,ft);
 		p->alb[0]=NULL;p->art[0]=NULL;p->loop1=p->loop2=p->ret2=0;
 		_tcscpy(kpi,ss);
+		return;
+	}
+	plugswinamp(fff, p, kpi, kv);
+	if (p->sub == MODE_PLUGIN_WINAMP) return;
+	plugsxmplay(fff, p, kpi, kv);
+	if (p->sub == MODE_PLUGIN_XMPLAY) return;
+	plugsaimp(fff, p, kpi, kv);
+	// KPI/VST/外部いずれも無い MIDI 等は呼び出し側の初期値(-2=DirectShow)のまま
+}
+
+void CPlayList::plugswinamp(CString fff, playlistdata *p, TCHAR* kpi, BYTE& kv)
+{
+	CString ss, ft;
+	for (int i = 0; i < kpicnt; i++) {
+		if (plugkind[i] != PLUGKIND_WINAMP || kpichk[i] != 1) continue;
+		for (int j = 0;; j++) {
+			if (ext[i][j] == L"") break;
+			ss = fff.Right(fff.GetLength() - fff.ReverseFind(L'.')); ss.MakeLower();
+			if (ext[i][j] == ss) {
+				_tcscpy(p->fol, fff);
+				p->sub = MODE_PLUGIN_WINAMP;
+				ft = fff.Right(fff.GetLength() - fff.ReverseFind(L'\\') - 1);
+				_tcscpy(p->name, ft);
+				p->alb[0] = NULL; p->art[0] = NULL; p->loop1 = p->loop2 = p->ret2 = 0;
+				_tcscpy(kpi, kpif[i]);
+				kv = 0;
+				return;
+			}
+		}
+	}
+}
+
+void CPlayList::plugsxmplay(CString fff, playlistdata *p, TCHAR* kpi, BYTE& kv)
+{
+	CString ss, ft;
+	for (int i = 0; i < kpicnt; i++) {
+		if (plugkind[i] != PLUGKIND_XMPLAY || kpichk[i] != 1) continue;
+		for (int j = 0;; j++) {
+			if (ext[i][j] == L"") break;
+			ss = fff.Right(fff.GetLength() - fff.ReverseFind(L'.')); ss.MakeLower();
+			if (ext[i][j] == ss) {
+				_tcscpy(p->fol, fff);
+				p->sub = MODE_PLUGIN_XMPLAY;
+				ft = fff.Right(fff.GetLength() - fff.ReverseFind(L'\\') - 1);
+				_tcscpy(p->name, ft);
+				p->alb[0] = NULL; p->art[0] = NULL; p->loop1 = p->loop2 = p->ret2 = 0;
+				_tcscpy(kpi, kpif[i]);
+				kv = 0;
+				return;
+			}
+		}
+	}
+}
+
+void CPlayList::plugsaimp(CString fff, playlistdata *p, TCHAR* kpi, BYTE& kv)
+{
+	CString ss, ft;
+	for (int i = 0; i < kpicnt; i++) {
+		if (plugkind[i] != PLUGKIND_AIMP || kpichk[i] != 1) continue;
+		int hasExt = (ext[i][0] != L"");
+		int match = 0;
+		if (hasExt) {
+			ss = fff.Right(fff.GetLength() - fff.ReverseFind(L'.')); ss.MakeLower();
+			for (int j = 0;; j++) {
+				if (ext[i][j] == L"") break;
+				if (ext[i][j] == ss) { match = 1; break; }
+			}
+		}
+		else {
+			// 拡張子未公開: CreateDecoder で実ファイルを試す
+			if (PluginAimp_Open(kpif[i], fff)) {
+				PluginAimp_Close();
+				match = 1;
+			}
+		}
+		if (!match) continue;
+		_tcscpy(p->fol, fff);
+		p->sub = MODE_PLUGIN_AIMP;
+		ft = fff.Right(fff.GetLength() - fff.ReverseFind(L'\\') - 1);
+		_tcscpy(p->name, ft);
+		p->alb[0] = NULL; p->art[0] = NULL; p->loop1 = p->loop2 = p->ret2 = 0;
+		_tcscpy(kpi, kpif[i]);
+		kv = 0;
+		return;
 	}
 }
 
@@ -10324,6 +10496,7 @@ void CPlayList::OnNMDblclkList1(NMHDR *pNMHDR, LRESULT *pResult)
 	Lindex=m_lc.GetNextItem(Lindex,LVNI_ALL |LVNI_SELECTED);i=Lindex;
 	if(Lindex>=playcnt) return;
 	if(Lindex==-1) return;
+	FixMidiMode(pc[Lindex]);
 	//SIcon(i);
 	fnn=pc[Lindex].name;
 	filen=pc[Lindex].fol;
@@ -11073,6 +11246,16 @@ void CPlayList::OnPopTagEdit()
 	if (indices.empty()) return;
 	CTagEditDlg* a = new CTagEditDlg(GetPlaylistModalOwner(this));
 	w_flg = FALSE;
+	a->m_selN = (int)indices.size();
+	if (a->m_selN > 0) {
+		a->m_selIdx = (int*)malloc(sizeof(int) * (size_t)a->m_selN);
+		if (a->m_selIdx) {
+			for (int i = 0; i < a->m_selN; ++i)
+				a->m_selIdx[i] = indices[(size_t)i];
+		}
+		else
+			a->m_selN = 0;
+	}
 	if (indices.size() == 1) {
 		a->multiFile = false;
 		memcpy(&a->pc, &pc[indices[0]], sizeof(playlistdata0));
@@ -11131,6 +11314,39 @@ void CPlayList::OnPopTagEdit()
 			mp->m_list.Invalidate(FALSE);
 	}
 	delete a;
+}
+
+void CPlayList::OnPopTagBatch()
+{
+	int cap = 0;
+	int Lindex = -1;
+	while ((Lindex = m_lc.GetNextItem(Lindex, LVNI_ALL | LVNI_SELECTED)) >= 0) {
+		if (Lindex < playcnt) ++cap;
+	}
+	if (cap < 2)
+		return;
+	int* idx = (int*)malloc(sizeof(int) * (size_t)cap);
+	if (!idx)
+		return;
+	int n = 0;
+	Lindex = -1;
+	while ((Lindex = m_lc.GetNextItem(Lindex, LVNI_ALL | LVNI_SELECTED)) >= 0) {
+		if (Lindex < playcnt)
+			idx[n++] = Lindex;
+	}
+	if (n < 2) {
+		free(idx);
+		return;
+	}
+	CTagBatchEditDlg dlg(GetPlaylistModalOwner(this));
+	dlg.m_idx = idx;
+	dlg.m_n = n;
+	dlg.m_te = NULL;
+	w_flg = FALSE;
+	CWnd::PostMessage(0x118);
+	dlg.DoModal();
+	w_flg = TRUE;
+	free(idx);
 }
 
 void CPlayList::OnFindUp()

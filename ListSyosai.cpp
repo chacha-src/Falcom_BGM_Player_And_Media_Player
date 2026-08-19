@@ -1,4 +1,4 @@
-﻿// ListSyosai.cpp : 実装ファイル
+// ListSyosai.cpp : 実装ファイル
 //
 
 #include "stdafx.h"
@@ -8,6 +8,8 @@
 #include "ListSyosai.h"
 #include "FileTagInfo.h"
 #include "SongParams.h"
+#include "VstMidiEngine.h"
+#include "PluginKinds.h"
 #include <shlwapi.h>
 #include <algorithm>
 
@@ -416,7 +418,7 @@ static bool TrackMatchesPlaying(const playlistdata0& pc)
 	const playlistdata0& cur = pl->pc[plcnt];
 	if (_tcscmp(cur.fol, pc.fol) != 0 || cur.sub != pc.sub)
 		return false;
-	if (pc.sub == -10 || pc.sub == -2 || pc.sub == -3 || pc.sub == 30 || pc.sub == 999)
+	if (pc.sub == -10 || pc.sub == -2 || pc.sub == -3 || pc.sub == 30 || pc.sub == 999 || pc.sub == MODE_VST_MIDI)
 		return _tcscmp(cur.name, pc.name) == 0;
 	return cur.ret2 == pc.ret2;
 }
@@ -902,6 +904,15 @@ BOOL CListSyosai::OnInitDialog()
 	m_art.SetWindowText(pc.art);
 	m_alb.SetWindowText(pc.alb);
 	m_fol.SetWindowText(pc.fol);
+	if (pl) {
+		pl->FixMidiMode(pc);
+		for (int i = 0; i < pl->playcnt; ++i) {
+			if (_tcsicmp(pl->pc[i].fol, pc.fol) == 0) {
+				pl->pc[i].sub = pc.sub;
+				_tcscpy(pl->pc[i].game, pc.game);
+			}
+		}
+	}
 	m_id.SetWindowText(_itot(pc.sub, dy, 10));
 	m_game.SetWindowText(pc.game);
 

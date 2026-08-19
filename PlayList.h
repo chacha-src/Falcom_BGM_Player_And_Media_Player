@@ -59,6 +59,10 @@ public:
 	void AddFilePath(LPCTSTR path);
 	void plug(CString ff,KMPMODULE *mod);
 	void plugs(CString ext1,playlistdata *p,TCHAR* kpi, BYTE& kv);
+	void FixMidiMode(playlistdata0& item); // .mid 等が動画(-2)のまま残っていたら振り直し
+	void plugswinamp(CString ext1, playlistdata *p, TCHAR* kpi, BYTE& kv);
+	void plugsxmplay(CString ext1, playlistdata *p, TCHAR* kpi, BYTE& kv);
+	void plugsaimp(CString ext1, playlistdata *p, TCHAR* kpi, BYTE& kv);
 	void Get(int i);
 	void RestoreSavedPlaybackRow(); // Load 後: 保存 pnt(♪行)から filen/plcnt を復元
 
@@ -147,6 +151,7 @@ public:
 	afx_msg void OnPopTranscode();
 	afx_msg void OnPopXfadeExport();
 	afx_msg void OnPopTagEdit();
+	afx_msg void OnPopTagBatch();
 	CCustomEdit m_find;
 	afx_msg void OnFindUp();
 	afx_msg void OnFindDown();
@@ -264,6 +269,7 @@ enum {
 	PL_CTX_EDIT_CUT = 47,
 	PL_CTX_EDIT_PASTE = 48,
 	PL_CTX_EDIT_REDO = 49,
+	PL_CTX_TAG_BATCH = 50,
 	PL_CTX_MOVE_BASE = 42500,
 	PL_CTX_COPY_BASE = 43500,
 	PL_CTX_MOVE_MAX = PL_CTX_MOVE_BASE + 999,

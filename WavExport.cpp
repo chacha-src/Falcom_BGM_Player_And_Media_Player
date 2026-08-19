@@ -303,14 +303,14 @@ void CWeHelpDlg::OnPaint()
 		L"· Ruta …… archivo (1) o carpeta (varios)", L"· 출력 경로 …… 단곡=파일명, 다중=폴더", L"· 输出路径 …… 单曲为文件名，多选为文件夹", L"· المسار …… ملف لواحدة أو مجلد لعدة",
 		L"· Путь …… файл (1) или папка (несколько)", L"· Pfad …… Datei (1) oder Ordner (mehrere)", L"· Caminho …… arquivo (1) ou pasta (vários)", L"· Pad …… bestand (1) of map (meer)",
 		L"· Ścieżka …… plik (1) lub folder (wiele)", L"· Yol …… tek parça=dosya, çoklu=klasör")); y += lh;
-	body(L, y, LL14(L"・フェードアウト …… 末尾を指定秒でフェード", L"· Fade out …… fade the end over N seconds", L"· Fondu …… fondre la fin sur N sec", L"· Dissolvenza …… fade finale in N sec",
-		L"· Fundido …… fundir el final en N seg", L"· 페이드 아웃 …… 끝을 N초 페이드", L"· 淡出 …… 末尾用 N 秒淡出", L"· تلاشي …… تلاشي النهاية خلال N ث",
-		L"· Затухание …… затухание конца за N сек", L"· Ausblenden …… Ende über N Sek. ausblenden", L"· Fade out …… esmaecer o fim em N seg", L"· Fade-out …… einde over N sec faden",
-		L"· Wyciszanie …… wycisz koniec przez N sek", L"· Solma …… sonu N sn sol")); y += lh;
-	body(L, y, LL14(L"・先頭無音を揃える …… 先頭の無音を指定秒だけ残して揃える", L"· Align leading silence …… keep N sec of lead-in silence", L"· Silence initial …… garder N sec au début", L"· Silenzio iniziale …… lascia N sec all'inizio",
-		L"· Silencio inicial …… dejar N seg al inicio", L"· 앞 무음 맞추기 …… 앞 무음을 N초만 남김", L"· 对齐开头静音 …… 开头静音保留 N 秒", L"· صمت ابتدائي …… الإبقاء على N ث في البداية",
-		L"· Нач. тишина …… оставить N сек в начале", L"· Anfangsstille …… N Sek. am Anfang behalten", L"· Silêncio inicial …… manter N seg no início", L"· Beginstilte …… N sec stilte vooraan houden",
-		L"· Cisza na początku …… zostaw N sek na początku", L"· Baştaki sessizlik …… başta N sn bırak")); y += lh + 4;
+	body(L, y, LL14(L"・フェードアウト …… 末尾を指定秒でフェード（小数可。例 5.5）", L"· Fade out …… fade the end over N seconds (decimals OK, e.g. 5.5)", L"· Fondu …… fondre la fin sur N sec (decimales OK, ex. 5,5)", L"· Dissolvenza …… fade finale in N sec (decimali OK, es. 5,5)",
+		L"· Fundido …… fundir el final en N seg (decimales OK, ej. 5.5)", L"· 페이드 아웃 …… 끝을 N초 페이드 (소수 가능, 예 5.5)", L"· 淡出 …… 末尾用 N 秒淡出（可用小数，例 5.5）", L"· تلاشي …… تلاشي النهاية خلال N ث (كسور مسموحة، مثل 5.5)",
+		L"· Затухание …… затухание конца за N сек (дробные OK, напр. 5.5)", L"· Ausblenden …… Ende über N Sek. ausblenden (Dezimal OK, z.B. 5.5)", L"· Fade out …… esmaecer o fim em N seg (decimais OK, ex. 5.5)", L"· Fade-out …… einde over N sec faden (decimalen OK, bijv. 5.5)",
+		L"· Wyciszanie …… wycisz koniec przez N sek (ulamki OK, np. 5.5)", L"· Solma …… sonu N sn sol (ondalik OK, orn. 5.5)")); y += lh;
+	body(L, y, LL14(L"・先頭無音を揃える …… 先頭の無音を指定秒だけ残して揃える（小数可。例 0.5）", L"· Align leading silence …… keep N sec of lead-in silence (decimals OK, e.g. 0.5)", L"· Silence initial …… garder N sec au début (decimales OK, ex. 0,5)", L"· Silenzio iniziale …… lascia N sec all'inizio (decimali OK, es. 0,5)",
+		L"· Silencio inicial …… dejar N seg al inicio (decimales OK, ej. 0.5)", L"· 앞 무음 맞추기 …… 앞 무음을 N초만 남김 (소수 가능, 예 0.5)", L"· 对齐开头静音 …… 开头静音保留 N 秒（可用小数，例 0.5）", L"· صمت ابتدائي …… الإبقاء على N ث في البداية (كسور مسموحة، مثل 0.5)",
+		L"· Нач. тишина …… оставить N сек в начале (дробные OK, напр. 0.5)", L"· Anfangsstille …… N Sek. am Anfang behalten (Dezimal OK, z.B. 0.5)", L"· Silêncio inicial …… manter N seg no início (decimais OK, ex. 0.5)", L"· Beginstilte …… N sec stilte vooraan houden (decimalen OK, bijv. 0.5)",
+		L"· Cisza na początku …… zostaw N sek na początku (ulamki OK, np. 0.5)", L"· Baştaki sessizlik …… başta N sn bırak (ondalik OK, orn. 0.5)")); y += lh + 4;
 
 	title(L, y, LL14(L"タグ / ジャケット", L"Tags / Cover", L"Tags / Pochette", L"Tag / Copertina", L"Etiquetas / Portada", L"태그 / 재킷", L"标签 / 封面", L"الوسوم / الغلاف",
 		L"Теги / Обложка", L"Tags / Cover", L"Tags / Capa", L"Tags / Cover", L"Tagi / Okładka", L"Etiketler / Kapak"));
@@ -377,6 +377,7 @@ CWavExport::CWavExport(CWnd* pParent)
 	: CCustomBlurDialogBase(CWavExport::IDD, pParent)
 	, multiFile(false)
 	, m_coverBmp(NULL)
+	, m_persistReady(FALSE)
 {
 }
 
@@ -426,6 +427,14 @@ BEGIN_MESSAGE_MAP(CWavExport, CCustomBlurDialogBase)
 	ON_BN_CLICKED(IDC_WAVEXPORT_CLOSE, &CWavExport::OnBnClickedWavExportClose)
 	ON_BN_CLICKED(IDC_WAVEXPORT_COVER_CLEAR, &CWavExport::OnBnClickedCoverClear)
 	ON_BN_CLICKED(IDC_WE_HELP, &CWavExport::OnBnClickedHelp)
+	ON_BN_CLICKED(IDC_WAVEXPORT_FADE, &CWavExport::OnExportOptChanged)
+	ON_BN_CLICKED(IDC_WAVEXPORT_TRIM, &CWavExport::OnExportOptChanged)
+	ON_BN_CLICKED(IDC_WAVEXPORT_COPY_TAGS, &CWavExport::OnExportOptChanged)
+	ON_BN_CLICKED(IDC_WAVEXPORT_PROMPT, &CWavExport::OnExportOptChanged)
+	ON_EN_CHANGE(IDC_WAVEXPORT_FADE_SEC, &CWavExport::OnExportOptChanged)
+	ON_EN_CHANGE(IDC_WAVEXPORT_TRIM_SEC, &CWavExport::OnExportOptChanged)
+	ON_EN_KILLFOCUS(IDC_WAVEXPORT_FADE_SEC, &CWavExport::OnExportSecKillFocus)
+	ON_EN_KILLFOCUS(IDC_WAVEXPORT_TRIM_SEC, &CWavExport::OnExportSecKillFocus)
 	ON_WM_DROPFILES()
 	ON_WM_SIZE()
 	ON_WM_DESTROY()
@@ -492,14 +501,14 @@ BOOL CWavExport::OnInitDialog()
 		L"Выполнить", L"Ausführen", L"Executar", L"Uitvoeren",
 		L"Wykonaj", L"Çalıştır"));
 	m_loop.SetWindowText(L"1");
-	int fadeSec = savedata.wav_export_fade_sec;
-	if (fadeSec <= 0) fadeSec = 15;
-	int trimKeep = savedata.wav_export_trim_keep_sec;
-	if (trimKeep <= 0) trimKeep = 1;
+	float fadeSec = savedata.wav_export_fade_sec;
+	if (fadeSec <= 0.f) fadeSec = 15.f;
+	float trimKeep = savedata.wav_export_trim_keep_sec;
+	if (trimKeep < 0.f) trimKeep = 1.f;
 	CString s;
-	s.Format(L"%d", fadeSec);
+	s.Format(L"%g", (double)fadeSec);
 	m_fadeSec.SetWindowText(s);
-	s.Format(L"%d", trimKeep);
+	s.Format(L"%g", (double)trimKeep);
 	m_trimSec.SetWindowText(s);
 	m_fadeCheck.SetCheck(savedata.wav_export_fade ? BST_CHECKED : BST_UNCHECKED);
 	m_trimCheck.SetCheck(savedata.wav_export_trim_lead ? BST_CHECKED : BST_UNCHECKED);
@@ -625,6 +634,7 @@ BOOL CWavExport::OnInitDialog()
 	}
 	CCC_CaptionLayout(m_hWnd);
 	LayoutHelpBtn();
+	m_persistReady = TRUE;
 	return TRUE;
 }
 
@@ -666,6 +676,7 @@ void CWavExport::OnSize(UINT nType, int cx, int cy)
 
 void CWavExport::OnDestroy()
 {
+	PersistOptionsFromUi(TRUE);
 	if (g_weHelpDlg && ::IsWindow(g_weHelpDlg->GetSafeHwnd()))
 		g_weHelpDlg->DestroyWindow();
 	CCustomBlurDialogBase::OnDestroy();
@@ -676,6 +687,104 @@ BOOL CWavExport::PreTranslateMessage(MSG* pMsg)
 	if (m_tooltip.GetSafeHwnd())
 		m_tooltip.RelayEvent(pMsg);
 	return CCustomBlurDialogBase::PreTranslateMessage(pMsg);
+}
+
+void CWavExport::PersistOptionsFromUi(BOOL clamp)
+{
+	if (!m_persistReady)
+		return;
+	BOOL dirty = FALSE;
+	if (m_fadeCheck.GetSafeHwnd()) {
+		const int v = m_fadeCheck.GetCheck() ? 1 : 0;
+		if (savedata.wav_export_fade != v) { savedata.wav_export_fade = v; dirty = TRUE; }
+	}
+	if (m_trimCheck.GetSafeHwnd()) {
+		const int v = m_trimCheck.GetCheck() ? 1 : 0;
+		if (savedata.wav_export_trim_lead != v) { savedata.wav_export_trim_lead = v; dirty = TRUE; }
+	}
+	if (m_copyTags.GetSafeHwnd()) {
+		const int v = m_copyTags.GetCheck() ? 1 : 0;
+		if (savedata.wav_export_copy_tags != v) { savedata.wav_export_copy_tags = v; dirty = TRUE; }
+	}
+	if (m_promptCheck.GetSafeHwnd()) {
+		const int v = m_promptCheck.GetCheck() ? 1 : 0;
+		if (savedata.wav_export_apply_prompt != v) { savedata.wav_export_apply_prompt = v; dirty = TRUE; }
+	}
+	if (m_fadeSec.GetSafeHwnd()) {
+		CString s;
+		m_fadeSec.GetWindowText(s);
+		s.Trim();
+		if (!s.IsEmpty()) {
+			const float v = (float)_tstof(s);
+			if (v >= 0.1f) {
+				if (savedata.wav_export_fade_sec != v) { savedata.wav_export_fade_sec = v; dirty = TRUE; }
+			}
+			else if (clamp && savedata.wav_export_fade_sec != 15.f) {
+				savedata.wav_export_fade_sec = 15.f;
+				dirty = TRUE;
+			}
+		}
+		else if (clamp && savedata.wav_export_fade_sec != 15.f) {
+			savedata.wav_export_fade_sec = 15.f;
+			dirty = TRUE;
+		}
+	}
+	if (m_trimSec.GetSafeHwnd()) {
+		CString s;
+		m_trimSec.GetWindowText(s);
+		s.Trim();
+		if (!s.IsEmpty()) {
+			const float v = (float)_tstof(s);
+			if (v >= 0.f) {
+				if (savedata.wav_export_trim_keep_sec != v) { savedata.wav_export_trim_keep_sec = v; dirty = TRUE; }
+			}
+			else if (clamp) {
+				if (savedata.wav_export_trim_keep_sec != 1.f) { savedata.wav_export_trim_keep_sec = 1.f; dirty = TRUE; }
+			}
+		}
+		else if (clamp && savedata.wav_export_trim_keep_sec != 1.f) {
+			savedata.wav_export_trim_keep_sec = 1.f;
+			dirty = TRUE;
+		}
+	}
+	if (dirty)
+		MpPersistSavedataQuick();
+}
+
+void CWavExport::OnExportOptChanged()
+{
+	PersistOptionsFromUi(FALSE);
+}
+
+void CWavExport::OnExportSecKillFocus()
+{
+	if (!m_persistReady)
+		return;
+	if (m_fadeSec.GetSafeHwnd()) {
+		CString s;
+		m_fadeSec.GetWindowText(s);
+		const float v = (float)_tstof(s);
+		if (s.IsEmpty() || v < 0.1f) {
+			CString t;
+			t.Format(L"%g", 15.0);
+			m_persistReady = FALSE;
+			m_fadeSec.SetWindowText(t);
+			m_persistReady = TRUE;
+		}
+	}
+	if (m_trimSec.GetSafeHwnd()) {
+		CString s;
+		m_trimSec.GetWindowText(s);
+		const float v = (float)_tstof(s);
+		if (s.IsEmpty() || v < 0.f) {
+			CString t;
+			t.Format(L"%g", 1.0);
+			m_persistReady = FALSE;
+			m_trimSec.SetWindowText(t);
+			m_persistReady = TRUE;
+		}
+	}
+	PersistOptionsFromUi(TRUE);
 }
 
 void CWavExport::OnBnClickedCoverClear()
@@ -750,12 +859,11 @@ void CWavExport::OnBnClickedWavExportExec()
 	if (loopCount < 1) loopCount = 1;
 	double fadeSecD = _tstof(fadeStr);
 	if (fadeSecD < 0.1) fadeSecD = 15.0;
-	int fadeSec = (int)(fadeSecD + 0.5);
-	if (fadeSec < 1) fadeSec = 1;
+	float fadeSec = (float)fadeSecD;
 	double trimKeepSecD = _tstof(trimStr);
 	if (trimKeepSecD < 0) trimKeepSecD = 1.0;
-	int trimKeepSec = (int)(trimKeepSecD + 0.5);
-	if (trimKeepSec < 0) trimKeepSec = 0;
+	float trimKeepSec = (float)trimKeepSecD;
+	if (trimKeepSec < 0.f) trimKeepSec = 0.f;
 
 	WavExportOptions opts = {};
 	opts.fadeEnable = m_fadeCheck.GetCheck() ? 1 : 0;
@@ -769,6 +877,7 @@ void CWavExport::OnBnClickedWavExportExec()
 	savedata.wav_export_trim_keep_sec = opts.trimKeepSec;
 	savedata.wav_export_copy_tags = m_copyTags.GetCheck() ? 1 : 0;
 	savedata.wav_export_apply_prompt = opts.applyPrompt;
+	MpPersistSavedataQuick();
 	ExportTagUi_Collect(multiFile, savedata.wav_export_copy_tags, m_title, m_artist, m_album, m_coverPath, opts);
 
 	if (pathStr.IsEmpty()) {

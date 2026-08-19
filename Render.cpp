@@ -1,4 +1,4 @@
-﻿// Render.cpp : インプリメンテーション ファイル
+// Render.cpp : インプリメンテーション ファイル
 //
 
 #include "stdafx.h"
@@ -14,9 +14,13 @@
 #include "AudioUpscaler.h"
 #include "XfadePlayback.h"
 #include "AudioDevSync.h"
+#include "VstMidiEngine.h"
 #include <mutex>
 #include <mmdeviceapi.h>
 #include <FunctionDiscoveryKeys_devpkey.h>
+#include <CommDlg.h>
+#include <ShlObj.h>
+#include <mmsystem.h>
 
 static void SerializeLogFont(const LOGFONT* lf, TCHAR* str, int maxLen)
 {
@@ -272,6 +276,21 @@ void CRdHelpDlg::OnPaint()
 		L"· Asociación …… audio + vídeo (avi/mp4/mkv…) y listas", L"· 파일 연결 …… 음성+동영상(avi/mp4/mkv 등)+재생목록", L"· 文件关联 …… 音频+视频(avi/mp4/mkv等)+播放列表", L"· ربط الملفات …… صوت+فيديو+قوائم",
 		L"· Связь файлов …… аудио + видео (avi/mp4/mkv…) и плейлисты", L"· Dateizuordnung …… Audio + Video (avi/mp4/mkv…) und Playlists", L"· Associação …… áudio + vídeo (avi/mp4/mkv…) e playlists", L"· Koppeling …… audio + video (avi/mp4/mkv…) en playlists",
 		L"· Powiązanie …… audio + wideo (avi/mp4/mkv…) i playlisty", L"· İlişkilendirme …… ses + video (avi/mp4/mkv…) ve listeler")); y += lh;
+	body(L, y, LL14(
+		L"・MIDI再生 …… KPI優先／VST優先。明示DLLが空なら MIDI出力コンボの機器（未指定はWindows MIDIマッパー）。",
+		L"· MIDI play …… Prefer KPI/VST. Empty DLL uses the MIDI out combo (default: Windows MIDI Mapper).",
+		L"· MIDI …… KPI/VST. DLL vide = combo MIDI out (défaut: MIDI Mapper).",
+		L"· MIDI …… KPI/VST. DLL vuota = combo MIDI out (predef.: MIDI Mapper).",
+		L"· MIDI …… KPI/VST. DLL vacía = combo MIDI out (predet.: MIDI Mapper).",
+		L"· MIDI …… KPI/VST. DLL이 비면 MIDI 출력 콤보(기본: MIDI Mapper).",
+		L"· MIDI …… KPI/VST。DLL为空则用MIDI输出组合框（默认 Windows MIDI Mapper）。",
+		L"· MIDI …… KPI/VST. DLL فارغ = قائمة MIDI (الافتراضي: MIDI Mapper).",
+		L"· MIDI …… KPI/VST. Пустой DLL = комбо MIDI out (по умолч. MIDI Mapper).",
+		L"· MIDI …… KPI/VST. Leere DLL = MIDI-Out-Combo (Standard: MIDI Mapper).",
+		L"· MIDI …… KPI/VST. DLL vazia = combo MIDI out (padrao: MIDI Mapper).",
+		L"· MIDI …… KPI/VST. Lege DLL = MIDI-outcombo (standaard: MIDI Mapper).",
+		L"· MIDI …… KPI/VST. Pusty DLL = combo MIDI out (domyslnie MIDI Mapper).",
+		L"· MIDI …… KPI/VST. Bos DLL = MIDI cikis combo (varsayilan: MIDI Mapper).")); y += lh;
 	muted(L, y, LL14(
 		L"OKで保存して閉じる。キャンセルは変更を破棄。各項目の細かい注意はツールチップにあります。",
 		L"OK saves and closes. Cancel discards changes. Fine print is in the tooltips.",
@@ -488,6 +507,14 @@ void CRender::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDCANCEL, m_canceldummy);
 	DDX_Control(pDX, IDC_COMBO_LANG, m_comboLang);
 	DDX_Control(pDX, IDC_CHECK_UPSCALE, m_upscale);
+	DDX_Control(pDX, IDC_MID_PREFER_KPI, m_midPreferKpi);
+	DDX_Control(pDX, IDC_MID_PREFER_VST, m_midPreferVst);
+	DDX_Control(pDX, IDC_VST_MULTI_COMBO, m_vstMultiCombo);
+	DDX_Control(pDX, IDC_VST_EXTRA_PATH, m_vstExtraPath);
+	DDX_Control(pDX, IDC_VST_MULTI_DLL, m_vstMultiDll);
+	DDX_Control(pDX, IDC_VST_EXTRA_BROWSE, m_vstExtraBrowse);
+	DDX_Control(pDX, IDC_VST_MULTI_BROWSE, m_vstMultiBrowse);
+	DDX_Control(pDX, IDC_VST_SCAN_NOW, m_vstScanNow);
 	DDX_Control(pDX, IDC_COMBO_SPEAKER, m_speaker);
 }
 
@@ -531,6 +558,11 @@ BEGIN_MESSAGE_MAP(CRender, CCustomBlurDialogExBase)
 	ON_CBN_SELCHANGE(IDC_COMBO3, &CRender::OnCbnSelchangeCombo3)
 	ON_CBN_SELCHANGE(IDC_COMBO_SPEAKER, &CRender::OnCbnSelchangeSpeaker)
 	ON_BN_CLICKED(IDC_CHECK_UPSCALE, &CRender::OnBnClickedCheckUpscale)
+	ON_BN_CLICKED(IDC_MID_PREFER_KPI, &CRender::OnMidPreferKpi)
+	ON_BN_CLICKED(IDC_MID_PREFER_VST, &CRender::OnMidPreferVst)
+	ON_BN_CLICKED(IDC_VST_EXTRA_BROWSE, &CRender::OnVstExtraBrowse)
+	ON_BN_CLICKED(IDC_VST_MULTI_BROWSE, &CRender::OnVstMultiBrowse)
+	ON_BN_CLICKED(IDC_VST_SCAN_NOW, &CRender::OnVstScanNow)
 	ON_BN_CLICKED(IDC_CHECK51, &CRender::OnBnClicked32bit)
 	ON_BN_CLICKED(IDC_CHECK3, &CRender::OnBnClickedCheck3)
 	ON_WM_CTLCOLOR()
@@ -575,9 +607,9 @@ BOOL CRender::OnInitDialog()
 	SetDlgItemText(IDOK, LL14(L"OK", L"OK", L"OK", L"OK", L"OK", L"확인", L"确定", L"موافق", L"OK", L"OK", L"OK", L"OK", L"OK", L"Tamam"));
 	SetDlgItemText(IDCANCEL, LL14(L"キャンセル", L"Cancel", L"Annuler", L"Annulla", L"Cancelar", L"취소", L"取消", L"إلغاء", L"Отмена", L"Abbrechen", L"Cancelar", L"Annuleren", L"Anuluj", L"İptal"));
 	SetDlgItemText(IDCANCEL2, LL14(L"DirectShowフィルタ一覧", L"DirectShow Filter List", L"Liste des filtres DirectShow", L"Elenco filtri DirectShow", L"Lista de filtros DirectShow", L"DirectShow 필터 목록", L"DirectShow 过滤器列表", L"قائمة مرشحات DirectShow", L"Список фильтров DirectShow", L"DirectShow-Filterliste", L"Lista de filtros DirectShow", L"DirectShow-filterlijst", L"Lista filtrów DirectShow", L"DirectShow Filtre Listesi"));
-	SetDlgItemText(IDCANCEL3, LL14(L"kpi一覧", L"kpi List", L"Liste kpi", L"Elenco kpi", L"Lista kpi", L"kpi 목록", L"kpi 列表", L"قائمة kpi", L"Список kpi", L"kpi-Liste", L"Lista kpi", L"kpi-lijst", L"Lista kpi", L"kpi Listesi"));
-	SetDlgItemText(IDC_KPI_PLUGIN_DL, LL14(L"KPIプラグインDL", L"KPI plugin DL", L"DL plugins KPI", L"DL plugin KPI", L"DL plugins KPI", L"KPI 플러그인 DL", L"KPI 插件下载", L"تنزيل KPI", L"Скачать KPI", L"KPI-Plugin DL", L"DL plugins KPI", L"KPI-plugin DL", L"Pobierz KPI", L"KPI eklenti DL"));
-	SetDlgItemText(IDC_KPI_PLUGIN_RELOAD, LL14(L"KPI再読込", L"Reload KPI", L"Relire KPI", L"Ricarica KPI", L"Recargar KPI", L"KPI 다시 읽기", L"重新加载 KPI", L"إعادة KPI", L"Перечитать KPI", L"KPI neu laden", L"Recarregar KPI", L"KPI herladen", L"Wczytaj KPI", L"KPI yeniden"));
+	SetDlgItemText(IDCANCEL3, LL14(L"プラグイン一覧", L"Plugins", L"Plugins", L"Plugin", L"Plugins", L"플러그인", L"插件", L"إضافات", L"Плагины", L"Plugins", L"Plugins", L"Plug-ins", L"Wtyczki", L"Eklentiler"));
+	SetDlgItemText(IDC_KPI_PLUGIN_DL, LL14(L"KPIプラグインDL", L"Download KPI", L"Telecharger KPI", L"Scarica KPI", L"Descargar KPI", L"KPI 다운로드", L"下载 KPI", L"تنزيل KPI", L"Скачать KPI", L"KPI laden", L"Baixar KPI", L"KPI downloaden", L"Pobierz KPI", L"KPI indir"));
+	SetDlgItemText(IDC_KPI_PLUGIN_RELOAD, LL14(L"プラグイン再読込", L"Reload plugins", L"Relire plugins", L"Ricarica plugin", L"Recargar plugins", L"플러그인 다시 읽기", L"重新加载插件", L"إعادة الإضافات", L"Перечитать плагины", L"Plugins neu laden", L"Recarregar plugins", L"Plugins herladen", L"Wczytaj wtyczki", L"Eklentileri yeniden"));
 	SetDlgItemText(IDCANCEL5, LL14(L"関連付け", L"File Association", L"Association de fichiers", L"Associazione file", L"Asociación de archivos", L"파일 연결", L"文件关联", L"ربط الملفات", L"Связь файлов", L"Dateizuordnung", L"Associação de ficheiros", L"Bestandskoppeling", L"Powiazanie plików", L"Dosya ilişkilendirme"));
 	SetDlgItemText(IDC_CHECK1, LL14(L"デフォルトでEVR使用(Vista以降)", L"Default EVR use (Vista+)", L"EVR par défaut (Vista+)", L"Uso EVR predefinito (Vista+)", L"Uso EVR predeterminado (Vista+)", L"기본 EVR 사용(Vista+)", L"默认使用 EVR（Vista+）", L"استخدام EVR افتراضي (Vista+)", L"Использовать EVR по умолчанию (Vista+)", L"EVR standardmäßig (Vista+)", L"Usar EVR por defeito (Vista+)", L"Standaard EVR (Vista+)", L"Domyślne EVR (Vista+)", L"Varsayılan EVR kullan (Vista+)"));
 	SetDlgItemText(IDC_CHECK2, LL14(L"デスクトップコンポジションを使用する", L"Use desktop composition", L"Utiliser la composition du bureau", L"Usa composizione desktop", L"Usar composición de escritorio", L"데스크톱 컴포지션 사용", L"使用桌面合成", L"استخدام تركيب سطح المكتب", L"Использовать композицию рабочего стола", L"Desktop-Komposition verwenden", L"Usar composição do ambiente de trabalho", L"Bureaubladcompositie gebruiken", L"Użyj kompozycji pulpitu", L"Masaüstü birleşimini kullan"));
@@ -683,6 +715,18 @@ BOOL CRender::OnInitDialog()
 	m_32bit.SetCheck(savedata.bit32);
 	m_m4a.SetCheck(savedata.m4a);
 	m_upscale.SetCheck(savedata.upscale_enable ? BST_CHECKED : BST_UNCHECKED);
+	m_midPreferKpi.SetCheck(savedata.midPlayPrefer == 0 ? BST_CHECKED : BST_UNCHECKED);
+	m_midPreferVst.SetCheck(savedata.midPlayPrefer == 1 ? BST_CHECKED : BST_UNCHECKED);
+	SetDlgItemText(IDC_STATIC_MID_PREFER, LL14(L"MIDI再生", L"MIDI play", L"Lecture MIDI", L"Riproduzione MIDI", L"Reproduccion MIDI", L"MIDI 재생", L"MIDI播放", L"تشغيل MIDI", L"Воспроизведение MIDI", L"MIDI-Wiedergabe", L"Reproducao MIDI", L"MIDI-weergave", L"Odtwarzanie MIDI", L"MIDI oynatma"));
+	SetDlgItemText(IDC_MID_PREFER_KPI, LL14(L"KPI優先", L"Prefer KPI", L"Preferer KPI", L"Preferisci KPI", L"Preferir KPI", L"KPI 우선", L"优先KPI", L"تفضيل KPI", L"Предпочитать KPI", L"KPI bevorzugen", L"Preferir KPI", L"KPI verkiezen", L"Preferuj KPI", L"KPI tercih"));
+	SetDlgItemText(IDC_MID_PREFER_VST, LL14(L"VST優先", L"Prefer VST", L"Preferer VST", L"Preferisci VST", L"Preferir VST", L"VST 우선", L"优先VST", L"تفضيل VST", L"Предпочитать VST", L"VST bevorzugen", L"Preferir VST", L"VST verkiezen", L"Preferuj VST", L"VST tercih"));
+	SetDlgItemText(IDC_STATIC_VST_MULTI, LL14(L"MIDI出力", L"MIDI out", L"Sortie MIDI", L"Uscita MIDI", L"Salida MIDI", L"MIDI 출력", L"MIDI输出", L"خرج MIDI", L"MIDI-выход", L"MIDI-Out", L"Saida MIDI", L"MIDI-uit", L"Wyjscie MIDI", L"MIDI cikis"));
+	SetDlgItemText(IDC_STATIC_VST_EXTRA, LL14(L"追加検索", L"Extra folder", L"Dossier extra", L"Cartella extra", L"Carpeta extra", L"추가 폴더", L"附加搜索", L"مجلد إضافي", L"Доп. папка", L"Zusatzordner", L"Pasta extra", L"Extra map", L"Dodatkowy folder", L"Ekstra klasör"));
+	SetDlgItemText(IDC_STATIC_VST_DLL, LL14(L"明示DLL", L"Explicit DLL", L"DLL explicite", L"DLL esplicita", L"DLL explícita", L"명시 DLL", L"指定DLL", L"DLL صريح", L"Явный DLL", L"Explizite DLL", L"DLL explícita", L"Expliciete DLL", L"Jawny DLL", L"Açık DLL"));
+	SetDlgItemText(IDC_VST_SCAN_NOW, LL14(L"再", L"Scan", L"Scan", L"Scan", L"Scan", L"재", L"再", L"مسح", L"Скан", L"Scan", L"Scan", L"Scan", L"Skan", L"Tara"));
+	m_vstExtraPath.SetWindowText(savedata.vstExtraPath);
+	m_vstMultiDll.SetWindowText(savedata.vstMultiDll);
+	FillVstMultiCombo();
 	m_speaker.ResetContent();
 	m_speaker.AddString(LL14(L"ステレオ (2ch)", L"Stereo (2ch)", L"Stéréo (2ch)", L"Stereo (2ch)", L"Estéreo (2ch)", L"스테레오 (2ch)", L"立体声 (2ch)", L"ستيريو (2ch)", L"Стерео (2ch)", L"Stereo (2ch)", L"Estéreo (2ch)", L"Stereo (2ch)", L"Stereo (2ch)", L"Stereo (2ch)"));
 	m_speaker.AddString(LL14(L"2.1ch (L+R+LFE)", L"2.1ch (L+R+LFE)", L"2,1ch (G+D+LFE)", L"2.1ch (L+R+LFE)", L"2.1ch (L+R+LFE)", L"2.1ch (L+R+LFE)", L"2.1ch (左+右+低音)", L"2.1ش (يسار+يمين+باس)", L"2.1ch (L+R+LFE)", L"2.1ch (L+R+LFE)", L"2.1ch (L+R+LFE)", L"2.1ch (L+R+LFE)", L"2.1ch (L+R+LFE)", L"2.1ch (L+R+LFE)"));
@@ -700,13 +744,44 @@ BOOL CRender::OnInitDialog()
 	CCustomControlUtility::BeginDialogToolTip(m_tooltip, this);
 	if (m_help.GetSafeHwnd())
 		m_tooltip.AddTool(&m_help, LL14(L"操作ガイドを表示", L"Show operation guide", L"Afficher le guide", L"Mostra guida", L"Mostrar guía", L"조작 가이드 표시", L"显示操作指南", L"إظهار الدليل", L"Показать руководство", L"Bedienungsanleitung", L"Mostrar guia", L"Handleiding tonen", L"Pokaż przewodnik", L"İşlem kılavuzunu göster"));
+	m_tooltip.AddTool(&m_vstMultiCombo, LL14(
+		L"接続中のMIDI出力機器。明示DLLが空のときに使います。先頭はWindows MIDIマッパー。",
+		L"Connected MIDI outputs. Used when the explicit DLL is empty. First item is Windows MIDI Mapper.",
+		L"Sorties MIDI connectees. Utilisees si le DLL est vide. Premier = MIDI Mapper.",
+		L"Uscite MIDI collegate. Usate se la DLL e vuota. Primo = MIDI Mapper.",
+		L"Salidas MIDI conectadas. Se usan si la DLL esta vacia. Primero = MIDI Mapper.",
+		L"연결된 MIDI 출력. 명시 DLL이 비었을 때 사용. 첫 항목은 MIDI Mapper.",
+		L"已连接的MIDI输出。显式DLL为空时使用。第一项为 Windows MIDI Mapper。",
+		L"مخارج MIDI المتصلة. تُستخدم عند فراغ DLL. الأول = MIDI Mapper.",
+		L"Подключённые MIDI-выходы. Если DLL пуст. Первый = MIDI Mapper.",
+		L"Angeschlossene MIDI-Ausgaenge. Bei leerer DLL. Erstes = MIDI Mapper.",
+		L"Saidas MIDI ligadas. Usadas se a DLL estiver vazia. Primeiro = MIDI Mapper.",
+		L"Aangesloten MIDI-uitgangen. Bij lege DLL. Eerste = MIDI Mapper.",
+		L"Podlaczone wyjscia MIDI. Gdy DLL pusty. Pierwsze = MIDI Mapper.",
+		L"Bagli MIDI cikislar. DLL bossa kullanilir. Ilk = MIDI Mapper."));
+	m_tooltip.AddTool(&m_vstScanNow, LL14(
+		L"接続中のMIDI出力機器を再検出します",
+		L"Rescan connected MIDI output devices",
+		L"Rechercher les sorties MIDI connectees",
+		L"Rileva di nuovo le uscite MIDI",
+		L"Volver a detectar salidas MIDI",
+		L"연결된 MIDI 출력을 다시 찾습니다",
+		L"重新检测已连接的MIDI输出",
+		L"إعادة كشف مخارج MIDI",
+		L"Повторить поиск MIDI-выходов",
+		L"MIDI-Ausgaenge erneut erkennen",
+		L"Detetar de novo saidas MIDI",
+		L"MIDI-uitgangen opnieuw zoeken",
+		L"Ponownie wykryj wyjscia MIDI",
+		L"Bagli MIDI cikislarini yeniden tara"));
+	m_tooltip.AddTool(&m_vstMultiDll, LL14(L"VST音源DLLを直接指定（空=MIDI出力コンボの機器）", L"Explicit VSTi DLL (empty=MIDI out combo)", L"DLL VSTi explicite (vide=combo MIDI)", L"DLL VSTi esplicita (vuoto=combo MIDI)", L"DLL VSTi explícita (vacío=combo MIDI)", L"VSTi DLL 직접 지정(비우면 MIDI 출력 콤보)", L"直接指定VSTi DLL（空=MIDI输出组合框）", L"DLL VSTi صريح (فارغ=قائمة MIDI)", L"Явный VSTi DLL (пусто=комбо MIDI)", L"Explizite VSTi-DLL (leer=MIDI-Out-Combo)", L"DLL VSTi explícita (vazio=combo MIDI)", L"Expliciete VSTi-DLL (leeg=MIDI-combo)", L"Jawny DLL VSTi (puste=combo MIDI)", L"Acik VSTi DLL (bos=MIDI combo)"));
 	m_tooltip.AddTool(GetDlgItem(IDOK), LL14(L"設定を保存して閉じます", L"Save settings and close", L"Enregistrer les parametres et fermer", L"Salva impostazioni e chiudi", L"Guardar ajustes y cerrar", L"설정 저장 후 닫기", L"保存设置并关闭", L"حفظ الإعدادات وإغلاق", L"Сохранить настройки и закрыть", L"Einstellungen speichern und schließen", L"Salvar configuracoes e fechar", L"Instellingen opslaan en sluiten", L"Zapisz ustawienia i zamknij", L"Ayarları kaydet ve kapat"));	m_tooltip.AddTool(GetDlgItem(IDCANCEL), LL14(L"保存せずに閉じます", L"Close without saving", L"Fermer sans enregistrer", L"Chiudi senza salvare", L"Cerrar sin guardar", L"저장하지 않고 닫기", L"不保存并关闭", L"إغلاق دون حفظ", L"Закрыть без сохранения", L"Ohne Speichern schließen", L"Fechar sem salvar", L"Sluiten zonder opslaan", L"Zamknij bez zapisywania", L"Kaydetmeden kapat"));
 	m_tooltip.AddTool(GetDlgItem(IDC_COMBO2), LL14(L"DirectSoundの出力デバイスを選択します", L"Select DirectSound output device", L"Choisir le peripherique de sortie DirectSound", L"Seleziona dispositivo di uscita DirectSound", L"Seleccionar dispositivo de salida DirectSound", L"DirectSound 출력 장치 선택", L"选择 DirectSound 输出设备", L"اختر جهاز إخراج DirectSound", L"Выбрать устройство вывода DirectSound", L"DirectSound-Ausgabegerat wahlen", L"Selecionar dispositivo de saida DirectSound", L"DirectSound-uitvoerapparaat kiezen", L"Wybierz urzadzenie wyjsciowe DirectSound", L"DirectSound cikis aygitini sec"));
 	m_tooltip.AddTool(GetDlgItem(IDC_COMBO_MICDEV), LL14(L"WAV保存時のマイクミックス／録音に使うマイク端末を選びます", L"Select microphone for WAV mic-mix / recording", L"Choisir le micro pour le mix WAV / enregistrement", L"Scegli il microfono per mix WAV / registrazione", L"Elegir microfono para mix WAV / grabacion", L"WAV 마이크 믹스/녹음에 쓸 마이크 선택", L"选择用于WAV麦克风混音/录音的麦克风", L"اختر الميكروفون لمزج/تسجيل WAV", L"Выберите микрофон для микса/записи WAV", L"Mikrofon fur WAV-Mix / Aufnahme wahlen", L"Escolher microfone para mix WAV / gravacao", L"Kies microfoon voor WAV-mix / opname", L"Wybierz mikrofon do miksu/nagrania WAV", L"WAV miks/kayit icin mikrofon secin"));
 	m_tooltip.AddTool(GetDlgItem(IDC_FONT), LL14(L"メイン画面のフォントを設定します", L"Set main window font", L"Definir la police de la fenetre principale", L"Imposta carattere finestra principale", L"Establecer fuente de ventana principal", L"메인 화면 글꼴 설정", L"设置主窗口字体", L"تعيين خط النافذة الرئيسية", L"Задать шрифт главного окна", L"Schriftart des Hauptfensters festlegen", L"Definir fonte da janela principal", L"Lettertype hoofdvenster instellen", L"Ustaw czcionke okna glownego", L"Ana pencere yazi tipini ayarla"));
 	m_tooltip.AddTool(GetDlgItem(IDC_FONT2), LL14(L"リスト画面（プレイリスト等）のフォントを設定します", L"Set list view font (playlist, etc.)", L"Definir la police des vues liste (playlist, etc.)", L"Imposta carattere viste elenco (playlist, ecc.)", L"Establecer fuente de listas (playlist, etc.)", L"목록 화면(재생 목록 등) 글꼴 설정", L"设置列表界面（播放列表等）字体", L"تعيين خط عرض القائمة (قائمة التشغيل، إلخ)", L"Задать шрифт списков (плейлист и т.д.)", L"Schriftart fur Listenansichten festlegen", L"Definir fonte das listas (playlist etc.)", L"Lettertype lijstweergaven instellen", L"Ustaw czcionke widokow listy", L"Liste gorunumu yazi tipini ayarla"));
 	m_tooltip.AddTool(GetDlgItem(IDCANCEL2), LL14(L"再生中の使用DirectShowフィルタを表示します。", L"Show DirectShow filters in use during playback.", L"Afficher les filtres DirectShow utilises pendant la lecture.", L"Mostra filtri DirectShow in uso durante la riproduzione.", L"Mostrar filtros DirectShow en uso durante la reproduccion.", L"재생 중 사용 중인 DirectShow 필터 표시.", L"显示播放中使用的 DirectShow 过滤器。", L"إظهار مرشحات DirectShow المستخدمة أثناء التشغيل.", L"Показать фильтры DirectShow при воспроизведении.", L"DirectShow-Filter wahrend der Wiedergabe anzeigen.", L"Mostrar filtros DirectShow em uso durante reproducao.", L"DirectShow-filters tonen tijdens afspelen.", L"Pokaz filtry DirectShow uzywane podczas odtwarzania.", L"Calma sirasinda kullanilan DirectShow filtrelerini goster."));
-	m_tooltip.AddTool(GetDlgItem(IDCANCEL3), LL14(L"kpi一覧を表示します。", L"Show kpi list.", L"Afficher la liste kpi.", L"Mostra elenco kpi.", L"Mostrar lista kpi.", L"kpi 목록 표시.", L"显示 kpi 列表。", L"إظهار قائمة kpi.", L"Показать список kpi.", L"kpi-Liste anzeigen.", L"Mostrar lista kpi.", L"kpi-lijst tonen.", L"Pokaz liste kpi.", L"kpi listesini goster."));
+	m_tooltip.AddTool(GetDlgItem(IDCANCEL3), LL14(L"プラグイン一覧を表示します。", L"Show plugin list.", L"Afficher la liste des plugins.", L"Mostra elenco plugin.", L"Mostrar lista de plugins.", L"플러그인 목록 표시.", L"显示插件列表。", L"إظهار قائمة الإضافات.", L"Показать список плагинов.", L"Plugin-Liste anzeigen.", L"Mostrar lista de plugins.", L"Pluginlijst tonen.", L"Pokaz liste wtyczek.", L"Eklenti listesini goster."));
 	m_tooltip.AddTool(&m_kpiPluginDl, LL14(
 		L"公式 Plugins.zip をダウンロードし、このプログラムと同じフォルダへ展開します。",
 		L"Download official Plugins.zip and extract next to this program.",
@@ -1244,6 +1319,75 @@ void CRender::OnKpiPluginReload()
 
 extern HFONT	hFont;
 #include "afxdlgs.h"
+
+void CRender::OnMidPreferKpi()
+{
+	savedata.midPlayPrefer = 0;
+	m_midPreferKpi.SetCheck(BST_CHECKED);
+	m_midPreferVst.SetCheck(BST_UNCHECKED);
+}
+
+void CRender::OnMidPreferVst()
+{
+	savedata.midPlayPrefer = 1;
+	m_midPreferKpi.SetCheck(BST_UNCHECKED);
+	m_midPreferVst.SetCheck(BST_CHECKED);
+}
+
+void CRender::FillVstMultiCombo()
+{
+	m_vstMultiCombo.ResetContent();
+	int mapperIdx = m_vstMultiCombo.AddString(LL14(
+		L"Windows MIDIマッパー", L"Windows MIDI Mapper", L"Windows MIDI Mapper",
+		L"Windows MIDI Mapper", L"Windows MIDI Mapper", L"Windows MIDI Mapper",
+		L"Windows MIDI Mapper", L"Windows MIDI Mapper", L"Windows MIDI Mapper",
+		L"Windows MIDI Mapper", L"Windows MIDI Mapper", L"Windows MIDI Mapper",
+		L"Windows MIDI Mapper", L"Windows MIDI Mapper"));
+	m_vstMultiCombo.SetItemData(mapperIdx, (DWORD_PTR)MIDI_MAPPER);
+	int sel = 0;
+	const UINT n = midiOutGetNumDevs();
+	for (UINT i = 0; i < n; ++i) {
+		MIDIOUTCAPS c = {};
+		if (midiOutGetDevCaps(i, &c, sizeof(c)) != MMSYSERR_NOERROR) continue;
+		if (!c.szPname[0]) continue;
+		int idx = m_vstMultiCombo.AddString(c.szPname);
+		m_vstMultiCombo.SetItemData(idx, (DWORD_PTR)i);
+		if (savedata.midiOutName[0] && _tcsicmp(savedata.midiOutName, c.szPname) == 0)
+			sel = idx;
+	}
+	m_vstMultiCombo.SetCurSel(sel);
+}
+
+void CRender::OnVstExtraBrowse()
+{
+	BROWSEINFO bi = {};
+	TCHAR path[MAX_PATH] = {};
+	bi.hwndOwner = m_hWnd;
+	bi.lpszTitle = LL14(L"追加VSTフォルダ", L"Extra VST folder", L"Dossier VST extra", L"Cartella VST extra",
+		L"Carpeta VST extra", L"추가 VST 폴더", L"附加VST文件夹", L"مجلد VST إضافي", L"Доп. папка VST",
+		L"Zusätzlicher VST-Ordner", L"Pasta VST extra", L"Extra VST-map", L"Dodatkowy folder VST", L"Ekstra VST klasörü");
+	bi.ulFlags = BIF_RETURNONLYFSDIRS | BIF_NEWDIALOGSTYLE;
+	LPITEMIDLIST pidl = SHBrowseForFolder(&bi);
+	if (!pidl) return;
+	if (SHGetPathFromIDList(pidl, path))
+		m_vstExtraPath.SetWindowText(path);
+	CoTaskMemFree(pidl);
+}
+
+void CRender::OnVstMultiBrowse()
+{
+	CFileDialog dlg(TRUE, L"dll", NULL, OFN_FILEMUSTEXIST | OFN_HIDEREADONLY,
+		L"VST (*.dll;*.vst3)|*.dll;*.vst3|All (*.*)|*.*||", this);
+	if (dlg.DoModal() != IDOK) return;
+	m_vstMultiDll.SetWindowText(dlg.GetPathName());
+}
+
+void CRender::OnVstScanNow()
+{
+	FillVstMultiCombo();
+}
+
+
 void CRender::OnFontMain()
 {
 	LOGFONT dlgLogFont;
@@ -1365,6 +1509,27 @@ void CRender::OnBnClickedOk()
 		savedata.soundcur = dev;
 	}
 	AudioMicDevApplyFromCombo(m_miclist);
+	{
+		CString extra, dll;
+		m_vstExtraPath.GetWindowText(extra);
+		m_vstMultiDll.GetWindowText(dll);
+		_tcsncpy_s(savedata.vstExtraPath, extra, _TRUNCATE);
+		_tcsncpy_s(savedata.vstMultiDll, dll, _TRUNCATE);
+		savedata.vstMultiName[0] = 0;
+		savedata.midiOutName[0] = 0;
+		int i = m_vstMultiCombo.GetCurSel();
+		if (i > 0) {
+			CString name;
+			m_vstMultiCombo.GetLBText(i, name);
+			_tcsncpy_s(savedata.midiOutName, name, _TRUNCATE);
+		}
+		if (dll.GetLength() > 0) {
+			const TCHAR* leaf = dll;
+			const TCHAR* slash = _tcsrchr(dll, _T('\\'));
+			if (slash) leaf = slash + 1;
+			_tcsncpy_s(savedata.vstMultiName, leaf, _TRUNCATE);
+		}
+	}
 	extern int gameon;
 	ReleaseRenderGrassBackdrop();
 	CCustomBlurDialogExBase::OnOK();
