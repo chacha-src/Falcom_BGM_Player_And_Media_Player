@@ -19,6 +19,8 @@
 #include <stdlib.h>
 #include <wchar.h>
 
+struct Vst3Inst;
+
 namespace Vst3Detail {
 
 using namespace Steinberg;
@@ -271,15 +273,25 @@ private:
 	int32 size, cap, pos;
 };
 
-class CompHandler : public IComponentHandler, public IUnitHandler {
+// Editor gestures must reach the processor through the host. A no-op here is
+// why kit loads and mixer moves looked fine in the GUI but left the audio
+// side empty (Groove Agent is the loudest example).
+class CompHandler : public IComponentHandler, public IComponentHandler2,
+	public IUnitHandler {
 public:
-	CompHandler() : refs(1) {}
+	CompHandler() : refs(1), owner(NULL) {}
+	void SetOwner(::Vst3Inst* v) { owner = v; }
 	tresult PLUGIN_API queryInterface(const TUID iid, void** obj)
 	{
 		if (!obj) return kInvalidArgument;
 		*obj = NULL;
 		if (IidEqual(iid, FUnknown_iid) || IidEqual(iid, IComponentHandler_iid)) {
 			*obj = static_cast<IComponentHandler*>(this);
+			addRef();
+			return kResultOk;
+		}
+		if (IidEqual(iid, IComponentHandler2_iid)) {
+			*obj = static_cast<IComponentHandler2*>(this);
 			addRef();
 			return kResultOk;
 		}
@@ -293,13 +305,18 @@ public:
 	uint32 PLUGIN_API addRef() { return (uint32)InterlockedIncrement(&refs); }
 	uint32 PLUGIN_API release() { return (uint32)InterlockedDecrement(&refs); }
 	tresult PLUGIN_API beginEdit(ParamID) { return kResultOk; }
-	tresult PLUGIN_API performEdit(ParamID, ParamValue) { return kResultOk; }
+	tresult PLUGIN_API performEdit(ParamID id, ParamValue valueNormalized);
 	tresult PLUGIN_API endEdit(ParamID) { return kResultOk; }
-	tresult PLUGIN_API restartComponent(int32) { return kResultOk; }
+	tresult PLUGIN_API restartComponent(int32 flags);
+	tresult PLUGIN_API setDirty(TBool) { return kResultOk; }
+	tresult PLUGIN_API requestOpenEditor(FIDString) { return kResultFalse; }
+	tresult PLUGIN_API startGroupEdit() { return kResultOk; }
+	tresult PLUGIN_API finishGroupEdit() { return kResultOk; }
 	tresult PLUGIN_API notifyUnitSelection(UnitID) { return kResultOk; }
 	tresult PLUGIN_API notifyProgramListChange(ProgramListID, int32) { return kResultOk; }
 private:
 	volatile LONG refs;
+	::Vst3Inst* owner;
 };
 
 // The plug-in asks for its window to be resized through this, which VST3
@@ -468,6 +485,7 @@ private:
 
 class HostParamChanges : public IParameterChanges {
 public:
+	enum { MAX_QUEUES = 64 };
 	HostParamChanges() : refs(1), nq(0) {}
 	tresult PLUGIN_API queryInterface(const TUID iid, void** obj)
 	{
@@ -491,14 +509,14 @@ public:
 	IParamValueQueue* PLUGIN_API addParameterData(const ParamID& id, int32& index)
 	{
 		for (int32 i = 0; i < nq; ++i) if (q[i].id == id) { index = i; return &q[i]; }
-		if (nq >= 16) { index = -1; return NULL; }
+		if (nq >= MAX_QUEUES) { index = -1; return NULL; }
 		index = nq;
 		q[nq].reset(id);
 		return &q[nq++];
 	}
 	void clear() { nq = 0; }
 
-	ParamQueue q[16];
+	ParamQueue q[MAX_QUEUES];
 	int32 nq;
 private:
 	volatile LONG refs;
@@ -607,6 +625,8 @@ struct Vst3Inst {
 	int processing;
 	__int64 samplePos;
 	float* extraBufs; // (mixOutBuses-1) x 2 x VST3_BLOCK, summed into the mix
+	CRITICAL_SECTION paramCs;
+	int paramCsReady;
 
 	Vst3Inst()
 		: module(NULL), factory(NULL), component(NULL), processor(NULL),
@@ -614,11 +634,75 @@ struct Vst3Inst {
 		  progParam(0), progListId(-1), progCount(0), hasProgParam(0), midiInCh(1),
 		  view(NULL), ok(0), outputChannels(2), bus0Channels(2), audioIns(0), audioOuts(0), mixOutBuses(1),
 		  initialized(0), ctrlInit(0),
-		  connected(0), active(0), processing(0), samplePos(0), extraBufs(NULL)
+		  connected(0), active(0), processing(0), samplePos(0), extraBufs(NULL),
+		  paramCsReady(0)
 	{
 		ZeroMemory(&ctx, sizeof(ctx));
+		InitializeCriticalSection(&paramCs);
+		paramCsReady = 1;
+		handler.SetOwner(this);
+	}
+	~Vst3Inst()
+	{
+		if (paramCsReady) { DeleteCriticalSection(&paramCs); paramCsReady = 0; }
 	}
 };
+
+Steinberg::tresult PLUGIN_API Vst3Detail::CompHandler::performEdit(
+	Steinberg::Vst::ParamID id, Steinberg::Vst::ParamValue valueNormalized)
+{
+	using namespace Steinberg;
+	using namespace Steinberg::Vst;
+	if (!owner || !owner->ok) return kResultFalse;
+	EnterCriticalSection(&owner->paramCs);
+	int32 index = 0;
+	IParamValueQueue* q = owner->params.addParameterData(id, index);
+	if (q) {
+		int32 pi = 0;
+		q->addPoint(0, valueNormalized, pi);
+	}
+	LeaveCriticalSection(&owner->paramCs);
+	return kResultOk;
+}
+
+Steinberg::tresult PLUGIN_API Vst3Detail::CompHandler::restartComponent(int32 flags)
+{
+	using namespace Steinberg;
+	using namespace Steinberg::Vst;
+	if (!owner || !owner->ok) return kResultFalse;
+	// Editor-driven kit/preset loads change many parameters at once. Push the
+	// current controller values into the next process() so the processor side
+	// matches what the GUI is showing.
+	if ((flags & kParamValuesChanged) && owner->controller) {
+		EnterCriticalSection(&owner->paramCs);
+		const int32 np = owner->controller->getParameterCount();
+		for (int32 i = 0; i < np && i < 512; ++i) {
+			ParameterInfo pi = {};
+			if (owner->controller->getParameterInfo(i, pi) != kResultOk) continue;
+			int32 index = 0;
+			IParamValueQueue* q = owner->params.addParameterData(pi.id, index);
+			if (!q) break;
+			int32 pt = 0;
+			q->addPoint(0, owner->controller->getParamNormalized(pi.id), pt);
+		}
+		LeaveCriticalSection(&owner->paramCs);
+	}
+	if (flags & (kLatencyChanged | kIoChanged)) {
+		if (owner->processor && owner->processing) {
+			owner->processor->setProcessing(false);
+			owner->processing = 0;
+		}
+		if (owner->component && owner->active) {
+			owner->component->setActive(false);
+			owner->active = 0;
+		}
+		if (owner->component && owner->component->setActive(true) == kResultOk)
+			owner->active = 1;
+		if (owner->processor && owner->processor->setProcessing(true) == kResultOk)
+			owner->processing = 1;
+	}
+	return kResultOk;
+}
 
 Vst3Inst* Vst3Open(const wchar_t* vst3PathOrDll)
 {
@@ -780,8 +864,10 @@ Vst3Inst* Vst3Open(const wchar_t* vst3PathOrDll)
 	}
 	for (int32 i = 0; i < v->component->getBusCount(kEvent, kInput); ++i)
 		v->component->activateBus(kEvent, kInput, i, true);
+	// Groove Agent declares a stereo audio input (sidechain / pad). Leaving it
+	// inactive made process() run with a mismatched bus layout and stay silent.
 	for (int32 i = 0; i < audioIns; ++i)
-		v->component->activateBus(kAudio, kInput, i, false);
+		v->component->activateBus(kAudio, kInput, i, true);
 	for (int32 i = 0; i < audioOuts; ++i)
 		v->component->activateBus(kAudio, kOutput, i, i < v->mixOutBuses);
 	if (v->component->setActive(true) != kResultOk) {
@@ -895,11 +981,14 @@ static void MapMidiCc(Vst3Inst* v, Steinberg::int16 channel,
 	if (v->midiMap->getMidiControllerAssignment(0, channel, cn, id) != kResultOk)
 		return;
 	if (v->controller) v->controller->setParamNormalized(id, val);
+	EnterCriticalSection(&v->paramCs);
 	int32 qi = 0;
 	IParamValueQueue* q = v->params.addParameterData(id, qi);
-	if (!q) return;
-	int32 pi = 0;
-	q->addPoint(sampleOffset < 0 ? 0 : sampleOffset, val, pi);
+	if (q) {
+		int32 pi = 0;
+		q->addPoint(sampleOffset < 0 ? 0 : sampleOffset, val, pi);
+	}
+	LeaveCriticalSection(&v->paramCs);
 }
 
 void Vst3MidiShort(Vst3Inst* v, DWORD msg, int sampleOffset)
@@ -1109,6 +1198,7 @@ void Vst3Process(Vst3Inst* v, float* outL, float* outR, int frames)
 		data.numOutputs = nOut;
 		data.inputs = (v->audioIns > 0) ? &input : NULL;
 		data.outputs = output;
+		EnterCriticalSection(&v->paramCs);
 		data.inputParameterChanges = &v->params;
 		data.outputParameterChanges = &v->outParams;
 		data.inputEvents = &v->blockEvents;
@@ -1119,6 +1209,7 @@ void Vst3Process(Vst3Inst* v, float* outL, float* outR, int frames)
 			v->ok = 0;
 		}
 		v->params.clear();
+		LeaveCriticalSection(&v->paramCs);
 		if (nOut > 1) {
 			for (int b = 1; b < nOut; ++b) {
 				const float* xl = extraCh[b - 1][0];
@@ -1198,11 +1289,13 @@ int Vst3SetProgram(Vst3Inst* v, int index)
 			hostEdit->release();
 		}
 		int32 qi = 0;
+		EnterCriticalSection(&v->paramCs);
 		IParamValueQueue* q = v->params.addParameterData(v->progParam, qi);
 		if (q) {
 			int32 pi = 0;
 			q->addPoint(0, nv, pi);
 		}
+		LeaveCriticalSection(&v->paramCs);
 		return 1;
 	}
 	if (index <= 127)

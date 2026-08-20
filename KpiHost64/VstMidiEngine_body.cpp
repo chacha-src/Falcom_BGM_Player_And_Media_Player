@@ -82,6 +82,8 @@ struct LivePart {
 	Vst3Inst* vst3;
 	int isMulti;
 	int remote; // 1=hosted by KpiHost64 (wrong-arch plug-in)
+	int sendCh; // -1 = channel as received, 0..15 = forced
+	int prog;   // program last picked from the slot menu
 	HWND edWnd;
 	LivePending pend;
 };
@@ -3017,6 +3019,8 @@ extern "C" int VstLiveLoadPart(int part1to32,
 	Vst3Close(p.vst3); p.vst3 = NULL;
 	p.isMulti = 0;
 	p.remote = 0;
+	p.sendCh = -1;
+	p.prog = -1;
 	LeaveCriticalSection(&g_eng.cs);
 	if (wasRemote) LiveRemoteUnload(part1to32);
 
@@ -3031,6 +3035,8 @@ extern "C" int VstLiveLoadPart(int part1to32,
 		LivePart& rp = g_eng.live[part1to32 - 1];
 		rp.remote = 1;
 		rp.isMulti = DetectMultiTimbralName(pluginPath) ? 1 : 0;
+		rp.sendCh = rp.isMulti ? -1 : 0;
+		rp.prog = -1;
 		LeaveCriticalSection(&g_eng.cs);
 		return 0;
 	}
@@ -3045,11 +3051,18 @@ extern "C" int VstLiveLoadPart(int part1to32,
 		// Preset-based instruments (HALion Sonic, Groove Agent, SampleTank)
 		// come up with nothing loaded and stay silent no matter what you play,
 		// so start them on their first program.
-		if (ok && Vst3ProgramCount(p.vst3) > 0) Vst3SetProgram(p.vst3, 0);
+		if (ok && Vst3ProgramCount(p.vst3) > 0) { Vst3SetProgram(p.vst3, 0); p.prog = 0; }
 	} else {
 		ok = LoadVst2(pluginPath, p.module, p.effect);
 	}
-	if (ok) p.isMulti = DetectMultiTimbralName(pluginPath) ? 1 : 0;
+	if (ok) {
+		p.isMulti = DetectMultiTimbralName(pluginPath) ? 1 : 0;
+		// One part = one instrument track, and the channel already picked the
+		// slot, so a single-timbre plug-in is fed on ch1: a kit that listens
+		// there (Groove Agent default) plays wherever the user drops it. The
+		// slot menu can override this per part.
+		p.sendCh = p.isMulti ? -1 : 0;
+	}
 	LeaveCriticalSection(&g_eng.cs);
 	return ok ? 0 : -2;
 }
@@ -3319,6 +3332,15 @@ static int LiveMultiPart(int portIndex0to2)
 	return -1;
 }
 
+// The part decides which channel its plug-in sees. Status 0xF0 and above
+// carries no channel, so it passes through untouched.
+static DWORD LiveSendMsg(const LivePart& p, DWORD msg)
+{
+	const DWORD st = msg & 0xf0;
+	if (p.sendCh < 0 || st < 0x80 || st >= 0xf0) return msg;
+	return (msg & ~(DWORD)0x0f) | (DWORD)(p.sendCh & 15);
+}
+
 extern "C" void VstLiveMidiShort(int portIndex0to2, DWORD shortMsg)
 {
 	if (portIndex0to2 < 0 || portIndex0to2 > 2) return;
@@ -3328,8 +3350,171 @@ extern "C" void VstLiveMidiShort(int portIndex0to2, DWORD shortMsg)
 	EnterCriticalSection(&g_eng.cs);
 	int part = LiveMultiPart(portIndex0to2);
 	if (part < 0) part = portIndex0to2 * 16 + (int)(shortMsg & 15);
-	if (part < 32) LivePendPush(g_eng.live[part], shortMsg);
+	if (part < 32)
+		LivePendPush(g_eng.live[part], LiveSendMsg(g_eng.live[part], shortMsg));
 	LeaveCriticalSection(&g_eng.cs);
+}
+
+extern "C" int VstLiveSendChannel(int part1to32)
+{
+	if (part1to32 < 1 || part1to32 > 32) return -1;
+	return g_eng.live[part1to32 - 1].sendCh;
+}
+
+extern "C" void VstLiveSetSendChannel(int part1to32, int sendCh)
+{
+	if (part1to32 < 1 || part1to32 > 32) return;
+	if (sendCh > 15) sendCh = 15;
+	if (sendCh < 0) sendCh = -1;
+	LivePart& p = g_eng.live[part1to32 - 1];
+	EnterCriticalSection(&g_eng.cs);
+	// Whatever is held on the old channel would never get its note-off.
+	if (p.sendCh != sendCh && (p.effect || p.vst3)) LivePanicPart(p);
+	p.sendCh = sendCh;
+	LeaveCriticalSection(&g_eng.cs);
+#ifndef KPIHOST64_BUILD
+	if (p.remote) g_kpiHost.VstLiveSetSendChannel((uint32_t)part1to32, sendCh);
+#endif
+}
+
+// Channel the plug-in actually hears for this part, used to aim program
+// changes at the right internal part of a multi-timbral instrument.
+static int LivePartSendCh(const LivePart& p, int part1to32)
+{
+	return p.sendCh >= 0 ? p.sendCh : ((part1to32 - 1) & 15);
+}
+
+static VstIntPtr LiveVst2Dispatch(AEffect* e, VstInt32 op, VstInt32 index,
+	VstIntPtr value, void* ptr)
+{
+	if (!e || !e->dispatcher) return 0;
+	VstIntPtr rc = 0;
+	__try { rc = e->dispatcher(e, op, index, value, ptr, 0.0f); }
+	__except (EXCEPTION_EXECUTE_HANDLER) { rc = 0; }
+	return rc;
+}
+
+extern "C" int VstLiveProgramCount(int part1to32)
+{
+	if (part1to32 < 1 || part1to32 > 32) return 0;
+	LivePart& p = g_eng.live[part1to32 - 1];
+#ifndef KPIHOST64_BUILD
+	if (p.remote) {
+		uint32_t total = 0, cur = 0;
+		std::vector<std::wstring> names;
+		if (!g_kpiHost.VstLivePrograms((uint32_t)part1to32, 0, 0, total, cur, names))
+			return 0;
+		return (int)total;
+	}
+#endif
+	if (p.vst3) return Vst3ProgramCount(p.vst3);
+	if (p.effect) return p.effect->numPrograms > 0 ? p.effect->numPrograms : 0;
+	return 0;
+}
+
+extern "C" int VstLiveProgramCurrent(int part1to32)
+{
+	if (part1to32 < 1 || part1to32 > 32) return -1;
+	LivePart& p = g_eng.live[part1to32 - 1];
+#ifndef KPIHOST64_BUILD
+	if (p.remote) {
+		uint32_t total = 0, cur = 0xFFFFFFFFu;
+		std::vector<std::wstring> names;
+		if (!g_kpiHost.VstLivePrograms((uint32_t)part1to32, 0, 0, total, cur, names))
+			return -1;
+		return cur == 0xFFFFFFFFu ? -1 : (int)cur;
+	}
+#endif
+	if (p.effect && p.prog < 0)
+		return (int)LiveVst2Dispatch(p.effect, effGetProgram, 0, 0, NULL);
+	return p.prog;
+}
+
+extern "C" int VstLiveProgramName(int part1to32, int index, wchar_t* out,
+	int outChars)
+{
+	if (!out || outChars <= 0) return 0;
+	out[0] = 0;
+	if (part1to32 < 1 || part1to32 > 32 || index < 0) return 0;
+	LivePart& p = g_eng.live[part1to32 - 1];
+#ifndef KPIHOST64_BUILD
+	if (p.remote) {
+		uint32_t total = 0, cur = 0;
+		std::vector<std::wstring> names;
+		if (!g_kpiHost.VstLivePrograms((uint32_t)part1to32, (uint32_t)index, 1,
+			total, cur, names) || names.empty())
+			return 0;
+		wcsncpy_s(out, outChars, names[0].c_str(), _TRUNCATE);
+		return out[0] ? 1 : 0;
+	}
+#endif
+	if (p.vst3) return Vst3ProgramName(p.vst3, index, out, outChars);
+	if (p.effect) {
+		char nm[64] = {};
+		if (LiveVst2Dispatch(p.effect, effGetProgramNameIndexed, index, -1, nm) ||
+			nm[0]) {
+			MultiByteToWideChar(CP_ACP, 0, nm, -1, out, outChars);
+			out[outChars - 1] = 0;
+		}
+		if (!out[0]) _snwprintf_s(out, outChars, _TRUNCATE, L"Program %d", index + 1);
+		return 1;
+	}
+	return 0;
+}
+
+extern "C" int VstLiveProgramNames(int part1to32, int first, int count,
+	wchar_t* out, int stride)
+{
+	if (!out || stride <= 1 || count <= 0 || first < 0) return 0;
+	if (part1to32 < 1 || part1to32 > 32) return 0;
+	for (int i = 0; i < count; ++i) out[(size_t)i * stride] = 0;
+#ifndef KPIHOST64_BUILD
+	LivePart& p = g_eng.live[part1to32 - 1];
+	if (p.remote) {
+		uint32_t total = 0, cur = 0;
+		std::vector<std::wstring> names;
+		if (!g_kpiHost.VstLivePrograms((uint32_t)part1to32, (uint32_t)first,
+			(uint32_t)count, total, cur, names))
+			return 0;
+		int n = 0;
+		for (; n < count && n < (int)names.size(); ++n)
+			wcsncpy_s(out + (size_t)n * stride, stride, names[n].c_str(), _TRUNCATE);
+		return n;
+	}
+#endif
+	int n = 0;
+	for (; n < count; ++n)
+		if (!VstLiveProgramName(part1to32, first + n, out + (size_t)n * stride, stride))
+			break;
+	return n;
+}
+
+extern "C" int VstLiveSetProgram(int part1to32, int index)
+{
+	if (part1to32 < 1 || part1to32 > 32 || index < 0) return 0;
+	LivePart& p = g_eng.live[part1to32 - 1];
+#ifndef KPIHOST64_BUILD
+	if (p.remote) {
+		if (!g_kpiHost.VstLiveSetProgram((uint32_t)part1to32, (uint32_t)index))
+			return 0;
+		p.prog = index;
+		return 1;
+	}
+#endif
+	int ok = 0;
+	EnterCriticalSection(&g_eng.cs);
+	if (p.vst3) {
+		// Aimed at the internal part that answers this slot's channel, which
+		// is what HALion Sonic / SampleTank / Groove Agent key their program
+		// lists off.
+		ok = Vst3SetChannelProgram(p.vst3, LivePartSendCh(p, part1to32), index);
+	} else if (p.effect) {
+		LiveVst2Dispatch(p.effect, effSetProgram, 0, index, NULL);
+		ok = 1;
+	}
+	if (ok) p.prog = index;
+	LeaveCriticalSection(&g_eng.cs);
+	return ok;
 }
 
 extern "C" void VstLiveMidiSysex(int portIndex0to2, const unsigned char* data,

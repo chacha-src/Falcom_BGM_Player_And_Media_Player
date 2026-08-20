@@ -1,4 +1,4 @@
-#include "stdafx.h"
+﻿#include "stdafx.h"
 
 #include "KpiHostClient.h"
 
@@ -608,5 +608,54 @@ bool KpiHost64Client::VstLiveEditorClose(uint32_t part1to32)
 {
 	KPIHOST64_U32 u{ part1to32 };
 	return SendSimple(KPIHOST64_CMD_VST_LIVE_EDITOR_CLOSE, &u, sizeof(u));
+}
+
+bool KpiHost64Client::VstLiveSetSendChannel(uint32_t part1to32, int32_t sendCh)
+{
+	KPIHOST64_VstLiveSendChReq r{};
+	r.part = part1to32;
+	r.sendCh = sendCh;
+	return SendSimple(KPIHOST64_CMD_VST_LIVE_SEND_CH, &r, sizeof(r));
+}
+
+bool KpiHost64Client::VstLivePrograms(uint32_t part1to32, uint32_t first, uint32_t count,
+	uint32_t& outTotal, uint32_t& outCurrent, std::vector<std::wstring>& outNames)
+{
+	outTotal = 0;
+	outCurrent = 0xFFFFFFFFu;
+	outNames.clear();
+	KPIHOST64_VstLiveProgramsReq r{};
+	r.part = part1to32;
+	r.first = first;
+	r.count = count;
+	std::vector<uint8_t> reply;
+	uint32_t st = 0;
+	if (!SendRequest(KPIHOST64_CMD_VST_LIVE_PROGRAMS, &r, sizeof(r), reply, st)) return false;
+	if (st != KPIHOST64_STATUS_OK || reply.size() < sizeof(KPIHOST64_VstLiveProgramsReply))
+		return false;
+	const KPIHOST64_VstLiveProgramsReply* rep =
+		(const KPIHOST64_VstLiveProgramsReply*)reply.data();
+	outTotal = rep->total;
+	outCurrent = rep->current;
+	const uint8_t* p = reply.data() + sizeof(*rep);
+	const uint8_t* end = reply.data() + reply.size();
+	for (uint32_t i = 0; i < rep->got; ++i) {
+		if ((size_t)(end - p) < sizeof(uint32_t)) break;
+		const uint32_t chars = *(const uint32_t*)p;
+		p += sizeof(uint32_t);
+		const size_t bytes = (size_t)chars * sizeof(wchar_t);
+		if ((size_t)(end - p) < bytes) break;
+		outNames.push_back(std::wstring((const wchar_t*)p, (const wchar_t*)p + chars));
+		p += bytes;
+	}
+	return true;
+}
+
+bool KpiHost64Client::VstLiveSetProgram(uint32_t part1to32, uint32_t index)
+{
+	KPIHOST64_VstLiveSetProgramReq r{};
+	r.part = part1to32;
+	r.index = index;
+	return SendSimple(KPIHOST64_CMD_VST_LIVE_SET_PROGRAM, &r, sizeof(r));
 }
 

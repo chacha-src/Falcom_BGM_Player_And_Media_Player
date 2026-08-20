@@ -16,6 +16,9 @@ struct VstPluginInfo {
 	int isVst3;        // 0=VST2 DLL, 1=VST3 bundle
 	int isInstrument;
 	int isMultiTimbral; // 1=SC-VA / SGP2 / GS・XG 系マルチ等（1インスタンスで16ch）
+	// 1 = opened through the same path a slot drop uses. The host palette only
+	// lists plugs that passed; 0 means not checked yet or a failed probe.
+	int isLiveOk;
 };
 
 /*
@@ -27,6 +30,9 @@ extern "C" {
 #endif
 
 int VstScanEnsure(HWND parentForWait);
+// After Ensure: try each instrument the way a part-slot drop does, and keep
+// only the ones that open. Call from the VST host UI on first open / rescan.
+void VstScanVerifyLiveList(HWND parentForWait);
 int VstScanGetCount(void);
 const VstPluginInfo* VstScanGet(int i);
 void VstScanInvalidate(void);
@@ -67,6 +73,21 @@ void VstLiveMidiSysex(int portIndex0to2, const unsigned char* data, int bytes);
 int VstLiveRender(float* L, float* R, int frames);
 int VstLiveEditorOpen(int part1to32);
 void VstLiveEditorClose(int part1to32);
+
+// Which MIDI channel the part hands to its plug-in. -1 keeps the channel the
+// note arrived on; 0..15 forces one, so a drum kit that only listens on its
+// own channel still plays whichever slot it sits in.
+int VstLiveSendChannel(int part1to32);
+void VstLiveSetSendChannel(int part1to32, int sendCh);
+// Programs (HALion/SampleTank/Groove Agent kits, VST2 patches).
+int VstLiveProgramCount(int part1to32);
+int VstLiveProgramCurrent(int part1to32);
+int VstLiveProgramName(int part1to32, int index, wchar_t* out, int outChars);
+// Batched form for the slot menu: one call, so a remote part costs a single
+// pipe round trip instead of one per name. Returns the names written.
+int VstLiveProgramNames(int part1to32, int first, int count, wchar_t* out,
+	int stride);
+int VstLiveSetProgram(int part1to32, int index);
 
 // What the part is currently hearing, so the UI can light up the channels.
 struct VstLiveActInfo {

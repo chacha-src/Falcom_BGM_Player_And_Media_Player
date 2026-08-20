@@ -1,4 +1,4 @@
-#include <windows.h>
+﻿#include <windows.h>
 #include <unknwn.h>
 #include <string>
 #include <vector>
@@ -1164,6 +1164,24 @@ static void ServeOnce(HANDLE pipe)
 		case KPIHOST64_CMD_VST_LIVE_EDITOR_CLOSE: {
 			if ((size_t)(end - p) < sizeof(KPIHOST64_U32)) { status = KPIHOST64_STATUS_BAD_REQUEST; break; }
 			status = VstHost64_LiveEditorClose(((const KPIHOST64_U32*)p)->v);
+			break;
+		}
+		case KPIHOST64_CMD_VST_LIVE_SEND_CH: {
+			if ((size_t)(end - p) < sizeof(KPIHOST64_VstLiveSendChReq)) { status = KPIHOST64_STATUS_BAD_REQUEST; break; }
+			auto* sc = (const KPIHOST64_VstLiveSendChReq*)p;
+			status = VstHost64_LiveSetSendChannel(sc->part, sc->sendCh);
+			break;
+		}
+		case KPIHOST64_CMD_VST_LIVE_PROGRAMS: {
+			if ((size_t)(end - p) < sizeof(KPIHOST64_VstLiveProgramsReq)) { status = KPIHOST64_STATUS_BAD_REQUEST; break; }
+			auto* pr = (const KPIHOST64_VstLiveProgramsReq*)p;
+			status = VstHost64_LivePrograms(pr->part, pr->first, pr->count, reply);
+			break;
+		}
+		case KPIHOST64_CMD_VST_LIVE_SET_PROGRAM: {
+			if ((size_t)(end - p) < sizeof(KPIHOST64_VstLiveSetProgramReq)) { status = KPIHOST64_STATUS_BAD_REQUEST; break; }
+			auto* sp = (const KPIHOST64_VstLiveSetProgramReq*)p;
+			status = VstHost64_LiveSetProgram(sp->part, sp->index);
 			break;
 		}
 		default:

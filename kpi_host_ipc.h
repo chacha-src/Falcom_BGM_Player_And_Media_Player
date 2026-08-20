@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include <stdint.h>
 
@@ -36,7 +36,11 @@ enum KPIHOST64_CMD : uint32_t
 	KPIHOST64_CMD_VST_LIVE_AUDIO_START = 36,
 	KPIHOST64_CMD_VST_LIVE_AUDIO_STOP = 37,
 	KPIHOST64_CMD_VST_LIVE_EDITOR_OPEN = 38,
-	KPIHOST64_CMD_VST_LIVE_EDITOR_CLOSE = 39
+	KPIHOST64_CMD_VST_LIVE_EDITOR_CLOSE = 39,
+	// Per-part routing and program picking for the part grid's slot menu.
+	KPIHOST64_CMD_VST_LIVE_SEND_CH = 40,
+	KPIHOST64_CMD_VST_LIVE_PROGRAMS = 41,
+	KPIHOST64_CMD_VST_LIVE_SET_PROGRAM = 42
 };
 
 enum KPIHOST64_STATUS : uint32_t
@@ -158,6 +162,33 @@ struct KPIHOST64_VstLiveSysexReq
 	uint32_t port;
 	uint32_t bytes;
 	// followed by raw sysex bytes
+};
+
+struct KPIHOST64_VstLiveSendChReq
+{
+	uint32_t part;   // 1..32
+	int32_t sendCh;  // -1 = keep the received channel, 0..15 = force
+};
+
+struct KPIHOST64_VstLiveProgramsReq
+{
+	uint32_t part;
+	uint32_t first;
+	uint32_t count; // names wanted, clamped by the host
+};
+
+struct KPIHOST64_VstLiveProgramsReply
+{
+	uint32_t total;   // programs the plug-in offers
+	uint32_t current; // program in use, or 0xFFFFFFFF when unknown
+	uint32_t got;     // names that follow
+	// followed by got x [u32 chars][wchar_t[]]
+};
+
+struct KPIHOST64_VstLiveSetProgramReq
+{
+	uint32_t part;
+	uint32_t index;
 };
 
 struct KPIHOST64_VstLiveRenderReq

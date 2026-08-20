@@ -43,15 +43,24 @@ protected:
 	CString m_actText[PART_COUNT];
 	CString m_actNotes[PART_COUNT];
 	unsigned m_actMask[PART_COUNT][4];
+	// Slot buttons: 0 = open the plug-in editor, 1 = part/program menu.
+	enum { SLOT_BTN_EDIT = 0, SLOT_BTN_MENU = 1 };
+	int m_pressSlot;
+	int m_pressBtn;
+	int m_hintSlot;
+	int m_hintBtn;
 
 	CRect PaletteRect(int i) const;
 	CRect SlotRect(int i) const;
 	// The whole grid cell, including the empty space under the slot bar: it is
 	// the drop target and carries the held-note readout.
 	CRect SlotCellRect(int i) const;
+	CRect SlotBtnRect(int i, int which) const;
+	int HitSlotBtn(CPoint pt, int* outBtn) const;
 	int HitPalette(CPoint pt) const;
 	void NotifyChanged(int slot);
 	int CoveringMulti(int slot) const;
+	void ShowSlotMenu(int slot, CPoint screenPt);
 
 	DECLARE_MESSAGE_MAP()
 	afx_msg void OnPaint();

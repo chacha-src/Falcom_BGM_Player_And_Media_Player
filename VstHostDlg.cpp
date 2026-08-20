@@ -18,6 +18,12 @@ enum {
 	ID_VST_POP_CLEAR = 0xe711,
 	ID_VST_POP_SAVE = 0xe712,
 	ID_VST_POP_EDITOR = 0xe713,
+	// Send-channel picker: "as received" plus the 16 MIDI channels.
+	ID_VST_POP_CH_ASIS = 0xe720,
+	ID_VST_POP_CH_FIRST = 0xe721, // .. +15
+	// Program picker; the list is capped at VST_PROG_MENU_MAX entries.
+	ID_VST_POP_PROG_FIRST = 0xe740,
+	VST_PROG_MENU_MAX = 64,
 	VST_AUDIO_FRAMES = 512,
 	VST_AUDIO_BUFFERS = 4,
 	VST_ACTIVITY_TIMER = 1,
@@ -249,6 +255,7 @@ public:
 		dc.SetTextColor(RGB(48, 48, 64));
 		const CString lines[] = {
 			LL14(L"・左のプラグインを右の Part 1～32 へドラッグします。", L"· Drag a plug-in from the left to Parts 1–32.", L"· Glissez un plug-in vers les parties 1–32.", L"· Trascina un plug-in nelle parti 1–32.", L"· Arrastre un plug-in a las partes 1–32.", L"· 왼쪽 플러그인을 파트 1~32로 드래그합니다.", L"· 将左侧插件拖到声部 1–32。", L"· اسحب إضافة إلى الأجزاء 1–32.", L"· Перетащите плагин в партии 1–32.", L"· Plugin links auf Part 1–32 ziehen.", L"· Arraste um plug-in para as partes 1–32.", L"· Sleep een plug-in naar partijen 1–32.", L"· Przeciągnij wtyczkę do partii 1–32.", L"· Eklentiyi Bölüm 1–32'ye sürükleyin."),
+			LL14(L"・一覧にはドロップで実際に載るものだけが出ます（初回／再スキャンで確認）。", L"· The list shows only plug-ins that actually drop onto a part (checked on first open / rescan).", L"· La liste n'affiche que les plug-ins réellement déposables (vérifié à l'ouverture / rescannage).", L"· L'elenco mostra solo i plug-in che si possono trascinare (controllo all'apertura / scansione).", L"· La lista solo muestra plug-ins que se pueden soltar (comprobado al abrir / reescanear).", L"· 목록에는 실제로 드롭되는 플러그인만 표시됩니다(첫 실행/재검색 시 확인).", L"· 列表只显示可拖放到声部的插件（首次打开/重新扫描时检查）。", L"· تظهر القائمة فقط الإضافات القابلة للإفلات (تُفحص عند الفتح / إعادة المسح).", L"· В списке только плагины, которые реально ставятся на слот (проверка при открытии / скане).", L"· Die Liste zeigt nur Plug-ins, die sich ablegen lassen (Prüfung beim Öffnen / Neu scannen).", L"· A lista mostra só plug-ins que se podem largar (verificado ao abrir / procurar).", L"· De lijst toont alleen plug-ins die echt te droppen zijn (controle bij openen / scannen).", L"· Lista pokazuje tylko wtyczki, które da się upuścić (sprawdzane przy otwarciu / skanie).", L"· Liste yalnızca gerçekten bırakılabilen eklentileri gösterir (açılış / yeniden tarama kontrolü)."),
 			LL14(L"・MIDI入力は最大3台。同じパートへリアルタイム送信します。", L"· Up to three MIDI inputs feed the live parts.", L"· Trois entrées MIDI maximum alimentent les parties.", L"· Fino a tre ingressi MIDI alimentano le parti.", L"· Hasta tres entradas MIDI alimentan las partes.", L"· 최대 3개의 MIDI 입력을 실시간 파트로 보냅니다.", L"· 最多三个 MIDI 输入发送到实时声部。", L"· حتى ثلاثة مداخل MIDI للأجزاء الحية.", L"· До трёх MIDI-входов подаются на партии.", L"· Bis zu drei MIDI-Eingänge speisen die Parts.", L"· Até três entradas MIDI alimentam as partes.", L"· Maximaal drie MIDI-ingangen voeden de partijen.", L"· Do trzech wejść MIDI zasila partie.", L"· En fazla üç MIDI girişi canlı bölümleri besler."),
 			LL14(L"・配線とデバイス設定はプリセットへ保存できます。", L"· Wiring and device choices are stored in presets.", L"· Le câblage et les périphériques sont enregistrés.", L"· Cablaggio e dispositivi sono salvati nei preset.", L"· El cableado y los dispositivos se guardan.", L"· 배선과 장치 선택은 프리셋에 저장됩니다.", L"· 连线和设备选择可保存到预设。", L"· تُحفظ التوصيلات والأجهزة في الإعدادات.", L"· Схема и устройства сохраняются в пресетах.", L"· Verdrahtung und Geräte werden im Preset gespeichert.", L"· Ligações e dispositivos são guardados.", L"· Bedrading en apparaten worden opgeslagen.", L"· Okablowanie i urządzenia zapisują się w presetach.", L"· Bağlantılar ve aygıtlar ön ayarlara kaydedilir."),
 			LL14(L"・右クリックで再スキャン、スロット解除、保存ができます。", L"· Right-click to rescan, clear a slot, or save.", L"· Clic droit: rescanner, effacer ou enregistrer.", L"· Clic destro: scansione, azzera o salva.", L"· Clic derecho: reescanear, borrar o guardar.", L"· 우클릭으로 재검색, 슬롯 해제, 저장합니다.", L"· 右键可重新扫描、清除插槽或保存。", L"· انقر يميناً للمسح أو الإزالة أو الحفظ.", L"· ПКМ: сканирование, очистка или сохранение.", L"· Rechtsklick: scannen, Slot leeren oder speichern.", L"· Clique direito: procurar, limpar ou guardar.", L"· Rechtsklik: scannen, wissen of opslaan.", L"· PPM: skanowanie, czyszczenie lub zapis.", L"· Sağ tık: tara, slotu temizle veya kaydet."),
@@ -276,7 +283,8 @@ IMPLEMENT_DYNAMIC(CVstWireCtrl, CStatic)
 
 CVstWireCtrl::CVstWireCtrl()
 	: m_owner(NULL), m_bAeroMode(FALSE), m_pluginCount(0), m_dragging(FALSE),
-	  m_dragScanIndex(-1), m_hoverPlugin(-1), m_hoverSlot(-1), m_trackLeave(FALSE)
+	  m_dragScanIndex(-1), m_hoverPlugin(-1), m_hoverSlot(-1), m_trackLeave(FALSE),
+	  m_pressSlot(-1), m_pressBtn(-1), m_hintSlot(-1), m_hintBtn(-1)
 {
 	memset(m_scanIndices, -1, sizeof(m_scanIndices));
 	memset(m_slots, -1, sizeof(m_slots));
@@ -361,6 +369,37 @@ CRect CVstWireCtrl::SlotCellRect(int i) const
 	const int avail = max(18, (rc.Height() - 32) / 16);
 	return CRect(left + col * (w + gap), 27 + row * avail,
 		left + col * (w + gap) + w, 27 + row * avail + avail - 2);
+}
+
+// Two small buttons at the right end of a loaded slot's bar: the editor and
+// the part/program menu, so neither needs a right-click to be found.
+CRect CVstWireCtrl::SlotBtnRect(int i, int which) const
+{
+	CRect r = SlotRect(i);
+	const int bw = 15;
+	int bh = r.Height() - 6;
+	if (bh > 15) bh = 15;
+	if (bh < 8) bh = r.Height() - 2;
+	if (bh < 6 || r.Width() < 3 * bw + 24) return CRect(0, 0, 0, 0);
+	const int top = r.top + (r.Height() - bh) / 2;
+	CRect b(r.right - 4 - bw, top, r.right - 4, top + bh);
+	if (which == SLOT_BTN_EDIT) b.OffsetRect(-(bw + 2), 0);
+	return b;
+}
+
+int CVstWireCtrl::HitSlotBtn(CPoint pt, int* outBtn) const
+{
+	for (int i = 0; i < PART_COUNT; ++i) {
+		if (m_slots[i] < 0) continue;
+		for (int b = 0; b < 2; ++b) {
+			CRect r = SlotBtnRect(i, b);
+			if (!r.IsRectEmpty() && r.PtInRect(pt)) {
+				if (outBtn) *outBtn = b;
+				return i;
+			}
+		}
+	}
+	return -1;
 }
 
 int CVstWireCtrl::HitPalette(CPoint pt) const
@@ -479,10 +518,20 @@ void CVstWireCtrl::PaintToDC(CDC& dc)
 		CString s, name;
 		if (full && m_owner) name = m_owner->PluginName(m_slots[i]);
 		else if (cover >= 0 && m_owner) name = m_owner->PluginName(m_slots[cover]);
-		if (full) s.Format(L"%02d  %s", i + 1, (LPCTSTR)name);
+		// A forced send channel changes which sound the plug-in makes, so say so
+		// on the bar instead of hiding it inside the slot menu.
+		if (full) {
+			const int send = VstLiveSendChannel(i + 1);
+			if (send >= 0)
+				s.Format(L"%02d→ch%d  %s", i + 1, send + 1, (LPCTSTR)name);
+			else s.Format(L"%02d  %s", i + 1, (LPCTSTR)name);
+		}
 		else if (cover >= 0) s.Format(L"%02d  ch%d ← %s", i + 1, (i % 16) + 1, (LPCTSTR)name);
 		else s.Format(L"%02d  —", i + 1);
 		CRect t = r; t.DeflateRect(4, 1);
+		CRect bEdit = full ? SlotBtnRect(i, SLOT_BTN_EDIT) : CRect(0, 0, 0, 0);
+		CRect bMenu = full ? SlotBtnRect(i, SLOT_BTN_MENU) : CRect(0, 0, 0, 0);
+		if (!bEdit.IsRectEmpty()) t.right = bEdit.left - 4;
 		if (lit && !m_actText[i].IsEmpty()) {
 			CRect nt = t;
 			nt.left = max(t.left, t.right - 120);
@@ -493,6 +542,29 @@ void CVstWireCtrl::PaintToDC(CDC& dc)
 		dc.SetTextColor(lit ? RGB(228, 255, 238)
 			: (full ? RGB(255, 238, 180) : (cover >= 0 ? RGB(198, 176, 124) : RGB(155, 164, 180))));
 		dc.DrawText(s, t, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
+		for (int b = 0; b < 2; ++b) {
+			CRect bt = b == SLOT_BTN_EDIT ? bEdit : bMenu;
+			if (bt.IsRectEmpty()) continue;
+			const BOOL down = m_pressSlot == i && m_pressBtn == b;
+			dc.FillSolidRect(bt, down ? RGB(96, 130, 180) : RGB(46, 56, 76));
+			dc.Draw3dRect(bt, down ? RGB(200, 232, 255) : RGB(132, 158, 198),
+				RGB(20, 24, 32));
+			const COLORREF ink = down ? RGB(255, 255, 255) : RGB(198, 220, 250);
+			if (b == SLOT_BTN_EDIT) {
+				// A little window with a title bar: this opens the plug-in's own UI.
+				CRect g = bt; g.DeflateRect(4, 4);
+				if (g.Width() >= 4 && g.Height() >= 4) {
+					dc.Draw3dRect(g, ink, ink);
+					dc.FillSolidRect(g.left, g.top, g.Width(), 2, ink);
+				}
+			} else {
+				// Down arrow: the part / program menu.
+				const int cx = bt.left + bt.Width() / 2;
+				const int cy = bt.top + bt.Height() / 2 - 1;
+				for (int k = 0; k < 4; ++k)
+					dc.FillSolidRect(cx - 3 + k, cy + k, (4 - k) * 2 - 1, 1, ink);
+			}
+		}
 	}
 	if (m_dragging) {
 		CRect g(m_dragPt.x - 80, m_dragPt.y - 10, m_dragPt.x + 80, m_dragPt.y + 10);
@@ -575,6 +647,12 @@ LRESULT CVstWireCtrl::OnPrintClient(WPARAM wp, LPARAM)
 
 void CVstWireCtrl::OnLButtonDown(UINT flags, CPoint pt)
 {
+	int btn = -1;
+	const int bslot = HitSlotBtn(pt, &btn);
+	if (bslot >= 0) {
+		m_pressSlot = bslot; m_pressBtn = btn;
+		SetCapture(); Invalidate(FALSE); return;
+	}
 	const int p = HitPalette(pt);
 	if (p >= 0) {
 		m_dragging = TRUE; m_dragScanIndex = m_scanIndices[p]; m_dragPt = pt;
@@ -585,6 +663,31 @@ void CVstWireCtrl::OnLButtonDown(UINT flags, CPoint pt)
 
 void CVstWireCtrl::OnLButtonUp(UINT flags, CPoint pt)
 {
+	if (m_pressSlot >= 0) {
+		ReleaseCapture();
+		const int slot = m_pressSlot, btn = m_pressBtn;
+		m_pressSlot = m_pressBtn = -1;
+		Invalidate(FALSE);
+		int hitBtn = -1;
+		if (HitSlotBtn(pt, &hitBtn) != slot || hitBtn != btn) return;
+		if (btn == SLOT_BTN_EDIT) {
+			if (VstLiveEditorOpen(slot + 1) != 0 && m_owner)
+				m_owner->SetStatus(LL14(L"このプラグインには設定画面がありません",
+					L"This plug-in has no editor", L"Ce plug-in n'a pas d'éditeur",
+					L"Questo plug-in non ha un editor", L"Este plug-in no tiene editor",
+					L"이 플러그인에는 설정 화면이 없습니다", L"此插件没有设置界面",
+					L"لا تحتوي هذه الإضافة على واجهة", L"У этого плагина нет редактора",
+					L"Dieses Plug-in hat keinen Editor", L"Este plug-in não tem editor",
+					L"Deze plug-in heeft geen editor", L"Ta wtyczka nie ma edytora",
+					L"Bu eklentinin arayüzü yok"));
+			return;
+		}
+		CRect b = SlotBtnRect(slot, SLOT_BTN_MENU);
+		CPoint at(b.left, b.bottom);
+		ClientToScreen(&at);
+		ShowSlotMenu(slot, at);
+		return;
+	}
 	if (m_dragging) {
 		ReleaseCapture();
 		const int slot = HitSlot(pt);
@@ -607,18 +710,134 @@ void CVstWireCtrl::OnMouseMove(UINT flags, CPoint pt)
 	m_dragPt = pt;
 	m_hoverPlugin = m_dragging ? -1 : HitPalette(pt);
 	m_hoverSlot = HitSlot(pt);
+	// The two slot buttons are small, so say what they do while the pointer is
+	// on them.
+	int hoverBtn = -1;
+	const int btnSlot = m_dragging ? -1 : HitSlotBtn(pt, &hoverBtn);
+	if (btnSlot != m_hintSlot || hoverBtn != m_hintBtn) {
+		m_hintSlot = btnSlot;
+		m_hintBtn = hoverBtn;
+		if (m_owner && btnSlot >= 0) {
+			CString s;
+			if (hoverBtn == SLOT_BTN_EDIT)
+				s.Format(L"%02d: %s", btnSlot + 1,
+					LL14(L"プラグインの設定画面を開く", L"Open the plug-in's editor",
+						L"Ouvrir l'éditeur du plug-in", L"Apri l'editor del plug-in",
+						L"Abrir el editor del plug-in", L"플러그인 설정 화면 열기",
+						L"打开插件设置界面", L"فتح واجهة الإضافة",
+						L"Открыть редактор плагина", L"Editor des Plug-ins öffnen",
+						L"Abrir o editor do plug-in", L"Editor van de plug-in openen",
+						L"Otwórz edytor wtyczki", L"Eklenti arayüzünü aç"));
+			else
+				s.Format(L"%02d: %s", btnSlot + 1,
+					LL14(L"パート（渡すチャンネル）とプログラムを選ぶ",
+						L"Pick the part channel and program", L"Choisir le canal et le programme",
+						L"Scegli canale e programma", L"Elegir canal y programa",
+						L"파트 채널과 프로그램 선택", L"选择声部通道与程序",
+						L"اختر القناة والبرنامج", L"Выбор канала и программы",
+						L"Kanal und Programm wählen", L"Escolher canal e programa",
+						L"Kanaal en programma kiezen", L"Wybierz kanał i program",
+						L"Kanal ve program seç"));
+			m_owner->SetStatus(s);
+		}
+	}
 	Invalidate(FALSE);
 	CStatic::OnMouseMove(flags, pt);
 }
 
 void CVstWireCtrl::OnMouseLeave()
 {
-	m_trackLeave = FALSE; m_hoverPlugin = m_hoverSlot = -1; Invalidate(FALSE);
+	m_trackLeave = FALSE; m_hoverPlugin = m_hoverSlot = -1;
+	m_hintSlot = m_hintBtn = -1;
+	Invalidate(FALSE);
+}
+
+// Everything that belongs to one loaded part: its editor, which MIDI channel
+// it hands the plug-in, and its program list. Drum kits that only listen on
+// ch1 can therefore sit in any slot, and HALion / SampleTank / Groove Agent
+// parts are reachable without going through the plug-in's own window.
+void CVstWireCtrl::ShowSlotMenu(int slot, CPoint screenPt)
+{
+	if (slot < 0 || slot >= PART_COUNT || m_slots[slot] < 0 || !m_owner) return;
+	const int part = slot + 1;
+	const int curCh = VstLiveSendChannel(part);
+	const int curProg = VstLiveProgramCurrent(part);
+	int progCount = VstLiveProgramCount(part);
+	if (progCount > VST_PROG_MENU_MAX) progCount = VST_PROG_MENU_MAX;
+
+	CCustomPopupMenu menu;
+	menu.AddCommand(ID_VST_POP_EDITOR, LL14(L"設定画面を開く", L"Open editor", L"Ouvrir l'éditeur",
+		L"Apri l'editor", L"Abrir el editor", L"설정 화면 열기", L"打开设置界面",
+		L"فتح واجهة الإعدادات", L"Открыть редактор", L"Editor öffnen", L"Abrir o editor",
+		L"Editor openen", L"Otwórz edytor", L"Arayüzü aç"));
+	menu.AddSeparator();
+
+	CCustomPopupMenu* chMenu = menu.AddSubMenu(LL14(L"プラグインに渡すチャンネル",
+		L"Channel sent to the plug-in", L"Canal envoyé au plug-in", L"Canale inviato al plug-in",
+		L"Canal enviado al plug-in", L"플러그인에 보낼 채널", L"发送到插件的通道",
+		L"القناة المرسلة إلى الإضافة", L"Канал, отправляемый плагину",
+		L"An das Plug-in gesendeter Kanal", L"Canal enviado ao plug-in",
+		L"Kanaal naar de plug-in", L"Kanał wysyłany do wtyczki", L"Eklentiye gönderilen kanal"));
+	if (chMenu) {
+		chMenu->AddCheck(ID_VST_POP_CH_ASIS, LL14(L"受信したチャンネルのまま",
+			L"Keep the received channel", L"Conserver le canal reçu", L"Mantieni il canale ricevuto",
+			L"Mantener el canal recibido", L"수신한 채널 그대로", L"保持接收到的通道",
+			L"الإبقاء على القناة المستلمة", L"Оставить принятый канал",
+			L"Empfangenen Kanal beibehalten", L"Manter o canal recebido",
+			L"Ontvangen kanaal behouden", L"Zachowaj odebrany kanał", L"Alınan kanalı koru"),
+			curCh < 0);
+		for (int c = 0; c < 16; ++c) {
+			CString s;
+			s.Format(L"ch %d%s", c + 1, c == 9 ? L"  (drums)" : L"");
+			chMenu->AddCheck(ID_VST_POP_CH_FIRST + c, s, curCh == c);
+		}
+	}
+
+	CCustomPopupMenu* progMenu = progCount > 0
+		? menu.AddSubMenu(LL14(L"プログラム / キット", L"Program / kit", L"Programme / kit",
+			L"Programma / kit", L"Programa / kit", L"프로그램 / 킷", L"程序 / 音色组",
+			L"البرنامج / الطقم", L"Программа / кит", L"Programm / Kit", L"Programa / kit",
+			L"Programma / kit", L"Program / zestaw", L"Program / kit"))
+		: NULL;
+	if (progMenu) {
+		const int stride = 64;
+		wchar_t buf[VST_PROG_MENU_MAX * 64] = {};
+		const int got = VstLiveProgramNames(part, 0, progCount, buf, stride);
+		for (int i = 0; i < got; ++i) {
+			CString s;
+			s.Format(L"%3d  %s", i + 1, buf + (size_t)i * stride);
+			progMenu->AddCheck(ID_VST_POP_PROG_FIRST + i, s, i == curProg);
+		}
+	}
+
+	menu.AddSeparator();
+	menu.AddCommand(ID_VST_POP_CLEAR, LL14(L"このスロットを解除", L"Clear this slot", L"Effacer ce slot",
+		L"Azzera slot", L"Borrar ranura", L"이 슬롯 해제", L"清除此插槽", L"مسح هذه الفتحة",
+		L"Очистить слот", L"Slot leeren", L"Limpar slot", L"Slot wissen", L"Wyczyść slot",
+		L"Slotu temizle"));
+
+	const UINT cmd = menu.Track(screenPt, (CWnd*)m_owner);
+	if (!cmd) return;
+	if (cmd == ID_VST_POP_EDITOR) VstLiveEditorOpen(part);
+	else if (cmd == ID_VST_POP_CLEAR) ClearSlot(slot);
+	else if (cmd == ID_VST_POP_CH_ASIS) VstLiveSetSendChannel(part, -1);
+	else if (cmd >= ID_VST_POP_CH_FIRST && cmd < ID_VST_POP_CH_FIRST + 16)
+		VstLiveSetSendChannel(part, (int)(cmd - ID_VST_POP_CH_FIRST));
+	else if (cmd >= ID_VST_POP_PROG_FIRST &&
+		cmd < ID_VST_POP_PROG_FIRST + VST_PROG_MENU_MAX)
+		VstLiveSetProgram(part, (int)(cmd - ID_VST_POP_PROG_FIRST));
+	Invalidate(FALSE);
 }
 
 void CVstWireCtrl::OnRButtonUp(UINT, CPoint pt)
 {
 	const int slot = HitSlot(pt);
+	if (slot >= 0 && m_slots[slot] >= 0) {
+		CPoint at = pt;
+		ClientToScreen(&at);
+		ShowSlotMenu(slot, at);
+		return;
+	}
 	// Right-clicking a channel that a multi-timbral part answers should reach
 	// that part's editor, not nothing.
 	const int owner = (slot >= 0 && m_slots[slot] < 0) ? CoveringMulti(slot) : slot;
@@ -766,6 +985,7 @@ BOOL CVstHostDlg::OnInitDialog()
 	FillDevices();
 	LoadPresets();
 	VstScanEnsure(m_hWnd);
+	VstScanVerifyLiveList(m_hWnd);
 	RebuildPluginList();
 	m_wire.SetSlots(m_slots);
 
@@ -907,7 +1127,7 @@ void CVstHostDlg::RebuildPluginList()
 	CString names[100]; int indices[100]; int count = 0;
 	for (int i = 0; i < VstScanGetCount() && count < 100; ++i) {
 		const VstPluginInfo* pi = VstScanGet(i);
-		if (!pi || !pi->isInstrument) continue;
+		if (!pi || !pi->isInstrument || !pi->isLiveOk) continue;
 		CString n(pi->name), low(n); low.MakeLower();
 		if (!filter.IsEmpty() && low.Find(filter) < 0) continue;
 		names[count] = n;
@@ -1073,6 +1293,7 @@ void CVstHostDlg::OnRescan()
 		L"جارٍ المسح…", L"Сканирование…", L"Scannen…", L"A procurar…", L"Scannen…", L"Skanowanie…", L"Taranıyor…"));
 	VstScanInvalidate();
 	VstScanEnsure(m_hWnd);
+	VstScanVerifyLiveList(m_hWnd);
 	RebuildPluginList();
 	SetStatus(LL14(L"スキャン完了", L"Scan complete", L"Analyse terminée", L"Scansione completata", L"Escaneo completo",
 		L"검색 완료", L"扫描完成", L"اكتمل المسح", L"Сканирование завершено", L"Scan abgeschlossen", L"Procura concluída",

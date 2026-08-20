@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include <windows.h>
 #include <string>
@@ -53,6 +53,10 @@ public:
 	bool VstLiveAudioStop();
 	bool VstLiveEditorOpen(uint32_t part1to32);
 	bool VstLiveEditorClose(uint32_t part1to32);
+	bool VstLiveSetSendChannel(uint32_t part1to32, int32_t sendCh);
+	bool VstLivePrograms(uint32_t part1to32, uint32_t first, uint32_t count,
+		uint32_t& outTotal, uint32_t& outCurrent, std::vector<std::wstring>& outNames);
+	bool VstLiveSetProgram(uint32_t part1to32, uint32_t index);
 
 private:
 	HANDLE m_hPipe = INVALID_HANDLE_VALUE;
