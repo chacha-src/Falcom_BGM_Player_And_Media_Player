@@ -1,7 +1,17 @@
-﻿// AIMP decoder plugin host (AIMPPluginGetHeader + IAIMPExtensionAudioDecoderOld)
+﻿// AIMP decoder plugin host (AIMPPluginGetHeader + IAIMPExtensionAudioDecoder / ...Old)
+//
+// AIMP SDK の実装に合わせた点:
+//  - デコーダ系プラグインは Initialize(Core) の中で Core->RegisterExtension() を呼び、
+//    再生用に IAIMPExtensionAudioDecoder(ストリーム版) か IAIMPExtensionAudioDecoderOld(パス版)、
+//    対応拡張子用に IAIMPExtensionFileFormat を登録してくる。
+//    拡張子は IAIMPExtensionFileFormat::GetExtList() ("*.mp3;*.mp2;") からしか取れない。
+//  - 新しめのプラグインは Old を持たずストリーム版だけを登録するので、
+//    IAIMPStream 実装(ファイル)を用意して両方に対応する。
+//  - 32bit float 出力は本体の再生経路が整数 PCM 前提なので int32 へ変換して渡す(バイト数不変)。
 #include "stdafx.h"
 #include "PluginAimp.h"
 #include "PluginKinds.h"
+#include <float.h>
 
 // AIMP SDK headers live under third_party/aimp (AdditionalIncludeDirectories)
 #include "apiPlugin.h"
@@ -18,11 +28,12 @@ extern int kpicnt;
 static HMODULE g_aimpDll = NULL;
 static IAIMPPlugin* g_aimpPlugin = NULL;
 static IAIMPAudioDecoder* g_aimpDec = NULL;
-static IAIMPExtensionAudioDecoderOld* g_aimpExtOld = NULL;
+static IAIMPStream* g_aimpStream = NULL;
 static int g_aimpOpen = 0;
 static int g_aimpRate = 44100;
 static int g_aimpCh = 2;
 static int g_aimpBits = 16;
+static int g_aimpFloat = 0;   // デコーダのネイティブが 32bit float
 static INT64 g_aimpSize = 0;
 
 // ---- minimal IAIMPString ----
@@ -123,12 +134,67 @@ public:
 	void WINAPI SetInfo(int, IAIMPString*, IAIMPString*) {}
 };
 
+// ストリーム版 CreateDecoder(IAIMPStream*) 用のローカルファイルストリーム
+class CAimpFileStream : public IAIMPStream
+{
+	LONG m_ref;
+	HANDLE m_h;
+public:
+	explicit CAimpFileStream(const wchar_t* path) : m_ref(1)
+	{
+		m_h = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING,
+			FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, NULL);
+	}
+	~CAimpFileStream() { if (m_h != INVALID_HANDLE_VALUE) CloseHandle(m_h); }
+	BOOL IsValid() const { return m_h != INVALID_HANDLE_VALUE; }
+	HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void** ppv)
+	{
+		if (!ppv) return E_POINTER;
+		if (riid == IID_IUnknown || riid == IID_IAIMPStream) { *ppv = (IAIMPStream*)this; AddRef(); return S_OK; }
+		*ppv = NULL; return E_NOINTERFACE;
+	}
+	ULONG STDMETHODCALLTYPE AddRef() { return (ULONG)InterlockedIncrement(&m_ref); }
+	ULONG STDMETHODCALLTYPE Release() { LONG r = InterlockedDecrement(&m_ref); if (r == 0) delete this; return (ULONG)r; }
+	INT64 WINAPI GetSize()
+	{
+		LARGE_INTEGER li;
+		if (!GetFileSizeEx(m_h, &li)) return 0;
+		return li.QuadPart;
+	}
+	HRESULT WINAPI SetSize(const INT64) { return E_NOTIMPL; }
+	INT64 WINAPI GetPosition()
+	{
+		LARGE_INTEGER z; z.QuadPart = 0;
+		LARGE_INTEGER cur; cur.QuadPart = 0;
+		if (!SetFilePointerEx(m_h, z, &cur, FILE_CURRENT)) return 0;
+		return cur.QuadPart;
+	}
+	HRESULT WINAPI Seek(const INT64 Offset, int Mode)
+	{
+		DWORD m = FILE_BEGIN;
+		if (Mode == AIMP_STREAM_SEEKMODE_FROM_CURRENT) m = FILE_CURRENT;
+		else if (Mode == AIMP_STREAM_SEEKMODE_FROM_END) m = FILE_END;
+		LARGE_INTEGER li; li.QuadPart = Offset;
+		return SetFilePointerEx(m_h, li, NULL, m) ? S_OK : E_FAIL;
+	}
+	int WINAPI Read(unsigned char* Buffer, unsigned int Count)
+	{
+		DWORD rd = 0;
+		if (!ReadFile(m_h, Buffer, Count, &rd, NULL)) return -1;
+		return (int)rd;
+	}
+	HRESULT WINAPI Write(unsigned char*, unsigned int, unsigned int*) { return E_NOTIMPL; }
+};
+
 class CAimpCore : public IAIMPCore
 {
 	LONG m_ref;
 public:
 	IAIMPExtensionAudioDecoderOld* m_extOld;
-	CAimpCore() : m_ref(1), m_extOld(NULL) {}
+	IAIMPExtensionAudioDecoder* m_extNew;
+	CString m_exts;          // "*.mp3;*.mp2;" を連結したもの
+	CString m_pluginDir;
+	CAimpCore() : m_ref(1), m_extOld(NULL), m_extNew(NULL) {}
 	HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void** ppv)
 	{
 		if (!ppv) return E_POINTER;
@@ -147,30 +213,41 @@ public:
 	HRESULT WINAPI GetPath(int, IAIMPString** Value)
 	{
 		if (!Value) return E_POINTER;
-		*Value = new CAimpString(L".");
+		*Value = new CAimpString(m_pluginDir.IsEmpty() ? L"." : (const wchar_t*)m_pluginDir);
 		return S_OK;
 	}
-	HRESULT WINAPI RegisterExtension(REFIID ServiceIID, IUnknown* Extension)
+	HRESULT WINAPI RegisterExtension(REFIID, IUnknown* Extension)
 	{
+		// ServiceIID で振り分けず、来たものを片端から QI する（登録先 IID はプラグイン依存）
 		if (!Extension) return E_INVALIDARG;
-		if (ServiceIID == IID_IAIMPServiceAudioDecoders || ServiceIID == IID_IAIMPExtensionAudioDecoderOld) {
+		IAIMPExtensionFileFormat* fmt = NULL;
+		if (SUCCEEDED(Extension->QueryInterface(IID_IAIMPExtensionFileFormat, (void**)&fmt)) && fmt) {
+			IAIMPString* s = NULL;
+			if (SUCCEEDED(fmt->GetExtList(&s)) && s) {
+				if (!m_exts.IsEmpty()) m_exts += L";";
+				m_exts += s->GetData();
+				s->Release();
+			}
+			fmt->Release();
+		}
+		if (!m_extOld) {
 			IAIMPExtensionAudioDecoderOld* old = NULL;
-			if (SUCCEEDED(Extension->QueryInterface(IID_IAIMPExtensionAudioDecoderOld, (void**)&old)) && old) {
-				if (m_extOld) m_extOld->Release();
+			if (SUCCEEDED(Extension->QueryInterface(IID_IAIMPExtensionAudioDecoderOld, (void**)&old)) && old)
 				m_extOld = old;
-				return S_OK;
-			}
+		}
+		if (!m_extNew) {
 			IAIMPExtensionAudioDecoder* neu = NULL;
-			if (SUCCEEDED(Extension->QueryInterface(IID_IAIMPExtensionAudioDecoder, (void**)&neu)) && neu) {
-				neu->Release(); // stream-based; Old preferred for file path host
-			}
+			if (SUCCEEDED(Extension->QueryInterface(IID_IAIMPExtensionAudioDecoder, (void**)&neu)) && neu)
+				m_extNew = neu;
 		}
 		return S_OK;
 	}
 	HRESULT WINAPI RegisterService(IUnknown*) { return S_OK; }
 	HRESULT WINAPI UnregisterExtension(IUnknown* Extension)
 	{
-		if (Extension && m_extOld == Extension) { m_extOld->Release(); m_extOld = NULL; }
+		if (!Extension) return S_OK;
+		if (m_extOld == Extension) { m_extOld->Release(); m_extOld = NULL; }
+		if (m_extNew == Extension) { m_extNew->Release(); m_extNew = NULL; }
 		return S_OK;
 	}
 };
@@ -180,7 +257,7 @@ static CAimpCore* g_aimpCore = NULL;
 static void AimpUnloadPlugin()
 {
 	if (g_aimpDec) { g_aimpDec->Release(); g_aimpDec = NULL; }
-	g_aimpExtOld = NULL;
+	if (g_aimpStream) { g_aimpStream->Release(); g_aimpStream = NULL; }
 	if (g_aimpPlugin) {
 		g_aimpPlugin->Finalize();
 		g_aimpPlugin->Release();
@@ -188,11 +265,13 @@ static void AimpUnloadPlugin()
 	}
 	if (g_aimpCore) {
 		if (g_aimpCore->m_extOld) { g_aimpCore->m_extOld->Release(); g_aimpCore->m_extOld = NULL; }
+		if (g_aimpCore->m_extNew) { g_aimpCore->m_extNew->Release(); g_aimpCore->m_extNew = NULL; }
 		g_aimpCore->Release();
 		g_aimpCore = NULL;
 	}
 	if (g_aimpDll) { FreeLibrary(g_aimpDll); g_aimpDll = NULL; }
 	g_aimpOpen = 0;
+	g_aimpFloat = 0;
 }
 
 static int AimpLoadPlugin(const wchar_t* dllPath)
@@ -204,13 +283,16 @@ static int AimpLoadPlugin(const wchar_t* dllPath)
 	if (!getHdr) { FreeLibrary(h); return 0; }
 	IAIMPPlugin* plug = NULL;
 	if (FAILED(getHdr(&plug)) || !plug) { FreeLibrary(h); return 0; }
-	DWORD cat = plug->InfoGetCategories();
-	if ((cat & AIMP_PLUGIN_CATEGORY_DECODERS) == 0) {
+	if ((plug->InfoGetCategories() & AIMP_PLUGIN_CATEGORY_DECODERS) == 0) {
 		plug->Release();
 		FreeLibrary(h);
 		return 0;
 	}
 	g_aimpCore = new CAimpCore();
+	CString dir(dllPath);
+	int sl = dir.ReverseFind(L'\\');
+	if (sl > 0) dir = dir.Left(sl);
+	g_aimpCore->m_pluginDir = dir;
 	if (FAILED(plug->Initialize(g_aimpCore))) {
 		plug->Release();
 		g_aimpCore->Release();
@@ -220,52 +302,97 @@ static int AimpLoadPlugin(const wchar_t* dllPath)
 	}
 	g_aimpDll = h;
 	g_aimpPlugin = plug;
-	g_aimpExtOld = g_aimpCore->m_extOld;
-	return g_aimpExtOld ? 1 : 0;
+	return (g_aimpCore->m_extOld || g_aimpCore->m_extNew) ? 1 : 0;
+}
+
+// "*.mp3;*.mp2;" → ext[kpicnt][]
+static void AimpParseExts(const CString& list)
+{
+	ext[kpicnt][0] = L"";
+	ext[kpicnt][299] = L"";
+	int ei = 0;
+	int start = 0;
+	for (;;) {
+		int sc = list.Find(L';', start);
+		CString tok = (sc < 0) ? list.Mid(start) : list.Mid(start, sc - start);
+		tok.Trim();
+		tok.MakeLower();
+		int st = 0;
+		while (st < tok.GetLength() && (tok[st] == L'*' || tok[st] == L'.')) st++;
+		tok = tok.Mid(st);
+		if (!tok.IsEmpty() && ei < 298) {
+			tok = L"." + tok;
+			int dup = 0;
+			for (int k = 0; k < ei; k++) {
+				if (ext[kpicnt][k] == tok) { dup = 1; break; }
+			}
+			if (!dup) {
+				ext[kpicnt][ei] = tok;
+				kvar[kpicnt][ei] = 0;
+				ei++;
+			}
+		}
+		if (sc < 0) break;
+		start = sc + 1;
+	}
+	ext[kpicnt][ei] = L"";
 }
 
 int PluginAimp_TryEnum(const wchar_t* dllPath, int is64)
 {
 	if (!dllPath || !dllPath[0] || kpicnt >= 149) return 0;
 	if (is64) {
-		plugkind[kpicnt] = PLUGKIND_AIMP;
-		kpiarch[kpicnt] = 64;
-		kpif[kpicnt] = dllPath;
-		ext[kpicnt][0] = L"";
-		ext[kpicnt][299] = L"";
-		kvar[kpicnt][0] = 0;
-		kpicnt++;
-		return 1;
+		// x64 は KpiHost64 側に AIMP 再生系が無いので台帳に載せない
+		return 0;
 	}
-	if (!AimpLoadPlugin(dllPath)) return 0;
-	plugkind[kpicnt] = PLUGKIND_AIMP;
-	kpiarch[kpicnt] = 32;
-	kpif[kpicnt] = dllPath;
-	// 拡張子はプラグイン名・説明から推定不可なことが多い → 空（plugsaimp で CreateDecoder 試行）
-	ext[kpicnt][0] = L"";
-	ext[kpicnt][299] = L"";
-	kvar[kpicnt][0] = 0;
-	PWCHAR nm = g_aimpPlugin->InfoGet(AIMP_PLUGIN_INFO_NAME);
-	(void)nm;
+	int ok = 0;
+	try {
+		if (AimpLoadPlugin(dllPath)) {
+			plugkind[kpicnt] = PLUGKIND_AIMP;
+			kpiarch[kpicnt] = 32;
+			kpif[kpicnt] = dllPath;
+			AimpParseExts(g_aimpCore ? g_aimpCore->m_exts : CString());
+			// 拡張子を公開しないプラグインは plugsaimp でマッチできないので載せない
+			if (ext[kpicnt][0] != L"") {
+				kpichk[kpicnt] = TRUE;
+				kpicnt++;
+				ok = 1;
+			}
+		}
+	}
+	catch (...) {
+		ok = 0;
+	}
 	AimpUnloadPlugin();
-	kpicnt++;
-	return 1;
+	return ok;
 }
 
 int PluginAimp_Open(const wchar_t* dllPath, const wchar_t* mediaPath)
 {
 	PluginAimp_Close();
-	if (!AimpLoadPlugin(dllPath) || !g_aimpExtOld) {
+	if (!AimpLoadPlugin(dllPath)) {
 		AimpUnloadPlugin();
 		return 0;
 	}
-	CAimpString* fn = new CAimpString(mediaPath);
-	CAimpErrorInfo* err = new CAimpErrorInfo();
 	IAIMPAudioDecoder* dec = NULL;
-	HRESULT hr = g_aimpExtOld->CreateDecoder(fn, AIMP_DECODER_FLAGS_FORCE_CREATE_INSTANCE, err, &dec);
-	fn->Release();
+	CAimpErrorInfo* err = new CAimpErrorInfo();
+	if (g_aimpCore->m_extOld) {
+		CAimpString* fn = new CAimpString(mediaPath);
+		if (FAILED(g_aimpCore->m_extOld->CreateDecoder(fn, 0, err, &dec)))
+			dec = NULL;
+		fn->Release();
+	}
+	if (!dec && g_aimpCore->m_extNew) {
+		CAimpFileStream* st = new CAimpFileStream(mediaPath);
+		if (st->IsValid()) {
+			if (FAILED(g_aimpCore->m_extNew->CreateDecoder(st, 0, err, &dec)))
+				dec = NULL;
+		}
+		if (dec) g_aimpStream = st; // デコーダが読み続けるので再生中は保持
+		else st->Release();
+	}
 	err->Release();
-	if (FAILED(hr) || !dec) {
+	if (!dec) {
 		AimpUnloadPlugin();
 		return 0;
 	}
@@ -278,10 +405,12 @@ int PluginAimp_Open(const wchar_t* dllPath, const wchar_t* mediaPath)
 	g_aimpDec = dec;
 	g_aimpRate = sr > 0 ? sr : 44100;
 	g_aimpCh = ch > 0 ? ch : 2;
+	g_aimpFloat = 0;
 	if (fmt == AIMP_DECODER_SAMPLEFORMAT_08BIT) g_aimpBits = 8;
 	else if (fmt == AIMP_DECODER_SAMPLEFORMAT_16BIT) g_aimpBits = 16;
 	else if (fmt == AIMP_DECODER_SAMPLEFORMAT_24BIT) g_aimpBits = 24;
-	else if (fmt == AIMP_DECODER_SAMPLEFORMAT_32BIT || fmt == AIMP_DECODER_SAMPLEFORMAT_32BITFLOAT) g_aimpBits = 32;
+	else if (fmt == AIMP_DECODER_SAMPLEFORMAT_32BIT) g_aimpBits = 32;
+	else if (fmt == AIMP_DECODER_SAMPLEFORMAT_32BITFLOAT) { g_aimpBits = 32; g_aimpFloat = 1; }
 	else g_aimpBits = 16;
 	g_aimpSize = dec->GetSize();
 	g_aimpOpen = 1;
@@ -290,7 +419,6 @@ int PluginAimp_Open(const wchar_t* dllPath, const wchar_t* mediaPath)
 
 void PluginAimp_Close()
 {
-	if (g_aimpDec) { g_aimpDec->Release(); g_aimpDec = NULL; }
 	AimpUnloadPlugin();
 }
 
@@ -309,8 +437,26 @@ INT64 PluginAimp_SizeBytes() { return g_aimpSize; }
 int PluginAimp_Read(BYTE* dst, int bytesWanted)
 {
 	if (!dst || bytesWanted <= 0 || !g_aimpDec || !g_aimpOpen) return 0;
-	int n = g_aimpDec->Read(dst, bytesWanted);
-	return n > 0 ? n : 0;
+	int n = 0;
+	try { n = g_aimpDec->Read(dst, bytesWanted); }
+	catch (...) { n = 0; }
+	if (n <= 0) return 0;
+	if (g_aimpFloat) {
+		// 32bit float → 32bit int。KPI の QuietBoost(GetFloatToInt16Scale) は掛けない（正規化 float 向け）。
+		// バイト数は同じなのでその場で置換。長さ/Seek はデコーダの float バイト基準のまま。
+		float* f = (float*)dst;
+		int* i32 = (int*)dst;
+		const int cntS = n / 4;
+		for (int i = 0; i < cntS; i++) {
+			double v = (double)f[i];
+			if (!_finite(v)) v = 0.0;
+			double s = v * 2147483647.0;
+			if (s > 2147483647.0) s = 2147483647.0;
+			if (s < -2147483648.0) s = -2147483648.0;
+			i32[i] = (int)(s >= 0.0 ? (s + 0.5) : (s - 0.5));
+		}
+	}
+	return n;
 }
 
 int readaimp(BYTE* bw, int cnt)

@@ -1,4 +1,4 @@
-// PlayList.cpp : 実装ファイル
+﻿// PlayList.cpp : 実装ファイル
 //
 
 #include "stdafx.h"
@@ -4009,6 +4009,21 @@ int CPlayList::Add(CString name,int sub,int loop1,int loop2,CString art,CString 
 		case -3:
 			ss = fol.Right(fol.GetLength() - fol.ReverseFind('.') - 1);
 			s.Format(LL14(L"%sファイル", L"%s File", L"%s fichier", L"%s file", L"%s archivo", L"%s 파일", L"%s文件", L"ملف %s", L"файл %s", L"%s-Datei", L"arquivo %s", L"%s bestand", L"plik %s", L"%s dosyası"), ss);
+			break;
+
+		case MODE_PLUGIN_WINAMP:
+			ss = fol.Right(fol.GetLength() - fol.ReverseFind('.') - 1);
+			s.Format(LL14(L"%sファイル(Winamp)", L"%s File(Winamp)", L"%s fichier(Winamp)", L"%s file(Winamp)", L"%s archivo(Winamp)", L"%s 파일(Winamp)", L"%s文件(Winamp)", L"ملف %s(Winamp)", L"файл %s(Winamp)", L"%s-Datei(Winamp)", L"arquivo %s(Winamp)", L"%s bestand(Winamp)", L"plik %s(Winamp)", L"%s dosyası(Winamp)"), ss);
+			break;
+
+		case MODE_PLUGIN_XMPLAY:
+			ss = fol.Right(fol.GetLength() - fol.ReverseFind('.') - 1);
+			s.Format(LL14(L"%sファイル(XMPlay)", L"%s File(XMPlay)", L"%s fichier(XMPlay)", L"%s file(XMPlay)", L"%s archivo(XMPlay)", L"%s 파일(XMPlay)", L"%s文件(XMPlay)", L"ملف %s(XMPlay)", L"файл %s(XMPlay)", L"%s-Datei(XMPlay)", L"arquivo %s(XMPlay)", L"%s bestand(XMPlay)", L"plik %s(XMPlay)", L"%s dosyası(XMPlay)"), ss);
+			break;
+
+		case MODE_PLUGIN_AIMP:
+			ss = fol.Right(fol.GetLength() - fol.ReverseFind('.') - 1);
+			s.Format(LL14(L"%sファイル(AIMP)", L"%s File(AIMP)", L"%s fichier(AIMP)", L"%s file(AIMP)", L"%s archivo(AIMP)", L"%s 파일(AIMP)", L"%s文件(AIMP)", L"ملف %s(AIMP)", L"файл %s(AIMP)", L"%s-Datei(AIMP)", L"arquivo %s(AIMP)", L"%s bestand(AIMP)", L"plik %s(AIMP)", L"%s dosyası(AIMP)"), ss);
 			break;
 
 		case MODE_VST_MIDI:
@@ -10095,14 +10110,22 @@ if (fff == 0)
 
 void CPlayList::FixMidiMode(playlistdata0& item)
 {
-	if (!(VstIsMidiExt(item.fol) || VstIsProjectExt(item.fol))) return;
-	const int preferVst = (savedata.midPlayPrefer == 1) ? 1 : 0;
-	// VST優先で既に -30、KPI優先で既に -3 → そのまま。
-	// KPIもVSTも無い -2 は許容（KPI優先時の再試行のみ下で行う）。
-	if (preferVst && item.sub == MODE_VST_MIDI) return;
-	if (!preferVst && item.sub == -3) return;
-	if (!preferVst && item.sub == MODE_VST_MIDI) return;
-	if (!preferVst && item.sub != -2) return;
+	if (VstIsMidiExt(item.fol) || VstIsProjectExt(item.fol)) {
+		const int preferVst = (savedata.midPlayPrefer == 1) ? 1 : 0;
+		// VST優先で既に -30、KPI優先で既に -3 → そのまま。
+		// KPIもVSTも無い -2 は許容（KPI優先時の再試行のみ下で行う）。
+		if (preferVst && item.sub == MODE_VST_MIDI) return;
+		if (!preferVst && item.sub == -3) return;
+		if (!preferVst && item.sub == MODE_VST_MIDI) return;
+		if (!preferVst && item.sub != -2) return;
+	}
+	else {
+		// 非MIDI: 保存済み -2(DirectShow) だけ引き直す。
+		// プラグイン追加/有効化より前に登録した曲は sub=-2 のまま .dat に焼き付き、
+		// 以後どれだけ再生しても Winamp/XMPlay/AIMP/KPI に上がらない。
+		if (item.sub != -2) return;
+		if (IsDougaVideoFile(item.fol)) return;
+	}
 	playlistdata p;
 	ZeroMemory(&p, sizeof(p));
 	_tcscpy(p.fol, item.fol);
@@ -10119,6 +10142,12 @@ void CPlayList::FixMidiMode(playlistdata0& item)
 	CString game;
 	if (p.sub == MODE_VST_MIDI)
 		game.Format(LL14(L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)"), ss);
+	else if (p.sub == MODE_PLUGIN_WINAMP)
+		game.Format(LL14(L"%sファイル(Winamp)", L"%s File(Winamp)", L"%s fichier(Winamp)", L"%s file(Winamp)", L"%s archivo(Winamp)", L"%s 파일(Winamp)", L"%s文件(Winamp)", L"ملف %s(Winamp)", L"файл %s(Winamp)", L"%s-Datei(Winamp)", L"arquivo %s(Winamp)", L"%s bestand(Winamp)", L"plik %s(Winamp)", L"%s dosyası(Winamp)"), ss);
+	else if (p.sub == MODE_PLUGIN_XMPLAY)
+		game.Format(LL14(L"%sファイル(XMPlay)", L"%s File(XMPlay)", L"%s fichier(XMPlay)", L"%s file(XMPlay)", L"%s archivo(XMPlay)", L"%s 파일(XMPlay)", L"%s文件(XMPlay)", L"ملف %s(XMPlay)", L"файл %s(XMPlay)", L"%s-Datei(XMPlay)", L"arquivo %s(XMPlay)", L"%s bestand(XMPlay)", L"plik %s(XMPlay)", L"%s dosyası(XMPlay)"), ss);
+	else if (p.sub == MODE_PLUGIN_AIMP)
+		game.Format(LL14(L"%sファイル(AIMP)", L"%s File(AIMP)", L"%s fichier(AIMP)", L"%s file(AIMP)", L"%s archivo(AIMP)", L"%s 파일(AIMP)", L"%s文件(AIMP)", L"ملف %s(AIMP)", L"файл %s(AIMP)", L"%s-Datei(AIMP)", L"arquivo %s(AIMP)", L"%s bestand(AIMP)", L"plik %s(AIMP)", L"%s dosyası(AIMP)"), ss);
 	else
 		game.Format(LL14(L"%sファイル", L"%s File", L"%s fichier", L"%s file", L"%s archivo", L"%s 파일", L"%s文件", L"ملف %s", L"файл %s", L"%s-Datei", L"arquivo %s", L"%s bestand", L"plik %s", L"%s dosyası"), ss);
 	_tcsncpy_s(item.game, game, _TRUNCATE);
@@ -10235,31 +10264,20 @@ void CPlayList::plugsaimp(CString fff, playlistdata *p, TCHAR* kpi, BYTE& kv)
 	CString ss, ft;
 	for (int i = 0; i < kpicnt; i++) {
 		if (plugkind[i] != PLUGKIND_AIMP || kpichk[i] != 1) continue;
-		int hasExt = (ext[i][0] != L"");
-		int match = 0;
-		if (hasExt) {
+		for (int j = 0;; j++) {
+			if (ext[i][j] == L"") break;
 			ss = fff.Right(fff.GetLength() - fff.ReverseFind(L'.')); ss.MakeLower();
-			for (int j = 0;; j++) {
-				if (ext[i][j] == L"") break;
-				if (ext[i][j] == ss) { match = 1; break; }
+			if (ext[i][j] == ss) {
+				_tcscpy(p->fol, fff);
+				p->sub = MODE_PLUGIN_AIMP;
+				ft = fff.Right(fff.GetLength() - fff.ReverseFind(L'\\') - 1);
+				_tcscpy(p->name, ft);
+				p->alb[0] = NULL; p->art[0] = NULL; p->loop1 = p->loop2 = p->ret2 = 0;
+				_tcscpy(kpi, kpif[i]);
+				kv = 0;
+				return;
 			}
 		}
-		else {
-			// 拡張子未公開: CreateDecoder で実ファイルを試す
-			if (PluginAimp_Open(kpif[i], fff)) {
-				PluginAimp_Close();
-				match = 1;
-			}
-		}
-		if (!match) continue;
-		_tcscpy(p->fol, fff);
-		p->sub = MODE_PLUGIN_AIMP;
-		ft = fff.Right(fff.GetLength() - fff.ReverseFind(L'\\') - 1);
-		_tcscpy(p->name, ft);
-		p->alb[0] = NULL; p->art[0] = NULL; p->loop1 = p->loop2 = p->ret2 = 0;
-		_tcscpy(kpi, kpif[i]);
-		kv = 0;
-		return;
 	}
 }
 

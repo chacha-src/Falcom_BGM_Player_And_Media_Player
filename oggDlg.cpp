@@ -737,6 +737,7 @@ int readvst(BYTE* bw, int cnt);
 int playwavwinamp(BYTE* bw, int old, int l1, int l2);
 int playwavxmplay(BYTE* bw, int old, int l1, int l2);
 int playwavaimp(BYTE* bw, int old, int l1, int l2);
+void EqualiserSetFormatVolContext(int mode, BOOL spcApplicable);
 int playwavflac(BYTE* bw, int old, int l1, int l2);
 int readflac(BYTE* bw, int cnt);
 static double GetFloatToInt16Scale(double maxAbs, double meanAbs)
@@ -11151,6 +11152,7 @@ void COggDlg::play()
 	}
 	else if (mode == MODE_VST_MIDI) {
 		ret2 = 0;
+		EqualiserSetFormatVolContext(1, FALSE); // その他のkpi（x86 直読み / KpiHost64 経由とも本体 equaliser）
 		wchar_t mid[VST_PATH_CHARS]; mid[0] = 0;
 		wchar_t hints[32][128]; int hc = 0;
 		CString src = filen;
@@ -11262,6 +11264,7 @@ void COggDlg::play()
 	}
 	else if (mode == MODE_PLUGIN_WINAMP) {
 		ret2 = 0;
+		EqualiserSetFormatVolContext(1, FALSE); // その他のkpi
 		const WORD km = GetPeMachine(kpi);
 		int ok = 0;
 		if (km == IMAGE_FILE_MACHINE_AMD64 || km == IMAGE_FILE_MACHINE_ARM64)
@@ -11305,6 +11308,7 @@ void COggDlg::play()
 	}
 	else if (mode == MODE_PLUGIN_XMPLAY) {
 		ret2 = 0;
+		EqualiserSetFormatVolContext(1, FALSE); // その他のkpi
 		if (!PluginXmplay_Open(kpi, filen)) {
 			MessageBox(LL14(
 				L"XMPlayプラグインを開けませんでした。",
@@ -11342,6 +11346,7 @@ void COggDlg::play()
 	}
 	else if (mode == MODE_PLUGIN_AIMP) {
 		ret2 = 0;
+		EqualiserSetFormatVolContext(1, FALSE); // その他のkpi
 		if (!PluginAimp_Open(kpi, filen)) {
 			MessageBox(LL14(
 				L"AIMPプラグインを開けませんでした。",
@@ -13127,8 +13132,8 @@ BOOL COggDlg::ExportToWav(playlistdata0* pc, CString outputPath, int loopCount, 
 		if (localOpts.forceBits == 16 || localOpts.forceBits == 24 || localOpts.forceBits == 32)
 			g_wavExportBits = localOpts.forceBits;
 	}
-	if (pc->sub == -3) {
-		// OnRestart と同様、書き出し前に KPI プラグインを解決する。
+	if (pc->sub == -3 || IsForeignPluginMode(pc->sub)) {
+		// OnRestart と同様、書き出し前に KPI/Winamp/XMPlay/AIMP プラグインを解決する。
 		// 未再生のまま書き出すと kpi/kvver が空のまま Open できず、進捗2〜3%で失敗する。
 		if (pl && plw) {
 			playlistdata p = {};
@@ -13149,6 +13154,8 @@ BOOL COggDlg::ExportToWav(playlistdata0* pc, CString outputPath, int loopCount, 
 				}
 			}
 		}
+	}
+	if (pc->sub == -3) {
 		float sec = localOpts.kpiDurationSec;
 		if (sec < 1.f) sec = savedata.wav_export_kpi_sec;
 		if (sec < 1.f) sec = 240.f;
@@ -18759,6 +18766,10 @@ int playwavkpi(BYTE* bw, int old, int l1, int l2)
 static int playwavForeignPull(BYTE* bw, int old, int l1, int l2, int (*readfn)(BYTE*, int), int (*seek0)())
 {
 	if (!readfn) return 0;
+	// 生PCM（プラグイン出力そのまま）を equaliser に渡し、倍率は「その他のkpi」(kpivol) のみ。
+	// SPC 倍率は掛けない。KPI の readkpi と同じ equaliser 経路に載せる。
+	// （以前は equaliser 未呼び出しで生のまま DS へ → フルスケール源で割れ、倍率も効かない）
+	EqualiserSetFormatVolContext(1, FALSE);
 	const bool exporting = (wavExportPath.GetLength() > 0 || g_isWavExportRendering);
 	int rrr = readfn(bw + old, l1);
 	{
@@ -18801,6 +18812,12 @@ static int playwavForeignPull(BYTE* bw, int old, int l1, int l2, int (*readfn)(B
 			l1 = rrr;
 		}
 	}
+	if (l1 > 0) {
+		EqualiserSetFormatVolContext(1, FALSE);
+		equaliser(bw + old, l1, reset);
+		if (og) og->FeedPianoRoll(bw + old, l1);
+		reset = FALSE;
+	}
 	if (l2) {
 		rrr = readfn(bw, l2);
 		{
@@ -18842,6 +18859,12 @@ static int playwavForeignPull(BYTE* bw, int old, int l1, int l2, int (*readfn)(B
 			else {
 				l2 = rrr;
 			}
+		}
+		if (l2 > 0) {
+			EqualiserSetFormatVolContext(1, FALSE);
+			equaliser(bw, l2, reset);
+			if (og) og->FeedPianoRoll(bw, l2);
+			reset = FALSE;
 		}
 	}
 	return l1 + l2;
@@ -19150,11 +19173,20 @@ int readvst(BYTE* bw, int cnt)
 
 int playwavvst(BYTE* bw, int old, int l1, int l2)
 {
+	// x86 直読み(VstMidiRead)・x64 リモート(KpiHost64 VstRender→readvst)とも
+	// 生PCMをここで受け、KPI と同じ equaliser + その他のkpi(kpivol) を載せる。
+	EqualiserSetFormatVolContext(1, FALSE);
 	int rrr = readvst(bw + old, l1);
 	if (rrr < 0) rrr = 0;
 	if (rrr < l1) {
 		if (rrr > 0) ZeroMemory(bw + old + rrr, l1 - rrr);
 		else ZeroMemory(bw + old, l1);
+	}
+	if (rrr > 0) {
+		EqualiserSetFormatVolContext(1, FALSE);
+		equaliser(bw + old, rrr, reset);
+		if (og) og->FeedPianoRoll(bw + old, rrr);
+		reset = FALSE;
 	}
 	if (l2 > 0) {
 		int r2 = readvst(bw, l2);
@@ -19162,6 +19194,12 @@ int playwavvst(BYTE* bw, int old, int l1, int l2)
 		if (r2 < l2) {
 			if (r2 > 0) ZeroMemory(bw + r2, l2 - r2);
 			else ZeroMemory(bw, l2);
+		}
+		if (r2 > 0) {
+			EqualiserSetFormatVolContext(1, FALSE);
+			equaliser(bw, r2, reset);
+			if (og) og->FeedPianoRoll(bw, r2);
+			reset = FALSE;
 		}
 		rrr += r2;
 	}
@@ -27828,7 +27866,7 @@ void COggDlg::OnRestart()
 			modesub = mode;
 			play();
 		}
-		else if (mode == -2 || mode == -3) {
+		else if (mode == -2 || mode == -3 || IsForeignPluginMode(mode)) {
 			playlistdata p;
 			kpi[0] = 0;
 			if (pl && plw) {
@@ -27849,6 +27887,20 @@ void COggDlg::OnRestart()
 					//					pFunck = (pfnGetKMPModule)::GetProcAddress(hDLLk, "kmp_GetTestModule");
 					mode = -3;
 					modesub = -3;
+					play();
+					return;
+				}
+				// Winamp/XMPlay/AIMP も KPI 同様に毎回 kpi[] を引き直す。
+				// ここを通さないと前の曲のプラグインパスのまま Open して必ず失敗し、
+				// プレイリスト経由の再生だけが「開けません」→ DirectShow(-2) に落ちる。
+				if (IsForeignPluginMode(p.sub)) {
+					s = kpi;
+					const int slash = s.ReverseFind('\\');
+					if (slash > 0) {
+						ss = s.Left(slash);
+						_tchdir(ss);
+					}
+					mode = modesub = p.sub;
 					play();
 					return;
 				}

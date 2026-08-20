@@ -52,6 +52,7 @@ static ForeignSession* ForeignGet(uint32_t id)
 
 // ---- Winamp out stubs (per-session via TLS-like: only one session plays) ----
 static ForeignSession* g_waCur = nullptr;
+static volatile LONG g_waEof = 0;
 
 static int __cdecl FWa_Open(int sr, int nch, int bps, int, int)
 {
@@ -100,7 +101,7 @@ static int __cdecl FWa_IsPlaying()
 static int __cdecl FWa_Pause(int) { return 0; }
 static void __cdecl FWa_SetVolume(int) {}
 static void __cdecl FWa_SetPan(int) {}
-static void __cdecl FWa_Flush(int t) { if (g_waCur) { EnterCriticalSection(&g_waCur->cs); g_waCur->ringR = g_waCur->ringW = g_waCur->ringUsed = 0; g_waCur->flushMs = t; LeaveCriticalSection(&g_waCur->cs); } }
+static void __cdecl FWa_Flush(int t) { InterlockedExchange(&g_waEof, 0); if (g_waCur) { EnterCriticalSection(&g_waCur->cs); g_waCur->ringR = g_waCur->ringW = g_waCur->ringUsed = 0; g_waCur->flushMs = t; LeaveCriticalSection(&g_waCur->cs); } }
 static int __cdecl FWa_GetOutputTime() { return g_waCur ? g_waCur->flushMs : 0; }
 static int __cdecl FWa_GetWrittenTime() { return 0; }
 static void __cdecl FWa_nop() {}
@@ -159,20 +160,88 @@ static void BindWa(ForeignSession* s, HWND hwnd)
 	}
 }
 
+static void AppendWaExt(std::wstring& out, const std::string& tok)
+{
+	size_t b = tok.find_first_not_of(" \t*.");
+	if (b == std::string::npos) return;
+	size_t e = tok.find_last_not_of(" \t");
+	std::wstring w = L".";
+	for (size_t i = b; i <= e; ++i) w += (wchar_t)tolower((unsigned char)tok[i]);
+	if (w.size() <= 1) return;
+	if (!out.empty()) out += L'/';
+	out += w;
+}
+
+// "ext群\0説明\0ext群\0説明\0\0"。ext群は in_mod の "mod;s3m;xm" のように ';' 連結される。
+// ここを1つの拡張子として扱うと本体側の照合が一生ヒットしない。
 static std::wstring ParseWaExts(const char* fe)
 {
 	std::wstring out;
 	if (!fe) return out;
 	const char* p = fe;
 	while (*p) {
-		std::string e(p); p += e.size() + 1;
-		if (*p) p += strlen(p) + 1; else break;
-		if (e.empty()) continue;
-		if (!out.empty()) out += L'/';
-		out += L'.';
-		for (char c : e) out += (wchar_t)tolower((unsigned char)c);
+		std::string group(p); p += group.size() + 1;
+		if (*p) p += strlen(p) + 1;
+		size_t start = 0;
+		for (;;) {
+			size_t sc = group.find(';', start);
+			AppendWaExt(out, (sc == std::string::npos) ? group.substr(start) : group.substr(start, sc - start));
+			if (sc == std::string::npos) break;
+			start = sc + 1;
+		}
 	}
 	return out;
+}
+
+// version から IN_UNICODE / IN_INIT_RET を除いた素の型番だけを見る
+static bool WaVersionOk(const In_Module* in)
+{
+	if (!in) return false;
+	const int v = (in->version & ~IN_UNICODE) & ~IN_INIT_RET;
+	return v == IN_VER_OLD || v == IN_VER;
+}
+static bool WaIsUnicode(const In_Module* in) { return in && (in->version & IN_UNICODE) == IN_UNICODE; }
+static bool WaUsesOutput(const In_Module* in) { return in && (in->UsesOutputPlug & IN_MODULE_FLAG_USES_OUTPUT_PLUGIN) != 0; }
+
+// 曲終端は WM_WA_MPEG_EOF(WM_USER+2) の PostMessage で来る。
+// GetConsoleWindow() はホストが GUI 無しだと NULL になり通知を取りこぼすため専用窓を持つ。
+enum { WA_WM_IPC = WM_USER, WA_WM_MPEG_EOF = WM_USER + 2 };
+static HWND g_waWnd = NULL;
+static HANDLE g_waWndThread = NULL, g_waWndReady = NULL;
+
+static LRESULT CALLBACK WaHostWndProc(HWND h, UINT m, WPARAM w, LPARAM l)
+{
+	if (m == WA_WM_MPEG_EOF) { InterlockedExchange(&g_waEof, 1); return 0; }
+	if (m == WA_WM_IPC) {
+		if (l == 0) return 0x5066;  // IPC_GETVERSION
+		if (l == 104) return 1;     // IPC_ISPLAYING
+		return 0;
+	}
+	return DefWindowProcW(h, m, w, l);
+}
+
+static DWORD WINAPI WaHostWndThread(LPVOID)
+{
+	HINSTANCE hi = GetModuleHandleW(NULL);
+	WNDCLASSEXW wc; ZeroMemory(&wc, sizeof(wc));
+	wc.cbSize = sizeof(wc); wc.lpfnWndProc = WaHostWndProc;
+	wc.hInstance = hi; wc.lpszClassName = L"KpiHost64WinampHost";
+	RegisterClassExW(&wc);
+	g_waWnd = CreateWindowExW(0, L"KpiHost64WinampHost", L"", 0, 0, 0, 0, 0, HWND_MESSAGE, NULL, hi, NULL);
+	SetEvent(g_waWndReady);
+	if (!g_waWnd) return 0;
+	MSG m;
+	while (GetMessageW(&m, NULL, 0, 0) > 0) { TranslateMessage(&m); DispatchMessageW(&m); }
+	return 0;
+}
+
+static HWND WaEnsureWnd()
+{
+	if (g_waWnd) return g_waWnd;
+	if (!g_waWndReady) g_waWndReady = CreateEventW(NULL, TRUE, FALSE, NULL);
+	if (!g_waWndThread) g_waWndThread = CreateThread(NULL, 0, WaHostWndThread, NULL, 0, NULL);
+	if (g_waWndReady) WaitForSingleObject(g_waWndReady, 3000);
+	return g_waWnd;
 }
 
 typedef In_Module* (__cdecl* pfn_wa)();
@@ -186,44 +255,20 @@ uint32_t ForeignHost_ListExts(uint32_t kind, const std::wstring& path, std::wstr
 		pfn_wa getIn = (pfn_wa)GetProcAddress(h, "winampGetInModule2");
 		if (!getIn) { FreeLibrary(h); return KPIHOST64_STATUS_FAIL; }
 		In_Module* in = getIn();
-		if (!in) { FreeLibrary(h); return KPIHOST64_STATUS_FAIL; }
+		if (!WaVersionOk(in) || !WaUsesOutput(in)) { FreeLibrary(h); return KPIHOST64_STATUS_FAIL; }
+		// vgmstream 系は Init() を通すまで FileExtensions が空。列挙前に必ず初期化する。
+		ForeignSession probe;
+		probe.dll = h;
+		probe.waIn = in;
+		BindWa(&probe, WaEnsureWnd());
+		if (in->Init) in->Init();
 		outExts = ParseWaExts(in->FileExtensions);
+		if (in->Quit) in->Quit();
 		FreeLibrary(h);
-		return KPIHOST64_STATUS_OK;
+		return outExts.empty() ? KPIHOST64_STATUS_FAIL : KPIHOST64_STATUS_OK;
 	}
-	if (kind == PLUGKIND_XMPLAY) {
-		auto getIf = (XMPIN*(WINAPI*)(UINT32, InterfaceProc))GetProcAddress(h, "XMPIN_GetInterface");
-		if (!getIf) { FreeLibrary(h); return KPIHOST64_STATUS_FAIL; }
-		// minimal face: return null faces — plugin may still return XMPIN*
-		auto face = [](DWORD) -> void* { return nullptr; };
-		XMPIN* in = getIf(XMPIN_FACE, face);
-		if (!in) { FreeLibrary(h); return KPIHOST64_STATUS_FAIL; }
-		if (in->exts) {
-			const char* p = in->exts;
-			if (*p) p += strlen(p) + 1;
-			std::string list = p ? p : "";
-			std::wstring w;
-			for (size_t i = 0; i < list.size(); ) {
-				size_t slash = list.find('/', i);
-				std::string tok = (slash == std::string::npos) ? list.substr(i) : list.substr(i, slash - i);
-				if (!tok.empty()) {
-					if (!w.empty()) w += L'/';
-					w += L'.';
-					for (char c : tok) w += (wchar_t)tolower((unsigned char)c);
-				}
-				if (slash == std::string::npos) break;
-				i = slash + 1;
-			}
-			outExts = w;
-		}
-		FreeLibrary(h);
-		return KPIHOST64_STATUS_OK;
-	}
-	if (kind == PLUGKIND_AIMP) {
-		auto getHdr = (TAIMPPluginGetHeaderProc)GetProcAddress(h, "AIMPPluginGetHeader");
-		FreeLibrary(h);
-		return getHdr ? KPIHOST64_STATUS_OK : KPIHOST64_STATUS_FAIL;
-	}
+	// XMPlay / AIMP は x64 の再生系が無い。ここで拡張子を返すと本体台帳に載ってしまい、
+	// 再生時に必ず Open 失敗 → DirectShow(-2) に落ちるだけなので列挙自体を断る。
 	FreeLibrary(h);
 	return KPIHOST64_STATUS_NOT_SUPPORTED;
 }
@@ -242,13 +287,32 @@ uint32_t ForeignHost_Open(uint32_t kind, const std::wstring& dll, const std::wst
 		pfn_wa getIn = (pfn_wa)GetProcAddress(s->dll, "winampGetInModule2");
 		if (!getIn) { FreeLibrary(s->dll); delete s; return KPIHOST64_STATUS_FAIL; }
 		s->waIn = getIn();
-		if (!s->waIn || !s->waIn->Play) { FreeLibrary(s->dll); delete s; return KPIHOST64_STATUS_FAIL; }
+		if (!s->waIn || !s->waIn->Play || !WaVersionOk(s->waIn) || !WaUsesOutput(s->waIn)) {
+			FreeLibrary(s->dll); delete s; return KPIHOST64_STATUS_FAIL;
+		}
 		g_waCur = s;
-		BindWa(s, GetConsoleWindow());
+		InterlockedExchange(&g_waEof, 0);
+		BindWa(s, WaEnsureWnd());
 		if (s->waIn->Init) s->waIn->Init();
-		char pathA[MAX_PATH * 2];
-		WideCharToMultiByte(CP_ACP, 0, media.c_str(), -1, pathA, (int)sizeof(pathA), NULL, NULL);
-		if (s->waIn->Play(pathA) != 0) {
+		int rc;
+		if (WaIsUnicode(s->waIn)) {
+			// IN_UNICODE プラグインの Play は wchar_t*。ANSI 変換して渡すと開けない
+			rc = s->waIn->Play((const in_char*)media.c_str());
+		} else {
+			char pathA[MAX_PATH * 2];
+			WideCharToMultiByte(CP_ACP, 0, media.c_str(), -1, pathA, (int)sizeof(pathA), NULL, NULL);
+			rc = s->waIn->Play((const in_char*)pathA);
+		}
+		if (rc != 0) {
+			if (s->waIn->Quit) s->waIn->Quit();
+			FreeLibrary(s->dll); delete s; g_waCur = nullptr; return KPIHOST64_STATUS_FAIL;
+		}
+		// フォーマットはデコードスレッドが outMod->Open() を呼ぶまで確定しない。
+		// Play() 直後に読むと既定値(44100/2/16)を本体へ返してしまう。
+		for (int i = 0; i < 5000 && !s->playing && !InterlockedCompareExchange(&g_waEof, 0, 0); ++i)
+			Sleep(1);
+		if (!s->playing) {
+			if (s->waIn->Stop) s->waIn->Stop();
 			if (s->waIn->Quit) s->waIn->Quit();
 			FreeLibrary(s->dll); delete s; g_waCur = nullptr; return KPIHOST64_STATUS_FAIL;
 		}
@@ -292,9 +356,11 @@ uint32_t ForeignHost_Render(uint32_t sessionId, uint32_t bytesWanted, std::vecto
 			LeaveCriticalSection(&s->cs);
 			got += take;
 			if (got >= (int)bytesWanted) break;
-			if (!s->playing && avail == 0) {
-				if (GetTickCount() - t0 > 200) { eof = 1; break; }
-			}
+			if (take > 0) { t0 = GetTickCount(); continue; }
+			// リングが空。WM_WA_MPEG_EOF 受信済み／出力クローズ済みなら本当に終端
+			if (InterlockedCompareExchange(&g_waEof, 0, 0)) { eof = 1; break; }
+			if (!s->playing) { eof = 1; break; }
+			if (GetTickCount() - t0 > 5000) break; // デコーダ無応答の保険
 			Sleep(1);
 		}
 		out.resize(got);
@@ -308,6 +374,7 @@ uint32_t ForeignHost_Seek(uint32_t sessionId, uint64_t posSample)
 	ForeignSession* s = ForeignGet(sessionId);
 	if (!s) return KPIHOST64_STATUS_NOT_FOUND;
 	if (s->kind == PLUGKIND_WINAMP && s->waIn && s->waIn->SetOutputTime && s->rate > 0) {
+		InterlockedExchange(&g_waEof, 0);
 		s->waIn->SetOutputTime((int)(posSample * 1000 / s->rate));
 		return KPIHOST64_STATUS_OK;
 	}

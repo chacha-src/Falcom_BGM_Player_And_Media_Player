@@ -4831,6 +4831,13 @@ static void ApplyLookaheadLimiterStereo(float* L, float* R, int n, int rate, flo
 // ============================================================
 // 拡張音量 / フォーマット別音量ブースト (マスター音量とは独立)
 // COggDlg 拡張音量 + CRender SPC/KPI/MP3 倍率をここで1本化
+//
+// mode:
+//   NONE(0) … ネイティブ音声等。kpivol・mp3 倍率は掛けない
+//   KPI (1) … readkpi / Winamp/XMPlay/AIMP / mid VST（その他のkpi = savedata.kpivol）。SPC は別フラグ
+//   MP3 (2) … readmp3/m4a 専用。savedata.mp3
+// sticky なので、デコード側で毎回正しい mode を立てること。
+// mid VST の x64 は KpiHost64 が生PCMを返し、本体(x86) playwavvst で equaliser を掛ける。
 // ============================================================
 #define EQ_FMT_VOL_NONE 0
 #define EQ_FMT_VOL_KPI  1
@@ -4856,23 +4863,16 @@ static float EqCalcSpcVolumeGain(int spcVal)
 	}
 }
 
-static float EqCalcKpiVolumeGain(int kpiVal, int bitDepth)
+static float EqCalcKpiVolumeGain(int kpiVal, int /*bitDepth*/)
 {
-	if (kpiVal == 1) return 1.0f;
-	if (bitDepth == 16) {
-		switch (kpiVal) {
-		case 2: return 2.0f;
-		case 3: return 3.0f;
-		case 4: return 4.0f;
-		case 5: return 5.0f;
-		default: return 1.0f;
-		}
-	}
+	// CRender「その他のkpi」: 等倍/2倍/3倍/4倍/5倍 (savedata.kpivol = 1..5)
+	// bitDepth で分岐しない（24/32bit 時に 3,5 が default→1.0 になっていたのを修正）
 	switch (kpiVal) {
-	case 2:  return 2.0f;
-	case 4:  return 3.0f;
-	case 8:  return 4.0f;
-	case 16: return 5.0f;
+	case 1: return 1.0f;
+	case 2: return 2.0f;
+	case 3: return 3.0f;
+	case 4: return 4.0f;
+	case 5: return 5.0f;
 	default: return 1.0f;
 	}
 }
