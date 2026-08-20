@@ -22,6 +22,8 @@ public:
 	void ClearSlot(int slot);
 	int HitSlot(CPoint pt) const;
 	void PaintToDC(CDC& dc);
+	// Repaints only the parts whose incoming MIDI changed.
+	void RefreshActivity();
 
 protected:
 	enum { MAX_VISIBLE_PLUGINS = 100, PART_COUNT = 32 };
@@ -37,11 +39,19 @@ protected:
 	int m_hoverPlugin;
 	int m_hoverSlot;
 	BOOL m_trackLeave;
+	int m_actLevel[PART_COUNT];
+	CString m_actText[PART_COUNT];
+	CString m_actNotes[PART_COUNT];
+	unsigned m_actMask[PART_COUNT][4];
 
 	CRect PaletteRect(int i) const;
 	CRect SlotRect(int i) const;
+	// The whole grid cell, including the empty space under the slot bar: it is
+	// the drop target and carries the held-note readout.
+	CRect SlotCellRect(int i) const;
 	int HitPalette(CPoint pt) const;
 	void NotifyChanged(int slot);
+	int CoveringMulti(int slot) const;
 
 	DECLARE_MESSAGE_MAP()
 	afx_msg void OnPaint();
@@ -65,6 +75,7 @@ public:
 
 	void OnWireChanged(int slot);
 	CString PluginName(int scanIndex) const;
+	BOOL PluginIsMulti(int scanIndex) const;
 
 	struct Preset {
 		wchar_t name[64];
@@ -117,7 +128,7 @@ protected:
 	afx_msg void OnDeviceChange();
 	afx_msg void OnSize(UINT nType, int cx, int cy);
 	afx_msg void OnDestroy();
-	afx_msg LRESULT OnMidiShort(WPARAM wParam, LPARAM lParam);
+	afx_msg void OnTimer(UINT_PTR id);
 
 	CCustomComboBox m_preset;
 	CCustomComboBox m_midiIn[3];
@@ -131,6 +142,10 @@ protected:
 	CCustomStandardButton m_save;
 	CVstWireCtrl m_wire;
 	CToolTipCtrl m_tooltip;
+	enum { LABEL_COUNT = 6 };
+	CStatic m_labels[LABEL_COUNT];
+	CStatic m_monitor;
+	CString m_monitorText;
 
 	Preset m_presets[100];
 	int m_presetCount;

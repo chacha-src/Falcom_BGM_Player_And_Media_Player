@@ -1,4 +1,4 @@
-#include "stdafx.h"
+﻿#include "stdafx.h"
 #include "ogg.h"
 #include "VstHostDlg.h"
 #include "VstMidiEngine.h"
@@ -9,17 +9,160 @@
 
 #pragma comment(lib, "winmm.lib")
 
+
 namespace {
 
 enum {
-	WM_VST_MIDI_SHORT = WM_APP + 741,
 	IDC_VST_FILTER = 0x7e10,
 	ID_VST_POP_RESCAN = 0xe710,
 	ID_VST_POP_CLEAR = 0xe711,
 	ID_VST_POP_SAVE = 0xe712,
+	ID_VST_POP_EDITOR = 0xe713,
 	VST_AUDIO_FRAMES = 512,
-	VST_AUDIO_BUFFERS = 4
+	VST_AUDIO_BUFFERS = 4,
+	VST_ACTIVITY_TIMER = 1,
+	MIDI_FIFO_CAP = 4096, // power of two
+	SYSEX_POOL_SLOTS = 16,
+	SYSEX_SLOT_BYTES = 4096,
+	SYSEX_BUFS_PER_PORT = 4
 };
+
+// MIDI used to reach the engine through the dialog's message queue. Whenever
+// the UI thread stalled (painting, menus, a drag) the events piled up and were
+// then applied all at once, so a note-on and its note-off could land in the
+// same audio block and that note was never heard. The MIDI callback now only
+// queues, and the audio thread applies the events at block rate.
+struct MidiFifo
+{
+	unsigned head;
+	unsigned tail;
+	DWORD msg[MIDI_FIFO_CAP];
+	BYTE port[MIDI_FIFO_CAP];
+	short sysexSlot[MIDI_FIFO_CAP]; // -1 for a plain short message
+	int sysexLen[MIDI_FIFO_CAP];
+	BYTE sysexPool[SYSEX_POOL_SLOTS][SYSEX_SLOT_BYTES];
+	unsigned sysexNext;
+	CRITICAL_SECTION cs;
+	LONG init;
+};
+
+MidiFifo g_midiFifo = {};
+
+// The driver hands a buffer back through the callback, but midiInAddBuffer is
+// a multimedia call and must not be made from there, so the bytes are copied
+// out and the buffer is recycled by the audio thread.
+struct SysexBuf
+{
+	MIDIHDR hdr;
+	BYTE data[SYSEX_SLOT_BYTES];
+	HMIDIIN in;
+	volatile LONG needAdd;
+	volatile LONG prepared;
+};
+
+SysexBuf g_sysexBufs[3][SYSEX_BUFS_PER_PORT] = {};
+
+void MidiFifoInit()
+{
+	if (InterlockedCompareExchange(&g_midiFifo.init, 1, 0) == 0) {
+		InitializeCriticalSection(&g_midiFifo.cs);
+		// Never deleted on purpose: a MIDI callback already in flight would
+		// otherwise enter a destroyed section while the dialog closes.
+		InterlockedExchange(&g_midiFifo.init, 2);
+		return;
+	}
+	while (InterlockedCompareExchange(&g_midiFifo.init, 2, 2) != 2)
+		Sleep(0);
+}
+
+void MidiFifoPush(int port, DWORD msg)
+{
+	if (InterlockedCompareExchange(&g_midiFifo.init, 2, 2) != 2) return;
+	bool dropped = false;
+	EnterCriticalSection(&g_midiFifo.cs);
+	if (g_midiFifo.head - g_midiFifo.tail < MIDI_FIFO_CAP) {
+		const unsigned i = g_midiFifo.head & (MIDI_FIFO_CAP - 1);
+		g_midiFifo.msg[i] = msg;
+		g_midiFifo.port[i] = (BYTE)port;
+		g_midiFifo.sysexSlot[i] = -1;
+		g_midiFifo.sysexLen[i] = 0;
+		++g_midiFifo.head;
+	} else {
+		dropped = true;
+	}
+	LeaveCriticalSection(&g_midiFifo.cs);
+}
+
+// Queued alongside the short messages so a reset cannot overtake the notes
+// that follow it.
+void MidiFifoPushSysex(int port, const BYTE* data, int bytes)
+{
+	if (InterlockedCompareExchange(&g_midiFifo.init, 2, 2) != 2) return;
+	if (!data || bytes <= 0) return;
+	bool dropped = false;
+	EnterCriticalSection(&g_midiFifo.cs);
+	if (bytes > SYSEX_SLOT_BYTES || g_midiFifo.head - g_midiFifo.tail >= MIDI_FIFO_CAP) {
+		dropped = true;
+	} else {
+		const unsigned slot = g_midiFifo.sysexNext++ % SYSEX_POOL_SLOTS;
+		memcpy(g_midiFifo.sysexPool[slot], data, (size_t)bytes);
+		const unsigned i = g_midiFifo.head & (MIDI_FIFO_CAP - 1);
+		g_midiFifo.msg[i] = 0;
+		g_midiFifo.port[i] = (BYTE)port;
+		g_midiFifo.sysexSlot[i] = (short)slot;
+		g_midiFifo.sysexLen[i] = bytes;
+		++g_midiFifo.head;
+	}
+	LeaveCriticalSection(&g_midiFifo.cs);
+}
+
+void MidiFifoClear()
+{
+	if (InterlockedCompareExchange(&g_midiFifo.init, 2, 2) != 2) return;
+	EnterCriticalSection(&g_midiFifo.cs);
+	g_midiFifo.tail = g_midiFifo.head;
+	LeaveCriticalSection(&g_midiFifo.cs);
+}
+
+void MidiFifoDrain()
+{
+	if (InterlockedCompareExchange(&g_midiFifo.init, 2, 2) != 2) return;
+	for (;;) {
+		DWORD msg = 0;
+		int port = 0, slot = -1, len = 0;
+		BYTE sysex[SYSEX_SLOT_BYTES];
+		EnterCriticalSection(&g_midiFifo.cs);
+		const bool empty = g_midiFifo.head == g_midiFifo.tail;
+		if (!empty) {
+			const unsigned i = g_midiFifo.tail & (MIDI_FIFO_CAP - 1);
+			msg = g_midiFifo.msg[i];
+			port = g_midiFifo.port[i];
+			slot = g_midiFifo.sysexSlot[i];
+			len = g_midiFifo.sysexLen[i];
+			if (slot >= 0 && len > 0) memcpy(sysex, g_midiFifo.sysexPool[slot], (size_t)len);
+			++g_midiFifo.tail;
+		}
+		LeaveCriticalSection(&g_midiFifo.cs);
+		if (empty) return;
+		if (slot >= 0) VstLiveMidiSysex(port, sysex, len);
+		else VstLiveMidiShort(port, msg);
+	}
+}
+
+// Recycles the buffers the driver returned. A multimedia call, so it belongs
+// on the audio thread rather than in the MIDI callback.
+void MidiSysexRecycle()
+{
+	for (int p = 0; p < 3; ++p)
+		for (int b = 0; b < SYSEX_BUFS_PER_PORT; ++b) {
+			SysexBuf& s = g_sysexBufs[p][b];
+			if (InterlockedCompareExchange(&s.needAdd, 0, 1) != 1) continue;
+			if (!s.in || !InterlockedCompareExchange(&s.prepared, 1, 1)) continue;
+			s.hdr.dwBytesRecorded = 0;
+			if (midiInAddBuffer(s.in, &s.hdr, sizeof(MIDIHDR)) != MMSYSERR_NOERROR)
+				InterlockedExchange(&s.needAdd, 1);
+		}
+}
 
 const DWORD VST_WIRE_MAGIC = 0x31525756; // "VWR1"
 
@@ -137,6 +280,8 @@ CVstWireCtrl::CVstWireCtrl()
 {
 	memset(m_scanIndices, -1, sizeof(m_scanIndices));
 	memset(m_slots, -1, sizeof(m_slots));
+	memset(m_actLevel, 0, sizeof(m_actLevel));
+	memset(m_actMask, 0, sizeof(m_actMask));
 }
 
 CVstWireCtrl::~CVstWireCtrl() {}
@@ -206,6 +351,18 @@ CRect CVstWireCtrl::SlotRect(int i) const
 		left + col * (w + gap) + w, 27 + row * avail + h);
 }
 
+CRect CVstWireCtrl::SlotCellRect(int i) const
+{
+	CRect rc; GetClientRect(&rc);
+	const int left = max(156, rc.Width() * 38 / 100) + 8;
+	const int cols = 2, gap = 5;
+	const int w = max(70, (rc.Width() - left - 10 - gap) / cols);
+	const int row = i / cols, col = i % cols;
+	const int avail = max(18, (rc.Height() - 32) / 16);
+	return CRect(left + col * (w + gap), 27 + row * avail,
+		left + col * (w + gap) + w, 27 + row * avail + avail - 2);
+}
+
 int CVstWireCtrl::HitPalette(CPoint pt) const
 {
 	for (int i = 0; i < m_pluginCount; ++i)
@@ -216,13 +373,27 @@ int CVstWireCtrl::HitPalette(CPoint pt) const
 int CVstWireCtrl::HitSlot(CPoint pt) const
 {
 	for (int i = 0; i < PART_COUNT; ++i)
-		if (SlotRect(i).PtInRect(pt)) return i;
+		if (SlotCellRect(i).PtInRect(pt)) return i;
 	return -1;
 }
 
 void CVstWireCtrl::NotifyChanged(int slot)
 {
 	if (m_owner) m_owner->OnWireChanged(slot);
+}
+
+// A multi-timbral instance answers all 16 MIDI channels of its port block, so
+// the slots above it hold no instance of their own yet are in use. Returns the
+// slot that owns them, or -1 when this slot stands alone.
+int CVstWireCtrl::CoveringMulti(int slot) const
+{
+	if (!m_owner || slot < 0 || slot >= PART_COUNT) return -1;
+	if (m_slots[slot] >= 0) return -1;
+	for (int i = slot - 1, blockStart = (slot / 16) * 16; i >= blockStart; --i) {
+		if (m_slots[i] < 0) continue;
+		return m_owner->PluginIsMulti(m_slots[i]) ? i : -1;
+	}
+	return -1;
 }
 
 void CVstWireCtrl::PaintToDC(CDC& dc)
@@ -253,15 +424,74 @@ void CVstWireCtrl::PaintToDC(CDC& dc)
 	}
 	for (int i = 0; i < PART_COUNT; ++i) {
 		CRect r = SlotRect(i);
+		CRect cell = SlotCellRect(i);
 		const BOOL full = m_slots[i] >= 0;
+		const int cover = CoveringMulti(i);
 		const BOOL hot = i == m_hoverSlot;
-		dc.FillSolidRect(r, hot ? RGB(48, 68, 94) : (full ? RGB(56, 48, 24) : RGB(34, 37, 46)));
-		dc.Draw3dRect(r, hot ? RGB(130, 215, 255) : (full ? RGB(245, 190, 70) : RGB(82, 92, 112)), RGB(16, 18, 23));
+		const int lit = m_actLevel[i];
+		// The area under the bar is part of the drop target, so show it while
+		// dragging and use it for the notes that are sounding.
+		if (hot && m_dragging) {
+			dc.FillSolidRect(cell, RGB(30, 46, 66));
+			dc.Draw3dRect(cell, RGB(120, 205, 250), RGB(60, 100, 140));
+		}
+		CRect info(cell.left + 6, r.bottom + 2, cell.right - 4, cell.bottom - 1);
+		if (info.Height() >= 8) {
+			const int strip = min(5, info.Height() - 1);
+			CRect bar(info.left, info.bottom - strip, info.right, info.bottom);
+			int shown = 0;
+			for (int b = 0; b < 4; ++b) {
+				unsigned bits = m_actMask[i][b];
+				for (; bits; bits &= bits - 1) {
+					unsigned low = bits & (~bits + 1u);
+					int n = b * 32;
+					while (!(low & 1u)) { low >>= 1; ++n; }
+					// A0 to C8 laid out across the cell, so the ticks read like
+					// a keyboard.
+					int x = bar.left + (bar.Width() * (n - 21)) / 87;
+					if (x < bar.left) x = bar.left;
+					if (x > bar.right - 3) x = bar.right - 3;
+					dc.FillSolidRect(x, bar.top, 3, strip, RGB(120, 240, 175));
+					++shown;
+				}
+			}
+			if (shown) dc.FillSolidRect(bar.left, bar.bottom - 1, bar.Width(), 1,
+				RGB(52, 92, 76));
+			if (!m_actNotes[i].IsEmpty()) {
+				CRect t = info;
+				t.bottom = bar.top - 1;
+				if (t.Height() >= 9) {
+					dc.SetTextColor(RGB(150, 232, 190));
+					dc.DrawText(m_actNotes[i], t,
+						DT_LEFT | DT_TOP | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
+				}
+			}
+		}
+		COLORREF bg = hot ? RGB(48, 68, 94)
+			: (full ? RGB(56, 48, 24) : (cover >= 0 ? RGB(42, 39, 26) : RGB(34, 37, 46)));
+		COLORREF edge = hot ? RGB(130, 215, 255)
+			: (full ? RGB(245, 190, 70) : (cover >= 0 ? RGB(150, 124, 56) : RGB(82, 92, 112)));
+		if (lit >= 3) { bg = RGB(30, 122, 78); edge = RGB(150, 255, 200); }
+		else if (lit == 2) { bg = RGB(24, 88, 60); edge = RGB(120, 232, 175); }
+		else if (lit == 1) { bg = RGB(26, 60, 50); edge = RGB(92, 186, 145); }
+		dc.FillSolidRect(r, bg);
+		dc.Draw3dRect(r, edge, RGB(16, 18, 23));
 		CString s, name;
 		if (full && m_owner) name = m_owner->PluginName(m_slots[i]);
-		s.Format(L"%02d  %s", i + 1, full ? (LPCTSTR)name : L"—");
-		dc.SetTextColor(full ? RGB(255, 238, 180) : RGB(155, 164, 180));
+		else if (cover >= 0 && m_owner) name = m_owner->PluginName(m_slots[cover]);
+		if (full) s.Format(L"%02d  %s", i + 1, (LPCTSTR)name);
+		else if (cover >= 0) s.Format(L"%02d  ch%d ← %s", i + 1, (i % 16) + 1, (LPCTSTR)name);
+		else s.Format(L"%02d  —", i + 1);
 		CRect t = r; t.DeflateRect(4, 1);
+		if (lit && !m_actText[i].IsEmpty()) {
+			CRect nt = t;
+			nt.left = max(t.left, t.right - 120);
+			dc.SetTextColor(RGB(205, 255, 225));
+			dc.DrawText(m_actText[i], nt, DT_RIGHT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+			t.right = nt.left - 4;
+		}
+		dc.SetTextColor(lit ? RGB(228, 255, 238)
+			: (full ? RGB(255, 238, 180) : (cover >= 0 ? RGB(198, 176, 124) : RGB(155, 164, 180))));
 		dc.DrawText(s, t, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
 	}
 	if (m_dragging) {
@@ -276,10 +506,57 @@ void CVstWireCtrl::PaintToDC(CDC& dc)
 	dc.SelectObject(old);
 }
 
+// Which parts are hearing MIDI right now. Only the slots whose state moved get
+// invalidated, so the 20 Hz refresh does not repaint the whole palette.
+void CVstWireCtrl::RefreshActivity()
+{
+	static const wchar_t* kNames[12] = { L"C", L"C#", L"D", L"D#", L"E", L"F",
+		L"F#", L"G", L"G#", L"A", L"A#", L"B" };
+	if (!GetSafeHwnd()) return;
+	for (int i = 0; i < PART_COUNT; ++i) {
+		VstLiveActInfo a = {};
+		int level = 0;
+		CString text, notes;
+		if (VstLiveActivity(i + 1, &a) && a.ageMs >= 0) {
+			if (a.held > 0) level = a.ageMs < 120 ? 3 : 2;
+			else if (a.ageMs < 400) level = 1;
+			// The bar carries the newest note; every held note is listed under it.
+			if (level && a.vel > 0)
+				text.Format(L"%s%d v%d", kNames[a.note % 12], a.note / 12 - 1, a.vel);
+			int listed = 0;
+			for (int b = 0; b < 4 && listed < 10; ++b)
+				for (int bit = 0; bit < 32 && listed < 10; ++bit) {
+					if (!(a.mask[b] & (1u << bit))) continue;
+					const int n = b * 32 + bit;
+					CString one;
+					one.Format(listed ? L" %s%d" : L"%s%d", kNames[n % 12], n / 12 - 1);
+					notes += one;
+					++listed;
+				}
+			if (a.held > listed) {
+				CString more;
+				more.Format(L" +%d", a.held - listed);
+				notes += more;
+			}
+		}
+		if (level == m_actLevel[i] && text == m_actText[i] && notes == m_actNotes[i] &&
+			memcmp(m_actMask[i], a.mask, sizeof(a.mask)) == 0)
+			continue;
+		m_actLevel[i] = level;
+		m_actText[i] = text;
+		m_actNotes[i] = notes;
+		memcpy(m_actMask[i], a.mask, sizeof(a.mask));
+		CRect r = SlotCellRect(i);
+		r.InflateRect(2, 2);
+		InvalidateRect(&r, FALSE);
+	}
+}
+
 void CVstWireCtrl::OnPaint()
 {
 	CPaintDC dc(this);
-	CRect r; GetClientRect(&r);
+	CRect r;
+	if (!dc.GetClipBox(&r) || r.IsRectEmpty()) GetClientRect(&r);
 	BP_PAINTPARAMS pp = { sizeof(pp) }; pp.dwFlags = BPPF_ERASE;
 	HDC mem = NULL;
 	HPAINTBUFFER bp = BeginBufferedPaint(dc, &r, BPBF_TOPDOWNDIB, &pp, &mem);
@@ -342,7 +619,15 @@ void CVstWireCtrl::OnMouseLeave()
 void CVstWireCtrl::OnRButtonUp(UINT, CPoint pt)
 {
 	const int slot = HitSlot(pt);
+	// Right-clicking a channel that a multi-timbral part answers should reach
+	// that part's editor, not nothing.
+	const int owner = (slot >= 0 && m_slots[slot] < 0) ? CoveringMulti(slot) : slot;
 	CCustomPopupMenu menu;
+	menu.AddCommand(ID_VST_POP_EDITOR, LL14(L"プラグインの画面を開く", L"Open plug-in editor", L"Ouvrir l'éditeur du plug-in",
+		L"Apri l'editor del plug-in", L"Abrir el editor del plug-in", L"플러그인 화면 열기", L"打开插件界面",
+		L"فتح واجهة الإضافة", L"Открыть редактор плагина", L"Plug-in-Editor öffnen", L"Abrir o editor do plug-in",
+		L"Plug-in-editor openen", L"Otwórz edytor wtyczki", L"Eklenti arayüzünü aç"),
+		NULL, owner >= 0 && m_slots[owner] >= 0);
 	menu.AddCommand(ID_VST_POP_RESCAN, LL14(L"プラグイン再スキャン", L"Rescan plug-ins", L"Réanalyser les plug-ins", L"Scansiona plug-in",
 		L"Reescanear plug-ins", L"플러그인 다시 검색", L"重新扫描插件", L"إعادة مسح الإضافات", L"Пересканировать плагины",
 		L"Plug-ins neu scannen", L"Procurar plug-ins", L"Plug-ins opnieuw scannen", L"Przeskanuj wtyczki", L"Eklentileri yeniden tara"));
@@ -358,6 +643,8 @@ void CVstWireCtrl::OnRButtonUp(UINT, CPoint pt)
 	if (cmd == ID_VST_POP_RESCAN) m_owner->OnRescan();
 	else if (cmd == ID_VST_POP_CLEAR && slot >= 0) ClearSlot(slot);
 	else if (cmd == ID_VST_POP_SAVE) m_owner->OnSave();
+	else if (cmd == ID_VST_POP_EDITOR && owner >= 0 && m_slots[owner] >= 0)
+		VstLiveEditorOpen(owner + 1);
 }
 
 CVstHostDlg* g_vstHostDlg = NULL;
@@ -407,7 +694,7 @@ BEGIN_MESSAGE_MAP(CVstHostDlg, CCustomBlurDialogBase)
 	ON_CBN_SELCHANGE(IDC_VST_OUT, OnDeviceChange)
 	ON_WM_SIZE()
 	ON_WM_DESTROY()
-	ON_MESSAGE(WM_VST_MIDI_SHORT, OnMidiShort)
+	ON_WM_TIMER()
 END_MESSAGE_MAP()
 
 BOOL CVstHostDlg::OnInitDialog()
@@ -444,6 +731,35 @@ BOOL CVstHostDlg::OnInitDialog()
 	m_pluginFilter.AddString(LL14(L"すべて", L"All plug-ins", L"Tous", L"Tutti", L"Todos", L"모든 플러그인", L"全部插件",
 		L"كل الإضافات", L"Все плагины", L"Alle Plug-ins", L"Todos", L"Alle plug-ins", L"Wszystkie", L"Tüm eklentiler"));
 	m_pluginFilter.SetCurSel(0);
+
+	const LPCTSTR labels[LABEL_COUNT] = {
+		LL14(L"プリセット", L"Preset", L"Préréglage", L"Preset", L"Preajuste", L"프리셋", L"预设", L"إعداد مسبق",
+			L"Пресет", L"Preset", L"Predefinição", L"Preset", L"Ustawienie", L"Ön ayar"),
+		LL14(L"MIDI入力 1", L"MIDI In 1", L"Entrée MIDI 1", L"Ingresso MIDI 1", L"Entrada MIDI 1", L"MIDI 입력 1",
+			L"MIDI 输入 1", L"دخل MIDI 1", L"MIDI-вход 1", L"MIDI-Eingang 1", L"Entrada MIDI 1", L"MIDI-ingang 1",
+			L"Wejście MIDI 1", L"MIDI girişi 1"),
+		LL14(L"MIDI入力 2", L"MIDI In 2", L"Entrée MIDI 2", L"Ingresso MIDI 2", L"Entrada MIDI 2", L"MIDI 입력 2",
+			L"MIDI 输入 2", L"دخل MIDI 2", L"MIDI-вход 2", L"MIDI-Eingang 2", L"Entrada MIDI 2", L"MIDI-ingang 2",
+			L"Wejście MIDI 2", L"MIDI girişi 2"),
+		LL14(L"MIDI入力 3", L"MIDI In 3", L"Entrée MIDI 3", L"Ingresso MIDI 3", L"Entrada MIDI 3", L"MIDI 입력 3",
+			L"MIDI 输入 3", L"دخل MIDI 3", L"MIDI-вход 3", L"MIDI-Eingang 3", L"Entrada MIDI 3", L"MIDI-ingang 3",
+			L"Wejście MIDI 3", L"MIDI girişi 3"),
+		LL14(L"音声出力", L"Audio out", L"Sortie audio", L"Uscita audio", L"Salida de audio", L"오디오 출력",
+			L"音频输出", L"خرج الصوت", L"Аудиовыход", L"Audioausgang", L"Saída de áudio", L"Audio-uitgang",
+			L"Wyjście audio", L"Ses çıkışı"),
+		LL14(L"一覧の絞り込み", L"List filter", L"Filtre de liste", L"Filtro elenco", L"Filtro de lista", L"목록 필터",
+			L"列表筛选", L"مرشّح القائمة", L"Фильтр списка", L"Listenfilter", L"Filtro da lista", L"Lijstfilter",
+			L"Filtr listy", L"Liste filtresi")
+	};
+	for (int i = 0; i < LABEL_COUNT; ++i) {
+		m_labels[i].Create(labels[i], WS_CHILD | WS_VISIBLE | SS_LEFT | SS_NOPREFIX,
+			CRect(8, 4, 120, 18), this);
+		m_labels[i].SetFont(GetFont());
+	}
+	m_monitor.Create(L"", WS_CHILD | WS_VISIBLE | SS_LEFT | SS_NOPREFIX | SS_ENDELLIPSIS,
+		CRect(8, 4, 120, 18), this);
+	m_monitor.SetFont(GetFont());
+
 	LayoutHelpBtn();
 	CCC_CaptionLayout(m_hWnd);
 
@@ -468,6 +784,7 @@ BOOL CVstHostDlg::OnInitDialog()
 	}
 	StartMidi();
 	StartAudio();
+	SetTimer(VST_ACTIVITY_TIMER, 50, NULL);
 	PostMessage(CCC_MSG_REAPPLY_OPAQUE_FIXERS, 0, 0);
 	GetClientRect(&rc);
 	LayoutChildren(rc.Width(), rc.Height());
@@ -488,25 +805,45 @@ void CVstHostDlg::LayoutChildren(int cx, int cy)
 {
 	if (!GetSafeHwnd() || !m_wire.GetSafeHwnd()) return;
 	const int capH = GetCustomCaptionHeight();
-	const int pad = 8, rowH = 24, gap = 5;
-	const int top = capH + pad;
+	const int pad = 8, rowH = 24, gap = 5, lblGap = 4;
+	// Sized from the real font metrics: a fixed height clipped the Japanese
+	// labels and made them look glued to the combo below.
+	int lblH = 16;
+	{
+		CClientDC dc(this);
+		CFont* prev = dc.SelectObject(GetFont());
+		TEXTMETRIC tm = {};
+		if (dc.GetTextMetrics(&tm) && tm.tmHeight > 0) lblH = tm.tmHeight + 3;
+		dc.SelectObject(prev);
+	}
+	const int top = capH + pad + lblH + lblGap;
 	const int bottomH = 28;
 	int x = pad;
+	if (m_labels[0].GetSafeHwnd())
+		m_labels[0].SetWindowPos(NULL, x + 1, top - lblH - lblGap, 142, lblH, SWP_NOZORDER);
 	m_preset.SetWindowPos(NULL, x, top, 142, 220, SWP_NOZORDER); x += 142 + gap;
 	m_rename.SetWindowPos(NULL, x, top, 64, rowH, SWP_NOZORDER); x += 64 + gap;
 	m_del.SetWindowPos(NULL, x, top, 54, rowH, SWP_NOZORDER); x += 54 + gap;
 	m_save.SetWindowPos(NULL, x, top, 58, rowH, SWP_NOZORDER); x += 58 + gap;
 	m_rescan.SetWindowPos(NULL, cx - pad - 82, top, 82, rowH, SWP_NOZORDER);
-	const int y2 = top + rowH + gap;
+	const int y2 = top + rowH + gap + lblH + lblGap;
 	const int comboW = max(90, (cx - pad * 2 - gap * 4) / 5);
+	for (int i = 0; i < 5; ++i)
+		if (m_labels[i + 1].GetSafeHwnd())
+			m_labels[i + 1].SetWindowPos(NULL, pad + i * (comboW + gap) + 1,
+				y2 - lblH - lblGap, comboW, lblH, SWP_NOZORDER);
 	for (int i = 0; i < 3; ++i)
 		m_midiIn[i].SetWindowPos(NULL, pad + i * (comboW + gap), y2, comboW, 220, SWP_NOZORDER);
 	m_speakerOut.SetWindowPos(NULL, pad + 3 * (comboW + gap), y2, comboW, 220, SWP_NOZORDER);
 	m_pluginFilter.SetWindowPos(NULL, pad + 4 * (comboW + gap), y2, comboW, 220, SWP_NOZORDER);
 	const int wireTop = y2 + rowH + gap;
 	m_wire.SetWindowPos(NULL, pad, wireTop, max(10, cx - pad * 2), max(40, cy - wireTop - bottomH - pad), SWP_NOZORDER);
+	const int statusW = max(20, (cx - 110) / 2);
 	if (CWnd* st = GetDlgItem(IDC_VST_STATUS))
-		st->SetWindowPos(NULL, pad, cy - bottomH + 4, max(20, cx - 110), 18, SWP_NOZORDER);
+		st->SetWindowPos(NULL, pad, cy - bottomH + 4, statusW, 18, SWP_NOZORDER);
+	if (m_monitor.GetSafeHwnd())
+		m_monitor.SetWindowPos(NULL, pad + statusW + gap, cy - bottomH + 4,
+			max(20, cx - pad * 2 - statusW - gap - 90), 18, SWP_NOZORDER);
 	m_close.SetWindowPos(NULL, cx - pad - 82, cy - bottomH, 82, 22, SWP_NOZORDER);
 }
 
@@ -554,6 +891,12 @@ CString CVstHostDlg::PluginName(int scanIndex) const
 {
 	const VstPluginInfo* pi = VstScanGet(scanIndex);
 	return pi ? CString(pi->name) : CString(L"?");
+}
+
+BOOL CVstHostDlg::PluginIsMulti(int scanIndex) const
+{
+	const VstPluginInfo* pi = VstScanGet(scanIndex);
+	return (pi && pi->isMultiTimbral) ? TRUE : FALSE;
 }
 
 void CVstHostDlg::RebuildPluginList()
@@ -742,46 +1085,102 @@ void CVstHostDlg::OnWireChanged(int slot)
 	if (slot < 0 || slot >= 32) return;
 	VstLiveUnloadPart(slot + 1);
 	const VstPluginInfo* pi = VstScanGet(m_slots[slot]);
-	if (pi && VstLiveLoadPart(slot + 1, pi->path, pi->isVst3) != 0) {
+	if (!pi) return;
+	if (VstLiveLoadPart(slot + 1, pi->path, pi->isVst3) != 0) {
 		m_slots[slot] = -1; m_wire.SetSlots(m_slots);
 		SetStatus(LL14(L"プラグインを読み込めません", L"Could not load plug-in", L"Impossible de charger le plug-in",
 			L"Impossibile caricare il plug-in", L"No se pudo cargar el plug-in", L"플러그인을 불러올 수 없습니다",
 			L"无法加载插件", L"تعذر تحميل الإضافة", L"Не удалось загрузить плагин", L"Plugin konnte nicht geladen werden",
 			L"Não foi possível carregar o plug-in", L"Kan plug-in niet laden", L"Nie można wczytać wtyczki", L"Eklenti yüklenemedi"));
+		return;
 	}
+	// A multi-timbral instance answers all 16 channels of its port block, so
+	// the remaining slots of that block must not look free.
+	if (pi->isMultiTimbral) {
+		const int blockEnd = (slot / 16) * 16 + 16;
+		for (int i = slot + 1; i < blockEnd && i < 32; ++i) {
+			if (m_slots[i] < 0) continue;
+			VstLiveUnloadPart(i + 1);
+			m_slots[i] = -1;
+		}
+		m_wire.SetSlots(m_slots);
+	}
+	SetStatus(pi->name);
 }
 
 void CALLBACK CVstHostDlg::MidiInProc(HMIDIIN, UINT msg, DWORD_PTR instance, DWORD_PTR p1, DWORD_PTR)
 {
+	CVstHostDlg* self = (CVstHostDlg*)(instance & ~(DWORD_PTR)3);
+	const int port = (int)(instance & 3);
+	const bool queued = self && InterlockedCompareExchange(&self->m_audioRunning, 0, 0) != 0;
 	if (msg == MIM_DATA) {
-		CVstHostDlg* self = (CVstHostDlg*)(instance & ~(DWORD_PTR)3);
-		int port = (int)(instance & 3);
-		if (self && self->GetSafeHwnd()) self->PostMessage(WM_VST_MIDI_SHORT, port, (LPARAM)(DWORD)p1);
+		// Without an audio thread to drain the queue (output device missing)
+		// keep the notes flowing rather than swallowing them.
+		if (queued) MidiFifoPush(port, (DWORD)p1);
+		else VstLiveMidiShort(port, (DWORD)p1);
+		return;
+	}
+	if (msg == MIM_LONGDATA) {
+		MIDIHDR* hdr = (MIDIHDR*)p1;
+		if (!hdr) return;
+		const int bytes = (int)hdr->dwBytesRecorded;
+		if (bytes > 0) {
+			if (queued) MidiFifoPushSysex(port, (const BYTE*)hdr->lpData, bytes);
+			else VstLiveMidiSysex(port, (const unsigned char*)hdr->lpData, bytes);
+			// Zero bytes means the driver is returning buffers on reset, and
+			// re-adding then would fight midiInClose.
+			for (int b = 0; b < SYSEX_BUFS_PER_PORT; ++b)
+				if (&g_sysexBufs[port][b].hdr == hdr)
+					InterlockedExchange(&g_sysexBufs[port][b].needAdd, 1);
+		}
 	}
 }
 
 void CVstHostDlg::StartMidi()
 {
 	StopMidi();
+	MidiFifoInit();
 	for (int p = 0; p < 3; ++p) {
 		int sel = m_midiIn[p].GetCurSel();
 		int dev = sel >= 0 ? (int)m_midiIn[p].GetItemData(sel) : -1;
-		if (dev >= 0 && midiInOpen(&m_midiHandles[p], dev, (DWORD_PTR)&MidiInProc,
-			((DWORD_PTR)this) | p, CALLBACK_FUNCTION) == MMSYSERR_NOERROR)
-			midiInStart(m_midiHandles[p]);
+		if (dev < 0 || midiInOpen(&m_midiHandles[p], dev, (DWORD_PTR)&MidiInProc,
+			((DWORD_PTR)this) | p, CALLBACK_FUNCTION) != MMSYSERR_NOERROR)
+			continue;
+		// Without these buffers the driver has nowhere to put system
+		// exclusive, so GS/XG resets and bank selects never arrive at all.
+		for (int b = 0; b < SYSEX_BUFS_PER_PORT; ++b) {
+			SysexBuf& s = g_sysexBufs[p][b];
+			ZeroMemory(&s.hdr, sizeof(s.hdr));
+			s.hdr.lpData = (LPSTR)s.data;
+			s.hdr.dwBufferLength = SYSEX_SLOT_BYTES;
+			s.in = m_midiHandles[p];
+			InterlockedExchange(&s.needAdd, 0);
+			if (midiInPrepareHeader(m_midiHandles[p], &s.hdr, sizeof(MIDIHDR)) != MMSYSERR_NOERROR)
+				continue;
+			InterlockedExchange(&s.prepared, 1);
+			midiInAddBuffer(m_midiHandles[p], &s.hdr, sizeof(MIDIHDR));
+		}
+		midiInStart(m_midiHandles[p]);
 	}
 }
 
 void CVstHostDlg::StopMidi()
 {
 	for (int i = 0; i < 3; ++i) if (m_midiHandles[i]) {
-		midiInStop(m_midiHandles[i]); midiInReset(m_midiHandles[i]); midiInClose(m_midiHandles[i]); m_midiHandles[i] = NULL;
+		midiInStop(m_midiHandles[i]);
+		midiInReset(m_midiHandles[i]); // returns every sysex buffer first
+		for (int b = 0; b < SYSEX_BUFS_PER_PORT; ++b) {
+			SysexBuf& s = g_sysexBufs[i][b];
+			InterlockedExchange(&s.needAdd, 0);
+			if (InterlockedExchange(&s.prepared, 0) == 1)
+				midiInUnprepareHeader(m_midiHandles[i], &s.hdr, sizeof(MIDIHDR));
+			s.in = NULL;
+		}
+		midiInClose(m_midiHandles[i]);
+		m_midiHandles[i] = NULL;
 	}
-}
-
-LRESULT CVstHostDlg::OnMidiShort(WPARAM port, LPARAM msg)
-{
-	VstLiveMidiShort((int)port, (DWORD)msg); return 0;
+	MidiFifoClear();
+	VstLiveAllNotesOff();
 }
 
 UINT __stdcall CVstHostDlg::AudioThreadProc(void* ctx)
@@ -800,6 +1199,8 @@ UINT __stdcall CVstHostDlg::AudioThreadProc(void* ctx)
 		BOOL queued = FALSE;
 		for (int b = 0; b < VST_AUDIO_BUFFERS; ++b) if (hdr[b].dwFlags & WHDR_DONE) {
 			ZeroMemory(L, sizeof(L)); ZeroMemory(R, sizeof(R));
+			MidiFifoDrain();
+			MidiSysexRecycle();
 			VstLiveRender(L, R, VST_AUDIO_FRAMES);
 			for (int i = 0; i < VST_AUDIO_FRAMES; ++i) {
 				float l = max(-1.f, min(1.f, L[i])), r = max(-1.f, min(1.f, R[i]));
@@ -833,7 +1234,12 @@ BOOL CVstHostDlg::StartAudio()
 		StopAudio(); return FALSE;
 	}
 	unsigned tid = 0;
+	MidiFifoInit();
 	m_audioThread = (HANDLE)_beginthreadex(NULL, 0, AudioThreadProc, this, 0, &tid);
+	// This thread now carries the MIDI timing as well, and it only has four
+	// 11 ms buffers of slack. TIME_CRITICAL was tried before and starved the
+	// UI, so stay one step below it.
+	if (m_audioThread) SetThreadPriority(m_audioThread, THREAD_PRIORITY_ABOVE_NORMAL);
 	return m_audioThread != NULL;
 }
 
@@ -856,6 +1262,31 @@ void CVstHostDlg::SetStatus(LPCTSTR text)
 	if (CWnd* s = GetDlgItem(IDC_VST_STATUS)) s->SetWindowText(text);
 }
 
+void CVstHostDlg::OnTimer(UINT_PTR id)
+{
+	if (id == VST_ACTIVITY_TIMER) {
+		m_wire.RefreshActivity();
+		wchar_t sx[160] = {};
+		int age = -1;
+		CString line;
+		if (VstLiveSysexInfo(sx, 160, &age) && age >= 0) {
+			CString when;
+			if (age < 1500)
+				when = LL14(L"受信中", L"live", L"en cours", L"in corso", L"activo", L"수신 중",
+					L"接收中", L"مباشر", L"сейчас", L"aktiv", L"ativo", L"actief", L"na żywo", L"canlı");
+			else
+				when.Format(L"%.1fs", age / 1000.0);
+			line.Format(L"SysEx: %s  [%s]", sx, (LPCTSTR)when);
+		}
+		if (line != m_monitorText) {
+			m_monitorText = line;
+			if (m_monitor.GetSafeHwnd()) m_monitor.SetWindowText(line);
+		}
+		return;
+	}
+	CCustomBlurDialogBase::OnTimer(id);
+}
+
 void CVstHostDlg::ShowHelpSheet()
 {
 	CVstHelpDlg dlg(this); dlg.DoModal();
@@ -868,6 +1299,7 @@ void CVstHostDlg::OnOK() {}
 
 void CVstHostDlg::OnDestroy()
 {
+	KillTimer(VST_ACTIVITY_TIMER);
 	StopMidi(); StopAudio();
 	for (int i = 1; i <= 32; ++i) VstLiveUnloadPart(i);
 	CCustomBlurDialogBase::OnDestroy();

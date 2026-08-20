@@ -11,11 +11,17 @@ static void AppendLogLine(const wchar_t* line)
 	path += L"ogg_kpi64_client.log";
 	HANDLE h = CreateFileW(path.c_str(), FILE_APPEND_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
 	if (h == INVALID_HANDLE_VALUE) return;
-	DWORD bytes = (DWORD)(wcslen(line) * sizeof(wchar_t));
+	SYSTEMTIME st{};
+	GetLocalTime(&st);
+	wchar_t stamp[48];
+	swprintf_s(stamp, L"%04d-%02d-%02d %02d:%02d:%02d.%03d ",
+		st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond, st.wMilliseconds);
+	// One write keeps interleaved lines from other threads readable.
+	std::wstring rec = stamp;
+	rec += line;
+	rec += L"\r\n";
 	DWORD written = 0;
-	WriteFile(h, line, bytes, &written, NULL);
-	const wchar_t crlf[] = L"\r\n";
-	WriteFile(h, crlf, (DWORD)(2 * sizeof(wchar_t)), &written, NULL);
+	WriteFile(h, rec.c_str(), (DWORD)(rec.size() * sizeof(wchar_t)), &written, NULL);
 	CloseHandle(h);
 }
 
@@ -36,8 +42,12 @@ static void AppendWString(std::vector<uint8_t>& b, const std::wstring& s)
 	}
 }
 
-KpiHost64Client::KpiHost64Client() {}
-KpiHost64Client::~KpiHost64Client() { Disconnect(); }
+KpiHost64Client::KpiHost64Client() { InitializeCriticalSection(&m_cs); }
+KpiHost64Client::~KpiHost64Client()
+{
+	Disconnect();
+	DeleteCriticalSection(&m_cs);
+}
 
 static std::wstring JoinPath(const std::wstring& a, const std::wstring& b)
 {
@@ -139,9 +149,10 @@ bool KpiHost64Client::StartHostProcess()
 	return true;
 }
 
-bool KpiHost64Client::ConnectPipe()
+bool KpiHost64Client::ConnectPipe(bool waitForHost)
 {
-	for (int i = 0; i < 30; i++) {
+	const int attempts = waitForHost ? 30 : 1;
+	for (int i = 0; i < attempts; i++) {
 		HANDLE h = CreateFileW(KPIHOST64_PIPE_NAME, GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING, 0, NULL);
 		if (h != INVALID_HANDLE_VALUE) {
 			DWORD mode = PIPE_READMODE_BYTE;
@@ -156,8 +167,10 @@ bool KpiHost64Client::ConnectPipe()
 			if (!WaitNamedPipeW(KPIHOST64_PIPE_NAME, 200)) Sleep(50);
 			continue;
 		}
-		AppendLogLine((L"[ConnectPipe] CreateFile failed err=" + std::to_wstring(err)).c_str());
-		Sleep(50);
+		if (waitForHost) {
+			AppendLogLine((L"[ConnectPipe] CreateFile failed err=" + std::to_wstring(err)).c_str());
+			Sleep(50);
+		}
 	}
 	return false;
 }
@@ -165,13 +178,56 @@ bool KpiHost64Client::ConnectPipe()
 bool KpiHost64Client::EnsureConnected()
 {
 	if (m_hPipe != INVALID_HANDLE_VALUE) return true;
-	if (ConnectPipe()) return true;
+	// No pipe means no host yet: retrying first only delays the launch, which
+	// the first .mid of a session waits on.
+	if (ConnectPipe(false)) return true;
 	StartHostProcess();
-	return ConnectPipe();
+	return ConnectPipe(true);
 }
+
+namespace {
+struct PipeLock
+{
+	CRITICAL_SECTION* cs;
+	explicit PipeLock(CRITICAL_SECTION& c) : cs(&c) { EnterCriticalSection(cs); }
+	~PipeLock() { LeaveCriticalSection(cs); }
+};
+
+// The pipe is a byte stream, so a single ReadFile may return less than asked
+// for. Treating that as an error used to drop the connection mid-song, which
+// the playback thread turns into a zero-filled buffer, i.e. a hole in the
+// audio.
+bool PipeReadAll(HANDLE pipe, void* buf, uint32_t bytes)
+{
+	uint8_t* p = (uint8_t*)buf;
+	while (bytes) {
+		DWORD got = 0;
+		if (!ReadFile(pipe, p, bytes, &got, NULL) || got == 0) return false;
+		p += got;
+		bytes -= got;
+	}
+	return true;
+}
+
+bool PipeSkip(HANDLE pipe, uint32_t bytes)
+{
+	uint8_t scratch[4096];
+	while (bytes) {
+		const uint32_t take = bytes < sizeof(scratch) ? bytes : (uint32_t)sizeof(scratch);
+		if (!PipeReadAll(pipe, scratch, take)) return false;
+		bytes -= take;
+	}
+	return true;
+}
+
+enum : uint32_t { PIPE_MAX_REPLY_BYTES = 64u * 1024u * 1024u };
+} // namespace
 
 bool KpiHost64Client::SendRequest(uint32_t cmd, const void* payload, uint32_t payloadBytes, std::vector<uint8_t>& outReplyPayload, uint32_t& outStatus)
 {
+	// The host serves a single pipe instance, so playback and the VST Live UI
+	// share this connection; a half-written request would desync the stream.
+	PipeLock lock(m_cs);
 	outReplyPayload.clear();
 	outStatus = KPIHOST64_STATUS_FAIL;
 	if (!EnsureConnected()) return false;
@@ -195,35 +251,46 @@ bool KpiHost64Client::SendRequest(uint32_t cmd, const void* payload, uint32_t pa
 		}
 	}
 
-	KPIHOST64_ReplyHeader rh{};
-	DWORD read = 0;
-	if (!ReadFile(m_hPipe, &rh, sizeof(rh), &read, NULL) || read != sizeof(rh)) {
-		AppendLogLine(L"[SendRequest] read reply header failed");
-		Disconnect();
-		return false;
-	}
-	if (rh.requestId != h.requestId || rh.cmd != cmd) {
-		AppendLogLine(L"[SendRequest] reply mismatch");
-		Disconnect();
-		return false;
-	}
-
-	outStatus = rh.status;
-	if (rh.payloadBytes) {
-		outReplyPayload.resize(rh.payloadBytes);
-		uint8_t* p = outReplyPayload.data();
-		uint32_t remaining = rh.payloadBytes;
-		while (remaining) {
-			DWORD chunk = 0;
-			if (!ReadFile(m_hPipe, p, remaining, &chunk, NULL) || chunk == 0) {
+	// A reply left over from a request that was abandoned earlier is still in
+	// the stream. Skip past it and keep looking for our own reply rather than
+	// dropping the connection, which would cost a whole buffer of audio.
+	for (int attempt = 0; attempt < 16; ++attempt) {
+		KPIHOST64_ReplyHeader rh{};
+		if (!PipeReadAll(m_hPipe, &rh, sizeof(rh))) {
+			AppendLogLine(L"[SendRequest] read reply header failed");
+			Disconnect();
+			return false;
+		}
+		if (rh.payloadBytes > PIPE_MAX_REPLY_BYTES) {
+			AppendLogLine((L"[SendRequest] absurd reply size " + std::to_wstring(rh.payloadBytes)).c_str());
+			Disconnect();
+			return false;
+		}
+		if (rh.requestId != h.requestId || rh.cmd != cmd) {
+			AppendLogLine((L"[SendRequest] stale reply skipped: got cmd=" + std::to_wstring(rh.cmd) +
+				L" id=" + std::to_wstring(rh.requestId) + L", want cmd=" + std::to_wstring(cmd) +
+				L" id=" + std::to_wstring(h.requestId)).c_str());
+			if (!PipeSkip(m_hPipe, rh.payloadBytes)) {
 				Disconnect();
 				return false;
 			}
-			p += chunk;
-			remaining -= chunk;
+			continue;
 		}
+		if (rh.payloadBytes) {
+			outReplyPayload.resize(rh.payloadBytes);
+			if (!PipeReadAll(m_hPipe, outReplyPayload.data(), rh.payloadBytes)) {
+				AppendLogLine(L"[SendRequest] read reply payload failed");
+				outReplyPayload.clear();
+				Disconnect();
+				return false;
+			}
+		}
+		outStatus = rh.status;
+		return true;
 	}
-	return true;
+	AppendLogLine(L"[SendRequest] could not resync reply stream");
+	Disconnect();
+	return false;
 }
 
 bool KpiHost64Client::Ping()
@@ -407,7 +474,6 @@ bool KpiHost64Client::ForeignClose(uint32_t sessionId)
 bool KpiHost64Client::VstOpen(const std::wstring& midPath, const std::wstring& vstDllPath,
 	const std::wstring& extraScanPath, KPIHOST64_ForeignOpenReply& out)
 {
-	if (!EnsureConnected()) return false;
 	std::vector<uint8_t> req;
 	uint32_t nMid = (uint32_t)midPath.size();
 	uint32_t nDll = (uint32_t)vstDllPath.size();
@@ -430,7 +496,6 @@ bool KpiHost64Client::VstOpen(const std::wstring& midPath, const std::wstring& v
 
 bool KpiHost64Client::VstRender(uint32_t bytesWanted, std::vector<uint8_t>& outPcm, bool& outEof)
 {
-	if (!EnsureConnected()) return false;
 	KPIHOST64_RenderReq rr{};
 	rr.sessionId = 1;
 	rr.bytesWanted = bytesWanted;
@@ -450,7 +515,6 @@ bool KpiHost64Client::VstRender(uint32_t bytesWanted, std::vector<uint8_t>& outP
 
 bool KpiHost64Client::VstSeek(uint64_t posSample)
 {
-	if (!EnsureConnected()) return false;
 	KPIHOST64_SeekReq sr{};
 	sr.sessionId = 1;
 	sr.posSample = posSample;
@@ -463,10 +527,86 @@ bool KpiHost64Client::VstSeek(uint64_t posSample)
 
 bool KpiHost64Client::VstClose()
 {
-	if (!EnsureConnected()) return false;
 	std::vector<uint8_t> reply;
 	uint32_t st = 0;
 	if (!SendRequest(KPIHOST64_CMD_VST_CLOSE, NULL, 0, reply, st)) return false;
 	return st == KPIHOST64_STATUS_OK;
+}
+
+bool KpiHost64Client::SendSimple(uint32_t cmd, const void* payload, uint32_t payloadBytes)
+{
+	std::vector<uint8_t> reply;
+	uint32_t st = 0;
+	if (!SendRequest(cmd, payload, payloadBytes, reply, st)) return false;
+	return st == KPIHOST64_STATUS_OK;
+}
+
+bool KpiHost64Client::VstLiveLoad(uint32_t part1to32, const std::wstring& pluginPath, bool isVst3)
+{
+	if (pluginPath.empty()) return false;
+	const uint32_t nPath = (uint32_t)pluginPath.size();
+	std::vector<uint8_t> req(sizeof(KPIHOST64_VstLiveLoadReq) + sizeof(uint32_t) +
+		nPath * sizeof(wchar_t));
+	uint8_t* p = req.data();
+	KPIHOST64_VstLiveLoadReq lr{};
+	lr.part = part1to32;
+	lr.isVst3 = isVst3 ? 1u : 0u;
+	memcpy(p, &lr, sizeof(lr)); p += sizeof(lr);
+	memcpy(p, &nPath, sizeof(nPath)); p += sizeof(nPath);
+	memcpy(p, pluginPath.c_str(), nPath * sizeof(wchar_t));
+	return SendSimple(KPIHOST64_CMD_VST_LIVE_LOAD, req.data(), (uint32_t)req.size());
+}
+
+bool KpiHost64Client::VstLiveUnload(uint32_t part1to32)
+{
+	KPIHOST64_U32 u{ part1to32 };
+	return SendSimple(KPIHOST64_CMD_VST_LIVE_UNLOAD, &u, sizeof(u));
+}
+
+bool KpiHost64Client::VstLiveUnloadAll()
+{
+	return SendSimple(KPIHOST64_CMD_VST_LIVE_UNLOAD_ALL, NULL, 0);
+}
+
+bool KpiHost64Client::VstLiveMidi(uint32_t port, uint32_t msg)
+{
+	KPIHOST64_VstLiveMidiReq mr{};
+	mr.port = port;
+	mr.msg = msg;
+	return SendSimple(KPIHOST64_CMD_VST_LIVE_MIDI, &mr, sizeof(mr));
+}
+
+bool KpiHost64Client::VstLiveSysex(uint32_t port, const uint8_t* data, uint32_t bytes)
+{
+	if (!data || !bytes) return false;
+	std::vector<uint8_t> req(sizeof(KPIHOST64_VstLiveSysexReq) + bytes);
+	KPIHOST64_VstLiveSysexReq sr{};
+	sr.port = port;
+	sr.bytes = bytes;
+	memcpy(req.data(), &sr, sizeof(sr));
+	memcpy(req.data() + sizeof(sr), data, bytes);
+	return SendSimple(KPIHOST64_CMD_VST_LIVE_SYSEX, req.data(), (uint32_t)req.size());
+}
+
+bool KpiHost64Client::VstLiveAudioStart()
+{
+	return SendSimple(KPIHOST64_CMD_VST_LIVE_AUDIO_START, NULL, 0);
+}
+
+bool KpiHost64Client::VstLiveAudioStop()
+{
+	return SendSimple(KPIHOST64_CMD_VST_LIVE_AUDIO_STOP, NULL, 0);
+}
+
+bool KpiHost64Client::VstLiveEditorOpen(uint32_t part1to32)
+{
+	KPIHOST64_U32 u{ part1to32 };
+	return SendSimple(KPIHOST64_CMD_VST_LIVE_EDITOR_OPEN, &u, sizeof(u));
+}
+
+bool KpiHost64Client::VstLiveEditorClose(uint32_t part1to32)
+{
+	KPIHOST64_U32 u{ part1to32 };
+	return SendSimple(KPIHOST64_CMD_VST_LIVE_EDITOR_CLOSE, &u, sizeof(u));
 }
 

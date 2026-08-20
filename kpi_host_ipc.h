@@ -23,7 +23,20 @@ enum KPIHOST64_CMD : uint32_t
 	KPIHOST64_CMD_VST_OPEN = 20,   // [u32 midChars][mid][u32 dllChars][dll]
 	KPIHOST64_CMD_VST_RENDER = 21,
 	KPIHOST64_CMD_VST_SEEK = 22,
-	KPIHOST64_CMD_VST_CLOSE = 23
+	KPIHOST64_CMD_VST_CLOSE = 23,
+	// VST Live parts (x86 app hosting x64 plug-ins such as SOUND Canvas VA).
+	// Only lifecycle goes over the pipe; notes and audio use shared memory so
+	// the keyboard is never blocked by a pending render request.
+	KPIHOST64_CMD_VST_LIVE_LOAD = 30,
+	KPIHOST64_CMD_VST_LIVE_UNLOAD = 31,
+	KPIHOST64_CMD_VST_LIVE_UNLOAD_ALL = 32,
+	KPIHOST64_CMD_VST_LIVE_MIDI = 33,
+	KPIHOST64_CMD_VST_LIVE_SYSEX = 34,
+	KPIHOST64_CMD_VST_LIVE_RENDER = 35,
+	KPIHOST64_CMD_VST_LIVE_AUDIO_START = 36,
+	KPIHOST64_CMD_VST_LIVE_AUDIO_STOP = 37,
+	KPIHOST64_CMD_VST_LIVE_EDITOR_OPEN = 38,
+	KPIHOST64_CMD_VST_LIVE_EDITOR_CLOSE = 39
 };
 
 enum KPIHOST64_STATUS : uint32_t
@@ -126,5 +139,75 @@ struct KPIHOST64_ForeignOpenReply
 	int32_t bitsPerSample;
 	uint64_t lengthSamples;
 };
+
+struct KPIHOST64_VstLiveLoadReq
+{
+	uint32_t part;   // 1..32
+	uint32_t isVst3; // 0=VST2 DLL, 1=VST3 bundle
+	// followed by: [u32 pathChars][wchar_t[]]
+};
+
+struct KPIHOST64_VstLiveMidiReq
+{
+	uint32_t port; // 0..2
+	uint32_t msg;  // packed short message
+};
+
+struct KPIHOST64_VstLiveSysexReq
+{
+	uint32_t port;
+	uint32_t bytes;
+	// followed by raw sysex bytes
+};
+
+struct KPIHOST64_VstLiveRenderReq
+{
+	uint32_t frames;
+};
+
+struct KPIHOST64_VstLiveRenderReply
+{
+	uint32_t frames;
+	// followed by frames * 2 interleaved floats (L,R)
+};
+
+// Audio ring written by KpiHost64, read by the app. Capacities are powers of
+// two so producer and consumer can mask instead of taking a lock.
+struct KPIHOST64_VstLiveAudioShm
+{
+	uint32_t capacity; // frames
+	uint32_t sampleRate;
+	volatile uint32_t writePos;
+	volatile uint32_t readPos;
+	// followed by capacity floats (L) then capacity floats (R)
+};
+
+struct KPIHOST64_VstLiveMidiEvent
+{
+	uint32_t port;
+	uint32_t msg;
+};
+
+// MIDI ring written by the app, drained by KpiHost64's render thread.
+struct KPIHOST64_VstLiveMidiShm
+{
+	uint32_t capacity; // events
+	volatile uint32_t writePos;
+	volatile uint32_t readPos;
+	// followed by capacity KPIHOST64_VstLiveMidiEvent
+};
 #pragma pack(pop)
+
+enum : uint32_t
+{
+	KPIHOST64_VST_LIVE_SHM_CAP = 32768, // frames, power of two
+	KPIHOST64_VST_LIVE_MIDI_CAP = 8192  // events, power of two
+};
+
+static const wchar_t* const KPIHOST64_VST_LIVE_SHM_NAME =
+	L"Local\\ogg_kpi64_vstlive_audio";
+static const wchar_t* const KPIHOST64_VST_LIVE_MIDI_SHM_NAME =
+	L"Local\\ogg_kpi64_vstlive_midi";
+static const wchar_t* const KPIHOST64_VST_LIVE_EVENT_NAME =
+	L"Local\\ogg_kpi64_vstlive_wake";
 

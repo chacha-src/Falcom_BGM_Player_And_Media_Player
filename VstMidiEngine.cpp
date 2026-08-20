@@ -1,4 +1,4 @@
-#include "stdafx.h"
+﻿#include "stdafx.h"
 #include "VstMidiEngine.h"
 #include "Vst3Host.h"
 #include "third_party/vst2/aeffect.h"
@@ -9,6 +9,11 @@
 #include <stdarg.h>
 #include <shlobj.h>
 #include <mmsystem.h>
+
+#ifndef KPIHOST64_BUILD
+#include "kpi_host_ipc.h"
+#include "KpiHostClient.h"
+#endif
 
 #pragma comment(lib, "winmm.lib")
 static int ProbeLoadedEffectAudible(AEffect* effect);
@@ -49,11 +54,36 @@ struct DrumV {
 	unsigned rng;
 };
 
+enum { LIVE_PEND_EVENTS = 512, LIVE_PEND_SYSEX_BYTES = 4096 };
+
+struct LivePendEv {
+	DWORD msg;
+	int sysexOff; // <0 for a plain short message
+	int sysexLen;
+};
+
+// VST2 wants effProcessEvents once per block, carrying every event for that
+// block. Sending one event per call makes the plug-in keep only the last one,
+// which silently eats notes and, when the lost one is a note-off, leaves the
+// voice ringing forever. So live input is collected here and handed over in a
+// single call right before the part is rendered.
+struct LivePending {
+	int count;
+	int sysexUsed;
+	int lostEvents;
+	int lostSysex;
+	LivePendEv ev[LIVE_PEND_EVENTS];
+	BYTE sysex[LIVE_PEND_SYSEX_BYTES];
+};
+
 struct LivePart {
 	HMODULE module;
 	AEffect* effect;
 	Vst3Inst* vst3;
 	int isMulti;
+	int remote; // 1=hosted by KpiHost64 (wrong-arch plug-in)
+	HWND edWnd;
+	LivePending pend;
 };
 
 enum { MIX_SLOTS = 16 };
@@ -2788,20 +2818,234 @@ extern "C" int VstMidiGetChannels(void) { return 2; }
 extern "C" int VstMidiGetBits(void) { return 16; }
 extern "C" __int64 VstMidiGetLengthSamples(void) { return g_eng.lengthSamples; }
 
+#ifndef KPIHOST64_BUILD
+
+// ---------------------------------------------------------------------------
+// Cross-architecture live parts
+//
+// A 32-bit process cannot load SOUND Canvas VA (x64), so the plug-in lives in
+// KpiHost64. The pipe carries only load/unload/editor: notes go through a MIDI
+// ring and audio comes back through an audio ring, so neither the keyboard nor
+// the wave-out thread can be blocked by a pending request.
+// ---------------------------------------------------------------------------
+
+extern KpiHost64Client g_kpiHost;
+
+enum { LIVE_REMOTE_PREBUFFER = 512 };
+
+struct LiveRemoteShm {
+	HANDLE hAudioMap;
+	HANDLE hMidiMap;
+	HANDLE hWake;
+	KPIHOST64_VstLiveAudioShm* audio;
+	KPIHOST64_VstLiveMidiShm* midi;
+	int parts;
+	int primed; // 1 once the ring has reached LIVE_REMOTE_PREBUFFER
+};
+
+static LiveRemoteShm g_liveShm;
+
+// The wave-out thread reads the rings while the UI thread can unload a part and
+// unmap them, so the pointers themselves are published under this lock.
+static SRWLOCK g_liveShmLock = SRWLOCK_INIT;
+
+static float* LiveShmL(KPIHOST64_VstLiveAudioShm* s) { return (float*)(s + 1); }
+static float* LiveShmR(KPIHOST64_VstLiveAudioShm* s)
+{
+	return LiveShmL(s) + s->capacity;
+}
+
+static void LiveRemoteCloseShm()
+{
+	AcquireSRWLockExclusive(&g_liveShmLock);
+	LiveRemoteShm old = g_liveShm;
+	g_liveShm.audio = NULL;
+	g_liveShm.midi = NULL;
+	g_liveShm.hWake = NULL;
+	g_liveShm.hAudioMap = NULL;
+	g_liveShm.hMidiMap = NULL;
+	g_liveShm.primed = 0;
+	ReleaseSRWLockExclusive(&g_liveShmLock);
+	// Safe to release now: nobody can still be inside the ring, because every
+	// reader holds the lock for as long as it touches these pointers.
+	if (old.audio) UnmapViewOfFile(old.audio);
+	if (old.hAudioMap) CloseHandle(old.hAudioMap);
+	if (old.midi) UnmapViewOfFile(old.midi);
+	if (old.hMidiMap) CloseHandle(old.hMidiMap);
+	if (old.hWake) CloseHandle(old.hWake);
+}
+
+static int LiveRemoteOpenShm()
+{
+	if (g_liveShm.audio && g_liveShm.midi && g_liveShm.hWake) return 1;
+	LiveRemoteCloseShm();
+	if (!g_kpiHost.VstLiveAudioStart()) return 0;
+	const SIZE_T audioBytes = sizeof(KPIHOST64_VstLiveAudioShm) +
+		(SIZE_T)KPIHOST64_VST_LIVE_SHM_CAP * 2 * sizeof(float);
+	const SIZE_T midiBytes = sizeof(KPIHOST64_VstLiveMidiShm) +
+		(SIZE_T)KPIHOST64_VST_LIVE_MIDI_CAP * sizeof(KPIHOST64_VstLiveMidiEvent);
+	LiveRemoteShm n = {};
+	n.hAudioMap = OpenFileMappingW(FILE_MAP_ALL_ACCESS, FALSE,
+		KPIHOST64_VST_LIVE_SHM_NAME);
+	n.hMidiMap = OpenFileMappingW(FILE_MAP_ALL_ACCESS, FALSE,
+		KPIHOST64_VST_LIVE_MIDI_SHM_NAME);
+	n.hWake = OpenEventW(EVENT_MODIFY_STATE, FALSE,
+		KPIHOST64_VST_LIVE_EVENT_NAME);
+	if (n.hAudioMap)
+		n.audio = (KPIHOST64_VstLiveAudioShm*)MapViewOfFile(
+			n.hAudioMap, FILE_MAP_ALL_ACCESS, 0, 0, audioBytes);
+	if (n.hMidiMap)
+		n.midi = (KPIHOST64_VstLiveMidiShm*)MapViewOfFile(
+			n.hMidiMap, FILE_MAP_ALL_ACCESS, 0, 0, midiBytes);
+	if (!n.audio || !n.midi || !n.hWake) {
+		if (n.audio) UnmapViewOfFile(n.audio);
+		if (n.hAudioMap) CloseHandle(n.hAudioMap);
+		if (n.midi) UnmapViewOfFile(n.midi);
+		if (n.hMidiMap) CloseHandle(n.hMidiMap);
+		if (n.hWake) CloseHandle(n.hWake);
+		return 0;
+	}
+	AcquireSRWLockExclusive(&g_liveShmLock);
+	n.parts = g_liveShm.parts;
+	g_liveShm = n;
+	ReleaseSRWLockExclusive(&g_liveShmLock);
+	SetEvent(n.hWake);
+	return 1;
+}
+
+static void LiveRemoteStop()
+{
+	LiveRemoteCloseShm();
+	g_kpiHost.VstLiveAudioStop();
+}
+
+static void LiveRemoteMidi(int portIndex0to2, DWORD msg)
+{
+	AcquireSRWLockExclusive(&g_liveShmLock);
+	KPIHOST64_VstLiveMidiShm* m = g_liveShm.midi;
+	if (!m || !m->capacity) { ReleaseSRWLockExclusive(&g_liveShmLock); return; }
+	KPIHOST64_VstLiveMidiEvent* ev = (KPIHOST64_VstLiveMidiEvent*)(m + 1);
+	const uint32_t cap = m->capacity;
+	const uint32_t w = m->writePos;
+	if (w - m->readPos < cap) { // else the host stopped draining
+		ev[w & (cap - 1)].port = (uint32_t)portIndex0to2;
+		ev[w & (cap - 1)].msg = (uint32_t)msg;
+		MemoryBarrier();
+		InterlockedExchange((LONG*)&m->writePos, (LONG)(w + 1));
+		if (g_liveShm.hWake) SetEvent(g_liveShm.hWake);
+	}
+	ReleaseSRWLockExclusive(&g_liveShmLock);
+}
+
+// Adds the host's output on top of whatever the local parts produced.
+static void LiveRemoteMix(float* L, float* R, int frames)
+{
+	AcquireSRWLockExclusive(&g_liveShmLock);
+	KPIHOST64_VstLiveAudioShm* s = g_liveShm.audio;
+	if (!s || !s->capacity) { ReleaseSRWLockExclusive(&g_liveShmLock); return; }
+	const uint32_t cap = s->capacity;
+	const uint32_t need = (uint32_t)frames;
+	const uint32_t want = g_liveShm.primed ? need : (uint32_t)LIVE_REMOTE_PREBUFFER;
+	// Wave-out already holds queued blocks, so a short wait here costs nothing
+	// audible while it keeps a slow first render from turning into a gap. Once
+	// primed the wait stays well inside the queued time, so a dead host cannot
+	// stall this thread.
+	const int spins = g_liveShm.primed ? 20 : 300;
+	for (int spin = 0; spin < spins; ++spin) {
+		if (s->writePos - s->readPos >= want) break;
+		if (g_liveShm.hWake) SetEvent(g_liveShm.hWake);
+		Sleep(1);
+	}
+	uint32_t r = s->readPos;
+	uint32_t avail = s->writePos - r;
+	if (avail > cap) avail = 0; // producer restarted
+	const uint32_t n = (avail < need) ? avail : need;
+	const float* sl = LiveShmL(s);
+	const float* sr = LiveShmR(s);
+	for (uint32_t i = 0; i < n; ++i) {
+		const uint32_t idx = (r + i) & (cap - 1);
+		L[i] += sl[idx];
+		R[i] += sr[idx];
+	}
+	if (n) {
+		MemoryBarrier();
+		InterlockedExchange((LONG*)&s->readPos, (LONG)(r + n));
+		g_liveShm.primed = 1;
+	}
+	if (g_liveShm.hWake) SetEvent(g_liveShm.hWake);
+	ReleaseSRWLockExclusive(&g_liveShmLock);
+}
+
+static int LiveRemoteLoad(int part1to32, const wchar_t* pluginPath, int isVst3)
+{
+	if (!g_kpiHost.VstLiveLoad((uint32_t)part1to32, pluginPath, isVst3 != 0))
+		return -3;
+	if (!LiveRemoteOpenShm()) {
+		g_kpiHost.VstLiveUnload((uint32_t)part1to32);
+		return -4;
+	}
+	++g_liveShm.parts;
+	return 0;
+}
+
+static void LiveRemoteUnload(int part1to32)
+{
+	g_kpiHost.VstLiveUnload((uint32_t)part1to32);
+	if (g_liveShm.parts > 0) --g_liveShm.parts;
+	if (g_liveShm.parts == 0) LiveRemoteStop();
+}
+
+static int LiveRemoteActive() { return g_liveShm.parts > 0 && g_liveShm.audio != NULL; }
+
+#else  // KPIHOST64_BUILD: the plug-ins are already in-process here
+
+static void LiveRemoteMidi(int, DWORD) {}
+static void LiveRemoteMix(float*, float*, int) {}
+static void LiveRemoteUnload(int) {}
+static int LiveRemoteActive() { return 0; }
+
+#endif
+
 extern "C" int VstLiveLoadPart(int part1to32,
 	const wchar_t* pluginPath, int isVst3)
 {
 	if (part1to32 < 1 || part1to32 > 32 || !pluginPath) return -1;
 	EnterCriticalSection(&g_eng.cs);
 	LivePart& p = g_eng.live[part1to32 - 1];
+	const int wasRemote = p.remote;
 	CloseEffect(p.module, p.effect);
 	Vst3Close(p.vst3); p.vst3 = NULL;
 	p.isMulti = 0;
+	p.remote = 0;
+	LeaveCriticalSection(&g_eng.cs);
+	if (wasRemote) LiveRemoteUnload(part1to32);
+
+#ifndef KPIHOST64_BUILD
+	// x64 plug-in in a 32-bit process: hand it to KpiHost64. Slot state is
+	// updated outside the engine lock because the pipe call can start the
+	// host process, which takes far too long to hold the audio lock for.
+	if (PeArch(pluginPath) != HostArch()) {
+		const int rc = LiveRemoteLoad(part1to32, pluginPath, isVst3);
+		if (rc != 0) return rc;
+		EnterCriticalSection(&g_eng.cs);
+		LivePart& rp = g_eng.live[part1to32 - 1];
+		rp.remote = 1;
+		rp.isMulti = DetectMultiTimbralName(pluginPath) ? 1 : 0;
+		LeaveCriticalSection(&g_eng.cs);
+		return 0;
+	}
+#endif
+
+	EnterCriticalSection(&g_eng.cs);
 	int ok = 0;
 	if (isVst3) {
 		p.vst3 = Vst3Open(pluginPath);
 		ok = Vst3IsOk(p.vst3);
 		if (!ok) { Vst3Close(p.vst3); p.vst3 = NULL; }
+		// Preset-based instruments (HALion Sonic, Groove Agent, SampleTank)
+		// come up with nothing loaded and stay silent no matter what you play,
+		// so start them on their first program.
+		if (ok && Vst3ProgramCount(p.vst3) > 0) Vst3SetProgram(p.vst3, 0);
 	} else {
 		ok = LoadVst2(pluginPath, p.module, p.effect);
 	}
@@ -2810,42 +3054,420 @@ extern "C" int VstLiveLoadPart(int part1to32,
 	return ok ? 0 : -2;
 }
 
+enum { LIVE_PEND_SYSEX_EVENTS = 32 };
+
+static void LivePendPush(LivePart& p, DWORD msg)
+{
+	LivePending& q = p.pend;
+	if (q.count >= LIVE_PEND_EVENTS) { ++q.lostEvents; return; }
+	q.ev[q.count].msg = msg;
+	q.ev[q.count].sysexOff = -1;
+	q.ev[q.count].sysexLen = 0;
+	++q.count;
+}
+
+static void LivePendPushSysex(LivePart& p, const BYTE* data, int bytes)
+{
+	LivePending& q = p.pend;
+	if (q.count >= LIVE_PEND_EVENTS ||
+		bytes <= 0 || q.sysexUsed + bytes > LIVE_PEND_SYSEX_BYTES) {
+		++q.lostSysex;
+		return;
+	}
+	memcpy(q.sysex + q.sysexUsed, data, (size_t)bytes);
+	q.ev[q.count].msg = 0;
+	q.ev[q.count].sysexOff = q.sysexUsed;
+	q.ev[q.count].sysexLen = bytes;
+	q.sysexUsed += bytes;
+	++q.count;
+}
+
+// One dispatcher call for the whole block, notes and sysex together, in the
+// order they arrived.
+static void LivePendFlush(LivePart& p)
+{
+	LivePending& q = p.pend;
+	if (!q.count) return;
+	if (p.effect && p.effect->dispatcher) {
+		struct EventBlock {
+			VstInt32 numEvents;
+			VstIntPtr reserved;
+			VstEvent* events[LIVE_PEND_EVENTS];
+		} block;
+		VstMidiEvent me[LIVE_PEND_EVENTS];
+		VstMidiSysexEvent sx[LIVE_PEND_SYSEX_EVENTS];
+		block.reserved = 0;
+		int n = 0, nsx = 0;
+		for (int i = 0; i < q.count; ++i) {
+			if (q.ev[i].sysexOff >= 0) {
+				if (nsx >= LIVE_PEND_SYSEX_EVENTS) continue;
+				VstMidiSysexEvent& s = sx[nsx];
+				ZeroMemory(&s, sizeof(s));
+				s.type = kVstSysExType;
+				s.byteSize = sizeof(VstMidiSysexEvent);
+				s.dumpBytes = (VstInt32)q.ev[i].sysexLen;
+				s.sysexDump = (char*)(q.sysex + q.ev[i].sysexOff);
+				block.events[n++] = (VstEvent*)&s;
+				++nsx;
+				continue;
+			}
+			VstMidiEvent& m = me[n];
+			ZeroMemory(&m, sizeof(m));
+			m.type = kVstMidiType;
+			m.byteSize = sizeof(VstMidiEvent);
+			m.midiData[0] = (char)(q.ev[i].msg & 0xff);
+			m.midiData[1] = (char)((q.ev[i].msg >> 8) & 0x7f);
+			m.midiData[2] = (char)((q.ev[i].msg >> 16) & 0x7f);
+			block.events[n] = (VstEvent*)&m;
+			++n;
+		}
+		block.numEvents = n;
+		if (n) {
+			__try { p.effect->dispatcher(p.effect, effProcessEvents, 0, 0, &block, 0); }
+			__except (EXCEPTION_EXECUTE_HANDLER) {}
+		}
+	}
+	if (p.vst3) {
+		// Vst3MidiShort already accumulates until the next Vst3Process.
+		for (int i = 0; i < q.count; ++i)
+			if (q.ev[i].sysexOff < 0) Vst3MidiShort(p.vst3, q.ev[i].msg, 0);
+	}
+	q.count = 0;
+	q.sysexUsed = 0;
+}
+
+// Channel-mode messages only: CC64=0 (sustain off), CC120 (all sound off),
+// CC123 (all notes off). Data bytes live in bits 8..15 / 16..23, so a wrong
+// shift here silently turns into Bank Select MSB and retunes the part.
+static void LivePanicPart(LivePart& p)
+{
+	if (!p.effect && !p.vst3) return;
+	// Drop anything still queued: it is stale the moment we panic, and a
+	// note-on left in there would start a voice right after the all-notes-off.
+	p.pend.count = 0;
+	p.pend.sysexUsed = 0;
+	for (int ch = 0; ch < 16; ++ch) {
+		LivePendPush(p, (DWORD)((0xb0 | ch) | (64 << 8) | (0 << 16)));
+		LivePendPush(p, (DWORD)((0xb0 | ch) | (120 << 8)));
+		LivePendPush(p, (DWORD)((0xb0 | ch) | (123 << 8)));
+	}
+	// Panic also runs while unloading, where no render follows, so push it out
+	// and give the plug-in the process call that acts on it.
+	LivePendFlush(p);
+	PumpSilent(p.effect, p.vst3, 1);
+}
+
+static void LivePanicRemote()
+{
+	if (!LiveRemoteActive()) return;
+	for (int port = 0; port < 3; ++port)
+		for (int ch = 0; ch < 16; ++ch) {
+			LiveRemoteMidi(port, (DWORD)((0xb0 | ch) | (64 << 8)));
+			LiveRemoteMidi(port, (DWORD)((0xb0 | ch) | (120 << 8)));
+			LiveRemoteMidi(port, (DWORD)((0xb0 | ch) | (123 << 8)));
+		}
+}
+
+// Live input monitor. Written from the audio thread as events are handed to
+// the plug-ins and read by the UI timer, so the values are deliberately just
+// interlocked scalars rather than a locked snapshot.
+struct LiveActEntry {
+	volatile LONG down[4]; // bit n of down[n/32] = note n is held
+	volatile LONG note;
+	volatile LONG vel;
+	volatile LONG tick;
+	volatile LONG seen;
+};
+
+static LiveActEntry g_liveAct[48]; // 3 ports x 16 channels
+static wchar_t g_liveSysexText[160];
+static volatile LONG g_liveSysexTick;
+static volatile LONG g_liveSysexSeen;
+
+static void LiveActTrack(int port, DWORD msg)
+{
+	const int idx = port * 16 + (int)(msg & 15);
+	if (idx < 0 || idx >= 48) return;
+	LiveActEntry& a = g_liveAct[idx];
+	const int type = (int)(msg & 0xf0);
+	const int d1 = (int)((msg >> 8) & 0x7f);
+	const int d2 = (int)((msg >> 16) & 0x7f);
+	if (type == 0x90 && d2) {
+		InterlockedOr(&a.down[d1 >> 5], (LONG)(1u << (d1 & 31)));
+		InterlockedExchange(&a.note, d1);
+		InterlockedExchange(&a.vel, d2);
+	} else if (type == 0x80 || type == 0x90) {
+		InterlockedAnd(&a.down[d1 >> 5], (LONG)~(1u << (d1 & 31)));
+	} else if (type == 0xb0 && (d1 == 120 || d1 == 123)) {
+		for (int i = 0; i < 4; ++i) InterlockedExchange(&a.down[i], 0);
+	}
+	InterlockedExchange(&a.tick, (LONG)GetTickCount());
+	InterlockedExchange(&a.seen, 1);
+}
+
+static void LiveActReset()
+{
+	for (int i = 0; i < 48; ++i)
+		for (int b = 0; b < 4; ++b) InterlockedExchange(&g_liveAct[i].down[b], 0);
+}
+
+extern "C" int VstLiveActivity(int part1to32, struct VstLiveActInfo* out)
+{
+	if (!out || part1to32 < 1 || part1to32 > 48) return 0;
+	const LiveActEntry& a = g_liveAct[part1to32 - 1];
+	int held = 0;
+	for (int b = 0; b < 4; ++b) {
+		const unsigned w = (unsigned)a.down[b];
+		out->mask[b] = w;
+		for (unsigned bit = w; bit; bit &= bit - 1) ++held;
+	}
+	out->held = held;
+	out->note = (int)a.note;
+	out->vel = (int)a.vel;
+	out->ageMs = a.seen ? (int)(GetTickCount() - (DWORD)a.tick) : -1;
+	return 1;
+}
+
+extern "C" int VstLiveSysexInfo(wchar_t* out, int chars, int* ageMs)
+{
+	if (!out || chars <= 0) return 0;
+	out[0] = 0;
+	if (!InterlockedCompareExchange(&g_liveSysexSeen, 0, 0)) {
+		if (ageMs) *ageMs = -1;
+		return 0;
+	}
+	wcsncpy_s(out, chars, g_liveSysexText, _TRUNCATE);
+	if (ageMs) *ageMs = (int)(GetTickCount() - (DWORD)g_liveSysexTick);
+	return 1;
+}
+
+// Names the resets everyone actually sends; anything else is shown raw.
+static void LiveSysexDescribe(const unsigned char* d, int n)
+{
+	const wchar_t* known = NULL;
+	if (n >= 6 && d[0] == 0xf0 && d[1] == 0x7e && d[3] == 0x09) {
+		if (d[4] == 0x01) known = L"GM1 On";
+		else if (d[4] == 0x03) known = L"GM2 On";
+		else if (d[4] == 0x02) known = L"GM Off";
+	} else if (n >= 10 && d[0] == 0xf0 && d[1] == 0x41 && d[3] == 0x42 &&
+		d[4] == 0x12 && d[5] == 0x40 && d[6] == 0x00 && d[7] == 0x7f) {
+		known = L"GS Reset";
+	} else if (n >= 8 && d[0] == 0xf0 && d[1] == 0x43 && d[3] == 0x4c &&
+		d[4] == 0x00 && d[5] == 0x00 && d[6] == 0x7e) {
+		known = L"XG On";
+	} else if (n >= 2 && d[0] == 0xf0 && d[1] == 0x41) {
+		known = L"Roland";
+	} else if (n >= 2 && d[0] == 0xf0 && d[1] == 0x43) {
+		known = L"Yamaha";
+	}
+	wchar_t head[64] = {};
+	const int show = n < 5 ? n : 5;
+	for (int i = 0; i < show; ++i) {
+		wchar_t b[8];
+		_snwprintf_s(b, _TRUNCATE, i ? L" %02X" : L"%02X", d[i]);
+		wcsncat_s(head, b, _TRUNCATE);
+	}
+	if (known)
+		_snwprintf_s(g_liveSysexText, _TRUNCATE, L"%s (%dB: %s%s)", known, n,
+			head, n > show ? L" …" : L"");
+	else
+		_snwprintf_s(g_liveSysexText, _TRUNCATE, L"SysEx %dB: %s%s", n, head,
+			n > show ? L" …" : L"");
+	InterlockedExchange(&g_liveSysexTick, (LONG)GetTickCount());
+	InterlockedExchange(&g_liveSysexSeen, 1);
+}
+
+extern "C" void VstLiveAllNotesOff()
+{
+	EnterCriticalSection(&g_eng.cs);
+	for (int i = 0; i < 32; ++i) LivePanicPart(g_eng.live[i]);
+	LeaveCriticalSection(&g_eng.cs);
+	LiveActReset();
+	LivePanicRemote();
+}
+
 extern "C" void VstLiveUnloadPart(int part1to32)
 {
 	if (part1to32 < 1 || part1to32 > 32) return;
+	VstLiveEditorClose(part1to32);
 	EnterCriticalSection(&g_eng.cs);
+	LivePanicPart(g_eng.live[part1to32 - 1]);
 	LivePart& p = g_eng.live[part1to32 - 1];
+	const int wasRemote = p.remote;
 	CloseEffect(p.module, p.effect);
 	Vst3Close(p.vst3); p.vst3 = NULL;
 	p.isMulti = 0;
+	p.remote = 0;
 	LeaveCriticalSection(&g_eng.cs);
+	if (wasRemote) LiveRemoteUnload(part1to32);
+}
+
+
+// Multi-timbral (SC-VA / SGP2 etc.): one instance receives all channels.
+// Prefer the instance inside this port's 16-part block, so two multi instances
+// on different blocks stay separated; otherwise fall back to the first one
+// anywhere, as a single instance must hear every port.
+static int LiveMultiPart(int portIndex0to2)
+{
+	const int blockStart = portIndex0to2 * 16;
+	for (int i = blockStart; i < blockStart + 16 && i < 32; ++i)
+		if (g_eng.live[i].isMulti && (g_eng.live[i].effect || g_eng.live[i].vst3))
+			return i;
+	for (int i = 0; i < 32; ++i)
+		if (g_eng.live[i].isMulti && (g_eng.live[i].effect || g_eng.live[i].vst3))
+			return i;
+	return -1;
 }
 
 extern "C" void VstLiveMidiShort(int portIndex0to2, DWORD shortMsg)
 {
 	if (portIndex0to2 < 0 || portIndex0to2 > 2) return;
+	// Remote parts route inside KpiHost64, which holds the same part layout.
+	LiveActTrack(portIndex0to2, shortMsg);
+	LiveRemoteMidi(portIndex0to2, shortMsg);
 	EnterCriticalSection(&g_eng.cs);
-	MidiItem e = {};
-	e.msg = shortMsg;
-	// Multi-timbral (SC-VA / SGP2 etc.): one instance receives all channels.
-	int multi = -1;
-	for (int i = 0; i < 32; ++i)
-		if (g_eng.live[i].isMulti && (g_eng.live[i].effect || g_eng.live[i].vst3)) {
-			multi = i; break;
+	int part = LiveMultiPart(portIndex0to2);
+	if (part < 0) part = portIndex0to2 * 16 + (int)(shortMsg & 15);
+	if (part < 32) LivePendPush(g_eng.live[part], shortMsg);
+	LeaveCriticalSection(&g_eng.cs);
+}
+
+extern "C" void VstLiveMidiSysex(int portIndex0to2, const unsigned char* data,
+	int bytes)
+{
+	if (portIndex0to2 < 0 || portIndex0to2 > 2 || !data || bytes <= 0) return;
+	LiveSysexDescribe(data, bytes);
+#ifndef KPIHOST64_BUILD
+	if (LiveRemoteActive())
+		g_kpiHost.VstLiveSysex((uint32_t)portIndex0to2, data, (uint32_t)bytes);
+#endif
+	EnterCriticalSection(&g_eng.cs);
+	int part = LiveMultiPart(portIndex0to2);
+	if (part < 0) part = portIndex0to2 * 16;
+	// Queued with the notes so a GS reset cannot wipe the events around it.
+	if (part < 32) LivePendPushSysex(g_eng.live[part], data, bytes);
+	LeaveCriticalSection(&g_eng.cs);
+}
+
+// The plug-in draws its own editor, and VST2 requires effEditIdle for the
+// meters and animations to advance. Both the window and the idle pump must
+// belong to the thread that loaded the module, so KpiHost64 marshals every
+// call here onto its plug-in UI thread.
+struct LiveEditorRect { short top, left, bottom, right; };
+
+enum { LIVE_EDITOR_IDLE_TIMER = 1 };
+
+static LRESULT CALLBACK LiveEditorWndProc(HWND h, UINT m, WPARAM w, LPARAM l)
+{
+	const int part = (int)GetWindowLongPtrW(h, GWLP_USERDATA);
+	if (part >= 1 && part <= 32) {
+		if (m == WM_TIMER && w == LIVE_EDITOR_IDLE_TIMER) {
+			AEffect* e = g_eng.live[part - 1].effect;
+			if (e && e->dispatcher) {
+				__try { e->dispatcher(e, effEditIdle, 0, 0, NULL, 0); }
+				__except (EXCEPTION_EXECUTE_HANDLER) {}
+			}
+			return 0;
 		}
-	if (multi >= 0) {
-		SendVstEvents(g_eng.live[multi].effect, &e, 1, 0);
-		Vst3MidiShort(g_eng.live[multi].vst3, shortMsg, 0);
-		LeaveCriticalSection(&g_eng.cs);
+		if (m == WM_CLOSE) { VstLiveEditorClose(part); return 0; }
+	}
+	return DefWindowProcW(h, m, w, l);
+}
+
+static HWND LiveEditorCreateHostWnd(int part1to32)
+{
+	static int registered = 0;
+	if (!registered) {
+		WNDCLASSEXW wc = {};
+		wc.cbSize = sizeof(wc);
+		wc.lpfnWndProc = LiveEditorWndProc;
+		wc.hInstance = GetModuleHandleW(NULL);
+		wc.hCursor = LoadCursorW(NULL, IDC_ARROW);
+		wc.hbrBackground = (HBRUSH)GetStockObject(BLACK_BRUSH);
+		wc.lpszClassName = L"OggVstLiveEditor";
+		RegisterClassExW(&wc);
+		registered = 1;
+	}
+	wchar_t title[64];
+	_snwprintf_s(title, _TRUNCATE, L"VST %d", part1to32);
+	HWND h = CreateWindowExW(0, L"OggVstLiveEditor", title,
+		WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
+		CW_USEDEFAULT, CW_USEDEFAULT, 640, 480, NULL, NULL,
+		GetModuleHandleW(NULL), NULL);
+	if (h) SetWindowLongPtrW(h, GWLP_USERDATA, (LONG_PTR)part1to32);
+	return h;
+}
+
+extern "C" int VstLiveEditorOpen(int part1to32)
+{
+	if (part1to32 < 1 || part1to32 > 32) return -1;
+	LivePart& p = g_eng.live[part1to32 - 1];
+#ifndef KPIHOST64_BUILD
+	if (p.remote)
+		return g_kpiHost.VstLiveEditorOpen((uint32_t)part1to32) ? 0 : -5;
+#endif
+	if (p.edWnd && IsWindow(p.edWnd)) {
+		ShowWindow(p.edWnd, SW_SHOW);
+		SetForegroundWindow(p.edWnd);
+		return 0;
+	}
+	const int wantVst3 = p.vst3 != NULL;
+	if (!wantVst3) {
+		if (!p.effect || !p.effect->dispatcher) return -2;
+		if (!(p.effect->flags & effFlagsHasEditor)) return -3;
+	}
+	HWND host = LiveEditorCreateHostWnd(part1to32);
+	if (!host) return -4;
+	int cw = 640, chh = 480;
+	if (wantVst3) {
+		// VST3 hands back its own IPlugView instead of drawing into ours.
+		if (Vst3EditorOpen(p.vst3, host, &cw, &chh) != 0) {
+			DestroyWindow(host);
+			return -6;
+		}
+	} else {
+		VstIntPtr opened = 0;
+		__try { opened = p.effect->dispatcher(p.effect, effEditOpen, 0, 0, host, 0); }
+		__except (EXCEPTION_EXECUTE_HANDLER) { opened = 0; }
+		LiveEditorRect* r = NULL;
+		__try { p.effect->dispatcher(p.effect, effEditGetRect, 0, 0, &r, 0); }
+		__except (EXCEPTION_EXECUTE_HANDLER) { r = NULL; }
+		if (r && r->right > r->left) cw = r->right - r->left;
+		if (r && r->bottom > r->top) chh = r->bottom - r->top;
+		(void)opened;
+	}
+	RECT wr = { 0, 0, cw, chh };
+	AdjustWindowRect(&wr, (DWORD)GetWindowLongW(host, GWL_STYLE), FALSE);
+	SetWindowPos(host, NULL, 0, 0, wr.right - wr.left, wr.bottom - wr.top,
+		SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+	p.edWnd = host;
+	SetTimer(host, LIVE_EDITOR_IDLE_TIMER, 30, NULL);
+	ShowWindow(host, SW_SHOW);
+	SetForegroundWindow(host);
+	return 0;
+}
+
+extern "C" void VstLiveEditorClose(int part1to32)
+{
+	if (part1to32 < 1 || part1to32 > 32) return;
+	LivePart& p = g_eng.live[part1to32 - 1];
+#ifndef KPIHOST64_BUILD
+	if (p.remote) {
+		g_kpiHost.VstLiveEditorClose((uint32_t)part1to32);
 		return;
 	}
-	const int ch = shortMsg & 15;
-	const int part = portIndex0to2 * 16 + ch;
-	if (part < 32) {
-		SendVstEvents(g_eng.live[part].effect, &e, 1, 0);
-		Vst3MidiShort(g_eng.live[part].vst3, shortMsg, 0);
+#endif
+	HWND h = p.edWnd;
+	if (!h) return;
+	p.edWnd = NULL;
+	KillTimer(h, LIVE_EDITOR_IDLE_TIMER);
+	if (p.vst3) Vst3EditorClose(p.vst3);
+	if (p.effect && p.effect->dispatcher) {
+		__try { p.effect->dispatcher(p.effect, effEditClose, 0, 0, NULL, 0); }
+		__except (EXCEPTION_EXECUTE_HANDLER) {}
 	}
-	LeaveCriticalSection(&g_eng.cs);
+	SetWindowLongPtrW(h, GWLP_USERDATA, 0);
+	DestroyWindow(h);
 }
 
 extern "C" int VstLiveRender(float* L, float* R, int frames)
@@ -2860,6 +3482,8 @@ extern "C" int VstLiveRender(float* L, float* R, int frames)
 		if (n > BLOCK_FRAMES) n = BLOCK_FRAMES;
 		for (int p = 0; p < 32; ++p)
 			if (g_eng.live[p].effect || g_eng.live[p].vst3) {
+			// Immediately before the process call, as VST2 requires.
+			LivePendFlush(g_eng.live[p]);
 			if (g_eng.live[p].vst3)
 				Vst3Process(g_eng.live[p].vst3, tl, tr, n);
 			else
@@ -2872,5 +3496,6 @@ extern "C" int VstLiveRender(float* L, float* R, int frames)
 		pos += n;
 	}
 	LeaveCriticalSection(&g_eng.cs);
+	LiveRemoteMix(L, R, frames);
 	return frames;
 }

@@ -12,6 +12,7 @@
 #include "..\KpiV5ConfigStore.h"
 #include "KpiHost64Foreign.h"
 #include "KpiHost64Vst.h"
+#include "KpiHost64VstLive.h"
 
 static std::wstring DirNameOf(const std::wstring& path)
 {
@@ -909,10 +910,9 @@ static void ServeOnce(HANDLE pipe)
 {
 	for (;;) {
 		KPIHOST64_MsgHeader h{};
-		DWORD rd = 0;
-		BOOL ok = ReadFile(pipe, &h, sizeof(h), &rd, NULL);
-		if (!ok || rd == 0) break;
-		if (rd != sizeof(h)) break;
+		// Byte-mode pipe: a header can arrive in pieces, and giving up on a
+		// short read would drop the client mid-song.
+		if (!ReadExact(pipe, &h, sizeof(h))) break;
 
 		std::vector<uint8_t> payload;
 		payload.resize(h.payloadBytes);
@@ -1105,6 +1105,67 @@ static void ServeOnce(HANDLE pipe)
 			status = VstHost64_Close();
 			break;
 		}
+		case KPIHOST64_CMD_VST_LIVE_LOAD: {
+			if ((size_t)(end - p) < sizeof(KPIHOST64_VstLiveLoadReq) + sizeof(uint32_t)) {
+				status = KPIHOST64_STATUS_BAD_REQUEST; break;
+			}
+			auto* lr = (const KPIHOST64_VstLiveLoadReq*)p;
+			p += sizeof(KPIHOST64_VstLiveLoadReq);
+			uint32_t nPath = *(const uint32_t*)p; p += sizeof(uint32_t);
+			if ((size_t)(end - p) < nPath * sizeof(wchar_t) || !nPath) {
+				status = KPIHOST64_STATUS_BAD_REQUEST; break;
+			}
+			std::wstring path((const wchar_t*)p, (const wchar_t*)p + nPath);
+			status = VstHost64_LiveLoad(lr->part, path.c_str(), lr->isVst3);
+			break;
+		}
+		case KPIHOST64_CMD_VST_LIVE_UNLOAD: {
+			if ((size_t)(end - p) < sizeof(KPIHOST64_U32)) { status = KPIHOST64_STATUS_BAD_REQUEST; break; }
+			status = VstHost64_LiveUnload(((const KPIHOST64_U32*)p)->v);
+			break;
+		}
+		case KPIHOST64_CMD_VST_LIVE_UNLOAD_ALL: {
+			status = VstHost64_LiveUnloadAll();
+			break;
+		}
+		case KPIHOST64_CMD_VST_LIVE_MIDI: {
+			if ((size_t)(end - p) < sizeof(KPIHOST64_VstLiveMidiReq)) { status = KPIHOST64_STATUS_BAD_REQUEST; break; }
+			auto* mr = (const KPIHOST64_VstLiveMidiReq*)p;
+			status = VstHost64_LiveMidi(mr->port, mr->msg);
+			break;
+		}
+		case KPIHOST64_CMD_VST_LIVE_SYSEX: {
+			if ((size_t)(end - p) < sizeof(KPIHOST64_VstLiveSysexReq)) { status = KPIHOST64_STATUS_BAD_REQUEST; break; }
+			auto* sr = (const KPIHOST64_VstLiveSysexReq*)p;
+			p += sizeof(KPIHOST64_VstLiveSysexReq);
+			if ((size_t)(end - p) < sr->bytes) { status = KPIHOST64_STATUS_BAD_REQUEST; break; }
+			status = VstHost64_LiveSysex(sr->port, (const uint8_t*)p, sr->bytes);
+			break;
+		}
+		case KPIHOST64_CMD_VST_LIVE_RENDER: {
+			if ((size_t)(end - p) < sizeof(KPIHOST64_VstLiveRenderReq)) { status = KPIHOST64_STATUS_BAD_REQUEST; break; }
+			auto* rr = (const KPIHOST64_VstLiveRenderReq*)p;
+			status = VstHost64_LiveRender(rr->frames, reply);
+			break;
+		}
+		case KPIHOST64_CMD_VST_LIVE_AUDIO_START: {
+			status = VstHost64_LiveAudioStart();
+			break;
+		}
+		case KPIHOST64_CMD_VST_LIVE_AUDIO_STOP: {
+			status = VstHost64_LiveAudioStop();
+			break;
+		}
+		case KPIHOST64_CMD_VST_LIVE_EDITOR_OPEN: {
+			if ((size_t)(end - p) < sizeof(KPIHOST64_U32)) { status = KPIHOST64_STATUS_BAD_REQUEST; break; }
+			status = VstHost64_LiveEditorOpen(((const KPIHOST64_U32*)p)->v);
+			break;
+		}
+		case KPIHOST64_CMD_VST_LIVE_EDITOR_CLOSE: {
+			if ((size_t)(end - p) < sizeof(KPIHOST64_U32)) { status = KPIHOST64_STATUS_BAD_REQUEST; break; }
+			status = VstHost64_LiveEditorClose(((const KPIHOST64_U32*)p)->v);
+			break;
+		}
 		default:
 			status = KPIHOST64_STATUS_BAD_REQUEST;
 			break;
@@ -1154,7 +1215,11 @@ int wmain(int argc, wchar_t** argv)
 		if (wr == WAIT_TIMEOUT) {
 			CancelIoEx(pipe, &ov);
 			CloseHandle(ov.hEvent);
-			if (g_sessions.empty()) {
+			if (g_sessions.empty() && !VstHost64_LiveActive()) {
+				// The app did not come back within the idle window, so the
+				// song session it was streaming is not coming back either.
+				if (VstHost64_SongActive())
+					(void)VstHost64_Close();
 				break;
 			}
 			continue;
@@ -1163,6 +1228,11 @@ int wmain(int argc, wchar_t** argv)
 		CloseHandle(ov.hEvent);
 		ServeOnce(pipe);
 		DisconnectNamedPipe(pipe);
+		// The app owns the live parts; once it is gone nothing can drive them,
+		// and keeping them loaded would pin this process (and the plug-in)
+		// alive forever because live parts suppress the idle timeout.
+		if (VstHost64_LiveActive())
+			(void)VstHost64_LiveUnloadAll();
 	}
 
 	for (auto& kv : g_sessions) {

@@ -55,6 +55,10 @@ uint32_t VstHost64_Render(uint32_t bytesWanted, std::vector<uint8_t>& out, uint3
 	return KPIHOST64_STATUS_OK;
 }
 
+// The app may pause for longer than the idle timeout; tearing the session down
+// underneath it would leave playback permanently silent on resume.
+int VstHost64_SongActive() { return g_vstOpen ? 1 : 0; }
+
 uint32_t VstHost64_Seek(uint64_t posSample)
 {
 	if (!g_vstOpen) return KPIHOST64_STATUS_FAIL;

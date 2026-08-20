@@ -1,4 +1,4 @@
-﻿// ogg.cpp : アプリケーション用クラスの定義を行います。
+// ogg.cpp : アプリケーション用クラスの定義を行います。
 //
 
 #include "stdafx.h"
@@ -158,7 +158,24 @@ BOOL COggApp::InitInstance()
 	//  れば以下の特定の初期化ルーチンの中から不必要なものを削除して
 	//  ください。
 	ndd="";
-	if(m_lpCmdLine[0] !=NULL){	ndd=m_lpCmdLine; nd=m_lpCmdLine;}
+	if(m_lpCmdLine[0] !=NULL){
+		// Explorer (関連付け/送る/EXEへのドロップ) は空白を含むパスを引用符で
+		// 囲んで渡す。引用符はファイル名の一部ではないので剥がす。
+		static TCHAR cmdArg[2048];
+		const TCHAR* src = m_lpCmdLine;
+		int star = 0;
+		if (src[0] == _T('*')) { star = 1; ++src; }
+		while (*src == _T(' ') || *src == _T('\t')) ++src;
+		CString body(src);
+		while (!body.IsEmpty() && (body.Right(1) == _T(" ") || body.Right(1) == _T("\t")))
+			body = body.Left(body.GetLength() - 1);
+		if (body.GetLength() >= 2 && body.Left(1) == _T("\"") && body.Right(1) == _T("\""))
+			body = body.Mid(1, body.GetLength() - 2);
+		if (star) body = CString(_T("*")) + body;
+		_tcsncpy_s(cmdArg, _countof(cmdArg), body, _TRUNCATE);
+		ndd = cmdArg;
+		nd = cmdArg;
+	}
 	Mutex = CreateMutex(NULL,FALSE,_T("oggEDYSbgm"));
     DWORD Status = GetLastError(); 
     if(Mutex == NULL){exit(-1);} 

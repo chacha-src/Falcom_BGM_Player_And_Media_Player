@@ -1,4 +1,4 @@
-#include "stdafx.h"
+﻿#include "stdafx.h"
 #include "Vst3Host.h"
 
 #include "pluginterfaces/base/ipluginbase.h"
@@ -12,6 +12,7 @@
 #include "pluginterfaces/vst/ivstparameterchanges.h"
 #include "pluginterfaces/vst/ivstprocesscontext.h"
 #include "pluginterfaces/vst/ivstunits.h"
+#include "pluginterfaces/gui/iplugview.h"
 
 #include <new>
 #include <string.h>
@@ -24,6 +25,9 @@ using namespace Steinberg;
 using namespace Steinberg::Vst;
 
 enum { VST3_MAX_EVENTS = 256, VST3_MAX_BUSES = 64, VST3_BLOCK = 512 };
+// Drum machines and multi-out samplers (Groove Agent has 32 output buses) can
+// route voices away from the master bus, so every bus is summed into the mix.
+enum { VST3_MAX_MIX_BUSES = 32 };
 
 static wchar_t g_vst3Fail[256];
 
@@ -38,9 +42,22 @@ static int IidEqual(const TUID a, const TUID b)
 	return memcmp(a, b, sizeof(TUID)) == 0;
 }
 
-class DummyAttrs : public IAttributeList {
+
+// A real attribute list, not a stub. Plug-ins built from two components talk
+// to themselves through host messages, and the ones that carry their program
+// state that way stay mute if the attributes are silently dropped.
+class AttrList : public IAttributeList {
 public:
-	DummyAttrs() : refs(1) {}
+	enum { MAX_ATTRS = 64, MAX_STR = 256 };
+	explicit AttrList(bool heapOwned = false)
+		: refs(1), count(0), owned(heapOwned ? 1 : 0)
+	{
+		ZeroMemory(items, sizeof(items));
+	}
+	~AttrList()
+	{
+		for (int i = 0; i < count; ++i) if (items[i].bin) free(items[i].bin);
+	}
 	tresult PLUGIN_API queryInterface(const TUID iid, void** obj)
 	{
 		if (!obj) return kInvalidArgument;
@@ -53,17 +70,101 @@ public:
 		return kNoInterface;
 	}
 	uint32 PLUGIN_API addRef() { return (uint32)InterlockedIncrement(&refs); }
-	uint32 PLUGIN_API release() { return (uint32)InterlockedDecrement(&refs); }
-	tresult PLUGIN_API setInt(AttrID, int64) { return kResultFalse; }
-	tresult PLUGIN_API getInt(AttrID, int64&) { return kResultFalse; }
-	tresult PLUGIN_API setFloat(AttrID, double) { return kResultFalse; }
-	tresult PLUGIN_API getFloat(AttrID, double&) { return kResultFalse; }
-	tresult PLUGIN_API setString(AttrID, const TChar*) { return kResultFalse; }
-	tresult PLUGIN_API getString(AttrID, TChar*, uint32) { return kResultFalse; }
-	tresult PLUGIN_API setBinary(AttrID, const void*, uint32) { return kResultFalse; }
-	tresult PLUGIN_API getBinary(AttrID, const void*&, uint32&) { return kResultFalse; }
+	uint32 PLUGIN_API release()
+	{
+		const LONG n = InterlockedDecrement(&refs);
+		if (n == 0 && owned) delete this;
+		return (uint32)n;
+	}
+	tresult PLUGIN_API setInt(AttrID id, int64 v)
+	{
+		Item* it = Find(id, true); if (!it) return kResultFalse;
+		it->kind = KIND_INT; it->i = v; return kResultOk;
+	}
+	tresult PLUGIN_API getInt(AttrID id, int64& v)
+	{
+		Item* it = Find(id, false);
+		if (!it || it->kind != KIND_INT) return kResultFalse;
+		v = it->i; return kResultOk;
+	}
+	tresult PLUGIN_API setFloat(AttrID id, double v)
+	{
+		Item* it = Find(id, true); if (!it) return kResultFalse;
+		it->kind = KIND_FLOAT; it->f = v; return kResultOk;
+	}
+	tresult PLUGIN_API getFloat(AttrID id, double& v)
+	{
+		Item* it = Find(id, false);
+		if (!it || it->kind != KIND_FLOAT) return kResultFalse;
+		v = it->f; return kResultOk;
+	}
+	tresult PLUGIN_API setString(AttrID id, const TChar* s)
+	{
+		Item* it = Find(id, true); if (!it || !s) return kResultFalse;
+		it->kind = KIND_STR;
+		int n = 0;
+		while (s[n] && n < MAX_STR - 1) { it->str[n] = s[n]; ++n; }
+		it->str[n] = 0;
+		return kResultOk;
+	}
+	tresult PLUGIN_API getString(AttrID id, TChar* out, uint32 bytes)
+	{
+		Item* it = Find(id, false);
+		if (!it || it->kind != KIND_STR || !out) return kResultFalse;
+		const uint32 room = bytes / sizeof(TChar);
+		if (!room) return kResultFalse;
+		uint32 n = 0;
+		while (it->str[n] && n + 1 < room) { out[n] = it->str[n]; ++n; }
+		out[n] = 0;
+		return kResultOk;
+	}
+	tresult PLUGIN_API setBinary(AttrID id, const void* data, uint32 bytes)
+	{
+		Item* it = Find(id, true);
+		if (!it || (!data && bytes)) return kResultFalse;
+		if (it->bin) { free(it->bin); it->bin = NULL; it->binBytes = 0; }
+		if (bytes) {
+			it->bin = malloc(bytes);
+			if (!it->bin) return kOutOfMemory;
+			memcpy(it->bin, data, bytes);
+			it->binBytes = bytes;
+		}
+		it->kind = KIND_BIN;
+		return kResultOk;
+	}
+	tresult PLUGIN_API getBinary(AttrID id, const void*& data, uint32& bytes)
+	{
+		Item* it = Find(id, false);
+		if (!it || it->kind != KIND_BIN) return kResultFalse;
+		data = it->bin; bytes = it->binBytes; return kResultOk;
+	}
 private:
+	enum { KIND_NONE = 0, KIND_INT, KIND_FLOAT, KIND_STR, KIND_BIN };
+	struct Item {
+		char id[128];
+		int kind;
+		int64 i;
+		double f;
+		TChar str[MAX_STR];
+		void* bin;
+		uint32 binBytes;
+	};
+	Item* Find(AttrID id, bool create)
+	{
+		if (!id) return NULL;
+		for (int i = 0; i < count; ++i)
+			if (strcmp(items[i].id, id) == 0) return &items[i];
+		if (!create || count >= MAX_ATTRS) return NULL;
+		Item* it = &items[count];
+		strncpy_s(it->id, id, _TRUNCATE);
+		it->kind = KIND_NONE; it->bin = NULL; it->binBytes = 0;
+		++count;
+		return it;
+	}
 	volatile LONG refs;
+	int count;
+	int owned;
+	Item items[MAX_ATTRS];
 };
 
 class HostMessage : public IMessage {
@@ -97,7 +198,7 @@ public:
 private:
 	volatile LONG refs;
 	char id[128];
-	DummyAttrs attrs;
+	AttrList attrs;
 };
 
 class MemStream : public IBStream {
@@ -201,6 +302,42 @@ private:
 	volatile LONG refs;
 };
 
+// The plug-in asks for its window to be resized through this, which VST3
+// editors do as soon as they switch page or scale.
+class PlugFrame : public Steinberg::IPlugFrame {
+public:
+	PlugFrame() : refs(1), wnd(NULL) {}
+	void SetWindow(HWND h) { wnd = h; }
+	tresult PLUGIN_API queryInterface(const TUID iid, void** obj)
+	{
+		if (!obj) return kInvalidArgument;
+		*obj = NULL;
+		if (IidEqual(iid, FUnknown_iid) || IidEqual(iid, Steinberg::IPlugFrame_iid)) {
+			*obj = static_cast<Steinberg::IPlugFrame*>(this);
+			addRef();
+			return kResultOk;
+		}
+		return kNoInterface;
+	}
+	uint32 PLUGIN_API addRef() { return (uint32)InterlockedIncrement(&refs); }
+	uint32 PLUGIN_API release() { return (uint32)InterlockedDecrement(&refs); }
+	tresult PLUGIN_API resizeView(Steinberg::IPlugView* view, Steinberg::ViewRect* r)
+	{
+		if (!r) return kInvalidArgument;
+		if (wnd) {
+			RECT wr = { 0, 0, r->right - r->left, r->bottom - r->top };
+			AdjustWindowRect(&wr, (DWORD)GetWindowLongW(wnd, GWL_STYLE), FALSE);
+			SetWindowPos(wnd, NULL, 0, 0, wr.right - wr.left, wr.bottom - wr.top,
+				SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+		}
+		if (view) view->onSize(r);
+		return kResultOk;
+	}
+private:
+	volatile LONG refs;
+	HWND wnd;
+};
+
 class HostApplication : public IHostApplication {
 public:
 	HostApplication() : refs(1) {}
@@ -234,6 +371,10 @@ public:
 		*obj = NULL;
 		if (IidEqual(cid, IMessage_iid) && IidEqual(iid, IMessage_iid)) {
 			*obj = new HostMessage();
+			return kResultOk;
+		}
+		if (IidEqual(cid, IAttributeList_iid) && IidEqual(iid, IAttributeList_iid)) {
+			*obj = new AttrList(true);
 			return kResultOk;
 		}
 		return kNoInterface;
@@ -446,6 +587,8 @@ struct Vst3Inst {
 	int midiInCh;
 	Vst3Detail::HostApplication host;
 	Vst3Detail::CompHandler handler;
+	Vst3Detail::PlugFrame frame;
+	Steinberg::IPlugView* view;
 	Vst3Detail::FixedEventList pending;
 	Vst3Detail::FixedEventList blockEvents;
 	Vst3Detail::HostParamChanges params;
@@ -463,14 +606,15 @@ struct Vst3Inst {
 	int active;
 	int processing;
 	__int64 samplePos;
+	float* extraBufs; // (mixOutBuses-1) x 2 x VST3_BLOCK, summed into the mix
 
 	Vst3Inst()
 		: module(NULL), factory(NULL), component(NULL), processor(NULL),
 		  controller(NULL), midiMap(NULL), units(NULL),
 		  progParam(0), progListId(-1), progCount(0), hasProgParam(0), midiInCh(1),
-		  ok(0), outputChannels(2), bus0Channels(2), audioIns(0), audioOuts(0), mixOutBuses(1),
+		  view(NULL), ok(0), outputChannels(2), bus0Channels(2), audioIns(0), audioOuts(0), mixOutBuses(1),
 		  initialized(0), ctrlInit(0),
-		  connected(0), active(0), processing(0), samplePos(0)
+		  connected(0), active(0), processing(0), samplePos(0), extraBufs(NULL)
 	{
 		ZeroMemory(&ctx, sizeof(ctx));
 	}
@@ -618,7 +762,12 @@ Vst3Inst* Vst3Open(const wchar_t* vst3PathOrDll)
 	v->audioOuts = audioOuts;
 	v->mixOutBuses = audioOuts;
 	if (v->mixOutBuses < 1) v->mixOutBuses = 1;
-	if (v->mixOutBuses > 8) v->mixOutBuses = 8;
+	if (v->mixOutBuses > VST3_MAX_MIX_BUSES) v->mixOutBuses = VST3_MAX_MIX_BUSES;
+	if (v->mixOutBuses > 1) {
+		v->extraBufs = (float*)calloc((size_t)(v->mixOutBuses - 1) * 2 * VST3_BLOCK,
+			sizeof(float));
+		if (!v->extraBufs) v->mixOutBuses = 1;
+	}
 
 	ProcessSetup setup = {};
 	setup.processMode = kRealtime;
@@ -690,6 +839,7 @@ void Vst3Close(Vst3Inst* v)
 	using namespace Vst3Detail;
 	if (!v) return;
 	v->ok = 0;
+	Vst3EditorClose(v);
 	if (v->processor && v->processing) {
 		v->processor->setProcessing(false);
 		v->processing = 0;
@@ -731,6 +881,7 @@ void Vst3Close(Vst3Inst* v)
 		FreeLibrary(v->module);
 		v->module = NULL;
 	}
+	if (v->extraBufs) { free(v->extraBufs); v->extraBufs = NULL; }
 	delete v;
 }
 
@@ -783,13 +934,17 @@ void Vst3MidiShort(Vst3Inst* v, DWORD msg, int sampleOffset)
 		e.noteOn.tuning = 0;
 		e.noteOn.velocity = d2 / 127.0f;
 		e.noteOn.length = 0;
-		e.noteOn.noteId = d1;
+		// -1 means "no id", so the plug-in matches note-off by channel and
+		// pitch. Using the pitch as an id collides between MIDI channels on a
+		// multi-timbral instance, where a note-off then releases the wrong
+		// voice and the original one keeps sounding.
+		e.noteOn.noteId = -1;
 	} else if (type == 0x80 || type == 0x90) {
 		e.type = Event::kNoteOffEvent;
 		e.noteOff.channel = (int16)channel;
 		e.noteOff.pitch = (int16)d1;
 		e.noteOff.velocity = d2 / 127.0f;
-		e.noteOff.noteId = d1;
+		e.noteOff.noteId = -1;
 		e.noteOff.tuning = 0;
 	} else if (type == 0xa0) {
 		e.type = Event::kPolyPressureEvent;
@@ -818,6 +973,57 @@ void Vst3MidiShort(Vst3Inst* v, DWORD msg, int sampleOffset)
 		}
 	}
 	v->pending.addEvent(e);
+}
+
+int Vst3EditorOpen(Vst3Inst* v, void* parentHwnd, int* outW, int* outH)
+{
+	using namespace Steinberg;
+	using namespace Steinberg::Vst;
+	using namespace Vst3Detail;
+	if (!v || !v->ok || !v->controller || !parentHwnd) return -1;
+	if (v->view) return 0;
+	IPlugView* view = NULL;
+	__try { view = v->controller->createView(ViewType::kEditor); }
+	__except (EXCEPTION_EXECUTE_HANDLER) { view = NULL; }
+	if (!view) { Vst3Fail(L"createView"); return -2; }
+	tresult rc = kResultFalse;
+	__try {
+		if (view->isPlatformTypeSupported(kPlatformTypeHWND) == kResultTrue) {
+			v->frame.SetWindow((HWND)parentHwnd);
+			view->setFrame(&v->frame);
+			rc = view->attached(parentHwnd, kPlatformTypeHWND);
+		}
+	}
+	__except (EXCEPTION_EXECUTE_HANDLER) { rc = kResultFalse; }
+	if (rc != kResultOk) {
+		Vst3Fail(L"attached");
+		__try { view->setFrame(NULL); view->release(); }
+		__except (EXCEPTION_EXECUTE_HANDLER) {}
+		return -3;
+	}
+	ViewRect r = {};
+	__try {
+		if (view->getSize(&r) != kResultOk) r.right = r.bottom = 0;
+	}
+	__except (EXCEPTION_EXECUTE_HANDLER) { r.right = r.bottom = 0; }
+	if (outW) *outW = (r.right > r.left) ? (r.right - r.left) : 640;
+	if (outH) *outH = (r.bottom > r.top) ? (r.bottom - r.top) : 480;
+	v->view = view;
+	return 0;
+}
+
+void Vst3EditorClose(Vst3Inst* v)
+{
+	if (!v || !v->view) return;
+	Steinberg::IPlugView* view = v->view;
+	v->view = NULL;
+	__try {
+		view->removed();
+		view->setFrame(NULL);
+		view->release();
+	}
+	__except (EXCEPTION_EXECUTE_HANDLER) {}
+	v->frame.SetWindow(NULL);
 }
 
 void Vst3Process(Vst3Inst* v, float* outL, float* outR, int frames)
@@ -867,19 +1073,20 @@ void Vst3Process(Vst3Inst* v, float* outL, float* outR, int frames)
 		channels[0] = outL + done;
 		channels[1] = (nch >= 2) ? (outR + done) : dump[1];
 		for (int c = 2; c < nch; ++c) channels[c] = dump[c];
-		AudioBusBuffers output[8];
+		AudioBusBuffers output[VST3_MAX_MIX_BUSES];
 		ZeroMemory(output, sizeof(output));
 		output[0].numChannels = nch;
 		output[0].silenceFlags = 0;
 		output[0].channelBuffers32 = channels;
-		float extra[7][2][VST3_BLOCK];
-		float* extraCh[7][2];
-		ZeroMemory(extra, sizeof(extra));
+		float* extraCh[VST3_MAX_MIX_BUSES - 1][2];
 		ZeroMemory(extraCh, sizeof(extraCh));
-		const int nOut = (v->mixOutBuses > 1) ? v->mixOutBuses : 1;
-		for (int b = 1; b < nOut && b < 8; ++b) {
-			extraCh[b - 1][0] = extra[b - 1][0];
-			extraCh[b - 1][1] = extra[b - 1][1];
+		const int nOut = (v->mixOutBuses > 1 && v->extraBufs) ? v->mixOutBuses : 1;
+		if (nOut > 1)
+			ZeroMemory(v->extraBufs,
+				(size_t)(nOut - 1) * 2 * VST3_BLOCK * sizeof(float));
+		for (int b = 1; b < nOut; ++b) {
+			extraCh[b - 1][0] = v->extraBufs + (size_t)(b - 1) * 2 * VST3_BLOCK;
+			extraCh[b - 1][1] = extraCh[b - 1][0] + VST3_BLOCK;
 			output[b].numChannels = 2;
 			output[b].silenceFlags = 0;
 			output[b].channelBuffers32 = extraCh[b - 1];
@@ -913,10 +1120,12 @@ void Vst3Process(Vst3Inst* v, float* outL, float* outR, int frames)
 		}
 		v->params.clear();
 		if (nOut > 1) {
-			for (int i = 0; i < count; ++i) {
-				for (int b = 1; b < nOut && b < 8; ++b) {
-					outL[done + i] += extra[b - 1][0][i];
-					outR[done + i] += extra[b - 1][1][i];
+			for (int b = 1; b < nOut; ++b) {
+				const float* xl = extraCh[b - 1][0];
+				const float* xr = extraCh[b - 1][1];
+				for (int i = 0; i < count; ++i) {
+					outL[done + i] += xl[i];
+					outR[done + i] += xr[i];
 				}
 			}
 		}

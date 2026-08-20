@@ -1962,7 +1962,7 @@ BEGIN
     COMBOBOX        IDC_VST_MIDI2,133,51,120,120,CBS_DROPDOWNLIST | CBS_AUTOHSCROLL | WS_VSCROLL | WS_TABSTOP
     COMBOBOX        IDC_VST_MIDI3,258,51,120,120,CBS_DROPDOWNLIST | CBS_AUTOHSCROLL | WS_VSCROLL | WS_TABSTOP
     COMBOBOX        IDC_VST_OUT,383,51,120,120,CBS_DROPDOWNLIST | CBS_AUTOHSCROLL | WS_VSCROLL | WS_TABSTOP
-    CONTROL         "",IDC_VST_WIRE,"Static",SS_NOTIFY | WS_BORDER,8,78,624,362
+    LTEXT           "",IDC_VST_WIRE,8,78,624,362,SS_NOTIFY | WS_BORDER | NOT WS_GROUP
     LTEXT           "",IDC_VST_STATUS,8,450,510,12
     PUSHBUTTON      "閉じる",IDC_VST_CLOSE,550,448,82,18
 END
@@ -2171,7 +2171,7 @@ END
 //
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 0,9,1,820
+ FILEVERSION 0,9,1,830
  PRODUCTVERSION 1,0,0,1
  FILEFLAGSMASK 0x3fL
 #ifdef _DEBUG
@@ -2189,10 +2189,10 @@ BEGIN
         BEGIN
             VALUE "Comments", "Falcom BGM Player & Media Player"
             VALUE "CompanyName", "Pre Prayer Power Soft"
-            VALUE "FileDescription", "Falcom BGM Player & Media Player Ver 0.9a Rel.2026.08.19"
-            VALUE "FileVersion", "0.9.1.820"
+            VALUE "FileDescription", "Falcom BGM Player & Media Player Ver 0.9a Rel.2026.08.20"
+            VALUE "FileVersion", "0.9.1.830"
             VALUE "InternalName", "ogg YS/ED bgm"
-            VALUE "LegalCopyright", "Copyright (C) 2026.08.19"
+            VALUE "LegalCopyright", "Copyright (C) 2026.08.20"
             VALUE "LegalTrademarks", "Pre Prayer Power Soft"
             VALUE "OriginalFilename", "oggYSEDbgm_uni_avx2.exe"
             VALUE "ProductName", "Falcom BGM Player & Media Player"

@@ -42,13 +42,27 @@ public:
 	bool VstSeek(uint64_t posSample);
 	bool VstClose();
 
+	// VST Live parts. Notes and audio travel through shared memory; only the
+	// lifecycle calls below go over the pipe.
+	bool VstLiveLoad(uint32_t part1to32, const std::wstring& pluginPath, bool isVst3);
+	bool VstLiveUnload(uint32_t part1to32);
+	bool VstLiveUnloadAll();
+	bool VstLiveMidi(uint32_t port, uint32_t msg);
+	bool VstLiveSysex(uint32_t port, const uint8_t* data, uint32_t bytes);
+	bool VstLiveAudioStart();
+	bool VstLiveAudioStop();
+	bool VstLiveEditorOpen(uint32_t part1to32);
+	bool VstLiveEditorClose(uint32_t part1to32);
+
 private:
 	HANDLE m_hPipe = INVALID_HANDLE_VALUE;
 	uint32_t m_reqId = 1;
+	CRITICAL_SECTION m_cs{};
 
-	bool ConnectPipe();
+	bool ConnectPipe(bool waitForHost = true);
 	bool StartHostProcess();
 
 	bool SendRequest(uint32_t cmd, const void* payload, uint32_t payloadBytes, std::vector<uint8_t>& outReplyPayload, uint32_t& outStatus);
+	bool SendSimple(uint32_t cmd, const void* payload, uint32_t payloadBytes);
 };
 

@@ -1,4 +1,4 @@
-// oggDlg.cpp : インプリメンテーション ファイル
+﻿// oggDlg.cpp : インプリメンテーション ファイル
 //
 //#define _DLL
 #include "stdafx.h"
@@ -3264,9 +3264,13 @@ int g_kpiPlaybackArch = 0;   // 0=不明 32=x86 64=x64（再生中の KPI arch �
 KpiHost64Client g_kpiHost;
 static int g_vstRemote64 = 0; // 1=x64 VST MIDI via KpiHost64 (SC-VA 等)
 
+void VstPrefetchStart(int rate, int channels, int bits);
+void VstPrefetchStop();
+
 static void CloseVstMidiSession()
 {
 	if (g_vstRemote64) {
+		VstPrefetchStop();
 		g_kpiHost.VstClose();
 		g_vstRemote64 = 0;
 	} else {
@@ -11194,6 +11198,7 @@ void COggDlg::play()
 				m_time.SetRange(0, (loop2 > 0) ? loop2 : 1, TRUE);
 				g_openDecoderMode = mode;
 				vstOk = 1;
+				VstPrefetchStart((int)orp.sampleRate, (int)orp.channels, orp.bitsPerSample);
 				wav_start();
 			}
 		}
@@ -18972,13 +18977,169 @@ static bool IsBlockSilent(const BYTE* buffer, int bytes, int bitDepth)
 	return true;
 }
 
+
+// The host answers renders over a pipe, and the DirectSound notify thread only
+// runs a few tens of milliseconds ahead of the play cursor. Doing the round
+// trip on that thread turns every scheduling hiccup into a silent gap, so a
+// worker keeps seconds of PCM ready instead.
+namespace {
+enum : int { VST_PF_CHUNK = 64 * 1024, VST_PF_SECONDS = 4 };
+
+struct VstPrefetch
+{
+	std::vector<uint8_t> ring;
+	size_t head = 0;
+	size_t used = 0;
+	int bpf = 4;
+	bool eof = false;
+	bool csReady = false;
+	CRITICAL_SECTION cs{};
+	HANDLE room = NULL;
+	HANDLE stop = NULL;
+	HANDLE thread = NULL;
+};
+VstPrefetch g_vstPf;
+} // namespace
+
+static unsigned __stdcall VstPrefetchProc(void*)
+{
+	for (;;) {
+		if (WaitForSingleObject(g_vstPf.stop, 0) == WAIT_OBJECT_0) break;
+		EnterCriticalSection(&g_vstPf.cs);
+		const size_t room = g_vstPf.ring.size() - g_vstPf.used;
+		const bool done = g_vstPf.eof;
+		LeaveCriticalSection(&g_vstPf.cs);
+		if (done || room < (size_t)VST_PF_CHUNK) {
+			HANDLE h[2] = { g_vstPf.stop, g_vstPf.room };
+			if (WaitForMultipleObjects(2, h, FALSE, 20) == WAIT_OBJECT_0) break;
+			continue;
+		}
+		std::vector<uint8_t> pcm;
+		bool eof = false;
+		if (!g_kpiHost.VstRender((uint32_t)VST_PF_CHUNK, pcm, eof)) {
+			Sleep(2);
+			continue;
+		}
+		EnterCriticalSection(&g_vstPf.cs);
+		const size_t cap = g_vstPf.ring.size();
+		size_t left = pcm.size();
+		if (left > cap - g_vstPf.used) left = cap - g_vstPf.used;
+		const uint8_t* src = pcm.data();
+		while (left) {
+			const size_t at = (g_vstPf.head + g_vstPf.used) % cap;
+			size_t run = cap - at;
+			if (run > left) run = left;
+			memcpy(g_vstPf.ring.data() + at, src, run);
+			src += run; left -= run;
+			g_vstPf.used += run;
+		}
+		if (eof) g_vstPf.eof = true;
+		LeaveCriticalSection(&g_vstPf.cs);
+	}
+	return 0;
+}
+
+void VstPrefetchStop()
+{
+	if (g_vstPf.thread) {
+		SetEvent(g_vstPf.stop);
+		WaitForSingleObject(g_vstPf.thread, 3000);
+		CloseHandle(g_vstPf.thread);
+		g_vstPf.thread = NULL;
+	}
+	if (g_vstPf.stop) { CloseHandle(g_vstPf.stop); g_vstPf.stop = NULL; }
+	if (g_vstPf.room) { CloseHandle(g_vstPf.room); g_vstPf.room = NULL; }
+	if (g_vstPf.csReady) {
+		EnterCriticalSection(&g_vstPf.cs);
+		g_vstPf.ring.clear();
+		g_vstPf.head = g_vstPf.used = 0;
+		g_vstPf.eof = false;
+		LeaveCriticalSection(&g_vstPf.cs);
+	}
+}
+
+void VstPrefetchStart(int rate, int channels, int bits)
+{
+	VstPrefetchStop();
+	if (!g_vstRemote64) return;
+	if (rate <= 0) rate = 44100;
+	if (channels <= 0) channels = 2;
+	if (bits <= 0) bits = 16;
+	const int bpf = channels * (bits / 8);
+	size_t bytes = (size_t)rate * (size_t)bpf * (size_t)VST_PF_SECONDS;
+	if (bytes < (size_t)VST_PF_CHUNK * 4) bytes = (size_t)VST_PF_CHUNK * 4;
+	if (!g_vstPf.csReady) {
+		InitializeCriticalSection(&g_vstPf.cs);
+		g_vstPf.csReady = true;
+	}
+	EnterCriticalSection(&g_vstPf.cs);
+	g_vstPf.ring.assign(bytes, 0);
+	g_vstPf.head = g_vstPf.used = 0;
+	g_vstPf.eof = false;
+	g_vstPf.bpf = (bpf > 0) ? bpf : 4;
+	LeaveCriticalSection(&g_vstPf.cs);
+	g_vstPf.stop = CreateEventW(NULL, TRUE, FALSE, NULL);
+	g_vstPf.room = CreateEventW(NULL, FALSE, FALSE, NULL);
+	if (!g_vstPf.stop || !g_vstPf.room) { VstPrefetchStop(); return; }
+	g_vstPf.thread = (HANDLE)_beginthreadex(NULL, 0, VstPrefetchProc, NULL, 0, NULL);
+	if (!g_vstPf.thread) { VstPrefetchStop(); return; }
+	// Playback starts filling the DirectSound buffer immediately after the
+	// open, so hand it a head start rather than a dry ring.
+	const size_t want = (size_t)rate * (size_t)bpf / 2;
+	for (int i = 0; i < 200; ++i) {
+		EnterCriticalSection(&g_vstPf.cs);
+		const bool ready = g_vstPf.used >= want || g_vstPf.eof;
+		LeaveCriticalSection(&g_vstPf.cs);
+		if (ready) break;
+		Sleep(5);
+	}
+}
+
+static int VstPrefetchRead(BYTE* dst, int cnt)
+{
+	if (!g_vstPf.thread || !g_vstPf.csReady) return -1;
+	int copied = 0;
+	EnterCriticalSection(&g_vstPf.cs);
+	const size_t cap = g_vstPf.ring.size();
+	while (cap && copied < cnt && g_vstPf.used) {
+		size_t run = (size_t)(cnt - copied);
+		if (run > g_vstPf.used) run = g_vstPf.used;
+		if (run > cap - g_vstPf.head) run = cap - g_vstPf.head;
+		memcpy(dst + copied, g_vstPf.ring.data() + g_vstPf.head, run);
+		g_vstPf.head = (g_vstPf.head + run) % cap;
+		g_vstPf.used -= run;
+		copied += (int)run;
+	}
+	// A partial fill must still end on a frame boundary, or every following
+	// sample would land in the wrong channel.
+	if (copied < cnt && g_vstPf.bpf > 1) {
+		const int keep = copied - (copied % g_vstPf.bpf);
+		if (keep != copied) {
+			const size_t back = (size_t)(copied - keep);
+			g_vstPf.head = (g_vstPf.head + cap - back) % cap;
+			g_vstPf.used += back;
+			copied = keep;
+		}
+	}
+	LeaveCriticalSection(&g_vstPf.cs);
+	SetEvent(g_vstPf.room);
+	return copied;
+}
+
 int readvst(BYTE* bw, int cnt)
 {
 	if (!bw || cnt <= 0) return 0;
 	if (g_vstRemote64) {
+		const int pre = VstPrefetchRead(bw, cnt);
+		if (pre >= 0) return pre;
 		std::vector<uint8_t> pcm;
 		bool eof = false;
-		if (!g_kpiHost.VstRender((uint32_t)cnt, pcm, eof)) return 0;
+		// A dropped pipe reconnects on the next request and the engine keeps
+		// its play position, so retrying costs latency instead of a silent
+		// buffer.
+		if (!g_kpiHost.VstRender((uint32_t)cnt, pcm, eof) &&
+			!g_kpiHost.VstRender((uint32_t)cnt, pcm, eof))
+			return 0;
 		int n = (int)pcm.size();
 		if (n > cnt) n = cnt;
 		if (n > 0) memcpy(bw, pcm.data(), (size_t)n);
@@ -21522,8 +21683,13 @@ static void ResumeApplyPlaybSeek(__int64 pb)
 		return;
 	}
 	if (mode == MODE_VST_MIDI) {
-		if (g_vstRemote64)
+		if (g_vstRemote64) {
+			// Buffered audio belongs to the old position; drop it with the
+			// worker so nothing from before the seek is heard afterwards.
+			VstPrefetchStop();
 			g_kpiHost.VstSeek((uint64_t)playb);
+			VstPrefetchStart(wavbit_sample_Hz, wavchannel, abs(wavsam_depth));
+		}
 		else
 			VstMidiSeekSamples((__int64)playb);
 		return;

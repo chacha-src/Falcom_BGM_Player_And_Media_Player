@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include <Windows.h>
 #include "PluginKinds.h"
@@ -61,8 +61,24 @@ __int64 VstMidiGetLengthSamples(void);
 
 int VstLiveLoadPart(int part1to32, const wchar_t* pluginPath, int isVst3);
 void VstLiveUnloadPart(int part1to32);
+void VstLiveAllNotesOff();
 void VstLiveMidiShort(int portIndex0to2, DWORD shortMsg);
+void VstLiveMidiSysex(int portIndex0to2, const unsigned char* data, int bytes);
 int VstLiveRender(float* L, float* R, int frames);
+int VstLiveEditorOpen(int part1to32);
+void VstLiveEditorClose(int part1to32);
+
+// What the part is currently hearing, so the UI can light up the channels.
+struct VstLiveActInfo {
+	int held;            // notes currently down
+	int note;            // last note number
+	int vel;             // last velocity
+	int ageMs;           // since the last message on this channel, -1 when never
+	unsigned mask[4];    // bit n of mask[n/32] = note n is down
+};
+int VstLiveActivity(int part1to32, struct VstLiveActInfo* out);
+// Last system exclusive seen, already summarised for display.
+int VstLiveSysexInfo(wchar_t* out, int chars, int* ageMs);
 
 #ifdef __cplusplus
 }
