@@ -52,9 +52,11 @@ namespace PianoKey
         return best;
     }
 
-    // ゴースト剪定用: 高次倍音(10〜24次)まで含めた整数比判定。
-    // プロファイル次元(h2..h9)とは独立。漏れ込みタワーは n>9 も普通に出る。
+    // 漏れ込みタワー用の高次比。メロディ剪定には使わない（15〜20次で主旋律を食う）。
     static constexpr int HARMONIC_PAIR_N_MAX = 24;
+    // 実害のある倍音ゴーストはほぼ h2〜h8（オクターブ〜3オクターブ）。
+    static constexpr int kGhostHarmonicNMax = 8;
+    static constexpr int GHOST_BASS_END = 48; // C3。PianoRoll108::BASS_END と一致
 
     // hi / lo が n:1 の等倍音関係（±3%×n、鍵インデックスは厳密でなく周波数比）
     inline bool IsHarmonicPairCompute(int hi, int lo, int nMax = HARMONIC_N_MAX)
@@ -115,10 +117,10 @@ namespace PianoKey
         const float sc = st[candidate];
         if (sc <= 1e-8f) return false;
 
-        for (int n = HARMONIC_N_MIN; n <= HARMONIC_PAIR_N_MAX; ++n) {
+        for (int n = HARMONIC_N_MIN; n <= kGhostHarmonicNMax; ++n) {
             const int lo = HarmonicDownKeyAny(candidate, n);
             if (lo < 0 || lo >= candidate) continue;
-            if (!IsHarmonicPairExtended(candidate, lo)) continue;
+            if (!IsHarmonicPairCompute(candidate, lo, kGhostHarmonicNMax)) continue;
 
             const float loSc = st[lo];
             if (loSc < sc * parentMinRatio) continue;
@@ -154,13 +156,11 @@ namespace PianoKey
     // 実害のある漏れ込みはほぼ h2〜h6（オクターブ〜2オクターブ＋α）。
     // bassBandEnd: 低音帯の終端(PianoRoll108::BASS_END を渡す)
     inline bool IsHarmonicGhostPartial(const float* st, int candidate, int count,
-        int bassBandEnd = 36)
+        int bassBandEnd = GHOST_BASS_END)
     {
         if (!st || candidate <= 0 || candidate >= count) return false;
         const float sc = st[candidate];
         if (sc <= 1e-8f) return false;
-
-        static constexpr int kGhostHarmonicNMax = 8;
 
         int bandLo = 0, bandHi = count;
         if (candidate < bassBandEnd) {
@@ -183,7 +183,22 @@ namespace PianoKey
             if (st[i] > bandMax) bandMax = st[i];
         const bool bandProminent = (bandMax > 1e-6f && sc >= bandMax * 0.18f);
 
-        if (HasOwnOvertoneSupport(st, candidate, count, 0.12f) && bandProminent)
+        // 自前の 2f/3f があるだけでは独立音にしない。明るいベースの h2 も
+        // 自分の倍音列(親の 4f/6f)を持つので、親ピークが同程度以上なら借り物。
+        bool strongParent = false;
+        for (int n = HARMONIC_N_MIN; n <= kGhostHarmonicNMax; ++n) {
+            const int lo = HarmonicDownKeyAny(candidate, n);
+            if (lo < 0 || lo >= candidate) continue;
+            if (!IsHarmonicPairCompute(candidate, lo, kGhostHarmonicNMax)) continue;
+            const float loSc = st[lo];
+            if (lo > 0 && st[lo - 1] > loSc) continue;
+            if (lo + 1 < count && st[lo + 1] > loSc) continue;
+            if (loSc >= sc * 0.90f) {
+                strongParent = true;
+                break;
+            }
+        }
+        if (!strongParent && HasOwnOvertoneSupport(st, candidate, count, 0.12f) && bandProminent)
             return false;
 
         for (int n = HARMONIC_N_MIN; n <= kGhostHarmonicNMax; ++n) {

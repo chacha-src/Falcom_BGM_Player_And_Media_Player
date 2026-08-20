@@ -508,6 +508,8 @@ UINT HandleNotifications(LPVOID)
 	};
 
 	const ULONG prefilledOldw = oldw; // play() がプリフィル後に進めた値
+	ULONG prefillProtectUntil = 0;
+	int prefillRestFilled = 0;
 	oldw = 0;
 	if (isPlausibleDsb(m_dsb))
 		m_dsb->SetCurrentPosition(0);
@@ -516,9 +518,10 @@ UINT HandleNotifications(LPVOID)
 		oldw = OUTPUT_BUFFER_SIZE * 2;
 		og->timer.SetEvent();
 	}
-	else if ((g_openDecoderMode == -7 || g_openDecoderMode == -8) && prefilledOldw > 0) {
-		// DSD/FLAC の長プリフィル済み区間を再デコードで潰さない
+	else if (g_openDecoderMode == -7 && prefilledOldw > 0) {
+		// DSD の長プリフィル済み区間を再デコードで潰さない。FLAC は KPI と同じ（oldw=0）。
 		oldw = prefilledOldw;
+		prefillProtectUntil = prefilledOldw;
 	}
 	fade1 = 0;
 	sek4 = FALSE;
@@ -573,13 +576,31 @@ UINT HandleNotifications(LPVOID)
 		// 書き込み位置の計算
 		dsb->GetCurrentPosition(&PlayCursor, &WriteCursor);
 		const ULONG ringBytes = (g_ds_buffer_bytes > 0) ? g_ds_buffer_bytes : (ULONG)(OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM);
+		if (prefillProtectUntil > 0 && PlayCursor >= prefillProtectUntil) {
+			prefillProtectUntil = 0;
+			prefillRestFilled = 0;
+			oldw = WriteCursor;
+			continue;
+		}
+		if (prefillProtectUntil > 0 && prefillRestFilled && oldw < prefillProtectUntil)
+			continue;
 		int len1 = (int)WriteCursor - (int)oldw;
 		int len2 = 0;
 
 		if (len1 == 0) continue;
 		if (len1 < 0) {
-			len1 = (int)ringBytes - (int)oldw;
-			len2 = (int)WriteCursor;
+			// SetCurrentPosition(0) 直後は WriteCursor が先頭へ戻っただけ。
+			// 先頭は触らず、プリフィル以降〜リング末だけ先に埋める。
+			if (prefillProtectUntil > 0 && PlayCursor < prefillProtectUntil) {
+				len1 = (int)ringBytes - (int)oldw;
+				len2 = 0;
+				prefillRestFilled = 1;
+			}
+			else {
+				prefillProtectUntil = 0;
+				len1 = (int)ringBytes - (int)oldw;
+				len2 = (int)WriteCursor;
+			}
 		}
 		/* DS 書込みカーソルは bpf 非整列になり得る（24bit 等）。部分フレームを混ぜると
 		 * シーク位相によって数サンプルのクリックが xfade 混合時に出る。 */
@@ -778,7 +799,15 @@ UINT HandleNotifications(LPVOID)
 				else if (writtenBefore > 0)
 					g_endWrittenBytes = writtenBefore;
 			}
-			oldw = WriteCursor;
+			if (prefillProtectUntil > 0 && len2 == 0 && len1 > 0 && ringBytes > 0) {
+				ULONG nw = oldw + (ULONG)len1;
+				if (nw >= ringBytes)
+					nw -= ringBytes;
+				oldw = nw;
+			}
+			else {
+				oldw = WriteCursor;
+			}
 		}
 
 		// 再生カーソル基準の heard を毎サイクル更新（クロスフェード早期開始に必要）

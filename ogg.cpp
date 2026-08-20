@@ -1,4 +1,4 @@
-// ogg.cpp : アプリケーション用クラスの定義を行います。
+﻿// ogg.cpp : アプリケーション用クラスの定義を行います。
 //
 
 #include "stdafx.h"
@@ -319,6 +319,17 @@ BOOL COggApp::InitInstance()
 	savedata.vstMultiDll[0] = 0;
 	savedata.vstMultiName[0] = 0;
 	savedata.midiOutName[0] = 0;
+	savedata.midimonwindow = 0;
+	savedata.midimonx = -1;
+	savedata.midimony = 0;
+	savedata.midimonw = 0;
+	savedata.midimonh = 0;
+	savedata.midimonMainLock = 0;
+	savedata.midimontopmost = 0;
+	savedata.midimonviewmode = 0;
+	savedata.midimon3dyaw = -220;
+	savedata.midimon3dpitch = 260;
+	savedata.midimon3dzoom = 100;
 	savedata.teBatchMainLock = 0;
 	savedata.mpDjPadwindow = 0;
 	savedata.mpNormTargetLufs = -14;
@@ -1087,7 +1098,6 @@ BOOL COggApp::InitInstance()
 		savedata.s3r_win_w = savedata.s3r_win_h = 0;
 		savedata.s3r_invert_y = 0;
 		savedata.mpBotToolsFlags |= 512; // Soft3D空中レースボタン
-	savedata.mpBotToolsFlags |= 1024; // VSTホストボタン
 	} else {
 		if (savedata.s3r_ai < 0 || savedata.s3r_ai > 4) savedata.s3r_ai = 2;
 		if (savedata.s3r_opponents < 1 || savedata.s3r_opponents > 11) savedata.s3r_opponents = 5;
@@ -1102,6 +1112,7 @@ BOOL COggApp::InitInstance()
 		}
 		savedata.s3r_show_map = savedata.s3r_show_map ? 1 : 0;
 	}
+	savedata.mpBotToolsFlags |= 1024; // VSTホストボタンは常時表示
 	if (datFileSize < (int)(offsetof(save, s3r_invert_y) + sizeof(savedata.s3r_invert_y))) {
 		savedata.s3r_invert_y = 0;
 	} else {
@@ -1852,6 +1863,19 @@ BOOL COggApp::InitInstance()
 		savedata.mpMirrorCueMode = 0;
 		savedata.mpTransPreset = 0;
 		savedata.mpPhraseSnapBeat = 0;
+	}
+	if (datFileSize < (int)(offsetof(save, midimonwindow) + sizeof(savedata.midimonwindow))) {
+		savedata.midimonwindow = 0;
+		savedata.midimonx = -1;
+		savedata.midimony = 0;
+		savedata.midimonw = 0;
+		savedata.midimonh = 0;
+		savedata.midimonMainLock = 0;
+		savedata.midimontopmost = 0;
+		savedata.midimonviewmode = 0;
+		savedata.midimon3dyaw = -220;
+		savedata.midimon3dpitch = 260;
+		savedata.midimon3dzoom = 100;
 	}
 	{
 		extern void MpFeatInitDefaults();

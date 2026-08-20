@@ -607,6 +607,7 @@ struct Session
 	DWORD channels = 2;
 	DWORD bps = 16;
 	uint32_t zeroRenderStreak = 0;
+	std::wstring mediaPath;
 };
 
 static uint32_t g_nextSessionId = 1;
@@ -805,6 +806,7 @@ static uint32_t Cmd_Open(const std::wstring& kpiPath, const std::wstring& mediaP
 	s.channels = s.selected.dwChannels ? s.selected.dwChannels : 2;
 	s.bps = (DWORD)(s.selected.nBitsPerSample ? (s.selected.nBitsPerSample < 0 ? -s.selected.nBitsPerSample : s.selected.nBitsPerSample) : 16);
 	if (s.bps == 0) s.bps = 16;
+	s.mediaPath = mediaPath;
 
 	const uint32_t id = g_nextSessionId++;
 	g_sessions[id] = s;
@@ -874,6 +876,18 @@ static uint32_t Cmd_Render(uint32_t sessionId, uint32_t bytesWanted, std::vector
 	return KPIHOST64_STATUS_OK;
 }
 
+static bool IsMidiLikePathW(const std::wstring& path)
+{
+	size_t d = path.find_last_of(L'.');
+	if (d == std::wstring::npos) return false;
+	std::wstring e = path.substr(d);
+	for (size_t i = 0; i < e.size(); ++i) {
+		wchar_t c = e[i];
+		if (c >= L'A' && c <= L'Z') e[i] = (wchar_t)(c - L'A' + L'a');
+	}
+	return e == L".mid" || e == L".midi" || e == L".kar" || e == L".rmi";
+}
+
 static uint32_t Cmd_Seek(uint32_t sessionId, uint64_t posSample, uint32_t flag, std::vector<uint8_t>& out)
 {
 	out.clear();
@@ -882,7 +896,41 @@ static uint32_t Cmd_Seek(uint32_t sessionId, uint64_t posSample, uint32_t flag, 
 	Session& s = it->second;
 	if (!s.dec) return KPIHOST64_STATUS_FAIL;
 
-	UINT64 newPos = s.dec->Seek(posSample, flag);
+	UINT64 newPos = 0;
+	if (IsMidiLikePathW(s.mediaPath)) {
+		// MIDI KPI: プラグインの Seek は音色/音量を復元しないことが多い。
+		// 先頭へ戻してから目標サンプルまで Render 破棄で超高速再生する。
+		s.zeroRenderStreak = 0;
+		bool seekEx = false;
+		SafeDecoderSeek(s.dec, 0, KPI_MEDIAINFO::SEEK_FLAGS_SAMPLE, &seekEx);
+		(void)seekEx;
+		uint64_t left = posSample;
+		const DWORD ch = s.channels ? s.channels : 2;
+		const int srcBits = s.sourceBitsPerSample;
+		const DWORD chunk = 8192;
+		std::vector<uint8_t> junk;
+		while (left > 0) {
+			DWORD ask = (DWORD)((left > chunk) ? chunk : left);
+			if (srcBits == -32) {
+				junk.resize((size_t)ask * ch * sizeof(float));
+			} else if (srcBits == -64) {
+				junk.resize((size_t)ask * ch * sizeof(double));
+			} else {
+				DWORD bps = s.bps ? s.bps : 16;
+				junk.resize((size_t)ask * ch * ((bps ? bps : 16) / 8));
+			}
+			bool hadEx = false;
+			DWORD got = SafeDecoderRender(s.dec, junk.data(), ask, &hadEx);
+			(void)hadEx;
+			if (got == 0) break;
+			if ((uint64_t)got > left) got = (DWORD)left;
+			left -= got;
+			newPos += got;
+		}
+	} else {
+		newPos = s.dec->Seek(posSample, flag);
+	}
+
 	KPIHOST64_SeekReply rep{};
 	rep.sessionId = sessionId;
 	rep.newPosSample = newPos;

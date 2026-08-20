@@ -1745,14 +1745,20 @@
 #define IDC_VST_MULTI_BROWSE            4324
 #define IDC_VST_SCAN_NOW                4325
 #define ID_MP_TAG_BATCH                 33256
+#define IDD_MIDIMONITOR                 277
+#define IDD_MM_HELP                     278
+#define IDR_SASAMI_GS                   279
+#define IDR_SASAMI_XG                   280
+#define IDC_MM_HELP                     4326
+#define ID_MP_OPEN_MIDIMON              33257
 
 // Next default values for new objects
 // 
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
-#define _APS_NEXT_RESOURCE_VALUE        277
-#define _APS_NEXT_COMMAND_VALUE         33257
-#define _APS_NEXT_CONTROL_VALUE         4326
+#define _APS_NEXT_RESOURCE_VALUE        281
+#define _APS_NEXT_COMMAND_VALUE         33258
+#define _APS_NEXT_CONTROL_VALUE         4327
 #define _APS_NEXT_SYMED_VALUE           104
 #endif
 #endif

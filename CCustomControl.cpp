@@ -15642,6 +15642,18 @@ static void CCC_GdiHelpFillDemoScene(GdiSoft3D::Context& ctx, int kind, DWORD ti
 		}
 		break;
 	}
+	case CCC_HELPDEMO_KMIDIMON: {
+		ctx.DrawGrid(-1.1f, 1.1f, 0.0f, 1.0f, 0.0f, 4, RGB(40, 48, 62));
+		for (int i = 0; i < 16; ++i) {
+			const float x0 = -1.02f + (i % 8) * (2.04f / 8.f);
+			const float x1 = x0 + (2.04f / 8.f) * 0.78f;
+			const float z = (i < 8) ? 0.28f : 0.62f;
+			const float h = 0.12f + 0.38f * (0.5f + 0.5f * sinf(t * 1.3f + i * 0.4f));
+			const COLORREF c = (i < 8) ? RGB(90, 180, 255) : RGB(255, 140, 90);
+			ctx.DrawBox(x0, x1, h, z, z + 0.22f, c, 0.f);
+		}
+		break;
+	}
 	case CCC_HELPDEMO_KEQ: {
 		ctx.DrawGrid(-1.05f, 1.05f, 0.0f, 0.9f, 0.0f, 5, RGB(48, 52, 68));
 		for (int i = 0; i < 12; ++i) {

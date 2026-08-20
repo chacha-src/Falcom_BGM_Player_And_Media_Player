@@ -2076,6 +2076,11 @@ void CAnalyzerDlg::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
 			L"피아노 롤 열기", L"打开钢琴卷帘", L"فتح لفافة البيانو", L"Открыть пианоролл", L"Piano-Roll öffnen",
 			L"Abrir piano roll", L"Piano-roll openen", L"Otworz piano roll", L"Piyano rolunu ac"),
 		LL14(L"簡易ピアノロールウィンドウを開きます。", L"Open the simple piano roll window.", L"Ouvrir la fenetre du piano roll simple.", L"Apri la finestra del piano roll semplice.", L"Abrir la ventana del piano roll simple.", L"간이 피아노 롤 창을 엽니다.", L"打开简易钢琴卷帘窗口。", L"فتح نافذة لفافة البيانو البسيطة.", L"Открыть окно простого пианоролла.", L"Einfaches Piano-Roll-Fenster offnen.", L"Abrir a janela do piano roll simples.", L"Open het eenvoudige piano-roll-venster.", L"Otworz okno prostego piano roll.", L"Basit piyano roll penceresini ac."));
+	menu.AddCommand(ID_MP_OPEN_MIDIMON,
+		LL14(L"MIDIモニタを開く", L"Open MIDI monitor", L"Ouvrir le moniteur MIDI", L"Apri monitor MIDI", L"Abrir monitor MIDI",
+			L"MIDI 모니터 열기", L"打开MIDI监视器", L"فتح مراقب MIDI", L"Открыть MIDI-монитор", L"MIDI-Monitor öffnen",
+			L"Abrir monitor MIDI", L"MIDI-monitor openen", L"Otworz monitor MIDI", L"MIDI izleyiciyi ac"),
+		LL14(L"MIDI 32パート・モニタを開きます。", L"Open the 32-part MIDI monitor.", L"Ouvrir le moniteur MIDI 32 parties.", L"Apri il monitor MIDI a 32 parti.", L"Abrir el monitor MIDI de 32 partes.", L"MIDI 32파트 모니터를 엽니다.", L"打开 MIDI 32 声部监视器。", L"فتح مراقب MIDI ذا 32 جزءاً.", L"Открыть MIDI-монитор на 32 партии.", L"32-Part-MIDI-Monitor offnen.", L"Abrir o monitor MIDI de 32 partes.", L"Open de MIDI-monitor met 32 partijen.", L"Otworz monitor MIDI 32 partii.", L"32 part MIDI izleyiciyi ac."));
 	menu.AddSeparator();
 	menu.AddCommand(ID_HELP_SHOWSHEET,
 		LL14(L"操作ガイド", L"Operation guide", L"Guide d'utilisation", L"Guida operativa",
@@ -2137,13 +2142,15 @@ void CAnalyzerDlg::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
 			KillTimer(2);
 		KickUiPresent();
 	}
-	else if (cmd == ID_MP_OPEN_EQ || cmd == ID_MP_OPEN_PIANOROLL) {
+	else if (cmd == ID_MP_OPEN_EQ || cmd == ID_MP_OPEN_PIANOROLL || cmd == ID_MP_OPEN_MIDIMON) {
 		extern CMediaPlayerDlg* mp;
 		if (mp && ::IsWindow(mp->GetSafeHwnd()))
 			mp->PostMessage(WM_COMMAND, cmd);
 		else if (og && ::IsWindow(og->GetSafeHwnd())) {
 			if (cmd == ID_MP_OPEN_EQ)
 				og->PostMessage(WM_COMMAND, MAKEWPARAM(IDC_BUTTON59, BN_CLICKED), 0);
+			else if (cmd == ID_MP_OPEN_MIDIMON)
+				og->PostMessage(WM_OGG_TOGGLE_SUBUI, 3, 0);
 			else
 				og->PostMessage(WM_OGG_TOGGLE_SUBUI, 1, 0);
 		}

@@ -2896,6 +2896,16 @@ int CPlayList::ShowTrackContextMenu(CPoint pt, CWnd* pOwner)
 					L"Muestra u oculta el piano roll (altura)", L"피아노 롤(음정 표시)을 열거나 닫습니다", L"打开或关闭钢琴卷帘（音高显示）", L"يظهر أو يخفي لفة البيانو (عرض الطبقة)",
 					L"Показывает или скрывает пианоролл (высота тона)", L"Blendet die Piano-Roll (Tonhoehe) ein oder aus", L"Mostra ou oculta o piano roll (altura)", L"Toont of verbergt de piano-roll (toonhoogte)",
 					L"Pokazuje lub ukrywa piano roll (wysokosc dzwieku)", L"Piano roll (perde gosterimi) acar veya kapatir"));
+		subWin->AddCheck(PL_CTX_MIDIMON,
+				LL14(L"MIDIモニタを開く", L"Open MIDI monitor", L"Ouvrir le moniteur MIDI", L"Apri monitor MIDI",
+					L"Abrir monitor MIDI", L"MIDI 모니터 열기", L"打开MIDI监视器", L"فتح مراقب MIDI",
+					L"Открыть MIDI-монитор", L"MIDI-Monitor oeffnen", L"Abrir monitor MIDI", L"MIDI-monitor openen",
+					L"Otworz monitor MIDI", L"MIDI izleyiciyi ac"),
+				savedata.midimonwindow ? TRUE : FALSE,
+				LL14(L"MIDI 32パート・モニタを開く／閉じる", L"Show or hide the 32-part MIDI monitor", L"Affiche ou masque le moniteur MIDI 32 parties", L"Mostra o nasconde il monitor MIDI a 32 parti",
+					L"Muestra u oculta el monitor MIDI de 32 partes", L"MIDI 32파트 모니터를 열거나 닫습니다", L"打开或关闭 MIDI 32 声部监视器", L"يظهر أو يخفي مراقب MIDI ذا 32 جزءاً",
+					L"Показывает или скрывает MIDI-монитор на 32 партии", L"Blendet den 32-Part-MIDI-Monitor ein oder aus", L"Mostra ou oculta o monitor MIDI de 32 partes", L"Toont of verbergt de MIDI-monitor met 32 partijen",
+					L"Pokazuje lub ukrywa monitor MIDI 32 partii", L"32 part MIDI izleyiciyi acar veya kapatir"));
 		if (hasMp) {
 			subWin->AddCheck(PL_CTX_DESK_LRC,
 						LL14(L"歌詞ウィンドウを表示", L"Show lyrics window", L"Afficher fenetre paroles", L"Mostra finestra testi", L"Mostrar ventana de letra",
@@ -3458,6 +3468,9 @@ void CPlayList::HandleTrackContextCmd(int cmd)
 	}
 	else if (cmd == PL_CTX_PIANOROLL) {
 		if (og && ::IsWindow(og->GetSafeHwnd())) og->TogglePianoRoll();
+	}
+	else if (cmd == PL_CTX_MIDIMON) {
+		if (og && ::IsWindow(og->GetSafeHwnd())) og->ToggleMidiMonitor();
 	}
 	else if (cmd == PL_CTX_COPY_TITLEART) {
 		const int idx = m_lc.GetNextItem(-1, LVNI_ALL | LVNI_SELECTED);
@@ -10212,7 +10225,31 @@ void CPlayList::plugs(CString fff, playlistdata *p,TCHAR* kpi, BYTE& kv)
 	plugsxmplay(fff, p, kpi, kv);
 	if (p->sub == MODE_PLUGIN_XMPLAY) return;
 	plugsaimp(fff, p, kpi, kv);
-	// KPI/VST/外部いずれも無い MIDI 等は呼び出し側の初期値(-2=DirectShow)のまま
+	if (p->sub == MODE_PLUGIN_AIMP) return;
+	// MIDI/プロジェクト: KPI・外部が無ければ VST。DirectShow(-2) には落とさない。
+	if (p && isMidiOrProj) {
+		wchar_t mid2[VST_PATH_CHARS]; mid2[0] = 0;
+		wchar_t hints2[32][128]; int hc2 = 0;
+		if (VstResolvePlayPath(fff, mid2, VST_PATH_CHARS, hints2, 32, &hc2)) {
+			_tcscpy(p->fol, fff);
+			p->sub = MODE_VST_MIDI;
+			ft = fff.Right(fff.GetLength() - fff.ReverseFind(L'\\') - 1);
+			_tcscpy(p->name, ft);
+			p->alb[0] = 0; p->art[0] = 0; p->loop1 = p->loop2 = p->ret2 = 0;
+			if (kpi) { _tcscpy(kpi, mid2); }
+			kv = 0;
+			return;
+		}
+		// VST パスも解決できない稀なケースでも -2 にはしない（DShow 途中保存の対象外）
+		p->sub = MODE_VST_MIDI;
+		ft = fff.Right(fff.GetLength() - fff.ReverseFind(L'\\') - 1);
+		_tcscpy(p->name, ft);
+		p->alb[0] = 0; p->art[0] = 0; p->loop1 = p->loop2 = p->ret2 = 0;
+		if (kpi) kpi[0] = 0;
+		kv = 0;
+		return;
+	}
+	// 非MIDI: KPI/外部いずれも無ければ呼び出し側の初期値(-2=DirectShow)のまま
 }
 
 void CPlayList::plugswinamp(CString fff, playlistdata *p, TCHAR* kpi, BYTE& kv)

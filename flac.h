@@ -12,7 +12,7 @@ private:
 	BYTE* m_direct_buf;
 	DWORD  m_direct_buf_size;
 	DWORD  m_direct_buf_copied;
-	BYTE   m_temp_buf[FLAC__MAX_BLOCK_SIZE * 2 * 3];//2=maxchannel, 3=24/8
+	BYTE   m_temp_buf[FLAC__MAX_BLOCK_SIZE * 8 * 4]; // 8ch × 32bit
 	DWORD  m_temp_buf_size;
 	DWORD  m_temp_buf_remain;
 	int    m_flacPosMode; // 1=SetPosition がサンプル直指定（0xBF）。グローバル flacmode に依存しない
@@ -271,13 +271,17 @@ FLAC__StreamDecoderWriteStatus KbFlacDecoder::write_callback(const FLAC__StreamD
 	const FLAC__Frame* frame,
 	const FLAC__int32* const buffer[])
 {
-	int wide_sample, sample, channel;
+	int wide_sample, sample = 0, channel;
 	int channels = m_stream_info.channels;
 	int wide_samples = frame->header.blocksize;
-	int direct_copy_samples = m_direct_buf_size / m_block_align;
+	int direct_copy_samples = 0;
+	if (m_direct_buf && m_block_align > 0)
+		direct_copy_samples = (int)(m_direct_buf_size / (DWORD)m_block_align);
 	if (direct_copy_samples > wide_samples) {
 		direct_copy_samples = wide_samples;
 	}
+	if (!m_direct_buf)
+		direct_copy_samples = 0;
 	if (m_stream_info.bits_per_sample == 16) {
 		for (sample = 0, wide_sample = 0; wide_sample < direct_copy_samples; wide_sample++) {
 			for (channel = 0; channel < channels; channel++, sample++) {
@@ -336,7 +340,12 @@ FLAC__StreamDecoderWriteStatus KbFlacDecoder::write_callback(const FLAC__StreamD
 		}
 	}
 	m_direct_buf_copied = direct_copy_samples * m_block_align;
-	m_temp_buf_remain = m_temp_buf_size = sample * m_block_align / channels;
+	int temp_bytes = sample * m_block_align / (channels > 0 ? channels : 1);
+	if (temp_bytes < 0)
+		temp_bytes = 0;
+	if ((DWORD)temp_bytes > sizeof(m_temp_buf))
+		temp_bytes = (int)sizeof(m_temp_buf);
+	m_temp_buf_remain = m_temp_buf_size = (DWORD)temp_bytes;
 	return FLAC__STREAM_DECODER_WRITE_STATUS_CONTINUE;
 }
 /////////////////////////////////////////////////////////////////////////////

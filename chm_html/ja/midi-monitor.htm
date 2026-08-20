@@ -1,0 +1,42 @@
+﻿<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<title>MIDIモニタ</title>
+<link rel="stylesheet" type="text/css" href="../css/help.css">
+</head>
+<body>
+
+<div class="topnav"><a href="index.htm">目次</a> &nbsp;|&nbsp; <a href="../en/midi-monitor.htm">English</a></div>
+
+<h1>MIDIモニタ</h1>
+
+<p class="lead">MIDIモニタは、再生中の SMF（.mid / .midi / .kar / .rmi）を 32 パート（A01–A16 / B01–B16）で見守る画面です。オーディオから音程を推定するのではなく、ファイルに書かれた MIDI イベントそのものを表示します。</p>
+<h2>開く</h2>
+<p>メディアプレイヤーのバナーを右クリックして「ウィンドウ」→「MIDIモニタ」、プレイリストの右クリック、イコライザー／アナライザー／ピアノロールの「開く」、コマンドパレットから開けます。</p>
+<h2>見られるもの</h2>
+<ul>
+<li><b>ヘッダ</b> …… BPM、テンポ%、調、タイムベース、拍子、Transpose、ファイル名。</li>
+<li><b>各パート</b> …… PC / バンク / マップ、音色名、レベル、Vol / Pan / Exp / Rev / Crs / Var、ビブラート、フィルタ、エンベロープ、EQ、NRPN、ミニ鍵盤。</li>
+<li><b>音色名</b> …… 内蔵の SASAMI GS / XG 音色表から引きます。XG System On があれば XG、なければ GS として名前を付けます。右クリックの「音色マップ」で強制もできます。</li>
+</ul>
+<h2>表示</h2>
+<ul>
+<li><b>通常の2D</b> …… 表形式です。</li>
+<li><b>簡易3D</b> …… 32 パートのレベルを箱として CPU 描画します。ドラッグで視点、ホイールで寄り引き。</li>
+</ul>
+<h2>GS / XG の音源</h2>
+<p>演奏に使う VST は <a href="render.htm">レンダリング設定</a> の GS VST と XG VST です。曲が始まる前に SMF を少し読んで、XG リセット（XG System On）があれば XG 側、なければ GS 側を使います。片方だけ書いてあればそちらで両方をまかない、両方空なら Windows MIDI マッパーへ落ちます。</p>
+<div class="related"><span class="label">あわせて読みたい</span><ul><li><a href="midi.htm">MIDIキーボードで操作する</a></li><li><a href="vst.htm">VSTホストで音源を鳴らす</a></li><li><a href="render.htm">レンダリング設定</a></li><li><a href="pianoroll.htm">ピアノロールで音を見る</a></li><li><a href="help-buttons.htm">各画面の「？」操作ガイド</a></li></ul></div>
+
+<div class="botnav">
+<span class="prev">&#171; 前へ: <a href="pianoroll.htm">ピアノロールで音を見る</a></span>
+<span class="next">次へ: <a href="midi.htm">MIDIキーボードで操作する</a> &#187;</span>
+<span class="up"><a href="index.htm">目次</a></span>
+<div class="clear"></div>
+</div>
+
+<div class="foot">メディアプレイヤー「らいら」 (oggYSEDbgm) — PrePrayerPower Soft</div>
+
+</body>
+</html>

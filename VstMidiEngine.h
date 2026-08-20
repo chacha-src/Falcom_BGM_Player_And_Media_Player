@@ -40,11 +40,12 @@ int VstDetectMultiTimbral(const wchar_t* nameOrPath); // 0/1
 int VstScanGetMultiCount(void); // instruments with isMultiTimbral (host arch)
 const VstPluginInfo* VstScanGetMulti(int multiIndex); // 0..GetMultiCount-1
 int VstPluginPeArch(const wchar_t* path); // 32/64/0
-// Explicit savedata.vstMultiDll only. Empty DLL => 0 (local MIDI out / Mapper).
+// Explicit GS (vstMultiDll) / XG (vstExtraPath). Empty both => 0 (MIDI Mapper).
+// XG System On in the SMF picks XG; otherwise GS. One slot empty uses the other.
 // Returns PE arch (32/64) or 0 if none. outPath filled when return!=0.
 int VstPickPreferredPlugin(wchar_t* outPath, int outChars);
-// 1=open via KpiHost64. Only when explicit DLL is PE32+. Empty DLL never remotes.
-int VstShouldOpenRemote64(wchar_t* outDll, int outChars);
+// 1=open via KpiHost64. midPath is peeked for XG reset. Empty both DLLs never remotes.
+int VstShouldOpenRemote64(const wchar_t* midPath, wchar_t* outDll, int outChars);
 int VstHasX64Instruments(void);
 
 int VstIsMidiExt(const wchar_t* path);

@@ -1,4 +1,4 @@
-#include "afxdialogex.h"
+﻿#include "afxdialogex.h"
 #include "afxwin.h"
 #include "afxcmn.h"
 #if !defined(AFX_RENDER_H__F5FB1AA1_8545_4B26_80A3_4E0FA43C0548__INCLUDED_)
@@ -28,7 +28,9 @@ public:
 	DECLARE_DYNAMIC(CRender);
 
 	CWnd* m_pParent;
+	int m_modeless;
 	int Create(CWnd* pWnd);
+	void CloseModeless();
 	CBrush m_brDlg;
 	
 	// オーバーライド
@@ -50,6 +52,9 @@ protected:
 	//{{AFX_MSG(CRender)
 	virtual BOOL OnInitDialog();
 	virtual void OnOK();
+	virtual void OnCancel();
+	virtual void PostNcDestroy();
+	afx_msg void OnClose();
 	//}}AFX_MSG
 	DECLARE_MESSAGE_MAP()
 public:
@@ -179,6 +184,9 @@ public:
 	int m_bakAero;
 	afx_msg void OnBnClickedCheck3();
 };
+
+extern CRender* g_renderDlg;
+void CloseRenderIfOpen();
 
 // 設定ダイアログを開かずに savedata の出力形式を再生パスへ反映する
 void MpRecreatePlaybackOutput();

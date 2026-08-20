@@ -585,7 +585,7 @@ struct save{
 	int mpTempOpen;
 
 	// --- MP底バー: ツール由来ショートカットボタン(末尾追記。旧.datは0→起動時既定) ---
-	// mpBotToolsInited=1 なら mpBotToolsFlags 有効。bit: DJ/Tag/BPM/Sleep/Mirror/SsViz/Alarm/Remote/VST(1024)/Maze/Race
+	// mpBotToolsInited=1 なら mpBotToolsFlags 有効。bit: DJ/Tag/BPM/Sleep/Mirror/SsViz/Alarm/Remote/VST(1024・常時)/Maze/Race
 	int mpBotToolsInited;
 	int mpBotToolsFlags;
 
@@ -770,13 +770,19 @@ struct save{
 
 	// --- MIDI再生: KPI優先 / VST優先(末尾追記。旧.datは0=KPI) ---
 	int midPlayPrefer;          // 0=KPIプラグイン優先 1=自前VST2/3ホスト優先
-	TCHAR vstExtraPath[520];    // 追加VST検索フォルダ(空可)
+	TCHAR vstExtraPath[520];    // XG用 明示VST DLL（空可。フォルダだった旧値は無視）
 	int vstHostMainLock;        // 1=VSTホスト画面をメインに追随
 	int vstHostWinX, vstHostWinY, vstHostWinW, vstHostWinH; // 0幅=未保存
 	// --- マルチティンバー音源(SC-VA / SGP2 等。末尾追記) ---
-	TCHAR vstMultiDll[520];     // 明示DLL/パス（空=MIDI出力コンボ）
+	TCHAR vstMultiDll[520];     // GS用 明示DLL（空=XGがあればXG、両方空=MIDIマッパー）
 	TCHAR vstMultiName[128];    // コンボ表示用名（空可）
 	TCHAR midiOutName[32];      // 空=Windows MIDIマッパー。MIDIOUTCAPS.szPname
+	int midimonwindow;
+	int midimonx, midimony, midimonw, midimonh;
+	int midimonMainLock;
+	int midimontopmost;
+	int midimonviewmode;
+	int midimon3dyaw, midimon3dpitch, midimon3dzoom;
 };
 extern save savedata;
 /* コード間隔(ms)。16..500。旧.dat や未設定は 25。 */
@@ -875,7 +881,8 @@ enum {
 	CCC_HELPDEMO_KLIST,
 	CCC_HELPDEMO_KTRANSPORT,
 	CCC_HELPDEMO_KMAZE,
-	CCC_HELPDEMO_KRACE
+	CCC_HELPDEMO_KRACE,
+	CCC_HELPDEMO_KMIDIMON
 };
 int CCC_GdiHelpDrawSoft3DDemo(CDC& dc, int x, int y, int maxW, int maxH, int kind);
 int CCC_GdiHelpDrawSoftDemoPair(CDC& dc, int x, int y, int totalW, int demoH, int kind);

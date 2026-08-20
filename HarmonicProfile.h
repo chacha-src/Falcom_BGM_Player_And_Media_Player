@@ -225,6 +225,6 @@ namespace HarmonicProfile
     // プロファイル類似度とは別軸。CPianoRoll のノートON抑制にも使える。
     inline bool LooksLikePartialGhost(const float* blend, int candidate, int count)
     {
-        return PianoKey::IsHarmonicGhostPartial(blend, candidate, count, 36);
+        return PianoKey::IsHarmonicGhostPartial(blend, candidate, count, PianoKey::GHOST_BASS_END);
     }
 }

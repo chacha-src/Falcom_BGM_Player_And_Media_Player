@@ -334,6 +334,21 @@ void CPrHelpDlg::OnPaint()
 		L"· Wykrywanie …… reatak / duchy / profil barwy",
 		L"· Algılama …… yeniden saldırı / hayalet / timbre profili")); y += lh;
 	body(L, y, LL14(
+		L"・和音の3度・5度は倍音として落としません。ベースの高次倍音(10次以上)でメロディを消さないようにしています",
+		L"· Chord 3rds/5ths are not dropped as overtones. Bass harmonics above the 8th do not erase melody",
+		L"· Les 3es/5tes d'accord ne sont pas des harmoniques. Les partiels aigus de basse n'effacent pas la mélodie",
+		L"· 3e/5e di accordo non sono armoniche. Gli armonici alti del basso non cancellano la melodia",
+		L"· 3as/5as de acorde no son armónicos. Armónicos altos del bajo no borran la melodía",
+		L"· 화음의 3도·5도는 배음으로 버리지 않음. 베이스 고차 배음으로 멜로디를 지우지 않음",
+		L"· 和弦的三度、五度不当泛音丢掉。低音的高次泛音不抹掉旋律",
+		L"· ثالثات/خامسات الوتر ليست توافقيات. توافقيات الباس العليا لا تمحو اللحن",
+		L"· Терции/квинты аккорда не отбрасываются как обертоны. Верхние гармоники баса не стирают мелодию",
+		L"· Akkordterzen/-quinten nicht als Obertöne streichen. Hohe Bass-Harmonische loeschen die Melodie nicht",
+		L"· 3as/5as de acorde nao sao harmonicos. Harmonicos altos do baixo nao apagam a melodia",
+		L"· Akkoordtertsen/-kwinten niet als boventonen schrappen. Hoge basharmonischen wissen de melodie niet",
+		L"· Tercje/kwinty akordu nie sa obertonami. Wysokie harmoniczne basu nie kasuja melodii",
+		L"· Akor 3./5. derecelerini armonik sayma. Basin ust armonikleri melodiyi silmesin")); y += lh;
+	body(L, y, LL14(
 		L"・検出パラメータ調整… …… 感度を % で細かく調整する別ダイアログを開きます",
 		L"· Detection parameter tuning… …… opens a dialog to fine-tune sensitivity (%)",
 		L"· Paramètres de détection… …… dialogue de sensibilité (%)",
@@ -627,7 +642,7 @@ namespace Cfg
         }
     }
 
-    // C4 = key 39。弦/鍵盤の減衰は中音域で長く、高音ほど短い。
+    // C4 = MIDI 60。弦/鍵盤の減衰は中音域で長く、高音ほど短い。
     static float HoldEnvRatio(int keyIndex)
     {
         if (keyIndex < BAND_BASS_END) return HOLD_ENV_BASS;
@@ -1292,7 +1307,7 @@ BOOL CPianoRoll::OnInitDialog()
 }
 float CPianoRoll::MidiToFreq(int midi)
 {
-    return 440.0f * powf(2.0f, (midi - 69) / 12.0f);
+    return PianoKey::MidiToHz(midi);
 }
 
 int CPianoRoll::KeyBandIndex(int keyIndex)
@@ -3250,6 +3265,11 @@ void CPianoRoll::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
                 L"분석기 열기", L"打开分析器", L"فتح المحلل", L"Открыть анализатор", L"Analyzer öffnen",
                 L"Abrir analisador", L"Analyzer openen", L"Otworz analizator", L"Analizoru ac"),
             LL14(L"アナライザウィンドウを開きます。", L"Open the analyzer window.", L"Ouvrir la fenetre de l'analyseur.", L"Apri la finestra dell'analizzatore.", L"Abrir la ventana del analizador.", L"분석기 창을 엽니다.", L"打开分析器窗口。", L"فتح نافذة المحلل.", L"Открыть окно анализатора.", L"Analysator-Fenster offnen.", L"Abrir a janela do analisador.", L"Open het analyser-venster.", L"Otworz okno analizatora.", L"Analizor penceresini ac."));
+        subOpen->AddCommand(ID_MP_OPEN_MIDIMON,
+            LL14(L"MIDIモニタを開く", L"Open MIDI monitor", L"Ouvrir le moniteur MIDI", L"Apri monitor MIDI", L"Abrir monitor MIDI",
+                L"MIDI 모니터 열기", L"打开MIDI监视器", L"فتح مراقب MIDI", L"Открыть MIDI-монитор", L"MIDI-Monitor öffnen",
+                L"Abrir monitor MIDI", L"MIDI-monitor openen", L"Otworz monitor MIDI", L"MIDI izleyiciyi ac"),
+            LL14(L"MIDI 32パート・モニタを開きます。", L"Open the 32-part MIDI monitor.", L"Ouvrir le moniteur MIDI 32 parties.", L"Apri il monitor MIDI a 32 parti.", L"Abrir el monitor MIDI de 32 partes.", L"MIDI 32파트 모니터를 엽니다.", L"打开 MIDI 32 声部监视器。", L"فتح مراقب MIDI ذا 32 جزءاً.", L"Открыть MIDI-монитор на 32 партии.", L"32-Part-MIDI-Monitor offnen.", L"Abrir o monitor MIDI de 32 partes.", L"Open de MIDI-monitor met 32 partijen.", L"Otworz monitor MIDI 32 partii.", L"32 part MIDI izleyiciyi ac."));
         subOpen->AddCommand(ID_HELP_SHOWSHEET,
             LL14(L"操作ガイド", L"Operation guide", L"Guide d'utilisation", L"Guida operativa",
                 L"Guía de operación", L"조작 가이드", L"操作指南", L"دليل التشغيل",
@@ -3263,13 +3283,15 @@ void CPianoRoll::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
         point = CPoint(rc.left + 8, rc.top + 8);
     }
     const UINT cmd = menu.Track(point, this);
-    if (cmd == ID_MP_OPEN_EQ || cmd == ID_MP_OPEN_ANALYZER) {
+    if (cmd == ID_MP_OPEN_EQ || cmd == ID_MP_OPEN_ANALYZER || cmd == ID_MP_OPEN_MIDIMON) {
         extern CMediaPlayerDlg* mp;
         if (mp && ::IsWindow(mp->GetSafeHwnd()))
             mp->PostMessage(WM_COMMAND, cmd);
         else if (og && ::IsWindow(og->GetSafeHwnd())) {
             if (cmd == ID_MP_OPEN_EQ)
                 og->PostMessage(WM_COMMAND, MAKEWPARAM(IDC_BUTTON59, BN_CLICKED), 0);
+            else if (cmd == ID_MP_OPEN_MIDIMON)
+                og->PostMessage(WM_OGG_TOGGLE_SUBUI, 3, 0);
             else
                 og->PostMessage(WM_OGG_TOGGLE_SUBUI, 2, 0);
         }

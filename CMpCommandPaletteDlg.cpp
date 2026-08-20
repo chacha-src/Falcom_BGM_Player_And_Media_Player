@@ -4,6 +4,7 @@
 #include "CMediaPlayerDlg.h"
 #include "oggDlg.h"
 #include "CAnalyzerDlg.h"
+#include "CMidiMonitorDlg.h"
 #include "CCommandRollDlg.h"
 
 extern CMediaPlayerDlg* mp;
@@ -33,6 +34,8 @@ enum {
 	PAL_ROLL3D_RESET,
 	PAL_PIANO3D_TOGGLE,
 	PAL_PIANO3D_RESET,
+	PAL_MIDIMON3D_TOGGLE,
+	PAL_MIDIMON3D_RESET,
 	PAL_LRC_EXPAND,
 	PAL_DESK_LRC,
 
@@ -52,6 +55,7 @@ enum {
 	PAL_WIN_EQ,
 	PAL_WIN_PIANO,
 	PAL_WIN_ANALYZER,
+	PAL_WIN_MIDIMON,
 	PAL_WIN_PROTOOLS,
 	PAL_WIN_PROMPT,
 	PAL_WIN_CMDROLL,
@@ -98,6 +102,8 @@ const MpPalCmd kCmds[] = {
 	{ PAL_ROLL3D_RESET,     1 },
 	{ PAL_PIANO3D_TOGGLE,   1 },
 	{ PAL_PIANO3D_RESET,    1 },
+	{ PAL_MIDIMON3D_TOGGLE, 1 },
+	{ PAL_MIDIMON3D_RESET,  1 },
 	{ PAL_LRC_EXPAND,       1 },
 	{ PAL_DESK_LRC,         1 },
 
@@ -117,6 +123,7 @@ const MpPalCmd kCmds[] = {
 	{ PAL_WIN_EQ,           3 },
 	{ PAL_WIN_PIANO,        3 },
 	{ PAL_WIN_ANALYZER,     3 },
+	{ PAL_WIN_MIDIMON,      3 },
 	{ PAL_WIN_PROTOOLS,     3 },
 	{ PAL_WIN_PROMPT,       3 },
 	{ PAL_WIN_CMDROLL,      3 },
@@ -233,6 +240,14 @@ const wchar_t* PalCmdName(int id)
 		return LL14(L"ピアノロール簡易3D 視点リセット", L"Reset piano roll Soft 3D view", L"Reinitialiser vue piano roll", L"Reimposta vista piano roll", L"Restablecer vista del piano roll",
 			L"피아노 롤 간이 3D 시점 초기화", L"重置钢琴卷帘简易3D视角", L"إعادة ضبط عرض لفة البيانو", L"Сбросить вид пианоролла", L"Piano-Roll-Ansicht zuruecksetzen",
 			L"Redefinir vista do piano roll", L"Piano roll-weergave resetten", L"Resetuj widok piano roll", L"Piano roll gorunumunu sifirla");
+	case PAL_MIDIMON3D_TOGGLE:
+		return LL14(L"MIDIモニタ簡易3D 切替", L"Toggle MIDI monitor Soft 3D", L"Moniteur MIDI 3D simplifie", L"3D semplificato monitor MIDI", L"3D simple del monitor MIDI",
+			L"MIDI 모니터 간이 3D 전환", L"MIDI监视器简易3D 切换", L"تبديل 3D المبسط لمراقب MIDI", L"Простой 3D MIDI-монитора", L"MIDI-Monitor Soft-3D umschalten",
+			L"Alternar Soft 3D do monitor MIDI", L"MIDI-monitor Soft 3D wisselen", L"Przelacz Soft 3D monitora MIDI", L"MIDI izleyici Soft 3B degistir");
+	case PAL_MIDIMON3D_RESET:
+		return LL14(L"MIDIモニタ簡易3D 視点リセット", L"Reset MIDI monitor Soft 3D view", L"Reinitialiser vue moniteur MIDI", L"Reimposta vista monitor MIDI", L"Restablecer vista del monitor MIDI",
+			L"MIDI 모니터 간이 3D 시점 초기화", L"重置MIDI监视器简易3D视角", L"إعادة ضبط عرض مراقب MIDI", L"Сбросить вид MIDI-монитора", L"MIDI-Monitor-Ansicht zuruecksetzen",
+			L"Redefinir vista do monitor MIDI", L"MIDI-monitorweergave resetten", L"Resetuj widok monitora MIDI", L"MIDI izleyici gorunumunu sifirla");
 	case PAL_LRC_EXPAND:
 		return LL14(L"歌詞パネル拡大", L"Expand lyrics panel", L"Agrandir les paroles", L"Espandi testi", L"Expandir letra",
 			L"가사 패널 확대", L"扩大歌词面板", L"توسيع لوحة الكلمات", L"Развернуть панель текста", L"Textpanel vergroessern",
@@ -299,6 +314,10 @@ const wchar_t* PalCmdName(int id)
 		return LL14(L"簡易ピアノロール", L"Piano roll", L"Piano roll", L"Piano roll", L"Piano roll",
 			L"피아노 롤", L"钢琴卷帘", L"لفة البيانو", L"Пианоролл", L"Piano Roll",
 			L"Piano roll", L"Piano roll", L"Piano roll", L"Piano roll");
+	case PAL_WIN_MIDIMON:
+		return LL14(L"MIDIモニタ", L"MIDI monitor", L"Moniteur MIDI", L"Monitor MIDI", L"Monitor MIDI",
+			L"MIDI 모니터", L"MIDI监视器", L"مراقب MIDI", L"MIDI-монитор", L"MIDI-Monitor",
+			L"Monitor MIDI", L"MIDI-monitor", L"Monitor MIDI", L"MIDI izleyici");
 	case PAL_WIN_ANALYZER:
 		return LL14(L"アナライザー", L"Analyzer", L"Analyseur", L"Analizzatore", L"Analizador",
 			L"애널라이저", L"分析器", L"المحلل", L"Анализатор", L"Analyzer",
@@ -467,6 +486,12 @@ void PalEnsurePianoOpen()
 {
 	if (savedata.pianorollwindow != 1)
 		PalPostToMp(ID_MP_OPEN_PIANOROLL);
+}
+
+void PalEnsureMidiMonOpen()
+{
+	if (savedata.midimonwindow != 1)
+		PalPostToMp(ID_MP_OPEN_MIDIMON);
 }
 
 // 簡易ピアノロール窓(未生成なら nullptr)。ID を投げるだけなので CWnd で扱う。
@@ -819,6 +844,22 @@ void CMpCommandPaletteDlg::ExecCommand(int id)
 			MpPersistSavedataQuick();
 		}
 		return;
+	case PAL_MIDIMON3D_TOGGLE: {
+		savedata.midimonviewmode = (savedata.midimonviewmode == 1) ? 0 : 1;
+		PalEnsureMidiMonOpen();
+		if (og && og->m_MidiMonitorDlg && ::IsWindow(og->m_MidiMonitorDlg->GetSafeHwnd()))
+			og->m_MidiMonitorDlg->PaletteApplySoft3D();
+		MpPersistSavedataQuick();
+		return;
+	}
+	case PAL_MIDIMON3D_RESET:
+		savedata.midimon3dyaw = -220;
+		savedata.midimon3dpitch = 260;
+		savedata.midimon3dzoom = 100;
+		if (og && og->m_MidiMonitorDlg && ::IsWindow(og->m_MidiMonitorDlg->GetSafeHwnd()))
+			og->m_MidiMonitorDlg->PaletteApplySoft3D();
+		MpPersistSavedataQuick();
+		return;
 	case PAL_LRC_EXPAND:  PalPostToMp(ID_MP_LRC_EXPAND); return;
 	case PAL_DESK_LRC:    PalPostToMp(ID_MP_DESK_LRC); return;
 
@@ -841,6 +882,7 @@ void CMpCommandPaletteDlg::ExecCommand(int id)
 	// ---- ウィンドウ ----
 	case PAL_WIN_EQ:        PalPostToMp(ID_MP_OPEN_EQ); return;
 	case PAL_WIN_PIANO:     PalPostToMp(ID_MP_OPEN_PIANOROLL); return;
+	case PAL_WIN_MIDIMON:   PalPostToMp(ID_MP_OPEN_MIDIMON); return;
 	case PAL_WIN_ANALYZER:  PalPostToMp(ID_MP_OPEN_ANALYZER); return;
 	case PAL_WIN_PROTOOLS:  PalPostToMp(ID_MP_OPEN_PROTOOLS); return;
 	case PAL_WIN_PROMPT:    PalPostToMp(IDC_MP_PROMPT); return;

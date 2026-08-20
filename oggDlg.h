@@ -27,9 +27,9 @@ void ApplyPlaylistRowDisplay(const playlistdata0& row);
 #define WM_OGG_ENTER_MP_MODE (WM_APP + 101)
 #endif
 // MP から EQ/ピアノ/アナの開閉を遅延実行(ボタンハンドラ内 Create/Destroy 回避)
-// wParam: 1=piano toggle, 2=analyzer toggle (EQ は IDC_BUTTON59 の PostMessage)
-//         10..15=起動時サブUI復元(1メッセージ=1 Create、次を PostMessage)
-//         10=EQ 11=ピアノ 12=Tune 13=アナライザ 14=プロンプト 15=ロール
+// wParam: 1=piano toggle, 2=analyzer toggle, 3=MIDI monitor toggle
+//         10..17=起動時サブUI復元(1メッセージ=1 Create、次を PostMessage)
+//         10=EQ 11=ピアノ 12=Tune 13=アナライザ 14=プロンプト 15=ロール 16=DJパッド 17=MIDIモニタ
 #ifndef WM_OGG_TOGGLE_SUBUI
 #define WM_OGG_TOGGLE_SUBUI (WM_APP + 102)
 #endif
@@ -93,6 +93,7 @@ class CEqualizer;
 class CPianoRoll;
 class CPianoRollTuneDlg;
 class CAnalyzerDlg;
+class CMidiMonitorDlg;
 class CDouga;
 class CPlayList;
 class CRender;
@@ -121,6 +122,7 @@ public:
 	void SyncAnalyzerFromPlayCursor();
 	void TogglePianoRoll();
 	void ToggleAnalyzer();
+	void ToggleMidiMonitor();
 	void ShowPianoRollTune();
 	void FeedPianoRoll(const void* pData, int bytes);
 	// x,y は論理座標(*4)。戻り値は描画文字列のピクセル幅(hFont / GetTextExtent)。
@@ -177,6 +179,7 @@ public:
 	CPianoRoll* m_PianoRollDlg = nullptr;
 	CPianoRollTuneDlg* m_PianoRollTuneDlg = nullptr;
 	CAnalyzerDlg* m_AnalyzerDlg = nullptr;
+	CMidiMonitorDlg* m_MidiMonitorDlg = nullptr;
 	bool m_cascadePrevValid = false;
 	CRect m_cascadePrevRc;
 	// SyncAnalyzerFromPlayCursor: bufwav3 上の前回終端バイト位置

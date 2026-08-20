@@ -29,7 +29,8 @@ namespace {
 		IDM_EQ_REVERB_SLIDER = 42227,
 		IDM_EQ_PRESET_BASE = 42300, // +preset index (m_pre)
 		IDM_EQ_OPEN_ANALYZER = 42390,
-		IDM_EQ_OPEN_PIANO = 42391
+		IDM_EQ_OPEN_PIANO = 42391,
+		IDM_EQ_OPEN_MIDIMON = 42392
 	};
 
 	static void EqEffSliderCb(void* ctx, int value)
@@ -1584,6 +1585,13 @@ void CEqualizer::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
 				LL14(L"ピアノロールウィンドウを開きます。", L"Open the piano roll window.", L"Ouvrir la fenetre du piano roll.", L"Apri la finestra del piano roll.", L"Abrir la ventana del piano roll.",
 					L"피아노 롤 창을 엽니다.", L"打开钢琴卷帘窗口。", L"فتح نافذة لفافة البيانو.", L"Открыть окно пианоролла.", L"Piano-Roll-Fenster öffnen.",
 					L"Abrir a janela do piano roll.", L"Open het piano-roll-venster.", L"Otworz okno piano roll.", L"Piyano rulosu penceresini ac."));
+			openSub->AddCommand(IDM_EQ_OPEN_MIDIMON,
+				LL14(L"MIDIモニタを開く", L"Open MIDI monitor", L"Ouvrir le moniteur MIDI", L"Apri monitor MIDI", L"Abrir monitor MIDI",
+					L"MIDI 모니터 열기", L"打开MIDI监视器", L"فتح مراقب MIDI", L"Открыть MIDI-монитор", L"MIDI-Monitor öffnen",
+					L"Abrir monitor MIDI", L"MIDI-monitor openen", L"Otworz monitor MIDI", L"MIDI izleyiciyi ac"),
+				LL14(L"MIDI 32パート・モニタを開きます。", L"Open the 32-part MIDI monitor.", L"Ouvrir le moniteur MIDI 32 parties.", L"Apri il monitor MIDI a 32 parti.", L"Abrir el monitor MIDI de 32 partes.",
+					L"MIDI 32파트 모니터를 엽니다.", L"打开 MIDI 32 声部监视器。", L"فتح مراقب MIDI ذا 32 جزءاً.", L"Открыть MIDI-монитор на 32 партии.", L"32-Part-MIDI-Monitor öffnen.",
+					L"Abrir o monitor MIDI de 32 partes.", L"Open de MIDI-monitor met 32 partijen.", L"Otworz monitor MIDI 32 partii.", L"32 part MIDI izleyiciyi ac."));
 			openSub->AddCommand(ID_HELP_SHOWSHEET,
 				LL14(L"操作ガイド", L"Operation guide", L"Guide d'utilisation", L"Guida operativa",
 					L"Guía de operación", L"조작 가이드", L"操作指南", L"دليل التشغيل",
@@ -1616,6 +1624,10 @@ void CEqualizer::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
 	else if (cmd == IDM_EQ_OPEN_PIANO) {
 		if (og && ::IsWindow(og->GetSafeHwnd()))
 			og->PostMessage(WM_OGG_TOGGLE_SUBUI, 1, 0);
+	}
+	else if (cmd == IDM_EQ_OPEN_MIDIMON) {
+		if (og && ::IsWindow(og->GetSafeHwnd()))
+			og->PostMessage(WM_OGG_TOGGLE_SUBUI, 3, 0);
 	}
 	else if (cmd == ID_HELP_SHOWSHEET) ShowHelpSheet();
 	else if (cmd)

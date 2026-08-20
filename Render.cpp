@@ -1,4 +1,4 @@
-// Render.cpp : インプリメンテーション ファイル
+﻿// Render.cpp : インプリメンテーション ファイル
 //
 
 #include "stdafx.h"
@@ -226,6 +226,10 @@ void CRdHelpDlg::OnPaint()
 		L"· Intervalo …… temporización; muy corto = cortes", L"· 인터럽트 간격 …… 버퍼 타이밍. 너무 짧으면 끊김", L"· 中断间隔 …… 缓冲时序；过短可能跳音", L"· فاصل المقاطعة …… توقيت المخزن؛ القصير جداً يقطع",
 		L"· Интервал …… тайминг буфера; слишком мало — сбои", L"· Interrupt …… Puffer-Timing; zu kurz = Aussetzer", L"· Intervalo …… timing do buffer; curto demais falha", L"· Interrupt …… buffertiming; te kort = haperingen",
 		L"· Interwał …… timing bufora; za krótki = przeskoki", L"· Kesme aralığı …… tampon zamanlaması; çok kısa = atlama")); y += lh;
+	body(L, y, LL14(L"・再生開始 …… リングへ積んだ実デコードだけを出す。FLAC等で頭が重ならない", L"· Playback start …… emit only decoded ring bytes; FLAC intro is not doubled", L"· Début …… uniquement les octets décodés; pas de double intro FLAC", L"· Avvio …… solo byte decodificati; intro FLAC non duplicata",
+		L"· Inicio …… solo bytes decodificados; intro FLAC sin duplicar", L"· 재생 시작 …… 디코드된 링만 출력. FLAC 인트로 중복 없음", L"· 开始播放 …… 只输出已解码的环形数据，FLAC 开头不重叠", L"· بدء التشغيل …… إخراج المفكوك فقط؛ بدون تكرار مقدمة FLAC",
+		L"· Старт …… только декодированное; начало FLAC не двоится", L"· Start …… nur dekodierte Ringdaten; FLAC-Intro nicht doppelt", L"· Início …… só bytes descodificados; intro FLAC sem duplicar", L"· Start …… alleen gedecodeerde ringbytes; FLAC-intro niet dubbel",
+		L"· Start …… tylko zdekodowany pierścień; intro FLAC bez dubletu", L"· Başlangıç …… yalnızca çözülen halka; FLAC giriş çiftlenmez")); y += lh;
 	body(L, y, LL14(L"・MAXサンプル／24・32bit／アップスケール …… 出力形式の上限と変換", L"· Max sample / 24·32bit / upscale …… output format limits", L"· Échant. max / 24·32 bits / upscale …… format de sortie", L"· Camp. max / 24·32 bit / upscale …… formato uscita",
 		L"· Muestreo máx. / 24·32 bits / upscale …… formato", L"· MAX 샘플/24·32bit/업스케일 …… 출력 형식", L"· 最大采样/24·32bit/升频 …… 输出格式上限", L"· أقصى عينات/24·32بت/ترقية …… حدود الخرج",
 		L"· Макс. частота / 24·32 бит / апскейл …… формат", L"· Max. Rate / 24·32 Bit / Upscale …… Ausgabeformat", L"· Taxa máx. / 24·32 bits / upscale …… formato", L"· Max. sample / 24·32 bit / upscale …… formaat",
@@ -438,9 +442,18 @@ void MpRecreatePlaybackOutput()
 /////////////////////////////////////////////////////////////////////////////
 // CRender ダイアログ
 
+CRender* g_renderDlg = nullptr;
+
+void CloseRenderIfOpen()
+{
+	if (g_renderDlg && ::IsWindow(g_renderDlg->GetSafeHwnd()))
+		g_renderDlg->DestroyWindow();
+}
+
 IMPLEMENT_DYNAMIC(CRender, CCustomBlurDialogExBase)
 CRender::CRender(CWnd* pParent /*=NULL*/)
 	: CCustomBlurDialogExBase(CRender::IDD, pParent)
+	, m_modeless(0)
 {
 	//{{AFX_DATA_INIT(CRender)
 		// メモ - ClassWizard はこの位置にマッピング用のマクロを追加または削除します。
@@ -546,6 +559,7 @@ BEGIN_MESSAGE_MAP(CRender, CCustomBlurDialogExBase)
 	ON_BN_CLICKED(IDC_KPI_PLUGIN_RELOAD, &CRender::OnKpiPluginReload)
 	ON_BN_CLICKED(IDC_FONT, &CRender::OnFontMain)
 	ON_BN_CLICKED(IDC_FONT2, &CRender::OnFontList)
+	ON_WM_CLOSE()
 	ON_BN_CLICKED(IDOK, &CRender::OnBnClickedOk)
 	ON_BN_CLICKED(IDC_CHECK49, &CRender::OnBnClicked24bit)
 	ON_BN_CLICKED(IDC_CHECK50, &CRender::OnBnClickedCheck50)
@@ -721,8 +735,8 @@ BOOL CRender::OnInitDialog()
 	SetDlgItemText(IDC_MID_PREFER_KPI, LL14(L"KPI優先", L"Prefer KPI", L"Preferer KPI", L"Preferisci KPI", L"Preferir KPI", L"KPI 우선", L"优先KPI", L"تفضيل KPI", L"Предпочитать KPI", L"KPI bevorzugen", L"Preferir KPI", L"KPI verkiezen", L"Preferuj KPI", L"KPI tercih"));
 	SetDlgItemText(IDC_MID_PREFER_VST, LL14(L"VST優先", L"Prefer VST", L"Preferer VST", L"Preferisci VST", L"Preferir VST", L"VST 우선", L"优先VST", L"تفضيل VST", L"Предпочитать VST", L"VST bevorzugen", L"Preferir VST", L"VST verkiezen", L"Preferuj VST", L"VST tercih"));
 	SetDlgItemText(IDC_STATIC_VST_MULTI, LL14(L"MIDI出力", L"MIDI out", L"Sortie MIDI", L"Uscita MIDI", L"Salida MIDI", L"MIDI 출력", L"MIDI输出", L"خرج MIDI", L"MIDI-выход", L"MIDI-Out", L"Saida MIDI", L"MIDI-uit", L"Wyjscie MIDI", L"MIDI cikis"));
-	SetDlgItemText(IDC_STATIC_VST_EXTRA, LL14(L"追加検索", L"Extra folder", L"Dossier extra", L"Cartella extra", L"Carpeta extra", L"추가 폴더", L"附加搜索", L"مجلد إضافي", L"Доп. папка", L"Zusatzordner", L"Pasta extra", L"Extra map", L"Dodatkowy folder", L"Ekstra klasör"));
-	SetDlgItemText(IDC_STATIC_VST_DLL, LL14(L"明示DLL", L"Explicit DLL", L"DLL explicite", L"DLL esplicita", L"DLL explícita", L"명시 DLL", L"指定DLL", L"DLL صريح", L"Явный DLL", L"Explizite DLL", L"DLL explícita", L"Expliciete DLL", L"Jawny DLL", L"Açık DLL"));
+	SetDlgItemText(IDC_STATIC_VST_DLL, LL14(L"GS VST", L"GS VST", L"GS VST", L"GS VST", L"GS VST", L"GS VST", L"GS VST", L"GS VST", L"GS VST", L"GS VST", L"GS VST", L"GS VST", L"GS VST", L"GS VST"));
+	SetDlgItemText(IDC_STATIC_VST_EXTRA, LL14(L"XG VST", L"XG VST", L"XG VST", L"XG VST", L"XG VST", L"XG VST", L"XG VST", L"XG VST", L"XG VST", L"XG VST", L"XG VST", L"XG VST", L"XG VST", L"XG VST"));
 	SetDlgItemText(IDC_VST_SCAN_NOW, LL14(L"再", L"Scan", L"Scan", L"Scan", L"Scan", L"재", L"再", L"مسح", L"Скан", L"Scan", L"Scan", L"Scan", L"Skan", L"Tara"));
 	m_vstExtraPath.SetWindowText(savedata.vstExtraPath);
 	m_vstMultiDll.SetWindowText(savedata.vstMultiDll);
@@ -745,20 +759,20 @@ BOOL CRender::OnInitDialog()
 	if (m_help.GetSafeHwnd())
 		m_tooltip.AddTool(&m_help, LL14(L"操作ガイドを表示", L"Show operation guide", L"Afficher le guide", L"Mostra guida", L"Mostrar guía", L"조작 가이드 표시", L"显示操作指南", L"إظهار الدليل", L"Показать руководство", L"Bedienungsanleitung", L"Mostrar guia", L"Handleiding tonen", L"Pokaż przewodnik", L"İşlem kılavuzunu göster"));
 	m_tooltip.AddTool(&m_vstMultiCombo, LL14(
-		L"接続中のMIDI出力機器。明示DLLが空のときに使います。先頭はWindows MIDIマッパー。",
-		L"Connected MIDI outputs. Used when the explicit DLL is empty. First item is Windows MIDI Mapper.",
-		L"Sorties MIDI connectees. Utilisees si le DLL est vide. Premier = MIDI Mapper.",
-		L"Uscite MIDI collegate. Usate se la DLL e vuota. Primo = MIDI Mapper.",
-		L"Salidas MIDI conectadas. Se usan si la DLL esta vacia. Primero = MIDI Mapper.",
-		L"연결된 MIDI 출력. 명시 DLL이 비었을 때 사용. 첫 항목은 MIDI Mapper.",
-		L"已连接的MIDI输出。显式DLL为空时使用。第一项为 Windows MIDI Mapper。",
-		L"مخارج MIDI المتصلة. تُستخدم عند فراغ DLL. الأول = MIDI Mapper.",
-		L"Подключённые MIDI-выходы. Если DLL пуст. Первый = MIDI Mapper.",
-		L"Angeschlossene MIDI-Ausgaenge. Bei leerer DLL. Erstes = MIDI Mapper.",
-		L"Saidas MIDI ligadas. Usadas se a DLL estiver vazia. Primeiro = MIDI Mapper.",
-		L"Aangesloten MIDI-uitgangen. Bij lege DLL. Eerste = MIDI Mapper.",
-		L"Podlaczone wyjscia MIDI. Gdy DLL pusty. Pierwsze = MIDI Mapper.",
-		L"Bagli MIDI cikislar. DLL bossa kullanilir. Ilk = MIDI Mapper."));
+		L"接続中のMIDI出力機器。GS/XG の明示VSTが両方空のときに使います。先頭はWindows MIDIマッパー。",
+		L"Connected MIDI outputs. Used when both GS and XG VSTs are empty. First item is Windows MIDI Mapper.",
+		L"Sorties MIDI connectees. Utilisees si GS et XG sont vides. Premier = MIDI Mapper.",
+		L"Uscite MIDI collegate. Usate se GS e XG sono vuoti. Primo = MIDI Mapper.",
+		L"Salidas MIDI conectadas. Se usan si GS y XG estan vacios. Primero = MIDI Mapper.",
+		L"연결된 MIDI 출력. GS/XG VST가 둘 다 비었을 때 사용. 첫 항목은 MIDI Mapper.",
+		L"已连接的MIDI输出。GS/XG 显式VST都空时使用。第一项为 Windows MIDI Mapper。",
+		L"مخارج MIDI المتصلة. تُستخدم عند فراغ GS وXG. الأول = MIDI Mapper.",
+		L"Подключённые MIDI-выходы. Если GS и XG пусты. Первый = MIDI Mapper.",
+		L"Angeschlossene MIDI-Ausgaenge. Wenn GS und XG leer. Erstes = MIDI Mapper.",
+		L"Saidas MIDI ligadas. Usadas se GS e XG estiverem vazios. Primeiro = MIDI Mapper.",
+		L"Aangesloten MIDI-uitgangen. Als GS en XG leeg zijn. Eerste = MIDI Mapper.",
+		L"Podlaczone wyjscia MIDI. Gdy GS i XG puste. Pierwsze = MIDI Mapper.",
+		L"Bagli MIDI cikislar. GS ve XG bossa kullanilir. Ilk = MIDI Mapper."));
 	m_tooltip.AddTool(&m_vstScanNow, LL14(
 		L"接続中のMIDI出力機器を再検出します",
 		L"Rescan connected MIDI output devices",
@@ -774,7 +788,36 @@ BOOL CRender::OnInitDialog()
 		L"MIDI-uitgangen opnieuw zoeken",
 		L"Ponownie wykryj wyjscia MIDI",
 		L"Bagli MIDI cikislarini yeniden tara"));
-	m_tooltip.AddTool(&m_vstMultiDll, LL14(L"VST音源DLLを直接指定（空=MIDI出力コンボの機器）", L"Explicit VSTi DLL (empty=MIDI out combo)", L"DLL VSTi explicite (vide=combo MIDI)", L"DLL VSTi esplicita (vuoto=combo MIDI)", L"DLL VSTi explícita (vacío=combo MIDI)", L"VSTi DLL 직접 지정(비우면 MIDI 출력 콤보)", L"直接指定VSTi DLL（空=MIDI输出组合框）", L"DLL VSTi صريح (فارغ=قائمة MIDI)", L"Явный VSTi DLL (пусто=комбо MIDI)", L"Explizite VSTi-DLL (leer=MIDI-Out-Combo)", L"DLL VSTi explícita (vazio=combo MIDI)", L"Expliciete VSTi-DLL (leeg=MIDI-combo)", L"Jawny DLL VSTi (puste=combo MIDI)", L"Acik VSTi DLL (bos=MIDI combo)"));
+	m_tooltip.AddTool(&m_vstMultiDll, LL14(
+		L"GS用 VST音源（SC-VA 等）。XGリセットが無いSMFで使います。空ならXG側、両方空ならMIDIマッパー。",
+		L"GS VSTi (SC-VA etc.). Used when the SMF has no XG reset. Empty falls back to XG; both empty uses MIDI Mapper.",
+		L"VSTi GS (SC-VA etc.). Utilise si le SMF n'a pas de reset XG. Vide = XG; les deux vides = MIDI Mapper.",
+		L"VSTi GS (SC-VA ecc.). Usato se lo SMF non ha reset XG. Vuoto = XG; entrambi vuoti = MIDI Mapper.",
+		L"VSTi GS (SC-VA etc.). Se usa si el SMF no tiene reset XG. Vacio = XG; ambos vacios = MIDI Mapper.",
+		L"GS용 VSTi(SC-VA 등). XG 리셋이 없는 SMF에서 사용. 비면 XG, 둘 다 비면 MIDI Mapper.",
+		L"GS用 VSTi（SC-VA 等）。SMF 无 XG 复位时使用。空则用 XG，都空则 MIDI Mapper。",
+		L"VSTi لـ GS. يُستخدم إن لم يكن في SMF إعادة XG. فارغ=XG؛ كلاهما فارغ=MIDI Mapper.",
+		L"VSTi GS (SC-VA и т.д.). Если в SMF нет XG reset. Пусто = XG; оба пусты = MIDI Mapper.",
+		L"GS-VSTi (SC-VA usw.). Bei SMF ohne XG-Reset. Leer = XG; beide leer = MIDI Mapper.",
+		L"VSTi GS (SC-VA etc.). Usado se o SMF nao tiver reset XG. Vazio = XG; ambos vazios = MIDI Mapper.",
+		L"GS-VSTi (SC-VA enz.). Bij SMF zonder XG-reset. Leeg = XG; beide leeg = MIDI Mapper.",
+		L"VSTi GS (SC-VA itd.). Gdy SMF nie ma resetu XG. Puste = XG; oba puste = MIDI Mapper.",
+		L"GS VSTi (SC-VA vb.). SMF'de XG reset yoksa. Bos = XG; ikisi de bos = MIDI Mapper."));
+	m_tooltip.AddTool(&m_vstExtraPath, LL14(
+		L"XG用 VST音源（S-YXG50 等）。XG System On があるSMFで使います。空ならGS側。",
+		L"XG VSTi (S-YXG50 etc.). Used when the SMF has XG System On. Empty falls back to GS.",
+		L"VSTi XG (S-YXG50 etc.). Utilise si le SMF a XG System On. Vide = GS.",
+		L"VSTi XG (S-YXG50 ecc.). Usato se lo SMF ha XG System On. Vuoto = GS.",
+		L"VSTi XG (S-YXG50 etc.). Se usa si el SMF tiene XG System On. Vacio = GS.",
+		L"XG용 VSTi(S-YXG50 등). XG System On이 있는 SMF에서 사용. 비면 GS.",
+		L"XG用 VSTi（S-YXG50 等）。SMF 含 XG System On 时使用。空则用 GS。",
+		L"VSTi لـ XG. يُستخدم عند وجود XG System On. فارغ=GS.",
+		L"VSTi XG (S-YXG50 и т.д.). Если в SMF есть XG System On. Пусто = GS.",
+		L"XG-VSTi (S-YXG50 usw.). Bei SMF mit XG System On. Leer = GS.",
+		L"VSTi XG (S-YXG50 etc.). Usado se o SMF tiver XG System On. Vazio = GS.",
+		L"XG-VSTi (S-YXG50 enz.). Bij SMF met XG System On. Leeg = GS.",
+		L"VSTi XG (S-YXG50 itd.). Gdy SMF ma XG System On. Puste = GS.",
+		L"XG VSTi (S-YXG50 vb.). SMF'de XG System On varsa. Bos = GS."));
 	m_tooltip.AddTool(GetDlgItem(IDOK), LL14(L"設定を保存して閉じます", L"Save settings and close", L"Enregistrer les parametres et fermer", L"Salva impostazioni e chiudi", L"Guardar ajustes y cerrar", L"설정 저장 후 닫기", L"保存设置并关闭", L"حفظ الإعدادات وإغلاق", L"Сохранить настройки и закрыть", L"Einstellungen speichern und schließen", L"Salvar configuracoes e fechar", L"Instellingen opslaan en sluiten", L"Zapisz ustawienia i zamknij", L"Ayarları kaydet ve kapat"));	m_tooltip.AddTool(GetDlgItem(IDCANCEL), LL14(L"保存せずに閉じます", L"Close without saving", L"Fermer sans enregistrer", L"Chiudi senza salvare", L"Cerrar sin guardar", L"저장하지 않고 닫기", L"不保存并关闭", L"إغلاق دون حفظ", L"Закрыть без сохранения", L"Ohne Speichern schließen", L"Fechar sem salvar", L"Sluiten zonder opslaan", L"Zamknij bez zapisywania", L"Kaydetmeden kapat"));
 	m_tooltip.AddTool(GetDlgItem(IDC_COMBO2), LL14(L"DirectSoundの出力デバイスを選択します", L"Select DirectSound output device", L"Choisir le peripherique de sortie DirectSound", L"Seleziona dispositivo di uscita DirectSound", L"Seleccionar dispositivo de salida DirectSound", L"DirectSound 출력 장치 선택", L"选择 DirectSound 输出设备", L"اختر جهاز إخراج DirectSound", L"Выбрать устройство вывода DirectSound", L"DirectSound-Ausgabegerat wahlen", L"Selecionar dispositivo de saida DirectSound", L"DirectSound-uitvoerapparaat kiezen", L"Wybierz urzadzenie wyjsciowe DirectSound", L"DirectSound cikis aygitini sec"));
 	m_tooltip.AddTool(GetDlgItem(IDC_COMBO_MICDEV), LL14(L"WAV保存時のマイクミックス／録音に使うマイク端末を選びます", L"Select microphone for WAV mic-mix / recording", L"Choisir le micro pour le mix WAV / enregistrement", L"Scegli il microfono per mix WAV / registrazione", L"Elegir microfono para mix WAV / grabacion", L"WAV 마이크 믹스/녹음에 쓸 마이크 선택", L"选择用于WAV麦克风混音/录音的麦克风", L"اختر الميكروفون لمزج/تسجيل WAV", L"Выберите микрофон для микса/записи WAV", L"Mikrofon fur WAV-Mix / Aufnahme wahlen", L"Escolher microfone para mix WAV / gravacao", L"Kies microfoon voor WAV-mix / opname", L"Wybierz mikrofon do miksu/nagrania WAV", L"WAV miks/kayit icin mikrofon secin"));
@@ -1060,33 +1103,9 @@ BOOL CALLBACK CRender::DSEnumCallback(LPGUID pGUID, LPCWSTR strDesc,LPCWSTR strD
 	return TRUE;
 }
 
-void CRender::OnOK() 
+void CRender::OnOK()
 {
-	// TODO: この位置にその他の検証用のコードを追加してください
-	savedata.render=m_1.GetCurSel();
-	savedata.evr=m_evr.GetCheck();
-	savedata.con=m_con.GetCheck();
-	savedata.aero=m_a.GetCheck();
-	savedata.ffd=m_ffd.GetCheck();
-	savedata.vob=m_vob.GetCheck();
-	savedata.haali=m_haali.GetCheck();
-	savedata.audiost=m_audiost.GetCheck();
-	savedata.bit24 = m_24.GetCheck();
-	savedata.bit32 = m_32bit.GetCheck();
-	savedata.m4a = m_m4a.GetCheck();
-	savedata.ms = m_ms.GetPos();
-	savedata.ms2 = m_hyouji2.GetPos() * 16;
-	savedata.eqCodeMs = m_eqCode.GetPos();
-	if (savedata.eqCodeMs < 16) savedata.eqCodeMs = 16;
-	if (savedata.eqCodeMs > 500) savedata.eqCodeMs = 500;
-	savedata.samples = samp[m_Hz.GetCurSel()];
-	savedata.speanamode = m_speana.GetCheck();
-	savedata.speananum = m_speana_num.GetCurSel();
-	savedata.lang = m_comboLang.GetCurSel();
-
-	//	savedata.mp3orig=m_mp3orig.GetCheck();
-	ReleaseRenderGrassBackdrop();
-	CCustomBlurDialogExBase::OnOK();
+	OnBnClickedOk();
 }
 
 INT_PTR CRender::OnToolHitTest(CPoint point, TOOLINFO* pTI) const
@@ -1360,18 +1379,10 @@ void CRender::FillVstMultiCombo()
 
 void CRender::OnVstExtraBrowse()
 {
-	BROWSEINFO bi = {};
-	TCHAR path[MAX_PATH] = {};
-	bi.hwndOwner = m_hWnd;
-	bi.lpszTitle = LL14(L"追加VSTフォルダ", L"Extra VST folder", L"Dossier VST extra", L"Cartella VST extra",
-		L"Carpeta VST extra", L"추가 VST 폴더", L"附加VST文件夹", L"مجلد VST إضافي", L"Доп. папка VST",
-		L"Zusätzlicher VST-Ordner", L"Pasta VST extra", L"Extra VST-map", L"Dodatkowy folder VST", L"Ekstra VST klasörü");
-	bi.ulFlags = BIF_RETURNONLYFSDIRS | BIF_NEWDIALOGSTYLE;
-	LPITEMIDLIST pidl = SHBrowseForFolder(&bi);
-	if (!pidl) return;
-	if (SHGetPathFromIDList(pidl, path))
-		m_vstExtraPath.SetWindowText(path);
-	CoTaskMemFree(pidl);
+	CFileDialog dlg(TRUE, L"dll", NULL, OFN_FILEMUSTEXIST | OFN_HIDEREADONLY,
+		L"VST (*.dll;*.vst3)|*.dll;*.vst3|All (*.*)|*.*||", this);
+	if (dlg.DoModal() != IDOK) return;
+	m_vstExtraPath.SetWindowText(dlg.GetPathName());
 }
 
 void CRender::OnVstMultiBrowse()
@@ -1532,7 +1543,12 @@ void CRender::OnBnClickedOk()
 	}
 	extern int gameon;
 	ReleaseRenderGrassBackdrop();
-	CCustomBlurDialogExBase::OnOK();
+	if (m_modeless) {
+		MpPersistSavedataQuick();
+		CloseModeless();
+	} else {
+		CCustomBlurDialogExBase::OnOK();
+	}
 }
 
 void CRender::OnCbnSelchangeMic()
@@ -1906,8 +1922,9 @@ void CRender::OnMoving(UINT fwSide, LPRECT pRect)
 
 int CRender::Create(CWnd* pWnd)
 {
-	m_pParent = NULL;
-	BOOL bret = CCustomBlurDialogExBase::Create(CRender::IDD, this);
+	m_pParent = pWnd;
+	m_modeless = 1;
+	BOOL bret = CCustomBlurDialogExBase::Create(CRender::IDD, pWnd);
 #if CCUSTOM_AERO_SUPPORT
 	if (savedata.aero == 1 && !CCC_IsWin11())
 #else
@@ -2068,7 +2085,35 @@ void CRender::OnBnClickedCancel()
 	}
 
 	ReleaseRenderGrassBackdrop();
-	CCustomBlurDialogExBase::OnCancel();
+	if (m_modeless)
+		CloseModeless();
+	else
+		CCustomBlurDialogExBase::OnCancel();
+}
+
+void CRender::OnCancel()
+{
+	OnBnClickedCancel();
+}
+
+void CRender::OnClose()
+{
+	OnBnClickedCancel();
+}
+
+void CRender::CloseModeless()
+{
+	if (::IsWindow(GetSafeHwnd()))
+		DestroyWindow();
+}
+
+void CRender::PostNcDestroy()
+{
+	CCustomBlurDialogExBase::PostNcDestroy();
+	if (g_renderDlg == this)
+		g_renderDlg = nullptr;
+	if (m_modeless)
+		delete this;
 }
 
 static void SyncRenderGrassBackdrop(CRender* pRender)

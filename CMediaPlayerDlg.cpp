@@ -1,4 +1,4 @@
-// CMediaPlayerDlg.cpp : メディアプレイヤーモード画面(張りぼて)とモード選択ダイアログ
+﻿// CMediaPlayerDlg.cpp : メディアプレイヤーモード画面(張りぼて)とモード選択ダイアログ
 //
 // 実体は COggDlg(og->) と CPlayList(pl->)。ここは表示と操作の取り次ぎだけを行う。
 // メディアプレイヤーモード中は og / pl のウィンドウを非表示にして裏で生かしておく。
@@ -1382,6 +1382,7 @@ BEGIN_MESSAGE_MAP(CMediaPlayerDlg, CCustomBlurDialogExBase)
 	ON_COMMAND(ID_MP_CORR_METER, &CMediaPlayerDlg::OnCorrMeterToggle)
 	ON_COMMAND(ID_MP_OPEN_ANALYZER, &CMediaPlayerDlg::OnAnalyzer)
 	ON_COMMAND(ID_MP_OPEN_PIANOROLL, &CMediaPlayerDlg::OnPiano)
+	ON_COMMAND(ID_MP_OPEN_MIDIMON, &CMediaPlayerDlg::OnMidiMonitor)
 	ON_COMMAND(ID_MP_OPEN_EQ, &CMediaPlayerDlg::OnEq)
 	ON_COMMAND(ID_MP_OPEN_PROTOOLS, &CMediaPlayerDlg::OnProTools)
 	ON_COMMAND(ID_MP_LRC_EXPAND, &CMediaPlayerDlg::OnLrcExpand)
@@ -2630,6 +2631,7 @@ void CMediaPlayerDlg::RequestAppShutdown()
 {
 	DesktopLyricsPrepareAppExit();
 	MpDjPadPrepareAppExit();
+	CloseRenderIfOpen();
 	SavePos();
 	if (og && ::IsWindow(og->GetSafeHwnd()))
 		og->PostMessage(WM_COMMAND, MAKEWPARAM(IDOK, BN_CLICKED), 0);
@@ -3757,6 +3759,8 @@ void CMediaPlayerDlg::DoLayout()
 		savedata.mpBotToolsInited = 1;
 		savedata.mpBotToolsFlags = 0x70F; // DJ|Tag|BPM|Sleep|VST|Maze|Race
 	}
+	// VSTホストは切替対象にせず、底バーへ常時出す
+	savedata.mpBotToolsFlags |= 1024;
 	const int botFl = savedata.mpBotToolsFlags;
 	CCustomStandardButton* botBtn[11] = {
 		&m_botDj, &m_botTag, &m_botBpm, &m_botSleep, &m_botMirror, &m_botSsViz, &m_botAlarm, &m_botRemote, &m_botVst, &m_botMaze, &m_botRace
@@ -6721,6 +6725,12 @@ void CMediaPlayerDlg::OnAnalyzer()
 		og->PostMessage(WM_OGG_TOGGLE_SUBUI, 2, 0);  // 2=analyzer
 }
 
+void CMediaPlayerDlg::OnMidiMonitor()
+{
+	if (og && ::IsWindow(og->GetSafeHwnd()))
+		og->PostMessage(WM_OGG_TOGGLE_SUBUI, 3, 0);  // 3=MIDI monitor
+}
+
 void CMediaPlayerDlg::OnProTools()
 {
 	extern CProToolsDlg* g_proToolsDlg;
@@ -7479,9 +7489,15 @@ void CMediaPlayerDlg::ToggleBotVisFlag(int bit)
 {
 	if (!savedata.mpBotToolsInited) {
 		savedata.mpBotToolsInited = 1;
-		savedata.mpBotToolsFlags = 0x0F;
+		savedata.mpBotToolsFlags = 0x70F; // DJ|Tag|BPM|Sleep|VST|Maze|Race
 	}
-	savedata.mpBotToolsFlags ^= bit;
+	// VSTホスト(1024)は常時表示。消さない。
+	if (bit == 1024) {
+		savedata.mpBotToolsFlags |= 1024;
+	} else {
+		savedata.mpBotToolsFlags ^= bit;
+		savedata.mpBotToolsFlags |= 1024;
+	}
 	MpPersistSavedataQuick();
 	m_mpBotShort = -1;
 	DoLayout();
@@ -10088,6 +10104,10 @@ void CMediaPlayerDlg::OnRButtonUp(UINT nFlags, CPoint point)
 						LL14(L"ピアノロール...", L"Piano roll...", L"Piano roll...", L"Piano roll...", L"Piano roll...", L"피아노 롤...", L"钢琴卷帘...", L"لفة البيانو...", L"Пианоролл...", L"Piano Roll...", L"Piano roll...", L"Piano roll...", L"Piano roll...", L"Piano roll..."),
 						savedata.pianorollwindow != 0,
 						LL14(L"ピアノロールウィンドウを開閉します", L"Open or close the piano-roll window", L"Ouvrir/fermer la fenetre piano roll", L"Apri/chiudi la finestra piano roll", L"Abrir/cerrar la ventana piano roll", L"피아노 롤 창을 여닫기", L"打开或关闭钢琴卷帘窗口", L"فتح/إغلاق نافذة لفة البيانو", L"Открыть/закрыть окно пианоролла", L"Piano-Roll-Fenster oeffnen/schliessen", L"Abrir/fechar a janela do piano roll", L"Piano-rollvenster openen/sluiten", L"Otworz/zamknij okno piano roll", L"Piano roll penceresini ac/kapat"));
+					wins->AddCheck(ID_MP_OPEN_MIDIMON,
+						LL14(L"MIDIモニタ...", L"MIDI monitor...", L"Moniteur MIDI...", L"Monitor MIDI...", L"Monitor MIDI...", L"MIDI 모니터...", L"MIDI监视器...", L"مراقب MIDI...", L"MIDI-монитор...", L"MIDI-Monitor...", L"Monitor MIDI...", L"MIDI-monitor...", L"Monitor MIDI...", L"MIDI izleyici..."),
+						savedata.midimonwindow != 0,
+						LL14(L"MIDI 32パート・モニタを開閉します（.mid の GS/XG 演奏状態）", L"Open or close the 32-part MIDI monitor (GS/XG state of the playing .mid)", L"Ouvrir/fermer le moniteur MIDI 32 parties (etat GS/XG du .mid)", L"Apri/chiudi il monitor MIDI a 32 parti (stato GS/XG del .mid)", L"Abrir/cerrar el monitor MIDI de 32 partes (estado GS/XG del .mid)", L"MIDI 32파트 모니터를 여닫기(재생 중 .mid의 GS/XG 상태)", L"打开或关闭 MIDI 32 声部监视器（正在播放的 .mid 的 GS/XG 状态）", L"فتح/إغلاق مراقب MIDI ذا 32 جزءاً", L"Открыть/закрыть MIDI-монитор на 32 партии (состояние GS/XG у .mid)", L"32-Part-MIDI-Monitor oeffnen/schliessen (GS/XG des .mid)", L"Abrir/fechar o monitor MIDI de 32 partes (estado GS/XG do .mid)", L"MIDI-monitor met 32 partijen openen/sluiten (GS/XG van .mid)", L"Otworz/zamknij monitor MIDI 32 partii (stan GS/XG pliku .mid)", L"32 part MIDI izleyiciyi ac/kapat (.mid GS/XG durumu)"));
 					wins->AddCheck(ID_MP_OPEN_EQ,
 						LL14(L"イコライザー...", L"Equalizer...", L"Egaliseur...", L"Equalizzatore...", L"Ecualizador...",
 							L"이퀄라이저...", L"均衡器...", L"المعادل...", L"Эквалайзер...", L"Equalizer...",
@@ -11002,8 +11022,9 @@ void CMediaPlayerDlg::ShowToolsExtrasMenu(CPoint screenPt)
 		{
 			if (!savedata.mpBotToolsInited) {
 				savedata.mpBotToolsInited = 1;
-				savedata.mpBotToolsFlags = 0x0F;
+				savedata.mpBotToolsFlags = 0x70F; // DJ|Tag|BPM|Sleep|VST|Maze|Race
 			}
+			savedata.mpBotToolsFlags |= 1024; // VSTホストは常時表示
 			const int bf = savedata.mpBotToolsFlags;
 			CCustomPopupMenu* botSub = sub->AddSubMenu(
 				LL14(L"底バーのツールボタン", L"Bottom bar tool buttons", L"Boutons outils bas", L"Pulsanti strumenti in basso", L"Botones de herramientas abajo",
@@ -11021,7 +11042,6 @@ void CMediaPlayerDlg::ShowToolsExtrasMenu(CPoint screenPt)
 				botSub->AddCheck(ID_MP_BOTVIS_SSVIZ, LL14(L"SS ビジュアライザ", L"SS visualizer", L"Visualiseur SS", L"Visualizzatore SS", L"Visualizador SS", L"SS 비주얼", L"SS 可视化", L"عارض SS", L"SS-визуализатор", L"SS-Visualizer", L"Visual SS", L"SS-visualizer", L"Wizual SS", L"SS gorsel"), (bf & 32) != 0);
 				botSub->AddCheck(ID_MP_BOTVIS_ALARM, LL14(L"アラーム", L"Alarm", L"Alarme", L"Sveglia", L"Alarma", L"알람", L"闹钟", L"منبه", L"Будильник", L"Wecker", L"Alarme", L"Wekker", L"Budzik", L"Alarm"), (bf & 64) != 0);
 				botSub->AddCheck(ID_MP_BOTVIS_REMOTE, LL14(L"リモート", L"Remote", L"Remote", L"Remote", L"Remoto", L"리모트", L"遥控", L"تحكم", L"Пульт", L"Remote", L"Remoto", L"Remote", L"Pilot", L"Uzaktan"), (bf & 128) != 0);
-				botSub->AddCheck(ID_MP_BOTVIS_VST, LL14(L"VSTホスト", L"VST Host", L"Hote VST", L"Host VST", L"Host VST", L"VST 호스트", L"VST主机", L"مضيف VST", L"Хост VST", L"VST-Host", L"Host VST", L"VST-host", L"Host VST", L"VST host"), (bf & 1024) != 0);
 				botSub->AddCheck(ID_MP_BOTVIS_MAZE, LL14(L"迷路", L"Maze", L"Labyrinthe", L"Labirinto", L"Laberinto", L"미로", L"迷宫", L"متاهة", L"Лабиринт", L"Labyrinth", L"Labirinto", L"Doolhof", L"Labirynt", L"Labirent"), (bf & 256) != 0);
 				botSub->AddCheck(ID_MP_BOTVIS_RACE, LL14(L"レース", L"Race", L"Course", L"Gara", L"Carrera", L"레이스", L"竞速", L"سباق", L"Гонка", L"Rennen", L"Corrida", L"Race", L"Wyścig", L"Yarış"), (bf & 512) != 0);
 			}

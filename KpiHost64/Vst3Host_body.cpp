@@ -1,4 +1,4 @@
-﻿#include "stdafx.h"
+﻿#include "kpihost_stdafx.h"
 #include "Vst3Host.h"
 
 #include "pluginterfaces/base/ipluginbase.h"

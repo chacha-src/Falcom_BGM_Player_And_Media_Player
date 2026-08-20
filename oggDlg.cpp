@@ -29,6 +29,7 @@ int flacmode = 0;
 #include "CPianoRoll.h"
 #include "CPianoRollTuneDlg.h"
 #include "CAnalyzerDlg.h"
+#include "CMidiMonitorDlg.h"
 #include "CProToolsDlg.h"
 #include "TranscodeExport.h"
 #include "CPromptEngine.h"
@@ -464,6 +465,21 @@ static BOOL ResumeModeUsesPlayb(int m)
 	return FALSE;
 }
 
+// mid/プロジェクトは KPI/VST 再生になり、mode=-2 に落ちない。
+// 旧仕様で -2 に落ちていた頃の DShow 途中保存が残っていても効かせない。
+static BOOL IsMidiOrProjectMedia(LPCTSTR path)
+{
+	if (!path || !*path) return FALSE;
+	return (VstIsMidiExt(path) || VstIsProjectExt(path)) ? TRUE : FALSE;
+}
+
+static BOOL ResumeDshowApplies(int m, LPCTSTR path)
+{
+	if (m != -2) return FALSE;
+	if (IsMidiOrProjectMedia(path)) return FALSE;
+	return TRUE;
+}
+
 // 動画グラフ構築(play/plays)の前に呼ぶ。.save が無ければ 0。
 // g_resumeSilentArm: 0=未指定 / 1=はい(途中から) / 2=いいえ(先頭から)
 static volatile LONG g_resumeSilentArm = 0;
@@ -524,6 +540,9 @@ BOOL OggPrepareResumeBeforePlayback(LPCTSTR mediaPath)
 	if (InterlockedCompareExchange(&g_inDougaTeardown, 0, 0) != 0)
 		return FALSE;
 	if (!mediaPath || !*mediaPath) return TRUE;
+	// mid は DShow 途中保存の対象外。内蔵(savecheck_mp3)がOFFなら確認も出さない。
+	if (IsMidiOrProjectMedia(mediaPath) && !savedata.savecheck_mp3)
+		return TRUE;
 	CString path = ResumeSavePathRead(mediaPath);
 	if (!ResumeSaveFileExists(path)) return TRUE;
 	const LONG already = InterlockedCompareExchange(&g_resumeSilentArm, 0, 0);
@@ -554,6 +573,9 @@ static int PromptResumePlaybackIfSaveExists(CWnd* wnd, LPCTSTR mediaPath)
 {
 	UNREFERENCED_PARAMETER(wnd);
 	if (!mediaPath || !*mediaPath) return 0;
+	// mid + DShow専用チェックのみ → 確認しない（旧 -2 落ち時代の .save も無視）
+	if (IsMidiOrProjectMedia(mediaPath) && !savedata.savecheck_mp3)
+		return 0;
 	CString path = ResumeSavePathRead(mediaPath);
 	if (!ResumeSaveFileExists(path)) return 0;
 	const LONG arm = InterlockedExchange(&g_resumeSilentArm, 0);
@@ -1907,6 +1929,7 @@ COggDlg::COggDlg(CWnd* pParent /*=NULL*/)
 	m_PianoRollDlg = new CPianoRoll();
 	m_PianoRollTuneDlg = new CPianoRollTuneDlg();
 	m_AnalyzerDlg = new CAnalyzerDlg();
+	m_MidiMonitorDlg = new CMidiMonitorDlg();
 }
 
 void COggDlg::DoDataExchange(CDataExchange* pDX)
@@ -2766,7 +2789,7 @@ void OggArmSilentResumeFromCurrent()
 		InterlockedExchange(&g_silentResumeApply, 0);
 		return;
 	}
-	if (!ResumeModeUsesPlayb(mode) && mode != -2) {
+	if (!ResumeModeUsesPlayb(mode) && !ResumeDshowApplies(mode, filen)) {
 		InterlockedExchange(&g_silentResumeApply, 0);
 		return;
 	}
@@ -2774,7 +2797,7 @@ void OggArmSilentResumeFromCurrent()
 	BOOL atBoundary = FALSE;
 	if (ResumeModeUsesPlayb(mode) && ResumePlaybAtEndOrStart())
 		atBoundary = TRUE;
-	if (mode == -2) {
+	if (ResumeDshowApplies(mode, filen)) {
 		if (aa1_ == 0.0) atBoundary = TRUE;
 		if (oggsize2 > 0.0 && aa1_ >= oggsize2) atBoundary = TRUE;
 	}
@@ -11182,11 +11205,11 @@ void COggDlg::play()
 		int vstOk = 0;
 #if !defined(_WIN64)
 		int triedRemote = 0;
-		const int useRemote = VstShouldOpenRemote64(vstPlug, VST_PATH_CHARS);
+		const int useRemote = VstShouldOpenRemote64(mid, vstPlug, VST_PATH_CHARS);
 		if (useRemote) {
 			triedRemote = 1;
 			KPIHOST64_ForeignOpenReply orp{};
-			if (g_kpiHost.VstOpen(std::wstring(mid), std::wstring(vstPlug),
+			if (g_kpiHost.VstOpen(std::wstring(mid), std::wstring(savedata.vstMultiDll),
 				std::wstring(savedata.vstExtraPath), orp)) {
 				g_vstRemote64 = 1;
 				wavbit_sample_Hz = (int)orp.sampleRate;
@@ -12648,6 +12671,7 @@ void COggDlg::play()
 	playf = 1;
 	fade1 = 0; fade = 1.0f; fadeadd = 0.0f;
 	poss = 0; poss2 = 0; poss3 = 0; poss4 = 0; poss5 = 0; poss6 = 0;
+	ZeroMemory(bufwav3, sizeof(bufwav3));
 	g_oggPcmDecodePos = 0;
 	g_oggRbPrimingNeed = OggRbLatencyReserveBytes();
 	mcnt = mcnt1 = mcnt2 = mcnt3 = mcnt4 = mcnt5 = mcnt6 = 0;
@@ -12759,15 +12783,14 @@ void COggDlg::play()
 		const int bpf = (g_ds_pcm_ch > 0 && g_ds_pcm_bits >= 8) ? (g_ds_pcm_ch * (g_ds_pcm_bits / 8)) : 4;
 		const int ring = (int)((g_ds_buffer_bytes > 0) ? g_ds_buffer_bytes : (ULONG)(OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM));
 		const bool isDsd = (g_openDecoderMode == -7 || mode == -7);
-		const bool isFlac = (g_openDecoderMode == -8 || mode == -8);
 		// 比較基準: 2026.08.08 88c4b63（通常再生） / 08.09 e125f4a（DSD用のみ長プリフィル）。
 		// 非DSDへゼロ＋強制プリフィルを広げると、頭がリングに残り通知追従まで
-		// 同じ内容が数周する（KPIで確認済。MP3も同症状）。
-		// DSD/FLAC以外は 88c4b63 どおり WriteCursor ベース・ゼロ無し・強制プリフィル無し。
-		if (isDsd || isFlac) {
+		// 同じ内容が数周する（KPI/MP3で確認済。FLACも同症状で2〜3周に聞こえる）。
+		// FLAC は KPI/MP3 と同じ 88c4b63（WriteCursor ベース・ゼロ無し・強制プリフィル無し）。
+		if (isDsd) {
 			if (len1 <= 0) {
 				const int rate = (g_ds_pcm_rate >= 8000) ? g_ds_pcm_rate : ((wavbit_sample_Hz >= 8000) ? wavbit_sample_Hz : 44100);
-				int fill = isDsd ? (ring / 2) : (bpf * (rate / 2)); // DSD:~半リング / FLAC:~500ms
+				int fill = ring / 2;
 				const int maxMs = bpf * (rate / 2); // ~500ms 上限
 				if (fill > maxMs && maxMs > 0)
 					fill = maxMs;
@@ -12826,15 +12849,15 @@ void COggDlg::play()
 	else if (m_dsb) {
 		m_dsb->SetVolume((savedata.dsvol - 1) * 10);
 	}
-	// DSD/FLAC のみプリフィル位置を通知へ渡す。MP3/KPI等は 88c4b63 どおり触らない
-	// （ここで進めると通知側の固定 oldw と食い違い、頭がリングに残って周回する）。
-	if (g_openDecoderMode == -7 || mode == -7 || g_openDecoderMode == -8 || mode == -8)
+	// DSD のみプリフィル位置を通知へ渡す。FLAC/MP3/KPI は 88c4b63 どおり触らない
+	// （FLAC で進めると通知の wrap 埋めが頭をリングに残して 2〜3 周する）。
+	if (g_openDecoderMode == -7 || mode == -7)
 		oldw = (ULONG)(len1 + len2);
 	CFile f123;
 	int flggg = 0;
 	if (silentNow) {
 		// 既に位置はメモリにある。途中再生ダイアログは出さない
-		if (pMainFrame1 && pGraphBuilder && mode == -2) {
+		if (pMainFrame1 && pGraphBuilder && ResumeDshowApplies(mode, filen)) {
 			pMainFrame1->plays2();
 			TryRunMediaControlQuick();
 			if (silentAa > 0.0) {
@@ -12843,7 +12866,7 @@ void COggDlg::play()
 			}
 		}
 	}
-	else if (ResumeModeUsesPlayb(mode) || mode == -2) {
+	else if (ResumeModeUsesPlayb(mode) || ResumeDshowApplies(mode, filen)) {
 		flggg = PromptResumePlaybackIfSaveExists(this, filen);
 		if (flggg == 1 && f123.Open(ResumeSavePathRead(filen), CFile::modeRead | CFile::shareDenyWrite, NULL) == TRUE) {
 			f123.Close();
@@ -12856,7 +12879,7 @@ void COggDlg::play()
 					ResumeApplyPlaybSeek(pb);
 				}
 			}
-			if (mode == -2) {
+			if (ResumeDshowApplies(mode, filen)) {
 				// 動画の途中位置は Run 後にシーク（下の TryRun 相当は呼び出し側）
 				// ここでは plays2 のみ。シークは呼び出し側で Run 後に行う想定だが、
 				// play() 内のこの経路では直後に DS Play するため、ここで Run→seek する。
@@ -12895,13 +12918,13 @@ void COggDlg::play()
 	thn1 = FALSE;
 	playf = 1;
 	plf = 1;
-	// DSD/FLAC: Play 前に通知。KPI は Play 後（ここに混ぜると破綻する）。
-	if (g_openDecoderMode == -7 || mode == -7 || g_openDecoderMode == -8 || mode == -8)
+	// DSD: Play 前に通知。FLAC は KPI と同じく Play 後（先に notify すると頭が残って数周する）。
+	if (g_openDecoderMode == -7 || mode == -7)
 		BeginPlaybackNotifyThread();
 	if (m_dsb) {
 		m_dsb->Play(0, 0, DSBPLAY_LOOPING);
 	}
-	if (!(g_openDecoderMode == -7 || mode == -7 || g_openDecoderMode == -8 || mode == -8))
+	if (!(g_openDecoderMode == -7 || mode == -7))
 		BeginPlaybackNotifyThread();
 
 	if (!xfSoftOpen) {
@@ -17904,7 +17927,9 @@ static bool PlaybackShortMeansEof(int gotBytes)
 	if (gotBytes <= 0)
 		return true;
 	const int dm = ActiveDecodeMode();
-	if (dm == -3 || IsForeignPluginMode(dm))
+	// KPI / 外部プラグイン / mid VST: 途中短読みは誤停止しやすい。
+	// ゼロ返却と無音連続（playwav* 側）で止める。
+	if (dm == -3 || IsForeignPluginMode(dm) || dm == MODE_VST_MIDI)
 		return false;
 	const int total = PlaybackSrcTotalSamples();
 	const int hz = (wavbit_sample_Hz > 0) ? wavbit_sample_Hz : 44100;
@@ -18661,7 +18686,7 @@ int playwavkpi(BYTE* bw, int old, int l1, int l2)
 	}
 	if (l1 != rrr) {
 		// 書き出し中は秒数上限で止める。短い返却を即 EOF にすると RB プライミングで失敗する。
-		if (endf == 1 && !exporting) {
+		if (!WantPlaybackLoop() && !exporting) {
 			if (rrr < l1)
 				ZeroMemory(bw + old + rrr, (SIZE_T)(l1 - rrr));
 			// 途中のリング/RB短読みは終端にしない（DSD/MP3 と同じ）。真欠落だけ fade。
@@ -18674,10 +18699,11 @@ int playwavkpi(BYTE* bw, int old, int l1, int l2)
 			}
 			// else: 要求長を維持（ゼロ埋め済み）。誤停止で KPI を解放しない。
 		}
-		else if (endf == 1 && exporting && rrr <= 0 && fade1) {
+		else if (!WantPlaybackLoop() && exporting && rrr <= 0 && fade1) {
 			l1 = rrr;
 		}
-		else if (!(endf == 1 && exporting)) {
+		else if (WantPlaybackLoop() && !exporting && PlaybackShortMeansEof(rrr)) {
+			// endf は KPI/MIDI で常に 1 だが、ループ再生ONなら先頭へ戻す（FLAC/MP3 と同じ）
 			PlaybackNoteLoop(loop1);
 			if (kvver == 2)
 				og->mod->SetPosition(og->kmp1, 0);
@@ -18685,11 +18711,13 @@ int playwavkpi(BYTE* bw, int old, int l1, int l2)
 				if (g_kpiRemote && g_kpiSession.sessionId != 0) {
 					uint64_t np = 0;
 					g_kpiHost.Seek(g_kpiSession.sessionId, 0, 1, np);
+					ResetKpiRemoteCache();
 				}
 				else if (kpidec) {
 					kpidec->Seek(0, 1);
 				}
 			}
+			kpi_silence_bytes = 0;
 			poss2 = poss3 = poss4 = poss6 = 0; poss5 = loop1;
 			cnt3 = 0;
 			RubberBand_DestroyBank(0);
@@ -18704,6 +18732,8 @@ int playwavkpi(BYTE* bw, int old, int l1, int l2)
 			l1 = rrr;
 		}
 		else {
+			if (rrr < l1)
+				ZeroMemory(bw + old + rrr, (SIZE_T)(l1 - rrr));
 			l1 = rrr;
 		}
 	}
@@ -18715,7 +18745,7 @@ int playwavkpi(BYTE* bw, int old, int l1, int l2)
 				AdvanceOutAndSrcPos(rrr / bpf);
 		}
 		if (l2 != rrr) {
-			if (endf == 1 && !exporting) {
+			if (!WantPlaybackLoop() && !exporting) {
 				if (rrr < l2)
 					ZeroMemory(bw + rrr, (SIZE_T)(l2 - rrr));
 				if (PlaybackShortMeansEof(rrr)) {
@@ -18726,10 +18756,10 @@ int playwavkpi(BYTE* bw, int old, int l1, int l2)
 						endflg = 1;
 				}
 			}
-			else if (endf == 1 && exporting && rrr <= 0 && fade1) {
+			else if (!WantPlaybackLoop() && exporting && rrr <= 0 && fade1) {
 				l2 = rrr;
 			}
-			else if (!(endf == 1 && exporting)) {
+			else if (WantPlaybackLoop() && !exporting && PlaybackShortMeansEof(rrr)) {
 				PlaybackNoteLoop(loop1);
 				if (kvver == 2)
 					og->mod->SetPosition(og->kmp1, 0);
@@ -18737,11 +18767,13 @@ int playwavkpi(BYTE* bw, int old, int l1, int l2)
 					if (g_kpiRemote && g_kpiSession.sessionId != 0) {
 						uint64_t np = 0;
 						g_kpiHost.Seek(g_kpiSession.sessionId, 0, 1, np);
+						ResetKpiRemoteCache();
 					}
 					else if (kpidec) {
 						kpidec->Seek(0, 1);
 					}
 				}
+				kpi_silence_bytes = 0;
 				poss2 = poss3 = poss4 = poss6 = 0; poss5 = loop1;
 				cnt3 = 0;
 				RubberBand_DestroyBank(0);
@@ -18756,6 +18788,8 @@ int playwavkpi(BYTE* bw, int old, int l1, int l2)
 				l2 = rrr;
 			}
 			else {
+				if (rrr < l2)
+					ZeroMemory(bw + rrr, (SIZE_T)(l2 - rrr));
 				l2 = rrr;
 			}
 		}
@@ -18778,7 +18812,7 @@ static int playwavForeignPull(BYTE* bw, int old, int l1, int l2, int (*readfn)(B
 			AdvanceOutAndSrcPos(rrr / bpf);
 	}
 	if (l1 != rrr) {
-		if (endf == 1 && !exporting) {
+		if (!WantPlaybackLoop() && !exporting) {
 			if (rrr < l1)
 				ZeroMemory(bw + old + rrr, (SIZE_T)(l1 - rrr));
 			if (PlaybackShortMeansEof(rrr)) {
@@ -18789,12 +18823,13 @@ static int playwavForeignPull(BYTE* bw, int old, int l1, int l2, int (*readfn)(B
 					endflg = 1;
 			}
 		}
-		else if (endf == 1 && exporting && rrr <= 0 && fade1) {
+		else if (!WantPlaybackLoop() && exporting && rrr <= 0 && fade1) {
 			l1 = rrr;
 		}
-		else if (!(endf == 1 && exporting)) {
+		else if (WantPlaybackLoop() && !exporting && PlaybackShortMeansEof(rrr)) {
 			PlaybackNoteLoop(loop1);
 			if (seek0) seek0();
+			kpi_silence_bytes = 0;
 			poss2 = poss3 = poss4 = poss6 = 0; poss5 = loop1;
 			cnt3 = 0;
 			RubberBand_DestroyBank(0);
@@ -18809,6 +18844,8 @@ static int playwavForeignPull(BYTE* bw, int old, int l1, int l2, int (*readfn)(B
 			l1 = rrr;
 		}
 		else {
+			if (rrr < l1)
+				ZeroMemory(bw + old + rrr, (SIZE_T)(l1 - rrr));
 			l1 = rrr;
 		}
 	}
@@ -18826,7 +18863,7 @@ static int playwavForeignPull(BYTE* bw, int old, int l1, int l2, int (*readfn)(B
 				AdvanceOutAndSrcPos(rrr / bpf);
 		}
 		if (l2 != rrr) {
-			if (endf == 1 && !exporting) {
+			if (!WantPlaybackLoop() && !exporting) {
 				if (rrr < l2)
 					ZeroMemory(bw + rrr, (SIZE_T)(l2 - rrr));
 				if (PlaybackShortMeansEof(rrr)) {
@@ -18837,12 +18874,13 @@ static int playwavForeignPull(BYTE* bw, int old, int l1, int l2, int (*readfn)(B
 						endflg = 1;
 				}
 			}
-			else if (endf == 1 && exporting && rrr <= 0 && fade1) {
+			else if (!WantPlaybackLoop() && exporting && rrr <= 0 && fade1) {
 				l2 = rrr;
 			}
-			else if (!(endf == 1 && exporting)) {
+			else if (WantPlaybackLoop() && !exporting && PlaybackShortMeansEof(rrr)) {
 				PlaybackNoteLoop(loop1);
 				if (seek0) seek0();
+				kpi_silence_bytes = 0;
 				poss2 = poss3 = poss4 = poss6 = 0; poss5 = loop1;
 				cnt3 = 0;
 				RubberBand_DestroyBank(0);
@@ -18857,6 +18895,8 @@ static int playwavForeignPull(BYTE* bw, int old, int l1, int l2, int (*readfn)(B
 				l2 = rrr;
 			}
 			else {
+				if (rrr < l2)
+					ZeroMemory(bw + rrr, (SIZE_T)(l2 - rrr));
 				l2 = rrr;
 			}
 		}
@@ -19171,35 +19211,164 @@ int readvst(BYTE* bw, int cnt)
 	return VstMidiRead(bw, cnt);
 }
 
+// mid VST: 演奏後も VST が無音/残響を出し続ける／length 超過後に 0 埋めが続くのを
+// KPI と同様の無音連続で打ち切る（約4秒）。x86 直読み・KpiHost64 経由ともここで見る。
+static int VstSilenceAccum(BYTE* pcm, int bytes)
+{
+	if (bytes <= 0) return 0;
+	const bool exporting = (wavExportPath.GetLength() > 0 || g_isWavExportRendering);
+	if (exporting) return 0;
+	if (IsBlockSilent(pcm, bytes, abs(wavsam_depth)))
+		kpi_silence_bytes += bytes;
+	else
+		kpi_silence_bytes = 0;
+	const int hz = (wavbit_sample_Hz > 0) ? wavbit_sample_Hz : 44100;
+	const int ch = (wavchannel > 0) ? wavchannel : 2;
+	const int bps = abs(wavsam_depth) / 8;
+	if (bps <= 0) return 0;
+	const int maxSilentBytes = (int)((double)hz * (double)ch * (double)bps * 4.0);
+	if (maxSilentBytes > 0 && kpi_silence_bytes >= maxSilentBytes)
+		return 1;
+	return 0;
+}
+
+static void VstMarkPlaybackEof()
+{
+	if (savedata.saverenzoku == 0)
+		fade1 = 1;
+	else
+		endflg = 1;
+}
+
+// ループ先頭へ（DS を止めない。先頭 Seek は高速）
+static void VstSeekLoopStart()
+{
+	PlaybackNoteLoop(loop1);
+	kpi_silence_bytes = 0;
+	if (g_vstRemote64) {
+		VstPrefetchStop();
+		g_kpiHost.VstSeek(0);
+		VstPrefetchStart(wavbit_sample_Hz, wavchannel, abs(wavsam_depth));
+	} else {
+		VstMidiSeekSamples(0);
+	}
+	poss2 = poss3 = poss4 = poss6 = 0; poss5 = loop1;
+	cnt3 = 0;
+	RubberBand_DestroyBank(0);
+	reset = TRUE;
+}
+
 int playwavvst(BYTE* bw, int old, int l1, int l2)
 {
 	// x86 直読み(VstMidiRead)・x64 リモート(KpiHost64 VstRender→readvst)とも
-	// 生PCMをここで受け、KPI と同じ equaliser + その他のkpi(kpivol) を載せる。
+	// 生PCMをここで受け、KPI と同じ equaliser + その他のkpi(kpivol) + 無音終端。
 	EqualiserSetFormatVolContext(1, FALSE);
+	const bool exporting = (wavExportPath.GetLength() > 0 || g_isWavExportRendering);
+	const bool doLoop = WantPlaybackLoop() && !exporting;
 	int rrr = readvst(bw + old, l1);
 	if (rrr < 0) rrr = 0;
+	{
+		const int bpf = PcmOutBytesPerFrame();
+		if (bpf > 0)
+			AdvanceOutAndSrcPos(rrr / bpf);
+	}
+	auto vstHitEnd = [&](int got) -> bool {
+		if (exporting) return false;
+		if (PlaybackShortMeansEof(got)) return true;
+		return false;
+	};
 	if (rrr < l1) {
-		if (rrr > 0) ZeroMemory(bw + old + rrr, l1 - rrr);
-		else ZeroMemory(bw + old, l1);
+		if (rrr > 0) ZeroMemory(bw + old + rrr, (SIZE_T)(l1 - rrr));
+		else ZeroMemory(bw + old, (SIZE_T)l1);
+		if (vstHitEnd(rrr)) {
+			if (doLoop) {
+				VstSeekLoopStart();
+				const int got = readvst(bw + old + rrr, l1 - rrr);
+				if (got > 0) {
+					{
+						const int bpf = PcmOutBytesPerFrame();
+						if (bpf > 0)
+							AdvanceOutAndSrcPos(got / bpf);
+					}
+					rrr += got;
+					l1 = rrr;
+				} else {
+					l1 = rrr;
+				}
+			} else {
+				l1 = rrr;
+				VstMarkPlaybackEof();
+			}
+		}
 	}
 	if (rrr > 0) {
+		if (VstSilenceAccum(bw + old, rrr)) {
+			if (doLoop) {
+				VstSeekLoopStart();
+			} else {
+				VstMarkPlaybackEof();
+			}
+		}
 		EqualiserSetFormatVolContext(1, FALSE);
 		equaliser(bw + old, rrr, reset);
 		if (og) og->FeedPianoRoll(bw + old, rrr);
 		reset = FALSE;
 	}
+	else if (vstHitEnd(0)) {
+		if (doLoop)
+			VstSeekLoopStart();
+		else
+			VstMarkPlaybackEof();
+	}
 	if (l2 > 0) {
 		int r2 = readvst(bw, l2);
 		if (r2 < 0) r2 = 0;
+		{
+			const int bpf = PcmOutBytesPerFrame();
+			if (bpf > 0)
+				AdvanceOutAndSrcPos(r2 / bpf);
+		}
 		if (r2 < l2) {
-			if (r2 > 0) ZeroMemory(bw + r2, l2 - r2);
-			else ZeroMemory(bw, l2);
+			if (r2 > 0) ZeroMemory(bw + r2, (SIZE_T)(l2 - r2));
+			else ZeroMemory(bw, (SIZE_T)l2);
+			if (vstHitEnd(r2)) {
+				if (doLoop) {
+					VstSeekLoopStart();
+					const int got = readvst(bw + r2, l2 - r2);
+					if (got > 0) {
+						{
+							const int bpf = PcmOutBytesPerFrame();
+							if (bpf > 0)
+								AdvanceOutAndSrcPos(got / bpf);
+						}
+						r2 += got;
+						l2 = r2;
+					} else {
+						l2 = r2;
+					}
+				} else {
+					l2 = r2;
+					VstMarkPlaybackEof();
+				}
+			}
 		}
 		if (r2 > 0) {
+			if (VstSilenceAccum(bw, r2)) {
+				if (doLoop)
+					VstSeekLoopStart();
+				else
+					VstMarkPlaybackEof();
+			}
 			EqualiserSetFormatVolContext(1, FALSE);
 			equaliser(bw, r2, reset);
 			if (og) og->FeedPianoRoll(bw, r2);
 			reset = FALSE;
+		}
+		else if (vstHitEnd(0)) {
+			if (doLoop)
+				VstSeekLoopStart();
+			else
+				VstMarkPlaybackEof();
 		}
 		rrr += r2;
 	}
@@ -19357,9 +19526,10 @@ int readkpi(BYTE* bw, int cnt)
 						}
 					}
 					if (r > 0 && !kpiDecEof) {
-						// 不定長（loop2==0）のゲーム系など、Render が止まらないときの保険。
-						// 総長が分かる曲では末尾の弱い音量を誤って切らない。
-						if (loop2 == 0 && !(wavExportPath.GetLength() > 0 || g_isWavExportRendering)) {
+						// 不定長（loop2==0）のゲーム系、および mid/midi（演奏後も無音が続く場合）。
+						// 総長が分かる非MIDIでは末尾の弱い音量を誤って切らない。
+						const bool midiLike = (sss == "mid" || sss == "midi" || sss == "kar" || sss == "rmi");
+						if ((loop2 == 0 || midiLike) && !(wavExportPath.GetLength() > 0 || g_isWavExportRendering)) {
 							if (IsBlockSilent((const BYTE*)bufkpi + cnt3, (int)r, abs(wavsam_depth))) {
 								kpi_silence_bytes += r;
 							} else {
@@ -19677,13 +19847,18 @@ int readm4a(BYTE* bw, int cnt)
 					// muon 潰しは fade1 停止時のみ（連続再生 endflg 経路では fade1==0 のままなのでここは通さない）
 					if (fade1 == 1 && muon == 0) r = 0;
 
-					int len2 = readtempo(bufkpi, cnt);
+					int tempoIn = (int)cnt3;
+					if (tempoIn > cnt)
+						tempoIn = cnt;
+					if (tempoIn < 0)
+						tempoIn = 0;
+					if (fade1 == 1 && r > 0)
+						tempoIn = (int)r;
+					int len2 = (tempoIn > 0) ? readtempo(bufkpi, tempoIn) : 0;
 
 					if (len2 > 0) {
-						// 書き込み
 						RingBufWrite(bufkpi3, max_buffer_size, poss2, outputRawBytesData.data(), len2);
 						poss4 += len2;
-						if (cnt3 < cnt) return cnt4;
 						if (cnt2 <= cnt3) {
 							cnt3 -= cnt2;
 							if (cnt3 != 0)	memcpy(bufkpi, bufkpi + cnt2, cnt3);
@@ -19698,15 +19873,22 @@ int readm4a(BYTE* bw, int cnt)
 		}
 
 		cnt2 = cnt;
-
-		if (cnt2 > 0) {
+		{
 			int to_read = cnt;
-			RingBufRead(bw, bufkpi3, max_buffer_size, poss3, to_read);
-			poss4 -= to_read;
+			if (to_read > poss4)
+				to_read = (poss4 > 0) ? poss4 : 0;
+			if (to_read > 0) {
+				RingBufRead(bw, bufkpi3, max_buffer_size, poss3, to_read);
+				poss4 -= to_read;
+			}
+			if (to_read < cnt)
+				ZeroMemory(bw + to_read, (SIZE_T)(cnt - to_read));
+			cnt2 = to_read;
+			cnt = to_read;
 		}
 
-		equaliser(bw, cnt, reset);
-		og->FeedPianoRoll(bw, cnt);
+		equaliser(bw, cnt2, reset);
+		og->FeedPianoRoll(bw, cnt2);
 		reset = FALSE;
 
 		cnt4 = cnt3;
@@ -19809,8 +19991,10 @@ int playwavflac(BYTE* bw, int old, int l1, int l2)
 			}
 		}
 		else if (WantPlaybackLoop() || flacmode != 0) {
-			const bool nearEnd = flacEos || PlaybackShortMeansEof(rrr)
-				|| ((loop1 == 0 && loop2 == 0) && rrr == 0);
+			// rrr==0 だけだと曲頭の RB待ちも EOF 扱い→ SetPosition(0) で頭を同じバッファへ再書き込みする
+			const bool nearEnd = flacEos
+				|| (rrr > 0 && PlaybackShortMeansEof(rrr))
+				|| (rrr == 0 && poss5 > 0 && PlaybackShortMeansEof(1));
 			if (nearEnd) {
 				PlaybackNoteLoop(loop1);
 				if (flacmode == 0)
@@ -19846,8 +20030,9 @@ int playwavflac(BYTE* bw, int old, int l1, int l2)
 				}
 			}
 			else if (WantPlaybackLoop() || flacmode != 0) {
-				const bool nearEnd2 = flacEos2 || PlaybackShortMeansEof(rrr)
-					|| ((loop1 == 0 && loop2 == 0) && rrr == 0);
+				const bool nearEnd2 = flacEos2
+					|| (rrr > 0 && PlaybackShortMeansEof(rrr))
+					|| (rrr == 0 && poss5 > 0 && PlaybackShortMeansEof(1));
 				if (nearEnd2) {
 					PlaybackNoteLoop(loop1);
 					if (flacmode == 0)
@@ -19932,7 +20117,6 @@ int readflac(BYTE* bw, int cnt)
 				// fade1 停止フェードで muon を使い切ったら入力を切る（fade1==0 の曲末では muon だけで r を潰さない）
 				if (fade1 == 1 && muon == 0) r = 0;
 				cnt4 = r;
-				if (r == 0) lenl = 0;
 				if (r == 0) {
 					// デコード EOF: readtempo(0) が RB 尻尾を常に吐く（fade1 含む）
 					int tailLen = readtempo(bufkpi, 0);
@@ -19943,17 +20127,14 @@ int readflac(BYTE* bw, int cnt)
 					break;
 				}
 
-				int len2 = readtempo(bufkpi, lenl);
+				// Render 実バイトだけ RB へ。lenl だと bufkpi の未更新余り（前曲の頭）が混ざる
+				int len2 = readtempo(bufkpi, (int)r);
 				if (len2 > 0) {
 					flacRbStallIters = 0;
-					// 書き込み
 					RingBufWrite(bufkpi3, max_buffer_size, poss2, outputRawBytesData.data(), len2);
 					poss4 += len2;
-					if (cnt4 != lenl) return cnt4;
 					if (poss4 > lenl) break;
 				}
-				// len2==0 でもデコードが部分読みなら上位へ返さないとループし得る
-				if (cnt4 != lenl) return cnt4;
 				if (len2 <= 0 && (fade1 == 1 || IsPlaybackStopRequested())) break;
 				// フルブロック decode 済みだが RB がまだ出さない（readmp3 と同様）
 				if (len2 <= 0 && r > 0 && r == (DWORD)lenl) {
@@ -19961,22 +20142,36 @@ int readflac(BYTE* bw, int cnt)
 						break;
 					continue;
 				}
+				// 短読みはリングへ積んで継続（bw 未コピーのまま return すると頭が二重になる）
+				if (r != (DWORD)lenl && poss4 < lenl) {
+					if (rrr == 0)
+						break;
+					if (len2 <= 0 && ++flacRbStallIters >= kFlacRbStallMax)
+						break;
+					continue;
+				}
+				if (poss4 >= lenl)
+					break;
 			}
 		}
 
 		cnt2 = lenl;
-
-		if (cnt2 > 0) {
-			int to_read = lenl;
+		int to_read = lenl;
+		if (to_read > poss4)
+			to_read = (poss4 > 0) ? poss4 : 0;
+		if (to_read > 0) {
 			RingBufRead(bw, bufkpi3, max_buffer_size, poss3, to_read);
 			poss4 -= to_read;
 		}
+		if (to_read < cnt)
+			ZeroMemory(bw + to_read, (SIZE_T)(cnt - to_read));
 
-		equaliser(bw, cnt2, reset);
-		og->FeedPianoRoll(bw, cnt2);
+		equaliser(bw, to_read, reset);
+		og->FeedPianoRoll(bw, to_read);
 		reset = FALSE;
 
-		cnt4 = lenl;
+		cnt4 = (DWORD)to_read;
+		lenl = to_read;
 		unsigned short* bf1, * bf2; bf1 = (unsigned short*)bw; bf2 = (unsigned short*)bufkpi2;
 		//		int fw = playb % (wavchannel);
 		//		bf2 += fw;
@@ -20146,24 +20341,31 @@ int readopus(BYTE* bw, int cnt)
 					wl += PlaybackCcWrite(outputRawBytesData.data(), len2);
 
 					if (len2 > 0) {
-						// 書き込み
 						RingBufWrite(bufkpi3, max_buffer_size, poss2, outputRawBytesData.data(), len2);
 						poss4 += len2;
-						if (r < cnt) return cnt4;
-
+						if (poss4 > cnt)
+							break;
 					}
-					else if (r < cnt)
-						return cnt4;
+					else if (r == 0)
+						break;
 				}
 			}
+		}
 
-			cnt2 = lenl;
-
-			if (cnt2 > 0) {
-				int to_read = cnt;
+		cnt2 = cnt;
+		{
+			int to_read = cnt;
+			if (to_read > poss4)
+				to_read = (poss4 > 0) ? poss4 : 0;
+			if (to_read > 0) {
 				RingBufRead(bw, bufkpi3, max_buffer_size, poss3, to_read);
 				poss4 -= to_read;
 			}
+			if (to_read < cnt)
+				ZeroMemory(bw + to_read, (SIZE_T)(cnt - to_read));
+			cnt2 = to_read;
+			cnt = to_read;
+			lenl = to_read;
 		}
 
 		equaliser(bw, cnt2, reset);
@@ -20171,7 +20373,6 @@ int readopus(BYTE* bw, int cnt)
 		reset = FALSE;
 
 		cnt4 = r;
-		if (r == 0) cnt = 0;
 		unsigned short* bf1, * bf2; bf1 = (unsigned short*)bw; bf2 = (unsigned short*)bufkpi2;
 		//		int fw = playb % (wavchannel);
 		//		bf2 += fw;
@@ -20695,10 +20896,9 @@ int readwav(BYTE* bw, int cnt)
 				wavRbStallIters = 0;
 				RingBufWrite(bufkpi3, max_buffer_size, poss2, outputRawBytesData.data(), len2);
 				poss4 += len2;
-				if (rr > r) return r;
-				if (poss4 > cnt) break;
+				if (rr > r || poss4 > cnt) break;
 			}
-			if (rr > r) return r;
+			if (rr > r) break;
 			if (fade1 == 1) {
 				if (muon != 0) {
 					if (savedata.saverenzoku == 0) { ZeroMemory(bufkpi, rr); muon--; }
@@ -21460,7 +21660,7 @@ void COggDlg::dp(CString a)
 			}
 			// 途中再生シークは Run 後。PitchCorrect 導入直後＋Stopped での SetPositions が不安定
 			if (pMediaControl) { TryRunMediaControlQuick(); }
-			if (mode == -2) {
+			if (ResumeDshowApplies(mode, filen)) {
 				if (f123.Open(ResumeSavePathRead(filen), CFile::modeRead | CFile::shareDenyWrite, NULL) == TRUE) {
 					f123.Read(&aa1_, sizeof(double));
 					f123.Close();
@@ -21667,6 +21867,166 @@ void COggDlg::ResetPauseButtonUi()
 }
 
 // stop() で保存した playb を再生開始時にデコーダへ反映(OnHScroll と同系統)
+static bool IsMidiLikePath(const CString& path)
+{
+	if (path.IsEmpty()) return false;
+	CString e = path;
+	const int d = e.ReverseFind(_T('.'));
+	if (d < 0) return false;
+	e = e.Mid(d);
+	e.MakeLower();
+	return e == _T(".mid") || e == _T(".midi") || e == _T(".kar") || e == _T(".rmi");
+}
+
+// MIDI KPI: Seek だけでは音色/CC/ノートが復元されない。先頭→目標まで Render 破棄。
+// MIDI シークは高速レンダで長くかかり、その間 DS リングが回り続けると古い音がループする。
+// シーク中は Stop + リング全消しし、終わったら再生中だった場合だけ再開する。
+struct MidiSeekDsGuard {
+	BOOL active;
+	BOOL wasPlaying;
+	MidiSeekDsGuard()
+		: active(FALSE), wasPlaying(FALSE)
+	{
+		extern IAudioClient* pAudioClient;
+		extern ULONG g_ds_buffer_bytes;
+		extern int ps;
+		extern BOOL thn;
+		extern LPDIRECTSOUNDBUFFER8 m_dsb;
+		if (!m_dsb) return;
+		active = TRUE;
+		DWORD st = 0;
+		if (m_dsb->GetStatus(&st) == DS_OK && (st & DSBSTATUS_PLAYING))
+			wasPlaying = TRUE;
+		m_dsb->SetVolume(DSBVOLUME_MIN);
+		m_dsb->Stop();
+		if (pAudioClient)
+			pAudioClient->Stop();
+		const ULONG ring = (g_ds_buffer_bytes > 0) ? g_ds_buffer_bytes
+			: (ULONG)(OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM);
+		LPVOID p1 = NULL, p2 = NULL;
+		DWORD l1 = 0, l2 = 0;
+		if (ring > 0 && m_dsb->Lock(0, ring, &p1, &l1, &p2, &l2, 0) == DS_OK) {
+			if (p1 && l1) ZeroMemory(p1, l1);
+			if (p2 && l2) ZeroMemory(p2, l2);
+			m_dsb->Unlock(p1, l1, p2, l2);
+		}
+		(void)ps;
+		(void)thn;
+	}
+	~MidiSeekDsGuard()
+	{
+		extern IAudioClient* pAudioClient;
+		extern int ps;
+		extern BOOL thn;
+		extern LPDIRECTSOUNDBUFFER8 m_dsb;
+		if (!active || !m_dsb) return;
+		LONG vol = (LONG)(savedata.dsvol - 1) * 10;
+		if (vol < DSBVOLUME_MIN) vol = DSBVOLUME_MIN;
+		if (vol > DSBVOLUME_MAX) vol = DSBVOLUME_MAX;
+		m_dsb->SetVolume(vol);
+		// ユーザー一時停止中は再開しない
+		if (wasPlaying && ps == 0 && thn == FALSE) {
+			m_dsb->Play(0, 0, DSBPLAY_LOOPING);
+			if (pAudioClient)
+				pAudioClient->Start();
+		}
+	}
+};
+
+static void KpiMidiSeekAccurate(__int64 samplePos)
+{
+	MidiSeekDsGuard dsHold;
+	if (samplePos < 0) samplePos = 0;
+	kpi_silence_bytes = 0;
+	const int ch = (wavchannel > 0) ? wavchannel : 2;
+	const int srcBits = wavsam_src;
+	const int outBits = abs(wavsam_depth) > 0 ? abs(wavsam_depth) : 16;
+	const DWORD chunk = 8192;
+
+	if (g_kpiRemote && g_kpiSession.sessionId != 0) {
+		// KpiHost64 側 Cmd_Seek が MIDI なら Render 破棄する
+		uint64_t np = 0;
+		g_kpiHost.Seek(g_kpiSession.sessionId, (uint64_t)samplePos, KPI_MEDIAINFO::SEEK_FLAGS_SAMPLE, np);
+		ResetKpiRemoteCache();
+		return;
+	}
+
+	if (kvver == 5 && kpidec) {
+		kpidec->Seek(0, KPI_MEDIAINFO::SEEK_FLAGS_SAMPLE);
+		__int64 left = samplePos;
+		std::vector<BYTE> junk;
+		while (left > 0) {
+			DWORD ask = (DWORD)((left > (__int64)chunk) ? chunk : left);
+			if (srcBits == -32)
+				junk.resize((size_t)ask * (size_t)ch * sizeof(float));
+			else if (srcBits == -64)
+				junk.resize((size_t)ask * (size_t)ch * sizeof(double));
+			else
+				junk.resize((size_t)ask * (size_t)ch * (size_t)(outBits / 8));
+			DWORD got = kpidec->Render(junk.data(), ask);
+			if (got == 0) break;
+			if ((__int64)got > left) got = (DWORD)left;
+			left -= got;
+		}
+		return;
+	}
+
+	if (kvver == 2 && og && og->mod && og->mod->SetPosition && og->mod->Render) {
+		HKMP hk = og->kmp1;
+		if (!hk) return;
+		og->mod->SetPosition(hk, 0);
+		const int bpf = (outBits / 8) * ch;
+		if (bpf <= 0) return;
+		__int64 leftBytes = samplePos * bpf;
+		std::vector<BYTE> junk((size_t)chunk * (size_t)bpf);
+		while (leftBytes > 0) {
+			DWORD ask = (DWORD)((leftBytes > (__int64)junk.size()) ? junk.size() : leftBytes);
+			DWORD got = og->mod->Render(hk, junk.data(), ask);
+			if (got == 0) break;
+			if ((__int64)got > leftBytes) got = (DWORD)leftBytes;
+			leftBytes -= got;
+		}
+	}
+}
+
+static void KpiSeekToPlayb(__int64 samplePos)
+{
+	kpi_silence_bytes = 0;
+	const CString path = !filen.IsEmpty() ? filen : (og ? CString(og->kpi) : CString());
+	if (IsMidiLikePath(path)) {
+		KpiMidiSeekAccurate(samplePos);
+		return;
+	}
+	if (g_kpiRemote && g_kpiSession.sessionId != 0) {
+		uint64_t np = 0;
+		g_kpiHost.Seek(g_kpiSession.sessionId, (uint64_t)samplePos, KPI_MEDIAINFO::SEEK_FLAGS_SAMPLE, np);
+		ResetKpiRemoteCache();
+		return;
+	}
+	if (kvver == 5 && kpidec) {
+		kpidec->Seek((UINT64)samplePos, KPI_MEDIAINFO::SEEK_FLAGS_SAMPLE);
+		return;
+	}
+	if (kvver == 2 && og && og->mod && og->mod->SetPosition) {
+		HKMP hk = og->kmp1;
+		if (hk && og->sikpi.dwSeekable)
+			og->mod->SetPosition(hk, (DWORD)((double)samplePos / (((double)wavbit_sample_Hz * (double)wavchannel) / 2000.0)));
+	}
+}
+
+static void VstSeekToPlayb(__int64 samplePos)
+{
+	MidiSeekDsGuard dsHold;
+	kpi_silence_bytes = 0;
+	if (g_vstRemote64) {
+		VstPrefetchStop();
+		g_kpiHost.VstSeek((uint64_t)samplePos);
+		VstPrefetchStart(wavbit_sample_Hz, wavchannel, abs(wavsam_depth));
+	} else {
+		VstMidiSeekSamples(samplePos);
+	}
+}
+
 static void ResumeApplyPlaybSeek(__int64 pb)
 {
 	playb = pb;
@@ -21684,6 +22044,15 @@ static void ResumeApplyPlaybSeek(__int64 pb)
 			seekadpcm((int)playb);
 		else
 			wav_.Seek(playb);
+		return;
+	}
+	// mid VST / KPI は og 無し（リモート含む）でもシークできる
+	if (mode == -3) {
+		KpiSeekToPlayb(playb);
+		return;
+	}
+	if (mode == MODE_VST_MIDI) {
+		VstSeekToPlayb(playb);
 		return;
 	}
 	if (!og) return;
@@ -21707,29 +22076,6 @@ static void ResumeApplyPlaybSeek(__int64 pb)
 	}
 	if (mode == -7) {
 		dsd_.kpiSetPosition(og->kmp, (DWORD)((double)playb / (((double)wavbit_sample_Hz * (double)wavchannel) / 2000.0)));
-		return;
-	}
-	if (mode == -3) {
-		if (g_kpiRemote && g_kpiSession.sessionId != 0) {
-			uint64_t np = 0;
-			g_kpiHost.Seek(g_kpiSession.sessionId, (uint64_t)playb, KPI_MEDIAINFO::SEEK_FLAGS_SAMPLE, np);
-			ResetKpiRemoteCache();
-		}
-		else if (og->mod && og->mod->SetPosition && og->sikpi.dwSeekable) {
-			og->mod->SetPosition(og->kmp1, (DWORD)((double)playb / (((double)wavbit_sample_Hz * (double)wavchannel) / 2000.0)));
-		}
-		return;
-	}
-	if (mode == MODE_VST_MIDI) {
-		if (g_vstRemote64) {
-			// Buffered audio belongs to the old position; drop it with the
-			// worker so nothing from before the seek is heard afterwards.
-			VstPrefetchStop();
-			g_kpiHost.VstSeek((uint64_t)playb);
-			VstPrefetchStart(wavbit_sample_Hz, wavchannel, abs(wavsam_depth));
-		}
-		else
-			VstMidiSeekSamples((__int64)playb);
 		return;
 	}
 	if (mode == MODE_PLUGIN_WINAMP) {
@@ -21821,7 +22167,7 @@ void COggDlg::stop()
 	// 曲切替時は stop1() 側で保存しない（プレイリストTipの仕様どおり）。
 	const BOOL wantResumeSave =
 		(savedata.savecheck == 1 || savedata.savecheck_mp3 == 1 || savedata.savecheck_dshow == 1)
-		&& (ResumeModeUsesPlayb(mode) || mode == -2);
+		&& (ResumeModeUsesPlayb(mode) || ResumeDshowApplies(mode, filen));
 	if (wantResumeSave) {
 		try {
 			int flg = 0;
@@ -21835,7 +22181,7 @@ void COggDlg::stop()
 					flg = 1;
 				}
 			}
-			if (mode == -2) {
+			if (ResumeDshowApplies(mode, filen)) {
 				if (oggsize2 <= aa1_ && oggsize2 != 0.0) {
 					try {
 						ResumeSaveRemove(filen);
@@ -21849,14 +22195,14 @@ void COggDlg::stop()
 				}
 			}
 			if (flg == 0) {
-				// savecheck_mp3: 内蔵音源全形式 / savecheck_dshow: 動画等
-				if ((savedata.savecheck_mp3 == 1 && ResumeModeUsesPlayb(mode)) || (savedata.savecheck_dshow == 1 && mode == -2)) {
+				// savecheck_mp3: 内蔵音源全形式 / savecheck_dshow: 動画等（mid は除外）
+				if ((savedata.savecheck_mp3 == 1 && ResumeModeUsesPlayb(mode)) || (savedata.savecheck_dshow == 1 && ResumeDshowApplies(mode, filen))) {
 					CFile f;
 					const CString savePath = ResumeSavePathNew(filen);
 					if (!savePath.IsEmpty() && f.Open(savePath, CFile::modeCreate | CFile::modeWrite | CFile::shareExclusive, NULL) == TRUE) {
 						if (ResumeModeUsesPlayb(mode))
 							f.Write(&playb, sizeof(__int64));
-						if (mode == -2)
+						if (ResumeDshowApplies(mode, filen))
 							f.Write(&aa1_, sizeof(double));
 						f.Close();
 						// 旧・メディア隣サイドカーは残さない
@@ -22167,6 +22513,7 @@ BOOL COggDlg::DestroyWindow()
 	}
 	// 再生詳細はモードレス。親(mp/og)破棄より先に閉じる
 	CloseProToolsIfOpen();
+	CloseRenderIfOpen();
 	// メディアプレイヤー画面(オーナー無しトップレベル)を後始末
 	{
 		CMediaPlayerDlg* dyingMp = mp;
@@ -22204,6 +22551,10 @@ BOOL COggDlg::DestroyWindow()
 		m_AnalyzerDlg->DetachForDestroy();
 		m_AnalyzerDlg->DestroyWindow();
 	}
+	if (::IsWindow(m_MidiMonitorDlg->GetSafeHwnd())) {
+		m_MidiMonitorDlg->DetachForDestroy();
+		m_MidiMonitorDlg->DestroyWindow();
+	}
 	if (::IsWindow(m_PianoRollTuneDlg->GetSafeHwnd())) {
 		m_PianoRollTuneDlg->DestroyWindow();
 	}
@@ -22211,6 +22562,7 @@ BOOL COggDlg::DestroyWindow()
 	delete m_PianoRollDlg; m_PianoRollDlg = nullptr;
 	delete m_PianoRollTuneDlg; m_PianoRollTuneDlg = nullptr;
 	delete m_AnalyzerDlg; m_AnalyzerDlg = nullptr;
+	delete m_MidiMonitorDlg; m_MidiMonitorDlg = nullptr;
 	if (m_pDlgColor)delete m_pDlgColor;
 	if (ptl) ptl->Release();
 	if (pcdl) pcdl->Release();
@@ -23400,6 +23752,12 @@ void COggDlg::timerp()
 			&& m_AnalyzerDlg->IsWindowVisible() && !m_AnalyzerDlg->IsIconic())
 			m_AnalyzerDlg->UpdateWindow();
 	}
+	if (plf == 1 && ::IsWindow(m_MidiMonitorDlg->GetSafeHwnd()) && Ms2DrawDue(ms2)) {
+		m_MidiMonitorDlg->PumpSyncNow();
+		if (::IsWindow(m_MidiMonitorDlg->GetSafeHwnd())
+			&& m_MidiMonitorDlg->IsWindowVisible() && !m_MidiMonitorDlg->IsIconic())
+			m_MidiMonitorDlg->UpdateWindow();
+	}
 
 	// スペアナは不透明で先に描く（ピーク／現在を保持）。バナー文字は後から SRCINVERT（XOR）。
 	// コンテキストメニュー Track 中もスペアナ／EQコード供給は止めない（見た目とコード更新を維持）。
@@ -23539,7 +23897,7 @@ void COggDlg::timerp()
 		s.Format(LL14(L"file:aimpプラグイン(%s %s)", L"file:aimp plugin (%s %s)", L"file:Plugin aimp (%s %s)", L"file:Plugin aimp (%s %s)", L"file:Plugin aimp (%s %s)", L"file:aimp 플러그인(%s %s)", L"file:aimp 插件(%s %s)", L"file:إضافة aimp (%s %s)", L"file:Плагин aimp (%s %s)", L"file:aimp-Plugin (%s %s)", L"file:Plugin aimp (%s %s)", L"file:aimp-plugin (%s %s)", L"file:Wtyczka aimp (%s %s)", L"file:aimp eklentisi (%s %s)"), sss, arch);
 	}
 	if (mode == MODE_VST_MIDI) {
-		if (!savedata.vstMultiDll[0]) {
+		if (!savedata.vstMultiDll[0] && !savedata.vstExtraPath[0]) {
 			s.Format(LL14(L"file:mid %s", L"file:mid %s", L"file:mid %s", L"file:mid %s", L"file:mid %s", L"file:mid %s", L"file:mid %s", L"file:mid %s", L"file:mid %s", L"file:mid %s", L"file:mid %s", L"file:mid %s", L"file:mid %s", L"file:mid %s"),
 				savedata.midiOutName[0] ? savedata.midiOutName : L"MIDI Mapper");
 		} else {
@@ -23702,7 +24060,7 @@ void COggDlg::timerp()
 	else if (mode == MODE_VST_MIDI) {
 		s = FormatBannerDataAudioLine();
 		moji(s, 1, 48, 0x7fffff);
-		if (!savedata.vstMultiDll[0])
+		if (!savedata.vstMultiDll[0] && !savedata.vstExtraPath[0])
 			s.Format(_T("midi :%s"), savedata.midiOutName[0] ? savedata.midiOutName : L"MIDI Mapper");
 		else
 			s.Format(_T("vst :%s"), g_vstRemote64 ? L"x64" : L"x86");
@@ -27922,7 +28280,7 @@ void COggDlg::OnRestart()
 				if (pMainFrame1 && pGraphBuilder)pMainFrame1->plays2();
 				TryRunMediaControlQuick();
 				// 途中再生シークは Run 後（PitchCorrect 張り替え直後の Stopped シークを避ける）
-				if (mode == -2) {
+				if (ResumeDshowApplies(mode, filen)) {
 					if (f123.Open(ResumeSavePathRead(filen), CFile::modeRead | CFile::shareDenyWrite, NULL) == TRUE) {
 						f123.Read(&aa1_, sizeof(double));
 						f123.Close();
@@ -29571,15 +29929,10 @@ void COggDlg::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
 				}
 			}
 			else if (mode == -3) { // KPI
-				if (g_kpiRemote && g_kpiSession.sessionId != 0) {
-					// playb は「サンプル位置」扱いなのでそのまま渡す
-					uint64_t np = 0;
-					g_kpiHost.Seek(g_kpiSession.sessionId, (uint64_t)playb, KPI_MEDIAINFO::SEEK_FLAGS_SAMPLE, np);
-					ResetKpiRemoteCache();
-				}
-				else if (mod && mod->SetPosition && sikpi.dwSeekable) {
-					mod->SetPosition(kmp1, (DWORD)((double)playb / (((double)wavbit_sample_Hz * (double)wavchannel) / 2000.0)));
-				}
+				KpiSeekToPlayb(playb);
+			}
+			else if (mode == MODE_VST_MIDI) {
+				VstSeekToPlayb(playb);
 			}
 			else if (mode == -7) { // DSD
 				dsd_.kpiSetPosition(kmp, (DWORD)((double)playb / (((double)wavbit_sample_Hz * (double)wavchannel) / 2000.0)));
@@ -29653,26 +30006,19 @@ void COggDlg::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
 
 void COggDlg::OnButton21()
 {
-	// TODO: この位置にコントロール通知ハンドラ用のコードを追加してください
-	CRender* r = new CRender(CWnd::FromHandle(GetSafeHwnd()));
-	CWnd::PostMessage(0x118);
-	int ret = r->DoModal();
-	char tmp[1024];
-	_getcwd(tmp, 1000);
-	DatArc_Chdir();
-	CFile ab;
-#if _UNICODE
-	if (ab.Open(L"oggYSEDbgmu.dat", CFile::modeCreate | CFile::modeWrite | CFile::shareExclusive, NULL) == TRUE) {
-#else
-	if (ab.Open("oggYSEDbgm.dat", CFile::modeCreate | CFile::modeWrite | CFile::shareExclusive, NULL) == TRUE) {
-#endif
-		ab.Write(&savedata, sizeof(save));
-		ab.Close();
-		DatArc_Commit(L"oggYSEDbgmu.dat");
+	extern CRender* g_renderDlg;
+	if (g_renderDlg && ::IsWindow(g_renderDlg->GetSafeHwnd())) {
+		g_renderDlg->ShowWindow(SW_SHOW);
+		g_renderDlg->SetForegroundWindow();
+		return;
 	}
-	_chdir(tmp);
-	delete r;
+	CRender* r = new CRender(this);
+	g_renderDlg = r;
+	if (!r->Create(this)) {
+		g_renderDlg = nullptr;
+		delete r;
 	}
+}
 
 
 void COggDlg::OnNMReleasedcaptureSlider2(NMHDR * pNMHDR, LRESULT * pResult)
@@ -29927,6 +30273,7 @@ void COggDlg::RefreshAllAeroWindows()
 	refreshMode(m_EqualizerDlg);
 	refreshMode(m_PianoRollDlg);
 	refreshMode(m_AnalyzerDlg);
+	refreshMode(m_MidiMonitorDlg);
 	if (pl) refreshMode(pl);
 	{
 		extern CMediaPlayerDlg* mp;
@@ -30224,7 +30571,9 @@ LRESULT COggDlg::OnToggleSubUiMsg(WPARAM wParam, LPARAM)
 		TogglePianoRoll();
 	else if (wParam == 2)
 		ToggleAnalyzer();
-	else if (wParam >= 10 && wParam <= 16) {
+	else if (wParam == 3)
+		ToggleMidiMonitor();
+	else if (wParam >= 10 && wParam <= 17) {
 		// 起動時サブUI復元: 開くだけ(トグルしない)。1メッセージ=最大1 Create。
 		// SW_SHOWNOACTIVATE でフォーカス奪取・ちらつきを抑える。
 		g_oggSubUiRestoring = 1;
@@ -30293,6 +30642,16 @@ LRESULT COggDlg::OnToggleSubUiMsg(WPARAM wParam, LPARAM)
 				OpenMpDjPadModeless(pParent);
 			}
 		}
+		else if (wParam == 17) {
+			if (savedata.midimonwindow == 1 && m_MidiMonitorDlg) {
+				if (!::IsWindow(m_MidiMonitorDlg->GetSafeHwnd())) {
+					if (!m_MidiMonitorDlg->Create(IDD_MIDIMONITOR, this))
+						savedata.midimonwindow = 0;
+				}
+				if (savedata.midimonwindow == 1 && ::IsWindow(m_MidiMonitorDlg->GetSafeHwnd()))
+					m_MidiMonitorDlg->ShowWindow(SW_SHOWNOACTIVATE);
+			}
+		}
 		}
 		catch (CException* e) {
 			e->Delete();
@@ -30300,7 +30659,7 @@ LRESULT COggDlg::OnToggleSubUiMsg(WPARAM wParam, LPARAM)
 		g_oggSubUiRestoring = 0;
 		// 閉じている窓の空メッセージを飛ばし、次に復元が要る番号へ
 		WPARAM next = wParam + 1;
-		while (next <= 16) {
+		while (next <= 17) {
 			BOOL need = FALSE;
 			if (next == 10)
 				need = (savedata.eqwindow == 1 && m_EqualizerDlg);
@@ -30316,10 +30675,12 @@ LRESULT COggDlg::OnToggleSubUiMsg(WPARAM wParam, LPARAM)
 				need = (savedata.mpCmdRollwindow == 1);
 			else if (next == 16)
 				need = (savedata.mpDjPadwindow == 1);
+			else if (next == 17)
+				need = (savedata.midimonwindow == 1 && m_MidiMonitorDlg);
 			if (need) break;
 			++next;
 		}
-		if (next <= 16)
+		if (next <= 17)
 			PostMessage(WM_OGG_TOGGLE_SUBUI, next, 0);
 		else {
 			// 復元完了: 押下見た目を一度だけ同期(復元中は抑止していた)
@@ -32401,6 +32762,30 @@ void COggDlg::ToggleAnalyzer()
 	if (::IsWindow(m_AnalyzerDlg->GetSafeHwnd())) {
 		m_AnalyzerDlg->ShowWindow(SW_SHOW);
 		m_AnalyzerDlg->SetFocus();
+	}
+}
+
+void COggDlg::ToggleMidiMonitor()
+{
+	if (!m_MidiMonitorDlg)
+		return;
+	if (!::IsWindow(m_MidiMonitorDlg->GetSafeHwnd()))
+	{
+		if (!m_MidiMonitorDlg->Create(IDD_MIDIMONITOR, this)) {
+			savedata.midimonwindow = 0;
+			return;
+		}
+		savedata.midimonwindow = 1;
+	}
+	else {
+		m_MidiMonitorDlg->DetachForDestroy();
+		m_MidiMonitorDlg->DestroyWindow();
+		savedata.midimonwindow = 0;
+	}
+
+	if (::IsWindow(m_MidiMonitorDlg->GetSafeHwnd())) {
+		m_MidiMonitorDlg->ShowWindow(SW_SHOW);
+		m_MidiMonitorDlg->SetFocus();
 	}
 }
 

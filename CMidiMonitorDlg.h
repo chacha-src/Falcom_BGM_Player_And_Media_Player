@@ -1,0 +1,187 @@
+﻿#pragma once
+// CMidiMonitorDlg : MIDI 32パート・モニタ（XG/GS 風）
+// SMF を再生位置に同期して CC/ノート/SysEx を表示。音色名は SASAMI_GS/XG.DAT。
+#include "afxdialogex.h"
+#include "CCustomControl.h"
+#include "GdiSoft3D.h"
+
+class CMidiMonitorDlg : public CCustomBlurDialogExBase
+{
+	DECLARE_DYNAMIC(CMidiMonitorDlg)
+
+public:
+	CMidiMonitorDlg(CWnd* pParent = nullptr);
+	virtual ~CMidiMonitorDlg();
+
+#ifdef AFX_DESIGN_TIME
+	enum { IDD = IDD_MIDIMONITOR };
+#endif
+
+	static constexpr int PART_MAX = 32;
+	static constexpr int NOTE_MAX = 128;
+	static constexpr int NAME_CHARS = 24;
+	static constexpr int EV_MAX = 500000;
+
+	struct MmEv {
+		unsigned __int64 tick;
+		__int64 sample;
+		DWORD msg;
+		DWORD aux;
+		int port;
+		int sysexOff;
+	};
+
+	void PumpSyncNow();
+	void ResetPlaybackState();
+	void DetachForDestroy();
+	void PaletteApplySoft3D();
+	void PersistSoft3D();
+	void LayoutHelpBtn();
+	void ShowHelpSheet();
+	GdiSoft3D::Cam m_cam;
+
+protected:
+	virtual void DoDataExchange(CDataExchange* pDX);
+	virtual BOOL OnInitDialog();
+	DECLARE_MESSAGE_MAP()
+
+	afx_msg void OnPaint();
+	afx_msg BOOL OnEraseBkgnd(CDC* pDC);
+	afx_msg void OnTimer(UINT_PTR nIDEvent);
+	afx_msg void OnSize(UINT nType, int cx, int cy);
+	afx_msg void OnMove(int x, int y);
+	afx_msg void OnShowWindow(BOOL bShow, UINT nStatus);
+	afx_msg void OnClose();
+	afx_msg void OnDestroy();
+	afx_msg void OnBnClickedHelp();
+	afx_msg void OnContextMenu(CWnd* pWnd, CPoint point);
+	afx_msg void OnLButtonDown(UINT nFlags, CPoint point);
+	afx_msg void OnMouseMove(UINT nFlags, CPoint point);
+	afx_msg void OnLButtonUp(UINT nFlags, CPoint point);
+	afx_msg BOOL OnMouseWheel(UINT nFlags, short zDelta, CPoint pt);
+	afx_msg BOOL OnTtnNeedText(UINT id, NMHDR* pNMHDR, LRESULT* pResult);
+	virtual BOOL PreTranslateMessage(MSG* pMsg);
+
+private:
+	struct Part {
+		int pc;
+		int bankMsb;
+		int bankLsb;
+		int mapId;
+		int vol;
+		int exp;
+		int pan;
+		int rev;
+		int crs;
+		int var;
+		int dt;
+		int vibRat;
+		int vibDpt;
+		int vibDly;
+		int lpf;
+		int rsn;
+		int hpf;
+		int atk;
+		int dcy;
+		int rls;
+		int eqLow;
+		int eqHigh;
+		int nrpnMsb;
+		int nrpnLsb;
+		int rpnMsb;
+		int rpnLsb;
+		int dataMsb;
+		BYTE noteOn[NOTE_MAX];
+		int lastNote;
+		int lastVel;
+		int isDrum;
+		int held;
+		float lev;
+		wchar_t name[NAME_CHARS];
+	};
+
+	void ReleasePaintBuffers();
+	bool EnsureFrameBuffer(CDC& refDC, int w, int h);
+	void DrawMonitor2D(CDC& dc, int w, int h, UINT dpi);
+	void DrawMonitor3D(CDC& dc, int w, int h);
+	void DrawMiniKeys(CDC& dc, const CRect& rc, const Part& p);
+	void DrawVBar(CDC& dc, int x, int y, int bw, int bh, int v0, int vmax, COLORREF col);
+	void DrawPanBar(CDC& dc, int x, int y, int bw, int bh, int pan);
+	void SyncFromPlayback();
+	void LoadCurrentMidi();
+	void UnloadMidi();
+	void ResetParts();
+	void ApplyEvent(const MmEv& e);
+	void ApplyShort(int port, DWORD msg);
+	void ApplySysex(const BYTE* d, int n);
+	void ApplyNrpn(Part& p);
+	void RefreshPartName(Part& p);
+	void LookupToneName(int isXg, int mapId, int bankMsb, int bankLsb, int pc, int isDrum, wchar_t* out, int outN);
+	void PersistPos();
+	void SyncSoft3DFromSave();
+	bool IsView3D() const { return m_viewMode == 1; }
+	int Scale(int v96, UINT dpi) const { return MulDiv(v96, (int)dpi, 96); }
+	UINT WindowDpi() const;
+
+	CCustomStandardButton m_help;
+	CToolTipCtrl m_tooltip;
+	TCHAR m_hoverTip[256];
+
+	CDC m_frameDC;
+	CBitmap m_frameBmp;
+	CBitmap* m_frameOld;
+	int m_frameW;
+	int m_frameH;
+#if CCUSTOM_AERO_SUPPORT
+	CCC_ChromaBlitCache m_chromaCache;
+	int m_chromaW;
+	int m_chromaH;
+	bool m_chromaReady;
+#endif
+
+	CFont m_fontHead;
+	CFont m_fontCell;
+	CFont m_fontTiny;
+	int m_fontDpi;
+	int m_fontH;
+
+	Part m_part[PART_MAX];
+	MmEv* m_ev;
+	int m_evCount;
+	int m_evPos;
+	BYTE* m_sx;
+	int m_sxBytes;
+	int m_division;
+	int m_sampleRate;
+	__int64 m_lastPlayb;
+	wchar_t m_loadedPath[520];
+	wchar_t m_titleBuf[280];
+
+	int m_usecQn;
+	int m_tsNum;
+	int m_tsDen;
+	int m_keySf;
+	int m_keyMin;
+	int m_transpose;
+	int m_sysMode; // 0=GM 1=GS 2=XG
+	int m_revType;
+	int m_choType;
+	int m_varType;
+	int m_ins1;
+	int m_ins2;
+	int m_noteCount;
+	int m_masterVol;
+
+	int m_viewMode;
+	int m_mapForce;
+	bool m_frozen;
+	bool m_alwaysOnTop;
+	bool m_paintDisabled;
+	bool m_rotDragging;
+	CPoint m_rotDragOrigin;
+	float m_rotDragYaw0;
+	float m_rotDragPitch0;
+	DWORD m_soft3dTourUntil;
+	int m_hoverCol;
+	int m_hoverPart;
+};

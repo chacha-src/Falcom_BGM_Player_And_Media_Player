@@ -514,6 +514,7 @@ protected:
 	afx_msg void OnEq();
 	afx_msg void OnPiano();
 	afx_msg void OnAnalyzer();
+	afx_msg void OnMidiMonitor();
 	afx_msg void OnProTools();
 	afx_msg void OnFadeout();
 	afx_msg void OnFolder();

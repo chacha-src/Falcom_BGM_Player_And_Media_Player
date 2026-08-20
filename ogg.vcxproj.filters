@@ -489,6 +489,9 @@
     <ClCompile Include="CPianoRoll.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="CMidiMonitorDlg.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="GdiSoft3D.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -1115,6 +1118,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="CPianoRoll.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CMidiMonitorDlg.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="GdiSoft3D.h">

@@ -261,6 +261,7 @@ namespace PianoRoll108
         // では取り切れないので、最後に全域で「より強い確定音の整数倍音位置にある
         // 弱いピック」を剪定する。高い方から見て、より強い下位ピック j の n:1 倍音に
         // あたる i を落とす。独立音級(親に肉薄する強さ)は残す。
+        // n は h2〜h8 まで。24次まで広げるとベースの 15〜20 次としてメロディを落とす。
         // メロディ帯(C4–C6)はピアノのオクターブ重ねを守るため、明確に弱い倍音のみ対象。
         for (int i = count - 1; i > EDGE_LO; --i) {
             if (!outPicked[i]) continue;
@@ -270,7 +271,7 @@ namespace PianoRoll108
                 if (!outPicked[j]) continue;
                 if (blend[j] <= blend[i]) continue;                 // 親はより強い方のみ
                 if (blend[i] > blend[j] * harmMaxRatio) continue;   // 独立音級は残す
-                if (PianoKey::IsHarmonicPairExtended(i, j)) {       // i は j の n:1 倍音
+                if (PianoKey::IsHarmonicPairCompute(i, j, PianoKey::kGhostHarmonicNMax)) {
                     outPicked[i] = false;
                     break;
                 }

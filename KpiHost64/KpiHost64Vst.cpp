@@ -1,4 +1,4 @@
-// KpiHost64 VST MIDI session bridge
+﻿// KpiHost64 VST MIDI session bridge
 #include "kpihost_stdafx.h"
 #include "../kpi_host_ipc.h"
 #include "../VstMidiEngine.h"
@@ -17,15 +17,19 @@ uint32_t VstHost64_Open(const wchar_t* midPath, const wchar_t* vstDllPath, const
 			wcsncpy_s(savedata.vstExtraPath, _countof(savedata.vstExtraPath), extraScanPath, _TRUNCATE);
 			rescan = 1;
 		}
+	} else {
+		savedata.vstExtraPath[0] = 0;
 	}
-	if (!vstDllPath || !vstDllPath[0])
-		return KPIHOST64_STATUS_FAIL;
-	wcsncpy_s(savedata.vstMultiDll, _countof(savedata.vstMultiDll), vstDllPath, _TRUNCATE);
-	savedata.vstMultiName[0] = 0;
-	{
+	// GS may be empty when only XG is set; VstMidiOpen peeks the SMF and picks.
+	if (vstDllPath && vstDllPath[0]) {
+		wcsncpy_s(savedata.vstMultiDll, _countof(savedata.vstMultiDll), vstDllPath, _TRUNCATE);
+		savedata.vstMultiName[0] = 0;
 		const wchar_t* slash = wcsrchr(vstDllPath, L'\\');
 		const wchar_t* leaf = slash ? slash + 1 : vstDllPath;
 		wcsncpy_s(savedata.vstMultiName, _countof(savedata.vstMultiName), leaf, _TRUNCATE);
+	} else {
+		savedata.vstMultiDll[0] = 0;
+		savedata.vstMultiName[0] = 0;
 	}
 	if (rescan) VstScanInvalidate();
 	wchar_t hints[1][128] = {};
