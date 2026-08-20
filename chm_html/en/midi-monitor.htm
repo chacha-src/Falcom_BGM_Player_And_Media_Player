@@ -1,4 +1,4 @@
-﻿<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
 <html>
 <head>
 <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
@@ -11,27 +11,80 @@
 
 <h1>MIDI monitor</h1>
 
-<p class="lead">The MIDI monitor watches the SMF that is playing (.mid / .midi / .kar / .rmi) as 32 parts (A01–A16 / B01–B16). It shows MIDI events from the file, not pitches guessed from audio.</p>
+<p class="lead">The MIDI monitor watches the SMF that is playing (.mid / .midi / .kar / .rmi) as 32 parts (A01–A16 / B01–B16). It shows the MIDI events from the file — not pitch guessed from audio. Where the piano roll shows notes over time, this window lists each channel's tone, level, and effects.</p>
 <h2>How to open it</h2>
-<p>Right-click the media-player banner and choose Windows → MIDI monitor. You can also open it from the playlist context menu, from Equalizer / Analyzer / Piano roll → Open, or from the command palette.</p>
-<h2>What you see</h2>
 <ul>
-<li><b>Header</b> — BPM, tempo %, key, time base, time signature, Transpose, file name.</li>
-<li><b>Each part</b> — PC / bank / map, instrument name, level, Vol / Pan / Exp / Rev / Crs / Var, vibrato, filter, envelope, EQ, NRPN, mini keyboard.</li>
-<li><b>Instrument names</b> — looked up from the built-in SASAMI GS / XG tables. XG System On selects XG names; otherwise GS. Right-click Tone map to force one map.</li>
+<li>Media-player banner right-click → Window → MIDI monitor…</li>
+<li>Playlist right-click → Window → Open MIDI monitor</li>
+<li><a href="pianoroll.htm">Seeing notes on the piano roll</a> / analyzer / EQ right-click → Open → MIDI monitor</li>
+<li>Command palette: “MIDI monitor”</li>
 </ul>
-<h2>View</h2>
+<div class="tip"><span class="label">Tip</span>
+<p>Position and size are remembered for the next open.</p>
+</div>
+<h2>Header</h2>
 <ul>
-<li><b>Normal 2D</b> — a table.</li>
-<li><b>Soft 3D</b> — 32 part levels as boxes, drawn on the CPU. Drag to orbit, wheel to zoom.</li>
+<li>BPM, tempo %, key, time base, meter, transpose, file name</li>
+<li>Overall volume %, note count</li>
+<li>Reverb / chorus / variation</li>
+<li>SYS (GM / GS / XG), INSERTION 1 / 2</li>
 </ul>
-<h2>GS / XG instruments</h2>
-<p>The VSTis used for playback are GS VST and XG VST in <a href="render.htm">Rendering settings</a>. Before play starts, the SMF is peeked: an XG reset (XG System On) selects the XG slot, otherwise the GS slot. If only one slot is filled, that plugin covers both. If both are empty, Windows MIDI Mapper is used.</p>
-<div class="related"><span class="label">See also</span><ul><li><a href="midi.htm">Controlling Raira from a MIDI keyboard</a></li><li><a href="vst.htm">Playing instruments with the VST host</a></li><li><a href="render.htm">Rendering settings</a></li><li><a href="pianoroll.htm">Seeing the music on a piano roll</a></li><li><a href="help-buttons.htm">The "?" guide on every window</a></li></ul></div>
+<h2>The 32-row channel table</h2>
+<p>Each row is one part. A01–A16 are port A; B01–B16 are port B.</p>
+<dl>
+<dt>PC# / BNK / Map / Instrument</dt>
+<dd>Program, bank, GS/XG map, and instrument name (from the built-in SASAMI GS/XG tables).</dd>
+<dt>Lev / Vol / Pan / Exp</dt>
+<dd>Output level plus volume, pan, and expression.</dd>
+<dt>Rev / Crs / Var</dt>
+<dd>Reverb, chorus, and variation send amounts.</dd>
+<dt>Vibrato / Filter / Envelope / EQ / NRPN</dt>
+<dd>Live controller / NRPN state for those areas.</dd>
+<dt>Keyboard (mini keys on the right)</dt>
+<dd>Keys that are currently down light up.</dd>
+</dl>
+<h2>View modes (2D / Soft 3D)</h2>
+<ul>
+<li><b>Normal (2D)</b> — table layout; the default.</li>
+<li><b>Soft 3D</b> — 32 part levels as boxes, drawn on the CPU only (no OpenGL / Direct3D). Drag to orbit, wheel to zoom, <kbd>0</kbd> to reset. Switch back to 2D from the right-click menu if it feels heavy.</li>
+</ul>
+<h2>Right-click menu</h2>
+<dl>
+<dt>View mode</dt>
+<dd>Normal (2D) or Soft 3D.</dd>
+<dt>Freeze</dt>
+<dd>Stops updating the display.</dd>
+<dt>Always on top</dt>
+<dd>Keeps the window above others.</dd>
+<dt>Copy state</dt>
+<dd>Copies the table as text.</dd>
+<dt>Reload MIDI</dt>
+<dd>Reloads the current file's MIDI.</dd>
+<dt>Tone map</dt>
+<dd>Auto (SysEx) / GS / XG for name lookup.</dd>
+<dt>Open</dt>
+<dd>Equalizer / piano roll / analyzer / this operation guide.</dd>
+</dl>
+<h2>Timing vs what you hear</h2>
+<p>When playing through <a href="vst-midi.htm">Playing .mid through a VST</a>, the monitor may lag slightly so it stays close to the audible position (plugin latency). If the picture feels behind the sound, that is intentional.</p>
+<h2>How it relates to other features</h2>
+<ul>
+<li><a href="pianoroll.htm">Seeing notes on the piano roll</a> — notes over time; the monitor is channel state.</li>
+<li><a href="vst-midi.htm">Playing .mid through a VST</a> — watch GS/XG VST playback here.</li>
+<li><a href="vst.htm">Playing instruments with the VST host</a> — live keyboard hosting; a different window.</li>
+<li><a href="midi.htm">Controlling the player with a MIDI keyboard</a> — map transport / EQ to hardware.</li>
+</ul>
+<div class="tip"><span class="label">Tip</span>
+<p>Press <b>?</b> for the in-window guide. See also <a href="help-buttons.htm">The “?” guide on every window</a>.</p>
+</div>
+<div class="note"><span class="label">Please note</span>
+<p>Audio files (mp3 and so on) have no MIDI events, so the monitor stays idle. It is for SMF playback only.</p>
+</div>
+<div class="related"><span class="label">See also</span><ul><li><a href="vst-midi.htm">Playing .mid through a VST</a></li><li><a href="pianoroll.htm">Seeing the music on a piano roll</a></li><li><a href="vst.htm">Playing instruments with the VST host</a></li><li><a href="midi.htm">Controlling Raira from a MIDI keyboard</a></li><li><a href="render.htm">Rendering settings</a></li></ul></div>
 
 <div class="botnav">
-<span class="prev">&#171; Back: <a href="pianoroll.htm">Seeing the music on a piano roll</a></span>
-<span class="next">Next: <a href="midi.htm">Controlling Raira from a MIDI keyboard</a> &#187;</span>
+<span class="prev">&#171; Back: <a href="pianoroll-tune.htm">Tuning piano roll detection</a></span>
+<span class="next">Next: <a href="video.htm">Playing video</a> &#187;</span>
 <span class="up"><a href="index.htm">Contents</a></span>
 <div class="clear"></div>
 </div>

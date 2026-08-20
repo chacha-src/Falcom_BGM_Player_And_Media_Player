@@ -255,6 +255,7 @@ public:
 		dc.SetTextColor(RGB(48, 48, 64));
 		const CString lines[] = {
 			LL14(L"・左のプラグインを右の Part 1～32 へドラッグします。", L"· Drag a plug-in from the left to Parts 1–32.", L"· Glissez un plug-in vers les parties 1–32.", L"· Trascina un plug-in nelle parti 1–32.", L"· Arrastre un plug-in a las partes 1–32.", L"· 왼쪽 플러그인을 파트 1~32로 드래그합니다.", L"· 将左侧插件拖到声部 1–32。", L"· اسحب إضافة إلى الأجزاء 1–32.", L"· Перетащите плагин в партии 1–32.", L"· Plugin links auf Part 1–32 ziehen.", L"· Arraste um plug-in para as partes 1–32.", L"· Sleep een plug-in naar partijen 1–32.", L"· Przeciągnij wtyczkę do partii 1–32.", L"· Eklentiyi Bölüm 1–32'ye sürükleyin."),
+			LL14(L"・Z列＝C4～、Q列＝C5～のPC鍵盤（コンボ／入力中は無効。Spaceで全ノートオフ）。", L"· PC keys: Z-row = C4…, Q-row = C5… (off while typing in a combo; Space = all notes off).", L"· Clavier PC: rangée Z = C4…, Q = C5… (inactif dans les listes; Espace = all notes off).", L"· Tastiera PC: fila Z = C4…, Q = C5… (disattiva nei combo; Spazio = all notes off).", L"· Teclado PC: fila Z = C4…, Q = C5… (inactivo en combos; Espacio = all notes off).", L"· PC 건반: Z열=C4~, Q열=C5~(콤보 입력 중 비활성, Space=올 노트 오프).", L"· PC 键盘：Z 行=C4…，Q 行=C5…（组合框输入时无效；空格全音符关闭）。", L"· لوحة PC: صف Z=C4… وصف Q=C5… (معطّل أثناء الكتابة؛ المسافة = إيقاف كل النغمات).", L"· ПК-клавиатура: ряд Z = C4…, Q = C5… (не в комбо; Пробел = all notes off).", L"· PC-Tastatur: Z-Reihe = C4…, Q = C5… (nicht in Combos; Leertaste = All Notes Off).", L"· Teclado PC: fila Z = C4…, Q = C5… (inativo em combos; Espaço = all notes off).", L"· PC-toetsenbord: Z-rij = C4…, Q = C5… (uit in combo's; Spatie = all notes off).", L"· Klawiatura PC: rząd Z = C4…, Q = C5… (wył. w combo; Spacja = all notes off).", L"· PC klavye: Z satırı = C4…, Q = C5… (kombo yazarken kapalı; Boşluk = all notes off)."),
 			LL14(L"・一覧にはドロップで実際に載るものだけが出ます（初回／再スキャンで確認）。", L"· The list shows only plug-ins that actually drop onto a part (checked on first open / rescan).", L"· La liste n'affiche que les plug-ins réellement déposables (vérifié à l'ouverture / rescannage).", L"· L'elenco mostra solo i plug-in che si possono trascinare (controllo all'apertura / scansione).", L"· La lista solo muestra plug-ins que se pueden soltar (comprobado al abrir / reescanear).", L"· 목록에는 실제로 드롭되는 플러그인만 표시됩니다(첫 실행/재검색 시 확인).", L"· 列表只显示可拖放到声部的插件（首次打开/重新扫描时检查）。", L"· تظهر القائمة فقط الإضافات القابلة للإفلات (تُفحص عند الفتح / إعادة المسح).", L"· В списке только плагины, которые реально ставятся на слот (проверка при открытии / скане).", L"· Die Liste zeigt nur Plug-ins, die sich ablegen lassen (Prüfung beim Öffnen / Neu scannen).", L"· A lista mostra só plug-ins que se podem largar (verificado ao abrir / procurar).", L"· De lijst toont alleen plug-ins die echt te droppen zijn (controle bij openen / scannen).", L"· Lista pokazuje tylko wtyczki, które da się upuścić (sprawdzane przy otwarciu / skanie).", L"· Liste yalnızca gerçekten bırakılabilen eklentileri gösterir (açılış / yeniden tarama kontrolü)."),
 			LL14(L"・MIDI入力は最大3台。同じパートへリアルタイム送信します。", L"· Up to three MIDI inputs feed the live parts.", L"· Trois entrées MIDI maximum alimentent les parties.", L"· Fino a tre ingressi MIDI alimentano le parti.", L"· Hasta tres entradas MIDI alimentan las partes.", L"· 최대 3개의 MIDI 입력을 실시간 파트로 보냅니다.", L"· 最多三个 MIDI 输入发送到实时声部。", L"· حتى ثلاثة مداخل MIDI للأجزاء الحية.", L"· До трёх MIDI-входов подаются на партии.", L"· Bis zu drei MIDI-Eingänge speisen die Parts.", L"· Até três entradas MIDI alimentam as partes.", L"· Maximaal drie MIDI-ingangen voeden de partijen.", L"· Do trzech wejść MIDI zasila partie.", L"· En fazla üç MIDI girişi canlı bölümleri besler."),
 			LL14(L"・配線とデバイス設定はプリセットへ保存できます。", L"· Wiring and device choices are stored in presets.", L"· Le câblage et les périphériques sont enregistrés.", L"· Cablaggio e dispositivi sono salvati nei preset.", L"· El cableado y los dispositivos se guardan.", L"· 배선과 장치 선택은 프리셋에 저장됩니다.", L"· 连线和设备选择可保存到预设。", L"· تُحفظ التوصيلات والأجهزة في الإعدادات.", L"· Схема и устройства сохраняются в пресетах.", L"· Verdrahtung und Geräte werden im Preset gespeichert.", L"· Ligações e dispositivos são guardados.", L"· Bedrading en apparaten worden opgeslagen.", L"· Okablowanie i urządzenia zapisują się w presetach.", L"· Bağlantılar ve aygıtlar ön ayarlara kaydedilir."),
@@ -876,6 +877,7 @@ CVstHostDlg::CVstHostDlg(CWnd* parent)
 	memset(m_presets, 0, sizeof(m_presets));
 	memset(m_slots, -1, sizeof(m_slots));
 	memset(m_midiHandles, 0, sizeof(m_midiHandles));
+	memset(m_pcHeldNote, 0, sizeof(m_pcHeldNote));
 }
 
 CVstHostDlg::~CVstHostDlg() {}
@@ -914,6 +916,7 @@ BEGIN_MESSAGE_MAP(CVstHostDlg, CCustomBlurDialogBase)
 	ON_WM_SIZE()
 	ON_WM_DESTROY()
 	ON_WM_TIMER()
+	ON_WM_ACTIVATE()
 END_MESSAGE_MAP()
 
 BOOL CVstHostDlg::OnInitDialog()
@@ -1016,7 +1019,103 @@ BOOL CVstHostDlg::OnInitDialog()
 BOOL CVstHostDlg::PreTranslateMessage(MSG* msg)
 {
 	if (m_tooltip.GetSafeHwnd()) m_tooltip.RelayEvent(msg);
+	if (HandlePcKeyboardMidi(msg)) return TRUE;
 	return CCustomBlurDialogBase::PreTranslateMessage(msg);
+}
+
+// Z-row = C4 (MIDI 60); Q-row = C5. Black keys on the home/number row.
+// Edit and Combo focus is left alone so filter typing and device lists still work.
+int CVstHostDlg::PcKeyToNote(UINT vk) const
+{
+	switch (vk) {
+	case 'Z': return 60; case 'S': return 61; case 'X': return 62; case 'D': return 63;
+	case 'C': return 64; case 'V': return 65; case 'G': return 66; case 'B': return 67;
+	case 'H': return 68; case 'N': return 69; case 'J': return 70; case 'M': return 71;
+	case VK_OEM_COMMA: return 72; case 'L': return 73; case VK_OEM_PERIOD: return 74;
+	case VK_OEM_1: return 75; case VK_OEM_2: return 76;
+	case 'Q': return 72; case '2': return 73; case 'W': return 74; case '3': return 75;
+	case 'E': return 76; case 'R': return 77; case '5': return 78; case 'T': return 79;
+	case '6': return 80; case 'Y': return 81; case '7': return 82; case 'U': return 83;
+	case 'I': return 84; case '9': return 85; case 'O': return 86; case '0': return 87;
+	case 'P': return 88;
+	default: return -1;
+	}
+}
+
+BOOL CVstHostDlg::PcFocusBlocksKeys() const
+{
+	CWnd* f = GetFocus();
+	if (!f) return FALSE;
+	HWND h = f->GetSafeHwnd();
+	while (h) {
+		wchar_t cls[64] = {};
+		GetClassNameW(h, cls, 64);
+		if (!_wcsicmp(cls, L"Edit") || !_wcsicmp(cls, L"ComboBox") ||
+			!_wcsicmp(cls, L"ComboBoxEx32"))
+			return TRUE;
+		if (h == m_hWnd) break;
+		h = ::GetParent(h);
+	}
+	return FALSE;
+}
+
+void CVstHostDlg::PcSendShort(DWORD msg)
+{
+	if (InterlockedCompareExchange(&m_audioRunning, 0, 0) != 0)
+		MidiFifoPush(0, msg);
+	else
+		VstLiveMidiShort(0, msg);
+}
+
+void CVstHostDlg::PcKeyReleaseAll()
+{
+	for (int vk = 0; vk < 256; ++vk) {
+		if (!m_pcHeldNote[vk]) continue;
+		const int note = (int)m_pcHeldNote[vk] - 1;
+		m_pcHeldNote[vk] = 0;
+		PcSendShort((DWORD)(0x80 | (note << 8)));
+	}
+}
+
+BOOL CVstHostDlg::HandlePcKeyboardMidi(MSG* msg)
+{
+	if (!msg || !GetSafeHwnd()) return FALSE;
+	if (msg->message != WM_KEYDOWN && msg->message != WM_KEYUP &&
+		msg->message != WM_SYSKEYDOWN && msg->message != WM_SYSKEYUP)
+		return FALSE;
+	// Ctrl / Alt belong to UI shortcuts; leave them alone.
+	if ((GetKeyState(VK_CONTROL) & 0x8000) || (GetKeyState(VK_MENU) & 0x8000))
+		return FALSE;
+	if (PcFocusBlocksKeys()) return FALSE;
+
+	const UINT vk = (UINT)msg->wParam;
+	if (vk == VK_SPACE && msg->message == WM_KEYDOWN && !(msg->lParam & (1 << 30))) {
+		PcKeyReleaseAll();
+		VstLiveAllNotesOff();
+		return TRUE;
+	}
+
+	const int note = PcKeyToNote(vk);
+	if (note < 0 || note > 127 || vk >= 256) return FALSE;
+
+	if (msg->message == WM_KEYDOWN || msg->message == WM_SYSKEYDOWN) {
+		if (msg->lParam & (1 << 30)) return TRUE; // auto-repeat
+		if (m_pcHeldNote[vk]) return TRUE;
+		m_pcHeldNote[vk] = (BYTE)(note + 1);
+		PcSendShort((DWORD)(0x90 | (note << 8) | (100 << 16)));
+		return TRUE;
+	}
+	if (m_pcHeldNote[vk]) {
+		m_pcHeldNote[vk] = 0;
+		PcSendShort((DWORD)(0x80 | (note << 8)));
+	}
+	return TRUE;
+}
+
+void CVstHostDlg::OnActivate(UINT nState, CWnd* pWndOther, BOOL bMinimized)
+{
+	CCustomBlurDialogBase::OnActivate(nState, pWndOther, bMinimized);
+	if (nState == WA_INACTIVE) PcKeyReleaseAll();
 }
 
 void CVstHostDlg::LayoutHelpBtn() { CCC_CaptionPlaceHelpBtn(m_hWnd, &m_help); }
@@ -1521,6 +1620,7 @@ void CVstHostDlg::OnOK() {}
 void CVstHostDlg::OnDestroy()
 {
 	KillTimer(VST_ACTIVITY_TIMER);
+	PcKeyReleaseAll();
 	StopMidi(); StopAudio();
 	for (int i = 1; i <= 32; ++i) VstLiveUnloadPart(i);
 	CCustomBlurDialogBase::OnDestroy();

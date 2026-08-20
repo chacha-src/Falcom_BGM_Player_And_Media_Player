@@ -14142,7 +14142,7 @@ static BOOL CCC_IsCaptionChromeCtrl(HWND hWnd)
         IDC_TE_HELP, IDC_FD_HELP, IDC_KPI_HELP, IDC_SY_HELP, IDC_PRT_HELP,
         IDC_OGG_HELP, IDC_MP_CHEATBTN,
         IDC_SM_HELP, IDC_DIG_HELP, IDC_VC_HELP, IDC_TN_HELP, IDC_PF_HELP,
-        IDC_S3M_HELP, IDC_S3R_HELP, IDC_MP_BPM_HELP, IDC_TB_HELP, IDC_VST_HELP
+        IDC_S3M_HELP, IDC_S3R_HELP, IDC_MP_BPM_HELP, IDC_TB_HELP, IDC_VST_HELP, IDC_MM_HELP
     };
     for (int i = 0; i < (int)_countof(kHelpChromeIds); ++i) {
         if (id == kHelpChromeIds[i])
@@ -14159,7 +14159,7 @@ static BOOL CCC_IsCaptionHelpChromeId(UINT id)
         IDC_TE_HELP, IDC_FD_HELP, IDC_KPI_HELP, IDC_SY_HELP, IDC_PRT_HELP,
         IDC_OGG_HELP, IDC_MP_CHEATBTN,
         IDC_SM_HELP, IDC_DIG_HELP, IDC_VC_HELP, IDC_TN_HELP, IDC_PF_HELP,
-        IDC_S3M_HELP, IDC_S3R_HELP, IDC_MP_BPM_HELP, IDC_TB_HELP, IDC_VST_HELP
+        IDC_S3M_HELP, IDC_S3R_HELP, IDC_MP_BPM_HELP, IDC_TB_HELP, IDC_VST_HELP, IDC_MM_HELP
     };
     for (int i = 0; i < (int)_countof(kHelpChromeIds); ++i) {
         if (id == kHelpChromeIds[i])
@@ -14177,7 +14177,7 @@ static HWND CCC_FindCaptionHelpChrome(HWND hDlg)
         IDC_TE_HELP, IDC_FD_HELP, IDC_KPI_HELP, IDC_SY_HELP, IDC_PRT_HELP,
         IDC_OGG_HELP, IDC_MP_CHEATBTN,
         IDC_SM_HELP, IDC_DIG_HELP, IDC_VC_HELP, IDC_TN_HELP, IDC_PF_HELP,
-        IDC_S3M_HELP, IDC_S3R_HELP, IDC_MP_BPM_HELP, IDC_TB_HELP, IDC_VST_HELP
+        IDC_S3M_HELP, IDC_S3R_HELP, IDC_MP_BPM_HELP, IDC_TB_HELP, IDC_VST_HELP, IDC_MM_HELP
     };
     for (int i = 0; i < (int)_countof(kHelpChromeIds); ++i) {
         HWND h = ::GetDlgItem(hDlg, kHelpChromeIds[i]);
@@ -14730,7 +14730,7 @@ void CCC_CaptionLayout(HWND hDlg)
         IDC_TE_HELP, IDC_FD_HELP, IDC_KPI_HELP, IDC_SY_HELP, IDC_PRT_HELP,
         IDC_OGG_HELP, IDC_MP_CHEATBTN,
         IDC_SM_HELP, IDC_DIG_HELP, IDC_VC_HELP, IDC_TN_HELP, IDC_PF_HELP,
-        IDC_S3M_HELP, IDC_S3R_HELP, IDC_MP_BPM_HELP, IDC_TB_HELP, IDC_VST_HELP
+        IDC_S3M_HELP, IDC_S3R_HELP, IDC_MP_BPM_HELP, IDC_TB_HELP, IDC_VST_HELP, IDC_MM_HELP
     };
     for (int i = 0; i < (int)_countof(kHelpChromeIds); ++i) {
         HWND hHelp = ::GetDlgItem(hDlg, kHelpChromeIds[i]);

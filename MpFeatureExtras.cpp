@@ -1,4 +1,4 @@
-#include "stdafx.h"
+﻿#include "stdafx.h"
 #include "MpFeatureExtras.h"
 #include "MpKeyCamelot.h"
 #include "SongParams.h"
@@ -238,9 +238,10 @@ BOOL MpFeatHandleKeyMenuCmd(UINT cmd)
 				gameon = 0;
 				if (og && ::IsWindow(og->GetSafeHwnd()))
 					RequestPlaybackRestart(og->GetSafeHwnd());
+				return TRUE;
 			}
 		}
-		return TRUE;
+		return FALSE;
 	}
 	return FALSE;
 }

@@ -21,7 +21,7 @@ enum KPIHOST64_CMD : uint32_t
 	KPIHOST64_CMD_FOREIGN_SEEK = 13,
 	KPIHOST64_CMD_FOREIGN_CLOSE = 14,
 	KPIHOST64_CMD_VST_OPEN = 20,   // [u32 midChars][mid][u32 dllChars][dll]
-	KPIHOST64_CMD_VST_RENDER = 21,
+	KPIHOST64_CMD_VST_RENDER = 21, // RenderReq, optional [u32 nInj][nInj * VstLiveMidiReq]
 	KPIHOST64_CMD_VST_SEEK = 22,
 	KPIHOST64_CMD_VST_CLOSE = 23,
 	// VST Live parts (x86 app hosting x64 plug-ins such as SOUND Canvas VA).
@@ -142,6 +142,7 @@ struct KPIHOST64_ForeignOpenReply
 	uint32_t channels;
 	int32_t bitsPerSample;
 	uint64_t lengthSamples;
+	uint32_t latencySamples; // VST MIDI plugin delay; 0 for foreign/mapper
 };
 
 struct KPIHOST64_VstLiveLoadReq

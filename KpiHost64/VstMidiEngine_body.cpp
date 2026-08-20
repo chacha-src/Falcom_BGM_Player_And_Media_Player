@@ -1,4 +1,4 @@
-#include "kpihost_stdafx.h"
+﻿#include "kpihost_stdafx.h"
 #include "PluginKinds.h"
 #include "VstMidiEngine.h"
 #include "Vst3Host.h"
@@ -1015,6 +1015,168 @@ static void FlushUnitShorts(AEffect* effect, Vst3Inst* vst3, MidiItem* batch,
 	n = 0;
 }
 
+enum { SONG_INJ_CAP = 128, SONG_OV_PC = 6, SONG_OV_N = 7 };
+static volatile LONG g_injW = 0;
+static volatile LONG g_injR = 0;
+static DWORD g_injMsg[SONG_INJ_CAP];
+static BYTE g_injPort[SONG_INJ_CAP];
+static BYTE g_ovOn[3][16][SONG_OV_N];
+static BYTE g_ovVal[3][16][SONG_OV_N];
+static DWORD g_ovTick[3][16];
+
+static int SongOvSlot(int cc)
+{
+	if (cc == 7) return 0;
+	if (cc == 10) return 1;
+	if (cc == 11) return 2;
+	if (cc == 91) return 3;
+	if (cc == 93) return 4;
+	if (cc == 94) return 5;
+	return -1;
+}
+
+static void SongOvClear()
+{
+	g_injR = g_injW;
+	ZeroMemory(g_ovOn, sizeof(g_ovOn));
+	ZeroMemory(g_ovTick, sizeof(g_ovTick));
+}
+
+static void SongOvSet(int port, DWORD msg)
+{
+	if (port < 0) port = 0;
+	if (port > 2) port = 2;
+	const int st = (int)(msg & 0xf0);
+	const int ch = (int)(msg & 0x0f);
+	if (st == 0xb0) {
+		const int slot = SongOvSlot((int)((msg >> 8) & 0x7f));
+		if (slot < 0) return;
+		g_ovOn[port][ch][slot] = 1;
+		g_ovVal[port][ch][slot] = (BYTE)((msg >> 16) & 0x7f);
+		g_ovTick[port][ch] = GetTickCount();
+	} else if (st == 0xc0) {
+		g_ovOn[port][ch][SONG_OV_PC] = 1;
+		g_ovVal[port][ch][SONG_OV_PC] = (BYTE)((msg >> 8) & 0x7f);
+		g_ovTick[port][ch] = GetTickCount();
+	}
+}
+
+static void SongOvExpire()
+{
+	const DWORD now = GetTickCount();
+	for (int p = 0; p < 3; ++p) {
+		for (int c = 0; c < 16; ++c) {
+			if (!g_ovTick[p][c]) continue;
+			if (now - g_ovTick[p][c] < 2500) continue;
+			memset(g_ovOn[p][c], 0, SONG_OV_N);
+			g_ovTick[p][c] = 0;
+		}
+	}
+}
+
+static DWORD SongOverrideMsg(int port, DWORD msg)
+{
+	if (port < 0) port = 0;
+	if (port > 2) port = 2;
+	const int st = (int)(msg & 0xf0);
+	const int ch = (int)(msg & 0x0f);
+	if (st == 0xb0) {
+		const int slot = SongOvSlot((int)((msg >> 8) & 0x7f));
+		if (slot >= 0 && g_ovOn[port][ch][slot])
+			return (msg & 0xFFFFu) | ((DWORD)g_ovVal[port][ch][slot] << 16);
+	} else if (st == 0xc0) {
+		if (g_ovOn[port][ch][SONG_OV_PC])
+			return (msg & 0xFFu) | ((DWORD)g_ovVal[port][ch][SONG_OV_PC] << 8);
+	}
+	return msg;
+}
+
+} // namespace（無名名前空間の中で extern "C" を書いても内部リンケージのまま
+  // シンボルが出ない。この2本は他モジュールから呼ばれるので外に出す）
+
+extern "C" void VstMidiInjectShort(int portIndex0to2, DWORD shortMsg)
+{
+	int port = portIndex0to2;
+	if (port < 0) port = 0;
+	if (port > 2) port = 2;
+	SongOvSet(port, shortMsg);
+	const LONG w = g_injW;
+	if ((w - g_injR) >= (SONG_INJ_CAP - 1)) return;
+	const int i = (int)(w & (SONG_INJ_CAP - 1));
+	g_injMsg[i] = shortMsg;
+	g_injPort[i] = (BYTE)port;
+	MemoryBarrier();
+	g_injW = w + 1;
+}
+
+extern "C" int VstMidiStealInjects(BYTE* ports, DWORD* msgs, int maxCount)
+{
+	if (!ports || !msgs || maxCount < 1) return 0;
+	int n = 0;
+	LONG r = g_injR;
+	const LONG w = g_injW;
+	while (n < maxCount && r != w) {
+		const int i = (int)(r & (SONG_INJ_CAP - 1));
+		ports[n] = g_injPort[i];
+		msgs[n] = g_injMsg[i];
+		++n;
+		++r;
+	}
+	g_injR = r;
+	return n;
+}
+
+namespace {
+
+static void EmitSongShort(int port, DWORD msg, __int64 start, int frames)
+{
+	MidiItem it = {};
+	it.msg = msg;
+	it.sample = start;
+	it.port = port;
+	it.sysexOff = -1;
+	if (g_eng.useEnsemble) {
+		const int ch = (int)(msg & 15);
+		const int slot = g_eng.chSlot[ch];
+		if (slot < 0 || slot >= g_eng.mixCount) return;
+		MixSlot& ms = g_eng.mix[slot];
+		MidiItem m = it;
+		const int type = (int)(msg & 0xf0);
+		if (!ms.keepMidiCh) {
+			if (type == 0xc0) return;
+			m.msg = (m.msg & ~0x0fu) | 0u;
+		}
+		if (ms.effect) SendVstEvents(ms.effect, &m, 1, start);
+		if (ms.vst3) Vst3MidiShort(ms.vst3, m.msg, 0);
+		return;
+	}
+	if (g_eng.midiOut && (port <= 0 || !g_eng.effectB))
+		midiOutShortMsg(g_eng.midiOut, msg);
+	int n = 1;
+	if (port <= 0) {
+		if (g_eng.effect || g_eng.vst3)
+			FlushUnitShorts(g_eng.effect, g_eng.vst3, &it, n, start, frames);
+	} else if (port == 1) {
+		if (g_eng.effectB)
+			FlushUnitShorts(g_eng.effectB, NULL, &it, n, start, frames);
+	} else if (g_eng.effectC || g_eng.vst3C) {
+		FlushUnitShorts(g_eng.effectC, g_eng.vst3C, &it, n, start, frames);
+	}
+}
+
+static void FlushInjectQueue(__int64 start, int frames)
+{
+	SongOvExpire();
+	LONG r = g_injR;
+	const LONG w = g_injW;
+	while (r != w) {
+		const int i = (int)(r & (SONG_INJ_CAP - 1));
+		EmitSongShort((int)g_injPort[i], g_injMsg[i], start, frames);
+		++r;
+	}
+	g_injR = r;
+}
+
 static void DispatchDueEvents(__int64 start, int frames)
 {
 	MidiItem batch0[256], batch1[256], batch2[256];
@@ -1025,9 +1187,11 @@ static void DispatchDueEvents(__int64 start, int frames)
 		FlushUnitShorts(g_eng.effectB, NULL, batch1, n1, start, frames);
 		FlushUnitShorts(g_eng.effectC, g_eng.vst3C, batch2, n2, start, frames);
 	};
+	FlushInjectQueue(start, frames);
 	while (g_eng.eventPos < g_eng.eventCount &&
 		g_eng.events[g_eng.eventPos].sample < end) {
-		const MidiItem& e = g_eng.events[g_eng.eventPos++];
+		MidiItem e = g_eng.events[g_eng.eventPos++];
+		e.msg = SongOverrideMsg(e.port, e.msg);
 		if ((e.msg & 0xff) == 0xff) continue;
 
 		if ((e.msg & 0xff) == 0xf0 && e.sysexOff >= 0 && g_eng.sysexData) {
@@ -2144,9 +2308,11 @@ static int BuildEnsembleFromSong()
 static void DispatchEnsemble(__int64 start, int frames)
 {
 	const __int64 end = start + frames;
+	FlushInjectQueue(start, frames);
 	while (g_eng.eventPos < g_eng.eventCount &&
 		g_eng.events[g_eng.eventPos].sample < end) {
-		const MidiItem& e = g_eng.events[g_eng.eventPos++];
+		MidiItem e = g_eng.events[g_eng.eventPos++];
+		e.msg = SongOverrideMsg(e.port, e.msg);
 		if ((e.msg & 0xff) == 0xff) continue;
 		const int ch = (int)(e.msg & 15);
 		const int slot = g_eng.chSlot[ch];
@@ -2301,6 +2467,7 @@ static void ResetSequence()
 	ZeroMemory(g_eng.voices, sizeof(g_eng.voices));
 	ZeroMemory(g_eng.drums, sizeof(g_eng.drums));
 	ZeroMemory(g_eng.noteState, sizeof(g_eng.noteState));
+	SongOvClear();
 	auto allOff = [](AEffect* effect, Vst3Inst* vst3) {
 		if (effect) {
 			MidiItem alloff[16] = {};
@@ -3152,11 +3319,14 @@ extern "C" void VstMidiLog(const wchar_t* msg)
 	if (msg && msg[0]) EnsLog(L"%s", msg);
 }
 
+static int g_reportedLatencySamples = 0;
+
 extern "C" void VstMidiClose(void)
 {
 	EnterCriticalSection(&g_eng.cs);
 	FreeSong();
 	LeaveCriticalSection(&g_eng.cs);
+	g_reportedLatencySamples = 0;
 }
 
 extern "C" int VstMidiRead(BYTE* dst, int bytesWanted)
@@ -3270,6 +3440,40 @@ extern "C" int VstMidiGetRate(void) { return SAMPLE_RATE; }
 extern "C" int VstMidiGetChannels(void) { return 2; }
 extern "C" int VstMidiGetBits(void) { return 16; }
 extern "C" __int64 VstMidiGetLengthSamples(void) { return g_eng.lengthSamples; }
+
+static int ClampLat(int d)
+{
+	if (d < 0) d = 0;
+	if (d > SAMPLE_RATE * 2) d = SAMPLE_RATE * 2;
+	return d;
+}
+static int MaxLat(int a, int b) { return a > b ? a : b; }
+
+extern "C" void VstMidiSetReportedLatencySamples(int samples)
+{
+	if (samples < 0) samples = 0;
+	if (samples > SAMPLE_RATE * 2) samples = SAMPLE_RATE * 2;
+	g_reportedLatencySamples = samples;
+}
+
+extern "C" int VstMidiGetLatencySamples(void)
+{
+	int lat = 0;
+	if (g_eng.effect) lat = MaxLat(lat, ClampLat(g_eng.effect->initialDelay));
+	lat = MaxLat(lat, ClampLat(Vst3GetLatencySamples(g_eng.vst3)));
+	if (g_eng.effectB) lat = MaxLat(lat, ClampLat(g_eng.effectB->initialDelay));
+	if (g_eng.effectC) lat = MaxLat(lat, ClampLat(g_eng.effectC->initialDelay));
+	lat = MaxLat(lat, ClampLat(Vst3GetLatencySamples(g_eng.vst3C)));
+	if (g_eng.useEnsemble) {
+		for (int s = 0; s < g_eng.mixCount; ++s) {
+			if (g_eng.mix[s].effect)
+				lat = MaxLat(lat, ClampLat(g_eng.mix[s].effect->initialDelay));
+			lat = MaxLat(lat, ClampLat(Vst3GetLatencySamples(g_eng.mix[s].vst3)));
+		}
+	}
+	if (lat > 0) return lat;
+	return g_reportedLatencySamples;
+}
 
 #ifndef KPIHOST64_BUILD
 

@@ -494,14 +494,29 @@ bool KpiHost64Client::VstOpen(const std::wstring& midPath, const std::wstring& v
 	return true;
 }
 
-bool KpiHost64Client::VstRender(uint32_t bytesWanted, std::vector<uint8_t>& outPcm, bool& outEof)
+bool KpiHost64Client::VstRender(uint32_t bytesWanted, std::vector<uint8_t>& outPcm, bool& outEof,
+	const uint8_t* injPorts, const uint32_t* injMsgs, uint32_t injCount)
 {
 	KPIHOST64_RenderReq rr{};
 	rr.sessionId = 1;
 	rr.bytesWanted = bytesWanted;
+	if (injCount > 64) injCount = 64;
+	if (!injPorts || !injMsgs) injCount = 0;
+	std::vector<uint8_t> req(sizeof(rr) + sizeof(uint32_t) +
+		(size_t)injCount * sizeof(KPIHOST64_VstLiveMidiReq));
+	uint8_t* p = req.data();
+	memcpy(p, &rr, sizeof(rr)); p += sizeof(rr);
+	memcpy(p, &injCount, sizeof(injCount)); p += sizeof(injCount);
+	for (uint32_t i = 0; i < injCount; ++i) {
+		KPIHOST64_VstLiveMidiReq mr{};
+		mr.port = injPorts[i];
+		mr.msg = injMsgs[i];
+		memcpy(p, &mr, sizeof(mr));
+		p += sizeof(mr);
+	}
 	std::vector<uint8_t> reply;
 	uint32_t st = 0;
-	if (!SendRequest(KPIHOST64_CMD_VST_RENDER, &rr, sizeof(rr), reply, st)) return false;
+	if (!SendRequest(KPIHOST64_CMD_VST_RENDER, req.data(), (uint32_t)req.size(), reply, st)) return false;
 	if (st != KPIHOST64_STATUS_OK || reply.size() < sizeof(KPIHOST64_RenderReply)) return false;
 	const KPIHOST64_RenderReply* r = (const KPIHOST64_RenderReply*)reply.data();
 	outEof = r->eof != 0;

@@ -1,4 +1,4 @@
-#include "stdafx.h"
+﻿#include "stdafx.h"
 #ifndef _USE_MATH_DEFINES
 #define _USE_MATH_DEFINES
 #endif
@@ -1837,7 +1837,13 @@ void CPianoRoll::UpdateNoteStates()
         // ホールド延長でもパッシブ倍音を残さない。
         // ただし C4〜C6 のメロディー帯は、ピック側の FinishPicks に任せ、
         // ここでの二次剪定でピアノを再キルしない（パッチ連鎖の主因だった）。
-        if (effective &&
+        //
+        // picked[i] が立っているフレームには掛けない。BuildFramePicks は
+        // 白色化スペクトルからの反復倍音減算で「倍音では説明できない」と
+        // 判定した鍵だけを返しており、ここで blend の絶対量比による旧判定を
+        // 重ねると、ベースが鳴っている間じゅう中高音が再度落とされる。
+        // 本来この剪定はコメント通りホールド延長ぶんだけが対象。
+        if (effective && !picked[i] &&
             (i < PianoRoll108::C4_KEY || i >= PianoRoll108::O5_HI) &&
             PianoKey::IsHarmonicGhostPartial(blend, i, KEY_COUNT, PianoRoll108::BASS_END)) {
             effective = false;

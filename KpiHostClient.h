@@ -38,7 +38,8 @@ public:
 
 	bool VstOpen(const std::wstring& midPath, const std::wstring& vstDllPath,
 		const std::wstring& extraScanPath, KPIHOST64_ForeignOpenReply& out);
-	bool VstRender(uint32_t bytesWanted, std::vector<uint8_t>& outPcm, bool& outEof);
+	bool VstRender(uint32_t bytesWanted, std::vector<uint8_t>& outPcm, bool& outEof,
+		const uint8_t* injPorts = nullptr, const uint32_t* injMsgs = nullptr, uint32_t injCount = 0);
 	bool VstSeek(uint64_t posSample);
 	bool VstClose();
 

@@ -1750,14 +1750,15 @@
 #define IDR_SASAMI_GS                   279
 #define IDR_SASAMI_XG                   280
 #define IDC_MM_HELP                     4326
-#define ID_MP_OPEN_MIDIMON              33257
+// 33250-33282 は MpFeatHandleKeyMenuCmd（キー相性）が先に食うので使わない
+#define ID_MP_OPEN_MIDIMON              33283
 
 // Next default values for new objects
 // 
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NEXT_RESOURCE_VALUE        281
-#define _APS_NEXT_COMMAND_VALUE         33258
+#define _APS_NEXT_COMMAND_VALUE         33284
 #define _APS_NEXT_CONTROL_VALUE         4327
 #define _APS_NEXT_SYMED_VALUE           104
 #endif

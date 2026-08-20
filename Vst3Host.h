@@ -13,6 +13,7 @@ void Vst3Process(Vst3Inst* inst, float* outL, float* outR, int frames);
 int Vst3EditorOpen(Vst3Inst* inst, void* parentHwnd, int* outW, int* outH);
 void Vst3EditorClose(Vst3Inst* inst);
 int Vst3IsOk(Vst3Inst* inst);
+int Vst3GetLatencySamples(Vst3Inst* inst);
 const wchar_t* Vst3LastError();
 int Vst3MidiChannels(Vst3Inst* inst);
 int Vst3ProgramCount(Vst3Inst* inst);

@@ -3297,6 +3297,7 @@ static void CloseVstMidiSession()
 		VstPrefetchStop();
 		g_kpiHost.VstClose();
 		g_vstRemote64 = 0;
+		VstMidiSetReportedLatencySamples(0);
 	} else {
 		VstMidiClose();
 	}
@@ -11212,6 +11213,7 @@ void COggDlg::play()
 			if (g_kpiHost.VstOpen(std::wstring(mid), std::wstring(savedata.vstMultiDll),
 				std::wstring(savedata.vstExtraPath), orp)) {
 				g_vstRemote64 = 1;
+				VstMidiSetReportedLatencySamples((int)orp.latencySamples);
 				wavbit_sample_Hz = (int)orp.sampleRate;
 				wavchannel = (int)orp.channels;
 				wavsam_src = orp.bitsPerSample;
@@ -19064,6 +19066,17 @@ struct VstPrefetch
 VstPrefetch g_vstPf;
 } // namespace
 
+static bool VstRemoteRender(uint32_t bytesWanted, std::vector<uint8_t>& pcm, bool& eof)
+{
+	BYTE ports[64];
+	DWORD msgs[64];
+	const int n = VstMidiStealInjects(ports, msgs, 64);
+	// DWORD(unsigned long) と uint32_t(unsigned int) は MSVC では別型。
+	// ビット幅は同じなので再解釈でよい。
+	return g_kpiHost.VstRender(bytesWanted, pcm, eof, ports,
+		reinterpret_cast<const uint32_t*>(msgs), (uint32_t)n);
+}
+
 static unsigned __stdcall VstPrefetchProc(void*)
 {
 	for (;;) {
@@ -19079,7 +19092,7 @@ static unsigned __stdcall VstPrefetchProc(void*)
 		}
 		std::vector<uint8_t> pcm;
 		bool eof = false;
-		if (!g_kpiHost.VstRender((uint32_t)VST_PF_CHUNK, pcm, eof)) {
+		if (!VstRemoteRender((uint32_t)VST_PF_CHUNK, pcm, eof)) {
 			Sleep(2);
 			continue;
 		}
@@ -19200,8 +19213,8 @@ int readvst(BYTE* bw, int cnt)
 		// A dropped pipe reconnects on the next request and the engine keeps
 		// its play position, so retrying costs latency instead of a silent
 		// buffer.
-		if (!g_kpiHost.VstRender((uint32_t)cnt, pcm, eof) &&
-			!g_kpiHost.VstRender((uint32_t)cnt, pcm, eof))
+		if (!VstRemoteRender((uint32_t)cnt, pcm, eof) &&
+			!VstRemoteRender((uint32_t)cnt, pcm, eof))
 			return 0;
 		int n = (int)pcm.size();
 		if (n > cnt) n = cnt;

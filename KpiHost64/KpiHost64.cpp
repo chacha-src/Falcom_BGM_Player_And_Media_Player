@@ -13,6 +13,7 @@
 #include "KpiHost64Foreign.h"
 #include "KpiHost64Vst.h"
 #include "KpiHost64VstLive.h"
+#include "..\VstMidiEngine.h"
 
 static std::wstring DirNameOf(const std::wstring& path)
 {
@@ -1113,6 +1114,7 @@ static void ServeOnce(HANDLE pipe)
 				orp.channels = (uint32_t)VstHost64_Channels();
 				orp.bitsPerSample = VstHost64_Bits();
 				orp.lengthSamples = VstHost64_Length();
+				orp.latencySamples = (uint32_t)VstHost64_Latency();
 				reply.resize(sizeof(orp));
 				memcpy(reply.data(), &orp, sizeof(orp));
 			}
@@ -1121,6 +1123,17 @@ static void ServeOnce(HANDLE pipe)
 		case KPIHOST64_CMD_VST_RENDER: {
 			if ((size_t)(end - p) < sizeof(KPIHOST64_RenderReq)) { status = KPIHOST64_STATUS_BAD_REQUEST; break; }
 			auto* rr = (const KPIHOST64_RenderReq*)p;
+			const uint8_t* q = p + sizeof(KPIHOST64_RenderReq);
+			if ((size_t)(end - q) >= sizeof(uint32_t)) {
+				uint32_t nInj = *(const uint32_t*)q; q += sizeof(uint32_t);
+				if (nInj > 64) nInj = 64;
+				for (uint32_t i = 0; i < nInj; ++i) {
+					if ((size_t)(end - q) < sizeof(KPIHOST64_VstLiveMidiReq)) break;
+					auto* mr = (const KPIHOST64_VstLiveMidiReq*)q;
+					VstMidiInjectShort((int)mr->port, mr->msg);
+					q += sizeof(KPIHOST64_VstLiveMidiReq);
+				}
+			}
 			std::vector<uint8_t> pcm;
 			uint32_t eof = 0;
 			status = VstHost64_Render(rr->bytesWanted, pcm, eof);

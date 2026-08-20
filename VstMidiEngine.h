@@ -65,6 +65,15 @@ int VstMidiGetRate(void);
 int VstMidiGetChannels(void);
 int VstMidiGetBits(void);
 __int64 VstMidiGetLengthSamples(void);
+// Plugin delay (VST2 initialDelay / VST3 getLatencySamples). 0 = mapper / unknown.
+int VstMidiGetLatencySamples(void);
+// x86 app: KpiHost64 Open の戻りを覚えさせる（ローカルにプラグが無いとき用）。
+void VstMidiSetReportedLatencySamples(int samples);
+
+// Live MIDI を曲エンジンへ差し込む（モニタの CC / 鍵盤）。キューして次のブロックで送る。
+void VstMidiInjectShort(int portIndex0to2, DWORD shortMsg);
+// x86→KpiHost64: 曲レンダーに乗せるためキューを奪う。ローカル再生では呼ばない。
+int VstMidiStealInjects(BYTE* ports, DWORD* msgs, int maxCount);
 
 int VstLiveLoadPart(int part1to32, const wchar_t* pluginPath, int isVst3);
 void VstLiveUnloadPart(int part1to32);

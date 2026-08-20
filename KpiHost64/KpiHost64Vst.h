@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include <stdint.h>
 #include <vector>
 
@@ -11,3 +11,4 @@ int VstHost64_Rate();
 int VstHost64_Channels();
 int VstHost64_Bits();
 uint64_t VstHost64_Length();
+int VstHost64_Latency();

@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 // 108鍵（MIDI 0…107）の等律周波数と倍音キー対応。A0=21, C8=108 は範囲内。
 
 #include <cmath>
@@ -214,29 +214,31 @@ namespace PianoKey
 
             const bool octaveLike = (n == 2 || n == 4 || n == 8);
             const bool parentInBass = (lo < bassBandEnd);
+            const bool hasOwn = HasOwnOvertoneSupport(st, candidate, count, 0.10f);
 
             if (octaveLike) {
                 if (parentInBass) {
-                    // ベースのオクターブ重ねは「帯域またがりゴースト」になりやすい。
-                    // 自帯域で十分目立ち、かつ親より明らかに強く自前倍音もあるときだけ独立音。
-                    if (bandProminent && sc >= loSc * 1.12f &&
-                        HasOwnOvertoneSupport(st, candidate, count, 0.14f))
-                        continue;
-                    if (sc <= loSc * 1.05f)
-                        return true;
-                    if (!bandProminent)
-                        return true;
-                    continue;
+                    if (hasOwn) {
+                        if (sc < loSc * 0.35f) return true;
+                    } else {
+                        if (sc <= loSc * 1.05f) return true;
+                    }
+                } else {
+                    if (hasOwn) {
+                        if (sc < loSc * 0.35f) return true;
+                    } else {
+                        if (sc < loSc * 0.65f) return true;
+                    }
                 }
-                if (!bandProminent && sc < loSc * 0.65f)
-                    return true;
             }
             else {
-                // h3/h5/h6/h7: 帯域トップ級はメロディ候補として残す
-                if (sc >= bandMax * 0.40f)
+                if (sc >= bandMax * 0.60f)
                     continue;
-                if (loSc >= sc * 0.55f && sc <= loSc * 0.90f)
-                    return true;
+                if (hasOwn) {
+                    if (sc < loSc * 0.25f) return true;
+                } else {
+                    if (sc <= loSc * 0.50f) return true;
+                }
             }
         }
         return false;

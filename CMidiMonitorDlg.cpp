@@ -42,6 +42,71 @@ static constexpr COLORREF MM_HEAD_TX = RGB(28, 28, 36);
 static constexpr COLORREF MM_ROW_A = RGB(14, 16, 22);
 static constexpr COLORREF MM_ROW_B = RGB(10, 12, 18);
 
+enum {
+	MM_HIT_NONE = 0,
+	MM_HIT_APPVOL,
+	MM_HIT_VOL,
+	MM_HIT_PAN,
+	MM_HIT_EXP,
+	MM_HIT_REV,
+	MM_HIT_CRS,
+	MM_HIT_VAR,
+	MM_HIT_KEYS,
+	MM_HIT_PC
+};
+
+enum {
+	MM_LATCH_VOL = 1,
+	MM_LATCH_PAN = 2,
+	MM_LATCH_EXP = 4,
+	MM_LATCH_REV = 8,
+	MM_LATCH_CRS = 16,
+	MM_LATCH_VAR = 32,
+	MM_LATCH_PC = 64
+};
+
+static int MmCcForHit(int kind)
+{
+	if (kind == MM_HIT_VOL) return 7;
+	if (kind == MM_HIT_PAN) return 10;
+	if (kind == MM_HIT_EXP) return 11;
+	if (kind == MM_HIT_REV) return 91;
+	if (kind == MM_HIT_CRS) return 93;
+	if (kind == MM_HIT_VAR) return 94;
+	return -1;
+}
+
+static int MmDefaultForHit(int kind)
+{
+	if (kind == MM_HIT_VOL) return 100;
+	if (kind == MM_HIT_PAN) return 64;
+	if (kind == MM_HIT_EXP) return 127;
+	if (kind == MM_HIT_REV) return 40;
+	return 0;
+}
+
+static int MmIsBlackKey(int n)
+{
+	const int m = n % 12;
+	return (m == 1 || m == 3 || m == 6 || m == 8 || m == 10) ? 1 : 0;
+}
+
+static COLORREF MmMix(COLORREF a, COLORREF b, int t)
+{
+	if (t <= 0) return a;
+	if (t >= 256) return b;
+	const int ar = GetRValue(a), ag = GetGValue(a), ab = GetBValue(a);
+	const int br = GetRValue(b), bg = GetGValue(b), bb = GetBValue(b);
+	return RGB(ar + (br - ar) * t / 256, ag + (bg - ag) * t / 256, ab + (bb - ab) * t / 256);
+}
+
+static void MmGlowTick(BYTE& g)
+{
+	if (!g) return;
+	g = (BYTE)((int)g * 7 / 8);
+	if (g < 6) g = 0;
+}
+
 static const wchar_t* kGmName[128] = {
 	L"Acoustic Grand", L"Bright Piano", L"Electric Grand", L"Honky-tonk",
 	L"E.Piano 1", L"E.Piano 2", L"Harpsichord", L"Clavi",
@@ -485,20 +550,36 @@ void CMmHelpDlg::OnPaint()
 		L"· PC# BNK Map …… Program, banka, GS/XG haritasi. Isimler SASAMI_GS/XG.DAT'tan."));
 	y += lh;
 	body(L, y, LL14(
-		L"・Lev / Vol Exp Rev Crs Var …… 出力と CC7/11/10/91/93/94。Vibrato・Filter・Envelope・EQ・NRPN は NRPN/CC。",
-		L"· Lev / Vol Exp Rev Crs Var …… Output and CC7/11/10/91/93/94. Vibrato/Filter/Envelope/EQ/NRPN from NRPN/CC.",
-		L"· Lev / Vol Exp Rev Crs Var …… Sortie et CC7/11/10/91/93/94. Vibrato/filtre/enveloppe/EQ/NRPN via NRPN/CC.",
-		L"· Lev / Vol Exp Rev Crs Var …… Uscita e CC7/11/10/91/93/94. Vibrato/filtro/inviluppo/EQ/NRPN da NRPN/CC.",
-		L"· Lev / Vol Exp Rev Crs Var …… Salida y CC7/11/10/91/93/94. Vibrato/filtro/envolvente/EQ/NRPN por NRPN/CC.",
-		L"· Lev / Vol Exp Rev Crs Var …… 출력과 CC7/11/10/91/93/94. 비브라토/필터/엔벨로프/EQ/NRPN은 NRPN/CC.",
-		L"· Lev / Vol Exp Rev Crs Var …… 电平和 CC7/11/10/91/93/94。颤音/滤波/包络/EQ/NRPN 来自 NRPN/CC。",
-		L"· Lev / Vol Exp Rev Crs Var …… خرج و CC7/11/10/91/93/94. اهتزاز/مرشح/غلاف/EQ/NRPN من NRPN/CC.",
-		L"· Lev / Vol Exp Rev Crs Var …… Выход и CC7/11/10/91/93/94. Вибрато/фильтр/огибающая/EQ/NRPN из NRPN/CC.",
-		L"· Lev / Vol Exp Rev Crs Var …… Pegel und CC7/11/10/91/93/94. Vibrato/Filter/Huellkurve/EQ/NRPN aus NRPN/CC.",
-		L"· Lev / Vol Exp Rev Crs Var …… Saida e CC7/11/10/91/93/94. Vibrato/filtro/envelope/EQ/NRPN via NRPN/CC.",
-		L"· Lev / Vol Exp Rev Crs Var …… Uitgang en CC7/11/10/91/93/94. Vibrato/filter/envelope/EQ/NRPN via NRPN/CC.",
-		L"· Lev / Vol Exp Rev Crs Var …… Wyjscie i CC7/11/10/91/93/94. Vibrato/filtr/obwiednia/EQ/NRPN z NRPN/CC.",
-		L"· Lev / Vol Exp Rev Crs Var …… Cikis ve CC7/11/10/91/93/94. Vibrato/filtre/zarf/EQ/NRPN, NRPN/CC'den."));
+		L"・Lev は発音。Vol/Pan/Exp 等は動いているとき明るく、初期値のままなら暗くなります。ヘッダ Vol は再生音量（ドラッグで本体/MP と同期）。Notes は実発音数、暗いバーが MAX（少しして減衰）。DRUM はドラムパートのヒット。",
+		L"· Lev is level. Vol/Pan/Exp light up while moving, stay dim at defaults. Header Vol is playback volume (drag syncs with the main/MP slider). Notes is held polyphony; the dim bar is MAX (holds, then decays). DRUM lights on drum hits.",
+		L"· Lev = niveau. Vol/Pan/Exp s'allument en mouvement. Vol d'en-tete = volume (glisser = sync MP). Notes = polyphonie reelle; barre sombre = MAX (puis baisse). DRUM = hits batterie.",
+		L"· Lev e il livello. Vol/Pan/Exp si illuminano se si muovono. Vol in testa = volume (trascina = sync MP). Notes = polifonia reale; barra scura = MAX (poi scende). DRUM = colpi batteria.",
+		L"· Lev es el nivel. Vol/Pan/Exp se iluminan al moverse. Vol de cabecera = volumen (arrastrar = sync MP). Notes = polifonia real; barra oscura = MAX (luego baja). DRUM = golpes de bateria.",
+		L"· Lev는 레벨. Vol/Pan/Exp는 움직일 때 밝고, 기본값이면 어둡습니다. 헤더 Vol은 재생 음량(드래그하면 본체/MP와 동기). Notes는 실제 발음 수, 어두운 바는 MAX(잠시 후 감쇠). DRUM은 드럼 타격.",
+		L"· Lev 是电平。Vol/Pan/Exp 在变化时发亮。页眉 Vol 是播放音量（拖动与主界面/MP 同步）。Notes 是实际发音数，暗条是 MAX（稍后衰减）。DRUM 表示鼓组敲击。",
+		L"· Lev هو المستوى. Vol الرأس = حجم التشغيل. Notes = تعدد الأصوات الفعلي؛ الشريط الداكن = MAX ثم ينخفض. DRUM لضربات الطبل.",
+		L"· Lev — уровень. Vol в шапке — громкость. Notes — реальная полифония; тёмная полоса — MAX (потом спадает). DRUM — удары барабанов.",
+		L"· Lev ist Pegel. Kopf-Vol ist Wiedergabelautstaerke. Notes ist echte Polyphonie; die dunkle Leiste ist MAX (dann Abfall). DRUM = Drum-Hits.",
+		L"· Lev e o nivel. Vol do cabecalho e o volume. Notes e a polifonia real; a barra escura e MAX (depois cai). DRUM = batidas de bateria.",
+		L"· Lev is niveau. Kop-Vol is afspeelvolume. Notes is echte polyfonie; de donkere balk is MAX (daarna verval). DRUM = drumhits.",
+		L"· Lev to poziom. Vol w naglowku to glosnosc. Notes to rzeczywista polifonia; ciemny pasek to MAX (potem opada). DRUM = uderzenia perkusji.",
+		L"· Lev seviyedir. Baslik Vol oynatma sesidir. Notes gercek polifonidir; koyu cubuk MAX'tir (sonra duser). DRUM davul vurusudur."));
+	y += lh;
+	body(L, y, LL14(
+		L"・Vol/Pan/Exp/Rev/Crs/Var はドラッグまたはホイールで送出（ダブルクリックで初期値）。PC# はホイールでプログラム変更。右端のミニ鍵盤はクリックで発音。曲の CC より約2.5秒優先します。",
+		L"· Drag or wheel Vol/Pan/Exp/Rev/Crs/Var to send CC (double-click resets). Wheel PC# for program change. Click the mini keyboard to play. Your edits hold about 2.5s over the song CC.",
+		L"· Glisser / molette Vol/Pan/Exp/Rev/Crs/Var envoie le CC (double-clic = defaut). Molette sur PC# = programme. Mini clavier cliquable. Vos reglages priment ~2,5 s sur le SMF.",
+		L"· Trascina o rotella su Vol/Pan/Exp/Rev/Crs/Var per inviare CC (doppio clic = default). Rotella su PC# = programma. Mini tastiera cliccabile. Le modifiche restano ~2,5 s sul SMF.",
+		L"· Arrastre o rueda Vol/Pan/Exp/Rev/Crs/Var para enviar CC (doble clic = valor por defecto). Rueda en PC# = programa. Mini teclado clicable. Sus ediciones pesan ~2,5 s sobre el SMF.",
+		L"· Vol/Pan/Exp/Rev/Crs/Var는 드래그 또는 휠로 전송(더블클릭=초기값). PC#는 휠로 프로그램 변경. 미니 건반 클릭으로 연주. 곡 CC보다 약 2.5초 우선.",
+		L"· 拖动或滚轮 Vol/Pan/Exp/Rev/Crs/Var 发送 CC（双击恢复默认）。滚轮 PC# 改音色。点击迷你键盘发音。约 2.5 秒内优先于乐曲 CC。",
+		L"· اسحب أو عجلة Vol/Pan/Exp لإرسال CC. عجلة PC# لتغيير البرنامج. انقر على لوحة المفاتيح الصغيرة للعزف. تعديلاتك تسبق ملف SMF نحو 2.5 ث.",
+		L"· Перетаскивание/колесо Vol/Pan/Exp/Rev/Crs/Var шлёт CC (двойной щелчок — сброс). Колесо на PC# — программа. Мини-клавиатура играет. Правки держатся ~2,5 с над CC файла.",
+		L"· Ziehen oder Rad auf Vol/Pan/Exp/Rev/Crs/Var sendet CC (Doppelklick = Default). Rad auf PC# = Programm. Mini-Tastatur ist spielbar. Edits gelten ~2,5 s vor Song-CC.",
+		L"· Arrastar ou roda em Vol/Pan/Exp/Rev/Crs/Var envia CC (duplo clique = padrao). Roda em PC# = programa. Mini teclado toca. Edicoes valem ~2,5 s sobre o CC do SMF.",
+		L"· Slepen of wiel op Vol/Pan/Exp/Rev/Crs/Var stuurt CC (dubbelklik = default). Wiel op PC# = programma. Mini-toetsenbord speelt. Edits gaan ~2,5 s voor SMF-CC.",
+		L"· Przeciagnij lub kolo na Vol/Pan/Exp/Rev/Crs/Var wysyla CC (dwuklik = domyslne). Kolo na PC# = program. Mini klawiatura gra. Edycje trzymaja ~2,5 s nad CC z SMF.",
+		L"· Vol/Pan/Exp/Rev/Crs/Var surukleme veya tekerlekle CC gonderir (cift tik = varsayilan). PC# tekerlegi program degistirir. Mini klavye calinir. Duzenlemeler SMF CC'den ~2,5 sn once gelir."));
 	y += lh + 2;
 	title(L, y, LL14(L"右クリック", L"Right-click", L"Clic droit", L"Tasto destro", L"Clic derecho", L"우클릭", L"右键", L"زر أيمن", L"ПКМ", L"Rechtsklick", L"Botao direito", L"Rechtsklik", L"PPM", L"Sag tik"));
 	y += titleLh;
@@ -537,14 +618,23 @@ CMidiMonitorDlg::CMidiMonitorDlg(CWnd* pParent)
 	, m_usecQn(500000), m_tsNum(4), m_tsDen(4), m_keySf(0), m_keyMin(0), m_transpose(0)
 	, m_sysMode(0), m_revType(1), m_choType(2), m_varType(1), m_ins1(0), m_ins2(0)
 	, m_noteCount(0), m_masterVol(100)
+	, m_notesPeak(0), m_notesPeakHold(0), m_layW(0)
+	, m_dragKind(0), m_dragPart(-1), m_playPart(-1), m_playNote(-1)
 	, m_viewMode(0), m_mapForce(0), m_frozen(false), m_alwaysOnTop(false), m_paintDisabled(false)
 	, m_rotDragging(false), m_rotDragYaw0(0), m_rotDragPitch0(0), m_soft3dTourUntil(0)
 	, m_hoverCol(-1), m_hoverPart(-1)
+	, m_layHeadH(0), m_layRowH(0), m_persistAge(0), m_drumGlow(0), m_dispBpm(-1)
+	, m_dirtyRows(0xFFFFFFFFu), m_rowLive(0)
+	, m_dirtyHead(true), m_fullDraw(true), m_volDragging(false)
 {
 	m_loadedPath[0] = 0;
 	m_titleBuf[0] = 0;
 	m_hoverTip[0] = 0;
+	m_volBarRc.SetRectEmpty();
+	m_notesBarRc.SetRectEmpty();
 	memset(m_part, 0, sizeof(m_part));
+	memset(m_latchUntil, 0, sizeof(m_latchUntil));
+	memset(m_latchMask, 0, sizeof(m_latchMask));
 }
 
 CMidiMonitorDlg::~CMidiMonitorDlg()
@@ -574,6 +664,7 @@ BEGIN_MESSAGE_MAP(CMidiMonitorDlg, CCustomBlurDialogExBase)
 	ON_WM_LBUTTONDOWN()
 	ON_WM_MOUSEMOVE()
 	ON_WM_LBUTTONUP()
+	ON_WM_LBUTTONDBLCLK()
 	ON_WM_MOUSEWHEEL()
 	ON_NOTIFY_EX_RANGE(TTN_NEEDTEXTW, 0, 0xFFFF, &CMidiMonitorDlg::OnTtnNeedText)
 	ON_NOTIFY_EX_RANGE(TTN_NEEDTEXTA, 0, 0xFFFF, &CMidiMonitorDlg::OnTtnNeedText)
@@ -612,6 +703,7 @@ void CMidiMonitorDlg::ReleasePaintBuffers()
 	if (m_frameDC.GetSafeHdc())
 		m_frameDC.DeleteDC();
 	m_frameW = m_frameH = 0;
+	m_fullDraw = true;
 #if CCUSTOM_AERO_SUPPORT
 	m_chromaCache.Release();
 	m_chromaReady = false;
@@ -634,6 +726,7 @@ bool CMidiMonitorDlg::EnsureFrameBuffer(CDC& refDC, int w, int h)
 	m_frameOld = m_frameDC.SelectObject(&m_frameBmp);
 	m_frameW = w;
 	m_frameH = h;
+	m_fullDraw = true;
 	return true;
 }
 
@@ -667,8 +760,17 @@ void CMidiMonitorDlg::ResetParts()
 	m_ins1 = 0;
 	m_ins2 = 0;
 	m_noteCount = 0;
+	m_notesPeak = 0;
+	m_notesPeakHold = 0;
 	m_masterVol = 100;
 	m_evPos = 0;
+	m_dirtyRows = 0xFFFFFFFFu;
+	m_dirtyHead = true;
+	m_fullDraw = true;
+	m_rowLive = 0;
+	m_drumGlow = 0;
+	memset(m_latchUntil, 0, sizeof(m_latchUntil));
+	memset(m_latchMask, 0, sizeof(m_latchMask));
 }
 
 void CMidiMonitorDlg::UnloadMidi()
@@ -743,42 +845,51 @@ void CMidiMonitorDlg::ApplyShort(int port, DWORD msg)
 			p.lastVel = d2;
 			p.held++;
 			if (p.held < 1) p.held = 1;
-			p.lev = (float)d2 / 127.f;
-			m_noteCount++;
+			const float lv = (float)d2 / 127.f;
+			if (lv > p.lev) p.lev = lv;
+			m_dirtyRows |= (1u << part);
+			if (p.isDrum) m_drumGlow = 255;
 		} else {
 			p.noteOn[d1] = 0;
 			if (p.held > 0) p.held--;
+			m_dirtyRows |= (1u << part);
 		}
 	} else if (st == 0x80) {
 		p.noteOn[d1] = 0;
 		if (p.held > 0) p.held--;
+		m_dirtyRows |= (1u << part);
 	} else if (st == 0xc0) {
-		p.pc = d1 & 127;
-		RefreshPartName(p);
+		if (!IsLatched(part, MM_LATCH_PC)) {
+			p.pc = d1 & 127;
+			RefreshPartName(p);
+			m_dirtyRows |= (1u << part);
+		}
 	} else if (st == 0xb0) {
-		if (d1 == 0) { p.bankMsb = d2; RefreshPartName(p); }
-		else if (d1 == 32) { p.bankLsb = d2; RefreshPartName(p); }
-		else if (d1 == 7) p.vol = d2;
-		else if (d1 == 11) p.exp = d2;
-		else if (d1 == 10) p.pan = d2;
-		else if (d1 == 91) p.rev = d2;
-		else if (d1 == 93) p.crs = d2;
-		else if (d1 == 94) p.var = d2;
-		else if (d1 == 71) p.rsn = d2 - 64;
-		else if (d1 == 74) p.lpf = d2 - 64;
-		else if (d1 == 72) p.rls = d2 - 64;
-		else if (d1 == 73) p.atk = d2 - 64;
-		else if (d1 == 75) p.dcy = d2 - 64;
-		else if (d1 == 76) p.vibRat = d2 - 64;
-		else if (d1 == 77) p.vibDpt = d2 - 64;
-		else if (d1 == 78) p.vibDly = d2 - 64;
+		if (d1 == 0) { p.bankMsb = d2; RefreshPartName(p); m_dirtyRows |= (1u << part); }
+		else if (d1 == 32) { p.bankLsb = d2; RefreshPartName(p); m_dirtyRows |= (1u << part); }
+		else if (d1 == 7) { if (!IsLatched(part, MM_LATCH_VOL)) { if (p.vol != d2) p.glowVol = 255; p.vol = d2; m_dirtyRows |= (1u << part); } }
+		else if (d1 == 11) { if (!IsLatched(part, MM_LATCH_EXP)) { if (p.exp != d2) p.glowExp = 255; p.exp = d2; m_dirtyRows |= (1u << part); } }
+		else if (d1 == 10) { if (!IsLatched(part, MM_LATCH_PAN)) { if (p.pan != d2) p.glowPan = 255; p.pan = d2; m_dirtyRows |= (1u << part); } }
+		else if (d1 == 91) { if (!IsLatched(part, MM_LATCH_REV)) { if (p.rev != d2) p.glowRev = 255; p.rev = d2; m_dirtyRows |= (1u << part); } }
+		else if (d1 == 93) { if (!IsLatched(part, MM_LATCH_CRS)) { if (p.crs != d2) p.glowCrs = 255; p.crs = d2; m_dirtyRows |= (1u << part); } }
+		else if (d1 == 94) { if (!IsLatched(part, MM_LATCH_VAR)) { if (p.var != d2) p.glowVar = 255; p.var = d2; m_dirtyRows |= (1u << part); } }
+		else if (d1 == 71) { p.rsn = d2 - 64; m_dirtyRows |= (1u << part); }
+		else if (d1 == 74) { p.lpf = d2 - 64; m_dirtyRows |= (1u << part); }
+		else if (d1 == 72) { p.rls = d2 - 64; m_dirtyRows |= (1u << part); }
+		else if (d1 == 73) { p.atk = d2 - 64; m_dirtyRows |= (1u << part); }
+		else if (d1 == 75) { p.dcy = d2 - 64; m_dirtyRows |= (1u << part); }
+		else if (d1 == 76) { p.vibRat = d2 - 64; m_dirtyRows |= (1u << part); }
+		else if (d1 == 77) { p.vibDpt = d2 - 64; m_dirtyRows |= (1u << part); }
+		else if (d1 == 78) { p.vibDly = d2 - 64; m_dirtyRows |= (1u << part); }
 		else if (d1 == 98) p.nrpnLsb = d2;
 		else if (d1 == 99) p.nrpnMsb = d2;
 		else if (d1 == 100) p.rpnLsb = d2;
 		else if (d1 == 101) p.rpnMsb = d2;
-		else if (d1 == 6) { p.dataMsb = d2; ApplyNrpn(p); }
+		else if (d1 == 6) { p.dataMsb = d2; ApplyNrpn(p); m_dirtyRows |= (1u << part); }
 		else if (d1 == 121) {
 			p.exp = 127; p.pan = 64; p.rev = 40; p.crs = 0; p.var = 0;
+			p.glowExp = p.glowPan = p.glowRev = p.glowCrs = p.glowVar = 180;
+			m_dirtyRows |= (1u << part);
 		}
 		else if (d1 == 120 || d1 == 123) {
 			memset(p.noteOn, 0, sizeof(p.noteOn));
@@ -816,15 +927,19 @@ void CMidiMonitorDlg::ApplySysex(const BYTE* d, int n)
 		if (d[6] == 0x00) m_revType = d[7];
 		else if (d[6] == 0x20) m_choType = d[7];
 		else if (d[6] == 0x40) m_varType = d[7];
+		m_dirtyHead = true;
 	}
 	if (n >= 11 && d[1] == 0x41 && d[3] == 0x42 && d[4] == 0x12 && d[5] == 0x40 && d[6] == 0x01) {
 		if (d[7] == 0x30) m_revType = d[8];
 		else if (d[7] == 0x38) m_choType = d[8];
+		m_dirtyHead = true;
 	}
-	if (n >= 9 && d[1] == 0x43 && d[3] == 0x4c && d[4] == 0x03 && d[5] == 0x00)
-		m_ins1 = d[7];
-	if (n >= 9 && d[1] == 0x43 && d[3] == 0x4c && d[4] == 0x03 && d[5] == 0x10)
-		m_ins2 = d[7];
+	if (n >= 9 && d[1] == 0x43 && d[3] == 0x4c && d[4] == 0x03 && d[5] == 0x00) {
+		m_ins1 = d[7]; m_dirtyHead = true;
+	}
+	if (n >= 9 && d[1] == 0x43 && d[3] == 0x4c && d[4] == 0x03 && d[5] == 0x10) {
+		m_ins2 = d[7]; m_dirtyHead = true;
+	}
 }
 
 void CMidiMonitorDlg::ApplyEvent(const MmEv& e)
@@ -1036,6 +1151,19 @@ void CMidiMonitorDlg::SyncFromPlayback()
 	if (!m_ev || m_evCount <= 0) return;
 	__int64 pb = playb;
 	if (pb < 0) pb = 0;
+	if (mode == MODE_VST_MIDI) {
+		const int vstPcm = (savedata.vstMultiDll[0] || savedata.vstExtraPath[0]);
+		if (vstPcm) {
+			// 時間表示と同じ「再生カーソル」位置。さらにプラグイン遅延と、
+			// DS play cursor がアナログ出力より先に進む分（簡易ピアノロール extra と同じ 700ms）。
+			const int sr = (m_sampleRate > 0) ? m_sampleRate : 44100;
+			const double sec = OggGetGdiPlaybackTimeSec();
+			pb = (__int64)(sec * (double)sr + 0.5);
+			pb -= VstMidiGetLatencySamples();
+			pb -= (__int64)sr * 700 / 1000;
+			if (pb < 0) pb = 0;
+		}
+	}
 	if (pb < m_lastPlayb) {
 		ResetParts();
 		m_evPos = 0;
@@ -1045,41 +1173,47 @@ void CMidiMonitorDlg::SyncFromPlayback()
 		ApplyEvent(m_ev[m_evPos]);
 		m_evPos++;
 	}
-	for (int i = 0; i < PART_MAX; ++i) {
-		if (m_part[i].held <= 0) {
-			m_part[i].lev *= 0.82f;
-			if (m_part[i].lev < 0.002f) m_part[i].lev = 0;
-		}
-	}
-	int notes = 0;
-	for (int i = 0; i < PART_MAX; ++i) notes += m_part[i].held;
-	m_noteCount = notes;
+	UpdateNoteMeter();
 }
 
-void CMidiMonitorDlg::DrawVBar(CDC& dc, int x, int y, int bw, int bh, int v0, int vmax, COLORREF col)
+void CMidiMonitorDlg::DrawVBar(CDC& dc, int x, int y, int bw, int bh, int v0, int vmax, COLORREF col, int glow, int idle)
 {
 	if (bw < 2 || bh < 2) return;
-	dc.FillSolidRect(x, y, bw, bh, RGB(22, 22, 28));
+	dc.FillSolidRect(x, y, bw, bh, RGB(16, 16, 20));
 	int v = v0;
 	if (v < 0) v = 0;
 	if (vmax < 1) vmax = 1;
 	if (v > vmax) v = vmax;
 	int h = (bh * v) / vmax;
-	if (h > 0)
-		dc.FillSolidRect(x, y + bh - h, bw, h, col);
+	if (h <= 0) return;
+	COLORREF c = col;
+	if (idle)
+		c = MmMix(RGB(38, 40, 46), col, 40);
+	else if (glow > 0)
+		c = MmMix(col, RGB(255, 255, 220), glow);
+	else
+		c = MmMix(RGB(48, 50, 56), col, 150);
+	dc.FillSolidRect(x, y + bh - h, bw, h, c);
+	if (glow > 40 && h > 2)
+		dc.FillSolidRect(x, y + bh - h, bw, 1, MmMix(c, RGB(255, 255, 255), 120));
 }
 
-void CMidiMonitorDlg::DrawPanBar(CDC& dc, int x, int y, int bw, int bh, int pan)
+void CMidiMonitorDlg::DrawPanBar(CDC& dc, int x, int y, int bw, int bh, int pan, int glow, int idle)
 {
 	if (bw < 3 || bh < 2) return;
-	dc.FillSolidRect(x, y, bw, bh, RGB(22, 22, 28));
+	dc.FillSolidRect(x, y, bw, bh, RGB(16, 16, 20));
 	int mid = x + bw / 2;
-	dc.FillSolidRect(mid, y, 1, bh, RGB(80, 80, 40));
+	dc.FillSolidRect(mid, y, 1, bh, RGB(70, 70, 36));
 	int p = pan;
 	if (p < 0) p = 0;
 	if (p > 127) p = 127;
 	int px = x + (bw - 2) * p / 127;
-	dc.FillSolidRect(px, y + 1, 2, bh - 2, RGB(230, 210, 40));
+	COLORREF c = RGB(230, 210, 40);
+	if (idle)
+		c = RGB(90, 88, 50);
+	else if (glow > 0)
+		c = MmMix(c, RGB(255, 255, 200), glow);
+	dc.FillSolidRect(px, y + 1, 2, bh - 2, c);
 }
 
 void CMidiMonitorDlg::DrawMiniKeys(CDC& dc, const CRect& rc, const Part& p)
@@ -1118,11 +1252,9 @@ void CMidiMonitorDlg::DrawMiniKeys(CDC& dc, const CRect& rc, const Part& p)
 	}
 }
 
-void CMidiMonitorDlg::DrawMonitor2D(CDC& dc, int w, int h, UINT dpi)
+void CMidiMonitorDlg::DrawHeader(CDC& dc, int w, int headH, UINT dpi)
 {
-	const int headH = Scale(78, dpi);
 	dc.FillSolidRect(0, 0, w, headH, MM_HEAD_BG);
-	dc.FillSolidRect(0, headH, w, h - headH, MM_BG);
 	dc.SetBkMode(TRANSPARENT);
 	CFont* oldF = dc.SelectObject(&m_fontHead);
 	dc.SetTextColor(MM_HEAD_TX);
@@ -1131,6 +1263,7 @@ void CMidiMonitorDlg::DrawMonitor2D(CDC& dc, int w, int h, UINT dpi)
 	if (m_usecQn > 0)
 		bpm = (int)((60000000.0 / (double)m_usecQn) + 0.5);
 	if (bpm < 1) bpm = savedata.mpDetectedBpm;
+	m_dispBpm = bpm;
 	int tpc = tempo;
 	if (tpc < 1) tpc = 100;
 	m_transpose = (pitch != 0) ? (int)((double)pitch / 100.0 + (pitch > 0 ? 0.5 : -0.5)) : 0;
@@ -1145,21 +1278,67 @@ void CMidiMonitorDlg::DrawMonitor2D(CDC& dc, int w, int h, UINT dpi)
 		bpm, tpc, keyBuf, m_division, m_tsNum, m_tsDen, m_transpose, base);
 	dc.TextOut(Scale(8, dpi), Scale(4, dpi), line1);
 
-	int volBarW = max(40, w / 3);
-	int notesW = Scale(90, dpi);
-	dc.FillSolidRect(Scale(8, dpi), Scale(22, dpi), volBarW, Scale(10, dpi), RGB(40, 140, 50));
+	const int volBarW = max(40, w / 3);
+	const int vx = Scale(8, dpi);
+	const int vy = Scale(22, dpi);
+	const int vh = Scale(10, dpi);
+	m_volBarRc.SetRect(vx, vy, vx + volBarW, vy + vh);
+	dc.FillSolidRect(vx, vy, volBarW, vh, RGB(22, 28, 22));
+	int pct = m_masterVol;
+	if (pct < 0) pct = 0;
+	if (pct > 100) pct = 100;
+	const int fillW = volBarW * pct / 100;
+	if (fillW > 0)
+		dc.FillSolidRect(vx, vy, fillW, vh, RGB(48, 170, 70));
+	dc.FillSolidRect(vx, vy, volBarW, 1, RGB(70, 100, 70));
+	dc.FillSolidRect(vx, vy + vh - 1, volBarW, 1, RGB(20, 40, 20));
+	for (int k = 1; k < 4; ++k) {
+		const int tx = vx + volBarW * k / 4;
+		dc.FillSolidRect(tx, vy + 1, 1, vh - 2, RGB(36, 52, 36));
+	}
 	wchar_t volT[32];
-	_snwprintf_s(volT, _TRUNCATE, L"Vol %d%%", m_masterVol);
-	dc.SetTextColor(RGB(255, 255, 255));
-	dc.TextOut(Scale(12, dpi), Scale(21, dpi), volT);
-	dc.FillSolidRect(Scale(8, dpi) + volBarW + Scale(6, dpi), Scale(22, dpi), notesW, Scale(10, dpi), RGB(90, 170, 220));
-	wchar_t nt[24];
-	_snwprintf_s(nt, _TRUNCATE, L"Notes %03d", m_noteCount);
-	dc.TextOut(Scale(12, dpi) + volBarW + Scale(6, dpi), Scale(21, dpi), nt);
-	dc.FillSolidRect(Scale(8, dpi) + volBarW + notesW + Scale(14, dpi), Scale(20, dpi), Scale(12, dpi), Scale(12, dpi), RGB(180, 30, 30));
-	dc.SetTextColor(RGB(255, 255, 255));
-	dc.TextOut(Scale(10, dpi) + volBarW + notesW + Scale(16, dpi), Scale(20, dpi), L"D");
+	_snwprintf_s(volT, _TRUNCATE, L"Vol %d%%", pct);
+	dc.SetTextColor(RGB(245, 255, 245));
+	dc.TextOut(vx + Scale(4, dpi), Scale(21, dpi), volT);
 
+	const int nx = vx + volBarW + Scale(6, dpi);
+	const int notesW = Scale(140, dpi);
+	m_notesBarRc.SetRect(nx, vy, nx + notesW, vy + vh);
+	dc.FillSolidRect(nx, vy, notesW, vh, RGB(14, 22, 32));
+	int nScale = 32;
+	const int pk = (int)(m_notesPeak + 0.5f);
+	if (pk > nScale) nScale = pk;
+	if (m_noteCount > nScale) nScale = m_noteCount;
+	if (nScale < 1) nScale = 1;
+	const int maxW = notesW * pk / nScale;
+	const int nFill = notesW * m_noteCount / nScale;
+	if (maxW > 0)
+		dc.FillSolidRect(nx, vy, maxW, vh, RGB(36, 72, 104));
+	if (nFill > 0)
+		dc.FillSolidRect(nx, vy, nFill, vh, RGB(90, 170, 220));
+	if (pk > 0 && maxW > 1)
+		dc.FillSolidRect(nx + maxW - 2, vy, 2, vh, RGB(220, 240, 255));
+	dc.FillSolidRect(nx, vy, notesW, 1, RGB(50, 80, 110));
+	dc.FillSolidRect(nx, vy + vh - 1, notesW, 1, RGB(16, 24, 36));
+	wchar_t nt[40];
+	_snwprintf_s(nt, _TRUNCATE, L"Notes %03d  MAX %03d", m_noteCount, pk);
+	dc.SetTextColor(RGB(255, 255, 255));
+	dc.TextOut(nx + Scale(4, dpi), Scale(21, dpi), nt);
+
+	const int dx = nx + notesW + Scale(14, dpi);
+	const int dy = Scale(20, dpi);
+	const int ds = Scale(12, dpi);
+	const int dg = m_drumGlow;
+	COLORREF dcol = (dg > 0)
+		? MmMix(RGB(70, 16, 16), RGB(255, 50, 40), dg)
+		: RGB(52, 20, 20);
+	dc.FillSolidRect(dx, dy, ds, ds, dcol);
+	dc.FillSolidRect(dx + 1, dy + 1, ds - 2, 1, MmMix(dcol, RGB(255, 180, 160), dg > 0 ? 80 : 20));
+	dc.SetTextColor(dg > 40 ? RGB(255, 230, 230) : RGB(140, 90, 90));
+	dc.SelectObject(&m_fontTiny);
+	dc.TextOut(dx + ds + Scale(3, dpi), dy + 1, L"DRUM");
+
+	dc.SelectObject(&m_fontHead);
 	dc.SetTextColor(MM_HEAD_TX);
 	const wchar_t* sysN = (m_sysMode == 2) ? L"XG" : (m_sysMode == 1) ? L"GS" : L"GM";
 	wchar_t line3[320];
@@ -1173,54 +1352,11 @@ void CMidiMonitorDlg::DrawMonitor2D(CDC& dc, int w, int h, UINT dpi)
 	dc.TextOut(Scale(8, dpi), Scale(36, dpi), line3);
 
 	dc.SelectObject(&m_fontCell);
-	const wchar_t* hdr = L"CH#   PC# BNK Map     Instrument        Lev  Vol Pan Exp Rev Crs Var   Vibrato        Filter         Envelope        EQ         NRPN   Keyboard";
-	dc.TextOut(Scale(4, dpi), Scale(54, dpi), hdr);
+	dc.TextOut(Scale(4, dpi), Scale(54, dpi),
+		L"CH#   PC# BNK Map     Instrument        Lev  Vol Pan Exp Rev Crs Var   Vibrato        Filter         Envelope        EQ         NRPN   Keyboard");
 	dc.SelectObject(&m_fontTiny);
 	dc.SetTextColor(RGB(70, 70, 80));
 	dc.TextOut(Scale(520, dpi), Scale(66, dpi), L"Rat Dpt Dly     LPF Rsn HPF     Atk Dcy Rls     Low High");
-
-	const int rows = PART_MAX;
-	int bodyH = h - headH;
-	if (bodyH < rows) bodyH = rows;
-	int rowH = bodyH / rows;
-	if (rowH < Scale(10, dpi)) rowH = Scale(10, dpi);
-	dc.SelectObject(&m_fontTiny);
-	for (int i = 0; i < rows; ++i) {
-		const Part& p = m_part[i];
-		int y = headH + i * rowH;
-		dc.FillSolidRect(0, y, w, rowH - 1, (i < 16) ? MM_ROW_A : MM_ROW_B);
-		dc.FillSolidRect(0, y + rowH - 1, w, 1, MM_GRID);
-		dc.SetTextColor(MM_FG);
-		wchar_t chs[8];
-		_snwprintf_s(chs, _TRUNCATE, L"%c%02d", (i < 16) ? L'A' : L'B', (i % 16) + 1);
-		dc.TextOut(Scale(4, dpi), y + 1, chs);
-		wchar_t pcb[48];
-		_snwprintf_s(pcb, _TRUNCATE, L"%03d %03d %s", p.pc + 1, p.bankMsb, MmMapLabel(m_sysMode, p.mapId));
-		dc.TextOut(Scale(40, dpi), y + 1, pcb);
-		dc.TextOut(Scale(148, dpi), y + 1, p.name);
-		int meterX = Scale(280, dpi);
-		int bh = rowH - Scale(4, dpi);
-		int by = y + Scale(2, dpi);
-		int bw = Scale(6, dpi);
-		DrawVBar(dc, meterX, by, bw, bh, (int)(p.lev * 127.f), 127, RGB(40, 210, 70));
-		DrawVBar(dc, meterX + Scale(10, dpi), by, bw, bh, p.vol, 127, RGB(50, 200, 70));
-		DrawPanBar(dc, meterX + Scale(18, dpi), by, Scale(8, dpi), bh, p.pan);
-		DrawVBar(dc, meterX + Scale(28, dpi), by, bw, bh, p.exp, 127, RGB(50, 200, 70));
-		DrawVBar(dc, meterX + Scale(36, dpi), by, bw, bh, p.rev, 127, RGB(210, 50, 50));
-		DrawVBar(dc, meterX + Scale(44, dpi), by, bw, bh, p.crs, 127, RGB(80, 200, 230));
-		DrawVBar(dc, meterX + Scale(52, dpi), by, bw, bh, p.var, 127, RGB(50, 80, 200));
-		wchar_t num[96];
-		_snwprintf_s(num, _TRUNCATE, L"%+03d %+03d %+03d   %+03d %+03d %+03d   %+03d %+03d %+03d   %d %s",
-			p.vibRat, p.vibDpt, p.vibDly, p.lpf, p.rsn, p.hpf, p.atk, p.dcy, p.rls,
-			p.eqLow, (p.eqHigh >= 1000) ? L"10k" : L"Hz");
-		dc.TextOut(Scale(360, dpi), y + 1, num);
-		wchar_t nr[16];
-		_snwprintf_s(nr, _TRUNCATE, L"%02X\n%02X", p.nrpnMsb & 127, p.nrpnLsb & 127);
-		CRect nrRc(Scale(640, dpi), y, Scale(668, dpi), y + rowH);
-		dc.DrawText(nr, &nrRc, DT_CENTER | DT_WORDBREAK);
-		CRect krc(Scale(672, dpi), y + 1, w - Scale(4, dpi), y + rowH - 2);
-		DrawMiniKeys(dc, krc, p);
-	}
 	if (m_frozen) {
 		dc.SelectObject(&m_fontHead);
 		dc.SetTextColor(RGB(255, 180, 80));
@@ -1229,6 +1365,361 @@ void CMidiMonitorDlg::DrawMonitor2D(CDC& dc, int w, int h, UINT dpi)
 				L"Заморожено", L"Eingefroren", L"Congelado", L"Bevroren", L"Zamrozone", L"Donduruldu"));
 	}
 	dc.SelectObject(oldF);
+}
+
+void CMidiMonitorDlg::DrawPartRow(CDC& dc, int i, int y, int rowH, int w, UINT dpi)
+{
+	const Part& p = m_part[i];
+	dc.SetBkMode(TRANSPARENT);
+	CFont* oldF = dc.SelectObject(&m_fontTiny);
+	dc.FillSolidRect(0, y, w, rowH - 1, (i < 16) ? MM_ROW_A : MM_ROW_B);
+	dc.FillSolidRect(0, y + rowH - 1, w, 1, MM_GRID);
+	const int live = (p.held > 0);
+	dc.SetTextColor(live ? RGB(255, 245, 245) : MM_FG);
+	wchar_t chs[8];
+	_snwprintf_s(chs, _TRUNCATE, L"%c%02d", (i < 16) ? L'A' : L'B', (i % 16) + 1);
+	dc.TextOut(Scale(4, dpi), y + 1, chs);
+	wchar_t pcb[48];
+	_snwprintf_s(pcb, _TRUNCATE, L"%03d %03d %s", p.pc + 1, p.bankMsb, MmMapLabel(m_sysMode, p.mapId));
+	dc.TextOut(Scale(40, dpi), y + 1, pcb);
+	dc.TextOut(Scale(148, dpi), y + 1, p.name);
+	const int meterX = Scale(280, dpi);
+	const int bh = rowH - Scale(4, dpi);
+	const int by = y + Scale(2, dpi);
+	const int bw = Scale(6, dpi);
+	DrawVBar(dc, meterX, by, bw, bh, (int)(p.lev * 127.f), 127, RGB(70, 255, 90), 255, 0);
+	DrawVBar(dc, meterX + Scale(10, dpi), by, bw, bh, p.vol, 127, RGB(50, 200, 70), p.glowVol, (p.vol == 100 && !p.glowVol) ? 1 : 0);
+	DrawPanBar(dc, meterX + Scale(18, dpi), by, Scale(8, dpi), bh, p.pan, p.glowPan, (p.pan == 64 && !p.glowPan) ? 1 : 0);
+	DrawVBar(dc, meterX + Scale(28, dpi), by, bw, bh, p.exp, 127, RGB(50, 200, 70), p.glowExp, (p.exp == 127 && !p.glowExp) ? 1 : 0);
+	DrawVBar(dc, meterX + Scale(36, dpi), by, bw, bh, p.rev, 127, RGB(210, 50, 50), p.glowRev, (p.rev == 40 && !p.glowRev) ? 1 : 0);
+	DrawVBar(dc, meterX + Scale(44, dpi), by, bw, bh, p.crs, 127, RGB(80, 200, 230), p.glowCrs, (p.crs == 0 && !p.glowCrs) ? 1 : 0);
+	DrawVBar(dc, meterX + Scale(52, dpi), by, bw, bh, p.var, 127, RGB(50, 80, 200), p.glowVar, (p.var == 0 && !p.glowVar) ? 1 : 0);
+	const int numsLive = (p.vibRat | p.vibDpt | p.vibDly | p.lpf | p.rsn | p.hpf | p.atk | p.dcy | p.rls);
+	dc.SetTextColor(numsLive ? RGB(220, 220, 230) : RGB(88, 90, 98));
+	wchar_t num[96];
+	_snwprintf_s(num, _TRUNCATE, L"%+03d %+03d %+03d   %+03d %+03d %+03d   %+03d %+03d %+03d   %d %s",
+		p.vibRat, p.vibDpt, p.vibDly, p.lpf, p.rsn, p.hpf, p.atk, p.dcy, p.rls,
+		p.eqLow, (p.eqHigh >= 1000) ? L"10k" : L"Hz");
+	dc.TextOut(Scale(360, dpi), y + 1, num);
+	dc.SetTextColor((p.nrpnMsb | p.nrpnLsb) ? MM_FG : RGB(70, 72, 80));
+	wchar_t nr[16];
+	_snwprintf_s(nr, _TRUNCATE, L"%02X\n%02X", p.nrpnMsb & 127, p.nrpnLsb & 127);
+	CRect nrRc(Scale(640, dpi), y, Scale(668, dpi), y + rowH);
+	dc.DrawText(nr, &nrRc, DT_CENTER | DT_WORDBREAK);
+	CRect krc(Scale(672, dpi), y + 1, w - Scale(4, dpi), y + rowH - 2);
+	DrawMiniKeys(dc, krc, p);
+	dc.SelectObject(oldF);
+}
+
+void CMidiMonitorDlg::DrawMonitor2D(CDC& dc, int w, int h, UINT dpi)
+{
+	const int headH = Scale(78, dpi);
+	dc.FillSolidRect(0, headH, w, h - headH, MM_BG);
+	DrawHeader(dc, w, headH, dpi);
+	int bodyH = h - headH;
+	if (bodyH < PART_MAX) bodyH = PART_MAX;
+	int rowH = bodyH / PART_MAX;
+	if (rowH < Scale(10, dpi)) rowH = Scale(10, dpi);
+	m_layHeadH = headH;
+	m_layRowH = rowH;
+	m_layW = w;
+	for (int i = 0; i < PART_MAX; ++i)
+		DrawPartRow(dc, i, headH + i * rowH, rowH, w, dpi);
+}
+
+void CMidiMonitorDlg::TickVisuals()
+{
+	DWORD live = 0;
+	int drumHit = 0;
+	for (int i = 0; i < PART_MAX; ++i) {
+		Part& p = m_part[i];
+		if (p.held <= 0) {
+			p.lev *= 0.90f;
+			if (p.lev < 0.002f) p.lev = 0;
+		}
+		MmGlowTick(p.glowVol);
+		MmGlowTick(p.glowExp);
+		MmGlowTick(p.glowPan);
+		MmGlowTick(p.glowRev);
+		MmGlowTick(p.glowCrs);
+		MmGlowTick(p.glowVar);
+		const int busy = (p.held > 0 || p.lev > 0.002f
+			|| p.glowVol || p.glowExp || p.glowPan || p.glowRev || p.glowCrs || p.glowVar);
+		if (busy) live |= (1u << i);
+		if (p.isDrum && p.held > 0)
+			drumHit = 1;
+	}
+	TickNotePeak();
+	if (drumHit) m_drumGlow = 255;
+	else if (m_drumGlow) {
+		m_drumGlow = m_drumGlow * 5 / 6;
+		if (m_drumGlow < 8) m_drumGlow = 0;
+		m_dirtyHead = true;
+	}
+	m_dirtyRows |= live | m_rowLive;
+	m_rowLive = live;
+}
+
+int CMidiMonitorDlg::AppVolPercent() const
+{
+	if (!og || !::IsWindow(og->GetSafeHwnd())) return m_masterVol;
+	int mn = 0, mx = 100000;
+	og->m_sl.GetRange(mn, mx);
+	if (mx <= mn) return 100;
+	int pct = (og->m_sl.GetPos() - mn) * 100 / (mx - mn);
+	if (pct < 0) pct = 0;
+	if (pct > 100) pct = 100;
+	return pct;
+}
+
+void CMidiMonitorDlg::SetAppVolPercent(int pct)
+{
+	if (pct < 0) pct = 0;
+	if (pct > 100) pct = 100;
+	if (!og || !::IsWindow(og->GetSafeHwnd())) return;
+	int mn = 0, mx = 100000;
+	og->m_sl.GetRange(mn, mx);
+	if (mx <= mn) return;
+	og->m_sl.SetPos(mn + pct * (mx - mn) / 100);
+	m_masterVol = pct;
+	m_dirtyHead = true;
+}
+
+void CMidiMonitorDlg::PollAppVolume()
+{
+	const int pct = AppVolPercent();
+	if (pct != m_masterVol) {
+		m_masterVol = pct;
+		m_dirtyHead = true;
+	}
+}
+
+void CMidiMonitorDlg::UpdateNoteMeter()
+{
+	int notes = 0;
+	for (int i = 0; i < PART_MAX; ++i)
+		notes += m_part[i].held;
+	if (notes < 0) notes = 0;
+	if (notes != m_noteCount) {
+		m_noteCount = notes;
+		m_dirtyHead = true;
+	}
+	if ((float)m_noteCount > m_notesPeak) {
+		m_notesPeak = (float)m_noteCount;
+		m_notesPeakHold = 45;
+		m_dirtyHead = true;
+	}
+}
+
+void CMidiMonitorDlg::TickNotePeak()
+{
+	UpdateNoteMeter();
+	if ((float)m_noteCount > m_notesPeak) {
+		m_notesPeak = (float)m_noteCount;
+		m_notesPeakHold = 45;
+		m_dirtyHead = true;
+		return;
+	}
+	if (m_notesPeakHold > 0) {
+		m_notesPeakHold--;
+		return;
+	}
+	if (m_notesPeak > (float)m_noteCount + 0.02f) {
+		m_notesPeak -= 0.16f;
+		if (m_notesPeak < (float)m_noteCount)
+			m_notesPeak = (float)m_noteCount;
+		m_dirtyHead = true;
+	} else {
+		m_notesPeak = (float)m_noteCount;
+	}
+}
+
+void CMidiMonitorDlg::LatchPart(int part, BYTE bit)
+{
+	if (part < 0 || part >= PART_MAX || !bit) return;
+	m_latchMask[part] |= bit;
+	m_latchUntil[part] = GetTickCount() + 2500;
+}
+
+bool CMidiMonitorDlg::IsLatched(int part, BYTE bit) const
+{
+	if (part < 0 || part >= PART_MAX || !bit) return false;
+	if ((m_latchMask[part] & bit) == 0) return false;
+	if ((int)(GetTickCount() - m_latchUntil[part]) >= 0) return false;
+	return true;
+}
+
+void CMidiMonitorDlg::InjectShort(int part, DWORD msg)
+{
+	if (part < 0 || part >= PART_MAX) return;
+	const int port = part / 16;
+	const int ch = part % 16;
+	msg = (msg & ~(DWORD)0x0f) | (DWORD)ch;
+	VstMidiInjectShort(port, msg);
+	ApplyShort(port, msg);
+	const int st = (int)(msg & 0xf0);
+	if (st == 0xb0) {
+		const int cc = (int)((msg >> 8) & 0x7f);
+		BYTE bit = 0;
+		if (cc == 7) bit = MM_LATCH_VOL;
+		else if (cc == 10) bit = MM_LATCH_PAN;
+		else if (cc == 11) bit = MM_LATCH_EXP;
+		else if (cc == 91) bit = MM_LATCH_REV;
+		else if (cc == 93) bit = MM_LATCH_CRS;
+		else if (cc == 94) bit = MM_LATCH_VAR;
+		LatchPart(part, bit);
+	} else if (st == 0xc0) {
+		LatchPart(part, MM_LATCH_PC);
+	}
+	UpdateNoteMeter();
+}
+
+void CMidiMonitorDlg::ReleasePlayNote()
+{
+	if (m_playPart < 0 || m_playNote < 0) return;
+	const int ch = m_playPart % 16;
+	const DWORD msg = (DWORD)(0x80 | ch) | ((DWORD)(m_playNote & 127) << 8);
+	InjectShort(m_playPart, msg);
+	m_playPart = -1;
+	m_playNote = -1;
+}
+
+int CMidiMonitorDlg::KeyAt(const CRect& rc, CPoint pt) const
+{
+	if (!rc.PtInRect(pt) || rc.Width() < 20 || rc.Height() < 6) return -1;
+	const int k0 = 21, k1 = 108;
+	int whites = 0;
+	for (int n = k0; n <= k1; ++n) {
+		if (!MmIsBlackKey(n)) whites++;
+	}
+	if (whites < 1) return -1;
+	const int ww = rc.Width();
+	const int hh = rc.Height();
+	if (pt.y < rc.top + hh * 6 / 10) {
+		int wi = 0;
+		for (int n = k0; n <= k1; ++n) {
+			if (!MmIsBlackKey(n)) { wi++; continue; }
+			int xw = rc.left + (wi * ww / whites);
+			int bw = max(2, ww / whites * 6 / 10);
+			int x0 = xw - bw / 2;
+			if (pt.x >= x0 && pt.x < x0 + bw) return n;
+		}
+	}
+	int wi = 0;
+	for (int n = k0; n <= k1; ++n) {
+		if (MmIsBlackKey(n)) continue;
+		int x0 = rc.left + wi * ww / whites;
+		int x1 = rc.left + (wi + 1) * ww / whites;
+		if (pt.x >= x0 && pt.x < x1) return n;
+		wi++;
+	}
+	return -1;
+}
+
+int CMidiMonitorDlg::HitMonitor(CPoint clientPt, int& part, CRect& cell) const
+{
+	part = -1;
+	cell.SetRectEmpty();
+	if (IsView3D() || m_layHeadH <= 0 || m_layRowH <= 0) return MM_HIT_NONE;
+	CPoint f = clientPt;
+	f.y -= CCC_GetCustomCaptionHeight(m_hWnd);
+	if (!m_volBarRc.IsRectEmpty() && m_volBarRc.PtInRect(f))
+		return MM_HIT_APPVOL;
+	if (f.y < m_layHeadH) return MM_HIT_NONE;
+	const int row = (f.y - m_layHeadH) / m_layRowH;
+	if (row < 0 || row >= PART_MAX) return MM_HIT_NONE;
+	part = row;
+	const UINT dpi = WindowDpi();
+	const int y = m_layHeadH + row * m_layRowH;
+	const int w = m_layW;
+	const int meterX = Scale(280, dpi);
+	const int bh = m_layRowH - Scale(4, dpi);
+	const int by = y + Scale(2, dpi);
+	const int bw = Scale(6, dpi);
+	auto hitBar = [&](int x, int bwBar, CRect& out) -> bool {
+		out.SetRect(x, by, x + bwBar, by + bh);
+		return f.x >= x && f.x < x + bwBar && f.y >= by && f.y < by + bh;
+	};
+	if (hitBar(meterX + Scale(10, dpi), bw, cell)) return MM_HIT_VOL;
+	if (hitBar(meterX + Scale(18, dpi), Scale(8, dpi), cell)) return MM_HIT_PAN;
+	if (hitBar(meterX + Scale(28, dpi), bw, cell)) return MM_HIT_EXP;
+	if (hitBar(meterX + Scale(36, dpi), bw, cell)) return MM_HIT_REV;
+	if (hitBar(meterX + Scale(44, dpi), bw, cell)) return MM_HIT_CRS;
+	if (hitBar(meterX + Scale(52, dpi), bw, cell)) return MM_HIT_VAR;
+	CRect krc(Scale(672, dpi), y + 1, w - Scale(4, dpi), y + m_layRowH - 2);
+	if (krc.PtInRect(f)) { cell = krc; return MM_HIT_KEYS; }
+	CRect pcRc(Scale(40, dpi), y, Scale(140, dpi), y + m_layRowH);
+	if (pcRc.PtInRect(f)) { cell = pcRc; return MM_HIT_PC; }
+	return MM_HIT_NONE;
+}
+
+void CMidiMonitorDlg::ApplyDragValue(CPoint clientPt)
+{
+	if (m_dragPart < 0 || m_dragPart >= PART_MAX) return;
+	const int cc = MmCcForHit(m_dragKind);
+	if (cc < 0) return;
+	CPoint f = clientPt;
+	f.y -= CCC_GetCustomCaptionHeight(m_hWnd);
+	const UINT dpi = WindowDpi();
+	CRect cell;
+	int part = m_dragPart;
+	HitMonitor(clientPt, part, cell);
+	part = m_dragPart;
+	const int y = m_layHeadH + part * m_layRowH;
+	const int bh = m_layRowH - Scale(4, dpi);
+	const int by = y + Scale(2, dpi);
+	int v = 0;
+	if (m_dragKind == MM_HIT_PAN) {
+		const int meterX = Scale(280, dpi);
+		const int x0 = meterX + Scale(18, dpi);
+		const int bw = Scale(8, dpi);
+		if (bw > 0) v = (f.x - x0) * 127 / bw;
+	} else {
+		if (bh > 0) v = (by + bh - f.y) * 127 / bh;
+	}
+	if (v < 0) v = 0;
+	if (v > 127) v = 127;
+	const int ch = part % 16;
+	const DWORD msg = (DWORD)(0xb0 | ch) | ((DWORD)cc << 8) | ((DWORD)v << 16);
+	InjectShort(part, msg);
+	InvalidateDirty();
+}
+
+bool CMidiMonitorDlg::HitVolBar(CPoint clientPt) const
+{
+	if (IsView3D() || m_volBarRc.IsRectEmpty()) return false;
+	CPoint f = clientPt;
+	f.y -= CCC_GetCustomCaptionHeight(m_hWnd);
+	return m_volBarRc.PtInRect(f) ? true : false;
+}
+
+void CMidiMonitorDlg::InvalidateDirty()
+{
+	if (!::IsWindow(m_hWnd)) return;
+	if (m_fullDraw || IsView3D()) {
+		Invalidate(FALSE);
+		return;
+	}
+	if (!m_dirtyHead && m_dirtyRows == 0)
+		return;
+	CRect rc;
+	GetClientRect(&rc);
+	const int capH = CCC_GetCustomCaptionHeight(m_hWnd);
+	const int w = rc.Width();
+	if (m_dirtyHead && m_layHeadH > 0) {
+		CRect r(0, capH, w, capH + m_layHeadH);
+		InvalidateRect(&r, FALSE);
+	}
+	if (m_layRowH > 0 && m_layHeadH > 0) {
+		for (int i = 0; i < PART_MAX; ++i) {
+			if ((m_dirtyRows & (1u << i)) == 0) continue;
+			const int y = capH + m_layHeadH + i * m_layRowH;
+			CRect r(0, y, w, y + m_layRowH);
+			InvalidateRect(&r, FALSE);
+		}
+	} else {
+		Invalidate(FALSE);
+	}
 }
 
 void CMidiMonitorDlg::DrawMonitor3D(CDC& dc, int w, int h)
@@ -1356,7 +1847,7 @@ BOOL CMidiMonitorDlg::OnInitDialog()
 	EnableMainWindowLock(&savedata.midimonMainLock, TRUE);
 	CCC_CaptionLayout(m_hWnd);
 	LayoutHelpBtn();
-	SetTimer(1, 33, nullptr);
+	SetTimer(1, 16, nullptr);
 	LoadCurrentMidi();
 	return TRUE;
 }
@@ -1370,7 +1861,10 @@ void CMidiMonitorDlg::OnPaint()
 	const int w = rect.Width();
 	const int capH = CCC_GetCustomCaptionHeight(m_hWnd);
 	const int h = rect.Height() - capH;
-	if (w <= 0 || h <= 0) return;
+	if (w <= 0 || h <= 0) {
+		CCC_CaptionPaint(dc, m_hWnd);
+		return;
+	}
 	if (!m_frozen)
 		SyncFromPlayback();
 
@@ -1390,16 +1884,55 @@ void CMidiMonitorDlg::OnPaint()
 		lf.lfHeight = -Scale(10, dpi);
 		m_fontTiny.CreateFontIndirect(&lf);
 		m_fontDpi = (int)dpi;
+		m_fullDraw = true;
 	}
 
 	if (!EnsureFrameBuffer(dc, w, h) || !m_frameDC.GetSafeHdc()) {
 		dc.FillSolidRect(0, capH, w, h, MM_BG);
+		CCC_CaptionPaint(dc, m_hWnd);
 		return;
 	}
-	if (IsView3D())
-		DrawMonitor3D(m_frameDC, w, h);
-	else
-		DrawMonitor2D(m_frameDC, w, h, dpi);
+
+	const bool full = m_fullDraw || IsView3D();
+	if (full) {
+		if (IsView3D())
+			DrawMonitor3D(m_frameDC, w, h);
+		else
+			DrawMonitor2D(m_frameDC, w, h, dpi);
+		m_fullDraw = false;
+		m_dirtyRows = 0;
+		m_dirtyHead = false;
+	} else {
+		if (m_layHeadH <= 0 || m_layRowH <= 0)
+			DrawMonitor2D(m_frameDC, w, h, dpi);
+		else {
+			if (m_dirtyHead)
+				DrawHeader(m_frameDC, w, m_layHeadH, dpi);
+			for (int i = 0; i < PART_MAX; ++i) {
+				if (m_dirtyRows & (1u << i))
+					DrawPartRow(m_frameDC, i, m_layHeadH + i * m_layRowH, m_layRowH, w, dpi);
+			}
+		}
+		m_dirtyRows = 0;
+		m_dirtyHead = false;
+	}
+
+	CRect pr = dc.m_ps.rcPaint;
+	if (pr.IsRectEmpty()) {
+		pr.SetRect(0, capH, w, capH + h);
+	}
+	int sx = pr.left;
+	int sy = pr.top - capH;
+	int sw = pr.Width();
+	int sh = pr.Height();
+	if (sy < 0) { sh += sy; sy = 0; }
+	if (sx < 0) { sw += sx; sx = 0; }
+	if (sx + sw > w) sw = w - sx;
+	if (sy + sh > h) sh = h - sy;
+	if (sw <= 0 || sh <= 0) {
+		CCC_CaptionPaint(dc, m_hWnd);
+		return;
+	}
 
 #if CCUSTOM_AERO_SUPPORT
 	const bool bodyAero = (savedata.aero == 1 && CCC_IsWin11());
@@ -1418,16 +1951,19 @@ void CMidiMonitorDlg::OnPaint()
 				m_chromaCache.UpdateOpaqueRect(m_frameDC.GetSafeHdc(), 0, 0, 0, 0, w, h);
 			m_chromaReady = true;
 			m_chromaCache.BlitFull(dc.GetSafeHdc(), 0, capH, w, h);
+			CCC_CaptionPaint(dc, m_hWnd);
 			return;
 		}
 	}
 	if (!CCC_IsAeroEnabled() && CCC_AcrylicCaption(m_hWnd) && CCC_IsWin11()) {
 		CCC_BlitStretchOpaque(dc.GetSafeHdc(), 0, capH, w, h,
 			m_frameDC.GetSafeHdc(), 0, 0, w, h);
+		CCC_CaptionPaint(dc, m_hWnd);
 		return;
 	}
 #endif
-	dc.BitBlt(0, capH, w, h, &m_frameDC, 0, 0, SRCCOPY);
+	dc.BitBlt(sx, capH + sy, sw, sh, &m_frameDC, sx, sy, SRCCOPY);
+	CCC_CaptionPaint(dc, m_hWnd);
 }
 
 BOOL CMidiMonitorDlg::OnEraseBkgnd(CDC* pDC)
@@ -1439,9 +1975,22 @@ BOOL CMidiMonitorDlg::OnEraseBkgnd(CDC* pDC)
 void CMidiMonitorDlg::OnTimer(UINT_PTR nIDEvent)
 {
 	if (nIDEvent == 1) {
-		PersistPos();
-		if (!IsIconic() && IsWindowVisible() && !m_paintDisabled)
-			Invalidate(FALSE);
+		if (++m_persistAge >= 32) {
+			PersistPos();
+			m_persistAge = 0;
+		}
+		if (!IsIconic() && IsWindowVisible() && !m_paintDisabled) {
+			if (m_playNote >= 0 && ::GetCapture() != m_hWnd)
+				ReleasePlayNote();
+			if (!m_frozen) {
+				SyncFromPlayback();
+				TickVisuals();
+				PollAppVolume();
+			}
+			if (m_volDragging)
+				PollAppVolume();
+			InvalidateDirty();
+		}
 	}
 	CCustomBlurDialogExBase::OnTimer(nIDEvent);
 }
@@ -1485,6 +2034,7 @@ void CMidiMonitorDlg::OnClose()
 void CMidiMonitorDlg::OnDestroy()
 {
 	KillTimer(1);
+	ReleasePlayNote();
 	PersistPos();
 	CCC_CaptionUnregister(m_hWnd);
 	CCustomBlurDialogExBase::OnDestroy();
@@ -1511,9 +2061,11 @@ void CMidiMonitorDlg::ResetPlaybackState()
 void CMidiMonitorDlg::PumpSyncNow()
 {
 	if (!::IsWindow(m_hWnd) || m_paintDisabled) return;
-	if (!m_frozen)
+	if (!m_frozen) {
 		SyncFromPlayback();
-	Invalidate(FALSE);
+		PollAppVolume();
+	}
+	InvalidateDirty();
 }
 
 void CMidiMonitorDlg::PersistPos()
@@ -1647,9 +2199,10 @@ void CMidiMonitorDlg::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
 	}
 	const UINT cmd = menu.Track(point, this);
 	if (cmd == IDM_MM_VIEW_2D) {
-		m_viewMode = 0; savedata.midimonviewmode = 0; Invalidate(FALSE);
+		m_viewMode = 0; savedata.midimonviewmode = 0; m_fullDraw = true; Invalidate(FALSE);
 	} else if (cmd == IDM_MM_VIEW_3D) {
 		m_viewMode = 1; savedata.midimonviewmode = 1;
+		m_fullDraw = true;
 		if (!(savedata.soft3dTourSeen & 16)) {
 			savedata.soft3dTourSeen |= 16;
 			m_soft3dTourUntil = GetTickCount() + 3000;
@@ -1720,7 +2273,16 @@ void CMidiMonitorDlg::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
 
 void CMidiMonitorDlg::OnLButtonDown(UINT nFlags, CPoint point)
 {
-	if (IsView3D() && !CCC_MainLockOverlayHitTest(m_hWnd, point)) {
+	if (CCC_MainLockOverlayHitTest(m_hWnd, point)) {
+		CCustomBlurDialogExBase::OnLButtonDown(nFlags, point);
+		return;
+	}
+	const int capH = CCC_GetCustomCaptionHeight(m_hWnd);
+	if (capH > 0 && point.y >= 0 && point.y < capH) {
+		CCustomBlurDialogExBase::OnLButtonDown(nFlags, point);
+		return;
+	}
+	if (IsView3D()) {
 		m_rotDragging = true;
 		m_rotDragOrigin = point;
 		m_rotDragYaw0 = m_cam.yawDeg;
@@ -1728,11 +2290,113 @@ void CMidiMonitorDlg::OnLButtonDown(UINT nFlags, CPoint point)
 		SetCapture();
 		return;
 	}
+	int part = -1;
+	CRect cell;
+	const int hit = HitMonitor(point, part, cell);
+	if (hit == MM_HIT_APPVOL) {
+		m_volDragging = true;
+		CPoint f = point;
+		f.y -= CCC_GetCustomCaptionHeight(m_hWnd);
+		int pct = 0;
+		if (m_volBarRc.Width() > 0)
+			pct = (f.x - m_volBarRc.left) * 100 / m_volBarRc.Width();
+		SetAppVolPercent(pct);
+		SetCapture();
+		InvalidateDirty();
+		return;
+	}
+	if (hit == MM_HIT_VOL || hit == MM_HIT_PAN || hit == MM_HIT_EXP
+		|| hit == MM_HIT_REV || hit == MM_HIT_CRS || hit == MM_HIT_VAR) {
+		m_dragKind = hit;
+		m_dragPart = part;
+		SetCapture();
+		ApplyDragValue(point);
+		return;
+	}
+	if (hit == MM_HIT_KEYS && part >= 0) {
+		CPoint f = point;
+		f.y -= CCC_GetCustomCaptionHeight(m_hWnd);
+		const int note = KeyAt(cell, f);
+		if (note >= 0) {
+			ReleasePlayNote();
+			m_playPart = part;
+			m_playNote = note;
+			const int ch = part % 16;
+			const DWORD msg = (DWORD)(0x90 | ch) | ((DWORD)note << 8) | (100u << 16);
+			InjectShort(part, msg);
+			InvalidateDirty();
+			SetCapture();
+		}
+		return;
+	}
 	CCustomBlurDialogExBase::OnLButtonDown(nFlags, point);
 }
 
 void CMidiMonitorDlg::OnMouseMove(UINT nFlags, CPoint point)
 {
+	if (m_volDragging) {
+		if (!(nFlags & MK_LBUTTON)) {
+			m_volDragging = false;
+			if (::GetCapture() == m_hWnd) ::ReleaseCapture();
+			return;
+		}
+		CPoint f = point;
+		f.y -= CCC_GetCustomCaptionHeight(m_hWnd);
+		int pct = 0;
+		if (m_volBarRc.Width() > 0)
+			pct = (f.x - m_volBarRc.left) * 100 / m_volBarRc.Width();
+		SetAppVolPercent(pct);
+		InvalidateDirty();
+		return;
+	}
+	if (m_dragKind == MM_HIT_VOL || m_dragKind == MM_HIT_PAN || m_dragKind == MM_HIT_EXP
+		|| m_dragKind == MM_HIT_REV || m_dragKind == MM_HIT_CRS || m_dragKind == MM_HIT_VAR) {
+		if (!(nFlags & MK_LBUTTON)) {
+			m_dragKind = MM_HIT_NONE;
+			m_dragPart = -1;
+			if (::GetCapture() == m_hWnd) ::ReleaseCapture();
+			return;
+		}
+		ApplyDragValue(point);
+		return;
+	}
+	if (m_playNote >= 0) {
+		if (!(nFlags & MK_LBUTTON)) {
+			ReleasePlayNote();
+			if (::GetCapture() == m_hWnd) ::ReleaseCapture();
+			InvalidateDirty();
+			return;
+		}
+		int part = -1;
+		CRect cell;
+		if (HitMonitor(point, part, cell) == MM_HIT_KEYS && part == m_playPart) {
+			CPoint f = point;
+			f.y -= CCC_GetCustomCaptionHeight(m_hWnd);
+			const int note = KeyAt(cell, f);
+			if (note >= 0 && note != m_playNote) {
+				ReleasePlayNote();
+				m_playPart = part;
+				m_playNote = note;
+				const int ch = part % 16;
+				const DWORD msg = (DWORD)(0x90 | ch) | ((DWORD)note << 8) | (100u << 16);
+				InjectShort(part, msg);
+				InvalidateDirty();
+			}
+		}
+		return;
+	}
+	if (!IsView3D()) {
+		int part = -1;
+		CRect cell;
+		const int hit = HitMonitor(point, part, cell);
+		if (hit == MM_HIT_APPVOL || hit == MM_HIT_PAN)
+			::SetCursor(::LoadCursor(NULL, IDC_SIZEWE));
+		else if (hit == MM_HIT_VOL || hit == MM_HIT_EXP || hit == MM_HIT_REV
+			|| hit == MM_HIT_CRS || hit == MM_HIT_VAR)
+			::SetCursor(::LoadCursor(NULL, IDC_SIZENS));
+		else if (hit == MM_HIT_KEYS)
+			::SetCursor(::LoadCursor(NULL, IDC_HAND));
+	}
 	if (m_rotDragging) {
 		if (!(nFlags & MK_LBUTTON)) {
 			m_rotDragging = false;
@@ -1749,6 +2413,23 @@ void CMidiMonitorDlg::OnMouseMove(UINT nFlags, CPoint point)
 
 void CMidiMonitorDlg::OnLButtonUp(UINT nFlags, CPoint point)
 {
+	if (m_volDragging) {
+		m_volDragging = false;
+		if (::GetCapture() == m_hWnd) ::ReleaseCapture();
+		return;
+	}
+	if (m_dragKind != MM_HIT_NONE) {
+		m_dragKind = MM_HIT_NONE;
+		m_dragPart = -1;
+		if (::GetCapture() == m_hWnd) ::ReleaseCapture();
+		return;
+	}
+	if (m_playNote >= 0) {
+		ReleasePlayNote();
+		if (::GetCapture() == m_hWnd) ::ReleaseCapture();
+		InvalidateDirty();
+		return;
+	}
 	if (m_rotDragging) {
 		m_rotDragging = false;
 		if (::GetCapture() == m_hWnd) ::ReleaseCapture();
@@ -1758,14 +2439,69 @@ void CMidiMonitorDlg::OnLButtonUp(UINT nFlags, CPoint point)
 	CCustomBlurDialogExBase::OnLButtonUp(nFlags, point);
 }
 
+void CMidiMonitorDlg::OnLButtonDblClk(UINT nFlags, CPoint point)
+{
+	if (IsView3D() || CCC_MainLockOverlayHitTest(m_hWnd, point)) {
+		CCustomBlurDialogExBase::OnLButtonDblClk(nFlags, point);
+		return;
+	}
+	int part = -1;
+	CRect cell;
+	const int hit = HitMonitor(point, part, cell);
+	const int cc = MmCcForHit(hit);
+	if (cc >= 0 && part >= 0) {
+		const int v = MmDefaultForHit(hit);
+		const int ch = part % 16;
+		const DWORD msg = (DWORD)(0xb0 | ch) | ((DWORD)cc << 8) | ((DWORD)v << 16);
+		InjectShort(part, msg);
+		InvalidateDirty();
+		return;
+	}
+	CCustomBlurDialogExBase::OnLButtonDblClk(nFlags, point);
+}
+
 BOOL CMidiMonitorDlg::OnMouseWheel(UINT nFlags, short zDelta, CPoint pt)
 {
 	UNREFERENCED_PARAMETER(nFlags);
-	UNREFERENCED_PARAMETER(pt);
 	if (IsView3D()) {
 		GdiSoft3D::WheelZoom(m_cam, zDelta);
 		PersistSoft3D();
 		Invalidate(FALSE);
+		return TRUE;
+	}
+	CPoint client = pt;
+	ScreenToClient(&client);
+	int part = -1;
+	CRect cell;
+	const int hit = HitMonitor(client, part, cell);
+	if (part >= 0 && (hit == MM_HIT_VOL || hit == MM_HIT_PAN || hit == MM_HIT_EXP
+		|| hit == MM_HIT_REV || hit == MM_HIT_CRS || hit == MM_HIT_VAR)) {
+		const int cc = MmCcForHit(hit);
+		int* pv = nullptr;
+		Part& p = m_part[part];
+		if (hit == MM_HIT_VOL) pv = &p.vol;
+		else if (hit == MM_HIT_PAN) pv = &p.pan;
+		else if (hit == MM_HIT_EXP) pv = &p.exp;
+		else if (hit == MM_HIT_REV) pv = &p.rev;
+		else if (hit == MM_HIT_CRS) pv = &p.crs;
+		else pv = &p.var;
+		int v = *pv + ((zDelta > 0) ? 2 : -2);
+		if (v < 0) v = 0;
+		if (v > 127) v = 127;
+		const int ch = part % 16;
+		const DWORD msg = (DWORD)(0xb0 | ch) | ((DWORD)cc << 8) | ((DWORD)v << 16);
+		InjectShort(part, msg);
+		InvalidateDirty();
+		return TRUE;
+	}
+	if (part >= 0 && hit == MM_HIT_PC) {
+		int pc = m_part[part].pc + ((zDelta > 0) ? 1 : -1);
+		if (pc < 0) pc = 0;
+		if (pc > 127) pc = 127;
+		const int ch = part % 16;
+		const DWORD msg = (DWORD)(0xc0 | ch) | ((DWORD)pc << 8);
+		InjectShort(part, msg);
+		InvalidateDirty();
 		return TRUE;
 	}
 	return CCustomBlurDialogExBase::OnMouseWheel(nFlags, zDelta, pt);

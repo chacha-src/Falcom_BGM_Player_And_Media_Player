@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -168,8 +168,13 @@ inline int PickFundamentalNotesRange(const float* inStrengths, bool* outActive, 
         float bestS = minS;
         for (int i = bandStart; i < bandEnd; ++i) {
             if (work[i] > bestS) {
-                bestS = work[i];
-                best = i;
+                bool isPeak = true;
+                if (i > 0 && inStrengths[i - 1] >= inStrengths[i]) isPeak = false;
+                if (i + 1 < count && inStrengths[i + 1] > inStrengths[i]) isPeak = false;
+                if (isPeak) {
+                    bestS = work[i];
+                    best = i;
+                }
             }
         }
         if (best < 0) break;

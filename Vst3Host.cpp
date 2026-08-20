@@ -1240,6 +1240,14 @@ int Vst3IsOk(Vst3Inst* v)
 	return v && v->ok;
 }
 
+int Vst3GetLatencySamples(Vst3Inst* v)
+{
+	if (!v || !v->ok || !v->processor) return 0;
+	const Steinberg::uint32 n = v->processor->getLatencySamples();
+	if (n > 192000u * 2u) return 192000 * 2;
+	return (int)n;
+}
+
 int Vst3MidiChannels(Vst3Inst* v)
 {
 	return v ? v->midiInCh : 0;

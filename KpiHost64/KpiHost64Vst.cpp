@@ -82,3 +82,4 @@ int VstHost64_Rate() { return VstMidiGetRate(); }
 int VstHost64_Channels() { return VstMidiGetChannels(); }
 int VstHost64_Bits() { return VstMidiGetBits(); }
 uint64_t VstHost64_Length() { return (uint64_t)VstMidiGetLengthSamples(); }
+int VstHost64_Latency() { return VstMidiGetLatencySamples(); }

@@ -1,4 +1,4 @@
-﻿<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
 <html>
 <head>
 <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
@@ -11,27 +11,80 @@
 
 <h1>MIDIモニタ</h1>
 
-<p class="lead">MIDIモニタは、再生中の SMF（.mid / .midi / .kar / .rmi）を 32 パート（A01–A16 / B01–B16）で見守る画面です。オーディオから音程を推定するのではなく、ファイルに書かれた MIDI イベントそのものを表示します。</p>
+<p class="lead">MIDIモニタは、再生中の SMF（.mid / .midi / .kar / .rmi）を 32パート（A01–A16 / B01–B16）で見守る画面です。オーディオから音程を推定するのではなく、ファイルに書かれた MIDI イベントそのものを表示します。ピアノロールが「どの音が鳴ったか」を時間軸で見せるのに対し、こちらは「各チャンネルの音色・音量・効果」を一覧します。</p>
 <h2>開く</h2>
-<p>メディアプレイヤーのバナーを右クリックして「ウィンドウ」→「MIDIモニタ」、プレイリストの右クリック、イコライザー／アナライザー／ピアノロールの「開く」、コマンドパレットから開けます。</p>
-<h2>見られるもの</h2>
 <ul>
-<li><b>ヘッダ</b> …… BPM、テンポ%、調、タイムベース、拍子、Transpose、ファイル名。</li>
-<li><b>各パート</b> …… PC / バンク / マップ、音色名、レベル、Vol / Pan / Exp / Rev / Crs / Var、ビブラート、フィルタ、エンベロープ、EQ、NRPN、ミニ鍵盤。</li>
-<li><b>音色名</b> …… 内蔵の SASAMI GS / XG 音色表から引きます。XG System On があれば XG、なければ GS として名前を付けます。右クリックの「音色マップ」で強制もできます。</li>
+<li>メディアプレイヤーのバナーを右クリック → 「ウィンドウ」→ 「MIDIモニタ…」</li>
+<li>プレイリストの右クリック → 「ウィンドウ」→ 「MIDIモニタを開く」</li>
+<li><a href="pianoroll.htm">ピアノロールで音を見る</a>・アナライザー・イコライザーの右クリック → 「開く」→ 「MIDIモニタを開く」</li>
+<li>コマンドパレットから「MIDIモニタ」</li>
 </ul>
-<h2>表示</h2>
+<div class="tip"><span class="label">ヒント</span>
+<p>窓の位置と大きさは覚えられます。次に開いたときも、前回の場所に戻ります。</p>
+</div>
+<h2>ヘッダに出るもの</h2>
 <ul>
-<li><b>通常の2D</b> …… 表形式です。</li>
-<li><b>簡易3D</b> …… 32 パートのレベルを箱として CPU 描画します。ドラッグで視点、ホイールで寄り引き。</li>
+<li>BPM、テンポ%、調、タイムベース、拍子、Transpose、ファイル名</li>
+<li>全体の音量%、ノート数</li>
+<li>リバーブ／コーラス／バリエーション</li>
+<li>SYS（GM / GS / XG）、INSERTION 1 / 2</li>
 </ul>
-<h2>GS / XG の音源</h2>
-<p>演奏に使う VST は <a href="render.htm">レンダリング設定</a> の GS VST と XG VST です。曲が始まる前に SMF を少し読んで、XG リセット（XG System On）があれば XG 側、なければ GS 側を使います。片方だけ書いてあればそちらで両方をまかない、両方空なら Windows MIDI マッパーへ落ちます。</p>
-<div class="related"><span class="label">あわせて読みたい</span><ul><li><a href="midi.htm">MIDIキーボードで操作する</a></li><li><a href="vst.htm">VSTホストで音源を鳴らす</a></li><li><a href="render.htm">レンダリング設定</a></li><li><a href="pianoroll.htm">ピアノロールで音を見る</a></li><li><a href="help-buttons.htm">各画面の「？」操作ガイド</a></li></ul></div>
+<h2>32行のチャンネル表</h2>
+<p>各行が1パートです。A01–A16 がポートA、B01–B16 がポートBです。</p>
+<dl>
+<dt>PC# / BNK / Map / Instrument</dt>
+<dd>プログラム番号・バンク・GS/XGマップ・音色名です。音色名は内蔵の SASAMI GS / XG 表から引きます。</dd>
+<dt>Lev / Vol / Pan / Exp</dt>
+<dd>出力レベルと、音量・パン・エクスプレッションです。</dd>
+<dt>Rev / Crs / Var</dt>
+<dd>リバーブ・コーラス・バリエーションの送り量です。</dd>
+<dt>Vibrato / Filter / Envelope / EQ / NRPN</dt>
+<dd>ビブラートやフィルタ、エンベロープ、EQ、NRPN の状態です。</dd>
+<dt>Keyboard（右端のミニ鍵盤）</dt>
+<dd>いま押されている鍵盤が点灯します。</dd>
+</dl>
+<h2>表示モード（2D / 簡易3D）</h2>
+<ul>
+<li><b>通常（2D）</b> …… 表形式。いちばん見やすい標準です。</li>
+<li><b>簡易3D</b> …… 32パートのレベルを箱として描きます。OpenGL や Direct3D は使わず、CPUだけであしらいます。ドラッグで回転、ホイールでズーム、<kbd>0</kbd> で視点リセット。重いと感じたら、右クリックから 2D に戻してください。</li>
+</ul>
+<h2>右クリックメニュー</h2>
+<dl>
+<dt>表示モード</dt>
+<dd>通常（2D）と簡易3Dを切り替えます。</dd>
+<dt>フリーズ</dt>
+<dd>表示の更新を止めます。確認したい瞬間を止めたいときに。</dd>
+<dt>常に手前に表示</dt>
+<dd>ほかの窓の上に重ねて置けます。</dd>
+<dt>状態をコピー</dt>
+<dd>いまの表の内容をテキストとしてコピーします。</dd>
+<dt>MIDIを再読込</dt>
+<dd>いまの曲の MIDI を読み直します。</dd>
+<dt>音色マップ</dt>
+<dd>自動（SysEx）／GS／XG。音色名の引きかたを決めます。</dd>
+<dt>開く</dt>
+<dd>イコライザー／ピアノロール／アナライザー／操作ガイドへ飛びます。</dd>
+</dl>
+<h2>聞こえる音とのタイミング</h2>
+<p><a href="vst-midi.htm">.mid を VST 音源で鳴らす</a> で再生しているときは、プラグインの遅れに合わせて、モニタの進行も実際に聞こえる位置に近づくよう少し遅れて進むことがあります。「画面と音がずれている」と感じる場合は、この調整のせいです。</p>
+<h2>ほかの機能との関係</h2>
+<ul>
+<li><a href="pianoroll.htm">ピアノロールで音を見る</a> …… ノートの時間軸。モニタはチャンネル状態。</li>
+<li><a href="vst-midi.htm">.mid を VST 音源で鳴らす</a> …… GS/XG VST で鳴らしている曲を見守れます。</li>
+<li><a href="vst.htm">VSTホストで音源を鳴らす</a> …… 鍵盤からリアルタイムに鳴らす画面（モニタとは別）。</li>
+<li><a href="midi.htm">MIDIキーボードで操作する</a> …… 再生操作やEQを鍵盤に割り当てる機能です。</li>
+</ul>
+<div class="tip"><span class="label">ヒント</span>
+<p>「？」ボタンを押すと、この画面専用の図解（操作ガイド）が出ます。<a href="help-buttons.htm">各画面の「？」操作ガイド</a> もご覧ください。</p>
+</div>
+<div class="note"><span class="label">注意</span>
+<p>音声ファイル（mp3 など）の再生では MIDI イベントが無いのでモニタは動きません。SMF を再生しているとき専用の画面です。</p>
+</div>
+<div class="related"><span class="label">あわせて読みたい</span><ul><li><a href="vst-midi.htm">.mid を VST 音源で鳴らす</a></li><li><a href="pianoroll.htm">ピアノロールで音を見る</a></li><li><a href="vst.htm">VSTホストで音源を鳴らす</a></li><li><a href="midi.htm">MIDIキーボードで操作する</a></li><li><a href="render.htm">レンダリング設定</a></li></ul></div>
 
 <div class="botnav">
-<span class="prev">&#171; 前へ: <a href="pianoroll.htm">ピアノロールで音を見る</a></span>
-<span class="next">次へ: <a href="midi.htm">MIDIキーボードで操作する</a> &#187;</span>
+<span class="prev">&#171; 前へ: <a href="pianoroll-tune.htm">ピアノロールの検出パラメータ</a></span>
+<span class="next">次へ: <a href="video.htm">動画を再生する</a> &#187;</span>
 <span class="up"><a href="index.htm">目次</a></span>
 <div class="clear"></div>
 </div>

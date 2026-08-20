@@ -121,6 +121,12 @@ protected:
 	void RestartIo();
 	void ShowHelpSheet();
 	void SetStatus(LPCTSTR text);
+	// PC keyboard as a one-row MIDI keyboard (Z=C4…). Skips Edit/Combo focus.
+	int PcKeyToNote(UINT vk) const;
+	void PcSendShort(DWORD msg);
+	void PcKeyReleaseAll();
+	BOOL PcFocusBlocksKeys() const;
+	BOOL HandlePcKeyboardMidi(MSG* msg);
 	static void CALLBACK MidiInProc(HMIDIIN hmi, UINT msg, DWORD_PTR instance,
 		DWORD_PTR param1, DWORD_PTR param2);
 	static UINT __stdcall AudioThreadProc(void* p);
@@ -138,6 +144,7 @@ protected:
 	afx_msg void OnSize(UINT nType, int cx, int cy);
 	afx_msg void OnDestroy();
 	afx_msg void OnTimer(UINT_PTR id);
+	afx_msg void OnActivate(UINT nState, CWnd* pWndOther, BOOL bMinimized);
 
 	CCustomComboBox m_preset;
 	CCustomComboBox m_midiIn[3];
@@ -165,6 +172,8 @@ protected:
 	HANDLE m_audioStop;
 	HANDLE m_audioThread;
 	volatile LONG m_audioRunning;
+	// vk -> held MIDI note+1 (0 = not held). Same path as MIDI In port 0.
+	BYTE m_pcHeldNote[256];
 };
 
 extern CVstHostDlg* g_vstHostDlg;
