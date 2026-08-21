@@ -867,6 +867,8 @@
     <None Include="res\ogg.ico" />
     <None Include="res\ogg.rc2" />
     <None Include="ReadMe.txt" />
+    <None Include="res\SASAMI_GS.DAT" />
+    <None Include="res\SASAMI_XG.DAT" />
   </ItemGroup>
   <ItemGroup>
     <Text Include="codec\APPLE_LICENSE.txt" />

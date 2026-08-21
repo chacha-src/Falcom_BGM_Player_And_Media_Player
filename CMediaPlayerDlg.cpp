@@ -2193,7 +2193,7 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 	addTip(m_m3uImport, LL14(L"プレイリストファイル(M3U/PLS等)を読み込みます。", L"Import a playlist file (M3U/PLS etc.).", L"Importer un fichier de liste.", L"Importa un file playlist.", L"Importar archivo de lista.", L"재생목록 파일을 가져옵니다.", L"导入播放列表文件。", L"استيراد ملف قائمة.", L"Импорт файла плейлиста.", L"Playlist-Datei importieren.", L"Importar arquivo de lista.", L"Playlistbestand importeren.", L"Importuj plik listy.", L"Oynatma listesi dosyasi ice aktar."));
 	addTip(m_up, LL14(L"選択した曲を上へ移動します。", L"Move selected track up.", L"Monter la piste.", L"Sposta su.", L"Subir pista.", L"선택 곡을 위로.", L"上移所选曲目。", L"تحريك لأعلى.", L"Переместить вверх.", L"Nach oben.", L"Mover para cima.", L"Omhoog verplaatsen.", L"Przesuń w górę.", L"Yukarı taşı."));
 	addTip(m_down, LL14(L"選択した曲を下へ移動します。", L"Move selected track down.", L"Descendre la piste.", L"Sposta giu.", L"Bajar pista.", L"선택 곡을 아래로.", L"下移所选曲目。", L"تحريك لأسفل.", L"Переместить вниз.", L"Nach unten.", L"Mover para baixo.", L"Omlaag verplaatsen.", L"Przesuń w dół.", L"Aşağı taşı."));
-	addTip(m_itemdel, LL14(L"選択した曲をリストから削除します（確認あり）。やり直しの右。", L"Remove selected track(s) from the list (with confirm). Right of Redo.", L"Retirer les pistes (avec confirmation).", L"Rimuovi le tracce (con conferma).", L"Quitar pistas (con confirmacion).", L"선택 곡을 목록에서 삭제(확인). 다시 실행 오른쪽.", L"从列表删除所选（有确认）。在重做右侧。", L"حذف المقاطع (مع تأكيد).", L"Удалить выбранные (с подтверждением).", L"Ausgewahlte Titel entfernen (mit Nachfrage).", L"Remover faixas (com confirmacao).", L"Geselecteerde tracks verwijderen (met bevestiging).", L"Usuń zaznaczone (z potwierdzeniem).", L"Seçili parçaları sil (onaylı)."));
+	addTip(m_itemdel, LL14(L"選択した曲をリストから削除します（確認あり）。リスト右上・上下移動の左。", L"Remove selected track(s) from the list (with confirm). Top-right of the list, left of move buttons.", L"Retirer les pistes (avec confirmation).", L"Rimuovi le tracce (con conferma).", L"Quitar pistas (con confirmacion).", L"선택 곡을 목록에서 삭제(확인). 목록 오른쪽 위.", L"从列表删除所选（有确认）。列表右上。", L"حذف المقاطع (مع تأكيد).", L"Удалить выбранные (с подтверждением).", L"Ausgewahlte Titel entfernen (mit Nachfrage).", L"Remover faixas (com confirmacao).", L"Geselecteerde tracks verwijderen (met bevestiging).", L"Usuń zaznaczone (z potwierdzeniem).", L"Seçili parçaları sil (onaylı)."));
 	addTip(m_supe, LL14(L"スペアナ表示を切り替えます。", L"Toggle spectrum display.", L"Afficher le spectre.", L"Mostra spettro.", L"Mostrar espectro.", L"스펙트럼 표시 전환.", L"切换频谱显示。", L"تبديل عرض الطيف.", L"Спектр вкл/выкл.", L"Spektrum umschalten.", L"Alternar espectro.", L"Spectrum wisselen.", L"Przełącz widmo.", L"Spektrumu değiştir."));
 	if (m_prompt.GetSafeHwnd())
 		addTip(m_prompt, LL14(L"演奏アレンジ用プロンプト(テキスト編集)を開きます。", L"Open the performance prompt (text editor).", L"Ouvrir le prompt (edition texte).", L"Apri prompt (editor testo).", L"Abrir prompt (editor de texto).", L"연주 프롬프트(텍스트 편집)를 엽니다.", L"打开演奏提示(文本编辑)。", L"فتح الموجه (تحرير النص).", L"Открыть промпт (текст).", L"Prompt (Texteditor) oeffnen.", L"Abrir prompt (editor de texto).", L"Prompt (teksteditor) openen.", L"Otworz prompt (edytor tekstu).", L"Istem (metin duzenleyici) ac."));
@@ -3309,6 +3309,34 @@ void CMediaPlayerDlg::DoLayout()
 	MoveCtl(&m_finddown, tx, by4, ibw, tbH); tx += ibw + (int)(1 * s);
 	MoveCtl(&m_findup, tx, by4, ibw, tbH);
 	int moveRight = W - M - gPad;
+	const int moveClusterW = ibw * 4 + (int)(3 * s);
+	// 行削除は1段目の右端（上下ボタンの左）。ツール行に左詰めすると幅次第でリスト/窓の外へ出る。
+	const int delGap = (int)(4 * s);
+	const int findRight = tx + ibw;
+	const int delWFull = (int)(60 * s);
+	const int delWMid = (int)(40 * s);
+	const int delWTiny = (int)(22 * s);
+	int delRoom = moveRight - moveClusterW - delGap - findRight - (int)(4 * s);
+	int delW = delWFull;
+	int delLv = 0;
+	if (delRoom < delWFull) { delW = delWMid; delLv = 1; }
+	if (delRoom < delWMid) { delW = delWTiny; delLv = 2; }
+	if (delRoom >= (int)(16 * s) && delW > delRoom) delW = delRoom;
+	if (delW < (int)(16 * s)) delW = (int)(16 * s);
+	int delX = moveRight - moveClusterW - delGap - delW;
+	if (delX < 0) delX = 0;
+	if (m_itemdel.GetSafeHwnd()) {
+		MoveCtl(&m_itemdel, delX, by4, delW, tbH);
+		m_itemdel.ShowWindow(SW_SHOW);
+		if (!liveResize) {
+			if (delLv >= 2)
+				m_itemdel.SetWindowText(L"×");
+			else if (delLv >= 1)
+				m_itemdel.SetWindowText(LL14(L"削除", L"Del", L"Suppr.", L"Elim.", L"Elim.", L"삭제", L"删除", L"حذف", L"Удал.", L"Entf.", L"Excl.", L"Verw.", L"Usuń", L"Sil"));
+			else
+				m_itemdel.SetWindowText(LL14(L"曲削除", L"Remove", L"Retirer", L"Rimuovi", L"Quitar", L"곡삭제", L"删除曲目", L"حذف", L"Удалить", L"Entfernen", L"Remover", L"Verwijder", L"Usuń utwór", L"Parçayı sil"));
+		}
+	}
 	MoveCtl(&m_lsdown, moveRight - ibw, by4, ibw, tbH);
 	MoveCtl(&m_down, moveRight - ibw * 2 - (int)(1 * s), by4, ibw, tbH);
 	MoveCtl(&m_up, moveRight - ibw * 3 - (int)(2 * s), by4, ibw, tbH);
@@ -3340,10 +3368,9 @@ void CMediaPlayerDlg::DoLayout()
 			if (m_sortTime.GetSafeHwnd()) m_sortTime.ShowWindow(SW_SHOW);
 			if (m_addFolder.GetSafeHwnd()) m_addFolder.ShowWindow(SW_SHOW);
 
-			// フォルダ追加より右: 全選択/コピー/…/やり直し、そのすぐ右に曲削除（上下移動の下に置かない）
+			// フォルダ追加より右: 全選択/コピー/切取/貼付/戻す/やり直し（曲削除は1段目右端へ固定）
 			const int editRight = W - M - gPad;
 			const int editGap = (int)(2 * s);
-			// 曲削除は「やり直し」と同幅系（index 5）
 			const int wFull[6] = {
 				(int)(56 * s), (int)(52 * s), (int)(60 * s), (int)(60 * s), (int)(68 * s), (int)(60 * s)
 			};
@@ -3359,9 +3386,6 @@ void CMediaPlayerDlg::DoLayout()
 				needMid += wMid[i] + editGap;
 				needTiny += wTiny[i] + editGap;
 			}
-			needFull += wFull[5] + editGap;
-			needMid += wMid[5] + editGap;
-			needTiny += wTiny[5] + editGap;
 			const int avail = editRight - sx;
 			int editLv = 0;
 			if (needFull > avail) editLv = 1;
@@ -3376,7 +3400,6 @@ void CMediaPlayerDlg::DoLayout()
 					if (m_editPaste.GetSafeHwnd()) m_editPaste.SetWindowText(L"V");
 					if (m_editUndo.GetSafeHwnd()) m_editUndo.SetWindowText(L"↶");
 					if (m_editRedo.GetSafeHwnd()) m_editRedo.SetWindowText(L"↷");
-					if (m_itemdel.GetSafeHwnd()) m_itemdel.SetWindowText(L"×");
 				}
 				else if (editLv >= 1) {
 					if (m_editSelAll.GetSafeHwnd())
@@ -3391,8 +3414,6 @@ void CMediaPlayerDlg::DoLayout()
 						m_editUndo.SetWindowText(LL14(L"戻す", L"Undo", L"Annul.", L"Annulla", L"Deshac.", L"취소", L"撤销", L"تراجع", L"Отм.", L"Ruckg.", L"Desfaz.", L"Onged.", L"Cofnij", L"Geri"));
 					if (m_editRedo.GetSafeHwnd())
 						m_editRedo.SetWindowText(LL14(L"進む", L"Redo", L"Retabl.", L"Ripeti", L"Rehac.", L"다시", L"重做", L"إعادة", L"Повт.", L"Wdh.", L"Refaz.", L"Opn.", L"Ponow", L"Yinele"));
-					if (m_itemdel.GetSafeHwnd())
-						m_itemdel.SetWindowText(LL14(L"削除", L"Del", L"Suppr.", L"Elim.", L"Elim.", L"삭제", L"删除", L"حذف", L"Удал.", L"Entf.", L"Excl.", L"Verw.", L"Usuń", L"Sil"));
 				}
 				else {
 					if (m_editSelAll.GetSafeHwnd())
@@ -3407,8 +3428,6 @@ void CMediaPlayerDlg::DoLayout()
 						m_editUndo.SetWindowText(LL14(L"元に戻す", L"Undo", L"Annuler", L"Annulla", L"Deshacer", L"실행 취소", L"撤销", L"تراجع", L"Отмена", L"Ruckgangig", L"Desfazer", L"Ongedaan", L"Cofnij", L"Geri al"));
 					if (m_editRedo.GetSafeHwnd())
 						m_editRedo.SetWindowText(LL14(L"やり直し", L"Redo", L"Retablir", L"Ripeti", L"Rehacer", L"다시 실행", L"重做", L"إعادة", L"Повтор", L"Wiederholen", L"Refazer", L"Opnieuw", L"Ponow", L"Yinele"));
-					if (m_itemdel.GetSafeHwnd())
-						m_itemdel.SetWindowText(LL14(L"曲削除", L"Remove", L"Retirer", L"Rimuovi", L"Quitar", L"곡삭제", L"删除曲目", L"حذف", L"Удалить", L"Entfernen", L"Remover", L"Verwijder", L"Usuń utwór", L"Parçayı sil"));
 				}
 			}
 			for (int i = 0; i < 6; ++i) {
@@ -3417,11 +3436,6 @@ void CMediaPlayerDlg::DoLayout()
 				MoveCtl(b, sx, byTools, ww[i], tbH);
 				if (!b->IsWindowVisible()) b->ShowWindow(SW_SHOW);
 				sx += ww[i] + editGap;
-			}
-			if (m_itemdel.GetSafeHwnd()) {
-				const int delW = ww[5];
-				MoveCtl(&m_itemdel, sx, byTools, delW, tbH);
-				m_itemdel.ShowWindow(SW_SHOW);
 			}
 		}
 		else {
@@ -3435,8 +3449,6 @@ void CMediaPlayerDlg::DoLayout()
 				if (editBtns[i]->GetSafeHwnd() && editBtns[i]->IsWindowVisible())
 					editBtns[i]->ShowWindow(SW_HIDE);
 			}
-			if (m_itemdel.GetSafeHwnd() && m_itemdel.IsWindowVisible())
-				m_itemdel.ShowWindow(SW_HIDE);
 		}
 	}
 

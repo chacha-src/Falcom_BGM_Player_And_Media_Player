@@ -1,4 +1,9 @@
-﻿#include "stdafx.h"
+﻿// One engine source for both hosts. KpiHost64.exe compiles this same file
+// through VstMidiEngine_k64.cpp; it used to keep a private copy, which quietly
+// meant every VST2 hosting fix landed only in ogg.exe while the x64 plug-ins
+// that actually run inside KpiHost64 kept the old code. stdafx.h routes itself
+// to the MFC-free header when KPIHOST64_BUILD is set.
+#include "stdafx.h"
 #include "VstMidiEngine.h"
 #include "Vst3Host.h"
 #include "third_party/vst2/aeffect.h"
@@ -24,7 +29,14 @@ static int ProbeLoadedVst3Audible(Vst3Inst* vst3, int drums);
 namespace {
 
 enum { SAMPLE_RATE = 44100, BLOCK_FRAMES = 512, MAX_MIDI_EVENTS = 500000 };
-enum { CACHE_MAGIC = 0x43545356, CACHE_VERSION = 6 }; // + isLiveOk
+// Loading is not proof of anything: an unauthorised or half-installed
+// instrument opens cleanly, reports its name, accepts every note and returns
+// digital silence. The only honest test is to play something and look at the
+// output. Peak is in the same units as the render log, and 0.001 sits well
+// above an idle noise floor (~0.00002 observed) and far below a real note
+// (~0.06 observed).
+enum { PROBE_AUDIBLE_MILLI = 1 }; // peak x1000
+enum { CACHE_MAGIC = 0x43545356, CACHE_VERSION = 7 }; // + isAudible
 
 struct MidiItem {
 	unsigned __int64 tick;
@@ -144,11 +156,11 @@ struct EngineState {
 	short ring[16384];
 	int ringRead;
 	int ringCount;
-	float outL[BLOCK_FRAMES];
-	float outR[BLOCK_FRAMES];
-	float zero[BLOCK_FRAMES];
-	float mixL[BLOCK_FRAMES];
-	float mixR[BLOCK_FRAMES];
+	__declspec(align(32)) float outL[BLOCK_FRAMES];
+	__declspec(align(32)) float outR[BLOCK_FRAMES];
+	__declspec(align(32)) float zero[BLOCK_FRAMES];
+	__declspec(align(32)) float mixL[BLOCK_FRAMES];
+	__declspec(align(32)) float mixR[BLOCK_FRAMES];
 	LivePart live[32];
 	int gmResetMode; // 0=GM+GS, 1=GS, 2=XG（シーク巻き戻し時に再送）
 
@@ -341,7 +353,78 @@ static int HostArch()
 static VstTimeInfo g_vstTime = {};
 static char g_vstHostDirA[VST_PATH_CHARS] = {};
 
-static VstIntPtr VSTCALLBACK HostCallback(AEffect*, VstInt32 opcode,
+static void InitHostDir() {
+	if (!g_vstHostDirA[0]) {
+		wchar_t path[MAX_PATH];
+		GetModuleFileNameW(NULL, path, MAX_PATH);
+		wchar_t* slash = wcsrchr(path, L'\\');
+		if (slash) *slash = 0;
+		WideCharToMultiByte(CP_ACP, 0, path, -1, g_vstHostDirA, VST_PATH_CHARS, NULL, NULL);
+	}
+}
+
+// audioMasterGetDirectory has to hand back the *plug-in's* folder, not ours:
+// that reply is how a VST2 instrument locates the tone data sitting next to its
+// own DLL. Answering with the host's folder makes such a plug-in load cleanly,
+// accept MIDI and then render pure silence, and makes the whole thing depend on
+// where the host executable happens to be installed.
+enum { VST_PLUG_DIR_SLOTS = 64 };
+
+struct PlugDirEntry {
+	AEffect* effect;
+	char dir[VST_PATH_CHARS];
+};
+
+static PlugDirEntry g_plugDirs[VST_PLUG_DIR_SLOTS];
+// Plug-ins ask during VSTPluginMain, before we hold an AEffect to key on.
+static char g_plugDirLoading[VST_PATH_CHARS] = {};
+
+static void VstPlugDirSet(const wchar_t* pluginPath)
+{
+	g_plugDirLoading[0] = 0;
+	if (!pluginPath) return;
+	wchar_t dir[VST_PATH_CHARS];
+	SafeCopy(dir, VST_PATH_CHARS, pluginPath);
+	wchar_t* slash = wcsrchr(dir, L'\\');
+	if (!slash) return;
+	*slash = 0;
+	WideCharToMultiByte(CP_ACP, 0, dir, -1, g_plugDirLoading,
+		VST_PATH_CHARS, NULL, NULL);
+}
+
+static void VstPlugDirBind(AEffect* e)
+{
+	if (!e || !g_plugDirLoading[0]) return;
+	for (int i = 0; i < VST_PLUG_DIR_SLOTS; ++i) {
+		if (g_plugDirs[i].effect && g_plugDirs[i].effect != e) continue;
+		strcpy_s(g_plugDirs[i].dir, VST_PATH_CHARS, g_plugDirLoading);
+		// Publish the key only once the string is complete: the audio thread
+		// may read this table while a later part is still loading.
+		InterlockedExchangePointer((void* volatile*)&g_plugDirs[i].effect, e);
+		return;
+	}
+}
+
+static void VstPlugDirUnbind(AEffect* e)
+{
+	if (!e) return;
+	for (int i = 0; i < VST_PLUG_DIR_SLOTS; ++i) {
+		if (g_plugDirs[i].effect != e) continue;
+		InterlockedExchangePointer((void* volatile*)&g_plugDirs[i].effect, NULL);
+		return;
+	}
+}
+
+static const char* VstPlugDirFor(AEffect* e)
+{
+	if (e) {
+		for (int i = 0; i < VST_PLUG_DIR_SLOTS; ++i)
+			if (g_plugDirs[i].effect == e) return g_plugDirs[i].dir;
+	}
+	return g_plugDirLoading[0] ? g_plugDirLoading : NULL;
+}
+
+static VstIntPtr VSTCALLBACK HostCallback(AEffect* effect, VstInt32 opcode,
 	VstInt32, VstIntPtr value, void* ptr, float)
 {
 	switch (opcode) {
@@ -378,9 +461,13 @@ static VstIntPtr VSTCALLBACK HostCallback(AEffect*, VstInt32 opcode,
 		(void)value; // filter mask from plug; we always fill common fields
 		return (VstIntPtr)&g_vstTime;
 	}
-	case audioMasterGetDirectory:
+	case audioMasterGetDirectory: {
+		const char* dir = VstPlugDirFor(effect);
+		if (dir && dir[0]) return (VstIntPtr)dir;
+		InitHostDir();
 		if (g_vstHostDirA[0]) return (VstIntPtr)g_vstHostDirA;
 		return 0;
+	}
 	case audioMasterNeedIdle:
 	case audioMasterUpdateDisplay:
 	case audioMasterIdle:
@@ -420,6 +507,8 @@ static void AddPlugin(const wchar_t* path, const wchar_t* name,
 	p.isInstrument = instrument;
 	p.isMultiTimbral = 0; // filled after ContainsI exists via RescoreMultiFlags
 	p.isLiveOk = 0;
+	p.isAudible = 0;
+	p.probePeakMilli = 0;
 }
 
 static void ProbeVst2(const wchar_t* path)
@@ -447,11 +536,13 @@ static void ProbeVst2(const wchar_t* path)
 	if (!mainProc) mainProc = (VSTPluginMainProc)GetProcAddress(mod, "main");
 	if (!mainProc) { FreeLibrary(mod); return; }
 	AEffect* e = NULL;
+	VstPlugDirSet(path);
 	__try { e = mainProc(HostCallback); }
 	__except (EXCEPTION_EXECUTE_HANDLER) { e = NULL; }
 	if (!e || e->magic != kEffectMagic || !e->dispatcher) {
 		FreeLibrary(mod); return;
 	}
+	VstPlugDirBind(e);
 	char nm[128] = {};
 	int instrument = 0;
 	__try {
@@ -465,6 +556,7 @@ static void ProbeVst2(const wchar_t* path)
 		e->dispatcher(e, effClose, 0, 0, NULL, 0);
 	}
 	__except (EXCEPTION_EXECUTE_HANDLER) { instrument = 0; }
+	VstPlugDirUnbind(e);
 	wchar_t wide[VST_NAME_CHARS] = {};
 	if (nm[0]) MultiByteToWideChar(CP_ACP, 0, nm, -1, wide, VST_NAME_CHARS);
 	AddPlugin(path, wide[0] ? wide : base, arch, 0, instrument);
@@ -583,20 +675,10 @@ static void CachePath(wchar_t path[VST_PATH_CHARS])
 	JoinPath(path, dir, L"vstscan.cache");
 }
 
-static int LoadCache()
+static int ReadCacheFile()
 {
 	wchar_t path[VST_PATH_CHARS];
 	CachePath(path);
-	WIN32_FILE_ATTRIBUTE_DATA ad = {};
-	if (!GetFileAttributesExW(path, GetFileExInfoStandard, &ad)) return 0;
-	FILETIME now;
-	GetSystemTimeAsFileTime(&now);
-	ULARGE_INTEGER a, b;
-	a.LowPart = ad.ftLastWriteTime.dwLowDateTime;
-	a.HighPart = ad.ftLastWriteTime.dwHighDateTime;
-	b.LowPart = now.dwLowDateTime; b.HighPart = now.dwHighDateTime;
-	if (b.QuadPart < a.QuadPart ||
-		b.QuadPart - a.QuadPart > 24ULL * 60 * 60 * 10000000ULL) return 0;
 	HANDLE f = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ, NULL,
 		OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
 	if (f == INVALID_HANDLE_VALUE) return 0;
@@ -612,6 +694,23 @@ static int LoadCache()
 	if (!ok) return 0;
 	g_pluginCount = (int)hdr[2];
 	return 1;
+}
+
+static int LoadCache()
+{
+	wchar_t path[VST_PATH_CHARS];
+	CachePath(path);
+	WIN32_FILE_ATTRIBUTE_DATA ad = {};
+	if (!GetFileAttributesExW(path, GetFileExInfoStandard, &ad)) return 0;
+	FILETIME now;
+	GetSystemTimeAsFileTime(&now);
+	ULARGE_INTEGER a, b;
+	a.LowPart = ad.ftLastWriteTime.dwLowDateTime;
+	a.HighPart = ad.ftLastWriteTime.dwHighDateTime;
+	b.LowPart = now.dwLowDateTime; b.HighPart = now.dwHighDateTime;
+	if (b.QuadPart < a.QuadPart ||
+		b.QuadPart - a.QuadPart > 24ULL * 60 * 60 * 10000000ULL) return 0;
+	return ReadCacheFile();
 }
 
 static void SaveCache()
@@ -1463,33 +1562,48 @@ static int LoadVst2(const wchar_t* path, HMODULE& module, AEffect*& effect)
 	SafeCopy(plugDir, VST_PATH_CHARS, path);
 	wchar_t* slash = wcsrchr(plugDir, L'\\');
 	if (slash) *slash = 0; else plugDir[0] = 0;
-	wchar_t prevDllDir[VST_PATH_CHARS]; prevDllDir[0] = 0;
-	const DWORD prevLen = GetDllDirectoryW(VST_PATH_CHARS, prevDllDir);
-	if (plugDir[0]) SetDllDirectoryW(plugDir);
+	wchar_t oldCurDir[MAX_PATH] = {};
+	GetCurrentDirectoryW(MAX_PATH, oldCurDir);
+	// Two different lookups have to succeed: LoadLibrary("SCCore.dll") from
+	// inside the stub, which follows the DLL search path, and any relative
+	// file the plug-in opens during init, which follows the current directory.
+	if (plugDir[0]) {
+		SetDllDirectoryW(plugDir);
+		SetCurrentDirectoryW(plugDir);
+	}
 
 	module = LoadLibraryExW(path, NULL, LOAD_WITH_ALTERED_SEARCH_PATH);
 	if (!module) {
-		if (plugDir[0]) SetDllDirectoryW(prevLen ? prevDllDir : NULL);
+		EnsLog(L"LoadVst2 FAIL LoadLibrary err=%lu path=%s",
+			GetLastError(), path);
+		if (oldCurDir[0]) SetCurrentDirectoryW(oldCurDir);
 		return 0;
 	}
 	VSTPluginMainProc proc = (VSTPluginMainProc)GetProcAddress(module, "VSTPluginMain");
 	if (!proc) proc = (VSTPluginMainProc)GetProcAddress(module, "main");
 	if (!proc) {
+		EnsLog(L"LoadVst2 FAIL no VSTPluginMain path=%s", path);
 		FreeLibrary(module); module = NULL;
-		if (plugDir[0]) SetDllDirectoryW(prevLen ? prevDllDir : NULL);
+		if (oldCurDir[0]) SetCurrentDirectoryW(oldCurDir);
 		return 0;
 	}
+	DWORD seh = 0;
+	VstPlugDirSet(path);
 	__try { effect = proc(HostCallback); }
-	__except (EXCEPTION_EXECUTE_HANDLER) { effect = NULL; }
+	__except (seh = GetExceptionCode(), EXCEPTION_EXECUTE_HANDLER) { effect = NULL; }
 	if (!effect || effect->magic != kEffectMagic || !effect->dispatcher ||
 		!effect->processReplacing) {
+		EnsLog(L"LoadVst2 FAIL entry effect=%p seh=0x%08X path=%s",
+			(void*)effect, seh, path);
 		if (effect && effect->dispatcher)
 			__try { effect->dispatcher(effect, effClose, 0, 0, NULL, 0); }
 			__except (EXCEPTION_EXECUTE_HANDLER) {}
 		FreeLibrary(module); module = NULL; effect = NULL;
-		if (plugDir[0]) SetDllDirectoryW(prevLen ? prevDllDir : NULL);
+		if (oldCurDir[0]) SetCurrentDirectoryW(oldCurDir);
 		return 0;
 	}
+	// Bound before effOpen: that is where an instrument reads its tone data.
+	VstPlugDirBind(effect);
 	__try {
 		effect->dispatcher(effect, effOpen, 0, 0, NULL, 0);
 		effect->dispatcher(effect, effSetSampleRate, 0, 0, NULL, (float)SAMPLE_RATE);
@@ -1501,9 +1615,11 @@ static int LoadVst2(const wchar_t* path, HMODULE& module, AEffect*& effect)
 		effect->dispatcher(effect, effMainsChanged, 0, 1, NULL, 0);
 		effect->dispatcher(effect, effStartProcess, 0, 0, NULL, 0);
 	}
-	__except (EXCEPTION_EXECUTE_HANDLER) {
+	__except (seh = GetExceptionCode(), EXCEPTION_EXECUTE_HANDLER) {
+		EnsLog(L"LoadVst2 FAIL init seh=0x%08X path=%s", seh, path);
+		VstPlugDirUnbind(effect);
 		FreeLibrary(module); module = NULL; effect = NULL;
-		if (plugDir[0]) SetDllDirectoryW(prevLen ? prevDllDir : NULL);
+		if (oldCurDir[0]) SetCurrentDirectoryW(oldCurDir);
 		return 0;
 	}
 	// Keep plugin dir on the search path while the module stays loaded
@@ -1511,11 +1627,10 @@ static int LoadVst2(const wchar_t* path, HMODULE& module, AEffect*& effect)
 	// tracking would be complex; leave SetDllDirectory to this plug's dir
 	// for the session — FreeSong/CloseEffect does not clear it; next Load
 	// overwrites. Acceptable for single-song MIDI host.
-	if (plugDir[0])
-		WideCharToMultiByte(CP_ACP, 0, plugDir, -1, g_vstHostDirA, VST_PATH_CHARS, NULL, NULL);
-	EnsLog(L"LoadVst2 OK dir=%s path=%s outs=%d flags=0x%X sccore=%p",
-		plugDir, path, effect->numOutputs, (unsigned)effect->flags,
-		(void*)GetModuleHandleW(L"SCCore.dll"));
+	EnsLog(L"LoadVst2 OK path=%s ins=%d outs=%d flags=0x%X uid=0x%08X",
+		path, effect->numInputs, effect->numOutputs, (unsigned)effect->flags,
+		(unsigned)effect->uniqueID);
+	if (oldCurDir[0]) SetCurrentDirectoryW(oldCurDir);
 	return 1;
 }
 
@@ -1528,6 +1643,7 @@ static void CloseEffect(HMODULE& module, AEffect*& effect)
 			effect->dispatcher(effect, effClose, 0, 0, NULL, 0);
 		} __except (EXCEPTION_EXECUTE_HANDLER) {}
 	}
+	VstPlugDirUnbind(effect);
 	effect = NULL;
 	if (module) FreeLibrary(module);
 	module = NULL;
@@ -3000,8 +3116,9 @@ extern "C" int VstResolvePlayPath(const wchar_t* inPath, wchar_t* outMid,
 
 static void PumpSilent(AEffect* effect, Vst3Inst* vst3, int blocks)
 {
-	float z[BLOCK_FRAMES];
-	float l[BLOCK_FRAMES], r[BLOCK_FRAMES];
+	__declspec(align(32)) float z[BLOCK_FRAMES];
+	__declspec(align(32)) float l[BLOCK_FRAMES];
+	__declspec(align(32)) float r[BLOCK_FRAMES];
 	ZeroMemory(z, sizeof(z));
 	for (int b = 0; b < blocks; ++b) {
 		ZeroMemory(l, sizeof(l));
@@ -3276,6 +3393,223 @@ static int TryLoadPluginPath(const wchar_t* path, int isVst3)
 	return 0;
 }
 
+// Same idea as the scan probe, but against the plug-in already loaded into the
+// song engine, where rendering is synchronous and therefore cheap.
+static double ProbeEngineStage(int channel0, int note, int velocity)
+{
+	AEffect* e = g_eng.effect;
+	Vst3Inst* v = g_eng.vst3;
+	if (!e && !v) return 0.0;
+
+	const DWORD noteOn = (DWORD)(0x90 | (channel0 & 15)) |
+		((DWORD)note << 8) | ((DWORD)velocity << 16);
+	const DWORD noteOff = (DWORD)(0x80 | (channel0 & 15)) | ((DWORD)note << 8);
+
+	if (v) Vst3MidiShort(v, noteOn, 0);
+	if (e) { MidiItem on = {}; on.msg = noteOn; SendVstEvents(e, &on, 1, 0); }
+
+	static __declspec(align(32)) float l[BLOCK_FRAMES];
+	static __declspec(align(32)) float r[BLOCK_FRAMES];
+	double peak = 0.0;
+	const int blocks = SAMPLE_RATE / BLOCK_FRAMES; // one second at most
+	for (int b = 0; b < blocks; ++b) {
+		if (v) Vst3Process(v, l, r, BLOCK_FRAMES);
+		else RenderEffect(e, l, r, BLOCK_FRAMES);
+		for (int i = 0; i < BLOCK_FRAMES; ++i) {
+			const double a = fabs((double)l[i]), c = fabs((double)r[i]);
+			if (a > peak) peak = a;
+			if (c > peak) peak = c;
+		}
+		if (peak * 1000.0 >= (double)PROBE_AUDIBLE_MILLI) break;
+	}
+	if (v) Vst3MidiShort(v, noteOff, 0);
+	if (e) { MidiItem off = {}; off.msg = noteOff; SendVstEvents(e, &off, 1, 0); }
+	return peak;
+}
+
+static int ProbeEngineAudible(int* outMilli)
+{
+	double peak = ProbeEngineStage(0, 60, 100);
+	if (peak * 1000.0 < (double)PROBE_AUDIBLE_MILLI) {
+		const double drum = ProbeEngineStage(9, 36, 110);
+		if (drum > peak) peak = drum;
+	}
+	const int milli = (int)(peak * 1000.0 + 0.5);
+	if (outMilli) *outMilli = milli;
+	return milli >= PROBE_AUDIBLE_MILLI ? 1 : 0;
+}
+
+static int ResetModeForPath(const wchar_t* p)
+{
+	if (!p) return 0;
+	if (ContainsI(p, L"YXG") || ContainsI(p, L"S-YXG") ||
+		ContainsI(p, L"SGP2") || ContainsI(p, L"SoftXG") ||
+		(ContainsI(p, L"XG") && !ContainsI(p, L"SC")))
+		return 2;
+	if (DetectMultiTimbralName(p) ||
+		ContainsI(p, L"Canvas") || ContainsI(p, L"SC-") ||
+		ContainsI(p, L"SCVA") || ContainsI(p, L"8820") ||
+		ContainsI(p, L"SC88") || ContainsI(p, L"SGP"))
+		return 1;
+	return 0;
+}
+
+static void UnloadSongPlugin()
+{
+	if (g_eng.vst3) { Vst3Close(g_eng.vst3); g_eng.vst3 = NULL; }
+	if (g_eng.effect || g_eng.module) CloseEffect(g_eng.module, g_eng.effect);
+}
+
+// Load a candidate under real playing conditions (reset sent first) and keep it
+// only if it actually makes a sound. Leaves nothing loaded when it fails, so the
+// caller can simply try the next one.
+static int TryLoadAudible(const wchar_t* path, int* outReset, int* outMilli)
+{
+	if (!TryLoadPluginPath(path, 0)) return 0;
+	const int reset = ResetModeForPath(path);
+	SendGmGsReset(g_eng.effect, g_eng.vst3, reset);
+	int milli = 0;
+	const int ok = ProbeEngineAudible(&milli);
+	EnsLog(L"song probe %s peak=%d/1000 path=%s",
+		ok ? L"SOUND" : L"SILENT", milli, path);
+	if (outMilli) *outMilli = milli;
+	if (!ok) { UnloadSongPlugin(); return 0; }
+	// The probe advanced the instrument by up to a second; start the song clean.
+	SendGmGsReset(g_eng.effect, g_eng.vst3, reset);
+	if (outReset) *outReset = reset;
+	return 1;
+}
+
+// When the song engine runs inside KpiHost64 there is no plug-in list: scanning
+// belongs to ogg.exe. Both executables ship in the same folder, so the cache the
+// host UI wrote is readable here and already carries the audible verdicts. Age
+// is irrelevant for this use - a stale verdict beats a silent song.
+static void EnsureCandidateList()
+{
+	if (!g_pluginCount) ReadCacheFile();
+}
+
+static int AlreadyListed(const wchar_t* path)
+{
+	for (int i = 0; i < g_pluginCount; ++i)
+		if (_wcsicmp(g_plugins[i].path, path) == 0) return 1;
+	return 0;
+}
+
+static void SweepDirForMulti(const wchar_t* dir, int depth,
+	wchar_t out[][VST_PATH_CHARS], int& count, int max)
+{
+	if (!dir || !*dir || depth > 3 || count >= max || !DirExists(dir)) return;
+	wchar_t pat[VST_PATH_CHARS];
+	JoinPath(pat, dir, L"*");
+	WIN32_FIND_DATAW fd = {};
+	HANDLE h = FindFirstFileW(pat, &fd);
+	if (h == INVALID_HANDLE_VALUE) return;
+	do {
+		if (fd.cFileName[0] == L'.') continue;
+		wchar_t full[VST_PATH_CHARS];
+		JoinPath(full, dir, fd.cFileName);
+		if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+			SweepDirForMulti(full, depth + 1, out, count, max);
+			continue;
+		}
+		if (count >= max) break;
+		if (!EqExt(full, L".dll")) continue;
+		if (!DetectMultiTimbralName(full) && !PathLooksLikeScVa(full)) continue;
+		if (PeArch(full) != HostArch()) continue;
+		int dup = 0;
+		for (int i = 0; i < count; ++i)
+			if (_wcsicmp(out[i], full) == 0) { dup = 1; break; }
+		if (!dup) SafeCopy(out[count++], VST_PATH_CHARS, full);
+	} while (FindNextFileW(h, &fd) && count < max);
+	FindClose(h);
+}
+
+// Last resort when no scan has ever run. The same product is routinely
+// installed in several places at once and only some copies work, so sweeping
+// the usual locations is what turns "silent song" into "it found the good one".
+static int CollectMultiCandidates(wchar_t out[][VST_PATH_CHARS], int max)
+{
+	wchar_t roots[16][VST_PATH_CHARS];
+	int nroots = 0;
+	static const wchar_t* fixed[] = {
+		L"C:\\Program Files\\Steinberg\\VstPlugins",
+		L"C:\\Program Files\\Steinberg\\VSTPlugins",
+		L"C:\\Roland VS\\64",
+		L"C:\\Roland VS",
+		L"C:\\Program Files\\Roland\\SOUND Canvas VA",
+		L"C:\\Program Files (x86)\\Roland\\SOUND Canvas VA",
+		L"C:\\Yamaha\\S-YXG50",
+	};
+	AddRegRoot(HKEY_LOCAL_MACHINE, roots, nroots, 16);
+	AddRegRoot(HKEY_CURRENT_USER, roots, nroots, 16);
+	{
+		wchar_t pd[MAX_PATH] = {};
+		if (SUCCEEDED(SHGetFolderPathW(NULL, CSIDL_COMMON_APPDATA, NULL, 0, pd)) &&
+			nroots < 16)
+			_snwprintf_s(roots[nroots++], VST_PATH_CHARS, _TRUNCATE,
+				L"%s\\Roland Cloud\\SOUND Canvas VA", pd);
+	}
+	if (savedata.vstExtraPath[0] && nroots < 16)
+		SafeCopy(roots[nroots++], VST_PATH_CHARS, savedata.vstExtraPath);
+	for (int i = 0; i < (int)(sizeof(fixed) / sizeof(fixed[0])) && nroots < 16; ++i)
+		SafeCopy(roots[nroots++], VST_PATH_CHARS, fixed[i]);
+
+	int count = 0;
+	for (int i = 0; i < nroots && count < max; ++i)
+		SweepDirForMulti(roots[i], 0, out, count, max);
+	return count;
+}
+
+// The configured instrument first, then every other multi-timbral one the scan
+// found, so a dud install degrades into "a different synth plays the song"
+// instead of "the song is silent".
+static int LoadFirstAudibleCandidate(const wchar_t* preferred, wchar_t* outPath,
+	int outChars, int* outReset, int* outMilli)
+{
+	if (preferred && *preferred && TryLoadAudible(preferred, outReset, outMilli)) {
+		SafeCopy(outPath, outChars, preferred);
+		return 1;
+	}
+	EnsureCandidateList();
+	// Proven-audible entries first, then untested ones. A sampler waiting for a
+	// patch is no use for unattended song playback, so isAudible == 2 is not a
+	// candidate here even though the host palette still lists it.
+	for (int pass = 0; pass < 2; ++pass) {
+		for (int i = 0; i < g_pluginCount; ++i) {
+			const VstPluginInfo& p = g_plugins[i];
+			if (!p.isInstrument || !p.isMultiTimbral) continue;
+			if (p.isAudible == 2) continue;
+			if (pass == 0 && p.isAudible != 1) continue;
+			if (pass == 1 && p.isAudible == 1) continue;
+			if (preferred && *preferred &&
+				_wcsicmp(p.path, preferred) == 0) continue;
+			if (!p.isVst3 && PeArch(p.path) != HostArch()) continue;
+			if (!TryLoadAudible(p.path, outReset, outMilli)) continue;
+			SafeCopy(outPath, outChars, p.path);
+			EnsLog(L"song fallback picked [%s] after [%s] was silent",
+				p.path, preferred ? preferred : L"(none)");
+			return 1;
+		}
+	}
+
+	// Nothing in the list worked, or there was no list to walk.
+	enum { SWEEP_MAX = 12 };
+	wchar_t cand[SWEEP_MAX][VST_PATH_CHARS];
+	const int n = CollectMultiCandidates(cand, SWEEP_MAX);
+	EnsLog(L"song sweep found %d candidate(s)", n);
+	for (int i = 0; i < n; ++i) {
+		if (preferred && *preferred && _wcsicmp(cand[i], preferred) == 0) continue;
+		if (AlreadyListed(cand[i])) continue; // already tried above
+		if (!TryLoadAudible(cand[i], outReset, outMilli)) continue;
+		SafeCopy(outPath, outChars, cand[i]);
+		EnsLog(L"song sweep picked [%s] after [%s] was silent",
+			cand[i], preferred ? preferred : L"(none)");
+		return 1;
+	}
+	return 0;
+}
+
 extern "C" int VstMidiOpen(const wchar_t* midPath,
 	const wchar_t hints[][128], int hintCount, HWND parentForWait)
 {
@@ -3288,8 +3622,11 @@ extern "C" int VstMidiOpen(const wchar_t* midPath,
 
 	int loaded = 0;
 	int resetMode = 0;
+	int probeMilli = 0;
 	wchar_t pickDll[VST_PATH_CHARS];
+	wchar_t usedDll[VST_PATH_CHARS];
 	pickDll[0] = 0;
+	usedDll[0] = 0;
 	const wchar_t* loadedPath = NULL;
 	if (!PickGsXgDll(midPath, pickDll, VST_PATH_CHARS)) {
 		if (!MapperOpen()) {
@@ -3298,19 +3635,20 @@ extern "C" int VstMidiOpen(const wchar_t* midPath,
 		}
 		loaded = 1;
 	} else {
-		loaded = TryLoadPluginPath(pickDll, 0);
-		if (loaded) loadedPath = pickDll;
+		loaded = LoadFirstAudibleCandidate(pickDll, usedDll, VST_PATH_CHARS,
+			&resetMode, &probeMilli);
+		if (loaded) loadedPath = usedDll;
+		else if (TryLoadPluginPath(pickDll, 0)) {
+			// Nothing on this machine passed the sound check. Play through the
+			// configured instrument anyway rather than refusing to open: the
+			// user gets the same result as before plus a log line saying why.
+			loaded = 1;
+			loadedPath = pickDll;
+			resetMode = ResetModeForPath(pickDll);
+			EnsLog(L"song NO AUDIBLE CANDIDATE, using [%s] as-is", pickDll);
+		}
 	}
 	if (loadedPath) {
-		if (ContainsI(loadedPath, L"YXG") || ContainsI(loadedPath, L"S-YXG") ||
-			ContainsI(loadedPath, L"SGP2") || ContainsI(loadedPath, L"SoftXG") ||
-			(ContainsI(loadedPath, L"XG") && !ContainsI(loadedPath, L"SC")))
-			resetMode = 2;
-		else if (DetectMultiTimbralName(loadedPath) ||
-			ContainsI(loadedPath, L"Canvas") || ContainsI(loadedPath, L"SC-") ||
-			ContainsI(loadedPath, L"SCVA") || ContainsI(loadedPath, L"8820") ||
-			ContainsI(loadedPath, L"SC88") || ContainsI(loadedPath, L"SGP"))
-			resetMode = 1;
 		g_eng.gmResetMode = resetMode;
 		SendGmGsReset(g_eng.effect, g_eng.vst3, resetMode);
 		LoadPortExtraUnits(loadedPath, resetMode);
@@ -3329,6 +3667,14 @@ extern "C" int VstMidiOpen(const wchar_t* midPath,
 	ZeroMemory(g_eng.noteState, sizeof(g_eng.noteState));
 	if (!g_eng.useMapper)
 		ResetSequence();
+	EnsLog(L"VstMidiOpen pick=[%s] used=[%s] peak=%d/1000 loaded=%d effect=%p "
+		L"vst3=%p mapper=%d hasOut=%d reset=%d gs=[%s] xg=[%s]",
+		pickDll[0] ? pickDll : L"(none)",
+		loadedPath ? loadedPath : L"(none)", probeMilli, loaded,
+		(void*)g_eng.effect, (void*)g_eng.vst3, g_eng.useMapper,
+		hasOut, resetMode,
+		savedata.vstMultiDll[0] ? savedata.vstMultiDll : L"(empty)",
+		savedata.vstExtraPath[0] ? savedata.vstExtraPath : L"(empty)");
 	LeaveCriticalSection(&g_eng.cs);
 	return hasOut ? 0 : -5;
 }
@@ -3704,6 +4050,8 @@ extern "C" int VstLiveLoadPart(int part1to32,
 	// host process, which takes far too long to hold the audio lock for.
 	if (PeArch(pluginPath) != HostArch()) {
 		const int rc = LiveRemoteLoad(part1to32, pluginPath, isVst3);
+		EnsLog(L"LiveLoad part=%d remote rc=%d arch=%d vst3=%d path=%s",
+			part1to32, rc, PeArch(pluginPath), isVst3, pluginPath);
 		if (rc != 0) return rc;
 		EnterCriticalSection(&g_eng.cs);
 		LivePart& rp = g_eng.live[part1to32 - 1];
@@ -3995,6 +4343,178 @@ static int LivePartFreeForProbe(int part0)
 	return (!p.effect && !p.vst3 && !p.remote && !p.module && !p.edWnd) ? 1 : 0;
 }
 
+static double PeakOf(const float* l, const float* r, int n)
+{
+	double peak = 0.0;
+	for (int i = 0; i < n; ++i) {
+		const double a = fabs((double)l[i]), b = fabs((double)r[i]);
+		if (a > peak) peak = a;
+		if (b > peak) peak = b;
+	}
+	return peak;
+}
+
+// A part hosted in this process can be driven and rendered on its own, which
+// keeps the measurement clean no matter what else is loaded. Note that feeding
+// the note through VstLiveMidiShort would be wrong here: that routes by port,
+// so during a rescan the note lands on whichever part owns the port instead of
+// the one being tested.
+static double LiveProbeLocal(int part1to32, int channel0, int note,
+	int velocity, int honourSendCh)
+{
+	LivePart& p = g_eng.live[part1to32 - 1];
+	if (!p.effect && !p.vst3) return 0.0;
+
+	int ch = channel0 & 15;
+	if (honourSendCh && p.sendCh >= 0) ch = p.sendCh & 15;
+	const DWORD noteOn = (DWORD)(0x90 | ch) |
+		((DWORD)note << 8) | ((DWORD)velocity << 16);
+	const DWORD noteOff = (DWORD)(0x80 | ch) | ((DWORD)note << 8);
+
+	static __declspec(align(32)) float l[BLOCK_FRAMES];
+	static __declspec(align(32)) float r[BLOCK_FRAMES];
+	p.pend.count = 0;
+	p.pend.sysexUsed = 0;
+	LivePendPush(p, noteOn);
+
+	double peak = 0.0;
+	const int blocks = SAMPLE_RATE / BLOCK_FRAMES; // one second at most
+	for (int b = 0; b < blocks; ++b) {
+		LivePendFlush(p);
+		if (p.vst3) Vst3Process(p.vst3, l, r, BLOCK_FRAMES);
+		else RenderEffect(p.effect, l, r, BLOCK_FRAMES);
+		const double got = PeakOf(l, r, BLOCK_FRAMES);
+		if (got > peak) peak = got;
+		if (peak * 1000.0 >= (double)PROBE_AUDIBLE_MILLI) break;
+	}
+	LivePendPush(p, noteOff);
+	LivePendFlush(p);
+	return peak;
+}
+
+// A remote part lives in KpiHost64 and only comes back inside the shared mix,
+// so this one measures the mix and subtracts what it was already producing.
+// The note is aimed with the channel that matches the slot, which is how the
+// far side routes it to this part and not another.
+static double LiveProbeRemote(int part1to32, int note, int velocity,
+	double* outBaseline)
+{
+	static float l[BLOCK_FRAMES];
+	static float r[BLOCK_FRAMES];
+	const int ch = (part1to32 - 1) % 16;
+	const DWORD blockMs = (DWORD)((BLOCK_FRAMES * 1000) / SAMPLE_RATE); // ~11ms
+
+	// KpiHost64 fills the ring in real time; draining faster only yields
+	// starved zeros, which would read as a dead plug-in.
+	double base = 0.0;
+	const DWORD baseEnd = GetTickCount() + 250;
+	while (GetTickCount() < baseEnd) {
+		if (VstLiveRender(l, r, BLOCK_FRAMES) <= 0) break;
+		const double got = PeakOf(l, r, BLOCK_FRAMES);
+		if (got > base) base = got;
+		Sleep(blockMs);
+	}
+	if (outBaseline) *outBaseline = base;
+
+	const DWORD noteOn = (DWORD)(0x90 | ch) |
+		((DWORD)note << 8) | ((DWORD)velocity << 16);
+	const DWORD noteOff = (DWORD)(0x80 | ch) | ((DWORD)note << 8);
+	// Straight into the ring, deliberately not through VstLiveMidiShort: that
+	// also pushes the note to the local part owning the port, so a plug-in
+	// sitting in another slot would answer and get measured instead.
+	LiveRemoteMidi(0, noteOn);
+
+	double peak = 0.0;
+	const DWORD deadline = GetTickCount() + 2000;
+	__int64 rendered = 0;
+	while (rendered < SAMPLE_RATE && GetTickCount() < deadline) {
+		if (VstLiveRender(l, r, BLOCK_FRAMES) <= 0) break;
+		rendered += BLOCK_FRAMES;
+		const double got = PeakOf(l, r, BLOCK_FRAMES);
+		if (got > peak) peak = got;
+		if ((peak - base) * 1000.0 >= (double)PROBE_AUDIBLE_MILLI) break;
+		Sleep(blockMs);
+	}
+	LiveRemoteMidi(0, noteOff);
+	return peak;
+}
+
+// A melodic note first, then a drum hit on channel 10: a kit-only plug-in has
+// nothing mapped at C4 and would otherwise be written off as broken.
+static double LiveProbeBothStages(int part1to32, int remote, double* outBase)
+{
+	double base = 0.0;
+	double rise = 0.0;
+	if (remote) {
+		double b1 = 0.0;
+		const double mel = LiveProbeRemote(part1to32, 60, 100, &b1);
+		rise = mel - b1;
+		base = b1;
+		if (rise * 1000.0 < (double)PROBE_AUDIBLE_MILLI) {
+			double b2 = 0.0;
+			const double drum = LiveProbeRemote(part1to32, 36, 110, &b2);
+			if (drum - b2 > rise) { rise = drum - b2; base = b2; }
+		}
+	} else {
+		EnterCriticalSection(&g_eng.cs);
+		rise = LiveProbeLocal(part1to32, 0, 60, 100, 1);
+		if (rise * 1000.0 < (double)PROBE_AUDIBLE_MILLI) {
+			const double drum = LiveProbeLocal(part1to32, 9, 36, 110, 0);
+			if (drum > rise) rise = drum;
+		}
+		LeaveCriticalSection(&g_eng.cs);
+	}
+	if (outBase) *outBase = base;
+	return rise;
+}
+
+// Romplers and kit players come up with an empty slot and expose no usable
+// program list, so they legitimately answer silence until the user picks a
+// patch in the plug-in's own browser. Judging those as broken would hide the
+// instruments the user actually reaches for, so they get their own verdict.
+static int NeedsUserPatch(const wchar_t* name, const wchar_t* path)
+{
+	static const wchar_t* keys[] = {
+		L"Groove Agent", L"Battery", L"BFD", L"Addictive Drums",
+		L"Superior Drummer", L"EZdrummer", L"MT-PowerDrumKit"
+	};
+	if (IsRomplerName(name, path)) return 1;
+	for (int i = 0; i < (int)(sizeof(keys) / sizeof(keys[0])); ++i)
+		if (NameOrPathHas(name, path, keys[i])) return 1;
+	return 0;
+}
+
+// Walk a few programs and stop at the first that speaks, for plug-ins whose
+// patches really do come from the host-visible program list.
+enum { PROBE_PROGRAM_TRIES = 6 };
+
+static int LiveProbePartAudible(int part1to32, int* outPeakMilli,
+	int* outBaseMilli, int* outProgram, int tryPrograms)
+{
+	if (part1to32 < 1 || part1to32 > 32) return 0;
+	const int remote = g_eng.live[part1to32 - 1].remote ? 1 : 0;
+	double base = 0.0;
+	double rise = LiveProbeBothStages(part1to32, remote, &base);
+	int usedProgram = -1;
+
+	if (tryPrograms && rise * 1000.0 < (double)PROBE_AUDIBLE_MILLI) {
+		const int progs = VstLiveProgramCount(part1to32);
+		const int tries = progs < PROBE_PROGRAM_TRIES ? progs : PROBE_PROGRAM_TRIES;
+		for (int i = 0; i < tries; ++i) {
+			if (!VstLiveSetProgram(part1to32, i)) continue;
+			double b = 0.0;
+			const double got = LiveProbeBothStages(part1to32, remote, &b);
+			if (got > rise) { rise = got; base = b; usedProgram = i; }
+			if (rise * 1000.0 >= (double)PROBE_AUDIBLE_MILLI) break;
+		}
+	}
+
+	if (outPeakMilli) *outPeakMilli = (int)((rise + base) * 1000.0 + 0.5);
+	if (outBaseMilli) *outBaseMilli = (int)(base * 1000.0 + 0.5);
+	if (outProgram) *outProgram = usedProgram;
+	return (rise * 1000.0 >= (double)PROBE_AUDIBLE_MILLI) ? 1 : 0;
+}
+
 // Same open/close the part grid uses on a drop. Failures leave isLiveOk at 0
 // so the host palette never offers a plug-in that would bounce on drop.
 extern "C" void VstScanVerifyLiveList(HWND parentForWait)
@@ -4020,7 +4540,7 @@ extern "C" void VstScanVerifyLiveList(HWND parentForWait)
 		if (wait) {
 			wchar_t msg[384];
 			_snwprintf_s(msg, _TRUNCATE,
-				L"D&&D確認 %d / %d\nChecking droppable plug-ins %d / %d\n%s",
+				L"D&&D・発音確認 %d / %d\nChecking plug-ins (load + sound) %d / %d\n%s",
 				done, todo, done, todo, p.name);
 			SetWaitStatus(wait, msg);
 		}
@@ -4038,9 +4558,23 @@ extern "C" void VstScanVerifyLiveList(HWND parentForWait)
 			continue;
 		}
 		if (VstLiveLoadPart(part, p.path, p.isVst3) == 0) {
+			int milli = 0, base = 0, prog = -1;
+			const int wasRemote = g_eng.live[part - 1].remote;
+			// Cycling programs on a sampler costs seconds and proves nothing,
+			// since its patches do not live in the program list.
+			const int needsPatch = NeedsUserPatch(p.name, p.path);
+			p.isAudible = LiveProbePartAudible(part, &milli, &base, &prog,
+				needsPatch ? 0 : 1);
+			if (!p.isAudible && needsPatch) p.isAudible = 2;
+			p.probePeakMilli = milli;
 			VstLiveUnloadPart(part);
 			p.isLiveOk = 1;
 			changed = 1;
+			EnsLog(L"verify %s part=%d remote=%d peak=%d base=%d prog=%d "
+				L"(per 1000) path=%s",
+				p.isAudible == 1 ? L"SOUND" :
+				(p.isAudible == 2 ? L"NEEDS-PATCH" : L"SILENT"),
+				part, wasRemote, milli, base, prog, p.path);
 		} else {
 			p.isInstrument = 0;
 			changed = 1;
@@ -4412,7 +4946,8 @@ extern "C" int VstLiveRender(float* L, float* R, int frames)
 	EnterCriticalSection(&g_eng.cs);
 	ZeroMemory(L, frames * sizeof(float));
 	ZeroMemory(R, frames * sizeof(float));
-	float tl[BLOCK_FRAMES], tr[BLOCK_FRAMES];
+	__declspec(align(32)) float tl[BLOCK_FRAMES];
+	__declspec(align(32)) float tr[BLOCK_FRAMES];
 	for (int pos = 0; pos < frames;) {
 		int n = frames - pos;
 		if (n > BLOCK_FRAMES) n = BLOCK_FRAMES;

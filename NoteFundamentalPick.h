@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -28,23 +28,17 @@ inline float ScaleGoertzelAmp(float rawAmp, int keyIndex, int keyCount)
 
 inline void BuildHarmonicSalience(const float* raw, float* salience, int count)
 {
-    static const int kHarmBelow[] = { 12, 19, 24 };
     for (int i = 0; i < count; ++i) {
         const float f = raw[i];
         if (f <= 0.0f) {
             salience[i] = 0.0f;
             continue;
         }
-        float penalty = 1.0f;
-        for (int d : kHarmBelow) {
-            const int lo = i - d;
-            if (lo < 0) continue;
-            if (raw[lo] > f * 0.72f)
-                penalty *= 0.40f;
-        }
+        // 倍音によるペナルティ（低音に食われる原因）を廃止。
+        // ゴースト除去は後段の IsHarmonicGhostPartial に任せる。
         const float h2 = (i + 12 < count) ? raw[i + 12] : 0.0f;
         const float h3 = (i + 19 < count) ? raw[i + 19] : 0.0f;
-        salience[i] = f * (f + h2 * 0.48f + h3 * 0.26f) * penalty;
+        salience[i] = f * (f + h2 * 0.48f + h3 * 0.26f);
     }
 }
 
@@ -169,8 +163,8 @@ inline int PickFundamentalNotesRange(const float* inStrengths, bool* outActive, 
         for (int i = bandStart; i < bandEnd; ++i) {
             if (work[i] > bestS) {
                 bool isPeak = true;
-                if (i > 0 && inStrengths[i - 1] >= inStrengths[i]) isPeak = false;
-                if (i + 1 < count && inStrengths[i + 1] > inStrengths[i]) isPeak = false;
+                if (i > 0 && inStrengths[i - 1] > inStrengths[i]) isPeak = false;
+                if (i + 1 < count && inStrengths[i + 1] >= inStrengths[i]) isPeak = false;
                 if (isPeak) {
                     bestS = work[i];
                     best = i;

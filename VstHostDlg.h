@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "afxwin.h"
 #include "CCustomControl.h"
@@ -145,6 +145,7 @@ protected:
 	afx_msg void OnDestroy();
 	afx_msg void OnTimer(UINT_PTR id);
 	afx_msg void OnActivate(UINT nState, CWnd* pWndOther, BOOL bMinimized);
+	afx_msg void OnLButtonDown(UINT nFlags, CPoint point);
 
 	CCustomComboBox m_preset;
 	CCustomComboBox m_midiIn[3];

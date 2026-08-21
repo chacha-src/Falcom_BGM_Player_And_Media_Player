@@ -19,6 +19,15 @@ struct VstPluginInfo {
 	// 1 = opened through the same path a slot drop uses. The host palette only
 	// lists plugs that passed; 0 means not checked yet or a failed probe.
 	int isLiveOk;
+	// Result of playing a probe note and measuring the output, because loading
+	// successfully proves nothing: an unauthorised or half-installed instrument
+	// opens, accepts MIDI and returns digital silence.
+	//   0 = stayed silent although it should be ready to play (bad install)
+	//   1 = made a sound
+	//   2 = silent, but it is a sampler/kit player with nothing loaded yet, so
+	//       silence is the expected answer until the user picks a patch
+	int isAudible;
+	int probePeakMilli; // measured peak x1000, kept for the log / tooltip
 };
 
 /*

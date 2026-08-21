@@ -1,14 +1,8 @@
 ﻿#pragma once
 // 108鍵簡易ピアノロール検出
 //
-// 採択の本体は PianoRollSalience（白色化 + 反復倍音減算）。ここは
-// 帯域ごとのしきい値とチューニング設定の対応付け、および前後処理を持つ。
-//
-// 旧実装は帯域ごとに枠数と「帯域最大値に対する相対比」でピックし、その後
-// ベース倍音の減衰・ゴースト判定・全域倍音ふるいを重ねがけしていた。
-// どの段も blend（＝振幅の2乗）の絶対量を直接比べていたため、低音と中高音で
-// 桁が違い、ベースが鳴っている間は中高音がどこかの段で必ず落とされ、
-// ベースが止まると基準が下がって今度はノイズが載る、という振動を起こしていた。
+// 旧実装（帯域ごとの枠数と相対比によるピック）をベースにしつつ、
+// 「低音に食われる（高音が消える）」問題と「音数制限」を解消した「いいとこ取り」版。
 //
 // 公開 API / 定数名は CPianoRoll.cpp 互換を維持する。
 #include <algorithm>
@@ -17,7 +11,6 @@
 #include "NoteFundamentalPick.h"
 #include "PianoKeyTable.h"
 #include "PianoRollPick.h"
-#include "PianoRollSalience.h"
 
 namespace PianoRoll108
 {
@@ -49,6 +42,15 @@ namespace PianoRoll108
         if (keyIndex < BASS_END) return 0.30f;
         if (keyIndex < MID_END) return 0.42f;
         return 0.48f;
+    }
+
+    inline float BandMax(const float* st, int lo, int hi)
+    {
+        float mx = 0.0f;
+        if (!st || lo >= hi) return 0.0f;
+        for (int i = lo; i < hi; ++i)
+            if (st[i] > mx) mx = st[i];
+        return mx;
     }
 
     inline void BuildDetectionSpectrum(const float* smoothed, const float* raw, float* out, int count)
@@ -105,6 +107,16 @@ namespace PianoRoll108
         return baseFloor * 0.50f;
     }
 
+    inline bool IsStrictLocalPeak(const float* st, int i, int lo, int hi)
+    {
+        if (!st || i < lo || i >= hi) return false;
+        const float v = st[i];
+        if (v <= 1e-8f) return false;
+        if (i > lo && st[i - 1] >= v) return false;
+        if (i + 1 < hi && st[i + 1] > v) return false;
+        return true;
+    }
+
     // 低音の半音またぎを強度の強い側1本へ強制
     inline void ForceUniqueBassAdjacents(const float* st, bool* picked, int lo, int hi)
     {
@@ -118,38 +130,15 @@ namespace PianoRoll108
         }
     }
 
-    // 帯域ごとの既定サリエンスしきい値[dB]と、対応するチューニング項目の既定値。
-    // ユーザ設定は「既定値からの倍率」としてしきい値に掛かる（従来の相対比率
-    // パラメータと向きが同じ: 値を上げると厳しくなる）。
-    inline void SalienceThreshForKey(int i, float pickBassRel, float pickLowMidRel,
-        float pickMelodyRel, float pickTreRel, float scale, float* outT)
+    inline void MergeBandPicks(bool* dest, const bool* band, int lo, int hi)
     {
-        float base, rel, defRel;
-        if (i < BASS_END) { base = 11.0f; rel = pickBassRel; defRel = 0.28f; }
-        else if (i < C4_KEY) { base = 9.0f; rel = pickLowMidRel; defRel = 0.20f; }
-        else if (i < O5_HI) { base = 7.0f; rel = pickMelodyRel; defRel = 0.10f; }
-        else if (i < EDGE_HI) { base = 7.0f; rel = pickTreRel; defRel = 0.22f; }
-        // C7 以上は倍音が鍵盤範囲外に出て倍音列で裏を取れず、逆に下の音の
-        // 高次倍音の吹き溜まりになる。基音として採るには強い根拠を要求する。
-        else { base = 13.0f; rel = pickTreRel; defRel = 0.22f; }
-        if (defRel <= 1e-6f) defRel = 1.0f;
-        float t = base * (rel / defRel) / scale;
-        if (t < 3.0f) t = 3.0f;
-        if (t > 45.0f) t = 45.0f;
-        *outT = t;
+        if (!dest || !band) return;
+        for (int i = lo; i < hi; ++i) {
+            if (band[i])
+                dest[i] = true;
+        }
     }
 
-    // 1フレーム分の基音採択。
-    //
-    // 旧実装は帯域ごとに「帯域最大値に対する相対比」でピックし、そのあと
-    // ベース倍音の減衰・ゴースト判定・全域倍音ふるいを重ねがけしていた。
-    // どの段も blend（＝振幅の2乗）の絶対量を直接比べていたため、ベースが
-    // 鳴っている間は中高音がどの段かで必ず落とされ、ベースが止まると
-    // 基準が下がって今度はノイズが載る、という振動を起こしていた。
-    //
-    // 新実装は PianoRollSalience の白色化＋反復倍音減算 1本に統一する。
-    // ゴーストは「採った基音の倍音ぶんを引く」ことで消えるので、比率による
-    // 個別のゴースト規則を持たない。
     inline void BuildFramePicks(const float* blend, bool* outPicked, int count,
         float levelScale = 1.0f, float absNoiseFloor = 0.00055f,
         const float* onset = nullptr, const float* prevOnset = nullptr,
@@ -160,63 +149,120 @@ namespace PianoRoll108
         if (!blend || !outPicked || count != COUNT) return;
         memset(outPicked, 0, (size_t)count * sizeof(bool));
 
+        float gated[COUNT];
+        for (int i = 0; i < count; ++i) {
+            const float floor = AbsFloorForKey(i, absNoiseFloor);
+            gated[i] = (blend[i] >= floor) ? blend[i] : 0.0f;
+        }
+
         float scale = levelScale;
         if (scale < 0.70f) scale = 0.70f;
         if (scale > 1.10f) scale = 1.10f;
 
-        // blend は振幅の2乗（ApplyDetectScale = amp^2 * 5）。比率の議論を
-        // まともにするため振幅ドメインへ戻す。
-        float amp[COUNT], absFloorAmp[COUNT];
-        for (int i = 0; i < count; ++i) {
-            const float v = blend[i];
-            amp[i] = (v > 0.0f) ? sqrtf(v) : 0.0f;
-            absFloorAmp[i] = sqrtf(AbsFloorForKey(i, absNoiseFloor));
-        }
+        bool band[COUNT];
 
-        PianoRollSalience::PickParams pp;
+        // ---- 1) 低音: 枠2本、相対厳しめ。隣接は後で強制1本化 ----
+        PickFundamentalNotesRange(gated, band, count, EDGE_LO, BASS_END, 2, pickBassRel / scale);
+        for (int i = 0; i < EDGE_LO; ++i) band[i] = false;
+        CollapseNearbyPicks(blend, band, EDGE_LO, BASS_END, 3, false); // 強い方優先
+        ForceUniqueBassAdjacents(blend, band, EDGE_LO, BASS_END);
+        RefineToLocalPeaksInBand(blend, band, count, EDGE_LO, BASS_END, 1);
+        // 低域DC/サブオーディオ裾の除去: 基音は「下隣の半音より強い」真の局所ピークで
+        // あること。すぐ下の鍵(EDGE_LO 未満のサブオーディオ帯を含む)が同等以上に強ければ、
+        // それは基音ではなく DC 方向へ単調増加する漏れ裾の縁にすぎない。裾は下ほど強いので
+        // 縁を落とすと1つ上へ連鎖し、真の局所ピーク(下より強い鍵)が現れた所で自然に止まる。
+        // RefineToLocalPeaksInBand は帯域下端より下を見ないため、この判定を別途行う。
         // オクターブ0(C0–B0 = key12–23, 約16–31Hz)は 185ms 窓では半音間隔(<2Hz)が
         // 分解能(約5.4Hz)を大きく下回り、原理的に音程を分離できない。PSG/ピアノの
-        // 最低音 A0 以下でもあり、実質 DC 漏れ裾の常時点灯源にしかならない。
-        pp.pickLo = MUSIC_LOW_FLOOR;
-        pp.pickHi = count;
-        pp.bassEnd = BASS_END;
-        pp.maxNotes = 24; // 音数制限は入れず、という要望に合わせて上限を拡大
-        pp.fundMinDb = 3.0f;
-        
-        // 説明済みスロットへのペナルティを緩和。
-        // ベースの倍音より小さい実音（メロディ等）が重なった場合、減算後の残差は
-        // 元の振幅の半分未満になることがよくある。ここで 0.50 を要求すると
-        // 「ベースに食われる」現象が起きるため、大幅に下げる。
-        pp.explainedPenalty = 1.0f;
-        pp.verifyHi = EDGE_HI;
+        // 最低音 A0 以下でもあり、実質 DC 漏れ裾の常時点灯源にしかならないため検出しない。
+        for (int i = EDGE_LO; i < MUSIC_LOW_FLOOR && i < BASS_END; ++i)
+            band[i] = false;
+        // それ以上(オクターブ1〜)は「下隣の半音より強い」真の局所ピークのみ採用する。
+        // すぐ下の鍵が同等以上に強ければ、それは基音でなく DC 方向へ単調増加する漏れ裾の
+        // 縁にすぎない。係数 0.98 は低音側の分解能不足で隣接鍵がほぼ同値になる分の許容。
+        for (int i = MUSIC_LOW_FLOOR; i < BASS_END; ++i) {
+            if (!band[i]) continue;
+            if (blend[i - 1] >= blend[i] * 0.98f)
+                band[i] = false;
+        }
+        MergeBandPicks(outPicked, band, EDGE_LO, BASS_END);
 
-        for (int i = 0; i < count; ++i) {
-            float t;
-            SalienceThreshForKey(i, pickBassRel, pickLowMidRel, pickMelodyRel,
-                pickTreRel, scale, &t);
-            
-            float uMin = 0.15f;
-            // 自分のアタックを持つ鍵は倍音の追従では説明できないので通しやすくする。
-            if (onset && prevOnset &&
-                OnsetSupportsPickInBand(onset, prevOnset, i, pp.pickLo, pp.pickHi,
-                    scale, onsetDeltaScale)) {
-                t *= 0.60f;
-                // アタックがあるなら引き残り比率の制約も免除する
-                uMin = 0.0f; 
+        // ベース倍音のソフト減衰は高音の欠落（低音に食われる）を招くため廃止。
+        // ゴースト除去は IsHarmonicGhostPartial に任せる。
+        // float upperSpec[COUNT];
+        // memcpy(upperSpec, gated, sizeof(upperSpec));
+        // SoftAttenuateBassHarmonics(outPicked, upperSpec, count);
+
+        // ---- 2) 低中 (C3–C4): 弦の支えなど ----
+        // 音数制限を大幅に緩和（実質無制限）
+        PickFundamentalNotesRange(gated, band, count, BASS_END, C4_KEY, 16, pickLowMidRel);
+        CollapseNearbyPicks(blend, band, BASS_END, C4_KEY, 3, false);
+        MergeBandPicks(outPicked, band, BASS_END, C4_KEY);
+
+        // ---- 3) メロディ帯 C4–C6: 枠を多め・閾値緩め（ピアノ本命）----
+        PickFundamentalNotesRange(gated, band, count, C4_KEY, O5_HI, 24, pickMelodyRel);
+        // 帯域内 salience で取れなかったアタックを onset で救出（ゴースト形は除外）
+        if (onset && prevOnset) {
+            for (int i = C4_KEY; i < O5_HI; ++i) {
+                if (band[i]) continue;
+                if (gated[i] < AbsFloorForKey(i, absNoiseFloor) * 1.5f) continue;
+                if (!IsStrictLocalPeak(gated, i, C4_KEY, O5_HI)) continue;
+                if (PianoKey::IsHarmonicGhostPartial(blend, i, count, BASS_END)) continue;
+                if (OnsetSupportsPickInBand(onset, prevOnset, i, C4_KEY, O5_HI, scale, onsetDeltaScale))
+                    band[i] = true;
             }
-            pp.salThresh[i] = t;
-            pp.unexplainedMin[i] = uMin;
+        }
+        CollapseNearbyPicks(blend, band, C4_KEY, O5_HI, 2, false);
+        MergeBandPicks(outPicked, band, C4_KEY, O5_HI);
+
+        // ---- 4) 高音 C6–C7: 控えめ ----
+        PickFundamentalNotesRange(gated, band, count, O5_HI, EDGE_HI, 16, pickTreRel);
+        for (int i = O5_HI; i < EDGE_HI; ++i) {
+            if (!band[i]) continue;
+            if (PianoKey::IsHarmonicGhostPartial(blend, i, count, BASS_END) &&
+                !PianoKey::HasOwnOvertoneSupport(blend, i, count, 0.18f))
+                band[i] = false;
+        }
+        MergeBandPicks(outPicked, band, O5_HI, EDGE_HI);
+
+        // ---- 5) 最高音 C7–B7: 通常曲の高音メロディ/装飾を拾う ----
+        if (EDGE_HI < count) {
+            PickFundamentalNotesRange(gated, band, count, EDGE_HI, count, 16, pickTreRel);
+            for (int i = EDGE_HI; i < count; ++i) {
+                if (!band[i]) continue;
+                if (PianoKey::IsHarmonicGhostPartial(blend, i, count, BASS_END) &&
+                    !PianoKey::HasOwnOvertoneSupport(blend, i, count, 0.18f))
+                    band[i] = false;
+            }
+            MergeBandPicks(outPicked, band, EDGE_HI, count);
         }
 
-        PianoRollSalience::PickIterative(amp, absFloorAmp, outPicked, count, pp);
+        // ---- 全域倍音ふるい（パルス波/矩形波対策）----
+        // PSG 等のパルス波は全整数次倍音を含むため、各倍音自身も倍音列(2f,3f…)を
+        // 持ち、HasOwnOvertoneSupport 等で「独立音」に誤判定されて残る。帯域別ピック
+        // では取り切れないので、最後に全域で「より強い確定音の整数倍音位置にある
+        // 弱いピック」を剪定する。高い方から見て、より強い下位ピック j の n:1 倍音に
+        // あたる i を落とす。独立音級(親に肉薄する強さ)は残す。
+        // n は h2〜h8 まで。24次まで広げるとベースの 15〜20 次としてメロディを落とす。
+        // メロディ帯(C4–C6)はピアノのオクターブ重ねを守るため、明確に弱い倍音のみ対象。
+        for (int i = count - 1; i > EDGE_LO; --i) {
+            if (!outPicked[i]) continue;
+            const bool inMelody = (i >= C4_KEY && i < O5_HI);
+            const float harmMaxRatio = inMelody ? 0.60f : 0.92f;
+            for (int j = i - 1; j >= EDGE_LO; --j) {
+                if (!outPicked[j]) continue;
+                if (blend[j] <= blend[i]) continue;                 // 親はより強い方のみ
+                if (blend[i] > blend[j] * harmMaxRatio) continue;   // 独立音級は残す
+                if (PianoKey::IsHarmonicPairCompute(i, j, PianoKey::kGhostHarmonicNMax)) {
+                    outPicked[i] = false;
+                    break;
+                }
+            }
+        }
 
-        // 低音は半音分解能が足りないので、またぎが残っていれば強い方1本にする。
-        // （PickIterative 側でも隣接は塞いでいるが、範囲指定が違うので保険）
+        // 最後にもう一度低音隣接を潰す（帯域マージ後の漏れ）
         ForceUniqueBassAdjacents(blend, outPicked, EDGE_LO, BASS_END);
-        // ここで全域 RefineToLocalPeaks は掛けない。あれは「隣り合って採られた
-        // 2音のうち弱いほうを消す」ので、中高音の半音和音（短2度）が必ず片方
-        // 落ちる。しかも判定材料が減算前の blend なので、ベース倍音に覆われて
-        // いた実音を採れるようにした今の採択と噛み合わない。局所ピーク性は
-        // PickIterative が残差スペクトル上で毎回確認している。
+        // 全域 RefineToLocalPeaks は中高音の半音和音（短2度）を落とすため廃止。
+        // 各帯域の PickFundamentalNotesRange 内で isPeak 判定を行っているため不要。
     }
 }

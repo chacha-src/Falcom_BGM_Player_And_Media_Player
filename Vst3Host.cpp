@@ -1,4 +1,6 @@
-﻿#include "stdafx.h"
+// Shared by ogg.exe and KpiHost64.exe (via Vst3Host_k64.cpp). Keep it that
+// way: a second copy under KpiHost64 is how x64 plug-in fixes get lost.
+#include "stdafx.h"
 #include "Vst3Host.h"
 
 #include "pluginterfaces/base/ipluginbase.h"
@@ -588,6 +590,37 @@ typedef IPluginFactory* (PLUGIN_API *GetFactoryProc)();
 typedef bool (PLUGIN_API *InitDllProc)();
 typedef bool (PLUGIN_API *ExitDllProc)();
 
+// Makes the plug-in's own folder both the current directory and a DLL search
+// location for as long as it is being loaded, then puts everything back. RAII
+// because Vst3Open bails out from a dozen places.
+class ScopedPluginDir {
+public:
+	explicit ScopedPluginDir(const wchar_t* modulePath) : cookie(0)
+	{
+		prevCwd[0] = 0;
+		dir[0] = 0;
+		if (!modulePath) return;
+		wcsncpy_s(dir, modulePath, _TRUNCATE);
+		wchar_t* slash = wcsrchr(dir, L'\\');
+		if (!slash) { dir[0] = 0; return; }
+		*slash = 0;
+		GetCurrentDirectoryW(_countof(prevCwd), prevCwd);
+		SetCurrentDirectoryW(dir);
+		cookie = AddDllDirectory(dir);
+	}
+	~ScopedPluginDir()
+	{
+		if (prevCwd[0]) SetCurrentDirectoryW(prevCwd);
+		if (cookie) RemoveDllDirectory(cookie);
+	}
+private:
+	ScopedPluginDir(const ScopedPluginDir&);
+	ScopedPluginDir& operator=(const ScopedPluginDir&);
+	wchar_t dir[1024];
+	wchar_t prevCwd[MAX_PATH];
+	DLL_DIRECTORY_COOKIE cookie;
+};
+
 } // namespace Vst3Detail
 
 struct Vst3Inst {
@@ -711,6 +744,11 @@ Vst3Inst* Vst3Open(const wchar_t* vst3PathOrDll)
 	using namespace Vst3Detail;
 	wchar_t modulePath[1024] = {};
 	if (!ResolveModulePath(vst3PathOrDll, modulePath, 1024)) return NULL;
+
+	// Instruments that pull sample content or a companion DLL by relative path
+	// during initialize() find nothing when the current directory belongs to
+	// the host, and then play silence without reporting an error.
+	ScopedPluginDir plugDir(modulePath);
 
 	Vst3Inst* v = new (std::nothrow) Vst3Inst;
 	if (!v) return NULL;
@@ -1146,7 +1184,7 @@ void Vst3Process(Vst3Inst* v, float* outL, float* outR, int frames)
 		}
 		v->pending.count = keep;
 
-		float zin[2][VST3_BLOCK];
+		__declspec(align(32)) float zin[2][VST3_BLOCK];
 		ZeroMemory(zin, sizeof(zin));
 		float* inCh[2] = { zin[0], zin[1] };
 		AudioBusBuffers input = {};
@@ -1154,7 +1192,7 @@ void Vst3Process(Vst3Inst* v, float* outL, float* outR, int frames)
 		input.silenceFlags = 3;
 		input.channelBuffers32 = inCh;
 
-		float dump[16][VST3_BLOCK];
+		__declspec(align(32)) float dump[16][VST3_BLOCK];
 		ZeroMemory(dump, sizeof(dump));
 		int nch = v->bus0Channels > 0 ? v->bus0Channels : 2;
 		if (nch > 16) nch = 16;

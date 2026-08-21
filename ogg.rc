@@ -1,4 +1,4 @@
-﻿// Microsoft Visual C++ generated resource script.
+// Microsoft Visual C++ generated resource script.
 //
 #pragma code_page(65001)
 
@@ -78,8 +78,6 @@ IDR_UP                  ICON                    "res\\idr_down.ico"
 IDR_DOWN                ICON                    "res\\idr_sdow.ico"
 
 IDR_SDOWN               ICON                    "res\\idr_up1.ico"
-IDR_SASAMI_GS           RCDATA                  "res\\SASAMI_GS.DAT"
-IDR_SASAMI_XG           RCDATA                  "res\\SASAMI_XG.DAT"
 
 IDI_ICON1               ICON                    "res\\ico00002.ico"
 
@@ -94,6 +92,16 @@ IDI_T2                  ICON                    "res\\icon5.ico"
 IDI_T3                  ICON                    "res\\ico00003.ico"
 
 IDI_T4                  ICON                    "res\\ico00004.ico"
+
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// RCDATA
+//
+
+IDR_SASAMI_GS           RCDATA                  "res\\SASAMI_GS.DAT"
+
+IDR_SASAMI_XG           RCDATA                  "res\\SASAMI_XG.DAT"
 
 
 /////////////////////////////////////////////////////////////////////////////
@@ -753,7 +761,7 @@ BEGIN
     PUSHBUTTON      "",IDC_MP_UP,450,192,16,12,BS_ICON | BS_FLAT
     PUSHBUTTON      "",IDC_MP_DOWN,468,192,16,12,BS_ICON | BS_FLAT
     PUSHBUTTON      "",IDC_MP_LSDOWN,486,192,16,12,BS_ICON | BS_FLAT
-    PUSHBUTTON      "曲削除",IDC_MP_ITEMDEL,520,192,40,12
+    PUSHBUTTON      "曲削除",IDC_MP_ITEMDEL,390,192,40,12
     CONTROL         "",IDC_MP_LIST,"SysListView32",LVS_REPORT | LVS_SHOWSELALWAYS | LVS_ALIGNLEFT | LVS_OWNERDATA | WS_BORDER | WS_TABSTOP,195,208,278,106
     PUSHBUTTON      "ファルコム特化型へ",IDC_MP_SWITCHMODE,7,318,90,12
     PUSHBUTTON      "保存リセット",IDC_MP_RESETDATA,100,318,80,12
@@ -2190,7 +2198,7 @@ END
 //
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 0,9,1,831
+ FILEVERSION 0,9,1,833
  PRODUCTVERSION 1,0,0,1
  FILEFLAGSMASK 0x3fL
 #ifdef _DEBUG
@@ -2208,10 +2216,10 @@ BEGIN
         BEGIN
             VALUE "Comments", "Falcom BGM Player & Media Player"
             VALUE "CompanyName", "Pre Prayer Power Soft"
-            VALUE "FileDescription", "Falcom BGM Player & Media Player Ver 0.9a Rel.2026.08.20"
-            VALUE "FileVersion", "0.9.1.831"
+            VALUE "FileDescription", "Falcom BGM Player & Media Player Ver 0.9a Rel.2026.08.21"
+            VALUE "FileVersion", "0.9.1.833"
             VALUE "InternalName", "ogg YS/ED bgm"
-            VALUE "LegalCopyright", "Copyright (C) 2026.08.20"
+            VALUE "LegalCopyright", "Copyright (C) 2026.08.21"
             VALUE "LegalTrademarks", "Pre Prayer Power Soft"
             VALUE "OriginalFilename", "oggYSEDbgm_uni_avx2.exe"
             VALUE "ProductName", "Falcom BGM Player & Media Player"

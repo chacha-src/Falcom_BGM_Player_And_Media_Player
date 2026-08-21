@@ -1258,8 +1258,6 @@ int wmain(int argc, wchar_t** argv)
 {
 	(void)argc; (void)argv;
 
-	SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_DEFAULT_DIRS | LOAD_LIBRARY_SEARCH_USER_DIRS);
-
 	HANDLE pipe = CreateNamedPipeW(
 		KPIHOST64_PIPE_NAME,
 		PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED,

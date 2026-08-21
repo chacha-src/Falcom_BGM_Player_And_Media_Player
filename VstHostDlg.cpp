@@ -1,4 +1,4 @@
-﻿#include "stdafx.h"
+#include "stdafx.h"
 #include "ogg.h"
 #include "VstHostDlg.h"
 #include "VstMidiEngine.h"
@@ -648,6 +648,7 @@ LRESULT CVstWireCtrl::OnPrintClient(WPARAM wp, LPARAM)
 
 void CVstWireCtrl::OnLButtonDown(UINT flags, CPoint pt)
 {
+	if (m_owner) m_owner->SetFocus();
 	int btn = -1;
 	const int bslot = HitSlotBtn(pt, &btn);
 	if (bslot >= 0) {
@@ -832,6 +833,7 @@ void CVstWireCtrl::ShowSlotMenu(int slot, CPoint screenPt)
 
 void CVstWireCtrl::OnRButtonUp(UINT, CPoint pt)
 {
+	if (m_owner) m_owner->SetFocus();
 	const int slot = HitSlot(pt);
 	if (slot >= 0 && m_slots[slot] >= 0) {
 		CPoint at = pt;
@@ -917,6 +919,7 @@ BEGIN_MESSAGE_MAP(CVstHostDlg, CCustomBlurDialogBase)
 	ON_WM_DESTROY()
 	ON_WM_TIMER()
 	ON_WM_ACTIVATE()
+	ON_WM_LBUTTONDOWN()
 END_MESSAGE_MAP()
 
 BOOL CVstHostDlg::OnInitDialog()
@@ -1118,6 +1121,12 @@ void CVstHostDlg::OnActivate(UINT nState, CWnd* pWndOther, BOOL bMinimized)
 	if (nState == WA_INACTIVE) PcKeyReleaseAll();
 }
 
+void CVstHostDlg::OnLButtonDown(UINT nFlags, CPoint point)
+{
+	SetFocus();
+	CCustomBlurDialogBase::OnLButtonDown(nFlags, point);
+}
+
 void CVstHostDlg::LayoutHelpBtn() { CCC_CaptionPlaceHelpBtn(m_hWnd, &m_help); }
 
 void CVstHostDlg::LayoutChildren(int cx, int cy)
@@ -1223,14 +1232,32 @@ void CVstHostDlg::RebuildPluginList()
 	CString filter;
 	m_pluginFilter.GetWindowText(filter); filter.MakeLower();
 	if (m_pluginFilter.GetCurSel() == 0) filter.Empty();
+
+	// A plug-in that stayed silent although it should have been ready to play is
+	// a broken install, and offering it only wastes the user's time. Samplers
+	// that are merely waiting for a patch stay listed. If the probe never ran at
+	// all, listing nothing would be worse than listing unproven entries.
+	int audibleKnown = 0;
+	for (int i = 0; i < VstScanGetCount(); ++i) {
+		const VstPluginInfo* pi = VstScanGet(i);
+		if (pi && pi->isInstrument && pi->isLiveOk && pi->isAudible) {
+			audibleKnown = 1;
+			break;
+		}
+	}
+
 	CString names[100]; int indices[100]; int count = 0;
 	for (int i = 0; i < VstScanGetCount() && count < 100; ++i) {
 		const VstPluginInfo* pi = VstScanGet(i);
 		if (!pi || !pi->isInstrument || !pi->isLiveOk) continue;
+		if (audibleKnown && pi->isAudible == 0) continue;
 		CString n(pi->name), low(n); low.MakeLower();
 		if (!filter.IsEmpty() && low.Find(filter) < 0) continue;
 		names[count] = n;
 		if (pi->isMultiTimbral) names[count] = CString(L"[M] ") + n;
+		// Loads and takes notes, but needs a patch picked in its own browser
+		// before anything is heard.
+		if (pi->isAudible == 2) names[count] += L" (音色選択)";
 		indices[count] = i; count++;
 	}
 	m_wire.SetPlugins(names, indices, count);
