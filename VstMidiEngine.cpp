@@ -3899,6 +3899,17 @@ static int TryLoadAudible(const wchar_t* path, int* outReset, int* outMilli)
 	if (!TryLoadPluginPath(path, 0)) return 0;
 	const int reset = ResetModeForPath(path);
 	SendGmGsReset(g_eng.effect, g_eng.vst3, reset);
+
+	/* プラグインがリセット処理を終えるのを待つ */
+	if (g_eng.effect || g_eng.vst3) {
+		for (int i = 0; i < 12; ++i) {
+			__declspec(align(32)) float l[BLOCK_FRAMES] = {};
+			__declspec(align(32)) float r[BLOCK_FRAMES] = {};
+			if (g_eng.vst3) Vst3Process(g_eng.vst3, l, r, BLOCK_FRAMES);
+			else if (g_eng.effect) RenderEffect(g_eng.effect, l, r, BLOCK_FRAMES);
+		}
+	}
+
 	int milli = 0;
 	const int ok = ProbeEngineAudible(&milli);
 	EnsLog(L"song probe %s peak=%d/1000 path=%s",
@@ -4098,6 +4109,18 @@ extern "C" int VstMidiOpen(const wchar_t* midPath,
 	ZeroMemory(g_eng.noteState, sizeof(g_eng.noteState));
 	if (!g_eng.useMapper)
 		ResetSequence();
+
+	/* GM/GS/XGリセット後、プラグイン（特にSC-VAなど）が内部でリセット処理を
+	 * 完了する前にCC/PCを送りつけると無視されてしまうため、少しだけ空レンダリングして
+	 * リセットを消化させる。 */
+	if (g_eng.effect || g_eng.vst3 || g_eng.effectB || g_eng.effectC || g_eng.vst3C || g_eng.useEnsemble) {
+		for (int i = 0; i < 12; ++i) { // 12 * 512 = 6144 frames (~139ms)
+			if (g_eng.useEnsemble)
+				RenderEnsemble(g_eng.outL, g_eng.outR, BLOCK_FRAMES);
+			else
+				RenderSongUnits(BLOCK_FRAMES);
+		}
+	}
 	EnsLog(L"VstMidiOpen pick=[%s] used=[%s] peak=%d/1000 loaded=%d effect=%p "
 		L"vst3=%p mapper=%d hasOut=%d reset=%d gs=[%s] xg=[%s]",
 		pickDll[0] ? pickDll : L"(none)",
