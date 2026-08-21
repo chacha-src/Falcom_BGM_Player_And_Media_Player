@@ -4,6 +4,7 @@
 #include "PlayList.h"
 #include "oggDlg.h"
 #include "AudioUpscaler.h"
+#include "VstMidiEngine.h"
 #include <math.h>
 #include <mutex>
 
@@ -18,6 +19,8 @@ volatile LONG g_xfPromotePlIndex = -1;
 volatile LONG g_xfSuppressRestart = 0;
 volatile LONG g_xfStartPosted = 0;
 volatile LONG g_xfWantStart = 0;
+volatile LONG g_xfPrepared = 0;
+volatile LONG g_xfCancelMpFade = 0;
 
 int g_openDecoderModeSlot[XF_SLOTS] = { INT_MIN, INT_MIN };
 int g_xfSrcRate[XF_SLOTS] = { 0, 0 };
@@ -226,6 +229,52 @@ __int64 XfTrackEndRefBytes(__int64 endWrittenBytes)
 	return 0;
 }
 
+/* VST MIDI の曲長は「最終イベント + 2 秒」。この 2 秒は残響を鳴らし切るための
+ * 余白で、音楽としてはもう終わっている。ここを含めた終端で窓を取ると
+ * フェード後半は A が居ない状態で B だけが上がり、クロスの末尾と B の頭がずれる。 */
+__int64 XfTailPadBytes()
+{
+	if (!InterlockedCompareExchange(&g_xfInProgress, 0, 0)) {
+		extern int g_openDecoderMode;
+		if (g_openDecoderMode == MODE_VST_MIDI) {
+			MmBindVstActiveSlot();
+			const double sec = VstMidiTailPadSec();
+			if (sec <= 0.0)
+				return 0;
+			const int bpf = XfDsOutBpf();
+			const int rate = XfDsOutRate();
+			if (bpf > 0 && rate > 0)
+				return (__int64)(sec * (double)rate + 0.5) * (__int64)bpf;
+		}
+		return 0;
+	}
+	
+	const int s = XfActiveSlot();
+	if (g_openDecoderModeSlot[s] == MODE_VST_MIDI) {
+		MmBindVstActiveSlot();
+		const double sec = VstMidiTailPadSec();
+		if (sec <= 0.0)
+			return 0;
+		const int bpf = XfDsOutBpf();
+		const int rate = XfDsOutRate();
+		if (bpf > 0 && rate > 0)
+			return (__int64)(sec * (double)rate + 0.5) * (__int64)bpf;
+	}
+	return 0;
+}
+
+__int64 XfFadeEndRefBytes(__int64 endWrittenBytes)
+{
+	const __int64 endRef = XfTrackEndRefBytes(endWrittenBytes);
+	if (endRef <= 0)
+		return endRef;
+	const __int64 pad = XfTailPadBytes();
+	/* 余白しか無いような短い曲では引かない */
+	if (pad > 0 && endRef > pad * 2)
+		return endRef - pad;
+	return endRef;
+}
+
 double XfSecFromSave()
 {
 	int c = savedata.play_xfade_sec100;
@@ -336,6 +385,7 @@ void XfResetAll()
 	InterlockedExchange(&g_xfSuppressRestart, 0);
 	InterlockedExchange(&g_xfStartPosted, 0);
 	InterlockedExchange(&g_xfWantStart, 0);
+	InterlockedExchange(&g_xfPrepared, 0);
 	g_xfFadeTotalFrames = 0;
 	g_xfFadePos = 0;
 	for (int i = 0; i < XF_SLOTS; ++i) {
@@ -448,6 +498,7 @@ void XfOnCrossfadeFinished()
 	XfCloseSlotDecoders(oldSlot);
 	InterlockedExchange(&g_xfSlot, newSlot);
 	InterlockedExchange(&g_xfInProgress, 0);
+	InterlockedExchange(&g_xfPrepared, 0);
 	InterlockedExchange(&g_xfSecSlot, XfOtherSlot(newSlot));
 	g_xfFadePos = 0;
 	g_xfFadeTotalFrames = 0;
@@ -474,12 +525,18 @@ void XfOnCrossfadeFinished()
 
 void XfAbortCrossfade()
 {
-	if (!InterlockedCompareExchange(&g_xfInProgress, 0, 0))
-		return;
 	const int cur = XfActiveSlot();
 	const int sec = (int)InterlockedCompareExchange(&g_xfSecSlot, 0, 0);
-	XfCloseSlotDecoders(sec);
+	const int had = InterlockedCompareExchange(&g_xfInProgress, 0, 0)
+		|| InterlockedCompareExchange(&g_xfPrepared, 0, 0);
+	if (!had)
+		return;
+	/* 先読みスレッドがまだ B を開いている間は閉じない（cl2 を持つ呼び出し元がいるので待てない。
+	 * 開き終わった側が中止フラグを見て自分で破棄する） */
+	if (XfPreloadCancel(0))
+		XfCloseSlotDecoders(sec);
 	InterlockedExchange(&g_xfInProgress, 0);
+	InterlockedExchange(&g_xfPrepared, 0);
 	InterlockedExchange(&g_xfPromotePlIndex, -1);
 	InterlockedExchange(&g_xfWantStart, 0);
 	g_xfFadePos = 0;
@@ -508,6 +565,17 @@ int XfFindNextAudioPlIndex(int fromInclusive)
 	for (int guard = 0; guard < n; ++guard) {
 		if (!pl->pc)
 			return -1;
+		/* 未再生の .mid は DirectShow(-2) のまま残る。動画と誤判定して飛ばすと
+		 * MIDI が丸ごと候補から外れ、ずっと後ろの曲がクロスフェードで上がってくる。
+		 * 再生時と同じ振り直しを先に行って本来のモードにする。
+		 * 振り直しても -2 のまま（VST も KPI も無い）なら毎回引き直さない。 */
+		static int s_midiFixFailIdx = -1;
+		if (pl->pc[i].sub == -2 && i != s_midiFixFailIdx &&
+			(VstIsMidiExt(pl->pc[i].fol) || VstIsProjectExt(pl->pc[i].fol))) {
+			pl->FixMidiMode(pl->pc[i]);
+			if (pl->pc[i].sub == -2)
+				s_midiFixFailIdx = i;
+		}
 		const int sub = pl->pc[i].sub;
 		CString fol = pl->pc[i].fol;
 		fol.MakeLower();
@@ -545,7 +613,7 @@ int XfShouldStartEarly(__int64 /*heardBytes*/, __int64 endWrittenBytes)
 	const int s = XfActiveSlot();
 	if (endflg_arr[s])
 		return 0;
-	const __int64 endRef = XfTrackEndRefBytes(endWrittenBytes);
+	const __int64 endRef = XfFadeEndRefBytes(endWrittenBytes);
 	if (endRef <= 0)
 		return 0;
 	const __int64 xfBytes = XfCrossfadeWindowBytes();
