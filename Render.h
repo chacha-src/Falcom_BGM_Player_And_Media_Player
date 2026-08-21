@@ -168,6 +168,7 @@ public:
 	afx_msg void OnVstMultiBrowse();
 	afx_msg void OnVstScanNow();
 	void FillVstMultiCombo();
+	void LayoutMidiVstRows();
 	CCustomComboBox m_speaker;
 	afx_msg void OnCbnSelchangeSpeaker();
 	afx_msg void OnBnClickedCheckUpscale();

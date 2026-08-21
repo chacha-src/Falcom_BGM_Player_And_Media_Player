@@ -741,6 +741,7 @@ BOOL CRender::OnInitDialog()
 	m_vstExtraPath.SetWindowText(savedata.vstExtraPath);
 	m_vstMultiDll.SetWindowText(savedata.vstMultiDll);
 	FillVstMultiCombo();
+	LayoutMidiVstRows();
 	m_speaker.ResetContent();
 	m_speaker.AddString(LL14(L"ステレオ (2ch)", L"Stereo (2ch)", L"Stéréo (2ch)", L"Stereo (2ch)", L"Estéreo (2ch)", L"스테레오 (2ch)", L"立体声 (2ch)", L"ستيريو (2ch)", L"Стерео (2ch)", L"Stereo (2ch)", L"Estéreo (2ch)", L"Stereo (2ch)", L"Stereo (2ch)", L"Stereo (2ch)"));
 	m_speaker.AddString(LL14(L"2.1ch (L+R+LFE)", L"2.1ch (L+R+LFE)", L"2,1ch (G+D+LFE)", L"2.1ch (L+R+LFE)", L"2.1ch (L+R+LFE)", L"2.1ch (L+R+LFE)", L"2.1ch (左+右+低音)", L"2.1ش (يسار+يمين+باس)", L"2.1ch (L+R+LFE)", L"2.1ch (L+R+LFE)", L"2.1ch (L+R+LFE)", L"2.1ch (L+R+LFE)", L"2.1ch (L+R+LFE)", L"2.1ch (L+R+LFE)"));
@@ -1351,6 +1352,44 @@ void CRender::OnMidPreferVst()
 	savedata.midPlayPrefer = 1;
 	m_midPreferKpi.SetCheck(BST_UNCHECKED);
 	m_midPreferVst.SetCheck(BST_CHECKED);
+}
+
+void CRender::LayoutMidiVstRows()
+{
+	if (!m_vstMultiCombo.GetSafeHwnd() || !m_vstScanNow.GetSafeHwnd())
+		return;
+	CRect combo, scan;
+	m_vstMultiCombo.GetWindowRect(&combo);
+	ScreenToClient(&combo);
+	m_vstScanNow.GetWindowRect(&scan);
+	ScreenToClient(&scan);
+	const int fieldL = combo.left;
+	const int fieldW = combo.Width();
+	const int btnL = scan.left;
+	const int btnW = scan.Width();
+	if (fieldW < 8 || btnW < 8)
+		return;
+
+	int comboH = combo.Height();
+	int btnH = scan.Height();
+	if (comboH > btnH * 3)
+		comboH = btnH;
+	m_vstScanNow.SetWindowPos(NULL, btnL, combo.top, btnW, comboH,
+		SWP_NOZORDER | SWP_NOACTIVATE);
+
+	CWnd* fields[2] = { &m_vstExtraPath, &m_vstMultiDll };
+	CWnd* btns[2] = { &m_vstExtraBrowse, &m_vstMultiBrowse };
+	for (int i = 0; i < 2; ++i) {
+		if (!fields[i]->GetSafeHwnd() || !btns[i]->GetSafeHwnd())
+			continue;
+		CRect fr;
+		fields[i]->GetWindowRect(&fr);
+		ScreenToClient(&fr);
+		fields[i]->SetWindowPos(NULL, fieldL, fr.top, fieldW, fr.Height(),
+			SWP_NOZORDER | SWP_NOACTIVATE);
+		btns[i]->SetWindowPos(NULL, btnL, fr.top, btnW, fr.Height(),
+			SWP_NOZORDER | SWP_NOACTIVATE);
+	}
 }
 
 void CRender::FillVstMultiCombo()
