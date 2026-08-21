@@ -711,6 +711,7 @@ static void SetOpenDecoderMode(int m)
 
 void ReleaseOggVorbis(char** pOggBuf);
 void XfCloseSlotDecodersImpl(int slot); /* 定義は adbuf2_arr 宣言後 */
+static void CloseVstMidiSessionSlot(int slot);
 
 int XfStartCrossfadeFromNotify(); /* 定義は mode/filen 宣言後 — int 戻り */
 static void XfSaveUiMetaFromGlobals(int slot);
@@ -2582,6 +2583,9 @@ void XfCloseSlotDecodersImpl(int slot)
 		opus_arr[slot].Close(og->kmp);
 		og->kmp = NULL;
 	}
+	else if (m == MODE_VST_MIDI) {
+		CloseVstMidiSessionSlot(slot);
+	}
 	if (ogg_arr[slot]) {
 		ReleaseOggVorbis(&ogg_arr[slot]);
 		ogg_arr[slot] = NULL;
@@ -3286,21 +3290,53 @@ IKpiDecoder* kpidec = NULL;
 bool g_kpiRemote = false;
 int g_kpiPlaybackArch = 0;   // 0=不明 32=x86 64=x64（再生中の KPI arch 表示用）
 KpiHost64Client g_kpiHost;
-static int g_vstRemote64 = 0; // 1=x64 VST MIDI via KpiHost64 (SC-VA 等)
+static int g_vstRemote64Slot[2] = { 0, 0 }; // 1=x64 VST MIDI via KpiHost64 (SC-VA 等)
 
-void VstPrefetchStart(int rate, int channels, int bits);
-void VstPrefetchStop();
+void VstPrefetchStart(int slot, int rate, int channels, int bits, int prefill, double seconds = 0.0);
+void VstPrefetchStop(int slot);
+void VstPrefetchStopAll();
+
+static int VstBindIoSlot()
+{
+	int s = XfDecSlot();
+	if (s < 0 || s >= XF_SLOTS) s = 0;
+	VstMidiSetIoSlot(s);
+	return s;
+}
+
+static int VstRemoteNow()
+{
+	const int s = VstBindIoSlot();
+	return g_vstRemote64Slot[s];
+}
+
+static void CloseVstMidiSessionSlot(int slot)
+{
+	if (slot < 0 || slot >= XF_SLOTS) slot = 0;
+	VstMidiSetIoSlot(slot);
+	if (g_vstRemote64Slot[slot]) {
+		VstPrefetchStop(slot);
+		g_kpiHost.VstClose((uint32_t)slot);
+		g_vstRemote64Slot[slot] = 0;
+		VstMidiSetReportedLatencySamples(0);
+	} else {
+		VstMidiCloseSlot(slot);
+	}
+}
+
+/* UI(MIDIモニタ等)から現行スロットのエンジンを見るためのバインド */
+void MmBindVstActiveSlot()
+{
+	int s = XfActiveSlot();
+	if (s < 0 || s >= XF_SLOTS) s = 0;
+	VstMidiSetIoSlot(s);
+}
 
 static void CloseVstMidiSession()
 {
-	if (g_vstRemote64) {
-		VstPrefetchStop();
-		g_kpiHost.VstClose();
-		g_vstRemote64 = 0;
-		VstMidiSetReportedLatencySamples(0);
-	} else {
-		VstMidiClose();
-	}
+	VstPrefetchStopAll();
+	CloseVstMidiSessionSlot(0);
+	CloseVstMidiSessionSlot(1);
 }
 
 static HWND ShowVstWaitPopup(HWND owner)
@@ -4321,8 +4357,56 @@ int current_section;
 long whsize;
 int ret2;
 
-/* 戻り値: 1=クロスフェード開始成功 0=失敗（呼び出し側はレガシー次曲へ） */
-int XfStartCrossfadeFromNotify()
+/* 次曲が VST MIDI のとき、指定秒より十分前に B を開き始めるか判定 */
+int XfShouldPreloadNext()
+{
+	if (!XfEnabled())
+		return 0;
+	if (InterlockedCompareExchange(&g_xfInProgress, 0, 0))
+		return 0;
+	if (InterlockedCompareExchange(&g_xfOpening, 0, 0))
+		return 0;
+	if (InterlockedCompareExchange(&g_xfPrepared, 0, 0))
+		return 0;
+	extern ULONGLONG g_seekUiHoldUntil;
+	if (g_seekUiHoldUntil != 0 && GetTickCount64() < g_seekUiHoldUntil)
+		return 0;
+	extern BOOL sek;
+	extern int sek4;
+	if (sek || sek4)
+		return 0;
+	if (!pl || !pl->pc || pl->playcnt <= 0)
+		return 0;
+	int nextIdx = PlaylistResolveNextIndex(0, 0);
+	if (nextIdx < 0) return 0;
+	nextIdx = XfFindNextAudioPlIndex(nextIdx);
+	if (nextIdx < 0) return 0;
+	if (pl->pc[nextIdx].sub != MODE_VST_MIDI)
+		return 0;
+	const __int64 endRef = XfTrackEndRefBytes(g_endWrittenBytes);
+	if (endRef <= 0)
+		return 0;
+	const __int64 xfBytes = XfCrossfadeWindowBytes();
+	if (xfBytes <= 0)
+		return 0;
+	const int bpf = XfDsOutBpf();
+	const int sr = XfDsOutRate();
+	/* VST(SC-VA 等)の Open はプラグイン走査込みで数十秒かかることがある */
+	__int64 loadBytes = xfBytes;
+	if (bpf > 0 && sr > 0)
+		loadBytes = (__int64)(45.0 * (double)sr + 0.5) * (__int64)bpf;
+	if (loadBytes < xfBytes)
+		loadBytes = xfBytes;
+	const __int64 startAt = XfFadeEndRefBytes(g_endWrittenBytes) - xfBytes - loadBytes;
+	const __int64 pos = XfPlayPosBytes();
+	if (pos <= 0)
+		return 0;
+	if (startAt <= 0)
+		return 1;
+	return (pos >= startAt && pos < endRef) ? 1 : 0;
+}
+
+static int XfOpenNextSlotForCrossfade(int* outCur, int* outNxt)
 {
 	if (!og || !pl || !XfEnabled())
 		return 0;
@@ -4344,6 +4428,8 @@ int XfStartCrossfadeFromNotify()
 
 	const int cur = XfActiveSlot();
 	const int nxt = XfOtherSlot(cur);
+	if (outCur) *outCur = cur;
+	if (outNxt) *outNxt = nxt;
 
 	extern std::mutex cl2;
 	extern __int64 g_endWrittenBytes;
@@ -4362,6 +4448,7 @@ int XfStartCrossfadeFromNotify()
 		InterlockedExchange(&g_xfOpenSlot, nxt);
 		InterlockedExchange(&g_xfSecSlot, nxt);
 		InterlockedExchange(&g_xfPromotePlIndex, nextIdx);
+		InterlockedExchange(&g_xfOpenThreadId, (LONG)GetCurrentThreadId());
 		InterlockedExchange(&g_xfOpening, 1);
 	}
 
@@ -4391,38 +4478,193 @@ int XfStartCrossfadeFromNotify()
 			g_pcm_upscale_active = g_audioUpscalerArr[cur].IsActive() ? 1 : 0;
 			return 0;
 		}
-
-		/* オープン中も A は作業用で進んでいる。配列へ追いつかせてからミックス。 */
 		XfSaveSlotDecodeState(cur);
 		InterlockedExchange(&g_xfFillSlot, cur);
 		XfCaptureGlobalsToSlot(cur);
 		InterlockedExchange(&g_xfFillSlot, -1);
-		{
-			extern int g_pcm_upscale_active;
-			g_pcm_upscale_active = g_audioUpscalerArr[cur].IsActive() ? 1 : 0;
-		}
-
-		const double sec = XfSecFromSave();
-		const int rate = XfDsOutRate();
-		g_xfFadeTotalFrames = (__int64)(sec * (double)rate + 0.5);
-		if (g_xfFadeTotalFrames < 1)
-			g_xfFadeTotalFrames = 1;
-		g_xfFadePos = 0;
-		fade_arr[cur] = 1.0f;
-		fade1_arr[cur] = 0;
-		endflg_arr[cur] = 0;
-		g_endWrittenBytes = 0;
-		InterlockedExchange(&g_xfInProgress, 1);
+		extern int g_pcm_upscale_active;
+		g_pcm_upscale_active = g_audioUpscalerArr[cur].IsActive() ? 1 : 0;
 	}
-	/* ジャケ先読みは非同期（UI を塞いで A がまごつかないように） */
 	if (og && ::IsWindow(og->GetSafeHwnd()))
 		og->PostMessage(WM_APP + 93, (WPARAM)nxt, 0);
-	/* SoftOpen 直後の SyncFromMain が暗いフェードを載せないよう抑止 */
 	extern ULONGLONG g_xfJacketStableUntil;
 	g_xfJacketStableUntil = GetTickCount64() + 800;
+	return 1;
+}
+
+/* cl2 保持中に呼ぶ（DS 通知スレッドはこのサイクル内でそのまま混合へ入る）。
+ * UI に触る処理は入れない。 */
+void XfBeginMixLocked(int cur)
+{
+	extern __int64 g_endWrittenBytes;
+	const double sec = XfSecFromSave();
+	const int rate = XfDsOutRate();
+	const int bpf = XfDsOutBpf();
+	__int64 total = (__int64)(sec * (double)rate + 0.5);
+	/* フェード長は「A に実際に残っている長さ」に合わせる。指定秒のまま固定すると、
+	 * 開始がサイクル境界で少し遅れた分だけ A が先に尽き、末尾は B だけが上がる
+	 * （= クロス末尾と B の頭が合わない）。 */
+	{
+		const __int64 fadeEnd = XfFadeEndRefBytes(g_endWrittenBytes);
+		const __int64 pos = XfPlayPosBytes();
+		if (fadeEnd > 0 && pos > 0 && bpf > 0) {
+			const __int64 remain = (fadeEnd - pos) / (__int64)bpf;
+			/* 行き過ぎ（境界をまたいだ 1 サイクル分）は吸収し、足りない側は必ず詰める */
+			if (remain > 0 && (remain < total || remain - total <= (__int64)(rate / 4)))
+				total = remain;
+		}
+	}
+	XfSaveSlotDecodeState(cur);
+	InterlockedExchange(&g_xfFillSlot, cur);
+	XfCaptureGlobalsToSlot(cur);
+	InterlockedExchange(&g_xfFillSlot, -1);
+	{
+		extern int g_pcm_upscale_active;
+		g_pcm_upscale_active = g_audioUpscalerArr[cur].IsActive() ? 1 : 0;
+	}
+	g_xfFadeTotalFrames = (total < 1) ? 1 : total;
+	g_xfFadePos = 0;
+	fade_arr[cur] = 1.0f;
+	fade1_arr[cur] = 0;
+	endflg_arr[cur] = 0;
+	g_endWrittenBytes = 0;
+	InterlockedExchange(&g_xfPrepared, 0);
+	InterlockedExchange(&g_xfInProgress, 1);
+	InterlockedExchange(&g_xfCancelMpFade, 1);
+}
+
+void XfMpCancelFadeIfRequested()
+{
+	if (!InterlockedExchange(&g_xfCancelMpFade, 0))
+		return;
 	extern CMediaPlayerDlg* mp;
 	if (mp && ::IsWindow(mp->GetSafeHwnd()))
 		mp->CancelTrackFade();
+}
+
+static void XfBeginMixNow(int cur)
+{
+	extern std::mutex cl2;
+	{
+		std::lock_guard<std::mutex> xfLock(cl2);
+		XfBeginMixLocked(cur);
+	}
+	XfMpCancelFadeIfRequested();
+}
+
+/* 先読み後に中断された B を捨てる。A の再生形式は触らない（グローバルを退避／復元） */
+static void XfDropPreloadedSlot(int slot)
+{
+	if (slot < 0 || slot >= XF_SLOTS)
+		return;
+	extern std::mutex cl2;
+	std::unique_lock<std::mutex> xfLock(cl2);
+	const int saveMode = g_openDecoderMode;
+	const int saveRate = wavbit_sample_Hz;
+	const int saveCh = wavchannel;
+	const int saveBits = wavsam_depth;
+	const int saveMp3 = g_mp3_decoder_bps;
+	HKMP saveKmp = og ? og->kmp : NULL;
+	HKMP saveKmp1 = og ? og->kmp1 : NULL;
+	XfCloseSlotDecoders(slot);
+	g_openDecoderMode = saveMode;
+	wavbit_sample_Hz = saveRate;
+	wavchannel = saveCh;
+	wavsam_depth = saveBits;
+	g_mp3_decoder_bps = saveMp3;
+	if (og) {
+		og->kmp = saveKmp;
+		og->kmp1 = saveKmp1;
+	}
+	InterlockedExchange(&g_xfPromotePlIndex, -1);
+}
+
+/* VST の Open は数秒〜十数秒かかる。UI スレッドで待つと A の再生が終わってしまうので
+ * 専用スレッドで開き、B は再生せずに待機させる。 */
+static volatile LONG g_xfPreloadBusy = 0;
+static volatile LONG g_xfPreloadCancel = 0;
+static HANDLE g_xfPreloadThread = NULL;
+
+static unsigned __stdcall XfPreloadProc(void*)
+{
+	/* VST プラグインは COM を使うものがある（ホスト側で STA を用意する） */
+	const HRESULT hrCo = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
+	int cur = 0, nxt = 0;
+	if (XfOpenNextSlotForCrossfade(&cur, &nxt)) {
+		if (InterlockedCompareExchange(&g_xfPreloadCancel, 0, 0))
+			XfDropPreloadedSlot(nxt);
+		else
+			InterlockedExchange(&g_xfPrepared, 1);
+	}
+	if (SUCCEEDED(hrCo))
+		CoUninitialize();
+	InterlockedExchange(&g_xfPreloadBusy, 0);
+	return 0;
+}
+
+int XfPreloadNextFromNotify()
+{
+	if (InterlockedCompareExchange(&g_xfPrepared, 0, 0))
+		return 1;
+	if (InterlockedCompareExchange(&g_xfPreloadBusy, 1, 0))
+		return 0;
+	InterlockedExchange(&g_xfPreloadCancel, 0);
+	if (g_xfPreloadThread) {
+		CloseHandle(g_xfPreloadThread);
+		g_xfPreloadThread = NULL;
+	}
+	g_xfPreloadThread = (HANDLE)_beginthreadex(NULL, 0, XfPreloadProc, NULL, 0, NULL);
+	if (!g_xfPreloadThread) {
+		InterlockedExchange(&g_xfPreloadBusy, 0);
+		return 0;
+	}
+	return 1;
+}
+
+/* 先読み中の B を捨てる。戻り値 1 = スレッドは停止済み（スロットを閉じても安全） */
+int XfPreloadCancel(int waitMs)
+{
+	if (!InterlockedCompareExchange(&g_xfPreloadBusy, 0, 0)) {
+		if (g_xfPreloadThread) {
+			CloseHandle(g_xfPreloadThread);
+			g_xfPreloadThread = NULL;
+		}
+		InterlockedExchange(&g_xfPreloadCancel, 0);
+		return 1;
+	}
+	InterlockedExchange(&g_xfPreloadCancel, 1);
+	if (waitMs > 0 && g_xfPreloadThread) {
+		if (WaitForSingleObject(g_xfPreloadThread, (DWORD)waitMs) == WAIT_OBJECT_0) {
+			CloseHandle(g_xfPreloadThread);
+			g_xfPreloadThread = NULL;
+			InterlockedExchange(&g_xfPreloadBusy, 0);
+			InterlockedExchange(&g_xfPreloadCancel, 0);
+			return 1;
+		}
+	}
+	return 0;
+}
+
+int XfStartCrossfadeFromNotify()
+{
+	if (!og || !pl || !XfEnabled())
+		return 0;
+	if (InterlockedCompareExchange(&g_xfInProgress, 0, 0))
+		return 0;
+	if (InterlockedCompareExchange(&g_xfOpening, 0, 0))
+		return 0;
+
+	const int cur = XfActiveSlot();
+	if (InterlockedCompareExchange(&g_xfPrepared, 0, 0)
+		&& g_openDecoderModeSlot[XfOtherSlot(cur)] != INT_MIN) {
+		XfBeginMixNow(cur);
+		return 1;
+	}
+
+	int dummyCur = 0, dummyNxt = 0;
+	if (!XfOpenNextSlotForCrossfade(&dummyCur, &dummyNxt))
+		return 0;
+	XfBeginMixNow(dummyCur);
 	return 1;
 }
 
@@ -6328,9 +6570,19 @@ enum { XF_KPI_RING_BYTES = OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3 };
 static SOUNDINFO s_xfSikpi[XF_SLOTS];
 static int s_xfSikpiValid[XF_SLOTS] = { 0, 0 };
 
+/* mid VST の読み出し（readvst）は DS ステージへ直接書き、bufkpi* を一切使わない。
+ * それでも毎サイクル 5 本×リング分を往復コピーすると、A と B を同じサイクルで
+ * デコードするクロスフェード中だけ通知スレッドが重くなる。 */
+static bool XfSlotUsesDecodeRing(int slot)
+{
+	if (slot < 0 || slot >= XF_SLOTS) return true;
+	return g_openDecoderModeSlot[slot] != MODE_VST_MIDI;
+}
+
 void XfSyncSlotDecodeRingSave(int slot)
 {
 	if (slot < 0 || slot >= XF_SLOTS) return;
+	if (!XfSlotUsesDecodeRing(slot)) return;
 	memcpy(bufkpi_arr[slot], bufkpi, XF_KPI_RING_BYTES);
 	memcpy(bufkpi__arr[slot], bufkpi_, XF_KPI_RING_BYTES);
 	memcpy(bufkpi2_arr[slot], bufkpi2, XF_KPI_RING_BYTES);
@@ -6341,6 +6593,7 @@ void XfSyncSlotDecodeRingSave(int slot)
 void XfSyncSlotDecodeRingLoad(int slot)
 {
 	if (slot < 0 || slot >= XF_SLOTS) return;
+	if (!XfSlotUsesDecodeRing(slot)) return;
 	memcpy(bufkpi, bufkpi_arr[slot], XF_KPI_RING_BYTES);
 	memcpy(bufkpi_, bufkpi__arr[slot], XF_KPI_RING_BYTES);
 	memcpy(bufkpi2, bufkpi2_arr[slot], XF_KPI_RING_BYTES);
@@ -6427,9 +6680,13 @@ static void XfSaveUiMetaFromGlobals(int slot)
 	s_xfStitle[slot] = stitle;
 	s_xfUiMode[slot] = mode;
 	int mx = 0;
-	if (og && og->m_time.GetSafeHwnd())
+	/* 別スレッド(先読み)から SendMessage すると cl2 保持中に UI と相互待ちになる */
+	HWND hTime = og ? og->m_time.GetSafeHwnd() : NULL;
+	if (hTime && ::GetWindowThreadProcessId(hTime, NULL) == GetCurrentThreadId())
 		mx = og->m_time.GetMaxValue();
-	s_xfTimeMax[slot] = (mx > 0) ? mx : ((loop3 > 0) ? loop3 : 1);
+	if (mx <= 0)
+		mx = (loop3 > 0) ? loop3 : ((loop2 > 0) ? (loop1 + loop2) : 1);
+	s_xfTimeMax[slot] = mx;
 }
 
 static void XfFillSoundInfoDefaults(SOUNDINFO& si)
@@ -6525,13 +6782,68 @@ static int XfSoftOpenSlot(int slot, const CString& path, int openMode)
 		dsz = loop3v * ((si.dwBitsPerSample >= 8) ? (int)(si.dwBitsPerSample / 4) : 4);
 		timeMax = (loop3v > 0) ? loop3v : 1;
 	}
+	else if (openMode == MODE_VST_MIDI) {
+		wchar_t mid[VST_PATH_CHARS]; mid[0] = 0;
+		wchar_t hints[32][128]; int hc = 0;
+		if (!VstResolvePlayPath(path, mid, VST_PATH_CHARS, hints, 32, &hc))
+			return 0;
+		VstMidiSetIoSlot(slot);
+		CloseVstMidiSessionSlot(slot);
+		int remote = 0;
+		int rate = 44100, ch = 2, bits = 16;
+		int lenSamp = 0;
+#if !defined(_WIN64)
+		wchar_t vstPlug[VST_PATH_CHARS]; vstPlug[0] = 0;
+		if (VstShouldOpenRemote64(mid, vstPlug, VST_PATH_CHARS)) {
+			KPIHOST64_ForeignOpenReply orp{};
+			if (!g_kpiHost.VstOpen(std::wstring(mid), std::wstring(savedata.vstMultiDll),
+				std::wstring(savedata.vstExtraPath), orp, (uint32_t)slot))
+				return 0;
+			remote = 1;
+			rate = (int)orp.sampleRate;
+			ch = (int)orp.channels;
+			bits = orp.bitsPerSample;
+			lenSamp = (int)orp.lengthSamples;
+			VstMidiSetReportedLatencySamples((int)orp.latencySamples);
+		}
+#endif
+		if (!remote) {
+			if (VstMidiOpen(mid, hints, hc, NULL) != 0)
+				return 0;
+			rate = VstMidiGetRate();
+			ch = VstMidiGetChannels();
+			bits = VstMidiGetBits();
+			lenSamp = (int)VstMidiGetLengthSamples();
+		}
+		g_vstRemote64Slot[slot] = remote;
+		if (rate < 8000 || rate > 384000) rate = 44100;
+		if (ch < 1) ch = 2;
+		if (ch > 32) ch = 32;
+		if (!(bits == 8 || bits == 16 || bits == 24 || bits == 32)) bits = 16;
+		/* B は鳴らさず待機するが、リングに冒頭を溜めておけばフェード開始で即出せる */
+		if (remote)
+			VstPrefetchStart(slot, rate, ch, bits, 1);
+		si.dwSamplesPerSec = (DWORD)rate;
+		si.dwChannels = (DWORD)ch;
+		si.dwBitsPerSample = (DWORD)bits;
+		loop3v = lenSamp;
+		timeMax = (loop3v > 0) ? loop3v : 1;
+		const int bps = bits / 8;
+		const __int64 bytesTotal = (__int64)loop3v * (__int64)ch * (__int64)bps;
+		oggsz = dsz = (bytesTotal > 0 && bytesTotal < (__int64)0x7fffffff) ? (int)bytesTotal : 0;
+	}
 	else {
 		return 0;
 	}
 
 	if (si.dwSamplesPerSec < 8000 || si.dwSamplesPerSec > 384000)
 		si.dwSamplesPerSec = 44100;
-	if (si.dwChannels < 1 || si.dwChannels > 8)
+	if (si.dwChannels < 1)
+		si.dwChannels = 2;
+	else if (openMode == MODE_VST_MIDI) {
+		if (si.dwChannels > 32)
+			si.dwChannels = 32;
+	} else if (si.dwChannels > 8)
 		si.dwChannels = 2;
 	int srcBits = (int)si.dwBitsPerSample;
 	if (srcBits < 0)
@@ -11202,6 +11514,10 @@ void COggDlg::play()
 			m_saisai.EnableWindow(TRUE); endflg = 0; return;
 		}
 		CloseVstMidiSession();
+		{
+			const int vstSlot = XfActiveSlot() == 1 ? 1 : 0;
+			VstMidiSetIoSlot(vstSlot);
+		}
 		wchar_t vstPlug[VST_PATH_CHARS]; vstPlug[0] = 0;
 		int vstOk = 0;
 #if !defined(_WIN64)
@@ -11210,9 +11526,10 @@ void COggDlg::play()
 		if (useRemote) {
 			triedRemote = 1;
 			KPIHOST64_ForeignOpenReply orp{};
+			const int vstSlot = XfActiveSlot() == 1 ? 1 : 0;
 			if (g_kpiHost.VstOpen(std::wstring(mid), std::wstring(savedata.vstMultiDll),
-				std::wstring(savedata.vstExtraPath), orp)) {
-				g_vstRemote64 = 1;
+				std::wstring(savedata.vstExtraPath), orp, (uint32_t)vstSlot)) {
+				g_vstRemote64Slot[vstSlot] = 1;
 				VstMidiSetReportedLatencySamples((int)orp.latencySamples);
 				wavbit_sample_Hz = (int)orp.sampleRate;
 				wavchannel = (int)orp.channels;
@@ -11225,7 +11542,7 @@ void COggDlg::play()
 				m_time.SetRange(0, (loop2 > 0) ? loop2 : 1, TRUE);
 				g_openDecoderMode = mode;
 				vstOk = 1;
-				VstPrefetchStart((int)orp.sampleRate, (int)orp.channels, orp.bitsPerSample);
+				VstPrefetchStart(vstSlot, (int)orp.sampleRate, (int)orp.channels, orp.bitsPerSample, 1);
 				wav_start();
 			}
 		}
@@ -11273,7 +11590,7 @@ void COggDlg::play()
 					MB_ICONERROR | MB_OK);
 				m_saisai.EnableWindow(TRUE); endflg = 0; return;
 			}
-			g_vstRemote64 = 0;
+			g_vstRemote64Slot[XfActiveSlot() == 1 ? 1 : 0] = 0;
 			wavbit_sample_Hz = VstMidiGetRate();
 			wavchannel = VstMidiGetChannels();
 			wavsam_src = VstMidiGetBits();
@@ -19056,170 +19373,239 @@ struct VstPrefetch
 	size_t head = 0;
 	size_t used = 0;
 	int bpf = 4;
+	int slot = 0;
 	bool eof = false;
 	bool csReady = false;
-	CRITICAL_SECTION cs{};
+	CRITICAL_SECTION cs{};   // リング保護
+	CRITICAL_SECTION rcs{};  // Render 順序保護（先読みと同期フォールバックの入れ替え防止）
 	HANDLE room = NULL;
 	HANDLE stop = NULL;
 	HANDLE thread = NULL;
 };
-VstPrefetch g_vstPf;
+/* 曲スロットごとに独立したリング。クロスフェード中も A のリングを捨てない
+ * （捨てるとエンジンは先まで描画済みなので、その分 A が数秒ワープする） */
+VstPrefetch g_vstPf[XF_SLOTS];
 } // namespace
+
+static bool VstRemoteRenderSlot(int slot, uint32_t bytesWanted, std::vector<uint8_t>& pcm, bool& eof)
+{
+	if (slot < 0 || slot >= XF_SLOTS) slot = 0;
+	BYTE ports[64];
+	DWORD msgs[64];
+	/* ライブ鍵盤の注入は現行曲のエンジンだけに渡す */
+	const int n = (slot == XfActiveSlot()) ? VstMidiStealInjects(ports, msgs, 64) : 0;
+	VstMidiSetIoSlot(slot);
+	return g_kpiHost.VstRender(bytesWanted, pcm, eof, ports,
+		reinterpret_cast<const uint32_t*>(msgs), (uint32_t)n, (uint32_t)slot);
+}
 
 static bool VstRemoteRender(uint32_t bytesWanted, std::vector<uint8_t>& pcm, bool& eof)
 {
-	BYTE ports[64];
-	DWORD msgs[64];
-	const int n = VstMidiStealInjects(ports, msgs, 64);
-	// DWORD(unsigned long) と uint32_t(unsigned int) は MSVC では別型。
-	// ビット幅は同じなので再解釈でよい。
-	return g_kpiHost.VstRender(bytesWanted, pcm, eof, ports,
-		reinterpret_cast<const uint32_t*>(msgs), (uint32_t)n);
+	return VstRemoteRenderSlot(VstBindIoSlot(), bytesWanted, pcm, eof);
 }
 
-static unsigned __stdcall VstPrefetchProc(void*)
+static unsigned __stdcall VstPrefetchProc(void* arg)
 {
+	const int slot = ((int)(intptr_t)arg == 1) ? 1 : 0;
+	VstPrefetch& pf = g_vstPf[slot];
 	for (;;) {
-		if (WaitForSingleObject(g_vstPf.stop, 0) == WAIT_OBJECT_0) break;
-		EnterCriticalSection(&g_vstPf.cs);
-		const size_t room = g_vstPf.ring.size() - g_vstPf.used;
-		const bool done = g_vstPf.eof;
-		LeaveCriticalSection(&g_vstPf.cs);
+		if (WaitForSingleObject(pf.stop, 0) == WAIT_OBJECT_0) break;
+		EnterCriticalSection(&pf.cs);
+		const size_t room = pf.ring.size() - pf.used;
+		const bool done = pf.eof;
+		LeaveCriticalSection(&pf.cs);
 		if (done || room < (size_t)VST_PF_CHUNK) {
-			HANDLE h[2] = { g_vstPf.stop, g_vstPf.room };
+			HANDLE h[2] = { pf.stop, pf.room };
 			if (WaitForMultipleObjects(2, h, FALSE, 20) == WAIT_OBJECT_0) break;
 			continue;
 		}
 		std::vector<uint8_t> pcm;
 		bool eof = false;
-		if (!VstRemoteRender((uint32_t)VST_PF_CHUNK, pcm, eof)) {
+		EnterCriticalSection(&pf.rcs);
+		const bool ok = VstRemoteRenderSlot(slot, (uint32_t)VST_PF_CHUNK, pcm, eof);
+		if (ok) {
+			EnterCriticalSection(&pf.cs);
+			const size_t cap = pf.ring.size();
+			size_t left = pcm.size();
+			if (left > cap - pf.used) left = cap - pf.used;
+			const uint8_t* src = pcm.data();
+			while (left) {
+				const size_t at = (pf.head + pf.used) % cap;
+				size_t run = cap - at;
+				if (run > left) run = left;
+				memcpy(pf.ring.data() + at, src, run);
+				src += run; left -= run;
+				pf.used += run;
+			}
+			if (eof) pf.eof = true;
+			LeaveCriticalSection(&pf.cs);
+		}
+		LeaveCriticalSection(&pf.rcs);
+		if (!ok) {
 			Sleep(2);
-			continue;
+		} else {
+			/* KpiHost64 はプロセスあたり 1 つのパイプ（シングルスレッド）で要求をさばく。
+			 * B の先読みがパイプを占有すると A の先読みや音声出力（同期フォールバック）が
+			 * ブロックされ、A の再生にノイズ・音途切れが生じる。短く Sleep して
+			 * 現行曲（A）のレンダ要求を通す隙間を作る。 */
+			if (slot != XfActiveSlot()) Sleep(5);
+			else Sleep(1);
 		}
-		EnterCriticalSection(&g_vstPf.cs);
-		const size_t cap = g_vstPf.ring.size();
-		size_t left = pcm.size();
-		if (left > cap - g_vstPf.used) left = cap - g_vstPf.used;
-		const uint8_t* src = pcm.data();
-		while (left) {
-			const size_t at = (g_vstPf.head + g_vstPf.used) % cap;
-			size_t run = cap - at;
-			if (run > left) run = left;
-			memcpy(g_vstPf.ring.data() + at, src, run);
-			src += run; left -= run;
-			g_vstPf.used += run;
-		}
-		if (eof) g_vstPf.eof = true;
-		LeaveCriticalSection(&g_vstPf.cs);
 	}
 	return 0;
 }
 
-void VstPrefetchStop()
+void VstPrefetchStop(int slot)
 {
-	if (g_vstPf.thread) {
-		SetEvent(g_vstPf.stop);
-		WaitForSingleObject(g_vstPf.thread, 3000);
-		CloseHandle(g_vstPf.thread);
-		g_vstPf.thread = NULL;
+	if (slot < 0 || slot >= XF_SLOTS) return;
+	VstPrefetch& pf = g_vstPf[slot];
+	if (pf.thread) {
+		SetEvent(pf.stop);
+		WaitForSingleObject(pf.thread, 3000);
+		CloseHandle(pf.thread);
+		pf.thread = NULL;
 	}
-	if (g_vstPf.stop) { CloseHandle(g_vstPf.stop); g_vstPf.stop = NULL; }
-	if (g_vstPf.room) { CloseHandle(g_vstPf.room); g_vstPf.room = NULL; }
-	if (g_vstPf.csReady) {
-		EnterCriticalSection(&g_vstPf.cs);
-		g_vstPf.ring.clear();
-		g_vstPf.head = g_vstPf.used = 0;
-		g_vstPf.eof = false;
-		LeaveCriticalSection(&g_vstPf.cs);
+	if (pf.stop) { CloseHandle(pf.stop); pf.stop = NULL; }
+	if (pf.room) { CloseHandle(pf.room); pf.room = NULL; }
+	if (pf.csReady) {
+		EnterCriticalSection(&pf.cs);
+		pf.ring.clear();
+		pf.head = pf.used = 0;
+		pf.eof = false;
+		LeaveCriticalSection(&pf.cs);
 	}
 }
 
-void VstPrefetchStart(int rate, int channels, int bits)
+void VstPrefetchStopAll()
 {
-	VstPrefetchStop();
-	if (!g_vstRemote64) return;
+	for (int i = 0; i < XF_SLOTS; ++i)
+		VstPrefetchStop(i);
+}
+
+void VstPrefetchStart(int slot, int rate, int channels, int bits, int prefill, double seconds)
+{
+	if (slot < 0 || slot >= XF_SLOTS) return;
+	VstPrefetchStop(slot);
+	if (!g_vstRemote64Slot[slot]) return;
 	if (rate <= 0) rate = 44100;
 	if (channels <= 0) channels = 2;
 	if (bits <= 0) bits = 16;
+	VstPrefetch& pf = g_vstPf[slot];
 	const int bpf = channels * (bits / 8);
-	size_t bytes = (size_t)rate * (size_t)bpf * (size_t)VST_PF_SECONDS;
+	if (seconds < (double)VST_PF_SECONDS) seconds = (double)VST_PF_SECONDS;
+	if (seconds > 60.0) seconds = 60.0;
+	size_t bytes = (size_t)((double)rate * (double)bpf * seconds);
 	if (bytes < (size_t)VST_PF_CHUNK * 4) bytes = (size_t)VST_PF_CHUNK * 4;
-	if (!g_vstPf.csReady) {
-		InitializeCriticalSection(&g_vstPf.cs);
-		g_vstPf.csReady = true;
+	if (!pf.csReady) {
+		InitializeCriticalSection(&pf.cs);
+		InitializeCriticalSection(&pf.rcs);
+		pf.csReady = true;
 	}
-	EnterCriticalSection(&g_vstPf.cs);
-	g_vstPf.ring.assign(bytes, 0);
-	g_vstPf.head = g_vstPf.used = 0;
-	g_vstPf.eof = false;
-	g_vstPf.bpf = (bpf > 0) ? bpf : 4;
-	LeaveCriticalSection(&g_vstPf.cs);
-	g_vstPf.stop = CreateEventW(NULL, TRUE, FALSE, NULL);
-	g_vstPf.room = CreateEventW(NULL, FALSE, FALSE, NULL);
-	if (!g_vstPf.stop || !g_vstPf.room) { VstPrefetchStop(); return; }
-	g_vstPf.thread = (HANDLE)_beginthreadex(NULL, 0, VstPrefetchProc, NULL, 0, NULL);
-	if (!g_vstPf.thread) { VstPrefetchStop(); return; }
+	EnterCriticalSection(&pf.cs);
+	pf.ring.assign(bytes, 0);
+	pf.head = pf.used = 0;
+	pf.eof = false;
+	pf.bpf = (bpf > 0) ? bpf : 4;
+	pf.slot = slot;
+	LeaveCriticalSection(&pf.cs);
+	pf.stop = CreateEventW(NULL, TRUE, FALSE, NULL);
+	pf.room = CreateEventW(NULL, FALSE, FALSE, NULL);
+	if (!pf.stop || !pf.room) { VstPrefetchStop(slot); return; }
+	pf.thread = (HANDLE)_beginthreadex(NULL, 0, VstPrefetchProc, (void*)(intptr_t)slot, 0, NULL);
+	if (!pf.thread) { VstPrefetchStop(slot); return; }
+	if (!prefill)
+		return;
 	// Playback starts filling the DirectSound buffer immediately after the
 	// open, so hand it a head start rather than a dry ring.
 	const size_t want = (size_t)rate * (size_t)bpf / 2;
 	for (int i = 0; i < 200; ++i) {
-		EnterCriticalSection(&g_vstPf.cs);
-		const bool ready = g_vstPf.used >= want || g_vstPf.eof;
-		LeaveCriticalSection(&g_vstPf.cs);
+		EnterCriticalSection(&pf.cs);
+		const bool ready = pf.used >= want || pf.eof;
+		LeaveCriticalSection(&pf.cs);
 		if (ready) break;
 		Sleep(5);
 	}
 }
 
-static int VstPrefetchRead(BYTE* dst, int cnt)
+static int VstPrefetchRead(int slot, BYTE* dst, int cnt)
 {
-	if (!g_vstPf.thread || !g_vstPf.csReady) return -1;
+	if (slot < 0 || slot >= XF_SLOTS) return -1;
+	VstPrefetch& pf = g_vstPf[slot];
+	if (!pf.thread || !pf.csReady) return -1;
 	int copied = 0;
-	EnterCriticalSection(&g_vstPf.cs);
-	const size_t cap = g_vstPf.ring.size();
-	while (cap && copied < cnt && g_vstPf.used) {
+	EnterCriticalSection(&pf.cs);
+	const size_t cap = pf.ring.size();
+	while (cap && copied < cnt && pf.used) {
 		size_t run = (size_t)(cnt - copied);
-		if (run > g_vstPf.used) run = g_vstPf.used;
-		if (run > cap - g_vstPf.head) run = cap - g_vstPf.head;
-		memcpy(dst + copied, g_vstPf.ring.data() + g_vstPf.head, run);
-		g_vstPf.head = (g_vstPf.head + run) % cap;
-		g_vstPf.used -= run;
+		if (run > pf.used) run = pf.used;
+		if (run > cap - pf.head) run = cap - pf.head;
+		memcpy(dst + copied, pf.ring.data() + pf.head, run);
+		pf.head = (pf.head + run) % cap;
+		pf.used -= run;
 		copied += (int)run;
 	}
 	// A partial fill must still end on a frame boundary, or every following
 	// sample would land in the wrong channel.
-	if (copied < cnt && g_vstPf.bpf > 1) {
-		const int keep = copied - (copied % g_vstPf.bpf);
+	if (copied < cnt && pf.bpf > 1) {
+		const int keep = copied - (copied % pf.bpf);
 		if (keep != copied) {
 			const size_t back = (size_t)(copied - keep);
-			g_vstPf.head = (g_vstPf.head + cap - back) % cap;
-			g_vstPf.used += back;
+			pf.head = (pf.head + cap - back) % cap;
+			pf.used += back;
 			copied = keep;
 		}
 	}
-	LeaveCriticalSection(&g_vstPf.cs);
-	SetEvent(g_vstPf.room);
+	LeaveCriticalSection(&pf.cs);
+	SetEvent(pf.room);
 	return copied;
 }
 
 int readvst(BYTE* bw, int cnt)
 {
 	if (!bw || cnt <= 0) return 0;
-	if (g_vstRemote64) {
-		const int pre = VstPrefetchRead(bw, cnt);
-		if (pre >= 0) return pre;
+	const int slot = VstBindIoSlot();
+	if (g_vstRemote64Slot[slot]) {
+		VstPrefetch& pf = g_vstPf[slot];
+		if (!pf.thread)
+			VstPrefetchStart(slot, wavbit_sample_Hz, wavchannel, abs(wavsam_depth), 0);
+		int got = VstPrefetchRead(slot, bw, cnt);
+		if (got < 0) got = 0;
+		if (got >= cnt)
+			return got;
+		/* 足りない分は同期レンダで埋め切る。半端な長さで返すと呼び出し側が残りを
+		 * ゼロ埋めし、その分だけ音が空く（クロス開始の一瞬の無音がこれ）。
+		 * rcs の中では「レンダ済みでリング未反映」の PCM は存在しない（先読みは
+		 * rcs を持ったまま追記する）ので、ここで作るブロックが追い越すことはない。 */
 		std::vector<uint8_t> pcm;
 		bool eof = false;
-		// A dropped pipe reconnects on the next request and the engine keeps
-		// its play position, so retrying costs latency instead of a silent
-		// buffer.
-		if (!VstRemoteRender((uint32_t)cnt, pcm, eof) &&
-			!VstRemoteRender((uint32_t)cnt, pcm, eof))
-			return 0;
+		if (pf.csReady) {
+			EnterCriticalSection(&pf.rcs);
+			for (int guard = 0; guard < 8 && got < cnt; ++guard) {
+				const int add = VstPrefetchRead(slot, bw + got, cnt - got);
+				if (add > 0) { got += add; continue; }
+				pcm.clear();
+				if (!VstRemoteRenderSlot(slot, (uint32_t)(cnt - got), pcm, eof))
+					break;
+				int n = (int)pcm.size();
+				if (n <= 0)
+					break;
+				if (n > cnt - got) n = cnt - got;
+				memcpy(bw + got, pcm.data(), (size_t)n);
+				got += n;
+			}
+			LeaveCriticalSection(&pf.rcs);
+			return got;
+		}
+		if (!VstRemoteRenderSlot(slot, (uint32_t)(cnt - got), pcm, eof)
+			&& !VstRemoteRenderSlot(slot, (uint32_t)(cnt - got), pcm, eof))
+			return got;
 		int n = (int)pcm.size();
-		if (n > cnt) n = cnt;
-		if (n > 0) memcpy(bw, pcm.data(), (size_t)n);
-		return n;
+		if (n > cnt - got) n = cnt - got;
+		if (n > 0) {
+			memcpy(bw + got, pcm.data(), (size_t)n);
+			got += n;
+		}
+		return got;
 	}
 	return VstMidiRead(bw, cnt);
 }
@@ -19258,10 +19644,11 @@ static void VstSeekLoopStart()
 {
 	PlaybackNoteLoop(loop1);
 	kpi_silence_bytes = 0;
-	if (g_vstRemote64) {
-		VstPrefetchStop();
-		g_kpiHost.VstSeek(0);
-		VstPrefetchStart(wavbit_sample_Hz, wavchannel, abs(wavsam_depth));
+	if (VstRemoteNow()) {
+		const int slot = VstBindIoSlot();
+		VstPrefetchStop(slot);
+		g_kpiHost.VstSeek(0, (uint32_t)slot);
+		VstPrefetchStart(slot, wavbit_sample_Hz, wavchannel, abs(wavsam_depth), 0);
 	} else {
 		VstMidiSeekSamples(0);
 	}
@@ -22031,10 +22418,11 @@ static void VstSeekToPlayb(__int64 samplePos)
 {
 	MidiSeekDsGuard dsHold;
 	kpi_silence_bytes = 0;
-	if (g_vstRemote64) {
-		VstPrefetchStop();
-		g_kpiHost.VstSeek((uint64_t)samplePos);
-		VstPrefetchStart(wavbit_sample_Hz, wavchannel, abs(wavsam_depth));
+	if (VstRemoteNow()) {
+		const int slot = VstBindIoSlot();
+		VstPrefetchStop(slot);
+		g_kpiHost.VstSeek((uint64_t)samplePos, (uint32_t)slot);
+		VstPrefetchStart(slot, wavbit_sample_Hz, wavchannel, abs(wavsam_depth), 1);
 	} else {
 		VstMidiSeekSamples(samplePos);
 	}
@@ -22452,12 +22840,15 @@ BOOL COggDlg::stop1()
 	}
 	/* クロスフェード副スロットも閉じる */
 	{
+		/* 先読み中に閉じると壊れる。開き終わらない場合は開いた側が自分で破棄する */
+		const int preloadIdle = XfPreloadCancel(4000);
 		const int act = XfActiveSlot();
 		const int oth = XfOtherSlot(act);
-		if (g_openDecoderModeSlot[oth] != INT_MIN)
+		if (preloadIdle && g_openDecoderModeSlot[oth] != INT_MIN)
 			XfCloseSlotDecoders(oth);
 		InterlockedExchange(&g_xfInProgress, 0);
 		InterlockedExchange(&g_xfOpening, 0);
+		InterlockedExchange(&g_xfPrepared, 0);
 	}
 	wav999_use_adbuf = 0;
 	if (stoppingMode == -10) { mp3_.Close(); g_mp3_decoder_bps = 16; }
@@ -23914,7 +24305,7 @@ void COggDlg::timerp()
 			s.Format(LL14(L"file:mid %s", L"file:mid %s", L"file:mid %s", L"file:mid %s", L"file:mid %s", L"file:mid %s", L"file:mid %s", L"file:mid %s", L"file:mid %s", L"file:mid %s", L"file:mid %s", L"file:mid %s", L"file:mid %s", L"file:mid %s"),
 				savedata.midiOutName[0] ? savedata.midiOutName : L"MIDI Mapper");
 		} else {
-			const CString arch = KpiArchLabel(g_vstRemote64 ? 64 : 32);
+			const CString arch = KpiArchLabel(VstRemoteNow() ? 64 : 32);
 			s.Format(LL14(L"file:mid VST (%s)", L"file:mid VST (%s)", L"file:mid VST (%s)", L"file:mid VST (%s)", L"file:mid VST (%s)", L"file:mid VST (%s)", L"file:mid VST (%s)", L"file:mid VST (%s)", L"file:mid VST (%s)", L"file:mid VST (%s)", L"file:mid VST (%s)", L"file:mid VST (%s)", L"file:mid VST (%s)", L"file:mid VST (%s)"), arch);
 		}
 	}
@@ -24076,7 +24467,7 @@ void COggDlg::timerp()
 		if (!savedata.vstMultiDll[0] && !savedata.vstExtraPath[0])
 			s.Format(_T("midi :%s"), savedata.midiOutName[0] ? savedata.midiOutName : L"MIDI Mapper");
 		else
-			s.Format(_T("vst :%s"), g_vstRemote64 ? L"x64" : L"x86");
+			s.Format(_T("vst :%s"), VstRemoteNow() ? L"x64" : L"x86");
 		moji(s, 1, 64, 0x7fffff);
 	}
 	else if (mode == -8 || mode == -7 || mode == 999) {
@@ -25316,6 +25707,9 @@ void timerog1(UINT nIDEvent)
 		if (g_seekUiHoldUntil != 0 && GetTickCount64() < g_seekUiHoldUntil)
 			return;
 
+		/* 混合は DS 通知スレッドが始める。MP 画面のフェード取消だけ UI で消化 */
+		XfMpCancelFadeIfRequested();
+
 		/* notify からのクロスフェード開始要求（UI スレッドでのみ play()） */
 		if (InterlockedCompareExchange(&g_xfWantStart, 0, 0)) {
 			InterlockedExchange(&g_xfWantStart, 0);
@@ -25324,14 +25718,22 @@ void timerog1(UINT nIDEvent)
 			/* Open 失敗 → 下の EOF / レガシーへ */
 		}
 
+		/* VST 次曲は指定秒より前にエンジンBを開いて待機（Open は別スレッド。ここで待たない） */
+		if (XfEnabled() && savedata.saverenzoku == 1
+			&& !InterlockedCompareExchange(&g_xfInProgress, 0, 0)
+			&& XfShouldPreloadNext())
+			XfPreloadNextFromNotify();
+
 		const __int64 endRef = XfTrackEndRefBytes(g_endWrittenBytes);
+		/* 窓の基準は残響余白を除いた「音の終わり」。atEof は実終端のまま */
+		const __int64 fadeEnd = XfFadeEndRefBytes(g_endWrittenBytes);
 		const __int64 playPos = XfPlayPosBytes();
 		const __int64 xfWin = XfCrossfadeWindowBytes();
 		const bool atEof = (endflg == 1)
 			|| (endRef > 0 && playPos >= endRef)
 			|| (g_endWrittenBytes > 0 && g_heardBytes >= g_endWrittenBytes);
-		const bool inXfadeWindow = (endflg != 1 && endRef > 0 && xfWin > 0
-			&& playPos + xfWin >= endRef && playPos < endRef);
+		const bool inXfadeWindow = (endflg != 1 && fadeEnd > 0 && xfWin > 0
+			&& playPos + xfWin >= fadeEnd && playPos < fadeEnd);
 
 		/* クロスフェード中: 進捗なしで EOF に達したら abort → レガシー次曲へ */
 		if (InterlockedCompareExchange(&g_xfInProgress, 0, 0)) {
@@ -29873,7 +30275,9 @@ void COggDlg::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
 		// timerp の TempoPredRealSrcSamples が旧 poss5 を返すとシーク棒が即座に戻る
 		poss5 = (int)srcCur;
 		/* シーク中に xfade が走ると A がまごつくので一旦止める */
-		if (InterlockedCompareExchange(&g_xfInProgress, 0, 0))
+		XfPreloadCancel(0);
+		if (InterlockedCompareExchange(&g_xfInProgress, 0, 0)
+			|| InterlockedCompareExchange(&g_xfPrepared, 0, 0))
 			XfAbortCrossfade();
 		InterlockedExchange(&g_xfWantStart, 0);
 		InterlockedExchange(&g_xfOpening, 0);
@@ -30974,9 +31378,9 @@ LRESULT COggDlg::OnXfadePromoteUi(WPARAM wParam, LPARAM lParam)
 
 	/* B 昇格: play() 末尾相当のうち stop1 無しで必要なものを移植 */
 	extern void wav_start();
-	extern void equaliserResetBank(int bank);
 	wav_start();
-	equaliserResetBank(slot);
+	/* B の EQ バンクは soft-open 時に初期化済み。ここで張り直すと、クロス中ずっと
+	 * 流していた IIR の履歴が昇格の瞬間だけ切れて段差になる。 */
 	AckEqKeyUiNotify();
 	if (m_EqualizerDlg && ::IsWindow(m_EqualizerDlg->GetSafeHwnd()))
 		RegisterEqKeyUiHwnd(m_EqualizerDlg->GetSafeHwnd());
@@ -32505,6 +32909,7 @@ void COggDlg::OnBnClickedHelp()
 
 void COggDlg::OnDestroy()
 {
+	XfPreloadCancel(20000); /* 先読みスレッドを残したまま終了するとプラグイン解放中に落ちる */
 	AudioDevWatchShutdown();
 	if (g_oggHelpDlg && ::IsWindow(g_oggHelpDlg->GetSafeHwnd()))
 		g_oggHelpDlg->DestroyWindow();
@@ -32829,6 +33234,10 @@ void COggDlg::FeedPianoRoll(const void* pData, int bytes)
 	if (!pData || bytes <= 0 || playf == 0 || thn1 || stf != 0 || plf != 1)
 		return;
 	if (!m_dsb)
+		return;
+	/* クロスフェード中に次曲側の PCM まで流すと、解析が 2 曲混在になるうえ
+	 * 1 サイクルの仕事が倍になる。現行曲だけ食わせる。 */
+	if (InterlockedCompareExchange(&g_xfInProgress, 0, 0) && XfDecSlot() != XfActiveSlot())
 		return;
 	if (!m_PianoRollDlg) return;
 	const bool pianoOpen = ::IsWindow(m_PianoRollDlg->GetSafeHwnd()) != FALSE;
