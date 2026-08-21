@@ -10,6 +10,8 @@
 
 #include <math.h>
 #include <stdlib.h>
+#include <stdio.h>
+#include <string.h>
 #include <wchar.h>
 #include <stdarg.h>
 #include <shlobj.h>
@@ -18,6 +20,7 @@
 #ifndef KPIHOST64_BUILD
 #include "kpi_host_ipc.h"
 #include "KpiHostClient.h"
+#include "resource.h"
 #endif
 
 #pragma comment(lib, "winmm.lib")
@@ -25,6 +28,259 @@ static int ProbeLoadedEffectAudible(AEffect* effect);
 static int ProbeLoadedVst3Audible(Vst3Inst* vst3, int drums);
 
 #pragma comment(lib, "advapi32.lib")
+
+static void MmCompactKey(const wchar_t* s, wchar_t* out, int outN)
+{
+	int j = 0;
+	if (!out || outN <= 0) return;
+	out[0] = 0;
+	if (!s) return;
+	for (; *s && j < outN - 1; ++s) {
+		wchar_t c = *s;
+		if (c >= L'a' && c <= L'z') c = (wchar_t)(c - 32);
+		if (c == L'-' || c == L'_' || c == L' ' || c == L'\t' || c == L'.')
+			continue;
+		out[j++] = c;
+	}
+	out[j] = 0;
+}
+
+static int MmIsolated55(const wchar_t* s)
+{
+	if (!s || !s[0]) return 0;
+	for (int i = 0; s[i]; ++i) {
+		if (s[i] != L'5' || s[i + 1] != L'5') continue;
+		const wchar_t prev = (i > 0) ? s[i - 1] : 0;
+		const wchar_t next = s[i + 2];
+		const int prevDig = (prev >= L'0' && prev <= L'9');
+		const int nextDig = (next >= L'0' && next <= L'9');
+		if (!prevDig && !nextDig) return 1;
+		++i;
+	}
+	return 0;
+}
+
+static int MmIsAlnumW(wchar_t c)
+{
+	return (c >= L'0' && c <= L'9') || (c >= L'A' && c <= L'Z') || (c >= L'a' && c <= L'z');
+}
+
+static int MmHasToken(const wchar_t* s, const wchar_t* tok)
+{
+	if (!s || !tok || !tok[0]) return 0;
+	const int tn = (int)wcslen(tok);
+	for (int i = 0; s[i]; ++i) {
+		int j = 0;
+		for (; tok[j] && s[i + j]; ++j) {
+			wchar_t a = s[i + j];
+			wchar_t b = tok[j];
+			if (a >= L'a' && a <= L'z') a = (wchar_t)(a - 32);
+			if (b >= L'a' && b <= L'z') b = (wchar_t)(b - 32);
+			if (a != b) break;
+		}
+		if (tok[j]) continue;
+		const wchar_t prev = (i > 0) ? s[i - 1] : 0;
+		const wchar_t next = s[i + tn];
+		if (!MmIsAlnumW(prev) && !MmIsAlnumW(next)) return 1;
+		i += tn - 1;
+	}
+	return 0;
+}
+
+static int MmKindFromCompact(const wchar_t* k)
+{
+	if (!k || !k[0]) return 0;
+	if (wcsstr(k, L"8850") || wcsstr(k, L"SC8850") ||
+		wcsstr(k, L"8820") || wcsstr(k, L"SC8820"))
+		return 4;
+	if (wcsstr(k, L"88PRO") || wcsstr(k, L"SC88PRO") || wcsstr(k, L"88PMAP"))
+		return 3;
+	if (wcsstr(k, L"88P"))
+		return 3;
+	if (wcsstr(k, L"SC88") || wcsstr(k, L"88MAP"))
+		return 2;
+	if (wcsstr(k, L"SC55") || wcsstr(k, L"55MAP") || wcsstr(k, L"SC55MK"))
+		return 1;
+	if (wcsstr(k, L"SD90") || wcsstr(k, L"SD80") || wcsstr(k, L"SD20") ||
+		wcsstr(k, L"STUDIOCANVAS"))
+		return 6;
+	if (wcsstr(k, L"GENERALMIDI") || wcsstr(k, L"GMMAP") || wcsstr(k, L"GM2"))
+		return 5;
+	if (wcsstr(k, L"XGMAP") || wcsstr(k, L"SOFTXG") || wcsstr(k, L"SYXG") ||
+		wcsstr(k, L"MU80") || wcsstr(k, L"MU90") || wcsstr(k, L"MU100") ||
+		wcsstr(k, L"MU128") || wcsstr(k, L"MU500") || wcsstr(k, L"MU1000") ||
+		wcsstr(k, L"MU2000") || wcsstr(k, L"YAMAHAXG"))
+		return 7;
+	return 0;
+}
+
+static int MmKindFromText(const wchar_t* s)
+{
+	if (!s || !s[0]) return 0;
+	wchar_t k[280];
+	MmCompactKey(s, k, 280);
+	int kind = MmKindFromCompact(k);
+	if (!kind && MmIsolated55(s)) kind = 1;
+	if (!kind && MmHasToken(s, L"GM2")) kind = 5;
+	if (!kind && MmHasToken(s, L"GM")) kind = 5;
+	if (!kind && MmHasToken(s, L"XG")) kind = 7;
+	return kind;
+}
+
+extern "C" int VstMidiFoldGsMapHint(int cur, int kind)
+{
+	if (kind == 4) return 4;
+	if (kind == 3 && cur != 4) return 3;
+	if (kind == 2 && cur != 4 && cur != 3) return 2;
+	if (kind == 1 && cur == 0) return 1;
+	if ((kind == 5 || kind == 6 || kind == 7) && cur == 0) return kind;
+	return cur;
+}
+
+extern "C" int VstMidiGuessGsMapKind(const wchar_t* title, const wchar_t* path)
+{
+	int kind = MmKindFromText(title);
+	const wchar_t* base = path;
+	if (base && base[0]) {
+		const wchar_t* sl = wcsrchr(base, L'\\');
+		if (sl) base = sl + 1;
+		const wchar_t* sl2 = wcsrchr(base, L'/');
+		if (sl2) base = sl2 + 1;
+	}
+	if (!kind)
+		kind = MmKindFromText(base);
+	return kind;
+}
+
+extern "C" int VstMidiSysexIsGmOn(const unsigned char* d, int n)
+{
+	if (!d || n < 6 || d[0] != 0xf0 || d[1] != 0x7e || d[3] != 0x09) return 0;
+	return (d[4] == 0x01 || d[4] == 0x03) ? 1 : 0;
+}
+
+extern "C" int VstMidiSysexIsGsReset(const unsigned char* d, int n)
+{
+	if (!d || n < 11 || d[0] != 0xf0 || d[1] != 0x41) return 0;
+	return (d[3] == 0x42 && d[4] == 0x12 && d[5] == 0x40 && d[6] == 0x00 && d[7] == 0x7f) ? 1 : 0;
+}
+
+extern "C" int VstMidiSysexIsXgOn(const unsigned char* d, int n)
+{
+	if (!d || n < 9 || d[0] != 0xf0 || d[1] != 0x43) return 0;
+	return (d[3] == 0x4c && d[4] == 0x00 && d[5] == 0x00 && d[6] == 0x7e) ? 1 : 0;
+}
+
+extern "C" int VstMidiBankMsbIsSdNative(int msb)
+{
+	return (msb == 80 || msb == 81 ||
+		msb == 96 || msb == 97 || msb == 98 || msb == 99 ||
+		msb == 104 || msb == 105 || msb == 106 || msb == 107) ? 1 : 0;
+}
+
+static BYTE g_gsBits[5][2048];
+static int g_gsBitsReady;
+
+static int GsBitsHas(int map, int bank, int pc)
+{
+	if (map < 1 || map > 4 || bank < 0 || bank > 127 || pc < 0 || pc > 127) return 0;
+	const int bit = bank * 128 + pc;
+	return (g_gsBits[map][bit >> 3] >> (bit & 7)) & 1;
+}
+
+static void GsBitsAddBuf(const BYTE* d, int n)
+{
+	if (!d || n < 20) return;
+	const int rec = n / 20;
+	for (int i = 0; i < rec; ++i) {
+		const BYTE* r = d + i * 20;
+		const int map = r[0], bank = r[1], pc = r[2];
+		if (map < 1 || map > 4 || bank > 127 || pc > 127) continue;
+		const int bit = bank * 128 + pc;
+		g_gsBits[map][bit >> 3] = (BYTE)(g_gsBits[map][bit >> 3] | (BYTE)(1 << (bit & 7)));
+	}
+}
+
+static int GsBitsLoadFile(const wchar_t* path)
+{
+	HANDLE f = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ, NULL,
+		OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+	if (f == INVALID_HANDLE_VALUE) return 0;
+	DWORD sz = GetFileSize(f, NULL), got = 0;
+	if (sz < 20 || sz > 8 * 1024 * 1024) { CloseHandle(f); return 0; }
+	BYTE* buf = new BYTE[sz];
+	if (!ReadFile(f, buf, sz, &got, NULL) || got != sz) {
+		CloseHandle(f); delete[] buf; return 0;
+	}
+	CloseHandle(f);
+	GsBitsAddBuf(buf, (int)sz);
+	delete[] buf;
+	return 1;
+}
+
+static int GsBitsEnsure()
+{
+	if (g_gsBitsReady) return g_gsBitsReady > 0;
+	g_gsBitsReady = -1;
+#ifndef KPIHOST64_BUILD
+	{
+		HINSTANCE hi = GetModuleHandleW(NULL);
+		HRSRC hr = FindResourceW(hi, MAKEINTRESOURCEW(IDR_SASAMI_GS), RT_RCDATA);
+		if (hr) {
+			HGLOBAL hg = LoadResource(hi, hr);
+			DWORD sz = SizeofResource(hi, hr);
+			const BYTE* p = (const BYTE*)LockResource(hg);
+			if (p && sz >= 20) {
+				GsBitsAddBuf(p, (int)sz);
+				g_gsBitsReady = 1;
+				return 1;
+			}
+		}
+	}
+#endif
+	if (GsBitsLoadFile(L"C:\\Windows\\SASAMI_GS.DAT")) {
+		g_gsBitsReady = 1;
+		return 1;
+	}
+	wchar_t exe[MAX_PATH];
+	exe[0] = 0;
+	GetModuleFileNameW(NULL, exe, MAX_PATH);
+	for (int up = 0; up < 8; ++up) {
+		wchar_t dir[MAX_PATH];
+		wcsncpy_s(dir, exe, _TRUNCATE);
+		wchar_t* sl = wcsrchr(dir, L'\\');
+		if (sl) *sl = 0;
+		else break;
+		wchar_t cand[MAX_PATH];
+		_snwprintf_s(cand, _TRUNCATE, L"%s\\SASAMI_GS.DAT", dir);
+		if (GsBitsLoadFile(cand)) { g_gsBitsReady = 1; return 1; }
+		_snwprintf_s(cand, _TRUNCATE, L"%s\\res\\SASAMI_GS.DAT", dir);
+		if (GsBitsLoadFile(cand)) { g_gsBitsReady = 1; return 1; }
+		wcsncpy_s(exe, dir, _TRUNCATE);
+	}
+	return 0;
+}
+
+extern "C" int VstMidiGsMapDropFromUsed(const unsigned short* pairs, int nPairs)
+{
+	if (!pairs || nPairs <= 0) return 0;
+	if (!GsBitsEnsure()) return 0;
+	int all[5] = { 1, 1, 1, 1, 1 };
+	int any = 0;
+	for (int i = 0; i < nPairs; ++i) {
+		const int bank = (pairs[i] >> 8) & 0x7f;
+		const int pc = pairs[i] & 0x7f;
+		any = 1;
+		for (int m = 1; m <= 4; ++m) {
+			if (!GsBitsHas(m, bank, pc)) all[m] = 0;
+		}
+	}
+	if (!any) return 0;
+	int kind = 4;
+	if (all[3]) kind = 3;
+	if (all[2]) kind = 2;
+	if (all[1]) kind = 1;
+	return kind;
+}
 
 namespace {
 
@@ -163,6 +419,8 @@ struct EngineState {
 	__declspec(align(32)) float mixR[BLOCK_FRAMES];
 	LivePart live[32];
 	int gmResetMode; // 0=GM+GS, 1=GS, 2=XG（シーク巻き戻し時に再送）
+	int gsMapLsb;    // 0=なし 1=SC-55 2=SC-88 3=88Pro 4=8820/50（CC#32）
+	int songGm;      // 1=GM曲（GM On のみ、CC#32 なし）
 
 	EngineState() : csReady(0), fileData(NULL), fileBytes(0), events(NULL),
 		eventCount(0), eventPos(0), playSample(0), lengthSamples(0),
@@ -170,7 +428,7 @@ struct EngineState {
 		moduleB(NULL), effectB(NULL), moduleC(NULL), effectC(NULL), vst3C(NULL),
 		sysexData(NULL), sysexBytes(0), maxMidiPort(0), usingBuiltin(1),
 		useEnsemble(0), useDrums(0), useMapper(0), midiOut(NULL), mixCount(0),
-		ringRead(0), ringCount(0), gmResetMode(0)
+		ringRead(0), ringCount(0), gmResetMode(0), gsMapLsb(0), songGm(0)
 	{
 		InitializeCriticalSection(&cs);
 		csReady = 1;
@@ -187,7 +445,29 @@ struct EngineState {
 	}
 };
 
-static EngineState g_eng;
+static EngineState g_engs[2];
+static __declspec(thread) int t_vstIoSlot = 0;
+
+static int VstIoSlot()
+{
+	int s = t_vstIoSlot;
+	if (s < 0 || s >= 2) s = 0;
+	return s;
+}
+
+extern "C" void VstMidiSetIoSlot(int slot)
+{
+	if (slot < 0 || slot >= 2) slot = 0;
+	t_vstIoSlot = slot;
+}
+
+extern "C" int VstMidiGetIoSlot(void)
+{
+	return VstIoSlot();
+}
+
+#define g_eng (g_engs[VstIoSlot()])
+
 static VstPluginInfo g_plugins[VST_MAX_PLUGINS];
 static int g_pluginCount = 0;
 static int g_scanReady = 0;
@@ -956,6 +1236,10 @@ static int LoadSmf(const wchar_t* path)
 	int sxUsed = 0;
 	int count = 0;
 	int maxPort = 0;
+	wchar_t metaTitle[280];
+	metaTitle[0] = 0;
+	int hasXg = 0;
+	int mapHint = 0;
 	const BYTE* p = smf + 8 + ReadBE(smf + 4, 4);
 	const BYTE* fileEnd = smf + smfSize;
 	for (int tr = 0; tr < tracks && p + 8 <= fileEnd; ++tr) {
@@ -992,6 +1276,24 @@ static int LoadSmf(const wchar_t* path)
 					// RP-019 MIDI Port Prefix — port A/B/... for 32ch modules.
 					curPort = (int)q[0];
 					if (curPort > maxPort) maxPort = curPort;
+				} else if ((type == 0x01 || type == 0x02 || type == 0x03) && ml > 0) {
+					char tmp[256];
+					unsigned n = ml;
+					if (n > 255) n = 255;
+					memcpy(tmp, q, n);
+					tmp[n] = 0;
+					wchar_t w[256];
+					w[0] = 0;
+					if (!MultiByteToWideChar(932, 0, tmp, -1, w, 256))
+						MultiByteToWideChar(CP_ACP, 0, tmp, -1, w, 256);
+					w[255] = 0;
+					if (w[0]) {
+						mapHint = VstMidiFoldGsMapHint(mapHint, VstMidiGuessGsMapKind(w, NULL));
+						if (type == 0x03 || !metaTitle[0]) {
+							if (!metaTitle[0] || type == 0x03)
+								wcsncpy_s(metaTitle, w, _TRUNCATE);
+						}
+					}
 				}
 				q += ml;
 			} else if (st == 0xf0 || st == 0xf7) {
@@ -1011,6 +1313,10 @@ static int LoadSmf(const wchar_t* path)
 					ev[count].port = curPort;
 					ev[count].sysexOff = off;
 					++count;
+					if (need >= 6) {
+						const BYTE* sx = sxData + off;
+						if (VstMidiSysexIsXgOn(sx, need)) hasXg = 1;
+					}
 				}
 				q += sl;
 			} else {
@@ -1047,6 +1353,107 @@ static int LoadSmf(const wchar_t* path)
 		lastTick = ev[i].tick;
 		if ((ev[i].msg & 0xff) == 0xff && ev[i].aux) tempo = ev[i].aux;
 	}
+	if (!mapHint)
+		mapHint = VstMidiGuessGsMapKind(metaTitle, path);
+	else
+		mapHint = VstMidiFoldGsMapHint(mapHint, VstMidiGuessGsMapKind(NULL, path));
+	if (mapHint == 7) hasXg = 1;
+	{
+		BYTE msb[32];
+		BYTE have[2048];
+		unsigned short pairs[256];
+		int nPairs = 0, hasGm = 0, hasGs = 0, hasSd = 0, cc32Max = 0;
+		memset(msb, 0, sizeof(msb));
+		memset(have, 0, sizeof(have));
+		for (int i = 0; i < count; ++i) {
+			if ((ev[i].msg & 0xff) == 0xf0 && ev[i].sysexOff >= 0) {
+				const int n = (int)ev[i].aux;
+				if (ev[i].sysexOff + n <= sxUsed) {
+					const BYTE* d = sxData + ev[i].sysexOff;
+					if (VstMidiSysexIsXgOn(d, n)) hasXg = 1;
+					if (VstMidiSysexIsGmOn(d, n)) hasGm = 1;
+					if (VstMidiSysexIsGsReset(d, n)) hasGs = 1;
+				}
+				continue;
+			}
+			const int st = (int)(ev[i].msg & 0xf0);
+			const int ch = (int)(ev[i].msg & 0x0f);
+			int idx = ev[i].port * 16 + ch;
+			if (idx < 0) idx = ch;
+			if (idx > 31) idx = 31;
+			const int d1 = (int)((ev[i].msg >> 8) & 0x7f);
+			const int d2 = (int)((ev[i].msg >> 16) & 0x7f);
+			const int drum = (ch == 9) ? 1 : 0;
+			if (st == 0xb0 && d1 == 0) {
+				msb[idx] = (BYTE)d2;
+				if (VstMidiBankMsbIsSdNative(d2)) hasSd = 1;
+			} else if (st == 0xb0 && d1 == 32) {
+				if (!drum && d2 >= 1 && d2 <= 4 && d2 > cc32Max) cc32Max = d2;
+			} else if (st == 0xc0 && !drum) {
+				const int bank = (int)msb[idx];
+				const int bit = bank * 128 + d1;
+				if (bit >= 0 && bit < 16384) {
+					const int bi = bit >> 3;
+					const BYTE mask = (BYTE)(1 << (bit & 7));
+					if (!(have[bi] & mask)) {
+						have[bi] = (BYTE)(have[bi] | mask);
+						if (nPairs < 256)
+							pairs[nPairs++] = (unsigned short)((bank << 8) | d1);
+					}
+				}
+			}
+		}
+		int resolved = 0;
+		if (hasXg) resolved = 0;
+		else if (mapHint >= 1 && mapHint <= 4) resolved = mapHint;
+		else if ((mapHint == 5 || hasGm) && !hasGs) resolved = 5;
+		else if (mapHint == 6 || hasSd) resolved = 6;
+		else if (cc32Max >= 1 && cc32Max <= 4) resolved = cc32Max;
+		else resolved = VstMidiGsMapDropFromUsed(pairs, nPairs);
+		g_eng.songGm = (resolved == 5) ? 1 : 0;
+		g_eng.gsMapLsb = (resolved >= 1 && resolved <= 4) ? resolved : 0;
+	}
+	if (g_eng.gsMapLsb && count + 64 < MAX_MIDI_EVENTS) {
+		auto isGsReset = [&](const MidiItem& e) -> int {
+			if ((e.msg & 0xff) != 0xf0 || e.sysexOff < 0) return 0;
+			const int n = (int)e.aux;
+			if (e.sysexOff + n > sxUsed || n < 11) return 0;
+			const BYTE* d = sxData + e.sysexOff;
+			return VstMidiSysexIsGsReset(d, n);
+		};
+		auto appendMap = [&](MidiItem* dst, int w, unsigned __int64 tick, __int64 samp) -> int {
+			const int lsb = g_eng.gsMapLsb;
+			for (int port = 0; port < 2 && w < MAX_MIDI_EVENTS; ++port) {
+				for (int ch = 0; ch < 16 && w < MAX_MIDI_EVENTS; ++ch) {
+					dst[w].tick = tick;
+					dst[w].sample = samp;
+					dst[w].msg = (0xb0 | ch) | (32u << 8) | ((DWORD)lsb << 16);
+					dst[w].aux = 0;
+					dst[w].port = port;
+					dst[w].sysexOff = -1;
+					++w;
+				}
+			}
+			return w;
+		};
+		int anyReset = 0;
+		for (int i = 0; i < count; ++i)
+			if (isGsReset(ev[i])) { anyReset = 1; break; }
+		MidiItem* tmp = new MidiItem[MAX_MIDI_EVENTS];
+		int w = 0;
+		if (!anyReset)
+			w = appendMap(tmp, w, 0, 0);
+		for (int i = 0; i < count && w < MAX_MIDI_EVENTS; ++i) {
+			tmp[w++] = ev[i];
+			if (isGsReset(ev[i]))
+				w = appendMap(tmp, w, ev[i].tick, ev[i].sample);
+		}
+		delete[] ev;
+		ev = tmp;
+		count = w;
+	}
+	EnsLog(L"LoadSmf GS map lsb=%d xg=%d gm=%d title=[%s]",
+		g_eng.gsMapLsb, hasXg, g_eng.songGm, metaTitle[0] ? metaTitle : L"");
 	g_eng.fileData = data;
 	g_eng.fileBytes = size;
 	g_eng.sysexData = sxData;
@@ -1054,7 +1461,9 @@ static int LoadSmf(const wchar_t* path)
 	g_eng.events = ev;
 	g_eng.eventCount = count;
 	g_eng.maxMidiPort = maxPort;
-	g_eng.lengthSamples = sample + SAMPLE_RATE * 2;
+	/* 最後のノートの残響を鳴らし切るための余白。クロスフェードは
+	 * この余白を除いた「音の終わり」を基準にする（XfTailPadBytes）。 */
+	g_eng.lengthSamples = sample + SAMPLE_RATE * VST_TAIL_PAD_SEC;
 	EnsLog(L"LoadSmf events=%d maxPort=%d sysexBytes=%d (ports: %dch)",
 		count, maxPort, sxUsed, (maxPort + 1) * 16);
 	return 0;
@@ -2592,6 +3001,8 @@ static void FreeSong()
 	ZeroMemory(g_eng.noteState, sizeof(g_eng.noteState));
 	g_eng.usingBuiltin = 1;
 	g_eng.useDrums = 0;
+	g_eng.gsMapLsb = 0;
+	g_eng.songGm = 0;
 }
 
 static void ResetSequence()
@@ -3153,6 +3564,12 @@ static void SendGmGsReset(AEffect* effect, Vst3Inst* vst3, int preferGs)
 			sx[0].dumpBytes = (VstInt32)sizeof(xgOn);
 			sx[0].sysexDump = (char*)xgOn;
 			block.events[n++] = (VstEvent*)&sx[0];
+		} else if (g_eng.songGm) {
+			sx[0].type = kVstSysExType;
+			sx[0].byteSize = sizeof(VstMidiSysexEvent);
+			sx[0].dumpBytes = (VstInt32)sizeof(gmOn);
+			sx[0].sysexDump = (char*)gmOn;
+			block.events[n++] = (VstEvent*)&sx[0];
 		} else if (preferGs == 1) {
 			sx[0].type = kVstSysExType;
 			sx[0].byteSize = sizeof(VstMidiSysexEvent);
@@ -3182,6 +3599,20 @@ static void SendGmGsReset(AEffect* effect, Vst3Inst* vst3, int preferGs)
 			Vst3MidiShort(vst3, (0xb0 | ch) | (123 << 8), 0);
 		}
 		PumpSilent(NULL, vst3, 2);
+	}
+	if (preferGs == 1 && g_eng.gsMapLsb >= 1 && g_eng.gsMapLsb <= 4) {
+		MidiItem mapcc[16] = {};
+		for (int ch = 0; ch < 16; ++ch)
+			mapcc[ch].msg = (0xb0 | ch) | (32 << 8) | ((DWORD)g_eng.gsMapLsb << 16);
+		if (effect) SendVstEvents(effect, mapcc, 16, 0);
+		if (vst3) {
+			for (int ch = 0; ch < 16; ++ch)
+				Vst3MidiShort(vst3, mapcc[ch].msg, 0);
+		}
+		if (g_eng.midiOut && effect == g_eng.effect) {
+			for (int ch = 0; ch < 16; ++ch)
+				midiOutShortMsg(g_eng.midiOut, mapcc[ch].msg);
+		}
 	}
 }
 
@@ -3684,14 +4115,22 @@ extern "C" void VstMidiLog(const wchar_t* msg)
 	if (msg && msg[0]) EnsLog(L"%s", msg);
 }
 
-static int g_reportedLatencySamples = 0;
+static int g_reportedLatencySamples[2] = { 0, 0 };
 
 extern "C" void VstMidiClose(void)
 {
 	EnterCriticalSection(&g_eng.cs);
 	FreeSong();
 	LeaveCriticalSection(&g_eng.cs);
-	g_reportedLatencySamples = 0;
+	g_reportedLatencySamples[VstIoSlot()] = 0;
+}
+
+extern "C" void VstMidiCloseSlot(int slot)
+{
+	const int prev = VstIoSlot();
+	VstMidiSetIoSlot(slot);
+	VstMidiClose();
+	VstMidiSetIoSlot(prev);
 }
 
 extern "C" int VstMidiRead(BYTE* dst, int bytesWanted)
@@ -3758,6 +4197,91 @@ static void VstRenderBlockDiscard(int frames)
 	g_eng.playSample += frames;
 }
 
+/* 飛ばす区間は音を作らない。音色/音量/ベンド/ドラムマップを決める非ノート
+ * イベントだけを塊で送り、プラグインに確定させる極小ブロックだけ process する。
+ * 曲頭から目標まで丸ごとレンダしていた時間（6分の曲で数秒〜十数秒）が消える。
+ * ノートは着地直前 preroll を通常レンダで鳴らすので、そこから普通に聞こえる。 */
+static void SeekFastForwardEvents(__int64 ffEnd)
+{
+	enum { FF_BATCH = 256, FF_FRAMES = 64 };
+	if (ffEnd <= 0 || !g_eng.events) return;
+	MidiItem batch0[FF_BATCH], batch1[FF_BATCH], batch2[FF_BATCH];
+	int n0 = 0, n1 = 0, n2 = 0;
+	BYTE ensDirty[MIX_SLOTS] = {};
+	int pending = 0;
+	/* delta を 0 に揃えるため sample を start へ書き換えて送る */
+	const __int64 start = 0;
+	auto micro = [&]() {
+		if (g_eng.useEnsemble)
+			RenderEnsemble(g_eng.outL, g_eng.outR, FF_FRAMES);
+		else
+			RenderSongUnits(FF_FRAMES);
+		ZeroMemory(ensDirty, sizeof(ensDirty));
+		pending = 0;
+	};
+	auto flushAll = [&]() {
+		FlushUnitShorts(g_eng.effect, g_eng.vst3, batch0, n0, start, FF_FRAMES);
+		FlushUnitShorts(g_eng.effectB, NULL, batch1, n1, start, FF_FRAMES);
+		FlushUnitShorts(g_eng.effectC, g_eng.vst3C, batch2, n2, start, FF_FRAMES);
+	};
+	while (g_eng.eventPos < g_eng.eventCount &&
+		g_eng.events[g_eng.eventPos].sample < ffEnd) {
+		MidiItem e = g_eng.events[g_eng.eventPos++];
+		e.msg = SongOverrideMsg(e.port, e.msg);
+		if ((e.msg & 0xff) == 0xff) continue;
+		const int isSysex = ((e.msg & 0xff) == 0xf0 && e.sysexOff >= 0 && g_eng.sysexData) ? 1 : 0;
+		const int type = (int)(e.msg & 0xf0);
+		if (!isSysex && (type == 0x80 || type == 0x90))
+			continue;
+		e.sample = start;
+		if (isSysex) {
+			flushAll();
+			if (pending) micro();
+			const int len = (int)e.aux;
+			if (e.sysexOff + len <= g_eng.sysexBytes)
+				BroadcastSongSysex(g_eng.sysexData + e.sysexOff, len, 0);
+			micro();
+			continue;
+		}
+		if (g_eng.midiOut && (e.port <= 0 || !g_eng.effectB))
+			midiOutShortMsg(g_eng.midiOut, e.msg);
+		if (g_eng.useEnsemble) {
+			const int ch = (int)(e.msg & 15);
+			const int s = g_eng.chSlot[ch];
+			if (s < 0 || s >= g_eng.mixCount) continue;
+			MixSlot& ms = g_eng.mix[s];
+			MidiItem m = e;
+			if (!ms.keepMidiCh) {
+				if (type == 0xc0) continue;
+				m.msg = (m.msg & ~0x0fu) | 0u;
+			}
+			/* VST2 は effProcessEvents を続けて呼ぶと最後の1件しか残らない */
+			if (ms.effect && ensDirty[s]) micro();
+			if (ms.effect) { SendVstEvents(ms.effect, &m, 1, start); ensDirty[s] = 1; }
+			if (ms.vst3) Vst3MidiShort(ms.vst3, m.msg, 0);
+			if (++pending >= FF_BATCH) micro();
+			continue;
+		}
+		const int port = e.port < 0 ? 0 : e.port;
+		MidiItem* batch = batch0;
+		int* n = &n0;
+		int hasTgt = (g_eng.effect || g_eng.vst3) ? 1 : 0;
+		if (port == 1) {
+			if (!g_eng.effectB) continue;
+			batch = batch1; n = &n1; hasTgt = 1;
+		} else if (port >= 2) {
+			if (!g_eng.effectC && !g_eng.vst3C) continue;
+			batch = batch2; n = &n2; hasTgt = 1;
+		}
+		if (!hasTgt) continue;
+		if (*n >= FF_BATCH) { flushAll(); micro(); }
+		batch[(*n)++] = e;
+		++pending;
+	}
+	flushAll();
+	micro();
+}
+
 extern "C" int VstMidiSeekSamples(__int64 samplePos)
 {
 	EnterCriticalSection(&g_eng.cs);
@@ -3767,7 +4291,7 @@ extern "C" int VstMidiSeekSamples(__int64 samplePos)
 
 	g_eng.ringRead = g_eng.ringCount = 0;
 
-	// 常に先頭へ戻してから目標まで高速再生。途中の PC/CC/ピッチベンド/ノートオンが
+	// 常に先頭へ戻してから目標まで進める。途中の PC/CC/ピッチベンド/sysex が
 	// 欠けると「音色や音量が違う」になるため、前方シークでも飛ばさない。
 	ResetSequence();
 	if (g_eng.effect || g_eng.vst3)
@@ -3782,7 +4306,26 @@ extern "C" int VstMidiSeekSamples(__int64 samplePos)
 				SendGmGsReset(g_eng.mix[s].effect, g_eng.mix[s].vst3, g_eng.gmResetMode);
 		}
 	}
+	
+	/* GM/GS/XGリセット後、プラグイン（特にSC-VAなど）が内部でリセット処理を
+	 * 完了する前にCC/PCを送りつけると無視されてしまうため、少しだけ空レンダリングして
+	 * リセットを消化させる。 */
+	if (g_eng.effect || g_eng.vst3 || g_eng.effectB || g_eng.effectC || g_eng.vst3C || g_eng.useEnsemble) {
+		for (int i = 0; i < 12; ++i) { // 12 * 512 = 6144 frames (~139ms)
+			if (g_eng.useEnsemble)
+				RenderEnsemble(g_eng.outL, g_eng.outR, BLOCK_FRAMES);
+			else
+				RenderSongUnits(BLOCK_FRAMES);
+		}
+	}
 
+	/* 着地の少し前までイベント早送り、そこから通常レンダ（鳴っているノート・残響用） */
+	const __int64 preroll = SAMPLE_RATE / 2;
+	__int64 ffEnd = samplePos - preroll;
+	if (ffEnd > 0) {
+		SeekFastForwardEvents(ffEnd);
+		g_eng.playSample = ffEnd;
+	}
 	while (g_eng.playSample < samplePos) {
 		int frames = BLOCK_FRAMES;
 		const __int64 remain = samplePos - g_eng.playSample;
@@ -3805,6 +4348,7 @@ extern "C" int VstMidiGetRate(void) { return SAMPLE_RATE; }
 extern "C" int VstMidiGetChannels(void) { return 2; }
 extern "C" int VstMidiGetBits(void) { return 16; }
 extern "C" __int64 VstMidiGetLengthSamples(void) { return g_eng.lengthSamples; }
+extern "C" double VstMidiTailPadSec(void) { return (double)VST_TAIL_PAD_SEC; }
 
 static int ClampLat(int d)
 {
@@ -3818,7 +4362,7 @@ extern "C" void VstMidiSetReportedLatencySamples(int samples)
 {
 	if (samples < 0) samples = 0;
 	if (samples > SAMPLE_RATE * 2) samples = SAMPLE_RATE * 2;
-	g_reportedLatencySamples = samples;
+	g_reportedLatencySamples[VstIoSlot()] = samples;
 }
 
 extern "C" int VstMidiGetLatencySamples(void)
@@ -3837,7 +4381,7 @@ extern "C" int VstMidiGetLatencySamples(void)
 		}
 	}
 	if (lat > 0) return lat;
-	return g_reportedLatencySamples;
+	return g_reportedLatencySamples[VstIoSlot()];
 }
 
 #ifndef KPIHOST64_BUILD
