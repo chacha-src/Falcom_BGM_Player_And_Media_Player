@@ -1,0 +1,57 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<title>Importing playlists from other software</title>
+<link rel="stylesheet" type="text/css" href="../css/help.css">
+</head>
+<body>
+
+<div class="topnav"><a href="index.htm">Contents</a> &nbsp;|&nbsp; <a href="../ja/playlist-import.htm">日本語</a></div>
+
+<h1>Importing playlists from other software</h1>
+
+<p class="lead">Playlists you built in another program do not need rebuilding. Raira reads m3u, m3u8, pls and xspf as they are.</p>
+<h2>Importing</h2>
+<ol>
+<li>Right-click the playlist and choose the playlist import command.</li>
+<li>Pick the file you want to bring in.</li>
+<li>Check the import options and run it.</li>
+<li>If any rows come in with a missing mark, fix the paths with the missing-file review in <a href="playlist.htm">Working with playlists</a>.</li>
+</ol>
+<h2>The import options</h2>
+<dl>
+<dt>Character encoding</dt>
+<dd>UTF-8 files are read correctly. m3u8 is UTF-8 by definition, so non-ASCII file names survive intact.</dd>
+<dt>Relative paths</dt>
+<dd>Paths relative to the playlist's own location are resolved, which often means a collection moved wholesale to another PC still reads.</dd>
+<dt>Skip missing</dt>
+<dd>Rows whose file does not actually exist are left out.</dd>
+<dt>Skip duplicates</dt>
+<dd>Tracks already in the list are not added twice.</dd>
+</dl>
+<h2>Worth doing afterwards</h2>
+<ul>
+<li>Blank titles or artists can be tidied in bulk with <a href="tags.htm">Editing tags</a>.</li>
+<li>Registering the collection in <a href="smart-lib.htm">Smart playlists and the library tree</a> lets you recall tracks by rule later on.</li>
+<li>With a large import, <a href="history.htm">Looking back at play history</a> helps you spot what you actually listen to so you can split it into a smaller list.</li>
+</ul>
+<div class="tip"><span class="label">Tip</span>
+<p>If what you really want is a list that follows a folder rather than a one-off import, the folder sync lists in <a href="playlist.htm">Working with playlists</a> are a better fit — drop music into the folder and the list grows.</p>
+</div>
+<div class="note"><span class="label">Please note</span>
+<p>What comes across is the playlist contents, that is, the track order. Ratings or custom tags added by other software are not carried over.</p>
+</div>
+<div class="related"><span class="label">See also</span><ul><li><a href="playlist.htm">Working with playlists</a></li><li><a href="smart-lib.htm">Smart playlists and the library tree</a></li><li><a href="tags.htm">Editing tags</a></li><li><a href="history.htm">Looking back at play history</a></li><li><a href="formats.htm">Supported formats and titles</a></li></ul></div>
+
+<div class="botnav">
+<span class="prev">&#171; Back: <a href="playlist.htm">Working with playlists</a></span>
+<span class="next">Next: <a href="smart-lib.htm">Smart playlists and the library tree</a> &#187;</span>
+<span class="up"><a href="index.htm">Contents</a></span>
+<div class="clear"></div>
+</div>
+
+<div class="foot">Media player "Raira" (oggYSEDbgm) — PrePrayerPower Soft</div>
+
+</body>
+</html>

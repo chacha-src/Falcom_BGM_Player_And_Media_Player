@@ -1,0 +1,65 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<title>Live streaming</title>
+<link rel="stylesheet" type="text/css" href="../css/help.css">
+</head>
+<body>
+
+<div class="topnav"><a href="index.htm">Contents</a> &nbsp;|&nbsp; <a href="../ja/live.htm">日本語</a></div>
+
+<h1>Live streaming</h1>
+
+<p class="lead">Tick <b>Live</b> in <a href="capture.htm">Recording your screen</a> and Raira sends picture and sound to your platform instead of writing an MP4. YouTube Live, Niconico and custom RTMP destinations are supported.</p>
+<h2>What you need first</h2>
+<div class="note"><span class="label">Please note</span>
+<p><b>ffmpeg.exe</b> must sit next to the executable, or in the <code>ogg_binary</code> folder. Without it, streaming will not start.</p>
+</div>
+<h2>Streaming to YouTube Live</h2>
+<ol>
+<li>Enter your Google OAuth Client ID and Secret.</li>
+<li>Run the authentication to connect your account.</li>
+<li>Create the broadcast, choosing a title and privacy (public, unlisted or private).</li>
+<li>Start streaming.</li>
+</ol>
+<p>For a first attempt, set the privacy to <b>private</b>. You can check your framing and levels and switch to public afterwards.</p>
+<h2>Streaming to Niconico or a custom RTMP URL</h2>
+<ol>
+<li>Open your platform's broadcast page and find the RTMP URL and stream key.</li>
+<li>Enter both into this window.</li>
+<li>Start streaming.</li>
+</ol>
+<h2>Audio quality</h2>
+<p>Choose an AAC profile.</p>
+<ul>
+<li><b>128 kbps</b> for ordinary streaming.</li>
+<li><b>192 kbps</b> when the music itself matters.</li>
+<li><b>Low-latency 96 kbps</b> when you want to keep the delay down.</li>
+</ul>
+<h2>Making the stream look good</h2>
+<ul>
+<li>The window composition in <a href="capture.htm">Recording your screen</a> puts a game and the media player side by side.</li>
+<li>The <code>/overlay</code> page in <a href="remote.htm">Controlling Raira from a phone or PC</a> is simple HTML with a transparent background showing the track and state — drop it into an OBS browser source.</li>
+<li>The current track can also be written to <code>nowplaying.txt</code>. See <a href="tools.htm">The companion tools</a>.</li>
+<li><a href="crossfade.htm">Continuous-play crossfade</a> keeps track changes smooth.</li>
+</ul>
+<div class="tip"><span class="label">Tip</span>
+<p>You cannot leave the desk mid-stream, so keep <a href="remote.htm">Controlling Raira from a phone or PC</a> open — you can change tracks and volume from your phone. There is even a shared queue if you want your audience choosing what comes next.</p>
+</div>
+<div class="note"><span class="label">Please note</span>
+<p>While Live is on, no MP4 file is written. If you want a copy afterwards, record separately or rely on your platform's archive.</p>
+</div>
+<div class="related"><span class="label">See also</span><ul><li><a href="capture.htm">Recording your screen</a></li><li><a href="remote.htm">Controlling Raira from a phone or PC</a></li><li><a href="device-rec.htm">Recording what you hear</a></li><li><a href="crossfade.htm">Continuous-play crossfade</a></li><li><a href="tools.htm">The companion tools</a></li></ul></div>
+
+<div class="botnav">
+<span class="prev">&#171; Back: <a href="capture.htm">Recording your screen</a></span>
+<span class="next">Next: <a href="prompt.htm">Automating a performance with prompts</a> &#187;</span>
+<span class="up"><a href="index.htm">Contents</a></span>
+<div class="clear"></div>
+</div>
+
+<div class="foot">Media player "Raira" (oggYSEDbgm) — PrePrayerPower Soft</div>
+
+</body>
+</html>

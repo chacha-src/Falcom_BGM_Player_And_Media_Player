@@ -1,0 +1,54 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<title>Adding formats with KPI plug-ins</title>
+<link rel="stylesheet" type="text/css" href="../css/help.css">
+</head>
+<body>
+
+<div class="topnav"><a href="index.htm">Contents</a> &nbsp;|&nbsp; <a href="../ja/kpi.htm">日本語</a></div>
+
+<h1>Adding formats with KPI plug-ins</h1>
+
+<p class="lead">Unusual audio formats that Raira cannot read on its own may still play if you add a kpi plug-in written for Kb Media Player. Legacy kpi plug-ins and some of the newer ones are supported.</p>
+<h2>Installing one</h2>
+<ol>
+<li>Put the kpi plug-in file into the <code>Plugins</code> folder next to the executable.</li>
+<li>Restart the program.</li>
+<li>Open the plug-in list (the kpi list) and check the plug-in you want.</li>
+<li>Try playing a file in the format it handles.</li>
+</ol>
+<h2>Using the kpi list</h2>
+<ul>
+<li>Typing an extension filters the list as you type. Type "mid" and only the MIDI-related plug-ins remain.</li>
+<li>Checkbox state is kept per plug-in, so you can say "read this track with this plug-in".</li>
+</ul>
+<h2>How the 64-bit build handles them</h2>
+<p>The 64-bit build loads plug-ins through a separate process called KpiHost64. That is what allows old plug-ins built for 32-bit to be used from a 64-bit host. 64-bit plug-ins in <a href="vst.htm">Playing instruments with the VST host</a> use the same mechanism.</p>
+<h2>Plug-ins that need extra setup</h2>
+<ul>
+<li><b>KPI ver5 parameters</b> — detailed settings for the newer plug-in type.</li>
+<li><b>fmpmd.kpi PVI path</b> — tells the plug-in where its extra data files live.</li>
+</ul>
+<h2>A note about exporting</h2>
+<p>Tracks played through a kpi plug-in sometimes have no known duration. Fill in the length in seconds in <a href="export.htm">Audio export (WAV / mp3 / FLAC)</a> to say how much to write.</p>
+<div class="tip"><span class="label">Tip</span>
+<p>Check <a href="formats.htm">Supported formats and titles</a> first. If Raira reads the format natively, you do not need a plug-in at all.</p>
+</div>
+<div class="note"><span class="label">Please note</span>
+<p>kpi plug-ins are third-party software and some simply will not work. When one does not, try a different plug-in for the same format.</p>
+</div>
+<div class="related"><span class="label">See also</span><ul><li><a href="formats.htm">Supported formats and titles</a></li><li><a href="vst.htm">Playing instruments with the VST host</a></li><li><a href="export.htm">Audio export (WAV / mp3 / FLAC)</a></li><li><a href="render.htm">Rendering settings</a></li><li><a href="tips.htm">Small things worth knowing</a></li></ul></div>
+
+<div class="botnav">
+<span class="prev">&#171; Back: <a href="mirror.htm">Sending sound to a second device</a></span>
+<span class="next">Next: <a href="render.htm">Rendering settings</a> &#187;</span>
+<span class="up"><a href="index.htm">Contents</a></span>
+<div class="clear"></div>
+</div>
+
+<div class="foot">Media player "Raira" (oggYSEDbgm) — PrePrayerPower Soft</div>
+
+</body>
+</html>

@@ -1,0 +1,70 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<title>波形・周波数アナライザー</title>
+<link rel="stylesheet" type="text/css" href="../css/help.css">
+</head>
+<body>
+
+<div class="topnav"><a href="index.htm">目次</a> &nbsp;|&nbsp; <a href="../en/analyzer.htm">English</a></div>
+
+<h1>波形・周波数アナライザー</h1>
+
+<p class="lead">アナライザーは、鳴っている音を「見る」ための画面です。上に波形とレベルメーター、下に周波数の特性が出ます。見た目は何種類も選べるので、見慣れたスタイルに合わせられます。</p>
+<div class="shot">
+<img src="../img/analyzer.png" alt="波形・周波数アナライザー">
+<p class="cap">波形・周波数アナライザー</p>
+</div>
+<h2>上半分 — 波形とレベル</h2>
+<ul>
+<li>多チャンネルのPCM波形が横へスクロールしていきます。</li>
+<li>左右のレベルメーターは RMS と、その最大値を残すピークホールドを表示します。</li>
+<li>波形が流れる速さは右クリックから x0.25 〜 x2.0 で変えられます。</li>
+</ul>
+<h2>下半分 — 周波数特性</h2>
+<p>横軸が対数（低い音のほうが広く見える）の周波数表示です。ピークホールドを使うと、いちばん出たところが線として残ります。</p>
+<p>表示モードは右クリックから選べます。</p>
+<ul>
+<li>Ozone 風</li>
+<li>Cubase Frequency 風</li>
+<li>Voxengo SPAN 風</li>
+<li>Ableton Spectrum 風</li>
+<li>FabFilter Pro-Q 風</li>
+<li>バー / 線のみ</li>
+</ul>
+<h2>並べ方（レイアウト）</h2>
+<p>右クリックメニューから、重ね描き／上下分割／左右分割／2x2／2x4 を選べます。チャンネルが多い音源を1つずつ見たいときに便利です。</p>
+<h2>EQオーバーレイ</h2>
+<p><a href="eq.htm">イコライザーと環境モデル</a> の15バンドの位置とゲイン曲線を、スペクトラムの上に重ねて表示できます。「いま触っているつまみが、どの山に効いているのか」が目で分かるので、EQの調整がぐっと楽になります。</p>
+<h2>キー操作</h2>
+<table class="grid">
+<tr><th>キー</th><th>働き</th></tr>
+<tr><td><kbd>F</kbd></td><td>フリーズ（表示を止める）</td></tr>
+<tr><td><kbd>P</kbd></td><td>ピークホールドの切り替え</td></tr>
+<tr><td><kbd>E</kbd></td><td>EQオーバーレイの切り替え</td></tr>
+<tr><td><kbd>Space</kbd> / ダブルクリック</td><td>ピークのリセット</td></tr>
+</table>
+<h2>マウスで読み取る</h2>
+<p>表示にマウスを重ねると、その位置の周波数（Hz）、レベル（dB）、そしてチャンネルが表示されます。分割表示のときは、カーソルの下にあるパネルの値が出ます。</p>
+<h2>画像として残す</h2>
+<p><a href="tools.htm">附属ツールいろいろ</a> の「スペクトロジャケット」を使うと、アナライザーの表示を画像として保存できます。曲の雰囲気を絵として残しておきたいときに使えます。</p>
+<div class="tip"><span class="label">ヒント</span>
+<p>描画は解析用のワーカースレッドで動くので、表示がなめらかなまま音が途切れにくくなっています。アクリル（ぼかし）表示にも対応しています。</p>
+</div>
+<div class="note"><span class="label">注意</span>
+<p>プレイリストで曲を右クリックすると、そこから直接アナライザーを開けます。<a href="pianoroll.htm">ピアノロールで音を見る</a> も同じように開けます。</p>
+</div>
+<div class="related"><span class="label">あわせて読みたい</span><ul><li><a href="eq.htm">イコライザーと環境モデル</a></li><li><a href="pianoroll.htm">ピアノロールで音を見る</a></li><li><a href="mp-seek.htm">シークバーの読み方</a></li><li><a href="tools.htm">附属ツールいろいろ</a></li><li><a href="acrylic.htm">アクリル表示とコンテキストメニュー</a></li></ul></div>
+
+<div class="botnav">
+<span class="prev">&#171; 前へ: <a href="lyrics.htm">歌詞を表示する</a></span>
+<span class="next">次へ: <a href="pianoroll.htm">ピアノロールで音を見る</a> &#187;</span>
+<span class="up"><a href="index.htm">目次</a></span>
+<div class="clear"></div>
+</div>
+
+<div class="foot">メディアプレイヤー「らいら」 (oggYSEDbgm) — PrePrayerPower Soft</div>
+
+</body>
+</html>

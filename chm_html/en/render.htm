@@ -1,0 +1,75 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<title>Rendering settings</title>
+<link rel="stylesheet" type="text/css" href="../css/help.css">
+</head>
+<body>
+
+<div class="topnav"><a href="index.htm">Contents</a> &nbsp;|&nbsp; <a href="../ja/render.htm">日本語</a></div>
+
+<h1>Rendering settings</h1>
+
+<p class="lead">Rendering settings is the foundation of the program. "No sound", "the audio breaks up", "I want larger text" — most of those are solved right here.</p>
+<h2>Where the sound goes</h2>
+<dl>
+<dt>Playback device</dt>
+<dd>Which speakers or headphones the audio comes out of. When there is no sound at all, check this first.</dd>
+<dt>Buffer</dt>
+<dd>How much audio is held in reserve. Larger is more robust, smaller is more responsive. If the sound stutters, make it larger.</dd>
+<dt>Bit depth</dt>
+<dd>The resolution of the output. Sample-rate and bit-depth upscaling and multi-channel output are supported.</dd>
+</dl>
+<h2>The microphone device</h2>
+<p>The capture device used by the microphone mix in <a href="wav-save.htm">Saving to WAV</a> is chosen here.</p>
+<h2>Appearance</h2>
+<dl>
+<dt>Language</dt>
+<dd>Fourteen locales: Japanese, English, Français, Italiano, Español, 한국어, 中文, العربية, Русский, Deutsch, Português, Nederlands, Polski and Türkçe.</dd>
+<dt>Fonts</dt>
+<dd>Changes the text throughout the program. Set a size you find comfortable.</dd>
+<dt>Spectrum scale mode</dt>
+<dd>How the frequency display is scaled, which changes how the <a href="analyzer.htm">Waveform and spectrum analyzer</a> looks.</dd>
+</dl>
+<h2>File associations</h2>
+<p>Associate extensions so that double-clicking a file in Explorer opens it in Raira.</p>
+<ul>
+<li><b>Audio</b> — mp3, flac, ogg, wav and more</li>
+<li><b>Video</b> — avi, mp4, mkv, wmv, mov, webm and more</li>
+<li><b>Playlists</b> — m3u and similar</li>
+</ul>
+<h2>The startup-mode prompt</h2>
+<p>Whether the "which screen would you like to start in?" dialog appears is also restored from here. See <a href="modes.htm">The two screen modes</a>.</p>
+<h2>MIDI playback and VST modules</h2>
+<dl>
+<dt>MIDI playback (Prefer KPI / Prefer VST)</dt>
+<dd>Choose whether playlist .mid files use KPI or a VST. Details: <a href="vst-midi.htm">Playing .mid through a VST</a>.</dd>
+<dt>GS VST</dt>
+<dd>GS module (SC-VA, etc.) for SMFs without an XG reset. If empty, XG side is used; if both empty, the MIDI Mapper.</dd>
+<dt>XG VST</dt>
+<dd>XG module (S-YXG50, etc.) when the SMF has XG System On. If empty, GS side is used.</dd>
+<dt>MIDI out</dt>
+<dd>Hardware / mapper destination when both VST paths are empty.</dd>
+<dt>Rescan</dt>
+<dd>Search again for VSTs under the chosen paths.</dd>
+</dl>
+<div class="tip"><span class="label">Tip</span>
+<p>The "?" button opens the render guide, a diagram made for this window, so you can see what each option affects.</p>
+</div>
+<div class="note"><span class="label">Please note</span>
+<p>If the app is muted in the Windows volume mixer, Raira warns you at startup. When there is still no sound after checking these settings, check Windows' own volume mixer as well.</p>
+</div>
+<div class="related"><span class="label">See also</span><ul><li><a href="first-start.htm">Your first launch</a></li><li><a href="modes.htm">The two screen modes</a></li><li><a href="mirror.htm">Sending sound to a second device</a></li><li><a href="analyzer.htm">Waveform and spectrum analyzer</a></li><li><a href="help-buttons.htm">The "?" guide on every window</a></li></ul></div>
+
+<div class="botnav">
+<span class="prev">&#171; Back: <a href="kpi.htm">Adding formats with KPI plug-ins</a></span>
+<span class="next">Next: <a href="tools.htm">The companion tools</a> &#187;</span>
+<span class="up"><a href="index.htm">Contents</a></span>
+<div class="clear"></div>
+</div>
+
+<div class="foot">Media player "Raira" (oggYSEDbgm) — PrePrayerPower Soft</div>
+
+</body>
+</html>

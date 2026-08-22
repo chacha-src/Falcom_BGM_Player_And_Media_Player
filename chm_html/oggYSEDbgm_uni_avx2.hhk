@@ -1,0 +1,2416 @@
+<!DOCTYPE HTML PUBLIC "-//IETF//DTD HTML//EN">
+<HTML>
+<HEAD>
+<meta name="GENERATOR" content="build_help.py">
+<!-- Sitemap 1.0 -->
+</HEAD><BODY>
+<UL>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value=".mid を VST 音源で鳴らす">
+		<param name="Name" value="日本語: .mid を VST 音源で鳴らす">
+		<param name="Local" value="ja\vst-midi.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="A tour of the media player screen">
+		<param name="Name" value="English: A tour of the media player screen">
+		<param name="Local" value="en\mp-overview.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="A-B">
+		<param name="Name" value="日本語: キュー、A-B、練習テンポ">
+		<param name="Local" value="ja\mp-cues.htm">
+		<param name="Name" value="日本語: シークバーの読み方">
+		<param name="Local" value="ja\mp-seek.htm">
+		<param name="Name" value="日本語: チューナー道場">
+		<param name="Local" value="ja\tuner.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="A-B repeat">
+		<param name="Name" value="English: Cues, A-B and practice tempo">
+		<param name="Local" value="en\mp-cues.htm">
+		<param name="Name" value="English: Reading the seek bar">
+		<param name="Local" value="en\mp-seek.htm">
+		<param name="Name" value="English: Tuner practice">
+		<param name="Local" value="en\tuner.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="A/B snapshot">
+		<param name="Name" value="日本語: イコライザーと環境モデル">
+		<param name="Local" value="ja\eq.htm">
+		<param name="Name" value="English: Equalizer and environmental models">
+		<param name="Local" value="en\eq.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="AAC">
+		<param name="Name" value="日本語: スマホやPCから操作する">
+		<param name="Local" value="ja\remote.htm">
+		<param name="Name" value="English: Controlling Raira from a phone or PC">
+		<param name="Local" value="en\remote.htm">
+		<param name="Name" value="日本語: ライブ配信する">
+		<param name="Local" value="ja\live.htm">
+		<param name="Name" value="English: Live streaming">
+		<param name="Local" value="en\live.htm">
+		<param name="Name" value="日本語: 画面を録画する">
+		<param name="Local" value="ja\capture.htm">
+		<param name="Name" value="English: Recording your screen">
+		<param name="Local" value="en\capture.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="acrylic">
+		<param name="Name" value="English: Acrylic look and context menus">
+		<param name="Local" value="en\acrylic.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="Acrylic look and context menus">
+		<param name="Name" value="English: Acrylic look and context menus">
+		<param name="Local" value="en\acrylic.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="Adding formats with KPI plug-ins">
+		<param name="Name" value="English: Adding formats with KPI plug-ins">
+		<param name="Local" value="en\kpi.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="alarm">
+		<param name="Name" value="English: Sleep timer and alarm">
+		<param name="Local" value="en\sleep-alarm.htm">
+		<param name="Name" value="English: The companion tools">
+		<param name="Local" value="en\tools.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="analog">
+		<param name="Name" value="English: The analog digitizer">
+		<param name="Local" value="en\digitize.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="analyzer">
+		<param name="Name" value="English: Waveform and spectrum analyzer">
+		<param name="Local" value="en\analyzer.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="audio export">
+		<param name="Name" value="English: Audio export (WAV / mp3 / FLAC)">
+		<param name="Local" value="en\export.htm">
+		<param name="Name" value="English: Saving to WAV">
+		<param name="Local" value="en\wav-save.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="Audio export (WAV / mp3 / FLAC)">
+		<param name="Name" value="English: Audio export (WAV / mp3 / FLAC)">
+		<param name="Local" value="en\export.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="Automating a performance with prompts">
+		<param name="Name" value="English: Automating a performance with prompts">
+		<param name="Local" value="en\prompt.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="beat grid">
+		<param name="Name" value="English: Reading the seek bar">
+		<param name="Local" value="en\mp-seek.htm">
+		<param name="Name" value="English: Measuring BPM">
+		<param name="Local" value="en\bpm.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="bonus">
+		<param name="Name" value="English: The bonus games">
+		<param name="Local" value="en\games.htm">
+		<param name="Name" value="English: Bonus: the Soft3D maze">
+		<param name="Local" value="en\maze.htm">
+		<param name="Name" value="English: Bonus: the Soft3D aerial race">
+		<param name="Local" value="en\race.htm">
+		<param name="Name" value="English: The photo frame">
+		<param name="Local" value="en\photoframe.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="Bonus: the Soft3D aerial race">
+		<param name="Name" value="English: Bonus: the Soft3D aerial race">
+		<param name="Local" value="en\race.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="Bonus: the Soft3D maze">
+		<param name="Name" value="English: Bonus: the Soft3D maze">
+		<param name="Local" value="en\maze.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="BPM">
+		<param name="Name" value="日本語: BPMを測る">
+		<param name="Local" value="ja\bpm.htm">
+		<param name="Name" value="English: Measuring BPM">
+		<param name="Local" value="en\bpm.htm">
+		<param name="Name" value="日本語: シークバーの読み方">
+		<param name="Local" value="ja\mp-seek.htm">
+		<param name="Name" value="English: Reading the seek bar">
+		<param name="Local" value="en\mp-seek.htm">
+		<param name="Name" value="日本語: 連続再生クロスフェード">
+		<param name="Local" value="ja\crossfade.htm">
+		<param name="Name" value="English: Continuous-play crossfade">
+		<param name="Local" value="en\crossfade.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="BPM measure">
+		<param name="Name" value="English: Measuring BPM">
+		<param name="Local" value="en\bpm.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="BPMを測る">
+		<param name="Name" value="日本語: BPMを測る">
+		<param name="Local" value="ja\bpm.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="BPM計測">
+		<param name="Name" value="日本語: BPMを測る">
+		<param name="Local" value="ja\bpm.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="buffer">
+		<param name="Name" value="English: Rendering settings">
+		<param name="Local" value="en\render.htm">
+		<param name="Name" value="English: Small things worth knowing">
+		<param name="Local" value="en\tips.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="Camelot">
+		<param name="Name" value="日本語: 附属ツールいろいろ">
+		<param name="Local" value="ja\tools.htm">
+		<param name="Name" value="English: The companion tools">
+		<param name="Local" value="en\tools.htm">
+		<param name="Name" value="日本語: 連続再生クロスフェード">
+		<param name="Local" value="ja\crossfade.htm">
+		<param name="Name" value="English: Continuous-play crossfade">
+		<param name="Local" value="en\crossfade.htm">
+		<param name="Name" value="日本語: 各画面の「？」操作ガイド">
+		<param name="Local" value="ja\help-buttons.htm">
+		<param name="Name" value="English: The "?" guide on every window">
+		<param name="Local" value="en\help-buttons.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="cassette">
+		<param name="Name" value="English: The analog digitizer">
+		<param name="Local" value="en\digitize.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="Changing tempo and pitch">
+		<param name="Name" value="English: Changing tempo and pitch">
+		<param name="Local" value="en\tempo-pitch.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="chords">
+		<param name="Name" value="English: Seeing the music on a piano roll">
+		<param name="Local" value="en\pianoroll.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="codec">
+		<param name="Name" value="English: Playing video">
+		<param name="Local" value="en\video.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="command palette">
+		<param name="Name" value="English: Shortcuts and the command palette">
+		<param name="Local" value="en\shortcuts.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="command roll">
+		<param name="Name" value="English: Laying commands out on the roll">
+		<param name="Local" value="en\cmdroll.htm">
+		<param name="Name" value="English: Automating a performance with prompts">
+		<param name="Local" value="en\prompt.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="companion tools">
+		<param name="Name" value="English: The companion tools">
+		<param name="Local" value="en\tools.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="context menu">
+		<param name="Name" value="English: Acrylic look and context menus">
+		<param name="Local" value="en\acrylic.htm">
+		<param name="Name" value="English: Small things worth knowing">
+		<param name="Local" value="en\tips.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="Continuous-play crossfade">
+		<param name="Name" value="English: Continuous-play crossfade">
+		<param name="Local" value="en\crossfade.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="Controlling Raira from a MIDI keyboard">
+		<param name="Name" value="English: Controlling Raira from a MIDI keyboard">
+		<param name="Local" value="en\midi.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="Controlling Raira from a phone or PC">
+		<param name="Name" value="English: Controlling Raira from a phone or PC">
+		<param name="Local" value="en\remote.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="cover art">
+		<param name="Name" value="English: Jacket art and the banner display">
+		<param name="Local" value="en\mp-jacket.htm">
+		<param name="Name" value="English: Editing tags">
+		<param name="Local" value="en\tags.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="cover.jpg">
+		<param name="Name" value="日本語: ジャケットとバナー表示">
+		<param name="Local" value="ja\mp-jacket.htm">
+		<param name="Name" value="English: Jacket art and the banner display">
+		<param name="Local" value="en\mp-jacket.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="crossfade">
+		<param name="Name" value="English: Continuous-play crossfade">
+		<param name="Local" value="en\crossfade.htm">
+		<param name="Name" value="English: Audio export (WAV / mp3 / FLAC)">
+		<param name="Local" value="en\export.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="cues">
+		<param name="Name" value="English: Cues, A-B and practice tempo">
+		<param name="Local" value="en\mp-cues.htm">
+		<param name="Name" value="English: Playback details">
+		<param name="Local" value="en\details.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="Cues, A-B and practice tempo">
+		<param name="Name" value="English: Cues, A-B and practice tempo">
+		<param name="Local" value="en\mp-cues.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="DirectShow">
+		<param name="Name" value="日本語: 動画を再生する">
+		<param name="Local" value="ja\video.htm">
+		<param name="Name" value="English: Playing video">
+		<param name="Local" value="en\video.htm">
+		<param name="Name" value="日本語: 対応形式と対応タイトル">
+		<param name="Local" value="ja\formats.htm">
+		<param name="Name" value="English: Supported formats and titles">
+		<param name="Local" value="en\formats.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="DirectX 11">
+		<param name="Name" value="日本語: おまけ：Soft3D迷路">
+		<param name="Local" value="ja\maze.htm">
+		<param name="Name" value="English: Bonus: the Soft3D maze">
+		<param name="Local" value="en\maze.htm">
+		<param name="Name" value="日本語: おまけ：Soft3D空中レース">
+		<param name="Local" value="ja\race.htm">
+		<param name="Name" value="English: Bonus: the Soft3D aerial race">
+		<param name="Local" value="en\race.htm">
+		<param name="Name" value="日本語: おまけのお遊び">
+		<param name="Local" value="ja\games.htm">
+		<param name="Name" value="English: The bonus games">
+		<param name="Local" value="en\games.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="DJ pad">
+		<param name="Name" value="English: Playing with the DJ pad">
+		<param name="Local" value="en\djpad.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="DJパッド">
+		<param name="Name" value="日本語: DJパッドで遊ぶ">
+		<param name="Local" value="ja\djpad.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="DJパッドで遊ぶ">
+		<param name="Name" value="日本語: DJパッドで遊ぶ">
+		<param name="Local" value="ja\djpad.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="DSD">
+		<param name="Name" value="日本語: 対応形式と対応タイトル">
+		<param name="Local" value="ja\formats.htm">
+		<param name="Name" value="English: Supported formats and titles">
+		<param name="Local" value="en\formats.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="Editing tags">
+		<param name="Name" value="English: Editing tags">
+		<param name="Local" value="en\tags.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="environmental model">
+		<param name="Name" value="English: Equalizer and environmental models">
+		<param name="Local" value="en\eq.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="EQ">
+		<param name="Name" value="日本語: イコライザーと環境モデル">
+		<param name="Local" value="ja\eq.htm">
+		<param name="Name" value="English: Equalizer and environmental models">
+		<param name="Local" value="en\eq.htm">
+		<param name="Name" value="日本語: 波形・周波数アナライザー">
+		<param name="Local" value="ja\analyzer.htm">
+		<param name="Name" value="English: Waveform and spectrum analyzer">
+		<param name="Local" value="en\analyzer.htm">
+		<param name="Name" value="日本語: DJパッドで遊ぶ">
+		<param name="Local" value="ja\djpad.htm">
+		<param name="Name" value="English: Playing with the DJ pad">
+		<param name="Local" value="en\djpad.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="equalizer">
+		<param name="Name" value="English: Equalizer and environmental models">
+		<param name="Local" value="en\eq.htm">
+		<param name="Name" value="English: Waveform and spectrum analyzer">
+		<param name="Local" value="en\analyzer.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="Equalizer and environmental models">
+		<param name="Name" value="English: Equalizer and environmental models">
+		<param name="Local" value="en\eq.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="EVR">
+		<param name="Name" value="日本語: 動画を再生する">
+		<param name="Local" value="ja\video.htm">
+		<param name="Name" value="English: Playing video">
+		<param name="Local" value="en\video.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="Falcom">
+		<param name="Name" value="English: The Falcom BGM screen">
+		<param name="Local" value="en\falcom-main.htm">
+		<param name="Name" value="English: Supported formats and titles">
+		<param name="Local" value="en\formats.htm">
+		<param name="Name" value="English: Pointing Raira at your game folders">
+		<param name="Local" value="en\folder-setup.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="ffmpeg">
+		<param name="Name" value="English: Live streaming">
+		<param name="Local" value="en\live.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="ffmpeg.exe">
+		<param name="Name" value="日本語: ライブ配信する">
+		<param name="Local" value="ja\live.htm">
+		<param name="Name" value="English: Live streaming">
+		<param name="Local" value="en\live.htm">
+		<param name="Name" value="日本語: 更新のチェック">
+		<param name="Local" value="ja\update.htm">
+		<param name="Name" value="English: Update checks">
+		<param name="Local" value="en\update.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="file associations">
+		<param name="Name" value="English: Rendering settings">
+		<param name="Local" value="en\render.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="file info">
+		<param name="Name" value="English: Viewing and fixing file info">
+		<param name="Local" value="en\fileinfo.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="FLAC">
+		<param name="Name" value="日本語: 対応形式と対応タイトル">
+		<param name="Local" value="ja\formats.htm">
+		<param name="Name" value="English: Supported formats and titles">
+		<param name="Local" value="en\formats.htm">
+		<param name="Name" value="日本語: 音声書き出し（WAV / mp3 / FLAC）">
+		<param name="Local" value="ja\export.htm">
+		<param name="Name" value="English: Audio export (WAV / mp3 / FLAC)">
+		<param name="Local" value="en\export.htm">
+		<param name="Name" value="日本語: タグを編集する">
+		<param name="Local" value="ja\tags.htm">
+		<param name="Name" value="English: Editing tags">
+		<param name="Local" value="en\tags.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="game folders">
+		<param name="Name" value="English: Pointing Raira at your game folders">
+		<param name="Local" value="en\folder-setup.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="game music">
+		<param name="Name" value="English: The Falcom BGM screen">
+		<param name="Local" value="en\falcom-main.htm">
+		<param name="Name" value="English: Pointing Raira at your game folders">
+		<param name="Local" value="en\folder-setup.htm">
+		<param name="Name" value="English: Supported formats and titles">
+		<param name="Local" value="en\formats.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="gapless">
+		<param name="Name" value="English: Playback details">
+		<param name="Local" value="en\details.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="getting started">
+		<param name="Name" value="English: Your first launch">
+		<param name="Local" value="en\first-start.htm">
+		<param name="Name" value="English: Raira Help">
+		<param name="Local" value="en\index.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="GS / XG">
+		<param name="Name" value="日本語: .mid を VST 音源で鳴らす">
+		<param name="Local" value="ja\vst-midi.htm">
+		<param name="Name" value="English: Playing .mid through a VST">
+		<param name="Local" value="en\vst-midi.htm">
+		<param name="Name" value="日本語: MIDIモニタ">
+		<param name="Local" value="ja\midi-monitor.htm">
+		<param name="Name" value="English: MIDI monitor">
+		<param name="Local" value="en\midi-monitor.htm">
+		<param name="Name" value="日本語: レンダリング設定">
+		<param name="Local" value="ja\render.htm">
+		<param name="Name" value="English: Rendering settings">
+		<param name="Local" value="en\render.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="GS VST">
+		<param name="Name" value="日本語: .mid を VST 音源で鳴らす">
+		<param name="Local" value="ja\vst-midi.htm">
+		<param name="Name" value="日本語: レンダリング設定">
+		<param name="Local" value="ja\render.htm">
+		<param name="Name" value="日本語: MIDIモニタ">
+		<param name="Local" value="ja\midi-monitor.htm">
+		<param name="Name" value="English: Playing .mid through a VST">
+		<param name="Local" value="en\vst-midi.htm">
+		<param name="Name" value="English: Rendering settings">
+		<param name="Local" value="en\render.htm">
+		<param name="Name" value="English: MIDI monitor">
+		<param name="Local" value="en\midi-monitor.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="hot cues">
+		<param name="Name" value="English: Playing with the DJ pad">
+		<param name="Local" value="en\djpad.htm">
+		<param name="Name" value="English: Cues, A-B and practice tempo">
+		<param name="Local" value="en\mp-cues.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="import">
+		<param name="Name" value="English: Importing playlists from other software">
+		<param name="Local" value="en\playlist-import.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="Importing playlists from other software">
+		<param name="Name" value="English: Importing playlists from other software">
+		<param name="Local" value="en\playlist-import.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="jacket art">
+		<param name="Name" value="English: Jacket art and the banner display">
+		<param name="Local" value="en\mp-jacket.htm">
+		<param name="Name" value="English: Editing tags">
+		<param name="Local" value="en\tags.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="Jacket art and the banner display">
+		<param name="Name" value="English: Jacket art and the banner display">
+		<param name="Local" value="en\mp-jacket.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="jump list">
+		<param name="Name" value="English: Shortcuts and the command palette">
+		<param name="Local" value="en\shortcuts.htm">
+		<param name="Name" value="English: Looking back at play history">
+		<param name="Local" value="en\history.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="Kill">
+		<param name="Name" value="日本語: DJパッドで遊ぶ">
+		<param name="Local" value="ja\djpad.htm">
+		<param name="Name" value="English: Playing with the DJ pad">
+		<param name="Local" value="en\djpad.htm">
+		<param name="Name" value="日本語: イコライザーと環境モデル">
+		<param name="Local" value="ja\eq.htm">
+		<param name="Name" value="English: Equalizer and environmental models">
+		<param name="Local" value="en\eq.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="KPI">
+		<param name="Name" value="日本語: KPIプラグインで対応形式をふやす">
+		<param name="Local" value="ja\kpi.htm">
+		<param name="Name" value="English: Adding formats with KPI plug-ins">
+		<param name="Local" value="en\kpi.htm">
+		<param name="Name" value="日本語: VSTホストで音源を鳴らす">
+		<param name="Local" value="ja\vst.htm">
+		<param name="Name" value="English: Playing instruments with the VST host">
+		<param name="Local" value="en\vst.htm">
+		<param name="Name" value="日本語: 音声書き出し（WAV / mp3 / FLAC）">
+		<param name="Local" value="ja\export.htm">
+		<param name="Name" value="English: Audio export (WAV / mp3 / FLAC)">
+		<param name="Local" value="en\export.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="kpi plugin">
+		<param name="Name" value="日本語: KPIプラグインで対応形式をふやす">
+		<param name="Local" value="ja\kpi.htm">
+		<param name="Name" value="English: Adding formats with KPI plug-ins">
+		<param name="Local" value="en\kpi.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="KpiHost64">
+		<param name="Name" value="日本語: KPIプラグインで対応形式をふやす">
+		<param name="Local" value="ja\kpi.htm">
+		<param name="Name" value="English: Adding formats with KPI plug-ins">
+		<param name="Local" value="en\kpi.htm">
+		<param name="Name" value="日本語: VSTホストで音源を鳴らす">
+		<param name="Local" value="ja\vst.htm">
+		<param name="Name" value="English: Playing instruments with the VST host">
+		<param name="Local" value="en\vst.htm">
+		<param name="Name" value="日本語: .mid を VST 音源で鳴らす">
+		<param name="Local" value="ja\vst-midi.htm">
+		<param name="Name" value="English: Playing .mid through a VST">
+		<param name="Local" value="en\vst-midi.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="KPIプラグインで対応形式をふやす">
+		<param name="Name" value="日本語: KPIプラグインで対応形式をふやす">
+		<param name="Local" value="ja\kpi.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="language">
+		<param name="Name" value="English: Rendering settings">
+		<param name="Local" value="en\render.htm">
+		<param name="Name" value="English: Your first launch">
+		<param name="Local" value="en\first-start.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="Laying commands out on the roll">
+		<param name="Name" value="English: Laying commands out on the roll">
+		<param name="Local" value="en\cmdroll.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="library tree">
+		<param name="Name" value="English: Smart playlists and the library tree">
+		<param name="Local" value="en\smart-lib.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="limiter">
+		<param name="Name" value="English: Tools for shaping the sound">
+		<param name="Local" value="en\protools.htm">
+		<param name="Name" value="English: Audio export (WAV / mp3 / FLAC)">
+		<param name="Local" value="en\export.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="Live streaming">
+		<param name="Name" value="English: Live streaming">
+		<param name="Local" value="en\live.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="live streaming">
+		<param name="Name" value="English: Live streaming">
+		<param name="Local" value="en\live.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="Looking back at play history">
+		<param name="Name" value="English: Looking back at play history">
+		<param name="Local" value="en\history.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="loop playback">
+		<param name="Name" value="English: The Falcom BGM screen">
+		<param name="Local" value="en\falcom-main.htm">
+		<param name="Name" value="English: Playback details">
+		<param name="Local" value="en\details.htm">
+		<param name="Name" value="English: Supported formats and titles">
+		<param name="Local" value="en\formats.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="loopback">
+		<param name="Name" value="English: Recording what you hear">
+		<param name="Local" value="en\device-rec.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="loudness normalize">
+		<param name="Name" value="English: The companion tools">
+		<param name="Local" value="en\tools.htm">
+		<param name="Name" value="English: Tools for shaping the sound">
+		<param name="Local" value="en\protools.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="LRC">
+		<param name="Name" value="日本語: 歌詞を表示する">
+		<param name="Local" value="ja\lyrics.htm">
+		<param name="Name" value="English: Showing lyrics">
+		<param name="Local" value="en\lyrics.htm">
+		<param name="Name" value="日本語: プレイヤー内の歌詞パネル">
+		<param name="Local" value="ja\mp-lyrics-panel.htm">
+		<param name="Name" value="English: The in-player lyrics panel">
+		<param name="Local" value="en\mp-lyrics-panel.htm">
+		<param name="Name" value="日本語: シークバーの読み方">
+		<param name="Local" value="ja\mp-seek.htm">
+		<param name="Name" value="English: Reading the seek bar">
+		<param name="Local" value="en\mp-seek.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="lyrics">
+		<param name="Name" value="English: Showing lyrics">
+		<param name="Local" value="en\lyrics.htm">
+		<param name="Name" value="English: The in-player lyrics panel">
+		<param name="Local" value="en\mp-lyrics-panel.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="M/S">
+		<param name="Name" value="日本語: 音を整えるツール">
+		<param name="Local" value="ja\protools.htm">
+		<param name="Name" value="English: Tools for shaping the sound">
+		<param name="Local" value="en\protools.htm">
+		<param name="Name" value="日本語: 再生詳細">
+		<param name="Local" value="ja\details.htm">
+		<param name="Name" value="English: Playback details">
+		<param name="Local" value="en\details.htm">
+		<param name="Name" value="日本語: DJパッドで遊ぶ">
+		<param name="Local" value="ja\djpad.htm">
+		<param name="Name" value="English: Playing with the DJ pad">
+		<param name="Local" value="en\djpad.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="m3u">
+		<param name="Name" value="日本語: 他のソフトのプレイリストを取り込む">
+		<param name="Local" value="ja\playlist-import.htm">
+		<param name="Name" value="English: Importing playlists from other software">
+		<param name="Local" value="en\playlist-import.htm">
+		<param name="Name" value="日本語: 対応形式と対応タイトル">
+		<param name="Local" value="ja\formats.htm">
+		<param name="Name" value="English: Supported formats and titles">
+		<param name="Local" value="en\formats.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="maze">
+		<param name="Name" value="English: Bonus: the Soft3D maze">
+		<param name="Local" value="en\maze.htm">
+		<param name="Name" value="English: The bonus games">
+		<param name="Local" value="en\games.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="Measuring BPM">
+		<param name="Name" value="English: Measuring BPM">
+		<param name="Local" value="en\bpm.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="metronome">
+		<param name="Name" value="English: Tuner practice">
+		<param name="Local" value="en\tuner.htm">
+		<param name="Name" value="English: Measuring BPM">
+		<param name="Local" value="en\bpm.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="microphone mix">
+		<param name="Name" value="English: Saving to WAV">
+		<param name="Local" value="en\wav-save.htm">
+		<param name="Name" value="English: Recording what you hear">
+		<param name="Local" value="en\device-rec.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="Mid/Side">
+		<param name="Name" value="日本語: 音を整えるツール">
+		<param name="Local" value="ja\protools.htm">
+		<param name="Name" value="English: Tools for shaping the sound">
+		<param name="Local" value="en\protools.htm">
+		<param name="Name" value="日本語: 再生詳細">
+		<param name="Local" value="ja\details.htm">
+		<param name="Name" value="English: Playback details">
+		<param name="Local" value="en\details.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="MIDI">
+		<param name="Name" value="日本語: MIDIキーボードで操作する">
+		<param name="Local" value="ja\midi.htm">
+		<param name="Name" value="English: Controlling Raira from a MIDI keyboard">
+		<param name="Local" value="en\midi.htm">
+		<param name="Name" value="日本語: MIDIモニタ">
+		<param name="Local" value="ja\midi-monitor.htm">
+		<param name="Name" value="English: MIDI monitor">
+		<param name="Local" value="en\midi-monitor.htm">
+		<param name="Name" value="日本語: VSTホストで音源を鳴らす">
+		<param name="Local" value="ja\vst.htm">
+		<param name="Name" value="English: Playing instruments with the VST host">
+		<param name="Local" value="en\vst.htm">
+		<param name="Name" value="日本語: .mid を VST 音源で鳴らす">
+		<param name="Local" value="ja\vst-midi.htm">
+		<param name="Name" value="English: Playing .mid through a VST">
+		<param name="Local" value="en\vst-midi.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="MIDI monitor">
+		<param name="Name" value="English: MIDI monitor">
+		<param name="Local" value="en\midi-monitor.htm">
+		<param name="Name" value="English: Playing .mid through a VST">
+		<param name="Local" value="en\vst-midi.htm">
+		<param name="Name" value="English: Seeing the music on a piano roll">
+		<param name="Local" value="en\pianoroll.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="MIDIキーボードで操作する">
+		<param name="Name" value="日本語: MIDIキーボードで操作する">
+		<param name="Local" value="ja\midi.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="MIDIモニタ">
+		<param name="Name" value="日本語: MIDIモニタ">
+		<param name="Local" value="ja\midi-monitor.htm">
+		<param name="Name" value="日本語: .mid を VST 音源で鳴らす">
+		<param name="Local" value="ja\vst-midi.htm">
+		<param name="Name" value="日本語: ピアノロールで音を見る">
+		<param name="Local" value="ja\pianoroll.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="mirror output">
+		<param name="Name" value="English: Sending sound to a second device">
+		<param name="Local" value="en\mirror.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="missing files">
+		<param name="Name" value="English: Working with playlists">
+		<param name="Local" value="en\playlist.htm">
+		<param name="Name" value="English: Smart playlists and the library tree">
+		<param name="Local" value="en\smart-lib.htm">
+		<param name="Name" value="English: Small things worth knowing">
+		<param name="Local" value="en\tips.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="mp3">
+		<param name="Name" value="日本語: 対応形式と対応タイトル">
+		<param name="Local" value="ja\formats.htm">
+		<param name="Name" value="English: Supported formats and titles">
+		<param name="Local" value="en\formats.htm">
+		<param name="Name" value="日本語: 音声書き出し（WAV / mp3 / FLAC）">
+		<param name="Local" value="ja\export.htm">
+		<param name="Name" value="English: Audio export (WAV / mp3 / FLAC)">
+		<param name="Local" value="en\export.htm">
+		<param name="Name" value="日本語: 再生している音を録音する">
+		<param name="Local" value="ja\device-rec.htm">
+		<param name="Name" value="English: Recording what you hear">
+		<param name="Local" value="en\device-rec.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="MP4">
+		<param name="Name" value="日本語: 画面を録画する">
+		<param name="Local" value="ja\capture.htm">
+		<param name="Name" value="English: Recording your screen">
+		<param name="Local" value="en\capture.htm">
+		<param name="Name" value="日本語: 動画を再生する">
+		<param name="Local" value="ja\video.htm">
+		<param name="Name" value="English: Playing video">
+		<param name="Local" value="en\video.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="MusicBrainz">
+		<param name="Name" value="日本語: 附属ツールいろいろ">
+		<param name="Local" value="ja\tools.htm">
+		<param name="Name" value="日本語: タグを編集する">
+		<param name="Local" value="ja\tags.htm">
+		<param name="Name" value="English: The companion tools">
+		<param name="Local" value="en\tools.htm">
+		<param name="Name" value="English: Editing tags">
+		<param name="Local" value="en\tags.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="MusicXML">
+		<param name="Name" value="日本語: ピアノロールで音を見る">
+		<param name="Local" value="ja\pianoroll.htm">
+		<param name="Name" value="English: Seeing the music on a piano roll">
+		<param name="Local" value="en\pianoroll.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="no sound">
+		<param name="Name" value="English: Small things worth knowing">
+		<param name="Local" value="en\tips.htm">
+		<param name="Name" value="English: Rendering settings">
+		<param name="Local" value="en\render.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="nowplaying.txt">
+		<param name="Name" value="日本語: 附属ツールいろいろ">
+		<param name="Local" value="ja\tools.htm">
+		<param name="Name" value="English: The companion tools">
+		<param name="Local" value="en\tools.htm">
+		<param name="Name" value="日本語: ライブ配信する">
+		<param name="Local" value="ja\live.htm">
+		<param name="Name" value="English: Live streaming">
+		<param name="Local" value="en\live.htm">
+		<param name="Name" value="日本語: 再生履歴を見る">
+		<param name="Local" value="ja\history.htm">
+		<param name="Name" value="English: Looking back at play history">
+		<param name="Local" value="en\history.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="OBS">
+		<param name="Name" value="English: Controlling Raira from a phone or PC">
+		<param name="Local" value="en\remote.htm">
+		<param name="Name" value="English: Live streaming">
+		<param name="Local" value="en\live.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="Ogg Opus">
+		<param name="Name" value="日本語: 対応形式と対応タイトル">
+		<param name="Local" value="ja\formats.htm">
+		<param name="Name" value="English: Supported formats and titles">
+		<param name="Local" value="en\formats.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="Ogg Vorbis">
+		<param name="Name" value="日本語: 対応形式と対応タイトル">
+		<param name="Local" value="ja\formats.htm">
+		<param name="Name" value="English: Supported formats and titles">
+		<param name="Local" value="en\formats.htm">
+		<param name="Name" value="日本語: タグを編集する">
+		<param name="Local" value="ja\tags.htm">
+		<param name="Name" value="English: Editing tags">
+		<param name="Local" value="en\tags.htm">
+		<param name="Name" value="日本語: 再生詳細">
+		<param name="Local" value="ja\details.htm">
+		<param name="Name" value="English: Playback details">
+		<param name="Local" value="en\details.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="oggYSEDbgm">
+		<param name="Name" value="日本語: らいら ヘルプ">
+		<param name="Local" value="ja\index.htm">
+		<param name="Name" value="English: Raira Help">
+		<param name="Local" value="en\index.htm">
+		<param name="Name" value="日本語: 更新のチェック">
+		<param name="Local" value="ja\update.htm">
+		<param name="Name" value="English: Update checks">
+		<param name="Local" value="en\update.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="operation guide">
+		<param name="Name" value="English: The "?" guide on every window">
+		<param name="Local" value="en\help-buttons.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="overlay">
+		<param name="Name" value="English: Controlling Raira from a phone or PC">
+		<param name="Local" value="en\remote.htm">
+		<param name="Name" value="English: Live streaming">
+		<param name="Local" value="en\live.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="per-song settings">
+		<param name="Name" value="English: Working with playlists">
+		<param name="Local" value="en\playlist.htm">
+		<param name="Name" value="English: Small things worth knowing">
+		<param name="Local" value="en\tips.htm">
+		<param name="Name" value="English: Viewing and fixing file info">
+		<param name="Local" value="en\fileinfo.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="phone">
+		<param name="Name" value="English: Controlling Raira from a phone or PC">
+		<param name="Local" value="en\remote.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="photo frame">
+		<param name="Name" value="English: The photo frame">
+		<param name="Local" value="en\photoframe.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="piano roll">
+		<param name="Name" value="English: Seeing the music on a piano roll">
+		<param name="Local" value="en\pianoroll.htm">
+		<param name="Name" value="English: Tuning piano roll detection">
+		<param name="Local" value="en\pianoroll-tune.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="pitch">
+		<param name="Name" value="English: Changing tempo and pitch">
+		<param name="Local" value="en\tempo-pitch.htm">
+		<param name="Name" value="English: The voice changer">
+		<param name="Local" value="en\voice.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="play history">
+		<param name="Name" value="English: Looking back at play history">
+		<param name="Local" value="en\history.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="Playback details">
+		<param name="Name" value="English: Playback details">
+		<param name="Local" value="en\details.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="playback device">
+		<param name="Name" value="English: Rendering settings">
+		<param name="Local" value="en\render.htm">
+		<param name="Name" value="English: Sending sound to a second device">
+		<param name="Local" value="en\mirror.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="Playing .mid through a VST">
+		<param name="Name" value="English: Playing .mid through a VST">
+		<param name="Local" value="en\vst-midi.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="Playing instruments with the VST host">
+		<param name="Name" value="English: Playing instruments with the VST host">
+		<param name="Local" value="en\vst.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="Playing video">
+		<param name="Name" value="English: Playing video">
+		<param name="Local" value="en\video.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="Playing with the DJ pad">
+		<param name="Name" value="English: Playing with the DJ pad">
+		<param name="Local" value="en\djpad.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="Playing, stopping and volume">
+		<param name="Name" value="English: Playing, stopping and volume">
+		<param name="Local" value="en\mp-transport.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="playlist">
+		<param name="Name" value="English: Working with playlists">
+		<param name="Local" value="en\playlist.htm">
+		<param name="Name" value="English: Importing playlists from other software">
+		<param name="Local" value="en\playlist-import.htm">
+		<param name="Name" value="English: Smart playlists and the library tree">
+		<param name="Local" value="en\smart-lib.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="Pointing Raira at your game folders">
+		<param name="Name" value="English: Pointing Raira at your game folders">
+		<param name="Local" value="en\folder-setup.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="practice">
+		<param name="Name" value="English: Cues, A-B and practice tempo">
+		<param name="Local" value="en\mp-cues.htm">
+		<param name="Name" value="English: Tuner practice">
+		<param name="Local" value="en\tuner.htm">
+		<param name="Name" value="English: Changing tempo and pitch">
+		<param name="Local" value="en\tempo-pitch.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="Prefer VST">
+		<param name="Name" value="English: Playing .mid through a VST">
+		<param name="Local" value="en\vst-midi.htm">
+		<param name="Name" value="English: Rendering settings">
+		<param name="Local" value="en\render.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="preset">
+		<param name="Name" value="English: Equalizer and environmental models">
+		<param name="Local" value="en\eq.htm">
+		<param name="Name" value="English: The voice changer">
+		<param name="Local" value="en\voice.htm">
+		<param name="Name" value="English: Playing instruments with the VST host">
+		<param name="Local" value="en\vst.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="prompt">
+		<param name="Name" value="English: Automating a performance with prompts">
+		<param name="Local" value="en\prompt.htm">
+		<param name="Name" value="English: Laying commands out on the roll">
+		<param name="Local" value="en\cmdroll.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="race">
+		<param name="Name" value="English: Bonus: the Soft3D aerial race">
+		<param name="Local" value="en\race.htm">
+		<param name="Name" value="English: The bonus games">
+		<param name="Local" value="en\games.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="Raira">
+		<param name="Name" value="日本語: らいら ヘルプ">
+		<param name="Local" value="ja\index.htm">
+		<param name="Name" value="English: Raira Help">
+		<param name="Local" value="en\index.htm">
+		<param name="Name" value="日本語: メディアプレイヤー画面を見てみる">
+		<param name="Local" value="ja\mp-overview.htm">
+		<param name="Name" value="English: A tour of the media player screen">
+		<param name="Local" value="en\mp-overview.htm">
+		<param name="Name" value="日本語: ふたつの画面モード">
+		<param name="Local" value="ja\modes.htm">
+		<param name="Name" value="English: The two screen modes">
+		<param name="Local" value="en\modes.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="Raira Help">
+		<param name="Name" value="English: Raira Help">
+		<param name="Local" value="en\index.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="Reading the seek bar">
+		<param name="Name" value="English: Reading the seek bar">
+		<param name="Local" value="en\mp-seek.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="recording">
+		<param name="Name" value="English: Recording what you hear">
+		<param name="Local" value="en\device-rec.htm">
+		<param name="Name" value="English: The analog digitizer">
+		<param name="Local" value="en\digitize.htm">
+		<param name="Name" value="English: Saving to WAV">
+		<param name="Local" value="en\wav-save.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="Recording what you hear">
+		<param name="Name" value="English: Recording what you hear">
+		<param name="Local" value="en\device-rec.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="Recording your screen">
+		<param name="Name" value="English: Recording your screen">
+		<param name="Local" value="en\capture.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="remote control">
+		<param name="Name" value="English: Controlling Raira from a phone or PC">
+		<param name="Local" value="en\remote.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="Rendering settings">
+		<param name="Name" value="English: Rendering settings">
+		<param name="Local" value="en\render.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="rendering settings">
+		<param name="Name" value="English: Rendering settings">
+		<param name="Local" value="en\render.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="ReplayGain">
+		<param name="Name" value="English: Playback details">
+		<param name="Local" value="en\details.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="ReplayGain / gapless">
+		<param name="Name" value="日本語: 再生詳細">
+		<param name="Local" value="ja\details.htm">
+		<param name="Name" value="English: Playback details">
+		<param name="Local" value="en\details.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="RF64">
+		<param name="Name" value="日本語: WAVへ保存する">
+		<param name="Local" value="ja\wav-save.htm">
+		<param name="Name" value="English: Saving to WAV">
+		<param name="Local" value="en\wav-save.htm">
+		<param name="Name" value="日本語: 音声書き出し（WAV / mp3 / FLAC）">
+		<param name="Local" value="ja\export.htm">
+		<param name="Name" value="English: Audio export (WAV / mp3 / FLAC)">
+		<param name="Local" value="en\export.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="RTMP">
+		<param name="Name" value="English: Live streaming">
+		<param name="Local" value="en\live.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="RTMP / YouTube Live">
+		<param name="Name" value="日本語: ライブ配信する">
+		<param name="Local" value="ja\live.htm">
+		<param name="Name" value="English: Live streaming">
+		<param name="Local" value="en\live.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="save to WAV">
+		<param name="Name" value="English: Saving to WAV">
+		<param name="Local" value="en\wav-save.htm">
+		<param name="Name" value="English: Audio export (WAV / mp3 / FLAC)">
+		<param name="Local" value="en\export.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="Saving to WAV">
+		<param name="Name" value="English: Saving to WAV">
+		<param name="Local" value="en\wav-save.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="scratch">
+		<param name="Name" value="English: Playing with the DJ pad">
+		<param name="Local" value="en\djpad.htm">
+		<param name="Name" value="English: Controlling Raira from a phone or PC">
+		<param name="Local" value="en\remote.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="screen capture">
+		<param name="Name" value="English: Recording your screen">
+		<param name="Local" value="en\capture.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="Seeing the music on a piano roll">
+		<param name="Name" value="English: Seeing the music on a piano roll">
+		<param name="Local" value="en\pianoroll.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="seek bar">
+		<param name="Name" value="English: Reading the seek bar">
+		<param name="Local" value="en\mp-seek.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="Sending sound to a second device">
+		<param name="Name" value="English: Sending sound to a second device">
+		<param name="Local" value="en\mirror.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="shortcuts">
+		<param name="Name" value="English: Shortcuts and the command palette">
+		<param name="Local" value="en\shortcuts.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="Shortcuts and the command palette">
+		<param name="Name" value="English: Shortcuts and the command palette">
+		<param name="Local" value="en\shortcuts.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="Showing lyrics">
+		<param name="Name" value="English: Showing lyrics">
+		<param name="Local" value="en\lyrics.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="sleep timer">
+		<param name="Name" value="English: Sleep timer and alarm">
+		<param name="Local" value="en\sleep-alarm.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="Sleep timer and alarm">
+		<param name="Name" value="English: Sleep timer and alarm">
+		<param name="Local" value="en\sleep-alarm.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="slideshow">
+		<param name="Name" value="English: The photo frame">
+		<param name="Local" value="en\photoframe.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="Small things worth knowing">
+		<param name="Name" value="English: Small things worth knowing">
+		<param name="Local" value="en\tips.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="smart playlist">
+		<param name="Name" value="English: Smart playlists and the library tree">
+		<param name="Local" value="en\smart-lib.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="Smart playlists and the library tree">
+		<param name="Name" value="English: Smart playlists and the library tree">
+		<param name="Local" value="en\smart-lib.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="SMF">
+		<param name="Name" value="日本語: MIDIモニタ">
+		<param name="Local" value="ja\midi-monitor.htm">
+		<param name="Name" value="English: MIDI monitor">
+		<param name="Local" value="en\midi-monitor.htm">
+		<param name="Name" value="日本語: .mid を VST 音源で鳴らす">
+		<param name="Local" value="ja\vst-midi.htm">
+		<param name="Name" value="English: Playing .mid through a VST">
+		<param name="Local" value="en\vst-midi.htm">
+		<param name="Name" value="日本語: 対応形式と対応タイトル">
+		<param name="Local" value="ja\formats.htm">
+		<param name="Name" value="English: Supported formats and titles">
+		<param name="Local" value="en\formats.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="Soft 3D">
+		<param name="Name" value="English: MIDI monitor">
+		<param name="Local" value="en\midi-monitor.htm">
+		<param name="Name" value="English: Seeing the music on a piano roll">
+		<param name="Local" value="en\pianoroll.htm">
+		<param name="Name" value="English: Bonus: the Soft3D maze">
+		<param name="Local" value="en\maze.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="Soft3D">
+		<param name="Name" value="日本語: MIDIモニタ">
+		<param name="Local" value="ja\midi-monitor.htm">
+		<param name="Name" value="English: MIDI monitor">
+		<param name="Local" value="en\midi-monitor.htm">
+		<param name="Name" value="日本語: おまけ：Soft3D迷路">
+		<param name="Local" value="ja\maze.htm">
+		<param name="Name" value="English: Bonus: the Soft3D maze">
+		<param name="Local" value="en\maze.htm">
+		<param name="Name" value="日本語: おまけ：Soft3D空中レース">
+		<param name="Local" value="ja\race.htm">
+		<param name="Name" value="English: Bonus: the Soft3D aerial race">
+		<param name="Local" value="en\race.htm">
+		<param name="Name" value="日本語: ピアノロールで音を見る">
+		<param name="Local" value="ja\pianoroll.htm">
+		<param name="Name" value="English: Seeing the music on a piano roll">
+		<param name="Local" value="en\pianoroll.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="SongParams.dat">
+		<param name="Name" value="日本語: ちょっとしたコツ">
+		<param name="Local" value="ja\tips.htm">
+		<param name="Name" value="English: Small things worth knowing">
+		<param name="Local" value="en\tips.htm">
+		<param name="Name" value="日本語: シークバーの読み方">
+		<param name="Local" value="ja\mp-seek.htm">
+		<param name="Name" value="English: Reading the seek bar">
+		<param name="Local" value="en\mp-seek.htm">
+		<param name="Name" value="日本語: 更新のチェック">
+		<param name="Local" value="ja\update.htm">
+		<param name="Name" value="English: Update checks">
+		<param name="Local" value="en\update.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="SOUND Canvas">
+		<param name="Name" value="日本語: .mid を VST 音源で鳴らす">
+		<param name="Local" value="ja\vst-midi.htm">
+		<param name="Name" value="日本語: VSTホストで音源を鳴らす">
+		<param name="Local" value="ja\vst.htm">
+		<param name="Name" value="English: Playing .mid through a VST">
+		<param name="Local" value="en\vst-midi.htm">
+		<param name="Name" value="English: Playing instruments with the VST host">
+		<param name="Local" value="en\vst.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="sound meter">
+		<param name="Name" value="English: The sound meter">
+		<param name="Local" value="en\soundmeter.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="spectrum">
+		<param name="Name" value="English: Waveform and spectrum analyzer">
+		<param name="Local" value="en\analyzer.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="star rating">
+		<param name="Name" value="English: Working with playlists">
+		<param name="Local" value="en\playlist.htm">
+		<param name="Name" value="English: Smart playlists and the library tree">
+		<param name="Local" value="en\smart-lib.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="startup mode">
+		<param name="Name" value="English: The two screen modes">
+		<param name="Local" value="en\modes.htm">
+		<param name="Name" value="English: Your first launch">
+		<param name="Local" value="en\first-start.htm">
+		<param name="Name" value="English: Rendering settings">
+		<param name="Local" value="en\render.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="streaming">
+		<param name="Name" value="English: Live streaming">
+		<param name="Local" value="en\live.htm">
+		<param name="Name" value="English: Recording your screen">
+		<param name="Local" value="en\capture.htm">
+		<param name="Name" value="English: Controlling Raira from a phone or PC">
+		<param name="Local" value="en\remote.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="stuttering audio">
+		<param name="Name" value="English: Small things worth knowing">
+		<param name="Local" value="en\tips.htm">
+		<param name="Name" value="English: Rendering settings">
+		<param name="Local" value="en\render.htm">
+		<param name="Name" value="English: Continuous-play crossfade">
+		<param name="Local" value="en\crossfade.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="subtitles">
+		<param name="Name" value="English: Playing video">
+		<param name="Local" value="en\video.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="supported formats">
+		<param name="Name" value="English: Supported formats and titles">
+		<param name="Local" value="en\formats.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="Supported formats and titles">
+		<param name="Name" value="English: Supported formats and titles">
+		<param name="Local" value="en\formats.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="supported titles">
+		<param name="Name" value="English: Supported formats and titles">
+		<param name="Local" value="en\formats.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="tag editing">
+		<param name="Name" value="English: Editing tags">
+		<param name="Local" value="en\tags.htm">
+		<param name="Name" value="English: Viewing and fixing file info">
+		<param name="Local" value="en\fileinfo.htm">
+		<param name="Name" value="English: Playback details">
+		<param name="Local" value="en\details.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="tempo">
+		<param name="Name" value="English: Changing tempo and pitch">
+		<param name="Local" value="en\tempo-pitch.htm">
+		<param name="Name" value="English: Cues, A-B and practice tempo">
+		<param name="Local" value="en\mp-cues.htm">
+		<param name="Name" value="English: Measuring BPM">
+		<param name="Local" value="en\bpm.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="The "?" guide on every window">
+		<param name="Name" value="English: The "?" guide on every window">
+		<param name="Local" value="en\help-buttons.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="The analog digitizer">
+		<param name="Name" value="English: The analog digitizer">
+		<param name="Local" value="en\digitize.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="The bonus games">
+		<param name="Name" value="English: The bonus games">
+		<param name="Local" value="en\games.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="The companion tools">
+		<param name="Name" value="English: The companion tools">
+		<param name="Local" value="en\tools.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="The Falcom BGM screen">
+		<param name="Name" value="English: The Falcom BGM screen">
+		<param name="Local" value="en\falcom-main.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="The in-player lyrics panel">
+		<param name="Name" value="English: The in-player lyrics panel">
+		<param name="Local" value="en\mp-lyrics-panel.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="The photo frame">
+		<param name="Name" value="English: The photo frame">
+		<param name="Local" value="en\photoframe.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="The sound meter">
+		<param name="Name" value="English: The sound meter">
+		<param name="Local" value="en\soundmeter.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="The two screen modes">
+		<param name="Name" value="English: The two screen modes">
+		<param name="Local" value="en\modes.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="The voice changer">
+		<param name="Name" value="English: The voice changer">
+		<param name="Local" value="en\voice.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="Tools for shaping the sound">
+		<param name="Name" value="English: Tools for shaping the sound">
+		<param name="Local" value="en\protools.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="Trails">
+		<param name="Name" value="English: Supported formats and titles">
+		<param name="Local" value="en\formats.htm">
+		<param name="Name" value="English: The Falcom BGM screen">
+		<param name="Local" value="en\falcom-main.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="troubleshooting">
+		<param name="Name" value="English: Small things worth knowing">
+		<param name="Local" value="en\tips.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="True Peak">
+		<param name="Name" value="English: Tools for shaping the sound">
+		<param name="Local" value="en\protools.htm">
+		<param name="Name" value="English: Playback details">
+		<param name="Local" value="en\details.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="tuner">
+		<param name="Name" value="English: Tuner practice">
+		<param name="Local" value="en\tuner.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="Tuner practice">
+		<param name="Name" value="English: Tuner practice">
+		<param name="Local" value="en\tuner.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="Tuning piano roll detection">
+		<param name="Name" value="English: Tuning piano roll detection">
+		<param name="Local" value="en\pianoroll-tune.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="Up Next">
+		<param name="Name" value="日本語: プレイリストを使う">
+		<param name="Local" value="ja\playlist.htm">
+		<param name="Name" value="English: Working with playlists">
+		<param name="Local" value="en\playlist.htm">
+		<param name="Name" value="日本語: 再生と停止、音量">
+		<param name="Local" value="ja\mp-transport.htm">
+		<param name="Name" value="English: Playing, stopping and volume">
+		<param name="Local" value="en\mp-transport.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="Update checks">
+		<param name="Name" value="English: Update checks">
+		<param name="Local" value="en\update.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="updates">
+		<param name="Name" value="English: Update checks">
+		<param name="Local" value="en\update.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="video">
+		<param name="Name" value="English: Playing video">
+		<param name="Local" value="en\video.htm">
+		<param name="Name" value="English: Supported formats and titles">
+		<param name="Local" value="en\formats.htm">
+		<param name="Name" value="English: Recording your screen">
+		<param name="Local" value="en\capture.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="Viewing and fixing file info">
+		<param name="Name" value="English: Viewing and fixing file info">
+		<param name="Local" value="en\fileinfo.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="vinyl">
+		<param name="Name" value="English: The analog digitizer">
+		<param name="Local" value="en\digitize.htm">
+		<param name="Name" value="English: Playing with the DJ pad">
+		<param name="Local" value="en\djpad.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="virtual cable">
+		<param name="Name" value="English: The voice changer">
+		<param name="Local" value="en\voice.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="vocal cancel">
+		<param name="Name" value="English: Tools for shaping the sound">
+		<param name="Local" value="en\protools.htm">
+		<param name="Name" value="English: Playing with the DJ pad">
+		<param name="Local" value="en\djpad.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="voice changer">
+		<param name="Name" value="English: The voice changer">
+		<param name="Local" value="en\voice.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="VST">
+		<param name="Name" value="日本語: VSTホストで音源を鳴らす">
+		<param name="Local" value="ja\vst.htm">
+		<param name="Name" value="English: Playing instruments with the VST host">
+		<param name="Local" value="en\vst.htm">
+		<param name="Name" value="日本語: .mid を VST 音源で鳴らす">
+		<param name="Local" value="ja\vst-midi.htm">
+		<param name="Name" value="English: Playing .mid through a VST">
+		<param name="Local" value="en\vst-midi.htm">
+		<param name="Name" value="日本語: MIDIキーボードで操作する">
+		<param name="Local" value="ja\midi.htm">
+		<param name="Name" value="English: Controlling Raira from a MIDI keyboard">
+		<param name="Local" value="en\midi.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="VSTホストで音源を鳴らす">
+		<param name="Name" value="日本語: VSTホストで音源を鳴らす">
+		<param name="Local" value="ja\vst.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="VST優先">
+		<param name="Name" value="日本語: .mid を VST 音源で鳴らす">
+		<param name="Local" value="ja\vst-midi.htm">
+		<param name="Name" value="日本語: レンダリング設定">
+		<param name="Local" value="ja\render.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="waveform">
+		<param name="Name" value="English: Reading the seek bar">
+		<param name="Local" value="en\mp-seek.htm">
+		<param name="Name" value="English: Waveform and spectrum analyzer">
+		<param name="Local" value="en\analyzer.htm">
+		<param name="Name" value="English: Playback details">
+		<param name="Local" value="en\details.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="Waveform and spectrum analyzer">
+		<param name="Name" value="English: Waveform and spectrum analyzer">
+		<param name="Local" value="en\analyzer.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="WAVへ保存">
+		<param name="Name" value="日本語: WAVへ保存する">
+		<param name="Local" value="ja\wav-save.htm">
+		<param name="Name" value="日本語: 音声書き出し（WAV / mp3 / FLAC）">
+		<param name="Local" value="ja\export.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="WAVへ保存する">
+		<param name="Name" value="日本語: WAVへ保存する">
+		<param name="Local" value="ja\wav-save.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="Working with playlists">
+		<param name="Name" value="English: Working with playlists">
+		<param name="Local" value="en\playlist.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="XG VST">
+		<param name="Name" value="日本語: .mid を VST 音源で鳴らす">
+		<param name="Local" value="ja\vst-midi.htm">
+		<param name="Name" value="日本語: レンダリング設定">
+		<param name="Local" value="ja\render.htm">
+		<param name="Name" value="日本語: MIDIモニタ">
+		<param name="Local" value="ja\midi-monitor.htm">
+		<param name="Name" value="English: Playing .mid through a VST">
+		<param name="Local" value="en\vst-midi.htm">
+		<param name="Name" value="English: Rendering settings">
+		<param name="Local" value="en\render.htm">
+		<param name="Name" value="English: MIDI monitor">
+		<param name="Local" value="en\midi-monitor.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="Your first launch">
+		<param name="Name" value="English: Your first launch">
+		<param name="Local" value="en\first-start.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="YouTube">
+		<param name="Name" value="English: Live streaming">
+		<param name="Local" value="en\live.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="Ys">
+		<param name="Name" value="English: Supported formats and titles">
+		<param name="Local" value="en\formats.htm">
+		<param name="Name" value="English: The Falcom BGM screen">
+		<param name="Local" value="en\falcom-main.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="おまけ">
+		<param name="Name" value="日本語: おまけのお遊び">
+		<param name="Local" value="ja\games.htm">
+		<param name="Name" value="日本語: おまけ：Soft3D迷路">
+		<param name="Local" value="ja\maze.htm">
+		<param name="Name" value="日本語: おまけ：Soft3D空中レース">
+		<param name="Local" value="ja\race.htm">
+		<param name="Name" value="日本語: フォトフレーム">
+		<param name="Local" value="ja\photoframe.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="おまけのお遊び">
+		<param name="Name" value="日本語: おまけのお遊び">
+		<param name="Local" value="ja\games.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="おまけ：Soft3D空中レース">
+		<param name="Name" value="日本語: おまけ：Soft3D空中レース">
+		<param name="Local" value="ja\race.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="おまけ：Soft3D迷路">
+		<param name="Name" value="日本語: おまけ：Soft3D迷路">
+		<param name="Local" value="ja\maze.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="ちょっとしたコツ">
+		<param name="Name" value="日本語: ちょっとしたコツ">
+		<param name="Local" value="ja\tips.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="はじめて">
+		<param name="Name" value="日本語: はじめて起動したとき">
+		<param name="Local" value="ja\first-start.htm">
+		<param name="Name" value="日本語: らいら ヘルプ">
+		<param name="Local" value="ja\index.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="はじめて起動したとき">
+		<param name="Name" value="日本語: はじめて起動したとき">
+		<param name="Local" value="ja\first-start.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="ふたつの画面モード">
+		<param name="Name" value="日本語: ふたつの画面モード">
+		<param name="Local" value="ja\modes.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="もう一台のスピーカーへ同時に出す">
+		<param name="Name" value="日本語: もう一台のスピーカーへ同時に出す">
+		<param name="Local" value="ja\mirror.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="らいら ヘルプ">
+		<param name="Name" value="日本語: らいら ヘルプ">
+		<param name="Local" value="ja\index.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="アクリル">
+		<param name="Name" value="日本語: アクリル表示とコンテキストメニュー">
+		<param name="Local" value="ja\acrylic.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="アクリル表示とコンテキストメニュー">
+		<param name="Name" value="日本語: アクリル表示とコンテキストメニュー">
+		<param name="Local" value="ja\acrylic.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="アナライザー">
+		<param name="Name" value="日本語: 波形・周波数アナライザー">
+		<param name="Local" value="ja\analyzer.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="アナログ">
+		<param name="Name" value="日本語: アナログ起こし台">
+		<param name="Local" value="ja\digitize.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="アナログ起こし台">
+		<param name="Name" value="日本語: アナログ起こし台">
+		<param name="Local" value="ja\digitize.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="アラーム">
+		<param name="Name" value="日本語: スリープタイマーとアラーム">
+		<param name="Local" value="ja\sleep-alarm.htm">
+		<param name="Name" value="日本語: 附属ツールいろいろ">
+		<param name="Local" value="ja\tools.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="イコライザー">
+		<param name="Name" value="日本語: イコライザーと環境モデル">
+		<param name="Local" value="ja\eq.htm">
+		<param name="Name" value="日本語: 波形・周波数アナライザー">
+		<param name="Local" value="ja\analyzer.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="イコライザーと環境モデル">
+		<param name="Name" value="日本語: イコライザーと環境モデル">
+		<param name="Local" value="ja\eq.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="イース">
+		<param name="Name" value="日本語: 対応形式と対応タイトル">
+		<param name="Local" value="ja\formats.htm">
+		<param name="Name" value="日本語: ファルコムBGM画面">
+		<param name="Local" value="ja\falcom-main.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="オーバーレイ">
+		<param name="Name" value="日本語: スマホやPCから操作する">
+		<param name="Local" value="ja\remote.htm">
+		<param name="Name" value="日本語: ライブ配信する">
+		<param name="Local" value="ja\live.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="カセット">
+		<param name="Name" value="日本語: アナログ起こし台">
+		<param name="Local" value="ja\digitize.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="キュー">
+		<param name="Name" value="日本語: キュー、A-B、練習テンポ">
+		<param name="Local" value="ja\mp-cues.htm">
+		<param name="Name" value="日本語: 再生詳細">
+		<param name="Local" value="ja\details.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="キュー、A-B、練習テンポ">
+		<param name="Name" value="日本語: キュー、A-B、練習テンポ">
+		<param name="Local" value="ja\mp-cues.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="ギャップレス">
+		<param name="Name" value="日本語: 再生詳細">
+		<param name="Local" value="ja\details.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="クロスフェード">
+		<param name="Name" value="日本語: 連続再生クロスフェード">
+		<param name="Local" value="ja\crossfade.htm">
+		<param name="Name" value="日本語: 音声書き出し（WAV / mp3 / FLAC）">
+		<param name="Local" value="ja\export.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="ゲームBGM">
+		<param name="Name" value="日本語: ファルコムBGM画面">
+		<param name="Local" value="ja\falcom-main.htm">
+		<param name="Name" value="日本語: ゲームフォルダの設定">
+		<param name="Local" value="ja\folder-setup.htm">
+		<param name="Name" value="日本語: 対応形式と対応タイトル">
+		<param name="Local" value="ja\formats.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="ゲームフォルダの設定">
+		<param name="Name" value="日本語: ゲームフォルダの設定">
+		<param name="Local" value="ja\folder-setup.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="コマンドパレット">
+		<param name="Name" value="日本語: ショートカットとコマンドパレット">
+		<param name="Local" value="ja\shortcuts.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="コマンドロール">
+		<param name="Name" value="日本語: コマンドロールで並べる">
+		<param name="Local" value="ja\cmdroll.htm">
+		<param name="Name" value="日本語: 演奏プロンプトで曲を動かす">
+		<param name="Local" value="ja\prompt.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="コマンドロールで並べる">
+		<param name="Name" value="日本語: コマンドロールで並べる">
+		<param name="Local" value="ja\cmdroll.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="コンテキストメニュー">
+		<param name="Name" value="日本語: アクリル表示とコンテキストメニュー">
+		<param name="Local" value="ja\acrylic.htm">
+		<param name="Name" value="日本語: ちょっとしたコツ">
+		<param name="Local" value="ja\tips.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="コーデック">
+		<param name="Name" value="日本語: 動画を再生する">
+		<param name="Local" value="ja\video.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="コード">
+		<param name="Name" value="日本語: ピアノロールで音を見る">
+		<param name="Local" value="ja\pianoroll.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="ショートカット">
+		<param name="Name" value="日本語: ショートカットとコマンドパレット">
+		<param name="Local" value="ja\shortcuts.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="ショートカットとコマンドパレット">
+		<param name="Name" value="日本語: ショートカットとコマンドパレット">
+		<param name="Local" value="ja\shortcuts.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="シークバー">
+		<param name="Name" value="日本語: シークバーの読み方">
+		<param name="Local" value="ja\mp-seek.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="シークバーの読み方">
+		<param name="Name" value="日本語: シークバーの読み方">
+		<param name="Local" value="ja\mp-seek.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="ジャケット">
+		<param name="Name" value="日本語: ジャケットとバナー表示">
+		<param name="Local" value="ja\mp-jacket.htm">
+		<param name="Name" value="日本語: タグを編集する">
+		<param name="Local" value="ja\tags.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="ジャケットとバナー表示">
+		<param name="Name" value="日本語: ジャケットとバナー表示">
+		<param name="Local" value="ja\mp-jacket.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="ジャンプリスト">
+		<param name="Name" value="日本語: ショートカットとコマンドパレット">
+		<param name="Local" value="ja\shortcuts.htm">
+		<param name="Name" value="日本語: 再生履歴を見る">
+		<param name="Local" value="ja\history.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="スクラッチ">
+		<param name="Name" value="日本語: DJパッドで遊ぶ">
+		<param name="Local" value="ja\djpad.htm">
+		<param name="Name" value="日本語: スマホやPCから操作する">
+		<param name="Local" value="ja\remote.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="スペクトラム">
+		<param name="Name" value="日本語: 波形・周波数アナライザー">
+		<param name="Local" value="ja\analyzer.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="スマホ">
+		<param name="Name" value="日本語: スマホやPCから操作する">
+		<param name="Local" value="ja\remote.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="スマホやPCから操作する">
+		<param name="Name" value="日本語: スマホやPCから操作する">
+		<param name="Local" value="ja\remote.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="スマートプレイリスト">
+		<param name="Name" value="日本語: スマートプレイリストと書庫ツリー">
+		<param name="Local" value="ja\smart-lib.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="スマートプレイリストと書庫ツリー">
+		<param name="Name" value="日本語: スマートプレイリストと書庫ツリー">
+		<param name="Local" value="ja\smart-lib.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="スリープタイマー">
+		<param name="Name" value="日本語: スリープタイマーとアラーム">
+		<param name="Local" value="ja\sleep-alarm.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="スリープタイマーとアラーム">
+		<param name="Name" value="日本語: スリープタイマーとアラーム">
+		<param name="Local" value="ja\sleep-alarm.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="タグを編集する">
+		<param name="Name" value="日本語: タグを編集する">
+		<param name="Local" value="ja\tags.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="タグ編集">
+		<param name="Name" value="日本語: タグを編集する">
+		<param name="Local" value="ja\tags.htm">
+		<param name="Name" value="日本語: ファイル情報を見る・直す">
+		<param name="Local" value="ja\fileinfo.htm">
+		<param name="Name" value="日本語: 再生詳細">
+		<param name="Local" value="ja\details.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="チューナー">
+		<param name="Name" value="日本語: チューナー道場">
+		<param name="Local" value="ja\tuner.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="チューナー道場">
+		<param name="Name" value="日本語: チューナー道場">
+		<param name="Local" value="ja\tuner.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="テンポ">
+		<param name="Name" value="日本語: テンポとピッチを変える">
+		<param name="Local" value="ja\tempo-pitch.htm">
+		<param name="Name" value="日本語: キュー、A-B、練習テンポ">
+		<param name="Local" value="ja\mp-cues.htm">
+		<param name="Name" value="日本語: BPMを測る">
+		<param name="Local" value="ja\bpm.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="テンポとピッチを変える">
+		<param name="Name" value="日本語: テンポとピッチを変える">
+		<param name="Local" value="ja\tempo-pitch.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="バッファ">
+		<param name="Name" value="日本語: レンダリング設定">
+		<param name="Local" value="ja\render.htm">
+		<param name="Name" value="日本語: ちょっとしたコツ">
+		<param name="Local" value="ja\tips.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="ピアノロール">
+		<param name="Name" value="日本語: ピアノロールで音を見る">
+		<param name="Local" value="ja\pianoroll.htm">
+		<param name="Name" value="日本語: ピアノロールの検出パラメータ">
+		<param name="Local" value="ja\pianoroll-tune.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="ピアノロールで音を見る">
+		<param name="Name" value="日本語: ピアノロールで音を見る">
+		<param name="Local" value="ja\pianoroll.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="ピアノロールの検出パラメータ">
+		<param name="Name" value="日本語: ピアノロールの検出パラメータ">
+		<param name="Local" value="ja\pianoroll-tune.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="ピッチ">
+		<param name="Name" value="日本語: テンポとピッチを変える">
+		<param name="Local" value="ja\tempo-pitch.htm">
+		<param name="Name" value="日本語: ボイスチェンジャー">
+		<param name="Local" value="ja\voice.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="ファイル情報">
+		<param name="Name" value="日本語: ファイル情報を見る・直す">
+		<param name="Local" value="ja\fileinfo.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="ファイル情報を見る・直す">
+		<param name="Name" value="日本語: ファイル情報を見る・直す">
+		<param name="Local" value="ja\fileinfo.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="ファイル関連付け">
+		<param name="Name" value="日本語: レンダリング設定">
+		<param name="Local" value="ja\render.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="ファルコム">
+		<param name="Name" value="日本語: ファルコムBGM画面">
+		<param name="Local" value="ja\falcom-main.htm">
+		<param name="Name" value="日本語: 対応形式と対応タイトル">
+		<param name="Local" value="ja\formats.htm">
+		<param name="Name" value="日本語: ゲームフォルダの設定">
+		<param name="Local" value="ja\folder-setup.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="ファルコムBGM画面">
+		<param name="Name" value="日本語: ファルコムBGM画面">
+		<param name="Local" value="ja\falcom-main.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="フォトフレーム">
+		<param name="Name" value="日本語: フォトフレーム">
+		<param name="Local" value="ja\photoframe.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="フォルダ設定">
+		<param name="Name" value="日本語: ゲームフォルダの設定">
+		<param name="Local" value="ja\folder-setup.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="プリセット">
+		<param name="Name" value="日本語: イコライザーと環境モデル">
+		<param name="Local" value="ja\eq.htm">
+		<param name="Name" value="日本語: ボイスチェンジャー">
+		<param name="Local" value="ja\voice.htm">
+		<param name="Name" value="日本語: VSTホストで音源を鳴らす">
+		<param name="Local" value="ja\vst.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="プレイヤー内の歌詞パネル">
+		<param name="Name" value="日本語: プレイヤー内の歌詞パネル">
+		<param name="Local" value="ja\mp-lyrics-panel.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="プレイリスト">
+		<param name="Name" value="日本語: プレイリストを使う">
+		<param name="Local" value="ja\playlist.htm">
+		<param name="Name" value="日本語: 他のソフトのプレイリストを取り込む">
+		<param name="Local" value="ja\playlist-import.htm">
+		<param name="Name" value="日本語: スマートプレイリストと書庫ツリー">
+		<param name="Local" value="ja\smart-lib.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="プレイリストを使う">
+		<param name="Name" value="日本語: プレイリストを使う">
+		<param name="Local" value="ja\playlist.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="プロンプト">
+		<param name="Name" value="日本語: 演奏プロンプトで曲を動かす">
+		<param name="Local" value="ja\prompt.htm">
+		<param name="Name" value="日本語: コマンドロールで並べる">
+		<param name="Local" value="ja\cmdroll.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="ホットキュー">
+		<param name="Name" value="日本語: DJパッドで遊ぶ">
+		<param name="Local" value="ja\djpad.htm">
+		<param name="Name" value="日本語: キュー、A-B、練習テンポ">
+		<param name="Local" value="ja\mp-cues.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="ボイスチェンジャー">
+		<param name="Name" value="日本語: ボイスチェンジャー">
+		<param name="Local" value="ja\voice.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="ボーカルキャンセル">
+		<param name="Name" value="日本語: 音を整えるツール">
+		<param name="Local" value="ja\protools.htm">
+		<param name="Name" value="日本語: DJパッドで遊ぶ">
+		<param name="Local" value="ja\djpad.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="マイクミックス">
+		<param name="Name" value="日本語: WAVへ保存する">
+		<param name="Local" value="ja\wav-save.htm">
+		<param name="Name" value="日本語: 再生している音を録音する">
+		<param name="Local" value="ja\device-rec.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="ミラー">
+		<param name="Name" value="日本語: もう一台のスピーカーへ同時に出す">
+		<param name="Local" value="ja\mirror.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="メディアプレイヤー画面を見てみる">
+		<param name="Name" value="日本語: メディアプレイヤー画面を見てみる">
+		<param name="Local" value="ja\mp-overview.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="メトロノーム">
+		<param name="Name" value="日本語: チューナー道場">
+		<param name="Local" value="ja\tuner.htm">
+		<param name="Name" value="日本語: BPMを測る">
+		<param name="Local" value="ja\bpm.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="ライブ配信">
+		<param name="Name" value="日本語: ライブ配信する">
+		<param name="Local" value="ja\live.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="ライブ配信する">
+		<param name="Name" value="日本語: ライブ配信する">
+		<param name="Local" value="ja\live.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="リプレイゲイン">
+		<param name="Name" value="日本語: 再生詳細">
+		<param name="Local" value="ja\details.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="リミッター">
+		<param name="Name" value="日本語: 音を整えるツール">
+		<param name="Local" value="ja\protools.htm">
+		<param name="Name" value="日本語: 音声書き出し（WAV / mp3 / FLAC）">
+		<param name="Local" value="ja\export.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="リモート">
+		<param name="Name" value="日本語: スマホやPCから操作する">
+		<param name="Local" value="ja\remote.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="ループ再生">
+		<param name="Name" value="日本語: ファルコムBGM画面">
+		<param name="Local" value="ja\falcom-main.htm">
+		<param name="Name" value="日本語: 再生詳細">
+		<param name="Local" value="ja\details.htm">
+		<param name="Name" value="日本語: 対応形式と対応タイトル">
+		<param name="Local" value="ja\formats.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="レコード">
+		<param name="Name" value="日本語: アナログ起こし台">
+		<param name="Local" value="ja\digitize.htm">
+		<param name="Name" value="日本語: DJパッドで遊ぶ">
+		<param name="Local" value="ja\djpad.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="レンダリング設定">
+		<param name="Name" value="日本語: レンダリング設定">
+		<param name="Local" value="ja\render.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="レース">
+		<param name="Name" value="日本語: おまけ：Soft3D空中レース">
+		<param name="Local" value="ja\race.htm">
+		<param name="Name" value="日本語: おまけのお遊び">
+		<param name="Local" value="ja\games.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="レーティング">
+		<param name="Name" value="日本語: プレイリストを使う">
+		<param name="Local" value="ja\playlist.htm">
+		<param name="Name" value="日本語: スマートプレイリストと書庫ツリー">
+		<param name="Local" value="ja\smart-lib.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="他のソフトのプレイリストを取り込む">
+		<param name="Name" value="日本語: 他のソフトのプレイリストを取り込む">
+		<param name="Local" value="ja\playlist-import.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="仮想ケーブル">
+		<param name="Name" value="日本語: ボイスチェンジャー">
+		<param name="Local" value="ja\voice.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="再生している音を録音する">
+		<param name="Name" value="日本語: 再生している音を録音する">
+		<param name="Local" value="ja\device-rec.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="再生と停止、音量">
+		<param name="Name" value="日本語: 再生と停止、音量">
+		<param name="Local" value="ja\mp-transport.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="再生デバイス">
+		<param name="Name" value="日本語: レンダリング設定">
+		<param name="Local" value="ja\render.htm">
+		<param name="Name" value="日本語: もう一台のスピーカーへ同時に出す">
+		<param name="Local" value="ja\mirror.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="再生履歴">
+		<param name="Name" value="日本語: 再生履歴を見る">
+		<param name="Local" value="ja\history.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="再生履歴を見る">
+		<param name="Name" value="日本語: 再生履歴を見る">
+		<param name="Local" value="ja\history.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="再生詳細">
+		<param name="Name" value="日本語: 再生詳細">
+		<param name="Local" value="ja\details.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="動画">
+		<param name="Name" value="日本語: 動画を再生する">
+		<param name="Local" value="ja\video.htm">
+		<param name="Name" value="日本語: 対応形式と対応タイトル">
+		<param name="Local" value="ja\formats.htm">
+		<param name="Name" value="日本語: 画面を録画する">
+		<param name="Local" value="ja\capture.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="動画を再生する">
+		<param name="Name" value="日本語: 動画を再生する">
+		<param name="Local" value="ja\video.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="取り込み">
+		<param name="Name" value="日本語: 他のソフトのプレイリストを取り込む">
+		<param name="Local" value="ja\playlist-import.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="各画面の「？」操作ガイド">
+		<param name="Name" value="日本語: 各画面の「？」操作ガイド">
+		<param name="Local" value="ja\help-buttons.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="困ったとき">
+		<param name="Name" value="日本語: ちょっとしたコツ">
+		<param name="Local" value="ja\tips.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="多言語">
+		<param name="Name" value="日本語: レンダリング設定">
+		<param name="Local" value="ja\render.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="字幕">
+		<param name="Name" value="日本語: 動画を再生する">
+		<param name="Local" value="ja\video.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="対応タイトル">
+		<param name="Name" value="日本語: 対応形式と対応タイトル">
+		<param name="Local" value="ja\formats.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="対応形式">
+		<param name="Name" value="日本語: 対応形式と対応タイトル">
+		<param name="Local" value="ja\formats.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="対応形式と対応タイトル">
+		<param name="Name" value="日本語: 対応形式と対応タイトル">
+		<param name="Local" value="ja\formats.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="拍グリッド">
+		<param name="Name" value="日本語: シークバーの読み方">
+		<param name="Local" value="ja\mp-seek.htm">
+		<param name="Name" value="日本語: BPMを測る">
+		<param name="Local" value="ja\bpm.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="操作ガイド">
+		<param name="Name" value="日本語: 各画面の「？」操作ガイド">
+		<param name="Local" value="ja\help-buttons.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="曲ごと設定">
+		<param name="Name" value="日本語: プレイリストを使う">
+		<param name="Local" value="ja\playlist.htm">
+		<param name="Name" value="日本語: ちょっとしたコツ">
+		<param name="Local" value="ja\tips.htm">
+		<param name="Name" value="日本語: ファイル情報を見る・直す">
+		<param name="Local" value="ja\fileinfo.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="更新">
+		<param name="Name" value="日本語: 更新のチェック">
+		<param name="Local" value="ja\update.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="更新のチェック">
+		<param name="Name" value="日本語: 更新のチェック">
+		<param name="Local" value="ja\update.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="書庫">
+		<param name="Name" value="日本語: スマートプレイリストと書庫ツリー">
+		<param name="Local" value="ja\smart-lib.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="欠損ファイル">
+		<param name="Name" value="日本語: プレイリストを使う">
+		<param name="Local" value="ja\playlist.htm">
+		<param name="Name" value="日本語: スマートプレイリストと書庫ツリー">
+		<param name="Local" value="ja\smart-lib.htm">
+		<param name="Name" value="日本語: ちょっとしたコツ">
+		<param name="Local" value="ja\tips.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="歌詞">
+		<param name="Name" value="日本語: 歌詞を表示する">
+		<param name="Local" value="ja\lyrics.htm">
+		<param name="Name" value="日本語: プレイヤー内の歌詞パネル">
+		<param name="Local" value="ja\mp-lyrics-panel.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="歌詞を表示する">
+		<param name="Name" value="日本語: 歌詞を表示する">
+		<param name="Local" value="ja\lyrics.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="波形">
+		<param name="Name" value="日本語: シークバーの読み方">
+		<param name="Local" value="ja\mp-seek.htm">
+		<param name="Name" value="日本語: 波形・周波数アナライザー">
+		<param name="Local" value="ja\analyzer.htm">
+		<param name="Name" value="日本語: 再生詳細">
+		<param name="Local" value="ja\details.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="波形・周波数アナライザー">
+		<param name="Name" value="日本語: 波形・周波数アナライザー">
+		<param name="Local" value="ja\analyzer.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="演奏プロンプトで曲を動かす">
+		<param name="Name" value="日本語: 演奏プロンプトで曲を動かす">
+		<param name="Local" value="ja\prompt.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="環境モデル">
+		<param name="Name" value="日本語: イコライザーと環境モデル">
+		<param name="Local" value="ja\eq.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="画面を録画する">
+		<param name="Name" value="日本語: 画面を録画する">
+		<param name="Local" value="ja\capture.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="画面キャプチャ">
+		<param name="Name" value="日本語: 画面を録画する">
+		<param name="Local" value="ja\capture.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="簡易3D">
+		<param name="Name" value="日本語: MIDIモニタ">
+		<param name="Local" value="ja\midi-monitor.htm">
+		<param name="Name" value="日本語: ピアノロールで音を見る">
+		<param name="Local" value="ja\pianoroll.htm">
+		<param name="Name" value="日本語: おまけ：Soft3D迷路">
+		<param name="Local" value="ja\maze.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="練習">
+		<param name="Name" value="日本語: キュー、A-B、練習テンポ">
+		<param name="Local" value="ja\mp-cues.htm">
+		<param name="Name" value="日本語: チューナー道場">
+		<param name="Local" value="ja\tuner.htm">
+		<param name="Name" value="日本語: テンポとピッチを変える">
+		<param name="Local" value="ja\tempo-pitch.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="言語">
+		<param name="Name" value="日本語: レンダリング設定">
+		<param name="Local" value="ja\render.htm">
+		<param name="Name" value="日本語: はじめて起動したとき">
+		<param name="Local" value="ja\first-start.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="起動モード">
+		<param name="Name" value="日本語: ふたつの画面モード">
+		<param name="Local" value="ja\modes.htm">
+		<param name="Name" value="日本語: はじめて起動したとき">
+		<param name="Local" value="ja\first-start.htm">
+		<param name="Name" value="日本語: レンダリング設定">
+		<param name="Local" value="ja\render.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="軌跡">
+		<param name="Name" value="日本語: 対応形式と対応タイトル">
+		<param name="Local" value="ja\formats.htm">
+		<param name="Name" value="日本語: ファルコムBGM画面">
+		<param name="Local" value="ja\falcom-main.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="迷路">
+		<param name="Name" value="日本語: おまけ：Soft3D迷路">
+		<param name="Local" value="ja\maze.htm">
+		<param name="Name" value="日本語: おまけのお遊び">
+		<param name="Local" value="ja\games.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="連続再生クロスフェード">
+		<param name="Name" value="日本語: 連続再生クロスフェード">
+		<param name="Local" value="ja\crossfade.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="配信">
+		<param name="Name" value="日本語: ライブ配信する">
+		<param name="Local" value="ja\live.htm">
+		<param name="Name" value="日本語: 画面を録画する">
+		<param name="Local" value="ja\capture.htm">
+		<param name="Name" value="日本語: スマホやPCから操作する">
+		<param name="Local" value="ja\remote.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="録音">
+		<param name="Name" value="日本語: 再生している音を録音する">
+		<param name="Local" value="ja\device-rec.htm">
+		<param name="Name" value="日本語: アナログ起こし台">
+		<param name="Local" value="ja\digitize.htm">
+		<param name="Name" value="日本語: WAVへ保存する">
+		<param name="Local" value="ja\wav-save.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="附属ツール">
+		<param name="Name" value="日本語: 附属ツールいろいろ">
+		<param name="Local" value="ja\tools.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="附属ツールいろいろ">
+		<param name="Name" value="日本語: 附属ツールいろいろ">
+		<param name="Local" value="ja\tools.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="音が出ない">
+		<param name="Name" value="日本語: ちょっとしたコツ">
+		<param name="Local" value="ja\tips.htm">
+		<param name="Name" value="日本語: レンダリング設定">
+		<param name="Local" value="ja\render.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="音が途切れる">
+		<param name="Name" value="日本語: ちょっとしたコツ">
+		<param name="Local" value="ja\tips.htm">
+		<param name="Name" value="日本語: レンダリング設定">
+		<param name="Local" value="ja\render.htm">
+		<param name="Name" value="日本語: 連続再生クロスフェード">
+		<param name="Local" value="ja\crossfade.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="音を整えるツール">
+		<param name="Name" value="日本語: 音を整えるツール">
+		<param name="Local" value="ja\protools.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="音声書き出し">
+		<param name="Name" value="日本語: 音声書き出し（WAV / mp3 / FLAC）">
+		<param name="Local" value="ja\export.htm">
+		<param name="Name" value="日本語: WAVへ保存する">
+		<param name="Local" value="ja\wav-save.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="音声書き出し（WAV / mp3 / FLAC）">
+		<param name="Name" value="日本語: 音声書き出し（WAV / mp3 / FLAC）">
+		<param name="Local" value="ja\export.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="音量正規化">
+		<param name="Name" value="日本語: 附属ツールいろいろ">
+		<param name="Local" value="ja\tools.htm">
+		<param name="Name" value="日本語: 音を整えるツール">
+		<param name="Local" value="ja\protools.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="騒音計">
+		<param name="Name" value="日本語: 騒音計">
+		<param name="Local" value="ja\soundmeter.htm">
+		</OBJECT>
+</UL>
+</BODY></HTML>

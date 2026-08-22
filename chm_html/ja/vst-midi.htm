@@ -1,0 +1,70 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<title>.mid を VST 音源で鳴らす</title>
+<link rel="stylesheet" type="text/css" href="../css/help.css">
+</head>
+<body>
+
+<div class="topnav"><a href="index.htm">目次</a> &nbsp;|&nbsp; <a href="../en/vst-midi.htm">English</a></div>
+
+<h1>.mid を VST 音源で鳴らす</h1>
+
+<p class="lead">プレイリストに入れた .mid（や .midi / .kar / .rmi）を、SOUND Canvas VA や S-YXG50 のような VST 音源で鳴らせます。リアルタイムに鍵盤を弾く <a href="vst.htm">VSTホストで音源を鳴らす</a> とは別で、「曲ファイルを VST で演奏する」ための設定です。</p>
+<div class="shot">
+<img src="../img/vst-host.png" alt="VSTホストでのMIDI入力とパート">
+<p class="cap">VSTホストでのMIDI入力とパート</p>
+</div>
+<h2>準備（レンダリング設定）</h2>
+<ol>
+<li><a href="render.htm">レンダリング設定</a> を開きます。</li>
+<li>「MIDI再生」で <b>VST優先</b> を選びます（KPI優先のままでは VST 側になりません）。</li>
+<li>「GS VST」に、GS 用の音源（SC-VA など）のファイルやフォルダを指定します。</li>
+<li>「XG VST」に、XG 用の音源（S-YXG50 など）を指定します。</li>
+<li>必要なら「再」でプラグインを探し直します。「VSTプラグインを検索しています…」という待ち画面が出ることがあります。</li>
+</ol>
+<h2>GS と XG のどちらが使われるか</h2>
+<ul>
+<li>曲の中に <b>XG System On</b>（XGリセット）があれば → <b>XG VST</b></li>
+<li>それが無ければ → <b>GS VST</b></li>
+<li>片方だけ指定してあるときは、その片方で両方をまかないます。</li>
+<li>両方とも空のときは、Windows の MIDI マッパー（または「MIDI出力」で選んだ端末）へ落ちます。</li>
+</ul>
+<h2>再生してみる</h2>
+<ol>
+<li>.mid ファイルをプレイリストへ入れます。</li>
+<li>ダブルクリック（または再生）します。</li>
+<li>バナーに <code>file:mid VST (32)</code> や <code>file:mid VST (64)</code> のように出れば、VST 経由で鳴っています。VST が無いときは <code>file:mid MIDI Mapper</code> になります。</li>
+<li>再生（または <a href="crossfade.htm">連続再生クロスフェード</a> の先読み）が始まると、プレイリストの印に緑の <b>LR</b>（など）が付きます。MIDI はヘッダだけではチャンネルが分からないため、開いたあとに確定します。</li>
+</ol>
+<h2>演奏の様子を見る</h2>
+<p>鳴らしている最中に <a href="midi-monitor.htm">MIDIモニタ</a> を開くと、32パートの音色・音量・効果がリアルタイムで見られます。<a href="pianoroll.htm">ピアノロールで音を見る</a> と並べると便利です。</p>
+<h2>64bit の音源について</h2>
+<p>本体は 32bit なので、64bit の VST（SC-VA x64 など）は KpiHost64.exe を経由します。「x64 VSTホストを開けませんでした。KpiHost64.exe を確認してください。」と出たときは、実行ファイルと同じフォルダに KpiHost64.exe があるかを確かめてください。<a href="kpi.htm">KPIプラグインで対応形式をふやす</a> と同じしくみです。</p>
+<h2>VSTホストとのちがい</h2>
+<table class="grid">
+<tr><th></th><th>このページ（.mid 再生）</th><th>VSTホスト</th></tr>
+<tr><td>目的</td><td>プレイリストの SMF を鳴らす</td><td>鍵盤からリアルタイムに鳴らす</td></tr>
+<tr><td>開き方</td><td>レンダリング設定の GS/XG VST</td><td>下段の「VST」ボタン</td></tr>
+<tr><td>設定の場所</td><td>GS VST / XG VST / VST優先</td><td>配線キャンバスとプリセット</td></tr>
+</table>
+<div class="tip"><span class="label">ヒント</span>
+<p>プロジェクトフォルダに .mid が無いときは、「MIDIが見つかりません。同フォルダに .mid をエクスポートしてください。」と出ることがあります。</p>
+</div>
+<div class="note"><span class="label">注意</span>
+<p>「VST MIDIを開けませんでした。」と出るときは、指定した DLL のパス、32/64bit の食い違い、KpiHost64.exe の有無を順に確かめてください。</p>
+</div>
+<div class="related"><span class="label">あわせて読みたい</span><ul><li><a href="render.htm">レンダリング設定</a></li><li><a href="midi-monitor.htm">MIDIモニタ</a></li><li><a href="vst.htm">VSTホストで音源を鳴らす</a></li><li><a href="kpi.htm">KPIプラグインで対応形式をふやす</a></li><li><a href="playlist.htm">プレイリストを使う</a></li><li><a href="crossfade.htm">連続再生クロスフェード</a></li></ul></div>
+
+<div class="botnav">
+<span class="prev">&#171; 前へ: <a href="vst.htm">VSTホストで音源を鳴らす</a></span>
+<span class="next">次へ: <a href="remote.htm">スマホやPCから操作する</a> &#187;</span>
+<span class="up"><a href="index.htm">目次</a></span>
+<div class="clear"></div>
+</div>
+
+<div class="foot">メディアプレイヤー「らいら」 (oggYSEDbgm) — PrePrayerPower Soft</div>
+
+</body>
+</html>

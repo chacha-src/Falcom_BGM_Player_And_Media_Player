@@ -1,0 +1,62 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<title>連続再生クロスフェード</title>
+<link rel="stylesheet" type="text/css" href="../css/help.css">
+</head>
+<body>
+
+<div class="topnav"><a href="index.htm">目次</a> &nbsp;|&nbsp; <a href="../en/crossfade.htm">English</a></div>
+
+<h1>連続再生クロスフェード</h1>
+
+<p class="lead">連続再生がONのとき、曲の終わりで次の曲を指定した秒数だけ重ねて、自然に切り替えられます。パーティーで流しっぱなしにしたいときや、曲間の無音が気になるときに効きます。</p>
+<h2>使いかた</h2>
+<ol>
+<li><a href="mp-transport.htm">再生と停止、音量</a> の「連続再生」をONにします。これが前提です。</li>
+<li>クロスフェードのチェックを入れます。メイン画面とメディアプレイヤー画面のどちらからでも設定できます。</li>
+<li>重ねる秒数を入れます。小数も使えます。既定は 5.00 秒です。</li>
+<li>そのまま聴いていると、曲の終わりで次の曲が重なってきます。</li>
+</ol>
+<h2>裏で何が起きているか</h2>
+<ul>
+<li>曲の終わりが近づくと、次の曲を裏でそっと開きます。</li>
+<li>指定した秒数のあいだ、いまの曲と次の曲を等パワーで混ぜます。どちらも小さくなりすぎないので、音量が落ち込みません。</li>
+<li>混ぜ終わったら、次の曲を主役に昇格させます。このときプレイリストの♪、ジャケット、時間やタグの欄も更新されます。</li>
+<li>チャンネル印（緑の <b>MONO</b> / <b>LR</b> / <b>2.1</b>…）も、次の曲を裏で開いた時点で確定してリストへ付きます。VST MIDI や m4a のようにヘッダだけでは分からない形式も、通常再生と同じく印が出ます。</li>
+<li>動画の行や再生できない行は飛ばして、次の音声曲へ進みます。</li>
+</ul>
+<h2>書き出しのクロスフェードとの違い</h2>
+<table class="grid">
+<tr><th></th><th>連続再生クロスフェード</th><th>書き出しクロスフェード</th></tr>
+<tr><td>目的</td><td>聴いているときに切れ目をなくす</td><td>1本のファイルにつなげて保存する</td></tr>
+<tr><td>設定場所</td><td>メイン／メディアプレイヤーのチェックと秒数</td><td><a href="export.htm">音声書き出し（WAV / mp3 / FLAC）</a> の中</td></tr>
+<tr><td>結果</td><td>その場の音だけが変わります</td><td>ファイルができます</td></tr>
+</table>
+<h2>つないだ音をそのまま録りたいとき</h2>
+<p><a href="wav-save.htm">WAVへ保存する</a> と一緒に使うと「チェック用」モードになります。</p>
+<ul>
+<li>最初に流した曲名のWAVファイルへ、そのまま追記し続けます。</li>
+<li>出力は余裕を見て <b>96 kHz / 2ch / 24bit</b> に固定されます。聞こえている混合PCMをそのまま変換したものです。</li>
+<li>停止すると、そのファイルが確定します。</li>
+</ul>
+<div class="tip"><span class="label">ヒント</span>
+<p>曲どうしのつながりを良くしたいときは、<a href="bpm.htm">BPMを測る</a> でテンポを測ってからクロスフェード秒に反映させると、拍が合ったまま渡りやすくなります。<a href="tools.htm">附属ツールいろいろ</a> の「キー確定／Camelot相性」で調の相性がよい曲を次に置くのも効果的です。</p>
+</div>
+<div class="note"><span class="label">注意</span>
+<p>クロスフェード中は2曲ぶんの音を作るので、古いパソコンでは少し重くなることがあります。音が途切れるときは、<a href="render.htm">レンダリング設定</a> でバッファを大きくしてみてください。</p>
+</div>
+<div class="related"><span class="label">あわせて読みたい</span><ul><li><a href="mp-transport.htm">再生と停止、音量</a></li><li><a href="export.htm">音声書き出し（WAV / mp3 / FLAC）</a></li><li><a href="wav-save.htm">WAVへ保存する</a></li><li><a href="bpm.htm">BPMを測る</a></li><li><a href="render.htm">レンダリング設定</a></li><li><a href="playlist.htm">プレイリストを使う</a></li></ul></div>
+
+<div class="botnav">
+<span class="prev">&#171; 前へ: <a href="tempo-pitch.htm">テンポとピッチを変える</a></span>
+<span class="next">次へ: <a href="details.htm">再生詳細</a> &#187;</span>
+<span class="up"><a href="index.htm">目次</a></span>
+<div class="clear"></div>
+</div>
+
+<div class="foot">メディアプレイヤー「らいら」 (oggYSEDbgm) — PrePrayerPower Soft</div>
+
+</body>
+</html>

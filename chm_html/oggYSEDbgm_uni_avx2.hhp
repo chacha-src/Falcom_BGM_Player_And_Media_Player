@@ -1,0 +1,156 @@
+[OPTIONS]
+Auto Index=Yes
+Binary TOC=Yes
+Binary Index=Yes
+Compatibility=1.1 or later
+Compiled file=oggYSEDbgm_uni_avx2.chm
+Contents file=oggYSEDbgm_uni_avx2.hhc
+Index file=oggYSEDbgm_uni_avx2.hhk
+Default Window=main
+Default topic=ja\index.htm
+Display compile progress=No
+Error log file=oggYSEDbgm_uni_avx2.log
+Full-text search=Yes
+Language=0x411 Japanese
+Title=メディアプレイヤー「らいら」 ヘルプ
+
+[WINDOWS]
+main="メディアプレイヤー「らいら」 ヘルプ","oggYSEDbgm_uni_avx2.hhc","oggYSEDbgm_uni_avx2.hhk","ja\index.htm","ja\index.htm",,,,,0x63520,,0x304e,[40,30,940,760],,,,,,,0
+
+[FILES]
+ja\index.htm
+ja\first-start.htm
+ja\modes.htm
+ja\falcom-main.htm
+ja\folder-setup.htm
+ja\formats.htm
+ja\mp-overview.htm
+ja\mp-transport.htm
+ja\mp-seek.htm
+ja\mp-cues.htm
+ja\mp-jacket.htm
+ja\mp-lyrics-panel.htm
+ja\playlist.htm
+ja\playlist-import.htm
+ja\smart-lib.htm
+ja\history.htm
+ja\eq.htm
+ja\tempo-pitch.htm
+ja\crossfade.htm
+ja\details.htm
+ja\protools.htm
+ja\lyrics.htm
+ja\analyzer.htm
+ja\pianoroll.htm
+ja\pianoroll-tune.htm
+ja\midi-monitor.htm
+ja\video.htm
+ja\fileinfo.htm
+ja\tags.htm
+ja\export.htm
+ja\wav-save.htm
+ja\device-rec.htm
+ja\digitize.htm
+ja\capture.htm
+ja\live.htm
+ja\prompt.htm
+ja\cmdroll.htm
+ja\djpad.htm
+ja\bpm.htm
+ja\midi.htm
+ja\vst.htm
+ja\vst-midi.htm
+ja\remote.htm
+ja\mirror.htm
+ja\kpi.htm
+ja\render.htm
+ja\tools.htm
+ja\voice.htm
+ja\tuner.htm
+ja\soundmeter.htm
+ja\photoframe.htm
+ja\games.htm
+ja\maze.htm
+ja\race.htm
+ja\acrylic.htm
+ja\shortcuts.htm
+ja\sleep-alarm.htm
+ja\help-buttons.htm
+ja\tips.htm
+ja\update.htm
+en\index.htm
+en\first-start.htm
+en\modes.htm
+en\falcom-main.htm
+en\folder-setup.htm
+en\formats.htm
+en\mp-overview.htm
+en\mp-transport.htm
+en\mp-seek.htm
+en\mp-cues.htm
+en\mp-jacket.htm
+en\mp-lyrics-panel.htm
+en\playlist.htm
+en\playlist-import.htm
+en\smart-lib.htm
+en\history.htm
+en\eq.htm
+en\tempo-pitch.htm
+en\crossfade.htm
+en\details.htm
+en\protools.htm
+en\lyrics.htm
+en\analyzer.htm
+en\pianoroll.htm
+en\pianoroll-tune.htm
+en\midi-monitor.htm
+en\video.htm
+en\fileinfo.htm
+en\tags.htm
+en\export.htm
+en\wav-save.htm
+en\device-rec.htm
+en\digitize.htm
+en\capture.htm
+en\live.htm
+en\prompt.htm
+en\cmdroll.htm
+en\djpad.htm
+en\bpm.htm
+en\midi.htm
+en\vst.htm
+en\vst-midi.htm
+en\remote.htm
+en\mirror.htm
+en\kpi.htm
+en\render.htm
+en\tools.htm
+en\voice.htm
+en\tuner.htm
+en\soundmeter.htm
+en\photoframe.htm
+en\games.htm
+en\maze.htm
+en\race.htm
+en\acrylic.htm
+en\shortcuts.htm
+en\sleep-alarm.htm
+en\help-buttons.htm
+en\tips.htm
+en\update.htm
+css\help.css
+img\analyzer.png
+img\bpm.png
+img\details.png
+img\djpad.png
+img\eq.png
+img\maze.png
+img\midi-monitor.png
+img\mirror.png
+img\mp-overview.png
+img\pianoroll.png
+img\race.png
+img\remote.png
+img\vst-host.png
+
+[INFOTYPES]

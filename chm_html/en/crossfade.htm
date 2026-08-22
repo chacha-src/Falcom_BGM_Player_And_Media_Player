@@ -1,0 +1,62 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<title>Continuous-play crossfade</title>
+<link rel="stylesheet" type="text/css" href="../css/help.css">
+</head>
+<body>
+
+<div class="topnav"><a href="index.htm">Contents</a> &nbsp;|&nbsp; <a href="../ja/crossfade.htm">日本語</a></div>
+
+<h1>Continuous-play crossfade</h1>
+
+<p class="lead">With continuous play on, Raira can overlap the end of a track with the next one for a number of seconds you choose, handing over smoothly. Just the thing when you want music running all evening, or when the silence between tracks bothers you.</p>
+<h2>Setting it up</h2>
+<ol>
+<li>Turn on continuous play in <a href="mp-transport.htm">Playing, stopping and volume</a>. This is the prerequisite.</li>
+<li>Tick the crossfade box. It is available on the main screen and the media player screen alike.</li>
+<li>Enter the overlap in seconds. Decimals are allowed; the default is 5.00.</li>
+<li>Keep listening — the next track now comes in over the end of the current one.</li>
+</ol>
+<h2>What happens behind the scenes</h2>
+<ul>
+<li>As the end approaches, Raira quietly soft-opens the next track in the background.</li>
+<li>For the number of seconds you set, both tracks are mixed at equal power, so neither drops away and the level does not sag.</li>
+<li>Once the blend finishes, the next track is promoted to the main stream. The playlist note icon, the jacket and the duration and tag columns all update.</li>
+<li>Channel marks (green <b>MONO</b> / <b>LR</b> / <b>2.1</b>…) are also written as soon as the next track is soft-opened. Formats that cannot be peeked from the header alone — VST MIDI, m4a and the like — get the same marks as on a normal play.</li>
+<li>Video rows and unplayable entries are skipped, continuing to the next audio track.</li>
+</ul>
+<h2>How this differs from export crossfade</h2>
+<table class="grid">
+<tr><th></th><th>Continuous-play crossfade</th><th>Export crossfade</th></tr>
+<tr><td>Purpose</td><td>Remove the seams while you listen</td><td>Join tracks into one file</td></tr>
+<tr><td>Where it is set</td><td>A checkbox and duration on the main / media player screen</td><td>Inside <a href="export.htm">Audio export (WAV / mp3 / FLAC)</a></td></tr>
+<tr><td>Result</td><td>Only the sound in the moment changes</td><td>A file is produced</td></tr>
+</table>
+<h2>Capturing the blend</h2>
+<p>Combined with <a href="wav-save.htm">Saving to WAV</a> this becomes a verification dump.</p>
+<ul>
+<li>Everything is appended to a single WAV named after the first track you played.</li>
+<li>The output is fixed at a generous <b>96 kHz / 2ch / 24-bit</b>, converted from the mix you can actually hear.</li>
+<li>Stopping playback finalises the file.</li>
+</ul>
+<div class="tip"><span class="label">Tip</span>
+<p>For better joins, measure the tempo in <a href="bpm.htm">Measuring BPM</a> and feed it into the crossfade duration so the beats stay together. Placing a track in a compatible key next is effective too — the key-detect and Camelot compatibility tool in <a href="tools.htm">The companion tools</a> lists the candidates.</p>
+</div>
+<div class="note"><span class="label">Please note</span>
+<p>During a crossfade Raira renders two tracks at once, which can be a lot for an older machine. If the sound breaks up, try a larger buffer in <a href="render.htm">Rendering settings</a>.</p>
+</div>
+<div class="related"><span class="label">See also</span><ul><li><a href="mp-transport.htm">Playing, stopping and volume</a></li><li><a href="export.htm">Audio export (WAV / mp3 / FLAC)</a></li><li><a href="wav-save.htm">Saving to WAV</a></li><li><a href="bpm.htm">Measuring BPM</a></li><li><a href="render.htm">Rendering settings</a></li><li><a href="playlist.htm">Working with playlists</a></li></ul></div>
+
+<div class="botnav">
+<span class="prev">&#171; Back: <a href="tempo-pitch.htm">Changing tempo and pitch</a></span>
+<span class="next">Next: <a href="details.htm">Playback details</a> &#187;</span>
+<span class="up"><a href="index.htm">Contents</a></span>
+<div class="clear"></div>
+</div>
+
+<div class="foot">Media player "Raira" (oggYSEDbgm) — PrePrayerPower Soft</div>
+
+</body>
+</html>

@@ -1,0 +1,64 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<title>Seeing the music on a piano roll</title>
+<link rel="stylesheet" type="text/css" href="../css/help.css">
+</head>
+<body>
+
+<div class="topnav"><a href="index.htm">Contents</a> &nbsp;|&nbsp; <a href="../ja/pianoroll.htm">日本語</a></div>
+
+<h1>Seeing the music on a piano roll</h1>
+
+<p class="lead">The piano roll lays the notes it detects over a keyboard so you can follow melody and harmony with your eyes. The range covers 108 keys (displayable as 88 or 108), and it is a real help when working music out by ear.</p>
+<div class="shot">
+<img src="../img/pianoroll.png" alt="Simple piano roll">
+<p class="cap">Simple piano roll</p>
+</div>
+<h2>Opening it</h2>
+<p>Use the <b>Roll</b> button on the media player, or right-click a track in the playlist. Almost all the controls live in the right-click menu on the display itself.</p>
+<h2>What it can show</h2>
+<ul>
+<li><b>Notes</b> — everything it detects, placed over the keyboard.</li>
+<li><b>Note names</b> — C, D# and so on.</li>
+<li><b>Chords</b> — the name of the harmony sounding now, plus a chord progression panel.</li>
+<li><b>Melody</b> — the line that looks like the lead, drawn more prominently.</li>
+</ul>
+<h2>Range and appearance</h2>
+<ul>
+<li><b>88 or 108 keys</b> — piano range, or wider.</li>
+<li><b>Flat 2D</b> — straight on from above.</li>
+<li><b>Simple 3D</b> — with depth. Drag to orbit and use the wheel to zoom.</li>
+</ul>
+<h2>Adjusting how notes are detected</h2>
+<p>If it picks up too much or too little, the detection can be tuned in detail. See <a href="pianoroll-tune.htm">Tuning piano roll detection</a>.</p>
+<p>Detection picks fundamentals one by one and subtracts each note's overtone series from the spectrum. Octave copies (harmonic ghosts) are removed; chords or melodies that share a slot stay when residual energy and their own partials say so. Sustain is shown as a symbol only — not as a midline on every history row (that used to look like ladder noise).</p>
+<h2>Capturing MIDI or MusicXML</h2>
+<p>What is playing can be written out as MIDI or MusicXML. This is an experimental feature.</p>
+<ul>
+<li>Capture while a track plays to get the basis of a score for it.</li>
+<li>While playback is stopped, Raira picks up whatever your PC is playing (loopback) automatically, so audio from other programs or a video site can be turned into a score too.</li>
+<li>Open the result in notation software or a DAW to tidy it up.</li>
+</ul>
+<h2>Playing the notes back</h2>
+<p>To hear the detected notes through an instrument, <a href="vst.htm">Playing instruments with the VST host</a> and <a href="midi.htm">Controlling Raira from a MIDI keyboard</a> are what you want.</p>
+<div class="tip"><span class="label">Tip</span>
+<p>Open this beside the analyzer and you can watch the frequency peaks and the note names at the same time. See <a href="analyzer.htm">Waveform and spectrum analyzer</a>.</p>
+</div>
+<div class="note"><span class="label">Please note</span>
+<p>This is automatic detection, so it is never perfect. Dense passages and percussion-heavy music are the hardest. Use it alongside your ears rather than instead of them.</p>
+</div>
+<div class="related"><span class="label">See also</span><ul><li><a href="pianoroll-tune.htm">Tuning piano roll detection</a></li><li><a href="analyzer.htm">Waveform and spectrum analyzer</a></li><li><a href="midi-monitor.htm">MIDI monitor</a></li><li><a href="vst.htm">Playing instruments with the VST host</a></li><li><a href="midi.htm">Controlling Raira from a MIDI keyboard</a></li></ul></div>
+
+<div class="botnav">
+<span class="prev">&#171; Back: <a href="analyzer.htm">Waveform and spectrum analyzer</a></span>
+<span class="next">Next: <a href="pianoroll-tune.htm">Tuning piano roll detection</a> &#187;</span>
+<span class="up"><a href="index.htm">Contents</a></span>
+<div class="clear"></div>
+</div>
+
+<div class="foot">Media player "Raira" (oggYSEDbgm) — PrePrayerPower Soft</div>
+
+</body>
+</html>

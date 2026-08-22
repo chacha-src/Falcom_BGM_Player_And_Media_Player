@@ -1,0 +1,72 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<title>ボイスチェンジャー</title>
+<link rel="stylesheet" type="text/css" href="../css/help.css">
+</head>
+<body>
+
+<div class="topnav"><a href="index.htm">目次</a> &nbsp;|&nbsp; <a href="../en/voice.htm">English</a></div>
+
+<h1>ボイスチェンジャー</h1>
+
+<p class="lead">マイクから入ってくる声を、その場で別の声に変えて出力します。男性の声を女性の声に、あるいはその逆に。ロボットやラジオ風といった効果も選べます。変えた声はほかのアプリのマイク入力としても使えます。</p>
+<h2>使いはじめる</h2>
+<ol>
+<li><b>入力</b> でマイクを選びます。見つからないときは「再検出」を押します。</li>
+<li><b>出力</b> で処理した声を出す先を選びます。自分で聴くだけならスピーカーやヘッドホンでかまいません。</li>
+<li><b>プリセット</b> から声の種類を選びます。</li>
+<li>「開始」を押します。走っている間もつまみを動かせます。</li>
+</ol>
+<h2>プリセットの種類</h2>
+<dl>
+<dt>基本</dt>
+<dd>標準（原音）、男→女（標準）、女→男（標準）、少女ボイス、少年ボイス、低音ボイス、ロボット、ラジオ/電話、チップマンク、カスタム。</dd>
+<dt>男→女のバリエーション</dt>
+<dd>女子高生、女子大生、高め女性、低め女性、年配女性、小学生女子、中学生女子。</dd>
+<dt>女→男のバリエーション</dt>
+<dd>高め男性、低め男性、青年、年配男性、小学生男子、中学生男子。</dd>
+</dl>
+<h2>細かいつまみ</h2>
+<dl>
+<dt>Pitch</dt>
+<dd>声の高さです。女声にするなら上げます。</dd>
+<dt>Form（フォルマント）</dt>
+<dd>声道の長さにあたる要素です。女声なら 110〜120% くらいが自然です。<b>Pitch と同じ値にしないのがこつ</b>です。同じにすると、いわゆる「変装ボイス」らしさが強く出てしまいます。</dd>
+<dt>Gain</dt>
+<dd>出力の大きさです。</dd>
+<dt>Bright（明るさ）</dt>
+<dd>声の存在感です。</dd>
+<dt>Breath（息）</dt>
+<dd>息の成分の量です。</dd>
+<dt>Quality</dt>
+<dd>低遅延と高音質のどちらを取るかです。会話で使うなら低遅延、録音に使うなら高音質が向いています。</dd>
+<dt>FX</dt>
+<dd>なし / ロボット / ラジオ・電話 の効果です。</dd>
+</dl>
+<h2>自分の声も聴く</h2>
+<p>「自分にもモニタ」にチェックを入れると、変えた声が自分にも返ってきます。調整するときは入れておくと分かりやすいです。</p>
+<h2>ほかのアプリで使う</h2>
+<p>Discord などの通話ソフトで使いたいときは、<b>仮想オーディオケーブル</b> のような仮想デバイスを出力に選び、通話ソフト側のマイク入力にその同じデバイスを指定します。</p>
+<h2>録音や配信に乗せる</h2>
+<p><a href="capture.htm">画面を録画する</a> や、<a href="wav-save.htm">WAVへ保存する</a> のマイクミックスで「VC適用」をONにすると、同じプリセットの声がマイクに乗ります。設定を二重にしなくて済みます。</p>
+<div class="tip"><span class="label">ヒント</span>
+<p>エンジンは LPC で声道の成分を分けて、声帯にあたる残りの部分に常に高さの変換をかけています。そのため小声でも素通りせず、しっかり変わります。</p>
+</div>
+<div class="note"><span class="label">注意</span>
+<p>出力に選んだデバイスが <a href="mirror.htm">もう一台のスピーカーへ同時に出す</a> で使われていると「出力競合」のお知らせが出ます。どちらかを別のデバイスにしてください。</p>
+</div>
+<div class="related"><span class="label">あわせて読みたい</span><ul><li><a href="capture.htm">画面を録画する</a></li><li><a href="wav-save.htm">WAVへ保存する</a></li><li><a href="mirror.htm">もう一台のスピーカーへ同時に出す</a></li><li><a href="tools.htm">附属ツールいろいろ</a></li><li><a href="render.htm">レンダリング設定</a></li></ul></div>
+
+<div class="botnav">
+<span class="prev">&#171; 前へ: <a href="tools.htm">附属ツールいろいろ</a></span>
+<span class="next">次へ: <a href="tuner.htm">チューナー道場</a> &#187;</span>
+<span class="up"><a href="index.htm">目次</a></span>
+<div class="clear"></div>
+</div>
+
+<div class="foot">メディアプレイヤー「らいら」 (oggYSEDbgm) — PrePrayerPower Soft</div>
+
+</body>
+</html>

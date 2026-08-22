@@ -1,0 +1,65 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<title>ライブ配信する</title>
+<link rel="stylesheet" type="text/css" href="../css/help.css">
+</head>
+<body>
+
+<div class="topnav"><a href="index.htm">目次</a> &nbsp;|&nbsp; <a href="../en/live.htm">English</a></div>
+
+<h1>ライブ配信する</h1>
+
+<p class="lead"><a href="capture.htm">画面を録画する</a> の「Live」チェックを入れると、MP4 を作らずに配信先へ映像と音を送ります。YouTube Live、ニコニコ、そして自分で URL を指定するカスタム RTMP に対応しています。</p>
+<h2>先に用意するもの</h2>
+<div class="note"><span class="label">注意</span>
+<p>実行ファイルの隣（または <code>ogg_binary</code> フォルダ）に <b>ffmpeg.exe</b> が必要です。これがないと配信は始まりません。</p>
+</div>
+<h2>YouTube Live へ送る</h2>
+<ol>
+<li>Google の OAuth Client ID と Secret を入力します。</li>
+<li>認証を実行して、アカウントとつなぎます。</li>
+<li>配信枠を作ります。タイトルと公開範囲（公開・限定公開・非公開）を決めます。</li>
+<li>配信開始を押します。</li>
+</ol>
+<p>はじめて試すときは、公開範囲を<b>非公開</b>にしておくと安心です。映り具合や音量を確かめてから公開に切り替えられます。</p>
+<h2>ニコニコ / カスタム RTMP へ送る</h2>
+<ol>
+<li>配信サイトの配信ページを開いて、RTMP の URL とストリームキーを確認します。</li>
+<li>その2つをこの画面に入力します。</li>
+<li>配信開始を押します。</li>
+</ol>
+<h2>音の品質</h2>
+<p>AAC のプロファイルを選べます。</p>
+<ul>
+<li><b>128 kbps</b> …… ふつうの配信に。</li>
+<li><b>192 kbps</b> …… 音楽をきれいに聴かせたいときに。</li>
+<li><b>低遅延 96 kbps</b> …… 遅れを小さくしたいときに。</li>
+</ul>
+<h2>配信画面をきれいに作る</h2>
+<ul>
+<li><a href="capture.htm">画面を録画する</a> のウィンドウ合成で、ゲームの画面とメディアプレイヤーを並べられます。</li>
+<li><a href="remote.htm">スマホやPCから操作する</a> の <code>/overlay</code> は、透過の曲名表示を作るための簡易HTMLです。OBSのブラウザソースに入れられます。</li>
+<li>いま鳴っている曲名は <code>nowplaying.txt</code> としても書き出せます。<a href="tools.htm">附属ツールいろいろ</a> をご覧ください。</li>
+<li>曲の切り替えを自然にしたいときは <a href="crossfade.htm">連続再生クロスフェード</a> が効きます。</li>
+</ul>
+<div class="tip"><span class="label">ヒント</span>
+<p>配信中は手が離せません。スマホから曲を送ったり音量を変えたりできる <a href="remote.htm">スマホやPCから操作する</a> を開いておくと便利です。リスナーに次の曲を選ばせたいときは、共同キューの機能も使えます。</p>
+</div>
+<div class="note"><span class="label">注意</span>
+<p>Live をONにしている間は MP4 ファイルは作られません。あとで見返したい場合は、別に録画するか、配信サイト側のアーカイブ機能を使ってください。</p>
+</div>
+<div class="related"><span class="label">あわせて読みたい</span><ul><li><a href="capture.htm">画面を録画する</a></li><li><a href="remote.htm">スマホやPCから操作する</a></li><li><a href="device-rec.htm">再生している音を録音する</a></li><li><a href="crossfade.htm">連続再生クロスフェード</a></li><li><a href="tools.htm">附属ツールいろいろ</a></li></ul></div>
+
+<div class="botnav">
+<span class="prev">&#171; 前へ: <a href="capture.htm">画面を録画する</a></span>
+<span class="next">次へ: <a href="prompt.htm">演奏プロンプトで曲を動かす</a> &#187;</span>
+<span class="up"><a href="index.htm">目次</a></span>
+<div class="clear"></div>
+</div>
+
+<div class="foot">メディアプレイヤー「らいら」 (oggYSEDbgm) — PrePrayerPower Soft</div>
+
+</body>
+</html>

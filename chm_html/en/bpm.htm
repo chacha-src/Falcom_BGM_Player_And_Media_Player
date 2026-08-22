@@ -1,0 +1,60 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<title>Measuring BPM</title>
+<link rel="stylesheet" type="text/css" href="../css/help.css">
+</head>
+<body>
+
+<div class="topnav"><a href="index.htm">Contents</a> &nbsp;|&nbsp; <a href="../ja/bpm.htm">日本語</a></div>
+
+<h1>Measuring BPM</h1>
+
+<p class="lead">BPM is beats per minute — how fast the music runs. A measured BPM feeds the beat grid on the seek bar and helps you choose a crossfade duration.</p>
+<div class="shot">
+<img src="../img/bpm.png" alt="BPM detection">
+<p class="cap">BPM detection</p>
+</div>
+<h2>Measuring</h2>
+<ol>
+<li>Press the <b>BPM</b> button on the media player's bottom row.</li>
+<li>Play the track (or let it listen to whatever your PC is playing).</li>
+<li>Tick the measure box and it starts counting as it listens.</li>
+<li>Let it run until the number settles, then untick the box.</li>
+<li>The value at the moment you untick is applied to the beat grid and the export crossfade duration.</li>
+</ol>
+<h2>What the value is good for</h2>
+<dl>
+<dt>The beat grid</dt>
+<dd>Vertical beat lines appear on the seek bar, so you can think in terms of "four bars later". See <a href="mp-seek.htm">Reading the seek bar</a>.</dd>
+<dt>Aligning the phase</dt>
+<dd>If the lines sit slightly off the real beat, hold <kbd>Alt</kbd> and drag on the seek bar to shift them. That offset is remembered per track along with the BPM.</dd>
+<dt>Crossfade duration</dt>
+<dd>Knowing the tempo makes it much easier to pick a duration that lands on a beat boundary. It pays off in both <a href="crossfade.htm">Continuous-play crossfade</a> and <a href="export.htm">Audio export (WAV / mp3 / FLAC)</a>.</dd>
+<dt>Beat nudges</dt>
+<dd>The beat nudge on <a href="djpad.htm">Playing with the DJ pad</a> starts behaving properly.</dd>
+</dl>
+<h2>If you want a metronome</h2>
+<p>To practise against an audible click, the metronome in <a href="tuner.htm">Tuner practice</a> is the better tool. You choose BPM and time signature, and the first beat of each bar clicks higher.</p>
+<h2>Where the value is kept</h2>
+<p>BPM, the beat phase offset and the key are stored per track in <code>SongParams.dat</code> and come back the next time you play. Measure once and it stays measured.</p>
+<div class="tip"><span class="label">Tip</span>
+<p>It can measure audio from other programs on your PC, so it also works for finding the tempo of something on a video site.</p>
+</div>
+<div class="note"><span class="label">Please note</span>
+<p>Tracks whose tempo changes partway through, or whose beat is not clearly defined, may not measure well. In that case, let it listen only to a section where the beat is obvious.</p>
+</div>
+<div class="related"><span class="label">See also</span><ul><li><a href="mp-seek.htm">Reading the seek bar</a></li><li><a href="crossfade.htm">Continuous-play crossfade</a></li><li><a href="djpad.htm">Playing with the DJ pad</a></li><li><a href="tuner.htm">Tuner practice</a></li><li><a href="tools.htm">The companion tools</a></li></ul></div>
+
+<div class="botnav">
+<span class="prev">&#171; Back: <a href="djpad.htm">Playing with the DJ pad</a></span>
+<span class="next">Next: <a href="midi.htm">Controlling Raira from a MIDI keyboard</a> &#187;</span>
+<span class="up"><a href="index.htm">Contents</a></span>
+<div class="clear"></div>
+</div>
+
+<div class="foot">Media player "Raira" (oggYSEDbgm) — PrePrayerPower Soft</div>
+
+</body>
+</html>

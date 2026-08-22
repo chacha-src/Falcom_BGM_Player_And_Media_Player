@@ -1,0 +1,45 @@
+﻿// KpiHost64 version resource (copied from ogg.rc VERSIONINFO, names adapted)
+// winres.h / LANG_* に依存しない（RC の include 経路差で落ちないようにする）
+#pragma code_page(65001)
+
+LANGUAGE 0x11, 0x01
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// Version
+//
+
+1 VERSIONINFO
+ FILEVERSION 0,9,1,833
+ PRODUCTVERSION 1,0,0,1
+ FILEFLAGSMASK 0x3fL
+#ifdef _DEBUG
+ FILEFLAGS 0x1L
+#else
+ FILEFLAGS 0x0L
+#endif
+ FILEOS 0x40004L
+ FILETYPE 0x1L
+ FILESUBTYPE 0x0L
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "041104b0"
+        BEGIN
+            VALUE "Comments", "Falcom BGM Player & Media Player"
+            VALUE "CompanyName", "Pre Prayer Power Soft"
+            VALUE "FileDescription", "Falcom BGM Player & Media Player Ver 0.9a Rel.2026.08.21"
+            VALUE "FileVersion", "0.9.1.833"
+            VALUE "InternalName", "KpiHost64"
+            VALUE "LegalCopyright", "Copyright (C) 2026.08.21"
+            VALUE "LegalTrademarks", "Pre Prayer Power Soft"
+            VALUE "OriginalFilename", "KpiHost64.exe"
+            VALUE "ProductName", "Falcom BGM Player & Media Player"
+            VALUE "ProductVersion", "1, 0, 0, 1"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x411, 1200
+    END
+END

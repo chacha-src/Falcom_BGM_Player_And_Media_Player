@@ -1,0 +1,64 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<title>Reading the seek bar</title>
+<link rel="stylesheet" type="text/css" href="../css/help.css">
+</head>
+<body>
+
+<div class="topnav"><a href="index.htm">Contents</a> &nbsp;|&nbsp; <a href="../ja/mp-seek.htm">日本語</a></div>
+
+<h1>Reading the seek bar</h1>
+
+<p class="lead">The seek bar is far more than a bar you drag. Several layers of information are drawn on top of each other, and once you can read them you can see at a glance where everything in a track is.</p>
+<h2>The layers</h2>
+<pre class="fig">+--------------------------------------------------+
+|  waveform overview (furthest back)               |
+|  | | | |   beat grid (Alt+drag shifts phase)     |
+|  : : :     LRC markers in cyan (click to seek)   |
+|  ####pink = loop####  blue A---B   play position |
++--------------------------------------------------+</pre>
+<dl>
+<dt>Waveform overview</dt>
+<dd>The shape of the track's loudness. It fills in live as you play; WAV files are replaced by an overview of the whole file. Toggle it from the right-click menu.</dd>
+<dt>Beat grid</dt>
+<dd>Thin vertical lines marking the beats, based on the tempo measured in <a href="bpm.htm">Measuring BPM</a>. If the lines sit slightly off the real beat, hold <kbd>Alt</kbd> and drag on the seek bar to shift the phase. That offset is remembered per track alongside BPM and key.</dd>
+<dt>LRC markers</dt>
+<dd>Cyan lines showing the timings in your lyrics file. Click one to jump to that line, which also makes them handy candidates for A-B points. Hovering pops up a magnifier of that area.</dd>
+<dt>Loop range (pink)</dt>
+<dd>The game loop range, shown as a pink band with its own thumbs. A lock checkbox freezes the thumbs so you cannot nudge them by accident (locked by default).</dd>
+<dt>A-B range (blue)</dt>
+<dd>Your own repeat range. Different colour, different thumbs, so it never gets confused with the loop.</dd>
+<dt>Spectrum ribbon</dt>
+<dd>A thin frequency display along the seek bar, so you can follow the shape of the track with your eyes.</dd>
+</dl>
+<h2>What the mouse does</h2>
+<ul>
+<li><b>Click</b> seeks to that position.</li>
+<li><b>Hover</b> pops up a tip with the time at that point.</li>
+<li><b>Drag</b> moves the loop or A-B thumbs.</li>
+<li><kbd>Alt</kbd>+<b>drag</b> shifts the beat-grid phase.</li>
+<li><b>Right-click</b> gives you fine adjustment of seek, loop and A-B, setting the A and B points, adding cues and toggling the waveform.</li>
+</ul>
+<h2>How many times A-B has looped</h2>
+<p>While an A-B range repeats, the number after <code>L</code> counts the passes. Useful when you are drilling a phrase until it sticks.</p>
+<div class="tip"><span class="label">Tip</span>
+<p>If the waveform is too small to read, open the <a href="analyzer.htm">Waveform and spectrum analyzer</a>, which gives you a large scrolling waveform and the frequency response side by side.</p>
+</div>
+<div class="note"><span class="label">Please note</span>
+<p>Beat grid and key are stored per track in <code>SongParams.dat</code> and restored next time you play. If an adjustment seems to have vanished, check the per-song (star) state in <a href="fileinfo.htm">Viewing and fixing file info</a>.</p>
+</div>
+<div class="related"><span class="label">See also</span><ul><li><a href="mp-cues.htm">Cues, A-B and practice tempo</a></li><li><a href="bpm.htm">Measuring BPM</a></li><li><a href="lyrics.htm">Showing lyrics</a></li><li><a href="analyzer.htm">Waveform and spectrum analyzer</a></li><li><a href="details.htm">Playback details</a></li></ul></div>
+
+<div class="botnav">
+<span class="prev">&#171; Back: <a href="mp-transport.htm">Playing, stopping and volume</a></span>
+<span class="next">Next: <a href="mp-cues.htm">Cues, A-B and practice tempo</a> &#187;</span>
+<span class="up"><a href="index.htm">Contents</a></span>
+<div class="clear"></div>
+</div>
+
+<div class="foot">Media player "Raira" (oggYSEDbgm) — PrePrayerPower Soft</div>
+
+</body>
+</html>

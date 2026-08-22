@@ -1,0 +1,62 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<title>Small things worth knowing</title>
+<link rel="stylesheet" type="text/css" href="../css/help.css">
+</head>
+<body>
+
+<div class="topnav"><a href="index.htm">Contents</a> &nbsp;|&nbsp; <a href="../ja/tips.htm">日本語</a></div>
+
+<h1>Small things worth knowing</h1>
+
+<p class="lead">A collection of small things that pay off, which doubles as a checklist for when something is not behaving.</p>
+<h2>No sound, or odd sound</h2>
+<dl>
+<dt>No sound at all</dt>
+<dd>Check the playback device in <a href="render.htm">Rendering settings</a>. If the app is muted in the Windows volume mixer, Raira warns you at startup.</dd>
+<dt>The audio stutters</dt>
+<dd>Increase the buffer in <a href="render.htm">Rendering settings</a>. <a href="crossfade.htm">Continuous-play crossfade</a> and recording both raise the load.</dd>
+<dt>Turning the volume up is not enough</dt>
+<dd>The main volume, the <a href="eq.htm">Equalizer and environmental models</a> master and the extended volume are three separate paths. Check all three.</dd>
+<dt>Muffled, or an effect stuck on</dt>
+<dd>Look for a filter or Kill left engaged on <a href="djpad.htm">Playing with the DJ pad</a>, and check whether an environmental model is still applied in <a href="eq.htm">Equalizer and environmental models</a>.</dd>
+<dt>Thin in mono</dt>
+<dd>Watch the correlation meter in <a href="protools.htm">Tools for shaping the sound</a> and adjust the M/S width.</dd>
+</dl>
+<h2>Tracks that cannot be found</h2>
+<ul>
+<li>For game music, check <a href="folder-setup.htm">Pointing Raira at your game folders</a>.</li>
+<li>Missing marks in a playlist can be fixed in bulk with the missing-file review in <a href="playlist.htm">Working with playlists</a>.</li>
+<li>Check whether an external drive's letter has changed.</li>
+</ul>
+<h2>Connections worth remembering</h2>
+<ul>
+<li><a href="bpm.htm">Measuring BPM</a> feeds the beat grid, the duration for <a href="crossfade.htm">Continuous-play crossfade</a> and beat nudges on <a href="djpad.htm">Playing with the DJ pad</a>.</li>
+<li>Key detection feeds Camelot compatibility for choosing the next track, and the key-to-EQ suggestion.</li>
+<li><a href="tags.htm">Editing tags</a> feeds online lookup in <a href="lyrics.htm">Showing lyrics</a> and the conditions in <a href="smart-lib.htm">Smart playlists and the library tree</a>.</li>
+<li><a href="mp-cues.htm">Cues, A-B and practice tempo</a> feeds the A-B / cue pack export.</li>
+<li><a href="prompt.htm">Automating a performance with prompts</a> is baked in by "Apply prompt execution" in <a href="export.htm">Audio export (WAV / mp3 / FLAC)</a>.</li>
+</ul>
+<h2>What is remembered per track</h2>
+<p>BPM, the beat phase offset and the key are stored per track in <code>SongParams.dat</code> and restored the next time you play.</p>
+<p>Settings such as volume and EQ are saved against starred tracks when <b>Save per-song</b> is on. Switching it off first saves the current settings to that track, then disables the feature.</p>
+<h2>When you delete something by mistake</h2>
+<p>Removed a playlist row? "Undo delete" in the right-click menu brings back one step. It will not go back further, so use it as soon as you notice.</p>
+<div class="tip"><span class="label">Tip</span>
+<p>Whenever you feel lost on screen, right-click where you are. You get a list of what is possible there, and almost every one of those menus includes the operation guide. See <a href="help-buttons.htm">The "?" guide on every window</a>.</p>
+</div>
+<div class="related"><span class="label">See also</span><ul><li><a href="help-buttons.htm">The "?" guide on every window</a></li><li><a href="render.htm">Rendering settings</a></li><li><a href="playlist.htm">Working with playlists</a></li><li><a href="bpm.htm">Measuring BPM</a></li><li><a href="update.htm">Update checks</a></li></ul></div>
+
+<div class="botnav">
+<span class="prev">&#171; Back: <a href="help-buttons.htm">The "?" guide on every window</a></span>
+<span class="next">Next: <a href="update.htm">Update checks</a> &#187;</span>
+<span class="up"><a href="index.htm">Contents</a></span>
+<div class="clear"></div>
+</div>
+
+<div class="foot">Media player "Raira" (oggYSEDbgm) — PrePrayerPower Soft</div>
+
+</body>
+</html>

@@ -1,0 +1,75 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<title>スマホやPCから操作する</title>
+<link rel="stylesheet" type="text/css" href="../css/help.css">
+</head>
+<body>
+
+<div class="topnav"><a href="index.htm">目次</a> &nbsp;|&nbsp; <a href="../en/remote.htm">English</a></div>
+
+<h1>スマホやPCから操作する</h1>
+
+<p class="lead">ローカルリモートをONにすると、同じWi-FiやLANにつながっているスマホやPCのブラウザから、このソフトを操作できるようになります。同時に最大6台までつなげます。インターネットへは公開しません。</p>
+<div class="shot">
+<img src="../img/remote.png" alt="ローカルリモート設定">
+<p class="cap">ローカルリモート設定</p>
+</div>
+<h2>つなぐ手順</h2>
+<ol>
+<li>メディアプレイヤー下段の「リモート」ボタンを押します。</li>
+<li>「HTTP on Wi-Fi/LAN」のチェックを入れます。</li>
+<li>画面に <code>http://（LANのIP）:ポート/</code> という住所が出ます。</li>
+<li>スマホのブラウザでその住所を開きます。同じパソコンからなら <code>127.0.0.1</code> でも開けます。</li>
+</ol>
+<div class="note"><span class="label">注意</span>
+<p>はじめてONにしたときは、Windowsファイアウォールの許可を求められることがあります。許可しないと、他の機器からつながりません。</p>
+</div>
+<h2>ブラウザに出るタブ</h2>
+<dl>
+<dt>操作</dt>
+<dd>再生・停止・前後の曲・音量など、いちばん基本の操作です。</dd>
+<dt>EQ</dt>
+<dd><a href="eq.htm">イコライザーと環境モデル</a> を遠くから触れます。</dd>
+<dt>プレイリスト</dt>
+<dd>曲の一覧を見て、選んで再生できます。</dd>
+<dt>歌詞</dt>
+<dd><a href="lyrics.htm">歌詞を表示する</a> をスマホの画面で読めます。</dd>
+<dt>DJスクラッチ</dt>
+<dd>画面のレコード盤を指でこすって操作できます。<a href="djpad.htm">DJパッドで遊ぶ</a> の一部を持ち出したものです。</dd>
+<dt>ピアノ</dt>
+<dd>画面の鍵盤で音を鳴らせます。<a href="vst.htm">VSTホストで音源を鳴らす</a> と組み合わせられます。</dd>
+<dt>アナ</dt>
+<dd><a href="analyzer.htm">波形・周波数アナライザー</a> の表示をブラウザで見られます。</dd>
+</dl>
+<h2>配信で使える出口</h2>
+<dl>
+<dt>OBS用オーバーレイ</dt>
+<dd><code>http://…/overlay</code> を開くと、透過の曲名・状態表示になる簡易HTMLが出ます。OBSのブラウザソースに入れて、配信画面に曲名を出せます。<a href="live.htm">ライブ配信する</a> をご覧ください。</dd>
+<dt>共同キュー</dt>
+<dd><code>…/api/queue-add?i=行番号</code> を開くと、その行を次に流す予約に入れられます。その場にいる人に次の曲を選ばせる、という使い方ができます。ローカル用途向けで、認証はありません。</dd>
+<dt>AACの音を配る</dt>
+<dd>「AAC listen stream」をONにすると、鳴っている音をブラウザで聴けます。品質は 128 / 192 / 低遅延96 kbps から選べます。</dd>
+</dl>
+<h2>ポートを変える</h2>
+<p>ほかのソフトとポートがぶつかるときは、番号を変えてください。変えたあとは、スマホ側の住所も新しい番号にします。</p>
+<div class="tip"><span class="label">ヒント</span>
+<p>配信中や、パソコンから離れて音楽を流しているときにいちばん便利です。<a href="live.htm">ライブ配信する</a> と一緒に開いておくと、手が離せない場面でも曲を変えられます。</p>
+</div>
+<div class="note"><span class="label">注意</span>
+<p>この機能はインターネットへの公開はしません。同じネットワークの中だけで使う想定なので、認証のしくみは持っていません。知らない人がつながる場所（公共のWi-Fiなど）では使わないでください。</p>
+</div>
+<div class="related"><span class="label">あわせて読みたい</span><ul><li><a href="live.htm">ライブ配信する</a></li><li><a href="djpad.htm">DJパッドで遊ぶ</a></li><li><a href="eq.htm">イコライザーと環境モデル</a></li><li><a href="mirror.htm">もう一台のスピーカーへ同時に出す</a></li><li><a href="tools.htm">附属ツールいろいろ</a></li></ul></div>
+
+<div class="botnav">
+<span class="prev">&#171; 前へ: <a href="vst-midi.htm">.mid を VST 音源で鳴らす</a></span>
+<span class="next">次へ: <a href="mirror.htm">もう一台のスピーカーへ同時に出す</a> &#187;</span>
+<span class="up"><a href="index.htm">目次</a></span>
+<div class="clear"></div>
+</div>
+
+<div class="foot">メディアプレイヤー「らいら」 (oggYSEDbgm) — PrePrayerPower Soft</div>
+
+</body>
+</html>

@@ -1,0 +1,75 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<title>Controlling Raira from a phone or PC</title>
+<link rel="stylesheet" type="text/css" href="../css/help.css">
+</head>
+<body>
+
+<div class="topnav"><a href="index.htm">Contents</a> &nbsp;|&nbsp; <a href="../ja/remote.htm">日本語</a></div>
+
+<h1>Controlling Raira from a phone or PC</h1>
+
+<p class="lead">Turn the local remote on and any phone or PC on the same Wi-Fi or LAN can control Raira from a browser. Up to six clients at once. Nothing is exposed to the public internet.</p>
+<div class="shot">
+<img src="../img/remote.png" alt="Local remote settings">
+<p class="cap">Local remote settings</p>
+</div>
+<h2>Connecting</h2>
+<ol>
+<li>Press the <b>Remote</b> button on the media player's bottom row.</li>
+<li>Tick <b>HTTP on Wi-Fi/LAN</b>.</li>
+<li>An address of the form <code>http://(LAN IP):port/</code> appears.</li>
+<li>Open that address in your phone's browser. From the same PC, <code>127.0.0.1</code> works too.</li>
+</ol>
+<div class="note"><span class="label">Please note</span>
+<p>The first time you turn this on, Windows Firewall may ask for permission. Without it, other devices cannot connect.</p>
+</div>
+<h2>The browser tabs</h2>
+<dl>
+<dt>Transport</dt>
+<dd>Play, stop, previous, next, volume — the essentials.</dd>
+<dt>EQ</dt>
+<dd>Reach <a href="eq.htm">Equalizer and environmental models</a> from across the room.</dd>
+<dt>Playlist</dt>
+<dd>Browse the list and pick something to play.</dd>
+<dt>Lyrics</dt>
+<dd>Read <a href="lyrics.htm">Showing lyrics</a> on your phone screen.</dd>
+<dt>DJ scratch</dt>
+<dd>Drag a record with your finger. A slice of <a href="djpad.htm">Playing with the DJ pad</a>, brought along with you.</dd>
+<dt>Piano</dt>
+<dd>Play notes from an on-screen keyboard, which pairs with <a href="vst.htm">Playing instruments with the VST host</a>.</dd>
+<dt>Analyzer</dt>
+<dd>View the <a href="analyzer.htm">Waveform and spectrum analyzer</a> in the browser.</dd>
+</dl>
+<h2>Outputs useful for streaming</h2>
+<dl>
+<dt>OBS overlay</dt>
+<dd>Open <code>http://.../overlay</code> for simple HTML with a transparent background showing the track and state. Drop it into an OBS browser source to put the title on your stream. See <a href="live.htm">Live streaming</a>.</dd>
+<dt>Shared queue</dt>
+<dd><code>.../api/queue-add?i=row</code> adds that row to the up-next queue, which lets people in the room choose what plays next. It is meant for local use and has no authentication.</dd>
+<dt>AAC listen stream</dt>
+<dd>Turn on the AAC listen stream and the audio can be heard in a browser. Quality options are 128, 192 and low-latency 96 kbps.</dd>
+</dl>
+<h2>Changing the port</h2>
+<p>If another program already uses the port, change the number here — then use the new number in the address on your phone.</p>
+<div class="tip"><span class="label">Tip</span>
+<p>This is at its most useful mid-stream, or when music is playing and you are nowhere near the keyboard. Keeping it open alongside <a href="live.htm">Live streaming</a> means you can change tracks with your hands full.</p>
+</div>
+<div class="note"><span class="label">Please note</span>
+<p>This feature is not published to the internet. It assumes a network you trust and therefore has no authentication, so do not use it somewhere strangers can connect, such as public Wi-Fi.</p>
+</div>
+<div class="related"><span class="label">See also</span><ul><li><a href="live.htm">Live streaming</a></li><li><a href="djpad.htm">Playing with the DJ pad</a></li><li><a href="eq.htm">Equalizer and environmental models</a></li><li><a href="mirror.htm">Sending sound to a second device</a></li><li><a href="tools.htm">The companion tools</a></li></ul></div>
+
+<div class="botnav">
+<span class="prev">&#171; Back: <a href="vst-midi.htm">Playing .mid through a VST</a></span>
+<span class="next">Next: <a href="mirror.htm">Sending sound to a second device</a> &#187;</span>
+<span class="up"><a href="index.htm">Contents</a></span>
+<div class="clear"></div>
+</div>
+
+<div class="foot">Media player "Raira" (oggYSEDbgm) — PrePrayerPower Soft</div>
+
+</body>
+</html>

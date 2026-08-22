@@ -1,0 +1,62 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<title>歌詞を表示する</title>
+<link rel="stylesheet" type="text/css" href="../css/help.css">
+</head>
+<body>
+
+<div class="topnav"><a href="index.htm">目次</a> &nbsp;|&nbsp; <a href="../en/lyrics.htm">English</a></div>
+
+<h1>歌詞を表示する</h1>
+
+<p class="lead">時刻の付いた歌詞ファイル（.lrc）を読み込むと、曲に合わせて歌詞が流れます。手元にファイルがなくても、ネットから探してくることができます。</p>
+<h2>歌詞ファイルを置く</h2>
+<p>いちばん簡単なのは、曲と同じフォルダに同じ名前で <code>.lrc</code> を置く方法です。</p>
+<pre class="fig">Music\
+  ├ 01 - 銀の意志.ogg
+  └ 01 - 銀の意志.lrc   ← 同じ名前にします</pre>
+<h2>ネットから取得する</h2>
+<ol>
+<li>曲を再生した状態で、歌詞の取得を実行します。</li>
+<li>LRCLib や NetEase などから候補を探します。</li>
+<li>見つかったら読み込まれ、そのまま表示に使えます。</li>
+</ol>
+<p>曲名やアーティスト名がきちんと入っていないと見つかりにくいので、先に <a href="tags.htm">タグを編集する</a> で整えておくと成功しやすくなります。</p>
+<h2>ふたつの表示方法</h2>
+<dl>
+<dt>プレイヤー内の歌詞パネル</dt>
+<dd>メディアプレイヤーの中でカラオケ風にスクロールします。<a href="mp-lyrics-panel.htm">プレイヤー内の歌詞パネル</a> をご覧ください。</dd>
+<dt>歌詞ウィンドウ</dt>
+<dd>常時最前面にできる独立した窓です。透明度、表示する行数、フォント、位置を覚えてくれるので、他の作業をしながら歌詞だけ見たいときに向いています。歌詞ボタンの横の「▾」を右クリックすると開けます。</dd>
+</dl>
+<h2>ずれを直す</h2>
+<p>歌詞が音より早い、あるいは遅いときは、時刻をまとめて前後に動かせます。</p>
+<ul>
+<li>±10ms …… 細かい追い込みに。</li>
+<li>±50ms …… ふつうのずれに。</li>
+<li>±100ms …… はっきりずれているときに。</li>
+<li>合ったところで、ファイルへ保存できます。次からはそのまま合います。</li>
+</ul>
+<h2>シークバーとのつながり</h2>
+<p>読み込んだ歌詞の各行の時刻は、シークバーに水色の細い線として出ます。クリックするとその行の頭へ飛べるので、「2番のサビから聴きたい」といった移動が一瞬です。A-B範囲を作るときの目安にもなります。<a href="mp-seek.htm">シークバーの読み方</a> をご覧ください。</p>
+<div class="tip"><span class="label">ヒント</span>
+<p>歌詞をきれいに読ませたいときは、<a href="acrylic.htm">アクリル表示とコンテキストメニュー</a> でフォントを大きめの読みやすいものに変えると効果があります。</p>
+</div>
+<div class="note"><span class="label">注意</span>
+<p>時刻の付いていないふつうのテキスト歌詞は、スクロールの位置合わせができません。時刻付きの <code>.lrc</code> を用意すると、この機能がいちばん活きます。</p>
+</div>
+<div class="related"><span class="label">あわせて読みたい</span><ul><li><a href="mp-lyrics-panel.htm">プレイヤー内の歌詞パネル</a></li><li><a href="mp-seek.htm">シークバーの読み方</a></li><li><a href="tags.htm">タグを編集する</a></li><li><a href="tools.htm">附属ツールいろいろ</a></li><li><a href="acrylic.htm">アクリル表示とコンテキストメニュー</a></li></ul></div>
+
+<div class="botnav">
+<span class="prev">&#171; 前へ: <a href="protools.htm">音を整えるツール</a></span>
+<span class="next">次へ: <a href="analyzer.htm">波形・周波数アナライザー</a> &#187;</span>
+<span class="up"><a href="index.htm">目次</a></span>
+<div class="clear"></div>
+</div>
+
+<div class="foot">メディアプレイヤー「らいら」 (oggYSEDbgm) — PrePrayerPower Soft</div>
+
+</body>
+</html>

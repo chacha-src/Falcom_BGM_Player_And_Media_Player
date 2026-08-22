@@ -1,0 +1,326 @@
+﻿/* ------------------------------------------------------------------
+   help.css : oggYSEDbgm / メディアプレイヤー「らいら」 offline help
+   Kept intentionally close to CSS2 because CHM pages render in the
+   legacy Trident engine, where flexbox / grid / custom properties
+   are not available.
+   ------------------------------------------------------------------ */
+
+html, body {
+	margin: 0;
+	padding: 0;
+}
+
+body {
+	background-color: #f7f4ee;
+	color: #33302b;
+	font-family: "Meiryo", "Yu Gothic UI", "Segoe UI", "Hiragino Kaku Gothic ProN", "MS PGothic", sans-serif;
+	font-size: 88%;
+	line-height: 1.85;
+	padding: 18px 26px 40px 26px;
+}
+
+/* ---------- headings ---------- */
+
+h1 {
+	font-size: 154%;
+	font-weight: normal;
+	color: #1d5f56;
+	margin: 4px 0 6px 0;
+	padding: 0 0 8px 0;
+	border-bottom: 3px solid #cfe0da;
+	letter-spacing: 0.02em;
+}
+
+h2 {
+	font-size: 116%;
+	color: #235c52;
+	margin: 30px 0 8px 0;
+	padding: 3px 0 3px 12px;
+	border-left: 6px solid #7fae9f;
+	background-color: #eef3ef;
+	line-height: 1.6;
+}
+
+h3 {
+	font-size: 102%;
+	color: #4a5a52;
+	margin: 20px 0 4px 0;
+	padding: 0;
+	border-bottom: 1px dotted #bdc9c3;
+}
+
+/* ---------- text ---------- */
+
+p {
+	margin: 0.7em 0;
+}
+
+p.lead {
+	background-color: #fffdf6;
+	border: 1px solid #e4dcc8;
+	border-left: 5px solid #c8b98d;
+	margin: 12px 0 18px 0;
+	padding: 10px 14px;
+	line-height: 1.9;
+}
+
+ul, ol {
+	margin: 0.6em 0 0.9em 0;
+	padding-left: 1.9em;
+}
+
+li {
+	margin: 0.25em 0;
+}
+
+ul.plain {
+	list-style-type: none;
+	padding-left: 0.4em;
+}
+
+dl {
+	margin: 0.7em 0 1em 0;
+}
+
+dt {
+	font-weight: bold;
+	color: #2b5a50;
+	margin-top: 0.7em;
+}
+
+dd {
+	margin: 0.1em 0 0.4em 1.6em;
+}
+
+strong, b {
+	color: #1f4f46;
+}
+
+code, kbd, pre.fig {
+	font-family: "Consolas", "MS Gothic", monospace;
+}
+
+kbd {
+	background-color: #f0ece1;
+	border: 1px solid #cec6b2;
+	border-bottom-width: 2px;
+	padding: 0 4px;
+	font-size: 94%;
+	color: #4a423a;
+}
+
+pre.fig {
+	background-color: #fbfaf6;
+	border: 1px solid #ded7c6;
+	color: #43403a;
+	font-size: 96%;
+	line-height: 1.5;
+	margin: 0.9em 0;
+	overflow: auto;
+	padding: 10px 14px;
+}
+
+/* ---------- callout boxes ---------- */
+
+div.tip, div.note {
+	margin: 1em 0;
+	padding: 9px 14px 9px 14px;
+	line-height: 1.8;
+}
+
+div.tip {
+	background-color: #f3f8f2;
+	border: 1px solid #c6ddca;
+	border-left: 6px solid #74ab7d;
+}
+
+div.note {
+	background-color: #fdf4ef;
+	border: 1px solid #ecd2c2;
+	border-left: 6px solid #d09166;
+}
+
+div.tip span.label, div.note span.label {
+	display: block;
+	font-weight: bold;
+	font-size: 94%;
+	letter-spacing: 0.06em;
+	margin-bottom: 2px;
+}
+
+div.tip span.label {
+	color: #357a45;
+}
+
+div.note span.label {
+	color: #a55f2c;
+}
+
+div.tip p, div.note p {
+	margin: 0.35em 0;
+}
+
+/* ---------- tables ---------- */
+
+table.grid {
+	border-collapse: collapse;
+	margin: 1em 0;
+	background-color: #fffefb;
+}
+
+table.grid th, table.grid td {
+	border: 1px solid #d4cdbc;
+	padding: 5px 11px;
+	text-align: left;
+	vertical-align: top;
+	line-height: 1.7;
+}
+
+table.grid th {
+	background-color: #eceee7;
+	color: #33453d;
+	font-weight: bold;
+	white-space: nowrap;
+}
+
+/* ---------- links ---------- */
+
+a:link {
+	color: #1a6156;
+	text-decoration: none;
+	border-bottom: 1px solid #a9ccc3;
+}
+
+a:visited {
+	color: #4b6b62;
+	text-decoration: none;
+	border-bottom: 1px solid #c2d2cd;
+}
+
+a:hover, a:active {
+	color: #0f463d;
+	background-color: #e4efeb;
+	border-bottom: 1px solid #4f8478;
+}
+
+/* ---------- navigation strips ---------- */
+
+div.topnav {
+	background-color: #eae6dc;
+	border: 1px solid #d6cfbe;
+	color: #6a6255;
+	font-size: 92%;
+	margin: 0 0 14px 0;
+	padding: 5px 12px;
+}
+
+div.topnav a:link, div.topnav a:visited {
+	border-bottom: none;
+}
+
+div.related {
+	background-color: #f2f6f4;
+	border: 1px solid #d2e0da;
+	margin: 26px 0 0 0;
+	padding: 8px 14px 10px 14px;
+}
+
+div.related span.label {
+	display: block;
+	color: #2f6459;
+	font-weight: bold;
+	font-size: 94%;
+	margin-bottom: 3px;
+}
+
+div.related ul {
+	margin: 0.2em 0 0.2em 0;
+	padding-left: 1.5em;
+}
+
+div.botnav {
+	border-top: 2px solid #ddd6c6;
+	color: #77705f;
+	font-size: 92%;
+	margin: 24px 0 0 0;
+	padding: 8px 2px 0 2px;
+}
+
+div.botnav span.prev {
+	float: left;
+}
+
+div.botnav span.next {
+	float: right;
+}
+
+div.botnav span.up {
+	display: block;
+	text-align: center;
+}
+
+div.clear {
+	clear: both;
+	height: 1px;
+	font-size: 1px;
+	line-height: 1px;
+}
+
+/* ---------- index page listing ---------- */
+
+table.toc {
+	border-collapse: collapse;
+	margin: 0.6em 0 1.2em 0;
+	width: 100%;
+}
+
+table.toc td {
+	border-bottom: 1px solid #e6e0d2;
+	padding: 4px 10px 4px 2px;
+	vertical-align: top;
+	line-height: 1.75;
+}
+
+table.toc td.slug {
+	white-space: nowrap;
+	width: 15em;
+}
+
+table.toc td.desc {
+	color: #5d574c;
+	font-size: 94%;
+}
+
+/* ---------- screenshots ---------- */
+
+div.shot {
+	margin: 1em 0 1.2em 0;
+	text-align: center;
+	background-color: #fbfaf6;
+	border: 1px solid #ded7c6;
+	padding: 10px 10px 6px 10px;
+}
+
+div.shot img {
+	max-width: 100%;
+	height: auto;
+	border: 1px solid #cfc7b6;
+}
+
+div.shot p.cap {
+	color: #5d574c;
+	font-size: 92%;
+	margin: 8px 4px 2px 4px;
+	line-height: 1.6;
+	text-align: left;
+}
+
+/* ---------- footer ---------- */
+
+div.foot {
+	border-top: 1px solid #e0d9c9;
+	color: #8d8677;
+	font-size: 86%;
+	margin-top: 30px;
+	padding-top: 8px;
+}

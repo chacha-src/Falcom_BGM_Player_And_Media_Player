@@ -1,0 +1,68 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<title>Playing instruments with the VST host</title>
+<link rel="stylesheet" type="text/css" href="../css/help.css">
+</head>
+<body>
+
+<div class="topnav"><a href="index.htm">Contents</a> &nbsp;|&nbsp; <a href="../ja/vst.htm">日本語</a></div>
+
+<h1>Playing instruments with the VST host</h1>
+
+<p class="lead">The VST host loads your VST instruments so you can play them live from a MIDI keyboard. Open it with the media player's bottom-bar <b>VST</b> button. To play playlist .mid files through a VST, see <a href="vst-midi.htm">Playing .mid through a VST</a> instead.</p>
+<div class="shot">
+<img src="../img/vst-host.png" alt="VST host with plugins and part assignment">
+<p class="cap">VST host with plugins and part assignment</p>
+</div>
+<h2>From zero to sound</h2>
+<ol>
+<li>Press <b>VST</b> on the bottom bar. Plug-ins are on the left; Parts 1–32 on the right.</li>
+<li>If the list is empty, use Rescan (or right-click → Rescan plug-ins). Only plug-ins that can actually land on a part are listed.</li>
+<li>Drag a plug-in onto one of <b>Parts 1–32</b>.</li>
+<li>Choose MIDI In 1–3 and the audio output device at the top.</li>
+<li>Play the keyboard — that part should sound.</li>
+</ol>
+<h2>Main controls</h2>
+<dl>
+<dt>Preset</dt>
+<dd>Save / switch / rename / delete wiring and device choices.</dd>
+<dt>Rescan</dt>
+<dd>Rebuild the plug-in list.</dd>
+<dt>Save / Rename / Delete</dt>
+<dd>Preset management.</dd>
+<dt>Filter</dt>
+<dd>Narrow the list by name.</dd>
+</dl>
+<h2>Slot actions</h2>
+<ul>
+<li>Slot button — open the plug-in's editor window.</li>
+<li>▼ — choose send channel or program / kit.</li>
+<li>Right-click — Open editor, MIDI channel to send (as received / ch1–16), program/kit, clear slot, rescan, save preset.</li>
+</ul>
+<h2>Computer keyboard</h2>
+<p>Without a MIDI device you can still play: lower keys ≈ C4, upper ≈ C5. <kbd>Space</kbd> sends all notes off. Disabled while a text field has focus.</p>
+<h2>Multitimbral modules</h2>
+<p>SOUND Canvas VA, SGP2, and similar modules take 16 channels in one slot. MIDI channels pass through, so each channel can be a different instrument.</p>
+<h2>64-bit plug-ins</h2>
+<p>64-bit plug-ins load through KpiHost64 — same idea as <a href="kpi.htm">Expanding formats with KPI plug-ins</a>.</p>
+<div class="tip"><span class="label">Tip</span>
+<p>No MIDI gear? Try the piano tab in <a href="remote.htm">Controlling from a phone or PC</a>. To watch SMF channel state, open the <a href="midi-monitor.htm">MIDI monitor</a>.</p>
+</div>
+<div class="note"><span class="label">Please note</span>
+<p>“This plug-in has no editor window” means the UI cannot open — sound still works.</p>
+</div>
+<div class="related"><span class="label">See also</span><ul><li><a href="vst-midi.htm">Playing .mid through a VST</a></li><li><a href="midi.htm">Controlling Raira from a MIDI keyboard</a></li><li><a href="midi-monitor.htm">MIDI monitor</a></li><li><a href="kpi.htm">Adding formats with KPI plug-ins</a></li><li><a href="remote.htm">Controlling Raira from a phone or PC</a></li></ul></div>
+
+<div class="botnav">
+<span class="prev">&#171; Back: <a href="midi.htm">Controlling Raira from a MIDI keyboard</a></span>
+<span class="next">Next: <a href="vst-midi.htm">Playing .mid through a VST</a> &#187;</span>
+<span class="up"><a href="index.htm">Contents</a></span>
+<div class="clear"></div>
+</div>
+
+<div class="foot">Media player "Raira" (oggYSEDbgm) — PrePrayerPower Soft</div>
+
+</body>
+</html>

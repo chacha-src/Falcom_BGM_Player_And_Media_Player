@@ -1,0 +1,57 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<title>Tuning piano roll detection</title>
+<link rel="stylesheet" type="text/css" href="../css/help.css">
+</head>
+<body>
+
+<div class="topnav"><a href="index.htm">Contents</a> &nbsp;|&nbsp; <a href="../ja/pianoroll-tune.htm">日本語</a></div>
+
+<h1>Tuning piano roll detection</h1>
+
+<p class="lead">This window controls how sensitive the piano roll is. There are a lot of sliders, but the reliable approach is to move them a little at a time and judge with your eyes and ears. If it all goes wrong, "Reset to defaults" starts you over.</p>
+<h2>Opening it</h2>
+<p>Right-click the <a href="pianoroll.htm">piano roll</a> display and choose the detection tuning dialog.</p>
+<h2>How to go about it</h2>
+<ol>
+<li>Open it while the track you care about is playing — adjusting against a moving display is far clearer.</li>
+<li>Move one slider at a time. Change several at once and you lose track of which one did what.</li>
+<li>Picking up too much? Raise the threshold. Picking up too little? Lower it.</li>
+<li>If you paint yourself into a corner, press "Reset to defaults" and begin again.</li>
+</ol>
+<h2>Common symptoms</h2>
+<table class="grid">
+<tr><th>Problem</th><th>What to try</th></tr>
+<tr><td>Notes so dense you cannot read them</td><td>Raise the threshold; narrow the range to 88 keys</td></tr>
+<tr><td>Nothing appears in quiet passages</td><td>Lower the threshold, or raise the volume first</td></tr>
+<tr><td>Percussion registers as notes</td><td>Reduce sensitivity in the low bands</td></tr>
+<tr><td>Chord names keep flickering</td><td>Move settings towards a steadier judgement</td></tr>
+<tr><td>High notes never appear</td><td>Switch the range to 108 keys</td></tr>
+</table>
+<h2>Worth trying afterwards</h2>
+<ul>
+<li>Capture MIDI or MusicXML in <a href="pianoroll.htm">Seeing the music on a piano roll</a>.</li>
+<li>Open the <a href="analyzer.htm">Waveform and spectrum analyzer</a> alongside and compare the frequency peaks with the notes detected.</li>
+<li>Confirm the tempo in <a href="bpm.htm">Measuring BPM</a> so beats and notes line up.</li>
+</ul>
+<div class="tip"><span class="label">Tip</span>
+<p>This window has a "?" button too, with a diagram of what each slider affects. See <a href="help-buttons.htm">The "?" guide on every window</a>.</p>
+</div>
+<div class="note"><span class="label">Please note</span>
+<p>The best values depend heavily on how the music is put together. There is no universal setting, so it is practical to settle on something that suits the genre you listen to most.</p>
+</div>
+<div class="related"><span class="label">See also</span><ul><li><a href="pianoroll.htm">Seeing the music on a piano roll</a></li><li><a href="analyzer.htm">Waveform and spectrum analyzer</a></li><li><a href="bpm.htm">Measuring BPM</a></li><li><a href="help-buttons.htm">The "?" guide on every window</a></li><li><a href="tips.htm">Small things worth knowing</a></li></ul></div>
+
+<div class="botnav">
+<span class="prev">&#171; Back: <a href="pianoroll.htm">Seeing the music on a piano roll</a></span>
+<span class="next">Next: <a href="midi-monitor.htm">MIDI monitor</a> &#187;</span>
+<span class="up"><a href="index.htm">Contents</a></span>
+<div class="clear"></div>
+</div>
+
+<div class="foot">Media player "Raira" (oggYSEDbgm) — PrePrayerPower Soft</div>
+
+</body>
+</html>

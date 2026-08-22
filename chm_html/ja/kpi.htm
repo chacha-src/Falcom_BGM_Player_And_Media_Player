@@ -1,0 +1,54 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<title>KPIプラグインで対応形式をふやす</title>
+<link rel="stylesheet" type="text/css" href="../css/help.css">
+</head>
+<body>
+
+<div class="topnav"><a href="index.htm">目次</a> &nbsp;|&nbsp; <a href="../en/kpi.htm">English</a></div>
+
+<h1>KPIプラグインで対応形式をふやす</h1>
+
+<p class="lead">ふつうでは読めない珍しい音声形式は、Kb Media Player 用の kpi プラグインを入れることで再生できる場合があります。旧タイプの kpi と、新しい kpi の一部に対応しています。</p>
+<h2>入れかた</h2>
+<ol>
+<li>手に入れた kpi プラグインのファイルを、実行ファイルの隣にある <code>Plugins</code> フォルダへ入れます。</li>
+<li>ソフトを起動し直します。</li>
+<li>プラグイン一覧（kpi一覧）を開いて、使いたいプラグインを確認します。</li>
+<li>対応した形式のファイルを再生してみます。</li>
+</ol>
+<h2>kpi一覧の使いかた</h2>
+<ul>
+<li>拡張子のテキストを入力すると、その場で一覧が絞り込まれます。「mid」と打てば、MIDI系のプラグインだけが残ります。</li>
+<li>チェックの状態は曲単位で保たれます。「この曲はこのプラグインで読む」という指定ができます。</li>
+</ul>
+<h2>64bit版でのしくみ</h2>
+<p>64bit 版では KpiHost64 という別のプロセスを経由してプラグインを読み込みます。この仕組みのおかげで、32bit 用に作られた古いプラグインも 64bit の本体から使えます。<a href="vst.htm">VSTホストで音源を鳴らす</a> の64bitプラグインも同じ仕組みです。</p>
+<h2>細かい設定が要るプラグイン</h2>
+<ul>
+<li><b>KPI ver5 専用パラメータ設定</b> …… 新しいタイプのプラグインの細かい設定です。</li>
+<li><b>fmpmd.kpi の PVI パス設定</b> …… 追加のデータファイルの場所を教えます。</li>
+</ul>
+<h2>書き出すときの注意</h2>
+<p>kpi で鳴らしている曲は、長さが分からないことがあります。<a href="export.htm">音声書き出し（WAV / mp3 / FLAC）</a> の「長さ（秒）」に、書き出したい秒数を入れてください。</p>
+<div class="tip"><span class="label">ヒント</span>
+<p>まずは本体が対応している形式かどうかを <a href="formats.htm">対応形式と対応タイトル</a> で確かめてください。本体で読めるならプラグインは要りません。</p>
+</div>
+<div class="note"><span class="label">注意</span>
+<p>kpi プラグインは第三者が作ったものです。うまく動かないプラグインもあります。動かないときは、その形式のプラグインを別のものに替えて試してみてください。</p>
+</div>
+<div class="related"><span class="label">あわせて読みたい</span><ul><li><a href="formats.htm">対応形式と対応タイトル</a></li><li><a href="vst.htm">VSTホストで音源を鳴らす</a></li><li><a href="export.htm">音声書き出し（WAV / mp3 / FLAC）</a></li><li><a href="render.htm">レンダリング設定</a></li><li><a href="tips.htm">ちょっとしたコツ</a></li></ul></div>
+
+<div class="botnav">
+<span class="prev">&#171; 前へ: <a href="mirror.htm">もう一台のスピーカーへ同時に出す</a></span>
+<span class="next">次へ: <a href="render.htm">レンダリング設定</a> &#187;</span>
+<span class="up"><a href="index.htm">目次</a></span>
+<div class="clear"></div>
+</div>
+
+<div class="foot">メディアプレイヤー「らいら」 (oggYSEDbgm) — PrePrayerPower Soft</div>
+
+</body>
+</html>

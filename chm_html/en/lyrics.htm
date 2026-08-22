@@ -1,0 +1,62 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<title>Showing lyrics</title>
+<link rel="stylesheet" type="text/css" href="../css/help.css">
+</head>
+<body>
+
+<div class="topnav"><a href="index.htm">Contents</a> &nbsp;|&nbsp; <a href="../ja/lyrics.htm">日本語</a></div>
+
+<h1>Showing lyrics</h1>
+
+<p class="lead">Load a timed lyrics file (.lrc) and the words follow the music. If you do not have one to hand, Raira can look one up online.</p>
+<h2>Placing a lyrics file</h2>
+<p>The simplest arrangement is a <code>.lrc</code> file with the same name, in the same folder as the track.</p>
+<pre class="fig">Music\
+  +- 01 - Silver Will.ogg
+  +- 01 - Silver Will.lrc   <- same name</pre>
+<h2>Fetching lyrics online</h2>
+<ol>
+<li>With the track playing, run the lyrics lookup.</li>
+<li>Raira searches sources such as LRCLib and NetEase.</li>
+<li>Anything found is loaded and ready to display.</li>
+</ol>
+<p>Lookups depend on a sensible title and artist, so tidying those up in <a href="tags.htm">Editing tags</a> first raises your success rate considerably.</p>
+<h2>Two ways to display them</h2>
+<dl>
+<dt>The in-player panel</dt>
+<dd>Scrolls karaoke-style inside the media player. See <a href="mp-lyrics-panel.htm">The in-player lyrics panel</a>.</dd>
+<dt>The lyrics window</dt>
+<dd>A separate window that can stay above everything else. It remembers opacity, the number of visible lines, the font and its position, which makes it ideal for reading lyrics while you work on something else. Open it by right-clicking the arrow beside the Lyrics button.</dd>
+</dl>
+<h2>Fixing the timing</h2>
+<p>When the lyrics run ahead of or behind the music, you can shift every timing at once.</p>
+<ul>
+<li>±10 ms for fine tuning.</li>
+<li>±50 ms for ordinary drift.</li>
+<li>±100 ms when it is clearly out.</li>
+<li>Save to the file once it lines up, and it will be right from then on.</li>
+</ul>
+<h2>How this ties into the seek bar</h2>
+<p>Each line's timing appears on the seek bar as a thin cyan line. Click one to jump to that line, which turns "start from the second chorus" into a single click, and gives you natural candidates for A-B ranges. See <a href="mp-seek.htm">Reading the seek bar</a>.</p>
+<div class="tip"><span class="label">Tip</span>
+<p>To make lyrics easier on the eye, try a larger, more readable font via <a href="acrylic.htm">Acrylic look and context menus</a>.</p>
+</div>
+<div class="note"><span class="label">Please note</span>
+<p>Plain text lyrics with no timings cannot be scrolled in sync. A timed <code>.lrc</code> file is what makes this feature shine.</p>
+</div>
+<div class="related"><span class="label">See also</span><ul><li><a href="mp-lyrics-panel.htm">The in-player lyrics panel</a></li><li><a href="mp-seek.htm">Reading the seek bar</a></li><li><a href="tags.htm">Editing tags</a></li><li><a href="tools.htm">The companion tools</a></li><li><a href="acrylic.htm">Acrylic look and context menus</a></li></ul></div>
+
+<div class="botnav">
+<span class="prev">&#171; Back: <a href="protools.htm">Tools for shaping the sound</a></span>
+<span class="next">Next: <a href="analyzer.htm">Waveform and spectrum analyzer</a> &#187;</span>
+<span class="up"><a href="index.htm">Contents</a></span>
+<div class="clear"></div>
+</div>
+
+<div class="foot">Media player "Raira" (oggYSEDbgm) — PrePrayerPower Soft</div>
+
+</body>
+</html>

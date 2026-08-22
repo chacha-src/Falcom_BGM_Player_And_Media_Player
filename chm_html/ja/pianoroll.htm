@@ -1,0 +1,64 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<title>ピアノロールで音を見る</title>
+<link rel="stylesheet" type="text/css" href="../css/help.css">
+</head>
+<body>
+
+<div class="topnav"><a href="index.htm">目次</a> &nbsp;|&nbsp; <a href="../en/pianoroll.htm">English</a></div>
+
+<h1>ピアノロールで音を見る</h1>
+
+<p class="lead">ピアノロールは、いま鳴っている音を鍵盤の上に並べて見せてくれる画面です。108鍵（表示は88鍵と108鍵を切り替え）で、メロディやコードを目で追えます。耳コピの助けになります。</p>
+<div class="shot">
+<img src="../img/pianoroll.png" alt="簡易ピアノロール">
+<p class="cap">簡易ピアノロール</p>
+</div>
+<h2>開く</h2>
+<p>メディアプレイヤーの「ロール」ボタン、またはプレイリストで曲を右クリックして開きます。操作のほとんどは画面の右クリックメニューに入っています。</p>
+<h2>表示できるもの</h2>
+<ul>
+<li><b>ノート</b> …… 検出した音が鍵盤の上に並びます。</li>
+<li><b>ノート名</b> …… C、D#、といった音名を出せます。</li>
+<li><b>コード</b> …… 鳴っている和音の名前を表示します。コード進行のパネルもあります。</li>
+<li><b>メロディ</b> …… 主旋律らしい線を強調して表示します。</li>
+</ul>
+<h2>表示レンジと見た目</h2>
+<ul>
+<li><b>88鍵 / 108鍵</b> …… ピアノと同じ範囲か、もっと広い範囲かを選べます。</li>
+<li><b>通常の2D</b> …… まっすぐ上から見た表示です。</li>
+<li><b>簡易3D</b> …… 奥行きのある表示です。ドラッグで視点を動かし、ホイールで寄り引きできます。</li>
+</ul>
+<h2>検出のぐあいを調整する</h2>
+<p>「音を拾いすぎる」「拾ってくれない」というときは、検出パラメータを細かく調整できます。<a href="pianoroll-tune.htm">ピアノロールの検出パラメータ</a> をご覧ください。</p>
+<p>検出は、鳴っている基音を1つずつ確定しては、その倍音列をスペクトルから引きます。オクターブに乗るコピー（倍音ゴースト）は消し、同じ位置に乗っている和音やメロディは、残差と自前の倍音の両方で残します。履歴の棒にサステインの横線を毎行描くのはやめて、記号だけにしています。</p>
+<h2>MIDI / MusicXML として録る</h2>
+<p>再生している音から、MIDI や MusicXML を書き出せます（実験的な機能です）。</p>
+<ul>
+<li>曲を再生しながら録ると、その曲の譜面のもとになります。</li>
+<li>再生を止めているときは、パソコンで鳴っている音（ループバック）を自動で拾います。他のソフトの音や、動画サイトの音も譜面にできます。</li>
+<li>できたファイルは、譜面ソフトやDAWで開いて手直しできます。</li>
+</ul>
+<h2>音源として鳴らす</h2>
+<p>拾ったノートをそのまま音源で鳴らしてみたいときは、<a href="vst.htm">VSTホストで音源を鳴らす</a> と <a href="midi.htm">MIDIキーボードで操作する</a> が使えます。</p>
+<div class="tip"><span class="label">ヒント</span>
+<p>アナライザーと並べて開くと、「周波数の山」と「音名」を同時に見られます。<a href="analyzer.htm">波形・周波数アナライザー</a> をご覧ください。</p>
+</div>
+<div class="note"><span class="label">注意</span>
+<p>音を自動で拾う処理なので、完全に正確ではありません。とくに音が重なった部分や、打楽器の多い曲では拾いにくくなります。耳での確認と合わせて使ってください。</p>
+</div>
+<div class="related"><span class="label">あわせて読みたい</span><ul><li><a href="pianoroll-tune.htm">ピアノロールの検出パラメータ</a></li><li><a href="analyzer.htm">波形・周波数アナライザー</a></li><li><a href="midi-monitor.htm">MIDIモニタ</a></li><li><a href="vst.htm">VSTホストで音源を鳴らす</a></li><li><a href="midi.htm">MIDIキーボードで操作する</a></li></ul></div>
+
+<div class="botnav">
+<span class="prev">&#171; 前へ: <a href="analyzer.htm">波形・周波数アナライザー</a></span>
+<span class="next">次へ: <a href="pianoroll-tune.htm">ピアノロールの検出パラメータ</a> &#187;</span>
+<span class="up"><a href="index.htm">目次</a></span>
+<div class="clear"></div>
+</div>
+
+<div class="foot">メディアプレイヤー「らいら」 (oggYSEDbgm) — PrePrayerPower Soft</div>
+
+</body>
+</html>

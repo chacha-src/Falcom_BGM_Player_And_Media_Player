@@ -1,0 +1,72 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<title>The voice changer</title>
+<link rel="stylesheet" type="text/css" href="../css/help.css">
+</head>
+<body>
+
+<div class="topnav"><a href="index.htm">Contents</a> &nbsp;|&nbsp; <a href="../ja/voice.htm">日本語</a></div>
+
+<h1>The voice changer</h1>
+
+<p class="lead">This turns your microphone into a different voice as you speak — male to female, female to male, or effects such as robot and telephone. The result can be used as the microphone input for other applications.</p>
+<h2>Getting started</h2>
+<ol>
+<li>Choose your microphone under <b>Input</b>. Press <b>Refresh</b> if it is missing.</li>
+<li>Choose where the processed voice goes under <b>Output</b>. If you only want to hear it yourself, speakers or headphones are fine.</li>
+<li>Pick a voice from <b>Preset</b>.</li>
+<li>Press <b>Start</b>. You can keep adjusting while it runs.</li>
+</ol>
+<h2>The presets</h2>
+<dl>
+<dt>Basic</dt>
+<dd>Normal (unprocessed), male to female (standard), female to male (standard), young girl, young boy, deep male, robot, radio / phone, chipmunk and custom.</dd>
+<dt>Male to female variants</dt>
+<dd>High-school girl, college girl, higher female, lower female, mature female, grade-school girl and middle-school girl.</dd>
+<dt>Female to male variants</dt>
+<dd>Higher male, lower male, young man, mature male, grade-school boy and middle-school boy.</dd>
+</dl>
+<h2>The individual controls</h2>
+<dl>
+<dt>Pitch</dt>
+<dd>How high the voice sits. Raise it for a female voice.</dd>
+<dt>Form (formant)</dt>
+<dd>Corresponds to the length of the vocal tract. Around 110–120% sounds natural for a female voice. <b>The trick is not to match it to Pitch</b> — setting both the same is what produces that obvious "disguised voice" quality.</dd>
+<dt>Gain</dt>
+<dd>Output level.</dd>
+<dt>Bright</dt>
+<dd>The presence of the voice.</dd>
+<dt>Breath</dt>
+<dd>How much breath is in it.</dd>
+<dt>Quality</dt>
+<dd>Trades latency against fidelity. Low latency suits conversation; high quality suits recording.</dd>
+<dt>FX</dt>
+<dd>None, robot, or radio / phone.</dd>
+</dl>
+<h2>Hearing yourself</h2>
+<p>Tick <b>Local monitor</b> and the processed voice comes back to you, which makes adjusting far easier.</p>
+<h2>Using it in other applications</h2>
+<p>For a chat program such as Discord, choose a <b>virtual audio cable</b> as the output here, then set that same device as the microphone input in the chat program.</p>
+<h2>Putting it on a recording or stream</h2>
+<p>Turn on Apply VC in <a href="capture.htm">Recording your screen</a> or in the microphone mix of <a href="wav-save.htm">Saving to WAV</a> and the same preset is applied to the microphone there, so you do not have to configure it twice.</p>
+<div class="tip"><span class="label">Tip</span>
+<p>The engine uses LPC to separate the vocal tract from the rest, then always applies the pitch conversion to the glottal residual. That is why even quiet speech is converted rather than slipping through unchanged.</p>
+</div>
+<div class="note"><span class="label">Please note</span>
+<p>If the output device you chose is in use by <a href="mirror.htm">Sending sound to a second device</a>, you get an output-conflict message. Move one of them to another device.</p>
+</div>
+<div class="related"><span class="label">See also</span><ul><li><a href="capture.htm">Recording your screen</a></li><li><a href="wav-save.htm">Saving to WAV</a></li><li><a href="mirror.htm">Sending sound to a second device</a></li><li><a href="tools.htm">The companion tools</a></li><li><a href="render.htm">Rendering settings</a></li></ul></div>
+
+<div class="botnav">
+<span class="prev">&#171; Back: <a href="tools.htm">The companion tools</a></span>
+<span class="next">Next: <a href="tuner.htm">Tuner practice</a> &#187;</span>
+<span class="up"><a href="index.htm">Contents</a></span>
+<div class="clear"></div>
+</div>
+
+<div class="foot">Media player "Raira" (oggYSEDbgm) — PrePrayerPower Soft</div>
+
+</body>
+</html>
