@@ -30,17 +30,21 @@ chachakotorinのgithubから移転です。
 108鍵盤（表示レンジは 88／108 切替）の簡易ピアノロールが実装されました。右クリックメニューから操作でき、検出パラメータの微調整や、再生中のコード・メロディ表示、ノート名表示にも対応しています。再生（またはPC音譜面化）中の MIDI / MusicXML 録り（実験的）もできます。
 表示は通常の2Dに加え **簡易3D**（視点ドラッグ・ホイールズーム）も選べます。
 
+### MIDIモニタ
+再生中の SMF（.mid / .midi / .kar / .rmi）を **32パート**（A01–A16 / B01–B16）で見守る画面です。オーディオから音程を推定するのではなく、ファイルに書かれた MIDI イベントそのものを出します。ピアノロールが「どの音が鳴ったか」を時間軸で見せるのに対し、こちらは各チャンネルの音色・音量・GS/XG の状態を一覧します。バナー／プレイリスト／コマンドパレットから開けます。
+
 ### 波形・周波数アナライザー
 Ozone風のリアルタイムアナライザーを追加しました。
 
-- **上部:** 多チャンネルPCM波形（横スクロール）と L/R レベルメーター（RMS＋RMSピークホールド）
-- **下部:** 対数軸の周波数特性（複数の表示モード、ピークホールド）
-- **表示モード:** Ozone / Cubase Frequency / Voxengo SPAN / Ableton Spectrum / FabFilter Pro-Q / バー / 線のみ（右クリック）
+- **上部:** 多チャンネルPCM波形（横スクロール）と L/R レベルメーター（RMS＋RMSピークホールド）。位相相関 φ はメーター左、レベルを消すと右端へ移ります
+- **上部の描画:** スクロール波形／エンベロープ／M-S／ラウドネス履歴／トリガー式オシロ／残光オシロ（右クリック、または **W**）
+- **下部:** 対数軸の周波数特性に加え、1/3oct RTA・スペクトログラム・位相スコープ・ゴニオ・帯域相関・帯域位相差（右クリック、または **S**）。簡易3Dでも同じ種類
+- **表示モード（周波数特性）:** Ozone / Cubase Frequency / Voxengo SPAN / Ableton Spectrum / FabFilter Pro-Q / バー / 線のみ
 - **波形速度:** x0.25〜x2.0（右クリック）
 - **レイアウト:** 重ね描き / 上下分割 / 左右分割 / 2x2 / 2x4（右クリックメニュー）
 - **EQオーバーレイ:** 既存15バンドEQの帯域とゲイン曲線をスペクトラム上に表示
-- **マウス読取:** ホバーで周波数・dB・チャンネル（分割時はカーソル下のパネル）を表示
-- **操作:** フリーズ（F） / ピークホールド（P） / EQ表示（E） / ピークリセット（Space・ダブルクリック）
+- **マウス読取:** ホバーで周波数・dB・チャンネル（分割時はカーソル下のパネル）を表示。帯域相関は φ、帯域位相差は角度
+- **操作:** フリーズ（F） / ピークホールド（P） / EQ表示（E） / メーター（M） / ピークリセット（Space・ダブルクリック）
 - **描画:** 解析ワーカースレッド＋UI自由走行（ピアノロールと同様）。アクリル（ぼかし）モードにも対応
 
 メディアプレイヤー画面モードの再生中アイコン（♪点滅2コマ）と選択♡の描画順も整備しました。
@@ -116,6 +120,10 @@ Windows 11のアクリル風ぼかし表示に対応しています。コンテ�
 ### 操作ガイド
 メディアプレイヤーの「？」に加え、EQ・プレイリスト・動画・レンダリング・キャプチャ・アナライザ・ピアノロール・メイン画面など、各 UI から **操作ガイド**（GDIヘルプ）を開けます。コンテキストメニューの「操作ガイド」からも到達できます。
 
+タイトルバーの **本** ボタンや **F1** では、オフラインヘルプ（CHM）全体が開きます。「？」がその画面だけの短い図解なのに対し、本／F1 は目次つきの説明です。
+
+**コマンドパレット**で機能名の一部を打てば、メニューをたどらずに目的の画面へ飛べます（「あの機能どこだっけ」のとき向きです）。
+
 操作ガイドには、画面ミニマップに加え、**シーク層（波形／拍グリッド／LRC／ループ・A-B）**、**Camelot相性**、**セット章**、**Remote/OBS** などの図解も入っています。追加機能の位置づけが分かりにくいときは、まずここを開くと把握しやすいです。
 
 ### PCMアップスケール
@@ -125,7 +133,12 @@ Windows 11のアクリル風ぼかし表示に対応しています。コンテ�
 再生中にピッチやテンポ、エフェクトなどを時間指定で動かすプロンプト機能があります。テキスト編集のほか、曲を読みながらの解析・履歴の保存／読込、雰囲気モードにも対応しています。
 
 ### コマンドロール
-プロンプトを時間軸のロール上で編集・配置できます（複数レーン）。メディアプレイヤー側から開けます。メイン画面に追随するロックや表示倍率の保存にも対応しています。
+プロンプトを時間軸のロール上で編集・配置できます（複数レーン）。メディアプレイヤー側から開けます。メイン画面に追随するロックや表示倍率の保存にも対応しています。簡易3D表示もあります。
+
+### VSTホスト
+メディアプレイヤー下段の **VST** から、手持ちの VST 音源を読み込んで鍵盤で鳴らせます。プラグインを Part 1〜32 へドラッグして配線し、MIDI入力（最大3系統）と音声出力を選べます。プリセットの保存・切替、名前での絞り込み、再スキャンに対応。MIDI機器が無くてもパソコンのキーボードで簡易演奏できます（Space で全音停止）。SOUND Canvas VA のようなマルチティンバーは1スロットで16chを受け持ちます。64bit プラグインは KpiHost64 経由です。
+
+プレイリストの **.mid / .midi / .kar / .rmi** は、レンダリング設定の「MIDI再生」を **VST優先** にし、GS／XG 用の VST を指定すると、その音源で曲ファイルを演奏できます（XG System On があれば XG、無ければ GS。両方空なら Windows の MIDI マッパーへ落ちます）。
 
 ### 再生詳細
 ギャップレス、ReplayGain、Mid/Side、相関メーター、書き出しリミッター、ループ区間、ループ境界フェード、キュー、タグ書き込み、簡易波形プレビューなどをまとめた設定です。メディアプレイヤー画面の「詳細」ボタン、またはプレイリストの右クリックから開けます。
@@ -162,6 +175,9 @@ Windows 11のアクリル風ぼかし表示に対応しています。コンテ�
 ### デバイス録音
 メディアプレイヤー下段の「録音」から、再生端末のループバックを **WAV / mp3 / FLAC** に録音できます。端末・形式・品質・保存先を指定でき、マイクの同時ミックスにも対応しています。mp3 / FLAC はいったんWAV経由で変換します。
 
+### アナログ起こし台
+レコードプレイヤーやカセット、ラジオなど **外から入る音** を WAV / mp3 / FLAC に録音します（下段やツールから）。入力端末のほか、**HPF**（ランブル対策）、**Gain**、**Gate**（曲間ノイズ抑え）、モニタ出力を備え、メーターを見ながらレベルを合わせられます。mp3 / FLAC はデバイス録音と同じく WAV 経由です。
+
 ### 画面キャプチャ
 同じく下段の「キャプチャ」から、画面を **MP4（H.264 + AAC）** で録画できます。**ライブ配信モード**では MP4 を作らず、ffmpeg 経由で YouTube Live / ニコニコ / カスタム RTMP へ送ります。
 
@@ -188,6 +204,11 @@ Windows 11のアクリル風ぼかし表示に対応しています。コンテ�
 - **キー確定／Camelot相性:** 解析キーを曲ごとに記憶。ツールから相性候補（隣接キー）を次曲候補として列挙
 - **DJパッド:** ピッチ／テンポ／ボーカル／M/S に加え、レコードスクラッチ、Kill（低／中／高）、±拍、ホットキュー、A-B、フィルタ／FX／速度、3バンドEQ などをワンタッチ
 - **MIDIキーボード操作:** ノート／CC で再生・次曲・音量など。**MIDI学習**で CC をテンポ／EQ 帯へ割り当て可能
+- **ボイスチェンジャー:** マイクの声をリアルタイムに変換（男女・年齢などのプリセット、ピッチ／フォルマント／息、ロボット／ラジオFX）。変えた声はほかのアプリのマイク入力にも回せます
+- **チューナー道場:** 単音チューナー（音名・セント、A4基準）とメトロノーム。フレーズA-Bで再生位置前後を練習範囲にできます（趣味用途・和音は非対応）
+- **騒音計:** マイク入力を相対 dBFS で表示（Hold・応答の速さ）。校正SPL計ではありません
+- **フォトフレーム:** フォルダ内の JPG/PNG/BMP/GIF を最大512枚、クロスフェードのスライドショー（シャッフル／最前面／BGM）
+- **コマンドパレット:** 機能名の一部を打って画面を開く
 - **トランジション・プリセット:** EQスイープ／フィルタ／クロスフェード秒の数種を「次曲向け」に適用（時系列オートメーション本体はなし）
 - **ライブセット録画:** 画面キャプチャとデバイス録音をまとめて開く（ゲーム録画プリセットの拡張）
 - **動画の音声抽出／差し替え:** 選択動画から WAV 抽出、または外部 WAV で音声を差し替えて MP4 へ書き出し
@@ -291,7 +312,7 @@ flowchart TB
   - kpi一覧では拡張子テキストで絞り込みできます（入力すると即座に反映。チェック状態は曲単位で保持）
 
 ### 3. 動画再生 (DirectShow)
-avi, mpgなどのDirectShow対応動画を再生可能です。Windows Vista以降ではEVRを使用し、高画質で再生します。映像・音声・字幕ストリームの切り替えにも対応しています。
+avi, mpg, mp4, mkv などのDirectShow対応動画を再生可能です。Windows Vista以降ではEVRを使用し、高画質で再生します。映像・音声・字幕ストリームの切り替えにも対応しています。
 ※ avi等の再生にはコーデックパック（K-Lite Codec Pack等）が必要です。
 [解説サイト: ppp.oohara.jp/k-lite.html](http://ppp.oohara.jp/k-lite.html)
 
@@ -339,6 +360,12 @@ avi, mpgなどのDirectShow対応動画を再生可能です。Windows Vista以�
 - kpi一覧の拡張子絞り込み
 - 拡張音量（主音量／EQマスターとは別系統）
 - Soft3D迷路（おまけ・下段ボタンから。地下階層・曲連動アイテムあり）
+- Soft3D空中レース（おまけ・下段の「レース」。光帯コース・AI対戦・テーマ地形）
+- VSTホスト（下段「VST」。パート配線・鍵盤演奏）と、.mid の VST優先再生（GS/XG）
+- MIDIモニタ（SMF 32パート／GS・XG）
+- アナログ起こし台（ライン入力＋HPF/Gate）
+- ボイスチェンジャー、チューナー道場、騒音計、フォトフレーム
+- コマンドパレット、オフラインヘルプ（CHM／F1）
 
 ## おまけ：Soft3D迷路
 メディアプレイヤー下段の **迷路** ボタンから開ける、DirectX11 の一人称迷路です。BGMを聴きながらの息抜き用で、本編の再生機能とは別枠のおまけです。
@@ -349,6 +376,14 @@ avi, mpgなどのDirectShow対応動画を再生可能です。Windows Vista以�
 - **地下:** 「地下」コンボで 0〜3F。壁・床のモチーフは階ごと（地上=レンガ／B1=湿った石／B2=錆び金属／B3=火山岩）。橙の階段＝下り、水色＝上り（斜め2マス）。半透明トラップ（粘液・棘・氷・闇、ワープなし）あり。旧セーブの同一マス階段は自動再生成。ゴールは難易度に応じてどこかの階
 - **難易度:** 超簡単〜超難しい。難しいほど細い通路・階段が多く上下往復し、トラップも増えやすい
 - **見た目:** 地上は草木付きレンガ、地下は階ごとの壁・床・霧。進行は自動保存され、開き直すと続きから
+
+## おまけ：Soft3D空中レース
+メディアプレイヤー下段の **レース** ボタンから開ける、光の帯（パワーバンド）に沿って飛ぶレースです。BGMを聴きながらの息抜き用で、迷路と同じく本編とは別枠のおまけです。
+
+- **操作:** マウスで機体の向き、左ボタン加速、右ボタンブレーキ、ホイールでズーム、中ボタンで後方確認。ゲームパッド（左スティック操舵、RT/A 加速、LT/B ブレーキ）にも対応。Yコンボで上下反転を覚えられます
+- **コース:** **生成** でデモ走行（俯瞰の下見）、**スタート** でカウント後に本戦。帯の上で推進力・中央の緑帯でHPが回復。帯外はショートカット向きですが推進力が尽きると戻されます
+- **設定:** AI（超簡単〜強烈）、相手台数、距離、周回、テーマ（森／遺跡／石油工場／夜の街／水中／草原／メサ／雲 など）
+- **連動:** アイテム球は再生中のテンポやピッチも変えます。ゴール後は表彰台（1〜3位）
 
 ## 注意事項
 - **Brandish4 および ガガーブトリロジー**については、WAVファイルをHDDへコピーする必要があります（フォルダ名は `WAVE`, `WAVEDV`, `WAVEDVD` などゲームにより異なります）。
@@ -395,17 +430,21 @@ You can store and recall the current EQ / global set as **A/B snapshots**.
 A simplified piano roll with an **88 / 108-key** display range has been implemented. Use the right-click menu for controls, detection tuning, chord/melody display, and note-name labels during playback. MIDI / MusicXML capture while playing (or PC-audio score) is experimental, and PC loopback audio can feed the roll.
 Besides flat 2D, a **simple 3D** view (drag to orbit, wheel to zoom) is available.
 
+### MIDI Monitor
+A window that watches the playing SMF (`.mid` / `.midi` / `.kar` / `.rmi`) as **32 parts** (A01–A16 / B01–B16). It shows MIDI events written in the file, not pitches estimated from audio. Where the piano roll plots *which notes sounded* over time, this lists each channel’s program, volume, and GS/XG state. Open it from the banner, playlist, or command palette.
+
 ### Waveform & Spectrum Analyzer
 An Ozone-inspired real-time analyzer has been added.
 
-- **Top:** Multi-channel scrolling PCM waveform with L/R level meters (RMS + RMS peak hold)
-- **Bottom:** Log-frequency spectrum (multiple display modes, with peak hold)
-- **Display modes:** Ozone / Cubase Frequency / Voxengo SPAN / Ableton Spectrum / FabFilter Pro-Q / Bars / Line only (right-click)
+- **Top:** Multi-channel scrolling PCM waveform with L/R level meters (RMS + RMS peak hold). Phase correlation φ sits left of the meters, or at the right edge when meters are hidden
+- **Top drawing:** scrolling waveform / envelope / M-S / loudness history / triggered oscilloscope / phosphor oscilloscope (right-click, or **W**)
+- **Bottom:** log-frequency spectrum plus 1/3-oct RTA, spectrogram, phase scope, goniometer, band correlation, and band phase difference (right-click, or **S**). The same kinds are available in simple 3D
+- **Display modes (spectrum):** Ozone / Cubase Frequency / Voxengo SPAN / Ableton Spectrum / FabFilter Pro-Q / Bars / Line only
 - **Wave speed:** x0.25–x2.0 (right-click)
 - **Layouts:** Overlay / split vertical / split horizontal / 2x2 / 2x4 (right-click menu)
 - **EQ overlay:** Shows the existing 15-band EQ band markers and gain curve on the spectrum
-- **Mouse readout:** Hover to read Hz, dB, and channel (on split layouts, the panel under the cursor)
-- **Controls:** Freeze (F) / Peak hold (P) / EQ overlay (E) / Reset peaks (Space or double-click)
+- **Mouse readout:** Hover to read Hz, dB, and channel (on split layouts, the panel under the cursor). Band correlation reads φ; band phase difference reads an angle
+- **Controls:** Freeze (F) / Peak hold (P) / EQ overlay (E) / Meters (M) / Reset peaks (Space or double-click)
 - **Rendering:** Analysis worker thread with free-running UI present (same approach as the piano roll), including Acrylic (blur) mode support
 
 Playback note icon blinking (two frames) and heart (♡) draw order on the media-player list were also fixed.
@@ -420,11 +459,33 @@ The seek bar area has been expanded:
 - **Cues / phrase A-B / practice tempo:** Add cues and jump with 1–8, R sets A-B around now ±seconds; tempo presets 50/75/100% plus continuous **50–200%**
 - **Jacket remaining-time ring**, banner modes (bars / mirror / wave) with phase correlation (φ/LR), and a thin spectrum ribbon on the seek bar
 - **Seek right-click menu:** adjust seek / loop / A-B, set A/B points, add cues, and more
+- **Beat-grid phase:** **Alt+drag** on the seek bar to shift grid phase (offset). Stored per track with BPM / key
+- **LRC markers:** light-blue time ticks under the seek waveform; click to seek (also usable as A-B candidates). Hover for a local-zoom loupe
+- **Key / Camelot:** Tools → **Confirm key** stores the analyzed key on the track. Compatible candidates list neighboring keys from the current playlist
 - **Up Next queue** (panel + reorder), **smart playlists** / **Lib (library) tree** (roots, PC / smart-PL nodes), temporary playlists, missing heat + manage, dupes dialog, folder sync lists, and ★ ratings
+- **Set chapters:** playlist right-click tags Warmup / Peak / Cooldown (a sketch of set structure)
 - Export crossfade-band preview, beat grid, LRC nudge, sleep timer (custom minutes + countdown)
 - Play-history timeline (date headers, up to 64 entries)
 - Seek hover time tip and A-B loop count display (L%d)
 - In-player **karaoke-style lyrics panel** (scrolling; independent from the separate lyrics window)
+
+Seek-bar layers, roughly:
+
+```text
+ ┌──────────────────────────────────────────────┐
+ │  Waveform overview (back)                    │
+ │  ┃ ┃ ┃ ┃  Beat grid (Alt+drag = phase)       │
+ │  ┊ ┊ ┊     LRC markers (click to seek)       │
+ │  ████pink=loop██  blue A──blue B   ♥ playhead │
+ └──────────────────────────────────────────────┘
+```
+
+Camelot neighbors, roughly:
+
+```text
+        7B   8B   9B
+        7A  [8A]  9A     ← adjacent / relative keys as “compatible”
+```
 
 ### Tempo & Pitch Control
 Tempo and pitch can be adjusted independently during playback.
@@ -459,6 +520,12 @@ Menu font (8–24 pt, bold/italic) can be changed with hover preview.
 ### Operation Guides
 Besides the media player **?**, GDI operation guides are available from EQ, playlist, video, rendering, capture, analyzer, piano roll, main window, and more—also via each window’s context-menu **Operation guide** item.
 
+The title-bar **book** button and **F1** open the full offline help (CHM). **?** is a short diagram for that window; the book / F1 is the table-of-contents manual.
+
+The **command palette** jumps to a window by typing part of its name (handy when you remember the feature but not the menu).
+
+Guides include a screen minimap plus diagrams for **seek layers (waveform / beat grid / LRC / loop·A-B)**, **Camelot compatibility**, **set chapters**, **Remote/OBS**, and more. When extra features are hard to place, opening a guide first is the fastest way to get oriented.
+
 ### PCM Upscaling
 Supports sample-rate / bit-depth upscaling and multi-channel output.
 
@@ -466,7 +533,12 @@ Supports sample-rate / bit-depth upscaling and multi-channel output.
 A timed prompt feature can change pitch, tempo, effects, and more during playback. Besides text editing, it supports analyze-while-listening, history save/load, and atmosphere modes.
 
 ### Command Roll
-Edit and place prompt commands on a time-based roll (multiple lanes). Open it from the media player. Follow-main lock and zoom level can be remembered.
+Edit and place prompt commands on a time-based roll (multiple lanes). Open it from the media player. Follow-main lock and zoom level can be remembered. A simple 3D view is also available.
+
+### VST Host
+From the media player’s bottom-bar **VST** button, load your own VST instruments and play them from a keyboard. Drag plugins onto Parts 1–32, pick MIDI inputs (up to 3) and an audio output. Preset save/switch, name filter, and rescan are supported. With no MIDI hardware, the PC keyboard can play a simple map (Space all-notes-off). Multi-timbral hosts such as SOUND Canvas VA take 16 channels in one slot. 64-bit plugins go through KpiHost64.
+
+Playlist **.mid / .midi / .kar / .rmi** can be rendered through a GS/XG VST when Rendering → MIDI playback is set to **Prefer VST** (XG System On → XG VST; otherwise GS; if both slots are empty, Windows MIDI Mapper).
 
 ### Playback Details
 Gapless playback, ReplayGain, Mid/Side, correlation meter, export limiter, loop points, loop-boundary fade, cues, tag writing, and a simple waveform preview are grouped in one window. Open it from the media player **Extra** button or the playlist context menu.
@@ -503,14 +575,18 @@ For the verification dump when combined with continuous-play crossfade (96 kHz /
 ### Device Recording
 From the media player **Record** button, capture playback-device loopback to **WAV / mp3 / FLAC**. Choose device, format, quality, and path; optional mic mix is available. mp3 / FLAC go through a temporary WAV encode step.
 
+### Analog Digitize Deck
+Records **external analog** (turntable, cassette, radio, etc.) to WAV / mp3 / FLAC from the bottom bar or Tools. Besides the input device: **HPF** (rumble), **Gain**, **Gate** (gap noise), and monitor output, with meters for level. mp3 / FLAC go through WAV the same way as device recording.
+
 ### Screen Capture
-From **Capture**, record the screen to **MP4 (H.264 + AAC)**.
+From **Capture**, record the screen to **MP4 (H.264 + AAC)**. **Live streaming** skips the MP4 and sends via ffmpeg to YouTube Live / Niconico / custom RTMP.
 
 - **Modes:** primary monitor / all monitors (virtual desktop) / window composition
 - **Window composition:** place multiple windows as layers; drag to move, corner handles to resize, Z-order controls
 - Optional **system audio** (loopback) and **microphone**, FPS, and output resolution
 - **Include MP song:** composite the open media-player window and adjust its layout on the preview
 - Preview keeps updating while recording (HUD overlays are not written into the file)
+- **Live:** check Live. YouTube: Google OAuth Client ID/Secret → authorize → create broadcast (title / public·unlisted·private) → go live. Niconico / custom: paste the page’s RTMP URL + key. Needs **ffmpeg.exe** beside the exe (or under `ogg_binary`)
 
 ### Companion Tools (Raira)
 Handy media-player add-ons from the Tools right-click menu and each window’s context menu.
@@ -525,15 +601,53 @@ Handy media-player add-ons from the Tools right-click menu and each window’s c
 - **M/S presets:** One-click narrow / wide / mono from correlation tools
 - **Key → EQ suggest:** Propose an EQ preset from detected key
 - **BPM measure:** Check while playing or with PC audio; uncheck to apply to beat grid and export crossfade seconds
+- **Confirm key / Camelot:** Store analyzed key per track. Tools lists neighboring keys as next-track candidates
 - **DJ pad:** Pitch / tempo / vocal / M/S plus vinyl scratch, Kill (low/mid/high), ±beat, hot cues, A-B, filter/FX/speed, and a 3-band EQ
-- **MIDI keyboard control:** Notes / CC for play, next, volume, etc.
+- **MIDI keyboard control:** Notes / CC for play, next, volume, etc. **MIDI learn** can map a CC to tempo / EQ bands
+- **Voice changer:** Real-time mic conversion (gender/age presets, pitch / formant / breath, robot / radio FX). The processed voice can also feed other apps as a virtual mic
+- **Tuner dojo:** Monophonic tuner (note + cents, A4 reference) and metronome. Phrase A-B can set a practice range around the playhead (hobby use; chords not supported)
+- **Sound meter:** Mic input as relative dBFS (Hold, response speed). Not a calibrated SPL meter
+- **Photo frame:** Up to 512 JPG/PNG/BMP/GIF from a folder, crossfade slideshow (shuffle / always-on-top / BGM)
+- **Command palette:** Type part of a feature name to open its window
+- **Transition presets:** A few EQ-sweep / filter / crossfade-second recipes applied “toward the next track” (not a full timeline automation)
+- **Live-set record:** Opens screen capture and device recording together (an extension of the game-capture preset)
 - **Video audio extract / replace:** Export audio from a selected video to WAV, or replace the video’s audio with an external WAV and write MP4
-- **Output mirror:** Mirror the same mix to another playback device (separate volume only)
+- **Output mirror:** Mirror the same mix to another playback device (separate volume only). **Mirror CUE** switch and independent gain
 - **Screensaver-style visualizer:** Fullscreen display (ESC to exit)
 - **Local remote:** Browser transport from PCs/phones on the same Wi-Fi / LAN (up to 6 clients). Tabs: transport / EQ / playlist / lyrics / DJ scratch / piano / analyzer. Open the `http://(LAN IP):port/` shown in settings (on the PC, `127.0.0.1` also works). Not exposed to the public Internet; Windows Firewall may prompt once
+  - **OBS** `http://…/overlay` — simple transparent title / status HTML
+  - **Shared queue** `…/api/queue-add?i=row` — local use (no auth; same bar as existing Remote)
+  - **AAC profile** — 128 / 192 / low-latency 96 kbps
+- **nowplaying.txt:** Writes the current track next to the exe (Discord itself is file-output only)
+- **Focus mode / confirm destructive actions / layouts 1–3 / weekly summary / practice log** — from the Tools menu
 - **Alarm:** Start playback at a set time (sleep timer remains as before)
 - **Game-capture preset:** Open screen capture + device record with preset settings (local recording, not internet streaming)
-- **Live streaming (screen capture):** Live checkbox → YouTube (OAuth + Live API: title/privacy) or Niconico/Custom RTMP URL+key. Requires `ffmpeg.exe` beside the exe (or under `ogg_binary`). Does not write MP4 while live.
+- **Playlist delete one-step Undo:** context **Undo delete** (not a full history undo)
+
+Remote / OBS:
+
+```mermaid
+flowchart LR
+  MP[Raira MP] --> Rem[HTTP Remote :port]
+  Rem --> UI["/ UI"]
+  Rem --> Ov["/overlay OBS"]
+  Rem --> Q["/api/queue-add"]
+  Rem --> AAC["/stream AAC"]
+  MP --> NP[nowplaying.txt]
+```
+
+How track parameters are remembered:
+
+```mermaid
+flowchart TB
+  Play[Play / analyze] --> Key[Key / Camelot]
+  Play --> BPM[BPM / beat grid]
+  BPM --> Off[Phase offset Alt+drag]
+  Key --> SP[SongParams.dat ver4]
+  Off --> SP
+  BPM --> SP
+  SP --> Next[Restored next play]
+```
 
 ![Player Screen](https://ppp.oohara.jp/img/ysedplay2e_git7.png)
 
@@ -598,7 +712,7 @@ Supports the following formats:
   - The kpi list can be filtered by extension text (updates as you type; checkbox state is kept per plugin)
 
 ### 3. Video Playback (DirectShow)
-Plays avi, mpg, and other DirectShow-compatible formats. On Windows Vista and later, it utilizes **EVR (Enhanced Video Renderer)** for high-quality output. Video, audio, and subtitle stream switching is also supported.
+Plays avi, mpg, mp4, mkv, and other DirectShow-compatible formats. On Windows Vista and later, it utilizes **EVR (Enhanced Video Renderer)** for high-quality output. Video, audio, and subtitle stream switching is also supported.
 *Note: Playback of certain formats may require codec packs (e.g., K-Lite Codec Pack).*
 [Instructional Site: ppp.oohara.jp/k-lite.html](http://ppp.oohara.jp/k-lite.html)
 
@@ -626,7 +740,7 @@ Plays avi, mpg, and other DirectShow-compatible formats. On Windows Vista and la
 - Lyrics window, LRC nudge/save, piano-roll MIDI/MusicXML capture, score from PC audio, simple 3D view
 - A-B/cue pack export, loudness normalize batch, MusicBrainz auto-tag, vocal Mid, M/S presets, key→EQ suggest
 - BPM measure, DJ pad (scratch / Kill / hot cues, etc.), MIDI control, video audio extract, output mirror, screensaver visualizer
-- Local remote (LAN / up to 6 clients; tabs: transport/EQ/list/lyrics/DJ scratch/piano/analyzer), alarm, game-stream preset
+- Local remote (LAN / up to 6 clients; tabs: transport/EQ/list/lyrics/DJ scratch/piano/analyzer), alarm, game-stream preset, screen-capture live (YouTube API / RTMP)
 - Piano-roll detection tuning dialog (many sliders), 88 / 108-key range
 - Open analyzer / piano roll directly from the playlist
 - Sort, move/copy to another playlist, refresh jacket for selection, temporary playlists
@@ -646,6 +760,12 @@ Plays avi, mpg, and other DirectShow-compatible formats. On Windows Vista and la
 - kpi list extension filter
 - Extended volume (separate from main volume / EQ master)
 - Soft3D maze (bonus; bottom-bar button; basements and track-linked items)
+- Soft3D aerial race (bonus; bottom-bar **Race**; light-band course, AI, themed terrain)
+- VST host (bottom-bar **VST**; part routing and keyboard play) and Prefer-VST .mid playback (GS/XG)
+- MIDI monitor (SMF 32 parts / GS·XG)
+- Analog digitize deck (line-in + HPF/Gate)
+- Voice changer, tuner dojo, sound meter, photo frame
+- Command palette, offline help (CHM / F1)
 
 ## Extra: Soft3D Maze
 A first-person DirectX 11 maze opened from the media player’s bottom-bar **Maze** button. It’s a light distraction while BGM plays—separate from the core playback features.
@@ -656,6 +776,14 @@ A first-person DirectX 11 maze opened from the media player’s bottom-bar **Maz
 - **Basements:** The basement combo adds 0–3 underground floors. Orange stairs go down, cyan stairs go up. You move diagonally between floors and can glimpse adjacent levels through stair shafts (basements have ceilings). The goal sits on a floor chosen by difficulty
 - **Difficulty:** Very easy–very hard. Affects corridor width, stair count, and 3D path length to the goal
 - **Look:** Ground floor uses greenery; B1–B3 use stone / metal / dark rock motifs for walls and floors. Progress autosaves and resumes when you reopen the maze
+
+## Extra: Soft3D Aerial Race
+An aerial race opened from the media player’s bottom-bar **Race** button. You fly along a ribbon of light (the power band) while BGM plays—same “bonus, not core playback” slot as the maze.
+
+- **Controls:** Mouse aims the craft, left button accelerates, right button brakes, wheel zooms, middle button looks back. Gamepads work too (left stick steer, RT/A accelerate, LT/B brake). The Y combo remembers invert-Y
+- **Course:** **Generate** runs a demo lap (overview recon); **Start** begins the race after a countdown. On the band you regenerate thrust; the inner green strip restores HP. Off-band is useful for shortcuts, but empty thrust snaps you back
+- **Settings:** AI (super easy–intense), opponent count, length, laps, theme (forest / ruins / oil factory / night city / underwater / grassland / mesa / clouds, etc.)
+- **Track links:** Item orbs also change the playing track’s tempo or pitch. After the finish, a podium shows 1st–3rd
 
 ## Important Notes
 - **For Brandish 4 and the Gagharv Trilogy:** WAV files must be copied to your HDD (Folder names like `WAVE`, `WAVEDV`, or `WAVEDVD` vary by game).
