@@ -54,6 +54,7 @@
 #include <math.h>
 
 extern void equaliser(void* data, int len, BOOL reset);
+void MpSurroundAmountSliderCb(void* ctx, int value);
 #ifdef _DEBUG
 #define new DEBUG_NEW
 #endif
@@ -10233,6 +10234,18 @@ void CMediaPlayerDlg::OnRButtonUp(UINT nFlags, CPoint point)
 				L"Руководство", L"Bedienungsanleitung", L"Guia de operação", L"Handleiding",
 				L"Przewodnik", L"İşlem kılavuzu"),
 				LL14(L"この画面の操作ガイド（ヘルプシート）を表示します", L"Show the operation guide (help sheet) for this view", L"Afficher le guide d'utilisation de cette vue", L"Mostra la guida operativa di questa vista", L"Mostrar la guía de operación de esta vista", L"이 화면의 조작 가이드를 표시", L"显示此界面的操作指南", L"عرض دليل التشغيل لهذه الشاشة", L"Показать руководство по этой панели", L"Bedienungsanleitung fur diese Ansicht zeigen", L"Mostrar o guia de operacao desta tela", L"Handleiding voor dit scherm tonen", L"Pokaz przewodnik po tym widoku", L"Bu ekranin islem kilavuzunu goster"));
+		{
+			int sv = savedata.surround;
+			if (sv < 0) sv = 0;
+			if (sv > 100) sv = 100;
+			menu.AddSlider(
+				LL14(L"サラウンド", L"Surround", L"Surround", L"Surround", L"Surround",
+					L"서라운드", L"环绕声", L"محيطي", L"Объём", L"Surround",
+					L"Surround", L"Surround", L"Surround", L"Surround"),
+				0, 100, sv, MpSurroundAmountSliderCb, NULL,
+				LL14(L"サラウンド効き目 0=オフ〜100（LRでも展開向け処理）", L"Surround amount 0=off..100 (LR expander friendly)", L"Niveau surround 0=off..100", L"Intensita surround 0=off..100", L"Intensidad surround 0=off..100", L"서라운드 세기 0=끔..100", L"环绕量 0=关..100", L"مقدار المحيطي 0=إيقاف..100", L"Уровень surround 0=выкл..100", L"Surround-Staerke 0=aus..100", L"Intensidade surround 0=off..100", L"Surround-sterkte 0=uit..100", L"Sila surround 0=wyl..100", L"Surround seviyesi 0=kapali..100"),
+				ID_MP_SURROUND_SLIDER);
+		}
 		menu.AddCommand(42343,
 			LL14(L"コマンドパレット… Ctrl+K", L"Command palette… Ctrl+K", L"Palette de commandes… Ctrl+K", L"Palette comandi… Ctrl+K",
 				L"Paleta de comandos… Ctrl+K", L"명령 팔레트… Ctrl+K", L"命令面板… Ctrl+K", L"لوحة الأوامر… Ctrl+K",
@@ -10630,6 +10643,29 @@ void CMediaPlayerDlg::ShowSettingsExtrasMenu(CPoint screenPt)
 	MpShowSettingsExtrasMenu(this, screenPt);
 }
 
+void MpSurroundAmountSliderCb(void* /*ctx*/, int value)
+{
+	if (value < 0) value = 0;
+	if (value > 100) value = 100;
+	savedata.surround = value;
+	extern CRender* g_renderDlg;
+	if (g_renderDlg && ::IsWindow(g_renderDlg->GetSafeHwnd()) && g_renderDlg->m_surround.GetSafeHwnd()) {
+		g_renderDlg->m_surround.SetPos(value);
+		CString ss; ss.Format(L"%d", value);
+		if (g_renderDlg->m_surroundVal.GetSafeHwnd())
+			g_renderDlg->m_surroundVal.SetWindowText(ss);
+	}
+	extern COggDlg* og;
+	if (og && og->m_EqualizerDlg && ::IsWindow(og->m_EqualizerDlg->GetSafeHwnd())
+		&& og->m_EqualizerDlg->m_surround.GetSafeHwnd()) {
+		og->m_EqualizerDlg->m_surround.SetPos(value);
+		CString ss; ss.Format(L"%d", value);
+		if (og->m_EqualizerDlg->m_surroundVal.GetSafeHwnd())
+			og->m_EqualizerDlg->m_surroundVal.SetWindowText(ss);
+	}
+	MpPersistSavedataQuick();
+}
+
 void MpShowSettingsExtrasMenu(CWnd* owner, CPoint screenPt)
 {
 	if (!owner) return;
@@ -10642,6 +10678,18 @@ void MpShowSettingsExtrasMenu(CWnd* owner, CPoint screenPt)
 			L"Saida upscale", L"Upscale-uitvoer", L"Wyjscie upscale", L"Upscale cikis"),
 		savedata.upscale_enable != 0,
 		LL14(L"出力を高サンプルレートへアップスケールします（再初期化あり）", L"Upscale output to a higher sample rate (re-inits audio)", L"Upscaler la sortie (reinit audio)", L"Upscale dell'uscita (reiniz. audio)", L"Escalar la salida (reinicia audio)", L"출력을 고샘플레이트로 업스케일(오디오 재초기화)", L"将输出升频到更高采样率（会重新初始化）", L"رفع معدل العينات للخرج (إعادة تهيئة)", L"Апскейл выхода к более высокой ЧД (реинит.)", L"Ausgabe auf hoehere Samplerate (Audio-Reinit)", L"Fazer upscale da saida (reinicia audio)", L"Uitvoer upscalen (audio-herinit)", L"Upscale wyjscia (reinicjalizacja audio)", L"Cikisi yuksek ornekleme hizina cikar (ses yeniden)"));
+	{
+		int sv = savedata.surround;
+		if (sv < 0) sv = 0;
+		if (sv > 100) sv = 100;
+		menu.AddSlider(
+			LL14(L"サラウンド", L"Surround", L"Surround", L"Surround", L"Surround",
+				L"서라운드", L"环绕声", L"محيطي", L"Объём", L"Surround",
+				L"Surround", L"Surround", L"Surround", L"Surround"),
+			0, 100, sv, MpSurroundAmountSliderCb, NULL,
+			LL14(L"サラウンド効き目 0=オフ〜100（LRでも展開向け処理）", L"Surround amount 0=off..100 (LR expander friendly)", L"Niveau surround 0=off..100", L"Intensita surround 0=off..100", L"Intensidad surround 0=off..100", L"서라운드 세기 0=끔..100", L"环绕量 0=关..100", L"مقدار المحيطي 0=إيقاف..100", L"Уровень surround 0=выкл..100", L"Surround-Staerke 0=aus..100", L"Intensidade surround 0=off..100", L"Surround-sterkte 0=uit..100", L"Sila surround 0=wyl..100", L"Surround seviyesi 0=kapali..100"),
+			ID_MP_SURROUND_SLIDER);
+	}
 
 	{
 		CCustomPopupMenu* bitSub = menu.AddSubMenu(

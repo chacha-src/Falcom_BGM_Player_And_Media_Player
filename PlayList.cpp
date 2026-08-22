@@ -2537,6 +2537,8 @@ static void PlMicLevSliderCb(void* /*ctx*/, int value)
 	MpPersistSavedataQuick();
 }
 
+void MpSurroundAmountSliderCb(void* /*ctx*/, int value);
+
 int CPlayList::ShowTrackContextMenu(CPoint pt, CWnd* pOwner)
 {
 	int Lindex = -1;
@@ -2845,6 +2847,19 @@ int CPlayList::ShowTrackContextMenu(CPoint pt, CWnd* pOwner)
 			extern void MpFeatAppendChapterMenu(CCustomPopupMenu& menu, int row);
 			MpFeatAppendChapterMenu(*subTag, Lindex);
 		}
+	}
+	menu.AddSeparator();
+	{
+		int sv = savedata.surround;
+		if (sv < 0) sv = 0;
+		if (sv > 100) sv = 100;
+		menu.AddSlider(
+			LL14(L"サラウンド", L"Surround", L"Surround", L"Surround", L"Surround",
+				L"서라운드", L"环绕声", L"محيطي", L"Объём", L"Surround",
+				L"Surround", L"Surround", L"Surround", L"Surround"),
+			0, 100, sv, MpSurroundAmountSliderCb, NULL,
+			LL14(L"サラウンド効き目 0=オフ〜100（LRでも展開向け処理）", L"Surround amount 0=off..100 (LR expander friendly)", L"Niveau surround 0=off..100", L"Intensita surround 0=off..100", L"Intensidad surround 0=off..100", L"서라운드 세기 0=끔..100", L"环绕量 0=关..100", L"مقدار المحيطي 0=إيقاف..100", L"Уровень surround 0=выкл..100", L"Surround-Staerke 0=aus..100", L"Intensidade surround 0=off..100", L"Surround-sterkte 0=uit..100", L"Sila surround 0=wyl..100", L"Surround seviyesi 0=kapali..100"),
+			ID_MP_SURROUND_SLIDER);
 	}
 	menu.AddSeparator();
 	CCustomPopupMenu* subWin = menu.AddSubMenu(

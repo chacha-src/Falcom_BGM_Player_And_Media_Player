@@ -161,6 +161,69 @@ static CString ResolveUpdateUrl(time_t* outModified)
 	return CString();
 }
 
+/* サイトの DL カウンター（Top/abcd → dncont）を +1。
+ * ブラウザで download/oggYSEDbgm09a_…zip をクリックしたときと同じキー（絶対 URL）。
+ * CSRF は Web 側で abcd が除外済み。失敗しても更新処理は続行。 */
+static void NotifySiteDownloadCount(const CString& zipUrl)
+{
+	if (zipUrl.IsEmpty())
+		return;
+	CString file = zipUrl;
+	const int q = file.Find(_T('?'));
+	if (q >= 0)
+		file = file.Left(q);
+	if (file.IsEmpty())
+		return;
+
+	CStringA enc;
+	{
+		const CStringA raw = CT2A(file, CP_UTF8);
+		const int n = raw.GetLength();
+		for (int i = 0; i < n; ++i) {
+			const unsigned char c = (unsigned char)raw[i];
+			if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')
+				|| c == '-' || c == '_' || c == '.' || c == '~') {
+				enc += (char)c;
+			} else {
+				char hex[8];
+				sprintf_s(hex, "%%%02X", c);
+				enc += hex;
+			}
+		}
+	}
+	CStringA body = "file=";
+	body += enc;
+
+	HINTERNET hInternet = InternetOpen(_T("oggUpdateCheck/1.0"), INTERNET_OPEN_TYPE_PRECONFIG, NULL, NULL, 0);
+	if (!hInternet)
+		return;
+	DWORD timeout = 8000;
+	InternetSetOption(hInternet, INTERNET_OPTION_CONNECT_TIMEOUT, &timeout, sizeof(timeout));
+	InternetSetOption(hInternet, INTERNET_OPTION_RECEIVE_TIMEOUT, &timeout, sizeof(timeout));
+	InternetSetOption(hInternet, INTERNET_OPTION_SEND_TIMEOUT, &timeout, sizeof(timeout));
+
+	HINTERNET hConnect = InternetConnect(hInternet, _T("ppp.oohara.jp"),
+		INTERNET_DEFAULT_HTTPS_PORT, NULL, NULL, INTERNET_SERVICE_HTTP, 0, 0);
+	if (!hConnect) {
+		InternetCloseHandle(hInternet);
+		return;
+	}
+	HINTERNET hReq = HttpOpenRequest(hConnect, _T("POST"), _T("/top/abcd"),
+		NULL, NULL, NULL,
+		INTERNET_FLAG_SECURE | INTERNET_FLAG_RELOAD | INTERNET_FLAG_NO_CACHE_WRITE
+		| INTERNET_FLAG_NO_COOKIES | INTERNET_FLAG_PRAGMA_NOCACHE, 0);
+	if (!hReq) {
+		InternetCloseHandle(hConnect);
+		InternetCloseHandle(hInternet);
+		return;
+	}
+	static const TCHAR hdr[] = _T("Content-Type: application/x-www-form-urlencoded\r\n");
+	HttpSendRequest(hReq, hdr, (DWORD)_tcslen(hdr), (LPVOID)(LPCSTR)body, (DWORD)body.GetLength());
+	InternetCloseHandle(hReq);
+	InternetCloseHandle(hConnect);
+	InternetCloseHandle(hInternet);
+}
+
 // ZIP をダウンロード。HTTP 200・最低サイズを満たさない場合は失敗（途中ファイルは削除）
 static bool HttpDownloadToFile(const CString& url, const CString& localPath)
 {
@@ -245,6 +308,8 @@ static bool HttpDownloadToFile(const CString& url, const CString& localPath)
 		DeleteFile(localPath);
 		return false;
 	}
+	/* サイトの ogg ページと同じ ZIP なので DL 回数も上げる */
+	NotifySiteDownloadCount(url);
 	return true;
 }
 

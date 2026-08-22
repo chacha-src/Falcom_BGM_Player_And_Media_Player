@@ -74,10 +74,32 @@ int VstMidiGetRate(void);
 int VstMidiGetChannels(void);
 int VstMidiGetBits(void);
 __int64 VstMidiGetLengthSamples(void);
+// 曲長に含まれる残響用の余白（秒）。最終イベント以降は音楽としては終わっている。
+#define VST_TAIL_PAD_SEC 2
+double VstMidiTailPadSec(void);
 // Plugin delay (VST2 initialDelay / VST3 getLatencySamples). 0 = mapper / unknown.
 int VstMidiGetLatencySamples(void);
 // x86 app: KpiHost64 Open の戻りを覚えさせる（ローカルにプラグが無いとき用）。
 void VstMidiSetReportedLatencySamples(int samples);
+
+// ライブ交差用に曲エンジンを2本。スロットはスレッドローカル（A再生中にBを開ける）。
+enum { VST_SONG_SLOTS = 2 };
+void VstMidiSetIoSlot(int slot);
+int VstMidiGetIoSlot(void);
+void VstMidiCloseSlot(int slot);
+
+// MIDI メタ/ファイル名から GS マップ種別。
+// 0=なし 1=55 2=88 3=88Pro 4=8820/50 5=GM 6=SD-90 7=XG(タイトル)。
+int VstMidiGuessGsMapKind(const wchar_t* title, const wchar_t* path);
+// 複数メタを畳む。8820>88Pro>88>55 が GM/SD/XG タイトルより強い。
+int VstMidiFoldGsMapHint(int cur, int kind);
+int VstMidiSysexIsGmOn(const unsigned char* d, int n);
+int VstMidiSysexIsGsReset(const unsigned char* d, int n);
+int VstMidiSysexIsXgOn(const unsigned char* d, int n);
+int VstMidiBankMsbIsSdNative(int msb);
+// 使われている (bankMSB<<8|PC) が SASAMI_GS.DAT のどのマップに収まるか。
+// 8820 から 88Pro→88→55 へ落とす。0=判定不能。
+int VstMidiGsMapDropFromUsed(const unsigned short* pairs, int nPairs);
 
 // Live MIDI を曲エンジンへ差し込む（モニタの CC / 鍵盤）。キューして次のブロックで送る。
 void VstMidiInjectShort(int portIndex0to2, DWORD shortMsg);

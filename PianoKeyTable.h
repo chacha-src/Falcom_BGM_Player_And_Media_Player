@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 // 108鍵（MIDI 0…107）の等律周波数と倍音キー対応。A0=21, C8=108 は範囲内。
 
 #include <cmath>
@@ -52,11 +52,9 @@ namespace PianoKey
         return best;
     }
 
-    // 漏れ込みタワー用の高次比。メロディ剪定には使わない（15〜20次で主旋律を食う）。
+    // ゴースト剪定用: 高次倍音(10〜24次)まで含めた整数比判定。
+    // プロファイル次元(h2..h9)とは独立。漏れ込みタワーは n>9 も普通に出る。
     static constexpr int HARMONIC_PAIR_N_MAX = 24;
-    // 実害のある倍音ゴーストはほぼ h2〜h8（オクターブ〜3オクターブ）。
-    static constexpr int kGhostHarmonicNMax = 8;
-    static constexpr int GHOST_BASS_END = 48; // C3。PianoRoll108::BASS_END と一致
 
     // hi / lo が n:1 の等倍音関係（±3%×n、鍵インデックスは厳密でなく周波数比）
     inline bool IsHarmonicPairCompute(int hi, int lo, int nMax = HARMONIC_N_MAX)
@@ -73,6 +71,22 @@ namespace PianoKey
                 return true;
         }
         return false;
+    }
+
+    inline int GetHarmonicNCompute(int hi, int lo, int nMax = HARMONIC_N_MAX)
+    {
+        if (hi <= lo || lo < 0 || hi >= COUNT) return 0;
+        const float fh = KeyHz(hi);
+        const float fl = KeyHz(lo);
+        if (fl <= 1e-3f) return 0;
+        const float ratio = fh / fl;
+        const int nHi = (nMax < HARMONIC_N_MIN) ? HARMONIC_N_MIN : nMax;
+        for (int n = HARMONIC_N_MIN; n <= nHi; ++n) {
+            const float e = (float)n;
+            if (fabsf(ratio - e) < 0.035f * e)
+                return n;
+        }
+        return 0;
     }
 
     // 基音候補 fundKey の n 次倍音に最も近い鍵（n は 2 以上、HARMONIC_N_MAX 外も可）
@@ -117,10 +131,10 @@ namespace PianoKey
         const float sc = st[candidate];
         if (sc <= 1e-8f) return false;
 
-        for (int n = HARMONIC_N_MIN; n <= kGhostHarmonicNMax; ++n) {
+        for (int n = HARMONIC_N_MIN; n <= HARMONIC_PAIR_N_MAX; ++n) {
             const int lo = HarmonicDownKeyAny(candidate, n);
             if (lo < 0 || lo >= candidate) continue;
-            if (!IsHarmonicPairCompute(candidate, lo, kGhostHarmonicNMax)) continue;
+            if (!IsHarmonicPairExtended(candidate, lo)) continue;
 
             const float loSc = st[lo];
             if (loSc < sc * parentMinRatio) continue;
@@ -156,11 +170,13 @@ namespace PianoKey
     // 実害のある漏れ込みはほぼ h2〜h6（オクターブ〜2オクターブ＋α）。
     // bassBandEnd: 低音帯の終端(PianoRoll108::BASS_END を渡す)
     inline bool IsHarmonicGhostPartial(const float* st, int candidate, int count,
-        int bassBandEnd = GHOST_BASS_END)
+        int bassBandEnd = 36)
     {
         if (!st || candidate <= 0 || candidate >= count) return false;
         const float sc = st[candidate];
         if (sc <= 1e-8f) return false;
+
+        static constexpr int kGhostHarmonicNMax = 8;
 
         int bandLo = 0, bandHi = count;
         if (candidate < bassBandEnd) {
@@ -183,22 +199,7 @@ namespace PianoKey
             if (st[i] > bandMax) bandMax = st[i];
         const bool bandProminent = (bandMax > 1e-6f && sc >= bandMax * 0.18f);
 
-        // 自前の 2f/3f があるだけでは独立音にしない。明るいベースの h2 も
-        // 自分の倍音列(親の 4f/6f)を持つので、親ピークが同程度以上なら借り物。
-        bool strongParent = false;
-        for (int n = HARMONIC_N_MIN; n <= kGhostHarmonicNMax; ++n) {
-            const int lo = HarmonicDownKeyAny(candidate, n);
-            if (lo < 0 || lo >= candidate) continue;
-            if (!IsHarmonicPairCompute(candidate, lo, kGhostHarmonicNMax)) continue;
-            const float loSc = st[lo];
-            if (lo > 0 && st[lo - 1] > loSc) continue;
-            if (lo + 1 < count && st[lo + 1] > loSc) continue;
-            if (loSc >= sc * 0.90f) {
-                strongParent = true;
-                break;
-            }
-        }
-        if (!strongParent && HasOwnOvertoneSupport(st, candidate, count, 0.12f) && bandProminent)
+        if (HasOwnOvertoneSupport(st, candidate, count, 0.12f) && bandProminent)
             return false;
 
         for (int n = HARMONIC_N_MIN; n <= kGhostHarmonicNMax; ++n) {
@@ -214,31 +215,29 @@ namespace PianoKey
 
             const bool octaveLike = (n == 2 || n == 4 || n == 8);
             const bool parentInBass = (lo < bassBandEnd);
-            const bool hasOwn = HasOwnOvertoneSupport(st, candidate, count, 0.10f);
 
             if (octaveLike) {
                 if (parentInBass) {
-                    if (hasOwn) {
-                        if (sc < loSc * 0.35f) return true;
-                    } else {
-                        if (sc <= loSc * 1.05f) return true;
-                    }
-                } else {
-                    if (hasOwn) {
-                        if (sc < loSc * 0.35f) return true;
-                    } else {
-                        if (sc < loSc * 0.65f) return true;
-                    }
+                    // ベースのオクターブ重ねは「帯域またがりゴースト」になりやすい。
+                    // 自帯域で十分目立ち、かつ親より明らかに強く自前倍音もあるときだけ独立音。
+                    if (bandProminent && sc >= loSc * 1.12f &&
+                        HasOwnOvertoneSupport(st, candidate, count, 0.14f))
+                        continue;
+                    if (sc <= loSc * 1.05f)
+                        return true;
+                    if (!bandProminent)
+                        return true;
+                    continue;
                 }
+                if (!bandProminent && sc < loSc * 0.65f)
+                    return true;
             }
             else {
-                if (sc >= bandMax * 0.60f)
+                // h3/h5/h6/h7: 帯域トップ級はメロディ候補として残す
+                if (sc >= bandMax * 0.40f)
                     continue;
-                if (hasOwn) {
-                    if (sc < loSc * 0.25f) return true;
-                } else {
-                    if (sc <= loSc * 0.50f) return true;
-                }
+                if (loSc >= sc * 0.55f && sc <= loSc * 0.90f)
+                    return true;
             }
         }
         return false;

@@ -3827,7 +3827,10 @@ static const UINT_PTR kCheckBounceTimerId   = 4121; // チェックON時のバ�
 static const UINT_PTR kCheckHoverTimerId    = 4123; // ホバー中レ点／リボンゆっくり動き
 static const UINT_PTR kButtonSoftTimerId    = 4124; // Soft3D 常時（間引き 220ms）
 static const UINT_PTR kSliderShimmerTimerId = 4122; // スライダーの流れるシマー
-static const UINT_PTR kListSoftTimerId      = 4125; // 選択♡ Soft3D 回転（120ms）
+static const UINT_PTR kListSoftTimerId      = 4125; // 選択/ホバー♡ Soft3D 回転
+// ♡ は矩形だけ再描画するので短周期でも軽い。step を小さくすると速く回る。
+static const UINT kListHeartTimerMs = 30;
+static const int kListHeartStepMs = 26;
 static const UINT_PTR kGroupSoftTimerId     = 4126; // GroupBox ゆらゆら（500ms）
 static const UINT_PTR kTabSoftTimerId       = 4127; // 選択タブ Soft（220ms）
 
@@ -8017,6 +8020,8 @@ CCustomListCtrl::CCustomListCtrl()
     : m_bAutoDelete(FALSE), m_nHotItem(-1), m_bAeroMode(FALSE)
 {
     m_brBackground.CreateSolidBrush(COLOR_LIST_BG);
+    m_heartRcSel.SetRectEmpty();
+    m_heartRcHot.SetRectEmpty();
 }
 
 CCustomListCtrl::~CCustomListCtrl()
@@ -8119,11 +8124,18 @@ void CCustomListCtrl::OnTimer(UINT_PTR nIDEvent)
 {
     if (nIDEvent == kListSoftTimerId)
     {
-        if (GetSelectedCount() <= 0) {
+        if (m_nHotItem < 0)
+            m_heartRcHot.SetRectEmpty();
+        if (GetSelectedCount() <= 0)
+            m_heartRcSel.SetRectEmpty();
+        if (m_heartRcSel.IsRectEmpty() && m_heartRcHot.IsRectEmpty()) {
             KillTimer(kListSoftTimerId);
             return;
         }
-        Invalidate(FALSE);
+        if (!m_heartRcSel.IsRectEmpty())
+            InvalidateRect(&m_heartRcSel, FALSE);
+        if (!m_heartRcHot.IsRectEmpty())
+            InvalidateRect(&m_heartRcHot, FALSE);
         return;
     }
     if (nIDEvent == kListScrollOpaqueTimerId)
@@ -8155,6 +8167,8 @@ void CCustomListCtrl::UpdateHotItem(int n)
     if (m_nHotItem == n) return;
     const int o = m_nHotItem;
     m_nHotItem = n;
+    /* 前の行の♡はもう無い。古い矩形を回し続けない */
+    m_heartRcHot.SetRectEmpty();
     // アクリル/キャプションガラス: 部分 Invalidate の素塗りは α=0 穴→ホバーで透過。
     // 連続ホバー行変更は Post でキューに載せ、OpaqueFixer が全面不透明再描画する。
     // 旧: ジャケ/♪リストはここで return し、♪点滅(SIconTimer)まで見た目が止まっていた。
@@ -8679,14 +8693,17 @@ void CCustomListCtrl::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
                 noteX = ri.left + (ri.Width() - iw) / 2;
             else
                 noteX = r.left + CCC_ScaleDpi(2, dpiNote);
-            if (bS) {
-                // Soft3D 回転♡（選択行のみ）。GDI ハートは載せない。
+            if (bS || bH) {
+                // Soft3D 回転♡（選択行 + ホバー行）。GDI ハートは載せない。
                 CRect rh(noteX, noteY + CCC_ScaleDpi(2, dpiNote),
                     noteX + CCC_ScaleDpi(14, dpiNote), noteY + ih);
-                DrawSoftJkHeart(pDC, rh, (int)(::GetTickCount64() / 120), TRUE, RGB(255, 140, 188));
-                // 120ms 常時 Invalidate は再生中のピアノ提示を遅らせる。自然な再描画に任せる。
+                DrawSoftJkHeart(pDC, rh, (int)(::GetTickCount64() / kListHeartStepMs),
+                    TRUE, RGB(255, 140, 188));
+                // リスト全体の周期 Invalidate は再生中のピアノ提示を遅らせる。
+                // ♡ の矩形だけ回して、なめらかさと軽さを両立させる。
+                if (bS) m_heartRcSel = rh; else m_heartRcHot = rh;
                 if (GetSafeHwnd())
-                    KillTimer(kListSoftTimerId);
+                    SetTimer(kListSoftTimerId, kListHeartTimerMs, NULL);
             }
             if (pIL && noteImg >= 0 && noteImg != 1) {
                 // ImageList は行高確保(♪相当)。♪自体は 16x16@96dpi。

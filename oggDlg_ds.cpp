@@ -656,6 +656,16 @@ UINT HandleNotifications(LPVOID)
 			}
 			else {
 				sflg = TRUE;
+				/* 混合開始はこのサイクル境界で行う。UI タイマ経由にすると
+				 * ジャケ読み込み等で UI が詰まった分だけ開始が遅れ、その遅れ量が
+				 * そのままクロス末尾と B の頭のずれになる。 */
+				if (!InterlockedCompareExchange(&g_xfInProgress, 0, 0)
+					&& InterlockedCompareExchange(&g_xfPrepared, 0, 0)
+					&& XfShouldStartEarly(g_heardBytes, g_endWrittenBytes)) {
+					const int cur = XfActiveSlot();
+					if (g_openDecoderModeSlot[XfOtherSlot(cur)] != INT_MIN)
+						XfBeginMixLocked(cur);
+				}
 				if (m_dsb) {
 					if (InterlockedCompareExchange(&g_xfInProgress, 0, 0)) {
 						const int aSlot = XfActiveSlot();
@@ -822,8 +832,10 @@ UINT HandleNotifications(LPVOID)
 			}
 		}
 
-		/* クロスフェード早期開始（曲長 expected または end 確定後） */
-		if (!InterlockedCompareExchange(&g_xfInProgress, 0, 0) && XfEnabled()) {
+		/* B 未準備のときだけ UI に開始を頼む（同期 Open が必要）。準備済みは上の
+		 * サイクル境界で自前に開始する。両方から始めると開始位置がぶれる。 */
+		if (!InterlockedCompareExchange(&g_xfInProgress, 0, 0)
+			&& !InterlockedCompareExchange(&g_xfPrepared, 0, 0) && XfEnabled()) {
 			if (XfShouldStartEarly(g_heardBytes, g_endWrittenBytes))
 				XfTryStartCrossfade();
 		}
@@ -4638,6 +4650,175 @@ static void FxApplyUserEffects(float* L, float* R, int n, int rate) {
 }
 
 
+// ============================================================
+// サラウンド化 (savedata.surround 0..100)
+// EQ / リミッター前に適用。0=オフ。後段で割れないようヘッドルームを残す。
+// ・2ch: マトリクス/Haas/サイド強調（サウンドボードの LR→5.1 展開向け）
+// ・4/5.1/7.1: リア（とサイド）を L−R 差分と遅延で強調
+// ============================================================
+static const int SUR_DLY_MAX = 4096;
+struct SurroundState {
+	float dL[SUR_DLY_MAX];
+	float dR[SUR_DLY_MAX];
+	int wpos;
+	int dly;
+	int rate;
+	float apL, apR;
+};
+static SurroundState g_sur[EQ_BANKS];
+
+static void SurroundResetBank(int bank, int rate)
+{
+	if (bank < 0 || bank >= EQ_BANKS) bank = 0;
+	memset(&g_sur[bank], 0, sizeof(g_sur[bank]));
+	if (rate < 8000) rate = 44100;
+	g_sur[bank].rate = rate;
+	int d = (int)(rate * 0.012f + 0.5f); // ~12ms Haas
+	if (d < 32) d = 32;
+	if (d >= SUR_DLY_MAX) d = SUR_DLY_MAX - 1;
+	g_sur[bank].dly = d;
+}
+
+static inline float SurLoad(const unsigned char* p, int bits)
+{
+	if (bits == 16)
+		return (*(const short*)p) / 32768.0f;
+	if (bits == 24) {
+		int v = p[0] | (p[1] << 8) | ((signed char)p[2] << 16);
+		return v / 8388608.0f;
+	}
+	if (bits == 32)
+		return (*(const int*)p) / 2147483648.0f;
+	return (p[0] - 128) / 128.0f;
+}
+
+static inline void SurStore(unsigned char* p, int bits, float x)
+{
+	if (x > 1.0f) x = 1.0f;
+	if (x < -1.0f) x = -1.0f;
+	if (bits == 16) {
+		int32_t v = (int32_t)roundf(x * 32768.0f);
+		if (v > 32767) v = 32767;
+		if (v < -32768) v = -32768;
+		*(short*)p = (short)v;
+	}
+	else if (bits == 24) {
+		int32_t v = (int32_t)roundf(x * 8388608.0f);
+		if (v > 8388607) v = 8388607;
+		if (v < -8388608) v = -8388608;
+		p[0] = (unsigned char)(v & 0xFF);
+		p[1] = (unsigned char)((v >> 8) & 0xFF);
+		p[2] = (unsigned char)((v >> 16) & 0xFF);
+	}
+	else if (bits == 32)
+		*(int*)p = (int)(x * 2147483647.0f);
+	else
+		p[0] = (unsigned char)(x * 127.0f + 128.0f);
+}
+
+static void ApplySurroundProcess(void* data, int len, int rate, int bits, int ch)
+{
+	int amtI = savedata.surround;
+	if (amtI < 0) amtI = 0;
+	if (amtI > 100) amtI = 100;
+	if (amtI <= 0 || !data || len <= 0 || bits < 8 || ch < 1)
+		return;
+	const float amt = (float)amtI / 100.0f;
+	const int bps = bits / 8;
+	const int frame = bps * ch;
+	if (frame <= 0 || len < frame) return;
+	const int n = len / frame;
+	if (rate <= 0) rate = 44100;
+	if (g_sur[g_eqCur].rate != rate || g_sur[g_eqCur].dly <= 0)
+		SurroundResetBank(g_eqCur, rate);
+
+	SurroundState& st = g_sur[g_eqCur];
+	unsigned char* p = (unsigned char*)data;
+	const float kSide = 1.0f + 0.55f * amt;
+	const float kHaas = 0.22f * amt;
+	const float kRear = 0.40f * amt;
+	// EQ / リミッター前なのでフルスケールまで張り付けない
+	const float head = 1.0f / (1.0f + 0.50f * amt);
+
+	for (int i = 0; i < n; ++i) {
+		unsigned char* f = p + (size_t)i * (size_t)frame;
+		float L = SurLoad(f + 0 * bps, bits);
+		float R = (ch >= 2) ? SurLoad(f + 1 * bps, bits) : L;
+
+		int rp = st.wpos - st.dly;
+		if (rp < 0) rp += SUR_DLY_MAX;
+		const float dL = st.dL[rp];
+		const float dR = st.dR[rp];
+
+		if (ch <= 2) {
+			float mid = (L + R) * 0.5f;
+			float side = (L - R) * 0.5f;
+			// 軽いオールパスでサイドを散らす（相関を下げマトリクスデコードしやすく）
+			st.apL = side + 0.55f * st.apL;
+			side = side * 0.45f + st.apL * 0.55f;
+			side *= kSide;
+			float oL = mid + side + kHaas * dR;
+			float oR = mid - side + kHaas * dL;
+			L = (L + (oL - L) * amt) * head;
+			R = (R + (oR - R) * amt) * head;
+			SurStore(f + 0 * bps, bits, L);
+			if (ch >= 2) SurStore(f + 1 * bps, bits, R);
+		}
+		else {
+			// フロントは軽く広げ、リア/サイドへ差分＋遅延を足す
+			float mid = (L + R) * 0.5f;
+			float side = (L - R) * 0.5f;
+			st.apL = side + 0.50f * st.apL;
+			side = side * 0.50f + st.apL * 0.50f;
+			L = (L + (L - mid) * (0.15f * amt)) * head;
+			R = (R + (R - mid) * (0.15f * amt)) * head;
+			SurStore(f + 0 * bps, bits, L);
+			SurStore(f + 1 * bps, bits, R);
+
+			if (ch == 4) {
+				// FL FR BL BR
+				float bl = SurLoad(f + 2 * bps, bits);
+				float br = SurLoad(f + 3 * bps, bits);
+				SurStore(f + 2 * bps, bits, bl + side * kRear + kHaas * dR * 0.5f);
+				SurStore(f + 3 * bps, bits, br - side * kRear + kHaas * dL * 0.5f);
+			}
+			else if (ch == 6) {
+				// FL FR FC LFE BL BR
+				float bl = SurLoad(f + 4 * bps, bits);
+				float br = SurLoad(f + 5 * bps, bits);
+				SurStore(f + 4 * bps, bits, bl + side * kRear + kHaas * dR * 0.5f);
+				SurStore(f + 5 * bps, bits, br - side * kRear + kHaas * dL * 0.5f);
+			}
+			else if (ch >= 8) {
+				// FL FR FC LFE BL BR SL SR
+				float bl = SurLoad(f + 4 * bps, bits);
+				float br = SurLoad(f + 5 * bps, bits);
+				float sl = SurLoad(f + 6 * bps, bits);
+				float sr = SurLoad(f + 7 * bps, bits);
+				SurStore(f + 4 * bps, bits, bl + side * kRear + kHaas * dR * 0.5f);
+				SurStore(f + 5 * bps, bits, br - side * kRear + kHaas * dL * 0.5f);
+				SurStore(f + 6 * bps, bits, sl + side * (kRear * 0.85f) + kHaas * dR * 0.35f);
+				SurStore(f + 7 * bps, bits, sr - side * (kRear * 0.85f) + kHaas * dL * 0.35f);
+			}
+			else if (ch == 3) {
+				// L R LFE: LFE に mid 成分を少し（低域の厚み）
+				float lfe = SurLoad(f + 2 * bps, bits);
+				SurStore(f + 2 * bps, bits, lfe + mid * (0.12f * amt));
+			}
+		}
+
+		st.dL[st.wpos] = L;
+		st.dR[st.wpos] = R;
+		if (++st.wpos >= SUR_DLY_MAX) st.wpos = 0;
+	}
+}
+
+static void EqTailOut(void* outPtr, int outLen, int rate)
+{
+	ProAudio_ApplyXfadeIn(outPtr, outLen, rate, wavsam_depth, wavchannel);
+	ProAudio_PushTailPcm(outPtr, outLen, rate, wavsam_depth, wavchannel);
+}
+
 // ===== エンジン初期化 =====
 // サンプルレート変更または reset==1 時に呼ばれる
 // 全チャンネル状態のクリア、ディレイバッファのゼロ埋め、
@@ -4723,6 +4904,7 @@ static void InitEngine(int rate, int bank = 0) {
 	// [FIX-COMP] ブロック間平滑ゲインをリセット
 	g_stagingGainSmooth[g_eqCur] = 1.0f;
 	g_laLimEnv[g_eqCur] = 1.0f;
+	SurroundResetBank(g_eqCur, rate);
 	g_eqCur = prevBank;
 }
 
@@ -5371,6 +5553,9 @@ static void equaliserBankUnlocked(void* data, int len, BOOL reset) {
 	if (effectAmount < 0)   effectAmount = 0;
 	if (effectAmount > 100) effectAmount = 100;
 
+	// サラウンドは EQ / リミッター前に適用（後段で割れるのを防ぐ）
+	ApplySurroundProcess(processData, processLen, wavbitbackup, wavsam_depth, wavchannel);
+
 	int masterVolume = savedata.eq[15];
 	int clarity = savedata.eq[16];
 	int balance = savedata.eq[17];
@@ -5406,6 +5591,7 @@ static void equaliserBankUnlocked(void* data, int len, BOOL reset) {
 	//   ・masterVolume/clarity/balance/density/spatial がすべて100
 	//   ・EQ帯域 eq[0-14] がすべて100 (フラット)
 	//   ・追加エフェクト(リバーブ/コーラス/ディレイ)がすべて0 (オフ)
+	//   ・サラウンド == 0（サラウンド ON 時はリミッター経路へ）
 	// 上記すべて満たす場合は一切の処理をせず即返す。
 	// リサンプリングが不要な場合(≥44100Hz)はそのまま、
 	// リサンプリングが走っていた場合は tempBuffer を解放して返す。
@@ -5415,7 +5601,8 @@ static void equaliserBankUnlocked(void* data, int len, BOOL reset) {
 		balance == 100 && density == 100 && spatial == 100 &&
 		g_eqReverb == 0 && g_eqChorus == 0 && g_eqDelay == 0 &&
 		savedata.pro_ms_width == 100 && !savedata.pro_ms_mono &&
-		savedata.mpVocalCenter == 100)
+		savedata.mpVocalCenter == 100 &&
+		savedata.surround <= 0)
 	{
 		bool allFlat = true;
 		for (int i = 0; i < 15; i++) {
@@ -5434,8 +5621,7 @@ static void equaliserBankUnlocked(void* data, int len, BOOL reset) {
 					outPtr = processData;
 					outLen = processLen;
 				}
-				ProAudio_ApplyXfadeIn(outPtr, outLen, originalRate, wavsam_depth, wavchannel);
-				ProAudio_PushTailPcm(outPtr, outLen, originalRate, wavsam_depth, wavchannel);
+				EqTailOut(outPtr, outLen, originalRate);
 			};
 			// 計測は RG/拡張ブースト前(EQ経路と同じ位置)
 			ProAudio_FeedMetersFromInterleaved(
@@ -5446,12 +5632,10 @@ static void equaliserBankUnlocked(void* data, int len, BOOL reset) {
 			if (extBoostGain <= 1.0001f) {
 				if (needsResampling && tempBuffer) {
 					free(tempBuffer);
-					ProAudio_ApplyXfadeIn(data, originalLen, originalRate, wavsam_depth, wavchannel);
-					ProAudio_PushTailPcm(data, originalLen, originalRate, wavsam_depth, wavchannel);
+					EqTailOut(data, originalLen, originalRate);
 					return;
 				}
-				ProAudio_ApplyXfadeIn(data, originalLen, originalRate, wavsam_depth, wavchannel);
-				ProAudio_PushTailPcm(data, originalLen, originalRate, wavsam_depth, wavchannel);
+				EqTailOut(data, originalLen, originalRate);
 				return;
 			}
 			{
@@ -5729,8 +5913,7 @@ static void equaliserBankUnlocked(void* data, int len, BOOL reset) {
 				outPtr = processData;
 				outLen = processLen;
 			}
-			ProAudio_ApplyXfadeIn(outPtr, outLen, originalRate, wavsam_depth, wavchannel);
-			ProAudio_PushTailPcm(outPtr, outLen, originalRate, wavsam_depth, wavchannel);
+			EqTailOut(outPtr, outLen, originalRate);
 		}
 		return;
 	}
@@ -6127,8 +6310,7 @@ static void equaliserBankUnlocked(void* data, int len, BOOL reset) {
 			outPtr = processData;
 			outLen = processLen;
 		}
-		ProAudio_ApplyXfadeIn(outPtr, outLen, originalRate, wavsam_depth, wavchannel);
-		ProAudio_PushTailPcm(outPtr, outLen, originalRate, wavsam_depth, wavchannel);
+		EqTailOut(outPtr, outLen, originalRate);
 	}
 }
 

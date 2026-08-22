@@ -37,11 +37,13 @@ public:
 	bool ForeignClose(uint32_t sessionId);
 
 	bool VstOpen(const std::wstring& midPath, const std::wstring& vstDllPath,
-		const std::wstring& extraScanPath, KPIHOST64_ForeignOpenReply& out);
+		const std::wstring& extraScanPath, KPIHOST64_ForeignOpenReply& out, uint32_t slot = 0);
 	bool VstRender(uint32_t bytesWanted, std::vector<uint8_t>& outPcm, bool& outEof,
-		const uint8_t* injPorts = nullptr, const uint32_t* injMsgs = nullptr, uint32_t injCount = 0);
-	bool VstSeek(uint64_t posSample);
-	bool VstClose();
+		const uint8_t* injPorts = nullptr, const uint32_t* injMsgs = nullptr, uint32_t injCount = 0,
+		uint32_t slot = 0);
+	bool VstSeek(uint64_t posSample, uint32_t slot = 0);
+	bool VstClose(uint32_t slot = 0);
+	bool VstCloseAll();
 
 	// VST Live parts. Notes and audio travel through shared memory; only the
 	// lifecycle calls below go over the pipe.

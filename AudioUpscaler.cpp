@@ -360,9 +360,13 @@ static void UpmixStereoToSurround(float L, float R, int dstCh, float* dstChOut, 
 	const float C = (L + R) * s2;
 	const float lfe = (L + R) * 0.25f;
 	// 旧: s2*0.5 ≈ 0.35 で差分が二重減衰。5.1→2ch の s2 係数に合わせつつ体感補正。
-	const float kSurround51 = 0.85f;
-	const float kSide71 = 0.85f;
-	const float kRear71 = 0.65f;
+	const float kSurround51 = (savedata.surround > 0)
+		? (0.85f + 0.40f * ((savedata.surround > 100 ? 100 : savedata.surround) / 100.0f))
+		: 0.85f;
+	const float kSide71 = kSurround51;
+	const float kRear71 = (savedata.surround > 0)
+		? (0.65f + 0.30f * ((savedata.surround > 100 ? 100 : savedata.surround) / 100.0f))
+		: 0.65f;
 
 	if (dstCh == 2) {
 		dstChOut[0] = clip1(L);

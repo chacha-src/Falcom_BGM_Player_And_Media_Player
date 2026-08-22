@@ -154,6 +154,9 @@ public:
 	afx_msg void OnCbnSelchangeCombo4();
 	afx_msg void OnBnClickedCancel5();
 	CCustomCheckBox m_upscale;
+	CCustomSliderCtrl m_surround;
+	CCustomStatic m_surroundVal;
+	CCustomStatic m_surroundLabel;
 	CCustomCheckBox m_midPreferKpi;
 	CCustomCheckBox m_midPreferVst;
 	CCustomComboBox m_vstMultiCombo;
@@ -177,6 +180,7 @@ public:
 	int m_bakSoundCur;
 	DWORD m_bakSamples;
 	int m_bakUpscale;
+	int m_bakSurround;
 	int m_bakSpeaker;
 	int m_bakBit24;
 	int m_bakBit32;

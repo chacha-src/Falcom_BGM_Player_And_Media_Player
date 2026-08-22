@@ -330,6 +330,7 @@ BOOL COggApp::InitInstance()
 	savedata.midimon3dyaw = -220;
 	savedata.midimon3dpitch = 260;
 	savedata.midimon3dzoom = 100;
+	savedata.surround = 0;
 	savedata.teBatchMainLock = 0;
 	savedata.mpDjPadwindow = 0;
 	savedata.mpNormTargetLufs = -14;
@@ -686,6 +687,8 @@ BOOL COggApp::InitInstance()
 	}
 	if (savedata.speaker_layout < 0 || savedata.speaker_layout > 5)
 		savedata.speaker_layout = 0;
+	if (savedata.surround < 0 || savedata.surround > 100)
+		savedata.surround = 0;
 	// wav_export_*_sec の正規化は saveversion 3 コンバート後に行う（intビットをfloatとして読まない）
 	// アナライザー窓: 必ず構造体末尾に追記(旧.datは部分読込で未設定のまま→既定値)
 	if (datFileSize < (int)(offsetof(save, analyzerwindow) + sizeof(savedata.analyzerwindow))) {

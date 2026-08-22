@@ -8,6 +8,9 @@
 #include <math.h>
 #include <mutex>
 
+/* クロスフェードで B(スロット1)が現行になった後も、正しいエンジンを見る（実体は oggDlg.cpp） */
+void MmBindVstActiveSlot();
+
 volatile LONG g_xfSlot = 0;
 volatile LONG g_xfFillSlot = -1;
 volatile LONG g_xfOpening = 0;

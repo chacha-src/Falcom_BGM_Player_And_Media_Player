@@ -472,14 +472,16 @@ bool KpiHost64Client::ForeignClose(uint32_t sessionId)
 }
 
 bool KpiHost64Client::VstOpen(const std::wstring& midPath, const std::wstring& vstDllPath,
-	const std::wstring& extraScanPath, KPIHOST64_ForeignOpenReply& out)
+	const std::wstring& extraScanPath, KPIHOST64_ForeignOpenReply& out, uint32_t slot)
 {
+	if (slot > 1) slot = 0;
 	std::vector<uint8_t> req;
 	uint32_t nMid = (uint32_t)midPath.size();
 	uint32_t nDll = (uint32_t)vstDllPath.size();
 	uint32_t nEx = (uint32_t)extraScanPath.size();
-	req.resize(sizeof(uint32_t) * 3 + (nMid + nDll + nEx) * sizeof(wchar_t));
+	req.resize(sizeof(uint32_t) * 4 + (nMid + nDll + nEx) * sizeof(wchar_t));
 	uint8_t* p = req.data();
+	memcpy(p, &slot, sizeof(slot)); p += sizeof(slot);
 	memcpy(p, &nMid, sizeof(nMid)); p += sizeof(nMid);
 	if (nMid) { memcpy(p, midPath.c_str(), nMid * sizeof(wchar_t)); p += nMid * sizeof(wchar_t); }
 	memcpy(p, &nDll, sizeof(nDll)); p += sizeof(nDll);
@@ -495,10 +497,11 @@ bool KpiHost64Client::VstOpen(const std::wstring& midPath, const std::wstring& v
 }
 
 bool KpiHost64Client::VstRender(uint32_t bytesWanted, std::vector<uint8_t>& outPcm, bool& outEof,
-	const uint8_t* injPorts, const uint32_t* injMsgs, uint32_t injCount)
+	const uint8_t* injPorts, const uint32_t* injMsgs, uint32_t injCount, uint32_t slot)
 {
+	if (slot > 1) slot = 0;
 	KPIHOST64_RenderReq rr{};
-	rr.sessionId = 1;
+	rr.sessionId = slot;
 	rr.bytesWanted = bytesWanted;
 	if (injCount > 64) injCount = 64;
 	if (!injPorts || !injMsgs) injCount = 0;
@@ -528,10 +531,11 @@ bool KpiHost64Client::VstRender(uint32_t bytesWanted, std::vector<uint8_t>& outP
 	return true;
 }
 
-bool KpiHost64Client::VstSeek(uint64_t posSample)
+bool KpiHost64Client::VstSeek(uint64_t posSample, uint32_t slot)
 {
+	if (slot > 1) slot = 0;
 	KPIHOST64_SeekReq sr{};
-	sr.sessionId = 1;
+	sr.sessionId = slot;
 	sr.posSample = posSample;
 	sr.flag = 0;
 	std::vector<uint8_t> reply;
@@ -540,7 +544,18 @@ bool KpiHost64Client::VstSeek(uint64_t posSample)
 	return st == KPIHOST64_STATUS_OK;
 }
 
-bool KpiHost64Client::VstClose()
+bool KpiHost64Client::VstClose(uint32_t slot)
+{
+	if (slot > 1) slot = 0;
+	KPIHOST64_U32 u{};
+	u.v = slot;
+	std::vector<uint8_t> reply;
+	uint32_t st = 0;
+	if (!SendRequest(KPIHOST64_CMD_VST_CLOSE, &u, sizeof(u), reply, st)) return false;
+	return st == KPIHOST64_STATUS_OK;
+}
+
+bool KpiHost64Client::VstCloseAll()
 {
 	std::vector<uint8_t> reply;
 	uint32_t st = 0;

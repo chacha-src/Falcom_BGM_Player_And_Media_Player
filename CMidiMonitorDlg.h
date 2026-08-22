@@ -181,6 +181,10 @@ private:
 	__int64 m_lastPlayb;
 	wchar_t m_loadedPath[520];
 	wchar_t m_titleBuf[280];
+	int m_gsMapKind; // 0=なし 1=55 2=88 3=88Pro 4=8820 5=GM 6=SD
+	int m_fileHasXg;
+	int m_fileHasGm;
+	int m_fileHasSd;
 
 	int m_usecQn;
 	int m_tsNum;

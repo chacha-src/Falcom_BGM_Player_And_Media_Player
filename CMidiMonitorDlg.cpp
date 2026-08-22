@@ -11,6 +11,8 @@
 
 class COggDlg;
 extern COggDlg* og;
+/* クロスフェードで B(スロット1)が現行になった後も、UI から正しいエンジンを見る */
+void MmBindVstActiveSlot();
 extern save savedata;
 extern CString filen;
 extern int mode;
@@ -337,11 +339,15 @@ static const wchar_t* MmEffName(int mode, int kind, int type)
 	return L"OFF";
 }
 
-static const wchar_t* MmMapLabel(int sysMode, int mapId)
+static const wchar_t* MmMapLabel(int sysMode, int mapId, int bankLsb)
 {
 	if (sysMode == 2) return L"XGmap";
-	if (mapId == 1) return L"55map";
-	if (mapId == 3) return L"88Pmap";
+	if (sysMode == 0 || mapId == 5) return L"GMmap";
+	if (mapId == 6) return L"SDmap";
+	if (bankLsb == 1 || mapId == 1) return L"55map";
+	if (bankLsb == 3 || mapId == 3) return L"88Pmap";
+	if (bankLsb == 4) return L"8820map";
+	if (bankLsb == 2 || mapId == 2) return L"88map";
 	if (mapId == 0) return L"GSmap";
 	return L"88map";
 }
@@ -620,7 +626,7 @@ CMidiMonitorDlg::CMidiMonitorDlg(CWnd* pParent)
 	, m_noteCount(0), m_masterVol(100)
 	, m_notesPeak(0), m_notesPeakHold(0), m_layW(0)
 	, m_dragKind(0), m_dragPart(-1), m_playPart(-1), m_playNote(-1)
-	, m_viewMode(0), m_mapForce(0), m_frozen(false), m_alwaysOnTop(false), m_paintDisabled(false)
+	, m_viewMode(0), m_mapForce(0), m_gsMapKind(0), m_fileHasXg(0), m_fileHasGm(0), m_fileHasSd(0), m_frozen(false), m_alwaysOnTop(false), m_paintDisabled(false)
 	, m_rotDragging(false), m_rotDragYaw0(0), m_rotDragPitch0(0), m_soft3dTourUntil(0)
 	, m_hoverCol(-1), m_hoverPart(-1)
 	, m_layHeadH(0), m_layRowH(0), m_persistAge(0), m_drumGlow(0), m_dispBpm(-1)
@@ -743,6 +749,20 @@ void CMidiMonitorDlg::ResetParts()
 		p.eqLow = 80;
 		p.eqHigh = 10000;
 		p.mapId = 4;
+		p.bankLsb = 0;
+		if (!m_fileHasXg && !m_fileHasGm && m_gsMapKind >= 1 && m_gsMapKind <= 4 && m_mapForce != 2) {
+			p.bankLsb = m_gsMapKind;
+			if (m_gsMapKind == 1) p.mapId = 1;
+			else if (m_gsMapKind == 2) p.mapId = 2;
+			else if (m_gsMapKind == 3) p.mapId = 3;
+			else p.mapId = 4;
+		} else if (m_fileHasGm || m_gsMapKind == 5) {
+			p.mapId = 5;
+			p.bankLsb = 0;
+		} else if (m_fileHasSd || m_gsMapKind == 6) {
+			p.mapId = 6;
+			p.bankLsb = 0;
+		}
 		p.isDrum = ((i % 16) == 9) ? 1 : 0;
 		p.lastNote = -1;
 		RefreshPartName(p);
@@ -753,7 +773,7 @@ void CMidiMonitorDlg::ResetParts()
 	m_keySf = 0;
 	m_keyMin = 0;
 	m_transpose = 0;
-	m_sysMode = 1;
+	m_sysMode = m_fileHasXg ? 2 : ((m_fileHasGm || m_gsMapKind == 5) ? 0 : 1);
 	m_revType = 1;
 	m_choType = 2;
 	m_varType = 1;
@@ -763,7 +783,6 @@ void CMidiMonitorDlg::ResetParts()
 	m_notesPeak = 0;
 	m_notesPeakHold = 0;
 	m_masterVol = 100;
-	m_evPos = 0;
 	m_dirtyRows = 0xFFFFFFFFu;
 	m_dirtyHead = true;
 	m_fullDraw = true;
@@ -780,6 +799,11 @@ void CMidiMonitorDlg::UnloadMidi()
 	m_evCount = m_evPos = 0;
 	m_sxBytes = 0;
 	m_loadedPath[0] = 0;
+	m_titleBuf[0] = 0;
+	m_gsMapKind = 0;
+	m_fileHasXg = 0;
+	m_fileHasGm = 0;
+	m_fileHasSd = 0;
 }
 
 void CMidiMonitorDlg::LookupToneName(int isXg, int mapId, int bankMsb, int bankLsb, int pc, int isDrum, wchar_t* out, int outN)
@@ -797,7 +821,7 @@ void CMidiMonitorDlg::LookupToneName(int isXg, int mapId, int bankMsb, int bankL
 	}
 	if (isXg) {
 		if (MmLookupXgOk(bankMsb, bankLsb, pc, out, outN) && out[0]) return;
-	} else {
+	} else if (mapId != 5 && mapId != 6) {
 		if (MmLookupGs(mapId, bankMsb, pc, out, outN) && out[0]) return;
 	}
 	if (pc >= 0 && pc < 128)
@@ -866,7 +890,17 @@ void CMidiMonitorDlg::ApplyShort(int port, DWORD msg)
 		}
 	} else if (st == 0xb0) {
 		if (d1 == 0) { p.bankMsb = d2; RefreshPartName(p); m_dirtyRows |= (1u << part); }
-		else if (d1 == 32) { p.bankLsb = d2; RefreshPartName(p); m_dirtyRows |= (1u << part); }
+		else if (d1 == 32) {
+			p.bankLsb = d2;
+			if (m_sysMode != 2 && m_mapForce != 2) {
+				if (d2 == 1) p.mapId = 1;
+				else if (d2 == 2) p.mapId = 2;
+				else if (d2 == 3) p.mapId = 3;
+				else if (d2 == 4) p.mapId = 4;
+			}
+			RefreshPartName(p);
+			m_dirtyRows |= (1u << part);
+		}
 		else if (d1 == 7) { if (!IsLatched(part, MM_LATCH_VOL)) { if (p.vol != d2) p.glowVol = 255; p.vol = d2; m_dirtyRows |= (1u << part); } }
 		else if (d1 == 11) { if (!IsLatched(part, MM_LATCH_EXP)) { if (p.exp != d2) p.glowExp = 255; p.exp = d2; m_dirtyRows |= (1u << part); } }
 		else if (d1 == 10) { if (!IsLatched(part, MM_LATCH_PAN)) { if (p.pan != d2) p.glowPan = 255; p.pan = d2; m_dirtyRows |= (1u << part); } }
@@ -905,19 +939,19 @@ void CMidiMonitorDlg::ApplySysex(const BYTE* d, int n)
 {
 	if (!d || n < 6) return;
 	if (d[0] != 0xf0) return;
-	if (n >= 6 && d[1] == 0x7e && d[3] == 0x09 && d[4] == 0x01) {
+	if (n >= 6 && VstMidiSysexIsGmOn(d, n)) {
 		m_sysMode = 0;
 		ResetParts();
 		m_sysMode = 0;
 		return;
 	}
-	if (n >= 11 && d[1] == 0x41 && d[3] == 0x42 && d[4] == 0x12 && d[5] == 0x40 && d[6] == 0x00 && d[7] == 0x7f) {
+	if (n >= 11 && VstMidiSysexIsGsReset(d, n)) {
 		m_sysMode = 1;
 		ResetParts();
 		m_sysMode = 1;
 		return;
 	}
-	if (n >= 9 && d[1] == 0x43 && d[3] == 0x4c && d[4] == 0x00 && d[5] == 0x00 && d[6] == 0x7e) {
+	if (n >= 9 && VstMidiSysexIsXgOn(d, n)) {
 		m_sysMode = 2;
 		ResetParts();
 		m_sysMode = 2;
@@ -1030,6 +1064,9 @@ void CMidiMonitorDlg::LoadCurrentMidi()
 	BYTE* sxData = new BYTE[size + 8];
 	int sxUsed = 0;
 	int count = 0;
+	int hasXg = 0;
+	int mapHint = 0;
+	m_titleBuf[0] = 0;
 	const BYTE* p = smf + 8 + MmReadBE(smf + 4, 4);
 	const BYTE* fileEnd = smf + smfSize;
 	for (int tr = 0; tr < tracks && p + 8 <= fileEnd; ++tr) {
@@ -1076,6 +1113,22 @@ void CMidiMonitorDlg::LoadCurrentMidi()
 					curPort = (int)q[0];
 					if (curPort < 0) curPort = 0;
 					if (curPort > 1) curPort = 1;
+				} else if ((type == 0x01 || type == 0x02 || type == 0x03) && ml > 0) {
+					char tmp[256];
+					unsigned n = ml;
+					if (n > 255) n = 255;
+					memcpy(tmp, q, n);
+					tmp[n] = 0;
+					wchar_t w[256];
+					w[0] = 0;
+					if (!MultiByteToWideChar(932, 0, tmp, -1, w, 256))
+						MultiByteToWideChar(CP_ACP, 0, tmp, -1, w, 256);
+					w[255] = 0;
+					if (w[0]) {
+						mapHint = VstMidiFoldGsMapHint(mapHint, VstMidiGuessGsMapKind(w, NULL));
+						if (type == 0x03 || !m_titleBuf[0])
+							MmCopyW(m_titleBuf, 280, w);
+					}
 				}
 				q += ml;
 			} else if (st == 0xf0 || st == 0xf7) {
@@ -1091,6 +1144,8 @@ void CMidiMonitorDlg::LoadCurrentMidi()
 					ev[count].msg = 0xf0; ev[count].aux = (DWORD)need;
 					ev[count].port = curPort; ev[count].sysexOff = off;
 					++count;
+					if (need >= 6 && VstMidiSysexIsXgOn(sxData + off, need))
+						hasXg = 1;
 				}
 				q += sl;
 			} else {
@@ -1116,6 +1171,7 @@ void CMidiMonitorDlg::LoadCurrentMidi()
 	qsort(ev, count, sizeof(MmEv), MmCmpEv);
 	int sr = 44100;
 	if (mode == MODE_VST_MIDI) {
+		MmBindVstActiveSlot();
 		int r = VstMidiGetRate();
 		if (r > 0) sr = r;
 	} else if (savedata.samples >= 8000) {
@@ -1139,6 +1195,69 @@ void CMidiMonitorDlg::LoadCurrentMidi()
 	m_sx = sxData;
 	m_sxBytes = sxUsed;
 	MmCopyW(m_loadedPath, 520, mid);
+	if (!mapHint)
+		mapHint = VstMidiGuessGsMapKind(m_titleBuf, mid);
+	else
+		mapHint = VstMidiFoldGsMapHint(mapHint, VstMidiGuessGsMapKind(NULL, mid));
+	if (mapHint == 7) hasXg = 1;
+	{
+		BYTE msb[32];
+		BYTE have[2048];
+		unsigned short pairs[256];
+		int nPairs = 0, hasGm = 0, hasGs = 0, hasSd = 0, cc32Max = 0;
+		memset(msb, 0, sizeof(msb));
+		memset(have, 0, sizeof(have));
+		for (int i = 0; i < count; ++i) {
+			if (ev[i].msg == 0xf0 && ev[i].sysexOff >= 0) {
+				const int n = (int)ev[i].aux;
+				if (ev[i].sysexOff + n <= sxUsed) {
+					const BYTE* d = sxData + ev[i].sysexOff;
+					if (VstMidiSysexIsXgOn(d, n)) hasXg = 1;
+					if (VstMidiSysexIsGmOn(d, n)) hasGm = 1;
+					if (VstMidiSysexIsGsReset(d, n)) hasGs = 1;
+				}
+				continue;
+			}
+			const int st = (int)(ev[i].msg & 0xf0);
+			const int ch = (int)(ev[i].msg & 0x0f);
+			int idx = ev[i].port * 16 + ch;
+			if (idx < 0) idx = ch;
+			if (idx > 31) idx = 31;
+			const int d1 = (int)((ev[i].msg >> 8) & 0x7f);
+			const int d2 = (int)((ev[i].msg >> 16) & 0x7f);
+			const int drum = (ch == 9) ? 1 : 0;
+			if (st == 0xb0 && d1 == 0) {
+				msb[idx] = (BYTE)d2;
+				if (VstMidiBankMsbIsSdNative(d2)) hasSd = 1;
+			} else if (st == 0xb0 && d1 == 32) {
+				if (!drum && d2 >= 1 && d2 <= 4 && d2 > cc32Max) cc32Max = d2;
+			} else if (st == 0xc0 && !drum) {
+				const int bank = (int)msb[idx];
+				const int bit = bank * 128 + d1;
+				if (bit >= 0 && bit < 16384) {
+					const int bi = bit >> 3;
+					const BYTE mask = (BYTE)(1 << (bit & 7));
+					if (!(have[bi] & mask)) {
+						have[bi] = (BYTE)(have[bi] | mask);
+						if (nPairs < 256)
+							pairs[nPairs++] = (unsigned short)((bank << 8) | d1);
+					}
+				}
+			}
+		}
+		int resolved = 0;
+		if (hasXg) resolved = 0;
+		else if (mapHint >= 1 && mapHint <= 4) resolved = mapHint;
+		else if ((mapHint == 5 || hasGm) && !hasGs) resolved = 5;
+		else if (mapHint == 6 || hasSd) resolved = 6;
+		else if (cc32Max >= 1 && cc32Max <= 4) resolved = cc32Max;
+		else resolved = VstMidiGsMapDropFromUsed(pairs, nPairs);
+		m_fileHasXg = hasXg;
+		m_fileHasGm = (resolved == 5) ? 1 : 0;
+		m_fileHasSd = (resolved == 6) ? 1 : 0;
+		m_gsMapKind = (resolved >= 1 && resolved <= 6) ? resolved : 0;
+	}
+	ResetParts();
 	delete[] data;
 	m_lastPlayb = -1;
 	m_evPos = 0;
@@ -1159,6 +1278,7 @@ void CMidiMonitorDlg::SyncFromPlayback()
 			const int sr = (m_sampleRate > 0) ? m_sampleRate : 44100;
 			const double sec = OggGetGdiPlaybackTimeSec();
 			pb = (__int64)(sec * (double)sr + 0.5);
+			MmBindVstActiveSlot();
 			pb -= VstMidiGetLatencySamples();
 			pb -= (__int64)sr * 700 / 1000;
 			if (pb < 0) pb = 0;
@@ -1273,9 +1393,15 @@ void CMidiMonitorDlg::DrawHeader(CDC& dc, int w, int headH, UINT dpi)
 	const wchar_t* fn = m_loadedPath[0] ? m_loadedPath : (LPCWSTR)filen;
 	const wchar_t* slash = fn ? wcsrchr(fn, L'\\') : NULL;
 	const wchar_t* base = slash ? slash + 1 : (fn ? fn : L"");
-	wchar_t line1[400];
+	/* ファイル名の横にシーケンス名/曲名メタ(FF 03)も出す */
+	wchar_t nameBuf[400];
+	if (m_titleBuf[0] && _wcsicmp(m_titleBuf, base) != 0)
+		_snwprintf_s(nameBuf, _TRUNCATE, L"%s  /  %s", base, m_titleBuf);
+	else
+		MmCopyW(nameBuf, 400, base);
+	wchar_t line1[560];
 	_snwprintf_s(line1, _TRUNCATE, L"BPM %3d    %3d%%    %s    TB %d    %d/%d    Transpose %d    %s",
-		bpm, tpc, keyBuf, m_division, m_tsNum, m_tsDen, m_transpose, base);
+		bpm, tpc, keyBuf, m_division, m_tsNum, m_tsDen, m_transpose, nameBuf);
 	dc.TextOut(Scale(8, dpi), Scale(4, dpi), line1);
 
 	const int volBarW = max(40, w / 3);
@@ -1380,7 +1506,7 @@ void CMidiMonitorDlg::DrawPartRow(CDC& dc, int i, int y, int rowH, int w, UINT d
 	_snwprintf_s(chs, _TRUNCATE, L"%c%02d", (i < 16) ? L'A' : L'B', (i % 16) + 1);
 	dc.TextOut(Scale(4, dpi), y + 1, chs);
 	wchar_t pcb[48];
-	_snwprintf_s(pcb, _TRUNCATE, L"%03d %03d %s", p.pc + 1, p.bankMsb, MmMapLabel(m_sysMode, p.mapId));
+	_snwprintf_s(pcb, _TRUNCATE, L"%03d %03d %s", p.pc + 1, p.bankMsb, MmMapLabel(m_sysMode, p.mapId, p.bankLsb));
 	dc.TextOut(Scale(40, dpi), y + 1, pcb);
 	dc.TextOut(Scale(148, dpi), y + 1, p.name);
 	const int meterX = Scale(280, dpi);
@@ -1555,6 +1681,7 @@ void CMidiMonitorDlg::InjectShort(int part, DWORD msg)
 	const int port = part / 16;
 	const int ch = part % 16;
 	msg = (msg & ~(DWORD)0x0f) | (DWORD)ch;
+	MmBindVstActiveSlot();
 	VstMidiInjectShort(port, msg);
 	ApplyShort(port, msg);
 	const int st = (int)(msg & 0xf0);

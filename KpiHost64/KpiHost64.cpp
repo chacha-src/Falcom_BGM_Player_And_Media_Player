@@ -1086,8 +1086,10 @@ static void ServeOnce(HANDLE pipe)
 			break;
 		}
 		case KPIHOST64_CMD_VST_OPEN: {
-			// payload: [u32 midChars][mid][u32 dllChars][dll][u32 extraChars][extra]
-			if ((size_t)(end - p) < sizeof(uint32_t)) { status = KPIHOST64_STATUS_BAD_REQUEST; break; }
+			// payload: [u32 slot][u32 midChars][mid][u32 dllChars][dll][u32 extraChars][extra]
+			if ((size_t)(end - p) < sizeof(uint32_t) * 2) { status = KPIHOST64_STATUS_BAD_REQUEST; break; }
+			uint32_t slot = *(const uint32_t*)p; p += sizeof(uint32_t);
+			if (slot > 1) slot = 0;
 			uint32_t nMid = *(const uint32_t*)p; p += sizeof(uint32_t);
 			if ((size_t)(end - p) < nMid * sizeof(wchar_t)) { status = KPIHOST64_STATUS_BAD_REQUEST; break; }
 			std::wstring mid((const wchar_t*)p, (const wchar_t*)p + nMid);
@@ -1104,17 +1106,17 @@ static void ServeOnce(HANDLE pipe)
 				if ((size_t)(end - p) < nEx * sizeof(wchar_t)) { status = KPIHOST64_STATUS_BAD_REQUEST; break; }
 				extra.assign((const wchar_t*)p, (const wchar_t*)p + nEx);
 			}
-			status = VstHost64_Open(mid.c_str(),
+			status = VstHost64_Open((int)slot, mid.c_str(),
 				dll.empty() ? nullptr : dll.c_str(),
 				extra.empty() ? nullptr : extra.c_str());
 			if (status == KPIHOST64_STATUS_OK) {
 				KPIHOST64_ForeignOpenReply orp{};
-				orp.sessionId = 1;
-				orp.sampleRate = (uint32_t)VstHost64_Rate();
-				orp.channels = (uint32_t)VstHost64_Channels();
-				orp.bitsPerSample = VstHost64_Bits();
-				orp.lengthSamples = VstHost64_Length();
-				orp.latencySamples = (uint32_t)VstHost64_Latency();
+				orp.sessionId = slot;
+				orp.sampleRate = (uint32_t)VstHost64_Rate((int)slot);
+				orp.channels = (uint32_t)VstHost64_Channels((int)slot);
+				orp.bitsPerSample = VstHost64_Bits((int)slot);
+				orp.lengthSamples = VstHost64_Length((int)slot);
+				orp.latencySamples = (uint32_t)VstHost64_Latency((int)slot);
 				reply.resize(sizeof(orp));
 				memcpy(reply.data(), &orp, sizeof(orp));
 			}
@@ -1123,10 +1125,12 @@ static void ServeOnce(HANDLE pipe)
 		case KPIHOST64_CMD_VST_RENDER: {
 			if ((size_t)(end - p) < sizeof(KPIHOST64_RenderReq)) { status = KPIHOST64_STATUS_BAD_REQUEST; break; }
 			auto* rr = (const KPIHOST64_RenderReq*)p;
+			int slot = (rr->sessionId == 1) ? 1 : 0;
 			const uint8_t* q = p + sizeof(KPIHOST64_RenderReq);
 			if ((size_t)(end - q) >= sizeof(uint32_t)) {
 				uint32_t nInj = *(const uint32_t*)q; q += sizeof(uint32_t);
 				if (nInj > 64) nInj = 64;
+				VstMidiSetIoSlot(slot);
 				for (uint32_t i = 0; i < nInj; ++i) {
 					if ((size_t)(end - q) < sizeof(KPIHOST64_VstLiveMidiReq)) break;
 					auto* mr = (const KPIHOST64_VstLiveMidiReq*)q;
@@ -1136,7 +1140,7 @@ static void ServeOnce(HANDLE pipe)
 			}
 			std::vector<uint8_t> pcm;
 			uint32_t eof = 0;
-			status = VstHost64_Render(rr->bytesWanted, pcm, eof);
+			status = VstHost64_Render(slot, rr->bytesWanted, pcm, eof);
 			if (status == KPIHOST64_STATUS_OK) {
 				KPIHOST64_RenderReply rrep{};
 				rrep.sessionId = rr->sessionId;
@@ -1152,7 +1156,8 @@ static void ServeOnce(HANDLE pipe)
 		case KPIHOST64_CMD_VST_SEEK: {
 			if ((size_t)(end - p) < sizeof(KPIHOST64_SeekReq)) { status = KPIHOST64_STATUS_BAD_REQUEST; break; }
 			auto* sr = (const KPIHOST64_SeekReq*)p;
-			status = VstHost64_Seek(sr->posSample);
+			int slot = (sr->sessionId == 1) ? 1 : 0;
+			status = VstHost64_Seek(slot, sr->posSample);
 			if (status == KPIHOST64_STATUS_OK) {
 				KPIHOST64_SeekReply srep{};
 				srep.sessionId = sr->sessionId;
@@ -1163,7 +1168,12 @@ static void ServeOnce(HANDLE pipe)
 			break;
 		}
 		case KPIHOST64_CMD_VST_CLOSE: {
-			status = VstHost64_Close();
+			if ((size_t)(end - p) >= sizeof(KPIHOST64_U32)) {
+				auto* u = (const KPIHOST64_U32*)p;
+				status = VstHost64_Close((int)u->v);
+			} else {
+				status = VstHost64_CloseAll();
+			}
 			break;
 		}
 		case KPIHOST64_CMD_VST_LIVE_LOAD: {
@@ -1296,7 +1306,7 @@ int wmain(int argc, wchar_t** argv)
 				// The app did not come back within the idle window, so the
 				// song session it was streaming is not coming back either.
 				if (VstHost64_SongActive())
-					(void)VstHost64_Close();
+					(void)VstHost64_CloseAll();
 				break;
 			}
 			continue;

@@ -1,4 +1,4 @@
-// stdafx.h : 標準のシステム インクルード ファイルのインクルード ファイル、または
+﻿// stdafx.h : 標準のシステム インクルード ファイルのインクルード ファイル、または
 // 参照回数が多く、かつあまり変更されない、プロジェクト専用のインクルード ファイル
 // を記述します。
 
@@ -791,6 +791,11 @@ struct save{
 	int midimontopmost;
 	int midimonviewmode;
 	int midimon3dyaw, midimon3dpitch, midimon3dzoom;
+
+	// --- サラウンド化(末尾追記。旧.datは0)。0=OFF、1..100=効き目。
+	// LR でもサウンドボード展開向けにマトリクス/位相を付け、
+	// アップスケール多ch 時はリアを強調する（EQ後に全ルート適用）。 ---
+	int surround;               // 0..100（0=オフ）
 };
 extern save savedata;
 /* コード間隔(ms)。16..500。旧.dat や未設定は 25。 */

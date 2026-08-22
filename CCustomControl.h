@@ -917,6 +917,9 @@ protected:
 private:
     CBrush m_brBackground; // 背景塗りつぶし用ブラシ
     int m_nHotItem;        // 現在マウスカーソルが乗っているアイテムのインデックス（ホバー処理用）
+    // 回転♡: リスト全体ではなく♡の矩形だけ再描画してなめらかに回す
+    CRect m_heartRcSel;    // 選択行の♡
+    CRect m_heartRcHot;    // ホバー行の♡
 
     // ホバー状態のアイテムを更新し、必要に応じて再描画します
     void UpdateHotItem(int n);

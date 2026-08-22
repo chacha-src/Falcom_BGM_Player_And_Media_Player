@@ -520,6 +520,9 @@ void CRender::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDCANCEL, m_canceldummy);
 	DDX_Control(pDX, IDC_COMBO_LANG, m_comboLang);
 	DDX_Control(pDX, IDC_CHECK_UPSCALE, m_upscale);
+	DDX_Control(pDX, IDC_SLIDER_SURROUND, m_surround);
+	DDX_Control(pDX, IDC_STATIC_SURROUND_VAL, m_surroundVal);
+	DDX_Control(pDX, IDC_STATIC_R_SURROUND, m_surroundLabel);
 	DDX_Control(pDX, IDC_MID_PREFER_KPI, m_midPreferKpi);
 	DDX_Control(pDX, IDC_MID_PREFER_VST, m_midPreferVst);
 	DDX_Control(pDX, IDC_VST_MULTI_COMBO, m_vstMultiCombo);
@@ -610,6 +613,7 @@ BOOL CRender::OnInitDialog()
 	m_bakSoundGuid = savedata.soundguid;	m_bakSoundCur = savedata.soundcur;
 	m_bakSamples = savedata.samples;
 	m_bakUpscale = savedata.upscale_enable;
+	m_bakSurround = savedata.surround;
 	m_bakSpeaker = savedata.speaker_layout;
 	m_bakBit24 = savedata.bit24;
 	m_bakBit32 = savedata.bit32;
@@ -729,6 +733,18 @@ BOOL CRender::OnInitDialog()
 	m_32bit.SetCheck(savedata.bit32);
 	m_m4a.SetCheck(savedata.m4a);
 	m_upscale.SetCheck(savedata.upscale_enable ? BST_CHECKED : BST_UNCHECKED);
+	SetDlgItemText(IDC_STATIC_R_SURROUND, LL14(L"サラウンド", L"Surround", L"Surround", L"Surround", L"Surround", L"서라운드", L"环绕声", L"محيطي", L"Объём", L"Surround", L"Surround", L"Surround", L"Surround", L"Surround"));
+	m_surround.SetMode(1);
+	m_surround.SetRange(0, 100);
+	{
+		int sv = savedata.surround;
+		if (sv < 0) sv = 0;
+		if (sv > 100) sv = 100;
+		savedata.surround = sv;
+		m_surround.SetPos(sv);
+		CString ss; ss.Format(L"%d", sv);
+		m_surroundVal.SetWindowText(ss);
+	}
 	m_midPreferKpi.SetCheck(savedata.midPlayPrefer == 0 ? BST_CHECKED : BST_UNCHECKED);
 	m_midPreferVst.SetCheck(savedata.midPlayPrefer == 1 ? BST_CHECKED : BST_UNCHECKED);
 	SetDlgItemText(IDC_STATIC_MID_PREFER, LL14(L"MIDI再生", L"MIDI play", L"Lecture MIDI", L"Riproduzione MIDI", L"Reproduccion MIDI", L"MIDI 재생", L"MIDI播放", L"تشغيل MIDI", L"Воспроизведение MIDI", L"MIDI-Wiedergabe", L"Reproducao MIDI", L"MIDI-weergave", L"Odtwarzanie MIDI", L"MIDI oynatma"));
@@ -886,6 +902,7 @@ BOOL CRender::OnInitDialog()
 	m_tooltip.AddTool(GetDlgItem(IDC_COMBO_LANG), LL14(L"UI表示言語を切り替えます。\n設定を保存して再起動後に反映されます。", L"Switch UI language.\nTakes effect after saving and restarting.", L"Changer la langue de l'interface.\nPrend effet apres enregistrement et redemarrage.", L"Cambia lingua interfaccia.\nEffetto dopo salvataggio e riavvio.", L"Cambiar idioma de la interfaz.\nEfectivo tras guardar y reiniciar.", L"UI 표시 언어 전환.\n저장 후 재시작 시 적용.", L"切换界面语言。\n保存并重启后生效。", L"تبديل لغة الواجهة.\nيسري بعد الحفظ وإعادة التشغيل.", L"Сменить язык интерфейса.\nПосле сохранения и перезапуска.", L"UI-Sprache wechseln.\nNach Speichern und Neustart wirksam.", L"Alterar idioma da interface.\nApos salvar e reiniciar.", L"UI-taal wijzigen.\nNa opslaan en herstarten.", L"Zmien jezyk interfejsu.\nPo zapisaniu i restarcie.", L"Arayuz dilini degistir.\nKaydet ve yeniden baslat sonrasi gecerli."));
 	m_tooltip.AddTool(GetDlgItem(IDC_COMBO3), LL14(L"再生するサンプルレートを設定します。\nサウンドカードが対応していない場合自動的に再生時対応上限まで下げます。", L"Set playback sample rate.\nAuto-lowers if sound card unsupported.", L"Regler la frequence d'echantillonnage.\nReduit automatiquement si la carte son ne supporte pas.", L"Imposta frequenza di campionamento.\nRiduce automaticamente se non supportata.", L"Ajustar frecuencia de muestreo.\nReduce automaticamente si no es compatible.", L"재생 샘플레이트 설정.\n사운드카드 미지원 시 자동으로 낮춤.", L"设置播放采样率。\n声卡不支持时自动降至上限。", L"تعيين معدل العينات.\nيُخفض تلقائياً إذا لم تدعمه البطاقة.", L"Задать частоту дискретизации.\nАвтопонижение, если карта не поддерживает.", L"Wiedergabe-Samplerate einstellen.\nAutomatisch reduzieren bei Nichtunterstutzung.", L"Definir taxa de amostragem.\nReduz automaticamente se nao suportada.", L"Afspeelfrequentie instellen.\nAutomatisch verlagen indien niet ondersteund.", L"Ustaw czestotliwosc probkowania.\nAuto-obnizanie gdy karta nie obsluguje.", L"Ornekleme hizini ayarla.\nSes karti desteklemezse otomatik dusurur."));
 	m_tooltip.AddTool(GetDlgItem(IDC_CHECK_UPSCALE), LL14(L"設定したサンプルレート・ビット深度・チャンネルでDirectSoundに出力します。\nオフにするとソース形式のまま出力します。", L"Output to DirectSound at configured rate, bit depth, and channels.\nOff keeps the source format.", L"Sortie DirectSound au debit / bits / canaux configures.\nDesactive = format source.", L"Uscita DirectSound con frequenza, bit e canali impostati.\nSpento = formato sorgente.", L"Salida DirectSound con frecuencia, bits y canales configurados.\nApagado = formato de origen.", L"설정한 샘플레이트·비트·채널로 DirectSound 출력.\n끄면 소스 형식 유지.", L"按设置的采样率、位深和声道输出到 DirectSound。\n关闭则保持源格式。", L"إخراج DirectSound بالمعدل والبت والقنوات المضبوطة.\nإيقاف = تنسيق المصدر.", L"Вывод в DirectSound с заданной частотой, битностью и каналами.\nВыкл. — формат источника.", L"Ausgabe an DirectSound mit eingestellter Rate, Bittiefe und Kanalen.\nAus = Quellformat.", L"Saida DirectSound com taxa, bits e canais configurados.\nDesligado = formato da fonte.", L"DirectSound-uitvoer met ingestelde rate, bits en kanalen.\nUit = bronformaat.", L"Wyjscie DirectSound z ustawiona czestotliwoscia, bitami i kanalami.\nWyl. = format zrodla.", L"Ayarlanan hiz, bit ve kanallarla DirectSound cikisi.\nKapali = kaynak bicimi."));
+	m_tooltip.AddTool(GetDlgItem(IDC_SLIDER_SURROUND), LL14(L"サラウンド効き目 0=オフ〜100。LRでもマトリクス／位相で展開しやすくし、多ch時はリアを強調します。", L"Surround amount 0=off..100. Matrix/phase for LR expanders; boosts rears on multi-ch.", L"Niveau surround 0=off..100.", L"Intensita surround 0=off..100.", L"Intensidad surround 0=off..100.", L"서라운드 세기 0=끔..100.", L"环绕量 0=关..100。", L"مقدار المحيطي 0=إيقاف..100.", L"Уровень surround 0=выкл..100.", L"Surround-Staerke 0=aus..100.", L"Intensidade surround 0=off..100.", L"Surround-sterkte 0=uit..100.", L"Sila surround 0=wyl..100.", L"Surround seviyesi 0=kapali..100."));
 	m_tooltip.AddTool(GetDlgItem(IDC_COMBO_SPEAKER), LL14(L"アップスケール時の出力チャンネル配置（2ch / 2.1 / 4ch / 5.1 / 7.1 / マッピングなし）を選びます。マッピングなしはソースのチャンネル数のまま、レート・ビット深度のみ変換します。", L"Speaker layout when upscaling (2ch / 2.1 / 4ch / 5.1 / 7.1 / no mapping). No mapping keeps source channel count; only rate and bit depth change.", L"Disposition haut-parleurs en upscaling (2ch / 2.1 / 4ch / 5.1 / 7.1 / sans mappage). Sans mappage : meme nombre de canaux, seuls debit et bits changent.", L"Layout altoparlanti (2ch / 2.1 / 4ch / 5.1 / 7.1 / nessun mapping). Nessun mapping: stessi canali, solo frequenza e bit.", L"Disposicion de altavoces (2ch / 2.1 / 4ch / 5.1 / 7.1 / sin mapeo). Sin mapeo: mismos canales; solo tasa y bits.", L"업스케일 시 스피커(2ch/2.1/4ch/5.1/7.1/매핑 없음). 매핑 없음은 소스 채널 수 유지, 레이트·비트만 변환.", L"升频时的扬声器布局（含不映射声道）。不映射则保持源声道数，仅转换采样率与位深。", L"تخطيط السماعات مع خيار بدون تعيين. بدون تعيين: نفس عدد القنوات؛ تغيير المعدل والبت فقط.", L"Раскладка каналов при апскейле; «без маппинга» сохраняет число каналов источника, меняются только частота и битность.", L"Lautsprecher-Layout; „kein Mapping“ behalt Kanalzahl, nur Rate/Bits.", L"Layout de altifalante; sem mapeamento mantem canais da fonte, so taxa e bits.", L"Luidsprekerindeling; geen mapping behoudt bronkanalen, alleen rate en bits.", L"Uklad kanalow; bez mapowania = ta sama liczba kanalow, zmiana tylko czestotliwosci i bitow.", L"Hoparlor duzeni; esleme yok kaynak kanal sayisini korur, yalnizca hiz ve bit derinligi degisir."));
 	m_tooltip.AddTool(GetDlgItem(IDC_COMBO4), LL14(L"スペアナで表示する表示方法を選択します。\n使う時は横のチェックボックスにチェックを入れてください\n音階：88鍵盤として表示します\n周波数帯：周波数として表示します\n標準：既定の見やすい形のスペアナで表示します", L"Select spectrum display.\nCheck the box to use.\nScale: 88-key piano\nFreq band: frequency view\nStandard: default spectrum", L"Choisir l'affichage du spectre.\nCochez la case pour activer.\nGamme : clavier 88 touches\nBandes : frequences\nStandard : spectre par defaut", L"Scegli visualizzazione spettro.\nSpunta la casella per usare.\nScale : tastiera 88 tasti\nBande : frequenze\nStandard : spettro predefinito", L"Elegir visualizacion del espectro.\nMarca la casilla para usar.\nEscala : piano 88 teclas\nBandas : frecuencias\nEstandar : espectro predeterminado", L"스펙트럼 표시 방식 선택.\n사용 시 옆 체크박스 선택.\n음계: 88건반\n주파수대: 주파수\n표준: 기본 스펙트럼", L"选择频谱显示方式。\n使用时请勾选旁边复选框。\n音阶：88键\n频段：频率\n标准：默认频谱", L"اختر عرض الطيف.\nحدّد المربع للاستخدام.\nسلم : 88 مفتاحاً\nنطاق : تردد\nقياسي : الطيف الافتراضي", L"Выбрать отображение спектра.\nОтметьте флажок для включения.\nГамма: 88 клавиш\nПолосы: частоты\nСтандарт: обычный спектр", L"Spektrum-Anzeige wahlen.\nKastchen ankreuzen zum Aktivieren.\nTonleiter: 88 Tasten\nBanden: Frequenzen\nStandard: Default-Spektrum", L"Escolher exibicao do espectro.\nMarque a caixa para usar.\nEscala: 88 teclas\nBandas: frequencias\nPadrao: espectro padrao", L"Spectrumweergave kiezen.\nVink aan om te gebruiken.\nToonladder: 88 toetsen\nBanden: frequenties\nStandaard: standaardspectrum", L"Wybierz wyswietlanie widma.\nZaznacz pole aby uzyc.\nSkala: 88 klawiszy\nPasma: czestotliwosci\nStandard: domyslne widmo", L"Spektrum gosterimini sec.\nKullanmak icin kutuyu isaretle.\nDizi: 88 tus\nBant: frekans\nStandart: varsayilan spektrum"));
 	m_tooltip.AddTool(GetDlgItem(IDC_BUTTON1), LL14(L"碧の軌跡用のt_bgm._dtを設定します。", L"Set t_bgm._dt for Ao no Kiseki.", L"Definir t_bgm._dt pour Ao no Kiseki.", L"Imposta t_bgm._dt per Ao no Kiseki.", L"Establecer t_bgm._dt para Ao no Kiseki.", L"Ao no Kiseki용 t_bgm._dt 설정.", L"设置碧之轨迹的 t_bgm._dt。", L"تعيين t_bgm._dt لـ Ao no Kiseki.", L"Задать t_bgm._dt для Ao no Kiseki.", L"t_bgm._dt fur Ao no Kiseki festlegen.", L"Definir t_bgm._dt para Ao no Kiseki.", L"t_bgm._dt instellen voor Ao no Kiseki.", L"Ustaw t_bgm._dt dla Ao no Kiseki.", L"Ao no Kiseki icin t_bgm._dt ayarla"));
@@ -1549,6 +1566,12 @@ void CRender::OnBnClickedOk()
 	if (ihz >= 0 && ihz < 12)
 		savedata.samples = samp[ihz];
 	savedata.upscale_enable = m_upscale.GetCheck() ? 1 : 0;
+	{
+		int sv = m_surround.GetPos();
+		if (sv < 0) sv = 0;
+		if (sv > 100) sv = 100;
+		savedata.surround = sv;
+	}
 	int sp = m_speaker.GetCurSel();
 	savedata.speaker_layout = (sp >= 0 && sp <= 5) ? sp : 0;
 	int dev = m_soundlist.GetCurSel();
@@ -1850,6 +1873,14 @@ void CRender::OnTimer(UINT_PTR nIDEvent)
 		m_eqCodeMs.SetWindowText(s3);
 	}
 	savedata.wup = w_wups.GetPos()/ 100.0;
+	{
+		int sv = m_surround.GetPos();
+		if (sv < 0) sv = 0;
+		if (sv > 100) sv = 100;
+		savedata.surround = sv;
+		CString ss; ss.Format(L"%d", sv);
+		m_surroundVal.SetWindowText(ss);
+	}
 	CString s;
 	{
 		const wchar_t* fmt = LL14(L"%1.2lf倍", L"%1.2lfx", L"%1.2lfx", L"%1.2lfx", L"%1.2lfx", L"%1.2lfx", L"%1.2lf倍", L"%1.2lfx", L"%1.2lfx", L"%1.2lfx", L"%1.2lfx", L"%1.2lfx", L"%1.2lfx", L"%1.2lfx");
@@ -2025,6 +2056,7 @@ void CRender::OnBnClickedCancel()
 	savedata.soundcur = m_bakSoundCur;
 	savedata.samples = m_bakSamples;
 	savedata.upscale_enable = m_bakUpscale;
+	savedata.surround = m_bakSurround;
 	savedata.speaker_layout = m_bakSpeaker;
 	savedata.bit24 = m_bakBit24;
 	savedata.bit32 = m_bakBit32;
@@ -2034,6 +2066,14 @@ void CRender::OnBnClickedCancel()
 	m_24.SetCheck(savedata.bit24);
 	m_32bit.SetCheck(savedata.bit32);
 	m_upscale.SetCheck(savedata.upscale_enable ? BST_CHECKED : BST_UNCHECKED);
+	{
+		int sv = savedata.surround;
+		if (sv < 0) sv = 0;
+		if (sv > 100) sv = 100;
+		m_surround.SetPos(sv);
+		CString ss; ss.Format(L"%d", sv);
+		m_surroundVal.SetWindowText(ss);
+	}
 	{
 		int sp = savedata.speaker_layout;
 		if (sp < 0 || sp > 5) sp = 0;

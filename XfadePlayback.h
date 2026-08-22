@@ -28,6 +28,7 @@ extern volatile LONG g_xfSuppressRestart;
 extern volatile LONG g_xfStartPosted;
 /* notify が立てる開始要求（UI timer9000 が処理） */
 extern volatile LONG g_xfWantStart;
+extern volatile LONG g_xfPrepared;
 
 extern int g_ds_pcm_ch;
 extern int g_ds_pcm_bits;
@@ -39,6 +40,17 @@ extern __int64 g_expectedDsBytes;
 __int64 XfPlayPosBytes();
 /* 曲終端（DS 出力バイト）。end 確定値 → expected → loop3/oggsize */
 __int64 XfTrackEndRefBytes(__int64 endWrittenBytes);
+/* 曲長に含まれる「音の無い余白」（DS 出力バイト）。VST MIDI のみ */
+__int64 XfTailPadBytes();
+/* クロスフェードの基準終端（DS 出力バイト）= 終端 − 余白。窓もフェード長もこれで決める */
+__int64 XfFadeEndRefBytes(__int64 endWrittenBytes);
+
+/* cl2 を保持している呼び出し元用の混合開始（UI 呼び出しを含まない） */
+void XfBeginMixLocked(int cur);
+/* 混合開始で要求された MP 画面のフェード取消を UI スレッドで消化 */
+void XfMpCancelFadeIfRequested();
+/* 混合開始時に立つ。UI スレッドが XfMpCancelFadeIfRequested() で降ろす */
+extern volatile LONG g_xfCancelMpFade;
 
 double XfSecFromSave();
 
@@ -164,4 +176,8 @@ int XfFindNextAudioPlIndex(int fromInclusive);
 int XfShouldStartEarly(__int64 heardBytes, __int64 endWrittenBytes);
 /* 成功で1。失敗時は呼び出し側がレガシー次曲へ */
 int XfStartCrossfadeFromNotify();
+int XfPreloadNextFromNotify();
+int XfShouldPreloadNext();
+/* 先読み(B)を中止。waitMs 待って 1=停止済み（スロットを閉じても安全） 0=まだ開いている */
+int XfPreloadCancel(int waitMs);
 void XfTryStartCrossfade();

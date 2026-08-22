@@ -82,6 +82,9 @@ public:
 	virtual BOOL PreTranslateMessage(MSG* pMsg);
 	CCustomStatic m_seff;
 	CCustomSliderCtrl m_eff;
+	CCustomStatic m_surroundLabel;
+	CCustomSliderCtrl m_surround;
+	CCustomStatic m_surroundVal;
 	afx_msg void OnBnClickedOk();
 	CCustomSliderCtrl m_smaster;
 	CCustomSliderCtrl m_ssenmei;

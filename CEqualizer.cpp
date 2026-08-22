@@ -515,6 +515,9 @@ void CEqualizer::DoDataExchange(CDataExchange* pDX)
 	bind(pDX, IDC_SLIDER17, m_s10);
 	bind(pDX, IDC_STATIC_eff, m_seff);
 	bind(pDX, IDC_SLIDER22, m_eff);
+	bind(pDX, IDC_STATIC_EQ_SURROUND, m_surroundLabel);
+	bind(pDX, IDC_SLIDER_EQ_SURROUND, m_surround);
+	bind(pDX, IDC_STATIC_EQ_SURROUND_VAL, m_surroundVal);
 	bind(pDX, IDC_SLIDER23, m_smaster);
 	bind(pDX, IDC_SLIDER24, m_ssenmei);
 	bind(pDX, IDC_SLIDER25, m_skoutei);
@@ -593,6 +596,14 @@ void CEqualizer::SyncSlidersFromSavedata()
 		s.Format(L"%d", savedata.eqsoundeffect * 2);
 		m_seff.SetWindowText(s);
 	}
+	if (m_surround.GetSafeHwnd()) {
+		int sv = savedata.surround;
+		if (sv < 0) sv = 0;
+		if (sv > 100) sv = 100;
+		m_surround.SetPos(sv);
+		s.Format(L"%d", sv);
+		m_surroundVal.SetWindowText(s);
+	}
 	if (m_env.GetSafeHwnd())
 		m_env.SetCurSel(savedata.eqsoundenv);
 	if (m_smaster.GetSafeHwnd()) {
@@ -661,6 +672,7 @@ BOOL CEqualizer::OnInitDialog()
 	SetDlgItemText(IDC_STATIC_EQ_DRY, LL14(L"環境", L"Environment", L"Environnement", L"Ambiente", L"Entorno", L"환경", L"环境", L"البيئة", L"Среда", L"Umgebung", L"Ambiente", L"Omgeving", L"Środowisko", L"Ortam"));
 	SetDlgItemText(IDC_STATIC_EQ_WET, LL14(L"プリセット", L"Preset", L"Préréglage", L"Preset", L"Preajuste", L"프리셋", L"预设", L"إعداد مسبق", L"Пресет", L"Voreinstellung", L"Predefinição", L"Voorinstelling", L"Preset", L"Ön ayar"));
 	SetDlgItemText(IDC_STATIC_EQ_ACOUSTIC, LL14(L"環境のかかり具合", L"Environment effect", L"Effet d'ambiance", L"Effetto ambiente", L"Efecto de entorno", L"환경 효과 강도", L"环境效果强度", L"قوة تأثير البيئة", L"Сила эффекта среды", L"Umgebungseffekt", L"Efeito de ambiente", L"Omgevingseffect", L"Efekt otoczenia", L"Ortam efekti"));
+	SetDlgItemText(IDC_STATIC_EQ_SURROUND, LL14(L"サラウンド", L"Surround", L"Surround", L"Surround", L"Surround", L"서라운드", L"环绕声", L"محيطي", L"Объём", L"Surround", L"Surround", L"Surround", L"Surround", L"Surround"));
 	// eq[15..19]: マスター / 明瞭 / バランス / 密度 / 立体（IDC名は旧称のまま）
 	SetDlgItemText(IDC_STATIC_EQ_SPECTRUM, LL14(L"マスター", L"Master", L"Maître", L"Master", L"Máster", L"마스터", L"主控", L"رئيسي", L"Мастер", L"Master", L"Mestre", L"Master", L"Master", L"Ana"));
 	SetDlgItemText(IDC_STATIC_EQ_FREQ, LL14(L"明瞭", L"Clarity", L"Clarté", L"Chiarezza", L"Claridad", L"명료", L"清晰", L"وضوح", L"Чёткость", L"Klarheit", L"Clareza", L"Helderheid", L"Klarość", L"Netlik"));
@@ -684,6 +696,7 @@ BOOL CEqualizer::OnInitDialog()
 	addTip(IDOK3, LL14(L"イコライザーの値をリセットします", L"Reset equalizer values", L"Réinitialiser les valeurs de l'égaliseur", L"Reimposta valori equalizer", L"Restablecer valores del ecualizador", L"이퀄라이저 값 초기화", L"重置均衡器数值", L"إعادة تعيين قيم المعادل", L"Сброс значений эквалайзера", L"Equalizerwerte zurücksetzen", L"Redefinir valores do equalizador", L"Equalizatorwaarden resetten", L"Resetuj wartości korektora", L"Ekolayzer değerlerini sıfırla"));
 	addTip(IDOK4, LL14(L"グローバルの値をリセットします", L"Reset global values", L"Réinitialiser les valeurs globales", L"Reimposta valori globali", L"Restablecer valores globales", L"전역 값 초기화", L"重置全局数值", L"إعادة تعيين القيم العامة", L"Сброс глобальных значений", L"Globale Werte zurücksetzen", L"Redefinir valores globais", L"Globale waarden resetten", L"Resetuj wartości globalne", L"Genel değerleri sıfırla"));
 	addTip(IDC_SLIDER22, LL14(L"サウンドエフェクトの強さを調整します（左の数値が現在値）", L"Adjust sound effect strength (number at left is current value)", L"Ajuster l'intensite de l'effet sonore (nombre a gauche = valeur actuelle)", L"Regola intensita effetto sonoro (numero a sinistra = valore attuale)", L"Ajustar intensidad del efecto de sonido (numero a la izquierda = valor actual)", L"사운드 이펙트 강도 조정(왼쪽 숫자가 현재값)", L"调整音效强度（左侧数字为当前值）", L"ضبط قوة المؤثر الصوتي (الرقم على اليسار = القيمة الحالية)", L"Настроить силу звукового эффекта (число слева — текущее значение)", L"Soundeffekt-Starke einstellen (Zahl links = aktueller Wert)", L"Ajustar intensidade do efeito sonoro (numero a esquerda = valor atual)", L"Sterkte geluidseffect instellen (getal links = huidige waarde)", L"Reguluj sile efektu dzwiekowego (liczba po lewej = biezaca wartosc)", L"Ses efekti gucunu ayarla (soldaki sayi guncel deger)"));
+	addTip(IDC_SLIDER_EQ_SURROUND, LL14(L"サラウンド効き目 0=オフ〜100。LRでもマトリクス／位相で展開しやすくし、多ch時はリアを強調します。", L"Surround amount 0=off..100. Matrix/phase for LR expanders; boosts rears on multi-ch.", L"Niveau surround 0=off..100.", L"Intensita surround 0=off..100.", L"Intensidad surround 0=off..100.", L"서라운드 세기 0=끔..100.", L"环绕量 0=关..100。", L"مقدار المحيطي 0=إيقاف..100.", L"Уровень surround 0=выкл..100.", L"Surround-Staerke 0=aus..100.", L"Intensidade surround 0=off..100.", L"Surround-sterkte 0=uit..100.", L"Sila surround 0=wyl..100.", L"Surround seviyesi 0=kapali..100."));
 	addTip(IDC_SLIDER23, LL14(L"マスター音量を調整します（左の数値が現在値）\n拡張音量・形式別倍率とは別です", L"Adjust master volume (number at left is current value)\nSeparate from extended/format volume", L"Regler le volume master (nombre a gauche = valeur actuelle)\nDistinct du volume etendu/format", L"Regola volume master (numero a sinistra = valore attuale)\nSeparato da volume esteso/formato", L"Ajustar volumen maestro (numero a la izquierda = valor actual)\nSeparado del volumen extendido/formato", L"마스터 볼륨 조정(왼쪽 숫자가 현재값)\n확장/형식별 볼륨과 별개", L"调整主音量（左侧数字为当前值）\n与扩展/格式音量分开", L"ضبط مستوى الصوت الرئيسي (الرقم على اليسار = القيمة الحالية)\nمنفصل عن الصوت الممتد/حسب التنسيق", L"Настроить общую громкость (число слева — текущее значение)\nОтдельно от доп. и форматной громкости", L"Master-Lautstarke einstellen (Zahl links = aktueller Wert)\nGetrennt von erweiterter/Format-Lautstarke", L"Ajustar volume mestre (numero a esquerda = valor atual)\nSeparado do volume estendido/formato", L"Hoofdvolume instellen (getal links = huidige waarde)\nAparte van uitgebreid/formaatvolume", L"Reguluj glosnosc glowna (liczba po lewej = biezaca wartosc)\nOsobno od rozszerzonej/formatowej", L"Ana ses seviyesini ayarla (soldaki sayi guncel deger)\nGenisletilmis/format sesinden ayri)"));
 	addTip(IDC_SLIDER24, LL14(L"明瞭度（クリアさ）を調整します（左の数値が現在値）", L"Adjust clarity (number at left is current value)", L"Ajuster la clarte (nombre a gauche = valeur actuelle)", L"Regola chiarezza (numero a sinistra = valore attuale)", L"Ajustar claridad (numero a la izquierda = valor actual)", L"선명도 조정(왼쪽 숫자가 현재값)", L"调整清晰度（左侧数字为当前值）", L"ضبط الوضوح (الرقم على اليسار = القيمة الحالية)", L"Настроить четкость (число слева — текущее значение)", L"Klarheit einstellen (Zahl links = aktueller Wert)", L"Ajustar clareza (numero a esquerda = valor atual)", L"Helderheid instellen (getal links = huidige waarde)", L"Reguluj klarownosc (liczba po lewej = biezaca wartosc)", L"Netligi ayarla (soldaki sayi guncel deger)"));
 	addTip(IDC_SLIDER25, LL14(L"バランス（左右・帯域バランス）を調整します（左の数値が現在値）", L"Adjust balance (L/R and band balance; number at left is current value)", L"Ajuster l'equilibre (gauche/droite et bandes; nombre a gauche = valeur actuelle)", L"Regola bilanciamento (L/R e bande; numero a sinistra = valore attuale)", L"Ajustar balance (I/D y bandas; numero a la izquierda = valor actual)", L"밸런스(좌우·대역) 조정(왼쪽 숫자가 현재값)", L"调整平衡（左右与频段平衡；左侧数字为当前值）", L"ضبط التوازن (يسار/يمين ونطاقات؛ الرقم على اليسار = القيمة الحالية)", L"Настроить баланс (Л/П и полосы; число слева — текущее значение)", L"Balance einstellen (L/R und Bänder; Zahl links = aktueller Wert)", L"Ajustar balanco (E/D e bandas; numero a esquerda = valor atual)", L"Balans instellen (L/R en banden; getal links = huidige waarde)", L"Reguluj balans (L/P i pasma; liczba po lewej = biezaca wartosc)", L"Dengeyi ayarla (L/R ve bant dengesi; soldaki sayi guncel deger)"));
@@ -800,6 +813,7 @@ BOOL CEqualizer::OnInitDialog()
 	m_s14.SetRange(0, 200);
 
 	m_eff.SetRange(0, 200);
+	m_surround.SetRange(0, 100);
 
 	m_smaster.SetRange(0, 200);
 	m_ssenmei.SetRange(0, 200);
@@ -1788,6 +1802,12 @@ void CEqualizer::OnTimer(UINT_PTR nIDEvent)
 	vol = m_eff.GetPos();
 	if(vol / 2 != savedata.eqsoundeffect) { s.Format(L"%d", vol); m_seff.SetWindowText(s); }
 	savedata.eqsoundeffect = vol / 2;
+
+	vol = m_surround.GetPos();
+	if (vol < 0) vol = 0;
+	if (vol > 100) vol = 100;
+	if (vol != savedata.surround) { s.Format(L"%d", vol); m_surroundVal.SetWindowText(s); }
+	savedata.surround = vol;
 
 
 	CRect rect;

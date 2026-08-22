@@ -20,10 +20,10 @@ enum KPIHOST64_CMD : uint32_t
 	KPIHOST64_CMD_FOREIGN_RENDER = 12,
 	KPIHOST64_CMD_FOREIGN_SEEK = 13,
 	KPIHOST64_CMD_FOREIGN_CLOSE = 14,
-	KPIHOST64_CMD_VST_OPEN = 20,   // [u32 midChars][mid][u32 dllChars][dll]
-	KPIHOST64_CMD_VST_RENDER = 21, // RenderReq, optional [u32 nInj][nInj * VstLiveMidiReq]
-	KPIHOST64_CMD_VST_SEEK = 22,
-	KPIHOST64_CMD_VST_CLOSE = 23,
+	KPIHOST64_CMD_VST_OPEN = 20,   // [u32 slot][u32 midChars][mid][u32 dllChars][dll][u32 extraChars][extra]
+	KPIHOST64_CMD_VST_RENDER = 21, // RenderReq.sessionId = slot 0/1
+	KPIHOST64_CMD_VST_SEEK = 22,   // SeekReq.sessionId = slot
+	KPIHOST64_CMD_VST_CLOSE = 23,  // optional U32 slot; empty = close all
 	// VST Live parts (x86 app hosting x64 plug-ins such as SOUND Canvas VA).
 	// Only lifecycle goes over the pipe; notes and audio use shared memory so
 	// the keyboard is never blocked by a pending render request.

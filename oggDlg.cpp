@@ -6856,6 +6856,13 @@ static int XfSoftOpenSlot(int slot, const CString& path, int openMode)
 		(openMode == -10) ? mp3Bps : g_mp3_decoder_bps, kmpNew);
 	s_xfSikpi[slot] = si;
 	s_xfSikpiValid[slot] = 1;
+	/* SoftOpen は ConfigurePlaybackOutputAndUpscaler を通らないため、ここで印キャッシュへ。
+	 * VST MIDI / m4a 等はヘッダ peek 不能で、昇格まで印が空のままになるのを防ぐ */
+	{
+		const int chMark = (int)si.dwChannels;
+		if (chMark >= 1 && chMark <= 8)
+			PlChDiskSet(path, chMark);
+	}
 
 	s_xfLoop1[slot] = 0;
 	s_xfLoop2[slot] = 0;
@@ -12401,9 +12408,13 @@ void COggDlg::play()
 	if (mode == 30) { wavbit_sample_Hz = 48000; wavsam_depth = 16; wavchannel = 2; }
 	NormalizePlaybackWaveFormat();
 
-	/* soft-open: 本流の DS 出力形式は変えない（副スロット Upscaler は後で合わせる） */
+	/* soft-open: 本流の DS 出力形式は変えない（副スロット Upscaler は後で合わせる）。
+	 * 印だけ書く: play() soft-open で filen/wavchannel が次曲側のとき用。
+	 * 現行の先読みは XfSoftOpenSlot 側でも PlChDiskSet する。 */
 	if (!xfSoftOpen)
 		ConfigurePlaybackOutputAndUpscaler();
+	else if (!filen.IsEmpty() && wavchannel >= 1 && wavchannel <= 8)
+		PlChDiskSet(filen, wavchannel);
 	// 書き出し専用: 指定Hz/ch/bitへリサンプル（KPI・クロスフェード先頭追従）
 	if (!xfSoftOpen && wavExportPath.GetLength() > 0 &&
 		(g_wavExportSampleRate >= 8000 || g_wavExportChannels >= 1 || g_wavExportBits > 0)) {
@@ -31257,12 +31268,25 @@ LRESULT COggDlg::OnXfadePreloadJacket(WPARAM wParam, LPARAM)
 			extern CMediaPlayerDlg* mp;
 			if (savedata.playerMode == 1 && mp && ::IsWindow(mp->GetSafeHwnd()))
 				mp->InvalidateJacketImageOnly();
-			return 0;
 		}
-		if (!s_xfJacketImg[slot].IsNull())
-			s_xfJacketImg[slot].Destroy();
-		s_xfJacketImg[slot].Attach(tmp.Detach());
-		s_xfJacketReady[slot] = 1;
+		else {
+			if (!s_xfJacketImg[slot].IsNull())
+				s_xfJacketImg[slot].Destroy();
+			s_xfJacketImg[slot].Attach(tmp.Detach());
+			s_xfJacketReady[slot] = 1;
+		}
+	}
+	/* SoftOpen で書いた MONO/LR 印を、昇格前でも次曲行へ反映（1行のみ・点滅なし）
+	 * ジャケット無し／メイン直付けでも PostMessage 経路で必ず走らせる */
+	{
+		const LONG pi = InterlockedCompareExchange(&g_xfPromotePlIndex, 0, 0);
+		if (pi >= 0 && pl && pi < pl->playcnt) {
+			if (::IsWindow(pl->m_lc.GetSafeHwnd()))
+				pl->m_lc.RedrawItems((int)pi, (int)pi);
+			extern CMediaPlayerDlg* mp;
+			if (mp && ::IsWindow(mp->m_list.GetSafeHwnd()))
+				mp->m_list.RedrawItems((int)pi, (int)pi);
+		}
 	}
 	return 0;
 }
@@ -31312,6 +31336,14 @@ LRESULT COggDlg::OnXfadePromoteUi(WPARAM wParam, LPARAM lParam)
 		if (tagfile.IsEmpty() && !tf.title.IsEmpty()) tagfile = tf.title;
 		if (tagname.IsEmpty() && !tf.artist.IsEmpty()) tagname = tf.artist;
 		if (tagalbum.IsEmpty() && !tf.album.IsEmpty()) tagalbum = tf.album;
+		/* SoftOpen で書いた印の取りこぼし防止（スロット確定 ch を優先して再書き込み） */
+		{
+			int chMark = g_xfSrcCh[slot];
+			if (chMark < 1 || chMark > 8)
+				chMark = wavchannel;
+			if (chMark >= 1 && chMark <= 8)
+				PlChDiskSet(path, chMark);
+		}
 	}
 
 	if (tmax < 1) tmax = 1;
