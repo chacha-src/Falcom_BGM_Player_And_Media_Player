@@ -1,4 +1,4 @@
-﻿#if !defined(AFX_DOUGA_H__27DB31FC_C694_448B_A81D_4F617F04BC9C__INCLUDED_)
+#if !defined(AFX_DOUGA_H__27DB31FC_C694_448B_A81D_4F617F04BC9C__INCLUDED_)
 #define AFX_DOUGA_H__27DB31FC_C694_448B_A81D_4F617F04BC9C__INCLUDED_
 
 #if _MSC_VER > 1000
@@ -108,6 +108,7 @@ public:
 	void play(int,CString str = L"");
 	void plays(TCHAR* s);
 	void plays2();
+	void RefreshVideoSizeAfterRun();
 	void stops();
 	void stop();
 	void pause(int a);
@@ -336,6 +337,10 @@ void DougaSetPlaybackRate(double rate, BOOL pushTempo);
 void DougaApplyTempoToVideoRate();
 BOOL DougaVideoRateActive();
 BOOL DougaPitchCorrect_IsActive();
+void DougaPitchCorrect_EnableCallback();
+// グラフの状態遷移完了待ち（待つ間もメッセージを回す）
+BOOL DougaPumpWaitState(OAFilterState want, DWORD timeoutMs);
+BOOL DougaRunGraphAndWait();
 void DougaPitchCorrect_SetVolumeDsPos(int dsPos);
 
 /////////////////////////////////////////////////////////////////////////////

@@ -1,4 +1,4 @@
-﻿// oggDlg.h : ヘッダー ファイル
+// oggDlg.h : ヘッダー ファイル
 //
 #include "afxmt.h"
 //#include "afxcmn.h"
@@ -506,6 +506,8 @@ void OggArmSilentResumeFromCurrent();
 // リモート再生: MessageBox なし。Yes=途中から / No=先頭から(.save削除)
 void OggArmRemoteSilentResumeYes();
 void OggArmRemoteSilentResumeNo();
+// 先頭から再生するが .save は残す（前へボタンの3秒ルール等）
+void OggArmResumeFromStartKeepSave();
 
 // KPI プラグイン: confirm/startupEmpty/reloadAfter。いいえ(起動0件時)は kpi_plugin_dl_skip を立てる。
 BOOL OggKpiDownloadPlugins(CWnd* owner, BOOL confirm, BOOL startupEmpty, BOOL reloadAfter);

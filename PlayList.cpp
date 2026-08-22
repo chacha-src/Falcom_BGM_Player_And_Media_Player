@@ -1,4 +1,4 @@
-﻿// PlayList.cpp : 実装ファイル
+// PlayList.cpp : 実装ファイル
 //
 
 #include "stdafx.h"
@@ -4132,14 +4132,22 @@ int CPlayList::Add(CString name,int sub,int loop1,int loop2,CString art,CString 
 				pc=(playlistdata0*)malloc(sizeof(playlistdata0));
 				if(!pc) return -1;
 			}
-			playlistdata0 *tmp;	tmp=pc;
-		size_t size=_msize(pc);
-		playlistdata0 *newPc = (playlistdata0*)realloc(tmp, size + sizeof(playlistdata0));
-		if (newPc == NULL) {
-			pc = tmp;
-			return -1;
-		}
-		pc = newPc;
+			// 1件ごとに配列全体を realloc すると、1件 8KB 超 × N 件で総コピー量が
+			// O(N^2) になりフォルダ D&D が固まる。倍々で伸ばして償却 O(1) にする。
+			// 容量は _msize から求める(他所の realloc とも整合が取れる)。
+			const size_t need = (size_t)playcnt + 1;
+			size_t cap = _msize(pc) / sizeof(playlistdata0);
+			if (cap < need) {
+				size_t ncap = cap ? cap * 2 : 16;
+				if (ncap < need) ncap = need;
+				playlistdata0 *newPc = (playlistdata0*)realloc(pc, ncap * sizeof(playlistdata0));
+				if (newPc == NULL) {
+					// 倍化に失敗したら必要最小限で再挑戦
+					newPc = (playlistdata0*)realloc(pc, need * sizeof(playlistdata0));
+					if (newPc == NULL) return -1;
+				}
+				pc = newPc;
+			}
 			m_lc.SetItemCount(playcnt+1);
 		}
 		_tcscpy(pc[playcnt].name,name);
@@ -4240,9 +4248,16 @@ static void PlRefreshAfterEdit(CPlayList* pl)
 		pl->m_lc.RedrawWindow();
 	}
 	pl->Save();
+	if (::IsWindow(pl->m_listchange.GetSafeHwnd())) {
+		const int nFiles = pl->GetPlaylistFileCount();
+		if (pl->m_listchange.GetCount() != nFiles + 1)
+			pl->loadplaylistname();
+	}
 	extern CMediaPlayerDlg* mp;
-	if (mp && ::IsWindow(mp->GetSafeHwnd()))
+	if (mp && ::IsWindow(mp->GetSafeHwnd())) {
 		mp->RefreshList(TRUE);
+		mp->ReloadPlaylistCombo();
+	}
 }
 
 static void PlAdjustAfterInsert(CPlayList* pl, int at, int n)
@@ -4528,6 +4543,22 @@ BOOL CPlayList::CopySelectionToClipboard()
 
 void CPlayList::PasteFromClipboard()
 {
+	const int fileCnt = GetPlaylistFileCount();
+	if (savedata.playlistnum >= fileCnt) {
+		savedata.playlistnum = fileCnt;
+		if (!pc)
+			pc = (playlistdata0*)malloc(sizeof(playlistdata0));
+		if (playcnt < 0) playcnt = 0;
+		Save();
+		// 実体が無いまま進むと loadplaylistname が番号を 0 に丸め、
+		// 貼り付け結果が既存リスト0を上書きしてしまう。
+		if (!PathFileExists(GetModulePath() + PlPlaylistFileName(fileCnt)))
+			return;
+		loadplaylistname();
+		extern CMediaPlayerDlg* mp;
+		if (mp && ::IsWindow(mp->GetSafeHwnd()))
+			mp->ReloadPlaylistCombo();
+	}
 	HWND hOwner = GetSafeHwnd();
 	if (!hOwner) hOwner = AfxGetMainWnd() ? AfxGetMainWnd()->GetSafeHwnd() : NULL;
 	if (!::OpenClipboard(hOwner)) return;
@@ -4868,12 +4899,14 @@ void CPlayList::OnDropFiles(HDROP hDropInfo)
 	syo = 0; syos = ""; syomode = 0;
 	const int ii = playcnt; // 新規追加時の先頭インデックス
 	int playIdx = -1;       // 再生対象(新規 or 既存)
-	UINT cnt = DragQueryFile(hDropInfo, (UINT)-1, filen_c, sizeof(filen_c));
+	// 第4引数は文字数。sizeof を渡すと長いパスで filen_c を溢れさせる。
+	UINT cnt = DragQueryFile(hDropInfo, (UINT)-1, filen_c, _countof(filen_c));
 	TCHAR tmp[1024];
 	_tgetcwd(tmp, 1000);
 	m_lc.SetRedraw(FALSE);
 	for (UINT i = 0; i < cnt; i++) {
-		DragQueryFile(hDropInfo, (UINT)i, filen_c, sizeof(filen_c));
+		filen_c[0] = 0;
+		DragQueryFile(hDropInfo, (UINT)i, filen_c, _countof(filen_c));
 		const CString dropped = filen_c;
 		int existing = -1;
 		if (PathIsDirectory(dropped) == FALSE) {
@@ -10433,8 +10466,8 @@ void CPlayList::Save()
 
 void CPlayList::Load(BOOL restoreSavedRow)
 {
-	TCHAR tmp[1024];int cnt;
-	int cx,cy,x=-10000,y,c;
+	TCHAR tmp[1024];int cnt = 0;
+	int cx=0,cy=0,x=-10000,y=0,c=0;
 	playcnt = 0;
 	MpPlaylistNatOrdClear();
 	if (pc) {
@@ -10454,8 +10487,19 @@ void CPlayList::Load(BOOL restoreSavedRow)
 #else
 	CFile f;if(f.Open(_T("playlist.dat"),CFile::modeRead | CFile::shareDenyWrite,NULL)==TRUE){
 #endif
-		f.Read(&cnt,4);
-		pc = (playlistdata0*)malloc(sizeof(playlistdata0) * (cnt + 1));
+		// 件数はファイル長で必ず検算する。0バイト/途中までしか書けていない .dat を
+		// そのまま信じると巨大ループ＋範囲外書込みになり、ハングやヒープ破壊を招く。
+		if (f.Read(&cnt, 4) != 4)
+			cnt = 0;
+		{
+			const ULONGLONG flen = f.GetLength();
+			const ULONGLONG head = 4 + 4 * 4 + 5 * 4; // 件数 + 窓位置 + 列幅5
+			const ULONGLONG maxRec = (flen > head) ? (flen - head) / sizeof(playlistdata) : 0;
+			if (cnt < 0) cnt = 0;
+			if ((ULONGLONG)cnt > maxRec) cnt = (int)maxRec;
+		}
+		pc = (playlistdata0*)malloc(sizeof(playlistdata0) * ((size_t)cnt + 1));
+		if (!pc) cnt = 0;
 		f.Read(&x,4);
 		f.Read(&y,4);
 		f.Read(&cx,4);
@@ -10474,7 +10518,12 @@ void CPlayList::Load(BOOL restoreSavedRow)
 		playlistdata pld;
 		m_lc.SetItemCount(cnt);
 		for(int i=0;i<cnt;i++){
-			f.Read(&pld,sizeof(pld));
+			if (f.Read(&pld, sizeof(pld)) != sizeof(pld))
+				break;
+			pld.name[_countof(pld.name) - 1] = 0;
+			pld.art[_countof(pld.art) - 1] = 0;
+			pld.alb[_countof(pld.alb) - 1] = 0;
+			pld.fol[_countof(pld.fol) - 1] = 0;
 			Add(pld.name,pld.sub,pld.loop1,pld.loop2,pld.art,pld.alb,pld.fol,pld.ret2,pld.time,FALSE,FALSE);			
 		}
 		c=0;f.Read(&c,4);m_loop.SetCheck(c);
@@ -10497,6 +10546,8 @@ void CPlayList::Load(BOOL restoreSavedRow)
 	if(GetAsyncKeyState(VK_LCONTROL)&0x8000){
 		x=-10000;
 	}
+	if (cx < 100 || cy < 100 || cx > 32000 || cy > 32000)
+		x = -10000; // 壊れた .dat の窓サイズは使わない
 	if(x!=-10000){
 		MoveWindow(x,y,cx,cy,TRUE);
 		RECT r;
@@ -11784,15 +11835,14 @@ void CPlayList::OnCbnSelchangeEndMode()
 
 void CPlayList::OnCbnSelchangeCombo1()
 {
-	// TODO: ここにコントロール通知ハンドラー コードを追加します。
 	if (m_tempMode) return;
 	if (changeflg == TRUE) return;
 	int num = m_listchange.GetCurSel();
 	if (num < 0) return;
-	// 起動時/同期時の同一選択通知で Save→Load を繰り返さない(時間列の消失防止)
-	if (num == savedata.playlistnum && pc != NULL && playcnt > 0)
+	const int fileCnt = GetPlaylistFileCount();
+	const BOOL creatingNew = (num >= fileCnt);
+	if (!creatingNew && num == savedata.playlistnum && pc != NULL && playcnt > 0)
 		return;
-	// 再生中/一時停止中は filen・mode を維持(Load の RestoreSavedPlaybackRow で上書きしない)
 	const BOOL keepPlayback = (plf != 0 || playf != 0) && filen.GetLength() > 0;
 	CString keepFol, keepFnn;
 	int keepMode = 0, keepModesub = 0, keepLoop1 = 0, keepLoop2 = 0, keepRet2 = 0;
@@ -11805,22 +11855,67 @@ void CPlayList::OnCbnSelchangeCombo1()
 		keepLoop2 = loop2;
 		keepRet2 = ret2;
 	}
-	// Save×2 + 全dat再zstd が切替遅延の主因。ステージ書込をまとめ、アーカイブ再生成は1回。
 	DatArc_FlushSuspend(TRUE);
 	if (pc != NULL && playcnt > 0)
 		Save();
+
+	if (creatingNew) {
+		const int prevNum = savedata.playlistnum;
+		savedata.playlistnum = fileCnt;
+		playcnt = 0;
+		pnt = -1;
+		pnt1 = -1;
+		MpPlaylistNatOrdClear();
+		free(pc);
+		pc = (playlistdata0*)malloc(sizeof(playlistdata0));
+		Save();
+		// 実体が作れていないのに新スロットへ切り替えると、以降の Save が
+		// 既存リストのファイルを上書きしてしまう。作成失敗なら元へ戻す。
+		if (!PathFileExists(GetModulePath() + PlPlaylistFileName(fileCnt))) {
+			savedata.playlistnum = prevNum;
+			free(pc);
+			pc = NULL;
+			Load(FALSE);
+			if (pc == NULL)
+				pc = (playlistdata0*)malloc(sizeof(playlistdata0));
+			m_lc.pc = pc;
+			m_lc.SetItemCount(playcnt);
+			ClampPlaylistSelectionIndices(this);
+			m_lc.RedrawWindow();
+			loadplaylistname();
+			DatArc_FlushSuspend(FALSE);
+			return;
+		}
+		Load(FALSE);
+		if (pc == NULL)
+			pc = (playlistdata0*)malloc(sizeof(playlistdata0));
+		m_lc.pc = pc;
+		m_lc.SetItemCount(playcnt);
+		ClampPlaylistSelectionIndices(this);
+		m_lc.RedrawWindow();
+		loadplaylistname();
+		extern CMediaPlayerDlg* mp;
+		if (mp && ::IsWindow(mp->GetSafeHwnd())) {
+			mp->ReloadPlaylistCombo();
+			mp->RefreshList(TRUE);
+		}
+		MpPersistSavedataQuick();
+		DatArc_FlushSuspend(FALSE);
+		return;
+	}
+
 	savedata.playlistnum = num;
 	playcnt = 0;
 	pnt = -1;
 	pnt1 = -1;
 	MpPlaylistNatOrdClear();
-	playlistdata0* tmp; tmp = pc;
 	free(pc);
 	pc = NULL;
 	Load(!keepPlayback);
 	if (pc == NULL) {
 		pc = (playlistdata0*)malloc(sizeof(playlistdata0));
 	}
+	m_lc.pc = pc;
 	m_lc.SetItemCount(playcnt);
 	for (int j = 0; j < playcnt; j++) pc[j].icon = 1;
 	if (keepPlayback) {
@@ -11849,10 +11944,8 @@ void CPlayList::OnCbnSelchangeCombo1()
 	}
 	ClampPlaylistSelectionIndices(this);
 	m_lc.RedrawWindow();
-	// 新 playlistnum だけ設定へ。読み直したPL本体の再Saveは不要。
 	MpPersistSavedataQuick();
 	DatArc_FlushSuspend(FALSE);
-	// コンボ項目は変わっていないので loadplaylistname() は省略
 }
 
 void CPlayList::loadplaylistname()
@@ -11911,13 +12004,12 @@ void CPlayList::loadplaylistname()
 		L"<Yeni oynatma listesi>"));         /* トルコ語 */
 
 	changeflg = TRUE;
-	m_listchange.SetCurSel(savedata.playlistnum);
-	int num = m_listchange.GetCurSel();
-	if (num != savedata.playlistnum) {
+	if (savedata.playlistnum < 0 || savedata.playlistnum >= lcnt)
 		savedata.playlistnum = 0;
+	if (lcnt > 0)
 		m_listchange.SetCurSel(savedata.playlistnum);
-	}
 	changeflg = FALSE;
+	MpPersistSavedataQuick();
 }
 
 CString CPlayList::GetModulePath()
@@ -11984,11 +12076,15 @@ void CPlayList::OnBnClickedButton3()
 		// 曲ごと保存パラメータのキー(リスト名)を旧名→新名へ移行
 		// (未命名 "#N" や旧表示名エイリアスも SongParams_RenameList 側で走査)
 		CString oldKey = SongParams_CurrentListName();
-		wcscpy(savedata.playlistname[savedata.playlistnum], newName);
+		_tcsncpy_s(savedata.playlistname[savedata.playlistnum], _countof(savedata.playlistname[0]), newName, _TRUNCATE);
 		CString newKey = SongParams_CurrentListName();
 		if (oldKey.CompareNoCase(newKey) != 0)
 			SongParams_RenameList(oldKey, newKey);
 		loadplaylistname();
+		MpPersistSavedataQuick();
+		extern CMediaPlayerDlg* mp;
+		if (mp && ::IsWindow(mp->GetSafeHwnd()))
+			mp->ReloadPlaylistCombo();
 	}
 
 }

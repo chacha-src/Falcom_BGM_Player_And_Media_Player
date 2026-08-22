@@ -48,13 +48,14 @@ volatile LONG g_dougaAssocTopMost = 0;
 BOOL DougaPitchCorrect_Install(IGraphBuilder* graph, HWND hwndOwner);
 void DougaPitchCorrect_Shutdown();
 BOOL DougaPitchCorrect_IsActive();
+void DougaPitchCorrect_EnableCallback();
 int DougaPitchCorrect_GetLatencyMs();
 void DougaPitchCorrect_SetVolumeDsPos(int dsPos);
 void DougaPitchCorrect_SetPlaybackRate(double rate);
 void DougaPitchCorrect_SetPaused(BOOL paused);
 void DougaPitchCorrect_Poll();
 void DougaPitchCorrect_PauseForGraphSeek();
-void DougaPitchCorrect_OnSeek();
+void DougaPitchCorrect_OnSeek(double mediaSec = -1.0);
 
 // PitchCorrect: Grabber→外部 DS（mode=-2）。0=無効（切り分け用）
 #ifndef DOUGA_PITCHCORRECT_ENABLE
@@ -3398,9 +3399,61 @@ static void DougaCaptureVideoPinMap(IGraphBuilder* g)
 	pRen->Release();
 }
 
-// フリーズ調査用ログは不要になったので無効化
-static void DougaHangTrace(LPCWSTR)
+// フリーズ調査用ログ。exe の隣に dougatrace.txt を置いた時だけ有効になり、
+// 同じ場所の dougatrace.log へ 1 行ごとに追記＋即クローズする。
+// 固まっても直前までの行が残るので、停止位置をそのまま特定できる。
+static BOOL DougaHangTraceEnabled(WCHAR* outLogPath)
 {
+	static int cached = -1;
+	static WCHAR s_log[MAX_PATH] = {};
+	if (cached < 0) {
+		cached = 0;
+		WCHAR path[MAX_PATH] = {};
+		if (GetModuleFileNameW(NULL, path, MAX_PATH)) {
+			WCHAR* sep = wcsrchr(path, L'\\');
+			if (sep) {
+				const size_t room = MAX_PATH - (size_t)(sep + 1 - path);
+				wcscpy_s(sep + 1, room, L"dougatrace.txt");
+				if (GetFileAttributesW(path) != INVALID_FILE_ATTRIBUTES) {
+					wcscpy_s(sep + 1, room, L"dougatrace.log");
+					wcscpy_s(s_log, MAX_PATH, path);
+					cached = 1;
+				}
+			}
+		}
+	}
+	if (cached && outLogPath)
+		wcscpy_s(outLogPath, MAX_PATH, s_log);
+	return cached ? TRUE : FALSE;
+}
+
+static void DougaHangTrace(LPCWSTR stage)
+{
+	WCHAR log[MAX_PATH];
+	if (!stage || !DougaHangTraceEnabled(log))
+		return;
+
+	SYSTEMTIME st;
+	GetLocalTime(&st);
+	char line[1024];
+	char utf8[512];
+	if (WideCharToMultiByte(CP_UTF8, 0, stage, -1, utf8, sizeof(utf8), NULL, NULL) <= 0)
+		return;
+	const int n = _snprintf_s(line, sizeof(line), _TRUNCATE,
+		"%02u:%02u:%02u.%03u t=%lu tid=%lu %s\r\n",
+		st.wHour, st.wMinute, st.wSecond, st.wMilliseconds,
+		(unsigned long)GetTickCount(), (unsigned long)GetCurrentThreadId(), utf8);
+	if (n <= 0)
+		return;
+
+	HANDLE h = CreateFileW(log, FILE_APPEND_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE,
+		NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+	if (h == INVALID_HANDLE_VALUE)
+		return;
+	DWORD wrote = 0;
+	WriteFile(h, line, (DWORD)n, &wrote, NULL);
+	FlushFileBuffers(h);
+	CloseHandle(h);
 }
 
 static void DougaPumpSleep(DWORD ms)
@@ -3602,6 +3655,33 @@ static BOOL DougaPeelFfdBeforeStop(IGraphBuilder* pGraph)
 	return reconnected;
 }
 
+// 遷移が終わらないとき、どのフィルタが止まっているかを individually に出す。
+// GetState はタイムアウト 0 なので詰まったグラフでも戻る。
+static void DougaTraceFilterStates(IGraphBuilder* g, LPCWSTR tag)
+{
+	if (!g) return;
+	IEnumFilters* e = NULL;
+	if (FAILED(g->EnumFilters(&e)) || !e) return;
+	IBaseFilter* f = NULL;
+	ULONG n = 0;
+	while (e->Next(1, &f, &n) == S_OK) {
+		if (!f) continue;
+		FILTER_INFO fi = {};
+		if (FAILED(f->QueryFilterInfo(&fi)))
+			fi.achName[0] = 0;
+		if (fi.pGraph) fi.pGraph->Release();
+		FILTER_STATE fs = State_Stopped;
+		const HRESULT hr = f->GetState(0, &fs);
+		WCHAR m[256];
+		swprintf_s(m, L"%s:%s st=%d hr=0x%08X", tag,
+			fi.achName[0] ? fi.achName : L"(noname)", (int)fs, (unsigned)hr);
+		DougaHangTrace(m);
+		f->Release();
+		f = NULL;
+	}
+	e->Release();
+}
+
 static void DougaStopFiltersIndividually(IGraphBuilder* g)
 {
 	if (!g) return;
@@ -3627,6 +3707,10 @@ static void DougaColdResetPlaybackGlobals()
 	// 起動直後と同じ状態へ。すべて UI (STA) スレッド上で行う。
 	DougaHangTrace(L"ColdReset:enter");
 	const BOOL hadFfd = (InterlockedCompareExchange(&s_dougaSessionUsedFfd, 0, 0) != 0);
+	// グラフが既に無い呼び出し(停止時に数回連続で来る)では、落とすべき
+	// フィルタ DLL も無いので CoFreeUnusedLibraries の周回は丸ごと無駄になる。
+	// 登録フィルタの多い環境ではこれが毎回 0.3〜1.2 秒の停止として出る。
+	const BOOL hadGraph = (pGraphBuilder != NULL || pMediaControl != NULL);
 
 	DougaHangTrace(L"ColdReset:PitchCorrect_Shutdown");
 	DougaPitchCorrect_Shutdown();
@@ -3640,27 +3724,26 @@ static void DougaColdResetPlaybackGlobals()
 
 	// PitchCorrect 無効時はグラフ内 DS が音源。Peel 失敗で Stop を飛ばすと
 	// Nuke しても DS が鳴り続ける（画面だけ消えて音が残る）。
-	// 先に必ず Stop してから Nuke する。
+	// Stop は非同期。Stopped になる前に RemoveFilter すると EVR/LAV で返ってこない。
+	// 待ち中はキー/マウス/タイマーを回さない（切替の再入防止）。
+	BOOL graphStopped = (pMediaControl == NULL && pGraphBuilder == NULL);
 	if (pMediaControl) {
 		DougaHangTrace(L"ColdReset:Stop");
 		pMediaControl->Stop();
-		for (int i = 0; i < 30; ++i) {
-			OAFilterState st = State_Running;
-			HRESULT ghr = pMediaControl->GetState(50, &st);
-			if (st == State_Stopped) break;
-			if (FAILED(ghr) && ghr != VFW_S_STATE_INTERMEDIATE && ghr != VFW_S_CANT_CUE)
-				break;
-			DougaPumpSleep(10);
-		}
-		DougaHangTrace(L"ColdReset:Stop done");
+		graphStopped = DougaPumpWaitState(State_Stopped, 2000);
+		if (!graphStopped)
+			DougaHangTrace(L"ColdReset:Stop not settled, skip Nuke");
+		else
+			DougaHangTrace(L"ColdReset:Stop done");
 	} else if (pGraphBuilder) {
 		DougaHangTrace(L"ColdReset:StopFilters (no MediaControl)");
 		DougaStopFiltersIndividually(pGraphBuilder);
+		graphStopped = TRUE;
 	}
 
 	// Peel は Nuke 前には不要。Stop 後の再配線が ffd モジュールを汚し、
 	// 無→有の次 Run を固める（ログ上 PinMap はクリーンなのに plays2:return で停止）。
-	if (pGraphBuilder) {
+	if (pGraphBuilder && graphStopped) {
 		DougaHangTrace(L"ColdReset:Nuke");
 		DougaNukeGraphFilters(pGraphBuilder);
 		DougaHangTrace(L"ColdReset:Nuke done");
@@ -3709,14 +3792,24 @@ static void DougaColdResetPlaybackGlobals()
 	RELEASE(pSource1);
 	RELEASE(pSource);
 	RELEASE(pVmr9);
-	RELEASE(pMediaControl);
 	RELEASE(pBasicVideo);
 	RELEASE(pVideoWindow);
 	RELEASE(pMediaSeeking);
 	RELEASE(iam);
 	RELEASE(pMediaEvent);
-	// Graph は他経路から AddRef 残りやすい → 参照が尽くまで落とす
-	RELEASE1(pGraphBuilder);
+	if (!graphStopped && (pMediaControl || pGraphBuilder)) {
+		// Stop が着地していないグラフに Release を投げると同じ所で固まる。
+		// 参照は残してポインタだけ捨て、次の plays は新しい FilterGraph を作る。
+		DougaHangTrace(L"ColdReset:leave graph (not stopped)");
+		pMediaControl = NULL;
+		pGraphBuilder = NULL;
+	} else {
+		RELEASE(pMediaControl);
+		RELEASE1(pGraphBuilder);
+	}
+
+	if (pGraphBuilder || pMediaControl || pMediaSeeking || prend || Vdc)
+		DougaHangTrace(L"ColdReset:WARNING leftover COM");
 
 	ev = FALSE;
 	streamidxSubOff = -1;
@@ -3736,9 +3829,12 @@ static void DougaColdResetPlaybackGlobals()
 	InterlockedExchange(&s_dougaSessionUsedFfd, 0);
 	// 「クリーン＝インスタンス無し」: Flush スキップしない（残留 ffd.ax が次の Run を壊す）
 	InterlockedExchange(&s_dougaAvoidFlush, 0);
-	if (hadFfd)
-		DougaHangTrace(L"ColdReset:Flush always (full unload)");
-	DougaFlushLeftoverFilterModules();
+	if (hadFfd) {
+		DougaHangTrace(L"ColdReset:Flush (ffd unload)");
+		DougaFlushLeftoverFilterModules();
+	} else {
+		DougaHangTrace(hadGraph ? L"FlushModules:skipped (no ffd)" : L"FlushModules:skipped (no graph)");
+	}
 	DougaHangTrace(L"ColdReset:leave");
 }
 static BOOL DougaGraphHasFfdshow(IGraphBuilder* g)
@@ -4177,6 +4273,323 @@ void CDouga::ConnectSubtitleWithDirectVobSub(IGraphBuilder* pGraph)
 	OutputDebugString(L"=== ConnectSubtitleWithDirectVobSub End ===\n");
 }
 
+// ---------------------------------------------------------------------------
+// LAV 優先レンダリング
+// Windows 内蔵の AVI Splitter + WMVideo Decoder DMO 経路は環境によって
+// まともに再生できない。K-Lite 等で LAV が入っていれば AVI はそちらを使う。
+// CLSID 直書きは版によってずれるのでフレンドリ名で引く。
+// ---------------------------------------------------------------------------
+static IBaseFilter* DougaCreateFilterByFriendlyName(LPCWSTR wantName)
+{
+	if (!wantName || !wantName[0]) return NULL;
+	ICreateDevEnum* devEnum = NULL;
+	if (FAILED(CoCreateInstance(CLSID_SystemDeviceEnum, NULL, CLSCTX_INPROC,
+		IID_ICreateDevEnum, (void**)&devEnum)) || !devEnum)
+		return NULL;
+	IEnumMoniker* en = NULL;
+	const HRESULT hrEnum = devEnum->CreateClassEnumerator(CLSID_LegacyAmFilterCategory, &en, 0);
+	devEnum->Release();
+	if (hrEnum != S_OK || !en)
+		return NULL;
+
+	IBaseFilter* found = NULL;
+	IMoniker* mon = NULL;
+	while (!found && en->Next(1, &mon, NULL) == S_OK) {
+		IPropertyBag* bag = NULL;
+		if (SUCCEEDED(mon->BindToStorage(0, 0, IID_IPropertyBag, (void**)&bag)) && bag) {
+			VARIANT v;
+			VariantInit(&v);
+			if (SUCCEEDED(bag->Read(L"FriendlyName", &v, 0)) && v.vt == VT_BSTR && v.bstrVal) {
+				if (_wcsicmp(v.bstrVal, wantName) == 0) {
+					IBaseFilter* f = NULL;
+					if (SUCCEEDED(mon->BindToObject(NULL, NULL, IID_IBaseFilter, (void**)&f)) && f)
+						found = f;
+				}
+			}
+			VariantClear(&v);
+			bag->Release();
+		}
+		mon->Release();
+		mon = NULL;
+	}
+	en->Release();
+	return found;
+}
+
+static IPin* DougaGetFreePin(IBaseFilter* f, PIN_DIRECTION want)
+{
+	if (!f) return NULL;
+	IEnumPins* ep = NULL;
+	if (FAILED(f->EnumPins(&ep)) || !ep) return NULL;
+	IPin* found = NULL;
+	IPin* pin = NULL;
+	while (!found && ep->Next(1, &pin, NULL) == S_OK) {
+		PIN_DIRECTION dir;
+		IPin* peer = NULL;
+		if (SUCCEEDED(pin->QueryDirection(&dir)) && dir == want
+			&& FAILED(pin->ConnectedTo(&peer))) {
+			found = pin;
+			pin = NULL;
+		}
+		if (peer) peer->Release();
+		if (pin) pin->Release();
+		pin = NULL;
+	}
+	ep->Release();
+	return found;
+}
+
+static BOOL DougaPinMajorType(IPin* pin, GUID* out)
+{
+	if (!pin || !out) return FALSE;
+	IEnumMediaTypes* em = NULL;
+	if (FAILED(pin->EnumMediaTypes(&em)) || !em) return FALSE;
+	BOOL ok = FALSE;
+	AM_MEDIA_TYPE* mt = NULL;
+	if (em->Next(1, &mt, NULL) == S_OK && mt) {
+		*out = mt->majortype;
+		ok = TRUE;
+		DeleteMediaType(mt);
+	}
+	em->Release();
+	return ok;
+}
+
+// スプリッタ出力を指定デコーダへ直結してから下流を Render する。
+// Intelligent Connect に任せるとメリット順で内蔵 DMO が勝ってしまうため。
+static BOOL DougaConnectThroughDecoder(IGraphBuilder* g, IPin* srcOut, IBaseFilter* dec)
+{
+	if (!g || !srcOut || !dec) return FALSE;
+	IPin* decIn = DougaGetFreePin(dec, PINDIR_INPUT);
+	if (!decIn) {
+		DougaHangTrace(L"LAV:decoder has no free input pin");
+		return FALSE;
+	}
+	HRESULT hr = g->ConnectDirect(srcOut, decIn, NULL);
+	if (FAILED(hr)) {
+		WCHAR m[96];
+		swprintf_s(m, L"LAV:ConnectDirect hr=0x%08X", (unsigned)hr);
+		DougaHangTrace(m);
+		decIn->Release();
+		return FALSE;
+	}
+	IPin* decOut = DougaGetFreePin(dec, PINDIR_OUTPUT);
+	if (decOut) {
+		hr = g->Render(decOut);
+		decOut->Release();
+	} else {
+		hr = E_FAIL;
+	}
+	if (FAILED(hr)) {
+		// 中途半端に繋がった状態を残さない
+		g->Disconnect(srcOut);
+		g->Disconnect(decIn);
+		decIn->Release();
+		return FALSE;
+	}
+	decIn->Release();
+	return TRUE;
+}
+
+static BOOL DougaFilterHasConnectedPin(IBaseFilter* f)
+{
+	if (!f) return FALSE;
+	IEnumPins* ep = NULL;
+	if (FAILED(f->EnumPins(&ep)) || !ep) return FALSE;
+	BOOL any = FALSE;
+	IPin* pin = NULL;
+	while (!any && ep->Next(1, &pin, NULL) == S_OK) {
+		IPin* peer = NULL;
+		if (SUCCEEDED(pin->ConnectedTo(&peer)) && peer) {
+			any = TRUE;
+			peer->Release();
+		}
+		pin->Release();
+		pin = NULL;
+	}
+	ep->Release();
+	return any;
+}
+
+// LAV の設定インターフェース。SDK ヘッダは取り込まず先頭 3 メソッドだけ宣言する。
+// LAVVideoSettings.h の並びは SetRuntimeConfig / Get / Set の順で、
+// この 3 つは vtable 先頭に固定されている。順序を間違えると別の関数を呼ぶので注意。
+struct DECLSPEC_UUID("FA40D6E9-4D38-4761-ADD2-71A9EC5FD32F") IDougaLavVideoSettings : public IUnknown
+{
+	STDMETHOD(SetRuntimeConfig)(BOOL bRuntimeConfig) PURE;
+	STDMETHOD_(BOOL, GetFormatConfiguration)(int vCodec) PURE;
+	STDMETHOD(SetFormatConfiguration)(int vCodec, BOOL bEnabled) PURE;
+};
+
+// LAV Splitter の設定インターフェース。
+struct DECLSPEC_UUID("774A919D-EA95-4A87-8A1E-F48ABE8499C7") IDougaLavSplitterSettings : public IUnknown
+{
+	STDMETHOD(SetRuntimeConfig)(BOOL bRuntimeConfig) PURE;
+	// ILAVFSettings の 2 番目以降のメソッドは文字列を返すものなどがあり、
+	// 単純な int ではないため宣言を省略する。SetFormatEnabled は 15 番目付近。
+	// ここでは SetRuntimeConfig(TRUE) による既定値（全有効）へのリセットのみ使う。
+};
+
+// K-Lite 等は LAV Video Decoder の担当フォーマットを絞って登録することがあり、
+// 古い MS-MPEG4 系 AVI は拒否されて内蔵 DMO に流れる。
+// SetRuntimeConfig(TRUE) はこのインスタンスだけを既定値に戻すもので、
+// 利用者のレジストリ設定は書き換えない。接続前に呼ぶ必要がある。
+static void DougaLavEnableAllVideoFormats(IBaseFilter* vdec)
+{
+	if (!vdec) return;
+	IDougaLavVideoSettings* cfg = NULL;
+	if (FAILED(vdec->QueryInterface(__uuidof(IDougaLavVideoSettings), (void**)&cfg)) || !cfg) {
+		DougaHangTrace(L"LAV:vdec no ILAVVideoSettings");
+		return;
+	}
+	const HRESULT hr = cfg->SetRuntimeConfig(TRUE);
+	// 列挙値はバージョンで増減するので範囲で総当たりする
+	int on = 0;
+	for (int codec = 0; codec < 64; ++codec) {
+		if (SUCCEEDED(cfg->SetFormatConfiguration(codec, TRUE)))
+			on++;
+	}
+	cfg->Release();
+	WCHAR m[112];
+	swprintf_s(m, L"LAV:vdec runtime cfg hr=0x%08X formats=%d", (unsigned)hr, on);
+	DougaHangTrace(m);
+}
+
+static void DougaLavEnableAllSplitterFormats(IBaseFilter* src)
+{
+	if (!src) return;
+	IDougaLavSplitterSettings* cfg = NULL;
+	if (FAILED(src->QueryInterface(__uuidof(IDougaLavSplitterSettings), (void**)&cfg)) || !cfg) {
+		DougaHangTrace(L"LAV:src no ILAVFSettings");
+		return;
+	}
+	const HRESULT hr = cfg->SetRuntimeConfig(TRUE);
+	cfg->Release();
+	WCHAR m[112];
+	swprintf_s(m, L"LAV:src runtime cfg hr=0x%08X", (unsigned)hr);
+	DougaHangTrace(m);
+}
+
+// 成功したら S_OK。LAV が無い/失敗した場合は元の RenderFile へ落とす。
+static HRESULT DougaRenderWithLav(IGraphBuilder* g, LPCWSTR path)
+{
+	if (!g || !path || !path[0]) return E_INVALIDARG;
+
+	IBaseFilter* src = DougaCreateFilterByFriendlyName(L"LAV Splitter Source");
+	if (!src) {
+		DougaHangTrace(L"LAV:not installed");
+		return E_FAIL;
+	}
+	IFileSourceFilter* fsrc = NULL;
+	if (FAILED(src->QueryInterface(IID_IFileSourceFilter, (void**)&fsrc)) || !fsrc) {
+		DougaHangTrace(L"LAV:no IFileSourceFilter");
+		src->Release();
+		return E_FAIL;
+	}
+	DougaLavEnableAllSplitterFormats(src);
+	HRESULT hr = fsrc->Load(path, NULL);
+	fsrc->Release();
+	if (FAILED(hr)) {
+		WCHAR m[96];
+		swprintf_s(m, L"LAV:Load FAILED hr=0x%08X", (unsigned)hr);
+		DougaHangTrace(m);
+		src->Release();
+		return hr;
+	}
+	hr = g->AddFilter(src, L"LAV Splitter Source");
+	if (FAILED(hr)) {
+		DougaHangTrace(L"LAV:AddFilter source FAILED");
+		src->Release();
+		return hr;
+	}
+
+	IBaseFilter* vdec = DougaCreateFilterByFriendlyName(L"LAV Video Decoder");
+	if (!vdec)
+		DougaHangTrace(L"LAV:vdec not found");
+	else if (FAILED(g->AddFilter(vdec, L"LAV Video Decoder"))) {
+		DougaHangTrace(L"LAV:vdec AddFilter FAILED");
+		vdec->Release();
+		vdec = NULL;
+	}
+	else {
+		DougaLavEnableAllVideoFormats(vdec);
+	}
+	IBaseFilter* adec = DougaCreateFilterByFriendlyName(L"LAV Audio Decoder");
+	if (!adec)
+		DougaHangTrace(L"LAV:adec not found");
+	else if (FAILED(g->AddFilter(adec, L"LAV Audio Decoder"))) {
+		DougaHangTrace(L"LAV:adec AddFilter FAILED");
+		adec->Release();
+		adec = NULL;
+	}
+
+	int rendered = 0;
+	IEnumPins* ep = NULL;
+	if (SUCCEEDED(src->EnumPins(&ep)) && ep) {
+		IPin* pin = NULL;
+		while (ep->Next(1, &pin, NULL) == S_OK) {
+			PIN_DIRECTION dir;
+			IPin* peer = NULL;
+			if (SUCCEEDED(pin->QueryDirection(&dir)) && dir == PINDIR_OUTPUT
+				&& FAILED(pin->ConnectedTo(&peer))) {
+				GUID major = GUID_NULL;
+				DougaPinMajorType(pin, &major);
+				const BOOL isVideo = (major == MEDIATYPE_Video);
+				IBaseFilter* want = isVideo ? vdec : ((major == MEDIATYPE_Audio) ? adec : NULL);
+				BOOL done = FALSE;
+				if (want)
+					done = DougaConnectThroughDecoder(g, pin, want);
+				if (done) {
+					DougaHangTrace(isVideo ? L"LAV:video via LAV Video Decoder"
+						: L"LAV:audio via LAV Audio Decoder");
+				} else {
+					if (want)
+						DougaHangTrace(isVideo ? L"LAV:vdec connect FAILED, fallback IC"
+							: L"LAV:adec connect FAILED, fallback IC");
+					done = SUCCEEDED(g->Render(pin));
+				}
+				if (done) rendered++;
+			}
+			if (peer) peer->Release();
+			pin->Release();
+			pin = NULL;
+		}
+		ep->Release();
+	}
+
+	// 使われなかったデコーダはグラフに残さない
+	if (vdec) {
+		if (!DougaFilterHasConnectedPin(vdec)) g->RemoveFilter(vdec);
+		vdec->Release();
+	}
+	if (adec) {
+		if (!DougaFilterHasConnectedPin(adec)) g->RemoveFilter(adec);
+		adec->Release();
+	}
+
+	if (rendered == 0) {
+		DougaHangTrace(L"LAV:Render produced nothing, fallback");
+		g->RemoveFilter(src);
+		src->Release();
+		return E_FAIL;
+	}
+	{
+		WCHAR m[96];
+		swprintf_s(m, L"LAV:rendered %d pin(s)", rendered);
+		DougaHangTrace(m);
+	}
+	src->Release();
+	return S_OK;
+}
+
+static BOOL DougaPathShouldUseLav(LPCWSTR path)
+{
+	if (!path) return FALSE;
+	const WCHAR* dot = wcsrchr(path, L'.');
+	if (!dot) return FALSE;
+	return _wcsicmp(dot, L".avi") == 0;
+}
+
 void CDouga::plays(TCHAR* s)
 {
 	WCHAR ss[2050];HRESULT hr;
@@ -4209,9 +4622,18 @@ void CDouga::plays(TCHAR* s)
 	subtitleStreams.clear();
 	streamMap.videoStart = streamMap.audioStart = streamMap.subtitleStart = -1;
 	streamMap.videoCount = streamMap.audioCount = streamMap.subtitleCount = 0;
-	CoCreateInstance(CLSID_FilterGraph,NULL,CLSCTX_INPROC_SERVER,IID_IGraphBuilder,(LPVOID *)&pGraphBuilder);
-	if (!pGraphBuilder)
-		return;
+	{
+		const HRESULT hrGraph = CoCreateInstance(CLSID_FilterGraph, NULL, CLSCTX_INPROC_SERVER,
+			IID_IGraphBuilder, (LPVOID*)&pGraphBuilder);
+		if (FAILED(hrGraph) || !pGraphBuilder) {
+			WCHAR m[96];
+			swprintf_s(m, L"plays:CoCreateInstance FilterGraph FAILED hr=0x%08X", (unsigned)hrGraph);
+			DougaHangTrace(m);
+			pGraphBuilder = NULL;
+			DougaHangTrace(L"plays:return (no graph)");
+			return;
+		}
+	}
 	if(pGraphBuilder){
 		pGraphBuilder->QueryInterface(IID_IMediaControl,(LPVOID *)&pMediaControl);
 		pGraphBuilder->QueryInterface(IID_IVideoWindow,(LPVOID *)&pVideoWindow);
@@ -4349,8 +4771,16 @@ void CDouga::plays(TCHAR* s)
 	DougaPrefFfdshowSubsReg(FALSE);
 	DougaBlockFfdshowIntelligentConnect(TRUE);
 	DougaInstallRejectFfdCallback(pGraphBuilder);
-	DougaHangTrace(L"plays:RenderFile:begin (UI/STA sync)");
-	HRESULT hr2 = pGraphBuilder->RenderFile(ss, NULL);
+	HRESULT hr2 = E_FAIL;
+	// AVI は内蔵 AVI Splitter 経路が環境依存で不安定なので LAV を優先する。
+	if (DougaPathShouldUseLav(ss)) {
+		DougaHangTrace(L"plays:LAV:begin (avi)");
+		hr2 = DougaRenderWithLav(pGraphBuilder, ss);
+	}
+	if (FAILED(hr2)) {
+		DougaHangTrace(L"plays:RenderFile:begin (UI/STA sync)");
+		hr2 = pGraphBuilder->RenderFile(ss, NULL);
+	}
 	DougaClearRejectFfdCallback(pGraphBuilder);
 	{
 		CString m; m.Format(L"plays:RenderFile:end hr=0x%08X", (unsigned)hr2);
@@ -5844,40 +6274,42 @@ void CDouga::plays2()
 			actualWidth = (long)((double)height * aspectX / aspectY);
 	}
 
-	if (pVideoWindow)pVideoWindow->SetWindowPosition(0, 0, actualHeight, actualWidth);
+	if (pVideoWindow)pVideoWindow->SetWindowPosition(0, 0, actualWidth, actualHeight);
 	rc.top = 0; rc.left = 0; rc.right = actualWidth; rc.bottom = actualHeight;
 	rcm.top = 0; rcm.left = 0; rcm.right = actualWidth; rcm.bottom = actualHeight;
 	if (rcm.right == 704 && rcm.bottom == 480)
 		rcm.bottom = 396;
 
-	// PitchCorrect より先に動画UIを出す（張り替えで固まっても画面は出る）
-	if (width == 0) {
-		ShowWindow(SW_HIDE);
-		if (m_bar.IsBarReady())
-			m_bar.SetMediaInfoText(L"");
-	} else {
-		if (pVideoWindow)pVideoWindow->put_Visible(OATRUE);
-		if (savedata.gx != -10000) {
-			SetWindowPos(NULL, savedata.gx, savedata.gy, 0, 0,
-				SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOREDRAW);
-		}
-		switch (savedata.douga) {
-		case 0:OnMenuitem32771(); break;
-		case 1:OnMenuitem32772(); break;
-		case 2:OnMenuitem32773(); break;
-		case 3:OnMenuitem32774(); break;
-		}
-		if (InterlockedCompareExchange(&g_dougaAssocTopMost, 0, 0) != 0)
-			::SetWindowPos(m_hWnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
-		else if (savedata.dougatopmost)
-			::SetWindowPos(m_hWnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
-		ShowWindow(SW_SHOWNORMAL);
-		::SetWindowPos(m_hWnd, savedata.dougatopmost ? HWND_TOPMOST : HWND_TOP,
-			0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
-		::BringWindowToTop(m_hWnd);
-		RefreshBarMediaInfo();
-		SetTimer(155, 400, NULL);
+	// サイズ未確定でも窓は出す（Stopped では get_VideoWidth=0 が多く、隠すと一生出ない）
+	if (width <= 0 || height <= 0) {
+		width = 640;
+		height = 360;
+		actualWidth = width;
+		actualHeight = height;
+		rc.right = rcm.right = width;
+		rc.bottom = rcm.bottom = height;
 	}
+	if (pVideoWindow)pVideoWindow->put_Visible(OATRUE);
+	if (savedata.gx != -10000) {
+		SetWindowPos(NULL, savedata.gx, savedata.gy, 0, 0,
+			SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOREDRAW);
+	}
+	switch (savedata.douga) {
+	case 0:OnMenuitem32771(); break;
+	case 1:OnMenuitem32772(); break;
+	case 2:OnMenuitem32773(); break;
+	case 3:OnMenuitem32774(); break;
+	}
+	if (InterlockedCompareExchange(&g_dougaAssocTopMost, 0, 0) != 0)
+		::SetWindowPos(m_hWnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+	else if (savedata.dougatopmost)
+		::SetWindowPos(m_hWnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+	ShowWindow(SW_SHOWNORMAL);
+	::SetWindowPos(m_hWnd, savedata.dougatopmost ? HWND_TOPMOST : HWND_TOP,
+		0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
+	::BringWindowToTop(m_hWnd);
+	RefreshBarMediaInfo();
+	SetTimer(155, 400, NULL);
 	SetTimer(1255, 200, NULL);
 
 	DougaHangTrace(L"plays2:after ShowWindow");
@@ -5888,6 +6320,7 @@ void CDouga::plays2()
 		HWND hwndOwner = GetSafeHwnd();
 		if (DougaPitchCorrect_Install(pGraphBuilder, hwndOwner)) {
 			DougaHangTrace(L"plays2:PitchCorrect_Install OK");
+			SetTimer(1255, 40, NULL);
 			if (pBasicAudio) { pBasicAudio->Release(); pBasicAudio = NULL; }
 			DougaPitchCorrect_SetVolumeDsPos(savedata.dsvol);
 			if (pMediaSeeking) {
@@ -5925,19 +6358,194 @@ void CDouga::plays2()
 	if (pBasicVideo2) pBasicVideo2->Release();
 }
 
+void CDouga::RefreshVideoSizeAfterRun()
+{
+	if (!GetSafeHwnd()) return;
+	if (pBasicVideo) { pBasicVideo->Release(); pBasicVideo = NULL; }
+	if (pGraphBuilder)pGraphBuilder->QueryInterface(IID_IBasicVideo, (LPVOID*)&pBasicVideo);
+	long nw = 0, nh = 0;
+	if (pBasicVideo) {
+		pBasicVideo->get_VideoHeight(&nh);
+		pBasicVideo->get_VideoWidth(&nw);
+	}
+	if (nw == 0 && ev && Vdc) {
+		SIZE a = { 0 }, b = { 0 };
+		if (SUCCEEDED(Vdc->GetNativeVideoSize(&a, &b)) && a.cx > 0) {
+			nw = a.cx;
+			nh = a.cy;
+		}
+	}
+	if (nw <= 0 || nh <= 0) {
+		ApplyVideoDest();
+		return;
+	}
+	if (nw == width && nh == height) {
+		ApplyVideoDest();
+		return;
+	}
+	width = nw;
+	height = nh;
+	long actualWidth = nw;
+	long actualHeight = nh;
+	IBasicVideo2* pBasicVideo2 = NULL;
+	if (pGraphBuilder)pGraphBuilder->QueryInterface(IID_IBasicVideo2, (LPVOID*)&pBasicVideo2);
+	if (pBasicVideo2) {
+		long aspectX = 0, aspectY = 0;
+		HRESULT hrAr = pBasicVideo2->GetPreferredAspectRatio(&aspectX, &aspectY);
+		if (SUCCEEDED(hrAr) && aspectX > 0 && aspectY > 0 && height > 0)
+			actualWidth = (long)((double)height * aspectX / aspectY);
+		pBasicVideo2->Release();
+	}
+	rc.right = rcm.right = actualWidth;
+	rc.bottom = rcm.bottom = actualHeight;
+	if (pVideoWindow)pVideoWindow->SetWindowPosition(0, 0, actualWidth, actualHeight);
+	switch (savedata.douga) {
+	case 0:OnMenuitem32771(); break;
+	case 1:OnMenuitem32772(); break;
+	case 2:OnMenuitem32773(); break;
+	case 3:OnMenuitem32774(); break;
+	}
+	ApplyVideoDest();
+}
+
 extern REFTIME aa2,aa;
+extern int ps;
+
+// Pause/Run は非同期。EVR や字幕フィルタは完了に呼び出し側のメッセージ処理を
+// 必要とするため、待つ間もメッセージを回す。入力とタイマーは回さない
+// （再入で再生開始をやり直してしまう）。
+BOOL DougaPumpWaitState(OAFilterState want, DWORD timeoutMs)
+{
+	static LONG s_inWait = 0;
+	if (InterlockedCompareExchange(&s_inWait, 1, 0) != 0) {
+		DougaHangTrace(L"WaitState:REENTRY rejected");
+		return FALSE;
+	}
+	const DWORD t0 = GetTickCount();
+	BOOL ok = FALSE;
+	OAFilterState lastSt = -1;
+	HRESULT lastHr = E_FAIL;
+	for (;;) {
+		IMediaControl* mc = pMediaControl;
+		if (!mc) break;
+		OAFilterState st = State_Stopped;
+		const HRESULT hr = mc->GetState(10, &st);
+		lastSt = st;
+		lastHr = hr;
+		if (SUCCEEDED(hr) && hr != VFW_S_STATE_INTERMEDIATE && st == want) {
+			ok = TRUE;
+			break;
+		}
+		// 検証されない WM_PAINT は PeekMessage が返し続けるので必ず上限を切る
+		MSG m;
+		for (int n = 0; n < 32; ++n) {
+			if (!::PeekMessage(&m, NULL, 0, WM_KEYFIRST - 1, PM_REMOVE) &&
+				!::PeekMessage(&m, NULL, WM_MOUSELAST + 1, 0xFFFFFFFF, PM_REMOVE))
+				break;
+			if (m.message == WM_QUIT) {
+				::PostQuitMessage((int)m.wParam);
+				InterlockedExchange(&s_inWait, 0);
+				return FALSE;
+			}
+			::TranslateMessage(&m);
+			::DispatchMessage(&m);
+		}
+		// WM_TIMER は回さない（再入する）ので、PCM のドレインだけ直接叩く。
+		// これを止めると待っている間ぶん音が出ず、そのまま無音の穴になる。
+		DougaPitchCorrect_Poll();
+		if (GetTickCount() - t0 >= timeoutMs)
+			break;
+	}
+	if (!ok) {
+		WCHAR msg[160];
+		swprintf_s(msg, L"WaitState:TIMEOUT want=%d last=%d hr=0x%08X after=%lums",
+			(int)want, (int)lastSt, (unsigned)lastHr, (unsigned long)(GetTickCount() - t0));
+		DougaHangTrace(msg);
+	}
+	InterlockedExchange(&s_inWait, 0);
+	return ok;
+}
+
+// Run 完了まで待つ。待たずに次へ進むと、環境によっては Paused のまま
+// 1 枚目だけ表示され「窓は出るが再生されない」状態になる。
+BOOL DougaRunGraphAndWait()
+{
+	if (!pMediaControl) {
+		DougaHangTrace(L"RunGraph:no MediaControl");
+		return FALSE;
+	}
+	DougaHangTrace(L"RunGraph:Run:begin");
+	HRESULT hr = pMediaControl->Run();
+	{
+		WCHAR m[96];
+		swprintf_s(m, L"RunGraph:Run:end hr=0x%08X", (unsigned)hr);
+		DougaHangTrace(m);
+	}
+	// 待っている間は入力メッセージを配送しないので、粘るほどボタンが死ぬ。
+	// まず短く確定を狙う。
+	if (DougaPumpWaitState(State_Running, 300)) {
+		DougaHangTrace(L"RunGraph:Running OK");
+		return TRUE;
+	}
+	// Run が成功していて遷移中なら、そのまま Running へ着地する。AVI Splitter の
+	// ように充填が長い環境ではここで数秒 INTERMEDIATE のまま留まるため、
+	// 確定を待つと再生直後の操作を丸ごと食ってしまう。作り直しが要るのは
+	// Run 自体が失敗した時か、遷移もせず Stopped/Paused で固まっている時だけ。
+	if (SUCCEEDED(hr)) {
+		OAFilterState st = State_Stopped;
+		const HRESULT hs = pMediaControl->GetState(0, &st);
+		if (st == State_Running) {
+			DougaHangTrace(L"RunGraph:Running OK");
+			return TRUE;
+		}
+		if (hs == VFW_S_STATE_INTERMEDIATE) {
+			WCHAR m[128];
+			swprintf_s(m, L"RunGraph:accept transitioning st=%d hs=0x%08X", (int)st, (unsigned)hs);
+			DougaHangTrace(m);
+			DougaTraceFilterStates(pGraphBuilder, L"RunState");
+			return TRUE;
+		}
+	}
+	DougaHangTrace(L"RunGraph:retry Run");
+	if (pMediaControl)
+		pMediaControl->Run();
+	if (DougaPumpWaitState(State_Running, 800)) {
+		DougaHangTrace(L"RunGraph:Running OK (retry)");
+		return TRUE;
+	}
+	WCHAR msg[128];
+	swprintf_s(msg, L"RunGraph:FAILED not Running hr=0x%08X", (unsigned)hr);
+	DougaHangTrace(msg);
+	OutputDebugStringW(msg);
+	return FALSE;
+}
+
 void CDouga::seek(LONGLONG l)
 {
 	// SetPositions より先に Grabber CB を止める（再生中シーク／途中再生のデッドロック防止）
 	DougaPitchCorrect_PauseForGraphSeek();
-	if(pMediaSeeking)pMediaSeeking->SetTimeFormat(&TIME_FORMAT_MEDIA_TIME);
-	REFERENCE_TIME rtpos = l;
-	if(pMediaSeeking)pMediaSeeking->SetPositions(&rtpos,AM_SEEKING_AbsolutePositioning,NULL,AM_SEEKING_NoPositioning);
-	// ピッチ補正 DS / Stretcher の古い PCM を捨てて再開
-	DougaPitchCorrect_OnSeek();
+	{
+		WCHAR m[128];
+		swprintf_s(m, L"seek:enter pos=%lldms", (long long)(l / 10000));
+		DougaHangTrace(m);
+	}
+	HRESULT hrSeek = E_FAIL;
+	if (pMediaSeeking) {
+		pMediaSeeking->SetTimeFormat(&TIME_FORMAT_MEDIA_TIME);
+		REFERENCE_TIME rtpos = l;
+		hrSeek = pMediaSeeking->SetPositions(&rtpos, AM_SEEKING_AbsolutePositioning, NULL, AM_SEEKING_NoPositioning);
+	}
+	if (FAILED(hrSeek) && pMediaPosition)
+		pMediaPosition->put_CurrentPosition((REFTIME)l / 10000000.0);
+	DougaPitchCorrect_OnSeek((double)l / 10000000.0);
+	{
+		WCHAR m[96];
+		swprintf_s(m, L"seek:SetPositions hr=0x%08X", (unsigned)hrSeek);
+		DougaHangTrace(m);
+	}
+	DougaHangTrace(L"seek:return");
 }
 
-extern int ps;
 void CDouga::pause(int a)
 {
 	if(a==0)
@@ -5956,9 +6564,11 @@ void CDouga::pause(int a)
 
 void CDouga::stops()
 {
+	DougaHangTrace(L"stops:enter");
 	if (!pGraphBuilder && !pMediaControl) {
 		ev = FALSE;
 		DougaColdResetPlaybackGlobals();
+		DougaHangTrace(L"stops:return (empty graph)");
 		return;
 	}
 	CRect r,rr;
@@ -5983,6 +6593,7 @@ void CDouga::stops()
 	DougaColdResetPlaybackGlobals();
 	// 字幕あり後の COM リサイクルは次の plays 冒頭 DougaRecycleComApartmentIfNeeded で行う。
 	if(mode==-14) Sleep(500);
+	DougaHangTrace(L"stops:return");
 }
 
 void CDouga::stop()
@@ -6283,6 +6894,16 @@ void CDouga::OnTimer(UINT nIDEvent)
 			::SetWindowPos(m_hWnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
 		}
 		SetFocus();
+		extern int ps;
+		if (pMediaControl && ps != 1) {
+			OAFilterState st = State_Stopped;
+			pMediaControl->GetState(0, &st);
+			if (st != State_Running) {
+				pMediaControl->Run();
+				ApplyVideoDest();
+			}
+		}
+		DougaPitchCorrect_EnableCallback();
 	}
 	if (nIDEvent == 1260) {
 		KillTimer(1260);
@@ -6504,19 +7125,19 @@ void CDouga::OnNcRButtonDown(UINT nHitTest, CPoint point)
 namespace {
 
 static const double kDougaPitchEps = 0.02;
-static const DWORD kDougaPcPrebufferMs = 60;   // Play 開始前に少しだけ貯める
-static const DWORD kDougaPcPrebufferMsMulti = 120;
+// Play 開始前に貯める量。グラフ起動直後のデコーダはバースト後に一度息継ぎするので、
+// ここが小さいと鳴り出した直後に必ず一度枯れる（＝一瞬鳴って無音）。
+static const DWORD kDougaPcPrebufferMs = 200;
+static const DWORD kDougaPcPrebufferMsMulti = 320;
 // 2ch: 短めで低遅延。多ch: デコードバーストで先行が膨らむ。
 // ここで捨てると「届いたサンプルをロスト→音声だけ先へ」となりセリフ位置が狂う。
 static const DWORD kDougaPcMaxAheadMs = 800;
 static const DWORD kDougaPcMaxAheadMsMulti = 2500;
 static const DWORD kDougaPcGapFlushMs = 350;   // PCM 途切れ → flush＋ドレイン開始
 static const DWORD kDougaPcStartGraceMs = 4000; // 字幕/ffd 起動直後のギャップで DS を止めない
-static const double kDougaPcLeadSec = 0.06;     // graph よりこれだけ先まで書いてよい
 static const size_t kDougaPcQMax = 96;
 
 struct DougaPcQItem {
-	double t; // BufferCB SampleTime（秒）。不明は <0
 	std::vector<BYTE> data;
 };
 
@@ -6545,7 +7166,6 @@ struct DougaPcState {
 	DWORD drainAheadBytes; // flush 時点の残りバイト（ループ防止の上限）
 	DWORD startTick;     // Install 時刻（起動グレース）
 	double rate;
-	double dropBeforeSec; // シーク位置より前の SampleTime を破棄
 	int sampleRate;
 	int channels;        // DS / RubberBand / EQ 側
 	int srcChannels;     // SampleGrabber 入力
@@ -6561,7 +7181,8 @@ struct DougaPcState {
 	DWORD prebufferBytes;
 	volatile LONG inCallback; // BufferCB 滞在中（UI は Stop 前に待つ）
 	volatile LONG shuttingDown; // Shutdown 中は CB を即抜ける（SetCallback 待ち回避）
-	DWORD dropUntilTick; // シーク直後の補助
+	BOOL cbArmed;        // SetCallback 済み
+	DWORD lastWriteTick;
 	std::deque<DougaPcQItem> pcmQ;
 	std::vector<float> inFlat;
 	std::vector<float> outFlat;
@@ -6574,6 +7195,17 @@ struct DougaPcState {
 };
 
 static DougaPcState g_pc = {};
+
+// プロセス寿命で 1 回だけ作る。Install/Shutdown ごとに作り直すと、
+// 取り残された Grabber スレッドが待っている最中に破棄してしまう。
+static void DougaPcEnsureCs()
+{
+	if (g_pc.csInit) return;
+	InitializeCriticalSection(&g_pc.cs);
+	InitializeCriticalSection(&g_pc.dsCs);
+	g_pc.csInit = TRUE;
+	g_pc.dsCsInit = TRUE;
+}
 
 static void DougaPcEqAndRemote(BYTE* data, DWORD bytes)
 {
@@ -6661,8 +7293,7 @@ static void DougaPcSilenceAll_NoLock()
 
 static void DougaPcWaitCallbackGone()
 {
-	// RubberBand process は数百 ms。Shutdown でも短すぎるとスレッドリークする
-	const int lim = (InterlockedCompareExchange(&g_pc.shuttingDown, 0, 0) != 0) ? 800 : 2000;
+	const int lim = (InterlockedCompareExchange(&g_pc.shuttingDown, 0, 0) != 0) ? 150 : 400;
 	for (int i = 0; i < lim; ++i) {
 		if (InterlockedCompareExchange(&g_pc.inCallback, 0, 0) == 0)
 			break;
@@ -6715,6 +7346,45 @@ static void DougaPcSilenceStaleKeepValid_NoLock()
 	g_pc.dsb->Unlock(p1, b1, p2, b2);
 }
 
+// 供給が間に合わず再生位置が書込位置を追い越した状態から復帰する。
+// 貯め直しから始めるので穴はプリバッファ分だけで済む。
+static void DougaPcResyncUnderrun_NoLock()
+{
+	if (!g_pc.dsb) return;
+	g_pc.dsb->Stop();
+	DougaPcSilenceAll_NoLock(); // writePos=0 / writePosValid=TRUE / prebufferBytes=0
+	g_pc.dsRunning = FALSE;
+	g_pc.lastWriteTick = GetTickCount();
+	DougaHangTrace(L"PitchDs:underrun resync");
+}
+
+// DS が再生位置よりどれだけ先行しているかで書き込み可否を返す — 呼び出し元が dsCs 保持
+static BOOL DougaPcHasRoom_NoLock(DWORD bytes)
+{
+	if (!g_pc.dsb || !g_pc.dsRunning || g_pc.bufBytes == 0) return TRUE;
+	DWORD play = 0, dsWrite = 0;
+	if (FAILED(g_pc.dsb->GetCurrentPosition(&play, &dsWrite)))
+		return FALSE;
+	const DWORD ahead = DougaPcBytesAhead(g_pc.writePos, play, g_pc.bufBytes);
+	// play..dsWrite は DS が今まさに読み出している区間。
+	const DWORD lead = DougaPcBytesAhead(dsWrite, play, g_pc.bufBytes);
+	DWORD maxAhead = DougaPcMaxAheadBytes();
+	if (maxAhead == 0 || maxAhead > g_pc.bufBytes)
+		maxAhead = g_pc.bufBytes;
+	// 追い越されると先行量がバッファ一周ぶんに化ける。これを「先行しすぎ」と
+	// 誤認して書き込みを止めると、再生位置が一周して戻るまで無音が続く
+	// (バッファは 3 秒なので実測 1〜2 秒の穴になる)。
+	if (ahead <= lead || ahead > maxAhead + DougaPcMsToBytes(120)) {
+		DougaPcResyncUnderrun_NoLock();
+		return TRUE;
+	}
+	if (ahead + bytes > maxAhead)
+		return FALSE;
+	if (ahead + bytes >= g_pc.bufBytes - (DWORD)g_pc.blockAlign * 8)
+		return FALSE;
+	return TRUE;
+}
+
 // 呼び出し元が dsCs を保持すること
 static BOOL DougaPcWritePcm_NoLock(const BYTE* data, DWORD bytes)
 {
@@ -6726,17 +7396,8 @@ static BOOL DougaPcWritePcm_NoLock(const BYTE* data, DWORD bytes)
 	if (!g_pc.writePosValid)
 		DougaPcSilenceAll_NoLock();
 
-	if (g_pc.dsRunning) {
-		DWORD play = 0, dsWrite = 0;
-		if (FAILED(g_pc.dsb->GetCurrentPosition(&play, &dsWrite)))
-			return FALSE;
-		const DWORD ahead = DougaPcBytesAhead(g_pc.writePos, play, g_pc.bufBytes);
-		const DWORD maxAhead = DougaPcMaxAheadBytes();
-		if (maxAhead > 0 && ahead + bytes > maxAhead)
-			return FALSE;
-		if (ahead + bytes >= g_pc.bufBytes - (DWORD)g_pc.blockAlign * 8)
-			return FALSE;
-	}
+	if (!DougaPcHasRoom_NoLock(bytes))
+		return FALSE;
 
 	void* p1 = NULL; void* p2 = NULL;
 	DWORD b1 = 0, b2 = 0;
@@ -6752,10 +7413,10 @@ static BOOL DougaPcWritePcm_NoLock(const BYTE* data, DWORD bytes)
 	g_pc.writePos = (g_pc.writePos + bytes) % g_pc.bufBytes;
 
 	if (!g_pc.dsRunning && g_pc.playing) {
+		g_pc.lastWriteTick = GetTickCount();
 		g_pc.prebufferBytes += bytes;
 		const DWORD needMs = (g_pc.channels > 2) ? kDougaPcPrebufferMsMulti : kDougaPcPrebufferMs;
-		const DWORD need = DougaPcMsToBytes(needMs);
-		if (g_pc.prebufferBytes >= need) {
+		if (g_pc.prebufferBytes >= DougaPcMsToBytes(needMs)) {
 			g_pc.dsb->SetCurrentPosition(0);
 			if (SUCCEEDED(g_pc.dsb->Play(0, 0, DSBPLAY_LOOPING)))
 				g_pc.dsRunning = TRUE;
@@ -7001,23 +7662,37 @@ static void DougaPcRetrieveAndWrite_NoLock()
 	}
 }
 
-static double DougaPcGraphSec()
-{
-	if (!pMediaSeeking) return -1.0;
-	LONGLONG pos = 0;
-	if (FAILED(pMediaSeeking->GetCurrentPosition(&pos)))
-		return -1.0;
-	return (double)pos / 10000000.0;
-}
-
-// グラフ位置に合わせてキューを吐き出す（捨てない＝位置ずれ防止）
+// 受け取った PCM を順に DS へ流す。時刻での取捨選択はしない。
+//
+// NullRenderer は参照クロックに合わせてサンプルをスケジュールするので、
+// PCM はもともと実時間で届く。またシークはグラフをフラッシュするため、
+// 以降に届くものは必ずシーク後のデータになる。
+// BufferCB の SampleTime を IMediaSeeking の位置と比較する方式は、
+// 「シーク後に 0 から振り直すスプリッタ」と「絶対値のままのスプリッタ」で
+// 意味が逆になり、片方では全サンプルを捨てて無音になっていた。
 static void DougaPcDrainQueue()
 {
 	if (!g_pc.installed) return;
 	for (;;) {
+		DWORD bytes = 0;
+		if (g_pc.csInit)
+			EnterCriticalSection(&g_pc.cs);
+		if (g_pc.playing && !g_pc.pcmQ.empty())
+			bytes = (DWORD)g_pc.pcmQ.front().data.size();
+		if (g_pc.csInit)
+			LeaveCriticalSection(&g_pc.cs);
+		if (bytes == 0) break;
+
+		// DS が先行しすぎなら次のタイマーまで残す（捨てると位置がずれる）
+		BOOL room = TRUE;
+		if (g_pc.dsCsInit)
+			EnterCriticalSection(&g_pc.dsCs);
+		room = DougaPcHasRoom_NoLock(bytes);
+		if (g_pc.dsCsInit)
+			LeaveCriticalSection(&g_pc.dsCs);
+		if (!room) break;
+
 		DougaPcQItem item;
-		BOOL have = FALSE;
-		BOOL waitMore = FALSE;
 		if (g_pc.csInit)
 			EnterCriticalSection(&g_pc.cs);
 		if (!g_pc.playing || g_pc.pcmQ.empty()) {
@@ -7025,43 +7700,22 @@ static void DougaPcDrainQueue()
 				LeaveCriticalSection(&g_pc.cs);
 			break;
 		}
-		const double g = DougaPcGraphSec();
-		const double t = g_pc.pcmQ.front().t;
-		if (g >= 0.0 && t >= 0.0) {
-			if (t + 0.40 < g) {
-				// 遅すぎ（シーク残骸）→破棄
-				g_pc.pcmQ.pop_front();
-				if (g_pc.csInit)
-					LeaveCriticalSection(&g_pc.cs);
-				continue;
-			}
-			if (t > g + kDougaPcLeadSec) {
-				waitMore = TRUE;
-			}
-		}
-		if (!waitMore) {
-			item = std::move(g_pc.pcmQ.front());
-			g_pc.pcmQ.pop_front();
-			have = TRUE;
-		}
+		item = std::move(g_pc.pcmQ.front());
+		g_pc.pcmQ.pop_front();
 		if (g_pc.csInit)
 			LeaveCriticalSection(&g_pc.cs);
-		if (waitMore || !have)
-			break;
 
-		if (!item.data.empty()) {
-			DougaPcEqAndRemote(item.data.data(), (DWORD)item.data.size());
-			if (g_pc.dsCsInit)
-				EnterCriticalSection(&g_pc.dsCs);
-			if (g_pc.playing)
-				DougaPcWritePcm_NoLock(item.data.data(), (DWORD)item.data.size());
-			if (g_pc.dsCsInit)
-				LeaveCriticalSection(&g_pc.dsCs);
-		}
+		DougaPcEqAndRemote(item.data.data(), (DWORD)item.data.size());
+		if (g_pc.dsCsInit)
+			EnterCriticalSection(&g_pc.dsCs);
+		if (g_pc.playing)
+			DougaPcWritePcm_NoLock(item.data.data(), (DWORD)item.data.size());
+		if (g_pc.dsCsInit)
+			LeaveCriticalSection(&g_pc.dsCs);
 	}
 }
 
-static void DougaPcQueuePcm(double sampleTime, const BYTE* data, DWORD bytes)
+static void DougaPcQueuePcm(const BYTE* data, DWORD bytes)
 {
 	if (!data || bytes == 0) return;
 	if (g_pc.csInit)
@@ -7071,39 +7725,18 @@ static void DougaPcQueuePcm(double sampleTime, const BYTE* data, DWORD bytes)
 			LeaveCriticalSection(&g_pc.cs);
 		return;
 	}
-	// 溢れそうなら古いのを強制排出（破棄ではなく書く）
-	while (g_pc.pcmQ.size() >= kDougaPcQMax) {
-		DougaPcQItem old = std::move(g_pc.pcmQ.front());
+	// 溢れは捨てるだけ。ここから DS 書き／GetCurrentPosition すると
+	// SampleGrabber スレッドとグラフがデッドロックし、映像も止まる。
+	while (g_pc.pcmQ.size() >= kDougaPcQMax)
 		g_pc.pcmQ.pop_front();
-		if (g_pc.csInit)
-			LeaveCriticalSection(&g_pc.cs);
-		if (!old.data.empty()) {
-			DougaPcEqAndRemote(old.data.data(), (DWORD)old.data.size());
-			if (g_pc.dsCsInit)
-				EnterCriticalSection(&g_pc.dsCs);
-			if (g_pc.playing)
-				DougaPcWritePcm_NoLock(old.data.data(), (DWORD)old.data.size());
-			if (g_pc.dsCsInit)
-				LeaveCriticalSection(&g_pc.dsCs);
-		}
-		if (g_pc.csInit)
-			EnterCriticalSection(&g_pc.cs);
-		if (!g_pc.playing) {
-			if (g_pc.csInit)
-				LeaveCriticalSection(&g_pc.cs);
-			return;
-		}
-	}
 	DougaPcQItem it;
-	it.t = sampleTime;
 	it.data.assign(data, data + bytes);
 	g_pc.pcmQ.push_back(std::move(it));
 	if (g_pc.csInit)
 		LeaveCriticalSection(&g_pc.cs);
-	DougaPcDrainQueue();
 }
 
-static void DougaPcOnPcm(const BYTE* p, long len, double sampleTime)
+static void DougaPcOnPcm(const BYTE* p, long len)
 {
 	if (!p || len <= 0 || !g_pc.installed) return;
 	InterlockedExchange(&g_pc.inCallback, 1);
@@ -7161,9 +7794,9 @@ static void DougaPcOnPcm(const BYTE* p, long len, double sampleTime)
 		pcmBytes = frames * 4;
 	}
 
-	// rate≈1: グラフ時刻に合わせてキュー経由で書く（多chバーストの先走り防止）
+	// rate≈1: DS 書きは Grabber スレッドでやらない（グラフとデッドロックする）
 	if (fabs(rate - 1.0) < kDougaPitchEps) {
-		DougaPcQueuePcm(sampleTime, (const BYTE*)pcm16, (DWORD)pcmBytes);
+		DougaPcQueuePcm((const BYTE*)pcm16, (DWORD)pcmBytes);
 		InterlockedExchange(&g_pc.inCallback, 0);
 		return;
 	}
@@ -7253,24 +7886,11 @@ public:
 		return (ULONG)n;
 	}
 	STDMETHODIMP SampleCB(double, IMediaSample*) { return S_OK; }
-	STDMETHODIMP BufferCB(double SampleTime, BYTE* pBuffer, long BufferLen)
+	STDMETHODIMP BufferCB(double, BYTE* pBuffer, long BufferLen)
 	{
 		if (InterlockedCompareExchange(&g_pc.shuttingDown, 0, 0) != 0)
 			return S_OK;
-		const DWORD until = g_pc.dropUntilTick;
-		if (until != 0) {
-			const DWORD now = GetTickCount();
-			if ((LONG)(until - now) > 0)
-				return S_OK;
-			g_pc.dropUntilTick = 0;
-		}
-		if (SampleTime >= 0.0 && g_pc.dropBeforeSec > 0.0) {
-			if (SampleTime + 0.05 < g_pc.dropBeforeSec)
-				return S_OK;
-			if (SampleTime >= g_pc.dropBeforeSec)
-				g_pc.dropBeforeSec = 0.0;
-		}
-		DougaPcOnPcm(pBuffer, BufferLen, SampleTime);
+		DougaPcOnPcm(pBuffer, BufferLen);
 		return S_OK;
 	}
 };
@@ -7350,11 +7970,16 @@ static BOOL DougaPcCreateDs(HWND hwnd, const WAVEFORMATEX* wfx, DWORD channelMas
 		if (SUCCEEDED(hr) && g_pc.ds) break;
 		Sleep(30 + attempt * 20);
 	}
-	if (FAILED(hr) || !g_pc.ds)
+	if (FAILED(hr) || !g_pc.ds) {
+		WCHAR m[96];
+		swprintf_s(m, L"CreateDs:DirectSoundCreate8 FAILED hr=0x%08X", (unsigned)hr);
+		DougaHangTrace(m);
 		return FALSE;
+	}
 	HWND owner = hwnd ? hwnd : GetDesktopWindow();
 	if (FAILED(g_pc.ds->SetCooperativeLevel(owner, DSSCL_PRIORITY))) {
 		if (FAILED(g_pc.ds->SetCooperativeLevel(owner, DSSCL_NORMAL))) {
+			DougaHangTrace(L"CreateDs:SetCooperativeLevel FAILED");
 			g_pc.ds->Release(); g_pc.ds = NULL;
 			return FALSE;
 		}
@@ -7389,7 +8014,12 @@ static BOOL DougaPcCreateDs(HWND hwnd, const WAVEFORMATEX* wfx, DWORD channelMas
 			pPrim = NULL;
 			Sleep(30 + attempt * 15);
 		}
-		if (FAILED(chr) || !pPrim) return FALSE;
+		if (FAILED(chr) || !pPrim) {
+			WCHAR m[96];
+			swprintf_s(m, L"CreateDs:CreateSoundBuffer FAILED hr=0x%08X", (unsigned)chr);
+			DougaHangTrace(m);
+			return FALSE;
+		}
 		if (g_pc.dsb) { g_pc.dsb->Release(); g_pc.dsb = NULL; }
 		g_pc.dsb = pPrim;
 		g_pc.sampleRate = (int)fmt->nSamplesPerSec;
@@ -7434,6 +8064,7 @@ static BOOL DougaPcCreateDs(HWND hwnd, const WAVEFORMATEX* wfx, DWORD channelMas
 		fmt.cbSize = 0;
 		if (tryCreate(&fmt, FALSE) || tryCreate(&fmt, TRUE))
 			return TRUE;
+		DougaHangTrace(L"CreateDs:tryCreate(2ch) FAILED");
 		g_pc.ds->Release(); g_pc.ds = NULL;
 		return FALSE;
 	}
@@ -7454,6 +8085,7 @@ static BOOL DougaPcCreateDs(HWND hwnd, const WAVEFORMATEX* wfx, DWORD channelMas
 	if (tryCreate(&wfex.Format, FALSE) || tryCreate(&wfex.Format, TRUE))
 		return TRUE;
 
+	DougaHangTrace(L"CreateDs:tryCreate(multi) FAILED");
 	if (!allowDownmix) {
 		g_pc.ds->Release(); g_pc.ds = NULL;
 		return FALSE;
@@ -7467,6 +8099,7 @@ static BOOL DougaPcCreateDs(HWND hwnd, const WAVEFORMATEX* wfx, DWORD channelMas
 	stereo.nAvgBytesPerSec = stereo.nSamplesPerSec * stereo.nBlockAlign;
 	stereo.cbSize = 0;
 	if (!tryCreate(&stereo, FALSE) && !tryCreate(&stereo, TRUE)) {
+		DougaHangTrace(L"CreateDs:tryCreate(downmix) FAILED");
 		g_pc.ds->Release(); g_pc.ds = NULL;
 		return FALSE;
 	}
@@ -7479,6 +8112,23 @@ static BOOL DougaPcCreateDs(HWND hwnd, const WAVEFORMATEX* wfx, DWORD channelMas
 BOOL DougaPitchCorrect_IsActive()
 {
 	return g_pc.installed ? TRUE : FALSE;
+}
+
+void DougaPitchCorrect_EnableCallback()
+{
+	if (!g_pc.installed || !g_pc.grabber) return;
+	if (g_pc.cbArmed) return;
+	g_pc.cbArmed = TRUE;
+	g_pc.playing = TRUE;
+	if (g_pc.dsCsInit)
+		EnterCriticalSection(&g_pc.dsCs);
+	DougaPcSilenceAll_NoLock();
+	g_pc.dsRunning = FALSE;
+	g_pc.prebufferBytes = 0;
+	g_pc.lastWriteTick = 0;
+	if (g_pc.dsCsInit)
+		LeaveCriticalSection(&g_pc.dsCs);
+	g_pc.grabber->SetCallback(&g_pcCb, 1);
 }
 
 int DougaPitchCorrect_GetLatencyMs()
@@ -7526,11 +8176,11 @@ void DougaPitchCorrect_SetPaused(BOOL paused)
 		DougaPcStopDsOutsideCallback();
 		return;
 	}
-	g_pc.lastPcmTick = GetTickCount();
 	g_pc.endFlushed = FALSE;
 	g_pc.writePosValid = FALSE;
 	g_pc.dsRunning = FALSE;
 	g_pc.prebufferBytes = 0;
+	g_pc.lastPcmTick = GetTickCount();
 	LeaveCriticalSection(&g_pc.cs);
 }
 
@@ -7543,19 +8193,14 @@ void DougaPitchCorrect_PauseForGraphSeek()
 	DougaPcWaitCallbackGone();
 }
 
-void DougaPitchCorrect_OnSeek()
+void DougaPitchCorrect_OnSeek(double)
 {
 	if (!g_pc.installed || !g_pc.csInit) return;
-	// コールバック中に reset すると RubberBand 内で永久待ちになり得る
 	EnterCriticalSection(&g_pc.cs);
 	g_pc.playing = FALSE;
 	LeaveCriticalSection(&g_pc.cs);
 
-	DougaPcStopDsOutsideCallback(); // inCallback==0 まで待ってから DS Stop
-
-	LONGLONG pos = 0;
-	if (pMediaSeeking)
-		pMediaSeeking->GetCurrentPosition(&pos);
+	DougaPcStopDsOutsideCallback();
 
 	EnterCriticalSection(&g_pc.cs);
 	if (g_pc.shifter)
@@ -7568,9 +8213,8 @@ void DougaPitchCorrect_OnSeek()
 	g_pc.dsRunning = FALSE;
 	g_pc.prebufferBytes = 0;
 	g_pc.startTick = GetTickCount();
-	g_pc.lastPcmTick = g_pc.startTick;
-	g_pc.dropUntilTick = g_pc.startTick + 50;
-	g_pc.dropBeforeSec = (double)pos / 10000000.0;
+	g_pc.lastPcmTick = 0;
+	g_pc.lastWriteTick = 0;
 	InterlockedExchange(&g_pc.eqNeedReset, 1);
 	g_pc.playing = TRUE;
 	LeaveCriticalSection(&g_pc.cs);
@@ -7647,7 +8291,7 @@ void DougaPitchCorrect_SetPlaybackRate(double rate)
 
 void DougaPitchCorrect_Shutdown()
 {
-	if (!g_pc.csInit && !g_pc.installed && !g_pc.dsb && !g_pc.grabber) {
+	if (!g_pc.installed && !g_pc.dsb && !g_pc.grabber) {
 		DougaHangTrace(L"PitchShutdown:idle");
 		return;
 	}
@@ -7661,12 +8305,16 @@ void DougaPitchCorrect_Shutdown()
 	IBaseFilter* grabberF = NULL;
 	IBaseFilter* nullF = NULL;
 	IBaseFilter* oldRenderer = NULL;
-	// graph ポインタは保持しない（Shutdown で RemoveFilter しないため未使用）
+
+	if (g_pc.grabber) {
+		g_pc.grabber->SetCallback(NULL, 0);
+	}
 
 	if (g_pc.csInit)
 		EnterCriticalSection(&g_pc.cs);
 	g_pc.playing = FALSE;
 	g_pc.installed = FALSE;
+	g_pc.cbArmed = FALSE;
 	g_pc.dsRunning = FALSE;
 	g_pc.endFlushed = FALSE;
 	g_pc.lastPcmTick = 0;
@@ -7690,8 +8338,7 @@ void DougaPitchCorrect_Shutdown()
 	g_pc.srcFloat = FALSE;
 	g_pc.channelMask = 0;
 	g_pc.startTick = 0;
-	g_pc.dropBeforeSec = 0.0;
-	g_pc.dropUntilTick = 0;
+	g_pc.lastWriteTick = 0;
 	g_pc.downmixBuf.clear();
 	if (g_pc.csInit)
 		LeaveCriticalSection(&g_pc.cs);
@@ -7718,16 +8365,30 @@ void DougaPitchCorrect_Shutdown()
 	if (nullF) nullF->Release();
 	if (oldRenderer) oldRenderer->Release();
 
-	if (g_pc.dsCsInit) {
-		DeleteCriticalSection(&g_pc.dsCs);
-		g_pc.dsCsInit = FALSE;
-	}
-	if (g_pc.csInit) {
-		DeleteCriticalSection(&g_pc.cs);
-		g_pc.csInit = FALSE;
-	}
+	// クリティカルセクションは破棄しない。DougaPcWaitCallbackGone は上限付きで
+	// 諦めるため、Grabber のストリーミングスレッドがまだ EnterCriticalSection で
+	// 待っている可能性がある。そこで削除すると そのスレッドが永久に戻らず、
+	// 旧グラフの Stop() も返らなくなる（曲移動の 2 回目以降で「応答なし」）。
 	InterlockedExchange(&g_pc.shuttingDown, 0);
 	DougaHangTrace(L"PitchShutdown:leave");
+}
+
+// exe と同じ場所に nopitch.txt を置くと Grabber 張り替えを行わない。
+// 環境切り分け用（その PC では速度変更時の音程補正のみ無効になる）。
+static BOOL DougaPitchDisabledByFile()
+{
+	BOOL disabled = FALSE;
+	WCHAR path[MAX_PATH] = {};
+	if (GetModuleFileNameW(NULL, path, MAX_PATH)) {
+		WCHAR* sep = wcsrchr(path, L'\\');
+		if (sep) {
+			const size_t room = MAX_PATH - (size_t)(sep + 1 - path);
+			wcscpy_s(sep + 1, room, L"nopitch.txt");
+			if (GetFileAttributesW(path) != INVALID_FILE_ATTRIBUTES)
+				disabled = TRUE;
+		}
+	}
+	return disabled;
 }
 
 BOOL DougaPitchCorrect_Install(IGraphBuilder* graph, HWND hwndOwner)
@@ -7740,6 +8401,11 @@ BOOL DougaPitchCorrect_Install(IGraphBuilder* graph, HWND hwndOwner)
 #else
 	DougaPitchCorrect_Shutdown();
 	if (!graph || mode != -2) return FALSE;
+	if (DougaPitchDisabledByFile()) {
+		OutputDebugStringW(L"[DougaPitch] disabled by nopitch.txt\n");
+		DougaHangTrace(L"PitchInstall:DISABLED by nopitch.txt");
+		return FALSE;
+	}
 
 	IBaseFilter* renderer = NULL;
 	IPin* renIn = NULL;
@@ -7756,6 +8422,7 @@ BOOL DougaPitchCorrect_Install(IGraphBuilder* graph, HWND hwndOwner)
 		IID_IBaseFilter, (void**)&grabF);
 	if (FAILED(hr) || !grabF) {
 		OutputDebugStringW(L"[DougaPitch] CLSID_SampleGrabber CoCreate failed\n");
+		DougaHangTrace(L"PitchInstall:CLSID_SampleGrabber CoCreate failed");
 		renIn->Release(); upOut->Release(); renderer->Release();
 		return FALSE;
 	}
@@ -7763,6 +8430,7 @@ BOOL DougaPitchCorrect_Install(IGraphBuilder* graph, HWND hwndOwner)
 		IID_IBaseFilter, (void**)&nullF);
 	if (FAILED(hr) || !nullF) {
 		OutputDebugStringW(L"[DougaPitch] CLSID_NullRenderer CoCreate failed\n");
+		DougaHangTrace(L"PitchInstall:CLSID_NullRenderer CoCreate failed");
 		grabF->Release();
 		renIn->Release(); upOut->Release(); renderer->Release();
 		return FALSE;
@@ -7770,6 +8438,7 @@ BOOL DougaPitchCorrect_Install(IGraphBuilder* graph, HWND hwndOwner)
 	hr = grabF->QueryInterface(IID_ISampleGrabber, (void**)&grab);
 	if (FAILED(hr) || !grab) {
 		OutputDebugStringW(L"[DougaPitch] IID_ISampleGrabber QI failed\n");
+		DougaHangTrace(L"PitchInstall:IID_ISampleGrabber QI failed");
 		nullF->Release(); grabF->Release();
 		renIn->Release(); upOut->Release(); renderer->Release();
 		return FALSE;
@@ -7783,15 +8452,60 @@ BOOL DougaPitchCorrect_Install(IGraphBuilder* graph, HWND hwndOwner)
 	grab->SetOneShot(FALSE);
 	grab->SetBufferSamples(TRUE); // BufferCB 必須
 
-	// グラフ停止中を想定（plays2 は Run 前）
+	// 何も壊していない段階で降りる（DS レンダラのまま普通に再生される）
+	auto abortKeepRenderer = [&](LPCWSTR why, HRESULT h) {
+		WCHAR m[192];
+		swprintf_s(m, L"[DougaPitch] %s hr=0x%08X; keep DS renderer\n", why, (unsigned)h);
+		OutputDebugStringW(m);
+		DougaHangTrace(m);
+		if (upOut && renIn) graph->ConnectDirect(upOut, renIn, NULL);
+		if (grab) { grab->Release(); grab = NULL; }
+		if (nullF) { nullF->Release(); nullF = NULL; }
+		if (grabF) { grabF->Release(); grabF = NULL; }
+		if (renIn) { renIn->Release(); renIn = NULL; }
+		if (upOut) { upOut->Release(); upOut = NULL; }
+		if (renderer) { renderer->Release(); renderer = NULL; }
+	};
+
+	// 張り替えは停止中でしか行えない。停止していなければ Disconnect も
+	// RemoveFilter も VFW_E_NOT_STOPPED で失敗し、一部だけ成功した壊れたグラフが
+	// 残る（窓は出るが何も描画されず Stop も返らない）。
+	// ここで Stop() を呼びに行くと、詰まったグラフでは戻ってこないので呼ばない。
+	// 張り替えを見送るだけにする＝その回はピッチ補正なしで普通に再生される。
+	if (pMediaControl) {
+		OAFilterState st0 = State_Stopped;
+		pMediaControl->GetState(0, &st0);
+		if (st0 != State_Stopped) {
+			abortKeepRenderer(L"graph not stopped", (HRESULT)st0);
+			return FALSE;
+		}
+	}
+
 	BOOL rewired = FALSE;
 	DougaHangTrace(L"PitchInstall:Disconnect:begin");
-	hr = renIn->Disconnect();
-	hr = upOut->Disconnect();
+	hr = graph->Disconnect(renIn);
+	if (SUCCEEDED(hr))
+		hr = graph->Disconnect(upOut);
+	if (FAILED(hr)) {
+		abortKeepRenderer(L"Disconnect failed", hr);
+		return FALSE;
+	}
 	DougaHangTrace(L"PitchInstall:RemoveFilter renderer");
 	hr = graph->RemoveFilter(renderer);
+	if (FAILED(hr)) {
+		abortKeepRenderer(L"RemoveFilter failed", hr);
+		return FALSE;
+	}
 	hr = graph->AddFilter(grabF, L"Douga Pitch Grabber");
-	hr = graph->AddFilter(nullF, L"Douga Pitch Null");
+	if (SUCCEEDED(hr))
+		hr = graph->AddFilter(nullF, L"Douga Pitch Null");
+	if (FAILED(hr)) {
+		graph->RemoveFilter(grabF);
+		graph->RemoveFilter(nullF);
+		graph->AddFilter(renderer, L"Default DirectSound Device");
+		abortKeepRenderer(L"AddFilter failed", hr);
+		return FALSE;
+	}
 	rewired = TRUE;
 
 	IPin* grabIn = NULL; IPin* grabOut = NULL; IPin* nullIn = NULL;
@@ -7801,6 +8515,7 @@ BOOL DougaPitchCorrect_Install(IGraphBuilder* graph, HWND hwndOwner)
 
 	auto failCleanup = [&](LPCWSTR why) {
 		OutputDebugStringW(why);
+		DougaHangTrace(why);
 		if (grabIn) { grabIn->Release(); grabIn = NULL; }
 		if (grabOut) { grabOut->Release(); grabOut = NULL; }
 		if (nullIn) { nullIn->Release(); nullIn = NULL; }
@@ -7873,18 +8588,11 @@ BOOL DougaPitchCorrect_Install(IGraphBuilder* graph, HWND hwndOwner)
 	if (chMask == 0)
 		chMask = DirectSoundChannelMaskForOutput((int)wfx.nChannels, 0);
 
-	InitializeCriticalSection(&g_pc.cs);
-	g_pc.csInit = TRUE;
-	InitializeCriticalSection(&g_pc.dsCs);
-	g_pc.dsCsInit = TRUE;
+	DougaPcEnsureCs();
 	g_pc.rate = 1.0;
 	g_pc.refCb = 1;
 	if (!DougaPcCreateDs(hwndOwner, &wfx, chMask, TRUE)) {
 		DougaHangTrace(L"PitchInstall:CreateDs FAILED");
-		DeleteCriticalSection(&g_pc.dsCs);
-		g_pc.dsCsInit = FALSE;
-		DeleteCriticalSection(&g_pc.cs);
-		g_pc.csInit = FALSE;
 		// re-acquire pins for rollback path: upOut already released — reconnect via failCleanup needs upOut
 		// Reconstruct: grab still connected; tear grab and restore renderer from current grab input
 		IPin* gIn = NULL; IPin* upstream = NULL;
@@ -7910,6 +8618,7 @@ BOOL DougaPitchCorrect_Install(IGraphBuilder* graph, HWND hwndOwner)
 		if (upstream) upstream->Release();
 		renderer->Release();
 		OutputDebugStringW(L"[DougaPitch] CreateDs failed; restored DS renderer\n");
+		DougaHangTrace(L"PitchInstall:CreateDs FAILED (restored DS renderer)");
 		return FALSE;
 	}
 
@@ -7923,22 +8632,21 @@ BOOL DougaPitchCorrect_Install(IGraphBuilder* graph, HWND hwndOwner)
 		g_pc.srcBits = (int)wfx.wBitsPerSample;
 	DougaPcAttachSystemClock(graph);
 	InterlockedExchange(&g_pc.refCb, 1);
-	grab->SetCallback(&g_pcCb, 1); // BufferCB
+	// BufferCB は Run 後に付ける。Pause/Run 中の GetCurrentPosition デッドロックを避ける
 	g_pc.installed = TRUE;
 	g_pc.playing = TRUE;
 	g_pc.dsRunning = FALSE;
 	g_pc.endFlushed = FALSE;
 	g_pc.draining = FALSE;
 	g_pc.drainAheadBytes = 0;
-	g_pc.dropUntilTick = 0;
-	g_pc.dropBeforeSec = 0.0;
 	g_pc.pcmQ.clear();
 	g_pc.startTick = GetTickCount();
-	g_pc.lastPcmTick = g_pc.startTick;
+	g_pc.lastPcmTick = 0;
+	g_pc.lastWriteTick = 0;
+	g_pc.cbArmed = FALSE;
 	DougaPcApplyVolume_NoLock(savedata.dsvol);
 	DougaPcSilenceAll_NoLock();
-	// Play はプリバッファ後。Stretcher は非 1.0x 到達時に生成
-	OutputDebugStringW(L"[DougaPitch] installed OK\n");
+	OutputDebugStringW(L"[DougaPitch] installed OK (callback deferred)\n");
 	return TRUE;
 #endif
 }

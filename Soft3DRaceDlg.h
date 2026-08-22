@@ -144,8 +144,8 @@ public:
 		int isPlayer;
 		float cr, cg, cb;
 		int lapShowN;
-		int lapNo[3];
-		float lapSec[3];
+		int lapNo[4];
+		float lapSec[4];
 		int retired;
 	};
 	BOOL BakeStandingsTexture(const S3rStandRow* rows, int nRows);

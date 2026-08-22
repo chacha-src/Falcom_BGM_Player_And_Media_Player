@@ -812,25 +812,26 @@ BOOL CS3mView::CreateShaders()
 		"P VST(V x){P o;o.p=x.p;o.n=x.n;o.uv=x.uv;o.c=x.c;return o;}"
 		"struct HC{float e[4]:SV_TessFactor;float i[2]:SV_InsideTessFactor;};"
 		"HC HPC(InputPatch<P,4> p,uint id:SV_PrimitiveID){HC o;float3 c=(p[0].p+p[1].p+p[2].p+p[3].p)*.25;float d=distance(c,Eye.xyz);"
-		// LightDir.w==0 → シャドウマップ生成：カメラ距離で粗くせず一定テッセ（色パスの変位と一致させる）
-		"float tf=(LightDir.w<.5)?18.:lerp(28.,1.,saturate((d-1.2)/11.));tf=clamp(tf,1.,28.);"
+		"float tf=(LightDir.w<.5)?64.:lerp(64.,2.,saturate((d-1.2)/11.));tf=clamp(tf,1.,64.);"
 		"o.e[0]=o.e[1]=o.e[2]=o.e[3]=tf;o.i[0]=o.i[1]=tf;return o;}"
 		"[domain(\"quad\")][partitioning(\"fractional_even\")][outputtopology(\"triangle_cw\")][outputcontrolpoints(4)][patchconstantfunc(\"HPC\")]"
 		"P HST(InputPatch<P,4> p,uint i:SV_OutputControlPointID,uint id:SV_PrimitiveID){return p[i];}"
+		"float hash(float2 p){return frac(sin(dot(p,float2(12.9898,78.233)))*43758.5453);}"
+		"float noise(float2 p){float2 i=floor(p),f=frac(p);float a=hash(i),b=hash(i+float2(1,0)),c=hash(i+float2(0,1)),d=hash(i+float2(1,1));"
+		"float2 u=f*f*(3.-2.*f);return lerp(a,b,u.x)+(c-a)*u.y*(1.-u.x)+(d-b)*u.x*u.y;}"
+		"float fbm(float2 p){float f=0.,a=0.5;for(int i=0;i<4;i++){f+=a*noise(p);p*=2.;a*=.5;}return f;}"
 		"[domain(\"quad\")]D DST(HC h,float2 q:SV_DomainLocation,const OutputPatch<P,4> p){"
 		"P a,b,o;a.p=lerp(p[0].p,p[1].p,q.x);b.p=lerp(p[3].p,p[2].p,q.x);o.p=lerp(a.p,b.p,q.y);"
 		"a.n=lerp(p[0].n,p[1].n,q.x);b.n=lerp(p[3].n,p[2].n,q.x);o.n=normalize(lerp(a.n,b.n,q.y));"
 		"a.uv=lerp(p[0].uv,p[1].uv,q.x);b.uv=lerp(p[3].uv,p[2].uv,q.x);o.uv=lerp(a.uv,b.uv,q.y);o.c=p[0].c;"
 		"float ht=T0.SampleLevel(SL,o.uv*2.5,0).a-.42;float bump=max(0,ht);bump=bump*bump*(3.-2.*bump);"
-		// 影パスも色パスも同じ変位（Eye=カメラ）。影だけ強く変位すると床に影がはみ出す
+		"float nz=fbm(o.p.xz*15.+Misc.w*.02)*0.015;"
 		"float d=distance(o.p,Eye.xyz);float amp=lerp(.38,.015,saturate((d-1.5)/10.));"
-		"o.p+=o.n*bump*amp;float3 nn=normalize(o.n+float3(bump*.8,0,bump*.8)*amp*2.);"
+		"o.p+=o.n*(bump+nz)*amp;float3 nn=normalize(o.n+float3(bump*.8,0,bump*.8)*amp*2.+float3(nz,nz,nz));"
 		"D z;z.w=o.p;z.n=nn;z.uv=o.uv;z.c=o.c;z.p=mul(float4(o.p,1),VP);return z;}"
-		// Qullusrent bias: uv = ndc.xy*(.5,-.5)+.5 （LightVPは View*Proj のまま）
 		"float ShadowAt(float3 w,float3 n){float3 nn=normalize(n);float3 l=normalize(LightDir.xyz);float ndl=saturate(dot(nn,l));"
 		"w+=nn*(0.015+(1-ndl)*0.025);float4 sp=mul(float4(w,1),LightVP);float iw=1.0/max(sp.w,1e-5);"
 		"float2 uv=sp.xy*iw*float2(.5,-.5)+.5;"
-		// 実機ずれ補正: 影が左下寄り → サンプルを右上へ（D3DのVは上が小さい）
 		"uv+=float2(2.0,-2.0)/1024.0;"
 		"float z=sp.z*iw-0.003;"
 		"if(any(uv<0)||any(uv>1)||z<=0||z>=1)return 1;"
@@ -844,7 +845,8 @@ BOOL CS3mView::CreateShaders()
 		"float mb=(rp.w>0)*saturate(min(min(muv.x,1-muv.x),min(muv.y,1-muv.y))*6);return float4(M.Sample(SL,saturate(muv)).rgb,mb);}"
 		"float4 PSW(D i):SV_Target{float4 a=T0.Sample(SL,i.uv*2.5)*i.c;float h=T0.Sample(SL,i.uv*2.5).a;"
 		"float hx=T0.Sample(SL,i.uv*2.5+float2(.004,0)).a-h;float hy=T0.Sample(SL,i.uv*2.5+float2(0,.004)).a-h;"
-		"float3 n=normalize(i.n+float3(hx,hy,0)*4.2);float3 l=normalize(LightDir.xyz);float sh=ShadowAt(i.w,n);"
+		"float nz=fbm(i.uv*250.+Misc.w*.02)*0.1;"
+		"float3 n=normalize(i.n+float3(hx+nz,hy+nz,0)*4.2);float3 l=normalize(LightDir.xyz);float sh=ShadowAt(i.w,n);"
 		"float nd=ShadeLit(dot(n,l),sh);"
 		"float3 v=normalize(Eye.xyz-i.w);float3 r=reflect(-l,n);float rv=saturate(dot(r,v));"
 		"float sp=pow(rv,56)*sh;float spark=pow(rv,180)*sh;float3 sun=float3(1.0,.94,.78);"
@@ -854,13 +856,16 @@ BOOL CS3mView::CreateShaders()
 		"float4 mir=PlanarMir(i.w,ReflectVP,MirrorMap);float4 mir2=PlanarMir(i.w+rd*1.35,ReflectVP,MirrorMap);if(mir2.a>mir.a)mir=mir2;"
 		"float mw=metal*useMir*max(mir.a,.35);env=lerp(env,mir.rgb,mw);"
 		"float pulse=.5+.5*sin(Misc.w*1.65+i.w.x*.4+i.w.z*.3);"
-		"float3 col=lerp(a.rgb*nd,mir.rgb*(.3+.7*a.rgb),mw*.92)+sun*(sp*.4+spark*.8)+env*(.05+fr*.10)*(1-mw*.55)*lerp(.45,1,sh);"
+		"float occ=lerp(0.5,1.0,a.a);"
+		"float3 col=lerp(a.rgb*nd*occ,mir.rgb*(.3+.7*a.rgb),mw*.92)+sun*(sp*.4+spark*.8)+env*(.05+fr*.10)*(1-mw*.55)*lerp(.45,1,sh);"
 		"col+=sun*(sp*.55+spark*1.1)*doorM*(.55+.45*pulse);col+=float3(1,.92,.35)*(spark*1.6+sp*.4)*keyM*(.6+.4*pulse);"
 		"col=lerp(col,env*(.4+.6*a.rgb)+mir.rgb*.5,keyM*.35*useMir);"
 		"float d=length(Eye.xyz-i.w),fg=saturate((d-Fog.x)/max(.01,Fog.y-Fog.x));fg=saturate(fg+max(0,Fog.w-i.w.y)*Fog.z);fg=fg*fg*(3-2*fg);"
 		"return float4(lerp(col,float3(.52,.66,.84),fg*.72),1);}"
 		"D VSS(V x){D o;o.w=x.p;o.n=x.n;o.uv=x.uv;o.c=x.c;o.p=mul(float4(x.p,1),VP);return o;}"
 		"float4 PSS(D i):SV_Target{float3 n=normalize(i.n);float3 l=normalize(LightDir.xyz);float sh=ShadowAt(i.w,n);"
+		"float nz=fbm(i.w.xz*18.+i.w.y*14.+Misc.w*.02)*0.1;"
+		"n=normalize(n+float3(nz,nz*0.5,nz)*0.8);"
 		"float3 v=normalize(Eye.xyz-i.w);float nd=ShadeLit(dot(n,l),sh);"
 		"float sp=pow(saturate(dot(reflect(-l,n),v)),64)*sh;float3 env=Env.Sample(SL,reflect(-v,n)).rgb;"
 		"float fr=pow(1-saturate(dot(n,v)),2.5);float mirror=saturate((i.c.a-1.01)*8);float glass=saturate((i.c.a-1.18)*10);float useMir=LightDir.w;"
@@ -951,12 +956,34 @@ BOOL CS3mView::CreateProcTextures()
 	// 階テーマごと 512² アトラス（4×4=16種）＋床テクスチャ
 	const int AW=512,AH=512,TW=128,TH=128;
 	auto hash=[&](int x,int y,int s)->int{return ((x*73856093)^(y*19349663)^(s*83492791))&255;};
+	auto noise = [&](float x, float y, int s) -> float {
+		int ix = (int)floorf(x); float fx = x - ix;
+		int iy = (int)floorf(y); float fy = y - iy;
+		float u = fx * fx * (3.f - 2.f * fx);
+		float v = fy * fy * (3.f - 2.f * fy);
+		auto h = [&](int i, int j) { return (float)hash(i, j, s) * (1.f / 255.f); };
+		float n00 = h(ix, iy), n10 = h(ix + 1, iy);
+		float n01 = h(ix, iy + 1), n11 = h(ix + 1, iy + 1);
+		float nx0 = n00 + u * (n10 - n00);
+		float nx1 = n01 + u * (n11 - n01);
+		return nx0 + v * (nx1 - nx0);
+	};
+	auto fbm = [&](float x, float y, int s, int oct) -> float {
+		float val = 0.f; float amp = 1.f; float maxAmp = 0.f;
+		for (int i = 0; i < oct; i++) {
+			val += noise(x, y, s + i) * amp;
+			maxAmp += amp;
+			amp *= 0.5f;
+			x *= 2.f; y *= 2.f;
+		}
+		return val / maxAmp;
+	};
 	auto genWall=[&](int theme,DWORD* atlas){
 		for(int ty=0;ty<4;ty++)for(int tx=0;tx<4;tx++){
 			const int vid=ty*4+tx;
 			for(int ly=0;ly<TH;ly++)for(int lx=0;lx<TW;lx++){
 				int x=tx*TW+lx,y=ty*TH+ly;
-				int n=hash(lx,ly,vid+theme*97)-128;
+				int n=(int)(fbm((float)lx * 0.15f, (float)ly * 0.15f, vid+theme*97, 4) * 255.f) - 128;
 				BYTE r,g,b,a;
 				if(theme==0){ // 地上：レンガ＋草木・苔・花（αでテッセ変位＝ふんわり凹凸）
 					int row=ly/16,bx=(lx+((row&1)?32:0))&63,by=ly&15;BOOL mortar=by<2||bx<2;
@@ -1011,7 +1038,7 @@ BOOL CS3mView::CreateProcTextures()
 	};
 	auto genFloor=[&](int theme,DWORD* p,int W,int H){
 		for(int y=0;y<H;y++)for(int x=0;x<W;x++){
-			int n=((x*17+y*29+(x*y)%31+theme*13)&31)-15;BYTE r,g,b;
+			int n=(int)(fbm((float)x * 0.1f, (float)y * 0.1f, theme * 13, 3) * 255.f) - 128;BYTE r,g,b;
 			if(theme==0){ // 土っぽい石畳
 				BYTE v=(BYTE)(145+n);r=v;g=(BYTE)(v*4/5);b=(BYTE)(v*2/3);
 				if(((x&15)<1)||((y&15)<1)){r=(BYTE)(r*3/4);g=(BYTE)(g*3/4);b=(BYTE)(b*3/4);}
@@ -6913,9 +6940,19 @@ void CSoft3DMazeDlg::ShowContextMenu(CPoint screenPt)
 		}
 	}
 	menu.AddSeparator();
-	menu.AddCheck(20, LL14(L"ミニマップ表示", L"Show minimap", L"Afficher la minimap", L"Mostra minimap", L"Mostrar minimapa",
-		L"미니맵 표시", L"显示小地图", L"إظهار الخريطة المصغّرة", L"Показать мини-карту", L"Minimap anzeigen", L"Mostrar minimapa", L"Minimapa tonen", L"Pokaż minimapę", L"Minimapi göster"),
-		savedata.s3m_show_map != 0);
+	if (CCustomPopupMenu* viewSub = menu.AddSubMenu(LL14(L"表示・視点", L"View", L"Vue", L"Vista", L"Vista",
+		L"보기/시점", L"显示/视角", L"عرض", L"Вид", L"Ansicht", L"Vista", L"Weergave", L"Widok", L"Görünüm"))) {
+		viewSub->AddCheck(20, LL14(L"ミニマップ表示", L"Show minimap", L"Afficher la minimap", L"Mostra minimap", L"Mostrar minimapa",
+			L"미니맵 표시", L"显示小地图", L"إظهار الخريطة المصغّرة", L"Показать мини-карту", L"Minimap anzeigen", L"Mostrar minimapa", L"Minimapa tonen", L"Pokaż minimapę", L"Minimapi göster"),
+			savedata.s3m_show_map != 0);
+		viewSub->AddSeparator();
+		viewSub->AddCheck(50,LL14(L"歩行時の揺れ",L"Walking bob",L"Balancement de marche",L"Oscillazione camminata",L"Balanceo al caminar",L"걷기 흔들림",L"行走晃动",L"تمايل المشي",L"Покачивание при ходьбе",L"Kamerawippen",L"Balanço ao andar",L"Loopbeweging",L"Kołysanie chodu",L"Yürüme sallantısı"),savedata.s3m_bob!=0);
+		viewSub->AddCheck(51,L"FOV 55°",savedata.s3m_fov==0);
+		viewSub->AddCheck(52,L"FOV 70°",savedata.s3m_fov==1);
+		viewSub->AddCheck(53,L"FOV 90°",savedata.s3m_fov==2);
+		viewSub->AddCommand(54,LL14(L"ズームをリセット（視点・地図）",L"Reset zoom (view & maps)",L"Réinitialiser le zoom",L"Reimposta zoom",L"Restablecer zoom",
+			L"줌 리셋(시점·지도)",L"重置缩放（视角与地图）",L"إعادة التكبير",L"Сбросить зум",L"Zoom zurücksetzen",L"Redefinir zoom",L"Zoom resetten",L"Resetuj zoom",L"Zoomu sıfırla"));
+	}
 	menu.AddSeparator();
 	const int mask = S3mItemMask();
 	if (CCustomPopupMenu* itemSub = menu.AddSubMenu(LL14(L"アイテム", L"Items", L"Objets", L"Oggetti", L"Objetos",

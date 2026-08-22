@@ -481,10 +481,11 @@ static BOOL ResumeDshowApplies(int m, LPCTSTR path)
 }
 
 // 動画グラフ構築(play/plays)の前に呼ぶ。.save が無ければ 0。
-// g_resumeSilentArm: 0=未指定 / 1=はい(途中から) / 2=いいえ(先頭から)
+// g_resumeSilentArm: 0=未指定 / 1=はい(途中から) / 2=いいえ(先頭から・save削除) / 3=先頭から(save残す)
 static volatile LONG g_resumeSilentArm = 0;
 static volatile LONG g_inResumePrompt = 0;
 static volatile LONG g_inDougaTeardown = 0;
+extern int mode;
 
 void OggArmRemoteSilentResumeYes()
 {
@@ -494,6 +495,11 @@ void OggArmRemoteSilentResumeYes()
 void OggArmRemoteSilentResumeNo()
 {
 	InterlockedExchange(&g_resumeSilentArm, 2);
+}
+
+void OggArmResumeFromStartKeepSave()
+{
+	InterlockedExchange(&g_resumeSilentArm, 3);
 }
 
 static volatile LONG g_resumePromptPosted = 0;
@@ -543,10 +549,12 @@ BOOL OggPrepareResumeBeforePlayback(LPCTSTR mediaPath)
 	// mid は DShow 途中保存の対象外。内蔵(savecheck_mp3)がOFFなら確認も出さない。
 	if (IsMidiOrProjectMedia(mediaPath) && !savedata.savecheck_mp3)
 		return TRUE;
+	if (!savedata.savecheck && !savedata.savecheck_mp3 && !savedata.savecheck_dshow)
+		return TRUE;
 	CString path = ResumeSavePathRead(mediaPath);
 	if (!ResumeSaveFileExists(path)) return TRUE;
 	const LONG already = InterlockedCompareExchange(&g_resumeSilentArm, 0, 0);
-	if (already == 1 || already == 2)
+	if (already == 1 || already == 2 || already == 3)
 		return TRUE;
 	if (OggIsResumePromptActive())
 		return FALSE;
@@ -576,6 +584,10 @@ static int PromptResumePlaybackIfSaveExists(CWnd* wnd, LPCTSTR mediaPath)
 	// mid + DShow専用チェックのみ → 確認しない（旧 -2 落ち時代の .save も無視）
 	if (IsMidiOrProjectMedia(mediaPath) && !savedata.savecheck_mp3)
 		return 0;
+	if (ResumeDshowApplies(mode, mediaPath) && savedata.savecheck_dshow != 1)
+		return 0;
+	if (ResumeModeUsesPlayb(mode) && savedata.savecheck_mp3 != 1)
+		return 0;
 	CString path = ResumeSavePathRead(mediaPath);
 	if (!ResumeSaveFileExists(path)) return 0;
 	const LONG arm = InterlockedExchange(&g_resumeSilentArm, 0);
@@ -583,30 +595,48 @@ static int PromptResumePlaybackIfSaveExists(CWnd* wnd, LPCTSTR mediaPath)
 		ResumeSaveRemove(mediaPath);
 		return 0;
 	}
+	if (arm == 3)
+		return 0;
 	if (OggIsResumePromptActive())
 		return 0;
 	// arm==1（はい）または未確認の自動再開: 途中から（位置を捨てない）
 	return 1;
 }
 
-// plays2 直後の Run。先に即試行し、失敗時のみ短いリトライ（従来の無条件 Sleep 450ms を避ける）
-static void TryRunMediaControlQuick()
+// plays2 のあと Run。Run 完了まで待つ（待たずに抜けると Paused のまま
+// 1 枚目だけ表示され、映像も音も出ない環境がある）
+static void TryRunMediaControlQuick(BOOL armPitchCb = TRUE)
 {
 	extern IMediaControl* pMediaControl;
 	extern CDouga* pMainFrame1;
-	extern void DoEvent();
+	extern int ps;
 	if (!pMediaControl) return;
-	HRESULT hr = pMediaControl->Run();
-	if (FAILED(hr)) {
-		for (int y = 0; y < 30; ++y) {
-			Sleep(10);
-			DoEvent();
-			hr = pMediaControl->Run();
-			if (SUCCEEDED(hr)) break;
-		}
-	}
-	if (pMainFrame1 && ::IsWindow(pMainFrame1->GetSafeHwnd()))
+	ps = 0;
+	if (og && ::IsWindow(og->GetSafeHwnd()))
+		og->ResetPauseButtonUi();
+
+	if (armPitchCb)
+		DougaPitchCorrect_EnableCallback();
+
+	pMediaControl->Run();
+
+	if (pMainFrame1 && ::IsWindow(pMainFrame1->GetSafeHwnd())) {
+		if (!::IsWindowVisible(pMainFrame1->GetSafeHwnd()))
+			pMainFrame1->ShowWindow(SW_SHOWNORMAL);
+		pMainFrame1->RefreshVideoSizeAfterRun();
 		pMainFrame1->ApplyVideoDest();
+	}
+}
+
+static void DougaRunThenSeek(double seekSec)
+{
+	extern CDouga* pMainFrame1;
+	extern IGraphBuilder* pGraphBuilder;
+	if (!pMainFrame1 || !pGraphBuilder)
+		return;
+	if (seekSec > 0.0)
+		pMainFrame1->seek((LONGLONG)(((float)((float)seekSec * 100.0f * 100000.0f))));
+	TryRunMediaControlQuick(TRUE);
 }
 
 static void ResumeApplyPlaybSeek(__int64 pb);
@@ -2962,16 +2992,40 @@ void MpTaskbarNextTrack()
 
 void MpTaskbarPrevTrack()
 {
-	if (!pl || pl->playcnt <= 0) return;
-	// 一般メディアプレイヤー準拠: 再生中かつ曲頭から3秒以上なら頭出し、3秒未満なら前曲。
-	// ttt は 1/100 秒。一時停止中(ps==1)は常に前曲へ。
 	extern UINT ttt;
 	extern int plf;
 	extern int ps;
-	if (plf && ps != 1 && ttt >= 300) {
-		MpTaskbarReplay();
+	extern double aa1_;
+	extern int mode;
+	extern BOOL videoonly;
+	extern IMediaControl* pMediaControl;
+	extern IMediaPosition* pMediaPosition;
+	const BOOL videoMode = (mode == -2 || videoonly);
+	double posSec = aa1_;
+	if (videoMode && pMediaPosition) {
+		REFTIME aa = 0;
+		if (SUCCEEDED(pMediaPosition->get_CurrentPosition(&aa)) && aa > posSec)
+			posSec = (double)aa;
+	}
+	// ttt は 1/100 秒。3秒以上なら途中保存を見ずに同じ項目を頭から（一時停止中も含む）
+	const BOOL over3 = (ttt >= 300) || (posSec >= 3.0);
+	BOOL fromStart = FALSE;
+	if (plf && over3)
+		fromStart = TRUE;
+	// 窓は出たがグラフが走っていない（他環境の無再生）→ 同じ動画を頭からやり直し
+	if (!fromStart && plf && videoMode && pMediaControl && ps != 1) {
+		OAFilterState st = State_Stopped;
+		pMediaControl->GetState(0, &st);
+		if (st != State_Running)
+			fromStart = TRUE;
+	}
+	if (fromStart || ((!pl || pl->playcnt <= 0) && plf)) {
+		OggArmResumeFromStartKeepSave();
+		if (og && ::IsWindow(og->GetSafeHwnd()))
+			RequestPlaybackRestart(og->GetSafeHwnd());
 		return;
 	}
+	if (!pl || pl->playcnt <= 0) return;
 	int idx = MpCurrentPlayIndex();
 	if (idx < 0) idx = 0;
 	else {
@@ -13189,11 +13243,8 @@ void COggDlg::play()
 		// 既に位置はメモリにある。途中再生ダイアログは出さない
 		if (pMainFrame1 && pGraphBuilder && ResumeDshowApplies(mode, filen)) {
 			pMainFrame1->plays2();
-			TryRunMediaControlQuick();
-			if (silentAa > 0.0) {
-				aa1_ = silentAa;
-				pMainFrame1->seek((LONGLONG)(((float)((float)aa1_ * 100.0f * 100000.0f))));
-			}
+			aa1_ = silentAa;
+			DougaRunThenSeek(silentAa);
 		}
 	}
 	else if (ResumeModeUsesPlayb(mode) || ResumeDshowApplies(mode, filen)) {
@@ -13210,24 +13261,25 @@ void COggDlg::play()
 				}
 			}
 			if (ResumeDshowApplies(mode, filen)) {
-				// 動画の途中位置は Run 後にシーク（下の TryRun 相当は呼び出し側）
-				// ここでは plays2 のみ。シークは呼び出し側で Run 後に行う想定だが、
-				// play() 内のこの経路では直後に DS Play するため、ここで Run→seek する。
-				TryRunMediaControlQuick();
+				double resumeAa = 0.0;
 				if (f123.Open(ResumeSavePathRead(filen), CFile::modeRead | CFile::shareDenyWrite, NULL) == TRUE) {
-					f123.Read(&aa1_, sizeof(double));
+					f123.Read(&resumeAa, sizeof(double));
 					f123.Close();
-					if (pMainFrame1)
-						pMainFrame1->seek((LONGLONG)(((float)((float)aa1_ * 100.0f * 100000.0f))));
+					aa1_ = resumeAa;
 				}
+				DougaRunThenSeek(resumeAa);
 			}
 		}
 		else {
 			if (pMainFrame1 && pGraphBuilder)pMainFrame1->plays2();
+			if (ResumeDshowApplies(mode, filen))
+				TryRunMediaControlQuick();
 		}
 	}
 	else {
 		if (pMainFrame1) pMainFrame1->plays2();
+		if (ResumeDshowApplies(mode, filen))
+			TryRunMediaControlQuick();
 	}
 	syukai = 0;
 	fade1 = 0;
@@ -22052,7 +22104,7 @@ void COggDlg::dp(CString a)
 		pMainFrame1->ShowWindow(SW_HIDE);
 		pMainFrame1->play(0);
 		CFile f123;
-		if (flggg == 1 && f123.Open(ResumeSavePathRead(filen), CFile::modeRead | CFile::shareDenyWrite, NULL) == TRUE) {
+			if (flggg == 1 && f123.Open(ResumeSavePathRead(filen), CFile::modeRead | CFile::shareDenyWrite, NULL) == TRUE) {
 			f123.Close();
 			if (pMainFrame1 && pGraphBuilder)pMainFrame1->plays2();
 			if (mode == -10) {
@@ -22069,15 +22121,16 @@ void COggDlg::dp(CString a)
 					f123.Close();
 				}
 			}
-			// 途中再生シークは Run 後。PitchCorrect 導入直後＋Stopped での SetPositions が不安定
-			if (pMediaControl) { TryRunMediaControlQuick(); }
 			if (ResumeDshowApplies(mode, filen)) {
+				double resumeAa = 0.0;
 				if (f123.Open(ResumeSavePathRead(filen), CFile::modeRead | CFile::shareDenyWrite, NULL) == TRUE) {
-					f123.Read(&aa1_, sizeof(double));
+					f123.Read(&resumeAa, sizeof(double));
 					f123.Close();
-					if (pMainFrame1)
-						pMainFrame1->seek((LONGLONG)(((float)((float)aa1_ * 100.0f * 100000.0f))));
+					aa1_ = resumeAa;
 				}
+				DougaRunThenSeek(resumeAa);
+			} else if (pMediaControl) {
+				TryRunMediaControlQuick();
 			}
 		}
 		else {
@@ -26436,7 +26489,7 @@ void COggDlg::gamenkill()
 		if (pMainFrame1->GetSafeHwnd())
 			ScWgcReleaseWindow(pMainFrame1->GetSafeHwnd());
 		::SendMessage(pMainFrame1->m_hWnd, WM_CLOSE, NULL, NULL);
-		PumpUntilFlagOrTimeout(killw, 10000);
+		PumpUntilFlagOrTimeout(killw, 3000);
 		pMainFrame1 = NULL;
 		ResumePromptKillQueued();
 		InterlockedExchange(&g_inDougaTeardown, 0);
@@ -28704,16 +28757,15 @@ void COggDlg::OnRestart()
 			if (flggg == 1 && f123.Open(ResumeSavePathRead(filen), CFile::modeRead | CFile::shareDenyWrite, NULL) == TRUE) {
 				f123.Close();
 				if (pMainFrame1 && pGraphBuilder)pMainFrame1->plays2();
-				TryRunMediaControlQuick();
-				// 途中再生シークは Run 後（PitchCorrect 張り替え直後の Stopped シークを避ける）
+				double resumeAa = 0.0;
 				if (ResumeDshowApplies(mode, filen)) {
 					if (f123.Open(ResumeSavePathRead(filen), CFile::modeRead | CFile::shareDenyWrite, NULL) == TRUE) {
-						f123.Read(&aa1_, sizeof(double));
+						f123.Read(&resumeAa, sizeof(double));
 						f123.Close();
-						if (pMainFrame1)
-							pMainFrame1->seek((LONGLONG)(((float)((float)aa1_ * 100.0f * 100000.0f))));
+						aa1_ = resumeAa;
 					}
 				}
+				DougaRunThenSeek(resumeAa);
 			}
 			else {
 				if (pMainFrame1 && pGraphBuilder)pMainFrame1->plays2();

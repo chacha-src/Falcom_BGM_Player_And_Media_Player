@@ -1,4 +1,4 @@
-﻿// CMediaPlayerDlg.cpp : メディアプレイヤーモード画面(張りぼて)とモード選択ダイアログ
+// CMediaPlayerDlg.cpp : メディアプレイヤーモード画面(張りぼて)とモード選択ダイアログ
 //
 // 実体は COggDlg(og->) と CPlayList(pl->)。ここは表示と操作の取り次ぎだけを行う。
 // メディアプレイヤーモード中は og / pl のウィンドウを非表示にして裏で生かしておく。
@@ -6971,7 +6971,8 @@ void CMediaPlayerDlg::OnPlSel()
 	if (pl->m_tempMode) return;
 	int sel = m_plsel.GetCurSel();
 	if (sel < 0) return;
-	if (sel == savedata.playlistnum && pl->pc != NULL && pl->playcnt > 0)
+	const int fileCnt = pl->GetPlaylistFileCount();
+	if (sel == savedata.playlistnum && sel < fileCnt && pl->pc != NULL && pl->playcnt > 0)
 		return;
 	changeflg = TRUE;
 	pl->m_listchange.SetCurSel(sel);

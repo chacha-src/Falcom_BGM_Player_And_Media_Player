@@ -455,8 +455,8 @@ void CS3rHelpDlg::OnPaint()
 		L"Buiten vrij; stuwkracht 0 = reset (HP blijft). Obstakels alleen HP.",
 		L"Poza pasem wolno; ciąg 0 = reset (HP bez zmian). Przeszkody tylko HP.",
 		L"Bant dışı serbest; itki 0 = dönüş (HP aynı). Engeller yalnız HP."));
-	line(LL14(L"右のミニマップ下に順位パネル（名前・順位・直近LAPタイム）。自機行だけ色が違う。ゴール後は表彰台で1〜3位を表示。",
-		L"Standings under the minimap (name/rank/recent LAP times). Your row is tinted. After finish: podium 1–3.",
+	line(LL14(L"右のミニマップ下に順位パネル（名前の右へLAPを2行・最大4枠。入りきらない周は出さない）。自機行だけ色が違う。ゴール後は表彰台で1〜3位を表示。",
+		L"Standings under the minimap (name/rank; up to 4 recent LAP times in two rows). Your row is tinted. After finish: podium 1–3.",
 		L"Classement sous la minimap (nom/rang/tours). Votre ligne est teintée. Après: podium 1–3.",
 		L"Classifica sotto minimap (nome/grado/giri). La tua riga è evidenziata. Poi podio 1–3.",
 		L"Clasificación bajo el minimapa (nombre/puesto/vueltas). Tu fila resalta. Luego podio 1–3.",
@@ -588,15 +588,19 @@ BOOL CS3rView::CreateShaders()
 		"P VST(V x){P o;o.p=x.p;o.n=x.n;o.uv=x.uv;o.c=x.c;return o;}"
 		"struct HC{float e[4]:SV_TessFactor;float i[2]:SV_InsideTessFactor;};"
 		"HC HPC(InputPatch<P,4> p,uint id:SV_PrimitiveID){HC o;float3 c=(p[0].p+p[1].p+p[2].p+p[3].p)*.25;float d=distance(c,Eye.xyz);"
-		"float tf=(LightDir.w<.5)?16.:lerp(26.,2.,saturate((d-2.)/18.));tf=clamp(tf,1.,26.);"
+		"float tf=(LightDir.w<.5)?64.:lerp(64.,2.,saturate((d-2.)/18.));tf=clamp(tf,1.,64.);"
 		"o.e[0]=o.e[1]=o.e[2]=o.e[3]=tf;o.i[0]=o.i[1]=tf;return o;}"
 		"[domain(\"quad\")][partitioning(\"fractional_even\")][outputtopology(\"triangle_cw\")][outputcontrolpoints(4)][patchconstantfunc(\"HPC\")]"
 		"P HST(InputPatch<P,4> p,uint i:SV_OutputControlPointID,uint id:SV_PrimitiveID){return p[i];}"
+		"float hash(float2 p){return frac(sin(dot(p,float2(12.9898,78.233)))*43758.5453);}"
+		"float noise(float2 p){float2 i=floor(p),f=frac(p);float a=hash(i),b=hash(i+float2(1,0)),c=hash(i+float2(0,1)),d=hash(i+float2(1,1));"
+		"float2 u=f*f*(3.-2.*f);return lerp(a,b,u.x)+(c-a)*u.y*(1.-u.x)+(d-b)*u.x*u.y;}"
+		"float fbm(float2 p){float f=0.,a=0.5;for(int i=0;i<4;i++){f+=a*noise(p);p*=2.;a*=.5;}return f;}"
 		"[domain(\"quad\")]D DST(HC h,float2 q:SV_DomainLocation,const OutputPatch<P,4> p){"
 		"P a,b,o;a.p=lerp(p[0].p,p[1].p,q.x);b.p=lerp(p[3].p,p[2].p,q.x);o.p=lerp(a.p,b.p,q.y);"
 		"a.n=lerp(p[0].n,p[1].n,q.x);b.n=lerp(p[3].n,p[2].n,q.x);o.n=normalize(lerp(a.n,b.n,q.y));"
 		"a.uv=lerp(p[0].uv,p[1].uv,q.x);b.uv=lerp(p[3].uv,p[2].uv,q.x);o.uv=lerp(a.uv,b.uv,q.y);o.c=p[0].c;"
-		"float nse=NoiseMap.SampleLevel(SL,o.uv*3.+Misc.w*.02,0).r;float bump=(nse-.45);"
+		"float nse=fbm(o.uv*6.+Misc.w*.02);float bump=(nse-.45);"
 		"float d=distance(o.p,Eye.xyz);float amp=lerp(.18,.02,saturate((d-3.)/20.));"
 		"o.p+=o.n*bump*amp;float3 nn=normalize(o.n+float3(bump,bump*.5,bump)*.8*amp);"
 		"D z;z.w=o.p;z.n=nn;z.uv=o.uv;z.c=o.c;z.p=mul(float4(o.p,1),VP);return z;}"
@@ -618,6 +622,8 @@ BOOL CS3rView::CreateShaders()
 		"float4 PSH(HO i):SV_Target{if(i.uv.x<-0.5)return i.c;float4 t=T0.Sample(SL,i.uv);return float4(t.rgb*i.c.rgb,t.a*i.c.a);}"
 		"float4 PSLINE(HO i):SV_Target{float t=saturate(1.-abs(i.uv.y-.5)*2.4);float cap=saturate(min(i.uv.x,1.-i.uv.x)*10.);return float4(i.c.rgb,i.c.a*t*cap);}"
 		"float4 PSS(D i):SV_Target{float3 n=normalize(i.n);float3 l=normalize(LightDir.xyz);float sh=ShadowAt(i.w,n);"
+		"float nz=fbm(i.w.xz*12.+i.w.y*10.+Misc.w*.02)*0.15;"
+		"n=normalize(n+float3(nz,nz*0.5,nz)*0.8);"
 		"float3 v=normalize(Eye.xyz-i.w);float nd=lerp(.32,max(saturate(dot(n,l)),.24),sh);"
 		"float3 tex=T0.Sample(SL,i.w.xz*0.00115).rgb;"
 		"float3 base=i.c.rgb*(0.9+0.1*tex);"
@@ -626,8 +632,12 @@ BOOL CS3rView::CreateShaders()
 		"float d=length(Eye.xyz-i.w),fg=saturate((d-Fog.x)/max(.01,Fog.y-Fog.x));fg=fg*fg*(3-2*fg);"
 		"return float4(lerp(c,float3(.55,.7,.92),fg*.45),saturate(i.c.a));}"
 		"float4 PSC(D i):SV_Target{float3 n=normalize(i.n);float3 l=normalize(LightDir.xyz);float sh=ShadowAt(i.w,n);"
-		"float3 v=normalize(Eye.xyz-i.w);float nd=lerp(.48,max(saturate(dot(n,l)),.34),sh);"
-		"float3 albedo=T0.Sample(SL,i.uv).rgb;float3 base=saturate(i.c.rgb*albedo*1.12);"
+		"float3 v=normalize(Eye.xyz-i.w);"
+		"float3 albedo=T0.Sample(SL,i.uv).rgb;"
+		"float nz=(albedo.r-0.5)*0.2 + fbm(i.w.xz*12.+i.w.y*10.+Misc.w*.02)*0.15;"
+		"n=normalize(n+float3(nz,nz,nz));"
+		"float nd=lerp(.48,max(saturate(dot(n,l)),.34),sh);"
+		"float3 base=saturate(i.c.rgb*albedo*1.12);"
 		"float3 env=Env.Sample(SL,reflect(-v,n)).rgb;float fr=pow(1-saturate(dot(n,v)),2.4);"
 		"float sp=pow(saturate(dot(reflect(-l,n),v)),52)*sh;"
 		"float3 c=base*(0.42+0.58*nd)+env*(.1+fr*.26)+float3(1,.96,.9)*sp*.55;"
@@ -645,10 +655,11 @@ BOOL CS3rView::CreateShaders()
 		"float th=Eye.w;float3 tone=float3(1.02,.98,.96);if(th>6.5)tone=float3(1.05,.92,.85);else if(th>5.5)tone=float3(.9,1.02,1.08);"
 		"else if(th>4.5)tone=float3(.88,.92,1.08);else if(th>3.5)tone=float3(.95,.95,1.02);else if(th>2.5)tone=float3(1.0,.9,.85);"
 		"else if(th>1.5)tone=float3(.95,1.02,.92);c.rgb=saturate(c.rgb*tone);if(Misc.x>0.01)c.rgb=lerp(c.rgb,1,Misc.x*.35);return c;}"
-		"RWTexture2D<float4> NoiseOut:register(u0);[numthreads(8,8,1)]void CSNoise(uint3 id:SV_DispatchThreadID){"
+		"RWTexture2D<float4> NoiseOut:register(u0);"
+		"[numthreads(8,8,1)]void CSNoise(uint3 id:SV_DispatchThreadID){"
 		"uint2 p=id.xy;if(p.x>=64||p.y>=64)return;float2 uv=(float2(p)+.5)/64.;"
-		"float n=frac(sin(dot(uv,float2(12.9898,78.233))+Misc.w)*43758.5453);"
-		"float n2=frac(sin(dot(uv*2.7,float2(39.7,11.3))+n)*23421.6);"
+		"float n=fbm(uv*6.+Misc.w*0.2);"
+		"float n2=fbm(uv*12.-Misc.w*0.3);"
 		"float d=length(uv-.5);NoiseOut[p]=float4(n,n2,saturate(1.-d*1.4),1);}";
 
 	ID3DBlob *b[12]={0}, *err=NULL;
@@ -718,10 +729,31 @@ fail_sh:
 BOOL CS3rView::CreateProcTextures()
 {
 	auto hash=[&](int x,int y,int s)->int{return ((x*73856093)^(y*19349663)^(s*83492791))&255;};
+	auto noise = [&](float x, float y, int s) -> float {
+		int ix = (int)floorf(x); float fx = x - ix;
+		int iy = (int)floorf(y); float fy = y - iy;
+		float u = fx * fx * (3.f - 2.f * fx);
+		float v = fy * fy * (3.f - 2.f * fy);
+		auto h = [&](int i, int j) { return (float)hash(i, j, s) * (1.f / 255.f); };
+		float n00 = h(ix, iy), n10 = h(ix + 1, iy);
+		float n01 = h(ix, iy + 1), n11 = h(ix + 1, iy + 1);
+		float nx0 = n00 + u * (n10 - n00);
+		float nx1 = n01 + u * (n11 - n01);
+		return nx0 + v * (nx1 - nx0);
+	};
+	auto fbm = [&](float x, float y, int s, int oct) -> float {
+		float val = 0.f; float amp = 1.f; float maxAmp = 0.f;
+		for (int i = 0; i < oct; i++) {
+			val += noise(x, y, s + i) * amp;
+			maxAmp += amp;
+			amp *= 0.5f;
+			x *= 2.f; y *= 2.f;
+		}
+		return val / maxAmp;
+	};
 	// 低周波のみ（画素単位ノイズは機体/地形の「UV破綻」に見える）
 	auto softN=[&](int x,int y,int s)->int{
-		int a=hash(x/6,y/6,s)-128, b=hash(x/12,y/12,s+17)-128, c=hash(x/24,y/24,s+41)-128;
-		return (a*2+b*3+c)/6;
+		return (int)(fbm((float)x * 0.1f, (float)y * 0.1f, s, 3) * 255.f) - 128;
 	};
 	const int W=256,H=256;
 	DWORD* pix=new (std::nothrow) DWORD[W*H];
@@ -987,45 +1019,47 @@ BOOL CS3rView::BakeStandingsTexture(const S3rStandRow* rows, int nRows)
 	if (!m_dev || !rows || nRows < 1) return FALSE;
 	ReleaseStandingsTexture();
 	if (nRows > 12) nRows = 12;
-	const int rowH = 128;
-	const int namePx = 34;
-	const int lapPx = 20;
-	const int lapLineH = 26;
+	const int rowH = 72;
 	const int w = 400, h = nRows * rowH + 8;
 	Soft3DTextD2DCanvas* cv = Soft3DTextD2D_Begin(w, h);
 	if (!cv) return FALSE;
 	for (int i = 0; i < nRows; i++) {
 		const S3rStandRow& r = rows[i];
-		float y0 = (float)(6 + i * rowH);
+		float y0 = (float)(4 + i * rowH);
 		BYTE aBg = r.isPlayer ? (BYTE)230 : (BYTE)185;
 		BYTE br = r.isPlayer ? 28 : 10, bg = r.isPlayer ? 48 : 14, bb = r.isPlayer ? 72 : 22;
-		Soft3DTextD2D_FillRect(cv, 3.f, y0, (float)(w - 6), (float)(rowH - 6), aBg, br, bg, bb);
+		Soft3DTextD2D_FillRect(cv, 3.f, y0, (float)(w - 6), (float)(rowH - 4), aBg, br, bg, bb);
 		BYTE cr = (BYTE)(r.cr * 255.f), cg = (BYTE)(r.cg * 255.f), cb = (BYTE)(r.cb * 255.f);
-		float cx = 30.f, cy = y0 + 20.f;
-		Soft3DTextD2D_FillEllipse(cv, cx, cy, 12.f, 10.f, 255, cr, cg, cb);
-		Soft3DTextD2D_FillTriangle(cv, cx - 16.f, cy, cx - 2.f, cy - 8.f, cx - 2.f, cy + 8.f, 255, cr, cg, cb);
-		Soft3DTextD2D_FillTriangle(cv, cx + 16.f, cy, cx + 2.f, cy - 8.f, cx + 2.f, cy + 8.f, 255, cr, cg, cb);
+		float cx = 24.f, cy = y0 + (float)rowH * 0.5f;
+		Soft3DTextD2D_FillEllipse(cv, cx, cy, 11.f, 9.f, 255, cr, cg, cb);
+		Soft3DTextD2D_FillTriangle(cv, cx - 14.f, cy, cx - 2.f, cy - 7.f, cx - 2.f, cy + 7.f, 255, cr, cg, cb);
+		Soft3DTextD2D_FillTriangle(cv, cx + 14.f, cy, cx + 2.f, cy - 7.f, cx + 2.f, cy + 7.f, 255, cr, cg, cb);
 		wchar_t rankBuf[24];
 		S3rRankWord(r.rank, rankBuf, _countof(rankBuf));
 		BYTE fr = r.isPlayer ? 255 : 250, fg = r.isPlayer ? 252 : 250, fb = r.isPlayer ? 215 : 255;
-		Soft3DTextD2D_DrawTextShadow(cv, r.name, 52.f, y0 + 2.f, 230.f, 38.f,
-			(float)namePx, 1, 0, 1, 255, fr, fg, fb, 1.8f, 1.8f, 200, 0, 0, 0);
-		Soft3DTextD2D_DrawTextShadow(cv, rankBuf, 270.f, y0 + 2.f, 120.f, 38.f,
-			(float)namePx, 1, 2, 1, 255, fr, fg, fb, 1.8f, 1.8f, 200, 0, 0, 0);
+		Soft3DTextD2D_DrawTextShadow(cv, r.name, 42.f, y0 + 4.f, 86.f, (float)(rowH - 10),
+			24.f, 1, 0, 1, 255, fr, fg, fb, 1.6f, 1.6f, 200, 0, 0, 0);
+		Soft3DTextD2D_DrawTextShadow(cv, rankBuf, 324.f, y0 + 4.f, 70.f, (float)(rowH - 10),
+			20.f, 1, 2, 1, 255, fr, fg, fb, 1.6f, 1.6f, 200, 0, 0, 0);
 		if (r.retired) {
 			const wchar_t* retire = LL14(L"リタイア", L"RETIRED", L"ABANDON", L"RITIRATO", L"ABANDONO",
 				L"리타이어", L"退赛", L"انسحاب", L"СОШЁЛ", L"AUFGABE", L"ABANDONO", L"OPGEGEVEN", L"WYCOFANY", L"ÇEKİLDİ");
-			Soft3DTextD2D_DrawTextShadow(cv, retire, 52.f, y0 + 48.f, 340.f, 56.f,
-				24.f, 1, 0, 1, 255, 255, 170, 140, 1.4f, 1.4f, 200, 0, 0, 0);
+			Soft3DTextD2D_DrawTextShadow(cv, retire, 130.f, y0 + 16.f, 190.f, 40.f,
+				20.f, 1, 0, 1, 255, 255, 170, 140, 1.4f, 1.4f, 200, 0, 0, 0);
 		} else {
-			for (int k = 0; k < 3; k++) {
+			const int nLap = r.lapShowN < 0 ? 0 : (r.lapShowN > 4 ? 4 : r.lapShowN);
+			const float lapX0 = 130.f, colW = 94.f, lapH = 26.f;
+			const float lapY0 = y0 + ((float)rowH - lapH * 2.f) * 0.5f;
+			for (int k = 0; k < nLap; k++) {
 				int lapNo = r.lapNo[k] > 0 ? r.lapNo[k] : (k + 1);
 				float sec = r.lapSec[k];
 				wchar_t one[40];
-				if (sec >= 0.f) swprintf_s(one, L"LAP%d  %.2f", lapNo, sec);
-				else swprintf_s(one, L"LAP%d  ----", lapNo);
-				Soft3DTextD2D_DrawTextShadow(cv, one, 52.f, y0 + 42.f + (float)(lapLineH * k), 340.f, (float)lapLineH,
-					(float)lapPx, 1, 0, 1, 255, 210, 230, 245, 1.4f, 1.4f, 200, 0, 0, 0);
+				if (sec >= 0.f) swprintf_s(one, L"L%d %.1f", lapNo, sec);
+				else swprintf_s(one, L"L%d ----", lapNo);
+				int col = k & 1;
+				int row = k >> 1;
+				Soft3DTextD2D_DrawTextShadow(cv, one, lapX0 + (float)col * colW, lapY0 + (float)row * lapH, colW - 2.f, lapH,
+					16.f, 1, 0, 1, 255, 210, 230, 245, 1.3f, 1.3f, 200, 0, 0, 0);
 			}
 		}
 	}
@@ -1047,7 +1081,7 @@ BOOL CS3rView::BakeBubbleTexture(const S3rBubbleRow* rows, int nRows)
 	ReleaseBubbleTexture();
 	if (!m_dev || !rows || nRows < 1) return FALSE;
 	if (nRows > S3R_BUBBLE_MAX) nRows = S3R_BUBBLE_MAX;
-		const int cellW = 384, cellH = 80, cols = 4;
+	const int cellW = 384, cellH = 80, cols = 4;
 	const int rowsN = (nRows + cols - 1) / cols;
 	const int w = cellW * cols, h = cellH * rowsN;
 	Soft3DTextD2DCanvas* cv = Soft3DTextD2D_Begin(w, h);
@@ -1556,6 +1590,8 @@ float CSoft3DRaceDlg::GroundY(float x, float z) const
 	else if (m_themeActive == THEME_FOREST) h += 2.4f * sinf(x * 0.038f) * cosf(z * 0.033f) + 1.8f * sinf((x-z)*0.02f);
 	else if (m_themeActive == THEME_NIGHT) h += 1.5f * sinf(x * 0.03f);
 	else if (m_themeActive == THEME_OIL) h += 1.2f * fabsf(sinf(x * 0.05f));
+	// コースを少し低くして、地面や木々との距離を近づける
+	h += 12.f; 
 	return h;
 }
 
@@ -1747,7 +1783,7 @@ void CSoft3DRaceDlg::BuildCraftMeshes()
 		if (m_craftNi + 3 > S3R_CRAFT_IMAX) return;
 		m_craftIdx[m_craftNi++]=a; m_craftIdx[m_craftNi++]=b; m_craftIdx[m_craftNi++]=c;
 	};
-	const int rings = 14, segs = 18;
+	const int rings = 28, segs = 36;
 	const UINT base = 0;
 	for (int i = 0; i <= rings; i++) {
 		float t = (float)i / (float)rings;
@@ -1758,6 +1794,7 @@ void CSoft3DRaceDlg::BuildCraftMeshes()
 		for (int j = 0; j <= segs; j++) {
 			float a = (float)j / (float)segs * (float)(M_PI * 2.0);
 			float x = cosf(a) * rad, z = sinf(a) * rad;
+			float dx = cosf(a) * rad; float dz = sinf(a) * rad;
 			float nx=cosf(a), ny=(t<0.5f?0.35f:-0.15f), nz=sinf(a); S3rNorm3(nx,ny,nz);
 			emitV(x, yy, z, nx, ny, nz, (float)j/segs, t, 1,1,1,1);
 		}
@@ -1770,7 +1807,7 @@ void CSoft3DRaceDlg::BuildCraftMeshes()
 	// wings
 	auto wing = [&](float side){
 		UINT w0 = (UINT)m_craftNv;
-		const int wu=10, wv=6;
+		const int wu=20, wv=16;
 		for (int v=0;v<=wv;v++) for (int u=0;u<=wu;u++) {
 			float uu=(float)u/wu, vv=(float)v/wv;
 			float x = side * (0.25f + uu * 1.15f);
@@ -1787,7 +1824,7 @@ void CSoft3DRaceDlg::BuildCraftMeshes()
 	wing(1.f); wing(-1.f);
 	// canopy bubble
 	UINT c0=(UINT)m_craftNv;
-	const int cr=10, cs=14;
+	const int cr=20, cs=28;
 	for (int i=0;i<=cr;i++){
 		float t=(float)i/cr; float ph=t*(float)M_PI*.55f;
 		for (int j=0;j<=cs;j++){
@@ -1831,8 +1868,12 @@ void CSoft3DRaceDlg::BuildObstacleMesh(int theme)
 		for(int k=0;k<=segsN;k++){
 			float a=(float)k/segsN*(float)(M_PI*2);
 			float c=cosf(a), s=sinf(a);
-			emitV(c*rad0,y0,s*rad0,c,0.35f,s,(float)k/segsN,0,rr,gg,bb,1);
-			emitV(c*rad1,y1,s*rad1,c,0.55f,s,(float)k/segsN,1,rr,gg,bb,1);
+			float dx = c*(rad1-rad0), dy = y1-y0, dz = s*(rad1-rad0);
+			float ny = -sqrtf(dx*dx+dz*dz)/dy;
+			float nx=c, nz=s;
+			float nl=sqrtf(nx*nx+ny*ny+nz*nz); nx/=nl; ny/=nl; nz/=nl;
+			emitV(c*rad0,y0,s*rad0,nx,ny,nz,(float)k/segsN,0,rr,gg,bb,1);
+			emitV(c*rad1,y1,s*rad1,nx,ny,nz,(float)k/segsN,1,rr,gg,bb,1);
 		}
 		for(int k=0;k<segsN;k++){
 			UINT a=baseV+(UINT)(k*2), b=a+1, c=a+2, d=c+1;
@@ -1840,95 +1881,98 @@ void CSoft3DRaceDlg::BuildObstacleMesh(int theme)
 		}
 	};
 	// AABB は常に min/max 正規化（逆転座標で長針ポリゴンが出ないように）
-	auto box=[&](float x0,float y0,float z0,float x1,float y1,float z1,float rr,float gg,float bb){
+	auto box=[&](float x0,float y0,float z0,float x1,float y1,float z1,float rr,float gg,float bb, int sub=1){
 		float xa=(x0<x1)?x0:x1, xb=(x0<x1)?x1:x0;
 		float ya=(y0<y1)?y0:y1, yb=(y0<y1)?y1:y0;
 		float za=(z0<z1)?z0:z1, zb=(z0<z1)?z1:z0;
 		if (xb-xa < 1e-4f || yb-ya < 1e-4f || zb-za < 1e-4f) return;
-		UINT b0=(UINT)m_obsNv;
 		auto v=[&](float x,float y,float z,float nx,float ny,float nz){emitV(x,y,z,nx,ny,nz,0,0,rr,gg,bb,1);};
-		v(xa,ya,za,0,-1,0);v(xb,ya,za,0,-1,0);v(xb,ya,zb,0,-1,0);v(xa,ya,zb,0,-1,0);
-		v(xa,yb,za,0,1,0);v(xa,yb,zb,0,1,0);v(xb,yb,zb,0,1,0);v(xb,yb,za,0,1,0);
-		emitTri(b0,b0+1,b0+2);emitTri(b0,b0+2,b0+3);
-		emitTri(b0+4,b0+5,b0+6);emitTri(b0+4,b0+6,b0+7);
-		UINT s=(UINT)m_obsNv;
-		v(xa,ya,za,-1,0,0);v(xa,yb,za,-1,0,0);v(xa,yb,zb,-1,0,0);v(xa,ya,zb,-1,0,0);
-		emitTri(s,s+1,s+2);emitTri(s,s+2,s+3);
-		s=(UINT)m_obsNv;
-		v(xb,ya,za,1,0,0);v(xb,ya,zb,1,0,0);v(xb,yb,zb,1,0,0);v(xb,yb,za,1,0,0);
-		emitTri(s,s+1,s+2);emitTri(s,s+2,s+3);
-		s=(UINT)m_obsNv;
-		v(xa,ya,za,0,0,-1);v(xb,ya,za,0,0,-1);v(xb,yb,za,0,0,-1);v(xa,yb,za,0,0,-1);
-		emitTri(s,s+1,s+2);emitTri(s,s+2,s+3);
-		s=(UINT)m_obsNv;
-		v(xa,ya,zb,0,0,1);v(xa,yb,zb,0,0,1);v(xb,yb,zb,0,0,1);v(xb,ya,zb,0,0,1);
-		emitTri(s,s+1,s+2);emitTri(s,s+2,s+3);
+		
+		auto face=[&](float x0,float y0,float z0, float x1,float y1,float z1, float x2,float y2,float z2, float x3,float y3,float z3, float nx,float ny,float nz) {
+			for(int j=0;j<sub;j++)for(int i=0;i<sub;i++){
+				float u0=(float)i/sub, u1=(float)(i+1)/sub;
+				float v0=(float)j/sub, v1=(float)(j+1)/sub;
+				float p0x=x0+(x1-x0)*u0+(x3-x0)*v0, p0y=y0+(y1-y0)*u0+(y3-y0)*v0, p0z=z0+(z1-z0)*u0+(z3-z0)*v0;
+				float p1x=x0+(x1-x0)*u1+(x3-x0)*v0, p1y=y0+(y1-y0)*u1+(y3-y0)*v0, p1z=z0+(z1-z0)*u1+(z3-z0)*v0;
+				float p2x=x0+(x1-x0)*u1+(x3-x0)*v1, p2y=y0+(y1-y0)*u1+(y3-y0)*v1, p2z=z0+(z1-z0)*u1+(z3-z0)*v1;
+				float p3x=x0+(x1-x0)*u0+(x3-x0)*v1, p3y=y0+(y1-y0)*u0+(y3-y0)*v1, p3z=z0+(z1-z0)*u0+(z3-z0)*v1;
+				UINT b0=(UINT)m_obsNv;
+				v(p0x,p0y,p0z,nx,ny,nz); v(p1x,p1y,p1z,nx,ny,nz); v(p2x,p2y,p2z,nx,ny,nz); v(p3x,p3y,p3z,nx,ny,nz);
+				emitTri(b0,b0+1,b0+2); emitTri(b0,b0+2,b0+3);
+			}
+		};
+		face(xa,ya,zb, xb,ya,zb, xb,ya,za, xa,ya,za, 0,-1,0);
+		face(xa,yb,za, xb,yb,za, xb,yb,zb, xa,yb,zb, 0,1,0);
+		face(xa,ya,za, xa,yb,za, xa,yb,zb, xa,ya,zb, -1,0,0);
+		face(xb,ya,zb, xb,yb,zb, xb,yb,za, xb,ya,za, 1,0,0);
+		face(xa,ya,zb, xa,yb,zb, xb,yb,zb, xb,ya,zb, 0,0,1);
+		face(xb,ya,za, xb,yb,za, xa,yb,za, xa,ya,za, 0,0,-1);
 	};
 
 	if (theme == THEME_FOREST) {
-		cyl(0.f, 2.6f, 0.34f, 0.42f, 0.26f, 0.12f, 16, 0.f, 0.f);
-		cone(1.7f, 4.4f, 1.45f, 0.2f, 0.32f, 0.78f, 0.3f, 18);
-		cone(3.0f, 5.4f, 1.05f, 0.12f, 0.28f, 0.72f, 0.26f, 16);
-		cone(4.1f, 6.2f, 0.65f, 0.05f, 0.4f, 0.88f, 0.35f, 14);
-		box(-0.85f,0,-0.85f,0.85f,0.16f,0.85f,0.35f,0.55f,0.25f);
+		cyl(0.f, 2.6f, 0.34f, 0.42f, 0.26f, 0.12f, 32, 0.f, 0.f);
+		cone(1.7f, 4.4f, 1.45f, 0.2f, 0.32f, 0.78f, 0.3f, 32);
+		cone(3.0f, 5.4f, 1.05f, 0.12f, 0.28f, 0.72f, 0.26f, 32);
+		cone(4.1f, 6.2f, 0.65f, 0.05f, 0.4f, 0.88f, 0.35f, 32);
+		box(-0.85f,0,-0.85f,0.85f,0.16f,0.85f,0.35f,0.55f,0.25f, 2);
 	} else if (theme == THEME_RUINS) {
 		// 細切れアーチは非等方スケールで針状になるので、塔＋梁のソリッドに変更
-		box(-0.85f,0,-0.85f,0.85f,0.35f,0.85f,0.62f,0.56f,0.46f);
-		box(-0.55f,0.35f,-0.55f,0.55f,3.4f,0.55f,0.7f,0.64f,0.52f);
-		box(-1.35f,3.15f,-0.4f,1.35f,3.55f,0.4f,0.68f,0.62f,0.5f);
-		box(-1.25f,0,-0.28f,-0.85f,3.2f,0.28f,0.58f,0.52f,0.42f);
-		box(0.85f,0,-0.28f,1.25f,3.2f,0.28f,0.58f,0.52f,0.42f);
-		box(-0.35f,3.55f,-0.35f,0.35f,4.1f,0.35f,0.66f,0.6f,0.48f);
+		box(-0.85f,0,-0.85f,0.85f,0.35f,0.85f,0.62f,0.56f,0.46f, 2);
+		box(-0.55f,0.35f,-0.55f,0.55f,3.4f,0.55f,0.7f,0.64f,0.52f, 4);
+		box(-1.35f,3.15f,-0.4f,1.35f,3.55f,0.4f,0.68f,0.62f,0.5f, 2);
+		box(-1.25f,0,-0.28f,-0.85f,3.2f,0.28f,0.58f,0.52f,0.42f, 2);
+		box(0.85f,0,-0.28f,1.25f,3.2f,0.28f,0.58f,0.52f,0.42f, 2);
+		box(-0.35f,3.55f,-0.35f,0.35f,4.1f,0.35f,0.66f,0.6f,0.48f, 2);
 	} else if (theme == THEME_OIL) {
-		cyl(0.f, 4.0f, 0.55f, 0.3f, 0.32f, 0.36f, 18, 0.f, 0.f);
-		cyl(3.7f, 4.35f, 0.8f, 0.9f, 0.55f, 0.18f, 14, 0.f, 0.f);
-		cyl(4.2f, 5.0f, 0.22f, 0.45f, 0.48f, 0.5f, 10, 0.f, 0.f);
-		box(-1.4f,0,-0.45f,-0.65f,1.9f,0.45f,0.38f,0.4f,0.44f);
-		box(0.65f,0,-0.4f,1.4f,1.35f,0.4f,0.42f,0.44f,0.48f);
-		box(-0.35f,1.9f,-0.35f,0.35f,2.2f,0.35f,0.95f,0.7f,0.25f);
+		cyl(0.f, 4.0f, 0.55f, 0.3f, 0.32f, 0.36f, 36, 0.f, 0.f);
+		cyl(3.7f, 4.35f, 0.8f, 0.9f, 0.55f, 0.18f, 28, 0.f, 0.f);
+		cyl(4.2f, 5.0f, 0.22f, 0.45f, 0.48f, 0.5f, 24, 0.f, 0.f);
+		box(-1.4f,0,-0.45f,-0.65f,1.9f,0.45f,0.38f,0.4f,0.44f, 2);
+		box(0.65f,0,-0.4f,1.4f,1.35f,0.4f,0.42f,0.44f,0.48f, 2);
+		box(-0.35f,1.9f,-0.35f,0.35f,2.2f,0.35f,0.95f,0.7f,0.25f, 2);
 		for (int i=0;i<6;i++) {
 			float a=(float)i/6.f*(float)(M_PI*2);
-			cyl(0.f, 0.4f, 0.1f, 0.55f, 0.35f, 0.15f, 8, cosf(a)*0.95f, sinf(a)*0.95f);
+			cyl(0.f, 0.4f, 0.1f, 0.55f, 0.35f, 0.15f, 16, cosf(a)*0.95f, sinf(a)*0.95f);
 		}
 	} else if (theme == THEME_NIGHT) {
-		box(-0.7f,0,-0.7f,0.7f,4.6f,0.7f,0.28f,0.32f,0.55f);
-		box(-0.9f,0,-0.9f,0.9f,0.3f,0.9f,0.22f,0.25f,0.4f);
+		box(-0.7f,0,-0.7f,0.7f,4.6f,0.7f,0.28f,0.32f,0.55f, 4);
+		box(-0.9f,0,-0.9f,0.9f,0.3f,0.9f,0.22f,0.25f,0.4f, 2);
 		for (int w=0;w<6;w++) {
 			float yy=0.5f+w*0.65f;
-			box(-0.5f,yy,-0.72f,-0.18f,yy+0.26f,-0.68f,1.f,0.92f,0.45f);
-			box(0.18f,yy,0.68f,0.5f,yy+0.26f,0.72f,1.f,0.88f,0.4f);
+			box(-0.5f,yy,-0.72f,-0.18f,yy+0.26f,-0.68f,1.f,0.92f,0.45f, 1);
+			box(0.18f,yy,0.68f,0.5f,yy+0.26f,0.72f,1.f,0.88f,0.4f, 1);
 		}
-		box(-0.18f,4.6f,-0.18f,0.18f,5.15f,0.18f,0.9f,0.3f,0.35f);
+		box(-0.18f,4.6f,-0.18f,0.18f,5.15f,0.18f,0.9f,0.3f,0.35f, 2);
 	} else if (theme == THEME_UNDER) {
-		cyl(0.f, 0.5f, 1.2f, 0.22f, 0.6f, 0.85f, 18, 0.f, 0.f);
-		cone(0.35f, 2.4f, 1.0f, 0.1f, 0.35f, 0.82f, 0.95f, 16);
-		cone(0.2f, 1.7f, 0.6f, 0.08f, 1.f, 0.5f, 0.75f, 12);
+		cyl(0.f, 0.5f, 1.2f, 0.22f, 0.6f, 0.85f, 32, 0.f, 0.f);
+		cone(0.35f, 2.4f, 1.0f, 0.1f, 0.35f, 0.82f, 0.95f, 32);
+		cone(0.2f, 1.7f, 0.6f, 0.08f, 1.f, 0.5f, 0.75f, 32);
 		for (int i=0;i<8;i++) {
 			float a=(float)i/8.f*(float)(M_PI*2);
-			cyl(0.f, 0.7f+0.25f*sinf(a*2.f), 0.07f, 0.3f, 0.9f, 0.7f, 6, cosf(a)*0.85f, sinf(a)*0.85f);
+			cyl(0.f, 0.7f+0.25f*sinf(a*2.f), 0.07f, 0.3f, 0.9f, 0.7f, 16, cosf(a)*0.85f, sinf(a)*0.85f);
 		}
 	} else if (theme == THEME_GRASS) {
-		cyl(0.f, 0.95f, 0.2f, 0.5f, 0.38f, 0.18f, 12, 0.f, 0.f);
-		cone(0.55f, 2.7f, 1.15f, 0.12f, 0.5f, 0.9f, 0.32f, 16);
-		cone(1.4f, 3.2f, 0.8f, 0.08f, 0.45f, 0.85f, 0.3f, 12);
-		box(-0.9f,0,-0.9f,0.9f,0.18f,0.9f,0.65f,0.82f,0.38f);
+		cyl(0.f, 0.95f, 0.2f, 0.5f, 0.38f, 0.18f, 32, 0.f, 0.f);
+		cone(0.55f, 2.7f, 1.15f, 0.12f, 0.5f, 0.9f, 0.32f, 32);
+		cone(1.4f, 3.2f, 0.8f, 0.08f, 0.45f, 0.85f, 0.3f, 32);
+		box(-0.9f,0,-0.9f,0.9f,0.18f,0.9f,0.65f,0.82f,0.38f, 2);
 	} else if (theme == THEME_MESA) {
 		// 段丘は太いブロックのみ（薄い板や針を作らない）
-		box(-1.4f,0,-1.4f,1.4f,0.7f,1.4f,1.f,0.52f,0.28f);
-		box(-1.0f,0.7f,-1.0f,1.0f,1.8f,1.0f,0.98f,0.58f,0.32f);
-		box(-0.65f,1.8f,-0.65f,0.65f,2.7f,0.65f,0.95f,0.5f,0.26f);
-		box(-0.35f,2.7f,-0.35f,0.35f,3.25f,0.35f,0.9f,0.45f,0.22f);
-		box(-1.9f,0,0.7f,-1.2f,1.0f,1.4f,0.85f,0.4f,0.22f);
-		box(1.15f,0,-1.7f,1.85f,1.15f,-1.0f,0.9f,0.48f,0.25f);
+		box(-1.4f,0,-1.4f,1.4f,0.7f,1.4f,1.f,0.52f,0.28f, 3);
+		box(-1.0f,0.7f,-1.0f,1.0f,1.8f,1.0f,0.98f,0.58f,0.32f, 2);
+		box(-0.65f,1.8f,-0.65f,0.65f,2.7f,0.65f,0.95f,0.5f,0.26f, 2);
+		box(-0.35f,2.7f,-0.35f,0.35f,3.25f,0.35f,0.9f,0.45f,0.22f, 2);
+		box(-1.9f,0,0.7f,-1.2f,1.0f,1.4f,0.85f,0.4f,0.22f, 2);
+		box(1.15f,0,-1.7f,1.85f,1.15f,-1.0f,0.9f,0.48f,0.25f, 2);
 	} else { // cloud garden
-		cyl(0.4f, 1.4f, 1.05f, 0.95f, 0.95f, 1.f, 16, 0.f, 0.f);
-		cyl(1.0f, 2.05f, 0.85f, 1.f, 0.92f, 0.98f, 14, 0.f, 0.f);
-		cyl(1.6f, 2.55f, 0.6f, 1.f, 0.88f, 0.96f, 12, 0.f, 0.f);
-		cyl(2.1f, 2.9f, 0.38f, 1.f, 0.85f, 0.95f, 10, 0.f, 0.f);
-		box(-0.3f,0,-0.3f,0.3f,0.55f,0.3f,0.8f,0.95f,0.7f);
+		cyl(0.4f, 1.4f, 1.05f, 0.95f, 0.95f, 1.f, 32, 0.f, 0.f);
+		cyl(1.0f, 2.05f, 0.85f, 1.f, 0.92f, 0.98f, 32, 0.f, 0.f);
+		cyl(1.6f, 2.55f, 0.6f, 1.f, 0.88f, 0.96f, 32, 0.f, 0.f);
+		cyl(2.1f, 2.9f, 0.38f, 1.f, 0.85f, 0.95f, 32, 0.f, 0.f);
+		box(-0.3f,0,-0.3f,0.3f,0.55f,0.3f,0.8f,0.95f,0.7f, 2);
 		for (int i=0;i<6;i++) {
 			float a=(float)i/6.f*(float)(M_PI*2);
-			cyl(0.7f, 1.35f, 0.28f, 0.95f, 0.9f, 1.f, 10, cosf(a)*0.7f, sinf(a)*0.7f);
+			cyl(0.7f, 1.35f, 0.28f, 0.95f, 0.9f, 1.f, 16, cosf(a)*0.7f, sinf(a)*0.7f);
 		}
 	}
 }
@@ -1951,11 +1995,13 @@ void CSoft3DRaceDlg::PlaceObstaclesAndItems()
 		float gy=GroundY(px,pz);
 		int sec=((int)(t*m_knotN))%10;
 		float half=m_bandHalf;
-		float side = half * (2.1f + S3rRand01(rng)*0.55f);
-		float hs= (m_themeActive==THEME_FOREST)? (2.2f+S3rRand01(rng)*1.8f) : (1.7f+S3rRand01(rng)*1.1f);
-		float tall=(m_themeActive==THEME_FOREST)? (4.2f+S3rRand01(rng)*2.6f) : (3.0f+S3rRand01(rng)*2.0f);
-		addObs(px+bx*side, gy, pz+bz*side, atan2f(tx,tz), 0, hs*0.5f, tall, hs*0.5f, 1, 7.f, t, 1);
-		addObs(px-bx*side, gy, pz-bz*side, atan2f(tx,tz), 0, hs*0.5f, tall, hs*0.5f, 1, 7.f, t, 1);
+		float side = half * (1.1f + S3rRand01(rng)*0.9f);
+		float hs= (m_themeActive==THEME_FOREST)? (3.5f+S3rRand01(rng)*2.0f) : (2.4f+S3rRand01(rng)*1.5f);
+		float tall=(m_themeActive==THEME_FOREST)? (6.5f+S3rRand01(rng)*4.0f) : (4.5f+S3rRand01(rng)*3.0f);
+		float gyl = GroundY(px+bx*side, pz+bz*side) - 0.4f;
+		float gyr = GroundY(px-bx*side, pz-bz*side) - 0.4f;
+		addObs(px+bx*side, gyl, pz+bz*side, atan2f(tx,tz), 0, hs*0.5f, tall, hs*0.5f, 1, 7.f, t, 1);
+		addObs(px-bx*side, gyr, pz-bz*side, atan2f(tx,tz), 0, hs*0.5f, tall, hs*0.5f, 1, 7.f, t, 1);
 		// 頭上の梁（潜る／越える）
 		if ((sec==2||sec==3||sec==5||sec==7) && (g%2)==0) {
 			float topY = py + half * (0.95f + 0.55f * S3rRand01(rng));
@@ -1965,9 +2011,13 @@ void CSoft3DRaceDlg::PlaceObstaclesAndItems()
 		if ((g%5)==0) {
 			float gate = half * 0.72f;
 			float gh = 1.1f + S3rRand01(rng)*0.5f;
-			addObs(px+bx*gate, py - half*0.15f, pz+bz*gate, atan2f(tx,tz), 0, 0.35f, gh*2.2f, 0.35f, 3, 8.f, t, 1);
-			addObs(px-bx*gate, py - half*0.15f, pz-bz*gate, atan2f(tx,tz), 0, 0.35f, gh*2.2f, 0.35f, 3, 8.f, t, 1);
-			addObs(px, py + gh*1.1f, pz, atan2f(tx,tz), 0, gate*1.1f, 0.32f, 0.4f, 2, 7.f, t, 1);
+			float gyl = GroundY(px+bx*gate, pz+bz*gate) - 0.4f;
+			float gyr = GroundY(px-bx*gate, pz-bz*gate) - 0.4f;
+			float by1 = (gyl<py-half*0.15f)?gyl:py-half*0.15f;
+			float by2 = (gyr<py-half*0.15f)?gyr:py-half*0.15f;
+			addObs(px+bx*gate, by1, pz+bz*gate, atan2f(tx,tz), 0, 0.35f, gh*2.2f, 0.35f, 3, 8.f, t, 1);
+			addObs(px-bx*gate, by2, pz-bz*gate, atan2f(tx,tz), 0, 0.35f, gh*2.2f, 0.35f, 3, 8.f, t, 1);
+			addObs(px, (by1+by2)*0.5f + gh*1.1f, pz, atan2f(tx,tz), 0, gate*1.1f, 0.32f, 0.4f, 2, 7.f, t, 1);
 		}
 	}
 
@@ -1980,12 +2030,22 @@ void CSoft3DRaceDlg::PlaceObstaclesAndItems()
 		SplineFrame(t,px,py,pz,tx,ty,tz,nx,ny,nz,bx,by,bz);
 		float side = ((i&1)?1.f:-1.f);
 		float off = m_bandHalf * (1.05f + S3rRand01(rng)*0.55f);
-		float up = (S3rRand01(rng)*0.55f - 0.1f) * m_bandHalf;
-		float s = 0.55f + S3rRand01(rng)*0.7f;
-		float tall = s * (1.1f + S3rRand01(rng)*1.4f);
-		addObs(px + bx*side*off + nx*up*0.35f, py + ny*up*0.35f, pz + bz*side*off + nz*up*0.35f,
+		float s = 1.0f + S3rRand01(rng)*1.2f;
+		float tall = 2.8f + S3rRand01(rng)*3.5f;
+		float obsx = px + bx*side*off;
+		float obsz = pz + bz*side*off;
+		float obsy = GroundY(obsx, obsz) - 0.4f;
+		
+		int k = 0;
+		if (m_themeActive == THEME_FOREST) { k = 1; }
+		else if (m_themeActive == THEME_NIGHT) { k = 0; }
+		else if (m_themeActive == THEME_RUINS) { k = 1; }
+		else if (m_themeActive == THEME_MESA) { k = 1; }
+		else if (m_themeActive == THEME_UNDER) { k = 0; }
+
+		addObs(obsx, obsy, obsz,
 			atan2f(tx,tz) + (S3rRand01(rng)-0.5f)*0.4f, (S3rRand01(rng)-0.5f)*0.25f,
-			s, tall, s, 4, 9.f, t, 1);
+			s, tall, s, k, 9.f, t, 1);
 	}
 
 	// 低空ブロック／浮遊障害（高度テク）
@@ -1998,8 +2058,15 @@ void CSoft3DRaceDlg::PlaceObstaclesAndItems()
 		float lift = (S3rRand01(rng) < 0.5f)
 			? -m_bandHalf * (0.15f + S3rRand01(rng)*0.35f)  // 低空
 			:  m_bandHalf * (0.55f + S3rRand01(rng)*0.7f); // 高空
-		float s = 0.7f + S3rRand01(rng)*0.9f;
-		addObs(px+bx*lat+nx*lift, py+by*lat+ny*lift, pz+bz*lat+nz*lift,
+		float s = 1.2f + S3rRand01(rng)*1.5f;
+		
+		float obsx = px+bx*lat+nx*lift;
+		float obsz = pz+bz*lat+nz*lift;
+		float obsy = py+by*lat+ny*lift;
+		float gy = GroundY(obsx, obsz) - 0.4f;
+		if (obsy < gy + s * 0.5f) obsy = gy;
+
+		addObs(obsx, obsy, obsz,
 			atan2f(tx,tz), 0.f, s, s*0.7f, s, 5, 8.f, t, 1);
 	}
 
@@ -2018,16 +2085,30 @@ void CSoft3DRaceDlg::PlaceObstaclesAndItems()
 		float along = (S3rRand01(rng)*2.f-1.f)*(ring<0.55f?12.f:28.f);
 		float ox = px + bx * side * dist + tx * along;
 		float oz = pz + bz * side * dist + tz * along;
-		float gy = GroundY(ox, oz);
-		float s = 0.85f + S3rRand01(rng) * (ring<0.55f ? 1.5f : 2.4f);
-		float tall = s * (1.05f + S3rRand01(rng) * (ring<0.55f ? 1.15f : 1.55f));
+		float gy = GroundY(ox, oz) - 0.4f;
+		float s = 1.6f + S3rRand01(rng) * (ring<0.55f ? 2.5f : 3.8f);
+		float tall = s * (1.15f + S3rRand01(rng) * (ring<0.55f ? 1.35f : 1.75f));
 		if (m_themeActive == THEME_FOREST) tall *= 1.35f;
 		if (m_themeActive == THEME_NIGHT) tall *= 1.4f;
 		if (m_themeActive == THEME_RUINS) { s *= 1.1f; tall *= 1.15f; }
-		if (m_themeActive == THEME_CLOUD) { gy += 2.f + S3rRand01(rng)*14.f; tall *= 0.95f; }
+		if (m_themeActive == THEME_CLOUD) {
+			// Cloud needs things to float
+			gy += 2.f + S3rRand01(rng)*14.f;
+			tall *= 0.95f;
+		}
 		if (m_themeActive == THEME_MESA) { s *= 1.2f; tall *= 1.05f; }
 		if (m_themeActive == THEME_OIL) tall *= 1.25f;
-		addObs(ox, gy, oz, S3rRand01(rng)*(float)(M_PI*2), 0.f, s, tall, s, i%8, 0.f, t, 0);
+		
+		int k = 0;
+		float r = S3rRand01(rng);
+		if (m_themeActive == THEME_FOREST) { k = (r < 0.6f) ? 0 : 1; }
+		else if (m_themeActive == THEME_NIGHT) { k = (r < 0.5f) ? 0 : 1; }
+		else if (m_themeActive == THEME_RUINS) { k = (r < 0.33f) ? 0 : ((r < 0.66f) ? 1 : 2); }
+		else if (m_themeActive == THEME_MESA) { k = (r < 0.4f) ? 0 : 1; }
+		else if (m_themeActive == THEME_UNDER) { k = (r < 0.5f) ? 0 : 1; }
+		else { k = 0; }
+		
+		addObs(ox, gy, oz, S3rRand01(rng)*(float)(M_PI*2), 0.f, s, tall, s, k, 0.f, t, 0);
 	}
 
 	const int kinds[]={KIND_TEMPO,KIND_TEMPO_DN,KIND_PITCH_UP,KIND_PITCH_DN,KIND_NEXT,KIND_PREV,KIND_VOL_UP,KIND_VOL_DN,KIND_EQ,KIND_EQ_FLAT,KIND_REVERB,KIND_XFADE,KIND_RANDOM};
@@ -3227,15 +3308,29 @@ void CSoft3DRaceDlg::EnsureStandingsBake()
 		r.cg = kCraftColors[c.colorIdx][1];
 		r.cb = kCraftColors[c.colorIdx][2];
 		r.retired = c.retired ? 1 : 0;
-		// 常に直近3枠（未計測は ----）。4周目以降は枠が LAP2/3/4… とずれる
+		// 2行×2列で最大4枠。上段 L1 L2 / 下段 L3 L4。L5 が来たら L1 が消え L2 L3 / L4 L5
 		int nDone = c.lapTimesN;
-		int start = 0;
-		if (nDone > 3) start = nDone - 3;
-		r.lapShowN = 3;
-		for (int k = 0; k < 3; k++) {
-			r.lapNo[k] = start + k + 1;
-			int src = start + k;
-			r.lapSec[k] = (src < nDone) ? c.lapTimes[src] : -1.f;
+		int hi = nDone;
+		if (!c.finished && !c.retired) {
+			hi = nDone + 1;
+			if (hi < 1) hi = 1;
+		}
+		if (hi < 1) hi = 1;
+		if (m_lapsTarget > 0 && hi > m_lapsTarget) hi = m_lapsTarget;
+		int showN = 4;
+		if (m_lapsTarget > 0 && showN > m_lapsTarget) showN = m_lapsTarget;
+		int startNo = hi - showN + 1;
+		if (startNo < 1) startNo = 1;
+		r.lapShowN = showN;
+		for (int k = 0; k < 4; k++) {
+			if (k < showN) {
+				r.lapNo[k] = startNo + k;
+				int src = r.lapNo[k] - 1;
+				r.lapSec[k] = (src >= 0 && src < nDone) ? c.lapTimes[src] : -1.f;
+			} else {
+				r.lapNo[k] = 0;
+				r.lapSec[k] = -1.f;
+			}
 		}
 	}
 	m_view.BakeStandingsTexture(rows, m_craftN);
@@ -3933,11 +4028,18 @@ void CSoft3DRaceDlg::ShowContextMenu(CPoint screenPt)
 	menu.AddCommand(1, LL14(L"リスタート", L"Restart", L"Redémarrer", L"Riavvia", L"Reiniciar", L"재시작", L"重启", L"إعادة", L"Рестарт", L"Neustart", L"Reiniciar", L"Herstarten", L"Restart", L"Yeniden"));
 	menu.AddCommand(2, LL14(L"コース再生成", L"Regenerate course", L"Régénérer", L"Rigenera", L"Regenerar", L"코스 재생성", L"重新生成赛道", L"إعادة توليد", L"Новый курс", L"Strecke neu", L"Gerar de novo", L"Opnieuw genereren", L"Generuj tor", L"Parkuru yenile"));
 	menu.AddSeparator();
-	menu.AddCheck(20, LL14(L"ミニマップ表示", L"Show minimap", L"Afficher minimap", L"Mostra minimap", L"Mostrar minimapa", L"미니맵", L"显示小地图", L"خريطة", L"Мини-карта", L"Minimap", L"Minimapa", L"Minimapa", L"Minimapa", L"Minimapi"), savedata.s3r_show_map != 0);
-	menu.AddSeparator();
+	
+	if (CCustomPopupMenu* viewSub = menu.AddSubMenu(LL14(L"表示・視点", L"View", L"Vue", L"Vista", L"Vista", L"보기/시점", L"显示/视角", L"عرض", L"Вид", L"Ansicht", L"Vista", L"Weergave", L"Widok", L"Görünüm"))) {
+		viewSub->AddCheck(20, LL14(L"ミニマップ表示", L"Show minimap", L"Afficher minimap", L"Mostra minimap", L"Mostrar minimapa", L"미니맵", L"显示小地图", L"خريطة", L"Мини-карта", L"Minimap", L"Minimapa", L"Minimapa", L"Minimapa", L"Minimapi"), savedata.s3r_show_map != 0);
+		viewSub->AddCommand(54, LL14(L"ズームをリセット", L"Reset zoom", L"Réinit. zoom", L"Reset zoom", L"Restablecer zoom", L"줌 리셋", L"重置缩放", L"إعادة التكبير", L"Сброс зума", L"Zoom reset", L"Redefinir zoom", L"Zoom resetten", L"Reset zoom", L"Zoom sıfırla"));
+	}
+	
 	const int mask = ItemMask();
 	if (CCustomPopupMenu* itemSub = menu.AddSubMenu(LL14(L"アイテム", L"Items", L"Objets", L"Oggetti", L"Objetos",
 		L"아이템", L"道具", L"عناصر", L"Предметы", L"Items", L"Itens", L"Items", L"Przedmioty", L"Öğeler"))) {
+		itemSub->AddCommand(28, LL14(L"アイテムをすべてON", L"Enable all items", L"Activer tous les objets", L"Attiva tutti gli oggetti", L"Activar todos los objetos", L"아이템 모두 ON", L"全部道具开启", L"تفعيل كل العناصر", L"Включить все предметы", L"Alle Items ein", L"Ativar todos os itens", L"Alle items aan", L"Włącz wszystkie przedmioty", L"Tüm öğeleri aç"));
+		itemSub->AddCommand(29, LL14(L"アイテムをすべてOFF", L"Disable all items", L"Désactiver tous les objets", L"Disattiva tutti gli oggetti", L"Desactivar todos los objetos", L"아이템 모두 OFF", L"全部道具关闭", L"تعطيل كل العناصر", L"Выключить все предметы", L"Alle Items aus", L"Desativar todos os itens", L"Alle items uit", L"Wyłącz wszystkie przedmioty", L"Tüm öğeleri kapat"));
+		itemSub->AddSeparator();
 		itemSub->AddCheck(30, LL14(L"アイテム: テンポ↑", L"Item: tempo↑", L"Objet: tempo↑", L"Oggetto: tempo↑", L"Objeto: tempo↑", L"아이템: 템포↑", L"道具：速度↑", L"Item: tempo↑", L"Item: tempo↑", L"Item: Tempo↑", L"Item: tempo↑", L"Item: tempo↑", L"Przedmiot: tempo↑", L"Öğe: tempo↑"), (mask & ITEM_TEMPO) != 0);
 		itemSub->AddCheck(31, LL14(L"アイテム: テンポ↓", L"Item: tempo↓", L"Objet: tempo↓", L"Oggetto: tempo↓", L"Objeto: tempo↓", L"아이템: 템포↓", L"道具：速度↓", L"Item: tempo↓", L"Item: tempo↓", L"Item: Tempo↓", L"Item: tempo↓", L"Item: tempo↓", L"Przedmiot: tempo↓", L"Öğe: tempo↓"), (mask & ITEM_TEMPO_DN) != 0);
 		itemSub->AddCheck(32, LL14(L"アイテム: ピッチ↑", L"Item: pitch↑", L"Objet: pitch↑", L"Oggetto: pitch↑", L"Objeto: tono↑", L"아이템: 피치↑", L"道具：音高↑", L"Item: pitch↑", L"Item: pitch↑", L"Item: Ton↑", L"Item: tom↑", L"Item: toon↑", L"Przedmiot: wys↑", L"Öğe: perde↑"), (mask & ITEM_PITCH_UP) != 0);
@@ -3954,12 +4056,13 @@ void CSoft3DRaceDlg::ShowContextMenu(CPoint screenPt)
 	}
 	menu.AddSeparator();
 	menu.AddCommand(45, LL14(L"テンポ／ピッチを開いた時に戻す", L"Reset tempo/pitch to open values", L"Remettre tempo/hauteur", L"Ripristina tempo/pitch", L"Restablecer tempo/tono", L"템포/피치 복원", L"恢复速度/音高", L"إعادة الإيقاع", L"Вернуть темп", L"Tempo zurück", L"Restaurar tempo", L"Tempo herstellen", L"Przywróć tempo", L"Tempo sıfırla"));
-	menu.AddCommand(54, LL14(L"ズームをリセット", L"Reset zoom", L"Réinit. zoom", L"Reset zoom", L"Restablecer zoom", L"줌 리셋", L"重置缩放", L"إعادة التكبير", L"Сброс зума", L"Zoom reset", L"Redefinir zoom", L"Zoom resetten", L"Reset zoom", L"Zoom sıfırla"));
 
 	UINT cmd = menu.Track(screenPt, this);
 	if (cmd == 1) { StartRace(); return; }
 	if (cmd == 2) { GenerateCourse(); return; }
 	if (cmd == 20) { savedata.s3r_show_map = savedata.s3r_show_map ? 0 : 1; PersistUi(); return; }
+	if (cmd == 28) { savedata.s3r_item_mask = ITEM_ALL; PersistUi(); return; }
+	if (cmd == 29) { savedata.s3r_item_mask = 0; PersistUi(); return; }
 	if (cmd >= 30 && cmd <= 42) {
 		const int bits[] = { ITEM_TEMPO, ITEM_TEMPO_DN, ITEM_PITCH_UP, ITEM_PITCH_DN, ITEM_NEXT, ITEM_PREV, ITEM_VOL_UP, ITEM_VOL_DN, ITEM_EQ, ITEM_EQ_FLAT, ITEM_REVERB, ITEM_XFADE, ITEM_RANDOM };
 		int idx = (int)cmd - 30; if (idx < 0 || idx > 12) return;
