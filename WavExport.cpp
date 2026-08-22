@@ -201,8 +201,7 @@ END_MESSAGE_MAP()
 BOOL CWeHelpDlg::OnInitDialog()
 {
 	CDialog::OnInitDialog();
-	SetIcon(nullptr, TRUE);
-	SetIcon(nullptr, FALSE);
+	CCC_ApplyWindowIconFromTemplate(this, IDD);
 	ModifyStyleEx(0, WS_EX_DLGMODALFRAME, SWP_FRAMECHANGED);
 	SetWindowText(LL14(
 		L"WAV出力操作ガイド", L"WAV Export Guide", L"Guide d'export WAV", L"Guida esportazione WAV",

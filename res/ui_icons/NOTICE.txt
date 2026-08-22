@@ -1,0 +1,6 @@
+Window icons in this folder are derived from Material Design Icons
+by Pictogrammers (https://pictogrammers.com/library/mdi/),
+licensed under the Apache License, Version 2.0.
+https://www.apache.org/licenses/LICENSE-2.0
+Upstream: https://github.com/Templarian/MaterialDesign
+Glyphs were recolored for caption contrast; no other modification.

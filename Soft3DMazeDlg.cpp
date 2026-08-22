@@ -1,4 +1,4 @@
-﻿// Soft3DMazeDlg.cpp — Soft3D 迷路（ミニマップ／訪問／コンテキスト設定／曲連動）
+// Soft3DMazeDlg.cpp — Soft3D 迷路（ミニマップ／訪問／コンテキスト設定／曲連動）
 
 #include "stdafx.h"
 #include "ogg.h"
@@ -14,6 +14,8 @@
 #define DIRECTINPUT_VERSION 0x0800
 #include <dinput.h>
 #include "Soft3DTextD2D.h"
+#include "Soft3DGameSfx.h"
+#include "Soft3DTexRes.h"
 
 #ifdef _MSC_VER
 #pragma comment(lib, "d3dcompiler.lib")
@@ -156,8 +158,7 @@ END_MESSAGE_MAP()
 BOOL CS3mHelpDlg::OnInitDialog()
 {
 	CDialog::OnInitDialog();
-	SetIcon(nullptr, TRUE);
-	SetIcon(nullptr, FALSE);
+	CCC_ApplyWindowIconFromTemplate(this, IDD);
 	SetWindowText(LL14(
 		L"Soft3D迷路ガイド", L"Soft3D maze guide", L"Guide labyrinthe Soft3D", L"Guida labirinto Soft3D",
 		L"Guía laberinto Soft3D", L"Soft3D 미로 가이드", L"Soft3D 迷宫指南", L"دليل متاهة Soft3D",
@@ -464,6 +465,34 @@ void CS3mHelpDlg::OnPaint()
 		L"Rechtsklik: herstart / grootte / minimap / items. Voortgang bewaart zich (hervatten).",
 		L"PPM: restart / rozmiar / minimapa / przedmioty. Postęp zapisuje się (wznów).",
 		L"Sağ tık: yeniden / boyut / harita / öğeler. İlerleme otomatik kaydolur."));
+	line(LL14(L"PCM効果音: 歩行・アイテム・鍵・扉・階段・ポータルに加え、壁衝突、鍵なし扉、棘／粘液／氷／闇、ゴールを合成。曲の再生とは別経路。表示メニューでON/OFF。",
+		L"PCM SFX: steps, items, keys, doors, stairs, portals, plus bumps, locked doors, spike/slime/ice/dark traps and the goal (separate from music). Toggle in View.",
+		L"SFX PCM : pas, objets, clés, portes, escaliers, portails, chocs, portes fermées, pièges, arrivée. Menu Vue.",
+		L"SFX PCM: passi, oggetti, chiavi, porte, scale, portali, urti, porte chiuse, trappole, arrivo. Menu Vista.",
+		L"SFX PCM: pasos, objetos, llaves, puertas, escaleras, portales, golpes, puertas cerradas, trampas, meta. Menú Vista.",
+		L"PCM 효과음: 발소리·아이템·열쇠·문·계단·포털+벽충돌·잠긴문·함정·골. 보기 메뉴 ON/OFF.",
+		L"PCM效果音：脚步、道具、钥匙、门、楼梯、传送门，以及撞墙、无钥匙门、尖刺/粘液/冰/暗、终点。显示菜单开关。",
+		L"PCM SFX: steps, items, keys, doors, stairs, portals, bumps, locks, traps, goal. View menu toggle.",
+		L"PCM SFX: шаги, предметы, ключи, двери, лестницы, порталы, удары, замки, ловушки, цель.",
+		L"PCM-SFX: Schritte, Items, Schlüssel, Türen, Treppen, Portale, Stöße, Schlösser, Fallen, Ziel. Ansicht-Menü.",
+		L"SFX PCM: passos, itens, chaves, portas, escadas, portais, impactos, portas trancadas, armadilhas, chegada. Menu Vista.",
+		L"PCM-SFX: stappen, items, sleutels, deuren, trappen, portalen, stoten, sloten, vallen, doel. Weergave-menu.",
+		L"SFX PCM: kroki, przedmioty, klucze, drzwi, schody, portale, uderzenia, zamki, pułapki, cel. Menu Widok.",
+		L"PCM SFX: adım, öğe, anahtar, kapı, merdiven, portal, çarpma, kilit, tuzak, hedef. Görünüm menüsü."));
+	line(LL14(L"壁・床・鏡はライセンスフリーの写真テクスチャを256でexeに埋め込んでいます（別ファイル不要）。階テーマ（レンガ／湿った石／錆び鉄／火山岩）に合わせています。",
+		L"Walls, floors and mirrors use license-free photo textures (256px) embedded in the exe (no extra files), matched to each floor theme (brick, wet stone, rusted metal, volcanic).",
+		L"Murs, sols et miroirs : textures photo 256 dans l'exe (brique, pierre humide, métal rouillé, volcanique).",
+		L"Muri, pavimenti e specchi: texture foto 256 nell'exe (mattoni, pietra umida, metallo arrugginito, vulcanico).",
+		L"Paredes, suelos y espejos: texturas foto 256 en el exe (ladrillo, piedra húmeda, metal oxidado, volcánico).",
+		L"벽·바닥·거울은 256 사진 텍스처를 exe에 내장(별도 파일 없음). 층 테마(벽돌/젖은 돌/녹슨 철/화산암)에 맞춤.",
+		L"墙、地板、镜子为256照片纹理，嵌入exe（无需旁路文件），对应各层主题（砖/湿石/锈铁/火山岩）。",
+		L"Walls/floors/mirrors: 256 photo textures in the exe (brick, wet stone, rusted metal, volcanic).",
+		L"Стены, полы и зеркала: фототекстуры 256 в exe (кирпич, мокрый камень, ржавый металл, вулкан).",
+		L"Wände, Böden, Spiegel: Fototexturen 256 in der exe (Ziegel, nasser Stein, Rostmetall, Vulkan).",
+		L"Paredes, chãos e espelhos: texturas foto 256 no exe (tijolo, pedra úmida, metal enferrujado, vulcânico).",
+		L"Muren, vloeren en spiegels: fototexturen 256 in de exe (baksteen, nat gesteente, roestmetaal, vulkanisch).",
+		L"Ściany, podłogi i lustra: tekstury zdjęciowe 256 w exe (cegła, mokry kamień, zardzewiały metal, wulkan).",
+		L"Duvar, zemin ve aynalar: 256 fotoğraf dokuları exe içinde (tuğla, ıslak taş, paslı metal, volkanik)."));
 	line(LL14(L"アイテムを拾うと再生パラメータが変わります（テンポ↑↓・ピッチ・前後曲・音量・EQ／平坦・リバーブ・クロスフェード・ランダム切替）。閉じるとテンポ/ピッチは復帰。",
 		L"Pickups tweak playback (tempo↑↓, pitch, prev/next, volume, EQ/flatten, reverb, crossfade, random). Tempo/pitch restore on close.",
 		L"Les objets changent lecture (tempo, hauteur, pistes, volume, EQ, réverb, fondu, aléatoire). Tempo/hauteur à la fermeture.",
@@ -1060,27 +1089,31 @@ BOOL CS3mView::CreateProcTextures()
 	};
 	D3D11_TEXTURE2D_DESC d={}; d.Width=AW;d.Height=AH;d.MipLevels=1;d.ArraySize=1;d.Format=DXGI_FORMAT_B8G8R8A8_UNORM;d.SampleDesc.Count=1;d.Usage=D3D11_USAGE_IMMUTABLE;d.BindFlags=D3D11_BIND_SHADER_RESOURCE;
 	DWORD* atlas=new DWORD[AW*AH];
+	static const int kWallRes[S3M_THEME_N]={IDR_S3TEX_M_WALL0,IDR_S3TEX_M_WALL1,IDR_S3TEX_M_WALL2,IDR_S3TEX_M_WALL3};
 	for(int th=0;th<S3M_THEME_N;th++){
-		genWall(th,atlas);
+		if(!Soft3DTexLoadPngRes(kWallRes[th],atlas,AW,AH))
+			genWall(th,atlas);
 		D3D11_SUBRESOURCE_DATA sd={atlas,AW*4,0};
 		if(FAILED(m_dev->CreateTexture2D(&d,&sd,&m_texBrick[th]))||FAILED(m_dev->CreateShaderResourceView(m_texBrick[th],NULL,&m_srvBrick[th]))){delete[] atlas;return FALSE;}
 	}
 	delete[] atlas;
-	const int W=128,H=128; DWORD* p=new DWORD[W*H];
+	const int W=256,H=256; DWORD* p=new DWORD[W*H];
 	d.Width=W;d.Height=H;
+	static const int kFloorRes[S3M_THEME_N]={IDR_S3TEX_M_FLOOR0,IDR_S3TEX_M_FLOOR1,IDR_S3TEX_M_FLOOR2,IDR_S3TEX_M_FLOOR3};
 	for(int th=0;th<S3M_THEME_N;th++){
-		genFloor(th,p,W,H);
+		if(!Soft3DTexLoadPngRes(kFloorRes[th],p,W,H))
+			genFloor(th,p,W,H);
 		D3D11_SUBRESOURCE_DATA sd={p,W*4,0};
 		if(FAILED(m_dev->CreateTexture2D(&d,&sd,&m_texFloor[th]))||FAILED(m_dev->CreateShaderResourceView(m_texFloor[th],NULL,&m_srvFloor[th]))){delete[] p;return FALSE;}
 	}
-	D3D11_SUBRESOURCE_DATA sd={};d.ArraySize=6;d.MiscFlags=D3D11_RESOURCE_MISC_TEXTURECUBE;D3D11_SUBRESOURCE_DATA cs[6]={};
-	DWORD* cube=new DWORD[W*H*6];
-	for(int f=0;f<6;f++){for(int y=0;y<H;y++)for(int x=0;x<W;x++){float t=(float)y/(H-1);BYTE r=(BYTE)(110+70*(1-t)),g=(BYTE)(145+55*(1-t)),b=(BYTE)(175+40*(1-t));if(f==2){r=(BYTE)(85+35*t);g=(BYTE)(120+45*t);b=(BYTE)(60+25*t);}cube[(f*H+y)*W+x]=0xff000000|((DWORD)r<<16)|((DWORD)g<<8)|b;}cs[f].pSysMem=cube+f*W*H;cs[f].SysMemPitch=W*4;}
+	d.Width=128;d.Height=128;d.ArraySize=6;d.MiscFlags=D3D11_RESOURCE_MISC_TEXTURECUBE;D3D11_SUBRESOURCE_DATA cs[6]={};
+	DWORD* cube=new DWORD[128*128*6];
+	for(int f=0;f<6;f++){for(int y=0;y<128;y++)for(int x=0;x<128;x++){float t=(float)y/127.f;BYTE r=(BYTE)(110+70*(1-t)),g=(BYTE)(145+55*(1-t)),b=(BYTE)(175+40*(1-t));if(f==2){r=(BYTE)(85+35*t);g=(BYTE)(120+45*t);b=(BYTE)(60+25*t);}cube[(f*128+y)*128+x]=0xff000000|((DWORD)r<<16)|((DWORD)g<<8)|b;}cs[f].pSysMem=cube+f*128*128; cs[f].SysMemPitch=128*4;}
 	if(FAILED(m_dev->CreateTexture2D(&d,cs,&m_texEnv))||FAILED(m_dev->CreateShaderResourceView(m_texEnv,NULL,&m_srvEnv))){delete[] cube;delete[] p;return FALSE;}
 	delete[] cube;delete[] p;
 	// 鏡壁／鏡床：滑らかな銀シアン鏡＋細い傷（割れすぎない）
 	{
-		const int MW=128,MH=128;
+		const int MW=256,MH=256;
 		DWORD* mir=new DWORD[MW*MH];
 		auto putMir=[&](BOOL wall){
 			for(int y=0;y<MH;y++)for(int x=0;x<MW;x++){
@@ -1107,10 +1140,12 @@ BOOL CS3mView::CreateProcTextures()
 		};
 		D3D11_TEXTURE2D_DESC md={};md.Width=MW;md.Height=MH;md.MipLevels=1;md.ArraySize=1;
 		md.Format=DXGI_FORMAT_B8G8R8A8_UNORM;md.SampleDesc.Count=1;md.Usage=D3D11_USAGE_IMMUTABLE;md.BindFlags=D3D11_BIND_SHADER_RESOURCE;
-		putMir(TRUE);
+		if(!Soft3DTexLoadPngRes(IDR_S3TEX_M_MIRWALL,mir,MW,MH))
+			putMir(TRUE);
 		D3D11_SUBRESOURCE_DATA sd={mir,MW*4,0};
 		if(FAILED(m_dev->CreateTexture2D(&md,&sd,&m_texMirrorWall))||FAILED(m_dev->CreateShaderResourceView(m_texMirrorWall,NULL,&m_srvMirrorWall))){delete[] mir;return FALSE;}
-		putMir(FALSE);
+		if(!Soft3DTexLoadPngRes(IDR_S3TEX_M_MIRFLOOR,mir,MW,MH))
+			putMir(FALSE);
 		sd.pSysMem=mir;
 		if(FAILED(m_dev->CreateTexture2D(&md,&sd,&m_texMirrorFloor))||FAILED(m_dev->CreateShaderResourceView(m_texMirrorFloor,NULL,&m_srvMirrorFloor))){delete[] mir;return FALSE;}
 		delete[] mir;
@@ -1552,11 +1587,11 @@ BOOL CS3mView::OnSetCursor(CWnd* pWnd, UINT nHitTest, UINT message)
 			ScreenToClient(&pt);
 			int act = -1;
 			if (dlg->HitOverviewFloorUi(pt, act) && act >= 0) {
-				HCURSOR h = ::LoadCursor(NULL, IDC_HAND);
-				if (h) { ::SetCursor(h); return TRUE; }
+				if (CCC_SetUiCursor(IDC_UI_HAND))
+					return TRUE;
 			}
-			HCURSOR h = ::LoadCursor(NULL, IDC_SIZEALL);
-			if (h) { ::SetCursor(h); return TRUE; }
+			if (CCC_SetUiCursor(IDC_UI_GRAB))
+				return TRUE;
 		}
 		CPoint pt;
 		::GetCursorPos(&pt);
@@ -1637,7 +1672,7 @@ CSoft3DMazeDlg::CSoft3DMazeDlg(CWnd* p)
 	, m_stairStartX(0.f), m_stairStartZ(0.f), m_stairLandX(0.f), m_stairLandZ(0.f)
 	, m_miniFade(1.f), m_miniFadeFrom(0), m_miniFadeTo(0)
 	, m_itemsLeft(0), m_keysHeld(0), m_doorMsgT(0.f), m_toastKind(0)
-	, m_trapCellX(-1), m_trapCellZ(-1), m_slowT(0.f)
+	, m_trapCellX(-1), m_trapCellZ(-1), m_slowT(0.f), m_sfxBumpCool(0.f)
 	, m_lastStepMx(0), m_lastStepMz(0), m_iceSlideLeft(0)
 	, m_stepFromX(1.5f), m_stepFromZ(1.5f), m_darkT(0.f)
 	, m_portalFx(PORTALFX_IDLE), m_portalFxT(0.f), m_portalToX(0.f), m_portalToZ(0.f)
@@ -3971,6 +4006,7 @@ void CSoft3DMazeDlg::TryPickup()
 		ApplyItem(c);
 		Cell(ix, iz) = CELL_FLOOR;
 		if (m_itemsLeft > 0) m_itemsLeft--;
+		Soft3DSfxOneShot(S3SFX_ITEM, GridToWorldX((float)ix + 0.5f), GetRenderEyeY(), GridToWorldZ((float)iz + 0.5f));
 		UpdateStatus();
 	} else if (c == CELL_KEY) {
 		m_keysHeld++;
@@ -3980,6 +4016,7 @@ void CSoft3DMazeDlg::TryPickup()
 		m_toastKind = 2;
 		m_doorMsgT = 2.0f;
 		m_floorTextAPrev = -1.f;
+		Soft3DSfxOneShot(S3SFX_KEY, GridToWorldX((float)ix + 0.5f), GetRenderEyeY(), GridToWorldZ((float)iz + 0.5f));
 		UpdateStatus();
 	} else if (c == CELL_DOOR) {
 		if (m_keysHeld > 0) {
@@ -3990,6 +4027,7 @@ void CSoft3DMazeDlg::TryPickup()
 			m_toastKind = 3;
 			m_doorMsgT = 1.8f;
 			m_floorTextAPrev = -1.f;
+			Soft3DSfxOneShot(S3SFX_DOOR, GridToWorldX((float)ix + 0.5f), GetRenderEyeY(), GridToWorldZ((float)iz + 0.5f));
 			UpdateStatus();
 		}
 	} else if (c == CELL_PORTAL && m_portalFx == PORTALFX_IDLE && m_clearPhase == CLEAR_IDLE
@@ -4037,6 +4075,7 @@ void CSoft3DMazeDlg::BeginPortalWarp(int toX, int toZ)
 	m_portalFxT = 0.f;
 	m_portalFlashA = 0.f;
 	m_runDirty = 1;
+	Soft3DSfxOneShot(S3SFX_PORTAL, GridToWorldX(m_px), GetRenderEyeY(), GridToWorldZ(m_pz));
 }
 
 void CSoft3DMazeDlg::TickPortalFx(float dt)
@@ -4096,7 +4135,9 @@ void CSoft3DMazeDlg::TryTrapEnter()
 	const BYTE c = CellAt(ix, iz);
 	if (c == CELL_SLIME) {
 		m_slowT = 2.2f;
+		Soft3DSfxOneShot(S3SFX_SLIME, GridToWorldX((float)ix + 0.5f), GetRenderEyeY(), GridToWorldZ((float)iz + 0.5f));
 	} else if (c == CELL_SPIKE) {
+		Soft3DSfxOneShot(S3SFX_SPIKE, GridToWorldX((float)ix + 0.5f), GetRenderEyeY(), GridToWorldZ((float)iz + 0.5f));
 		// 進入前のマスへ戻る（ワープではなく跳ね返り）
 		if (!m_moving && !m_turning
 			&& !IsBlocked(m_stepFromX, m_stepFromZ)) {
@@ -4109,8 +4150,10 @@ void CSoft3DMazeDlg::TryTrapEnter()
 	} else if (c == CELL_ICE) {
 		if (m_lastStepMx != 0 || m_lastStepMz != 0)
 			m_iceSlideLeft = 1;
+		Soft3DSfxOneShot(S3SFX_ICE, GridToWorldX((float)ix + 0.5f), GetRenderEyeY(), GridToWorldZ((float)iz + 0.5f));
 	} else if (c == CELL_DARK) {
 		m_darkT = 3.2f;
+		Soft3DSfxOneShot(S3SFX_DARK, GridToWorldX((float)ix + 0.5f), GetRenderEyeY(), GridToWorldZ((float)iz + 0.5f));
 	}
 }
 
@@ -4181,6 +4224,7 @@ void CSoft3DMazeDlg::BeginFloorChange(int newFloor, int landX, int landZ)
 	m_runDirty = 1;
 	RefreshFloorTex();
 	UpdateStatus();
+	Soft3DSfxOneShot(S3SFX_STAIR, GridToWorldX(m_px), GetRenderEyeY(), GridToWorldZ(m_pz));
 }
 
 void CSoft3DMazeDlg::TickFloorFx(float dt)
@@ -4444,6 +4488,7 @@ void CSoft3DMazeDlg::BeginClearSequence()
 	m_runDirty = 1;
 	RefreshClearTex();
 	UpdateStatus();
+	Soft3DSfxUi(S3SFX_GOAL, 0);
 }
 
 void CSoft3DMazeDlg::TickClear(float dt)
@@ -4785,6 +4830,15 @@ BOOL CSoft3DMazeDlg::TryStep(int mx, int mz)
 			m_floorTextAPrev = -1.f;
 		}
 	};
+	auto failMove = [&](int x, int z) {
+		noteNoKeyDoor(x, z);
+		if (x >= 0 && z >= 0 && x < m_n && z < m_n && CellAt(x, z) == CELL_DOOR && m_keysHeld <= 0)
+			Soft3DSfxOneShot(S3SFX_LOCKED, GridToWorldX((float)x + 0.5f), GetRenderEyeY(), GridToWorldZ((float)z + 0.5f));
+		else if (m_sfxBumpCool <= 0.f) {
+			Soft3DSfxOneShot(S3SFX_BUMP, GridToWorldX(m_px), GetRenderEyeY(), GridToWorldZ(m_pz));
+			m_sfxBumpCool = 0.14f;
+		}
+	};
 	// 2マス移動では扉マスに着地しないため、通過マスで開錠する
 	auto tryOpenDoorAt = [&](int x, int z) {
 		if (x < 0 || z < 0 || x >= m_n || z >= m_n) return;
@@ -4797,6 +4851,7 @@ BOOL CSoft3DMazeDlg::TryStep(int mx, int mz)
 		m_doorMsgT = 1.8f;
 		m_floorTextAPrev = -1.f;
 		UpdateStatus();
+		Soft3DSfxOneShot(S3SFX_DOOR, GridToWorldX((float)x + 0.5f), GetRenderEyeY(), GridToWorldZ((float)z + 0.5f));
 	};
 	if ((cx & 1) && (cz & 1)) {
 		// 奇数×奇数の通路: 2マス進むには「1マス先も通行可」が必須（壁・鍵なし扉のすり抜け禁止）
@@ -4811,13 +4866,13 @@ BOOL CSoft3DMazeDlg::TryStep(int mx, int mz)
 			tz = a1z;
 			tryOpenDoorAt(a1x, a1z);
 		} else {
-			noteNoKeyDoor(a1x, a1z);
+			failMove(a1x, a1z);
 			return FALSE;
 		}
 	} else {
 		// 広間・壁帯上など: 1マスのみ（壁／鍵なし扉へは進めない）
 		if (!standable(a1x, a1z)) {
-			noteNoKeyDoor(a1x, a1z);
+			failMove(a1x, a1z);
 			return FALSE;
 		}
 		tx = a1x;
@@ -4826,7 +4881,7 @@ BOOL CSoft3DMazeDlg::TryStep(int mx, int mz)
 	}
 
 	if (!standable(tx, tz)) {
-		noteNoKeyDoor(tx, tz);
+		failMove(tx, tz);
 		return FALSE;
 	}
 
@@ -4837,12 +4892,14 @@ BOOL CSoft3DMazeDlg::TryStep(int mx, int mz)
 	m_lastStepMx = mx;
 	m_lastStepMz = mz;
 	m_moving = 1;
+	Soft3DSfxOneShot(S3SFX_STEP, GridToWorldX(m_px), GetRenderEyeY(), GridToWorldZ(m_pz));
 	return TRUE;
 }
 
 void CSoft3DMazeDlg::TickMove(float dt)
 {
 	if (m_n <= 0) return;
+	if (m_sfxBumpCool > 0.f) m_sfxBumpCool = max(0.f, m_sfxBumpCool - dt);
 	m_anim += dt;
 	TickFloorFx(dt);
 	// 階層ラベル／クリア／ナビ待ちと共有する中央トースト（同じ BakeClearTexture 経路）
@@ -4995,6 +5052,13 @@ void CSoft3DMazeDlg::TickMove(float dt)
 	}
 
 	if (m_moving) {
+		static float s_stepAcc = 0.f;
+		s_stepAcc += dt;
+		const float per = (m_slowT > 0.f) ? 0.40f : 0.24f;
+		if (s_stepAcc >= per) {
+			s_stepAcc -= per;
+			Soft3DSfxOneShot(S3SFX_STEP, GridToWorldX(m_px), GetRenderEyeY(), GridToWorldZ(m_pz));
+		}
 		const float dx = m_pxTarget - m_px;
 		const float dz = m_pzTarget - m_pz;
 		const float dist = sqrtf(dx * dx + dz * dz);
@@ -5018,6 +5082,7 @@ void CSoft3DMazeDlg::TickMove(float dt)
 				m_pzTarget = m_pz;
 			}
 			m_moving = 0;
+			s_stepAcc = 0.f;
 			MarkVisited();
 			UpdateNavProgress();
 			UpdateStatus();
@@ -6945,6 +7010,7 @@ void CSoft3DMazeDlg::ShowContextMenu(CPoint screenPt)
 		viewSub->AddCheck(20, LL14(L"ミニマップ表示", L"Show minimap", L"Afficher la minimap", L"Mostra minimap", L"Mostrar minimapa",
 			L"미니맵 표시", L"显示小地图", L"إظهار الخريطة المصغّرة", L"Показать мини-карту", L"Minimap anzeigen", L"Mostrar minimapa", L"Minimapa tonen", L"Pokaż minimapę", L"Minimapi göster"),
 			savedata.s3m_show_map != 0);
+		viewSub->AddCheck(56, LL14(L"PCM効果音（足音／罠／ゴール）", L"PCM SFX (steps / traps / goal)", L"SFX PCM (pas / pièges / arrivée)", L"SFX PCM (passi / trappole / arrivo)", L"SFX PCM (pasos / trampas / meta)", L"PCM 효과음(발소리/함정/골)", L"PCM效果音（脚步／陷阱／终点）", L"PCM SFX (steps / traps)", L"PCM-эффекты (шаги/ловушки)", L"PCM-SFX (Schritte / Fallen)", L"SFX PCM (passos / armadilhas)", L"PCM-SFX (stappen / vallen)", L"SFX PCM (kroki / pułapki)", L"PCM SFX (adım / tuzak)"), savedata.s3_pcm_sfx != 0);
 		viewSub->AddSeparator();
 		viewSub->AddCheck(50,LL14(L"歩行時の揺れ",L"Walking bob",L"Balancement de marche",L"Oscillazione camminata",L"Balanceo al caminar",L"걷기 흔들림",L"行走晃动",L"تمايل المشي",L"Покачивание при ходьбе",L"Kamerawippen",L"Balanço ao andar",L"Loopbeweging",L"Kołysanie chodu",L"Yürüme sallantısı"),savedata.s3m_bob!=0);
 		viewSub->AddCheck(51,L"FOV 55°",savedata.s3m_fov==0);
@@ -7008,6 +7074,11 @@ void CSoft3DMazeDlg::ShowContextMenu(CPoint screenPt)
 	}
 	if (cmd == 20) {
 		savedata.s3m_show_map = savedata.s3m_show_map ? 0 : 1;
+		PersistUi();
+		return;
+	}
+	if (cmd == 56) {
+		savedata.s3_pcm_sfx = savedata.s3_pcm_sfx ? 0 : 1;
 		PersistUi();
 		return;
 	}
@@ -7172,6 +7243,7 @@ BOOL CSoft3DMazeDlg::OnInitDialog()
 		DestroyWindow();
 		return FALSE;
 	}
+	Soft3DSfxEnsure(m_hWnd);
 	m_playTipText = LL14(
 		L"WASD / QE / パッド：移動・旋回\nホイール：拡大縮小（Shift+で旋回）\nSPACE／A・Start／ホイールクリック：全体マップ切替\n（ホイール=ズーム・ドラッグ=スクロール・Shift+ホイール/←→=階層）\n橙の階段=地下へ／水色=地上へ。ゴールは難易度で階が変わる",
 		L"WASD / QE / pad: move / turn\nWheel: zoom (Shift+=turn)\nSPACE / A·Start / wheel-click: toggle map\n(wheel=zoom · drag=scroll · Shift+wheel/←→=floor)\nOrange stairs down, cyan up. Goal floor depends on difficulty",
@@ -7320,6 +7392,12 @@ void CSoft3DMazeDlg::TickFrame()
 	if (dt > 0.05f) dt = 0.05f;
 	TickClear(dt);
 	TickMove(dt);
+	{
+		float ex, ez;
+		GetRenderEye(ex, ez);
+		Soft3DSfxSetListener(ex, GetRenderEyeY(), ez, m_yaw);
+		Soft3DSfxPump();
+	}
 	RenderScene();
 	m_view.RequestRedraw();
 	if (m_runDirty && !m_moving) {
@@ -7361,6 +7439,7 @@ void CSoft3DMazeDlg::OnDestroy()
 {
 	PersistUi();
 	PersistRun();
+	Soft3DSfxShutdown();
 	RestoreAudioBaseline();
 	FreeGrid();
 	S3mReleaseJoypad();

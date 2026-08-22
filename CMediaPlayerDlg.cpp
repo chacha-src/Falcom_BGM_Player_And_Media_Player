@@ -1,4 +1,4 @@
-// CMediaPlayerDlg.cpp : メディアプレイヤーモード画面(張りぼて)とモード選択ダイアログ
+﻿// CMediaPlayerDlg.cpp : メディアプレイヤーモード画面(張りぼて)とモード選択ダイアログ
 //
 // 実体は COggDlg(og->) と CPlayList(pl->)。ここは表示と操作の取り次ぎだけを行う。
 // メディアプレイヤーモード中は og / pl のウィンドウを非表示にして裏で生かしておく。
@@ -13232,8 +13232,7 @@ END_MESSAGE_MAP()
 BOOL CMpCheatSheetDlg::OnInitDialog()
 {
 	CDialog::OnInitDialog();
-	SetIcon(nullptr, TRUE);
-	SetIcon(nullptr, FALSE);
+	CCC_ApplyWindowIconFromTemplate(this, IDD);
 	ModifyStyleEx(0, WS_EX_DLGMODALFRAME, SWP_FRAMECHANGED);
 	SetWindowText(LL14(
 		L"メディアプレイヤー操作ガイド", L"Media Player Guide", L"Guide lecteur", L"Guida Media Player",

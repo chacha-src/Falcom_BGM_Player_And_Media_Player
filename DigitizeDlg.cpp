@@ -75,7 +75,7 @@ class CDigHelp : public CDialog {
 public: CDigHelp(CWnd* p) : CDialog(IDD_DIG_HELP, p) {}
 protected:
 	virtual BOOL OnInitDialog() {
-		CDialog::OnInitDialog(); SetWindowText(DigText(0));
+		CDialog::OnInitDialog(); CCC_ApplyWindowIconFromTemplate(this, IDD_DIG_HELP); SetWindowText(DigText(0));
 		if (CWnd* w=GetDlgItem(IDOK)) w->SetWindowText(LL14(L"閉じる",L"Close",L"Fermer",L"Chiudi",L"Cerrar",L"닫기",L"关闭",L"إغلاق",L"Закрыть",L"Schließen",L"Fechar",L"Sluiten",L"Zamknij",L"Kapat")); return TRUE;
 	}
 	virtual void OnOK(){DestroyWindow();} virtual void OnCancel(){DestroyWindow();}

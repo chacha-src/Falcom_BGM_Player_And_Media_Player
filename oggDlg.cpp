@@ -32712,8 +32712,7 @@ END_MESSAGE_MAP()
 BOOL COggHelpDlg::OnInitDialog()
 {
 	CDialog::OnInitDialog();
-	SetIcon(nullptr, TRUE);
-	SetIcon(nullptr, FALSE);
+	CCC_ApplyWindowIconFromTemplate(this, IDD);
 	ModifyStyleEx(0, WS_EX_DLGMODALFRAME, SWP_FRAMECHANGED);
 	SetWindowText(LL14(
 		L"メイン画面操作ガイド", L"Main Window Guide", L"Guide fenêtre principale", L"Guida finestra principale",

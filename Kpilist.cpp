@@ -40,8 +40,7 @@ END_MESSAGE_MAP()
 BOOL CKpiHelpDlg::OnInitDialog()
 {
 	CDialog::OnInitDialog();
-	SetIcon(nullptr, TRUE);
-	SetIcon(nullptr, FALSE);
+	CCC_ApplyWindowIconFromTemplate(this, IDD);
 	ModifyStyleEx(0, WS_EX_DLGMODALFRAME, SWP_FRAMECHANGED);
 	SetWindowText(LL14(
 		L"プラグイン一覧操作ガイド", L"Plugin List Guide", L"Guide liste plugins", L"Guida elenco plugin",

@@ -99,8 +99,7 @@ END_MESSAGE_MAP()
 BOOL CSmHelpDlg::OnInitDialog()
 {
 	CDialog::OnInitDialog();
-	SetIcon(nullptr, TRUE);
-	SetIcon(nullptr, FALSE);
+	CCC_ApplyWindowIconFromTemplate(this, IDD);
 	SetWindowText(LL14(
 		L"騒音計ガイド", L"Sound meter guide", L"Guide sonomètre", L"Guida fonometro",
 		L"Guía medidor", L"소음계 가이드", L"声级计指南", L"دليل مقياس الصوت",

@@ -73,8 +73,7 @@ END_MESSAGE_MAP()
 BOOL CPrHelpDlg::OnInitDialog()
 {
 	CDialog::OnInitDialog();
-	SetIcon(nullptr, TRUE);
-	SetIcon(nullptr, FALSE);
+	CCC_ApplyWindowIconFromTemplate(this, IDD);
 	ModifyStyleEx(0, WS_EX_DLGMODALFRAME, SWP_FRAMECHANGED);
 	SetWindowText(LL14(
 		L"ピアノロール操作ガイド", L"Piano Roll Guide", L"Guide piano roll", L"Guida piano roll",
@@ -1184,6 +1183,7 @@ BEGIN_MESSAGE_MAP(CPianoRoll, CCustomBlurDialogExBase)
     ON_WM_LBUTTONDOWN()
     ON_WM_MOUSEMOVE()
     ON_WM_LBUTTONUP()
+    ON_WM_SETCURSOR()
     ON_WM_MOUSEWHEEL()
     ON_MESSAGE(WM_PIANOROLL_SYNC, &CPianoRoll::OnSyncRequest)
     ON_MESSAGE(WM_PIANOROLL_ANALYSIS_DONE, &CPianoRoll::OnAnalysisDone)
@@ -1210,11 +1210,6 @@ BOOL CPianoRoll::OnInitDialog()
     }
 #endif
     ModifyStyle(WS_MINIMIZEBOX, 0);
-    SetIcon(nullptr, TRUE);
-    SetIcon(nullptr, FALSE);
-    // キャプションアイコンは付けない。WM_SETICON(NULL) だけでは DWM が
-    // 既定アイコンへフォールバックするため、Aero 有効時も常に
-    // WS_EX_DLGMODALFRAME を立ててフレーム再計算する（イコライザーと同じ見た目）。
     ModifyStyleEx(0, WS_EX_DLGMODALFRAME, SWP_FRAMECHANGED);
 
     {
@@ -6473,6 +6468,20 @@ void CPianoRoll::OnLButtonUp(UINT nFlags, CPoint point)
         return;
     }
     CCustomBlurDialogExBase::OnLButtonUp(nFlags, point);
+}
+
+BOOL CPianoRoll::OnSetCursor(CWnd* pWnd, UINT nHitTest, UINT message)
+{
+    if (nHitTest == HTCLIENT && IsView3D()) {
+        CPoint pt;
+        ::GetCursorPos(&pt);
+        ScreenToClient(&pt);
+        if (pt.y >= CCC_GetCustomCaptionHeight(m_hWnd)
+            && !CCC_MainLockOverlayHitTest(m_hWnd, pt)
+            && CCC_SetUiCursor(IDC_UI_GRAB))
+            return TRUE;
+    }
+    return CCustomBlurDialogExBase::OnSetCursor(pWnd, nHitTest, message);
 }
 
 BOOL CPianoRoll::OnMouseWheel(UINT nFlags, short zDelta, CPoint pt)

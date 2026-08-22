@@ -11,46 +11,61 @@
 
 <h1>Waveform and spectrum analyzer</h1>
 
-<p class="lead">The analyzer is where you look at the sound rather than only hear it. The waveform and level meters sit on top, the frequency response below. Several display styles are available, so you can settle on one that feels familiar.</p>
+<p class="lead">The analyzer is where you look at the sound rather than only hear it. The waveform and meters sit on top, frequency and stereo-field views below. Several display styles are available, so you can settle on one that feels familiar.</p>
 <div class="shot">
 <img src="../img/analyzer.png" alt="Waveform and frequency analyzer">
 <p class="cap">Waveform and frequency analyzer</p>
 </div>
-<h2>The top half — waveform and level</h2>
+<h2>The top half — waveform</h2>
+<p>The newest samples start beside the level meters (and the correlation meter), not under them. The visual start of the wave matches the actual samples.</p>
 <ul>
-<li>Multi-channel PCM waveform scrolling horizontally.</li>
-<li>Left and right level meters showing RMS plus an RMS peak hold.</li>
-<li>Waveform speed is adjustable from x0.25 to x2.0 in the right-click menu.</li>
+<li><b>Scrolling wave</b> — multi-channel PCM flowing sideways. Speed is x0.25–x2.0 from the right-click menu.</li>
+<li><b>Envelope</b> — DAW-style filled min-to-max per column.</li>
+<li><b>Mid / Side</b> — Mid=(L+R)/2 and Side=(L−R)/2 on two lanes.</li>
+<li><b>Loudness history</b> — per-column RMS with a simple LUFS guide line.</li>
+<li><b>Triggered scope</b> — a frozen trace aligned to a rising zero-cross.</li>
+<li><b>Phosphor scope</b> — the same alignment with phosphor decay stacked on top.</li>
 </ul>
-<h2>The bottom half — frequency response</h2>
-<p>A log-frequency display, so the low end gets more room. Peak hold leaves a line at the loudest point reached.</p>
-<p>Display modes are chosen from the right-click menu.</p>
+<h2>Meters on the right</h2>
 <ul>
-<li>Ozone style</li>
-<li>Cubase Frequency style</li>
-<li>Voxengo SPAN style</li>
-<li>Ableton Spectrum style</li>
-<li>FabFilter Pro-Q style</li>
-<li>Bars, or line only</li>
+<li><b>Level meters</b> — RMS plus peak hold. Hide them from right-click → Meter, or with <kbd>M</kbd>.</li>
+<li><b>Correlation φ</b> — −1 (antiphase) to +1 (in phase). Hiding the level meters does not hide φ. With both on, φ sits to the left of the levels; with levels off, φ moves to the right edge.</li>
+<li>The waveform scrolls from the left edge of whichever meters are showing.</li>
+</ul>
+<h2>The bottom half — frequency and stereo field</h2>
+<p>Pick these from right-click → Lower display. Soft 3D draws the same kinds.</p>
+<ul>
+<li><b>Spectrum</b> — log-frequency response. Ozone / Cubase Frequency / SPAN / Ableton / FabFilter looks, plus bars or line.</li>
+<li><b>1/3-octave RTA</b> — ISO 31-band real-time analyzer, useful for PA and room balance.</li>
+<li><b>Spectrogram</b> — frequency mapped over time.</li>
+<li><b>Phase scope</b> — L/R Lissajous (in-phase is vertical, antiphase is sideways).</li>
+<li><b>Goniometer (density)</b> — the same field as a density plot, so width and mono bias stay visible.</li>
+<li><b>Correlation vs frequency</b> — L/R correlation per band (−1…+1), for spotting a band that is out of phase.</li>
+<li><b>Phase vs frequency</b> — L/R phase difference per band. Mono is 0°, antiphase is ±180°.</li>
 </ul>
 <h2>Layouts</h2>
-<p>The right-click menu offers overlay, split vertical, split horizontal, 2x2 and 2x4 — useful when you want to look at the channels of a multi-channel source one at a time.</p>
+<p>On the spectrum view the right-click menu offers overlay, split vertical, split horizontal, 2x2 and 2x4 — useful when you want to look at the channels of a multi-channel source one at a time.</p>
 <h2>The EQ overlay</h2>
-<p>The band positions and gain curve from <a href="eq.htm">Equalizer and environmental models</a> can be drawn over the spectrum. Seeing which peak the slider in your hand is affecting makes EQ work considerably easier.</p>
+<p>The band positions and gain curve from <a href="eq.htm">Equalizer and environmental models</a> can be drawn over the spectrum or RTA. Seeing which peak the slider in your hand is affecting makes EQ work considerably easier.</p>
 <h2>Keyboard controls</h2>
 <table class="grid">
 <tr><th>Key</th><th>Action</th></tr>
+<tr><td><kbd>W</kbd></td><td>Cycle the upper display kind</td></tr>
+<tr><td><kbd>S</kbd></td><td>Cycle the lower display kind</td></tr>
+<tr><td><kbd>M</kbd></td><td>Show or hide the level meters (φ stays)</td></tr>
 <tr><td><kbd>F</kbd></td><td>Freeze the display</td></tr>
 <tr><td><kbd>P</kbd></td><td>Toggle peak hold</td></tr>
 <tr><td><kbd>E</kbd></td><td>Toggle the EQ overlay</td></tr>
 <tr><td><kbd>Space</kbd> or double-click</td><td>Reset peaks</td></tr>
 </table>
 <h2>Reading values with the mouse</h2>
-<p>Hover over the display to read the frequency in Hz, the level in dB and the channel. On split layouts you get the values for the panel under the cursor.</p>
+<p>Hover over the display to read the frequency in Hz, the level in dB and the channel. Correlation-vs-frequency shows φ; phase-vs-frequency shows degrees. On split layouts you get the values for the panel under the cursor.</p>
+<h2>Soft 3D</h2>
+<p>Right-click → Upper / Lower panel view switches a pane to Soft 3D. Drag to orbit, wheel to zoom, <kbd>0</kbd> to reset the camera. Wave, RTA and goniometer all have matching 3D views.</p>
 <h2>Saving the view as a picture</h2>
 <p>The spectrogram jacket tool in <a href="tools.htm">The companion tools</a> saves the analyzer view as an image — a nice way to keep the character of a track as a picture.</p>
 <div class="tip"><span class="label">Tip</span>
-<p>Drawing runs on an analysis worker thread, so the display stays smooth without interrupting the audio. Acrylic blur is supported here too.</p>
+<p>Drawing runs on an analysis worker thread, so the display stays smooth without interrupting the audio. Acrylic blur is supported here too. In acrylic mode the wave still scrolls from the left of the meters; the meter strip is overlaid rather than scrolled.</p>
 </div>
 <div class="note"><span class="label">Please note</span>
 <p>Right-clicking a track in the playlist opens the analyzer for it directly. <a href="pianoroll.htm">Seeing the music on a piano roll</a> opens the same way.</p>

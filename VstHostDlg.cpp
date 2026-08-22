@@ -188,6 +188,7 @@ public:
 	CButton m_ok, m_cancel;
 	BOOL OnInitDialog() override {
 		CDialog::OnInitDialog();
+		CCC_ApplyWindowIconFromTemplate(this, IDD_VST_WAIT);
 		SetWindowText(m_title);
 		if (CWnd* t = GetDlgItem(IDC_VST_WAIT_TXT))
 			t->SetWindowText(LL14(L"名前", L"Name", L"Nom", L"Nome", L"Nombre", L"이름", L"名称", L"الاسم",
@@ -227,6 +228,7 @@ public:
 	CVstHelpDlg(CWnd* parent) : CDialog(IDD_VST_HELP, parent) {}
 	BOOL OnInitDialog() override {
 		CDialog::OnInitDialog();
+		CCC_ApplyWindowIconFromTemplate(this, IDD_VST_HELP);
 		SetWindowText(LL14(L"VSTホスト ガイド", L"VST Host Guide", L"Guide hôte VST", L"Guida host VST",
 			L"Guía host VST", L"VST 호스트 가이드", L"VST 主机指南", L"دليل مضيف VST",
 			L"Руководство VST", L"VST-Host-Anleitung", L"Guia do host VST", L"VST-hostgids",

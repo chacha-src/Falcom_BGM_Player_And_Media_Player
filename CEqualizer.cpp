@@ -138,8 +138,7 @@ END_MESSAGE_MAP()
 BOOL CEqHelpDlg::OnInitDialog()
 {
 	CDialog::OnInitDialog();
-	SetIcon(nullptr, TRUE);
-	SetIcon(nullptr, FALSE);
+	CCC_ApplyWindowIconFromTemplate(this, IDD);
 	ModifyStyleEx(0, WS_EX_DLGMODALFRAME, SWP_FRAMECHANGED);
 	SetWindowText(LL14(
 		L"イコライザー操作ガイド", L"Equalizer Guide", L"Guide égaliseur", L"Guida equalizzatore",

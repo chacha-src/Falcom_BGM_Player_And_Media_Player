@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include "afxwin.h"
 #include "CCustomControl.h"
 #include "resource.h"
@@ -443,6 +443,7 @@ public:
 	int m_toastKind; // 0=なし 1=鍵なし扉 2=鍵取得 3=扉開放
 	int m_trapCellX, m_trapCellZ;
 	float m_slowT;
+	float m_sfxBumpCool;
 	int m_lastStepMx, m_lastStepMz;
 	int m_iceSlideLeft;
 	float m_stepFromX, m_stepFromZ;

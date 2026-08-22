@@ -164,6 +164,7 @@ END_MESSAGE_MAP()
 BOOL CVcHelp::OnInitDialog()
 {
 	CDialog::OnInitDialog();
+	CCC_ApplyWindowIconFromTemplate(this, IDD_VC_HELP);
 	SetWindowText(LL14(L"ボイスチェンジャーガイド", L"Voice changer guide", L"Guide changeur de voix", L"Guida cambia voce", L"Guía del cambiador de voz", L"보이스 체인저 가이드", L"变声器指南", L"دليل مغير الصوت", L"Гид по изменению голоса", L"Stimmenwandler-Hilfe", L"Guia do modificador de voz", L"Gids stemvervormer", L"Przewodnik zmiany głosu", L"Ses değiştirici rehberi"));
 	return TRUE;
 }

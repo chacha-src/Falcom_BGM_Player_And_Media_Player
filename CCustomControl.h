@@ -105,6 +105,14 @@ void CCC_InwomanGetShake(int& dx, int& dy);
 // コンテキストメニューからアクリルON/OFFしたとき全UIへ再適用
 void CCC_NotifyAeroSettingChanged();
 
+// ツール窓のキャプション／タスクバー用。iconId=0 は何もしない（MP/本窓は各自 SetIcon）。
+void CCC_ApplyDlgResourceIcon(CWnd* w, UINT iconId);
+UINT CCC_IconIdForDialogTemplate(UINT idd);
+void CCC_ApplyWindowIconFromTemplate(CWnd* w, UINT idd);
+
+HCURSOR CCC_LoadUiCursor(UINT id);
+BOOL CCC_SetUiCursor(UINT id);
+
 // モーダルダイアログを親の背後に隠さず前面へ出す(メディアプレイヤー等)
 inline void CCC_BringDialogToForeground(CWnd* dlg)
 {

@@ -1,7 +1,7 @@
 ﻿#pragma once
 // CAnalyzerDlg.h : 簡易波形アナライザー
-// 上部: PCM 波形(横スクロール・バックバッファ) / トリガー式オシロ
-// 下部: 周波数特性 / スペクトログラム / 位相スコープ
+// 上部: スクロール/エンベロープ/M-S/ラウドネス/トリガー/残光オシロ
+// 下部: スペクトラム/RTA/スペクトログラム/位相/ゴニオ/帯域相関/帯域位相
 // ステレオ〜7.1ch(最大8)対応。周波数特性は右クリックで分割レイアウト切替。
 // Ozone 風: 塗/線/バー、ピークホールド、EQオーバーレイ(全パネル・編集可)、
 // ホバー読取、レベルメーター(全ch)、フリーズ、差分、ズーム、マーカー、TP/LUFS。
@@ -51,14 +51,24 @@ public:
 
 	enum WaveMode {
 		WaveScroll = 0,
-		WaveTrigger = 1
+		WaveTrigger = 1,
+		WaveEnvelope = 2,   // DAW 風 min/max 塗り波形
+		WaveMidSide = 3,    // Mid / Side 2レーン
+		WaveLoudness = 4,   // RMS/LUFS 履歴
+		WavePhosphor = 5    // 残光オシロ
 	};
+	static constexpr int WAVE_MODE_COUNT = 6;
 
 	enum LowerMode {
 		LowerSpectrum = 0,
 		LowerWaterfall = 1,
-		LowerPhase = 2
+		LowerPhase = 2,
+		LowerVector = 3,     // 密度ゴニオメータ
+		LowerRta = 4,        // 1/3 オクターブ RTA
+		LowerCorrFreq = 5,   // 帯域相関
+		LowerPhaseFreq = 6   // 帯域位相差
 	};
+	static constexpr int LOWER_MODE_COUNT = 7;
 
 	enum FreqZoom {
 		ZoomFull = 0,
@@ -109,6 +119,7 @@ protected:
 	afx_msg void OnLButtonDown(UINT nFlags, CPoint point);
 	afx_msg void OnLButtonUp(UINT nFlags, CPoint point);
 	afx_msg void OnLButtonDblClk(UINT nFlags, CPoint point);
+	afx_msg BOOL OnSetCursor(CWnd* pWnd, UINT nHitTest, UINT message);
 	afx_msg BOOL OnMouseWheel(UINT nFlags, short zDelta, CPoint pt);
 	afx_msg void OnSpecLayoutOverlay();
 	afx_msg void OnSpecLayoutSplitV();
@@ -135,9 +146,11 @@ protected:
 	afx_msg void OnCopyLevels();
 	afx_msg void OnWaveModeScroll();
 	afx_msg void OnWaveModeTrigger();
+	afx_msg void OnWaveModeExtra(UINT nID);
 	afx_msg void OnLowerModeSpectrum();
 	afx_msg void OnLowerModeWaterfall();
 	afx_msg void OnLowerModePhase();
+	afx_msg void OnLowerModeExtra(UINT nID);
 	afx_msg void OnToggleSpecDiff();
 	afx_msg void OnCaptureSpecSnap();
 	afx_msg void OnClearSpecSnap();
@@ -232,6 +245,8 @@ private:
 	bool m_specSnapValid = false;
 	float m_corrHist[64];
 	int m_corrHistHead = 0;
+	static constexpr int GONIO_N = 96;
+	unsigned char m_gonio[GONIO_N][GONIO_N];
 
 	std::vector<float> m_ring[CH_MAX];
 	std::vector<float> m_ringSnap[CH_MAX];
@@ -250,10 +265,15 @@ private:
 	int m_waveW = 0, m_waveH = 0;
 	bool m_waveReady = false;
 	int m_waveLayoutCh = 0;
+	int m_waveLayoutPlotW = 0;
 
 	float m_specDb[CH_MAX][SPEC_BINS];
 	float m_specPeakDb[CH_MAX][SPEC_BINS];
 	float m_specSnapDb[CH_MAX][SPEC_BINS];
+	float m_specCorr[SPEC_BINS];
+	float m_specPhase[SPEC_BINS];
+	float m_fftLre[FFT_SIZE / 2 + 1];
+	float m_fftLim[FFT_SIZE / 2 + 1];
 	float m_wfHist[CH_MAX][WF_ROWS][SPEC_BINS];
 	int m_wfWrite = 0;
 	int m_wfFilled = 0;

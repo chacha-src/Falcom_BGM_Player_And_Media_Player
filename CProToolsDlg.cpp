@@ -46,8 +46,7 @@ END_MESSAGE_MAP()
 BOOL CPtHelpDlg::OnInitDialog()
 {
 	CDialog::OnInitDialog();
-	SetIcon(nullptr, TRUE);
-	SetIcon(nullptr, FALSE);
+	CCC_ApplyWindowIconFromTemplate(this, IDD);
 	ModifyStyleEx(0, WS_EX_DLGMODALFRAME, SWP_FRAMECHANGED);
 	SetWindowText(LL14(
 		L"再生詳細操作ガイド", L"Playback Details Guide", L"Guide détails lecture", L"Guida dettagli riproduzione",

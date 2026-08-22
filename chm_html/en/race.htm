@@ -1,4 +1,4 @@
-﻿<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
 <html>
 <head>
 <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
@@ -30,37 +30,42 @@
 <h2>Reading the screen</h2>
 <dl>
 <dt>The power band (ribbon of light)</dt>
-<dd>The course itself. Flying on the band regenerates thrust, and the centre of the band restores HP.</dd>
+<dd>The course itself. Flying on the band regenerates thrust, and the inner green strip down the centre restores HP.</dd>
+<dt>Start / lap line</dt>
+<dd>The chequered gate is the lap marker. Crossing it forwards counts a lap, and the last lap is the finish.</dd>
 <dt>Off the band</dt>
 <dd>You can fly freely, which makes shortcuts possible — but when the thrust gauge hits zero you cannot move and are returned to the point where you left the band. Your HP is untouched.</dd>
-<dt>Terrain</dt>
-<dd>Rolling ground. Contact costs HP.</dd>
+<dt>Terrain (hills, valleys, rivers)</dt>
+<dd>Real relief. Trees and other props grow from hill surfaces. The band may clip into terrain and trees. Large mountains stay solid from the outside; where the band meets them a tunnel is carved through. Geometry between the camera and the course fades so you can still see the lane. Fly the gaps. Contact costs HP.</dd>
 <dt>Trees, buildings and hazards</dt>
-<dd>Off-course scenery, plus slalom markers and gates on the band itself. Collisions cost HP.</dd>
+<dd>Trunks and buildings are allowed to sink into the band. You fly between branches, pipes and structures. Nothing is placed so that it fills the whole lane. Hitting the solid core costs HP.</dd>
 <dt>Item orbs</dt>
 <dd>Touching one changes the playing track's tempo or pitch, and applies a race effect such as a boost or fog at the same time.</dd>
 <dt>The standings panel</dt>
-<dd>Below the minimap on the right: name, position and recent lap times. Laps sit to the right of the name in two rows (two slots each, up to four). Older laps drop off when a fifth would not fit. Your own row is tinted differently.</dd>
+<dd>Below the minimap on the right: name, position and recent lap times. Your own row is tinted differently.</dd>
 </dl>
 <h2>From start to finish</h2>
 <ol>
-<li>Press <b>Generate</b> and a course is built, followed straight away by a demo lap. It shows you the whole course from above, which makes a useful reconnaissance run. The mouse pans the view.</li>
+<li>Press <b>Generate</b> and a course is built, followed straight away by a demo lap. It shows you the whole course from above, which makes a useful reconnaissance run. The mouse pans the view. Each generate also picks a plan: an oval, a figure-8 whose crossing is split in height so you cannot cut through it on the flat, a rounded convex shape, or a concave pinch.</li>
 <li>Press <b>Start</b> to end the demo. After a five-count and GO, the race begins.</li>
 <li>Complete your chosen number of laps and the podium shows the top three.</li>
 </ol>
 <h2>What you can set</h2>
 <ul>
-<li><b>AI</b> — super easy, easy, normal, hard or intense</li>
+<li><b>AI</b> — super easy, easy, normal, hard or intense (super easy stays a bit slower than you; intense races near the cap)</li>
 <li><b>Opponents</b> — how many rivals</li>
 <li><b>Length</b> — auto, short or long</li>
 <li><b>Laps</b> — how many times round</li>
-<li><b>Theme</b> — ruins, oil factory, night city, underwater tube, grassland, sunset mesa or cloud garden</li>
+<li><b>Theme</b> — forest, ruins, oil factory, night city, underwater tube, grassland, sunset mesa or cloud garden</li>
 </ul>
+<p>Ground, craft and the light ribbon use license-free photo textures (256px) embedded in the exe. Nothing extra is placed beside the exe.</p>
 <p>These settings persist, so the next time you open the race you start on the same terms.</p>
+<h2>PCM sound effects</h2>
+<p>Engine notes are synthesized as PCM, not taken from wave files, together with the start countdown and GO, lap crossings, finish, podium, course-out, item pickups, collisions and wrong-way alerts. Throttle raises pitch and sub-bass, each craft has its own timbre, and distance changes loudness and left/right pan (in the spirit of DirectSound 3D). They are not mixed into the music streaming buffer. Toggle them from View in the right-click menu.</p>
 <h2>The right-click menu</h2>
 <p>Right-click the status area or the window chrome for restart, regenerate course, minimap display and item types. On the view itself the right button is the brake, so use the status area when you want the menu.</p>
 <div class="tip"><span class="label">Tip</span>
-<p>The camera deliberately lags behind on both axes to reduce motion sickness, and the course keeps height changes to occasional bumps for the same reason.</p>
+<p>The camera deliberately lags behind on both axes to reduce motion sickness. On steep climbs it eases to a look-up from below. Terrain varies by theme with hills, valleys and rivers. The band may clip through trees and ground; large mountains are tunneled through.</p>
 </div>
 <div class="note"><span class="label">Please note</span>
 <p>This cannot be open at the same time as <a href="maze.htm">Bonus: the Soft3D maze</a>, and it will not start on a system without DirectX 11.</p>

@@ -331,6 +331,7 @@ BOOL COggApp::InitInstance()
 	savedata.midimon3dpitch = 260;
 	savedata.midimon3dzoom = 100;
 	savedata.surround = 0;
+	savedata.s3_pcm_sfx = 1;
 	savedata.teBatchMainLock = 0;
 	savedata.mpDjPadwindow = 0;
 	savedata.mpNormTargetLufs = -14;
@@ -689,6 +690,10 @@ BOOL COggApp::InitInstance()
 		savedata.speaker_layout = 0;
 	if (savedata.surround < 0 || savedata.surround > 100)
 		savedata.surround = 0;
+	if (datFileSize < (int)(offsetof(save, s3_pcm_sfx) + sizeof(savedata.s3_pcm_sfx)))
+		savedata.s3_pcm_sfx = 1;
+	else
+		savedata.s3_pcm_sfx = savedata.s3_pcm_sfx ? 1 : 0;
 	// wav_export_*_sec の正規化は saveversion 3 コンバート後に行う（intビットをfloatとして読まない）
 	// アナライザー窓: 必ず構造体末尾に追記(旧.datは部分読込で未設定のまま→既定値)
 	if (datFileSize < (int)(offsetof(save, analyzerwindow) + sizeof(savedata.analyzerwindow))) {
@@ -1246,11 +1251,11 @@ BOOL COggApp::InitInstance()
 		savedata.mpSpeanaStyle = 0;
 	if (datFileSize < (int)(offsetof(save, analyzerwavemode) + sizeof(savedata.analyzerwavemode)))
 		savedata.analyzerwavemode = 0;
-	else if (savedata.analyzerwavemode != 0)
-		savedata.analyzerwavemode = 1;
+	else if (savedata.analyzerwavemode < 0 || savedata.analyzerwavemode > 5)
+		savedata.analyzerwavemode = 0;
 	if (datFileSize < (int)(offsetof(save, analyzerlowermode) + sizeof(savedata.analyzerlowermode)))
 		savedata.analyzerlowermode = 0;
-	else if (savedata.analyzerlowermode < 0 || savedata.analyzerlowermode > 2)
+	else if (savedata.analyzerlowermode < 0 || savedata.analyzerlowermode > 6)
 		savedata.analyzerlowermode = 0;
 	if (datFileSize < (int)(offsetof(save, analyzerspecdiff) + sizeof(savedata.analyzerspecdiff)))
 		savedata.analyzerspecdiff = 0;

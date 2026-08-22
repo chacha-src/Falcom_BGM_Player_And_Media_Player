@@ -607,8 +607,7 @@ END_MESSAGE_MAP()
 BOOL CTeHelpDlg::OnInitDialog()
 {
 	CDialog::OnInitDialog();
-	SetIcon(nullptr, TRUE);
-	SetIcon(nullptr, FALSE);
+	CCC_ApplyWindowIconFromTemplate(this, IDD);
 	ModifyStyleEx(0, WS_EX_DLGMODALFRAME, SWP_FRAMECHANGED);
 	SetWindowText(LL14(
 		L"タグ編集操作ガイド", L"Tag Edit Guide", L"Guide d'édition des tags", L"Guida modifica tag",

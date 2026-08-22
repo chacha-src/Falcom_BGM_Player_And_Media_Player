@@ -326,8 +326,7 @@ END_MESSAGE_MAP()
 BOOL CDrHelpDlg::OnInitDialog()
 {
 	CDialog::OnInitDialog();
-	SetIcon(nullptr, TRUE);
-	SetIcon(nullptr, FALSE);
+	CCC_ApplyWindowIconFromTemplate(this, IDD);
 	ModifyStyleEx(0, WS_EX_DLGMODALFRAME, SWP_FRAMECHANGED);
 	SetWindowText(LL14(
 		L"デバイス録音操作ガイド", L"Device Recording Guide", L"Guide d'enregistrement", L"Guida registrazione",

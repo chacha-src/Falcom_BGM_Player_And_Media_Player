@@ -15,6 +15,10 @@ extern COggDlg* og;
 extern int tempo;
 extern int pitch;
 
+static void AnalyzerMeterGeom(int channels, int& n, int& meterW, int& gap, int& totalW);
+static int AnalyzerMeterStripWidth(int channels, int showLr);
+static int AnalyzerWavePlotWidth(int waveW, int channels, int showLr);
+
 IMPLEMENT_DYNAMIC(CAnalyzerDlg, CCustomBlurDialogExBase)
 
 namespace
@@ -296,6 +300,14 @@ namespace
 		IDM_MS_MONO = 42053,
 		IDM_MS_RESET = 42054,
 		IDM_MS_FROM_CORR = 42055,
+		IDM_WAVE_ENVELOPE = 42070,
+		IDM_WAVE_MS = 42071,
+		IDM_WAVE_LOUDNESS = 42072,
+		IDM_WAVE_PHOSPHOR = 42073,
+		IDM_LOWER_VECTOR = 42080,
+		IDM_LOWER_RTA = 42081,
+		IDM_LOWER_CORRFREQ = 42082,
+		IDM_LOWER_PHASEFREQ = 42083,
 
 		IDM_VIEW_TOP_2D = 42300,
 		IDM_VIEW_TOP_3D = 42301,
@@ -342,8 +354,7 @@ END_MESSAGE_MAP()
 BOOL CAnHelpDlg::OnInitDialog()
 {
 	CDialog::OnInitDialog();
-	SetIcon(nullptr, TRUE);
-	SetIcon(nullptr, FALSE);
+	CCC_ApplyWindowIconFromTemplate(this, IDD);
 	ModifyStyleEx(0, WS_EX_DLGMODALFRAME, SWP_FRAMECHANGED);
 	SetWindowText(LL14(
 		L"アナライザー操作ガイド", L"Analyzer Guide", L"Guide analyseur", L"Guida analizzatore",
@@ -455,35 +466,50 @@ void CAnHelpDlg::OnPaint()
 		L"Układ", L"Düzen"));
 	y += titleLh;
 	body(L, y, LL14(
-		L"・上部 …… スクロール波形 / トリガー式オシロ。速度は右クリックで x0.25〜x2.0",
-		L"· Upper …… scrolling wave / triggered scope. Speed via right-click x0.25–x2.0",
-		L"· Haut …… onde / oscilloscope. Vitesse clic droit x0.25–x2.0",
-		L"· Alto …… onda / oscilloscopio. Velocità destro x0.25–x2.0",
-		L"· Superior …… onda / osciloscopio. Velocidad clic der. x0.25–x2.0",
-		L"· 상단 …… 스크롤 파형 / 트리거 스코프. 우클릭으로 x0.25~x2.0",
-		L"· 上部 …… 滚动波形 / 触发示波。右键速度 x0.25–x2.0",
-		L"· أعلى …… موجة / راسم. السرعة يمين x0.25–x2.0",
-		L"· Верх …… прокрутка / осциллограф. Скорость ПКМ x0.25–x2.0",
-		L"· Oben …… Scrollwelle / Scope. Tempo Rechtsklick x0.25–x2.0",
-		L"· Topo …… onda / osciloscópio. Velocidade direito x0.25–x2.0",
-		L"· Boven …… golf / scoop. Snelheid rechtsklik x0.25–x2.0",
-		L"· Góra …… fala / oscyloskop. Prędkość PPM x0.25–x2.0",
-		L"· Üst …… kayan dalga / osiloskop. Hız sağ tık x0.25–x2.0")); y += lh;
+		L"・上部 …… スクロール／エンベロープ／Mid-Side／ラウドネス／トリガー／残光。速度は右クリック",
+		L"· Upper …… scroll / envelope / M-S / loudness / trigger / phosphor. Speed via RMB",
+		L"· Haut …… onde / enveloppe / M-S / loudness / trigger / phosphore. Vitesse clic droit",
+		L"· Alto …… onda / inviluppo / M-S / loudness / trigger / fosforo. Velocità destro",
+		L"· Superior …… onda / envolvente / M-S / loudness / trigger / fósforo. Velocidad clic der.",
+		L"· 상단 …… 스크롤 / 엔벨로프 / M-S / 라우드니스 / 트리거 / 잔광. 우클릭으로 속도",
+		L"· 上部 …… 滚动/包络/M-S/响度/触发/余辉。右键调速度",
+		L"· أعلى …… تمرير / غلاف / M-S / جهارة / محفز / فسفور. السرعة يمين",
+		L"· Верх …… прокрутка / огибающая / M-S / громкость / триггер / фосфор. Скорость ПКМ",
+		L"· Oben …… Scroll / Hüllkurve / M-S / Loudness / Trigger / Phosphor. Tempo RMB",
+		L"· Topo …… rolagem / envelope / M-S / loudness / trigger / fósforo. Velocidade direito",
+		L"· Boven …… scroll / omhullende / M-S / loudness / trigger / fosfor. Snelheid RMB",
+		L"· Góra …… scroll / obwiednia / M-S / głośność / trigger / fosfor. Prędkość PPM",
+		L"· Üst …… kaydırma / zarf / M-S / loudness / tetik / fosfor. Hız sağ tık")); y += lh;
 	body(L, y, LL14(
-		L"・下部 …… 周波数特性 / スペクトログラム / 位相スコープ",
-		L"· Lower …… spectrum / spectrogram / phase scope",
-		L"· Bas …… spectre / spectrogramme / phase",
-		L"· Basso …… spettro / spettrogramma / fase",
-		L"· Inferior …… espectro / espectrograma / fase",
-		L"· 하단 …… 스펙트럼 / 스펙트로그램 / 위상 스코프",
-		L"· 下部 …… 频谱 / 频谱图 / 相位示波",
-		L"· أسفل …… طيف / مخطط طيفي / طور",
-		L"· Низ …… спектр / спектрограмма / фаза",
-		L"· Unten …… Spektrum / Spektrogramm / Phase",
-		L"· Inferior …… espectro / espectrograma / fase",
-		L"· Onder …… spectrum / spectrogram / fase",
-		L"· Dół …… widmo / spektrogram / faza",
-		L"· Alt …… spektrum / spektrogram / faz")); y += lh;
+		L"・下部 …… スペクトラム／1/3oct RTA／スペクトログラム／位相／ゴニオ／帯域相関／帯域位相",
+		L"· Lower …… spectrum / 1/3-oct RTA / spectrogram / phase / gonio / corr vs Hz / phase vs Hz",
+		L"· Bas …… spectre / RTA 1/3 / spectrogramme / phase / gonio / corr. / phase vs Hz",
+		L"· Basso …… spettro / RTA 1/3 / spettrogramma / fase / gonio / corr. / fase vs Hz",
+		L"· Inferior …… espectro / RTA 1/3 / espectrograma / fase / gonio / corr. / fase vs Hz",
+		L"· 하단 …… 스펙트럼 / 1/3oct RTA / 스펙트로그램 / 위상 / 고니오 / 대역상관 / 대역위상",
+		L"· 下部 …… 频谱 / 1/3oct RTA / 频谱图 / 相位 / 测向 / 频段相关 / 频段相位",
+		L"· أسفل …… طيف / RTA / مخطط / طور / اتجاه / ترابط / طور vs هرتز",
+		L"· Низ …… спектр / RTA 1/3 / спектрограмма / фаза / гонио / корр. / фаза vs Гц",
+		L"· Unten …… Spektrum / 1/3-Okt-RTA / Spektrogramm / Phase / Gonio / Korr. / Phase vs Hz",
+		L"· Inferior …… espectro / RTA 1/3 / espectrograma / fase / gonio / corr. / fase vs Hz",
+		L"· Onder …… spectrum / 1/3-oct RTA / spectrogram / fase / gonio / corr. / fase vs Hz",
+		L"· Dół …… widmo / RTA 1/3 / spektrogram / faza / gonio / kor. / faza vs Hz",
+		L"· Alt …… spektrum / 1/3oct RTA / spektrogram / faz / gonyo / korelasyon / faz vs Hz")); y += lh;
+	body(L, y, LL14(
+		L"・右端メーター …… 波形は LR／φ の左から始まります。LR を消しても φ は右端に残ります",
+		L"· Right meters …… the wave starts left of LR / φ. Hide LR and φ stays at the right edge",
+		L"· Compteurs à droite …… l'onde commence à gauche de LR / φ. Sans LR, φ reste à droite",
+		L"· Meter a destra …… l'onda inizia a sinistra di LR / φ. Senza LR, φ resta a destra",
+		L"· Medidores a la derecha …… la onda empieza a la izq. de LR / φ. Sin LR, φ queda a la der.",
+		L"· 오른쪽 미터 …… 파형은 LR/φ 왼쪽부터. LR를 꺼도 φ는 오른쪽에 남음",
+		L"· 右端表头 …… 波形从 LR／φ 左侧开始。关掉 LR 后 φ 仍留在右端",
+		L"· المقاييس يميناً …… تبدأ الموجة يسار LR / φ. دون LR يبقى φ يميناً",
+		L"· Метры справа …… волна слева от LR / φ. Без LR φ остаётся справа",
+		L"· Rechte Anzeigen …… Welle links von LR / φ. Ohne LR bleibt φ rechts",
+		L"· Medidores à direita …… a onda começa à esq. de LR / φ. Sem LR, φ fica à dir.",
+		L"· Meters rechts …… golf start links van LR / φ. Zonder LR blijft φ rechts",
+		L"· Mierniki z prawej …… fala od lewej LR / φ. Bez LR φ zostaje z prawej",
+		L"· Sağ ölçerler …… dalga LR / φ solundan başlar. LR kapalı olsa da φ sağda kalır")); y += lh;
 	body(L, y, LL14(
 		L"・周波数モード …… 塗+線 / バー / Cubase・SPAN・Ableton・FabFilter 風など",
 		L"· Spectrum style …… fill+line / bars / Cubase·SPAN·Ableton·FabFilter looks",
@@ -570,7 +596,7 @@ void CAnHelpDlg::OnPaint()
 		L"· TP/LUFS …… True Peak e LUFS simples perto da onda",
 		L"· TP/LUFS …… eenvoudige True Peak & LUFS bij de golf",
 		L"· TP/LUFS …… prosty True Peak i LUFS przy fali",
-		L"· TP/LUFS …… dalga yanında basit True Peak ve LUFS")); 
+		L"· TP/LUFS …… dalga yanında basit True Peak ve LUFS")); y += lh;
 	body(L, y, LL14(
 		L"・スペクトログラムを画像保存 …… 右クリックで PNG/BMP に書き出し（ジャケット用）",
 		L"· Save spectrogram image …… RMB exports PNG/BMP (for jacket use)",
@@ -602,8 +628,6 @@ void CAnHelpDlg::OnPaint()
 		L"· Kor→M/S …… PPM proponuje z historii",
 		L"· Kor→M/S …… sag tik gecmisten onerir")); y += lh;
 
-	y += lh + 4;
-
 	title(L, y, LL14(L"操作・ウィンドウ", L"Actions & window", L"Actions et fenêtre", L"Azioni e finestra",
 		L"Acciones y ventana", L"조작·창", L"操作与窗口", L"إجراءات والنافذة",
 		L"Действия и окно", L"Aktionen & Fenster", L"Ações e janela", L"Acties & venster",
@@ -624,6 +648,21 @@ void CAnHelpDlg::OnPaint()
 		L"· Rechtsklik …… layout/stijl/diff/bevriezen/kopiëren/boven…",
 		L"· PPM …… układ/styl/różnica/zamroź/kopiuj/zawsze na wierzchu…",
 		L"· Sağ tık …… düzen/stil/fark/dondur/kopyala/her zaman üstte…")); y += lh;
+	body(L, y, LL14(
+		L"・キー …… W 上部モード / S 下部モード / M レベル / F フリーズ / P ピーク / E EQ",
+		L"· Keys …… W upper mode / S lower mode / M levels / F freeze / P peak / E EQ",
+		L"· Touches …… W haut / S bas / M niveaux / F gel / P crête / E EQ",
+		L"· Tasti …… W alto / S basso / M livelli / F gelo / P picco / E EQ",
+		L"· Teclas …… W superior / S inferior / M niveles / F congelar / P pico / E EQ",
+		L"· 키 …… W 상단 모드 / S 하단 모드 / M 레벨 / F 프리즈 / P 피크 / E EQ",
+		L"· 按键 …… W 上部模式 / S 下部模式 / M 电平 / F 冻结 / P 峰值 / E EQ",
+		L"· مفاتيح …… W أعلى / S أسفل / M مستوى / F تجميد / P ذروة / E EQ",
+		L"· Клавиши …… W верх / S низ / M уровень / F заморозка / P пик / E EQ",
+		L"· Tasten …… W oben / S unten / M Pegel / F Freeze / P Peak / E EQ",
+		L"· Teclas …… W topo / S baixo / M níveis / F congelar / P pico / E EQ",
+		L"· Toetsen …… W boven / S onder / M niveau / F bevriezen / P piek / E EQ",
+		L"· Klawisze …… W góra / S dół / M poziom / F zamroź / P szczyt / E EQ",
+		L"· Tuşlar …… W üst / S alt / M seviye / F dondur / P tepe / E EQ")); y += lh;
 	body(L, y, LL14(
 		L"・EQオーバーレイ …… 曲線をドラッグして帯域ゲインを直接いじれます",
 		L"· EQ overlay …… drag the curve to tweak band gains live",
@@ -785,6 +824,12 @@ CAnalyzerDlg::CAnalyzerDlg(CWnd* pParent)	: CCustomBlurDialogExBase(IDD_ANALYZER
 	m_tpLufsTipRc.SetRectEmpty();
 	memset(m_corrHist, 0, sizeof(m_corrHist));
 	m_corrHistHead = 0;
+	memset(m_specCorr, 0, sizeof(m_specCorr));
+	memset(m_specPhase, 0, sizeof(m_specPhase));
+	memset(m_fftLre, 0, sizeof(m_fftLre));
+	memset(m_fftLim, 0, sizeof(m_fftLim));
+	memset(m_gonio, 0, sizeof(m_gonio));
+	m_waveLayoutPlotW = 0;
 }
 
 CAnalyzerDlg::~CAnalyzerDlg()
@@ -817,6 +862,7 @@ BEGIN_MESSAGE_MAP(CAnalyzerDlg, CCustomBlurDialogExBase)
 	ON_WM_LBUTTONDOWN()
 	ON_WM_LBUTTONUP()
 	ON_WM_LBUTTONDBLCLK()
+	ON_WM_SETCURSOR()
 	ON_WM_MOUSEWHEEL()
 	ON_COMMAND(IDM_SPEC_OVERLAY, &CAnalyzerDlg::OnSpecLayoutOverlay)
 	ON_COMMAND(IDM_SPEC_SPLIT_V, &CAnalyzerDlg::OnSpecLayoutSplitV)
@@ -843,9 +889,11 @@ BEGIN_MESSAGE_MAP(CAnalyzerDlg, CCustomBlurDialogExBase)
 	ON_COMMAND(IDM_COPY_LEVELS, &CAnalyzerDlg::OnCopyLevels)
 	ON_COMMAND(IDM_WAVE_SCROLL, &CAnalyzerDlg::OnWaveModeScroll)
 	ON_COMMAND(IDM_WAVE_TRIGGER, &CAnalyzerDlg::OnWaveModeTrigger)
+	ON_COMMAND_RANGE(IDM_WAVE_ENVELOPE, IDM_WAVE_PHOSPHOR, &CAnalyzerDlg::OnWaveModeExtra)
 	ON_COMMAND(IDM_LOWER_SPECTRUM, &CAnalyzerDlg::OnLowerModeSpectrum)
 	ON_COMMAND(IDM_LOWER_WATERFALL, &CAnalyzerDlg::OnLowerModeWaterfall)
 	ON_COMMAND(IDM_LOWER_PHASE, &CAnalyzerDlg::OnLowerModePhase)
+	ON_COMMAND_RANGE(IDM_LOWER_VECTOR, IDM_LOWER_PHASEFREQ, &CAnalyzerDlg::OnLowerModeExtra)
 	ON_COMMAND(IDM_SPEC_DIFF, &CAnalyzerDlg::OnToggleSpecDiff)
 	ON_COMMAND(IDM_SPEC_SNAP, &CAnalyzerDlg::OnCaptureSpecSnap)
 	ON_COMMAND(IDM_SPEC_SNAP_CLEAR, &CAnalyzerDlg::OnClearSpecSnap)
@@ -877,10 +925,6 @@ BOOL CAnalyzerDlg::OnInitDialog()
 		L"Анализатор", L"Analysator", L"Analisador", L"Analyser",
 		L"Analizator", L"Analizor"));
 	ModifyStyle(WS_MINIMIZEBOX, 0);
-	SetIcon(nullptr, TRUE);
-	SetIcon(nullptr, FALSE);
-	// キャプションアイコンは付けない。Aero 有効時も WS_EX_DLGMODALFRAME を
-	// 立てないと既定アイコンが残る（イコライザーは rc の DS_MODALFRAME で消えている）。
 	ModifyStyleEx(0, WS_EX_DLGMODALFRAME, SWP_FRAMECHANGED);
 
 	int ax = savedata.analyzerx;
@@ -910,10 +954,10 @@ BOOL CAnalyzerDlg::OnInitDialog()
 	m_showLevelMeter = (savedata.analyzerlevelmeter != 0);
 	m_alwaysOnTop = (savedata.analyzertopmost != 0);
 	m_waveMode = savedata.analyzerwavemode;
-	if (m_waveMode < WaveScroll || m_waveMode > WaveTrigger)
+	if (m_waveMode < WaveScroll || m_waveMode >= WAVE_MODE_COUNT)
 		m_waveMode = WaveScroll;
 	m_lowerMode = savedata.analyzerlowermode;
-	if (m_lowerMode < LowerSpectrum || m_lowerMode > LowerPhase)
+	if (m_lowerMode < LowerSpectrum || m_lowerMode >= LOWER_MODE_COUNT)
 		m_lowerMode = LowerSpectrum;
 	m_specDiff = (savedata.analyzerspecdiff != 0);
 	m_freqZoom = savedata.analyzerfreqzoom;
@@ -1022,6 +1066,9 @@ void CAnalyzerDlg::ResetPlaybackState()
 	}
 	m_wfWrite = 0;
 	m_wfFilled = 0;
+	memset(m_specCorr, 0, sizeof(m_specCorr));
+	memset(m_specPhase, 0, sizeof(m_specPhase));
+	memset(m_gonio, 0, sizeof(m_gonio));
 	LeaveCriticalSection(&m_cs);
 	m_waveReady = false;
 	m_specReady = false;
@@ -1239,7 +1286,7 @@ void CAnalyzerDlg::SetWaveSpeedPct(int pct)
 
 void CAnalyzerDlg::SetWaveMode(int mode)
 {
-	if (mode < WaveScroll || mode > WaveTrigger) return;
+	if (mode < WaveScroll || mode >= WAVE_MODE_COUNT) return;
 	if (m_waveMode == mode) return;
 	m_waveMode = mode;
 	savedata.analyzerwavemode = mode;
@@ -1247,6 +1294,7 @@ void CAnalyzerDlg::SetWaveMode(int mode)
 	m_pendingScroll = 0;
 	LeaveCriticalSection(&m_cs);
 	m_waveReady = false;   // 描き方が変わるので波形BBは作り直し
+	m_waveLayoutPlotW = 0;
 	m_specDirty = true;
 #if CCUSTOM_AERO_SUPPORT
 	m_chromaReady = false; // スクロール差分キャッシュを捨てる
@@ -1257,7 +1305,7 @@ void CAnalyzerDlg::SetWaveMode(int mode)
 
 void CAnalyzerDlg::SetLowerMode(int mode)
 {
-	if (mode < LowerSpectrum || mode > LowerPhase) return;
+	if (mode < LowerSpectrum || mode >= LOWER_MODE_COUNT) return;
 	if (m_lowerMode == mode) return;
 	m_lowerMode = mode;
 	savedata.analyzerlowermode = mode;
@@ -1354,9 +1402,23 @@ void CAnalyzerDlg::OnSpecStyleFabFilter() { SetSpecStyle(StyleFabFilter); }
 
 void CAnalyzerDlg::OnWaveModeScroll() { SetWaveMode(WaveScroll); }
 void CAnalyzerDlg::OnWaveModeTrigger() { SetWaveMode(WaveTrigger); }
+void CAnalyzerDlg::OnWaveModeExtra(UINT nID)
+{
+	if (nID == IDM_WAVE_ENVELOPE) SetWaveMode(WaveEnvelope);
+	else if (nID == IDM_WAVE_MS) SetWaveMode(WaveMidSide);
+	else if (nID == IDM_WAVE_LOUDNESS) SetWaveMode(WaveLoudness);
+	else if (nID == IDM_WAVE_PHOSPHOR) SetWaveMode(WavePhosphor);
+}
 void CAnalyzerDlg::OnLowerModeSpectrum() { SetLowerMode(LowerSpectrum); }
 void CAnalyzerDlg::OnLowerModeWaterfall() { SetLowerMode(LowerWaterfall); }
 void CAnalyzerDlg::OnLowerModePhase() { SetLowerMode(LowerPhase); }
+void CAnalyzerDlg::OnLowerModeExtra(UINT nID)
+{
+	if (nID == IDM_LOWER_VECTOR) SetLowerMode(LowerVector);
+	else if (nID == IDM_LOWER_RTA) SetLowerMode(LowerRta);
+	else if (nID == IDM_LOWER_CORRFREQ) SetLowerMode(LowerCorrFreq);
+	else if (nID == IDM_LOWER_PHASEFREQ) SetLowerMode(LowerPhaseFreq);
+}
 void CAnalyzerDlg::OnFreqZoomFull() { SetFreqZoom(ZoomFull); }
 void CAnalyzerDlg::OnFreqZoomLow() { SetFreqZoom(ZoomLow); }
 void CAnalyzerDlg::OnFreqZoomMid() { SetFreqZoom(ZoomMid); }
@@ -1458,6 +1520,8 @@ void CAnalyzerDlg::OnMarkerClearAll()
 void CAnalyzerDlg::OnToggleCorrMeter()
 {
 	savedata.pro_corr_meter = savedata.pro_corr_meter ? 0 : 1;
+	m_waveReady = false;
+	m_waveLayoutPlotW = 0;
 #if CCUSTOM_AERO_SUPPORT
 	m_chromaReady = false; // 相関帯の幅が変わるため残像を避ける
 #endif
@@ -1650,10 +1714,13 @@ void CAnalyzerDlg::OnToggleLevelMeter()
 {
 	m_showLevelMeter = !m_showLevelMeter;
 	savedata.analyzerlevelmeter = m_showLevelMeter ? 1 : 0;
+	m_waveReady = false;
+	m_waveLayoutPlotW = 0;
 #if CCUSTOM_AERO_SUPPORT
 	m_chromaReady = false; // 右端ストリップ残像を避ける
 #endif
 	Invalidate(FALSE);
+	KickUiPresent();
 }
 
 void CAnalyzerDlg::OnToggleAlwaysOnTop()
@@ -1836,29 +1903,85 @@ void CAnalyzerDlg::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
 
 	CCustomPopupMenu* subWave = menu.AddSubMenu(
 		LL14(L"上部の表示", L"Upper display", L"Affichage superieur", L"Display superiore", L"Pantalla superior", L"상단 표시", L"上部显示", L"العرض العلوي", L"Верхняя область", L"Obere Anzeige", L"Exibicao superior", L"Bovenste weergave", L"Gorny widok", L"Ust gosterim"),
-		LL14(L"上部ペインの表示内容（スクロール波形／トリガー式オシロ）を選びます。", L"Choose what the upper pane shows (scrolling wave / triggered scope).", L"Choisir l'affichage du panneau superieur (onde / oscillo).", L"Scegli cosa mostra il riquadro superiore (onda / oscilloscopio).", L"Elegir que muestra el panel superior (onda / osciloscopio).", L"상단 패널 표시(스크롤 파형/트리거 스코프)를 고릅니다.", L"选择上部窗格显示内容（滚动波形/触发示波）。", L"اختر ما يعرضه اللوح العلوي (موجة/راسم).", L"Выбрать содержимое верхней панели (волна / осциллограф).", L"Obere Anzeige wahlen (Scrollwelle / Scope).", L"Escolher o que o painel superior mostra (onda / osciloscopio).", L"Kies wat het bovenpaneel toont (golf / scoop).", L"Wybierz zawartosc gornego panelu (fala / oscyloskop).", L"Ust panelde ne gosterilecegini sec (kayan dalga / osiloskop)."));
+		LL14(L"上部ペインの表示内容を選びます。", L"Choose what the upper pane shows.", L"Choisir l'affichage du panneau superieur.", L"Scegli cosa mostra il riquadro superiore.", L"Elegir que muestra el panel superior.", L"상단 패널 표시 내용을 고릅니다.", L"选择上部窗格显示内容。", L"اختر ما يعرضه اللوح العلوي.", L"Выбрать содержимое верхней панели.", L"Obere Anzeige wahlen.", L"Escolher o que o painel superior mostra.", L"Kies wat het bovenpaneel toont.", L"Wybierz zawartosc gornego panelu.", L"Ust panelde ne gosterilecegini sec."));
 	if (subWave) {
-		subWave->AddCheck(IDM_WAVE_SCROLL,
-			LL14(L"スクロール波形", L"Scrolling wave", L"Onde defilante", L"Onda scorrevole", L"Onda desplazable", L"스크롤 파형", L"滚动波形", L"موجة متمررة", L"Прокрутка волны", L"Scrollende Welle", L"Onda rolante", L"Scrollende golf", L"Przewijana fala", L"Kayan dalga"),
-			m_waveMode == WaveScroll);
-		subWave->AddCheck(IDM_WAVE_TRIGGER,
-			LL14(L"トリガー式オシロ", L"Triggered scope", L"Oscillo declenche", L"Oscilloscopio con trigger", L"Osciloscopio con disparo", L"트리거 오실로스코프", L"触发示波器", L"راسم ذبذبات محفز", L"Синхр. осциллограф", L"Getriggertes Oszilloskop", L"Osciloscopio disparado", L"Getriggerde scoop", L"Wyzwalany oscyloskop", L"Tetiklemeli osiloskop"),
-			m_waveMode == WaveTrigger);
+		CCustomPopupMenu* subWaveTime = subWave->AddSubMenu(
+			LL14(L"時間軸", L"Time domain", L"Domaine temporel", L"Dominio tempo", L"Dominio temporal", L"시간축", L"时域", L"مجال زمني", L"Временная область", L"Zeitbereich", L"Dominio do tempo", L"Tijdsdomein", L"Domena czasu", L"Zaman alani"),
+			LL14(L"スクロール波形・エンベロープ・M/S・ラウドネス。", L"Scrolling wave, envelope, M/S, loudness.", L"Onde, enveloppe, M/S, loudness.", L"Onda, inviluppo, M/S, loudness.", L"Onda, envolvente, M/S, loudness.", L"스크롤 파형·엔벨로프·M/S·라우드니스.", L"滚动波形、包络、M/S、响度。", L"موجة وغلاف وM/S وloudness.", L"Волна, огибающая, M/S, громкость.", L"Scrollwelle, Hüllkurve, M/S, Loudness.", L"Onda, envelope, M/S, loudness.", L"Golf, omhullende, M/S, loudness.", L"Fala, obwiednia, M/S, glosnosc.", L"Kayan dalga, zarf, M/S, loudness."));
+		if (subWaveTime) {
+			subWaveTime->AddCheck(IDM_WAVE_SCROLL,
+				LL14(L"スクロール波形", L"Scrolling wave", L"Onde defilante", L"Onda scorrevole", L"Onda desplazable", L"스크롤 파형", L"滚动波形", L"موجة متمررة", L"Прокрутка волны", L"Scrollende Welle", L"Onda rolante", L"Scrollende golf", L"Przewijana fala", L"Kayan dalga"),
+				m_waveMode == WaveScroll);
+			subWaveTime->AddCheck(IDM_WAVE_ENVELOPE,
+				LL14(L"エンベロープ (min/max)", L"Envelope (min/max)", L"Enveloppe (min/max)", L"Inviluppo (min/max)", L"Envolvente (min/max)", L"엔벨로프 (min/max)", L"包络 (min/max)", L"غلاف (min/max)", L"Огибающая (min/max)", L"Hüllkurve (min/max)", L"Envelope (min/max)", L"Omhullende (min/max)", L"Obwiednia (min/max)", L"Zarf (min/max)"),
+				m_waveMode == WaveEnvelope,
+				LL14(L"各列の最小〜最大を塗り潰した DAW 風波形です。", L"DAW-style filled min-to-max per column.", L"Onde DAW remplie min-max par colonne.", L"Onda DAW riempita min-max per colonna.", L"Onda DAW rellena min-max por columna.", L"열마다 최소~최대를 채운 DAW 풍 파형.", L"按列填充最小到最大的 DAW 风格波形。", L"موجة DAW تملأ الأدنى-الأقصى لكل عمود.", L"DAW-волна с заливкой min-max по столбцам.", L"DAW-Welle mit Min-Max-Füllung je Spalte.", L"Onda DAW preenchida min-max por coluna.", L"DAW-golf gevuld min-max per kolom.", L"Fala DAW wypelniona min-max w kolumnie.", L"Sutun basina min-max dolgulu DAW dalgasi."));
+			subWaveTime->AddCheck(IDM_WAVE_MS,
+				LL14(L"Mid / Side", L"Mid / Side", L"Mid / Side", L"Mid / Side", L"Mid / Side", L"Mid / Side", L"Mid / Side", L"Mid / Side", L"Mid / Side", L"Mid / Side", L"Mid / Side", L"Mid / Side", L"Mid / Side", L"Mid / Side"),
+				m_waveMode == WaveMidSide,
+				LL14(L"Mid=(L+R)/2 と Side=(L-R)/2 を2レーンで表示します。", L"Show Mid=(L+R)/2 and Side=(L-R)/2 on two lanes.", L"Afficher Mid=(L+R)/2 et Side=(L-R)/2.", L"Mostra Mid=(L+R)/2 e Side=(L-R)/2.", L"Mostrar Mid=(L+R)/2 y Side=(L-R)/2.", L"Mid=(L+R)/2와 Side=(L-R)/2를 두 레인으로.", L"以两行显示 Mid=(L+R)/2 与 Side=(L-R)/2。", L"عرض Mid=(L+R)/2 و Side=(L-R)/2.", L"Показать Mid=(L+R)/2 и Side=(L-R)/2.", L"Mid=(L+R)/2 und Side=(L-R)/2 in zwei Bahnen.", L"Mostrar Mid=(L+R)/2 e Side=(L-R)/2.", L"Toon Mid=(L+R)/2 en Side=(L-R)/2.", L"Pokaz Mid=(L+R)/2 i Side=(L-R)/2.", L"Mid=(L+R)/2 ve Side=(L-R)/2 iki seritte."));
+			subWaveTime->AddCheck(IDM_WAVE_LOUDNESS,
+				LL14(L"ラウドネス履歴 (RMS)", L"Loudness history (RMS)", L"Historique loudness (RMS)", L"Cronologia loudness (RMS)", L"Historial de loudness (RMS)", L"라우드니스 이력 (RMS)", L"响度历史 (RMS)", L"سجل الجهارة (RMS)", L"История громкости (RMS)", L"Loudness-Verlauf (RMS)", L"Historico de loudness (RMS)", L"Loudness-geschiedenis (RMS)", L"Historia glosnosci (RMS)", L"Loudness gecmisi (RMS)"),
+				m_waveMode == WaveLoudness,
+				LL14(L"列ごとの RMS と簡易 LUFS 目安線です。", L"Per-column RMS with a simple LUFS guide line.", L"RMS par colonne avec un guide LUFS simple.", L"RMS per colonna con linea guida LUFS.", L"RMS por columna con linea guia LUFS.", L"열별 RMS와 간이 LUFS 기준선.", L"每列 RMS，带简易 LUFS 参考线。", L"RMS لكل عمود مع خط إرشاد LUFS.", L"RMS по столбцам и простая линия LUFS.", L"RMS je Spalte mit einfacher LUFS-Linie.", L"RMS por coluna com linha guia LUFS.", L"RMS per kolom met eenvoudige LUFS-lijn.", L"RMS w kolumnie z linia LUFS.", L"Sutun RMS ve basit LUFS cizgisi."));
+		}
+		CCustomPopupMenu* subWaveScope = subWave->AddSubMenu(
+			LL14(L"オシロ", L"Scope", L"Oscillo", L"Oscilloscopio", L"Osciloscopio", L"스코프", L"示波", L"راسم", L"Осциллограф", L"Scope", L"Osciloscopio", L"Scoop", L"Oscyloskop", L"Osiloskop"),
+			LL14(L"トリガー式と残光オシロ。", L"Triggered and phosphor scopes.", L"Oscillo declenche et a persistance.", L"Oscilloscopio con trigger e fosforo.", L"Osciloscopio con disparo y fosforo.", L"트리거·잔광 스코프.", L"触发式与余辉示波。", L"راسم محفز وفسفور.", L"Триггерный и фосфорный скоп.", L"Getriggertes und Phosphor-Scope.", L"Osciloscopio disparado e fosforo.", L"Getriggerde en fosfor-scoop.", L"Wyzwalany i fosforowy oscyloskop.", L"Tetiklemeli ve fosfor osiloskop."));
+		if (subWaveScope) {
+			subWaveScope->AddCheck(IDM_WAVE_TRIGGER,
+				LL14(L"トリガー式オシロ", L"Triggered scope", L"Oscillo declenche", L"Oscilloscopio con trigger", L"Osciloscopio con disparo", L"트리거 오실로스코프", L"触发示波器", L"راسم ذبذبات محفز", L"Синхр. осциллограф", L"Getriggertes Oszilloskop", L"Osciloscopio disparado", L"Getriggerde scoop", L"Wyzwalany oscyloskop", L"Tetiklemeli osiloskop"),
+				m_waveMode == WaveTrigger);
+			subWaveScope->AddCheck(IDM_WAVE_PHOSPHOR,
+				LL14(L"残光オシロ", L"Phosphor scope", L"Oscillo a persistance", L"Oscilloscopio al fosforo", L"Osciloscopio de fosforo", L"잔광 스코프", L"余辉示波器", L"راسم فسفور", L"Фосфорный скоп", L"Phosphor-Oszilloskop", L"Osciloscopio de fosforo", L"Fosfor-scoop", L"Oscyloskop fosforowy", L"Fosfor osiloskop"),
+				m_waveMode == WavePhosphor,
+				LL14(L"ゼロクロス整列のトレースを残光で重ねます。", L"Zero-cross aligned traces stacked with phosphor decay.", L"Traces alignees au zero avec persistance.", L"Tracce allineate allo zero con decadimento.", L"Trazas alineadas al cero con persistencia.", L"제로크로스 정렬 트레이스를 잔광으로 겹칩니다.", L"零交叉对齐的轨迹以余辉叠加。", L"آثار محاذاة عند الصفر مع تلاشي فسفور.", L"Трассы по пересечению нуля с затуханием.", L"Nulldurchgangs-Spuren mit Phosphor-Abklingen.", L"Trilhas alinhadas no zero com persistencia.", L"Nuldoorgang-sporen met fosforverval.", L"Slady na przejscu przez zero z zanikiem.", L"Sifir gecisli izler fosfor sönmesiyle."));
+		}
 	}
 
 	CCustomPopupMenu* subLower = menu.AddSubMenu(
 		LL14(L"下部の表示", L"Lower display", L"Affichage inferieur", L"Display inferiore", L"Pantalla inferior", L"하단 표시", L"下部显示", L"العرض السفلي", L"Нижняя область", L"Untere Anzeige", L"Exibicao inferior", L"Onderste weergave", L"Dolny widok", L"Alt gosterim"),
-		LL14(L"下部ペインの表示内容（周波数特性／スペクトログラム／位相スコープ）を選びます。", L"Choose what the lower pane shows (spectrum / spectrogram / phase scope).", L"Choisir l'affichage du panneau inferieur (spectre / spectro / phase).", L"Scegli cosa mostra il riquadro inferiore (spettro / spettrogramma / fase).", L"Elegir que muestra el panel inferior (espectro / espectrograma / fase).", L"하단 패널 표시(스펙트럼/스펙트로그램/위상 스코프)를 고릅니다.", L"选择下部窗格显示内容（频谱/频谱图/相位示波）。", L"اختر ما يعرضه اللوح السفلي (طيف/مخطط طيفي/طور).", L"Выбрать содержимое нижней панели (спектр / спектрограмма / фаза).", L"Untere Anzeige wahlen (Spektrum / Spektrogramm / Phase).", L"Escolher o que o painel inferior mostra (espectro / espectrograma / fase).", L"Kies wat het onderpaneel toont (spectrum / spectrogram / fase).", L"Wybierz zawartosc dolnego panelu (widmo / spektrogram / faza).", L"Alt panelde ne gosterilecegini sec (spektrum / spektrogram / faz)."));
+		LL14(L"下部ペインの表示内容を選びます。", L"Choose what the lower pane shows.", L"Choisir l'affichage du panneau inferieur.", L"Scegli cosa mostra il riquadro inferiore.", L"Elegir que muestra el panel inferior.", L"하단 패널 표시 내용을 고릅니다.", L"选择下部窗格显示内容。", L"اختر ما يعرضه اللوح السفلي.", L"Выбрать содержимое нижней панели.", L"Untere Anzeige wahlen.", L"Escolher o que o painel inferior mostra.", L"Kies wat het onderpaneel toont.", L"Wybierz zawartosc dolnego panelu.", L"Alt panelde ne gosterilecegini sec."));
 	if (subLower) {
-		subLower->AddCheck(IDM_LOWER_SPECTRUM,
-			LL14(L"周波数特性", L"Spectrum", L"Spectre", L"Spettro", L"Espectro", L"스펙트럼", L"频谱", L"الطيف", L"Спектр", L"Spektrum", L"Espectro", L"Spectrum", L"Widmo", L"Spektrum"),
-			m_lowerMode == LowerSpectrum);
+		CCustomPopupMenu* subLspec = subLower->AddSubMenu(
+			LL14(L"スペクトル", L"Spectrum", L"Spectre", L"Spettro", L"Espectro", L"스펙트럼", L"频谱", L"طيف", L"Спектр", L"Spektrum", L"Espectro", L"Spectrum", L"Widmo", L"Spektrum"),
+			LL14(L"周波数特性と 1/3 オクターブ RTA。", L"Frequency response and 1/3-octave RTA.", L"Reponse en frequence et RTA 1/3 d'octave.", L"Risposta in frequenza e RTA 1/3.", L"Respuesta en frecuencia y RTA 1/3.", L"주파수 특성과 1/3 옥타브 RTA.", L"频率特性与 1/3 倍频程 RTA。", L"استجابة ترددية و RTA ثلث أوكتاف.", L"АЧХ и RTA 1/3 октавы.", L"Frequenzgang und 1/3-Oktav-RTA.", L"Resposta em frequencia e RTA 1/3.", L"Frequentierespons en 1/3-octaaf-RTA.", L"Charakterystyka i RTA 1/3 oktawy.", L"Frekans yaniti ve 1/3 oktav RTA."));
+		if (subLspec) {
+			subLspec->AddCheck(IDM_LOWER_SPECTRUM,
+				LL14(L"周波数特性", L"Spectrum", L"Spectre", L"Spettro", L"Espectro", L"스펙트럼", L"频谱", L"الطيف", L"Спектр", L"Spektrum", L"Espectro", L"Spectrum", L"Widmo", L"Spektrum"),
+				m_lowerMode == LowerSpectrum);
+			subLspec->AddCheck(IDM_LOWER_RTA,
+				LL14(L"1/3 オクターブ RTA", L"1/3-octave RTA", L"RTA 1/3 d'octave", L"RTA 1/3 d'ottava", L"RTA de 1/3 de octava", L"1/3 옥타브 RTA", L"1/3 倍频程 RTA", L"RTA ثلث أوكتاف", L"RTA 1/3 октавы", L"1/3-Oktav-RTA", L"RTA 1/3 de oitava", L"1/3-octaaf-RTA", L"RTA 1/3 oktawy", L"1/3 oktav RTA"),
+				m_lowerMode == LowerRta,
+				LL14(L"ISO 31 バンドの 1/3 オクターブ実時間アナライザです。", L"ISO 31-band 1/3-octave real-time analyzer.", L"Analyseur temps réel ISO 31 bandes 1/3 d'octave.", L"Analizzatore in tempo reale ISO 31 bande 1/3.", L"Analizador en tiempo real ISO 31 bandas 1/3.", L"ISO 31밴드 1/3 옥타브 실시간 분석기.", L"ISO 31 段 1/3 倍频程实时分析。", L"محلل زمن حقيقي ISO 31 نطاقاً ثلث أوكتاف.", L"RTA ISO 31 полос 1/3 октавы.", L"ISO-31-Band 1/3-Oktav-Echtzeitanalysator.", L"Analisador em tempo real ISO 31 faixas 1/3.", L"ISO 31-band 1/3-octaaf realtime-analyzer.", L"RTA ISO 31 pasm 1/3 oktawy.", L"ISO 31 bant 1/3 oktav gercek zamanli analizor."));
+		}
 		subLower->AddCheck(IDM_LOWER_WATERFALL,
 			LL14(L"スペクトログラム", L"Spectrogram", L"Spectrogramme", L"Spettrogramma", L"Espectrograma", L"스펙트로그램", L"频谱图", L"مخطط طيفي", L"Спектрограмма", L"Spektrogramm", L"Espectrograma", L"Spectrogram", L"Spektrogram", L"Spektrogram"),
 			m_lowerMode == LowerWaterfall);
-		subLower->AddCheck(IDM_LOWER_PHASE,
-			LL14(L"位相スコープ", L"Phase scope", L"Scope de phase", L"Scope di fase", L"Osciloscopio de fase", L"위상 스코프", L"相位示波器", L"راسم الطور", L"Фазовый скоп", L"Phasenskop", L"Escopo de fase", L"Fasescoop", L"Skop fazy", L"Faz skopu"),
-			m_lowerMode == LowerPhase);
+		CCustomPopupMenu* subLstereo = subLower->AddSubMenu(
+			LL14(L"ステレオ場", L"Stereo field", L"Champ stereo", L"Campo stereo", L"Campo estereo", L"스테레오 장", L"立体声场", L"مجال ستيريو", L"Стереополе", L"Stereofeld", L"Campo estereo", L"Stereoveld", L"Pole stereo", L"Stereo alani"),
+			LL14(L"位相スコープと密度ゴニオメータ。", L"Phase scope and density goniometer.", L"Scope de phase et goniometre densite.", L"Scope di fase e goniometro densita.", L"Osciloscopio de fase y goniometro.", L"위상 스코프와 밀도 고니오미터.", L"相位示波与密度测向仪。", L"راسم طور ومقياس اتجاه كثافة.", L"Фазовый скоп и гониометр.", L"Phasenskop und Dichte-Goniometer.", L"Escopo de fase e goniometro.", L"Fasescoop en dichtheidsgoniometer.", L"Skop fazy i goniometr gestosci.", L"Faz skopu ve yogunluk gonyometresi."));
+		if (subLstereo) {
+			subLstereo->AddCheck(IDM_LOWER_PHASE,
+				LL14(L"位相スコープ", L"Phase scope", L"Scope de phase", L"Scope di fase", L"Osciloscopio de fase", L"위상 스코프", L"相位示波器", L"راسم الطور", L"Фазовый скоп", L"Phasenskop", L"Escopo de fase", L"Fasescoop", L"Skop fazy", L"Faz skopu"),
+				m_lowerMode == LowerPhase);
+			subLstereo->AddCheck(IDM_LOWER_VECTOR,
+				LL14(L"ゴニオメータ (密度)", L"Goniometer (density)", L"Goniometre (densite)", L"Goniometro (densita)", L"Goniometro (densidad)", L"고니오미터 (밀도)", L"测向仪（密度）", L"مقياس الاتجاه (كثافة)", L"Гониометр (плотность)", L"Goniometer (Dichte)", L"Goniometro (densidade)", L"Goniometer (dichtheid)", L"Goniometr (gestosc)", L"Gonyometre (yogunluk)"),
+				m_lowerMode == LowerVector);
+		}
+		CCustomPopupMenu* subLband = subLower->AddSubMenu(
+			LL14(L"帯域解析", L"Band analysis", L"Analyse par bande", L"Analisi per banda", L"Analisis por banda", L"대역 분석", L"频段分析", L"تحليل النطاق", L"Анализ полос", L"Bandanalyse", L"Analise por faixa", L"Bandanalyse", L"Analiza pasm", L"Bant analizi"),
+			LL14(L"周波数ごとの相関と位相差。", L"Correlation and phase difference vs frequency.", L"Correlation et phase par frequence.", L"Correlazione e fase per frequenza.", L"Correlacion y fase por frecuencia.", L"주파수별 상관과 위상차.", L"按频率的相关与相位差。", L"ترابط وطور حسب التردد.", L"Корреляция и фаза по частоте.", L"Korrelation und Phase vs. Frequenz.", L"Correlacao e fase por frequencia.", L"Correlatie en fase vs frequentie.", L"Korelacja i faza vs czestotliwosc.", L"Frekansa gore korelasyon ve faz."));
+		if (subLband) {
+			subLband->AddCheck(IDM_LOWER_CORRFREQ,
+				LL14(L"帯域相関", L"Correlation vs frequency", L"Correlation par frequence", L"Correlazione per frequenza", L"Correlacion por frecuencia", L"대역 상관", L"频段相关", L"ترابط حسب التردد", L"Корреляция по частоте", L"Korrelation vs. Frequenz", L"Correlacao por frequencia", L"Correlatie vs frequentie", L"Korelacja vs czestotliwosc", L"Frekansa gore korelasyon"),
+				m_lowerMode == LowerCorrFreq,
+				LL14(L"L/R クロススペクトルから周波数ごとの相関 (−1…+1) を出します。", L"Per-band L/R correlation (−1…+1) from the cross-spectrum.", L"Correlation L/R par bande (−1…+1) via le spectre croise.", L"Correlazione L/R per banda (−1…+1) dallo spettro incrociato.", L"Correlacion L/R por banda (−1…+1) del espectro cruzado.", L"L/R 크로스 스펙트럼으로 주파수별 상관(−1…+1).", L"由 L/R 交叉谱得到各频段相关（−1…+1）。", L"ترابط L/R لكل نطاق (−1…+1) من الطيف المتقاطع.", L"Корреляция L/R по полосам (−1…+1) из кросс-спектра.", L"L/R-Korrelation je Band (−1…+1) aus dem Kreuzspektrum.", L"Correlacao L/R por faixa (−1…+1) do espectro cruzado.", L"L/R-correlatie per band (−1…+1) uit het kruisspectrum.", L"Korelacja L/R w pasmie (−1…+1) ze spektrum skrośnego.", L"Capraz spektrumdan bant basina L/R korelasyonu (−1…+1)."));
+			subLband->AddCheck(IDM_LOWER_PHASEFREQ,
+				LL14(L"帯域位相差", L"Phase vs frequency", L"Phase par frequence", L"Fase per frequenza", L"Fase por frecuencia", L"대역 위상차", L"频段相位差", L"طور حسب التردد", L"Фаза по частоте", L"Phase vs. Frequenz", L"Fase por frequencia", L"Fase vs frequentie", L"Faza vs czestotliwosc", L"Frekansa gore faz"),
+				m_lowerMode == LowerPhaseFreq,
+				LL14(L"L/R の周波数ごとの位相差です（モノは 0°、逆相は ±180°）。", L"Per-band L/R phase difference (mono = 0°, antiphase = ±180°).", L"Difference de phase L/R par bande (mono = 0°, antiphasé = ±180°).", L"Differenza di fase L/R per banda (mono = 0°, antifase = ±180°).", L"Diferencia de fase L/R por banda (mono = 0°, antifase = ±180°).", L"주파수별 L/R 위상차(모노 0°, 역위상 ±180°).", L"各频段 L/R 相位差（单声道 0°，反相 ±180°）。", L"فرق طور L/R لكل نطاق (مونو 0°، عكس ±180°).", L"Разность фаз L/R по полосам (моно 0°, противофаза ±180°).", L"L/R-Phasendifferenz je Band (Mono 0°, Gegenphase ±180°).", L"Diferenca de fase L/R por faixa (mono = 0°, antifase = ±180°).", L"L/R-faseverschil per band (mono = 0°, tegenfase = ±180°).", L"Roznica fazy L/R w pasmie (mono 0°, antyfaza ±180°).", L"Bant basina L/R faz farki (mono 0°, ters faz ±180°)."));
+		}
 	}
 
 	CCustomPopupMenu* subDiff = menu.AddSubMenu(
@@ -1905,11 +2028,6 @@ void CAnalyzerDlg::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
 		subMarker->AddCommand(IDM_MARKER_CLEAR,
 			LL14(L"すべて削除", L"Clear all", L"Tout effacer", L"Cancella tutti", L"Borrar todos", L"모두 삭제", L"全部清除", L"مسح الكل", L"Удалить все", L"Alle loschen", L"Limpar todos", L"Alles wissen", L"Usun wszystkie", L"Tumunu temizle"));
 	}
-
-	menu.AddCheck(IDM_CORR_METER,
-		LL14(L"位相相関メーター", L"Correlation meter", L"Correlometre", L"Misuratore di correlazione", L"Medidor de correlacion", L"위상 상관 미터", L"相位相关表", L"مقياس الترابط الطوري", L"Измеритель корреляции", L"Korrelationsanzeige", L"Medidor de correlacao", L"Correlatiemeter", L"Miernik korelacji", L"Faz korelasyon olceri"),
-		savedata.pro_corr_meter != 0,
-		LL14(L"ステレオ位相相関を表示します（-1…+1）。", L"Show stereo phase correlation (-1…+1).", L"Afficher la correlation de phase stereo (-1…+1).", L"Mostra la correlazione di fase stereo (-1…+1).", L"Mostrar correlacion de fase estereo (-1…+1).", L"스테레오 위상 상관을 표시합니다(-1…+1).", L"显示立体声相位相关（-1…+1）。", L"عرض ترابط الطور الاستريو (-1…+1).", L"Показывать фазовую корреляцию стерео (-1…+1).", L"Stereo-Phasenkorrelation anzeigen (-1…+1).", L"Mostrar correlacao de fase stereo (-1…+1).", L"Stereo-fasecorrelatie tonen (-1…+1).", L"Pokaz korelacje fazy stereo (-1…+1).", L"Stereo faz korelasyonunu goster (-1…+1)."));
 
 	CCustomPopupMenu* subMs = menu.AddSubMenu(
 		LL14(L"相関→M/S", L"Correlation→M/S", L"Correlation→M/S", L"Correlazione→M/S", L"Correlacion→M/S", L"상관→M/S", L"相关→M/S", L"ترابط→M/S", L"Корреляция→M/S", L"Korrelation→M/S", L"Correlacao→M/S", L"Correlatie→M/S", L"Korelacja→M/S", L"Korelasyon→M/S"),
@@ -2022,7 +2140,11 @@ void CAnalyzerDlg::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
 			meter->AddCheck(IDM_LEVEL_METER,
 				LL14(L"レベルメーター", L"Level meter", L"Indicateur de niveau", L"Misuratore di livello", L"Medidor de nivel", L"레벨 미터", L"电平表", L"مقياس المستوى", L"Уровень сигнала", L"Pegelanzeige", L"Medidor de nivel", L"Niveaumeter", L"Miernik poziomu", L"Seviye olcer"),
 				m_showLevelMeter,
-				LL14(L"レベルメーターの表示／非表示を切り替えます。", L"Show or hide the level meters.", L"Afficher ou masquer les indicateurs de niveau.", L"Mostra o nasconde i misuratori di livello.", L"Mostrar u ocultar los medidores de nivel.", L"레벨 미터 표시/숨기기를 전환합니다.", L"显示或隐藏电平表。", L"إظهار أو إخفاء مقاييس المستوى.", L"Показать или скрыть измерители уровня.", L"Pegelanzeigen ein- oder ausblenden.", L"Mostrar ou ocultar os medidores de nivel.", L"Niveaumeters tonen of verbergen.", L"Pokaz lub ukryj mierniki poziomu.", L"Seviye olcerlerini goster veya gizle."));
+				LL14(L"レベルメーターの表示／非表示を切り替えます。LR を消しても位相相関は残ります。", L"Show or hide the level meters. Correlation stays if LR is hidden.", L"Afficher ou masquer les indicateurs de niveau. La correlation reste sans LR.", L"Mostra o nasconde i misuratori di livello. La correlazione resta senza LR.", L"Mostrar u ocultar los medidores de nivel. La correlacion permanece sin LR.", L"레벨 미터 표시/숨기기. LR를 꺼도 상관 미터는 남습니다.", L"显示或隐藏电平表。关掉 LR 后相位相关仍保留。", L"إظهار أو إخفاء مقاييس المستوى. يبقى الترابط دون LR.", L"Показать или скрыть измерители уровня. Корреляция остается без LR.", L"Pegelanzeigen ein- oder ausblenden. Korrelation bleibt ohne LR.", L"Mostrar ou ocultar os medidores de nivel. A correlacao permanece sem LR.", L"Niveaumeters tonen of verbergen. Correlatie blijft zonder LR.", L"Pokaz lub ukryj mierniki poziomu. Korelacja zostaje bez LR.", L"Seviye olcerlerini goster veya gizle. LR kapali olsa da korelasyon kalir."));
+			meter->AddCheck(IDM_CORR_METER,
+				LL14(L"位相相関メーター", L"Correlation meter", L"Correlometre", L"Misuratore di correlazione", L"Medidor de correlacion", L"위상 상관 미터", L"相位相关表", L"مقياس الترابط الطوري", L"Измеритель корреляции", L"Korrelationsanzeige", L"Medidor de correlacao", L"Correlatiemeter", L"Miernik korelacji", L"Faz korelasyon olceri"),
+				savedata.pro_corr_meter != 0,
+				LL14(L"ステレオ位相相関を表示します（-1…+1）。LR バーを消しても右端に残ります。", L"Show stereo phase correlation (-1…+1). Stays at the right if LR meters are hidden.", L"Correlation de phase stereo (-1…+1). Reste a droite sans LR.", L"Correlazione di fase stereo (-1…+1). Resta a destra senza LR.", L"Correlacion de fase estereo (-1…+1). Permanece a la derecha sin LR.", L"스테레오 위상 상관(-1…+1). LR를 꺼도 오른쪽에 남습니다.", L"立体声相位相关（-1…+1）。关掉 LR 后仍留在右端。", L"ترابط الطور الاستريو (-1…+1). يبقى يميناً دون LR.", L"Фазовая корреляция стерео (-1…+1). Остается справа без LR.", L"Stereo-Phasenkorrelation (-1…+1). Bleibt rechts ohne LR.", L"Correlacao de fase stereo (-1…+1). Permanece a direita sem LR.", L"Stereo-fasecorrelatie (-1…+1). Blijft rechts zonder LR.", L"Korelacja fazy stereo (-1…+1). Zostaje po prawej bez LR.", L"Stereo faz korelasyonu (-1…+1). LR kapali olsa da sagda kalir."));
 			meter->AddCheck(IDM_FREEZE,
 				LL14(L"フリーズ", L"Freeze", L"Gel", L"Congela", L"Congelar", L"정지", L"冻结", L"تجميد", L"Заморозка", L"Einfrieren", L"Congelar", L"Bevriezen", L"Zamroz", L"Dondur"),
 				m_frozen,
@@ -2066,28 +2188,35 @@ void CAnalyzerDlg::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
 		m_soft3dApiDemo,
 		LL14(L"カメラがゆっくり周回し、箱・球・トーラス・波形が公転する確認用デモです（もう一度選ぶと解除）。", L"Camera slowly orbits while boxes, spheres, torus and waves revolve (pick again to turn off).", L"La caméra orbite; boîtes, sphères, tore et ondes tournent (réactiver pour couper).", L"La camera orbita; scatole, sfere, toro e onde ruotano (riseleziona per spegnere).", L"La cámara orbita; cajas, esferas, toro y ondas giran (vuelva a elegir para apagar).", L"카메라가 천천히 돌며 상자·구·토러스·파형이 공전하는 확인용 데모(다시 선택하면 해제).", L"相机缓慢环绕，箱/球/环/波形公转的确认演示（再选一次关闭）。", L"الكاميرا تدور ببطء مع صناديق وكرات وحلقات وموجات (أعد الاختيار للإيقاف).", L"Камера медленно облетает; ящики, сферы, тор и волны вращаются (выберите снова, чтобы выкл.).", L"Kamera kreist langsam; Boxen, Kugeln, Torus und Wellen kreisen (erneut wählen zum Aus).", L"A câmera orbita; caixas, esferas, toro e ondas giram (escolha de novo para desligar).", L"Camera draait langzaam; dozen, bollen, torus en golven cirkelen (kies opnieuw om uit).", L"Kamera powoli orbituje; pudełka, sfery, torus i fale krążą (wybierz ponownie, by wyłączyć).", L"Kamera yavaş döner; kutular, küreler, torus ve dalgalar dolanır (kapatmak için tekrar seçin)."));
 	menu.AddSeparator();
-	menu.AddCommand(ID_MP_OPEN_EQ,
-		LL14(L"イコライザを開く", L"Open equalizer", L"Ouvrir l'egaliseur", L"Apri equalizzatore", L"Abrir ecualizador",
-			L"이퀄라이저 열기", L"打开均衡器", L"فتح المعادل", L"Открыть эквалайзер", L"Equalizer öffnen",
-			L"Abrir equalizador", L"Equalizer openen", L"Otworz equalizer", L"Equalizeri ac"),
-		LL14(L"イコライザウィンドウを開きます。", L"Open the equalizer window.", L"Ouvrir la fenetre de l'egaliseur.", L"Apri la finestra dell'equalizzatore.", L"Abrir la ventana del ecualizador.", L"이퀄라이저 창을 엽니다.", L"打开均衡器窗口。", L"فتح نافذة المعادل.", L"Открыть окно эквалайзера.", L"Equalizer-Fenster offnen.", L"Abrir a janela do equalizador.", L"Open het equalizer-venster.", L"Otworz okno equalizera.", L"Equalizer penceresini ac."));
-	menu.AddCommand(ID_MP_OPEN_PIANOROLL,
-		LL14(L"ピアノロールを開く", L"Open piano roll", L"Ouvrir le piano roll", L"Apri piano roll", L"Abrir piano roll",
-			L"피아노 롤 열기", L"打开钢琴卷帘", L"فتح لفافة البيانو", L"Открыть пианоролл", L"Piano-Roll öffnen",
-			L"Abrir piano roll", L"Piano-roll openen", L"Otworz piano roll", L"Piyano rolunu ac"),
-		LL14(L"簡易ピアノロールウィンドウを開きます。", L"Open the simple piano roll window.", L"Ouvrir la fenetre du piano roll simple.", L"Apri la finestra del piano roll semplice.", L"Abrir la ventana del piano roll simple.", L"간이 피아노 롤 창을 엽니다.", L"打开简易钢琴卷帘窗口。", L"فتح نافذة لفافة البيانو البسيطة.", L"Открыть окно простого пианоролла.", L"Einfaches Piano-Roll-Fenster offnen.", L"Abrir a janela do piano roll simples.", L"Open het eenvoudige piano-roll-venster.", L"Otworz okno prostego piano roll.", L"Basit piyano roll penceresini ac."));
-	menu.AddCommand(ID_MP_OPEN_MIDIMON,
-		LL14(L"MIDIモニタを開く", L"Open MIDI monitor", L"Ouvrir le moniteur MIDI", L"Apri monitor MIDI", L"Abrir monitor MIDI",
-			L"MIDI 모니터 열기", L"打开MIDI监视器", L"فتح مراقب MIDI", L"Открыть MIDI-монитор", L"MIDI-Monitor öffnen",
-			L"Abrir monitor MIDI", L"MIDI-monitor openen", L"Otworz monitor MIDI", L"MIDI izleyiciyi ac"),
-		LL14(L"MIDI 32パート・モニタを開きます。", L"Open the 32-part MIDI monitor.", L"Ouvrir le moniteur MIDI 32 parties.", L"Apri il monitor MIDI a 32 parti.", L"Abrir el monitor MIDI de 32 partes.", L"MIDI 32파트 모니터를 엽니다.", L"打开 MIDI 32 声部监视器。", L"فتح مراقب MIDI ذا 32 جزءاً.", L"Открыть MIDI-монитор на 32 партии.", L"32-Part-MIDI-Monitor offnen.", L"Abrir o monitor MIDI de 32 partes.", L"Open de MIDI-monitor met 32 partijen.", L"Otworz monitor MIDI 32 partii.", L"32 part MIDI izleyiciyi ac."));
-	menu.AddSeparator();
-	menu.AddCommand(ID_HELP_SHOWSHEET,
-		LL14(L"操作ガイド", L"Operation guide", L"Guide d'utilisation", L"Guida operativa",
-			L"Guía de operación", L"조작 가이드", L"操作指南", L"دليل التشغيل",
-			L"Руководство", L"Bedienungsanleitung", L"Guia de operação", L"Handleiding",
-			L"Przewodnik", L"İşlem kılavuzu"),
-		LL14(L"アナライザの操作ガイドを表示します。", L"Show the analyzer operation guide.", L"Afficher le guide d'utilisation de l'analyseur.", L"Mostra la guida operativa dell'analizzatore.", L"Mostrar la guia de operacion del analizador.", L"분석기 조작 가이드를 표시합니다.", L"显示分析器操作指南。", L"عرض دليل تشغيل المحلل.", L"Показать руководство по анализатору.", L"Bedienungsanleitung des Analysators anzeigen.", L"Mostrar o guia de operacao do analisador.", L"Toon de handleiding van de analyser.", L"Pokaz przewodnik po analizatorze.", L"Analizor islem kilavuzunu goster."));
+	{
+		CCustomPopupMenu* openSub = menu.AddSubMenu(
+			LL14(L"開く", L"Open", L"Ouvrir", L"Apri", L"Abrir", L"열기", L"打开", L"فتح", L"Открыть", L"Offnen", L"Abrir", L"Openen", L"Otworz", L"Ac"),
+			LL14(L"イコライザ／ピアノロール／MIDIモニタ／操作ガイドを開きます。", L"Open equalizer, piano roll, MIDI monitor, or the operation guide.", L"Ouvrir egaliseur, piano roll, moniteur MIDI ou le guide.", L"Apri equalizzatore, piano roll, monitor MIDI o la guida.", L"Abrir ecualizador, piano roll, monitor MIDI o la guia.", L"이퀄라이저/피아노 롤/MIDI 모니터/조작 가이드를 엽니다.", L"打开均衡器/钢琴卷帘/MIDI监视器/操作指南。", L"فتح المعادل أو لفافة البيانو أو مراقب MIDI أو الدليل.", L"Открыть эквалайзер, пианоролл, MIDI-монитор или руководство.", L"Equalizer, Piano-Roll, MIDI-Monitor oder Anleitung offnen.", L"Abrir equalizador, piano roll, monitor MIDI ou o guia.", L"Open equalizer, piano-roll, MIDI-monitor of handleiding.", L"Otworz equalizer, piano roll, monitor MIDI lub przewodnik.", L"Equalizer, piyano roll, MIDI izleyici veya kilavuzu ac."));
+		if (openSub) {
+			openSub->AddCommand(ID_MP_OPEN_EQ,
+				LL14(L"イコライザを開く", L"Open equalizer", L"Ouvrir l'egaliseur", L"Apri equalizzatore", L"Abrir ecualizador",
+					L"이퀄라이저 열기", L"打开均衡器", L"فتح المعادل", L"Открыть эквалайзер", L"Equalizer öffnen",
+					L"Abrir equalizador", L"Equalizer openen", L"Otworz equalizer", L"Equalizeri ac"),
+				LL14(L"イコライザウィンドウを開きます。", L"Open the equalizer window.", L"Ouvrir la fenetre de l'egaliseur.", L"Apri la finestra dell'equalizzatore.", L"Abrir la ventana del ecualizador.", L"이퀄라이저 창을 엽니다.", L"打开均衡器窗口。", L"فتح نافذة المعادل.", L"Открыть окно эквалайзера.", L"Equalizer-Fenster offnen.", L"Abrir a janela do equalizador.", L"Open het equalizer-venster.", L"Otworz okno equalizera.", L"Equalizer penceresini ac."));
+			openSub->AddCommand(ID_MP_OPEN_PIANOROLL,
+				LL14(L"ピアノロールを開く", L"Open piano roll", L"Ouvrir le piano roll", L"Apri piano roll", L"Abrir piano roll",
+					L"피아노 롤 열기", L"打开钢琴卷帘", L"فتح لفافة البيانو", L"Открыть пианоролл", L"Piano-Roll öffnen",
+					L"Abrir piano roll", L"Piano-roll openen", L"Otworz piano roll", L"Piyano rolunu ac"),
+				LL14(L"簡易ピアノロールウィンドウを開きます。", L"Open the simple piano roll window.", L"Ouvrir la fenetre du piano roll simple.", L"Apri la finestra del piano roll semplice.", L"Abrir la ventana del piano roll simple.", L"간이 피아노 롤 창을 엽니다.", L"打开简易钢琴卷帘窗口。", L"فتح نافذة لفافة البيانو البسيطة.", L"Открыть окно простого пианоролла.", L"Einfaches Piano-Roll-Fenster offnen.", L"Abrir a janela do piano roll simples.", L"Open het eenvoudige piano-roll-venster.", L"Otworz okno prostego piano roll.", L"Basit piyano roll penceresini ac."));
+			openSub->AddCommand(ID_MP_OPEN_MIDIMON,
+				LL14(L"MIDIモニタを開く", L"Open MIDI monitor", L"Ouvrir le moniteur MIDI", L"Apri monitor MIDI", L"Abrir monitor MIDI",
+					L"MIDI 모니터 열기", L"打开MIDI监视器", L"فتح مراقب MIDI", L"Открыть MIDI-монитор", L"MIDI-Monitor öffnen",
+					L"Abrir monitor MIDI", L"MIDI-monitor openen", L"Otworz monitor MIDI", L"MIDI izleyiciyi ac"),
+				LL14(L"MIDI 32パート・モニタを開きます。", L"Open the 32-part MIDI monitor.", L"Ouvrir le moniteur MIDI 32 parties.", L"Apri il monitor MIDI a 32 parti.", L"Abrir el monitor MIDI de 32 partes.", L"MIDI 32파트 모니터를 엽니다.", L"打开 MIDI 32 声部监视器。", L"فتح مراقب MIDI ذا 32 جزءاً.", L"Открыть MIDI-монитор на 32 партии.", L"32-Part-MIDI-Monitor offnen.", L"Abrir o monitor MIDI de 32 partes.", L"Open de MIDI-monitor met 32 partijen.", L"Otworz monitor MIDI 32 partii.", L"32 part MIDI izleyiciyi ac."));
+			openSub->AddSeparator();
+			openSub->AddCommand(ID_HELP_SHOWSHEET,
+				LL14(L"操作ガイド", L"Operation guide", L"Guide d'utilisation", L"Guida operativa",
+					L"Guía de operación", L"조작 가이드", L"操作指南", L"دليل التشغيل",
+					L"Руководство", L"Bedienungsanleitung", L"Guia de operação", L"Handleiding",
+					L"Przewodnik", L"İşlem kılavuzu"),
+				LL14(L"アナライザの操作ガイドを表示します。", L"Show the analyzer operation guide.", L"Afficher le guide d'utilisation de l'analyseur.", L"Mostra la guida operativa dell'analizzatore.", L"Mostrar la guia de operacion del analizador.", L"분석기 조작 가이드를 표시합니다.", L"显示分析器操作指南。", L"عرض دليل تشغيل المحلل.", L"Показать руководство по анализатору.", L"Bedienungsanleitung des Analysators anzeigen.", L"Mostrar o guia de operacao do analisador.", L"Toon de handleiding van de analyser.", L"Pokaz przewodnik po analizatorze.", L"Analizor islem kilavuzunu goster."));
+		}
+	}
 
 	if (point.x == -1 && point.y == -1) {
 		CRect rc; GetClientRect(&rc); ClientToScreen(&rc);
@@ -2175,6 +2304,15 @@ LPCTSTR CAnalyzerDlg::ChannelLabel(int ch, int channels)
 
 int CAnalyzerDlg::VisibleChannelCount(int waveH) const
 {
+	if (m_waveMode == WaveMidSide) {
+		const int fit = (std::max)(1, waveH / 22);
+		return (std::min)(2, fit);
+	}
+	if (m_waveMode == WaveLoudness) {
+		const int ch = (m_channels >= 2) ? 2 : 1;
+		const int fit = (std::max)(1, waveH / 22);
+		return (std::min)(ch, fit);
+	}
 	const int ch = (std::max)(1, (std::min)(m_channels, CH_MAX));
 	const int minBand = 22;
 	const int fit = (std::max)(1, waveH / minBand);
@@ -2359,6 +2497,12 @@ void CAnalyzerDlg::UpdateSpectrumFromRing()
 	float magLin[FFT_SIZE / 2 + 1];
 	float instant[CH_MAX][SPEC_BINS];
 	float smoothed[SPEC_BINS];
+	float corrTmp[SPEC_BINS];
+	float phaseTmp[SPEC_BINS];
+	for (int b = 0; b < SPEC_BINS; ++b) {
+		corrTmp[b] = 0.0f;
+		phaseTmp[b] = 0.0f;
+	}
 
 	auto magAt = [&](float kFrac) -> float {
 		if (kFrac < 1.0f) kFrac = 1.0f;
@@ -2383,6 +2527,14 @@ void CAnalyzerDlg::UpdateSpectrumFromRing()
 		magLin[0] = 0.0f;
 		for (int k = 1; k <= kNyq; ++k)
 			magLin[k] = sqrtf(m_fftRe[k] * m_fftRe[k] + m_fftIm[k] * m_fftIm[k]) * norm;
+		if (c == 0) {
+			m_fftLre[0] = m_fftRe[0];
+			m_fftLim[0] = m_fftIm[0];
+			for (int k = 1; k <= kNyq; ++k) {
+				m_fftLre[k] = m_fftRe[k];
+				m_fftLim[k] = m_fftIm[k];
+			}
+		}
 
 		// 対数帯域ごとにエネルギー平均。帯域幅 < 1 FFT bin なら線形補間
 		// (低域の階段化を防ぎ、高域のピーク固まりも抑える)
@@ -2429,10 +2581,53 @@ void CAnalyzerDlg::UpdateSpectrumFromRing()
 		}
 		for (int b = 0; b < SPEC_BINS; ++b)
 			instant[c][b] = smoothed[b];
+
+		if (c == 1) {
+			for (int b = 0; b < SPEC_BINS; ++b) {
+				const float fLo = SpecEdgeHz(b, SPEC_BINS, nyquist);
+				const float fHi = SpecEdgeHz(b + 1, SPEC_BINS, nyquist);
+				float kLo = fLo * (float)FFT_SIZE / (float)sr;
+				float kHi = fHi * (float)FFT_SIZE / (float)sr;
+				if (kLo < 1.0f) kLo = 1.0f;
+				if (kHi > (float)kNyq) kHi = (float)kNyq;
+				if (kHi <= kLo) kHi = kLo + 0.05f;
+				double crossRe = 0.0, crossIm = 0.0, magL2 = 0.0, magR2 = 0.0;
+				const int i0 = (int)kLo;
+				const int i1 = (int)kHi;
+				for (int k = i0; k <= i1; ++k) {
+					if (k < 1 || k > kNyq) continue;
+					const float a = (std::max)(kLo, (float)k);
+					const float bb = (std::min)(kHi, (float)(k + 1));
+					const float w = bb - a;
+					if (w <= 0.0f) continue;
+					const float Lre = m_fftLre[k], Lim = m_fftLim[k];
+					const float Rre = m_fftRe[k], Rim = m_fftIm[k];
+					crossRe += (double)((Lre * Rre + Lim * Rim) * w);
+					crossIm += (double)((Lim * Rre - Lre * Rim) * w);
+					magL2 += (double)((Lre * Lre + Lim * Lim) * w);
+					magR2 += (double)((Rre * Rre + Rim * Rim) * w);
+				}
+				const double den = sqrt(magL2 * magR2);
+				float corr = (den > 1e-20) ? (float)(crossRe / den) : 0.0f;
+				if (corr > 1.f) corr = 1.f;
+				if (corr < -1.f) corr = -1.f;
+				corrTmp[b] = corr;
+				phaseTmp[b] = (float)atan2(crossIm, crossRe);
+			}
+		}
+	}
+
+	if (channels < 2) {
+		for (int b = 0; b < SPEC_BINS; ++b) {
+			corrTmp[b] = 0.0f;
+			phaseTmp[b] = 0.0f;
+		}
 	}
 
 	EnterCriticalSection(&m_cs);
 	const bool peakHold = m_peakHold;
+	memcpy(m_specCorr, corrTmp, sizeof(m_specCorr));
+	memcpy(m_specPhase, phaseTmp, sizeof(m_specPhase));
 	for (int c = 0; c < channels; ++c) {
 		for (int b = 0; b < SPEC_BINS; ++b) {
 			if (instant[c][b] > m_specDb[c][b])
@@ -2608,7 +2803,11 @@ void CAnalyzerDlg::FullRedrawWave(COLORREF bg)
 	EnterCriticalSection(&m_cs);
 	m_pendingScroll = 0;
 	LeaveCriticalSection(&m_cs);
-	m_waveDC.FillSolidRect(0, 0, m_waveW, m_waveH, bg);
+	const int plotWEarly = AnalyzerWavePlotWidth(m_waveW, m_channels, m_showLevelMeter ? 1 : 0);
+	if (m_waveMode != WavePhosphor || !m_waveReady)
+		m_waveDC.FillSolidRect(0, 0, m_waveW, m_waveH, bg);
+	else if (plotWEarly < m_waveW)
+		m_waveDC.FillSolidRect(plotWEarly, 0, m_waveW - plotWEarly, m_waveH, bg);
 
 	int channels = 0, filled = 0, write = 0;
 	if (!SnapshotRing(write, filled, channels)) {
@@ -2622,6 +2821,8 @@ void CAnalyzerDlg::FullRedrawWave(COLORREF bg)
 
 	const int vis = VisibleChannelCount(m_waveH);
 	m_waveLayoutCh = vis;
+	const int plotW = AnalyzerWavePlotWidth(m_waveW, channels, m_showLevelMeter ? 1 : 0);
+	m_waveLayoutPlotW = plotW;
 	if (filled < 8) {
 		m_waveReady = true;
 		return;
@@ -2631,23 +2832,24 @@ void CAnalyzerDlg::FullRedrawWave(COLORREF bg)
 	CFont* oldFont = m_waveDC.SelectObject(&m_font);
 	m_waveDC.SetBkMode(TRANSPARENT);
 	float dispPeak = 0.25f;
+	float lufsNow = -70.0f;
 	EnterCriticalSection(&m_cs);
 	dispPeak = m_waveDispPeak;
+	lufsNow = m_lufsMom;
 	LeaveCriticalSection(&m_cs);
 	// 直近ピークを帯の ~72% に合わせる(常時フル振りを避ける)。静音は拡大しすぎない。
 	float waveGain = 0.70f / (std::max)(0.08f, dispPeak);
 	if (waveGain > 2.2f) waveGain = 2.2f;
 	if (waveGain < 0.55f) waveGain = 0.55f;
 
-	// トリガー式オシロ: リングの直近ウィンドウを立ち上がりゼロクロスに合わせて静止表示。
-	// 表示窓はリング内に必ず収める(スクロール用の spc だと窓長がリングを超える)。
-	const bool trigger = (m_waveMode == WaveTrigger);
+	// トリガー／残光オシロ: リングの直近ウィンドウを立ち上がりゼロクロスに合わせて静止表示。
+	const bool trigger = (m_waveMode == WaveTrigger || m_waveMode == WavePhosphor);
 	int trigSpc = spc;
 	int trigStart = 0;
 	if (trigger) {
 		const int budget = (std::min)(filled, RING_SAMPLES / 2);
-		trigSpc = (std::max)(1, budget / (std::max)(1, m_waveW));
-		const int window = trigSpc * m_waveW;
+		trigSpc = (std::max)(1, budget / (std::max)(1, plotW));
+		const int window = trigSpc * plotW;
 		int base = write - window;
 		int searchMax = (std::min)(RING_SAMPLES / 4, filled - window);
 		if (searchMax < 0) searchMax = 0;
@@ -2662,6 +2864,14 @@ void CAnalyzerDlg::FullRedrawWave(COLORREF bg)
 		}
 	}
 
+	if (m_waveMode == WavePhosphor && m_waveScratchDC.GetSafeHdc()) {
+		// 残光: 背景へフェードしてから新しいトレースを重ねる（ちらつき回避のため BB 内で完結）
+		m_waveScratchDC.FillSolidRect(0, 0, plotW, m_waveH, bg);
+		BLENDFUNCTION bf = { AC_SRC_OVER, 0, 42, 0 };
+		::GdiAlphaBlend(m_waveDC.GetSafeHdc(), 0, 0, plotW, m_waveH,
+			m_waveScratchDC.GetSafeHdc(), 0, 0, plotW, m_waveH, bf);
+	}
+
 	for (int c = 0; c < vis; ++c) {
 		const int y0 = c * bandH;
 		const int y1 = (c == vis - 1) ? m_waveH : (c + 1) * bandH;
@@ -2671,41 +2881,95 @@ void CAnalyzerDlg::FullRedrawWave(COLORREF bg)
 		HGDIOBJ oldPen = m_waveDC.SelectObject(::GetStockObject(DC_PEN));
 		::SetDCPenColor(m_waveDC.GetSafeHdc(), RGB(40, 44, 58));
 		m_waveDC.MoveTo(0, mid);
-		m_waveDC.LineTo(m_waveW, mid);
+		m_waveDC.LineTo(plotW, mid);
 
-		::SetDCPenColor(m_waveDC.GetSafeHdc(), kChColor[c % CH_MAX]);
+		const COLORREF col = (m_waveMode == WaveMidSide)
+			? ((c == 0) ? RGB(120, 210, 255) : RGB(255, 180, 90))
+			: kChColor[c % CH_MAX];
+		::SetDCPenColor(m_waveDC.GetSafeHdc(), col);
+		const COLORREF fillCol = RGB(
+			(GetRValue(col) * 2 + 18) / 5,
+			(GetGValue(col) * 2 + 20) / 5,
+			(GetBValue(col) * 2 + 28) / 5);
 
-		for (int x = 0; x < m_waveW; ++x) {
-			const int ageCols = m_waveW - 1 - x;
+		if (m_waveMode == WaveLoudness) {
+			const float lufsT = (lufsNow + 70.0f) / 70.0f;
+			int lufsY = y1 - (int)((lufsT < 0.f ? 0.f : (lufsT > 1.f ? 1.f : lufsT)) * (y1 - y0 - 2));
+			::SetDCPenColor(m_waveDC.GetSafeHdc(), RGB(80, 90, 70));
+			m_waveDC.MoveTo(0, lufsY);
+			m_waveDC.LineTo(plotW, lufsY);
+		}
+
+		for (int x = 0; x < plotW; ++x) {
+			const int ageCols = plotW - 1 - x;
 			const int sampleBack = trigger
 				? (write - (trigStart + x * trigSpc))
 				: (ageCols * spc + spc);
 			const int useSpc = trigger ? trigSpc : spc;
-			float mn = 1.0f, mx = -1.0f;
+			float mn = 1.0f, mx = -1.0f, sum2 = 0.0f;
+			int cnt = 0;
 			bool any = false;
 			for (int s = 0; s < useSpc; ++s) {
 				int idx = write - sampleBack + s;
 				while (idx < 0) idx += RING_SAMPLES;
 				idx %= RING_SAMPLES;
 				if (filled < RING_SAMPLES && idx >= filled) continue;
-				float v = m_ringSnap[c][idx];
+				float v;
+				if (m_waveMode == WaveMidSide) {
+					float L = m_ringSnap[0][idx];
+					float R = (channels >= 2) ? m_ringSnap[1][idx] : L;
+					v = (c == 0) ? (0.5f * (L + R)) : (0.5f * (L - R));
+				}
+				else {
+					int srcCh = c;
+					if (srcCh >= channels) srcCh = channels - 1;
+					if (srcCh < 0) srcCh = 0;
+					v = m_ringSnap[srcCh][idx];
+				}
 				if (v > 1.0f) v = 1.0f;
 				if (v < -1.0f) v = -1.0f;
 				if (!any || v < mn) mn = v;
 				if (!any || v > mx) mx = v;
+				sum2 += v * v;
+				++cnt;
 				any = true;
 			}
 			if (!any) continue;
+			if (m_waveMode == WaveLoudness) {
+				float rms = (cnt > 0) ? sqrtf(sum2 / (float)cnt) : 0.0f;
+				if (rms > 1.f) rms = 1.f;
+				const int yh = y1 - 1 - (int)(rms * (amp * 2));
+				const int yTop = (yh < y0 + 1) ? (y0 + 1) : yh;
+				if (yTop < y1 - 1)
+					m_waveDC.FillSolidRect(x, yTop, 1, (y1 - 1) - yTop, fillCol);
+				continue;
+			}
 			mn *= waveGain; mx *= waveGain;
 			if (mn < -1.0f) mn = -1.0f;
 			if (mx > 1.0f) mx = 1.0f;
-			m_waveDC.MoveTo(x, mid - (int)(mx * amp));
-			m_waveDC.LineTo(x, mid - (int)(mn * amp));
+			const int yMx = mid - (int)(mx * amp);
+			const int yMn = mid - (int)(mn * amp);
+			if (m_waveMode == WaveEnvelope) {
+				int top = (yMx < yMn) ? yMx : yMn;
+				int bot = (yMx < yMn) ? yMn : yMx;
+				if (bot < top + 1) bot = top + 1;
+				m_waveDC.FillSolidRect(x, top, 1, bot - top, fillCol);
+				m_waveDC.SetPixel(x, yMx, col);
+			}
+			else {
+				m_waveDC.MoveTo(x, yMx);
+				m_waveDC.LineTo(x, yMn);
+			}
 		}
 
 		m_waveDC.FillSolidRect(0, y0, 28, (std::min)(14, y1 - y0), ANALYZER_LABEL_PLATE);
-		m_waveDC.SetTextColor(kChColor[c % CH_MAX]);
-		m_waveDC.TextOut(4, y0 + 2, ChannelLabel(c, channels));
+		m_waveDC.SetTextColor(col);
+		if (m_waveMode == WaveMidSide)
+			m_waveDC.TextOut(4, y0 + 2, (c == 0) ? _T("M") : _T("S"));
+		else if (m_waveMode == WaveLoudness)
+			m_waveDC.TextOut(4, y0 + 2, (c == 0) ? _T("RMS") : ChannelLabel(c, channels));
+		else
+			m_waveDC.TextOut(4, y0 + 2, ChannelLabel(c, channels));
 		m_waveDC.SelectObject(oldPen);
 	}
 	m_waveDC.SelectObject(oldFont);
@@ -2718,8 +2982,8 @@ void CAnalyzerDlg::FullRedrawWave(COLORREF bg)
 int CAnalyzerDlg::ScrollWaveAndDrawNew(COLORREF bg, int maxScroll)
 {
 	if (!m_waveDC.GetSafeHdc() || !m_waveScratchDC.GetSafeHdc()) return 0;
-	if (m_waveMode == WaveTrigger) {
-		// トリガー表示は毎回全描画(横スクロールしない)
+	if (m_waveMode == WaveTrigger || m_waveMode == WavePhosphor) {
+		// トリガー／残光は毎回全描画(横スクロールしない)
 		FullRedrawWave(bg);
 		return -1;
 	}
@@ -2734,29 +2998,32 @@ int CAnalyzerDlg::ScrollWaveAndDrawNew(COLORREF bg, int maxScroll)
 	LeaveCriticalSection(&m_cs);
 
 	const int vis = VisibleChannelCount(m_waveH);
-	if (vis != m_waveLayoutCh || !m_waveReady) {
+	const int plotW = AnalyzerWavePlotWidth(m_waveW, m_channels, m_showLevelMeter ? 1 : 0);
+	if (vis != m_waveLayoutCh || plotW != m_waveLayoutPlotW || !m_waveReady) {
 		FullRedrawWave(bg);
 		return -1;
 	}
 	if (scroll <= 0) return 0;
-	if (scroll >= m_waveW) {
+	if (scroll >= plotW) {
 		FullRedrawWave(bg);
 		return -1;
 	}
 	if (!SnapshotRing(write, filled, channels))
 		return 0;
 
-	const int keep = m_waveW - scroll;
+	const int keep = plotW - scroll;
 	m_waveScratchDC.BitBlt(0, 0, keep, m_waveH, &m_waveDC, scroll, 0, SRCCOPY);
 	m_waveScratchDC.FillSolidRect(keep, 0, scroll, m_waveH, bg);
-	m_waveDC.BitBlt(0, 0, m_waveW, m_waveH, &m_waveScratchDC, 0, 0, SRCCOPY);
+	m_waveDC.BitBlt(0, 0, plotW, m_waveH, &m_waveScratchDC, 0, 0, SRCCOPY);
 
 	const int bandH = m_waveH / vis;
 	CFont* oldFont = m_waveDC.SelectObject(&m_font);
 	m_waveDC.SetBkMode(TRANSPARENT);
 	float dispPeak = 0.25f;
+	float lufsNow = -70.0f;
 	EnterCriticalSection(&m_cs);
 	dispPeak = m_waveDispPeak;
+	lufsNow = m_lufsMom;
 	LeaveCriticalSection(&m_cs);
 	float waveGain = 0.70f / (std::max)(0.08f, dispPeak);
 	if (waveGain > 2.2f) waveGain = 2.2f;
@@ -2771,38 +3038,92 @@ int CAnalyzerDlg::ScrollWaveAndDrawNew(COLORREF bg, int maxScroll)
 		HGDIOBJ oldPen = m_waveDC.SelectObject(::GetStockObject(DC_PEN));
 		::SetDCPenColor(m_waveDC.GetSafeHdc(), RGB(40, 44, 58));
 		m_waveDC.MoveTo(keep, mid);
-		m_waveDC.LineTo(m_waveW, mid);
+		m_waveDC.LineTo(plotW, mid);
 
-		::SetDCPenColor(m_waveDC.GetSafeHdc(), kChColor[c % CH_MAX]);
+		const COLORREF col = (m_waveMode == WaveMidSide)
+			? ((c == 0) ? RGB(120, 210, 255) : RGB(255, 180, 90))
+			: kChColor[c % CH_MAX];
+		::SetDCPenColor(m_waveDC.GetSafeHdc(), col);
+		const COLORREF fillCol = RGB(
+			(GetRValue(col) * 2 + 18) / 5,
+			(GetGValue(col) * 2 + 20) / 5,
+			(GetBValue(col) * 2 + 28) / 5);
 
-		for (int x = keep; x < m_waveW; ++x) {
-			const int ageCols = m_waveW - 1 - x;
+		if (m_waveMode == WaveLoudness) {
+			const float lufsT = (lufsNow + 70.0f) / 70.0f;
+			int lufsY = y1 - (int)((lufsT < 0.f ? 0.f : (lufsT > 1.f ? 1.f : lufsT)) * (y1 - y0 - 2));
+			::SetDCPenColor(m_waveDC.GetSafeHdc(), RGB(80, 90, 70));
+			m_waveDC.MoveTo(keep, lufsY);
+			m_waveDC.LineTo(plotW, lufsY);
+		}
+
+		for (int x = keep; x < plotW; ++x) {
+			const int ageCols = plotW - 1 - x;
 			const int sampleBack = ageCols * spc + spc;
-			float mn = 1.0f, mx = -1.0f;
+			float mn = 1.0f, mx = -1.0f, sum2 = 0.0f;
+			int cnt = 0;
 			bool any = false;
 			for (int s = 0; s < spc; ++s) {
 				int idx = write - sampleBack + s;
 				while (idx < 0) idx += RING_SAMPLES;
 				idx %= RING_SAMPLES;
 				if (filled < RING_SAMPLES && idx >= filled) continue;
-				float v = m_ringSnap[c][idx];
+				float v;
+				if (m_waveMode == WaveMidSide) {
+					float L = m_ringSnap[0][idx];
+					float R = (channels >= 2) ? m_ringSnap[1][idx] : L;
+					v = (c == 0) ? (0.5f * (L + R)) : (0.5f * (L - R));
+				}
+				else {
+					int srcCh = c;
+					if (srcCh >= channels) srcCh = channels - 1;
+					if (srcCh < 0) srcCh = 0;
+					v = m_ringSnap[srcCh][idx];
+				}
 				if (v > 1.0f) v = 1.0f;
 				if (v < -1.0f) v = -1.0f;
 				if (!any || v < mn) mn = v;
 				if (!any || v > mx) mx = v;
+				sum2 += v * v;
+				++cnt;
 				any = true;
 			}
 			if (!any) continue;
+			if (m_waveMode == WaveLoudness) {
+				float rms = (cnt > 0) ? sqrtf(sum2 / (float)cnt) : 0.0f;
+				if (rms > 1.f) rms = 1.f;
+				const int yh = y1 - 1 - (int)(rms * (amp * 2));
+				const int yTop = (yh < y0 + 1) ? (y0 + 1) : yh;
+				if (yTop < y1 - 1)
+					m_waveDC.FillSolidRect(x, yTop, 1, (y1 - 1) - yTop, fillCol);
+				continue;
+			}
 			mn *= waveGain; mx *= waveGain;
 			if (mn < -1.0f) mn = -1.0f;
 			if (mx > 1.0f) mx = 1.0f;
-			m_waveDC.MoveTo(x, mid - (int)(mx * amp));
-			m_waveDC.LineTo(x, mid - (int)(mn * amp));
+			const int yMx = mid - (int)(mx * amp);
+			const int yMn = mid - (int)(mn * amp);
+			if (m_waveMode == WaveEnvelope) {
+				int top = (yMx < yMn) ? yMx : yMn;
+				int bot = (yMx < yMn) ? yMn : yMx;
+				if (bot < top + 1) bot = top + 1;
+				m_waveDC.FillSolidRect(x, top, 1, bot - top, fillCol);
+				m_waveDC.SetPixel(x, yMx, col);
+			}
+			else {
+				m_waveDC.MoveTo(x, yMx);
+				m_waveDC.LineTo(x, yMn);
+			}
 		}
 
 		m_waveDC.FillSolidRect(0, y0, 28, (std::min)(14, y1 - y0), ANALYZER_LABEL_PLATE);
-		m_waveDC.SetTextColor(kChColor[c % CH_MAX]);
-		m_waveDC.TextOut(4, y0 + 2, ChannelLabel(c, channels));
+		m_waveDC.SetTextColor(col);
+		if (m_waveMode == WaveMidSide)
+			m_waveDC.TextOut(4, y0 + 2, (c == 0) ? _T("M") : _T("S"));
+		else if (m_waveMode == WaveLoudness)
+			m_waveDC.TextOut(4, y0 + 2, (c == 0) ? _T("RMS") : ChannelLabel(c, channels));
+		else
+			m_waveDC.TextOut(4, y0 + 2, ChannelLabel(c, channels));
 		m_waveDC.SelectObject(oldPen);
 	}
 	m_waveDC.SelectObject(oldFont);
@@ -3232,6 +3553,228 @@ void CAnalyzerDlg::RedrawSpectrum(COLORREF bg)
 		return;
 	}
 
+	// --- 密度ゴニオメータ ---
+	if (m_lowerMode == LowerVector) {
+		CRect plot(area.left + 4, area.top, area.right - 4, area.bottom - 4);
+		addHoverPlot(plot, 0);
+		m_specDC.SetTextColor(RGB(180, 190, 210));
+		m_specDC.TextOut(plot.left + 2, (int)(std::max)(0L, plot.top - 13),
+			LL14(L"ゴニオメータ (密度)", L"Goniometer (density)", L"Goniometre (densite)", L"Goniometro (densita)",
+				L"Goniometro (densidad)", L"고니오미터 (밀도)", L"测向仪（密度）", L"مقياس الاتجاه (كثافة)",
+				L"Гониометр (плотность)", L"Goniometer (Dichte)", L"Goniometro (densidade)", L"Goniometer (dichtheid)",
+				L"Goniometr (gestosc)", L"Gonyometre (yogunluk)"));
+		const int side = (std::min)(plot.Width(), plot.Height());
+		CRect box(plot.left + (plot.Width() - side) / 2, plot.top + (plot.Height() - side) / 2,
+			plot.left + (plot.Width() - side) / 2 + side, plot.top + (plot.Height() - side) / 2 + side);
+		for (int y = 0; y < GONIO_N; ++y)
+			for (int x = 0; x < GONIO_N; ++x)
+				m_gonio[y][x] = (unsigned char)((m_gonio[y][x] * 13) / 16);
+		if (channels >= 2) {
+			int wr = 0, wf = 0, wch = 0;
+			if (SnapshotRing(wr, wf, wch) && wf >= 64) {
+				const int useN = (std::min)(wf, 2048);
+				const int step = (std::max)(1, useN / 800);
+				for (int i = 0; i < useN; i += step) {
+					int idx = wr - useN + i;
+					while (idx < 0) idx += RING_SAMPLES;
+					idx %= RING_SAMPLES;
+					float l = m_ringSnap[0][idx];
+					float rr = m_ringSnap[1][idx];
+					if (l > 1.f) l = 1.f; if (l < -1.f) l = -1.f;
+					if (rr > 1.f) rr = 1.f; if (rr < -1.f) rr = -1.f;
+					const float mx = (l + rr) * 0.7071f;
+					const float my = (l - rr) * 0.7071f;
+					int gx = (int)((my * 0.5f + 0.5f) * (GONIO_N - 1));
+					int gy = (int)((0.5f - mx * 0.5f) * (GONIO_N - 1));
+					if (gx < 0) gx = 0; if (gx >= GONIO_N) gx = GONIO_N - 1;
+					if (gy < 0) gy = 0; if (gy >= GONIO_N) gy = GONIO_N - 1;
+					unsigned int nv = (unsigned int)m_gonio[gy][gx] + 18u;
+					if (nv > 255u) nv = 255u;
+					m_gonio[gy][gx] = (unsigned char)nv;
+				}
+			}
+		}
+		static DWORD imgG[GONIO_N * GONIO_N];
+		for (int y = 0; y < GONIO_N; ++y) {
+			for (int x = 0; x < GONIO_N; ++x) {
+				const int v = m_gonio[y][x];
+				DWORD c = 0;
+				if (v > 0) {
+					const int r = (std::min)(255, 20 + v);
+					const int g = (std::min)(255, 40 + v * 2);
+					const int b = (std::min)(255, 30 + v / 2);
+					c = ((DWORD)r << 16) | ((DWORD)g << 8) | (DWORD)b;
+				}
+				imgG[y * GONIO_N + x] = c;
+			}
+		}
+		BITMAPINFO bi = {};
+		bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+		bi.bmiHeader.biWidth = GONIO_N;
+		bi.bmiHeader.biHeight = -GONIO_N;
+		bi.bmiHeader.biPlanes = 1;
+		bi.bmiHeader.biBitCount = 32;
+		bi.bmiHeader.biCompression = BI_RGB;
+		m_specDC.FillSolidRect(box, RGB(12, 14, 20));
+		const int oldMode = m_specDC.SetStretchBltMode(COLORONCOLOR);
+		::StretchDIBits(m_specDC.GetSafeHdc(), box.left, box.top, box.Width(), box.Height(),
+			0, 0, GONIO_N, GONIO_N, imgG, &bi, DIB_RGB_COLORS, SRCCOPY);
+		m_specDC.SetStretchBltMode(oldMode);
+		CPen frame(PS_SOLID, 1, RGB(55, 60, 78));
+		CPen* oldPen = m_specDC.SelectObject(&frame);
+		m_specDC.SelectStockObject(NULL_BRUSH);
+		m_specDC.Rectangle(box);
+		const int cx = (box.left + box.right) / 2;
+		const int cy = (box.top + box.bottom) / 2;
+		CPen ax(PS_DOT, 1, RGB(50, 56, 72));
+		CPen* prevAx = m_specDC.SelectObject(&ax);
+		m_specDC.MoveTo(cx, box.top); m_specDC.LineTo(cx, box.bottom);
+		m_specDC.MoveTo(box.left, cy); m_specDC.LineTo(box.right, cy);
+		m_specDC.SelectObject(prevAx);
+		m_specDC.SelectObject(oldPen);
+		m_specDC.SelectObject(oldFont);
+		m_specReady = true;
+		m_specDirty = false;
+		return;
+	}
+
+	// --- 1/3 オクターブ RTA ---
+	if (m_lowerMode == LowerRta) {
+		static const float kRtaHz[31] = {
+			20.f, 25.f, 31.5f, 40.f, 50.f, 63.f, 80.f, 100.f, 125.f, 160.f,
+			200.f, 250.f, 315.f, 400.f, 500.f, 630.f, 800.f, 1000.f, 1250.f, 1600.f,
+			2000.f, 2500.f, 3150.f, 4000.f, 5000.f, 6300.f, 8000.f, 10000.f, 12500.f, 16000.f, 20000.f
+		};
+		CRect plot(area.left + 28, area.top, area.right, area.bottom - 14);
+		addHoverPlot(plot, -1);
+		m_specDC.SetTextColor(RGB(180, 190, 210));
+		m_specDC.TextOut(plot.left + 2, (int)(std::max)(0L, plot.top - 13),
+			LL14(L"1/3 オクターブ RTA", L"1/3-octave RTA", L"RTA 1/3 d'octave", L"RTA 1/3 d'ottava",
+				L"RTA de 1/3 de octava", L"1/3 옥타브 RTA", L"1/3 倍频程 RTA", L"RTA ثلث أوكتاف",
+				L"RTA 1/3 октавы", L"1/3-Oktav-RTA", L"RTA 1/3 de oitava", L"1/3-octaaf-RTA",
+				L"RTA 1/3 oktawy", L"1/3 oktav RTA"));
+		CPen frame(PS_SOLID, 1, RGB(55, 60, 78));
+		CPen* oldPen = m_specDC.SelectObject(&frame);
+		m_specDC.SelectStockObject(NULL_BRUSH);
+		m_specDC.Rectangle(plot);
+		m_specDC.SelectObject(oldPen);
+		float rtaDb[31];
+		for (int i = 0; i < 31; ++i) {
+			const float fC = kRtaHz[i];
+			if (fC >= nyquist) { rtaDb[i] = -96.f; continue; }
+			const float fLo = fC / 1.122462f;
+			const float fHi = fC * 1.122462f;
+			float best = -96.f;
+			for (int b = 0; b < SPEC_BINS; ++b) {
+				const float hz = SpecCenterHz(b, SPEC_BINS, nyquist);
+				if (hz < fLo || hz > fHi) continue;
+				for (int c = 0; c < channels; ++c)
+					if (spec[c][b] > best) best = spec[c][b];
+			}
+			rtaDb[i] = best;
+		}
+		const int nBar = 31;
+		const int gapB = 2;
+		const int innerW = plot.Width() - 8;
+		const int bw = (innerW - gapB * (nBar - 1)) / nBar;
+		for (int i = 0; i < nBar; ++i) {
+			float t = (rtaDb[i] + 96.f) / 96.f;
+			if (t < 0.f) t = 0.f; if (t > 1.f) t = 1.f;
+			const int x0 = plot.left + 4 + i * (bw + gapB);
+			const int h = (int)(t * (plot.Height() - 8));
+			COLORREF col = RGB(80, 180, 220);
+			if (rtaDb[i] > -9.f) col = RGB(255, 200, 80);
+			if (rtaDb[i] > -3.f) col = RGB(255, 90, 80);
+			if (h > 0)
+				m_specDC.FillSolidRect(x0, plot.bottom - 4 - h, (std::max)(1, bw), h, col);
+			if (bw >= 10 && (i == 7 || i == 17 || i == 27)) {
+				CString lab;
+				if (kRtaHz[i] >= 1000.f) lab.Format(_T("%.0fk"), kRtaHz[i] / 1000.f);
+				else lab.Format(_T("%.0f"), kRtaHz[i]);
+				m_specDC.SetTextColor(RGB(140, 150, 170));
+				m_specDC.TextOut(x0, plot.bottom - 13, lab);
+			}
+		}
+		if (m_eqOverlay)
+			DrawEqOverlay(m_specDC, plot, nyquist);
+		m_specDC.SelectObject(oldFont);
+		m_specReady = true;
+		m_specDirty = false;
+		return;
+	}
+
+	// --- 帯域相関 / 帯域位相差 ---
+	if (m_lowerMode == LowerCorrFreq || m_lowerMode == LowerPhaseFreq) {
+		const bool isCorr = (m_lowerMode == LowerCorrFreq);
+		CRect plot(area.left + 28, area.top, area.right, area.bottom - 12);
+		addHoverPlot(plot, 0);
+		m_specDC.SetTextColor(RGB(180, 190, 210));
+		m_specDC.TextOut(plot.left + 2, (int)(std::max)(0L, plot.top - 13),
+			isCorr
+			? LL14(L"帯域相関 (L/R)", L"Correlation vs frequency (L/R)", L"Correlation par frequence (L/R)", L"Correlazione per frequenza (L/R)",
+				L"Correlacion por frecuencia (L/R)", L"대역 상관 (L/R)", L"频段相关 (L/R)", L"ترابط حسب التردد (L/R)",
+				L"Корреляция по частоте (L/R)", L"Korrelation vs. Frequenz (L/R)", L"Correlacao por frequencia (L/R)", L"Correlatie vs frequentie (L/R)",
+				L"Korelacja vs czestotliwosc (L/R)", L"Frekansa gore korelasyon (L/R)")
+			: LL14(L"帯域位相差 (L/R)", L"Phase vs frequency (L/R)", L"Phase par frequence (L/R)", L"Fase per frequenza (L/R)",
+				L"Fase por frecuencia (L/R)", L"대역 위상차 (L/R)", L"频段相位差 (L/R)", L"طور حسب التردد (L/R)",
+				L"Фаза по частоте (L/R)", L"Phase vs. Frequenz (L/R)", L"Fase por frequencia (L/R)", L"Fase vs frequentie (L/R)",
+				L"Faza vs czestotliwosc (L/R)", L"Frekansa gore faz (L/R)"));
+		CPen frame(PS_SOLID, 1, RGB(55, 60, 78));
+		CPen* oldPen = m_specDC.SelectObject(&frame);
+		m_specDC.SelectStockObject(NULL_BRUSH);
+		m_specDC.Rectangle(plot);
+		m_specDC.SelectObject(oldPen);
+		const int midY = (plot.top + plot.bottom) / 2;
+		CPen zero(PS_DOT, 1, RGB(70, 80, 100));
+		oldPen = m_specDC.SelectObject(&zero);
+		m_specDC.MoveTo(plot.left, midY);
+		m_specDC.LineTo(plot.right, midY);
+		m_specDC.SelectObject(oldPen);
+		float localC[SPEC_BINS], localP[SPEC_BINS];
+		EnterCriticalSection(&m_cs);
+		memcpy(localC, m_specCorr, sizeof(localC));
+		memcpy(localP, m_specPhase, sizeof(localP));
+		LeaveCriticalSection(&m_cs);
+		float fMinZ = 20.0f, fMaxZ = nyquist;
+		GetZoomFreqRange(m_freqZoom, nyquist, fMinZ, fMaxZ);
+		POINT pts[SPEC_BINS];
+		int nPts = 0;
+		for (int b = 0; b < SPEC_BINS; ++b) {
+			const float hz = SpecCenterHz(b, SPEC_BINS, nyquist);
+			if (hz < fMinZ || hz > fMaxZ) continue;
+			const float tx = logf((std::max)(hz, fMinZ) / fMinZ) / logf(fMaxZ / fMinZ);
+			float ty;
+			if (isCorr)
+				ty = (localC[b] + 1.f) * 0.5f;
+			else
+				ty = (localP[b] / 3.14159265f + 1.f) * 0.5f;
+			if (ty < 0.f) ty = 0.f; if (ty > 1.f) ty = 1.f;
+			pts[nPts].x = plot.left + (int)(tx * plot.Width());
+			pts[nPts].y = plot.bottom - (int)(ty * plot.Height());
+			const int y0 = midY;
+			const int y1 = pts[nPts].y;
+			const int top = (y0 < y1) ? y0 : y1;
+			const int bot = (y0 < y1) ? y1 : y0;
+			COLORREF fill = isCorr
+				? ((localC[b] >= 0.f) ? RGB(40, 90, 70) : RGB(90, 40, 50))
+				: RGB(50, 60, 90);
+			if (bot > top)
+				m_specDC.FillSolidRect(pts[nPts].x, top, 1, bot - top, fill);
+			++nPts;
+		}
+		if (nPts >= 2) {
+			CPen ln(PS_SOLID, 1, isCorr ? RGB(120, 230, 170) : RGB(160, 190, 255));
+			CPen* prev = m_specDC.SelectObject(&ln);
+			m_specDC.Polyline(pts, nPts);
+			m_specDC.SelectObject(prev);
+		}
+		DrawFreqMarkers(m_specDC, plot, nyquist);
+		m_specDC.SelectObject(oldFont);
+		m_specReady = true;
+		m_specDirty = false;
+		return;
+	}
+
 	// --- スペクトログラム(ウォーターフォール) ---
 	if (m_lowerMode == LowerWaterfall) {
 		int wfWrite = 0, wfFilled = 0;
@@ -3446,8 +3989,18 @@ void CAnalyzerDlg::DrawLevelMeters(CDC& dc, const CRect& waveRc, COLORREF bg)
 
 	int n = 1, meterW = 10, gap = 3, totalW = 0;
 	AnalyzerMeterGeom(channels, n, meterW, gap, totalW);
-	CRect area(waveRc.right - totalW - 4, waveRc.top + 8, waveRc.right - 4, waveRc.bottom - 8);
-	dc.FillSolidRect(area, panelBg);
+	const bool showLr = (m_showLevelMeter != false);
+	const bool showCorr = (savedata.pro_corr_meter != 0 && n >= 2);
+	if (!showLr && !showCorr) return;
+
+	// LR バーは右端。消したときはその位置へ φ を移す。両方出すときは φ を LR の左へ。
+	int rightEdge = waveRc.right - 4;
+	CRect area(0, 0, 0, 0);
+	if (showLr) {
+		area.SetRect(rightEdge - totalW, waveRc.top + 8, rightEdge, waveRc.bottom - 8);
+		dc.FillSolidRect(area, panelBg);
+		rightEdge = area.left - 4;
+	}
 
 	auto ampToY = [&](float a) -> int {
 		float db = AmpToDb(a);
@@ -3458,23 +4011,27 @@ void CAnalyzerDlg::DrawLevelMeters(CDC& dc, const CRect& waveRc, COLORREF bg)
 	};
 
 	// 位相相関メーター(-1..+1)と L/R バランス。
-	// 先に描き、チャネルバーを後で重ねる（旧: スパークが L バーを塗り潰していた）。
-	if (savedata.pro_corr_meter && n >= 2) {
+	if (showCorr) {
 		const float corr = ProAudio_CorrValue();
 		const float bal = ProAudio_CorrBalance();
 		m_corrHist[m_corrHistHead & 63] = corr;
 		m_corrHistHead++;
 		const int corrW = 22;
 		const int sparkW = 18;
-		CRect corrRc(area.left - corrW - 4, area.top + 2, area.left - 4, area.bottom - 2);
-		// スパークは φ の左。チャネル帯(area)には食い込ませない
+		CRect corrRc(rightEdge - corrW, waveRc.top + 10, rightEdge, waveRc.bottom - 10);
 		CRect sparkRc(corrRc.left - sparkW - 2, corrRc.top, corrRc.left - 2, corrRc.bottom);
 		if (sparkRc.left < waveRc.left + 2) {
 			const int dx = waveRc.left + 2 - sparkRc.left;
 			sparkRc.OffsetRect(dx, 0);
 			corrRc.OffsetRect(dx, 0);
 		}
-		if (corrRc.Width() >= 12 && corrRc.right <= area.left - 2) {
+		if (corrRc.Width() >= 12) {
+			if (!showLr) {
+				const int slotL = (sparkRc.left > 2) ? (sparkRc.left - 2) : waveRc.left;
+				CRect slot(slotL, waveRc.top + 8, waveRc.right - 2, waveRc.bottom - 8);
+				if (slot.Width() > 0 && slot.Height() > 0)
+					dc.FillSolidRect(slot, panelBg);
+			}
 			dc.FillSolidRect(corrRc, RGB(28, 32, 44));
 			dc.Draw3dRect(corrRc, RGB(70, 80, 100), RGB(40, 45, 60));
 			const int midY = (corrRc.top + corrRc.bottom) / 2;
@@ -3510,6 +4067,8 @@ void CAnalyzerDlg::DrawLevelMeters(CDC& dc, const CRect& waveRc, COLORREF bg)
 			}
 		}
 	}
+
+	if (!showLr) return;
 
 	// すべて RMS 基準: バー=現在RMS、白線=RMSピークホールド、黄/赤=RMS閾値
 	const float ampYellow = powf(10.0f, -9.0f / 20.0f);
@@ -3550,15 +4109,29 @@ void CAnalyzerDlg::DrawLevelMeters(CDC& dc, const CRect& waveRc, COLORREF bg)
 	}
 }
 
-// 波形右端のレベルメーター帯幅(クロマ更新用)。DrawLevelMeters の早期 return 下限以上にすること。
-static int AnalyzerMeterStripWidth(int channels)
+// 波形右端のメーター帯幅(クロマ更新・波形プロット幅用)。
+// showLr=0 でも相関メーターだけで帯を取る（LR を消しても φ は残す）。
+static int AnalyzerMeterStripWidth(int channels, int showLr)
 {
 	int n = 1, meterW = 10, gap = 3, totalW = 0;
 	AnalyzerMeterGeom(channels, n, meterW, gap, totalW);
-	int w = totalW + 16; // 余白多め(>=44)
+	int w = 0;
+	if (showLr)
+		w += totalW + 16; // 余白多め(>=44 for stereo)
 	if (savedata.pro_corr_meter && n >= 2)
-		w += 28 + 20; // φ 相関帯 + 左スパーク（Lバーへ食い込まない幅）
+		w += 28 + 20; // φ 相関帯 + 左スパーク
+	if (w > 0 && w < 28)
+		w = 28; // DrawLevelMeters の早期 return 下限以上
 	return w;
+}
+
+static int AnalyzerWavePlotWidth(int waveW, int channels, int showLr)
+{
+	const int strip = AnalyzerMeterStripWidth(channels, showLr);
+	int plot = waveW - strip;
+	if (plot < 48)
+		plot = waveW;
+	return plot;
 }
 
 void CAnalyzerDlg::DrawTpLufsReadout(CDC& dc, const CRect& waveRc)
@@ -3626,8 +4199,13 @@ void CAnalyzerDlg::DrawHoverReadout(CDC& dc, const CRect& clientRc)
 	if (tx > 1.0f) tx = 1.0f;
 	// 差分表示中は縦軸が ±48dB(0dB=中央)。読取点も同じ軸に載せる。
 	float ty;
-	if (m_specDiff && m_specSnapValid && m_hoverBin >= 0 && m_hoverCh >= 0 && m_hoverCh < CH_MAX)
+	if (m_specDiff && m_specSnapValid && m_hoverBin >= 0 && m_hoverCh >= 0 && m_hoverCh < CH_MAX
+		&& m_lowerMode != LowerCorrFreq && m_lowerMode != LowerPhaseFreq)
 		ty = ((m_hoverDb - m_specSnapDb[m_hoverCh][m_hoverBin]) + 48.0f) / 96.0f;
+	else if (m_lowerMode == LowerCorrFreq)
+		ty = (m_hoverDb + 1.0f) * 0.5f;
+	else if (m_lowerMode == LowerPhaseFreq)
+		ty = (m_hoverDb + 180.0f) / 360.0f;
 	else
 		ty = (m_hoverDb + 96.0f) / 96.0f;
 	if (ty < 0.0f) ty = 0.0f;
@@ -3646,7 +4224,19 @@ void CAnalyzerDlg::DrawHoverReadout(CDC& dc, const CRect& clientRc)
 
 	CString s;
 	const int channels = (std::max)(1, (std::min)(m_channels, CH_MAX));
-	if (m_hoverHz >= 1000.0f)
+	if (m_lowerMode == LowerCorrFreq) {
+		if (m_hoverHz >= 1000.0f)
+			s.Format(_T("%s  %.2f kHz  φ %.2f"), ChannelLabel(m_hoverCh, channels), m_hoverHz / 1000.0f, m_hoverDb);
+		else
+			s.Format(_T("%s  %.0f Hz  φ %.2f"), ChannelLabel(m_hoverCh, channels), m_hoverHz, m_hoverDb);
+	}
+	else if (m_lowerMode == LowerPhaseFreq) {
+		if (m_hoverHz >= 1000.0f)
+			s.Format(_T("%s  %.2f kHz  %.0f deg"), ChannelLabel(m_hoverCh, channels), m_hoverHz / 1000.0f, m_hoverDb);
+		else
+			s.Format(_T("%s  %.0f Hz  %.0f deg"), ChannelLabel(m_hoverCh, channels), m_hoverHz, m_hoverDb);
+	}
+	else if (m_hoverHz >= 1000.0f)
 		s.Format(_T("%s  %.2f kHz  %.1f dB"), ChannelLabel(m_hoverCh, channels), m_hoverHz / 1000.0f, m_hoverDb);
 	else
 		s.Format(_T("%s  %.0f Hz  %.1f dB"), ChannelLabel(m_hoverCh, channels), m_hoverHz, m_hoverDb);
@@ -3676,8 +4266,8 @@ bool CAnalyzerDlg::UpdateHoverFromPoint(CPoint ptClient)
 	m_hoverBin = -1;
 	if (m_hoverPlotCount <= 0 || m_hoverSplitY <= 0)
 		return wasValid;
-	// 位相スコープは周波数軸ではないので読取を出さない
-	if (m_lowerMode == LowerPhase)
+	// 位相／ゴニオは周波数軸ではないので読取を出さない
+	if (m_lowerMode == LowerPhase || m_lowerMode == LowerVector)
 		return wasValid;
 
 	// カーソル下のパネルを探す(分割時は各ch、重ね時は1枚で ch=-1)
@@ -3735,6 +4325,14 @@ bool CAnalyzerDlg::UpdateHoverFromPoint(CPoint ptClient)
 
 	m_hoverHz = SpecCenterHz(bestB, SPEC_BINS, nyquist);
 	m_hoverDb = localBins[ch][bestB];
+	if (m_lowerMode == LowerCorrFreq || m_lowerMode == LowerPhaseFreq) {
+		EnterCriticalSection(&m_cs);
+		if (m_lowerMode == LowerCorrFreq)
+			m_hoverDb = m_specCorr[bestB];
+		else
+			m_hoverDb = m_specPhase[bestB] * (180.0f / 3.14159265f);
+		LeaveCriticalSection(&m_cs);
+	}
 	m_hoverCh = ch;
 	m_hoverBin = bestB;
 	m_hoverPlot = m_hoverPlots[hit];
@@ -3751,7 +4349,8 @@ bool CAnalyzerDlg::HitEqBand(CPoint ptClient, int& outBand, CRect& outPlot)
 	// Soft3D 中は読取専用（誤操作防止）
 	if (IsSoft3DBot()) return false;
 	// EQ カーブが出ている表示(周波数特性/スペクトログラム)でのみ掴める
-	if (!m_eqOverlay || m_lowerMode == LowerPhase) return false;
+	if (!m_eqOverlay || m_lowerMode == LowerPhase || m_lowerMode == LowerVector
+		|| m_lowerMode == LowerCorrFreq || m_lowerMode == LowerPhaseFreq) return false;
 	if (m_hoverPlotCount <= 0 || m_hoverSplitY <= 0) return false;
 
 	int sr = 44100;
@@ -3841,7 +4440,7 @@ void CAnalyzerDlg::Present(CDC& dc, const CRect& rc, BOOL bAero)
 
 		DrawTpLufsReadout(*pDst, CRect(0, 0, m_waveW > 0 ? m_waveW : clientW, waveH));
 
-		if (m_showLevelMeter)
+		if (m_showLevelMeter || savedata.pro_corr_meter)
 			DrawLevelMeters(*pDst, CRect(0, 0, m_waveW > 0 ? m_waveW : clientW, waveH), ANALYZER_BG);
 	}
 
@@ -4045,10 +4644,12 @@ void CAnalyzerDlg::PresentSoft3DTop(CDC& dc, const CRect& pane)
 	}
 
 	const int chUse = (std::max)(1, (std::min)(wch, 2));
-	const bool trigger = (m_waveMode == WaveTrigger);
+	const bool trigger = (m_waveMode == WaveTrigger || m_waveMode == WavePhosphor);
+	const bool showCorr3d = (savedata.pro_corr_meter != 0 && chUse >= 2);
+	const float xWaveR = (m_showLevelMeter || showCorr3d) ? 0.70f : 1.0f;
+	const float xSpan = xWaveR + 1.0f;
 
 	if (trigger) {
-		// オシロ: ゼロクロス整列の固定窓。L/R を Y=振幅のリボンとして分離（Z で前後）
 		const int cols = 120;
 		const int budget = (std::min)(wf, RING_SAMPLES / 2);
 		const int spc = (std::max)(1, budget / cols);
@@ -4074,11 +4675,19 @@ void CAnalyzerDlg::PresentSoft3DTop(CDC& dc, const CRect& pane)
 			return a;
 		};
 		for (int i = 0; i < cols - 1; ++i) {
-			const float x0 = -1.0f + 2.0f * ((float)i / (float)cols);
-			const float x1 = -1.0f + 2.0f * ((float)(i + 1) / (float)cols);
+			const float x0 = -1.0f + xSpan * ((float)i / (float)cols);
+			const float x1 = -1.0f + xSpan * ((float)(i + 1) / (float)cols);
 			for (int c = 0; c < chUse; ++c) {
-				const float y0 = 0.32f + sampleAt(c, i) * 0.28f;
-				const float y1 = 0.32f + sampleAt(c, i + 1) * 0.28f;
+				float s0 = sampleAt(c, i);
+				float s1 = sampleAt(c, i + 1);
+				if (m_waveMode == WaveMidSide && chUse >= 2) {
+					const float L0 = sampleAt(0, i), R0 = sampleAt(1, i);
+					const float L1 = sampleAt(0, i + 1), R1 = sampleAt(1, i + 1);
+					s0 = (c == 0) ? 0.5f * (L0 + R0) : 0.5f * (L0 - R0);
+					s1 = (c == 0) ? 0.5f * (L1 + R1) : 0.5f * (L1 - R1);
+				}
+				const float y0 = 0.32f + s0 * 0.28f;
+				const float y1 = 0.32f + s1 * 0.28f;
 				const float z0 = (c == 0) ? 0.22f : 0.55f;
 				const float z1 = z0 + 0.06f;
 				const float yLo = (std::min)(y0, y1) - 0.01f;
@@ -4086,28 +4695,36 @@ void CAnalyzerDlg::PresentSoft3DTop(CDC& dc, const CRect& pane)
 				ctx.DrawBox(x0, x1, yHi, z0, z1, kChColor[c], yLo);
 			}
 		}
-		// ゼロ線
-		ctx.DrawLine(-1.0f, 0.32f, 0.15f, 1.0f, 0.32f, 0.15f, RGB(70, 78, 98));
-		ctx.DrawLine(-1.0f, 0.32f, 0.70f, 1.0f, 0.32f, 0.70f, RGB(70, 78, 98));
+		ctx.DrawLine(-1.0f, 0.32f, 0.15f, xWaveR, 0.32f, 0.15f, RGB(70, 78, 98));
+		ctx.DrawLine(-1.0f, 0.32f, 0.70f, xWaveR, 0.32f, 0.70f, RGB(70, 78, 98));
 	}
 	else {
-		// スクロール履歴: フレームごとにピークを右端へ押し込み（オシロの瞬間窓と区別）
 		static float histL[96] = {}, histR[96] = {};
 		static int histInit = 0;
 		const int cols = 96;
 		if (!histInit) { memset(histL, 0, sizeof(histL)); memset(histR, 0, sizeof(histR)); histInit = 1; }
 		const int useN = (std::min)(wf, 512);
-		float peakL = 0.f, peakR = 0.f;
+		float peakL = 0.f, peakR = 0.f, sumL = 0.f, sumR = 0.f;
 		for (int s = 0; s < useN; ++s) {
 			int idx = wr - useN + s;
 			while (idx < 0) idx += RING_SAMPLES;
 			idx %= RING_SAMPLES;
-			float aL = fabsf(m_ringSnap[0][idx]);
-			if (aL > peakL) peakL = aL;
-			if (chUse >= 2) {
-				float aR = fabsf(m_ringSnap[1][idx]);
-				if (aR > peakR) peakR = aR;
+			float aL = m_ringSnap[0][idx];
+			float aR = (chUse >= 2) ? m_ringSnap[1][idx] : aL;
+			if (m_waveMode == WaveMidSide) {
+				const float m = 0.5f * (aL + aR);
+				const float sd = 0.5f * (aL - aR);
+				aL = m; aR = sd;
 			}
+			const float absL = fabsf(aL), absR = fabsf(aR);
+			if (absL > peakL) peakL = absL;
+			if (absR > peakR) peakR = absR;
+			sumL += aL * aL;
+			sumR += aR * aR;
+		}
+		if (m_waveMode == WaveLoudness) {
+			peakL = (useN > 0) ? sqrtf(sumL / (float)useN) : 0.f;
+			peakR = (useN > 0) ? sqrtf(sumR / (float)useN) : 0.f;
 		}
 		if (peakL > 1.f) peakL = 1.f;
 		if (peakR > 1.f) peakR = 1.f;
@@ -4115,11 +4732,13 @@ void CAnalyzerDlg::PresentSoft3DTop(CDC& dc, const CRect& pane)
 		memmove(histR, histR + 1, (cols - 1) * sizeof(float));
 		histL[cols - 1] = peakL;
 		histR[cols - 1] = peakR;
-		ctx.DrawMirrorFloor(-1.05f, 1.05f, 0.22f, 0.68f, RGB(50, 70, 110), 0.22f);
+		ctx.DrawMirrorFloor(-1.05f, xWaveR + 0.05f, 0.22f, 0.68f, RGB(50, 70, 110), 0.22f);
+		COLORREF cL = (m_waveMode == WaveMidSide) ? RGB(120, 210, 255) : kChColor[0];
+		COLORREF cR = (m_waveMode == WaveMidSide) ? RGB(255, 180, 90) : kChColor[1];
 		if (chUse >= 2)
-			ctx.DrawStereoBarsLR(-1.0f, 1.0f, cols, histL, histR, 0.30f, 0.55f, 0.52f, 0.12f, kChColor[0], kChColor[1]);
+			ctx.DrawStereoBarsLR(-1.0f, xWaveR, cols, histL, histR, 0.30f, 0.55f, 0.52f, 0.12f, cL, cR);
 		else
-			ctx.DrawStereoBarsLR(-1.0f, 1.0f, cols, histL, nullptr, 0.30f, 0.55f, 0.52f, 0.12f, kChColor[0], kChColor[0]);
+			ctx.DrawStereoBarsLR(-1.0f, xWaveR, cols, histL, nullptr, 0.30f, 0.55f, 0.52f, 0.12f, cL, cL);
 	}
 
 	if (m_showLevelMeter) {
@@ -4129,9 +4748,16 @@ void CAnalyzerDlg::PresentSoft3DTop(CDC& dc, const CRect& pane)
 			float lv = m_meterRms[c];
 			if (lv < 0.02f) continue;
 			if (lv > 1.f) lv = 1.f;
-			const float x0 = 1.05f + slot * (float)c;
+			const float x0 = 0.78f + slot * (float)c;
 			ctx.DrawBox(x0, x0 + slot * 0.70f, 0.04f + lv * 0.55f, 0.20f, 0.40f, kChColor[c % CH_MAX], 0.f);
 		}
+	}
+	if (showCorr3d) {
+		const float corr = ProAudio_CorrValue();
+		float t = (corr + 1.f) * 0.5f;
+		if (t < 0.f) t = 0.f; if (t > 1.f) t = 1.f;
+		const float x0 = m_showLevelMeter ? 1.12f : 0.78f;
+		ctx.DrawBox(x0, x0 + 0.08f, 0.04f + t * 0.55f, 0.45f, 0.62f, RGB(100, 230, 150), 0.f);
 	}
 
 	ctx.EndFrame();
@@ -4245,6 +4871,114 @@ void CAnalyzerDlg::PresentSoft3DBot(CDC& dc, const CRect& pane)
 					if (xR <= xL) continue;
 					sc.AddBox(xL, xR, t * 0.40f, z0, z1, GdiSoft3D::Shade(base, 0.45f + 0.55f * t), 0.f);
 				}
+			}
+		}
+		sc.Flush(clip);
+		dc.BitBlt(pane.left, pane.top, pw, ph, &clip, 0, 0, SRCCOPY);
+		clip.SelectObject(ob);
+		return;
+	}
+
+	if (m_lowerMode == LowerVector) {
+		const float boxes[1][6] = { { -0.85f, 0.85f, -0.05f, 0.85f, -0.05f, 1.05f } };
+		GdiSoft3D::View v;
+		GdiSoft3D::BuildView(pw, ph, m_camBot, boxes, 1, v);
+		GdiSoft3D::Scene sc;
+		sc.Begin(v);
+		sc.AddFloor(-0.75f, 0.75f, 0.0f, 0.95f, RGB(40, 44, 58));
+		sc.AddBox(-0.02f, 0.02f, 0.02f, 0.0f, 0.95f, RGB(70, 78, 98), 0.f);
+		sc.AddBox(-0.75f, 0.75f, 0.02f, 0.46f, 0.50f, RGB(70, 78, 98), 0.f);
+		int wr = 0, wf = 0, wch = 0;
+		if (SnapshotRing(wr, wf, wch) && wf >= 64 && wch >= 2) {
+			const int useN = (std::min)(wf, 800);
+			const int step = (std::max)(1, useN / 160);
+			int n = 0;
+			for (int i = 0; i < useN && n < 160; i += step, ++n) {
+				int idx = wr - useN + i;
+				while (idx < 0) idx += RING_SAMPLES;
+				idx %= RING_SAMPLES;
+				float l = m_ringSnap[0][idx];
+				float rr = m_ringSnap[1][idx];
+				if (l > 1.f) l = 1.f; if (l < -1.f) l = -1.f;
+				if (rr > 1.f) rr = 1.f; if (rr < -1.f) rr = -1.f;
+				const float x = (l - rr) * 0.55f;
+				const float y = fabsf(l + rr) * 0.38f + 0.02f;
+				const float z = 0.08f + 0.80f * ((float)n / 160.f);
+				const float s = 0.018f;
+				sc.AddBox(x - s, x + s, y, z, z + 0.03f, RGB(90, 210, 160), 0.f);
+			}
+		}
+		sc.Flush(clip);
+		dc.BitBlt(pane.left, pane.top, pw, ph, &clip, 0, 0, SRCCOPY);
+		clip.SelectObject(ob);
+		return;
+	}
+
+	if (m_lowerMode == LowerRta || m_lowerMode == LowerCorrFreq || m_lowerMode == LowerPhaseFreq) {
+		const float boxes[1][6] = { { -1.05f, 1.05f, -0.02f, 0.62f, 0.0f, 0.95f } };
+		GdiSoft3D::View v;
+		GdiSoft3D::BuildView(pw, ph, m_camBot, boxes, 1, v);
+		GdiSoft3D::Scene sc;
+		sc.Begin(v);
+		sc.AddFloor(-1.0f, 1.0f, 0.0f, 0.88f, RGB(40, 44, 58));
+		if (m_lowerMode == LowerRta) {
+			static const float kRtaHz[31] = {
+				20.f, 25.f, 31.5f, 40.f, 50.f, 63.f, 80.f, 100.f, 125.f, 160.f,
+				200.f, 250.f, 315.f, 400.f, 500.f, 630.f, 800.f, 1000.f, 1250.f, 1600.f,
+				2000.f, 2500.f, 3150.f, 4000.f, 5000.f, 6300.f, 8000.f, 10000.f, 12500.f, 16000.f, 20000.f
+			};
+			const float nyq = (m_sampleRate > 0) ? (float)m_sampleRate * 0.5f : 22050.f;
+			float lev[31];
+			int nB = 0;
+			float spec0[SPEC_BINS], spec1[SPEC_BINS];
+			int chN = 1;
+			EnterCriticalSection(&m_cs);
+			memcpy(spec0, m_specDb[0], sizeof(spec0));
+			memcpy(spec1, m_specDb[1], sizeof(spec1));
+			chN = m_channels;
+			LeaveCriticalSection(&m_cs);
+			for (int i = 0; i < 31; ++i) {
+				if (kRtaHz[i] >= nyq) break;
+				const float fLo = kRtaHz[i] / 1.122462f;
+				const float fHi = kRtaHz[i] * 1.122462f;
+				float best = -96.f;
+				for (int b = 0; b < SPEC_BINS; ++b) {
+					const float hz = SpecCenterHz(b, SPEC_BINS, nyq);
+					if (hz < fLo || hz > fHi) continue;
+					if (spec0[b] > best) best = spec0[b];
+					if (chN >= 2 && spec1[b] > best) best = spec1[b];
+				}
+				float t = (best + 96.f) / 96.f;
+				if (t < 0.f) t = 0.f; if (t > 1.f) t = 1.f;
+				lev[nB++] = t;
+			}
+			for (int i = 0; i < nB; ++i) {
+				if (lev[i] < 0.02f) continue;
+				const float x0 = -1.0f + 2.0f * ((float)i / (float)nB);
+				const float x1 = -1.0f + 2.0f * ((float)(i + 1) / (float)nB) - 0.012f;
+				if (x1 > x0)
+					sc.AddBox(x0, x1, lev[i] * 0.52f, 0.12f, 0.72f, RGB(80, 180, 220), 0.f);
+			}
+		}
+		else {
+			float lev[SPEC_BINS];
+			EnterCriticalSection(&m_cs);
+			for (int b = 0; b < SPEC_BINS; ++b) {
+				if (m_lowerMode == LowerCorrFreq)
+					lev[b] = (m_specCorr[b] + 1.f) * 0.5f;
+				else
+					lev[b] = (m_specPhase[b] / 3.14159265f + 1.f) * 0.5f;
+				if (lev[b] < 0.f) lev[b] = 0.f;
+				if (lev[b] > 1.f) lev[b] = 1.f;
+			}
+			LeaveCriticalSection(&m_cs);
+			const COLORREF col = (m_lowerMode == LowerCorrFreq) ? RGB(120, 230, 170) : RGB(160, 190, 255);
+			for (int b = 0; b < SPEC_BINS; ++b) {
+				if (lev[b] < 0.02f) continue;
+				const float x0 = -1.0f + 2.0f * ((float)b / (float)SPEC_BINS);
+				const float x1 = -1.0f + 2.0f * ((float)(b + 1) / (float)SPEC_BINS) - 0.004f;
+				if (x1 > x0)
+					sc.AddBox(x0, x1, lev[b] * 0.52f, 0.12f, 0.72f, col, 0.f);
 			}
 		}
 		sc.Flush(clip);
@@ -4376,7 +5110,7 @@ void CAnalyzerDlg::OnPaint()
 	const bool softBot = IsSoft3DBot();
 	if (!softTop) {
 		// トリガー表示は毎回全描画(スクロール差分を使わない)
-		if (!m_waveReady || m_waveMode == WaveTrigger) {
+		if (!m_waveReady || m_waveMode == WaveTrigger || m_waveMode == WavePhosphor) {
 			InterlockedExchange(&m_fullRedrawBusy, 1);
 			FullRedrawWave(bg);
 			didWaveFull = true;
@@ -4436,24 +5170,25 @@ void CAnalyzerDlg::OnPaint()
 		if (m_chromaCache.Ensure(dc.GetSafeHdc(), clientW, clientH)) {
 			const COLORREF key = ANALYZER_CHROMA_KEY;
 			if (m_waveReady && m_waveDC.GetSafeHdc()) {
-				const int stripW = m_showLevelMeter
-					? (std::min)(waveW, AnalyzerMeterStripWidth(m_channels))
+				const int stripW = AnalyzerMeterStripWidth(m_channels, m_showLevelMeter ? 1 : 0);
+				const int plotW = AnalyzerWavePlotWidth(waveW, m_channels, m_showLevelMeter ? 1 : 0);
+				const int meterWdraw = (plotW < waveW) ? (waveW - plotW) : stripW;
+				const int stripX = (meterWdraw > 0)
+					? ((plotW < waveW) ? plotW : (std::max)(0, waveW - meterWdraw))
 					: 0;
-				const int stripX = (std::max)(0, waveW - stripW);
 
 				if (didWaveScroll && m_lastWaveScroll > 0 && m_chromaReady) {
-					// 前回メーター帯を波形で戻してからスクロール(バーが波形に流れ込まない)
-					if (stripW > 0)
-						m_chromaCache.UpdateRect(m_waveDC.GetSafeHdc(), stripX, 0, stripX, 0, stripW, waveH, key);
-					m_chromaCache.ScrollCols(0, 0, waveW, waveH, m_lastWaveScroll);
-					const int keep = waveW - m_lastWaveScroll;
-					m_chromaCache.UpdateRect(m_waveDC.GetSafeHdc(), keep, 0,
-						keep, 0, m_lastWaveScroll, waveH, key);
+					if (plotW >= waveW && meterWdraw > 0)
+						m_chromaCache.UpdateRect(m_waveDC.GetSafeHdc(), stripX, 0, stripX, 0, meterWdraw, waveH, key);
+					m_chromaCache.ScrollCols(0, 0, plotW, waveH, m_lastWaveScroll);
+					const int keep = plotW - m_lastWaveScroll;
+					if (keep >= 0 && m_lastWaveScroll > 0)
+						m_chromaCache.UpdateRect(m_waveDC.GetSafeHdc(), keep, 0,
+							keep, 0, m_lastWaveScroll, waveH, key);
 					m_chromaCache.UpdateRect(m_waveDC.GetSafeHdc(), 0, 0, 0, 0,
-						(std::min)(32, waveW), waveH, key);
-					// TP/LUFS プレートが横に流れないよう、その行だけ波形BBから戻す
+						(std::min)(32, plotW), waveH, key);
 					if (!m_tpLufsTipRc.IsRectEmpty()) {
-						const int rw = (std::min)((long)waveW, m_tpLufsTipRc.right + 8);
+						const int rw = (std::min)((long)plotW, m_tpLufsTipRc.right + 8);
 						const int rh = (std::min)((long)waveH, m_tpLufsTipRc.bottom + 4);
 						if (rw > 0 && rh > 0)
 							m_chromaCache.UpdateRect(m_waveDC.GetSafeHdc(), 0, 0, 0, 0, rw, rh, key);
@@ -4463,12 +5198,11 @@ void CAnalyzerDlg::OnPaint()
 					m_chromaCache.UpdateRect(m_waveDC.GetSafeHdc(), 0, 0, 0, 0, waveW, waveH, key);
 				}
 
-				// メーターは独立ストリップ → クロマ右端へ(波形BBには焼かない)
-				if (stripW > 0 && m_waveScratchDC.GetSafeHdc()) {
-					m_waveScratchDC.FillSolidRect(0, 0, stripW, waveH, key);
-					DrawLevelMeters(m_waveScratchDC, CRect(0, 0, stripW, waveH), key);
+				if (meterWdraw > 0 && m_waveScratchDC.GetSafeHdc()) {
+					m_waveScratchDC.FillSolidRect(0, 0, meterWdraw, waveH, key);
+					DrawLevelMeters(m_waveScratchDC, CRect(0, 0, meterWdraw, waveH), key);
 					m_chromaCache.UpdateRect(m_waveScratchDC.GetSafeHdc(),
-						0, 0, stripX, 0, stripW, waveH, key);
+						0, 0, stripX, 0, meterWdraw, waveH, key);
 				}
 
 				// TP/LUFS も独立プレート(不透明)としてクロマへ焼く
@@ -4805,6 +5539,39 @@ void CAnalyzerDlg::OnLButtonDown(UINT nFlags, CPoint point)
 	CCustomBlurDialogExBase::OnLButtonDown(nFlags, point);
 }
 
+BOOL CAnalyzerDlg::OnSetCursor(CWnd* pWnd, UINT nHitTest, UINT message)
+{
+	if (nHitTest == HTCLIENT) {
+		CPoint pt;
+		::GetCursorPos(&pt);
+		ScreenToClient(&pt);
+		const int capH = CCC_GetCustomCaptionHeight(m_hWnd);
+		if (pt.y >= capH) {
+			if (m_eqDrag) {
+				::SetCursor(::LoadCursor(NULL, IDC_SIZEWE));
+				return TRUE;
+			}
+			int band = -1;
+			CRect plot;
+			if (HitEqBand(pt, band, plot)) {
+				::SetCursor(::LoadCursor(NULL, IDC_SIZEWE));
+				return TRUE;
+			}
+			CRect rc;
+			GetClientRect(&rc);
+			const int contentH = rc.Height() - capH;
+			const int split = capH + (int)(contentH * 0.65);
+			if (m_rotDragging || (IsSoft3DTop() && pt.y < split) || (IsSoft3DBot() && pt.y >= split)) {
+				if (CCC_SetUiCursor(IDC_UI_GRAB))
+					return TRUE;
+			}
+			if (CCC_SetUiCursor(IDC_UI_CROSS))
+				return TRUE;
+		}
+	}
+	return CCustomBlurDialogExBase::OnSetCursor(pWnd, nHitTest, message);
+}
+
 void CAnalyzerDlg::OnLButtonUp(UINT nFlags, CPoint point)
 {
 	if (m_rotDragging) {
@@ -4926,11 +5693,11 @@ BOOL CAnalyzerDlg::PreTranslateMessage(MSG* pMsg)
 			return TRUE;
 		}
 		if (pMsg->wParam == 'W' || pMsg->wParam == 'w') {
-			SetWaveMode(m_waveMode == WaveScroll ? WaveTrigger : WaveScroll);
+			SetWaveMode((m_waveMode + 1) % WAVE_MODE_COUNT);
 			return TRUE;
 		}
 		if (pMsg->wParam == 'S' || pMsg->wParam == 's') {
-			SetLowerMode((m_lowerMode + 1) % 3);
+			SetLowerMode((m_lowerMode + 1) % LOWER_MODE_COUNT);
 			return TRUE;
 		}
 		if (pMsg->wParam == 'D' || pMsg->wParam == 'd') {

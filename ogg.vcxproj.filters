@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
     <Filter Include="Source Files">
@@ -457,6 +457,12 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="Soft3DTextD2D.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Soft3DGameSfx.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Soft3DTexRes.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="SoundMeterDlg.cpp">
@@ -1117,6 +1123,12 @@
     <ClInclude Include="Soft3DRaceDlg.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="Soft3DGameSfx.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Soft3DTexRes.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="SoundMeterDlg.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -1308,6 +1320,99 @@
     <None Include="res\ogg.ico">
       <Filter>Resource Files</Filter>
     </None>
+    <None Include="res\ui_icons\analyzer.ico">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="res\ui_icons\piano.ico">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="res\ui_icons\eq.ico">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="res\ui_icons\render.ico">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="res\ui_icons\export.ico">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="res\ui_icons\tag.ico">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="res\ui_icons\prompt.ico">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="res\ui_icons\mic.ico">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="res\ui_icons\capture.ico">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="res\ui_icons\folder.ico">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="res\ui_icons\info.ico">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="res\ui_icons\video.ico">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="res\ui_icons\keyboard.ico">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="res\ui_icons\meter.ico">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="res\ui_icons\disc.ico">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="res\ui_icons\photo.ico">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="res\ui_icons\maze.ico">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="res\ui_icons\race.ico">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="res\ui_icons\vst.ico">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="res\ui_icons\help.ico">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="res\ui_icons\alarm.ico">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="res\ui_icons\remote.ico">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="res\ui_icons\viz.ico">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="res\ui_icons\music.ico">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="res\ui_icons\sync.ico">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="res\ui_icons\audio.ico">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="res\ui_icons\file.ico">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="res\ui_icons\apps.ico">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="res\ui_icons\copy.ico">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="res\ui_icons\share.ico">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="res\ui_icons\tune.ico">
+      <Filter>Resource Files</Filter>
+    </None>
     <None Include="res\ogg.rc2">
       <Filter>Resource Files</Filter>
     </None>
@@ -1332,8 +1437,37 @@
     <None Include="res\cursor2.cur">
       <Filter>Resource Files</Filter>
     </None>
+    <None Include="res\ui_cursors\hand.cur">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="res\ui_cursors\cross.cur">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="res\ui_cursors\grab.cur">
+      <Filter>Resource Files</Filter>
+    </None>
     <None Include="res\SASAMI_GS.DAT" />
     <None Include="res\SASAMI_XG.DAT" />
+    <None Include="res\s3tex\r_forest.png" />
+    <None Include="res\s3tex\r_ruins.png" />
+    <None Include="res\s3tex\r_oil.png" />
+    <None Include="res\s3tex\r_night.png" />
+    <None Include="res\s3tex\r_under.png" />
+    <None Include="res\s3tex\r_grass.png" />
+    <None Include="res\s3tex\r_mesa.png" />
+    <None Include="res\s3tex\r_cloud.png" />
+    <None Include="res\s3tex\r_craft.png" />
+    <None Include="res\s3tex\r_band.png" />
+    <None Include="res\s3tex\m_wall0.png" />
+    <None Include="res\s3tex\m_wall1.png" />
+    <None Include="res\s3tex\m_wall2.png" />
+    <None Include="res\s3tex\m_wall3.png" />
+    <None Include="res\s3tex\m_floor0.png" />
+    <None Include="res\s3tex\m_floor1.png" />
+    <None Include="res\s3tex\m_floor2.png" />
+    <None Include="res\s3tex\m_floor3.png" />
+    <None Include="res\s3tex\m_mirwall.png" />
+    <None Include="res\s3tex\m_mirfloor.png" />
   </ItemGroup>
   <ItemGroup>
     <Text Include="codec\APPLE_LICENSE.txt">

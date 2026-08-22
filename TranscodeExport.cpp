@@ -917,8 +917,7 @@ END_MESSAGE_MAP()
 BOOL CTcHelpDlg::OnInitDialog()
 {
 	CDialog::OnInitDialog();
-	SetIcon(nullptr, TRUE);
-	SetIcon(nullptr, FALSE);
+	CCC_ApplyWindowIconFromTemplate(this, IDD);
 	ModifyStyleEx(0, WS_EX_DLGMODALFRAME, SWP_FRAMECHANGED);
 	SetWindowText(LL14(
 		L"音声書き出し操作ガイド", L"Audio Export Guide", L"Guide d'export audio", L"Guida esportazione audio",

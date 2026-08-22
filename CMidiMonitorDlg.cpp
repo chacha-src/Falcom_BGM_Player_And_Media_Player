@@ -392,8 +392,7 @@ END_MESSAGE_MAP()
 BOOL CMmHelpDlg::OnInitDialog()
 {
 	CDialog::OnInitDialog();
-	SetIcon(nullptr, TRUE);
-	SetIcon(nullptr, FALSE);
+	CCC_ApplyWindowIconFromTemplate(this, IDD);
 	ModifyStyleEx(0, WS_EX_DLGMODALFRAME, SWP_FRAMECHANGED);
 	SetWindowText(LL14(
 		L"MIDIモニタ操作ガイド", L"MIDI Monitor Guide", L"Guide moniteur MIDI", L"Guida monitor MIDI",
@@ -1936,8 +1935,6 @@ BOOL CMidiMonitorDlg::OnInitDialog()
 		L"MIDI 모니터", L"MIDI监视器", L"مراقب MIDI", L"MIDI-монитор", L"MIDI-Monitor",
 		L"Monitor MIDI", L"MIDI-monitor", L"Monitor MIDI", L"MIDI izleyici"));
 	ModifyStyle(WS_MINIMIZEBOX, 0);
-	SetIcon(nullptr, TRUE);
-	SetIcon(nullptr, FALSE);
 	ModifyStyleEx(0, WS_EX_DLGMODALFRAME, SWP_FRAMECHANGED);
 
 	m_viewMode = (savedata.midimonviewmode == 1) ? 1 : 0;

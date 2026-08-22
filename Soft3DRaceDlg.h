@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include "afxwin.h"
 #include "CCustomControl.h"
 #include "resource.h"
@@ -66,6 +66,7 @@ public:
 	ID3D11PixelShader* m_psBand;
 	ID3D11VertexShader* m_vsSolid;
 	ID3D11PixelShader* m_psSolid;
+	ID3D11PixelShader* m_psTerr; // 地形専用（傾斜・河川・テーマ着色）
 	ID3D11PixelShader* m_psCraft; // 機体専用（キャラテクスチャ）
 	ID3D11VertexShader* m_vsHud;
 	ID3D11PixelShader* m_psHud;
@@ -172,6 +173,7 @@ protected:
 	afx_msg BOOL OnMouseWheel(UINT nFlags, short zDelta, CPoint pt);
 	afx_msg void OnMButtonDown(UINT nFlags, CPoint point);
 	afx_msg void OnMButtonUp(UINT nFlags, CPoint point);
+	afx_msg BOOL OnSetCursor(CWnd* pWnd, UINT nHitTest, UINT message);
 	DECLARE_MESSAGE_MAP()
 };
 
@@ -192,6 +194,8 @@ public:
 		S3R_CRAFT_IMAX = 12000,
 		S3R_OBS_VMAX = 6400,
 		S3R_OBS_IMAX = 19200,
+		S3R_HM_N = 161,
+		S3R_CARVE_MAX = 128,
 		ITEM_TEMPO = 1,
 		ITEM_PITCH_UP = 2,
 		ITEM_PITCH_DN = 4,
@@ -290,6 +294,7 @@ protected:
 	BOOL AllAliveFinished() const;
 	void EnterPodium();
 	float AiPaceIndep(float sk) const;
+	void AiCapPair(float sk, float raceCap, float pace, float plNow, float indep, int demo, int finishRush, float& softFloor, float& hardCap) const;
 	void UpdateRanks();
 	void ApplyItem(int kind);
 	void TryPickupCraft(int ci);
@@ -451,6 +456,7 @@ public:
 	int m_podiumOrder[3];
 	float m_confetti[96][6]; // x y z vx vy life
 	int m_themeActive;
+	int m_layoutKind; // 0楕円 1八の字 2スタジアム 3箱型凸 4腎臓凹 5ピーナッツ 6三角凸
 	int m_lapsTarget;
 	float m_bandHalf;
 	float m_camYawOff, m_camPitchOff;
@@ -474,6 +480,7 @@ public:
 	int m_playerAccel;
 	int m_wrongWay;
 	float m_overlayHold; // LAP/COURSE OUT 表示の優先保持
+	float m_sfxHitCool;
 	CStringW m_hudBakeText;
 	CStringW m_clearBakeText;
 	float m_clearBakeA;
@@ -486,6 +493,16 @@ public:
 	float m_demoCamT; // 俯瞰オービット角
 	float m_demoCamElev; // 俯瞰の高さバイアス
 	float m_demoMidX, m_demoMidY, m_demoMidZ, m_demoRad;
+	float m_hm[S3R_HM_N * S3R_HM_N];
+	float m_hmRaw[S3R_HM_N * S3R_HM_N];
+	float m_hmPathDist[S3R_HM_N * S3R_HM_N];
+	float m_hmX0, m_hmZ0, m_hmStep;
+	int m_hmReady;
+	float m_waterY;
+	float m_carveX0[S3R_CARVE_MAX], m_carveY0[S3R_CARVE_MAX], m_carveZ0[S3R_CARVE_MAX];
+	float m_carveX1[S3R_CARVE_MAX], m_carveY1[S3R_CARVE_MAX], m_carveZ1[S3R_CARVE_MAX];
+	int m_carveCeil[S3R_CARVE_MAX];
+	int m_carveN;
 };
 
 void OpenSoft3DRaceModeless(CWnd*);

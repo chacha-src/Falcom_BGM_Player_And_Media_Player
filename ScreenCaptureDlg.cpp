@@ -2482,8 +2482,7 @@ END_MESSAGE_MAP()
 BOOL CScHelpDlg::OnInitDialog()
 {
 	CDialog::OnInitDialog();
-	SetIcon(nullptr, TRUE);
-	SetIcon(nullptr, FALSE);
+	CCC_ApplyWindowIconFromTemplate(this, IDD);
 	ModifyStyleEx(0, WS_EX_DLGMODALFRAME, SWP_FRAMECHANGED);
 	SetWindowText(LL14(
 		L"画面キャプチャ操作ガイド", L"Screen Capture Guide", L"Guide de capture", L"Guida cattura",

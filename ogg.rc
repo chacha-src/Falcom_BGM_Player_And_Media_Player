@@ -93,6 +93,68 @@ IDI_T3                  ICON                    "res\\ico00003.ico"
 
 IDI_T4                  ICON                    "res\\ico00004.ico"
 
+IDI_UI_ANALYZER         ICON                    "res\\ui_icons\\analyzer.ico"
+
+IDI_UI_PIANO            ICON                    "res\\ui_icons\\piano.ico"
+
+IDI_UI_EQ               ICON                    "res\\ui_icons\\eq.ico"
+
+IDI_UI_RENDER           ICON                    "res\\ui_icons\\render.ico"
+
+IDI_UI_EXPORT           ICON                    "res\\ui_icons\\export.ico"
+
+IDI_UI_TAG              ICON                    "res\\ui_icons\\tag.ico"
+
+IDI_UI_PROMPT           ICON                    "res\\ui_icons\\prompt.ico"
+
+IDI_UI_MIC              ICON                    "res\\ui_icons\\mic.ico"
+
+IDI_UI_CAPTURE          ICON                    "res\\ui_icons\\capture.ico"
+
+IDI_UI_FOLDER           ICON                    "res\\ui_icons\\folder.ico"
+
+IDI_UI_INFO             ICON                    "res\\ui_icons\\info.ico"
+
+IDI_UI_VIDEO            ICON                    "res\\ui_icons\\video.ico"
+
+IDI_UI_KEYBOARD         ICON                    "res\\ui_icons\\keyboard.ico"
+
+IDI_UI_METER            ICON                    "res\\ui_icons\\meter.ico"
+
+IDI_UI_DISC             ICON                    "res\\ui_icons\\disc.ico"
+
+IDI_UI_PHOTO            ICON                    "res\\ui_icons\\photo.ico"
+
+IDI_UI_MAZE             ICON                    "res\\ui_icons\\maze.ico"
+
+IDI_UI_RACE             ICON                    "res\\ui_icons\\race.ico"
+
+IDI_UI_VST              ICON                    "res\\ui_icons\\vst.ico"
+
+IDI_UI_HELP             ICON                    "res\\ui_icons\\help.ico"
+
+IDI_UI_ALARM            ICON                    "res\\ui_icons\\alarm.ico"
+
+IDI_UI_REMOTE           ICON                    "res\\ui_icons\\remote.ico"
+
+IDI_UI_VIZ              ICON                    "res\\ui_icons\\viz.ico"
+
+IDI_UI_MUSIC            ICON                    "res\\ui_icons\\music.ico"
+
+IDI_UI_SYNC             ICON                    "res\\ui_icons\\sync.ico"
+
+IDI_UI_AUDIO            ICON                    "res\\ui_icons\\audio.ico"
+
+IDI_UI_FILE             ICON                    "res\\ui_icons\\file.ico"
+
+IDI_UI_APPS             ICON                    "res\\ui_icons\\apps.ico"
+
+IDI_UI_COPY             ICON                    "res\\ui_icons\\copy.ico"
+
+IDI_UI_SHARE            ICON                    "res\\ui_icons\\share.ico"
+
+IDI_UI_TUNE             ICON                    "res\\ui_icons\\tune.ico"
+
 
 /////////////////////////////////////////////////////////////////////////////
 //
@@ -102,6 +164,46 @@ IDI_T4                  ICON                    "res\\ico00004.ico"
 IDR_SASAMI_GS           RCDATA                  "res\\SASAMI_GS.DAT"
 
 IDR_SASAMI_XG           RCDATA                  "res\\SASAMI_XG.DAT"
+
+IDR_S3TEX_R_FOREST      RCDATA                  "res\\s3tex\\r_forest.png"
+
+IDR_S3TEX_R_RUINS       RCDATA                  "res\\s3tex\\r_ruins.png"
+
+IDR_S3TEX_R_OIL         RCDATA                  "res\\s3tex\\r_oil.png"
+
+IDR_S3TEX_R_NIGHT       RCDATA                  "res\\s3tex\\r_night.png"
+
+IDR_S3TEX_R_UNDER       RCDATA                  "res\\s3tex\\r_under.png"
+
+IDR_S3TEX_R_GRASS       RCDATA                  "res\\s3tex\\r_grass.png"
+
+IDR_S3TEX_R_MESA        RCDATA                  "res\\s3tex\\r_mesa.png"
+
+IDR_S3TEX_R_CLOUD       RCDATA                  "res\\s3tex\\r_cloud.png"
+
+IDR_S3TEX_R_CRAFT       RCDATA                  "res\\s3tex\\r_craft.png"
+
+IDR_S3TEX_R_BAND        RCDATA                  "res\\s3tex\\r_band.png"
+
+IDR_S3TEX_M_WALL0       RCDATA                  "res\\s3tex\\m_wall0.png"
+
+IDR_S3TEX_M_WALL1       RCDATA                  "res\\s3tex\\m_wall1.png"
+
+IDR_S3TEX_M_WALL2       RCDATA                  "res\\s3tex\\m_wall2.png"
+
+IDR_S3TEX_M_WALL3       RCDATA                  "res\\s3tex\\m_wall3.png"
+
+IDR_S3TEX_M_FLOOR0      RCDATA                  "res\\s3tex\\m_floor0.png"
+
+IDR_S3TEX_M_FLOOR1      RCDATA                  "res\\s3tex\\m_floor1.png"
+
+IDR_S3TEX_M_FLOOR2      RCDATA                  "res\\s3tex\\m_floor2.png"
+
+IDR_S3TEX_M_FLOOR3      RCDATA                  "res\\s3tex\\m_floor3.png"
+
+IDR_S3TEX_M_MIRWALL     RCDATA                  "res\\s3tex\\m_mirwall.png"
+
+IDR_S3TEX_M_MIRFLOOR    RCDATA                  "res\\s3tex\\m_mirfloor.png"
 
 
 /////////////////////////////////////////////////////////////////////////////
@@ -1768,12 +1870,12 @@ BEGIN
     DEFPUSHBUTTON   "Close",IDOK,402,338,50,14
 END
 
-IDD_AN_HELP DIALOGEX 0, 0, 480, 400
+IDD_AN_HELP DIALOGEX 0, 0, 480, 440
 STYLE DS_SETFONT | DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "Analyzer Guide"
 FONT 9, "MS Shell Dlg", 400, 0, 0x1
 BEGIN
-    DEFPUSHBUTTON   "Close",IDOK,422,378,50,14
+    DEFPUSHBUTTON   "Close",IDOK,422,418,50,14
 END
 
 IDD_PR_HELP DIALOGEX 0, 0, 480, 480
@@ -2079,8 +2181,8 @@ BEGIN
     CONTROL         "",IDC_SLIDER22,"msctls_trackbar32",TBS_BOTH | TBS_NOTICKS | WS_TABSTOP,88,197,120,12
     LTEXT           "100",IDC_STATIC_eff,211,198,18,8
     LTEXT           "サラウンド",IDC_STATIC_EQ_SURROUND,238,198,40,8
-    CONTROL         "",IDC_SLIDER_EQ_SURROUND,"msctls_trackbar32",TBS_BOTH | TBS_NOTICKS | WS_TABSTOP,280,197,120,12
-    LTEXT           "0",IDC_STATIC_EQ_SURROUND_VAL,403,198,18,8
+    CONTROL         "",IDC_SLIDER_EQ_SURROUND,"msctls_trackbar32",TBS_BOTH | TBS_NOTICKS | WS_TABSTOP,280,197,93,12
+    LTEXT           "0",IDC_STATIC_EQ_SURROUND_VAL,374,198,18,8
     LTEXT           "Hyper DSP Equaliser 100 x 15 band",IDC_STATICf,3,2,216,28
     LTEXT           "％",IDC_EQ_UNIT_PCT,368,151,8,8
     CONTROL         "",IDC_SLIDER23,"msctls_trackbar32",TBS_VERT | TBS_BOTH | TBS_NOTICKS | WS_TABSTOP,378,43,16,106
@@ -2204,7 +2306,7 @@ END
 //
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 0,9,1,835
+ FILEVERSION 0,9,1,840
  PRODUCTVERSION 1,0,0,1
  FILEFLAGSMASK 0x3fL
 #ifdef _DEBUG
@@ -2222,10 +2324,10 @@ BEGIN
         BEGIN
             VALUE "Comments", "Falcom BGM Player & Media Player"
             VALUE "CompanyName", "Pre Prayer Power Soft"
-            VALUE "FileDescription", "Falcom BGM Player & Media Player Ver 0.9a Rel.2026.08.22"
-            VALUE "FileVersion", "0.9.1.835"
+            VALUE "FileDescription", "Falcom BGM Player & Media Player Ver 0.9a Rel.2026.08.23"
+            VALUE "FileVersion", "0.9.1.840"
             VALUE "InternalName", "ogg YS/ED bgm"
-            VALUE "LegalCopyright", "Copyright (C) 2026.08.22"
+            VALUE "LegalCopyright", "Copyright (C) 2026.08.23"
             VALUE "LegalTrademarks", "Pre Prayer Power Soft"
             VALUE "OriginalFilename", "oggYSEDbgm_uni_avx2.exe"
             VALUE "ProductName", "Falcom BGM Player & Media Player"
@@ -3139,6 +3241,12 @@ IDC_CLEFT               CURSOR                  "res\\cur00002.cur"
 IDC_CDOWN               CURSOR                  "res\\cur00003.cur"
 
 IDC_CUP                 CURSOR                  "res\\cursor2.cur"
+
+IDC_UI_HAND             CURSOR                  "res\\ui_cursors\\hand.cur"
+
+IDC_UI_CROSS            CURSOR                  "res\\ui_cursors\\cross.cur"
+
+IDC_UI_GRAB             CURSOR                  "res\\ui_cursors\\grab.cur"
 
 
 /////////////////////////////////////////////////////////////////////////////

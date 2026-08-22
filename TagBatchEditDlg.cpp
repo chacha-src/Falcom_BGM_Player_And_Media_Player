@@ -812,8 +812,7 @@ END_MESSAGE_MAP()
 BOOL CTbHelpDlg::OnInitDialog()
 {
 	CDialog::OnInitDialog();
-	SetIcon(nullptr, TRUE);
-	SetIcon(nullptr, FALSE);
+	CCC_ApplyWindowIconFromTemplate(this, IDD);
 	ModifyStyleEx(0, WS_EX_DLGMODALFRAME, SWP_FRAMECHANGED);
 	SetWindowText(LL14(
 		L"まとめて編集操作ガイド", L"Batch Tag Edit Guide", L"Guide d'édition groupée", L"Guida modifica in blocco",

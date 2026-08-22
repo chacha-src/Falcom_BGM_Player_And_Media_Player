@@ -741,8 +741,7 @@ END_MESSAGE_MAP()
 BOOL CFdHelpDlg::OnInitDialog()
 {
 	CDialog::OnInitDialog();
-	SetIcon(nullptr, TRUE);
-	SetIcon(nullptr, FALSE);
+	CCC_ApplyWindowIconFromTemplate(this, IDD);
 	ModifyStyleEx(0, WS_EX_DLGMODALFRAME, SWP_FRAMECHANGED);
 	SetWindowText(LL14(
 		L"フォルダ設定操作ガイド", L"Folder Settings Guide", L"Guide des dossiers", L"Guida cartelle",

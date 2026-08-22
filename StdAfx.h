@@ -405,8 +405,8 @@ struct save{
 	int mpSpeanaStyle;     // 0=バー 1=ミラー 2=波形(バナー右クリック切替)
 
 	// --- アナライザー Pro 拡張(末尾追記。旧.datは0初期化→起動時に妥当値へ正規化) ---
-	int analyzerwavemode;     // 0=スクロール波形 1=トリガー式オシロ
-	int analyzerlowermode;    // 0=スペクトラム 1=スペクトログラム 2=位相スコープ
+	int analyzerwavemode;     // 0=スクロール 1=トリガー 2=エンベロープ 3=M/S 4=ラウドネス 5=残光
+	int analyzerlowermode;    // 0=スペクトラム 1=WF 2=位相 3=ゴニオ 4=RTA 5=帯域相関 6=帯域位相
 	int analyzerspecdiff;     // 1=スペクトラム差分表示
 	int analyzerfreqzoom;     // 0=全帯域 1=低域 2=中域 3=高域
 	int analyzermarkers[4];   // 固定周波数マーカー(Hz)。0=未使用
@@ -796,6 +796,8 @@ struct save{
 	// LR でもサウンドボード展開向けにマトリクス/位相を付け、
 	// アップスケール多ch 時はリアを強調する（EQ後に全ルート適用）。 ---
 	int surround;               // 0..100（0=オフ）
+	// --- Soft3D レース／迷路 PCM効果音（末尾追記。旧.datは1=ON）---
+	int s3_pcm_sfx;             // 1=PCM合成効果音ON 0=OFF
 };
 extern save savedata;
 /* コード間隔(ms)。16..500。旧.dat や未設定は 25。 */

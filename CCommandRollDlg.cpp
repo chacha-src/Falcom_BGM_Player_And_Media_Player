@@ -1,4 +1,4 @@
-#include "stdafx.h"
+﻿#include "stdafx.h"
 #include "CCommandRollDlg.h"
 #include "CPromptDlg.h"
 #include "CPromptEngine.h"
@@ -26,8 +26,6 @@ protected:
 	virtual BOOL OnInitDialog()
 	{
 		CCustomBlurDialogExBase::OnInitDialog();
-		SetIcon(nullptr, TRUE);
-		SetIcon(nullptr, FALSE);
 		ModifyStyleEx(0, WS_EX_DLGMODALFRAME, SWP_FRAMECHANGED);
 		CString cmd;
 		if (m_ev.c2) cmd.Format(L"%c%c", m_ev.c1, m_ev.c2);
@@ -94,6 +92,7 @@ BEGIN_MESSAGE_MAP(CCommandRollView, CWnd)
 	ON_WM_LBUTTONUP()
 	ON_WM_LBUTTONDBLCLK()
 	ON_WM_MOUSEMOVE()
+	ON_WM_SETCURSOR()
 	ON_WM_KEYDOWN()
 	ON_WM_CONTEXTMENU()
 	ON_WM_RBUTTONUP()
@@ -1135,6 +1134,28 @@ void CCommandRollView::OnLButtonDown(UINT nFlags, CPoint point)
 	}
 }
 
+BOOL CCommandRollView::OnSetCursor(CWnd* pWnd, UINT nHitTest, UINT message)
+{
+	if (nHitTest == HTCLIENT) {
+		if (IsSoft3D() || m_rotDragging) {
+			if (CCC_SetUiCursor(IDC_UI_GRAB))
+				return TRUE;
+		}
+		CPoint pt;
+		::GetCursorPos(&pt);
+		ScreenToClient(&pt);
+		if (m_dragging || m_paletteDrag || HitTestEvent(pt) >= 0) {
+			if (CCC_SetUiCursor(IDC_UI_HAND))
+				return TRUE;
+		}
+		if (m_creating || HitTestPalette(pt) >= 0 || HitTestLane(pt) >= 0) {
+			if (CCC_SetUiCursor(IDC_UI_CROSS))
+				return TRUE;
+		}
+	}
+	return CWnd::OnSetCursor(pWnd, nHitTest, message);
+}
+
 void CCommandRollView::OnMouseMove(UINT nFlags, CPoint point)
 {
 	if (m_rotDragging) {
@@ -1551,9 +1572,6 @@ BOOL CCommandRollDlg::OnInitDialog()
 	CCustomBlurDialogExBase::OnInitDialog();
 	RestorePosFromSavedata();
 	ModifyStyle(WS_HSCROLL | WS_VSCROLL, 0);
-	SetIcon(nullptr, TRUE);
-	SetIcon(nullptr, FALSE);
-	// キャプション既定アイコンを消す(ピアノロール/アナライザーと同じ)
 	ModifyStyleEx(WS_EX_TOPMOST, WS_EX_DLGMODALFRAME, SWP_FRAMECHANGED);
 	SetWindowText(LL14(L"コマンドロール", L"Command Roll", L"Rouleau", L"Command Roll", L"Command Roll", L"커맨드 롤", L"命令卷轴", L"Command Roll", L"Command Roll", L"Command Roll", L"Command Roll", L"Command Roll", L"Command Roll", L"Komut Rulosu"));
 	SetDlgItemText(IDC_MCR_CLOSE, LL14(L"閉じる", L"Close", L"Fermer", L"Chiudi", L"Cerrar", L"닫기", L"关闭", L"إغلاق", L"Закрыть", L"Schliessen", L"Fechar", L"Sluiten", L"Zamknij", L"Kapat"));
@@ -1931,8 +1949,7 @@ END_MESSAGE_MAP()
 BOOL CCmdRollHelpDlg::OnInitDialog()
 {
 	CDialog::OnInitDialog();
-	SetIcon(nullptr, TRUE);
-	SetIcon(nullptr, FALSE);
+	CCC_ApplyWindowIconFromTemplate(this, IDD);
 	ModifyStyleEx(0, WS_EX_DLGMODALFRAME, SWP_FRAMECHANGED);
 	SetWindowText(LL14(
 		L"プロンプトロール操作ガイド", L"Prompt Roll Guide", L"Guide du rouleau", L"Guida Prompt Roll",

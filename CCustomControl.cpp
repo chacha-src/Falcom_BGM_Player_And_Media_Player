@@ -14779,9 +14779,118 @@ void CCC_CaptionLayout(HWND hDlg)
     }
 }
 
+void CCC_ApplyDlgResourceIcon(CWnd* w, UINT iconId)
+{
+	if (!w || !w->GetSafeHwnd() || iconId == 0)
+		return;
+	HICON h = NULL;
+	if (AfxGetApp())
+		h = AfxGetApp()->LoadIcon(iconId);
+	if (!h)
+		h = (HICON)::LoadImage(AfxGetResourceHandle(), MAKEINTRESOURCE(iconId),
+			IMAGE_ICON, 0, 0, LR_DEFAULTSIZE | LR_SHARED);
+	if (!h)
+		return;
+	w->SetIcon(h, TRUE);
+	w->SetIcon(h, FALSE);
+}
+
+UINT CCC_IconIdForDialogTemplate(UINT idd)
+{
+	if (idd == 0)
+		return 0;
+	// MP 本窓・ファルコム本窓・プレイリスト・歌詞オーバーレイは既存アイコン／非表示のまま
+	if (idd == IDD_MEDIAPLAYER || idd == IDD_OGG_DIALOG || idd == IDD_PLAYLIST
+		|| idd == IDD_DESKTOP_LYRICS)
+		return 0;
+
+	static const UINT kMap[][2] = {
+		{ IDD_ANALYZER, IDI_UI_ANALYZER }, { IDD_AN_HELP, IDI_UI_ANALYZER },
+		{ IDD_PIANOROLL, IDI_UI_PIANO }, { IDD_PR_HELP, IDI_UI_PIANO },
+		{ IDD_PIANOROLL_TUNE, IDI_UI_TUNE }, { IDD_PRT_HELP, IDI_UI_TUNE },
+		{ IDD_MIDIMONITOR, IDI_UI_PIANO }, { IDD_MM_HELP, IDI_UI_PIANO },
+		{ IDD_EQUALIZER, IDI_UI_EQ }, { IDD_EQ_HELP, IDI_UI_EQ },
+		{ IDD_PROTOOLS, IDI_UI_TUNE }, { IDD_PT_HELP, IDI_UI_TUNE },
+		{ IDD_Render, IDI_UI_RENDER }, { IDD_RD_HELP, IDI_UI_RENDER },
+		{ IDD_WAVEXPORT, IDI_UI_EXPORT }, { IDD_WE_HELP, IDI_UI_EXPORT },
+		{ IDD_TRANSCODE, IDI_UI_EXPORT }, { IDD_TC_HELP, IDI_UI_EXPORT },
+		{ IDD_TAGEDIT, IDI_UI_TAG }, { IDD_TE_HELP, IDI_UI_TAG },
+		{ IDD_TAGBATCH, IDI_UI_TAG }, { IDD_TB_HELP, IDI_UI_TAG },
+		{ IDD_MP_PROMPT, IDI_UI_PROMPT }, { IDD_PRM_HELP, IDI_UI_PROMPT },
+		{ IDD_DEVICERECORD, IDI_UI_MIC }, { IDD_DR_HELP, IDI_UI_MIC },
+		{ IDD_VOICECHANGER, IDI_UI_MIC }, { IDD_VC_HELP, IDI_UI_MIC },
+		{ IDD_TUNERPRACTICE, IDI_UI_MIC }, { IDD_TN_HELP, IDI_UI_MIC },
+		{ IDD_SCREENCAPTURE, IDI_UI_CAPTURE }, { IDD_SC_HELP, IDI_UI_CAPTURE },
+		{ IDD_SC_LIVESETTINGS, IDI_UI_CAPTURE },
+		{ IDD_KPI, IDI_UI_FOLDER }, { IDD_KPI_HELP, IDI_UI_FOLDER },
+		{ IDD_KPI5CFG, IDI_UI_FOLDER },
+		{ IDD_ZEROFOL, IDI_UI_FOLDER }, { IDD_FD_HELP, IDI_UI_FOLDER },
+		{ IDD_SYOSAI, IDI_UI_INFO }, { IDD_SY_HELP, IDI_UI_INFO },
+		{ IDD_ABOUTBOX, IDI_UI_INFO }, { IDD_OGG_HELP, IDI_UI_INFO },
+		{ IDD_DOUGA_HELP, IDI_UI_VIDEO },
+		{ IDD_MP_CMDROLL, IDI_UI_KEYBOARD }, { IDD_MP_CMDROLL_HELP, IDI_UI_KEYBOARD },
+		{ IDD_MP_CMDPLACE, IDI_UI_KEYBOARD }, { IDD_MP_CMDPAL, IDI_UI_KEYBOARD },
+		{ IDD_SOUNDMETER, IDI_UI_METER }, { IDD_SM_HELP, IDI_UI_METER },
+		{ IDD_DIGITIZE, IDI_UI_DISC }, { IDD_DIG_HELP, IDI_UI_DISC },
+		{ IDD_MP_DJPAD, IDI_UI_DISC },
+		{ IDD_PHOTOFRAME, IDI_UI_PHOTO }, { IDD_PF_HELP, IDI_UI_PHOTO },
+		{ IDD_IMAGE, IDI_UI_PHOTO }, { IDD_IMAGEBASE, IDI_UI_PHOTO },
+		{ IDD_SOFT3DMAZE, IDI_UI_MAZE }, { IDD_S3M_HELP, IDI_UI_MAZE },
+		{ IDD_SOFT3DRACE, IDI_UI_RACE }, { IDD_S3R_HELP, IDI_UI_RACE },
+		{ IDD_VSTHOST, IDI_UI_VST }, { IDD_VST_HELP, IDI_UI_VST }, { IDD_VST_WAIT, IDI_UI_VST },
+		{ IDD_MP_CHEATSHEET, IDI_UI_HELP }, { IDD_PL_HELP, IDI_UI_MUSIC },
+		{ IDD_MP_ALARM, IDI_UI_ALARM },
+		{ IDD_MP_REMOTE, IDI_UI_REMOTE },
+		{ IDD_MP_MIRROR, IDI_UI_SHARE },
+		{ IDD_MP_SSVIZ, IDI_UI_VIZ }, { IDD_GRAPH, IDI_UI_VIZ },
+		{ IDD_MP_BPM, IDI_UI_MUSIC }, { IDD_PLAYLIST_NEW, IDI_UI_MUSIC },
+		{ IDD_MP_QUEUE, IDI_UI_MUSIC }, { IDD_MP_SMART, IDI_UI_MUSIC },
+		{ IDD_MP_M3U_IMPORT, IDI_UI_FILE },
+		{ IDD_MP_FOLDER_SYNC, IDI_UI_SYNC },
+		{ IDD_AUDIOSELECT, IDI_UI_AUDIO },
+		{ IDD_FILENAME, IDI_UI_FILE },
+		{ IDD_MODESELECT, IDI_UI_APPS },
+		{ IDD_MISSING_FILES, IDI_UI_COPY },
+		{ IDD_MP_DUPES, IDI_UI_COPY },
+		{ IDD_MP_MBPICK, IDI_UI_MUSIC },
+	};
+	for (int i = 0; i < (int)(sizeof(kMap) / sizeof(kMap[0])); ++i) {
+		if (kMap[i][0] == idd)
+			return kMap[i][1];
+	}
+	return IDI_UI_APPS;
+}
+
+void CCC_ApplyWindowIconFromTemplate(CWnd* w, UINT idd)
+{
+	CCC_ApplyDlgResourceIcon(w, CCC_IconIdForDialogTemplate(idd));
+}
+
+HCURSOR CCC_LoadUiCursor(UINT id)
+{
+	if (id == 0)
+		return NULL;
+	HCURSOR h = NULL;
+	if (AfxGetApp())
+		h = AfxGetApp()->LoadCursor(id);
+	if (!h)
+		h = (HCURSOR)::LoadImage(AfxGetResourceHandle(), MAKEINTRESOURCE(id),
+			IMAGE_CURSOR, 0, 0, LR_DEFAULTSIZE | LR_SHARED);
+	return h;
+}
+
+BOOL CCC_SetUiCursor(UINT id)
+{
+	HCURSOR h = CCC_LoadUiCursor(id);
+	if (!h)
+		return FALSE;
+	::SetCursor(h);
+	return TRUE;
+}
+
 // カスタムキャプション用アイコン取得。
-// WM_GETICON は未設定時に exe 既定アイコンへフォールバックするため、
-// ツール系が立てる WS_EX_DLGMODALFRAME（アイコン無し）では描かない。
+// WM_GETICON が NULL なら描かない（クラス／exe 既定へフォールバックしない）。
+// ツール窓は SetIcon したリソースだけを出す。歌詞オーバーレイは非表示。
 static HICON CCC_CaptionGetTitleIcon(HWND hDlg)
 {
 	if (!hDlg || !::IsWindow(hDlg))
@@ -14789,9 +14898,6 @@ static HICON CCC_CaptionGetTitleIcon(HWND hDlg)
 	CWnd* pWnd = CWnd::FromHandlePermanent(hDlg);
 	if (pWnd && pWnd->GetRuntimeClass() && pWnd->GetRuntimeClass()->m_lpszClassName
 		&& strcmp(pWnd->GetRuntimeClass()->m_lpszClassName, "CDesktopLyricsWnd") == 0)
-		return NULL;
-	const DWORD ex = (DWORD)::GetWindowLong(hDlg, GWL_EXSTYLE);
-	if (ex & WS_EX_DLGMODALFRAME)
 		return NULL;
 	HICON hIcon = (HICON)::SendMessage(hDlg, WM_GETICON, ICON_SMALL, 0);
 	if (!hIcon)
@@ -14868,8 +14974,7 @@ void CCC_CaptionPaint(CDC& dc, HWND hDlg)
             HDC hdcMem = s_capDib.hdcDib;
 
             int textLeft = 8;
-            // 明示 SetIcon された窓のみ。WS_EX_DLGMODALFRAME 時は描かない
-            // （WM_GETICON の exe フォールバックで歌詞ウィンドウ等にアイコンが付くのを防ぐ）
+            // WM_GETICON が載っている窓だけ描く（未設定は NULL）
             if (hIcon) {
                 const int isz = 16;
                 const int iy = (h - isz) / 2;
@@ -16995,16 +17100,21 @@ BOOL CCustomBlurDialogBase::PreCreateWindow(CREATESTRUCT& cs)
 BOOL CCustomBlurDialogBase::OnInitDialog()
 {
     BOOL b = CCustomDialog::OnInitDialog();
-    // ツール系ダイアログは明示 SetIcon しないとクラス/既定の空アイコンがキャプションに出る。
-    // メイン画面などアイコンが必要な側は、この後に SetIcon(m_hIcon, …) する。
+    // クラス既定アイコンを消し、テンプレート対応のリソースアイコンを載せる。
+    // MP/ファルコム本窓/プレイリストはマップで 0 を返し、後段の SetIcon(m_hIcon) に任せる。
     SetIcon(nullptr, TRUE);
     SetIcon(nullptr, FALSE);
+    {
+        UINT idd = 0;
+        if (m_lpszTemplateName && IS_INTRESOURCE(m_lpszTemplateName))
+            idd = (UINT)(ULONG_PTR)m_lpszTemplateName;
+        CCC_ApplyWindowIconFromTemplate(this, idd);
+    }
 #if CCUSTOM_AERO_SUPPORT
     ::SetClassLongPtr(m_hWnd, GCLP_HBRBACKGROUND, 0);
 #endif
     ApplyDwmBlur();
-    // キャプション化は初回 OnShowWindow（表示前）で行う。
-    // PostMessage だと Show 後に走り、システム帯の一瞬アクリル＋縦幅ジャンプになる。
+    // キャプション化は初回 OnShowWindow（表示前）で行う。PostMessage だと Show 後に走り、システム帯の一瞬アクリル＋縦幅ジャンプになる。
     return b;
 }
 
@@ -17670,6 +17780,12 @@ BOOL CCustomBlurDialogExBase::OnInitDialog()
     BOOL b = CCustomDialogEx::OnInitDialog();
     SetIcon(nullptr, TRUE);
     SetIcon(nullptr, FALSE);
+    {
+        UINT idd = 0;
+        if (m_lpszTemplateName && IS_INTRESOURCE(m_lpszTemplateName))
+            idd = (UINT)(ULONG_PTR)m_lpszTemplateName;
+        CCC_ApplyWindowIconFromTemplate(this, idd);
+    }
 #if CCUSTOM_AERO_SUPPORT
     ::SetClassLongPtr(m_hWnd, GCLP_HBRBACKGROUND, 0);
 #endif

@@ -3,6 +3,7 @@
 
 #include "stdafx.h"
 #include "LinkStatic.h"
+#include "resource.h"
 
 #ifdef _DEBUG
 #define new DEBUG_NEW
@@ -20,30 +21,13 @@ static char THIS_FILE[] = __FILE__;
 CLinkStatic::CLinkStatic()
 {
 	m_bClick = FALSE;
-	
-	// 指のカーソル読み込み
-	OSVERSIONINFO in;ZeroMemory(&in,sizeof(in));in.dwOSVersionInfoSize=sizeof(OSVERSIONINFO);GetVersionEx(&in);
-	TCHAR lpWinDir[MAX_PATH];
-	::GetWindowsDirectory(lpWinDir, MAX_PATH - 13);
-	if(in.dwMajorVersion<=5){
-		_tcscat(lpWinDir, _T("\\winhlp32.exe"));
-		HINSTANCE hInstHelp = ::LoadLibrary(lpWinDir);
-		if(hInstHelp)
-		{
-			m_hCursor = CopyCursor(::LoadCursor(hInstHelp, MAKEINTRESOURCE(106)));
-			::FreeLibrary(hInstHelp);
-		}
-		else
-			m_hCursor = ::LoadCursor(NULL, IDC_ARROW);
-	}else{
-		TCHAR tmp[1024];
-		DWORD r=ExpandEnvironmentStrings( _T("%windir%") , tmp,1024);
-		CString s;s=tmp;s+="\\cursors\\aero_link.cur";
-		if(r!=0)
-			m_hCursor = CopyCursor(::LoadCursorFromFile(s));
-		else
-			m_hCursor = ::LoadCursor(NULL, IDC_ARROW);
-	}
+
+	// 埋め込みハンド。OS の aero_link.cur / WinHelp に依存しない。
+	m_hCursor = NULL;
+	if (AfxGetApp())
+		m_hCursor = (HICON)AfxGetApp()->LoadCursor(IDC_UI_HAND);
+	if (!m_hCursor)
+		m_hCursor = (HICON)::LoadCursor(NULL, IDC_HAND);
 	m_text = OUT_COLOR;
 	m_brush.CreateSolidBrush(::GetSysColor(COLOR_3DFACE));
 }

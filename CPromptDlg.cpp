@@ -38,8 +38,7 @@ END_MESSAGE_MAP()
 BOOL CPrmHelpDlg::OnInitDialog()
 {
 	CDialog::OnInitDialog();
-	SetIcon(nullptr, TRUE);
-	SetIcon(nullptr, FALSE);
+	CCC_ApplyWindowIconFromTemplate(this, IDD);
 	ModifyStyleEx(0, WS_EX_DLGMODALFRAME, SWP_FRAMECHANGED);
 	SetWindowText(LL14(
 		L"プロンプト操作ガイド", L"Prompt Guide", L"Guide du prompt", L"Guida Prompt",
@@ -973,10 +972,6 @@ BOOL CPromptDlg::OnInitDialog()
 
 	SetWindowText(LL14(L"プロンプト", L"Prompt", L"Prompt", L"Prompt", L"Prompt", L"프롬프트", L"提示", L"موجه", L"Промпт", L"Prompt", L"Prompt", L"Prompt", L"Prompt", L"Istem"));
 	ModifyStyle(WS_MINIMIZEBOX, 0);
-	SetIcon(nullptr, TRUE);
-	SetIcon(nullptr, FALSE);
-	// キャプションアイコンは付けない。Aero 有効時も WS_EX_DLGMODALFRAME を
-	// 立てないと既定アイコンが残る（イコライザーは rc の DS_MODALFRAME で消えている）。
 	ModifyStyleEx(0, WS_EX_DLGMODALFRAME, SWP_FRAMECHANGED);
 	m_legend.SetWindowText(MpPromptLegendText());
 	if (m_edit.GetSafeHwnd())
@@ -1707,8 +1702,6 @@ void MpMakeIndependentZOrder(CWnd* w)
 	// オーナー付きだと常にメインの手前に張り付くので切り離す
 	::SetWindowLongPtr(w->GetSafeHwnd(), GWLP_HWNDPARENT, 0);
 	w->ModifyStyleEx(WS_EX_TOPMOST, WS_EX_DLGMODALFRAME);
-	w->SetIcon(nullptr, TRUE);
-	w->SetIcon(nullptr, FALSE);
 	::SetWindowPos(w->GetSafeHwnd(), HWND_NOTOPMOST, 0, 0, 0, 0,
 		SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_FRAMECHANGED);
 }
