@@ -4712,15 +4712,9 @@ void CSoft3DRaceDlg::RenderScene()
 		float pr = m_bandHalf * 1.85f;
 		if (pr < 10.f) pr = 10.f;
 		if (pr > 22.f) pr = 22.f;
-		if (m_phase == PHASE_PODIUM) pr = 0.f;
-		if (m_phase == PHASE_DEMO) {
-			if (pr < 16.f) pr = 16.f;
-			pr *= 1.45f;
-			if (pr > 32.f) pr = 32.f;
-			cb.peel = {ax, ay, az, pr};
-		} else {
-			cb.peel = {pl.x, pl.y, pl.z, pr};
-		}
+		// 俯瞰デモで peel すると視線方向の円柱が画面中央の○に見える
+		if (m_phase == PHASE_PODIUM || m_phase == PHASE_DEMO) pr = 0.f;
+		cb.peel = {pl.x, pl.y, pl.z, pr};
 	}
 
 	D3D11_MAPPED_SUBRESOURCE map={};
