@@ -207,8 +207,8 @@ public:
 	enum {
 		CD_MAX_TRACK = 99,
 		CD_HDR = 80,
-		CD_PLAY_BUFS = 8,
-		CD_PLAY_SECS = 8,
+		CD_PLAY_BUFS = 12,
+		CD_PLAY_SECS = 16,
 		CD_TIMER_UI = 1,
 		CD_TIMER_DISC = 2,
 		CD_TIMER_FOLLOW = 3,

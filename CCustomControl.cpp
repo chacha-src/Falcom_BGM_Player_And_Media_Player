@@ -1931,6 +1931,136 @@ static void DrawDecorations(CDC* pDC, CRect rect, BOOL bPA, BOOL bPushed)
     pDC->SelectObject(ob);
 }
 
+static BOOL CCC_TextHasBreak(const CString& str)
+{
+    return str.Find(_T('\n')) >= 0 || str.Find(_T('\r')) >= 0;
+}
+
+static CSize CCC_MeasureFitText(CDC* pDC, const CString& str, BOOL hasBreak)
+{
+    if (!pDC)
+        return CSize(0, 0);
+    if (hasBreak) {
+        CRect mc(0, 0, 32767, 32767);
+        pDC->DrawText(str, &mc, DT_CALCRECT | DT_LEFT | DT_TOP | DT_NOPREFIX);
+        return CSize((std::max)(0, mc.Width()), (std::max)(0, mc.Height()));
+    }
+    return pDC->GetTextExtent(str);
+}
+
+// 改行なし: 横縮小のみ。改行あり: 先に2〜3行として出してから最長行を横縮小。
+// 半分未満は呼び出し側で3段階ボタンへ。描画の下限は 0.50。
+static void DrawFitControlText(CDC* pDC, CRect rc, const CString& str, UINT fmt, float minScaleX = 0.50f)
+{
+    if (!pDC || str.IsEmpty() || rc.Width() <= 0 || rc.Height() <= 0)
+        return;
+
+    const BOOL hasBreak = CCC_TextHasBreak(str);
+    UINT baseFmt = fmt & ~(DT_END_ELLIPSIS | DT_PATH_ELLIPSIS | DT_WORD_ELLIPSIS);
+    if (hasBreak) {
+        baseFmt &= ~DT_SINGLELINE;
+        baseFmt |= DT_NOPREFIX;
+    } else {
+        baseFmt |= DT_SINGLELINE;
+        baseFmt &= ~DT_WORDBREAK;
+        baseFmt |= DT_NOPREFIX;
+    }
+
+    CFont* pCur = pDC->GetCurrentFont();
+    LOGFONT lf = {};
+    if (pCur)
+        pCur->GetLogFont(&lf);
+    long tH = abs(lf.lfHeight);
+    if (tH <= 0)
+        tH = 12;
+
+    CFont shrinkFont;
+    CFont* pOldFont = nullptr;
+    auto measure = [&]() -> CSize {
+        return CCC_MeasureFitText(pDC, str, hasBreak);
+    };
+
+    CSize need = measure();
+    const int availW = (std::max)(1, rc.Width());
+    const int availH = (std::max)(1, rc.Height());
+
+    if (hasBreak && need.cy > availH && tH > 6) {
+        while (tH > 6 && need.cy > availH) {
+            tH--;
+            lf.lfHeight = -tH;
+            if (shrinkFont.GetSafeHandle())
+                shrinkFont.DeleteObject();
+            if (!shrinkFont.CreateFontIndirect(&lf))
+                break;
+            if (!pOldFont)
+                pOldFont = pDC->SelectObject(&shrinkFont);
+            else
+                pDC->SelectObject(&shrinkFont);
+            need = measure();
+        }
+    }
+
+    float scaleX = 1.0f;
+    if (need.cx > availW)
+        scaleX = (float)availW / (float)need.cx;
+    if (scaleX > 1.0f)
+        scaleX = 1.0f;
+    if (scaleX < minScaleX)
+        scaleX = minScaleX;
+    if (scaleX < 0.99f)
+        scaleX *= 0.98f;
+
+    int yTop = rc.top;
+    if ((fmt & DT_VCENTER) && need.cy < availH)
+        yTop = rc.top + (availH - need.cy) / 2;
+    else if (fmt & DT_BOTTOM)
+        yTop = rc.bottom - need.cy;
+    if (yTop < rc.top)
+        yTop = rc.top;
+
+    const UINT align = fmt & (DT_CENTER | DT_RIGHT | DT_LEFT);
+    auto restoreFont = [&]() {
+        if (pOldFont)
+            pDC->SelectObject(pOldFont);
+    };
+
+    UINT placeFmt = (baseFmt & ~(DT_VCENTER | DT_BOTTOM)) | DT_TOP;
+    if (!hasBreak)
+        placeFmt |= DT_SINGLELINE;
+
+    if (scaleX >= 0.99f) {
+        CRect rd(rc.left, yTop, rc.right, (std::max)(rc.bottom, yTop + need.cy));
+        pDC->DrawText(str, &rd, placeFmt);
+        restoreFont();
+        return;
+    }
+
+    if (!pDC->SaveDC()) {
+        pDC->DrawText(str, &rc, placeFmt);
+        restoreFont();
+        return;
+    }
+
+    pDC->IntersectClipRect(rc);
+    pDC->SetGraphicsMode(GM_ADVANCED);
+    const float scaledW = (float)need.cx * scaleX;
+    float tx = (float)rc.left;
+    if (align & DT_RIGHT)
+        tx = (float)rc.right - scaledW;
+    else if (align & DT_CENTER)
+        tx = (float)rc.left + ((float)availW - scaledW) * 0.5f;
+    if (tx < (float)rc.left)
+        tx = (float)rc.left;
+
+    XFORM xf = { scaleX, 0.0f, 0.0f, 1.0f, tx, (float)yTop };
+    pDC->SetWorldTransform(&xf);
+    CRect rl(0, 0, (std::max)(1, (int)need.cx), (std::max)(1, (int)need.cy));
+    UINT drawFmt = (placeFmt & ~(DT_CENTER | DT_RIGHT)) | DT_LEFT;
+    pDC->DrawText(str, &rl, drawFmt);
+    pDC->RestoreDC(-1);
+    restoreFont();
+}
+
 static void DrawSmartText(CDC* pDC, CRect rect, CString str, BOOL bDis, BOOL bPushed)
 {
     if (str.IsEmpty()) return;
@@ -1942,54 +2072,7 @@ static void DrawSmartText(CDC* pDC, CRect rect, CString str, BOOL bDis, BOOL bPu
     rt.DeflateRect(1, 1);
     if (bPushed) rt.OffsetRect(1, 1);
 
-    CFont* pCF = pDC->GetCurrentFont();
-    LOGFONT lf;
-    pCF->GetLogFont(&lf);
-    long tH = max(8L, abs(lf.lfHeight) - 2);
-    lf.lfHeight = -tH;
-
-    CFont fs;
-    fs.CreateFontIndirect(&lf);
-    CFont* po = pDC->SelectObject(&fs);
-    CSize sz = pDC->GetTextExtent(str);
-
-    if (sz.cx <= rt.Width())
-    {
-        pDC->DrawText(str, &rt, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-        pDC->SelectObject(po);
-        fs.DeleteObject();
-        return;
-    }
-
-    // ボタン幅不足時は折り返しではなくフォント縮小で1行に収める
-    pDC->SelectObject(po);
-    fs.DeleteObject();
-    while (tH > 6)
-    {
-        tH--;
-        lf.lfHeight = -tH;
-        CFont ft;
-        ft.CreateFontIndirect(&lf);
-        pDC->SelectObject(&ft);
-        sz = pDC->GetTextExtent(str);
-        if (sz.cx <= rt.Width() && sz.cy <= rt.Height())
-        {
-            pDC->DrawText(str, &rt, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-            pDC->SelectObject(po);
-            ft.DeleteObject();
-            return;
-        }
-        pDC->SelectObject(po);
-        ft.DeleteObject();
-    }
-
-    lf.lfHeight = -6;
-    CFont fm;
-    fm.CreateFontIndirect(&lf);
-    pDC->SelectObject(&fm);
-    pDC->DrawText(str, &rt, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
-    pDC->SelectObject(po);
-    fm.DeleteObject();
+    DrawFitControlText(pDC, rt, str, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX, 0.50f);
 }
 
 static void DrawFittedText(CDC& dc, const CRect& rect, const CString& str, UINT fmt,
@@ -2047,7 +2130,7 @@ static void DrawFittedText(CDC& dc, const CRect& rect, const CString& str, UINT 
     if (needW > nBudgetW)
         scaleX = (float)nBudgetW / (float)needW;
     scaleX *= 0.98f;
-    if (scaleX < 0.62f) scaleX = 0.62f;
+    if (scaleX < 0.50f) scaleX = 0.50f;
     if (scaleX > 1.0f) scaleX = 1.0f;
 
     float scaleY = 1.0f;
@@ -2310,43 +2393,7 @@ static void DrawSmartText2(CDC* pDC, CRect rect, CString str, UINT fmt, BOOL bDi
     rl.DeflateRect(2, 0);
     if (bPushed) rl.OffsetRect(1, 1);
 
-    CFont* pCF = pDC->GetCurrentFont();
-    LOGFONT lf;
-    pCF->GetLogFont(&lf);
-    long tH = abs(lf.lfHeight);
-    const long MH = 6;
-    CFont ff;
-
-    while (tH >= MH)
-    {
-        lf.lfHeight = -tH;
-        CFont ft;
-        ft.CreateFontIndirect(&lf);
-        CFont* po = pDC->SelectObject(&ft);
-        CRect rc = rl;
-        pDC->DrawText(str, &rc, fmt | DT_CALCRECT);
-        pDC->SelectObject(po);
-
-        if (rc.Width() <= rl.Width() && rc.Height() <= rl.Height())
-        {
-            ff.CreateFontIndirect(&lf);
-            ft.DeleteObject();
-            break;
-        }
-        ft.DeleteObject();
-        tH--;
-    }
-
-    if (!ff.GetSafeHandle())
-    {
-        lf.lfHeight = -MH;
-        ff.CreateFontIndirect(&lf);
-    }
-
-    CFont* po = pDC->SelectObject(&ff);
-    pDC->DrawText(str, &rl, fmt);
-    pDC->SelectObject(po);
-    ff.DeleteObject();
+    DrawFitControlText(pDC, rl, str, fmt, 0.50f);
 }
 
 static void FillRectAlpha(CDC* pDC, const CRect& rc, COLORREF clr, BYTE alpha)
@@ -5564,6 +5611,7 @@ void CCustomStatic::DrawClient(CDC& dc)
     }
 
     CString strText = m_strText;
+    const BOOL hasBreak = CCC_TextHasBreak(strText);
     const BOOL bHasFmt = (strText.Find(_T("!@")) >= 0);
     if (bHasFmt) {
         if (strText != m_strSegSource)
@@ -5692,7 +5740,14 @@ void CCustomStatic::DrawClient(CDC& dc)
                 CFont* pTry = CCC_GetPooledSegFont(lfTry);
                 if (!pTry) return CSize(0, 0);
                 CFont* pOld = memDC.SelectObject(pTry);
-                CSize size = memDC.GetTextExtent(strText);
+                CSize size;
+                if (hasBreak) {
+                    CRect mc(0, 0, 32767, 32767);
+                    memDC.DrawText(strText, &mc, DT_CALCRECT | DT_LEFT | DT_TOP | DT_NOPREFIX);
+                    size = CSize(mc.Width(), mc.Height());
+                } else {
+                    size = memDC.GetTextExtent(strText);
+                }
                 memDC.SelectObject(pOld);
                 return size;
             };
@@ -5708,6 +5763,12 @@ void CCustomStatic::DrawClient(CDC& dc)
             finalHeight = min(baseHeight, rectWithMargin.Height());
             finalWidth = 0;
             szFinal = MeasureText(finalHeight, 0);
+            if (hasBreak) {
+                while (finalHeight > kMinHeight && szFinal.cy > rectWithMargin.Height()) {
+                    finalHeight--;
+                    szFinal = MeasureText(finalHeight, 0);
+                }
+            }
 
             int italicMargin = lfB.lfItalic ? (finalHeight / 2) : 0;
             int needW = szFinal.cx + italicMargin;
@@ -5715,21 +5776,13 @@ void CCustomStatic::DrawClient(CDC& dc)
             if (needW > availW)
             {
                 scaleX = (float)availW / (float)needW;
-                const float kMinScaleX = 0.62f;
-                if (scaleX < kMinScaleX)
-                {
-                    finalHeight = max(kMinHeight, (int)(finalHeight * scaleX / kMinScaleX + 0.5f));
-                    szFinal = MeasureText(finalHeight, 0);
-                    italicMargin = lfB.lfItalic ? (finalHeight / 2) : 0;
-                    needW = szFinal.cx + italicMargin;
-                    scaleX = (float)availW / (float)needW;
-                }
+                const float kMinScaleX = 0.50f;
                 scaleX *= 0.98f;
                 if (scaleX < kMinScaleX) scaleX = kMinScaleX;
                 if (scaleX > 1.0f) scaleX = 1.0f;
             }
 
-            if (m_bPreferWideMode && szFinal.cx < availW)
+            if (!hasBreak && m_bPreferWideMode && szFinal.cx < availW)
             {
                 LOGFONT lfTry = lfB;
                 lfTry.lfHeight = -finalHeight;
@@ -5780,7 +5833,9 @@ void CCustomStatic::DrawClient(CDC& dc)
     }
 
     DWORD ds = GetStyle();
-    UINT fmt = DT_VCENTER | DT_SINGLELINE;
+    UINT fmt = DT_NOPREFIX;
+    if (hasBreak) fmt |= DT_TOP;
+    else fmt |= DT_VCENTER | DT_SINGLELINE;
     if (ds & SS_CENTER) fmt |= DT_CENTER;
     else if (ds & SS_RIGHT) fmt |= DT_RIGHT;
     else fmt |= DT_LEFT;
@@ -5802,7 +5857,11 @@ void CCustomStatic::DrawClient(CDC& dc)
         }
         CFont* pOIF = pFontFinal ? memDC.SelectObject(pFontFinal) : nullptr;
 
-        if (m_fCachedScaleX < 0.98f)
+        if (hasBreak)
+        {
+            DrawFitControlText(&memDC, rectWithMargin, strText, fmt, 0.50f);
+        }
+        else if (m_fCachedScaleX < 0.98f)
         {
             DrawFittedText(memDC, rect, strText, fmt,
                 m_bGradEnable, m_clrGradStart, m_clrGradEnd, m_nGradDirection,
@@ -6438,7 +6497,7 @@ void CCustomComboBox::PaintClient(CDC& dc)
     }
 
     mDC.SetBkMode(TRANSPARENT);
-    mDC.DrawText(st, &rt, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
+    DrawFitControlText(&mDC, rt, st, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX, 0.50f);
     mDC.SelectObject(pOF);
 
     CCC_DrawInwoman(&mDC, r, bTrans);
@@ -9878,8 +9937,7 @@ void CCustomTreeCtrl::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
 		pDC->SetTextColor(bSel ? COLOR_LIST_SEL_TEXT : RGB(0, 0, 0));
 		{
 			CFont* pOldFont = pDC->SelectObject(GetFont());
-			pDC->DrawText(strText, &rcText,
-				DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+			DrawFitControlText(pDC, rcText, strText, DT_LEFT | DT_VCENTER | DT_NOPREFIX, 0.50f);
 			pDC->SelectObject(pOldFont);
 		}
 
@@ -10937,8 +10995,7 @@ void CCustomStandardButton::PaintClient(CDC& dc, const CRect& r)
         mDC.DrawFocusRect(&rf);
     }
 
-    // アイコン。ラベル付きは左に小さめ、記号だけ／空／幅不足は中央。
-    // 幅が足りないときの「停...」は読めないので、文字は出さずアイコンだけにする。
+    // アイコン。ラベル付きは左に小さめ。横幅が本文の半分未満ならアイコン中央(3段階)。
     CString s;
     GetWindowText(s);
     const BOOL glyphOnly = CCC_CaptionIsGlyphOnly(s);
@@ -10947,6 +11004,13 @@ void CCustomStandardButton::PaintClient(CDC& dc, const CRect& r)
         hDraw = m_hIconOut;
     BOOL drawLabel = hDraw && !glyphOnly && !s.IsEmpty();
     int iconRight = r.left;
+
+    CFont* pF = GetFont();
+    CFont* pOF = mDC.SelectObject(pF ? pF : (CFont*)mDC.SelectStockObject(DEFAULT_GUI_FONT));
+    CSize te(0, 0);
+    if (!s.IsEmpty() && !glyphOnly)
+        te = CCC_MeasureFitText(&mDC, s, CCC_TextHasBreak(s));
+
     if (hDraw)
     {
         const int pad = m_bFlat ? 4 : 6;
@@ -10965,7 +11029,7 @@ void CCustomStandardButton::PaintClient(CDC& dc, const CRect& r)
         if (drawLabel) {
             const int leftPad = m_bFlat ? 3 : 5;
             const int remain = r.Width() - leftPad - iw - 8;
-            if (remain < 22)
+            if (remain < (std::max)(8, (int)te.cx / 2))
                 drawLabel = FALSE;
         }
         int ix, iy;
@@ -10982,25 +11046,16 @@ void CCustomStandardButton::PaintClient(CDC& dc, const CRect& r)
         ::DrawIconEx(mDC.GetSafeHdc(), ix, iy, hDraw, iw, ih, 0, NULL, DI_NORMAL);
     }
 
-    // 記号だけのキャプションはアイコンに任せて文字を出さない。
     if (!s.IsEmpty() && !hDraw)
-    {
-        CFont* pF = GetFont();
-        CFont* pOF = mDC.SelectObject(pF ? pF : (CFont*)mDC.SelectStockObject(DEFAULT_GUI_FONT));
         DrawSmartText(&mDC, r, s, bD, bP);
-        mDC.SelectObject(pOF);
-    }
     else if (drawLabel)
     {
-        CFont* pF = GetFont();
-        CFont* pOF = mDC.SelectObject(pF ? pF : (CFont*)mDC.SelectStockObject(DEFAULT_GUI_FONT));
         CRect tr = r;
         tr.left = iconRight + 3;
         tr.DeflateRect(2, 1);
-        // 省略記号は1〜2文字で切れて無意味。フォントを縮めて収める。
-        DrawSmartText2(&mDC, tr, s, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX, bD, bP);
-        mDC.SelectObject(pOF);
+        DrawSmartText2(&mDC, tr, s, DT_LEFT | DT_VCENTER | DT_NOPREFIX, bD, bP);
     }
+    mDC.SelectObject(pOF);
 
     if (!bD) CCC_DrawInwoman(&mDC, r, bAeroTrans); // 淫女モード演出
 
@@ -11515,10 +11570,10 @@ void CCustomCheckBox::OnDrawLayer(CDC* pDC, CRect rect)
                 if (bCapLock) {
                     dc.SetBkMode(TRANSPARENT);
                     dc.SetTextColor(bD ? RGB(180, 180, 180) : RGB(255, 255, 255));
-                    dc.DrawText(t, &rt, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
+                    DrawFitControlText(&dc, rt, t, DT_LEFT | DT_VCENTER | DT_NOPREFIX, 0.50f);
                 }
                 else {
-                    DrawSmartText2(&dc, rt, t, DT_LEFT | DT_VCENTER | DT_SINGLELINE, bD, FALSE);
+                    DrawSmartText2(&dc, rt, t, DT_LEFT | DT_VCENTER | DT_NOPREFIX, bD, FALSE);
                 }
             }
             if (bC)
@@ -14371,7 +14426,7 @@ static void CCC_DrawGroupBoxFrame(CDC& dc, const CRect& r, const CString& t, BOO
 {
     CFont* pOF = dc.SelectObject(dc.GetCurrentFont());
 
-    // タイトルが枠幅を食いつぶさないよう省略。右上リボン分(約24px)を確保。
+    // タイトルは枠幅に合わせて横縮小。右上リボン分(約24px)を確保。
     CString title = t;
     CSize s(0, 0);
     if (!title.IsEmpty())
@@ -14379,33 +14434,7 @@ static void CCC_DrawGroupBoxFrame(CDC& dc, const CRect& r, const CString& t, BOO
         const int maxTitleW = (std::max)(8, r.Width() - 40);
         s = dc.GetTextExtent(title);
         if (s.cx > maxTitleW)
-        {
-            int fit = 0;
-            SIZE szFit = {};
-            if (::GetTextExtentExPoint(dc.GetSafeHdc(), title, title.GetLength(),
-                    maxTitleW, &fit, NULL, &szFit) && fit > 0 && fit < title.GetLength())
-            {
-                if (fit > 1)
-                    title = title.Left(fit - 1) + _T("…");
-                else
-                    title = _T("…");
-                s = dc.GetTextExtent(title);
-            }
-            else
-            {
-                // GetTextExtentExPoint 失敗時のフォールバック
-                while (title.GetLength() > 1 && dc.GetTextExtent(title).cx > maxTitleW)
-                    title = title.Left(title.GetLength() - 1);
-                if (title.GetLength() < t.GetLength())
-                {
-                    if (title.GetLength() > 1)
-                        title = title.Left(title.GetLength() - 1) + _T("…");
-                    else
-                        title = _T("…");
-                }
-                s = dc.GetTextExtent(title);
-            }
-        }
+            s.cx = maxTitleW;
     }
 
     int nT = r.top + (s.cy > 0 ? s.cy / 2 : 8);
@@ -14472,7 +14501,7 @@ static void CCC_DrawGroupBoxFrame(CDC& dc, const CRect& r, const CString& t, BOO
         dc.SetBkMode(TRANSPARENT);
         // クロマキー RGB(1,1,1) と区別するため、透過時の黒文字は 2,2,2 にずらす
         dc.SetTextColor(bTrans ? RGB(2, 2, 2) : RGB(0, 0, 0));
-        dc.DrawText(title, &rt, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
+        DrawFitControlText(&dc, rt, title, DT_LEFT | DT_VCENTER | DT_NOPREFIX, 0.50f);
     }
     dc.SelectObject(pOF);
 }

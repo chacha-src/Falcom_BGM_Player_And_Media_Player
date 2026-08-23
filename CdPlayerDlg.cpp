@@ -180,6 +180,23 @@ static BOOL CdReadSectorsVerified(HANDLE h, DWORD lba, DWORD nsec, BYTE* a, BYTE
 	}
 }
 
+static void CdSetMaxReadSpeed(HANDLE h)
+{
+	if (!h || h == INVALID_HANDLE_VALUE) return;
+	struct {
+		LONG requestType;
+		USHORT readSpeed;
+		USHORT writeSpeed;
+		LONG rotationControl;
+	} sp;
+	ZeroMemory(&sp, sizeof(sp));
+	sp.readSpeed = 0xFFFF;
+	sp.writeSpeed = 0xFFFF;
+	DWORD br = 0;
+	DeviceIoControl(h, CTL_CODE(IOCTL_CDROM_BASE, 0x0018, METHOD_BUFFERED, FILE_READ_ACCESS),
+		&sp, sizeof(sp), NULL, 0, &br, NULL);
+}
+
 static void CdWriteWavHdr(CFile& f, int rate, int ch, int bits)
 {
 	if (rate < 8000) rate = 44100;
@@ -1039,7 +1056,10 @@ HANDLE CCdPlayerDlg::OpenCdHandle()
 	if (!letter) return INVALID_HANDLE_VALUE;
 	TCHAR path[8];
 	wsprintf(path, _T("\\\\.\\%c:"), letter);
-	return CreateFile(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, NULL);
+	HANDLE h = CreateFile(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, NULL);
+	if (h && h != INVALID_HANDLE_VALUE)
+		CdSetMaxReadSpeed(h);
+	return h;
 }
 
 void CCdPlayerDlg::CloseCdHandle()
@@ -2344,15 +2364,83 @@ static int CdProcessSrc(BYTE* src, int srcBytes, BOOL eqReset, AudioUpscaler* up
 	return n;
 }
 
+static int CdWaveQueued(const WAVEHDR* hdr)
+{
+	int queued = 0;
+	for (int i = 0; i < CCdPlayerDlg::CD_PLAY_BUFS; ++i)
+		if (hdr[i].dwFlags & WHDR_INQUEUE) queued++;
+	return queued;
+}
+
 static void CdWaveWait(CCdPlayerDlg* self, WAVEHDR* hdr)
 {
 	while (!InterlockedCompareExchange(&self->m_playStop, 0, 0)) {
-		int queued = 0;
-		for (int i = 0; i < CCdPlayerDlg::CD_PLAY_BUFS; ++i)
-			if (hdr[i].dwFlags & WHDR_INQUEUE) queued++;
-		if (queued < CCdPlayerDlg::CD_PLAY_BUFS - 1) break;
+		if (CdWaveQueued(hdr) < CCdPlayerDlg::CD_PLAY_BUFS - 1) break;
 		WaitForSingleObject(self->m_waveEvt, 80);
 	}
+}
+
+static int CdXfadePickNext(CCdPlayerDlg* self)
+{
+	int xfNext;
+	if (self->m_shuffle.GetCheck() && self->m_trackN > 1) {
+		xfNext = (int)((GetTickCount() / 17) % (DWORD)self->m_trackN);
+		if (xfNext == self->m_curTrack) xfNext = (xfNext + 1) % self->m_trackN;
+	}
+	else {
+		xfNext = self->m_curTrack + 1;
+		if (xfNext >= self->m_trackN)
+			xfNext = self->m_repeat.GetCheck() ? 0 : -1;
+	}
+	return xfNext;
+}
+
+static BOOL CdXfadeEnsure(BYTE** buf, int* n, int* cap, int want)
+{
+	if (!buf || !n || !cap || want < 1) return FALSE;
+	if (!*buf) {
+		*cap = want;
+		*n = 0;
+		*buf = (BYTE*)malloc((size_t)want);
+		return *buf != NULL;
+	}
+	if (*cap >= want) return TRUE;
+	BYTE* p = (BYTE*)realloc(*buf, (size_t)want);
+	if (!p) return FALSE;
+	*buf = p;
+	*cap = want;
+	return TRUE;
+}
+
+static DWORD CdXfadeReadOnce(CCdPlayerDlg* self, DWORD* lba, DWORD endLba,
+	BYTE* buf, int* n, int cap, DWORD prefer)
+{
+	if (!self || !lba || !buf || !n || cap - *n < 2352) return 0;
+	if (*lba >= endLba) return 0;
+	DWORD chunk = prefer;
+	if (chunk < 1u) chunk = 1u;
+	if (chunk > 32u) chunk = 32u;
+	while (chunk >= 1u && !InterlockedCompareExchange(&self->m_playStop, 0, 0)) {
+		DWORD n2 = chunk;
+		if ((int)(n2 * 2352) > cap - *n)
+			n2 = (DWORD)((cap - *n) / 2352);
+		if (*lba + n2 > endLba)
+			n2 = endLba - *lba;
+		if (n2 == 0) return 0;
+		EnterCriticalSection(&self->m_cdCs);
+		HANDLE h = self->m_hCd;
+		BOOL rd = (h && h != INVALID_HANDLE_VALUE)
+			? CdReadSectors(h, *lba, n2, buf + *n, (DWORD)(cap - *n)) : FALSE;
+		LeaveCriticalSection(&self->m_cdCs);
+		if (!rd) {
+			chunk /= 2u;
+			continue;
+		}
+		*n += (int)(n2 * 2352);
+		*lba += n2;
+		return n2;
+	}
+	return 0;
 }
 
 void CALLBACK CCdPlayerDlg::WaveOutProc(HWAVEOUT, UINT msg, DWORD_PTR inst, DWORD_PTR, DWORD_PTR)
@@ -2415,7 +2503,17 @@ UINT __stdcall CCdPlayerDlg::PlayThread(void* p)
 	int dstChunk = (int)((__int64)CD_PLAY_SECS * 588 * dRate / 44100 * dstBpf);
 	if (dstChunk < bufBytes) dstChunk = bufBytes;
 	const int dstCap = dstChunk * 4;
-	BYTE pcm[CD_PLAY_BUFS][CD_PLAY_SECS * 2352];
+	BYTE* pcmBlk = (BYTE*)malloc((size_t)CD_PLAY_BUFS * (size_t)bufBytes);
+	if (!pcmBlk) {
+		waveOutClose(hwo);
+		self->m_hwo = NULL;
+		if (self->GetSafeHwnd())
+			self->PostMessage(WM_CD_ENDED, 2, 0);
+		return 0;
+	}
+	BYTE* pcm[CD_PLAY_BUFS];
+	for (int i = 0; i < CD_PLAY_BUFS; ++i)
+		pcm[i] = pcmBlk + (size_t)i * (size_t)bufBytes;
 	BYTE xfBuf[CD_PLAY_SECS * 2352];
 	BYTE* outP[CD_PLAY_BUFS];
 	WAVEHDR hdr[CD_PLAY_BUFS];
@@ -2448,7 +2546,14 @@ UINT __stdcall CCdPlayerDlg::PlayThread(void* p)
 	int xfHoldN = 0;
 	int xfHoldPos = 0;
 	int xfHoldCap = 0;
+	BYTE* xfCur = NULL;
+	int xfCurN = 0;
+	int xfCurCap = 0;
+	DWORD xfCurLba = 0;
 	const DWORD xfSecsWant = (DWORD)(CdPlayXfadeSec() * 75.f + 0.5f);
+	DWORD xfPrep = xfSecsWant * 2u + 450u;
+	if (xfPrep > 3000u) xfPrep = 3000u;
+	if (xfPrep < xfSecsWant + 150u) xfPrep = xfSecsWant + 150u;
 	AudioUpscaler* upPtr = useUp ? &up : NULL;
 
 	while (!InterlockedCompareExchange(&self->m_playStop, 0, 0) && self->m_alive) {
@@ -2472,6 +2577,8 @@ UINT __stdcall CCdPlayerDlg::PlayThread(void* p)
 				xfNext = -1;
 				xfHoldN = xfHoldPos = 0;
 				if (xfHold) { free(xfHold); xfHold = NULL; xfHoldCap = 0; }
+				xfCurN = 0;
+				if (xfCur) { free(xfCur); xfCur = NULL; xfCurCap = 0; xfCurLba = 0; }
 				continue;
 			}
 			if (end > loopB) end = loopB;
@@ -2485,36 +2592,38 @@ UINT __stdcall CCdPlayerDlg::PlayThread(void* p)
 			|| fabsf(pscale - 1.f) > 0.02f || rb != NULL || loN > 0);
 
 		DWORD nsec = CD_PLAY_SECS;
-		BYTE* work = pcm[next];
 		int workN = 0;
 		BOOL haveSrc = FALSE;
+		BOOL fromRam = FALSE;
+		const BOOL abOn = (loopB > loopA + 8);
+		DWORD remainNow = (end > lba) ? (end - lba) : 0;
+		if (lba + nsec > end) nsec = end - lba;
 
-		if (!wantRb) {
-			if (discEnded) {
-				self->PostMessage(WM_CD_ENDED, 0, 0);
-				break;
+		if (!abOn && xfSecsWant >= 8 && xfCur && nsec > 0 && lba >= xfCurLba) {
+			const int off = (int)(lba - xfCurLba) * 2352;
+			if (off >= 0 && off < xfCurN) {
+				int haveB = xfCurN - off;
+				DWORD haveSec = (DWORD)(haveB / 2352);
+				if (haveSec > 0) {
+					if (haveSec < nsec) nsec = haveSec;
+					memcpy(pcm[next], xfCur + off, (size_t)nsec * 2352);
+					workN = (int)(nsec * 2352);
+					haveSrc = TRUE;
+					fromRam = TRUE;
+				}
 			}
-			if (lba + nsec > end) nsec = end - lba;
-			if (nsec == 0) {
-				self->PostMessage(WM_CD_ENDED, 0, 0);
-				break;
-			}
-			EnterCriticalSection(&self->m_cdCs);
-			HANDLE h = self->m_hCd;
-			BOOL rd = (h && h != INVALID_HANDLE_VALUE) ? CdReadSectors(h, lba, nsec, pcm[next], bufBytes) : FALSE;
-			LeaveCriticalSection(&self->m_cdCs);
-			if (!rd) {
-				self->PostMessage(WM_CD_ENDED, 1, 0);
-				break;
-			}
-			workN = (int)(nsec * 2352);
-			haveSrc = TRUE;
 		}
-		else if (!discEnded && loN < bufBytes) {
-			if (lba + nsec > end) nsec = end - lba;
-			if (nsec == 0)
-				discEnded = TRUE;
-			else {
+
+		if (!fromRam) {
+			if (!wantRb) {
+				if (discEnded) {
+					self->PostMessage(WM_CD_ENDED, 0, 0);
+					break;
+				}
+				if (nsec == 0) {
+					self->PostMessage(WM_CD_ENDED, 0, 0);
+					break;
+				}
 				EnterCriticalSection(&self->m_cdCs);
 				HANDLE h = self->m_hCd;
 				BOOL rd = (h && h != INVALID_HANDLE_VALUE) ? CdReadSectors(h, lba, nsec, pcm[next], bufBytes) : FALSE;
@@ -2526,65 +2635,60 @@ UINT __stdcall CCdPlayerDlg::PlayThread(void* p)
 				workN = (int)(nsec * 2352);
 				haveSrc = TRUE;
 			}
+			else if (!discEnded && loN < bufBytes) {
+				if (nsec == 0)
+					discEnded = TRUE;
+				else {
+					EnterCriticalSection(&self->m_cdCs);
+					HANDLE h = self->m_hCd;
+					BOOL rd = (h && h != INVALID_HANDLE_VALUE) ? CdReadSectors(h, lba, nsec, pcm[next], bufBytes) : FALSE;
+					LeaveCriticalSection(&self->m_cdCs);
+					if (!rd) {
+						self->PostMessage(WM_CD_ENDED, 1, 0);
+						break;
+					}
+					workN = (int)(nsec * 2352);
+					haveSrc = TRUE;
+				}
+			}
+			if (haveSrc && !abOn && xfSecsWant >= 8 && remainNow <= xfPrep) {
+				const int wantCur = (int)remainNow * 2352;
+				if (!xfCur) {
+					xfCurLba = lba;
+					CdXfadeEnsure(&xfCur, &xfCurN, &xfCurCap, wantCur);
+				}
+				if (xfCur && lba >= xfCurLba) {
+					const int off = (int)(lba - xfCurLba) * 2352;
+					if (off <= xfCurN && CdXfadeEnsure(&xfCur, &xfCurN, &xfCurCap, off + workN)) {
+						memcpy(xfCur + off, pcm[next], (size_t)workN);
+						if (off + workN > xfCurN) xfCurN = off + workN;
+					}
+				}
+			}
 		}
 
 		if (haveSrc && workN > 0) {
-			const BOOL abOn = (loopB > loopA + 8);
 			if (!abOn && xfSecsWant >= 8) {
 				DWORD remain = (end > lba) ? (end - lba) : 0;
+				if (xfNext < 0 && remain <= xfPrep) {
+					xfNext = CdXfadePickNext(self);
+					if (xfNext >= 0) xfLba = self->m_startLba[xfNext];
+				}
 				if (remain <= xfSecsWant) {
-					if (xfNext < 0) {
-						if (self->m_shuffle.GetCheck() && self->m_trackN > 1) {
-							xfNext = (int)((GetTickCount() / 17) % (DWORD)self->m_trackN);
-							if (xfNext == self->m_curTrack) xfNext = (xfNext + 1) % self->m_trackN;
-						}
-						else {
-							xfNext = self->m_curTrack + 1;
-							if (xfNext >= self->m_trackN)
-								xfNext = self->m_repeat.GetCheck() ? 0 : -1;
-						}
-						if (xfNext >= 0) xfLba = self->m_startLba[xfNext];
-					}
-					if (xfNext >= 0 && xfNext < self->m_trackN && xfHoldN == 0) {
-						if (!xfHold) {
-							xfHoldCap = (int)xfSecsWant * 2352;
-							if (xfHoldCap < bufBytes) xfHoldCap = bufBytes;
-							xfHold = (BYTE*)malloc((size_t)xfHoldCap);
-							xfHoldPos = 0;
-						}
-						while (xfHold && xfHoldN + 2352 <= xfHoldCap && xfLba < self->m_endLba[xfNext]
-							&& !InterlockedCompareExchange(&self->m_playStop, 0, 0)) {
-							DWORD n2 = 32;
-							if ((int)(n2 * 2352) > xfHoldCap - xfHoldN)
-								n2 = (DWORD)((xfHoldCap - xfHoldN) / 2352);
-							if (xfLba + n2 > self->m_endLba[xfNext])
-								n2 = self->m_endLba[xfNext] - xfLba;
-							if (n2 == 0) break;
-							EnterCriticalSection(&self->m_cdCs);
-							HANDLE h2 = self->m_hCd;
-							BOOL rd2 = (h2 && h2 != INVALID_HANDLE_VALUE)
-								? CdReadSectors(h2, xfLba, n2, xfHold + xfHoldN, (DWORD)(xfHoldCap - xfHoldN)) : FALSE;
-							LeaveCriticalSection(&self->m_cdCs);
-							if (!rd2) break;
-							xfHoldN += (int)(n2 * 2352);
-							xfLba += n2;
-						}
-					}
-					if (xfHold && xfHoldPos < xfHoldN) {
+					const int fadeOff = (int)(xfSecsWant - remain) * 2352;
+					if (xfHold && fadeOff >= 0 && fadeOff < xfHoldN) {
 						int mixN = workN;
-						if (xfHoldPos + mixN > xfHoldN) mixN = xfHoldN - xfHoldPos;
-						if (mixN > 0) {
-							const BYTE* nxt = xfHold + xfHoldPos;
-							if (mixN < workN) {
-								memcpy(xfBuf, nxt, (size_t)mixN);
-								ZeroMemory(xfBuf + mixN, (size_t)(workN - mixN));
-								nxt = xfBuf;
-							}
-							const float t0 = 1.f - (float)remain / (float)xfSecsWant;
-							const float t1 = 1.f - (float)(remain > nsec ? remain - nsec : 0) / (float)xfSecsWant;
-							CdMixEqualPower(pcm[next], nxt, workN, t0, t1);
-							xfHoldPos += mixN;
+						if (fadeOff + mixN > xfHoldN) mixN = xfHoldN - fadeOff;
+						const BYTE* nxt = xfHold + fadeOff;
+						if (mixN < workN) {
+							memcpy(xfBuf, nxt, (size_t)mixN);
+							ZeroMemory(xfBuf + mixN, (size_t)(workN - mixN));
+							nxt = xfBuf;
 						}
+						const float t0 = 1.f - (float)remain / (float)xfSecsWant;
+						const float t1 = 1.f - (float)(remain > nsec ? remain - nsec : 0) / (float)xfSecsWant;
+						CdMixEqualPower(pcm[next], nxt, workN, t0, t1);
+						xfHoldPos = fadeOff + mixN;
 					}
 				}
 			}
@@ -2592,17 +2696,18 @@ UINT __stdcall CCdPlayerDlg::PlayThread(void* p)
 			self->m_playFrames += (int)nsec;
 			self->PostMessage(WM_CD_POS, self->m_playFrames, self->m_curTrack);
 			if (self->m_playLba >= end && xfNext >= 0 && xfNext < self->m_trackN) {
+				const DWORD used = (DWORD)(xfHoldPos / 2352);
 				self->m_curTrack = xfNext;
-				self->m_playLba = xfLba;
+				self->m_playLba = self->m_startLba[xfNext] + used;
 				self->m_playEnd = self->m_endLba[xfNext];
-				self->m_playFrames = (int)(xfLba - self->m_startLba[xfNext]);
+				self->m_playFrames = (int)used;
 				self->PostMessage(WM_CD_POS, self->m_playFrames, xfNext);
-				eqReset = TRUE;
 				discEnded = FALSE;
 				xfNext = -1;
 				xfHoldN = xfHoldPos = 0;
 				if (xfHold) { free(xfHold); xfHold = NULL; xfHoldCap = 0; }
-				if (useUp) up.Reset();
+				xfCurN = 0;
+				if (xfCur) { free(xfCur); xfCur = NULL; xfCurCap = 0; xfCurLba = 0; }
 			}
 		}
 
@@ -2682,16 +2787,51 @@ UINT __stdcall CCdPlayerDlg::PlayThread(void* p)
 		waveOutWrite(hwo, &hdr[next], sizeof(WAVEHDR));
 		next = (next + 1) % CD_PLAY_BUFS;
 		CdWaveWait(self, hdr);
+		if (!InterlockedCompareExchange(&self->m_playStop, 0, 0) && xfSecsWant >= 8u) {
+			const int xfWantBytes = (int)xfSecsWant * 2352;
+			const DWORD loopA2 = self->m_loopStartLba;
+			const DWORD loopB2 = self->m_loopEndLba;
+			if (!(loopB2 > loopA2 + 8)) {
+				DWORD rem = (self->m_playEnd > self->m_playLba) ? (self->m_playEnd - self->m_playLba) : 0;
+				if (rem <= xfPrep) {
+					if (xfNext < 0) {
+						xfNext = CdXfadePickNext(self);
+						if (xfNext >= 0) xfLba = self->m_startLba[xfNext];
+					}
+					const DWORD curEnd = self->m_playEnd;
+					const DWORD curCover = xfCur ? (xfCurLba + (DWORD)(xfCurN / 2352)) : 0;
+					if (!xfCur && rem > 0) {
+						xfCurLba = self->m_playLba;
+						CdXfadeEnsure(&xfCur, &xfCurN, &xfCurCap, (int)rem * 2352);
+					}
+					if (xfCur && curCover < curEnd) {
+						DWORD fetch = xfCurLba + (DWORD)(xfCurN / 2352);
+						if (fetch < curEnd)
+							CdXfadeReadOnce(self, &fetch, curEnd, xfCur, &xfCurN, xfCurCap, 32u);
+					}
+					else if (xfNext >= 0 && xfNext < self->m_trackN && xfHoldN < xfWantBytes
+						&& CdWaveQueued(hdr) >= CCdPlayerDlg::CD_PLAY_BUFS - 4) {
+						if (!xfHold)
+							CdXfadeEnsure(&xfHold, &xfHoldN, &xfHoldCap, xfWantBytes);
+						if (xfHold)
+							CdXfadeReadOnce(self, &xfLba, self->m_endLba[xfNext], xfHold, &xfHoldN, xfHoldCap,
+								xfHoldN <= 0 ? 8u : 32u);
+					}
+				}
+			}
+		}
 	}
 	CdRbDestroy(rb);
 	if (leftover) free(leftover);
 	if (dLo) free(dLo);
 	if (xfHold) free(xfHold);
+	if (xfCur) free(xfCur);
 	waveOutReset(hwo);
 	for (int i = 0; i < CD_PLAY_BUFS; ++i) {
 		waveOutUnprepareHeader(hwo, &hdr[i], sizeof(WAVEHDR));
 		if (outAlloc && outP[i] && outP[i] != pcm[i]) free(outP[i]);
 	}
+	free(pcmBlk);
 	waveOutClose(hwo);
 	self->m_hwo = NULL;
 	return 0;

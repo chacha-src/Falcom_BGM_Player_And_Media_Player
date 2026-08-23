@@ -3036,9 +3036,9 @@ void CMediaPlayerDlg::DoLayout()
 	int volLblX = volSlX - volLblW;
 	const int freeEnd = volLblX - gap;
 
-	// 幅に応じて 0=フル / 1=EQ系短縮 / 2=フェード・JK等も短縮 / 3=最小幅用の超短縮
-	// 各段階は「その段階の幅でもまだ主音量に食い込むか」で次へ進む(同条件で2と3が同時発火しないこと)。
-	// ラベル付きボタンは左に約16pxのアイコンを置くので、その分を幅に乗せる。前/次はアイコンのみ。
+	// 幅に応じて 0=フル全文 / 1=EQ系を約半分幅(全文を横縮小) / 2=フェード等も半分幅 / 3=半分未満で3段階(短縮)
+	// 各段階は「その段階の幅でもまだ主音量に食い込むか」で次へ進む。
+	// ラベル付きは左に約16pxのアイコンを置くので、その分を幅に乗せる。前/次はアイコンのみ。
 	const int icoAdd = (int)(20 * s);
 	const int prevW = max(1, (int)(40 * s));
 	const int playW = max(1, (int)(48 * s) + icoAdd);
@@ -3048,7 +3048,7 @@ void CMediaPlayerDlg::DoLayout()
 	const int fadeFull = max(1, (int)(92 * s) + icoAdd), fadeShort = max(1, (int)(56 * s) + icoAdd), fadeTiny = max(1, (int)(32 * s));
 	const int jkFull = max(1, (int)(62 * s) + icoAdd), jkShort = max(1, (int)(40 * s) + icoAdd), jkTiny = max(1, (int)(32 * s));
 	const int ebwFull = max(1, (int)(84 * s) + icoAdd), pbwFull = max(1, (int)(128 * s) + icoAdd), abwFull = max(1, (int)(88 * s) + icoAdd), prbwFull = max(1, (int)(56 * s) + icoAdd);
-	const int ebwShort = max(1, (int)(42 * s) + icoAdd), pbwShort = max(1, (int)(56 * s) + icoAdd), abwShort = max(1, (int)(48 * s) + icoAdd), prbwShort = max(1, (int)(40 * s) + icoAdd);
+	const int ebwShort = max(1, (int)(52 * s) + icoAdd), pbwShort = max(1, (int)(72 * s) + icoAdd), abwShort = max(1, (int)(54 * s) + icoAdd), prbwShort = max(1, (int)(44 * s) + icoAdd);
 	const int ebwTiny = max(1, (int)(32 * s)), pbwTiny = max(1, (int)(32 * s)), abwTiny = max(1, (int)(32 * s)), prbwTiny = max(1, (int)(32 * s));
 
 	const int baseLeft = M + prevW + gap + playW + gap + stopW + gap + nextW + (int)(8 * s);
@@ -3081,16 +3081,6 @@ void CMediaPlayerDlg::DoLayout()
 		if (shortLv >= 3) {
 			m_fadeout.SetWindowText(LL14(L"FO", L"FO", L"Fd", L"Fd", L"Fd", L"페", L"淡", L"تل", L"Зт", L"AO", L"Fd", L"Fo", L"Zan", L"So"));
 			m_jacket.SetWindowText(LL14(L"JK", L"JK", L"Poc", L"Cop", L"Car", L"JK", L"封", L"غل", L"Обл", L"Cov", L"Cap", L"Oms", L"Okł", L"Kap"));
-		}
-		else if (shortLv >= 2) {
-			m_fadeout.SetWindowText(LL14(L"フェード", L"Fade", L"Fondu", L"Fade", L"Fade", L"페이드", L"淡出", L"تلاشي", L"Затухание", L"Fade", L"Fade", L"Fade", L"Fade", L"Fade"));
-			m_jacket.SetWindowText(LL14(L"JK", L"JK", L"Poc", L"Cop", L"Car", L"JK", L"封", L"غل", L"Обл", L"Cov", L"Cap", L"Oms", L"Okł", L"Kap"));
-		}
-		else {
-			m_fadeout.SetWindowText(LL14(L"フェードアウト", L"Fade out", L"Fondu", L"Dissolvenza", L"Desvanecer", L"페이드 아웃", L"淡出", L"تلاشي", L"Затухание", L"Ausblenden", L"Desvanecer", L"Uitfaden", L"Zanikanie", L"Soluklaştır"));
-			m_jacket.SetWindowText(LL14(L"ジャケット", L"Jacket", L"Pochette", L"Copertina", L"Caratula", L"자켓", L"封面", L"الغلاف", L"Обложка", L"Cover", L"Capa", L"Omslag", L"Okładka", L"Kapak"));
-		}
-		if (shortLv >= 3) {
 			if (m_eq.GetSafeHwnd())
 				m_eq.SetWindowText(LL14(L"EQ", L"EQ", L"Égal.", L"EQ", L"Ecual.", L"EQ", L"均衡", L"معادل", L"Экв.", L"EQ", L"Equal.", L"EQ", L"Kor.", L"Ekol."));
 			if (m_piano.GetSafeHwnd())
@@ -3100,17 +3090,9 @@ void CMediaPlayerDlg::DoLayout()
 			if (m_pro.GetSafeHwnd())
 				m_pro.SetWindowText(LL14(L"詳", L"E", L"E", L"E", L"E", L"상", L"详", L"ت", L"Д", L"E", L"E", L"E", L"E", L"E"));
 		}
-		else if (shortLv >= 1) {
-			if (m_eq.GetSafeHwnd())
-				m_eq.SetWindowText(LL14(L"EQ", L"EQ", L"Égal.", L"EQ", L"Ecual.", L"EQ", L"均衡", L"معادل", L"Экв.", L"EQ", L"Equal.", L"EQ", L"Kor.", L"Ekol."));
-			if (m_piano.GetSafeHwnd())
-				m_piano.SetWindowText(LL14(L"ロール", L"Roll", L"Rouleau", L"Roll", L"Rollo", L"롤", L"卷帘", L"رول", L"Ролл", L"Rolle", L"Rolo", L"Rol", L"Rolka", L"Rulo"));
-			if (m_analyzer.GetSafeHwnd())
-				m_analyzer.SetWindowText(LL14(L"アナ", L"Ana", L"Ana", L"Ana", L"Ana", L"아나", L"分析", L"محلل", L"Ана", L"Ana", L"Ana", L"Ana", L"Ana", L"Ana"));
-			if (m_pro.GetSafeHwnd())
-				m_pro.SetWindowText(LL14(L"詳細", L"Extra", L"Extra", L"Extra", L"Extra", L"상세", L"详情", L"تفاصيل", L"Доп.", L"Extra", L"Extra", L"Extra", L"Extra", L"Ek"));
-		}
 		else {
+			m_fadeout.SetWindowText(LL14(L"フェードアウト", L"Fade out", L"Fondu", L"Dissolvenza", L"Desvanecer", L"페이드 아웃", L"淡出", L"تلاشي", L"Затухание", L"Ausblenden", L"Desvanecer", L"Uitfaden", L"Zanikanie", L"Soluklaştır"));
+			m_jacket.SetWindowText(LL14(L"ジャケット", L"Jacket", L"Pochette", L"Copertina", L"Caratula", L"자켓", L"封面", L"الغلاف", L"Обложка", L"Cover", L"Capa", L"Omslag", L"Okładka", L"Kapak"));
 			if (m_eq.GetSafeHwnd())
 				m_eq.SetWindowText(LL14(L"イコライザー", L"Equalizer", L"Egaliseur", L"Equalizzatore", L"Ecualizador", L"이퀄라이저", L"均衡器", L"المعادل", L"Эквалайзер", L"Equalizer", L"Equalizador", L"Equalizer", L"Korektor", L"Ekolayzer"));
 			if (m_piano.GetSafeHwnd())
@@ -3171,10 +3153,10 @@ void CMediaPlayerDlg::DoLayout()
 	auto rightNeed = [&](int lv) -> int {
 		// folder, st, supe, prompt?, cmdroll?
 		const int fol = (int)((lv >= 2 ? 40 : 54) * s) + icoAdd;
-		const int st = (int)((lv >= 1 ? 36 : 72) * s) + icoAdd;
-		const int supe = (int)((lv >= 1 ? 40 : 62) * s) + icoAdd;
-		const int pr = m_prompt.GetSafeHwnd() ? (int)((lv >= 1 ? 36 : 76) * s) + icoAdd : 0;
-		const int roll = m_cmdroll.GetSafeHwnd() ? (int)((lv >= 1 ? 36 : 56) * s) + icoAdd : 0;
+		const int st = (int)((lv >= 2 ? 36 : lv >= 1 ? 48 : 72) * s) + icoAdd;
+		const int supe = (int)((lv >= 2 ? 40 : lv >= 1 ? 50 : 62) * s) + icoAdd;
+		const int pr = m_prompt.GetSafeHwnd() ? (int)((lv >= 2 ? 36 : lv >= 1 ? 52 : 76) * s) + icoAdd : 0;
+		const int roll = m_cmdroll.GetSafeHwnd() ? (int)((lv >= 2 ? 36 : lv >= 1 ? 44 : 56) * s) + icoAdd : 0;
 		int n = 1 + (st > 0 ? 1 : 0) + (supe > 0 ? 1 : 0) + (pr > 0 ? 1 : 0) + (roll > 0 ? 1 : 0);
 		return fol + st + supe + pr + roll + optGap * max(0, n - 1);
 	};
@@ -3184,8 +3166,8 @@ void CMediaPlayerDlg::DoLayout()
 
 	if (!liveResize && optLv != m_mpOptShort) {
 		m_mpOptShort = optLv;
-		m_mpPromptShort = (optLv >= 1) ? 1 : 0;
-		m_mpCmdRollShort = (optLv >= 1) ? 1 : 0;
+		m_mpPromptShort = (optLv >= 2) ? 1 : 0;
+		m_mpCmdRollShort = (optLv >= 2) ? 1 : 0;
 		if (optLv >= 2) {
 			m_renzoku.SetWindowText(LL14(L"連続", L"Cont", L"Cont", L"Cont", L"Cont", L"연속", L"连续", L"متتابع", L"Подр.", L"Folge", L"Cont", L"Doorl.", L"Ciagle", L"Surekli"));
 			m_loop.SetWindowText(LL14(L"ループ", L"Loop", L"Boucle", L"Loop", L"Bucle", L"루프", L"循环", L"حلقة", L"Цикл", L"Loop", L"Loop", L"Lus", L"Petla", L"Dongu"));
@@ -3204,12 +3186,12 @@ void CMediaPlayerDlg::DoLayout()
 			m_xfadeL.SetWindowText(LL14(L"秒", L"sec", L"s", L"s", L"s", L"초", L"秒", L"ث", L"с", L"s", L"s", L"s", L"s", L"sn"));
 		}
 		if (m_st.GetSafeHwnd()) {
-			m_st.SetWindowText(optLv >= 1
+			m_st.SetWindowText(optLv >= 2
 				? LL14(L"ST", L"ST", L"ST", L"ST", L"ST", L"ST", L"立体", L"ST", L"СТ", L"ST", L"ST", L"ST", L"ST", L"ST")
 				: LL14(L"ステレオ表示", L"Stereo view", L"Vue stereo", L"Vista stereo", L"Vista estereo", L"스테레오 표시", L"立体声显示", L"عرض ستيريو", L"Стерео", L"Stereo", L"Visao stereo", L"Stereo", L"Widok stereo", L"Stereo gosterim"));
 		}
 		if (m_supe.GetSafeHwnd()) {
-			m_supe.SetWindowText(optLv >= 1
+			m_supe.SetWindowText(optLv >= 2
 				? LL14(L"SPA", L"SPA", L"SPA", L"SPA", L"SPA", L"SPA", L"频谱", L"SPA", L"СП", L"SPA", L"SPA", L"SPA", L"SPA", L"SPA")
 				: LL14(L"スペアナ", L"Spectrum", L"Spectre", L"Spettro", L"Espectro", L"스펙트럼", L"频谱", L"الطيف", L"Спектр", L"Spektrum", L"Espectro", L"Spectrum", L"Widmo", L"Spektrum"));
 		}
@@ -3218,12 +3200,12 @@ void CMediaPlayerDlg::DoLayout()
 		else if (m_folder.GetSafeHwnd())
 			m_folder.SetWindowText(LL14(L"フォルダ", L"Folder", L"Dossier", L"Cartella", L"Carpeta", L"폴더", L"文件夹", L"مجلد", L"Папка", L"Ordner", L"Pasta", L"Map", L"Folder", L"Klasor"));
 		if (m_prompt.GetSafeHwnd()) {
-			m_prompt.SetWindowText(optLv >= 1
+			m_prompt.SetWindowText(optLv >= 2
 				? LL14(L"指示", L"Pmt", L"Pmt", L"Pmt", L"Pmt", L"지시", L"指示", L"توجيه", L"Прм", L"Pmt", L"Pmt", L"Pmt", L"Pmt", L"Pmt")
 				: LL14(L"プロンプト", L"Prompt", L"Prompt", L"Prompt", L"Prompt", L"프롬프트", L"提示", L"موجه", L"Промпт", L"Prompt", L"Prompt", L"Prompt", L"Prompt", L"Istem"));
 		}
 		if (m_cmdroll.GetSafeHwnd()) {
-			m_cmdroll.SetWindowText(optLv >= 1
+			m_cmdroll.SetWindowText(optLv >= 2
 				? LL14(L"巻", L"Rol", L"Rol", L"Rol", L"Rol", L"롤", L"卷", L"Rol", L"Rol", L"Rol", L"Rol", L"Rol", L"Rol", L"Rol")
 				: LL14(L"ロール", L"Roll", L"Rouleau", L"Roll", L"Roll", L"롤", L"卷轴", L"Roll", L"Roll", L"Roll", L"Roll", L"Roll", L"Roll", L"Rulo"));
 		}
@@ -3250,10 +3232,10 @@ void CMediaPlayerDlg::DoLayout()
 	MoveCtl(&m_xfadeL, cx, optY, lw[7], chkRowH);
 
 	const int folW = (int)((optLv >= 2 ? 40 : 54) * s) + icoAdd;
-	const int stW = (int)((optLv >= 1 ? 36 : 72) * s) + icoAdd;
-	const int supeW = (int)((optLv >= 1 ? 40 : 62) * s) + icoAdd;
-	const int prW = (int)((optLv >= 1 ? 36 : 76) * s) + icoAdd;
-	const int rollW = (int)((optLv >= 1 ? 36 : 56) * s) + icoAdd;
+	const int stW = (int)((optLv >= 2 ? 36 : optLv >= 1 ? 48 : 72) * s) + icoAdd;
+	const int supeW = (int)((optLv >= 2 ? 40 : optLv >= 1 ? 50 : 62) * s) + icoAdd;
+	const int prW = (int)((optLv >= 2 ? 36 : optLv >= 1 ? 52 : 76) * s) + icoAdd;
+	const int rollW = (int)((optLv >= 2 ? 36 : optLv >= 1 ? 44 : 56) * s) + icoAdd;
 	int rcx = W - M - folW;
 	MoveCtl(&m_folder, rcx, by2, folW, ch);
 	rcx -= optGap + stW;
@@ -3385,7 +3367,7 @@ void CMediaPlayerDlg::DoLayout()
 				(int)(56 * s), (int)(52 * s), (int)(60 * s), (int)(60 * s), (int)(68 * s), (int)(60 * s)
 			};
 			const int wMid[6] = {
-				(int)(40 * s), (int)(40 * s), (int)(40 * s), (int)(40 * s), (int)(40 * s), (int)(40 * s)
+				(int)(48 * s), (int)(48 * s), (int)(48 * s), (int)(48 * s), (int)(52 * s), (int)(48 * s)
 			};
 			const int wTiny[6] = {
 				(int)(26 * s), (int)(26 * s), (int)(26 * s), (int)(26 * s), (int)(26 * s), (int)(26 * s)
@@ -3410,20 +3392,6 @@ void CMediaPlayerDlg::DoLayout()
 					if (m_editPaste.GetSafeHwnd()) m_editPaste.SetWindowText(L"V");
 					if (m_editUndo.GetSafeHwnd()) m_editUndo.SetWindowText(L"↶");
 					if (m_editRedo.GetSafeHwnd()) m_editRedo.SetWindowText(L"↷");
-				}
-				else if (editLv >= 1) {
-					if (m_editSelAll.GetSafeHwnd())
-						m_editSelAll.SetWindowText(LL14(L"全選", L"All", L"Tout", L"Tutti", L"Todo", L"모두", L"全选", L"الكل", L"Все", L"Alles", L"Tudo", L"Alles", L"Wszyst.", L"Tumu"));
-					if (m_editCopy.GetSafeHwnd())
-						m_editCopy.SetWindowText(LL14(L"コピー", L"Copy", L"Copier", L"Copia", L"Copiar", L"복사", L"复制", L"نسخ", L"Коп.", L"Kop.", L"Copiar", L"Kop.", L"Kopiuj", L"Kopya"));
-					if (m_editCut.GetSafeHwnd())
-						m_editCut.SetWindowText(LL14(L"切取", L"Cut", L"Coup.", L"Taglia", L"Cortar", L"자르기", L"剪切", L"قص", L"Выр.", L"Ausschn.", L"Recort.", L"Knip", L"Wytnij", L"Kes"));
-					if (m_editPaste.GetSafeHwnd())
-						m_editPaste.SetWindowText(LL14(L"貼付", L"Paste", L"Coller", L"Incolla", L"Pegar", L"붙여넣기", L"粘贴", L"لصق", L"Вст.", L"Einf.", L"Colar", L"Plak", L"Wklej", L"Yapist."));
-					if (m_editUndo.GetSafeHwnd())
-						m_editUndo.SetWindowText(LL14(L"戻す", L"Undo", L"Annul.", L"Annulla", L"Deshac.", L"취소", L"撤销", L"تراجع", L"Отм.", L"Ruckg.", L"Desfaz.", L"Onged.", L"Cofnij", L"Geri"));
-					if (m_editRedo.GetSafeHwnd())
-						m_editRedo.SetWindowText(LL14(L"進む", L"Redo", L"Retabl.", L"Ripeti", L"Rehac.", L"다시", L"重做", L"إعادة", L"Повт.", L"Wdh.", L"Refaz.", L"Opn.", L"Ponow", L"Yinele"));
 				}
 				else {
 					if (m_editSelAll.GetSafeHwnd())
@@ -3770,7 +3738,7 @@ void CMediaPlayerDlg::DoLayout()
 	const int exitLeft = W - M - exW;
 
 	const int swFull = max(1, (int)(120 * s) + icoAdd), swMid = max(1, (int)(72 * s) + icoAdd), swShort = max(1, (int)(40 * s));
-	const int rsFull = max(1, (int)(100 * s)), rsMid = max(1, (int)(56 * s)), rsShort = max(1, (int)(36 * s));
+	const int rsFull = max(1, (int)(100 * s) + icoAdd), rsMid = max(1, (int)(56 * s) + icoAdd), rsShort = max(1, (int)(36 * s));
 	const int recFull = max(1, (int)(64 * s) + icoAdd), recMid = max(1, (int)(44 * s) + icoAdd), recShort = max(1, (int)(32 * s));
 	const int capFull = max(1, (int)(80 * s) + icoAdd), capMid = max(1, (int)(48 * s) + icoAdd), capShort = max(1, (int)(32 * s));
 	const int leadFull = swFull + gapLead + rsFull + gapLead + recFull + gapLead + capFull + gapLead;
@@ -3789,12 +3757,14 @@ void CMediaPlayerDlg::DoLayout()
 	};
 	const int botBit[12] = { 1, 2, 4, 8, 16, 32, 64, 128, 1024, 2048, 256, 512 };
 	const int wFull[12] = {
-		(int)(56 * s), (int)(52 * s), (int)(48 * s), (int)(56 * s),
-		(int)(60 * s), (int)(40 * s), (int)(56 * s), (int)(64 * s), (int)(48 * s), (int)(48 * s), (int)(52 * s), (int)(52 * s)
+		(int)(56 * s) + icoAdd, (int)(52 * s) + icoAdd, (int)(48 * s) + icoAdd, (int)(56 * s) + icoAdd,
+		(int)(60 * s) + icoAdd, (int)(40 * s) + icoAdd, (int)(56 * s) + icoAdd, (int)(64 * s) + icoAdd,
+		(int)(48 * s) + icoAdd, (int)(48 * s) + icoAdd, (int)(52 * s) + icoAdd, (int)(52 * s) + icoAdd
 	};
 	const int wMid[12] = {
-		(int)(36 * s), (int)(36 * s), (int)(36 * s), (int)(40 * s),
-		(int)(40 * s), (int)(32 * s), (int)(40 * s), (int)(44 * s), (int)(36 * s), (int)(36 * s), (int)(36 * s), (int)(36 * s)
+		(int)(40 * s) + icoAdd, (int)(40 * s) + icoAdd, (int)(40 * s) + icoAdd, (int)(40 * s) + icoAdd,
+		(int)(40 * s) + icoAdd, (int)(36 * s) + icoAdd, (int)(40 * s) + icoAdd, (int)(44 * s) + icoAdd,
+		(int)(40 * s) + icoAdd, (int)(40 * s) + icoAdd, (int)(40 * s) + icoAdd, (int)(40 * s) + icoAdd
 	};
 	const int wShort[12] = {
 		(int)(28 * s), (int)(28 * s), (int)(28 * s), (int)(28 * s),
@@ -3839,33 +3809,6 @@ void CMediaPlayerDlg::DoLayout()
 			if (m_botCd.GetSafeHwnd()) m_botCd.SetWindowText(L"CD");
 			if (m_botMaze.GetSafeHwnd()) m_botMaze.SetWindowText(L"Mz");
 			if (m_botRace.GetSafeHwnd()) m_botRace.SetWindowText(L"Rc");
-		}
-		else if (botShortLv >= 1) {
-			m_switch.SetWindowText(LL14(L"ファルコム", L"Falcom", L"Falcom", L"Falcom", L"Falcom", L"팔콤", L"Falcom", L"Falcom", L"Falcom", L"Falcom", L"Falcom", L"Falcom", L"Falcom", L"Falcom"));
-			m_resetdata.SetWindowText(LL14(L"リセット", L"Reset", L"RAZ", L"Reset", L"Reset", L"초기화", L"重置", L"إعادة", L"Сброс", L"Reset", L"Reset", L"Reset", L"Reset", L"Sıfırla"));
-			m_record.SetWindowText(LL14(L"録音", L"Record", L"Enreg.", L"Registra", L"Grabar", L"녹음", L"录音", L"تسجيل", L"Запись", L"Aufnahme", L"Gravar", L"Opnemen", L"Nagraj", L"Kaydet"));
-			m_capture.SetWindowText(LL14(L"キャプチャ", L"Capture", L"Capture", L"Cattura", L"Captura", L"캡처", L"捕获", L"التقاط", L"Захват", L"Aufnahme", L"Captura", L"Opname", L"Przechwyt", L"Yakala"));
-			if (m_botDj.GetSafeHwnd()) m_botDj.SetWindowText(L"DJ");
-			if (m_botTag.GetSafeHwnd())
-				m_botTag.SetWindowText(LL14(L"タグ", L"Tags", L"Tags", L"Tag", L"Tags", L"태그", L"标签", L"وسوم", L"Теги", L"Tags", L"Tags", L"Tags", L"Tagi", L"Etiket"));
-			if (m_botBpm.GetSafeHwnd()) m_botBpm.SetWindowText(L"BPM");
-			if (m_botSleep.GetSafeHwnd())
-				m_botSleep.SetWindowText(LL14(L"スリープ", L"Sleep", L"Veille", L"Sleep", L"Sueño", L"슬립", L"睡眠", L"نوم", L"Сон", L"Schlaf", L"Sono", L"Slaap", L"Sen", L"Uyku"));
-			if (m_botMirror.GetSafeHwnd())
-				m_botMirror.SetWindowText(LL14(L"ミラー", L"Mirror", L"Miroir", L"Mirror", L"Espejo", L"미러", L"镜像", L"مرآة", L"Зеркало", L"Spiegel", L"Espelho", L"Spiegel", L"Lustro", L"Ayna"));
-			if (m_botSsViz.GetSafeHwnd()) m_botSsViz.SetWindowText(L"SS");
-			if (m_botAlarm.GetSafeHwnd())
-				m_botAlarm.SetWindowText(LL14(L"アラーム", L"Alarm", L"Alarme", L"Sveglia", L"Alarma", L"알람", L"闹钟", L"منبه", L"Будильник", L"Wecker", L"Alarme", L"Wekker", L"Budzik", L"Alarm"));
-			if (m_botRemote.GetSafeHwnd())
-				m_botRemote.SetWindowText(LL14(L"リモート", L"Remote", L"Remote", L"Remote", L"Remoto", L"리모트", L"遥控", L"تحكم", L"Пульт", L"Remote", L"Remoto", L"Remote", L"Pilot", L"Uzaktan"));
-			if (m_botVst.GetSafeHwnd())
-				m_botVst.SetWindowText(LL14(L"VST", L"VST", L"VST", L"VST", L"VST", L"VST", L"VST", L"VST", L"VST", L"VST", L"VST", L"VST", L"VST", L"VST"));
-			if (m_botCd.GetSafeHwnd())
-				m_botCd.SetWindowText(LL14(L"CD", L"CD", L"CD", L"CD", L"CD", L"CD", L"CD", L"CD", L"CD", L"CD", L"CD", L"CD", L"CD", L"CD"));
-			if (m_botMaze.GetSafeHwnd())
-				m_botMaze.SetWindowText(LL14(L"迷路", L"Maze", L"Labyrinthe", L"Labirinto", L"Laberinto", L"미로", L"迷宫", L"متاهة", L"Лабиринт", L"Labyrinth", L"Labirinto", L"Doolhof", L"Labirynt", L"Labirent"));
-			if (m_botRace.GetSafeHwnd())
-				m_botRace.SetWindowText(LL14(L"レース", L"Race", L"Course", L"Gara", L"Carrera", L"레이스", L"竞速", L"سباق", L"Гонка", L"Rennen", L"Corrida", L"Race", L"Wyścig", L"Yarış"));
 		}
 		else {
 			m_switch.SetWindowText(LL14(L"ファルコム特化型へ", L"To Falcom screen", L"Vers ecran Falcom", L"Alla schermata Falcom", L"A pantalla Falcom", L"팔콤 화면으로", L"切换到Falcom画面", L"إلى شاشة Falcom", L"К экрану Falcom", L"Zum Falcom-Bildschirm", L"Para tela Falcom", L"Naar Falcom-scherm", L"Do ekranu Falcom", L"Falcom ekranına"));
@@ -4504,9 +4447,6 @@ void CMediaPlayerDlg::ApplyPauseButtonLabel()
 	}
 	else if (m_mpBtnShort >= 3) {
 		text.Empty();
-	}
-	else if (m_mpBtnShort >= 2) {
-		text = LL14(L"一時停", L"Pause", L"Pause", L"Pausa", L"Pausa", L"일시정", L"暂停", L"إيقاف", L"Пауза", L"Pause", L"Pausa", L"Pauze", L"Pauza", L"Duraklat");
 	}
 	else {
 		text = LL14(L"一時停止", L"Pause", L"Pause", L"Pausa", L"Pausa", L"일시정지", L"暂停", L"إيقاف مؤقت", L"Пауза", L"Pause", L"Pausar", L"Pauze", L"Pauza", L"Duraklat");
