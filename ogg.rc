@@ -1,4 +1,4 @@
-// Microsoft Visual C++ generated resource script.
+﻿// Microsoft Visual C++ generated resource script.
 //
 #pragma code_page(65001)
 
@@ -155,6 +155,50 @@ IDI_UI_SHARE            ICON                    "res\\ui_icons\\share.ico"
 
 IDI_UI_TUNE             ICON                    "res\\ui_icons\\tune.ico"
 
+IDI_CTL_CLOSE           ICON                    "res\\ui_ctl\\close.ico"
+IDI_CTL_MIN             ICON                    "res\\ui_ctl\\min.ico"
+IDI_CTL_MAX             ICON                    "res\\ui_ctl\\max.ico"
+IDI_CTL_RESTORE         ICON                    "res\\ui_ctl\\restore.ico"
+IDI_CTL_PIN             ICON                    "res\\ui_ctl\\pin.ico"
+IDI_CTL_PINOFF          ICON                    "res\\ui_ctl\\pinoff.ico"
+IDI_CTL_COG             ICON                    "res\\ui_ctl\\cog.ico"
+IDI_CTL_BOOK            ICON                    "res\\ui_ctl\\book.ico"
+IDI_CTL_PLAY            ICON                    "res\\ui_ctl\\play.ico"
+IDI_CTL_PAUSE           ICON                    "res\\ui_ctl\\pause.ico"
+IDI_CTL_STOP            ICON                    "res\\ui_ctl\\stop.ico"
+IDI_CTL_NEXT            ICON                    "res\\ui_ctl\\next.ico"
+IDI_CTL_PREV            ICON                    "res\\ui_ctl\\prev.ico"
+IDI_CTL_LOCK            ICON                    "res\\ui_ctl\\lock.ico"
+IDI_CTL_SEARCH          ICON                    "res\\ui_ctl\\search.ico"
+IDI_CTL_PLUS            ICON                    "res\\ui_ctl\\plus.ico"
+IDI_CTL_MINUS           ICON                    "res\\ui_ctl\\minus.ico"
+IDI_CTL_DELETE          ICON                    "res\\ui_ctl\\delete.ico"
+IDI_CTL_RECORD          ICON                    "res\\ui_ctl\\record.ico"
+IDI_CTL_LOOP            ICON                    "res\\ui_ctl\\loop.ico"
+IDI_CTL_SHUFFLE         ICON                    "res\\ui_ctl\\shuffle.ico"
+IDI_CTL_XFADE           ICON                    "res\\ui_ctl\\xfade.ico"
+IDI_CTL_CHEVUP          ICON                    "res\\ui_ctl\\chevup.ico"
+IDI_CTL_CHEVDOWN        ICON                    "res\\ui_ctl\\chevdown.ico"
+IDI_CTL_CHEVLEFT        ICON                    "res\\ui_ctl\\chevleft.ico"
+IDI_CTL_CHEVRIGHT       ICON                    "res\\ui_ctl\\chevright.ico"
+IDI_CTL_POWER           ICON                    "res\\ui_ctl\\power.ico"
+IDI_CTL_REFRESH         ICON                    "res\\ui_ctl\\refresh.ico"
+IDI_CTL_SLEEP           ICON                    "res\\ui_ctl\\sleep.ico"
+IDI_CTL_CHECK           ICON                    "res\\ui_ctl\\check.ico"
+IDI_CTL_STAR            ICON                    "res\\ui_ctl\\star.ico"
+IDI_CTL_FADE            ICON                    "res\\ui_ctl\\fade.ico"
+IDI_CTL_AB              ICON                    "res\\ui_ctl\\ab.ico"
+
+IDR_IW_FACE             RCDATA                  "res\\iw\\face.iwj"
+IDR_IW_BODY             RCDATA                  "res\\iw\\body.iwj"
+IDR_IW_BODY2            RCDATA                  "res\\iw\\body2.iwj"
+IDR_IW_LACE             RCDATA                  "res\\iw\\lace.iwj"
+IDR_IW_BOW              RCDATA                  "res\\iw\\bow.iwj"
+IDR_IW_BLUSH            RCDATA                  "res\\iw\\blush.iwj"
+IDR_IW_FLUID            RCDATA                  "res\\iw\\fluid.iwj"
+IDR_IW_ROTOR            RCDATA                  "res\\iw\\rotor.iwj"
+IDR_IW_VIBE             RCDATA                  "res\\iw\\vibe.iwj"
+
 
 /////////////////////////////////////////////////////////////////////////////
 //
@@ -204,6 +248,66 @@ IDR_S3TEX_M_FLOOR3      RCDATA                  "res\\s3tex\\m_floor3.png"
 IDR_S3TEX_M_MIRWALL     RCDATA                  "res\\s3tex\\m_mirwall.png"
 
 IDR_S3TEX_M_MIRFLOOR    RCDATA                  "res\\s3tex\\m_mirfloor.png"
+
+IDR_S3TEX_R_FOREST_D    RCDATA                  "res\\s3tex\\r_forest_d.png"
+
+IDR_S3TEX_R_RUINS_D     RCDATA                  "res\\s3tex\\r_ruins_d.png"
+
+IDR_S3TEX_R_OIL_D       RCDATA                  "res\\s3tex\\r_oil_d.png"
+
+IDR_S3TEX_R_NIGHT_D     RCDATA                  "res\\s3tex\\r_night_d.png"
+
+IDR_S3TEX_R_UNDER_D     RCDATA                  "res\\s3tex\\r_under_d.png"
+
+IDR_S3TEX_R_GRASS_D     RCDATA                  "res\\s3tex\\r_grass_d.png"
+
+IDR_S3TEX_R_MESA_D      RCDATA                  "res\\s3tex\\r_mesa_d.png"
+
+IDR_S3TEX_R_CLOUD_D     RCDATA                  "res\\s3tex\\r_cloud_d.png"
+
+IDR_S3TEX_R_CRAFT_D     RCDATA                  "res\\s3tex\\r_craft_d.png"
+
+IDR_S3TEX_R_WATER       RCDATA                  "res\\s3tex\\r_water.png"
+
+IDR_S3TEX_R_OBS         RCDATA                  "res\\s3tex\\r_obs.png"
+
+IDR_S3TEX_R_ENV         RCDATA                  "res\\s3tex\\r_env.png"
+
+IDR_S3TEX_M_WALL0_D     RCDATA                  "res\\s3tex\\m_wall0_d.png"
+
+IDR_S3TEX_M_WALL1_D     RCDATA                  "res\\s3tex\\m_wall1_d.png"
+
+IDR_S3TEX_M_WALL2_D     RCDATA                  "res\\s3tex\\m_wall2_d.png"
+
+IDR_S3TEX_M_WALL3_D     RCDATA                  "res\\s3tex\\m_wall3_d.png"
+
+IDR_S3TEX_M_FLOOR0_D    RCDATA                  "res\\s3tex\\m_floor0_d.png"
+
+IDR_S3TEX_M_FLOOR1_D    RCDATA                  "res\\s3tex\\m_floor1_d.png"
+
+IDR_S3TEX_M_FLOOR2_D    RCDATA                  "res\\s3tex\\m_floor2_d.png"
+
+IDR_S3TEX_M_FLOOR3_D    RCDATA                  "res\\s3tex\\m_floor3_d.png"
+
+IDR_S3TEX_R_SKY         RCDATA                  "res\\s3tex\\r_sky.png"
+
+IDR_S3TEX_R_SKY2        RCDATA                  "res\\s3tex\\r_sky2.png"
+
+IDR_S3TEX_R_ITEM        RCDATA                  "res\\s3tex\\r_item.png"
+
+IDR_S3TEX_M_ITEM        RCDATA                  "res\\s3tex\\m_item.png"
+
+IDR_S3TEX_M_GIMMICK     RCDATA                  "res\\s3tex\\m_gimmick.png"
+
+IDR_S3TEX_M_GLASS       RCDATA                  "res\\s3tex\\m_glass.png"
+
+IDR_S3TEX_R_WOOD        RCDATA                  "res\\s3tex\\r_wood.png"
+
+IDR_S3TEX_M_BRICK2      RCDATA                  "res\\s3tex\\m_brick2.png"
+
+IDR_S3TEX_R_ENV2        RCDATA                  "res\\s3tex\\r_env2.png"
+
+IDR_S3TEX_M_ENV         RCDATA                  "res\\s3tex\\m_env.png"
 
 
 /////////////////////////////////////////////////////////////////////////////
@@ -2306,7 +2410,7 @@ END
 //
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 0,9,1,840
+ FILEVERSION 0,9,1,841
  PRODUCTVERSION 1,0,0,1
  FILEFLAGSMASK 0x3fL
 #ifdef _DEBUG
@@ -2325,7 +2429,7 @@ BEGIN
             VALUE "Comments", "Falcom BGM Player & Media Player"
             VALUE "CompanyName", "Pre Prayer Power Soft"
             VALUE "FileDescription", "Falcom BGM Player & Media Player Ver 0.9a Rel.2026.08.23"
-            VALUE "FileVersion", "0.9.1.840"
+            VALUE "FileVersion", "0.9.1.841"
             VALUE "InternalName", "ogg YS/ED bgm"
             VALUE "LegalCopyright", "Copyright (C) 2026.08.23"
             VALUE "LegalTrademarks", "Pre Prayer Power Soft"

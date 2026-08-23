@@ -42,6 +42,7 @@ namespace {
 struct S3RFloat4 { float x, y, z, w; };
 struct S3RMat { float m[16]; };
 struct S3RVertex { float x,y,z, nx,ny,nz, u,v, r,g,b,a; };
+struct S3RInst { float x,y,z,yaw, sx,sy,sz,pitch, r,g,b,a; };
 struct S3RHudVertex { float x,y, u,v, r,g,b,a; }; // uv.x<0 = solid color only
 struct S3RFrameCB {
 	S3RMat viewProj;
@@ -494,20 +495,20 @@ void CS3rHelpDlg::OnPaint()
 		L"Nalopende camera; bij helling van onder. Heuvels/dalen/rivieren; tunnels door bergen. Bomen mogen in de band steken; vlieg door gaten.",
 		L"Opóźniona kamera; na stromiźnie od dołu. Wzgórza/doliny/rzeki; tunele w górach. Drzewa mogą wchodzić w pas; leć prześwitami.",
 		L"Gecikmeli kamera; dik yokuşta alttan. Tepe/vadi/ırmak; dağ tünelleri. Ağaçlar banta gömülebilir; boşluktan geçin."));
-	line(LL14(L"テーマで森〜雲の庭まで変化。地形もオブジェクトもテーマごと。地面・機体・光帯はライセンスフリーの写真テクスチャを256でexeに埋め込んでいます（別ファイル不要）。生成のたびに輪郭も抽選（楕円／高低差のある八の字／角の丸い凸型／くびれた凹型）。八の字の交差は段差なので横切ってショートカットできない。枝下／土管の間／山のトンネル／急坂／開けた区間が混在。",
-		L"Themes from forest to cloud garden. Terrain and props change per theme. Ground, craft and ribbon use license-free photo textures (256px) embedded in the exe (no extra files). Each Generate also picks a plan: oval, figure-8 with a height split (no flat shortcut through the crossing), rounded convex, or a concave pinch. Mix of canopy gaps, pipe gaps, mountain tunnels, steep climbs and open stretches.",
-		L"Thèmes forêt→jardin de nuages. Textures photo 256 intégrées à l'exe. Générer tire aussi le tracé: ovale, 8 avec dénivelé (pas de coupe à plat), convexe arrondi ou concave. Branches, tuyaux, tunnels, pentes, ouvert.",
-		L"Temi foresta→giardino di nubi. Texture foto 256 nell'exe. Genera estrae anche il tracciato: ovale, 8 con dislivello, convesso o concavo. Rami, tubi, tunnel, salite, aperti.",
-		L"Temas bosque→jardín de nubes. Texturas foto 256 en el exe. Generar también elige el trazado: óvalo, 8 con desnivel, convexo o cóncavo. Ramas, tuberías, túneles, pendientes.",
-		L"테마: 숲~구름 정원. 지면·기체·광대는 256 사진 텍스처를 exe에 내장(별도 파일 없음). 생성마다 윤곽도 추첨(타원/고저 8자/볼록/오목). 8자 교차는 단차라 가로질러 숏컷 불가. 가지/파이프/터널/급경사/개방 혼합.",
-		L"主题从森林到云之庭。地面/机体/光带为256照片纹理，嵌入exe（无需旁路文件）。每次生成也抽轮廓：椭圆／带高低差的8字（交叉处不能平切）／圆角凸形／收腰凹形。枝下/管隙/山洞/急坡/开阔混在。",
-		L"Themes forest→cloud garden. Photo textures 256 embedded in the exe. Generate also picks oval, a height-split figure-8 (no flat shortcut), rounded convex or a concave pinch. Branches/pipes/tunnels/climbs/open.",
-		L"Темы лес→облачный сад. Фототекстуры 256 вшиты в exe. Создать также выбирает овал, восьмёрку с перепадом, выпуклый или вогнутый контур.",
-		L"Themen Wald→Wolkengarten. Fototexturen 256 in der exe. Erzeugen wählt auch Oval, Achter mit Höhensprung, konvex oder konkav.",
-		L"Temas floresta→jardim de nuvens. Texturas foto 256 no exe. Gerar também escolhe oval, 8 com desnível, convexo ou côncavo.",
-		L"Thema's bos→wolken tuin. Fototexturen 256 in de exe. Genereren kiest ook ovaal, 8-vorm met hoogteverschil, convex of concaaf.",
-		L"Tematy las→ogród chmur. Tekstury zdjęciowe 256 w exe. Generuj losuje też owal, ósemkę z przewyższeniem, wypukły lub wklęsły.",
-		L"Temalar orman→bulut bahçesi. 256 fotoğraf dokuları exe içinde. Üret oval, yükseklik farklı 8, dışbükey veya içbükey de seçer."));
+	line(LL14(L"テーマで森〜雲の庭まで変化。地形もオブジェクトもテーマごと。ライセンスフリーの写真テクスチャ50枚（256）をexeに埋め込んでいます（別ファイル不要）。地面はテーマ写真に細部を重ね、水面・機体・空の雲カードとキューブも写真。反射と乱反射があり、アイテムは結晶球です。生成のたびに輪郭も抽選（楕円／高低差のある八の字／角の丸い凸型／くびれた凹型）。八の字の交差は段差なので横切ってショートカットできない。枝下／土管の間／山のトンネル／急坂／開けた区間が混在。",
+		L"Themes from forest to cloud garden. Terrain and props change per theme. Fifty license-free photo textures (256px) are embedded in the exe (no extra files): theme albedo plus detail, water, craft, cloud cards and a sky cube. Wrap lighting and reflection; items are crystal orbs. Each Generate also picks a plan: oval, figure-8 with a height split (no flat shortcut through the crossing), rounded convex, or a concave pinch. Mix of canopy gaps, pipe gaps, mountain tunnels, steep climbs and open stretches.",
+		L"Thèmes forêt→jardin de nuages. 50 textures photo 256 dans l'exe (albédo+détail, eau, nuages, ciel). Réflexion ; objets en orbes. Générer tire aussi le tracé: ovale, 8 avec dénivelé (pas de coupe à plat), convexe arrondi ou concave. Branches, tuyaux, tunnels, pentes, ouvert.",
+		L"Temi foresta→giardino di nubi. 50 texture foto 256 nell'exe (albedo+dettaglio, acqua, nubi, cielo). Riflessione; oggetti a sfera. Genera estrae anche il tracciato: ovale, 8 con dislivello, convesso o concavo. Rami, tubi, tunnel, salite, aperti.",
+		L"Temas bosque→jardín de nubes. 50 texturas foto 256 en el exe (albedo+detalle, agua, nubes, cielo). Reflexión; objetos en orbe. Generar también elige el trazado: óvalo, 8 con desnivel, convexo o cóncavo. Ramas, tuberías, túneles, pendientes.",
+		L"테마: 숲~구름 정원. 라이선스 프리 사진 텍스처 50장(256)을 exe에 내장. 지면은 테마+세부, 수면·기체·구름 카드·하늘도 사진. 반사·난반사, 아이템은 결정 구. 생성마다 윤곽도 추첨(타원/고저 8자/볼록/오목). 8자 교차는 단차라 가로질러 숏컷 불가. 가지/파이프/터널/급경사/개방 혼합.",
+		L"主题从森林到云之庭。许可证自由照片纹理50张、256、嵌入exe。地面为主题加细节，水面/机体/云卡/天空亦为照片。反射与漫反射，道具为结晶球。每次生成也抽轮廓：椭圆／带高低差的8字（交叉处不能平切）／圆角凸形／收腰凹形。枝下/管隙/山洞/急坡/开阔混在。",
+		L"Themes forest→cloud garden. 50 photo textures 256 in the exe (albedo+detail, water, cloud cards, sky cube). Reflection; crystal item orbs. Generate also picks oval, a height-split figure-8 (no flat shortcut), rounded convex or a concave pinch. Branches/pipes/tunnels/climbs/open.",
+		L"Темы лес→облачный сад. 50 фототекстур 256 в exe (альбедо+деталь, вода, облака, небо). Отражение; предметы-сферы. Создать также выбирает овал, восьмёрку с перепадом, выпуклый или вогнутый контур.",
+		L"Themen Wald→Wolkengarten. 50 Fototexturen 256 in der exe (Albedo+Detail, Wasser, Wolken, Himmel). Reflexion; Item-Kugeln. Erzeugen wählt auch Oval, Achter mit Höhensprung, konvex oder konkav.",
+		L"Temas floresta→jardim de nuvens. 50 texturas foto 256 no exe (albedo+detalhe, água, nuvens, céu). Reflexão; orbes de item. Gerar também escolhe oval, 8 com desnível, convexo ou côncavo.",
+		L"Thema's bos→wolken tuin. 50 fototexturen 256 in de exe (albedo+detail, water, wolken, lucht). Reflectie; item-bollen. Genereren kiest ook ovaal, 8-vorm met hoogteverschil, convex of concaaf.",
+		L"Tematy las→ogród chmur. 50 tekstur zdjęciowych 256 w exe (albedo+szczegół, woda, chmury, niebo). Odbicie; kule przedmiotów. Generuj losuje też owal, ósemkę z przewyższeniem, wypukły lub wklęsły.",
+		L"Temalar orman→bulut bahçesi. 50 adet 256 fotoğraf dokusu exe içinde (albedo+ayrıntı, su, bulut, gök). Yansıma; öğe küreleri. Üret oval, yükseklik farklı 8, dışbükey veya içbükey de seçer."));
 	line(LL14(L"右クリック（ステータス／枠）: コース（リスタート／再生成）・表示・アイテム種類など。ビュー上はRMB=ブレーキのみ。",
 		L"Right-click (status/chrome): Course (restart/regen), view, item masks. On the view, RMB=brake only.",
 		L"Clic droit (statut/cadre) : parcours (redémarrer/régénérer), vue, objets. Sur la vue, RMB=frein.",
@@ -583,11 +584,18 @@ CS3rView::CS3rView()
 	, m_dsTex(NULL), m_dsv(NULL), m_dsSrv(NULL), m_sceneTex(NULL), m_sceneRtv(NULL), m_sceneSrv(NULL)
 	, m_postTex(NULL), m_postRtv(NULL), m_postSrv(NULL), m_shadowTex(NULL), m_shadowDsv(NULL), m_shadowSrv(NULL)
 	, m_vsTess(NULL), m_hsTess(NULL), m_dsTess(NULL)
-	, m_psBand(NULL), m_vsSolid(NULL), m_psSolid(NULL), m_psTerr(NULL), m_psCraft(NULL), m_vsHud(NULL), m_psHud(NULL), m_psHudLine(NULL), m_vsPost(NULL)
-	, m_psSsr(NULL), m_psDof(NULL), m_psFinal(NULL), m_csNoise(NULL), m_ilPatch(NULL), m_ilSolid(NULL), m_ilHud(NULL)
-	, m_cbFrame(NULL), m_vbDyn(NULL), m_vbHud(NULL), m_vbDynBytes(24*1024*1024), m_vbHudBytes(512*1024)
+	, m_psBand(NULL), m_vsSolid(NULL), m_vsInst(NULL), m_psSolid(NULL), m_psTerr(NULL), m_psCraft(NULL), m_vsHud(NULL), m_psHud(NULL), m_psHudLine(NULL), m_vsPost(NULL)
+	, m_psSsr(NULL), m_psDof(NULL), m_psFinal(NULL), m_csNoise(NULL), m_ilPatch(NULL), m_ilSolid(NULL), m_ilInst(NULL), m_ilHud(NULL)
+	, m_cbFrame(NULL), m_vbDyn(NULL), m_vbTerr(NULL), m_vbBand(NULL), m_vbWater(NULL), m_vbScenery(NULL)
+	, m_vbObs(NULL), m_ibObs(NULL), m_vbObsInst(NULL), m_vbCraft(NULL), m_ibCraft(NULL), m_vbCraftInst(NULL), m_vbHud(NULL)
+	, m_vbDynBytes(4*1024*1024), m_vbHudBytes(512*1024), m_vbTerrN(0), m_vbBandN(0), m_vbWaterN(0), m_vbSceneryN(0)
+	, m_obsNvGpu(0), m_obsNiGpu(0), m_obsInstN(0), m_craftNvGpu(0), m_craftNiGpu(0)
 	, m_cpuDynScratch(NULL), m_cpuDynScratchBytes(0), m_cpuHudScratch(NULL), m_cpuHudScratchBytes(0)
-	, m_texBand(NULL), m_srvBand(NULL), m_texEnv(NULL), m_srvEnv(NULL), m_texCraft(NULL), m_srvCraft(NULL)
+	, m_texBand(NULL), m_srvBand(NULL), m_texWater(NULL), m_srvWater(NULL), m_texObs(NULL), m_srvObs(NULL)
+	, m_texEnv(NULL), m_srvEnv(NULL), m_texEnv2(NULL), m_srvEnv2(NULL)
+	, m_texSky(NULL), m_srvSky(NULL), m_texSky2(NULL), m_srvSky2(NULL)
+	, m_texItem(NULL), m_srvItem(NULL), m_texWood(NULL), m_srvWood(NULL)
+	, m_texCraft(NULL), m_srvCraft(NULL), m_texCraftD(NULL), m_srvCraftD(NULL)
 	, m_texNoise(NULL), m_srvNoise(NULL), m_uavNoise(NULL)
 	, m_texClear(NULL), m_srvClear(NULL), m_clearTexW(0), m_clearTexH(0)
 	, m_texHud(NULL), m_srvHud(NULL), m_hudTexW(0), m_hudTexH(0)
@@ -598,7 +606,10 @@ CS3rView::CS3rView()
 	, m_bsOpaque(NULL), m_bsAlpha(NULL), m_bsAdd(NULL)
 	, m_dxFailStage(0), m_dxFailHr(S_OK)
 {
-	for (int i = 0; i < S3R_THEME_N; i++) { m_texTheme[i] = NULL; m_srvTheme[i] = NULL; }
+	for (int i = 0; i < S3R_THEME_N; i++) {
+		m_texTheme[i] = NULL; m_srvTheme[i] = NULL;
+		m_texThemeD[i] = NULL; m_srvThemeD[i] = NULL;
+	}
 }
 CS3rView::~CS3rView() { ReleaseDx(); }
 
@@ -646,6 +657,11 @@ BOOL CS3rView::CreateShaders()
 		"col*=lerp(0.55,1.0,sh);col+=a.rgb*pulse*.12;float d=length(Eye.xyz-i.w),fg=saturate((d-Fog.x)/max(.01,Fog.y-Fog.x));fg=fg*fg*(3-2*fg);"
 		"float al=saturate(.22+a.a*.45+fr*.15);return float4(lerp(col,float3(.55,.72,.95),fg*.55),al);}"
 		"D VSS(V x){D o;o.w=x.p;o.n=x.n;o.uv=x.uv;o.c=x.c;o.p=mul(float4(x.p,1),VP);return o;}"
+		"D VSSI(V x,float4 iw:TEXCOORD2,float4 isc:TEXCOORD3,float4 ic:TEXCOORD4){"
+		"float cy=cos(iw.w),sy=sin(iw.w),cp=cos(isc.w),sp=sin(isc.w);float3 p=x.p*isc.xyz;"
+		"float y2=p.y*cp-p.z*sp,z2=p.y*sp+p.z*cp;float3 w=float3(iw.x+p.x*cy+z2*sy,iw.y+y2,iw.z-p.x*sy+z2*cy);"
+		"float ny2=x.n.y*cp-x.n.z*sp,nz2=x.n.y*sp+x.n.z*cp;float3 n=float3(x.n.x*cy+nz2*sy,ny2,-x.n.x*sy+nz2*cy);"
+		"D o;o.w=w;o.n=n;o.uv=x.uv;o.c=x.c*ic;o.p=mul(float4(w,1),VP);return o;}"
 		"struct HV{float2 p:POSITION;float2 uv:TEXCOORD0;float4 c:TEXCOORD1;};struct HO{float4 p:SV_POSITION;float2 uv:TEXCOORD0;float4 c:TEXCOORD1;};"
 		"HO VSH(HV x){HO o;o.p=float4(x.p,0,1);o.uv=x.uv;o.c=x.c;return o;}"
 		"float4 PSH(HO i):SV_Target{if(i.uv.x<-0.5)return i.c;float4 t=T0.Sample(SL,i.uv);return float4(t.rgb*i.c.rgb,t.a*i.c.a);}"
@@ -653,21 +669,30 @@ BOOL CS3rView::CreateShaders()
 		"float4 PSS(D i):SV_Target{float3 n=normalize(i.n);float3 l=normalize(LightDir.xyz);float sh=ShadowAt(i.w,n);"
 		"float nz=fbm(i.w.xz*12.+i.w.y*10.+Misc.w*.02)*0.15;"
 		"n=normalize(n+float3(nz,nz*0.5,nz)*0.8);"
-		"float3 v=normalize(Eye.xyz-i.w);float nd=lerp(.32,max(saturate(dot(n,l)),.24),sh);"
-		"float3 tex=T0.Sample(SL,i.w.xz*0.00115).rgb;"
-		"float3 base=i.c.rgb*(0.9+0.1*tex);"
+		"float3 v=normalize(Eye.xyz-i.w);float ndl=saturate(dot(n,l));float wrap=saturate(dot(n,l)*.5+.5);"
+		"float nd=lerp(.30,max(ndl,.22),sh);nd=saturate(nd*.62+wrap*wrap*.48);"
+		"float uvk=saturate((0.96-i.c.a)*18.);"
+		"float4 tex4=T0.Sample(SL,lerp(i.w.xz*0.0048+i.w.y*0.002,i.uv,uvk));float3 tex=tex4.rgb;"
+		"float3 det=T1.Sample(SL,lerp(i.w.xz*0.021+i.w.y*0.014,i.uv*2.,uvk)).rgb;"
+		"float3 photo=saturate(tex*lerp(float3(1,1,1),det*1.38,0.52*(1.-uvk)));"
+		"float3 base=lerp(i.c.rgb,photo,lerp(0.58,0.90,uvk));"
 		"float sp=pow(saturate(dot(reflect(-l,n),v)),56)*sh;float3 env=Env.Sample(SL,reflect(-v,n)).rgb;"
-		"float fr=pow(1-saturate(dot(n,v)),2.2);float3 c=base*nd+env*(.07+fr*.18)+float3(1,.96,.88)*sp*.3;"
+		"float fr=pow(1-saturate(dot(n,v)),2.2);float ndc=lerp(nd,saturate(.74+wrap*.28),uvk);"
+		"float3 c=base*ndc+env*(.12+fr*.28)*(1.-uvk*.7)+float3(1,.96,.88)*sp*.42*(1.-uvk);"
 		"float d=length(Eye.xyz-i.w),fg=saturate((d-Fog.x)/max(.01,Fog.y-Fog.x));fg=fg*fg*(3-2*fg);"
-		"float pe=PeelAmt(i.w);if(Peel.w>=0){if(pe>0.16)discard;return float4(lerp(c,float3(.55,.7,.92),fg*.45),saturate(i.c.a));}"
-		"if(pe<0.16)discard;return float4(lerp(c,float3(.55,.7,.92),fg*.45),saturate(i.c.a*(1.-pe*0.86)));}"
+		"float al=saturate(i.c.a*lerp(1,tex4.a,uvk));if(al<0.04&&uvk>0.5)discard;"
+		"float pe=PeelAmt(i.w);if(Peel.w>=0){if(pe>0.16)discard;return float4(lerp(c,float3(.55,.7,.92),fg*.45),al);}"
+		"if(pe<0.16)discard;return float4(lerp(c,float3(.55,.7,.92),fg*.45),al*(1.-pe*0.86));}"
 		"float4 PST(D i):SV_Target{float3 n=normalize(i.n);float3 l=normalize(LightDir.xyz);float sh=ShadowAt(i.w,n);"
 		"float slope=saturate(1.-n.y);float h=i.w.y;float th=Eye.w;"
 		"float nLo=fbm(i.w.xz*0.028), nHi=fbm(i.w.xz*0.11);"
 		"n=normalize(n+float3(nHi-.45,0,nLo-.45)*slope*0.55);"
-		"float3 v=normalize(Eye.xyz-i.w);float nd=lerp(.26,max(saturate(dot(n,l)),.16),sh);"
+		"float3 v=normalize(Eye.xyz-i.w);float ndl=saturate(dot(n,l));float wrap=saturate(dot(n,l)*.5+.5);"
+		"float nd=lerp(.28,max(ndl,.18),sh);nd=saturate(nd*.60+wrap*wrap*.50);"
 		"float3 tex=T0.Sample(SL,i.w.xz*0.0038).rgb;"
-		"float3 dirt=i.c.rgb*(0.78+0.22*tex);"
+		"float3 det=T1.Sample(SL,i.w.xz*0.018).rgb;"
+		"float3 photo=saturate(tex*lerp(float3(1,1,1),det*1.32,0.48));"
+		"float3 dirt=lerp(i.c.rgb,photo,0.72);"
 		"float3 rock=dirt*lerp(float3(.62,.58,.52),float3(.48,.42,.36),saturate(slope*1.4));"
 		"float3 wet=lerp(dirt,float3(.16,.26,.34),0.72);"
 		"if(th<0.5){rock=float3(.36,.30,.20);wet=float3(.10,.22,.16);}"
@@ -685,7 +710,7 @@ BOOL CS3rView::CreateShaders()
 		"if(th>5.5&&th<6.6) base=lerp(base,float3(.95,.72,.48),saturate((h-28.)/22.)*0.35);"
 		"float sp=pow(saturate(dot(reflect(-l,n),v)),40)*sh*lerp(.08,.28,slope);"
 		"float3 env=Env.Sample(SL,reflect(-v,n)).rgb;float fr=pow(1-saturate(dot(n,v)),2.4);"
-		"float3 c=base*nd+env*(.05+fr*.14)+float3(1,.97,.9)*sp;"
+		"float3 c=base*nd+env*(.10+fr*.26)+float3(1,.97,.9)*sp;"
 		"float specW=saturate(low*(1.-slope)*0.65);c+=float3(.25,.4,.5)*pow(saturate(dot(reflect(-l,n),v)),24)*specW*sh;"
 		"float d=length(Eye.xyz-i.w),fg=saturate((d-Fog.x)/max(.01,Fog.y-Fog.x));fg=fg*fg*(3-2*fg);"
 		"float pe=PeelAmt(i.w);if(Peel.w>=0){if(pe>0.16)discard;return float4(lerp(c,float3(.55,.7,.92),fg*.42),1);}"
@@ -693,13 +718,15 @@ BOOL CS3rView::CreateShaders()
 		"float4 PSC(D i):SV_Target{float3 n=normalize(i.n);float3 l=normalize(LightDir.xyz);float sh=ShadowAt(i.w,n);"
 		"float3 v=normalize(Eye.xyz-i.w);"
 		"float3 albedo=T0.Sample(SL,i.uv).rgb;"
+		"float3 det=T1.Sample(SL,i.uv*4.6).rgb;"
+		"albedo=saturate(albedo*lerp(float3(1,1,1),det*1.28,0.4));"
 		"float nz=(albedo.r-0.5)*0.2 + fbm(i.w.xz*12.+i.w.y*10.+Misc.w*.02)*0.15;"
 		"n=normalize(n+float3(nz,nz,nz));"
-		"float nd=lerp(.48,max(saturate(dot(n,l)),.34),sh);"
+		"float nd=lerp(.48,max(saturate(dot(n,l)),.34),sh);nd=saturate(nd*.7+saturate(dot(n,l)*.5+.5)*saturate(dot(n,l)*.5+.5)*.4);"
 		"float3 base=saturate(i.c.rgb*albedo*1.12);"
 		"float3 env=Env.Sample(SL,reflect(-v,n)).rgb;float fr=pow(1-saturate(dot(n,v)),2.4);"
 		"float sp=pow(saturate(dot(reflect(-l,n),v)),52)*sh;"
-		"float3 c=base*(0.42+0.58*nd)+env*(.1+fr*.26)+float3(1,.96,.9)*sp*.55;"
+		"float3 c=base*(0.38+0.62*nd)+env*(.16+fr*.34)+float3(1,.96,.9)*sp*.62;"
 		"float d=length(Eye.xyz-i.w),fg=saturate((d-Fog.x)/max(.01,Fog.y-Fog.x));fg=fg*fg*(3-2*fg);"
 		"return float4(lerp(c,float3(.55,.7,.92),fg*.3),saturate(i.c.a));}"
 		"struct Q{float4 p:SV_POSITION;float2 uv:TEXCOORD0;};Q VSQ(uint id:SV_VertexID){Q o;float2 p=float2((id==2)?3:-1,(id==1)?3:-1);o.p=float4(p,0,1);o.uv=float2((p.x+1)*.5,(1-p.y)*.5);return o;}"
@@ -757,12 +784,19 @@ BOOL CS3rView::CreateShaders()
 		for(int i=0;i<12;i++) S3R_RELEASE(b[i]); S3R_RELEASE(bcs); S3R_RELEASE(bcraft); S3R_RELEASE(bline); S3R_RELEASE(err); return FALSE;
 	}
 	S3R_RELEASE(err);
+	ID3DBlob* binst=NULL;
+	if(FAILED(D3DCompile(hlsl,(SIZE_T)strlen(hlsl),NULL,NULL,NULL,"VSSI","vs_5_0",D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&binst,&err))){
+		m_dxFailHr = E_FAIL;
+		for(int i=0;i<12;i++) S3R_RELEASE(b[i]); S3R_RELEASE(bcs); S3R_RELEASE(bcraft); S3R_RELEASE(bline); S3R_RELEASE(bterr); S3R_RELEASE(err); return FALSE;
+	}
+	S3R_RELEASE(err);
 	HRESULT hr=S_OK;
 	if(FAILED(hr=m_dev->CreateVertexShader(b[0]->GetBufferPointer(),b[0]->GetBufferSize(),NULL,&m_vsTess))) goto fail_sh;
 	if(FAILED(hr=m_dev->CreateHullShader(b[1]->GetBufferPointer(),b[1]->GetBufferSize(),NULL,&m_hsTess))) goto fail_sh;
 	if(FAILED(hr=m_dev->CreateDomainShader(b[2]->GetBufferPointer(),b[2]->GetBufferSize(),NULL,&m_dsTess))) goto fail_sh;
 	if(FAILED(hr=m_dev->CreatePixelShader(b[3]->GetBufferPointer(),b[3]->GetBufferSize(),NULL,&m_psBand))) goto fail_sh;
 	if(FAILED(hr=m_dev->CreateVertexShader(b[4]->GetBufferPointer(),b[4]->GetBufferSize(),NULL,&m_vsSolid))) goto fail_sh;
+	if(FAILED(hr=m_dev->CreateVertexShader(binst->GetBufferPointer(),binst->GetBufferSize(),NULL,&m_vsInst))) goto fail_sh;
 	if(FAILED(hr=m_dev->CreatePixelShader(b[5]->GetBufferPointer(),b[5]->GetBufferSize(),NULL,&m_psSolid))) goto fail_sh;
 	if(FAILED(hr=m_dev->CreatePixelShader(bcraft->GetBufferPointer(),bcraft->GetBufferSize(),NULL,&m_psCraft))) goto fail_sh;
 	if(FAILED(hr=m_dev->CreateVertexShader(b[6]->GetBufferPointer(),b[6]->GetBufferSize(),NULL,&m_vsHud))) goto fail_sh;
@@ -781,14 +815,23 @@ BOOL CS3rView::CreateShaders()
 	D3D11_INPUT_ELEMENT_DESC ih[]={{"POSITION",0,DXGI_FORMAT_R32G32_FLOAT,0,0,D3D11_INPUT_PER_VERTEX_DATA,0},
 		{"TEXCOORD",0,DXGI_FORMAT_R32G32_FLOAT,0,8,D3D11_INPUT_PER_VERTEX_DATA,0},
 		{"TEXCOORD",1,DXGI_FORMAT_R32G32B32A32_FLOAT,0,16,D3D11_INPUT_PER_VERTEX_DATA,0}};
+	D3D11_INPUT_ELEMENT_DESC ii[]={
+		{"POSITION",0,DXGI_FORMAT_R32G32B32_FLOAT,0,0,D3D11_INPUT_PER_VERTEX_DATA,0},
+		{"NORMAL",0,DXGI_FORMAT_R32G32B32_FLOAT,0,12,D3D11_INPUT_PER_VERTEX_DATA,0},
+		{"TEXCOORD",0,DXGI_FORMAT_R32G32_FLOAT,0,24,D3D11_INPUT_PER_VERTEX_DATA,0},
+		{"TEXCOORD",1,DXGI_FORMAT_R32G32B32A32_FLOAT,0,32,D3D11_INPUT_PER_VERTEX_DATA,0},
+		{"TEXCOORD",2,DXGI_FORMAT_R32G32B32A32_FLOAT,1,0,D3D11_INPUT_PER_INSTANCE_DATA,1},
+		{"TEXCOORD",3,DXGI_FORMAT_R32G32B32A32_FLOAT,1,16,D3D11_INPUT_PER_INSTANCE_DATA,1},
+		{"TEXCOORD",4,DXGI_FORMAT_R32G32B32A32_FLOAT,1,32,D3D11_INPUT_PER_INSTANCE_DATA,1}};
 	if(FAILED(hr=m_dev->CreateInputLayout(il,4,b[0]->GetBufferPointer(),b[0]->GetBufferSize(),&m_ilPatch))) goto fail_sh;
 	if(FAILED(hr=m_dev->CreateInputLayout(il,4,b[4]->GetBufferPointer(),b[4]->GetBufferSize(),&m_ilSolid))) goto fail_sh;
+	if(FAILED(hr=m_dev->CreateInputLayout(ii,7,binst->GetBufferPointer(),binst->GetBufferSize(),&m_ilInst))) goto fail_sh;
 	if(FAILED(hr=m_dev->CreateInputLayout(ih,3,b[6]->GetBufferPointer(),b[6]->GetBufferSize(),&m_ilHud))) goto fail_sh;
-	for(int i=0;i<12;i++) S3R_RELEASE(b[i]); S3R_RELEASE(bcs); S3R_RELEASE(bcraft); S3R_RELEASE(bline); S3R_RELEASE(bterr);
+	for(int i=0;i<12;i++) S3R_RELEASE(b[i]); S3R_RELEASE(bcs); S3R_RELEASE(bcraft); S3R_RELEASE(bline); S3R_RELEASE(bterr); S3R_RELEASE(binst);
 	return TRUE;
 fail_sh:
 	m_dxFailHr = hr;
-	for(int i=0;i<12;i++) S3R_RELEASE(b[i]); S3R_RELEASE(bcs); S3R_RELEASE(bcraft); S3R_RELEASE(bline); S3R_RELEASE(bterr);
+	for(int i=0;i<12;i++) S3R_RELEASE(b[i]); S3R_RELEASE(bcs); S3R_RELEASE(bcraft); S3R_RELEASE(bline); S3R_RELEASE(bterr); S3R_RELEASE(binst);
 	return FALSE;
 }
 
@@ -909,23 +952,63 @@ BOOL CS3rView::CreateProcTextures()
 	}
 	}
 	{D3D11_SUBRESOURCE_DATA sd={pix,W*4,0}; if(FAILED(m_dev->CreateTexture2D(&d,&sd,&m_texBand))||FAILED(m_dev->CreateShaderResourceView(m_texBand,NULL,&m_srvBand))){delete[] pix;return FALSE;}}
-	// env cube
+	auto upload2d=[&](ID3D11Texture2D** tex, ID3D11ShaderResourceView** srv)->BOOL{
+		D3D11_SUBRESOURCE_DATA sd={pix,W*4,0};
+		return SUCCEEDED(m_dev->CreateTexture2D(&d,&sd,tex)) && SUCCEEDED(m_dev->CreateShaderResourceView(*tex,NULL,srv));
+	};
+	static const int kThemeDetRes[S3R_THEME_N]={
+		IDR_S3TEX_R_FOREST_D,IDR_S3TEX_R_RUINS_D,IDR_S3TEX_R_OIL_D,IDR_S3TEX_R_NIGHT_D,
+		IDR_S3TEX_R_UNDER_D,IDR_S3TEX_R_GRASS_D,IDR_S3TEX_R_MESA_D,IDR_S3TEX_R_CLOUD_D
+	};
+	for(int th=0;th<S3R_THEME_N;th++){
+		if(Soft3DTexLoadPngRes(kThemeDetRes[th],pix,W,H)){
+			if(!upload2d(&m_texThemeD[th],&m_srvThemeD[th])){delete[] pix;return FALSE;}
+		}
+	}
+	if(Soft3DTexLoadPngRes(IDR_S3TEX_R_CRAFT_D,pix,W,H)){
+		if(!upload2d(&m_texCraftD,&m_srvCraftD)){delete[] pix;return FALSE;}
+	}
+	if(Soft3DTexLoadPngRes(IDR_S3TEX_R_WATER,pix,W,H)){
+		if(!upload2d(&m_texWater,&m_srvWater)){delete[] pix;return FALSE;}
+	}
+	if(Soft3DTexLoadPngRes(IDR_S3TEX_R_OBS,pix,W,H)){
+		if(!upload2d(&m_texObs,&m_srvObs)){delete[] pix;return FALSE;}
+	}
+	// env cube: stacked +X -X +Y -Y +Z -Z photo strip, else procedural sky
 	d.ArraySize=6; d.MiscFlags=D3D11_RESOURCE_MISC_TEXTURECUBE;
 	DWORD* cube=new (std::nothrow) DWORD[W*H*6];
 	if(!cube){delete[] pix;return FALSE;}
 	D3D11_SUBRESOURCE_DATA cs[6]={};
-	for(int f=0;f<6;f++){
-		for(int y=0;y<H;y++)for(int x=0;x<W;x++){
-			float t=(float)y/(H-1);
-			BYTE r=(BYTE)(140+70*(1-t)), g=(BYTE)(180+50*(1-t)), b=(BYTE)(220+30*(1-t));
-			if(f==2){r=(BYTE)(90+40*t);g=(BYTE)(150+40*t);b=(BYTE)(80+20*t);}
-			if(f==3){r=(BYTE)(200+30*(1-t));g=(BYTE)(140+20*(1-t));b=(BYTE)(160+40*(1-t));}
-			cube[(f*H+y)*W+x]=0xff000000|((DWORD)r<<16)|((DWORD)g<<8)|b;
+	BOOL envPhoto=Soft3DTexLoadPngRes(IDR_S3TEX_R_ENV,cube,W,H*6);
+	if(!envPhoto){
+		for(int f=0;f<6;f++){
+			for(int y=0;y<H;y++)for(int x=0;x<W;x++){
+				float t=(float)y/(H-1);
+				BYTE r=(BYTE)(140+70*(1-t)), g=(BYTE)(180+50*(1-t)), b=(BYTE)(220+30*(1-t));
+				if(f==2){r=(BYTE)(90+40*t);g=(BYTE)(150+40*t);b=(BYTE)(80+20*t);}
+				if(f==3){r=(BYTE)(200+30*(1-t));g=(BYTE)(140+20*(1-t));b=(BYTE)(160+40*(1-t));}
+				cube[(f*H+y)*W+x]=0xff000000|((DWORD)r<<16)|((DWORD)g<<8)|b;
+			}
 		}
-		cs[f].pSysMem=cube+f*W*H; cs[f].SysMemPitch=W*4;
 	}
+	for(int f=0;f<6;f++){ cs[f].pSysMem=cube+f*W*H; cs[f].SysMemPitch=W*4; }
 	if(FAILED(m_dev->CreateTexture2D(&d,cs,&m_texEnv))||FAILED(m_dev->CreateShaderResourceView(m_texEnv,NULL,&m_srvEnv))){delete[] cube;delete[] pix;return FALSE;}
-	delete[] cube; delete[] pix;
+	{
+		DWORD* cube2=new (std::nothrow) DWORD[W*H*6];
+		if(cube2 && Soft3DTexLoadPngRes(IDR_S3TEX_R_ENV2,cube2,W,H*6)){
+			D3D11_SUBRESOURCE_DATA cs2[6]={};
+			for(int f=0;f<6;f++){cs2[f].pSysMem=cube2+f*W*H;cs2[f].SysMemPitch=W*4;}
+			if(FAILED(m_dev->CreateTexture2D(&d,cs2,&m_texEnv2))||FAILED(m_dev->CreateShaderResourceView(m_texEnv2,NULL,&m_srvEnv2))){delete[] cube2;delete[] cube;delete[] pix;return FALSE;}
+		}
+		delete[] cube2;
+	}
+	delete[] cube;
+	d.ArraySize=1; d.MiscFlags=0;
+	if(Soft3DTexLoadPngRes(IDR_S3TEX_R_SKY,pix,W,H)){ if(!upload2d(&m_texSky,&m_srvSky)){delete[] pix;return FALSE;} }
+	if(Soft3DTexLoadPngRes(IDR_S3TEX_R_SKY2,pix,W,H)){ if(!upload2d(&m_texSky2,&m_srvSky2)){delete[] pix;return FALSE;} }
+	if(Soft3DTexLoadPngRes(IDR_S3TEX_R_ITEM,pix,W,H)){ if(!upload2d(&m_texItem,&m_srvItem)){delete[] pix;return FALSE;} }
+	if(Soft3DTexLoadPngRes(IDR_S3TEX_R_WOOD,pix,W,H)){ if(!upload2d(&m_texWood,&m_srvWood)){delete[] pix;return FALSE;} }
+	delete[] pix;
 	// noise UAV target 64x64
 	{
 		D3D11_TEXTURE2D_DESC nd={}; nd.Width=64; nd.Height=64; nd.MipLevels=1; nd.ArraySize=1;
@@ -982,9 +1065,9 @@ BOOL CS3rView::InitDx()
 	if(!CreateProcTextures()){ m_dxFailStage = 7; m_dxFailHr = E_FAIL; return FALSE; }
 	bd.ByteWidth=m_vbDynBytes;bd.BindFlags=D3D11_BIND_VERTEX_BUFFER;bd.CPUAccessFlags=D3D11_CPU_ACCESS_WRITE;
 	if(FAILED(hr=m_dev->CreateBuffer(&bd,NULL,&m_vbDyn))){
-		static const UINT kVbTry[]={16u*1024u*1024u,12u*1024u*1024u,8u*1024u*1024u,4u*1024u*1024u};
+		static const UINT kVbTry[]={2u*1024u*1024u,1024u*1024u};
 		hr=E_FAIL;
-		for(int ti=0;ti<4 && FAILED(hr);ti++){
+		for(int ti=0;ti<2 && FAILED(hr);ti++){
 			m_vbDynBytes=kVbTry[ti]; bd.ByteWidth=m_vbDynBytes;
 			hr=m_dev->CreateBuffer(&bd,NULL,&m_vbDyn);
 		}
@@ -992,6 +1075,9 @@ BOOL CS3rView::InitDx()
 	}
 	bd.ByteWidth=m_vbHudBytes;
 	if(FAILED(hr=m_dev->CreateBuffer(&bd,NULL,&m_vbHud))){ m_dxFailStage = 9; m_dxFailHr = hr; return FALSE; }
+	bd.ByteWidth = sizeof(S3RInst) * (UINT)CSoft3DRaceDlg::S3R_MAX_CRAFT;
+	if (bd.ByteWidth < 256) bd.ByteWidth = 256;
+	if(FAILED(hr=m_dev->CreateBuffer(&bd,NULL,&m_vbCraftInst))){ m_dxFailStage = 9; m_dxFailHr = hr; return FALSE; }
 	D3D11_SAMPLER_DESC ss={};ss.Filter=D3D11_FILTER_MIN_MAG_MIP_LINEAR;ss.AddressU=ss.AddressV=ss.AddressW=D3D11_TEXTURE_ADDRESS_WRAP;ss.MaxLOD=D3D11_FLOAT32_MAX;m_dev->CreateSamplerState(&ss,&m_sampLin);ss.Filter=D3D11_FILTER_MIN_MAG_MIP_POINT;ss.AddressU=ss.AddressV=ss.AddressW=D3D11_TEXTURE_ADDRESS_CLAMP;m_dev->CreateSamplerState(&ss,&m_sampPoint);
 	ss.Filter=D3D11_FILTER_COMPARISON_MIN_MAG_LINEAR_MIP_POINT;ss.AddressU=ss.AddressV=ss.AddressW=D3D11_TEXTURE_ADDRESS_BORDER;ss.ComparisonFunc=D3D11_COMPARISON_LESS;ss.BorderColor[0]=ss.BorderColor[1]=ss.BorderColor[2]=ss.BorderColor[3]=1.f;m_dev->CreateSamplerState(&ss,&m_sampCmp);
 	D3D11_RASTERIZER_DESC rs={};rs.FillMode=D3D11_FILL_SOLID;rs.CullMode=D3D11_CULL_BACK;rs.DepthClipEnable=TRUE;m_dev->CreateRasterizerState(&rs,&m_rsSolid);
@@ -1195,15 +1281,73 @@ void CS3rView::ReleaseDx()
 	m_ready=FALSE;if(m_imm){m_imm->ClearState();m_imm->Flush();}
 	ReleaseClearTexture();ReleaseHudTexture();ReleaseStandingsTexture();ReleaseBubbleTexture();
 	S3R_RELEASE(m_uavNoise);S3R_RELEASE(m_srvNoise);S3R_RELEASE(m_texNoise);
-	S3R_RELEASE(m_srvEnv);S3R_RELEASE(m_texEnv);S3R_RELEASE(m_srvCraft);S3R_RELEASE(m_texCraft);S3R_RELEASE(m_srvBand);S3R_RELEASE(m_texBand);
-	for(int i=0;i<S3R_THEME_N;i++){S3R_RELEASE(m_srvTheme[i]);S3R_RELEASE(m_texTheme[i]);}
+	S3R_RELEASE(m_srvWood);S3R_RELEASE(m_texWood);S3R_RELEASE(m_srvItem);S3R_RELEASE(m_texItem);
+	S3R_RELEASE(m_srvSky2);S3R_RELEASE(m_texSky2);S3R_RELEASE(m_srvSky);S3R_RELEASE(m_texSky);
+	S3R_RELEASE(m_srvEnv2);S3R_RELEASE(m_texEnv2);S3R_RELEASE(m_srvEnv);S3R_RELEASE(m_texEnv);S3R_RELEASE(m_srvCraftD);S3R_RELEASE(m_texCraftD);S3R_RELEASE(m_srvCraft);S3R_RELEASE(m_texCraft);
+	S3R_RELEASE(m_srvWater);S3R_RELEASE(m_texWater);S3R_RELEASE(m_srvObs);S3R_RELEASE(m_texObs);S3R_RELEASE(m_srvBand);S3R_RELEASE(m_texBand);
+	for(int i=0;i<S3R_THEME_N;i++){S3R_RELEASE(m_srvThemeD[i]);S3R_RELEASE(m_texThemeD[i]);S3R_RELEASE(m_srvTheme[i]);S3R_RELEASE(m_texTheme[i]);}
 	S3R_RELEASE(m_bsAdd);S3R_RELEASE(m_bsAlpha);S3R_RELEASE(m_bsOpaque);S3R_RELEASE(m_dssOff);S3R_RELEASE(m_dssRead);S3R_RELEASE(m_dssWrite);S3R_RELEASE(m_rsShadow);S3R_RELEASE(m_rsNoCull);S3R_RELEASE(m_rsSolid);S3R_RELEASE(m_sampCmp);S3R_RELEASE(m_sampPoint);S3R_RELEASE(m_sampLin);
-	S3R_RELEASE(m_vbHud);S3R_RELEASE(m_vbDyn);S3R_RELEASE(m_cbFrame);S3R_RELEASE(m_ilHud);S3R_RELEASE(m_ilSolid);S3R_RELEASE(m_ilPatch);
+	S3R_RELEASE(m_vbHud);
+	S3R_RELEASE(m_vbCraftInst); S3R_RELEASE(m_ibCraft); S3R_RELEASE(m_vbCraft);
+	S3R_RELEASE(m_vbObsInst); S3R_RELEASE(m_ibObs); S3R_RELEASE(m_vbObs);
+	S3R_RELEASE(m_vbScenery); S3R_RELEASE(m_vbWater); S3R_RELEASE(m_vbBand);
+	S3R_RELEASE(m_vbTerr); m_vbTerrN=0; m_vbBandN=0; m_vbWaterN=0; m_vbSceneryN=0;
+	m_obsNvGpu=m_obsNiGpu=m_obsInstN=0; m_craftNvGpu=m_craftNiGpu=0;
+	S3R_RELEASE(m_vbDyn);S3R_RELEASE(m_cbFrame);S3R_RELEASE(m_ilHud);S3R_RELEASE(m_ilInst);S3R_RELEASE(m_ilSolid);S3R_RELEASE(m_ilPatch);
 	delete[] m_cpuDynScratch; m_cpuDynScratch=NULL; m_cpuDynScratchBytes=0;
 	delete[] m_cpuHudScratch; m_cpuHudScratch=NULL; m_cpuHudScratchBytes=0;
-	S3R_RELEASE(m_csNoise);S3R_RELEASE(m_psFinal);S3R_RELEASE(m_psDof);S3R_RELEASE(m_psSsr);S3R_RELEASE(m_vsPost);S3R_RELEASE(m_psHudLine);S3R_RELEASE(m_psHud);S3R_RELEASE(m_vsHud);S3R_RELEASE(m_psCraft);S3R_RELEASE(m_psTerr);S3R_RELEASE(m_psSolid);S3R_RELEASE(m_vsSolid);S3R_RELEASE(m_psBand);S3R_RELEASE(m_dsTess);S3R_RELEASE(m_hsTess);S3R_RELEASE(m_vsTess);
+	S3R_RELEASE(m_csNoise);S3R_RELEASE(m_psFinal);S3R_RELEASE(m_psDof);S3R_RELEASE(m_psSsr);S3R_RELEASE(m_vsPost);S3R_RELEASE(m_psHudLine);S3R_RELEASE(m_psHud);S3R_RELEASE(m_vsHud);S3R_RELEASE(m_psCraft);S3R_RELEASE(m_psTerr);S3R_RELEASE(m_psSolid);S3R_RELEASE(m_vsInst);S3R_RELEASE(m_vsSolid);S3R_RELEASE(m_psBand);S3R_RELEASE(m_dsTess);S3R_RELEASE(m_hsTess);S3R_RELEASE(m_vsTess);
 	S3R_RELEASE(m_shadowSrv);S3R_RELEASE(m_shadowDsv);S3R_RELEASE(m_shadowTex);
 	S3R_RELEASE(m_postSrv);S3R_RELEASE(m_postRtv);S3R_RELEASE(m_postTex);S3R_RELEASE(m_sceneSrv);S3R_RELEASE(m_sceneRtv);S3R_RELEASE(m_sceneTex);S3R_RELEASE(m_dsSrv);S3R_RELEASE(m_dsv);S3R_RELEASE(m_dsTex);S3R_RELEASE(m_bbRtv);S3R_RELEASE(m_swap);S3R_RELEASE(m_imm);S3R_RELEASE(m_dev);m_vw=m_vh=0;
+}
+void CS3rView::ClearTerrMesh()
+{
+	S3R_RELEASE(m_vbTerr);
+	m_vbTerrN = 0;
+}
+void CS3rView::ClearStaticMeshes()
+{
+	ClearTerrMesh();
+	S3R_RELEASE(m_vbBand); m_vbBandN = 0;
+	S3R_RELEASE(m_vbWater); m_vbWaterN = 0;
+	S3R_RELEASE(m_vbScenery); m_vbSceneryN = 0;
+	S3R_RELEASE(m_vbObsInst); m_obsInstN = 0;
+	S3R_RELEASE(m_ibObs); S3R_RELEASE(m_vbObs); m_obsNvGpu = m_obsNiGpu = 0;
+	S3R_RELEASE(m_ibCraft); S3R_RELEASE(m_vbCraft); m_craftNvGpu = m_craftNiGpu = 0;
+}
+BOOL CS3rView::UploadDefaultVB(ID3D11Buffer** dst, UINT* nOut, const void* verts, UINT nVerts)
+{
+	S3R_RELEASE(*dst);
+	*nOut = 0;
+	if (!m_dev || !verts || nVerts < 1) return FALSE;
+	D3D11_BUFFER_DESC bd = {};
+	bd.ByteWidth = nVerts * (UINT)sizeof(S3RVertex);
+	bd.Usage = D3D11_USAGE_DEFAULT;
+	bd.BindFlags = D3D11_BIND_VERTEX_BUFFER;
+	D3D11_SUBRESOURCE_DATA srd = {};
+	srd.pSysMem = verts;
+	if (FAILED(m_dev->CreateBuffer(&bd, &srd, dst))) return FALSE;
+	*nOut = nVerts;
+	return TRUE;
+}
+BOOL CS3rView::UploadDefaultIB(ID3D11Buffer** dst, UINT* nOut, const UINT* idx, UINT nIdx)
+{
+	S3R_RELEASE(*dst);
+	*nOut = 0;
+	if (!m_dev || !idx || nIdx < 3) return FALSE;
+	D3D11_BUFFER_DESC bd = {};
+	bd.ByteWidth = nIdx * (UINT)sizeof(UINT);
+	bd.Usage = D3D11_USAGE_DEFAULT;
+	bd.BindFlags = D3D11_BIND_INDEX_BUFFER;
+	D3D11_SUBRESOURCE_DATA srd = {};
+	srd.pSysMem = idx;
+	if (FAILED(m_dev->CreateBuffer(&bd, &srd, dst))) return FALSE;
+	*nOut = nIdx;
+	return TRUE;
+}
+BOOL CS3rView::UploadTerrMesh(const void* verts, UINT nVerts)
+{
+	return UploadDefaultVB(&m_vbTerr, &m_vbTerrN, verts, nVerts);
 }
 void CS3rView::OnSize(UINT nType,int cx,int cy){CCustomStatic::OnSize(nType,cx,cy);if(m_swap&&cx>0&&cy>0)ResizeDx(cx,cy);}
 void CS3rView::OnPaint(){CPaintDC dc(this);ValidateRect(NULL);}
@@ -1268,7 +1412,7 @@ CSoft3DRaceDlg::CSoft3DRaceDlg(CWnd* p)
 	, m_camYawOff(0), m_camPitchOff(0.22f), m_camZoom(1.f)
 	, m_camSx(0), m_camSy(0), m_camSz(0), m_camAx(0), m_camAy(0), m_camAz(0), m_camSmoothInit(0)
 	, m_lookback(0), m_accelHeld(0), m_brakeHeld(0), m_mouseLook(0)
-	, m_lastTick(0), m_rng(1), m_genSeed(1), m_spaceToggleTick(0)
+	, m_lastTick(0), m_inTick(0), m_rng(1), m_genSeed(1), m_spaceToggleTick(0)
 	, m_baseTempoPos(100), m_basePitchPos(200), m_anim(0), m_raceClock(0), m_playerSpdEma(0), m_playerAccel(0)
 	, m_wrongWay(0), m_overlayHold(0), m_sfxHitCool(0)
 	, m_clearBakeA(0), m_hudDirty(1), m_clearDirty(1), m_standDirty(1)
@@ -1354,6 +1498,27 @@ void CSoft3DRaceDlg::PostNcDestroy()
 	delete this;
 }
 void CSoft3DRaceDlg::LayoutHelpBtn() { CCC_CaptionPlaceHelpBtn(m_hWnd, &m_help); }
+void CSoft3DRaceDlg::PumpQueued(BOOL input)
+{
+	HWND root = GetSafeHwnd();
+	if (!root) return;
+	MSG msg;
+	int n = 0;
+	const int cap = input ? 18 : 10;
+	while (n < cap) {
+		if (!::PeekMessage(&msg, NULL, WM_PAINT, WM_PAINT, PM_REMOVE)) {
+			if (!input) break;
+			if (!::PeekMessage(&msg, NULL, WM_MOUSEFIRST, WM_MOUSELAST, PM_REMOVE)
+				&& !::PeekMessage(&msg, NULL, WM_KEYFIRST, WM_KEYLAST, PM_REMOVE)
+				&& !::PeekMessage(&msg, NULL, WM_NCMOUSEMOVE, WM_NCMBUTTONDBLCLK, PM_REMOVE))
+				break;
+		}
+		if (msg.message == WM_QUIT) { ::PostQuitMessage((int)msg.wParam); return; }
+		::TranslateMessage(&msg);
+		::DispatchMessage(&msg);
+		n++;
+	}
+}
 void CSoft3DRaceDlg::LayoutAll()
 {
 	if (!GetSafeHwnd() || !m_view.GetSafeHwnd()) return;
@@ -1363,10 +1528,11 @@ void CSoft3DRaceDlg::LayoutAll()
 	int capH = CCC_GetCustomCaptionHeight(m_hWnd); if (capH < 0) capH = 0;
 	const int m = 10, rowH = 36, btnH = 32, labH = 22;
 	int y = capH + 8;
-	const float baseW = 1080.f;
-	const float sx = max(1.f, (float)(cx - 2 * m) / baseW);
-	auto sw = [&](int w)->int { return max(w, (int)((float)w * sx + .5f)); };
-	const int gap = max(4, (int)(6.f * sx + .5f));
+	float s = (float)(cx - 2 * m) / 920.f;
+	if (s < 0.70f) s = 0.70f;
+	if (s > 1.55f) s = 1.55f;
+	auto sw = [&](int w)->int { return max(28, (int)((float)w * s + .5f)); };
+	const int gap = max(4, (int)(6.f * s + .5f));
 	int x = m;
 	auto placeL = [&](CWnd& w, int ww){ if(w.GetSafeHwnd()) w.SetWindowPos(NULL,x,y+6,ww,labH,SWP_NOZORDER|SWP_NOACTIVATE); x+=ww+2; };
 	auto placeC = [&](CWnd& w, int ww){ if(w.GetSafeHwnd()) w.SetWindowPos(NULL,x,y,ww,280,SWP_NOZORDER|SWP_NOACTIVATE); x+=ww+gap; };
@@ -1377,6 +1543,8 @@ void CSoft3DRaceDlg::LayoutAll()
 	placeL(m_lapsL, sw(36)); placeC(m_laps, sw(64));
 	placeL(m_themeL, sw(40)); placeC(m_theme, sw(110));
 	placeL(m_invertL, sw(36)); placeC(m_invert, sw(100));
+	y += rowH + 4;
+	x = m;
 	placeB(m_start, sw(80)); placeB(m_gen, sw(80));
 	if (m_hint.GetSafeHwnd()) m_hint.SetWindowPos(NULL, x, y+6, max(40, cx-x-m), labH, SWP_NOZORDER|SWP_NOACTIVATE);
 	y += rowH + 6;
@@ -1392,8 +1560,14 @@ void CSoft3DRaceDlg::LayoutAll()
 	if (m_laps.GetSafeHwnd()) {int v=savedata.s3r_laps; if(v<0)v=0; if(v>10)v=10; m_laps.CComboBox::SetCurSel(v);}
 	if (m_theme.GetSafeHwnd()) {int v=savedata.s3r_theme; if(v<0)v=0; if(v>8)v=8; m_theme.CComboBox::SetCurSel(v);}
 	if (m_invert.GetSafeHwnd()) {int v=savedata.s3r_invert_y?1:0; m_invert.CComboBox::SetCurSel(v);}
+	if (m_start.GetSafeHwnd()) m_start.Invalidate();
+	if (m_gen.GetSafeHwnd()) m_gen.Invalidate();
+	CWnd* raise[] = { &m_aiL,&m_ai,&m_oppL,&m_opp,&m_lenL,&m_len,&m_lapsL,&m_laps,&m_themeL,&m_theme,&m_invertL,&m_invert,&m_start,&m_gen,&m_hint,&m_close,&m_status };
+	for (int i = 0; i < (int)(sizeof(raise)/sizeof(raise[0])); i++) {
+		if (raise[i]->GetSafeHwnd())
+			raise[i]->SetWindowPos(&CWnd::wndTop, 0, 0, 0, 0, SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE);
+	}
 	CCC_CaptionLayout(m_hWnd); LayoutHelpBtn();
-	// SetWindowPos 後にアクリル穴が開くので opaque fixer を遅延再適用
 	PostMessage(CCC_MSG_REAPPLY_OPAQUE_FIXERS, 0, 0);
 }
 
@@ -1710,6 +1884,7 @@ void CSoft3DRaceDlg::GenerateCourseWithSeed(DWORD seed)
 	m_bandHalf = 7.2f * sc;
 	m_hmReady = 0;
 	m_carveN = 0;
+	m_view.ClearStaticMeshes();
 	// --- 平面レイアウト（XZ）：楕円／八の字／凸／凹を抽選 ---
 	{
 		float lr = S3rRand01(m_rng);
@@ -2056,6 +2231,7 @@ void CSoft3DRaceDlg::GenerateCourseWithSeed(DWORD seed)
 			const float inB = m_bandHalf * 1.02f;
 			const float outB = m_bandHalf * 3.35f;
 			for (int pass = 0; pass < 3; pass++) {
+				PumpQueued(FALSE);
 				for (int i = 0; i < S3R_HM_N * S3R_HM_N; i++) tmp[i] = m_hm[i];
 				for (int jz = 0; jz < S3R_HM_N; jz++) {
 					for (int ix = 0; ix < S3R_HM_N; ix++) {
@@ -2101,6 +2277,9 @@ void CSoft3DRaceDlg::GenerateCourseWithSeed(DWORD seed)
 	if (m_view.m_ready) m_view.BakeNoiseCS();
 	UpdateStatus();
 	m_hudDirty = 1; m_clearDirty = 1;
+	PumpQueued(FALSE);
+	BakeStaticMeshes();
+	PumpQueued(FALSE);
 	RenderScene();
 }
 
@@ -3838,9 +4017,317 @@ void CSoft3DRaceDlg::EnsureStandingsBake()
 	m_standDirty = 0;
 }
 
+void CSoft3DRaceDlg::BakeStaticMeshes()
+{
+	if (!m_view.m_ready || m_knotN < 4 || !m_view.m_dev) return;
+	const UINT bakeMax = 700000u;
+	S3RVertex* bv = new (std::nothrow) S3RVertex[bakeMax];
+	if (!bv) return;
+	UINT n = 0;
+	auto put=[&](float x,float y,float z,float nx,float ny,float nz,float u,float vv,float r,float g,float b,float a)->BOOL{
+		if (n >= bakeMax) return FALSE;
+		bv[n++] = {x,y,z,nx,ny,nz,u,vv,r,g,b,a};
+		return TRUE;
+	};
+	auto patch=[&](float x0,float y0,float z0,float x1,float y1,float z1,float x2,float y2,float z2,float x3,float y3,float z3,float nx,float ny,float nz,float u0,float v0,float u1,float v1,float r,float g,float b,float a){
+		put(x0,y0,z0,nx,ny,nz,u0,v1,r,g,b,a); put(x1,y1,z1,nx,ny,nz,u1,v1,r,g,b,a);
+		put(x2,y2,z2,nx,ny,nz,u1,v0,r,g,b,a); put(x3,y3,z3,nx,ny,nz,u0,v0,r,g,b,a);
+	};
+	const int segs = 220;
+	float half = BandHalfWidth();
+	n = 0;
+	for (int i=0;i<segs;i++){
+		float t0=(float)i/segs, t1=(float)(i+1)/segs;
+		float p0x,p0y,p0z,t0x,t0y,t0z,n0x,n0y,n0z,b0x,b0y,b0z;
+		float p1x,p1y,p1z,t1x,t1y,t1z,n1x,n1y,n1z,b1x,b1y,b1z;
+		SplineFrame(t0,p0x,p0y,p0z,t0x,t0y,t0z,n0x,n0y,n0z,b0x,b0y,b0z);
+		SplineFrame(t1,p1x,p1y,p1z,t1x,t1y,t1z,n1x,n1y,n1z,b1x,b1y,b1z);
+		float u0=t0*6.f, u1=t1*6.f;
+		float colR=.65f,colG=.9f,colB=1.f,colA=.42f;
+		if (m_themeActive==THEME_FOREST){colR=.55f;colG=1.f;colB=.7f;}
+		else if (m_themeActive==THEME_MESA){colR=1.f;colG=.75f;colB=.45f;}
+		else if (m_themeActive==THEME_NIGHT){colR=.55f;colG=.7f;colB=1.f;}
+		patch(p0x-b0x*half,p0y-b0y*half,p0z-b0z*half, p0x+b0x*half,p0y+b0y*half,p0z+b0z*half,
+			  p1x+b1x*half,p1y+b1y*half,p1z+b1z*half, p1x-b1x*half,p1y-b1y*half,p1z-b1z*half,
+			  n0x,n0y,n0z, u0,0,u1,1, colR,colG,colB,colA);
+		float rh=half*1.04f;
+		patch(p0x-b0x*rh+n0x*.35f,p0y-b0y*rh+n0y*.35f,p0z-b0z*rh+n0z*.35f,
+			  p0x-b0x*half+n0x*.08f,p0y-b0y*half+n0y*.08f,p0z-b0z*half+n0z*.08f,
+			  p1x-b1x*half+n1x*.08f,p1y-b1y*half+n1y*.08f,p1z-b1z*half+n1z*.08f,
+			  p1x-b1x*rh+n1x*.35f,p1y-b1y*rh+n1y*.35f,p1z-b1z*rh+n1z*.35f,
+			  -b0x,-b0y,-b0z, u0,0,u1,1, colR,colG,colB,.28f);
+		float rhRec = half * 0.40f;
+		float nLift = 0.12f;
+		patch(p0x-b0x*rhRec+n0x*nLift,p0y-b0y*rhRec+n0y*nLift,p0z-b0z*rhRec+n0z*nLift,
+			  p0x+b0x*rhRec+n0x*nLift,p0y+b0y*rhRec+n0y*nLift,p0z+b0z*rhRec+n0z*nLift,
+			  p1x+b1x*rhRec+n1x*nLift,p1y+b1y*rhRec+n1y*nLift,p1z+b1z*rhRec+n1z*nLift,
+			  p1x-b1x*rhRec+n1x*nLift,p1y-b1y*rhRec+n1y*nLift,p1z-b1z*rhRec+n1z*nLift,
+			  n0x,n0y,n0z, u0,0,u1,1, 0.22f,0.95f,0.52f,0.58f);
+	}
+	{
+		float tA = 0.f, tB = 0.012f;
+		float p0x,p0y,p0z,t0x,t0y,t0z,n0x,n0y,n0z,b0x,b0y,b0z;
+		float p1x,p1y,p1z,t1x,t1y,t1z,n1x,n1y,n1z,b1x,b1y,b1z;
+		SplineFrame(tA,p0x,p0y,p0z,t0x,t0y,t0z,n0x,n0y,n0z,b0x,b0y,b0z);
+		SplineFrame(tB,p1x,p1y,p1z,t1x,t1y,t1z,n1x,n1y,n1z,b1x,b1y,b1z);
+		const int nChk = 8;
+		const float lift = 0.18f;
+		for (int k = 0; k < nChk; k++) {
+			float a0 = -1.f + 2.f * (float)k / (float)nChk;
+			float a1 = -1.f + 2.f * (float)(k + 1) / (float)nChk;
+			int chk = k & 1;
+			float cr = chk ? 0.98f : 0.10f, cg = chk ? 0.98f : 0.10f, cb = chk ? 0.94f : 0.12f;
+			float h0 = a0 * half, h1 = a1 * half;
+			patch(p0x+b0x*h0+n0x*lift,p0y+b0y*h0+n0y*lift,p0z+b0z*h0+n0z*lift,
+				  p0x+b0x*h1+n0x*lift,p0y+b0y*h1+n0y*lift,p0z+b0z*h1+n0z*lift,
+				  p1x+b1x*h1+n1x*lift,p1y+b1y*h1+n1y*lift,p1z+b1z*h1+n1z*lift,
+				  p1x+b1x*h0+n1x*lift,p1y+b1y*h0+n1y*lift,p1z+b1z*h0+n1z*lift,
+				  n0x,n0y,n0z, 0,0,1,1, cr,cg,cb,0.90f);
+		}
+		const int nBan = 6;
+		float hLo = 0.35f, hHi = max(3.2f, half * 1.05f);
+		for (int k = 0; k < nBan; k++) {
+			float a0 = -1.f + 2.f * (float)k / (float)nBan;
+			float a1 = -1.f + 2.f * (float)(k + 1) / (float)nBan;
+			int chk = k & 1;
+			float cr = chk ? 0.95f : 0.82f, cg = chk ? 0.18f : 0.95f, cb = chk ? 0.18f : 0.95f;
+			float h0 = a0 * half * 0.98f, h1 = a1 * half * 0.98f;
+			patch(p0x+b0x*h0+n0x*hLo,p0y+b0y*h0+n0y*hLo,p0z+b0z*h0+n0z*hLo,
+				  p0x+b0x*h1+n0x*hLo,p0y+b0y*h1+n0y*hLo,p0z+b0z*h1+n0z*hLo,
+				  p0x+b0x*h1+n0x*hHi,p0y+b0y*h1+n0y*hHi,p0z+b0z*h1+n0z*hHi,
+				  p0x+b0x*h0+n0x*hHi,p0y+b0y*h0+n0y*hHi,p0z+b0z*h0+n0z*hHi,
+				  t0x,t0y,t0z, 0,0,1,1, cr,cg,cb,0.72f);
+		}
+	}
+	if (n >= 4) m_view.UploadDefaultVB(&m_view.m_vbBand, &m_view.m_vbBandN, bv, n);
+
+	float gr=.35f,gg=.55f,gb=.32f;
+	if (m_themeActive==THEME_FOREST){gr=.28f;gg=.62f;gb=.28f;}
+	else if (m_themeActive==THEME_RUINS){gr=.55f;gg=.5f;gb=.42f;}
+	else if (m_themeActive==THEME_OIL){gr=.28f;gg=.3f;gb=.32f;}
+	else if (m_themeActive==THEME_NIGHT){gr=.12f;gg=.14f;gb=.22f;}
+	else if (m_themeActive==THEME_UNDER){gr=.15f;gg=.35f;gb=.5f;}
+	else if (m_themeActive==THEME_GRASS){gr=.4f;gg=.7f;gb=.3f;}
+	else if (m_themeActive==THEME_MESA){gr=.85f;gg=.45f;gb=.28f;}
+	else {gr=.75f;gg=.8f;gb=.95f;}
+	const int gN = 72;
+	float extent = m_demoRad + m_bandHalf + 56.f;
+	if (extent < 280.f) extent = 280.f;
+	if (extent > 480.f) extent = 480.f;
+	float step = extent * 2.f / (float)gN;
+	float x0 = m_demoMidX - extent, z0 = m_demoMidZ - extent;
+	auto sampHm=[&](const float* hm, float x, float z, float fb)->float{
+		if (m_hmStep < 1e-4f) return fb;
+		float u = (x - m_hmX0) / m_hmStep, v = (z - m_hmZ0) / m_hmStep;
+		int i = (int)floorf(u), j = (int)floorf(v);
+		float fu = u - (float)i, fv = v - (float)j;
+		if (i < 0) { i = 0; fu = 0.f; } if (j < 0) { j = 0; fv = 0.f; }
+		if (i >= S3R_HM_N - 1) { i = S3R_HM_N - 2; fu = 1.f; }
+		if (j >= S3R_HM_N - 1) { j = S3R_HM_N - 2; fv = 1.f; }
+		float h00=hm[j*S3R_HM_N+i], h10=hm[j*S3R_HM_N+i+1];
+		float h01=hm[(j+1)*S3R_HM_N+i], h11=hm[(j+1)*S3R_HM_N+i+1];
+		return h00+(h10-h00)*fu+((h01+(h11-h01)*fu)-(h00+(h10-h00)*fu))*fv;
+	};
+	auto rawY=[&](float x,float z)->float{ return sampHm(m_hmRaw, x, z, GroundY(x,z)); };
+	auto pathD=[&](float x,float z)->float{ return sampHm(m_hmPathDist, x, z, 1e8f); };
+	auto quad=[&](float ax,float ay,float az, float bx,float by,float bz, float cx2,float cy2,float cz2, float dx,float dy,float dz,
+		float nx,float ny,float nz, float r,float g,float b){
+		put(ax,ay,az,nx,ny,nz,0,0,r,g,b,1.f);
+		put(dx,dy,dz,nx,ny,nz,0,1,r,g,b,1.f);
+		put(cx2,cy2,cz2,nx,ny,nz,1,1,r,g,b,1.f);
+		put(ax,ay,az,nx,ny,nz,0,0,r,g,b,1.f);
+		put(cx2,cy2,cz2,nx,ny,nz,1,1,r,g,b,1.f);
+		put(bx,by,bz,nx,ny,nz,1,0,r,g,b,1.f);
+	};
+	auto terrPatch=[&](float xa,float za,float xb,float zb, float u0,float v0,float u1,float v1){
+		float y00=GroundY(xa,za), y10=GroundY(xb,za), y11=GroundY(xb,zb), y01=GroundY(xa,zb);
+		float nx=(y00-y10)+(y01-y11), nz=(y00-y01)+(y10-y11), ny=(xb-xa)*2.f; S3rNorm3(nx,ny,nz);
+		put(xa,y00,za,nx,ny,nz,u0,v0,gr,gg,gb,1.f);
+		put(xa,y01,zb,nx,ny,nz,u0,v1,gr,gg,gb,1.f);
+		put(xb,y11,zb,nx,ny,nz,u1,v1,gr,gg,gb,1.f);
+		put(xa,y00,za,nx,ny,nz,u0,v0,gr,gg,gb,1.f);
+		put(xb,y11,zb,nx,ny,nz,u1,v1,gr,gg,gb,1.f);
+		put(xb,y10,za,nx,ny,nz,u1,v0,gr,gg,gb,1.f);
+	};
+	const float refineR = m_bandHalf * 3.8f;
+	n = 0;
+	for (int gz=0; gz<gN; gz++) {
+		for (int gx=0; gx<gN; gx++) {
+			float xa = x0 + gx * step, za = z0 + gz * step;
+			float xb = xa + step, zb = za + step;
+			float u0=(float)gx/(float)gN, v0=(float)gz/(float)gN, u1=(float)(gx+1)/(float)gN, v1=(float)(gz+1)/(float)gN;
+			float dmin = pathD(xa,za);
+			float d1 = pathD(xb,za); if (d1 < dmin) dmin = d1;
+			float d2 = pathD(xb,zb); if (d2 < dmin) dmin = d2;
+			float d3 = pathD(xa,zb); if (d3 < dmin) dmin = d3;
+			int sub = 1;
+			if (dmin < refineR) {
+				float yspan = rawY(xa,za) - GroundY(xa,za);
+				if (yspan < 0.f) yspan = -yspan;
+				sub = (yspan > 5.f) ? 6 : 3;
+			}
+			float us = (u1 - u0) / (float)sub, vs = (v1 - v0) / (float)sub;
+			float xs = (xb - xa) / (float)sub, zs = (zb - za) / (float)sub;
+			for (int iz=0; iz<sub; iz++) for (int ix=0; ix<sub; ix++) {
+				float xA = xa + xs * (float)ix, zA = za + zs * (float)iz;
+				terrPatch(xA, zA, xA + xs, zA + zs, u0 + us * (float)ix, v0 + vs * (float)iz, u0 + us * (float)(ix + 1), v0 + vs * (float)(iz + 1));
+			}
+		}
+	}
+	{
+		float cr=gr*0.70f, cg=gg*0.70f, cb=gb*0.70f;
+		const float holeR = m_bandHalf * 1.52f;
+		const float lipR = m_bandHalf * 2.55f;
+		const int tSegs = 220;
+		const int pN = 8;
+		for (int i = 0; i < tSegs; i++) {
+			float t0 = (float)i / (float)tSegs, t1 = (float)(i + 1) / (float)tSegs;
+			float p0x,p0y,p0z,t0x,t0y,t0z,n0x,n0y,n0z,b0x,b0y,b0z;
+			float p1x,p1y,p1z,t1x,t1y,t1z,n1x,n1y,n1z,b1x,b1y,b1z;
+			SplineFrame(t0,p0x,p0y,p0z,t0x,t0y,t0z,n0x,n0y,n0z,b0x,b0y,b0z);
+			SplineFrame(t1,p1x,p1y,p1z,t1x,t1y,t1z,n1x,n1y,n1z,b1x,b1y,b1z);
+			float gc0 = GroundY(p0x, p0z), rc0 = rawY(p0x, p0z);
+			float gc1 = GroundY(p1x, p1z), rc1 = rawY(p1x, p1z);
+			if (rc0 < gc0 + 5.2f && rc1 < gc1 + 5.2f) continue;
+			for (int s = 0; s < 2; s++) {
+				float sg = (s == 0) ? -1.f : 1.f;
+				for (int p = 0; p < pN - 1; p++) {
+					float a0 = (float)p / (float)(pN - 1) * 1.5707963f;
+					float a1 = (float)(p + 1) / (float)(pN - 1) * 1.5707963f;
+					auto prof=[&](float ang, float px, float pz, float bx, float bz, float gy, float ry,
+						float& ox, float& oy, float& oz){
+						float ca = 1.f - cosf(ang);
+						float rr = holeR + (lipR - holeR) * ca;
+						ox = px + bx * sg * rr;
+						oz = pz + bz * sg * rr;
+						oy = gy + (ry - gy) * sinf(ang) + 0.05f;
+					};
+					float ax,ay,az, bx2,by2,bz2, cx2,cy2,cz2, dx,dy,dz;
+					prof(a0, p0x,p0z, b0x,b0z, gc0,rc0, ax,ay,az);
+					prof(a0, p1x,p1z, b1x,b1z, gc1,rc1, bx2,by2,bz2);
+					prof(a1, p1x,p1z, b1x,b1z, gc1,rc1, cx2,cy2,cz2);
+					prof(a1, p0x,p0z, b0x,b0z, gc0,rc0, dx,dy,dz);
+					float e1x=bx2-ax, e1y=by2-ay, e1z=bz2-az;
+					float e2x=dx-ax, e2y=dy-ay, e2z=dz-az;
+					float wnx=e1y*e2z-e1z*e2y, wny=e1z*e2x-e1x*e2z, wnz=e1x*e2y-e1y*e2x;
+					S3rNorm3(wnx,wny,wnz);
+					if (wnx * (-sg * b0x) + wnz * (-sg * b0z) < 0.f) { wnx=-wnx; wny=-wny; wnz=-wnz; }
+					quad(ax,ay,az, bx2,by2,bz2, cx2,cy2,cz2, dx,dy,dz, wnx,wny,wnz, cr,cg,cb);
+				}
+			}
+			if (rc0 > gc0 + 6.f && rc1 > gc1 + 6.f) {
+				float y0 = gc0 + (rc0 - gc0) * 0.86f;
+				float y1 = gc1 + (rc1 - gc1) * 0.86f;
+				float lx0 = p0x - b0x * holeR, lz0 = p0z - b0z * holeR;
+				float rx0 = p0x + b0x * holeR, rz0 = p0z + b0z * holeR;
+				float lx1 = p1x - b1x * holeR, lz1 = p1z - b1z * holeR;
+				float rx1 = p1x + b1x * holeR, rz1 = p1z + b1z * holeR;
+				quad(lx0,y0,lz0, rx0,y0,rz0, rx1,y1,rz1, lx1,y1,lz1, 0.f,-1.f,0.f, cr,cg,cb);
+			}
+		}
+	}
+	if (n >= 3) m_view.UploadTerrMesh(bv, n);
+
+	n = 0;
+	{
+		float px,py,pz,tx,ty,tz,nx,ny,nz,bx,by,bz;
+		SplineFrame(0.f, px,py,pz, tx,ty,tz, nx,ny,nz, bx,by,bz);
+		float postH = half * 1.20f; if (postH < 3.4f) postH = 3.4f;
+		auto gateBox = [&](float x, float y0, float z, float hx, float hy, float hz, float r, float g, float b) {
+			float y1 = y0 + hy;
+			float x0 = x - hx, x1 = x + hx, z0 = z - hz, z1 = z + hz;
+			auto tri = [&](float ax,float ay,float az, float bx2,float by2,float bz2, float cx2,float cy2,float cz2,
+				float nx2,float ny2,float nz2) {
+				put(ax,ay,az,nx2,ny2,nz2,0,0,r,g,b,1.f);
+				put(bx2,by2,bz2,nx2,ny2,nz2,1,0,r,g,b,1.f);
+				put(cx2,cy2,cz2,nx2,ny2,nz2,.5f,1,r,g,b,1.f);
+			};
+			tri(x0,y1,z0, x1,y1,z0, x1,y1,z1, 0,1,0);
+			tri(x0,y1,z0, x1,y1,z1, x0,y1,z1, 0,1,0);
+			tri(x0,y0,z1, x1,y0,z1, x1,y1,z1, 0,0,1);
+			tri(x0,y0,z1, x1,y1,z1, x0,y1,z1, 0,0,1);
+			tri(x1,y0,z0, x0,y0,z0, x0,y1,z0, 0,0,-1);
+			tri(x1,y0,z0, x0,y1,z0, x1,y1,z0, 0,0,-1);
+			tri(x0,y0,z0, x0,y0,z1, x0,y1,z1, -1,0,0);
+			tri(x0,y0,z0, x0,y1,z1, x0,y1,z0, -1,0,0);
+			tri(x1,y0,z1, x1,y0,z0, x1,y1,z0, 1,0,0);
+			tri(x1,y0,z1, x1,y1,z0, x1,y1,z1, 1,0,0);
+		};
+		float lx = px - bx * half, ly = py - by * half, lz = pz - bz * half;
+		float rx = px + bx * half, ry = py + by * half, rz = pz + bz * half;
+		gateBox(lx, ly, lz, 0.22f, postH, 0.22f, 0.96f, 0.96f, 0.98f);
+		gateBox(rx, ry, rz, 0.22f, postH, 0.22f, 0.96f, 0.96f, 0.98f);
+		float mx = (lx + rx) * 0.5f, mz = (lz + rz) * 0.5f;
+		float my = (ly + ry) * 0.5f + postH - 0.18f;
+		float span = half + 0.28f;
+		gateBox(mx, my, mz, span, 0.16f, 0.16f, 0.88f, 0.16f, 0.18f);
+	}
+	if (n >= 3) m_view.UploadDefaultVB(&m_view.m_vbScenery, &m_view.m_vbSceneryN, bv, n);
+
+	n = 0;
+	{
+		const int wN = 28;
+		float wExt = m_demoRad + m_bandHalf + 40.f;
+		if (wExt < 200.f) wExt = 200.f;
+		if (wExt > 420.f) wExt = 420.f;
+		float wStep = wExt * 2.f / (float)wN;
+		float wx0 = m_demoMidX - wExt, wz0 = m_demoMidZ - wExt;
+		float wr=.22f,wg=.42f,wb=.58f,wa=.42f;
+		if (m_themeActive==THEME_FOREST){wr=.16f;wg=.38f;wb=.32f;}
+		else if (m_themeActive==THEME_MESA){wr=.35f;wg=.28f;wb=.18f;wa=.38f;}
+		else if (m_themeActive==THEME_UNDER){wr=.12f;wg=.40f;wb=.62f;wa=.35f;}
+		else if (m_themeActive==THEME_NIGHT){wr=.10f;wg=.16f;wb=.28f;}
+		float wy = m_waterY + 0.18f;
+		for (int gz=0; gz<wN; gz++) for (int gx=0; gx<wN; gx++) {
+			float xa = wx0 + gx * wStep, za = wz0 + gz * wStep;
+			float xb = xa + wStep, zb = za + wStep;
+			float y00=GroundY(xa,za), y10=GroundY(xb,za), y11=GroundY(xb,zb), y01=GroundY(xa,zb);
+			if (y00>wy+0.9f || y10>wy+0.9f || y11>wy+0.9f || y01>wy+0.9f) continue;
+			put(xa,wy,za,0,1,0,0,0,wr,wg,wb,wa);
+			put(xb,wy,za,0,1,0,1,0,wr,wg,wb,wa);
+			put(xb,wy,zb,0,1,0,1,1,wr,wg,wb,wa);
+			put(xa,wy,za,0,1,0,0,0,wr,wg,wb,wa);
+			put(xb,wy,zb,0,1,0,1,1,wr,wg,wb,wa);
+			put(xa,wy,zb,0,1,0,0,1,wr,wg,wb,wa);
+		}
+	}
+	if (n >= 3) m_view.UploadDefaultVB(&m_view.m_vbWater, &m_view.m_vbWaterN, bv, n);
+	delete[] bv;
+
+	if (m_obsNv > 0 && m_obsNi >= 3)
+		m_view.UploadDefaultVB(&m_view.m_vbObs, &m_view.m_obsNvGpu, m_obsVert, (UINT)m_obsNv);
+	if (m_obsNi >= 3)
+		m_view.UploadDefaultIB(&m_view.m_ibObs, &m_view.m_obsNiGpu, m_obsIdx, (UINT)m_obsNi);
+	m_view.m_obsInstN = 0;
+	S3R_RELEASE(m_view.m_vbObsInst);
+	if (m_obsN > 0 && m_view.m_dev) {
+		S3RInst* inst = new (std::nothrow) S3RInst[m_obsN];
+		if (inst) {
+			for (int i = 0; i < m_obsN; i++) {
+				S3rObs& o = m_obs[i];
+				inst[i] = {o.x, o.y, o.z, o.yaw, o.sx, o.sy, o.sz, 0.f, 1.f, 1.f, 1.f, 1.f};
+			}
+			D3D11_BUFFER_DESC bd = {};
+			bd.ByteWidth = (UINT)m_obsN * (UINT)sizeof(S3RInst);
+			bd.Usage = D3D11_USAGE_DEFAULT;
+			bd.BindFlags = D3D11_BIND_VERTEX_BUFFER;
+			D3D11_SUBRESOURCE_DATA srd = {};
+			srd.pSysMem = inst;
+			if (SUCCEEDED(m_view.m_dev->CreateBuffer(&bd, &srd, &m_view.m_vbObsInst)))
+				m_view.m_obsInstN = (UINT)m_obsN;
+			delete[] inst;
+		}
+	}
+	if (m_craftNv > 0 && m_craftNi >= 3) {
+		m_view.UploadDefaultVB(&m_view.m_vbCraft, &m_view.m_craftNvGpu, m_craftVert, (UINT)m_craftNv);
+		m_view.UploadDefaultIB(&m_view.m_ibCraft, &m_view.m_craftNiGpu, m_craftIdx, (UINT)m_craftNi);
+	}
+}
+
 void CSoft3DRaceDlg::RenderScene()
 {
 	if (!m_view.m_ready || m_knotN < 4) return;
+	if (m_view.m_vbTerrN == 0 && m_hmReady) BakeStaticMeshes();
 	ID3D11DeviceContext* dc = m_view.m_imm;
 	const int w = m_view.m_vw, h = m_view.m_vh; if (w < 8 || h < 8) return;
 	if (m_clearDirty) {
@@ -3983,308 +4470,9 @@ void CSoft3DRaceDlg::RenderScene()
 		put(x2,y2,z2,nx,ny,nz,u1,v0,r,g,b,a); put(x3,y3,z3,nx,ny,nz,u0,v0,r,g,b,a);
 	};
 
-	// course ribbon patches along spline
-	phase=0;
-	const int segs = (m_phase == PHASE_PODIUM) ? 48 : 220;
-	float half = BandHalfWidth();
-	for (int i=0;i<segs;i++){
-		float t0=(float)i/segs, t1=(float)(i+1)/segs;
-		float p0x,p0y,p0z,t0x,t0y,t0z,n0x,n0y,n0z,b0x,b0y,b0z;
-		float p1x,p1y,p1z,t1x,t1y,t1z,n1x,n1y,n1z,b1x,b1y,b1z;
-		SplineFrame(t0,p0x,p0y,p0z,t0x,t0y,t0z,n0x,n0y,n0z,b0x,b0y,b0z);
-		SplineFrame(t1,p1x,p1y,p1z,t1x,t1y,t1z,n1x,n1y,n1z,b1x,b1y,b1z);
-		float u0=t0*6.f, u1=t1*6.f;
-		float colR=.65f,colG=.9f,colB=1.f,colA=.42f;
-		if (m_themeActive==THEME_FOREST){colR=.55f;colG=1.f;colB=.7f;}
-		else if (m_themeActive==THEME_MESA){colR=1.f;colG=.75f;colB=.45f;}
-		else if (m_themeActive==THEME_NIGHT){colR=.55f;colG=.7f;colB=1.f;}
-		patch(p0x-b0x*half,p0y-b0y*half,p0z-b0z*half, p0x+b0x*half,p0y+b0y*half,p0z+b0z*half,
-			  p1x+b1x*half,p1y+b1y*half,p1z+b1z*half, p1x-b1x*half,p1y-b1y*half,p1z-b1z*half,
-			  n0x,n0y,n0z, u0,0,u1,1, colR,colG,colB,colA);
-		float rh=half*1.04f;
-		patch(p0x-b0x*rh+n0x*.35f,p0y-b0y*rh+n0y*.35f,p0z-b0z*rh+n0z*.35f,
-			  p0x-b0x*half+n0x*.08f,p0y-b0y*half+n0y*.08f,p0z-b0z*half+n0z*.08f,
-			  p1x-b1x*half+n1x*.08f,p1y-b1y*half+n1y*.08f,p1z-b1z*half+n1z*.08f,
-			  p1x-b1x*rh+n1x*.35f,p1y-b1y*rh+n1y*.35f,p1z-b1z*rh+n1z*.35f,
-			  -b0x,-b0y,-b0z, u0,0,u1,1, colR,colG,colB,.28f);
-		// 回復ゾーン：帯中央（HP回復判定 lat<=0.42*half と一致）
-		float rhRec = half * 0.40f;
-		float nLift = 0.12f;
-		patch(p0x-b0x*rhRec+n0x*nLift,p0y-b0y*rhRec+n0y*nLift,p0z-b0z*rhRec+n0z*nLift,
-			  p0x+b0x*rhRec+n0x*nLift,p0y+b0y*rhRec+n0y*nLift,p0z+b0z*rhRec+n0z*nLift,
-			  p1x+b1x*rhRec+n1x*nLift,p1y+b1y*rhRec+n1y*nLift,p1z+b1z*rhRec+n1z*nLift,
-			  p1x-b1x*rhRec+n1x*nLift,p1y-b1y*rhRec+n1y*nLift,p1z-b1z*rhRec+n1z*nLift,
-			  n0x,n0y,n0z, u0,0,u1,1, 0.22f,0.95f,0.52f,0.58f);
-	}
-	// スタート／LAP線（pathT=0 の格子ゲート）
-	{
-		float tA = 0.f, tB = 0.012f;
-		float p0x,p0y,p0z,t0x,t0y,t0z,n0x,n0y,n0z,b0x,b0y,b0z;
-		float p1x,p1y,p1z,t1x,t1y,t1z,n1x,n1y,n1z,b1x,b1y,b1z;
-		SplineFrame(tA,p0x,p0y,p0z,t0x,t0y,t0z,n0x,n0y,n0z,b0x,b0y,b0z);
-		SplineFrame(tB,p1x,p1y,p1z,t1x,t1y,t1z,n1x,n1y,n1z,b1x,b1y,b1z);
-		const int nChk = 8;
-		const float lift = 0.18f;
-		for (int k = 0; k < nChk; k++) {
-			float a0 = -1.f + 2.f * (float)k / (float)nChk;
-			float a1 = -1.f + 2.f * (float)(k + 1) / (float)nChk;
-			int chk = k & 1;
-			float cr = chk ? 0.98f : 0.10f, cg = chk ? 0.98f : 0.10f, cb = chk ? 0.94f : 0.12f;
-			float h0 = a0 * half, h1 = a1 * half;
-			patch(p0x+b0x*h0+n0x*lift,p0y+b0y*h0+n0y*lift,p0z+b0z*h0+n0z*lift,
-				  p0x+b0x*h1+n0x*lift,p0y+b0y*h1+n0y*lift,p0z+b0z*h1+n0z*lift,
-				  p1x+b1x*h1+n1x*lift,p1y+b1y*h1+n1y*lift,p1z+b1z*h1+n1z*lift,
-				  p1x+b1x*h0+n1x*lift,p1y+b1y*h0+n1y*lift,p1z+b1z*h0+n1z*lift,
-				  n0x,n0y,n0z, 0,0,1,1, cr,cg,cb,0.90f);
-		}
-		// ゲートの縦幕（左右ポールの間）
-		const int nBan = 6;
-		float hLo = 0.35f, hHi = max(3.2f, half * 1.05f);
-		for (int k = 0; k < nBan; k++) {
-			float a0 = -1.f + 2.f * (float)k / (float)nBan;
-			float a1 = -1.f + 2.f * (float)(k + 1) / (float)nBan;
-			int chk = k & 1;
-			float cr = chk ? 0.95f : 0.82f, cg = chk ? 0.18f : 0.95f, cb = chk ? 0.18f : 0.95f;
-			float h0 = a0 * half * 0.98f, h1 = a1 * half * 0.98f;
-			patch(p0x+b0x*h0+n0x*hLo,p0y+b0y*h0+n0y*hLo,p0z+b0z*h0+n0z*hLo,
-				  p0x+b0x*h1+n0x*hLo,p0y+b0y*h1+n0y*hLo,p0z+b0z*h1+n0z*hLo,
-				  p0x+b0x*h1+n0x*hHi,p0y+b0y*h1+n0y*hHi,p0z+b0z*h1+n0z*hHi,
-				  p0x+b0x*h0+n0x*hHi,p0y+b0y*h0+n0y*hHi,p0z+b0z*h0+n0z*hHi,
-				  t0x,t0y,t0z, 0,0,1,1, cr,cg,cb,0.72f);
-		}
-	}
-
-	// world: terrain + obstacles（空カードは半透明パスへ — 不透明だと横から棒状破綻）
+	// 帯・地形・水・ゲート・障害は BakeStaticMeshes。ここは動くものだけ。
+	nTerr = 0;
 	phase=1;
-	{
-		float gr=.35f,gg=.55f,gb=.32f;
-		if (m_themeActive==THEME_FOREST){gr=.28f;gg=.62f;gb=.28f;}
-		else if (m_themeActive==THEME_RUINS){gr=.55f;gg=.5f;gb=.42f;}
-		else if (m_themeActive==THEME_OIL){gr=.28f;gg=.3f;gb=.32f;}
-		else if (m_themeActive==THEME_NIGHT){gr=.12f;gg=.14f;gb=.22f;}
-		else if (m_themeActive==THEME_UNDER){gr=.15f;gg=.35f;gb=.5f;}
-		else if (m_themeActive==THEME_GRASS){gr=.4f;gg=.7f;gb=.3f;}
-		else if (m_themeActive==THEME_MESA){gr=.85f;gg=.45f;gb=.28f;}
-		else {gr=.75f;gg=.8f;gb=.95f;}
-		const int gN = 72;
-		float extent = m_demoRad + m_bandHalf + 56.f;
-		if (extent < 280.f) extent = 280.f;
-		if (extent > 480.f) extent = 480.f;
-		float step = extent * 2.f / (float)gN;
-		float x0 = m_demoMidX - extent, z0 = m_demoMidZ - extent;
-		auto sampHm=[&](const float* hm, float x, float z, float fb)->float{
-			if (m_hmStep < 1e-4f) return fb;
-			float u = (x - m_hmX0) / m_hmStep, v = (z - m_hmZ0) / m_hmStep;
-			int i = (int)floorf(u), j = (int)floorf(v);
-			float fu = u - (float)i, fv = v - (float)j;
-			if (i < 0) { i = 0; fu = 0.f; } if (j < 0) { j = 0; fv = 0.f; }
-			if (i >= S3R_HM_N - 1) { i = S3R_HM_N - 2; fu = 1.f; }
-			if (j >= S3R_HM_N - 1) { j = S3R_HM_N - 2; fv = 1.f; }
-			float h00=hm[j*S3R_HM_N+i], h10=hm[j*S3R_HM_N+i+1];
-			float h01=hm[(j+1)*S3R_HM_N+i], h11=hm[(j+1)*S3R_HM_N+i+1];
-			return h00+(h10-h00)*fu+((h01+(h11-h01)*fu)-(h00+(h10-h00)*fu))*fv;
-		};
-		auto rawY=[&](float x,float z)->float{ return sampHm(m_hmRaw, x, z, GroundY(x,z)); };
-		auto pathD=[&](float x,float z)->float{ return sampHm(m_hmPathDist, x, z, 1e8f); };
-		auto quad=[&](float ax,float ay,float az, float bx,float by,float bz, float cx2,float cy2,float cz2, float dx,float dy,float dz,
-			float nx,float ny,float nz, float r,float g,float b){
-			put(ax,ay,az,nx,ny,nz,0,0,r,g,b,1.f);
-			put(dx,dy,dz,nx,ny,nz,0,1,r,g,b,1.f);
-			put(cx2,cy2,cz2,nx,ny,nz,1,1,r,g,b,1.f);
-			put(ax,ay,az,nx,ny,nz,0,0,r,g,b,1.f);
-			put(cx2,cy2,cz2,nx,ny,nz,1,1,r,g,b,1.f);
-			put(bx,by,bz,nx,ny,nz,1,0,r,g,b,1.f);
-		};
-		auto terrPatch=[&](float xa,float za,float xb,float zb, float u0,float v0,float u1,float v1){
-			float y00=GroundY(xa,za), y10=GroundY(xb,za), y11=GroundY(xb,zb), y01=GroundY(xa,zb);
-			float nx=(y00-y10)+(y01-y11), nz=(y00-y01)+(y10-y11), ny=(xb-xa)*2.f; S3rNorm3(nx,ny,nz);
-			put(xa,y00,za,nx,ny,nz,u0,v0,gr,gg,gb,1.f);
-			put(xa,y01,zb,nx,ny,nz,u0,v1,gr,gg,gb,1.f);
-			put(xb,y11,zb,nx,ny,nz,u1,v1,gr,gg,gb,1.f);
-			put(xa,y00,za,nx,ny,nz,u0,v0,gr,gg,gb,1.f);
-			put(xb,y11,zb,nx,ny,nz,u1,v1,gr,gg,gb,1.f);
-			put(xb,y10,za,nx,ny,nz,u1,v0,gr,gg,gb,1.f);
-		};
-		const float refineR = m_bandHalf * 3.8f;
-		for (int gz=0; gz<gN; gz++) for (int gx=0; gx<gN; gx++) {
-			float xa = x0 + gx * step, za = z0 + gz * step;
-			float xb = xa + step, zb = za + step;
-			float u0=(float)gx/(float)gN, v0=(float)gz/(float)gN, u1=(float)(gx+1)/(float)gN, v1=(float)(gz+1)/(float)gN;
-			float dmin = pathD(xa,za);
-			float d1 = pathD(xb,za); if (d1 < dmin) dmin = d1;
-			float d2 = pathD(xb,zb); if (d2 < dmin) dmin = d2;
-			float d3 = pathD(xa,zb); if (d3 < dmin) dmin = d3;
-			int sub = 1;
-			if (m_phase != PHASE_PODIUM && dmin < refineR) {
-				float yspan = rawY(xa,za) - GroundY(xa,za);
-				if (yspan < 0.f) yspan = -yspan;
-				sub = (yspan > 5.f) ? 6 : 3;
-			}
-			float us = (u1 - u0) / (float)sub, vs = (v1 - v0) / (float)sub;
-			float xs = (xb - xa) / (float)sub, zs = (zb - za) / (float)sub;
-			for (int iz=0; iz<sub; iz++) for (int ix=0; ix<sub; ix++) {
-				float xA = xa + xs * (float)ix, zA = za + zs * (float)iz;
-				terrPatch(xA, zA, xA + xs, zA + zs, u0 + us * (float)ix, v0 + vs * (float)iz, u0 + us * (float)(ix + 1), v0 + vs * (float)(iz + 1));
-			}
-		}
-		// 山のくり抜き：コースに沿った楕円ベベル＋天井（格子の段差を隠す）
-		{
-			float cr=gr*0.70f, cg=gg*0.70f, cb=gb*0.70f;
-			const float holeR = m_bandHalf * 1.52f;
-			const float lipR = m_bandHalf * 2.55f;
-			const int tSegs = (m_phase == PHASE_PODIUM) ? 32 : 220;
-			const int pN = 8;
-			for (int i = 0; i < tSegs; i++) {
-				float t0 = (float)i / (float)tSegs, t1 = (float)(i + 1) / (float)tSegs;
-				float p0x,p0y,p0z,t0x,t0y,t0z,n0x,n0y,n0z,b0x,b0y,b0z;
-				float p1x,p1y,p1z,t1x,t1y,t1z,n1x,n1y,n1z,b1x,b1y,b1z;
-				SplineFrame(t0,p0x,p0y,p0z,t0x,t0y,t0z,n0x,n0y,n0z,b0x,b0y,b0z);
-				SplineFrame(t1,p1x,p1y,p1z,t1x,t1y,t1z,n1x,n1y,n1z,b1x,b1y,b1z);
-				float gc0 = GroundY(p0x, p0z), rc0 = rawY(p0x, p0z);
-				float gc1 = GroundY(p1x, p1z), rc1 = rawY(p1x, p1z);
-				if (rc0 < gc0 + 5.2f && rc1 < gc1 + 5.2f) continue;
-				for (int s = 0; s < 2; s++) {
-					float sg = (s == 0) ? -1.f : 1.f;
-					for (int p = 0; p < pN - 1; p++) {
-						float a0 = (float)p / (float)(pN - 1) * 1.5707963f;
-						float a1 = (float)(p + 1) / (float)(pN - 1) * 1.5707963f;
-						auto prof=[&](float ang, float px, float pz, float bx, float bz, float gy, float ry,
-							float& ox, float& oy, float& oz){
-							float ca = 1.f - cosf(ang);
-							float rr = holeR + (lipR - holeR) * ca;
-							ox = px + bx * sg * rr;
-							oz = pz + bz * sg * rr;
-							oy = gy + (ry - gy) * sinf(ang) + 0.05f;
-						};
-						float ax,ay,az, bx2,by2,bz2, cx2,cy2,cz2, dx,dy,dz;
-						prof(a0, p0x,p0z, b0x,b0z, gc0,rc0, ax,ay,az);
-						prof(a0, p1x,p1z, b1x,b1z, gc1,rc1, bx2,by2,bz2);
-						prof(a1, p1x,p1z, b1x,b1z, gc1,rc1, cx2,cy2,cz2);
-						prof(a1, p0x,p0z, b0x,b0z, gc0,rc0, dx,dy,dz);
-						float e1x=bx2-ax, e1y=by2-ay, e1z=bz2-az;
-						float e2x=dx-ax, e2y=dy-ay, e2z=dz-az;
-						float wnx=e1y*e2z-e1z*e2y, wny=e1z*e2x-e1x*e2z, wnz=e1x*e2y-e1y*e2x;
-						S3rNorm3(wnx,wny,wnz);
-						if (wnx * (-sg * b0x) + wnz * (-sg * b0z) < 0.f) { wnx=-wnx; wny=-wny; wnz=-wnz; }
-						quad(ax,ay,az, bx2,by2,bz2, cx2,cy2,cz2, dx,dy,dz, wnx,wny,wnz, cr,cg,cb);
-					}
-				}
-				if (rc0 > gc0 + 6.f && rc1 > gc1 + 6.f) {
-					float y0 = gc0 + (rc0 - gc0) * 0.86f;
-					float y1 = gc1 + (rc1 - gc1) * 0.86f;
-					float lx0 = p0x - b0x * holeR, lz0 = p0z - b0z * holeR;
-					float rx0 = p0x + b0x * holeR, rz0 = p0z + b0z * holeR;
-					float lx1 = p1x - b1x * holeR, lz1 = p1z - b1z * holeR;
-					float rx1 = p1x + b1x * holeR, rz1 = p1z + b1z * holeR;
-					quad(lx0,y0,lz0, rx0,y0,rz0, rx1,y1,rz1, lx1,y1,lz1, 0.f,-1.f,0.f, cr,cg,cb);
-				}
-			}
-		}
-		nTerr = nWorld;
-	}
-	// スタート／LAP ゲートのポール（地形シェーダを当てないよう nTerr 確定後）
-	{
-		float px,py,pz,tx,ty,tz,nx,ny,nz,bx,by,bz;
-		SplineFrame(0.f, px,py,pz, tx,ty,tz, nx,ny,nz, bx,by,bz);
-		float postH = half * 1.20f; if (postH < 3.4f) postH = 3.4f;
-		auto gateBox = [&](float x, float y0, float z, float hx, float hy, float hz, float r, float g, float b) {
-			float y1 = y0 + hy;
-			float x0 = x - hx, x1 = x + hx, z0 = z - hz, z1 = z + hz;
-			auto tri = [&](float ax,float ay,float az, float bx2,float by2,float bz2, float cx2,float cy2,float cz2,
-				float nx2,float ny2,float nz2) {
-				put(ax,ay,az,nx2,ny2,nz2,0,0,r,g,b,1.f);
-				put(bx2,by2,bz2,nx2,ny2,nz2,1,0,r,g,b,1.f);
-				put(cx2,cy2,cz2,nx2,ny2,nz2,.5f,1,r,g,b,1.f);
-			};
-			tri(x0,y1,z0, x1,y1,z0, x1,y1,z1, 0,1,0);
-			tri(x0,y1,z0, x1,y1,z1, x0,y1,z1, 0,1,0);
-			tri(x0,y0,z1, x1,y0,z1, x1,y1,z1, 0,0,1);
-			tri(x0,y0,z1, x1,y1,z1, x0,y1,z1, 0,0,1);
-			tri(x1,y0,z0, x0,y0,z0, x0,y1,z0, 0,0,-1);
-			tri(x1,y0,z0, x0,y1,z0, x1,y1,z0, 0,0,-1);
-			tri(x0,y0,z0, x0,y0,z1, x0,y1,z1, -1,0,0);
-			tri(x0,y0,z0, x0,y1,z1, x0,y1,z0, -1,0,0);
-			tri(x1,y0,z1, x1,y0,z0, x1,y1,z0, 1,0,0);
-			tri(x1,y0,z1, x1,y1,z0, x1,y1,z1, 1,0,0);
-		};
-		float lx = px - bx * half, ly = py - by * half, lz = pz - bz * half;
-		float rx = px + bx * half, ry = py + by * half, rz = pz + bz * half;
-		gateBox(lx, ly, lz, 0.22f, postH, 0.22f, 0.96f, 0.96f, 0.98f);
-		gateBox(rx, ry, rz, 0.22f, postH, 0.22f, 0.96f, 0.96f, 0.98f);
-		float mx = (lx + rx) * 0.5f, mz = (lz + rz) * 0.5f;
-		float my = (ly + ry) * 0.5f + postH - 0.18f;
-		float span = half + 0.28f;
-		gateBox(mx, my, mz, span, 0.16f, 0.16f, 0.88f, 0.16f, 0.18f);
-	}
-	auto xformEmitMesh=[&](const float* mv, const UINT* mi, int nv, int ni, float ox,float oy,float oz, float yaw,float pitch, float sx,float sy,float sz, float r,float g,float b,float a){
-		float cy=cosf(yaw), syaw=sinf(yaw), cp=cosf(pitch), sp=sinf(pitch);
-		auto xf=[&](float x,float y,float z, float& X,float& Y,float& Z){
-			x*=sx;y*=sy;z*=sz;
-			float y2=y*cp-z*sp, z2=y*sp+z*cp;
-			X=ox + x*cy + z2*syaw; Y=oy + y2; Z=oz + -x*syaw + z2*cy;
-		};
-		auto xn=[&](float nx,float ny,float nz, float& NX,float& NY,float& NZ){
-			float y2=ny*cp-nz*sp, z2=ny*sp+nz*cp;
-			NX=nx*cy+z2*syaw; NY=y2; NZ=-nx*syaw+z2*cy; S3rNorm3(NX,NY,NZ);
-		};
-		UINT base = nBand+nWorld+nCraft+nTrans;
-		for (int i=0;i<nv;i++){
-			const float* p=mv+i*12; float X,Y,Z,NX,NY,NZ; xf(p[0],p[1],p[2],X,Y,Z); xn(p[3],p[4],p[5],NX,NY,NZ);
-			if(!put(X,Y,Z,NX,NY,NZ,p[6],p[7], r*p[8],g*p[9],b*p[10], a*p[11])) return;
-		}
-		(void)base;(void)mi;(void)ni;
-	};
-	// Expand craft as indexed into triangles
-	auto emitIndexed=[&](const float* mv,const UINT* mi,int nv,int ni,float ox,float oy,float oz,float yaw,float pitch,float sx,float sy,float sz,float r,float g,float b,float a)->BOOL{
-		float cy=cosf(yaw), syaw=sinf(yaw), cp=cosf(pitch), sp=sinf(pitch);
-		auto xf=[&](float x,float y,float z, float& X,float& Y,float& Z){
-			x*=sx;y*=sy;z*=sz; float y2=y*cp-z*sp, z2=y*sp+z*cp;
-			X=ox+x*cy+z2*syaw; Y=oy+y2; Z=oz+-x*syaw+z2*cy;
-		};
-		auto xn=[&](float nx,float ny,float nz, float& NX,float& NY,float& NZ){
-			float y2=ny*cp-nz*sp, z2=ny*sp+nz*cp; NX=nx*cy+z2*syaw; NY=y2; NZ=-nx*syaw+z2*cy; S3rNorm3(NX,NY,NZ);
-		};
-		for (int t=0;t+2<ni;t+=3){
-			for (int k=0;k<3;k++){
-				UINT id=mi[t+k]; if((int)id>=nv) return FALSE;
-				const float* p=mv+id*12; float X,Y,Z,NX,NY,NZ; xf(p[0],p[1],p[2],X,Y,Z); xn(p[3],p[4],p[5],NX,NY,NZ);
-				if(!put(X,Y,Z,NX,NY,NZ,p[6],p[7],r*p[8],g*p[9],b*p[10],a*p[11])) return FALSE;
-			}
-		}
-		return TRUE;
-	};
-	// 景色オブジェクト（VB残量から描画数を決める — 途中切断＝破綻を防ぐ）
-	{
-		int order[S3R_MAX_OBS]; float dist2[S3R_MAX_OBS]; int nCand=0;
-		const int skipDecor = (m_phase == PHASE_PODIUM) ? 1 : 0;
-		for (int i=0;!skipDecor && i<m_obsN && nCand<S3R_MAX_OBS;i++){
-			float odx=m_obs[i].x-cx,ody=m_obs[i].y-cy,odz=m_obs[i].z-cz;
-			float d2=odx*odx+ody*ody+odz*odz;
-			if (d2 > 420.f*420.f) continue;
-			order[nCand]=i; dist2[nCand]=d2; nCand++;
-		}
-		const int craftReserve = (m_phase == PHASE_PODIUM)
-			? (3 * (m_craftNi > 0 ? m_craftNi : 4000) + 12000)
-			: ((m_craftN > 0 ? m_craftN : 6) * (m_craftNi > 0 ? m_craftNi : 4000) + 8000);
-		UINT usedNow = nBand + nWorld + nCraft + nTrans;
-		UINT room = (maxV > usedNow + (UINT)craftReserve) ? (maxV - usedNow - (UINT)craftReserve) : 0;
-		int perObs = m_obsNi > 0 ? m_obsNi : 1;
-		int drawMax = (int)(room / (UINT)perObs);
-		if (drawMax > 320) drawMax = 320;
-		if (drawMax < 48) drawMax = 48;
-		for (int a=0;a<nCand && a<drawMax;a++){
-			int best=a;
-			for (int b=a+1;b<nCand;b++) if (dist2[b] < dist2[best]) best=b;
-			if (best!=a){ int ti=order[a]; order[a]=order[best]; order[best]=ti; float td=dist2[a]; dist2[a]=dist2[best]; dist2[best]=td; }
-		}
-		int drawN = nCand; if (drawN > drawMax) drawN = drawMax;
-		for (int k=0;k<drawN;k++){
-			S3rObs& o=m_obs[order[k]];
-			if(!emitIndexed(m_obsVert, m_obsIdx, m_obsNv, m_obsNi, o.x,o.y,o.z, o.yaw,0.f, o.sx,o.sy,o.sz, 1,1,1,1)) break;
-		}
-	}
-	// crafts — キャラ専用テクスチャパス
-	phase=2;
 	// 表彰台（1位中央・2位左・3位右）— ワールドは TRIANGLELIST なので 6頂点/面
 	if (m_phase == PHASE_PODIUM) {
 		auto tri = [&](float ax, float ay, float az, float bx, float by, float bz, float cx2, float cy2, float cz2,
@@ -4314,26 +4502,10 @@ void CSoft3DRaceDlg::RenderScene()
 		box(m_podiumBaseX,      y0, m_podiumBaseZ, 1.6f, 4.2f, 1.6f, 1.f, .85f, .25f);   // 1st gold
 		box(m_podiumBaseX-5.2f, y0, m_podiumBaseZ, 1.5f, 2.8f, 1.5f, .72f, .76f, .82f); // 2nd silver
 		box(m_podiumBaseX+5.2f, y0, m_podiumBaseZ, 1.5f, 1.8f, 1.5f, .78f, .48f, .28f); // 3rd bronze
-		phase = 2;
-		// 表彰中は台の3機だけ完全描画（他機でVBが切れて機体が欠けるのを防ぐ）
-		for (int s = 0; s < 3; s++) {
-			int ci = m_podiumOrder[s];
-			if (ci < 0 || ci >= m_craftN) continue;
-			S3rCraft& c = m_crafts[ci];
-			float cr = kCraftColors[c.colorIdx][0], cg = kCraftColors[c.colorIdx][1], cb = kCraftColors[c.colorIdx][2];
-			if (!emitIndexed(m_craftVert, m_craftIdx, m_craftNv, m_craftNi, c.x, c.y, c.z, c.yaw, c.pitch, 1.25f, 1.25f, 1.25f, cr, cg, cb, 1.f))
-				break;
-		}
-	} else {
-		for (int i = 0; i < m_craftN; i++) {
-			S3rCraft& c = m_crafts[i];
-			float cr = kCraftColors[c.colorIdx][0], cg = kCraftColors[c.colorIdx][1], cb = kCraftColors[c.colorIdx][2];
-			float a = c.alive ? 1.f : 0.35f;
-			if (!emitIndexed(m_craftVert, m_craftIdx, m_craftNv, m_craftNi, c.x, c.y, c.z, c.yaw, c.pitch, 1.1f, 1.1f, 1.1f, cr, cg, cb, a)) break;
-		}
 	}
 	// sky cards + items（深度書き込みなし）
 	phase=3;
+	UINT nSky=0, nSky2=0, nItem=0;
 	{
 		float rx = ax - cx, ry = ay - cy, rz = az - cz; S3rNorm3(rx,ry,rz);
 		float ux=0,uy=1,uz=0;
@@ -4346,43 +4518,36 @@ void CSoft3DRaceDlg::RenderScene()
 		else if (m_themeActive==THEME_CLOUD){br=.96f;bg=.96f;bb=1.f;}
 		else if (m_themeActive==THEME_UNDER){br=.28f;bg=.58f;bb=.78f;}
 		else if (m_themeActive==THEME_OIL){br=.48f;bg=.5f;bb=.54f;}
-		for (int bi=0;bi<12;bi++){
-			float ang = (float)bi * (float)(M_PI*2.0/12.0) + m_anim*0.025f;
-			float dist = 190.f + 40.f*(bi%3);
-			float bx0 = pl.x + cosf(ang)*dist;
-			float by0 = pl.y + 42.f + 10.f*sinf(ang*1.5f+m_anim*0.07f);
-			float bz0 = pl.z + sinf(ang)*dist;
-			float hs=42.f, vs=24.f;
+		auto card=[&](float bx0,float by0,float bz0,float hs,float vs,float r,float g,float b,float a){
 			float x0=bx0-sx*hs-ux2*vs, y0=by0-sy*hs-uy2*vs, z0=bz0-sz*hs-uz2*vs;
 			float x1=bx0+sx*hs-ux2*vs, y1=by0+sy*hs-uy2*vs, z1=bz0+sz*hs-uz2*vs;
 			float x2=bx0+sx*hs+ux2*vs, y2=by0+sy*hs+uy2*vs, z2=bz0+sz*hs+uz2*vs;
 			float x3=bx0-sx*hs+ux2*vs, y3=by0-sy*hs+uy2*vs, z3=bz0-sz*hs+uz2*vs;
-			patch(x0,y0,z0,x1,y1,z1,x2,y2,z2,x3,y3,z3, -rx,-ry,-rz, 0,0,1,1, br,bg,bb,.28f);
+			put(x0,y0,z0, -rx,-ry,-rz, 0,0, r,g,b,a); put(x1,y1,z1, -rx,-ry,-rz, 1,0, r,g,b,a); put(x2,y2,z2, -rx,-ry,-rz, 1,1, r,g,b,a);
+			put(x0,y0,z0, -rx,-ry,-rz, 0,0, r,g,b,a); put(x2,y2,z2, -rx,-ry,-rz, 1,1, r,g,b,a); put(x3,y3,z3, -rx,-ry,-rz, 0,1, r,g,b,a);
+		};
+		for (int bi=0;bi<16;bi++){
+			float ang = (float)bi * (float)(M_PI*2.0/16.0) + m_anim*0.018f;
+			float dist = 170.f + 50.f*(bi%4);
+			float bx0 = pl.x + cosf(ang)*dist;
+			float by0 = pl.y + 38.f + 14.f*sinf(ang*1.3f+m_anim*0.05f);
+			float bz0 = pl.z + sinf(ang)*dist;
+			float hs = 38.f + 22.f*(float)(bi%5);
+			float vs = 14.f + 10.f*(float)((bi*3)%4);
+			card(bx0,by0,bz0, hs, vs, br,bg,bb,.88f);
 		}
-		const int wN = 28;
-		float wExt = m_demoRad + m_bandHalf + 40.f;
-		if (wExt < 200.f) wExt = 200.f;
-		if (wExt > 420.f) wExt = 420.f;
-		float wStep = wExt * 2.f / (float)wN;
-		float wx0 = m_demoMidX - wExt, wz0 = m_demoMidZ - wExt;
-		float wr=.22f,wg=.42f,wb=.58f,wa=.42f;
-		if (m_themeActive==THEME_FOREST){wr=.16f;wg=.38f;wb=.32f;}
-		else if (m_themeActive==THEME_MESA){wr=.35f;wg=.28f;wb=.18f;wa=.38f;}
-		else if (m_themeActive==THEME_UNDER){wr=.12f;wg=.40f;wb=.62f;wa=.35f;}
-		else if (m_themeActive==THEME_NIGHT){wr=.10f;wg=.16f;wb=.28f;}
-		float wy = m_waterY + 0.18f;
-		for (int gz=0; gz<wN; gz++) for (int gx=0; gx<wN; gx++) {
-			float xa = wx0 + gx * wStep, za = wz0 + gz * wStep;
-			float xb = xa + wStep, zb = za + wStep;
-			float y00=GroundY(xa,za), y10=GroundY(xb,za), y11=GroundY(xb,zb), y01=GroundY(xa,zb);
-			if (y00>wy+0.9f || y10>wy+0.9f || y11>wy+0.9f || y01>wy+0.9f) continue;
-			put(xa,wy,za,0,1,0,0,0,wr,wg,wb,wa);
-			put(xb,wy,za,0,1,0,1,0,wr,wg,wb,wa);
-			put(xb,wy,zb,0,1,0,1,1,wr,wg,wb,wa);
-			put(xa,wy,za,0,1,0,0,0,wr,wg,wb,wa);
-			put(xb,wy,zb,0,1,0,1,1,wr,wg,wb,wa);
-			put(xa,wy,zb,0,1,0,0,1,wr,wg,wb,wa);
+		nSky = nTrans;
+		for (int bi=0;bi<12;bi++){
+			float ang = (float)bi * (float)(M_PI*2.0/12.0) - m_anim*0.012f + 0.4f;
+			float dist = 130.f + 36.f*(bi%3);
+			float bx0 = pl.x + cosf(ang)*dist;
+			float by0 = pl.y + 28.f + 10.f*sinf(ang*1.7f+m_anim*0.08f);
+			float bz0 = pl.z + sinf(ang)*dist;
+			float hs = 48.f + 18.f*(float)(bi%3);
+			float vs = 9.f + 6.f*(float)(bi%4);
+			card(bx0,by0,bz0, hs, vs, br,bg,bb,.78f);
 		}
+		nSky2 = nTrans - nSky;
 	}
 	for (int i=0;i<m_itemN;i++){
 		S3rItem& it=m_items[i]; if (it.taken) continue;
@@ -4396,17 +4561,38 @@ void CSoft3DRaceDlg::RenderScene()
 		case KIND_REVERB: r=.2f;g=.85f;b=.95f; break; case KIND_XFADE: r=1;g=.45f;b=.75f; break;
 		default: r=1;g=.55f;b=.2f; break;
 		}
-		float s=.55f; float cy=cosf(it.spin), sy=sinf(it.spin);
-		float p[6][3]={{0,s,0},{0,-s,0},{s*cy,0,s*sy},{-s*cy,0,-s*sy},{s*sy,0,-s*cy},{-s*sy,0,s*cy}};
-		int faces[8][3]={{0,2,4},{0,4,3},{0,3,5},{0,5,2},{1,4,2},{1,3,4},{1,5,3},{1,2,5}};
-		for (int f=0;f<8;f++){
-			float ax=it.x+p[faces[f][0]][0], ay=it.y+p[faces[f][0]][1], az=it.z+p[faces[f][0]][2];
-			float bx=it.x+p[faces[f][1]][0], by=it.y+p[faces[f][1]][1], bz=it.z+p[faces[f][1]][2];
-			float cx2=it.x+p[faces[f][2]][0], cy2=it.y+p[faces[f][2]][1], cz2=it.z+p[faces[f][2]][2];
-			float nx=(by-ay)*(cz2-az)-(bz-az)*(cy2-ay), ny=(bz-az)*(cx2-ax)-(bx-ax)*(cz2-az), nz=(bx-ax)*(cy2-ay)-(by-ay)*(cx2-ax); S3rNorm3(nx,ny,nz);
-			put(ax,ay,az,nx,ny,nz,0,0,r,g,b,.9f); put(bx,by,bz,nx,ny,nz,1,0,r,g,b,.9f); put(cx2,cy2,cz2,nx,ny,nz,.5f,1,r,g,b,.9f);
+		const float rad=.55f;
+		const int nl=8, nb=5;
+		for(int ii=0;ii<nl;ii++){
+			float a0=(float)ii*(6.2831853f/(float)nl)+it.spin, a1=(float)(ii+1)*(6.2831853f/(float)nl)+it.spin;
+			for(int jj=0;jj<nb;jj++){
+				float b0=-1.5707963f+(float)jj*(3.14159265f/(float)nb);
+				float b1=b0+(3.14159265f/(float)nb);
+				auto P=[&](float an,float bn,float& x,float& y,float& z,float& nx,float& ny,float& nz,float& u,float& vv){
+					float cb=cosf(bn),sb=sinf(bn),ca=cosf(an),sa=sinf(an);
+					nx=cb*ca; ny=sb; nz=cb*sa;
+					x=it.x+nx*rad; y=it.y+ny*rad; z=it.z+nz*rad;
+					u=an*(1.f/6.2831853f); vv=(bn+1.5707963f)*(1.f/3.14159265f);
+				};
+				float x0,y0,z0,n0x,n0y,n0z,uA,vA, x1,y1,z1,n1x,n1y,n1z,uB,vB, x2,y2,z2,n2x,n2y,n2z,uC,vC, x3,y3,z3,n3x,n3y,n3z,uD,vD;
+				P(a0,b0,x0,y0,z0,n0x,n0y,n0z,uA,vA); P(a1,b0,x1,y1,z1,n1x,n1y,n1z,uB,vB);
+				P(a1,b1,x2,y2,z2,n2x,n2y,n2z,uC,vC); P(a0,b1,x3,y3,z3,n3x,n3y,n3z,uD,vD);
+				put(x0,y0,z0,n0x,n0y,n0z,uA,vA,r,g,b,.90f); put(x1,y1,z1,n1x,n1y,n1z,uB,vB,r,g,b,.90f); put(x2,y2,z2,n2x,n2y,n2z,uC,vC,r,g,b,.90f);
+				put(x0,y0,z0,n0x,n0y,n0z,uA,vA,r,g,b,.90f); put(x2,y2,z2,n2x,n2y,n2z,uC,vC,r,g,b,.90f); put(x3,y3,z3,n3x,n3y,n3z,uD,vD,r,g,b,.90f);
+			}
+		}
+		for(int k=0;k<8;k++){
+			float a0=(float)k*(6.2831853f/8.f)+it.spin*1.4f, a1=a0+(6.2831853f/8.f);
+			float ri=rad*1.08f, ro=rad*1.28f, y0=it.y-rad*.07f, y1=it.y+rad*.07f;
+			float x00=it.x+cosf(a0)*ri, z00=it.z+sinf(a0)*ri;
+			float x10=it.x+cosf(a1)*ri, z10=it.z+sinf(a1)*ri;
+			float x01=it.x+cosf(a0)*ro, z01=it.z+sinf(a0)*ro;
+			float x11=it.x+cosf(a1)*ro, z11=it.z+sinf(a1)*ro;
+			put(x00,y0,z00,0,1,0,0,0,r,g,b,.88f); put(x10,y0,z10,0,1,0,1,0,r,g,b,.88f); put(x11,y1,z11,0,1,0,1,1,r,g,b,.88f);
+			put(x00,y0,z00,0,1,0,0,0,r,g,b,.88f); put(x11,y1,z11,0,1,0,1,1,r,g,b,.88f); put(x01,y1,z01,0,1,0,0,1,r,g,b,.88f);
 		}
 	}
+	nItem = nTrans - nSky - nSky2;
 	// podium confetti
 	if (m_phase==PHASE_PODIUM){
 		for (int i=0;i<96;i++){
@@ -4415,6 +4601,33 @@ void CSoft3DRaceDlg::RenderScene()
 			float r=kCraftColors[i%12][0], g=kCraftColors[i%12][1], b=kCraftColors[i%12][2];
 			put(x-s,y,z,0,1,0,0,0,r,g,b,1); put(x+s,y,z,0,1,0,1,0,r,g,b,1); put(x,y+s,z,0,1,0,.5f,1,r,g,b,1);
 		}
+	}
+
+	UINT craftDrawN = 0;
+	{
+		S3RInst ci[S3R_MAX_CRAFT];
+		if (m_phase == PHASE_PODIUM) {
+			for (int s = 0; s < 3 && craftDrawN < (UINT)S3R_MAX_CRAFT; s++) {
+				int idx = m_podiumOrder[s];
+				if (idx < 0 || idx >= m_craftN) continue;
+				S3rCraft& c = m_crafts[idx];
+				float cr = kCraftColors[c.colorIdx][0], cg = kCraftColors[c.colorIdx][1], cb = kCraftColors[c.colorIdx][2];
+				ci[craftDrawN++] = {c.x, c.y, c.z, c.yaw, 1.25f, 1.25f, 1.25f, c.pitch, cr, cg, cb, 1.f};
+			}
+		} else {
+			for (int i = 0; i < m_craftN && craftDrawN < (UINT)S3R_MAX_CRAFT; i++) {
+				S3rCraft& c = m_crafts[i];
+				float cr = kCraftColors[c.colorIdx][0], cg = kCraftColors[c.colorIdx][1], cb = kCraftColors[c.colorIdx][2];
+				float a = c.alive ? 1.f : 0.35f;
+				ci[craftDrawN++] = {c.x, c.y, c.z, c.yaw, 1.1f, 1.1f, 1.1f, c.pitch, cr, cg, cb, a};
+			}
+		}
+		if (craftDrawN && m_view.m_vbCraftInst) {
+			if (SUCCEEDED(dc->Map(m_view.m_vbCraftInst, 0, D3D11_MAP_WRITE_DISCARD, 0, &map))) {
+				memcpy(map.pData, ci, craftDrawN * sizeof(S3RInst));
+				dc->Unmap(m_view.m_vbCraftInst, 0);
+			} else craftDrawN = 0;
+		} else if (!m_view.m_vbCraftInst) craftDrawN = 0;
 	}
 
 	const UINT total = nBand + nWorld + nCraft + nTrans;
@@ -4435,6 +4648,44 @@ void CSoft3DRaceDlg::RenderScene()
 	else if (m_themeActive==THEME_RUINS){clearC[0]=.55f;clearC[1]=.52f;clearC[2]=.48f;}
 
 	const UINT nSolid = nWorld + nCraft;
+	auto bindMesh=[&](ID3D11Buffer* vb){
+		UINT st=sizeof(S3RVertex), of=0;
+		dc->IASetVertexBuffers(0,1,&vb,&st,&of);
+	};
+	auto bindInst=[&](ID3D11Buffer* vb, ID3D11Buffer* ib, ID3D11Buffer* inst){
+		ID3D11Buffer* b[2]={vb,inst};
+		UINT st[2]={sizeof(S3RVertex), sizeof(S3RInst)};
+		UINT of[2]={0,0};
+		dc->IASetVertexBuffers(0,2,b,st,of);
+		dc->IASetIndexBuffer(ib, DXGI_FORMAT_R32_UINT, 0);
+		dc->IASetInputLayout(m_view.m_ilInst);
+		dc->VSSetShader(m_view.m_vsInst,NULL,0);
+	};
+	auto unbindInst=[&](){
+		ID3D11Buffer* z[2]={NULL,NULL};
+		UINT st[2]={0,0}, of[2]={0,0};
+		dc->IASetVertexBuffers(0,2,z,st,of);
+		dc->IASetIndexBuffer(NULL, DXGI_FORMAT_R32_UINT, 0);
+		dc->IASetInputLayout(m_view.m_ilSolid);
+		dc->VSSetShader(m_view.m_vsSolid,NULL,0);
+		UINT st1=sizeof(S3RVertex), of1=0;
+		dc->IASetVertexBuffers(0,1,&m_view.m_vbDyn,&st1,&of1);
+	};
+	auto drawObsGpu=[&](){
+		if (m_phase == PHASE_PODIUM) return;
+		if (!m_view.m_vsInst || !m_view.m_ilInst || !m_view.m_vbObs || !m_view.m_ibObs || !m_view.m_vbObsInst) return;
+		if (m_view.m_obsNiGpu < 3 || m_view.m_obsInstN < 1) return;
+		bindInst(m_view.m_vbObs, m_view.m_ibObs, m_view.m_vbObsInst);
+		dc->DrawIndexedInstanced(m_view.m_obsNiGpu, m_view.m_obsInstN, 0, 0, 0);
+		unbindInst();
+	};
+	auto drawCraftGpu=[&](){
+		if (!craftDrawN || !m_view.m_vsInst || !m_view.m_ilInst || !m_view.m_vbCraft || !m_view.m_ibCraft || !m_view.m_vbCraftInst) return;
+		if (m_view.m_craftNiGpu < 3) return;
+		bindInst(m_view.m_vbCraft, m_view.m_ibCraft, m_view.m_vbCraftInst);
+		dc->DrawIndexedInstanced(m_view.m_craftNiGpu, craftDrawN, 0, 0, 0);
+		unbindInst();
+	};
 	// shadow pass — VP を LightVP にして投影（カメラVPのままだと影が落ちない）
 	{
 		S3RFrameCB cbSh = cb;
@@ -4446,7 +4697,18 @@ void CSoft3DRaceDlg::RenderScene()
 		dc->RSSetState(m_view.m_rsShadow); dc->OMSetDepthStencilState(m_view.m_dssWrite,0); dc->OMSetBlendState(m_view.m_bsOpaque,NULL,0xffffffff);
 		dc->VSSetShader(m_view.m_vsSolid,NULL,0); dc->PSSetShader(NULL,NULL,0); dc->IASetInputLayout(m_view.m_ilSolid);
 		dc->VSSetConstantBuffers(0,1,&m_view.m_cbFrame); dc->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-		UINT stride=sizeof(S3RVertex), off=0; dc->IASetVertexBuffers(0,1,&m_view.m_vbDyn,&stride,&off);
+		UINT stride=sizeof(S3RVertex), off=0;
+		if (m_view.m_vbTerr && m_view.m_vbTerrN) {
+			dc->IASetVertexBuffers(0,1,&m_view.m_vbTerr,&stride,&off);
+			dc->Draw(m_view.m_vbTerrN, 0);
+		}
+		if (m_view.m_vbScenery && m_view.m_vbSceneryN) {
+			dc->IASetVertexBuffers(0,1,&m_view.m_vbScenery,&stride,&off);
+			dc->Draw(m_view.m_vbSceneryN, 0);
+		}
+		drawObsGpu();
+		drawCraftGpu();
+		dc->IASetVertexBuffers(0,1,&m_view.m_vbDyn,&stride,&off);
 		if (nSolid) dc->Draw(nSolid, nBand);
 	}
 
@@ -4465,45 +4727,61 @@ void CSoft3DRaceDlg::RenderScene()
 	ID3D11ShaderResourceView* bandSrv=m_view.m_srvBand;
 	ID3D11ShaderResourceView* noiseSrv=m_view.m_srvNoise;
 	ID3D11ShaderResourceView* envSrv=m_view.m_srvEnv;
+	if(m_view.m_srvEnv2 && (m_themeActive==THEME_CLOUD||m_themeActive==THEME_GRASS||m_themeActive==THEME_FOREST||m_themeActive==THEME_MESA||m_themeActive==THEME_UNDER))
+		envSrv=m_view.m_srvEnv2;
 	ID3D11ShaderResourceView* shSrv=m_view.m_shadowSrv;
 	int thIdx=m_themeActive-1; if(thIdx<0)thIdx=0; if(thIdx>7)thIdx=7; ID3D11ShaderResourceView* themeSrv=m_view.m_srvTheme[thIdx];
+	ID3D11ShaderResourceView* themeDet=m_view.m_srvThemeD[thIdx]?m_view.m_srvThemeD[thIdx]:themeSrv;
+	ID3D11ShaderResourceView* obsSrv=m_view.m_srvObs?m_view.m_srvObs:themeDet;
+	ID3D11ShaderResourceView* waterSrv=m_view.m_srvWater?m_view.m_srvWater:themeSrv;
 
 	UINT stride=sizeof(S3RVertex), off=0; dc->IASetVertexBuffers(0,1,&m_view.m_vbDyn,&stride,&off);
-	// terrain first (slope/river shader), then scenery/obstacles。裏表はカリングしない
-	if (nTerr){
-		dc->RSSetState(m_view.m_rsNoCull); dc->OMSetDepthStencilState(m_view.m_dssWrite,0); dc->OMSetBlendState(m_view.m_bsOpaque,NULL,0xffffffff);
-		dc->IASetInputLayout(m_view.m_ilSolid); dc->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-		dc->VSSetShader(m_view.m_vsSolid,NULL,0); dc->HSSetShader(NULL,NULL,0); dc->DSSetShader(NULL,NULL,0);
+	dc->RSSetState(m_view.m_rsNoCull); dc->OMSetDepthStencilState(m_view.m_dssWrite,0); dc->OMSetBlendState(m_view.m_bsOpaque,NULL,0xffffffff);
+	dc->IASetInputLayout(m_view.m_ilSolid); dc->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+	dc->VSSetShader(m_view.m_vsSolid,NULL,0); dc->HSSetShader(NULL,NULL,0); dc->DSSetShader(NULL,NULL,0);
+	if (m_view.m_vbTerr && m_view.m_vbTerrN){
 		dc->PSSetShader(m_view.m_psTerr,NULL,0);
-		ID3D11ShaderResourceView* srvs[]={themeSrv,themeSrv,NULL,envSrv,shSrv,noiseSrv};
+		ID3D11ShaderResourceView* srvs[]={themeSrv,themeDet,NULL,envSrv,shSrv,noiseSrv};
 		dc->PSSetShaderResources(0,6,srvs);
-		dc->Draw(nTerr, nBand);
+		bindMesh(m_view.m_vbTerr);
+		dc->Draw(m_view.m_vbTerrN, 0);
+	}
+	{
+		dc->PSSetShader(m_view.m_psSolid,NULL,0);
+		ID3D11ShaderResourceView* scenT1=m_view.m_srvWood?m_view.m_srvWood:obsSrv;
+		ID3D11ShaderResourceView* srvs[]={themeSrv,scenT1,NULL,envSrv,shSrv,noiseSrv};
+		dc->PSSetShaderResources(0,6,srvs);
+		if (m_view.m_vbScenery && m_view.m_vbSceneryN) {
+			bindMesh(m_view.m_vbScenery);
+			dc->Draw(m_view.m_vbSceneryN, 0);
+		}
+		{
+			ID3D11ShaderResourceView* osrvs[]={themeSrv,obsSrv,NULL,envSrv,shSrv,noiseSrv};
+			dc->PSSetShaderResources(0,6,osrvs);
+		}
+		drawObsGpu();
 	}
 	if (nWorld > nTerr){
 		dc->RSSetState(m_view.m_rsNoCull); dc->OMSetDepthStencilState(m_view.m_dssWrite,0); dc->OMSetBlendState(m_view.m_bsOpaque,NULL,0xffffffff);
 		dc->IASetInputLayout(m_view.m_ilSolid); dc->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 		dc->VSSetShader(m_view.m_vsSolid,NULL,0); dc->HSSetShader(NULL,NULL,0); dc->DSSetShader(NULL,NULL,0); dc->PSSetShader(m_view.m_psSolid,NULL,0);
-		ID3D11ShaderResourceView* srvs[]={themeSrv,themeSrv,NULL,envSrv,shSrv,noiseSrv};
+		ID3D11ShaderResourceView* srvs[]={themeSrv,obsSrv,NULL,envSrv,shSrv,noiseSrv};
 		dc->PSSetShaderResources(0,6,srvs);
+		bindMesh(m_view.m_vbDyn);
 		dc->Draw(nWorld - nTerr, nBand + nTerr);
 	}
-	// crafts — vertex color + lighting only（テーマテクスチャを当てない）
-	if (nCraft && m_view.m_psCraft){
+	if (craftDrawN){
 		dc->RSSetState(m_view.m_rsSolid); dc->OMSetDepthStencilState(m_view.m_dssWrite,0); dc->OMSetBlendState(m_view.m_bsOpaque,NULL,0xffffffff);
-		dc->IASetInputLayout(m_view.m_ilSolid); dc->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-		dc->VSSetShader(m_view.m_vsSolid,NULL,0); dc->HSSetShader(NULL,NULL,0); dc->DSSetShader(NULL,NULL,0); dc->PSSetShader(m_view.m_psCraft,NULL,0);
+		dc->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+		dc->HSSetShader(NULL,NULL,0); dc->DSSetShader(NULL,NULL,0);
+		dc->PSSetShader(m_view.m_psCraft ? m_view.m_psCraft : m_view.m_psSolid,NULL,0);
 		ID3D11ShaderResourceView* craftSrv = m_view.m_srvCraft ? m_view.m_srvCraft : themeSrv;
-		ID3D11ShaderResourceView* srvs[]={craftSrv,craftSrv,NULL,envSrv,shSrv,noiseSrv};
+		ID3D11ShaderResourceView* craftDet = m_view.m_srvCraftD ? m_view.m_srvCraftD : craftSrv;
+		ID3D11ShaderResourceView* srvs[]={craftSrv,craftDet,NULL,envSrv,shSrv,noiseSrv};
 		dc->PSSetShaderResources(0,6,srvs);
-		dc->Draw(nCraft, nBand+nWorld);
-	} else if (nCraft){
-		dc->PSSetShader(m_view.m_psSolid,NULL,0);
-		ID3D11ShaderResourceView* srvs[]={themeSrv,themeSrv,NULL,envSrv,shSrv,noiseSrv};
-		dc->PSSetShaderResources(0,6,srvs);
-		dc->Draw(nCraft, nBand+nWorld);
+		drawCraftGpu();
 	}
-	// カメラ〜コース間の地形・障害を半透明でもう一度（深度は書かない）
-	if (nWorld && cb.peel.w > 0.05f) {
+	if ((nWorld || m_view.m_vbTerrN || m_view.m_vbSceneryN) && cb.peel.w > 0.05f) {
 		S3RFrameCB cbPeel = cb;
 		cbPeel.peel.w = -cb.peel.w;
 		if (SUCCEEDED(dc->Map(m_view.m_cbFrame,0,D3D11_MAP_WRITE_DISCARD,0,&map))){ memcpy(map.pData,&cbPeel,sizeof(cbPeel)); dc->Unmap(m_view.m_cbFrame,0); }
@@ -4512,38 +4790,66 @@ void CSoft3DRaceDlg::RenderScene()
 		dc->OMSetBlendState(m_view.m_bsAlpha,NULL,0xffffffff);
 		dc->IASetInputLayout(m_view.m_ilSolid); dc->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 		dc->VSSetShader(m_view.m_vsSolid,NULL,0); dc->HSSetShader(NULL,NULL,0); dc->DSSetShader(NULL,NULL,0);
-		if (nTerr) {
+		if (m_view.m_vbTerr && m_view.m_vbTerrN) {
 			dc->PSSetShader(m_view.m_psTerr,NULL,0);
-			ID3D11ShaderResourceView* srvs[]={themeSrv,themeSrv,NULL,envSrv,shSrv,noiseSrv};
+			ID3D11ShaderResourceView* srvs[]={themeSrv,themeDet,NULL,envSrv,shSrv,noiseSrv};
 			dc->PSSetShaderResources(0,6,srvs);
-			dc->Draw(nTerr, nBand);
+			bindMesh(m_view.m_vbTerr);
+			dc->Draw(m_view.m_vbTerrN, 0);
 		}
-		if (nWorld > nTerr) {
-			dc->PSSetShader(m_view.m_psSolid,NULL,0);
-			ID3D11ShaderResourceView* srvs[]={themeSrv,themeSrv,NULL,envSrv,shSrv,noiseSrv};
+		dc->PSSetShader(m_view.m_psSolid,NULL,0);
+		{
+			ID3D11ShaderResourceView* srvs[]={themeSrv,obsSrv,NULL,envSrv,shSrv,noiseSrv};
 			dc->PSSetShaderResources(0,6,srvs);
+		}
+		if (m_view.m_vbScenery && m_view.m_vbSceneryN) {
+			bindMesh(m_view.m_vbScenery);
+			dc->Draw(m_view.m_vbSceneryN, 0);
+		}
+		drawObsGpu();
+		if (nWorld > nTerr) {
+			bindMesh(m_view.m_vbDyn);
 			dc->Draw(nWorld - nTerr, nBand + nTerr);
 		}
 		if (SUCCEEDED(dc->Map(m_view.m_cbFrame,0,D3D11_MAP_WRITE_DISCARD,0,&map))){ memcpy(map.pData,&cb,sizeof(cb)); dc->Unmap(m_view.m_cbFrame,0); }
 	}
-	// 半透明パワーバンド（深度書き込みなし → 自機が透けて見える）
-	if (nBand>=4){
-		dc->RSSetState(m_view.m_rsNoCull); dc->OMSetDepthStencilState(m_view.m_dssRead,0); dc->OMSetBlendState(m_view.m_bsAlpha,NULL,0xffffffff);
-		dc->IASetInputLayout(m_view.m_ilPatch); dc->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_4_CONTROL_POINT_PATCHLIST);
-		dc->VSSetShader(m_view.m_vsTess,NULL,0); dc->HSSetShader(m_view.m_hsTess,NULL,0); dc->DSSetShader(m_view.m_dsTess,NULL,0); dc->PSSetShader(m_view.m_psBand,NULL,0);
-		ID3D11ShaderResourceView* srvs[]={bandSrv,themeSrv,NULL,envSrv,shSrv,noiseSrv};
-		dc->PSSetShaderResources(0,6,srvs); dc->DSSetShaderResources(5,1,&noiseSrv); dc->DSSetShaderResources(0,1,&bandSrv);
-		dc->Draw(nBand - (nBand%4), 0);
-		dc->HSSetShader(NULL,NULL,0); dc->DSSetShader(NULL,NULL,0);
+	{
+		UINT nB = m_view.m_vbBandN;
+		if (nB >= 4 && m_view.m_vbBand){
+			dc->RSSetState(m_view.m_rsNoCull); dc->OMSetDepthStencilState(m_view.m_dssRead,0); dc->OMSetBlendState(m_view.m_bsAlpha,NULL,0xffffffff);
+			dc->IASetInputLayout(m_view.m_ilPatch); dc->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_4_CONTROL_POINT_PATCHLIST);
+			dc->VSSetShader(m_view.m_vsTess,NULL,0); dc->HSSetShader(m_view.m_hsTess,NULL,0); dc->DSSetShader(m_view.m_dsTess,NULL,0); dc->PSSetShader(m_view.m_psBand,NULL,0);
+			ID3D11ShaderResourceView* srvs[]={bandSrv,themeSrv,NULL,envSrv,shSrv,noiseSrv};
+			dc->PSSetShaderResources(0,6,srvs); dc->DSSetShaderResources(5,1,&noiseSrv); dc->DSSetShaderResources(0,1,&bandSrv);
+			bindMesh(m_view.m_vbBand);
+			dc->Draw(nB - (nB%4), 0);
+			dc->HSSetShader(NULL,NULL,0); dc->DSSetShader(NULL,NULL,0);
+		}
+	}
+	dc->IASetInputLayout(m_view.m_ilSolid); dc->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+	dc->VSSetShader(m_view.m_vsSolid,NULL,0); dc->PSSetShader(m_view.m_psSolid,NULL,0);
+	dc->RSSetState(m_view.m_rsNoCull);
+	dc->OMSetBlendState(m_view.m_bsAlpha,NULL,0xffffffff); dc->OMSetDepthStencilState(m_view.m_dssRead,0);
+	{
+		ID3D11ShaderResourceView* srvs[]={waterSrv,themeDet,NULL,envSrv,shSrv,noiseSrv};
+		dc->PSSetShaderResources(0,6,srvs);
+	}
+	if (m_view.m_vbWater && m_view.m_vbWaterN) {
+		bindMesh(m_view.m_vbWater);
+		dc->Draw(m_view.m_vbWaterN, 0);
 	}
 	if (nTrans){
-		dc->RSSetState(m_view.m_rsNoCull);
-		dc->OMSetBlendState(m_view.m_bsAlpha,NULL,0xffffffff); dc->OMSetDepthStencilState(m_view.m_dssRead,0);
-		dc->IASetInputLayout(m_view.m_ilSolid); dc->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-		dc->VSSetShader(m_view.m_vsSolid,NULL,0); dc->PSSetShader(m_view.m_psSolid,NULL,0);
-		ID3D11ShaderResourceView* srvs[]={themeSrv,themeSrv,NULL,envSrv,shSrv,noiseSrv};
-		dc->PSSetShaderResources(0,6,srvs);
-		dc->Draw(nTrans, nBand+nWorld+nCraft);
+		bindMesh(m_view.m_vbDyn);
+		const UINT t0 = nBand+nWorld+nCraft;
+		auto bindT=[&](ID3D11ShaderResourceView* a, ID3D11ShaderResourceView* b){
+			ID3D11ShaderResourceView* srvs[]={a?a:themeSrv, b?b:(a?a:themeDet), NULL, envSrv, shSrv, noiseSrv};
+			dc->PSSetShaderResources(0,6,srvs);
+		};
+		if(nSky){ bindT(m_view.m_srvSky, m_view.m_srvSky2); dc->Draw(nSky, t0); }
+		if(nSky2){ bindT(m_view.m_srvSky2, m_view.m_srvSky); dc->Draw(nSky2, t0+nSky); }
+		if(nItem){ bindT(m_view.m_srvItem, m_view.m_srvItem); dc->Draw(nItem, t0+nSky+nSky2); }
+		const UINT nRest = nTrans - nSky - nSky2 - nItem;
+		if(nRest){ bindT(themeSrv, themeDet); dc->Draw(nRest, t0+nSky+nSky2+nItem); }
 	}
 
 	// post SSR -> DOF -> FIN
@@ -4765,7 +5071,6 @@ void CSoft3DRaceDlg::RenderScene()
 		dc->RSSetViewports(1,&vp);
 	}
 
-	(void)xformEmitMesh;
 	m_view.PresentFrame();
 }
 
@@ -4979,6 +5284,9 @@ void CSoft3DRaceDlg::OnContextMenu(CWnd* pWnd, CPoint point)
 void CSoft3DRaceDlg::TickFrame()
 {
 	if (!GetSafeHwnd() || !m_view.m_ready) return;
+	if (m_inTick) return;
+	m_inTick = 1;
+	PumpQueued(TRUE);
 	const DWORD now = GetTickCount();
 	float dt = (float)(now - m_lastTick) * 0.001f;
 	m_lastTick = now;
@@ -5089,6 +5397,8 @@ void CSoft3DRaceDlg::TickFrame()
 		Soft3DSfxPump();
 	}
 	m_view.RequestRedraw();
+	PumpQueued(FALSE);
+	m_inTick = 0;
 }
 
 void CSoft3DRaceDlg::OnTimer(UINT_PTR id)
@@ -5108,6 +5418,7 @@ void CSoft3DRaceDlg::OnShowWindow(BOOL bShow, UINT nStatus)
 void CSoft3DRaceDlg::OnDestroy()
 {
 	PersistUi(); PersistWindowRect();
+	m_view.ClearStaticMeshes();
 	Soft3DSfxShutdown();
 	RestoreAudioBaseline();
 	S3rReleaseJoypad();

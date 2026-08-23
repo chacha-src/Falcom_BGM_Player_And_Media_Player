@@ -34,6 +34,11 @@ public:
 	void RequestRedraw() {}
 	BOOL InitDx();
 	void ReleaseDx();
+	void ClearTerrMesh();
+	void ClearStaticMeshes();
+	BOOL UploadTerrMesh(const void* verts, UINT nVerts);
+	BOOL UploadDefaultVB(ID3D11Buffer** dst, UINT* nOut, const void* verts, UINT nVerts);
+	BOOL UploadDefaultIB(ID3D11Buffer** dst, UINT* nOut, const UINT* idx, UINT nIdx);
 	BOOL ResizeDx(int w, int h);
 	int m_dxFailStage; // InitDx 失敗段階（デバッグ用）
 	HRESULT m_dxFailHr;
@@ -65,6 +70,7 @@ public:
 	ID3D11DomainShader* m_dsTess;
 	ID3D11PixelShader* m_psBand;
 	ID3D11VertexShader* m_vsSolid;
+	ID3D11VertexShader* m_vsInst; // 機体・障害の GPU インスタンス
 	ID3D11PixelShader* m_psSolid;
 	ID3D11PixelShader* m_psTerr; // 地形専用（傾斜・河川・テーマ着色）
 	ID3D11PixelShader* m_psCraft; // 機体専用（キャラテクスチャ）
@@ -78,13 +84,30 @@ public:
 	ID3D11ComputeShader* m_csNoise;
 	ID3D11InputLayout* m_ilPatch;
 	ID3D11InputLayout* m_ilSolid;
+	ID3D11InputLayout* m_ilInst;
 	ID3D11InputLayout* m_ilHud;
 
 	ID3D11Buffer* m_cbFrame;
 	ID3D11Buffer* m_vbDyn;
+	ID3D11Buffer* m_vbTerr; // 地形はコース生成時に一度だけ。毎フレーム組まない
+	ID3D11Buffer* m_vbBand;
+	ID3D11Buffer* m_vbWater;
+	ID3D11Buffer* m_vbScenery; // ゲートなど少量の静的 TRIANGLELIST
+	ID3D11Buffer* m_vbObs;
+	ID3D11Buffer* m_ibObs;
+	ID3D11Buffer* m_vbObsInst;
+	ID3D11Buffer* m_vbCraft;
+	ID3D11Buffer* m_ibCraft;
+	ID3D11Buffer* m_vbCraftInst; // DYNAMIC、毎フレーム 12 機分だけ
 	ID3D11Buffer* m_vbHud;
 	UINT m_vbDynBytes;
 	UINT m_vbHudBytes;
+	UINT m_vbTerrN;
+	UINT m_vbBandN;
+	UINT m_vbWaterN;
+	UINT m_vbSceneryN;
+	UINT m_obsNvGpu, m_obsNiGpu, m_obsInstN;
+	UINT m_craftNvGpu, m_craftNiGpu;
 	BYTE* m_cpuDynScratch;
 	UINT m_cpuDynScratchBytes;
 	BYTE* m_cpuHudScratch;
@@ -93,12 +116,30 @@ public:
 	enum { S3R_THEME_N = 8 };
 	ID3D11Texture2D* m_texTheme[S3R_THEME_N];
 	ID3D11ShaderResourceView* m_srvTheme[S3R_THEME_N];
+	ID3D11Texture2D* m_texThemeD[S3R_THEME_N];
+	ID3D11ShaderResourceView* m_srvThemeD[S3R_THEME_N];
 	ID3D11Texture2D* m_texCraft;
 	ID3D11ShaderResourceView* m_srvCraft;
+	ID3D11Texture2D* m_texCraftD;
+	ID3D11ShaderResourceView* m_srvCraftD;
 	ID3D11Texture2D* m_texBand;
 	ID3D11ShaderResourceView* m_srvBand;
+	ID3D11Texture2D* m_texWater;
+	ID3D11ShaderResourceView* m_srvWater;
+	ID3D11Texture2D* m_texObs;
+	ID3D11ShaderResourceView* m_srvObs;
 	ID3D11Texture2D* m_texEnv;
 	ID3D11ShaderResourceView* m_srvEnv;
+	ID3D11Texture2D* m_texEnv2;
+	ID3D11ShaderResourceView* m_srvEnv2;
+	ID3D11Texture2D* m_texSky;
+	ID3D11ShaderResourceView* m_srvSky;
+	ID3D11Texture2D* m_texSky2;
+	ID3D11ShaderResourceView* m_srvSky2;
+	ID3D11Texture2D* m_texItem;
+	ID3D11ShaderResourceView* m_srvItem;
+	ID3D11Texture2D* m_texWood;
+	ID3D11ShaderResourceView* m_srvWood;
 	ID3D11Texture2D* m_texNoise;
 	ID3D11ShaderResourceView* m_srvNoise;
 	ID3D11UnorderedAccessView* m_uavNoise;
@@ -259,6 +300,7 @@ protected:
 	DECLARE_MESSAGE_MAP()
 	void LayoutHelpBtn();
 	void LayoutAll();
+	void PumpQueued(BOOL input);
 	void PersistUi();
 	void PersistWindowRect();
 	void ApplySavedWindowRect();
@@ -303,6 +345,7 @@ protected:
 	void UpdateStatus();
 	void ShowHelpSheet();
 	void ShowContextMenu(CPoint screenPt);
+	void BakeStaticMeshes();
 	void RenderScene();
 	void EnsureHudBake();
 	void EnsureStandingsBake();
@@ -469,6 +512,7 @@ public:
 	int m_mouseLook;
 	CPoint m_lastMouse;
 	DWORD m_lastTick;
+	int m_inTick;
 	DWORD m_rng;
 	DWORD m_genSeed;
 	DWORD m_spaceToggleTick;

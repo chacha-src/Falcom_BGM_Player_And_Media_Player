@@ -1000,10 +1000,12 @@ void CCommandRollView::OnPaint()
 	if (CCC_AcrylicCaption(::GetParent(m_hWnd)) || CCC_IsAeroEnabled()) {
 		CCC_BlitStretchOpaque(pdc.GetSafeHdc(), 0, 0, w, h,
 			m_memDC.GetSafeHdc(), 0, 0, w, h);
+		CCC_DrawInwomanOnClient(&pdc, m_hWnd);
 		return;
 	}
 #endif
 	pdc.BitBlt(0, 0, w, h, &m_memDC, 0, 0, SRCCOPY);
+	CCC_DrawInwomanOnClient(&pdc, m_hWnd);
 }
 
 BOOL CCommandRollView::OnEraseBkgnd(CDC* /*pDC*/)

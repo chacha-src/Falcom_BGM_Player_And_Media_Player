@@ -5319,7 +5319,7 @@ void CAnalyzerDlg::OnPaint()
 		CCC_MainLockPaintClient(dc, m_hWnd);
 	}
 
-	CCC_CaptionPaint(dc, m_hWnd);
+	CCC_CaptionPaintGdi(dc, m_hWnd);
 
 	// 描画完了後に提示フラグを開放し、未消化スクロール/遅延 Kick があれば1回だけ
 	InterlockedExchange(&m_presentPosted, 0);

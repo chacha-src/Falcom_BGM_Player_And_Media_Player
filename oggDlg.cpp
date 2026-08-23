@@ -5570,14 +5570,15 @@ void COggDlg::OnPaint()
 				}
 				else
 #endif
-				{
-					SetStretchBltMode(dcc.m_hDC, COLORONCOLOR);
-					SetBrushOrgEx(dcc.m_hDC, 0, 0, NULL);
-					dcc.StretchBlt(0, gdiY, destW, destH, &dc, 0, 0, srcW, srcH, SRCCOPY);
-				}
+			{
+				SetStretchBltMode(dcc.m_hDC, COLORONCOLOR);
+				SetBrushOrgEx(dcc.m_hDC, 0, 0, NULL);
+				dcc.StretchBlt(0, gdiY, destW, destH, &dc, 0, 0, srcW, srcH, SRCCOPY);
+			}
 			}
 			ms2 = 0;
 			InterlockedExchange(&g_gdiPaintPending, 0);
+			CCC_DrawInwomanOnRect(&dcc, gdiRect);
 		}
 	}
 	if (!IsIconic())
@@ -28040,8 +28041,6 @@ BOOL COggDlg::PreTranslateMessage(MSG* pMsg)
 			MpShowSettingsExtrasMenu(this, sp);
 		return TRUE;
 	}
-	if (CCC_InwomanHotkey(pMsg, this))
-		return TRUE; // 隠し: F12を5回で淫女モード切替
 	if (m_tooltip.GetSafeHwnd())
 		m_tooltip.RelayEvent(pMsg);
 	return CCustomBlurDialogBase::PreTranslateMessage(pMsg);

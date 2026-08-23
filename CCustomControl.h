@@ -84,10 +84,8 @@ void CCC_FillRectAlpha(HDC hdc, const RECT& rc, COLORREF clr, BYTE alpha);
 #endif
 
 // ============================================================================
-// 隠し機能: 淫女モード (savedata.inwoman==1 のときだけ UI 演出を盛る)
-// F12 を2秒以内に5回でトグル。
-// バイブ=ロータ/電マ/吸引/クンニ、愛液=XXXから垂れ・溜まり、
-// ピクン=控件全体が跳ねる、イク=白み+赤み。
+// 隠し機能: 複合ファンクション連打で入る裏演出 (savedata.inwoman==1)。
+// 出口は F12 を短時間に5回。入り口は cpp 側のシーケンス。
 // ============================================================================
 extern save savedata;
 static inline BOOL CCC_IsInwoman()
@@ -100,6 +98,10 @@ BOOL CCC_InwomanHotkey(MSG* pMsg, CWnd* pWnd);
 void CCC_StartInwomanTimer();
 // 不透明パネル等への淫女オーバーレイ描画（ポップアップメニュー等から利用）
 void CCC_DrawInwoman(CDC* pDC, const CRect& rc, BOOL bAeroTrans);
+// aero=0 の GDI キャンバス（ピアノロール／アナライザ等）へ裸体を重ねる
+void CCC_DrawInwomanOnRect(CDC* pDC, const CRect& rc);
+void CCC_DrawInwomanOnClient(CDC* pDC, HWND hWnd);
+void CCC_CaptionPaintGdi(CDC& dc, HWND hDlg);
 // ピクン時の控件全体シェイク量(非淫女/静止時は 0,0)
 void CCC_InwomanGetShake(int& dx, int& dy);
 // コンテキストメニューからアクリルON/OFFしたとき全UIへ再適用
@@ -109,6 +111,8 @@ void CCC_NotifyAeroSettingChanged();
 void CCC_ApplyDlgResourceIcon(CWnd* w, UINT iconId);
 UINT CCC_IconIdForDialogTemplate(UINT idd);
 void CCC_ApplyWindowIconFromTemplate(CWnd* w, UINT idd);
+HICON CCC_LoadSharedIcon(UINT iconId, int px = 24);
+UINT CCC_CtlIconForCtrl(UINT id);
 
 HCURSOR CCC_LoadUiCursor(UINT id);
 BOOL CCC_SetUiCursor(UINT id);
@@ -1142,6 +1146,8 @@ private:
     BOOL m_bAeroMode;      // TRUE=クロマ透過（既定ボタンは不透明のまま）
     BOOL m_bIconOwnedIn;   // DestroyIcon が必要か
     BOOL m_bIconOwnedOut;
+    BOOL m_bAutoGlyphDone; // コントロールIDから一度だけグリフを載せた
+    void EnsureAutoGlyph();
 };
 
 // ============================================================================

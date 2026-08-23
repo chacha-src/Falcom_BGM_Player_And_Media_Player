@@ -12,10 +12,12 @@
 #include <psapi.h>
 #include <TlHelp32.h>
 #include <imm.h>
+#include <wincodec.h>
 
 #pragma comment(lib, "msimg32.lib")
 #pragma comment(lib, "psapi.lib")
 #pragma comment(lib, "imm32.lib")
+#pragma comment(lib, "windowscodecs.lib")
 
 static UINT CCC_GetControlDpi(HWND hWnd)
 {
@@ -44,6 +46,9 @@ static int CCC_ScaleDpi(int value, UINT dpi)
 {
     return MulDiv(value, (int)dpi, 96);
 }
+
+static BOOL CCC_CaptionIsGlyphOnly(const CString& s);
+static void CCC_CaptionApplySharedIcon(CCustomStandardButton* p, UINT iconId);
 
 static void CCC_ComputeShadowPad(int nSD, int nDist, int nBlur, BOOL bSE, UINT dpi,
     int& padX, int& padY)
@@ -92,6 +97,9 @@ static BOOL CCC_IsCustomPopupChild(HWND hWnd)
 
 static BOOL CCC_IsCaptionChromeCtrl(HWND hWnd);
 static BOOL CCC_CaptionOnlyHostGlass(HWND hWnd);
+UINT CCC_CtlIconForCtrl(UINT id);
+static BOOL CCC_CaptionIsGlyphOnly(const CString& s);
+static void CCC_CaptionApplySharedIcon(CCustomStandardButton* p, UINT iconId);
 
 // キャプション常時アクリル(本文 aero=0)でも子は α=255 必須
 static BOOL CCC_HostNeedsChildOpaque(HWND hWnd)
@@ -175,6 +183,7 @@ static void CCC_ClearDestBlt(HDC hdcDest, int x, int y, int w, int h,
 static void CCC_FillRectOpaqueBits(HDC hdc, const RECT& rc, COLORREF clr);
 static void CCC_MakeRectOpaquePreserve(HDC hdc, const RECT& rc);
 #endif
+static void CCC_DrawInwomanDlgBody(CDC* pDC, const CRect& rc);
 
 static BOOL DlgOnEraseBkgnd(CDC* pDC, CBrush& brDlg, BOOL bAeroEnabled, HWND hWnd)
 {
@@ -200,15 +209,21 @@ static BOOL DlgOnEraseBkgnd(CDC* pDC, CBrush& brDlg, BOOL bAeroEnabled, HWND hWn
     if (capH > 0 && CCC_IsWin11() && r.Height() > capH) {
         r.top = capH;
         CCC_FillRectOpaqueBits(pDC->GetSafeHdc(), r, COLOR_DIALOG_BG);
+        if (CCC_IsInwoman())
+            CCC_DrawInwomanDlgBody(pDC, r);
         return TRUE;
     }
 #endif
     if (capH > 0 && r.Height() > capH) {
         r.top = capH;
         pDC->FillRect(&r, &brDlg);
+        if (CCC_IsInwoman())
+            CCC_DrawInwomanDlgBody(pDC, r);
         return TRUE;
     }
     pDC->FillRect(&r, &brDlg);
+    if (CCC_IsInwoman())
+        CCC_DrawInwomanDlgBody(pDC, r);
     return TRUE;
 }
 
@@ -3006,11 +3021,23 @@ static void DrawLooseRibbon(CDC* pDC, const CRect& rc, COLORREF c, float angleDe
 }
 
 // ============================================================================
-// 隠し機能: 淫女モード (F12を5回でトグル / UI演出のみ)
+// 隠し機能: 裏演出 (入口は複合連打、出口は F12×5)
 // ============================================================================
 static UINT_PTR g_inwomanTimer = 0;
 static int      g_f12Count = 0;
-static DWORD    g_f12First = 0;   // 連打シーケンスの最初の F12 を押した時刻
+static int      g_f11Count = 0;
+static int      g_iwSeq = 0;      // 0=F12集め / 1=F11集め
+static DWORD    g_seqT0 = 0;      // 現バースト最初の時刻
+static DWORD    g_armT0 = 0;      // F12条件達成時刻
+
+static void CCC_IwSeqReset()
+{
+    g_f12Count = 0;
+    g_f11Count = 0;
+    g_iwSeq = 0;
+    g_seqT0 = 0;
+    g_armT0 = 0;
+}
 
 // ちらつき対策: 背景消去を伴う全画面再描画はやめ、オーナードロー(ダブルバッファ)の
 // カスタムコントロールだけを消去なしで無効化する。
@@ -3036,7 +3063,11 @@ static BOOL CALLBACK CCC_InwomanInvalidateChild(HWND hChild, LPARAM)
 static BOOL CALLBACK CCC_InwomanTopProc(HWND hTop, LPARAM)
 {
     if (::IsWindowVisible(hTop))
+    {
+        if (CCC_IsInwoman() && !CCC_IsAeroEnabled())
+            ::InvalidateRect(hTop, NULL, FALSE);
         ::EnumChildWindows(hTop, CCC_InwomanInvalidateChild, 0);
+    }
     return TRUE;
 }
 
@@ -3065,24 +3096,86 @@ BOOL CCC_InwomanHotkey(MSG* pMsg, CWnd* pWnd)
 {
     UNREFERENCED_PARAMETER(pWnd);
     CCC_StartInwomanTimer();
-    if (!pMsg || pMsg->message != WM_KEYDOWN || pMsg->wParam != VK_F12)
+    if (!pMsg || pMsg->message != WM_KEYDOWN)
+        return FALSE;
+    // キーリピートは連打に数えない
+    if (pMsg->lParam & (1 << 30))
+        return FALSE;
+    const WPARAM vk = pMsg->wParam;
+    if (vk != VK_F12 && vk != VK_F11)
         return FALSE;
 
     const DWORD now = ::GetTickCount();
-    // 裏モードらしく「2秒以内に5連打」を要求する。最初の押下から2秒を超えたら
-    // 回数をリセットして最初からやり直し。
-    if (g_f12Count == 0 || (now - g_f12First) > 2000)
+    const DWORD burstMs = 3000;
+    const DWORD gapMs = 4000;
+
+    // 出口: 入っているときだけ F12 を 2〜3 秒以内に5回
+    if (CCC_IsInwoman())
     {
-        g_f12Count = 0;
-        g_f12First = now;
+        if (vk != VK_F12)
+            return FALSE;
+        if (g_f12Count == 0 || (now - g_seqT0) > 2000)
+        {
+            g_f12Count = 0;
+            g_seqT0 = now;
+        }
+        if (++g_f12Count >= 5)
+        {
+            CCC_IwSeqReset();
+            savedata.inwoman = 0;
+            CCC_InwomanInvalidateAll();
+            return TRUE;
+        }
+        return FALSE;
     }
 
-    if (++g_f12Count >= 5)
+    // 入口: F12 を burstMs 以内に7回以上 → 続けて F11 を burstMs 以内に7回
+    if (vk == VK_F12)
     {
-        g_f12Count = 0;
-        savedata.inwoman = savedata.inwoman ? 0 : 1;
-        CCC_InwomanInvalidateAll(); // ON/OFFどちらも1回更新して反映
-        return TRUE; // 5回目はトグルとして消費
+        if (g_iwSeq == 1)
+        {
+            // F11待ち中の F12 は入り口やり直し
+            CCC_IwSeqReset();
+        }
+        if (g_f12Count == 0 || (now - g_seqT0) > burstMs)
+        {
+            g_f12Count = 0;
+            g_seqT0 = now;
+        }
+        ++g_f12Count;
+        if (g_f12Count >= 7)
+        {
+            g_iwSeq = 1;
+            g_f11Count = 0;
+            g_armT0 = now;
+            g_seqT0 = 0;
+        }
+        return FALSE;
+    }
+
+    // F11
+    if (g_iwSeq != 1)
+        return FALSE;
+    if (g_f11Count == 0)
+    {
+        if ((now - g_armT0) > gapMs)
+        {
+            CCC_IwSeqReset();
+            return FALSE;
+        }
+        g_seqT0 = now;
+    }
+    else if ((now - g_seqT0) > burstMs)
+    {
+        CCC_IwSeqReset();
+        return FALSE;
+    }
+    if (++g_f11Count >= 7)
+    {
+        CCC_IwSeqReset();
+        savedata.inwoman = 1;
+        CCC_InwomanInvalidateAll();
+        return TRUE;
     }
     return FALSE;
 }
@@ -3476,6 +3569,149 @@ static void CCC_DrawVibrator(CDC* pDC, int cx, int cy, int sz, double t, double 
     }
 }
 
+// 裏演出スチル: RCDATA は IWJ1 ジャム。読み出し時だけ元 PNG に戻す。
+static const BYTE kIwJamKey[32] = {
+    0xA7, 0x3C, 0x91, 0xE2, 0x5B, 0x08, 0xD4, 0x6F,
+    0xC1, 0x2A, 0x77, 0xBE, 0x14, 0x9D, 0xF0, 0x33,
+    0x4E, 0x88, 0x1B, 0xC6, 0x59, 0xA0, 0x7D, 0x02,
+    0xE5, 0x36, 0xB9, 0x4C, 0x70, 0xAD, 0x18, 0xF3
+};
+
+struct CCC_IwBmp {
+    HBITMAP hbm = NULL;
+    int w = 0;
+    int h = 0;
+    BOOL tried = FALSE;
+};
+
+enum {
+    IW_FACE = 0, IW_BODY, IW_BODY2, IW_LACE, IW_BOW, IW_BLUSH, IW_FLUID, IW_ROTOR, IW_VIBE, IW_COUNT
+};
+static CCC_IwBmp g_iwBmp[IW_COUNT];
+static const UINT kIwResId[IW_COUNT] = {
+    IDR_IW_FACE, IDR_IW_BODY, IDR_IW_BODY2, IDR_IW_LACE, IDR_IW_BOW, IDR_IW_BLUSH,
+    IDR_IW_FLUID, IDR_IW_ROTOR, IDR_IW_VIBE
+};
+
+static BOOL CCC_IwUnjam(const BYTE* src, DWORD n, std::vector<BYTE>& out)
+{
+    if (!src || n < 8 || memcmp(src, "IWJ1", 4) != 0)
+        return FALSE;
+    DWORD sz = 0;
+    memcpy(&sz, src + 4, 4);
+    if (sz == 0 || sz > 8 * 1024 * 1024 || 8 + sz > n)
+        return FALSE;
+    out.resize(sz);
+    const BYTE* p = src + 8;
+    for (DWORD i = 0; i < sz; ++i)
+        out[i] = (BYTE)(p[i] ^ kIwJamKey[i % 32] ^ ((i * 13 + 7) & 0xFF));
+    return TRUE;
+}
+
+static BOOL CCC_IwDecodePng(const BYTE* png, DWORD n, CCC_IwBmp& b)
+{
+    if (!png || n < 24)
+        return FALSE;
+    IWICImagingFactory* fac = NULL;
+    IWICStream* stream = NULL;
+    IWICBitmapDecoder* dec = NULL;
+    IWICBitmapFrameDecode* frame = NULL;
+    IWICFormatConverter* conv = NULL;
+    BOOL ok = FALSE;
+    UINT w = 0, h = 0;
+    BITMAPINFO bi = {};
+    void* bits = NULL;
+    HBITMAP hbm = NULL;
+    HRESULT hr = CoCreateInstance(CLSID_WICImagingFactory, NULL, CLSCTX_INPROC_SERVER,
+        IID_PPV_ARGS(&fac));
+    if (FAILED(hr) || !fac) {
+        CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
+        hr = CoCreateInstance(CLSID_WICImagingFactory, NULL, CLSCTX_INPROC_SERVER,
+            IID_PPV_ARGS(&fac));
+    }
+    if (FAILED(hr) || !fac) goto done;
+    if (FAILED(fac->CreateStream(&stream)) || !stream) goto done;
+    if (FAILED(stream->InitializeFromMemory((BYTE*)png, n))) goto done;
+    if (FAILED(fac->CreateDecoderFromStream(stream, NULL, WICDecodeMetadataCacheOnLoad, &dec)) || !dec) goto done;
+    if (FAILED(dec->GetFrame(0, &frame)) || !frame) goto done;
+    if (FAILED(fac->CreateFormatConverter(&conv)) || !conv) goto done;
+    if (FAILED(conv->Initialize(frame, GUID_WICPixelFormat32bppPBGRA, WICBitmapDitherTypeNone,
+        NULL, 0.0, WICBitmapPaletteTypeCustom))) goto done;
+    conv->GetSize(&w, &h);
+    if (w < 2 || h < 2 || w > 2048 || h > 2048) goto done;
+    bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bi.bmiHeader.biWidth = (LONG)w;
+    bi.bmiHeader.biHeight = -(LONG)h;
+    bi.bmiHeader.biPlanes = 1;
+    bi.bmiHeader.biBitCount = 32;
+    bi.bmiHeader.biCompression = BI_RGB;
+    hbm = ::CreateDIBSection(NULL, &bi, DIB_RGB_COLORS, &bits, NULL, 0);
+    if (!hbm || !bits) {
+        if (hbm) ::DeleteObject(hbm);
+        hbm = NULL;
+        goto done;
+    }
+    if (FAILED(conv->CopyPixels(NULL, w * 4, w * h * 4, (BYTE*)bits))) {
+        ::DeleteObject(hbm);
+        hbm = NULL;
+        goto done;
+    }
+    b.hbm = hbm;
+    hbm = NULL;
+    b.w = (int)w;
+    b.h = (int)h;
+    ok = TRUE;
+done:
+    if (hbm) ::DeleteObject(hbm);
+    if (conv) conv->Release();
+    if (frame) frame->Release();
+    if (dec) dec->Release();
+    if (stream) stream->Release();
+    if (fac) fac->Release();
+    return ok;
+}
+
+static BOOL CCC_IwEnsure(int idx)
+{
+    if (idx < 0 || idx >= IW_COUNT)
+        return FALSE;
+    CCC_IwBmp& b = g_iwBmp[idx];
+    if (b.tried)
+        return b.hbm != NULL;
+    b.tried = TRUE;
+    HINSTANCE hi = AfxGetResourceHandle();
+    HRSRC hrs = ::FindResource(hi, MAKEINTRESOURCE(kIwResId[idx]), RT_RCDATA);
+    if (!hrs)
+        return FALSE;
+    HGLOBAL hg = ::LoadResource(hi, hrs);
+    if (!hg)
+        return FALSE;
+    const DWORD n = ::SizeofResource(hi, hrs);
+    const BYTE* mem = (const BYTE*)::LockResource(hg);
+    if (!mem || n < 8)
+        return FALSE;
+    std::vector<BYTE> png;
+    if (!CCC_IwUnjam(mem, n, png))
+        return FALSE;
+    return CCC_IwDecodePng(png.data(), (DWORD)png.size(), b);
+}
+
+static void CCC_IwBlit(CDC* pDC, int x, int y, int dw, int dh, int idx, BYTE alpha)
+{
+    if (!pDC || dw < 2 || dh < 2 || alpha < 8)
+        return;
+    if (!CCC_IwEnsure(idx) || !g_iwBmp[idx].hbm)
+        return;
+    HDC hdc = ::CreateCompatibleDC(pDC->GetSafeHdc());
+    if (!hdc)
+        return;
+    HGDIOBJ old = ::SelectObject(hdc, g_iwBmp[idx].hbm);
+    BLENDFUNCTION bf = { AC_SRC_OVER, 0, alpha, AC_SRC_ALPHA };
+    ::GdiAlphaBlend(pDC->GetSafeHdc(), x, y, dw, dh, hdc, 0, 0, g_iwBmp[idx].w, g_iwBmp[idx].h, bf);
+    ::SelectObject(hdc, old);
+    ::DeleteDC(hdc);
+}
+
 // 淫女オーバーレイ: ロータ/電マ/吸引/クンニ＋XXX愛液＋控件ピクン＋イク(白み/赤み)。
 // 縁デコ中心にし、中央の文字・クリック領域はなるべく残す。
 void CCC_DrawInwoman(CDC* pDC, const CRect& rc, BOOL bAeroTrans)
@@ -3522,25 +3758,85 @@ void CCC_DrawInwoman(CDC* pDC, const CRect& rc, BOOL bAeroTrans)
         }
     }
 
-    // --- 刺激具: 右端寄り・小さめ(ラベルを隠さない) ---
-    if (W >= 48 && H >= 22)
-    {
-        const int vs = min(H * 5 / 10, max(10, W * 3 / 10));
-        const int vw = max(4, vs / 3);
-        const int vx = rc.right - vw / 2 - max(2, W / 18);
-        const int vy = rc.top + H / 2;
-        CCC_DrawVibrator(pDC, vx, vy, vs, (double)t, twitch, breath, climax, bAeroTrans);
+    const BYTE aLace = (BYTE)(70 + (int)(50 * heat));
+    const BYTE aBody = (BYTE)(48 + (int)(70 * heat) + (int)(40 * climax));
+    const BYTE aFace = (BYTE)(80 + (int)(90 * iku));
+    const int ox = (int)(1.5 * sin(t / 180.0) + 2 * twitch);
+    const int oy = (int)(-1 * climax);
+
+    // ジャム解除スチル。中央の文字は残すので縁・下半分中心。
+    if (H >= 14 && W >= 20)
+        CCC_IwBlit(pDC, rc.left + 2, rc.bottom - max(8, H / 5), W - 4, max(8, H / 5), IW_LACE, aLace);
+
+    if (H >= 18 && W >= 28) {
+        const int bw = max(10, W / 6), bh = max(8, H / 4);
+        CCC_IwBlit(pDC, rc.left + 2, rc.bottom - bh - 1, bw, bh, IW_BLUSH, (BYTE)(50 + 40 * heat));
+        CCC_IwBlit(pDC, rc.right - bw - 2, rc.bottom - bh - 1, bw, bh, IW_BLUSH, (BYTE)(50 + 40 * heat));
     }
 
-    // --- 愛液: 十分な高さの控件だけ(細いボタンはスキップ) ---
-    if (H >= 28 && W >= 36)
-        CCC_DrawLoveFluid(pDC, rc, breath, twitch, climax, bAeroTrans);
+    if (H >= 20 && W >= 32) {
+        const int bh = max(12, H * 12 / 20);
+        const int bw = max(18, W * 5 / 8);
+        CCC_IwBlit(pDC, rc.left + ox, rc.bottom - bh + oy, bw, bh, IW_BODY, aBody);
+    }
 
-    // --- イク顔(大きめのみ・左上) ---
-    if (W >= 72 && H >= 36 && iku > 0.45)
+    if (H >= 26 && W >= 48) {
+        const int bw = max(14, W * 2 / 7);
+        CCC_IwBlit(pDC, rc.right - bw - 1 + ox, rc.top + 2 + oy, bw, H * 2 / 5, IW_BODY2, (BYTE)(aBody * 3 / 4));
+    }
+
+    if (H >= 22 && W >= 40) {
+        const int fs = min(min(H * 3 / 5, W * 2 / 5), 110);
+        CCC_IwBlit(pDC, rc.left + 1 + ox, rc.top + 1 + oy, fs, fs, IW_FACE, aFace);
+    }
+
+    if (H >= 20 && W >= 26) {
+        const int fw = max(12, W / 6), fh = max(16, H * 2 / 5);
+        CCC_IwBlit(pDC, rc.left + W / 4 - fw / 2, rc.bottom - fh - 1, fw, fh, IW_FLUID, (BYTE)(90 + 90 * iku));
+    }
+
+    // トイは裸体の秘所(左下寄り)を避ける。上端・右上へ。
+    if (H >= 18 && W >= 24) {
+        const int rs = min(min(H * 2 / 5, W / 4), 42);
+        CCC_IwBlit(pDC, rc.right - rs - 2 + ox, rc.top + 1 + oy, rs, rs, IW_ROTOR,
+            (BYTE)(110 + 80 * heat));
+    }
+    if (H >= 22 && W >= 36) {
+        const int vs = min(min(H * 2 / 5, W / 4), 52);
+        CCC_IwBlit(pDC, rc.right - vs - 1 + ox, rc.top + H / 3 + oy, vs, vs, IW_VIBE,
+            (BYTE)(100 + 70 * heat));
+    }
+
+    if (H >= 20 && W >= 36) {
+        const int bs = max(10, min(18, H / 3));
+        CCC_IwBlit(pDC, rc.left + W / 2 - bs / 2, rc.top + 1, bs, bs, IW_BOW, (BYTE)(90 + 40 * breath));
+    }
+
+    const BOOL havePhoto = CCC_IwEnsure(IW_BODY) || CCC_IwEnsure(IW_FACE);
+    const BOOL haveToy = CCC_IwEnsure(IW_ROTOR) || CCC_IwEnsure(IW_VIBE);
+    const BOOL haveFluid = CCC_IwEnsure(IW_FLUID);
+
+    // スチルが無いときだけ従来の描画デコ
+    if (!haveToy)
     {
-        const int fs = min(H / 4, max(10, W / 9));
-        CCC_DrawAhegaoFace(pDC, rc.left + fs / 2 + 3, rc.top + fs / 2 + 2, fs, twitch, climax, bAeroTrans);
+        if (W >= 48 && H >= 22)
+        {
+            const int vs = min(H * 5 / 10, max(10, W * 3 / 10));
+            const int vw = max(4, vs / 3);
+            const int vx = rc.right - vw / 2 - max(2, W / 18);
+            const int vy = rc.top + H / 2;
+            CCC_DrawVibrator(pDC, vx, vy, vs, (double)t, twitch, breath, climax, bAeroTrans);
+        }
+    }
+    if (!haveFluid && !havePhoto)
+    {
+        if (H >= 28 && W >= 36)
+            CCC_DrawLoveFluid(pDC, rc, breath, twitch, climax, bAeroTrans);
+        if (W >= 72 && H >= 36 && iku > 0.45)
+        {
+            const int fs = min(H / 4, max(10, W / 9));
+            CCC_DrawAhegaoFace(pDC, rc.left + fs / 2 + 3, rc.top + fs / 2 + 2, fs, twitch, climax, bAeroTrans);
+        }
     }
 
     // --- 汗 ---
@@ -3558,6 +3854,93 @@ void CCC_DrawInwoman(CDC* pDC, const CRect& rc, BOOL bAeroTrans)
         pDC->SelectObject(ob);
         DrawShine(pDC, sx - 1, sy - 1, 1, 1);
     }
+}
+
+// aero=0 の窓本体（控件の隙間）。キャプション帯は呼ばない側で除く。
+static void CCC_DrawInwomanDlgBody(CDC* pDC, const CRect& rc)
+{
+    if (!pDC || !CCC_IsInwoman() || rc.Width() < 48 || rc.Height() < 36)
+        return;
+
+    const DWORD t = ::GetTickCount();
+    double breath = 0, twitch = 0, climax = 0;
+    CCC_InwomanPulse(t, breath, twitch, climax);
+    const double iku = (climax > twitch) ? climax : twitch;
+    const double heat = min(1.0, breath * 0.45 + twitch * 0.7 + climax * 0.85);
+    const int W = rc.Width(), H = rc.Height();
+    const int ox = (int)(3 * sin(t / 220.0) + 4 * twitch);
+    const int oy = (int)(-2 * climax);
+
+    if (!CCC_IsAeroEnabled() && climax > 0.18) {
+        FillRectAlpha(pDC, rc, RGB(255, 70, 120), (BYTE)(8 + (int)(22 * climax)));
+    }
+
+    const int bodyH = max(40, H * 52 / 100);
+    const int bodyW = max(80, W * 56 / 100);
+    CCC_IwBlit(pDC, rc.left + ox, rc.bottom - bodyH + oy, bodyW, bodyH, IW_BODY,
+        (BYTE)(70 + (int)(70 * heat)));
+
+    const int face = min(min(W / 3, H / 2), 220);
+    CCC_IwBlit(pDC, rc.left + 6 + ox, rc.top + 8 + oy, face, face, IW_FACE,
+        (BYTE)(90 + (int)(80 * iku)));
+
+    const int sideW = max(48, W / 5);
+    CCC_IwBlit(pDC, rc.right - sideW - 8 + ox, rc.top + 8 + oy, sideW, H * 2 / 5, IW_BODY2,
+        (BYTE)(60 + (int)(50 * heat)));
+
+    // 電マ・ロータは裸体の下腹部を避ける（右上／右中）
+    const int vh = min(140, max(52, H / 4));
+    CCC_IwBlit(pDC, rc.right - vh - 10 + ox, rc.top + 10 + oy, vh, vh, IW_VIBE,
+        (BYTE)(120 + (int)(80 * heat)));
+
+    const int rh = min(80, max(32, H / 7));
+    CCC_IwBlit(pDC, rc.right - rh - 18 + ox, rc.top + H * 38 / 100 + oy, rh, rh, IW_ROTOR,
+        (BYTE)(130 + (int)(70 * heat)));
+
+    const int fh = max(36, H / 6);
+    const int fw = max(40, bodyW / 3);
+    CCC_IwBlit(pDC, rc.left + bodyW / 2 - fw / 2 + ox, rc.bottom - fh + oy, fw, fh, IW_FLUID,
+        (BYTE)(100 + (int)(90 * iku)));
+
+    CCC_IwBlit(pDC, rc.left, rc.bottom - max(16, H / 14), W, max(16, H / 14), IW_LACE,
+        (BYTE)(90 + (int)(50 * heat)));
+}
+
+void CCC_DrawInwomanOnRect(CDC* pDC, const CRect& rc)
+{
+    if (!pDC || !CCC_IsInwoman() || CCC_IsAeroEnabled())
+        return;
+    CCC_DrawInwomanDlgBody(pDC, rc);
+}
+
+void CCC_DrawInwomanOnClient(CDC* pDC, HWND hWnd)
+{
+    if (!pDC || !hWnd || !CCC_IsInwoman() || CCC_IsAeroEnabled())
+        return;
+    CRect r;
+    ::GetClientRect(hWnd, &r);
+    const int capH = CCC_GetCustomCaptionHeight(hWnd);
+    if (capH > 0 && r.Height() > capH)
+        r.top = capH;
+    CCC_DrawInwomanDlgBody(pDC, r);
+}
+
+void CCC_CaptionPaintGdi(CDC& dc, HWND hDlg)
+{
+    CCC_DrawInwomanOnClient(&dc, hDlg);
+    CCC_CaptionPaint(dc, hDlg);
+}
+
+static void DlgPaintSolidInwoman(CWnd* pWnd)
+{
+    CPaintDC dc(pWnd);
+    CRect r;
+    pWnd->GetClientRect(&r);
+    const int capH = CCC_GetCustomCaptionHeight(pWnd->m_hWnd);
+    if (capH > 0 && r.Height() > capH)
+        r.top = capH;
+    dc.FillSolidRect(&r, COLOR_DIALOG_BG);
+    CCC_DrawInwomanDlgBody(&dc, r);
 }
 
 // ============================================================================
@@ -9951,7 +10334,7 @@ CCustomStandardButton::CCustomStandardButton()
     m_clrShadow(RGB(0, 0, 0)), m_nShadowDirection(135), m_nShadowDistance(2),
     m_nShadowBlur(3), m_bShadowEnable(FALSE),
     m_hIconIn(NULL), m_hIconOut(NULL), m_bFlat(FALSE), m_bAeroMode(FALSE),
-    m_bIconOwnedIn(FALSE), m_bIconOwnedOut(FALSE)
+    m_bIconOwnedIn(FALSE), m_bIconOwnedOut(FALSE), m_bAutoGlyphDone(FALSE)
 {
     ZeroMemory(m_sparklePos, sizeof(m_sparklePos));
     m_brBackground.CreateSolidBrush(COLOR_BUTTON_BG);
@@ -10133,6 +10516,7 @@ DWORD CCustomStandardButton::SetIcon(int nIconIn, int nIconOut)
     m_hIconOut = hOut;
     m_bIconOwnedIn = (hIn != NULL);
     m_bIconOwnedOut = (hOut != NULL);
+    m_bAutoGlyphDone = TRUE;
     if (GetSafeHwnd()) Invalidate(FALSE);
     return 0;
 }
@@ -10148,8 +10532,24 @@ DWORD CCustomStandardButton::SetIcon(HICON hIconIn, HICON hIconOut)
     // 呼び出し側が寿命管理(非所有)
     m_bIconOwnedIn = FALSE;
     m_bIconOwnedOut = FALSE;
+    m_bAutoGlyphDone = TRUE;
     if (GetSafeHwnd()) Invalidate(FALSE);
     return 0;
+}
+
+void CCustomStandardButton::EnsureAutoGlyph()
+{
+    if (m_hIconIn || m_bAutoGlyphDone || !GetSafeHwnd())
+        return;
+    m_bAutoGlyphDone = TRUE;
+    const UINT iconId = CCC_CtlIconForCtrl((UINT)GetDlgCtrlID());
+    if (!iconId)
+        return;
+    HICON h = CCC_LoadSharedIcon(iconId, 24);
+    if (!h)
+        return;
+    m_hIconIn = h;
+    m_bIconOwnedIn = FALSE;
 }
 
 void CCustomStandardButton::SetFlat(BOOL bFlat)
@@ -10184,6 +10584,7 @@ void CCustomStandardButton::PreSubclassWindow()
     }
     UpdateAnimTimer();
     CCC_ButtonSoftTimerSync(m_hWnd, m_bFlat);
+    EnsureAutoGlyph();
 }
 
 HBRUSH CCustomStandardButton::CtlColor(CDC*, UINT)
@@ -10194,6 +10595,7 @@ HBRUSH CCustomStandardButton::CtlColor(CDC*, UINT)
 void CCustomStandardButton::PaintClient(CDC& dc, const CRect& r)
 {
     if (r.Width() <= 0 || r.Height() <= 0) return;
+    EnsureAutoGlyph();
     CDC mDC;
     CBitmap mB;
     mDC.CreateCompatibleDC(&dc);
@@ -10400,43 +10802,42 @@ void CCustomStandardButton::PaintClient(CDC& dc, const CRect& r)
         mDC.DrawFocusRect(&rf);
     }
 
-    // アイコン(中央)。ホバー時は Out があれば差し替え。押下で1pxずらす。
+    // アイコン。ラベル付きは左、記号だけ／空は中央。押下で1pxずらす。
+    CString s;
+    GetWindowText(s);
+    const BOOL glyphOnly = CCC_CaptionIsGlyphOnly(s);
     HICON hDraw = m_hIconIn;
     if (m_bMouseOver && m_hIconOut)
         hDraw = m_hIconOut;
+    int iconRight = r.left;
     if (hDraw)
     {
-        ICONINFO ii = {};
-        int iw = 16, ih = 16;
-        if (::GetIconInfo(hDraw, &ii))
+        const int pad = m_bFlat ? 4 : 6;
+        const int maxSz = (std::max)(8, (std::min)(r.Width(), r.Height()) - pad);
+        int iw = (std::min)(24, maxSz);
+        int ih = iw;
         {
-            BITMAP bm = {};
-            if (ii.hbmColor && ::GetObject(ii.hbmColor, sizeof(bm), &bm))
-            {
-                iw = bm.bmWidth;
-                ih = bm.bmHeight;
-            }
-            else if (ii.hbmMask && ::GetObject(ii.hbmMask, sizeof(bm), &bm))
-            {
-                iw = bm.bmWidth;
-                ih = bm.bmHeight / 2;
-            }
-            if (ii.hbmColor) ::DeleteObject(ii.hbmColor);
-            if (ii.hbmMask) ::DeleteObject(ii.hbmMask);
+            const UINT dpi = CCC_GetControlDpi(m_hWnd);
+            int want = CCC_ScaleDpi(24, dpi);
+            if (want < 16) want = 16;
+            if (want > 36) want = 36;
+            iw = ih = (std::min)(want, maxSz);
         }
-        // ボタン内に収める(はみ出し防止)
-        const int maxSz = (std::max)(8, (std::min)(r.Width(), r.Height()) - (m_bFlat ? 4 : 8));
-        if (iw > maxSz) { ih = MulDiv(ih, maxSz, iw); iw = maxSz; }
-        if (ih > maxSz) { iw = MulDiv(iw, maxSz, ih); ih = maxSz; }
-        int ix = r.left + (r.Width() - iw) / 2;
-        int iy = r.top + (r.Height() - ih) / 2;
+        int ix, iy;
+        if (!glyphOnly && !s.IsEmpty()) {
+            ix = r.left + (m_bFlat ? 3 : 5);
+            iy = r.top + (r.Height() - ih) / 2;
+            iconRight = ix + iw;
+        } else {
+            ix = r.left + (r.Width() - iw) / 2;
+            iy = r.top + (r.Height() - ih) / 2;
+            iconRight = ix + iw;
+        }
         if (bP) { ix += 1; iy += 1; }
         ::DrawIconEx(mDC.GetSafeHdc(), ix, iy, hDraw, iw, ih, 0, NULL, DI_NORMAL);
     }
 
-    CString s;
-    GetWindowText(s);
-    // アイコン専用ボタンは空キャプション想定。文字がある場合だけ描く(はみ出し注意)。
+    // 記号だけのキャプションはアイコンに任せて文字を出さない。
     if (!s.IsEmpty() && !hDraw)
     {
         CFont* pF = GetFont();
@@ -10444,17 +10845,14 @@ void CCustomStandardButton::PaintClient(CDC& dc, const CRect& r)
         DrawSmartText(&mDC, r, s, bD, bP);
         mDC.SelectObject(pOF);
     }
-    else if (!s.IsEmpty() && hDraw)
+    else if (!s.IsEmpty() && hDraw && !glyphOnly)
     {
-        // アイコン+文字: アイコン左、文字右(狭いときは省略)
         CFont* pF = GetFont();
         CFont* pOF = mDC.SelectObject(pF ? pF : (CFont*)mDC.SelectStockObject(DEFAULT_GUI_FONT));
         CRect tr = r;
-        tr.left += (std::min)(r.Width() / 2, 22);
+        tr.left = iconRight + 4;
         tr.DeflateRect(2, 1);
-        mDC.SetBkMode(TRANSPARENT);
-        mDC.SetTextColor(bD ? RGB(120, 120, 120) : RGB(0, 0, 0));
-        mDC.DrawText(s, &tr, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
+        DrawSmartText2(&mDC, tr, s, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS, bD, bP);
         mDC.SelectObject(pOF);
     }
 
@@ -12964,6 +13362,8 @@ void CCustomDialog::OnPaint()
 {
     if (m_bAeroEnabled)
         DlgOnPaintAero(this, m_bAeroEnabled);
+    else if (CCC_IsInwoman())
+        DlgPaintSolidInwoman(this);
     else
         CDialogEx::OnPaint();
 }
@@ -14157,7 +14557,7 @@ static BOOL CCC_IsCaptionChromeCtrl(HWND hWnd)
         IDC_SC_HELP, IDC_PL_HELP, IDC_AN_HELP, IDC_PR_HELP, IDC_EQ_HELP,
         IDC_PT_HELP, IDC_RD_HELP, IDC_DR_HELP, IDC_WE_HELP, IDC_TC_HELP,
         IDC_TE_HELP, IDC_FD_HELP, IDC_KPI_HELP, IDC_SY_HELP, IDC_PRT_HELP,
-        IDC_OGG_HELP, IDC_MP_CHEATBTN,
+        IDC_OGG_HELP, IDC_PRM_HELP, IDC_MCR_HELP, IDC_DOUGA_HELP, IDC_MP_CHEATBTN,
         IDC_SM_HELP, IDC_DIG_HELP, IDC_VC_HELP, IDC_TN_HELP, IDC_PF_HELP,
         IDC_S3M_HELP, IDC_S3R_HELP, IDC_MP_BPM_HELP, IDC_TB_HELP, IDC_VST_HELP, IDC_MM_HELP
     };
@@ -14174,7 +14574,7 @@ static BOOL CCC_IsCaptionHelpChromeId(UINT id)
         IDC_SC_HELP, IDC_PL_HELP, IDC_AN_HELP, IDC_PR_HELP, IDC_EQ_HELP,
         IDC_PT_HELP, IDC_RD_HELP, IDC_DR_HELP, IDC_WE_HELP, IDC_TC_HELP,
         IDC_TE_HELP, IDC_FD_HELP, IDC_KPI_HELP, IDC_SY_HELP, IDC_PRT_HELP,
-        IDC_OGG_HELP, IDC_MP_CHEATBTN,
+        IDC_OGG_HELP, IDC_PRM_HELP, IDC_MCR_HELP, IDC_DOUGA_HELP, IDC_MP_CHEATBTN,
         IDC_SM_HELP, IDC_DIG_HELP, IDC_VC_HELP, IDC_TN_HELP, IDC_PF_HELP,
         IDC_S3M_HELP, IDC_S3R_HELP, IDC_MP_BPM_HELP, IDC_TB_HELP, IDC_VST_HELP, IDC_MM_HELP
     };
@@ -14192,7 +14592,7 @@ static HWND CCC_FindCaptionHelpChrome(HWND hDlg)
         IDC_SC_HELP, IDC_PL_HELP, IDC_AN_HELP, IDC_PR_HELP, IDC_EQ_HELP,
         IDC_PT_HELP, IDC_RD_HELP, IDC_DR_HELP, IDC_WE_HELP, IDC_TC_HELP,
         IDC_TE_HELP, IDC_FD_HELP, IDC_KPI_HELP, IDC_SY_HELP, IDC_PRT_HELP,
-        IDC_OGG_HELP, IDC_MP_CHEATBTN,
+        IDC_OGG_HELP, IDC_PRM_HELP, IDC_MCR_HELP, IDC_DOUGA_HELP, IDC_MP_CHEATBTN,
         IDC_SM_HELP, IDC_DIG_HELP, IDC_VC_HELP, IDC_TN_HELP, IDC_PF_HELP,
         IDC_S3M_HELP, IDC_S3R_HELP, IDC_MP_BPM_HELP, IDC_TB_HELP, IDC_VST_HELP, IDC_MM_HELP
     };
@@ -14441,6 +14841,8 @@ static void CCC_PaintOpaqueBodyBelowCaption(CDC& dc, CWnd* pDlg, CBrush& brDlg)
         if (fill.IntersectRect(&body, &clip) && fill.Width() > 0 && fill.Height() > 0)
             CCC_FillRectOpaqueBits(dc.GetSafeHdc(), fill, COLOR_DIALOG_BG);
     }
+    if (CCC_IsInwoman())
+        CCC_DrawInwomanDlgBody(&dc, body);
     dc.RestoreDC(saved);
 #else
     UNREFERENCED_PARAMETER(dc);
@@ -14547,6 +14949,9 @@ static CCustomStandardButton* CCC_CaptionMakeBtn(CWnd* pDlg, UINT id, LPCWSTR te
     }
     if (CFont* pFont = pDlg->GetFont())
         p->SetFont(pFont);
+    const UINT iconId = CCC_CtlIconForCtrl(id);
+    if (iconId)
+        CCC_CaptionApplySharedIcon(p, iconId);
     return p;
 }
 
@@ -14645,7 +15050,7 @@ void CCC_CaptionPlaceHelpBtn(HWND hDlg, CWnd* pHelp)
     CWnd* pDlg = CWnd::FromHandle(hDlg);
     if (pDlg && (!e->pOfflineHelp || !::IsWindow(e->pOfflineHelp->GetSafeHwnd())))
     {
-        e->pOfflineHelp = CCC_CaptionMakeBtn(pDlg, IDC_CAP_OFFLINE_HELP, L"\u672C");
+        e->pOfflineHelp = CCC_CaptionMakeBtn(pDlg, IDC_CAP_OFFLINE_HELP, L"");
         if (e->pOfflineHelp && e->pCapTip && e->pCapTip->GetSafeHwnd())
         {
             e->pCapTip->AddTool(e->pOfflineHelp, LL14(
@@ -14745,7 +15150,7 @@ void CCC_CaptionLayout(HWND hDlg)
         IDC_SC_HELP, IDC_PL_HELP, IDC_AN_HELP, IDC_PR_HELP, IDC_EQ_HELP,
         IDC_PT_HELP, IDC_RD_HELP, IDC_DR_HELP, IDC_WE_HELP, IDC_TC_HELP,
         IDC_TE_HELP, IDC_FD_HELP, IDC_KPI_HELP, IDC_SY_HELP, IDC_PRT_HELP,
-        IDC_OGG_HELP, IDC_MP_CHEATBTN,
+        IDC_OGG_HELP, IDC_PRM_HELP, IDC_MCR_HELP, IDC_DOUGA_HELP, IDC_MP_CHEATBTN,
         IDC_SM_HELP, IDC_DIG_HELP, IDC_VC_HELP, IDC_TN_HELP, IDC_PF_HELP,
         IDC_S3M_HELP, IDC_S3R_HELP, IDC_MP_BPM_HELP, IDC_TB_HELP, IDC_VST_HELP, IDC_MM_HELP
     };
@@ -14783,16 +15188,18 @@ void CCC_ApplyDlgResourceIcon(CWnd* w, UINT iconId)
 {
 	if (!w || !w->GetSafeHwnd() || iconId == 0)
 		return;
-	HICON h = NULL;
-	if (AfxGetApp())
-		h = AfxGetApp()->LoadIcon(iconId);
-	if (!h)
-		h = (HICON)::LoadImage(AfxGetResourceHandle(), MAKEINTRESOURCE(iconId),
+	HINSTANCE hi = AfxGetResourceHandle();
+	HICON hBig = (HICON)::LoadImage(hi, MAKEINTRESOURCE(iconId),
+		IMAGE_ICON, 32, 32, LR_SHARED);
+	if (!hBig && AfxGetApp())
+		hBig = AfxGetApp()->LoadIcon(iconId);
+	if (!hBig)
+		hBig = (HICON)::LoadImage(hi, MAKEINTRESOURCE(iconId),
 			IMAGE_ICON, 0, 0, LR_DEFAULTSIZE | LR_SHARED);
-	if (!h)
+	if (!hBig)
 		return;
-	w->SetIcon(h, TRUE);
-	w->SetIcon(h, FALSE);
+	w->SetIcon(hBig, TRUE);
+	w->SetIcon(hBig, FALSE);
 }
 
 UINT CCC_IconIdForDialogTemplate(UINT idd)
@@ -14888,9 +15295,192 @@ BOOL CCC_SetUiCursor(UINT id)
 	return TRUE;
 }
 
+HICON CCC_LoadSharedIcon(UINT iconId, int px)
+{
+	if (!iconId)
+		return NULL;
+	if (px < 12)
+		px = 12;
+	if (px > 36)
+		px = 36;
+	HICON h = (HICON)::LoadImage(AfxGetResourceHandle(), MAKEINTRESOURCE(iconId),
+		IMAGE_ICON, px, px, LR_SHARED);
+	if (!h)
+		h = (HICON)::LoadImage(AfxGetResourceHandle(), MAKEINTRESOURCE(iconId),
+			IMAGE_ICON, 16, 16, LR_SHARED);
+	return h;
+}
+
+UINT CCC_CtlIconForCtrl(UINT id)
+{
+	if (id == 0)
+		return 0;
+	switch (id) {
+	case IDC_CAP_CLOSE: return IDI_CTL_CLOSE;
+	case IDC_CAP_MIN: return IDI_CTL_MIN;
+	case IDC_CAP_MAX: return IDI_CTL_MAX;
+	case IDC_CAP_SETTINGS: return IDI_CTL_COG;
+	case IDC_CAP_PIN: return IDI_CTL_PIN;
+	case IDC_CAP_OFFLINE_HELP: return IDI_CTL_BOOK;
+	case IDC_MP_PLAY: return IDI_CTL_PLAY;
+	case IDC_MP_PAUSE: return IDI_CTL_PAUSE;
+	case IDC_MP_STOP: return IDI_CTL_STOP;
+	case IDC_MP_NEXT: return IDI_CTL_NEXT;
+	case IDC_MP_PREV: return IDI_CTL_PREV;
+	case IDC_MP_EQ: return IDI_UI_EQ;
+	case IDC_MP_PIANO: return IDI_UI_PIANO;
+	case IDC_MP_ANALYZER: return IDI_UI_ANALYZER;
+	case IDC_MP_PRO: return IDI_UI_TUNE;
+	case IDC_MP_PROMPT: return IDI_UI_PROMPT;
+	case IDC_MP_CMDROLL: return IDI_UI_KEYBOARD;
+	case IDC_MP_SETTINGS: return IDI_CTL_COG;
+	case IDC_MP_FOLDER: return IDI_UI_FOLDER;
+	case IDC_MP_JACK:
+	case IDC_MP_JACKET: return IDI_UI_PHOTO;
+	case IDC_MP_EXIT: return IDI_CTL_POWER;
+	case IDC_MP_FADEOUT: return IDI_CTL_FADE;
+	case IDC_MP_RECORD: return IDI_CTL_RECORD;
+	case IDC_MP_CAPTURE: return IDI_UI_CAPTURE;
+	case IDC_MP_MICMIX: return IDI_UI_MIC;
+	case IDC_MP_LOOP: return IDI_CTL_LOOP;
+	case IDC_MP_RANDOM: return IDI_CTL_SHUFFLE;
+	case IDC_MP_XFADE: return IDI_CTL_XFADE;
+	case IDC_MP_SEEKLOCK: return IDI_CTL_LOCK;
+	case IDC_MP_FIND: return IDI_CTL_SEARCH;
+	case IDC_MP_ITEMDEL:
+	case IDC_MP_PLDELETE: return IDI_CTL_DELETE;
+	case IDC_MP_LSUP:
+	case IDC_MP_UP:
+	case IDC_MP_FINDUP: return IDI_CTL_CHEVUP;
+	case IDC_MP_LSDOWN:
+	case IDC_MP_DOWN:
+	case IDC_MP_FINDDOWN: return IDI_CTL_CHEVDOWN;
+	case IDC_MCR_ZOOMIN: return IDI_CTL_PLUS;
+	case IDC_MCR_ZOOMOUT: return IDI_CTL_MINUS;
+	case IDC_DJPAD_PLAY: return IDI_CTL_PLAY;
+	case IDC_DJPAD_PAUSE: return IDI_CTL_PAUSE;
+	case IDC_DJPAD_STOP: return IDI_CTL_STOP;
+	case IDC_DJPAD_PREV: return IDI_CTL_PREV;
+	case IDC_DJPAD_NEXT: return IDI_CTL_NEXT;
+	case IDC_DJPAD_PITCH_UP:
+	case IDC_DJPAD_TEMPO_UP: return IDI_CTL_PLUS;
+	case IDC_DJPAD_PITCH_DN:
+	case IDC_DJPAD_TEMPO_DN: return IDI_CTL_MINUS;
+	case IDC_DJPAD_ABA:
+	case IDC_DJPAD_ABB:
+	case IDC_DJPAD_ABCLR: return IDI_CTL_AB;
+	case IDC_DJPAD_LOOP1:
+	case IDC_DJPAD_LOOP2:
+	case IDC_DJPAD_LOOP4:
+	case IDC_DJPAD_LOOP8: return IDI_CTL_LOOP;
+	case IDC_MP_M3U_EXPORT: return IDI_UI_EXPORT;
+	case IDC_MP_M3U_IMPORT: return IDI_UI_FILE;
+	case IDC_MP_ADDFOLDER: return IDI_CTL_PLUS;
+	case IDC_MP_BOT_VST: return IDI_UI_VST;
+	case IDC_MP_BOT_MAZE: return IDI_UI_MAZE;
+	case IDC_MP_BOT_RACE: return IDI_UI_RACE;
+	case IDC_MP_BOT_DJ: return IDI_UI_DISC;
+	case IDC_MP_BOT_TAG: return IDI_UI_TAG;
+	case IDC_MP_BOT_BPM: return IDI_UI_MUSIC;
+	case IDC_MP_BOT_SLEEP: return IDI_CTL_SLEEP;
+	case IDC_MP_BOT_MIRROR: return IDI_UI_SHARE;
+	case IDC_MP_BOT_SSVIZ: return IDI_UI_VIZ;
+	case IDC_MP_BOT_ALARM: return IDI_UI_ALARM;
+	case IDC_MP_BOT_REMOTE: return IDI_UI_REMOTE;
+	case IDC_MP_DESKLRC: return IDI_UI_KEYBOARD;
+	case IDC_MP_SWITCHMODE: return IDI_UI_APPS;
+	case IDC_MP_ABA:
+	case IDC_MP_ABB:
+	case IDC_MP_ABCLR: return IDI_CTL_AB;
+	case IDC_MP_SUPE: return IDI_UI_ANALYZER;
+	case IDC_S3M_GEN:
+	case IDC_S3R_GEN: return IDI_CTL_PLUS;
+	case IDC_S3R_START: return IDI_CTL_PLAY;
+	case IDC_S3M_CLOSE:
+	case IDC_S3R_CLOSE:
+	case IDC_MP_BPM_CLOSE: return IDI_CTL_CLOSE;
+	case IDC_S3M_NAVI: return IDI_CTL_CHEVRIGHT;
+	case IDC_MP_MICDEV_REFRESH:
+	case IDC_MP_LOOPDEV_REFRESH:
+	case IDC_OGG_MICDEV_REFRESH:
+	case IDC_DR_MICDEV_REFRESH:
+	case IDC_SC_MICDEV_REFRESH:
+	case IDC_DJPAD_MICDEV_REFRESH:
+	case IDC_COMBO_MICDEV_REFRESH:
+	case IDC_SM_MIC_REFRESH:
+	case IDC_VC_MIC_REFRESH:
+	case IDC_TN_MIC_REFRESH:
+	case IDC_DIG_CAP_REFRESH:
+	case IDC_VC_OUT_REFRESH:
+	case IDC_TN_OUT_REFRESH:
+	case IDC_DIG_MON_REFRESH:
+	case IDC_SC_REFRESH: return IDI_CTL_REFRESH;
+	case IDC_SC_HELP:
+	case IDC_PL_HELP:
+	case IDC_AN_HELP:
+	case IDC_PR_HELP:
+	case IDC_EQ_HELP:
+	case IDC_PT_HELP:
+	case IDC_RD_HELP:
+	case IDC_DR_HELP:
+	case IDC_WE_HELP:
+	case IDC_TC_HELP:
+	case IDC_TE_HELP:
+	case IDC_FD_HELP:
+	case IDC_KPI_HELP:
+	case IDC_SY_HELP:
+	case IDC_PRT_HELP:
+	case IDC_OGG_HELP:
+	case IDC_PRM_HELP:
+	case IDC_MCR_HELP:
+	case IDC_DOUGA_HELP:
+	case IDC_MP_CHEATBTN:
+	case IDC_SM_HELP:
+	case IDC_DIG_HELP:
+	case IDC_VC_HELP:
+	case IDC_TN_HELP:
+	case IDC_PF_HELP:
+	case IDC_S3M_HELP:
+	case IDC_S3R_HELP:
+	case IDC_MP_BPM_HELP:
+	case IDC_TB_HELP:
+	case IDC_VST_HELP:
+	case IDC_MM_HELP: return IDI_UI_HELP;
+	default: return 0;
+	}
+}
+
+static BOOL CCC_CaptionIsGlyphOnly(const CString& s)
+{
+	if (s.IsEmpty())
+		return TRUE;
+	const int n = s.GetLength();
+	if (n > 3)
+		return FALSE;
+	for (int i = 0; i < n; ++i) {
+		const WCHAR c = s[i];
+		if ((c >= L'0' && c <= L'9') || (c >= L'A' && c <= L'Z') || (c >= L'a' && c <= L'z'))
+			return FALSE;
+		if (c >= 0x3040) // かな・漢字はラベル
+			return FALSE;
+	}
+	return TRUE;
+}
+
+static void CCC_CaptionApplySharedIcon(CCustomStandardButton* p, UINT iconId)
+{
+	if (!p || !p->GetSafeHwnd() || !iconId)
+		return;
+	p->SetWindowText(L"");
+	HICON h = CCC_LoadSharedIcon(iconId, 24);
+	if (h)
+		p->SetIcon(h, NULL);
+}
+
 // カスタムキャプション用アイコン取得。
 // WM_GETICON が NULL なら描かない（クラス／exe 既定へフォールバックしない）。
 // ツール窓は SetIcon したリソースだけを出す。歌詞オーバーレイは非表示。
+// 帯へは ICON_BIG（32）を優先。SMALL だと 16 を引き伸ばすことになる。
 static HICON CCC_CaptionGetTitleIcon(HWND hDlg)
 {
 	if (!hDlg || !::IsWindow(hDlg))
@@ -14899,10 +15489,23 @@ static HICON CCC_CaptionGetTitleIcon(HWND hDlg)
 	if (pWnd && pWnd->GetRuntimeClass() && pWnd->GetRuntimeClass()->m_lpszClassName
 		&& strcmp(pWnd->GetRuntimeClass()->m_lpszClassName, "CDesktopLyricsWnd") == 0)
 		return NULL;
-	HICON hIcon = (HICON)::SendMessage(hDlg, WM_GETICON, ICON_SMALL, 0);
+	HICON hIcon = (HICON)::SendMessage(hDlg, WM_GETICON, ICON_BIG, 0);
 	if (!hIcon)
-		hIcon = (HICON)::SendMessage(hDlg, WM_GETICON, ICON_BIG, 0);
+		hIcon = (HICON)::SendMessage(hDlg, WM_GETICON, ICON_SMALL, 0);
 	return hIcon;
+}
+
+// 帯いっぱい(barH-2)は大きすぎ、旧16は小さい。96dpi 帯32なら 24。
+static int CCC_CaptionTitleIconSize(int barH)
+{
+	int isz = (barH * 3) / 4;
+	if (isz < 16)
+		isz = 16;
+	if (isz > barH - 6)
+		isz = barH - 6;
+	if (isz < 16)
+		isz = 16;
+	return isz;
 }
 
 void CCC_CaptionPaint(CDC& dc, HWND hDlg)
@@ -14976,7 +15579,7 @@ void CCC_CaptionPaint(CDC& dc, HWND hDlg)
             int textLeft = 8;
             // WM_GETICON が載っている窓だけ描く（未設定は NULL）
             if (hIcon) {
-                const int isz = 16;
+                const int isz = CCC_CaptionTitleIconSize(h);
                 const int iy = (h - isz) / 2;
                 ::DrawIconEx(hdcMem, 6, iy, hIcon, isz, isz, 0, NULL, DI_NORMAL);
                 textLeft = 6 + isz + 6;
@@ -15064,7 +15667,7 @@ void CCC_CaptionPaint(CDC& dc, HWND hDlg)
 
     int textLeft = 8;
     if (hIcon) {
-        const int isz = 16;
+        const int isz = CCC_CaptionTitleIconSize(bar.Height());
         const int iy = (bar.Height() - isz) / 2;
         ::DrawIconEx(mem.GetSafeHdc(), 6, iy, hIcon, isz, isz, 0, NULL, DI_NORMAL);
         textLeft = 6 + isz + 6;
@@ -16445,14 +17048,18 @@ static void CCC_CaptionInstallCore(CWnd* pDlg, CToolTipCtrl* pTip)
         hChild = ::GetWindow(hChild, GW_HWNDNEXT);
     }
 
-    e->pClose = CCC_CaptionMakeBtn(pDlg, IDC_CAP_CLOSE, L"\u00D7");
+    e->pClose = CCC_CaptionMakeBtn(pDlg, IDC_CAP_CLOSE, L"");
     if (e->hasMin)
-        e->pMin = CCC_CaptionMakeBtn(pDlg, IDC_CAP_MIN, L"\u2013");
-    if (e->hasMax)
-        e->pMax = CCC_CaptionMakeBtn(pDlg, IDC_CAP_MAX, pDlg->IsZoomed() ? L"\u2752" : L"\u25A1");
+        e->pMin = CCC_CaptionMakeBtn(pDlg, IDC_CAP_MIN, L"");
+    if (e->hasMax) {
+        e->pMax = CCC_CaptionMakeBtn(pDlg, IDC_CAP_MAX, L"");
+        CCC_CaptionApplySharedIcon(e->pMax,
+            (pDlg->IsZoomed() || e->manualZoomed) ? IDI_CTL_RESTORE : IDI_CTL_MAX);
+    }
     if (e->hasSettings)
-        e->pSettings = CCC_CaptionMakeBtn(pDlg, IDC_CAP_SETTINGS, L"\u2699");
-    e->pPin = CCC_CaptionMakeBtn(pDlg, IDC_CAP_PIN, e->topmost ? L"P*" : L"P");
+        e->pSettings = CCC_CaptionMakeBtn(pDlg, IDC_CAP_SETTINGS, L"");
+    e->pPin = CCC_CaptionMakeBtn(pDlg, IDC_CAP_PIN, L"");
+    CCC_CaptionApplySharedIcon(e->pPin, e->topmost ? IDI_CTL_PIN : IDI_CTL_PINOFF);
 
     if (CCC_MainLockEntry* le = CCC_FindMainLockEntry(hWnd)) {
         if (le->overlayPaint) {
@@ -17274,7 +17881,8 @@ void CCustomBlurDialogBase::OnSize(UINT nType, int cx, int cy)
                 e->manualZoomed = FALSE;
             else if (nType == SIZE_MAXIMIZED)
                 e->manualZoomed = TRUE;
-            e->pMax->SetWindowText((IsZoomed() || e->manualZoomed) ? L"\u2752" : L"\u25A1");
+            CCC_CaptionApplySharedIcon(e->pMax,
+                (IsZoomed() || e->manualZoomed) ? IDI_CTL_RESTORE : IDI_CTL_MAX);
         }
     }
 }
@@ -17401,6 +18009,8 @@ BOOL CCustomBlurDialogBase::OnTtnNeedText(UINT, NMHDR*, LRESULT* pResult)
 
 BOOL CCustomBlurDialogBase::PreTranslateMessage(MSG* pMsg)
 {
+    if (CCC_InwomanHotkey(pMsg, this))
+        return TRUE;
     if (pMsg && pMsg->message == WM_KEYDOWN && pMsg->wParam == VK_F1)
     {
         OfflineHelpOpen(m_hWnd);
@@ -17494,6 +18104,8 @@ void CCustomDialogEx::OnPaint()
 {
     if (m_bAeroEnabled)
         DlgOnPaintAero(this, m_bAeroEnabled);
+    else if (CCC_IsInwoman())
+        DlgPaintSolidInwoman(this);
     else
         CDialogEx::OnPaint();
 }
@@ -17711,7 +18323,7 @@ static void CCC_CaptionToggleMaximize(CWnd* pDlg)
     }
     if (e && e->pMax && ::IsWindow(e->pMax->GetSafeHwnd())) {
         const BOOL z = pDlg->IsZoomed() || e->manualZoomed;
-        e->pMax->SetWindowText(z ? L"\u2752" : L"\u25A1");
+        CCC_CaptionApplySharedIcon(e->pMax, z ? IDI_CTL_RESTORE : IDI_CTL_MAX);
     }
 }
 
@@ -17724,7 +18336,7 @@ static void CCC_CaptionTogglePin(CWnd* pDlg)
     pDlg->SetWindowPos(e->topmost ? &CWnd::wndTopMost : &CWnd::wndNoTopMost, 0, 0, 0, 0,
         SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
     if (e->pPin && ::IsWindow(e->pPin->GetSafeHwnd()))
-        e->pPin->SetWindowText(e->topmost ? L"P*" : L"P");
+        CCC_CaptionApplySharedIcon(e->pPin, e->topmost ? IDI_CTL_PIN : IDI_CTL_PINOFF);
 }
 
 // ============================================================================
@@ -17944,7 +18556,8 @@ void CCustomBlurDialogExBase::OnSize(UINT nType, int cx, int cy)
                 e->manualZoomed = FALSE;
             else if (nType == SIZE_MAXIMIZED)
                 e->manualZoomed = TRUE;
-            e->pMax->SetWindowText((IsZoomed() || e->manualZoomed) ? L"\u2752" : L"\u25A1");
+            CCC_CaptionApplySharedIcon(e->pMax,
+                (IsZoomed() || e->manualZoomed) ? IDI_CTL_RESTORE : IDI_CTL_MAX);
         }
     }
 }
@@ -18071,6 +18684,8 @@ BOOL CCustomBlurDialogExBase::OnTtnNeedText(UINT, NMHDR*, LRESULT* pResult)
 
 BOOL CCustomBlurDialogExBase::PreTranslateMessage(MSG* pMsg)
 {
+    if (CCC_InwomanHotkey(pMsg, this))
+        return TRUE;
     if (pMsg && pMsg->message == WM_KEYDOWN && pMsg->wParam == VK_F1)
     {
         OfflineHelpOpen(m_hWnd);

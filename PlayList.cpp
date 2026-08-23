@@ -1,4 +1,4 @@
-﻿// PlayList.cpp : 実装ファイル
+// PlayList.cpp : 実装ファイル
 //
 
 #include "stdafx.h"
@@ -1001,17 +1001,17 @@ BOOL CPlayList::OnInitDialog()
 
 	plw = 1;
 
-	m_lsup.SetIcon(IDR_SUP);
+	m_lsup.SetIcon(CCC_LoadSharedIcon(IDI_CTL_CHEVUP), NULL);
 	m_lsup.SetFlat(TRUE);
-	m_lup.SetIcon(IDR_UP);
+	m_lup.SetIcon(CCC_LoadSharedIcon(IDI_CTL_CHEVUP), NULL);
 	m_lup.SetFlat(TRUE);
-	m_lsdown.SetIcon(IDR_SDOWN);
+	m_lsdown.SetIcon(CCC_LoadSharedIcon(IDI_CTL_CHEVDOWN), NULL);
 	m_lsdown.SetFlat(TRUE);
-	m_ldown.SetIcon(IDR_DOWN);
+	m_ldown.SetIcon(CCC_LoadSharedIcon(IDI_CTL_CHEVDOWN), NULL);
 	m_ldown.SetFlat(TRUE);
-	m_findup.SetIcon(IDR_DOWN);
+	m_findup.SetIcon(CCC_LoadSharedIcon(IDI_CTL_CHEVUP), NULL);
 	m_findup.SetFlat(TRUE);
-	m_finddown.SetIcon(IDR_UP);
+	m_finddown.SetIcon(CCC_LoadSharedIcon(IDI_CTL_CHEVDOWN), NULL);
 	m_finddown.SetFlat(TRUE);
 	m_help.SetWindowText(L"?");
 	m_help.SetFlat(TRUE);

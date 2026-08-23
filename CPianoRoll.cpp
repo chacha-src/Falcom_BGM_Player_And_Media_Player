@@ -5645,7 +5645,7 @@ void CPianoRoll::PresentFinalFrame(CDC& dc, int w, int h, int rollH, int keySect
         const int yOff = CCC_GetCustomCaptionHeight(m_hWnd);
         if (m_rollReady && (m_keyBufReady || keySectionH <= 0) && chordH <= 0) {
             m_chromaCache.BlitFull(dc.GetSafeHdc(), 0, yOff, w, h);
-            CCC_CaptionPaint(dc, m_hWnd);
+            CCC_CaptionPaintGdi(dc, m_hWnd);
             return;
         }
         if (m_rollReady && (m_keyBufReady || keySectionH <= 0) && chordH > 0) {
@@ -5663,7 +5663,7 @@ void CPianoRoll::PresentFinalFrame(CDC& dc, int w, int h, int rollH, int keySect
                         m_chromaCache.hdcDib, 0, rollH, w, keySectionH, bf);
             }
             DrawChordPanel(dc, 0, yOff + rollH, w, chordH);
-            CCC_CaptionPaint(dc, m_hWnd);
+            CCC_CaptionPaintGdi(dc, m_hWnd);
             return;
         }
         if (yOff <= 0) {
@@ -5681,7 +5681,7 @@ void CPianoRoll::PresentFinalFrame(CDC& dc, int w, int h, int rollH, int keySect
                 ::GdiAlphaBlend(dc.GetSafeHdc(), 0, yOff + rollH, w, keySectionH,
                     m_chromaCache.hdcDib, 0, rollH, w, keySectionH, bf);
         }
-        CCC_CaptionPaint(dc, m_hWnd);
+        CCC_CaptionPaintGdi(dc, m_hWnd);
         return;
     }
 #endif
@@ -5706,7 +5706,7 @@ void CPianoRoll::PresentFinalFrame(CDC& dc, int w, int h, int rollH, int keySect
             if (of) dc.SelectObject(of);
         }
         CCC_MainLockPaintClient(dc, m_hWnd);
-        CCC_CaptionPaint(dc, m_hWnd);
+        CCC_CaptionPaintGdi(dc, m_hWnd);
         return;
     }
 
@@ -5741,7 +5741,7 @@ void CPianoRoll::PresentFinalFrame(CDC& dc, int w, int h, int rollH, int keySect
     else
 #endif
         dc.BitBlt(0, yOff, w, h, &m_frameDC, 0, 0, SRCCOPY);
-    CCC_CaptionPaint(dc, m_hWnd);
+    CCC_CaptionPaintGdi(dc, m_hWnd);
 }
 
 void CPianoRoll::PresentClientFromBuffers(CPaintDC& dc, int w, int h, int rollH, int keySectionH)

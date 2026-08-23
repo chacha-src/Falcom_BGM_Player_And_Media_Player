@@ -1,4 +1,4 @@
-#include "StdAfx.h"
+﻿#include "StdAfx.h"
 #include "CLyricsViewWnd.h"
 #include "CCustomControl.h"
 #include <math.h>
@@ -682,4 +682,5 @@ void CLyricsViewWnd::OnPaint()
 #else
 	pdc.BitBlt(0, 0, w, h, &mem, 0, 0, SRCCOPY);
 #endif
+	CCC_DrawInwomanOnClient(&pdc, m_hWnd);
 }

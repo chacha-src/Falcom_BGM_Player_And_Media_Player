@@ -858,6 +858,9 @@ BOOL CCC_AcrylicCaption(HWND hWnd);
 // AcrylicCaption ホストの帯ガラスを再適用（WS_EX_LAYERED を剥がしてから）
 void CCC_CaptionEnsureHostAcrylic(HWND hWnd);
 void CCC_CaptionPaint(CDC& dc, HWND hDlg);
+void CCC_DrawInwomanOnRect(CDC* pDC, const CRect& rc);
+void CCC_DrawInwomanOnClient(CDC* pDC, HWND hWnd);
+void CCC_CaptionPaintGdi(CDC& dc, HWND hDlg);
 void CCC_CaptionLayout(HWND hDlg);
 void CCC_CaptionUnregister(HWND hDlg);
 // キャプション隣の「?」を、実在する CAP ボタンと「メインに追随」の左へ置く（欠けるボタン分の空きを作らない）

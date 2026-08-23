@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include "afxwin.h"
 #include "CCustomControl.h"
 #include "resource.h"
@@ -97,14 +97,28 @@ public:
 	enum { S3M_WALL_VAR = 16, S3M_THEME_N = 4 };
 	ID3D11Texture2D* m_texBrick[S3M_THEME_N];
 	ID3D11ShaderResourceView* m_srvBrick[S3M_THEME_N];
+	ID3D11Texture2D* m_texBrickD[S3M_THEME_N];
+	ID3D11ShaderResourceView* m_srvBrickD[S3M_THEME_N];
 	ID3D11Texture2D* m_texFloor[S3M_THEME_N];
 	ID3D11ShaderResourceView* m_srvFloor[S3M_THEME_N];
+	ID3D11Texture2D* m_texFloorD[S3M_THEME_N];
+	ID3D11ShaderResourceView* m_srvFloorD[S3M_THEME_N];
 	ID3D11Texture2D* m_texMirrorWall;
 	ID3D11ShaderResourceView* m_srvMirrorWall;
 	ID3D11Texture2D* m_texMirrorFloor;
 	ID3D11ShaderResourceView* m_srvMirrorFloor;
 	ID3D11Texture2D* m_texEnv;
 	ID3D11ShaderResourceView* m_srvEnv;
+	ID3D11Texture2D* m_texEnvIn;
+	ID3D11ShaderResourceView* m_srvEnvIn;
+	ID3D11Texture2D* m_texItem;
+	ID3D11ShaderResourceView* m_srvItem;
+	ID3D11Texture2D* m_texGimmick;
+	ID3D11ShaderResourceView* m_srvGimmick;
+	ID3D11Texture2D* m_texGlass;
+	ID3D11ShaderResourceView* m_srvGlass;
+	ID3D11Texture2D* m_texBrick2;
+	ID3D11ShaderResourceView* m_srvBrick2;
 	ID3D11Texture2D* m_texClear;
 	ID3D11ShaderResourceView* m_srvClear;
 	int m_clearTexW, m_clearTexH;

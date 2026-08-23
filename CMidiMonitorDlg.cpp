@@ -1986,7 +1986,7 @@ void CMidiMonitorDlg::OnPaint()
 	const int capH = CCC_GetCustomCaptionHeight(m_hWnd);
 	const int h = rect.Height() - capH;
 	if (w <= 0 || h <= 0) {
-		CCC_CaptionPaint(dc, m_hWnd);
+		CCC_CaptionPaintGdi(dc, m_hWnd);
 		return;
 	}
 	if (!m_frozen)
@@ -2013,7 +2013,7 @@ void CMidiMonitorDlg::OnPaint()
 
 	if (!EnsureFrameBuffer(dc, w, h) || !m_frameDC.GetSafeHdc()) {
 		dc.FillSolidRect(0, capH, w, h, MM_BG);
-		CCC_CaptionPaint(dc, m_hWnd);
+		CCC_CaptionPaintGdi(dc, m_hWnd);
 		return;
 	}
 
@@ -2054,7 +2054,7 @@ void CMidiMonitorDlg::OnPaint()
 	if (sx + sw > w) sw = w - sx;
 	if (sy + sh > h) sh = h - sy;
 	if (sw <= 0 || sh <= 0) {
-		CCC_CaptionPaint(dc, m_hWnd);
+		CCC_CaptionPaintGdi(dc, m_hWnd);
 		return;
 	}
 
@@ -2075,19 +2075,19 @@ void CMidiMonitorDlg::OnPaint()
 				m_chromaCache.UpdateOpaqueRect(m_frameDC.GetSafeHdc(), 0, 0, 0, 0, w, h);
 			m_chromaReady = true;
 			m_chromaCache.BlitFull(dc.GetSafeHdc(), 0, capH, w, h);
-			CCC_CaptionPaint(dc, m_hWnd);
+			CCC_CaptionPaintGdi(dc, m_hWnd);
 			return;
 		}
 	}
 	if (!CCC_IsAeroEnabled() && CCC_AcrylicCaption(m_hWnd) && CCC_IsWin11()) {
 		CCC_BlitStretchOpaque(dc.GetSafeHdc(), 0, capH, w, h,
 			m_frameDC.GetSafeHdc(), 0, 0, w, h);
-		CCC_CaptionPaint(dc, m_hWnd);
+		CCC_CaptionPaintGdi(dc, m_hWnd);
 		return;
 	}
 #endif
 	dc.BitBlt(sx, capH + sy, sw, sh, &m_frameDC, sx, sy, SRCCOPY);
-	CCC_CaptionPaint(dc, m_hWnd);
+	CCC_CaptionPaintGdi(dc, m_hWnd);
 }
 
 BOOL CMidiMonitorDlg::OnEraseBkgnd(CDC* pDC)

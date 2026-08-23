@@ -1718,11 +1718,11 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 		SetWindowText(cap);
 	}
 
-	m_play.SetWindowText(LL14(L"▶ 再生", L"▶ Play", L"▶ Lire", L"▶ Play", L"▶ Play", L"▶ 재생", L"▶ 播放", L"▶ تشغيل", L"▶ Играть", L"▶ Play", L"▶ Play", L"▶ Play", L"▶ Odtwarzaj", L"▶ Oynat"));
-	m_pause.SetWindowText(LL14(L"⏸ 一時停止", L"⏸ Pause", L"⏸ Pause", L"⏸ Pausa", L"⏸ Pausa", L"⏸ 일시정지", L"⏸ 暂停", L"⏸ إيقاف", L"⏸ Пауза", L"⏸ Pause", L"⏸ Pausar", L"⏸ Pauze", L"⏸ Pauza", L"⏸ Duraklat"));
-	m_stop.SetWindowText(LL14(L"■ 停止", L"■ Stop", L"■ Stop", L"■ Stop", L"■ Stop", L"■ 정지", L"■ 停止", L"■ إيقاف", L"■ Стоп", L"■ Stopp", L"■ Parar", L"■ Stop", L"■ Stop", L"■ Durdur"));
-	m_prev.SetWindowText(LL14(L"|◀", L"|◀", L"|◀", L"|◀", L"|◀", L"|◀", L"|◀", L"|◀", L"|◀", L"|◀", L"|◀", L"|◀", L"|◀", L"|◀"));
-	m_next.SetWindowText(LL14(L"▶|", L"▶|", L"▶|", L"▶|", L"▶|", L"▶|", L"▶|", L"▶|", L"▶|", L"▶|", L"▶|", L"▶|", L"▶|", L"▶|"));
+	m_play.SetWindowText(LL14(L"再生", L"Play", L"Lire", L"Play", L"Play", L"재생", L"播放", L"تشغيل", L"Играть", L"Play", L"Play", L"Play", L"Odtwarzaj", L"Oynat"));
+	m_pause.SetWindowText(LL14(L"一時停止", L"Pause", L"Pause", L"Pausa", L"Pausa", L"일시정지", L"暂停", L"إيقاف", L"Пауза", L"Pause", L"Pausar", L"Pauze", L"Pauza", L"Duraklat"));
+	m_stop.SetWindowText(LL14(L"停止", L"Stop", L"Stop", L"Stop", L"Stop", L"정지", L"停止", L"إيقاف", L"Стоп", L"Stopp", L"Parar", L"Stop", L"Stop", L"Durdur"));
+	m_prev.SetWindowText(L"");
+	m_next.SetWindowText(L"");
 	if (m_abA.GetSafeHwnd())
 		m_abA.SetWindowText(L"A");
 	if (m_abB.GetSafeHwnd())
@@ -1837,12 +1837,12 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 	m_grpSnd.ModifyStyle(0, WS_CLIPSIBLINGS);
 	m_grpPl.ModifyStyle(0, WS_CLIPSIBLINGS);
 	// ButtonST(プレイリストと同じアイコン): 一番上/上/下/一番下 と あいまい検索 上/下
-	m_lsup.SetIcon(IDR_SUP);    m_lsup.SetFlat(TRUE);
-	m_up.SetIcon(IDR_UP);       m_up.SetFlat(TRUE);
-	m_down.SetIcon(IDR_DOWN);   m_down.SetFlat(TRUE);
-	m_lsdown.SetIcon(IDR_SDOWN); m_lsdown.SetFlat(TRUE);
-	m_findup.SetIcon(IDR_DOWN); m_findup.SetFlat(TRUE);
-	m_finddown.SetIcon(IDR_UP); m_finddown.SetFlat(TRUE);
+	m_lsup.SetIcon(CCC_LoadSharedIcon(IDI_CTL_CHEVUP), NULL);    m_lsup.SetFlat(TRUE);
+	m_up.SetIcon(CCC_LoadSharedIcon(IDI_CTL_CHEVUP), NULL);       m_up.SetFlat(TRUE);
+	m_down.SetIcon(CCC_LoadSharedIcon(IDI_CTL_CHEVDOWN), NULL);   m_down.SetFlat(TRUE);
+	m_lsdown.SetIcon(CCC_LoadSharedIcon(IDI_CTL_CHEVDOWN), NULL); m_lsdown.SetFlat(TRUE);
+	m_findup.SetIcon(CCC_LoadSharedIcon(IDI_CTL_CHEVUP), NULL); m_findup.SetFlat(TRUE);
+	m_finddown.SetIcon(CCC_LoadSharedIcon(IDI_CTL_CHEVDOWN), NULL); m_finddown.SetFlat(TRUE);
 
 	// サウンド調整スライダー(og の各スライダーと同じ範囲に合わせる)
 	m_dsvol.SetRange(-498, 1); 
@@ -2614,8 +2614,6 @@ BOOL CMediaPlayerDlg::PreTranslateMessage(MSG* pMsg)
 {
 	if (RelayPreTranslateMessage(pMsg))
 		return TRUE;
-	if (CCC_InwomanHotkey(pMsg, this))
-		return TRUE; // 隠し: F12を5回で淫女モード切替
 	// リスト行ツールチップ (CListCtrlA 実装): ツールチップ表示ON時のみリレー
 	if (m_list.GetSafeHwnd() && m_tip.GetCheck())
 		if (m_list.PreTranslateMessage(pMsg))
@@ -4484,19 +4482,22 @@ void CMediaPlayerDlg::ApplyPauseButtonLabel()
 	CString text;
 	if (ps == 1) {
 		if (m_mpBtnShort >= 3)
-			text = LL14(L"▶", L"▶", L"▶", L"▶", L"▶", L"▶", L"▶", L"▶", L"▶", L"▶", L"▶", L"▶", L"▶", L"▶");
+			text.Empty();
 		else
-			text = LL14(L"▶ 再開", L"▶ Resume", L"▶ Reprendre", L"▶ Riprendi", L"▶ Reanudar", L"▶ 재개", L"▶ 恢复", L"▶ استئناف", L"▶ Продолжить", L"▶ Fortsetzen", L"▶ Retomar", L"▶ Hervatten", L"▶ Wznów", L"▶ Sürdür");
+			text = LL14(L"再開", L"Resume", L"Reprendre", L"Riprendi", L"Reanudar", L"재개", L"恢复", L"استئناف", L"Продолжить", L"Fortsetzen", L"Retomar", L"Hervatten", L"Wznów", L"Sürdür");
 	}
 	else if (m_mpBtnShort >= 3) {
-		text = LL14(L"⏸", L"⏸", L"⏸", L"⏸", L"⏸", L"⏸", L"⏸", L"⏸", L"⏸", L"⏸", L"⏸", L"⏸", L"⏸", L"⏸");
+		text.Empty();
 	}
 	else if (m_mpBtnShort >= 2) {
-		text = LL14(L"⏸ 一時停", L"⏸ Pause", L"⏸ Pause", L"⏸ Pausa", L"⏸ Pausa", L"⏸ 일시정", L"⏸ 暂停", L"⏸ إيقاف", L"⏸ Пауза", L"⏸ Pause", L"⏸ Pausa", L"⏸ Pauze", L"⏸ Pauza", L"⏸ Duraklat");
+		text = LL14(L"一時停", L"Pause", L"Pause", L"Pausa", L"Pausa", L"일시정", L"暂停", L"إيقاف", L"Пауза", L"Pause", L"Pausa", L"Pauze", L"Pauza", L"Duraklat");
 	}
 	else {
-		text = LL14(L"⏸ 一時停止", L"⏸ Pause", L"⏸ Pause", L"⏸ Pausa", L"⏸ Pausa", L"⏸ 일시정지", L"⏸ 暂停", L"⏸ إيقاف مؤقت", L"⏸ Пауза", L"⏸ Pause", L"⏸ Pausar", L"⏸ Pauze", L"⏸ Pauza", L"⏸ Duraklat");
+		text = LL14(L"一時停止", L"Pause", L"Pause", L"Pausa", L"Pausa", L"일시정지", L"暂停", L"إيقاف مؤقت", L"Пауза", L"Pause", L"Pausar", L"Pauze", L"Pauza", L"Duraklat");
 	}
+	HICON hIco = CCC_LoadSharedIcon(ps == 1 ? IDI_CTL_PLAY : IDI_CTL_PAUSE, 24);
+	if (hIco)
+		m_pause.SetIcon(hIco, NULL);
 	CString cur;
 	m_pause.GetWindowText(cur);
 	if (cur != text) {

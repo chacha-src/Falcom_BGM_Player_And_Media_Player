@@ -479,20 +479,20 @@ void CS3mHelpDlg::OnPaint()
 		L"PCM-SFX: stappen, items, sleutels, deuren, trappen, portalen, stoten, sloten, vallen, doel. Weergave-menu.",
 		L"SFX PCM: kroki, przedmioty, klucze, drzwi, schody, portale, uderzenia, zamki, pułapki, cel. Menu Widok.",
 		L"PCM SFX: adım, öğe, anahtar, kapı, merdiven, portal, çarpma, kilit, tuzak, hedef. Görünüm menüsü."));
-	line(LL14(L"壁・床・鏡はライセンスフリーの写真テクスチャを256でexeに埋め込んでいます（別ファイル不要）。階テーマ（レンガ／湿った石／錆び鉄／火山岩）に合わせています。",
-		L"Walls, floors and mirrors use license-free photo textures (256px) embedded in the exe (no extra files), matched to each floor theme (brick, wet stone, rusted metal, volcanic).",
-		L"Murs, sols et miroirs : textures photo 256 dans l'exe (brique, pierre humide, métal rouillé, volcanique).",
-		L"Muri, pavimenti e specchi: texture foto 256 nell'exe (mattoni, pietra umida, metallo arrugginito, vulcanico).",
-		L"Paredes, suelos y espejos: texturas foto 256 en el exe (ladrillo, piedra húmeda, metal oxidado, volcánico).",
-		L"벽·바닥·거울은 256 사진 텍스처를 exe에 내장(별도 파일 없음). 층 테마(벽돌/젖은 돌/녹슨 철/화산암)에 맞춤.",
-		L"墙、地板、镜子为256照片纹理，嵌入exe（无需旁路文件），对应各层主题（砖/湿石/锈铁/火山岩）。",
-		L"Walls/floors/mirrors: 256 photo textures in the exe (brick, wet stone, rusted metal, volcanic).",
-		L"Стены, полы и зеркала: фототекстуры 256 в exe (кирпич, мокрый камень, ржавый металл, вулкан).",
-		L"Wände, Böden, Spiegel: Fototexturen 256 in der exe (Ziegel, nasser Stein, Rostmetall, Vulkan).",
-		L"Paredes, chãos e espelhos: texturas foto 256 no exe (tijolo, pedra úmida, metal enferrujado, vulcânico).",
-		L"Muren, vloeren en spiegels: fototexturen 256 in de exe (baksteen, nat gesteente, roestmetaal, vulkanisch).",
-		L"Ściany, podłogi i lustra: tekstury zdjęciowe 256 w exe (cegła, mokry kamień, zardzewiały metal, wulkan).",
-		L"Duvar, zemin ve aynalar: 256 fotoğraf dokuları exe içinde (tuğla, ıslak taş, paslı metal, volkanik)."));
+	line(LL14(L"壁・床・鏡・アイテム・ギミックはライセンスフリーの写真テクスチャ（50枚・256）をexeに埋め込んでいます（別ファイル不要）。階テーマ（レンガ／湿った石／錆び鉄／火山岩）に細部を重ね、地下は室内キューブで壁が見える明るさにし、反射と乱反射があります。",
+		L"Walls, floors, mirrors, items and gizmos use 50 license-free photo textures (256px) embedded in the exe (no extra files): albedo plus detail per floor theme (brick, wet stone, rusted metal, volcanic), a brighter indoor cube in the basement, and reflection plus wrap lighting.",
+		L"Murs, sols, miroirs, objets : 50 textures photo 256 dans l'exe (albédo+détail, cube intérieur plus clair en sous-sol, réflexion).",
+		L"Muri, pavimenti, specchi, oggetti: 50 texture foto 256 nell'exe (albedo+dettaglio, cubo interno più chiaro in cantina, riflessione).",
+		L"Paredes, suelos, espejos, objetos: 50 texturas foto 256 en el exe (albedo+detalle, cubo interior más claro en sótano, reflexión).",
+		L"벽·바닥·거울·아이템·기믹은 라이선스 프리 사진 텍스처 50장(256)을 exe에 내장. 층 테마에 세부, 지하는 실내 큐브로 밝게, 반사·난반사.",
+		L"墙、地板、镜子、道具、机关：50张许可证自由照片纹理（256）嵌入exe。各层主题叠加细节，地下用室内立方体提亮，含反射与漫反射。",
+		L"Walls/floors/mirrors/items: 50 photo textures 256 in the exe (albedo+detail, brighter indoor cube below, reflection).",
+		L"Стены, полы, зеркала, предметы: 50 фототекстур 256 в exe (альбедо+деталь, более светлый внутренний куб в подвале, отражение).",
+		L"Wände, Böden, Spiegel, Items: 50 Fototexturen 256 in der exe (Albedo+Detail, hellerer Innenwürfel im Keller, Reflexion).",
+		L"Paredes, chãos, espelhos, itens: 50 texturas foto 256 no exe (albedo+detalhe, cubo interno mais claro no subsolo, reflexão).",
+		L"Muren, vloeren, spiegels, items: 50 fototexturen 256 in de exe (albedo+detail, helderdere binnenkubus in de kelder, reflectie).",
+		L"Ściany, podłogi, lustra, przedmioty: 50 tekstur zdjęciowych 256 w exe (albedo+szczegół, jaśniejszy sześcian wewnątrz w piwnicy, odbicie).",
+		L"Duvar, zemin, ayna, öğe: 50 adet 256 fotoğraf dokusu exe içinde (albedo+ayrıntı, bodrumda daha aydınlık iç küp, yansıma)."));
 	line(LL14(L"アイテムを拾うと再生パラメータが変わります（テンポ↑↓・ピッチ・前後曲・音量・EQ／平坦・リバーブ・クロスフェード・ランダム切替）。閉じるとテンポ/ピッチは復帰。",
 		L"Pickups tweak playback (tempo↑↓, pitch, prev/next, volume, EQ/flatten, reverb, crossfade, random). Tempo/pitch restore on close.",
 		L"Les objets changent lecture (tempo, hauteur, pistes, volume, EQ, réverb, fondu, aléatoire). Tempo/hauteur à la fermeture.",
@@ -802,7 +802,9 @@ CS3mView::CS3mView()
 	, m_psSsr(NULL), m_psDof(NULL), m_psFinal(NULL), m_ilPatch(NULL), m_ilSolid(NULL), m_ilHud(NULL)
 	, m_cbFrame(NULL), m_vbDyn(NULL), m_vbHud(NULL), m_vbDynBytes(6*1024*1024), m_vbHudBytes(512*1024)
 	, m_cpuDynScratch(NULL), m_cpuDynScratchBytes(0), m_cpuHudScratch(NULL), m_cpuHudScratchBytes(0)
-	, m_texEnv(NULL), m_srvEnv(NULL)
+	, m_texEnv(NULL), m_srvEnv(NULL), m_texEnvIn(NULL), m_srvEnvIn(NULL)
+	, m_texItem(NULL), m_srvItem(NULL), m_texGimmick(NULL), m_srvGimmick(NULL)
+	, m_texGlass(NULL), m_srvGlass(NULL), m_texBrick2(NULL), m_srvBrick2(NULL)
 	, m_texMirrorWall(NULL), m_srvMirrorWall(NULL), m_texMirrorFloor(NULL), m_srvMirrorFloor(NULL)
 	, m_texClear(NULL), m_srvClear(NULL), m_clearTexW(0), m_clearTexH(0), m_texMap(NULL), m_srvMap(NULL), m_texTip(NULL), m_srvTip(NULL), m_tipW(0), m_tipH(0), m_texBadge(NULL), m_srvBadge(NULL), m_badgeW(0), m_badgeH(0)
 	, m_texCallout(NULL), m_srvCallout(NULL), m_calloutW(0), m_calloutH(0), m_calloutN(0)
@@ -813,7 +815,9 @@ CS3mView::CS3mView()
 {
 	for (int i = 0; i < S3M_THEME_N; i++) {
 		m_texBrick[i] = NULL; m_srvBrick[i] = NULL;
+		m_texBrickD[i] = NULL; m_srvBrickD[i] = NULL;
 		m_texFloor[i] = NULL; m_srvFloor[i] = NULL;
+		m_texFloorD[i] = NULL; m_srvFloorD[i] = NULL;
 	}
 	for (int i = 0; i < S3M_MIRROR_N; i++) {
 		m_mirrorTex[i] = NULL;
@@ -868,11 +872,13 @@ BOOL CS3mView::CreateShaders()
 		"float2(0.962,-0.195),float2(0.473,-0.480),float2(0.519,0.767),float2(0.185,-0.893),"
 		"float2(0.507,0.064),float2(0.896,0.412),float2(-0.322,-0.933),float2(-0.792,-0.598)};"
 		"float s=0;const float t=2.0/1024.0;[unroll]for(int k=0;k<12;k++)s+=ShadowMap.SampleCmpLevelZero(SCmp,uv+o[k]*t,z);"
-		"s/=12.0;return pow(saturate(s),1.35);}"
-		"float ShadeLit(float ndl,float sh){float d=saturate(ndl);float amb=.30;return lerp(amb,max(d,amb*.85),sh);}"
+		"s/=12.0;return pow(saturate(s),1.12);}"
+		"float ShadeLit(float ndl,float sh){float d=saturate(ndl);float wrap=saturate(ndl*.52+.48);float amb=.48+.11*saturate(Eye.w*.5);"
+		"float lit=lerp(amb,max(d,amb*.92),sh);return saturate(lit*.62+wrap*wrap*.48);}"
 		"float4 PlanarMir(float3 w,row_major float4x4 RVP,Texture2D M){float4 rp=mul(float4(w,1),RVP);float iw=max(rp.w,1e-5);float2 muv=rp.xy/iw*float2(.5,-.5)+.5;"
 		"float mb=(rp.w>0)*saturate(min(min(muv.x,1-muv.x),min(muv.y,1-muv.y))*6);return float4(M.Sample(SL,saturate(muv)).rgb,mb);}"
 		"float4 PSW(D i):SV_Target{float4 a=T0.Sample(SL,i.uv*2.5)*i.c;float h=T0.Sample(SL,i.uv*2.5).a;"
+		"float3 det=T1.Sample(SL,i.uv*8.2).rgb;a.rgb=lerp(a.rgb,saturate(a.rgb*det*1.28),0.46);"
 		"float hx=T0.Sample(SL,i.uv*2.5+float2(.004,0)).a-h;float hy=T0.Sample(SL,i.uv*2.5+float2(0,.004)).a-h;"
 		"float nz=fbm(i.uv*250.+Misc.w*.02)*0.1;"
 		"float3 n=normalize(i.n+float3(hx+nz,hy+nz,0)*4.2);float3 l=normalize(LightDir.xyz);float sh=ShadowAt(i.w,n);"
@@ -885,8 +891,8 @@ BOOL CS3mView::CreateShaders()
 		"float4 mir=PlanarMir(i.w,ReflectVP,MirrorMap);float4 mir2=PlanarMir(i.w+rd*1.35,ReflectVP,MirrorMap);if(mir2.a>mir.a)mir=mir2;"
 		"float mw=metal*useMir*max(mir.a,.35);env=lerp(env,mir.rgb,mw);"
 		"float pulse=.5+.5*sin(Misc.w*1.65+i.w.x*.4+i.w.z*.3);"
-		"float occ=lerp(0.5,1.0,a.a);"
-		"float3 col=lerp(a.rgb*nd*occ,mir.rgb*(.3+.7*a.rgb),mw*.92)+sun*(sp*.4+spark*.8)+env*(.05+fr*.10)*(1-mw*.55)*lerp(.45,1,sh);"
+		"float occ=lerp(0.84,1.08,a.a);if(Eye.w>0.5)occ=lerp(0.94,1.14,a.a);"
+		"float3 col=lerp(a.rgb*nd*occ,mir.rgb*(.3+.7*a.rgb),mw*.92)+sun*(sp*.5+spark*.9)+env*(.12+fr*.28)*(1-mw*.55)*lerp(.55,1,sh);"
 		"col+=sun*(sp*.55+spark*1.1)*doorM*(.55+.45*pulse);col+=float3(1,.92,.35)*(spark*1.6+sp*.4)*keyM*(.6+.4*pulse);"
 		"col=lerp(col,env*(.4+.6*a.rgb)+mir.rgb*.5,keyM*.35*useMir);"
 		"float d=length(Eye.xyz-i.w),fg=saturate((d-Fog.x)/max(.01,Fog.y-Fog.x));fg=saturate(fg+max(0,Fog.w-i.w.y)*Fog.z);fg=fg*fg*(3-2*fg);"
@@ -905,10 +911,17 @@ BOOL CS3mView::CreateShaders()
 		"float mw=mirror*useMir*saturate(max(mir.a,.82)+mirror*.15);"
 		"mw=max(mw,keyM*useMir*saturate(max(mir.a,.7)+.25));"
 		"float3 chrome=mir.rgb*1.15+env*.35;"
-		"float3 lit=i.c.rgb*nd;"
-		"float wet=.5+.5*sin(Misc.w*1.4+i.w.x+i.w.z);float wetSp=pow(saturate(dot(reflect(-l,n),v)),90)*sh*(.08+.07*wet)*(1-mirror);"
+		"float trapK=saturate(1.-abs(i.c.a-.44)*16.);float itemK=saturate(1.-abs(i.c.a-1.15)*18.);"
+		"float glassK=saturate((i.c.a-1.18)*8.);float woodK=saturate(1.-abs(i.c.a-1.05)*40.);"
+		"float prop=saturate(trapK+itemK+glassK+woodK);"
+		"float3 tex=T0.Sample(SL,lerp(i.uv*4.2,i.uv,prop)).rgb;float3 det=T1.Sample(SL,lerp(i.uv*11.0,i.uv,prop)).rgb;"
+		"float tm=saturate(dot(tex,tex)*3.);float dm=saturate(dot(det,det)*3.);"
+		"float3 albedo=lerp(i.c.rgb,saturate(tex*lerp(float3(1,1,1),det*1.32,0.42*dm)),0.64*tm);"
+		"albedo=lerp(albedo,saturate(lerp(tex,det,trapK)*i.c.rgb*1.15),prop);"
+		"float3 lit=albedo*nd;"
+		"float wet=.5+.5*sin(Misc.w*1.4+i.w.x+i.w.z);float wetSp=pow(saturate(dot(reflect(-l,n),v)),90)*sh*(.10+.08*wet)*(1-mirror);"
 		"float glowP=.55+.45*sin(Misc.w*2.1+i.w.y*3);"
-		"float3 c=lerp(lit,chrome*(.12+.88*saturate(i.c.rgb+.25)),mw*(.98-.18*glass))+env*((.08+fr*.35)*(1-mw*.9)+mirror*.22*(1-glass))*lerp(.4,1,sh)+float3(1,.96,.9)*sp*(.35+mirror*1.4)+float3(.7,.9,1)*pow(fr,1.2)*mirror*.45;"
+		"float3 c=lerp(lit,chrome*(.12+.88*saturate(i.c.rgb+.25)),mw*(.98-.18*glass))+env*((.14+fr*.42)*(1-mw*.9)+mirror*.28*(1-glass))*lerp(.5,1,sh)+float3(1,.96,.9)*sp*(.42+mirror*1.4)+float3(.7,.9,1)*pow(fr,1.2)*mirror*.5;"
 		"c=lerp(c,env*(.45+.55*saturate(i.c.rgb+.2))+mir.rgb*.55,keyM*(.42+.28*fr)*useMir);"
 		"c+=float3(.85,.95,1)*wetSp;c+=float3(1,.9,.35)*sp*keyM*(.5+.5*glowP)*1.2;c+=float3(.75,.7,.65)*sp*doorM*.8;"
 		"c+=i.c.rgb*(.04+.05*glowP)*saturate(i.c.a-.35)*(1-mirror)*.35;"
@@ -932,25 +945,32 @@ BOOL CS3mView::CreateShaders()
 		"c+=(T0.Sample(SL,i.uv+float2(px.x,0))+T0.Sample(SL,i.uv-float2(px.x,0))+T0.Sample(SL,i.uv+float2(0,px.y))+T0.Sample(SL,i.uv-float2(0,px.y)))*.13;"
 		"c+=(T0.Sample(SL,i.uv+px)+T0.Sample(SL,i.uv-px)+T0.Sample(SL,i.uv+float2(px.x,-px.y))+T0.Sample(SL,i.uv+float2(-px.x,px.y)))*.05;"
 		"return c;}"
-		"float4 FIN(Q i):SV_Target{float4 c=T0.Sample(SL,i.uv);if(Misc.z>8.f){c.a*=saturate(Misc.y);return c;}float v=saturate(1-dot((i.uv-.5)*1.05,(i.uv-.5)*1.05));c.rgb*=lerp(.88,1.06,v);"
-		"float th=Eye.w;float3 tone=float3(1.02,.98,.94);if(th>2.5)tone=float3(.98,.92,.90);else if(th>1.5)tone=float3(1.02,.96,.90);else if(th>.5)tone=float3(.94,.98,1.04);"
+		"float4 FIN(Q i):SV_Target{float4 c=T0.Sample(SL,i.uv);if(Misc.z>8.f){c.a*=saturate(Misc.y);return c;}float v=saturate(1-dot((i.uv-.5)*1.05,(i.uv-.5)*1.05));c.rgb*=lerp(.92,1.08,v);"
+		"float th=Eye.w;float3 tone=float3(1.05,1.02,.98);if(th>2.5)tone=float3(1.12,1.04,.98);else if(th>1.5)tone=float3(1.10,1.05,1.00);else if(th>.5)tone=float3(1.08,1.10,1.14);"
 		"c.rgb=saturate(c.rgb*tone);return c;}";
 	ID3DBlob *b[11]={0}, *err=NULL;
 	const char* entries[11]={"VST","HST","DST","PSW","VSS","PSS","VSH","PSH","VSQ","SSR","DOFP"};
 	const char* profiles[11]={"vs_5_0","hs_5_0","ds_5_0","ps_5_0","vs_5_0","ps_5_0","vs_5_0","ps_5_0","vs_5_0","ps_5_0","ps_5_0"};
-	for(int i=0;i<11;i++) {
-		if(FAILED(D3DCompile(hlsl,strlen(hlsl),NULL,NULL,NULL,entries[i],profiles[i],D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&b[i],&err))) {
-			S3M_RELEASE(err); for(int j=0;j<11;j++) S3M_RELEASE(b[j]); return FALSE;
-		}
+	auto compile=[&](const char* entry,const char* prof,ID3DBlob** out)->HRESULT{
 		S3M_RELEASE(err);
+		HRESULT chr=D3DCompile(hlsl,strlen(hlsl),NULL,NULL,NULL,entry,prof,D3DCOMPILE_OPTIMIZATION_LEVEL3,0,out,&err);
+		if(FAILED(chr)){ S3M_RELEASE(err); chr=D3DCompile(hlsl,strlen(hlsl),NULL,NULL,NULL,entry,prof,D3DCOMPILE_OPTIMIZATION_LEVEL1,0,out,&err); }
+		if(FAILED(chr)) m_dxFailHr=chr;
+		S3M_RELEASE(err);
+		return chr;
+	};
+	for(int i=0;i<11;i++) {
+		if(FAILED(compile(entries[i],profiles[i],&b[i]))) {
+			for(int j=0;j<11;j++) S3M_RELEASE(b[j]); return FALSE;
+		}
 	}
 	ID3DBlob* bf=NULL;
-	if(FAILED(D3DCompile(hlsl,strlen(hlsl),NULL,NULL,NULL,"FIN","ps_5_0",D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&bf,&err))) {
-		for(int i=0;i<11;i++) S3M_RELEASE(b[i]); S3M_RELEASE(err); return FALSE;
+	if(FAILED(compile("FIN","ps_5_0",&bf))) {
+		for(int i=0;i<11;i++) S3M_RELEASE(b[i]); return FALSE;
 	}
 	ID3DBlob* bline=NULL;
-	if(FAILED(D3DCompile(hlsl,strlen(hlsl),NULL,NULL,NULL,"PSLINE","ps_5_0",D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&bline,&err))) {
-		for(int i=0;i<11;i++) S3M_RELEASE(b[i]); S3M_RELEASE(bf); S3M_RELEASE(err); return FALSE;
+	if(FAILED(compile("PSLINE","ps_5_0",&bline))) {
+		for(int i=0;i<11;i++) S3M_RELEASE(b[i]); S3M_RELEASE(bf); return FALSE;
 	}
 	HRESULT hr=S_OK;
 	hr|=m_dev->CreateVertexShader(b[0]->GetBufferPointer(),b[0]->GetBufferSize(),NULL,&m_vsTess);
@@ -1106,11 +1126,60 @@ BOOL CS3mView::CreateProcTextures()
 		D3D11_SUBRESOURCE_DATA sd={p,W*4,0};
 		if(FAILED(m_dev->CreateTexture2D(&d,&sd,&m_texFloor[th]))||FAILED(m_dev->CreateShaderResourceView(m_texFloor[th],NULL,&m_srvFloor[th]))){delete[] p;return FALSE;}
 	}
-	d.Width=128;d.Height=128;d.ArraySize=6;d.MiscFlags=D3D11_RESOURCE_MISC_TEXTURECUBE;D3D11_SUBRESOURCE_DATA cs[6]={};
-	DWORD* cube=new DWORD[128*128*6];
-	for(int f=0;f<6;f++){for(int y=0;y<128;y++)for(int x=0;x<128;x++){float t=(float)y/127.f;BYTE r=(BYTE)(110+70*(1-t)),g=(BYTE)(145+55*(1-t)),b=(BYTE)(175+40*(1-t));if(f==2){r=(BYTE)(85+35*t);g=(BYTE)(120+45*t);b=(BYTE)(60+25*t);}cube[(f*128+y)*128+x]=0xff000000|((DWORD)r<<16)|((DWORD)g<<8)|b;}cs[f].pSysMem=cube+f*128*128; cs[f].SysMemPitch=128*4;}
-	if(FAILED(m_dev->CreateTexture2D(&d,cs,&m_texEnv))||FAILED(m_dev->CreateShaderResourceView(m_texEnv,NULL,&m_srvEnv))){delete[] cube;delete[] p;return FALSE;}
-	delete[] cube;delete[] p;
+	static const int kWallDetRes[S3M_THEME_N]={IDR_S3TEX_M_WALL0_D,IDR_S3TEX_M_WALL1_D,IDR_S3TEX_M_WALL2_D,IDR_S3TEX_M_WALL3_D};
+	static const int kFloorDetRes[S3M_THEME_N]={IDR_S3TEX_M_FLOOR0_D,IDR_S3TEX_M_FLOOR1_D,IDR_S3TEX_M_FLOOR2_D,IDR_S3TEX_M_FLOOR3_D};
+	for(int th=0;th<S3M_THEME_N;th++){
+		if(Soft3DTexLoadPngRes(kWallDetRes[th],p,W,H)){
+			D3D11_SUBRESOURCE_DATA sd={p,W*4,0};
+			if(FAILED(m_dev->CreateTexture2D(&d,&sd,&m_texBrickD[th]))||FAILED(m_dev->CreateShaderResourceView(m_texBrickD[th],NULL,&m_srvBrickD[th]))){delete[] p;return FALSE;}
+		}
+		if(Soft3DTexLoadPngRes(kFloorDetRes[th],p,W,H)){
+			D3D11_SUBRESOURCE_DATA sd={p,W*4,0};
+			if(FAILED(m_dev->CreateTexture2D(&d,&sd,&m_texFloorD[th]))||FAILED(m_dev->CreateShaderResourceView(m_texFloorD[th],NULL,&m_srvFloorD[th]))){delete[] p;return FALSE;}
+		}
+	}
+	auto up2=[&](int id, ID3D11Texture2D** tex, ID3D11ShaderResourceView** srv){
+		if(!Soft3DTexLoadPngRes(id,p,W,H)) return;
+		D3D11_SUBRESOURCE_DATA sd={p,(UINT)(W*4),0};
+		if(FAILED(m_dev->CreateTexture2D(&d,&sd,tex))||FAILED(m_dev->CreateShaderResourceView(*tex,NULL,srv))){
+			S3M_RELEASE(*srv); S3M_RELEASE(*tex);
+		}
+	};
+	up2(IDR_S3TEX_M_ITEM,&m_texItem,&m_srvItem);
+	up2(IDR_S3TEX_M_GIMMICK,&m_texGimmick,&m_srvGimmick);
+	up2(IDR_S3TEX_M_GLASS,&m_texGlass,&m_srvGlass);
+	up2(IDR_S3TEX_M_BRICK2,&m_texBrick2,&m_srvBrick2);
+	{
+		const int EW=256,EH=256;
+		DWORD* cube=new (std::nothrow) DWORD[EW*EH*6];
+		if(!cube){delete[] p;return FALSE;}
+		BOOL photo=Soft3DTexLoadPngRes(IDR_S3TEX_R_ENV,cube,EW,EH*6);
+		int cw=photo?EW:128, ch=photo?EH:128;
+		if(!photo){
+			delete[] cube;
+			cube=new (std::nothrow) DWORD[128*128*6];
+			if(!cube){delete[] p;return FALSE;}
+			for(int f=0;f<6;f++){for(int y=0;y<128;y++)for(int x=0;x<128;x++){float t=(float)y/127.f;BYTE r=(BYTE)(110+70*(1-t)),g=(BYTE)(145+55*(1-t)),b=(BYTE)(175+40*(1-t));if(f==2){r=(BYTE)(85+35*t);g=(BYTE)(120+45*t);b=(BYTE)(60+25*t);}cube[(f*128+y)*128+x]=0xff000000|((DWORD)r<<16)|((DWORD)g<<8)|b;}}
+		}
+		d.Width=cw;d.Height=ch;d.ArraySize=6;d.MiscFlags=D3D11_RESOURCE_MISC_TEXTURECUBE;
+		D3D11_SUBRESOURCE_DATA cs[6]={};
+		for(int f=0;f<6;f++){cs[f].pSysMem=cube+f*cw*ch;cs[f].SysMemPitch=cw*4;cs[f].SysMemSlicePitch=cw*ch*4;}
+		if(FAILED(m_dev->CreateTexture2D(&d,cs,&m_texEnv))||FAILED(m_dev->CreateShaderResourceView(m_texEnv,NULL,&m_srvEnv))){delete[] cube;delete[] p;return FALSE;}
+		{
+			DWORD* cubeIn=new (std::nothrow) DWORD[256*256*6];
+			if(cubeIn && Soft3DTexLoadPngRes(IDR_S3TEX_M_ENV,cubeIn,256,256*6)){
+				D3D11_TEXTURE2D_DESC ed=d; ed.Width=256; ed.Height=256; ed.ArraySize=6; ed.MiscFlags=D3D11_RESOURCE_MISC_TEXTURECUBE;
+				D3D11_SUBRESOURCE_DATA ics[6]={};
+				for(int f=0;f<6;f++){ics[f].pSysMem=cubeIn+f*256*256;ics[f].SysMemPitch=256*4;ics[f].SysMemSlicePitch=256*256*4;}
+				if(FAILED(m_dev->CreateTexture2D(&ed,ics,&m_texEnvIn))||FAILED(m_dev->CreateShaderResourceView(m_texEnvIn,NULL,&m_srvEnvIn))){
+					S3M_RELEASE(m_srvEnvIn); S3M_RELEASE(m_texEnvIn);
+				}
+			}
+			delete[] cubeIn;
+		}
+		delete[] cube;
+	}
+	delete[] p;
 	// 鏡壁／鏡床：滑らかな銀シアン鏡＋細い傷（割れすぎない）
 	{
 		const int MW=256,MH=256;
@@ -1457,9 +1526,12 @@ BOOL CS3mView::BakeCalloutAtlas(const wchar_t* const* labels, int nLabels)
 void CS3mView::ReleaseDx()
 {
 	m_ready=FALSE;if(m_imm){m_imm->ClearState();m_imm->Flush();}
-	ReleaseClearTexture();ReleaseTipTexture();ReleaseBadgeTexture();ReleaseFloorBarTexture();ReleaseCalloutTexture();S3M_RELEASE(m_srvMap);S3M_RELEASE(m_texMap);S3M_RELEASE(m_srvEnv);S3M_RELEASE(m_texEnv);
+	ReleaseClearTexture();ReleaseTipTexture();ReleaseBadgeTexture();ReleaseFloorBarTexture();ReleaseCalloutTexture();S3M_RELEASE(m_srvMap);S3M_RELEASE(m_texMap);
+	S3M_RELEASE(m_srvBrick2);S3M_RELEASE(m_texBrick2);S3M_RELEASE(m_srvGlass);S3M_RELEASE(m_texGlass);
+	S3M_RELEASE(m_srvGimmick);S3M_RELEASE(m_texGimmick);S3M_RELEASE(m_srvItem);S3M_RELEASE(m_texItem);
+	S3M_RELEASE(m_srvEnvIn);S3M_RELEASE(m_texEnvIn);S3M_RELEASE(m_srvEnv);S3M_RELEASE(m_texEnv);
 	S3M_RELEASE(m_srvMirrorWall);S3M_RELEASE(m_texMirrorWall);S3M_RELEASE(m_srvMirrorFloor);S3M_RELEASE(m_texMirrorFloor);
-	for(int i=0;i<S3M_THEME_N;i++){S3M_RELEASE(m_srvFloor[i]);S3M_RELEASE(m_texFloor[i]);S3M_RELEASE(m_srvBrick[i]);S3M_RELEASE(m_texBrick[i]);}
+	for(int i=0;i<S3M_THEME_N;i++){S3M_RELEASE(m_srvFloorD[i]);S3M_RELEASE(m_texFloorD[i]);S3M_RELEASE(m_srvFloor[i]);S3M_RELEASE(m_texFloor[i]);S3M_RELEASE(m_srvBrickD[i]);S3M_RELEASE(m_texBrickD[i]);S3M_RELEASE(m_srvBrick[i]);S3M_RELEASE(m_texBrick[i]);}
 	S3M_RELEASE(m_bsAdd);S3M_RELEASE(m_bsAlpha);S3M_RELEASE(m_bsOpaque);S3M_RELEASE(m_dssOff);S3M_RELEASE(m_dssRead);S3M_RELEASE(m_dssWrite);S3M_RELEASE(m_rsShadow);S3M_RELEASE(m_rsNoCull);S3M_RELEASE(m_rsSolid);S3M_RELEASE(m_sampCmp);S3M_RELEASE(m_sampPoint);S3M_RELEASE(m_sampLin);
 	S3M_RELEASE(m_vbHud);S3M_RELEASE(m_vbDyn);S3M_RELEASE(m_cbFrame);S3M_RELEASE(m_ilHud);S3M_RELEASE(m_ilSolid);S3M_RELEASE(m_ilPatch);
 	delete[] m_cpuDynScratch; m_cpuDynScratch = NULL; m_cpuDynScratchBytes = 0;
@@ -5141,9 +5213,9 @@ void CSoft3DMazeDlg::RenderScene()
 		const int thFog=ThemeOfFloor((m_floorFx==FLOORFX_IN)?m_stairFrom:m_floor);
 		float fogNear=5.5f,fogFar=16.f,fogH=.04f,fogY=.15f;
 		if(thFog<=0){fogNear=5.5f;fogFar=16.f;fogH=.04f;fogY=.15f;}
-		else if(thFog==1){fogNear=4.f;fogFar=13.f;fogH=.07f;fogY=.2f;}
-		else if(thFog==2){fogNear=5.f;fogFar=15.f;fogH=.05f;fogY=.1f;}
-		else{fogNear=3.5f;fogFar=11.f;fogH=.09f;fogY=.25f;}
+		else if(thFog==1){fogNear=6.2f;fogFar=19.f;fogH=.028f;fogY=.10f;}
+		else if(thFog==2){fogNear=6.5f;fogFar=20.f;fogH=.025f;fogY=.08f;}
+		else{fogNear=5.8f;fogFar=17.5f;fogH=.035f;fogY=.10f;}
 		if(m_darkT>0.f){
 			const float k=min(1.f,m_darkT/1.2f);
 			fogNear=max(2.f,fogNear*(1.f-k*.72f));
@@ -5235,6 +5307,40 @@ void CSoft3DMazeDlg::RenderScene()
 		quadUV(xa,ya,za,xb,ya,za,xb,yb,za,xa,yb,za,0,0,-1,0,0,1,1,r,g,b,a);
 		quadUV(xb,ya,zb,xa,ya,zb,xa,yb,zb,xb,yb,zb,0,0,1,0,0,1,1,r,g,b,a);
 	};
+	auto emitSphere=[&](float cx,float cy,float cz,float rx,float ry,float rz,int nl,int nb,float r,float g,float b,float a,float u0,float v0,float u1,float v1){
+		if(nl<3)nl=3; if(nb<2)nb=2;
+		for(int i=0;i<nl;i++){
+			const float a0=(float)i*(6.2831853f/(float)nl), a1=(float)(i+1)*(6.2831853f/(float)nl);
+			for(int j=0;j<nb;j++){
+				const float b0=-1.5707963f+(float)j*(3.14159265f/(float)nb);
+				const float b1=b0+(3.14159265f/(float)nb);
+				auto P=[&](float an,float bn,float& x,float& y,float& z,float& nx,float& ny,float& nz,float& u,float& vv){
+					const float cb=cosf(bn),sb=sinf(bn),ca=cosf(an),sa=sinf(an);
+					nx=cb*ca; ny=sb; nz=cb*sa;
+					x=cx+nx*rx; y=cy+ny*ry; z=cz+nz*rz;
+					u=u0+(u1-u0)*an*(1.f/6.2831853f);
+					vv=v0+(v1-v0)*(bn+1.5707963f)*(1.f/3.14159265f);
+				};
+				float x0,y0,z0,n0x,n0y,n0z,uA,vA, x1,y1,z1,n1x,n1y,n1z,uB,vB, x2,y2,z2,n2x,n2y,n2z,uC,vC, x3,y3,z3,n3x,n3y,n3z,uD,vD;
+				P(a0,b0,x0,y0,z0,n0x,n0y,n0z,uA,vA); P(a1,b0,x1,y1,z1,n1x,n1y,n1z,uB,vB);
+				P(a1,b1,x2,y2,z2,n2x,n2y,n2z,uC,vC); P(a0,b1,x3,y3,z3,n3x,n3y,n3z,uD,vD);
+				tri(x0,y0,z0,x1,y1,z1,x2,y2,z2,(n0x+n1x+n2x)/3.f,(n0y+n1y+n2y)/3.f,(n0z+n1z+n2z)/3.f,uA,vA,uB,vB,uC,vC,r,g,b,a);
+				tri(x0,y0,z0,x2,y2,z2,x3,y3,z3,(n0x+n2x+n3x)/3.f,(n0y+n2y+n3y)/3.f,(n0z+n2z+n3z)/3.f,uA,vA,uC,vC,uD,vD,r,g,b,a);
+			}
+		}
+	};
+	auto emitCone=[&](float cx,float cy,float cz,float rBase,float h,int n,float r,float g,float b,float a,float u0,float v0,float u1,float v1){
+		if(n<3)n=3;
+		const float tx=cx,ty=cy+h,tz=cz;
+		for(int i=0;i<n;i++){
+			const float a0=(float)i*(6.2831853f/(float)n), a1=(float)(i+1)*(6.2831853f/(float)n);
+			const float x0=cx+cosf(a0)*rBase, z0=cz+sinf(a0)*rBase;
+			const float x1=cx+cosf(a1)*rBase, z1=cz+sinf(a1)*rBase;
+			float nx=(x0+x1)*.5f-cx, nz=(z0+z1)*.5f-cz; const float nl=sqrtf(nx*nx+h*h+nz*nz)+1e-5f;
+			const float uA=u0+(u1-u0)*(float)i/(float)n, uB=u0+(u1-u0)*(float)(i+1)/(float)n, uM=(uA+uB)*.5f;
+			tri(x0,cy,z0,x1,cy,z1,tx,ty,tz,nx/nl,h/nl,nz/nl,uA,v1,uB,v1,uM,v0,r,g,b,a);
+		}
+	};
 	const float wallH=1.20f,passH=0.08f,drawDist=28.f,rad=drawDist+2.f;
 	// 遠クリップ相当までNDCでは落とさないが、頂点溢れ防止のため走査半径は drawDist に制限
 	const int ix0=max(0,WorldToGridAxis(ex-rad)-1),ix1=min(m_n-1,WorldToGridAxis(ex+rad)+1);
@@ -5286,16 +5392,16 @@ void CSoft3DMazeDlg::RenderScene()
 	struct Layer{UINT fBeg,nF,mfBeg,nMF,wBeg,nW,mwBeg,nMW;int th;};
 	Layer layers[4];int nLay=0;
 	auto themeFloorRGB=[&](int th,float k,float& r,float& g,float& b){
-		if(th<=0){r=.72f*k;g=.58f*k;b=.42f*k;}
-		else if(th==1){r=.42f*k;g=.55f*k;b=.72f*k;}
-		else if(th==2){r=.62f*k;g=.48f*k;b=.38f*k;}
-		else{r=.48f*k;g=.28f*k;b=.24f*k;}
+		if(th<=0){r=.78f*k;g=.64f*k;b=.48f*k;}
+		else if(th==1){r=.66f*k;g=.76f*k;b=.90f*k;}
+		else if(th==2){r=.82f*k;g=.70f*k;b=.58f*k;}
+		else{r=.74f*k;g=.52f*k;b=.44f*k;}
 	};
 	auto themeWallTint=[&](int th,float& r,float& g,float& b){
-		if(th<=0){r=1.f;g=1.f;b=1.f;}
-		else if(th==1){r=.78f;g=.88f;b=1.05f;}
-		else if(th==2){r=1.05f;g=.88f;b=.72f;}
-		else{r=1.08f;g=.72f;b=.62f;}
+		if(th<=0){r=1.04f;g=1.04f;b=1.02f;}
+		else if(th==1){r=.94f;g=1.02f;b=1.16f;}
+		else if(th==2){r=1.14f;g=1.00f;b=.90f;}
+		else{r=1.16f;g=.92f;b=.82f;}
 	};
 	auto emitWallCell=[&](int f,float yBias,int x,int z,BOOL fullVis,BOOL mirror,float& wr,float& wg,float& wb){
 		if(fullVis){
@@ -5346,7 +5452,7 @@ void CSoft3DMazeDlg::RenderScene()
 			if(fullVis&&!vis(x,z))continue;
 			float x0=cellX0(x),x1=x0+cellW(x),z0=cellZ0(z),z1=z0+cellD(z);
 			if(c!=CELL_STAIRS_DOWN&&c!=CELL_STAIRS_UP){
-				float k=VisitAtF(f,x,z)?1.f:.82f;float r,g,b;themeFloorRGB(L.th,k,r,g,b);
+				float k=VisitAtF(f,x,z)?1.f:.90f;float r,g,b;themeFloorRGB(L.th,k,r,g,b);
 				const float y1=yBias+passH;
 				quad(x0,y1,z0,x1,y1,z0,x1,y1,z1,x0,y1,z1,0,1,0,r,g,b,1.f);
 			}
@@ -5438,7 +5544,7 @@ void CSoft3DMazeDlg::RenderScene()
 			float dx=cellCX(x)-ex,dz=cellCZ(z)-ez;xl[nc++]={dx*fx+dz*fz,x,z,c};}}
 	for(int i=1;i<nc;i++){XL q=xl[i];int j=i-1;while(j>=0&&xl[j].d<q.d){xl[j+1]=xl[j];j--;}xl[j+1]=q;}
 	transBeg=nFloor+nWall;phase=2;
-	struct FxRec{UINT beg,n;float cx,cy,cz,d;float nx,ny,nz;BOOL plane;BOOL wantMir;};FxRec fxObj[64];int nFx=0;int fxMirOf[64];
+	struct FxRec{UINT beg,n;float cx,cy,cz,d;float nx,ny,nz;BOOL plane;BOOL wantMir;int texKind;};FxRec fxObj[64];int nFx=0;int fxMirOf[64];
 	struct CallRec{float wx,wy,wz,d;BYTE c;};CallRec calls[64];int nCall=0;
 	for(int i=0;i<64;i++)fxMirOf[i]=-1;
 	const int plx=(int)floorf(m_px),plz=(int)floorf(m_pz);
@@ -5448,7 +5554,7 @@ void CSoft3DMazeDlg::RenderScene()
 			if(nFx>=64)continue;
 			const UINT b=nFloor+nWall+nTrans;
 			// ガラス：反射ありだが通れると誤解しないよう濃いアルファ（a>1.18 → glass）
-			float rr=.22f,gg=.42f,bb=.58f,a=1.20f;
+			float rr=.22f,gg=.42f,bb=.58f,a=1.28f;
 			float wnx=0.f,wnz=0.f;float wpx=ocx,wpz=ocz;
 			float fr=.40f,fg=.38f,fb=.36f,fa=.98f,t=.022f;
 			if(cellW(x)<cellD(z)){
@@ -5470,13 +5576,13 @@ void CSoft3DMazeDlg::RenderScene()
 				quad(x0,0,z1,x1,0,z1,x1,t,z1,x0,t,z1,0,0,1,fr,fg,fb,fa);
 				quad(x0,wallH-t,z1,x1,wallH-t,z1,x1,wallH,z1,x0,wallH,z1,0,0,1,fr,fg,fb,fa);
 			}
-			fxObj[nFx++]={b,nFloor+nWall+nTrans-b,wpx,wallH*.5f,wpz,xl[i].d,wnx,0.f,wnz,TRUE,TRUE};
+			fxObj[nFx++]={b,nFloor+nWall+nTrans-b,wpx,wallH*.5f,wpz,xl[i].d,wnx,0.f,wnz,TRUE,TRUE,2};
 		}else if(c==CELL_STAIRS_DOWN||c==CELL_STAIRS_UP){
 			if(nFx>=64)continue;
 			// 斜め段：相手マス方向へ伸びる半透明ステップ（下／上が見えやすい）
 			const UINT b=nFloor+nWall+nTrans;const BOOL dn=(c==CELL_STAIRS_DOWN);
 			const float rr=dn?1.f:.22f,gg=dn?.58f:.86f,bb=dn?.16f:1.f;
-			const float stairA=.48f;
+			const float stairA=.70f;
 			int pf=fxFloor,px=x,pz=z;
 			if(!FindStairPartner(fxFloor,x,z,pf,px,pz)){px=x;pz=z;}
 			const float ax=cellCX(x),az=cellCZ(z),bx=cellCX(px),bz=cellCZ(pz);
@@ -5512,7 +5618,7 @@ void CSoft3DMazeDlg::RenderScene()
 			const float sx=-adz*.07f,sz=adx*.07f;
 			passCube(tipX-adx*.10f+sx,tipZ-adz*.10f+sz,tipX+adx*.02f-sx,tipZ+adz*.02f-sz,tipY,tipY+.05f,rr,gg,bb,stairA+.15f);
 			passCube(tipX+adx*.00f-sx*1.6f,tipZ+adz*.00f-sz*1.6f,tipX+adx*.14f+sx*1.6f,tipZ+adz*.14f+sz*1.6f,tipY-.01f,tipY+.06f,rr,gg,bb,stairA+.18f);
-			fxObj[nFx++]={b,nFloor+nWall+nTrans-b,ocx,passH+.2f,ocz,xl[i].d,0,0,0,FALSE,FALSE};
+			fxObj[nFx++]={b,nFloor+nWall+nTrans-b,ocx,passH+.2f,ocz,xl[i].d,0,0,0,FALSE,FALSE,4};
 		}else if(c==CELL_PORTAL){
 			if(nFx>=64)continue;
 			const UINT b=nFloor+nWall+nTrans;
@@ -5540,7 +5646,7 @@ void CSoft3DMazeDlg::RenderScene()
 						.85f,.45f,1.f,.55f);
 				}
 			}
-			fxObj[nFx++]={b,nFloor+nWall+nTrans-b,ocx,passH+.3f,ocz,xl[i].d,0,0,0,FALSE,FALSE};
+			fxObj[nFx++]={b,nFloor+nWall+nTrans-b,ocx,passH+.3f,ocz,xl[i].d,0,0,0,FALSE,FALSE,0};
 		}else if(c==CELL_DOOR){
 			if(nFx>=64)continue;
 			const UINT b=nFloor+nWall+nTrans;
@@ -5586,7 +5692,7 @@ void CSoft3DMazeDlg::RenderScene()
 				passCubeAll(hx-.04f,dz0-.055f,hx+.04f,dz0-.010f,hy0,hy1,hr,hg,hb,ha);
 				passCubeAll(hx-.04f,dz1+.010f,hx+.04f,dz1+.055f,hy0,hy1,hr,hg,hb,ha);
 			}
-			fxObj[nFx++]={b,nFloor+nWall+nTrans-b,ocx,passH+.45f,ocz,xl[i].d,0,0,0,FALSE,FALSE};
+			fxObj[nFx++]={b,nFloor+nWall+nTrans-b,ocx,passH+.45f,ocz,xl[i].d,0,0,0,FALSE,FALSE,3};
 		}else if(c==CELL_KEY){
 			if(nFx>=64)continue;
 			const UINT b=nFloor+nWall+nTrans;
@@ -5614,14 +5720,14 @@ void CSoft3DMazeDlg::RenderScene()
 			kPut(.08f,-.02f,.08f,0.f,.06f,.04f); // 歯1
 			kPut(.08f,-.10f,-.02f,0.f,.06f,.04f); // 歯2
 			kPut(0.f,-.14f,-.06f,0.f,.04f,.04f); // 先端
-			fxObj[nFx++]={b,nFloor+nWall+nTrans-b,ocx,ky+bowY*.5f,ocz,xl[i].d,0,0,0,FALSE,TRUE};
+			fxObj[nFx++]={b,nFloor+nWall+nTrans-b,ocx,ky+bowY*.5f,ocz,xl[i].d,0,0,0,FALSE,TRUE,0};
 		}else if(S3mIsTrapCell(c)){
 			if(nFx>=64)continue;
 			const UINT b=nFloor+nWall+nTrans;
-			float rr=.3f,gg=.85f,bb=.35f,a=.42f;
-			if(c==CELL_SPIKE){rr=1.f;gg=.28f;bb=.22f;a=.44f;}
-			else if(c==CELL_ICE){rr=.45f;gg=.85f;bb=1.f;a=.38f;}
-			else if(c==CELL_DARK){rr=.25f;gg=.2f;bb=.45f;a=.46f;}
+			float rr=.3f,gg=.85f,bb=.35f,a=.44f;
+			if(c==CELL_SPIKE){rr=1.f;gg=.28f;bb=.22f;}
+			else if(c==CELL_ICE){rr=.45f;gg=.85f;bb=1.f;}
+			else if(c==CELL_DARK){rr=.25f;gg=.2f;bb=.45f;}
 			const float pad=.08f;
 			quad(x0+pad,passH+.03f,z0+pad,x0+pad,passH+.03f,z1-pad,x1-pad,passH+.03f,z1-pad,x1-pad,passH+.03f,z0+pad,0,1,0,rr,gg,bb,a);
 			const float bob=.03f*sinf(m_anim*2.8f+x+z);
@@ -5629,25 +5735,21 @@ void CSoft3DMazeDlg::RenderScene()
 			if(c==CELL_SPIKE){
 				for(int si=0;si<5;si++){
 					const float ox=((si%3)-1)*.12f,oz=((si/3)-.5f)*.14f;
-					const float h=.10f+(si&1)*.08f;
-					passCubeAll(ocx+ox-.04f,ocz+oz-.04f,ocx+ox+.04f,ocz+oz+.04f,passH+.03f,ty+h,rr,gg,bb,a+.2f);
-					passCubeAll(ocx+ox-.025f,ocz+oz-.025f,ocx+ox+.025f,ocz+oz+.025f,ty+h,ty+h+.08f,rr,gg,bb,a+.25f);
+					const float h=.16f+(si&1)*.10f;
+					emitCone(ocx+ox,passH+.03f,ocz+oz,.055f,h,6,rr,gg,bb,a, .50f,.0f,1.f,.50f);
 				}
 			}else if(c==CELL_ICE){
-				passCubeAll(ocx-.10f,ocz-.10f,ocx+.10f,ocz+.10f,passH+.03f,ty+.06f,rr,gg,bb,a+.15f);
-				passCubeAll(ocx-.05f,ocz-.05f,ocx+.05f,ocz+.05f,ty+.06f,ty+.22f,.7f,.95f,1.f,a+.25f);
-				passCubeAll(ocx-.14f,ocz-.04f,ocx-.07f,ocz+.04f,passH+.03f,ty+.14f,rr,gg,bb,a+.2f);
-				passCubeAll(ocx+.07f,ocz-.04f,ocx+.14f,ocz+.04f,passH+.03f,ty+.12f,rr,gg,bb,a+.2f);
+				emitSphere(ocx,ty+.08f,ocz,.12f,.14f,.12f,7,4,rr,gg,bb,a, 0.f,.50f,.50f,1.f);
+				emitSphere(ocx-.10f,ty+.02f,ocz,.06f,.10f,.06f,5,3,.7f,.95f,1.f,a, 0.f,.50f,.50f,1.f);
+				emitSphere(ocx+.09f,ty+.00f,ocz,.05f,.09f,.05f,5,3,.7f,.95f,1.f,a, 0.f,.50f,.50f,1.f);
 			}else if(c==CELL_DARK){
-				passCubeAll(ocx-.11f,ocz-.11f,ocx+.11f,ocz+.11f,ty,ty+.18f,rr,gg,bb,a+.2f);
-				passCubeAll(ocx-.07f,ocz-.07f,ocx+.07f,ocz+.07f,ty+.18f,ty+.30f,.15f,.1f,.35f,a+.3f);
-				passCubeAll(ocx-.16f,ocz-.04f,ocx+.16f,ocz+.04f,ty+.08f,ty+.14f,.4f,.25f,.6f,a+.15f);
+				emitSphere(ocx,ty+.10f,ocz,.12f,.16f,.12f,7,4,rr,gg,bb,a, .50f,.50f,1.f,1.f);
+				emitSphere(ocx,ty+.22f,ocz,.07f,.10f,.07f,5,3,.15f,.1f,.35f,a, .50f,.50f,1.f,1.f);
 			}else{ // slime
-				passCubeAll(ocx-.16f,ocz-.14f,ocx+.16f,ocz+.14f,passH+.03f,ty+.08f,rr,gg,bb,a+.2f);
-				passCubeAll(ocx-.10f,ocz-.10f,ocx+.10f,ocz+.10f,ty+.08f,ty+.18f,rr*.85f,gg*.85f,bb*.85f,a+.25f);
-				passCubeAll(ocx-.05f,ocz-.05f,ocx+.05f,ocz+.05f,ty+.18f,ty+.26f,rr,gg,bb,a+.3f);
+				emitSphere(ocx,ty+.02f,ocz,.16f,.07f,.14f,8,4,rr,gg,bb,a, 0.f,0.f,.50f,.50f);
+				emitSphere(ocx,ty+.12f,ocz,.10f,.08f,.10f,6,3,rr*.85f,gg*.85f,bb*.85f,a, 0.f,0.f,.50f,.50f);
 			}
-			fxObj[nFx++]={b,nFloor+nWall+nTrans-b,ocx,passH+.25f,ocz,xl[i].d,0,0,0,FALSE,FALSE};
+			fxObj[nFx++]={b,nFloor+nWall+nTrans-b,ocx,passH+.25f,ocz,xl[i].d,0,0,0,FALSE,FALSE,1};
 		}else if(nFx<64){
 			// 自機マスと重なるスタート旗は書かない
 			if(c==CELL_START&&x==plx&&z==plz&&!stairMove)continue;
@@ -5670,6 +5772,7 @@ void CSoft3DMazeDlg::RenderScene()
 				else if(c==CELL_RANDOM){rr=.95f;gg=.55f;bb=.2f+0.55f*(0.5f+0.5f*sinf(m_anim*3.f+x));}
 			}
 			const float ka=1.15f; // アイテム／スタート／ゴール：平面反射スロット用の金属アルファ
+			if(c!=CELL_START) emitSphere(ocx,passH+.22f+(cy-passH)*.35f,ocz,.11f,.13f,.11f,8,5,rr,gg,bb,ka,0.f,0.f,1.f,1.f);
 			if(c==CELL_GOAL){
 				passCubeAll(ocx-.22f,ocz-.22f,ocx+.22f,ocz+.22f,passH+.02f,passH+.10f,.55f,.45f,.22f,1.f);
 				passCubeAll(ocx-.20f,ocz-.07f,ocx-.12f,ocz+.07f,passH+.10f,passH+.55f,.9f,.75f,.25f,1.05f);
@@ -5734,7 +5837,7 @@ void CSoft3DMazeDlg::RenderScene()
 					passCubeAll(ocx-.12f,ocz-.05f,ocx+.12f,ocz+.05f,cy+.08f,cy+.14f,rr,gg,bb,ka);
 				}
 			}
-			fxObj[nFx++]={b,nFloor+nWall+nTrans-b,ocx,cy,ocz,xl[i].d,0,0,0,FALSE,TRUE};
+			fxObj[nFx++]={b,nFloor+nWall+nTrans-b,ocx,cy,ocz,xl[i].d,0,0,0,FALSE,TRUE,0};
 		}
 	}
 	{int ord[64];for(int i=0;i<nFx;i++)ord[i]=i;
@@ -6056,20 +6159,26 @@ void CSoft3DMazeDlg::RenderScene()
 	}
 	if(FAILED(dc->Map(m_view.m_vbDyn,0,D3D11_MAP_WRITE_DISCARD,0,&map)))return;memcpy(map.pData,v,(nFloor+nWall+nTrans)*sizeof(S3MVertex));dc->Unmap(m_view.m_vbDyn,0);
 	UINT stride=sizeof(S3MVertex),off=0;ID3D11ShaderResourceView* ns[7]={NULL,NULL,NULL,NULL,NULL,NULL,NULL};ID3D11RenderTargetView* nullRtv=NULL;
+	ID3D11ShaderResourceView* envUse=m_view.m_srvEnv;
+	{const int thE=ThemeOfFloor((m_floorFx==FLOORFX_IN)?m_stairFrom:m_floor); if(thE>=1&&m_view.m_srvEnvIn) envUse=m_view.m_srvEnvIn;}
 	auto bindCB=[&](){dc->VSSetConstantBuffers(0,1,&m_view.m_cbFrame);dc->HSSetConstantBuffers(0,1,&m_view.m_cbFrame);dc->DSSetConstantBuffers(0,1,&m_view.m_cbFrame);dc->PSSetConstantBuffers(0,1,&m_view.m_cbFrame);};
 	auto drawFloorWall=[&](BOOL colorPass){
 		dc->IASetVertexBuffers(0,1,&m_view.m_vbDyn,&stride,&off);bindCB();
 		dc->PSSetSamplers(0,1,&m_view.m_sampLin);dc->DSSetSamplers(0,1,&m_view.m_sampLin);dc->OMSetDepthStencilState(m_view.m_dssWrite,0);dc->OMSetBlendState(m_view.m_bsOpaque,NULL,~0u);
-		if(colorPass){dc->PSSetSamplers(2,1,&m_view.m_sampCmp);dc->PSSetShaderResources(4,1,&m_view.m_shadowSrv);dc->PSSetShaderResources(3,1,&m_view.m_srvEnv);}
+		if(colorPass){dc->PSSetSamplers(2,1,&m_view.m_sampCmp);dc->PSSetShaderResources(4,1,&m_view.m_shadowSrv);dc->PSSetShaderResources(3,1,&envUse);}
 		for(int li=0;li<nLay;li++){
 			const Layer& L=layers[li];
 			dc->IASetInputLayout(m_view.m_ilSolid);dc->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 			dc->VSSetShader(m_view.m_vsSolid,NULL,0);dc->HSSetShader(NULL,NULL,0);dc->DSSetShader(NULL,NULL,0);dc->PSSetShader(colorPass?m_view.m_psSolid:NULL,NULL,0);
-			dc->PSSetShaderResources(0,1,&m_view.m_srvFloor[L.th]);if(L.nF)dc->Draw(L.nF,L.fBeg);
+			dc->PSSetShaderResources(0,1,&m_view.m_srvFloor[L.th]);
+			if(colorPass){ID3D11ShaderResourceView* fd=m_view.m_srvFloorD[L.th]?m_view.m_srvFloorD[L.th]:m_view.m_srvFloor[L.th];dc->PSSetShaderResources(1,1,&fd);}
+			if(L.nF)dc->Draw(L.nF,L.fBeg);
 			if(L.nMF&&m_view.m_srvMirrorFloor){dc->PSSetShaderResources(0,1,&m_view.m_srvMirrorFloor);dc->Draw(L.nMF,L.mfBeg);}
 			dc->IASetInputLayout(m_view.m_ilPatch);dc->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_4_CONTROL_POINT_PATCHLIST);
 			dc->VSSetShader(m_view.m_vsTess,NULL,0);dc->HSSetShader(m_view.m_hsTess,NULL,0);dc->DSSetShader(m_view.m_dsTess,NULL,0);dc->PSSetShader(colorPass?m_view.m_psWall:NULL,NULL,0);
-			dc->DSSetShaderResources(0,1,&m_view.m_srvBrick[L.th]);dc->PSSetShaderResources(0,1,&m_view.m_srvBrick[L.th]);if(L.nW)dc->Draw(L.nW,L.wBeg);
+			dc->DSSetShaderResources(0,1,&m_view.m_srvBrick[L.th]);dc->PSSetShaderResources(0,1,&m_view.m_srvBrick[L.th]);
+			if(colorPass){ID3D11ShaderResourceView* bd=m_view.m_srvBrickD[L.th]?m_view.m_srvBrickD[L.th]:m_view.m_srvBrick[L.th];if(L.th==0&&m_view.m_srvBrick2)bd=m_view.m_srvBrick2;dc->PSSetShaderResources(1,1,&bd);}
+			if(L.nW)dc->Draw(L.nW,L.wBeg);
 			if(L.nMW&&m_view.m_srvMirrorWall){
 				dc->DSSetShaderResources(0,1,&m_view.m_srvMirrorWall);dc->PSSetShaderResources(0,1,&m_view.m_srvMirrorWall);
 				dc->Draw(L.nMW,L.mwBeg);
@@ -6085,20 +6194,29 @@ void CSoft3DMazeDlg::RenderScene()
 		dc->PSSetSamplers(0,1,&m_view.m_sampLin);
 		if(colorPass){
 			dc->OMSetDepthStencilState(m_view.m_dssRead,0);dc->OMSetBlendState(m_view.m_bsAlpha,NULL,~0u);
-			dc->PSSetSamplers(2,1,&m_view.m_sampCmp);dc->PSSetShaderResources(3,1,&m_view.m_srvEnv);dc->PSSetShaderResources(4,1,&m_view.m_shadowSrv);
+			dc->PSSetSamplers(2,1,&m_view.m_sampCmp);dc->PSSetShaderResources(3,1,&envUse);dc->PSSetShaderResources(4,1,&m_view.m_shadowSrv);
 		}else{
 			// シャドウマップ：半透明も深度書き込み（キャスタとして全部）
 			dc->OMSetDepthStencilState(m_view.m_dssWrite,0);dc->OMSetBlendState(m_view.m_bsOpaque,NULL,~0u);
 		}
 		dc->Draw(nTrans,transBeg);dc->PSSetShaderResources(0,5,ns);
 	};
-	auto drawTransRange=[&](UINT beg,UINT n,BOOL colorPass){
+	auto bindProp=[&](int kind){
+		ID3D11ShaderResourceView* t0=m_view.m_srvItem?m_view.m_srvItem:ns[0];
+		ID3D11ShaderResourceView* t1=m_view.m_srvGimmick?m_view.m_srvGimmick:t0;
+		if(kind==1){ if(m_view.m_srvGimmick) t0=m_view.m_srvGimmick; if(m_view.m_srvItem) t1=m_view.m_srvItem; }
+		else if(kind==2){ if(m_view.m_srvGlass) t0=m_view.m_srvGlass; if(m_view.m_srvItem) t1=m_view.m_srvItem; }
+		else if(kind==3){ if(m_view.m_srvBrick2){ t0=m_view.m_srvBrick2; t1=m_view.m_srvBrick2; } }
+		else if(kind==4){ t0=ns[0]; t1=ns[0]; }
+		dc->PSSetShaderResources(0,1,&t0); dc->PSSetShaderResources(1,1,&t1);
+	};
+	auto drawTransRange=[&](UINT beg,UINT n,BOOL colorPass,int kind){
 		if(!n)return;
 		dc->IASetVertexBuffers(0,1,&m_view.m_vbDyn,&stride,&off);bindCB();
 		dc->IASetInputLayout(m_view.m_ilSolid);dc->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 		dc->VSSetShader(m_view.m_vsSolid,NULL,0);dc->HSSetShader(NULL,NULL,0);dc->DSSetShader(NULL,NULL,0);dc->PSSetShader(colorPass?m_view.m_psSolid:NULL,NULL,0);
 		dc->PSSetSamplers(0,1,&m_view.m_sampLin);
-		if(colorPass){dc->OMSetDepthStencilState(m_view.m_dssRead,0);dc->OMSetBlendState(m_view.m_bsAlpha,NULL,~0u);dc->PSSetSamplers(2,1,&m_view.m_sampCmp);dc->PSSetShaderResources(3,1,&m_view.m_srvEnv);dc->PSSetShaderResources(4,1,&m_view.m_shadowSrv);}
+		if(colorPass){dc->OMSetDepthStencilState(m_view.m_dssRead,0);dc->OMSetBlendState(m_view.m_bsAlpha,NULL,~0u);dc->PSSetSamplers(2,1,&m_view.m_sampCmp);dc->PSSetShaderResources(3,1,&envUse);dc->PSSetShaderResources(4,1,&m_view.m_shadowSrv);bindProp(kind);}
 		dc->Draw(n,beg);
 	};
 	S3MMat fxRefVP[CS3mView::S3M_MIRROR_FX_N];
@@ -6141,7 +6259,7 @@ void CSoft3DMazeDlg::RenderScene()
 			dc->VSSetShader(m_view.m_vsSolid,NULL,0);dc->HSSetShader(NULL,NULL,0);dc->DSSetShader(NULL,NULL,0);dc->PSSetShader(m_view.m_psSolid,NULL,0);
 			dc->PSSetSamplers(0,1,&m_view.m_sampLin);dc->OMSetDepthStencilState(m_view.m_dssRead,0);
 			dc->OMSetBlendState(thV>=2?m_view.m_bsAdd:m_view.m_bsAlpha,NULL,~0u);
-			dc->PSSetSamplers(2,1,&m_view.m_sampCmp);dc->PSSetShaderResources(3,1,&m_view.m_srvEnv);dc->PSSetShaderResources(4,1,&m_view.m_shadowSrv);
+			dc->PSSetSamplers(2,1,&m_view.m_sampCmp);dc->PSSetShaderResources(3,1,&envUse);dc->PSSetShaderResources(4,1,&m_view.m_shadowSrv);
 			dc->PSSetShaderResources(5,2,ns+5);dc->PSSetShaderResources(6,1,ns+6);
 			dc->Draw(nVfxAlpha,vfxBeg);
 			dc->OMSetBlendState(m_view.m_bsOpaque,NULL,~0u);
@@ -6181,7 +6299,7 @@ void CSoft3DMazeDlg::RenderScene()
 		dc->VSSetShader(m_view.m_vsSolid,NULL,0);dc->HSSetShader(NULL,NULL,0);dc->DSSetShader(NULL,NULL,0);dc->PSSetShader(m_view.m_psSolid,NULL,0);
 		dc->PSSetSamplers(0,1,&m_view.m_sampLin);dc->OMSetDepthStencilState(m_view.m_dssRead,0);
 		dc->OMSetBlendState(m_view.m_bsAlpha,NULL,~0u);
-		dc->PSSetSamplers(2,1,&m_view.m_sampCmp);dc->PSSetShaderResources(3,1,&m_view.m_srvEnv);dc->PSSetShaderResources(4,1,&m_view.m_shadowSrv);
+		dc->PSSetSamplers(2,1,&m_view.m_sampCmp);dc->PSSetShaderResources(3,1,&envUse);dc->PSSetShaderResources(4,1,&m_view.m_shadowSrv);
 		dc->PSSetShaderResources(5,2,ns+5);dc->PSSetShaderResources(6,1,ns+6);
 		dc->Draw(nNav,navBeg);
 		dc->RSSetState(m_view.m_rsSolid);dc->OMSetBlendState(m_view.m_bsOpaque,NULL,~0u);
@@ -6210,12 +6328,12 @@ void CSoft3DMazeDlg::RenderScene()
 			}else{
 				dc->PSSetShaderResources(6,1,ns+6);
 			}
-			drawTransRange(fxObj[i].beg,fxObj[i].n,TRUE);
+			drawTransRange(fxObj[i].beg,fxObj[i].n,TRUE,fxObj[i].texKind);
 		}
 		cb.reflectFloorVP=floorVP;
 		if(SUCCEEDED(dc->Map(m_view.m_cbFrame,0,D3D11_MAP_WRITE_DISCARD,0,&map))){memcpy(map.pData,&cb,sizeof(cb));dc->Unmap(m_view.m_cbFrame,0);}
 		dc->PSSetShaderResources(5,1,&m_view.m_mirrorSrv[0]);dc->PSSetShaderResources(6,1,&m_view.m_mirrorSrv[1]);
-		drawTransRange(plateBeg,nPlate,TRUE);
+		drawTransRange(plateBeg,nPlate,TRUE,4);
 		if(nVfxAlpha){
 			const int thV=ThemeOfFloor(fxFloor);
 			dc->IASetVertexBuffers(0,1,&m_view.m_vbDyn,&stride,&off);bindCB();
@@ -6223,7 +6341,7 @@ void CSoft3DMazeDlg::RenderScene()
 			dc->VSSetShader(m_view.m_vsSolid,NULL,0);dc->HSSetShader(NULL,NULL,0);dc->DSSetShader(NULL,NULL,0);dc->PSSetShader(m_view.m_psSolid,NULL,0);
 			dc->PSSetSamplers(0,1,&m_view.m_sampLin);dc->OMSetDepthStencilState(m_view.m_dssRead,0);
 			dc->OMSetBlendState(thV>=2?m_view.m_bsAdd:m_view.m_bsAlpha,NULL,~0u);
-			dc->PSSetSamplers(2,1,&m_view.m_sampCmp);dc->PSSetShaderResources(3,1,&m_view.m_srvEnv);dc->PSSetShaderResources(4,1,&m_view.m_shadowSrv);
+			dc->PSSetSamplers(2,1,&m_view.m_sampCmp);dc->PSSetShaderResources(3,1,&envUse);dc->PSSetShaderResources(4,1,&m_view.m_shadowSrv);
 			dc->PSSetShaderResources(6,1,ns+6);
 			dc->Draw(nVfxAlpha,vfxBeg);
 			dc->OMSetBlendState(m_view.m_bsAlpha,NULL,~0u);

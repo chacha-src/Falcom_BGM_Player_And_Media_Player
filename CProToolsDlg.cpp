@@ -950,7 +950,7 @@ void CProToolsDlg::OnPaint()
 	CPaintDC dc(this);
 	SyncWaveRect();
 	DrawWave(dc, m_waveRc);
-	CCC_CaptionPaint(dc, m_hWnd);
+	CCC_CaptionPaintGdi(dc, m_hWnd);
 }
 
 BOOL CProToolsDlg::OnEraseBkgnd(CDC* pDC)
