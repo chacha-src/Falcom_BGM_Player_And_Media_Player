@@ -89,6 +89,17 @@ static S3RMat S3rLookAt(float ex,float ey,float ez,float ax,float ay,float az,fl
 }
 
 #define S3R_RELEASE(p) do { if (p) { (p)->Release(); (p)=NULL; } } while(0)
+// D3D11 頂点バッファは実質 ~128MB。超えると CreateBuffer が失敗する
+static const UINT kS3rMaxVbBytes = 120u * 1024u * 1024u;
+static void S3rUnbindIA(ID3D11DeviceContext* dc)
+{
+	if (!dc) return;
+	ID3D11Buffer* z = NULL;
+	UINT st = 0, of = 0;
+	dc->IASetVertexBuffers(0, 1, &z, &st, &of);
+	dc->IASetVertexBuffers(1, 1, &z, &st, &of);
+	dc->IASetIndexBuffer(NULL, DXGI_FORMAT_R32_UINT, 0);
+}
 
 static float S3rNormAngle(float a)
 {
@@ -596,20 +607,20 @@ void CS3rHelpDlg::OnPaint()
 		L"PCM-SFX: motoren, aftellen/START, ronde, finish, podium, course-out, items, hits. Weergave-menu.",
 		L"SFX PCM: silniki, odliczanie/START, okrążenie, meta, podium, poza torem, przedmioty, uderzenia.",
 		L"PCM SFX: motor, geri sayım/BAŞLA, tur, bitiş, podyum, kurs dışı, öğe, çarpışma. Görünüm menüsü."));
-	line(LL14(L"迷路 Soft3D と同時には開けません。AI／敵機数／長さ／周回／テーマ／密度はコンボで変更（保存されます）。軽量が現行の粗さ、5が既定、緻密が最大（約80倍）。",
-		L"Cannot open with Soft3D maze at once. AI/opponents/length/laps/theme/density combos persist. Light=current coarseness, 5=default, Dense=max (~80×).",
-		L"Pas avec le labyrinthe Soft3D. Combos AI/adversaires/longueur/tours/thème/densité sauvés. Léger=actuel, 5=défaut, Dense=max (~80×).",
-		L"Non insieme al labirinto Soft3D. Combo AI/avversari/lunghezza/giri/tema/densità salvate. Leggero=attuale, 5=predef., Denso=max (~80×).",
-		L"No a la vez con el laberinto Soft3D. Combos IA/rivales/largo/vueltas/tema/densidad se guardan. Ligero=actual, 5=predet., Denso=máx. (~80×).",
-		L"미로 Soft3D와 동시 불가. AI/적/길이/랩/테마/밀도 콤보 저장. 가벼움=현재, 5=기본, 치밀=최대(약80배).",
-		L"不可与 Soft3D 迷宫同时开。AI/对手/长度/圈数/主题/密度会保存。轻量=现行，5=默认，致密=最大（约80倍）。",
-		L"Not with Soft3D maze. Combos persist. Light=current, 5=default, Dense=max (~80×).",
-		L"Не вместе с лабиринтом Soft3D. Комбо сохраняются. Лёгкий=текущий, 5=по умолч., Плотный=макс.",
-		L"Nicht zusammen mit Soft3D-Labyrinth. Kombos werden gespeichert. Leicht=aktuell, 5=Standard, Dicht=max.",
-		L"Não junto com o labirinto Soft3D. Combos são salvos. Leve=atual, 5=padrão, Denso=máx.",
-		L"Niet samen met Soft3D-doolhof. Combo's worden bewaard. Licht=huidig, 5=standaard, Dicht=max.",
-		L"Nie razem z labiryntem Soft3D. Combo są zapisywane. Lekki=obecny, 5=domyślny, Gęsty=maks.",
-		L"Soft3D labirent ile birlikte değil. Kombolar kaydedilir. Hafif=şimdiki, 5=varsayılan, Yoğun=en fazla."));
+	line(LL14(L"迷路 Soft3D と同時には開けません。AI／敵機数／長さ／周回／テーマ／密度はコンボで変更（保存されます）。軽量〜美麗（11〜19と美麗は分割描画で約88〜160倍）。5が既定。",
+		L"Cannot open with Soft3D maze at once. AI/opponents/length/laps/theme/density combos persist. Light–Fine (11–19 and Fine split-draw ~88–160×). Default 5.",
+		L"Pas avec le labyrinthe Soft3D. Combos sauvés. Léger–Fin (11–19 et Fin en plusieurs buffers, ~88–160×). Défaut 5.",
+		L"Non insieme al labirinto Soft3D. Combo salvate. Leggero–Fine (11–19 e Fine a più buffer, ~88–160×). Predef. 5.",
+		L"No a la vez con el laberinto Soft3D. Combos se guardan. Ligero–Fino (11–19 y Fino en varios buffers, ~88–160×). Predet. 5.",
+		L"미로 Soft3D와 동시 불가. 콤보 저장. 가벼움~미려(11–19·미려는 분할 묘화 약88–160배). 기본 5.",
+		L"不可与 Soft3D 迷宫同时开。设置会保存。轻量〜美丽（11–19与美丽为分块绘制约88–160倍）。默认5。",
+		L"Not with Soft3D maze. Combos persist. Light–Fine (11–19 and Fine split-draw ~88–160×). Default 5.",
+		L"Не вместе с лабиринтом Soft3D. Комбо сохраняются. Лёгкий–Изящный (11–19 и Fine, ~88–160×). По умолч. 5.",
+		L"Nicht zusammen mit Soft3D-Labyrinth. Kombos gespeichert. Leicht–Fein (11–19 und Fein, ~88–160×). Standard 5.",
+		L"Não junto com o labirinto Soft3D. Combos salvos. Leve–Belo (11–19 e Belo, ~88–160×). Padrão 5.",
+		L"Niet samen met Soft3D-doolhof. Combo's bewaard. Licht–Fijn (11–19 en Fijn, ~88–160×). Standaard 5.",
+		L"Nie razem z labiryntem Soft3D. Combo zapisywane. Lekki–Piękny (11–19 i Fine, ~88–160×). Domyślnie 5.",
+		L"Soft3D labirent ile birlikte değil. Kombolar kaydedilir. Hafif–Güzel (11–19 ve Fine, ~88–160×). Varsayılan 5."));
 	CCC_GdiHelpEndPaint(hp);
 }
 
@@ -645,9 +656,10 @@ CS3rView::CS3rView()
 	, m_vsTess(NULL), m_hsTess(NULL), m_dsTess(NULL)
 	, m_psBand(NULL), m_vsSolid(NULL), m_vsInst(NULL), m_psSolid(NULL), m_psTerr(NULL), m_psCraft(NULL), m_vsHud(NULL), m_psHud(NULL), m_psHudLine(NULL), m_vsPost(NULL)
 	, m_psSsr(NULL), m_psDof(NULL), m_psFinal(NULL), m_csNoise(NULL), m_ilPatch(NULL), m_ilSolid(NULL), m_ilInst(NULL), m_ilHud(NULL)
-	, m_cbFrame(NULL), m_vbDyn(NULL), m_vbTerr(NULL), m_vbBand(NULL), m_vbWater(NULL), m_vbScenery(NULL)
+	, m_cbFrame(NULL), m_vbDyn(NULL)
+	, m_vbTerrParts(0), m_vbBandParts(0), m_vbWaterParts(0), m_vbSceneryParts(0)
 	, m_vbObs(NULL), m_ibObs(NULL), m_vbObsInst(NULL), m_vbCraft(NULL), m_ibCraft(NULL), m_vbCraftInst(NULL), m_vbHud(NULL)
-	, m_vbDynBytes(4*1024*1024), m_vbHudBytes(512*1024), m_vbTerrN(0), m_vbBandN(0), m_vbWaterN(0), m_vbSceneryN(0)
+	, m_vbDynBytes(4*1024*1024), m_vbHudBytes(512*1024)
 	, m_obsNvGpu(0), m_obsNiGpu(0), m_obsInstN(0), m_craftNvGpu(0), m_craftNiGpu(0)
 	, m_cpuDynScratch(NULL), m_cpuDynScratchBytes(0), m_cpuHudScratch(NULL), m_cpuHudScratchBytes(0)
 	, m_texBand(NULL), m_srvBand(NULL), m_texWater(NULL), m_srvWater(NULL), m_texObs(NULL), m_srvObs(NULL)
@@ -669,6 +681,12 @@ CS3rView::CS3rView()
 	for (int i = 0; i < S3R_THEME_N; i++) {
 		m_texTheme[i] = NULL; m_srvTheme[i] = NULL;
 		m_texThemeD[i] = NULL; m_srvThemeD[i] = NULL;
+	}
+	for (int i = 0; i < S3R_MESH_PARTS; i++) {
+		m_vbTerr[i] = NULL; m_vbTerrN[i] = 0;
+		m_vbBand[i] = NULL; m_vbBandN[i] = 0;
+		m_vbWater[i] = NULL; m_vbWaterN[i] = 0;
+		m_vbScenery[i] = NULL; m_vbSceneryN[i] = 0;
 	}
 }
 CS3rView::~CS3rView() { ReleaseDx(); }
@@ -1388,8 +1406,11 @@ void CS3rView::ReleaseDx()
 	S3R_RELEASE(m_vbHud);
 	S3R_RELEASE(m_vbCraftInst); S3R_RELEASE(m_ibCraft); S3R_RELEASE(m_vbCraft);
 	S3R_RELEASE(m_vbObsInst); S3R_RELEASE(m_ibObs); S3R_RELEASE(m_vbObs);
-	S3R_RELEASE(m_vbScenery); S3R_RELEASE(m_vbWater); S3R_RELEASE(m_vbBand);
-	S3R_RELEASE(m_vbTerr); m_vbTerrN=0; m_vbBandN=0; m_vbWaterN=0; m_vbSceneryN=0;
+	for (int i = 0; i < S3R_MESH_PARTS; i++) {
+		S3R_RELEASE(m_vbScenery[i]); S3R_RELEASE(m_vbWater[i]); S3R_RELEASE(m_vbBand[i]); S3R_RELEASE(m_vbTerr[i]);
+		m_vbTerrN[i] = m_vbBandN[i] = m_vbWaterN[i] = m_vbSceneryN[i] = 0;
+	}
+	m_vbTerrParts = m_vbBandParts = m_vbWaterParts = m_vbSceneryParts = 0;
 	m_obsNvGpu=m_obsNiGpu=m_obsInstN=0; m_craftNvGpu=m_craftNiGpu=0;
 	S3R_RELEASE(m_vbDyn);S3R_RELEASE(m_cbFrame);S3R_RELEASE(m_ilHud);S3R_RELEASE(m_ilInst);S3R_RELEASE(m_ilSolid);S3R_RELEASE(m_ilPatch);
 	delete[] m_cpuDynScratch; m_cpuDynScratch=NULL; m_cpuDynScratchBytes=0;
@@ -1400,52 +1421,93 @@ void CS3rView::ReleaseDx()
 }
 void CS3rView::ClearTerrMesh()
 {
-	S3R_RELEASE(m_vbTerr);
-	m_vbTerrN = 0;
+	S3rUnbindIA(m_imm);
+	if (m_imm) m_imm->Flush();
+	for (int i = 0; i < S3R_MESH_PARTS; i++) { S3R_RELEASE(m_vbTerr[i]); m_vbTerrN[i] = 0; }
+	m_vbTerrParts = 0;
 }
 void CS3rView::ClearStaticMeshes()
 {
+	S3rUnbindIA(m_imm);
+	if (m_imm) { m_imm->ClearState(); m_imm->Flush(); }
 	ClearTerrMesh();
-	S3R_RELEASE(m_vbBand); m_vbBandN = 0;
-	S3R_RELEASE(m_vbWater); m_vbWaterN = 0;
-	S3R_RELEASE(m_vbScenery); m_vbSceneryN = 0;
+	for (int i = 0; i < S3R_MESH_PARTS; i++) {
+		S3R_RELEASE(m_vbBand[i]); m_vbBandN[i] = 0;
+		S3R_RELEASE(m_vbWater[i]); m_vbWaterN[i] = 0;
+		S3R_RELEASE(m_vbScenery[i]); m_vbSceneryN[i] = 0;
+	}
+	m_vbBandParts = m_vbWaterParts = m_vbSceneryParts = 0;
 	S3R_RELEASE(m_vbObsInst); m_obsInstN = 0;
 	S3R_RELEASE(m_ibObs); S3R_RELEASE(m_vbObs); m_obsNvGpu = m_obsNiGpu = 0;
 	S3R_RELEASE(m_ibCraft); S3R_RELEASE(m_vbCraft); m_craftNvGpu = m_craftNiGpu = 0;
 }
 BOOL CS3rView::UploadDefaultVB(ID3D11Buffer** dst, UINT* nOut, const void* verts, UINT nVerts)
 {
-	S3R_RELEASE(*dst);
-	*nOut = 0;
+	if (!dst || !nOut) return FALSE;
 	if (!m_dev || !verts || nVerts < 1) return FALSE;
+	const UINT stride = (UINT)sizeof(S3RVertex);
+	if (stride < 1) return FALSE;
+	if (nVerts > kS3rMaxVbBytes / stride) nVerts = kS3rMaxVbBytes / stride;
+	UINT bytes = nVerts * stride;
+	bytes = (bytes + 15u) & ~15u;
+	if (bytes < 16u) bytes = 16u;
 	D3D11_BUFFER_DESC bd = {};
-	bd.ByteWidth = nVerts * (UINT)sizeof(S3RVertex);
+	bd.ByteWidth = bytes;
 	bd.Usage = D3D11_USAGE_DEFAULT;
 	bd.BindFlags = D3D11_BIND_VERTEX_BUFFER;
 	D3D11_SUBRESOURCE_DATA srd = {};
 	srd.pSysMem = verts;
-	if (FAILED(m_dev->CreateBuffer(&bd, &srd, dst))) return FALSE;
+	ID3D11Buffer* neu = NULL;
+	HRESULT hr = m_dev->CreateBuffer(&bd, &srd, &neu);
+	if (FAILED(hr) || !neu) {
+		S3rUnbindIA(m_imm);
+		if (m_imm) m_imm->Flush();
+		S3R_RELEASE(*dst);
+		*nOut = 0;
+		neu = NULL;
+		hr = m_dev->CreateBuffer(&bd, &srd, &neu);
+		if (FAILED(hr) || !neu) return FALSE;
+		*dst = neu;
+		*nOut = nVerts;
+		return TRUE;
+	}
+	S3rUnbindIA(m_imm);
+	S3R_RELEASE(*dst);
+	*dst = neu;
 	*nOut = nVerts;
+	return TRUE;
+}
+BOOL CS3rView::PushDefaultVBPart(ID3D11Buffer** arr, UINT* nArr, int& parts, const void* verts, UINT nVerts)
+{
+	if (!arr || !nArr || parts < 0 || parts >= S3R_MESH_PARTS) return FALSE;
+	if (!UploadDefaultVB(&arr[parts], &nArr[parts], verts, nVerts)) return FALSE;
+	parts++;
 	return TRUE;
 }
 BOOL CS3rView::UploadDefaultIB(ID3D11Buffer** dst, UINT* nOut, const UINT* idx, UINT nIdx)
 {
-	S3R_RELEASE(*dst);
-	*nOut = 0;
+	if (!dst || !nOut) return FALSE;
 	if (!m_dev || !idx || nIdx < 3) return FALSE;
+	const UINT stride = (UINT)sizeof(UINT);
+	const UINT kMaxIb = 16u * 1024u * 1024u;
+	if (nIdx > kMaxIb / stride) nIdx = kMaxIb / stride;
+	if (nIdx < 3) return FALSE;
+	UINT bytes = nIdx * stride;
+	bytes = (bytes + 15u) & ~15u;
+	if (bytes < 16u) bytes = 16u;
 	D3D11_BUFFER_DESC bd = {};
-	bd.ByteWidth = nIdx * (UINT)sizeof(UINT);
+	bd.ByteWidth = bytes;
 	bd.Usage = D3D11_USAGE_DEFAULT;
 	bd.BindFlags = D3D11_BIND_INDEX_BUFFER;
 	D3D11_SUBRESOURCE_DATA srd = {};
 	srd.pSysMem = idx;
-	if (FAILED(m_dev->CreateBuffer(&bd, &srd, dst))) return FALSE;
+	ID3D11Buffer* neu = NULL;
+	if (FAILED(m_dev->CreateBuffer(&bd, &srd, &neu)) || !neu) return FALSE;
+	S3rUnbindIA(m_imm);
+	S3R_RELEASE(*dst);
+	*dst = neu;
 	*nOut = nIdx;
 	return TRUE;
-}
-BOOL CS3rView::UploadTerrMesh(const void* verts, UINT nVerts)
-{
-	return UploadDefaultVB(&m_vbTerr, &m_vbTerrN, verts, nVerts);
 }
 void CS3rView::OnSize(UINT nType,int cx,int cy){CCustomStatic::OnSize(nType,cx,cy);if(m_swap&&cx>0&&cy>0)ResizeDx(cx,cy);}
 void CS3rView::OnPaint(){CPaintDC dc(this);ValidateRect(NULL);}
@@ -1495,6 +1557,7 @@ BEGIN_MESSAGE_MAP(CSoft3DRaceDlg, CCustomBlurDialogBase)
 	ON_WM_TIMER()
 	ON_WM_SIZE()
 	ON_WM_SHOWWINDOW()
+	ON_WM_CLOSE()
 	ON_WM_DESTROY()
 	ON_WM_CONTEXTMENU()
 END_MESSAGE_MAP()
@@ -1622,6 +1685,7 @@ void CSoft3DRaceDlg::PumpQueued(BOOL input)
 		if (HandleAccelMessage(&msg)) { n++; continue; }
 		::TranslateMessage(&msg);
 		::DispatchMessage(&msg);
+		if (!::IsWindow(root)) return;
 		n++;
 	}
 }
@@ -1691,8 +1755,8 @@ int CSoft3DRaceDlg::ReadThemeFromUi(){ int s=m_theme.GetSafeHwnd()?(int)m_theme.
 void CSoft3DRaceDlg::SetThemeToUi(int v){ if(v<0)v=0; if(v>8)v=8; savedata.s3r_theme=v; if(m_theme.GetSafeHwnd()) m_theme.CComboBox::SetCurSel(v); }
 int CSoft3DRaceDlg::ReadInvertFromUi(){ int s=m_invert.GetSafeHwnd()?(int)m_invert.CComboBox::GetCurSel():savedata.s3r_invert_y; return (s!=0)?1:0; }
 void CSoft3DRaceDlg::SetInvertToUi(int v){ v=v?1:0; savedata.s3r_invert_y=v; if(m_invert.GetSafeHwnd()) m_invert.CComboBox::SetCurSel(v); }
-int CSoft3DRaceDlg::ReadMeshFromUi(){ int s=m_mesh.GetSafeHwnd()?(int)m_mesh.CComboBox::GetCurSel():savedata.s3_mesh_density; if(s<0||s>10)s=5; return s; }
-void CSoft3DRaceDlg::SetMeshToUi(int v){ if(v<0||v>10)v=5; savedata.s3_mesh_density=v; if(m_mesh.GetSafeHwnd()) m_mesh.CComboBox::SetCurSel(v); }
+int CSoft3DRaceDlg::ReadMeshFromUi(){ int s=m_mesh.GetSafeHwnd()?(int)m_mesh.CComboBox::GetCurSel():savedata.s3_mesh_density; if(s<0||s>S3_MESH_DENSITY_MAX)s=5; return s; }
+void CSoft3DRaceDlg::SetMeshToUi(int v){ if(v<0||v>S3_MESH_DENSITY_MAX)v=5; savedata.s3_mesh_density=v; if(m_mesh.GetSafeHwnd()) m_mesh.CComboBox::SetCurSel(v); }
 
 void CSoft3DRaceDlg::PersistUi()
 {
@@ -2515,7 +2579,7 @@ void CSoft3DRaceDlg::BuildObstacleMesh(int theme)
 			int sm = S3MeshAxisMul();
 			if (sm > 1) {
 				sub *= sm;
-				if (sub > 8) sub = 8;
+				if (sub > 16) sub = 16;
 			}
 			if (sub < 1) sub = 1;
 		}
@@ -4322,39 +4386,55 @@ void CSoft3DRaceDlg::EnsureStandingsBake()
 void CSoft3DRaceDlg::BakeStaticMeshes()
 {
 	if (!m_view.m_ready || m_knotN < 4 || !m_view.m_dev) return;
+	S3rUnbindIA(m_view.m_imm);
+	m_view.ClearStaticMeshes();
 	const int axis = S3MeshAxisMul();
-	const int segs = S3MeshScaleCount(220, 2400);
-	const int gN = S3MeshScaleCount(72, 640);
-	const int tSegs = S3MeshScaleCount(220, 2400);
-	const int pN = S3MeshScaleCount(8, 48);
-	const int wN = S3MeshScaleCount(28, 256);
-	unsigned long long need = 700000ull;
-	{
-		unsigned long long terr = (unsigned long long)gN * (unsigned long long)gN * 6ull;
-		if (axis <= 1) terr *= 8ull;
-		else terr += terr / 4ull;
-		unsigned long long band = (unsigned long long)segs * 16ull;
-		unsigned long long tun = (unsigned long long)tSegs * 2ull * (unsigned long long)pN * 6ull;
-		unsigned long long water = (unsigned long long)wN * (unsigned long long)wN * 6ull;
-		need = terr + band + tun + water + 80000ull;
-		if (need < 700000ull) need = 700000ull;
-		if (need > 4500000ull) need = 4500000ull;
-	}
-	const UINT bakeMax = (UINT)need;
+	const int segs = S3MeshScaleCount(220, 4096);
+	const int gN = S3MeshScaleCount(72, 1200);
+	const int tSegs = S3MeshScaleCount(220, 4096);
+	const int pN = S3MeshScaleCount(8, 96);
+	const int wN = S3MeshScaleCount(28, 512);
+	const UINT bakeMax = (kS3rMaxVbBytes / (UINT)sizeof(S3RVertex) / 12u) * 12u;
+	if (bakeMax < 12u) return;
 	S3RVertex* bv = new (std::nothrow) S3RVertex[bakeMax];
 	if (!bv) return;
 	UINT n = 0;
+	ID3D11Buffer** curVb = NULL;
+	UINT* curNn = NULL;
+	int* curParts = NULL;
+	UINT primAlign = 3;
+	auto flush=[&](){
+		if (!curVb || !curNn || !curParts || n < primAlign) { n = 0; return; }
+		n -= n % primAlign;
+		if (n < primAlign) { n = 0; return; }
+		m_view.PushDefaultVBPart(curVb, curNn, *curParts, bv, n);
+		n = 0;
+	};
+	auto beginMesh=[&](ID3D11Buffer** vb, UINT* nn, int* parts, UINT align){
+		flush();
+		curVb = vb; curNn = nn; curParts = parts; primAlign = align ? align : 3u;
+		n = 0;
+	};
+	auto need=[&](UINT k)->BOOL{
+		if (k < 1) return FALSE;
+		if (curParts && *curParts >= CS3rView::S3R_MESH_PARTS) return FALSE;
+		if (n + k > bakeMax) flush();
+		if (curParts && *curParts >= CS3rView::S3R_MESH_PARTS) return FALSE;
+		if (n + k > bakeMax) return FALSE;
+		return TRUE;
+	};
 	auto put=[&](float x,float y,float z,float nx,float ny,float nz,float u,float vv,float r,float g,float b,float a)->BOOL{
-		if (n >= bakeMax) return FALSE;
+		if (!need(1)) return FALSE;
 		bv[n++] = {x,y,z,nx,ny,nz,u,vv,r,g,b,a};
 		return TRUE;
 	};
 	auto patch=[&](float x0,float y0,float z0,float x1,float y1,float z1,float x2,float y2,float z2,float x3,float y3,float z3,float nx,float ny,float nz,float u0,float v0,float u1,float v1,float r,float g,float b,float a){
+		if (!need(4)) return;
 		put(x0,y0,z0,nx,ny,nz,u0,v1,r,g,b,a); put(x1,y1,z1,nx,ny,nz,u1,v1,r,g,b,a);
 		put(x2,y2,z2,nx,ny,nz,u1,v0,r,g,b,a); put(x3,y3,z3,nx,ny,nz,u0,v0,r,g,b,a);
 	};
 	float half = BandHalfWidth();
-	n = 0;
+	beginMesh(m_view.m_vbBand, m_view.m_vbBandN, &m_view.m_vbBandParts, 4);
 	for (int i=0;i<segs;i++){
 		float t0=(float)i/segs, t1=(float)(i+1)/segs;
 		float p0x,p0y,p0z,t0x,t0y,t0z,n0x,n0y,n0z,b0x,b0y,b0z;
@@ -4389,7 +4469,7 @@ void CSoft3DRaceDlg::BakeStaticMeshes()
 		float p1x,p1y,p1z,t1x,t1y,t1z,n1x,n1y,n1z,b1x,b1y,b1z;
 		SplineFrame(tA,p0x,p0y,p0z,t0x,t0y,t0z,n0x,n0y,n0z,b0x,b0y,b0z);
 		SplineFrame(tB,p1x,p1y,p1z,t1x,t1y,t1z,n1x,n1y,n1z,b1x,b1y,b1z);
-		const int nChk = S3MeshScaleCount(8, 32);
+		const int nChk = S3MeshScaleCount(8, 48);
 		const float lift = 0.18f;
 		for (int k = 0; k < nChk; k++) {
 			float a0 = -1.f + 2.f * (float)k / (float)nChk;
@@ -4418,7 +4498,7 @@ void CSoft3DRaceDlg::BakeStaticMeshes()
 				  t0x,t0y,t0z, 0,0,1,1, cr,cg,cb,0.72f);
 		}
 	}
-	if (n >= 4) m_view.UploadDefaultVB(&m_view.m_vbBand, &m_view.m_vbBandN, bv, n);
+	beginMesh(m_view.m_vbTerr, m_view.m_vbTerrN, &m_view.m_vbTerrParts, 3);
 
 	float gr=.35f,gg=.55f,gb=.32f;
 	if (m_themeActive==THEME_FOREST){gr=.28f;gg=.62f;gb=.28f;}
@@ -4450,6 +4530,7 @@ void CSoft3DRaceDlg::BakeStaticMeshes()
 	auto pathD=[&](float x,float z)->float{ return sampHm(m_hmPathDist, x, z, 1e8f); };
 	auto quad=[&](float ax,float ay,float az, float bx,float by,float bz, float cx2,float cy2,float cz2, float dx,float dy,float dz,
 		float nx,float ny,float nz, float r,float g,float b){
+		if (!need(6)) return;
 		put(ax,ay,az,nx,ny,nz,0,0,r,g,b,1.f);
 		put(dx,dy,dz,nx,ny,nz,0,1,r,g,b,1.f);
 		put(cx2,cy2,cz2,nx,ny,nz,1,1,r,g,b,1.f);
@@ -4458,6 +4539,7 @@ void CSoft3DRaceDlg::BakeStaticMeshes()
 		put(bx,by,bz,nx,ny,nz,1,0,r,g,b,1.f);
 	};
 	auto terrPatch=[&](float xa,float za,float xb,float zb, float u0,float v0,float u1,float v1){
+		if (!need(6)) return;
 		float y00=GroundY(xa,za), y10=GroundY(xb,za), y11=GroundY(xb,zb), y01=GroundY(xa,zb);
 		float nx=(y00-y10)+(y01-y11), nz=(y00-y01)+(y10-y11), ny=(xb-xa)*2.f; S3rNorm3(nx,ny,nz);
 		put(xa,y00,za,nx,ny,nz,u0,v0,gr,gg,gb,1.f);
@@ -4545,7 +4627,7 @@ void CSoft3DRaceDlg::BakeStaticMeshes()
 			}
 		}
 	}
-	if (n >= 3) m_view.UploadTerrMesh(bv, n);
+	beginMesh(m_view.m_vbScenery, m_view.m_vbSceneryN, &m_view.m_vbSceneryParts, 3);
 
 	n = 0;
 	{
@@ -4557,6 +4639,7 @@ void CSoft3DRaceDlg::BakeStaticMeshes()
 			float x0 = x - hx, x1 = x + hx, z0 = z - hz, z1 = z + hz;
 			auto tri = [&](float ax,float ay,float az, float bx2,float by2,float bz2, float cx2,float cy2,float cz2,
 				float nx2,float ny2,float nz2) {
+				if (!need(3)) return;
 				put(ax,ay,az,nx2,ny2,nz2,0,0,r,g,b,1.f);
 				put(bx2,by2,bz2,nx2,ny2,nz2,1,0,r,g,b,1.f);
 				put(cx2,cy2,cz2,nx2,ny2,nz2,.5f,1,r,g,b,1.f);
@@ -4581,9 +4664,7 @@ void CSoft3DRaceDlg::BakeStaticMeshes()
 		float span = half + 0.28f;
 		gateBox(mx, my, mz, span, 0.16f, 0.16f, 0.88f, 0.16f, 0.18f);
 	}
-	if (n >= 3) m_view.UploadDefaultVB(&m_view.m_vbScenery, &m_view.m_vbSceneryN, bv, n);
-
-	n = 0;
+	beginMesh(m_view.m_vbWater, m_view.m_vbWaterN, &m_view.m_vbWaterParts, 3);
 	{
 		float wExt = m_demoRad + m_bandHalf + 40.f;
 		if (wExt < 200.f) wExt = 200.f;
@@ -4601,6 +4682,7 @@ void CSoft3DRaceDlg::BakeStaticMeshes()
 			float xb = xa + wStep, zb = za + wStep;
 			float y00=GroundY(xa,za), y10=GroundY(xb,za), y11=GroundY(xb,zb), y01=GroundY(xa,zb);
 			if (y00>wy+0.9f || y10>wy+0.9f || y11>wy+0.9f || y01>wy+0.9f) continue;
+			if (!need(6)) continue;
 			put(xa,wy,za,0,1,0,0,0,wr,wg,wb,wa);
 			put(xb,wy,za,0,1,0,1,0,wr,wg,wb,wa);
 			put(xb,wy,zb,0,1,0,1,1,wr,wg,wb,wa);
@@ -4609,7 +4691,7 @@ void CSoft3DRaceDlg::BakeStaticMeshes()
 			put(xa,wy,zb,0,1,0,0,1,wr,wg,wb,wa);
 		}
 	}
-	if (n >= 3) m_view.UploadDefaultVB(&m_view.m_vbWater, &m_view.m_vbWaterN, bv, n);
+	flush();
 	delete[] bv;
 
 	if (m_obsNv > 0 && m_obsNi >= 3)
@@ -4645,7 +4727,7 @@ void CSoft3DRaceDlg::BakeStaticMeshes()
 void CSoft3DRaceDlg::RenderScene()
 {
 	if (!m_view.m_ready || m_knotN < 4) return;
-	if (m_view.m_vbTerrN == 0 && m_hmReady) BakeStaticMeshes();
+	if (m_view.m_vbTerrParts < 1 && m_hmReady) BakeStaticMeshes();
 	ID3D11DeviceContext* dc = m_view.m_imm;
 	const int w = m_view.m_vw, h = m_view.m_vh; if (w < 8 || h < 8) return;
 	if (m_clearDirty) {
@@ -4874,7 +4956,7 @@ void CSoft3DRaceDlg::RenderScene()
 		default: r=1;g=.55f;b=.2f; break;
 		}
 		const float rad=.55f;
-		const int nl=S3MeshScaleCount(8, 48), nb=S3MeshScaleCount(5, 32);
+		const int nl=S3MeshScaleCount(8, 16), nb=S3MeshScaleCount(5, 12);
 		for(int ii=0;ii<nl;ii++){
 			float a0=(float)ii*(6.2831853f/(float)nl)+it.spin, a1=(float)(ii+1)*(6.2831853f/(float)nl)+it.spin;
 			for(int jj=0;jj<nb;jj++){
@@ -4893,7 +4975,7 @@ void CSoft3DRaceDlg::RenderScene()
 				put(x0,y0,z0,n0x,n0y,n0z,uA,vA,r,g,b,.90f); put(x2,y2,z2,n2x,n2y,n2z,uC,vC,r,g,b,.90f); put(x3,y3,z3,n3x,n3y,n3z,uD,vD,r,g,b,.90f);
 			}
 		}
-		const int nRing = S3MeshScaleCount(8, 32);
+		const int nRing = S3MeshScaleCount(8, 16);
 		for(int k=0;k<nRing;k++){
 			float a0=(float)k*(6.2831853f/(float)nRing)+it.spin*1.4f, a1=a0+(6.2831853f/(float)nRing);
 			float ri=rad*1.08f, ro=rad*1.28f, y0=it.y-rad*.07f, y1=it.y+rad*.07f;
@@ -5016,6 +5098,16 @@ void CSoft3DRaceDlg::RenderScene()
 		UINT st=sizeof(S3RVertex), of=0;
 		dc->IASetVertexBuffers(0,1,&vb,&st,&of);
 	};
+	auto drawParts=[&](ID3D11Buffer** vb, UINT* nn, int parts, UINT align){
+		for (int i = 0; i < parts; i++) {
+			if (!vb[i] || nn[i] < align) continue;
+			UINT d = nn[i];
+			if (align > 1) d -= d % align;
+			if (d < align) continue;
+			bindMesh(vb[i]);
+			dc->Draw(d, 0);
+		}
+	};
 	auto bindInst=[&](ID3D11Buffer* vb, ID3D11Buffer* ib, ID3D11Buffer* inst){
 		ID3D11Buffer* b[2]={vb,inst};
 		UINT st[2]={sizeof(S3RVertex), sizeof(S3RInst)};
@@ -5062,14 +5154,8 @@ void CSoft3DRaceDlg::RenderScene()
 		dc->VSSetShader(m_view.m_vsSolid,NULL,0); dc->PSSetShader(NULL,NULL,0); dc->IASetInputLayout(m_view.m_ilSolid);
 		dc->VSSetConstantBuffers(0,1,&m_view.m_cbFrame); dc->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 		UINT stride=sizeof(S3RVertex), off=0;
-		if (m_view.m_vbTerr && m_view.m_vbTerrN) {
-			dc->IASetVertexBuffers(0,1,&m_view.m_vbTerr,&stride,&off);
-			dc->Draw(m_view.m_vbTerrN, 0);
-		}
-		if (m_view.m_vbScenery && m_view.m_vbSceneryN) {
-			dc->IASetVertexBuffers(0,1,&m_view.m_vbScenery,&stride,&off);
-			dc->Draw(m_view.m_vbSceneryN, 0);
-		}
+		drawParts(m_view.m_vbTerr, m_view.m_vbTerrN, m_view.m_vbTerrParts, 3);
+		drawParts(m_view.m_vbScenery, m_view.m_vbSceneryN, m_view.m_vbSceneryParts, 3);
 		drawObsGpu();
 		drawCraftGpu();
 		dc->IASetVertexBuffers(0,1,&m_view.m_vbDyn,&stride,&off);
@@ -5103,21 +5189,19 @@ void CSoft3DRaceDlg::RenderScene()
 	dc->RSSetState(m_view.m_rsNoCull); dc->OMSetDepthStencilState(m_view.m_dssWrite,0); dc->OMSetBlendState(m_view.m_bsOpaque,NULL,0xffffffff);
 	dc->IASetInputLayout(m_view.m_ilSolid); dc->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 	dc->VSSetShader(m_view.m_vsSolid,NULL,0); dc->HSSetShader(NULL,NULL,0); dc->DSSetShader(NULL,NULL,0);
-	if (m_view.m_vbTerr && m_view.m_vbTerrN){
+	if (m_view.m_vbTerrParts > 0){
 		dc->PSSetShader(m_view.m_psTerr,NULL,0);
 		ID3D11ShaderResourceView* srvs[]={themeSrv,themeDet,NULL,envSrv,shSrv,noiseSrv};
 		dc->PSSetShaderResources(0,6,srvs);
-		bindMesh(m_view.m_vbTerr);
-		dc->Draw(m_view.m_vbTerrN, 0);
+		drawParts(m_view.m_vbTerr, m_view.m_vbTerrN, m_view.m_vbTerrParts, 3);
 	}
 	{
 		dc->PSSetShader(m_view.m_psSolid,NULL,0);
 		ID3D11ShaderResourceView* scenT1=m_view.m_srvWood?m_view.m_srvWood:obsSrv;
 		ID3D11ShaderResourceView* srvs[]={themeSrv,scenT1,NULL,envSrv,shSrv,noiseSrv};
 		dc->PSSetShaderResources(0,6,srvs);
-		if (m_view.m_vbScenery && m_view.m_vbSceneryN) {
-			bindMesh(m_view.m_vbScenery);
-			dc->Draw(m_view.m_vbSceneryN, 0);
+		if (m_view.m_vbSceneryParts > 0) {
+			drawParts(m_view.m_vbScenery, m_view.m_vbSceneryN, m_view.m_vbSceneryParts, 3);
 		}
 		{
 			ID3D11ShaderResourceView* osrvs[]={themeSrv,obsSrv,NULL,envSrv,shSrv,noiseSrv};
@@ -5145,7 +5229,7 @@ void CSoft3DRaceDlg::RenderScene()
 		dc->PSSetShaderResources(0,6,srvs);
 		drawCraftGpu();
 	}
-	if ((nWorld || m_view.m_vbTerrN || m_view.m_vbSceneryN) && cb.peel.w > 0.05f) {
+	if ((nWorld || m_view.m_vbTerrParts || m_view.m_vbSceneryParts) && cb.peel.w > 0.05f) {
 		S3RFrameCB cbPeel = cb;
 		cbPeel.peel.w = -cb.peel.w;
 		if (SUCCEEDED(dc->Map(m_view.m_cbFrame,0,D3D11_MAP_WRITE_DISCARD,0,&map))){ memcpy(map.pData,&cbPeel,sizeof(cbPeel)); dc->Unmap(m_view.m_cbFrame,0); }
@@ -5154,21 +5238,19 @@ void CSoft3DRaceDlg::RenderScene()
 		dc->OMSetBlendState(m_view.m_bsAlpha,NULL,0xffffffff);
 		dc->IASetInputLayout(m_view.m_ilSolid); dc->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 		dc->VSSetShader(m_view.m_vsSolid,NULL,0); dc->HSSetShader(NULL,NULL,0); dc->DSSetShader(NULL,NULL,0);
-		if (m_view.m_vbTerr && m_view.m_vbTerrN) {
+		if (m_view.m_vbTerrParts > 0) {
 			dc->PSSetShader(m_view.m_psTerr,NULL,0);
 			ID3D11ShaderResourceView* srvs[]={themeSrv,themeDet,NULL,envSrv,shSrv,noiseSrv};
 			dc->PSSetShaderResources(0,6,srvs);
-			bindMesh(m_view.m_vbTerr);
-			dc->Draw(m_view.m_vbTerrN, 0);
+			drawParts(m_view.m_vbTerr, m_view.m_vbTerrN, m_view.m_vbTerrParts, 3);
 		}
 		dc->PSSetShader(m_view.m_psSolid,NULL,0);
 		{
 			ID3D11ShaderResourceView* srvs[]={themeSrv,obsSrv,NULL,envSrv,shSrv,noiseSrv};
 			dc->PSSetShaderResources(0,6,srvs);
 		}
-		if (m_view.m_vbScenery && m_view.m_vbSceneryN) {
-			bindMesh(m_view.m_vbScenery);
-			dc->Draw(m_view.m_vbSceneryN, 0);
+		if (m_view.m_vbSceneryParts > 0) {
+			drawParts(m_view.m_vbScenery, m_view.m_vbSceneryN, m_view.m_vbSceneryParts, 3);
 		}
 		drawObsGpu();
 		if (nWorld > nTerr) {
@@ -5178,15 +5260,13 @@ void CSoft3DRaceDlg::RenderScene()
 		if (SUCCEEDED(dc->Map(m_view.m_cbFrame,0,D3D11_MAP_WRITE_DISCARD,0,&map))){ memcpy(map.pData,&cb,sizeof(cb)); dc->Unmap(m_view.m_cbFrame,0); }
 	}
 	{
-		UINT nB = m_view.m_vbBandN;
-		if (nB >= 4 && m_view.m_vbBand){
+		if (m_view.m_vbBandParts > 0){
 			dc->RSSetState(m_view.m_rsNoCull); dc->OMSetDepthStencilState(m_view.m_dssRead,0); dc->OMSetBlendState(m_view.m_bsAlpha,NULL,0xffffffff);
 			dc->IASetInputLayout(m_view.m_ilPatch); dc->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_4_CONTROL_POINT_PATCHLIST);
 			dc->VSSetShader(m_view.m_vsTess,NULL,0); dc->HSSetShader(m_view.m_hsTess,NULL,0); dc->DSSetShader(m_view.m_dsTess,NULL,0); dc->PSSetShader(m_view.m_psBand,NULL,0);
 			ID3D11ShaderResourceView* srvs[]={bandSrv,themeSrv,NULL,envSrv,shSrv,noiseSrv};
 			dc->PSSetShaderResources(0,6,srvs); dc->DSSetShaderResources(5,1,&noiseSrv); dc->DSSetShaderResources(0,1,&bandSrv);
-			bindMesh(m_view.m_vbBand);
-			dc->Draw(nB - (nB%4), 0);
+			drawParts(m_view.m_vbBand, m_view.m_vbBandN, m_view.m_vbBandParts, 4);
 			dc->HSSetShader(NULL,NULL,0); dc->DSSetShader(NULL,NULL,0);
 		}
 	}
@@ -5198,9 +5278,8 @@ void CSoft3DRaceDlg::RenderScene()
 		ID3D11ShaderResourceView* srvs[]={waterSrv,themeDet,NULL,envSrv,shSrv,noiseSrv};
 		dc->PSSetShaderResources(0,6,srvs);
 	}
-	if (m_view.m_vbWater && m_view.m_vbWaterN) {
-		bindMesh(m_view.m_vbWater);
-		dc->Draw(m_view.m_vbWaterN, 0);
+	if (m_view.m_vbWaterParts > 0) {
+		drawParts(m_view.m_vbWater, m_view.m_vbWaterN, m_view.m_vbWaterParts, 3);
 	}
 	if (nTrans){
 		bindMesh(m_view.m_vbDyn);
@@ -5631,7 +5710,7 @@ BOOL CSoft3DRaceDlg::OnInitDialog()
 	if (savedata.s3r_show_map != 0) savedata.s3r_show_map = 1; else savedata.s3r_show_map = 1;
 	if (savedata.s3r_zoom < 50 || savedata.s3r_zoom > 250) savedata.s3r_zoom = 100;
 	if (savedata.s3r_invert_y != 0) savedata.s3r_invert_y = 1;
-	if (savedata.s3_mesh_density < 0 || savedata.s3_mesh_density > 10) savedata.s3_mesh_density = 5;
+	if (savedata.s3_mesh_density < 0 || savedata.s3_mesh_density > S3_MESH_DENSITY_MAX) savedata.s3_mesh_density = 5;
 
 	SetWindowText(LL14(L"Soft3D 空中レース", L"Soft3D aerial race", L"Course aérienne Soft3D", L"Gara aerea Soft3D", L"Carrera aérea Soft3D",
 		L"Soft3D 공중 레이스", L"Soft3D 空中竞速", L"سباق Soft3D الجوي", L"Воздушная гонка Soft3D", L"Soft3D-Luftrennen",
@@ -5705,7 +5784,7 @@ BOOL CSoft3DRaceDlg::OnInitDialog()
 		m_tooltip.AddTool(&m_gen, LL14(L"コース再生成（直後にデモ走行）", L"Regenerate course (then demo lap)", L"Régénérer (puis démo)", L"Rigenera (poi demo)", L"Regenerar (luego demo)", L"코스 재생성(직후 데모)", L"重新生成（随后演示）", L"Regen then demo", L"Новая трасса → демо", L"Strecke neu → Demo", L"Gerar de novo → demo", L"Opnieuw → demo", L"Nowa trasa → demo", L"Yeniden oluştur → demo"));
 		m_tooltip.AddTool(&m_invert, LL14(L"マウス上下とパッド上下のピッチを反転します", L"Invert mouse and pad pitch (up/down)", L"Inverser le tangage souris/manette", L"Inverte pitch mouse/pad", L"Invertir pitch de ratón/mando", L"마우스·패드 상하 피치 반전", L"翻转鼠标/手柄俯仰", L"Invert mouse/pad pitch", L"Инверсия pitch мыши/пада", L"Maus-/Pad-Pitch umkehren", L"Inverter pitch do mouse/pad", L"Muis-/pad-pitch omkeren", L"Odwróć pitch myszy/pada", L"Fare/pad pitch ters çevir"));
 		m_tooltip.AddTool(&m_theme, LL14(L"テーマで地形とオブジェクトが変わります（丘・谷・川・トンネル）", L"Theme changes terrain and props (hills, valleys, rivers, tunnels)", L"Le thème change le terrain et les objets", L"Il tema cambia terreno e oggetti", L"El tema cambia terreno y objetos", L"테마에 따라 지형·오브젝트가 바뀝니다", L"主题会改变地形与物体（丘谷河隧道）", L"Theme changes terrain and props", L"Тема меняет рельеф и объекты", L"Thema ändert Gelände und Objekte", L"O tema muda terreno e objetos", L"Thema verandert terrein en objecten", L"Motyw zmienia teren i obiekty", L"Tema arazi ve nesneleri değiştirir"));
-		m_tooltip.AddTool(&m_mesh, LL14(L"地形・木などのメッシュ密度。軽量が現行、5が既定、緻密が最大（約80倍）", L"Terrain and prop mesh density. Light=current, 5=default, Dense=max (~80×)", L"Densité du maillage. Léger=actuel, 5=défaut, Dense=max (~80×)", L"Densità mesh. Leggero=attuale, 5=predef., Denso=max (~80×)", L"Densidad de malla. Ligero=actual, 5=predet., Denso=máx. (~80×)", L"지형·나무 메시 밀도. 가벼움=현재, 5=기본, 치밀=최대(약80배)", L"地形与树木网格密度。轻量=现行，5=默认，致密=最大（约80倍）", L"Mesh density. Light=current, 5=default, Dense=max (~80×)", L"Плотность сетки. Лёгкий=текущий, 5=по умолч., Плотный=макс. (~80×)", L"Netzdichte. Leicht=aktuell, 5=Standard, Dicht=max. (~80×)", L"Densidade da malha. Leve=atual, 5=padrão, Denso=máx. (~80×)", L"Meshdichtheid. Licht=huidig, 5=standaard, Dicht=max (~80×)", L"Gęstość siatki. Lekki=obecny, 5=domyślny, Gęsty=maks. (~80×)", L"Mesh yoğunluğu. Hafif=şimdiki, 5=varsayılan, Yoğun=en fazla (~80×)"));
+		m_tooltip.AddTool(&m_mesh, LL14(L"地形・木などのメッシュ密度。軽量=現行、5=既定、緻密≈80倍、美麗≈160倍（バッファ分割）", L"Terrain/prop mesh density. Light=current, 5=default, Dense≈80×, Fine≈160× (split buffers)", L"Densité. Léger=actuel, 5=défaut, Dense≈80×, Fin≈160× (plusieurs buffers)", L"Densità. Leggero=attuale, 5=predef., Denso≈80×, Fine≈160× (più buffer)", L"Densidad. Ligero=actual, 5=predet., Denso≈80×, Fino≈160× (varios buffers)", L"지형·나무 메시 밀도. 가벼움=현재, 5=기본, 치밀≈80배, 미려≈160배(분할)", L"地形与树木网格密度。轻量=现行，5=默认，致密≈80倍，美丽≈160倍（分块）", L"Mesh density. Light=current, 5=default, Dense≈80×, Fine≈160× (split buffers)", L"Плотность сетки. Лёгкий=текущий, 5=по умолч., Плотный≈80×, Изящный≈160×", L"Netzdichte. Leicht=aktuell, 5=Standard, Dicht≈80×, Fein≈160× (geteilt)", L"Densidade da malha. Leve=atual, 5=padrão, Denso≈80×, Belo≈160×", L"Meshdichtheid. Licht=huidig, 5=standaard, Dicht≈80×, Fijn≈160×", L"Gęstość siatki. Lekki=obecny, 5=domyślny, Gęsty≈80×, Piękny≈160×", L"Mesh yoğunluğu. Hafif=şimdiki, 5=varsayılan, Yoğun≈80×, Güzel≈160×"));
 	}
 
 	CaptureAudioBaseline();
@@ -5729,7 +5808,17 @@ BOOL CSoft3DRaceDlg::OnInitDialog()
 
 void CSoft3DRaceDlg::OnStart() { StartRace(); }
 void CSoft3DRaceDlg::OnGen() { GenerateCourse(); PersistUi(); }
-void CSoft3DRaceDlg::OnCloseBtn() { DestroyWindow(); }
+void CSoft3DRaceDlg::RequestDestroyWindow()
+{
+	m_view.m_ready = FALSE;
+	if (m_inTick) {
+		PostMessage(WM_CLOSE);
+		return;
+	}
+	DestroyWindow();
+}
+void CSoft3DRaceDlg::OnClose() { RequestDestroyWindow(); }
+void CSoft3DRaceDlg::OnCloseBtn() { RequestDestroyWindow(); }
 void CSoft3DRaceDlg::OnHelp() { ShowHelpSheet(); }
 void CSoft3DRaceDlg::OnAiChanged() { savedata.s3r_ai = ReadAiFromUi(); PersistUi(); }
 void CSoft3DRaceDlg::OnOppChanged() { savedata.s3r_opponents = ReadOppFromUi(); PersistUi(); }
@@ -5757,10 +5846,11 @@ void CSoft3DRaceDlg::OnContextMenu(CWnd* pWnd, CPoint point)
 
 void CSoft3DRaceDlg::TickFrame()
 {
-	if (!GetSafeHwnd() || !m_view.m_ready) return;
 	if (m_inTick) return;
 	m_inTick = 1;
+	if (!GetSafeHwnd() || !m_view.m_ready) { m_inTick = 0; return; }
 	PumpQueued(TRUE);
+	if (!GetSafeHwnd() || !m_view.m_ready) { m_inTick = 0; return; }
 	const DWORD now = GetTickCount();
 	float dt = (float)(now - m_lastTick) * 0.001f;
 	m_lastTick = now;
@@ -5845,6 +5935,7 @@ void CSoft3DRaceDlg::TickFrame()
 	} else if ((now % 200u) < 20u) {
 		UpdateStatus();
 	}
+	if (!GetSafeHwnd() || !m_view.m_ready) { m_inTick = 0; return; }
 	RenderScene();
 	{
 		for (int i = 0; i < S3R_MAX_CRAFT; i++) {
@@ -5871,7 +5962,8 @@ void CSoft3DRaceDlg::TickFrame()
 		Soft3DSfxPump();
 	}
 	m_view.RequestRedraw();
-	PumpQueued(FALSE);
+	if (GetSafeHwnd())
+		PumpQueued(FALSE);
 	m_inTick = 0;
 }
 
@@ -5891,8 +5983,8 @@ void CSoft3DRaceDlg::OnShowWindow(BOOL bShow, UINT nStatus)
 }
 void CSoft3DRaceDlg::OnDestroy()
 {
+	m_view.m_ready = FALSE;
 	PersistUi(); PersistWindowRect();
-	m_view.ClearStaticMeshes();
 	Soft3DSfxShutdown();
 	RestoreAudioBaseline();
 	S3rReleaseJoypad();
@@ -5917,7 +6009,7 @@ void OpenSoft3DRaceModeless(CWnd* p)
 }
 void CloseSoft3DRaceIfOpen()
 {
-	if (g_s3r && g_s3r->GetSafeHwnd()) g_s3r->DestroyWindow();
+	if (g_s3r && g_s3r->GetSafeHwnd()) g_s3r->RequestDestroyWindow();
 }
 BOOL IsSoft3DRaceOpen()
 {

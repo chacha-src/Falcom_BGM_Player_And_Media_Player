@@ -798,7 +798,7 @@ struct save{
 	int surround;               // 0..100（0=オフ）
 	// --- Soft3D レース／迷路 PCM効果音（末尾追記。旧.datは1=ON）---
 	int s3_pcm_sfx;             // 1=PCM合成効果音ON 0=OFF
-	// --- Soft3D メッシュ密度（末尾追記。旧.datは5）。0=軽量(現行) 1..9 10=緻密。描画量 1,8,16,..80 ---
+	// --- Soft3D メッシュ密度（末尾追記。旧.datは5）。0=軽量 1..9 10=緻密 11..19 20=美麗。描画量 1,8,..160 ---
 	int s3_mesh_density;
 };
 extern save savedata;
@@ -820,10 +820,11 @@ const wchar_t* LangPick14(
 // LL2は使用しないこと。LL14のみ。翻訳は手抜きしない。
 #define LL2(ja, en) LL14(ja, en, en, en, en, en, en, en, en, en, en, en, en, en)
 
+enum { S3_MESH_DENSITY_MAX = 20 };
 inline int S3MeshDensityLevel()
 {
 	int v = savedata.s3_mesh_density;
-	if (v < 0 || v > 10) v = 5;
+	if (v < 0 || v > S3_MESH_DENSITY_MAX) v = 5;
 	return v;
 }
 inline int S3MeshDensityMul()
@@ -860,20 +861,24 @@ inline const wchar_t* S3MeshDensityItemText(int i)
 	if (i <= 0)
 		return LL14(L"軽量", L"Light", L"Léger", L"Leggero", L"Ligero",
 			L"가벼움", L"轻量", L"خفيف", L"Лёгкий", L"Leicht", L"Leve", L"Licht", L"Lekki", L"Hafif");
-	if (i >= 10)
+	if (i == 10)
 		return LL14(L"緻密", L"Dense", L"Dense", L"Denso", L"Denso",
 			L"치밀", L"致密", L"كثيف", L"Плотный", L"Dicht", L"Denso", L"Dicht", L"Gęsty", L"Yoğun");
-	static const wchar_t* const kNum[10] = {
-		L"0", L"1", L"2", L"3", L"4", L"5", L"6", L"7", L"8", L"9"
+	if (i >= S3_MESH_DENSITY_MAX)
+		return LL14(L"美麗", L"Fine", L"Fin", L"Fine", L"Fino",
+			L"미려", L"美丽", L"فاخر", L"Изящный", L"Fein", L"Belo", L"Fijn", L"Piękny", L"Güzel");
+	static const wchar_t* const kNum[20] = {
+		L"0", L"1", L"2", L"3", L"4", L"5", L"6", L"7", L"8", L"9",
+		L"10", L"11", L"12", L"13", L"14", L"15", L"16", L"17", L"18", L"19"
 	};
-	if (i >= 1 && i <= 9) return kNum[i];
+	if (i >= 1 && i <= 19) return kNum[i];
 	return kNum[5];
 }
 inline void S3MeshFillCombo(CComboBox& cb)
 {
 	if (!cb.GetSafeHwnd()) return;
 	cb.ResetContent();
-	for (int i = 0; i <= 10; ++i)
+	for (int i = 0; i <= S3_MESH_DENSITY_MAX; ++i)
 		cb.AddString(S3MeshDensityItemText(i));
 	cb.SetCurSel(S3MeshDensityLevel());
 }

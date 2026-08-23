@@ -103,6 +103,14 @@ static BOOL S3mWorldToNdc(const S3MMat& vp, float x, float y, float z, float& nd
 }
 
 #define S3M_RELEASE(p) do { if (p) { (p)->Release(); (p)=NULL; } } while(0)
+static const UINT kS3mMaxDynBytes = 120u * 1024u * 1024u;
+static void S3mUnbindIA(ID3D11DeviceContext* dc)
+{
+	if (!dc) return;
+	ID3D11Buffer* z = NULL;
+	UINT st = 0, of = 0;
+	dc->IASetVertexBuffers(0, 1, &z, &st, &of);
+}
 
 static const int kPresets[] = { 10, 20, 30, 50, 80, 100, 150, 200, 300, 400, 600, 800, 1000, 1500, 2000, 3000 };
 static const int kPresetCnt = (int)(sizeof(kPresets) / sizeof(kPresets[0]));
@@ -437,20 +445,20 @@ void CS3mHelpDlg::OnPaint()
 		L"Harder: thinner maze, more stairs, multi-floor zigzags, plentiful items.",
 		L"Harder: thinner maze, more stairs, multi-floor zigzags, plentiful items.",
 		L"Harder: thinner maze, more stairs, multi-floor zigzags, plentiful items."));
-	line(LL14(L"密度: 軽量（現行の粗さ）／1〜9／緻密。既定は5（約40倍）。壁・床・球を細かくします。保存されます。",
-		L"Density: Light (current coarseness) / 1–9 / Dense. Default 5 (~40×). Smooths walls, floors and orbs. Saved.",
-		L"Densité : Léger (actuel) / 1–9 / Dense. Défaut 5 (~40×). Murs, sols et sphères. Sauvegardé.",
-		L"Densità: Leggero (attuale) / 1–9 / Denso. Predef. 5 (~40×). Muri, pavimenti e sfere. Salvato.",
-		L"Densidad: Ligero (actual) / 1–9 / Denso. Predet. 5 (~40×). Paredes, suelos y orbes. Se guarda.",
-		L"밀도: 가벼움(현재)/1–9/치밀. 기본 5(약40배). 벽·바닥·구를 부드럽게. 저장됨.",
-		L"密度：轻量（现行）／1–9／致密。默认5（约40倍）。细化墙壁、地板和球。会保存。",
-		L"Density: Light / 1–9 / Dense. Default 5 (~40×). Smooths walls, floors, orbs. Saved.",
-		L"Плотность: Лёгкий / 1–9 / Плотный. По умолчанию 5 (~40×). Стены, пол, сферы. Сохраняется.",
-		L"Dichte: Leicht / 1–9 / Dicht. Standard 5 (~40×). Wände, Böden, Kugeln. Wird gespeichert.",
-		L"Densidade: Leve / 1–9 / Denso. Padrão 5 (~40×). Paredes, pisos e orbes. Gravado.",
-		L"Dichtheid: Licht / 1–9 / Dicht. Standaard 5 (~40×). Wanden, vloeren, bollen. Opgeslagen.",
-		L"Gęstość: Lekki / 1–9 / Gęsty. Domyślnie 5 (~40×). Ściany, podłogi, kule. Zapisywane.",
-		L"Yoğunluk: Hafif / 1–9 / Yoğun. Varsayılan 5 (~40×). Duvar, zemin, küre. Kaydedilir."));
+	line(LL14(L"密度: 軽量／1〜9／緻密／11〜19／美麗。既定は5（約40倍）。緻密≈80倍、美麗≈160倍。壁・床・球を細かくします（上限超は分割描画）。保存されます。",
+		L"Density: Light / 1–9 / Dense / 11–19 / Fine. Default 5 (~40×). Dense≈80×, Fine≈160×. Smooths walls, floors and orbs (split-draw past the buffer cap). Saved.",
+		L"Densité : Léger / 1–9 / Dense / 11–19 / Fin. Défaut 5 (~40×). Dense≈80×, Fin≈160×. Murs, sols et sphères. Sauvegardé.",
+		L"Densità: Leggero / 1–9 / Denso / 11–19 / Fine. Predef. 5 (~40×). Denso≈80×, Fine≈160×. Muri, pavimenti e sfere. Salvato.",
+		L"Densidad: Ligero / 1–9 / Denso / 11–19 / Fino. Predet. 5 (~40×). Denso≈80×, Fino≈160×. Paredes, suelos y orbes. Se guarda.",
+		L"밀도: 가벼움/1–9/치밀/11–19/미려. 기본 5(약40배). 치밀≈80배, 미려≈160배. 벽·바닥·구. 저장됨.",
+		L"密度：轻量／1–9／致密／11–19／美丽。默认5（约40倍）。致密≈80倍，美丽≈160倍。细化墙壁、地板和球。会保存。",
+		L"Density: Light / 1–9 / Dense / 11–19 / Fine. Default 5 (~40×). Dense≈80×, Fine≈160×. Saved.",
+		L"Плотность: Лёгкий / 1–9 / Плотный / 11–19 / Изящный. По умолчанию 5 (~40×). Сохраняется.",
+		L"Dichte: Leicht / 1–9 / Dicht / 11–19 / Fein. Standard 5 (~40×). Wird gespeichert.",
+		L"Densidade: Leve / 1–9 / Denso / 11–19 / Belo. Padrão 5 (~40×). Gravado.",
+		L"Dichtheid: Licht / 1–9 / Dicht / 11–19 / Fijn. Standaard 5 (~40×). Opgeslagen.",
+		L"Gęstość: Lekki / 1–9 / Gęsty / 11–19 / Piękny. Domyślnie 5 (~40×). Zapisywane.",
+		L"Yoğunluk: Hafif / 1–9 / Yoğun / 11–19 / Güzel. Varsayılan 5 (~40×). Kaydedilir."));
 	line(LL14(L"鍵と扉: 難易度・サイズに応じて扉が置かれ、手前側に鍵がある。鍵を拾って扉を通る（1扉で鍵1消費）。ナビはゴール不通時に最寄りの鍵へ誘導する。",
 		L"Keys & doors: doors scale with size/difficulty; a key sits on the near side. Pick up a key to open a door (1 key each). Navi guides to the nearest key if the goal is locked.",
 		L"Clés et portes : selon taille/difficulté. Ramassez une clé pour ouvrir (1 par porte). Nav vers la clé si le but est bloqué.",
@@ -2331,13 +2339,13 @@ int CSoft3DMazeDlg::ReadMeshFromUi()
 		if (sel != CB_ERR) s = sel;
 	}
 	if (s < 0) s = savedata.s3_mesh_density;
-	if (s < 0 || s > 10) s = 5;
+	if (s < 0 || s > S3_MESH_DENSITY_MAX) s = 5;
 	return s;
 }
 
 void CSoft3DMazeDlg::SetMeshToUi(int v)
 {
-	if (v < 0 || v > 10) v = 5;
+	if (v < 0 || v > S3_MESH_DENSITY_MAX) v = 5;
 	savedata.s3_mesh_density = v;
 	if (m_mesh.GetSafeHwnd())
 		m_mesh.CComboBox::SetCurSel(v);
@@ -2358,7 +2366,7 @@ void CSoft3DMazeDlg::PersistUi()
 	if (savedata.s3m_zoom < 50 || savedata.s3m_zoom > 250) savedata.s3m_zoom = 100;
 	if (savedata.s3m_map_zoom < 50 || savedata.s3m_map_zoom > 400) savedata.s3m_map_zoom = 100;
 	if (savedata.s3m_difficulty < 0 || savedata.s3m_difficulty >= DIFF_COUNT) savedata.s3m_difficulty = DIFF_NORMAL;
-	if (savedata.s3_mesh_density < 0 || savedata.s3_mesh_density > 10) savedata.s3_mesh_density = 5;
+	if (savedata.s3_mesh_density < 0 || savedata.s3_mesh_density > S3_MESH_DENSITY_MAX) savedata.s3_mesh_density = 5;
 	PersistWindowRect();
 	MpPersistSavedataQuick();
 }
@@ -5407,7 +5415,7 @@ void CSoft3DMazeDlg::RenderScene()
 	if(!v)return;
 	UINT floorBeg=0,nFloor=0,wallBeg=0,nWall=0,transBeg=0,nTrans=0;int phase=0;
 	// 頂点が足りなければCPUスクラッチを倍々拡張（描画欠け防止）。上限≈64MB
-	const UINT kDynVertCap=(64u*1024u*1024u)/sizeof(S3MVertex);
+	const UINT kDynVertCap=kS3mMaxDynBytes/sizeof(S3MVertex);
 	auto ensureDynCap=[&](UINT needVerts)->BOOL{
 		if(needVerts<=maxV)return TRUE;
 		if(needVerts>kDynVertCap)return FALSE;
@@ -5441,15 +5449,16 @@ void CSoft3DMazeDlg::RenderScene()
 		const float cx=(x0+x1+x2+x3)*.25f,cy=(y0+y1+y2+y3)*.25f,cz=(z0+z1+z2+z3)*.25f;
 		if(nx*(ex-cx)+ny*(eyeY-cy)+nz*(ez-cz)<=0.f)return;
 		const int sd=S3MeshAxisMul();
-		if(sd<=1){quadUV(x0,y0,z0,x1,y1,z1,x2,y2,z2,x3,y3,z3,nx,ny,nz,0,0,1,1,r,g,b,a);return;}
+		const int sdQ=(sd>16)?16:sd;
+		if(sdQ<=1){quadUV(x0,y0,z0,x1,y1,z1,x2,y2,z2,x3,y3,z3,nx,ny,nz,0,0,1,1,r,g,b,a);return;}
 		auto at=[&](float t,float s,float& x,float& y,float& z){
 			float xa=x0+(x1-x0)*t,ya=y0+(y1-y0)*t,za=z0+(z1-z0)*t;
 			float xb=x3+(x2-x3)*t,yb=y3+(y2-y3)*t,zb=z3+(z2-z3)*t;
 			x=xa+(xb-xa)*s;y=ya+(yb-ya)*s;z=za+(zb-za)*s;
 		};
-		for(int j=0;j<sd;j++)for(int i=0;i<sd;i++){
-			float t0=(float)i/(float)sd,t1=(float)(i+1)/(float)sd;
-			float s0=(float)j/(float)sd,s1=(float)(j+1)/(float)sd;
+		for(int j=0;j<sdQ;j++)for(int i=0;i<sdQ;i++){
+			float t0=(float)i/(float)sdQ,t1=(float)(i+1)/(float)sdQ;
+			float s0=(float)j/(float)sdQ,s1=(float)(j+1)/(float)sdQ;
 			float ax,ay,az,bx,by,bz,cx2,cy2,cz2,dx,dy,dz;
 			at(t0,s0,ax,ay,az);at(t1,s0,bx,by,bz);at(t1,s1,cx2,cy2,cz2);at(t0,s1,dx,dy,dz);
 			quadUV(ax,ay,az,bx,by,bz,cx2,cy2,cz2,dx,dy,dz,nx,ny,nz,t0,s0,t1,s1,r,g,b,a);
@@ -5461,15 +5470,16 @@ void CSoft3DMazeDlg::RenderScene()
 		const float cx=(x0+x1+x2+x3)*.25f,cy=(y0+y1+y2+y3)*.25f,cz=(z0+z1+z2+z3)*.25f;
 		if(nx*(ex-cx)+ny*(eyeY-cy)+nz*(ez-cz)<=0.f)return;
 		const int sd=S3MeshAxisMul();
-		if(sd<=1){patch1(x0,y0,z0,x1,y1,z1,x2,y2,z2,x3,y3,z3,nx,ny,nz,u0,v0,u1,v1,r,g,b,a);return;}
+		const int sdP=(sd>2)?2:sd;
+		if(sdP<=1){patch1(x0,y0,z0,x1,y1,z1,x2,y2,z2,x3,y3,z3,nx,ny,nz,u0,v0,u1,v1,r,g,b,a);return;}
 		auto at=[&](float t,float s,float& x,float& y,float& z){
 			float xa=x0+(x1-x0)*t,ya=y0+(y1-y0)*t,za=z0+(z1-z0)*t;
 			float xb=x3+(x2-x3)*t,yb=y3+(y2-y3)*t,zb=z3+(z2-z3)*t;
 			x=xa+(xb-xa)*s;y=ya+(yb-ya)*s;z=za+(zb-za)*s;
 		};
-		for(int j=0;j<sd;j++)for(int i=0;i<sd;i++){
-			float t0=(float)i/(float)sd,t1=(float)(i+1)/(float)sd;
-			float s0=(float)j/(float)sd,s1=(float)(j+1)/(float)sd;
+		for(int j=0;j<sdP;j++)for(int i=0;i<sdP;i++){
+			float t0=(float)i/(float)sdP,t1=(float)(i+1)/(float)sdP;
+			float s0=(float)j/(float)sdP,s1=(float)(j+1)/(float)sdP;
 			float ax,ay,az,bx,by,bz,cx2,cy2,cz2,dx,dy,dz;
 			at(t0,s0,ax,ay,az);at(t1,s0,bx,by,bz);at(t1,s1,cx2,cy2,cz2);at(t0,s1,dx,dy,dz);
 			float uu0=u0+(u1-u0)*t0,uu1=u0+(u1-u0)*t1;
@@ -5498,7 +5508,7 @@ void CSoft3DMazeDlg::RenderScene()
 		quadUV(xb,ya,zb,xa,ya,zb,xa,yb,zb,xb,yb,zb,0,0,1,0,0,1,1,r,g,b,a);
 	};
 	auto emitSphere=[&](float cx,float cy,float cz,float rx,float ry,float rz,int nl,int nb,float r,float g,float b,float a,float u0,float v0,float u1,float v1){
-		nl=S3MeshScaleCount(nl,48); nb=S3MeshScaleCount(nb,24);
+		nl=S3MeshScaleCount(nl,64); nb=S3MeshScaleCount(nb,36);
 		if(nl<3)nl=3; if(nb<2)nb=2;
 		for(int i=0;i<nl;i++){
 			const float a0=(float)i*(6.2831853f/(float)nl), a1=(float)(i+1)*(6.2831853f/(float)nl);
@@ -5521,7 +5531,7 @@ void CSoft3DMazeDlg::RenderScene()
 		}
 	};
 	auto emitCone=[&](float cx,float cy,float cz,float rBase,float h,int n,float r,float g,float b,float a,float u0,float v0,float u1,float v1){
-		n=S3MeshScaleCount(n,48);
+		n=S3MeshScaleCount(n,64);
 		if(n<3)n=3;
 		const float tx=cx,ty=cy+h,tz=cz;
 		for(int i=0;i<n;i++){
@@ -6339,22 +6349,48 @@ void CSoft3DMazeDlg::RenderScene()
 		const UINT needBytes=used*sizeof(S3MVertex);
 		UINT gpuBytes=m_view.m_vbDynBytes;
 		if(!m_view.m_vbDyn||gpuBytes<needBytes){
-			gpuBytes=m_view.m_cpuDynScratchBytes;
-			if(gpuBytes<needBytes)gpuBytes=needBytes;
-			// 1MB 単位に切り上げ（再生成回数を抑える）
-			gpuBytes=(gpuBytes+0xFFFFFu)&~0xFFFFFu;
-			if(gpuBytes<needBytes)gpuBytes=needBytes;
-			S3M_RELEASE(m_view.m_vbDyn);
-			D3D11_BUFFER_DESC bd={};
-			bd.ByteWidth=gpuBytes;
-			bd.Usage=D3D11_USAGE_DYNAMIC;
-			bd.BindFlags=D3D11_BIND_VERTEX_BUFFER;
-			bd.CPUAccessFlags=D3D11_CPU_ACCESS_WRITE;
-			if(FAILED(m_view.m_dev->CreateBuffer(&bd,NULL,&m_view.m_vbDyn)))return;
-			m_view.m_vbDynBytes=gpuBytes;
+			UINT grow=m_view.m_cpuDynScratchBytes;
+			if(grow<needBytes)grow=needBytes;
+			grow=(grow+0xFFFFFu)&~0xFFFFFu;
+			if(grow<needBytes)grow=needBytes;
+			if(grow>kS3mMaxDynBytes)grow=kS3mMaxDynBytes;
+			if(!m_view.m_vbDyn || grow>m_view.m_vbDynBytes){
+				D3D11_BUFFER_DESC bd={};
+				bd.ByteWidth=grow;
+				bd.Usage=D3D11_USAGE_DYNAMIC;
+				bd.BindFlags=D3D11_BIND_VERTEX_BUFFER;
+				bd.CPUAccessFlags=D3D11_CPU_ACCESS_WRITE;
+				ID3D11Buffer* neu=NULL;
+				if(SUCCEEDED(m_view.m_dev->CreateBuffer(&bd,NULL,&neu)) && neu){
+					S3mUnbindIA(dc);
+					S3M_RELEASE(m_view.m_vbDyn);
+					m_view.m_vbDyn=neu;
+					m_view.m_vbDynBytes=grow;
+				}
+			}
+		}
+		if(!m_view.m_vbDyn)return;
+		const UINT fit=m_view.m_vbDynBytes/sizeof(S3MVertex);
+		UINT copyN=used;
+		if(copyN>fit)copyN=fit;
+		if(copyN<1)return;
+		if(FAILED(dc->Map(m_view.m_vbDyn,0,D3D11_MAP_WRITE_DISCARD,0,&map)))return;
+		memcpy(map.pData,v,copyN*sizeof(S3MVertex));
+		dc->Unmap(m_view.m_vbDyn,0);
+		if(copyN<used){
+			auto clampDraw=[&](UINT& n,UINT beg){
+				if(beg>=copyN){n=0;return;}
+				if(beg+n>copyN)n=copyN-beg;
+			};
+			for(int li=0;li<nLay;li++){
+				Layer& L=layers[li];
+				clampDraw(L.nF,L.fBeg); clampDraw(L.nMF,L.mfBeg);
+				clampDraw(L.nW,L.wBeg); clampDraw(L.nMW,L.mwBeg);
+			}
+			if(transBeg>=copyN)nTrans=0;
+			else if(transBeg+nTrans>copyN)nTrans=copyN-transBeg;
 		}
 	}
-	if(FAILED(dc->Map(m_view.m_vbDyn,0,D3D11_MAP_WRITE_DISCARD,0,&map)))return;memcpy(map.pData,v,(nFloor+nWall+nTrans)*sizeof(S3MVertex));dc->Unmap(m_view.m_vbDyn,0);
 	UINT stride=sizeof(S3MVertex),off=0;ID3D11ShaderResourceView* ns[7]={NULL,NULL,NULL,NULL,NULL,NULL,NULL};ID3D11RenderTargetView* nullRtv=NULL;
 	ID3D11ShaderResourceView* envUse=m_view.m_srvEnv;
 	{const int thE=ThemeOfFloor((m_floorFx==FLOORFX_IN)?m_stairFrom:m_floor); if(thE>=1&&m_view.m_srvEnvIn) envUse=m_view.m_srvEnvIn;}
@@ -7501,7 +7537,7 @@ BOOL CSoft3DMazeDlg::OnInitDialog()
 	if(savedata.s3m_fov<0||savedata.s3m_fov>2)savedata.s3m_fov=1;
 	if(savedata.s3m_basements<0||savedata.s3m_basements>S3M_MAX_FLOORS-1)savedata.s3m_basements=0;
 	if(savedata.s3m_difficulty<0||savedata.s3m_difficulty>=DIFF_COUNT)savedata.s3m_difficulty=DIFF_NORMAL;
-	if(savedata.s3_mesh_density<0||savedata.s3_mesh_density>10)savedata.s3_mesh_density=5;
+	if(savedata.s3_mesh_density<0||savedata.s3_mesh_density>S3_MESH_DENSITY_MAX)savedata.s3_mesh_density=5;
 	if(savedata.s3m_zoom<50||savedata.s3m_zoom>250)savedata.s3m_zoom=100;
 	if(savedata.s3m_map_zoom<50||savedata.s3m_map_zoom>400)savedata.s3m_map_zoom=100;
 
@@ -7568,8 +7604,8 @@ BOOL CSoft3DMazeDlg::OnInitDialog()
 			L"지하 층수(0~3). 계단으로 연결되고 골 위치는 난이도에 따라 달라집니다.", L"地下层数（0–3）。楼梯连接各层，终点位置随难度变化。", L"عدد الأقبية (0–3). السلالم تربط والطابق الهدف يعتمد على الصعوبة.", L"Число подземных этажей (0–3). Лестницы связывают; этаж цели зависит от сложности.", L"Anzahl Kellergeschosse (0–3). Treppen verbinden; Zielétage hängt von der Schwierigkeit ab.", L"Número de subsolos (0–3). Escadas ligam; o piso do gol depende da dificuldade.", L"Aantal kelders (0–3). Trappen verbinden; doelverdieping hangt van moeilijkheid af.", L"Liczba piwnic (0–3). Schody łączą; piętro celu zależy od trudności.", L"Bodrum sayısı (0–3). Merdivenler bağlar; hedef katı zorluğa göre değişir."));
 		m_tooltip.AddTool(&m_diff, LL14(L"難易度。難しいほど通路が細く、階段が多く上下往復し、ゴールは階をまたいだ遠い位置になります。アイテムは多めです。", L"Difficulty. Harder = thinner corridors, more stairs (floor zigzags), farther multi-floor goal. Items stay plentiful.", L"Difficulté. Plus difficile = couloirs fins, plus d'escaliers, but lointain. Objets nombreux.", L"Difficoltà. Più difficile = corridoi stretti, più scale, traguardo lontano. Molti oggetti.", L"Dificultad. Más difícil = pasillos estrechos, más escaleras, meta lejana. Muchos objetos.",
 			L"난이도. 어려울수록 좁은 통로·계단 많음(층 왕복)·먼 골. 아이템은 많음.", L"难度。越难通道越窄、楼梯越多（上下往返）、终点越远。道具偏多。", L"Harder: thinner corridors, more stairs, farther goal, plentiful items.", L"Harder: thinner corridors, more stairs, farther goal, plentiful items.", L"Harder: thinner corridors, more stairs, farther goal, plentiful items.", L"Harder: thinner corridors, more stairs, farther goal, plentiful items.", L"Harder: thinner corridors, more stairs, farther goal, plentiful items.", L"Harder: thinner corridors, more stairs, farther goal, plentiful items.", L"Harder: thinner corridors, more stairs, farther goal, plentiful items."));
-		m_tooltip.AddTool(&m_mesh, LL14(L"壁・床などのメッシュ密度。軽量が現行、5が既定、緻密が最大（約80倍）", L"Wall/floor mesh density. Light=current, 5=default, Dense=max (~80×)", L"Densité du maillage. Léger=actuel, 5=défaut, Dense=max (~80×)", L"Densità mesh. Leggero=attuale, 5=predef., Denso=max (~80×)", L"Densidad de malla. Ligero=actual, 5=predet., Denso=máx. (~80×)",
-			L"벽·바닥 메시 밀도. 가벼움=현재, 5=기본, 치밀=최대(약80배)", L"墙壁与地板网格密度。轻量=现行，5=默认，致密=最大（约80倍）", L"Mesh density. Light=current, 5=default, Dense=max (~80×)", L"Плотность сетки. Лёгкий=текущий, 5=по умолч., Плотный=макс.", L"Netzdichte. Leicht=aktuell, 5=Standard, Dicht=max.", L"Densidade da malha. Leve=atual, 5=padrão, Denso=máx.", L"Meshdichtheid. Licht=huidig, 5=standaard, Dicht=max", L"Gęstość siatki. Lekki=obecny, 5=domyślny, Gęsty=maks.", L"Mesh yoğunluğu. Hafif=şimdiki, 5=varsayılan, Yoğun=en fazla"));
+		m_tooltip.AddTool(&m_mesh, LL14(L"壁・床などのメッシュ密度。軽量=現行、5=既定、緻密≈80倍、美麗≈160倍", L"Wall/floor mesh density. Light=current, 5=default, Dense≈80×, Fine≈160×", L"Densité. Léger=actuel, 5=défaut, Dense≈80×, Fin≈160×", L"Densità. Leggero=attuale, 5=predef., Denso≈80×, Fine≈160×", L"Densidad. Ligero=actual, 5=predet., Denso≈80×, Fino≈160×",
+			L"벽·바닥 메시 밀도. 가벼움=현재, 5=기본, 치밀≈80배, 미려≈160배", L"墙壁与地板网格密度。轻量=现行，5=默认，致密≈80倍，美丽≈160倍", L"Mesh density. Light=current, 5=default, Dense≈80×, Fine≈160×", L"Плотность сетки. Лёгкий=текущий, 5=по умолч., Плотный≈80×, Изящный≈160×", L"Netzdichte. Leicht=aktuell, 5=Standard, Dicht≈80×, Fein≈160×", L"Densidade da malha. Leve=atual, 5=padrão, Denso≈80×, Belo≈160×", L"Meshdichtheid. Licht=huidig, 5=standaard, Dicht≈80×, Fijn≈160×", L"Gęstość siatki. Lekki=obecny, 5=domyślny, Gęsty≈80×, Piękny≈160×", L"Mesh yoğunluğu. Hafif=şimdiki, 5=varsayılan, Yoğun≈80×, Güzel≈160×"));
 		if (m_hint.GetSafeHwnd()) {
 			CString ht;
 			m_hint.GetWindowText(ht);

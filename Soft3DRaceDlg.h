@@ -36,8 +36,8 @@ public:
 	void ReleaseDx();
 	void ClearTerrMesh();
 	void ClearStaticMeshes();
-	BOOL UploadTerrMesh(const void* verts, UINT nVerts);
 	BOOL UploadDefaultVB(ID3D11Buffer** dst, UINT* nOut, const void* verts, UINT nVerts);
+	BOOL PushDefaultVBPart(ID3D11Buffer** arr, UINT* nArr, int& parts, const void* verts, UINT nVerts);
 	BOOL UploadDefaultIB(ID3D11Buffer** dst, UINT* nOut, const UINT* idx, UINT nIdx);
 	BOOL ResizeDx(int w, int h);
 	int m_dxFailStage; // InitDx 失敗段階（デバッグ用）
@@ -89,10 +89,12 @@ public:
 
 	ID3D11Buffer* m_cbFrame;
 	ID3D11Buffer* m_vbDyn;
-	ID3D11Buffer* m_vbTerr; // 地形はコース生成時に一度だけ。毎フレーム組まない
-	ID3D11Buffer* m_vbBand;
-	ID3D11Buffer* m_vbWater;
-	ID3D11Buffer* m_vbScenery; // ゲートなど少量の静的 TRIANGLELIST
+	enum { S3R_MESH_PARTS = 8 };
+	ID3D11Buffer* m_vbTerr[S3R_MESH_PARTS];
+	ID3D11Buffer* m_vbBand[S3R_MESH_PARTS];
+	ID3D11Buffer* m_vbWater[S3R_MESH_PARTS];
+	ID3D11Buffer* m_vbScenery[S3R_MESH_PARTS];
+	int m_vbTerrParts, m_vbBandParts, m_vbWaterParts, m_vbSceneryParts;
 	ID3D11Buffer* m_vbObs;
 	ID3D11Buffer* m_ibObs;
 	ID3D11Buffer* m_vbObsInst;
@@ -102,10 +104,10 @@ public:
 	ID3D11Buffer* m_vbHud;
 	UINT m_vbDynBytes;
 	UINT m_vbHudBytes;
-	UINT m_vbTerrN;
-	UINT m_vbBandN;
-	UINT m_vbWaterN;
-	UINT m_vbSceneryN;
+	UINT m_vbTerrN[S3R_MESH_PARTS];
+	UINT m_vbBandN[S3R_MESH_PARTS];
+	UINT m_vbWaterN[S3R_MESH_PARTS];
+	UINT m_vbSceneryN[S3R_MESH_PARTS];
 	UINT m_obsNvGpu, m_obsNiGpu, m_obsInstN;
 	UINT m_craftNvGpu, m_craftNiGpu;
 	BYTE* m_cpuDynScratch;
@@ -392,9 +394,11 @@ public:
 	void InputZoom(int dir);
 	virtual BOOL OnInitDialog();
 	virtual void OnOK() {}
-	virtual void OnCancel() { DestroyWindow(); }
+	virtual void OnCancel() { RequestDestroyWindow(); }
+	void RequestDestroyWindow();
 	afx_msg void OnStart();
 	afx_msg void OnGen();
+	afx_msg void OnClose();
 	afx_msg void OnCloseBtn();
 	afx_msg void OnHelp();
 	afx_msg void OnAiChanged();

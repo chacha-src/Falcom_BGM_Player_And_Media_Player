@@ -697,7 +697,7 @@ BOOL COggApp::InitInstance()
 		savedata.s3_pcm_sfx = savedata.s3_pcm_sfx ? 1 : 0;
 	if (datFileSize < (int)(offsetof(save, s3_mesh_density) + sizeof(savedata.s3_mesh_density)))
 		savedata.s3_mesh_density = 5;
-	else if (savedata.s3_mesh_density < 0 || savedata.s3_mesh_density > 10)
+	else if (savedata.s3_mesh_density < 0 || savedata.s3_mesh_density > 20)
 		savedata.s3_mesh_density = 5;
 	// wav_export_*_sec の正規化は saveversion 3 コンバート後に行う（intビットをfloatとして読まない）
 	// アナライザー窓: 必ず構造体末尾に追記(旧.datは部分読込で未設定のまま→既定値)
