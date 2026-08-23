@@ -112,6 +112,31 @@ static BOOL S3rWorldToNdc(const S3RMat& vp, float x, float y, float z, float& nd
 	if (ndcX < -1.28f || ndcX > 1.28f || ndcY < -1.22f || ndcY > 1.22f) return FALSE;
 	return TRUE;
 }
+static int S3rItemLabSlot(int kind)
+{
+	if (kind >= CSoft3DRaceDlg::KIND_TEMPO && kind <= CSoft3DRaceDlg::KIND_RANDOM)
+		return kind - CSoft3DRaceDlg::KIND_TEMPO;
+	return -1;
+}
+static void S3rItemLabRgb(int kind, float& r, float& g, float& b)
+{
+	r = 1.f; g = .55f; b = .2f;
+	switch (kind) {
+	case CSoft3DRaceDlg::KIND_TEMPO: r=.3f;g=1;b=.45f; break;
+	case CSoft3DRaceDlg::KIND_TEMPO_DN: r=.1f;g=.55f;b=.25f; break;
+	case CSoft3DRaceDlg::KIND_PITCH_UP: r=1;g=.65f;b=.25f; break;
+	case CSoft3DRaceDlg::KIND_PITCH_DN: r=.35f;g=.55f;b=1; break;
+	case CSoft3DRaceDlg::KIND_NEXT: r=1;g=.2f;b=.35f; break;
+	case CSoft3DRaceDlg::KIND_PREV: r=.55f;g=.1f;b=.2f; break;
+	case CSoft3DRaceDlg::KIND_VOL_UP: r=1;g=.95f;b=.35f; break;
+	case CSoft3DRaceDlg::KIND_VOL_DN: r=.55f;g=.6f;b=.2f; break;
+	case CSoft3DRaceDlg::KIND_EQ: r=.75f;g=.35f;b=1; break;
+	case CSoft3DRaceDlg::KIND_EQ_FLAT: r=.6f;g=.55f;b=.8f; break;
+	case CSoft3DRaceDlg::KIND_REVERB: r=.2f;g=.85f;b=.95f; break;
+	case CSoft3DRaceDlg::KIND_XFADE: r=1;g=.45f;b=.75f; break;
+	default: break;
+	}
+}
 static void S3rRankWord(int rank, wchar_t* buf, size_t n)
 {
 	if (!buf || n < 2) return;
@@ -391,13 +416,19 @@ void CS3rHelpDlg::OnPaint()
 		LL14(L"外側は固体。コースが当たる所だけ頂点を削りトンネルにする。壁・天井に当たるとHP減少。カメラとコースの間の地形は透けて通路が見える", L"Solid from outside; verts carved into a tunnel where the band hits. Walls/ceilings cost HP. Terrain between camera and the course fades so the lane stays visible", L"Solide dehors; tunnel là où la bande passe. Murs/plafonds = PV", L"Solido fuori; tunnel dove passa la fascia. Muri/soffitti = HP", L"Sólido fuera; túnel donde pasa la banda. Paredes/techos = HP", L"밖은 고체. 밴드가 닿는 곳만 터널. 벽·천장 충돌 시 HP↓", L"外侧实心；赛带穿过处挖隧道。撞壁/顶扣HP", L"Solid outside; tunnel where the band passes. Walls/ceilings hurt", L"Снаружи сплошные; туннель где лента. Стены/потолок ранят", L"Außen massiv; Tunnel wo das Band durchgeht. Wände/Decken schaden", L"Sólido por fora; túnel onde a faixa passa. Paredes/tetos ferem", L"Buiten massief; tunnel waar de band gaat. Wanden/plafonds raken", L"Z zewnątrz lite; tunel tam gdzie pas. Ściany/sufity ranią", L"Dışarıdan katı; bantın geçtiği yerde tünel. Duvar/tavan hasar"));
 	legendRow(RGB(50, 160, 70),
 		LL14(L"樹木・建造物／コース障害", L"Trees / buildings / on-path hazards", L"Arbres / bâtiments / obstacles", L"Alberi / edifici / ostacoli", L"Árboles / edificios / obstáculos", L"나무·건물·코스 장애", L"树木/建筑/赛道障碍", L"Trees/buildings/hazards", L"Деревья/здания/препятствия", L"Bäume/Gebäude/Hindernisse", L"Árvores/prédios/obstáculos", L"Bomen/gebouwen/hindernissen", L"Drzewa/budynki/przeszkody", L"Ağaç/bina/engel"),
-		LL14(L"帯に木や地形がめり込む。隙間を抜けて通る。芯に当たるとHP減少", L"Trees and terrain clip into the band; fly the gaps. Hitting the core costs HP", L"Arbres/terrain s'enfoncent dans la bande; passez les trous. Noyau = PV", L"Alberi/terreno nella fascia; passa i varchi. Nucleo = HP", L"Árboles/terreno en la banda; pasa los huecos. Núcleo = HP", L"나무·지형이 밴드에 파고듦. 틈으로 통과. 중심에 닿으면 HP↓", L"树和地形嵌入光带；从空隙穿过；碰到实心扣HP", L"Terrain/props clip the band; fly the gaps. Core hits cost HP", L"Деревья/рельеф в ленте; летите в просветы. Ядро = HP", L"Bäume/Gelände in das Band; Lücken durchfliegen. Kern = HP", L"Árvores/terreno na faixa; passe pelos vãos. Núcleo = HP", L"Bomen/terrein in de band; vlieg door gaten. Kern = HP", L"Drzewa/teren w pasie; leć prześwitami. Rdzeń = HP", L"Ağaç/arazi banta gömülür; boşluktan geç. Çekirdek = HP"));
+		LL14(L"帯に木や地形がめり込む。隙間を抜けて通る。当たるとHP約1/10減り、空いている側へ弾かれる", L"Trees clip the band; fly the gaps. A hit costs ~1/10 HP and knocks you toward the open side", L"Arbres dans la bande; passez les trous. Coup ≈1/10 PV, rejet vers le vide", L"Alberi nella fascia; passa i varchi. Colpo ≈1/10 HP, respinti verso lo spazio libero", L"Árboles en la banda; pasa los huecos. Golpe ≈1/10 HP, rebote al lado libre", L"나무·지형이 밴드에 파고듦. 틈으로 통과. 맞으면 HP 약 1/10, 빈 쪽으로 밀림", L"树和地形嵌入光带；从空隙穿过；碰到约扣1/10 HP并弹向空侧", L"Terrain/props clip the band; fly the gaps. Hit ≈1/10 HP, knock toward the open side", L"Деревья в ленте; летите в просветы. Удар ≈1/10 HP, отброс в свободную сторону", L"Bäume im Band; Lücken durchfliegen. Treffer ≈1/10 HP, Stoß zur freien Seite", L"Árvores na faixa; passe pelos vãos. Acerto ≈1/10 HP, empurra para o lado livre", L"Bomen in de band; vlieg door gaten. Raak ≈1/10 HP, stoot naar de vrije kant", L"Drzewa w pasie; leć prześwitami. Trafienie ≈1/10 HP, odbicie na wolną stronę", L"Ağaç banta gömülür; boşluktan geç. Çarpınca HP ~1/10, boş tarafa savrulur"));
+	legendRow(RGB(255, 120, 90),
+		LL14(L"機体同士の接触", L"Craft-to-craft contact", L"Contact entre appareils", L"Contatto tra craft", L"Contacto entre naves", L"기체끼리 접촉", L"机体相撞", L"Craft contact", L"Столкновение аппаратов", L"Kontakt zwischen Crafts", L"Contato entre naves", L"Contact tussen crafts", L"Kontakt maszyn", L"Araç çarpışması"),
+		LL14(L"当たると少し弾かれ、HPが約1/30減る（自機も敵も）", L"A bump knocks both slightly and costs ~1/30 HP (you and rivals)", L"Choc: petit rejet, ≈1/30 PV (vous et rivaux)", L"Urto: piccolo respingo, ≈1/30 HP (tu e rivali)", L"Choque: rebote leve, ≈1/30 HP (tú y rivales)", L"부딪히면 살짝 밀리고 HP 약 1/30 (자신·상대)", L"相撞会轻弹开，约扣1/30 HP（自己和对手）", L"Bump: slight knock, ~1/30 HP (you and rivals)", L"Удар: лёгкий отброс, ≈1/30 HP (вы и соперники)", L"Stoß: leichter Kick, ≈1/30 HP (Sie und Rivalen)", L"Batida: empurrão leve, ≈1/30 HP (você e rivais)", L"Botsing: lichte stoot, ≈1/30 HP (jij en rivalen)", L"Zderzenie: lekkie odbicie, ≈1/30 HP (ty i rywale)", L"Çarpışma: hafif savrulma, ≈1/30 HP (siz ve rakipler)"));
+	legendRow(RGB(220, 80, 50),
+		LL14(L"敵AIのHP／爆破リタイア", L"Rival HP / explode retire", L"PV IA / explosion abandon", L"HP IA / ritiro esplosione", L"HP IA / retiro explosión", L"상대 HP/폭발 리타이어", L"对手HP／爆破退赛", L"Rival HP / explode retire", L"HP ИИ / взрыв и сход", L"KI-HP / Explosion-Aufgabe", L"HP IA / abandono explosão", L"AI-HP / explosie-opgave", L"HP SI / wybuch i wycofanie", L"YZ HP / patlama çekilme"),
+		LL14(L"敵も障害で同じダメージ。HP0で爆破してその場リタイア。他機に抜かれ順位が下がる。超簡単は12台で最大4機程度", L"Rivals take the same hazard hits. HP 0 explodes and retires in place; others pass so rank falls. Super-easy: at most ~4 of 12", L"Les IA prennent les memes coups. PV 0 = explosion et abandon sur place", L"Le IA subiscono gli stessi colpi. HP 0 = esplosione e ritiro", L"Las IA reciben los mismos golpes. HP 0 = explosion y abandono", L"상대도 같은 장애 데미지. HP0이면 폭발 리타이어. 초간단은 12대 중 최대 4기", L"对手同样受障碍伤害。HP0爆破原地退赛。超简单12台最多约4机", L"Rivals take the same hits. HP 0 explodes and retires in place", L"Соперники получают тот же урон. HP 0 — взрыв и сход", L"Rivalen erleiden denselben Schaden. HP 0 explodiert und gibt auf", L"Rivais sofrem o mesmo dano. HP 0 explode e abandona", L"Rivalen krijgen dezelfde hits. HP 0 explodeert en geeft op", L"Rywale biorą te same trafienia. HP 0 — wybuch i wycofanie", L"Rakipler aynı hasarı alır. HP 0 patlar ve çekilir"));
 	legendRow(RGB(255, 170, 90),
 		LL14(L"自機（鳥型クラフト）", L"Your craft (bird-ship)", L"Votre appareil", L"Il tuo craft", L"Tu nave", L"기체(새형)", L"自机（鸟型）", L"Your craft", L"Ваш корабль", L"Ihr Craft", L"Sua nave", L"Jouw craft", L"Twój craft", L"Aracınız"),
 		LL14(L"斜め上カメラが追従。急坂では徐々に下から見上げる（酔い対策）。マウスで向き、LMB加速／RMBブレーキ", L"Chase cam; on steep climbs it eases to a low look-up. Mouse steers; LMB accel / RMB brake", L"Caméra chase; en montée elle descend progressivement. Souris = direction", L"Camera chase; in salita scende gradualmente. Mouse = sterzo", L"Cámara chase; en subida baja poco a poco. Ratón = dirección", L"추종 카메라. 급경사에서는 천천히 아래에서 올려다봄. 마우스 조향", L"追从相机；急坡时逐渐改从下往上看。鼠标转向", L"Chase cam; steep climbs ease to look-up from below", L"Камера сзади; на крутом подъёме плавно снизу", L"Chase-Kamera; an Steigungen langsam von unten", L"Câmera chase; em subidas desce aos poucos", L"Chase-camera; bij steile helling langzaam van onder", L"Kamera z góry; na stromiźnie stopniowo od dołu", L"Üst-arka kamera; dik yokuşta yavaşça alttan"));
 	legendRow(RGB(80, 230, 130),
 		LL14(L"アイテム球", L"Item orbs", L"Sphères d'objets", L"Sfere oggetto", L"Orbes de objeto", L"아이템 구", L"道具球", L"Item orbs", L"Сферы предметов", L"Item-Kugeln", L"Orbes de item", L"Item-bollen", L"Kule przedmiotów", L"Öğe küreleri"),
-		LL14(L"触れると再生テンポ／ピッチ等＋レース効果（加速・霧など）", L"Touch to tweak playback + race buffs (boost, fog, …)", L"Toucher = lecture + buffs course", L"Tocco = riproduzione + buff", L"Tocar = reproducción + buffs", L"접촉 시 재생+레이스 버프", L"触碰改播放并带竞速效果", L"Playback + race effects", L"Воспроизведение + баффы", L"Playback + Buffs", L"Reprodução + buffs", L"Weergave + buffs", L"Odtwarzanie + buffy", L"Oynatma + buff"));
+		LL14(L"触れると再生テンポ／ピッチ等＋レース効果。球の上に小さなラベル", L"Touch for playback + race buffs. Small label above the orb", L"Toucher = lecture + buffs. Petite étiquette", L"Tocco = riproduzione + buff. Piccola etichetta", L"Tocar = reproducción + buffs. Etiqueta pequeña", L"접촉 시 재생+레이스 버프. 구 위에 작은 라벨", L"触碰改播放并带竞速效果。球上有小标签", L"Playback + race effects. Small label above", L"Воспроизведение + баффы. Маленькая метка сверху", L"Playback + Buffs. Kleines Label oben", L"Reprodução + buffs. Rótulo pequeno acima", L"Weergave + buffs. Klein label erboven", L"Odtwarzanie + buffy. Mała etykieta u góry", L"Oynatma + buff. Üstte küçük etiket"));
 	legendRow(RGB(140, 200, 255),
 		LL14(L"デモ走行（生成〜スタート前）", L"Demo (after generate, before Start)", L"Démo (après Générer)", L"Demo (dopo Genera)", L"Demo (tras Generar)", L"데모(생성~시작 전)", L"演示（生成到开始前）", L"Demo until Start", L"Демо до Старта", L"Demo bis Start", L"Demo até Iniciar", L"Demo tot Start", L"Demo do Start", L"Demo → Başlat"),
 		LL14(L"俯瞰でコース全体を見せ、自機もAI走行。マウスで視点。スタートで本番", L"Overview of whole course; your craft is AI too. Mouse pans. Start = race", L"Vue d'ensemble; votre craft en IA. Souris=vue. Démarrer=course", L"Vista d'insieme; anche il tuo craft in IA. Mouse=vista. Avvia=gara", L"Vista general; tu nave también IA. Ratón=vista. Iniciar=carrera", L"전체 조감+자기 AI. 마우스 시점. 시작=본경기", L"俯瞰全图，自机也AI跑。鼠标转视角。开始进正式赛", L"Overview + AI you; mouse pans; Start races", L"Обзор; ваш аппарат ИИ; мышь; Старт=гонка", L"Überblick; Ihr Craft KI; Maus; Start=Rennen", L"Visão geral; sua nave IA; mouse; Iniciar=corrida", L"Overzicht; jouw craft AI; muis; Start=race", L"Przegląd; Twój craft AI; mysz; Start=wyścig", L"Genel bakış; gemin AI; fare; Başlat=yarış"));
@@ -453,20 +484,34 @@ void CS3rHelpDlg::OnPaint()
 		L"Invert-Y-combo: muis/pad-pitch omkeren (opgeslagen)",
 		L"Combo Invert-Y: odwraca pitch myszy/pada (zapisywane)",
 		L"Y ters çevir: fare/pad pitch ters (kaydedilir)"));
-	line(LL14(L"帯外はフリー走行でショートカット可。推進力ゲージが0になると動けず離脱地点へ復帰（HPはそのまま）。障害物はHPのみ減らす。",
-		L"Off-band free flight for shortcuts. Thrust gauge 0 = reset to exit (HP unchanged). Obstacles only cut HP.",
-		L"Hors bande libre. Poussée 0 = retour (PV inchangé). Obstacles = PV seulement.",
-		L"Fuori libero. Spinta 0 = reset (HP invariato). Ostacoli = solo HP.",
-		L"Fuera libre. Empuje 0 = reinicio (HP igual). Obstáculos = solo HP.",
-		L"밴드 밖 자유 비행. 추진력 0이면 복귀(HP 유지). 장애물은 HP만 감소.",
-		L"带外可抄近路；推进力0回脱离点（HP不变）。障碍只扣HP。",
-		L"Off-band shortcuts; thrust 0 = reset (HP kept). Obstacles hit HP only.",
-		L"Вне ленты свободно; тяга 0 = возврат (HP без изменений).",
-		L"Off-band frei; Schub 0 = Reset (HP bleibt). Hindernisse nur HP.",
-		L"Fora livre; empuxo 0 = reset (HP igual). Obstáculos só HP.",
-		L"Buiten vrij; stuwkracht 0 = reset (HP blijft). Obstakels alleen HP.",
-		L"Poza pasem wolno; ciąg 0 = reset (HP bez zmian). Przeszkody tylko HP.",
-		L"Bant dışı serbest; itki 0 = dönüş (HP aynı). Engeller yalnız HP."));
+	line(LL14(L"帯外はフリー走行でショートカット可。推進力ゲージが0になると動けず離脱地点へ復帰（HPはそのまま）。障害物に当たるとHP約1/10減り、空いている側へ弾かれる。",
+		L"Off-band free flight for shortcuts. Thrust gauge 0 = reset to exit (HP unchanged). Hitting an obstacle costs ~1/10 HP and knocks you toward the open side.",
+		L"Hors bande libre. Poussée 0 = retour (PV inchangé). Obstacle ≈1/10 PV, rejet vers le vide.",
+		L"Fuori libero. Spinta 0 = reset (HP invariato). Ostacolo ≈1/10 HP, respinti verso lo spazio libero.",
+		L"Fuera libre. Empuje 0 = reinicio (HP igual). Obstáculo ≈1/10 HP, rebote al lado libre.",
+		L"밴드 밖 자유 비행. 추진력 0이면 복귀(HP 유지). 장애물에 맞으면 HP 약 1/10, 빈 쪽으로 밀림.",
+		L"带外可抄近路；推进力0回脱离点（HP不变）。撞障碍约扣1/10 HP并弹向空侧。",
+		L"Off-band shortcuts; thrust 0 = reset (HP kept). Obstacle hit ≈1/10 HP, knock toward the open side.",
+		L"Вне ленты свободно; тяга 0 = возврат (HP без изменений). Удар ≈1/10 HP, отброс в свободную сторону.",
+		L"Off-band frei; Schub 0 = Reset (HP bleibt). Treffer ≈1/10 HP, Stoß zur freien Seite.",
+		L"Fora livre; empuxo 0 = reset (HP igual). Acerto ≈1/10 HP, empurra para o lado livre.",
+		L"Buiten vrij; stuwkracht 0 = reset (HP blijft). Raak ≈1/10 HP, stoot naar de vrije kant.",
+		L"Poza pasem wolno; ciąg 0 = reset (HP bez zmian). Trafienie ≈1/10 HP, odbicie na wolną stronę.",
+		L"Bant dışı serbest; itki 0 = dönüş (HP aynı). Çarpınca HP ~1/10, boş tarafa savrulur."));
+	line(LL14(L"機体同士が当たると少し弾かれHP約1/30。敵AIもHPがあり、0で爆破してその場リタイア（順位は抜かれて下がる）。AIレベルで蛇行・ショートカット・減速の上手い下手が出る。超簡単は12台でリタイア最大4機程度。強烈でも勝てる。",
+		L"Craft bumps knock slightly (~1/30 HP). Rivals have HP too; at 0 they explode and retire in place (rank falls as others pass). AI level is weaving, cuts, braking. Super-easy: at most ~4 of 12 retire. Intense is still beatable.",
+		L"Choc entre appareils ≈1/30 PV. Les IA ont aussi des PV; à 0 explosion et abandon. Super facile: ≤4/12. Intense reste battable.",
+		L"Urto tra craft ≈1/30 HP. Anche le IA hanno HP; a 0 esplodono e si ritirano. Super facile: ≤4/12. Intenso è battibile.",
+		L"Choque entre naves ≈1/30 HP. Las IA también tienen HP; a 0 explosionan y abandonan. Super fácil: ≤4/12. Intenso se puede ganar.",
+		L"기체끼리 부딪히면 HP 약 1/30. 상대도 HP가 있고 0이면 폭발 리타이어. 초간단은 12대 중 최대 4기. 강렬해도 이길 수 있음.",
+		L"机体相撞约扣1/30 HP。对手也有HP，归零爆破原地退赛。超简单12台最多约4机。强烈仍可赢。",
+		L"Craft bumps ~1/30 HP. Rivals explode and retire at HP 0. Super-easy: at most ~4 of 12. Intense is beatable.",
+		L"Столкновение ≈1/30 HP. У ИИ тоже HP; при 0 взрыв и сход. Сверхлегко: ≤4 из 12. Сложный уровень обыгрывается.",
+		L"Craft-Kontakt ≈1/30 HP. Rivalen explodieren bei HP 0. Superleicht: höchstens ~4 von 12. Intensiv ist schlagbar.",
+		L"Batida entre naves ≈1/30 HP. Rivais explodem e abandonam em HP 0. Super fácil: ≤4 de 12. Intenso ainda é vencível.",
+		L"Botsing ≈1/30 HP. Rivalen exploderen bij HP 0. Super makkelijk: max. ~4 van 12. Intens is te verslaan.",
+		L"Zderzenie ≈1/30 HP. Rywale wybuchają przy HP 0. Super łatwy: maks. ~4 z 12. Intensywny da się wygrać.",
+		L"Çarpışma ≈1/30 HP. Rakipler HP 0’da patlar ve çekilir. Çok kolay: 12’de en fazla ~4. Yoğun da yenilebilir."));
 	line(LL14(L"右のミニマップ下に順位パネル（名前の右へLAPを2行・最大4枠。入りきらない周は出さない）。自機行だけ色が違う。ゴール後は表彰台で1〜3位を表示。",
 		L"Standings under the minimap (name/rank; up to 4 recent LAP times in two rows). Your row is tinted. After finish: podium 1–3.",
 		L"Classement sous la minimap (nom/rang/tours). Votre ligne est teintée. Après: podium 1–3.",
@@ -495,20 +540,34 @@ void CS3rHelpDlg::OnPaint()
 		L"Nalopende camera; bij helling van onder. Heuvels/dalen/rivieren; tunnels door bergen. Bomen mogen in de band steken; vlieg door gaten.",
 		L"Opóźniona kamera; na stromiźnie od dołu. Wzgórza/doliny/rzeki; tunele w górach. Drzewa mogą wchodzić w pas; leć prześwitami.",
 		L"Gecikmeli kamera; dik yokuşta alttan. Tepe/vadi/ırmak; dağ tünelleri. Ağaçlar banta gömülebilir; boşluktan geçin."));
-	line(LL14(L"テーマで森〜雲の庭まで変化。地形もオブジェクトもテーマごと。ライセンスフリーの写真テクスチャ50枚（256）をexeに埋め込んでいます（別ファイル不要）。地面はテーマ写真に細部を重ね、水面・機体・空の雲カードとキューブも写真。反射と乱反射があり、アイテムは結晶球です。生成のたびに輪郭も抽選（楕円／高低差のある八の字／角の丸い凸型／くびれた凹型）。八の字の交差は段差なので横切ってショートカットできない。枝下／土管の間／山のトンネル／急坂／開けた区間が混在。",
-		L"Themes from forest to cloud garden. Terrain and props change per theme. Fifty license-free photo textures (256px) are embedded in the exe (no extra files): theme albedo plus detail, water, craft, cloud cards and a sky cube. Wrap lighting and reflection; items are crystal orbs. Each Generate also picks a plan: oval, figure-8 with a height split (no flat shortcut through the crossing), rounded convex, or a concave pinch. Mix of canopy gaps, pipe gaps, mountain tunnels, steep climbs and open stretches.",
-		L"Thèmes forêt→jardin de nuages. 50 textures photo 256 dans l'exe (albédo+détail, eau, nuages, ciel). Réflexion ; objets en orbes. Générer tire aussi le tracé: ovale, 8 avec dénivelé (pas de coupe à plat), convexe arrondi ou concave. Branches, tuyaux, tunnels, pentes, ouvert.",
-		L"Temi foresta→giardino di nubi. 50 texture foto 256 nell'exe (albedo+dettaglio, acqua, nubi, cielo). Riflessione; oggetti a sfera. Genera estrae anche il tracciato: ovale, 8 con dislivello, convesso o concavo. Rami, tubi, tunnel, salite, aperti.",
-		L"Temas bosque→jardín de nubes. 50 texturas foto 256 en el exe (albedo+detalle, agua, nubes, cielo). Reflexión; objetos en orbe. Generar también elige el trazado: óvalo, 8 con desnivel, convexo o cóncavo. Ramas, tuberías, túneles, pendientes.",
-		L"테마: 숲~구름 정원. 라이선스 프리 사진 텍스처 50장(256)을 exe에 내장. 지면은 테마+세부, 수면·기체·구름 카드·하늘도 사진. 반사·난반사, 아이템은 결정 구. 생성마다 윤곽도 추첨(타원/고저 8자/볼록/오목). 8자 교차는 단차라 가로질러 숏컷 불가. 가지/파이프/터널/급경사/개방 혼합.",
-		L"主题从森林到云之庭。许可证自由照片纹理50张、256、嵌入exe。地面为主题加细节，水面/机体/云卡/天空亦为照片。反射与漫反射，道具为结晶球。每次生成也抽轮廓：椭圆／带高低差的8字（交叉处不能平切）／圆角凸形／收腰凹形。枝下/管隙/山洞/急坡/开阔混在。",
-		L"Themes forest→cloud garden. 50 photo textures 256 in the exe (albedo+detail, water, cloud cards, sky cube). Reflection; crystal item orbs. Generate also picks oval, a height-split figure-8 (no flat shortcut), rounded convex or a concave pinch. Branches/pipes/tunnels/climbs/open.",
-		L"Темы лес→облачный сад. 50 фототекстур 256 в exe (альбедо+деталь, вода, облака, небо). Отражение; предметы-сферы. Создать также выбирает овал, восьмёрку с перепадом, выпуклый или вогнутый контур.",
-		L"Themen Wald→Wolkengarten. 50 Fototexturen 256 in der exe (Albedo+Detail, Wasser, Wolken, Himmel). Reflexion; Item-Kugeln. Erzeugen wählt auch Oval, Achter mit Höhensprung, konvex oder konkav.",
-		L"Temas floresta→jardim de nuvens. 50 texturas foto 256 no exe (albedo+detalhe, água, nuvens, céu). Reflexão; orbes de item. Gerar também escolhe oval, 8 com desnível, convexo ou côncavo.",
-		L"Thema's bos→wolken tuin. 50 fototexturen 256 in de exe (albedo+detail, water, wolken, lucht). Reflectie; item-bollen. Genereren kiest ook ovaal, 8-vorm met hoogteverschil, convex of concaaf.",
-		L"Tematy las→ogród chmur. 50 tekstur zdjęciowych 256 w exe (albedo+szczegół, woda, chmury, niebo). Odbicie; kule przedmiotów. Generuj losuje też owal, ósemkę z przewyższeniem, wypukły lub wklęsły.",
-		L"Temalar orman→bulut bahçesi. 50 adet 256 fotoğraf dokusu exe içinde (albedo+ayrıntı, su, bulut, gök). Yansıma; öğe küreleri. Üret oval, yükseklik farklı 8, dışbükey veya içbükey de seçer."));
+	line(LL14(L"テーマで森〜雲の庭まで変化。地形もオブジェクトもテーマごと。ライセンスフリーの写真テクスチャ50枚（512）をexeに埋め込んでいます（別ファイル不要）。地面はテーマ写真に細部を重ね、水面・機体・空の雲カードとキューブも写真。反射と乱反射があり、アイテムは結晶球です。生成のたびに輪郭も抽選（楕円／高低差のある八の字／角の丸い凸型／くびれた凹型）。八の字の交差は段差なので横切ってショートカットできない。枝下／土管の間／山のトンネル／急坂／開けた区間が混在。",
+		L"Themes from forest to cloud garden. Terrain and props change per theme. Fifty license-free photo textures (512px) are embedded in the exe (no extra files): theme albedo plus detail, water, craft, cloud cards and a sky cube. Wrap lighting and reflection; items are crystal orbs. Each Generate also picks a plan: oval, figure-8 with a height split (no flat shortcut through the crossing), rounded convex, or a concave pinch. Mix of canopy gaps, pipe gaps, mountain tunnels, steep climbs and open stretches.",
+		L"Thèmes forêt→jardin de nuages. 50 textures photo 512 dans l'exe (albédo+détail, eau, nuages, ciel). Réflexion ; objets en orbes. Générer tire aussi le tracé: ovale, 8 avec dénivelé (pas de coupe à plat), convexe arrondi ou concave. Branches, tuyaux, tunnels, pentes, ouvert.",
+		L"Temi foresta→giardino di nubi. 50 texture foto 512 nell'exe (albedo+dettaglio, acqua, nubi, cielo). Riflessione; oggetti a sfera. Genera estrae anche il tracciato: ovale, 8 con dislivello, convesso o concavo. Rami, tubi, tunnel, salite, aperti.",
+		L"Temas bosque→jardín de nubes. 50 texturas foto 512 en el exe (albedo+detalle, agua, nubes, cielo). Reflexión; objetos en orbe. Generar también elige el trazado: óvalo, 8 con desnivel, convexo o cóncavo. Ramas, tuberías, túneles, pendientes.",
+		L"테마: 숲~구름 정원. 라이선스 프리 사진 텍스처 50장(512)을 exe에 내장. 지면은 테마+세부, 수면·기체·구름 카드·하늘도 사진. 반사·난반사, 아이템은 결정 구. 생성마다 윤곽도 추첨(타원/고저 8자/볼록/오목). 8자 교차는 단차라 가로질러 숏컷 불가. 가지/파이프/터널/급경사/개방 혼합.",
+		L"主题从森林到云之庭。许可证自由照片纹理50张、512、嵌入exe。地面为主题加细节，水面/机体/云卡/天空亦为照片。反射与漫反射，道具为结晶球。每次生成也抽轮廓：椭圆／带高低差的8字（交叉处不能平切）／圆角凸形／收腰凹形。枝下/管隙/山洞/急坡/开阔混在。",
+		L"Themes forest→cloud garden. 50 photo textures 512 in the exe (albedo+detail, water, cloud cards, sky cube). Reflection; crystal item orbs. Generate also picks oval, a height-split figure-8 (no flat shortcut), rounded convex or a concave pinch. Branches/pipes/tunnels/climbs/open.",
+		L"Темы лес→облачный сад. 50 фототекстур 512 в exe (альбедо+деталь, вода, облака, небо). Отражение; предметы-сферы. Создать также выбирает овал, восьмёрку с перепадом, выпуклый или вогнутый контур.",
+		L"Themen Wald→Wolkengarten. 50 Fototexturen 512 in der exe (Albedo+Detail, Wasser, Wolken, Himmel). Reflexion; Item-Kugeln. Erzeugen wählt auch Oval, Achter mit Höhensprung, konvex oder konkav.",
+		L"Temas floresta→jardim de nuvens. 50 texturas foto 512 no exe (albedo+detalhe, água, nuvens, céu). Reflexão; orbes de item. Gerar também escolhe oval, 8 com desnível, convexo ou côncavo.",
+		L"Thema's bos→wolken tuin. 50 fototexturen 512 in de exe (albedo+detail, water, wolken, lucht). Reflectie; item-bollen. Genereren kiest ook ovaal, 8-vorm met hoogteverschil, convex of concaaf.",
+		L"Tematy las→ogród chmur. 50 tekstur zdjęciowych 512 w exe (albedo+szczegół, woda, chmury, niebo). Odbicie; kule przedmiotów. Generuj losuje też owal, ósemkę z przewyższeniem, wypukły lub wklęsły.",
+		L"Temalar orman→bulut bahçesi. 50 adet 512 fotoğraf dokusu exe içinde (albedo+ayrıntı, su, bulut, gök). Yansıma; öğe küreleri. Üret oval, yükseklik farklı 8, dışbükey veya içbükey de seçer."));
+	line(LL14(L"アイテム球の上に、機体と同じ系統の小さなラベルが出ます（種類が分かります）。",
+		L"A small craft-style label sits above each item orb so you can tell the type.",
+		L"Petite étiquette (comme les appareils) au-dessus de chaque orbe.",
+		L"Piccola etichetta (come i craft) sopra ogni sfera.",
+		L"Etiqueta pequeña (como las naves) encima de cada orbe.",
+		L"기체와 같은 작은 라벨이 아이템 구 위에 뜹니다.",
+		L"道具球上方有与机体同系的小标签，便于辨认种类。",
+		L"Small craft-style label above each orb.",
+		L"Маленькая метка над каждой сферой, как у аппаратов.",
+		L"Kleines Label wie bei den Crafts über jeder Item-Kugel.",
+		L"Rótulo pequeno no estilo das naves acima de cada orbe.",
+		L"Klein label zoals bij crafts boven elke item-bol.",
+		L"Mała etykieta jak przy maszynach nad każdą kulą.",
+		L"Her öğe küresinin üstünde araçlardaki gibi küçük etiket."));
 	line(LL14(L"右クリック（ステータス／枠）: コース（リスタート／再生成）・表示・アイテム種類など。ビュー上はRMB=ブレーキのみ。",
 		L"Right-click (status/chrome): Course (restart/regen), view, item masks. On the view, RMB=brake only.",
 		L"Clic droit (statut/cadre) : parcours (redémarrer/régénérer), vue, objets. Sur la vue, RMB=frein.",
@@ -601,6 +660,7 @@ CS3rView::CS3rView()
 	, m_texHud(NULL), m_srvHud(NULL), m_hudTexW(0), m_hudTexH(0)
 	, m_texStand(NULL), m_srvStand(NULL), m_standTexW(0), m_standTexH(0)
 	, m_texBubble(NULL), m_srvBubble(NULL), m_bubbleTexW(0), m_bubbleTexH(0), m_bubbleN(0)
+	, m_texItemLab(NULL), m_srvItemLab(NULL), m_itemLabN(0)
 	, m_sampLin(NULL), m_sampPoint(NULL), m_sampCmp(NULL)
 	, m_rsSolid(NULL), m_rsShadow(NULL), m_rsNoCull(NULL), m_dssWrite(NULL), m_dssRead(NULL), m_dssOff(NULL)
 	, m_bsOpaque(NULL), m_bsAlpha(NULL), m_bsAdd(NULL)
@@ -864,7 +924,7 @@ BOOL CS3rView::CreateProcTextures()
 	auto softN=[&](int x,int y,int s)->int{
 		return (int)(fbm((float)x * 0.1f, (float)y * 0.1f, s, 3) * 255.f) - 128;
 	};
-	const int W=256,H=256;
+	const int W=512,H=512;
 	DWORD* pix=new (std::nothrow) DWORD[W*H];
 	if(!pix) return FALSE;
 	D3D11_TEXTURE2D_DESC d={}; d.Width=W;d.Height=H;d.MipLevels=1;d.ArraySize=1;d.Format=DXGI_FORMAT_B8G8R8A8_UNORM;d.SampleDesc.Count=1;d.Usage=D3D11_USAGE_IMMUTABLE;d.BindFlags=D3D11_BIND_SHADER_RESOURCE;
@@ -1125,6 +1185,10 @@ void CS3rView::ReleaseBubbleTexture()
 {
 	S3R_RELEASE(m_srvBubble);S3R_RELEASE(m_texBubble);m_bubbleTexW=m_bubbleTexH=0;m_bubbleN=0;
 }
+void CS3rView::ReleaseItemLabTexture()
+{
+	S3R_RELEASE(m_srvItemLab);S3R_RELEASE(m_texItemLab);m_itemLabN=0;
+}
 
 BOOL CS3rView::BakeClearTexture(const wchar_t* text,float /*alpha*/)
 {
@@ -1276,10 +1340,44 @@ BOOL CS3rView::BakeBubbleTexture(const S3rBubbleRow* rows, int nRows)
 	m_bubbleN = nRows;
 	return SUCCEEDED(hr);
 }
+BOOL CS3rView::BakeItemLabTexture(const wchar_t* const* labels, int nLabels)
+{
+	ReleaseItemLabTexture();
+	if (!m_dev || !labels || nLabels < 1) return FALSE;
+	if (nLabels > S3R_ITEMLAB_MAX) nLabels = S3R_ITEMLAB_MAX;
+	const int cellW = 280, cellH = 56, cols = 4;
+	const int rowsN = (nLabels + cols - 1) / cols;
+	const int w = cellW * cols, h = cellH * rowsN;
+	Soft3DTextD2DCanvas* cv = Soft3DTextD2D_Begin(w, h);
+	if (!cv) return FALSE;
+	for (int i = 0; i < nLabels; i++) {
+		const int col = i % cols, row = i / cols;
+		const float x = (float)(col * cellW), y = (float)(row * cellH);
+		Soft3DTextD2D_DrawTextShadow(cv, labels[i] ? labels[i] : L"", x + 5.f, y + 3.f, (float)(cellW - 10), (float)(cellH - 6),
+			32.f, 1, 1, 1, 255, 250, 248, 255, 1.6f, 1.6f, 200, 0, 0, 0);
+		const float pad = 2.f;
+		m_itemLabU0[i] = (x + pad) / (float)w;
+		m_itemLabV0[i] = (y + pad) / (float)h;
+		m_itemLabU1[i] = (x + cellW - pad) / (float)w;
+		m_itemLabV1[i] = (y + cellH - pad) / (float)h;
+	}
+	const BYTE* bits = NULL; UINT stride = 0;
+	if (!Soft3DTextD2D_End(cv, &bits, &stride) || !bits) { Soft3DTextD2D_Release(cv); return FALSE; }
+	D3D11_TEXTURE2D_DESC d = {};
+	d.Width = w; d.Height = h; d.MipLevels = 1; d.ArraySize = 1;
+	d.Format = DXGI_FORMAT_B8G8R8A8_UNORM; d.SampleDesc.Count = 1;
+	d.Usage = D3D11_USAGE_IMMUTABLE; d.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+	D3D11_SUBRESOURCE_DATA sd = { bits, stride, 0 };
+	HRESULT hr = m_dev->CreateTexture2D(&d, &sd, &m_texItemLab);
+	if (SUCCEEDED(hr)) hr = m_dev->CreateShaderResourceView(m_texItemLab, NULL, &m_srvItemLab);
+	Soft3DTextD2D_Release(cv);
+	m_itemLabN = nLabels;
+	return SUCCEEDED(hr);
+}
 void CS3rView::ReleaseDx()
 {
 	m_ready=FALSE;if(m_imm){m_imm->ClearState();m_imm->Flush();}
-	ReleaseClearTexture();ReleaseHudTexture();ReleaseStandingsTexture();ReleaseBubbleTexture();
+	ReleaseClearTexture();ReleaseHudTexture();ReleaseStandingsTexture();ReleaseBubbleTexture();ReleaseItemLabTexture();
 	S3R_RELEASE(m_uavNoise);S3R_RELEASE(m_srvNoise);S3R_RELEASE(m_texNoise);
 	S3R_RELEASE(m_srvWood);S3R_RELEASE(m_texWood);S3R_RELEASE(m_srvItem);S3R_RELEASE(m_texItem);
 	S3R_RELEASE(m_srvSky2);S3R_RELEASE(m_texSky2);S3R_RELEASE(m_srvSky);S3R_RELEASE(m_texSky);
@@ -1405,7 +1503,7 @@ CSoft3DRaceDlg::CSoft3DRaceDlg(CWnd* p)
 	, m_knotN(0), m_pathLen(0), m_craftN(0), m_obsN(0), m_itemN(0)
 	, m_craftNv(0), m_craftNi(0), m_obsNv(0), m_obsNi(0)
 	, m_phase(PHASE_IDLE), m_countT(0), m_countShown(-1), m_podiumT(0)
-	, m_finishSimT(0), m_aiRaceLv(AI_NORMAL)
+	, m_finishSimT(0), m_aiRaceLv(AI_NORMAL), m_blastCursor(0)
 	, m_themeActive(THEME_FOREST), m_layoutKind(0), m_lapsTarget(3), m_bandHalf(6.f)
 	, m_demoCamT(0.f), m_demoCamElev(0.f), m_demoMidX(0), m_demoMidY(0), m_demoMidZ(0), m_demoRad(80.f)
 	, m_hmX0(0), m_hmZ0(0), m_hmStep(1.f), m_hmReady(0), m_waterY(8.f), m_carveN(0)
@@ -1432,6 +1530,7 @@ CSoft3DRaceDlg::CSoft3DRaceDlg(CWnd* p)
 	memset(m_obsIdx,0,sizeof(m_obsIdx));
 	memset(m_podiumOrder,0,sizeof(m_podiumOrder));
 	memset(m_confetti,0,sizeof(m_confetti));
+	memset(m_blast,0,sizeof(m_blast));
 	memset(m_hm,0,sizeof(m_hm));
 	memset(m_hmRaw,0,sizeof(m_hmRaw));
 	memset(m_hmPathDist,0,sizeof(m_hmPathDist));
@@ -2686,7 +2785,8 @@ void CSoft3DRaceDlg::ResetRaceState()
 		} else {
 			float tier = (m_craftN <= 2) ? 0.5f : (float)(i - 1) / (float)(m_craftN - 2);
 			float base = aiLineTable[aiLv];
-			c.aiSkill = S3rClamp(base + (tier - 0.5f) * 0.06f + (S3rRand01(m_rng) - 0.5f) * 0.03f, 0.10f, 0.95f);
+			float spread = 0.28f - 0.035f * (float)aiLv;
+			c.aiSkill = S3rClamp(base + (tier - 0.5f) * spread + (S3rRand01(m_rng) - 0.5f) * 0.10f, 0.06f, 0.97f);
 		}
 		// レーン好みは弱め（端寄り暴走→帯外ループを減らす）
 		c.aiSteerBias=(S3rRand01(m_rng)*2.f-1.f) * 0.55f;
@@ -2699,6 +2799,8 @@ void CSoft3DRaceDlg::ResetRaceState()
 	}
 	for (int i=0;i<m_itemN;i++) m_items[i].taken=0;
 	for (int i=0;i<96;i++) memset(m_confetti[i],0,sizeof(m_confetti[i]));
+	memset(m_blast,0,sizeof(m_blast));
+	m_blastCursor=0;
 	m_clearBakeText=L""; m_clearDirty=1; m_hudDirty=1;
 }
 
@@ -2891,20 +2993,20 @@ void CSoft3DRaceDlg::UpdateRanks()
 	int order[S3R_MAX_CRAFT];
 	for (int i=0;i<m_craftN;i++){
 		S3rCraft& c=m_crafts[i];
-		c.lapProgress = (float)c.lap + c.pathT;
-		prog[i]=c.alive?(c.finished?1000.f+(c.retired?1e6f:0.f)+c.finishTime:c.lapProgress):-1.f;
+		if (!c.retired)
+			c.lapProgress = (float)c.lap + c.pathT;
+		prog[i]=c.lapProgress;
 		order[i]=i;
 	}
 	for (int i=0;i<m_craftN;i++) for (int j=i+1;j<m_craftN;j++){
+		const S3rCraft& a=m_crafts[order[i]];
+		const S3rCraft& b=m_crafts[order[j]];
+		const int aFin = (a.finished && !a.retired) ? 1 : 0;
+		const int bFin = (b.finished && !b.retired) ? 1 : 0;
 		BOOL swap=FALSE;
-		if (m_crafts[order[i]].finished && m_crafts[order[j]].finished) {
-			const int ri = m_crafts[order[i]].retired ? 1 : 0;
-			const int rj = m_crafts[order[j]].retired ? 1 : 0;
-			if (ri != rj) swap = ri > rj; // リタイアは完走の後ろ
-			else swap = m_crafts[order[i]].finishTime > m_crafts[order[j]].finishTime;
-		}
-		else if (m_crafts[order[i]].finished) swap=FALSE;
-		else if (m_crafts[order[j]].finished) swap=TRUE;
+		if (aFin && bFin) swap = a.finishTime > b.finishTime;
+		else if (aFin) swap=FALSE;
+		else if (bFin) swap=TRUE;
 		else swap = prog[order[i]] < prog[order[j]];
 		if (swap) { int t=order[i]; order[i]=order[j]; order[j]=t; }
 	}
@@ -3073,12 +3175,78 @@ BOOL CSoft3DRaceDlg::AllAliveFinished() const
 
 void CSoft3DRaceDlg::RetireCraft(S3rCraft& c)
 {
-	if (!c.alive || c.finished || c.retired) return;
+	if (c.retired) return;
+	c.lapProgress = (float)c.lap + c.pathT;
 	c.retired = 1;
-	c.finished = 1; // シミュ停止。偽ラップは付けない
-	c.finishTime = 1e6f + m_raceClock; // 完走者の後ろ
+	c.alive = 0;
+	c.finished = 0;
+	c.hp = 0.f;
 	c.vx = c.vy = c.vz = 0.f;
+	c.explodeT = 1.20f;
+	c.smokeT = 6.0f;
+	c.aiCutT = -1.f; c.aiCutTimer = 0.f;
+	SpawnBlast(c.x, c.y, c.z);
 	m_standDirty = 1;
+}
+
+int CSoft3DRaceDlg::CountAiRetired() const
+{
+	int n = 0;
+	for (int i = 1; i < m_craftN; i++) if (m_crafts[i].retired) n++;
+	return n;
+}
+
+int CSoft3DRaceDlg::MaxAiRetire() const
+{
+	int nAi = m_craftN - 1;
+	if (nAi < 1) return 0;
+	int lv = m_aiRaceLv;
+	if (lv <= AI_SUPER_EASY) {
+		int cap = (nAi * 4 + 5) / 11; // 12台(11AI)で最大4
+		if (cap < 1) cap = 1;
+		if (cap > 4) cap = 4;
+		if (cap > nAi) cap = nAi;
+		return cap;
+	}
+	if (lv <= AI_EASY) {
+		int cap = (nAi * 7 + 5) / 11;
+		if (cap < 2) cap = 2;
+		if (cap > nAi) cap = nAi;
+		return cap;
+	}
+	return nAi;
+}
+
+void CSoft3DRaceDlg::SpawnBlast(float x, float y, float z)
+{
+	for (int n = 0; n < 14; n++) {
+		int i = m_blastCursor % S3R_BLAST_N;
+		m_blastCursor++;
+		float a = S3rRand01(m_rng) * 6.2831853f;
+		float e = S3rRand01(m_rng) * 1.6f - 0.15f;
+		float sp = 4.5f + S3rRand01(m_rng) * 11.f;
+		m_blast[i][0] = x;
+		m_blast[i][1] = y;
+		m_blast[i][2] = z;
+		m_blast[i][3] = cosf(a) * sp;
+		m_blast[i][4] = e * sp + 2.8f;
+		m_blast[i][5] = sinf(a) * sp;
+		m_blast[i][6] = 0.50f + S3rRand01(m_rng) * 0.75f;
+	}
+}
+
+void CSoft3DRaceDlg::TickBlast(float dt)
+{
+	for (int i = 0; i < S3R_BLAST_N; i++) {
+		if (m_blast[i][6] <= 0.f) continue;
+		m_blast[i][0] += m_blast[i][3] * dt;
+		m_blast[i][1] += m_blast[i][4] * dt;
+		m_blast[i][2] += m_blast[i][5] * dt;
+		m_blast[i][4] -= 16.f * dt;
+		m_blast[i][3] *= (1.f - 1.4f * dt);
+		m_blast[i][5] *= (1.f - 1.4f * dt);
+		m_blast[i][6] -= dt;
+	}
 }
 
 void CSoft3DRaceDlg::EnterPodium()
@@ -3139,7 +3307,7 @@ void CSoft3DRaceDlg::TickAi(float dt)
 	const int i0 = demo ? 0 : 1;
 	for (int i=i0;i<m_craftN;i++){
 		S3rCraft& c=m_crafts[i];
-		if (!c.alive || c.finished) continue;
+		if (!c.alive || c.finished || c.retired) continue;
 		if (finishRush) c.courseOutCool = 0.f;
 		if (!finishRush && c.courseOutCool > 0.f) continue;
 		float half=BandHalfWidth();
@@ -3175,8 +3343,8 @@ void CSoft3DRaceDlg::TickAi(float dt)
 			float jdist = sqrtf(jdx*jdx+jdy*jdy+jdz*jdz);
 			const int success = (jdist < half * 1.05f) ? 1 : 0;
 			float gyNow = GroundY(c.x, c.z);
-			const int fail = (!success && (c.aiCutTimer <= 0.f || c.fuel < 52.f || c.hp < 38.f
-				|| c.y < gyNow + 1.5f || (c.offBand && c.aiCutTimer < 0.70f))) ? 1 : 0;
+			const int fail = (!success && (c.aiCutTimer <= 0.f || c.fuel < 52.f || c.hp < (38.f + 22.f * sk)
+				|| c.y < gyNow + 1.5f || (c.offBand && c.aiCutTimer < (0.35f + 0.55f * sk)))) ? 1 : 0;
 			if (success) {
 				float dJoin = c.aiCutT - c.pathT;
 				while (dJoin > 0.5f) dJoin -= 1.f;
@@ -3204,7 +3372,12 @@ void CSoft3DRaceDlg::TickAi(float dt)
 		}
 
 		// ライン固定・ゴール後シミュ中はカット禁止。技能が高く地形が空いているときだけ
-		if (!cutting && !lineLock && !finishRush && m_layoutKind != 1 && !c.offBand && c.fuel > 78.f && c.hp > 62.f && c.aiSkill >= 0.86f) {
+		float cutNeed = 1.10f;
+		if (m_aiRaceLv >= AI_FEROCIOUS) cutNeed = 0.68f;
+		else if (m_aiRaceLv >= AI_HARD) cutNeed = 0.78f;
+		else if (m_aiRaceLv >= AI_NORMAL) cutNeed = 0.86f;
+		else if (m_aiRaceLv >= AI_EASY) cutNeed = 0.96f;
+		if (!cutting && !lineLock && !finishRush && m_layoutKind != 1 && !c.offBand && c.fuel > 78.f && c.hp > 62.f && sk >= cutNeed) {
 			float spans[2] = { 0.028f + 0.012f * c.aiSkill, 0.042f + 0.018f * c.aiSkill };
 			float bestSave = 0.f, bestT = -1.f, bestChord = 0.f;
 			for (int s = 0; s < 2; s++) {
@@ -3252,11 +3425,34 @@ void CSoft3DRaceDlg::TickAi(float dt)
 		}
 
 		float phase = m_anim * (0.25f + (1.f - sk) * 0.4f) + (float)i * 1.1f;
-		float wanderAmp = lineLock ? 0.f : ((1.f - sk) * 0.14f);
-		float laneFrac = S3rClamp(sinf(phase) * wanderAmp + c.aiSteerBias * wanderAmp * 0.25f, -0.18f, 0.18f);
-		float vertFrac = S3rClamp(cosf(phase * 0.7f) * wanderAmp * 0.45f, -0.12f, 0.12f);
+		float wanderAmp = lineLock ? 0.f : ((1.f - sk) * ((m_aiRaceLv <= AI_EASY) ? 0.48f : 0.20f));
+		float laneLim = lineLock ? 0.08f : (0.12f + 0.40f * (1.f - sk));
+		float laneFrac = S3rClamp(sinf(phase) * wanderAmp + c.aiSteerBias * wanderAmp * 0.35f, -laneLim, laneLim);
+		float vertFrac = S3rClamp(cosf(phase * 0.7f) * wanderAmp * 0.55f, -0.22f, 0.22f);
 
-		float look = c.pathT + 0.02f + 0.03f * sk;
+		// 障害の先読み：上手いAIは空き側へ、下手は反応が遅い／逆側へ寄る
+		float dodge = 0.f;
+		if (!cutting && !lineLock) {
+			const float lookW = 0.028f + 0.040f * sk;
+			for (int o = 0; o < m_obsN; o++) {
+				if (!m_obs[o].hazard || m_obs[o].damage <= 0.f) continue;
+				float dT = m_obs[o].pathT - c.pathT;
+				while (dT > 0.5f) dT -= 1.f;
+				while (dT < -0.5f) dT += 1.f;
+				if (dT <= 0.002f || dT > lookW) continue;
+				float olat, overt, ocx, ocy, ocz;
+				BandLocal(m_obs[o].x, m_obs[o].y, m_obs[o].z, m_obs[o].pathT, olat, overt, ocx, ocy, ocz);
+				if (fabsf(olat) > half * 1.20f) continue;
+				float urg = 1.f - dT / lookW;
+				float away = (olat >= 0.f) ? -1.f : 1.f;
+				if (sk > 0.55f) dodge += away * urg * (0.40f + 0.70f * sk);
+				else if (sk > 0.28f) dodge += away * urg * sk * 0.50f;
+				else dodge += -away * urg * 0.16f;
+			}
+			laneFrac = S3rClamp(laneFrac + dodge * 0.42f, -laneLim, laneLim);
+		}
+
+		float look = c.pathT + 0.012f + 0.038f * sk;
 		float px,py,pz,tx,ty,tz,nx,ny,nz,bx,by,bz;
 		if (cutting) {
 			SplineFrame(c.aiCutT, px,py,pz, tx,ty,tz, nx,ny,nz, bx,by,bz);
@@ -3274,7 +3470,7 @@ void CSoft3DRaceDlg::TickAi(float dt)
 
 		// レールばね：ライン固定中は中央へ強く、カット中は弱め
 		{
-			float rail = cutting ? (1.0f + 1.5f * sk) : (lineLock ? (12.f + 8.f * sk) : (6.5f + 9.f * sk));
+			float rail = cutting ? (1.0f + 1.5f * sk) : (lineLock ? (12.f + 8.f * sk) : (1.6f + 14.f * sk));
 			if (c.offBand && !cutting) rail *= 2.2f;
 			c.vx += (-bx * lat - nx * vert) * rail * dt;
 			c.vy += (-by * lat - ny * vert) * rail * dt;
@@ -3282,12 +3478,12 @@ void CSoft3DRaceDlg::TickAi(float dt)
 			if (!cutting) {
 				float outV = c.vx*bx + c.vy*by + c.vz*bz;
 				if ((lat > 0.f && outV > 0.f) || (lat < 0.f && outV < 0.f)) {
-					float kill = min(1.f, (3.0f + 5.f * sk) * dt);
+					float kill = min(1.f, (1.2f + 7.f * sk) * dt);
 					c.vx -= bx * outV * kill; c.vy -= by * outV * kill; c.vz -= bz * outV * kill;
 				}
 				float outN = c.vx*nx + c.vy*ny + c.vz*nz;
 				if ((vert > 0.f && outN > 0.f) || (vert < 0.f && outN < 0.f)) {
-					float kill = min(1.f, (3.0f + 5.f * sk) * dt);
+					float kill = min(1.f, (1.2f + 7.f * sk) * dt);
 					c.vx -= nx * outN * kill; c.vy -= ny * outN * kill; c.vz -= nz * outN * kill;
 				}
 			}
@@ -3312,20 +3508,25 @@ void CSoft3DRaceDlg::TickAi(float dt)
 		float raceCap = RaceSpeedCap(c.boostT > 0.f ? 1 : 0);
 		float indep = finishRush ? 0.92f : AiPaceIndep(sk);
 		float rubber = paceRef * (0.86f + 0.18f * sk);
-		float freeT = raceCap * (0.66f + 0.22f * sk);
+		float freeT = raceCap * (0.50f + 0.38f * sk);
 		float targetSpd = S3rLerp(rubber, freeT, indep);
 		float hardCap = 9.f, softFloor = 0.f;
 		AiCapPair(sk, raceCap, paceRef, plNow, indep, demo, finishRush, softFloor, hardCap);
 		if (targetSpd < softFloor) targetSpd = softFloor;
 		if (targetSpd > hardCap) targetSpd = hardCap;
+		if (fabsf(dodge) > 0.12f) {
+			float hesitate = (m_aiRaceLv <= AI_EASY) ? 0.38f : (0.14f * (1.f - sk));
+			targetSpd *= (1.f - hesitate * S3rSaturate(fabsf(dodge)));
+		}
 
 		float lead = ((float)c.lap + c.pathT) - plProg;
-		// 超簡単は少しでも先行したら抑える。強烈はリード維持
-		if (!finishRush && lead > 0.f && indep < 0.85f) {
+		// 超簡単は少しでも先行したら抑える。強烈でもリードを伸ばしすぎない（勝てる設定）
+		if (!finishRush && lead > 0.f) {
 			float leadStart = (m_aiRaceLv <= AI_SUPER_EASY) ? 0.012f : ((m_aiRaceLv <= AI_EASY) ? 0.04f : 0.10f);
 			if (lead > leadStart) {
 				float cut = S3rSaturate((lead - leadStart) / 0.22f);
 				float damp = (m_aiRaceLv <= AI_SUPER_EASY) ? 0.62f : (0.30f - 0.16f * indep);
+				if (m_aiRaceLv >= AI_FEROCIOUS) damp = 0.18f;
 				targetSpd *= (1.f - cut * damp * (1.f - 0.40f * sk));
 			}
 		} else if (lead < -0.04f) {
@@ -3410,6 +3611,7 @@ void CSoft3DRaceDlg::TickItems(float dt)
 		S3rCraft& c=m_crafts[i];
 		if (c.boostT>0) c.boostT-=dt; if (c.slowT>0) c.slowT-=dt; if (c.agilityT>0) c.agilityT-=dt;
 		if (c.fogT>0) c.fogT-=dt; if (c.dofT>0) c.dofT-=dt; if (c.flashT>0) c.flashT-=dt;
+		if (c.explodeT>0) c.explodeT-=dt;
 		if (c.smokeT>0) c.smokeT-=dt;
 		TryPickupCraft(i);
 	}
@@ -3501,7 +3703,7 @@ void CSoft3DRaceDlg::TickPhysics(float dt)
 
 	for (int i=0;i<m_craftN;i++){
 		S3rCraft& c=m_crafts[i];
-		if (!c.alive) { c.smokeT=max(c.smokeT,0.5f); continue; }
+		if (!c.alive) continue;
 		if (c.finished) continue;
 		const int aiFinishRail = (!demo && m_phase == PHASE_FINISH && !c.isPlayer) ? 1 : 0;
 		if (aiFinishRail) {
@@ -3594,6 +3796,8 @@ void CSoft3DRaceDlg::TickPhysics(float dt)
 		if (spd>maxSpd){ float s=maxSpd/spd; c.vx*=s;c.vy*=s;c.vz*=s; }
 
 		if (c.courseOutCool > 0.f) c.courseOutCool = max(0.f, c.courseOutCool - dt);
+		if (c.obsHitCool > 0.f) c.obsHitCool = max(0.f, c.obsHitCool - dt);
+		if (c.craftHitCool > 0.f) c.craftHitCool = max(0.f, c.craftHitCool - dt);
 
 		c.x+=c.vx*dt; c.y+=c.vy*dt; c.z+=c.vz*dt;
 
@@ -3742,7 +3946,7 @@ void CSoft3DRaceDlg::TickPhysics(float dt)
 						c.vz += (hz / hd) * pull * dt;
 					}
 					c.yaw = S3rNormAngle(c.yaw + S3rNormAngle(atan2f(tx,tz) - c.yaw) * min(1.f, 4.0f*dt));
-					if (c.fuel < 55.f || c.offBandT > 0.55f) {
+					if (c.fuel < 55.f || c.offBandT > (0.28f + 0.90f * (1.f - c.aiSkill))) {
 						AbortAiToLine(c, 22.f);
 					}
 				}
@@ -3856,55 +4060,128 @@ void CSoft3DRaceDlg::TickPhysics(float dt)
 			}
 		}
 
-		// obstacles — 見た目より小さい判定球＋景色はダメージなし。ゴール後レールはスキップ
-		if (!aiFinishRail) for (int o=0;o<m_obsN;o++){
-			if (!m_obs[o].hazard || m_obs[o].damage <= 0.f) continue;
-			float dx=c.x-m_obs[o].x, dy=c.y-(m_obs[o].y+m_obs[o].sy*0.45f), dz=c.z-m_obs[o].z;
-			float rr=0.42f*max(m_obs[o].sx,max(m_obs[o].sy*0.35f,m_obs[o].sz));
-			if (rr < 0.55f) rr = 0.55f;
-			if (dx*dx+dy*dy+dz*dz < rr*rr) {
-				c.hp -= m_obs[o].damage * dt * 1.1f;
-				c.vx-=dx*5.f*dt; c.vy-=dy*5.f*dt; c.vz-=dz*5.f*dt;
-				if (c.isPlayer && !demo && m_sfxHitCool <= 0.f) {
-					Soft3DSfxOneShot(S3SFX_HIT, c.x, c.y, c.z);
-					m_sfxHitCool = 0.28f;
+		// 障害物: 貫通させず、空き側へ弾く。HPはヒットごとに約1/10（回復帯を考慮）
+		if (!aiFinishRail) {
+			int hitO = -1;
+			float hitD2 = 1e12f, hitRr = 1.f;
+			float hitDx = 0.f, hitDy = 0.f, hitDz = 0.f, hitOcx = 0.f, hitOcy = 0.f, hitOcz = 0.f;
+			for (int o=0;o<m_obsN;o++){
+				if (!m_obs[o].hazard || m_obs[o].damage <= 0.f) continue;
+				const float ocx=m_obs[o].x, ocy=m_obs[o].y+m_obs[o].sy*0.38f, ocz=m_obs[o].z;
+				const float dx=c.x-ocx, dy=c.y-ocy, dz=c.z-ocz;
+				const float halfY=max(0.85f, m_obs[o].sy*0.50f);
+				if (fabsf(dy) > halfY) continue;
+				float rr=0.82f*max(m_obs[o].sx, m_obs[o].sz);
+				if (rr < 0.80f) rr = 0.80f;
+				const float d2=dx*dx+dy*dy+dz*dz;
+				if (d2 < rr*rr && d2 < hitD2) {
+					hitO=o; hitD2=d2; hitRr=rr;
+					hitDx=dx; hitDy=dy; hitDz=dz;
+					hitOcx=ocx; hitOcy=ocy; hitOcz=ocz;
+				}
+			}
+			if (hitO >= 0) {
+				float d=sqrtf(hitD2);
+				float nx, ny, nz;
+				if (d > 1e-4f) { nx=hitDx/d; ny=hitDy/d; nz=hitDz/d; }
+				else { nx=0.f; ny=1.f; nz=0.f; }
+				float px,py,pz,tx,ty,tz,nnx,nny,nnz,bx,by,bz;
+				SplineFrame(c.pathT, px,py,pz, tx,ty,tz, nnx,nny,nnz, bx,by,bz);
+				const float obsLat=(hitOcx-px)*bx+(hitOcy-py)*by+(hitOcz-pz)*bz;
+				float ox=-bx, oy=-by, oz=-bz;
+				if (obsLat > 0.12f) { ox=-bx; oy=-by; oz=-bz; }
+				else if (obsLat < -0.12f) { ox=bx; oy=by; oz=bz; }
+				else {
+					const float clat=(c.x-px)*bx+(c.y-py)*by+(c.z-pz)*bz;
+					if (clat >= 0.f) { ox=bx; oy=by; oz=bz; }
+					else { ox=-bx; oy=-by; oz=-bz; }
+				}
+				float knx=nx*0.32f+ox*0.68f;
+				float kny=ny*0.32f+oy*0.68f;
+				float knz=nz*0.32f+oz*0.68f;
+				S3rNorm3(knx,kny,knz);
+				const float push=(hitRr-d)+0.28f;
+				c.x+=knx*push; c.y+=kny*push; c.z+=knz*push;
+				float vin=c.vx*knx+c.vy*kny+c.vz*knz;
+				if (vin < 0.f) {
+					c.vx-=knx*vin; c.vy-=kny*vin; c.vz-=knz*vin;
+				}
+				const float kick=12.f+0.28f*spd;
+				c.vx+=knx*kick; c.vy+=kny*kick*0.35f; c.vz+=knz*kick;
+				if (c.obsHitCool <= 0.f) {
+					c.hp-=10.f;
+					c.obsHitCool=0.48f;
+					if (c.isPlayer && !demo) {
+						Soft3DSfxOneShot(S3SFX_HIT, c.x, c.y, c.z);
+						m_sfxHitCool=0.22f;
+					}
 				}
 			}
 		}
-		// craft-craft bounce
+	}
+
+	// 機体同士：少し弾く。HPは約1/30（dt非依存）。残骸は静止障害
+	for (int i=0;i<m_craftN;i++){
+		S3rCraft& c=m_crafts[i];
 		for (int j=i+1;j<m_craftN;j++){
 			S3rCraft& o=m_crafts[j];
-			if (!o.alive || o.finished) continue;
+			const int cGo = (c.alive && !c.retired && !c.finished) ? 1 : 0;
+			const int oGo = (o.alive && !o.retired && !o.finished) ? 1 : 0;
+			if (!cGo && !oGo) continue;
 			float dx=c.x-o.x, dy=c.y-o.y, dz=c.z-o.z;
 			float d2=dx*dx+dy*dy+dz*dz;
 			const float rr=2.2f;
-			if (d2 < rr*rr && d2 > 1e-4f) {
-				float d=sqrtf(d2); float nx=dx/d, ny=dy/d, nz=dz/d;
-				float push=(rr-d)*0.5f;
-				c.x+=nx*push; c.y+=ny*push; c.z+=nz*push;
-				o.x-=nx*push; o.y-=ny*push; o.z-=nz*push;
-				c.vx+=nx*4.f*dt; c.vy+=ny*4.f*dt; c.vz+=nz*4.f*dt;
-				o.vx-=nx*4.f*dt; o.vy-=ny*4.f*dt; o.vz-=nz*4.f*dt;
-				c.hp-=2.f*dt; o.hp-=2.f*dt;
+			if (d2 >= rr*rr || d2 <= 1e-4f) continue;
+			float d=sqrtf(d2); float nx=dx/d, ny=dy/d, nz=dz/d;
+			float push=(rr-d)*0.5f;
+			if (cGo) { c.x+=nx*push; c.y+=ny*push; c.z+=nz*push; }
+			if (oGo) { o.x-=nx*push; o.y-=ny*push; o.z-=nz*push; }
+			float vinC=c.vx*nx+c.vy*ny+c.vz*nz;
+			float vinO=o.vx*nx+o.vy*ny+o.vz*nz;
+			if (cGo && vinC < 0.f) { c.vx-=nx*vinC; c.vy-=ny*vinC; c.vz-=nz*vinC; }
+			if (oGo && vinO > 0.f) { o.vx-=nx*vinO; o.vy-=ny*vinO; o.vz-=nz*vinO; }
+			const float kick=8.f;
+			if (cGo) { c.vx+=nx*kick; c.vy+=ny*kick*0.25f; c.vz+=nz*kick; }
+			if (oGo) { o.vx-=nx*kick; o.vy-=ny*kick*0.25f; o.vz-=nz*kick; }
+			const float dmg=100.f/30.f;
+			if (c.craftHitCool <= 0.f && o.craftHitCool <= 0.f) {
+				if (cGo) { c.hp-=dmg; c.craftHitCool=0.38f; }
+				if (oGo) { o.hp-=dmg; o.craftHitCool=0.38f; }
 				if (!demo && m_sfxHitCool <= 0.f && (c.isPlayer || o.isPlayer)) {
 					Soft3DSfxOneShot(S3SFX_HIT, c.x, c.y, c.z);
 					m_sfxHitCool = 0.22f;
 				}
 			}
 		}
-		if (c.hp <= 0.f) {
-			if (!c.isPlayer || demo) {
-				c.hp = 62.f;
-				AbortAiToLine(c, 14.f);
-			} else {
-				c.hp=0; c.alive=0; c.smokeT=8.f;
-				m_phase = PHASE_FINISH; m_podiumT = 0.f; m_finishSimT = 0.f;
-				m_clearBakeText = LL14(L"GAME OVER", L"GAME OVER", L"GAME OVER", L"GAME OVER", L"GAME OVER", L"게임 오버", L"游戏结束", L"انتهت", L"КОНЕЦ", L"GAME OVER", L"FIM DE JOGO", L"GAME OVER", L"KONIEC", L"OYUN BİTTİ");
-				m_clearBakeA=1.f; m_clearDirty=1;
-				Soft3DSfxUi(S3SFX_GAMEOVER, 0);
-			}
+	}
+
+	for (int i=0;i<m_craftN;i++){
+		S3rCraft& c=m_crafts[i];
+		if (c.retired || c.finished) continue;
+		if (c.hp > 0.f) continue;
+		c.hp = 0.f;
+		if (demo) {
+			c.hp = 62.f;
+			AbortAiToLine(c, 14.f);
+			continue;
+		}
+		if (c.isPlayer) {
+			RetireCraft(c);
+			m_phase = PHASE_FINISH; m_podiumT = 0.f; m_finishSimT = 0.f;
+			m_clearBakeText = LL14(L"GAME OVER", L"GAME OVER", L"GAME OVER", L"GAME OVER", L"GAME OVER", L"게임 오버", L"游戏结束", L"انتهت", L"КОНЕЦ", L"GAME OVER", L"FIM DE JOGO", L"GAME OVER", L"KONIEC", L"OYUN BİTTİ");
+			m_clearBakeA=1.f; m_clearDirty=1;
+			Soft3DSfxUi(S3SFX_GAMEOVER, 0);
+			continue;
+		}
+		if (CountAiRetired() >= MaxAiRetire()) {
+			c.hp = 42.f;
+			AbortAiToLine(c, 16.f);
+		} else {
+			RetireCraft(c);
+			Soft3DSfxOneShot(S3SFX_HIT, c.x, c.y, c.z);
 		}
 	}
+	TickBlast(dt);
 
 	if (m_phase == PHASE_RACE || m_phase == PHASE_FINISH) m_raceClock += dt;
 	else if (demo) m_raceClock += dt;
@@ -4607,6 +4884,46 @@ void CSoft3DRaceDlg::RenderScene()
 			put(x-s,y,z,0,1,0,0,0,r,g,b,1); put(x+s,y,z,0,1,0,1,0,r,g,b,1); put(x,y+s,z,0,1,0,.5f,1,r,g,b,1);
 		}
 	}
+	// 爆破破片
+	for (int i=0;i<S3R_BLAST_N;i++){
+		if (m_blast[i][6]<=0.f) continue;
+		float x=m_blast[i][0], y=m_blast[i][1], z=m_blast[i][2];
+		float life=m_blast[i][6];
+		float s=0.22f + (1.f - S3rSaturate(life))*0.55f;
+		float a=S3rSaturate(life*1.4f);
+		float r=1.f, g=0.38f+0.45f*S3rSaturate(life), b=0.10f;
+		put(x-s,y,z,0,1,0,0,0,r,g,b,a); put(x+s,y,z,0,1,0,1,0,r,g,b,a); put(x,y+s,z,0,1,0,.5f,1,r,g,b,a);
+	}
+	for (int i=0;i<m_craftN;i++){
+		S3rCraft& c=m_crafts[i];
+		if (c.explodeT > 0.f) {
+			float t = 1.f - S3rSaturate(c.explodeT / 1.20f);
+			float rad = 0.55f + t * 4.4f;
+			float aa = (1.f - t) * 0.80f;
+			for (int k=0;k<10;k++){
+				float ang = (float)k * 0.628f + m_anim * 4.f;
+				float px = c.x + cosf(ang)*rad;
+				float py = c.y + 0.35f + sinf((float)k*1.7f)*rad*0.40f;
+				float pz = c.z + sinf(ang)*rad;
+				float s = 0.32f + t * 0.70f;
+				float r=1.f, g=0.42f+0.35f*(1.f-t), b=0.08f;
+				put(px-s,py,pz,0,1,0,0,0,r,g,b,aa); put(px+s,py,pz,0,1,0,1,0,r,g,b,aa); put(px,py+s,pz,0,1,0,.5f,1,r,g,b,aa);
+			}
+		}
+		if (c.smokeT > 0.f && (!c.alive || c.retired)) {
+			float u = S3rSaturate(c.smokeT / 6.f);
+			for (int k=0;k<5;k++){
+				float ang = (float)k * 1.256f + m_anim * 0.8f;
+				float up = (1.f - u) * 2.8f + (float)k * 0.22f;
+				float px = c.x + cosf(ang)*0.45f;
+				float py = c.y + 0.4f + up;
+				float pz = c.z + sinf(ang)*0.45f;
+				float s = 0.28f + (1.f-u)*0.35f;
+				float g = 0.22f + 0.12f * (float)k;
+				put(px-s,py,pz,0,1,0,0,0,g,g,g,0.35f*u); put(px+s,py,pz,0,1,0,1,0,g,g,g,0.35f*u); put(px,py+s,pz,0,1,0,.5f,1,g,g,g,0.35f*u);
+			}
+		}
+	}
 
 	UINT craftDrawN = 0;
 	{
@@ -4623,8 +4940,19 @@ void CSoft3DRaceDlg::RenderScene()
 			for (int i = 0; i < m_craftN && craftDrawN < (UINT)S3R_MAX_CRAFT; i++) {
 				S3rCraft& c = m_crafts[i];
 				float cr = kCraftColors[c.colorIdx][0], cg = kCraftColors[c.colorIdx][1], cb = kCraftColors[c.colorIdx][2];
-				float a = c.alive ? 1.f : 0.35f;
-				ci[craftDrawN++] = {c.x, c.y, c.z, c.yaw, 1.1f, 1.1f, 1.1f, c.pitch, cr, cg, cb, a};
+				float sc = 1.1f, a = 1.f;
+				if (!c.alive || c.retired) {
+					sc = 0.78f; a = 0.48f;
+					cr *= 0.42f; cg *= 0.38f; cb *= 0.38f;
+					if (c.explodeT > 0.f) {
+						float k = S3rSaturate(c.explodeT / 1.20f);
+						sc = 0.55f + 0.70f * k;
+						a = 0.28f + 0.55f * k;
+						cr = S3rLerp(cr, 1.f, 0.65f);
+						cg = S3rLerp(cg, 0.45f, 0.50f);
+					}
+				}
+				ci[craftDrawN++] = {c.x, c.y, c.z, c.yaw, sc, sc, sc, c.pitch, cr, cg, cb, a};
 			}
 		}
 		if (craftDrawN && m_view.m_vbCraftInst) {
@@ -5048,6 +5376,101 @@ void CSoft3DRaceDlg::RenderScene()
 				htuv(x0, y0, x1, y1, m_view.m_bubbleU0[i], m_view.m_bubbleV0[i], m_view.m_bubbleU1[i], m_view.m_bubbleV1[i], a);
 			}
 			flushHud(m_view.m_srvBubble);
+		}
+
+		// アイテム球：機体吹き出しより小さく薄いラベル
+		if (m_view.m_psHudLine
+			&& (m_phase == PHASE_RACE || m_phase == PHASE_COUNTDOWN || m_phase == PHASE_FINISH
+				|| m_phase == PHASE_DEMO)) {
+			if (!m_view.m_srvItemLab) {
+				const wchar_t* labs[CS3rView::S3R_ITEMLAB_MAX] = {
+					LL14(L"テンポ↑", L"Tempo↑", L"Tempo↑", L"Tempo↑", L"Tempo↑", L"템포↑", L"速度↑", L"Tempo↑", L"Темп↑", L"Tempo↑", L"Tempo↑", L"Tempo↑", L"Tempo↑", L"Tempo↑"),
+					LL14(L"テンポ↓", L"Tempo↓", L"Tempo↓", L"Tempo↓", L"Tempo↓", L"템포↓", L"速度↓", L"Tempo↓", L"Темп↓", L"Tempo↓", L"Tempo↓", L"Tempo↓", L"Tempo↓", L"Tempo↓"),
+					LL14(L"ピッチ↑", L"Pitch↑", L"Hauteur↑", L"Pitch↑", L"Tono↑", L"피치↑", L"音高↑", L"Pitch↑", L"Высота↑", L"Ton↑", L"Tom↑", L"Toon↑", L"Wys.↑", L"Perde↑"),
+					LL14(L"ピッチ↓", L"Pitch↓", L"Hauteur↓", L"Pitch↓", L"Tono↓", L"피치↓", L"音高↓", L"Pitch↓", L"Высота↓", L"Ton↓", L"Tom↓", L"Toon↓", L"Wys.↓", L"Perde↓"),
+					LL14(L"次の曲", L"Next", L"Suivant", L"Succ.", L"Siguiente", L"다음", L"下一曲", L"Next", L"След.", L"Nächster", L"Próxima", L"Volgend", L"Nast.", L"Sonraki"),
+					LL14(L"前の曲", L"Prev", L"Préc.", L"Prec.", L"Anterior", L"이전", L"上一曲", L"Prev", L"Пред.", L"Vorher", L"Anterior", L"Vorig", L"Poprz.", L"Önceki"),
+					LL14(L"音量↑", L"Vol↑", L"Vol↑", L"Vol↑", L"Vol↑", L"볼륨↑", L"音量↑", L"Vol↑", L"Громк.↑", L"Laut↑", L"Vol↑", L"Vol↑", L"Głoś↑", L"Ses↑"),
+					LL14(L"音量↓", L"Vol↓", L"Vol↓", L"Vol↓", L"Vol↓", L"볼륨↓", L"音量↓", L"Vol↓", L"Громк.↓", L"Laut↓", L"Vol↓", L"Vol↓", L"Głoś↓", L"Ses↓"),
+					LL14(L"EQ", L"EQ", L"EQ", L"EQ", L"EQ", L"EQ", L"EQ", L"EQ", L"EQ", L"EQ", L"EQ", L"EQ", L"EQ", L"EQ"),
+					LL14(L"EQ平坦", L"EQ flat", L"EQ plat", L"EQ flat", L"EQ plano", L"EQ평탄", L"EQ平坦", L"EQ flat", L"EQ flat", L"EQ flach", L"EQ flat", L"EQ vlak", L"EQ płaski", L"EQ düz"),
+					LL14(L"リバーブ", L"Reverb", L"Réverb", L"Reverb", L"Reverb", L"리버브", L"混响", L"Reverb", L"Реверб", L"Hall", L"Reverb", L"Reverb", L"Pogłos", L"Reverb"),
+					LL14(L"クロスフェード", L"Crossfade", L"Fondu", L"Crossfade", L"Fundido", L"크로스페이드", L"交叉淡化", L"Xfade", L"Кроссфейд", L"Crossfade", L"Crossfade", L"Crossfade", L"Xfade", L"Xfade"),
+					LL14(L"ランダム", L"Random", L"Aléatoire", L"Casuale", L"Aleatorio", L"랜덤", L"随机", L"Random", L"Случ.", L"Zufall", L"Aleatório", L"Willekeurig", L"Losowo", L"Rastgele")
+				};
+				m_view.BakeItemLabTexture(labs, CS3rView::S3R_ITEMLAB_MAX);
+			}
+			if (m_view.m_srvItemLab && m_view.m_itemLabN > 0) {
+				struct ItDraw { int slot, kind; float nx, ny, w; };
+				ItDraw idr[S3R_MAX_ITEMS];
+				int nId = 0;
+				for (int i = 0; i < m_itemN && nId < S3R_MAX_ITEMS; i++) {
+					S3rItem& it = m_items[i];
+					if (it.taken) continue;
+					int slot = S3rItemLabSlot(it.kind);
+					if (slot < 0 || slot >= m_view.m_itemLabN) continue;
+					float nx, ny, cw;
+					if (!S3rWorldToNdc(cb.viewProj, it.x, it.y + 0.95f, it.z, nx, ny, cw)) continue;
+					if (nx < -1.05f || nx > 1.05f || ny < -1.02f || ny > 1.02f) continue;
+					idr[nId++] = { slot, it.kind, nx, ny, cw };
+				}
+				for (int a = 1; a < nId; a++) {
+					ItDraw q = idr[a]; int j = a - 1;
+					while (j >= 0 && idr[j].w < q.w) { idr[j + 1] = idr[j]; j--; }
+					idr[j + 1] = q;
+				}
+				auto htuvI = [&](float x0, float y0, float x1, float y1, float u0, float v0, float u1, float v1, float a) {
+					if (!hv || nh + 6 > maxH) return;
+					hv[nh++] = { x0, y1, u0, v0, 1, 1, 1, a };
+					hv[nh++] = { x1, y1, u1, v0, 1, 1, 1, a };
+					hv[nh++] = { x1, y0, u1, v1, 1, 1, 1, a };
+					hv[nh++] = { x0, y1, u0, v0, 1, 1, 1, a };
+					hv[nh++] = { x1, y0, u1, v1, 1, 1, 1, a };
+					hv[nh++] = { x0, y0, u0, v1, 1, 1, 1, a };
+				};
+				auto hlineI = [&](float x0, float y0, float x1, float y1, float r, float g, float b, float a) {
+					if (!hv || nh + 6 > maxH) return;
+					hv[nh++] = { x0, y0, 0, 0, r, g, b, a };
+					hv[nh++] = { x1, y0, 1, 0, r, g, b, a };
+					hv[nh++] = { x1, y1, 1, 1, r, g, b, a };
+					hv[nh++] = { x0, y0, 0, 0, r, g, b, a };
+					hv[nh++] = { x1, y1, 1, 1, r, g, b, a };
+					hv[nh++] = { x0, y1, 0, 1, r, g, b, a };
+				};
+				auto fadeW = [&](float cw)->float {
+					if (cw <= 6.f) return 0.92f;
+					if (cw >= 22.f) return 0.18f;
+					return 0.92f - (cw - 6.f) / (22.f - 6.f) * 0.74f;
+				};
+				const UINT lineBegI = nh;
+				for (int k = 0; k < nId; k++) {
+					const float sc = S3rClamp(1.05f / max(idr[k].w, 0.55f), 0.48f, 1.12f) * 0.78f;
+					const float aa = fadeW(idr[k].w);
+					const float bw = 0.22f * sc, bh = 0.058f * sc;
+					const float x0 = idr[k].nx - bw * 0.5f, x1 = idr[k].nx + bw * 0.5f;
+					const float y0 = idr[k].ny + 0.018f * sc, y1 = y0 + bh;
+					float r, g, b; S3rItemLabRgb(idr[k].kind, r, g, b);
+					const float ly1 = y0 - 0.003f * sc, ly0 = ly1 - 0.008f * sc;
+					hlineI(x0 + 0.008f * sc, ly0, x1 - 0.008f * sc, ly1, r, g, b, 0.88f * aa);
+					const float stemW = 0.0032f * sc;
+					hlineI(idr[k].nx - stemW, idr[k].ny + 0.003f, idr[k].nx + stemW, ly0, r, g, b, 0.72f * aa);
+				}
+				if (nh > lineBegI) {
+					dc->PSSetShader(m_view.m_psHudLine, NULL, 0);
+					flushHud(NULL);
+					dc->PSSetShader(m_view.m_psHud, NULL, 0);
+				}
+				for (int k = 0; k < nId; k++) {
+					const float sc = S3rClamp(1.05f / max(idr[k].w, 0.55f), 0.48f, 1.12f) * 0.78f;
+					const float aa = fadeW(idr[k].w);
+					const float bw = 0.22f * sc, bh = 0.058f * sc;
+					const float x0 = idr[k].nx - bw * 0.5f, x1 = idr[k].nx + bw * 0.5f;
+					const float y0 = idr[k].ny + 0.018f * sc, y1 = y0 + bh;
+					const int s = idr[k].slot;
+					htuvI(x0, y0, x1, y1, m_view.m_itemLabU0[s], m_view.m_itemLabV0[s], m_view.m_itemLabU1[s], m_view.m_itemLabV1[s], 0.90f * aa);
+				}
+				flushHud(m_view.m_srvItemLab);
+			}
 		}
 	}
 

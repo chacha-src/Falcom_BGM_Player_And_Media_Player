@@ -1176,6 +1176,38 @@
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
     </ClCompile>
   </ItemGroup>
+  <ItemGroup>
+    <Image Include="res\s3tex\m_brick2.png" />
+    <Image Include="res\s3tex\m_env.png" />
+    <Image Include="res\s3tex\m_floor0_d.png" />
+    <Image Include="res\s3tex\m_floor1_d.png" />
+    <Image Include="res\s3tex\m_floor2_d.png" />
+    <Image Include="res\s3tex\m_floor3_d.png" />
+    <Image Include="res\s3tex\m_gimmick.png" />
+    <Image Include="res\s3tex\m_glass.png" />
+    <Image Include="res\s3tex\m_item.png" />
+    <Image Include="res\s3tex\m_wall0_d.png" />
+    <Image Include="res\s3tex\m_wall1_d.png" />
+    <Image Include="res\s3tex\m_wall2_d.png" />
+    <Image Include="res\s3tex\m_wall3_d.png" />
+    <Image Include="res\s3tex\r_cloud_d.png" />
+    <Image Include="res\s3tex\r_craft_d.png" />
+    <Image Include="res\s3tex\r_env.png" />
+    <Image Include="res\s3tex\r_env2.png" />
+    <Image Include="res\s3tex\r_forest_d.png" />
+    <Image Include="res\s3tex\r_grass_d.png" />
+    <Image Include="res\s3tex\r_item.png" />
+    <Image Include="res\s3tex\r_mesa_d.png" />
+    <Image Include="res\s3tex\r_night_d.png" />
+    <Image Include="res\s3tex\r_obs.png" />
+    <Image Include="res\s3tex\r_oil_d.png" />
+    <Image Include="res\s3tex\r_ruins_d.png" />
+    <Image Include="res\s3tex\r_sky.png" />
+    <Image Include="res\s3tex\r_sky2.png" />
+    <Image Include="res\s3tex\r_under_d.png" />
+    <Image Include="res\s3tex\r_water.png" />
+    <Image Include="res\s3tex\r_wood.png" />
+  </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>

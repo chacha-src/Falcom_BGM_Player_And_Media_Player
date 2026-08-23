@@ -155,10 +155,15 @@ public:
 	ID3D11Texture2D* m_texBubble;
 	ID3D11ShaderResourceView* m_srvBubble;
 	int m_bubbleTexW, m_bubbleTexH;
-	enum { S3R_BUBBLE_MAX = 12 };
+	enum { S3R_BUBBLE_MAX = 12, S3R_ITEMLAB_MAX = 13 };
 	float m_bubbleU0[S3R_BUBBLE_MAX], m_bubbleV0[S3R_BUBBLE_MAX];
 	float m_bubbleU1[S3R_BUBBLE_MAX], m_bubbleV1[S3R_BUBBLE_MAX];
 	int m_bubbleN;
+	ID3D11Texture2D* m_texItemLab;
+	ID3D11ShaderResourceView* m_srvItemLab;
+	float m_itemLabU0[S3R_ITEMLAB_MAX], m_itemLabV0[S3R_ITEMLAB_MAX];
+	float m_itemLabU1[S3R_ITEMLAB_MAX], m_itemLabV1[S3R_ITEMLAB_MAX];
+	int m_itemLabN;
 
 	ID3D11SamplerState* m_sampLin;
 	ID3D11SamplerState* m_sampPoint;
@@ -198,6 +203,8 @@ public:
 	};
 	BOOL BakeBubbleTexture(const S3rBubbleRow* rows, int nRows);
 	void ReleaseBubbleTexture();
+	BOOL BakeItemLabTexture(const wchar_t* const* labels, int nLabels);
+	void ReleaseItemLabTexture();
 
 protected:
 	afx_msg void OnPaint();
@@ -227,6 +234,7 @@ public:
 	enum { IDD = IDD_SOFT3DRACE };
 	enum {
 		S3R_MAX_CRAFT = 12,
+		S3R_BLAST_N = 72,
 		S3R_MAX_OBS = 640,
 		S3R_MAX_ITEMS = 64,
 		S3R_SPLINE_MAX = 96,
@@ -420,6 +428,7 @@ public:
 		int colorIdx;
 		float boostT, slowT, agilityT, fogT, dofT, flashT;
 		float smokeT;
+		float explodeT; // 爆破演出残り秒
 		float bestLap;
 		float raceTime;
 		float finishTime;
@@ -434,6 +443,8 @@ public:
 		float offBandT;
 		float courseOutCool;
 		int offBand; // 1=帯外フリー走行中
+		float obsHitCool; // >0 の間は障害HPを重ねない（押し出しは毎フレ）
+		float craftHitCool; // >0 の間は機体接触HPを重ねない
 		float aiCutT; // ショートカット合流目標 pathT（未使用時 -1）
 		float aiCutTimer;
 		float aiCutCool; // >0 の間は通常ライン走行（カット禁止・中央固定）
@@ -442,6 +453,10 @@ public:
 		int lapTimesN;
 	};
 	void RetireCraft(S3rCraft& c);
+	int CountAiRetired() const;
+	int MaxAiRetire() const;
+	void SpawnBlast(float x, float y, float z);
+	void TickBlast(float dt);
 	void RespawnCraftToCheckpoint(S3rCraft& c, float fuelAmt, float cool);
 	// ショートカット失敗／帯外危険時：帯中央へ戻しライン固定へ
 	void AbortAiToLine(S3rCraft& c, float lineLockSec);
@@ -498,6 +513,8 @@ public:
 	int m_aiRaceLv; // レース開始時のAI難易度（0..4）
 	int m_podiumOrder[3];
 	float m_confetti[96][6]; // x y z vx vy life
+	float m_blast[S3R_BLAST_N][7]; // x y z vx vy vz life
+	int m_blastCursor;
 	int m_themeActive;
 	int m_layoutKind; // 0楕円 1八の字 2スタジアム 3箱型凸 4腎臓凹 5ピーナッツ 6三角凸
 	int m_lapsTarget;

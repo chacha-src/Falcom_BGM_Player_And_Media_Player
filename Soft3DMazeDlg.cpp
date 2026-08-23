@@ -479,20 +479,34 @@ void CS3mHelpDlg::OnPaint()
 		L"PCM-SFX: items, sleutels, deuren, trappen, portalen, stoten, sloten, vallen, doel. Weergave-menu.",
 		L"SFX PCM: przedmioty, klucze, drzwi, schody, portale, uderzenia, zamki, pułapki, cel. Menu Widok.",
 		L"PCM SFX: öğe, anahtar, kapı, merdiven, portal, çarpma, kilit, tuzak, hedef. Görünüm menüsü."));
-	line(LL14(L"壁・床・鏡・アイテム・ギミックはライセンスフリーの写真テクスチャ（50枚・256）をexeに埋め込んでいます（別ファイル不要）。階テーマ（レンガ／湿った石／錆び鉄／火山岩）に細部を重ね、地下は室内キューブで壁が見える明るさにし、反射と乱反射があります。",
-		L"Walls, floors, mirrors, items and gizmos use 50 license-free photo textures (256px) embedded in the exe (no extra files): albedo plus detail per floor theme (brick, wet stone, rusted metal, volcanic), a brighter indoor cube in the basement, and reflection plus wrap lighting.",
-		L"Murs, sols, miroirs, objets : 50 textures photo 256 dans l'exe (albédo+détail, cube intérieur plus clair en sous-sol, réflexion).",
-		L"Muri, pavimenti, specchi, oggetti: 50 texture foto 256 nell'exe (albedo+dettaglio, cubo interno più chiaro in cantina, riflessione).",
-		L"Paredes, suelos, espejos, objetos: 50 texturas foto 256 en el exe (albedo+detalle, cubo interior más claro en sótano, reflexión).",
-		L"벽·바닥·거울·아이템·기믹은 라이선스 프리 사진 텍스처 50장(256)을 exe에 내장. 층 테마에 세부, 지하는 실내 큐브로 밝게, 반사·난반사.",
-		L"墙、地板、镜子、道具、机关：50张许可证自由照片纹理（256）嵌入exe。各层主题叠加细节，地下用室内立方体提亮，含反射与漫反射。",
-		L"Walls/floors/mirrors/items: 50 photo textures 256 in the exe (albedo+detail, brighter indoor cube below, reflection).",
-		L"Стены, полы, зеркала, предметы: 50 фототекстур 256 в exe (альбедо+деталь, более светлый внутренний куб в подвале, отражение).",
-		L"Wände, Böden, Spiegel, Items: 50 Fototexturen 256 in der exe (Albedo+Detail, hellerer Innenwürfel im Keller, Reflexion).",
-		L"Paredes, chãos, espelhos, itens: 50 texturas foto 256 no exe (albedo+detalhe, cubo interno mais claro no subsolo, reflexão).",
-		L"Muren, vloeren, spiegels, items: 50 fototexturen 256 in de exe (albedo+detail, helderdere binnenkubus in de kelder, reflectie).",
-		L"Ściany, podłogi, lustra, przedmioty: 50 tekstur zdjęciowych 256 w exe (albedo+szczegół, jaśniejszy sześcian wewnątrz w piwnicy, odbicie).",
-		L"Duvar, zemin, ayna, öğe: 50 adet 256 fotoğraf dokusu exe içinde (albedo+ayrıntı, bodrumda daha aydınlık iç küp, yansıma)."));
+	line(LL14(L"壁・床・鏡・アイテム・ギミックはライセンスフリーの写真テクスチャ（50枚・512）をexeに埋め込んでいます（別ファイル不要）。階テーマ（レンガ／湿った石／錆び鉄／火山岩）に細部を重ね、地下は室内キューブで壁が見える明るさにし、反射と乱反射があります。",
+		L"Walls, floors, mirrors, items and gizmos use 50 license-free photo textures (512px) embedded in the exe (no extra files): albedo plus detail per floor theme (brick, wet stone, rusted metal, volcanic), a brighter indoor cube in the basement, and reflection plus wrap lighting.",
+		L"Murs, sols, miroirs, objets : 50 textures photo 512 dans l'exe (albédo+détail, cube intérieur plus clair en sous-sol, réflexion).",
+		L"Muri, pavimenti, specchi, oggetti: 50 texture foto 512 nell'exe (albedo+dettaglio, cubo interno più chiaro in cantina, riflessione).",
+		L"Paredes, suelos, espejos, objetos: 50 texturas foto 512 en el exe (albedo+detalle, cubo interior más claro en sótano, reflexión).",
+		L"벽·바닥·거울·아이템·기믹은 라이선스 프리 사진 텍스처 50장(512)을 exe에 내장. 층 테마에 세부, 지하는 실내 큐브로 밝게, 반사·난반사.",
+		L"墙、地板、镜子、道具、机关：50张许可证自由照片纹理（512）嵌入exe。各层主题叠加细节，地下用室内立方体提亮，含反射与漫反射。",
+		L"Walls/floors/mirrors/items: 50 photo textures 512 in the exe (albedo+detail, brighter indoor cube below, reflection).",
+		L"Стены, полы, зеркала, предметы: 50 фототекстур 512 в exe (альбедо+деталь, более светлый внутренний куб в подвале, отражение).",
+		L"Wände, Böden, Spiegel, Items: 50 Fototexturen 512 in der exe (Albedo+Detail, hellerer Innenwürfel im Keller, Reflexion).",
+		L"Paredes, chãos, espelhos, itens: 50 texturas foto 512 no exe (albedo+detalhe, cubo interno mais claro no subsolo, reflexão).",
+		L"Muren, vloeren, spiegels, items: 50 fototexturen 512 in de exe (albedo+detail, helderdere binnenkubus in de kelder, reflectie).",
+		L"Ściany, podłogi, lustra, przedmioty: 50 tekstur zdjęciowych 512 w exe (albedo+szczegół, jaśniejszy sześcian wewnątrz w piwnicy, odbicie).",
+		L"Duvar, zemin, ayna, öğe: 50 adet 512 fotoğraf dokusu exe içinde (albedo+ayrıntı, bodrumda daha aydınlık iç küp, yansıma)."));
+	line(LL14(L"半透明のトラップ（粘液・棘・氷・闇）や窓・鏡にも、上に小さなラベルが出ます。",
+		L"Translucent traps (slime, spikes, ice, dark), windows and mirrors also carry a small label above them.",
+		L"Pièges translucides, fenêtres et miroirs : petite étiquette au-dessus.",
+		L"Trappole traslucide, finestre e specchi: piccola etichetta sopra.",
+		L"Trampas translúcidas, ventanas y espejos: etiqueta pequeña encima.",
+		L"반투명 함정·창·거울 위에도 작은 라벨이 뜹니다.",
+		L"半透明陷阱、窗、镜上方也有小标签。",
+		L"Traps, windows and mirrors get a small label above them.",
+		L"Ловушки, окна и зеркала подписаны маленькой меткой сверху.",
+		L"Fallen, Fenster und Spiegel tragen ein kleines Label oben.",
+		L"Armadilhas, janelas e espelhos têm um rótulo pequeno acima.",
+		L"Vallen, ramen en spiegels hebben een klein label erboven.",
+		L"Pułapki, okna i lustra mają małą etykietę u góry.",
+		L"Tuzak, pencere ve aynaların üstünde küçük etiket vardır."));
 	line(LL14(L"アイテムを拾うと再生パラメータが変わります（テンポ↑↓・ピッチ・前後曲・音量・EQ／平坦・リバーブ・クロスフェード・ランダム切替）。閉じるとテンポ/ピッチは復帰。",
 		L"Pickups tweak playback (tempo↑↓, pitch, prev/next, volume, EQ/flatten, reverb, crossfade, random). Tempo/pitch restore on close.",
 		L"Les objets changent lecture (tempo, hauteur, pistes, volume, EQ, réverb, fondu, aléatoire). Tempo/hauteur à la fermeture.",
@@ -707,6 +721,13 @@ static int S3mCalloutSlot(BYTE c)
 	case C::CELL_STAIRS_UP: return 16;
 	case C::CELL_PORTAL: return 17;
 	case C::CELL_GOAL: return 18;
+	case C::CELL_SLIME: return 19;
+	case C::CELL_SPIKE: return 20;
+	case C::CELL_ICE: return 21;
+	case C::CELL_DARK: return 22;
+	case C::CELL_WINDOW: return 23;
+	case C::CELL_MIRROR_WALL: return 24;
+	case C::CELL_MIRROR_FLOOR: return 25;
 	default: return -1;
 	}
 }
@@ -720,6 +741,12 @@ static void S3mCalloutRgb(BYTE c, float& r, float& g, float& b)
 	else if (c == C::CELL_STAIRS_DOWN) { r = 1.f; g = .6f; b = .22f; }
 	else if (c == C::CELL_STAIRS_UP) { r = .35f; g = .9f; b = 1.f; }
 	else if (c == C::CELL_PORTAL) { r = .85f; g = .5f; b = 1.f; }
+	else if (c == C::CELL_SLIME) { r = .35f; g = .95f; b = .4f; }
+	else if (c == C::CELL_SPIKE) { r = .95f; g = .32f; b = .22f; }
+	else if (c == C::CELL_ICE) { r = .45f; g = .85f; b = 1.f; }
+	else if (c == C::CELL_DARK) { r = .55f; g = .4f; b = .85f; }
+	else if (c == C::CELL_WINDOW) { r = .4f; g = .78f; b = .95f; }
+	else if (c == C::CELL_MIRROR_WALL || c == C::CELL_MIRROR_FLOOR) { r = .7f; g = .9f; b = 1.f; }
 	else if (S3mIsPickupCell(c)) { r = .95f; g = .55f; b = .9f; }
 }
 static BOOL S3mIsSolidWall(BYTE c)
@@ -1136,7 +1163,7 @@ BOOL CS3mView::CreateProcTextures()
 	DWORD* atlas=new (std::nothrow) DWORD[AW*AH];
 	if(!atlas) return failHr(E_OUTOFMEMORY);
 	static const int kWallRes[S3M_THEME_N]={IDR_S3TEX_M_WALL0,IDR_S3TEX_M_WALL1,IDR_S3TEX_M_WALL2,IDR_S3TEX_M_WALL3};
-	const int W=256,H=256;
+	const int W=512,H=512;
 	DWORD* p=new (std::nothrow) DWORD[W*H];
 	if(!p){delete[] atlas; return failHr(E_OUTOFMEMORY);}
 	for(int th=0;th<S3M_THEME_N;th++){
@@ -1145,9 +1172,10 @@ BOOL CS3mView::CreateProcTextures()
 		d.Width=AW; d.Height=AH; d.ArraySize=1; d.MiscFlags=0;
 		HRESULT hr=make2d(&d,atlas,AW*4,&m_texBrick[th],&m_srvBrick[th]);
 		if(FAILED(hr)){
-			for(int y=0;y<H;y++)for(int x=0;x<W;x++) p[y*W+x]=atlas[(y*2)*AW+(x*2)];
-			d.Width=W; d.Height=H;
-			hr=make2d(&d,p,W*4,&m_texBrick[th],&m_srvBrick[th]);
+			const int fw=256,fh=256;
+			for(int y=0;y<fh;y++)for(int x=0;x<fw;x++) p[y*fw+x]=atlas[(y*2)*AW+(x*2)];
+			d.Width=fw; d.Height=fh;
+			hr=make2d(&d,p,fw*4,&m_texBrick[th],&m_srvBrick[th]);
 			if(FAILED(hr)){delete[] atlas;delete[] p; return failHr(hr);}
 		}
 	}
@@ -1179,7 +1207,7 @@ BOOL CS3mView::CreateProcTextures()
 	up2(IDR_S3TEX_M_GLASS,&m_texGlass,&m_srvGlass);
 	up2(IDR_S3TEX_M_BRICK2,&m_texBrick2,&m_srvBrick2);
 	{
-		const int EW=256,EH=256;
+		const int EW=512,EH=512;
 		DWORD* cube=new (std::nothrow) DWORD[EW*EH*6];
 		if(!cube){delete[] p; return failHr(E_OUTOFMEMORY);}
 		BOOL photo=Soft3DTexLoadPngRes(IDR_S3TEX_R_ENV,cube,EW,EH*6);
@@ -1195,9 +1223,9 @@ BOOL CS3mView::CreateProcTextures()
 		}
 		if(FAILED(cubeHr)){delete[] cube;delete[] p; return failHr(cubeHr);}
 		{
-			DWORD* cubeIn=new (std::nothrow) DWORD[256*256*6];
-			if(cubeIn && Soft3DTexLoadPngRes(IDR_S3TEX_M_ENV,cubeIn,256,256*6)){
-				if(FAILED(makeCube(cubeIn,256,&m_texEnvIn,&m_srvEnvIn))){
+			DWORD* cubeIn=new (std::nothrow) DWORD[512*512*6];
+			if(cubeIn && Soft3DTexLoadPngRes(IDR_S3TEX_M_ENV,cubeIn,512,512*6)){
+				if(FAILED(makeCube(cubeIn,512,&m_texEnvIn,&m_srvEnvIn))){
 					S3M_RELEASE(m_srvEnvIn); S3M_RELEASE(m_texEnvIn);
 				}
 			}
@@ -1207,7 +1235,7 @@ BOOL CS3mView::CreateProcTextures()
 	}
 	delete[] p; p=NULL;
 	{
-		const int MW=256,MH=256;
+		const int MW=512,MH=512;
 		DWORD* mir=new (std::nothrow) DWORD[MW*MH];
 		if(!mir) return failHr(E_OUTOFMEMORY);
 		auto putMir=[&](BOOL wall){
@@ -5626,7 +5654,7 @@ void CSoft3DMazeDlg::RenderScene()
 	struct XL{float d;int x,z;BYTE c;};XL xl[1536];int nc=0;
 	const int fxFloor=stairMove?m_stairFrom:m_floor;
 	for(int z=iz0;z<=iz1&&nc<1536;z++)for(int x=ix0;x<=ix1&&nc<1536;x++){BYTE c=CellAtF(fxFloor,x,z);if(!vis(x,z))continue;
-		if(c==CELL_WINDOW||c==CELL_GOAL||c==CELL_START||c==CELL_STAIRS_DOWN||c==CELL_STAIRS_UP||c==CELL_PORTAL||c==CELL_KEY||c==CELL_DOOR||S3mIsPickupCell(c)||S3mIsTrapCell(c)){
+		if(c==CELL_WINDOW||c==CELL_GOAL||c==CELL_START||c==CELL_STAIRS_DOWN||c==CELL_STAIRS_UP||c==CELL_PORTAL||c==CELL_KEY||c==CELL_DOOR||c==CELL_MIRROR_WALL||c==CELL_MIRROR_FLOOR||S3mIsPickupCell(c)||S3mIsTrapCell(c)){
 			float dx=cellCX(x)-ex,dz=cellCZ(z)-ez;xl[nc++]={dx*fx+dz*fz,x,z,c};}}
 	for(int i=1;i<nc;i++){XL q=xl[i];int j=i-1;while(j>=0&&xl[j].d<q.d){xl[j+1]=xl[j];j--;}xl[j+1]=q;}
 	transBeg=nFloor+nWall;phase=2;
@@ -5635,7 +5663,12 @@ void CSoft3DMazeDlg::RenderScene()
 	for(int i=0;i<64;i++)fxMirOf[i]=-1;
 	const int plx=(int)floorf(m_px),plz=(int)floorf(m_pz);
 	for(int i=0;i<nc;i++){int x=xl[i].x,z=xl[i].z;BYTE c=xl[i].c;float ocx=cellCX(x),ocz=cellCZ(z),x0=cellX0(x),x1=x0+cellW(x),z0=cellZ0(z),z1=z0+cellD(z);
-		if(nCall<64 && S3mCalloutSlot(c)>=0) calls[nCall++]={ocx,passH+0.62f,ocz,xl[i].d,c};
+		if(nCall<64 && S3mCalloutSlot(c)>=0){
+			float cy=passH+0.62f;
+			if(c==CELL_WINDOW||c==CELL_MIRROR_WALL) cy=wallH+0.22f;
+			else if(S3mIsTrapCell(c)||c==CELL_MIRROR_FLOOR) cy=passH+0.52f;
+			calls[nCall++]={ocx,cy,ocz,xl[i].d,c};
+		}
 		if(c==CELL_WINDOW){
 			if(nFx>=64)continue;
 			const UINT b=nFloor+nWall+nTrans;
@@ -6707,7 +6740,7 @@ void CSoft3DMazeDlg::RenderScene()
 	if(hn&&SUCCEEDED(dc->Map(m_view.m_vbHud,0,D3D11_MAP_WRITE_DISCARD,0,&map))){memcpy(map.pData,hv,hn*sizeof(S3MHudVertex));dc->Unmap(m_view.m_vbHud,0);UINT hs=sizeof(S3MHudVertex);dc->IASetVertexBuffers(0,1,&m_view.m_vbHud,&hs,&off);dc->IASetInputLayout(m_view.m_ilHud);dc->VSSetShader(m_view.m_vsHud,NULL,0);dc->PSSetShader(m_view.m_psHud,NULL,0);dc->OMSetBlendState(m_view.m_bsAlpha,NULL,~0u);dc->Draw(hn,0);}
 	if(!overview && nCall>0 && m_view.m_psHudLine){
 		if(!m_view.m_srvCallout){
-			const wchar_t* labs[19]={
+			const wchar_t* labs[26]={
 				LL14(L"鍵", L"Key", L"Clé", L"Chiave", L"Llave", L"열쇠", L"钥匙", L"Key", L"Ключ", L"Schlüssel", L"Chave", L"Sleutel", L"Klucz", L"Anahtar"),
 				LL14(L"扉", L"Door", L"Porte", L"Porta", L"Puerta", L"문", L"门", L"Door", L"Дверь", L"Tür", L"Porta", L"Deur", L"Drzwi", L"Kapı"),
 				LL14(L"テンポ↑", L"Tempo↑", L"Tempo↑", L"Tempo↑", L"Tempo↑", L"템포↑", L"速度↑", L"Tempo↑", L"Темп↑", L"Tempo↑", L"Tempo↑", L"Tempo↑", L"Tempo↑", L"Tempo↑"),
@@ -6726,9 +6759,16 @@ void CSoft3DMazeDlg::RenderScene()
 				LL14(L"階段↓", L"Stairs↓", L"Esc.↓", L"Scale↓", L"Esc.↓", L"계단↓", L"楼梯↓", L"Stairs↓", L"Лестн.↓", L"Treppe↓", L"Escadas↓", L"Trap↓", L"Schody↓", L"Merdiven↓"),
 				LL14(L"階段↑", L"Stairs↑", L"Esc.↑", L"Scale↑", L"Esc.↑", L"계단↑", L"楼梯↑", L"Stairs↑", L"Лестн.↑", L"Treppe↑", L"Escadas↑", L"Trap↑", L"Schody↑", L"Merdiven↑"),
 				LL14(L"ポータル", L"Portal", L"Portail", L"Portale", L"Portal", L"포털", L"传送门", L"Portal", L"Портал", L"Portal", L"Portal", L"Portaal", L"Portal", L"Portal"),
-				LL14(L"ゴール", L"Goal", L"But", L"Traguardo", L"Meta", L"골", L"终点", L"Goal", L"Цель", L"Ziel", L"Gol", L"Doel", L"Cel", L"Hedef")
+				LL14(L"ゴール", L"Goal", L"But", L"Traguardo", L"Meta", L"골", L"终点", L"Goal", L"Цель", L"Ziel", L"Gol", L"Doel", L"Cel", L"Hedef"),
+				LL14(L"粘液", L"Slime", L"Slime", L"Melma", L"Limo", L"슬라임", L"粘液", L"Slime", L"Слизь", L"Schleim", L"Limo", L"Slijm", L"Szlam", L"Balçık"),
+				LL14(L"棘", L"Spikes", L"Piques", L"Spine", L"Pinchos", L"가시", L"尖刺", L"Spikes", L"Шипы", L"Stacheln", L"Espinhos", L"Stekels", L"Kolce", L"Diken"),
+				LL14(L"氷", L"Ice", L"Glace", L"Ghiaccio", L"Hielo", L"얼음", L"冰", L"Ice", L"Лёд", L"Eis", L"Gelo", L"IJs", L"Lód", L"Buz"),
+				LL14(L"闇", L"Dark", L"Obscur", L"Buio", L"Oscuro", L"어둠", L"黑暗", L"Dark", L"Тьма", L"Dunkel", L"Escuro", L"Donker", L"Mrok", L"Karanlık"),
+				LL14(L"窓", L"Window", L"Fenêtre", L"Finestra", L"Ventana", L"창문", L"窗", L"Window", L"Окно", L"Fenster", L"Janela", L"Raam", L"Okno", L"Pencere"),
+				LL14(L"鏡壁", L"Mirror wall", L"Mur miroir", L"Muro specchio", L"Muro espejo", L"거울벽", L"镜墙", L"Mirror wall", L"Стена-зеркало", L"Spiegelwand", L"Parede espelho", L"Spiegelwand", L"Ściana-lustro", L"Ayna duvar"),
+				LL14(L"鏡床", L"Mirror floor", L"Sol miroir", L"Pavimento specchio", L"Suelo espejo", L"거울바닥", L"镜地板", L"Mirror floor", L"Пол-зеркало", L"Spiegelboden", L"Chão espelho", L"Spiegelvloer", L"Podłoga-lustro", L"Ayna zemin")
 			};
-			m_view.BakeCalloutAtlas(labs, 19);
+			m_view.BakeCalloutAtlas(labs, 26);
 		}
 		struct BubDraw { int slot; float nx, ny, cw; BYTE c; };
 		BubDraw bd[64]; int nBd=0;

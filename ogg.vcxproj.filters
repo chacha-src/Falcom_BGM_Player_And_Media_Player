@@ -1468,10 +1468,150 @@
     <None Include="res\s3tex\m_floor3.png" />
     <None Include="res\s3tex\m_mirwall.png" />
     <None Include="res\s3tex\m_mirfloor.png" />
+    <None Include="res\ui_ctl\close.ico">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="res\ui_ctl\min.ico">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="res\ui_ctl\max.ico">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="res\ui_ctl\restore.ico">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="res\ui_ctl\pin.ico">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="res\ui_ctl\pinoff.ico">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="res\ui_ctl\cog.ico">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="res\ui_ctl\book.ico">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="res\ui_ctl\play.ico">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="res\ui_ctl\pause.ico">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="res\ui_ctl\stop.ico">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="res\ui_ctl\next.ico">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="res\ui_ctl\prev.ico">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="res\ui_ctl\lock.ico">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="res\ui_ctl\search.ico">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="res\ui_ctl\plus.ico">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="res\ui_ctl\minus.ico">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="res\ui_ctl\delete.ico">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="res\ui_ctl\record.ico">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="res\ui_ctl\loop.ico">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="res\ui_ctl\shuffle.ico">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="res\ui_ctl\xfade.ico">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="res\ui_ctl\chevup.ico">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="res\ui_ctl\chevdown.ico">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="res\ui_ctl\chevleft.ico">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="res\ui_ctl\chevright.ico">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="res\ui_ctl\power.ico">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="res\ui_ctl\refresh.ico">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="res\ui_ctl\sleep.ico">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="res\ui_ctl\check.ico">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="res\ui_ctl\star.ico">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="res\ui_ctl\fade.ico">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="res\ui_ctl\ab.ico">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="res\iw\face.iwj" />
+    <None Include="res\iw\body.iwj" />
+    <None Include="res\iw\body2.iwj" />
+    <None Include="res\iw\lace.iwj" />
+    <None Include="res\iw\bow.iwj" />
+    <None Include="res\iw\blush.iwj" />
+    <None Include="res\iw\fluid.iwj" />
+    <None Include="res\iw\rotor.iwj" />
+    <None Include="res\iw\vibe.iwj" />
   </ItemGroup>
   <ItemGroup>
     <Text Include="codec\APPLE_LICENSE.txt">
       <Filter>ライブラリ\codec</Filter>
     </Text>
+  </ItemGroup>
+  <ItemGroup>
+    <Image Include="res\s3tex\r_forest_d.png" />
+    <Image Include="res\s3tex\r_ruins_d.png" />
+    <Image Include="res\s3tex\r_oil_d.png" />
+    <Image Include="res\s3tex\r_night_d.png" />
+    <Image Include="res\s3tex\r_under_d.png" />
+    <Image Include="res\s3tex\r_grass_d.png" />
+    <Image Include="res\s3tex\r_mesa_d.png" />
+    <Image Include="res\s3tex\r_cloud_d.png" />
+    <Image Include="res\s3tex\r_craft_d.png" />
+    <Image Include="res\s3tex\r_water.png" />
+    <Image Include="res\s3tex\r_obs.png" />
+    <Image Include="res\s3tex\r_env.png" />
+    <Image Include="res\s3tex\m_wall0_d.png" />
+    <Image Include="res\s3tex\m_wall1_d.png" />
+    <Image Include="res\s3tex\m_wall2_d.png" />
+    <Image Include="res\s3tex\m_wall3_d.png" />
+    <Image Include="res\s3tex\m_floor0_d.png" />
+    <Image Include="res\s3tex\m_floor1_d.png" />
+    <Image Include="res\s3tex\m_floor2_d.png" />
+    <Image Include="res\s3tex\m_floor3_d.png" />
+    <Image Include="res\s3tex\r_sky.png" />
+    <Image Include="res\s3tex\r_sky2.png" />
+    <Image Include="res\s3tex\r_item.png" />
+    <Image Include="res\s3tex\m_item.png" />
+    <Image Include="res\s3tex\m_gimmick.png" />
+    <Image Include="res\s3tex\m_glass.png" />
+    <Image Include="res\s3tex\r_wood.png" />
+    <Image Include="res\s3tex\m_brick2.png" />
+    <Image Include="res\s3tex\r_env2.png" />
+    <Image Include="res\s3tex\m_env.png" />
   </ItemGroup>
 </Project>

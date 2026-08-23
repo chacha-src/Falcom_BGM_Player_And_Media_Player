@@ -1,4 +1,4 @@
-﻿// Microsoft Visual C++ generated resource script.
+// Microsoft Visual C++ generated resource script.
 //
 #pragma code_page(65001)
 
@@ -156,54 +156,94 @@ IDI_UI_SHARE            ICON                    "res\\ui_icons\\share.ico"
 IDI_UI_TUNE             ICON                    "res\\ui_icons\\tune.ico"
 
 IDI_CTL_CLOSE           ICON                    "res\\ui_ctl\\close.ico"
-IDI_CTL_MIN             ICON                    "res\\ui_ctl\\min.ico"
-IDI_CTL_MAX             ICON                    "res\\ui_ctl\\max.ico"
-IDI_CTL_RESTORE         ICON                    "res\\ui_ctl\\restore.ico"
-IDI_CTL_PIN             ICON                    "res\\ui_ctl\\pin.ico"
-IDI_CTL_PINOFF          ICON                    "res\\ui_ctl\\pinoff.ico"
-IDI_CTL_COG             ICON                    "res\\ui_ctl\\cog.ico"
-IDI_CTL_BOOK            ICON                    "res\\ui_ctl\\book.ico"
-IDI_CTL_PLAY            ICON                    "res\\ui_ctl\\play.ico"
-IDI_CTL_PAUSE           ICON                    "res\\ui_ctl\\pause.ico"
-IDI_CTL_STOP            ICON                    "res\\ui_ctl\\stop.ico"
-IDI_CTL_NEXT            ICON                    "res\\ui_ctl\\next.ico"
-IDI_CTL_PREV            ICON                    "res\\ui_ctl\\prev.ico"
-IDI_CTL_LOCK            ICON                    "res\\ui_ctl\\lock.ico"
-IDI_CTL_SEARCH          ICON                    "res\\ui_ctl\\search.ico"
-IDI_CTL_PLUS            ICON                    "res\\ui_ctl\\plus.ico"
-IDI_CTL_MINUS           ICON                    "res\\ui_ctl\\minus.ico"
-IDI_CTL_DELETE          ICON                    "res\\ui_ctl\\delete.ico"
-IDI_CTL_RECORD          ICON                    "res\\ui_ctl\\record.ico"
-IDI_CTL_LOOP            ICON                    "res\\ui_ctl\\loop.ico"
-IDI_CTL_SHUFFLE         ICON                    "res\\ui_ctl\\shuffle.ico"
-IDI_CTL_XFADE           ICON                    "res\\ui_ctl\\xfade.ico"
-IDI_CTL_CHEVUP          ICON                    "res\\ui_ctl\\chevup.ico"
-IDI_CTL_CHEVDOWN        ICON                    "res\\ui_ctl\\chevdown.ico"
-IDI_CTL_CHEVLEFT        ICON                    "res\\ui_ctl\\chevleft.ico"
-IDI_CTL_CHEVRIGHT       ICON                    "res\\ui_ctl\\chevright.ico"
-IDI_CTL_POWER           ICON                    "res\\ui_ctl\\power.ico"
-IDI_CTL_REFRESH         ICON                    "res\\ui_ctl\\refresh.ico"
-IDI_CTL_SLEEP           ICON                    "res\\ui_ctl\\sleep.ico"
-IDI_CTL_CHECK           ICON                    "res\\ui_ctl\\check.ico"
-IDI_CTL_STAR            ICON                    "res\\ui_ctl\\star.ico"
-IDI_CTL_FADE            ICON                    "res\\ui_ctl\\fade.ico"
-IDI_CTL_AB              ICON                    "res\\ui_ctl\\ab.ico"
 
-IDR_IW_FACE             RCDATA                  "res\\iw\\face.iwj"
-IDR_IW_BODY             RCDATA                  "res\\iw\\body.iwj"
-IDR_IW_BODY2            RCDATA                  "res\\iw\\body2.iwj"
-IDR_IW_LACE             RCDATA                  "res\\iw\\lace.iwj"
-IDR_IW_BOW              RCDATA                  "res\\iw\\bow.iwj"
-IDR_IW_BLUSH            RCDATA                  "res\\iw\\blush.iwj"
-IDR_IW_FLUID            RCDATA                  "res\\iw\\fluid.iwj"
-IDR_IW_ROTOR            RCDATA                  "res\\iw\\rotor.iwj"
-IDR_IW_VIBE             RCDATA                  "res\\iw\\vibe.iwj"
+IDI_CTL_MIN             ICON                    "res\\ui_ctl\\min.ico"
+
+IDI_CTL_MAX             ICON                    "res\\ui_ctl\\max.ico"
+
+IDI_CTL_RESTORE         ICON                    "res\\ui_ctl\\restore.ico"
+
+IDI_CTL_PIN             ICON                    "res\\ui_ctl\\pin.ico"
+
+IDI_CTL_PINOFF          ICON                    "res\\ui_ctl\\pinoff.ico"
+
+IDI_CTL_COG             ICON                    "res\\ui_ctl\\cog.ico"
+
+IDI_CTL_BOOK            ICON                    "res\\ui_ctl\\book.ico"
+
+IDI_CTL_PLAY            ICON                    "res\\ui_ctl\\play.ico"
+
+IDI_CTL_PAUSE           ICON                    "res\\ui_ctl\\pause.ico"
+
+IDI_CTL_STOP            ICON                    "res\\ui_ctl\\stop.ico"
+
+IDI_CTL_NEXT            ICON                    "res\\ui_ctl\\next.ico"
+
+IDI_CTL_PREV            ICON                    "res\\ui_ctl\\prev.ico"
+
+IDI_CTL_LOCK            ICON                    "res\\ui_ctl\\lock.ico"
+
+IDI_CTL_SEARCH          ICON                    "res\\ui_ctl\\search.ico"
+
+IDI_CTL_PLUS            ICON                    "res\\ui_ctl\\plus.ico"
+
+IDI_CTL_MINUS           ICON                    "res\\ui_ctl\\minus.ico"
+
+IDI_CTL_DELETE          ICON                    "res\\ui_ctl\\delete.ico"
+
+IDI_CTL_RECORD          ICON                    "res\\ui_ctl\\record.ico"
+
+IDI_CTL_LOOP            ICON                    "res\\ui_ctl\\loop.ico"
+
+IDI_CTL_SHUFFLE         ICON                    "res\\ui_ctl\\shuffle.ico"
+
+IDI_CTL_XFADE           ICON                    "res\\ui_ctl\\xfade.ico"
+
+IDI_CTL_CHEVUP          ICON                    "res\\ui_ctl\\chevup.ico"
+
+IDI_CTL_CHEVDOWN        ICON                    "res\\ui_ctl\\chevdown.ico"
+
+IDI_CTL_CHEVLEFT        ICON                    "res\\ui_ctl\\chevleft.ico"
+
+IDI_CTL_CHEVRIGHT       ICON                    "res\\ui_ctl\\chevright.ico"
+
+IDI_CTL_POWER           ICON                    "res\\ui_ctl\\power.ico"
+
+IDI_CTL_REFRESH         ICON                    "res\\ui_ctl\\refresh.ico"
+
+IDI_CTL_SLEEP           ICON                    "res\\ui_ctl\\sleep.ico"
+
+IDI_CTL_CHECK           ICON                    "res\\ui_ctl\\check.ico"
+
+IDI_CTL_STAR            ICON                    "res\\ui_ctl\\star.ico"
+
+IDI_CTL_FADE            ICON                    "res\\ui_ctl\\fade.ico"
+
+IDI_CTL_AB              ICON                    "res\\ui_ctl\\ab.ico"
 
 
 /////////////////////////////////////////////////////////////////////////////
 //
 // RCDATA
 //
+
+IDR_IW_FACE             RCDATA                  "res\\iw\\face.iwj"
+
+IDR_IW_BODY             RCDATA                  "res\\iw\\body.iwj"
+
+IDR_IW_BODY2            RCDATA                  "res\\iw\\body2.iwj"
+
+IDR_IW_LACE             RCDATA                  "res\\iw\\lace.iwj"
+
+IDR_IW_BOW              RCDATA                  "res\\iw\\bow.iwj"
+
+IDR_IW_BLUSH            RCDATA                  "res\\iw\\blush.iwj"
+
+IDR_IW_FLUID            RCDATA                  "res\\iw\\fluid.iwj"
+
+IDR_IW_ROTOR            RCDATA                  "res\\iw\\rotor.iwj"
+
+IDR_IW_VIBE             RCDATA                  "res\\iw\\vibe.iwj"
 
 IDR_SASAMI_GS           RCDATA                  "res\\SASAMI_GS.DAT"
 
@@ -2410,7 +2450,7 @@ END
 //
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 0,9,1,841
+ FILEVERSION 0,9,1,843
  PRODUCTVERSION 1,0,0,1
  FILEFLAGSMASK 0x3fL
 #ifdef _DEBUG
@@ -2429,7 +2469,7 @@ BEGIN
             VALUE "Comments", "Falcom BGM Player & Media Player"
             VALUE "CompanyName", "Pre Prayer Power Soft"
             VALUE "FileDescription", "Falcom BGM Player & Media Player Ver 0.9a Rel.2026.08.23"
-            VALUE "FileVersion", "0.9.1.841"
+            VALUE "FileVersion", "0.9.1.843"
             VALUE "InternalName", "ogg YS/ED bgm"
             VALUE "LegalCopyright", "Copyright (C) 2026.08.23"
             VALUE "LegalTrademarks", "Pre Prayer Power Soft"

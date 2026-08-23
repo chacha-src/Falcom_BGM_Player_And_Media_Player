@@ -138,7 +138,7 @@ public:
 	ID3D11Texture2D* m_texCallout;
 	ID3D11ShaderResourceView* m_srvCallout;
 	int m_calloutW, m_calloutH;
-	enum { S3M_CALLOUT_MAX = 20 };
+	enum { S3M_CALLOUT_MAX = 28 };
 	float m_calloutU0[S3M_CALLOUT_MAX], m_calloutV0[S3M_CALLOUT_MAX];
 	float m_calloutU1[S3M_CALLOUT_MAX], m_calloutV1[S3M_CALLOUT_MAX];
 	int m_calloutN;

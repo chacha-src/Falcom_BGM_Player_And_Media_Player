@@ -38,9 +38,13 @@
 <dt>Terrain (hills, valleys, rivers)</dt>
 <dd>Real relief. Trees and other props grow from hill surfaces. The band may clip into terrain and trees. Large mountains stay solid from the outside; where the band meets them a tunnel is carved through. Geometry between the camera and the course fades so you can still see the lane. Fly the gaps. Contact costs HP.</dd>
 <dt>Trees, buildings and hazards</dt>
-<dd>Trunks and buildings are allowed to sink into the band. You fly between branches, pipes and structures. Nothing is placed so that it fills the whole lane. Hitting the solid core costs HP.</dd>
+<dd>Trunks and buildings are allowed to sink into the band. You fly between branches, pipes and structures. Nothing is placed so that it fills the whole lane. A hit costs about one tenth of your HP and knocks you toward the open side.</dd>
+<dt>Craft contact</dt>
+<dd>Bumping another craft knocks both of you slightly and costs about one thirtieth of HP.</dd>
+<dt>Rival HP and retirement</dt>
+<dd>Rivals use the same HP, obstacle hits and knockback. At 0 HP they explode and retire on the spot; others overtake so their rank keeps falling. Super easy caps retirements at about four of twelve crafts. Intense can still see retirements, but is tuned so you can win. AI level shows as weaving, attempted shortcuts, braking and leaving the lane.</dd>
 <dt>Item orbs</dt>
-<dd>Touching one changes the playing track's tempo or pitch, and applies a race effect such as a boost or fog at the same time.</dd>
+<dd>Touching one changes the playing track's tempo or pitch, and applies a race effect such as a boost or fog at the same time. A small label sits above each orb so you can tell the type.</dd>
 <dt>The standings panel</dt>
 <dd>Below the minimap on the right: name, position and recent lap times. Your own row is tinted differently.</dd>
 </dl>
@@ -52,13 +56,13 @@
 </ol>
 <h2>What you can set</h2>
 <ul>
-<li><b>AI</b> — super easy, easy, normal, hard or intense (super easy stays a bit slower than you; intense races near the cap)</li>
+<li><b>AI</b> — super easy, easy, normal, hard or intense (super easy stays a bit slower and weaves more; intense holds a tighter line but is still beatable)</li>
 <li><b>Opponents</b> — how many rivals</li>
 <li><b>Length</b> — auto, short or long</li>
 <li><b>Laps</b> — how many times round</li>
 <li><b>Theme</b> — forest, ruins, oil factory, night city, underwater tube, grassland, sunset mesa or cloud garden</li>
 </ul>
-<p>Fifty license-free photo textures (256px) are embedded in the exe: theme albedo plus detail, water, craft, cloud cards and a sky cube. Wrap lighting and reflection; items are crystal orbs. Nothing extra is placed beside the exe.</p>
+<p>Fifty license-free photo textures (512px) are embedded in the exe: theme albedo plus detail, water, craft, cloud cards and a sky cube. Wrap lighting and reflection; items are crystal orbs with a small label above each so you can tell the type. Nothing extra is placed beside the exe.</p>
 <p>These settings persist, so the next time you open the race you start on the same terms.</p>
 <h2>PCM sound effects</h2>
 <p>Engine notes are synthesized as PCM, not taken from wave files, together with the start countdown and GO, lap crossings, finish, podium, course-out, item pickups, collisions and wrong-way alerts. Throttle raises pitch and sub-bass, each craft has its own timbre, and distance changes loudness and left/right pan (in the spirit of DirectSound 3D). They are not mixed into the music streaming buffer. Toggle them from View in the right-click menu.</p>
