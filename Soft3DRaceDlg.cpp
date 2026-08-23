@@ -1476,8 +1476,11 @@ BOOL CSoft3DRaceDlg::HandleAccelMessage(MSG* pMsg)
 {
 	if (!pMsg) return FALSE;
 	const UINT msg = pMsg->message;
-	if (msg != WM_KEYDOWN && msg != WM_KEYUP && msg != WM_SYSKEYDOWN && msg != WM_SYSKEYUP)
+	if (msg != WM_KEYDOWN && msg != WM_KEYUP && msg != WM_SYSKEYDOWN && msg != WM_SYSKEYUP
+		&& msg != WM_CHAR && msg != WM_SYSCHAR)
 		return FALSE;
+	if ((msg == WM_CHAR || msg == WM_SYSCHAR) && (pMsg->wParam == _T(' ') || pMsg->wParam == VK_SPACE))
+		return TRUE;
 	if (pMsg->wParam == VK_SPACE) {
 		if (msg == WM_KEYDOWN && !(pMsg->lParam & (1 << 30))) {
 			const DWORD now = GetTickCount();
@@ -1514,6 +1517,7 @@ void CSoft3DRaceDlg::PumpQueued(BOOL input)
 				break;
 		}
 		if (msg.message == WM_QUIT) { ::PostQuitMessage((int)msg.wParam); return; }
+		if (HandleAccelMessage(&msg)) { n++; continue; }
 		::TranslateMessage(&msg);
 		::DispatchMessage(&msg);
 		n++;
@@ -2940,7 +2944,8 @@ void CSoft3DRaceDlg::TickCountdown(float dt)
 			m_clearBakeText = buf;
 			m_clearBakeA = 1.f;
 			m_clearDirty = 1;
-			Soft3DSfxUi(S3SFX_COUNT, show);
+			if (show <= 3)
+				Soft3DSfxUi(S3SFX_COUNT, show);
 		}
 	} else {
 		// GO を約1秒表示してからレース開始

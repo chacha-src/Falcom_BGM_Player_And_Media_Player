@@ -1,4 +1,4 @@
-#include "stdafx.h"
+﻿#include "stdafx.h"
 #include "ogg.h"
 #include "Soft3DGameSfx.h"
 #include <math.h>
@@ -267,8 +267,9 @@ static float S3sShotSample(S3SfxShot& s, float dt, float& nHold)
 		return (whoosh * 0.7f + thud * 0.45f) * env * 0.46f;
 	}
 	case S3SFX_COUNT: {
-		int step = s.param; if (step < 1) step = 1; if (step > 5) step = 5;
-		float hz = 392.f + (float)(5 - step) * 88.f;
+		int step = s.param;
+		if (step >= 4) return 0.f;
+		float hz = 659.f;
 		float ph = t * hz; ph -= (float)(int)ph; if (ph < 0.f) ph += 1.f;
 		float sq = (ph < 0.5f) ? 1.f : -1.f;
 		float click = (u < 0.18f) ? (1.f - u / 0.18f) : 0.f;

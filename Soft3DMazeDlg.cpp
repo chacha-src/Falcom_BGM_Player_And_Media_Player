@@ -465,20 +465,20 @@ void CS3mHelpDlg::OnPaint()
 		L"Rechtsklik: herstart / grootte / minimap / items. Voortgang bewaart zich (hervatten).",
 		L"PPM: restart / rozmiar / minimapa / przedmioty. Postęp zapisuje się (wznów).",
 		L"Sağ tık: yeniden / boyut / harita / öğeler. İlerleme otomatik kaydolur."));
-	line(LL14(L"PCM効果音: 歩行・アイテム・鍵・扉・階段・ポータルに加え、壁衝突、鍵なし扉、棘／粘液／氷／闇、ゴールを合成。曲の再生とは別経路。表示メニューでON/OFF。",
-		L"PCM SFX: steps, items, keys, doors, stairs, portals, plus bumps, locked doors, spike/slime/ice/dark traps and the goal (separate from music). Toggle in View.",
-		L"SFX PCM : pas, objets, clés, portes, escaliers, portails, chocs, portes fermées, pièges, arrivée. Menu Vue.",
-		L"SFX PCM: passi, oggetti, chiavi, porte, scale, portali, urti, porte chiuse, trappole, arrivo. Menu Vista.",
-		L"SFX PCM: pasos, objetos, llaves, puertas, escaleras, portales, golpes, puertas cerradas, trampas, meta. Menú Vista.",
-		L"PCM 효과음: 발소리·아이템·열쇠·문·계단·포털+벽충돌·잠긴문·함정·골. 보기 메뉴 ON/OFF.",
-		L"PCM效果音：脚步、道具、钥匙、门、楼梯、传送门，以及撞墙、无钥匙门、尖刺/粘液/冰/暗、终点。显示菜单开关。",
-		L"PCM SFX: steps, items, keys, doors, stairs, portals, bumps, locks, traps, goal. View menu toggle.",
-		L"PCM SFX: шаги, предметы, ключи, двери, лестницы, порталы, удары, замки, ловушки, цель.",
-		L"PCM-SFX: Schritte, Items, Schlüssel, Türen, Treppen, Portale, Stöße, Schlösser, Fallen, Ziel. Ansicht-Menü.",
-		L"SFX PCM: passos, itens, chaves, portas, escadas, portais, impactos, portas trancadas, armadilhas, chegada. Menu Vista.",
-		L"PCM-SFX: stappen, items, sleutels, deuren, trappen, portalen, stoten, sloten, vallen, doel. Weergave-menu.",
-		L"SFX PCM: kroki, przedmioty, klucze, drzwi, schody, portale, uderzenia, zamki, pułapki, cel. Menu Widok.",
-		L"PCM SFX: adım, öğe, anahtar, kapı, merdiven, portal, çarpma, kilit, tuzak, hedef. Görünüm menüsü."));
+	line(LL14(L"PCM効果音: アイテム・鍵・扉・階段・ポータルに加え、壁衝突、鍵なし扉、棘／粘液／氷／闇、ゴールを合成。曲の再生とは別経路。表示メニューでON/OFF。",
+		L"PCM SFX: items, keys, doors, stairs, portals, plus bumps, locked doors, spike/slime/ice/dark traps and the goal (separate from music). Toggle in View.",
+		L"SFX PCM : objets, clés, portes, escaliers, portails, chocs, portes fermées, pièges, arrivée. Menu Vue.",
+		L"SFX PCM: oggetti, chiavi, porte, scale, portali, urti, porte chiuse, trappole, arrivo. Menu Vista.",
+		L"SFX PCM: objetos, llaves, puertas, escaleras, portales, golpes, puertas cerradas, trampas, meta. Menú Vista.",
+		L"PCM 효과음: 아이템·열쇠·문·계단·포털+벽충돌·잠긴문·함정·골. 보기 메뉴 ON/OFF.",
+		L"PCM效果音：道具、钥匙、门、楼梯、传送门，以及撞墙、无钥匙门、尖刺/粘液/冰/暗、终点。显示菜单开关。",
+		L"PCM SFX: items, keys, doors, stairs, portals, bumps, locks, traps, goal. View menu toggle.",
+		L"PCM SFX: предметы, ключи, двери, лестницы, порталы, удары, замки, ловушки, цель.",
+		L"PCM-SFX: Items, Schlüssel, Türen, Treppen, Portale, Stöße, Schlösser, Fallen, Ziel. Ansicht-Menü.",
+		L"SFX PCM: itens, chaves, portas, escadas, portais, impactos, portas trancadas, armadilhas, chegada. Menu Vista.",
+		L"PCM-SFX: items, sleutels, deuren, trappen, portalen, stoten, sloten, vallen, doel. Weergave-menu.",
+		L"SFX PCM: przedmioty, klucze, drzwi, schody, portale, uderzenia, zamki, pułapki, cel. Menu Widok.",
+		L"PCM SFX: öğe, anahtar, kapı, merdiven, portal, çarpma, kilit, tuzak, hedef. Görünüm menüsü."));
 	line(LL14(L"壁・床・鏡・アイテム・ギミックはライセンスフリーの写真テクスチャ（50枚・256）をexeに埋め込んでいます（別ファイル不要）。階テーマ（レンガ／湿った石／錆び鉄／火山岩）に細部を重ね、地下は室内キューブで壁が見える明るさにし、反射と乱反射があります。",
 		L"Walls, floors, mirrors, items and gizmos use 50 license-free photo textures (256px) embedded in the exe (no extra files): albedo plus detail per floor theme (brick, wet stone, rusted metal, volcanic), a brighter indoor cube in the basement, and reflection plus wrap lighting.",
 		L"Murs, sols, miroirs, objets : 50 textures photo 256 dans l'exe (albédo+détail, cube intérieur plus clair en sous-sol, réflexion).",
@@ -806,7 +806,7 @@ CS3mView::CS3mView()
 	, m_texItem(NULL), m_srvItem(NULL), m_texGimmick(NULL), m_srvGimmick(NULL)
 	, m_texGlass(NULL), m_srvGlass(NULL), m_texBrick2(NULL), m_srvBrick2(NULL)
 	, m_texMirrorWall(NULL), m_srvMirrorWall(NULL), m_texMirrorFloor(NULL), m_srvMirrorFloor(NULL)
-	, m_texClear(NULL), m_srvClear(NULL), m_clearTexW(0), m_clearTexH(0), m_texMap(NULL), m_srvMap(NULL), m_texTip(NULL), m_srvTip(NULL), m_tipW(0), m_tipH(0), m_texBadge(NULL), m_srvBadge(NULL), m_badgeW(0), m_badgeH(0)
+	, m_texClear(NULL), m_srvClear(NULL), m_clearTexW(0), m_clearTexH(0), m_texMap(NULL), m_srvMap(NULL), m_mapTexSize(S3M_MAP_SIZE), m_mapCpu(NULL), m_mapCpuCount(0), m_texTip(NULL), m_srvTip(NULL), m_tipW(0), m_tipH(0), m_texBadge(NULL), m_srvBadge(NULL), m_badgeW(0), m_badgeH(0)
 	, m_texCallout(NULL), m_srvCallout(NULL), m_calloutW(0), m_calloutH(0), m_calloutN(0)
 	, m_texFloorBar(NULL), m_srvFloorBar(NULL), m_floorBarW(0), m_floorBarH(0), m_floorBarRecX0(0), m_floorBarRecX1(0)
 	, m_sampLin(NULL), m_sampPoint(NULL), m_sampCmp(NULL)
@@ -1108,42 +1108,71 @@ BOOL CS3mView::CreateProcTextures()
 		}
 	};
 	D3D11_TEXTURE2D_DESC d={}; d.Width=AW;d.Height=AH;d.MipLevels=1;d.ArraySize=1;d.Format=DXGI_FORMAT_B8G8R8A8_UNORM;d.SampleDesc.Count=1;d.Usage=D3D11_USAGE_IMMUTABLE;d.BindFlags=D3D11_BIND_SHADER_RESOURCE;
-	DWORD* atlas=new DWORD[AW*AH];
+	auto failHr=[&](HRESULT hr)->BOOL{ m_dxFailHr=hr; return FALSE; };
+	auto make2d=[&](D3D11_TEXTURE2D_DESC* desc, const void* bits, UINT pitch, ID3D11Texture2D** tex, ID3D11ShaderResourceView** srv)->HRESULT{
+		D3D11_SUBRESOURCE_DATA sd={bits,pitch,0};
+		HRESULT hr=m_dev->CreateTexture2D(desc,&sd,tex);
+		if(FAILED(hr)) return hr;
+		hr=m_dev->CreateShaderResourceView(*tex,NULL,srv);
+		if(FAILED(hr)){ S3M_RELEASE(*tex); }
+		return hr;
+	};
+	auto makeCube=[&](DWORD* src, int face, ID3D11Texture2D** tex, ID3D11ShaderResourceView** srv)->HRESULT{
+		D3D11_TEXTURE2D_DESC cd=d;
+		cd.Width=face; cd.Height=face; cd.MipLevels=1; cd.ArraySize=6;
+		cd.MiscFlags=D3D11_RESOURCE_MISC_TEXTURECUBE;
+		cd.Usage=D3D11_USAGE_IMMUTABLE; cd.BindFlags=D3D11_BIND_SHADER_RESOURCE;
+		D3D11_SUBRESOURCE_DATA cs[6]={};
+		for(int f=0;f<6;f++){ cs[f].pSysMem=src+f*face*face; cs[f].SysMemPitch=(UINT)(face*4); cs[f].SysMemSlicePitch=0; }
+		HRESULT hr=m_dev->CreateTexture2D(&cd,cs,tex);
+		if(FAILED(hr)) return hr;
+		D3D11_SHADER_RESOURCE_VIEW_DESC svd={};
+		svd.Format=cd.Format; svd.ViewDimension=D3D11_SRV_DIMENSION_TEXTURECUBE; svd.TextureCube.MipLevels=1;
+		hr=m_dev->CreateShaderResourceView(*tex,&svd,srv);
+		if(FAILED(hr)) hr=m_dev->CreateShaderResourceView(*tex,NULL,srv);
+		if(FAILED(hr)){ S3M_RELEASE(*tex); }
+		return hr;
+	};
+	DWORD* atlas=new (std::nothrow) DWORD[AW*AH];
+	if(!atlas) return failHr(E_OUTOFMEMORY);
 	static const int kWallRes[S3M_THEME_N]={IDR_S3TEX_M_WALL0,IDR_S3TEX_M_WALL1,IDR_S3TEX_M_WALL2,IDR_S3TEX_M_WALL3};
+	const int W=256,H=256;
+	DWORD* p=new (std::nothrow) DWORD[W*H];
+	if(!p){delete[] atlas; return failHr(E_OUTOFMEMORY);}
 	for(int th=0;th<S3M_THEME_N;th++){
 		if(!Soft3DTexLoadPngRes(kWallRes[th],atlas,AW,AH))
 			genWall(th,atlas);
-		D3D11_SUBRESOURCE_DATA sd={atlas,AW*4,0};
-		if(FAILED(m_dev->CreateTexture2D(&d,&sd,&m_texBrick[th]))||FAILED(m_dev->CreateShaderResourceView(m_texBrick[th],NULL,&m_srvBrick[th]))){delete[] atlas;return FALSE;}
+		d.Width=AW; d.Height=AH; d.ArraySize=1; d.MiscFlags=0;
+		HRESULT hr=make2d(&d,atlas,AW*4,&m_texBrick[th],&m_srvBrick[th]);
+		if(FAILED(hr)){
+			for(int y=0;y<H;y++)for(int x=0;x<W;x++) p[y*W+x]=atlas[(y*2)*AW+(x*2)];
+			d.Width=W; d.Height=H;
+			hr=make2d(&d,p,W*4,&m_texBrick[th],&m_srvBrick[th]);
+			if(FAILED(hr)){delete[] atlas;delete[] p; return failHr(hr);}
+		}
 	}
-	delete[] atlas;
-	const int W=256,H=256; DWORD* p=new DWORD[W*H];
-	d.Width=W;d.Height=H;
+	delete[] atlas; atlas=NULL;
+	d.Width=W;d.Height=H;d.ArraySize=1;d.MiscFlags=0;
 	static const int kFloorRes[S3M_THEME_N]={IDR_S3TEX_M_FLOOR0,IDR_S3TEX_M_FLOOR1,IDR_S3TEX_M_FLOOR2,IDR_S3TEX_M_FLOOR3};
 	for(int th=0;th<S3M_THEME_N;th++){
 		if(!Soft3DTexLoadPngRes(kFloorRes[th],p,W,H))
 			genFloor(th,p,W,H);
-		D3D11_SUBRESOURCE_DATA sd={p,W*4,0};
-		if(FAILED(m_dev->CreateTexture2D(&d,&sd,&m_texFloor[th]))||FAILED(m_dev->CreateShaderResourceView(m_texFloor[th],NULL,&m_srvFloor[th]))){delete[] p;return FALSE;}
+		HRESULT hr=make2d(&d,p,W*4,&m_texFloor[th],&m_srvFloor[th]);
+		if(FAILED(hr)){delete[] p; return failHr(hr);}
 	}
 	static const int kWallDetRes[S3M_THEME_N]={IDR_S3TEX_M_WALL0_D,IDR_S3TEX_M_WALL1_D,IDR_S3TEX_M_WALL2_D,IDR_S3TEX_M_WALL3_D};
 	static const int kFloorDetRes[S3M_THEME_N]={IDR_S3TEX_M_FLOOR0_D,IDR_S3TEX_M_FLOOR1_D,IDR_S3TEX_M_FLOOR2_D,IDR_S3TEX_M_FLOOR3_D};
 	for(int th=0;th<S3M_THEME_N;th++){
 		if(Soft3DTexLoadPngRes(kWallDetRes[th],p,W,H)){
-			D3D11_SUBRESOURCE_DATA sd={p,W*4,0};
-			if(FAILED(m_dev->CreateTexture2D(&d,&sd,&m_texBrickD[th]))||FAILED(m_dev->CreateShaderResourceView(m_texBrickD[th],NULL,&m_srvBrickD[th]))){delete[] p;return FALSE;}
+			if(FAILED(make2d(&d,p,W*4,&m_texBrickD[th],&m_srvBrickD[th]))){ S3M_RELEASE(m_srvBrickD[th]); S3M_RELEASE(m_texBrickD[th]); }
 		}
 		if(Soft3DTexLoadPngRes(kFloorDetRes[th],p,W,H)){
-			D3D11_SUBRESOURCE_DATA sd={p,W*4,0};
-			if(FAILED(m_dev->CreateTexture2D(&d,&sd,&m_texFloorD[th]))||FAILED(m_dev->CreateShaderResourceView(m_texFloorD[th],NULL,&m_srvFloorD[th]))){delete[] p;return FALSE;}
+			if(FAILED(make2d(&d,p,W*4,&m_texFloorD[th],&m_srvFloorD[th]))){ S3M_RELEASE(m_srvFloorD[th]); S3M_RELEASE(m_texFloorD[th]); }
 		}
 	}
 	auto up2=[&](int id, ID3D11Texture2D** tex, ID3D11ShaderResourceView** srv){
 		if(!Soft3DTexLoadPngRes(id,p,W,H)) return;
-		D3D11_SUBRESOURCE_DATA sd={p,(UINT)(W*4),0};
-		if(FAILED(m_dev->CreateTexture2D(&d,&sd,tex))||FAILED(m_dev->CreateShaderResourceView(*tex,NULL,srv))){
-			S3M_RELEASE(*srv); S3M_RELEASE(*tex);
-		}
+		if(FAILED(make2d(&d,p,W*4,tex,srv))){ S3M_RELEASE(*srv); S3M_RELEASE(*tex); }
 	};
 	up2(IDR_S3TEX_M_ITEM,&m_texItem,&m_srvItem);
 	up2(IDR_S3TEX_M_GIMMICK,&m_texGimmick,&m_srvGimmick);
@@ -1152,26 +1181,23 @@ BOOL CS3mView::CreateProcTextures()
 	{
 		const int EW=256,EH=256;
 		DWORD* cube=new (std::nothrow) DWORD[EW*EH*6];
-		if(!cube){delete[] p;return FALSE;}
+		if(!cube){delete[] p; return failHr(E_OUTOFMEMORY);}
 		BOOL photo=Soft3DTexLoadPngRes(IDR_S3TEX_R_ENV,cube,EW,EH*6);
-		int cw=photo?EW:128, ch=photo?EH:128;
-		if(!photo){
+		HRESULT cubeHr=E_FAIL;
+		if(photo) cubeHr=makeCube(cube,EW,&m_texEnv,&m_srvEnv);
+		if(FAILED(cubeHr)){
+			S3M_RELEASE(m_srvEnv); S3M_RELEASE(m_texEnv);
 			delete[] cube;
 			cube=new (std::nothrow) DWORD[128*128*6];
-			if(!cube){delete[] p;return FALSE;}
+			if(!cube){delete[] p; return failHr(E_OUTOFMEMORY);}
 			for(int f=0;f<6;f++){for(int y=0;y<128;y++)for(int x=0;x<128;x++){float t=(float)y/127.f;BYTE r=(BYTE)(110+70*(1-t)),g=(BYTE)(145+55*(1-t)),b=(BYTE)(175+40*(1-t));if(f==2){r=(BYTE)(85+35*t);g=(BYTE)(120+45*t);b=(BYTE)(60+25*t);}cube[(f*128+y)*128+x]=0xff000000|((DWORD)r<<16)|((DWORD)g<<8)|b;}}
+			cubeHr=makeCube(cube,128,&m_texEnv,&m_srvEnv);
 		}
-		d.Width=cw;d.Height=ch;d.ArraySize=6;d.MiscFlags=D3D11_RESOURCE_MISC_TEXTURECUBE;
-		D3D11_SUBRESOURCE_DATA cs[6]={};
-		for(int f=0;f<6;f++){cs[f].pSysMem=cube+f*cw*ch;cs[f].SysMemPitch=cw*4;cs[f].SysMemSlicePitch=cw*ch*4;}
-		if(FAILED(m_dev->CreateTexture2D(&d,cs,&m_texEnv))||FAILED(m_dev->CreateShaderResourceView(m_texEnv,NULL,&m_srvEnv))){delete[] cube;delete[] p;return FALSE;}
+		if(FAILED(cubeHr)){delete[] cube;delete[] p; return failHr(cubeHr);}
 		{
 			DWORD* cubeIn=new (std::nothrow) DWORD[256*256*6];
 			if(cubeIn && Soft3DTexLoadPngRes(IDR_S3TEX_M_ENV,cubeIn,256,256*6)){
-				D3D11_TEXTURE2D_DESC ed=d; ed.Width=256; ed.Height=256; ed.ArraySize=6; ed.MiscFlags=D3D11_RESOURCE_MISC_TEXTURECUBE;
-				D3D11_SUBRESOURCE_DATA ics[6]={};
-				for(int f=0;f<6;f++){ics[f].pSysMem=cubeIn+f*256*256;ics[f].SysMemPitch=256*4;ics[f].SysMemSlicePitch=256*256*4;}
-				if(FAILED(m_dev->CreateTexture2D(&ed,ics,&m_texEnvIn))||FAILED(m_dev->CreateShaderResourceView(m_texEnvIn,NULL,&m_srvEnvIn))){
+				if(FAILED(makeCube(cubeIn,256,&m_texEnvIn,&m_srvEnvIn))){
 					S3M_RELEASE(m_srvEnvIn); S3M_RELEASE(m_texEnvIn);
 				}
 			}
@@ -1179,11 +1205,11 @@ BOOL CS3mView::CreateProcTextures()
 		}
 		delete[] cube;
 	}
-	delete[] p;
-	// 鏡壁／鏡床：滑らかな銀シアン鏡＋細い傷（割れすぎない）
+	delete[] p; p=NULL;
 	{
 		const int MW=256,MH=256;
-		DWORD* mir=new DWORD[MW*MH];
+		DWORD* mir=new (std::nothrow) DWORD[MW*MH];
+		if(!mir) return failHr(E_OUTOFMEMORY);
 		auto putMir=[&](BOOL wall){
 			for(int y=0;y<MH;y++)for(int x=0;x<MW;x++){
 				const float u=(float)x/(float)(MW-1),v=(float)y/(float)(MH-1);
@@ -1211,20 +1237,36 @@ BOOL CS3mView::CreateProcTextures()
 		md.Format=DXGI_FORMAT_B8G8R8A8_UNORM;md.SampleDesc.Count=1;md.Usage=D3D11_USAGE_IMMUTABLE;md.BindFlags=D3D11_BIND_SHADER_RESOURCE;
 		if(!Soft3DTexLoadPngRes(IDR_S3TEX_M_MIRWALL,mir,MW,MH))
 			putMir(TRUE);
-		D3D11_SUBRESOURCE_DATA sd={mir,MW*4,0};
-		if(FAILED(m_dev->CreateTexture2D(&md,&sd,&m_texMirrorWall))||FAILED(m_dev->CreateShaderResourceView(m_texMirrorWall,NULL,&m_srvMirrorWall))){delete[] mir;return FALSE;}
+		HRESULT hr=make2d(&md,mir,MW*4,&m_texMirrorWall,&m_srvMirrorWall);
+		if(FAILED(hr)){delete[] mir; return failHr(hr);}
 		if(!Soft3DTexLoadPngRes(IDR_S3TEX_M_MIRFLOOR,mir,MW,MH))
 			putMir(FALSE);
-		sd.pSysMem=mir;
-		if(FAILED(m_dev->CreateTexture2D(&md,&sd,&m_texMirrorFloor))||FAILED(m_dev->CreateShaderResourceView(m_texMirrorFloor,NULL,&m_srvMirrorFloor))){delete[] mir;return FALSE;}
+		hr=make2d(&md,mir,MW*4,&m_texMirrorFloor,&m_srvMirrorFloor);
+		if(FAILED(hr)){delete[] mir; return failHr(hr);}
 		delete[] mir;
 	}
 	{
-		D3D11_TEXTURE2D_DESC md={};md.Width=S3M_MAP_SIZE;md.Height=S3M_MAP_SIZE;md.MipLevels=1;md.ArraySize=1;
-		md.Format=DXGI_FORMAT_B8G8R8A8_UNORM;md.SampleDesc.Count=1;md.Usage=D3D11_USAGE_DYNAMIC;
-		md.BindFlags=D3D11_BIND_SHADER_RESOURCE;md.CPUAccessFlags=D3D11_CPU_ACCESS_WRITE;
-		if(FAILED(m_dev->CreateTexture2D(&md,NULL,&m_texMap))||FAILED(m_dev->CreateShaderResourceView(m_texMap,NULL,&m_srvMap)))
-			return FALSE;
+		static const int kMapTry[]={S3M_MAP_SIZE,1024,512};
+		HRESULT mapHr=E_FAIL;
+		m_mapTexSize=0;
+		delete[] m_mapCpu; m_mapCpu=NULL; m_mapCpuCount=0;
+		for(int ti=0;ti<3;ti++){
+			const int sz=kMapTry[ti];
+			D3D11_TEXTURE2D_DESC md={};md.Width=sz;md.Height=sz;md.MipLevels=1;md.ArraySize=1;
+			md.Format=DXGI_FORMAT_B8G8R8A8_UNORM;md.SampleDesc.Count=1;md.Usage=D3D11_USAGE_DEFAULT;
+			md.BindFlags=D3D11_BIND_SHADER_RESOURCE;
+			mapHr=m_dev->CreateTexture2D(&md,NULL,&m_texMap);
+			if(SUCCEEDED(mapHr)) mapHr=m_dev->CreateShaderResourceView(m_texMap,NULL,&m_srvMap);
+			if(SUCCEEDED(mapHr)){
+				m_mapCpu=new (std::nothrow) DWORD[(size_t)sz*(size_t)sz];
+				if(!m_mapCpu){ S3M_RELEASE(m_srvMap); S3M_RELEASE(m_texMap); mapHr=E_OUTOFMEMORY; continue; }
+				m_mapCpuCount=sz*sz;
+				m_mapTexSize=sz;
+				break;
+			}
+			S3M_RELEASE(m_srvMap); S3M_RELEASE(m_texMap);
+		}
+		if(FAILED(mapHr)||!m_texMap||!m_mapCpu) return failHr(mapHr);
 	}
 	return TRUE;
 }
@@ -1259,7 +1301,7 @@ BOOL CS3mView::InitDx()
 	D3D11_BUFFER_DESC bd={};bd.ByteWidth=((sizeof(S3MFrameCB)+15)/16)*16;bd.Usage=D3D11_USAGE_DYNAMIC;bd.BindFlags=D3D11_BIND_CONSTANT_BUFFER;bd.CPUAccessFlags=D3D11_CPU_ACCESS_WRITE;
 	if(FAILED(hr=m_dev->CreateBuffer(&bd,NULL,&m_cbFrame))){ m_dxFailStage = 5; m_dxFailHr = hr; return FALSE; }
 	if(!CreateShaders()){ m_dxFailStage = 6; if(m_dxFailHr==S_OK) m_dxFailHr = E_FAIL; return FALSE; }
-	if(!CreateProcTextures()){ m_dxFailStage = 7; m_dxFailHr = E_FAIL; return FALSE; }
+	if(!CreateProcTextures()){ m_dxFailStage = 7; if(m_dxFailHr==S_OK) m_dxFailHr = E_FAIL; return FALSE; }
 	bd.ByteWidth=m_vbDynBytes;bd.BindFlags=D3D11_BIND_VERTEX_BUFFER;bd.CPUAccessFlags=D3D11_CPU_ACCESS_WRITE;
 	if(FAILED(hr=m_dev->CreateBuffer(&bd,NULL,&m_vbDyn))){
 		static const UINT kVbTry[]={6u*1024u*1024u,4u*1024u*1024u,3u*1024u*1024u,2u*1024u*1024u};
@@ -1342,7 +1384,24 @@ BOOL CS3mView::ResizeDx(int w,int h)
 	if(FAILED(hr)||!EnsureSceneTargets(w,h))return FALSE;m_ready=TRUE;return TRUE;
 }
 
-void CS3mView::PresentFrame(){if(m_swap&&m_ready)m_swap->Present(0,0);}
+void CS3mView::NoteContextLost(HRESULT hr)
+{
+	if (hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_RESET) {
+		m_ready = FALSE;
+		return;
+	}
+	if (m_dev) {
+		const HRESULT why = m_dev->GetDeviceRemovedReason();
+		if (FAILED(why))
+			m_ready = FALSE;
+	}
+}
+void CS3mView::PresentFrame()
+{
+	if (!m_swap || !m_ready) return;
+	const HRESULT hr = m_swap->Present(0, 0);
+	if (FAILED(hr)) NoteContextLost(hr);
+}
 void CS3mView::ReleaseClearTexture(){S3M_RELEASE(m_srvClear);S3M_RELEASE(m_texClear);m_clearTexW=m_clearTexH=0;}
 void CS3mView::ReleaseTipTexture(){S3M_RELEASE(m_srvTip);S3M_RELEASE(m_texTip);m_tipW=m_tipH=0;}
 void CS3mView::ReleaseBadgeTexture(){S3M_RELEASE(m_srvBadge);S3M_RELEASE(m_texBadge);m_badgeW=m_badgeH=0;}
@@ -1527,6 +1586,7 @@ void CS3mView::ReleaseDx()
 {
 	m_ready=FALSE;if(m_imm){m_imm->ClearState();m_imm->Flush();}
 	ReleaseClearTexture();ReleaseTipTexture();ReleaseBadgeTexture();ReleaseFloorBarTexture();ReleaseCalloutTexture();S3M_RELEASE(m_srvMap);S3M_RELEASE(m_texMap);
+	delete[] m_mapCpu; m_mapCpu=NULL; m_mapCpuCount=0; m_mapTexSize=0;
 	S3M_RELEASE(m_srvBrick2);S3M_RELEASE(m_texBrick2);S3M_RELEASE(m_srvGlass);S3M_RELEASE(m_texGlass);
 	S3M_RELEASE(m_srvGimmick);S3M_RELEASE(m_texGimmick);S3M_RELEASE(m_srvItem);S3M_RELEASE(m_texItem);
 	S3M_RELEASE(m_srvEnvIn);S3M_RELEASE(m_texEnvIn);S3M_RELEASE(m_srvEnv);S3M_RELEASE(m_texEnv);
@@ -1751,7 +1811,7 @@ CSoft3DMazeDlg::CSoft3DMazeDlg(CWnd* p)
 	, m_portalIgnoreX(-1), m_portalIgnoreZ(-1), m_portalFlashA(0.f)
 	, m_navCount(0), m_navWaiting(0)
 	, m_baseTempoPos(200), m_basePitchPos(200)
-	, m_lastTick(0), m_rng(GetTickCount()), m_genSeed(GetTickCount())
+	, m_lastTick(0), m_inTick(0), m_dxRecoverTries(0), m_ovStairN(0), m_rng(GetTickCount()), m_genSeed(GetTickCount())
 	, m_lastAutosave(0), m_runDirty(0), m_mapBakeDirty(1), m_mapToggle(0)
 	, m_overviewFloorHeld(0)
 	, m_mapPanX(0.f), m_mapPanY(0.f), m_mapPanDrag(0)
@@ -1816,14 +1876,42 @@ BOOL CSoft3DMazeDlg::PreTranslateMessage(MSG* pMsg)
 	return CCustomBlurDialogBase::PreTranslateMessage(pMsg);
 }
 
+void CSoft3DMazeDlg::PumpQueued(BOOL input)
+{
+	HWND root = GetSafeHwnd();
+	if (!root) return;
+	MSG msg;
+	int n = 0;
+	const int cap = input ? 18 : 10;
+	while (n < cap) {
+		if (!::PeekMessage(&msg, NULL, WM_PAINT, WM_PAINT, PM_REMOVE)) {
+			if (!input) break;
+			if (!::PeekMessage(&msg, NULL, WM_MOUSEFIRST, WM_MOUSELAST, PM_REMOVE)
+				&& !::PeekMessage(&msg, NULL, WM_KEYFIRST, WM_KEYLAST, PM_REMOVE)
+				&& !::PeekMessage(&msg, NULL, WM_NCMOUSEMOVE, WM_NCMBUTTONDBLCLK, PM_REMOVE))
+				break;
+		}
+		if (msg.message == WM_QUIT) { ::PostQuitMessage((int)msg.wParam); return; }
+		if (HandleAccelMessage(&msg)) { n++; continue; }
+		::TranslateMessage(&msg);
+		::DispatchMessage(&msg);
+		n++;
+	}
+}
+
 BOOL CSoft3DMazeDlg::HandleAccelMessage(MSG* pMsg)
 {
 	if (!pMsg) return FALSE;
 	const UINT msg = pMsg->message;
-	if (msg != WM_KEYDOWN && msg != WM_KEYUP && msg != WM_SYSKEYDOWN && msg != WM_SYSKEYUP)
+	if (msg != WM_KEYDOWN && msg != WM_KEYUP && msg != WM_SYSKEYDOWN && msg != WM_SYSKEYUP
+		&& msg != WM_CHAR && msg != WM_SYSCHAR)
 		return FALSE;
 	CWnd* f = GetFocus();
 	const BOOL inEdit = (f && (f == &m_size || m_size.IsChild(f) || f->IsKindOf(RUNTIME_CLASS(CEdit))));
+	if ((msg == WM_CHAR || msg == WM_SYSCHAR) && (pMsg->wParam == _T(' ') || pMsg->wParam == VK_SPACE)) {
+		if (inEdit) return FALSE;
+		return TRUE;
+	}
 	if (pMsg->wParam == VK_SPACE) {
 		if (inEdit) return FALSE;
 		// 押しっぱなしリピートは無視。同一キーイベントの二重処理も防ぐ
@@ -1860,6 +1948,8 @@ void CSoft3DMazeDlg::ToggleMapOverlay()
 		FocusOverviewOnPlayer();
 	}
 	EnsureTipTexture(m_mapToggle != 0);
+	if (m_view.GetSafeHwnd())
+		m_view.SetFocus();
 }
 
 void CSoft3DMazeDlg::FocusOverviewOnPlayer()
@@ -4964,7 +5054,6 @@ BOOL CSoft3DMazeDlg::TryStep(int mx, int mz)
 	m_lastStepMx = mx;
 	m_lastStepMz = mz;
 	m_moving = 1;
-	Soft3DSfxOneShot(S3SFX_STEP, GridToWorldX(m_px), GetRenderEyeY(), GridToWorldZ(m_pz));
 	return TRUE;
 }
 
@@ -5124,13 +5213,6 @@ void CSoft3DMazeDlg::TickMove(float dt)
 	}
 
 	if (m_moving) {
-		static float s_stepAcc = 0.f;
-		s_stepAcc += dt;
-		const float per = (m_slowT > 0.f) ? 0.40f : 0.24f;
-		if (s_stepAcc >= per) {
-			s_stepAcc -= per;
-			Soft3DSfxOneShot(S3SFX_STEP, GridToWorldX(m_px), GetRenderEyeY(), GridToWorldZ(m_pz));
-		}
 		const float dx = m_pxTarget - m_px;
 		const float dz = m_pzTarget - m_pz;
 		const float dist = sqrtf(dx * dx + dz * dz);
@@ -5154,7 +5236,6 @@ void CSoft3DMazeDlg::TickMove(float dt)
 				m_pzTarget = m_pz;
 			}
 			m_moving = 0;
-			s_stepAcc = 0.f;
 			MarkVisited();
 			UpdateNavProgress();
 			UpdateStatus();
@@ -5227,7 +5308,12 @@ void CSoft3DMazeDlg::RenderScene()
 	}
 	// DOF: 約6マス以遠からぼけ開始（通路マス≈1ワールド単位）。手前はシャープ
 	cb.dofParams={6.0f,7.0f,4.0f,m_bob};cb.screenSize={(float)w,(float)h,1.f/w,1.f/h};cb.misc={m_clearScreenA,m_clearTextA,1.f/tanf(fov*.5f),m_anim};
-	D3D11_MAPPED_SUBRESOURCE map={};if(FAILED(dc->Map(m_view.m_cbFrame,0,D3D11_MAP_WRITE_DISCARD,0,&map)))return;memcpy(map.pData,&cb,sizeof(cb));dc->Unmap(m_view.m_cbFrame,0);
+	D3D11_MAPPED_SUBRESOURCE map={};
+	{
+		const HRESULT mapHr=dc->Map(m_view.m_cbFrame,0,D3D11_MAP_WRITE_DISCARD,0,&map);
+		if(FAILED(mapHr)){ m_view.NoteContextLost(mapHr); return; }
+		memcpy(map.pData,&cb,sizeof(cb));dc->Unmap(m_view.m_cbFrame,0);
+	}
 	const S3MMat vpMat=cb.viewProj;
 	UINT maxV=m_view.m_vbDynBytes/sizeof(S3MVertex);
 	if(maxV<65536u)maxV=65536u;
@@ -6718,134 +6804,149 @@ void CSoft3DMazeDlg::RenderScene()
 		}
 		hn=0;
 	}
-	if(overview&&m_view.m_srvMap&&m_view.m_texMap){
-		const int TS=CS3mView::S3M_MAP_SIZE;
+	if(overview&&m_view.m_srvMap&&m_view.m_texMap&&m_view.m_mapCpu){
+		const int TS=m_view.m_mapTexSize>0?m_view.m_mapTexSize:CS3mView::S3M_MAP_SIZE;
 		int bakeFloor=m_mapViewFloor;
 		if(bakeFloor<0||bakeFloor>=m_nFloors||!m_grids[bakeFloor])bakeFloor=m_floor;
 		if(m_mapBakeDirty){
 			const DWORD nowBake=GetTickCount();
-			// 移動中の毎歩フル再ベイクは大マップで重い → 停止後 or 間引き
 			const BOOL allowBake=(!m_moving && (nowBake-m_lastMapBakeTick)>80)
 				|| (nowBake-m_lastMapBakeTick)>450;
-			if(allowBake){
+			if(allowBake && TS>=8 && TS<=CS3mView::S3M_MAP_SIZE && m_view.m_mapCpuCount>=TS*TS){
 			m_lastMapBakeTick=nowBake;
-			D3D11_MAPPED_SUBRESOURCE mm={};
-			if(SUCCEEDED(dc->Map(m_view.m_texMap,0,D3D11_MAP_WRITE_DISCARD,0,&mm))&&mm.pData){
-				BYTE* row=(BYTE*)mm.pData;
-				const int pitch=(int)mm.RowPitch;
-				// ワールド比率でベイク（壁帯は細い／通路は広い＝ミニマップと同じ見た目）
-				auto rgba=[&](BYTE r,BYTE g,BYTE b,BYTE a)->DWORD{
-					return ((DWORD)a<<24)|((DWORD)r<<16)|((DWORD)g<<8)|b;
-				};
-				const DWORD colWall=rgba(140,95,64,255);   // ミニマップ壁に近い茶
-				const DWORD colWin=rgba(64,148,220,255);
-				const DWORD colVisit=rgba(76,140,217,230);
-				const DWORD colFloor=rgba(56,102,71,255);  // ミニマップ床に近い緑
-				const DWORD colBlack=rgba(20,24,22,255);
-				auto cellColor=[&](BYTE c,BOOL visited)->DWORD{
-					if(c==CELL_GOAL)return rgba(255,210,40,235);
-					if(c==CELL_START)return rgba(55,220,120,235);
-					if(c==CELL_STAIRS_DOWN)return rgba(255,148,40,240);
-					if(c==CELL_STAIRS_UP)return rgba(60,220,255,240);
-					if(S3mIsPickupCell(c))return rgba(210,90,200,225);
-					if(c==CELL_SLIME)return rgba(60,200,80,210);
-					if(c==CELL_SPIKE)return rgba(220,60,50,215);
-					if(c==CELL_ICE)return rgba(100,200,255,210);
-					if(c==CELL_DARK)return rgba(50,40,90,220);
-					if(c==CELL_MIRROR_WALL)return rgba(120,200,230,255);
-					if(c==CELL_MIRROR_FLOOR)return rgba(100,180,210,230);
-					if(c==CELL_PORTAL)return rgba(200,90,255,245);
-					if(c==CELL_KEY)return rgba(255,215,60,245);
-					if(c==CELL_DOOR)return visited?colVisit:colFloor;
-					if(c==CELL_WALL)return colWall;
-					if(c==CELL_WINDOW)return colWin;
-					if(visited)return colVisit;
-					return colFloor;
-				};
-				const float worldSpan=max(1e-3f,AxisOrigin(m_n));
-				// ミニマップ相当の細さ（パッドなし＋細い軸をスリム化）
-				const float kWallSlim=.42f;
-				const float uScale=(float)TS/worldSpan;
-				auto fillWorld=[&](float x0,float z0,float x1,float z1,DWORD col,BOOL minPx){
-					int tx0=(int)floorf(x0*uScale),tx1=(int)ceilf(x1*uScale);
-					int ty0=(int)floorf(z0*uScale),ty1=(int)ceilf(z1*uScale);
-					if(minPx){
-						if(tx1<=tx0){tx0=max(0,(int)((x0+x1)*.5f*uScale));tx1=tx0+1;}
-						if(ty1<=ty0){ty0=max(0,(int)((z0+z1)*.5f*uScale));ty1=ty0+1;}
-					}
-					if(tx0<0)tx0=0;if(ty0<0)ty0=0;
-					if(tx1>TS)tx1=TS;if(ty1>TS)ty1=TS;
-					for(int ty=ty0;ty<ty1;ty++){
-						DWORD* dst=(DWORD*)(row+ty*pitch);
-						for(int tx=tx0;tx<tx1;tx++)dst[tx]=col;
-					}
-				};
-				auto fillWorldMin=[&](float x0,float z0,float x1,float z1,DWORD col,int minT){
-					int tx0=(int)floorf(x0*uScale),tx1=(int)ceilf(x1*uScale);
-					int ty0=(int)floorf(z0*uScale),ty1=(int)ceilf(z1*uScale);
-					int cx=(tx0+tx1)/2,cy=(ty0+ty1)/2;
-					if(tx1-tx0<minT){tx0=cx-minT/2;tx1=tx0+minT;}
-					if(ty1-ty0<minT){ty0=cy-minT/2;ty1=ty0+minT;}
-					if(tx0<0)tx0=0;if(ty0<0)ty0=0;
-					if(tx1>TS)tx1=TS;if(ty1>TS)ty1=TS;
-					for(int ty=ty0;ty<ty1;ty++){
-						DWORD* dst=(DWORD*)(row+ty*pitch);
-						for(int tx=tx0;tx<tx1;tx++)dst[tx]=col;
-					}
-				};
+			DWORD* bits=m_view.m_mapCpu;
+			auto rgba=[&](BYTE r,BYTE g,BYTE b,BYTE a)->DWORD{
+				return ((DWORD)a<<24)|((DWORD)r<<16)|((DWORD)g<<8)|b;
+			};
+			const DWORD colWall=rgba(140,95,64,255);
+			const DWORD colWin=rgba(64,148,220,255);
+			const DWORD colVisit=rgba(76,140,217,230);
+			const DWORD colFloor=rgba(56,102,71,255);
+			auto cellColor=[&](BYTE c,BOOL visited)->DWORD{
+				if(c==CELL_GOAL)return rgba(255,210,40,235);
+				if(c==CELL_START)return rgba(55,220,120,235);
+				if(c==CELL_STAIRS_DOWN)return rgba(255,148,40,240);
+				if(c==CELL_STAIRS_UP)return rgba(60,220,255,240);
+				if(S3mIsPickupCell(c))return rgba(210,90,200,225);
+				if(c==CELL_SLIME)return rgba(60,200,80,210);
+				if(c==CELL_SPIKE)return rgba(220,60,50,215);
+				if(c==CELL_ICE)return rgba(100,200,255,210);
+				if(c==CELL_DARK)return rgba(50,40,90,220);
+				if(c==CELL_MIRROR_WALL)return rgba(120,200,230,255);
+				if(c==CELL_MIRROR_FLOOR)return rgba(100,180,210,230);
+				if(c==CELL_PORTAL)return rgba(200,90,255,245);
+				if(c==CELL_KEY)return rgba(255,215,60,245);
+				if(c==CELL_DOOR)return visited?colVisit:colFloor;
+				if(c==CELL_WALL)return colWall;
+				if(c==CELL_WINDOW)return colWin;
+				if(visited)return colVisit;
+				return colFloor;
+			};
+			const float worldSpan=max(1e-3f,AxisOrigin(m_n));
+			const float kWallSlim=.42f;
+			const float uScale=(float)TS/worldSpan;
+			auto fillWorld=[&](float x0,float z0,float x1,float z1,DWORD col,BOOL minPx){
+				int tx0=(int)floorf(x0*uScale),tx1=(int)ceilf(x1*uScale);
+				int ty0=(int)floorf(z0*uScale),ty1=(int)ceilf(z1*uScale);
+				if(minPx){
+					if(tx1<=tx0){tx0=max(0,(int)((x0+x1)*.5f*uScale));tx1=tx0+1;}
+					if(ty1<=ty0){ty0=max(0,(int)((z0+z1)*.5f*uScale));ty1=ty0+1;}
+				}
+				if(tx0<0)tx0=0;if(ty0<0)ty0=0;
+				if(tx1>TS)tx1=TS;if(ty1>TS)ty1=TS;
+				for(int ty=ty0;ty<ty1;ty++){
+					DWORD* dst=bits+ty*TS;
+					for(int tx=tx0;tx<tx1;tx++)dst[tx]=col;
+				}
+			};
+			auto fillWorldMin=[&](float x0,float z0,float x1,float z1,DWORD col,int minT){
+				int tx0=(int)floorf(x0*uScale),tx1=(int)ceilf(x1*uScale);
+				int ty0=(int)floorf(z0*uScale),ty1=(int)ceilf(z1*uScale);
+				int cx=(tx0+tx1)/2,cy=(ty0+ty1)/2;
+				if(tx1-tx0<minT){tx0=cx-minT/2;tx1=tx0+minT;}
+				if(ty1-ty0<minT){ty0=cy-minT/2;ty1=ty0+minT;}
+				if(tx0<0)tx0=0;if(ty0<0)ty0=0;
+				if(tx1>TS)tx1=TS;if(ty1>TS)ty1=TS;
+				for(int ty=ty0;ty<ty1;ty++){
+					DWORD* dst=bits+ty*TS;
+					for(int tx=tx0;tx<tx1;tx++)dst[tx]=col;
+				}
+			};
+			int ax[CS3mView::S3M_MAP_SIZE];
+			int az[CS3mView::S3M_MAP_SIZE];
+			const float invTs=worldSpan/(float)TS;
+			for(int i=0;i<TS;i++){
+				const float w=((float)i+.5f)*invTs;
+				ax[i]=WorldToGridAxis(w);
+				az[i]=ax[i];
+			}
+			BYTE* g=m_grids[bakeFloor];
+			BYTE* vis=m_visits[bakeFloor];
+			const int nn=m_n;
+			if(g&&vis&&nn>0){
 				for(int ty=0;ty<TS;ty++){
-					DWORD* dst=(DWORD*)(row+ty*pitch);
-					for(int tx=0;tx<TS;tx++)dst[tx]=colBlack;
-				}
-				for(int z=0;z<m_n;z++)for(int x=0;x<m_n;x++){
-					const BYTE c=CellAtF(bakeFloor,x,z);
-					if(S3mIsSolidWall(c))continue;
-					DWORD col=cellColor(c,VisitAtF(bakeFloor,x,z)?TRUE:FALSE);
-					fillWorld(AxisOrigin(x),AxisOrigin(z),AxisOrigin(x)+AxisSpan(x),AxisOrigin(z)+AxisSpan(z),col,FALSE);
-				}
-				for(int z=0;z<m_n;z++)for(int x=0;x<m_n;x++){
-					const BYTE c=CellAtF(bakeFloor,x,z);
-					if(c!=CELL_WALL&&c!=CELL_WINDOW&&c!=CELL_MIRROR_WALL)continue;
-					float x0=AxisOrigin(x),x1=x0+AxisSpan(x);
-					float z0=AxisOrigin(z),z1=z0+AxisSpan(z);
-					const float sx=x1-x0,sz=z1-z0;
-					if(sx<=sz){
-						const float cx=(x0+x1)*.5f,half=sx*.5f*kWallSlim;
-						x0=cx-half;x1=cx+half;
+					int gz=az[ty]; if(gz<0)gz=0; if(gz>=nn)gz=nn-1;
+					DWORD* dst=bits+ty*TS;
+					const size_t rowOff=(size_t)gz*(size_t)nn;
+					for(int tx=0;tx<TS;tx++){
+						int gx=ax[tx]; if(gx<0)gx=0; if(gx>=nn)gx=nn-1;
+						dst[tx]=cellColor(g[rowOff+(size_t)gx], vis[rowOff+(size_t)gx]?TRUE:FALSE);
 					}
-					if(sz<=sx){
-						const float cz=(z0+z1)*.5f,half=sz*.5f*kWallSlim;
-						z0=cz-half;z1=cz+half;
-					}
-					fillWorld(x0,z0,x1,z1,cellColor(c,FALSE),TRUE);
+					if((ty&127)==127) PumpQueued(FALSE);
 				}
-				// 特殊マスを上書き（ズームアウトでも色が見えるよう最小テクスチャサイズを確保）
-				for(int z=0;z<m_n;z++)for(int x=0;x<m_n;x++){
-					const BYTE c=CellAtF(bakeFloor,x,z);
-					const BOOL special=c==CELL_GOAL||c==CELL_START||c==CELL_STAIRS_DOWN||c==CELL_STAIRS_UP
-						||c==CELL_PORTAL||c==CELL_KEY||c==CELL_MIRROR_FLOOR||c==CELL_MIRROR_WALL||c==CELL_WINDOW
-						||S3mIsPickupCell(c)||S3mIsTrapCell(c);
-					if(c==CELL_DOOR){
-						float x0,z0,x1,z1;DoorWorldRect(bakeFloor,x,z,0.05f,x0,z0,x1,z1);
-						fillWorldMin(x0,z0,x1,z1,rgba(242,108,48,255),4);
-						const float cx=(x0+x1)*.5f,cz=(z0+z1)*.5f,ks=.08f;
-						if(DoorThinX(bakeFloor,x,z))
-							fillWorldMin(cx+.03f,cz-ks,cx+.12f,cz+ks,rgba(255,210,70,255),3);
-						else
-							fillWorldMin(cx-ks,cz+.03f,cx+ks,cz+.12f,rgba(255,210,70,255),3);
-						continue;
+			}
+			const BOOL stampWalls=(0.10f*kWallSlim*uScale)<1.6f;
+			m_ovStairN=0;
+			if(nn>0&&m_grids[bakeFloor]){
+				for(int z=0;z<nn;z++){
+					if((z&63)==0) PumpQueued(FALSE);
+					if(!GetSafeHwnd()||!m_view.m_ready) break;
+					for(int x=0;x<nn;x++){
+						const BYTE c=CellAtF(bakeFloor,x,z);
+						if(stampWalls&&(c==CELL_WALL||c==CELL_WINDOW||c==CELL_MIRROR_WALL)){
+							float x0=AxisOrigin(x),x1=x0+AxisSpan(x);
+							float z0=AxisOrigin(z),z1=z0+AxisSpan(z);
+							const float sx=x1-x0,sz=z1-z0;
+							if(sx<=sz){const float cx=(x0+x1)*.5f,half=sx*.5f*kWallSlim;x0=cx-half;x1=cx+half;}
+							if(sz<=sx){const float cz=(z0+z1)*.5f,half=sz*.5f*kWallSlim;z0=cz-half;z1=cz+half;}
+							fillWorld(x0,z0,x1,z1,cellColor(c,FALSE),TRUE);
+						}
+						if(c==CELL_STAIRS_DOWN||c==CELL_STAIRS_UP){
+							if(m_ovStairN<S3M_OV_STAIR_MAX){
+								m_ovStairX[m_ovStairN]=x; m_ovStairZ[m_ovStairN]=z; m_ovStairC[m_ovStairN]=c; m_ovStairN++;
+							}
+						}
+						if(c==CELL_DOOR){
+							float x0,z0,x1,z1;DoorWorldRect(bakeFloor,x,z,0.05f,x0,z0,x1,z1);
+							fillWorldMin(x0,z0,x1,z1,rgba(242,108,48,255),4);
+							const float cx=(x0+x1)*.5f,cz=(z0+z1)*.5f,ks=.08f;
+							if(DoorThinX(bakeFloor,x,z))
+								fillWorldMin(cx+.03f,cz-ks,cx+.12f,cz+ks,rgba(255,210,70,255),3);
+							else
+								fillWorldMin(cx-ks,cz+.03f,cx+ks,cz+.12f,rgba(255,210,70,255),3);
+							continue;
+						}
+						const BOOL special=c==CELL_GOAL||c==CELL_START||c==CELL_STAIRS_DOWN||c==CELL_STAIRS_UP
+							||c==CELL_PORTAL||c==CELL_KEY||c==CELL_MIRROR_FLOOR||c==CELL_MIRROR_WALL||c==CELL_WINDOW
+							||S3mIsPickupCell(c)||S3mIsTrapCell(c);
+						if(!special)continue;
+						float x0=AxisOrigin(x),x1=x0+AxisSpan(x);
+						float z0=AxisOrigin(z),z1=z0+AxisSpan(z);
+						const int minT=(c==CELL_GOAL||c==CELL_START)?6:((c==CELL_STAIRS_DOWN||c==CELL_STAIRS_UP||c==CELL_PORTAL)?5:4);
+						fillWorldMin(x0,z0,x1,z1,cellColor(c,FALSE),minT);
 					}
-					if(!special)continue;
-					float x0=AxisOrigin(x),x1=x0+AxisSpan(x);
-					float z0=AxisOrigin(z),z1=z0+AxisSpan(z);
-					const int minT=(c==CELL_GOAL||c==CELL_START)?6:((c==CELL_STAIRS_DOWN||c==CELL_STAIRS_UP||c==CELL_PORTAL)?5:4);
-					fillWorldMin(x0,z0,x1,z1,cellColor(c,FALSE),minT);
 				}
-				dc->Unmap(m_view.m_texMap,0);
-				m_mapBakeDirty=0;
+			}
+			if(m_view.m_ready&&m_view.m_imm&&m_view.m_texMap){
+				ID3D11ShaderResourceView* zsrv[8]={};
+				dc->PSSetShaderResources(0,8,zsrv);
+				dc->UpdateSubresource(m_view.m_texMap,0,NULL,bits,(UINT)(TS*4),0);
+				m_view.NoteContextLost(S_OK);
+				if(m_view.m_ready) m_mapBakeDirty=0;
 			}
 			} // allowBake
 		}
+		if(!m_view.m_ready) return;
 		const float tipBand=210.f;
 		const float topPad=68.f;
 		const float areaTop=topPad;
@@ -6876,9 +6977,9 @@ void CSoft3DMazeDlg::RenderScene()
 		};
 		auto cellCX=[&](int x)->float{return AxisOrigin(x)+AxisSpan(x)*.5f;};
 		auto cellCZ=[&](int z)->float{return AxisOrigin(z)+AxisSpan(z)*.5f;};
-		for(int z=0;z<m_n;z++)for(int x=0;x<m_n;x++){
-			BYTE c=CellAtF(bakeFloor,x,z);
-			if(c!=CELL_STAIRS_DOWN&&c!=CELL_STAIRS_UP)continue;
+		for(int si=0;si<m_ovStairN;si++){
+			const int x=m_ovStairX[si], z=m_ovStairZ[si];
+			const BYTE c=m_ovStairC[si];
 			int pf=0,px=0,pz=0;
 			if(!FindStairPartner(bakeFloor,x,z,pf,px,pz))continue;
 			float qx0,qy0,qx1,qy1;w2s(cellCX(x),cellCZ(z),qx0,qy0);w2s(cellCX(px),cellCZ(pz),qx1,qy1);
@@ -7501,8 +7602,25 @@ void CSoft3DMazeDlg::OnContextMenu(CWnd* pWnd, CPoint point)
 
 void CSoft3DMazeDlg::TickFrame()
 {
-	if (!GetSafeHwnd() || !m_view.m_ready)
+	if (m_inTick) return;
+	m_inTick = 1;
+	if (!GetSafeHwnd()) { m_inTick = 0; return; }
+	if (!m_view.m_ready) {
+		if (m_dxRecoverTries < 2 && m_view.GetSafeHwnd()) {
+			m_dxRecoverTries++;
+			if (m_view.InitDx()) {
+				m_dxRecoverTries = 0;
+				m_mapBakeDirty = 1;
+				m_floorBarDirty = 1;
+				m_tipIsOverview = -1;
+			}
+		}
+		m_inTick = 0;
 		return;
+	}
+	m_dxRecoverTries = 0;
+	PumpQueued(TRUE);
+	if (!GetSafeHwnd() || !m_view.m_ready) { m_inTick = 0; return; }
 	const DWORD now = GetTickCount();
 	float dt = (float)(now - m_lastTick) * 0.001f;
 	m_lastTick = now;
@@ -7518,6 +7636,7 @@ void CSoft3DMazeDlg::TickFrame()
 	}
 	RenderScene();
 	m_view.RequestRedraw();
+	PumpQueued(FALSE);
 	if (m_runDirty && !m_moving) {
 		DWORD interval = 4000;
 		if (m_n >= 200) {
@@ -7529,6 +7648,7 @@ void CSoft3DMazeDlg::TickFrame()
 			m_lastAutosave = now;
 		}
 	}
+	m_inTick = 0;
 }
 
 void CSoft3DMazeDlg::OnTimer(UINT_PTR id)

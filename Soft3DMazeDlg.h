@@ -35,6 +35,7 @@ public:
 	BOOL ResizeDx(int w, int h);
 	BOOL EnsureSceneTargets(int w, int h);
 	void PresentFrame();
+	void NoteContextLost(HRESULT hr);
 	BOOL m_ready;
 	int m_vw, m_vh;
 	int m_dxFailStage; // InitDx 失敗段階（デバッグ用）
@@ -122,7 +123,10 @@ public:
 	ID3D11Texture2D* m_texClear;
 	ID3D11ShaderResourceView* m_srvClear;
 	int m_clearTexW, m_clearTexH;
-	enum { S3M_MAP_SIZE = 4096 };
+	enum { S3M_MAP_SIZE = 2048 }; // 4096 DYNAMIC Map は TDR でデバイス死
+	int m_mapTexSize;
+	DWORD* m_mapCpu;
+	int m_mapCpuCount;
 	ID3D11Texture2D* m_texMap;
 	ID3D11ShaderResourceView* m_srvMap;
 	ID3D11Texture2D* m_texTip;
@@ -372,6 +376,7 @@ public:
 	BOOL IsMapPanning() const { return m_mapPanDrag != 0; }
 	void ClampMapPan(int viewW, int viewH, float side);
 	void TickFrame(); // timerp から呼ばれる 1フレーム更新＋描画
+	void PumpQueued(BOOL input);
 	BOOL InputTurn(int dir) { return IsOverviewActive() || m_floorFx == FLOORFX_IN || m_portalFx != PORTALFX_IDLE ? FALSE : TryTurn(dir); }
 	BOOL InputStep(int mx, int mz) { return IsOverviewActive() || m_floorFx == FLOORFX_IN || m_portalFx != PORTALFX_IDLE ? FALSE : TryStep(mx, mz); }
 	void InputOverviewFloorDelta(int d) { OverviewFloorDelta(d); }
@@ -475,6 +480,13 @@ public:
 	int m_baseTempoPos;
 	int m_basePitchPos;
 	DWORD m_lastTick;
+	int m_inTick;
+	int m_dxRecoverTries;
+	enum { S3M_OV_STAIR_MAX = 128 };
+	int m_ovStairN;
+	int m_ovStairX[S3M_OV_STAIR_MAX];
+	int m_ovStairZ[S3M_OV_STAIR_MAX];
+	BYTE m_ovStairC[S3M_OV_STAIR_MAX];
 	DWORD m_rng;
 	DWORD m_genSeed;
 	DWORD m_lastAutosave;
