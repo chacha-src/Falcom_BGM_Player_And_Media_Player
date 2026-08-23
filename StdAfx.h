@@ -798,6 +798,8 @@ struct save{
 	int surround;               // 0..100（0=オフ）
 	// --- Soft3D レース／迷路 PCM効果音（末尾追記。旧.datは1=ON）---
 	int s3_pcm_sfx;             // 1=PCM合成効果音ON 0=OFF
+	// --- Soft3D メッシュ密度（末尾追記。旧.datは5）。0=軽量(現行) 1..9 10=緻密。描画量 1,8,16,..80 ---
+	int s3_mesh_density;
 };
 extern save savedata;
 /* コード間隔(ms)。16..500。旧.dat や未設定は 25。 */
@@ -817,6 +819,65 @@ const wchar_t* LangPick14(
 	LangPick14(ja,en,fr,it,es,ko,zh,ar,ru,de,pt,nl,pl,tr)
 // LL2は使用しないこと。LL14のみ。翻訳は手抜きしない。
 #define LL2(ja, en) LL14(ja, en, en, en, en, en, en, en, en, en, en, en, en, en)
+
+inline int S3MeshDensityLevel()
+{
+	int v = savedata.s3_mesh_density;
+	if (v < 0 || v > 10) v = 5;
+	return v;
+}
+inline int S3MeshDensityMul()
+{
+	int v = S3MeshDensityLevel();
+	return (v <= 0) ? 1 : v * 8;
+}
+inline int S3MeshAxisMul()
+{
+	int m = S3MeshDensityMul();
+	if (m <= 1) return 1;
+	int a = 1;
+	while ((a + 1) * (a + 1) <= m) a++;
+	const int lo = a * a;
+	const int hi = (a + 1) * (a + 1);
+	if (hi - m < m - lo) a++;
+	if (a < 1) a = 1;
+	return a;
+}
+inline int S3MeshScaleCount(int base, int cap)
+{
+	int v = base * S3MeshAxisMul();
+	if (v < 1) v = 1;
+	if (cap > 0 && v > cap) v = cap;
+	return v;
+}
+inline const wchar_t* S3MeshDensityLabel()
+{
+	return LL14(L"密度", L"Density", L"Densité", L"Densità", L"Densidad",
+		L"밀도", L"密度", L"كثافة", L"Плотность", L"Dichte", L"Densidade", L"Dichtheid", L"Gęstość", L"Yoğunluk");
+}
+inline const wchar_t* S3MeshDensityItemText(int i)
+{
+	if (i <= 0)
+		return LL14(L"軽量", L"Light", L"Léger", L"Leggero", L"Ligero",
+			L"가벼움", L"轻量", L"خفيف", L"Лёгкий", L"Leicht", L"Leve", L"Licht", L"Lekki", L"Hafif");
+	if (i >= 10)
+		return LL14(L"緻密", L"Dense", L"Dense", L"Denso", L"Denso",
+			L"치밀", L"致密", L"كثيف", L"Плотный", L"Dicht", L"Denso", L"Dicht", L"Gęsty", L"Yoğun");
+	static const wchar_t* const kNum[10] = {
+		L"0", L"1", L"2", L"3", L"4", L"5", L"6", L"7", L"8", L"9"
+	};
+	if (i >= 1 && i <= 9) return kNum[i];
+	return kNum[5];
+}
+inline void S3MeshFillCombo(CComboBox& cb)
+{
+	if (!cb.GetSafeHwnd()) return;
+	cb.ResetContent();
+	for (int i = 0; i <= 10; ++i)
+		cb.AddString(S3MeshDensityItemText(i));
+	cb.SetCurSel(S3MeshDensityLevel());
+}
+
 extern int loop1;
 extern int loop1_2;
 char *b64_decode(char *s, int size,int &len);

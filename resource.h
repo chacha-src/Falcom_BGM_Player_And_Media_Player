@@ -1455,6 +1455,10 @@
 #define IDC_MP_BOT_VST                  4218
 #define IDC_S3R_INVERT_L                4218
 #define IDC_S3R_INVERT                  4219
+#define IDC_S3R_MESH_L                  4333
+#define IDC_S3R_MESH                    4334
+#define IDC_S3M_MESH_L                  4335
+#define IDC_S3M_MESH                    4336
 #define IDC_VST_HELP                    4300
 #define IDC_VST_CLOSE                   4301
 #define IDC_VST_PRESET                  4302
@@ -1889,7 +1893,7 @@
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NEXT_RESOURCE_VALUE        344
 #define _APS_NEXT_COMMAND_VALUE         33284
-#define _APS_NEXT_CONTROL_VALUE         4333
+#define _APS_NEXT_CONTROL_VALUE         4337
 #define _APS_NEXT_SYMED_VALUE           104
 #endif
 #endif

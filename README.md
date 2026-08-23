@@ -1,4 +1,4 @@
-chachakotorinのgithubから移転です。
+﻿chachakotorinのgithubから移転です。
 
 # oggYSEDbgm メディアプレイヤー「らいら」
 日本ファルコム (Nihon Falcom) BGMプレイヤー / 高機能メディアプレイヤー
@@ -136,7 +136,7 @@ Windows 11のアクリル風ぼかし表示に対応しています。コンテ�
 プロンプトを時間軸のロール上で編集・配置できます（複数レーン）。メディアプレイヤー側から開けます。メイン画面に追随するロックや表示倍率の保存にも対応しています。簡易3D表示もあります。
 
 ### VSTホスト
-メディアプレイヤー下段の **VST** から、手持ちの VST 音源を読み込んで鍵盤で鳴らせます。プラグインを Part 1〜32 へドラッグして配線し、MIDI入力（最大3系統）と音声出力を選べます。プリセットの保存・切替、名前での絞り込み、再スキャンに対応。MIDI機器が無くてもパソコンのキーボードで簡易演奏できます（Space で全音停止）。SOUND Canvas VA のようなマルチティンバーは1スロットで16chを受け持ちます。64bit プラグインは KpiHost64 経由です。
+メディアプレイヤー下段の **VST** から、手持ちの VST 音源を読み込んで鍵盤で鳴らせます。プラグインを Part 1〜32 へドラッグして配線し、MIDI入力（最大3系統）と音声出力を選べます。プリセットの保存・切替、名前での絞り込み、再スキャンに対応。MIDI機器が無くてもパソコンのキーボードで簡易演奏できます（Space で全音停止）。SOUND Canvas VA のようなマルチティンバーは1スロットで16chを受け持ちます。64bit プラグインは KpiHost64 経由です（KpiHost64.exe は実行ファイルと同じ場所）。
 
 プレイリストの **.mid / .midi / .kar / .rmi** は、レンダリング設定の「MIDI再生」を **VST優先** にし、GS／XG 用の VST を指定すると、その音源で曲ファイルを演奏できます（XG System On があれば XG、無ければ GS。両方空なら Windows の MIDI マッパーへ落ちます）。
 
@@ -186,7 +186,7 @@ Windows 11のアクリル風ぼかし表示に対応しています。コンテ�
 - **システム音**（ループバック）と**マイク**の有無、FPS、出力解像度
 - **MPの曲を載せる:** 開いているメディアプレイヤー画面を合成に含め、配置・サイズを調整可能
 - プレビューは録画中も更新されます（枠やHUDは録画ファイルには入りません）
-- **ライブ配信:** Live チェック ON。YouTube は Google OAuth Client ID/Secret → 認証 → 配信枠作成（タイトル／公開・限定・非公開）→ 配信開始。ニコニコ／カスタムは配信ページの RTMP URL＋キーを入力。実行ファイル隣（または `ogg_binary`）に **ffmpeg.exe** が必要です
+- **ライブ配信:** Live チェック ON。YouTube は Google OAuth Client ID/Secret → 認証 → 配信枠作成（タイトル／公開・限定・非公開）→ 配信開始。ニコニコ／カスタムは配信ページの RTMP URL＋キーを入力。実行ファイルと同じ場所に **ffmpeg.exe** が必要です（無いときは配信画面から公式ビルドを取得できます）
 
 ### 附属ツール（らいら）
 メディアプレイヤーのツール右クリック／各ウィンドウの右クリックから使える、プレイヤー附属の便利機能です。
@@ -218,7 +218,7 @@ Windows 11のアクリル風ぼかし表示に対応しています。コンテ�
   - **OBS用** `http://…/overlay` …… 透過タイトル／状態の簡易HTML
   - **共同キュー** `…/api/queue-add?i=行番号` …… ローカル用途（認証なし・既存Remoteと同水準）
   - **AACプロファイル** …… 128 / 192 / 低遅延96 kbps 切替
-- **nowplaying.txt:** 実行ファイルフォルダへ現在曲を書き出し（Discord本体連携はファイル出力のみ）
+- **nowplaying.txt:** 実行ファイルと同じ場所へ現在曲を書き出し（Discord本体連携はファイル出力のみ）
 - **フォーカスモード／危険操作確認／レイアウト1–3／週次サマリ／練習ログ** …… ツールメニューから
 - **アラーム:** 指定時刻に再生開始（スリープタイマーは従来どおり）
 - **ゲーム録画プリセット:** 画面キャプチャ＋デバイス録音を所定設定でまとめて開く（ネット配信ではない）
@@ -308,7 +308,7 @@ flowchart TB
 - mp3, m4a, aac, alac, flac, tta, ape
 - DSD (dsf, dff)
 - OggOpus (48k)
-- Kb Media Playerの旧kpiプラグインと新kpiの一部に対応 (Pluginsフォルダに入れて使用。64bit版はKpiHost64経由)
+- Kb Media Playerの旧kpiプラグインと新kpiの一部に対応（実行ファイルと同じ場所の Plugins フォルダに入れて使用。64bit版は同じ場所の KpiHost64 経由）
   - kpi一覧では拡張子テキストで絞り込みできます（入力すると即座に反映。チェック状態は曲単位で保持）
 
 ### 3. 動画再生 (DirectShow)
@@ -536,7 +536,7 @@ A timed prompt feature can change pitch, tempo, effects, and more during playbac
 Edit and place prompt commands on a time-based roll (multiple lanes). Open it from the media player. Follow-main lock and zoom level can be remembered. A simple 3D view is also available.
 
 ### VST Host
-From the media player’s bottom-bar **VST** button, load your own VST instruments and play them from a keyboard. Drag plugins onto Parts 1–32, pick MIDI inputs (up to 3) and an audio output. Preset save/switch, name filter, and rescan are supported. With no MIDI hardware, the PC keyboard can play a simple map (Space all-notes-off). Multi-timbral hosts such as SOUND Canvas VA take 16 channels in one slot. 64-bit plugins go through KpiHost64.
+From the media player’s bottom-bar **VST** button, load your own VST instruments and play them from a keyboard. Drag plugins onto Parts 1–32, pick MIDI inputs (up to 3) and an audio output. Preset save/switch, name filter, and rescan are supported. With no MIDI hardware, the PC keyboard can play a simple map (Space all-notes-off). Multi-timbral hosts such as SOUND Canvas VA take 16 channels in one slot. 64-bit plugins go through KpiHost64 (place KpiHost64.exe in the same location as the executable).
 
 Playlist **.mid / .midi / .kar / .rmi** can be rendered through a GS/XG VST when Rendering → MIDI playback is set to **Prefer VST** (XG System On → XG VST; otherwise GS; if both slots are empty, Windows MIDI Mapper).
 
@@ -586,7 +586,7 @@ From **Capture**, record the screen to **MP4 (H.264 + AAC)**. **Live streaming**
 - Optional **system audio** (loopback) and **microphone**, FPS, and output resolution
 - **Include MP song:** composite the open media-player window and adjust its layout on the preview
 - Preview keeps updating while recording (HUD overlays are not written into the file)
-- **Live:** check Live. YouTube: Google OAuth Client ID/Secret → authorize → create broadcast (title / public·unlisted·private) → go live. Niconico / custom: paste the page’s RTMP URL + key. Needs **ffmpeg.exe** beside the exe (or under `ogg_binary`)
+- **Live:** check Live. YouTube: Google OAuth Client ID/Secret → authorize → create broadcast (title / public·unlisted·private) → go live. Niconico / custom: paste the page’s RTMP URL + key. Needs **ffmpeg.exe** in the same location as the executable (the live window can download the official build if it is missing)
 
 ### Companion Tools (Raira)
 Handy media-player add-ons from the Tools right-click menu and each window’s context menu.
@@ -618,7 +618,7 @@ Handy media-player add-ons from the Tools right-click menu and each window’s c
   - **OBS** `http://…/overlay` — simple transparent title / status HTML
   - **Shared queue** `…/api/queue-add?i=row` — local use (no auth; same bar as existing Remote)
   - **AAC profile** — 128 / 192 / low-latency 96 kbps
-- **nowplaying.txt:** Writes the current track next to the exe (Discord itself is file-output only)
+- **nowplaying.txt:** Writes the current track to the same location as the executable (Discord itself is file-output only)
 - **Focus mode / confirm destructive actions / layouts 1–3 / weekly summary / practice log** — from the Tools menu
 - **Alarm:** Start playback at a set time (sleep timer remains as before)
 - **Game-capture preset:** Open screen capture + device record with preset settings (local recording, not internet streaming)
@@ -708,7 +708,7 @@ Supports the following formats:
 - mp3, m4a, aac, alac, flac, tta, ape
 - DSD (dsf, dff)
 - OggOpus (48k)
-- Legacy and modern **kpi plugins** (Kb Media Player) are supported (place in the `Plugins` folder; the 64-bit build uses KpiHost64).
+- Legacy and modern **kpi plugins** (Kb Media Player) are supported (place in the `Plugins` folder in the same location as the executable; the 64-bit build uses KpiHost64 in that same location).
   - The kpi list can be filtered by extension text (updates as you type; checkbox state is kept per plugin)
 
 ### 3. Video Playback (DirectShow)

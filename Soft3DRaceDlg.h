@@ -241,8 +241,8 @@ public:
 		S3R_PATH_SAMPLES = 1024,
 		S3R_CRAFT_VMAX = 4800,
 		S3R_CRAFT_IMAX = 12000,
-		S3R_OBS_VMAX = 6400,
-		S3R_OBS_IMAX = 19200,
+		S3R_OBS_VMAX = 32768,
+		S3R_OBS_IMAX = 98304,
 		S3R_HM_N = 161,
 		S3R_CARVE_MAX = 128,
 		ITEM_TEMPO = 1,
@@ -326,6 +326,8 @@ protected:
 	void SetThemeToUi(int v);
 	int ReadInvertFromUi();
 	void SetInvertToUi(int v);
+	int ReadMeshFromUi();
+	void SetMeshToUi(int v);
 
 	void GenerateCourse();
 	void GenerateCourseWithSeed(DWORD seed);
@@ -401,6 +403,7 @@ public:
 	afx_msg void OnLapsChanged();
 	afx_msg void OnThemeChanged();
 	afx_msg void OnInvertChanged();
+	afx_msg void OnMeshChanged();
 	afx_msg void OnTimer(UINT_PTR);
 	afx_msg void OnSize(UINT, int, int);
 	afx_msg void OnShowWindow(BOOL bShow, UINT nStatus);
@@ -408,8 +411,8 @@ public:
 	afx_msg void OnContextMenu(CWnd*, CPoint);
 
 	CCustomStandardButton m_help, m_start, m_gen, m_close;
-	CCustomStatic m_aiL, m_oppL, m_lenL, m_lapsL, m_themeL, m_invertL, m_hint, m_status;
-	CCustomComboBox m_ai, m_opp, m_len, m_laps, m_theme, m_invert;
+	CCustomStatic m_aiL, m_oppL, m_lenL, m_lapsL, m_themeL, m_invertL, m_meshL, m_hint, m_status;
+	CCustomComboBox m_ai, m_opp, m_len, m_laps, m_theme, m_invert, m_mesh;
 	CS3rView m_view;
 	CToolTipCtrl m_tooltip;
 

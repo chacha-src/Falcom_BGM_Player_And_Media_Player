@@ -301,6 +301,8 @@ protected:
 	void SetBasementsToUi(int b);
 	int ReadDifficultyFromUi();
 	void SetDifficultyToUi(int d);
+	int ReadMeshFromUi();
+	void SetMeshToUi(int v);
 	void GenerateMaze();
 	void GenerateMazeWithSeed(DWORD seed, int forceSize = -1);
 	void GenerateOneFloor(int f);
@@ -399,6 +401,7 @@ public:
 	afx_msg void OnSizeEditChange();
 	afx_msg void OnBaseChanged();
 	afx_msg void OnDiffChanged();
+	afx_msg void OnMeshChanged();
 	afx_msg void OnTimer(UINT_PTR);
 	afx_msg void OnSize(UINT, int, int);
 	afx_msg void OnShowWindow(BOOL bShow, UINT nStatus);
@@ -407,8 +410,8 @@ public:
 	void ShowContextMenu(CPoint screenPt);
 
 	CCustomStandardButton m_help, m_gen, m_navi, m_close;
-	CCustomStatic m_sizeL, m_baseL, m_diffL, m_hint, m_status;
-	CCustomComboBox m_size, m_base, m_diff;
+	CCustomStatic m_sizeL, m_baseL, m_diffL, m_meshL, m_hint, m_status;
+	CCustomComboBox m_size, m_base, m_diff, m_mesh;
 	CS3mView m_view;
 	CToolTipCtrl m_tooltip;
 

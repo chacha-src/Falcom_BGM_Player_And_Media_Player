@@ -596,20 +596,20 @@ void CS3rHelpDlg::OnPaint()
 		L"PCM-SFX: motoren, aftellen/START, ronde, finish, podium, course-out, items, hits. Weergave-menu.",
 		L"SFX PCM: silniki, odliczanie/START, okrążenie, meta, podium, poza torem, przedmioty, uderzenia.",
 		L"PCM SFX: motor, geri sayım/BAŞLA, tur, bitiş, podyum, kurs dışı, öğe, çarpışma. Görünüm menüsü."));
-	line(LL14(L"迷路 Soft3D と同時には開けません。AI／敵機数／長さ／周回／テーマはコンボで変更（保存されます）。",
-		L"Cannot open with Soft3D maze at once. AI/opponents/length/laps/theme combos persist.",
-		L"Pas avec le labyrinthe Soft3D. Combos AI/adversaires/longueur/tours/thème sauvés.",
-		L"Non insieme al labirinto Soft3D. Combo AI/avversari/lunghezza/giri/tema salvate.",
-		L"No a la vez con el laberinto Soft3D. Combos IA/rivales/largo/vueltas/tema se guardan.",
-		L"미로 Soft3D와 동시 불가. AI/적/길이/랩/테마 콤보 저장.",
-		L"不可与 Soft3D 迷宫同时开。AI/对手/长度/圈数/主题会保存。",
-		L"Not with Soft3D maze. Combos persist.",
-		L"Не вместе с лабиринтом Soft3D. Комбо сохраняются.",
-		L"Nicht zusammen mit Soft3D-Labyrinth. Kombos werden gespeichert.",
-		L"Não junto com o labirinto Soft3D. Combos são salvos.",
-		L"Niet samen met Soft3D-doolhof. Combo's worden bewaard.",
-		L"Nie razem z labiryntem Soft3D. Combo są zapisywane.",
-		L"Soft3D labirent ile birlikte değil. Kombolar kaydedilir."));
+	line(LL14(L"迷路 Soft3D と同時には開けません。AI／敵機数／長さ／周回／テーマ／密度はコンボで変更（保存されます）。軽量が現行の粗さ、5が既定、緻密が最大（約80倍）。",
+		L"Cannot open with Soft3D maze at once. AI/opponents/length/laps/theme/density combos persist. Light=current coarseness, 5=default, Dense=max (~80×).",
+		L"Pas avec le labyrinthe Soft3D. Combos AI/adversaires/longueur/tours/thème/densité sauvés. Léger=actuel, 5=défaut, Dense=max (~80×).",
+		L"Non insieme al labirinto Soft3D. Combo AI/avversari/lunghezza/giri/tema/densità salvate. Leggero=attuale, 5=predef., Denso=max (~80×).",
+		L"No a la vez con el laberinto Soft3D. Combos IA/rivales/largo/vueltas/tema/densidad se guardan. Ligero=actual, 5=predet., Denso=máx. (~80×).",
+		L"미로 Soft3D와 동시 불가. AI/적/길이/랩/테마/밀도 콤보 저장. 가벼움=현재, 5=기본, 치밀=최대(약80배).",
+		L"不可与 Soft3D 迷宫同时开。AI/对手/长度/圈数/主题/密度会保存。轻量=现行，5=默认，致密=最大（约80倍）。",
+		L"Not with Soft3D maze. Combos persist. Light=current, 5=default, Dense=max (~80×).",
+		L"Не вместе с лабиринтом Soft3D. Комбо сохраняются. Лёгкий=текущий, 5=по умолч., Плотный=макс.",
+		L"Nicht zusammen mit Soft3D-Labyrinth. Kombos werden gespeichert. Leicht=aktuell, 5=Standard, Dicht=max.",
+		L"Não junto com o labirinto Soft3D. Combos são salvos. Leve=atual, 5=padrão, Denso=máx.",
+		L"Niet samen met Soft3D-doolhof. Combo's worden bewaard. Licht=huidig, 5=standaard, Dicht=max.",
+		L"Nie razem z labiryntem Soft3D. Combo są zapisywane. Lekki=obecny, 5=domyślny, Gęsty=maks.",
+		L"Soft3D labirent ile birlikte değil. Kombolar kaydedilir. Hafif=şimdiki, 5=varsayılan, Yoğun=en fazla."));
 	CCC_GdiHelpEndPaint(hp);
 }
 
@@ -1491,6 +1491,7 @@ BEGIN_MESSAGE_MAP(CSoft3DRaceDlg, CCustomBlurDialogBase)
 	ON_CBN_SELCHANGE(IDC_S3R_LAPS, &CSoft3DRaceDlg::OnLapsChanged)
 	ON_CBN_SELCHANGE(IDC_S3R_THEME, &CSoft3DRaceDlg::OnThemeChanged)
 	ON_CBN_SELCHANGE(IDC_S3R_INVERT, &CSoft3DRaceDlg::OnInvertChanged)
+	ON_CBN_SELCHANGE(IDC_S3R_MESH, &CSoft3DRaceDlg::OnMeshChanged)
 	ON_WM_TIMER()
 	ON_WM_SIZE()
 	ON_WM_SHOWWINDOW()
@@ -1557,6 +1558,8 @@ void CSoft3DRaceDlg::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDC_S3R_THEME, m_theme);
 	DDX_Control(pDX, IDC_S3R_INVERT_L, m_invertL);
 	DDX_Control(pDX, IDC_S3R_INVERT, m_invert);
+	DDX_Control(pDX, IDC_S3R_MESH_L, m_meshL);
+	DDX_Control(pDX, IDC_S3R_MESH, m_mesh);
 	DDX_Control(pDX, IDC_S3R_START, m_start);
 	DDX_Control(pDX, IDC_S3R_GEN, m_gen);
 	DDX_Control(pDX, IDC_S3R_HINT, m_hint);
@@ -1649,6 +1652,7 @@ void CSoft3DRaceDlg::LayoutAll()
 	y += rowH + 4;
 	x = m;
 	placeB(m_start, sw(80)); placeB(m_gen, sw(80));
+	placeL(m_meshL, sw(40)); placeC(m_mesh, sw(92));
 	if (m_hint.GetSafeHwnd()) m_hint.SetWindowPos(NULL, x, y+6, max(40, cx-x-m), labH, SWP_NOZORDER|SWP_NOACTIVATE);
 	y += rowH + 6;
 	const int btnY = cy - m - btnH;
@@ -1663,9 +1667,10 @@ void CSoft3DRaceDlg::LayoutAll()
 	if (m_laps.GetSafeHwnd()) {int v=savedata.s3r_laps; if(v<0)v=0; if(v>10)v=10; m_laps.CComboBox::SetCurSel(v);}
 	if (m_theme.GetSafeHwnd()) {int v=savedata.s3r_theme; if(v<0)v=0; if(v>8)v=8; m_theme.CComboBox::SetCurSel(v);}
 	if (m_invert.GetSafeHwnd()) {int v=savedata.s3r_invert_y?1:0; m_invert.CComboBox::SetCurSel(v);}
+	if (m_mesh.GetSafeHwnd()) m_mesh.CComboBox::SetCurSel(S3MeshDensityLevel());
 	if (m_start.GetSafeHwnd()) m_start.Invalidate();
 	if (m_gen.GetSafeHwnd()) m_gen.Invalidate();
-	CWnd* raise[] = { &m_aiL,&m_ai,&m_oppL,&m_opp,&m_lenL,&m_len,&m_lapsL,&m_laps,&m_themeL,&m_theme,&m_invertL,&m_invert,&m_start,&m_gen,&m_hint,&m_close,&m_status };
+	CWnd* raise[] = { &m_aiL,&m_ai,&m_oppL,&m_opp,&m_lenL,&m_len,&m_lapsL,&m_laps,&m_themeL,&m_theme,&m_invertL,&m_invert,&m_start,&m_gen,&m_meshL,&m_mesh,&m_hint,&m_close,&m_status };
 	for (int i = 0; i < (int)(sizeof(raise)/sizeof(raise[0])); i++) {
 		if (raise[i]->GetSafeHwnd())
 			raise[i]->SetWindowPos(&CWnd::wndTop, 0, 0, 0, 0, SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE);
@@ -1686,6 +1691,8 @@ int CSoft3DRaceDlg::ReadThemeFromUi(){ int s=m_theme.GetSafeHwnd()?(int)m_theme.
 void CSoft3DRaceDlg::SetThemeToUi(int v){ if(v<0)v=0; if(v>8)v=8; savedata.s3r_theme=v; if(m_theme.GetSafeHwnd()) m_theme.CComboBox::SetCurSel(v); }
 int CSoft3DRaceDlg::ReadInvertFromUi(){ int s=m_invert.GetSafeHwnd()?(int)m_invert.CComboBox::GetCurSel():savedata.s3r_invert_y; return (s!=0)?1:0; }
 void CSoft3DRaceDlg::SetInvertToUi(int v){ v=v?1:0; savedata.s3r_invert_y=v; if(m_invert.GetSafeHwnd()) m_invert.CComboBox::SetCurSel(v); }
+int CSoft3DRaceDlg::ReadMeshFromUi(){ int s=m_mesh.GetSafeHwnd()?(int)m_mesh.CComboBox::GetCurSel():savedata.s3_mesh_density; if(s<0||s>10)s=5; return s; }
+void CSoft3DRaceDlg::SetMeshToUi(int v){ if(v<0||v>10)v=5; savedata.s3_mesh_density=v; if(m_mesh.GetSafeHwnd()) m_mesh.CComboBox::SetCurSel(v); }
 
 void CSoft3DRaceDlg::PersistUi()
 {
@@ -1695,6 +1702,7 @@ void CSoft3DRaceDlg::PersistUi()
 	savedata.s3r_laps = ReadLapsFromUi();
 	savedata.s3r_theme = ReadThemeFromUi();
 	savedata.s3r_invert_y = ReadInvertFromUi();
+	savedata.s3_mesh_density = ReadMeshFromUi();
 	if (savedata.s3r_show_map != 0) savedata.s3r_show_map = 1;
 	int mask = savedata.s3r_item_mask; if (mask <= 0) mask = ITEM_ALL; savedata.s3r_item_mask = mask & ITEM_ALL;
 	if (savedata.s3r_zoom < 50 || savedata.s3r_zoom > 250) savedata.s3r_zoom = 100;
@@ -2468,6 +2476,8 @@ void CSoft3DRaceDlg::BuildObstacleMesh(int theme)
 	};
 	auto emitTri=[&](UINT a,UINT b,UINT c){ if(m_obsNi+3>S3R_OBS_IMAX)return; m_obsIdx[m_obsNi++]=a;m_obsIdx[m_obsNi++]=b;m_obsIdx[m_obsNi++]=c; };
 	auto cyl=[&](float y0,float y1,float rad,float rr,float gg,float bb,int segsN,float ox,float oz){
+		segsN = S3MeshScaleCount(segsN, 256);
+		if (segsN < 3) segsN = 3;
 		UINT baseV=(UINT)m_obsNv;
 		for(int k=0;k<=segsN;k++){
 			float a=(float)k/segsN*(float)(M_PI*2);
@@ -2481,6 +2491,8 @@ void CSoft3DRaceDlg::BuildObstacleMesh(int theme)
 		}
 	};
 	auto cone=[&](float y0,float y1,float rad0,float rad1,float rr,float gg,float bb,int segsN){
+		segsN = S3MeshScaleCount(segsN, 256);
+		if (segsN < 3) segsN = 3;
 		UINT baseV=(UINT)m_obsNv;
 		for(int k=0;k<=segsN;k++){
 			float a=(float)k/segsN*(float)(M_PI*2);
@@ -2499,6 +2511,14 @@ void CSoft3DRaceDlg::BuildObstacleMesh(int theme)
 	};
 	// AABB は常に min/max 正規化（逆転座標で長針ポリゴンが出ないように）
 	auto box=[&](float x0,float y0,float z0,float x1,float y1,float z1,float rr,float gg,float bb, int sub=1){
+		{
+			int sm = S3MeshAxisMul();
+			if (sm > 1) {
+				sub *= sm;
+				if (sub > 8) sub = 8;
+			}
+			if (sub < 1) sub = 1;
+		}
 		float xa=(x0<x1)?x0:x1, xb=(x0<x1)?x1:x0;
 		float ya=(y0<y1)?y0:y1, yb=(y0<y1)?y1:y0;
 		float za=(z0<z1)?z0:z1, zb=(z0<z1)?z1:z0;
@@ -4302,7 +4322,25 @@ void CSoft3DRaceDlg::EnsureStandingsBake()
 void CSoft3DRaceDlg::BakeStaticMeshes()
 {
 	if (!m_view.m_ready || m_knotN < 4 || !m_view.m_dev) return;
-	const UINT bakeMax = 700000u;
+	const int axis = S3MeshAxisMul();
+	const int segs = S3MeshScaleCount(220, 2400);
+	const int gN = S3MeshScaleCount(72, 640);
+	const int tSegs = S3MeshScaleCount(220, 2400);
+	const int pN = S3MeshScaleCount(8, 48);
+	const int wN = S3MeshScaleCount(28, 256);
+	unsigned long long need = 700000ull;
+	{
+		unsigned long long terr = (unsigned long long)gN * (unsigned long long)gN * 6ull;
+		if (axis <= 1) terr *= 8ull;
+		else terr += terr / 4ull;
+		unsigned long long band = (unsigned long long)segs * 16ull;
+		unsigned long long tun = (unsigned long long)tSegs * 2ull * (unsigned long long)pN * 6ull;
+		unsigned long long water = (unsigned long long)wN * (unsigned long long)wN * 6ull;
+		need = terr + band + tun + water + 80000ull;
+		if (need < 700000ull) need = 700000ull;
+		if (need > 4500000ull) need = 4500000ull;
+	}
+	const UINT bakeMax = (UINT)need;
 	S3RVertex* bv = new (std::nothrow) S3RVertex[bakeMax];
 	if (!bv) return;
 	UINT n = 0;
@@ -4315,7 +4353,6 @@ void CSoft3DRaceDlg::BakeStaticMeshes()
 		put(x0,y0,z0,nx,ny,nz,u0,v1,r,g,b,a); put(x1,y1,z1,nx,ny,nz,u1,v1,r,g,b,a);
 		put(x2,y2,z2,nx,ny,nz,u1,v0,r,g,b,a); put(x3,y3,z3,nx,ny,nz,u0,v0,r,g,b,a);
 	};
-	const int segs = 220;
 	float half = BandHalfWidth();
 	n = 0;
 	for (int i=0;i<segs;i++){
@@ -4352,7 +4389,7 @@ void CSoft3DRaceDlg::BakeStaticMeshes()
 		float p1x,p1y,p1z,t1x,t1y,t1z,n1x,n1y,n1z,b1x,b1y,b1z;
 		SplineFrame(tA,p0x,p0y,p0z,t0x,t0y,t0z,n0x,n0y,n0z,b0x,b0y,b0z);
 		SplineFrame(tB,p1x,p1y,p1z,t1x,t1y,t1z,n1x,n1y,n1z,b1x,b1y,b1z);
-		const int nChk = 8;
+		const int nChk = S3MeshScaleCount(8, 32);
 		const float lift = 0.18f;
 		for (int k = 0; k < nChk; k++) {
 			float a0 = -1.f + 2.f * (float)k / (float)nChk;
@@ -4392,7 +4429,6 @@ void CSoft3DRaceDlg::BakeStaticMeshes()
 	else if (m_themeActive==THEME_GRASS){gr=.4f;gg=.7f;gb=.3f;}
 	else if (m_themeActive==THEME_MESA){gr=.85f;gg=.45f;gb=.28f;}
 	else {gr=.75f;gg=.8f;gb=.95f;}
-	const int gN = 72;
 	float extent = m_demoRad + m_bandHalf + 56.f;
 	if (extent < 280.f) extent = 280.f;
 	if (extent > 480.f) extent = 480.f;
@@ -4446,7 +4482,10 @@ void CSoft3DRaceDlg::BakeStaticMeshes()
 			if (dmin < refineR) {
 				float yspan = rawY(xa,za) - GroundY(xa,za);
 				if (yspan < 0.f) yspan = -yspan;
-				sub = (yspan > 5.f) ? 6 : 3;
+				if (axis <= 1)
+					sub = (yspan > 5.f) ? 6 : 3;
+				else
+					sub = (yspan > 5.f) ? 2 : 1;
 			}
 			float us = (u1 - u0) / (float)sub, vs = (v1 - v0) / (float)sub;
 			float xs = (xb - xa) / (float)sub, zs = (zb - za) / (float)sub;
@@ -4460,8 +4499,6 @@ void CSoft3DRaceDlg::BakeStaticMeshes()
 		float cr=gr*0.70f, cg=gg*0.70f, cb=gb*0.70f;
 		const float holeR = m_bandHalf * 1.52f;
 		const float lipR = m_bandHalf * 2.55f;
-		const int tSegs = 220;
-		const int pN = 8;
 		for (int i = 0; i < tSegs; i++) {
 			float t0 = (float)i / (float)tSegs, t1 = (float)(i + 1) / (float)tSegs;
 			float p0x,p0y,p0z,t0x,t0y,t0z,n0x,n0y,n0z,b0x,b0y,b0z;
@@ -4548,7 +4585,6 @@ void CSoft3DRaceDlg::BakeStaticMeshes()
 
 	n = 0;
 	{
-		const int wN = 28;
 		float wExt = m_demoRad + m_bandHalf + 40.f;
 		if (wExt < 200.f) wExt = 200.f;
 		if (wExt > 420.f) wExt = 420.f;
@@ -4838,7 +4874,7 @@ void CSoft3DRaceDlg::RenderScene()
 		default: r=1;g=.55f;b=.2f; break;
 		}
 		const float rad=.55f;
-		const int nl=8, nb=5;
+		const int nl=S3MeshScaleCount(8, 48), nb=S3MeshScaleCount(5, 32);
 		for(int ii=0;ii<nl;ii++){
 			float a0=(float)ii*(6.2831853f/(float)nl)+it.spin, a1=(float)(ii+1)*(6.2831853f/(float)nl)+it.spin;
 			for(int jj=0;jj<nb;jj++){
@@ -4857,8 +4893,9 @@ void CSoft3DRaceDlg::RenderScene()
 				put(x0,y0,z0,n0x,n0y,n0z,uA,vA,r,g,b,.90f); put(x2,y2,z2,n2x,n2y,n2z,uC,vC,r,g,b,.90f); put(x3,y3,z3,n3x,n3y,n3z,uD,vD,r,g,b,.90f);
 			}
 		}
-		for(int k=0;k<8;k++){
-			float a0=(float)k*(6.2831853f/8.f)+it.spin*1.4f, a1=a0+(6.2831853f/8.f);
+		const int nRing = S3MeshScaleCount(8, 32);
+		for(int k=0;k<nRing;k++){
+			float a0=(float)k*(6.2831853f/(float)nRing)+it.spin*1.4f, a1=a0+(6.2831853f/(float)nRing);
 			float ri=rad*1.08f, ro=rad*1.28f, y0=it.y-rad*.07f, y1=it.y+rad*.07f;
 			float x00=it.x+cosf(a0)*ri, z00=it.z+sinf(a0)*ri;
 			float x10=it.x+cosf(a1)*ri, z10=it.z+sinf(a1)*ri;
@@ -5570,7 +5607,7 @@ BOOL CSoft3DRaceDlg::OnInitDialog()
 	m_help.SetWindowText(L"?");
 	m_help.SetFlat(TRUE);
 	m_help.SetGradation(RGB(255, 245, 220), RGB(240, 210, 160), 0, TRUE);
-	m_ai.SetAeroMode(FALSE); m_opp.SetAeroMode(FALSE); m_len.SetAeroMode(FALSE); m_laps.SetAeroMode(FALSE); m_theme.SetAeroMode(FALSE); m_invert.SetAeroMode(FALSE);
+	m_ai.SetAeroMode(FALSE); m_opp.SetAeroMode(FALSE); m_len.SetAeroMode(FALSE); m_laps.SetAeroMode(FALSE); m_theme.SetAeroMode(FALSE); m_invert.SetAeroMode(FALSE); m_mesh.SetAeroMode(FALSE);
 	m_start.SetAeroMode(FALSE); m_gen.SetAeroMode(FALSE); m_close.SetAeroMode(FALSE); m_view.SetAeroMode(FALSE);
 
 	if (!m_uiFont.GetSafeHandle()) {
@@ -5579,10 +5616,10 @@ BOOL CSoft3DRaceDlg::OnInitDialog()
 	}
 	if (m_uiFont.GetSafeHandle()) {
 		CFont* pf = &m_uiFont;
-		CWnd* ws[] = {&m_aiL,&m_oppL,&m_lenL,&m_lapsL,&m_themeL,&m_invertL,&m_hint,&m_status,&m_ai,&m_opp,&m_len,&m_laps,&m_theme,&m_invert,&m_start,&m_gen,&m_close};
+		CWnd* ws[] = {&m_aiL,&m_oppL,&m_lenL,&m_lapsL,&m_themeL,&m_invertL,&m_meshL,&m_hint,&m_status,&m_ai,&m_opp,&m_len,&m_laps,&m_theme,&m_invert,&m_mesh,&m_start,&m_gen,&m_close};
 		for (int i=0;i<(int)(sizeof(ws)/sizeof(ws[0]));i++) if (ws[i]->GetSafeHwnd()) ws[i]->SetFont(pf);
-		CCustomComboBox* cbs[]={&m_ai,&m_opp,&m_len,&m_laps,&m_theme,&m_invert};
-		for (int i=0;i<6;i++){ cbs[i]->SetItemHeight(-1,28); cbs[i]->SetItemHeight(0,26); }
+		CCustomComboBox* cbs[]={&m_ai,&m_opp,&m_len,&m_laps,&m_theme,&m_invert,&m_mesh};
+		for (int i=0;i<7;i++){ cbs[i]->SetItemHeight(-1,28); cbs[i]->SetItemHeight(0,26); }
 	}
 
 	if (savedata.s3r_ai < 0 || savedata.s3r_ai >= AI_COUNT) savedata.s3r_ai = AI_NORMAL;
@@ -5594,6 +5631,7 @@ BOOL CSoft3DRaceDlg::OnInitDialog()
 	if (savedata.s3r_show_map != 0) savedata.s3r_show_map = 1; else savedata.s3r_show_map = 1;
 	if (savedata.s3r_zoom < 50 || savedata.s3r_zoom > 250) savedata.s3r_zoom = 100;
 	if (savedata.s3r_invert_y != 0) savedata.s3r_invert_y = 1;
+	if (savedata.s3_mesh_density < 0 || savedata.s3_mesh_density > 10) savedata.s3_mesh_density = 5;
 
 	SetWindowText(LL14(L"Soft3D 空中レース", L"Soft3D aerial race", L"Course aérienne Soft3D", L"Gara aerea Soft3D", L"Carrera aérea Soft3D",
 		L"Soft3D 공중 레이스", L"Soft3D 空中竞速", L"سباق Soft3D الجوي", L"Воздушная гонка Soft3D", L"Soft3D-Luftrennen",
@@ -5604,6 +5642,7 @@ BOOL CSoft3DRaceDlg::OnInitDialog()
 	m_lapsL.SetWindowText(LL14(L"周回", L"Laps", L"Tours", L"Giri", L"Vueltas", L"랩", L"圈数", L"لفات", L"Круги", L"Runden", L"Voltas", L"Ronden", L"Okrążenia", L"Tur"));
 	m_themeL.SetWindowText(LL14(L"テーマ", L"Theme", L"Thème", L"Tema", L"Tema", L"테마", L"主题", L"سمة", L"Тема", L"Thema", L"Tema", L"Thema", L"Motyw", L"Tema"));
 	m_invertL.SetWindowText(LL14(L"上下", L"Y-axis", L"Axe Y", L"Asse Y", L"Eje Y", L"상하", L"上下", L"محور Y", L"Ось Y", L"Y-Achse", L"Eixo Y", L"Y-as", L"Oś Y", L"Y ekseni"));
+	m_meshL.SetWindowText(S3MeshDensityLabel());
 	m_start.SetWindowText(LL14(L"スタート", L"Start", L"Démarrer", L"Via", L"Iniciar", L"시작", L"开始", L"ابدأ", L"Старт", L"Start", L"Iniciar", L"Start", L"Start", L"Başlat"));
 	m_gen.SetWindowText(LL14(L"生成", L"Generate", L"Générer", L"Genera", L"Generar", L"생성", L"生成", L"توليد", L"Создать", L"Erzeugen", L"Gerar", L"Genereren", L"Generuj", L"Oluştur"));
 	m_close.SetWindowText(LL14(L"閉じる", L"Close", L"Fermer", L"Chiudi", L"Cerrar", L"닫기", L"关闭", L"إغلاق", L"Закрыть", L"Schließen", L"Fechar", L"Sluiten", L"Zamknij", L"Kapat"));
@@ -5657,12 +5696,16 @@ BOOL CSoft3DRaceDlg::OnInitDialog()
 	m_invert.AddString(LL14(L"上下反転", L"Invert Y", L"Inverser Y", L"Inverti Y", L"Invertir Y", L"상하 반전", L"上下翻转", L"عكس Y", L"Инверсия Y", L"Y umkehren", L"Inverter Y", L"Y omkeren", L"Odwróć Y", L"Y ters"));
 	SetInvertToUi(savedata.s3r_invert_y);
 
+	S3MeshFillCombo(m_mesh);
+	SetMeshToUi(S3MeshDensityLevel());
+
 	if (m_tooltip.Create(this, TTS_ALWAYSTIP | TTS_NOPREFIX)) {
 		m_tooltip.Activate(TRUE);
 		m_tooltip.AddTool(&m_start, LL14(L"デモを終えてカウントダウン開始", L"End demo and start countdown", L"Fin démo + compte à rebours", L"Fine demo + conto alla rovescia", L"Fin demo + cuenta atrás", L"데모 종료 후 카운트다운", L"结束演示并倒计时", L"End demo, start countdown", L"Конец демо и отсчёт", L"Demo beenden und Countdown", L"Fim da demo e contagem", L"Demo uit, dan countdown", L"Koniec demo i odliczanie", L"Demoyu bitir, geri sayım"));
 		m_tooltip.AddTool(&m_gen, LL14(L"コース再生成（直後にデモ走行）", L"Regenerate course (then demo lap)", L"Régénérer (puis démo)", L"Rigenera (poi demo)", L"Regenerar (luego demo)", L"코스 재생성(직후 데모)", L"重新生成（随后演示）", L"Regen then demo", L"Новая трасса → демо", L"Strecke neu → Demo", L"Gerar de novo → demo", L"Opnieuw → demo", L"Nowa trasa → demo", L"Yeniden oluştur → demo"));
 		m_tooltip.AddTool(&m_invert, LL14(L"マウス上下とパッド上下のピッチを反転します", L"Invert mouse and pad pitch (up/down)", L"Inverser le tangage souris/manette", L"Inverte pitch mouse/pad", L"Invertir pitch de ratón/mando", L"마우스·패드 상하 피치 반전", L"翻转鼠标/手柄俯仰", L"Invert mouse/pad pitch", L"Инверсия pitch мыши/пада", L"Maus-/Pad-Pitch umkehren", L"Inverter pitch do mouse/pad", L"Muis-/pad-pitch omkeren", L"Odwróć pitch myszy/pada", L"Fare/pad pitch ters çevir"));
 		m_tooltip.AddTool(&m_theme, LL14(L"テーマで地形とオブジェクトが変わります（丘・谷・川・トンネル）", L"Theme changes terrain and props (hills, valleys, rivers, tunnels)", L"Le thème change le terrain et les objets", L"Il tema cambia terreno e oggetti", L"El tema cambia terreno y objetos", L"테마에 따라 지형·오브젝트가 바뀝니다", L"主题会改变地形与物体（丘谷河隧道）", L"Theme changes terrain and props", L"Тема меняет рельеф и объекты", L"Thema ändert Gelände und Objekte", L"O tema muda terreno e objetos", L"Thema verandert terrein en objecten", L"Motyw zmienia teren i obiekty", L"Tema arazi ve nesneleri değiştirir"));
+		m_tooltip.AddTool(&m_mesh, LL14(L"地形・木などのメッシュ密度。軽量が現行、5が既定、緻密が最大（約80倍）", L"Terrain and prop mesh density. Light=current, 5=default, Dense=max (~80×)", L"Densité du maillage. Léger=actuel, 5=défaut, Dense=max (~80×)", L"Densità mesh. Leggero=attuale, 5=predef., Denso=max (~80×)", L"Densidad de malla. Ligero=actual, 5=predet., Denso=máx. (~80×)", L"지형·나무 메시 밀도. 가벼움=현재, 5=기본, 치밀=최대(약80배)", L"地形与树木网格密度。轻量=现行，5=默认，致密=最大（约80倍）", L"Mesh density. Light=current, 5=default, Dense=max (~80×)", L"Плотность сетки. Лёгкий=текущий, 5=по умолч., Плотный=макс. (~80×)", L"Netzdichte. Leicht=aktuell, 5=Standard, Dicht=max. (~80×)", L"Densidade da malha. Leve=atual, 5=padrão, Denso=máx. (~80×)", L"Meshdichtheid. Licht=huidig, 5=standaard, Dicht=max (~80×)", L"Gęstość siatki. Lekki=obecny, 5=domyślny, Gęsty=maks. (~80×)", L"Mesh yoğunluğu. Hafif=şimdiki, 5=varsayılan, Yoğun=en fazla (~80×)"));
 	}
 
 	CaptureAudioBaseline();
@@ -5694,6 +5737,15 @@ void CSoft3DRaceDlg::OnLenChanged() { savedata.s3r_len = ReadLenFromUi(); Persis
 void CSoft3DRaceDlg::OnLapsChanged() { savedata.s3r_laps = ReadLapsFromUi(); PersistUi(); }
 void CSoft3DRaceDlg::OnThemeChanged() { savedata.s3r_theme = ReadThemeFromUi(); PersistUi(); }
 void CSoft3DRaceDlg::OnInvertChanged() { savedata.s3r_invert_y = ReadInvertFromUi(); PersistUi(); }
+void CSoft3DRaceDlg::OnMeshChanged()
+{
+	savedata.s3_mesh_density = ReadMeshFromUi();
+	PersistUi();
+	if (m_view.m_ready && m_knotN >= 4) {
+		BuildObstacleMesh(m_themeActive);
+		BakeStaticMeshes();
+	}
+}
 
 void CSoft3DRaceDlg::OnContextMenu(CWnd* pWnd, CPoint point)
 {
