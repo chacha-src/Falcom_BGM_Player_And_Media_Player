@@ -223,6 +223,54 @@
 #define IDD_VSTHOST                     274
 #define IDD_VST_HELP                    275
 #define IDD_VST_WAIT                    276
+#define IDD_CDPLAYER                    344
+#define IDD_CD_HELP                     345
+#define IDC_MP_BOT_CD                   4337
+#define IDC_CD_HELP                     4338
+#define IDC_CD_DRIVE                    4339
+#define IDC_CD_REFRESH                  4340
+#define IDC_CD_EJECT                    4341
+#define IDC_CD_LOAD                     4342
+#define IDC_CD_LIST                     4343
+#define IDC_CD_COVER                    4344
+#define IDC_CD_ALBUM                    4345
+#define IDC_CD_ARTIST                   4346
+#define IDC_CD_DISCID                   4347
+#define IDC_CD_PLAY                     4348
+#define IDC_CD_PAUSE                    4349
+#define IDC_CD_STOP                     4350
+#define IDC_CD_PREV                     4351
+#define IDC_CD_NEXT                     4352
+#define IDC_CD_SEEK                     4353
+#define IDC_CD_TIME                     4354
+#define IDC_CD_VOL                      4355
+#define IDC_CD_REPEAT                   4356
+#define IDC_CD_SHUFFLE                  4357
+#define IDC_CD_LOOKUP                   4358
+#define IDC_CD_SEARCH                   4359
+#define IDC_CD_SEARCHGO                 4360
+#define IDC_CD_FMT                      4361
+#define IDC_CD_QUAL                     4362
+#define IDC_CD_FOLDER                   4363
+#define IDC_CD_BROWSE                   4364
+#define IDC_CD_RIPSEL                   4365
+#define IDC_CD_RIPALL                   4366
+#define IDC_CD_RIPONE                   4367
+#define IDC_CD_ADDPL                    4368
+#define IDC_CD_BURNAUD                  4369
+#define IDC_CD_BURNDATA                 4370
+#define IDC_CD_ERASE                    4371
+#define IDC_CD_STATUS                   4372
+#define IDC_CD_CLOSE                    4373
+#define IDC_CD_DRIVEL                   4374
+#define IDC_CD_FMTL                     4375
+#define IDC_CD_QUALL                    4376
+#define IDC_CD_FOLDERL                  4377
+#define IDC_CD_VOLL                     4378
+#define IDC_CD_PROGRESS                 4379
+#define IDC_CD_ABA                      4380
+#define IDC_CD_ABB                      4381
+#define IDC_CD_ABCLR                    4382
 #define IDD_MIDIMONITOR                 277
 #define IDD_MM_HELP                     278
 #define IDR_SASAMI_GS                   279
@@ -1891,9 +1939,9 @@
 // 
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
-#define _APS_NEXT_RESOURCE_VALUE        344
+#define _APS_NEXT_RESOURCE_VALUE        346
 #define _APS_NEXT_COMMAND_VALUE         33284
-#define _APS_NEXT_CONTROL_VALUE         4337
+#define _APS_NEXT_CONTROL_VALUE         4383
 #define _APS_NEXT_SYMED_VALUE           104
 #endif
 #endif

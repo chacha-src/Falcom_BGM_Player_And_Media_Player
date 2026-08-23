@@ -268,6 +268,7 @@ BOOL COggDlg::ReleaseDXSound(void)
 
 extern void playwavds2(BYTE* bw, int old, int l1, int l2);
 extern void DispatchPlaywavFill(BYTE* bufwav3, ULONG oldw, int len1, int len2);
+extern "C" int VstLiveThruIsOn(void);
 extern int playwavkpi(BYTE* bw, int old, int l1, int l2);
 extern int playwavmp3(BYTE* bw, int old, int l1, int l2);
 extern int playwavwav(BYTE* bw, int old, int l1, int l2);
@@ -769,11 +770,20 @@ UINT HandleNotifications(LPVOID)
 				thn = FALSE;
 				const int copy1 = (int)len3;
 				const int copy2 = (int)len4;
-				if (copy1 > 0 && copy1 <= stageBytes)
-					memcpy(pdsb1, s_dsStage.data(), (size_t)copy1);
+				const int thruMute = VstLiveThruIsOn();
+				if (copy1 > 0 && copy1 <= stageBytes) {
+					if (thruMute)
+						ZeroMemory(pdsb1, (SIZE_T)copy1);
+					else
+						memcpy(pdsb1, s_dsStage.data(), (size_t)copy1);
+				}
 				if (stageFade && copy1 > 0) ZeroMemory(pdsb1, (SIZE_T)copy1);
-				if (copy2 > 0 && copy1 + copy2 <= stageBytes)
-					memcpy(pdsb2, s_dsStage.data() + copy1, (size_t)copy2);
+				if (copy2 > 0 && copy1 + copy2 <= stageBytes) {
+					if (thruMute)
+						ZeroMemory(pdsb2, (SIZE_T)copy2);
+					else
+						memcpy(pdsb2, s_dsStage.data() + copy1, (size_t)copy2);
+				}
 				if (stageFade && copy2 > 0) ZeroMemory(pdsb2, (SIZE_T)copy2);
 				dsb->Unlock(pdsb1, len3, pdsb2, len4);
 				if (!stageFade)
@@ -852,7 +862,7 @@ UINT HandleNotifications(LPVOID)
 				const __int64 remain = g_endWrittenBytes - heard;
 				const int bpf = (g_outBytesPerFrame > 0) ? g_outBytesPerFrame : 4;
 				const __int64 fadeBytes = (__int64)bpf * (__int64)wavbit_sample_Hz * 35 / 1000; // 約35ms
-				if (remain > 0 && remain < fadeBytes && fadeBytes > 0) {
+				if (remain > 0 && remain < fadeBytes && fadeBytes > 0 && !VstLiveThruIsOn()) {
 					LONG vol = (LONG)((double)DSBVOLUME_MIN * (1.0 - (double)remain / (double)fadeBytes));
 					if (vol > 0) vol = 0;
 					if (vol < DSBVOLUME_MIN) vol = DSBVOLUME_MIN;

@@ -497,7 +497,7 @@ bool KpiHost64Client::VstOpen(const std::wstring& midPath, const std::wstring& v
 }
 
 bool KpiHost64Client::VstRender(uint32_t bytesWanted, std::vector<uint8_t>& outPcm, bool& outEof,
-	const uint8_t* injPorts, const uint32_t* injMsgs, uint32_t injCount, uint32_t slot)
+	const uint8_t* injPorts, const uint32_t* injMsgs, const int32_t* injOfs, uint32_t injCount, uint32_t slot)
 {
 	if (slot > 1) slot = 0;
 	KPIHOST64_RenderReq rr{};
@@ -514,6 +514,7 @@ bool KpiHost64Client::VstRender(uint32_t bytesWanted, std::vector<uint8_t>& outP
 		KPIHOST64_VstLiveMidiReq mr{};
 		mr.port = injPorts[i];
 		mr.msg = injMsgs[i];
+		mr.sampleOfs = injOfs ? injOfs[i] : 0;
 		memcpy(p, &mr, sizeof(mr));
 		p += sizeof(mr);
 	}

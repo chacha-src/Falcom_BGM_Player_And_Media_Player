@@ -600,6 +600,9 @@
     <ClCompile Include="VstHostDlg.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="CdPlayerDlg.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="PluginWinamp.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -1106,6 +1109,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="VoiceChangerDlg.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CdPlayerDlg.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="VcVocalTract.h">

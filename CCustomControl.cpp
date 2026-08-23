@@ -4218,7 +4218,7 @@ static const UINT_PTR kGroupSoftTimerId     = 4126; // GroupBox ゆらゆら（5
 static const UINT_PTR kTabSoftTimerId       = 4127; // 選択タブ Soft（220ms）
 
 CCustomEdit::CCustomEdit()
-    : m_bHasFocus(FALSE), m_bAutoDelete(FALSE), m_bSelDrag(FALSE), m_bCaretOn(TRUE)
+    : m_bHasFocus(FALSE), m_bAutoDelete(FALSE), m_bAeroMode(FALSE), m_bSelDrag(FALSE), m_bCaretOn(TRUE)
     , m_lastSel0(-1), m_lastSel1(-1)
 {
     m_brBackground.CreateSolidBrush(COLOR_EDIT_BG);
@@ -5541,7 +5541,9 @@ void CCustomStatic::DrawClient(CDC& dc)
     }
     CBitmap* ob = memDC.SelectObject(&m_memBackstore);
 
-    const BOOL bTrans = CCC_UseTransPaint(m_hWnd, m_bAeroMode);
+    BOOL bTrans = CCC_UseTransPaint(m_hWnd, m_bAeroMode);
+    if (m_bSolidFill || CCC_HostNeedsChildOpaque(m_hWnd))
+        bTrans = FALSE;
     // 透過時は最初からクロマキーで塗る(スライダー/チェックと同じ)。
     // COLOR_DIALOG_BG→リマップは CreateCompatibleBitmap 経由で色が
     // 量子化されると一致せず、不透明ピンクのまま残る。
@@ -5852,23 +5854,14 @@ void CCustomStatic::OnPaint()
     if (r.Width() <= 0 || r.Height() <= 0)
         return;
 
-#if CCUSTOM_AERO_SUPPORT
-    // ソリッド背景指定 + ホスト不透明必須: クロマ透過せず α=255 で塗る
-    // （MP Lib/Hist レール等の白抜け対策）
-    if (m_bSolidFill && CCC_HostNeedsChildOpaque(m_hWnd)) {
-        CCC_FillRectOpaqueBits(dc.GetSafeHdc(), r, m_clrSolidFill);
-        if (!m_strText.IsEmpty() || (CWnd::GetWindowTextLength() > 0)) {
-            // 文字がある場合は通常描画も重ねる（レールは空文字想定）
-            const BOOL bTrans = CCC_UseTransPaint(m_hWnd, m_bAeroMode);
-            if (!bTrans)
-                DrawClient(dc);
-        }
-        return;
-    }
-#endif
+    // ソリッド指定でも Win11 アクリル下は CompatibleBitmap の α=0 が黒帯になる。
+    // FillRectOpaqueBits の直後に素 DrawClient すると上書きで黒に戻るので、
+    // 不透明化は下の BufferedPaintMakeOpaque に任せる。
 
     // 透過(アクリル)時はクロマ blit を潰す MakeOpaque を避ける(CCustomCheckBox と同じ)
-    const BOOL bTrans = CCC_UseTransPaint(m_hWnd, m_bAeroMode);
+    BOOL bTrans = CCC_UseTransPaint(m_hWnd, m_bAeroMode);
+    if (m_bSolidFill || CCC_HostNeedsChildOpaque(m_hWnd))
+        bTrans = FALSE;
     if (bTrans)
     {
         DrawClient(dc);
@@ -6284,6 +6277,34 @@ HBRUSH CCustomComboBox::CtlColor(CDC* pDC, UINT nC)
     return NULL;
 }
 
+// ドロップダウン確保で HWND が縦長でも、描画は閉じた選択欄だけにする。
+// CB_GETITEMHEIGHT(-1) はオーナードロー未指定コンボで CB_ERR になり、王冠が巨大化する。
+static void CCC_ComboClipToClosedField(HWND hWnd, CRect& r)
+{
+    if (!hWnd || r.Height() <= 0)
+        return;
+    int closedH = 0;
+    COMBOBOXINFO ci = { sizeof(ci) };
+    if (::GetComboBoxInfo(hWnd, &ci)) {
+        CRect vis = ci.rcItem;
+        vis.UnionRect(&vis, &ci.rcButton);
+        // rcItem はクライアント座標。top は 0 のまま高さだけ切る（メモリDCの原点とずらさない）
+        if (vis.bottom - r.top >= 8)
+            closedH = vis.bottom - r.top;
+    }
+    if (closedH <= 0) {
+        const int selH = (int)(INT_PTR)::SendMessage(hWnd, CB_GETITEMHEIGHT, (WPARAM)-1, 0);
+        if (selH > 0)
+            closedH = selH;
+        else {
+            const UINT dpi = CCC_GetControlDpi(hWnd);
+            closedH = CCC_ScaleDpi(24, dpi);
+        }
+    }
+    if (closedH > 0 && r.Height() > closedH + 1)
+        r.bottom = r.top + closedH;
+}
+
 BOOL CCustomComboBox::OnEraseBkgnd(CDC* pDC)
 {
     if (pDC)
@@ -6291,9 +6312,7 @@ BOOL CCustomComboBox::OnEraseBkgnd(CDC* pDC)
         CRect r;
         GetClientRect(&r);
         // MoveWindow でドロップ領域まで高さがある場合、選択欄だけ消す(下段ボタンを塗り潰さない)
-        const int selH = (int)(INT_PTR)SendMessage(CB_GETITEMHEIGHT, (WPARAM)-1, 0);
-        if (selH > 0 && r.Height() > selH + 1)
-            r.bottom = r.top + selH;
+        CCC_ComboClipToClosedField(m_hWnd, r);
         // アクリル/キャプションガラス下の素 FillSolidRect は α=0 穴になる
         if (CCC_HostNeedsChildOpaque(m_hWnd))
             CCC_FillRectOpaqueBits(pDC->GetSafeHdc(), r, COLOR_COMBO_BG);
@@ -6309,12 +6328,7 @@ void CCustomComboBox::PaintClient(CDC& dc)
     GetClientRect(&r);
     if (r.Width() <= 0 || r.Height() <= 0)
         return;
-    // 選択欄の高さに制限(ドロップダウン確保分の HWND 高さがあっても枠・王冠を大きく描かない)
-    {
-        const int selH = (int)(INT_PTR)SendMessage(CB_GETITEMHEIGHT, (WPARAM)-1, 0);
-        if (selH > 0 && r.Height() > selH + 1)
-            r.bottom = r.top + selH;
-    }
+    CCC_ComboClipToClosedField(m_hWnd, r);
     if (r.Height() <= 0)
         return;
 
@@ -6395,6 +6409,8 @@ void CCustomComboBox::PaintClient(CDC& dc)
                 GetLBText(nPS, st);
         } else if (nPS != CB_ERR) {
             GetLBText(nPS, st);
+            if (st.IsEmpty())
+                GetWindowText(st);
         }
     }
 
@@ -6410,11 +6426,15 @@ void CCustomComboBox::PaintClient(CDC& dc)
     if (nPS != CB_ERR && !bIL)
     {
         int cs = max(4, (rt.Height() - CCC_ScaleDpi(8, dpi)) / 2);
-        // 王冠が選択欄を食いつぶさない上限
         const int csMax = max(4, rt.Height() / 2 - 1);
+        const int csCap = CCC_ScaleDpi(6, dpi);
         if (cs > csMax) cs = csMax;
-        DrawCrown(&mDC, rt.left + cs, rt.Height() / 2, cs, RGB(255, 215, 0));
-        rt.left += cs * 2 + CCC_ScaleDpi(4, dpi);
+        if (cs > csCap) cs = csCap;
+        // 文字の余地が無ければ王冠は省略（狭いコンボで名前が消えるのを防ぐ）
+        if (rt.Width() - (cs * 2 + CCC_ScaleDpi(4, dpi)) >= CCC_ScaleDpi(24, dpi)) {
+            DrawCrown(&mDC, rt.left + cs, rt.Height() / 2, cs, RGB(255, 215, 0));
+            rt.left += cs * 2 + CCC_ScaleDpi(4, dpi);
+        }
     }
 
     mDC.SetBkMode(TRANSPARENT);
@@ -6436,9 +6456,7 @@ void CCustomComboBox::OnPaint()
     CPaintDC dc(this);
     CRect r;
     GetClientRect(&r);
-    const int selH = (int)(INT_PTR)SendMessage(CB_GETITEMHEIGHT, (WPARAM)-1, 0);
-    if (selH > 0 && r.Height() > selH + 1)
-        r.bottom = r.top + selH;
+    CCC_ComboClipToClosedField(m_hWnd, r);
     if (r.Width() <= 0 || r.Height() <= 0) return;
 
     // ポップアップ子など: 素 BitBlt が消える環境向けに不透明化
@@ -6482,9 +6500,7 @@ void CCustomComboBox::DrawItem(LPDRAWITEMSTRUCT lp)
     {
         CRect r;
         GetClientRect(&r);
-        const int selH = (int)(INT_PTR)SendMessage(CB_GETITEMHEIGHT, (WPARAM)-1, 0);
-        if (selH > 0 && r.Height() > selH + 1)
-            r.bottom = r.top + selH;
+        CCC_ComboClipToClosedField(m_hWnd, r);
         if (r.Width() <= 0 || r.Height() <= 0) return;
         // アクリル下では常に α=255。HostNeeds 判定に頼ると初回/選択直後に白抜けする
         {
@@ -6858,7 +6874,9 @@ void CCustomSliderCtrl::PaintClient(CDC& dc)
     }
     CBitmap* ob = mDC.SelectObject(&m_memBackstore);
 
-    const BOOL bTrans = CCC_UseTransPaint(m_hWnd, m_bAeroMode);
+    BOOL bTrans = CCC_UseTransPaint(m_hWnd, m_bAeroMode);
+    if (CCC_HostNeedsChildOpaque(m_hWnd))
+        bTrans = FALSE;
     if (bTrans)
     {
         mDC.FillSolidRect(&r, CCC_AERO_CHROMA_KEY);
@@ -6883,11 +6901,65 @@ void CCustomSliderCtrl::PaintClient(CDC& dc)
     mDC.DeleteDC();
 }
 
+void CCustomSliderCtrl::PaintOpaqueIntoBuffer(HDC hdcBuf)
+{
+    if (!hdcBuf || !m_hWnd) return;
+    CRect r;
+    GetClientRect(&r);
+    if (r.Width() <= 0 || r.Height() <= 0) return;
+    CDC mem;
+    mem.Attach(hdcBuf);
+    mem.FillSolidRect(&r, COLOR_DIALOG_BG);
+    DrawSlider(&mem);
+    CCC_DrawInwoman(&mem, r, FALSE);
+    mem.Detach();
+}
+
+void CCustomSliderCtrl::PaintOpaqueClient(CDC& dc)
+{
+    CRect r;
+    GetClientRect(&r);
+    if (r.Width() <= 0 || r.Height() <= 0) return;
+    BP_PAINTPARAMS params = { sizeof(BP_PAINTPARAMS) };
+    params.dwFlags = BPPF_ERASE;
+    HDC hdcBuf = NULL;
+    HPAINTBUFFER hBP = ::BeginBufferedPaint(dc.GetSafeHdc(), &r, BPBF_TOPDOWNDIB, &params, &hdcBuf);
+    if (!hdcBuf || !hBP) {
+        CDC mem;
+        CBitmap bmp;
+        mem.CreateCompatibleDC(&dc);
+        if (!bmp.CreateCompatibleBitmap(&dc, r.Width(), r.Height()))
+            return;
+        CBitmap* old = mem.SelectObject(&bmp);
+        mem.FillSolidRect(0, 0, r.Width(), r.Height(), COLOR_DIALOG_BG);
+        DrawSlider(&mem);
+        CCC_DrawInwoman(&mem, r, FALSE);
+        CCC_InwomanBitBlt(dc.GetSafeHdc(), r.Width(), r.Height(), mem.GetSafeHdc(), COLOR_DIALOG_BG);
+        mem.SelectObject(old);
+        return;
+    }
+    CDC mem;
+    mem.Attach(hdcBuf);
+    mem.FillSolidRect(&r, COLOR_DIALOG_BG);
+    DrawSlider(&mem);
+    CCC_DrawInwoman(&mem, r, FALSE);
+    mem.Detach();
+    ::BufferedPaintMakeOpaque(hBP, &r);
+    ::EndBufferedPaint(hBP, TRUE);
+}
+
 void CCustomSliderCtrl::OnPaint()
 {
     CPaintDC dc(this);
     CRect r;
     GetClientRect(&r);
+#if CCUSTOM_AERO_SUPPORT
+    if (CCC_HostNeedsChildOpaque(m_hWnd))
+    {
+        PaintOpaqueClient(dc);
+        return;
+    }
+#endif
 
     // 透過(アクリル)時はクロマ blit を潰す MakeOpaque を避ける(CCustomCheckBox と同じ)
     const BOOL bTrans = CCC_UseTransPaint(m_hWnd, m_bAeroMode);
@@ -7325,7 +7397,13 @@ CCustomRangeSliderCtrl::CCustomRangeSliderCtrl()
     ZeroMemory(m_lrcFrames, sizeof(m_lrcFrames));
     ZeroMemory(m_ribbon, sizeof(m_ribbon));
 }
-CCustomRangeSliderCtrl::~CCustomRangeSliderCtrl() {}
+CCustomRangeSliderCtrl::~CCustomRangeSliderCtrl()
+{
+    if (m_memBackstore.GetSafeHandle()) m_memBackstore.DeleteObject();
+#if CCUSTOM_AERO_SUPPORT
+    m_chromaCache.Release();
+#endif
+}
 
 void CCustomRangeSliderCtrl::PostNcDestroy()
 {
@@ -7795,7 +7873,10 @@ void CCustomRangeSliderCtrl::PaintClient(CDC& dc)
     }
     CBitmap* ob = mDC.SelectObject(&m_memBackstore);
 
-    const BOOL bTrans = CCC_UseTransPaint(m_hWnd, m_bAeroMode);
+    // キャプションのみアクリルのホストでは穴抜き禁止。音量スライダーと同じ不透明塗り。
+    BOOL bTrans = CCC_UseTransPaint(m_hWnd, m_bAeroMode);
+    if (CCC_HostNeedsChildOpaque(m_hWnd))
+        bTrans = FALSE;
     if (bTrans)
     {
         mDC.FillSolidRect(&r, CCC_AERO_CHROMA_KEY);
@@ -7803,11 +7884,11 @@ void CCustomRangeSliderCtrl::PaintClient(CDC& dc)
         CCC_DrawInwoman(&mDC, r, TRUE);
 #if CCUSTOM_AERO_SUPPORT
         if (CCC_IsAeroEnabled() && CCC_IsWin11())
-            CCC_BlitChromaNF(dc.GetSafeHdc(), 0, 0, rw, rh,
-                mDC.GetSafeHdc(), 0, 0, CCC_AERO_CHROMA_KEY);
+            CCC_BlitChromaCached(dc.GetSafeHdc(), 0, 0, rw, rh,
+                mDC.GetSafeHdc(), 0, 0, CCC_AERO_CHROMA_KEY, m_chromaCache);
         else
 #endif
-            CCC_ClearDestBlt(dc.GetSafeHdc(), 0, 0, rw, rh,
+            CCC_BlitChromaTrans(dc.GetSafeHdc(), 0, 0, rw, rh,
                 mDC.GetSafeHdc(), 0, 0, CCC_AERO_CHROMA_KEY);
     }
     else
@@ -7821,12 +7902,66 @@ void CCustomRangeSliderCtrl::PaintClient(CDC& dc)
     mDC.DeleteDC();
 }
 
+void CCustomRangeSliderCtrl::PaintOpaqueIntoBuffer(HDC hdcBuf)
+{
+    if (!hdcBuf || !m_hWnd) return;
+    CRect r;
+    GetClientRect(&r);
+    if (r.Width() <= 0 || r.Height() <= 0) return;
+    CDC mem;
+    mem.Attach(hdcBuf);
+    mem.FillSolidRect(&r, COLOR_DIALOG_BG);
+    DrawRangeSlider(&mem);
+    CCC_DrawInwoman(&mem, r, FALSE);
+    mem.Detach();
+}
+
+void CCustomRangeSliderCtrl::PaintOpaqueClient(CDC& dc)
+{
+    CRect r;
+    GetClientRect(&r);
+    if (r.Width() <= 0 || r.Height() <= 0) return;
+    BP_PAINTPARAMS params = { sizeof(BP_PAINTPARAMS) };
+    params.dwFlags = BPPF_ERASE;
+    HDC hdcBuf = NULL;
+    HPAINTBUFFER hBP = ::BeginBufferedPaint(dc.GetSafeHdc(), &r, BPBF_TOPDOWNDIB, &params, &hdcBuf);
+    if (!hdcBuf || !hBP) {
+        CDC mem;
+        CBitmap bmp;
+        mem.CreateCompatibleDC(&dc);
+        if (!bmp.CreateCompatibleBitmap(&dc, r.Width(), r.Height()))
+            return;
+        CBitmap* old = mem.SelectObject(&bmp);
+        mem.FillSolidRect(0, 0, r.Width(), r.Height(), COLOR_DIALOG_BG);
+        DrawRangeSlider(&mem);
+        CCC_DrawInwoman(&mem, r, FALSE);
+        CCC_InwomanBitBlt(dc.GetSafeHdc(), r.Width(), r.Height(), mem.GetSafeHdc(), COLOR_DIALOG_BG);
+        mem.SelectObject(old);
+        return;
+    }
+    CDC mem;
+    mem.Attach(hdcBuf);
+    mem.FillSolidRect(&r, COLOR_DIALOG_BG);
+    DrawRangeSlider(&mem);
+    CCC_DrawInwoman(&mem, r, FALSE);
+    mem.Detach();
+    ::BufferedPaintMakeOpaque(hBP, &r);
+    ::EndBufferedPaint(hBP, TRUE);
+}
+
 void CCustomRangeSliderCtrl::OnPaint()
 {
     CPaintDC dc(this);
     CRect r;
     GetClientRect(&r);
-    const BOOL bTrans = CCC_UseTransPaint(m_hWnd, m_bAeroMode);
+#if CCUSTOM_AERO_SUPPORT
+    if (CCC_HostNeedsChildOpaque(m_hWnd))
+    {
+        PaintOpaqueClient(dc);
+        return;
+    }
+#endif
+    BOOL bTrans = CCC_UseTransPaint(m_hWnd, m_bAeroMode);
     if (bTrans || r.Width() <= 0 || r.Height() <= 0) {
         PaintClient(dc);
         return;
@@ -10802,29 +10937,39 @@ void CCustomStandardButton::PaintClient(CDC& dc, const CRect& r)
         mDC.DrawFocusRect(&rf);
     }
 
-    // アイコン。ラベル付きは左、記号だけ／空は中央。押下で1pxずらす。
+    // アイコン。ラベル付きは左に小さめ、記号だけ／空／幅不足は中央。
+    // 幅が足りないときの「停...」は読めないので、文字は出さずアイコンだけにする。
     CString s;
     GetWindowText(s);
     const BOOL glyphOnly = CCC_CaptionIsGlyphOnly(s);
     HICON hDraw = m_hIconIn;
     if (m_bMouseOver && m_hIconOut)
         hDraw = m_hIconOut;
+    BOOL drawLabel = hDraw && !glyphOnly && !s.IsEmpty();
     int iconRight = r.left;
     if (hDraw)
     {
         const int pad = m_bFlat ? 4 : 6;
         const int maxSz = (std::max)(8, (std::min)(r.Width(), r.Height()) - pad);
-        int iw = (std::min)(24, maxSz);
-        int ih = iw;
-        {
-            const UINT dpi = CCC_GetControlDpi(m_hWnd);
-            int want = CCC_ScaleDpi(24, dpi);
+        const UINT dpi = CCC_GetControlDpi(m_hWnd);
+        int want = CCC_ScaleDpi(drawLabel ? 16 : 24, dpi);
+        if (drawLabel) {
+            if (want < 14) want = 14;
+            if (want > 20) want = 20;
+        } else {
             if (want < 16) want = 16;
             if (want > 36) want = 36;
-            iw = ih = (std::min)(want, maxSz);
+        }
+        const int iw = (std::min)(want, maxSz);
+        const int ih = iw;
+        if (drawLabel) {
+            const int leftPad = m_bFlat ? 3 : 5;
+            const int remain = r.Width() - leftPad - iw - 8;
+            if (remain < 22)
+                drawLabel = FALSE;
         }
         int ix, iy;
-        if (!glyphOnly && !s.IsEmpty()) {
+        if (drawLabel) {
             ix = r.left + (m_bFlat ? 3 : 5);
             iy = r.top + (r.Height() - ih) / 2;
             iconRight = ix + iw;
@@ -10845,14 +10990,15 @@ void CCustomStandardButton::PaintClient(CDC& dc, const CRect& r)
         DrawSmartText(&mDC, r, s, bD, bP);
         mDC.SelectObject(pOF);
     }
-    else if (!s.IsEmpty() && hDraw && !glyphOnly)
+    else if (drawLabel)
     {
         CFont* pF = GetFont();
         CFont* pOF = mDC.SelectObject(pF ? pF : (CFont*)mDC.SelectStockObject(DEFAULT_GUI_FONT));
         CRect tr = r;
-        tr.left = iconRight + 4;
+        tr.left = iconRight + 3;
         tr.DeflateRect(2, 1);
-        DrawSmartText2(&mDC, tr, s, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS, bD, bP);
+        // 省略記号は1〜2文字で切れて無意味。フォントを縮めて収める。
+        DrawSmartText2(&mDC, tr, s, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX, bD, bP);
         mDC.SelectObject(pOF);
     }
 
@@ -14129,6 +14275,18 @@ static BOOL CCC_PaintChildDirect(HWND hWnd, HDC hdcBuf)
         dc.Detach();
         return TRUE;
     }
+    else if (auto* pRange = dynamic_cast<CCustomRangeSliderCtrl*>(pw))
+    {
+        pRange->PaintOpaqueIntoBuffer(hdcBuf);
+        dc.Detach();
+        return TRUE;
+    }
+    else if (auto* pSld = dynamic_cast<CCustomSliderCtrl*>(pw))
+    {
+        pSld->PaintOpaqueIntoBuffer(hdcBuf);
+        dc.Detach();
+        return TRUE;
+    }
     else if (auto* pPerf = dynamic_cast<CCustomSysPerfCtrl*>(pw))
     {
         pPerf->PaintOpaqueIntoBuffer(hdcBuf);
@@ -14559,7 +14717,7 @@ static BOOL CCC_IsCaptionChromeCtrl(HWND hWnd)
         IDC_TE_HELP, IDC_FD_HELP, IDC_KPI_HELP, IDC_SY_HELP, IDC_PRT_HELP,
         IDC_OGG_HELP, IDC_PRM_HELP, IDC_MCR_HELP, IDC_DOUGA_HELP, IDC_MP_CHEATBTN,
         IDC_SM_HELP, IDC_DIG_HELP, IDC_VC_HELP, IDC_TN_HELP, IDC_PF_HELP,
-        IDC_S3M_HELP, IDC_S3R_HELP, IDC_MP_BPM_HELP, IDC_TB_HELP, IDC_VST_HELP, IDC_MM_HELP
+        IDC_S3M_HELP, IDC_S3R_HELP, IDC_MP_BPM_HELP, IDC_TB_HELP, IDC_VST_HELP, IDC_CD_HELP, IDC_MM_HELP
     };
     for (int i = 0; i < (int)_countof(kHelpChromeIds); ++i) {
         if (id == kHelpChromeIds[i])
@@ -14576,7 +14734,7 @@ static BOOL CCC_IsCaptionHelpChromeId(UINT id)
         IDC_TE_HELP, IDC_FD_HELP, IDC_KPI_HELP, IDC_SY_HELP, IDC_PRT_HELP,
         IDC_OGG_HELP, IDC_PRM_HELP, IDC_MCR_HELP, IDC_DOUGA_HELP, IDC_MP_CHEATBTN,
         IDC_SM_HELP, IDC_DIG_HELP, IDC_VC_HELP, IDC_TN_HELP, IDC_PF_HELP,
-        IDC_S3M_HELP, IDC_S3R_HELP, IDC_MP_BPM_HELP, IDC_TB_HELP, IDC_VST_HELP, IDC_MM_HELP
+        IDC_S3M_HELP, IDC_S3R_HELP, IDC_MP_BPM_HELP, IDC_TB_HELP, IDC_VST_HELP, IDC_CD_HELP, IDC_MM_HELP
     };
     for (int i = 0; i < (int)_countof(kHelpChromeIds); ++i) {
         if (id == kHelpChromeIds[i])
@@ -14594,7 +14752,7 @@ static HWND CCC_FindCaptionHelpChrome(HWND hDlg)
         IDC_TE_HELP, IDC_FD_HELP, IDC_KPI_HELP, IDC_SY_HELP, IDC_PRT_HELP,
         IDC_OGG_HELP, IDC_PRM_HELP, IDC_MCR_HELP, IDC_DOUGA_HELP, IDC_MP_CHEATBTN,
         IDC_SM_HELP, IDC_DIG_HELP, IDC_VC_HELP, IDC_TN_HELP, IDC_PF_HELP,
-        IDC_S3M_HELP, IDC_S3R_HELP, IDC_MP_BPM_HELP, IDC_TB_HELP, IDC_VST_HELP, IDC_MM_HELP
+        IDC_S3M_HELP, IDC_S3R_HELP, IDC_MP_BPM_HELP, IDC_TB_HELP, IDC_VST_HELP, IDC_CD_HELP, IDC_MM_HELP
     };
     for (int i = 0; i < (int)_countof(kHelpChromeIds); ++i) {
         HWND h = ::GetDlgItem(hDlg, kHelpChromeIds[i]);
@@ -15152,7 +15310,7 @@ void CCC_CaptionLayout(HWND hDlg)
         IDC_TE_HELP, IDC_FD_HELP, IDC_KPI_HELP, IDC_SY_HELP, IDC_PRT_HELP,
         IDC_OGG_HELP, IDC_PRM_HELP, IDC_MCR_HELP, IDC_DOUGA_HELP, IDC_MP_CHEATBTN,
         IDC_SM_HELP, IDC_DIG_HELP, IDC_VC_HELP, IDC_TN_HELP, IDC_PF_HELP,
-        IDC_S3M_HELP, IDC_S3R_HELP, IDC_MP_BPM_HELP, IDC_TB_HELP, IDC_VST_HELP, IDC_MM_HELP
+        IDC_S3M_HELP, IDC_S3R_HELP, IDC_MP_BPM_HELP, IDC_TB_HELP, IDC_VST_HELP, IDC_CD_HELP, IDC_MM_HELP
     };
     for (int i = 0; i < (int)_countof(kHelpChromeIds); ++i) {
         HWND hHelp = ::GetDlgItem(hDlg, kHelpChromeIds[i]);
@@ -15245,6 +15403,7 @@ UINT CCC_IconIdForDialogTemplate(UINT idd)
 		{ IDD_SOFT3DMAZE, IDI_UI_MAZE }, { IDD_S3M_HELP, IDI_UI_MAZE },
 		{ IDD_SOFT3DRACE, IDI_UI_RACE }, { IDD_S3R_HELP, IDI_UI_RACE },
 		{ IDD_VSTHOST, IDI_UI_VST }, { IDD_VST_HELP, IDI_UI_VST }, { IDD_VST_WAIT, IDI_UI_VST },
+		{ IDD_CDPLAYER, IDI_UI_DISC }, { IDD_CD_HELP, IDI_UI_DISC },
 		{ IDD_MP_CHEATSHEET, IDI_UI_HELP }, { IDD_PL_HELP, IDI_UI_MUSIC },
 		{ IDD_MP_ALARM, IDI_UI_ALARM },
 		{ IDD_MP_REMOTE, IDI_UI_REMOTE },
@@ -15327,6 +15486,13 @@ UINT CCC_CtlIconForCtrl(UINT id)
 	case IDC_MP_STOP: return IDI_CTL_STOP;
 	case IDC_MP_NEXT: return IDI_CTL_NEXT;
 	case IDC_MP_PREV: return IDI_CTL_PREV;
+	case IDC_CD_PLAY: return IDI_CTL_PLAY;
+	case IDC_CD_PAUSE: return IDI_CTL_PAUSE;
+	case IDC_CD_STOP: return IDI_CTL_STOP;
+	case IDC_CD_NEXT: return IDI_CTL_NEXT;
+	case IDC_CD_PREV: return IDI_CTL_PREV;
+	case IDC_CD_CLOSE: return IDI_CTL_CLOSE;
+	case IDC_CD_REFRESH: return IDI_CTL_REFRESH;
 	case IDC_MP_EQ: return IDI_UI_EQ;
 	case IDC_MP_PIANO: return IDI_UI_PIANO;
 	case IDC_MP_ANALYZER: return IDI_UI_ANALYZER;
@@ -15377,6 +15543,7 @@ UINT CCC_CtlIconForCtrl(UINT id)
 	case IDC_MP_M3U_IMPORT: return IDI_UI_FILE;
 	case IDC_MP_ADDFOLDER: return IDI_CTL_PLUS;
 	case IDC_MP_BOT_VST: return IDI_UI_VST;
+	case IDC_MP_BOT_CD: return IDI_UI_DISC;
 	case IDC_MP_BOT_MAZE: return IDI_UI_MAZE;
 	case IDC_MP_BOT_RACE: return IDI_UI_RACE;
 	case IDC_MP_BOT_DJ: return IDI_UI_DISC;
@@ -15391,7 +15558,10 @@ UINT CCC_CtlIconForCtrl(UINT id)
 	case IDC_MP_SWITCHMODE: return IDI_UI_APPS;
 	case IDC_MP_ABA:
 	case IDC_MP_ABB:
-	case IDC_MP_ABCLR: return IDI_CTL_AB;
+	case IDC_MP_ABCLR:
+	case IDC_CD_ABA:
+	case IDC_CD_ABB:
+	case IDC_CD_ABCLR: return IDI_CTL_AB;
 	case IDC_MP_SUPE: return IDI_UI_ANALYZER;
 	case IDC_S3M_GEN:
 	case IDC_S3R_GEN: return IDI_CTL_PLUS;
@@ -15445,6 +15615,7 @@ UINT CCC_CtlIconForCtrl(UINT id)
 	case IDC_MP_BPM_HELP:
 	case IDC_TB_HELP:
 	case IDC_VST_HELP:
+	case IDC_CD_HELP:
 	case IDC_MM_HELP: return IDI_UI_HELP;
 	default: return 0;
 	}

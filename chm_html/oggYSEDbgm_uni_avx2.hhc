@@ -266,6 +266,10 @@
 			    <param name="Name" value="フォトフレーム">
 			    <param name="Local" value="ja\photoframe.htm">
 			    </OBJECT>
+			<LI> <OBJECT type="text/sitemap">
+			    <param name="Name" value="CDプレイヤー">
+			    <param name="Local" value="ja\cd.htm">
+			    </OBJECT>
 		</UL>
 		<LI> <OBJECT type="text/sitemap">
 		    <param name="Name" value="おまけ">
@@ -570,6 +574,10 @@
 			<LI> <OBJECT type="text/sitemap">
 			    <param name="Name" value="The photo frame">
 			    <param name="Local" value="en\photoframe.htm">
+			    </OBJECT>
+			<LI> <OBJECT type="text/sitemap">
+			    <param name="Name" value="The CD player">
+			    <param name="Local" value="en\cd.htm">
 			    </OBJECT>
 		</UL>
 		<LI> <OBJECT type="text/sitemap">

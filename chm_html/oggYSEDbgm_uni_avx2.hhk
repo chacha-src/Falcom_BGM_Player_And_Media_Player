@@ -190,6 +190,35 @@
 		<param name="Local" value="en\digitize.htm">
 		</OBJECT>
 	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="CD">
+		<param name="Name" value="日本語: CDプレイヤー">
+		<param name="Local" value="ja\cd.htm">
+		<param name="Name" value="English: The CD player">
+		<param name="Local" value="en\cd.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="CD player">
+		<param name="Name" value="English: The CD player">
+		<param name="Local" value="en\cd.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="CD rip">
+		<param name="Name" value="English: The CD player">
+		<param name="Local" value="en\cd.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="CD-TEXT">
+		<param name="Name" value="日本語: CDプレイヤー">
+		<param name="Local" value="ja\cd.htm">
+		<param name="Name" value="English: The CD player">
+		<param name="Local" value="en\cd.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="CDプレイヤー">
+		<param name="Name" value="日本語: CDプレイヤー">
+		<param name="Local" value="ja\cd.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
 		<param name="Name" value="Changing tempo and pitch">
 		<param name="Name" value="English: Changing tempo and pitch">
 		<param name="Local" value="en\tempo-pitch.htm">
@@ -301,6 +330,13 @@
 		<param name="Local" value="ja\games.htm">
 		<param name="Name" value="English: The bonus games">
 		<param name="Local" value="en\games.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="DiscID">
+		<param name="Name" value="日本語: CDプレイヤー">
+		<param name="Local" value="ja\cd.htm">
+		<param name="Name" value="English: The CD player">
+		<param name="Local" value="en\cd.htm">
 		</OBJECT>
 	<LI> <OBJECT type="text/sitemap">
 		<param name="Name" value="DJ pad">
@@ -417,6 +453,10 @@
 		<param name="Local" value="ja\tags.htm">
 		<param name="Name" value="English: Editing tags">
 		<param name="Local" value="en\tags.htm">
+		<param name="Name" value="日本語: CDプレイヤー">
+		<param name="Local" value="ja\cd.htm">
+		<param name="Name" value="English: The CD player">
+		<param name="Local" value="en\cd.htm">
 		</OBJECT>
 	<LI> <OBJECT type="text/sitemap">
 		<param name="Name" value="game folders">
@@ -443,6 +483,13 @@
 		<param name="Local" value="en\first-start.htm">
 		<param name="Name" value="English: Raira Help">
 		<param name="Local" value="en\index.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="GnuDB">
+		<param name="Name" value="日本語: CDプレイヤー">
+		<param name="Local" value="ja\cd.htm">
+		<param name="Name" value="English: The CD player">
+		<param name="Local" value="en\cd.htm">
 		</OBJECT>
 	<LI> <OBJECT type="text/sitemap">
 		<param name="Name" value="GS / XG">
@@ -490,6 +537,13 @@
 		<param name="Name" value="Importing playlists from other software">
 		<param name="Name" value="English: Importing playlists from other software">
 		<param name="Local" value="en\playlist-import.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="ISRC">
+		<param name="Name" value="日本語: CDプレイヤー">
+		<param name="Local" value="ja\cd.htm">
+		<param name="Name" value="English: The CD player">
+		<param name="Local" value="en\cd.htm">
 		</OBJECT>
 	<LI> <OBJECT type="text/sitemap">
 		<param name="Name" value="jacket art">
@@ -601,6 +655,11 @@
 		<param name="Name" value="Looking back at play history">
 		<param name="Name" value="English: Looking back at play history">
 		<param name="Local" value="en\history.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="lookup cache">
+		<param name="Name" value="English: The CD player">
+		<param name="Local" value="en\cd.htm">
 		</OBJECT>
 	<LI> <OBJECT type="text/sitemap">
 		<param name="Name" value="loop playback">
@@ -778,6 +837,10 @@
 		<param name="Local" value="ja\device-rec.htm">
 		<param name="Name" value="English: Recording what you hear">
 		<param name="Local" value="en\device-rec.htm">
+		<param name="Name" value="日本語: CDプレイヤー">
+		<param name="Local" value="ja\cd.htm">
+		<param name="Name" value="English: The CD player">
+		<param name="Local" value="en\cd.htm">
 		</OBJECT>
 	<LI> <OBJECT type="text/sitemap">
 		<param name="Name" value="MP4">
@@ -1355,6 +1418,11 @@
 		<param name="Local" value="en\games.htm">
 		</OBJECT>
 	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="The CD player">
+		<param name="Name" value="English: The CD player">
+		<param name="Local" value="en\cd.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
 		<param name="Name" value="The companion tools">
 		<param name="Name" value="English: The companion tools">
 		<param name="Local" value="en\tools.htm">
@@ -1699,6 +1767,11 @@
 		<param name="Local" value="ja\digitize.htm">
 		</OBJECT>
 	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="キャッシュ">
+		<param name="Name" value="日本語: CDプレイヤー">
+		<param name="Local" value="ja\cd.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
 		<param name="Name" value="キュー">
 		<param name="Name" value="日本語: キュー、A-B、練習テンポ">
 		<param name="Local" value="ja\mp-cues.htm">
@@ -1796,6 +1869,8 @@
 		<param name="Local" value="ja\mp-jacket.htm">
 		<param name="Name" value="日本語: タグを編集する">
 		<param name="Local" value="ja\tags.htm">
+		<param name="Name" value="日本語: CDプレイヤー">
+		<param name="Local" value="ja\cd.htm">
 		</OBJECT>
 	<LI> <OBJECT type="text/sitemap">
 		<param name="Name" value="ジャケットとバナー表示">
@@ -1888,6 +1963,11 @@
 		<param name="Name" value="テンポとピッチを変える">
 		<param name="Name" value="日本語: テンポとピッチを変える">
 		<param name="Local" value="ja\tempo-pitch.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="ディスクID">
+		<param name="Name" value="日本語: CDプレイヤー">
+		<param name="Local" value="ja\cd.htm">
 		</OBJECT>
 	<LI> <OBJECT type="text/sitemap">
 		<param name="Name" value="バッファ">
@@ -2046,6 +2126,15 @@
 		<param name="Name" value="ライブ配信する">
 		<param name="Name" value="日本語: ライブ配信する">
 		<param name="Local" value="ja\live.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="リッピング">
+		<param name="Name" value="日本語: CDプレイヤー">
+		<param name="Local" value="ja\cd.htm">
+		<param name="Name" value="日本語: アナログ起こし台">
+		<param name="Local" value="ja\digitize.htm">
+		<param name="Name" value="日本語: 再生している音を録音する">
+		<param name="Local" value="ja\device-rec.htm">
 		</OBJECT>
 	<LI> <OBJECT type="text/sitemap">
 		<param name="Name" value="リプレイゲイン">

@@ -35,6 +35,16 @@ enum {
 	IDM_MM_MAP_XG = 42459
 };
 
+HMIDIOUT s_kpiLiveOut = NULL;
+
+static void MmCloseKpiLiveOut()
+{
+	if (!s_kpiLiveOut) return;
+	midiOutReset(s_kpiLiveOut);
+	midiOutClose(s_kpiLiveOut);
+	s_kpiLiveOut = NULL;
+}
+
 static constexpr COLORREF MM_BG = RGB(8, 8, 12);
 static constexpr COLORREF MM_HEAD_BG = RGB(196, 196, 200);
 static constexpr COLORREF MM_CHROMA = RGB(8, 8, 12);
@@ -585,6 +595,22 @@ void CMmHelpDlg::OnPaint()
 		L"· Slepen of wiel op Vol/Pan/Exp/Rev/Crs/Var stuurt CC (dubbelklik = default). Wiel op PC# = programma. Mini-toetsenbord speelt. Edits gaan ~2,5 s voor SMF-CC.",
 		L"· Przeciagnij lub kolo na Vol/Pan/Exp/Rev/Crs/Var wysyla CC (dwuklik = domyslne). Kolo na PC# = program. Mini klawiatura gra. Edycje trzymaja ~2,5 s nad CC z SMF.",
 		L"· Vol/Pan/Exp/Rev/Crs/Var surukleme veya tekerlekle CC gonderir (cift tik = varsayilan). PC# tekerlegi program degistirir. Mini klavye calinir. Duzenlemeler SMF CC'den ~2,5 sn once gelir."));
+	y += lh;
+	body(L, y, LL14(
+		L"・VST MIDI 再生中は、いま鳴っている VST（または MIDI マッパー）と同じ経路で鍵盤・CC が出ます。KPI プラグイン再生中はプラグインへ差し込めないため、同じ「MIDI出力」端末（未指定なら MIDI マッパー）から出します。",
+		L"· During VST MIDI playback, keys and CC go through the same VST (or MIDI Mapper) as the song. During KPI plugin playback the plugin has no MIDI in, so notes go to the MIDI-out device (Mapper if none is set).",
+		L"· En lecture VST MIDI, clavier et CC passent par le meme VST (ou MIDI Mapper) que le morceau. En lecture KPI, le plugin n'a pas d'entree MIDI : les notes vont vers la sortie MIDI (Mapper si aucune).",
+		L"· In riproduzione VST MIDI, tasti e CC usano lo stesso VST (o MIDI Mapper) del brano. Con plugin KPI non c'e ingresso MIDI: le note vanno al dispositivo MIDI out (Mapper se non impostato).",
+		L"· En VST MIDI, teclas y CC van por el mismo VST (o MIDI Mapper) que la cancion. Con KPI el plugin no tiene entrada MIDI; las notas van al dispositivo MIDI out (Mapper si no hay uno).",
+		L"· VST MIDI 재생 중에는 곡과 같은 VST(또는 MIDI 매퍼)로 건반·CC가 나갑니다. KPI 플러그인 재생 중에는 플러그인에 MIDI 입력이 없어, MIDI 출력 장치(미지정 시 매퍼)로 나갑니다.",
+		L"· VST MIDI 播放时，琴键和 CC 走与乐曲相同的 VST（或 MIDI 映射器）。KPI 插件播放时插件没有 MIDI 输入，音符从 MIDI 输出设备发出（未指定则为映射器）。",
+		L"· أثناء تشغيل VST MIDI تمر المفاتيح وCC عبر نفس الـ VST (أو MIDI Mapper). أثناء KPI لا يملك المكون إضافة مدخل MIDI فتخرج النغمات إلى جهاز MIDI out (Mapper إن لم يُحدد).",
+		L"· При VST MIDI клавиши и CC идут в тот же VST (или MIDI Mapper), что и пьеса. У KPI-плагина нет MIDI-входа, поэтому ноты идут на устройство MIDI out (Mapper, если не задано).",
+		L"· Bei VST-MIDI gehen Tasten und CC denselben Weg wie das Stueck (VST oder MIDI-Mapper). KPI-Plugins haben keinen MIDI-Eingang; Noten gehen an das MIDI-Out-Geraet (Mapper, wenn keins gesetzt).",
+		L"· Em VST MIDI, teclas e CC seguem o mesmo VST (ou MIDI Mapper) da musica. No KPI o plugin nao tem entrada MIDI; as notas vao para o dispositivo MIDI out (Mapper se nenhum).",
+		L"· Bij VST MIDI gaan toetsen en CC via dezelfde VST (of MIDI Mapper) als het nummer. KPI-plugins hebben geen MIDI-in; noten gaan naar het MIDI-uit-apparaat (Mapper indien leeg).",
+		L"· Przy VST MIDI klawisze i CC ida ta sama droga co utwor (VST lub MIDI Mapper). Wtyczka KPI nie ma wejscia MIDI; nuty ida na urzadzenie MIDI out (Mapper, jesli puste).",
+		L"· VST MIDI sirasinda tuslar ve CC sarkiyle ayni VST (veya MIDI Mapper) yolundan cikar. KPI eklentisinin MIDI girisi yoktur; notalar MIDI cikis aygitina gider (aygit yoksa Mapper)."));
 	y += lh + 2;
 	title(L, y, LL14(L"右クリック", L"Right-click", L"Clic droit", L"Tasto destro", L"Clic derecho", L"우클릭", L"右键", L"زر أيمن", L"ПКМ", L"Rechtsklick", L"Botao direito", L"Rechtsklik", L"PPM", L"Sag tik"));
 	y += titleLh;
@@ -793,6 +819,7 @@ void CMidiMonitorDlg::ResetParts()
 
 void CMidiMonitorDlg::UnloadMidi()
 {
+	MmCloseKpiLiveOut();
 	if (m_ev) { delete[] m_ev; m_ev = NULL; }
 	if (m_sx) { delete[] m_sx; m_sx = NULL; }
 	m_evCount = m_evPos = 0;
@@ -1681,7 +1708,43 @@ void CMidiMonitorDlg::InjectShort(int part, DWORD msg)
 	const int ch = part % 16;
 	msg = (msg & ~(DWORD)0x0f) | (DWORD)ch;
 	MmBindVstActiveSlot();
-	VstMidiInjectShort(port, msg);
+	if (mode == MODE_VST_MIDI) {
+		MmCloseKpiLiveOut();
+		VstMidiInjectShort(port, msg, -1);
+	} else {
+		if (!s_kpiLiveOut) {
+			UINT id = MIDI_MAPPER;
+			if (savedata.midiOutName[0]) {
+				const UINT nd = midiOutGetNumDevs();
+				for (UINT i = 0; i < nd; ++i) {
+					MIDIOUTCAPS c = {};
+					if (midiOutGetDevCaps(i, &c, sizeof(c)) != MMSYSERR_NOERROR) continue;
+					if (_wcsicmp(c.szPname, savedata.midiOutName) == 0) { id = i; break; }
+				}
+			}
+			if (midiOutOpen(&s_kpiLiveOut, id, 0, 0, CALLBACK_NULL) != MMSYSERR_NOERROR) {
+				s_kpiLiveOut = NULL;
+				if (id != MIDI_MAPPER) {
+					if (midiOutOpen(&s_kpiLiveOut, MIDI_MAPPER, 0, 0, CALLBACK_NULL) != MMSYSERR_NOERROR)
+						s_kpiLiveOut = NULL;
+				}
+			}
+			if (s_kpiLiveOut) {
+				BYTE gmOn[] = { 0xf0, 0x7e, 0x7f, 0x09, 0x01, 0xf7 };
+				MIDIHDR hdr = {};
+				hdr.lpData = (LPSTR)gmOn;
+				hdr.dwBufferLength = sizeof(gmOn);
+				if (midiOutPrepareHeader(s_kpiLiveOut, &hdr, sizeof(hdr)) == MMSYSERR_NOERROR) {
+					midiOutLongMsg(s_kpiLiveOut, &hdr, sizeof(hdr));
+					for (int w = 0; w < 20 && !(hdr.dwFlags & MHDR_DONE); ++w)
+						Sleep(1);
+					midiOutUnprepareHeader(s_kpiLiveOut, &hdr, sizeof(hdr));
+				}
+			}
+		}
+		if (s_kpiLiveOut)
+			midiOutShortMsg(s_kpiLiveOut, msg);
+	}
 	ApplyShort(port, msg);
 	const int st = (int)(msg & 0xf0);
 	if (st == 0xb0) {

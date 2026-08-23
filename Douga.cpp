@@ -37,6 +37,7 @@ void equaliserBank(int bank, void* data, int len, BOOL reset,
 void EqualiserSetFormatVolContext(int mode, BOOL spcApplicable);
 void equaliser(void* data, int len, BOOL reset);
 extern int g_outBytesPerFrame;
+extern "C" int VstLiveThruIsOn(void);
 
 extern IMediaSeeking* pMediaSeeking;
 extern CDouga* pMainFrame1;
@@ -7649,6 +7650,8 @@ static void DougaPcRetrieveAndWrite_NoLock()
 			g_pc.pcmOut.resize(got * (size_t)g_pc.blockAlign);
 			DougaPcFloatToPcm16(g_pc.interleavedTmp.data(), got, g_pc.channels, g_pc.pcmOut.data());
 			DougaPcEqAndRemote(g_pc.pcmOut.data(), (DWORD)(got * (size_t)g_pc.blockAlign));
+			if (VstLiveThruIsOn())
+				ZeroMemory(g_pc.pcmOut.data(), got * (size_t)g_pc.blockAlign);
 			if (g_pc.dsCsInit)
 				EnterCriticalSection(&g_pc.dsCs);
 			const BOOL ok = DougaPcWritePcm_NoLock(g_pc.pcmOut.data(), (DWORD)(got * (size_t)g_pc.blockAlign));
@@ -7705,6 +7708,8 @@ static void DougaPcDrainQueue()
 			LeaveCriticalSection(&g_pc.cs);
 
 		DougaPcEqAndRemote(item.data.data(), (DWORD)item.data.size());
+		if (VstLiveThruIsOn() && !item.data.empty())
+			ZeroMemory(item.data.data(), item.data.size());
 		if (g_pc.dsCsInit)
 			EnterCriticalSection(&g_pc.dsCs);
 		if (g_pc.playing)

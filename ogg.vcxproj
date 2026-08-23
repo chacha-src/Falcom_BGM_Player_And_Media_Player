@@ -383,6 +383,7 @@
     <ClCompile Include="Vst3Host.cpp" />
     <ClCompile Include="VstMidiEngine.cpp" />
     <ClCompile Include="VstHostDlg.cpp" />
+    <ClCompile Include="CdPlayerDlg.cpp" />
     <ClCompile Include="CPianoRoll.cpp" />
     <ClCompile Include="CMidiMonitorDlg.cpp" />
     <ClCompile Include="GdiSoft3D.cpp" />
@@ -746,6 +747,7 @@
     <ClInclude Include="DeviceRecordDlg.h" />
     <ClInclude Include="DigitizeDlg.h" />
     <ClInclude Include="VoiceChangerDlg.h" />
+    <ClInclude Include="CdPlayerDlg.h" />
     <ClInclude Include="VcVocalTract.h" />
     <ClInclude Include="TunerPracticeDlg.h" />
     <ClInclude Include="PhotoFrameDlg.h" />

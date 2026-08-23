@@ -556,6 +556,8 @@ public:
     // コントロール破棄時に自動的に delete するかどうかを設定します
     void EnableAutoDelete(BOOL b = TRUE) { m_bAutoDelete = b; }
     BOOL m_bAutoDelete;
+    void SetAeroMode(BOOL b) { m_bAeroMode = b; if (GetSafeHwnd()) Invalidate(FALSE); }
+    BOOL m_bAeroMode;
 
     // 最小化復帰等: WM_PRINTCLIENT は Edit 本文を描かないため明示的に再描画
     void RepaintClient();
@@ -1177,6 +1179,7 @@ public:
 
     // アクリルモードの設定
     void SetAeroMode(BOOL b);
+    void PaintOpaqueIntoBuffer(HDC hdcBuf);
 
 protected:
     int m_nMode;      // 現在の描画モード
@@ -1198,6 +1201,7 @@ protected:
     DECLARE_MESSAGE_MAP()
 
     void PaintClient(CDC& dc);
+    void PaintOpaqueClient(CDC& dc);
 
 private:
     UINT m_nShimmer; // 流れるシマー用カウンタ（互換・予備）
@@ -1313,6 +1317,7 @@ public:
 
     // アクリルモードの設定
     void SetAeroMode(BOOL b);
+    void PaintOpaqueIntoBuffer(HDC hdcBuf);
 
     // ホバー時刻チップ用(親 PreTranslate から呼ぶ)
     virtual BOOL PreTranslateMessage(MSG* pMsg);
@@ -1338,6 +1343,7 @@ protected:
     DECLARE_MESSAGE_MAP()
 
     void PaintClient(CDC& dc);
+    void PaintOpaqueClient(CDC& dc);
 
 private:
     void DrawRangeSlider(CDC* pDC);
@@ -1382,6 +1388,9 @@ private:
     CBitmap m_memBackstore;     // 毎描画 CreateCompatibleBitmap を避ける
     int m_backstoreW;
     int m_backstoreH;
+#if CCUSTOM_AERO_SUPPORT
+    CCC_ChromaBlitCache m_chromaCache;
+#endif
 };
 
 // ============================================================================

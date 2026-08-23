@@ -593,7 +593,7 @@ struct save{
 	int mpTempOpen;
 
 	// --- MP底バー: ツール由来ショートカットボタン(末尾追記。旧.datは0→起動時既定) ---
-	// mpBotToolsInited=1 なら mpBotToolsFlags 有効。bit: DJ/Tag/BPM/Sleep/Mirror/SsViz/Alarm/Remote/VST(1024・常時)/Maze/Race
+	// mpBotToolsInited=1 なら mpBotToolsFlags 有効。bit: DJ/Tag/BPM/Sleep/Mirror/SsViz/Alarm/Remote/VST(1024・常時)/CD(2048・常時)/Maze/Race
 	int mpBotToolsInited;
 	int mpBotToolsFlags;
 
@@ -800,6 +800,17 @@ struct save{
 	int s3_pcm_sfx;             // 1=PCM合成効果音ON 0=OFF
 	// --- Soft3D メッシュ密度（末尾追記。旧.datは5）。0=軽量 1..9 10=緻密 11..19 20=美麗。描画量 1,8,..160 ---
 	int s3_mesh_density;
+	// --- CDプレイヤー（末尾追記。旧.datは offsetof で初期化）---
+	int cdWinX, cdWinY, cdWinW, cdWinH;
+	int cdMainLock;
+	TCHAR cdRipFolder[260];
+	int cdRipFmt;   // 0=WAV 1=MP3 2=FLAC
+	int cdRipQual;
+	int cdRipAddPl;
+	int cdRepeat;
+	int cdShuffle;
+	int cdVolume;   // 0..100
+	int vstHostVol; // VSTホスト出力 0..100（旧.datは100）
 };
 extern save savedata;
 /* コード間隔(ms)。16..500。旧.dat や未設定は 25。 */

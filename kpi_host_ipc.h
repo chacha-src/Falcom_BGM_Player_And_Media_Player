@@ -156,6 +156,7 @@ struct KPIHOST64_VstLiveMidiReq
 {
 	uint32_t port; // 0..2
 	uint32_t msg;  // packed short message
+	int32_t sampleOfs; // frames into this render block; 0 = block start
 };
 
 struct KPIHOST64_VstLiveSysexReq

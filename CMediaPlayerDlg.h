@@ -219,7 +219,7 @@ public:
 	CCustomStandardButton m_capture;   // 画面キャプチャ UI
 	// キャプチャ右〜終了左のツールショートカット（コンテキストでON/OFF）
 	CCustomStandardButton m_botDj, m_botTag, m_botBpm, m_botSleep;
-	CCustomStandardButton m_botMirror, m_botSsViz, m_botAlarm, m_botRemote, m_botVst, m_botMaze, m_botRace;
+	CCustomStandardButton m_botMirror, m_botSsViz, m_botAlarm, m_botRemote, m_botVst, m_botCd, m_botMaze, m_botRace;
 	int m_mpBotShort; // 底バー短縮段階 0=フル 1=中 2=短（切替〜レース）
 	CCustomStatic m_kaisuuL;
 	CCustomEdit m_kaisuu;
@@ -666,6 +666,7 @@ protected:
 	afx_msg void OnMpSoft3DMaze();
 	afx_msg void OnMpSoft3DRace();
 	afx_msg void OnMpVstHost();
+	afx_msg void OnMpCdPlayer();
 	afx_msg void OnMpRemote();
 	afx_msg void OnMpRemoteDlg();
 	afx_msg void OnMpRemoteBrowser();

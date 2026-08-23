@@ -116,6 +116,8 @@ protected:
 	BOOL PromptName(CString& name, LPCTSTR title);
 	void StartMidi();
 	void StopMidi();
+	void BindThruSong();
+	void StopWav();
 	BOOL StartAudio();
 	void StopAudio();
 	void RestartIo();
@@ -137,6 +139,7 @@ protected:
 	afx_msg void OnRename();
 	afx_msg void OnDelete();
 	afx_msg void OnSave();
+	afx_msg void OnWavClick();
 	afx_msg void OnRescan();
 	afx_msg void OnHelp();
 	afx_msg void OnCloseButton();
@@ -146,6 +149,8 @@ protected:
 	afx_msg void OnTimer(UINT_PTR id);
 	afx_msg void OnActivate(UINT nState, CWnd* pWndOther, BOOL bMinimized);
 	afx_msg void OnLButtonDown(UINT nFlags, CPoint point);
+	afx_msg void OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar);
+	void ApplyVolUi();
 
 	CCustomComboBox m_preset;
 	CCustomComboBox m_midiIn[3];
@@ -157,22 +162,34 @@ protected:
 	CCustomStandardButton m_rename;
 	CCustomStandardButton m_del;
 	CCustomStandardButton m_save;
+	CCustomStandardButton m_wav;
 	CVstWireCtrl m_wire;
 	CToolTipCtrl m_tooltip;
-	enum { LABEL_COUNT = 6 };
+	enum { LABEL_COUNT = 7 };
 	CStatic m_labels[LABEL_COUNT];
 	CStatic m_monitor;
+	CStatic m_volPct;
+	CCustomSliderCtrl m_vol;
+	volatile LONG m_volLevel;
 	CString m_monitorText;
 
 	Preset m_presets[100];
 	int m_presetCount;
 	int m_slots[32];
 	HMIDIIN m_midiHandles[3];
+	// Per opened hardware handle (slots 0,1): bit0 = parts 1-16, bit1 = 17-32.
+	BYTE m_midiDestMask[2];
+	// 0xFF = no Super-MPU F5 yet; 0/1 = last F5 cable (overrides dest for shorts).
+	BYTE m_midiF5Port[2];
 	HWAVEOUT m_waveOut;
 	HANDLE m_audioEvent;
 	HANDLE m_audioStop;
 	HANDLE m_audioThread;
 	volatile LONG m_audioRunning;
+	HANDLE m_wavFile;
+	volatile LONG m_wavOn;
+	LONG m_wavBytes;
+	CRITICAL_SECTION m_wavLock;
 	// vk -> held MIDI note+1 (0 = not held). Same path as MIDI In port 0.
 	BYTE m_pcHeldNote[256];
 };

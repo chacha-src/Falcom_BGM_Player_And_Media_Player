@@ -16,6 +16,7 @@
 #include <stdarg.h>
 #include <shlobj.h>
 #include <mmsystem.h>
+#include <process.h>
 
 #ifndef KPIHOST64_BUILD
 #include "kpi_host_ipc.h"
@@ -1547,6 +1548,9 @@ static volatile LONG g_injW = 0;
 static volatile LONG g_injR = 0;
 static DWORD g_injMsg[SONG_INJ_CAP];
 static BYTE g_injPort[SONG_INJ_CAP];
+static int g_injOfs[SONG_INJ_CAP];
+static LONGLONG g_injQpc[SONG_INJ_CAP];
+static int g_liveTailFrames = 0;
 static BYTE g_ovOn[3][16][SONG_OV_N];
 static BYTE g_ovVal[3][16][SONG_OV_N];
 static DWORD g_ovTick[3][16];
@@ -1565,6 +1569,7 @@ static int SongOvSlot(int cc)
 static void SongOvClear()
 {
 	g_injR = g_injW;
+	g_liveTailFrames = 0;
 	ZeroMemory(g_ovOn, sizeof(g_ovOn));
 	ZeroMemory(g_ovTick, sizeof(g_ovTick));
 }
@@ -1621,31 +1626,60 @@ static DWORD SongOverrideMsg(int port, DWORD msg)
 } // namespace（無名名前空間の中で extern "C" を書いても内部リンケージのまま
   // シンボルが出ない。この2本は他モジュールから呼ばれるので外に出す）
 
-extern "C" void VstMidiInjectShort(int portIndex0to2, DWORD shortMsg)
+extern "C" void VstMidiInjectShort(int portIndex0to2, DWORD shortMsg, int sampleOfs)
 {
 	int port = portIndex0to2;
 	if (port < 0) port = 0;
 	if (port > 2) port = 2;
 	SongOvSet(port, shortMsg);
+	/* マッパーは PCM ブロックを待たず、クリックした瞬間に短文を出す。
+	 * 同じフラッシュで note on/off が潰れるのを避ける。VST へはキューする。
+	 * プラグインが載っているときはマッパーへ出さない（別音源の PC が混ざる）。 */
+	const int hasPlug = (g_eng.effect || g_eng.vst3 || g_eng.useEnsemble) ? 1 : 0;
+	if (!hasPlug && g_eng.midiOut && (port <= 0 || !g_eng.effectB)) {
+		EnterCriticalSection(&g_eng.cs);
+		if (g_eng.midiOut)
+			midiOutShortMsg(g_eng.midiOut, shortMsg);
+		LeaveCriticalSection(&g_eng.cs);
+	}
 	const LONG w = g_injW;
 	if ((w - g_injR) >= (SONG_INJ_CAP - 1)) return;
 	const int i = (int)(w & (SONG_INJ_CAP - 1));
 	g_injMsg[i] = shortMsg;
 	g_injPort[i] = (BYTE)port;
+	g_injOfs[i] = sampleOfs;
+	LARGE_INTEGER qpc;
+	QueryPerformanceCounter(&qpc);
+	g_injQpc[i] = qpc.QuadPart;
 	MemoryBarrier();
 	g_injW = w + 1;
+	g_liveTailFrames = SAMPLE_RATE * 4;
 }
 
-extern "C" int VstMidiStealInjects(BYTE* ports, DWORD* msgs, int maxCount)
+extern "C" int VstMidiStealInjects(BYTE* ports, DWORD* msgs, int* sampleOfs, int maxCount)
 {
 	if (!ports || !msgs || maxCount < 1) return 0;
 	int n = 0;
 	LONG r = g_injR;
 	const LONG w = g_injW;
+	LARGE_INTEGER freq;
+	QueryPerformanceFrequency(&freq);
+	LONGLONG q0 = 0;
+	int haveQ = 0;
 	while (n < maxCount && r != w) {
 		const int i = (int)(r & (SONG_INJ_CAP - 1));
 		ports[n] = g_injPort[i];
 		msgs[n] = g_injMsg[i];
+		int ofs = g_injOfs[i];
+		if (ofs < 0) {
+			if (!haveQ) { q0 = g_injQpc[i]; haveQ = 1; }
+			if (freq.QuadPart > 0)
+				ofs = (int)((g_injQpc[i] - q0) * (LONGLONG)SAMPLE_RATE / freq.QuadPart);
+			else
+				ofs = 0;
+		}
+		if (ofs < 0) ofs = 0;
+		if (sampleOfs) sampleOfs[n] = ofs;
 		++n;
 		++r;
 	}
@@ -1655,11 +1689,13 @@ extern "C" int VstMidiStealInjects(BYTE* ports, DWORD* msgs, int maxCount)
 
 namespace {
 
-static void EmitSongShort(int port, DWORD msg, __int64 start, int frames)
+static void EmitSongShort(int port, DWORD msg, __int64 start, int frames, int ofs)
 {
+	if (ofs < 0) ofs = 0;
+	if (frames > 0 && ofs >= frames) ofs = frames - 1;
 	MidiItem it = {};
 	it.msg = msg;
-	it.sample = start;
+	it.sample = start + ofs;
 	it.port = port;
 	it.sysexOff = -1;
 	if (g_eng.useEnsemble) {
@@ -1674,11 +1710,9 @@ static void EmitSongShort(int port, DWORD msg, __int64 start, int frames)
 			m.msg = (m.msg & ~0x0fu) | 0u;
 		}
 		if (ms.effect) SendVstEvents(ms.effect, &m, 1, start);
-		if (ms.vst3) Vst3MidiShort(ms.vst3, m.msg, 0);
+		if (ms.vst3) Vst3MidiShort(ms.vst3, m.msg, ofs);
 		return;
 	}
-	if (g_eng.midiOut && (port <= 0 || !g_eng.effectB))
-		midiOutShortMsg(g_eng.midiOut, msg);
 	int n = 1;
 	if (port <= 0) {
 		if (g_eng.effect || g_eng.vst3)
@@ -1696,9 +1730,23 @@ static void FlushInjectQueue(__int64 start, int frames)
 	SongOvExpire();
 	LONG r = g_injR;
 	const LONG w = g_injW;
+	LARGE_INTEGER freq;
+	QueryPerformanceFrequency(&freq);
+	LONGLONG q0 = 0;
+	int haveQ = 0;
 	while (r != w) {
 		const int i = (int)(r & (SONG_INJ_CAP - 1));
-		EmitSongShort((int)g_injPort[i], g_injMsg[i], start, frames);
+		int ofs = g_injOfs[i];
+		if (ofs < 0) {
+			if (!haveQ) { q0 = g_injQpc[i]; haveQ = 1; }
+			if (freq.QuadPart > 0)
+				ofs = (int)((g_injQpc[i] - q0) * (LONGLONG)SAMPLE_RATE / freq.QuadPart);
+			else
+				ofs = 0;
+		}
+		if (ofs < 0) ofs = 0;
+		if (frames > 0 && ofs >= frames) ofs = frames - 1;
+		EmitSongShort((int)g_injPort[i], g_injMsg[i], start, frames, ofs);
 		++r;
 	}
 	g_injR = r;
@@ -2858,6 +2906,15 @@ static void DispatchEnsemble(__int64 start, int frames)
 		MidiItem e = g_eng.events[g_eng.eventPos++];
 		e.msg = SongOverrideMsg(e.port, e.msg);
 		if ((e.msg & 0xff) == 0xff) continue;
+		if ((e.msg & 0xff) == 0xf0 && e.sysexOff >= 0 && g_eng.sysexData) {
+			const int len = (int)e.aux;
+			if (e.sysexOff + len <= g_eng.sysexBytes) {
+				__int64 d = e.sample - start;
+				int offset = d < 0 ? 0 : (d >= frames ? frames - 1 : (int)d);
+				BroadcastSongSysex(g_eng.sysexData + e.sysexOff, len, offset);
+			}
+			continue;
+		}
 		const int ch = (int)(e.msg & 15);
 		const int slot = g_eng.chSlot[ch];
 		if (slot < 0) continue;
@@ -4160,16 +4217,20 @@ extern "C" int VstMidiRead(BYTE* dst, int bytesWanted)
 {
 	if (!dst || bytesWanted <= 0) return 0;
 	EnterCriticalSection(&g_eng.cs);
-	if (!g_eng.events || g_eng.playSample >= g_eng.lengthSamples) {
+	const int injPending = (g_injW != g_injR) ? 1 : 0;
+	if (!g_eng.events && !injPending && g_liveTailFrames <= 0) {
 		LeaveCriticalSection(&g_eng.cs); return 0;
 	}
 	int written = 0;
 	while (written < bytesWanted) {
 		if (!g_eng.ringCount) {
-			if (g_eng.playSample >= g_eng.lengthSamples) break;
+			const int past = (!g_eng.events || g_eng.playSample >= g_eng.lengthSamples) ? 1 : 0;
+			if (past && (g_injW == g_injR) && g_liveTailFrames <= 0)
+				break;
 			int frames = BLOCK_FRAMES;
-			if (g_eng.lengthSamples - g_eng.playSample < frames)
+			if (!past && g_eng.lengthSamples - g_eng.playSample < frames)
 				frames = (int)(g_eng.lengthSamples - g_eng.playSample);
+			if (frames < 1) frames = BLOCK_FRAMES;
 			if (g_eng.useEnsemble) {
 				DispatchEnsemble(g_eng.playSample, frames);
 				RenderEnsemble(g_eng.outL, g_eng.outR, frames);
@@ -4187,6 +4248,10 @@ extern "C" int VstMidiRead(BYTE* dst, int bytesWanted)
 				g_eng.ring[i * 2 + 1] = (short)(r * 32767.0f);
 			}
 			g_eng.playSample += frames;
+			if (g_liveTailFrames > 0) {
+				g_liveTailFrames -= frames;
+				if (g_liveTailFrames < 0) g_liveTailFrames = 0;
+			}
 		}
 		int availBytes = g_eng.ringCount * (int)sizeof(short);
 		int take = bytesWanted - written;
@@ -4365,7 +4430,7 @@ extern "C" int VstMidiSeekSamples(__int64 samplePos)
 extern "C" int VstMidiHasPluginAudio(void)
 {
 	return (g_eng.effect || g_eng.vst3 || g_eng.effectB || g_eng.effectC ||
-		g_eng.vst3C || g_eng.useEnsemble || g_eng.useMapper) ? 1 : 0;
+		g_eng.vst3C || g_eng.useEnsemble) ? 1 : 0;
 }
 extern "C" int VstMidiGetRate(void) { return SAMPLE_RATE; }
 extern "C" int VstMidiGetChannels(void) { return 2; }
@@ -5178,6 +5243,395 @@ static DWORD LiveSendMsg(const LivePart& p, DWORD msg)
 	const DWORD st = msg & 0xf0;
 	if (p.sendCh < 0 || st < 0x80 || st >= 0xf0) return msg;
 	return (msg & ~(DWORD)0x0f) | (DWORD)(p.sendCh & 15);
+}
+
+static volatile LONG g_thruOn = 0;
+static int g_thruUseEng = 0;
+static MidiItem* g_thruEv = NULL;
+static int g_thruCount = 0;
+static BYTE* g_thruSx = NULL;
+static int g_thruSxBytes = 0;
+static int g_thruPos = 0;
+static __int64 g_thruLastPb = -1;
+static wchar_t g_thruPath[520] = {};
+
+enum { THRU_RAW_SIZE = 1048576, THRU_RAW_MASK = 1048575 };
+static BYTE g_thruRaw[THRU_RAW_SIZE];
+static LONG g_thruRawWr = 0;
+static LONG g_thruRawRd = 0;
+static int g_thruFmtRate = 0;
+static int g_thruFmtCh = 2;
+static int g_thruFmtBits = 16;
+static int g_thruFmtBpf = 4;
+static CRITICAL_SECTION g_thruPcmCs;
+static int g_thruPcmCsOn = 0;
+static int g_thruPrimed = 0;
+static int g_thruHaveCur = 0;
+static int g_thruRsAcc = 0;
+static float g_thruHoldL = 0.f, g_thruHoldR = 0.f;
+static float g_thruCurL = 0.f, g_thruCurR = 0.f;
+static __int64 g_thruPcmPb = -1;
+
+static void ThruPcmCsEnsure()
+{
+	if (g_thruPcmCsOn) return;
+	InitializeCriticalSection(&g_thruPcmCs);
+	g_thruPcmCsOn = 1;
+}
+
+static void ThruPcmReset()
+{
+	if (g_thruPcmCsOn) EnterCriticalSection(&g_thruPcmCs);
+	g_thruRawWr = 0;
+	g_thruRawRd = 0;
+	g_thruPcmPb = -1;
+	g_thruRsAcc = 0;
+	g_thruPrimed = 0;
+	g_thruHaveCur = 0;
+	g_thruHoldL = 0.f;
+	g_thruHoldR = 0.f;
+	g_thruCurL = 0.f;
+	g_thruCurR = 0.f;
+	if (g_thruPcmCsOn) LeaveCriticalSection(&g_thruPcmCs);
+}
+
+static float ThruPcmSamp(const BYTE* p, int bits)
+{
+	if (bits <= 8)
+		return ((float)p[0] - 128.f) * (1.f / 128.f);
+	if (bits <= 16) {
+		short s;
+		memcpy(&s, p, 2);
+		return (float)s * (1.f / 32768.f);
+	}
+	if (bits <= 24) {
+		const int v = (int)p[0] | ((int)p[1] << 8) | ((int)(signed char)p[2] << 16);
+		return (float)v * (1.f / 8388608.f);
+	}
+	int v;
+	memcpy(&v, p, 4);
+	return (float)v * (1.f / 2147483648.f);
+}
+
+static void ThruCloneFree()
+{
+	delete[] g_thruEv; g_thruEv = NULL;
+	delete[] g_thruSx; g_thruSx = NULL;
+	g_thruCount = 0;
+	g_thruSxBytes = 0;
+}
+
+static int ThruRawPopUnlocked(float* L, float* R)
+{
+	const int bpf = g_thruFmtBpf;
+	const int ch = g_thruFmtCh;
+	const int bits = g_thruFmtBits;
+	if (bpf < 1 || bpf > 32) return 0;
+	const LONG r = g_thruRawRd;
+	if (g_thruRawWr - r < bpf) return 0;
+	BYTE fr[32];
+	const int off = (int)(r & THRU_RAW_MASK);
+	if (off + bpf <= THRU_RAW_SIZE)
+		memcpy(fr, g_thruRaw + off, (size_t)bpf);
+	else {
+		const int a = THRU_RAW_SIZE - off;
+		memcpy(fr, g_thruRaw + off, (size_t)a);
+		memcpy(fr + a, g_thruRaw, (size_t)(bpf - a));
+	}
+	g_thruRawRd = r + bpf;
+	int bps = bits / 8;
+	if (bps < 1) bps = 1;
+	if (bps > 4) bps = 4;
+	float l = ThruPcmSamp(fr, bits);
+	float rc = l;
+	if (ch >= 2)
+		rc = ThruPcmSamp(fr + bps, bits);
+	if (ch >= 3) {
+		const float c = ThruPcmSamp(fr + bps * 2, bits) * 0.707f;
+		l += c;
+		rc += c;
+	}
+	if (ch >= 5) l += ThruPcmSamp(fr + bps * 4, bits) * 0.5f;
+	if (ch >= 6) rc += ThruPcmSamp(fr + bps * 5, bits) * 0.5f;
+	if (ch >= 7) l += ThruPcmSamp(fr + bps * 6, bits) * 0.5f;
+	if (ch >= 8) rc += ThruPcmSamp(fr + bps * 7, bits) * 0.5f;
+	*L = l;
+	*R = rc;
+	return 1;
+}
+
+static int ThruRawAvailFramesUnlocked()
+{
+	const int bpf = g_thruFmtBpf;
+	if (bpf < 1) return 0;
+	LONG n = g_thruRawWr - g_thruRawRd;
+	if (n < 0) n = 0;
+	return (int)(n / bpf);
+}
+
+static void ThruRawTakeOutUnlocked(float* L, float* R)
+{
+	const int rate = g_thruFmtRate;
+	if (rate == SAMPLE_RATE) {
+		if (ThruRawPopUnlocked(L, R)) {
+			g_thruHoldL = *L;
+			g_thruHoldR = *R;
+			g_thruHaveCur = 1;
+			g_thruRsAcc = 0;
+			return;
+		}
+		*L = g_thruHoldL;
+		*R = g_thruHoldR;
+		return;
+	}
+	if (rate < 8000) {
+		*L = g_thruHoldL;
+		*R = g_thruHoldR;
+		return;
+	}
+	g_thruRsAcc += rate;
+	while (g_thruRsAcc >= SAMPLE_RATE) {
+		g_thruRsAcc -= SAMPLE_RATE;
+		g_thruHoldL = g_thruCurL;
+		g_thruHoldR = g_thruCurR;
+		if (!ThruRawPopUnlocked(&g_thruCurL, &g_thruCurR))
+			break;
+		g_thruHaveCur = 1;
+	}
+	const float t = (float)g_thruRsAcc / (float)rate;
+	*L = g_thruHoldL + (g_thruCurL - g_thruHoldL) * t;
+	*R = g_thruHoldR + (g_thruCurR - g_thruHoldR) * t;
+}
+
+extern "C" void VstLiveThruSet(int enable)
+{
+	if (!enable) {
+		EnterCriticalSection(&g_eng.cs);
+		g_thruOn = 0;
+		g_thruUseEng = 0;
+		g_thruPos = 0;
+		g_thruLastPb = -1;
+		g_thruPath[0] = 0;
+		ThruCloneFree();
+		LeaveCriticalSection(&g_eng.cs);
+		ThruPcmReset();
+		return;
+	}
+	ThruPcmCsEnsure();
+	if (g_thruOn)
+		return;
+	EnterCriticalSection(&g_eng.cs);
+	g_thruOn = 1;
+	LeaveCriticalSection(&g_eng.cs);
+	ThruPcmReset();
+}
+
+extern "C" int VstLiveThruIsOn(void)
+{
+	return g_thruOn ? 1 : 0;
+}
+
+extern "C" void VstLiveThruBind(const wchar_t* midPath)
+{
+	EnterCriticalSection(&g_eng.cs);
+	if (!g_thruOn) {
+		LeaveCriticalSection(&g_eng.cs);
+		return;
+	}
+	if (!midPath || !midPath[0]) {
+		g_thruUseEng = 0;
+		g_thruPos = 0;
+		g_thruLastPb = -1;
+		g_thruPath[0] = 0;
+		ThruCloneFree();
+		LeaveCriticalSection(&g_eng.cs);
+		return;
+	}
+	if (_wcsicmp(g_thruPath, midPath) == 0 &&
+		(g_thruUseEng || g_thruEv)) {
+		LeaveCriticalSection(&g_eng.cs);
+		return;
+	}
+	wcsncpy_s(g_thruPath, midPath, _TRUNCATE);
+	g_thruPos = 0;
+	g_thruLastPb = -1;
+	if (g_eng.events && g_eng.eventCount > 0) {
+		ThruCloneFree();
+		g_thruUseEng = 1;
+		LeaveCriticalSection(&g_eng.cs);
+		return;
+	}
+	g_thruUseEng = 0;
+	ThruCloneFree();
+	if (LoadSmf(midPath) < 0) {
+		g_thruPath[0] = 0;
+		LeaveCriticalSection(&g_eng.cs);
+		return;
+	}
+	g_thruEv = g_eng.events;
+	g_thruCount = g_eng.eventCount;
+	g_thruSx = g_eng.sysexData;
+	g_thruSxBytes = g_eng.sysexBytes;
+	g_eng.events = NULL;
+	g_eng.eventCount = 0;
+	g_eng.eventPos = 0;
+	g_eng.sysexData = NULL;
+	g_eng.sysexBytes = 0;
+	delete[] g_eng.fileData;
+	g_eng.fileData = NULL;
+	g_eng.fileBytes = 0;
+	g_eng.lengthSamples = 0;
+	g_eng.playSample = 0;
+	LeaveCriticalSection(&g_eng.cs);
+}
+
+extern "C" void VstLiveThruPcmPush(const BYTE* pcm, int bytes, int rate, int ch, int bits)
+{
+	if (!g_thruOn || !pcm || bytes <= 0) return;
+	if (rate < 8000 || rate > 384000) return;
+	if (ch < 1 || ch > 8) return;
+	int bps = bits / 8;
+	if (bps < 1) bps = 1;
+	if (bps > 4) bps = 4;
+	const int bpf = ch * bps;
+	if (bpf < 1 || bpf > 32 || bytes < bpf) return;
+	const int n = (bytes / bpf) * bpf;
+	if (n <= 0) return;
+	ThruPcmCsEnsure();
+	EnterCriticalSection(&g_thruPcmCs);
+	if (rate != g_thruFmtRate || ch != g_thruFmtCh || bits != g_thruFmtBits || bpf != g_thruFmtBpf) {
+		g_thruRawWr = 0;
+		g_thruRawRd = 0;
+		g_thruPrimed = 0;
+		g_thruHaveCur = 0;
+		g_thruRsAcc = 0;
+		g_thruFmtRate = rate;
+		g_thruFmtCh = ch;
+		g_thruFmtBits = bits;
+		g_thruFmtBpf = bpf;
+	}
+	LONG w = g_thruRawWr;
+	LONG r = g_thruRawRd;
+	LONG used = w - r;
+	if (used < 0) used = 0;
+	LONG space = (THRU_RAW_SIZE - 1) - used;
+	if (space < n) {
+		LONG drop = n - space;
+		const int align = g_thruFmtBpf;
+		if (align > 1) {
+			const LONG rem = drop % align;
+			if (rem) drop += align - rem;
+		}
+		if (drop < used)
+			r += drop;
+		else
+			r = w;
+		g_thruRawRd = r;
+	}
+	const int wi = (int)(w & THRU_RAW_MASK);
+	int first = THRU_RAW_SIZE - wi;
+	if (first > n) first = n;
+	memcpy(g_thruRaw + wi, pcm, (size_t)first);
+	if (n > first)
+		memcpy(g_thruRaw, pcm + first, (size_t)(n - first));
+	g_thruRawWr = w + n;
+	LeaveCriticalSection(&g_thruPcmCs);
+}
+
+extern "C" void VstLiveThruPcmMix(float* L, float* R, int frames)
+{
+	if (!g_thruOn || !L || !R || frames <= 0 || !g_thruPcmCsOn) return;
+	EnterCriticalSection(&g_thruPcmCs);
+	const int rate = g_thruFmtRate;
+	if (rate >= 8000 && g_thruFmtBpf >= 1) {
+		int avail = ThruRawAvailFramesUnlocked();
+		int need = rate * 60 / 1000;
+		if (need < BLOCK_FRAMES * 2) need = BLOCK_FRAMES * 2;
+		if (!g_thruPrimed) {
+			if (avail < need) {
+				LeaveCriticalSection(&g_thruPcmCs);
+				return;
+			}
+			g_thruPrimed = 1;
+		}
+		avail = ThruRawAvailFramesUnlocked();
+		const int high = rate / 4;
+		if (avail > high) {
+			int keep = rate * 80 / 1000;
+			if (keep < BLOCK_FRAMES * 3) keep = BLOCK_FRAMES * 3;
+			int dump = avail - keep;
+			float zL, zR;
+			while (dump-- > 0)
+				ThruRawPopUnlocked(&zL, &zR);
+		}
+		for (int i = 0; i < frames; ++i) {
+			float sL, sR;
+			ThruRawTakeOutUnlocked(&sL, &sR);
+			L[i] += sL;
+			R[i] += sR;
+		}
+	}
+	LeaveCriticalSection(&g_thruPcmCs);
+}
+
+extern "C" void VstLiveThruPoll(__int64 playSample)
+{
+	if (!g_thruOn) return;
+	if (g_thruPcmPb >= 0) {
+		const __int64 d = playSample - g_thruPcmPb;
+		if (d < -(SAMPLE_RATE / 5) || d > (__int64)SAMPLE_RATE * 2)
+			ThruPcmReset();
+	}
+	g_thruPcmPb = playSample;
+	MidiItem batch[64];
+	int n = 0;
+	EnterCriticalSection(&g_eng.cs);
+	if (!g_thruOn) {
+		LeaveCriticalSection(&g_eng.cs);
+		return;
+	}
+	MidiItem* ev = g_thruUseEng ? g_eng.events : g_thruEv;
+	const int count = g_thruUseEng ? g_eng.eventCount : g_thruCount;
+	const BYTE* sxSrc = g_thruUseEng ? g_eng.sysexData : g_thruSx;
+	const int sxBytes = g_thruUseEng ? g_eng.sysexBytes : g_thruSxBytes;
+	BYTE sxCopy[4096];
+	int sxCopyN = 0;
+	if (sxSrc && sxBytes > 0 && sxBytes <= 4096) {
+		memcpy(sxCopy, sxSrc, (size_t)sxBytes);
+		sxCopyN = sxBytes;
+	}
+	if (!ev || count <= 0) {
+		LeaveCriticalSection(&g_eng.cs);
+		return;
+	}
+	if (playSample < g_thruLastPb) {
+		g_thruPos = 0;
+		g_thruLastPb = -1;
+	}
+	const int notesOk = (g_thruLastPb >= 0) ? 1 : 0;
+	while (g_thruPos < count && ev[g_thruPos].sample <= playSample && n < 64) {
+		MidiItem e = ev[g_thruPos++];
+		const int st = (int)(e.msg & 0xf0);
+		if (!notesOk && (st == 0x80 || st == 0x90 || st == 0xa0))
+			continue;
+		batch[n++] = e;
+	}
+	g_thruLastPb = playSample;
+	LeaveCriticalSection(&g_eng.cs);
+	for (int i = 0; i < n; ++i) {
+		MidiItem e = batch[i];
+		if ((e.msg & 0xff) == 0xff) continue;
+		int port = e.port;
+		if (port < 0) port = 0;
+		if (port > 1) port = 1;
+		if ((e.msg & 0xff) == 0xf0 && e.sysexOff >= 0 && sxCopyN > 0) {
+			const int len = (int)e.aux;
+			if (e.sysexOff + len <= sxCopyN)
+				VstLiveMidiSysex(port, sxCopy + e.sysexOff, len);
+			continue;
+		}
+		VstLiveMidiShort(port, e.msg);
+	}
 }
 
 extern "C" void VstLiveMidiShort(int portIndex0to2, DWORD shortMsg)

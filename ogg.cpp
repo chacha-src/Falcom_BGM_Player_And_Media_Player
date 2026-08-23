@@ -333,6 +333,16 @@ BOOL COggApp::InitInstance()
 	savedata.surround = 0;
 	savedata.s3_pcm_sfx = 1;
 	savedata.s3_mesh_density = 5;
+	savedata.cdWinX = savedata.cdWinY = savedata.cdWinW = savedata.cdWinH = 0;
+	savedata.cdMainLock = 0;
+	savedata.cdRipFolder[0] = 0;
+	savedata.cdRipFmt = 0;
+	savedata.cdRipQual = 192;
+	savedata.cdRipAddPl = 1;
+	savedata.cdRepeat = 0;
+	savedata.cdShuffle = 0;
+	savedata.cdVolume = 80;
+	savedata.vstHostVol = 100;
 	savedata.teBatchMainLock = 0;
 	savedata.mpDjPadwindow = 0;
 	savedata.mpNormTargetLufs = -14;
@@ -699,6 +709,28 @@ BOOL COggApp::InitInstance()
 		savedata.s3_mesh_density = 5;
 	else if (savedata.s3_mesh_density < 0 || savedata.s3_mesh_density > 20)
 		savedata.s3_mesh_density = 5;
+	if (datFileSize < (int)(offsetof(save, cdWinX) + sizeof(savedata.cdWinX))) {
+		savedata.cdWinX = savedata.cdWinY = savedata.cdWinW = savedata.cdWinH = 0;
+		savedata.cdMainLock = 0;
+		savedata.cdRipFolder[0] = 0;
+		savedata.cdRipFmt = 0;
+		savedata.cdRipQual = 192;
+		savedata.cdRipAddPl = 1;
+		savedata.cdRepeat = 0;
+		savedata.cdShuffle = 0;
+		savedata.cdVolume = 80;
+	} else {
+		if (savedata.cdRipFmt < 0 || savedata.cdRipFmt > 2) savedata.cdRipFmt = 0;
+		if (savedata.cdVolume < 0 || savedata.cdVolume > 100) savedata.cdVolume = 80;
+		savedata.cdRipAddPl = savedata.cdRipAddPl ? 1 : 0;
+		savedata.cdRepeat = savedata.cdRepeat ? 1 : 0;
+		savedata.cdShuffle = savedata.cdShuffle ? 1 : 0;
+		savedata.cdMainLock = savedata.cdMainLock ? 1 : 0;
+	}
+	if (datFileSize < (int)(offsetof(save, vstHostVol) + sizeof(savedata.vstHostVol)))
+		savedata.vstHostVol = 100;
+	else if (savedata.vstHostVol < 0 || savedata.vstHostVol > 100)
+		savedata.vstHostVol = 100;
 	// wav_export_*_sec の正規化は saveversion 3 コンバート後に行う（intビットをfloatとして読まない）
 	// アナライザー窓: 必ず構造体末尾に追記(旧.datは部分読込で未設定のまま→既定値)
 	if (datFileSize < (int)(offsetof(save, analyzerwindow) + sizeof(savedata.analyzerwindow))) {
@@ -1125,7 +1157,7 @@ BOOL COggApp::InitInstance()
 		}
 		savedata.s3r_show_map = savedata.s3r_show_map ? 1 : 0;
 	}
-	savedata.mpBotToolsFlags |= 1024; // VSTホストボタンは常時表示
+	savedata.mpBotToolsFlags |= 1024 | 2048; // VSTホスト・CDボタンは常時表示
 	if (datFileSize < (int)(offsetof(save, s3r_invert_y) + sizeof(savedata.s3r_invert_y))) {
 		savedata.s3r_invert_y = 0;
 	} else {

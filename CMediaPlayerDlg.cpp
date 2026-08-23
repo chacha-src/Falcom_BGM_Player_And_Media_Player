@@ -39,6 +39,7 @@
 #include "PhotoFrameDlg.h"
 #include "Soft3DMazeDlg.h"
 #include "VstHostDlg.h"
+#include "CdPlayerDlg.h"
 #include "Soft3DRaceDlg.h"
 #include "CDesktopLyricsWnd.h"
 #include "Douga.h"
@@ -1238,6 +1239,7 @@ BEGIN_MESSAGE_MAP(CMediaPlayerDlg, CCustomBlurDialogExBase)
 	ON_BN_CLICKED(IDC_MP_BOT_ALARM, &CMediaPlayerDlg::OnMpAlarm)
 	ON_BN_CLICKED(IDC_MP_BOT_REMOTE, &CMediaPlayerDlg::OnMpRemote)
 	ON_BN_CLICKED(IDC_MP_BOT_VST, &CMediaPlayerDlg::OnMpVstHost)
+	ON_BN_CLICKED(IDC_MP_BOT_CD, &CMediaPlayerDlg::OnMpCdPlayer)
 	ON_BN_CLICKED(IDC_MP_BOT_MAZE, &CMediaPlayerDlg::OnMpSoft3DMaze)
 	ON_BN_CLICKED(IDC_MP_BOT_RACE, &CMediaPlayerDlg::OnMpSoft3DRace)
 	ON_COMMAND(ID_MP_BOTVIS_DJ, &CMediaPlayerDlg::OnBotVisDj)
@@ -1615,16 +1617,18 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 			m_botRemote.Create(_T("Remote"), WS_CHILD | BS_PUSHBUTTON | WS_TABSTOP, rc, this, IDC_MP_BOT_REMOTE);
 		if (!m_botVst.GetSafeHwnd())
 			m_botVst.Create(_T("VST"), WS_CHILD | BS_PUSHBUTTON | WS_TABSTOP, rc, this, IDC_MP_BOT_VST);
+		if (!m_botCd.GetSafeHwnd())
+			m_botCd.Create(_T("CD"), WS_CHILD | BS_PUSHBUTTON | WS_TABSTOP, rc, this, IDC_MP_BOT_CD);
 		if (!m_botMaze.GetSafeHwnd())
 			m_botMaze.Create(_T("Maze"), WS_CHILD | BS_PUSHBUTTON | WS_TABSTOP, rc, this, IDC_MP_BOT_MAZE);
 		if (!m_botRace.GetSafeHwnd())
 			m_botRace.Create(_T("Race"), WS_CHILD | BS_PUSHBUTTON | WS_TABSTOP, rc, this, IDC_MP_BOT_RACE);
 		{
 			// ショートカットは色で役割が分かるようにする（水色一色は避ける）
-			CCustomStandardButton* bots[11] = {
-				&m_botDj, &m_botTag, &m_botBpm, &m_botSleep, &m_botMirror, &m_botSsViz, &m_botAlarm, &m_botRemote, &m_botVst, &m_botMaze, &m_botRace
+			CCustomStandardButton* bots[12] = {
+				&m_botDj, &m_botTag, &m_botBpm, &m_botSleep, &m_botMirror, &m_botSsViz, &m_botAlarm, &m_botRemote, &m_botVst, &m_botCd, &m_botMaze, &m_botRace
 			};
-			const COLORREF botGrad[11][2] = {
+			const COLORREF botGrad[12][2] = {
 				{ RGB(240, 225, 255), RGB(200, 170, 245) }, // DJ: 紫
 				{ RGB(255, 235, 220), RGB(250, 195, 160) }, // Tag: 桃
 				{ RGB(220, 250, 235), RGB(155, 220, 190) }, // BPM: ミント
@@ -1634,10 +1638,11 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 				{ RGB(255, 230, 240), RGB(245, 180, 205) }, // Alarm: 薔薇
 				{ RGB(225, 250, 250), RGB(160, 215, 220) }, // Remote: 青緑
 				{ RGB(245, 235, 255), RGB(190, 160, 230) }, // VST: 藤
+				{ RGB(250, 248, 240), RGB(200, 190, 160) }, // CD: 銀
 				{ RGB(235, 245, 255), RGB(150, 190, 230) }, // Maze: 青
 				{ RGB(255, 230, 220), RGB(245, 150, 120) }, // Race: 珊瑚
 			};
-			for (int bi = 0; bi < 11; ++bi) {
+			for (int bi = 0; bi < 12; ++bi) {
 				if (!bots[bi]->GetSafeHwnd()) continue;
 				bots[bi]->SetGradation(botGrad[bi][0], botGrad[bi][1], 0, TRUE);
 			}
@@ -2056,6 +2061,7 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 	if (m_botAlarm.GetSafeHwnd()) m_botAlarm.SetFont(&m_fontChk, TRUE);
 	if (m_botRemote.GetSafeHwnd()) m_botRemote.SetFont(&m_fontChk, TRUE);
 	if (m_botVst.GetSafeHwnd()) m_botVst.SetFont(&m_fontChk, TRUE);
+	if (m_botCd.GetSafeHwnd()) m_botCd.SetFont(&m_fontChk, TRUE);
 	if (m_botMaze.GetSafeHwnd()) m_botMaze.SetFont(&m_fontChk, TRUE);
 	if (m_botRace.GetSafeHwnd()) m_botRace.SetFont(&m_fontChk, TRUE);
 	if (m_abA.GetSafeHwnd()) m_abA.SetFont(&m_fontChk, TRUE);
@@ -2311,6 +2317,8 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 		addTip(m_botRemote, LL14(L"ローカルリモート (HTTP) を切り替えます。", L"Toggle local remote (HTTP).", L"Basculer la telecommande locale (HTTP).", L"Attiva/disattiva remote locale (HTTP).", L"Alternar remoto local (HTTP).", L"로컬 리모트(HTTP) 전환.", L"切换本地遥控 (HTTP)。", L"تبديل التحكم المحلي (HTTP).", L"Переключить локальный пульт (HTTP).", L"Lokalfernbedienung (HTTP) umschalten.", L"Alternar remoto local (HTTP).", L"Lokale bediening (HTTP) wisselen.", L"Przelacz pilot lokalny (HTTP).", L"Yerel uzaktan (HTTP) ac/kapa."));
 	if (m_botVst.GetSafeHwnd())
 		addTip(m_botVst, LL14(L"VSTホスト（配線・MIDI入力）", L"VST host (wiring / MIDI in)", L"Hote VST (cablage / entree MIDI)", L"Host VST (cablaggio / MIDI in)", L"Host VST (cableado / MIDI in)", L"VST 호스트(배선/MIDI 입력)", L"VST主机（接线/MIDI输入）", L"مضيف VST (توصيل/إدخال MIDI)", L"Хост VST (коммутация/MIDI in)", L"VST-Host (Verdrahtung/MIDI-In)", L"Host VST (cabos/MIDI in)", L"VST-host (bedrading/MIDI in)", L"Host VST (okablowanie/MIDI in)", L"VST host (kablolama/MIDI giris)"));
+	if (m_botCd.GetSafeHwnd())
+		addTip(m_botCd, LL14(L"CDプレイヤー（再生・取り込み・曲目検索・書き込み）", L"CD player (play / rip / lookup / burn)", L"Lecteur CD (lecture / extraction / recherche / gravure)", L"Lettore CD (play / estrazione / ricerca / masterizza)", L"Reproductor CD (reproducir / extraer / buscar / grabar)", L"CD 플레이어(재생/추출/검색/굽기)", L"CD播放器（播放/抓轨/检索/刻录）", L"مشغل CD (تشغيل/استخراج/بحث/حرق)", L"CD-плеер (воспроизведение/извлечение/поиск/запись)", L"CD-Player (Play/Rip/Suche/Brennen)", L"Leitor de CD (play / extrair / pesquisa / gravar)", L"CD-speler (afspelen / rippen / zoeken / branden)", L"Odtwarzacz CD (odtwarzanie / zgrywanie / szukanie / nagranie)", L"CD oynatici (oynat / aktar / ara / yaz)"));
 	if (m_botMaze.GetSafeHwnd())
 		addTip(m_botMaze, LL14(L"Soft3D迷路で遊びます。", L"Play Soft3D maze.", L"Jouer au labyrinthe Soft3D.", L"Gioca al labirinto Soft3D.", L"Jugar al laberinto Soft3D.", L"Soft3D 미로로 놀기.", L"玩 Soft3D 迷宫。", L"اللعب بمتاهة Soft3D.", L"Играть в лабиринт Soft3D.", L"Im Soft3D-Labyrinth spielen.", L"Jogar o labirinto Soft3D.", L"Speel Soft3D-doolhof.", L"Graj w labirynt Soft3D.", L"Soft3D labirentte oyna."));
 	if (m_botRace.GetSafeHwnd())
@@ -3030,16 +3038,18 @@ void CMediaPlayerDlg::DoLayout()
 
 	// 幅に応じて 0=フル / 1=EQ系短縮 / 2=フェード・JK等も短縮 / 3=最小幅用の超短縮
 	// 各段階は「その段階の幅でもまだ主音量に食い込むか」で次へ進む(同条件で2と3が同時発火しないこと)。
+	// ラベル付きボタンは左に約16pxのアイコンを置くので、その分を幅に乗せる。前/次はアイコンのみ。
+	const int icoAdd = (int)(20 * s);
 	const int prevW = max(1, (int)(40 * s));
-	const int playW = max(1, (int)(48 * s));
-	const int stopW = max(1, (int)(44 * s));
+	const int playW = max(1, (int)(48 * s) + icoAdd);
+	const int stopW = max(1, (int)(44 * s) + icoAdd);
 	const int nextW = max(1, (int)(40 * s));
-	const int pauseFull = max(1, (int)(68 * s)), pauseShort = max(1, (int)(40 * s)), pauseTiny = max(1, (int)(28 * s));
-	const int fadeFull = max(1, (int)(92 * s)), fadeShort = max(1, (int)(52 * s)), fadeTiny = max(1, (int)(28 * s));
-	const int jkFull = max(1, (int)(62 * s)), jkShort = max(1, (int)(32 * s)), jkTiny = max(1, (int)(28 * s));
-	const int ebwFull = max(1, (int)(84 * s)), pbwFull = max(1, (int)(128 * s)), abwFull = max(1, (int)(88 * s)), prbwFull = max(1, (int)(56 * s));
-	const int ebwShort = max(1, (int)(42 * s)), pbwShort = max(1, (int)(56 * s)), abwShort = max(1, (int)(48 * s)), prbwShort = max(1, (int)(40 * s));
-	const int ebwTiny = max(1, (int)(30 * s)), pbwTiny = max(1, (int)(28 * s)), abwTiny = max(1, (int)(28 * s)), prbwTiny = max(1, (int)(28 * s));
+	const int pauseFull = max(1, (int)(68 * s) + icoAdd), pauseShort = max(1, (int)(48 * s) + icoAdd), pauseTiny = max(1, (int)(32 * s));
+	const int fadeFull = max(1, (int)(92 * s) + icoAdd), fadeShort = max(1, (int)(56 * s) + icoAdd), fadeTiny = max(1, (int)(32 * s));
+	const int jkFull = max(1, (int)(62 * s) + icoAdd), jkShort = max(1, (int)(40 * s) + icoAdd), jkTiny = max(1, (int)(32 * s));
+	const int ebwFull = max(1, (int)(84 * s) + icoAdd), pbwFull = max(1, (int)(128 * s) + icoAdd), abwFull = max(1, (int)(88 * s) + icoAdd), prbwFull = max(1, (int)(56 * s) + icoAdd);
+	const int ebwShort = max(1, (int)(42 * s) + icoAdd), pbwShort = max(1, (int)(56 * s) + icoAdd), abwShort = max(1, (int)(48 * s) + icoAdd), prbwShort = max(1, (int)(40 * s) + icoAdd);
+	const int ebwTiny = max(1, (int)(32 * s)), pbwTiny = max(1, (int)(32 * s)), abwTiny = max(1, (int)(32 * s)), prbwTiny = max(1, (int)(32 * s));
 
 	const int baseLeft = M + prevW + gap + playW + gap + stopW + gap + nextW + (int)(8 * s);
 	// 各候補レイアウトの右端(Pro右端)。freeEnd を超えたら一段短い段階へ。
@@ -3160,11 +3170,11 @@ void CMediaPlayerDlg::DoLayout()
 	};
 	auto rightNeed = [&](int lv) -> int {
 		// folder, st, supe, prompt?, cmdroll?
-		const int fol = (int)((lv >= 2 ? 40 : 54) * s);
-		const int st = (int)((lv >= 1 ? 36 : 72) * s);
-		const int supe = (int)((lv >= 1 ? 40 : 62) * s);
-		const int pr = m_prompt.GetSafeHwnd() ? (int)((lv >= 1 ? 36 : 76) * s) : 0;
-		const int roll = m_cmdroll.GetSafeHwnd() ? (int)((lv >= 1 ? 36 : 56) * s) : 0;
+		const int fol = (int)((lv >= 2 ? 40 : 54) * s) + icoAdd;
+		const int st = (int)((lv >= 1 ? 36 : 72) * s) + icoAdd;
+		const int supe = (int)((lv >= 1 ? 40 : 62) * s) + icoAdd;
+		const int pr = m_prompt.GetSafeHwnd() ? (int)((lv >= 1 ? 36 : 76) * s) + icoAdd : 0;
+		const int roll = m_cmdroll.GetSafeHwnd() ? (int)((lv >= 1 ? 36 : 56) * s) + icoAdd : 0;
 		int n = 1 + (st > 0 ? 1 : 0) + (supe > 0 ? 1 : 0) + (pr > 0 ? 1 : 0) + (roll > 0 ? 1 : 0);
 		return fol + st + supe + pr + roll + optGap * max(0, n - 1);
 	};
@@ -3239,11 +3249,11 @@ void CMediaPlayerDlg::DoLayout()
 	MoveCtl(&m_xfadeSec, cx, optY, lw[6], chkRowH); cx += lw[6] + optGap;
 	MoveCtl(&m_xfadeL, cx, optY, lw[7], chkRowH);
 
-	const int folW = (int)((optLv >= 2 ? 40 : 54) * s);
-	const int stW = (int)((optLv >= 1 ? 36 : 72) * s);
-	const int supeW = (int)((optLv >= 1 ? 40 : 62) * s);
-	const int prW = (int)((optLv >= 1 ? 36 : 76) * s);
-	const int rollW = (int)((optLv >= 1 ? 36 : 56) * s);
+	const int folW = (int)((optLv >= 2 ? 40 : 54) * s) + icoAdd;
+	const int stW = (int)((optLv >= 1 ? 36 : 72) * s) + icoAdd;
+	const int supeW = (int)((optLv >= 1 ? 40 : 62) * s) + icoAdd;
+	const int prW = (int)((optLv >= 1 ? 36 : 76) * s) + icoAdd;
+	const int rollW = (int)((optLv >= 1 ? 36 : 56) * s) + icoAdd;
 	int rcx = W - M - folW;
 	MoveCtl(&m_folder, rcx, by2, folW, ch);
 	rcx -= optGap + stW;
@@ -3263,8 +3273,8 @@ void CMediaPlayerDlg::DoLayout()
 	int sndTop = by2 + ch + (int)(5 * s);
 	int sy = sndTop + gTitle;
 	int slLabelH = (int)(15 * s), slH = (int)(16 * s);   // ラベル(13px)が収まる高さ
-	MoveCtl(&m_settings, M + gPad, sy + (int)(4 * s), (int)(48 * s), (int)(24 * s));
-	int slX = M + gPad + (int)(54 * s);
+	MoveCtl(&m_settings, M + gPad, sy + (int)(4 * s), (int)(48 * s) + icoAdd, (int)(24 * s));
+	int slX = M + gPad + (int)(54 * s) + icoAdd;
 	int slGap = (int)(8 * s);
 	int slW = (W - M - gPad - slX - slGap * 3) / 4;
 	if (slW < (int)(56 * s)) slW = (int)(56 * s);
@@ -3283,22 +3293,23 @@ void CMediaPlayerDlg::DoLayout()
 	// ===== プレイリストグループ: ツールバー + リスト + 下部チェック =====
 	int plTop = sndBottom + (int)(5 * s);
 	int by4 = plTop + gTitle;
-	int tbH = (int)(19 * s);
+	int tbH = (int)(24 * s);
 	int comboW = (int)(100 * s);
 	LayoutPlselCombo(m_plsel, m_plselDropExtent, m_plselLayoutDpi, M + gPad, by4, comboW, tbH, s);
-	int endW = (int)(118 * s);
+	int endW = (int)(136 * s);
 	LayoutPlselCombo(m_endMode, m_endModeDropExtent, m_endModeLayoutDpi, M + gPad + comboW + (int)(4 * s), by4, endW, tbH, s);
 	int tx = M + gPad + comboW + (int)(4 * s) + endW + (int)(5 * s);
-	int tbw = (int)(50 * s);
+	int tbw = (int)(56 * s);
 	MoveCtl(&m_plrename, tx, by4, tbw, tbH); tx += tbw + (int)(3 * s);
-	MoveCtl(&m_pldelete, tx, by4, tbw, tbH); tx += tbw + (int)(4 * s);
-	int m3uw = (int)(44 * s);
+	int tbwDel = (int)(50 * s) + icoAdd;
+	MoveCtl(&m_pldelete, tx, by4, tbwDel, tbH); tx += tbwDel + (int)(4 * s);
+	int m3uw = (int)(44 * s) + icoAdd;
 	MoveCtl(&m_m3uExport, tx, by4, m3uw, tbH); tx += m3uw + (int)(2 * s);
 	MoveCtl(&m_m3uImport, tx, by4, m3uw, tbH); tx += m3uw + (int)(6 * s);
 	// 「ツール」はツールバー上の明示ボタン（左クリックでメニュー）。▾単独は発見不能だった。
 	const int toolsBtnW = (int)(88 * s);
 	MoveCtl(&m_toolsToggle, tx, by4, toolsBtnW, tbH); tx += toolsBtnW + (int)(6 * s);
-	int ibw = (int)(16 * s);
+	int ibw = (int)(20 * s);
 	int filtW = (int)(56 * s);
 	int regexW = (int)(64 * s);
 	int findW = (int)(64 * s);
@@ -3312,8 +3323,8 @@ void CMediaPlayerDlg::DoLayout()
 	// 行削除は1段目の右端（上下ボタンの左）。ツール行に左詰めすると幅次第でリスト/窓の外へ出る。
 	const int delGap = (int)(4 * s);
 	const int findRight = tx + ibw;
-	const int delWFull = (int)(60 * s);
-	const int delWMid = (int)(40 * s);
+	const int delWFull = (int)(60 * s) + icoAdd;
+	const int delWMid = (int)(40 * s) + icoAdd;
 	const int delWTiny = (int)(22 * s);
 	int delRoom = moveRight - moveClusterW - delGap - findRight - (int)(4 * s);
 	int delW = delWFull;
@@ -3451,7 +3462,7 @@ void CMediaPlayerDlg::DoLayout()
 		}
 	}
 
-	int swH = (int)(22 * s);
+	int swH = (int)(24 * s);
 	int listY = by4 + tbH + toolsH + (int)(4 * s);
 	// UXステータス帯（操作ヒント）を画面最下端に確保。ボタンと重ねない
 	const int uxBandH = max(16, (int)(18 * s));
@@ -3758,10 +3769,10 @@ void CMediaPlayerDlg::DoLayout()
 	int exW = (int)(80 * s);
 	const int exitLeft = W - M - exW;
 
-	const int swFull = max(1, (int)(120 * s)), swMid = max(1, (int)(72 * s)), swShort = max(1, (int)(40 * s));
+	const int swFull = max(1, (int)(120 * s) + icoAdd), swMid = max(1, (int)(72 * s) + icoAdd), swShort = max(1, (int)(40 * s));
 	const int rsFull = max(1, (int)(100 * s)), rsMid = max(1, (int)(56 * s)), rsShort = max(1, (int)(36 * s));
-	const int recFull = max(1, (int)(64 * s)), recMid = max(1, (int)(44 * s)), recShort = max(1, (int)(28 * s));
-	const int capFull = max(1, (int)(80 * s)), capMid = max(1, (int)(48 * s)), capShort = max(1, (int)(28 * s));
+	const int recFull = max(1, (int)(64 * s) + icoAdd), recMid = max(1, (int)(44 * s) + icoAdd), recShort = max(1, (int)(32 * s));
+	const int capFull = max(1, (int)(80 * s) + icoAdd), capMid = max(1, (int)(48 * s) + icoAdd), capShort = max(1, (int)(32 * s));
 	const int leadFull = swFull + gapLead + rsFull + gapLead + recFull + gapLead + capFull + gapLead;
 	const int leadMid = swMid + gapLead + rsMid + gapLead + recMid + gapLead + capMid + gapLead;
 	const int leadShort = swShort + gapLead + rsShort + gapLead + recShort + gapLead + capShort + gapLead;
@@ -3771,26 +3782,26 @@ void CMediaPlayerDlg::DoLayout()
 		savedata.mpBotToolsFlags = 0x70F; // DJ|Tag|BPM|Sleep|VST|Maze|Race
 	}
 	// VSTホストは切替対象にせず、底バーへ常時出す
-	savedata.mpBotToolsFlags |= 1024;
+	savedata.mpBotToolsFlags |= 1024 | 2048;
 	const int botFl = savedata.mpBotToolsFlags;
-	CCustomStandardButton* botBtn[11] = {
-		&m_botDj, &m_botTag, &m_botBpm, &m_botSleep, &m_botMirror, &m_botSsViz, &m_botAlarm, &m_botRemote, &m_botVst, &m_botMaze, &m_botRace
+	CCustomStandardButton* botBtn[12] = {
+		&m_botDj, &m_botTag, &m_botBpm, &m_botSleep, &m_botMirror, &m_botSsViz, &m_botAlarm, &m_botRemote, &m_botVst, &m_botCd, &m_botMaze, &m_botRace
 	};
-	const int botBit[11] = { 1, 2, 4, 8, 16, 32, 64, 128, 1024, 256, 512 };
-	const int wFull[11] = {
+	const int botBit[12] = { 1, 2, 4, 8, 16, 32, 64, 128, 1024, 2048, 256, 512 };
+	const int wFull[12] = {
 		(int)(56 * s), (int)(52 * s), (int)(48 * s), (int)(56 * s),
-		(int)(60 * s), (int)(40 * s), (int)(56 * s), (int)(64 * s), (int)(48 * s), (int)(52 * s), (int)(52 * s)
+		(int)(60 * s), (int)(40 * s), (int)(56 * s), (int)(64 * s), (int)(48 * s), (int)(48 * s), (int)(52 * s), (int)(52 * s)
 	};
-	const int wMid[11] = {
+	const int wMid[12] = {
 		(int)(36 * s), (int)(36 * s), (int)(36 * s), (int)(40 * s),
-		(int)(40 * s), (int)(32 * s), (int)(40 * s), (int)(44 * s), (int)(36 * s), (int)(36 * s), (int)(36 * s)
+		(int)(40 * s), (int)(32 * s), (int)(40 * s), (int)(44 * s), (int)(36 * s), (int)(36 * s), (int)(36 * s), (int)(36 * s)
 	};
-	const int wShort[11] = {
+	const int wShort[12] = {
 		(int)(28 * s), (int)(28 * s), (int)(28 * s), (int)(28 * s),
-		(int)(28 * s), (int)(28 * s), (int)(28 * s), (int)(28 * s), (int)(28 * s), (int)(28 * s), (int)(28 * s)
+		(int)(28 * s), (int)(28 * s), (int)(28 * s), (int)(28 * s), (int)(28 * s), (int)(28 * s), (int)(28 * s), (int)(28 * s)
 	};
 	int needFull = 0, needMid = 0, needShort = 0;
-	for (int i = 0; i < 11; ++i) {
+	for (int i = 0; i < 12; ++i) {
 		if (!(botFl & botBit[i])) continue;
 		needFull += wFull[i] + gapBot;
 		needMid += wMid[i] + gapBot;
@@ -3825,6 +3836,7 @@ void CMediaPlayerDlg::DoLayout()
 			if (m_botAlarm.GetSafeHwnd()) m_botAlarm.SetWindowText(L"Alm");
 			if (m_botRemote.GetSafeHwnd()) m_botRemote.SetWindowText(L"Rem");
 			if (m_botVst.GetSafeHwnd()) m_botVst.SetWindowText(L"VST");
+			if (m_botCd.GetSafeHwnd()) m_botCd.SetWindowText(L"CD");
 			if (m_botMaze.GetSafeHwnd()) m_botMaze.SetWindowText(L"Mz");
 			if (m_botRace.GetSafeHwnd()) m_botRace.SetWindowText(L"Rc");
 		}
@@ -3848,6 +3860,8 @@ void CMediaPlayerDlg::DoLayout()
 				m_botRemote.SetWindowText(LL14(L"リモート", L"Remote", L"Remote", L"Remote", L"Remoto", L"리모트", L"遥控", L"تحكم", L"Пульт", L"Remote", L"Remoto", L"Remote", L"Pilot", L"Uzaktan"));
 			if (m_botVst.GetSafeHwnd())
 				m_botVst.SetWindowText(LL14(L"VST", L"VST", L"VST", L"VST", L"VST", L"VST", L"VST", L"VST", L"VST", L"VST", L"VST", L"VST", L"VST", L"VST"));
+			if (m_botCd.GetSafeHwnd())
+				m_botCd.SetWindowText(LL14(L"CD", L"CD", L"CD", L"CD", L"CD", L"CD", L"CD", L"CD", L"CD", L"CD", L"CD", L"CD", L"CD", L"CD"));
 			if (m_botMaze.GetSafeHwnd())
 				m_botMaze.SetWindowText(LL14(L"迷路", L"Maze", L"Labyrinthe", L"Labirinto", L"Laberinto", L"미로", L"迷宫", L"متاهة", L"Лабиринт", L"Labyrinth", L"Labirinto", L"Doolhof", L"Labirynt", L"Labirent"));
 			if (m_botRace.GetSafeHwnd())
@@ -3874,6 +3888,8 @@ void CMediaPlayerDlg::DoLayout()
 				m_botRemote.SetWindowText(LL14(L"リモート", L"Remote", L"Remote", L"Remote", L"Remoto", L"리모트", L"遥控", L"تحكم", L"Пульт", L"Remote", L"Remoto", L"Remote", L"Pilot", L"Uzaktan"));
 			if (m_botVst.GetSafeHwnd())
 				m_botVst.SetWindowText(LL14(L"VST", L"VST", L"VST", L"VST", L"VST", L"VST", L"VST", L"VST", L"VST", L"VST", L"VST", L"VST", L"VST", L"VST"));
+			if (m_botCd.GetSafeHwnd())
+				m_botCd.SetWindowText(LL14(L"CD", L"CD", L"CD", L"CD", L"CD", L"CD", L"CD", L"CD", L"CD", L"CD", L"CD", L"CD", L"CD", L"CD"));
 			if (m_botMaze.GetSafeHwnd())
 				m_botMaze.SetWindowText(LL14(L"迷路", L"Maze", L"Labyrinthe", L"Labirinto", L"Laberinto", L"미로", L"迷宫", L"متاهة", L"Лабиринт", L"Labyrinth", L"Labirinto", L"Doolhof", L"Labirynt", L"Labirent"));
 			if (m_botRace.GetSafeHwnd())
@@ -3886,7 +3902,7 @@ void CMediaPlayerDlg::DoLayout()
 	MoveCtl(&m_resetdata, bx, botY, rsW, swH); bx += rsW + gapLead;
 	MoveCtl(&m_record, bx, botY, recW, swH); bx += recW + gapLead;
 	MoveCtl(&m_capture, bx, botY, capW, swH); bx += capW + gapLead;
-	for (int i = 0; i < 11; ++i) {
+	for (int i = 0; i < 12; ++i) {
 		CCustomStandardButton* b = botBtn[i];
 		if (!b->GetSafeHwnd()) continue;
 		if (!(botFl & botBit[i])) {
@@ -7508,10 +7524,10 @@ void CMediaPlayerDlg::ToggleBotVisFlag(int bit)
 	}
 	// VSTホスト(1024)は常時表示。消さない。
 	if (bit == 1024) {
-		savedata.mpBotToolsFlags |= 1024;
+		savedata.mpBotToolsFlags |= 1024 | 2048;
 	} else {
 		savedata.mpBotToolsFlags ^= bit;
-		savedata.mpBotToolsFlags |= 1024;
+		savedata.mpBotToolsFlags |= 1024 | 2048;
 	}
 	MpPersistSavedataQuick();
 	m_mpBotShort = -1;
@@ -11086,7 +11102,7 @@ void CMediaPlayerDlg::ShowToolsExtrasMenu(CPoint screenPt)
 				savedata.mpBotToolsInited = 1;
 				savedata.mpBotToolsFlags = 0x70F; // DJ|Tag|BPM|Sleep|VST|Maze|Race
 			}
-			savedata.mpBotToolsFlags |= 1024; // VSTホストは常時表示
+			savedata.mpBotToolsFlags |= 1024 | 2048; // VSTホスト・CDは常時表示
 			const int bf = savedata.mpBotToolsFlags;
 			CCustomPopupMenu* botSub = sub->AddSubMenu(
 				LL14(L"底バーのツールボタン", L"Bottom bar tool buttons", L"Boutons outils bas", L"Pulsanti strumenti in basso", L"Botones de herramientas abajo",
@@ -13105,6 +13121,7 @@ void CMediaPlayerDlg::OnMpTunerPractice() { OpenTunerPracticeModeless(this); }
 void CMediaPlayerDlg::OnMpPhotoFrame() { OpenPhotoFrameModeless(this); }
 void CMediaPlayerDlg::OnMpSoft3DMaze() { OpenSoft3DMazeModeless(this); }
 void CMediaPlayerDlg::OnMpVstHost() { OpenVstHostModeless(this); }
+void CMediaPlayerDlg::OnMpCdPlayer() { OpenCdPlayerModeless(this); }
 void CMediaPlayerDlg::OnMpSoft3DRace() { OpenSoft3DRaceModeless(this); }
 void CMediaPlayerDlg::OnMpRemote()
 {
@@ -13515,10 +13532,10 @@ void CMpCheatSheetDlg::OnPaint()
 		L"· Grabar / Captura / WAV …… grabación y exportación", L"· 녹음 / 캡처 / WAV …… 장치 녹음·화면 녹화·내보내기", L"· 录音 / 捕获 / WAV …… 设备录音、屏录、导出", L"· تسجيل / التقاط / WAV …… تسجيل وتصدير",
 		L"· Запись / Захват / WAV …… запись и экспорт", L"· Aufnahme / Capture / WAV …… Aufnahme und Export", L"· Gravar / Captura / WAV …… gravação e exportação", L"· Opnemen / Capture / WAV …… opname en export",
 		L"· Nagraj / Capture / WAV …… nagrywanie i eksport", L"· Kaydet / Yakalama / WAV …… kayıt ve dışa aktarma")); yL += lh;
-	body(L, yL, LL14(L"・騒音計 / 起こし台 / ボイスチェンジャー / チューナー道場 / フォトフレーム / Soft3D迷路 / Soft3D空中レース", L"· Sound meter / Digitizer / Voice changer / Tuner practice / Photo frame / Soft3D maze / Soft3D aerial race", L"· Sonomètre / Numériseur / Changeur de voix / Accordeur / Cadre photo / Labyrinthe Soft3D / Course aérienne Soft3D", L"· Fonometro / Digitalizzatore / Cambia voce / Accordatore / Cornice / Labirinto Soft3D / Gara aerea Soft3D",
-		L"· Medidor / Digitalizador / Cambiador / Afinador / Marco / Laberinto Soft3D", L"· 소음계 / 디지타이저 / 보이스체인저 / 튜너 / 포토프레임 / Soft3D 미로", L"· 声级计 / 数字化 / 变声器 / 调音练习 / 照片框 / Soft3D 迷宫", L"· مقياس صوت / محول / مغير صوت / موالف / إطار صور / متاهة Soft3D",
-		L"· Шумомер / Оцифровка / Голос / Тюнер / Фоторамка / Лабиринт Soft3D", L"· Schallpegel / Digitalisierer / Stimmenwandler / Stimmtraining / Fotorahmen / Soft3D-Labyrinth", L"· Medidor / Digitalizador / Modificador / Afinador / Moldura / Labirinto Soft3D", L"· Geluidsmeter / Digitizer / Stemvervormer / Stemtrainer / Fotolijst / Soft3D-doolhof",
-		L"· Miernik / Digitalizacja / Zmiana głosu / Stroik / Ramka / Labirynt Soft3D", L"· Ses ölçer / Dijitalleştirici / Ses değiştirici / Akort / Çerçeve / Soft3D labirent")); yL += lh + 2;
+	body(L, yL, LL14(L"・騒音計 / 起こし台 / ボイスチェンジャー / チューナー道場 / フォトフレーム / CD / VST / Soft3D迷路 / Soft3D空中レース", L"· Sound meter / Digitizer / Voice changer / Tuner practice / Photo frame / CD / VST / Soft3D maze / Soft3D aerial race", L"· Sonomètre / Numériseur / Changeur de voix / Accordeur / Cadre photo / CD / VST / Labyrinthe Soft3D / Course aérienne Soft3D", L"· Fonometro / Digitalizzatore / Cambia voce / Accordatore / Cornice / CD / VST / Labirinto Soft3D / Gara aerea Soft3D",
+		L"· Medidor / Digitalizador / Cambiador / Afinador / Marco / CD / VST / Laberinto Soft3D", L"· 소음계 / 디지타이저 / 보이스체인저 / 튜너 / 포토프레임 / CD / VST / Soft3D 미로", L"· 声级计 / 数字化 / 变声器 / 调音练习 / 照片框 / CD / VST / Soft3D 迷宫", L"· مقياس صوت / محول / مغير صوت / موالف / إطار صور / CD / VST / متاهة Soft3D",
+		L"· Шумомер / Оцифровка / Голос / Тюнер / Фоторамка / CD / VST / Лабиринт Soft3D", L"· Schallpegel / Digitalisierer / Stimmenwandler / Stimmtraining / Fotorahmen / CD / VST / Soft3D-Labyrinth", L"· Medidor / Digitalizador / Modificador / Afinador / Moldura / CD / VST / Labirinto Soft3D", L"· Geluidsmeter / Digitizer / Stemvervormer / Stemtrainer / Fotolijst / CD / VST / Soft3D-doolhof",
+		L"· Miernik / Digitalizacja / Zmiana głosu / Stroik / Ramka / CD / VST / Labirynt Soft3D", L"· Ses ölçer / Dijitalleştirici / Ses değiştirici / Akort / Çerçeve / CD / VST / Soft3D labirent")); yL += lh + 2;
 
 	title(R, yR, LL14(L"保存 / 設定 / 切替", L"Save / Settings / Switch", L"Sauver / Réglages / Basculer", L"Salva / Impostazioni / Passa",
 		L"Guardar / Ajustes / Cambiar", L"저장 / 설정 / 전환", L"保存 / 设置 / 切换", L"حفظ / إعدادات / تبديل",

@@ -1,4 +1,4 @@
-// TranscodeExport.cpp
+﻿// TranscodeExport.cpp
 // WAV書き出し結果を mp3 / FLAC に変換するUIとエンコード。
 
 #include "stdafx.h"
@@ -267,6 +267,8 @@ void TcPcmFrameToInt16(const BYTE* frame, int ch, int bits, short* out)
 			out[c] = 0;
 	}
 }
+
+} // namespace
 
 CString TcMakeTempWavPath()
 {
@@ -547,6 +549,8 @@ BOOL TcAppendCrossfadeWav(const CString& accumPath, const CString& nextPath, flo
 	fn.Close();
 	return TRUE;
 }
+
+namespace {
 
 // PCM 1フレームを float[-1,1] へ（最大8ch）
 void TcPcmFrameToFloat(const BYTE* p, int ch, int bits, float* out)

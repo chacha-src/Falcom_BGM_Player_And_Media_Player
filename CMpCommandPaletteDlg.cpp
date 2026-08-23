@@ -67,6 +67,7 @@ enum {
 	PAL_WIN_MIRROR,
 	PAL_WIN_REMOTE,
 	PAL_WIN_SSVIZ,
+	PAL_WIN_CD,
 	PAL_WIN_PLAYLIST,
 	PAL_WIN_OGGHELP,
 	PAL_SWITCH_FALCOM
@@ -135,6 +136,7 @@ const MpPalCmd kCmds[] = {
 	{ PAL_WIN_MIRROR,       3 },
 	{ PAL_WIN_REMOTE,       3 },
 	{ PAL_WIN_SSVIZ,        3 },
+	{ PAL_WIN_CD,           3 },
 	{ PAL_WIN_PLAYLIST,     3 },
 	{ PAL_WIN_OGGHELP,      3 },
 	{ PAL_SWITCH_FALCOM,    3 }
@@ -366,6 +368,10 @@ const wchar_t* PalCmdName(int id)
 		return LL14(L"SS ビジュアライザ", L"SS visualizer", L"Visualiseur SS", L"Visualizzatore SS", L"Visualizador SS",
 			L"SS 비주얼라이저", L"SS 可视化", L"عارض SS", L"SS-визуализатор", L"SS-Visualizer",
 			L"Visualizador SS", L"SS-visualizer", L"Wizualizator SS", L"SS gorselleyici");
+	case PAL_WIN_CD:
+		return LL14(L"CDプレイヤー", L"CD player", L"Lecteur CD", L"Lettore CD", L"Reproductor CD",
+			L"CD 플레이어", L"CD播放器", L"مشغل CD", L"CD-плеер", L"CD-Player",
+			L"Leitor de CD", L"CD-speler", L"Odtwarzacz CD", L"CD oynatici");
 	case PAL_WIN_PLAYLIST:
 		return LL14(L"プレイリスト画面", L"Playlist window", L"Fenetre playlist", L"Finestra playlist", L"Ventana de lista",
 			L"재생목록 창", L"播放列表窗口", L"نافذة قائمة التشغيل", L"Окно плейлиста", L"Playlist-Fenster",
@@ -895,6 +901,7 @@ void CMpCommandPaletteDlg::ExecCommand(int id)
 	case PAL_WIN_MIRROR:    PalPostToMp(ID_MP_MIRROR); return;
 	case PAL_WIN_REMOTE:    PalPostToMp(ID_MP_REMOTE); return;
 	case PAL_WIN_SSVIZ:     PalPostToMp(ID_MP_SSVIZ); return;
+	case PAL_WIN_CD:        PalPostToMp(IDC_MP_BOT_CD); return;
 	case PAL_WIN_PLAYLIST:  PalPostToOg(IDC_BUTTON57); return;
 	case PAL_WIN_OGGHELP:   PalPostToOg(IDC_OGG_HELP); return;
 	case PAL_SWITCH_FALCOM: PalPostToMp(IDC_MP_SWITCHMODE); return;

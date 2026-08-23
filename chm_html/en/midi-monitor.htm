@@ -45,8 +45,10 @@
 <dt>Vibrato / Filter / Envelope / EQ / NRPN</dt>
 <dd>Live controller / NRPN state for those areas.</dd>
 <dt>Keyboard (mini keys on the right)</dt>
-<dd>Keys that are currently down light up.</dd>
+<dd>Keys that are down light up. Click a key to play that part through the current playback path.</dd>
 </dl>
+<h2>Playing from the mini keyboard and sliders</h2>
+<p>Clicks on the mini keyboard and drags on volume / pan / CC actually reach the synth, not just the display. During <a href="vst-midi.htm">Playing .mid through a VST</a>, they enter the same VST as the song (including 64-bit modules). Clicking a key does not rewind the song or reset other parts. When both VST slots are empty and playback falls to the MIDI Mapper, shorts go to that device; song tempo (event timing) and SysEx go there too. During <a href="kpi.htm">Adding formats with KPI plug-ins</a> MIDI playback the plugin has no MIDI input, so keys and CC go to the MIDI-out device in Rendering (the Mapper if none is set).</p>
 <h2>View modes (2D / Soft 3D)</h2>
 <ul>
 <li><b>Normal (2D)</b> — table layout; the default.</li>

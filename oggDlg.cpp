@@ -19456,11 +19456,30 @@ static bool VstRemoteRenderSlot(int slot, uint32_t bytesWanted, std::vector<uint
 	if (slot < 0 || slot >= XF_SLOTS) slot = 0;
 	BYTE ports[64];
 	DWORD msgs[64];
+	int ofs[64];
 	/* ライブ鍵盤の注入は現行曲のエンジンだけに渡す */
-	const int n = (slot == XfActiveSlot()) ? VstMidiStealInjects(ports, msgs, 64) : 0;
+	const int n = (slot == XfActiveSlot()) ? VstMidiStealInjects(ports, msgs, ofs, 64) : 0;
+	if (n > 0) {
+		int rewind = 0;
+		for (int i = 0; i < n; ++i) {
+			const int st = (int)(msgs[i] & 0xf0);
+			if (st == 0x80 || st == 0x90) { rewind = 1; break; }
+		}
+		if (rewind) {
+			/* 先読みを捨てて今の位置から描き直す。VstSeek は GS リセットまで
+			 * 巻き戻すので、モニタ鍵盤を押しただけで他パートの音色が変わる。 */
+			VstPrefetch& pf = g_vstPf[slot];
+			if (pf.csReady) {
+				EnterCriticalSection(&pf.cs);
+				pf.head = 0;
+				pf.used = 0;
+				LeaveCriticalSection(&pf.cs);
+			}
+		}
+	}
 	VstMidiSetIoSlot(slot);
 	return g_kpiHost.VstRender(bytesWanted, pcm, eof, ports,
-		reinterpret_cast<const uint32_t*>(msgs), (uint32_t)n, (uint32_t)slot);
+		reinterpret_cast<const uint32_t*>(msgs), ofs, (uint32_t)n, (uint32_t)slot);
 }
 
 static bool VstRemoteRender(uint32_t bytesWanted, std::vector<uint8_t>& pcm, bool& eof)
@@ -19766,7 +19785,7 @@ int playwavvst(BYTE* bw, int old, int l1, int l2)
 		}
 	}
 	if (rrr > 0) {
-		if (VstSilenceAccum(bw + old, rrr)) {
+		if (VstMidiHasPluginAudio() && VstSilenceAccum(bw + old, rrr)) {
 			if (doLoop) {
 				VstSeekLoopStart();
 			} else {
@@ -19817,7 +19836,7 @@ int playwavvst(BYTE* bw, int old, int l1, int l2)
 			}
 		}
 		if (r2 > 0) {
-			if (VstSilenceAccum(bw, r2)) {
+			if (VstMidiHasPluginAudio() && VstSilenceAccum(bw, r2)) {
 				if (doLoop)
 					VstSeekLoopStart();
 				else
@@ -25391,15 +25410,16 @@ void COggDlg::timerp()
 		SongParams_Sync(false);
 
 	if (drawth == TRUE) return;
+	const int thruMute = VstLiveThruIsOn();
 	if (m_dsb && thn1 == FALSE) {
-		if (savedata.dsvol == -498)
+		if (thruMute || savedata.dsvol == -498)
 			m_dsb->SetVolume(DSBVOLUME_MIN);
 		else
 			m_dsb->SetVolume((savedata.dsvol - 1) * 7);
 	}
 	if (drawth == TRUE) return;
 	if (DougaPitchCorrect_IsActive()) {
-		DougaPitchCorrect_SetVolumeDsPos(savedata.dsvol);
+		DougaPitchCorrect_SetVolumeDsPos(thruMute ? -498 : savedata.dsvol);
 	} else if (pBasicAudio) {
 		if (savedata.dsvol == -498)
 			pBasicAudio->put_Volume(-10000);

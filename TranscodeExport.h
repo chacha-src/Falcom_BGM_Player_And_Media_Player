@@ -131,3 +131,5 @@ protected:
 // wavPath: 本アプリの書き出しWAV(80byteヘッダ)。outPath: .mp3 / .flac
 BOOL EncodeWavToMp3(const CString& wavPath, const CString& outPath, int bitrateKbps);
 BOOL EncodeWavToFlac(const CString& wavPath, const CString& outPath, int compressionLevel);
+CString TcMakeTempWavPath();
+BOOL TcAppendCrossfadeWav(const CString& accumPath, const CString& nextPath, float xfadeSec);

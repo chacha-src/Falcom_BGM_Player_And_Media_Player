@@ -1134,7 +1134,7 @@ static void ServeOnce(HANDLE pipe)
 				for (uint32_t i = 0; i < nInj; ++i) {
 					if ((size_t)(end - q) < sizeof(KPIHOST64_VstLiveMidiReq)) break;
 					auto* mr = (const KPIHOST64_VstLiveMidiReq*)q;
-					VstMidiInjectShort((int)mr->port, mr->msg);
+					VstMidiInjectShort((int)mr->port, mr->msg, (int)mr->sampleOfs);
 					q += sizeof(KPIHOST64_VstLiveMidiReq);
 				}
 			}

@@ -66,7 +66,7 @@ int VstMidiOpen(const wchar_t* midPath, const wchar_t hints[][128],
 	int hintCount, HWND parentForWait);
 void VstMidiClose(void);
 int VstMidiRead(BYTE* dst, int bytesWanted);
-// 1 if a real plug or ensemble is active (not builtin-only).
+// 1 = VST/ensemble が PCM を出す。マッパーのみは 0（PCM は無音でも曲は続く）。
 int VstMidiHasPluginAudio(void);
 void VstMidiLog(const wchar_t* msg);
 int VstMidiSeekSamples(__int64 samplePos);
@@ -102,15 +102,21 @@ int VstMidiBankMsbIsSdNative(int msb);
 int VstMidiGsMapDropFromUsed(const unsigned short* pairs, int nPairs);
 
 // Live MIDI を曲エンジンへ差し込む（モニタの CC / 鍵盤）。キューして次のブロックで送る。
-void VstMidiInjectShort(int portIndex0to2, DWORD shortMsg);
+void VstMidiInjectShort(int portIndex0to2, DWORD shortMsg, int sampleOfs);
 // x86→KpiHost64: 曲レンダーに乗せるためキューを奪う。ローカル再生では呼ばない。
-int VstMidiStealInjects(BYTE* ports, DWORD* msgs, int maxCount);
+int VstMidiStealInjects(BYTE* ports, DWORD* msgs, int* sampleOfs, int maxCount);
 
 int VstLiveLoadPart(int part1to32, const wchar_t* pluginPath, int isVst3);
 void VstLiveUnloadPart(int part1to32);
 void VstLiveAllNotesOff();
 void VstLiveMidiShort(int portIndex0to2, DWORD shortMsg);
 void VstLiveMidiSysex(int portIndex0to2, const unsigned char* data, int bytes);
+void VstLiveThruSet(int enable);
+int VstLiveThruIsOn(void);
+void VstLiveThruBind(const wchar_t* midPath);
+void VstLiveThruPoll(__int64 playSample);
+void VstLiveThruPcmPush(const BYTE* pcm, int bytes, int rate, int ch, int bits);
+void VstLiveThruPcmMix(float* L, float* R, int frames);
 int VstLiveRender(float* L, float* R, int frames);
 int VstLiveEditorOpen(int part1to32);
 void VstLiveEditorClose(int part1to32);

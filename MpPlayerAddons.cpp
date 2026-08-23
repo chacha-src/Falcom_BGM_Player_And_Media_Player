@@ -75,6 +75,7 @@ extern int g_ds_pcm_rate;
 extern int g_ds_pcm_ch;
 extern int g_ds_pcm_bits;
 extern int g_outBytesPerFrame;
+extern "C" void VstLiveThruPcmPush(const BYTE* pcm, int bytes, int rate, int ch, int bits);
 extern CString fnn, tagname, tagfile, tagalbum;
 extern CString stitle;
 extern BOOL videoonly;
@@ -2592,6 +2593,21 @@ static void MpRemAacPushStereo16Locked(const short* stereo, int frames, int srcR
 void MpRemoteWritePcm(const BYTE* pcm, int bytes)
 {
 	if (!pcm || bytes <= 0) return;
+	{
+		const int rate = (g_ds_pcm_rate >= 8000) ? g_ds_pcm_rate : ((wavbit_sample_Hz >= 8000) ? wavbit_sample_Hz : 44100);
+		const int ch = (g_ds_pcm_ch >= 1) ? g_ds_pcm_ch : 2;
+		int bits = g_ds_pcm_bits;
+		int bpf = (g_outBytesPerFrame > 0) ? g_outBytesPerFrame : 0;
+		if (bpf >= ch && ch > 0) {
+			const int bps = bpf / ch;
+			if (bps == 4) bits = 32;
+			else if (bps == 3) bits = 24;
+			else if (bps == 1) bits = 8;
+			else bits = 16;
+		}
+		if (bits != 8 && bits != 16 && bits != 24 && bits != 32) bits = 16;
+		VstLiveThruPcmPush(pcm, bytes, rate, ch, bits);
+	}
 	if (!savedata.mpRemoteOn || !savedata.mpRemoteAac) return;
 	if (InterlockedCompareExchange(&g_mpRemAacClients, 0, 0) <= 0) return;
 
