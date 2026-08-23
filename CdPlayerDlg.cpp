@@ -31,6 +31,8 @@
 #include "CAnalyzerDlg.h"
 #include "CPianoRoll.h"
 
+void RestoreAppSessionVolumeToUnity();
+
 #pragma comment(lib, "winmm.lib")
 #pragma comment(lib, "wininet.lib")
 #pragma comment(lib, "crypt32.lib")
@@ -762,8 +764,8 @@ void CCdHelpDlg::OnPaint()
 		L"· Open via de CD-knop. Kies het station en laad de TOC.",
 		L"· Otworz przyciskiem CD. Wybierz naped i wczytaj TOC.",
 		L"· Alt cubuk CD ile acin. Surucuyu secip TOC yukleyin.");
-	lines[1] = LL14(L"· 再生／一時停止／停止／前後／音量。シーク横の A / B / 解除で A-B ループ（［ ］ でも可）。音量、リピート、シャッフルもあります。",
-		L"· Play / pause / stop / prev / next / volume. A / B / Clear beside the seek bar set an A-B loop (or [ ]). Repeat and shuffle too.",
+	lines[1] = LL14(L"· 再生／一時停止／停止／前後／音量。シーク横の A / B / 解除で A-B ループ（［ ］ でも可）。ここの音量はCDだけです（本体の主音量やDS音量は変わりません）。リピート、シャッフルもあります。",
+		L"· Play / pause / stop / prev / next / volume. A / B / Clear beside the seek bar set an A-B loop (or [ ]). CD volume is CD-only (main/DS sliders stay put). Repeat and shuffle too.",
 		L"· Lecture / pause / stop / prec. / suiv. / volume. A / B / Effacer a cote du seek font A-B (ou [ ]). Repetition et aleatoire aussi.",
 		L"· Play / pausa / stop / prec. / succ. / volume. A / B / Cancella accanto al seek fanno A-B (o [ ]). Ripetizione e casuale anche.",
 		L"· Reproducir / pausa / stop / ant. / sig. / volumen. A / B / Quitar junto al seek hacen A-B (o [ ]). Repeticion y aleatorio tambien.",
@@ -881,6 +883,7 @@ CCdPlayerDlg::CCdPlayerDlg(CWnd* pParent)
 	m_playStop = m_ripStop = m_lookupStop = m_burnStop = 0;
 	m_playTh = m_ripTh = m_lookupTh = m_coverTh = m_burnTh = NULL;
 	m_hwo = NULL;
+	m_playVol = 80;
 	m_waveEvt = CreateEvent(NULL, FALSE, FALSE, NULL);
 	m_trackN = m_firstTrack = 0;
 	ZeroMemory(m_startLba, sizeof(m_startLba));
@@ -1245,6 +1248,7 @@ BOOL CCdPlayerDlg::OnInitDialog()
 	int vol = savedata.cdVolume;
 	if (vol < 0 || vol > 100) vol = 80;
 	m_vol.SetPos(vol);
+	InterlockedExchange(&m_playVol, vol);
 
 	m_fmt.ResetContent();
 	m_fmt.AddString(L"WAV");
@@ -2109,12 +2113,67 @@ void CCdPlayerDlg::OnListClick(NMHDR* pNMHDR, LRESULT* pResult)
 	}
 }
 
+static void CdScalePcm(BYTE* p, int bytes, int bits, int volPct)
+{
+	if (!p || bytes <= 0) return;
+	if (volPct >= 100) return;
+	if (volPct < 0) volPct = 0;
+	if (volPct <= 0) {
+		ZeroMemory(p, bytes);
+		return;
+	}
+	if (bits == 16) {
+		INT16* s = (INT16*)p;
+		const int n = bytes / 2;
+		for (int i = 0; i < n; ++i) {
+			int x = ((int)s[i] * volPct) / 100;
+			if (x > 32767) x = 32767;
+			if (x < -32768) x = -32768;
+			s[i] = (INT16)x;
+		}
+		return;
+	}
+	if (bits == 24) {
+		for (int i = 0; i + 2 < bytes; i += 3) {
+			int v = (int)p[i] | ((int)p[i + 1] << 8) | ((int)(signed char)p[i + 2] << 16);
+			v = (int)(((__int64)v * volPct) / 100);
+			if (v > 8388607) v = 8388607;
+			if (v < -8388608) v = -8388608;
+			p[i] = (BYTE)(v & 0xFF);
+			p[i + 1] = (BYTE)((v >> 8) & 0xFF);
+			p[i + 2] = (BYTE)((v >> 16) & 0xFF);
+		}
+		return;
+	}
+	if (bits == 32) {
+		int* s = (int*)p;
+		const int n = bytes / 4;
+		for (int i = 0; i < n; ++i) {
+			__int64 x = ((__int64)s[i] * volPct) / 100;
+			if (x > 2147483647) x = 2147483647;
+			if (x < -2147483647 - 1) x = -2147483647 - 1;
+			s[i] = (int)x;
+		}
+		return;
+	}
+	if (bits == 8) {
+		for (int i = 0; i < bytes; ++i) {
+			int x = ((int)p[i] - 128) * volPct / 100 + 128;
+			if (x < 0) x = 0;
+			if (x > 255) x = 255;
+			p[i] = (BYTE)x;
+		}
+	}
+}
+
 void CCdPlayerDlg::ApplyVolume()
 {
-	if (!m_hwo) return;
-	const int v = m_vol.GetPos();
-	DWORD w = (DWORD)((v * 0xFFFFu) / 100);
-	waveOutSetVolume(m_hwo, (w << 16) | w);
+	int v = m_vol.GetPos();
+	if (v < 0) v = 0;
+	if (v > 100) v = 100;
+	InterlockedExchange(&m_playVol, v);
+	// waveOutSetVolume は Vista 以降、このプロセスのセッション音量まで動かす。
+	// CD つまみで本体の WAV/MIDI なども一緒に小さくなるので使わない。
 }
 
 void CCdPlayerDlg::StopPlay(BOOL join)
@@ -2497,6 +2556,8 @@ UINT __stdcall CCdPlayerDlg::PlayThread(void* p)
 		return 0;
 	}
 	self->m_hwo = hwo;
+	waveOutSetVolume(hwo, 0xFFFFFFFFu);
+	RestoreAppSessionVolumeToUnity();
 	self->ApplyVolume();
 	const int bufBytes = CD_PLAY_SECS * 2352;
 	const int dstBpf = dCh * (dBits / 8);
@@ -2781,6 +2842,7 @@ UINT __stdcall CCdPlayerDlg::PlayThread(void* p)
 			dest = outP[next];
 		}
 		if (got <= 0) continue;
+		CdScalePcm(dest, got, dBits, (int)InterlockedCompareExchange(&self->m_playVol, 0, 0));
 		hdr[next].lpData = (LPSTR)dest;
 		hdr[next].dwBufferLength = (DWORD)got;
 		hdr[next].dwFlags &= ~WHDR_DONE;
@@ -2832,6 +2894,8 @@ UINT __stdcall CCdPlayerDlg::PlayThread(void* p)
 		if (outAlloc && outP[i] && outP[i] != pcm[i]) free(outP[i]);
 	}
 	free(pcmBlk);
+	waveOutSetVolume(hwo, 0xFFFFFFFFu);
+	RestoreAppSessionVolumeToUnity();
 	waveOutClose(hwo);
 	self->m_hwo = NULL;
 	return 0;

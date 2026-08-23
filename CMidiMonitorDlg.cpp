@@ -565,20 +565,20 @@ void CMmHelpDlg::OnPaint()
 		L"· PC# BNK Map …… Program, banka, GS/XG haritasi. Isimler SASAMI_GS/XG.DAT'tan."));
 	y += lh;
 	body(L, y, LL14(
-		L"・Lev は発音。Vol/Pan/Exp 等は動いているとき明るく、初期値のままなら暗くなります。ヘッダ Vol は再生音量（ドラッグで本体/MP と同期）。Notes は実発音数、暗いバーが MAX（少しして減衰）。DRUM はドラムパートのヒット。",
-		L"· Lev is level. Vol/Pan/Exp light up while moving, stay dim at defaults. Header Vol is playback volume (drag syncs with the main/MP slider). Notes is held polyphony; the dim bar is MAX (holds, then decays). DRUM lights on drum hits.",
-		L"· Lev = niveau. Vol/Pan/Exp s'allument en mouvement. Vol d'en-tete = volume (glisser = sync MP). Notes = polyphonie reelle; barre sombre = MAX (puis baisse). DRUM = hits batterie.",
-		L"· Lev e il livello. Vol/Pan/Exp si illuminano se si muovono. Vol in testa = volume (trascina = sync MP). Notes = polifonia reale; barra scura = MAX (poi scende). DRUM = colpi batteria.",
-		L"· Lev es el nivel. Vol/Pan/Exp se iluminan al moverse. Vol de cabecera = volumen (arrastrar = sync MP). Notes = polifonia real; barra oscura = MAX (luego baja). DRUM = golpes de bateria.",
-		L"· Lev는 레벨. Vol/Pan/Exp는 움직일 때 밝고, 기본값이면 어둡습니다. 헤더 Vol은 재생 음량(드래그하면 본체/MP와 동기). Notes는 실제 발음 수, 어두운 바는 MAX(잠시 후 감쇠). DRUM은 드럼 타격.",
-		L"· Lev 是电平。Vol/Pan/Exp 在变化时发亮。页眉 Vol 是播放音量（拖动与主界面/MP 同步）。Notes 是实际发音数，暗条是 MAX（稍后衰减）。DRUM 表示鼓组敲击。",
-		L"· Lev هو المستوى. Vol الرأس = حجم التشغيل. Notes = تعدد الأصوات الفعلي؛ الشريط الداكن = MAX ثم ينخفض. DRUM لضربات الطبل.",
-		L"· Lev — уровень. Vol в шапке — громкость. Notes — реальная полифония; тёмная полоса — MAX (потом спадает). DRUM — удары барабанов.",
-		L"· Lev ist Pegel. Kopf-Vol ist Wiedergabelautstaerke. Notes ist echte Polyphonie; die dunkle Leiste ist MAX (dann Abfall). DRUM = Drum-Hits.",
-		L"· Lev e o nivel. Vol do cabecalho e o volume. Notes e a polifonia real; a barra escura e MAX (depois cai). DRUM = batidas de bateria.",
-		L"· Lev is niveau. Kop-Vol is afspeelvolume. Notes is echte polyfonie; de donkere balk is MAX (daarna verval). DRUM = drumhits.",
-		L"· Lev to poziom. Vol w naglowku to glosnosc. Notes to rzeczywista polifonia; ciemny pasek to MAX (potem opada). DRUM = uderzenia perkusji.",
-		L"· Lev seviyedir. Baslik Vol oynatma sesidir. Notes gercek polifonidir; koyu cubuk MAX'tir (sonra duser). DRUM davul vurusudur."));
+		L"・Lev は発音。Vol/Pan/Exp 等は動いているとき明るく、初期値のままなら暗くなります。ヘッダ DS は DirectSound 音量（ドラッグで MP の DS 音量と同期。主音量とは別）。Notes は実発音数、暗いバーが MAX（少しして減衰）。DRUM はドラムパートのヒット。",
+		L"· Lev is level. Vol/Pan/Exp light up while moving, stay dim at defaults. Header DS is DirectSound volume (drag syncs with the MP DS slider, not master volume). Notes is held polyphony; the dim bar is MAX (holds, then decays). DRUM lights on drum hits.",
+		L"· Lev = niveau. Vol/Pan/Exp s'allument en mouvement. DS d'en-tete = volume DirectSound (glisser = sync MP DS, pas le volume maitre). Notes = polyphonie reelle; barre sombre = MAX (puis baisse). DRUM = hits batterie.",
+		L"· Lev e il livello. Vol/Pan/Exp si illuminano se si muovono. DS in testa = volume DirectSound (trascina = sync MP DS, non il master). Notes = polifonia reale; barra scura = MAX (poi scende). DRUM = colpi batteria.",
+		L"· Lev es el nivel. Vol/Pan/Exp se iluminan al moverse. DS de cabecera = volumen DirectSound (arrastrar = sync MP DS, no el master). Notes = polifonia real; barra oscura = MAX (luego baja). DRUM = golpes de bateria.",
+		L"· Lev는 레벨. Vol/Pan/Exp는 움직일 때 밝고, 기본값이면 어둡습니다. 헤더 DS는 DirectSound 음량(드래그하면 MP DS와 동기, 주음량과 별개). Notes는 실제 발음 수, 어두운 바는 MAX(잠시 후 감쇠). DRUM은 드럼 타격.",
+		L"· Lev 是电平。Vol/Pan/Exp 在变化时发亮。页眉 DS 是 DirectSound 音量（拖动与 MP 的 DS 同步，与主音量分开）。Notes 是实际发音数，暗条是 MAX（稍后衰减）。DRUM 表示鼓组敲击。",
+		L"· Lev هو المستوى. DS في الرأس = مستوى DirectSound (يسحب مع DS في MP لا الصوت الرئيسي). Notes = تعدد الأصوات الفعلي؛ الشريط الداكن = MAX ثم ينخفض. DRUM لضربات الطبل.",
+		L"· Lev — уровень. DS в шапке — громкость DirectSound (синхрон с DS на MP, не мастер). Notes — реальная полифония; тёмная полоса — MAX (потом спадает). DRUM — удары барабанов.",
+		L"· Lev ist Pegel. Kopf-DS ist DirectSound-Lautstaerke (sync mit MP-DS, nicht Master). Notes ist echte Polyphonie; die dunkle Leiste ist MAX (dann Abfall). DRUM = Drum-Hits.",
+		L"· Lev e o nivel. DS do cabecalho e o volume DirectSound (sync com DS do MP, nao o master). Notes e a polifonia real; a barra escura e MAX (depois cai). DRUM = batidas de bateria.",
+		L"· Lev is niveau. Kop-DS is DirectSound-volume (sync met MP-DS, niet master). Notes is echte polyfonie; de donkere balk is MAX (daarna verval). DRUM = drumhits.",
+		L"· Lev to poziom. DS w naglowku to glosnosc DirectSound (sync z DS w MP, nie master). Notes to rzeczywista polifonia; ciemny pasek to MAX (potem opada). DRUM = uderzenia perkusji.",
+		L"· Lev seviyedir. Baslik DS DirectSound sesidir (MP DS ile eslenir, ana ses degil). Notes gercek polifonidir; koyu cubuk MAX'tir (sonra duser). DRUM davul vurusudur."));
 	y += lh;
 	body(L, y, LL14(
 		L"・Vol/Pan/Exp/Rev/Crs/Var はドラッグまたはホイールで送出（ダブルクリックで初期値）。PC# はホイールでプログラム変更。右端のミニ鍵盤はクリックで発音。曲の CC より約2.5秒優先します。",
@@ -878,7 +878,7 @@ void CMidiMonitorDlg::ApplyNrpn(Part& p)
 	}
 }
 
-void CMidiMonitorDlg::ApplyShort(int port, DWORD msg)
+void CMidiMonitorDlg::ApplyShort(int port, DWORD msg, BOOL fromUser)
 {
 	const int st = msg & 0xf0;
 	const int ch = msg & 0x0f;
@@ -909,7 +909,7 @@ void CMidiMonitorDlg::ApplyShort(int port, DWORD msg)
 		if (p.held > 0) p.held--;
 		m_dirtyRows |= (1u << part);
 	} else if (st == 0xc0) {
-		if (!IsLatched(part, MM_LATCH_PC)) {
+		if (fromUser || !IsLatched(part, MM_LATCH_PC)) {
 			p.pc = d1 & 127;
 			RefreshPartName(p);
 			m_dirtyRows |= (1u << part);
@@ -927,12 +927,12 @@ void CMidiMonitorDlg::ApplyShort(int port, DWORD msg)
 			RefreshPartName(p);
 			m_dirtyRows |= (1u << part);
 		}
-		else if (d1 == 7) { if (!IsLatched(part, MM_LATCH_VOL)) { if (p.vol != d2) p.glowVol = 255; p.vol = d2; m_dirtyRows |= (1u << part); } }
-		else if (d1 == 11) { if (!IsLatched(part, MM_LATCH_EXP)) { if (p.exp != d2) p.glowExp = 255; p.exp = d2; m_dirtyRows |= (1u << part); } }
-		else if (d1 == 10) { if (!IsLatched(part, MM_LATCH_PAN)) { if (p.pan != d2) p.glowPan = 255; p.pan = d2; m_dirtyRows |= (1u << part); } }
-		else if (d1 == 91) { if (!IsLatched(part, MM_LATCH_REV)) { if (p.rev != d2) p.glowRev = 255; p.rev = d2; m_dirtyRows |= (1u << part); } }
-		else if (d1 == 93) { if (!IsLatched(part, MM_LATCH_CRS)) { if (p.crs != d2) p.glowCrs = 255; p.crs = d2; m_dirtyRows |= (1u << part); } }
-		else if (d1 == 94) { if (!IsLatched(part, MM_LATCH_VAR)) { if (p.var != d2) p.glowVar = 255; p.var = d2; m_dirtyRows |= (1u << part); } }
+		else if (d1 == 7) { if (fromUser || !IsLatched(part, MM_LATCH_VOL)) { if (p.vol != d2) p.glowVol = 255; p.vol = d2; m_dirtyRows |= (1u << part); } }
+		else if (d1 == 11) { if (fromUser || !IsLatched(part, MM_LATCH_EXP)) { if (p.exp != d2) p.glowExp = 255; p.exp = d2; m_dirtyRows |= (1u << part); } }
+		else if (d1 == 10) { if (fromUser || !IsLatched(part, MM_LATCH_PAN)) { if (p.pan != d2) p.glowPan = 255; p.pan = d2; m_dirtyRows |= (1u << part); } }
+		else if (d1 == 91) { if (fromUser || !IsLatched(part, MM_LATCH_REV)) { if (p.rev != d2) p.glowRev = 255; p.rev = d2; m_dirtyRows |= (1u << part); } }
+		else if (d1 == 93) { if (fromUser || !IsLatched(part, MM_LATCH_CRS)) { if (p.crs != d2) p.glowCrs = 255; p.crs = d2; m_dirtyRows |= (1u << part); } }
+		else if (d1 == 94) { if (fromUser || !IsLatched(part, MM_LATCH_VAR)) { if (p.var != d2) p.glowVar = 255; p.var = d2; m_dirtyRows |= (1u << part); } }
 		else if (d1 == 71) { p.rsn = d2 - 64; m_dirtyRows |= (1u << part); }
 		else if (d1 == 74) { p.lpf = d2 - 64; m_dirtyRows |= (1u << part); }
 		else if (d1 == 72) { p.rls = d2 - 64; m_dirtyRows |= (1u << part); }
@@ -1449,7 +1449,7 @@ void CMidiMonitorDlg::DrawHeader(CDC& dc, int w, int headH, UINT dpi)
 		dc.FillSolidRect(tx, vy + 1, 1, vh - 2, RGB(36, 52, 36));
 	}
 	wchar_t volT[32];
-	_snwprintf_s(volT, _TRUNCATE, L"Vol %d%%", pct);
+	_snwprintf_s(volT, _TRUNCATE, L"DS %d%%", pct);
 	dc.SetTextColor(RGB(245, 255, 245));
 	dc.TextOut(vx + Scale(4, dpi), Scale(21, dpi), volT);
 
@@ -1614,11 +1614,14 @@ void CMidiMonitorDlg::TickVisuals()
 
 int CMidiMonitorDlg::AppVolPercent() const
 {
-	if (!og || !::IsWindow(og->GetSafeHwnd())) return m_masterVol;
-	int mn = 0, mx = 100000;
-	og->m_sl.GetRange(mn, mx);
+	int mn = -498, mx = 1;
+	if (og && og->m_dsval.GetSafeHwnd())
+		og->m_dsval.GetRange(mn, mx);
 	if (mx <= mn) return 100;
-	int pct = (og->m_sl.GetPos() - mn) * 100 / (mx - mn);
+	int pos = savedata.dsvol;
+	if (og && og->m_dsval.GetSafeHwnd())
+		pos = og->m_dsval.GetPos();
+	int pct = (pos - mn) * 100 / (mx - mn);
 	if (pct < 0) pct = 0;
 	if (pct > 100) pct = 100;
 	return pct;
@@ -1628,11 +1631,15 @@ void CMidiMonitorDlg::SetAppVolPercent(int pct)
 {
 	if (pct < 0) pct = 0;
 	if (pct > 100) pct = 100;
-	if (!og || !::IsWindow(og->GetSafeHwnd())) return;
-	int mn = 0, mx = 100000;
-	og->m_sl.GetRange(mn, mx);
+	int mn = -498, mx = 1;
+	if (og && og->m_dsval.GetSafeHwnd())
+		og->m_dsval.GetRange(mn, mx);
 	if (mx <= mn) return;
-	og->m_sl.SetPos(mn + pct * (mx - mn) / 100);
+	const int pos = mn + pct * (mx - mn) / 100;
+	if (og && og->m_dsval.GetSafeHwnd())
+		og->m_dsval.SetPos(pos);
+	savedata.dsvol = pos;
+	if (savedata.dsvol == 0) savedata.dsvol = 1;
 	m_masterVol = pct;
 	m_dirtyHead = true;
 }
@@ -1745,7 +1752,7 @@ void CMidiMonitorDlg::InjectShort(int part, DWORD msg)
 		if (s_kpiLiveOut)
 			midiOutShortMsg(s_kpiLiveOut, msg);
 	}
-	ApplyShort(port, msg);
+	ApplyShort(port, msg, TRUE);
 	const int st = (int)(msg & 0xf0);
 	if (st == 0xb0) {
 		const int cc = (int)((msg >> 8) & 0x7f);
@@ -2172,10 +2179,9 @@ void CMidiMonitorDlg::OnTimer(UINT_PTR nIDEvent)
 			if (!m_frozen) {
 				SyncFromPlayback();
 				TickVisuals();
-				PollAppVolume();
+				if (!m_volDragging)
+					PollAppVolume();
 			}
-			if (m_volDragging)
-				PollAppVolume();
 			InvalidateDirty();
 		}
 	}

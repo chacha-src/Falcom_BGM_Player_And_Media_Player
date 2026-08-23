@@ -137,7 +137,7 @@ private:
 	void UnloadMidi();
 	void ResetParts();
 	void ApplyEvent(const MmEv& e);
-	void ApplyShort(int port, DWORD msg);
+	void ApplyShort(int port, DWORD msg, BOOL fromUser = FALSE);
 	void ApplySysex(const BYTE* d, int n);
 	void ApplyNrpn(Part& p);
 	void RefreshPartName(Part& p);

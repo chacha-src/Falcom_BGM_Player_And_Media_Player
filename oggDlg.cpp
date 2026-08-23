@@ -6957,6 +6957,7 @@ static int XfSoftOpenSlot(int slot, const CString& path, int openMode)
 static ISimpleAudioVolume* FindCurrentProcessSimpleVolume();
 static DWORD WINAPI MixerMuteCheckThread(LPVOID);
 void CheckCurrentAppMixerMuteModal();
+void RestoreAppSessionVolumeToUnity();
 static bool GetMasterMuteState(BOOL* muted);
 bool CheckMixerMuteOnPlayModal();
 
@@ -25416,6 +25417,15 @@ void COggDlg::timerp()
 			m_dsb->SetVolume(DSBVOLUME_MIN);
 		else
 			m_dsb->SetVolume((savedata.dsvol - 1) * 7);
+	}
+	// CD の waveOutSetVolume がプロセスのセッション音量まで下げたあと、
+	// WASAPI 主音量スライダーはエンドポイント側なので表示は元のまま小さくなる。
+	if (deve && audio) {
+		static int s_sessionVolRestored = 0;
+		if (!s_sessionVolRestored) {
+			s_sessionVolRestored = 1;
+			RestoreAppSessionVolumeToUnity();
+		}
 	}
 	if (drawth == TRUE) return;
 	if (DougaPitchCorrect_IsActive()) {

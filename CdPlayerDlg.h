@@ -225,6 +225,7 @@ public:
 	volatile LONG m_burnStop;
 	HANDLE m_playTh, m_ripTh, m_lookupTh, m_coverTh, m_burnTh;
 	HWAVEOUT m_hwo;
+	volatile LONG m_playVol;
 	HANDLE m_waveEvt;
 	int m_trackN;
 	int m_firstTrack;

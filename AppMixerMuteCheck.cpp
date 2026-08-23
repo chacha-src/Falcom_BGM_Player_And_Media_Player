@@ -73,6 +73,18 @@ static DWORD WINAPI MixerMuteCheckThread(LPVOID)
 	return 0;
 }
 
+void RestoreAppSessionVolumeToUnity()
+{
+	HRESULT hr = CoInitialize(NULL);
+	if (FAILED(hr) && hr != RPC_E_CHANGED_MODE) return;
+	ISimpleAudioVolume* simple = FindCurrentProcessSimpleVolume();
+	if (simple) {
+		simple->SetMasterVolume(1.0f, NULL);
+		simple->Release();
+	}
+	if (hr == S_OK) CoUninitialize();
+}
+
 void CheckCurrentAppMixerMuteModal()
 {
 	HRESULT hr = CoInitialize(NULL);
