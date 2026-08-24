@@ -89,9 +89,9 @@ int VstMidiGetIoSlot(void);
 void VstMidiCloseSlot(int slot);
 
 // MIDI メタ/ファイル名から GS マップ種別。
-// 0=なし 1=55 2=88 3=88Pro 4=8820/50 5=GM 6=SD-90 7=XG(タイトル)。
+// 0=なし 1=55 2=88 3=88Pro 4=8820/50 5=GM 6=SD-90 7=XG(タイトル) 8=LA(MT-32) 9=GM2 10..=ETC。
 int VstMidiGuessGsMapKind(const wchar_t* title, const wchar_t* path);
-// 複数メタを畳む。8820>88Pro>88>55 が GM/SD/XG タイトルより強い。
+// 複数メタを畳む。8820>88Pro>88>LA>55 が GM/SD/XG タイトルより強い。
 int VstMidiFoldGsMapHint(int cur, int kind);
 int VstMidiSysexIsGmOn(const unsigned char* d, int n);
 int VstMidiSysexIsGsReset(const unsigned char* d, int n);

@@ -32,7 +32,24 @@ enum {
 	IDM_MM_RELOAD = 42456,
 	IDM_MM_MAP_AUTO = 42457,
 	IDM_MM_MAP_GS = 42458,
-	IDM_MM_MAP_XG = 42459
+	IDM_MM_MAP_XG = 42459,
+	IDM_MM_MAP_55 = 42460,
+	IDM_MM_MAP_88 = 42461,
+	IDM_MM_MAP_88P = 42462,
+	IDM_MM_MAP_8820 = 42463,
+	IDM_MM_MAP_GM = 42464,
+	IDM_MM_MAP_SD = 42465,
+	IDM_MM_MAP_LA = 42466,
+	IDM_MM_MAP_GM2 = 42467,
+	IDM_MM_MAP_NS = 42468,
+	IDM_MM_MAP_KW = 42469,
+	IDM_MM_MAP_SG = 42470,
+	IDM_MM_MAP_KR = 42471,
+	IDM_MM_MAP_PA = 42472,
+	IDM_MM_MAP_CS = 42473,
+	IDM_MM_MAP_GEM = 42474,
+	IDM_MM_MAP_LK = 42475,
+	IDM_MM_MAP_PV = 42476
 };
 
 HMIDIOUT s_kpiLiveOut = NULL;
@@ -184,7 +201,11 @@ static BYTE* s_gsDat = NULL;
 static int s_gsBytes = 0;
 static BYTE* s_xgDat = NULL;
 static int s_xgBytes = 0;
+static BYTE* s_exDat = NULL;
+static int s_exBytes = 0;
 static int s_datTried = 0;
+static wchar_t s_exLbl[32][12];
+static int s_exLblReady = 0;
 
 static void MmCopyW(wchar_t* dst, int n, const wchar_t* src)
 {
@@ -270,6 +291,9 @@ static void MmEnsureDat()
 		MmLoadFileDat(L"C:\\Windows\\SASAMI_GS.DAT", &s_gsDat, &s_gsBytes);
 	if (!MmLoadResDat(IDR_SASAMI_XG, &s_xgDat, &s_xgBytes))
 		MmLoadFileDat(L"C:\\Windows\\SASAMI_XG.DAT", &s_xgDat, &s_xgBytes);
+	if (!MmLoadResDat(IDR_SASAMI_EX, &s_exDat, &s_exBytes))
+		MmLoadFileDat(L"C:\\Windows\\SASAMI_EX.DAT", &s_exDat, &s_exBytes);
+	s_exLblReady = 0;
 }
 
 static void MmSjisToW(const char* src, int srcN, wchar_t* dst, int dstN)
@@ -290,7 +314,8 @@ static BOOL MmLookupGs(int mapId, int bank, int pc, wchar_t* out, int outN)
 {
 	if (!s_gsDat || s_gsBytes < 20) return FALSE;
 	const int rec = s_gsBytes / 20;
-	for (int pass = 0; pass < 3; ++pass) {
+	const int npass = (mapId == 0 || mapId == 6) ? 1 : 3;
+	for (int pass = 0; pass < npass; ++pass) {
 		int wantMap = mapId, wantBank = bank, wantPc = pc;
 		if (pass == 1) { wantMap = 4; wantBank = bank; }
 		if (pass == 2) { wantMap = 4; wantBank = 0; }
@@ -303,6 +328,59 @@ static BOOL MmLookupGs(int mapId, int bank, int pc, wchar_t* out, int outN)
 		}
 	}
 	return FALSE;
+}
+
+static BOOL MmLookupEx(int mapId, int bank, int pc, wchar_t* out, int outN)
+{
+	if (!s_exDat || s_exBytes < 20) return FALSE;
+	const int rec = s_exBytes / 20;
+	for (int i = 0; i < rec; ++i) {
+		const BYTE* r = s_exDat + i * 20;
+		if (r[0] == (BYTE)mapId && r[1] == (BYTE)bank && r[2] == (BYTE)pc) {
+			MmSjisToW((const char*)(r + 3), 17, out, outN);
+			return out[0] != 0;
+		}
+	}
+	return FALSE;
+}
+
+static int MmExBank(int mapId, int msb, int lsb, int isDrum)
+{
+	if (mapId == 9 || mapId == 14) {
+		if (isDrum || msb == 120) return 120;
+		return lsb;
+	}
+	if (mapId == 11) {
+		if (isDrum || msb == 122) return 122;
+		return lsb;
+	}
+	if (mapId == 13) return lsb;
+	return msb;
+}
+
+static int MmMsbLooksKorg(int m)
+{
+	return m == 56 || m == 61 || m == 62 || m == 82 || m == 83 ||
+		(m >= 88 && m <= 91);
+}
+
+static const wchar_t* MmExMapLabel(int mapId)
+{
+	if (mapId < 0 || mapId >= 32) return L"ETCmap";
+	if (!s_exLblReady) {
+		s_exLblReady = 1;
+		memset(s_exLbl, 0, sizeof(s_exLbl));
+		if (s_exDat && s_exBytes >= 20) {
+			const int rec = s_exBytes / 20;
+			for (int i = 0; i < rec; ++i) {
+				const BYTE* r = s_exDat + i * 20;
+				if (r[0] == 255 && r[1] < 32)
+					MmSjisToW((const char*)(r + 3), 17, s_exLbl[r[1]], 12);
+			}
+		}
+	}
+	if (s_exLbl[mapId][0]) return s_exLbl[mapId];
+	return L"ETCmap";
 }
 
 static BOOL MmLookupXgOk(int msb, int lsb, int pc, wchar_t* out, int outN)
@@ -349,14 +427,61 @@ static const wchar_t* MmEffName(int mode, int kind, int type)
 	return L"OFF";
 }
 
-static const wchar_t* MmMapLabel(int sysMode, int mapId, int bankLsb)
+static int MmForceMapId(int mapForce)
+{
+	if (mapForce >= 10 && mapForce <= 19)
+		return mapForce - 1;
+	switch (mapForce) {
+	case 3: return 1;
+	case 4: return 2;
+	case 5: return 3;
+	case 6: return 4;
+	case 7: return 5;
+	case 8: return 6;
+	case 9: return 8;
+	default: return -1;
+	}
+}
+
+static void MmResolveLookup(int mapForce, int sysMode, int partMap, int partMsb, int* isXg, int* mapId, int* bankMsb)
+{
+	int xg = (sysMode == 2);
+	int mid = partMap;
+	int msb = partMsb;
+	if (mapForce >= 10 && mapForce <= 19) {
+		xg = 0;
+		mid = mapForce - 1;
+	} else switch (mapForce) {
+	case 1: xg = 0; break;
+	case 2: xg = 1; break;
+	case 3: xg = 0; mid = 1; break;
+	case 4: xg = 0; mid = 2; break;
+	case 5: xg = 0; mid = 3; break;
+	case 6: xg = 0; mid = 4; break;
+	case 7: xg = 0; mid = 5; break;
+	case 8: xg = 0; mid = 6; break;
+	case 9: xg = 0; mid = 8; msb = 127; break;
+	default:
+		if (mid == 8) msb = 127;
+		break;
+	}
+	if (isXg) *isXg = xg;
+	if (mapId) *mapId = mid;
+	if (bankMsb) *bankMsb = msb;
+}
+
+static const wchar_t* MmMapLabel(int sysMode, int mapId, int bankMsb, int bankLsb)
 {
 	if (sysMode == 2) return L"XGmap";
+	if (mapId >= 9) return MmExMapLabel(mapId);
+	if (sysMode != 2 && bankMsb == 127) return L"LAmap";
+	if (sysMode != 2 && bankMsb == 126) return L"CMmap";
+	if (mapId == 8) return L"LAmap";
 	if (sysMode == 0 || mapId == 5) return L"GMmap";
 	if (mapId == 6) return L"SDmap";
 	if (bankLsb == 1 || mapId == 1) return L"55map";
-	if (bankLsb == 3 || mapId == 3) return L"88Pmap";
-	if (bankLsb == 4) return L"8820map";
+	if (bankLsb == 3 || mapId == 3) return L"88Promap";
+	if (bankLsb == 4 || mapId == 4) return L"8820map";
 	if (bankLsb == 2 || mapId == 2) return L"88map";
 	if (mapId == 0) return L"GSmap";
 	return L"88map";
@@ -549,20 +674,20 @@ void CMmHelpDlg::OnPaint()
 	title(L, y, LL14(L"列の見方", L"Columns", L"Colonnes", L"Colonne", L"Columnas", L"열", L"列", L"الأعمدة", L"Столбцы", L"Spalten", L"Colunas", L"Kolommen", L"Kolumny", L"Sutunlar"));
 	y += titleLh;
 	body(L, y, LL14(
-		L"・PC# BNK Map …… プログラム、バンク、GS/XG マップ。Instrument は DAT(SASAMI_GS/XG) から名前。",
-		L"· PC# BNK Map …… Program, bank, GS/XG map. Instrument names come from SASAMI_GS/XG DAT.",
-		L"· PC# BNK Map …… Programme, banque, carte GS/XG. Noms depuis SASAMI_GS/XG.DAT.",
-		L"· PC# BNK Map …… Programma, bank, mappa GS/XG. Nomi da SASAMI_GS/XG.DAT.",
-		L"· PC# BNK Map …… Programa, banco, mapa GS/XG. Nombres desde SASAMI_GS/XG.DAT.",
-		L"· PC# BNK Map …… 프로그램, 뱅크, GS/XG 맵. 이름은 SASAMI_GS/XG.DAT에서.",
-		L"· PC# BNK Map …… 音色号、库、GS/XG 映射。名称来自 SASAMI_GS/XG.DAT。",
-		L"· PC# BNK Map …… برنامج، بنك، خريطة GS/XG. الأسماء من SASAMI_GS/XG.DAT.",
-		L"· PC# BNK Map …… Программа, банк, карта GS/XG. Имена из SASAMI_GS/XG.DAT.",
-		L"· PC# BNK Map …… Programm, Bank, GS/XG-Map. Namen aus SASAMI_GS/XG.DAT.",
-		L"· PC# BNK Map …… Programa, banco, mapa GS/XG. Nomes de SASAMI_GS/XG.DAT.",
-		L"· PC# BNK Map …… Programma, bank, GS/XG-map. Namen uit SASAMI_GS/XG.DAT.",
-		L"· PC# BNK Map …… Program, bank, mapa GS/XG. Nazwy z SASAMI_GS/XG.DAT.",
-		L"· PC# BNK Map …… Program, banka, GS/XG haritasi. Isimler SASAMI_GS/XG.DAT'tan."));
+		L"・PC# BNK Map …… プログラム、バンク、GS/XG/ETC マップ。Instrument は DAT(SASAMI_GS/XG/EX)。LA は bank127=LAmap、GM2 は GM2map。",
+		L"· PC# BNK Map …… Program, bank, GS/XG/ETC map. Names from SASAMI_GS/XG/EX DAT. LA=bank127 LAmap, GM2=GM2map.",
+		L"· PC# BNK Map …… Programme, banque, carte GS/XG/ETC. Noms SASAMI_GS/XG/EX. LA=bank127 LAmap, GM2=GM2map.",
+		L"· PC# BNK Map …… Programma, bank, mappa GS/XG/ETC. Nomi SASAMI_GS/XG/EX. LA=bank127 LAmap, GM2=GM2map.",
+		L"· PC# BNK Map …… Programa, banco, mapa GS/XG/ETC. Nombres SASAMI_GS/XG/EX. LA=bank127 LAmap, GM2=GM2map.",
+		L"· PC# BNK Map …… 프로그램, 뱅크, GS/XG/ETC 맵. 이름은 SASAMI_GS/XG/EX. LA=bank127 LAmap, GM2=GM2map.",
+		L"· PC# BNK Map …… 音色号、库、GS/XG/ETC。名称来自 SASAMI_GS/XG/EX。LA=bank127 LAmap，GM2=GM2map。",
+		L"· PC# BNK Map …… برنامج، بنك، خريطة GS/XG/ETC. الأسماء SASAMI_GS/XG/EX. LA=bank127 LAmap, GM2=GM2map.",
+		L"· PC# BNK Map …… Программа, банк, карта GS/XG/ETC. Имена SASAMI_GS/XG/EX. LA=bank127 LAmap, GM2=GM2map.",
+		L"· PC# BNK Map …… Programm, Bank, GS/XG/ETC-Map. Namen SASAMI_GS/XG/EX. LA=bank127 LAmap, GM2=GM2map.",
+		L"· PC# BNK Map …… Programa, banco, mapa GS/XG/ETC. Nomes SASAMI_GS/XG/EX. LA=bank127 LAmap, GM2=GM2map.",
+		L"· PC# BNK Map …… Programma, bank, GS/XG/ETC-map. Namen SASAMI_GS/XG/EX. LA=bank127 LAmap, GM2=GM2map.",
+		L"· PC# BNK Map …… Program, bank, mapa GS/XG/ETC. Nazwy SASAMI_GS/XG/EX. LA=bank127 LAmap, GM2=GM2map.",
+		L"· PC# BNK Map …… Program, banka, GS/XG/ETC haritasi. SASAMI_GS/XG/EX. LA=bank127 LAmap, GM2=GM2map."));
 	y += lh;
 	body(L, y, LL14(
 		L"・Lev は発音。Vol/Pan/Exp 等は動いているとき明るく、初期値のままなら暗くなります。ヘッダ DS は DirectSound 音量（ドラッグで MP の DS 音量と同期。主音量とは別）。Notes は実発音数、暗いバーが MAX（少しして減衰）。DRUM はドラムパートのヒット。",
@@ -615,8 +740,8 @@ void CMmHelpDlg::OnPaint()
 	title(L, y, LL14(L"右クリック", L"Right-click", L"Clic droit", L"Tasto destro", L"Clic derecho", L"우클릭", L"右键", L"زر أيمن", L"ПКМ", L"Rechtsklick", L"Botao direito", L"Rechtsklik", L"PPM", L"Sag tik"));
 	y += titleLh;
 	body(L, y, LL14(
-		L"・表示モード / フリーズ / 常に手前 / 状態をコピー / マップ指定 / 他ウィンドウ / このガイド。",
-		L"· View mode / Freeze / Always on top / Copy state / Map / Other windows / This guide.",
+		L"・表示モード / フリーズ / 常に手前 / 状態をコピー / マップ指定（55/88/LA など） / 他ウィンドウ / このガイド。",
+		L"· View mode / Freeze / Always on top / Copy state / Map (55/88/LA…) / Other windows / This guide.",
 		L"· Mode d'affichage / Gel / Premier plan / Copier / Carte / Autres fenetres / Ce guide.",
 		L"· Modalita / Congela / In primo piano / Copia / Mappa / Altre finestre / Questa guida.",
 		L"· Modo / Congelar / Siempre visible / Copiar / Mapa / Otras ventanas / Esta guia.",
@@ -775,18 +900,35 @@ void CMidiMonitorDlg::ResetParts()
 		p.eqHigh = 10000;
 		p.mapId = 4;
 		p.bankLsb = 0;
-		if (!m_fileHasXg && !m_fileHasGm && m_gsMapKind >= 1 && m_gsMapKind <= 4 && m_mapForce != 2) {
-			p.bankLsb = m_gsMapKind;
-			if (m_gsMapKind == 1) p.mapId = 1;
-			else if (m_gsMapKind == 2) p.mapId = 2;
-			else if (m_gsMapKind == 3) p.mapId = 3;
-			else p.mapId = 4;
-		} else if (m_fileHasGm || m_gsMapKind == 5) {
-			p.mapId = 5;
-			p.bankLsb = 0;
-		} else if (m_fileHasSd || m_gsMapKind == 6) {
-			p.mapId = 6;
-			p.bankLsb = 0;
+		{
+			const int fmid = MmForceMapId(m_mapForce);
+			if (fmid >= 0) {
+				p.mapId = fmid;
+				if (m_mapForce == 3) p.bankLsb = 1;
+				else if (m_mapForce == 4) p.bankLsb = 2;
+				else if (m_mapForce == 5) p.bankLsb = 3;
+				else if (m_mapForce == 6) p.bankLsb = 4;
+				else if (m_mapForce == 9) { p.bankMsb = 127; p.bankLsb = 0; }
+			} else if (!m_fileHasXg && !m_fileHasGm && m_gsMapKind >= 1 && m_gsMapKind <= 4 && m_mapForce != 2) {
+				p.bankLsb = m_gsMapKind;
+				if (m_gsMapKind == 1) p.mapId = 1;
+				else if (m_gsMapKind == 2) p.mapId = 2;
+				else if (m_gsMapKind == 3) p.mapId = 3;
+				else p.mapId = 4;
+			} else if (m_fileHasGm || m_gsMapKind == 5) {
+				p.mapId = 5;
+				p.bankLsb = 0;
+			} else if (m_fileHasSd || m_gsMapKind == 6) {
+				p.mapId = 6;
+				p.bankLsb = 0;
+			} else if (m_gsMapKind == 8) {
+				p.mapId = 8;
+				p.bankMsb = 127;
+				p.bankLsb = 0;
+			} else if (m_gsMapKind >= 9) {
+				p.mapId = m_gsMapKind;
+				p.bankLsb = 0;
+			}
 		}
 		p.isDrum = ((i % 16) == 9) ? 1 : 0;
 		p.lastNote = -1;
@@ -798,7 +940,7 @@ void CMidiMonitorDlg::ResetParts()
 	m_keySf = 0;
 	m_keyMin = 0;
 	m_transpose = 0;
-	m_sysMode = m_fileHasXg ? 2 : ((m_fileHasGm || m_gsMapKind == 5) ? 0 : 1);
+	m_sysMode = m_fileHasXg ? 2 : ((m_fileHasGm || m_gsMapKind == 5 || m_gsMapKind == 9) ? 0 : 1);
 	m_revType = 1;
 	m_choType = 2;
 	m_varType = 1;
@@ -839,6 +981,13 @@ void CMidiMonitorDlg::LookupToneName(int isXg, int mapId, int bankMsb, int bankL
 		if (isXg) {
 			if (MmLookupXgOk(127, 0, pc, out, outN) && out[0]) return;
 		} else {
+			if (mapId >= 9 || bankMsb == 120) {
+				const int mid = (mapId >= 9) ? mapId : 9;
+				if (MmLookupEx(mid, MmExBank(mid, bankMsb, bankLsb, 1), pc, out, outN) && out[0]) return;
+			}
+			if (VstMidiBankMsbIsSdNative(bankMsb) || mapId == 6) {
+				if (MmLookupGs(6, bankMsb, pc, out, outN) && out[0]) return;
+			}
 			if (MmLookupGs(0, 0, pc, out, outN) && out[0]) return;
 		}
 		MmCopyW(out, outN, L"Standard Kit");
@@ -846,7 +995,21 @@ void CMidiMonitorDlg::LookupToneName(int isXg, int mapId, int bankMsb, int bankL
 	}
 	if (isXg) {
 		if (MmLookupXgOk(bankMsb, bankLsb, pc, out, outN) && out[0]) return;
-	} else if (mapId != 5 && mapId != 6) {
+	} else if (mapId >= 9) {
+		if (MmLookupEx(mapId, MmExBank(mapId, bankMsb, bankLsb, 0), pc, out, outN) && out[0]) return;
+	} else if (bankMsb == 121) {
+		if (MmLookupEx(9, bankLsb, pc, out, outN) && out[0]) return;
+	} else if (bankMsb == 126 || bankMsb == 127) {
+		if (MmLookupGs(1, bankMsb, pc, out, outN) && out[0]) return;
+	} else if (VstMidiBankMsbIsSdNative(bankMsb) || mapId == 6) {
+		if (MmLookupGs(6, bankMsb, pc, out, outN) && out[0]) return;
+		if (mapId == 6 && bankLsb >= 1 && bankLsb <= 4) {
+			if (MmLookupGs(bankLsb, bankMsb, pc, out, outN) && out[0]) return;
+		}
+	} else if (mapId == 8) {
+		const int b = (bankMsb == 126) ? 126 : 127;
+		if (MmLookupGs(1, b, pc, out, outN) && out[0]) return;
+	} else if (mapId != 5) {
 		if (MmLookupGs(mapId, bankMsb, pc, out, outN) && out[0]) return;
 	}
 	if (pc >= 0 && pc < 128)
@@ -857,8 +1020,30 @@ void CMidiMonitorDlg::LookupToneName(int isXg, int mapId, int bankMsb, int bankL
 
 void CMidiMonitorDlg::RefreshPartName(Part& p)
 {
-	const int isXg = (m_mapForce == 2) ? 1 : (m_mapForce == 1) ? 0 : ((m_sysMode == 2) ? 1 : 0);
-	LookupToneName(isXg, p.mapId, p.bankMsb, p.bankLsb, p.pc, p.isDrum, p.name, NAME_CHARS);
+	int isXg = 0, mapId = 0, bankMsb = 0;
+	MmResolveLookup(m_mapForce, m_sysMode, p.mapId, p.bankMsb, &isXg, &mapId, &bankMsb);
+	LookupToneName(isXg, mapId, bankMsb, p.bankLsb, p.pc, p.isDrum, p.name, NAME_CHARS);
+}
+
+void CMidiMonitorDlg::ApplyMapForce(int force)
+{
+	m_mapForce = force;
+	const int mid = MmForceMapId(force);
+	for (int i = 0; i < PART_MAX; ++i) {
+		Part& p = m_part[i];
+		if (mid >= 0) {
+			p.mapId = mid;
+			if (force == 3) p.bankLsb = 1;
+			else if (force == 4) p.bankLsb = 2;
+			else if (force == 5) p.bankLsb = 3;
+			else if (force == 6) p.bankLsb = 4;
+			else if (force == 9) { p.bankMsb = 127; p.bankLsb = 0; }
+		}
+		RefreshPartName(p);
+	}
+	m_dirtyRows = 0xFFFFFFFFu;
+	m_dirtyHead = true;
+	m_fullDraw = true;
 }
 
 void CMidiMonitorDlg::ApplyNrpn(Part& p)
@@ -914,11 +1099,21 @@ void CMidiMonitorDlg::ApplyShort(int port, DWORD msg, BOOL fromUser)
 			m_dirtyRows |= (1u << part);
 		}
 	} else if (st == 0xb0) {
-		if (d1 == 0) { p.bankMsb = d2; RefreshPartName(p); m_dirtyRows |= (1u << part); }
+		if (d1 == 0) {
+			p.bankMsb = d2;
+			if (m_sysMode != 2 && m_mapForce != 2 && m_mapForce < 3) {
+				if (d2 == 121) p.mapId = 9;
+				else if (p.mapId < 9 && VstMidiBankMsbIsSdNative(d2)) p.mapId = 6;
+				else if (p.mapId < 9 && MmMsbLooksKorg(d2)) p.mapId = 10;
+			}
+			RefreshPartName(p);
+			m_dirtyRows |= (1u << part);
+		}
 		else if (d1 == 32) {
 			p.bankLsb = d2;
-			if (m_sysMode != 2 && m_mapForce != 2) {
-				if (d2 == 1) p.mapId = 1;
+			if (m_sysMode != 2 && m_mapForce != 2 && m_mapForce < 3 && p.mapId < 9) {
+				if (VstMidiBankMsbIsSdNative(p.bankMsb)) p.mapId = 6;
+				else if (d2 == 1) p.mapId = 1;
 				else if (d2 == 2) p.mapId = 2;
 				else if (d2 == 3) p.mapId = 3;
 				else if (d2 == 4) p.mapId = 4;
@@ -965,7 +1160,9 @@ void CMidiMonitorDlg::ApplySysex(const BYTE* d, int n)
 	if (!d || n < 6) return;
 	if (d[0] != 0xf0) return;
 	if (n >= 6 && VstMidiSysexIsGmOn(d, n)) {
+		const int gm2 = (n >= 5 && d[4] == 0x03);
 		m_sysMode = 0;
+		if (gm2) m_gsMapKind = 9;
 		ResetParts();
 		m_sysMode = 0;
 		return;
@@ -1231,7 +1428,7 @@ void CMidiMonitorDlg::LoadCurrentMidi()
 		BYTE msb[32];
 		BYTE have[2048];
 		unsigned short pairs[256];
-		int nPairs = 0, hasGm = 0, hasGs = 0, hasSd = 0, cc32Max = 0;
+		int nPairs = 0, hasGm = 0, hasGs = 0, hasSd = 0, hasGm2 = 0, cc32Max = 0;
 		memset(msb, 0, sizeof(msb));
 		memset(have, 0, sizeof(have));
 		for (int i = 0; i < count; ++i) {
@@ -1240,7 +1437,10 @@ void CMidiMonitorDlg::LoadCurrentMidi()
 				if (ev[i].sysexOff + n <= sxUsed) {
 					const BYTE* d = sxData + ev[i].sysexOff;
 					if (VstMidiSysexIsXgOn(d, n)) hasXg = 1;
-					if (VstMidiSysexIsGmOn(d, n)) hasGm = 1;
+					if (VstMidiSysexIsGmOn(d, n)) {
+						hasGm = 1;
+						if (n >= 5 && d[4] == 0x03) hasGm2 = 1;
+					}
 					if (VstMidiSysexIsGsReset(d, n)) hasGs = 1;
 				}
 				continue;
@@ -1256,6 +1456,7 @@ void CMidiMonitorDlg::LoadCurrentMidi()
 			if (st == 0xb0 && d1 == 0) {
 				msb[idx] = (BYTE)d2;
 				if (VstMidiBankMsbIsSdNative(d2)) hasSd = 1;
+				if (d2 == 121) hasGm2 = 1;
 			} else if (st == 0xb0 && d1 == 32) {
 				if (!drum && d2 >= 1 && d2 <= 4 && d2 > cc32Max) cc32Max = d2;
 			} else if (st == 0xc0 && !drum) {
@@ -1274,7 +1475,10 @@ void CMidiMonitorDlg::LoadCurrentMidi()
 		}
 		int resolved = 0;
 		if (hasXg) resolved = 0;
+		else if (mapHint == 8) resolved = 8;
+		else if (mapHint >= 9 && mapHint <= 18) resolved = mapHint;
 		else if (mapHint >= 1 && mapHint <= 4) resolved = mapHint;
+		else if (hasGm2 && !hasGs) resolved = 9;
 		else if ((mapHint == 5 || hasGm) && !hasGs) resolved = 5;
 		else if (mapHint == 6 || hasSd) resolved = 6;
 		else if (cc32Max >= 1 && cc32Max <= 4) resolved = cc32Max;
@@ -1282,7 +1486,8 @@ void CMidiMonitorDlg::LoadCurrentMidi()
 		m_fileHasXg = hasXg;
 		m_fileHasGm = (resolved == 5) ? 1 : 0;
 		m_fileHasSd = (resolved == 6) ? 1 : 0;
-		m_gsMapKind = (resolved >= 1 && resolved <= 6) ? resolved : 0;
+		m_gsMapKind = (resolved == 8 || (resolved >= 1 && resolved <= 6) ||
+			(resolved >= 9 && resolved <= 18)) ? resolved : 0;
 	}
 	ResetParts();
 	delete[] data;
@@ -1533,7 +1738,10 @@ void CMidiMonitorDlg::DrawPartRow(CDC& dc, int i, int y, int rowH, int w, UINT d
 	_snwprintf_s(chs, _TRUNCATE, L"%c%02d", (i < 16) ? L'A' : L'B', (i % 16) + 1);
 	dc.TextOut(Scale(4, dpi), y + 1, chs);
 	wchar_t pcb[48];
-	_snwprintf_s(pcb, _TRUNCATE, L"%03d %03d %s", p.pc + 1, p.bankMsb, MmMapLabel(m_sysMode, p.mapId, p.bankLsb));
+	int isXg = 0, mapId = 0, bankMsb = 0;
+	MmResolveLookup(m_mapForce, m_sysMode, p.mapId, p.bankMsb, &isXg, &mapId, &bankMsb);
+	const int sys = isXg ? 2 : ((mapId == 5) ? 0 : 1);
+	_snwprintf_s(pcb, _TRUNCATE, L"%03d %03d %s", p.pc + 1, p.bankMsb, MmMapLabel(sys, mapId, bankMsb, p.bankLsb));
 	dc.TextOut(Scale(40, dpi), y + 1, pcb);
 	dc.TextOut(Scale(148, dpi), y + 1, p.name);
 	const int meterX = Scale(280, dpi);
@@ -2368,11 +2576,34 @@ void CMidiMonitorDlg::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
 	}
 	CCustomPopupMenu* map = menu.AddSubMenu(
 		LL14(L"音色マップ", L"Tone map", L"Carte de timbres", L"Mappa timbri", L"Mapa de timbres", L"음색 맵", L"音色映射", L"خريطة الأصوات", L"Карта тембров", L"Klangkarte", L"Mapa de timbres", L"Klankkaart", L"Mapa barw", L"Timbir haritasi"),
-		LL14(L"名前引きに使う GS/XG マップ", L"GS/XG map used for instrument names", L"Carte GS/XG pour les noms", L"Mappa GS/XG per i nomi", L"Mapa GS/XG para nombres", L"이름에 쓸 GS/XG 맵", L"用于查名的 GS/XG 映射", L"خريطة GS/XG للأسماء", L"Карта GS/XG для имён", L"GS/XG-Map fuer Namen", L"Mapa GS/XG para nomes", L"GS/XG-map voor namen", L"Mapa GS/XG do nazw", L"Isimler icin GS/XG haritasi"));
+		LL14(L"名前引きに使う音色マップ（自動／GS／XG／55／88／LA など）", L"Tone map for names (Auto / GS / XG / 55 / 88 / LA…)", L"Carte de timbres pour les noms (Auto / GS / XG / 55 / 88 / LA…)", L"Mappa timbri per i nomi (Auto / GS / XG / 55 / 88 / LA…)", L"Mapa de timbres para nombres (Auto / GS / XG / 55 / 88 / LA…)", L"이름에 쓸 음색 맵 (자동 / GS / XG / 55 / 88 / LA…)", L"用于查名的音色映射（自动／GS／XG／55／88／LA 等）", L"خريطة الأصوات للأسماء (Auto / GS / XG / 55 / 88 / LA…)", L"Карта тембров для имён (Auto / GS / XG / 55 / 88 / LA…)", L"Klangkarte fuer Namen (Auto / GS / XG / 55 / 88 / LA…)", L"Mapa de timbres para nomes (Auto / GS / XG / 55 / 88 / LA…)", L"Klankkaart voor namen (Auto / GS / XG / 55 / 88 / LA…)", L"Mapa barw do nazw (Auto / GS / XG / 55 / 88 / LA…)", L"Isimler icin timbir haritasi (Auto / GS / XG / 55 / 88 / LA…)"));
 	if (map) {
-		map->AddCheck(IDM_MM_MAP_AUTO, LL14(L"自動 (SysEx)", L"Auto (SysEx)", L"Auto (SysEx)", L"Auto (SysEx)", L"Auto (SysEx)", L"자동 (SysEx)", L"自动 (SysEx)", L"تلقائي (SysEx)", L"Авто (SysEx)", L"Auto (SysEx)", L"Auto (SysEx)", L"Auto (SysEx)", L"Auto (SysEx)", L"Otomatik (SysEx)"), m_mapForce == 0);
+		map->AddCheck(IDM_MM_MAP_AUTO, LL14(L"自動 (SysEx / 曲名)", L"Auto (SysEx / title)", L"Auto (SysEx / titre)", L"Auto (SysEx / titolo)", L"Auto (SysEx / titulo)", L"자동 (SysEx / 제목)", L"自动 (SysEx / 曲名)", L"تلقائي (SysEx / عنوان)", L"Авто (SysEx / название)", L"Auto (SysEx / Titel)", L"Auto (SysEx / titulo)", L"Auto (SysEx / titel)", L"Auto (SysEx / tytul)", L"Otomatik (SysEx / baslik)"), m_mapForce == 0);
 		map->AddCheck(IDM_MM_MAP_GS, L"GS", m_mapForce == 1);
 		map->AddCheck(IDM_MM_MAP_XG, L"XG", m_mapForce == 2);
+		map->AddSeparator();
+		map->AddCheck(IDM_MM_MAP_55, L"55map", m_mapForce == 3);
+		map->AddCheck(IDM_MM_MAP_88, L"88map", m_mapForce == 4);
+		map->AddCheck(IDM_MM_MAP_88P, L"88Promap", m_mapForce == 5);
+		map->AddCheck(IDM_MM_MAP_8820, L"8820map", m_mapForce == 6);
+		map->AddCheck(IDM_MM_MAP_GM, L"GMmap", m_mapForce == 7);
+		map->AddCheck(IDM_MM_MAP_SD, L"SDmap", m_mapForce == 8);
+		map->AddCheck(IDM_MM_MAP_LA, L"LAmap", m_mapForce == 9);
+		CCustomPopupMenu* etc = map->AddSubMenu(
+			LL14(L"ETC (EX)", L"ETC (EX)", L"ETC (EX)", L"ETC (EX)", L"ETC (EX)", L"ETC (EX)", L"ETC (EX)", L"ETC (EX)", L"ETC (EX)", L"ETC (EX)", L"ETC (EX)", L"ETC (EX)", L"ETC (EX)", L"ETC (EX)"),
+			LL14(L"GS/XG 以外（SASAMI_EX.DAT）", L"Non-GS/XG (SASAMI_EX.DAT)", L"Hors GS/XG (SASAMI_EX.DAT)", L"Non GS/XG (SASAMI_EX.DAT)", L"Fuera de GS/XG (SASAMI_EX.DAT)", L"GS/XG 이외 (SASAMI_EX.DAT)", L"GS/XG 以外（SASAMI_EX.DAT）", L"غير GS/XG (SASAMI_EX.DAT)", L"Не GS/XG (SASAMI_EX.DAT)", L"Nicht GS/XG (SASAMI_EX.DAT)", L"Fora GS/XG (SASAMI_EX.DAT)", L"Geen GS/XG (SASAMI_EX.DAT)", L"Poza GS/XG (SASAMI_EX.DAT)", L"GS/XG disi (SASAMI_EX.DAT)"));
+		if (etc) {
+			etc->AddCheck(IDM_MM_MAP_GM2, L"GM2map", m_mapForce == 10);
+			etc->AddCheck(IDM_MM_MAP_NS, L"NSmap", m_mapForce == 11);
+			etc->AddCheck(IDM_MM_MAP_KW, L"KWmap", m_mapForce == 12);
+			etc->AddCheck(IDM_MM_MAP_SG, L"SGmap", m_mapForce == 13);
+			etc->AddCheck(IDM_MM_MAP_KR, L"KRmap", m_mapForce == 14);
+			etc->AddCheck(IDM_MM_MAP_PA, L"PAmap", m_mapForce == 15);
+			etc->AddCheck(IDM_MM_MAP_CS, L"CSmap", m_mapForce == 16);
+			etc->AddCheck(IDM_MM_MAP_GEM, L"GEMmap", m_mapForce == 17);
+			etc->AddCheck(IDM_MM_MAP_LK, L"LKmap", m_mapForce == 18);
+			etc->AddCheck(IDM_MM_MAP_PV, L"PVmap", m_mapForce == 19);
+		}
 	}
 	CCustomPopupMenu* openSub = menu.AddSubMenu(
 		LL14(L"開く", L"Open", L"Ouvrir", L"Apri", L"Abrir", L"열기", L"打开", L"فتح", L"Открыть", L"Offnen", L"Abrir", L"Openen", L"Otworz", L"Ac"),
@@ -2434,16 +2665,37 @@ void CMidiMonitorDlg::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
 		LoadCurrentMidi();
 		Invalidate(FALSE);
 	} else if (cmd == IDM_MM_MAP_AUTO) {
-		m_mapForce = 0;
-		for (int i = 0; i < PART_MAX; ++i) RefreshPartName(m_part[i]);
+		ApplyMapForce(0);
 		Invalidate(FALSE);
 	} else if (cmd == IDM_MM_MAP_GS) {
-		m_mapForce = 1;
-		for (int i = 0; i < PART_MAX; ++i) RefreshPartName(m_part[i]);
+		ApplyMapForce(1);
 		Invalidate(FALSE);
 	} else if (cmd == IDM_MM_MAP_XG) {
-		m_mapForce = 2;
-		for (int i = 0; i < PART_MAX; ++i) RefreshPartName(m_part[i]);
+		ApplyMapForce(2);
+		Invalidate(FALSE);
+	} else if (cmd == IDM_MM_MAP_55) {
+		ApplyMapForce(3);
+		Invalidate(FALSE);
+	} else if (cmd == IDM_MM_MAP_88) {
+		ApplyMapForce(4);
+		Invalidate(FALSE);
+	} else if (cmd == IDM_MM_MAP_88P) {
+		ApplyMapForce(5);
+		Invalidate(FALSE);
+	} else if (cmd == IDM_MM_MAP_8820) {
+		ApplyMapForce(6);
+		Invalidate(FALSE);
+	} else if (cmd == IDM_MM_MAP_GM) {
+		ApplyMapForce(7);
+		Invalidate(FALSE);
+	} else if (cmd == IDM_MM_MAP_SD) {
+		ApplyMapForce(8);
+		Invalidate(FALSE);
+	} else if (cmd == IDM_MM_MAP_LA) {
+		ApplyMapForce(9);
+		Invalidate(FALSE);
+	} else if (cmd >= IDM_MM_MAP_GM2 && cmd <= IDM_MM_MAP_PV) {
+		ApplyMapForce(10 + (int)(cmd - IDM_MM_MAP_GM2));
 		Invalidate(FALSE);
 	} else if (cmd == ID_MP_OPEN_EQ || cmd == ID_MP_OPEN_PIANOROLL || cmd == ID_MP_OPEN_ANALYZER) {
 		extern CMediaPlayerDlg* mp;

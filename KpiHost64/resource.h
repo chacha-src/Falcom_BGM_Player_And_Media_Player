@@ -1,12 +1,10 @@
-//{{NO_DEPENDENCIES}}
-// Microsoft Visual C++ Ç≈ê∂ê¨Ç≥ÇÍÇΩÉCÉìÉNÉãÅ[Éh ÉtÉ@ÉCÉãÅB
-// KpiHost64.rc Ç≈égóp
-//
+Ôªø//{{NO_DEPENDENCIES}}
+// KpiHost64.rc only. Do not include the parent ogg resource.h.
+#pragma once
+
 #define VS_VERSION_INFO                 1
 #define IDC_STATIC                      -1
 
-// Next default values for new objects
-// 
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NEXT_RESOURCE_VALUE        101

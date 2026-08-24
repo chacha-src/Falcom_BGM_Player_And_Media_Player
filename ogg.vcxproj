@@ -951,6 +951,7 @@
     <None Include="ReadMe.txt" />
     <None Include="res\SASAMI_GS.DAT" />
     <None Include="res\SASAMI_XG.DAT" />
+    <None Include="res\SASAMI_EX.DAT" />
     <None Include="res\s3tex\r_forest.png" />
     <None Include="res\s3tex\r_ruins.png" />
     <None Include="res\s3tex\r_oil.png" />

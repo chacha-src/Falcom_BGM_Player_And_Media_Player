@@ -98,19 +98,49 @@ static int MmKindFromCompact(const wchar_t* k)
 		return 3;
 	if (wcsstr(k, L"88P"))
 		return 3;
+	if (wcsstr(k, L"88VL") || wcsstr(k, L"SC88VL") || wcsstr(k, L"88VALUE"))
+		return 2;
 	if (wcsstr(k, L"SC88") || wcsstr(k, L"88MAP"))
 		return 2;
-	if (wcsstr(k, L"SC55") || wcsstr(k, L"55MAP") || wcsstr(k, L"SC55MK"))
+	if (wcsstr(k, L"LAMAP") || wcsstr(k, L"MT32") || wcsstr(k, L"CM32L") ||
+		wcsstr(k, L"CM64") || wcsstr(k, L"LAPC") || wcsstr(k, L"LASYNTH") ||
+		wcsstr(k, L"ROLANDLA") || wcsstr(k, L"CM32"))
+		return 8;
+	if (wcsstr(k, L"GM2") || wcsstr(k, L"GENERALMIDI2") || wcsstr(k, L"GMLEVEL2"))
+		return 9;
+	if (wcsstr(k, L"NS5R") || wcsstr(k, L"NX5R") || wcsstr(k, L"X5DR") ||
+		wcsstr(k, L"X5D") || wcsstr(k, L"05RW") || wcsstr(k, L"AG10"))
+		return 10;
+	if (wcsstr(k, L"GMEGA") || wcsstr(k, L"GMEGALX") || wcsstr(k, L"KAWAIK11"))
+		return 11;
+	if (wcsstr(k, L"SG01") || wcsstr(k, L"SG01V") || wcsstr(k, L"SG01K"))
+		return 12;
+	if (wcsstr(k, L"KROSS"))
+		return 13;
+	if (wcsstr(k, L"KORGPA") || wcsstr(k, L"PA80") || wcsstr(k, L"PA50") ||
+		wcsstr(k, L"PA60") || wcsstr(k, L"PA1X"))
+		return 14;
+	if (wcsstr(k, L"CS2X") || wcsstr(k, L"CASIOCS"))
+		return 15;
+	if (wcsstr(k, L"GEMGMX") || wcsstr(k, L"GENERALMUSIC"))
+		return 16;
+	if (wcsstr(k, L"CASIOLK") || wcsstr(k, L"LK93") || wcsstr(k, L"LK50"))
+		return 17;
+	if (wcsstr(k, L"PEAVEYDPM") || wcsstr(k, L"DPMV3"))
+		return 18;
+	if (wcsstr(k, L"SC55") || wcsstr(k, L"55MAP") || wcsstr(k, L"SC55MK") ||
+		wcsstr(k, L"GS55"))
 		return 1;
 	if (wcsstr(k, L"SD90") || wcsstr(k, L"SD80") || wcsstr(k, L"SD20") ||
-		wcsstr(k, L"STUDIOCANVAS"))
+		wcsstr(k, L"SDMAP") || wcsstr(k, L"STUDIOCANVAS"))
 		return 6;
-	if (wcsstr(k, L"GENERALMIDI") || wcsstr(k, L"GMMAP") || wcsstr(k, L"GM2"))
+	if (wcsstr(k, L"GENERALMIDI") || wcsstr(k, L"GMMAP") || wcsstr(k, L"GM1"))
 		return 5;
 	if (wcsstr(k, L"XGMAP") || wcsstr(k, L"SOFTXG") || wcsstr(k, L"SYXG") ||
+		wcsstr(k, L"MU50") || wcsstr(k, L"MU10") || wcsstr(k, L"MU15") ||
 		wcsstr(k, L"MU80") || wcsstr(k, L"MU90") || wcsstr(k, L"MU100") ||
 		wcsstr(k, L"MU128") || wcsstr(k, L"MU500") || wcsstr(k, L"MU1000") ||
-		wcsstr(k, L"MU2000") || wcsstr(k, L"YAMAHAXG"))
+		wcsstr(k, L"MU2000") || wcsstr(k, L"YAMAHAXG") || wcsstr(k, L"XG50"))
 		return 7;
 	return 0;
 }
@@ -121,10 +151,14 @@ static int MmKindFromText(const wchar_t* s)
 	wchar_t k[280];
 	MmCompactKey(s, k, 280);
 	int kind = MmKindFromCompact(k);
+	if (!kind && MmHasToken(s, L"VL") && !wcsstr(k, L"VL1") && !wcsstr(k, L"VL70"))
+		kind = 2;
 	if (!kind && MmIsolated55(s)) kind = 1;
-	if (!kind && MmHasToken(s, L"GM2")) kind = 5;
+	if (!kind && MmHasToken(s, L"GM2")) kind = 9;
 	if (!kind && MmHasToken(s, L"GM")) kind = 5;
 	if (!kind && MmHasToken(s, L"XG")) kind = 7;
+	if (!kind && (MmHasToken(s, L"LA") || MmHasToken(s, L"MT32") || MmHasToken(s, L"MT-32")))
+		kind = 8;
 	return kind;
 }
 
@@ -133,6 +167,8 @@ extern "C" int VstMidiFoldGsMapHint(int cur, int kind)
 	if (kind == 4) return 4;
 	if (kind == 3 && cur != 4) return 3;
 	if (kind == 2 && cur != 4 && cur != 3) return 2;
+	if (kind == 8 && cur != 4 && cur != 3 && cur != 2) return 8;
+	if (kind >= 9 && kind <= 18 && cur == 0) return kind;
 	if (kind == 1 && cur == 0) return 1;
 	if ((kind == 5 || kind == 6 || kind == 7) && cur == 0) return kind;
 	return cur;
@@ -1363,7 +1399,7 @@ static int LoadSmf(const wchar_t* path)
 		BYTE msb[32];
 		BYTE have[2048];
 		unsigned short pairs[256];
-		int nPairs = 0, hasGm = 0, hasGs = 0, hasSd = 0, cc32Max = 0;
+		int nPairs = 0, hasGm = 0, hasGs = 0, hasSd = 0, hasGm2 = 0, cc32Max = 0;
 		memset(msb, 0, sizeof(msb));
 		memset(have, 0, sizeof(have));
 		for (int i = 0; i < count; ++i) {
@@ -1372,7 +1408,10 @@ static int LoadSmf(const wchar_t* path)
 				if (ev[i].sysexOff + n <= sxUsed) {
 					const BYTE* d = sxData + ev[i].sysexOff;
 					if (VstMidiSysexIsXgOn(d, n)) hasXg = 1;
-					if (VstMidiSysexIsGmOn(d, n)) hasGm = 1;
+					if (VstMidiSysexIsGmOn(d, n)) {
+						hasGm = 1;
+						if (n >= 5 && d[4] == 0x03) hasGm2 = 1;
+					}
 					if (VstMidiSysexIsGsReset(d, n)) hasGs = 1;
 				}
 				continue;
@@ -1388,6 +1427,7 @@ static int LoadSmf(const wchar_t* path)
 			if (st == 0xb0 && d1 == 0) {
 				msb[idx] = (BYTE)d2;
 				if (VstMidiBankMsbIsSdNative(d2)) hasSd = 1;
+				if (d2 == 121) hasGm2 = 1;
 			} else if (st == 0xb0 && d1 == 32) {
 				if (!drum && d2 >= 1 && d2 <= 4 && d2 > cc32Max) cc32Max = d2;
 			} else if (st == 0xc0 && !drum) {
@@ -1406,12 +1446,15 @@ static int LoadSmf(const wchar_t* path)
 		}
 		int resolved = 0;
 		if (hasXg) resolved = 0;
+		else if (mapHint == 8) resolved = 1;
+		else if (mapHint >= 9 && mapHint <= 18) resolved = mapHint;
 		else if (mapHint >= 1 && mapHint <= 4) resolved = mapHint;
+		else if (hasGm2 && !hasGs) resolved = 9;
 		else if ((mapHint == 5 || hasGm) && !hasGs) resolved = 5;
 		else if (mapHint == 6 || hasSd) resolved = 6;
 		else if (cc32Max >= 1 && cc32Max <= 4) resolved = cc32Max;
 		else resolved = VstMidiGsMapDropFromUsed(pairs, nPairs);
-		g_eng.songGm = (resolved == 5) ? 1 : 0;
+		g_eng.songGm = (resolved == 5 || resolved == 9) ? 1 : 0;
 		g_eng.gsMapLsb = (resolved >= 1 && resolved <= 4) ? resolved : 0;
 	}
 	if (g_eng.gsMapLsb && count + 64 < MAX_MIDI_EVENTS) {

@@ -275,6 +275,7 @@
 #define IDD_MM_HELP                     278
 #define IDR_SASAMI_GS                   279
 #define IDR_SASAMI_XG                   280
+#define IDR_SASAMI_EX                   346
 #define IDR_S3TEX_R_FOREST              281
 #define IDR_S3TEX_R_RUINS               282
 #define IDR_S3TEX_R_OIL                 283
@@ -1939,7 +1940,7 @@
 // 
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
-#define _APS_NEXT_RESOURCE_VALUE        346
+#define _APS_NEXT_RESOURCE_VALUE        347
 #define _APS_NEXT_COMMAND_VALUE         33284
 #define _APS_NEXT_CONTROL_VALUE         4383
 #define _APS_NEXT_SYMED_VALUE           104
