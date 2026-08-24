@@ -1,4 +1,4 @@
-// One engine source for both hosts. KpiHost64.exe compiles this same file
+﻿// One engine source for both hosts. KpiHost64.exe compiles this same file
 // through VstMidiEngine_k64.cpp; it used to keep a private copy, which quietly
 // meant every VST2 hosting fix landed only in ogg.exe while the x64 plug-ins
 // that actually run inside KpiHost64 kept the old code. stdafx.h routes itself
@@ -22,6 +22,8 @@
 #include "kpi_host_ipc.h"
 #include "KpiHostClient.h"
 #include "resource.h"
+#else
+#include "KpiHost64VstLive.h"
 #endif
 
 #pragma comment(lib, "winmm.lib")
@@ -733,6 +735,19 @@ static HWND MakeWait(HWND owner)
 	const int padY = MulDiv(8, (int)dpi, 96);
 	const int w = textW + padX * 2;
 	const int h = padY * 2 + lineH * 4;
+	int x = r.left + ((r.right - r.left) - w) / 2;
+	int y = r.top + ((r.bottom - r.top) - h) / 2;
+	if (owner) {
+		// Palette is the left ~38% of the host; keep it readable while
+		// drop / sound check fills the list one plug-in at a time.
+		const int split = ((r.right - r.left) * 38) / 100;
+		x = r.left + split + MulDiv(8, (int)dpi, 96);
+		if (x + w > r.right - 4) x = r.right - w - 4;
+		if (x < r.left) x = r.left;
+		y = r.top + MulDiv(48, (int)dpi, 96);
+		if (y + h > r.bottom) y = r.bottom - h;
+		if (y < r.top) y = r.top;
+	}
 	HWND wnd = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_TOPMOST, L"STATIC",
 		LL14(L"VSTプラグインを検索しています…", L"Searching VST plug-ins…",
 			L"Recherche des plug-ins VST…", L"Ricerca dei plug-in VST…",
@@ -741,8 +756,7 @@ static HWND MakeWait(HWND owner)
 			L"A procurar plug-ins VST…", L"VST-plug-ins zoeken…", L"Szukanie wtyczek VST…",
 			L"VST eklentileri aranıyor…"),
 		WS_POPUP | WS_BORDER | SS_CENTER | SS_NOPREFIX,
-		r.left + ((r.right - r.left) - w) / 2,
-		r.top + ((r.bottom - r.top) - h) / 2, w, h,
+		x, y, w, h,
 		owner, NULL, GetModuleHandleW(NULL), NULL);
 	if (wnd) {
 		SendMessage(wnd, WM_SETFONT, (WPARAM)(g_waitFont ? g_waitFont : stock), TRUE);
@@ -986,9 +1000,11 @@ static void ProbeVst2(const wchar_t* path)
 		SafeCopy(plugDir, VST_PATH_CHARS, path);
 		wchar_t* slash = wcsrchr(plugDir, L'\\');
 		if (slash) *slash = 0; else plugDir[0] = 0;
+		wchar_t savedDllDir[MAX_PATH] = {};
+		GetDllDirectoryW(MAX_PATH, savedDllDir);
 		if (plugDir[0]) SetDllDirectoryW(plugDir);
 		mod = LoadLibraryExW(path, NULL, LOAD_WITH_ALTERED_SEARCH_PATH);
-		if (plugDir[0]) SetDllDirectoryW(NULL);
+		SetDllDirectoryW(savedDllDir[0] ? savedDllDir : NULL);
 	}
 	if (!mod) return;
 	VSTPluginMainProc mainProc = (VSTPluginMainProc)GetProcAddress(mod, "VSTPluginMain");
@@ -2972,8 +2988,18 @@ static void RenderDrums(float* l, float* r, int frames)
 	}
 }
 
+static void LiveDllDirFromEffect(AEffect* e)
+{
+	const char* dirA = VstPlugDirFor(e);
+	if (!dirA || !dirA[0]) return;
+	wchar_t dirW[MAX_PATH];
+	if (MultiByteToWideChar(CP_ACP, 0, dirA, -1, dirW, MAX_PATH) > 0 && dirW[0])
+		SetDllDirectoryW(dirW);
+}
+
 static void RenderEffect(AEffect* e, float* l, float* r, int frames)
 {
+	LiveDllDirFromEffect(e);
 	float* in[32], *out[32];
 	for (int i = 0; i < 32; ++i) {
 		in[i] = g_eng.zero;
@@ -3006,6 +3032,8 @@ static int LoadVst2(const wchar_t* path, HMODULE& module, AEffect*& effect)
 	// Two different lookups have to succeed: LoadLibrary("SCCore.dll") from
 	// inside the stub, which follows the DLL search path, and any relative
 	// file the plug-in opens during init, which follows the current directory.
+	wchar_t savedDllDir[MAX_PATH] = {};
+	GetDllDirectoryW(MAX_PATH, savedDllDir);
 	if (plugDir[0]) {
 		SetDllDirectoryW(plugDir);
 		SetCurrentDirectoryW(plugDir);
@@ -3016,6 +3044,7 @@ static int LoadVst2(const wchar_t* path, HMODULE& module, AEffect*& effect)
 		EnsLog(L"LoadVst2 FAIL LoadLibrary err=%lu path=%s",
 			GetLastError(), path);
 		if (oldCurDir[0]) SetCurrentDirectoryW(oldCurDir);
+		SetDllDirectoryW(savedDllDir[0] ? savedDllDir : NULL);
 		return 0;
 	}
 	VSTPluginMainProc proc = (VSTPluginMainProc)GetProcAddress(module, "VSTPluginMain");
@@ -3024,6 +3053,7 @@ static int LoadVst2(const wchar_t* path, HMODULE& module, AEffect*& effect)
 		EnsLog(L"LoadVst2 FAIL no VSTPluginMain path=%s", path);
 		FreeLibrary(module); module = NULL;
 		if (oldCurDir[0]) SetCurrentDirectoryW(oldCurDir);
+		SetDllDirectoryW(savedDllDir[0] ? savedDllDir : NULL);
 		return 0;
 	}
 	DWORD seh = 0;
@@ -3039,6 +3069,7 @@ static int LoadVst2(const wchar_t* path, HMODULE& module, AEffect*& effect)
 			__except (EXCEPTION_EXECUTE_HANDLER) {}
 		FreeLibrary(module); module = NULL; effect = NULL;
 		if (oldCurDir[0]) SetCurrentDirectoryW(oldCurDir);
+		SetDllDirectoryW(savedDllDir[0] ? savedDllDir : NULL);
 		return 0;
 	}
 	// Bound before effOpen: that is where an instrument reads its tone data.
@@ -3059,13 +3090,11 @@ static int LoadVst2(const wchar_t* path, HMODULE& module, AEffect*& effect)
 		VstPlugDirUnbind(effect);
 		FreeLibrary(module); module = NULL; effect = NULL;
 		if (oldCurDir[0]) SetCurrentDirectoryW(oldCurDir);
+		SetDllDirectoryW(savedDllDir[0] ? savedDllDir : NULL);
 		return 0;
 	}
-	// Keep plugin dir on the search path while the module stays loaded
-	// (SCCore / companion DLLs may delay-load). Restore only on close via
-	// tracking would be complex; leave SetDllDirectory to this plug's dir
-	// for the session — FreeSong/CloseEffect does not clear it; next Load
-	// overwrites. Acceptable for single-song MIDI host.
+	// Keep this plug's folder on the DLL search path. SC-VA delay-loads
+	// SCCore; CloseEffect must not clear it while any live instance remains.
 	EnsLog(L"LoadVst2 OK path=%s ins=%d outs=%d flags=0x%X uid=0x%08X",
 		path, effect->numInputs, effect->numOutputs, (unsigned)effect->flags,
 		(unsigned)effect->uniqueID);
@@ -3073,8 +3102,28 @@ static int LoadVst2(const wchar_t* path, HMODULE& module, AEffect*& effect)
 	return 1;
 }
 
+#ifdef KPIHOST64_BUILD
+static volatile LONG g_liveAbandonPlugins = 0;
+extern "C" void VstLiveAbandonHostPlugins(int on)
+{
+	InterlockedExchange(&g_liveAbandonPlugins, on ? 1 : 0);
+}
+#else
+extern "C" void VstLiveAbandonHostPlugins(int) {}
+#endif
+
 static void CloseEffect(HMODULE& module, AEffect*& effect)
 {
+#ifdef KPIHOST64_BUILD
+	// SOUND Canvas VA's effClose / FreeLibrary can never return. Dropping the
+	// pointers leaks the module until this process exits, which is how the
+	// pipe stays able to open a KPI file after the live host window closes.
+	if (InterlockedCompareExchange(&g_liveAbandonPlugins, 0, 0)) {
+		effect = NULL;
+		module = NULL;
+		return;
+	}
+#endif
 	if (effect && effect->dispatcher) {
 		__try {
 			effect->dispatcher(effect, effStopProcess, 0, 0, NULL, 0);
@@ -3086,7 +3135,9 @@ static void CloseEffect(HMODULE& module, AEffect*& effect)
 	effect = NULL;
 	if (module) FreeLibrary(module);
 	module = NULL;
-	SetDllDirectoryW(NULL);
+	// Do not SetDllDirectoryW(NULL) here. SC-VA delay-loads SCCore from its
+	// folder; clearing the search path while another live instance is still
+	// open leaves that instance silent until the host is closed and reopened.
 }
 
 static int ContainsI(const wchar_t* text, const wchar_t* needle)
@@ -3117,6 +3168,16 @@ static int DetectMultiTimbralName(const wchar_t* text)
 	};
 	for (int i = 0; i < (int)(sizeof(keys) / sizeof(keys[0])); ++i)
 		if (ContainsI(text, keys[i])) return 1;
+	return 0;
+}
+
+static int LiveIsMultiPath(const wchar_t* pluginPath)
+{
+	if (DetectMultiTimbralName(pluginPath)) return 1;
+	for (int i = 0; i < g_pluginCount; ++i)
+		if (g_plugins[i].isMultiTimbral && pluginPath &&
+			!_wcsicmp(g_plugins[i].path, pluginPath))
+			return 1;
 	return 0;
 }
 
@@ -5614,6 +5675,7 @@ struct LiveRemoteShm {
 };
 
 static LiveRemoteShm g_liveShm;
+static volatile LONG g_liveShuttingDown = 0;
 
 // The wave-out thread reads the rings while the UI thread can unload a part and
 // unmap them, so the pointers themselves are published under this lock.
@@ -5685,8 +5747,8 @@ static int LiveRemoteOpenShm()
 
 static void LiveRemoteStop()
 {
-	LiveRemoteCloseShm();
 	g_kpiHost.VstLiveAudioStop();
+	LiveRemoteCloseShm();
 }
 
 static void LiveRemoteMidi(int portIndex0to2, DWORD msg)
@@ -5713,22 +5775,25 @@ static void LiveRemoteMix(float* L, float* R, int frames)
 	AcquireSRWLockExclusive(&g_liveShmLock);
 	KPIHOST64_VstLiveAudioShm* s = g_liveShm.audio;
 	if (!s || !s->capacity) { ReleaseSRWLockExclusive(&g_liveShmLock); return; }
-	const uint32_t cap = s->capacity;
 	const uint32_t need = (uint32_t)frames;
 	const uint32_t want = g_liveShm.primed ? need : (uint32_t)LIVE_REMOTE_PREBUFFER;
-	// Wave-out already holds queued blocks, so a short wait here costs nothing
-	// audible while it keeps a slow first render from turning into a gap. Once
-	// primed the wait stays well inside the queued time, so a dead host cannot
-	// stall this thread.
 	const int spins = g_liveShm.primed ? 20 : 300;
 	for (int spin = 0; spin < spins; ++spin) {
+		s = g_liveShm.audio;
+		if (!s || !s->capacity) { ReleaseSRWLockExclusive(&g_liveShmLock); return; }
 		if (s->writePos - s->readPos >= want) break;
-		if (g_liveShm.hWake) SetEvent(g_liveShm.hWake);
+		HANDLE wake = g_liveShm.hWake;
+		ReleaseSRWLockExclusive(&g_liveShmLock);
+		if (wake) SetEvent(wake);
 		Sleep(1);
+		AcquireSRWLockExclusive(&g_liveShmLock);
 	}
+	s = g_liveShm.audio;
+	if (!s || !s->capacity) { ReleaseSRWLockExclusive(&g_liveShmLock); return; }
+	const uint32_t cap = s->capacity;
 	uint32_t r = s->readPos;
 	uint32_t avail = s->writePos - r;
-	if (avail > cap) avail = 0; // producer restarted
+	if (avail > cap) avail = 0;
 	const uint32_t n = (avail < need) ? avail : need;
 	const float* sl = LiveShmL(s);
 	const float* sr = LiveShmR(s);
@@ -5760,7 +5825,13 @@ static int LiveRemoteLoad(int part1to32, const wchar_t* pluginPath, int isVst3)
 
 static void LiveRemoteUnload(int part1to32)
 {
-	g_kpiHost.VstLiveUnload((uint32_t)part1to32);
+	const int last = (g_liveShm.parts <= 1);
+	// Stop the host audio thread before closing the last plug-in: otherwise
+	// KpiHost64's UI thread waits on g_eng.cs while the audio thread is inside
+	// processReplacing, and the pipe never returns.
+	if (last) LiveRemoteStop();
+	if (!InterlockedCompareExchange(&g_liveShuttingDown, 0, 0))
+		g_kpiHost.VstLiveUnload((uint32_t)part1to32);
 	if (g_liveShm.parts > 0) --g_liveShm.parts;
 	if (g_liveShm.parts == 0) LiveRemoteStop();
 }
@@ -5804,7 +5875,7 @@ extern "C" int VstLiveLoadPart(int part1to32,
 		EnterCriticalSection(&g_eng.cs);
 		LivePart& rp = g_eng.live[part1to32 - 1];
 		rp.remote = 1;
-		rp.isMulti = DetectMultiTimbralName(pluginPath) ? 1 : 0;
+		rp.isMulti = LiveIsMultiPath(pluginPath);
 		rp.sendCh = rp.isMulti ? -1 : 0;
 		rp.prog = -1;
 		LeaveCriticalSection(&g_eng.cs);
@@ -5846,7 +5917,7 @@ extern "C" int VstLiveLoadPart(int part1to32,
 		ok = LoadVst2(pluginPath, p.module, p.effect);
 	}
 	if (ok) {
-		p.isMulti = DetectMultiTimbralName(pluginPath) ? 1 : 0;
+		p.isMulti = LiveIsMultiPath(pluginPath);
 		// One part = one instrument track, and the channel already picked the
 		// slot, so a single-timbre plug-in is fed on ch1: a kit that listens
 		// there (Groove Agent default) plays wherever the user drops it. The
@@ -5892,6 +5963,7 @@ static void LivePendFlush(LivePart& p)
 	LivePending& q = p.pend;
 	if (!q.count) return;
 	if (p.effect && p.effect->dispatcher) {
+		LiveDllDirFromEffect(p.effect);
 		const int pi = (int)(&p - g_eng.live);
 		VstPendBuf& buf = g_livePend[(pi >= 0 && pi < 32) ? pi : 0];
 		buf.block.reserved = 0;
@@ -6161,17 +6233,61 @@ extern "C" void VstLiveAllNotesOff()
 extern "C" void VstLiveUnloadPart(int part1to32)
 {
 	if (part1to32 < 1 || part1to32 > 32) return;
+#ifdef KPIHOST64_BUILD
+	if (InterlockedCompareExchange(&g_liveAbandonPlugins, 0, 0)) {
+		if (TryEnterCriticalSection(&g_eng.cs)) {
+			LivePart& p = g_eng.live[part1to32 - 1];
+			p.vst3 = NULL;
+			p.effect = NULL;
+			p.module = NULL;
+			p.isMulti = 0;
+			p.remote = 0;
+			p.edWnd = NULL;
+			LeaveCriticalSection(&g_eng.cs);
+		}
+		return;
+	}
+#endif
+	int wasRemote = 0;
+	EnterCriticalSection(&g_eng.cs);
+	wasRemote = g_eng.live[part1to32 - 1].remote;
+	LeaveCriticalSection(&g_eng.cs);
+#ifndef KPIHOST64_BUILD
+	// effEditClose / effClose while KpiHost64 is inside processReplacing is
+	// the usual "close the host and it hangs" path. Stop that thread first.
+	if (wasRemote) LiveRemoteStop();
+#endif
 	VstLiveEditorClose(part1to32);
 	EnterCriticalSection(&g_eng.cs);
 	LivePanicPart(g_eng.live[part1to32 - 1]);
 	LivePart& p = g_eng.live[part1to32 - 1];
-	const int wasRemote = p.remote;
+	wasRemote = p.remote;
 	CloseEffect(p.module, p.effect);
 	Vst3Close(p.vst3); p.vst3 = NULL;
 	p.isMulti = 0;
 	p.remote = 0;
 	LeaveCriticalSection(&g_eng.cs);
 	if (wasRemote) LiveRemoteUnload(part1to32);
+#ifndef KPIHOST64_BUILD
+	if (wasRemote && g_liveShm.parts > 0 &&
+		!InterlockedCompareExchange(&g_liveShuttingDown, 0, 0))
+		LiveRemoteOpenShm();
+#endif
+}
+
+extern "C" void VstLiveShutdown(void)
+{
+#ifndef KPIHOST64_BUILD
+	InterlockedExchange(&g_liveShuttingDown, 1);
+	LiveRemoteStop();
+	g_kpiHost.VstLiveUnloadAll();
+	g_liveShm.parts = 0;
+#endif
+	for (int i = 1; i <= 32; ++i)
+		VstLiveUnloadPart(i);
+#ifndef KPIHOST64_BUILD
+	InterlockedExchange(&g_liveShuttingDown, 0);
+#endif
 }
 
 static int LivePartFreeForProbe(int part0)
@@ -6259,7 +6375,8 @@ static double LiveProbeRemote(int part1to32, int note, int velocity,
 	// Straight into the ring, deliberately not through VstLiveMidiShort: that
 	// also pushes the note to the local part owning the port, so a plug-in
 	// sitting in another slot would answer and get measured instead.
-	LiveRemoteMidi(0, noteOn);
+	const int port = (part1to32 - 1) / 16;
+	LiveRemoteMidi(port, noteOn);
 
 	double peak = 0.0;
 	const DWORD deadline = GetTickCount() + 2000;
@@ -6272,7 +6389,7 @@ static double LiveProbeRemote(int part1to32, int note, int velocity,
 		if ((peak - base) * 1000.0 >= (double)PROBE_AUDIBLE_MILLI) break;
 		Sleep(blockMs);
 	}
-	LiveRemoteMidi(0, noteOff);
+	LiveRemoteMidi(port, noteOff);
 	return peak;
 }
 
@@ -6350,6 +6467,19 @@ static int LiveAlreadyDroppable(const VstPluginInfo& p, int beforeIndex)
 static int LivePaletteListed(const VstPluginInfo& p)
 {
 	return (p.isInstrument && p.isLiveOk && p.isAudible != 0) ? 1 : 0;
+}
+
+#ifndef KPIHOST64_BUILD
+void VstHostOnLiveListChanged(void);
+#endif
+
+static void LivePalettePushIfOk(const VstPluginInfo& p)
+{
+	if (!LivePaletteListed(p)) return;
+#ifndef KPIHOST64_BUILD
+	VstHostOnLiveListChanged();
+#endif
+	PumpWait(g_waitWnd);
 }
 
 // First droppable copy of a name+arch stays. Later copies are hidden even if
@@ -6441,6 +6571,7 @@ extern "C" void VstScanVerifyLiveList(HWND parentForWait)
 			p.isLiveOk = 1;
 			changed = 1;
 			EnsLog(L"verify NEEDS-PATCH instant path=%s", p.path);
+			LivePalettePushIfOk(p);
 			continue;
 		}
 		int part = 0;
@@ -6492,6 +6623,7 @@ extern "C" void VstScanVerifyLiveList(HWND parentForWait)
 			changed = 1;
 			EnsLog(L"verify NEEDS-PATCH skip-probe part=%d remote=%d path=%s",
 				part, wasRemote, p.path);
+			LivePalettePushIfOk(p);
 			continue;
 		}
 		if (wait) SetVerifyWait(wait, done, todo, p.name,
@@ -6516,9 +6648,15 @@ extern "C" void VstScanVerifyLiveList(HWND parentForWait)
 			p.isAudible == 1 ? L"SOUND" :
 			(p.isAudible == 2 ? L"NEEDS-PATCH" : L"SILENT"),
 			part, wasRemote, milli, base, prog, p.path);
+		LivePalettePushIfOk(p);
 	}
 	if (ownWait && wait) DestroyWait(wait);
-	if (CollapseLiveDuplicates()) changed = 1;
+	if (CollapseLiveDuplicates()) {
+		changed = 1;
+#ifndef KPIHOST64_BUILD
+		VstHostOnLiveListChanged();
+#endif
+	}
 	if (changed) SaveCache();
 }
 
@@ -7161,7 +7299,17 @@ static LRESULT CALLBACK LiveEditorWndProc(HWND h, UINT m, WPARAM w, LPARAM l)
 			}
 			return 0;
 		}
-		if (m == WM_CLOSE) { VstLiveEditorClose(part); return 0; }
+		if (m == WM_CLOSE) {
+#ifdef KPIHOST64_BUILD
+			VstHost64_LiveAudioStop();
+#endif
+			VstLiveEditorClose(part);
+#ifdef KPIHOST64_BUILD
+			if (VstHost64_LiveActive())
+				VstHost64_LiveAudioStart();
+#endif
+			return 0;
+		}
 	}
 	return DefWindowProcW(h, m, w, l);
 }
@@ -7255,10 +7403,21 @@ extern "C" int VstLiveEditorOpen(int part1to32)
 extern "C" void VstLiveEditorClose(int part1to32)
 {
 	if (part1to32 < 1 || part1to32 > 32) return;
+#ifdef KPIHOST64_BUILD
+	if (InterlockedCompareExchange(&g_liveAbandonPlugins, 0, 0)) {
+		g_eng.live[part1to32 - 1].edWnd = NULL;
+		return;
+	}
+#endif
 	LivePart& p = g_eng.live[part1to32 - 1];
 #ifndef KPIHOST64_BUILD
 	if (p.remote) {
+		if (InterlockedCompareExchange(&g_liveShuttingDown, 0, 0))
+			return;
+		const int resume = (g_liveShm.audio != NULL);
+		if (resume) LiveRemoteStop();
 		g_kpiHost.VstLiveEditorClose((uint32_t)part1to32);
+		if (resume && g_liveShm.parts > 0) LiveRemoteOpenShm();
 		return;
 	}
 #endif

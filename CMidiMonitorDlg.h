@@ -146,6 +146,7 @@ private:
 	void InjectShort(int part, DWORD msg);
 	void DrainLiveTap();
 	void SnapshotLiveNotes();
+	void MarkHostOccupiedParts();
 	void LatchPart(int part, BYTE bit);
 	bool IsLatched(int part, BYTE bit) const;
 	void ApplyDragValue(CPoint clientPt);
@@ -155,9 +156,11 @@ private:
 	void LoadCurrentMidi();
 	void UnloadMidi();
 	void ResetParts();
+	void InitPartDefaults(int i, BYTE heard);
+	void ResetPartsBank(int port);
 	void ApplyEvent(const MmEv& e);
 	void ApplyShort(int port, DWORD msg, BOOL fromUser = FALSE, BOOL liveExact = FALSE);
-	void ApplySysex(const BYTE* d, int n);
+	void ApplySysex(const BYTE* d, int n, int livePort = -1);
 	void ApplyNrpn(Part& p);
 	void RefreshPartName(Part& p);
 	void ApplyMapForce(int force);

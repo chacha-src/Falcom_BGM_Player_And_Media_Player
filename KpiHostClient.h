@@ -70,8 +70,11 @@ private:
 	bool ConnectPipe(bool waitForHost = true);
 	bool StartHostProcess();
 
-	bool SendRequest(uint32_t cmd, const void* payload, uint32_t payloadBytes, std::vector<uint8_t>& outReplyPayload, uint32_t& outStatus);
-	bool SendSimple(uint32_t cmd, const void* payload, uint32_t payloadBytes);
+	bool SendRequest(uint32_t cmd, const void* payload, uint32_t payloadBytes,
+		std::vector<uint8_t>& outReplyPayload, uint32_t& outStatus,
+		DWORD timeoutMs = 120000);
+	bool SendSimple(uint32_t cmd, const void* payload, uint32_t payloadBytes,
+		DWORD timeoutMs = 120000);
 	bool SyncHostLang();
 
 	int m_sentLang = -1;

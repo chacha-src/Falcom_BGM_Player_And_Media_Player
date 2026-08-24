@@ -19,7 +19,7 @@
 <h2>From zero to sound</h2>
 <ol>
 <li>Press <b>VST</b> on the bottom bar. Plug-ins are on the left; Parts 1–32 on the right.</li>
-<li>If the list is empty, use Rescan (or right-click → Rescan plug-ins). Only plug-ins that can land on a part and sound — or that need a patch picked in their own window — are listed. Copies of the same name are kept only if they can drop; the first droppable one wins. The GS/XG shared-DLL paths from settings are searched too. After the name, <b>&amp;lt;x86&amp;gt; &amp;lt;x64&amp;gt;</b> is bitness, <b>&amp;lt;patch&amp;gt;</b> means pick a sound in the plug-in editor, and <b>[M16ch]</b> is a 16-channel multi. Effects that cannot drop are omitted. HALion 7 and Groove Agent are confirmed instantly without opening.</li>
+<li>If the list is empty, use Rescan (or right-click → Rescan plug-ins). Only plug-ins that can land on a part and sound — or that need a patch picked in their own window — are listed. On first open and rescan, each plug-in that passes the drop and sound check is added to the left list as soon as it is confirmed. Copies of the same name are kept only if they can drop; the first droppable one wins. The GS/XG shared-DLL paths from settings are searched too. After the name, <b>&amp;lt;x86&amp;gt; &amp;lt;x64&amp;gt;</b> is bitness, <b>&amp;lt;patch&amp;gt;</b> means pick a sound in the plug-in editor, and <b>[M16ch]</b> is a 16-channel multi. Effects that cannot drop are omitted. HALion 7 and Groove Agent are confirmed instantly without opening.</li>
 <li>Drag a plug-in onto one of <b>Parts 1–32</b>. Patch-browser instruments also skip loading library program 0 on drop, so the drag is faster.</li>
 <li>Choose MIDI In 1–3 for keyboards. Each device appears twice: <b>1-16ch</b> (parts 1–16) and <b>17-32ch</b> (parts 17–32). Put one keyboard on 1-16ch and another on 17-32ch to split channels; the third input uses the same bands. Assigning the same device to several ports reaches 32 parts like Super-MPU. The <b>Main play</b> combo to their right is <b>Main-playback thru</b>: whatever the player is sounding (any format) is routed here, and it can run together with MIDI In 1–3. While thru is on, the player's own speakers are silent and you hear only this host's audio output. If it is MIDI, the SMF also merges with the keyboards.</li>
 <li>Play the keyboard — that part should sound. Names marked <b>&amp;lt;patch&amp;gt;</b> stay silent until you open the plug-in editor from the slot button and pick a sound.</li>
@@ -29,7 +29,7 @@
 <dt>Preset</dt>
 <dd>Save / switch / rename / delete wiring and device choices.</dd>
 <dt>Rescan</dt>
-<dd>Rebuild the plug-in list. Only instruments that can drop onto a part remain. Names are tagged <b>&amp;lt;x86&amp;gt; &amp;lt;x64&amp;gt;</b>, <b>&amp;lt;patch&amp;gt;</b>, and <b>[M16ch]</b>. Samplers such as HALion 7 and Groove Agent are listed as &amp;lt;patch&amp;gt; instantly, without opening. Plug-ins that already sound finish the check as soon as audio is heard.</dd>
+<dd>Rebuild the plug-in list. Only instruments that can drop onto a part remain. Each plug-in that passes the drop and sound check is added on the left as it is confirmed. Names are tagged <b>&amp;lt;x86&amp;gt; &amp;lt;x64&amp;gt;</b>, <b>&amp;lt;patch&amp;gt;</b>, and <b>[M16ch]</b>. Samplers such as HALion 7 and Groove Agent are listed as &amp;lt;patch&amp;gt; instantly, without opening. Plug-ins that already sound finish the check as soon as audio is heard.</dd>
 <dt>Save / Rename / Delete</dt>
 <dd>Preset management.</dd>
 <dt>MIDI In 1–3</dt>

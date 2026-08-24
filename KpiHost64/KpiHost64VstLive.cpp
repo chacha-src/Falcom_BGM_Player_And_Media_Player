@@ -73,24 +73,33 @@ static void LiveAudioDrainMidi()
 	InterlockedExchange((LONG*)&m->readPos, (LONG)r);
 }
 
+static int LiveAudioStopSignalled()
+{
+	return g_liveAudio.stopEvent &&
+		WaitForSingleObject(g_liveAudio.stopEvent, 0) == WAIT_OBJECT_0;
+}
+
 static unsigned __stdcall LiveAudioThreadProc(void*)
 {
 	CoInitializeEx(NULL, COINIT_MULTITHREADED);
 	__declspec(align(32)) float tl[LIVE_RENDER_FRAMES], tr[LIVE_RENDER_FRAMES];
 	HANDLE waits[2] = { g_liveAudio.stopEvent, g_liveAudio.wakeEvent };
-	while (WaitForMultipleObjects(2, waits, FALSE, INFINITE) != WAIT_OBJECT_0) {
+	for (;;) {
+		DWORD w = WaitForMultipleObjects(2, waits, FALSE, 50);
+		if (w == WAIT_OBJECT_0 || LiveAudioStopSignalled()) break;
 		KPIHOST64_VstLiveAudioShm* s = g_liveAudio.shm;
 		if (!s) continue;
 		const uint32_t cap = s->capacity;
 		for (;;) {
-			const uint32_t w = s->writePos;
+			if (LiveAudioStopSignalled()) break;
+			const uint32_t wr = s->writePos;
 			const uint32_t r = s->readPos;
-			const uint32_t buffered = w - r;
+			const uint32_t buffered = wr - r;
 			if (buffered >= cap - LIVE_RENDER_FRAMES) break;
 			if (buffered >= LIVE_MAX_BUFFERED) break;
 			LiveAudioDrainMidi();
 			VstLiveRender(tl, tr, LIVE_RENDER_FRAMES);
-			uint32_t wp = w;
+			uint32_t wp = wr;
 			float* sl = ShmL(s);
 			float* sr = ShmR(s);
 			for (int i = 0; i < LIVE_RENDER_FRAMES; ++i) {
@@ -107,19 +116,25 @@ static unsigned __stdcall LiveAudioThreadProc(void*)
 	return 0;
 }
 
-static void LiveAudioStopThread()
+static int LiveAudioStopThread()
 {
 	if (g_liveAudio.stopEvent)
 		SetEvent(g_liveAudio.stopEvent);
+	if (g_liveAudio.wakeEvent)
+		SetEvent(g_liveAudio.wakeEvent);
+	int stopped = 1;
 	if (g_liveAudio.thread) {
-		WaitForSingleObject(g_liveAudio.thread, 3000);
-		CloseHandle(g_liveAudio.thread);
-		g_liveAudio.thread = NULL;
+		if (WaitForSingleObject(g_liveAudio.thread, 4000) != WAIT_OBJECT_0)
+			stopped = 0;
+		if (stopped) {
+			CloseHandle(g_liveAudio.thread);
+			g_liveAudio.thread = NULL;
+		}
 	}
 	InterlockedExchange(&g_liveAudio.running, 0);
-	if (g_liveAudio.stopEvent) {
+	if (stopped && g_liveAudio.stopEvent)
 		ResetEvent(g_liveAudio.stopEvent);
-	}
+	return stopped;
 }
 
 // ---------------------------------------------------------------------------
@@ -263,25 +278,35 @@ uint32_t VstHost64_LiveUnload(uint32_t part1to32)
 {
 	if (part1to32 < 1 || part1to32 > 32) return KPIHOST64_STATUS_BAD_REQUEST;
 	if (!EnsureUiThread()) return KPIHOST64_STATUS_FAIL;
-	SendMessageW(g_uiWnd, UIMSG_UNLOAD, (WPARAM)part1to32, 0);
+	const LONG left = InterlockedCompareExchange(&g_liveParts, 0, 0);
+	VstHost64_LiveAudioStop();
+	DWORD_PTR dummy = 0;
+	SendMessageTimeoutW(g_uiWnd, UIMSG_UNLOAD, (WPARAM)part1to32, 0,
+		SMTO_ABORTIFHUNG, 4000, &dummy);
 	if (InterlockedCompareExchange(&g_liveParts, 0, 0) > 0)
 		InterlockedDecrement(&g_liveParts);
+	if (left > 1 && InterlockedCompareExchange(&g_liveParts, 0, 0) > 0)
+		VstHost64_LiveAudioStart();
 	return KPIHOST64_STATUS_OK;
 }
 
 uint32_t VstHost64_LiveUnloadAll()
 {
 	VstHost64_LiveAudioStop();
-	if (!EnsureUiThread()) return KPIHOST64_STATUS_FAIL;
-	SendMessageW(g_uiWnd, UIMSG_UNLOAD_ALL, 0, 0);
+	VstLiveAbandonHostPlugins(1);
+	if (g_uiWnd) {
+		DWORD_PTR dummy = 0;
+		SendMessageTimeoutW(g_uiWnd, UIMSG_UNLOAD_ALL, 0, 0,
+			SMTO_ABORTIFHUNG, 2000, &dummy);
+	}
+	VstLiveAbandonHostPlugins(0);
 	InterlockedExchange(&g_liveParts, 0);
 	return KPIHOST64_STATUS_OK;
 }
 
 int VstHost64_LiveActive()
 {
-	return (InterlockedCompareExchange(&g_liveParts, 0, 0) > 0 ||
-		InterlockedCompareExchange(&g_liveAudio.running, 0, 0) != 0) ? 1 : 0;
+	return InterlockedCompareExchange(&g_liveParts, 0, 0) > 0 ? 1 : 0;
 }
 
 uint32_t VstHost64_LiveMidi(uint32_t port, uint32_t msg)
@@ -316,6 +341,12 @@ uint32_t VstHost64_LiveRender(uint32_t frames, std::vector<uint8_t>& reply)
 
 uint32_t VstHost64_LiveAudioStart()
 {
+	if (g_liveAudio.thread) {
+		if (WaitForSingleObject(g_liveAudio.thread, 0) != WAIT_OBJECT_0)
+			return KPIHOST64_STATUS_FAIL;
+		CloseHandle(g_liveAudio.thread);
+		g_liveAudio.thread = NULL;
+	}
 	if (InterlockedCompareExchange(&g_liveAudio.running, 1, 0) != 0) {
 		if (g_liveAudio.shm && g_liveAudio.midiShm) return KPIHOST64_STATUS_OK;
 		VstHost64_LiveAudioStop();
@@ -373,7 +404,8 @@ uint32_t VstHost64_LiveAudioStart()
 
 uint32_t VstHost64_LiveAudioStop()
 {
-	LiveAudioStopThread();
+	if (!LiveAudioStopThread())
+		return KPIHOST64_STATUS_FAIL;
 	LiveAudioCloseMapping();
 	if (g_liveAudio.stopEvent) {
 		CloseHandle(g_liveAudio.stopEvent);
@@ -398,7 +430,9 @@ uint32_t VstHost64_LiveEditorClose(uint32_t part1to32)
 {
 	if (part1to32 < 1 || part1to32 > 32) return KPIHOST64_STATUS_BAD_REQUEST;
 	if (!EnsureUiThread()) return KPIHOST64_STATUS_FAIL;
-	SendMessageW(g_uiWnd, UIMSG_EDITOR_CLOSE, (WPARAM)part1to32, 0);
+	DWORD_PTR dummy = 0;
+	SendMessageTimeoutW(g_uiWnd, UIMSG_EDITOR_CLOSE, (WPARAM)part1to32, 0,
+		SMTO_ABORTIFHUNG, 4000, &dummy);
 	return KPIHOST64_STATUS_OK;
 }
 

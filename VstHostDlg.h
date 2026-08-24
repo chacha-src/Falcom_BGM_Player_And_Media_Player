@@ -77,6 +77,7 @@ class CVstHostDlg : public CCustomBlurDialogBase
 {
 	DECLARE_DYNAMIC(CVstHostDlg)
 	friend class CVstWireCtrl;
+	friend void VstHostOnLiveListChanged();
 public:
 	CVstHostDlg(CWnd* pParent = NULL);
 	virtual ~CVstHostDlg();

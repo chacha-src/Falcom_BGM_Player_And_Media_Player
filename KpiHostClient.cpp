@@ -1,6 +1,7 @@
 ﻿#include "stdafx.h"
 
 #include "KpiHostClient.h"
+#include <tlhelp32.h>
 
 static void AppendLogLine(const wchar_t* line)
 {
@@ -122,7 +123,6 @@ bool KpiHost64Client::StartHostProcess()
 
 	std::wstring hostExe;
 	if (!FindHostExeRecursive(dir, hostExe)) {
-		// last resort (dev/build output)
 		hostExe = L"C:\\projects\\APPLICATION3\\ogg_binary\\KpiHost64.exe";
 	}
 	if (!FileExists(hostExe)) return false;
@@ -150,11 +150,32 @@ bool KpiHost64Client::StartHostProcess()
 	return true;
 }
 
+static void KillStaleKpiHost64()
+{
+	HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+	if (snap == INVALID_HANDLE_VALUE) return;
+	PROCESSENTRY32W pe{};
+	pe.dwSize = sizeof(pe);
+	DWORD self = GetCurrentProcessId();
+	if (Process32FirstW(snap, &pe)) {
+		do {
+			if (_wcsicmp(pe.szExeFile, L"KpiHost64.exe") != 0) continue;
+			if (pe.th32ProcessID == self) continue;
+			HANDLE p = OpenProcess(PROCESS_TERMINATE, FALSE, pe.th32ProcessID);
+			if (!p) continue;
+			TerminateProcess(p, 1);
+			CloseHandle(p);
+		} while (Process32NextW(snap, &pe));
+	}
+	CloseHandle(snap);
+}
+
 bool KpiHost64Client::ConnectPipe(bool waitForHost)
 {
 	const int attempts = waitForHost ? 30 : 1;
 	for (int i = 0; i < attempts; i++) {
-		HANDLE h = CreateFileW(KPIHOST64_PIPE_NAME, GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING, 0, NULL);
+		HANDLE h = CreateFileW(KPIHOST64_PIPE_NAME, GENERIC_READ | GENERIC_WRITE, 0, NULL,
+			OPEN_EXISTING, FILE_FLAG_OVERLAPPED, NULL);
 		if (h != INVALID_HANDLE_VALUE) {
 			DWORD mode = PIPE_READMODE_BYTE;
 			SetNamedPipeHandleState(h, &mode, NULL, NULL);
@@ -204,11 +225,13 @@ bool KpiHost64Client::SyncHostLang()
 bool KpiHost64Client::EnsureConnected()
 {
 	if (m_hPipe == INVALID_HANDLE_VALUE) {
-		// No pipe means no host yet: retrying first only delays the launch, which
-		// the first .mid of a session waits on.
 		if (!ConnectPipe(false)) {
 			StartHostProcess();
-			if (!ConnectPipe(true)) return false;
+			if (!ConnectPipe(true)) {
+				KillStaleKpiHost64();
+				StartHostProcess();
+				if (!ConnectPipe(true)) return false;
+			}
 		}
 		m_sentLang = -1;
 	}
@@ -228,36 +251,75 @@ struct PipeLock
 // for. Treating that as an error used to drop the connection mid-song, which
 // the playback thread turns into a zero-filled buffer, i.e. a hole in the
 // audio.
-bool PipeReadAll(HANDLE pipe, void* buf, uint32_t bytes)
+enum : uint32_t { PIPE_MAX_REPLY_BYTES = 64u * 1024u * 1024u };
+
+bool PipeXfer(HANDLE pipe, void* buf, uint32_t bytes, int writing, DWORD timeoutMs)
 {
 	uint8_t* p = (uint8_t*)buf;
+	const DWORD t0 = GetTickCount();
 	while (bytes) {
+		const DWORD elapsed = GetTickCount() - t0;
+		if (elapsed >= timeoutMs) return false;
+		const DWORD left = timeoutMs - elapsed;
+		OVERLAPPED ov{};
+		ov.hEvent = CreateEventW(NULL, TRUE, FALSE, NULL);
+		if (!ov.hEvent) return false;
 		DWORD got = 0;
-		if (!ReadFile(pipe, p, bytes, &got, NULL) || got == 0) return false;
+		BOOL ok = writing
+			? WriteFile(pipe, p, bytes, &got, &ov)
+			: ReadFile(pipe, p, bytes, &got, &ov);
+		if (!ok) {
+			if (GetLastError() != ERROR_IO_PENDING) {
+				CloseHandle(ov.hEvent);
+				return false;
+			}
+			if (WaitForSingleObject(ov.hEvent, left) != WAIT_OBJECT_0) {
+				CancelIoEx(pipe, &ov);
+				WaitForSingleObject(ov.hEvent, 2000);
+				CloseHandle(ov.hEvent);
+				return false;
+			}
+			if (!GetOverlappedResult(pipe, &ov, &got, FALSE)) {
+				CloseHandle(ov.hEvent);
+				return false;
+			}
+		}
+		CloseHandle(ov.hEvent);
+		if (got == 0) return false;
 		p += got;
 		bytes -= got;
 	}
 	return true;
 }
 
-bool PipeSkip(HANDLE pipe, uint32_t bytes)
+bool PipeReadAll(HANDLE pipe, void* buf, uint32_t bytes, DWORD timeoutMs)
+{
+	return PipeXfer(pipe, buf, bytes, 0, timeoutMs);
+}
+
+bool PipeWriteAll(HANDLE pipe, const void* buf, uint32_t bytes, DWORD timeoutMs)
+{
+	return PipeXfer(pipe, (void*)buf, bytes, 1, timeoutMs);
+}
+
+bool PipeSkip(HANDLE pipe, uint32_t bytes, DWORD timeoutMs)
 {
 	uint8_t scratch[4096];
+	const DWORD t0 = GetTickCount();
 	while (bytes) {
+		const DWORD elapsed = GetTickCount() - t0;
+		if (elapsed >= timeoutMs) return false;
 		const uint32_t take = bytes < sizeof(scratch) ? bytes : (uint32_t)sizeof(scratch);
-		if (!PipeReadAll(pipe, scratch, take)) return false;
+		if (!PipeReadAll(pipe, scratch, take, timeoutMs - elapsed)) return false;
 		bytes -= take;
 	}
 	return true;
 }
-
-enum : uint32_t { PIPE_MAX_REPLY_BYTES = 64u * 1024u * 1024u };
 } // namespace
 
-bool KpiHost64Client::SendRequest(uint32_t cmd, const void* payload, uint32_t payloadBytes, std::vector<uint8_t>& outReplyPayload, uint32_t& outStatus)
+bool KpiHost64Client::SendRequest(uint32_t cmd, const void* payload, uint32_t payloadBytes,
+	std::vector<uint8_t>& outReplyPayload, uint32_t& outStatus, DWORD timeoutMs)
 {
-	// The host serves a single pipe instance, so playback and the VST Live UI
-	// share this connection; a half-written request would desync the stream.
 	PipeLock lock(m_cs);
 	outReplyPayload.clear();
 	outStatus = KPIHOST64_STATUS_FAIL;
@@ -268,26 +330,22 @@ bool KpiHost64Client::SendRequest(uint32_t cmd, const void* payload, uint32_t pa
 	h.requestId = m_reqId++;
 	h.payloadBytes = payloadBytes;
 
-	DWORD written = 0;
-	if (!WriteFile(m_hPipe, &h, sizeof(h), &written, NULL) || written != sizeof(h)) {
+	if (!PipeWriteAll(m_hPipe, &h, sizeof(h), timeoutMs)) {
 		AppendLogLine(L"[SendRequest] write header failed");
 		Disconnect();
 		return false;
 	}
 	if (payloadBytes) {
-		if (!WriteFile(m_hPipe, payload, payloadBytes, &written, NULL) || written != payloadBytes) {
+		if (!PipeWriteAll(m_hPipe, payload, payloadBytes, timeoutMs)) {
 			AppendLogLine(L"[SendRequest] write payload failed");
 			Disconnect();
 			return false;
 		}
 	}
 
-	// A reply left over from a request that was abandoned earlier is still in
-	// the stream. Skip past it and keep looking for our own reply rather than
-	// dropping the connection, which would cost a whole buffer of audio.
 	for (int attempt = 0; attempt < 16; ++attempt) {
 		KPIHOST64_ReplyHeader rh{};
-		if (!PipeReadAll(m_hPipe, &rh, sizeof(rh))) {
+		if (!PipeReadAll(m_hPipe, &rh, sizeof(rh), timeoutMs)) {
 			AppendLogLine(L"[SendRequest] read reply header failed");
 			Disconnect();
 			return false;
@@ -301,7 +359,7 @@ bool KpiHost64Client::SendRequest(uint32_t cmd, const void* payload, uint32_t pa
 			AppendLogLine((L"[SendRequest] stale reply skipped: got cmd=" + std::to_wstring(rh.cmd) +
 				L" id=" + std::to_wstring(rh.requestId) + L", want cmd=" + std::to_wstring(cmd) +
 				L" id=" + std::to_wstring(h.requestId)).c_str());
-			if (!PipeSkip(m_hPipe, rh.payloadBytes)) {
+			if (!PipeSkip(m_hPipe, rh.payloadBytes, timeoutMs)) {
 				Disconnect();
 				return false;
 			}
@@ -309,7 +367,7 @@ bool KpiHost64Client::SendRequest(uint32_t cmd, const void* payload, uint32_t pa
 		}
 		if (rh.payloadBytes) {
 			outReplyPayload.resize(rh.payloadBytes);
-			if (!PipeReadAll(m_hPipe, outReplyPayload.data(), rh.payloadBytes)) {
+			if (!PipeReadAll(m_hPipe, outReplyPayload.data(), rh.payloadBytes, timeoutMs)) {
 				AppendLogLine(L"[SendRequest] read reply payload failed");
 				outReplyPayload.clear();
 				Disconnect();
@@ -322,6 +380,15 @@ bool KpiHost64Client::SendRequest(uint32_t cmd, const void* payload, uint32_t pa
 	AppendLogLine(L"[SendRequest] could not resync reply stream");
 	Disconnect();
 	return false;
+}
+
+bool KpiHost64Client::SendSimple(uint32_t cmd, const void* payload, uint32_t payloadBytes,
+	DWORD timeoutMs)
+{
+	std::vector<uint8_t> reply;
+	uint32_t st = 0;
+	if (!SendRequest(cmd, payload, payloadBytes, reply, st, timeoutMs)) return false;
+	return st == KPIHOST64_STATUS_OK;
 }
 
 bool KpiHost64Client::Ping()
@@ -597,14 +664,6 @@ bool KpiHost64Client::VstCloseAll()
 	return st == KPIHOST64_STATUS_OK;
 }
 
-bool KpiHost64Client::SendSimple(uint32_t cmd, const void* payload, uint32_t payloadBytes)
-{
-	std::vector<uint8_t> reply;
-	uint32_t st = 0;
-	if (!SendRequest(cmd, payload, payloadBytes, reply, st)) return false;
-	return st == KPIHOST64_STATUS_OK;
-}
-
 bool KpiHost64Client::VstLiveLoad(uint32_t part1to32, const std::wstring& pluginPath, bool isVst3)
 {
 	if (pluginPath.empty()) return false;
@@ -624,12 +683,12 @@ bool KpiHost64Client::VstLiveLoad(uint32_t part1to32, const std::wstring& plugin
 bool KpiHost64Client::VstLiveUnload(uint32_t part1to32)
 {
 	KPIHOST64_U32 u{ part1to32 };
-	return SendSimple(KPIHOST64_CMD_VST_LIVE_UNLOAD, &u, sizeof(u));
+	return SendSimple(KPIHOST64_CMD_VST_LIVE_UNLOAD, &u, sizeof(u), 8000);
 }
 
 bool KpiHost64Client::VstLiveUnloadAll()
 {
-	return SendSimple(KPIHOST64_CMD_VST_LIVE_UNLOAD_ALL, NULL, 0);
+	return SendSimple(KPIHOST64_CMD_VST_LIVE_UNLOAD_ALL, NULL, 0, 8000);
 }
 
 bool KpiHost64Client::VstLiveMidi(uint32_t port, uint32_t msg)
@@ -659,7 +718,7 @@ bool KpiHost64Client::VstLiveAudioStart()
 
 bool KpiHost64Client::VstLiveAudioStop()
 {
-	return SendSimple(KPIHOST64_CMD_VST_LIVE_AUDIO_STOP, NULL, 0);
+	return SendSimple(KPIHOST64_CMD_VST_LIVE_AUDIO_STOP, NULL, 0, 8000);
 }
 
 bool KpiHost64Client::VstLiveEditorOpen(uint32_t part1to32)
@@ -671,7 +730,7 @@ bool KpiHost64Client::VstLiveEditorOpen(uint32_t part1to32)
 bool KpiHost64Client::VstLiveEditorClose(uint32_t part1to32)
 {
 	KPIHOST64_U32 u{ part1to32 };
-	return SendSimple(KPIHOST64_CMD_VST_LIVE_EDITOR_CLOSE, &u, sizeof(u));
+	return SendSimple(KPIHOST64_CMD_VST_LIVE_EDITOR_CLOSE, &u, sizeof(u), 8000);
 }
 
 bool KpiHost64Client::VstLiveSetSendChannel(uint32_t part1to32, int32_t sendCh)

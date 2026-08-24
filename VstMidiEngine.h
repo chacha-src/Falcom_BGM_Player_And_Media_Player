@@ -112,6 +112,10 @@ int VstMidiStealInjects(BYTE* ports, DWORD* msgs, int* sampleOfs, int maxCount);
 
 int VstLiveLoadPart(int part1to32, const wchar_t* pluginPath, int isVst3);
 void VstLiveUnloadPart(int part1to32);
+// Host window going away: stop remote audio first, then drop every part.
+void VstLiveShutdown(void);
+// KpiHost64 only: skip effClose/FreeLibrary so a wedged plug-in cannot pin the pipe.
+void VstLiveAbandonHostPlugins(int on);
 void VstLiveAllNotesOff();
 void VstLiveMidiShort(int portIndex0to2, DWORD shortMsg);
 void VstLiveMidiSysex(int portIndex0to2, const unsigned char* data, int bytes);

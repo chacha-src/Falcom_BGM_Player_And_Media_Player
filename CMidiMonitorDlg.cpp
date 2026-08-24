@@ -82,6 +82,16 @@ static int MmLiveHostPartOn(int part)
 	return plug[0] ? 1 : 0;
 }
 
+// Host closed → 0. Do not reuse MmLiveHostPartOn (that returns 1 when closed).
+static int MmHostSlotOccupied(int part)
+{
+	if (part < 0 || part >= CMidiMonitorDlg::PART_MAX) return 0;
+	if (!MmVstHostOpen()) return 0;
+	wchar_t plug[40] = {};
+	g_vstHostDlg->PartPluginName(part, plug, 40);
+	return plug[0] ? 1 : 0;
+}
+
 static constexpr COLORREF MM_BG = RGB(8, 8, 12);
 static constexpr COLORREF MM_HEAD_BG = RGB(196, 196, 200);
 static constexpr COLORREF MM_CHROMA = RGB(8, 8, 12);
@@ -1058,6 +1068,70 @@ bool CMidiMonitorDlg::EnsureFrameBuffer(CDC& refDC, int w, int h)
 	return true;
 }
 
+void CMidiMonitorDlg::InitPartDefaults(int i, BYTE heard)
+{
+	if (i < 0 || i >= PART_MAX) return;
+	Part& p = m_part[i];
+	memset(&p, 0, sizeof(p));
+	m_plugShown[i][0] = 0;
+	p.pc = 0;
+	p.vol = 100;
+	p.exp = 127;
+	p.pan = 64;
+	p.rev = 40;
+	p.eqLow = 80;
+	p.eqHigh = 10000;
+	p.mapId = 4;
+	p.bankLsb = 0;
+	{
+		const int fmid = MmForceMapId(m_mapForce);
+		if (fmid >= 0) {
+			p.mapId = fmid;
+			if (m_mapForce == 3) p.bankLsb = 1;
+			else if (m_mapForce == 4) p.bankLsb = 2;
+			else if (m_mapForce == 5) p.bankLsb = 3;
+			else if (m_mapForce == 6) p.bankLsb = 4;
+			else if (m_mapForce == 9) { p.bankMsb = 127; p.bankLsb = 0; }
+		} else if (!m_fileHasXg && !m_fileHasGm && m_gsMapKind >= 1 && m_gsMapKind <= 4 && m_mapForce != 2) {
+			p.bankLsb = m_gsMapKind;
+			if (m_gsMapKind == 1) p.mapId = 1;
+			else if (m_gsMapKind == 2) p.mapId = 2;
+			else if (m_gsMapKind == 3) p.mapId = 3;
+			else p.mapId = 4;
+		} else if (m_fileHasGm || m_gsMapKind == 5) {
+			p.mapId = 5;
+			p.bankLsb = 0;
+		} else if (m_fileHasSd || m_gsMapKind == 6) {
+			p.mapId = 6;
+			p.bankLsb = 0;
+		} else if (m_gsMapKind == 8) {
+			p.mapId = 8;
+			p.bankMsb = 127;
+			p.bankLsb = 0;
+		} else if (m_gsMapKind >= 9) {
+			p.mapId = m_gsMapKind;
+			p.bankLsb = 0;
+		}
+	}
+	p.isDrum = ((i % 16) == 9) ? 1 : 0;
+	p.heard = heard;
+	p.rxCh = i % 16;
+	p.rxPort = (i >= 16) ? 1 : 0;
+	p.lastNote = -1;
+	RefreshPartName(p);
+}
+
+void CMidiMonitorDlg::ResetPartsBank(int port)
+{
+	if (port < 0 || port > 1) return;
+	const int b0 = port * 16;
+	for (int i = b0; i < b0 + 16 && i < PART_MAX; ++i)
+		InitPartDefaults(i, m_part[i].heard);
+	m_dirtyRows |= (port ? 0xFFFF0000u : 0x0000FFFFu);
+	m_fullDraw = true;
+	m_nameNeed = 0;
+}
+
 void CMidiMonitorDlg::ResetParts()
 {
 	BYTE heard[PART_MAX];
@@ -1065,54 +1139,8 @@ void CMidiMonitorDlg::ResetParts()
 		heard[i] = m_part[i].heard;
 	memset(m_part, 0, sizeof(m_part));
 	memset(m_plugShown, 0, sizeof(m_plugShown));
-	for (int i = 0; i < PART_MAX; ++i) {
-		Part& p = m_part[i];
-		p.pc = 0;
-		p.vol = 100;
-		p.exp = 127;
-		p.pan = 64;
-		p.rev = 40;
-		p.eqLow = 80;
-		p.eqHigh = 10000;
-		p.mapId = 4;
-		p.bankLsb = 0;
-		{
-			const int fmid = MmForceMapId(m_mapForce);
-			if (fmid >= 0) {
-				p.mapId = fmid;
-				if (m_mapForce == 3) p.bankLsb = 1;
-				else if (m_mapForce == 4) p.bankLsb = 2;
-				else if (m_mapForce == 5) p.bankLsb = 3;
-				else if (m_mapForce == 6) p.bankLsb = 4;
-				else if (m_mapForce == 9) { p.bankMsb = 127; p.bankLsb = 0; }
-			} else if (!m_fileHasXg && !m_fileHasGm && m_gsMapKind >= 1 && m_gsMapKind <= 4 && m_mapForce != 2) {
-				p.bankLsb = m_gsMapKind;
-				if (m_gsMapKind == 1) p.mapId = 1;
-				else if (m_gsMapKind == 2) p.mapId = 2;
-				else if (m_gsMapKind == 3) p.mapId = 3;
-				else p.mapId = 4;
-			} else if (m_fileHasGm || m_gsMapKind == 5) {
-				p.mapId = 5;
-				p.bankLsb = 0;
-			} else if (m_fileHasSd || m_gsMapKind == 6) {
-				p.mapId = 6;
-				p.bankLsb = 0;
-			} else if (m_gsMapKind == 8) {
-				p.mapId = 8;
-				p.bankMsb = 127;
-				p.bankLsb = 0;
-			} else if (m_gsMapKind >= 9) {
-				p.mapId = m_gsMapKind;
-				p.bankLsb = 0;
-			}
-		}
-		p.isDrum = ((i % 16) == 9) ? 1 : 0;
-		p.heard = heard[i];
-		p.rxCh = i % 16;
-		p.rxPort = (i >= 16) ? 1 : 0;
-		p.lastNote = -1;
-		RefreshPartName(p);
-	}
+	for (int i = 0; i < PART_MAX; ++i)
+		InitPartDefaults(i, heard[i]);
 	m_usecQn = 500000;
 	m_tsNum = 4;
 	m_tsDen = 4;
@@ -1386,7 +1414,7 @@ void CMidiMonitorDlg::ApplyShort(int port, DWORD msg, BOOL fromUser, BOOL liveEx
 	}
 }
 
-void CMidiMonitorDlg::ApplySysex(const BYTE* d, int n)
+void CMidiMonitorDlg::ApplySysex(const BYTE* d, int n, int livePort)
 {
 	if (!d || n < 6) return;
 	if (d[0] != 0xf0) return;
@@ -1394,12 +1422,22 @@ void CMidiMonitorDlg::ApplySysex(const BYTE* d, int n)
 		const int gm2 = (n >= 5 && d[4] == 0x03);
 		m_sysMode = 0;
 		if (gm2) m_gsMapKind = 9;
+		if (livePort >= 0 && livePort <= 1) {
+			ResetPartsBank(livePort);
+			m_sysMode = 0;
+			return;
+		}
 		ResetParts();
 		m_sysMode = 0;
 		return;
 	}
 	if (n >= 11 && VstMidiSysexIsGsReset(d, n)) {
 		m_sysMode = 1;
+		if (livePort >= 0 && livePort <= 1) {
+			ResetPartsBank(livePort);
+			m_sysMode = 1;
+			return;
+		}
 		ResetParts();
 		m_sysMode = 1;
 		return;
@@ -1407,6 +1445,11 @@ void CMidiMonitorDlg::ApplySysex(const BYTE* d, int n)
 	if (n >= 11 && d[1] == 0x41 && d[3] == 0x42 && d[4] == 0x12 &&
 		(d[5] == 0x50 || d[5] == 0x60) && d[6] == 0x00 && d[7] == 0x7f) {
 		m_sysMode = 1;
+		if (livePort >= 0) {
+			const int bank = livePort + 1;
+			if (bank <= 1) ResetPartsBank(bank);
+			return;
+		}
 		for (int i = 16; i < PART_MAX; ++i) {
 			Part& p = m_part[i];
 			p.pc = 0;
@@ -1431,6 +1474,11 @@ void CMidiMonitorDlg::ApplySysex(const BYTE* d, int n)
 	}
 	if (n >= 9 && VstMidiSysexIsXgOn(d, n)) {
 		m_sysMode = 2;
+		if (livePort >= 0 && livePort <= 1) {
+			ResetPartsBank(livePort);
+			m_sysMode = 2;
+			return;
+		}
 		ResetParts();
 		m_sysMode = 2;
 		return;
@@ -1455,7 +1503,8 @@ void CMidiMonitorDlg::ApplySysex(const BYTE* d, int n)
 	const int hasF7 = (n > 0 && d[n - 1] == 0xf7) ? 1 : 0;
 	if (n >= 10 && d[1] == 0x41 && d[3] == 0x42 && d[4] == 0x12 &&
 		(d[5] == 0x40 || d[5] == 0x50) && d[6] >= 0x10 && d[6] <= 0x1f) {
-		const int blk = (d[5] == 0x50) ? 1 : 0;
+		int blk = (d[5] == 0x50) ? 1 : 0;
+		if (livePort >= 0) blk += livePort;
 		const int part = blk * 16 + MmGs1xToPart(d[6]);
 		if (part >= 0 && part < PART_MAX) {
 			Part& p = m_part[part];
@@ -1555,6 +1604,10 @@ void CMidiMonitorDlg::LoadCurrentMidi()
 
 	UnloadMidi();
 	ResetParts();
+	// Remember the try even if this is not SMF. Otherwise the next timer tick
+	// sees an empty m_loadedPath, UnloadMidi zeros heard, and live rows only
+	// light while a note is in the tap (gray again on note-off).
+	MmCopyW(m_loadedPath, 520, mid);
 	HANDLE f = CreateFileW(mid, GENERIC_READ, FILE_SHARE_READ, NULL,
 		OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, NULL);
 	if (f == INVALID_HANDLE_VALUE) return;
@@ -1922,6 +1975,7 @@ void CMidiMonitorDlg::LoadCurrentMidi()
 	ResetParts();
 	for (int i = 0; i < PART_MAX; ++i)
 		m_part[i].heard = chUse[i];
+	MarkHostOccupiedParts();
 	delete[] data;
 	m_lastPlayb = -1;
 	m_evPos = 0;
@@ -2423,7 +2477,7 @@ void CMidiMonitorDlg::DrawPartRow(CDC& dc, int i, int y, int rowH, int w, UINT d
 
 	dc.SetBkMode(TRANSPARENT);
 	CFont* oldF = dc.SelectObject(&m_fontTiny);
-	const int unused = p.heard ? 0 : 1;
+	const int unused = (p.heard || plug[0]) ? 0 : 1;
 	const int drum = (!unused && p.isDrum) ? 1 : 0;
 	const int dim = (i & 1);
 	COLORREF rowBg = unused ? MM_ROW_U : (drum ? MM_ROW_D : (dim ? MM_ROW_B : MM_ROW_A));
@@ -2699,7 +2753,7 @@ void CMidiMonitorDlg::DrainLiveTap()
 		const int n = VstLiveTapStealSysex(&port, sx, (int)sizeof(sx));
 		if (n <= 0) break;
 		if (!m_frozen) {
-			ApplySysex(sx, n);
+			ApplySysex(sx, n, port);
 			++applied;
 		}
 	}
@@ -2730,6 +2784,19 @@ void CMidiMonitorDlg::SnapshotLiveNotes()
 	}
 	if (any)
 		UpdateNoteMeter();
+	MarkHostOccupiedParts();
+}
+
+void CMidiMonitorDlg::MarkHostOccupiedParts()
+{
+	if (m_frozen) return;
+	if (!MmVstHostOpen()) return;
+	for (int i = 0; i < PART_MAX; ++i) {
+		if (m_part[i].heard) continue;
+		if (!MmHostSlotOccupied(i)) continue;
+		m_part[i].heard = 1;
+		m_dirtyRows |= (1u << i);
+	}
 }
 
 void CMidiMonitorDlg::InjectShort(int part, DWORD msg)
@@ -3020,7 +3087,7 @@ void CMidiMonitorDlg::DrawMonitor3D(CDC& dc, int w, int h)
 		if (lv < 0.04f) lv = 0.04f;
 		const float y = 0.08f + lv * 0.70f;
 		COLORREF c;
-		if (!m_part[i].heard)
+		if (!m_part[i].heard && !MmHostSlotOccupied(i))
 			c = RGB(72, 72, 78);
 		else if (m_part[i].isDrum)
 			c = RGB(255, 140, 64);
@@ -3272,6 +3339,7 @@ void CMidiMonitorDlg::OnTimer(UINT_PTR nIDEvent)
 			if (!m_frozen) {
 				SyncFromPlayback();
 				DrainLiveTap();
+				MarkHostOccupiedParts();
 				TickVisuals();
 			} else {
 				DrainLiveTap();
@@ -3310,6 +3378,7 @@ void CMidiMonitorDlg::OnShowWindow(BOOL bShow, UINT nStatus)
 	if (bShow) {
 		LoadCurrentMidi();
 		SnapshotLiveNotes();
+		MarkHostOccupiedParts();
 		PollAppVolume();
 		Invalidate(FALSE);
 	}
@@ -3576,6 +3645,7 @@ void CMidiMonitorDlg::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
 	} else if (cmd == IDM_MM_RELOAD) {
 		m_loadedPath[0] = 0;
 		LoadCurrentMidi();
+		MarkHostOccupiedParts();
 		Invalidate(FALSE);
 	} else if (cmd == IDM_MM_DRUM_PART || cmd == IDM_MM_DRUM_AB10) {
 		int parts[2];
