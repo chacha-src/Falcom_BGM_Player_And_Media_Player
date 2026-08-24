@@ -1601,6 +1601,7 @@ void CMidiMonitorDlg::LoadCurrentMidi()
 	int mapHint = 0;
 	int sawFf21 = 0;
 	int gs32 = 0;
+	int maxPort = 0;
 	m_titleBuf[0] = 0;
 	const BYTE* p = smf + 8 + MmReadBE(smf + 4, 4);
 	const BYTE* fileEnd = smf + smfSize;
@@ -1649,6 +1650,7 @@ void CMidiMonitorDlg::LoadCurrentMidi()
 					if (curPort < 0) curPort = 0;
 					if (curPort > 1) curPort = 1;
 					sawFf21 = 1;
+					if (curPort > maxPort) maxPort = curPort;
 				} else if ((type == 0x01 || type == 0x02 || type == 0x03) && ml > 0) {
 					char tmp[256];
 					unsigned n = ml;
@@ -1810,6 +1812,7 @@ void CMidiMonitorDlg::LoadCurrentMidi()
 	}
 	m_gs32 = gs32;
 	m_mirrorToB = (gs32 && !sawFf21) ? 1 : 0;
+	const int wantB = (gs32 || maxPort >= 1) ? 1 : 0;
 	BYTE chUse[PART_MAX];
 	memset(chUse, 0, sizeof(chUse));
 	for (int i = 0; i < count; ++i) {
@@ -1865,11 +1868,11 @@ void CMidiMonitorDlg::LoadCurrentMidi()
 			tmp[w].sysexOff = off;
 			++w;
 		};
-		if (!any) { put(1, 0, 0); put(2, 0, 0); }
+		if (!any) { put(1, 0, 0); if (wantB) put(2, 0, 0); }
 		for (int i = 0; i < count && w < EV_MAX; ++i) {
 			tmp[w++] = ev[i];
 			const int k = isRst(ev[i]);
-			if (k == 1) { put(1, ev[i].tick, ev[i].sample); put(2, ev[i].tick, ev[i].sample); }
+			if (k == 1) { put(1, ev[i].tick, ev[i].sample); if (wantB) put(2, ev[i].tick, ev[i].sample); }
 			else if (k == 2) put(2, ev[i].tick, ev[i].sample);
 			else if (k == 3) put(1, ev[i].tick, ev[i].sample);
 		}
@@ -1900,12 +1903,12 @@ void CMidiMonitorDlg::LoadCurrentMidi()
 			tmp[w].aux = 0; tmp[w].port = port; tmp[w].sysexOff = -1;
 			++w;
 		};
-		if (!any) { put(0, 0, 0); put(0, 0, 1); }
+		if (!any) { put(0, 0, 0); if (wantB) put(0, 0, 1); }
 		for (int i = 0; i < count && w < EV_MAX; ++i) {
 			tmp[w++] = ev[i];
 			if (isXg(ev[i])) {
 				put(ev[i].tick, ev[i].sample, ev[i].port);
-				if (ev[i].port == 0) put(ev[i].tick, ev[i].sample, 1);
+				if (wantB && ev[i].port == 0) put(ev[i].tick, ev[i].sample, 1);
 			}
 		}
 		delete[] ev;

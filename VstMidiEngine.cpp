@@ -215,11 +215,15 @@ extern "C" int VstMidiSysexMarksGs32(const unsigned char* d, int n)
 	if (!d || n < 8 || d[0] != 0xf0) return 0;
 	if (d[1] == 0x41 && n >= 11 && d[3] == 0x42 && d[4] == 0x12) {
 		const BYTE a0 = d[5], a1 = d[6], a2 = d[7];
-		if (a0 == 0x50) return 1;
-		if (a0 == 0x00 && a1 == 0x01 && a2 >= 0x10 && a2 <= 0x1f) return 1;
-		if (a0 == 0x00 && a1 == 0x01 && a2 == 0x00 && n >= 12 && d[8] == 0x01) return 1;
+		// Port B / Port C part & system DT1 (40=A, 50=B, 60=C).
+		if (a0 == 0x50 || a0 == 0x60) return 1;
+		// Voice Reserve starts at 00 01 10. 16 bytes = 16 parts (very common
+		// in ordinary GS). 32 bytes = parts 1–32. Treating any 00 01 10–1F
+		// as 32ch used to mirror every 16ch song onto B01–B16.
+		if (a0 == 0x00 && a1 == 0x01 && a2 == 0x10 && (n - 10) >= 32) return 1;
 		return 0;
 	}
+	// XG Multi Part 17–32 (high address 09). 08 is parts 1–16.
 	if (d[1] == 0x43 && n >= 8 && d[3] == 0x4c && d[4] == 0x09) return 1;
 	return 0;
 }
@@ -1649,7 +1653,8 @@ static int LoadSmf(const wchar_t* path)
 		};
 		auto appendMap = [&](MidiItem* dst, int w, unsigned __int64 tick, __int64 samp) -> int {
 			const int lsb = g_eng.gsMapLsb;
-			for (int port = 0; port < 2 && w < MAX_MIDI_EVENTS; ++port) {
+			const int nPort = (gs32 || maxPort >= 1) ? 2 : 1;
+			for (int port = 0; port < nPort && w < MAX_MIDI_EVENTS; ++port) {
 				for (int ch = 0; ch < 16 && w < MAX_MIDI_EVENTS; ++ch) {
 					if (ch == 9) continue;
 					dst[w].tick = tick;
@@ -1712,18 +1717,19 @@ static int LoadSmf(const wchar_t* path)
 		int any = 0;
 		for (int i = 0; i < count; ++i)
 			if (isRst(ev[i])) { any = 1; break; }
+		const int wantB = (gs32 || maxPort >= 1) ? 1 : 0;
 		MidiItem* tmp = new MidiItem[MAX_MIDI_EVENTS];
 		int w = 0;
 		if (!any) {
 			w = putRhy(tmp, w, 0, 0, 1);
-			w = putRhy(tmp, w, 0, 0, 2);
+			if (wantB) w = putRhy(tmp, w, 0, 0, 2);
 		}
 		for (int i = 0; i < count && w < MAX_MIDI_EVENTS; ++i) {
 			tmp[w++] = ev[i];
 			const int k = isRst(ev[i]);
 			if (k == 1) {
 				w = putRhy(tmp, w, ev[i].tick, ev[i].sample, 1);
-				w = putRhy(tmp, w, ev[i].tick, ev[i].sample, 2);
+				if (wantB) w = putRhy(tmp, w, ev[i].tick, ev[i].sample, 2);
 			} else if (k == 2)
 				w = putRhy(tmp, w, ev[i].tick, ev[i].sample, 2);
 			else if (k == 3)
@@ -1754,17 +1760,18 @@ static int LoadSmf(const wchar_t* path)
 		int any = 0;
 		for (int i = 0; i < count; ++i)
 			if (isXg(ev[i])) { any = 1; break; }
+		const int wantB = (gs32 || maxPort >= 1) ? 1 : 0;
 		MidiItem* tmp = new MidiItem[MAX_MIDI_EVENTS];
 		int w = 0;
 		if (!any) {
 			w = putXgDrum(tmp, w, 0, 0, 0);
-			w = putXgDrum(tmp, w, 0, 0, 1);
+			if (wantB) w = putXgDrum(tmp, w, 0, 0, 1);
 		}
 		for (int i = 0; i < count && w < MAX_MIDI_EVENTS; ++i) {
 			tmp[w++] = ev[i];
 			if (isXg(ev[i])) {
 				w = putXgDrum(tmp, w, ev[i].tick, ev[i].sample, ev[i].port);
-				if (ev[i].port == 0)
+				if (wantB && ev[i].port == 0)
 					w = putXgDrum(tmp, w, ev[i].tick, ev[i].sample, 1);
 			}
 		}
