@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include "CCustomControl.h"
 
 // ============================================================================
@@ -329,6 +329,8 @@ protected:
 	BOOL ChipFlightRowsAtRest() const; // 出現飛行が視覚的に静止したか
 	void UpdateTip();
 	BOOL IsPointInChain(CPoint screenPt) const;
+	BOOL ScreenPtOnMenuBody(CPoint screenPt) const;
+	BOOL ScreenPtOnOpenSubBody(CPoint screenPt) const;
 	BOOL IsHwndRelated(HWND h) const;
 	BOOL IsForegroundOurs() const;
 	BOOL IsInteractiveKind(int kind) const;

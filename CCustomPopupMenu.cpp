@@ -1,4 +1,4 @@
-#include "stdafx.h"
+﻿#include "stdafx.h"
 #include "CCustomPopupMenu.h"
 #include "GdiSoft2D.h"
 #include "GdiSoft3D.h"
@@ -2423,6 +2423,30 @@ BOOL CCustomPopupMenu::IsPointInChain(CPoint screenPt) const
 	return FALSE;
 }
 
+BOOL CCustomPopupMenu::ScreenPtOnMenuBody(CPoint screenPt) const
+{
+	if (!GetSafeHwnd()) return FALSE;
+	CRect wr;
+	GetWindowRect(&wr);
+	if (!wr.PtInRect(screenPt)) return FALSE;
+	CPoint c = screenPt;
+	const_cast<CCustomPopupMenu*>(this)->ScreenToClient(&c);
+	if (HitTest(c) >= 0) return TRUE;
+	CRect body(m_flightPad, m_flightPad, m_flightPad + m_menuW, m_flightPad + m_menuH);
+	if (m_flightPad <= 0)
+		GetClientRect(&body);
+	return body.PtInRect(c) ? TRUE : FALSE;
+}
+
+BOOL CCustomPopupMenu::ScreenPtOnOpenSubBody(CPoint screenPt) const
+{
+	if (m_openSub < 0 || m_openSub >= m_itemCount) return FALSE;
+	const int si = m_items[m_openSub].subIndex;
+	if (si < 0 || si >= m_subCount || !m_subs[si]) return FALSE;
+	if (m_subs[si]->ScreenPtOnMenuBody(screenPt)) return TRUE;
+	return m_subs[si]->ScreenPtOnOpenSubBody(screenPt);
+}
+
 BOOL CCustomPopupMenu::IsHwndRelated(HWND h) const
 {
 	if (!h || !::IsWindow(h)) return FALSE;
@@ -2807,10 +2831,12 @@ void CCustomPopupMenu::SnapAnimToIdle()
 	{
 		CPoint sp;
 		::GetCursorPos(&sp);
-		ScreenToClient(&sp);
-		const int idx = HitTest(sp);
-		if (idx != m_hot)
-			SetHot(idx);
+		if (!ScreenPtOnOpenSubBody(sp)) {
+			ScreenToClient(&sp);
+			const int idx = HitTest(sp);
+			if (idx != m_hot)
+				SetHot(idx);
+		}
 	}
 	// idle 背景アニメ用（ストライプ周期 ~66ms に合わせてやや速め）
 	SetTimer(kAnimTimer, 33, NULL);
@@ -3337,12 +3363,15 @@ LRESULT CCustomPopupMenu::OnPrintClient(WPARAM wParam, LPARAM)
 
 LRESULT CCustomPopupMenu::OnNcHitTest(CPoint point)
 {
-	// サブの飛行余白HWNDは親メニューを覆う。親項目上は透過して親の SetHot→サブ破棄へ渡す。
-	for (CCustomPopupMenu* p = m_parentMenu; p; p = p->m_parentMenu) {
-		if (!p->GetSafeHwnd()) continue;
-		CRect wr; p->GetWindowRect(&wr);
-		if (wr.PtInRect(point))
-			return HTTRANSPARENT;
+	// 飛行余白が親を覆うときだけ透過。左折り返しで本体が親に重なるときは
+	// こちらがヒットを取る（透過すると選択不能／親がサブを閉じる）。
+	if (!ScreenPtOnMenuBody(point)) {
+		for (CCustomPopupMenu* p = m_parentMenu; p; p = p->m_parentMenu) {
+			if (!p->GetSafeHwnd()) continue;
+			CRect wr; p->GetWindowRect(&wr);
+			if (wr.PtInRect(point))
+				return HTTRANSPARENT;
+		}
 	}
 	// 飛行パッドの穴（チップも定着行も無い）も下へ通す
 	if (m_flightPad > 0 && m_lineAnimPhase != 0 && UsesRowChipFlight(PopupAnimStyle())) {
@@ -3378,6 +3407,10 @@ void CCustomPopupMenu::OnMouseMove(UINT nFlags, CPoint point)
 	}
 	TRACKMOUSEEVENT tme = { sizeof(tme) };
 	tme.dwFlags = TME_LEAVE; tme.hwndTrack = m_hWnd; ::_TrackMouseEvent(&tme);
+	CPoint sp;
+	::GetCursorPos(&sp);
+	if (ScreenPtOnOpenSubBody(sp))
+		return;
 	SetHot(HitTest(point));
 	CWnd::OnMouseMove(nFlags, point);
 }
@@ -3678,6 +3711,9 @@ void CCustomPopupMenu::SyncHotFromCursor()
 	if (!GetSafeHwnd() || m_openSub < 0) return;
 	CPoint sp;
 	::GetCursorPos(&sp);
+	// 左折り返しで子孫本体が親に重なっているときは親行判定しない
+	if (ScreenPtOnOpenSubBody(sp))
+		return;
 	CRect pwr; GetWindowRect(&pwr);
 	if (!pwr.PtInRect(sp)) return;
 	CPoint c = sp;
