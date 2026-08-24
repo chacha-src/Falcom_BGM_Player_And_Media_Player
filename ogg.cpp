@@ -392,6 +392,7 @@ BOOL COggApp::InitInstance()
 	savedata.speaker_layout = 0;
 	savedata.lastUpdateCheck = 0;
 	savedata.updateAttemptExeTime = 0;
+	savedata.updateDlCountTime = 0;
 	savedata.pianorollwindow = 0;
 	savedata.pianorollx = -1;
 	savedata.pianorolly = -1;
@@ -731,6 +732,8 @@ BOOL COggApp::InitInstance()
 		savedata.vstHostVol = 100;
 	else if (savedata.vstHostVol < 0 || savedata.vstHostVol > 100)
 		savedata.vstHostVol = 100;
+	if (datFileSize < (int)(offsetof(save, updateDlCountTime) + sizeof(savedata.updateDlCountTime)))
+		savedata.updateDlCountTime = 0;
 	// wav_export_*_sec の正規化は saveversion 3 コンバート後に行う（intビットをfloatとして読まない）
 	// アナライザー窓: 必ず構造体末尾に追記(旧.datは部分読込で未設定のまま→既定値)
 	if (datFileSize < (int)(offsetof(save, analyzerwindow) + sizeof(savedata.analyzerwindow))) {

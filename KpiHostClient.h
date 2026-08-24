@@ -72,5 +72,9 @@ private:
 
 	bool SendRequest(uint32_t cmd, const void* payload, uint32_t payloadBytes, std::vector<uint8_t>& outReplyPayload, uint32_t& outStatus);
 	bool SendSimple(uint32_t cmd, const void* payload, uint32_t payloadBytes);
+	bool SyncHostLang();
+
+	int m_sentLang = -1;
+	int m_syncingLang = 0;
 };
 

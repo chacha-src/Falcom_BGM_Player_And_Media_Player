@@ -9,7 +9,7 @@ static const wchar_t* const KPIHOST64_PIPE_NAME = L"\\\\.\\pipe\\ogg_kpi64";
 
 enum KPIHOST64_CMD : uint32_t
 {
-	KPIHOST64_CMD_PING = 1,
+	KPIHOST64_CMD_PING = 1, // optional payload: u32 lang (0=ja … 13=tr, same as savedata.lang)
 	KPIHOST64_CMD_LIST_EXTS = 2, // input: kpiPath
 	KPIHOST64_CMD_OPEN = 3,      // input: kpiPath, mediaPath, request(KPI_MEDIAINFO), songNo
 	KPIHOST64_CMD_RENDER = 4,    // input: sessionId, bytesWanted

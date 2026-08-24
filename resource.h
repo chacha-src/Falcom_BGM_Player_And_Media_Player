@@ -1821,6 +1821,7 @@
 #define ID_MP_BOTVIS_VST                33256
 #define ID_MP_TAG_BATCH                 33256
 #define ID_MP_OPEN_MIDIMON              33283
+#define ID_MP_OPEN_VSTHOST              33284
 #define ID_SC_LAYER_HIDE                39001
 #define ID_SC_LAYER_FIT                 39002
 #define ID_SC_LAYER_SCALE50             39003

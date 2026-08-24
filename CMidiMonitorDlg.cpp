@@ -5,12 +5,14 @@
 #include "CEqualizer.h"
 #include "resource.h"
 #include "VstMidiEngine.h"
+#include "VstHostDlg.h"
 #include "PluginKinds.h"
 #include <math.h>
 #include <mmsystem.h>
 
 class COggDlg;
 extern COggDlg* og;
+#include <algorithm>
 /* クロスフェードで B(スロット1)が現行になった後も、UI から正しいエンジンを見る */
 void MmBindVstActiveSlot();
 extern save savedata;
@@ -49,7 +51,9 @@ enum {
 	IDM_MM_MAP_CS = 42473,
 	IDM_MM_MAP_GEM = 42474,
 	IDM_MM_MAP_LK = 42475,
-	IDM_MM_MAP_PV = 42476
+	IDM_MM_MAP_PV = 42476,
+	IDM_MM_DRUM_PART = 42477,
+	IDM_MM_DRUM_AB10 = 42478
 };
 
 HMIDIOUT s_kpiLiveOut = NULL;
@@ -62,14 +66,43 @@ static void MmCloseKpiLiveOut()
 	s_kpiLiveOut = NULL;
 }
 
+static int MmVstHostOpen()
+{
+	return (g_vstHostDlg && ::IsWindow(g_vstHostDlg->GetSafeHwnd())) ? 1 : 0;
+}
+
+// Host wiring: a multi on parts 1–16 covers only that block. Empty B rows
+// must not follow A MIDI (and the other way around).
+static int MmLiveHostPartOn(int part)
+{
+	if (part < 0 || part >= CMidiMonitorDlg::PART_MAX) return 0;
+	if (!MmVstHostOpen()) return 1;
+	wchar_t plug[40] = {};
+	g_vstHostDlg->PartPluginName(part, plug, 40);
+	return plug[0] ? 1 : 0;
+}
+
 static constexpr COLORREF MM_BG = RGB(8, 8, 12);
 static constexpr COLORREF MM_HEAD_BG = RGB(196, 196, 200);
 static constexpr COLORREF MM_CHROMA = RGB(8, 8, 12);
 static constexpr COLORREF MM_GRID = RGB(78, 82, 96);
 static constexpr COLORREF MM_FG = RGB(230, 230, 236);
 static constexpr COLORREF MM_HEAD_TX = RGB(28, 28, 36);
-static constexpr COLORREF MM_ROW_A = RGB(14, 16, 22);
-static constexpr COLORREF MM_ROW_B = RGB(10, 12, 18);
+static constexpr COLORREF MM_ROW_A = RGB(16, 17, 22);
+static constexpr COLORREF MM_ROW_B = RGB(11, 12, 16);
+static constexpr COLORREF MM_ROW_U = RGB(30, 30, 34);
+static constexpr COLORREF MM_ROW_D = RGB(96, 38, 22);
+static constexpr COLORREF MM_TX_W = RGB(250, 250, 252);
+static constexpr COLORREF MM_TX_D = RGB(214, 214, 220);
+static constexpr COLORREF MM_TX_U = RGB(128, 128, 136);
+static constexpr COLORREF MM_TX_DR = RGB(255, 216, 176);
+static constexpr COLORREF MM_KEY_W = RGB(240, 240, 244);
+static constexpr COLORREF MM_KEY_D = RGB(204, 206, 212);
+static constexpr COLORREF MM_KEY_U = RGB(110, 110, 118);
+static constexpr COLORREF MM_KEY_DR = RGB(255, 196, 148);
+static constexpr COLORREF MM_KEYB = RGB(22, 22, 26);
+static constexpr COLORREF MM_KEYB_U = RGB(52, 52, 58);
+static constexpr COLORREF MM_KEYB_DR = RGB(56, 18, 12);
 
 enum {
 	MM_HIT_NONE = 0,
@@ -134,6 +167,39 @@ static void MmGlowTick(BYTE& g)
 	if (!g) return;
 	g = (BYTE)((int)g * 7 / 8);
 	if (g < 6) g = 0;
+}
+
+/* 行の汚れ判定は「絵に出る量」で見る。lev と glow は毎フレーム減衰するので
+   生の値で比べると全行が常に不一致になり、32行を毎回塗り直してしまう。 */
+static int MmLevPix(float lev, int bh)
+{
+	int v = (int)(lev * 127.f);
+	if (v < 0) v = 0;
+	if (v > 127) v = 127;
+	return bh * v / 127;
+}
+
+static int MmGlowSig(BYTE g)
+{
+	/* 16段階。セル背景のフェードが見えるだけの再描画に抑える */
+	return (int)(g >> 4);
+}
+
+static void MmBumpFade(BYTE& g, int /*burst*/)
+{
+	g = 255;
+}
+
+static COLORREF MmTint(COLORREF base, COLORREF hi, BYTE fade)
+{
+	if (!fade) return base;
+	return MmMix(base, hi, fade);
+}
+
+static void MmFillFade(CDC& dc, int x, int y, int w, int h, COLORREF base, COLORREF hi, BYTE fade)
+{
+	if (w <= 0 || h <= 0 || !fade) return;
+	dc.FillSolidRect(x, y, w, h, MmTint(base, hi, fade));
 }
 
 static const wchar_t* kGmName[128] = {
@@ -233,16 +299,14 @@ static BOOL MmReadVar(const BYTE*& q, const BYTE* end, unsigned& out)
 	return FALSE;
 }
 
-static int MmCmpEv(const void* aa, const void* bb)
+static bool MmCmpEvStable(const CMidiMonitorDlg::MmEv& a, const CMidiMonitorDlg::MmEv& b)
 {
-	const CMidiMonitorDlg::MmEv* a = (const CMidiMonitorDlg::MmEv*)aa;
-	const CMidiMonitorDlg::MmEv* b = (const CMidiMonitorDlg::MmEv*)bb;
-	if (a->tick < b->tick) return -1;
-	if (a->tick > b->tick) return 1;
-	const int ca = (int)(a->msg & 15), cb = (int)(b->msg & 15);
-	if (ca < cb) return -1;
-	if (ca > cb) return 1;
-	return 0;
+	if (a.tick != b.tick)
+		return a.tick < b.tick;
+	const int ca = (int)(a.msg & 15), cb = (int)(b.msg & 15);
+	if (ca != cb)
+		return ca < cb;
+	return false;
 }
 
 static int MmGs1xToPart(int x)
@@ -714,6 +778,86 @@ void CMmHelpDlg::OnPaint()
 		L"· Lev seviyedir. Baslik DS DirectSound sesidir (MP DS ile eslenir, ana ses degil). Notes gercek polifonidir; koyu cubuk MAX'tir (sonra duser). DRUM davul vurusudur."));
 	y += lh;
 	body(L, y, LL14(
+		L"・VST 再生では GS リセットのあと A10/B10 へ USE FOR RHYTHM を送り、XG では ch10 にドラムバンク(MSB127)を送ります。曲の SysEx が後から上書きします。右クリック「操作」→「ドラムモード」でも再送できます。88map の ORCHESTRA はキット名のことがあります。",
+		L"· For VST playback, GS Reset is followed by USE FOR RHYTHM on A10/B10. XG sends drum bank MSB 127 on ch10. Later song SysEx can override. Right-click Actions → Drum mode to resend. ORCHESTRA on 88map can be a kit name.",
+		L"· En VST, apres GS Reset, USE FOR RHYTHM part sur A10/B10. XG envoie la banque batterie MSB 127 sur ch10. Le SysEx du morceau peut ecraser. Clic droit Actions → Mode batterie. ORCHESTRA en 88map peut etre un kit.",
+		L"· In VST, dopo GS Reset si invia USE FOR RHYTHM su A10/B10. XG manda banco batteria MSB 127 su ch10. Il SysEx del brano puo sovrascrivere. Tasto destro Azioni → Modo batteria. ORCHESTRA in 88map puo essere un kit.",
+		L"· En VST, tras GS Reset se envia USE FOR RHYTHM a A10/B10. XG manda banco de bateria MSB 127 en ch10. El SysEx de la pieza puede pisarlo. Clic derecho Acciones → Modo bateria. ORCHESTRA en 88map puede ser un kit.",
+		L"· VST 재생에서는 GS 리셋 뒤 A10/B10에 USE FOR RHYTHM을 보내고, XG는 ch10에 드럼 뱅크(MSB127)를 보냅니다. 곡 SysEx가 나중에 덮어씁니다. 오른쪽 클릭 조작 → 드럼 모드. 88map의 ORCHESTRA는 키트 이름일 수 있습니다.",
+		L"· VST 播放时，GS 复位后会向 A10/B10 发送 USE FOR RHYTHM；XG 则向 ch10 发送鼓组库 MSB127。乐曲 SysEx 可覆盖。右键「操作」→「鼓组模式」。88map 的 ORCHESTRA 可能是鼓组名。",
+		L"· في VST بعد GS Reset يُرسل USE FOR RHYTHM إلى A10/B10. XG يرسل بنك الطبل MSB 127 على القناة 10. يمكن لـ SysEx المقطوعة أن يستبدل ذلك. زر أيمن إجراءات → وضع الطبل.",
+		L"· В VST после GS Reset на A10/B10 уходит USE FOR RHYTHM. В XG на ch10 — банк ударных MSB 127. SysEx пьесы может переписать. ПКМ Действия → Режим ударных. ORCHESTRA в 88map может быть именем набора.",
+		L"· Bei VST folgt auf GS Reset USE FOR RHYTHM auf A10/B10. XG sendet Drum-Bank MSB 127 auf Kanal 10. Song-SysEx kann das ueberschreiben. Rechtsklick Aktionen → Drum-Modus. ORCHESTRA in 88map kann ein Kitname sein.",
+		L"· No VST, apos GS Reset envia-se USE FOR RHYTHM em A10/B10. XG envia banco de bateria MSB 127 no ch10. O SysEx da peca pode sobrescrever. Clique direito Acoes → Modo bateria. ORCHESTRA no 88map pode ser nome de kit.",
+		L"· Bij VST volgt na GS Reset USE FOR RHYTHM op A10/B10. XG stuurt drumbank MSB 127 op ch10. Song-SysEx kan dit overschrijven. Rechtsklik Acties → Drummodus. ORCHESTRA op 88map kan een kitnaam zijn.",
+		L"· W VST po GS Reset na A10/B10 idzie USE FOR RHYTHM. XG wysyla bank perkusji MSB 127 na ch10. SysEx utworu moze to nadpisac. PPM Akcje → Tryb perkusji. ORCHESTRA na 88map moze byc nazwa zestawu.",
+		L"· VST'de GS Reset sonrasi A10/B10'a USE FOR RHYTHM gider. XG ch10'a davul bankasi MSB 127 gonderir. Parca SysEx ezebilir. Sag tik Islemler → Davul modu. 88map'te ORCHESTRA kit adi olabilir."));
+	y += lh;
+	body(L, y, LL14(
+		L"・行の色 …… 使っているパートは白と少し暗い白を交互。ドラムパートは行全体を暖色にします。ノート/CC/SysEx が一度も無いチャンネルは灰色。ミニ鍵盤をクリックして鳴らすと交互色（ドラムなら暖色）に戻ります。",
+		L"· Row colors: used parts alternate white / off-white. Drum parts tint the whole row warm. Channels with no note/CC/SysEx stay gray. Click a mini-keyboard to play and the row returns to the stripe (or drum tint).",
+		L"· Couleurs : parties utilisees en blanc / blanc casse alterne. Batterie = ligne chaude. Sans note/CC/SysEx = gris. Clic sur le mini clavier : la bande (ou teinte batterie) revient.",
+		L"· Colori: parti usate in bianco / bianco sporco alternato. Batteria = riga calda. Senza nota/CC/SysEx = grigio. Clic sulla mini tastiera: torna la riga (o tinta batteria).",
+		L"· Colores: partes usadas en blanco / blanco roto. Bateria = fila calida. Sin nota/CC/SysEx = gris. Clic en el mini teclado: vuelve la franja (o tinte de bateria).",
+		L"· 행 색: 쓰는 파트는 흰색/조금 어두운 흰색 교차. 드럼은 행 전체 난색. 노트/CC/SysEx가 없는 채널은 회색. 미니 건반을 클릭해 치면 교차색(드럼이면 난색)으로 돌아갑니다.",
+		L"· 行色：有数据的声部白/略暗白交替。鼓组整行暖色。从未有音符/CC/SysEx 的通道为灰。点击迷你键盘发音后恢复条纹（鼓组则为暖色）。",
+		L"· الألوان: الأجزاء المستخدمة أبيض/أبيض باهت بالتناوب. الطبل يلوّن الصف بالكامل. بلا نغمة/CC/SysEx = رمادي. النقر على اللوحة يعيد الشريط.",
+		L"· Цвета: занятые партии — белый / чуть серый через ряд. Ударные — вся строка тёплая. Без нот/CC/SysEx — серый. Клик по мини-клавиатуре возвращает полосу (или тёплый тон).",
+		L"· Zeilen: genutzte Parts weiss / leicht abgesetzt. Drums faerben die ganze Zeile warm. Ohne Note/CC/SysEx grau. Klick auf die Mini-Tastatur stellt Streifen (oder Drum-Ton) wieder her.",
+		L"· Cores: partes usadas em branco / branco sujo. Bateria = linha quente. Sem nota/CC/SysEx = cinza. Clique no mini teclado devolve a faixa (ou tom de bateria).",
+		L"· Rijen: gebruikte partijen wit / iets donkerder wit. Drums kleuren de hele rij warm. Geen noot/CC/SysEx = grijs. Klik op het minitoetsenbord herstelt de streep (of drumtint).",
+		L"· Kolory: uzywane partie bialy / lekko przygaszony. Perkusja barwi caly wiersz. Bez nuty/CC/SysEx = szary. Klik w mini klawiature wraca pas (lub cieply odcien).",
+		L"· Satir renkleri: kullanilan partlar beyaz / biraz koyu beyaz. Davul tum satiri sicak boyar. Nota/CC/SysEx yoksa gri. Mini klavyeye tiklayinca serit (davulsa sicak ton) doner."));
+	y += lh;
+	body(L, y, LL14(
+		L"・変化の光 …… A01–B16 は発音中だけ緑に点き、離すと消えます。音色が変わるとインスト欄が琥珀に、Vol/Pan などのマスも色が点いて行の地色へ戻ります。追いつき中も、最後に残った値のマスが点きます。",
+		L"· Change glow: A01–B16 light green while sounding, then fade. An instrument change ambers that cell; Vol/Pan and other cells flash and return to the row color. Catch-up also lights the cells that still hold the last value.",
+		L"· Lueur : A01–B16 vert pendant le son, puis fondu. Changement de timbre = ambre. Vol/Pan clignotent. Le rattrapage allume aussi les cases du dernier etat.",
+		L"· Bagliore: A01–B16 verde mentre suona, poi sfuma. Cambio timbro = ambra. Vol/Pan lampeggiano. Il recupero accende anche le celle dell'ultimo stato.",
+		L"· Brillo: A01–B16 verde al sonar, luego se apaga. Cambio de timbre = ambar. Vol/Pan destellan. El alcance tambien enciende las celdas del ultimo valor.",
+		L"· 변화 빛: A01–B16은 발음 중 초록으로 켜졌다가 꺼집니다. 음색이 바뀌면 인스트 칸이 호박색, Vol/Pan 등도 점멸 후 행 색으로 돌아갑니다. 따라잡기 때도 마지막 값의 칸이 켜집니다.",
+		L"· 变化光：A01–B16 发音时亮绿，松开后淡出。音色变化时乐器栏呈琥珀；Vol/Pan 等格闪一下回到行底色。追赶时也会点亮仍保留最后值的格子。",
+		L"· توهج: A01–B16 أخضر أثناء العزف ثم يخفت. تغيير الآلة يُamber الخلية. Vol/Pan تومض. اللحاق يضيء أيضاً خلايا آخر قيمة.",
+		L"· Подсветка: A01–B16 зелёные, пока звучат, потом гаснут. Смена тембра — янтарь. Vol/Pan вспыхивают. При догоне тоже загораются ячейки последнего значения.",
+		L"· Leuchten: A01–B16 gruen beim Klingen, dann aus. Klangwechsel faerbt die Instrumentzelle amber. Vol/Pan blitzen. Beim Aufholen leuchten auch die Zellen des letzten Werts.",
+		L"· Brilho: A01–B16 verde ao soar, depois some. Troca de timbre = ambar. Vol/Pan piscam. O alcance tambem acende as celulas do ultimo valor.",
+		L"· Gloed: A01–B16 groen tijdens klank, daarna uit. Klankwissel maakt het instrumentvak amber. Vol/Pan flitsen. Inhalen licht ook de cellen van de laatste waarde.",
+		L"· Swiatlo: A01–B16 zielone gdy graja, potem gasna. Zmiana barwy = bursztyn. Vol/Pan blyskaja. Doganianie tez zapala pola ostatniej wartosci.",
+		L"· Pariltı: A01–B16 seslenirken yesil, sonra solar. Timbir degisince enstruman hucresi kehribar. Vol/Pan yanar. Yetisme son degerin hucrelerini de yakar."));
+	y += lh;
+	body(L, y, LL14(
+		L"・先頭のノートが乗るまでは SysEx/CC は遅れません（頭のダンプを表示遅延に引きずらない）。一度ノートが乗ったら、SysEx/CC も聞こえる位置に合わせて遅らせます。追いつき中は同じアドレスの SysEx / 同じ CC は最後の値だけ適用します。",
+		L"· Until a note appears, SysEx/CC are not delayed (opening dumps are not dragged by display lag). After the first note, SysEx/CC lag with the audible position. While catching up, only the last SysEx per address and last CC of each type are applied.",
+		L"· Tant qu'aucune note n'apparait, SysEx/CC ne sont pas retardees. Apres la premiere note, elles suivent la position audible. En rattrapage, seul le dernier SysEx par adresse et le dernier CC de chaque type s'appliquent.",
+		L"· Finche non compare una nota, SysEx/CC non sono ritardati. Dopo la prima nota seguono la posizione udibile. In recupero si applica solo l'ultimo SysEx per indirizzo e l'ultimo CC di ciascun tipo.",
+		L"· Hasta que aparezca una nota, SysEx/CC no se retrasan. Tras la primera nota siguen la posicion audible. Al ponerse al dia solo se aplica el ultimo SysEx por direccion y el ultimo CC de cada tipo.",
+		L"· 노트가 올라오기 전에는 SysEx/CC를 늦추지 않습니다. 첫 노트가 올라온 뒤에는 들리는 위치에 맞춰 늦춥니다. 따라잡을 때는 주소마다 마지막 SysEx, CC 종류마다 마지막 값만 적용합니다.",
+		L"· 在出现音符之前，SysEx/CC 不延迟（开头的转储不被显示延迟拖住）。出现第一个音符后，SysEx/CC 再按可听位置延迟。追赶时每个地址只保留最后一条 SysEx、每种 CC 只保留最后一次。",
+		L"· إلى أن تظهر نغمة لا تُؤخَّر SysEx/CC. بعد أول نغمة تُؤخَّر مع الموضع المسموع. عند اللحاق يُطبَّق آخر SysEx لكل عنوان وآخر CC لكل نوع.",
+		L"· Пока нет ноты, SysEx/CC не задерживаются. После первой ноты они следуют слышимой позиции. При догоне — только последний SysEx на адрес и последний CC каждого типа.",
+		L"· Bis eine Note erscheint, werden SysEx/CC nicht verzoegert. Nach der ersten Note folgen sie der hoerbaren Position. Beim Aufholen nur das letzte SysEx pro Adresse und das letzte CC je Typ.",
+		L"· Ate aparecer uma nota, SysEx/CC nao atrasam. Depois da primeira nota seguem a posicao audivel. No alcance so vale o ultimo SysEx por endereco e o ultimo CC de cada tipo.",
+		L"· Tot er een noot verschijnt, worden SysEx/CC niet vertraagd. Na de eerste noot volgen ze de hoorbare positie. Bij inhalen alleen de laatste SysEx per adres en de laatste CC per type.",
+		L"· Dopoki nie pojawi sie nuta, SysEx/CC nie sa opozniane. Po pierwszej nucie ida za slyszalna pozycja. Przy doganianiu tylko ostatni SysEx na adres i ostatni CC danego typu.",
+		L"· Nota gorene kadar SysEx/CC gecikmez. Ilk nota geldikten sonra duyulan konuma gore gecikir. Yetisirken her adresin son SysEx'i ve her CC turunun son degeri uygulanir."));
+	y += lh;
+	body(L, y, LL14(
+		L"・描画は 16ms ごとに「絵が変わった行」だけです。バーは1ピクセル動いたときだけ、ミニ鍵盤は押している音が変わったときだけ塗り直すので、32パートが同時に鳴っても全面を描き直しません。",
+		L"· Every 16ms only rows whose picture changed are repainted: a bar when it moves by a pixel, the mini keyboard only when the held notes change. Even with all 32 parts sounding, the table is not fully repainted.",
+		L"· Toutes les 16 ms, seules les lignes dont l'image change sont repeintes : une barre quand elle bouge d'un pixel, le mini clavier quand les notes tenues changent.",
+		L"· Ogni 16 ms si ridisegnano solo le righe la cui immagine cambia: una barra quando si muove di un pixel, la mini tastiera quando cambiano le note tenute.",
+		L"· Cada 16 ms solo se repintan las filas cuya imagen cambia: una barra cuando se mueve un pixel, el mini teclado cuando cambian las notas pulsadas.",
+		L"· 16ms마다 그림이 바뀐 행만 다시 그립니다. 바는 1픽셀 움직였을 때, 미니 건반은 누르고 있는 음이 바뀌었을 때만 칠합니다.",
+		L"· 每 16ms 只重绘画面真正变化的行：柱条移动一个像素时、迷你键盘按住的音变化时。即使 32 个声部同时发声也不整屏重绘。",
+		L"· كل 16ms تُعاد الصفوف التي تغيّرت صورتها فقط: الشريط عند تحركه بكسل، ولوحة المفاتيح عند تغيّر النغمات المضغوطة.",
+		L"· Каждые 16 мс перерисовываются только строки, чья картинка изменилась: полоса — при сдвиге на пиксель, мини-клавиатура — при смене зажатых нот.",
+		L"· Alle 16 ms werden nur Zeilen neu gezeichnet, deren Bild sich aendert: ein Balken bei einem Pixel Bewegung, die Mini-Tastatur nur bei geaenderten Noten.",
+		L"· A cada 16 ms so se repintam as linhas cuja imagem muda: a barra quando move um pixel, o mini teclado quando as notas presas mudam.",
+		L"· Elke 16 ms worden alleen rijen hertekend waarvan het beeld verandert: een balk bij een pixel beweging, het minitoetsenbord bij gewijzigde noten.",
+		L"· Co 16 ms rysowane sa tylko wiersze, ktorych obraz sie zmienil: pasek gdy przesunie sie o piksel, mini klawiatura gdy zmienia sie trzymane nuty.",
+		L"· Her 16ms'de yalnizca goruntusu degisen satirlar cizilir: cubuk bir piksel oynadiginda, mini klavye basili notalar degistiginde."));
+	y += lh;
+	body(L, y, LL14(
 		L"・Vol/Pan/Exp/Rev/Crs/Var はドラッグまたはホイールで送出（ダブルクリックで初期値）。PC# はホイールでプログラム変更。右端のミニ鍵盤はクリックで発音。曲の CC より約2.5秒優先します。",
 		L"· Drag or wheel Vol/Pan/Exp/Rev/Crs/Var to send CC (double-click resets). Wheel PC# for program change. Click the mini keyboard to play. Your edits hold about 2.5s over the song CC.",
 		L"· Glisser / molette Vol/Pan/Exp/Rev/Crs/Var envoie le CC (double-clic = defaut). Molette sur PC# = programme. Mini clavier cliquable. Vos reglages priment ~2,5 s sur le SMF.",
@@ -744,6 +888,22 @@ void CMmHelpDlg::OnPaint()
 		L"· Bij VST MIDI gaan toetsen en CC via dezelfde VST (of MIDI Mapper) als het nummer. KPI-plugins hebben geen MIDI-in; noten gaan naar het MIDI-uit-apparaat (Mapper indien leeg).",
 		L"· Przy VST MIDI klawisze i CC ida ta sama droga co utwor (VST lub MIDI Mapper). Wtyczka KPI nie ma wejscia MIDI; nuty ida na urzadzenie MIDI out (Mapper, jesli puste).",
 		L"· VST MIDI sirasinda tuslar ve CC sarkiyle ayni VST (veya MIDI Mapper) yolundan cikar. KPI eklentisinin MIDI girisi yoktur; notalar MIDI cikis aygitina gider (aygit yoksa Mapper)."));
+	y += lh;
+	body(L, y, LL14(
+		L"・VSTホストを開いているときは、その鍵盤・MIDI入力がこのモニタに出ます。ミニ鍵盤やスライダーはホストのプラグインへ送られます。右クリック「開く」からホストを出せます。",
+		L"· With the VST host open, its keyboard and MIDI in appear here. Mini keys and sliders go to the host's plug-ins. Right-click Open to show the host.",
+		L"· Hote VST ouvert : son clavier et MIDI in s'affichent ici. Mini clavier et curseurs vont aux plug-ins. Clic droit Ouvrir pour l'hote.",
+		L"· Con host VST aperto, tastiera e MIDI in compaiono qui. Mini tasti e slider vanno ai plug-in. Tasto destro Apri per l'host.",
+		L"· Con el host VST abierto, su teclado y MIDI in salen aqui. Mini teclas y deslizadores van a los plug-ins. Clic derecho Abrir para el host.",
+		L"· VST 호스트가 열려 있으면 그 건반·MIDI 입력이 여기 나옵니다. 미니 건반과 슬라이더는 호스트 플러그인으로 갑니다. 우클릭 열기로 호스트를 엽니다.",
+		L"· 打开 VST 主机时，其键盘和 MIDI 输入会显示在此。迷你键盘和滑块送到主机插件。右键「打开」可打开主机。",
+		L"· مع مضيف VST مفتوح تظهر لوحتُه وMIDI هنا. المفاتيح الصغيرة والمنزلقات إلى إضافات المضيف. يمين ← فتح للمضيف.",
+		L"· Если хост VST открыт, его клавиатура и MIDI in видны здесь. Мини-клавиши и ползунки идут в плагины хоста. ПКМ «Открыть» — хост.",
+		L"· Ist der VST-Host offen, erscheinen Tastatur und MIDI-In hier. Mini-Tasten und Schieber gehen an die Plug-ins. Rechtsklick Oeffnen fuer den Host.",
+		L"· Com o host VST aberto, teclado e MIDI in aparecem aqui. Mini teclas e controlos vao aos plug-ins. Clique direito Abrir para o host.",
+		L"· Met VST-host open verschijnen toetsenbord en MIDI-in hier. Mini-toetsen en schuiven gaan naar de plug-ins. Rechtsklik Openen voor de host.",
+		L"· Gdy host VST jest otwarty, klawiatura i MIDI in sa tu. Mini klawisze i suwaki ida do wtyczek. PPM Otworz dla hosta.",
+		L"· VST host aciksa klavyesi ve MIDI girisi burada gorunur. Mini tuslar ve kaydiricilar host eklentilerine gider. Sag tik Ac ile hostu acin."));
 	y += lh + 2;
 	title(L, y, LL14(L"右クリック", L"Right-click", L"Clic droit", L"Tasto destro", L"Clic derecho", L"우클릭", L"右键", L"زر أيمن", L"ПКМ", L"Rechtsklick", L"Botao direito", L"Rechtsklik", L"PPM", L"Sag tik"));
 	y += titleLh;
@@ -777,7 +937,7 @@ CMidiMonitorDlg::CMidiMonitorDlg(CWnd* pParent)
 	, m_chromaW(0), m_chromaH(0), m_chromaReady(false)
 #endif
 	, m_fontDpi(0), m_fontH(0)
-	, m_ev(NULL), m_evCount(0), m_evPos(0), m_sx(NULL), m_sxBytes(0)
+	, m_ev(NULL), m_evCount(0), m_evPos(0), m_hadNote(0), m_hearPlayb(-1), m_sx(NULL), m_sxBytes(0)
 	, m_division(480), m_sampleRate(44100), m_lastPlayb(-1)
 	, m_usecQn(500000), m_tsNum(4), m_tsDen(4), m_keySf(0), m_keyMin(0), m_transpose(0)
 	, m_sysMode(0), m_revType(1), m_choType(2), m_varType(1), m_ins1(0), m_ins2(0)
@@ -788,7 +948,7 @@ CMidiMonitorDlg::CMidiMonitorDlg(CWnd* pParent)
 	, m_rotDragging(false), m_rotDragYaw0(0), m_rotDragPitch0(0), m_soft3dTourUntil(0)
 	, m_hoverCol(-1), m_hoverPart(-1)
 	, m_layHeadH(0), m_layRowH(0), m_persistAge(0), m_drumGlow(0), m_dispBpm(-1)
-	, m_dirtyRows(0xFFFFFFFFu), m_rowLive(0)
+	, m_dirtyRows(0xFFFFFFFFu), m_rowLive(0), m_nameNeed(0), m_burstApply(0)
 	, m_dirtyHead(true), m_fullDraw(true), m_volDragging(false)
 {
 	m_loadedPath[0] = 0;
@@ -797,6 +957,10 @@ CMidiMonitorDlg::CMidiMonitorDlg(CWnd* pParent)
 	m_volBarRc.SetRectEmpty();
 	m_notesBarRc.SetRectEmpty();
 	memset(m_part, 0, sizeof(m_part));
+	memset(m_show, 0, sizeof(m_show));
+	memset(m_plugShown, 0, sizeof(m_plugShown));
+	m_showBpm = -1;
+	m_showTitle[0] = 0;
 	memset(m_latchUntil, 0, sizeof(m_latchUntil));
 	memset(m_latchMask, 0, sizeof(m_latchMask));
 }
@@ -896,7 +1060,11 @@ bool CMidiMonitorDlg::EnsureFrameBuffer(CDC& refDC, int w, int h)
 
 void CMidiMonitorDlg::ResetParts()
 {
+	BYTE heard[PART_MAX];
+	for (int i = 0; i < PART_MAX; ++i)
+		heard[i] = m_part[i].heard;
 	memset(m_part, 0, sizeof(m_part));
+	memset(m_plugShown, 0, sizeof(m_plugShown));
 	for (int i = 0; i < PART_MAX; ++i) {
 		Part& p = m_part[i];
 		p.pc = 0;
@@ -939,6 +1107,7 @@ void CMidiMonitorDlg::ResetParts()
 			}
 		}
 		p.isDrum = ((i % 16) == 9) ? 1 : 0;
+		p.heard = heard[i];
 		p.rxCh = i % 16;
 		p.rxPort = (i >= 16) ? 1 : 0;
 		p.lastNote = -1;
@@ -962,6 +1131,7 @@ void CMidiMonitorDlg::ResetParts()
 	m_dirtyRows = 0xFFFFFFFFu;
 	m_dirtyHead = true;
 	m_fullDraw = true;
+	m_nameNeed = 0;
 	m_rowLive = 0;
 	m_drumGlow = 0;
 	memset(m_latchUntil, 0, sizeof(m_latchUntil));
@@ -974,6 +1144,7 @@ void CMidiMonitorDlg::UnloadMidi()
 	if (m_ev) { delete[] m_ev; m_ev = NULL; }
 	if (m_sx) { delete[] m_sx; m_sx = NULL; }
 	m_evCount = m_evPos = 0;
+	m_hadNote = 0;
 	m_sxBytes = 0;
 	m_loadedPath[0] = 0;
 	m_titleBuf[0] = 0;
@@ -983,6 +1154,8 @@ void CMidiMonitorDlg::UnloadMidi()
 	m_fileHasSd = 0;
 	m_gs32 = 0;
 	m_mirrorToB = 0;
+	for (int i = 0; i < PART_MAX; ++i)
+		m_part[i].heard = 0;
 }
 
 void CMidiMonitorDlg::LookupToneName(int isXg, int mapId, int bankMsb, int bankLsb, int pc, int isDrum, wchar_t* out, int outN)
@@ -1074,14 +1247,14 @@ void CMidiMonitorDlg::ApplyNrpn(Part& p)
 	}
 }
 
-void CMidiMonitorDlg::ApplyShort(int port, DWORD msg, BOOL fromUser)
+void CMidiMonitorDlg::ApplyShort(int port, DWORD msg, BOOL fromUser, BOOL liveExact)
 {
 	const int st = msg & 0xf0;
 	const int ch = msg & 0x0f;
 	int part0 = (port * 16) + ch;
 	if (part0 < 0) part0 = 0;
 	if (part0 >= PART_MAX) part0 = PART_MAX - 1;
-	const int scan = (!fromUser && m_gs32) ? 1 : 0;
+	const int scan = (!fromUser && !liveExact && m_gs32) ? 1 : 0;
 	const int iBegin = scan ? 0 : part0;
 	const int iEnd = scan ? PART_MAX : (part0 + 1);
 	const int d1 = (int)((msg >> 8) & 0xff);
@@ -1094,6 +1267,15 @@ void CMidiMonitorDlg::ApplyShort(int port, DWORD msg, BOOL fromUser)
 			if (!m_mirrorToB && rp != 2 && rp != port) continue;
 		}
 		Part& p = m_part[part];
+	if (st >= 0x80 && st <= 0xe0) {
+		// Host XG drum-bank inject (CC0=127 / CC32=0 on ch10) is not "the part is used".
+		const int xgInj = (!fromUser && st == 0xb0 && (part % 16) == 9
+			&& ((d1 == 0 && d2 == 127) || (d1 == 32 && d2 == 0))) ? 1 : 0;
+		if (!xgInj && !p.heard) {
+			p.heard = 1;
+			m_dirtyRows |= (1u << part);
+		}
+	}
 	if (st == 0x90) {
 		if (d2 > 0) {
 			p.noteOn[d1] = (BYTE)d2;
@@ -1103,6 +1285,7 @@ void CMidiMonitorDlg::ApplyShort(int port, DWORD msg, BOOL fromUser)
 			if (p.held < 1) p.held = 1;
 			const float lv = (float)d2 / 127.f;
 			if (lv > p.lev) p.lev = lv;
+			MmBumpFade(p.fadeCh, m_burstApply);
 			m_dirtyRows |= (1u << part);
 			if (p.isDrum) m_drumGlow = 255;
 		} else {
@@ -1117,7 +1300,8 @@ void CMidiMonitorDlg::ApplyShort(int port, DWORD msg, BOOL fromUser)
 	} else if (st == 0xc0) {
 		if (fromUser || !IsLatched(part, MM_LATCH_PC)) {
 			p.pc = d1 & 127;
-			RefreshPartName(p);
+			MmBumpFade(p.fadeInst, m_burstApply);
+			m_nameNeed |= (1u << part);
 			m_dirtyRows |= (1u << part);
 		}
 	} else if (st == 0xb0) {
@@ -1128,7 +1312,8 @@ void CMidiMonitorDlg::ApplyShort(int port, DWORD msg, BOOL fromUser)
 				else if (p.mapId < 9 && VstMidiBankMsbIsSdNative(d2)) p.mapId = 6;
 				else if (p.mapId < 9 && MmMsbLooksKorg(d2)) p.mapId = 10;
 			}
-			RefreshPartName(p);
+			MmBumpFade(p.fadeInst, m_burstApply);
+			m_nameNeed |= (1u << part);
 			m_dirtyRows |= (1u << part);
 		}
 		else if (d1 == 32) {
@@ -1140,28 +1325,42 @@ void CMidiMonitorDlg::ApplyShort(int port, DWORD msg, BOOL fromUser)
 				else if (d2 == 3) p.mapId = 3;
 				else if (d2 == 4) p.mapId = 4;
 			}
-			RefreshPartName(p);
+			MmBumpFade(p.fadeInst, m_burstApply);
+			m_nameNeed |= (1u << part);
 			m_dirtyRows |= (1u << part);
 		}
-		else if (d1 == 7) { if (fromUser || !IsLatched(part, MM_LATCH_VOL)) { if (p.vol != d2) p.glowVol = 255; p.vol = d2; m_dirtyRows |= (1u << part); } }
-		else if (d1 == 11) { if (fromUser || !IsLatched(part, MM_LATCH_EXP)) { if (p.exp != d2) p.glowExp = 255; p.exp = d2; m_dirtyRows |= (1u << part); } }
-		else if (d1 == 10) { if (fromUser || !IsLatched(part, MM_LATCH_PAN)) { if (p.pan != d2) p.glowPan = 255; p.pan = d2; m_dirtyRows |= (1u << part); } }
-		else if (d1 == 91) { if (fromUser || !IsLatched(part, MM_LATCH_REV)) { if (p.rev != d2) p.glowRev = 255; p.rev = d2; m_dirtyRows |= (1u << part); } }
-		else if (d1 == 93) { if (fromUser || !IsLatched(part, MM_LATCH_CRS)) { if (p.crs != d2) p.glowCrs = 255; p.crs = d2; m_dirtyRows |= (1u << part); } }
-		else if (d1 == 94) { if (fromUser || !IsLatched(part, MM_LATCH_VAR)) { if (p.var != d2) p.glowVar = 255; p.var = d2; m_dirtyRows |= (1u << part); } }
-		else if (d1 == 71) { p.rsn = d2 - 64; m_dirtyRows |= (1u << part); }
-		else if (d1 == 74) { p.lpf = d2 - 64; m_dirtyRows |= (1u << part); }
-		else if (d1 == 72) { p.rls = d2 - 64; m_dirtyRows |= (1u << part); }
-		else if (d1 == 73) { p.atk = d2 - 64; m_dirtyRows |= (1u << part); }
-		else if (d1 == 75) { p.dcy = d2 - 64; m_dirtyRows |= (1u << part); }
-		else if (d1 == 76) { p.vibRat = d2 - 64; m_dirtyRows |= (1u << part); }
-		else if (d1 == 77) { p.vibDpt = d2 - 64; m_dirtyRows |= (1u << part); }
-		else if (d1 == 78) { p.vibDly = d2 - 64; m_dirtyRows |= (1u << part); }
-		else if (d1 == 98) p.nrpnLsb = d2;
-		else if (d1 == 99) p.nrpnMsb = d2;
+		else if (d1 == 7) { if (fromUser || !IsLatched(part, MM_LATCH_VOL)) { if (p.vol != d2) { p.glowVol = 255; p.vol = d2; m_dirtyRows |= (1u << part); } } }
+		else if (d1 == 11) { if (fromUser || !IsLatched(part, MM_LATCH_EXP)) { if (p.exp != d2) { p.glowExp = 255; p.exp = d2; m_dirtyRows |= (1u << part); } } }
+		else if (d1 == 10) { if (fromUser || !IsLatched(part, MM_LATCH_PAN)) { if (p.pan != d2) { p.glowPan = 255; p.pan = d2; m_dirtyRows |= (1u << part); } } }
+		else if (d1 == 91) { if (fromUser || !IsLatched(part, MM_LATCH_REV)) { if (p.rev != d2) { p.glowRev = 255; p.rev = d2; m_dirtyRows |= (1u << part); } } }
+		else if (d1 == 93) { if (fromUser || !IsLatched(part, MM_LATCH_CRS)) { if (p.crs != d2) { p.glowCrs = 255; p.crs = d2; m_dirtyRows |= (1u << part); } } }
+		else if (d1 == 94) { if (fromUser || !IsLatched(part, MM_LATCH_VAR)) { if (p.var != d2) { p.glowVar = 255; p.var = d2; m_dirtyRows |= (1u << part); } } }
+		else if (d1 == 71) { p.rsn = d2 - 64; MmBumpFade(p.fadeFilt, m_burstApply); m_dirtyRows |= (1u << part); }
+		else if (d1 == 74) { p.lpf = d2 - 64; MmBumpFade(p.fadeFilt, m_burstApply); m_dirtyRows |= (1u << part); }
+		else if (d1 == 72) { p.rls = d2 - 64; MmBumpFade(p.fadeEnv, m_burstApply); m_dirtyRows |= (1u << part); }
+		else if (d1 == 73) { p.atk = d2 - 64; MmBumpFade(p.fadeEnv, m_burstApply); m_dirtyRows |= (1u << part); }
+		else if (d1 == 75) { p.dcy = d2 - 64; MmBumpFade(p.fadeEnv, m_burstApply); m_dirtyRows |= (1u << part); }
+		else if (d1 == 76) { p.vibRat = d2 - 64; MmBumpFade(p.fadeVib, m_burstApply); m_dirtyRows |= (1u << part); }
+		else if (d1 == 77) { p.vibDpt = d2 - 64; MmBumpFade(p.fadeVib, m_burstApply); m_dirtyRows |= (1u << part); }
+		else if (d1 == 78) { p.vibDly = d2 - 64; MmBumpFade(p.fadeVib, m_burstApply); m_dirtyRows |= (1u << part); }
+		else if (d1 == 98) { p.nrpnLsb = d2; MmBumpFade(p.fadeNrpn, m_burstApply); m_dirtyRows |= (1u << part); }
+		else if (d1 == 99) { p.nrpnMsb = d2; MmBumpFade(p.fadeNrpn, m_burstApply); m_dirtyRows |= (1u << part); }
 		else if (d1 == 100) p.rpnLsb = d2;
 		else if (d1 == 101) p.rpnMsb = d2;
-		else if (d1 == 6) { p.dataMsb = d2; ApplyNrpn(p); m_dirtyRows |= (1u << part); }
+		else if (d1 == 6) {
+			p.dataMsb = d2;
+			ApplyNrpn(p);
+			if (p.nrpnMsb == 1) {
+				if (p.nrpnLsb == 8 || p.nrpnLsb == 9 || p.nrpnLsb == 10)
+					p.fadeVib = 255;
+				else if (p.nrpnLsb == 0x20 || p.nrpnLsb == 0x21 || p.nrpnLsb == 0x24)
+					p.fadeFilt = 255;
+				else if (p.nrpnLsb == 0x63 || p.nrpnLsb == 0x64 || p.nrpnLsb == 0x66)
+					p.fadeEnv = 255;
+			}
+			MmBumpFade(p.fadeNrpn, m_burstApply);
+			m_dirtyRows |= (1u << part);
+		}
 		else if (d1 == 121) {
 			p.exp = 127; p.pan = 64; p.rev = 40; p.crs = 0; p.var = 0;
 			p.glowExp = p.glowPan = p.glowRev = p.glowCrs = p.glowVar = 180;
@@ -1175,6 +1374,15 @@ void CMidiMonitorDlg::ApplyShort(int port, DWORD msg, BOOL fromUser)
 		const int bend = ((d2 << 7) | d1) - 8192;
 		p.dt = bend / 64;
 	}
+	}
+	if (!m_burstApply && m_nameNeed) {
+		for (int i = 0; i < PART_MAX; ++i) {
+			if (m_nameNeed & (1u << i)) {
+				RefreshPartName(m_part[i]);
+				m_dirtyRows |= (1u << i);
+			}
+		}
+		m_nameNeed = 0;
 	}
 }
 
@@ -1194,6 +1402,31 @@ void CMidiMonitorDlg::ApplySysex(const BYTE* d, int n)
 		m_sysMode = 1;
 		ResetParts();
 		m_sysMode = 1;
+		return;
+	}
+	if (n >= 11 && d[1] == 0x41 && d[3] == 0x42 && d[4] == 0x12 &&
+		(d[5] == 0x50 || d[5] == 0x60) && d[6] == 0x00 && d[7] == 0x7f) {
+		m_sysMode = 1;
+		for (int i = 16; i < PART_MAX; ++i) {
+			Part& p = m_part[i];
+			p.pc = 0;
+			p.bankMsb = 0;
+			p.vol = 100;
+			p.exp = 127;
+			p.pan = 64;
+			p.rev = 40;
+			p.isDrum = ((i % 16) == 9) ? 1 : 0;
+			p.rxCh = i % 16;
+			p.rxPort = 1;
+			memset(p.noteOn, 0, sizeof(p.noteOn));
+			p.held = 0;
+			if (!m_burstApply)
+				RefreshPartName(p);
+			else
+				m_nameNeed |= (1u << i);
+		}
+		m_dirtyRows = 0xFFFFFFFFu;
+		m_dirtyHead = true;
 		return;
 	}
 	if (n >= 9 && VstMidiSysexIsXgOn(d, n)) {
@@ -1228,31 +1461,48 @@ void CMidiMonitorDlg::ApplySysex(const BYTE* d, int n)
 			Part& p = m_part[part];
 			const int nval = n - 9 - hasF7;
 			int changed = 0;
+			int mark = 0;
 			for (int i = 0; i < nval; ++i) {
 				const int a = (int)d[7] + i;
 				const BYTE vv = d[8 + i];
 				if (a == 0x00) {
 					p.bankMsb = vv & 127;
 					changed = 1;
+					mark = 1;
 				} else if (a == 0x01) {
 					p.pc = vv & 127;
 					changed = 1;
+					mark = 1;
 				} else if (a == 0x02) {
 					// GS Rx CHANNEL: 00-0F = ch1-16, 10h = OFF.
 					if (vv >= 0x10) p.rxCh = 16;
 					else p.rxCh = (int)vv;
 					changed = 1;
+					mark = 1;
 				} else if (a == 0x15) {
 					// GS USE FOR RHYTHM: 0=OFF, 1=MAP1, 2=MAP2.
 					p.isDrum = (vv != 0) ? 1 : 0;
 					changed = 1;
 				}
 			}
+			if (mark)
+				p.heard = 1;
 			if (changed) {
-				RefreshPartName(p);
+				if (mark)
+					MmBumpFade(p.fadeInst, m_burstApply);
+				m_nameNeed |= (1u << part);
 				m_dirtyRows |= (1u << part);
 			}
 		}
+	}
+	if (!m_burstApply && m_nameNeed) {
+		for (int i = 0; i < PART_MAX; ++i) {
+			if (m_nameNeed & (1u << i)) {
+				RefreshPartName(m_part[i]);
+				m_dirtyRows |= (1u << i);
+			}
+		}
+		m_nameNeed = 0;
 	}
 }
 
@@ -1343,8 +1593,9 @@ void CMidiMonitorDlg::LoadCurrentMidi()
 	if (division <= 0 || (division & 0x8000)) { delete[] data; return; }
 	m_division = division;
 	MmEv* ev = new MmEv[EV_MAX];
-	BYTE* sxData = new BYTE[size + 8];
+	BYTE* sxData = new BYTE[size + 8 + 128];
 	int sxUsed = 0;
+	const int sxCap = (int)size + 8 + 128;
 	int count = 0;
 	int hasXg = 0;
 	int mapHint = 0;
@@ -1420,7 +1671,7 @@ void CMidiMonitorDlg::LoadCurrentMidi()
 				unsigned sl = 0;
 				if (!MmReadVar(q, end, sl) || q + sl > end) break;
 				const int need = (st == 0xf0) ? (1 + (int)sl) : (int)sl;
-				if (need > 0 && sxUsed + need <= (int)size + 8) {
+				if (need > 0 && sxUsed + need <= sxCap) {
 					const int off = sxUsed;
 					if (st == 0xf0) sxData[sxUsed++] = 0xf0;
 					memcpy(sxData + sxUsed, q, sl);
@@ -1457,7 +1708,7 @@ void CMidiMonitorDlg::LoadCurrentMidi()
 	if (!count) {
 		delete[] ev; delete[] data; delete[] sxData; return;
 	}
-	qsort(ev, count, sizeof(MmEv), MmCmpEv);
+	std::stable_sort(ev, ev + count, MmCmpEvStable);
 	int sr = 44100;
 	if (mode == MODE_VST_MIDI) {
 		MmBindVstActiveSlot();
@@ -1559,10 +1810,278 @@ void CMidiMonitorDlg::LoadCurrentMidi()
 	}
 	m_gs32 = gs32;
 	m_mirrorToB = (gs32 && !sawFf21) ? 1 : 0;
+	BYTE chUse[PART_MAX];
+	memset(chUse, 0, sizeof(chUse));
+	for (int i = 0; i < count; ++i) {
+		const DWORD msg = ev[i].msg;
+		if (msg == 0xff || msg == 0xfe || msg == 0xfd || msg == 0xf0) {
+			if (msg != 0xf0 || ev[i].sysexOff < 0) continue;
+			const int n = (int)ev[i].aux;
+			if (ev[i].sysexOff + n > sxUsed || n < 10) continue;
+			const BYTE* d = sxData + ev[i].sysexOff;
+			if (d[0] != 0xf0 || d[1] != 0x41 || d[3] != 0x42 || d[4] != 0x12) continue;
+			if (d[6] < 0x10 || d[6] > 0x1f) continue;
+			if (d[5] != 0x40 && d[5] != 0x50) continue;
+			if (d[7] == 0x15 && n <= 12) continue;
+			const int blk = (d[5] == 0x50) ? 1 : 0;
+			const int part = blk * 16 + MmGs1xToPart(d[6]);
+			if (part >= 0 && part < PART_MAX) chUse[part] = 1;
+			continue;
+		}
+		const int st = (int)(msg & 0xf0);
+		if (st < 0x80 || st > 0xe0) continue;
+		int idx = ev[i].port * 16 + (int)(msg & 0x0f);
+		if (idx < 0) idx = 0;
+		if (idx >= PART_MAX) idx = PART_MAX - 1;
+		chUse[idx] = 1;
+	}
+	if (!hasXg && m_fileHasGm == 0 && count + 8 < EV_MAX && sxUsed + 44 <= sxCap) {
+		const BYTE rhyA[11] = { 0xf0, 0x41, 0x10, 0x42, 0x12, 0x40, 0x10, 0x15, 0x01, 0x1a, 0xf7 };
+		const BYTE rhyB[11] = { 0xf0, 0x41, 0x10, 0x42, 0x12, 0x50, 0x10, 0x15, 0x01, 0x0a, 0xf7 };
+		auto isRst = [&](const MmEv& e) -> int {
+			if (e.msg != 0xf0 || e.sysexOff < 0) return 0;
+			const int n = (int)e.aux;
+			if (e.sysexOff + n > sxUsed || n < 11) return 0;
+			const BYTE* d = sxData + e.sysexOff;
+			if (VstMidiSysexIsGsReset(d, n)) return 1;
+			if (d[0] == 0xf0 && d[1] == 0x41 && d[3] == 0x42 && d[4] == 0x12 &&
+				d[6] == 0x00 && d[7] == 0x7f && (d[5] == 0x50 || d[5] == 0x60))
+				return (d[5] == 0x50) ? 2 : 3;
+			return 0;
+		};
+		MmEv* tmp = new MmEv[EV_MAX];
+		int w = 0;
+		int any = 0;
+		for (int i = 0; i < count; ++i)
+			if (isRst(ev[i])) { any = 1; break; }
+		auto put = [&](int which, unsigned __int64 tick, __int64 samp) {
+			if (w >= EV_MAX || sxUsed + 11 > sxCap) return;
+			const BYTE* src = (which == 2) ? rhyB : rhyA;
+			const int off = sxUsed;
+			memcpy(sxData + sxUsed, src, 11);
+			sxUsed += 11;
+			tmp[w].tick = tick; tmp[w].sample = samp; tmp[w].msg = 0xf0;
+			tmp[w].aux = 11; tmp[w].port = (which == 2) ? 1 : 0;
+			tmp[w].sysexOff = off;
+			++w;
+		};
+		if (!any) { put(1, 0, 0); put(2, 0, 0); }
+		for (int i = 0; i < count && w < EV_MAX; ++i) {
+			tmp[w++] = ev[i];
+			const int k = isRst(ev[i]);
+			if (k == 1) { put(1, ev[i].tick, ev[i].sample); put(2, ev[i].tick, ev[i].sample); }
+			else if (k == 2) put(2, ev[i].tick, ev[i].sample);
+			else if (k == 3) put(1, ev[i].tick, ev[i].sample);
+		}
+		delete[] ev;
+		ev = tmp;
+		count = w;
+	}
+	if (hasXg && count + 8 < EV_MAX) {
+		auto isXg = [&](const MmEv& e) -> int {
+			if (e.msg != 0xf0 || e.sysexOff < 0) return 0;
+			const int n = (int)e.aux;
+			if (e.sysexOff + n > sxUsed) return 0;
+			return VstMidiSysexIsXgOn(sxData + e.sysexOff, n);
+		};
+		MmEv* tmp = new MmEv[EV_MAX];
+		int w = 0;
+		int any = 0;
+		for (int i = 0; i < count; ++i)
+			if (isXg(ev[i])) { any = 1; break; }
+		auto put = [&](unsigned __int64 tick, __int64 samp, int port) {
+			if (w + 2 > EV_MAX) return;
+			tmp[w].tick = tick; tmp[w].sample = samp;
+			tmp[w].msg = 0xb9 | (0u << 8) | (127u << 16);
+			tmp[w].aux = 0; tmp[w].port = port; tmp[w].sysexOff = -1;
+			++w;
+			tmp[w].tick = tick; tmp[w].sample = samp;
+			tmp[w].msg = 0xb9 | (32u << 8);
+			tmp[w].aux = 0; tmp[w].port = port; tmp[w].sysexOff = -1;
+			++w;
+		};
+		if (!any) { put(0, 0, 0); put(0, 0, 1); }
+		for (int i = 0; i < count && w < EV_MAX; ++i) {
+			tmp[w++] = ev[i];
+			if (isXg(ev[i])) {
+				put(ev[i].tick, ev[i].sample, ev[i].port);
+				if (ev[i].port == 0) put(ev[i].tick, ev[i].sample, 1);
+			}
+		}
+		delete[] ev;
+		ev = tmp;
+		count = w;
+	}
+	m_ev = ev;
+	m_evCount = count;
+	m_sx = sxData;
+	m_sxBytes = sxUsed;
 	ResetParts();
+	for (int i = 0; i < PART_MAX; ++i)
+		m_part[i].heard = chUse[i];
 	delete[] data;
 	m_lastPlayb = -1;
 	m_evPos = 0;
+	m_hadNote = 0;
+}
+
+static int MmSxIsModeReset(const BYTE* d, int n)
+{
+	if (!d || n < 6) return 0;
+	if (VstMidiSysexIsGmOn(d, n) || VstMidiSysexIsGsReset(d, n) || VstMidiSysexIsXgOn(d, n))
+		return 1;
+	return 0;
+}
+
+static DWORD MmSxParamKey(int port, const BYTE* d, int n)
+{
+	DWORD k = (DWORD)(port & 3) << 30;
+	if (!d || n < 5) return k | 1u;
+	if (d[1] == 0x41 && n >= 8 && d[4] == 0x12)
+		return k | 0x10000000u | ((DWORD)d[5] << 16) | ((DWORD)d[6] << 8) | (DWORD)d[7];
+	if (d[1] == 0x43 && n >= 7 && d[3] == 0x4c)
+		return k | 0x20000000u | ((DWORD)d[4] << 16)
+			| ((DWORD)(n >= 8 ? d[5] : 0) << 8) | (DWORD)(n >= 9 ? d[6] : 0);
+	return k | ((DWORD)d[1] << 16) | ((DWORD)d[2] << 8) | (DWORD)d[3];
+}
+
+static int MmEvIsModeReset(const CMidiMonitorDlg::MmEv& e, const BYTE* sx, int sxBytes)
+{
+	if (e.msg != 0xf0 || e.sysexOff < 0) return 0;
+	const int n = (int)e.aux;
+	if (n < 6 || e.sysexOff + n > sxBytes) return 0;
+	return MmSxIsModeReset(sx + e.sysexOff, n);
+}
+
+static int MmEvIsNoteOn(const CMidiMonitorDlg::MmEv& e)
+{
+	if ((e.msg & 0xf0) != 0x90) return 0;
+	if (((e.msg >> 16) & 0x7f) == 0) return 0;
+	return 1;
+}
+
+void CMidiMonitorDlg::ApplyDueEvents(int lastDue)
+{
+	if (lastDue < m_evPos) return;
+	const int nDue = lastDue - m_evPos + 1;
+	const int savedBurst = m_burstApply;
+	if (nDue > 32)
+		m_burstApply = 1;
+	if (nDue <= 32) {
+		for (int i = m_evPos; i <= lastDue; ++i) {
+			ApplyEvent(m_ev[i]);
+			if (MmEvIsNoteOn(m_ev[i]))
+				m_hadNote = 1;
+		}
+	} else {
+		int start = m_evPos;
+		for (int k = lastDue; k >= m_evPos; --k) {
+			if (MmEvIsModeReset(m_ev[k], m_sx, m_sxBytes)) {
+				start = k;
+				break;
+			}
+		}
+		int lastCc[2][16][128];
+		int lastPc[2][16];
+		int lastPb[2][16];
+		int lastAt[2][16];
+		int lastT = -1, lastS = -1, lastK = -1;
+		memset(lastCc, 0xff, sizeof(lastCc));
+		memset(lastPc, 0xff, sizeof(lastPc));
+		memset(lastPb, 0xff, sizeof(lastPb));
+		memset(lastAt, 0xff, sizeof(lastAt));
+		DWORD sxKey[2048];
+		int sxLast[2048];
+		memset(sxLast, 0xff, sizeof(sxLast));
+		int sxFail = 0;
+		for (int k = start; k <= lastDue; ++k) {
+			const MmEv& e = m_ev[k];
+			if (e.msg == 0xff) { lastT = k; continue; }
+			if (e.msg == 0xfe) { lastS = k; continue; }
+			if (e.msg == 0xfd) { lastK = k; continue; }
+			if (e.msg == 0xf0) {
+				if (MmEvIsModeReset(e, m_sx, m_sxBytes))
+					continue;
+				if (e.sysexOff < 0 || e.sysexOff + (int)e.aux > m_sxBytes)
+					continue;
+				const DWORD key = MmSxParamKey(e.port, m_sx + e.sysexOff, (int)e.aux);
+				unsigned s = key & 2047u;
+				int put = 0;
+				for (int p = 0; p < 16; ++p) {
+					const unsigned t = (s + (unsigned)p) & 2047u;
+					if (sxLast[t] < 0 || sxKey[t] == key) {
+						sxKey[t] = key;
+						sxLast[t] = k;
+						put = 1;
+						break;
+					}
+				}
+				if (!put)
+					sxFail = 1;
+				continue;
+			}
+			int port = e.port;
+			if (port < 0) port = 0;
+			if (port > 1) port = 1;
+			const int st = (int)(e.msg & 0xf0);
+			const int ch = (int)(e.msg & 0x0f);
+			const int d1 = (int)((e.msg >> 8) & 0x7f);
+			if (st == 0xb0)
+				lastCc[port][ch][d1] = k;
+			else if (st == 0xc0)
+				lastPc[port][ch] = k;
+			else if (st == 0xe0)
+				lastPb[port][ch] = k;
+			else if (st == 0xd0)
+				lastAt[port][ch] = k;
+		}
+		for (int k = start; k <= lastDue; ++k) {
+			const MmEv& e = m_ev[k];
+			int keep = 1;
+			if (e.msg == 0xff) keep = (k == lastT);
+			else if (e.msg == 0xfe) keep = (k == lastS);
+			else if (e.msg == 0xfd) keep = (k == lastK);
+			else if (e.msg == 0xf0) {
+				if (MmEvIsModeReset(e, m_sx, m_sxBytes))
+					keep = (k == start);
+				else if (!sxFail && e.sysexOff >= 0 && e.sysexOff + (int)e.aux <= m_sxBytes) {
+					const DWORD key = MmSxParamKey(e.port, m_sx + e.sysexOff, (int)e.aux);
+					unsigned s = key & 2047u;
+					int last = -2;
+					for (int p = 0; p < 16; ++p) {
+						const unsigned t = (s + (unsigned)p) & 2047u;
+						if (sxLast[t] < 0) { last = -1; break; }
+						if (sxKey[t] == key) { last = sxLast[t]; break; }
+					}
+					keep = (last == k || last < 0);
+				}
+			} else {
+				int port = e.port;
+				if (port < 0) port = 0;
+				if (port > 1) port = 1;
+				const int st = (int)(e.msg & 0xf0);
+				const int ch = (int)(e.msg & 0x0f);
+				const int d1 = (int)((e.msg >> 8) & 0x7f);
+				if (st == 0xb0) {
+					if (d1 != 120 && d1 != 121 && d1 != 123 && d1 != 6 && d1 != 38
+						&& (d1 < 96 || d1 > 101))
+						keep = (k == lastCc[port][ch][d1]);
+				} else if (st == 0xc0)
+					keep = (k == lastPc[port][ch]);
+				else if (st == 0xe0)
+					keep = (k == lastPb[port][ch]);
+				else if (st == 0xd0)
+					keep = (k == lastAt[port][ch]);
+			}
+			if (keep) {
+				ApplyEvent(e);
+				if (MmEvIsNoteOn(e))
+					m_hadNote = 1;
+			}
+		}
+	}
+	m_evPos = lastDue + 1;
+	m_burstApply = savedBurst;
 }
 
 void CMidiMonitorDlg::SyncFromPlayback()
@@ -1570,30 +2089,62 @@ void CMidiMonitorDlg::SyncFromPlayback()
 	if (m_frozen) return;
 	LoadCurrentMidi();
 	if (!m_ev || m_evCount <= 0) return;
-	__int64 pb = playb;
-	if (pb < 0) pb = 0;
+	__int64 pbRaw = playb;
+	if (pbRaw < 0) pbRaw = 0;
+	__int64 pbHeard = pbRaw;
 	if (mode == MODE_VST_MIDI) {
 		const int vstPcm = (savedata.vstMultiDll[0] || savedata.vstExtraPath[0]);
 		if (vstPcm) {
-			// 時間表示と同じ「再生カーソル」位置。さらにプラグイン遅延と、
-			// DS play cursor がアナログ出力より先に進む分（簡易ピアノロール extra と同じ 700ms）。
+			// 時間表示と同じ再生カーソル（エンジン側）。ノート表示だけ
+			// プラグイン遅延＋DS がアナログより先に進む 700ms を引く。
 			const int sr = (m_sampleRate > 0) ? m_sampleRate : 44100;
 			const double sec = OggGetGdiPlaybackTimeSec();
-			pb = (__int64)(sec * (double)sr + 0.5);
+			pbRaw = (__int64)(sec * (double)sr + 0.5);
 			MmBindVstActiveSlot();
-			pb -= VstMidiGetLatencySamples();
-			pb -= (__int64)sr * 700 / 1000;
-			if (pb < 0) pb = 0;
+			pbHeard = pbRaw - VstMidiGetLatencySamples() - (__int64)sr * 700 / 1000;
+			if (pbRaw < 0) pbRaw = 0;
+			if (pbHeard < 0) pbHeard = 0;
 		}
 	}
-	if (pb < m_lastPlayb) {
+	if (pbRaw < m_lastPlayb) {
 		ResetParts();
 		m_evPos = 0;
+		m_hadNote = 0;
 	}
-	m_lastPlayb = pb;
-	while (m_evPos < m_evCount && m_ev[m_evPos].sample <= pb) {
-		ApplyEvent(m_ev[m_evPos]);
-		m_evPos++;
+	m_lastPlayb = pbRaw;
+	m_hearPlayb = pbHeard;
+
+	m_burstApply = 0;
+	if (!m_hadNote) {
+		int lastDump = m_evPos - 1;
+		for (int i = m_evPos; i < m_evCount && m_ev[i].sample <= pbRaw; ++i) {
+			if (MmEvIsNoteOn(m_ev[i]))
+				break;
+			lastDump = i;
+		}
+		if (lastDump >= m_evPos) {
+			m_burstApply = 1;
+			ApplyDueEvents(lastDump);
+			m_burstApply = 0;
+		}
+		int lastHeard = m_evPos - 1;
+		for (int i = m_evPos; i < m_evCount && m_ev[i].sample <= pbHeard; ++i)
+			lastHeard = i;
+		if (lastHeard >= m_evPos)
+			ApplyDueEvents(lastHeard);
+	} else {
+		int lastDue = m_evPos - 1;
+		for (int i = m_evPos; i < m_evCount && m_ev[i].sample <= pbHeard; ++i)
+			lastDue = i;
+		if (lastDue >= m_evPos)
+			ApplyDueEvents(lastDue);
+	}
+	if (m_nameNeed) {
+		for (int i = 0; i < PART_MAX; ++i) {
+			if (m_nameNeed & (1u << i))
+				RefreshPartName(m_part[i]);
+		}
+		m_nameNeed = 0;
 	}
 	UpdateNoteMeter();
 }
@@ -1638,7 +2189,7 @@ void CMidiMonitorDlg::DrawPanBar(CDC& dc, int x, int y, int bw, int bh, int pan,
 	dc.FillSolidRect(px, y + 1, 2, bh - 2, c);
 }
 
-void CMidiMonitorDlg::DrawMiniKeys(CDC& dc, const CRect& rc, const Part& p)
+void CMidiMonitorDlg::DrawMiniKeys(CDC& dc, const CRect& rc, const Part& p, COLORREF keyW, COLORREF keyB)
 {
 	if (rc.Width() < 20 || rc.Height() < 6) return;
 	const int k0 = 21, k1 = 108;
@@ -1656,7 +2207,7 @@ void CMidiMonitorDlg::DrawMiniKeys(CDC& dc, const CRect& rc, const Part& p)
 		if (m == 1 || m == 3 || m == 6 || m == 8 || m == 10) continue;
 		int x0 = rc.left + wi * ww / whites;
 		int x1 = rc.left + (wi + 1) * ww / whites;
-		COLORREF c = RGB(228, 228, 232);
+		COLORREF c = keyW;
 		if (p.noteOn[n]) c = RGB(220, 40, 40);
 		dc.FillSolidRect(x0, rc.top, max(1, x1 - x0 - 1), hh, c);
 		wi++;
@@ -1668,7 +2219,7 @@ void CMidiMonitorDlg::DrawMiniKeys(CDC& dc, const CRect& rc, const Part& p)
 		int xw = rc.left + (wi * ww / whites);
 		int bw = max(2, ww / whites * 6 / 10);
 		int x0 = xw - bw / 2;
-		COLORREF c = RGB(20, 20, 24);
+		COLORREF c = keyB;
 		if (p.noteOn[n]) c = RGB(255, 70, 70);
 		dc.FillSolidRect(x0, rc.top, bw, hh * 6 / 10, c);
 	}
@@ -1792,54 +2343,185 @@ void CMidiMonitorDlg::DrawHeader(CDC& dc, int w, int headH, UINT dpi)
 			LL14(L"フリーズ中", L"Frozen", L"Gele", L"Congelato", L"Congelado", L"정지됨", L"已冻结", L"مجمد",
 				L"Заморожено", L"Eingefroren", L"Congelado", L"Bevroren", L"Zamrozone", L"Donduruldu"));
 	}
+	m_showBpm = bpm;
+	m_showTpc = tpc;
+	m_showNotes = m_noteCount;
+	m_showPeak = pk;
+	m_showVol = m_masterVol;
+	m_showSys = m_sysMode;
+	m_showRev = m_revType;
+	m_showCho = m_choType;
+	m_showVar = m_varType;
+	m_showIns1 = m_ins1;
+	m_showIns2 = m_ins2;
+	m_showDrum = m_drumGlow;
+	m_showDiv = m_division;
+	m_showTsN = m_tsNum;
+	m_showTsD = m_tsDen;
+	m_showTransp = m_transpose;
+	m_showKeySf = m_keySf;
+	m_showKeyMin = m_keyMin;
+	m_showFrozen = m_frozen ? 1 : 0;
+	wcsncpy_s(m_showTitle, m_titleBuf, _TRUNCATE);
 	dc.SelectObject(oldF);
 }
 
-void CMidiMonitorDlg::DrawPartRow(CDC& dc, int i, int y, int rowH, int w, UINT dpi)
+void CMidiMonitorDlg::DrawPartRow(CDC& dc, int i, int y, int rowH, int w, UINT dpi, int forceKeys)
 {
 	const Part& p = m_part[i];
+	const int meterX = Scale(280, dpi);
+	const int textRX = Scale(360, dpi);
+	const int keysX = Scale(672, dpi);
+	
+	const Part& s = m_show[i];
+	const int bh = rowH - Scale(4, dpi);
+	int textLDirty = (forceKeys || p.heard != s.heard || p.isDrum != s.isDrum || (p.held > 0) != (s.held > 0)
+		|| p.pc != s.pc || p.bankMsb != s.bankMsb || p.bankLsb != s.bankLsb || p.mapId != s.mapId
+		|| wcscmp(p.name, s.name) != 0
+		|| MmGlowSig(p.fadeCh) != MmGlowSig(s.fadeCh)
+		|| MmGlowSig(p.fadeInst) != MmGlowSig(s.fadeInst)) ? 1 : 0;
+	wchar_t shownName[48];
+	wcsncpy_s(shownName, p.name, _TRUNCATE);
+	wchar_t plug[40] = {};
+	if (g_vstHostDlg && ::IsWindow(g_vstHostDlg->GetSafeHwnd()))
+		g_vstHostDlg->PartPluginName(i, plug, 40);
+	if (plug[0]) {
+		if (shownName[0]) {
+			wchar_t tmp[48];
+			_snwprintf_s(tmp, _TRUNCATE, L"%s [%s]", p.name, plug);
+			wcsncpy_s(shownName, tmp, _TRUNCATE);
+		} else
+			wcsncpy_s(shownName, plug, _TRUNCATE);
+	}
+	if (wcscmp(shownName, m_plugShown[i]) != 0)
+		textLDirty = 1;
+		
+	int metersDirty = (forceKeys || p.heard != s.heard || p.isDrum != s.isDrum || (p.held > 0) != (s.held > 0)
+		|| MmLevPix(p.lev, bh) != MmLevPix(s.lev, bh)
+		|| p.vol != s.vol || p.exp != s.exp || p.pan != s.pan || p.rev != s.rev || p.crs != s.crs || p.var != s.var
+		|| MmGlowSig(p.glowVol) != MmGlowSig(s.glowVol) || MmGlowSig(p.glowExp) != MmGlowSig(s.glowExp)
+		|| MmGlowSig(p.glowPan) != MmGlowSig(s.glowPan) || MmGlowSig(p.glowRev) != MmGlowSig(s.glowRev)
+		|| MmGlowSig(p.glowCrs) != MmGlowSig(s.glowCrs) || MmGlowSig(p.glowVar) != MmGlowSig(s.glowVar)) ? 1 : 0;
+
+	int textRDirty = (forceKeys || p.heard != s.heard || p.isDrum != s.isDrum || (p.held > 0) != (s.held > 0)
+		|| p.vibRat != s.vibRat || p.vibDpt != s.vibDpt || p.vibDly != s.vibDly
+		|| p.lpf != s.lpf || p.rsn != s.rsn || p.hpf != s.hpf
+		|| p.atk != s.atk || p.dcy != s.dcy || p.rls != s.rls
+		|| p.eqLow != s.eqLow || p.eqHigh != s.eqHigh
+		|| p.nrpnMsb != s.nrpnMsb || p.nrpnLsb != s.nrpnLsb
+		|| MmGlowSig(p.fadeVib) != MmGlowSig(s.fadeVib)
+		|| MmGlowSig(p.fadeFilt) != MmGlowSig(s.fadeFilt)
+		|| MmGlowSig(p.fadeEnv) != MmGlowSig(s.fadeEnv)
+		|| MmGlowSig(p.fadeEq) != MmGlowSig(s.fadeEq)
+		|| MmGlowSig(p.fadeNrpn) != MmGlowSig(s.fadeNrpn)) ? 1 : 0;
+
+	int keysDirty = (forceKeys || keysX >= w || p.heard != s.heard || p.isDrum != s.isDrum
+		|| memcmp(p.noteOn, s.noteOn, sizeof(p.noteOn)) != 0) ? 1 : 0;
+
 	dc.SetBkMode(TRANSPARENT);
 	CFont* oldF = dc.SelectObject(&m_fontTiny);
-	dc.FillSolidRect(0, y, w, rowH, (i < 16) ? MM_ROW_A : MM_ROW_B);
+	const int unused = p.heard ? 0 : 1;
+	const int drum = (!unused && p.isDrum) ? 1 : 0;
+	const int dim = (i & 1);
+	COLORREF rowBg = unused ? MM_ROW_U : (drum ? MM_ROW_D : (dim ? MM_ROW_B : MM_ROW_A));
+	COLORREF tx = unused ? MM_TX_U : (drum ? MM_TX_DR : (dim ? MM_TX_D : MM_TX_W));
+	COLORREF keyW = unused ? MM_KEY_U : (drum ? MM_KEY_DR : (dim ? MM_KEY_D : MM_KEY_W));
+	COLORREF keyB = unused ? MM_KEYB_U : (drum ? MM_KEYB_DR : MM_KEYB);
+	
+	if (textLDirty) dc.FillSolidRect(0, y, meterX, rowH, rowBg);
+	if (metersDirty) dc.FillSolidRect(meterX, y, textRX - meterX, rowH, rowBg);
+	if (textRDirty) dc.FillSolidRect(textRX, y, keysX - textRX, rowH, rowBg);
+	if (keysDirty) dc.FillSolidRect(keysX, y, w - keysX, rowH, rowBg);
+	const int fadeH = rowH - 1;
+	if (textLDirty) {
+		MmFillFade(dc, 0, y, Scale(38, dpi), fadeH, rowBg, RGB(40, 210, 120), p.fadeCh);
+		MmFillFade(dc, Scale(40, dpi), y, meterX - Scale(40, dpi), fadeH, rowBg, RGB(240, 190, 50), p.fadeInst);
+	}
+	if (metersDirty) {
+		MmFillFade(dc, meterX + Scale(10, dpi), y, Scale(8, dpi), fadeH, rowBg, RGB(50, 200, 80), p.glowVol);
+		MmFillFade(dc, meterX + Scale(18, dpi), y, Scale(10, dpi), fadeH, rowBg, RGB(220, 200, 40), p.glowPan);
+		MmFillFade(dc, meterX + Scale(28, dpi), y, Scale(8, dpi), fadeH, rowBg, RGB(50, 200, 80), p.glowExp);
+		MmFillFade(dc, meterX + Scale(36, dpi), y, Scale(8, dpi), fadeH, rowBg, RGB(220, 60, 50), p.glowRev);
+		MmFillFade(dc, meterX + Scale(44, dpi), y, Scale(8, dpi), fadeH, rowBg, RGB(70, 190, 220), p.glowCrs);
+		MmFillFade(dc, meterX + Scale(52, dpi), y, textRX - (meterX + Scale(52, dpi)), fadeH, rowBg, RGB(90, 100, 220), p.glowVar);
+	}
+	if (textRDirty) {
+		const int filtX = Scale(448, dpi);
+		const int envX = Scale(536, dpi);
+		const int eqX = Scale(624, dpi);
+		const int nrpnX = Scale(640, dpi);
+		MmFillFade(dc, textRX, y, filtX - textRX, fadeH, rowBg, RGB(200, 140, 255), p.fadeVib);
+		MmFillFade(dc, filtX, y, envX - filtX, fadeH, rowBg, RGB(255, 160, 80), p.fadeFilt);
+		MmFillFade(dc, envX, y, eqX - envX, fadeH, rowBg, RGB(180, 200, 90), p.fadeEnv);
+		MmFillFade(dc, eqX, y, nrpnX - eqX, fadeH, rowBg, RGB(160, 160, 200), p.fadeEq);
+		MmFillFade(dc, nrpnX, y, keysX - nrpnX, fadeH, rowBg, RGB(140, 150, 170), p.fadeNrpn);
+	}
+
 	const int live = (p.held > 0);
-	dc.SetTextColor(live ? RGB(255, 245, 245) : MM_FG);
-	wchar_t chs[8];
-	_snwprintf_s(chs, _TRUNCATE, L"%c%02d", (i < 16) ? L'A' : L'B', (i % 16) + 1);
-	dc.TextOut(Scale(4, dpi), y + 1, chs);
-	wchar_t pcb[48];
-	int isXg = 0, mapId = 0, bankMsb = 0;
-	MmResolveLookup(m_mapForce, m_sysMode, p.mapId, p.bankMsb, &isXg, &mapId, &bankMsb);
-	const int sys = isXg ? 2 : ((mapId == 5) ? 0 : 1);
-	_snwprintf_s(pcb, _TRUNCATE, L"%03d %03d %s", p.pc + 1, p.bankMsb, MmMapLabel(sys, mapId, bankMsb, p.bankLsb));
-	dc.TextOut(Scale(40, dpi), y + 1, pcb);
-	dc.TextOut(Scale(148, dpi), y + 1, p.name);
-	const int meterX = Scale(280, dpi);
-	const int bh = rowH - Scale(4, dpi);
+	if (textLDirty) {
+		if (live && !unused)
+			dc.SetTextColor(drum ? RGB(255, 220, 180) : RGB(255, 255, 255));
+		else
+			dc.SetTextColor(tx);
+		wchar_t chs[8];
+		_snwprintf_s(chs, _TRUNCATE, L"%c%02d", (i < 16) ? L'A' : L'B', (i % 16) + 1);
+		dc.TextOut(Scale(4, dpi), y + 1, chs);
+		wchar_t pcb[48];
+		int isXg = 0, mapId = 0, bankMsb = 0;
+		MmResolveLookup(m_mapForce, m_sysMode, p.mapId, p.bankMsb, &isXg, &mapId, &bankMsb);
+		const int sys = isXg ? 2 : ((mapId == 5) ? 0 : 1);
+		_snwprintf_s(pcb, _TRUNCATE, L"%03d %03d %s", p.pc + 1, p.bankMsb, MmMapLabel(sys, mapId, bankMsb, p.bankLsb));
+		dc.TextOut(Scale(40, dpi), y + 1, pcb);
+		dc.SetTextColor(tx);
+		dc.TextOut(Scale(148, dpi), y + 1, shownName);
+		wcsncpy_s(m_plugShown[i], shownName, _TRUNCATE);
+	}
+
 	const int by = y + Scale(2, dpi);
 	const int bw = Scale(6, dpi);
-	DrawVBar(dc, meterX, by, bw, bh, (int)(p.lev * 127.f), 127, RGB(70, 255, 90), 255, 0);
-	DrawVBar(dc, meterX + Scale(10, dpi), by, bw, bh, p.vol, 127, RGB(50, 200, 70), p.glowVol, (p.vol == 100 && !p.glowVol) ? 1 : 0);
-	DrawPanBar(dc, meterX + Scale(18, dpi), by, Scale(8, dpi), bh, p.pan, p.glowPan, (p.pan == 64 && !p.glowPan) ? 1 : 0);
-	DrawVBar(dc, meterX + Scale(28, dpi), by, bw, bh, p.exp, 127, RGB(50, 200, 70), p.glowExp, (p.exp == 127 && !p.glowExp) ? 1 : 0);
-	DrawVBar(dc, meterX + Scale(36, dpi), by, bw, bh, p.rev, 127, RGB(210, 50, 50), p.glowRev, (p.rev == 40 && !p.glowRev) ? 1 : 0);
-	DrawVBar(dc, meterX + Scale(44, dpi), by, bw, bh, p.crs, 127, RGB(80, 200, 230), p.glowCrs, (p.crs == 0 && !p.glowCrs) ? 1 : 0);
-	DrawVBar(dc, meterX + Scale(52, dpi), by, bw, bh, p.var, 127, RGB(50, 80, 200), p.glowVar, (p.var == 0 && !p.glowVar) ? 1 : 0);
-	const int numsLive = (p.vibRat | p.vibDpt | p.vibDly | p.lpf | p.rsn | p.hpf | p.atk | p.dcy | p.rls);
-	dc.SetTextColor(numsLive ? RGB(220, 220, 230) : RGB(88, 90, 98));
-	wchar_t num[96];
-	_snwprintf_s(num, _TRUNCATE, L"%+03d %+03d %+03d   %+03d %+03d %+03d   %+03d %+03d %+03d   %d %s",
-		p.vibRat, p.vibDpt, p.vibDly, p.lpf, p.rsn, p.hpf, p.atk, p.dcy, p.rls,
-		p.eqLow, (p.eqHigh >= 1000) ? L"10k" : L"Hz");
-	dc.TextOut(Scale(360, dpi), y + 1, num);
-	dc.SetTextColor((p.nrpnMsb | p.nrpnLsb) ? MM_FG : RGB(70, 72, 80));
-	wchar_t nr[16];
-	_snwprintf_s(nr, _TRUNCATE, L"%02X\n%02X", p.nrpnMsb & 127, p.nrpnLsb & 127);
-	CRect nrRc(Scale(640, dpi), y, Scale(668, dpi), y + rowH);
-	dc.DrawText(nr, &nrRc, DT_CENTER | DT_WORDBREAK);
-	CRect krc(Scale(672, dpi), y + 1, w - Scale(4, dpi), y + rowH - 2);
-	DrawMiniKeys(dc, krc, p);
-	dc.FillSolidRect(0, y + rowH - 1, w, 1, MM_GRID);
+	if (metersDirty) {
+		DrawVBar(dc, meterX, by, bw, bh, (int)(p.lev * 127.f), 127, RGB(70, 255, 90), 255, unused);
+		DrawVBar(dc, meterX + Scale(10, dpi), by, bw, bh, p.vol, 127, RGB(50, 200, 70), p.glowVol, unused || (p.vol == 100 && !p.glowVol) ? 1 : 0);
+		DrawPanBar(dc, meterX + Scale(18, dpi), by, Scale(8, dpi), bh, p.pan, p.glowPan, unused || (p.pan == 64 && !p.glowPan) ? 1 : 0);
+		DrawVBar(dc, meterX + Scale(28, dpi), by, bw, bh, p.exp, 127, RGB(50, 200, 70), p.glowExp, unused || (p.exp == 127 && !p.glowExp) ? 1 : 0);
+		DrawVBar(dc, meterX + Scale(36, dpi), by, bw, bh, p.rev, 127, RGB(210, 50, 50), p.glowRev, unused || (p.rev == 40 && !p.glowRev) ? 1 : 0);
+		DrawVBar(dc, meterX + Scale(44, dpi), by, bw, bh, p.crs, 127, RGB(80, 200, 230), p.glowCrs, unused || (p.crs == 0 && !p.glowCrs) ? 1 : 0);
+		DrawVBar(dc, meterX + Scale(52, dpi), by, bw, bh, p.var, 127, RGB(50, 80, 200), p.glowVar, unused || (p.var == 0 && !p.glowVar) ? 1 : 0);
+	}
+
+	if (textRDirty) {
+		const int numsLive = (p.vibRat | p.vibDpt | p.vibDly | p.lpf | p.rsn | p.hpf | p.atk | p.dcy | p.rls);
+		if (unused)
+			dc.SetTextColor(MM_TX_U);
+		else if (drum)
+			dc.SetTextColor(numsLive ? RGB(255, 200, 150) : RGB(196, 120, 88));
+		else
+			dc.SetTextColor(numsLive ? tx : (dim ? RGB(118, 118, 126) : RGB(140, 140, 148)));
+		wchar_t num[96];
+		_snwprintf_s(num, _TRUNCATE, L"%+03d %+03d %+03d   %+03d %+03d %+03d   %+03d %+03d %+03d   %d %s",
+			p.vibRat, p.vibDpt, p.vibDly, p.lpf, p.rsn, p.hpf, p.atk, p.dcy, p.rls,
+			p.eqLow, (p.eqHigh >= 1000) ? L"10k" : L"Hz");
+		dc.TextOut(textRX, y + 1, num);
+		if (unused)
+			dc.SetTextColor(MM_TX_U);
+		else
+			dc.SetTextColor((p.nrpnMsb | p.nrpnLsb) ? tx : (drum ? RGB(168, 96, 72) : RGB(70, 72, 80)));
+		wchar_t nr[16];
+		_snwprintf_s(nr, _TRUNCATE, L"%02X\n%02X", p.nrpnMsb & 127, p.nrpnLsb & 127);
+		CRect nrRc(Scale(640, dpi), y, keysX - Scale(4, dpi), y + rowH);
+		dc.DrawText(nr, &nrRc, DT_CENTER | DT_WORDBREAK);
+	}
+
+	if (keysDirty) {
+		CRect krc(keysX, y + 1, w - Scale(4, dpi), y + rowH - 2);
+		DrawMiniKeys(dc, krc, p, keyW, keyB);
+	}
+	
+	if (textLDirty || metersDirty || textRDirty || keysDirty) {
+		dc.FillSolidRect(0, y + rowH - 1, w, 1, drum ? RGB(160, 72, 48) : MM_GRID);
+	}
 	dc.SelectObject(oldF);
+	m_show[i] = m_part[i];
 }
 
 void CMidiMonitorDlg::DrawMonitor2D(CDC& dc, int w, int h, UINT dpi)
@@ -1855,7 +2537,7 @@ void CMidiMonitorDlg::DrawMonitor2D(CDC& dc, int w, int h, UINT dpi)
 	m_layRowH = rowH;
 	m_layW = w;
 	for (int i = 0; i < PART_MAX; ++i)
-		DrawPartRow(dc, i, headH + i * rowH, rowH, w, dpi);
+		DrawPartRow(dc, i, headH + i * rowH, rowH, w, dpi, 1);
 }
 
 void CMidiMonitorDlg::TickVisuals()
@@ -1874,8 +2556,18 @@ void CMidiMonitorDlg::TickVisuals()
 		MmGlowTick(p.glowRev);
 		MmGlowTick(p.glowCrs);
 		MmGlowTick(p.glowVar);
+		MmGlowTick(p.fadeCh);
+		MmGlowTick(p.fadeInst);
+		MmGlowTick(p.fadeVib);
+		MmGlowTick(p.fadeFilt);
+		MmGlowTick(p.fadeEnv);
+		MmGlowTick(p.fadeEq);
+		MmGlowTick(p.fadeNrpn);
+		if (p.held > 0 && p.fadeCh < 96)
+			p.fadeCh = 96;
 		const int busy = (p.held > 0 || p.lev > 0.002f
-			|| p.glowVol || p.glowExp || p.glowPan || p.glowRev || p.glowCrs || p.glowVar);
+			|| p.glowVol || p.glowExp || p.glowPan || p.glowRev || p.glowCrs || p.glowVar
+			|| p.fadeCh || p.fadeInst || p.fadeVib || p.fadeFilt || p.fadeEnv || p.fadeEq || p.fadeNrpn);
 		if (busy) live |= (1u << i);
 		if (p.isDrum && p.held > 0)
 			drumHit = 1;
@@ -1885,9 +2577,7 @@ void CMidiMonitorDlg::TickVisuals()
 	else if (m_drumGlow) {
 		m_drumGlow = m_drumGlow * 5 / 6;
 		if (m_drumGlow < 8) m_drumGlow = 0;
-		m_dirtyHead = true;
 	}
-	m_dirtyRows |= live | m_rowLive;
 	m_rowLive = live;
 }
 
@@ -1982,6 +2672,63 @@ bool CMidiMonitorDlg::IsLatched(int part, BYTE bit) const
 	return true;
 }
 
+void CMidiMonitorDlg::DrainLiveTap()
+{
+	BYTE ports[64];
+	DWORD msgs[64];
+	int applied = 0;
+	for (;;) {
+		const int n = VstLiveTapStealShorts(ports, msgs, 64);
+		if (n <= 0) break;
+		if (!m_frozen) {
+			for (int i = 0; i < n; ++i) {
+				const int part = (int)ports[i] * 16 + (int)(msgs[i] & 15);
+				if (!MmLiveHostPartOn(part)) continue;
+				ApplyShort((int)ports[i], msgs[i], FALSE, TRUE);
+				++applied;
+			}
+		}
+		if (n < 64) break;
+	}
+	for (int k = 0; k < 32; ++k) {
+		int port = 0;
+		BYTE sx[1024];
+		const int n = VstLiveTapStealSysex(&port, sx, (int)sizeof(sx));
+		if (n <= 0) break;
+		if (!m_frozen) {
+			ApplySysex(sx, n);
+			++applied;
+		}
+	}
+	if (applied && !m_frozen)
+		UpdateNoteMeter();
+}
+
+void CMidiMonitorDlg::SnapshotLiveNotes()
+{
+	if (playb > 0 && m_ev && m_evCount > 0) return;
+	int any = 0;
+	for (int i = 0; i < PART_MAX; ++i) {
+		if (!MmLiveHostPartOn(i)) continue;
+		VstLiveActInfo a = {};
+		if (!VstLiveActivity(i + 1, &a) || a.held <= 0) continue;
+		const int port = i / 16;
+		const int ch = i % 16;
+		const int vel = a.vel > 0 ? a.vel : 64;
+		for (int b = 0; b < 4; ++b) {
+			unsigned m = a.mask[b];
+			for (int bit = 0; bit < 32; ++bit) {
+				if (!(m & (1u << bit))) continue;
+				const int note = b * 32 + bit;
+				ApplyShort(port, (DWORD)(0x90 | ch) | ((DWORD)note << 8) | ((DWORD)vel << 16), FALSE, TRUE);
+				++any;
+			}
+		}
+	}
+	if (any)
+		UpdateNoteMeter();
+}
+
 void CMidiMonitorDlg::InjectShort(int part, DWORD msg)
 {
 	if (part < 0 || part >= PART_MAX) return;
@@ -1989,7 +2736,10 @@ void CMidiMonitorDlg::InjectShort(int part, DWORD msg)
 	const int ch = part % 16;
 	msg = (msg & ~(DWORD)0x0f) | (DWORD)ch;
 	MmBindVstActiveSlot();
-	if (mode == MODE_VST_MIDI) {
+	if (MmVstHostOpen()) {
+		MmCloseKpiLiveOut();
+		VstLiveMidiShort(port, msg);
+	} else if (mode == MODE_VST_MIDI) {
 		MmCloseKpiLiveOut();
 		VstMidiInjectShort(port, msg, -1);
 	} else {
@@ -2166,6 +2916,52 @@ bool CMidiMonitorDlg::HitVolBar(CPoint clientPt) const
 void CMidiMonitorDlg::InvalidateDirty()
 {
 	if (!::IsWindow(m_hWnd)) return;
+	if (!m_fullDraw && !IsView3D()) {
+		int bh = m_layRowH - 4;
+		if (bh < 2) bh = 2;
+		DWORD diff = 0;
+		for (int i = 0; i < PART_MAX; ++i) {
+			const Part& a = m_part[i];
+			const Part& b = m_show[i];
+			/* dt(ピッチベンド)は表に出さないので比較から外す */
+			if (memcmp(&a, &b, offsetof(Part, dt)) != 0
+				|| memcmp(&a.vibRat, &b.vibRat, offsetof(Part, lev) - offsetof(Part, vibRat)) != 0
+				|| a.heard != b.heard
+				|| MmLevPix(a.lev, bh) != MmLevPix(b.lev, bh)
+				|| MmGlowSig(a.glowVol) != MmGlowSig(b.glowVol)
+				|| MmGlowSig(a.glowExp) != MmGlowSig(b.glowExp)
+				|| MmGlowSig(a.glowPan) != MmGlowSig(b.glowPan)
+				|| MmGlowSig(a.glowRev) != MmGlowSig(b.glowRev)
+				|| MmGlowSig(a.glowCrs) != MmGlowSig(b.glowCrs)
+				|| MmGlowSig(a.glowVar) != MmGlowSig(b.glowVar)
+				|| MmGlowSig(a.fadeCh) != MmGlowSig(b.fadeCh)
+				|| MmGlowSig(a.fadeInst) != MmGlowSig(b.fadeInst)
+				|| MmGlowSig(a.fadeVib) != MmGlowSig(b.fadeVib)
+				|| MmGlowSig(a.fadeFilt) != MmGlowSig(b.fadeFilt)
+				|| MmGlowSig(a.fadeEnv) != MmGlowSig(b.fadeEnv)
+				|| MmGlowSig(a.fadeEq) != MmGlowSig(b.fadeEq)
+				|| MmGlowSig(a.fadeNrpn) != MmGlowSig(b.fadeNrpn)
+				|| wcscmp(a.name, b.name) != 0)
+				diff |= (1u << i);
+		}
+		m_dirtyRows = diff;
+		int bpm = 0;
+		if (m_usecQn > 0)
+			bpm = (int)((60000000.0 / (double)m_usecQn) + 0.5);
+		if (bpm < 1) bpm = savedata.mpDetectedBpm;
+		int tpc = tempo;
+		if (tpc < 1) tpc = 100;
+		int transp = (pitch != 0) ? (int)((double)pitch / 100.0 + (pitch > 0 ? 0.5 : -0.5)) : 0;
+		const int pk = (int)(m_notesPeak + 0.5f);
+		m_dirtyHead = (bpm != m_showBpm || tpc != m_showTpc || m_noteCount != m_showNotes
+			|| pk != m_showPeak || m_masterVol != m_showVol || m_sysMode != m_showSys
+			|| m_revType != m_showRev || m_choType != m_showCho || m_varType != m_showVar
+			|| m_ins1 != m_showIns1 || m_ins2 != m_showIns2 || m_drumGlow != m_showDrum
+			|| m_division != m_showDiv || m_tsNum != m_showTsN || m_tsDen != m_showTsD
+			|| transp != m_showTransp || m_keySf != m_showKeySf || m_keyMin != m_showKeyMin
+			|| (m_frozen ? 1 : 0) != m_showFrozen
+			|| wcscmp(m_titleBuf, m_showTitle) != 0);
+	}
 	if (m_fullDraw || IsView3D()) {
 		Invalidate(FALSE);
 		return;
@@ -2176,20 +2972,26 @@ void CMidiMonitorDlg::InvalidateDirty()
 	GetClientRect(&rc);
 	const int capH = CCC_GetCustomCaptionHeight(m_hWnd);
 	const int w = rc.Width();
+	CRect acc;
+	int any = 0;
 	if (m_dirtyHead && m_layHeadH > 0) {
-		CRect r(0, capH, w, capH + m_layHeadH);
-		InvalidateRect(&r, FALSE);
+		acc.SetRect(0, capH, w, capH + m_layHeadH);
+		any = 1;
 	}
 	if (m_layRowH > 0 && m_layHeadH > 0) {
 		for (int i = 0; i < PART_MAX; ++i) {
 			if ((m_dirtyRows & (1u << i)) == 0) continue;
 			const int y = capH + m_layHeadH + i * m_layRowH;
 			CRect r(0, y, w, y + m_layRowH);
-			InvalidateRect(&r, FALSE);
+			if (!any) { acc = r; any = 1; }
+			else acc.UnionRect(&acc, &r);
 		}
 	} else {
 		Invalidate(FALSE);
+		return;
 	}
+	if (any)
+		InvalidateRect(&acc, FALSE);
 }
 
 void CMidiMonitorDlg::DrawMonitor3D(CDC& dc, int w, int h)
@@ -2214,7 +3016,15 @@ void CMidiMonitorDlg::DrawMonitor3D(CDC& dc, int w, int h)
 		float lv = m_part[i].lev;
 		if (lv < 0.04f) lv = 0.04f;
 		const float y = 0.08f + lv * 0.70f;
-		COLORREF c = (bank == 0) ? RGB(80, 210, 255) : RGB(255, 150, 90);
+		COLORREF c;
+		if (!m_part[i].heard)
+			c = RGB(72, 72, 78);
+		else if (m_part[i].isDrum)
+			c = RGB(255, 140, 64);
+		else if (i & 1)
+			c = RGB(196, 198, 206);
+		else
+			c = RGB(236, 238, 244);
 		if (m_part[i].held > 0) c = RGB(255, 80, 80);
 		ctx.DrawBox(x0, x1, y, z0, z1, c, 0.f);
 	}
@@ -2334,8 +3144,6 @@ void CMidiMonitorDlg::OnPaint()
 		CCC_CaptionPaintGdi(dc, m_hWnd);
 		return;
 	}
-	if (!m_frozen)
-		SyncFromPlayback();
 
 	const UINT dpi = WindowDpi();
 	if (m_fontDpi != (int)dpi || !m_fontTiny.GetSafeHandle()) {
@@ -2364,9 +3172,11 @@ void CMidiMonitorDlg::OnPaint()
 
 	const bool full = m_fullDraw || IsView3D();
 	if (full) {
-		if (IsView3D())
+		if (IsView3D()) {
 			DrawMonitor3D(m_frameDC, w, h);
-		else
+			for (int i = 0; i < PART_MAX; ++i)
+				m_show[i] = m_part[i];
+		} else
 			DrawMonitor2D(m_frameDC, w, h, dpi);
 		m_fullDraw = false;
 		m_dirtyRows = 0;
@@ -2379,7 +3189,7 @@ void CMidiMonitorDlg::OnPaint()
 				DrawHeader(m_frameDC, w, m_layHeadH, dpi);
 			for (int i = 0; i < PART_MAX; ++i) {
 				if (m_dirtyRows & (1u << i))
-					DrawPartRow(m_frameDC, i, m_layHeadH + i * m_layRowH, m_layRowH, w, dpi);
+					DrawPartRow(m_frameDC, i, m_layHeadH + i * m_layRowH, m_layRowH, w, dpi, 0);
 			}
 		}
 		m_dirtyRows = 0;
@@ -2390,6 +3200,7 @@ void CMidiMonitorDlg::OnPaint()
 	if (pr.IsRectEmpty()) {
 		pr.SetRect(0, capH, w, capH + h);
 	}
+	const int paintCap = (pr.top < capH) ? 1 : 0;
 	int sx = pr.left;
 	int sy = pr.top - capH;
 	int sw = pr.Width();
@@ -2399,7 +3210,8 @@ void CMidiMonitorDlg::OnPaint()
 	if (sx + sw > w) sw = w - sx;
 	if (sy + sh > h) sh = h - sy;
 	if (sw <= 0 || sh <= 0) {
-		CCC_CaptionPaintGdi(dc, m_hWnd);
+		if (paintCap)
+			CCC_CaptionPaintGdi(dc, m_hWnd);
 		return;
 	}
 
@@ -2420,19 +3232,22 @@ void CMidiMonitorDlg::OnPaint()
 				m_chromaCache.UpdateOpaqueRect(m_frameDC.GetSafeHdc(), 0, 0, 0, 0, w, h);
 			m_chromaReady = true;
 			m_chromaCache.BlitFull(dc.GetSafeHdc(), 0, capH, w, h);
-			CCC_CaptionPaintGdi(dc, m_hWnd);
+			if (paintCap)
+				CCC_CaptionPaintGdi(dc, m_hWnd);
 			return;
 		}
 	}
 	if (!CCC_IsAeroEnabled() && CCC_AcrylicCaption(m_hWnd) && CCC_IsWin11()) {
 		CCC_BlitStretchOpaque(dc.GetSafeHdc(), 0, capH, w, h,
 			m_frameDC.GetSafeHdc(), 0, 0, w, h);
-		CCC_CaptionPaintGdi(dc, m_hWnd);
+		if (paintCap)
+			CCC_CaptionPaintGdi(dc, m_hWnd);
 		return;
 	}
 #endif
 	dc.BitBlt(sx, capH + sy, sw, sh, &m_frameDC, sx, sy, SRCCOPY);
-	CCC_CaptionPaintGdi(dc, m_hWnd);
+	if (paintCap)
+		CCC_CaptionPaintGdi(dc, m_hWnd);
 }
 
 BOOL CMidiMonitorDlg::OnEraseBkgnd(CDC* pDC)
@@ -2453,7 +3268,10 @@ void CMidiMonitorDlg::OnTimer(UINT_PTR nIDEvent)
 				ReleasePlayNote();
 			if (!m_frozen) {
 				SyncFromPlayback();
+				DrainLiveTap();
 				TickVisuals();
+			} else {
+				DrainLiveTap();
 			}
 			if (!m_volDragging)
 				PollAppVolume();
@@ -2488,6 +3306,7 @@ void CMidiMonitorDlg::OnShowWindow(BOOL bShow, UINT nStatus)
 	CCustomBlurDialogExBase::OnShowWindow(bShow, nStatus);
 	if (bShow) {
 		LoadCurrentMidi();
+		SnapshotLiveNotes();
 		PollAppVolume();
 		Invalidate(FALSE);
 	}
@@ -2521,7 +3340,9 @@ void CMidiMonitorDlg::ResetPlaybackState()
 {
 	ResetParts();
 	m_lastPlayb = -1;
+	m_hearPlayb = -1;
 	m_evPos = 0;
+	m_hadNote = 0;
 	m_loadedPath[0] = 0;
 	if (::IsWindow(m_hWnd))
 		Invalidate(FALSE);
@@ -2594,6 +3415,17 @@ void CMidiMonitorDlg::OnBnClickedHelp()
 
 void CMidiMonitorDlg::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
 {
+	int ctxPart = m_hoverPart;
+	{
+		CPoint cl = point;
+		if (cl.x != -1 || cl.y != -1) {
+			ScreenToClient(&cl);
+			int hp = -1;
+			CRect cell;
+			HitMonitor(cl, hp, cell);
+			if (hp >= 0) ctxPart = hp;
+		}
+	}
 	CCustomPopupMenu menu;
 	menu.SetAeroMode(FALSE);
 	CCustomPopupMenu* view = menu.AddSubMenu(
@@ -2643,6 +3475,13 @@ void CMidiMonitorDlg::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
 		ops->AddCheck(IDM_MM_TOPMOST, LL14(L"常に手前に表示", L"Always on top", L"Toujours au premier plan", L"Sempre in primo piano", L"Siempre visible", L"항상 위", L"始终置顶", L"دائماً أعلى", L"Поверх всех окон", L"Immer im Vordergrund", L"Sempre no topo", L"Altijd boven", L"Zawsze na wierzchu", L"Her zaman ustte"), m_alwaysOnTop);
 		ops->AddCommand(IDM_MM_COPY, LL14(L"状態をコピー", L"Copy state", L"Copier l'etat", L"Copia stato", L"Copiar estado", L"상태 복사", L"复制状态", L"نسخ الحالة", L"Копировать состояние", L"Zustand kopieren", L"Copiar estado", L"Status kopieren", L"Kopiuj stan", L"Durumu kopyala"));
 		ops->AddCommand(IDM_MM_RELOAD, LL14(L"MIDIを再読込", L"Reload MIDI", L"Recharger MIDI", L"Ricarica MIDI", L"Recargar MIDI", L"MIDI 다시 읽기", L"重新读取 MIDI", L"إعادة تحميل MIDI", L"Перечитать MIDI", L"MIDI neu laden", L"Recarregar MIDI", L"MIDI herladen", L"Wczytaj MIDI ponownie", L"MIDI'yi yeniden yukle"));
+		CCustomPopupMenu* drum = ops->AddSubMenu(
+			LL14(L"ドラムモード", L"Drum mode", L"Mode batterie", L"Modo batteria", L"Modo bateria", L"드럼 모드", L"鼓组模式", L"وضع الطبل", L"Режим ударных", L"Drum-Modus", L"Modo bateria", L"Drummodus", L"Tryb perkusji", L"Davul modu"),
+			LL14(L"GS USE FOR RHYTHM / XG ドラムバンクを送る", L"Send GS USE FOR RHYTHM / XG drum bank", L"Envoyer GS USE FOR RHYTHM / banque XG", L"Invia GS USE FOR RHYTHM / banco XG", L"Enviar GS USE FOR RHYTHM / banco XG", L"GS USE FOR RHYTHM / XG 드럼 뱅크 전송", L"发送 GS USE FOR RHYTHM / XG 鼓组库", L"إرسال GS USE FOR RHYTHM / بنك XG", L"Послать GS USE FOR RHYTHM / банк XG", L"GS USE FOR RHYTHM / XG-Drum-Bank senden", L"Enviar GS USE FOR RHYTHM / banco XG", L"GS USE FOR RHYTHM / XG-drumbank sturen", L"Wyslij GS USE FOR RHYTHM / bank XG", L"GS USE FOR RHYTHM / XG davul bankasi gonder"));
+		if (drum) {
+			drum->AddCommand(IDM_MM_DRUM_PART, LL14(L"このパートをドラムにする", L"Make this part drums", L"Mettre cette partie en batterie", L"Rendi questa parte batteria", L"Poner esta parte en bateria", L"이 파트를 드럼으로", L"将此声部设为鼓组", L"اجعل هذا الجزء طبلاً", L"Сделать эту партию ударными", L"Diesen Part zu Drums machen", L"Tornar esta parte bateria", L"Dit deel drums maken", L"Zrob ta partie perkusja", L"Bu parti davul yap"));
+			drum->AddCommand(IDM_MM_DRUM_AB10, LL14(L"A10 と B10 をドラムにする", L"Make A10 and B10 drums", L"A10 et B10 en batterie", L"A10 e B10 batteria", L"A10 y B10 en bateria", L"A10과 B10을 드럼으로", L"将 A10 和 B10 设为鼓组", L"اجعل A10 و B10 طبلاً", L"A10 и B10 — ударные", L"A10 und B10 zu Drums", L"A10 e B10 em bateria", L"A10 en B10 drums maken", L"A10 i B10 jako perkusja", L"A10 ve B10 davul yap"));
+		}
 	}
 	CCustomPopupMenu* map = menu.AddSubMenu(
 		LL14(L"音色マップ", L"Tone map", L"Carte de timbres", L"Mappa timbri", L"Mapa de timbres", L"음색 맵", L"音色映射", L"خريطة الأصوات", L"Карта тембров", L"Klangkarte", L"Mapa de timbres", L"Klankkaart", L"Mapa barw", L"Timbir haritasi"),
@@ -2677,11 +3516,12 @@ void CMidiMonitorDlg::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
 	}
 	CCustomPopupMenu* openSub = menu.AddSubMenu(
 		LL14(L"開く", L"Open", L"Ouvrir", L"Apri", L"Abrir", L"열기", L"打开", L"فتح", L"Открыть", L"Offnen", L"Abrir", L"Openen", L"Otworz", L"Ac"),
-		LL14(L"イコライザ／ピアノロール／アナライザ／操作ガイド", L"Equalizer / piano roll / analyzer / guide", L"Egaliseur / piano roll / analyseur / guide", L"Equalizzatore / piano roll / analizzatore / guida", L"Ecualizador / piano roll / analizador / guia", L"이퀄라이저/피아노 롤/분석기/가이드", L"均衡器/钢琴卷帘/分析器/指南", L"المعادل / البيانو / المحلل / الدليل", L"Эквалайзер / пианоролл / анализатор / руководство", L"Equalizer / Piano-Roll / Analyzer / Anleitung", L"Equalizador / piano roll / analisador / guia", L"Equalizer / piano-roll / analyser / gids", L"Equalizer / piano roll / analizator / przewodnik", L"Equalizer / piano roll / analizor / kilavuz"));
+		LL14(L"イコライザ／ピアノロール／アナライザ／VSTホスト／操作ガイド", L"Equalizer / piano roll / analyzer / VST host / guide", L"Egaliseur / piano roll / analyseur / hote VST / guide", L"Equalizzatore / piano roll / analizzatore / host VST / guida", L"Ecualizador / piano roll / analizador / host VST / guia", L"이퀄라이저/피아노 롤/분석기/VST 호스트/가이드", L"均衡器/钢琴卷帘/分析器/VST主机/指南", L"المعادل / البيانو / المحلل / مضيف VST / الدليل", L"Эквалайзер / пианоролл / анализатор / хост VST / руководство", L"Equalizer / Piano-Roll / Analyzer / VST-Host / Anleitung", L"Equalizador / piano roll / analisador / host VST / guia", L"Equalizer / piano-roll / analyser / VST-host / gids", L"Equalizer / piano roll / analizator / host VST / przewodnik", L"Equalizer / piano roll / analizor / VST host / kilavuz"));
 	if (openSub) {
 		openSub->AddCommand(ID_MP_OPEN_EQ, LL14(L"イコライザを開く", L"Open equalizer", L"Ouvrir l'egaliseur", L"Apri equalizzatore", L"Abrir ecualizador", L"이퀄라이저 열기", L"打开均衡器", L"فتح المعادل", L"Открыть эквалайзер", L"Equalizer öffnen", L"Abrir equalizador", L"Equalizer openen", L"Otworz equalizer", L"Equalizeri ac"));
 		openSub->AddCommand(ID_MP_OPEN_PIANOROLL, LL14(L"ピアノロールを開く", L"Open piano roll", L"Ouvrir le piano roll", L"Apri piano roll", L"Abrir piano roll", L"피아노 롤 열기", L"打开钢琴卷帘", L"فتح لفافة البيانو", L"Открыть пианоролл", L"Piano-Roll öffnen", L"Abrir piano roll", L"Piano-roll openen", L"Otworz piano roll", L"Piyano rolunu ac"));
 		openSub->AddCommand(ID_MP_OPEN_ANALYZER, LL14(L"アナライザを開く", L"Open analyzer", L"Ouvrir l'analyseur", L"Apri analizzatore", L"Abrir analizador", L"분석기 열기", L"打开分析器", L"فتح المحلل", L"Открыть анализатор", L"Analyzer öffnen", L"Abrir analisador", L"Analyzer openen", L"Otworz analizator", L"Analizoru ac"));
+		openSub->AddCommand(ID_MP_OPEN_VSTHOST, LL14(L"VSTホストを開く", L"Open VST host", L"Ouvrir l'hote VST", L"Apri host VST", L"Abrir host VST", L"VST 호스트 열기", L"打开 VST 主机", L"فتح مضيف VST", L"Открыть хост VST", L"VST-Host öffnen", L"Abrir host VST", L"VST-host openen", L"Otworz host VST", L"VST hostu ac"));
 		openSub->AddCommand(ID_HELP_SHOWSHEET, LL14(L"操作ガイド", L"Operation guide", L"Guide d'utilisation", L"Guida operativa", L"Guía de operación", L"조작 가이드", L"操作指南", L"دليل التشغيل", L"Руководство", L"Bedienungsanleitung", L"Guia de operação", L"Handleiding", L"Przewodnik", L"İşlem kılavuzu"));
 	}
 
@@ -2734,6 +3574,50 @@ void CMidiMonitorDlg::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
 		m_loadedPath[0] = 0;
 		LoadCurrentMidi();
 		Invalidate(FALSE);
+	} else if (cmd == IDM_MM_DRUM_PART || cmd == IDM_MM_DRUM_AB10) {
+		int parts[2];
+		int n = 0;
+		if (cmd == IDM_MM_DRUM_AB10) {
+			parts[n++] = 9;
+			parts[n++] = 25;
+		} else {
+			int p = ctxPart;
+			if (p < 0) p = 9;
+			if (p >= PART_MAX) p = PART_MAX - 1;
+			parts[n++] = p;
+		}
+		for (int i = 0; i < n; ++i) {
+			const int part = parts[i];
+			const int ch = part % 16;
+			const int port = part / 16;
+			BYTE bb = 0x10;
+			if (ch == 9) bb = 0x10;
+			else if (ch < 9) bb = (BYTE)(0x11 + ch);
+			else bb = (BYTE)(0x10 + ch);
+			BYTE d[11];
+			d[0] = 0xf0; d[1] = 0x41; d[2] = 0x10; d[3] = 0x42; d[4] = 0x12;
+			d[5] = (BYTE)(port ? 0x50 : 0x40);
+			d[6] = bb; d[7] = 0x15; d[8] = 0x01; d[9] = 0; d[10] = 0xf7;
+			unsigned sum = 0;
+			for (int k = 5; k <= 8; ++k) sum += d[k];
+			d[9] = (BYTE)((0x80 - (sum & 0x7f)) & 0x7f);
+			ApplySysex(d, 11);
+			m_part[part].isDrum = 1;
+			RefreshPartName(m_part[part]);
+			m_dirtyRows |= (1u << part);
+			if (m_sysMode == 2) {
+				InjectShort(part, 0xb0 | (0u << 8) | (127u << 16));
+				InjectShort(part, 0xb0 | (32u << 8));
+			} else {
+				MmBindVstActiveSlot();
+				if (MmVstHostOpen())
+					VstLiveMidiSysex(port, d, 11);
+				else if (mode == MODE_VST_MIDI)
+					VstMidiInjectSysex(port, d, 11);
+			}
+		}
+		m_fullDraw = true;
+		Invalidate(FALSE);
 	} else if (cmd == IDM_MM_MAP_AUTO) {
 		ApplyMapForce(0);
 		Invalidate(FALSE);
@@ -2779,6 +3663,10 @@ void CMidiMonitorDlg::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
 			else
 				og->PostMessage(WM_OGG_TOGGLE_SUBUI, 2, 0);
 		}
+	} else if (cmd == ID_MP_OPEN_VSTHOST) {
+		extern CMediaPlayerDlg* mp;
+		CWnd* parent = (mp && ::IsWindow(mp->GetSafeHwnd())) ? (CWnd*)mp : this;
+		OpenVstHostModeless(parent);
 	} else if (cmd == ID_HELP_SHOWSHEET) {
 		ShowHelpSheet();
 	}

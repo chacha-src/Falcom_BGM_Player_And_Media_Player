@@ -1,4 +1,4 @@
-// Shared by ogg.exe and KpiHost64.exe (via Vst3Host_k64.cpp). Keep it that
+﻿// Shared by ogg.exe and KpiHost64.exe (via Vst3Host_k64.cpp). Keep it that
 // way: a second copy under KpiHost64 is how x64 plug-in fixes get lost.
 #include "stdafx.h"
 #include "Vst3Host.h"
@@ -636,6 +636,8 @@ struct Vst3Inst {
 	int progCount;
 	int hasProgParam;
 	int midiInCh;
+	int instrumentClass; // 1 = VST3 subcategory contains Instrument
+	int sawFactory2;
 	Vst3Detail::HostApplication host;
 	Vst3Detail::CompHandler handler;
 	Vst3Detail::PlugFrame frame;
@@ -660,15 +662,19 @@ struct Vst3Inst {
 	float* extraBufs; // (mixOutBuses-1) x 2 x VST3_BLOCK, summed into the mix
 	CRITICAL_SECTION paramCs;
 	int paramCsReady;
+	enum { SX_STORE = 4096 };
+	BYTE sxStore[SX_STORE];
+	int sxUsed;
 
 	Vst3Inst()
 		: module(NULL), factory(NULL), component(NULL), processor(NULL),
 		  controller(NULL), midiMap(NULL), units(NULL),
 		  progParam(0), progListId(-1), progCount(0), hasProgParam(0), midiInCh(1),
+		  instrumentClass(0), sawFactory2(0),
 		  view(NULL), ok(0), outputChannels(2), bus0Channels(2), audioIns(0), audioOuts(0), mixOutBuses(1),
 		  initialized(0), ctrlInit(0),
 		  connected(0), active(0), processing(0), samplePos(0), extraBufs(NULL),
-		  paramCsReady(0)
+		  paramCsReady(0), sxUsed(0)
 	{
 		ZeroMemory(&ctx, sizeof(ctx));
 		InitializeCriticalSection(&paramCs);
@@ -776,6 +782,7 @@ Vst3Inst* Vst3Open(const wchar_t* vst3PathOrDll)
 	IPluginFactory2* factory2 = NULL;
 	if (v->factory->queryInterface(IPluginFactory2_iid,
 		(void**)&factory2) == kResultOk && factory2) {
+		v->sawFactory2 = 1;
 		for (int32 i = 0; i < v->factory->countClasses(); ++i) {
 			PClassInfo2 ci;
 			if (factory2->getClassInfo2(i, &ci) != kResultOk ||
@@ -800,6 +807,7 @@ Vst3Inst* Vst3Open(const wchar_t* vst3PathOrDll)
 		}
 	}
 	if (!haveClass) { Vst3Fail(L"no audio class"); Vst3Close(v); return NULL; }
+	v->instrumentClass = haveInstrument;
 
 	if (v->factory->createInstance(selected, IComponent_iid,
 		(void**)&v->component) != kResultOk || !v->component) {
@@ -1102,6 +1110,26 @@ void Vst3MidiShort(Vst3Inst* v, DWORD msg, int sampleOffset)
 	v->pending.addEvent(e);
 }
 
+void Vst3MidiSysex(Vst3Inst* v, const unsigned char* data, int bytes, int sampleOffset)
+{
+	using namespace Steinberg;
+	using namespace Steinberg::Vst;
+	if (!v || !v->ok || !data || bytes < 2) return;
+	if (v->pending.count >= (int32)(sizeof(v->pending.events) / sizeof(v->pending.events[0]))) return;
+	if (bytes > Vst3Inst::SX_STORE) bytes = Vst3Inst::SX_STORE;
+	if (v->sxUsed + bytes > Vst3Inst::SX_STORE) v->sxUsed = 0;
+	memcpy(v->sxStore + v->sxUsed, data, (size_t)bytes);
+	Event e = {};
+	e.busIndex = 0;
+	e.sampleOffset = sampleOffset < 0 ? 0 : sampleOffset;
+	e.type = Event::kDataEvent;
+	e.data.size = (uint32)bytes;
+	e.data.type = DataEvent::kMidiSysEx;
+	e.data.bytes = v->sxStore + v->sxUsed;
+	v->sxUsed += bytes;
+	v->pending.addEvent(e);
+}
+
 int Vst3EditorOpen(Vst3Inst* v, void* parentHwnd, int* outW, int* outH)
 {
 	using namespace Steinberg;
@@ -1289,6 +1317,14 @@ int Vst3GetLatencySamples(Vst3Inst* v)
 int Vst3MidiChannels(Vst3Inst* v)
 {
 	return v ? v->midiInCh : 0;
+}
+
+int Vst3IsInstrument(Vst3Inst* v)
+{
+	if (!v || !v->ok) return 0;
+	if (v->instrumentClass) return 1;
+	// No IPluginFactory2: subcategory is unknown, so MIDI in is the fallback.
+	return (!v->sawFactory2 && v->midiInCh > 0) ? 1 : 0;
 }
 
 int Vst3ProgramCount(Vst3Inst* v)

@@ -91,6 +91,8 @@ static S3RMat S3rLookAt(float ex,float ey,float ez,float ax,float ay,float az,fl
 #define S3R_RELEASE(p) do { if (p) { (p)->Release(); (p)=NULL; } } while(0)
 // D3D11 頂点バッファは実質 ~128MB。超えると CreateBuffer が失敗する
 static const UINT kS3rMaxVbBytes = 120u * 1024u * 1024u;
+// 再生成で 120MB new し直すと x86 で連続領域が取れず地表が消える。小さく分割して使い回す
+static const UINT kS3rBakeVertsTry[3] = { 36864u, 12288u, 4096u };
 static void S3rUnbindIA(ID3D11DeviceContext* dc)
 {
 	if (!dc) return;
@@ -662,6 +664,7 @@ CS3rView::CS3rView()
 	, m_vbDynBytes(4*1024*1024), m_vbHudBytes(512*1024)
 	, m_obsNvGpu(0), m_obsNiGpu(0), m_obsInstN(0), m_craftNvGpu(0), m_craftNiGpu(0)
 	, m_cpuDynScratch(NULL), m_cpuDynScratchBytes(0), m_cpuHudScratch(NULL), m_cpuHudScratchBytes(0)
+	, m_cpuBakeScratch(NULL), m_cpuBakeScratchBytes(0)
 	, m_texBand(NULL), m_srvBand(NULL), m_texWater(NULL), m_srvWater(NULL), m_texObs(NULL), m_srvObs(NULL)
 	, m_texEnv(NULL), m_srvEnv(NULL), m_texEnv2(NULL), m_srvEnv2(NULL)
 	, m_texSky(NULL), m_srvSky(NULL), m_texSky2(NULL), m_srvSky2(NULL)
@@ -1415,6 +1418,7 @@ void CS3rView::ReleaseDx()
 	S3R_RELEASE(m_vbDyn);S3R_RELEASE(m_cbFrame);S3R_RELEASE(m_ilHud);S3R_RELEASE(m_ilInst);S3R_RELEASE(m_ilSolid);S3R_RELEASE(m_ilPatch);
 	delete[] m_cpuDynScratch; m_cpuDynScratch=NULL; m_cpuDynScratchBytes=0;
 	delete[] m_cpuHudScratch; m_cpuHudScratch=NULL; m_cpuHudScratchBytes=0;
+	delete[] m_cpuBakeScratch; m_cpuBakeScratch=NULL; m_cpuBakeScratchBytes=0;
 	S3R_RELEASE(m_csNoise);S3R_RELEASE(m_psFinal);S3R_RELEASE(m_psDof);S3R_RELEASE(m_psSsr);S3R_RELEASE(m_vsPost);S3R_RELEASE(m_psHudLine);S3R_RELEASE(m_psHud);S3R_RELEASE(m_vsHud);S3R_RELEASE(m_psCraft);S3R_RELEASE(m_psTerr);S3R_RELEASE(m_psSolid);S3R_RELEASE(m_vsInst);S3R_RELEASE(m_vsSolid);S3R_RELEASE(m_psBand);S3R_RELEASE(m_dsTess);S3R_RELEASE(m_hsTess);S3R_RELEASE(m_vsTess);
 	S3R_RELEASE(m_shadowSrv);S3R_RELEASE(m_shadowDsv);S3R_RELEASE(m_shadowTex);
 	S3R_RELEASE(m_postSrv);S3R_RELEASE(m_postRtv);S3R_RELEASE(m_postTex);S3R_RELEASE(m_sceneSrv);S3R_RELEASE(m_sceneRtv);S3R_RELEASE(m_sceneTex);S3R_RELEASE(m_dsSrv);S3R_RELEASE(m_dsv);S3R_RELEASE(m_dsTex);S3R_RELEASE(m_bbRtv);S3R_RELEASE(m_swap);S3R_RELEASE(m_imm);S3R_RELEASE(m_dev);m_vw=m_vh=0;
@@ -1451,6 +1455,20 @@ BOOL CS3rView::UploadDefaultVB(ID3D11Buffer** dst, UINT* nOut, const void* verts
 	UINT bytes = nVerts * stride;
 	bytes = (bytes + 15u) & ~15u;
 	if (bytes < 16u) bytes = 16u;
+	if (*dst && m_imm) {
+		D3D11_BUFFER_DESC old = {};
+		(*dst)->GetDesc(&old);
+		if (old.ByteWidth >= bytes) {
+			S3rUnbindIA(m_imm);
+			D3D11_BOX box = {};
+			box.right = nVerts * stride;
+			box.bottom = 1;
+			box.back = 1;
+			m_imm->UpdateSubresource(*dst, 0, &box, verts, nVerts * stride, 0);
+			*nOut = nVerts;
+			return TRUE;
+		}
+	}
 	D3D11_BUFFER_DESC bd = {};
 	bd.ByteWidth = bytes;
 	bd.Usage = D3D11_USAGE_DEFAULT;
@@ -1462,14 +1480,9 @@ BOOL CS3rView::UploadDefaultVB(ID3D11Buffer** dst, UINT* nOut, const void* verts
 	if (FAILED(hr) || !neu) {
 		S3rUnbindIA(m_imm);
 		if (m_imm) m_imm->Flush();
-		S3R_RELEASE(*dst);
-		*nOut = 0;
 		neu = NULL;
 		hr = m_dev->CreateBuffer(&bd, &srd, &neu);
 		if (FAILED(hr) || !neu) return FALSE;
-		*dst = neu;
-		*nOut = nVerts;
-		return TRUE;
 	}
 	S3rUnbindIA(m_imm);
 	S3R_RELEASE(*dst);
@@ -1493,8 +1506,20 @@ BOOL CS3rView::UploadDefaultIB(ID3D11Buffer** dst, UINT* nOut, const UINT* idx, 
 	if (nIdx > kMaxIb / stride) nIdx = kMaxIb / stride;
 	if (nIdx < 3) return FALSE;
 	UINT bytes = nIdx * stride;
-	bytes = (bytes + 15u) & ~15u;
-	if (bytes < 16u) bytes = 16u;
+	if (*dst && m_imm) {
+		D3D11_BUFFER_DESC old = {};
+		(*dst)->GetDesc(&old);
+		if (old.ByteWidth >= bytes) {
+			S3rUnbindIA(m_imm);
+			D3D11_BOX box = {};
+			box.right = bytes;
+			box.bottom = 1;
+			box.back = 1;
+			m_imm->UpdateSubresource(*dst, 0, &box, idx, bytes, 0);
+			*nOut = nIdx;
+			return TRUE;
+		}
+	}
 	D3D11_BUFFER_DESC bd = {};
 	bd.ByteWidth = bytes;
 	bd.Usage = D3D11_USAGE_DEFAULT;
@@ -1502,7 +1527,12 @@ BOOL CS3rView::UploadDefaultIB(ID3D11Buffer** dst, UINT* nOut, const UINT* idx, 
 	D3D11_SUBRESOURCE_DATA srd = {};
 	srd.pSysMem = idx;
 	ID3D11Buffer* neu = NULL;
-	if (FAILED(m_dev->CreateBuffer(&bd, &srd, &neu)) || !neu) return FALSE;
+	if (FAILED(m_dev->CreateBuffer(&bd, &srd, &neu)) || !neu) {
+		S3rUnbindIA(m_imm);
+		if (m_imm) m_imm->Flush();
+		neu = NULL;
+		if (FAILED(m_dev->CreateBuffer(&bd, &srd, &neu)) || !neu) return FALSE;
+	}
 	S3rUnbindIA(m_imm);
 	S3R_RELEASE(*dst);
 	*dst = neu;
@@ -2059,7 +2089,7 @@ void CSoft3DRaceDlg::GenerateCourseWithSeed(DWORD seed)
 	m_bandHalf = 7.2f * sc;
 	m_hmReady = 0;
 	m_carveN = 0;
-	m_view.ClearStaticMeshes();
+	// 旧 GPU メッシュは BakeStaticMeshes が上書きするまで残す（再生成で地表が消えない）
 	// --- 平面レイアウト（XZ）：楕円／八の字／凸／凹を抽選 ---
 	{
 		float lr = S3rRand01(m_rng);
@@ -4387,17 +4417,38 @@ void CSoft3DRaceDlg::BakeStaticMeshes()
 {
 	if (!m_view.m_ready || m_knotN < 4 || !m_view.m_dev) return;
 	S3rUnbindIA(m_view.m_imm);
-	m_view.ClearStaticMeshes();
+	if (!m_view.m_cpuBakeScratch) {
+		for (int t = 0; t < 3 && !m_view.m_cpuBakeScratch; t++) {
+			UINT bytes = kS3rBakeVertsTry[t] * (UINT)sizeof(S3RVertex);
+			m_view.m_cpuBakeScratch = new (std::nothrow) BYTE[bytes];
+			if (m_view.m_cpuBakeScratch) m_view.m_cpuBakeScratchBytes = bytes;
+		}
+	}
+	if (!m_view.m_cpuBakeScratch) return;
+	const int keepTerr = m_view.m_vbTerrParts;
+	const int keepBand = m_view.m_vbBandParts;
+	const int keepWater = m_view.m_vbWaterParts;
+	const int keepScenery = m_view.m_vbSceneryParts;
+	m_view.m_vbTerrParts = 0;
+	m_view.m_vbBandParts = 0;
+	m_view.m_vbWaterParts = 0;
+	m_view.m_vbSceneryParts = 0;
 	const int axis = S3MeshAxisMul();
 	const int segs = S3MeshScaleCount(220, 4096);
 	const int gN = S3MeshScaleCount(72, 1200);
 	const int tSegs = S3MeshScaleCount(220, 4096);
 	const int pN = S3MeshScaleCount(8, 96);
 	const int wN = S3MeshScaleCount(28, 512);
-	const UINT bakeMax = (kS3rMaxVbBytes / (UINT)sizeof(S3RVertex) / 12u) * 12u;
-	if (bakeMax < 12u) return;
-	S3RVertex* bv = new (std::nothrow) S3RVertex[bakeMax];
-	if (!bv) return;
+	UINT bakeMax = m_view.m_cpuBakeScratchBytes / (UINT)sizeof(S3RVertex);
+	bakeMax = (bakeMax / 12u) * 12u;
+	if (bakeMax < 12u) {
+		m_view.m_vbTerrParts = keepTerr;
+		m_view.m_vbBandParts = keepBand;
+		m_view.m_vbWaterParts = keepWater;
+		m_view.m_vbSceneryParts = keepScenery;
+		return;
+	}
+	S3RVertex* bv = (S3RVertex*)m_view.m_cpuBakeScratch;
 	UINT n = 0;
 	ID3D11Buffer** curVb = NULL;
 	UINT* curNn = NULL;
@@ -4692,30 +4743,60 @@ void CSoft3DRaceDlg::BakeStaticMeshes()
 		}
 	}
 	flush();
-	delete[] bv;
+
+	if (m_view.m_vbTerrParts < 1) {
+		m_view.m_vbTerrParts = keepTerr;
+		m_view.m_vbBandParts = keepBand;
+		m_view.m_vbWaterParts = keepWater;
+		m_view.m_vbSceneryParts = keepScenery;
+	} else {
+		if (m_view.m_vbBandParts < 1) m_view.m_vbBandParts = keepBand;
+		if (m_view.m_vbSceneryParts < 1) m_view.m_vbSceneryParts = keepScenery;
+	}
 
 	if (m_obsNv > 0 && m_obsNi >= 3)
 		m_view.UploadDefaultVB(&m_view.m_vbObs, &m_view.m_obsNvGpu, m_obsVert, (UINT)m_obsNv);
 	if (m_obsNi >= 3)
 		m_view.UploadDefaultIB(&m_view.m_ibObs, &m_view.m_obsNiGpu, m_obsIdx, (UINT)m_obsNi);
 	m_view.m_obsInstN = 0;
-	S3R_RELEASE(m_view.m_vbObsInst);
 	if (m_obsN > 0 && m_view.m_dev) {
-		S3RInst* inst = new (std::nothrow) S3RInst[m_obsN];
-		if (inst) {
-			for (int i = 0; i < m_obsN; i++) {
-				S3rObs& o = m_obs[i];
-				inst[i] = {o.x, o.y, o.z, o.yaw, o.sx, o.sy, o.sz, 0.f, 1.f, 1.f, 1.f, 1.f};
+		S3RInst inst[S3R_MAX_OBS];
+		memset(inst, 0, sizeof(inst));
+		int nInst = m_obsN;
+		if (nInst > S3R_MAX_OBS) nInst = S3R_MAX_OBS;
+		for (int i = 0; i < nInst; i++) {
+			S3rObs& o = m_obs[i];
+			inst[i] = {o.x, o.y, o.z, o.yaw, o.sx, o.sy, o.sz, 0.f, 1.f, 1.f, 1.f, 1.f};
+		}
+		UINT ibytes = (UINT)nInst * (UINT)sizeof(S3RInst);
+		if (m_view.m_vbObsInst && m_view.m_imm) {
+			D3D11_BUFFER_DESC old = {};
+			m_view.m_vbObsInst->GetDesc(&old);
+			if (old.ByteWidth >= ibytes) {
+				S3rUnbindIA(m_view.m_imm);
+				D3D11_BOX box = {};
+				box.right = ibytes;
+				box.bottom = 1;
+				box.back = 1;
+				m_view.m_imm->UpdateSubresource(m_view.m_vbObsInst, 0, &box, inst, ibytes, 0);
+				m_view.m_obsInstN = (UINT)nInst;
 			}
+		}
+		if (m_view.m_obsInstN < 1) {
 			D3D11_BUFFER_DESC bd = {};
-			bd.ByteWidth = (UINT)m_obsN * (UINT)sizeof(S3RInst);
+			bd.ByteWidth = (UINT)S3R_MAX_OBS * (UINT)sizeof(S3RInst);
+			if (bd.ByteWidth < ibytes) bd.ByteWidth = ibytes;
 			bd.Usage = D3D11_USAGE_DEFAULT;
 			bd.BindFlags = D3D11_BIND_VERTEX_BUFFER;
 			D3D11_SUBRESOURCE_DATA srd = {};
 			srd.pSysMem = inst;
-			if (SUCCEEDED(m_view.m_dev->CreateBuffer(&bd, &srd, &m_view.m_vbObsInst)))
-				m_view.m_obsInstN = (UINT)m_obsN;
-			delete[] inst;
+			ID3D11Buffer* neu = NULL;
+			if (SUCCEEDED(m_view.m_dev->CreateBuffer(&bd, &srd, &neu)) && neu) {
+				S3rUnbindIA(m_view.m_imm);
+				S3R_RELEASE(m_view.m_vbObsInst);
+				m_view.m_vbObsInst = neu;
+				m_view.m_obsInstN = (UINT)nInst;
+			}
 		}
 	}
 	if (m_craftNv > 0 && m_craftNi >= 3) {

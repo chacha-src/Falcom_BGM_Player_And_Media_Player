@@ -163,11 +163,22 @@ static CString ResolveUpdateUrl(time_t* outModified)
 
 /* サイトの DL カウンター（Top/abcd → dncont）を +1。
  * ブラウザで download/oggYSEDbgm09a_…zip をクリックしたときと同じキー（絶対 URL）。
- * CSRF は Web 側で abcd が除外済み。失敗しても更新処理は続行。 */
+ * CSRF は Web 側で abcd が除外済み。失敗しても更新処理は続行。
+ * 前1日以内に自動アップデートで既に加算していれば送らない（失敗リトライで回数だけ増えるのを防ぐ）。 */
+static const time_t UPDATE_DL_COUNT_COOLDOWN_SEC = 24 * 60 * 60;
+
 static void NotifySiteDownloadCount(const CString& zipUrl)
 {
+	extern save savedata;
 	if (zipUrl.IsEmpty())
 		return;
+	const time_t now = time(NULL);
+	if (savedata.updateDlCountTime != 0 && now > 0)
+	{
+		const time_t last = (time_t)savedata.updateDlCountTime;
+		if (last > 0 && now >= last && (now - last) < UPDATE_DL_COUNT_COOLDOWN_SEC)
+			return;
+	}
 	CString file = zipUrl;
 	const int q = file.Find(_T('?'));
 	if (q >= 0)
@@ -218,10 +229,15 @@ static void NotifySiteDownloadCount(const CString& zipUrl)
 		return;
 	}
 	static const TCHAR hdr[] = _T("Content-Type: application/x-www-form-urlencoded\r\n");
-	HttpSendRequest(hReq, hdr, (DWORD)_tcslen(hdr), (LPVOID)(LPCSTR)body, (DWORD)body.GetLength());
+	const BOOL sent = HttpSendRequest(hReq, hdr, (DWORD)_tcslen(hdr), (LPVOID)(LPCSTR)body, (DWORD)body.GetLength());
 	InternetCloseHandle(hReq);
 	InternetCloseHandle(hConnect);
 	InternetCloseHandle(hInternet);
+	if (sent && now > 0)
+	{
+		savedata.updateDlCountTime = (__int64)now;
+		MpPersistSavedataQuick();
+	}
 }
 
 // ZIP をダウンロード。HTTP 200・最低サイズを満たさない場合は失敗（途中ファイルは削除）

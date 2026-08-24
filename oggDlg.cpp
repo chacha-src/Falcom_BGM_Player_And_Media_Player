@@ -1,4 +1,4 @@
-﻿// oggDlg.cpp : インプリメンテーション ファイル
+// oggDlg.cpp : インプリメンテーション ファイル
 //
 //#define _DLL
 #include "stdafx.h"
@@ -24240,12 +24240,6 @@ void COggDlg::timerp()
 		if (::IsWindow(m_AnalyzerDlg->GetSafeHwnd())
 			&& m_AnalyzerDlg->IsWindowVisible() && !m_AnalyzerDlg->IsIconic())
 			m_AnalyzerDlg->UpdateWindow();
-	}
-	if (plf == 1 && ::IsWindow(m_MidiMonitorDlg->GetSafeHwnd()) && Ms2DrawDue(ms2)) {
-		m_MidiMonitorDlg->PumpSyncNow();
-		if (::IsWindow(m_MidiMonitorDlg->GetSafeHwnd())
-			&& m_MidiMonitorDlg->IsWindowVisible() && !m_MidiMonitorDlg->IsIconic())
-			m_MidiMonitorDlg->UpdateWindow();
 	}
 
 	// スペアナは不透明で先に描く（ピーク／現在を保持）。バナー文字は後から SRCINVERT（XOR）。

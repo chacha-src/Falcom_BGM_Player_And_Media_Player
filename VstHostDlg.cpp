@@ -2,6 +2,8 @@
 #include "ogg.h"
 #include "VstHostDlg.h"
 #include "VstMidiEngine.h"
+#include "oggDlg.h"
+#include "CMidiMonitorDlg.h"
 #include "CCustomPopupMenu.h"
 #include <process.h>
 #include <math.h>
@@ -20,16 +22,21 @@ enum {
 	IDC_VST_FILTER = 0x7e10,
 	IDC_VST_WAV = 0x7e11,
 	IDC_VST_VOL = 0x7e12,
+	IDC_VST_THRU = 0x7e13,
 	ID_VST_POP_RESCAN = 0xe710,
 	ID_VST_POP_CLEAR = 0xe711,
 	ID_VST_POP_SAVE = 0xe712,
 	ID_VST_POP_EDITOR = 0xe713,
 	ID_VST_POP_WAV = 0xe714,
-	// MIDI In 1/2: (none) plus per-device 1-16ch / 17-32ch (max 32 devices).
+	ID_VST_POP_MIDIMON = 0xe716,
+	ID_VST_POP_THRU = 0xe717,
+	// MIDI In 1/2/3: (none) plus per-device 1-16ch / 17-32ch (max 32 devices).
 	ID_VST_POP_MIDI1_NONE = 0xe800,
 	ID_VST_POP_MIDI1_FIRST = 0xe801, // + dev*2+bank  (64 ids)
 	ID_VST_POP_MIDI2_NONE = 0xe841,
 	ID_VST_POP_MIDI2_FIRST = 0xe842,
+	ID_VST_POP_MIDI3_NONE = 0xe882,
+	ID_VST_POP_MIDI3_FIRST = 0xe883,
 	VST_MIDI_MENU_DEVS = 32,
 	// Send-channel picker: "as received" plus the 16 MIDI channels.
 	ID_VST_POP_CH_ASIS = 0xe720,
@@ -163,8 +170,13 @@ void MidiFifoDrain()
 		}
 		LeaveCriticalSection(&g_midiFifo.cs);
 		if (empty) return;
-		if (slot >= 0) VstLiveMidiSysex(port, sysex, len);
-		else VstLiveMidiShort(port, msg);
+		if (slot >= 0) {
+			VstLiveMidiSysex(port, sysex, len);
+			VstLiveTapPushSysex(port, sysex, len);
+		} else {
+			VstLiveMidiShort(port, msg);
+			VstLiveTapPushShort(port, msg);
+		}
 	}
 }
 
@@ -183,7 +195,8 @@ void MidiSysexRecycle()
 		}
 }
 
-const DWORD VST_WIRE_MAGIC = 0x31525756; // "VWR1"
+const DWORD VST_WIRE_MAGIC1 = 0x31525756; // "VWR1"
+const DWORD VST_WIRE_MAGIC2 = 0x32525756; // "VWR2" midiThru + MIDI In 3 hardware
 
 struct VstWireFile {
 	DWORD magic;
@@ -271,21 +284,35 @@ public:
 		const CString lines[] = {
 			LL14(L"・左のプラグインを右の Part 1～32 へドラッグします。", L"· Drag a plug-in from the left to Parts 1–32.", L"· Glissez un plug-in vers les parties 1–32.", L"· Trascina un plug-in nelle parti 1–32.", L"· Arrastre un plug-in a las partes 1–32.", L"· 왼쪽 플러그인을 파트 1~32로 드래그합니다.", L"· 将左侧插件拖到声部 1–32。", L"· اسحب إضافة إلى الأجزاء 1–32.", L"· Перетащите плагин в партии 1–32.", L"· Plugin links auf Part 1–32 ziehen.", L"· Arraste um plug-in para as partes 1–32.", L"· Sleep een plug-in naar partijen 1–32.", L"· Przeciągnij wtyczkę do partii 1–32.", L"· Eklentiyi Bölüm 1–32'ye sürükleyin."),
 			LL14(L"・Z列＝C4～、Q列＝C5～のPC鍵盤（コンボ／入力中は無効。Spaceで全ノートオフ）。", L"· PC keys: Z-row = C4…, Q-row = C5… (off while typing in a combo; Space = all notes off).", L"· Clavier PC: rangée Z = C4…, Q = C5… (inactif dans les listes; Espace = all notes off).", L"· Tastiera PC: fila Z = C4…, Q = C5… (disattiva nei combo; Spazio = all notes off).", L"· Teclado PC: fila Z = C4…, Q = C5… (inactivo en combos; Espacio = all notes off).", L"· PC 건반: Z열=C4~, Q열=C5~(콤보 입력 중 비활성, Space=올 노트 오프).", L"· PC 键盘：Z 行=C4…，Q 行=C5…（组合框输入时无效；空格全音符关闭）。", L"· لوحة PC: صف Z=C4… وصف Q=C5… (معطّل أثناء الكتابة؛ المسافة = إيقاف كل النغمات).", L"· ПК-клавиатура: ряд Z = C4…, Q = C5… (не в комбо; Пробел = all notes off).", L"· PC-Tastatur: Z-Reihe = C4…, Q = C5… (nicht in Combos; Leertaste = All Notes Off).", L"· Teclado PC: fila Z = C4…, Q = C5… (inativo em combos; Espaço = all notes off).", L"· PC-toetsenbord: Z-rij = C4…, Q = C5… (uit in combo's; Spatie = all notes off).", L"· Klawiatura PC: rząd Z = C4…, Q = C5… (wył. w combo; Spacja = all notes off).", L"· PC klavye: Z satırı = C4…, Q = C5… (kombo yazarken kapalı; Boşluk = all notes off)."),
-			LL14(L"・一覧にはドロップで実際に載るものだけが出ます（初回／再スキャンで確認）。", L"· The list shows only plug-ins that actually drop onto a part (checked on first open / rescan).", L"· La liste n'affiche que les plug-ins réellement déposables (vérifié à l'ouverture / rescannage).", L"· L'elenco mostra solo i plug-in che si possono trascinare (controllo all'apertura / scansione).", L"· La lista solo muestra plug-ins que se pueden soltar (comprobado al abrir / reescanear).", L"· 목록에는 실제로 드롭되는 플러그인만 표시됩니다(첫 실행/재검색 시 확인).", L"· 列表只显示可拖放到声部的插件（首次打开/重新扫描时检查）。", L"· تظهر القائمة فقط الإضافات القابلة للإفلات (تُفحص عند الفتح / إعادة المسح).", L"· В списке только плагины, которые реально ставятся на слот (проверка при открытии / скане).", L"· Die Liste zeigt nur Plug-ins, die sich ablegen lassen (Prüfung beim Öffnen / Neu scannen).", L"· A lista mostra só plug-ins que se podem largar (verificado ao abrir / procurar).", L"· De lijst toont alleen plug-ins die echt te droppen zijn (controle bij openen / scannen).", L"· Lista pokazuje tylko wtyczki, które da się upuścić (sprawdzane przy otwarciu / skanie).", L"· Liste yalnızca gerçekten bırakılabilen eklentileri gösterir (açılış / yeniden tarama kontrolü)."),
-			LL14(L"・MIDI入力は2台＋「メイン再生スルー」。プレイヤーで鳴っている音（形式不問）をホストへ回し、プレイヤー本体の出力は止まります。MIDIならSMFも鍵盤と合流します。各機器は「1-16ch」（パート1–16）と「17-32ch」（パート17–32）で選べます。",
-				L"· Two MIDI inputs plus Main-playback thru. Player audio (any format) is routed here and the player's own speakers go silent. MIDI SMF also merges with the keyboards. Each device is listed as 1-16ch (parts 1–16) and 17-32ch (parts 17–32).",
-				L"· Deux entrées MIDI + MIDI de lecture. Chaque périphérique : 1-16ch (parties 1–16) et 17-32ch (17–32). Le même sur les deux atteint 32 parties comme Super-MPU.",
-				L"· Due ingressi MIDI + MIDI riproduzione. Ogni dispositivo: 1-16ch (parti 1–16) e 17-32ch (17–32). Lo stesso su entrambi raggiunge 32 parti come Super-MPU.",
-				L"· Dos entradas MIDI + MIDI de reproducción. Cada dispositivo: 1-16ch (partes 1–16) y 17-32ch (17–32). El mismo en ambos llega a 32 partes como Super-MPU.",
-				L"· MIDI 입력 2대 + 메인 재생 MIDI. 각 장치는 1-16ch(파트 1–16)와 17-32ch(17–32). 둘 다 같은 장치면 Super-MPU처럼 32파트.",
-				L"· 两个 MIDI 输入加上「主播放 MIDI」。每台设备有 1-16ch（声部1–16）和 17-32ch（17–32）。两边选同一设备即像 Super-MPU 送到 32 声部。",
-				L"· مدخلان MIDI + MIDI التشغيل. كل جهاز: 1-16ch (1–16) و17-32ch (17–32). نفس الجهاز للاثنين يصل إلى 32 جزءاً مثل Super-MPU.",
-				L"· Два MIDI-входа + MIDI трека. Каждое устройство: 1-16ch (1–16) и 17-32ch (17–32). Одно на оба — 32 партии, как Super-MPU.",
-				L"· Zwei MIDI-Eingänge plus Wiedergabe-MIDI. Jedes Gerät: 1-16ch (Parts 1–16) und 17-32ch (17–32). Dasselbe auf beiden: 32 Parts wie Super-MPU.",
-				L"· Duas entradas MIDI + MIDI da reprodução. Cada dispositivo: 1-16ch (1–16) e 17-32ch (17–32). O mesmo nos dois chega a 32 partes como Super-MPU.",
-				L"· Twee MIDI-ingangen plus weergave-MIDI. Elk apparaat: 1-16ch (1–16) en 17-32ch (17–32). Hetzelfde op beide: 32 partijen zoals Super-MPU.",
-				L"· Dwa wejścia MIDI + MIDI odtwarzania. Każde urządzenie: 1-16ch (1–16) i 17-32ch (17–32). To samo na obu: 32 partie jak Super-MPU.",
-				L"· İki MIDI girişi + çalma MIDI. Her aygıt: 1-16ch (1–16) ve 17-32ch (17–32). İkisinde de aynı aygıt Super-MPU gibi 32 bölüm."),
+			LL14(L"・一覧にはドロップで実際に載るものだけが出ます（初回／再スキャンで確認）。同じ音源のコピーは1つにまとめます。<x86><x64>はビット数、<音色選択>はプラグイン側で音色を選ぶ音源、[M16ch]は16chマルチです。", L"· The list shows only plug-ins that actually drop onto a part (checked on first open / rescan). Copies of the same module are merged. <x86><x64> is bitness, <patch> needs a sound picked in the plug-in, [M16ch] is 16-ch multi.", L"· La liste n'affiche que les plug-ins réellement déposables. Les copies du même module sont fusionnées. <x86><x64> = bits, <timbre> = choisir dans le plug-in, [M16ch] = multi 16 ch.", L"· L'elenco mostra solo i plug-in che si possono trascinare. Le copie dello stesso modulo sono unite. <x86><x64> = bit, <patch> = scegliere nel plug-in, [M16ch] = multi 16 ch.", L"· La lista solo muestra plug-ins que se pueden soltar. Las copias del mismo módulo se unen. <x86><x64> = bits, <timbre> = elegir en el plug-in, [M16ch] = multi 16 ch.", L"· 목록에는 실제로 드롭되는 플러그인만 표시됩니다. 같은 모듈의 복사본은 하나로 합칩니다. <x86><x64>는 비트, <음색선택>은 플러그인에서 고름, [M16ch]은 16ch 멀티.", L"· 列表只显示可拖放到声部的插件。同一模块的副本会合为一条。<x86><x64>为位数，<选音色>需在插件里选，[M16ch]为 16 声道多音色。", L"· تظهر القائمة فقط الإضافات القابلة للإفلات. تُدمج نسخ نفس الوحدة. <x86><x64> البتات، <رقعة> اختيار في الإضافة، [M16ch] متعدد 16 قناة.", L"· В списке только плагины, которые реально ставятся на слот. Копии одного модуля сливаются. <x86><x64> — разрядность, <патч> — выбрать в плагине, [M16ch] — 16-канальный мульти.", L"· Die Liste zeigt nur Plug-ins, die sich ablegen lassen. Kopien desselben Moduls werden zusammengefasst. <x86><x64> = Bits, <Patch> = im Plug-in wählen, [M16ch] = 16-ch Multi.", L"· A lista mostra só plug-ins que se podem largar. Cópias do mesmo módulo juntam-se. <x86><x64> = bits, <timbre> = escolher no plug-in, [M16ch] = multi 16 ch.", L"· De lijst toont alleen plug-ins die echt te droppen zijn. Kopieën van dezelfde module worden samengevoegd. <x86><x64> = bits, <patch> = kiezen in de plug-in, [M16ch] = 16ch multi.", L"· Lista pokazuje tylko wtyczki, które da się upuścić. Kopie tego samego modułu są scalane. <x86><x64> = bity, <barwa> = wybór w wtyczce, [M16ch] = multi 16 ch.", L"· Liste yalnızca gerçekten bırakılabilen eklentileri gösterir. Aynı modülün kopyaları birleşir. <x86><x64> bit, <yama> eklentide seçim, [M16ch] 16ch multi."),
+			LL14(L"・MIDI入力は3台＋「メイン再生スルー」。プレイヤーで鳴っている音（形式不問）をホストへ回し、プレイヤー本体の出力は止まります。MIDIならSMFも鍵盤と合流します。各機器は「1-16ch」（パート1–16）と「17-32ch」（パート17–32）で選べます。",
+				L"· Three MIDI inputs plus Main-playback thru. Player audio (any format) is routed here and the player's own speakers go silent. MIDI SMF also merges with the keyboards. Each device is listed as 1-16ch (parts 1–16) and 17-32ch (parts 17–32).",
+				L"· Trois entrées MIDI + traversée lecture. Chaque périphérique : 1-16ch (parties 1–16) et 17-32ch (17–32).",
+				L"· Tre ingressi MIDI + pass-through riproduzione. Ogni dispositivo: 1-16ch (parti 1–16) e 17-32ch (17–32).",
+				L"· Tres entradas MIDI + paso de reproducción. Cada dispositivo: 1-16ch (partes 1–16) y 17-32ch (17–32).",
+				L"· MIDI 입력 3대 + 메인 재생 스루. 각 장치는 1-16ch(파트 1–16)와 17-32ch(17–32).",
+				L"· 三个 MIDI 输入加上「主播放直通」。每台设备有 1-16ch（声部1–16）和 17-32ch（17–32）。",
+				L"· ثلاثة مداخل MIDI + تمرير التشغيل. كل جهاز: 1-16ch (1–16) و17-32ch (17–32).",
+				L"· Три MIDI-входа + сквозн. воспр. Каждое устройство: 1-16ch (1–16) и 17-32ch (17–32).",
+				L"· Drei MIDI-Eingänge plus Wiedergabe-Thru. Jedes Gerät: 1-16ch (Parts 1–16) und 17-32ch (17–32).",
+				L"· Três entradas MIDI + passagem da reprodução. Cada dispositivo: 1-16ch (1–16) e 17-32ch (17–32).",
+				L"· Drie MIDI-ingangen plus weergave-thru. Elk apparaat: 1-16ch (1–16) en 17-32ch (17–32).",
+				L"· Trzy wejścia MIDI + przelot odtwarzania. Każde urządzenie: 1-16ch (1–16) i 17-32ch (17–32).",
+				L"· Üç MIDI girişi + ana çalma thru. Her aygıt: 1-16ch (1–16) ve 17-32ch (17–32)."),
+			LL14(L"・MIDIモニタとつながります。ホストの鍵盤・MIDI入力がモニタに出ます。モニタのミニ鍵盤やスライダーはここのプラグインへ送られます。右クリックからモニタを開けます。",
+				L"· Linked to the MIDI monitor: host keyboard and MIDI in appear there. Monitor mini keys and sliders go to these plug-ins. Right-click to open the monitor.",
+				L"· Lie au moniteur MIDI : clavier et MIDI in s'y affichent. Mini clavier et curseurs du moniteur vont aux plug-ins. Clic droit pour ouvrir le moniteur.",
+				L"· Collegato al monitor MIDI: tastiera e MIDI in appaiono li. Mini tasti e slider del monitor vanno ai plug-in. Tasto destro per aprire il monitor.",
+				L"· Enlazado al monitor MIDI: teclado y MIDI in salen alli. Mini teclas y deslizadores van a los plug-ins. Clic derecho para abrir el monitor.",
+				L"· MIDI 모니터와 연결됩니다. 호스트 건반·MIDI 입력이 모니터에 나옵니다. 모니터 미니 건반과 슬라이더는 여기 플러그인으로 갑니다. 우클릭으로 모니터를 엽니다.",
+				L"· 与 MIDI 监视器相连。主机键盘和 MIDI 输入显示在监视器上。监视器迷你键盘和滑块送到这里的插件。右键可打开监视器。",
+				L"· مرتبط بمراقب MIDI. لوحة المضيف وMIDI تظهر هناك. المفاتيح الصغيرة والمنزلقات إلى الإضافات هنا. يمين لفتح المراقب.",
+				L"· Связан с MIDI-монитором: клавиатура и MIDI in видны там. Мини-клавиши и ползунки монитора идут в плагины. ПКМ открывает монитор.",
+				L"· Mit dem MIDI-Monitor verbunden: Tastatur und MIDI-In erscheinen dort. Mini-Tasten und Schieber gehen an die Plug-ins. Rechtsklick oeffnet den Monitor.",
+				L"· Ligado ao monitor MIDI: teclado e MIDI in aparecem la. Mini teclas e controlos vao aos plug-ins. Clique direito abre o monitor.",
+				L"· Gekoppeld aan de MIDI-monitor: toetsenbord en MIDI-in verschijnen daar. Mini-toetsen en schuiven gaan naar de plug-ins. Rechtsklik opent de monitor.",
+				L"· Polaczony z monitorem MIDI: klawiatura i MIDI in sa tam. Mini klawisze i suwaki ida do wtyczek. PPM otwiera monitor.",
+				L"· MIDI izleyiciye bagli: host klavye ve MIDI girisi orada gorunur. Mini tuslar ve kaydiricilar eklentilere gider. Sag tik izleyiciyi acar."),
 			LL14(L"・配線とデバイス設定はプリセットへ保存できます。音量スライダーはこのホストの出力（WAV出力も含む）です。", L"· Wiring and device choices are stored in presets. The volume slider is this host's output (including WAV out).", L"· Le câblage et les périphériques sont enregistrés.", L"· Cablaggio e dispositivi sono salvati nei preset.", L"· El cableado y los dispositivos se guardan.", L"· 배선과 장치 선택은 프리셋에 저장됩니다.", L"· 连线和设备选择可保存到预设。", L"· تُحفظ التوصيلات والأجهزة في الإعدادات.", L"· Схема и устройства сохраняются в пресетах.", L"· Verdrahtung und Geräte werden im Preset gespeichert.", L"· Ligações e dispositivos são guardados.", L"· Bedrading en apparaten worden opgeslagen.", L"· Okablowanie i urządzenia zapisują się w presetach.", L"· Bağlantılar ve aygıtlar ön ayarlara kaydedilir."),
 			LL14(L"・右クリックで再スキャン、スロット解除、保存ができます。", L"· Right-click to rescan, clear a slot, or save.", L"· Clic droit: rescanner, effacer ou enregistrer.", L"· Clic destro: scansione, azzera o salva.", L"· Clic derecho: reescanear, borrar o guardar.", L"· 우클릭으로 재검색, 슬롯 해제, 저장합니다.", L"· 右键可重新扫描、清除插槽或保存。", L"· انقر يميناً للمسح أو الإزالة أو الحفظ.", L"· ПКМ: сканирование, очистка или сохранение.", L"· Rechtsklick: scannen, Slot leeren oder speichern.", L"· Clique direito: procurar, limpar ou guardar.", L"· Rechtsklik: scannen, wissen of opslaan.", L"· PPM: skanowanie, czyszczenie lub zapis.", L"· Sağ tık: tara, slotu temizle veya kaydet."),
 			LL14(L"・SOUND Canvas VA / SGP2 等のマルチは1スロットで16ch。MIDIチャンネルはそのまま送られます。", L"· Multi-timbral plugs (SOUND Canvas VA / SGP2) take one slot for 16 channels.", L"· Les multi (SOUND Canvas VA / SGP2) utilisent 1 slot pour 16 canaux.", L"· I multi (SOUND Canvas VA / SGP2) usano 1 slot per 16 canali.", L"· Los multi (SOUND Canvas VA / SGP2) usan 1 ranura para 16 canales.", L"· SOUND Canvas VA/SGP2 멀티는 1슬롯으로 16ch.", L"· SOUND Canvas VA/SGP2 等多音色占1槽覆盖16声道。", L"· الآلات المتعددة (SOUND Canvas VA/SGP2) تشغل فتحة واحدة لـ16 قناة.", L"· Мульти (SOUND Canvas VA/SGP2) — один слот на 16 каналов.", L"· Multi (SOUND Canvas VA/SGP2): ein Slot für 16 Kanäle.", L"· Multi (SOUND Canvas VA/SGP2) usam 1 slot para 16 canais.", L"· Multi (SOUND Canvas VA/SGP2): één slot voor 16 kanalen.", L"· Multi (SOUND Canvas VA/SGP2): jeden slot na 16 kanałów.", L"· Multi (SOUND Canvas VA/SGP2): 16 kanal için tek slot.")
@@ -852,26 +879,43 @@ void CVstWireCtrl::ShowSlotMenu(int slot, CPoint screenPt)
 			? (int)m_owner->m_midiIn[0].GetItemData(m_owner->m_midiIn[0].GetCurSel()) : -1;
 		const int cur1 = m_owner->m_midiIn[1].GetCurSel() >= 0
 			? (int)m_owner->m_midiIn[1].GetItemData(m_owner->m_midiIn[1].GetCurSel()) : -1;
+		const int cur2 = m_owner->m_midiIn[2].GetCurSel() >= 0
+			? (int)m_owner->m_midiIn[2].GetItemData(m_owner->m_midiIn[2].GetCurSel()) : -1;
+		const int thruOn = (m_owner->m_thru.GetSafeHwnd() && m_owner->m_thru.GetCurSel() >= 0
+			&& (int)m_owner->m_thru.GetItemData(m_owner->m_thru.GetCurSel()) == -2) ? 1 : 0;
 		const wchar_t* none = LL14(L"(なし)", L"(None)", L"(Aucun)", L"(Nessuno)", L"(Ninguno)", L"(없음)", L"(无)", L"(بلا)",
 			L"(Нет)", L"(Keine)", L"(Nenhum)", L"(Geen)", L"(Brak)", L"(Yok)");
-		CCustomPopupMenu* in1 = menu.AddSubMenu(LL14(L"MIDI入力 1", L"MIDI In 1", L"Entrée MIDI 1", L"Ingresso MIDI 1",
+		CCustomPopupMenu* midiRoot = menu.AddSubMenu(LL14(L"MIDI入力", L"MIDI In", L"Entrée MIDI", L"Ingresso MIDI",
+			L"Entrada MIDI", L"MIDI 입력", L"MIDI 输入", L"دخل MIDI", L"MIDI-вход", L"MIDI-Eingang",
+			L"Entrada MIDI", L"MIDI-ingang", L"Wejście MIDI", L"MIDI girişi"));
+		CCustomPopupMenu* in1 = midiRoot ? midiRoot->AddSubMenu(LL14(L"MIDI入力 1", L"MIDI In 1", L"Entrée MIDI 1", L"Ingresso MIDI 1",
 			L"Entrada MIDI 1", L"MIDI 입력 1", L"MIDI 输入 1", L"دخل MIDI 1", L"MIDI-вход 1", L"MIDI-Eingang 1",
 			L"Entrada MIDI 1", L"MIDI-ingang 1", L"Wejście MIDI 1", L"MIDI girişi 1"),
 			LL14(L"パート1–16（1-16ch）か 17–32（17-32ch）へ送ります", L"Send to parts 1–16 (1-16ch) or 17–32 (17-32ch)",
 				L"Envoie vers les parties 1–16 ou 17–32", L"Invia alle parti 1–16 o 17–32", L"Envía a las partes 1–16 o 17–32",
 				L"파트 1–16 또는 17–32로 보냅니다", L"送到声部 1–16 或 17–32", L"يرسل إلى الأجزاء 1–16 أو 17–32",
 				L"На партии 1–16 или 17–32", L"An Parts 1–16 oder 17–32", L"Envia para as partes 1–16 ou 17–32",
-				L"Naar partijen 1–16 of 17–32", L"Do partii 1–16 lub 17–32", L"Bölüm 1–16 veya 17–32'ye gönderir"));
-		CCustomPopupMenu* in2 = menu.AddSubMenu(LL14(L"MIDI入力 2", L"MIDI In 2", L"Entrée MIDI 2", L"Ingresso MIDI 2",
+				L"Naar partijen 1–16 of 17–32", L"Do partii 1–16 lub 17–32", L"Bölüm 1–16 veya 17–32'ye gönderir")) : NULL;
+		CCustomPopupMenu* in2 = midiRoot ? midiRoot->AddSubMenu(LL14(L"MIDI入力 2", L"MIDI In 2", L"Entrée MIDI 2", L"Ingresso MIDI 2",
 			L"Entrada MIDI 2", L"MIDI 입력 2", L"MIDI 输入 2", L"دخل MIDI 2", L"MIDI-вход 2", L"MIDI-Eingang 2",
 			L"Entrada MIDI 2", L"MIDI-ingang 2", L"Wejście MIDI 2", L"MIDI girişi 2"),
 			LL14(L"パート1–16（1-16ch）か 17–32（17-32ch）へ送ります", L"Send to parts 1–16 (1-16ch) or 17–32 (17-32ch)",
 				L"Envoie vers les parties 1–16 ou 17–32", L"Invia alle parti 1–16 o 17–32", L"Envía a las partes 1–16 o 17–32",
 				L"파트 1–16 또는 17–32로 보냅니다", L"送到声部 1–16 或 17–32", L"يرسل إلى الأجزاء 1–16 أو 17–32",
 				L"На партии 1–16 или 17–32", L"An Parts 1–16 oder 17–32", L"Envia para as partes 1–16 ou 17–32",
-				L"Naar partijen 1–16 of 17–32", L"Do partii 1–16 lub 17–32", L"Bölüm 1–16 veya 17–32'ye gönderir"));
+				L"Naar partijen 1–16 of 17–32", L"Do partii 1–16 lub 17–32", L"Bölüm 1–16 veya 17–32'ye gönderir")) : NULL;
+		CCustomPopupMenu* in3 = midiRoot ? midiRoot->AddSubMenu(LL14(L"MIDI入力 3", L"MIDI In 3", L"Entrée MIDI 3", L"Ingresso MIDI 3",
+			L"Entrada MIDI 3", L"MIDI 입력 3", L"MIDI 输入 3", L"دخل MIDI 3", L"MIDI-вход 3", L"MIDI-Eingang 3",
+			L"Entrada MIDI 3", L"MIDI-ingang 3", L"Wejście MIDI 3", L"MIDI girişi 3"),
+			LL14(L"3台目の鍵盤。1・2と同じ帯域（1-16ch / 17-32ch）へ送れます", L"Third keyboard. Same bands as 1 and 2 (1-16ch / 17-32ch)",
+				L"3e clavier. Mêmes bandes que 1 et 2", L"Terza tastiera. Stesse fasce di 1 e 2", L"Tercer teclado. Mismas bandas que 1 y 2",
+				L"세 번째 건반. 1·2와 같은 대역", L"第三键盘。与 1、2 相同的带", L"لوحة ثالثة. نفس نطاقَي 1 و2",
+				L"Третья клавиатура. Те же полосы, что у 1 и 2", L"Dritte Tastatur. Gleiche Bänder wie 1 und 2",
+				L"Terceiro teclado. Mesmas faixas que 1 e 2", L"Derde toetsenbord. Dezelfde banden als 1 en 2",
+				L"Trzecia klawiatura. Te same pasma co 1 i 2", L"Üçüncü klavye. 1 ve 2 ile aynı bantlar")) : NULL;
 		if (in1) in1->AddCheck(ID_VST_POP_MIDI1_NONE, none, cur0 == -1);
 		if (in2) in2->AddCheck(ID_VST_POP_MIDI2_NONE, none, cur1 == -1);
+		if (in3) in3->AddCheck(ID_VST_POP_MIDI3_NONE, none, cur2 == -1);
 		UINT nDev = midiInGetNumDevs();
 		if (nDev > (UINT)VST_MIDI_MENU_DEVS) nDev = (UINT)VST_MIDI_MENU_DEVS;
 		for (UINT i = 0; i < nDev; ++i) {
@@ -891,6 +935,20 @@ void CVstWireCtrl::ShowSlotMenu(int slot, CPoint screenPt)
 					d->AddCheck(ID_VST_POP_MIDI2_FIRST + i * 2 + 1, L"17-32ch", cur1 == (int)(i | 0x10000));
 				}
 			}
+			if (in3) {
+				CCustomPopupMenu* d = in3->AddSubMenu(caps.szPname);
+				if (d) {
+					d->AddCheck(ID_VST_POP_MIDI3_FIRST + i * 2, L"1-16ch", cur2 == (int)i);
+					d->AddCheck(ID_VST_POP_MIDI3_FIRST + i * 2 + 1, L"17-32ch", cur2 == (int)(i | 0x10000));
+				}
+			}
+		}
+		if (midiRoot) {
+			midiRoot->AddSeparator();
+			midiRoot->AddCheck(ID_VST_POP_THRU, LL14(L"メイン再生スルー", L"Main-playback thru", L"Traversée lecture",
+				L"Pass-through riproduzione", L"Paso de reproducción", L"메인 재생 스루", L"主播放直通", L"تمرير التشغيل الرئيسي",
+				L"Сквозн. осн. воспр.", L"Hauptwiedergabe-Thru", L"Passagem da reprodução", L"Hoofdweergave-thru",
+				L"Przelot odtwarzania", L"Ana çalma thru"), thruOn != 0);
 		}
 	}
 
@@ -904,19 +962,33 @@ void CVstWireCtrl::ShowSlotMenu(int slot, CPoint screenPt)
 	else if (cmd >= ID_VST_POP_PROG_FIRST &&
 		cmd < ID_VST_POP_PROG_FIRST + VST_PROG_MENU_MAX)
 		VstLiveSetProgram(part, (int)(cmd - ID_VST_POP_PROG_FIRST));
-	else if (cmd == ID_VST_POP_MIDI1_NONE || cmd == ID_VST_POP_MIDI2_NONE ||
+	else if (cmd == ID_VST_POP_THRU) {
+		if (m_owner->m_thru.GetSafeHwnd()) {
+			const int on = (m_owner->m_thru.GetCurSel() >= 0
+				&& (int)m_owner->m_thru.GetItemData(m_owner->m_thru.GetCurSel()) == -2) ? 1 : 0;
+			m_owner->m_thru.SetCurSel(on ? 0 : 1);
+			m_owner->OnDeviceChange();
+		}
+	}
+	else if (cmd == ID_VST_POP_MIDI1_NONE || cmd == ID_VST_POP_MIDI2_NONE || cmd == ID_VST_POP_MIDI3_NONE ||
 		(cmd >= ID_VST_POP_MIDI1_FIRST && cmd < ID_VST_POP_MIDI1_FIRST + VST_MIDI_MENU_DEVS * 2) ||
-		(cmd >= ID_VST_POP_MIDI2_FIRST && cmd < ID_VST_POP_MIDI2_FIRST + VST_MIDI_MENU_DEVS * 2)) {
+		(cmd >= ID_VST_POP_MIDI2_FIRST && cmd < ID_VST_POP_MIDI2_FIRST + VST_MIDI_MENU_DEVS * 2) ||
+		(cmd >= ID_VST_POP_MIDI3_FIRST && cmd < ID_VST_POP_MIDI3_FIRST + VST_MIDI_MENU_DEVS * 2)) {
 		int combo = -1, data = -1;
 		if (cmd == ID_VST_POP_MIDI1_NONE) combo = 0;
 		else if (cmd == ID_VST_POP_MIDI2_NONE) combo = 1;
+		else if (cmd == ID_VST_POP_MIDI3_NONE) combo = 2;
 		else if (cmd >= ID_VST_POP_MIDI1_FIRST && cmd < ID_VST_POP_MIDI1_FIRST + VST_MIDI_MENU_DEVS * 2) {
 			combo = 0;
 			const int idx = (int)(cmd - ID_VST_POP_MIDI1_FIRST);
 			data = (idx / 2) | ((idx & 1) << 16);
-		} else {
+		} else if (cmd >= ID_VST_POP_MIDI2_FIRST && cmd < ID_VST_POP_MIDI2_FIRST + VST_MIDI_MENU_DEVS * 2) {
 			combo = 1;
 			const int idx = (int)(cmd - ID_VST_POP_MIDI2_FIRST);
+			data = (idx / 2) | ((idx & 1) << 16);
+		} else {
+			combo = 2;
+			const int idx = (int)(cmd - ID_VST_POP_MIDI3_FIRST);
 			data = (idx / 2) | ((idx & 1) << 16);
 		}
 		int sel = 0;
@@ -959,22 +1031,36 @@ void CVstWireCtrl::OnRButtonUp(UINT, CPoint pt)
 	menu.AddCommand(ID_VST_POP_WAV, LL14(L"WAVへ書き出す", L"Write to WAV", L"Écrire en WAV", L"Scrivi su WAV", L"Escribir a WAV",
 		L"WAV로 쓰기", L"导出为 WAV", L"كتابة إلى WAV", L"Записать в WAV", L"Als WAV schreiben", L"Escrever para WAV",
 		L"Naar WAV schrijven", L"Zapisz do WAV", L"WAV olarak yaz"));
+	menu.AddCommand(ID_VST_POP_MIDIMON, LL14(L"MIDIモニタを開く", L"Open MIDI monitor", L"Ouvrir le moniteur MIDI", L"Apri monitor MIDI",
+		L"Abrir monitor MIDI", L"MIDI 모니터 열기", L"打开 MIDI 监视器", L"فتح مراقب MIDI", L"Открыть MIDI-монитор",
+		L"MIDI-Monitor öffnen", L"Abrir monitor MIDI", L"MIDI-monitor openen", L"Otwórz monitor MIDI", L"MIDI izleyiciyi aç"));
 	menu.AddSeparator();
 	{
 		const int cur0 = m_owner->m_midiIn[0].GetCurSel() >= 0
 			? (int)m_owner->m_midiIn[0].GetItemData(m_owner->m_midiIn[0].GetCurSel()) : -1;
 		const int cur1 = m_owner->m_midiIn[1].GetCurSel() >= 0
 			? (int)m_owner->m_midiIn[1].GetItemData(m_owner->m_midiIn[1].GetCurSel()) : -1;
+		const int cur2 = m_owner->m_midiIn[2].GetCurSel() >= 0
+			? (int)m_owner->m_midiIn[2].GetItemData(m_owner->m_midiIn[2].GetCurSel()) : -1;
+		const int thruOn = (m_owner->m_thru.GetSafeHwnd() && m_owner->m_thru.GetCurSel() >= 0
+			&& (int)m_owner->m_thru.GetItemData(m_owner->m_thru.GetCurSel()) == -2) ? 1 : 0;
 		const wchar_t* none = LL14(L"(なし)", L"(None)", L"(Aucun)", L"(Nessuno)", L"(Ninguno)", L"(없음)", L"(无)", L"(بلا)",
 			L"(Нет)", L"(Keine)", L"(Nenhum)", L"(Geen)", L"(Brak)", L"(Yok)");
-		CCustomPopupMenu* in1 = menu.AddSubMenu(LL14(L"MIDI入力 1", L"MIDI In 1", L"Entrée MIDI 1", L"Ingresso MIDI 1",
+		CCustomPopupMenu* midiRoot = menu.AddSubMenu(LL14(L"MIDI入力", L"MIDI In", L"Entrée MIDI", L"Ingresso MIDI",
+			L"Entrada MIDI", L"MIDI 입력", L"MIDI 输入", L"دخل MIDI", L"MIDI-вход", L"MIDI-Eingang",
+			L"Entrada MIDI", L"MIDI-ingang", L"Wejście MIDI", L"MIDI girişi"));
+		CCustomPopupMenu* in1 = midiRoot ? midiRoot->AddSubMenu(LL14(L"MIDI入力 1", L"MIDI In 1", L"Entrée MIDI 1", L"Ingresso MIDI 1",
 			L"Entrada MIDI 1", L"MIDI 입력 1", L"MIDI 输入 1", L"دخل MIDI 1", L"MIDI-вход 1", L"MIDI-Eingang 1",
-			L"Entrada MIDI 1", L"MIDI-ingang 1", L"Wejście MIDI 1", L"MIDI girişi 1"));
-		CCustomPopupMenu* in2 = menu.AddSubMenu(LL14(L"MIDI入力 2", L"MIDI In 2", L"Entrée MIDI 2", L"Ingresso MIDI 2",
+			L"Entrada MIDI 1", L"MIDI-ingang 1", L"Wejście MIDI 1", L"MIDI girişi 1")) : NULL;
+		CCustomPopupMenu* in2 = midiRoot ? midiRoot->AddSubMenu(LL14(L"MIDI入力 2", L"MIDI In 2", L"Entrée MIDI 2", L"Ingresso MIDI 2",
 			L"Entrada MIDI 2", L"MIDI 입력 2", L"MIDI 输入 2", L"دخل MIDI 2", L"MIDI-вход 2", L"MIDI-Eingang 2",
-			L"Entrada MIDI 2", L"MIDI-ingang 2", L"Wejście MIDI 2", L"MIDI girişi 2"));
+			L"Entrada MIDI 2", L"MIDI-ingang 2", L"Wejście MIDI 2", L"MIDI girişi 2")) : NULL;
+		CCustomPopupMenu* in3 = midiRoot ? midiRoot->AddSubMenu(LL14(L"MIDI入力 3", L"MIDI In 3", L"Entrée MIDI 3", L"Ingresso MIDI 3",
+			L"Entrada MIDI 3", L"MIDI 입력 3", L"MIDI 输入 3", L"دخل MIDI 3", L"MIDI-вход 3", L"MIDI-Eingang 3",
+			L"Entrada MIDI 3", L"MIDI-ingang 3", L"Wejście MIDI 3", L"MIDI girişi 3")) : NULL;
 		if (in1) in1->AddCheck(ID_VST_POP_MIDI1_NONE, none, cur0 == -1);
 		if (in2) in2->AddCheck(ID_VST_POP_MIDI2_NONE, none, cur1 == -1);
+		if (in3) in3->AddCheck(ID_VST_POP_MIDI3_NONE, none, cur2 == -1);
 		UINT nDev = midiInGetNumDevs();
 		if (nDev > (UINT)VST_MIDI_MENU_DEVS) nDev = (UINT)VST_MIDI_MENU_DEVS;
 		for (UINT i = 0; i < nDev; ++i) {
@@ -994,6 +1080,20 @@ void CVstWireCtrl::OnRButtonUp(UINT, CPoint pt)
 					d->AddCheck(ID_VST_POP_MIDI2_FIRST + i * 2 + 1, L"17-32ch", cur1 == (int)(i | 0x10000));
 				}
 			}
+			if (in3) {
+				CCustomPopupMenu* d = in3->AddSubMenu(caps.szPname);
+				if (d) {
+					d->AddCheck(ID_VST_POP_MIDI3_FIRST + i * 2, L"1-16ch", cur2 == (int)i);
+					d->AddCheck(ID_VST_POP_MIDI3_FIRST + i * 2 + 1, L"17-32ch", cur2 == (int)(i | 0x10000));
+				}
+			}
+		}
+		if (midiRoot) {
+			midiRoot->AddSeparator();
+			midiRoot->AddCheck(ID_VST_POP_THRU, LL14(L"メイン再生スルー", L"Main-playback thru", L"Traversée lecture",
+				L"Pass-through riproduzione", L"Paso de reproducción", L"메인 재생 스루", L"主播放直通", L"تمرير التشغيل الرئيسي",
+				L"Сквозн. осн. воспр.", L"Hauptwiedergabe-Thru", L"Passagem da reprodução", L"Hoofdweergave-thru",
+				L"Przelot odtwarzania", L"Ana çalma thru"), thruOn != 0);
 		}
 	}
 	ClientToScreen(&pt);
@@ -1003,21 +1103,45 @@ void CVstWireCtrl::OnRButtonUp(UINT, CPoint pt)
 	else if (cmd == ID_VST_POP_CLEAR && slot >= 0) ClearSlot(slot);
 	else if (cmd == ID_VST_POP_SAVE) m_owner->OnSave();
 	else if (cmd == ID_VST_POP_WAV) m_owner->OnWavClick();
+	else if (cmd == ID_VST_POP_MIDIMON) {
+		extern COggDlg* og;
+		if (og && ::IsWindow(og->GetSafeHwnd())) {
+			if (og->m_MidiMonitorDlg && ::IsWindow(og->m_MidiMonitorDlg->GetSafeHwnd())) {
+				og->m_MidiMonitorDlg->ShowWindow(SW_SHOW);
+				og->m_MidiMonitorDlg->SetForegroundWindow();
+			} else
+				og->PostMessage(WM_OGG_TOGGLE_SUBUI, 3, 0);
+		}
+	}
 	else if (cmd == ID_VST_POP_EDITOR && owner >= 0 && m_slots[owner] >= 0)
 		VstLiveEditorOpen(owner + 1);
-	else if (cmd == ID_VST_POP_MIDI1_NONE || cmd == ID_VST_POP_MIDI2_NONE ||
+	else if (cmd == ID_VST_POP_THRU) {
+		if (m_owner->m_thru.GetSafeHwnd()) {
+			const int on = (m_owner->m_thru.GetCurSel() >= 0
+				&& (int)m_owner->m_thru.GetItemData(m_owner->m_thru.GetCurSel()) == -2) ? 1 : 0;
+			m_owner->m_thru.SetCurSel(on ? 0 : 1);
+			m_owner->OnDeviceChange();
+		}
+	}
+	else if (cmd == ID_VST_POP_MIDI1_NONE || cmd == ID_VST_POP_MIDI2_NONE || cmd == ID_VST_POP_MIDI3_NONE ||
 		(cmd >= ID_VST_POP_MIDI1_FIRST && cmd < ID_VST_POP_MIDI1_FIRST + VST_MIDI_MENU_DEVS * 2) ||
-		(cmd >= ID_VST_POP_MIDI2_FIRST && cmd < ID_VST_POP_MIDI2_FIRST + VST_MIDI_MENU_DEVS * 2)) {
+		(cmd >= ID_VST_POP_MIDI2_FIRST && cmd < ID_VST_POP_MIDI2_FIRST + VST_MIDI_MENU_DEVS * 2) ||
+		(cmd >= ID_VST_POP_MIDI3_FIRST && cmd < ID_VST_POP_MIDI3_FIRST + VST_MIDI_MENU_DEVS * 2)) {
 		int combo = -1, data = -1;
 		if (cmd == ID_VST_POP_MIDI1_NONE) combo = 0;
 		else if (cmd == ID_VST_POP_MIDI2_NONE) combo = 1;
+		else if (cmd == ID_VST_POP_MIDI3_NONE) combo = 2;
 		else if (cmd >= ID_VST_POP_MIDI1_FIRST && cmd < ID_VST_POP_MIDI1_FIRST + VST_MIDI_MENU_DEVS * 2) {
 			combo = 0;
 			const int idx = (int)(cmd - ID_VST_POP_MIDI1_FIRST);
 			data = (idx / 2) | ((idx & 1) << 16);
-		} else {
+		} else if (cmd >= ID_VST_POP_MIDI2_FIRST && cmd < ID_VST_POP_MIDI2_FIRST + VST_MIDI_MENU_DEVS * 2) {
 			combo = 1;
 			const int idx = (int)(cmd - ID_VST_POP_MIDI2_FIRST);
+			data = (idx / 2) | ((idx & 1) << 16);
+		} else {
+			combo = 2;
+			const int idx = (int)(cmd - ID_VST_POP_MIDI3_FIRST);
 			data = (idx / 2) | ((idx & 1) << 16);
 		}
 		int sel = 0;
@@ -1039,8 +1163,8 @@ CVstHostDlg::CVstHostDlg(CWnd* parent)
 	memset(m_presets, 0, sizeof(m_presets));
 	memset(m_slots, -1, sizeof(m_slots));
 	memset(m_midiHandles, 0, sizeof(m_midiHandles));
-	m_midiDestMask[0] = m_midiDestMask[1] = 0;
-	m_midiF5Port[0] = m_midiF5Port[1] = 0xFF;
+	memset(m_midiDestMask, 0, sizeof(m_midiDestMask));
+	memset(m_midiF5Port, 0xFF, sizeof(m_midiF5Port));
 	memset(m_pcHeldNote, 0, sizeof(m_pcHeldNote));
 	InitializeCriticalSection(&m_wavLock);
 }
@@ -1081,6 +1205,7 @@ BEGIN_MESSAGE_MAP(CVstHostDlg, CCustomBlurDialogBase)
 	ON_CBN_SELCHANGE(IDC_VST_MIDI1, OnDeviceChange)
 	ON_CBN_SELCHANGE(IDC_VST_MIDI2, OnDeviceChange)
 	ON_CBN_SELCHANGE(IDC_VST_MIDI3, OnDeviceChange)
+	ON_CBN_SELCHANGE(IDC_VST_THRU, OnDeviceChange)
 	ON_CBN_SELCHANGE(IDC_VST_OUT, OnDeviceChange)
 	ON_WM_SIZE()
 	ON_WM_DESTROY()
@@ -1125,6 +1250,11 @@ BOOL CVstHostDlg::OnInitDialog()
 	m_pluginFilter.AddString(LL14(L"すべて", L"All plug-ins", L"Tous", L"Tutti", L"Todos", L"모든 플러그인", L"全部插件",
 		L"كل الإضافات", L"Все плагины", L"Alle Plug-ins", L"Todos", L"Alle plug-ins", L"Wszystkie", L"Tüm eklentiler"));
 	m_pluginFilter.SetCurSel(0);
+	m_thru.Create(WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_VSCROLL |
+		CBS_DROPDOWNLIST | CBS_OWNERDRAWVARIABLE | CBS_HASSTRINGS,
+		CRect(8, 72, 210, 300), this, IDC_VST_THRU);
+	m_thru.SetFont(GetFont());
+	m_thru.SetAeroMode(FALSE);
 
 	const LPCTSTR labels[LABEL_COUNT] = {
 		LL14(L"プリセット", L"Preset", L"Préréglage", L"Preset", L"Preajuste", L"프리셋", L"预设", L"إعداد مسبق",
@@ -1135,6 +1265,9 @@ BOOL CVstHostDlg::OnInitDialog()
 		LL14(L"MIDI入力 2", L"MIDI In 2", L"Entrée MIDI 2", L"Ingresso MIDI 2", L"Entrada MIDI 2", L"MIDI 입력 2",
 			L"MIDI 输入 2", L"دخل MIDI 2", L"MIDI-вход 2", L"MIDI-Eingang 2", L"Entrada MIDI 2", L"MIDI-ingang 2",
 			L"Wejście MIDI 2", L"MIDI girişi 2"),
+		LL14(L"MIDI入力 3", L"MIDI In 3", L"Entrée MIDI 3", L"Ingresso MIDI 3", L"Entrada MIDI 3", L"MIDI 입력 3",
+			L"MIDI 输入 3", L"دخل MIDI 3", L"MIDI-вход 3", L"MIDI-Eingang 3", L"Entrada MIDI 3", L"MIDI-ingang 3",
+			L"Wejście MIDI 3", L"MIDI girişi 3"),
 		LL14(L"メイン再生", L"Main play", L"Lecture principale", L"Riproduzione principale", L"Reproducción principal", L"메인 재생",
 			L"主播放", L"التشغيل الرئيسي", L"Основное воспр.", L"Hauptwiedergabe", L"Reprodução principal", L"Hoofdweergave",
 			L"Odtwarzanie główne", L"Ana çalma"),
@@ -1228,11 +1361,25 @@ BOOL CVstHostDlg::OnInitDialog()
 			L"Tweede MIDI-ingang. Kies een andere band (1-16ch / 17-32ch) om toetsenborden over partbanken te verdelen",
 			L"Drugie wejście MIDI. Inny pas (1-16ch / 17-32ch) niż wejście 1 rozdziela klawiatury na banki partii",
 			L"İkinci MIDI girişi. 1'den farklı bant (1-16ch / 17-32ch) seçerek klavyeleri bölüm bantlarına ayırır"));
-		m_tooltip.AddTool(&m_midiIn[2], LL14(L"プレイヤーで鳴っている音をこのホストへ回します。プレイヤー本体の出力は止まり、音はここの音声出力からだけ出ます。MIDIならSMFも鍵盤と合流します", L"Routes the player's current audio into this host. Player speakers go silent; listen from this host's audio output. MIDI SMF also merges with the keyboards",
-			L"Mélange le son du lecteur dans cet hôte. Le SMF MIDI rejoint aussi les claviers", L"Mescola l'audio del lettore in questo host. Lo SMF MIDI si unisce anche alle tastiere", L"Mezcla el audio del reproductor en este host. El SMF MIDI también se une a los teclados",
-			L"플레이어에서 나는 소리를 이 호스트 믹스에 섞습니다. MIDI면 SMF도 건반과 합류합니다", L"将播放器正在发出的声音混入本主机。若是 MIDI，SMF 也会与键盘合流", L"يمزج صوت المشغّل في هذا المضيف. إن كان MIDI ينضم SMF أيضاً إلى اللوحات",
-			L"Смешивает звук плеера в микс хоста. Для MIDI SMF тоже сливается с клавиатурами", L"Mischt den Playerklang in diesen Host. Bei MIDI kommt das SMF zu den Keyboards", L"Mistura o áudio do leitor neste host. Se for MIDI, o SMF junta-se também aos teclados",
-			L"Mengt het geluid van de speler in deze host. Bij MIDI voegt de SMF zich bij de toetsenborden", L"Miesza dźwięk odtwarzacza w ten host. Przy MIDI SMF też łączy się z klawiaturami", L"Çalıcının sesini bu hosta karıştırır. MIDI ise SMF de klavyelerle birleşir"));
+		m_tooltip.AddTool(&m_midiIn[2], LL14(L"3台目の MIDI 入力。1・2台目と同じく「1-16ch」（パート1–16）と「17-32ch」（パート17–32）から選びます。同じ機器を複数口に当てると Super-MPU のように 32 パートへ届きます",
+			L"Third MIDI input. Same as In 1/2: pick 1-16ch (parts 1–16) or 17-32ch (parts 17–32). Assigning the same device to several ports reaches 32 parts like Super-MPU",
+			L"3e entrée MIDI. Comme In 1/2 : 1-16ch (parties 1–16) ou 17-32ch (17–32). Le même périphérique sur plusieurs ports atteint 32 parties comme Super-MPU",
+			L"Terzo ingresso MIDI. Come In 1/2: 1-16ch (parti 1–16) o 17-32ch (17–32). Lo stesso dispositivo su più porte raggiunge 32 parti come Super-MPU",
+			L"Tercera entrada MIDI. Como In 1/2: 1-16ch (partes 1–16) o 17-32ch (17–32). El mismo dispositivo en varios puertos llega a 32 partes como Super-MPU",
+			L"세 번째 MIDI 입력. 1·2번과 같이 1-16ch(파트 1–16) 또는 17-32ch(17–32)를 고릅니다. 같은 장치를 여러 포트에 두면 Super-MPU처럼 32파트로 갑니다",
+			L"第三 MIDI 输入。与 1、2 号相同：选 1-16ch（声部1–16）或 17-32ch（17–32）。同一设备接到多个口即可像 Super-MPU 送到 32 声部",
+			L"دخل MIDI ثالث. مثل 1/2: 1-16ch (الأجزاء 1–16) أو 17-32ch (17–32). نفس الجهاز على عدة منافذ يصل إلى 32 جزءاً مثل Super-MPU",
+			L"Третий MIDI-вход. Как 1/2: 1-16ch (партии 1–16) или 17-32ch (17–32). Одно устройство на несколько портов даёт 32 партии, как Super-MPU",
+			L"Dritter MIDI-Eingang. Wie In 1/2: 1-16ch (Parts 1–16) oder 17-32ch (17–32). Dasselbe Gerät auf mehreren Ports erreicht 32 Parts wie Super-MPU",
+			L"Terceira entrada MIDI. Como In 1/2: 1-16ch (partes 1–16) ou 17-32ch (17–32). O mesmo dispositivo em várias portas chega a 32 partes como Super-MPU",
+			L"Derde MIDI-ingang. Zoals In 1/2: 1-16ch (partijen 1–16) of 17-32ch (17–32). Hetzelfde apparaat op meerdere poorten bereikt 32 partijen zoals Super-MPU",
+			L"Trzecie wejście MIDI. Jak 1/2: 1-16ch (partie 1–16) lub 17-32ch (17–32). To samo urządzenie na kilku portach daje 32 partie jak Super-MPU",
+			L"Üçüncü MIDI girişi. 1/2 ile aynı: 1-16ch (bölüm 1–16) veya 17-32ch (17–32). Aynı aygıtı birkaç porta bağlamak Super-MPU gibi 32 bölüme gider"));
+		m_tooltip.AddTool(&m_thru, LL14(L"プレイヤーで鳴っている音をこのホストへ回します。プレイヤー本体の出力は止まり、音はここの音声出力からだけ出ます。MIDIならSMFも鍵盤と合流します。MIDI入力 1–3 と同時に使えます", L"Routes the player's current audio into this host. Player speakers go silent; listen from this host's audio output. MIDI SMF also merges with the keyboards. Can be used together with MIDI In 1–3",
+			L"Mélange le son du lecteur dans cet hôte. Le SMF MIDI rejoint aussi les claviers. Utilisable avec MIDI In 1–3", L"Mescola l'audio del lettore in questo host. Lo SMF MIDI si unisce anche alle tastiere. Usabile insieme a MIDI In 1–3", L"Mezcla el audio del reproductor en este host. El SMF MIDI también se une a los teclados. Se puede usar junto con MIDI In 1–3",
+			L"플레이어에서 나는 소리를 이 호스트 믹스에 섞습니다. MIDI면 SMF도 건반과 합류합니다. MIDI 입력 1–3과 함께 쓸 수 있습니다", L"将播放器正在发出的声音混入本主机。若是 MIDI，SMF 也会与键盘合流。可与 MIDI 输入 1–3 同时使用", L"يمزج صوت المشغّل في هذا المضيف. إن كان MIDI ينضم SMF أيضاً إلى اللوحات. يمكن استخدامه مع دخل MIDI 1–3",
+			L"Смешивает звук плеера в микс хоста. Для MIDI SMF тоже сливается с клавиатурами. Можно вместе с MIDI In 1–3", L"Mischt den Playerklang in diesen Host. Bei MIDI kommt das SMF zu den Keyboards. Zusammen mit MIDI In 1–3 nutzbar", L"Mistura o áudio do leitor neste host. Se for MIDI, o SMF junta-se também aos teclados. Pode usar junto com MIDI In 1–3",
+			L"Mengt het geluid van de speler in deze host. Bij MIDI voegt de SMF zich bij de toetsenborden. Samen met MIDI In 1–3 te gebruiken", L"Miesza dźwięk odtwarzacza w ten host. Przy MIDI SMF też łączy się z klawiaturami. Można razem z MIDI In 1–3", L"Çalıcının sesini bu hosta karıştırır. MIDI ise SMF de klavyelerle birleşir. MIDI In 1–3 ile birlikte kullanılabilir"));
 		m_tooltip.AddTool(&m_vol, LL14(L"このホストの出力音量（WAV出力にもかかります）", L"This host's output volume (also applied to WAV out)",
 			L"Volume de sortie de cet hôte (aussi sur la sortie WAV)", L"Volume di uscita di questo host (vale anche per WAV)", L"Volumen de salida de este host (también en WAV)",
 			L"이 호스트의 출력 음량(WAV 출력에도 적용)", L"本主机的输出音量（也作用于 WAV 输出）", L"مستوى صوت خرج هذا المضيف (يُطبَّق أيضاً على WAV)",
@@ -1303,8 +1450,10 @@ void CVstHostDlg::PcSendShort(DWORD msg)
 {
 	if (InterlockedCompareExchange(&m_audioRunning, 0, 0) != 0)
 		MidiFifoPush(0, msg);
-	else
+	else {
 		VstLiveMidiShort(0, msg);
+		VstLiveTapPushShort(0, msg);
+	}
 }
 
 void CVstHostDlg::PcKeyReleaseAll()
@@ -1393,10 +1542,11 @@ void CVstHostDlg::LayoutChildren(int cx, int cy)
 	m_rescan.SetWindowPos(NULL, cx - pad - 82, top, 82, rowH, SWP_NOZORDER);
 	const int y2 = top + rowH + gap + lblH + lblGap;
 	const int volW = 108, pctW = 36;
-	const int comboW = max(72, (cx - pad * 2 - gap * 5 - volW - pctW) / 5);
+	const int comboW = max(72, (cx - pad * 2 - gap * 6 - volW - pctW) / 6);
 	const int xMidi = pad;
-	const int xOut = pad + 3 * (comboW + gap);
-	const int xVol = pad + 4 * (comboW + gap);
+	const int xThru = pad + 3 * (comboW + gap);
+	const int xOut = pad + 4 * (comboW + gap);
+	const int xVol = pad + 5 * (comboW + gap);
 	const int xFilt = xVol + volW + pctW + gap;
 	if (m_labels[1].GetSafeHwnd())
 		m_labels[1].SetWindowPos(NULL, xMidi + 1, y2 - lblH - lblGap, comboW, lblH, SWP_NOZORDER);
@@ -1405,13 +1555,17 @@ void CVstHostDlg::LayoutChildren(int cx, int cy)
 	if (m_labels[3].GetSafeHwnd())
 		m_labels[3].SetWindowPos(NULL, xMidi + 2 * (comboW + gap) + 1, y2 - lblH - lblGap, comboW, lblH, SWP_NOZORDER);
 	if (m_labels[4].GetSafeHwnd())
-		m_labels[4].SetWindowPos(NULL, xOut + 1, y2 - lblH - lblGap, comboW, lblH, SWP_NOZORDER);
+		m_labels[4].SetWindowPos(NULL, xThru + 1, y2 - lblH - lblGap, comboW, lblH, SWP_NOZORDER);
 	if (m_labels[5].GetSafeHwnd())
-		m_labels[5].SetWindowPos(NULL, xVol + 1, y2 - lblH - lblGap, volW + pctW, lblH, SWP_NOZORDER);
+		m_labels[5].SetWindowPos(NULL, xOut + 1, y2 - lblH - lblGap, comboW, lblH, SWP_NOZORDER);
 	if (m_labels[6].GetSafeHwnd())
-		m_labels[6].SetWindowPos(NULL, xFilt + 1, y2 - lblH - lblGap, comboW, lblH, SWP_NOZORDER);
+		m_labels[6].SetWindowPos(NULL, xVol + 1, y2 - lblH - lblGap, volW + pctW, lblH, SWP_NOZORDER);
+	if (m_labels[7].GetSafeHwnd())
+		m_labels[7].SetWindowPos(NULL, xFilt + 1, y2 - lblH - lblGap, comboW, lblH, SWP_NOZORDER);
 	for (int i = 0; i < 3; ++i)
 		m_midiIn[i].SetWindowPos(NULL, xMidi + i * (comboW + gap), y2, comboW, 220, SWP_NOZORDER);
+	if (m_thru.GetSafeHwnd())
+		m_thru.SetWindowPos(NULL, xThru, y2, comboW, 220, SWP_NOZORDER);
 	m_speakerOut.SetWindowPos(NULL, xOut, y2, comboW, 220, SWP_NOZORDER);
 	if (m_vol.GetSafeHwnd())
 		m_vol.SetWindowPos(NULL, xVol, y2, volW, rowH, SWP_NOZORDER);
@@ -1450,7 +1604,7 @@ void CVstHostDlg::FillDevices()
 		L" 1-16ch", L" 1-16ch", L" 1-16ch", L" 1-16ch", L" 1-16ch", L" 1-16ch", L" 1-16ch", L" 1-16ch");
 	const wchar_t* suf32 = LL14(L" 17-32ch", L" 17-32ch", L" 17-32ch", L" 17-32ch", L" 17-32ch", L" 17-32ch",
 		L" 17-32ch", L" 17-32ch", L" 17-32ch", L" 17-32ch", L" 17-32ch", L" 17-32ch", L" 17-32ch", L" 17-32ch");
-	for (int p = 0; p < 2; ++p) {
+	for (int p = 0; p < 3; ++p) {
 		m_midiIn[p].ResetContent();
 		int n = m_midiIn[p].AddString(none); m_midiIn[p].SetItemData(n, (DWORD_PTR)-1);
 		for (UINT i = 0; i < midiInGetNumDevs(); ++i) {
@@ -1481,14 +1635,31 @@ void CVstHostDlg::FillDevices()
 			m_midiIn[p].SetDroppedWidth(mw);
 		}
 	}
-	m_midiIn[2].ResetContent();
-	int n3 = m_midiIn[2].AddString(none); m_midiIn[2].SetItemData(n3, (DWORD_PTR)-1);
-	n3 = m_midiIn[2].AddString(LL14(L"メイン再生スルー", L"Main-playback thru", L"Traversée lecture", L"Pass-through riproduzione",
+	m_thru.ResetContent();
+	int n3 = m_thru.AddString(none); m_thru.SetItemData(n3, (DWORD_PTR)-1);
+	n3 = m_thru.AddString(LL14(L"メイン再生スルー", L"Main-playback thru", L"Traversée lecture", L"Pass-through riproduzione",
 		L"Paso de reproducción", L"메인 재생 스루", L"主播放直通", L"تمرير التشغيل الرئيسي",
 		L"Сквозн. осн. воспр.", L"Hauptwiedergabe-Thru", L"Passagem da reprodução", L"Hoofdweergave-thru",
 		L"Przelot odtwarzania", L"Ana çalma thru"));
-	m_midiIn[2].SetItemData(n3, (DWORD_PTR)-2);
-	m_midiIn[2].SetCurSel(0);
+	m_thru.SetItemData(n3, (DWORD_PTR)-2);
+	m_thru.SetCurSel(0);
+	{
+		CClientDC dc(&m_thru);
+		int mw = 0;
+		CFont* old = dc.SelectObject(m_thru.GetFont());
+		for (int i = 0; i < m_thru.GetCount(); ++i) {
+			CString s;
+			m_thru.GetLBText(i, s);
+			const int w = dc.GetTextExtent(s).cx;
+			if (w > mw) mw = w;
+		}
+		if (old) dc.SelectObject(old);
+		CRect wr;
+		m_thru.GetWindowRect(&wr);
+		mw += GetSystemMetrics(SM_CXVSCROLL) + 24;
+		if (mw < wr.Width()) mw = wr.Width();
+		m_thru.SetDroppedWidth(mw);
+	}
 	m_speakerOut.ResetContent();
 	int n = m_speakerOut.AddString(LL14(L"(既定のスピーカー)", L"(Default speaker)", L"(Haut-parleur par défaut)",
 		L"(Altoparlante predefinito)", L"(Altavoz predeterminado)", L"(기본 스피커)", L"(默认扬声器)", L"(مكبر الصوت الافتراضي)",
@@ -1516,37 +1687,53 @@ BOOL CVstHostDlg::PluginIsMulti(int scanIndex) const
 	return (pi && pi->isMultiTimbral) ? TRUE : FALSE;
 }
 
+void CVstHostDlg::PartPluginName(int part0to31, wchar_t* out, int outChars) const
+{
+	if (!out || outChars <= 0) return;
+	out[0] = 0;
+	if (part0to31 < 0 || part0to31 >= 32) return;
+	int scan = m_slots[part0to31];
+	if (scan < 0) {
+		for (int i = part0to31 - 1, b0 = (part0to31 / 16) * 16; i >= b0; --i) {
+			if (m_slots[i] < 0) continue;
+			scan = PluginIsMulti(m_slots[i]) ? m_slots[i] : -1;
+			break;
+		}
+	}
+	if (scan >= 0) {
+		CString s = PluginName(scan);
+		wcsncpy_s(out, outChars, s, _TRUNCATE);
+	}
+}
+
 void CVstHostDlg::RebuildPluginList()
 {
 	CString filter;
 	m_pluginFilter.GetWindowText(filter); filter.MakeLower();
 	if (m_pluginFilter.GetCurSel() == 0) filter.Empty();
 
-	// A plug-in that stayed silent although it should have been ready to play is
-	// a broken install, and offering it only wastes the user's time. Samplers
-	// that are merely waiting for a patch stay listed. If the probe never ran at
-	// all, listing nothing would be worse than listing unproven entries.
-	int audibleKnown = 0;
-	for (int i = 0; i < VstScanGetCount(); ++i) {
-		const VstPluginInfo* pi = VstScanGet(i);
-		if (pi && pi->isInstrument && pi->isLiveOk && pi->isAudible) {
-			audibleKnown = 1;
-			break;
-		}
-	}
-
+	// Silent after a real note probe is a broken install or an effect that
+	// should not occupy a part slot. Samplers waiting for a patch stay listed.
 	CString names[100]; int indices[100]; int count = 0;
 	for (int i = 0; i < VstScanGetCount() && count < 100; ++i) {
 		const VstPluginInfo* pi = VstScanGet(i);
 		if (!pi || !pi->isInstrument || !pi->isLiveOk) continue;
-		if (audibleKnown && pi->isAudible == 0) continue;
-		CString n(pi->name), low(n); low.MakeLower();
+		if (pi->isAudible == 0) continue;
+		CString n(pi->name);
+		CString tags;
+		if (pi->arch == 64) tags += L"<x64>";
+		else if (pi->arch == 32) tags += L"<x86>";
+		if (pi->isMultiTimbral) tags += L"[M16ch]";
+		if (pi->isAudible == 2)
+			tags += LL14(L"<音色選択>", L"<patch>", L"<timbre>", L"<patch>",
+				L"<timbre>", L"<음색선택>", L"<选音色>", L"<رقعة>",
+				L"<патч>", L"<Patch>", L"<timbre>", L"<patch>",
+				L"<barwa>", L"<yama>");
+		CString shown = n;
+		if (!tags.IsEmpty()) shown += L" " + tags;
+		CString low(shown); low.MakeLower();
 		if (!filter.IsEmpty() && low.Find(filter) < 0) continue;
-		names[count] = n;
-		if (pi->isMultiTimbral) names[count] = CString(L"[M] ") + n;
-		// Loads and takes notes, but needs a patch picked in its own browser
-		// before anything is heard.
-		if (pi->isAudible == 2) names[count] += L" (音色選択)";
+		names[count] = shown;
 		indices[count] = i; count++;
 	}
 	m_wire.SetPlugins(names, indices, count);
@@ -1564,12 +1751,34 @@ CString CVstHostDlg::DataPath() const
 void CVstHostDlg::LoadPresets()
 {
 	m_presetCount = 0;
+	memset(m_presets, 0, sizeof(m_presets));
 	CFile f;
 	if (f.Open(DataPath(), CFile::modeRead | CFile::shareDenyWrite)) {
-		VstWireFile data = {};
-		if (f.Read(&data, sizeof(data)) >= sizeof(DWORD) * 2 && data.magic == VST_WIRE_MAGIC) {
-			m_presetCount = min(100, (int)data.count);
-			memcpy(m_presets, data.presets, sizeof(Preset) * m_presetCount);
+		DWORD magic = 0, count = 0;
+		if (f.Read(&magic, sizeof(magic)) == sizeof(magic) &&
+			f.Read(&count, sizeof(count)) == sizeof(count) &&
+			(magic == VST_WIRE_MAGIC1 || magic == VST_WIRE_MAGIC2)) {
+			m_presetCount = min(100, (int)count);
+			if (magic == VST_WIRE_MAGIC2) {
+				for (int i = 0; i < m_presetCount; ++i) {
+					if (f.Read(&m_presets[i], sizeof(Preset)) != sizeof(Preset)) {
+						m_presetCount = i;
+						break;
+					}
+				}
+			} else {
+				const UINT oldSz = (UINT)offsetof(Preset, midiThru);
+				for (int i = 0; i < m_presetCount; ++i) {
+					if (f.Read(&m_presets[i], oldSz) != oldSz) {
+						m_presetCount = i;
+						break;
+					}
+					if (m_presets[i].midiIn[2] == -2) {
+						m_presets[i].midiThru = 1;
+						m_presets[i].midiIn[2] = -1;
+					}
+				}
+			}
 		}
 		f.Close();
 	}
@@ -1580,7 +1789,7 @@ void CVstHostDlg::LoadPresets()
 BOOL CVstHostDlg::SavePresets()
 {
 	VstWireFile data = {};
-	data.magic = VST_WIRE_MAGIC; data.count = m_presetCount;
+	data.magic = VST_WIRE_MAGIC2; data.count = m_presetCount;
 	memcpy(data.presets, m_presets, sizeof(Preset) * m_presetCount);
 	CFile f;
 	if (!f.Open(DataPath(), CFile::modeCreate | CFile::modeWrite | CFile::shareExclusive)) return FALSE;
@@ -1603,6 +1812,10 @@ void CVstHostDlg::CaptureCurrent(Preset& p, LPCTSTR name)
 		int sel = m_midiIn[i].GetCurSel();
 		p.midiIn[i] = sel >= 0 ? (int)m_midiIn[i].GetItemData(sel) : -1;
 	}
+	{
+		int sel = m_thru.GetCurSel();
+		p.midiThru = (sel >= 0 && (int)m_thru.GetItemData(sel) == -2) ? 1 : 0;
+	}
 	int outSel = m_speakerOut.GetCurSel();
 	p.outDev = outSel >= 0 ? (int)m_speakerOut.GetItemData(outSel) : WAVE_MAPPER;
 	m_wire.GetSlots(m_slots);
@@ -1622,11 +1835,18 @@ void CVstHostDlg::ApplyPreset(int index)
 	const Preset& p = m_presets[index];
 	for (int port = 0; port < 3; ++port) {
 		int want = p.midiIn[port];
-		if (port == 2 && want >= 0) want = -2;
+		if (want == -2) want = -1;
 		int sel = 0;
 		for (int i = 0; i < m_midiIn[port].GetCount(); ++i)
 			if ((int)m_midiIn[port].GetItemData(i) == want) { sel = i; break; }
 		m_midiIn[port].SetCurSel(sel);
+	}
+	{
+		const int wantThru = (p.midiThru || p.midiIn[2] == -2) ? -2 : -1;
+		int sel = 0;
+		for (int i = 0; i < m_thru.GetCount(); ++i)
+			if ((int)m_thru.GetItemData(i) == wantThru) { sel = i; break; }
+		m_thru.SetCurSel(sel);
 	}
 	int outSel = 0;
 	for (int i = 0; i < m_speakerOut.GetCount(); ++i)
@@ -1750,7 +1970,7 @@ void CALLBACK CVstHostDlg::MidiInProc(HMIDIIN, UINT msg, DWORD_PTR instance, DWO
 {
 	CVstHostDlg* self = (CVstHostDlg*)(instance & ~(DWORD_PTR)3);
 	const int slot = (int)(instance & 3);
-	if (!self || slot < 0 || slot > 1) return;
+	if (!self || slot < 0 || slot > 2) return;
 	const bool queued = InterlockedCompareExchange(&self->m_audioRunning, 0, 0) != 0;
 	BYTE mask = self->m_midiDestMask[slot];
 	if (msg == MIM_DATA) {
@@ -1791,8 +2011,8 @@ void CALLBACK CVstHostDlg::MidiInProc(HMIDIIN, UINT msg, DWORD_PTR instance, DWO
 
 void CVstHostDlg::BindThruSong()
 {
-	int sel = m_midiIn[2].GetCurSel();
-	int dev = sel >= 0 ? (int)m_midiIn[2].GetItemData(sel) : -1;
+	int sel = m_thru.GetCurSel();
+	int dev = sel >= 0 ? (int)m_thru.GetItemData(sel) : -1;
 	if (dev != -2) {
 		VstLiveThruSet(0);
 		return;
@@ -1899,11 +2119,11 @@ void CVstHostDlg::StartMidi()
 {
 	StopMidi();
 	MidiFifoInit();
-	m_midiDestMask[0] = m_midiDestMask[1] = 0;
-	m_midiF5Port[0] = m_midiF5Port[1] = 0xFF;
-	UINT openedDev[2];
-	openedDev[0] = openedDev[1] = 0xFFFFFFFFu;
-	for (int p = 0; p < 2; ++p) {
+	memset(m_midiDestMask, 0, sizeof(m_midiDestMask));
+	memset(m_midiF5Port, 0xFF, sizeof(m_midiF5Port));
+	UINT openedDev[3];
+	openedDev[0] = openedDev[1] = openedDev[2] = 0xFFFFFFFFu;
+	for (int p = 0; p < 3; ++p) {
 		int sel = m_midiIn[p].GetCurSel();
 		int data = sel >= 0 ? (int)m_midiIn[p].GetItemData(sel) : -1;
 		if (data < 0) continue;
@@ -1920,14 +2140,15 @@ void CVstHostDlg::StartMidi()
 				mask |= 2;
 		}
 		int slot = -1;
-		for (int q = 0; q < 2; ++q)
+		for (int q = 0; q < 3; ++q)
 			if (m_midiHandles[q] && openedDev[q] == dev) { slot = q; break; }
 		if (slot >= 0) {
 			m_midiDestMask[slot] = (BYTE)(m_midiDestMask[slot] | mask);
 			continue;
 		}
-		slot = m_midiHandles[0] ? 1 : 0;
-		if (m_midiHandles[slot]) continue;
+		for (int q = 0; q < 3; ++q)
+			if (!m_midiHandles[q]) { slot = q; break; }
+		if (slot < 0) continue;
 		if (midiInOpen(&m_midiHandles[slot], dev, (DWORD_PTR)&MidiInProc,
 			((DWORD_PTR)this) | (DWORD_PTR)slot, CALLBACK_FUNCTION) != MMSYSERR_NOERROR)
 			continue;
@@ -1968,8 +2189,8 @@ void CVstHostDlg::StopMidi()
 		midiInClose(m_midiHandles[i]);
 		m_midiHandles[i] = NULL;
 	}
-	m_midiDestMask[0] = m_midiDestMask[1] = 0;
-	m_midiF5Port[0] = m_midiF5Port[1] = 0xFF;
+	memset(m_midiDestMask, 0, sizeof(m_midiDestMask));
+	memset(m_midiF5Port, 0xFF, sizeof(m_midiF5Port));
 	MidiFifoClear();
 	VstLiveAllNotesOff();
 	VstLiveThruSet(0);

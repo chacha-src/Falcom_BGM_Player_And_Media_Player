@@ -21,6 +21,7 @@
 <li>Media-player banner right-click → Window → MIDI monitor…</li>
 <li>Playlist right-click → Window → Open MIDI monitor</li>
 <li><a href="pianoroll.htm">Seeing notes on the piano roll</a> / analyzer / EQ right-click → Open → MIDI monitor</li>
+<li><a href="vst.htm">VST host</a> wiring canvas right-click → Open MIDI monitor</li>
 <li>Command palette: “MIDI monitor”</li>
 </ul>
 <div class="tip"><span class="label">Tip</span>
@@ -34,7 +35,9 @@
 <li>SYS (GM / GS / XG), INSERTION 1 / 2</li>
 </ul>
 <h2>The 32-row channel table</h2>
-<p>Each row is one part. The top 16 rows are the first half; the bottom 16 are the second. Drums follow the song (channel 10 is not always drums).</p>
+<p>Each row is one part. The top 16 rows are the first half; the bottom 16 are the second. Drums follow the song (channel 10 is not always drums). During VST playback, GS Reset is followed by rhythm mode on A10/B10; XG songs get a drum bank on channel 10. See <a href="vst-midi.htm">Playing .mid through a VST</a>.</p>
+<p>While catching up, only the last SysEx per address and the last CC of each type are applied. A dump that walks all 32 channels several times is collapsed to the latest state at the play position.</p>
+<p>Every 16ms only rows whose picture changed are repainted: a bar when it moves by a pixel, the mini keyboard only when the held notes change. Even with all 32 parts sounding, the table is not fully repainted.</p>
 <dl>
 <dt>PC# / BNK / Map / Instrument</dt>
 <dd>Program, bank, GS/XG map, and instrument name (from the built-in SASAMI GS/XG tables).</dd>
@@ -47,6 +50,13 @@
 <dt>Keyboard (mini keys on the right)</dt>
 <dd>Keys that are down light up. Click a key to play that part through the current playback path.</dd>
 </dl>
+<h2>Colors</h2>
+<ul>
+<li>Channels that have not yet received a note, CC, or SysEx stay gray. Clicking a mini key to play restores the white / off-white stripe.</li>
+<li>Drum parts tint the whole row (CH#, name, parameters, and keys) a warm color.</li>
+<li>A01–B16 light green while sounding, then fade.</li>
+<li>An instrument change ambers that cell; Vol/Pan and other cells flash and return to the row color. Catch-up also lights the cells that still hold the last value.</li>
+</ul>
 <h2>Playing from the mini keyboard and sliders</h2>
 <p>Clicks on the mini keyboard and drags on volume actually reach the sound, not just the display. During <a href="vst-midi.htm">Playing .mid through a VST</a>, they enter the same module as the song. Clicking a key does not rewind the song. When playback uses Windows MIDI, the same output is used. During <a href="kpi.htm">Adding formats with KPI plug-ins</a> MIDI playback, keys go to the MIDI-out device in Rendering.</p>
 <h2>View modes (2D / Soft 3D)</h2>
@@ -66,25 +76,27 @@
 <dd>Copies the table as text.</dd>
 <dt>Reload MIDI</dt>
 <dd>Reloads the current file's MIDI.</dd>
+<dt>Drum mode</dt>
+<dd>Sends GS USE FOR RHYTHM to this part, or to A10 and B10. XG songs get a drum bank instead.</dd>
 <dt>Tone map</dt>
 <dd>Auto / GS / XG and similar tables. The song title can pick a matching table.</dd>
 <dt>Open</dt>
-<dd>Equalizer / piano roll / analyzer / this operation guide.</dd>
+<dd>Equalizer / piano roll / analyzer / VST host / this operation guide.</dd>
 </dl>
 <h2>Timing vs what you hear</h2>
-<p>When playing through <a href="vst-midi.htm">Playing .mid through a VST</a>, the monitor may lag slightly so it stays close to the audible position (plugin latency). If the picture feels behind the sound, that is intentional.</p>
+<p>When playing through <a href="vst-midi.htm">Playing .mid through a VST</a>, note display may lag slightly so it stays close to the audible position (plugin latency and output lead). Until the first note appears, SysEx/CC are not delayed so an opening dump is not dragged by that lag. After the first note, SysEx/CC follow the audible position too.</p>
 <h2>How it relates to other features</h2>
 <ul>
 <li><a href="pianoroll.htm">Seeing notes on the piano roll</a> — notes over time; the monitor is channel state.</li>
 <li><a href="vst-midi.htm">Playing .mid through a VST</a> — watch GS/XG VST playback here.</li>
-<li><a href="vst.htm">Playing instruments with the VST host</a> — live keyboard hosting; a different window.</li>
+<li><a href="vst.htm">Playing instruments with the VST host</a> — live keyboard hosting. Opening the host links its MIDI in and mini keys to this monitor.</li>
 <li><a href="midi.htm">Controlling the player with a MIDI keyboard</a> — map transport / EQ to hardware.</li>
 </ul>
 <div class="tip"><span class="label">Tip</span>
 <p>Press <b>?</b> for the in-window guide. See also <a href="help-buttons.htm">The “?” guide on every window</a>.</p>
 </div>
 <div class="note"><span class="label">Please note</span>
-<p>Audio files (mp3 and so on) have no MIDI events, so the monitor stays idle. It is for SMF playback only.</p>
+<p>Audio files (mp3 and so on) have no MIDI events, so the monitor stays idle. Use it during SMF playback, or when the <a href="vst.htm">VST host</a> is taking keyboard / MIDI in.</p>
 </div>
 <div class="related"><span class="label">See also</span><ul><li><a href="vst-midi.htm">Playing .mid through a VST</a></li><li><a href="pianoroll.htm">Seeing the music on a piano roll</a></li><li><a href="vst.htm">Playing instruments with the VST host</a></li><li><a href="midi.htm">Controlling Raira from a MIDI keyboard</a></li><li><a href="render.htm">Rendering settings</a></li></ul></div>
 

@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include "afxwin.h"
 #include "CCustomControl.h"
 #include "resource.h"
@@ -89,7 +89,7 @@ public:
 
 	ID3D11Buffer* m_cbFrame;
 	ID3D11Buffer* m_vbDyn;
-	enum { S3R_MESH_PARTS = 8 };
+	enum { S3R_MESH_PARTS = 4096 };
 	ID3D11Buffer* m_vbTerr[S3R_MESH_PARTS];
 	ID3D11Buffer* m_vbBand[S3R_MESH_PARTS];
 	ID3D11Buffer* m_vbWater[S3R_MESH_PARTS];
@@ -114,6 +114,8 @@ public:
 	UINT m_cpuDynScratchBytes;
 	BYTE* m_cpuHudScratch;
 	UINT m_cpuHudScratchBytes;
+	BYTE* m_cpuBakeScratch;
+	UINT m_cpuBakeScratchBytes;
 
 	enum { S3R_THEME_N = 8 };
 	ID3D11Texture2D* m_texTheme[S3R_THEME_N];

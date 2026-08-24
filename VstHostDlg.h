@@ -85,6 +85,7 @@ public:
 	void OnWireChanged(int slot);
 	CString PluginName(int scanIndex) const;
 	BOOL PluginIsMulti(int scanIndex) const;
+	void PartPluginName(int part0to31, wchar_t* out, int outChars) const;
 
 	struct Preset {
 		wchar_t name[64];
@@ -93,6 +94,7 @@ public:
 		int partPluginIndex[32];
 		wchar_t path[32][520];
 		BYTE isVst3[32];
+		int midiThru; // 0=off 1=on。VWR1 は midiIn[2]==-2 がスルー
 	};
 
 protected:
@@ -154,6 +156,7 @@ protected:
 
 	CCustomComboBox m_preset;
 	CCustomComboBox m_midiIn[3];
+	CCustomComboBox m_thru;
 	CCustomComboBox m_speakerOut;
 	CCustomComboBox m_pluginFilter;
 	CCustomStandardButton m_help;
@@ -165,7 +168,7 @@ protected:
 	CCustomStandardButton m_wav;
 	CVstWireCtrl m_wire;
 	CToolTipCtrl m_tooltip;
-	enum { LABEL_COUNT = 7 };
+	enum { LABEL_COUNT = 8 };
 	CStatic m_labels[LABEL_COUNT];
 	CStatic m_monitor;
 	CStatic m_volPct;
@@ -177,10 +180,10 @@ protected:
 	int m_presetCount;
 	int m_slots[32];
 	HMIDIIN m_midiHandles[3];
-	// Per opened hardware handle (slots 0,1): bit0 = parts 1-16, bit1 = 17-32.
-	BYTE m_midiDestMask[2];
+	// Per opened hardware handle (slots 0..2): bit0 = parts 1-16, bit1 = 17-32.
+	BYTE m_midiDestMask[3];
 	// 0xFF = no Super-MPU F5 yet; 0/1 = last F5 cable (overrides dest for shorts).
-	BYTE m_midiF5Port[2];
+	BYTE m_midiF5Port[3];
 	HWAVEOUT m_waveOut;
 	HANDLE m_audioEvent;
 	HANDLE m_audioStop;

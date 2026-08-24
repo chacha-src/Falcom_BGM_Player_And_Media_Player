@@ -1,4 +1,4 @@
-﻿// One engine source for both hosts. KpiHost64.exe compiles this same file
+// One engine source for both hosts. KpiHost64.exe compiles this same file
 // through VstMidiEngine_k64.cpp; it used to keep a private copy, which quietly
 // meant every VST2 hosting fix landed only in ogg.exe while the x64 plug-ins
 // that actually run inside KpiHost64 kept the old code. stdafx.h routes itself
@@ -338,6 +338,32 @@ extern "C" int VstMidiGsMapDropFromUsed(const unsigned short* pairs, int nPairs)
 
 namespace {
 
+static void GsFixChecksum(BYTE* d, int n)
+{
+	if (!d || n < 10 || d[0] != 0xf0 || d[n - 1] != 0xf7) return;
+	unsigned sum = 0;
+	for (int i = 5; i < n - 2; ++i)
+		sum += d[i];
+	d[n - 2] = (BYTE)((0x80 - (sum & 0x7f)) & 0x7f);
+}
+
+static void GsFillRhythmDt1(BYTE* d, BYTE aa)
+{
+	if (!d) return;
+	d[0] = 0xf0; d[1] = 0x41; d[2] = 0x10; d[3] = 0x42; d[4] = 0x12;
+	d[5] = aa; d[6] = 0x10; d[7] = 0x15; d[8] = 0x01; d[9] = 0; d[10] = 0xf7;
+	GsFixChecksum(d, 11);
+}
+
+static int GsDt1IsPortReset(const BYTE* d, int n)
+{
+	if (!d || n < 11 || d[0] != 0xf0 || d[1] != 0x41) return 0;
+	if (d[3] != 0x42 || d[4] != 0x12) return 0;
+	if (d[6] != 0x00 || d[7] != 0x7f) return 0;
+	if (d[5] == 0x50 || d[5] == 0x60) return 1;
+	return 0;
+}
+
 enum { SAMPLE_RATE = 44100, BLOCK_FRAMES = 512, MAX_MIDI_EVENTS = 500000 };
 // Loading is not proof of anything: an unauthorised or half-installed
 // instrument opens cleanly, reports its name, accepts every note and returns
@@ -346,7 +372,7 @@ enum { SAMPLE_RATE = 44100, BLOCK_FRAMES = 512, MAX_MIDI_EVENTS = 500000 };
 // above an idle noise floor (~0.00002 observed) and far below a real note
 // (~0.06 observed).
 enum { PROBE_AUDIBLE_MILLI = 1 }; // peak x1000
-enum { CACHE_MAGIC = 0x43545356, CACHE_VERSION = 7 }; // + isAudible
+enum { CACHE_MAGIC = 0x43545356, CACHE_VERSION = 10 }; // first droppable same-name wins
 
 struct MidiItem {
 	unsigned __int64 tick;
@@ -476,7 +502,7 @@ struct EngineState {
 	LivePart live[32];
 	int gmResetMode; // 0=GM+GS, 1=GS, 2=XG（シーク巻き戻し時に再送）
 	int gsMapLsb;    // 0=なし 1=SC-55 2=SC-88 3=88Pro 4=8820/50（CC#32）
-	int songGm;      // 1=GM曲（GM On のみ、CC#32 なし）
+	int songGm;      // 1=GM  2=GM2（GM On のみ。GM2 は ch10 に MSB120）
 
 	EngineState() : csReady(0), fileData(NULL), fileBytes(0), events(NULL),
 		eventCount(0), eventPos(0), playSample(0), lengthSamples(0),
@@ -580,6 +606,7 @@ static void BaseNameNoExt(const wchar_t* path, wchar_t out[VST_NAME_CHARS])
 }
 
 static HWND g_waitWnd = NULL;
+static HFONT g_waitFont = NULL;
 static int g_scanIndex = 0;
 static int g_scanTotal = 0;
 
@@ -603,6 +630,16 @@ static UINT WaitDpi(HWND h)
 	return d ? d : 96;
 }
 
+static void DestroyWait(HWND wnd)
+{
+	if (wnd) DestroyWindow(wnd);
+	if (g_waitWnd == wnd) g_waitWnd = NULL;
+	if (g_waitFont) {
+		DeleteObject(g_waitFont);
+		g_waitFont = NULL;
+	}
+}
+
 static void SetWaitStatus(HWND wnd, const wchar_t* msg)
 {
 	if (!wnd || !msg) return;
@@ -615,6 +652,50 @@ static void SetWaitStatus(HWND wnd, const wchar_t* msg)
 	UpdateWindow(wnd);
 }
 
+static void SetScanWait(HWND wnd, int cur, int total, int found, const wchar_t* name)
+{
+	wchar_t msg[384];
+	_snwprintf_s(msg, _TRUNCATE, LL14(
+		L"VSTスキャン %d / %d（発見 %d）\n%s",
+		L"Scanning VST %d / %d (%d found)\n%s",
+		L"Analyse VST %d / %d (%d trouvés)\n%s",
+		L"Scansione VST %d / %d (%d trovati)\n%s",
+		L"Explorando VST %d / %d (%d hallados)\n%s",
+		L"VST 검색 %d / %d (발견 %d)\n%s",
+		L"正在扫描 VST %d / %d（发现 %d）\n%s",
+		L"مسح VST %d / %d (%d عُثر عليها)\n%s",
+		L"Сканирование VST %d / %d (найдено %d)\n%s",
+		L"VST-Scan %d / %d (%d gefunden)\n%s",
+		L"A varrer VST %d / %d (%d achados)\n%s",
+		L"VST scannen %d / %d (%d gevonden)\n%s",
+		L"Skan VST %d / %d (znaleziono %d)\n%s",
+		L"VST tarama %d / %d (%d bulundu)\n%s"),
+		cur, total, found, name ? name : L"");
+	SetWaitStatus(wnd, msg);
+}
+
+static void SetVerifyWait(HWND wnd, int done, int todo, const wchar_t* name, const wchar_t* step)
+{
+	wchar_t msg[512];
+	_snwprintf_s(msg, _TRUNCATE, LL14(
+		L"D&D・発音確認 %d / %d\n%s\n%s",
+		L"Drop & sound check %d / %d\n%s\n%s",
+		L"Glisser-déposer / son %d / %d\n%s\n%s",
+		L"Trascina e suono %d / %d\n%s\n%s",
+		L"Arrastre y sonido %d / %d\n%s\n%s",
+		L"D&D·발음 확인 %d / %d\n%s\n%s",
+		L"拖放·发音确认 %d / %d\n%s\n%s",
+		L"التحقق من الإفلات والصوت %d / %d\n%s\n%s",
+		L"Проверка D&D / звука %d / %d\n%s\n%s",
+		L"D&D- und Klangprüfung %d / %d\n%s\n%s",
+		L"D&D e som %d / %d\n%s\n%s",
+		L"D&D- en geluidscheck %d / %d\n%s\n%s",
+		L"D&D i dźwięk %d / %d\n%s\n%s",
+		L"D&D / ses kontrolü %d / %d\n%s\n%s"),
+		done, todo, name ? name : L"", step ? step : L"");
+	SetWaitStatus(wnd, msg);
+}
+
 static HWND MakeWait(HWND owner)
 {
 	if (owner && !IsWindow(owner)) owner = NULL;
@@ -625,17 +706,42 @@ static HWND MakeWait(HWND owner)
 		r.right = GetSystemMetrics(SM_CXSCREEN);
 		r.bottom = GetSystemMetrics(SM_CYSCREEN);
 	}
-	const UINT dpi = WaitDpi(owner);
-	const int w = MulDiv(520, (int)dpi, 96);
-	const int h = MulDiv(112, (int)dpi, 96);
+	const UINT dpi = WaitDpi(owner ? owner : NULL);
+	LOGFONTW lf = {};
+	HFONT stock = (HFONT)GetStockObject(DEFAULT_GUI_FONT);
+	if (stock) GetObjectW(stock, sizeof(lf), &lf);
+	lf.lfHeight = -MulDiv(9, (int)dpi, 96);
+	if (lf.lfHeight == 0) lf.lfHeight = -12;
+	if (g_waitFont) { DeleteObject(g_waitFont); g_waitFont = NULL; }
+	g_waitFont = CreateFontIndirectW(&lf);
+	int lineH = MulDiv(16, (int)dpi, 96);
+	int textW = MulDiv(360, (int)dpi, 96);
+	HDC dc = GetDC(owner);
+	if (dc) {
+		HGDIOBJ old = SelectObject(dc, g_waitFont ? g_waitFont : stock);
+		TEXTMETRICW tm = {};
+		if (GetTextMetricsW(dc, &tm) && tm.tmHeight > 0)
+			lineH = tm.tmHeight + tm.tmExternalLeading;
+		SelectObject(dc, old);
+		ReleaseDC(owner, dc);
+	}
+	const int padX = MulDiv(12, (int)dpi, 96);
+	const int padY = MulDiv(8, (int)dpi, 96);
+	const int w = textW + padX * 2;
+	const int h = padY * 2 + lineH * 4;
 	HWND wnd = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_TOPMOST, L"STATIC",
-		L"VSTプラグインを検索しています…\nSearching VST plug-ins…",
-		WS_POPUP | WS_BORDER | SS_CENTER,
+		LL14(L"VSTプラグインを検索しています…", L"Searching VST plug-ins…",
+			L"Recherche des plug-ins VST…", L"Ricerca dei plug-in VST…",
+			L"Buscando plug-ins VST…", L"VST 플러그인을 찾는 중…", L"正在搜索 VST 插件…",
+			L"جارٍ البحث عن إضافات VST…", L"Поиск VST-плагинов…", L"VST-Plug-ins werden gesucht…",
+			L"A procurar plug-ins VST…", L"VST-plug-ins zoeken…", L"Szukanie wtyczek VST…",
+			L"VST eklentileri aranıyor…"),
+		WS_POPUP | WS_BORDER | SS_CENTER | SS_NOPREFIX,
 		r.left + ((r.right - r.left) - w) / 2,
 		r.top + ((r.bottom - r.top) - h) / 2, w, h,
 		owner, NULL, GetModuleHandleW(NULL), NULL);
 	if (wnd) {
-		SendMessage(wnd, WM_SETFONT, (WPARAM)GetStockObject(DEFAULT_GUI_FONT), TRUE);
+		SendMessage(wnd, WM_SETFONT, (WPARAM)(g_waitFont ? g_waitFont : stock), TRUE);
 		ShowWindow(wnd, SW_SHOWNOACTIVATE);
 		UpdateWindow(wnd);
 	}
@@ -685,6 +791,8 @@ static int HostArch()
 	return 32;
 #endif
 }
+
+static int PathLooksLikeScVa(const wchar_t* path);
 
 static VstTimeInfo g_vstTime = {};
 static char g_vstHostDirA[VST_PATH_CHARS] = {};
@@ -847,11 +955,22 @@ static void AddPlugin(const wchar_t* path, const wchar_t* name,
 	p.probePeakMilli = 0;
 }
 
+static int SkipCompanionDll(const wchar_t* path)
+{
+	if (!path || !*path) return 1;
+	const wchar_t* n = wcsrchr(path, L'\\');
+	n = n ? n + 1 : path;
+	return !_wcsicmp(n, L"SCCore.dll") || !_wcsicmp(n, L"Wrapper.dll");
+}
+
 static void ProbeVst2(const wchar_t* path)
 {
-	const int arch = PeArch(path);
+	if (SkipCompanionDll(path)) return;
+	int arch = PeArch(path);
 	wchar_t base[VST_NAME_CHARS];
 	BaseNameNoExt(path, base);
+	if (PathLooksLikeScVa(path) || PathLooksLikeScVa(base))
+		wcsncpy_s(base, VST_NAME_CHARS, L"SOUND Canvas VA", _TRUNCATE);
 	if (!arch) return;
 	if (arch != HostArch()) {
 		AddPlugin(path, base, arch, 0, 0);
@@ -895,6 +1014,8 @@ static void ProbeVst2(const wchar_t* path)
 	VstPlugDirUnbind(e);
 	wchar_t wide[VST_NAME_CHARS] = {};
 	if (nm[0]) MultiByteToWideChar(CP_ACP, 0, nm, -1, wide, VST_NAME_CHARS);
+	if (PathLooksLikeScVa(path))
+		wcsncpy_s(wide, VST_NAME_CHARS, L"SOUND Canvas VA", _TRUNCATE);
 	AddPlugin(path, wide[0] ? wide : base, arch, 0, instrument);
 	FreeLibrary(mod);
 }
@@ -909,6 +1030,8 @@ static void ProbeVst3Bundle(const wchar_t* bundle)
 {
 	wchar_t base[VST_NAME_CHARS];
 	BaseNameNoExt(bundle, base);
+	if (PathLooksLikeScVa(bundle) || PathLooksLikeScVa(base))
+		wcsncpy_s(base, VST_NAME_CHARS, L"SOUND Canvas VA", _TRUNCATE);
 	wchar_t p32[VST_PATH_CHARS], p64[VST_PATH_CHARS];
 	JoinPath(p32, bundle, L"Contents\\x86-win");
 	JoinPath(p64, bundle, L"Contents\\x86_64-win");
@@ -967,15 +1090,30 @@ static void ScanDir(const wchar_t* dir, int depth, HWND wait)
 		}
 		if (probed) {
 			++g_scanIndex;
-			wchar_t msg[384];
-			_snwprintf_s(msg, _TRUNCATE,
-				L"VSTスキャン %d / %d（発見 %d）\nScanning %d / %d  (%d found)\n%s",
-				g_scanIndex, g_scanTotal, g_pluginCount,
-				g_scanIndex, g_scanTotal, g_pluginCount, fd.cFileName);
-			SetWaitStatus(wait, msg);
+			SetScanWait(wait, g_scanIndex, g_scanTotal, g_pluginCount, fd.cFileName);
 		}
 	} while (FindNextFileW(h, &fd) && g_pluginCount < VST_MAX_PLUGINS);
 	FindClose(h);
+}
+
+static void ProbeUserSpecified(const wchar_t* src, HWND wait)
+{
+	if (!src || !src[0]) return;
+	DWORD a = GetFileAttributesW(src);
+	if (a == INVALID_FILE_ATTRIBUTES) {
+		wchar_t dir[VST_PATH_CHARS];
+		SafeCopy(dir, VST_PATH_CHARS, src);
+		wchar_t* slash = wcsrchr(dir, L'\\');
+		if (slash) { *slash = 0; if (DirExists(dir)) ScanDir(dir, 0, wait); }
+		return;
+	}
+	if (a & FILE_ATTRIBUTE_DIRECTORY) {
+		if (EqExt(src, L".vst3")) ProbeVst3Bundle(src);
+		else ScanDir(src, 0, wait);
+		return;
+	}
+	if (EqExt(src, L".vst3")) ProbeVst3Bundle(src);
+	else ProbeVst2(src);
 }
 
 static void AddEnvRoot(const wchar_t* env, const wchar_t* suffix,
@@ -1294,8 +1432,9 @@ static int LoadSmf(const wchar_t* path)
 	const int division = (int)ReadBE(smf + 12, 2);
 	if (division <= 0 || (division & 0x8000)) { delete[] data; return -5; }
 	MidiItem* ev = new MidiItem[MAX_MIDI_EVENTS];
-	BYTE* sxData = new BYTE[size + 8];
+	BYTE* sxData = new BYTE[size + 8 + 128];
 	int sxUsed = 0;
+	const int sxCap = (int)size + 8 + 128;
 	int count = 0;
 	int maxPort = 0;
 	int sawFf21 = 0;
@@ -1370,7 +1509,7 @@ static int LoadSmf(const wchar_t* path)
 				if (!ReadVar(q, end, sl) || q + sl > end) break;
 				// Rebuild a full dump (F0 + payload). F7 escape is raw payload.
 				const int need = (st == 0xf0) ? (1 + (int)sl) : (int)sl;
-				if (need > 0 && sxUsed + need <= (int)size + 8) {
+				if (need > 0 && sxUsed + need <= sxCap) {
 					const int off = sxUsed;
 					if (st == 0xf0) sxData[sxUsed++] = 0xf0;
 					memcpy(sxData + sxUsed, q, sl);
@@ -1497,7 +1636,7 @@ static int LoadSmf(const wchar_t* path)
 		else if (mapHint == 6 || hasSd) resolved = 6;
 		else if (cc32Max >= 1 && cc32Max <= 4) resolved = cc32Max;
 		else resolved = VstMidiGsMapDropFromUsed(pairs, nPairs);
-		g_eng.songGm = (resolved == 5 || resolved == 9) ? 1 : 0;
+		g_eng.songGm = (resolved == 9) ? 2 : ((resolved == 5) ? 1 : 0);
 		g_eng.gsMapLsb = (resolved >= 1 && resolved <= 4) ? resolved : 0;
 	}
 	if (g_eng.gsMapLsb && count + 64 < MAX_MIDI_EVENTS) {
@@ -1512,6 +1651,7 @@ static int LoadSmf(const wchar_t* path)
 			const int lsb = g_eng.gsMapLsb;
 			for (int port = 0; port < 2 && w < MAX_MIDI_EVENTS; ++port) {
 				for (int ch = 0; ch < 16 && w < MAX_MIDI_EVENTS; ++ch) {
+					if (ch == 9) continue;
 					dst[w].tick = tick;
 					dst[w].sample = samp;
 					dst[w].msg = (0xb0 | ch) | (32u << 8) | ((DWORD)lsb << 16);
@@ -1535,6 +1675,98 @@ static int LoadSmf(const wchar_t* path)
 			tmp[w++] = ev[i];
 			if (isGsReset(ev[i]))
 				w = appendMap(tmp, w, ev[i].tick, ev[i].sample);
+		}
+		delete[] ev;
+		ev = tmp;
+		count = w;
+	}
+	if (!hasXg && g_eng.songGm == 0 && count + 8 < MAX_MIDI_EVENTS && sxUsed + 44 <= sxCap) {
+		BYTE rhyA[11], rhyB[11];
+		GsFillRhythmDt1(rhyA, 0x40);
+		GsFillRhythmDt1(rhyB, 0x50);
+		auto isRst = [&](const MidiItem& e) -> int {
+			if ((e.msg & 0xff) != 0xf0 || e.sysexOff < 0) return 0;
+			const int n = (int)e.aux;
+			if (e.sysexOff + n > sxUsed || n < 11) return 0;
+			const BYTE* d = sxData + e.sysexOff;
+			if (VstMidiSysexIsGsReset(d, n)) return 1;
+			if (GsDt1IsPortReset(d, n)) return (d[5] == 0x50) ? 2 : 3;
+			return 0;
+		};
+		auto putRhy = [&](MidiItem* dst, int w, unsigned __int64 tick, __int64 samp, int which) -> int {
+			if (w >= MAX_MIDI_EVENTS) return w;
+			const BYTE* src = (which == 2) ? rhyB : rhyA;
+			if (sxUsed + 11 > sxCap) return w;
+			const int off = sxUsed;
+			memcpy(sxData + sxUsed, src, 11);
+			sxUsed += 11;
+			dst[w].tick = tick;
+			dst[w].sample = samp;
+			dst[w].msg = 0xf0;
+			dst[w].aux = 11;
+			dst[w].port = (which == 2) ? 1 : 0;
+			dst[w].sysexOff = off;
+			dst[w].seq = w;
+			return w + 1;
+		};
+		int any = 0;
+		for (int i = 0; i < count; ++i)
+			if (isRst(ev[i])) { any = 1; break; }
+		MidiItem* tmp = new MidiItem[MAX_MIDI_EVENTS];
+		int w = 0;
+		if (!any) {
+			w = putRhy(tmp, w, 0, 0, 1);
+			w = putRhy(tmp, w, 0, 0, 2);
+		}
+		for (int i = 0; i < count && w < MAX_MIDI_EVENTS; ++i) {
+			tmp[w++] = ev[i];
+			const int k = isRst(ev[i]);
+			if (k == 1) {
+				w = putRhy(tmp, w, ev[i].tick, ev[i].sample, 1);
+				w = putRhy(tmp, w, ev[i].tick, ev[i].sample, 2);
+			} else if (k == 2)
+				w = putRhy(tmp, w, ev[i].tick, ev[i].sample, 2);
+			else if (k == 3)
+				w = putRhy(tmp, w, ev[i].tick, ev[i].sample, 1);
+		}
+		delete[] ev;
+		ev = tmp;
+		count = w;
+	}
+	if (hasXg && count + 8 < MAX_MIDI_EVENTS) {
+		auto isXg = [&](const MidiItem& e) -> int {
+			if ((e.msg & 0xff) != 0xf0 || e.sysexOff < 0) return 0;
+			const int n = (int)e.aux;
+			if (e.sysexOff + n > sxUsed) return 0;
+			return VstMidiSysexIsXgOn(sxData + e.sysexOff, n);
+		};
+		auto putXgDrum = [&](MidiItem* dst, int w, unsigned __int64 tick, __int64 samp, int port) -> int {
+			if (w + 2 > MAX_MIDI_EVENTS) return w;
+			dst[w].tick = tick; dst[w].sample = samp;
+			dst[w].msg = 0xb9 | (0u << 8) | (127u << 16);
+			dst[w].aux = 0; dst[w].port = port; dst[w].sysexOff = -1; dst[w].seq = w;
+			++w;
+			dst[w].tick = tick; dst[w].sample = samp;
+			dst[w].msg = 0xb9 | (32u << 8);
+			dst[w].aux = 0; dst[w].port = port; dst[w].sysexOff = -1; dst[w].seq = w;
+			return w + 1;
+		};
+		int any = 0;
+		for (int i = 0; i < count; ++i)
+			if (isXg(ev[i])) { any = 1; break; }
+		MidiItem* tmp = new MidiItem[MAX_MIDI_EVENTS];
+		int w = 0;
+		if (!any) {
+			w = putXgDrum(tmp, w, 0, 0, 0);
+			w = putXgDrum(tmp, w, 0, 0, 1);
+		}
+		for (int i = 0; i < count && w < MAX_MIDI_EVENTS; ++i) {
+			tmp[w++] = ev[i];
+			if (isXg(ev[i])) {
+				w = putXgDrum(tmp, w, ev[i].tick, ev[i].sample, ev[i].port);
+				if (ev[i].port == 0)
+					w = putXgDrum(tmp, w, ev[i].tick, ev[i].sample, 1);
+			}
 		}
 		delete[] ev;
 		ev = tmp;
@@ -1656,25 +1888,17 @@ static void SendVstSysex(AEffect* e, const BYTE* data, int len, int deltaFrames)
 	__except (EXCEPTION_EXECUTE_HANDLER) {}
 }
 
-// Roland GS DT1 checksum (bytes from address through last data byte).
-static void GsFixChecksum(BYTE* d, int n)
-{
-	if (!d || n < 10 || d[0] != 0xf0 || d[n - 1] != 0xf7) return;
-	unsigned sum = 0;
-	for (int i = 5; i < n - 2; ++i)
-		sum += d[i];
-	d[n - 2] = (BYTE)((0x80 - (sum & 0x7f)) & 0x7f);
-}
-
 static void SendUnitSysex(int unit, const BYTE* data, int len, int deltaFrames)
 {
 	if (!data || len < 2) return;
 	if (unit == 0) {
 		if (g_eng.effect) SendVstSysex(g_eng.effect, data, len, deltaFrames);
+		if (g_eng.vst3) Vst3MidiSysex(g_eng.vst3, data, len, deltaFrames);
 	} else if (unit == 1) {
 		if (g_eng.effectB) SendVstSysex(g_eng.effectB, data, len, deltaFrames);
 	} else if (unit == 2) {
 		if (g_eng.effectC) SendVstSysex(g_eng.effectC, data, len, deltaFrames);
+		if (g_eng.vst3C) Vst3MidiSysex(g_eng.vst3C, data, len, deltaFrames);
 	}
 }
 
@@ -1997,6 +2221,34 @@ static void BroadcastSongSysex(const BYTE* data, int len, int deltaFrames, int s
 				SendUnitSysex(2, rx, 11, deltaFrames);
 			}
 		}
+		if (VstMidiSysexIsGsReset(data, len) || GsDt1IsPortReset(data, len)) {
+			BYTE rhy[11];
+			GsFillRhythmDt1(rhy, 0x40);
+			if (units & 1) SendUnitSysex(0, rhy, 11, deltaFrames);
+			if (units & 2) SendUnitSysex(1, rhy, 11, deltaFrames);
+			if (units & 4) SendUnitSysex(2, rhy, 11, deltaFrames);
+		}
+		if (VstMidiSysexIsXgOn(data, len)) {
+			const DWORD msb = 0xb9 | (0u << 8) | (127u << 16);
+			const DWORD lsb = 0xb9 | (32u << 8);
+			MidiItem cc[2] = {};
+			cc[0].msg = msb; cc[1].msg = lsb;
+			if (units & 1) {
+				if (g_eng.effect) SendVstEvents(g_eng.effect, cc, 2, 0);
+				if (g_eng.vst3) {
+					Vst3MidiShort(g_eng.vst3, msb, deltaFrames);
+					Vst3MidiShort(g_eng.vst3, lsb, deltaFrames);
+				}
+			}
+			if (units & 2 && g_eng.effectB) SendVstEvents(g_eng.effectB, cc, 2, 0);
+			if (units & 4) {
+				if (g_eng.effectC) SendVstEvents(g_eng.effectC, cc, 2, 0);
+				if (g_eng.vst3C) {
+					Vst3MidiShort(g_eng.vst3C, msb, deltaFrames);
+					Vst3MidiShort(g_eng.vst3C, lsb, deltaFrames);
+				}
+			}
+		}
 	}
 	if (g_eng.midiOut)
 		MapperSysex(g_eng.midiOut, data, (DWORD)len);
@@ -2048,9 +2300,13 @@ static void FlushUnitShorts(AEffect* effect, Vst3Inst* vst3, MidiItem* batch,
 	if (effect) SendVstEvents(effect, batch, n, start, sxStore, frames, unit);
 	if (vst3) {
 		for (int i = 0; i < n; ++i) {
-			if ((batch[i].msg & 0xff) == 0xf0) continue;
 			__int64 d = batch[i].sample - start;
 			int offset = d < 0 ? 0 : (d >= frames ? frames - 1 : (int)d);
+			if ((batch[i].msg & 0xff) == 0xf0 && batch[i].sysexOff >= 0 && sxStore) {
+				Vst3MidiSysex(vst3, sxStore + batch[i].sysexOff, (int)batch[i].aux, offset);
+				continue;
+			}
+			if ((batch[i].msg & 0xff) == 0xf0) continue;
 			Vst3MidiShort(vst3, batch[i].msg, offset);
 		}
 	}
@@ -2064,6 +2320,12 @@ static DWORD g_injMsg[SONG_INJ_CAP];
 static BYTE g_injPort[SONG_INJ_CAP];
 static int g_injOfs[SONG_INJ_CAP];
 static LONGLONG g_injQpc[SONG_INJ_CAP];
+enum { INJ_SX_N = 8, INJ_SX_B = 128 };
+static BYTE g_injSx[INJ_SX_N][INJ_SX_B];
+static int g_injSxLen[INJ_SX_N];
+static BYTE g_injSxPort[INJ_SX_N];
+static volatile LONG g_injSxW = 0;
+static volatile LONG g_injSxR = 0;
 static int g_liveTailFrames = 0;
 static BYTE g_ovOn[3][16][SONG_OV_N];
 static BYTE g_ovVal[3][16][SONG_OV_N];
@@ -2083,6 +2345,7 @@ static int SongOvSlot(int cc)
 static void SongOvClear()
 {
 	g_injR = g_injW;
+	g_injSxR = g_injSxW;
 	g_liveTailFrames = 0;
 	ZeroMemory(g_ovOn, sizeof(g_ovOn));
 	ZeroMemory(g_ovTick, sizeof(g_ovTick));
@@ -2170,6 +2433,23 @@ extern "C" void VstMidiInjectShort(int portIndex0to2, DWORD shortMsg, int sample
 	g_liveTailFrames = SAMPLE_RATE * 4;
 }
 
+extern "C" void VstMidiInjectSysex(int portIndex0to2, const unsigned char* data, int bytes)
+{
+	if (!data || bytes < 2 || bytes > INJ_SX_B) return;
+	int port = portIndex0to2;
+	if (port < 0) port = 0;
+	if (port > 2) port = 2;
+	const LONG w = g_injSxW;
+	if ((w - g_injSxR) >= (INJ_SX_N - 1)) return;
+	const int i = (int)(w & (INJ_SX_N - 1));
+	memcpy(g_injSx[i], data, (size_t)bytes);
+	g_injSxLen[i] = bytes;
+	g_injSxPort[i] = (BYTE)port;
+	MemoryBarrier();
+	g_injSxW = w + 1;
+	g_liveTailFrames = SAMPLE_RATE * 4;
+}
+
 extern "C" int VstMidiStealInjects(BYTE* ports, DWORD* msgs, int* sampleOfs, int maxCount)
 {
 	if (!ports || !msgs || maxCount < 1) return 0;
@@ -2246,6 +2526,16 @@ static void EmitSongShort(int port, DWORD msg, __int64 start, int frames, int of
 static void FlushInjectQueue(__int64 start, int frames)
 {
 	SongOvExpire();
+	{
+		LONG r = g_injSxR;
+		const LONG w = g_injSxW;
+		while (r != w) {
+			const int i = (int)(r & (INJ_SX_N - 1));
+			BroadcastSongSysex(g_injSx[i], g_injSxLen[i], 0, (int)g_injSxPort[i]);
+			++r;
+		}
+		g_injSxR = r;
+	}
 	LONG r = g_injR;
 	const LONG w = g_injW;
 	LARGE_INTEGER freq;
@@ -2314,6 +2604,26 @@ static void DispatchDueEvents(__int64 start, int frames)
 	};
 	SongOvExpire();
 	{
+		LONG r = g_injSxR;
+		const LONG w = g_injSxW;
+		while (r != w) {
+			const int i = (int)(r & (INJ_SX_N - 1));
+			const BYTE* raw = g_injSx[i];
+			const int rawLen = g_injSxLen[i];
+			BYTE buf[2048];
+			int units = 0, rhyBb = -1;
+			const int n = PrepareSongSysex(raw, rawLen, (int)g_injSxPort[i], buf,
+				(int)sizeof(buf), &units, &rhyBb);
+			if (n > 0) {
+				if (units & 1) pushSx(0, buf, n, start, (int)g_injSxPort[i]);
+				if (units & 2) pushSx(1, buf, n, start, (int)g_injSxPort[i]);
+				if (units & 4) pushSx(2, buf, n, start, (int)g_injSxPort[i]);
+			}
+			++r;
+		}
+		g_injSxR = r;
+	}
+	{
 		LONG r = g_injR;
 		const LONG w = g_injW;
 		LARGE_INTEGER freq;
@@ -2377,6 +2687,20 @@ static void DispatchDueEvents(__int64 start, int frames)
 						pushSx(2, rx, 11, e.sample, e.port);
 					}
 				}
+				if (VstMidiSysexIsGsReset(raw, rawLen) || GsDt1IsPortReset(raw, rawLen)) {
+					BYTE rhy[11];
+					GsFillRhythmDt1(rhy, 0x40);
+					if (units & 1) pushSx(0, rhy, 11, e.sample, e.port);
+					if (units & 2) pushSx(1, rhy, 11, e.sample, e.port);
+					if (units & 4) pushSx(2, rhy, 11, e.sample, e.port);
+				}
+			}
+			if (VstMidiSysexIsXgOn(raw, rawLen)) {
+				MidiItem cc0 = e, cc32 = e;
+				cc0.msg = 0xb9 | (0u << 8) | (127u << 16);
+				cc32.msg = 0xb9 | (32u << 8);
+				routeShort(cc0);
+				routeShort(cc32);
 			}
 			if (VstMidiSysexIsGmOn(raw, rawLen) || VstMidiSysexIsGsReset(raw, rawLen) ||
 				VstMidiSysexIsXgOn(raw, rawLen)) {
@@ -2433,10 +2757,14 @@ static void VstFeedSlice(int unit, AEffect* effect, Vst3Inst* vst3,
 		SendVstEvents(effect, tmp, nt, a, sx, nfr, unit);
 	if (vst3) {
 		for (int i = 0; i < nt; ++i) {
-			if ((tmp[i].msg & 0xff) == 0xf0) continue;
 			int off = (int)(tmp[i].sample - a);
 			if (off < 0) off = 0;
 			if (off >= nfr) off = nfr - 1;
+			if ((tmp[i].msg & 0xff) == 0xf0 && tmp[i].sysexOff >= 0) {
+				Vst3MidiSysex(vst3, sx + tmp[i].sysexOff, (int)tmp[i].aux, off);
+				continue;
+			}
+			if ((tmp[i].msg & 0xff) == 0xf0) continue;
 			Vst3MidiShort(vst3, tmp[i].msg, off);
 		}
 	}
@@ -2792,7 +3120,9 @@ static void RescoreMultiFlags(void)
 		p.isMultiTimbral =
 			(DetectMultiTimbralName(p.name) || DetectMultiTimbralName(p.path)) ? 1 : 0;
 		// Cross-arch multi (x86 app + x64 SC-VA) stays pickable for KpiHost64.
-		if (p.isMultiTimbral && p.arch != HostArch())
+		// Do not revive a copy that verify already hid (failed drop / duplicate).
+		if (p.isMultiTimbral && p.arch != HostArch() &&
+			!(p.isLiveOk && p.isAudible == 0))
 			p.isInstrument = 1;
 	}
 }
@@ -2942,6 +3272,33 @@ static int IsDrumPlugName(const wchar_t* name, const wchar_t* path)
 		if (NameOrPathHas(name, path, keys[i])) return 1;
 	return 0;
 }
+
+// Romplers and kit players come up with an empty slot and expose no usable
+// factory program, so they stay silent until the user picks a patch in the
+// plug-in's own browser. Forcing program 0 or waiting a second of digital
+// silence during D&D / scan only burns time (HALion 7, Kontakt, …).
+static int NeedsUserPatch(const wchar_t* name, const wchar_t* path)
+{
+	static const wchar_t* keys[] = {
+		L"Groove Agent", L"Battery", L"BFD", L"Addictive Drums",
+		L"Superior Drummer", L"EZdrummer", L"MT-PowerDrumKit"
+	};
+	if (IsRomplerName(name, path)) return 1;
+	for (int i = 0; i < (int)(sizeof(keys) / sizeof(keys[0])); ++i)
+		if (NameOrPathHas(name, path, keys[i])) return 1;
+	return 0;
+}
+
+static int IsFactoryRompler(const wchar_t* name, const wchar_t* path)
+{
+	return NameOrPathHas(name, path, L"HALion Sonic") ||
+		NameOrPathHas(name, path, L"HALionSonic") ||
+		NameOrPathHas(name, path, L"SampleTank");
+}
+
+// Program lists bigger than a GM bank are a library browser, not a factory
+// patch the host can safely load on drop.
+enum { LIVE_FACTORY_PROG_MAX = 256 };
 
 static int IsFxNotInstrument(const wchar_t* name, const wchar_t* path)
 {
@@ -3321,7 +3678,11 @@ static int BuildEnsembleFromSong()
 	}
 
 	if (bestR >= 0) {
-		SetWaitStatus(g_waitWnd, L"ロムプラーを開いています…\nOpening rompler…");
+		SetWaitStatus(g_waitWnd, LL14(L"ロムプラーを開いています…", L"Opening rompler…",
+			L"Ouverture du rompler…", L"Apertura del rompler…", L"Abriendo el rompler…",
+			L"롬플러를 여는 중…", L"正在打开采样器…", L"جارٍ فتح العيّنة…",
+			L"Открытие ромплера…", L"Rompler wird geöffnet…", L"A abrir o rompler…",
+			L"Rompler openen…", L"Otwieranie romplera…", L"Rompler açılıyor…"));
 		MixSlot& slot = g_eng.mix[0];
 		int opened = TryOpenMixPath(slot, g_plugins[bestR].path, g_plugins[bestR].isVst3,
 			0, 0, 0);
@@ -3336,7 +3697,11 @@ static int BuildEnsembleFromSong()
 			int drumSep = 0;
 			if (usedCh[9] && bestD >= 0 &&
 				_wcsicmp(g_plugins[bestD].path, g_plugins[bestR].path) != 0) {
-				SetWaitStatus(g_waitWnd, L"ドラム音源を開いています…\nOpening drum plug-in…");
+				SetWaitStatus(g_waitWnd, LL14(L"ドラム音源を開いています…", L"Opening drum plug-in…",
+					L"Ouverture de la batterie…", L"Apertura del kit…", L"Abriendo el kit…",
+					L"드럼 음원을 여는 중…", L"正在打开鼓音源…", L"جارٍ فتح طقم الطبول…",
+					L"Открытие ударных…", L"Drum-Plug-in wird geöffnet…", L"A abrir o kit…",
+					L"Drumplug-in openen…", L"Otwieranie zestawu…", L"Davul eklentisi açılıyor…"));
 				MixSlot& ds = g_eng.mix[1];
 				int dok = TryOpenMixPath(ds, g_plugins[bestD].path, g_plugins[bestD].isVst3,
 					1, 0, 0);
@@ -3442,9 +3807,22 @@ static int BuildEnsembleFromSong()
 			++nCatDone;
 			{
 				wchar_t msg[384];
-				_snwprintf_s(msg, _TRUNCATE,
-					L"類似確認 %d / %d\nMatching timbre %d / %d\n%s",
-					nCatDone, nCat, nCatDone, nCat, p.name);
+				_snwprintf_s(msg, _TRUNCATE, LL14(
+					L"類似確認 %d / %d\n%s",
+					L"Matching timbre %d / %d\n%s",
+					L"Correspondance %d / %d\n%s",
+					L"Corrispondenza %d / %d\n%s",
+					L"Coincidencia %d / %d\n%s",
+					L"유사 확인 %d / %d\n%s",
+					L"音色匹配 %d / %d\n%s",
+					L"مطابقة الجرس %d / %d\n%s",
+					L"Подбор тембра %d / %d\n%s",
+					L"Klangabgleich %d / %d\n%s",
+					L"Correspondência %d / %d\n%s",
+					L"Klankmatch %d / %d\n%s",
+					L"Dobór barwy %d / %d\n%s",
+					L"Tını eşleme %d / %d\n%s"),
+					nCatDone, nCat, p.name);
 				SetWaitStatus(g_waitWnd, msg);
 			}
 			MixSlot tmp = {};
@@ -3966,11 +4344,14 @@ static int ConvertMusicXml(const wchar_t* inPath, wchar_t* out, int outChars)
 
 } // namespace
 
+static int CollapseLiveDuplicates(void);
+
 extern "C" int VstScanEnsure(HWND parentForWait)
 {
 	if (g_scanReady && !g_scanInvalid) return 0;
 	if (!g_scanInvalid && LoadCache()) {
 		RescoreMultiFlags();
+		if (CollapseLiveDuplicates()) SaveCache();
 		g_scanReady = 1;
 		return 0;
 	}
@@ -4002,13 +4383,7 @@ extern "C" int VstScanEnsure(HWND parentForWait)
 	}
 	AddRegRoot(HKEY_LOCAL_MACHINE, roots, count, 16);
 	AddRegRoot(HKEY_CURRENT_USER, roots, count, 16);
-	if (savedata.vstExtraPath[0] && DirExists(savedata.vstExtraPath) && count < 16) {
-		SafeCopy(roots[count], VST_PATH_CHARS, savedata.vstExtraPath);
-		++count;
-	}
 	static const wchar_t* knownMulti[] = {
-		L"C:\\Roland VS\\64",
-		L"C:\\Roland VS",
 		L"C:\\Program Files\\Roland\\SOUND Canvas VA",
 		L"C:\\Program Files (x86)\\Roland\\SOUND Canvas VA",
 		L"C:\\Yamaha\\S-YXG50",
@@ -4037,45 +4412,28 @@ extern "C" int VstScanEnsure(HWND parentForWait)
 	g_scanTotal = 0;
 	for (int i = 0; i < count; ++i)
 		g_scanTotal += CountDir(roots[i], 0);
-	if (savedata.vstMultiDll[0]) ++g_scanTotal;
-	if (savedata.vstExtraPath[0] && !DirExists(savedata.vstExtraPath)) ++g_scanTotal;
-	{
-		wchar_t msg[256];
-		_snwprintf_s(msg, _TRUNCATE,
-			L"VSTスキャン 0 / %d\nScanning VST plug-ins… 0 / %d",
-			g_scanTotal, g_scanTotal);
-		SetWaitStatus(wait, msg);
-	}
-	for (int i = 0; i < count; ++i) ScanDir(roots[i], 0, wait);
 	if (savedata.vstMultiDll[0]) {
 		DWORD a = GetFileAttributesW(savedata.vstMultiDll);
-		if (a != INVALID_FILE_ATTRIBUTES && !(a & FILE_ATTRIBUTE_DIRECTORY)) {
-			if (EqExt(savedata.vstMultiDll, L".vst3"))
-				ProbeVst3Bundle(savedata.vstMultiDll);
-			else
-				ProbeVst2(savedata.vstMultiDll);
-		} else if (DirExists(savedata.vstMultiDll)) {
-			ScanDir(savedata.vstMultiDll, 0, wait);
-		} else {
-			wchar_t dir[VST_PATH_CHARS];
-			SafeCopy(dir, VST_PATH_CHARS, savedata.vstMultiDll);
-			wchar_t* slash = wcsrchr(dir, L'\\');
-			if (slash) { *slash = 0; ScanDir(dir, 0, wait); }
-		}
+		if (a != INVALID_FILE_ATTRIBUTES && (a & FILE_ATTRIBUTE_DIRECTORY))
+			g_scanTotal += CountDir(savedata.vstMultiDll, 0);
+		else
+			++g_scanTotal;
 	}
 	if (savedata.vstExtraPath[0]) {
 		DWORD a = GetFileAttributesW(savedata.vstExtraPath);
-		if (a != INVALID_FILE_ATTRIBUTES && !(a & FILE_ATTRIBUTE_DIRECTORY)) {
-			if (EqExt(savedata.vstExtraPath, L".vst3"))
-				ProbeVst3Bundle(savedata.vstExtraPath);
-			else
-				ProbeVst2(savedata.vstExtraPath);
-		} else if (EqExt(savedata.vstExtraPath, L".vst3") && DirExists(savedata.vstExtraPath)) {
-			ProbeVst3Bundle(savedata.vstExtraPath);
-		}
+		if (a != INVALID_FILE_ATTRIBUTES && (a & FILE_ATTRIBUTE_DIRECTORY))
+			g_scanTotal += CountDir(savedata.vstExtraPath, 0);
+		else
+			++g_scanTotal;
 	}
+	{
+		SetScanWait(wait, 0, g_scanTotal, 0, L"");
+	}
+	ProbeUserSpecified(savedata.vstMultiDll, wait);
+	ProbeUserSpecified(savedata.vstExtraPath, wait);
+	for (int i = 0; i < count; ++i) ScanDir(roots[i], 0, wait);
 	RescoreMultiFlags();
-	if (wait) { DestroyWindow(wait); if (g_waitWnd == wait) g_waitWnd = NULL; }
+	if (wait) DestroyWait(wait);
 	SaveCache();
 	g_scanInvalid = 0; g_scanReady = 1;
 	return 0;
@@ -4305,20 +4663,71 @@ static void SendGmGsReset(AEffect* effect, Vst3Inst* vst3, int preferGs)
 			Vst3MidiShort(vst3, (0xb0 | ch) | (121 << 8), 0);
 			Vst3MidiShort(vst3, (0xb0 | ch) | (123 << 8), 0);
 		}
+		if (preferGs == 2)
+			Vst3MidiSysex(vst3, xgOn, (int)sizeof(xgOn), 0);
+		else if (g_eng.songGm)
+			Vst3MidiSysex(vst3, gmOn, (int)sizeof(gmOn), 0);
+		else if (preferGs == 1)
+			Vst3MidiSysex(vst3, gsReset, (int)sizeof(gsReset), 0);
+		else {
+			Vst3MidiSysex(vst3, gmOn, (int)sizeof(gmOn), 0);
+			Vst3MidiSysex(vst3, gsReset, (int)sizeof(gsReset), 0);
+		}
 		PumpSilent(NULL, vst3, 2);
 	}
-	if (preferGs == 1 && g_eng.gsMapLsb >= 1 && g_eng.gsMapLsb <= 4) {
-		MidiItem mapcc[16] = {};
-		for (int ch = 0; ch < 16; ++ch)
-			mapcc[ch].msg = (0xb0 | ch) | (32 << 8) | ((DWORD)g_eng.gsMapLsb << 16);
-		if (effect) SendVstEvents(effect, mapcc, 16, 0);
+	if (preferGs != 2 && !g_eng.songGm) {
+		BYTE rhy[11];
+		GsFillRhythmDt1(rhy, 0x40);
+		if (effect) SendVstSysex(effect, rhy, 11, 0);
+		if (vst3) Vst3MidiSysex(vst3, rhy, 11, 0);
+		if (g_eng.midiOut && effect == g_eng.effect)
+			MapperSysex(g_eng.midiOut, rhy, 11);
+		PumpSilent(effect, vst3, 1);
+	}
+	if (preferGs == 2) {
+		const DWORD msb = 0xb9 | (0u << 8) | (127u << 16);
+		const DWORD lsb = 0xb9 | (32u << 8);
+		if (effect) {
+			MidiItem cc[2] = {};
+			cc[0].msg = msb; cc[1].msg = lsb;
+			SendVstEvents(effect, cc, 2, 0);
+		}
 		if (vst3) {
-			for (int ch = 0; ch < 16; ++ch)
-				Vst3MidiShort(vst3, mapcc[ch].msg, 0);
+			Vst3MidiShort(vst3, msb, 0);
+			Vst3MidiShort(vst3, lsb, 0);
 		}
 		if (g_eng.midiOut && effect == g_eng.effect) {
-			for (int ch = 0; ch < 16; ++ch)
-				midiOutShortMsg(g_eng.midiOut, mapcc[ch].msg);
+			midiOutShortMsg(g_eng.midiOut, msb);
+			midiOutShortMsg(g_eng.midiOut, lsb);
+		}
+	} else if (g_eng.songGm == 2) {
+		const DWORD msb = 0xb9 | (0u << 8) | (120u << 16);
+		const DWORD lsb = 0xb9 | (32u << 8);
+		if (effect) {
+			MidiItem cc[2] = {};
+			cc[0].msg = msb; cc[1].msg = lsb;
+			SendVstEvents(effect, cc, 2, 0);
+		}
+		if (vst3) {
+			Vst3MidiShort(vst3, msb, 0);
+			Vst3MidiShort(vst3, lsb, 0);
+		}
+	}
+	if (preferGs == 1 && g_eng.gsMapLsb >= 1 && g_eng.gsMapLsb <= 4) {
+		MidiItem mapcc[15] = {};
+		int nmap = 0;
+		for (int ch = 0; ch < 16; ++ch) {
+			if (ch == 9) continue;
+			mapcc[nmap++].msg = (0xb0 | ch) | (32 << 8) | ((DWORD)g_eng.gsMapLsb << 16);
+		}
+		if (effect) SendVstEvents(effect, mapcc, nmap, 0);
+		if (vst3) {
+			for (int i = 0; i < nmap; ++i)
+				Vst3MidiShort(vst3, mapcc[i].msg, 0);
+		}
+		if (g_eng.midiOut && effect == g_eng.effect) {
+			for (int i = 0; i < nmap; ++i)
+				midiOutShortMsg(g_eng.midiOut, mapcc[i].msg);
 		}
 	}
 }
@@ -4720,10 +5129,9 @@ static int CollectMultiCandidates(wchar_t out[][VST_PATH_CHARS], int max)
 	wchar_t roots[16][VST_PATH_CHARS];
 	int nroots = 0;
 	static const wchar_t* fixed[] = {
+		L"C:\\Program Files\\Common Files\\VST3",
 		L"C:\\Program Files\\Steinberg\\VstPlugins",
 		L"C:\\Program Files\\Steinberg\\VSTPlugins",
-		L"C:\\Roland VS\\64",
-		L"C:\\Roland VS",
 		L"C:\\Program Files\\Roland\\SOUND Canvas VA",
 		L"C:\\Program Files (x86)\\Roland\\SOUND Canvas VA",
 		L"C:\\Yamaha\\S-YXG50",
@@ -4739,10 +5147,19 @@ static int CollectMultiCandidates(wchar_t out[][VST_PATH_CHARS], int max)
 	}
 	if (savedata.vstExtraPath[0] && nroots < 16)
 		SafeCopy(roots[nroots++], VST_PATH_CHARS, savedata.vstExtraPath);
+	if (savedata.vstMultiDll[0] && DirExists(savedata.vstMultiDll) && nroots < 16)
+		SafeCopy(roots[nroots++], VST_PATH_CHARS, savedata.vstMultiDll);
 	for (int i = 0; i < (int)(sizeof(fixed) / sizeof(fixed[0])) && nroots < 16; ++i)
 		SafeCopy(roots[nroots++], VST_PATH_CHARS, fixed[i]);
 
 	int count = 0;
+	if (savedata.vstMultiDll[0] && count < max) {
+		DWORD a = GetFileAttributesW(savedata.vstMultiDll);
+		if (a != INVALID_FILE_ATTRIBUTES && !(a & FILE_ATTRIBUTE_DIRECTORY) &&
+			EqExt(savedata.vstMultiDll, L".dll") &&
+			PeArch(savedata.vstMultiDll) == HostArch())
+			SafeCopy(out[count++], VST_PATH_CHARS, savedata.vstMultiDll);
+	}
 	for (int i = 0; i < nroots && count < max; ++i)
 		SweepDirForMulti(roots[i], 0, out, count, max);
 	return count;
@@ -5394,10 +5811,30 @@ extern "C" int VstLiveLoadPart(int part1to32,
 		p.vst3 = Vst3Open(pluginPath);
 		ok = Vst3IsOk(p.vst3);
 		if (!ok) { Vst3Close(p.vst3); p.vst3 = NULL; }
-		// Preset-based instruments (HALion Sonic, Groove Agent, SampleTank)
-		// come up with nothing loaded and stay silent no matter what you play,
-		// so start them on their first program.
-		if (ok && Vst3ProgramCount(p.vst3) > 0) { Vst3SetProgram(p.vst3, 0); p.prog = 0; }
+		// Small factory banks still get program 0 so they speak on drop.
+		// Samplers/kits the user patches themselves, and MediaBay-sized lists
+		// (HALion 7), skip it: loading entry 0 can take seconds and the user
+		// will pick a sound in the plug-in anyway.
+		if (ok) {
+			const int nprog = Vst3ProgramCount(p.vst3);
+			const int factory = IsFactoryRompler(pluginPath, pluginPath);
+			int setFirst = 0;
+			if (nprog > 0) {
+				if (NeedsUserPatch(pluginPath, pluginPath) && !factory)
+					setFirst = 0;
+				else if (nprog <= LIVE_FACTORY_PROG_MAX || factory)
+					setFirst = 1;
+			}
+			if (setFirst) {
+				Vst3SetProgram(p.vst3, 0);
+				p.prog = 0;
+			}
+			if (!Vst3IsInstrument(p.vst3)) {
+				Vst3Close(p.vst3);
+				p.vst3 = NULL;
+				ok = 0;
+			}
+		}
 	} else {
 		ok = LoadVst2(pluginPath, p.module, p.effect);
 	}
@@ -5565,6 +6002,78 @@ static void LiveActReset()
 {
 	for (int i = 0; i < 48; ++i)
 		for (int b = 0; b < 4; ++b) InterlockedExchange(&g_liveAct[i].down[b], 0);
+}
+
+enum { LIVE_TAP_SHORT_N = 2048, LIVE_TAP_SX_N = 32, LIVE_TAP_SX_B = 1024 };
+struct LiveTapShort { BYTE port; DWORD msg; };
+static LiveTapShort g_liveTapShort[LIVE_TAP_SHORT_N];
+static volatile LONG g_liveTapShortW = 0;
+static volatile LONG g_liveTapShortR = 0;
+struct LiveTapSx { BYTE port; unsigned short len; BYTE d[LIVE_TAP_SX_B]; };
+static LiveTapSx g_liveTapSx[LIVE_TAP_SX_N];
+static volatile LONG g_liveTapSxW = 0;
+static volatile LONG g_liveTapSxR = 0;
+
+extern "C" void VstLiveTapPushShort(int portIndex0to2, DWORD shortMsg)
+{
+	if (portIndex0to2 < 0) portIndex0to2 = 0;
+	if (portIndex0to2 > 2) portIndex0to2 = 2;
+	const LONG w = g_liveTapShortW;
+	if ((LONG)(w - g_liveTapShortR) >= LIVE_TAP_SHORT_N - 1) return;
+	const int i = (int)(w & (LIVE_TAP_SHORT_N - 1));
+	g_liveTapShort[i].port = (BYTE)portIndex0to2;
+	g_liveTapShort[i].msg = shortMsg;
+	MemoryBarrier();
+	g_liveTapShortW = w + 1;
+}
+
+extern "C" void VstLiveTapPushSysex(int portIndex0to2, const unsigned char* data, int bytes)
+{
+	if (!data || bytes < 2) return;
+	if (portIndex0to2 < 0) portIndex0to2 = 0;
+	if (portIndex0to2 > 2) portIndex0to2 = 2;
+	if (bytes > LIVE_TAP_SX_B) bytes = LIVE_TAP_SX_B;
+	const LONG w = g_liveTapSxW;
+	if ((LONG)(w - g_liveTapSxR) >= LIVE_TAP_SX_N - 1) return;
+	const int i = (int)(w & (LIVE_TAP_SX_N - 1));
+	g_liveTapSx[i].port = (BYTE)portIndex0to2;
+	g_liveTapSx[i].len = (unsigned short)bytes;
+	memcpy(g_liveTapSx[i].d, data, (size_t)bytes);
+	MemoryBarrier();
+	g_liveTapSxW = w + 1;
+}
+
+extern "C" int VstLiveTapStealShorts(BYTE* ports, DWORD* msgs, int maxCount)
+{
+	if (!ports || !msgs || maxCount < 1) return 0;
+	int n = 0;
+	LONG r = g_liveTapShortR;
+	const LONG w = g_liveTapShortW;
+	while (n < maxCount && r != w) {
+		const int i = (int)(r & (LIVE_TAP_SHORT_N - 1));
+		ports[n] = g_liveTapShort[i].port;
+		msgs[n] = g_liveTapShort[i].msg;
+		++n;
+		++r;
+	}
+	MemoryBarrier();
+	g_liveTapShortR = r;
+	return n;
+}
+
+extern "C" int VstLiveTapStealSysex(int* portIndex0to2, unsigned char* data, int maxBytes)
+{
+	if (!portIndex0to2 || !data || maxBytes < 1) return 0;
+	const LONG r = g_liveTapSxR;
+	if (r == g_liveTapSxW) return 0;
+	const int i = (int)(r & (LIVE_TAP_SX_N - 1));
+	int n = (int)g_liveTapSx[i].len;
+	if (n > maxBytes) n = maxBytes;
+	*portIndex0to2 = (int)g_liveTapSx[i].port;
+	if (n > 0) memcpy(data, g_liveTapSx[i].d, (size_t)n);
+	MemoryBarrier();
+	g_liveTapSxR = r + 1;
+	return n;
 }
 
 extern "C" int VstLiveActivity(int part1to32, struct VstLiveActInfo* out)
@@ -5789,22 +6298,6 @@ static double LiveProbeBothStages(int part1to32, int remote, double* outBase)
 	return rise;
 }
 
-// Romplers and kit players come up with an empty slot and expose no usable
-// program list, so they legitimately answer silence until the user picks a
-// patch in the plug-in's own browser. Judging those as broken would hide the
-// instruments the user actually reaches for, so they get their own verdict.
-static int NeedsUserPatch(const wchar_t* name, const wchar_t* path)
-{
-	static const wchar_t* keys[] = {
-		L"Groove Agent", L"Battery", L"BFD", L"Addictive Drums",
-		L"Superior Drummer", L"EZdrummer", L"MT-PowerDrumKit"
-	};
-	if (IsRomplerName(name, path)) return 1;
-	for (int i = 0; i < (int)(sizeof(keys) / sizeof(keys[0])); ++i)
-		if (NameOrPathHas(name, path, keys[i])) return 1;
-	return 0;
-}
-
 // Walk a few programs and stop at the first that speaks, for plug-ins whose
 // patches really do come from the host-visible program list.
 enum { PROBE_PROGRAM_TRIES = 6 };
@@ -5836,14 +6329,54 @@ static int LiveProbePartAudible(int part1to32, int* outPeakMilli,
 	return (rise * 1000.0 >= (double)PROBE_AUDIBLE_MILLI) ? 1 : 0;
 }
 
-// Same open/close the part grid uses on a drop. Failures leave isLiveOk at 0
-// so the host palette never offers a plug-in that would bounce on drop.
+static int LiveAlreadyDroppable(const VstPluginInfo& p, int beforeIndex)
+{
+	for (int i = 0; i < beforeIndex; ++i) {
+		const VstPluginInfo& q = g_plugins[i];
+		if (!q.isInstrument || !q.isLiveOk || q.isAudible == 0) continue;
+		if (q.arch != p.arch) continue;
+		if (_wcsicmp(q.name, p.name) == 0) return 1;
+	}
+	return 0;
+}
+
+static int LivePaletteListed(const VstPluginInfo& p)
+{
+	return (p.isInstrument && p.isLiveOk && p.isAudible != 0) ? 1 : 0;
+}
+
+// First droppable copy of a name+arch stays. Later copies are hidden even if
+// they would also drop. A copy that failed to drop is not listed, so a later
+// same-name that does drop can still take the tile.
+static int CollapseLiveDuplicates(void)
+{
+	int n = 0;
+	for (int i = 0; i < g_pluginCount; ++i) {
+		if (!LivePaletteListed(g_plugins[i])) continue;
+		for (int j = i + 1; j < g_pluginCount; ++j) {
+			if (!LivePaletteListed(g_plugins[j])) continue;
+			if (g_plugins[i].arch != g_plugins[j].arch) continue;
+			if (_wcsicmp(g_plugins[i].name, g_plugins[j].name) != 0) continue;
+			g_plugins[j].isInstrument = 0;
+			g_plugins[j].isLiveOk = 1;
+			g_plugins[j].isAudible = 0;
+			++n;
+		}
+	}
+	return n;
+}
+
+// Same open/close the part grid uses on a drop. A failed open is marked
+// checked (isLiveOk, silent) so the palette never offers it again.
 extern "C" void VstScanVerifyLiveList(HWND parentForWait)
 {
 	int todo = 0;
 	for (int i = 0; i < g_pluginCount; ++i)
 		if (g_plugins[i].isInstrument && !g_plugins[i].isLiveOk) ++todo;
-	if (!todo) return;
+	if (!todo) {
+		if (CollapseLiveDuplicates()) SaveCache();
+		return;
+	}
 
 	HWND wait = g_waitWnd;
 	int ownWait = 0;
@@ -5858,16 +6391,49 @@ extern "C" void VstScanVerifyLiveList(HWND parentForWait)
 		VstPluginInfo& p = g_plugins[i];
 		if (!p.isInstrument || p.isLiveOk) continue;
 		++done;
-		if (wait) {
-			wchar_t msg[384];
-			_snwprintf_s(msg, _TRUNCATE,
-				L"D&&D・発音確認 %d / %d\nChecking plug-ins (load + sound) %d / %d\n%s",
-				done, todo, done, todo, p.name);
-			SetWaitStatus(wait, msg);
+		if (LiveAlreadyDroppable(p, i)) {
+			if (wait) SetVerifyWait(wait, done, todo, p.name,
+				LL14(L"同名で既に載るものがあるので飛ばします", L"Same name already drops, skipping",
+					L"Même nom déjà déposable, on passe", L"Stesso nome già trascinabile, salto",
+					L"El mismo nombre ya se puede soltar, se omite", L"같은 이름이 이미 드롭되므로 건너뜁니다",
+					L"同名已可拖放，跳过", L"نفس الاسم قابل للإفلات، يتم التخطي",
+					L"То же имя уже ставится, пропуск", L"Gleicher Name schon ablegbar, übersprungen",
+					L"O mesmo nome já larga, a saltar", L"Dezelfde naam is al te droppen, overgeslagen",
+					L"Ta sama nazwa już się kładzie, pomijam", L"Aynı ad zaten bırakılabiliyor, atlanıyor"));
+			p.isInstrument = 0;
+			p.isLiveOk = 1;
+			p.isAudible = 0;
+			changed = 1;
+			continue;
 		}
 		if (IsFxNotInstrument(p.name, p.path)) {
+			if (wait) SetVerifyWait(wait, done, todo, p.name,
+				LL14(L"エフェクトのため一覧から外します", L"FX, skipping",
+					L"Effet, on passe", L"Effetto, salto", L"Efecto, se omite",
+					L"이펙트라 목록에서 뺍니다", L"效果器，从列表去掉", L"تأثير، يتم التخطي",
+					L"Эффект, пропуск", L"Effekt, übersprungen", L"Efeito, a saltar",
+					L"Effect, overgeslagen", L"Efekt, pomijam", L"Efekt, atlanıyor"));
 			p.isInstrument = 0;
 			changed = 1;
+			continue;
+		}
+		const int factory = IsFactoryRompler(p.name, p.path);
+		if (NeedsUserPatch(p.name, p.path) && !factory) {
+			// Opening Groove Agent / HALion 7 / Kontakt just to see that they
+			// load can take many seconds, and the user still has to pick a
+			// patch. Listing them as "needs patch" is the drop check.
+			if (wait) SetVerifyWait(wait, done, todo, p.name,
+				LL14(L"音色選択として即確認", L"Needs a patch (instant)",
+					L"Timbre à choisir (immédiat)", L"Serve una patch (subito)",
+					L"Hay que elegir timbre (al instante)", L"음색 선택으로 즉시 확인",
+					L"作为选音色立即确认", L"يحتاج رقعة (فوري)",
+					L"Нужен патч (сразу)", L"Patch wählen (sofort)", L"Precisa de timbre (já)",
+					L"Patch kiezen (meteen)", L"Trzeba barwy (od razu)", L"Yama gerekir (anında)"));
+			p.isAudible = 2;
+			p.probePeakMilli = 0;
+			p.isLiveOk = 1;
+			changed = 1;
+			EnsLog(L"verify NEEDS-PATCH instant path=%s", p.path);
 			continue;
 		}
 		int part = 0;
@@ -5878,49 +6444,93 @@ extern "C" void VstScanVerifyLiveList(HWND parentForWait)
 			// entry unchecked so a later verify can finish the job.
 			continue;
 		}
-		if (VstLiveLoadPart(part, p.path, p.isVst3) == 0) {
-			int milli = 0, base = 0, prog = -1;
-			const int wasRemote = g_eng.live[part - 1].remote;
-			// Cycling programs on a sampler costs seconds and proves nothing,
-			// since its patches do not live in the program list.
-			const int needsPatch = NeedsUserPatch(p.name, p.path);
-			p.isAudible = LiveProbePartAudible(part, &milli, &base, &prog,
-				needsPatch ? 0 : 1);
-			if (!p.isAudible && needsPatch) p.isAudible = 2;
-			p.probePeakMilli = milli;
+		if (wait) SetVerifyWait(wait, done, todo, p.name,
+			LL14(L"音源を開いています…", L"Opening…",
+				L"Ouverture…", L"Apertura…", L"Abriendo…", L"음원을 여는 중…",
+				L"正在打开音源…", L"جارٍ الفتح…", L"Открытие…", L"Wird geöffnet…",
+				L"A abrir…", L"Openen…", L"Otwieranie…", L"Açılıyor…"));
+		if (VstLiveLoadPart(part, p.path, p.isVst3) != 0) {
+			if (wait) SetVerifyWait(wait, done, todo, p.name,
+				LL14(L"載せられないため一覧から外します", L"Cannot drop, skipping",
+					L"Non déposable, on passe", L"Non trascinabile, salto",
+					L"No se puede soltar, se omite", L"드롭할 수 없어 목록에서 뺍니다",
+					L"无法拖放，从列表去掉", L"تعذر الإفلات، يتم التخطي",
+					L"Не ставится, пропуск", L"Nicht ablegbar, übersprungen",
+					L"Não larga, a saltar", L"Niet te droppen, overgeslagen",
+					L"Nie da się upuścić, pomijam", L"Bırakılamıyor, atlanıyor"));
+			p.isInstrument = 0;
+			p.isLiveOk = 1;
+			p.isAudible = 0;
+			changed = 1;
+			continue;
+		}
+		int milli = 0, base = 0, prog = -1;
+		const int wasRemote = g_eng.live[part - 1].remote;
+		int needsPatch = 0;
+		if (!factory) {
+			const int nprog = VstLiveProgramCount(part);
+			if (nprog > LIVE_FACTORY_PROG_MAX) needsPatch = 1;
+		}
+		if (needsPatch) {
+			if (wait) SetVerifyWait(wait, done, todo, p.name,
+				LL14(L"音色選択として確認", L"Needs a patch",
+					L"Timbre à choisir", L"Serve una patch", L"Hay que elegir timbre",
+					L"음색 선택으로 확인", L"作为选音色确认", L"يحتاج رقعة",
+					L"Нужен патч", L"Patch wählen", L"Precisa de timbre",
+					L"Patch kiezen", L"Trzeba barwy", L"Yama gerekir"));
+			p.isAudible = 2;
+			p.probePeakMilli = 0;
 			VstLiveUnloadPart(part);
 			p.isLiveOk = 1;
 			changed = 1;
-			EnsLog(L"verify %s part=%d remote=%d peak=%d base=%d prog=%d "
-				L"(per 1000) path=%s",
-				p.isAudible == 1 ? L"SOUND" :
-				(p.isAudible == 2 ? L"NEEDS-PATCH" : L"SILENT"),
-				part, wasRemote, milli, base, prog, p.path);
-		} else {
-			p.isInstrument = 0;
-			changed = 1;
+			EnsLog(L"verify NEEDS-PATCH skip-probe part=%d remote=%d path=%s",
+				part, wasRemote, p.path);
+			continue;
 		}
+		if (wait) SetVerifyWait(wait, done, todo, p.name,
+			LL14(L"発音を確認しています…", L"Checking sound…",
+				L"Vérification du son…", L"Controllo del suono…", L"Comprobando el sonido…",
+				L"발음을 확인하는 중…", L"正在确认发音…", L"جارٍ التحقق من الصوت…",
+				L"Проверка звука…", L"Klang wird geprüft…", L"A verificar o som…",
+				L"Geluid controleren…", L"Sprawdzanie dźwięku…", L"Ses kontrol ediliyor…"));
+		p.isAudible = LiveProbePartAudible(part, &milli, &base, &prog, 0);
+		p.probePeakMilli = milli;
+		VstLiveUnloadPart(part);
+		if (!p.isAudible && factory) p.isAudible = 2;
+		p.isLiveOk = 1;
+		changed = 1;
+		if (wait && p.isAudible == 1)
+			SetVerifyWait(wait, done, todo, p.name,
+				LL14(L"発音OK", L"Sounds", L"Ça sonne", L"Suona", L"Suena",
+					L"발음 OK", L"发音正常", L"يصدر صوتًا", L"Звучит", L"Klingt",
+					L"Soa", L"Klinkt", L"Gra", L"Ses var"));
+		EnsLog(L"verify %s part=%d remote=%d peak=%d base=%d prog=%d "
+			L"(per 1000) path=%s",
+			p.isAudible == 1 ? L"SOUND" :
+			(p.isAudible == 2 ? L"NEEDS-PATCH" : L"SILENT"),
+			part, wasRemote, milli, base, prog, p.path);
 	}
-	if (ownWait && wait) {
-		DestroyWindow(wait);
-		if (g_waitWnd == wait) g_waitWnd = NULL;
-	}
+	if (ownWait && wait) DestroyWait(wait);
+	if (CollapseLiveDuplicates()) changed = 1;
 	if (changed) SaveCache();
 }
 
 
-// Multi-timbral (SC-VA / SGP2 etc.): one instance receives all channels.
-// Prefer the instance inside this port's 16-part block, so two multi instances
-// on different blocks stay separated; otherwise fall back to the first one
-// anywhere, as a single instance must hear every port.
+static int LivePartLoaded(int part)
+{
+	if (part < 0 || part >= 32) return 0;
+	const LivePart& p = g_eng.live[part];
+	return (p.effect || p.vst3 || p.remote) ? 1 : 0;
+}
+
+// Multi-timbral (SC-VA / SGP2 etc.): one instance receives all 16 channels
+// of its port block. The VST host UI covers only that block (parts 1–16 or
+// 17–32), so a module on A must not steal MIDI meant for empty B slots.
 static int LiveMultiPart(int portIndex0to2)
 {
 	const int blockStart = portIndex0to2 * 16;
 	for (int i = blockStart; i < blockStart + 16 && i < 32; ++i)
-		if (g_eng.live[i].isMulti && (g_eng.live[i].effect || g_eng.live[i].vst3))
-			return i;
-	for (int i = 0; i < 32; ++i)
-		if (g_eng.live[i].isMulti && (g_eng.live[i].effect || g_eng.live[i].vst3))
+		if (g_eng.live[i].isMulti && LivePartLoaded(i))
 			return i;
 	return -1;
 }
@@ -6326,15 +6936,18 @@ extern "C" void VstLiveThruPoll(__int64 playSample)
 extern "C" void VstLiveMidiShort(int portIndex0to2, DWORD shortMsg)
 {
 	if (portIndex0to2 < 0 || portIndex0to2 > 2) return;
+	const int chPart = portIndex0to2 * 16 + (int)(shortMsg & 15);
+	EnterCriticalSection(&g_eng.cs);
+	const int multi = LiveMultiPart(portIndex0to2);
+	const int part = (multi >= 0) ? multi : chPart;
+	const int occupied = (multi >= 0) || LivePartLoaded(chPart);
+	if (occupied && part >= 0 && part < 32)
+		LivePendPush(g_eng.live[part], LiveSendMsg(g_eng.live[part], shortMsg));
+	LeaveCriticalSection(&g_eng.cs);
+	if (!occupied) return;
 	// Remote parts route inside KpiHost64, which holds the same part layout.
 	LiveActTrack(portIndex0to2, shortMsg);
 	LiveRemoteMidi(portIndex0to2, shortMsg);
-	EnterCriticalSection(&g_eng.cs);
-	int part = LiveMultiPart(portIndex0to2);
-	if (part < 0) part = portIndex0to2 * 16 + (int)(shortMsg & 15);
-	if (part < 32)
-		LivePendPush(g_eng.live[part], LiveSendMsg(g_eng.live[part], shortMsg));
-	LeaveCriticalSection(&g_eng.cs);
 }
 
 extern "C" int VstLiveSendChannel(int part1to32)
@@ -6510,9 +7123,14 @@ extern "C" void VstLiveMidiSysex(int portIndex0to2, const unsigned char* data,
 #endif
 	EnterCriticalSection(&g_eng.cs);
 	int part = LiveMultiPart(portIndex0to2);
-	if (part < 0) part = portIndex0to2 * 16;
+	if (part < 0) {
+		const int b0 = portIndex0to2 * 16;
+		for (int i = b0; i < b0 + 16 && i < 32; ++i)
+			if (LivePartLoaded(i)) { part = i; break; }
+	}
 	// Queued with the notes so a GS reset cannot wipe the events around it.
-	if (part < 32) LivePendPushSysex(g_eng.live[part], data, bytes);
+	if (part >= 0 && part < 32)
+		LivePendPushSysex(g_eng.live[part], data, bytes);
 	LeaveCriticalSection(&g_eng.cs);
 }
 

@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cstdlib>
 
+#include "kpihost_stdafx.h"
 #include "..\kpi_decoder.h"
 #include "..\kmp_pi.h"
 #include "..\kpi_host_ipc.h"
@@ -977,6 +978,11 @@ static void ServeOnce(HANDLE pipe)
 
 		switch (h.cmd) {
 		case KPIHOST64_CMD_PING:
+			if (payload.size() >= sizeof(uint32_t)) {
+				int lang = (int)*(const uint32_t*)payload.data();
+				if (lang < 0 || lang > 13) lang = 1;
+				savedata.lang = lang;
+			}
 			status = KPIHOST64_STATUS_OK;
 			break;
 		case KPIHOST64_CMD_LIST_EXTS: {

@@ -105,6 +105,7 @@ int VstMidiGsMapDropFromUsed(const unsigned short* pairs, int nPairs);
 
 // Live MIDI を曲エンジンへ差し込む（モニタの CC / 鍵盤）。キューして次のブロックで送る。
 void VstMidiInjectShort(int portIndex0to2, DWORD shortMsg, int sampleOfs);
+void VstMidiInjectSysex(int portIndex0to2, const unsigned char* data, int bytes);
 // x86→KpiHost64: 曲レンダーに乗せるためキューを奪う。ローカル再生では呼ばない。
 int VstMidiStealInjects(BYTE* ports, DWORD* msgs, int* sampleOfs, int maxCount);
 
@@ -149,6 +150,13 @@ struct VstLiveActInfo {
 int VstLiveActivity(int part1to32, struct VstLiveActInfo* out);
 // Last system exclusive seen, already summarised for display.
 int VstLiveSysexInfo(wchar_t* out, int chars, int* ageMs);
+
+// Hardware / PC-keyboard MIDI that the VST host actually sent (not SMF thru).
+// The MIDI monitor drains these on its UI timer.
+void VstLiveTapPushShort(int portIndex0to2, DWORD shortMsg);
+void VstLiveTapPushSysex(int portIndex0to2, const unsigned char* data, int bytes);
+int VstLiveTapStealShorts(BYTE* ports, DWORD* msgs, int maxCount);
+int VstLiveTapStealSysex(int* portIndex0to2, unsigned char* data, int maxBytes);
 
 #ifdef __cplusplus
 }

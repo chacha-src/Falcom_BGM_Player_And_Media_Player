@@ -109,6 +109,7 @@ void KpiHost64Client::Disconnect()
 		CloseHandle(m_hPipe);
 		m_hPipe = INVALID_HANDLE_VALUE;
 	}
+	m_sentLang = -1;
 }
 
 bool KpiHost64Client::StartHostProcess()
@@ -175,14 +176,44 @@ bool KpiHost64Client::ConnectPipe(bool waitForHost)
 	return false;
 }
 
+static int HostLangCode()
+{
+	int lang = savedata.lang;
+	if (lang < 0 || lang > 13) lang = 1;
+	return lang;
+}
+
+bool KpiHost64Client::SyncHostLang()
+{
+	if (m_hPipe == INVALID_HANDLE_VALUE) return false;
+	const int lang = HostLangCode();
+	if (m_sentLang == lang) return true;
+	if (m_syncingLang) return true;
+	m_syncingLang = 1;
+	m_sentLang = lang;
+	uint32_t v = (uint32_t)lang;
+	std::vector<uint8_t> reply;
+	uint32_t st = 0;
+	const bool ok = SendRequest(KPIHOST64_CMD_PING, &v, sizeof(v), reply, st) &&
+		st == KPIHOST64_STATUS_OK;
+	m_syncingLang = 0;
+	if (!ok) m_sentLang = -1;
+	return ok;
+}
+
 bool KpiHost64Client::EnsureConnected()
 {
-	if (m_hPipe != INVALID_HANDLE_VALUE) return true;
-	// No pipe means no host yet: retrying first only delays the launch, which
-	// the first .mid of a session waits on.
-	if (ConnectPipe(false)) return true;
-	StartHostProcess();
-	return ConnectPipe(true);
+	if (m_hPipe == INVALID_HANDLE_VALUE) {
+		// No pipe means no host yet: retrying first only delays the launch, which
+		// the first .mid of a session waits on.
+		if (!ConnectPipe(false)) {
+			StartHostProcess();
+			if (!ConnectPipe(true)) return false;
+		}
+		m_sentLang = -1;
+	}
+	if (m_syncingLang) return true;
+	return SyncHostLang();
 }
 
 namespace {
@@ -297,7 +328,9 @@ bool KpiHost64Client::Ping()
 {
 	std::vector<uint8_t> reply;
 	uint32_t st = 0;
-	if (!SendRequest(KPIHOST64_CMD_PING, NULL, 0, reply, st)) return false;
+	uint32_t lang = (uint32_t)HostLangCode();
+	if (!SendRequest(KPIHOST64_CMD_PING, &lang, sizeof(lang), reply, st)) return false;
+	if (st == KPIHOST64_STATUS_OK) m_sentLang = (int)lang;
 	return st == KPIHOST64_STATUS_OK;
 }
 
