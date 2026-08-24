@@ -807,7 +807,6 @@ void CMidiMonitorDlg::ResetParts()
 	m_noteCount = 0;
 	m_notesPeak = 0;
 	m_notesPeakHold = 0;
-	m_masterVol = 100;
 	m_dirtyRows = 0xFFFFFFFFu;
 	m_dirtyHead = true;
 	m_fullDraw = true;
@@ -1040,8 +1039,10 @@ void CMidiMonitorDlg::LoadCurrentMidi()
 	if (!mid[0] && src)
 		MmCopyW(mid, 520, src);
 	if (!mid[0]) {
-		UnloadMidi();
-		ResetParts();
+		if (m_loadedPath[0]) {
+			UnloadMidi();
+			ResetParts();
+		}
 		return;
 	}
 	if (_wcsicmp(m_loadedPath, mid) == 0)
@@ -1614,14 +1615,11 @@ void CMidiMonitorDlg::TickVisuals()
 
 int CMidiMonitorDlg::AppVolPercent() const
 {
-	int mn = -498, mx = 1;
-	if (og && og->m_dsval.GetSafeHwnd())
-		og->m_dsval.GetRange(mn, mx);
-	if (mx <= mn) return 100;
+	/* MP の DirectSound 表示と同じ: (pos + 499) * 2 / 10 ＝ 0.2% 刻み */
 	int pos = savedata.dsvol;
 	if (og && og->m_dsval.GetSafeHwnd())
 		pos = og->m_dsval.GetPos();
-	int pct = (pos - mn) * 100 / (mx - mn);
+	int pct = (pos + 499) / 5;
 	if (pct < 0) pct = 0;
 	if (pct > 100) pct = 100;
 	return pct;
@@ -1631,15 +1629,13 @@ void CMidiMonitorDlg::SetAppVolPercent(int pct)
 {
 	if (pct < 0) pct = 0;
 	if (pct > 100) pct = 100;
-	int mn = -498, mx = 1;
-	if (og && og->m_dsval.GetSafeHwnd())
-		og->m_dsval.GetRange(mn, mx);
-	if (mx <= mn) return;
-	const int pos = mn + pct * (mx - mn) / 100;
+	int pos = pct * 5 - 499;
+	if (pos < -498) pos = -498;
+	if (pos > 1) pos = 1;
+	if (pos == 0) pos = 1;
 	if (og && og->m_dsval.GetSafeHwnd())
 		og->m_dsval.SetPos(pos);
 	savedata.dsvol = pos;
-	if (savedata.dsvol == 0) savedata.dsvol = 1;
 	m_masterVol = pct;
 	m_dirtyHead = true;
 }
@@ -2012,6 +2008,7 @@ BOOL CMidiMonitorDlg::OnInitDialog()
 	SyncSoft3DFromSave();
 	ResetParts();
 	MmEnsureDat();
+	PollAppVolume();
 
 	const UINT dpi = WindowDpi();
 	int dw = Scale(1180, dpi), dh = Scale(720, dpi);
@@ -2179,9 +2176,9 @@ void CMidiMonitorDlg::OnTimer(UINT_PTR nIDEvent)
 			if (!m_frozen) {
 				SyncFromPlayback();
 				TickVisuals();
-				if (!m_volDragging)
-					PollAppVolume();
 			}
+			if (!m_volDragging)
+				PollAppVolume();
 			InvalidateDirty();
 		}
 	}
@@ -2213,6 +2210,7 @@ void CMidiMonitorDlg::OnShowWindow(BOOL bShow, UINT nStatus)
 	CCustomBlurDialogExBase::OnShowWindow(bShow, nStatus);
 	if (bShow) {
 		LoadCurrentMidi();
+		PollAppVolume();
 		Invalidate(FALSE);
 	}
 }
