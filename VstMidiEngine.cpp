@@ -198,13 +198,30 @@ extern "C" int VstMidiSysexIsGmOn(const unsigned char* d, int n)
 extern "C" int VstMidiSysexIsGsReset(const unsigned char* d, int n)
 {
 	if (!d || n < 11 || d[0] != 0xf0 || d[1] != 0x41) return 0;
-	return (d[3] == 0x42 && d[4] == 0x12 && d[5] == 0x40 && d[6] == 0x00 && d[7] == 0x7f) ? 1 : 0;
+	if (d[3] != 0x42 || d[4] != 0x12) return 0;
+	if (d[5] == 0x40 && d[6] == 0x00 && d[7] == 0x7f) return 1;
+	if (d[5] == 0x00 && d[6] == 0x00 && d[7] == 0x7f) return 1;
+	return 0;
 }
 
 extern "C" int VstMidiSysexIsXgOn(const unsigned char* d, int n)
 {
 	if (!d || n < 9 || d[0] != 0xf0 || d[1] != 0x43) return 0;
 	return (d[3] == 0x4c && d[4] == 0x00 && d[5] == 0x00 && d[6] == 0x7e) ? 1 : 0;
+}
+
+extern "C" int VstMidiSysexMarksGs32(const unsigned char* d, int n)
+{
+	if (!d || n < 8 || d[0] != 0xf0) return 0;
+	if (d[1] == 0x41 && n >= 11 && d[3] == 0x42 && d[4] == 0x12) {
+		const BYTE a0 = d[5], a1 = d[6], a2 = d[7];
+		if (a0 == 0x50) return 1;
+		if (a0 == 0x00 && a1 == 0x01 && a2 >= 0x10 && a2 <= 0x1f) return 1;
+		if (a0 == 0x00 && a1 == 0x01 && a2 == 0x00 && n >= 12 && d[8] == 0x01) return 1;
+		return 0;
+	}
+	if (d[1] == 0x43 && n >= 8 && d[3] == 0x4c && d[4] == 0x09) return 1;
+	return 0;
 }
 
 extern "C" int VstMidiBankMsbIsSdNative(int msb)
@@ -338,6 +355,7 @@ struct MidiItem {
 	DWORD aux; // tempo usec/qn, or sysex byte length
 	int port; // SMF MIDI Port meta (FF 21): 0=ch1-16, 1=17-32, 2=33-48
 	int sysexOff; // offset into EngineState::sysexData; -1 if not sysex
+	int seq; // parse order; same-tick tie-break so qsort stays stable
 };
 
 struct Voice {
@@ -435,6 +453,7 @@ struct EngineState {
 	BYTE* sysexData;
 	int sysexBytes;
 	int maxMidiPort; // highest FF 21 port seen (0=16ch only)
+	int mirrorToB;   // GS/XG 32-part with no FF 21: copy ch MIDI to unit B
 	int usingBuiltin;
 	int useEnsemble;
 	int useDrums;
@@ -463,7 +482,7 @@ struct EngineState {
 		eventCount(0), eventPos(0), playSample(0), lengthSamples(0),
 		module(NULL), effect(NULL), vst3(NULL),
 		moduleB(NULL), effectB(NULL), moduleC(NULL), effectC(NULL), vst3C(NULL),
-		sysexData(NULL), sysexBytes(0), maxMidiPort(0), usingBuiltin(1),
+		sysexData(NULL), sysexBytes(0), maxMidiPort(0), mirrorToB(0), usingBuiltin(1),
 		useEnsemble(0), useDrums(0), useMapper(0), midiOut(NULL), mixCount(0),
 		ringRead(0), ringCount(0), gmResetMode(0), gsMapLsb(0), songGm(0)
 	{
@@ -1220,15 +1239,21 @@ static int MidiCmp(const void* aa, const void* bb)
 	const MidiItem* b = (const MidiItem*)bb;
 	if (a->tick < b->tick) return -1;
 	if (a->tick > b->tick) return 1;
-	// Same tick: tempo → bank → other CC → program → bend → note off → note on.
-	const int ra = MidiStatusRank(a->msg), rb = MidiStatusRank(b->msg);
-	if (ra < rb) return -1;
-	if (ra > rb) return 1;
-	const int ca = (int)(a->msg & 15), cb = (int)(b->msg & 15);
-	if (ca < cb) return -1;
-	if (ca > cb) return 1;
+	/* Setup (tempo / sysex / CC / PC / bend) before notes at the same tick.
+	 * Do not pull note-off ahead of note-on: a zero-length 9x/9x-vel0 pair
+	 * then becomes off-then-on, the off kills the previous key, and the new
+	 * on never sees its off — voices hang one by one on busy SMFs. */
+	const int ga = (MidiStatusRank(a->msg) < 50) ? 0 : 1;
+	const int gb = (MidiStatusRank(b->msg) < 50) ? 0 : 1;
+	if (ga < gb) return -1;
+	if (ga > gb) return 1;
+	if (a->seq < b->seq) return -1;
+	if (a->seq > b->seq) return 1;
 	return 0;
 }
+
+static void RxListenInit();
+static void RxChReset();
 
 static int LoadSmf(const wchar_t* path)
 {
@@ -1273,6 +1298,9 @@ static int LoadSmf(const wchar_t* path)
 	int sxUsed = 0;
 	int count = 0;
 	int maxPort = 0;
+	int sawFf21 = 0;
+	int gs32 = 0;
+	unsigned __int64 maxTick = 0;
 	wchar_t metaTitle[280];
 	metaTitle[0] = 0;
 	int hasXg = 0;
@@ -1308,10 +1336,14 @@ static int LoadSmf(const wchar_t* path)
 					ev[count].aux = ReadBE(q, 3);
 					ev[count].port = curPort;
 					ev[count].sysexOff = -1;
+					ev[count].seq = count;
 					++count;
 				} else if (type == 0x21 && ml >= 1) {
-					// RP-019 MIDI Port Prefix — port A/B/... for 32ch modules.
+					// RP-019 MIDI Port Prefix — port A/B/C for 16/32/48ch modules.
 					curPort = (int)q[0];
+					if (curPort < 0) curPort = 0;
+					if (curPort > 2) curPort = 2;
+					sawFf21 = 1;
 					if (curPort > maxPort) maxPort = curPort;
 				} else if ((type == 0x01 || type == 0x02 || type == 0x03) && ml > 0) {
 					char tmp[256];
@@ -1349,10 +1381,12 @@ static int LoadSmf(const wchar_t* path)
 					ev[count].aux = (DWORD)need;
 					ev[count].port = curPort;
 					ev[count].sysexOff = off;
+					ev[count].seq = count;
 					++count;
 					if (need >= 6) {
 						const BYTE* sx = sxData + off;
 						if (VstMidiSysexIsXgOn(sx, need)) hasXg = 1;
+						if (VstMidiSysexMarksGs32(sx, need)) gs32 = 1;
 					}
 				}
 				q += sl;
@@ -1369,10 +1403,12 @@ static int LoadSmf(const wchar_t* path)
 					ev[count].aux = 0;
 					ev[count].port = curPort;
 					ev[count].sysexOff = -1;
+					ev[count].seq = count;
 					++count;
 				}
 			}
 		}
+		if (tick > maxTick) maxTick = tick;
 		p = end;
 	}
 	if (!count) {
@@ -1382,13 +1418,20 @@ static int LoadSmf(const wchar_t* path)
 	unsigned __int64 lastTick = 0;
 	unsigned tempo = 500000;
 	__int64 sample = 0;
+	unsigned __int64 rem = 0;
+	const unsigned __int64 den = (unsigned __int64)division * 1000000ULL;
 	for (int i = 0; i < count; ++i) {
 		const unsigned __int64 dt = ev[i].tick - lastTick;
-		sample += (__int64)((dt * tempo * (unsigned __int64)SAMPLE_RATE) /
-			((unsigned __int64)division * 1000000ULL));
+		rem += dt * (unsigned __int64)tempo * (unsigned __int64)SAMPLE_RATE;
+		sample += (__int64)(rem / den);
+		rem %= den;
 		ev[i].sample = sample;
 		lastTick = ev[i].tick;
 		if ((ev[i].msg & 0xff) == 0xff && ev[i].aux) tempo = ev[i].aux;
+	}
+	if (maxTick > lastTick) {
+		rem += (maxTick - lastTick) * (unsigned __int64)tempo * (unsigned __int64)SAMPLE_RATE;
+		sample += (__int64)(rem / den);
 	}
 	if (!mapHint)
 		mapHint = VstMidiGuessGsMapKind(metaTitle, path);
@@ -1475,6 +1518,7 @@ static int LoadSmf(const wchar_t* path)
 					dst[w].aux = 0;
 					dst[w].port = port;
 					dst[w].sysexOff = -1;
+					dst[w].seq = w;
 					++w;
 				}
 			}
@@ -1504,38 +1548,89 @@ static int LoadSmf(const wchar_t* path)
 	g_eng.sysexBytes = sxUsed;
 	g_eng.events = ev;
 	g_eng.eventCount = count;
+	if (gs32 && maxPort < 1) maxPort = 1;
 	g_eng.maxMidiPort = maxPort;
+	g_eng.mirrorToB = (gs32 && !sawFf21) ? 1 : 0;
+	RxListenInit();
 	/* 最後のノートの残響を鳴らし切るための余白。クロスフェードは
 	 * この余白を除いた「音の終わり」を基準にする（XfTailPadBytes）。 */
 	g_eng.lengthSamples = sample + SAMPLE_RATE * VST_TAIL_PAD_SEC;
-	EnsLog(L"LoadSmf events=%d maxPort=%d sysexBytes=%d (ports: %dch)",
-		count, maxPort, sxUsed, (maxPort + 1) * 16);
+	EnsLog(L"LoadSmf events=%d maxPort=%d gs32=%d ff21=%d mirrorB=%d sysexBytes=%d (ports: %dch)",
+		count, maxPort, gs32, sawFf21, g_eng.mirrorToB, sxUsed, (maxPort + 1) * 16);
 	return 0;
 }
 
-static void SendVstEvents(AEffect* e, const MidiItem* ev, int count,
-	__int64 blockStart)
-{
-	if (!e || !e->dispatcher || count <= 0) return;
-	struct EventBlock {
+enum { kVstMidiEventIsRealtime = 1 };
+enum { VST_PEND_N = 1024, VST_PEND_SX = 256, VST_SLICE = 64 };
+
+struct VstPendBuf {
+	struct {
 		VstInt32 numEvents;
 		VstIntPtr reserved;
-		VstEvent* events[256];
-	} block = {};
-	VstMidiEvent me[256] = {};
-	if (count > 256) count = 256;
+		VstEvent* events[VST_PEND_N];
+	} block;
+	VstMidiEvent me[VST_PEND_N];
+	VstMidiSysexEvent sx[VST_PEND_SX];
+};
+/* Must outlive processReplacing: SC-VA (and many VST2s) keep the VstEvent*
+ * pointers from processEvents and read them in process. Stack arrays were
+ * already gone, so note-offs vanished. A second MIDI player → virtual MIDI →
+ * VST host keeps a heap buffer; we do the same here. */
+static VstPendBuf g_vstPend[2][3];
+static VstPendBuf g_livePend[32];
+static MidiItem g_songEv[2][3][VST_PEND_N];
+static BYTE g_songSx[2][3][8192];
+static int g_songN[2][3];
+static __int64 g_songT0[2];
+
+static void SendVstEvents(AEffect* e, const MidiItem* ev, int count,
+	__int64 blockStart, const BYTE* sxStore = 0, int frames = BLOCK_FRAMES,
+	int unit = 0)
+{
+	if (!e || !e->dispatcher || count <= 0) return;
+	if (unit < 0) unit = 0;
+	if (unit > 2) unit = 2;
+	VstPendBuf& p = g_vstPend[VstIoSlot()][unit];
+	if (count > VST_PEND_N) count = VST_PEND_N;
+	int n = 0, nsx = 0;
+	const int last = frames > 0 ? frames - 1 : 0;
 	for (int i = 0; i < count; ++i) {
-		me[i].type = kVstMidiType;
-		me[i].byteSize = sizeof(VstMidiEvent);
 		__int64 d = ev[i].sample - blockStart;
-		me[i].deltaFrames = d < 0 ? 0 : (d > BLOCK_FRAMES ? BLOCK_FRAMES : (int)d);
-		me[i].midiData[0] = (char)(ev[i].msg & 0xff);
-		me[i].midiData[1] = (char)((ev[i].msg >> 8) & 0x7f);
-		me[i].midiData[2] = (char)((ev[i].msg >> 16) & 0x7f);
-		block.events[i] = (VstEvent*)&me[i];
+		const int delta = d < 0 ? 0 : (d > last ? last : (int)d);
+		if ((ev[i].msg & 0xff) == 0xf0 && ev[i].sysexOff >= 0 && sxStore) {
+			if (nsx >= VST_PEND_SX || n >= VST_PEND_N) continue;
+			VstMidiSysexEvent& s = p.sx[nsx++];
+			ZeroMemory(&s, sizeof(s));
+			s.type = kVstSysExType;
+			s.byteSize = sizeof(VstMidiSysexEvent);
+			s.deltaFrames = delta;
+			s.dumpBytes = (VstInt32)ev[i].aux;
+			s.sysexDump = (char*)(sxStore + ev[i].sysexOff);
+			p.block.events[n++] = (VstEvent*)&s;
+			continue;
+		}
+		if (n >= VST_PEND_N) break;
+		DWORD msg = ev[i].msg;
+		if ((msg & 0xf0) == 0x90 && ((msg >> 16) & 0x7f) == 0)
+			msg = (msg & ~0xf0u) | 0x80u;
+		if ((msg & 0xf0) == 0x80 && ((msg >> 16) & 0x7f) == 0)
+			msg |= (64u << 16);
+		VstMidiEvent& m = p.me[n];
+		ZeroMemory(&m, sizeof(m));
+		m.type = kVstMidiType;
+		m.byteSize = sizeof(VstMidiEvent);
+		m.deltaFrames = delta;
+		m.flags = kVstMidiEventIsRealtime;
+		m.midiData[0] = (char)(msg & 0xff);
+		m.midiData[1] = (char)((msg >> 8) & 0x7f);
+		m.midiData[2] = (char)((msg >> 16) & 0x7f);
+		p.block.events[n] = (VstEvent*)&m;
+		++n;
 	}
-	block.numEvents = count;
-	e->dispatcher(e, effProcessEvents, 0, 0, &block, 0);
+	p.block.numEvents = n;
+	p.block.reserved = 0;
+	if (n)
+		e->dispatcher(e, effProcessEvents, 0, 0, &p.block, 0);
 }
 
 static void MapperSysex(HMIDIOUT h, const BYTE* data, DWORD bytes);
@@ -1561,23 +1656,399 @@ static void SendVstSysex(AEffect* e, const BYTE* data, int len, int deltaFrames)
 	__except (EXCEPTION_EXECUTE_HANDLER) {}
 }
 
-// Broadcast SysEx to every active song unit (SC-88: GM/GS resets must hit both).
-static void BroadcastSongSysex(const BYTE* data, int len, int deltaFrames)
+// Roland GS DT1 checksum (bytes from address through last data byte).
+static void GsFixChecksum(BYTE* d, int n)
+{
+	if (!d || n < 10 || d[0] != 0xf0 || d[n - 1] != 0xf7) return;
+	unsigned sum = 0;
+	for (int i = 5; i < n - 2; ++i)
+		sum += d[i];
+	d[n - 2] = (BYTE)((0x80 - (sum & 0x7f)) & 0x7f);
+}
+
+static void SendUnitSysex(int unit, const BYTE* data, int len, int deltaFrames)
 {
 	if (!data || len < 2) return;
-	if (g_eng.effect) SendVstSysex(g_eng.effect, data, len, deltaFrames);
-	if (g_eng.effectB) SendVstSysex(g_eng.effectB, data, len, deltaFrames);
-	if (g_eng.effectC) SendVstSysex(g_eng.effectC, data, len, deltaFrames);
-	if (g_eng.midiOut) MapperSysex(g_eng.midiOut, data, (DWORD)len);
+	if (unit == 0) {
+		if (g_eng.effect) SendVstSysex(g_eng.effect, data, len, deltaFrames);
+	} else if (unit == 1) {
+		if (g_eng.effectB) SendVstSysex(g_eng.effectB, data, len, deltaFrames);
+	} else if (unit == 2) {
+		if (g_eng.effectC) SendVstSysex(g_eng.effectC, data, len, deltaFrames);
+	}
+}
+
+// SC-88 32/48ch: block 40 = Port A (parts 1-16), 50 = Port B (17-32), 60 = Port C.
+// Each VST instance is a 16-part module, so 50/60 must be rewritten to 40 and
+// sent only to that instance. Broadcasting 40-block to B retunes Rx/rhythm and
+// leaves notes hanging. Hardware SC-88 still gets the original dump.
+// GS 40/50 1x 15 is USE FOR RHYTHM (0=OFF, 1=MAP1, 2=MAP2), not Rx CHANNEL
+// (that is 1x 02). 1x 40 size 0C is SCALE TUNING; a fill of identical bytes is
+// legal on SC-88 but some 16-part VSTs treat it as bank/PC and hang notes.
+static int GsDt1UniformFill(const BYTE* d, int n)
+{
+	const int nd = n - 10;
+	if (!d || nd < 8) return 0;
+	const BYTE v = d[8];
+	for (int i = 1; i < nd; ++i)
+		if (d[8 + i] != v) return 0;
+	return 1;
+}
+
+static int GsDt1SkipVstScaleFill(const BYTE* d, int n)
+{
+	if (!d || n < 18) return 0;
+	if (d[0] != 0xf0 || d[1] != 0x41 || d[3] != 0x42 || d[4] != 0x12) return 0;
+	const BYTE aa = d[5], bb = d[6], cc = d[7];
+	if ((aa & 0xf0) != 0x40 && (aa & 0xf0) != 0x50 && (aa & 0xf0) != 0x60) return 0;
+	if (bb < 0x10 || bb > 0x1f || cc != 0x40) return 0;
+	return GsDt1UniformFill(d, n);
+}
+
+// Two 16-part VSTs do not share Rx CHANNEL the way one SC-88 does. Host keeps
+// the listen map. 1x 02 is sent (16-part remap: 11h–1Fh minus 10h). After 1x 15
+// (USE FOR RHYTHM) the same block sends 1x 02 from that map, not a forced
+// identity: extra drum parts often listen on a channel other than 10.
+static BYTE g_rxCh[2][3][16];
+static BYTE g_rxPort[2][3][16];
+static BYTE g_vstOn[2][3][16][128];
+static BYTE g_vstHeldFlushed[2];
+
+static int GsPartXToCh(int bb)
+{
+	const int x = bb & 0x0f;
+	if (x == 0) return 9;
+	if (x <= 9) return x - 1;
+	return x;
+}
+
+static void RxListenInit()
+{
+	const int s = VstIoSlot();
+	g_vstHeldFlushed[s] = 0;
+	for (int u = 0; u < 3; ++u) {
+		for (int p = 0; p < 16; ++p) {
+			g_rxCh[s][u][p] = (BYTE)p;
+			g_rxPort[s][u][p] = (BYTE)u;
+		}
+		ZeroMemory(g_vstOn[s][u], sizeof(g_vstOn[s][u]));
+	}
+}
+
+static void RxChReset()
+{
+	const int s = VstIoSlot();
+	g_vstHeldFlushed[s] = 0;
+	for (int u = 0; u < 3; ++u) {
+		for (int p = 0; p < 16; ++p) {
+			g_rxCh[s][u][p] = (BYTE)p;
+			g_rxPort[s][u][p] = (BYTE)u;
+		}
+		ZeroMemory(g_vstOn[s][u], sizeof(g_vstOn[s][u]));
+	}
+}
+
+static void RxListenSet(int unit, int bb, BYTE v)
+{
+	const int s = VstIoSlot();
+	const int p = GsPartXToCh(bb);
+	if (unit < 0 || unit > 2 || p < 0 || p > 15) return;
+	if (v == 0x10) {
+		g_rxCh[s][unit][p] = 16;
+		return;
+	}
+	if (v <= 0x0f) {
+		g_rxCh[s][unit][p] = v;
+		g_rxPort[s][unit][p] = 0;
+	} else if (v <= 0x1f) {
+		g_rxCh[s][unit][p] = (BYTE)(v - 0x10);
+		g_rxPort[s][unit][p] = 1;
+	} else if (v <= 0x2f) {
+		g_rxCh[s][unit][p] = (BYTE)(v - 0x20);
+		g_rxPort[s][unit][p] = 2;
+	}
+}
+
+static void RxBlockPortSet(int blk, BYTE portAB)
+{
+	const int unit = (blk >= 0x10) ? 1 : 0;
+	const int p = GsPartXToCh(0x10 | (blk & 0x0f));
+	const int s = VstIoSlot();
+	if (p < 0 || p > 15) return;
+	g_rxPort[s][unit][p] = portAB ? 1 : 0;
+}
+
+static int UnitHasPlug(int unit)
+{
+	if (unit == 0) return (g_eng.effect || g_eng.vst3) ? 1 : 0;
+	if (unit == 1) return g_eng.effectB ? 1 : 0;
+	return (g_eng.effectC || g_eng.vst3C) ? 1 : 0;
+}
+
+static int PushFanout(MidiItem* batch, int n, int cap, MidiItem e, int unit)
+{
+	const int st = (int)(e.msg & 0xf0);
+	if (st < 0x80 || st > 0xe0) {
+		if (n < cap) batch[n++] = e;
+		return n;
+	}
+	const int src = (int)(e.msg & 0x0f);
+	int sport = e.port;
+	if (sport < 0) sport = 0;
+	const int s = VstIoSlot();
+	for (int p = 0; p < 16; ++p) {
+		if (g_rxCh[s][unit][p] != (BYTE)src) continue;
+		if (g_rxPort[s][unit][p] != (BYTE)sport) continue;
+		if (n >= cap) break;
+		MidiItem m = e;
+		m.msg = (e.msg & ~0x0fu) | (DWORD)p;
+		batch[n++] = m;
+	}
+	return n;
+}
+
+static int GsBuildRxDt1(BYTE* d, int unit, int bb)
+{
+	const int p = GsPartXToCh(bb);
+	const int s = VstIoSlot();
+	BYTE rv = (BYTE)p;
+	if (unit >= 0 && unit <= 2 && p >= 0 && p <= 15) {
+		const BYTE listen = g_rxCh[s][unit][p];
+		rv = (listen >= 16) ? (BYTE)0x10 : listen;
+	}
+	d[0] = 0xf0; d[1] = 0x41; d[2] = 0x10; d[3] = 0x42; d[4] = 0x12;
+	d[5] = 0x40; d[6] = (BYTE)bb; d[7] = 0x02;
+	d[8] = rv;
+	d[9] = 0; d[10] = 0xf7;
+	GsFixChecksum(d, 11);
+	return 11;
+}
+
+static int VstTrackPush(MidiItem* batch, int n, int cap, int unit, MidiItem e)
+{
+	const int s = VstIoSlot();
+	const int st = (int)(e.msg & 0xf0);
+	const int ch = (int)(e.msg & 0x0f);
+	const int note = (int)((e.msg >> 8) & 0x7f);
+	const int vel = (int)((e.msg >> 16) & 0x7f);
+	if (unit < 0 || unit > 2) {
+		if (n < cap) batch[n++] = e;
+		return n;
+	}
+	const int retrig = (st == 0x90 && vel && g_vstOn[s][unit][ch][note]) ? 1 : 0;
+	if (n + 1 + retrig > cap) return n;
+	if (retrig) {
+		MidiItem off = e;
+		off.msg = (DWORD)(0x80 | ch) | ((DWORD)note << 8);
+		batch[n++] = off;
+	}
+	if (st == 0x90 && vel)
+		g_vstOn[s][unit][ch][note] = 1;
+	else if (st == 0x80 || (st == 0x90 && vel == 0))
+		g_vstOn[s][unit][ch][note] = 0;
+	else if (st == 0xb0 && (note == 120 || note == 123))
+		ZeroMemory(g_vstOn[s][unit][ch], 128);
+	batch[n++] = e;
+	return n;
+}
+
+static int VstFlushHeld(MidiItem* batch, int n, int cap, int unit, __int64 sample)
+{
+	const int s = VstIoSlot();
+	if (unit < 0 || unit > 2) return n;
+	for (int ch = 0; ch < 16; ++ch) {
+		for (int note = 0; note < 128; ++note) {
+			if (!g_vstOn[s][unit][ch][note]) continue;
+			if (n >= cap) return n;
+			MidiItem it = {};
+			it.msg = (DWORD)(0x80 | ch) | ((DWORD)note << 8);
+			it.sample = sample;
+			it.sysexOff = -1;
+			it.port = unit;
+			batch[n++] = it;
+			g_vstOn[s][unit][ch][note] = 0;
+		}
+	}
+	return n;
+}
+
+static int VstPushCc123(MidiItem* batch, int n, int cap, int unit, __int64 sample)
+{
+	const int s = VstIoSlot();
+	if (unit < 0 || unit > 2) return n;
+	for (int ch = 0; ch < 16; ++ch) {
+		if (n >= cap) break;
+		MidiItem it = {};
+		it.msg = (DWORD)(0xb0 | ch) | (123u << 8);
+		it.sample = sample;
+		it.sysexOff = -1;
+		it.port = unit;
+		batch[n++] = it;
+		ZeroMemory(g_vstOn[s][unit][ch], 128);
+	}
+	return n;
+}
+
+static int PrepareSongSysex(const BYTE* data, int len, int smfPort,
+	BYTE* out, int outMax, int* unitsOut, int* rhyBbOut)
+{
+	if (unitsOut) *unitsOut = 0;
+	if (rhyBbOut) *rhyBbOut = -1;
+	if (!data || len < 2 || !out || outMax < len) return 0;
+	int units = 0;
+	const BYTE* vstData = data;
+	BYTE tmp[2048];
+	int skipVst = GsDt1SkipVstScaleFill(data, len);
+	int rhyBb = -1;
+
+	const int gsDt1 = (len >= 11 && data[0] == 0xf0 && data[1] == 0x41 &&
+		data[3] == 0x42 && data[4] == 0x12) ? 1 : 0;
+	if (gsDt1) {
+		const BYTE aa = data[5];
+		const BYTE bb = data[6];
+		const BYTE cc = data[7];
+		const int partRx = (bb >= 0x10 && bb <= 0x1f && cc == 0x02 && len >= 11) ? 1 : 0;
+		const int partRhy = (bb >= 0x10 && bb <= 0x1f && cc == 0x15 && len >= 11) ? 1 : 0;
+		if (aa == 0x00 && bb == 0x01 && cc <= 0x1f && len >= 11) {
+			RxBlockPortSet((int)cc, data[8]);
+			skipVst = 1;
+		} else if (aa == 0x40 && bb <= 0x01)
+			units = 1 | 2 | 4;
+		else if ((aa & 0xf0) == 0x40) {
+			units = 1;
+			if (partRx) {
+				RxListenSet(0, bb, data[8]);
+				BYTE rv = data[8];
+				if (rv > 0x10 && rv <= 0x1f) rv = (BYTE)(rv - 0x10);
+				if (rv != data[8] && len <= (int)sizeof(tmp)) {
+					memcpy(tmp, data, (size_t)len);
+					tmp[8] = rv;
+					GsFixChecksum(tmp, len);
+					vstData = tmp;
+				}
+			} else if (partRhy)
+				rhyBb = (int)bb;
+		} else if ((aa & 0xf0) == 0x50 || (aa & 0xf0) == 0x60) {
+			const int u = ((aa & 0xf0) == 0x60) ? 2 : 1;
+			units = 1 << u;
+			if (partRhy)
+				rhyBb = (int)bb;
+			if (len <= (int)sizeof(tmp)) {
+				memcpy(tmp, data, (size_t)len);
+				tmp[5] = (BYTE)(0x40 | (aa & 0x0f));
+				if (partRx && tmp[8] > 0x10 && tmp[8] <= 0x1f)
+					tmp[8] = (BYTE)(tmp[8] - 0x10);
+				GsFixChecksum(tmp, len);
+				vstData = tmp;
+			}
+			if (partRx)
+				RxListenSet(u, bb, data[8]);
+		} else
+			units = 1 | 2 | 4;
+	} else if (VstMidiSysexIsGmOn(data, len) || VstMidiSysexIsGsReset(data, len) ||
+		VstMidiSysexIsXgOn(data, len)) {
+		units = 1 | 2 | 4;
+		RxChReset();
+	} else if (len >= 8 && data[1] == 0x43 && data[3] == 0x4c && data[4] == 0x09) {
+		units = 2;
+		if (len <= (int)sizeof(tmp)) {
+			memcpy(tmp, data, (size_t)len);
+			tmp[4] = 0x08;
+			vstData = tmp;
+		}
+	} else if (len >= 8 && data[1] == 0x43 && data[3] == 0x4c && data[4] == 0x08) {
+		units = 1;
+	} else {
+		int p = smfPort;
+		if (p < 0) p = 0;
+		if (p > 2) p = 2;
+		units = 1 << p;
+	}
+
+	if (skipVst || !units) return 0;
+	if (unitsOut) *unitsOut = units;
+	if (rhyBbOut) *rhyBbOut = rhyBb;
+	memcpy(out, vstData, (size_t)len);
+	return len;
+}
+
+static void BroadcastSongSysex(const BYTE* data, int len, int deltaFrames, int smfPort)
+{
+	if (!data || len < 2) return;
+	BYTE buf[2048];
+	int units = 0, rhyBb = -1;
+	const int n = PrepareSongSysex(data, len, smfPort, buf, (int)sizeof(buf), &units, &rhyBb);
+	if (n > 0) {
+		if (units & 1) SendUnitSysex(0, buf, n, deltaFrames);
+		if (units & 2) SendUnitSysex(1, buf, n, deltaFrames);
+		if (units & 4) SendUnitSysex(2, buf, n, deltaFrames);
+		if (rhyBb >= 0) {
+			BYTE rx[11];
+			if (units & 1) {
+				GsBuildRxDt1(rx, 0, rhyBb);
+				SendUnitSysex(0, rx, 11, deltaFrames);
+			}
+			if (units & 2) {
+				GsBuildRxDt1(rx, 1, rhyBb);
+				SendUnitSysex(1, rx, 11, deltaFrames);
+			}
+			if (units & 4) {
+				GsBuildRxDt1(rx, 2, rhyBb);
+				SendUnitSysex(2, rx, 11, deltaFrames);
+			}
+		}
+	}
+	if (g_eng.midiOut)
+		MapperSysex(g_eng.midiOut, data, (DWORD)len);
+}
+
+static int MidiIsNoteMsg(DWORD msg)
+{
+	const int t = (int)(msg & 0xf0);
+	return (t == 0x80 || t == 0x90) ? 1 : 0;
+}
+
+/* Only the same key needs a 1-sample gap. Spreading every note in the block
+ * delayed an off past the next on of that key and made hangs worse. */
+static void VstPrepareBatch(MidiItem* batch, int n, __int64 start, int frames)
+{
+	if (!batch || n <= 0 || frames < 1) return;
+	const __int64 last = start + (frames - 1);
+	__int64 hold[16][128];
+	for (int ch = 0; ch < 16; ++ch)
+		for (int note = 0; note < 128; ++note)
+			hold[ch][note] = start - 1;
+	for (int i = 0; i < n; ++i) {
+		if (!MidiIsNoteMsg(batch[i].msg)) continue;
+		const int ch = (int)(batch[i].msg & 15);
+		const int note = (int)((batch[i].msg >> 8) & 0x7f);
+		__int64 s = batch[i].sample;
+		if (s <= hold[ch][note]) s = hold[ch][note] + 1;
+		if (s < start) s = start;
+		if (s > last) s = last;
+		batch[i].sample = s;
+		hold[ch][note] = s;
+	}
+	for (int i = 1; i < n; ++i) {
+		MidiItem x = batch[i];
+		int j = i;
+		while (j > 0 && batch[j - 1].sample > x.sample) {
+			batch[j] = batch[j - 1];
+			--j;
+		}
+		batch[j] = x;
+	}
 }
 
 static void FlushUnitShorts(AEffect* effect, Vst3Inst* vst3, MidiItem* batch,
-	int& n, __int64 start, int frames)
+	int& n, __int64 start, int frames, const BYTE* sxStore = 0, int unit = 0)
 {
 	if (!n) return;
-	if (effect) SendVstEvents(effect, batch, n, start);
+	VstPrepareBatch(batch, n, start, frames);
+	if (effect) SendVstEvents(effect, batch, n, start, sxStore, frames, unit);
 	if (vst3) {
 		for (int i = 0; i < n; ++i) {
+			if ((batch[i].msg & 0xff) == 0xf0) continue;
 			__int64 d = batch[i].sample - start;
 			int offset = d < 0 ? 0 : (d >= frames ? frames - 1 : (int)d);
 			Vst3MidiShort(vst3, batch[i].msg, offset);
@@ -1759,12 +2230,16 @@ static void EmitSongShort(int port, DWORD msg, __int64 start, int frames, int of
 	int n = 1;
 	if (port <= 0) {
 		if (g_eng.effect || g_eng.vst3)
-			FlushUnitShorts(g_eng.effect, g_eng.vst3, &it, n, start, frames);
+			FlushUnitShorts(g_eng.effect, g_eng.vst3, &it, n, start, frames, 0, 0);
+		if (g_eng.mirrorToB && g_eng.effectB) {
+			int n1 = 1;
+			FlushUnitShorts(g_eng.effectB, NULL, &it, n1, start, frames, 0, 1);
+		}
 	} else if (port == 1) {
 		if (g_eng.effectB)
-			FlushUnitShorts(g_eng.effectB, NULL, &it, n, start, frames);
+			FlushUnitShorts(g_eng.effectB, NULL, &it, n, start, frames, 0, 1);
 	} else if (g_eng.effectC || g_eng.vst3C) {
-		FlushUnitShorts(g_eng.effectC, g_eng.vst3C, &it, n, start, frames);
+		FlushUnitShorts(g_eng.effectC, g_eng.vst3C, &it, n, start, frames, 0, 2);
 	}
 }
 
@@ -1797,15 +2272,76 @@ static void FlushInjectQueue(__int64 start, int frames)
 
 static void DispatchDueEvents(__int64 start, int frames)
 {
-	MidiItem batch0[256], batch1[256], batch2[256];
+	/* VST2 keeps only the last processEvents in a processReplacing, so this
+	 * callback may call it once per unit. Mid-block flush dropped note-offs. */
+	enum { SONG_BATCH = 1024, SONG_SX = 8192 };
+	MidiItem batch0[SONG_BATCH], batch1[SONG_BATCH], batch2[SONG_BATCH];
+	BYTE sx0[SONG_SX], sx1[SONG_SX], sx2[SONG_SX];
 	int n0 = 0, n1 = 0, n2 = 0;
+	int u0 = 0, u1 = 0, u2 = 0;
 	const __int64 end = start + frames;
-	auto flushAll = [&]() {
-		FlushUnitShorts(g_eng.effect, g_eng.vst3, batch0, n0, start, frames);
-		FlushUnitShorts(g_eng.effectB, NULL, batch1, n1, start, frames);
-		FlushUnitShorts(g_eng.effectC, g_eng.vst3C, batch2, n2, start, frames);
+	auto pushSx = [&](int unit, const BYTE* src, int srcLen, __int64 sample, int port) {
+		if (!src || srcLen <= 0) return;
+		MidiItem* batch = (unit == 0) ? batch0 : (unit == 1 ? batch1 : batch2);
+		int* n = (unit == 0) ? &n0 : (unit == 1 ? &n1 : &n2);
+		BYTE* store = (unit == 0) ? sx0 : (unit == 1 ? sx1 : sx2);
+		int* used = (unit == 0) ? &u0 : (unit == 1 ? &u1 : &u2);
+		if (*n >= SONG_BATCH || *used + srcLen > SONG_SX) return;
+		memcpy(store + *used, src, (size_t)srcLen);
+		MidiItem it = {};
+		it.msg = 0xf0;
+		it.aux = (DWORD)srcLen;
+		it.sample = sample;
+		it.port = port;
+		it.sysexOff = *used;
+		*used += srcLen;
+		batch[(*n)++] = it;
 	};
-	FlushInjectQueue(start, frames);
+	auto routeShort = [&](MidiItem e) {
+		if ((e.msg & 0xff) == 0xff) return;
+		if (g_eng.midiOut && (e.port <= 0 || !g_eng.effectB))
+			midiOutShortMsg(g_eng.midiOut, e.msg);
+		const int port = e.port < 0 ? 0 : e.port;
+		if (port <= 0) {
+			if (UnitHasPlug(0)) n0 = VstTrackPush(batch0, n0, SONG_BATCH, 0, e);
+			if (g_eng.mirrorToB && UnitHasPlug(1))
+				n1 = VstTrackPush(batch1, n1, SONG_BATCH, 1, e);
+		} else if (port == 1) {
+			if (UnitHasPlug(1)) n1 = VstTrackPush(batch1, n1, SONG_BATCH, 1, e);
+		} else {
+			if (UnitHasPlug(2)) n2 = VstTrackPush(batch2, n2, SONG_BATCH, 2, e);
+		}
+	};
+	SongOvExpire();
+	{
+		LONG r = g_injR;
+		const LONG w = g_injW;
+		LARGE_INTEGER freq;
+		QueryPerformanceFrequency(&freq);
+		LONGLONG q0 = 0;
+		int haveQ = 0;
+		while (r != w) {
+			const int i = (int)(r & (SONG_INJ_CAP - 1));
+			int ofs = g_injOfs[i];
+			if (ofs < 0) {
+				if (!haveQ) { q0 = g_injQpc[i]; haveQ = 1; }
+				if (freq.QuadPart > 0)
+					ofs = (int)((g_injQpc[i] - q0) * (LONGLONG)SAMPLE_RATE / freq.QuadPart);
+				else
+					ofs = 0;
+			}
+			if (ofs < 0) ofs = 0;
+			if (frames > 0 && ofs >= frames) ofs = frames - 1;
+			MidiItem it = {};
+			it.msg = g_injMsg[i];
+			it.sample = start + ofs;
+			it.port = (int)g_injPort[i];
+			it.sysexOff = -1;
+			routeShort(it);
+			++r;
+		}
+		g_injR = r;
+	}
 	while (g_eng.eventPos < g_eng.eventCount &&
 		g_eng.events[g_eng.eventPos].sample < end) {
 		MidiItem e = g_eng.events[g_eng.eventPos++];
@@ -1813,74 +2349,142 @@ static void DispatchDueEvents(__int64 start, int frames)
 		if ((e.msg & 0xff) == 0xff) continue;
 
 		if ((e.msg & 0xff) == 0xf0 && e.sysexOff >= 0 && g_eng.sysexData) {
-			flushAll();
-			__int64 d = e.sample - start;
-			int offset = d < 0 ? 0 : (d >= frames ? frames - 1 : (int)d);
-			const int len = (int)e.aux;
-			if (e.sysexOff + len <= g_eng.sysexBytes)
-				BroadcastSongSysex(g_eng.sysexData + e.sysexOff, len, offset);
+			const int rawLen = (int)e.aux;
+			if (e.sysexOff + rawLen > g_eng.sysexBytes) continue;
+			const BYTE* raw = g_eng.sysexData + e.sysexOff;
+			BYTE buf[2048];
+			int units = 0, rhyBb = -1;
+			const int n = PrepareSongSysex(raw, rawLen, e.port, buf, (int)sizeof(buf),
+				&units, &rhyBb);
+			if (g_eng.midiOut)
+				MapperSysex(g_eng.midiOut, raw, (DWORD)rawLen);
+			if (n > 0) {
+				if (units & 1) pushSx(0, buf, n, e.sample, e.port);
+				if (units & 2) pushSx(1, buf, n, e.sample, e.port);
+				if (units & 4) pushSx(2, buf, n, e.sample, e.port);
+				if (rhyBb >= 0) {
+					BYTE rx[11];
+					if (units & 1) {
+						GsBuildRxDt1(rx, 0, rhyBb);
+						pushSx(0, rx, 11, e.sample, e.port);
+					}
+					if (units & 2) {
+						GsBuildRxDt1(rx, 1, rhyBb);
+						pushSx(1, rx, 11, e.sample, e.port);
+					}
+					if (units & 4) {
+						GsBuildRxDt1(rx, 2, rhyBb);
+						pushSx(2, rx, 11, e.sample, e.port);
+					}
+				}
+			}
+			if (VstMidiSysexIsGmOn(raw, rawLen) || VstMidiSysexIsGsReset(raw, rawLen) ||
+				VstMidiSysexIsXgOn(raw, rawLen)) {
+				if (units & 1) n0 = VstPushCc123(batch0, n0, SONG_BATCH, 0, e.sample);
+				if (units & 2) n1 = VstPushCc123(batch1, n1, SONG_BATCH, 1, e.sample);
+				if (units & 4) n2 = VstPushCc123(batch2, n2, SONG_BATCH, 2, e.sample);
+			}
 			continue;
 		}
 
-		if (g_eng.midiOut && (e.port <= 0 || !g_eng.effectB))
-			midiOutShortMsg(g_eng.midiOut, e.msg);
-
-		const int port = e.port < 0 ? 0 : e.port;
-		MidiItem* batch = batch0;
-		int* n = &n0;
-		int hasTgt = (g_eng.effect || g_eng.vst3) ? 1 : 0;
-		if (port == 1) {
-			if (g_eng.effectB) { batch = batch1; n = &n1; hasTgt = 1; }
-			else { batch = batch0; n = &n0; } // no B: drop onto A would collide — skip
-			if (!g_eng.effectB) continue;
-		} else if (port >= 2) {
-			if (g_eng.effectC || g_eng.vst3C) {
-				batch = batch2; n = &n2; hasTgt = 1;
-			} else if (g_eng.effectB) {
-				// No 3rd unit: keep port2+ silent rather than squash onto B.
-				continue;
-			} else {
-				continue;
-			}
-		}
-		if (!hasTgt) continue;
-		if (*n >= 256) flushAll();
-		batch[(*n)++] = e;
+		routeShort(e);
 	}
-	flushAll();
+	if (g_eng.events && g_eng.eventCount > 0 && g_eng.eventPos >= g_eng.eventCount &&
+		!g_vstHeldFlushed[VstIoSlot()]) {
+		g_vstHeldFlushed[VstIoSlot()] = 1;
+		const __int64 offAt = (end > start) ? (end - 1) : start;
+		n0 = VstFlushHeld(batch0, n0, SONG_BATCH, 0, offAt);
+		n1 = VstFlushHeld(batch1, n1, SONG_BATCH, 1, offAt);
+		n2 = VstFlushHeld(batch2, n2, SONG_BATCH, 2, offAt);
+		n0 = VstPushCc123(batch0, n0, SONG_BATCH, 0, offAt);
+		n1 = VstPushCc123(batch1, n1, SONG_BATCH, 1, offAt);
+		n2 = VstPushCc123(batch2, n2, SONG_BATCH, 2, offAt);
+	}
+	const int sl = VstIoSlot();
+	g_songT0[sl] = start;
+	auto stash = [&](int u, MidiItem* b, int n, BYTE* sx, int used) {
+		if (n > VST_PEND_N) n = VST_PEND_N;
+		g_songN[sl][u] = n;
+		if (n) memcpy(g_songEv[sl][u], b, (size_t)n * sizeof(MidiItem));
+		int su = used;
+		if (su > 8192) su = 8192;
+		if (su > 0) memcpy(g_songSx[sl][u], sx, (size_t)su);
+	};
+	stash(0, batch0, n0, sx0, u0);
+	stash(1, batch1, n1, sx1, u1);
+	stash(2, batch2, n2, sx2, u2);
+}
+
+static void VstFeedSlice(int unit, AEffect* effect, Vst3Inst* vst3,
+	__int64 t0, int done, int nfr)
+{
+	const int sl = VstIoSlot();
+	const MidiItem* src = g_songEv[sl][unit];
+	const int n = g_songN[sl][unit];
+	const BYTE* sx = g_songSx[sl][unit];
+	const __int64 a = t0 + done;
+	const __int64 b = a + nfr;
+	MidiItem tmp[VST_PEND_N];
+	int nt = 0;
+	for (int i = 0; i < n && nt < VST_PEND_N; ++i)
+		if (src[i].sample >= a && src[i].sample < b)
+			tmp[nt++] = src[i];
+	if (effect && nt)
+		SendVstEvents(effect, tmp, nt, a, sx, nfr, unit);
+	if (vst3) {
+		for (int i = 0; i < nt; ++i) {
+			if ((tmp[i].msg & 0xff) == 0xf0) continue;
+			int off = (int)(tmp[i].sample - a);
+			if (off < 0) off = 0;
+			if (off >= nfr) off = nfr - 1;
+			Vst3MidiShort(vst3, tmp[i].msg, off);
+		}
+	}
 }
 
 static void RenderSongUnits(int frames)
 {
 	ZeroMemory(g_eng.outL, frames * sizeof(float));
 	ZeroMemory(g_eng.outR, frames * sizeof(float));
-	if (g_eng.vst3)
-		Vst3Process(g_eng.vst3, g_eng.outL, g_eng.outR, frames);
-	else if (g_eng.effect)
-		RenderEffect(g_eng.effect, g_eng.outL, g_eng.outR, frames);
-
-	if (g_eng.effectB) {
-		RenderEffect(g_eng.effectB, g_eng.mixL, g_eng.mixR, frames);
-		for (int i = 0; i < frames; ++i) {
-			g_eng.outL[i] += g_eng.mixL[i];
-			g_eng.outR[i] += g_eng.mixR[i];
+	const int sl = VstIoSlot();
+	const __int64 t0 = g_songT0[sl];
+	for (int u = 0; u < 3; ++u)
+		VstPrepareBatch(g_songEv[sl][u], g_songN[sl][u], t0, frames);
+	for (int done = 0; done < frames; ) {
+		int nfr = frames - done;
+		if (nfr > VST_SLICE) nfr = VST_SLICE;
+		VstFeedSlice(0, g_eng.effect, g_eng.vst3, t0, done, nfr);
+		VstFeedSlice(1, g_eng.effectB, NULL, t0, done, nfr);
+		VstFeedSlice(2, g_eng.effectC, g_eng.vst3C, t0, done, nfr);
+		if (g_eng.vst3)
+			Vst3Process(g_eng.vst3, g_eng.outL + done, g_eng.outR + done, nfr);
+		else if (g_eng.effect)
+			RenderEffect(g_eng.effect, g_eng.outL + done, g_eng.outR + done, nfr);
+		if (g_eng.effectB) {
+			RenderEffect(g_eng.effectB, g_eng.mixL, g_eng.mixR, nfr);
+			for (int i = 0; i < nfr; ++i) {
+				g_eng.outL[done + i] += g_eng.mixL[i];
+				g_eng.outR[done + i] += g_eng.mixR[i];
+			}
 		}
+		if (g_eng.effectC) {
+			RenderEffect(g_eng.effectC, g_eng.mixL, g_eng.mixR, nfr);
+			for (int i = 0; i < nfr; ++i) {
+				g_eng.outL[done + i] += g_eng.mixL[i];
+				g_eng.outR[done + i] += g_eng.mixR[i];
+			}
+		} else if (g_eng.vst3C) {
+			ZeroMemory(g_eng.mixL, nfr * sizeof(float));
+			ZeroMemory(g_eng.mixR, nfr * sizeof(float));
+			Vst3Process(g_eng.vst3C, g_eng.mixL, g_eng.mixR, nfr);
+			for (int i = 0; i < nfr; ++i) {
+				g_eng.outL[done + i] += g_eng.mixL[i];
+				g_eng.outR[done + i] += g_eng.mixR[i];
+			}
+		}
+		done += nfr;
 	}
-	if (g_eng.effectC) {
-		RenderEffect(g_eng.effectC, g_eng.mixL, g_eng.mixR, frames);
-		for (int i = 0; i < frames; ++i) {
-			g_eng.outL[i] += g_eng.mixL[i];
-			g_eng.outR[i] += g_eng.mixR[i];
-		}
-	} else if (g_eng.vst3C) {
-		ZeroMemory(g_eng.mixL, frames * sizeof(float));
-		ZeroMemory(g_eng.mixR, frames * sizeof(float));
-		Vst3Process(g_eng.vst3C, g_eng.mixL, g_eng.mixR, frames);
-		for (int i = 0; i < frames; ++i) {
-			g_eng.outL[i] += g_eng.mixL[i];
-			g_eng.outR[i] += g_eng.mixR[i];
-		}
-	}
+	g_songN[sl][0] = g_songN[sl][1] = g_songN[sl][2] = 0;
 }
 
 static void VoiceMidi(DWORD msg)
@@ -2954,7 +3558,7 @@ static void DispatchEnsemble(__int64 start, int frames)
 			if (e.sysexOff + len <= g_eng.sysexBytes) {
 				__int64 d = e.sample - start;
 				int offset = d < 0 ? 0 : (d >= frames ? frames - 1 : (int)d);
-				BroadcastSongSysex(g_eng.sysexData + e.sysexOff, len, offset);
+				BroadcastSongSysex(g_eng.sysexData + e.sysexOff, len, offset, e.port);
 			}
 			continue;
 		}
@@ -3093,6 +3697,8 @@ static void FreeSong()
 	delete[] g_eng.sysexData; g_eng.sysexData = NULL;
 	g_eng.fileBytes = 0; g_eng.sysexBytes = 0;
 	g_eng.maxMidiPort = 0;
+	g_eng.mirrorToB = 0;
+	RxListenInit();
 	g_eng.eventCount = g_eng.eventPos = 0;
 	g_eng.playSample = g_eng.lengthSamples = 0;
 	g_eng.ringRead = g_eng.ringCount = 0;
@@ -3114,6 +3720,7 @@ static void ResetSequence()
 	ZeroMemory(g_eng.drums, sizeof(g_eng.drums));
 	ZeroMemory(g_eng.noteState, sizeof(g_eng.noteState));
 	SongOvClear();
+	RxChReset();
 	auto allOff = [](AEffect* effect, Vst3Inst* vst3) {
 		if (effect) {
 			MidiItem alloff[16] = {};
@@ -3851,6 +4458,44 @@ static int ResolveVst2PathForPortB(const wchar_t* primary, wchar_t* out, int out
 			return 1;
 		}
 	}
+	if (primary && *primary && EqExt(primary, L".vst3")) {
+		wchar_t dll[VST_PATH_CHARS];
+		SafeCopy(dll, VST_PATH_CHARS, primary);
+		wchar_t* dot = wcsrchr(dll, L'.');
+		if (dot) wcscpy_s(dot, VST_PATH_CHARS - (int)(dot - dll), L".dll");
+		wchar_t resolved[VST_PATH_CHARS];
+		SafeCopy(resolved, VST_PATH_CHARS, dll);
+		ResolveRolandScVaPath(dll, resolved, VST_PATH_CHARS, HostArch());
+		if (PathFileExistsW2(resolved) && PeArch(resolved) == HostArch()) {
+			SafeCopy(out, outChars, resolved);
+			return 1;
+		}
+		wchar_t dir[VST_PATH_CHARS], base[VST_NAME_CHARS], cand[VST_PATH_CHARS];
+		SafeCopy(dir, VST_PATH_CHARS, primary);
+		wchar_t* slash = wcsrchr(dir, L'\\');
+		if (slash) {
+			*slash = 0;
+			BaseNameNoExt(primary, base);
+			WIN32_FIND_DATAW fd = {};
+			wchar_t pat[VST_PATH_CHARS];
+			swprintf_s(pat, L"%s\\*.dll", dir);
+			HANDLE h = FindFirstFileW(pat, &fd);
+			if (h != INVALID_HANDLE_VALUE) {
+				do {
+					if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
+					swprintf_s(cand, L"%s\\%s", dir, fd.cFileName);
+					if (!(DetectMultiTimbralName(cand) || PathLooksLikeScVa(cand) ||
+						ContainsI(fd.cFileName, base)))
+						continue;
+					if (PeArch(cand) != HostArch()) continue;
+					SafeCopy(out, outChars, cand);
+					FindClose(h);
+					return 1;
+				} while (FindNextFileW(h, &fd));
+				FindClose(h);
+			}
+		}
+	}
 	return 0;
 }
 
@@ -4351,9 +4996,9 @@ static void SeekFastForwardEvents(__int64 ffEnd)
 		pending = 0;
 	};
 	auto flushAll = [&]() {
-		FlushUnitShorts(g_eng.effect, g_eng.vst3, batch0, n0, start, FF_FRAMES);
-		FlushUnitShorts(g_eng.effectB, NULL, batch1, n1, start, FF_FRAMES);
-		FlushUnitShorts(g_eng.effectC, g_eng.vst3C, batch2, n2, start, FF_FRAMES);
+		FlushUnitShorts(g_eng.effect, g_eng.vst3, batch0, n0, start, FF_FRAMES, 0, 0);
+		FlushUnitShorts(g_eng.effectB, NULL, batch1, n1, start, FF_FRAMES, 0, 1);
+		FlushUnitShorts(g_eng.effectC, g_eng.vst3C, batch2, n2, start, FF_FRAMES, 0, 2);
 	};
 	while (g_eng.eventPos < g_eng.eventCount &&
 		g_eng.events[g_eng.eventPos].sample < ffEnd) {
@@ -4370,7 +5015,7 @@ static void SeekFastForwardEvents(__int64 ffEnd)
 			if (pending) micro();
 			const int len = (int)e.aux;
 			if (e.sysexOff + len <= g_eng.sysexBytes)
-				BroadcastSongSysex(g_eng.sysexData + e.sysexOff, len, 0);
+				BroadcastSongSysex(g_eng.sysexData + e.sysexOff, len, 0, e.port);
 			micro();
 			continue;
 		}
@@ -4394,19 +5039,23 @@ static void SeekFastForwardEvents(__int64 ffEnd)
 			continue;
 		}
 		const int port = e.port < 0 ? 0 : e.port;
-		MidiItem* batch = batch0;
-		int* n = &n0;
-		int hasTgt = (g_eng.effect || g_eng.vst3) ? 1 : 0;
-		if (port == 1) {
-			if (!g_eng.effectB) continue;
-			batch = batch1; n = &n1; hasTgt = 1;
-		} else if (port >= 2) {
-			if (!g_eng.effectC && !g_eng.vst3C) continue;
-			batch = batch2; n = &n2; hasTgt = 1;
+		if (port <= 0) {
+			if (!UnitHasPlug(0)) continue;
+			if (n0 >= FF_BATCH) { flushAll(); micro(); }
+			batch0[n0++] = e;
+			if (g_eng.mirrorToB && UnitHasPlug(1)) {
+				if (n1 >= FF_BATCH) { flushAll(); micro(); }
+				batch1[n1++] = e;
+			}
+		} else if (port == 1) {
+			if (!UnitHasPlug(1)) continue;
+			if (n1 >= FF_BATCH) { flushAll(); micro(); }
+			batch1[n1++] = e;
+		} else {
+			if (!UnitHasPlug(2)) continue;
+			if (n2 >= FF_BATCH) { flushAll(); micro(); }
+			batch2[n2++] = e;
 		}
-		if (!hasTgt) continue;
-		if (*n >= FF_BATCH) { flushAll(); micro(); }
-		batch[(*n)++] = e;
 		++pending;
 	}
 	flushAll();
@@ -4799,41 +5448,38 @@ static void LivePendFlush(LivePart& p)
 	LivePending& q = p.pend;
 	if (!q.count) return;
 	if (p.effect && p.effect->dispatcher) {
-		struct EventBlock {
-			VstInt32 numEvents;
-			VstIntPtr reserved;
-			VstEvent* events[LIVE_PEND_EVENTS];
-		} block;
-		VstMidiEvent me[LIVE_PEND_EVENTS];
-		VstMidiSysexEvent sx[LIVE_PEND_SYSEX_EVENTS];
-		block.reserved = 0;
+		const int pi = (int)(&p - g_eng.live);
+		VstPendBuf& buf = g_livePend[(pi >= 0 && pi < 32) ? pi : 0];
+		buf.block.reserved = 0;
 		int n = 0, nsx = 0;
 		for (int i = 0; i < q.count; ++i) {
 			if (q.ev[i].sysexOff >= 0) {
-				if (nsx >= LIVE_PEND_SYSEX_EVENTS) continue;
-				VstMidiSysexEvent& s = sx[nsx];
+				if (nsx >= VST_PEND_SX || n >= VST_PEND_N) continue;
+				VstMidiSysexEvent& s = buf.sx[nsx];
 				ZeroMemory(&s, sizeof(s));
 				s.type = kVstSysExType;
 				s.byteSize = sizeof(VstMidiSysexEvent);
 				s.dumpBytes = (VstInt32)q.ev[i].sysexLen;
 				s.sysexDump = (char*)(q.sysex + q.ev[i].sysexOff);
-				block.events[n++] = (VstEvent*)&s;
+				buf.block.events[n++] = (VstEvent*)&s;
 				++nsx;
 				continue;
 			}
-			VstMidiEvent& m = me[n];
+			if (n >= VST_PEND_N) break;
+			VstMidiEvent& m = buf.me[n];
 			ZeroMemory(&m, sizeof(m));
 			m.type = kVstMidiType;
 			m.byteSize = sizeof(VstMidiEvent);
+			m.flags = kVstMidiEventIsRealtime;
 			m.midiData[0] = (char)(q.ev[i].msg & 0xff);
 			m.midiData[1] = (char)((q.ev[i].msg >> 8) & 0x7f);
 			m.midiData[2] = (char)((q.ev[i].msg >> 16) & 0x7f);
-			block.events[n] = (VstEvent*)&m;
+			buf.block.events[n] = (VstEvent*)&m;
 			++n;
 		}
-		block.numEvents = n;
+		buf.block.numEvents = n;
 		if (n) {
-			__try { p.effect->dispatcher(p.effect, effProcessEvents, 0, 0, &block, 0); }
+			__try { p.effect->dispatcher(p.effect, effProcessEvents, 0, 0, &buf.block, 0); }
 			__except (EXCEPTION_EXECUTE_HANDLER) {}
 		}
 	}

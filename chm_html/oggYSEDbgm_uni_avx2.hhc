@@ -134,7 +134,7 @@
 			    <param name="Local" value="ja\pianoroll.htm">
 			    </OBJECT>
 			<LI> <OBJECT type="text/sitemap">
-			    <param name="Name" value="ピアノロールの検出パラメータ">
+			    <param name="Name" value="ピアノロールの音の拾い方">
 			    <param name="Local" value="ja\pianoroll-tune.htm">
 			    </OBJECT>
 			<LI> <OBJECT type="text/sitemap">
@@ -443,7 +443,7 @@
 			    <param name="Local" value="en\pianoroll.htm">
 			    </OBJECT>
 			<LI> <OBJECT type="text/sitemap">
-			    <param name="Name" value="Tuning piano roll detection">
+			    <param name="Name" value="How the piano roll catches notes">
 			    <param name="Local" value="en\pianoroll-tune.htm">
 			    </OBJECT>
 			<LI> <OBJECT type="text/sitemap">

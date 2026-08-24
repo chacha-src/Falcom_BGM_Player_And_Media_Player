@@ -28,7 +28,7 @@ namespace Vst3Detail {
 using namespace Steinberg;
 using namespace Steinberg::Vst;
 
-enum { VST3_MAX_EVENTS = 256, VST3_MAX_BUSES = 64, VST3_BLOCK = 512 };
+enum { VST3_MAX_EVENTS = 2048, VST3_MAX_BUSES = 64, VST3_BLOCK = 512, VST3_SLICE = 64 };
 // Drum machines and multi-out samplers (Groove Agent has 32 output buses) can
 // route voices away from the master bus, so every bus is summed into the mix.
 enum { VST3_MAX_MIX_BUSES = 32 };
@@ -1070,7 +1070,7 @@ void Vst3MidiShort(Vst3Inst* v, DWORD msg, int sampleOffset)
 		e.type = Event::kNoteOffEvent;
 		e.noteOff.channel = (int16)channel;
 		e.noteOff.pitch = (int16)d1;
-		e.noteOff.velocity = d2 / 127.0f;
+		e.noteOff.velocity = (d2 ? d2 : 64) / 127.0f;
 		e.noteOff.noteId = -1;
 		e.noteOff.tuning = 0;
 	} else if (type == 0xa0) {
@@ -1167,7 +1167,7 @@ void Vst3Process(Vst3Inst* v, float* outL, float* outR, int frames)
 	int done = 0;
 	while (done < frames) {
 		int count = frames - done;
-		if (count > VST3_BLOCK) count = VST3_BLOCK;
+		if (count > VST3_SLICE) count = VST3_SLICE;
 		ZeroMemory(outL + done, count * sizeof(float));
 		ZeroMemory(outR + done, count * sizeof(float));
 

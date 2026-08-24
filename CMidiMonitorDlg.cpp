@@ -65,7 +65,7 @@ static void MmCloseKpiLiveOut()
 static constexpr COLORREF MM_BG = RGB(8, 8, 12);
 static constexpr COLORREF MM_HEAD_BG = RGB(196, 196, 200);
 static constexpr COLORREF MM_CHROMA = RGB(8, 8, 12);
-static constexpr COLORREF MM_GRID = RGB(36, 36, 44);
+static constexpr COLORREF MM_GRID = RGB(78, 82, 96);
 static constexpr COLORREF MM_FG = RGB(230, 230, 236);
 static constexpr COLORREF MM_HEAD_TX = RGB(28, 28, 36);
 static constexpr COLORREF MM_ROW_A = RGB(14, 16, 22);
@@ -243,6 +243,14 @@ static int MmCmpEv(const void* aa, const void* bb)
 	if (ca < cb) return -1;
 	if (ca > cb) return 1;
 	return 0;
+}
+
+static int MmGs1xToPart(int x)
+{
+	x &= 0x0f;
+	if (x == 0) return 9;
+	if (x <= 9) return x - 1;
+	return x;
 }
 
 static BOOL MmLoadResDat(int id, BYTE** out, int* outN)
@@ -619,20 +627,20 @@ void CMmHelpDlg::OnPaint()
 	title(L, y, LL14(L"表示", L"View", L"Affichage", L"Vista", L"Vista", L"표시", L"显示", L"العرض", L"Вид", L"Ansicht", L"Vista", L"Weergave", L"Widok", L"Gorunum"));
 	y += titleLh;
 	body(L, y, LL14(
-		L"・通常(2D) …… ヘッダ(BPM/拍子/リバーブ等)と32行のチャンネル表。右端はミニ鍵盤。",
-		L"· Normal (2D) …… Header (BPM/meter/reverb…) and a 32-row channel table. Mini keyboard on the right.",
-		L"· Normal (2D) …… En-tete (BPM/mesure/reverb…) et tableau 32 canaux. Mini clavier a droite.",
-		L"· Normale (2D) …… Intestazione (BPM/misura/reverb…) e tabella 32 canali. Mini tastiera a destra.",
-		L"· Normal (2D) …… Cabecera (BPM/compas/reverb…) y tabla de 32 canales. Mini teclado a la derecha.",
-		L"· 일반(2D) …… 헤더(BPM/박자/리버브 등)와 32행 채널 표. 오른쪽은 미니 건반.",
-		L"· 普通(2D) …… 页眉（BPM/拍号/混响等）和 32 行通道表。右侧是迷你键盘。",
-		L"· عادي (2D) …… رأس (BPM/ميزان/صدى…) وجدول 32 قناة. لوحة مفاتيح صغيرة يميناً.",
-		L"· Обычный (2D) …… Заголовок (BPM/размер/реверб…) и таблица 32 каналов. Мини-клавиатура справа.",
-		L"· Normal (2D) …… Kopf (BPM/Takt/Reverb…) und 32-Zeilen-Kanaltabelle. Mini-Tastatur rechts.",
-		L"· Normal (2D) …… Cabecalho (BPM/compasso/reverb…) e tabela de 32 canais. Mini teclado a direita.",
-		L"· Normaal (2D) …… Kop (BPM/maatsoort/reverb…) en 32-rijige kanaaltabel. Mini-toetsenbord rechts.",
-		L"· Zwykly (2D) …… Naglowek (BPM/metrum/poglos…) i tabela 32 kanalow. Mini klawiatura po prawej.",
-		L"· Normal (2D) …… Baslik (BPM/olcu/reverb…) ve 32 satirlik kanal tablosu. Sagda mini klavye."));
+		L"・通常(2D) …… ヘッダ(BPM/拍子/リバーブ等)と32行のチャンネル表。パートの間に薄い横線。右端はミニ鍵盤。",
+		L"· Normal (2D) …… Header (BPM/meter/reverb…) and a 32-row channel table. Thin lines between parts. Mini keyboard on the right.",
+		L"· Normal (2D) …… En-tete (BPM/mesure/reverb…) et tableau 32 canaux. Traits fins entre les parties. Mini clavier a droite.",
+		L"· Normale (2D) …… Intestazione (BPM/misura/reverb…) e tabella 32 canali. Linee sottili tra le parti. Mini tastiera a destra.",
+		L"· Normal (2D) …… Cabecera (BPM/compas/reverb…) y tabla de 32 canales. Lineas finas entre partes. Mini teclado a la derecha.",
+		L"· 일반(2D) …… 헤더(BPM/박자/리버브 등)와 32행 채널 표. 파트 사이에 얇은 가로선. 오른쪽은 미니 건반.",
+		L"· 普通(2D) …… 页眉（BPM/拍号/混响等）和 32 行通道表。声部之间有细横线。右侧是迷你键盘。",
+		L"· عادي (2D) …… رأس (BPM/ميزان/صدى…) وجدول 32 قناة. خطوط رفيعة بين الأجزاء. لوحة مفاتيح صغيرة يميناً.",
+		L"· Обычный (2D) …… Заголовок (BPM/размер/реверб…) и таблица 32 каналов. Тонкие линии между партиями. Мини-клавиатура справа.",
+		L"· Normal (2D) …… Kopf (BPM/Takt/Reverb…) und 32-Zeilen-Kanaltabelle. Duenne Linien zwischen den Parts. Mini-Tastatur rechts.",
+		L"· Normal (2D) …… Cabecalho (BPM/compasso/reverb…) e tabela de 32 canais. Linhas finas entre as partes. Mini teclado a direita.",
+		L"· Normaal (2D) …… Kop (BPM/maatsoort/reverb…) en 32-rijige kanaaltabel. Dunne lijnen tussen partijen. Mini-toetsenbord rechts.",
+		L"· Zwykly (2D) …… Naglowek (BPM/metrum/poglos…) i tabela 32 kanalow. Cienkie linie miedzy partiami. Mini klawiatura po prawej.",
+		L"· Normal (2D) …… Baslik (BPM/olcu/reverb…) ve 32 satirlik kanal tablosu. Partlar arasinda ince cizgiler. Sagda mini klavye."));
 	y += lh;
 	y = CCC_GdiHelpDrawSoftDemoPair(dc, L, y, rc.Width() - L * 2, min(140, max(112, rc.Height() / 5)),
 		CCC_HELPDEMO_KMIDIMON);
@@ -776,7 +784,7 @@ CMidiMonitorDlg::CMidiMonitorDlg(CWnd* pParent)
 	, m_noteCount(0), m_masterVol(100)
 	, m_notesPeak(0), m_notesPeakHold(0), m_layW(0)
 	, m_dragKind(0), m_dragPart(-1), m_playPart(-1), m_playNote(-1)
-	, m_viewMode(0), m_mapForce(0), m_gsMapKind(0), m_fileHasXg(0), m_fileHasGm(0), m_fileHasSd(0), m_frozen(false), m_alwaysOnTop(false), m_paintDisabled(false)
+	, m_viewMode(0), m_mapForce(0), m_gsMapKind(0), m_fileHasXg(0), m_fileHasGm(0), m_fileHasSd(0), m_gs32(0), m_mirrorToB(0), m_frozen(false), m_alwaysOnTop(false), m_paintDisabled(false)
 	, m_rotDragging(false), m_rotDragYaw0(0), m_rotDragPitch0(0), m_soft3dTourUntil(0)
 	, m_hoverCol(-1), m_hoverPart(-1)
 	, m_layHeadH(0), m_layRowH(0), m_persistAge(0), m_drumGlow(0), m_dispBpm(-1)
@@ -931,6 +939,8 @@ void CMidiMonitorDlg::ResetParts()
 			}
 		}
 		p.isDrum = ((i % 16) == 9) ? 1 : 0;
+		p.rxCh = i % 16;
+		p.rxPort = (i >= 16) ? 1 : 0;
 		p.lastNote = -1;
 		RefreshPartName(p);
 	}
@@ -971,6 +981,8 @@ void CMidiMonitorDlg::UnloadMidi()
 	m_fileHasXg = 0;
 	m_fileHasGm = 0;
 	m_fileHasSd = 0;
+	m_gs32 = 0;
+	m_mirrorToB = 0;
 }
 
 void CMidiMonitorDlg::LookupToneName(int isXg, int mapId, int bankMsb, int bankLsb, int pc, int isDrum, wchar_t* out, int outN)
@@ -1066,12 +1078,22 @@ void CMidiMonitorDlg::ApplyShort(int port, DWORD msg, BOOL fromUser)
 {
 	const int st = msg & 0xf0;
 	const int ch = msg & 0x0f;
-	int part = (port * 16) + ch;
-	if (part < 0) part = 0;
-	if (part >= PART_MAX) part = PART_MAX - 1;
-	Part& p = m_part[part];
+	int part0 = (port * 16) + ch;
+	if (part0 < 0) part0 = 0;
+	if (part0 >= PART_MAX) part0 = PART_MAX - 1;
+	const int scan = (!fromUser && m_gs32) ? 1 : 0;
+	const int iBegin = scan ? 0 : part0;
+	const int iEnd = scan ? PART_MAX : (part0 + 1);
 	const int d1 = (int)((msg >> 8) & 0xff);
 	const int d2 = (int)((msg >> 16) & 0xff);
+	for (int part = iBegin; part < iEnd; ++part) {
+		if (scan) {
+			if (m_part[part].rxCh != ch) continue;
+			if (m_part[part].rxCh > 15) continue;
+			const int rp = m_part[part].rxPort;
+			if (!m_mirrorToB && rp != 2 && rp != port) continue;
+		}
+		Part& p = m_part[part];
 	if (st == 0x90) {
 		if (d2 > 0) {
 			p.noteOn[d1] = (BYTE)d2;
@@ -1153,6 +1175,7 @@ void CMidiMonitorDlg::ApplyShort(int port, DWORD msg, BOOL fromUser)
 		const int bend = ((d2 << 7) | d1) - 8192;
 		p.dt = bend / 64;
 	}
+	}
 }
 
 void CMidiMonitorDlg::ApplySysex(const BYTE* d, int n)
@@ -1195,6 +1218,41 @@ void CMidiMonitorDlg::ApplySysex(const BYTE* d, int n)
 	}
 	if (n >= 9 && d[1] == 0x43 && d[3] == 0x4c && d[4] == 0x03 && d[5] == 0x10) {
 		m_ins2 = d[7]; m_dirtyHead = true;
+	}
+	const int hasF7 = (n > 0 && d[n - 1] == 0xf7) ? 1 : 0;
+	if (n >= 10 && d[1] == 0x41 && d[3] == 0x42 && d[4] == 0x12 &&
+		(d[5] == 0x40 || d[5] == 0x50) && d[6] >= 0x10 && d[6] <= 0x1f) {
+		const int blk = (d[5] == 0x50) ? 1 : 0;
+		const int part = blk * 16 + MmGs1xToPart(d[6]);
+		if (part >= 0 && part < PART_MAX) {
+			Part& p = m_part[part];
+			const int nval = n - 9 - hasF7;
+			int changed = 0;
+			for (int i = 0; i < nval; ++i) {
+				const int a = (int)d[7] + i;
+				const BYTE vv = d[8 + i];
+				if (a == 0x00) {
+					p.bankMsb = vv & 127;
+					changed = 1;
+				} else if (a == 0x01) {
+					p.pc = vv & 127;
+					changed = 1;
+				} else if (a == 0x02) {
+					// GS Rx CHANNEL: 00-0F = ch1-16, 10h = OFF.
+					if (vv >= 0x10) p.rxCh = 16;
+					else p.rxCh = (int)vv;
+					changed = 1;
+				} else if (a == 0x15) {
+					// GS USE FOR RHYTHM: 0=OFF, 1=MAP1, 2=MAP2.
+					p.isDrum = (vv != 0) ? 1 : 0;
+					changed = 1;
+				}
+			}
+			if (changed) {
+				RefreshPartName(p);
+				m_dirtyRows |= (1u << part);
+			}
+		}
 	}
 }
 
@@ -1290,6 +1348,8 @@ void CMidiMonitorDlg::LoadCurrentMidi()
 	int count = 0;
 	int hasXg = 0;
 	int mapHint = 0;
+	int sawFf21 = 0;
+	int gs32 = 0;
 	m_titleBuf[0] = 0;
 	const BYTE* p = smf + 8 + MmReadBE(smf + 4, 4);
 	const BYTE* fileEnd = smf + smfSize;
@@ -1337,6 +1397,7 @@ void CMidiMonitorDlg::LoadCurrentMidi()
 					curPort = (int)q[0];
 					if (curPort < 0) curPort = 0;
 					if (curPort > 1) curPort = 1;
+					sawFf21 = 1;
 				} else if ((type == 0x01 || type == 0x02 || type == 0x03) && ml > 0) {
 					char tmp[256];
 					unsigned n = ml;
@@ -1368,8 +1429,12 @@ void CMidiMonitorDlg::LoadCurrentMidi()
 					ev[count].msg = 0xf0; ev[count].aux = (DWORD)need;
 					ev[count].port = curPort; ev[count].sysexOff = off;
 					++count;
-					if (need >= 6 && VstMidiSysexIsXgOn(sxData + off, need))
-						hasXg = 1;
+					if (need >= 6) {
+						if (VstMidiSysexIsXgOn(sxData + off, need))
+							hasXg = 1;
+						if (VstMidiSysexMarksGs32(sxData + off, need))
+							gs32 = 1;
+					}
 				}
 				q += sl;
 			} else {
@@ -1405,13 +1470,16 @@ void CMidiMonitorDlg::LoadCurrentMidi()
 	unsigned __int64 lastTick = 0;
 	unsigned tempoU = 500000;
 	__int64 sample = 0;
+	unsigned __int64 rem = 0;
+	const unsigned __int64 den = (unsigned __int64)division * 1000000ULL;
 	for (int i = 0; i < count; ++i) {
 		const unsigned __int64 dt = ev[i].tick - lastTick;
-		sample += (__int64)((dt * (unsigned __int64)tempoU * (unsigned __int64)sr) /
-			((unsigned __int64)division * 1000000ULL));
+		rem += dt * (unsigned __int64)tempoU * (unsigned __int64)sr;
+		sample += (__int64)(rem / den);
+		rem %= den;
 		ev[i].sample = sample;
 		lastTick = ev[i].tick;
-		if (ev[i].msg == 0xff && ev[i].aux >= 10000)
+		if (ev[i].msg == 0xff && ev[i].aux)
 			tempoU = (unsigned)ev[i].aux;
 	}
 	m_ev = ev;
@@ -1489,6 +1557,8 @@ void CMidiMonitorDlg::LoadCurrentMidi()
 		m_gsMapKind = (resolved == 8 || (resolved >= 1 && resolved <= 6) ||
 			(resolved >= 9 && resolved <= 18)) ? resolved : 0;
 	}
+	m_gs32 = gs32;
+	m_mirrorToB = (gs32 && !sawFf21) ? 1 : 0;
 	ResetParts();
 	delete[] data;
 	m_lastPlayb = -1;
@@ -1730,8 +1800,7 @@ void CMidiMonitorDlg::DrawPartRow(CDC& dc, int i, int y, int rowH, int w, UINT d
 	const Part& p = m_part[i];
 	dc.SetBkMode(TRANSPARENT);
 	CFont* oldF = dc.SelectObject(&m_fontTiny);
-	dc.FillSolidRect(0, y, w, rowH - 1, (i < 16) ? MM_ROW_A : MM_ROW_B);
-	dc.FillSolidRect(0, y + rowH - 1, w, 1, MM_GRID);
+	dc.FillSolidRect(0, y, w, rowH, (i < 16) ? MM_ROW_A : MM_ROW_B);
 	const int live = (p.held > 0);
 	dc.SetTextColor(live ? RGB(255, 245, 245) : MM_FG);
 	wchar_t chs[8];
@@ -1769,6 +1838,7 @@ void CMidiMonitorDlg::DrawPartRow(CDC& dc, int i, int y, int rowH, int w, UINT d
 	dc.DrawText(nr, &nrRc, DT_CENTER | DT_WORDBREAK);
 	CRect krc(Scale(672, dpi), y + 1, w - Scale(4, dpi), y + rowH - 2);
 	DrawMiniKeys(dc, krc, p);
+	dc.FillSolidRect(0, y + rowH - 1, w, 1, MM_GRID);
 	dc.SelectObject(oldF);
 }
 

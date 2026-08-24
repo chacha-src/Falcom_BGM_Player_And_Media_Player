@@ -96,6 +96,8 @@ int VstMidiFoldGsMapHint(int cur, int kind);
 int VstMidiSysexIsGmOn(const unsigned char* d, int n);
 int VstMidiSysexIsGsReset(const unsigned char* d, int n);
 int VstMidiSysexIsXgOn(const unsigned char* d, int n);
+// 1 = GS Port B (50 xx) / XG Multi Part 17-32. 32ch without FF 21.
+int VstMidiSysexMarksGs32(const unsigned char* d, int n);
 int VstMidiBankMsbIsSdNative(int msb);
 // 使われている (bankMSB<<8|PC) が SASAMI_GS.DAT のどのマップに収まるか。
 // 8820 から 88Pro→88→55 へ落とす。0=判定不能。

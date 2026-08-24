@@ -11,7 +11,7 @@
 
 <h1>Audio export (WAV / mp3 / FLAC)</h1>
 
-<p class="lead">Open Audio export from the playlist right-click menu. Tabs at the top switch between WAV, mp3 and FLAC. Everything is rendered through the PCM (WAV) path first and encoded afterwards if needed, which is why the same options are available whatever format you pick.</p>
+<p class="lead">Open Audio export from the playlist right-click menu. Tabs at the top switch between WAV, mp3 and FLAC. Everything is rendered as uncompressed sound first and compressed afterwards if needed, which is why the same options are available whatever format you pick.</p>
 <h2>Exporting a single track</h2>
 <ol>
 <li>Select the track and open Audio export from the right-click menu.</li>
@@ -39,17 +39,17 @@
 <li>To tidy tags before exporting, see <a href="tags.htm">Editing tags</a>.</li>
 </ul>
 <h2>Baking in a performance</h2>
-<p>Tick "Apply prompt execution" and whatever you wrote in <a href="prompt.htm">Automating a performance with prompts</a> is rendered into the exported PCM, so tempo and effect moves end up in the file itself.</p>
+<p>Tick "Apply prompt execution" and whatever you wrote in <a href="prompt.htm">Automating a performance with prompts</a> is rendered into the exported file, so tempo and effect moves end up in the sound itself.</p>
 <h2>Joining tracks with a crossfade</h2>
-<p>Available with several tracks selected. Tracks are joined into one file with equal-power overlaps of the duration you choose. There is also a "Crossfade export" item in the right-click menu.</p>
+<p>Available with several tracks selected. Tracks are joined into one file with smooth overlaps of the duration you choose. There is also a "Crossfade export" item in the right-click menu.</p>
 <p>If you only want seamless listening rather than a file, <a href="crossfade.htm">Continuous-play crossfade</a> is the lighter option.</p>
 <h2>Layering tracks with Mix</h2>
 <p>Also a multi-selection option. Choose how many tracks play at once and the volume percentage for each, and they are combined into a single file. Turn Crossfade on as well and finished slots are refilled with the next track over the duration you set, so it never falls silent.</p>
 <div class="tip"><span class="label">Tip</span>
-<p>Capping the export level avoids clipping. See the export limiter and True Peak limiting in <a href="protools.htm">Tools for shaping the sound</a>. To even out a whole batch, the loudness normalize batch in <a href="tools.htm">The companion tools</a> is the tool for it.</p>
+<p>Capping the export level avoids the sound breaking up. See the export limiter in <a href="protools.htm">Tools for shaping the sound</a>. To even out a whole batch, the level-matching batch in <a href="tools.htm">The companion tools</a> is the tool for it.</p>
 </div>
 <div class="note"><span class="label">Please note</span>
-<p>WAV exports beyond 2 GB switch to RF64, so long exports do not break.</p>
+<p>Very long WAV exports still write as a single file that will not break.</p>
 </div>
 <div class="related"><span class="label">See also</span><ul><li><a href="wav-save.htm">Saving to WAV</a></li><li><a href="crossfade.htm">Continuous-play crossfade</a></li><li><a href="protools.htm">Tools for shaping the sound</a></li><li><a href="tags.htm">Editing tags</a></li><li><a href="prompt.htm">Automating a performance with prompts</a></li></ul></div>
 

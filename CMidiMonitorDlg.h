@@ -98,6 +98,8 @@ private:
 		int lastVel;
 		int isDrum;
 		int held;
+		int rxCh;   // 0-15, 16=off (GS Rx Channel)
+		int rxPort; // 0=A 1=B 2=both
 		float lev;
 		BYTE glowVol;
 		BYTE glowExp;
@@ -186,6 +188,8 @@ private:
 	int m_fileHasXg;
 	int m_fileHasGm;
 	int m_fileHasSd;
+	int m_gs32;      // GS Port B / XG 17-32 SysEx
+	int m_mirrorToB; // no FF 21: channel MIDI arrives on both cables
 
 	int m_usecQn;
 	int m_tsNum;

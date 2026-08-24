@@ -229,6 +229,15 @@
 		<param name="Local" value="en\pianoroll.htm">
 		</OBJECT>
 	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="clipping protection">
+		<param name="Name" value="English: Tools for shaping the sound">
+		<param name="Local" value="en\protools.htm">
+		<param name="Name" value="English: Playback details">
+		<param name="Local" value="en\details.htm">
+		<param name="Name" value="English: Audio export (WAV / mp3 / FLAC)">
+		<param name="Local" value="en\export.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
 		<param name="Name" value="codec">
 		<param name="Name" value="English: Playing video">
 		<param name="Local" value="en\video.htm">
@@ -529,6 +538,11 @@
 		<param name="Local" value="en\mp-cues.htm">
 		</OBJECT>
 	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="How the piano roll catches notes">
+		<param name="Name" value="English: How the piano roll catches notes">
+		<param name="Local" value="en\pianoroll-tune.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
 		<param name="Name" value="import">
 		<param name="Name" value="English: Importing playlists from other software">
 		<param name="Local" value="en\playlist-import.htm">
@@ -630,6 +644,21 @@
 		<param name="Local" value="en\cmdroll.htm">
 		</OBJECT>
 	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="left-right balance">
+		<param name="Name" value="日本語: ジャケットとバナー表示">
+		<param name="Local" value="ja\mp-jacket.htm">
+		<param name="Name" value="English: Jacket art and the banner display">
+		<param name="Local" value="en\mp-jacket.htm">
+		<param name="Name" value="日本語: 音を整えるツール">
+		<param name="Local" value="ja\protools.htm">
+		<param name="Name" value="English: Tools for shaping the sound">
+		<param name="Local" value="en\protools.htm">
+		<param name="Name" value="日本語: 波形・周波数アナライザー">
+		<param name="Local" value="ja\analyzer.htm">
+		<param name="Name" value="English: Waveform and spectrum analyzer">
+		<param name="Local" value="en\analyzer.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
 		<param name="Name" value="library tree">
 		<param name="Name" value="English: Smart playlists and the library tree">
 		<param name="Local" value="en\smart-lib.htm">
@@ -650,6 +679,17 @@
 		<param name="Name" value="live streaming">
 		<param name="Name" value="English: Live streaming">
 		<param name="Local" value="en\live.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="long WAV">
+		<param name="Name" value="日本語: WAVへ保存する">
+		<param name="Local" value="ja\wav-save.htm">
+		<param name="Name" value="English: Saving to WAV">
+		<param name="Local" value="en\wav-save.htm">
+		<param name="Name" value="日本語: 音声書き出し（WAV / mp3 / FLAC）">
+		<param name="Local" value="ja\export.htm">
+		<param name="Name" value="English: Audio export (WAV / mp3 / FLAC)">
+		<param name="Local" value="en\export.htm">
 		</OBJECT>
 	<LI> <OBJECT type="text/sitemap">
 		<param name="Name" value="Looking back at play history">
@@ -703,21 +743,6 @@
 		<param name="Local" value="en\lyrics.htm">
 		<param name="Name" value="English: The in-player lyrics panel">
 		<param name="Local" value="en\mp-lyrics-panel.htm">
-		</OBJECT>
-	<LI> <OBJECT type="text/sitemap">
-		<param name="Name" value="M/S">
-		<param name="Name" value="日本語: 音を整えるツール">
-		<param name="Local" value="ja\protools.htm">
-		<param name="Name" value="English: Tools for shaping the sound">
-		<param name="Local" value="en\protools.htm">
-		<param name="Name" value="日本語: 再生詳細">
-		<param name="Local" value="ja\details.htm">
-		<param name="Name" value="English: Playback details">
-		<param name="Local" value="en\details.htm">
-		<param name="Name" value="日本語: DJパッドで遊ぶ">
-		<param name="Local" value="ja\djpad.htm">
-		<param name="Name" value="English: Playing with the DJ pad">
-		<param name="Local" value="en\djpad.htm">
 		</OBJECT>
 	<LI> <OBJECT type="text/sitemap">
 		<param name="Name" value="m3u">
@@ -968,7 +993,7 @@
 		<param name="Name" value="piano roll">
 		<param name="Name" value="English: Seeing the music on a piano roll">
 		<param name="Local" value="en\pianoroll.htm">
-		<param name="Name" value="English: Tuning piano roll detection">
+		<param name="Name" value="English: How the piano roll catches notes">
 		<param name="Local" value="en\pianoroll-tune.htm">
 		</OBJECT>
 	<LI> <OBJECT type="text/sitemap">
@@ -1143,17 +1168,6 @@
 		<param name="Local" value="ja\details.htm">
 		<param name="Name" value="English: Playback details">
 		<param name="Local" value="en\details.htm">
-		</OBJECT>
-	<LI> <OBJECT type="text/sitemap">
-		<param name="Name" value="RF64">
-		<param name="Name" value="日本語: WAVへ保存する">
-		<param name="Local" value="ja\wav-save.htm">
-		<param name="Name" value="English: Saving to WAV">
-		<param name="Local" value="en\wav-save.htm">
-		<param name="Name" value="日本語: 音声書き出し（WAV / mp3 / FLAC）">
-		<param name="Local" value="ja\export.htm">
-		<param name="Name" value="English: Audio export (WAV / mp3 / FLAC)">
-		<param name="Local" value="en\export.htm">
 		</OBJECT>
 	<LI> <OBJECT type="text/sitemap">
 		<param name="Name" value="RTMP">
@@ -1347,6 +1361,21 @@
 		<param name="Local" value="en\render.htm">
 		</OBJECT>
 	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="stereo width">
+		<param name="Name" value="日本語: 音を整えるツール">
+		<param name="Local" value="ja\protools.htm">
+		<param name="Name" value="English: Tools for shaping the sound">
+		<param name="Local" value="en\protools.htm">
+		<param name="Name" value="日本語: 再生詳細">
+		<param name="Local" value="ja\details.htm">
+		<param name="Name" value="English: Playback details">
+		<param name="Local" value="en\details.htm">
+		<param name="Name" value="日本語: DJパッドで遊ぶ">
+		<param name="Local" value="ja\djpad.htm">
+		<param name="Name" value="English: Playing with the DJ pad">
+		<param name="Local" value="en\djpad.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
 		<param name="Name" value="streaming">
 		<param name="Name" value="English: Live streaming">
 		<param name="Local" value="en\live.htm">
@@ -1490,11 +1519,6 @@
 		<param name="Name" value="Tuner practice">
 		<param name="Name" value="English: Tuner practice">
 		<param name="Local" value="en\tuner.htm">
-		</OBJECT>
-	<LI> <OBJECT type="text/sitemap">
-		<param name="Name" value="Tuning piano roll detection">
-		<param name="Name" value="English: Tuning piano roll detection">
-		<param name="Local" value="en\pianoroll-tune.htm">
 		</OBJECT>
 	<LI> <OBJECT type="text/sitemap">
 		<param name="Name" value="Up Next">
@@ -1970,6 +1994,11 @@
 		<param name="Local" value="ja\cd.htm">
 		</OBJECT>
 	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="ディスク検索">
+		<param name="Name" value="日本語: CDプレイヤー">
+		<param name="Local" value="ja\cd.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
 		<param name="Name" value="バッファ">
 		<param name="Name" value="日本語: レンダリング設定">
 		<param name="Local" value="ja\render.htm">
@@ -1980,7 +2009,7 @@
 		<param name="Name" value="ピアノロール">
 		<param name="Name" value="日本語: ピアノロールで音を見る">
 		<param name="Local" value="ja\pianoroll.htm">
-		<param name="Name" value="日本語: ピアノロールの検出パラメータ">
+		<param name="Name" value="日本語: ピアノロールの音の拾い方">
 		<param name="Local" value="ja\pianoroll-tune.htm">
 		</OBJECT>
 	<LI> <OBJECT type="text/sitemap">
@@ -1989,8 +2018,8 @@
 		<param name="Local" value="ja\pianoroll.htm">
 		</OBJECT>
 	<LI> <OBJECT type="text/sitemap">
-		<param name="Name" value="ピアノロールの検出パラメータ">
-		<param name="Name" value="日本語: ピアノロールの検出パラメータ">
+		<param name="Name" value="ピアノロールの音の拾い方">
+		<param name="Name" value="日本語: ピアノロールの音の拾い方">
 		<param name="Local" value="ja\pianoroll-tune.htm">
 		</OBJECT>
 	<LI> <OBJECT type="text/sitemap">
@@ -2231,6 +2260,15 @@
 		<param name="Local" value="ja\details.htm">
 		</OBJECT>
 	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="割れ防止">
+		<param name="Name" value="日本語: 音を整えるツール">
+		<param name="Local" value="ja\protools.htm">
+		<param name="Name" value="日本語: 再生詳細">
+		<param name="Local" value="ja\details.htm">
+		<param name="Name" value="日本語: 音声書き出し（WAV / mp3 / FLAC）">
+		<param name="Local" value="ja\export.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
 		<param name="Name" value="動画">
 		<param name="Name" value="日本語: 動画を再生する">
 		<param name="Local" value="ja\video.htm">
@@ -2285,6 +2323,24 @@
 		<param name="Local" value="ja\formats.htm">
 		</OBJECT>
 	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="左右のバランス">
+		<param name="Name" value="日本語: ジャケットとバナー表示">
+		<param name="Local" value="ja\mp-jacket.htm">
+		<param name="Name" value="日本語: 音を整えるツール">
+		<param name="Local" value="ja\protools.htm">
+		<param name="Name" value="日本語: 波形・周波数アナライザー">
+		<param name="Local" value="ja\analyzer.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="左右の広がり">
+		<param name="Name" value="日本語: 音を整えるツール">
+		<param name="Local" value="ja\protools.htm">
+		<param name="Name" value="日本語: 再生詳細">
+		<param name="Local" value="ja\details.htm">
+		<param name="Name" value="日本語: DJパッドで遊ぶ">
+		<param name="Local" value="ja\djpad.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
 		<param name="Name" value="拍グリッド">
 		<param name="Name" value="日本語: シークバーの読み方">
 		<param name="Local" value="ja\mp-seek.htm">
@@ -2304,6 +2360,11 @@
 		<param name="Local" value="ja\tips.htm">
 		<param name="Name" value="日本語: ファイル情報を見る・直す">
 		<param name="Local" value="ja\fileinfo.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="曲コード">
+		<param name="Name" value="日本語: CDプレイヤー">
+		<param name="Local" value="ja\cd.htm">
 		</OBJECT>
 	<LI> <OBJECT type="text/sitemap">
 		<param name="Name" value="更新">
@@ -2445,6 +2506,17 @@
 		<param name="Local" value="ja\digitize.htm">
 		<param name="Name" value="日本語: WAVへ保存する">
 		<param name="Local" value="ja\wav-save.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="長いWAV">
+		<param name="Name" value="日本語: WAVへ保存する">
+		<param name="Local" value="ja\wav-save.htm">
+		<param name="Name" value="日本語: 音声書き出し（WAV / mp3 / FLAC）">
+		<param name="Local" value="ja\export.htm">
+		<param name="Name" value="English: Saving to WAV">
+		<param name="Local" value="en\wav-save.htm">
+		<param name="Name" value="English: Audio export (WAV / mp3 / FLAC)">
+		<param name="Local" value="en\export.htm">
 		</OBJECT>
 	<LI> <OBJECT type="text/sitemap">
 		<param name="Name" value="附属ツール">

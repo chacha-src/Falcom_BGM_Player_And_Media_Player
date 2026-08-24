@@ -17,15 +17,15 @@
 <h2>Playback</h2>
 <ol>
 <li>Pick an optical drive and press Load to read the TOC. CD-TEXT is applied here when the disc has it.</li>
-<li>Double-click a track or press Play. This uses its own waveOut, so the main playlist keeps going. The main equalizer (including surround) always applies; when upscale is on, a dedicated upscaler matches rate / channels / bits. RubberBand applies when the tempo/pitch sliders are not at 100%. If playback crossfade is on, tracks join at the boundary. The spectrum analyzer and piano roll also receive the PCM while it plays.</li>
-<li>The seek bar is a range slider. <b>A</b> / <b>B</b> / <b>A-B×</b> beside it set an A-B loop ([ and ] do the same; press again to clear). Drag the thumbs to move the span. Volume, repeat and shuffle sit along the bottom. CD volume scales this player's PCM only; it does not move Windows app volume or the main/DS sliders.</li>
+<li>Double-click a track or press Play. This is separate from the main playlist, so you do not have to stop it. The main equalizer (including surround) always applies. If cleaner playback is on, the sound is matched to that. Tempo and pitch also apply when those sliders are not at 100%. If playback crossfade is on, tracks join at the boundary. The analyzer and piano roll also follow the sound while it plays.</li>
+<li>The seek bar is a range slider. <b>A</b> / <b>B</b> / <b>A-B×</b> beside it set an A-B loop ([ and ] do the same; press again to clear). Drag the thumbs to move the span. Volume, repeat and shuffle sit along the bottom. CD volume scales this player's sound only; it does not move Windows app volume or the main/DS sliders.</li>
 <li>Eject opens the tray. Inserting another disc is picked up automatically.</li>
 </ol>
 <h2>Titles and cover art</h2>
-<p>Lookup asks MusicBrainz by DiscID, then GnuDB, iTunes, Deezer and CDStub. Pick from the candidate list. Type a query and press Go for a name search. Cover art comes from Cover Art Archive when a MusicBrainz release ID is present. Needs a network.</p>
-<p>Once you apply a match, it is remembered in the TEMP folder for that DiscID. Putting the same disc back uses the cached titles and cover without going online, if the file is still there. If the file is gone, lookup runs again and the candidate list appears. Go (name search) always fetches and never uses the cache. Picking another match overwrites the cache. Clearing TEMP brings the list back next time.</p>
+<p>Lookup asks MusicBrainz, then GnuDB, iTunes, Deezer and similar services. Pick from the candidate list. Type a query and press Go for a name search. Cover art is fetched when the match has enough album data. Needs a network.</p>
+<p>Once you apply a match, it is remembered in the TEMP folder for that disc. Putting the same disc back uses the cached titles and cover without going online, if the file is still there. If the file is gone, lookup runs again and the candidate list appears. Go (name search) always fetches and never uses the cache. Picking another match overwrites the cache. Clearing TEMP brings the list back next time.</p>
 <h2>Editing names</h2>
-<p>Album and artist next to the cover can be typed directly. Track title and artist in the list open with a second click on the selected cell, or F2. Copied text can be pasted onto every selected row. A tab-separated pair fills title and artist together. The list also has an ISRC column when the disc provides codes. Rip filenames use the names you leave here.</p>
+<p>Album and artist next to the cover can be typed directly. Track title and artist in the list open with a second click on the selected cell, or F2. Copied text can be pasted onto every selected row. A tab-separated pair fills title and artist together. The list also has a track-code column when the disc provides codes. Rip filenames use the names you leave here.</p>
 <h2>Ripping</h2>
 <dl>
 <dt>Format</dt>
@@ -35,14 +35,14 @@
 <dt>Rip all</dt>
 <dd>Writes every track to its own file.</dd>
 <dt>Rip as one</dt>
-<dd>Writes from the first track through lead-out into a single file. If WAV-export crossfade is on, track boundaries use the same join as a multi-select export.</dd>
+<dd>Writes from the start of the disc through to the end as a single file. If WAV-export crossfade is on, track boundaries use the same join as a multi-select export.</dd>
 <dt>Add to playlist</dt>
 <dd>Appends the finished files to the current playlist.</dd>
 </dl>
-<p>Sectors are read twice and retried on mismatch. Use ... to choose the destination folder. Rips bake in the current main-player settings (equalizer, surround, upscale, tempo/pitch). When WAV-export crossfade is on and two or more tracks are included, they are joined into one file. The analyzer and piano roll also receive PCM while ripping. MP3 is limited to 2-channel 16-bit, so 5.1-style channel expansion is for WAV / FLAC.</p>
+<p>Each read is checked twice and retried if it does not match. Use ... to choose the destination folder. Rips bake in the current main-player settings (equalizer, surround, upscale, tempo/pitch). When WAV-export crossfade is on and two or more tracks are included, they are joined into one file. The analyzer and piano roll also follow the sound while ripping. MP3 is limited to 2-channel 16-bit, so 5.1-style channel expansion is for WAV / FLAC.</p>
 <h2>Burning and erase</h2>
 <ul>
-<li>Audio CD — selected WAV / MP3 / FLAC become PCM and burn Track-At-Once.</li>
+<li>Audio CD — selected WAV / MP3 / FLAC are burned one track at a time.</li>
 <li>Data CD — files burn as a data track.</li>
 <li>Erase RW — blanks a rewritable disc. This cannot be undone.</li>
 </ul>

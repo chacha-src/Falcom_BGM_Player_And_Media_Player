@@ -11,7 +11,7 @@
 
 <h1>MIDIモニタ</h1>
 
-<p class="lead">MIDIモニタは、再生中の SMF（.mid / .midi / .kar / .rmi）を 32パート（A01–A16 / B01–B16）で見守る画面です。オーディオから音程を推定するのではなく、ファイルに書かれた MIDI イベントそのものを表示します。ピアノロールが「どの音が鳴ったか」を時間軸で見せるのに対し、こちらは「各チャンネルの音色・音量・効果」を一覧します。</p>
+<p class="lead">MIDIモニタは、再生中の SMF（.mid / .midi / .kar / .rmi）を 32パート（A01–A16 / B01–B16）で見守る画面です。ピアノロールのように音を推測するのではなく、MIDIファイルに書いてある通りを表示します。ピアノロールが「どの音が鳴ったか」なら、こちらは「各パートの音色・音量・効果」の一覧です。</p>
 <div class="shot">
 <img src="../img/midi-monitor.png" alt="MIDIモニタ">
 <p class="cap">MIDIモニタ</p>
@@ -34,7 +34,7 @@
 <li>SYS（GM / GS / XG）、INSERTION 1 / 2</li>
 </ul>
 <h2>32行のチャンネル表</h2>
-<p>各行が1パートです。A01–A16 がポートA、B01–B16 がポートBです。</p>
+<p>各行が1パートです。上の16行が前半、下の16行が後半です。ドラムは曲の指定に従います（10番だけがドラム、とは限りません）。</p>
 <dl>
 <dt>PC# / BNK / Map / Instrument</dt>
 <dd>プログラム番号・バンク・GS/XGマップ・音色名です。音色名は内蔵の SASAMI GS / XG 表から引きます。</dd>
@@ -48,10 +48,10 @@
 <dd>いま押されている鍵盤が点灯します。クリックすると、そのパートの音が再生経路から出ます。</dd>
 </dl>
 <h2>ミニ鍵盤とスライダーで鳴らす</h2>
-<p>ミニ鍵盤のクリック、音量・パンなどのドラッグは、表示だけでなく実際の音にも乗っかります。<a href="vst-midi.htm">.mid を VST 音源で鳴らす</a> のときは、曲と同じ VST（64bit 音源も含む）へ入ります。鍵盤クリックで曲を巻き戻したり、他パートの音色をリセットしたりはしません。両方の VST が空で MIDI マッパーに落ちているときも、同じ端末へ短文が行き、曲のテンポ（イベントの時間位置）と SysEx もその端末へ流れます。<a href="kpi.htm">KPIプラグインで対応形式をふやす</a> で MIDI を鳴らしているときは、プラグイン側に MIDI 入力が無いので、レンダリング設定の「MIDI出力」端末（未指定なら MIDI マッパー）から鍵盤と CC が出ます。</p>
+<p>ミニ鍵盤のクリックや音量のドラッグは、表示だけでなく実際の音にも乗っかります。<a href="vst-midi.htm">.mid を VST 音源で鳴らす</a> のときは、曲と同じ音源へ入ります。鍵盤をクリックしても、曲は巻き戻りません。Windows の MIDI で鳴らしているときも、同じ出口へ届きます。<a href="kpi.htm">KPIプラグインで対応形式をふやす</a> で MIDI を鳴らしているときは、レンダリング設定の「MIDI出力」から鍵盤の音が出ます。</p>
 <h2>表示モード（2D / 簡易3D）</h2>
 <ul>
-<li><b>通常（2D）</b> …… 表形式。いちばん見やすい標準です。</li>
+<li><b>通常（2D）</b> …… 表形式。パートの間に薄い横線。いちばん見やすい標準です。</li>
 <li><b>簡易3D</b> …… 32パートのレベルを箱として描きます。OpenGL や Direct3D は使わず、CPUだけであしらいます。ドラッグで回転、ホイールでズーム、<kbd>0</kbd> で視点リセット。重いと感じたら、右クリックから 2D に戻してください。</li>
 </ul>
 <h2>右クリックメニュー</h2>
@@ -67,7 +67,7 @@
 <dt>MIDIを再読込</dt>
 <dd>いまの曲の MIDI を読み直します。</dd>
 <dt>音色マップ</dt>
-<dd>自動（SysEx／曲名）／GS／XG／55map／88map／88Promap／8820map／GMmap／SDmap／LAmap。曲名に VL があれば 88map、MT-32 や LA なら LAmap（55map のバンク127）として引きます。</dd>
+<dd>自動／GS／XG などから選べます。曲名から合う表を選ぶこともできます。</dd>
 <dt>開く</dt>
 <dd>イコライザー／ピアノロール／アナライザー／操作ガイドへ飛びます。</dd>
 </dl>
@@ -89,7 +89,7 @@
 <div class="related"><span class="label">あわせて読みたい</span><ul><li><a href="vst-midi.htm">.mid を VST 音源で鳴らす</a></li><li><a href="pianoroll.htm">ピアノロールで音を見る</a></li><li><a href="vst.htm">VSTホストで音源を鳴らす</a></li><li><a href="midi.htm">MIDIキーボードで操作する</a></li><li><a href="render.htm">レンダリング設定</a></li></ul></div>
 
 <div class="botnav">
-<span class="prev">&#171; 前へ: <a href="pianoroll-tune.htm">ピアノロールの検出パラメータ</a></span>
+<span class="prev">&#171; 前へ: <a href="pianoroll-tune.htm">ピアノロールの音の拾い方</a></span>
 <span class="next">次へ: <a href="video.htm">動画を再生する</a> &#187;</span>
 <span class="up"><a href="index.htm">目次</a></span>
 <div class="clear"></div>

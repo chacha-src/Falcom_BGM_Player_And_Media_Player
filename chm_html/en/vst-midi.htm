@@ -29,14 +29,17 @@
 <li>If the SMF contains <b>XG System On</b> → <b>XG VST</b></li>
 <li>Otherwise → <b>GS VST</b></li>
 <li>If only one side is filled, that side covers both.</li>
-<li>If both are empty, playback falls back to the Windows MIDI Mapper (or the device chosen under MIDI out). Tempo is the event timeline; GM/GS/XG SysEx is sent to that device. PCM is silent, but silence does not cut the song short.</li>
+<li>If both are empty, playback falls back to Windows MIDI. There is no sound from this player, but the song still runs to the end.</li>
 </ul>
+<h2>32 parts (Port A / Port B)</h2>
+<p>32-part songs play the first 16 parts on one module and the second 16 on another. Which part is drums follows the song, not a hard lock to channel 10. The <a href="midi-monitor.htm">MIDI monitor</a> A01–A16 / B01–B16 rows follow the same split.</p>
 <h2>Play a file</h2>
 <ol>
 <li>Add a .mid to the playlist and play it.</li>
 <li>A banner like <code>file:mid VST (32)</code> or <code>file:mid VST (64)</code> means VST playback. Without a DLL you may see <code>file:mid MIDI Mapper</code>.</li>
 <li>Once playback (or a <a href="crossfade.htm">Continuous-play crossfade</a> soft-open) starts, a green <b>LR</b> (or similar) mark appears on the playlist row. MIDI cannot be peeked from the header alone, so the channel count is confirmed when the file is opened.</li>
 </ol>
+<p>Playback time follows tempo changes. A little ring-out may remain after the last note.</p>
 <h2>Watch while it plays</h2>
 <p>Open the <a href="midi-monitor.htm">MIDI monitor</a> to see all 32 parts live. Side by side with the <a href="pianoroll.htm">piano roll</a>, you get both notes and channel state.</p>
 <h2>64-bit modules</h2>
