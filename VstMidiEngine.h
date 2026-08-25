@@ -42,6 +42,8 @@ int VstScanEnsure(HWND parentForWait);
 // After Ensure: try each instrument the way a part-slot drop does, and keep
 // only the ones that open. Call from the VST host UI on first open / rescan.
 void VstScanVerifyLiveList(HWND parentForWait);
+void VstWaitShowLoad(HWND owner, const wchar_t* pluginName);
+void VstWaitHide(void);
 int VstScanGetCount(void);
 const VstPluginInfo* VstScanGet(int i);
 void VstScanInvalidate(void);

@@ -1,4 +1,4 @@
-#include "kpihost_stdafx.h"
+﻿#include "kpihost_stdafx.h"
 #include "../kpi_host_ipc.h"
 #include "../VstMidiEngine.h"
 #include "KpiHost64VstLive.h"
@@ -267,9 +267,16 @@ uint32_t VstHost64_LiveLoad(uint32_t part1to32, const wchar_t* path, uint32_t is
 	if (!path || !*path || part1to32 < 1 || part1to32 > 32)
 		return KPIHOST64_STATUS_BAD_REQUEST;
 	if (!EnsureUiThread()) return KPIHOST64_STATUS_FAIL;
+	// The audio thread holds the engine lock inside processReplacing. Load
+	// takes that lock on the UI thread, so stop rendering first. Do not start
+	// audio here: the app calls VstLiveAudioStart afterwards to open the rings.
+	const LONG hadParts = InterlockedCompareExchange(&g_liveParts, 0, 0);
+	if (hadParts > 0)
+		VstHost64_LiveAudioStop();
 	UiLoadRequest req = { (int)part1to32, path, (int)isVst3 };
 	const LRESULT rc = SendMessageW(g_uiWnd, UIMSG_LOAD, 0, (LPARAM)&req);
-	if (rc != 0) return KPIHOST64_STATUS_FAIL;
+	if (rc != 0)
+		return KPIHOST64_STATUS_FAIL;
 	InterlockedIncrement(&g_liveParts);
 	return KPIHOST64_STATUS_OK;
 }
@@ -342,8 +349,11 @@ uint32_t VstHost64_LiveRender(uint32_t frames, std::vector<uint8_t>& reply)
 uint32_t VstHost64_LiveAudioStart()
 {
 	if (g_liveAudio.thread) {
-		if (WaitForSingleObject(g_liveAudio.thread, 0) != WAIT_OBJECT_0)
+		if (WaitForSingleObject(g_liveAudio.thread, 0) != WAIT_OBJECT_0) {
+			if (g_liveAudio.shm && g_liveAudio.midiShm)
+				return KPIHOST64_STATUS_OK;
 			return KPIHOST64_STATUS_FAIL;
+		}
 		CloseHandle(g_liveAudio.thread);
 		g_liveAudio.thread = NULL;
 	}

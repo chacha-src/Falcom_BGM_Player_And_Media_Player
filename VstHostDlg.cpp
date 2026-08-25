@@ -291,9 +291,9 @@ public:
 		y = CCC_GdiHelpDrawSoftDemoPair(dc, x, y, hp.rc.Width() - x * 2, 110, CCC_HELPDEMO_KGENERIC);
 		dc.SetTextColor(RGB(48, 48, 64));
 		const CString lines[] = {
-			LL14(L"・左のプラグインを右の Part 1～32 へドラッグします。", L"· Drag a plug-in from the left to Parts 1–32.", L"· Glissez un plug-in vers les parties 1–32.", L"· Trascina un plug-in nelle parti 1–32.", L"· Arrastre un plug-in a las partes 1–32.", L"· 왼쪽 플러그인을 파트 1~32로 드래그합니다.", L"· 将左侧插件拖到声部 1–32。", L"· اسحب إضافة إلى الأجزاء 1–32.", L"· Перетащите плагин в партии 1–32.", L"· Plugin links auf Part 1–32 ziehen.", L"· Arraste um plug-in para as partes 1–32.", L"· Sleep een plug-in naar partijen 1–32.", L"· Przeciągnij wtyczkę do partii 1–32.", L"· Eklentiyi Bölüm 1–32'ye sürükleyin."),
+			LL14(L"・左のプラグインを右の Part 1～32 へドラッグします。読み込み中は「VST初期化中です。お待ちください」が出ます。", L"· Drag a plug-in from the left to Parts 1–32. While it loads, “Initializing VST. Please wait…” is shown.", L"· Glissez un plug-in vers les parties 1–32. Pendant le chargement : « Initialisation VST. Veuillez patienter… ».", L"· Trascina un plug-in nelle parti 1–32. Durante il caricamento: “Inizializzazione VST. Attendere…”.", L"· Arrastre un plug-in a las partes 1–32. Mientras carga: “Inicializando VST. Espere…”.", L"· 왼쪽 플러그인을 파트 1~32로 드래그합니다. 읽는 동안 “VST 초기화 중입니다. 잠시 기다려 주세요”가 나옵니다.", L"· 将左侧插件拖到声部 1–32。加载时显示“正在初始化 VST，请稍候”。", L"· اسحب إضافة إلى الأجزاء 1–32. أثناء التحميل تظهر «جارٍ تهيئة VST».", L"· Перетащите плагин в партии 1–32. Пока грузится: «Инициализация VST. Подождите…».", L"· Plugin links auf Part 1–32 ziehen. Beim Laden: „VST wird initialisiert. Bitte warten…“.", L"· Arraste um plug-in para as partes 1–32. Ao carregar: “A inicializar VST. Aguarde…”.", L"· Sleep een plug-in naar partijen 1–32. Tijdens laden: “VST wordt gestart. Even geduld…”.", L"· Przeciągnij wtyczkę do partii 1–32. Podczas wczytywania: „Inicjalizacja VST. Proszę czekać…”.", L"· Eklentiyi Bölüm 1–32'ye sürükleyin. Yüklenirken “VST başlatılıyor. Lütfen bekleyin…” görünür."),
 			LL14(L"・Z列＝C4～、Q列＝C5～のPC鍵盤（コンボ／入力中は無効。Spaceで全ノートオフ）。", L"· PC keys: Z-row = C4…, Q-row = C5… (off while typing in a combo; Space = all notes off).", L"· Clavier PC: rangée Z = C4…, Q = C5… (inactif dans les listes; Espace = all notes off).", L"· Tastiera PC: fila Z = C4…, Q = C5… (disattiva nei combo; Spazio = all notes off).", L"· Teclado PC: fila Z = C4…, Q = C5… (inactivo en combos; Espacio = all notes off).", L"· PC 건반: Z열=C4~, Q열=C5~(콤보 입력 중 비활성, Space=올 노트 오프).", L"· PC 键盘：Z 行=C4…，Q 行=C5…（组合框输入时无效；空格全音符关闭）。", L"· لوحة PC: صف Z=C4… وصف Q=C5… (معطّل أثناء الكتابة؛ المسافة = إيقاف كل النغمات).", L"· ПК-клавиатура: ряд Z = C4…, Q = C5… (не в комбо; Пробел = all notes off).", L"· PC-Tastatur: Z-Reihe = C4…, Q = C5… (nicht in Combos; Leertaste = All Notes Off).", L"· Teclado PC: fila Z = C4…, Q = C5… (inativo em combos; Espaço = all notes off).", L"· PC-toetsenbord: Z-rij = C4…, Q = C5… (uit in combo's; Spatie = all notes off).", L"· Klawiatura PC: rząd Z = C4…, Q = C5… (wył. w combo; Spacja = all notes off).", L"· PC klavye: Z satırı = C4…, Q = C5… (kombo yazarken kapalı; Boşluk = all notes off)."),
-			LL14(L"・一覧にはドロップで実際に載るものだけが出ます。初回／再スキャンの D&D・発音確認が通ったものから左側へ順に出ます。同じ音源のコピーは1つにまとめます。<x86><x64>はビット数、<音色選択>はプラグイン側で音色を選ぶ音源、[M16ch]は16chマルチです。", L"· The list shows only plug-ins that actually drop onto a part. Each one that passes the drop and sound check is added on the left as it is confirmed (first open / rescan). Copies of the same module are merged. <x86><x64> is bitness, <patch> needs a sound picked in the plug-in, [M16ch] is 16-ch multi.", L"· La liste n'affiche que les plug-ins réellement déposables. Chaque plug-in validé (glisser / son) apparaît à gauche au fur et à mesure. Les copies du même module sont fusionnées. <x86><x64> = bits, <timbre> = choisir dans le plug-in, [M16ch] = multi 16 ch.", L"· L'elenco mostra solo i plug-in che si possono trascinare. Ogni plug-in confermato (trascina / suono) compare a sinistra man mano. Le copie dello stesso modulo sono unite. <x86><x64> = bit, <patch> = scegliere nel plug-in, [M16ch] = multi 16 ch.", L"· La lista solo muestra plug-ins que se pueden soltar. Cada uno que pasa el arrastre y el sonido se añade a la izquierda al confirmarse. Las copias del mismo módulo se unen. <x86><x64> = bits, <timbre> = elegir en el plug-in, [M16ch] = multi 16 ch.", L"· 목록에는 실제로 드롭되는 플러그인만 표시됩니다. D&D·발음 확인이 된 것부터 왼쪽에 차례로 나옵니다. 같은 모듈의 복사본은 하나로 합칩니다. <x86><x64>는 비트, <음색선택>은 플러그인에서 고름, [M16ch]은 16ch 멀티.", L"· 列表只显示可拖放到声部的插件。通过拖放和发音确认的会从左侧依次出现。同一模块的副本会合为一条。<x86><x64>为位数，<选音色>需在插件里选，[M16ch]为 16 声道多音色。", L"· تظهر القائمة فقط الإضافات القابلة للإفلات. كل إضافة تجتاز الإفلات والصوت تُضاف إلى اليسار فور التأكيد. تُدمج نسخ نفس الوحدة. <x86><x64> البتات، <رقعة> اختيار في الإضافة، [M16ch] متعدد 16 قناة.", L"· В списке только плагины, которые реально ставятся на слот. Прошедшие проверку D&D и звука появляются слева по мере подтверждения. Копии одного модуля сливаются. <x86><x64> — разрядность, <патч> — выбрать в плагине, [M16ch] — 16-канальный мульти.", L"· Die Liste zeigt nur Plug-ins, die sich ablegen lassen. Jedes nach D&D- und Klangprüfung Bestätigte erscheint links der Reihe nach. Kopien desselben Moduls werden zusammengefasst. <x86><x64> = Bits, <Patch> = im Plug-in wählen, [M16ch] = 16-ch Multi.", L"· A lista mostra só plug-ins que se podem largar. Cada um que passa no largar e no som entra à esquerda à medida que é confirmado. Cópias do mesmo módulo juntam-se. <x86><x64> = bits, <timbre> = escolher no plug-in, [M16ch] = multi 16 ch.", L"· De lijst toont alleen plug-ins die echt te droppen zijn. Elke plug-in die D&D en geluid haalt, komt links bij bevestiging. Kopieën van dezelfde module worden samengevoegd. <x86><x64> = bits, <patch> = kiezen in de plug-in, [M16ch] = 16ch multi.", L"· Lista pokazuje tylko wtyczki, które da się upuścić. Każda po teście D&D i dźwięku pojawia się po lewej w miarę potwierdzenia. Kopie tego samego modułu są scalane. <x86><x64> = bity, <barwa> = wybór w wtyczce, [M16ch] = multi 16 ch.", L"· Liste yalnızca gerçekten bırakılabilen eklentileri gösterir. D&D ve ses kontrolünden geçenler solda sırayla çıkar. Aynı modülün kopyaları birleşir. <x86><x64> bit, <yama> eklentide seçim, [M16ch] 16ch multi."),
+			LL14(L"・一覧にはドロップで実際に載るものだけが出ます。LoopMash FX のようなエフェクトは出ません。確認が終わるまで載らないものは出しません。初回／再スキャンの D&D・発音確認が通ったものから左側へ順に出ます。同じ音源のコピーは1つにまとめます。<x86><x64>はビット数、<音色選択>はプラグイン側で音色を選ぶ音源、[M16ch]は16chマルチです。", L"· The list shows only plug-ins that actually drop onto a part. Effects such as LoopMash FX are omitted. Nothing that will be removed later is shown in passing. Each one that passes the drop and sound check is added on the left as it is confirmed (first open / rescan). Copies of the same module are merged. <x86><x64> is bitness, <patch> needs a sound picked in the plug-in, [M16ch] is 16-ch multi.", L"· La liste n'affiche que les plug-ins réellement déposables. Les effets (LoopMash FX…) sont omis. Rien n'apparaît pour disparaître ensuite. Chaque plug-in validé (glisser / son) apparaît à gauche au fur et à mesure. Les copies du même module sont fusionnées. <x86><x64> = bits, <timbre> = choisir dans le plug-in, [M16ch] = multi 16 ch.", L"· L'elenco mostra solo i plug-in che si possono trascinare. Gli effetti (LoopMash FX…) sono omessi. Nulla compare per poi sparire. Ogni plug-in confermato (trascina / suono) compare a sinistra man mano. Le copie dello stesso modulo sono unite. <x86><x64> = bit, <patch> = scegliere nel plug-in, [M16ch] = multi 16 ch.", L"· La lista solo muestra plug-ins que se pueden soltar. Los efectos (LoopMash FX…) se omiten. Nada aparece para luego desaparecer. Cada uno que pasa el arrastre y el sonido se añade a la izquierda al confirmarse. Las copias del mismo módulo se unen. <x86><x64> = bits, <timbre> = elegir en el plug-in, [M16ch] = multi 16 ch.", L"· 목록에는 실제로 드롭되는 플러그인만 표시됩니다. LoopMash FX 같은 이펙트는 나오지 않습니다. 나중에 사라질 항목은 잠깐도 올리지 않습니다. D&D·발음 확인이 된 것부터 왼쪽에 차례로 나옵니다. 같은 모듈의 복사본은 하나로 합칩니다. <x86><x64>는 비트, <음색선택>은 플러그인에서 고름, [M16ch]은 16ch 멀티.", L"· 列表只显示可拖放到声部的插件。LoopMash FX 一类效果器不列出。不会先显示再删掉。通过拖放和发音确认的会从左侧依次出现。同一模块的副本会合为一条。<x86><x64>为位数，<选音色>需在插件里选，[M16ch]为 16 声道多音色。", L"· تظهر القائمة فقط الإضافات القابلة للإفلات. تُستثنى المؤثرات مثل LoopMash FX. لا يظهر شيء ليُحذف لاحقًا. كل إضافة تجتاز الإفلات والصوت تُضاف إلى اليسار فور التأكيد. تُدمج نسخ نفس الوحدة. <x86><x64> البتات، <رقعة> اختيار في الإضافة، [M16ch] متعدد 16 قناة.", L"· В списке только плагины, которые реально ставятся на слот. Эффекты вроде LoopMash FX не показываются. Ничего не мелькает, чтобы потом исчезнуть. Прошедшие проверку D&D и звука появляются слева по мере подтверждения. Копии одного модуля сливаются. <x86><x64> — разрядность, <патч> — выбрать в плагине, [M16ch] — 16-канальный мульти.", L"· Die Liste zeigt nur Plug-ins, die sich ablegen lassen. Effekte wie LoopMash FX fehlen. Nichts erscheint nur, um danach zu verschwinden. Jedes nach D&D- und Klangprüfung Bestätigte erscheint links der Reihe nach. Kopien desselben Moduls werden zusammengefasst. <x86><x64> = Bits, <Patch> = im Plug-in wählen, [M16ch] = 16-ch Multi.", L"· A lista mostra só plug-ins que se podem largar. Efeitos como LoopMash FX ficam de fora. Nada aparece para depois desaparecer. Cada um que passa no largar e no som entra à esquerda à medida que é confirmado. Cópias do mesmo módulo juntam-se. <x86><x64> = bits, <timbre> = escolher no plug-in, [M16ch] = multi 16 ch.", L"· De lijst toont alleen plug-ins die echt te droppen zijn. Effecten zoals LoopMash FX ontbreken. Niets verschijnt even om daarna te verdwijnen. Elke plug-in die D&D en geluid haalt, komt links bij bevestiging. Kopieën van dezelfde module worden samengevoegd. <x86><x64> = bits, <patch> = kiezen in de plug-in, [M16ch] = 16ch multi.", L"· Lista pokazuje tylko wtyczki, które da się upuścić. Efekty jak LoopMash FX nie wchodzą. Nic nie miga, by zaraz zniknąć. Każda po teście D&D i dźwięku pojawia się po lewej w miarę potwierdzenia. Kopie tego samego modułu są scalane. <x86><x64> = bity, <barwa> = wybór w wtyczce, [M16ch] = multi 16 ch.", L"· Liste yalnızca gerçekten bırakılabilen eklentileri gösterir. LoopMash FX gibi efektler çıkmaz. Sonra silinecek öğeler ara ara gösterilmez. D&D ve ses kontrolünden geçenler solda sırayla çıkar. Aynı modülün kopyaları birleşir. <x86><x64> bit, <yama> eklentide seçim, [M16ch] 16ch multi."),
 			LL14(L"・MIDI入力は3台＋「メイン再生スルー」。プレイヤーで鳴っている音（形式不問）をホストへ回し、プレイヤー本体の出力は止まります。MIDIならSMFも鍵盤と合流します。各機器は「1-16ch」（パート1–16）と「17-32ch」（パート17–32）で選べます。",
 				L"· Three MIDI inputs plus Main-playback thru. Player audio (any format) is routed here and the player's own speakers go silent. MIDI SMF also merges with the keyboards. Each device is listed as 1-16ch (parts 1–16) and 17-32ch (parts 17–32).",
 				L"· Trois entrées MIDI + traversée lecture. Chaque périphérique : 1-16ch (parties 1–16) et 17-32ch (17–32).",
@@ -327,9 +327,10 @@ public:
 			LL14(L"・SOUND Canvas VA / SGP2 等のマルチは1スロットで16ch。MIDIチャンネルはそのまま送られます。", L"· Multi-timbral plugs (SOUND Canvas VA / SGP2) take one slot for 16 channels.", L"· Les multi (SOUND Canvas VA / SGP2) utilisent 1 slot pour 16 canaux.", L"· I multi (SOUND Canvas VA / SGP2) usano 1 slot per 16 canali.", L"· Los multi (SOUND Canvas VA / SGP2) usan 1 ranura para 16 canales.", L"· SOUND Canvas VA/SGP2 멀티는 1슬롯으로 16ch.", L"· SOUND Canvas VA/SGP2 等多音色占1槽覆盖16声道。", L"· الآلات المتعددة (SOUND Canvas VA/SGP2) تشغل فتحة واحدة لـ16 قناة.", L"· Мульти (SOUND Canvas VA/SGP2) — один слот на 16 каналов.", L"· Multi (SOUND Canvas VA/SGP2): ein Slot für 16 Kanäle.", L"· Multi (SOUND Canvas VA/SGP2) usam 1 slot para 16 canais.", L"· Multi (SOUND Canvas VA/SGP2): één slot voor 16 kanalen.", L"· Multi (SOUND Canvas VA/SGP2): jeden slot na 16 kanałów.", L"· Multi (SOUND Canvas VA/SGP2): 16 kanal için tek slot.")
 		};
 		for (int i = 0; i < (int)_countof(lines); ++i) {
-			CRect tr(x, y, hp.rc.right - x, y + 38);
+			const int lh = (i <= 2) ? 52 : 38;
+			CRect tr(x, y, hp.rc.right - x, y + lh);
 			dc.DrawText(lines[i], &tr, DT_LEFT | DT_WORDBREAK | DT_NOPREFIX);
-			y += 38;
+			y += lh;
 		}
 		dc.SelectObject(old);
 		CCC_GdiHelpEndPaint(hp);
@@ -1334,7 +1335,6 @@ BOOL CVstHostDlg::OnInitDialog()
 	ShowWindow(SW_SHOW);
 	UpdateWindow();
 	VstScanEnsure(m_hWnd);
-	RebuildPluginList();
 	VstScanVerifyLiveList(m_hWnd);
 	RebuildPluginList();
 	m_wire.SetSlots(m_slots);
@@ -1881,18 +1881,27 @@ void CVstHostDlg::ApplyPreset(int index)
 	for (int i = 0; i < m_speakerOut.GetCount(); ++i)
 		if ((int)m_speakerOut.GetItemData(i) == p.outDev) { outSel = i; break; }
 	m_speakerOut.CComboBox::SetCurSel(outSel);
+	int anyLoad = 0;
 	for (int part = 0; part < 32; ++part) {
 		m_slots[part] = -1;
 		VstLiveUnloadPart(part + 1);
 		if (!p.path[part][0]) continue;
 		int scanIndex = -1;
+		const wchar_t* waitName = p.path[part];
 		for (int i = 0; i < VstScanGetCount(); ++i) {
 			const VstPluginInfo* pi = VstScanGet(i);
-			if (pi && _wcsicmp(pi->path, p.path[part]) == 0) { scanIndex = i; break; }
+			if (pi && _wcsicmp(pi->path, p.path[part]) == 0) {
+				scanIndex = i;
+				waitName = pi->name;
+				break;
+			}
 		}
+		VstWaitShowLoad(m_hWnd, waitName);
+		anyLoad = 1;
 		if (VstLiveLoadPart(part + 1, p.path[part], p.isVst3[part]) == 0)
 			m_slots[part] = scanIndex;
 	}
+	if (anyLoad) VstWaitHide();
 	m_wire.SetSlots(m_slots);
 	RestartIo();
 }
@@ -1961,7 +1970,6 @@ void CVstHostDlg::OnRescan()
 	VstScanInvalidate();
 	m_wire.SetPlugins(NULL, NULL, 0);
 	VstScanEnsure(m_hWnd);
-	RebuildPluginList();
 	VstScanVerifyLiveList(m_hWnd);
 	RebuildPluginList();
 	StartAudio();
@@ -1977,7 +1985,10 @@ void CVstHostDlg::OnWireChanged(int slot)
 	VstLiveUnloadPart(slot + 1);
 	const VstPluginInfo* pi = VstScanGet(m_slots[slot]);
 	if (!pi) return;
-	if (VstLiveLoadPart(slot + 1, pi->path, pi->isVst3) != 0) {
+	VstWaitShowLoad(m_hWnd, pi->name);
+	const int loadRc = VstLiveLoadPart(slot + 1, pi->path, pi->isVst3);
+	VstWaitHide();
+	if (loadRc != 0) {
 		m_slots[slot] = -1; m_wire.SetSlots(m_slots);
 		SetStatus(LL14(L"プラグインを読み込めません", L"Could not load plug-in", L"Impossible de charger le plug-in",
 			L"Impossibile caricare il plug-in", L"No se pudo cargar el plug-in", L"플러그인을 불러올 수 없습니다",

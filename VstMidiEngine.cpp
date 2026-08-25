@@ -15,6 +15,7 @@
 #include <wchar.h>
 #include <stdarg.h>
 #include <shlobj.h>
+#include <knownfolders.h>
 #include <mmsystem.h>
 #include <process.h>
 
@@ -31,6 +32,8 @@ static int ProbeLoadedEffectAudible(AEffect* effect);
 static int ProbeLoadedVst3Audible(Vst3Inst* vst3, int drums);
 
 #pragma comment(lib, "advapi32.lib")
+#pragma comment(lib, "ole32.lib")
+#pragma comment(lib, "shell32.lib")
 
 static void MmCompactKey(const wchar_t* s, wchar_t* out, int outN)
 {
@@ -378,7 +381,7 @@ enum { SAMPLE_RATE = 44100, BLOCK_FRAMES = 512, MAX_MIDI_EVENTS = 500000 };
 // above an idle noise floor (~0.00002 observed) and far below a real note
 // (~0.06 observed).
 enum { PROBE_AUDIBLE_MILLI = 1 }; // peak x1000
-enum { CACHE_MAGIC = 0x43545356, CACHE_VERSION = 10 }; // first droppable same-name wins
+enum { CACHE_MAGIC = 0x43545356, CACHE_VERSION = 12 }; // single-file .vst3 (Kontakt) + standard roots
 
 struct MidiItem {
 	unsigned __int64 tick;
@@ -611,6 +614,34 @@ static void BaseNameNoExt(const wchar_t* path, wchar_t out[VST_NAME_CHARS])
 	if (dot) *dot = 0;
 }
 
+// "LoopMash FX" / "Foo Effect" are processors, not part instruments.
+static int IdentityLooksLikeFx(const wchar_t* name, const wchar_t* path)
+{
+	wchar_t t[VST_NAME_CHARS];
+	t[0] = 0;
+	if (name && name[0] && !wcschr(name, L'\\') && !wcschr(name, L'/'))
+		wcsncpy_s(t, name, _TRUNCATE);
+	else {
+		const wchar_t* file = (path && path[0]) ? path : name;
+		if (file && file[0]) BaseNameNoExt(file, t);
+	}
+	if (!t[0]) return 0;
+	const wchar_t* last = t;
+	for (const wchar_t* p = t; *p; ++p) {
+		if (*p == L' ' || *p == L'\t' || *p == L'-' || *p == L'_')
+			last = p + 1;
+	}
+	if (!last[0]) return 0;
+	if (!_wcsicmp(last, L"FX") || !_wcsicmp(last, L"Effect") ||
+		!_wcsicmp(last, L"Effects"))
+		return 1;
+	const size_t n = wcslen(last);
+	if (n >= 3 && (last[n - 2] == L'F' || last[n - 2] == L'f') &&
+		(last[n - 1] == L'X' || last[n - 1] == L'x'))
+		return 1;
+	return 0;
+}
+
 static HWND g_waitWnd = NULL;
 static HFONT g_waitFont = NULL;
 static int g_scanIndex = 0;
@@ -738,15 +769,24 @@ static HWND MakeWait(HWND owner)
 	int x = r.left + ((r.right - r.left) - w) / 2;
 	int y = r.top + ((r.bottom - r.top) - h) / 2;
 	if (owner) {
-		// Palette is the left ~38% of the host; keep it readable while
-		// drop / sound check fills the list one plug-in at a time.
-		const int split = ((r.right - r.left) * 38) / 100;
-		x = r.left + split + MulDiv(8, (int)dpi, 96);
-		if (x + w > r.right - 4) x = r.right - w - 4;
-		if (x < r.left) x = r.left;
-		y = r.top + MulDiv(48, (int)dpi, 96);
-		if (y + h > r.bottom) y = r.bottom - h;
-		if (y < r.top) y = r.top;
+		RECT cr = {};
+		GetClientRect(owner, &cr);
+		POINT tl = { cr.left, cr.top };
+		POINT br = { cr.right, cr.bottom };
+		ClientToScreen(owner, &tl);
+		ClientToScreen(owner, &br);
+		// Custom caption + toolbar live in the client; sit in the parts pane
+		// (right of the palette) so the scan text is not glued to the title.
+		const int skipTop = MulDiv(132, (int)dpi, 96);
+		const int skipBot = MulDiv(36, (int)dpi, 96);
+		const int paneL = tl.x + ((br.x - tl.x) * 38) / 100;
+		const int paneH = (br.y - tl.y) - skipTop - skipBot;
+		x = paneL + ((br.x - paneL) - w) / 2;
+		y = tl.y + skipTop + (paneH - h) / 2;
+		if (x + w > br.x - 4) x = br.x - w - 4;
+		if (x < paneL) x = paneL;
+		if (y + h > br.y - skipBot) y = br.y - skipBot - h;
+		if (y < tl.y + skipTop) y = tl.y + skipTop;
 	}
 	HWND wnd = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_TOPMOST, L"STATIC",
 		LL14(L"VSTプラグインを検索しています…", L"Searching VST plug-ins…",
@@ -765,6 +805,36 @@ static HWND MakeWait(HWND owner)
 	}
 	g_waitWnd = wnd;
 	return wnd;
+}
+
+extern "C" void VstWaitShowLoad(HWND owner, const wchar_t* pluginName)
+{
+	wchar_t msg[512];
+	_snwprintf_s(msg, _TRUNCATE, LL14(
+		L"VST初期化中です。お待ちください\n%s",
+		L"Initializing VST. Please wait…\n%s",
+		L"Initialisation VST. Veuillez patienter…\n%s",
+		L"Inizializzazione VST. Attendere…\n%s",
+		L"Inicializando VST. Espere…\n%s",
+		L"VST 초기화 중입니다. 잠시 기다려 주세요\n%s",
+		L"正在初始化 VST，请稍候\n%s",
+		L"جارٍ تهيئة VST. يرجى الانتظار…\n%s",
+		L"Инициализация VST. Подождите…\n%s",
+		L"VST wird initialisiert. Bitte warten…\n%s",
+		L"A inicializar VST. Aguarde…\n%s",
+		L"VST wordt gestart. Even geduld…\n%s",
+		L"Inicjalizacja VST. Proszę czekać…\n%s",
+		L"VST başlatılıyor. Lütfen bekleyin…\n%s"),
+		pluginName && pluginName[0] ? pluginName : L"");
+	HWND w = g_waitWnd;
+	if (!w || !IsWindow(w))
+		w = MakeWait(owner);
+	SetWaitStatus(w, msg);
+}
+
+extern "C" void VstWaitHide(void)
+{
+	if (g_waitWnd) DestroyWait(g_waitWnd);
 }
 
 static void PumpWait(HWND wnd)
@@ -1036,6 +1106,8 @@ static void ProbeVst2(const wchar_t* path)
 	if (nm[0]) MultiByteToWideChar(CP_ACP, 0, nm, -1, wide, VST_NAME_CHARS);
 	if (PathLooksLikeScVa(path))
 		wcsncpy_s(wide, VST_NAME_CHARS, L"SOUND Canvas VA", _TRUNCATE);
+	if (IdentityLooksLikeFx(wide[0] ? wide : base, path))
+		instrument = 0;
 	AddPlugin(path, wide[0] ? wide : base, arch, 0, instrument);
 	FreeLibrary(mod);
 }
@@ -1046,25 +1118,107 @@ static int DirExists(const wchar_t* path)
 	return a != INVALID_FILE_ATTRIBUTES && (a & FILE_ATTRIBUTE_DIRECTORY);
 }
 
-static void ProbeVst3Bundle(const wchar_t* bundle)
+static int PathHasDirLeaf(const wchar_t* path, const wchar_t* leaf)
 {
+	if (!path || !leaf || !leaf[0]) return 0;
+	const size_t ln = wcslen(leaf);
+	for (const wchar_t* p = path; *p; ++p) {
+		if (p != path && p[-1] != L'\\' && p[-1] != L'/') continue;
+		if (_wcsnicmp(p, leaf, ln) != 0) continue;
+		const wchar_t e = p[ln];
+		if (!e || e == L'\\' || e == L'/') return 1;
+	}
+	return 0;
+}
+
+// Product Foo.vst3 often ships a sibling folder Foo\ with internal VST-MA
+// modules. Recursing there registers helpers as if they were instruments.
+static int IsVst3ProductSupportDir(const wchar_t* dir)
+{
+	if (!dir || !*dir) return 0;
+	wchar_t parent[VST_PATH_CHARS];
+	SafeCopy(parent, VST_PATH_CHARS, dir);
+	wchar_t* slash = wcsrchr(parent, L'\\');
+	if (!slash || !slash[1]) return 0;
+	const wchar_t* leaf = slash + 1;
+	if (EqExt(leaf, L".vst3")) return 0;
+	*slash = 0;
+	if (!parent[0]) return 0;
+	wchar_t bundle[VST_PATH_CHARS];
+	if (wcslen(leaf) + 6 >= VST_PATH_CHARS) return 0;
+	wcscpy_s(bundle, VST_PATH_CHARS, leaf);
+	wcscat_s(bundle, VST_PATH_CHARS, L".vst3");
+	wchar_t sibling[VST_PATH_CHARS];
+	JoinPath(sibling, parent, bundle);
+	return GetFileAttributesW(sibling) != INVALID_FILE_ATTRIBUTES;
+}
+
+static int Vst3PathIsInsideProductSupport(const wchar_t* path)
+{
+	if (!path || !*path) return 0;
+	wchar_t cur[VST_PATH_CHARS];
+	SafeCopy(cur, VST_PATH_CHARS, path);
+	for (;;) {
+		wchar_t* slash = wcsrchr(cur, L'\\');
+		if (!slash || slash == cur) return 0;
+		*slash = 0;
+		if (!cur[0]) return 0;
+		if (IsVst3ProductSupportDir(cur)) return 1;
+	}
+}
+
+static int Vst3IsInternalModule(const wchar_t* bundle)
+{
+	if (!bundle || !*bundle) return 1;
+	if (PathHasDirLeaf(bundle, L"Shared Components")) return 1;
+	if (PathHasDirLeaf(bundle, L"Contents")) return 1;
+	return Vst3PathIsInsideProductSupport(bundle);
+}
+
+static int SkipVstScanDir(const wchar_t* dir)
+{
+	if (!dir || !*dir) return 1;
+	const wchar_t* leaf = wcsrchr(dir, L'\\');
+	leaf = leaf ? leaf + 1 : dir;
+	if (!_wcsicmp(leaf, L"Contents")) return 1;
+	if (!_wcsicmp(leaf, L"Shared Components")) return 1;
+	if (!_wcsicmp(leaf, L"x86-win") || !_wcsicmp(leaf, L"x86_64-win")) return 1;
+	return IsVst3ProductSupportDir(dir);
+}
+
+static int ProbeVst3Bundle(const wchar_t* bundle)
+{
+	if (Vst3IsInternalModule(bundle)) return 0;
 	wchar_t base[VST_NAME_CHARS];
 	BaseNameNoExt(bundle, base);
 	if (PathLooksLikeScVa(bundle) || PathLooksLikeScVa(base))
 		wcsncpy_s(base, VST_NAME_CHARS, L"SOUND Canvas VA", _TRUNCATE);
+	const DWORD attr = GetFileAttributesW(bundle);
+	if (attr == INVALID_FILE_ATTRIBUTES) return 0;
+	int arch = 0;
+	if (!(attr & FILE_ATTRIBUTE_DIRECTORY)) {
+		// Native Instruments (Kontakt, Massive X, …) ships a single PE .vst3,
+		// not a Contents\\x86_64-win bundle folder.
+		arch = PeArch(bundle);
+		if (!arch) return 0;
+		AddPlugin(bundle, base, arch, 1, IdentityLooksLikeFx(base, bundle) ? 0 : 1);
+		return 1;
+	}
 	wchar_t p32[VST_PATH_CHARS], p64[VST_PATH_CHARS];
 	JoinPath(p32, bundle, L"Contents\\x86-win");
 	JoinPath(p64, bundle, L"Contents\\x86_64-win");
-	int arch = DirExists(p64) ? 64 : (DirExists(p32) ? 32 : 0);
+	arch = DirExists(p64) ? 64 : (DirExists(p32) ? 32 : 0);
 	if (!arch) arch = HostArch();
 	// Registration is deliberately factory-free: some VST3 bundles perform
 	// expensive initialization in GetPluginFactory. Playback falls through.
-	AddPlugin(bundle, base, arch, 1, 1);
+	AddPlugin(bundle, base, arch, 1, IdentityLooksLikeFx(base, bundle) ? 0 : 1);
+	return 1;
 }
 
 static int CountDir(const wchar_t* dir, int depth)
 {
 	if (!dir || !*dir || depth > 4 || !DirExists(dir)) return 0;
+	if (SkipVstScanDir(dir)) return 0;
 	wchar_t pat[VST_PATH_CHARS];
 	JoinPath(pat, dir, L"*");
 	WIN32_FIND_DATAW fd = {};
@@ -1076,8 +1230,12 @@ static int CountDir(const wchar_t* dir, int depth)
 		wchar_t full[VST_PATH_CHARS];
 		JoinPath(full, dir, fd.cFileName);
 		if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
-			if (EqExt(fd.cFileName, L".vst3")) ++n;
-			else n += CountDir(full, depth + 1);
+			if (EqExt(fd.cFileName, L".vst3")) {
+				if (!Vst3IsInternalModule(full)) ++n;
+			} else if (!SkipVstScanDir(full))
+				n += CountDir(full, depth + 1);
+		} else if (EqExt(fd.cFileName, L".vst3")) {
+			if (!Vst3IsInternalModule(full)) ++n;
 		} else if (EqExt(fd.cFileName, L".dll")) {
 			++n;
 		}
@@ -1089,6 +1247,7 @@ static int CountDir(const wchar_t* dir, int depth)
 static void ScanDir(const wchar_t* dir, int depth, HWND wait)
 {
 	if (!dir || !*dir || depth > 4 || !DirExists(dir)) return;
+	if (SkipVstScanDir(dir)) return;
 	wchar_t pat[VST_PATH_CHARS];
 	JoinPath(pat, dir, L"*");
 	WIN32_FIND_DATAW fd = {};
@@ -1101,9 +1260,11 @@ static void ScanDir(const wchar_t* dir, int depth, HWND wait)
 		int probed = 0;
 		if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
 			if (EqExt(fd.cFileName, L".vst3")) {
-				ProbeVst3Bundle(full);
-				probed = 1;
-			} else ScanDir(full, depth + 1, wait);
+				probed = ProbeVst3Bundle(full);
+			} else if (!SkipVstScanDir(full))
+				ScanDir(full, depth + 1, wait);
+		} else if (EqExt(fd.cFileName, L".vst3")) {
+			probed = ProbeVst3Bundle(full);
 		} else if (EqExt(fd.cFileName, L".dll")) {
 			ProbeVst2(full);
 			probed = 1;
@@ -1136,30 +1297,155 @@ static void ProbeUserSpecified(const wchar_t* src, HWND wait)
 	else ProbeVst2(src);
 }
 
+enum { VST_SCAN_ROOTS = 40 };
+
+static void AddScanRoot(wchar_t roots[][VST_PATH_CHARS], int& count, int max,
+	const wchar_t* path)
+{
+	if (!path || !*path || count >= max) return;
+	wchar_t full[VST_PATH_CHARS];
+	SafeCopy(full, VST_PATH_CHARS, path);
+	size_t n = wcslen(full);
+	while (n > 3 && (full[n - 1] == L'\\' || full[n - 1] == L'/'))
+		full[--n] = 0;
+	if (!DirExists(full)) return;
+	for (int i = 0; i < count; ++i)
+		if (_wcsicmp(roots[i], full) == 0) return;
+	SafeCopy(roots[count++], VST_PATH_CHARS, full);
+}
+
 static void AddEnvRoot(const wchar_t* env, const wchar_t* suffix,
 	wchar_t roots[][VST_PATH_CHARS], int& count, int max)
 {
-	if (count >= max) return;
 	wchar_t val[VST_PATH_CHARS] = {};
 	DWORD n = GetEnvironmentVariableW(env, val, VST_PATH_CHARS);
 	if (!n || n >= VST_PATH_CHARS) return;
-	if (suffix) JoinPath(roots[count], val, suffix);
-	else SafeCopy(roots[count], VST_PATH_CHARS, val);
-	++count;
+	wchar_t full[VST_PATH_CHARS];
+	if (suffix) JoinPath(full, val, suffix);
+	else SafeCopy(full, VST_PATH_CHARS, val);
+	AddScanRoot(roots, count, max, full);
 }
 
-static void AddRegRoot(HKEY hive, wchar_t roots[][VST_PATH_CHARS],
-	int& count, int max)
+static void AddKnownFolderVst3(REFKNOWNFOLDERID id,
+	wchar_t roots[][VST_PATH_CHARS], int& count, int max)
 {
-	if (count >= max) return;
+	PWSTR base = NULL;
+	if (FAILED(SHGetKnownFolderPath(id, 0, NULL, &base)) || !base) return;
+	wchar_t full[VST_PATH_CHARS];
+	JoinPath(full, base, L"VST3");
+	CoTaskMemFree(base);
+	AddScanRoot(roots, count, max, full);
+}
+
+static void AddRegVstPluginsPath(HKEY hive, REGSAM wow,
+	wchar_t roots[][VST_PATH_CHARS], int& count, int max)
+{
 	HKEY key = NULL;
 	if (RegOpenKeyExW(hive, L"SOFTWARE\\VST", 0,
-		KEY_QUERY_VALUE | KEY_WOW64_32KEY, &key) != ERROR_SUCCESS) return;
-	DWORD type = 0, bytes = VST_PATH_CHARS * sizeof(wchar_t);
+		KEY_QUERY_VALUE | wow, &key) != ERROR_SUCCESS) return;
+	wchar_t path[VST_PATH_CHARS] = {};
+	DWORD type = 0, bytes = sizeof(path);
 	if (RegQueryValueExW(key, L"VSTPluginsPath", NULL, &type,
-		(BYTE*)roots[count], &bytes) == ERROR_SUCCESS &&
-		(type == REG_SZ || type == REG_EXPAND_SZ) && roots[count][0]) ++count;
+		(BYTE*)path, &bytes) == ERROR_SUCCESS &&
+		(type == REG_SZ || type == REG_EXPAND_SZ) && path[0])
+		AddScanRoot(roots, count, max, path);
 	RegCloseKey(key);
+}
+
+static void AddNiPluginRoots(HKEY hive, REGSAM wow,
+	wchar_t roots[][VST_PATH_CHARS], int& count, int max)
+{
+	HKEY key = NULL;
+	if (RegOpenKeyExW(hive, L"SOFTWARE\\Native Instruments", 0,
+		KEY_ENUMERATE_SUB_KEYS | wow, &key) != ERROR_SUCCESS) return;
+	for (DWORD i = 0; ; ++i) {
+		wchar_t sub[256];
+		DWORD subN = 256;
+		if (RegEnumKeyExW(key, i, sub, &subN, NULL, NULL, NULL, NULL) != ERROR_SUCCESS)
+			break;
+		HKEY prod = NULL;
+		if (RegOpenKeyExW(key, sub, 0, KEY_QUERY_VALUE, &prod) != ERROR_SUCCESS)
+			continue;
+		static const wchar_t* vals[] = {
+			L"InstallVST364Dir", L"InstallVST3Dir",
+			L"InstallVST64Dir", L"InstallVST32Dir"
+		};
+		for (int v = 0; v < (int)(sizeof(vals) / sizeof(vals[0])); ++v) {
+			wchar_t path[VST_PATH_CHARS] = {};
+			DWORD type = 0, bytes = sizeof(path);
+			if (RegQueryValueExW(prod, vals[v], NULL, &type, (BYTE*)path, &bytes)
+					== ERROR_SUCCESS &&
+				(type == REG_SZ || type == REG_EXPAND_SZ) && path[0])
+				AddScanRoot(roots, count, max, path);
+		}
+		RegCloseKey(prod);
+	}
+	RegCloseKey(key);
+}
+
+static int FillVstScanRoots(wchar_t roots[][VST_PATH_CHARS], int max)
+{
+	int count = 0;
+	AddEnvRoot(L"ProgramFiles", L"VstPlugins", roots, count, max);
+	AddEnvRoot(L"ProgramFiles", L"VSTPlugins", roots, count, max);
+	AddEnvRoot(L"ProgramFiles(x86)", L"VstPlugins", roots, count, max);
+	AddEnvRoot(L"ProgramFiles(x86)", L"VSTPlugins", roots, count, max);
+	AddEnvRoot(L"CommonProgramFiles", L"VST3", roots, count, max);
+	AddEnvRoot(L"CommonProgramFiles(x86)", L"VST3", roots, count, max);
+	AddEnvRoot(L"CommonProgramFiles", L"VST2", roots, count, max);
+	AddEnvRoot(L"CommonProgramFiles(x86)", L"VST2", roots, count, max);
+	AddEnvRoot(L"ProgramFiles", L"Native Instruments\\VSTPlugins 64 bit",
+		roots, count, max);
+	AddEnvRoot(L"ProgramFiles", L"Native Instruments\\VSTPlugins 32 bit",
+		roots, count, max);
+	AddEnvRoot(L"ProgramFiles(x86)", L"Native Instruments\\VSTPlugins 32 bit",
+		roots, count, max);
+	AddEnvRoot(L"ProgramFiles", L"Steinberg\\VstPlugins", roots, count, max);
+	AddEnvRoot(L"ProgramFiles", L"Steinberg\\VSTPlugins", roots, count, max);
+	AddEnvRoot(L"ProgramFiles(x86)", L"Steinberg\\VstPlugins", roots, count, max);
+	AddEnvRoot(L"ProgramFiles(x86)", L"Steinberg\\VSTPlugins", roots, count, max);
+	static const wchar_t* fixed[] = {
+		L"C:\\Program Files\\Common Files\\VST3",
+		L"C:\\Program Files (x86)\\Common Files\\VST3",
+		L"C:\\Program Files\\Common Files\\VST2",
+		L"C:\\Program Files\\Steinberg",
+		L"C:\\Program Files\\Common Files\\Steinberg\\VST2",
+		L"C:\\Program Files\\Common Files\\Steinberg\\VST3",
+		L"C:\\Program Files\\Native Instruments\\VSTPlugins 64 bit",
+		L"C:\\Program Files\\Native Instruments\\VSTPlugins 32 bit",
+		L"C:\\Program Files\\Roland\\SOUND Canvas VA",
+		L"C:\\Program Files (x86)\\Roland\\SOUND Canvas VA",
+		L"C:\\Yamaha\\S-YXG50",
+	};
+	for (int i = 0; i < (int)(sizeof(fixed) / sizeof(fixed[0])); ++i)
+		AddScanRoot(roots, count, max, fixed[i]);
+	AddKnownFolderVst3(FOLDERID_UserProgramFilesCommon, roots, count, max);
+	AddKnownFolderVst3(FOLDERID_Documents, roots, count, max);
+	{
+		wchar_t exe[VST_PATH_CHARS], local[VST_PATH_CHARS];
+		ExeDir(exe);
+		JoinPath(local, exe, L"VST");
+		AddScanRoot(roots, count, max, local);
+		JoinPath(local, exe, L"VST3");
+		AddScanRoot(roots, count, max, local);
+	}
+	AddRegVstPluginsPath(HKEY_LOCAL_MACHINE, KEY_WOW64_32KEY, roots, count, max);
+	AddRegVstPluginsPath(HKEY_LOCAL_MACHINE, KEY_WOW64_64KEY, roots, count, max);
+	AddRegVstPluginsPath(HKEY_CURRENT_USER, KEY_WOW64_32KEY, roots, count, max);
+	AddRegVstPluginsPath(HKEY_CURRENT_USER, KEY_WOW64_64KEY, roots, count, max);
+	AddNiPluginRoots(HKEY_LOCAL_MACHINE, KEY_WOW64_32KEY, roots, count, max);
+	AddNiPluginRoots(HKEY_LOCAL_MACHINE, KEY_WOW64_64KEY, roots, count, max);
+	AddNiPluginRoots(HKEY_CURRENT_USER, KEY_WOW64_32KEY, roots, count, max);
+	AddNiPluginRoots(HKEY_CURRENT_USER, KEY_WOW64_64KEY, roots, count, max);
+	{
+		wchar_t pd[MAX_PATH] = {};
+		if (SUCCEEDED(SHGetFolderPathW(NULL, CSIDL_COMMON_APPDATA, NULL, 0, pd))) {
+			wchar_t cloud[VST_PATH_CHARS];
+			_snwprintf_s(cloud, _TRUNCATE, L"%s\\Roland Cloud\\SOUND Canvas VA", pd);
+			AddScanRoot(roots, count, max, cloud);
+		}
+	}
+	return count;
 }
 
 static void CachePath(wchar_t path[VST_PATH_CHARS])
@@ -3263,12 +3549,13 @@ static int GmProgramFamily(int pc)
 
 static int ClassifyPlugFamily(const wchar_t* name, const wchar_t* path)
 {
-	wchar_t t[VST_PATH_CHARS * 2];
+	wchar_t t[VST_NAME_CHARS * 2];
 	t[0] = 0;
-	if (name) wcsncpy_s(t, name, _TRUNCATE);
-	if (path) {
-		wcscat_s(t, L" ");
-		wcscat_s(t, path);
+	if (name && name[0] && !wcschr(name, L'\\') && !wcschr(name, L'/'))
+		wcsncpy_s(t, name, _TRUNCATE);
+	else {
+		const wchar_t* file = (path && path[0]) ? path : name;
+		if (file && file[0]) BaseNameNoExt(file, t);
 	}
 	struct KeyFam { const wchar_t* key; int fam; };
 	static const KeyFam keys[] = {
@@ -3303,18 +3590,30 @@ static int ClassifyPlugFamily(const wchar_t* name, const wchar_t* path)
 	return FAM_GENERIC;
 }
 
-static int NameOrPathHas(const wchar_t* name, const wchar_t* path, const wchar_t* key)
+// Product family (HALion, Groove Agent, …) is the plug-in's own name, or the
+// .vst3 / .dll stem. Searching the full path treated helpers that merely live
+// under Steinberg's HALion folder (graphics2d, baios, Qt bits) as if they were
+// HALion itself, so the palette listed modules that cannot occupy a part.
+static int PlugIdentityHas(const wchar_t* name, const wchar_t* path, const wchar_t* key)
 {
-	return ContainsI(name, key) || ContainsI(path, key);
+	if (name && name[0] && !wcschr(name, L'\\') && !wcschr(name, L'/') &&
+		ContainsI(name, key))
+		return 1;
+	const wchar_t* file = (path && path[0]) ? path : name;
+	if (!file || !file[0]) return 0;
+	wchar_t stem[VST_NAME_CHARS];
+	BaseNameNoExt(file, stem);
+	return ContainsI(stem, key);
 }
 
 static int IsBundledToySynth(const wchar_t* name, const wchar_t* path)
 {
+	if (IdentityLooksLikeFx(name, path)) return 0;
 	static const wchar_t* toys[] = {
 		L"Padshop", L"Retrologue", L"Prologue", L"LoopMash", L"Trip"
 	};
 	for (int i = 0; i < (int)(sizeof(toys) / sizeof(toys[0])); ++i)
-		if (NameOrPathHas(name, path, toys[i])) return 1;
+		if (PlugIdentityHas(name, path, toys[i])) return 1;
 	return 0;
 }
 
@@ -3325,7 +3624,7 @@ static int IsRomplerName(const wchar_t* name, const wchar_t* path)
 		L"Independence", L"Falcon", L"Engine 2", L"HALion Sonic"
 	};
 	for (int i = 0; i < (int)(sizeof(keys) / sizeof(keys[0])); ++i)
-		if (NameOrPathHas(name, path, keys[i])) return 1;
+		if (PlugIdentityHas(name, path, keys[i])) return 1;
 	return 0;
 }
 
@@ -3337,14 +3636,15 @@ static int IsDrumPlugName(const wchar_t* name, const wchar_t* path)
 		L"MT-Power", L"PowerDrum"
 	};
 	for (int i = 0; i < (int)(sizeof(keys) / sizeof(keys[0])); ++i)
-		if (NameOrPathHas(name, path, keys[i])) return 1;
+		if (PlugIdentityHas(name, path, keys[i])) return 1;
 	return 0;
 }
 
 // Romplers and kit players come up with an empty slot and expose no usable
 // factory program, so they stay silent until the user picks a patch in the
-// plug-in's own browser. Forcing program 0 or waiting a second of digital
-// silence during D&D / scan only burns time (HALion 7, Kontakt, …).
+// plug-in's own browser. Opening them during D&D / scan (HALion 7, HALion
+// Sonic, Kontakt, Groove Agent, …) only burns time, and a failed open used
+// to hide them from the palette.
 static int NeedsUserPatch(const wchar_t* name, const wchar_t* path)
 {
 	static const wchar_t* keys[] = {
@@ -3353,15 +3653,15 @@ static int NeedsUserPatch(const wchar_t* name, const wchar_t* path)
 	};
 	if (IsRomplerName(name, path)) return 1;
 	for (int i = 0; i < (int)(sizeof(keys) / sizeof(keys[0])); ++i)
-		if (NameOrPathHas(name, path, keys[i])) return 1;
+		if (PlugIdentityHas(name, path, keys[i])) return 1;
 	return 0;
 }
 
 static int IsFactoryRompler(const wchar_t* name, const wchar_t* path)
 {
-	return NameOrPathHas(name, path, L"HALion Sonic") ||
-		NameOrPathHas(name, path, L"HALionSonic") ||
-		NameOrPathHas(name, path, L"SampleTank");
+	return PlugIdentityHas(name, path, L"HALion Sonic") ||
+		PlugIdentityHas(name, path, L"HALionSonic") ||
+		PlugIdentityHas(name, path, L"SampleTank");
 }
 
 // Program lists bigger than a GM bank are a library browser, not a factory
@@ -3370,6 +3670,7 @@ enum { LIVE_FACTORY_PROG_MAX = 256 };
 
 static int IsFxNotInstrument(const wchar_t* name, const wchar_t* path)
 {
+	if (IdentityLooksLikeFx(name, path)) return 1;
 	static const wchar_t* fx[] = {
 		L"Graillon", L"SpectraLayers", L"Replika", L"Supercharger",
 		L"Pro-Q", L"Ozone", L"Imager", L"Vinyl", L"Raum", L"Trash",
@@ -3401,9 +3702,9 @@ static int ScorePlugForFamily(const VstPluginInfo& p, int fam)
 	else if (fam == FAM_STRINGS && got == FAM_ENSEMBLE) s += 120;
 	else if (fam == FAM_SFX && got == FAM_FX) s += 100;
 	else if (got != fam) s -= 50;
-	if (ContainsI(p.name, L"HALion") || ContainsI(p.path, L"HALion")) s += 80;
-	if (ContainsI(p.name, L"SampleTank") || ContainsI(p.path, L"SampleTank")) s += 70;
-	if (ContainsI(p.name, L"Kontakt")) s += 30;
+	if (PlugIdentityHas(p.name, p.path, L"HALion")) s += 80;
+	if (PlugIdentityHas(p.name, p.path, L"SampleTank")) s += 70;
+	if (PlugIdentityHas(p.name, p.path, L"Kontakt")) s += 30;
 	if (IsBundledToySynth(p.name, p.path)) s -= 400;
 	if (IsDrumPlugName(p.name, p.path) && fam == FAM_DRUM) s += 200;
 	return s;
@@ -4413,69 +4714,24 @@ static int ConvertMusicXml(const wchar_t* inPath, wchar_t* out, int outChars)
 } // namespace
 
 static int CollapseLiveDuplicates(void);
+static int LivePaletteDropCompanionModules(void);
+static int LivePaletteReclassWrongPatch(void);
 
 extern "C" int VstScanEnsure(HWND parentForWait)
 {
 	if (g_scanReady && !g_scanInvalid) return 0;
 	if (!g_scanInvalid && LoadCache()) {
 		RescoreMultiFlags();
-		if (CollapseLiveDuplicates()) SaveCache();
+		int cleaned = LivePaletteDropCompanionModules();
+		cleaned += LivePaletteReclassWrongPatch();
+		if (CollapseLiveDuplicates() || cleaned) SaveCache();
 		g_scanReady = 1;
 		return 0;
 	}
 	HWND wait = MakeWait(parentForWait);
 	g_pluginCount = 0;
-	wchar_t roots[16][VST_PATH_CHARS] = {};
-	int count = 0;
-	AddEnvRoot(L"ProgramFiles", L"VstPlugins", roots, count, 16);
-	AddEnvRoot(L"ProgramFiles(x86)", L"VstPlugins", roots, count, 16);
-	AddEnvRoot(L"CommonProgramFiles", L"VST3", roots, count, 16);
-	AddEnvRoot(L"CommonProgramFiles(x86)", L"VST3", roots, count, 16);
-	static const wchar_t* fixedVstRoots[] = {
-		L"C:\\Program Files\\Common Files\\VST3",
-		L"C:\\Program Files (x86)\\Common Files\\VST3",
-		L"C:\\Program Files\\Steinberg",
-		L"C:\\Program Files\\Common Files\\Steinberg\\VST2",
-		L"C:\\Program Files\\Common Files\\Steinberg\\VST3",
-	};
-	for (int i = 0; i < (int)(sizeof(fixedVstRoots) / sizeof(fixedVstRoots[0])) && count < 16; ++i) {
-		if (!DirExists(fixedVstRoots[i])) continue;
-		int dup = 0;
-		for (int r = 0; r < count; ++r)
-			if (_wcsicmp(roots[r], fixedVstRoots[i]) == 0) { dup = 1; break; }
-		if (!dup) SafeCopy(roots[count++], VST_PATH_CHARS, fixedVstRoots[i]);
-	}
-	if (count < 16) {
-		wchar_t exe[VST_PATH_CHARS]; ExeDir(exe);
-		JoinPath(roots[count++], exe, L"VST");
-	}
-	AddRegRoot(HKEY_LOCAL_MACHINE, roots, count, 16);
-	AddRegRoot(HKEY_CURRENT_USER, roots, count, 16);
-	static const wchar_t* knownMulti[] = {
-		L"C:\\Program Files\\Roland\\SOUND Canvas VA",
-		L"C:\\Program Files (x86)\\Roland\\SOUND Canvas VA",
-		L"C:\\Yamaha\\S-YXG50",
-	};
-	wchar_t cloudRoot[VST_PATH_CHARS]; cloudRoot[0] = 0;
-	{
-		wchar_t pd[MAX_PATH] = {};
-		if (SUCCEEDED(SHGetFolderPathW(NULL, CSIDL_COMMON_APPDATA, NULL, 0, pd))) {
-			_snwprintf_s(cloudRoot, _TRUNCATE, L"%s\\Roland Cloud\\SOUND Canvas VA", pd);
-			if (DirExists(cloudRoot) && count < 16) {
-				int dup = 0;
-				for (int r = 0; r < count; ++r)
-					if (_wcsicmp(roots[r], cloudRoot) == 0) { dup = 1; break; }
-				if (!dup) SafeCopy(roots[count++], VST_PATH_CHARS, cloudRoot);
-			}
-		}
-	}
-	for (int k = 0; k < (int)(sizeof(knownMulti) / sizeof(knownMulti[0])) && count < 16; ++k) {
-		if (!DirExists(knownMulti[k])) continue;
-		int dup = 0;
-		for (int r = 0; r < count; ++r)
-			if (_wcsicmp(roots[r], knownMulti[k]) == 0) { dup = 1; break; }
-		if (!dup) SafeCopy(roots[count++], VST_PATH_CHARS, knownMulti[k]);
-	}
+	wchar_t roots[VST_SCAN_ROOTS][VST_PATH_CHARS] = {};
+	int count = FillVstScanRoots(roots, VST_SCAN_ROOTS);
 	g_scanIndex = 0;
 	g_scanTotal = 0;
 	for (int i = 0; i < count; ++i)
@@ -5194,31 +5450,12 @@ static void SweepDirForMulti(const wchar_t* dir, int depth,
 // the usual locations is what turns "silent song" into "it found the good one".
 static int CollectMultiCandidates(wchar_t out[][VST_PATH_CHARS], int max)
 {
-	wchar_t roots[16][VST_PATH_CHARS];
-	int nroots = 0;
-	static const wchar_t* fixed[] = {
-		L"C:\\Program Files\\Common Files\\VST3",
-		L"C:\\Program Files\\Steinberg\\VstPlugins",
-		L"C:\\Program Files\\Steinberg\\VSTPlugins",
-		L"C:\\Program Files\\Roland\\SOUND Canvas VA",
-		L"C:\\Program Files (x86)\\Roland\\SOUND Canvas VA",
-		L"C:\\Yamaha\\S-YXG50",
-	};
-	AddRegRoot(HKEY_LOCAL_MACHINE, roots, nroots, 16);
-	AddRegRoot(HKEY_CURRENT_USER, roots, nroots, 16);
-	{
-		wchar_t pd[MAX_PATH] = {};
-		if (SUCCEEDED(SHGetFolderPathW(NULL, CSIDL_COMMON_APPDATA, NULL, 0, pd)) &&
-			nroots < 16)
-			_snwprintf_s(roots[nroots++], VST_PATH_CHARS, _TRUNCATE,
-				L"%s\\Roland Cloud\\SOUND Canvas VA", pd);
-	}
-	if (savedata.vstExtraPath[0] && nroots < 16)
-		SafeCopy(roots[nroots++], VST_PATH_CHARS, savedata.vstExtraPath);
-	if (savedata.vstMultiDll[0] && DirExists(savedata.vstMultiDll) && nroots < 16)
-		SafeCopy(roots[nroots++], VST_PATH_CHARS, savedata.vstMultiDll);
-	for (int i = 0; i < (int)(sizeof(fixed) / sizeof(fixed[0])) && nroots < 16; ++i)
-		SafeCopy(roots[nroots++], VST_PATH_CHARS, fixed[i]);
+	wchar_t roots[VST_SCAN_ROOTS][VST_PATH_CHARS];
+	int nroots = FillVstScanRoots(roots, VST_SCAN_ROOTS);
+	if (savedata.vstExtraPath[0])
+		AddScanRoot(roots, nroots, VST_SCAN_ROOTS, savedata.vstExtraPath);
+	if (savedata.vstMultiDll[0] && DirExists(savedata.vstMultiDll))
+		AddScanRoot(roots, nroots, VST_SCAN_ROOTS, savedata.vstMultiDll);
 
 	int count = 0;
 	if (savedata.vstMultiDll[0] && count < max) {
@@ -5813,13 +6050,23 @@ static void LiveRemoteMix(float* L, float* R, int frames)
 
 static int LiveRemoteLoad(int part1to32, const wchar_t* pluginPath, int isVst3)
 {
-	if (!g_kpiHost.VstLiveLoad((uint32_t)part1to32, pluginPath, isVst3 != 0))
+	const int prevParts = g_liveShm.parts;
+	// KpiHost64 tears the rings down while it loads; drop our views first so
+	// we reopen the mapping the host creates afterwards.
+	LiveRemoteCloseShm();
+	g_liveShm.parts = prevParts;
+	if (!g_kpiHost.VstLiveLoad((uint32_t)part1to32, pluginPath, isVst3 != 0)) {
+		if (prevParts > 0)
+			LiveRemoteOpenShm();
+		g_liveShm.parts = prevParts;
 		return -3;
+	}
 	if (!LiveRemoteOpenShm()) {
 		g_kpiHost.VstLiveUnload((uint32_t)part1to32);
+		g_liveShm.parts = prevParts;
 		return -4;
 	}
-	++g_liveShm.parts;
+	g_liveShm.parts = prevParts + 1;
 	return 0;
 }
 
@@ -5847,6 +6094,26 @@ static int LiveRemoteActive() { return 0; }
 
 #endif
 
+// File .vst3 is a PE. A bundle folder is not, so PeArch is 0; look at Contents.
+static int PlugFileArch(const wchar_t* path, int isVst3)
+{
+	if (!path || !*path) return 0;
+	const DWORD attr = GetFileAttributesW(path);
+	if (attr == INVALID_FILE_ATTRIBUTES) return 0;
+	if (!(attr & FILE_ATTRIBUTE_DIRECTORY))
+		return PeArch(path);
+	if (!isVst3) return 0;
+	wchar_t p32[VST_PATH_CHARS], p64[VST_PATH_CHARS];
+	JoinPath(p32, path, L"Contents\\x86-win");
+	JoinPath(p64, path, L"Contents\\x86_64-win");
+	const int has32 = DirExists(p32);
+	const int has64 = DirExists(p64);
+	if (has64 && has32) return HostArch();
+	if (has64) return 64;
+	if (has32) return 32;
+	return 0;
+}
+
 extern "C" int VstLiveLoadPart(int part1to32,
 	const wchar_t* pluginPath, int isVst3)
 {
@@ -5867,34 +6134,38 @@ extern "C" int VstLiveLoadPart(int part1to32,
 	// x64 plug-in in a 32-bit process: hand it to KpiHost64. Slot state is
 	// updated outside the engine lock because the pipe call can start the
 	// host process, which takes far too long to hold the audio lock for.
-	if (PeArch(pluginPath) != HostArch()) {
+	const int arch = PlugFileArch(pluginPath, isVst3);
+	if (arch != HostArch()) {
 		const int rc = LiveRemoteLoad(part1to32, pluginPath, isVst3);
 		EnsLog(L"LiveLoad part=%d remote rc=%d arch=%d vst3=%d path=%s",
-			part1to32, rc, PeArch(pluginPath), isVst3, pluginPath);
-		if (rc != 0) return rc;
-		EnterCriticalSection(&g_eng.cs);
-		LivePart& rp = g_eng.live[part1to32 - 1];
-		rp.remote = 1;
-		rp.isMulti = LiveIsMultiPath(pluginPath);
-		rp.sendCh = rp.isMulti ? -1 : 0;
-		rp.prog = -1;
-		LeaveCriticalSection(&g_eng.cs);
-		return 0;
+			part1to32, rc, arch, isVst3, pluginPath);
+		if (rc == 0) {
+			EnterCriticalSection(&g_eng.cs);
+			LivePart& rp = g_eng.live[part1to32 - 1];
+			rp.remote = 1;
+			rp.isMulti = LiveIsMultiPath(pluginPath);
+			rp.sendCh = rp.isMulti ? -1 : 0;
+			rp.prog = -1;
+			LeaveCriticalSection(&g_eng.cs);
+			return 0;
+		}
+		if (arch == 64) return rc;
+		// arch 0 (bundle whose Contents we could not see) already tried
+		// remote; fall through to a local open.
 	}
 #endif
 
-	EnterCriticalSection(&g_eng.cs);
+	Vst3Inst* vst3 = NULL;
+	HMODULE module = NULL;
+	AEffect* effect = NULL;
 	int ok = 0;
+	int prog = -1;
 	if (isVst3) {
-		p.vst3 = Vst3Open(pluginPath);
-		ok = Vst3IsOk(p.vst3);
-		if (!ok) { Vst3Close(p.vst3); p.vst3 = NULL; }
-		// Small factory banks still get program 0 so they speak on drop.
-		// Samplers/kits the user patches themselves, and MediaBay-sized lists
-		// (HALion 7), skip it: loading entry 0 can take seconds and the user
-		// will pick a sound in the plug-in anyway.
+		vst3 = Vst3Open(pluginPath);
+		ok = Vst3IsOk(vst3);
+		if (!ok) { Vst3Close(vst3); vst3 = NULL; }
 		if (ok) {
-			const int nprog = Vst3ProgramCount(p.vst3);
+			const int nprog = Vst3ProgramCount(vst3);
 			const int factory = IsFactoryRompler(pluginPath, pluginPath);
 			int setFirst = 0;
 			if (nprog > 0) {
@@ -5904,28 +6175,38 @@ extern "C" int VstLiveLoadPart(int part1to32,
 					setFirst = 1;
 			}
 			if (setFirst) {
-				Vst3SetProgram(p.vst3, 0);
-				p.prog = 0;
+				Vst3SetProgram(vst3, 0);
+				prog = 0;
 			}
-			if (!Vst3IsInstrument(p.vst3)) {
-				Vst3Close(p.vst3);
-				p.vst3 = NULL;
+			if (!Vst3IsInstrument(vst3)) {
+				Vst3Close(vst3);
+				vst3 = NULL;
 				ok = 0;
 			}
 		}
 	} else {
-		ok = LoadVst2(pluginPath, p.module, p.effect);
+		ok = LoadVst2(pluginPath, module, effect);
 	}
+
+	EnterCriticalSection(&g_eng.cs);
 	if (ok) {
+		p.vst3 = vst3;
+		p.module = module;
+		p.effect = effect;
+		p.prog = prog;
 		p.isMulti = LiveIsMultiPath(pluginPath);
-		// One part = one instrument track, and the channel already picked the
-		// slot, so a single-timbre plug-in is fed on ch1: a kit that listens
-		// there (Groove Agent default) plays wherever the user drops it. The
-		// slot menu can override this per part.
 		p.sendCh = p.isMulti ? -1 : 0;
+		vst3 = NULL;
+		module = NULL;
+		effect = NULL;
 	}
 	LeaveCriticalSection(&g_eng.cs);
-	return ok ? 0 : -2;
+	if (!ok) {
+		if (vst3) Vst3Close(vst3);
+		if (effect || module) CloseEffect(module, effect);
+		return -2;
+	}
+	return 0;
 }
 
 enum { LIVE_PEND_SYSEX_EVENTS = 32 };
@@ -6473,8 +6754,13 @@ static int LivePaletteListed(const VstPluginInfo& p)
 void VstHostOnLiveListChanged(void);
 #endif
 
+static int CollapseLiveDuplicates(void);
+
 static void LivePalettePushIfOk(const VstPluginInfo& p)
 {
+	if (IsFxNotInstrument(p.name, p.path)) return;
+	if (!LivePaletteListed(p)) return;
+	CollapseLiveDuplicates();
 	if (!LivePaletteListed(p)) return;
 #ifndef KPIHOST64_BUILD
 	VstHostOnLiveListChanged();
@@ -6503,15 +6789,94 @@ static int CollapseLiveDuplicates(void)
 	return n;
 }
 
+static int LivePaletteIsPatchFamily(const VstPluginInfo& p)
+{
+	return NeedsUserPatch(p.name, p.path) || IsBundledToySynth(p.name, p.path);
+}
+
+// Helpers that live under Foo\ next to Foo.vst3 are not droppable instruments.
+static int LivePaletteDropCompanionModules(void)
+{
+	int n = 0;
+	for (int i = 0; i < g_pluginCount; ++i) {
+		VstPluginInfo& p = g_plugins[i];
+		if (!p.isVst3 || !p.isInstrument) continue;
+		if (!Vst3IsInternalModule(p.path)) continue;
+		p.isInstrument = 0;
+		p.isLiveOk = 1;
+		p.isAudible = 0;
+		++n;
+	}
+	return n;
+}
+
+// A previous verify listed helpers as <patch> because their folder said
+// HALion. They still cannot occupy a part; send them through a real drop test.
+static int LivePaletteReclassWrongPatch(void)
+{
+	int n = 0;
+	for (int i = 0; i < g_pluginCount; ++i) {
+		VstPluginInfo& p = g_plugins[i];
+		if (p.isAudible != 2) continue;
+		if (LivePaletteIsPatchFamily(p)) continue;
+		p.isLiveOk = 0;
+		p.isAudible = 0;
+		++n;
+	}
+	return n;
+}
+
+// A previous verify hid samplers after a failed unattended open (HALion Sonic
+// was the usual case). Put them back as "needs a patch" without opening.
+static int LivePaletteReviveHiddenSamplers(void)
+{
+	int n = 0;
+	for (int i = 0; i < g_pluginCount; ++i) {
+		VstPluginInfo& p = g_plugins[i];
+		if (p.isAudible != 0) continue;
+		if (IsFxNotInstrument(p.name, p.path)) continue;
+		if (!LivePaletteIsPatchFamily(p)) continue;
+		p.isInstrument = 1;
+		p.isAudible = 2;
+		p.isLiveOk = 1;
+		++n;
+	}
+	return n;
+}
+
+static int LivePaletteHideFx(void)
+{
+	int n = 0;
+	for (int i = 0; i < g_pluginCount; ++i) {
+		VstPluginInfo& p = g_plugins[i];
+		if (!p.isInstrument) continue;
+		if (!IsFxNotInstrument(p.name, p.path)) continue;
+		p.isInstrument = 0;
+		p.isLiveOk = 1;
+		p.isAudible = 0;
+		++n;
+	}
+	return n;
+}
+
 // Same open/close the part grid uses on a drop. A failed open is marked
-// checked (isLiveOk, silent) so the palette never offers it again.
+// checked (isLiveOk, silent) so the palette never offers it again — except
+// samplers, which LivePaletteReviveHiddenSamplers brings back as patch.
 extern "C" void VstScanVerifyLiveList(HWND parentForWait)
 {
+	const int hidFx = LivePaletteHideFx();
+	const int dropped = LivePaletteDropCompanionModules();
+	const int reclass = LivePaletteReclassWrongPatch();
+	const int revived = LivePaletteReviveHiddenSamplers();
+	const int dups = CollapseLiveDuplicates();
+#ifndef KPIHOST64_BUILD
+	VstHostOnLiveListChanged();
+#endif
 	int todo = 0;
 	for (int i = 0; i < g_pluginCount; ++i)
 		if (g_plugins[i].isInstrument && !g_plugins[i].isLiveOk) ++todo;
 	if (!todo) {
-		if (CollapseLiveDuplicates()) SaveCache();
+		if (hidFx || dups || revived || reclass || dropped) SaveCache();
 		return;
 	}
 
@@ -6555,10 +6920,10 @@ extern "C" void VstScanVerifyLiveList(HWND parentForWait)
 			continue;
 		}
 		const int factory = IsFactoryRompler(p.name, p.path);
-		if (NeedsUserPatch(p.name, p.path) && !factory) {
-			// Opening Groove Agent / HALion 7 / Kontakt just to see that they
-			// load can take many seconds, and the user still has to pick a
-			// patch. Listing them as "needs patch" is the drop check.
+		if (NeedsUserPatch(p.name, p.path)) {
+			// HALion Sonic used to be opened "because it has factory tones".
+			// A failed open then hid it, while HALion 7 / Groove Agent stayed
+			// listed. MediaBay samplers all belong on the palette as patch.
 			if (wait) SetVerifyWait(wait, done, todo, p.name,
 				LL14(L"音色選択として即確認", L"Needs a patch (instant)",
 					L"Timbre à choisir (immédiat)", L"Serve una patch (subito)",
@@ -6570,7 +6935,7 @@ extern "C" void VstScanVerifyLiveList(HWND parentForWait)
 			p.probePeakMilli = 0;
 			p.isLiveOk = 1;
 			changed = 1;
-			EnsLog(L"verify NEEDS-PATCH instant path=%s", p.path);
+			EnsLog(L"verify NEEDS-PATCH instant factory=%d path=%s", factory, p.path);
 			LivePalettePushIfOk(p);
 			continue;
 		}
@@ -6588,6 +6953,25 @@ extern "C" void VstScanVerifyLiveList(HWND parentForWait)
 				L"正在打开音源…", L"جارٍ الفتح…", L"Открытие…", L"Wird geöffnet…",
 				L"A abrir…", L"Openen…", L"Otwieranie…", L"Açılıyor…"));
 		if (VstLiveLoadPart(part, p.path, p.isVst3) != 0) {
+			if (!IsFxNotInstrument(p.name, p.path) &&
+				(IsBundledToySynth(p.name, p.path) || IsRomplerName(p.name, p.path)
+				|| IsDrumPlugName(p.name, p.path))) {
+				if (wait) SetVerifyWait(wait, done, todo, p.name,
+					LL14(L"今は開けないので音色選択として残します", L"Could not open now; listed as patch",
+						L"Ouverture ratée; listé comme timbre", L"Apertura fallita; in elenco come patch",
+						L"No se pudo abrir; se deja como timbre", L"지금은 못 열어서 음색 선택으로 남깁니다",
+						L"现在打不开，仍作为选音色留下", L"تعذر الفتح؛ يُدرج كرقعة",
+						L"Сейчас не открылся; в списке как патч", L"Jetzt nicht öffenbar; als Patch gelistet",
+						L"Não abriu agora; fica como timbre", L"Nu niet te openen; als patch gehouden",
+						L"Teraz się nie otwiera; zostaje jako barwa", L"Şimdi açılamadı; yama olarak kalır"));
+				p.isAudible = 2;
+				p.probePeakMilli = 0;
+				p.isLiveOk = 1;
+				changed = 1;
+				EnsLog(L"verify OPEN-FAIL keep-as-patch path=%s", p.path);
+				LivePalettePushIfOk(p);
+				continue;
+			}
 			if (wait) SetVerifyWait(wait, done, todo, p.name,
 				LL14(L"載せられないため一覧から外します", L"Cannot drop, skipping",
 					L"Non déposable, on passe", L"Non trascinabile, salto",
@@ -6635,7 +7019,8 @@ extern "C" void VstScanVerifyLiveList(HWND parentForWait)
 		p.isAudible = LiveProbePartAudible(part, &milli, &base, &prog, 0);
 		p.probePeakMilli = milli;
 		VstLiveUnloadPart(part);
-		if (!p.isAudible && factory) p.isAudible = 2;
+		if (!p.isAudible && (factory || IsBundledToySynth(p.name, p.path)))
+			p.isAudible = 2;
 		p.isLiveOk = 1;
 		changed = 1;
 		if (wait && p.isAudible == 1)
@@ -6657,7 +7042,7 @@ extern "C" void VstScanVerifyLiveList(HWND parentForWait)
 		VstHostOnLiveListChanged();
 #endif
 	}
-	if (changed) SaveCache();
+	if (changed || revived || reclass || dropped || hidFx || dups) SaveCache();
 }
 
 
