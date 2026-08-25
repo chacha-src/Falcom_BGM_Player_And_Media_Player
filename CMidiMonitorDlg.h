@@ -117,12 +117,14 @@ private:
 		BYTE fadeEq;
 		BYTE fadeNrpn;
 		BYTE heard;
+		BYTE efxOn;
 		wchar_t name[NAME_CHARS];
 	};
 
 	Part m_show[PART_MAX];
 	int m_showBpm, m_showTpc, m_showNotes, m_showPeak, m_showVol, m_showSys;
 	int m_showRev, m_showCho, m_showVar, m_showVarPacked, m_showVarConn, m_showIns1, m_showIns2, m_showDrum;
+	int m_showRevPacked, m_showChoPacked;
 	int m_showDiv, m_showTsN, m_showTsD, m_showTransp, m_showKeySf, m_showKeyMin, m_showFrozen;
 	int m_showBar, m_showBars, m_showBeat, m_showTick, m_showTpm, m_showNum;
 	wchar_t m_showTitle[280];
@@ -135,7 +137,9 @@ private:
 	void DrawVBar(CDC& dc, int x, int y, int bw, int bh, int v0, int vmax, COLORREF col, int glow, int idle);
 	void DrawPanBar(CDC& dc, int x, int y, int bw, int bh, int pan, int glow, int idle);
 	void DrawHeader(CDC& dc, int w, int headH, UINT dpi);
+	void DrawInsFoot(CDC& dc, int y, int w, int footH, UINT dpi);
 	void DrawPartRow(CDC& dc, int i, int y, int rowH, int w, UINT dpi, int forceKeys);
+	void BuildInsLine(int slot, wchar_t* out, int outN);
 	void TickVisuals();
 	void TickNotePeak();
 	void UpdateNoteMeter();
@@ -235,10 +239,17 @@ private:
 	int m_revType;
 	int m_choType;
 	int m_varType;
+	int m_revPacked;
+	int m_choPacked;
 	int m_varPacked; // XG variation TYPE (MSB<<8)|LSB; 0 until SysEx
 	int m_varConn;   // XG 02 01 5A: 0=INSERTION, 1=SYSTEM
-	int m_ins1;      // XG TYPE (MSB<<8)|LSB, or GS EFX type 0-127
+	int m_ins1;      // XG TYPE (MSB<<8)|LSB, or GS EFX (MSB<<8)|LSB
 	int m_ins2;
+	BYTE m_gsEfx[32];
+	BYTE m_gsEfxHasLsb;
+	DWORD m_gsEfxMask;
+	BYTE m_insBlk[2][24];
+	BYTE m_varBlk[32];
 	int m_noteCount;
 	int m_masterVol;
 	float m_notesPeak;
@@ -265,6 +276,7 @@ private:
 	int m_hoverPart;
 	int m_layHeadH;
 	int m_layRowH;
+	int m_layFootH;
 	int m_persistAge;
 	int m_drumGlow;
 	int m_dispBpm;
@@ -278,4 +290,6 @@ private:
 	CRect m_volBarRc;
 	CRect m_notesBarRc;
 	wchar_t m_plugShown[PART_MAX][40];
+	wchar_t m_insLine[2][220];
+	wchar_t m_showInsLine[2][220];
 };

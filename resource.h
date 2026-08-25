@@ -279,6 +279,7 @@
 #define IDR_SASAMI_GS                   279
 #define IDR_SASAMI_XG                   280
 #define IDR_SASAMI_EX                   346
+#define IDR_INSERTION_DAT               347
 #define IDR_S3TEX_R_FOREST              281
 #define IDR_S3TEX_R_RUINS               282
 #define IDR_S3TEX_R_OIL                 283

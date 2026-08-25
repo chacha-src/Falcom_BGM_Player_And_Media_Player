@@ -33,8 +33,9 @@
 <li>BPM、テンポ%、調、タイムベース、拍子、Transpose、ファイル名（シーケンス名があれば横に出す。「???」だけの名前は出さない）</li>
 <li>全体の音量%（DS）、ノート数、DRUM</li>
 <li>DRUM の右：いまの小節/総小節（001/051）、いまの拍/1小節の拍数（1/4→2/4→3/4→4/4）、小節内 tick / 1小節の tick（0000/1920）。再生位置に合わせて動きます。拍子が途中で変われば分母も変わります。</li>
-<li>リバーブ／コーラス／バリエーション</li>
-<li>SYS（GM / GS / XG）、INSERTION 1 / 2（ON/OFF ではなく、Thru・Distortion・Over Drive など XG インサーション／Variation（インサーション接続時）／GS EFX の正式名称）</li>
+<li>リバーブ／コーラス／バリエーション（XG は TYPE の MSB/LSB、GS は 40 01 30/38 の値そのもの。届いていないときは機種のリセット初期値）</li>
+<li>SYS（GM / GS / XG）、INSERTION 1 / 2（ON/OFF ではなく Thru・Distortion・Stereo-EQ など。XG インサーション／Variation をインサーション接続したとき／GS・88Pro の EFX。名前は曲の SysEx から引きます）</li>
+<li>B16 の下2行：INSERTION 1 と 2 の詳細。接続パート、Drive や EQ ゲインなど効いているパラメータ、EFX から Rev/Cho/Delay への送り。HEX ではなく取扱説明書の名称です（res/insertion.dat）</li>
 </ul>
 <h2>32行のチャンネル表</h2>
 <p>各行が1パートです。上の16行が前半、下の16行が後半です。ドラムは曲の指定に従います（10番だけがドラム、とは限りません）。VST 再生では GS リセットのあと A10/B10 をリズムへ切り替えます。XG では ch10 にドラムバンクを送ります。<a href="vst-midi.htm">.mid を VST 音源で鳴らす</a> もご覧ください。</p>

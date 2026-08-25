@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003" DefaultTargets="Build" ToolsVersion="14.0">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="uni_2026_de|Win32">
@@ -954,6 +954,7 @@
     <None Include="res\SASAMI_GS.DAT" />
     <None Include="res\SASAMI_XG.DAT" />
     <None Include="res\SASAMI_EX.DAT" />
+    <None Include="res\insertion.dat" />
     <None Include="res\s3tex\r_forest.png" />
     <None Include="res\s3tex\r_ruins.png" />
     <None Include="res\s3tex\r_oil.png" />

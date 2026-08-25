@@ -1,4 +1,4 @@
-// Microsoft Visual C++ generated resource script.
+﻿// Microsoft Visual C++ generated resource script.
 //
 #pragma code_page(65001)
 
@@ -254,6 +254,8 @@ IDR_SASAMI_GS           RCDATA                  "res\\SASAMI_GS.DAT"
 IDR_SASAMI_XG           RCDATA                  "res\\SASAMI_XG.DAT"
 
 IDR_SASAMI_EX           RCDATA                  "res\\SASAMI_EX.DAT"
+
+IDR_INSERTION_DAT       RCDATA                  "res\\insertion.dat"
 
 IDR_S3TEX_R_FOREST      RCDATA                  "res\\s3tex\\r_forest.png"
 

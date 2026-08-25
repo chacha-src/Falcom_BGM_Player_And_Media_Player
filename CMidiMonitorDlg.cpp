@@ -274,14 +274,6 @@ static const wchar_t* kGsCho[] = {
 	L"Chorus 1", L"Chorus 2", L"Chorus 3", L"Chorus 4",
 	L"Feedback Chorus", L"Flanger", L"Short Delay", L"Short Delay FB"
 };
-static const wchar_t* kGsEfx[] = {
-	L"Thru", L"Stereo EQ", L"Overdrive", L"Distortion", L"Phaser",
-	L"Spectrum", L"Enhancer", L"Auto Wah", L"Rotary", L"Compressor",
-	L"Limiter", L"Hexa Chorus", L"Trem Chorus", L"Space-D", L"St. Chorus",
-	L"St. Flanger", L"Step Flanger", L"St. Delay", L"Mod Delay", L"3D Delay",
-	L"4-Tap Delay", L"Time Delay", L"Reverb", L"Gate Reverb", L"3D Reverb",
-	L"2V Pitch", L"Fb Pitch", L"Reverb+Delay", L"Chorus+Delay", L"Amp Sim"
-};
 struct MmXgTn { BYTE msb; BYTE lsb; const wchar_t* n; };
 static const MmXgTn kXgTypeNm[] = {
 	{ 0x00, 0x00, L"Thru" },
@@ -332,6 +324,8 @@ static const MmXgTn kXgTypeNm[] = {
 };
 
 static void MmCopyW(wchar_t* dst, int n, const wchar_t* src);
+static BOOL MmLoadResDat(int id, BYTE** out, int* outN);
+static BOOL MmLoadFileDat(const wchar_t* path, BYTE** out, int* outN);
 
 static int MmXgUnpack(const BYTE* d, int n, int* ah, int* am, int* al, const BYTE** data, int* ndata)
 {
@@ -361,10 +355,13 @@ static int MmXgUnpack(const BYTE* d, int n, int* ah, int* am, int* al, const BYT
 	return 0;
 }
 
+static int MmInsNameFromDat(int fam, int msb, int lsb, wchar_t* out, int outN);
+
 static void MmXgEffTypeName(int msb, int lsb, wchar_t* out, int outN)
 {
 	msb &= 127;
 	lsb &= 127;
+	if (MmInsNameFromDat('X', msb, lsb, out, outN)) return;
 	const wchar_t* hit = NULL;
 	const wchar_t* base = NULL;
 	for (int i = 0; i < (int)(sizeof(kXgTypeNm) / sizeof(kXgTypeNm[0])); ++i) {
@@ -375,18 +372,24 @@ static void MmXgEffTypeName(int msb, int lsb, wchar_t* out, int outN)
 	if (hit) { MmCopyW(out, outN, hit); return; }
 	if (base) { MmCopyW(out, outN, base); return; }
 	if (msb == 0 && lsb == 0) { MmCopyW(out, outN, L"Thru"); return; }
-	_snwprintf_s(out, outN, _TRUNCATE, L"%02X:%02X", msb, lsb);
+	_snwprintf_s(out, outN, _TRUNCATE, L"%d:%d", msb, lsb);
 }
 
-static void MmInsDisp(int mode, int slot, int insPacked, int varPacked, int varConn, wchar_t* out, int outN)
+static void MmInsDisp(int mode, int slot, int insPacked, int varPacked, int varConn, wchar_t* out, int outN, int gsHasLsb)
 {
 	if (mode == 1) {
 		if (slot != 0) { MmCopyW(out, outN, L"Thru"); return; }
-		const int t = insPacked & 127;
-		if (t >= 0 && t < (int)(sizeof(kGsEfx) / sizeof(kGsEfx[0])))
-			MmCopyW(out, outN, kGsEfx[t]);
-		else
-			_snwprintf_s(out, outN, _TRUNCATE, L"%02X", t);
+		const int msb = (insPacked >> 8) & 127;
+		const int lsb = insPacked & 127;
+		if (gsHasLsb) {
+			if (MmInsNameFromDat('G', msb, lsb, out, outN)) return;
+			if (lsb == 0 && MmInsNameFromDat('8', msb, 0, out, outN)) return;
+		} else {
+			if (MmInsNameFromDat('8', msb, 0, out, outN)) return;
+			if (MmInsNameFromDat('G', msb, lsb, out, outN)) return;
+		}
+		if (msb == 0 && lsb == 0) { MmCopyW(out, outN, L"Thru"); return; }
+		MmCopyW(out, outN, L"EFX");
 		return;
 	}
 	int packed = insPacked;
@@ -410,6 +413,200 @@ static void MmCopyW(wchar_t* dst, int n, const wchar_t* src)
 	if (!dst || n <= 0) return;
 	if (!src) src = L"";
 	wcsncpy_s(dst, n, src, _TRUNCATE);
+}
+
+enum { INS_TMAX = 120, INS_PMAX = 16 };
+struct MmInsP { BYTE n; BYTE kind; char name[16]; char extra[72]; };
+struct MmInsT { BYTE fam; BYTE msb; BYTE lsb; BYTE np; char name[28]; MmInsP p[INS_PMAX]; };
+static MmInsT s_insTab[INS_TMAX];
+static int s_insTabN = 0;
+static int s_insReady = 0;
+
+static int MmInsHex2(const char* s)
+{
+	int v = 0;
+	for (int i = 0; i < 2 && s[i]; ++i) {
+		const char c = s[i];
+		v <<= 4;
+		if (c >= '0' && c <= '9') v += c - '0';
+		else if (c >= 'A' && c <= 'F') v += c - 'A' + 10;
+		else if (c >= 'a' && c <= 'f') v += c - 'a' + 10;
+	}
+	return v;
+}
+
+static void MmEnsureInsDat()
+{
+	if (s_insReady) return;
+	s_insReady = 1;
+	BYTE* raw = NULL;
+	int n = 0;
+	if (!MmLoadResDat(IDR_INSERTION_DAT, &raw, &n))
+		MmLoadFileDat(L"res\\insertion.dat", &raw, &n);
+	if (!raw || n <= 0) return;
+	int i = 0;
+	MmInsT* cur = NULL;
+	while (i < n && s_insTabN < INS_TMAX) {
+		char line[256];
+		int L = 0;
+		while (i < n && raw[i] != '\n' && L < 255) {
+			if (raw[i] != '\r') line[L++] = (char)raw[i];
+			++i;
+		}
+		if (i < n && raw[i] == '\n') ++i;
+		line[L] = 0;
+		char* p = line;
+		while (*p == ' ' || *p == '\t') ++p;
+		if (*p == 0 || *p == '#') continue;
+		if (p[0] == 'T' && (p[1] == ' ' || p[1] == '\t')) {
+			++p;
+			while (*p == ' ' || *p == '\t') ++p;
+			if (!*p) continue;
+			const BYTE fam = (BYTE)*p++;
+			while (*p == ' ' || *p == '\t') ++p;
+			const int msb = MmInsHex2(p);
+			while (*p && *p != ' ' && *p != '\t') ++p;
+			while (*p == ' ' || *p == '\t') ++p;
+			const int lsb = MmInsHex2(p);
+			while (*p && *p != ' ' && *p != '\t') ++p;
+			while (*p == ' ' || *p == '\t') ++p;
+			cur = &s_insTab[s_insTabN++];
+			memset(cur, 0, sizeof(*cur));
+			cur->fam = fam;
+			cur->msb = (BYTE)msb;
+			cur->lsb = (BYTE)lsb;
+			strncpy_s(cur->name, p, _TRUNCATE);
+			continue;
+		}
+		if (p[0] == 'P' && (p[1] == ' ' || p[1] == '\t') && cur && cur->np < INS_PMAX) {
+			++p;
+			while (*p == ' ' || *p == '\t') ++p;
+			int pn = 0;
+			while (*p >= '0' && *p <= '9') { pn = pn * 10 + (*p - '0'); ++p; }
+			while (*p == ' ' || *p == '\t') ++p;
+			MmInsP& pp = cur->p[cur->np++];
+			pp.n = (BYTE)pn;
+			int ni = 0;
+			while (*p && *p != ' ' && *p != '\t' && ni < 15) pp.name[ni++] = *p++;
+			pp.name[ni] = 0;
+			while (*p == ' ' || *p == '\t') ++p;
+			pp.kind = (BYTE)(*p ? *p++ : 'u');
+			while (*p == ' ' || *p == '\t') ++p;
+			strncpy_s(pp.extra, p, _TRUNCATE);
+		}
+	}
+	delete[] raw;
+}
+
+static const MmInsT* MmInsFind(int fam, int msb, int lsb)
+{
+	MmEnsureInsDat();
+	msb &= 127;
+	lsb &= 127;
+	const MmInsT* base = NULL;
+	for (int i = 0; i < s_insTabN; ++i) {
+		if (s_insTab[i].fam != (BYTE)fam) continue;
+		if (s_insTab[i].msb != (BYTE)msb) continue;
+		if (s_insTab[i].lsb == (BYTE)lsb) return &s_insTab[i];
+		if (s_insTab[i].lsb == 0) base = &s_insTab[i];
+	}
+	if (fam == 'G' && lsb == 0) {
+		for (int i = 0; i < s_insTabN; ++i) {
+			if (s_insTab[i].fam == '8' && s_insTab[i].msb == (BYTE)msb)
+				return &s_insTab[i];
+		}
+	}
+	return base;
+}
+
+static int MmInsNameFromDat(int fam, int msb, int lsb, wchar_t* out, int outN)
+{
+	const MmInsT* t = MmInsFind(fam, msb, lsb);
+	if (!t || !t->name[0]) return 0;
+	MultiByteToWideChar(CP_UTF8, 0, t->name, -1, out, outN);
+	if (outN > 0) out[outN - 1] = 0;
+	return out[0] != 0;
+}
+
+static int MmInsAppend(wchar_t* dst, int dstN, int used, const wchar_t* add)
+{
+	if (!add || !add[0] || used >= dstN - 2) return used;
+	if (used > 0) {
+		if (used < dstN - 1) dst[used++] = L' ';
+		if (used < dstN - 1) dst[used++] = L' ';
+	}
+	const int left = dstN - used;
+	if (left <= 1) return used;
+	wcsncpy_s(dst + used, left, add, _TRUNCATE);
+	return used + (int)wcslen(dst + used);
+}
+
+static int MmInsFmtP(const MmInsP& pp, int v, wchar_t* out, int outN)
+{
+	out[0] = 0;
+	v &= 127;
+	wchar_t nm[20];
+	MultiByteToWideChar(CP_UTF8, 0, pp.name, -1, nm, 20);
+	nm[19] = 0;
+	const char k = (char)pp.kind;
+	if (k == 'g') {
+		if (v == 64) return 0;
+		_snwprintf_s(out, outN, _TRUNCATE, L"%s %+dB", nm, v - 64);
+		return 1;
+	}
+	if (k == 'p') {
+		if (v == 64) return 0;
+		if (v < 64) _snwprintf_s(out, outN, _TRUNCATE, L"%s L%d", nm, 64 - v);
+		else _snwprintf_s(out, outN, _TRUNCATE, L"%s R%d", nm, v - 64);
+		return 1;
+	}
+	if (k == 'b') {
+		if (v == 0) return 0;
+		_snwprintf_s(out, outN, _TRUNCATE, L"%s On", nm);
+		return 1;
+	}
+	if (k == 'q') {
+		static const wchar_t* qv[] = { L"0.5", L"1.0", L"2.0", L"4.0", L"9.0" };
+		if (v <= 0) return 0;
+		if (v > 4) v = 4;
+		_snwprintf_s(out, outN, _TRUNCATE, L"%s Q%s", nm, qv[v]);
+		return 1;
+	}
+	if (k == 'f') {
+		static const wchar_t* hz[] = {
+			L"200Hz", L"250Hz", L"315Hz", L"400Hz", L"500Hz", L"630Hz", L"800Hz",
+			L"1.0k", L"1.3k", L"1.6k", L"2.0k", L"2.5k", L"3.2k", L"4.0k", L"5.0k", L"6.3k", L"8.0k"
+		};
+		if (v <= 0) return 0;
+		if (v >= (int)(sizeof(hz) / sizeof(hz[0]))) v = (int)(sizeof(hz) / sizeof(hz[0])) - 1;
+		_snwprintf_s(out, outN, _TRUNCATE, L"%s %s", nm, hz[v]);
+		return 1;
+	}
+	if (k == 'e') {
+		if (v == 0) return 0;
+		const char* s = pp.extra;
+		int idx = 0;
+		while (*s && idx < v) {
+			if (*s == ',') ++idx;
+			++s;
+		}
+		if (!*s || idx != v) return 0;
+		char tok[40];
+		int t = 0;
+		while (*s && *s != ',' && t < 39) tok[t++] = *s++;
+		tok[t] = 0;
+		wchar_t ev[40];
+		MultiByteToWideChar(CP_UTF8, 0, tok, -1, ev, 40);
+		ev[39] = 0;
+		_snwprintf_s(out, outN, _TRUNCATE, L"%s %s", nm, ev);
+		return 1;
+	}
+	int hide127 = (pp.extra[0] == '1');
+	if (hide127) {
+		if (v == 127) return 0;
+	} else if (v == 0) return 0;
+	_snwprintf_s(out, outN, _TRUNCATE, L"%s %d", nm, v);
+	return 1;
 }
 
 static UINT MmReadBE(const BYTE* p, int n)
@@ -910,8 +1107,8 @@ void CMmHelpDlg::OnPaint()
 		L"· Lev seviyedir. Baslik DS DirectSound sesidir (MP DS ile eslenir, ana ses degil). Notes gercek polifonidir; koyu cubuk MAX'tir (sonra duser). DRUM davul vurusudur. Saginda: olcu/toplam, vurus/olcu, tick/zaman tabani."));
 	y += lh;
 	body(L, y, LL14(
-		L"・INSERTION 1/2 は ON/OFF ではなく、XG インサーション（Variation をインサーション接続しているときはその効果）や GS EFX の正式名称です（Thru、Distortion、Over Drive など）。",
-		L"· INSERTION 1/2 shows official effect names (Thru, Distortion, Over Drive…), not ON/OFF. XG insertion, Variation when connected as insertion, or GS EFX.",
+		L"・INSERTION 1/2 は ON/OFF ではなく、曲の SysEx から引いた正式名称です（Thru、Distortion、Stereo-EQ など）。B16 の下2行に、接続パートと効いているパラメータ（Drive、EQ ゲイン、Rev/Cho 送り）を文字で出します。",
+		L"· INSERTION 1/2 shows official names from the song SysEx (Thru, Distortion, Stereo-EQ…), not ON/OFF. Two rows under B16 list connected parts and active parameters (Drive, EQ gains, Rev/Cho sends).",
 		L"· INSERTION 1/2 affiche le nom officiel (Thru, Distortion…), pas ON/OFF. Insertion XG, Variation en insertion, ou EFX GS.",
 		L"· INSERTION 1/2 mostra il nome ufficiale (Thru, Distortion…), non ON/OFF. Insertion XG, Variation in insertion, o EFX GS.",
 		L"· INSERTION 1/2 muestra el nombre oficial (Thru, Distortion…), no ON/OFF. Insercion XG, Variation como insercion, o EFX GS.",
@@ -1088,7 +1285,7 @@ CMidiMonitorDlg::CMidiMonitorDlg(CWnd* pParent)
 	, m_ev(NULL), m_evCount(0), m_evPos(0), m_hadNote(0), m_hearPlayb(-1), m_sx(NULL), m_sxBytes(0)
 	, m_division(480), m_sampleRate(44100), m_lastPlayb(-1)
 	, m_usecQn(500000), m_tsNum(4), m_tsDen(4), m_keySf(0), m_keyMin(0), m_transpose(0)
-	, m_sysMode(0), m_revType(1), m_choType(2), m_varType(1), m_varPacked(0), m_varConn(1), m_ins1(0), m_ins2(0)
+	, m_sysMode(0), m_revType(4), m_choType(2), m_varType(0), m_revPacked(0), m_choPacked(0), m_varPacked(0), m_varConn(1), m_ins1(0), m_ins2(0)
 	, m_noteCount(0), m_masterVol(100)
 	, m_notesPeak(0), m_notesPeakHold(0), m_layW(0)
 	, m_dragKind(0), m_dragPart(-1), m_playPart(-1), m_playNote(-1)
@@ -1098,7 +1295,7 @@ CMidiMonitorDlg::CMidiMonitorDlg(CWnd* pParent)
 	, m_frozen(false), m_alwaysOnTop(false), m_paintDisabled(false)
 	, m_rotDragging(false), m_rotDragYaw0(0), m_rotDragPitch0(0), m_soft3dTourUntil(0)
 	, m_hoverCol(-1), m_hoverPart(-1)
-	, m_layHeadH(0), m_layRowH(0), m_persistAge(0), m_drumGlow(0), m_dispBpm(-1)
+	, m_layHeadH(0), m_layRowH(0), m_layFootH(0), m_persistAge(0), m_drumGlow(0), m_dispBpm(-1)
 	, m_dirtyRows(0xFFFFFFFFu), m_rowLive(0), m_nameNeed(0), m_burstApply(0)
 	, m_dirtyHead(true), m_fullDraw(true), m_volDragging(false)
 {
@@ -1110,6 +1307,15 @@ CMidiMonitorDlg::CMidiMonitorDlg(CWnd* pParent)
 	memset(m_part, 0, sizeof(m_part));
 	memset(m_show, 0, sizeof(m_show));
 	memset(m_plugShown, 0, sizeof(m_plugShown));
+	memset(m_gsEfx, 0, sizeof(m_gsEfx));
+	m_gsEfxHasLsb = 0;
+	m_gsEfxMask = 0;
+	memset(m_insBlk, 0, sizeof(m_insBlk));
+	memset(m_varBlk, 0, sizeof(m_varBlk));
+	m_insLine[0][0] = 0;
+	m_insLine[1][0] = 0;
+	m_showInsLine[0][0] = 0;
+	m_showInsLine[1][0] = 0;
 	m_showBpm = -1;
 	m_showVarPacked = -1;
 	m_showVarConn = -1;
@@ -1293,13 +1499,30 @@ void CMidiMonitorDlg::ResetParts()
 	m_keyMin = 0;
 	m_transpose = 0;
 	m_sysMode = m_fileHasXg ? 2 : ((m_fileHasGm || m_gsMapKind == 5 || m_gsMapKind == 9) ? 0 : 1);
-	m_revType = 1;
-	m_choType = 2;
-	m_varType = 1;
-	m_varPacked = 0;
-	m_varConn = (m_sysMode == 2) ? 0 : 1;
+	memset(m_gsEfx, 0, sizeof(m_gsEfx));
+	m_gsEfxHasLsb = 0;
+	m_gsEfxMask = 0;
+	memset(m_insBlk, 0, sizeof(m_insBlk));
+	memset(m_varBlk, 0, sizeof(m_varBlk));
 	m_ins1 = 0;
 	m_ins2 = 0;
+	if (m_sysMode == 2) {
+		m_revType = 1;
+		m_choType = 0x41;
+		m_varType = 5;
+		m_revPacked = 0x0100;
+		m_choPacked = 0x4100;
+		m_varPacked = 0x0500;
+		m_varConn = 0;
+	} else {
+		m_revType = 4;
+		m_choType = 2;
+		m_varType = 0;
+		m_revPacked = 0;
+		m_choPacked = 0;
+		m_varPacked = 0;
+		m_varConn = 1;
+	}
 	m_noteCount = 0;
 	m_notesPeak = 0;
 	m_notesPeakHold = 0;
@@ -1638,6 +1861,12 @@ void CMidiMonitorDlg::ApplySysex(const BYTE* d, int n, int livePort)
 		ResetParts();
 		m_sysMode = 2;
 		m_varConn = 0;
+		m_revType = 1;
+		m_choType = 0x41;
+		m_varType = 5;
+		m_revPacked = 0x0100;
+		m_choPacked = 0x4100;
+		m_varPacked = 0x0500;
 		return;
 	}
 	{
@@ -1650,8 +1879,10 @@ void CMidiMonitorDlg::ApplySysex(const BYTE* d, int n, int livePort)
 				if (a > 127) break;
 				const BYTE v = data[i] & 127;
 				if (ah == 0x02 && am == 0x01) {
-					if (a == 0x00) { m_revType = v; eff = 1; }
-					else if (a == 0x20) { m_choType = v; eff = 1; }
+					if (a == 0x00) { m_revType = v; m_revPacked = (v << 8) | (m_revPacked & 0x7f); eff = 1; }
+					else if (a == 0x01) { m_revPacked = (m_revPacked & 0x7f00) | v; eff = 1; }
+					else if (a == 0x20) { m_choType = v; m_choPacked = (v << 8) | (m_choPacked & 0x7f); eff = 1; }
+					else if (a == 0x21) { m_choPacked = (m_choPacked & 0x7f00) | v; eff = 1; }
 					else if (a == 0x40) {
 						m_varType = v;
 						m_varPacked = (v << 8) | (m_varPacked & 0x7f);
@@ -1663,10 +1894,19 @@ void CMidiMonitorDlg::ApplySysex(const BYTE* d, int n, int livePort)
 						m_varConn = v ? 1 : 0;
 						eff = 1;
 					}
+					if (a >= 0x40 && a < 0x40 + 32) {
+						m_varBlk[a - 0x40] = v;
+						eff = 1;
+					}
 				} else if (ah == 0x03 && (am == 0x00 || am == 0x01 || am == 0x10)) {
-					int* dst = (am == 0x00) ? &m_ins1 : &m_ins2;
+					const int slot = (am == 0x00) ? 0 : 1;
+					int* dst = (slot == 0) ? &m_ins1 : &m_ins2;
 					if (a == 0x00) { *dst = (v << 8) | (*dst & 0x7f); eff = 1; }
 					else if (a == 0x01) { *dst = (*dst & 0x7f00) | v; eff = 1; }
+					if (a < 24) {
+						m_insBlk[slot][a] = v;
+						eff = 1;
+					}
 				}
 			}
 			if (eff) m_dirtyHead = true;
@@ -1682,15 +1922,19 @@ void CMidiMonitorDlg::ApplySysex(const BYTE* d, int n, int livePort)
 		int nval = n - 9 - hasF7g - 1;
 		if (nval < 1) nval = n - 9 - hasF7g;
 		for (int i = 0; i < nval; ++i) {
-			if ((int)d[7] + i == 0x00) {
-				m_ins1 = d[8 + i] & 127;
-				m_dirtyHead = true;
-			}
+			const int a = (int)d[7] + i;
+			if (a < 0 || a >= 32) continue;
+			m_gsEfx[a] = d[8 + i] & 127;
+			m_gsEfxMask |= (1u << a);
+			if (a == 0x01) m_gsEfxHasLsb = 1;
+			m_ins1 = (m_gsEfx[0] << 8) | m_gsEfx[1];
+			m_dirtyHead = true;
 		}
 	}
 	const int hasF7 = (n > 0 && d[n - 1] == 0xf7) ? 1 : 0;
 	if (n >= 10 && d[1] == 0x41 && d[3] == 0x42 && d[4] == 0x12 &&
-		(d[5] == 0x40 || d[5] == 0x50) && d[6] >= 0x10 && d[6] <= 0x1f) {
+		(d[5] == 0x40 || d[5] == 0x50) &&
+		((d[6] >= 0x10 && d[6] <= 0x1f) || (d[6] >= 0x40 && d[6] <= 0x4f))) {
 		int blk = (d[5] == 0x50) ? 1 : 0;
 		if (livePort >= 0) blk += livePort;
 		const int part = blk * 16 + MmGs1xToPart(d[6]);
@@ -1699,9 +1943,17 @@ void CMidiMonitorDlg::ApplySysex(const BYTE* d, int n, int livePort)
 			const int nval = n - 9 - hasF7;
 			int changed = 0;
 			int mark = 0;
+			const int efxBlk = ((d[6] & 0xf0) == 0x40) ? 1 : 0;
 			for (int i = 0; i < nval; ++i) {
 				const int a = (int)d[7] + i;
 				const BYTE vv = d[8 + i];
+				if (efxBlk) {
+					if (a == 0x22) {
+						p.efxOn = (vv != 0) ? 1 : 0;
+						m_dirtyHead = true;
+					}
+					continue;
+				}
 				if (a == 0x00) {
 					p.bankMsb = vv & 127;
 					changed = 1;
@@ -1711,13 +1963,11 @@ void CMidiMonitorDlg::ApplySysex(const BYTE* d, int n, int livePort)
 					changed = 1;
 					mark = 1;
 				} else if (a == 0x02) {
-					// GS Rx CHANNEL: 00-0F = ch1-16, 10h = OFF.
 					if (vv >= 0x10) p.rxCh = 16;
 					else p.rxCh = (int)vv;
 					changed = 1;
 					mark = 1;
 				} else if (a == 0x15) {
-					// GS USE FOR RHYTHM: 0=OFF, 1=MAP1, 2=MAP2.
 					p.isDrum = (vv != 0) ? 1 : 0;
 					changed = 1;
 				}
@@ -2716,17 +2966,21 @@ void CMidiMonitorDlg::DrawHeader(CDC& dc, int w, int headH, UINT dpi)
 	dc.SelectObject(&m_fontHead);
 	dc.SetTextColor(MM_HEAD_TX);
 	const wchar_t* sysN = (m_sysMode == 2) ? L"XG" : (m_sysMode == 1) ? L"GS" : L"GM";
-	wchar_t ins1n[48], ins2n[48];
-	MmInsDisp(m_sysMode, 0, m_ins1, m_varPacked, m_varConn, ins1n, 48);
-	MmInsDisp(m_sysMode, 1, m_ins2, 0, 1, ins2n, 48);
+	wchar_t ins1n[48], ins2n[48], revN[48], choN[48], varN[48];
+	MmInsDisp(m_sysMode, 0, m_ins1, m_varPacked, m_varConn, ins1n, 48, m_gsEfxHasLsb);
+	MmInsDisp(m_sysMode, 1, m_ins2, 0, 1, ins2n, 48, m_gsEfxHasLsb);
+	if (m_sysMode == 2) {
+		MmXgEffTypeName((m_revPacked >> 8) & 127, m_revPacked & 127, revN, 48);
+		MmXgEffTypeName((m_choPacked >> 8) & 127, m_choPacked & 127, choN, 48);
+		MmXgEffTypeName((m_varPacked >> 8) & 127, m_varPacked & 127, varN, 48);
+	} else {
+		wcsncpy_s(revN, MmEffName(m_sysMode, 0, m_revType), _TRUNCATE);
+		wcsncpy_s(choN, MmEffName(m_sysMode, 1, m_choType), _TRUNCATE);
+		wcsncpy_s(varN, L"—", _TRUNCATE);
+	}
 	wchar_t line3[400];
 	_snwprintf_s(line3, _TRUNCATE, L"Reverb  %s     Chorus  %s     Variation  %s     SYS  %s     INSERTION 1/2  %s / %s",
-		MmEffName(m_sysMode, 0, m_revType),
-		MmEffName(m_sysMode, 1, m_choType),
-		MmEffName(m_sysMode, 2, m_varType),
-		sysN,
-		ins1n,
-		ins2n);
+		revN, choN, varN, sysN, ins1n, ins2n);
 	dc.TextOut(Scale(8, dpi), Scale(36, dpi), line3);
 
 	dc.SelectObject(&m_fontTiny);
@@ -2808,6 +3062,8 @@ void CMidiMonitorDlg::DrawHeader(CDC& dc, int w, int headH, UINT dpi)
 	m_showRev = m_revType;
 	m_showCho = m_choType;
 	m_showVar = m_varType;
+	m_showRevPacked = m_revPacked;
+	m_showChoPacked = m_choPacked;
 	m_showVarPacked = m_varPacked;
 	m_showVarConn = m_varConn;
 	m_showIns1 = m_ins1;
@@ -2976,20 +3232,160 @@ void CMidiMonitorDlg::DrawPartRow(CDC& dc, int i, int y, int rowH, int w, UINT d
 	m_show[i] = m_part[i];
 }
 
+void CMidiMonitorDlg::BuildInsLine(int slot, wchar_t* out, int outN)
+{
+	if (!out || outN <= 0) return;
+	out[0] = 0;
+	MmEnsureInsDat();
+	wchar_t name[48];
+	MmInsDisp(m_sysMode, slot, (slot == 0) ? m_ins1 : m_ins2, m_varPacked, m_varConn, name, 48, m_gsEfxHasLsb);
+	int used = 0;
+	wchar_t head[80];
+	_snwprintf_s(head, _TRUNCATE, L"INS%d %s", slot + 1, name);
+	used = MmInsAppend(out, outN, used, head);
+
+	int packed = (slot == 0) ? m_ins1 : m_ins2;
+	int fromVar = 0;
+	if (slot == 0 && m_sysMode == 2 && packed == 0 && m_varConn == 0 && m_varPacked != 0) {
+		packed = m_varPacked;
+		fromVar = 1;
+	}
+	const int msb = (packed >> 8) & 127;
+	const int lsb = packed & 127;
+	const MmInsT* t = NULL;
+	if (m_sysMode == 1) {
+		if (m_gsEfxHasLsb) {
+			t = MmInsFind('G', msb, lsb);
+			if (!t && lsb == 0) t = MmInsFind('8', msb, 0);
+		} else {
+			t = MmInsFind('8', msb, 0);
+			if (!t) t = MmInsFind('G', msb, lsb);
+		}
+	} else
+		t = MmInsFind('X', msb, lsb);
+
+	if (m_sysMode == 1 && slot == 0) {
+		wchar_t parts[96];
+		parts[0] = 0;
+		int pu = 0;
+		for (int i = 0; i < PART_MAX; ++i) {
+			if (!m_part[i].efxOn) continue;
+			wchar_t tag[8];
+			_snwprintf_s(tag, _TRUNCATE, L"%c%02d", (i < 16) ? L'A' : L'B', (i % 16) + 1);
+			if (pu > 0 && pu < 90) { parts[pu++] = L'+'; parts[pu] = 0; }
+			wcsncat_s(parts, tag, _TRUNCATE);
+			pu = (int)wcslen(parts);
+		}
+		if (parts[0])
+			used = MmInsAppend(out, outN, used, parts);
+		else if (packed != 0)
+			used = MmInsAppend(out, outN, used, L"Part off");
+		if (m_gsEfx[0x17] > 0) {
+			wchar_t s[24];
+			_snwprintf_s(s, _TRUNCATE, L"to Rev %d", m_gsEfx[0x17]);
+			used = MmInsAppend(out, outN, used, s);
+		}
+		if (m_gsEfx[0x18] > 0) {
+			wchar_t s[24];
+			_snwprintf_s(s, _TRUNCATE, L"to Cho %d", m_gsEfx[0x18]);
+			used = MmInsAppend(out, outN, used, s);
+		}
+		if (m_gsEfx[0x19] > 0) {
+			wchar_t s[24];
+			_snwprintf_s(s, _TRUNCATE, L"to Dly %d", m_gsEfx[0x19]);
+			used = MmInsAppend(out, outN, used, s);
+		}
+		if ((m_gsEfxMask & (1u << 0x1F)) && m_gsEfx[0x1F] == 0 && packed != 0)
+			used = MmInsAppend(out, outN, used, L"EQ off");
+		if ((m_gsEfxMask & (1u << 0x1B)) && m_gsEfx[0x1B] > 0 && m_gsEfx[0x1B] <= 95) {
+			wchar_t s[24];
+			_snwprintf_s(s, _TRUNCATE, L"Ctrl CC%d", m_gsEfx[0x1B]);
+			used = MmInsAppend(out, outN, used, s);
+		}
+		if (t) {
+			for (int i = 0; i < t->np; ++i) {
+				const int addr = 2 + t->p[i].n;
+				if (addr < 0 || addr >= 32) continue;
+				wchar_t one[48];
+				if (!MmInsFmtP(t->p[i], m_gsEfx[addr], one, 48)) continue;
+				used = MmInsAppend(out, outN, used, one);
+			}
+		}
+		(void)used;
+		return;
+	}
+
+	if (m_sysMode == 2) {
+		int partV = 127;
+		const BYTE* blk = NULL;
+		if (fromVar) {
+			used = MmInsAppend(out, outN, used, L"via Variation");
+			partV = m_varBlk[0x1B];
+		} else {
+			blk = m_insBlk[slot];
+			partV = blk[0x0C];
+		}
+		if (partV == 127)
+			used = MmInsAppend(out, outN, used, L"Part off");
+		else if (partV >= 0 && partV < 32) {
+			wchar_t tag[16];
+			_snwprintf_s(tag, _TRUNCATE, L"%c%02d", (partV < 16) ? L'A' : L'B', (partV % 16) + 1);
+			used = MmInsAppend(out, outN, used, tag);
+		} else if (partV < 127) {
+			wchar_t tag[16];
+			_snwprintf_s(tag, _TRUNCATE, L"Part %d", partV + 1);
+			used = MmInsAppend(out, outN, used, tag);
+		}
+		if (t && blk) {
+			for (int i = 0; i < t->np; ++i) {
+				const int addr = 1 + t->p[i].n;
+				if (addr < 0 || addr >= 24) continue;
+				wchar_t one[48];
+				if (!MmInsFmtP(t->p[i], blk[addr], one, 48)) continue;
+				used = MmInsAppend(out, outN, used, one);
+			}
+		}
+		(void)used;
+	}
+}
+
+void CMidiMonitorDlg::DrawInsFoot(CDC& dc, int y, int w, int footH, UINT dpi)
+{
+	BuildInsLine(0, m_insLine[0], 220);
+	BuildInsLine(1, m_insLine[1], 220);
+	const int rowH = footH / 2;
+	CFont* oldF = dc.SelectObject(&m_fontTiny);
+	for (int s = 0; s < 2; ++s) {
+		const int yy = y + s * rowH;
+		dc.FillSolidRect(0, yy, w, rowH, (s == 0) ? RGB(18, 20, 28) : RGB(14, 16, 22));
+		dc.SetBkMode(TRANSPARENT);
+		dc.SetTextColor((m_insLine[s][4] && wcsstr(m_insLine[s], L"Thru") == m_insLine[s] + 5)
+			? RGB(120, 124, 136) : RGB(220, 214, 190));
+		dc.TextOut(Scale(8, dpi), yy + Scale(1, dpi), m_insLine[s]);
+		wcsncpy_s(m_showInsLine[s], m_insLine[s], _TRUNCATE);
+	}
+	dc.FillSolidRect(0, y, w, 1, MM_GRID);
+	dc.SelectObject(oldF);
+}
+
 void CMidiMonitorDlg::DrawMonitor2D(CDC& dc, int w, int h, UINT dpi)
 {
 	const int headH = Scale(78, dpi);
+	const int footH = Scale(32, dpi);
 	dc.FillSolidRect(0, headH, w, h - headH, MM_BG);
 	DrawHeader(dc, w, headH, dpi);
-	int bodyH = h - headH;
+	int bodyH = h - headH - footH;
 	if (bodyH < PART_MAX) bodyH = PART_MAX;
 	int rowH = bodyH / PART_MAX;
 	if (rowH < Scale(10, dpi)) rowH = Scale(10, dpi);
 	m_layHeadH = headH;
 	m_layRowH = rowH;
+	m_layFootH = footH;
 	m_layW = w;
 	for (int i = 0; i < PART_MAX; ++i)
 		DrawPartRow(dc, i, headH + i * rowH, rowH, w, dpi, 1);
+	const int footY = headH + PART_MAX * rowH;
+	DrawInsFoot(dc, footY, w, footH, dpi);
 }
 
 void CMidiMonitorDlg::TickVisuals()
@@ -3419,6 +3815,7 @@ void CMidiMonitorDlg::InvalidateDirty()
 		m_dirtyHead = (bpm != m_showBpm || tpc != m_showTpc || m_noteCount != m_showNotes
 			|| pk != m_showPeak || m_masterVol != m_showVol || m_sysMode != m_showSys
 			|| m_revType != m_showRev || m_choType != m_showCho || m_varType != m_showVar
+			|| m_revPacked != m_showRevPacked || m_choPacked != m_showChoPacked
 			|| m_varPacked != m_showVarPacked || m_varConn != m_showVarConn
 			|| m_ins1 != m_showIns1 || m_ins2 != m_showIns2 || m_drumGlow != m_showDrum
 			|| m_division != m_showDiv || m_tsNum != m_showTsN || m_tsDen != m_showTsD
@@ -3427,6 +3824,13 @@ void CMidiMonitorDlg::InvalidateDirty()
 			|| m_posBar != m_showBar || m_posBars != m_showBars || m_posBeat != m_showBeat
 			|| m_posTick != m_showTick || m_posTpm != m_showTpm || m_posNum != m_showNum
 			|| wcscmp(m_titleBuf, m_showTitle) != 0);
+		if (!m_dirtyHead) {
+			wchar_t l0[220], l1[220];
+			BuildInsLine(0, l0, 220);
+			BuildInsLine(1, l1, 220);
+			if (wcscmp(l0, m_showInsLine[0]) != 0 || wcscmp(l1, m_showInsLine[1]) != 0)
+				m_dirtyHead = true;
+		}
 	}
 	if (m_fullDraw || IsView3D()) {
 		Invalidate(FALSE);
@@ -3443,6 +3847,11 @@ void CMidiMonitorDlg::InvalidateDirty()
 	if (m_dirtyHead && m_layHeadH > 0) {
 		acc.SetRect(0, capH, w, capH + m_layHeadH);
 		any = 1;
+		if (m_layFootH > 0 && m_layRowH > 0) {
+			const int fy = capH + m_layHeadH + PART_MAX * m_layRowH;
+			CRect fr(0, fy, w, fy + m_layFootH);
+			acc.UnionRect(&acc, &fr);
+		}
 	}
 	if (m_layRowH > 0 && m_layHeadH > 0) {
 		for (int i = 0; i < PART_MAX; ++i) {
@@ -3651,8 +4060,11 @@ void CMidiMonitorDlg::OnPaint()
 		if (m_layHeadH <= 0 || m_layRowH <= 0)
 			DrawMonitor2D(m_frameDC, w, h, dpi);
 		else {
-			if (m_dirtyHead)
+			if (m_dirtyHead) {
 				DrawHeader(m_frameDC, w, m_layHeadH, dpi);
+				if (m_layFootH > 0)
+					DrawInsFoot(m_frameDC, m_layHeadH + PART_MAX * m_layRowH, w, m_layFootH, dpi);
+			}
 			for (int i = 0; i < PART_MAX; ++i) {
 				if (m_dirtyRows & (1u << i))
 					DrawPartRow(m_frameDC, i, m_layHeadH + i * m_layRowH, m_layRowH, w, dpi, 0);
@@ -4030,6 +4442,9 @@ void CMidiMonitorDlg::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
 				(i < 16) ? L'A' : L'B', (i % 16) + 1, m_part[i].pc + 1, m_part[i].bankMsb, m_part[i].name,
 				m_part[i].vol, m_part[i].exp, m_part[i].pan, m_part[i].rev, m_part[i].crs);
 		}
+		BuildInsLine(0, m_insLine[0], 220);
+		BuildInsLine(1, m_insLine[1], 220);
+		n += _snwprintf_s(buf + n, _countof(buf) - n, _TRUNCATE, L"%s\r\n%s\r\n", m_insLine[0], m_insLine[1]);
 		if (OpenClipboard()) {
 			EmptyClipboard();
 			const size_t bytes = (wcslen(buf) + 1) * sizeof(wchar_t);
