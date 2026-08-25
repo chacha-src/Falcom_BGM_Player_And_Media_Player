@@ -126,6 +126,8 @@
 #define IDI_CTL_STAR                    380
 #define IDI_CTL_FADE                    381
 #define IDI_CTL_AB                      382
+#define IDI_CTL_CHEVTOP                 392
+#define IDI_CTL_CHEVBOTTOM              393
 #define IDR_IW_FACE                     383
 #define IDR_IW_BODY                     384
 #define IDR_IW_BODY2                    385
@@ -226,6 +228,7 @@
 #define IDD_CDPLAYER                    344
 #define IDD_CD_HELP                     345
 #define IDC_MP_BOT_CD                   4337
+#define IDC_MP_BOT_MIDI                 4383
 #define IDC_CD_HELP                     4338
 #define IDC_CD_DRIVE                    4339
 #define IDC_CD_REFRESH                  4340
@@ -1943,7 +1946,7 @@
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NEXT_RESOURCE_VALUE        347
 #define _APS_NEXT_COMMAND_VALUE         33284
-#define _APS_NEXT_CONTROL_VALUE         4383
+#define _APS_NEXT_CONTROL_VALUE         4384
 #define _APS_NEXT_SYMED_VALUE           104
 #endif
 #endif

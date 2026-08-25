@@ -1,4 +1,4 @@
-// oggDlg.cpp : インプリメンテーション ファイル
+﻿// oggDlg.cpp : インプリメンテーション ファイル
 //
 //#define _DLL
 #include "stdafx.h"
@@ -33297,6 +33297,9 @@ void COggDlg::ToggleMidiMonitor()
 	{
 		if (!m_MidiMonitorDlg->Create(IDD_MIDIMONITOR, this)) {
 			savedata.midimonwindow = 0;
+			extern CMediaPlayerDlg* mp;
+			if (mp && ::IsWindow(mp->GetSafeHwnd()))
+				mp->SyncPushToggleButtons();
 			return;
 		}
 		savedata.midimonwindow = 1;
@@ -33311,6 +33314,9 @@ void COggDlg::ToggleMidiMonitor()
 		m_MidiMonitorDlg->ShowWindow(SW_SHOW);
 		m_MidiMonitorDlg->SetFocus();
 	}
+	extern CMediaPlayerDlg* mp;
+	if (mp && ::IsWindow(mp->GetSafeHwnd()))
+		mp->SyncPushToggleButtons();
 }
 
 void COggDlg::ShowPianoRollTune()

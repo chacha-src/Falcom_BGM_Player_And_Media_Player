@@ -553,6 +553,13 @@
 		<param name="Local" value="en\playlist-import.htm">
 		</OBJECT>
 	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="INSERTION">
+		<param name="Name" value="日本語: MIDIモニタ">
+		<param name="Local" value="ja\midi-monitor.htm">
+		<param name="Name" value="English: MIDI monitor">
+		<param name="Local" value="en\midi-monitor.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
 		<param name="Name" value="ISRC">
 		<param name="Name" value="日本語: CDプレイヤー">
 		<param name="Local" value="ja\cd.htm">
@@ -1770,6 +1777,13 @@
 		<param name="Name" value="イコライザーと環境モデル">
 		<param name="Name" value="日本語: イコライザーと環境モデル">
 		<param name="Local" value="ja\eq.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="インサーション">
+		<param name="Name" value="日本語: MIDIモニタ">
+		<param name="Local" value="ja\midi-monitor.htm">
+		<param name="Name" value="English: MIDI monitor">
+		<param name="Local" value="en\midi-monitor.htm">
 		</OBJECT>
 	<LI> <OBJECT type="text/sitemap">
 		<param name="Name" value="イース">

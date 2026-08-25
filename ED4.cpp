@@ -1,4 +1,4 @@
-﻿// ED4.cpp : 実装ファイル
+// ED4.cpp : 実装ファイル
 //
 
 #include "stdafx.h"
@@ -1002,7 +1002,7 @@ L"E4N26 Bağ -Kendi Yerlerimize-",
 L"E4N35 Vermilyon Gözyaşı -Bitiş Jeneriği-"
 };
 
-static inline CString ED4Track(int i) {
+CString ED4Track(int i) {
 	switch (savedata.lang) {
 	case 0: return CString(tied4[i]);
 	case 1: return CString(tied4_en[i]);

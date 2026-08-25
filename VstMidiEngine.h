@@ -105,6 +105,13 @@ int VstMidiBankMsbIsSdNative(int msb);
 // 使われている (bankMSB<<8|PC) が SASAMI_GS.DAT のどのマップに収まるか。
 // 8820 から 88Pro→88→55 へ落とす。0=判定不能。
 int VstMidiGsMapDropFromUsed(const unsigned short* pairs, int nPairs);
+// プレイリスト印用。ファイルを走査して 16/32ch と GM/GS/XG・マップ種別を返す。
+struct VstMidiListPeek {
+	int ch32;    // 0=16ch 1=32ch
+	int mapKind; // 0=なし 1=55 2=88 3=88Pro 4=8820 5=GM 6=SD 7=XG 8=LA 9=GM2 10..=ETC
+	int sysMode; // 0=GM 1=GS 2=XG
+};
+int VstMidiPeekListMarks(const wchar_t* path, struct VstMidiListPeek* out);
 
 // Live MIDI を曲エンジンへ差し込む（モニタの CC / 鍵盤）。キューして次のブロックで送る。
 void VstMidiInjectShort(int portIndex0to2, DWORD shortMsg, int sampleOfs);

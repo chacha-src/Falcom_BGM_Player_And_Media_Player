@@ -1,4 +1,4 @@
-﻿// ED3.cpp : 実装ファイル
+// ED3.cpp : 実装ファイル
 //
 
 #include "stdafx.h"
@@ -1016,7 +1016,7 @@ L"ED3931DA Küçük Kahraman -Kışın Gelişi-",
 L"ED3932DA Tilaksia'nın Beyaz Cadısı"
 };
 
-static inline CString ED3Track(int i) {
+CString ED3Track(int i) {
 	switch (savedata.lang) {
 		case 0: return CString(tied3[i]);
 		case 1: return CString(tied3_en[i]);

@@ -216,8 +216,15 @@ void PlChDiskForget(LPCTSTR fol);
 int PlChProbe(LPCTSTR fol);
 // 印用ラベル: MONO / LR / 2.1 / 3 / 4 / 5.1 / 7.1 等。ch<=0 は空
 void PlChFormatLabel(int ch, CString& out);
-// [SAV]=曲ごと保存 / [LRC]=歌詞 / [MONO]|[LR]|[2.1]…=ch。キャッシュのみ参照
+// [SAV]=曲ごと保存 / [LRC]=歌詞 / [MONO]|[LR]|[2.1]…=ch / [16ch]|[32ch] / [XG]|[88]…。キャッシュのみ参照
 void PlFormatRowMarks(int row, LPCTSTR fol, CString& out);
+// MIDI 印キャッシュ(%LOCALAPPDATA%\oggYSED\midflag)。-1=未
+int PlMidDiskGet(LPCTSTR fol, int* ch32, int* mapKind, int* sysMode, int* mapForce);
+void PlMidDiskSet(LPCTSTR fol, int ch32, int mapKind, int sysMode, int mapForce);
+int PlMidProbe(LPCTSTR fol);          // 非MIDIは 0。未キャッシュなら走査して登録
+int PlMidProbeIfNeeded(LPCTSTR fol);  // 走査したとき 1
+void PlMidForceSet(LPCTSTR fol, int mapForce); // 0=自動 1..19=モニタと同じ
+void PlMidNotifyMarkViews();
 
 enum {
 	PL_CTX_INFO = 1,
@@ -272,6 +279,8 @@ enum {
 	PL_CTX_TAG_BATCH = 50,
 	PL_CTX_MIDIMON = 51,
 	PL_CTX_SURROUND = 52,
+	PL_CTX_MIDMAP_BASE = 53, // +0 Auto … +19 PVmap（MIDIモニタと同じ順）
+	PL_CTX_MIDMAP_LAST = PL_CTX_MIDMAP_BASE + 19,
 	PL_CTX_MOVE_BASE = 42500,
 	PL_CTX_COPY_BASE = 43500,
 	PL_CTX_MOVE_MAX = PL_CTX_MOVE_BASE + 999,

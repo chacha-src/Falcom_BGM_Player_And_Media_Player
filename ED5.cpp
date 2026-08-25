@@ -1,4 +1,4 @@
-﻿// ED5.cpp : 実装ファイル
+// ED5.cpp : 実装ファイル
 //
 
 #include "stdafx.h"
@@ -1450,7 +1450,7 @@ L"ED5WV099 Kalbini Aç(McBain Troupe & Xiao & Rachel)",
 L"ED5WV109 Birlikte Dans Edelim(McBain Troupe)"
 };
 
-static inline CString ED5Track(int i) {
+CString ED5Track(int i) {
 	switch (savedata.lang) {
 		case 0: return CString(tied5[i]);
 		case 1: return CString(tied5_en[i]);

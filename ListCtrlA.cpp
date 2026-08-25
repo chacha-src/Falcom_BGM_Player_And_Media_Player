@@ -111,13 +111,13 @@ void CListCtrlA::BuildToolTipText(int row, int col, CString& out)
 				L" (클릭으로 변경)", L"（点击更改）", L" (انقر للتغيير)", L" (щелчок — изменить)", L" (Klick zum Andern)",
 				L" (clique para alterar)", L" (klik om te wijzigen)", L" (kliknij, by zmienic)", L" (degistirmek icin tikla)");
 		} else {
-			out += LL14(L"印: 橙SAV=曲ごと保存 / 青LRC=歌詞(.lrc)", L"Marks: amber SAV=per-track saved / blue LRC=lyrics (.lrc)",
-				L"Marques : orange SAV=réglages / bleu LRC=paroles (.lrc)", L"Segni: arancio SAV=salvato / blu LRC=testi (.lrc)",
-				L"Marcas: naranja SAV=guardado / azul LRC=letra (.lrc)", L"표시: 주황 SAV=곡별 저장 / 파랑 LRC=가사(.lrc)",
-				L"标记: 橙SAV=逐曲已存 / 蓝LRC=歌词(.lrc)", L"علامات: برتقالي SAV=محفوظ / أزرق LRC=كلمات",
-				L"Метки: оранж. SAV=сохранено / син. LRC=текст", L"Zeichen: orange SAV=gespeichert / blau LRC=Liedtext",
-				L"Marcas: laranja SAV=salvo / azul LRC=letra", L"Tekens: oranje SAV=opgeslagen / blauw LRC=songtekst",
-				L"Znaki: pomarańcz. SAV=zapisane / nieb. LRC=tekst", L"İşaret: turuncu SAV=kayıtlı / mavi LRC=söz");
+			out += LL14(L"印: 橙SAV=曲ごと保存 / 青LRC=歌詞(.lrc) / 緑ch / 藤16·32ch / 金マップ", L"Marks: amber SAV=per-track saved / blue LRC=lyrics (.lrc) / green ch / lavender 16·32ch / gold map",
+				L"Marques : orange SAV=réglages / bleu LRC=paroles (.lrc) / vert ch / parme 16·32ch / or carte", L"Segni: arancio SAV=salvato / blu LRC=testi (.lrc) / verde ch / lilla 16·32ch / oro mappa",
+				L"Marcas: naranja SAV=guardado / azul LRC=letra (.lrc) / verde ch / lila 16·32ch / oro mapa", L"표시: 주황 SAV=곡별 저장 / 파랑 LRC=가사(.lrc) / 초록 ch / 연보라 16·32ch / 금 맵",
+				L"标记: 橙SAV=逐曲已存 / 蓝LRC=歌词(.lrc) / 绿ch / 藤16·32ch / 金映射", L"علامات: برتقالي SAV=محفوظ / أزرق LRC=كلمات / أخضر ch / بنفسجي 16·32ch / ذهبي خريطة",
+				L"Метки: оранж. SAV=сохранено / син. LRC=текст / зел. ch / сирен. 16·32ch / зол. карта", L"Zeichen: orange SAV=gespeichert / blau LRC=Liedtext / gruen ch / lila 16·32ch / gold Karte",
+				L"Marcas: laranja SAV=salvo / azul LRC=letra (.lrc) / verde ch / lilas 16·32ch / ouro mapa", L"Tekens: oranje SAV=opgeslagen / blauw LRC=songtekst / groen ch / lila 16·32ch / goud kaart",
+				L"Znaki: pomarańcz. SAV=zapisane / nieb. LRC=tekst / ziel. ch / fiolet. 16·32ch / złote mapa", L"İşaret: turuncu SAV=kayıtlı / mavi LRC=söz / yeşil ch / eflatun 16·32ch / altın harita");
 			out += _T(" → ");
 			out += marks;
 		}

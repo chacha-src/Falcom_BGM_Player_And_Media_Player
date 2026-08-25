@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003" DefaultTargets="Build" ToolsVersion="14.0">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="uni_2026_de|Win32">
@@ -938,6 +938,8 @@
     <None Include="res\ui_ctl\star.ico" />
     <None Include="res\ui_ctl\fade.ico" />
     <None Include="res\ui_ctl\ab.ico" />
+    <None Include="res\ui_ctl\chevtop.ico" />
+    <None Include="res\ui_ctl\chevbottom.ico" />
     <None Include="res\iw\face.iwj" />
     <None Include="res\iw\body.iwj" />
     <None Include="res\iw\body2.iwj" />

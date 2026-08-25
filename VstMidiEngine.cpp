@@ -1448,17 +1448,34 @@ static int FillVstScanRoots(wchar_t roots[][VST_PATH_CHARS], int max)
 	return count;
 }
 
+// スキャン結果。%LOCALAPPDATA%\oggYSED\ （resume / libroots と同じ。TEMP より消えにくい）
 static void CachePath(wchar_t path[VST_PATH_CHARS])
 {
-	wchar_t dir[VST_PATH_CHARS];
-	ExeDir(dir);
-	JoinPath(path, dir, L"vstscan.cache");
+	wchar_t base[MAX_PATH] = {};
+	DWORD n = GetEnvironmentVariableW(L"LOCALAPPDATA", base, MAX_PATH);
+	if (n > 0 && n < MAX_PATH && base[0]) {
+		wchar_t dir[VST_PATH_CHARS];
+		JoinPath(dir, base, L"oggYSED");
+		CreateDirectoryW(dir, NULL);
+		JoinPath(path, dir, L"vstscan.cache");
+		return;
+	}
+	n = GetTempPathW(MAX_PATH, base);
+	if (n > 0 && n < MAX_PATH && base[0]) {
+		wchar_t dir[VST_PATH_CHARS];
+		JoinPath(dir, base, L"oggYSED");
+		CreateDirectoryW(dir, NULL);
+		JoinPath(path, dir, L"vstscan.cache");
+		return;
+	}
+	wchar_t exe[VST_PATH_CHARS];
+	ExeDir(exe);
+	JoinPath(path, exe, L"vstscan.cache");
 }
 
-static int ReadCacheFile()
+static int ReadCacheFile(const wchar_t* path)
 {
-	wchar_t path[VST_PATH_CHARS];
-	CachePath(path);
+	if (!path || !path[0]) return 0;
 	HANDLE f = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ, NULL,
 		OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
 	if (f == INVALID_HANDLE_VALUE) return 0;
@@ -1476,21 +1493,29 @@ static int ReadCacheFile()
 	return 1;
 }
 
+static void SaveCache();
+
 static int LoadCache()
 {
 	wchar_t path[VST_PATH_CHARS];
 	CachePath(path);
-	WIN32_FILE_ATTRIBUTE_DATA ad = {};
-	if (!GetFileAttributesExW(path, GetFileExInfoStandard, &ad)) return 0;
-	FILETIME now;
-	GetSystemTimeAsFileTime(&now);
-	ULARGE_INTEGER a, b;
-	a.LowPart = ad.ftLastWriteTime.dwLowDateTime;
-	a.HighPart = ad.ftLastWriteTime.dwHighDateTime;
-	b.LowPart = now.dwLowDateTime; b.HighPart = now.dwHighDateTime;
-	if (b.QuadPart < a.QuadPart ||
-		b.QuadPart - a.QuadPart > 24ULL * 60 * 60 * 10000000ULL) return 0;
-	return ReadCacheFile();
+	if (ReadCacheFile(path)) return 1;
+	wchar_t oldp[VST_PATH_CHARS];
+	{
+		wchar_t dir[VST_PATH_CHARS];
+		ExeDir(dir);
+		JoinPath(oldp, dir, L"vstscan.cache");
+		if (ReadCacheFile(oldp)) { SaveCache(); DeleteFileW(oldp); return 1; }
+	}
+	{
+		wchar_t tmp[MAX_PATH] = {};
+		DWORD n = GetTempPathW(MAX_PATH, tmp);
+		if (n > 0 && n < MAX_PATH && tmp[0]) {
+			JoinPath(oldp, tmp, L"vstscan.cache");
+			if (ReadCacheFile(oldp)) { SaveCache(); DeleteFileW(oldp); return 1; }
+		}
+	}
+	return 0;
 }
 
 static void SaveCache()
@@ -1498,7 +1523,7 @@ static void SaveCache()
 	wchar_t path[VST_PATH_CHARS];
 	CachePath(path);
 	HANDLE f = CreateFileW(path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS,
-		FILE_ATTRIBUTE_HIDDEN, NULL);
+		FILE_ATTRIBUTE_NORMAL, NULL);
 	if (f == INVALID_HANDLE_VALUE) return;
 	DWORD hdr[3] = { CACHE_MAGIC, CACHE_VERSION, (DWORD)g_pluginCount }, put = 0;
 	WriteFile(f, hdr, sizeof(hdr), &put, NULL);
@@ -1632,6 +1657,213 @@ static int SmfFileHasXgReset(const wchar_t* path)
 	const int hit = SmfBytesHasXgReset(data, size);
 	delete[] data;
 	return hit;
+}
+
+static const BYTE* SmfUnwrapRmid(const BYTE* data, DWORD size, DWORD* smfSize)
+{
+	const BYTE* smf = data;
+	DWORD n = size;
+	if (size >= 20 && memcmp(data, "RIFF", 4) == 0 && memcmp(data + 8, "RMID", 4) == 0) {
+		DWORD off = 12;
+		while (off + 8 <= size) {
+			const DWORD cksz = (DWORD)data[off + 4] | ((DWORD)data[off + 5] << 8)
+				| ((DWORD)data[off + 6] << 16) | ((DWORD)data[off + 7] << 24);
+			if (memcmp(data + off, "data", 4) == 0) {
+				if (off + 8 > size) break;
+				smf = data + off + 8;
+				n = cksz;
+				if (smf + n > data + size)
+					n = (DWORD)(data + size - smf);
+				break;
+			}
+			const DWORD step = 8 + ((cksz + 1) & ~1u);
+			if (step < 8 || off + step < off) break;
+			off += step;
+		}
+	}
+	if (smfSize) *smfSize = n;
+	return smf;
+}
+
+static int SmfBytesPeekListMarks(const BYTE* data, DWORD size, const wchar_t* path, VstMidiListPeek* out)
+{
+	if (!out) return 0;
+	out->ch32 = 0;
+	out->mapKind = 0;
+	out->sysMode = 0;
+	DWORD smfSize = 0;
+	const BYTE* smf = SmfUnwrapRmid(data, size, &smfSize);
+	if (smfSize < 14 || memcmp(smf, "MThd", 4) || ReadBE(smf + 4, 4) < 6)
+		return 0;
+	const int tracks = (int)ReadBE(smf + 10, 2);
+	const BYTE* p = smf + 8 + ReadBE(smf + 4, 4);
+	const BYTE* fileEnd = smf + smfSize;
+	int hasXg = 0, hasGs = 0, hasGm = 0, hasGm2 = 0, hasSd = 0;
+	int gs32 = 0, sawFf21 = 0, maxPort = 0, mapHint = 0, cc32Max = 0;
+	BYTE msb[32];
+	BYTE have[2048];
+	unsigned short pairs[256];
+	int nPairs = 0;
+	memset(msb, 0, sizeof(msb));
+	memset(have, 0, sizeof(have));
+	wchar_t titleBuf[280];
+	titleBuf[0] = 0;
+	for (int tr = 0; tr < tracks && p + 8 <= fileEnd; ++tr) {
+		if (memcmp(p, "MTrk", 4)) break;
+		DWORD len = ReadBE(p + 4, 4);
+		const BYTE* q = p + 8;
+		const BYTE* end = (q + len <= fileEnd) ? q + len : fileEnd;
+		BYTE running = 0;
+		int curPort = 0;
+		while (q < end) {
+			unsigned delta = 0;
+			if (!ReadVar(q, end, delta)) break;
+			if (q >= end) break;
+			BYTE st = *q;
+			if (st & 0x80) { ++q; if (st < 0xf0) running = st; }
+			else if (running) st = running;
+			else break;
+			if (st == 0xff) {
+				if (q >= end) break;
+				BYTE type = *q++;
+				unsigned ml = 0;
+				if (!ReadVar(q, end, ml) || q + ml > end) break;
+				if (type == 0x21 && ml >= 1) {
+					curPort = (int)q[0];
+					if (curPort < 0) curPort = 0;
+					if (curPort > 1) curPort = 1;
+					sawFf21 = 1;
+					if (curPort > maxPort) maxPort = curPort;
+				} else if ((type == 0x01 || type == 0x02 || type == 0x03) && ml > 0) {
+					char tmp[256];
+					unsigned n = ml;
+					if (n > 255) n = 255;
+					memcpy(tmp, q, n);
+					tmp[n] = 0;
+					wchar_t w[256];
+					w[0] = 0;
+					if (!MultiByteToWideChar(932, 0, tmp, -1, w, 256))
+						MultiByteToWideChar(CP_ACP, 0, tmp, -1, w, 256);
+					w[255] = 0;
+					if (w[0]) {
+						mapHint = VstMidiFoldGsMapHint(mapHint, VstMidiGuessGsMapKind(w, NULL));
+						int junk = 1;
+						for (const wchar_t* p = w; *p; ++p) {
+							const wchar_t c = *p;
+							if (c == L' ' || c == L'\t' || c == L'\r' || c == L'\n') continue;
+							if (c != L'?' && c != L'*' && c != L'.' && c != L'-' && c != L'_' && c != L'!') {
+								junk = 0;
+								break;
+							}
+						}
+						if (!junk && (wcsstr(w, L"GM版") || wcscmp(w, L"GM曲") == 0))
+							junk = 1;
+						if (!junk && (type == 0x03 || !titleBuf[0])) {
+							wcsncpy_s(titleBuf, w, _TRUNCATE);
+						}
+					}
+				}
+				q += ml;
+			} else if (st == 0xf0 || st == 0xf7) {
+				unsigned sl = 0;
+				if (!ReadVar(q, end, sl) || q + sl > end) break;
+				const int need = (st == 0xf0) ? (1 + (int)sl) : (int)sl;
+				if (need >= 6 && need <= 1024) {
+					BYTE sx[1024];
+					int off = 0;
+					if (st == 0xf0) sx[off++] = 0xf0;
+					memcpy(sx + off, q, sl);
+					off += (int)sl;
+					if (VstMidiSysexIsXgOn(sx, off)) hasXg = 1;
+					if (VstMidiSysexIsGsReset(sx, off)) hasGs = 1;
+					if (VstMidiSysexIsGmOn(sx, off)) {
+						hasGm = 1;
+						if (off >= 5 && sx[4] == 0x03) hasGm2 = 1;
+					}
+					if (VstMidiSysexMarksGs32(sx, off)) gs32 = 1;
+				}
+				q += sl;
+			} else {
+				const int kind = st & 0xf0;
+				const int need = (kind == 0xc0 || kind == 0xd0) ? 1 : 2;
+				if (q + need > end) break;
+				BYTE d1 = q[0], d2 = (need == 2) ? q[1] : 0;
+				q += need;
+				if (kind >= 0x80 && kind <= 0xe0) {
+					const int ch = st & 0x0f;
+					int idx = curPort * 16 + ch;
+					if (idx < 0) idx = ch;
+					if (idx > 31) idx = 31;
+					const int drum = (ch == 9) ? 1 : 0;
+					if (kind == 0xb0 && d1 == 0) {
+						msb[idx] = (BYTE)(d2 & 0x7f);
+						if (VstMidiBankMsbIsSdNative(d2 & 0x7f)) hasSd = 1;
+						if ((d2 & 0x7f) == 121) hasGm2 = 1;
+					} else if (kind == 0xb0 && d1 == 32) {
+						const int v = d2 & 0x7f;
+						if (!drum && v >= 1 && v <= 4 && v > cc32Max) cc32Max = v;
+					} else if (kind == 0xc0 && !drum) {
+						const int bank = (int)msb[idx];
+						const int pc = d1 & 0x7f;
+						const int bit = bank * 128 + pc;
+						if (bit >= 0 && bit < 16384) {
+							const int bi = bit >> 3;
+							const BYTE mask = (BYTE)(1 << (bit & 7));
+							if (!(have[bi] & mask)) {
+								have[bi] = (BYTE)(have[bi] | mask);
+								if (nPairs < 256)
+									pairs[nPairs++] = (unsigned short)((bank << 8) | pc);
+							}
+						}
+					}
+				}
+			}
+		}
+		p = end;
+	}
+	if (!mapHint)
+		mapHint = VstMidiGuessGsMapKind(titleBuf, path);
+	else
+		mapHint = VstMidiFoldGsMapHint(mapHint, VstMidiGuessGsMapKind(NULL, path));
+	if (mapHint == 7) hasXg = 1;
+	int resolved = 0;
+	if (hasXg) resolved = 0;
+	else if (mapHint == 8) resolved = 8;
+	else if (mapHint >= 9 && mapHint <= 18) resolved = mapHint;
+	else if (mapHint >= 1 && mapHint <= 4) resolved = mapHint;
+	else if (hasGm2 && !hasGs) resolved = 9;
+	else if ((mapHint == 5 || hasGm) && !hasGs) resolved = 5;
+	else if (mapHint == 6 || hasSd) resolved = 6;
+	else if (cc32Max >= 1 && cc32Max <= 4) resolved = cc32Max;
+	else resolved = VstMidiGsMapDropFromUsed(pairs, nPairs);
+	out->ch32 = (gs32 || maxPort >= 1) ? 1 : 0;
+	out->mapKind = (resolved == 8 || (resolved >= 1 && resolved <= 6) ||
+		(resolved >= 9 && resolved <= 18)) ? resolved : (hasXg ? 7 : 0);
+	out->sysMode = hasXg ? 2 : (hasGs ? 1 : 0);
+	UNREFERENCED_PARAMETER(sawFf21);
+	return 1;
+}
+
+extern "C" int VstMidiPeekListMarks(const wchar_t* path, VstMidiListPeek* out)
+{
+	if (!out) return 0;
+	out->ch32 = 0;
+	out->mapKind = 0;
+	out->sysMode = 0;
+	if (!path || !path[0]) return 0;
+	HANDLE f = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ, NULL,
+		OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, NULL);
+	if (f == INVALID_HANDLE_VALUE) return 0;
+	DWORD size = GetFileSize(f, NULL), got = 0;
+	if (size < 14 || size > 16 * 1024 * 1024) { CloseHandle(f); return 0; }
+	BYTE* data = new BYTE[size];
+	if (!ReadFile(f, data, size, &got, NULL) || got != size) {
+		CloseHandle(f); delete[] data; return 0;
+	}
+	CloseHandle(f);
+	const int ok = SmfBytesPeekListMarks(data, size, path, out);
+	delete[] data;
+	return ok;
 }
 
 static int PickGsXgDll(const wchar_t* midPath, wchar_t* out, int outN)
@@ -1803,7 +2035,18 @@ static int LoadSmf(const wchar_t* path)
 					w[255] = 0;
 					if (w[0]) {
 						mapHint = VstMidiFoldGsMapHint(mapHint, VstMidiGuessGsMapKind(w, NULL));
-						if (type == 0x03 || !metaTitle[0]) {
+						int junk = 1;
+						for (const wchar_t* p = w; *p; ++p) {
+							const wchar_t c = *p;
+							if (c == L' ' || c == L'\t' || c == L'\r' || c == L'\n') continue;
+							if (c != L'?' && c != L'*' && c != L'.' && c != L'-' && c != L'_' && c != L'!') {
+								junk = 0;
+								break;
+							}
+						}
+						if (!junk && (wcsstr(w, L"GM版") || wcscmp(w, L"GM曲") == 0))
+							junk = 1;
+						if (!junk && (type == 0x03 || !metaTitle[0])) {
 							if (!metaTitle[0] || type == 0x03)
 								wcsncpy_s(metaTitle, w, _TRUNCATE);
 						}
@@ -4773,8 +5016,23 @@ extern "C" const VstPluginInfo* VstScanGet(int i)
 extern "C" void VstScanInvalidate(void)
 {
 	g_scanInvalid = 1; g_scanReady = 0;
-	wchar_t p[VST_PATH_CHARS]; CachePath(p);
+	wchar_t p[VST_PATH_CHARS];
+	CachePath(p);
 	DeleteFileW(p);
+	{
+		wchar_t dir[VST_PATH_CHARS];
+		ExeDir(dir);
+		JoinPath(p, dir, L"vstscan.cache");
+		DeleteFileW(p);
+	}
+	{
+		wchar_t tmp[MAX_PATH] = {};
+		DWORD n = GetTempPathW(MAX_PATH, tmp);
+		if (n > 0 && n < MAX_PATH && tmp[0]) {
+			JoinPath(p, tmp, L"vstscan.cache");
+			DeleteFileW(p);
+		}
+	}
 }
 
 extern "C" int VstDetectMultiTimbral(const wchar_t* nameOrPath)
@@ -5401,12 +5659,11 @@ static int TryLoadAudible(const wchar_t* path, int* outReset, int* outMilli)
 }
 
 // When the song engine runs inside KpiHost64 there is no plug-in list: scanning
-// belongs to ogg.exe. Both executables ship in the same folder, so the cache the
-// host UI wrote is readable here and already carries the audible verdicts. Age
-// is irrelevant for this use - a stale verdict beats a silent song.
+// belongs to ogg.exe. Both read %LOCALAPPDATA%\oggYSED\vstscan.cache, which
+// already carries the audible verdicts.
 static void EnsureCandidateList()
 {
-	if (!g_pluginCount) ReadCacheFile();
+	if (!g_pluginCount) LoadCache();
 }
 
 static int AlreadyListed(const wchar_t* path)

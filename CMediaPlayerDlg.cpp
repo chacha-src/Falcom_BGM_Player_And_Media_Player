@@ -986,6 +986,7 @@ CMediaPlayerDlg::CMediaPlayerDlg(CWnd* pParent)
 	m_lastToggleAnalyzer = -1;
 	m_lastTogglePrompt = -1;
 	m_lastToggleCmdRoll = -1;
+	m_lastToggleMidiMon = -1;
 	m_dsvolSlW = 0;
 	m_mpBtnShort = -1;
 	m_mpBotShort = -1;
@@ -1239,6 +1240,7 @@ BEGIN_MESSAGE_MAP(CMediaPlayerDlg, CCustomBlurDialogExBase)
 	ON_BN_CLICKED(IDC_MP_BOT_ALARM, &CMediaPlayerDlg::OnMpAlarm)
 	ON_BN_CLICKED(IDC_MP_BOT_REMOTE, &CMediaPlayerDlg::OnMpRemote)
 	ON_BN_CLICKED(IDC_MP_BOT_VST, &CMediaPlayerDlg::OnMpVstHost)
+	ON_BN_CLICKED(IDC_MP_BOT_MIDI, &CMediaPlayerDlg::OnMidiMonitor)
 	ON_BN_CLICKED(IDC_MP_BOT_CD, &CMediaPlayerDlg::OnMpCdPlayer)
 	ON_BN_CLICKED(IDC_MP_BOT_MAZE, &CMediaPlayerDlg::OnMpSoft3DMaze)
 	ON_BN_CLICKED(IDC_MP_BOT_RACE, &CMediaPlayerDlg::OnMpSoft3DRace)
@@ -1617,6 +1619,8 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 			m_botRemote.Create(_T("Remote"), WS_CHILD | BS_PUSHBUTTON | WS_TABSTOP, rc, this, IDC_MP_BOT_REMOTE);
 		if (!m_botVst.GetSafeHwnd())
 			m_botVst.Create(_T("VST"), WS_CHILD | BS_PUSHBUTTON | WS_TABSTOP, rc, this, IDC_MP_BOT_VST);
+		if (!m_botMidi.GetSafeHwnd())
+			m_botMidi.Create(_T("MIDI"), WS_CHILD | BS_PUSHBUTTON | WS_TABSTOP, rc, this, IDC_MP_BOT_MIDI);
 		if (!m_botCd.GetSafeHwnd())
 			m_botCd.Create(_T("CD"), WS_CHILD | BS_PUSHBUTTON | WS_TABSTOP, rc, this, IDC_MP_BOT_CD);
 		if (!m_botMaze.GetSafeHwnd())
@@ -1625,10 +1629,10 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 			m_botRace.Create(_T("Race"), WS_CHILD | BS_PUSHBUTTON | WS_TABSTOP, rc, this, IDC_MP_BOT_RACE);
 		{
 			// ショートカットは色で役割が分かるようにする（水色一色は避ける）
-			CCustomStandardButton* bots[12] = {
-				&m_botDj, &m_botTag, &m_botBpm, &m_botSleep, &m_botMirror, &m_botSsViz, &m_botAlarm, &m_botRemote, &m_botVst, &m_botCd, &m_botMaze, &m_botRace
+			CCustomStandardButton* bots[13] = {
+				&m_botDj, &m_botTag, &m_botBpm, &m_botSleep, &m_botMirror, &m_botSsViz, &m_botAlarm, &m_botRemote, &m_botVst, &m_botMidi, &m_botCd, &m_botMaze, &m_botRace
 			};
-			const COLORREF botGrad[12][2] = {
+			const COLORREF botGrad[13][2] = {
 				{ RGB(240, 225, 255), RGB(200, 170, 245) }, // DJ: 紫
 				{ RGB(255, 235, 220), RGB(250, 195, 160) }, // Tag: 桃
 				{ RGB(220, 250, 235), RGB(155, 220, 190) }, // BPM: ミント
@@ -1638,14 +1642,16 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 				{ RGB(255, 230, 240), RGB(245, 180, 205) }, // Alarm: 薔薇
 				{ RGB(225, 250, 250), RGB(160, 215, 220) }, // Remote: 青緑
 				{ RGB(245, 235, 255), RGB(190, 160, 230) }, // VST: 藤
+				{ RGB(230, 245, 255), RGB(155, 195, 235) }, // MIDI: 水色
 				{ RGB(250, 248, 240), RGB(200, 190, 160) }, // CD: 銀
 				{ RGB(235, 245, 255), RGB(150, 190, 230) }, // Maze: 青
 				{ RGB(255, 230, 220), RGB(245, 150, 120) }, // Race: 珊瑚
 			};
-			for (int bi = 0; bi < 12; ++bi) {
+			for (int bi = 0; bi < 13; ++bi) {
 				if (!bots[bi]->GetSafeHwnd()) continue;
 				bots[bi]->SetGradation(botGrad[bi][0], botGrad[bi][1], 0, TRUE);
 			}
+			MpMakePushToggle(&m_botMidi);
 		}
 		if (!m_findFilter.GetSafeHwnd())
 			m_findFilter.Create(_T("Filter"), WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX | WS_TABSTOP, rc, this, IDC_MP_FINDFILTER);
@@ -1841,11 +1847,11 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 	m_grpInfo.ModifyStyle(0, WS_CLIPSIBLINGS);
 	m_grpSnd.ModifyStyle(0, WS_CLIPSIBLINGS);
 	m_grpPl.ModifyStyle(0, WS_CLIPSIBLINGS);
-	// ButtonST(プレイリストと同じアイコン): 一番上/上/下/一番下 と あいまい検索 上/下
-	m_lsup.SetIcon(CCC_LoadSharedIcon(IDI_CTL_CHEVUP), NULL);    m_lsup.SetFlat(TRUE);
+	// 一番上=線+矢印 / 上=山形1つ / 下=山形1つ / 一番下=線+矢印。検索上/下は1段移動の山形のまま
+	m_lsup.SetIcon(CCC_LoadSharedIcon(IDI_CTL_CHEVTOP), NULL);    m_lsup.SetFlat(TRUE);
 	m_up.SetIcon(CCC_LoadSharedIcon(IDI_CTL_CHEVUP), NULL);       m_up.SetFlat(TRUE);
 	m_down.SetIcon(CCC_LoadSharedIcon(IDI_CTL_CHEVDOWN), NULL);   m_down.SetFlat(TRUE);
-	m_lsdown.SetIcon(CCC_LoadSharedIcon(IDI_CTL_CHEVDOWN), NULL); m_lsdown.SetFlat(TRUE);
+	m_lsdown.SetIcon(CCC_LoadSharedIcon(IDI_CTL_CHEVBOTTOM), NULL); m_lsdown.SetFlat(TRUE);
 	m_findup.SetIcon(CCC_LoadSharedIcon(IDI_CTL_CHEVUP), NULL); m_findup.SetFlat(TRUE);
 	m_finddown.SetIcon(CCC_LoadSharedIcon(IDI_CTL_CHEVDOWN), NULL); m_finddown.SetFlat(TRUE);
 
@@ -2061,6 +2067,7 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 	if (m_botAlarm.GetSafeHwnd()) m_botAlarm.SetFont(&m_fontChk, TRUE);
 	if (m_botRemote.GetSafeHwnd()) m_botRemote.SetFont(&m_fontChk, TRUE);
 	if (m_botVst.GetSafeHwnd()) m_botVst.SetFont(&m_fontChk, TRUE);
+	if (m_botMidi.GetSafeHwnd()) m_botMidi.SetFont(&m_fontChk, TRUE);
 	if (m_botCd.GetSafeHwnd()) m_botCd.SetFont(&m_fontChk, TRUE);
 	if (m_botMaze.GetSafeHwnd()) m_botMaze.SetFont(&m_fontChk, TRUE);
 	if (m_botRace.GetSafeHwnd()) m_botRace.SetFont(&m_fontChk, TRUE);
@@ -2317,6 +2324,8 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 		addTip(m_botRemote, LL14(L"ローカルリモート (HTTP) を切り替えます。", L"Toggle local remote (HTTP).", L"Basculer la telecommande locale (HTTP).", L"Attiva/disattiva remote locale (HTTP).", L"Alternar remoto local (HTTP).", L"로컬 리모트(HTTP) 전환.", L"切换本地遥控 (HTTP)。", L"تبديل التحكم المحلي (HTTP).", L"Переключить локальный пульт (HTTP).", L"Lokalfernbedienung (HTTP) umschalten.", L"Alternar remoto local (HTTP).", L"Lokale bediening (HTTP) wisselen.", L"Przelacz pilot lokalny (HTTP).", L"Yerel uzaktan (HTTP) ac/kapa."));
 	if (m_botVst.GetSafeHwnd())
 		addTip(m_botVst, LL14(L"VSTホスト（配線・MIDI入力）", L"VST host (wiring / MIDI in)", L"Hote VST (cablage / entree MIDI)", L"Host VST (cablaggio / MIDI in)", L"Host VST (cableado / MIDI in)", L"VST 호스트(배선/MIDI 입력)", L"VST主机（接线/MIDI输入）", L"مضيف VST (توصيل/إدخال MIDI)", L"Хост VST (коммутация/MIDI in)", L"VST-Host (Verdrahtung/MIDI-In)", L"Host VST (cabos/MIDI in)", L"VST-host (bedrading/MIDI in)", L"Host VST (okablowanie/MIDI in)", L"VST host (kablolama/MIDI giris)"));
+	if (m_botMidi.GetSafeHwnd())
+		addTip(m_botMidi, LL14(L"MIDIモニタを開閉します（開いているあいだ凹みます）。", L"Toggle the MIDI monitor (stays depressed while open).", L"Afficher/masquer le moniteur MIDI (enfonce tant qu'il est ouvert).", L"Apri/chiudi il monitor MIDI (premuto mentre e aperto).", L"Abrir/cerrar el monitor MIDI (hundido mientras esta abierto).", L"MIDI 모니터 열기/닫기(열려 있는 동안 눌림).", L"打开/关闭 MIDI 监视器（打开时保持按下）。", L"فتح/إغلاق مراقب MIDI (يبقى مضغوطاً وهو مفتوح).", L"Открыть/закрыть MIDI-монитор (утоплен, пока открыт).", L"MIDI-Monitor ein/aus (eingedruckt solange offen).", L"Abrir/fechar o monitor MIDI (afundado enquanto aberto).", L"MIDI-monitor aan/uit (ingedrukt zolang open).", L"Wlacz/wylacz monitor MIDI (wcisniety gdy otwarty).", L"MIDI monitoru ac/kapa (acikken basili kalir)."));
 	if (m_botCd.GetSafeHwnd())
 		addTip(m_botCd, LL14(L"CDプレイヤー（再生・取り込み・曲目検索・書き込み）", L"CD player (play / rip / lookup / burn)", L"Lecteur CD (lecture / extraction / recherche / gravure)", L"Lettore CD (play / estrazione / ricerca / masterizza)", L"Reproductor CD (reproducir / extraer / buscar / grabar)", L"CD 플레이어(재생/추출/검색/굽기)", L"CD播放器（播放/抓轨/检索/刻录）", L"مشغل CD (تشغيل/استخراج/بحث/حرق)", L"CD-плеер (воспроизведение/извлечение/поиск/запись)", L"CD-Player (Play/Rip/Suche/Brennen)", L"Leitor de CD (play / extrair / pesquisa / gravar)", L"CD-speler (afspelen / rippen / zoeken / branden)", L"Odtwarzacz CD (odtwarzanie / zgrywanie / szukanie / nagranie)", L"CD oynatici (oynat / aktar / ara / yaz)"));
 	if (m_botMaze.GetSafeHwnd())
@@ -3732,8 +3741,8 @@ void CMediaPlayerDlg::DoLayout()
 	MoveCtl(&m_grpPl, M, plTop, W - M * 2, plBottom - plTop);
 
 	// 最下部: ファルコム特化〜レース + 終了。再生行と同じく幅で 0=フル / 1=中 / 2=短。
-	const int gapBot = (int)(4 * s);
-	const int gapLead = (int)(6 * s);
+	const int gapBot = (int)(2 * s);
+	const int gapLead = (int)(4 * s);
 	int exW = (int)(80 * s);
 	const int exitLeft = W - M - exW;
 
@@ -3750,28 +3759,29 @@ void CMediaPlayerDlg::DoLayout()
 		savedata.mpBotToolsFlags = 0x70F; // DJ|Tag|BPM|Sleep|VST|Maze|Race
 	}
 	// VSTホストは切替対象にせず、底バーへ常時出す
-	savedata.mpBotToolsFlags |= 1024 | 2048;
+	savedata.mpBotToolsFlags |= 1024 | 2048 | 4096;
 	const int botFl = savedata.mpBotToolsFlags;
-	CCustomStandardButton* botBtn[12] = {
-		&m_botDj, &m_botTag, &m_botBpm, &m_botSleep, &m_botMirror, &m_botSsViz, &m_botAlarm, &m_botRemote, &m_botVst, &m_botCd, &m_botMaze, &m_botRace
+	CCustomStandardButton* botBtn[13] = {
+		&m_botDj, &m_botTag, &m_botBpm, &m_botSleep, &m_botMirror, &m_botSsViz, &m_botAlarm, &m_botRemote, &m_botVst, &m_botMidi, &m_botCd, &m_botMaze, &m_botRace
 	};
-	const int botBit[12] = { 1, 2, 4, 8, 16, 32, 64, 128, 1024, 2048, 256, 512 };
-	const int wFull[12] = {
+	const int botBit[13] = { 1, 2, 4, 8, 16, 32, 64, 128, 1024, 4096, 2048, 256, 512 };
+	const int wFull[13] = {
 		(int)(56 * s) + icoAdd, (int)(52 * s) + icoAdd, (int)(48 * s) + icoAdd, (int)(56 * s) + icoAdd,
 		(int)(60 * s) + icoAdd, (int)(40 * s) + icoAdd, (int)(56 * s) + icoAdd, (int)(64 * s) + icoAdd,
-		(int)(48 * s) + icoAdd, (int)(48 * s) + icoAdd, (int)(52 * s) + icoAdd, (int)(52 * s) + icoAdd
+		(int)(48 * s) + icoAdd, (int)(48 * s) + icoAdd, (int)(48 * s) + icoAdd, (int)(52 * s) + icoAdd, (int)(52 * s) + icoAdd
 	};
-	const int wMid[12] = {
+	const int wMid[13] = {
 		(int)(40 * s) + icoAdd, (int)(40 * s) + icoAdd, (int)(40 * s) + icoAdd, (int)(40 * s) + icoAdd,
 		(int)(40 * s) + icoAdd, (int)(36 * s) + icoAdd, (int)(40 * s) + icoAdd, (int)(44 * s) + icoAdd,
-		(int)(40 * s) + icoAdd, (int)(40 * s) + icoAdd, (int)(40 * s) + icoAdd, (int)(40 * s) + icoAdd
+		(int)(40 * s) + icoAdd, (int)(40 * s) + icoAdd, (int)(40 * s) + icoAdd, (int)(40 * s) + icoAdd, (int)(40 * s) + icoAdd
 	};
-	const int wShort[12] = {
+	const int wShort[13] = {
 		(int)(28 * s), (int)(28 * s), (int)(28 * s), (int)(28 * s),
-		(int)(28 * s), (int)(28 * s), (int)(28 * s), (int)(28 * s), (int)(28 * s), (int)(28 * s), (int)(28 * s), (int)(28 * s)
+		(int)(28 * s), (int)(28 * s), (int)(28 * s), (int)(28 * s),
+		(int)(28 * s), (int)(28 * s), (int)(28 * s), (int)(28 * s), (int)(28 * s)
 	};
 	int needFull = 0, needMid = 0, needShort = 0;
-	for (int i = 0; i < 12; ++i) {
+	for (int i = 0; i < 13; ++i) {
 		if (!(botFl & botBit[i])) continue;
 		needFull += wFull[i] + gapBot;
 		needMid += wMid[i] + gapBot;
@@ -3806,6 +3816,7 @@ void CMediaPlayerDlg::DoLayout()
 			if (m_botAlarm.GetSafeHwnd()) m_botAlarm.SetWindowText(L"Alm");
 			if (m_botRemote.GetSafeHwnd()) m_botRemote.SetWindowText(L"Rem");
 			if (m_botVst.GetSafeHwnd()) m_botVst.SetWindowText(L"VST");
+			if (m_botMidi.GetSafeHwnd()) m_botMidi.SetWindowText(L"MIDI");
 			if (m_botCd.GetSafeHwnd()) m_botCd.SetWindowText(L"CD");
 			if (m_botMaze.GetSafeHwnd()) m_botMaze.SetWindowText(L"Mz");
 			if (m_botRace.GetSafeHwnd()) m_botRace.SetWindowText(L"Rc");
@@ -3831,6 +3842,8 @@ void CMediaPlayerDlg::DoLayout()
 				m_botRemote.SetWindowText(LL14(L"リモート", L"Remote", L"Remote", L"Remote", L"Remoto", L"리모트", L"遥控", L"تحكم", L"Пульт", L"Remote", L"Remoto", L"Remote", L"Pilot", L"Uzaktan"));
 			if (m_botVst.GetSafeHwnd())
 				m_botVst.SetWindowText(LL14(L"VST", L"VST", L"VST", L"VST", L"VST", L"VST", L"VST", L"VST", L"VST", L"VST", L"VST", L"VST", L"VST", L"VST"));
+			if (m_botMidi.GetSafeHwnd())
+				m_botMidi.SetWindowText(L"MIDI");
 			if (m_botCd.GetSafeHwnd())
 				m_botCd.SetWindowText(LL14(L"CD", L"CD", L"CD", L"CD", L"CD", L"CD", L"CD", L"CD", L"CD", L"CD", L"CD", L"CD", L"CD", L"CD"));
 			if (m_botMaze.GetSafeHwnd())
@@ -3845,7 +3858,7 @@ void CMediaPlayerDlg::DoLayout()
 	MoveCtl(&m_resetdata, bx, botY, rsW, swH); bx += rsW + gapLead;
 	MoveCtl(&m_record, bx, botY, recW, swH); bx += recW + gapLead;
 	MoveCtl(&m_capture, bx, botY, capW, swH); bx += capW + gapLead;
-	for (int i = 0; i < 12; ++i) {
+	for (int i = 0; i < 13; ++i) {
 		CCustomStandardButton* b = botBtn[i];
 		if (!b->GetSafeHwnd()) continue;
 		if (!(botFl & botBit[i])) {
@@ -4022,6 +4035,11 @@ void CMediaPlayerDlg::SyncPushToggleButtons()
 	if (m_cmdroll.GetSafeHwnd() && cmdRollOpen != m_lastToggleCmdRoll) {
 		MpSetPushToggle(m_cmdroll, cmdRollOpen, RGB(200, 170, 255), RGB(160, 120, 240), RGB(230, 220, 255), RGB(200, 185, 250));
 		m_lastToggleCmdRoll = cmdRollOpen;
+	}
+	const int midiOpen = savedata.midimonwindow ? 1 : 0;
+	if (m_botMidi.GetSafeHwnd() && midiOpen != m_lastToggleMidiMon) {
+		MpSetPushToggle(m_botMidi, midiOpen, RGB(90, 170, 230), RGB(50, 130, 200), RGB(230, 245, 255), RGB(155, 195, 235));
+		m_lastToggleMidiMon = midiOpen;
 	}
 }
 
@@ -4212,6 +4230,9 @@ void CMediaPlayerDlg::RefreshList(BOOL bForce)
 			}
 			if (PlChDiskGet(path) < 0) {
 				PlChProbe(path);
+				did = TRUE;
+			}
+			if (PlMidProbeIfNeeded(path)) {
 				did = TRUE;
 			}
 			if (did) {
@@ -7462,12 +7483,12 @@ void CMediaPlayerDlg::ToggleBotVisFlag(int bit)
 		savedata.mpBotToolsInited = 1;
 		savedata.mpBotToolsFlags = 0x70F; // DJ|Tag|BPM|Sleep|VST|Maze|Race
 	}
-	// VSTホスト(1024)は常時表示。消さない。
-	if (bit == 1024) {
-		savedata.mpBotToolsFlags |= 1024 | 2048;
+	// VSTホスト(1024)・MIDIモニタ(4096)・CD(2048)は常時表示。消さない。
+	if (bit == 1024 || bit == 2048 || bit == 4096) {
+		savedata.mpBotToolsFlags |= 1024 | 2048 | 4096;
 	} else {
 		savedata.mpBotToolsFlags ^= bit;
-		savedata.mpBotToolsFlags |= 1024 | 2048;
+		savedata.mpBotToolsFlags |= 1024 | 2048 | 4096;
 	}
 	MpPersistSavedataQuick();
 	m_mpBotShort = -1;
@@ -11042,7 +11063,7 @@ void CMediaPlayerDlg::ShowToolsExtrasMenu(CPoint screenPt)
 				savedata.mpBotToolsInited = 1;
 				savedata.mpBotToolsFlags = 0x70F; // DJ|Tag|BPM|Sleep|VST|Maze|Race
 			}
-			savedata.mpBotToolsFlags |= 1024 | 2048; // VSTホスト・CDは常時表示
+			savedata.mpBotToolsFlags |= 1024 | 2048 | 4096; // VSTホスト・MIDIモニタ・CDは常時表示
 			const int bf = savedata.mpBotToolsFlags;
 			CCustomPopupMenu* botSub = sub->AddSubMenu(
 				LL14(L"底バーのツールボタン", L"Bottom bar tool buttons", L"Boutons outils bas", L"Pulsanti strumenti in basso", L"Botones de herramientas abajo",
@@ -13415,10 +13436,10 @@ void CMpCheatSheetDlg::OnPaint()
 		L"· m3u / Buscar / Filtro / Regex / ▾ …… orden y Folder+", L"· m3u / 검색 / 필터 / 정규식 / ▾ …… 정렬·Folder+", L"· m3u / 搜索 / 筛选 / 正则 / ▾ …… 排序与 Folder+", L"· m3u / بحث / تصفية / Regex / ▾ …… فرز و Folder+",
 		L"· m3u / Поиск / Фильтр / Regex / ▾ …… сорт и Folder+", L"· m3u / Suche / Filter / Regex / ▾ …… Sort und Folder+", L"· m3u / Busca / Filtro / Regex / ▾ …… ordem e Folder+", L"· m3u / Zoeken / Filter / Regex / ▾ …… sorteren en Folder+",
 		L"· m3u / Szukaj / Filtr / Regex / ▾ …… sort i Folder+", L"· m3u / Ara / Filtre / Regex / ▾ …… sırala ve Folder+")); yR += lh;
-	body(R, yR, LL14(L"・名前の印 …… 橙SAV=曲ごと保存 / 青LRC=歌詞 / 緑MONO·LR·2.1…=ch。色タグ（PLの印列も同じ）", L"· Name marks …… amber SAV=per-song / blue LRC=lyrics / green MONO·LR·2.1…=ch (same in PL Mark col)", L"· Marques …… orange SAV / bleu LRC / vert MONO·LR·2.1…=ch", L"· Segni …… arancio SAV / blu LRC / verde MONO·LR·2.1…=ch",
-		L"· Marcas …… naranja SAV / azul LRC / verde MONO·LR·2.1…=ch", L"· 이름 표시 …… 주황 SAV / 파랑 LRC / 초록 MONO·LR·2.1…=ch", L"· 名称标记 …… 橙SAV / 蓝LRC / 绿MONO·LR·2.1…=ch", L"· علامات …… برتقالي SAV / أزرق LRC / أخضر MONO·LR·2.1…=ch",
-		L"· Метки …… оранж. SAV / син. LRC / зел. MONO·LR·2.1…=ch", L"· Zeichen …… orange SAV / blau LRC / gruen MONO·LR·2.1…=ch", L"· Marcas …… laranja SAV / azul LRC / verde MONO·LR·2.1…=ch", L"· Tekens …… oranje SAV / blauw LRC / groen MONO·LR·2.1…=ch",
-		L"· Znaki …… pomarańcz. SAV / nieb. LRC / ziel. MONO·LR·2.1…=ch", L"· İşaret …… turuncu SAV / mavi LRC / yeşil MONO·LR·2.1…=ch")); yR += lh + 2;
+	body(R, yR, LL14(L"・名前の印 …… 橙SAV=曲ごと保存 / 青LRC=歌詞 / 緑MONO·LR·2.1…=ch / 藤16ch·32ch=MIDI / 金XG·88…=マップ。色タグ（PLの印列も同じ）", L"· Name marks …… amber SAV=per-song / blue LRC=lyrics / green MONO·LR·2.1…=ch / lavender 16ch·32ch=MIDI / gold XG·88…=map (same in PL Mark col)", L"· Marques …… orange SAV / bleu LRC / vert ch / parme 16ch·32ch=MIDI / or XG·88…=carte", L"· Segni …… arancio SAV / blu LRC / verde ch / lilla 16ch·32ch=MIDI / oro XG·88…=mappa",
+		L"· Marcas …… naranja SAV / azul LRC / verde ch / lila 16ch·32ch=MIDI / oro XG·88…=mapa", L"· 이름 표시 …… 주황 SAV / 파랑 LRC / 초록 ch / 연보라 16ch·32ch=MIDI / 금 XG·88…=맵", L"· 名称标记 …… 橙SAV / 蓝LRC / 绿ch / 藤16ch·32ch=MIDI / 金XG·88…=映射", L"· علامات …… برتقالي SAV / أزرق LRC / أخضر ch / بنفسجي 16ch·32ch=MIDI / ذهبي XG·88…=خريطة",
+		L"· Метки …… оранж. SAV / син. LRC / зел. ch / сирен. 16ch·32ch=MIDI / зол. XG·88…=карта", L"· Zeichen …… orange SAV / blau LRC / gruen ch / lila 16ch·32ch=MIDI / gold XG·88…=Karte", L"· Marcas …… laranja SAV / azul LRC / verde ch / lilas 16ch·32ch=MIDI / ouro XG·88…=mapa", L"· Tekens …… oranje SAV / blauw LRC / groen ch / lila 16ch·32ch=MIDI / goud XG·88…=kaart",
+		L"· Znaki …… pomarańcz. SAV / nieb. LRC / ziel. ch / fiolet. 16ch·32ch=MIDI / złote XG·88…=mapa", L"· İşaret …… turuncu SAV / mavi LRC / yeşil ch / eflatun 16ch·32ch=MIDI / altın XG·88…=harita")); yR += lh + 2;
 
 	y = max(yL, yR) + 2;
 	yL = y; yR = y;

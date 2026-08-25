@@ -39,6 +39,8 @@ public:
 	void LayoutHelpBtn();
 	void ShowHelpSheet();
 	GdiSoft3D::Cam m_cam;
+	void ApplyMapForce(int force);
+	const wchar_t* LoadedMidiPath() const { return m_loadedPath; }
 
 protected:
 	virtual void DoDataExchange(CDataExchange* pDX);
@@ -120,8 +122,9 @@ private:
 
 	Part m_show[PART_MAX];
 	int m_showBpm, m_showTpc, m_showNotes, m_showPeak, m_showVol, m_showSys;
-	int m_showRev, m_showCho, m_showVar, m_showIns1, m_showIns2, m_showDrum;
+	int m_showRev, m_showCho, m_showVar, m_showVarPacked, m_showVarConn, m_showIns1, m_showIns2, m_showDrum;
 	int m_showDiv, m_showTsN, m_showTsD, m_showTransp, m_showKeySf, m_showKeyMin, m_showFrozen;
+	int m_showBar, m_showBars, m_showBeat, m_showTick, m_showTpm, m_showNum;
 	wchar_t m_showTitle[280];
 
 	void ReleasePaintBuffers();
@@ -152,6 +155,7 @@ private:
 	void ApplyDragValue(CPoint clientPt);
 	void ReleasePlayNote();
 	void SyncFromPlayback();
+	void UpdatePlayPos();
 	void ApplyDueEvents(int lastDue);
 	void LoadCurrentMidi();
 	void UnloadMidi();
@@ -163,7 +167,6 @@ private:
 	void ApplySysex(const BYTE* d, int n, int livePort = -1);
 	void ApplyNrpn(Part& p);
 	void RefreshPartName(Part& p);
-	void ApplyMapForce(int force);
 	void LookupToneName(int isXg, int mapId, int bankMsb, int bankLsb, int pc, int isDrum, wchar_t* out, int outN);
 	void PersistPos();
 	void SyncSoft3DFromSave();
@@ -212,6 +215,15 @@ private:
 	int m_fileHasSd;
 	int m_gs32;      // GS Port B / XG 17-32 SysEx
 	int m_mirrorToB; // no FF 21: channel MIDI arrives on both cables
+	struct MmTsEv {
+		unsigned __int64 tick;
+		int num;
+		int den;
+	};
+	MmTsEv m_tsEv[64];
+	int m_tsEvN;
+	unsigned __int64 m_maxTick;
+	int m_posBar, m_posBars, m_posBeat, m_posTick, m_posTpm, m_posNum;
 
 	int m_usecQn;
 	int m_tsNum;
@@ -223,7 +235,9 @@ private:
 	int m_revType;
 	int m_choType;
 	int m_varType;
-	int m_ins1;
+	int m_varPacked; // XG variation TYPE (MSB<<8)|LSB; 0 until SysEx
+	int m_varConn;   // XG 02 01 5A: 0=INSERTION, 1=SYSTEM
+	int m_ins1;      // XG TYPE (MSB<<8)|LSB, or GS EFX type 0-127
 	int m_ins2;
 	int m_noteCount;
 	int m_masterVol;

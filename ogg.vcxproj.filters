@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
     <Filter Include="Source Files">
@@ -1572,6 +1572,12 @@
       <Filter>Resource Files</Filter>
     </None>
     <None Include="res\ui_ctl\ab.ico">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="res\ui_ctl\chevtop.ico">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="res\ui_ctl\chevbottom.ico">
       <Filter>Resource Files</Filter>
     </None>
     <None Include="res\iw\face.iwj" />

@@ -59,12 +59,16 @@ TCHAR karento2[1024];
 CString ndd;
 void *Mutex;
 TCHAR* nd;
-BOOL CALLBACK ew(HWND hwnd , LPARAM lp);
-BOOL CALLBACK ew(HWND hwnd,LPARAM lParam) {
-	TCHAR a[1024];CString s;
-	::GetWindowText(hwnd,a,_countof(a));s=a;
-	// 既存インスタンスのタイトルは言語依存。ここは mutex 直後で savedata 未読込のため
-	// LL14(現在言語)ではなく、SetWindowText 側と同じ14言語タイトルをすべて照合する。
+static BOOL OggWndTitleIsPlayer(const CString& s, BOOL* isMp)
+{
+	static const TCHAR* const kMpTitles[] = {
+		_T("らいら"),
+		_T("Raira"),
+		_T("라이라"),
+		_T("莱拉"),
+		_T("رايرا"),
+		_T("Райра"),
+	};
 	static const TCHAR* const kMainTitles[] = {
 		_T("mp3/m4a簡易プレイヤ"),
 		_T("mp3/m4a Simple Player"),
@@ -81,19 +85,77 @@ BOOL CALLBACK ew(HWND hwnd,LPARAM lParam) {
 		_T("mp3/m4a Prosty odtwarzacz"),
 		_T("mp3/m4a Basit oynat"),
 	};
-	BOOL hit = FALSE;
-	for (int i = 0; i < (int)_countof(kMainTitles); ++i) {
-		if (s.Find(kMainTitles[i]) != -1) { hit = TRUE; break; }
+	for (int i = 0; i < (int)_countof(kMpTitles); ++i) {
+		if (s.Find(kMpTitles[i]) != -1) {
+			if (isMp) *isMp = TRUE;
+			return TRUE;
+		}
 	}
-	if (!hit) return TRUE;
-	COPYDATASTRUCT cd;
-	cd.cbData=ndd.GetLength()*sizeof(TCHAR)+sizeof(TCHAR);
-	cd.dwData=0;
-	cd.lpData=nd;
-	::SendMessage(hwnd,WM_COPYDATA, (WPARAM)NULL, (LPARAM)&cd);
-	if(ndd.Left(1)!="*")
-		::PostMessage(hwnd,WM_APP +1, (WPARAM)NULL, (LPARAM)NULL);
+	for (int i = 0; i < (int)_countof(kMainTitles); ++i) {
+		if (s.Find(kMainTitles[i]) != -1) {
+			if (isMp) *isMp = FALSE;
+			return TRUE;
+		}
+	}
 	return FALSE;
+}
+
+struct OggFindInst {
+	HWND vis;
+	HWND ogAny;
+	HWND mpAny;
+};
+
+BOOL CALLBACK ew(HWND hwnd, LPARAM lParam)
+{
+	OggFindInst* st = (OggFindInst*)lParam;
+	if (!st || !::IsWindow(hwnd))
+		return TRUE;
+	TCHAR a[1024];
+	if (!::GetWindowText(hwnd, a, _countof(a)) || !a[0])
+		return TRUE;
+	BOOL isMp = FALSE;
+	if (!OggWndTitleIsPlayer(a, &isMp))
+		return TRUE;
+	if (isMp) {
+		if (!st->mpAny) st->mpAny = hwnd;
+	} else {
+		if (!st->ogAny) st->ogAny = hwnd;
+	}
+	if (::IsWindowVisible(hwnd) && !st->vis)
+		st->vis = hwnd;
+	return TRUE;
+}
+
+static void OggActivateOrForwardExisting()
+{
+	OggFindInst st = {};
+	for (int i = 0; i < 5; ++i) {
+		ZeroMemory(&st, sizeof(st));
+		EnumWindows(ew, (LPARAM)&st);
+		if (st.vis || st.mpAny || st.ogAny)
+			break;
+		Sleep(300);
+	}
+	HWND show = st.vis ? st.vis : (st.mpAny ? st.mpAny : st.ogAny);
+	if (show) {
+		if (::IsIconic(show))
+			::ShowWindow(show, SW_RESTORE);
+		else
+			::ShowWindow(show, SW_SHOW);
+		::SetForegroundWindow(show);
+		::BringWindowToTop(show);
+	}
+	HWND ogw = st.ogAny ? st.ogAny : show;
+	if (ndd != _T("") && ogw) {
+		COPYDATASTRUCT cd;
+		cd.cbData = (DWORD)((ndd.GetLength() + 1) * sizeof(TCHAR));
+		cd.dwData = 0;
+		cd.lpData = nd;
+		::SendMessage(ogw, WM_COPYDATA, (WPARAM)NULL, (LPARAM)&cd);
+		if (ndd.Left(1) != _T("*"))
+			::PostMessage(ogw, WM_APP + 1, (WPARAM)NULL, (LPARAM)NULL);
+	}
 }
 
 LRESULT COggApp::ProcessWndProcException(CException* e, const MSG* pMsg)
@@ -181,8 +243,7 @@ BOOL COggApp::InitInstance()
     if(Mutex == NULL){exit(-1);} 
     if(Status == ERROR_ALREADY_EXISTS){ 
         ReleaseMutex(Mutex);
-		if(ndd!="")
-			EnumWindows( ew, 0);
+		OggActivateOrForwardExisting();
         exit(0); 
     } 
 //	_getcwd(karento2,255);
@@ -1160,7 +1221,7 @@ BOOL COggApp::InitInstance()
 		}
 		savedata.s3r_show_map = savedata.s3r_show_map ? 1 : 0;
 	}
-	savedata.mpBotToolsFlags |= 1024 | 2048; // VSTホスト・CDボタンは常時表示
+	savedata.mpBotToolsFlags |= 1024 | 2048 | 4096; // VSTホスト・MIDIモニタ・CDボタンは常時表示
 	if (datFileSize < (int)(offsetof(save, s3r_invert_y) + sizeof(savedata.s3r_invert_y))) {
 		savedata.s3r_invert_y = 0;
 	} else {

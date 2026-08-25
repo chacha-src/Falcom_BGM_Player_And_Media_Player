@@ -593,7 +593,7 @@ struct save{
 	int mpTempOpen;
 
 	// --- MP底バー: ツール由来ショートカットボタン(末尾追記。旧.datは0→起動時既定) ---
-	// mpBotToolsInited=1 なら mpBotToolsFlags 有効。bit: DJ/Tag/BPM/Sleep/Mirror/SsViz/Alarm/Remote/VST(1024・常時)/CD(2048・常時)/Maze/Race
+	// mpBotToolsInited=1 なら mpBotToolsFlags 有効。bit: DJ/Tag/BPM/Sleep/Mirror/SsViz/Alarm/Remote/VST(1024・常時)/MIDI(4096・常時)/CD(2048・常時)/Maze/Race
 	int mpBotToolsInited;
 	int mpBotToolsFlags;
 

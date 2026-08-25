@@ -2155,12 +2155,17 @@ static void DrawFittedText(CDC& dc, const CRect& rect, const CString& str, UINT 
     dc.RestoreDC(-1);
 }
 
-// 名前列/印列の [SAV]/[LRC]/[MONO]|[LR]|[2.1]… を抜き出し、色付きチップ描画用に分離する。
-static void CCC_ExtractSavLrc(CString& text, BOOL& bSav, BOOL& bLrc, CString& chLabel)
+// 名前列/印列の [SAV]/[LRC]/[MONO]|[LR]|[2.1]…/[16ch]/[XG] を抜き出し、色付きチップ描画用に分離する。
+static const int kCccExtraChips = 4;
+static void CCC_ExtractSavLrc(CString& text, BOOL& bSav, BOOL& bLrc, CString extra[], int extraMax, int& extraN)
 {
     bSav = FALSE;
     bLrc = FALSE;
-    chLabel.Empty();
+    extraN = 0;
+    if (extra && extraMax > 0) {
+        for (int e = 0; e < extraMax; ++e)
+            extra[e].Empty();
+    }
     if (text.IsEmpty()) return;
 
     // 先頭の欠損印「⚠ 」は残す
@@ -2183,13 +2188,12 @@ static void CCC_ExtractSavLrc(CString& text, BOOL& bSav, BOOL& bLrc, CString& ch
             rest = rest.Mid(5);
             continue;
         }
-        // [MONO] / [LR] / [2.1] / [3] / [5.1] …
+        // [MONO] / [LR] / [2.1] / [16ch] / [XG] / [88P] …
         if (!rest.IsEmpty() && rest[0] == _T('[')) {
             const int end = rest.Find(_T(']'));
             if (end >= 2) {
                 const CString inner = rest.Mid(1, end - 1);
                 if (inner != _T("SAV") && inner != _T("LRC") && !inner.IsEmpty()) {
-                    // 英数字と '.' のみをチャンネル印として採用
                     BOOL ok = TRUE;
                     for (int k = 0; k < inner.GetLength(); ++k) {
                         const TCHAR c = inner[k];
@@ -2201,8 +2205,8 @@ static void CCC_ExtractSavLrc(CString& text, BOOL& bSav, BOOL& bLrc, CString& ch
                             break;
                         }
                     }
-                    if (ok && chLabel.IsEmpty()) {
-                        chLabel = inner;
+                    if (ok && extra && extraN < extraMax) {
+                        extra[extraN++] = inner;
                         rest = rest.Mid(end + 1);
                         continue;
                     }
@@ -2220,6 +2224,27 @@ static void CCC_ExtractSavLrc(CString& text, BOOL& bSav, BOOL& bLrc, CString& ch
         && head[head.GetLength() - 2] == _T(' '))
         head = head.Left(head.GetLength() - 1);
     text = head + rest;
+}
+
+static COLORREF CCC_MarkChipBg(const CString& lab)
+{
+    if (lab.CompareNoCase(_T("16ch")) == 0)
+        return RGB(196, 186, 255);
+    if (lab.CompareNoCase(_T("32ch")) == 0)
+        return RGB(230, 176, 255);
+    if (lab.CompareNoCase(_T("MONO")) == 0 || lab.CompareNoCase(_T("LR")) == 0)
+        return RGB(186, 236, 210);
+    BOOL audioNum = !lab.IsEmpty();
+    for (int k = 0; k < lab.GetLength(); ++k) {
+        const TCHAR c = lab[k];
+        if (!((c >= _T('0') && c <= _T('9')) || c == _T('.'))) {
+            audioNum = FALSE;
+            break;
+        }
+    }
+    if (audioNum)
+        return RGB(186, 236, 210);
+    return RGB(255, 224, 168);
 }
 
 // 小さな色タグ（アイコン代わり）。戻り=消費幅(余白込み)
@@ -2273,10 +2298,11 @@ static int CCC_DrawMarkChip(CDC* pDC, int x, int midY, LPCTSTR label,
     return w + 3;
 }
 
-// SAV=琥珀 / LRC=青 / CH=薄荷。文字は黒固定（白字はアクリル上で読みにくい）
-static int CCC_DrawSavLrcChips(CDC* pDC, int x, int midY, BOOL bSav, BOOL bLrc, const CString& chLabel, BOOL bOpaque)
+// SAV=琥珀 / LRC=青 / 音声ch=薄荷 / 16ch·32ch=藤 / マップ=薄金
+static int CCC_DrawSavLrcChips(CDC* pDC, int x, int midY, BOOL bSav, BOOL bLrc,
+    const CString extra[], int extraN, BOOL bOpaque)
 {
-    if (!bSav && !bLrc && chLabel.IsEmpty()) return x;
+    if (!bSav && !bLrc && extraN <= 0) return x;
     const COLORREF fg = RGB(20, 20, 24);
     if (bSav)
         x += CCC_DrawMarkChip(pDC, x, midY, _T("SAV"),
@@ -2284,15 +2310,17 @@ static int CCC_DrawSavLrcChips(CDC* pDC, int x, int midY, BOOL bSav, BOOL bLrc, 
     if (bLrc)
         x += CCC_DrawMarkChip(pDC, x, midY, _T("LRC"),
             RGB(186, 210, 255), fg, bOpaque);
-    if (!chLabel.IsEmpty())
-        x += CCC_DrawMarkChip(pDC, x, midY, chLabel,
-            RGB(186, 236, 210), fg, bOpaque);
+    for (int i = 0; i < extraN; ++i) {
+        if (extra[i].IsEmpty()) continue;
+        x += CCC_DrawMarkChip(pDC, x, midY, extra[i],
+            CCC_MarkChipBg(extra[i]), fg, bOpaque);
+    }
     return x;
 }
 
-static int CCC_MeasureSavLrcChips(CDC* pDC, BOOL bSav, BOOL bLrc, const CString& chLabel)
+static int CCC_MeasureSavLrcChips(CDC* pDC, BOOL bSav, BOOL bLrc, const CString extra[], int extraN)
 {
-    if (!pDC || (!bSav && !bLrc && chLabel.IsEmpty())) return 0;
+    if (!pDC || (!bSav && !bLrc && extraN <= 0)) return 0;
     CFont* pCur = pDC->GetCurrentFont();
     LOGFONT lf = {};
     if (pCur) pCur->GetLogFont(&lf);
@@ -2311,8 +2339,9 @@ static int CCC_MeasureSavLrcChips(CDC* pDC, BOOL bSav, BOOL bLrc, const CString&
         CSize s = pDC->GetTextExtent(_T("LRC"));
         w += max(20, s.cx + 8) + 3;
     }
-    if (!chLabel.IsEmpty()) {
-        CSize s = pDC->GetTextExtent(chLabel);
+    for (int i = 0; i < extraN; ++i) {
+        if (extra[i].IsEmpty()) continue;
+        CSize s = pDC->GetTextExtent(extra[i]);
         w += max(20, s.cx + 8) + 3;
     }
     pDC->SelectObject(pOf);
@@ -9305,8 +9334,9 @@ void CCustomListCtrl::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
 
         CString st = GetItemText(ni, ns);
         BOOL bSav = FALSE, bLrc = FALSE;
-        CString chLabel;
-        CCC_ExtractSavLrc(st, bSav, bLrc, chLabel);
+        CString extra[kCccExtraChips];
+        int extraN = 0;
+        CCC_ExtractSavLrc(st, bSav, bLrc, extra, kCccExtraChips, extraN);
         const BOOL bOpaqueChips = bCapGlass;
         pDC->SetTextColor(bS ? COLOR_LIST_SEL_TEXT : (m_bAeroMode ? RGB(1, 1, 1) : RGB(0, 0, 0)));
         pDC->SetBkMode(TRANSPARENT);
@@ -9355,17 +9385,17 @@ void CCustomListCtrl::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
 
         CFont* po = pDC->SelectObject(GetFont());
         const int midY = (r.top + r.bottom) / 2;
-        if (bSav || bLrc || !chLabel.IsEmpty()) {
+        if (bSav || bLrc || extraN > 0) {
             if (st.IsEmpty() && (uColFmt & DT_CENTER)) {
                 // 印列のみ: チップを中央寄せ
-                const int chipsW = CCC_MeasureSavLrcChips(pDC, bSav, bLrc, chLabel);
+                const int chipsW = CCC_MeasureSavLrcChips(pDC, bSav, bLrc, extra, extraN);
                 int x = r.left + (r.Width() - chipsW) / 2;
                 if (x < r.left + 2) x = r.left + 2;
-                CCC_DrawSavLrcChips(pDC, x, midY, bSav, bLrc, chLabel, bOpaqueChips);
+                CCC_DrawSavLrcChips(pDC, x, midY, bSav, bLrc, extra, extraN, bOpaqueChips);
             } else {
                 // 名前列: チップ → 曲名
                 int x = rt.left;
-                x = CCC_DrawSavLrcChips(pDC, x, midY, bSav, bLrc, chLabel, bOpaqueChips);
+                x = CCC_DrawSavLrcChips(pDC, x, midY, bSav, bLrc, extra, extraN, bOpaqueChips);
                 if (x + 2 < rt.right)
                     rt.left = x + 1;
                 if (!st.IsEmpty() && rt.Width() > 4)
@@ -10995,7 +11025,7 @@ void CCustomStandardButton::PaintClient(CDC& dc, const CRect& r)
         mDC.DrawFocusRect(&rf);
     }
 
-    // アイコン。ラベル付きは左に小さめ。横幅が本文の半分未満ならアイコン中央(3段階)。
+    // アイコン。ラベル付きはアイコン+文字を一塊にして中央。狭いときはアイコンのみ中央。
     CString s;
     GetWindowText(s);
     const BOOL glyphOnly = CCC_CaptionIsGlyphOnly(s);
@@ -11026,15 +11056,20 @@ void CCustomStandardButton::PaintClient(CDC& dc, const CRect& r)
         }
         const int iw = (std::min)(want, maxSz);
         const int ih = iw;
+        const int edge = m_bFlat ? 3 : 5;
+        const int gap = 3;
         if (drawLabel) {
-            const int leftPad = m_bFlat ? 3 : 5;
-            const int remain = r.Width() - leftPad - iw - 8;
+            const int remain = r.Width() - edge * 2 - iw - gap;
             if (remain < (std::max)(8, (int)te.cx / 2))
                 drawLabel = FALSE;
         }
         int ix, iy;
         if (drawLabel) {
-            ix = r.left + (m_bFlat ? 3 : 5);
+            const int cluster = iw + gap + te.cx;
+            int ix0 = r.left + (r.Width() - cluster) / 2;
+            if (ix0 < r.left + edge)
+                ix0 = r.left + edge;
+            ix = ix0;
             iy = r.top + (r.Height() - ih) / 2;
             iconRight = ix + iw;
         } else {
@@ -15544,10 +15579,10 @@ UINT CCC_CtlIconForCtrl(UINT id)
 	case IDC_MP_FIND: return IDI_CTL_SEARCH;
 	case IDC_MP_ITEMDEL:
 	case IDC_MP_PLDELETE: return IDI_CTL_DELETE;
-	case IDC_MP_LSUP:
+	case IDC_MP_LSUP: return IDI_CTL_CHEVTOP;
 	case IDC_MP_UP:
 	case IDC_MP_FINDUP: return IDI_CTL_CHEVUP;
-	case IDC_MP_LSDOWN:
+	case IDC_MP_LSDOWN: return IDI_CTL_CHEVBOTTOM;
 	case IDC_MP_DOWN:
 	case IDC_MP_FINDDOWN: return IDI_CTL_CHEVDOWN;
 	case IDC_MCR_ZOOMIN: return IDI_CTL_PLUS;
@@ -15572,6 +15607,7 @@ UINT CCC_CtlIconForCtrl(UINT id)
 	case IDC_MP_M3U_IMPORT: return IDI_UI_FILE;
 	case IDC_MP_ADDFOLDER: return IDI_CTL_PLUS;
 	case IDC_MP_BOT_VST: return IDI_UI_VST;
+	case IDC_MP_BOT_MIDI: return IDI_UI_PIANO;
 	case IDC_MP_BOT_CD: return IDI_UI_DISC;
 	case IDC_MP_BOT_MAZE: return IDI_UI_MAZE;
 	case IDC_MP_BOT_RACE: return IDI_UI_RACE;

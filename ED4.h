@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include "CCustomControl.h"
 
 // CED4 ダイアログ
@@ -27,3 +27,5 @@ protected:
 public:
 	CCustomStandardButton m_okdummy;
 };
+
+CString ED4Track(int i);

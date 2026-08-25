@@ -1,4 +1,4 @@
-// PlayList.cpp : 実装ファイル
+﻿// PlayList.cpp : 実装ファイル
 //
 
 #include "stdafx.h"
@@ -22,10 +22,14 @@
 #include "VstMidiEngine.h"
 #include "PluginAimp.h"
 #include "mp3image.h"
+#include "CMidiMonitorDlg.h"
 #include "CMediaPlayerDlg.h"
 #include "CMissingFilesDlg.h"
 #include "MpPlayerAddons.h"
 #include "CDesktopLyricsWnd.h"
+#include "ED3.h"
+#include "ED4.h"
+#include "ED5.h"
 #include <regex>
 #include <shellapi.h>
 
@@ -1001,11 +1005,11 @@ BOOL CPlayList::OnInitDialog()
 
 	plw = 1;
 
-	m_lsup.SetIcon(CCC_LoadSharedIcon(IDI_CTL_CHEVUP), NULL);
+	m_lsup.SetIcon(CCC_LoadSharedIcon(IDI_CTL_CHEVTOP), NULL);
 	m_lsup.SetFlat(TRUE);
 	m_lup.SetIcon(CCC_LoadSharedIcon(IDI_CTL_CHEVUP), NULL);
 	m_lup.SetFlat(TRUE);
-	m_lsdown.SetIcon(CCC_LoadSharedIcon(IDI_CTL_CHEVDOWN), NULL);
+	m_lsdown.SetIcon(CCC_LoadSharedIcon(IDI_CTL_CHEVBOTTOM), NULL);
 	m_lsdown.SetFlat(TRUE);
 	m_ldown.SetIcon(CCC_LoadSharedIcon(IDI_CTL_CHEVDOWN), NULL);
 	m_ldown.SetFlat(TRUE);
@@ -1767,19 +1771,185 @@ int PlChProbe(LPCTSTR fol)
 	return ch;
 }
 
+static const TCHAR* PlMidForceChip(int force)
+{
+	switch (force) {
+	case 1: return _T("GS");
+	case 2: return _T("XG");
+	case 3: return _T("55");
+	case 4: return _T("88");
+	case 5: return _T("88P");
+	case 6: return _T("8820");
+	case 7: return _T("GM");
+	case 8: return _T("SD");
+	case 9: return _T("LA");
+	case 10: return _T("GM2");
+	case 11: return _T("NS");
+	case 12: return _T("KW");
+	case 13: return _T("SG");
+	case 14: return _T("KR");
+	case 15: return _T("PA");
+	case 16: return _T("CS");
+	case 17: return _T("GEM");
+	case 18: return _T("LK");
+	case 19: return _T("PV");
+	default: return NULL;
+	}
+}
+
+static void PlMidMapChip(int force, int mapKind, int sysMode, CString& out)
+{
+	out.Empty();
+	const TCHAR* f = PlMidForceChip(force);
+	if (f) { out = f; return; }
+	if (sysMode == 2 || mapKind == 7) { out = _T("XG"); return; }
+	switch (mapKind) {
+	case 1: out = _T("55"); break;
+	case 2: out = _T("88"); break;
+	case 3: out = _T("88P"); break;
+	case 4: out = _T("8820"); break;
+	case 5: out = _T("GM"); break;
+	case 6: out = _T("SD"); break;
+	case 8: out = _T("LA"); break;
+	case 9: out = _T("GM2"); break;
+	case 10: out = _T("NS"); break;
+	case 11: out = _T("KW"); break;
+	case 12: out = _T("SG"); break;
+	case 13: out = _T("KR"); break;
+	case 14: out = _T("PA"); break;
+	case 15: out = _T("CS"); break;
+	case 16: out = _T("GEM"); break;
+	case 17: out = _T("LK"); break;
+	case 18: out = _T("PV"); break;
+	default:
+		if (sysMode == 1) out = _T("GS");
+		else out = _T("GM");
+		break;
+	}
+}
+
+int PlMidDiskGet(LPCTSTR fol, int* ch32, int* mapKind, int* sysMode, int* mapForce)
+{
+	if (ch32) *ch32 = 0;
+	if (mapKind) *mapKind = 0;
+	if (sysMode) *sysMode = 0;
+	if (mapForce) *mapForce = 0;
+	if (!fol || !fol[0]) return -1;
+	CString dir = PlYsedCacheDir(_T("midflag"));
+	if (dir.IsEmpty()) return -1;
+	CString path;
+	path.Format(_T("%s\\%016I64X"), (LPCTSTR)dir, PlCacheHashPath(fol));
+	HANDLE h = ::CreateFile(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL,
+		OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+	if (h == INVALID_HANDLE_VALUE) return -1;
+	BYTE b[8] = {};
+	DWORD rd = 0;
+	const BOOL ok = ::ReadFile(h, b, 8, &rd, NULL);
+	::CloseHandle(h);
+	if (!ok || rd < 5 || b[0] != 1) return -1;
+	if (ch32) *ch32 = b[1] ? 1 : 0;
+	if (mapKind) *mapKind = (int)b[2];
+	if (sysMode) *sysMode = (int)b[3];
+	if (mapForce) *mapForce = (int)b[4];
+	return 0;
+}
+
+void PlMidDiskSet(LPCTSTR fol, int ch32, int mapKind, int sysMode, int mapForce)
+{
+	if (!fol || !fol[0]) return;
+	CString dir = PlYsedCacheDir(_T("midflag"));
+	if (dir.IsEmpty()) return;
+	CString path;
+	path.Format(_T("%s\\%016I64X"), (LPCTSTR)dir, PlCacheHashPath(fol));
+	HANDLE h = ::CreateFile(path, GENERIC_WRITE, FILE_SHARE_READ, NULL,
+		CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+	if (h == INVALID_HANDLE_VALUE) return;
+	BYTE b[8] = {};
+	b[0] = 1;
+	b[1] = ch32 ? 1 : 0;
+	b[2] = (BYTE)((mapKind < 0) ? 0 : (mapKind > 18) ? 18 : mapKind);
+	b[3] = (BYTE)((sysMode < 0) ? 0 : (sysMode > 2) ? 2 : sysMode);
+	b[4] = (BYTE)((mapForce < 0) ? 0 : (mapForce > 19) ? 19 : mapForce);
+	DWORD wr = 0;
+	::WriteFile(h, b, 8, &wr, NULL);
+	::CloseHandle(h);
+}
+
+int PlMidProbe(LPCTSTR fol)
+{
+	if (!fol || !fol[0]) return 0;
+#ifndef _UNICODE
+	CStringW w(fol);
+	if (!VstIsMidiExt(w)) return 0;
+	const wchar_t* wp = w;
+#else
+	if (!VstIsMidiExt(fol)) return 0;
+	const wchar_t* wp = fol;
+#endif
+	int ch32 = 0, mk = 0, sys = 0, force = 0;
+	const int had = (PlMidDiskGet(fol, &ch32, &mk, &sys, &force) >= 0) ? 1 : 0;
+	VstMidiListPeek peek = {};
+	if (!VstMidiPeekListMarks(wp, &peek)) {
+		if (!had) PlMidDiskSet(fol, 0, 0, 0, force);
+		return had;
+	}
+	PlMidDiskSet(fol, peek.ch32, peek.mapKind, peek.sysMode, had ? force : 0);
+	return 1;
+}
+
+int PlMidProbeIfNeeded(LPCTSTR fol)
+{
+	if (!fol || !fol[0]) return 0;
+#ifndef _UNICODE
+	CStringW w(fol);
+	if (!VstIsMidiExt(w)) return 0;
+#else
+	if (!VstIsMidiExt(fol)) return 0;
+#endif
+	if (PlMidDiskGet(fol, NULL, NULL, NULL, NULL) >= 0) return 0;
+	return PlMidProbe(fol) ? 1 : 0;
+}
+
+void PlMidForceSet(LPCTSTR fol, int mapForce)
+{
+	if (!fol || !fol[0]) return;
+	int ch32 = 0, mk = 0, sys = 0, oldF = 0;
+	if (PlMidDiskGet(fol, &ch32, &mk, &sys, &oldF) < 0)
+		PlMidProbe(fol);
+	if (PlMidDiskGet(fol, &ch32, &mk, &sys, &oldF) < 0) {
+		PlMidDiskSet(fol, 0, 0, 0, mapForce);
+		return;
+	}
+	PlMidDiskSet(fol, ch32, mk, sys, mapForce);
+}
+
+void PlMidNotifyMarkViews()
+{
+	extern CPlayList* pl;
+	extern CMediaPlayerDlg* mp;
+	if (pl && ::IsWindow(pl->m_lc.GetSafeHwnd()))
+		pl->m_lc.Invalidate(FALSE);
+	if (mp && ::IsWindow(mp->m_list.GetSafeHwnd()))
+		mp->m_list.Invalidate(FALSE);
+}
+
 void PlFormatRowMarks(int row, LPCTSTR fol, CString& out)
 {
 	out.Empty();
 	const BOOL sav = SongParams_HasEntryForRow(row);
 	BOOL lrc = FALSE;
 	int ch = 0;
+	int midCh32 = -1, midKind = 0, midSys = 0, midForce = 0;
+	BOOL midOk = FALSE;
 	if (fol && fol[0]) {
 		const int c = PlLrcDiskGet(fol);
 		lrc = (c == 0);
 		const int cc = PlChDiskGet(fol);
 		if (cc > 0) ch = cc;
+		if (PlMidDiskGet(fol, &midCh32, &midKind, &midSys, &midForce) >= 0)
+			midOk = TRUE;
 	}
-	// [SAV]=曲ごと保存 / [LRC]=歌詞 / [MONO]|[LR]|[2.1]…=チャンネル
+	// [SAV]=曲ごと保存 / [LRC]=歌詞 / [MONO]|[LR]|[2.1]…=チャンネル / MIDI 16ch·マップ
 	if (sav) out += _T("[SAV]");
 	if (lrc) out += _T("[LRC]");
 	if (ch > 0) {
@@ -1788,6 +1958,16 @@ void PlFormatRowMarks(int row, LPCTSTR fol, CString& out)
 		if (!lab.IsEmpty()) {
 			out += _T("[");
 			out += lab;
+			out += _T("]");
+		}
+	}
+	if (midOk) {
+		out += midCh32 ? _T("[32ch]") : _T("[16ch]");
+		CString map;
+		PlMidMapChip(midForce, midKind, midSys, map);
+		if (!map.IsEmpty()) {
+			out += _T("[");
+			out += map;
 			out += _T("]");
 		}
 	}
@@ -2647,6 +2827,61 @@ int CPlayList::ShowTrackContextMenu(CPoint pt, CWnd* pOwner)
 					L"Копирует «Название - Исполнитель» в буфер обмена", L"Kopiert Titel - Interpret in die Zwischenablage", L"Copia Titulo - Artista para a area de transferencia", L"Kopieert Titel - Artiest naar het klembord",
 					L"Kopiuje Tytul - Artysta do schowka", L"Baslik - Sanatci metnini panoya kopyalar"));
 	}
+	int midiForce = 0;
+	BOOL anyMidi = FALSE;
+	{
+		int i = -1;
+		while ((i = m_lc.GetNextItem(i, LVNI_ALL | LVNI_SELECTED)) >= 0) {
+			if (!pc || i >= playcnt || !pc[i].fol[0]) continue;
+#ifndef _UNICODE
+			if (!VstIsMidiExt(CStringW(pc[i].fol))) continue;
+#else
+			if (!VstIsMidiExt(pc[i].fol)) continue;
+#endif
+			if (!anyMidi) {
+				int f = 0;
+				if (PlMidDiskGet(pc[i].fol, NULL, NULL, NULL, &f) < 0)
+					PlMidProbe(pc[i].fol);
+				PlMidDiskGet(pc[i].fol, NULL, NULL, NULL, &f);
+				midiForce = f;
+			}
+			anyMidi = TRUE;
+		}
+	}
+	if (anyMidi) {
+		menu.AddSeparator();
+		CCustomPopupMenu* map = menu.AddSubMenu(
+			LL14(L"音色マップ", L"Tone map", L"Carte de timbres", L"Mappa timbri", L"Mapa de timbres", L"음색 맵", L"音色映射", L"خريطة الأصوات", L"Карта тембров", L"Klangkarte", L"Mapa de timbres", L"Klankkaart", L"Mapa barw", L"Timbir haritasi"),
+			LL14(L"この MIDI の印（16ch/32ch と XG/88 など）。自動判定か 55map 等を選べます", L"MIDI badges (16ch/32ch and XG/88…). Auto-detect or pick 55map etc.", L"Badges MIDI (16ch/32ch et XG/88…). Auto ou 55map…", L"Badge MIDI (16ch/32ch e XG/88…). Auto o 55map…", L"Insignias MIDI (16ch/32ch y XG/88…). Auto o 55map…", L"이 MIDI 표시(16ch/32ch와 XG/88 등). 자동 또는 55map 등", L"此 MIDI 标记（16ch/32ch 与 XG/88 等）。可自动判定或选 55map 等", L"شارات MIDI (16ch/32ch و XG/88…). تلقائي أو 55map…", L"Значки MIDI (16ch/32ch и XG/88…). Авто или 55map…", L"MIDI-Abzeichen (16ch/32ch und XG/88…). Auto oder 55map…", L"Selos MIDI (16ch/32ch e XG/88…). Auto ou 55map…", L"MIDI-badges (16ch/32ch en XG/88…). Auto of 55map…", L"Odznaki MIDI (16ch/32ch i XG/88…). Auto lub 55map…", L"MIDI rozetleri (16ch/32ch ve XG/88…). Otomatik veya 55map…"));
+		if (map) {
+			map->AddCheck(PL_CTX_MIDMAP_BASE + 0, LL14(L"自動 (SysEx / 曲名)", L"Auto (SysEx / title)", L"Auto (SysEx / titre)", L"Auto (SysEx / titolo)", L"Auto (SysEx / titulo)", L"자동 (SysEx / 제목)", L"自动 (SysEx / 曲名)", L"تلقائي (SysEx / عنوان)", L"Авто (SysEx / название)", L"Auto (SysEx / Titel)", L"Auto (SysEx / titulo)", L"Auto (SysEx / titel)", L"Auto (SysEx / tytul)", L"Otomatik (SysEx / baslik)"), midiForce == 0);
+			map->AddCheck(PL_CTX_MIDMAP_BASE + 1, L"GS", midiForce == 1);
+			map->AddCheck(PL_CTX_MIDMAP_BASE + 2, L"XG", midiForce == 2);
+			map->AddSeparator();
+			map->AddCheck(PL_CTX_MIDMAP_BASE + 3, L"55map", midiForce == 3);
+			map->AddCheck(PL_CTX_MIDMAP_BASE + 4, L"88map", midiForce == 4);
+			map->AddCheck(PL_CTX_MIDMAP_BASE + 5, L"88Promap", midiForce == 5);
+			map->AddCheck(PL_CTX_MIDMAP_BASE + 6, L"8820map", midiForce == 6);
+			map->AddCheck(PL_CTX_MIDMAP_BASE + 7, L"GMmap", midiForce == 7);
+			map->AddCheck(PL_CTX_MIDMAP_BASE + 8, L"SDmap", midiForce == 8);
+			map->AddCheck(PL_CTX_MIDMAP_BASE + 9, L"LAmap", midiForce == 9);
+			CCustomPopupMenu* etc = map->AddSubMenu(
+				LL14(L"ETC (EX)", L"ETC (EX)", L"ETC (EX)", L"ETC (EX)", L"ETC (EX)", L"ETC (EX)", L"ETC (EX)", L"ETC (EX)", L"ETC (EX)", L"ETC (EX)", L"ETC (EX)", L"ETC (EX)", L"ETC (EX)", L"ETC (EX)"),
+				LL14(L"GS/XG 以外（SASAMI_EX.DAT）", L"Non-GS/XG (SASAMI_EX.DAT)", L"Hors GS/XG (SASAMI_EX.DAT)", L"Non GS/XG (SASAMI_EX.DAT)", L"Fuera de GS/XG (SASAMI_EX.DAT)", L"GS/XG 이외 (SASAMI_EX.DAT)", L"GS/XG 以外（SASAMI_EX.DAT）", L"غير GS/XG (SASAMI_EX.DAT)", L"Не GS/XG (SASAMI_EX.DAT)", L"Nicht GS/XG (SASAMI_EX.DAT)", L"Fora GS/XG (SASAMI_EX.DAT)", L"Geen GS/XG (SASAMI_EX.DAT)", L"Poza GS/XG (SASAMI_EX.DAT)", L"GS/XG disi (SASAMI_EX.DAT)"));
+			if (etc) {
+				etc->AddCheck(PL_CTX_MIDMAP_BASE + 10, L"GM2map", midiForce == 10);
+				etc->AddCheck(PL_CTX_MIDMAP_BASE + 11, L"NSmap", midiForce == 11);
+				etc->AddCheck(PL_CTX_MIDMAP_BASE + 12, L"KWmap", midiForce == 12);
+				etc->AddCheck(PL_CTX_MIDMAP_BASE + 13, L"SGmap", midiForce == 13);
+				etc->AddCheck(PL_CTX_MIDMAP_BASE + 14, L"KRmap", midiForce == 14);
+				etc->AddCheck(PL_CTX_MIDMAP_BASE + 15, L"PAmap", midiForce == 15);
+				etc->AddCheck(PL_CTX_MIDMAP_BASE + 16, L"CSmap", midiForce == 16);
+				etc->AddCheck(PL_CTX_MIDMAP_BASE + 17, L"GEMmap", midiForce == 17);
+				etc->AddCheck(PL_CTX_MIDMAP_BASE + 18, L"LKmap", midiForce == 18);
+				etc->AddCheck(PL_CTX_MIDMAP_BASE + 19, L"PVmap", midiForce == 19);
+			}
+		}
+	}
 	menu.AddSeparator();
 	CCustomPopupMenu* subExport = menu.AddSubMenu(
 		LL14(L"書き出し", L"Export", L"Export", L"Esporta",
@@ -3486,6 +3721,28 @@ void CPlayList::HandleTrackContextCmd(int cmd)
 	else if (cmd == PL_CTX_MIDIMON) {
 		if (og && ::IsWindow(og->GetSafeHwnd())) og->ToggleMidiMonitor();
 	}
+	else if (cmd >= PL_CTX_MIDMAP_BASE && cmd <= PL_CTX_MIDMAP_LAST) {
+		const int force = (int)(cmd - PL_CTX_MIDMAP_BASE);
+		extern COggDlg* og;
+		int i = -1;
+		while ((i = m_lc.GetNextItem(i, LVNI_ALL | LVNI_SELECTED)) >= 0) {
+			if (!pc || i >= playcnt || !pc[i].fol[0]) continue;
+#ifndef _UNICODE
+			if (!VstIsMidiExt(CStringW(pc[i].fol))) continue;
+			CStringW folW(pc[i].fol);
+#else
+			if (!VstIsMidiExt(pc[i].fol)) continue;
+			const wchar_t* folW = pc[i].fol;
+#endif
+			PlMidForceSet(pc[i].fol, force);
+			if (og && og->m_MidiMonitorDlg && ::IsWindow(og->m_MidiMonitorDlg->GetSafeHwnd())) {
+				const wchar_t* loaded = og->m_MidiMonitorDlg->LoadedMidiPath();
+				if (loaded && loaded[0] && _wcsicmp(loaded, folW) == 0)
+					og->m_MidiMonitorDlg->ApplyMapForce(force);
+			}
+		}
+		PlMidNotifyMarkViews();
+	}
 	else if (cmd == PL_CTX_COPY_TITLEART) {
 		const int idx = m_lc.GetNextItem(-1, LVNI_ALL | LVNI_SELECTED);
 		if (pc && idx >= 0 && idx < playcnt) {
@@ -3990,6 +4247,319 @@ static bool IsPlaylistDropAllowedExt(const CString& pathOrName)
 	return false;
 }
 
+static unsigned PlMidiBe(const BYTE* p, int n)
+{
+	unsigned v = 0;
+	for (int i = 0; i < n; ++i)
+		v = (v << 8) | p[i];
+	return v;
+}
+
+static int PlMidiVar(const BYTE*& q, const BYTE* end, unsigned& out)
+{
+	out = 0;
+	for (int i = 0; i < 4; ++i) {
+		if (q >= end) return 0;
+		const BYTE b = *q++;
+		out = (out << 7) | (unsigned)(b & 0x7f);
+		if (!(b & 0x80)) return 1;
+	}
+	return 0;
+}
+
+static void PlMidiTrimW(wchar_t* w)
+{
+	if (!w || !w[0]) return;
+	wchar_t* s = w;
+	while (*s == L' ' || *s == L'\t' || *s == L'\r' || *s == L'\n')
+		++s;
+	if (s != w)
+		memmove(w, s, (wcslen(s) + 1) * sizeof(wchar_t));
+	int n = (int)wcslen(w);
+	while (n > 0 && (w[n - 1] == L' ' || w[n - 1] == L'\t' || w[n - 1] == L'\r' || w[n - 1] == L'\n'))
+		w[--n] = 0;
+}
+
+static void PlMidiDecodeText(const char* tmp, wchar_t* w, int cap)
+{
+	w[0] = 0;
+	if (!tmp || !tmp[0] || cap < 2) return;
+	// MB_ERR_INVALID_CHARS=8: UTF-8 first, then CP932, then ACP.
+	// 932 without the flag turns broken bytes into '?' and looks like a title.
+	if (MultiByteToWideChar(CP_UTF8, 8, tmp, -1, w, cap) <= 0)
+		w[0] = 0;
+	if (!w[0] && MultiByteToWideChar(932, 8, tmp, -1, w, cap) <= 0)
+		w[0] = 0;
+	if (!w[0])
+		MultiByteToWideChar(CP_ACP, 0, tmp, -1, w, cap);
+	w[cap - 1] = 0;
+	PlMidiTrimW(w);
+	int junk = 1;
+	for (wchar_t* p = w; *p; ++p) {
+		const wchar_t c = *p;
+		if (c == L' ' || c == L'\t') continue;
+		if (c != L'?' && c != L'*' && c != L'.' && c != L'-' && c != L'_' && c != L'!') {
+			junk = 0;
+			break;
+		}
+	}
+	if (junk)
+		w[0] = 0;
+}
+
+static void PlMidiScanTrack(const BYTE* tr, const BYTE* end, wchar_t* t03, int c03, wchar_t* t01, int c01)
+{
+	BYTE run = 0;
+	const BYTE* q = tr;
+	while (q < end) {
+		unsigned dt = 0;
+		if (!PlMidiVar(q, end, dt)) break;
+		if (q >= end) break;
+		BYTE st = *q;
+		if (st < 0x80) {
+			if (!run) break;
+			st = run;
+		} else {
+			++q;
+			if (st < 0xf0)
+				run = st;
+		}
+		if (st == 0xff) {
+			if (q >= end) break;
+			const BYTE type = *q++;
+			unsigned ml = 0;
+			if (!PlMidiVar(q, end, ml) || q + ml > end) break;
+			if ((type == 0x01 || type == 0x03) && ml > 0) {
+				char tmp[256];
+				unsigned n = ml;
+				if (n > 255) n = 255;
+				memcpy(tmp, q, n);
+				tmp[n] = 0;
+				wchar_t w[256];
+				PlMidiDecodeText(tmp, w, 256);
+				if (w[0]) {
+					if (type == 0x03 && t03 && !t03[0])
+						wcsncpy_s(t03, c03, w, _TRUNCATE);
+					else if (type == 0x01 && t01 && !t01[0])
+						wcsncpy_s(t01, c01, w, _TRUNCATE);
+				}
+			}
+			q += ml;
+			if (type == 0x2f) break;
+		} else if (st == 0xf0 || st == 0xf7) {
+			unsigned sl = 0;
+			if (!PlMidiVar(q, end, sl) || q + sl > end) break;
+			q += sl;
+		} else {
+			const int kind = st & 0xf0;
+			const int need = (kind == 0xc0 || kind == 0xd0) ? 1 : 2;
+			if (q + need > end) break;
+			q += need;
+		}
+		if (t03 && t03[0] && t01 && t01[0]) break;
+	}
+}
+
+static int PlMidiPeekTitle(const wchar_t* path, wchar_t* out, int outCap)
+{
+	out[0] = 0;
+	if (!path || !path[0] || outCap < 2) return 0;
+	HANDLE f = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ, NULL,
+		OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, NULL);
+	if (f == INVALID_HANDLE_VALUE) return 0;
+	LARGE_INTEGER sz;
+	if (!GetFileSizeEx(f, &sz) || sz.QuadPart < 14) {
+		CloseHandle(f);
+		return 0;
+	}
+	DWORD toRead = (sz.QuadPart > (LONGLONG)(1024 * 1024)) ? (1024 * 1024) : (DWORD)sz.QuadPart;
+	BYTE* data = (BYTE*)malloc(toRead);
+	DWORD got = 0;
+	if (!data || !ReadFile(f, data, toRead, &got, NULL) || got < 14) {
+		CloseHandle(f);
+		free(data);
+		return 0;
+	}
+	CloseHandle(f);
+	const BYTE* smf = data;
+	DWORD smfSize = got;
+	if (got >= 20 && memcmp(data, "RIFF", 4) == 0 && memcmp(data + 8, "RMID", 4) == 0) {
+		DWORD off = 12;
+		while (off + 8 <= got) {
+			const DWORD cksz = (DWORD)data[off + 4] | ((DWORD)data[off + 5] << 8)
+				| ((DWORD)data[off + 6] << 16) | ((DWORD)data[off + 7] << 24);
+			if (memcmp(data + off, "data", 4) == 0) {
+				if (off + 8 > got) break;
+				smf = data + off + 8;
+				smfSize = cksz;
+				if (smf + smfSize > data + got)
+					smfSize = (DWORD)(data + got - smf);
+				break;
+			}
+			const DWORD step = 8 + ((cksz + 1) & ~1u);
+			if (step < 8 || off + step < off) break;
+			off += step;
+		}
+	}
+	if (smfSize < 14 || memcmp(smf, "MThd", 4) != 0 || PlMidiBe(smf + 4, 4) < 6) {
+		free(data);
+		return 0;
+	}
+	const int tracks = (int)PlMidiBe(smf + 10, 2);
+	const BYTE* p = smf + 8 + PlMidiBe(smf + 4, 4);
+	wchar_t t03[256] = {}, t01[256] = {};
+	for (int t = 0; t < tracks && t < 64 && p + 8 <= smf + smfSize; ++t) {
+		if (memcmp(p, "MTrk", 4) != 0) break;
+		const DWORD tlen = PlMidiBe(p + 4, 4);
+		p += 8;
+		if (p + tlen > smf + smfSize) break;
+		PlMidiScanTrack(p, p + tlen, t03, 256, t01, 256);
+		p += tlen;
+		if (t03[0]) break;
+	}
+	free(data);
+	const wchar_t* src = t03[0] ? t03 : t01;
+	if (!src[0]) return 0;
+	// GM 変換バナー（「新英伝3　ハ　GM版」「GM曲」）は曲名ではない。
+	if (wcsstr(src, L"GM版") || wcscmp(src, L"GM曲") == 0)
+		return 0;
+	wcsncpy_s(out, outCap, src, _TRUNCATE);
+	return 1;
+}
+
+static int PlMidiCodeRestOk(const CString& rest)
+{
+	for (int i = 0; i < rest.GetLength(); ++i) {
+		TCHAR c = rest[i];
+		if (c >= _T('a') && c <= _T('z'))
+			c = (TCHAR)(c - _T('a') + _T('A'));
+		if (c == _T('_') || c == _T('-') || (c >= _T('0') && c <= _T('9')))
+			continue;
+		if (c == _T('G') || c == _T('M') || c == _T('D') || c == _T('A') || c == _T('W') || c == _T('V'))
+			continue;
+		return 0;
+	}
+	return 1;
+}
+
+static int PlMidiTitleIsCode(const wchar_t* title, const CString& stem, const CString& leaf)
+{
+	if (!title || !title[0])
+		return 1;
+	if (_wcsicmp(title, stem) == 0 || _wcsicmp(title, leaf) == 0)
+		return 1;
+	CString t(title);
+	if (t.GetLength() >= stem.GetLength() && t.Left(stem.GetLength()).CompareNoCase(stem) == 0)
+		return PlMidiCodeRestOk(t.Mid(stem.GetLength()));
+	return 0;
+}
+
+static void PlMidiMaybeTitle(CString& name, const CString& fol, int doPeek)
+{
+	if (!VstIsMidiExt(fol))
+		return;
+	CString leaf = fol;
+	const int slash = max(leaf.ReverseFind(_T('\\')), leaf.ReverseFind(_T('/')));
+	if (slash >= 0 && slash + 1 < leaf.GetLength())
+		leaf = leaf.Mid(slash + 1);
+	if (leaf.IsEmpty())
+		return;
+	CString stem = leaf;
+	const int dot = stem.ReverseFind(_T('.'));
+	if (dot > 0)
+		stem = stem.Left(dot);
+	CString cur = name;
+	cur.Trim();
+	if (cur.IsEmpty())
+		cur = leaf;
+	int allow = (cur.CompareNoCase(leaf) == 0 || cur.CompareNoCase(stem) == 0);
+	if (!allow) {
+		CString wrap;
+		wrap.Format(_T("(%s)"), (LPCTSTR)leaf);
+		const int wl = wrap.GetLength();
+		if (cur.GetLength() > wl && cur.Right(wl).CompareNoCase(wrap) == 0) {
+			CString inner = cur.Left(cur.GetLength() - wl);
+			inner.Trim();
+			int junk = inner.GetLength() > 0;
+			for (int i = 0; junk && i < inner.GetLength(); ++i) {
+				const TCHAR c = inner[i];
+				if (c == _T(' ') || c == _T('\t')) continue;
+				if (c != _T('?') && c != _T('*') && c != _T('.') && c != _T('-') && c != _T('_') && c != _T('!'))
+					junk = 0;
+			}
+			if (junk || PlMidiTitleIsCode(inner, stem, leaf))
+				allow = 1;
+		}
+	}
+	if (!allow)
+		return;
+	wchar_t title[256] = {};
+	if (doPeek) {
+		// 起動時 Load や死んだ UNC で CreateFile が数十秒ブロックすると、
+		// 窓が出る前に mutex だけ取ったまま固まる。ネット経路はファイル名のまま。
+		if (!(PathIsNetworkPath(fol) || (fol.GetLength() >= 2 && fol[0] == _T('\\') && fol[1] == _T('\\'))))
+			PlMidiPeekTitle(fol, title, 256);
+	}
+	if (PlMidiTitleIsCode(title, stem, leaf))
+		title[0] = 0;
+	if (!title[0] && stem.GetLength() >= 5) {
+		CString id = stem;
+		id.MakeUpper();
+		int n = 0;
+		CString (*track)(int) = NULL;
+		int idLen = 0;
+		if (id.GetLength() >= 6
+			&& id[0] == _T('E') && id[1] == _T('D')
+			&& id[2] >= _T('0') && id[2] <= _T('9')
+			&& id[3] >= _T('0') && id[3] <= _T('9')
+			&& id[4] >= _T('0') && id[4] <= _T('9')
+			&& id[5] >= _T('0') && id[5] <= _T('9')
+			&& !(id.GetLength() >= 3 && id[2] == _T('5'))) {
+			track = ED3Track; n = 67; idLen = 6; id = id.Left(6);
+		} else if (id.GetLength() >= 5
+			&& id[0] == _T('E') && id[1] == _T('4')
+			&& ((id[2] >= _T('A') && id[2] <= _T('Z')) || (id[2] >= _T('0') && id[2] <= _T('9')))
+			&& id[3] >= _T('0') && id[3] <= _T('9')
+			&& id[4] >= _T('0') && id[4] <= _T('9')) {
+			track = ED4Track; n = 66; idLen = 5; id = id.Left(5);
+		} else if (id.GetLength() >= 8
+			&& id[0] == _T('E') && id[1] == _T('D') && id[2] == _T('5')
+			&& ((id[3] == _T('G') && id[4] == _T('M')) || (id[3] == _T('W') && id[4] == _T('V')))
+			&& id[5] >= _T('0') && id[5] <= _T('9')
+			&& id[6] >= _T('0') && id[6] <= _T('9')
+			&& id[7] >= _T('0') && id[7] <= _T('9')) {
+			track = ED5Track; n = 98; idLen = 8; id = id.Left(8);
+			if (id[3] == _T('G') && id[4] == _T('M')) {
+				id.SetAt(3, _T('W'));
+				id.SetAt(4, _T('V'));
+			}
+		}
+		if (track) {
+			for (int i = 0; i < n; ++i) {
+				CString row = track(i);
+				if (row.GetLength() <= idLen || row[0] == 0x2605)
+					continue;
+				if (row.Left(idLen).CompareNoCase(id) != 0)
+					continue;
+				const int sp = row.Find(_T(' '));
+				if (sp == idLen && sp + 1 < row.GetLength()) {
+					wcsncpy_s(title, 256, row.Mid(sp + 1), _TRUNCATE);
+					break;
+				}
+			}
+		}
+	}
+	if (!title[0])
+		return;
+	if (_wcsicmp(title, leaf) == 0 || _wcsicmp(title, stem) == 0)
+		return;
+	CString out;
+	out.Format(_T("%s(%s)"), title, (LPCTSTR)leaf);
+	if (out.GetLength() >= 1023)
+		out = out.Left(1023);
+	name = out;
+}
+
 int CPlayList::Add(CString name,int sub,int loop1,int loop2,CString art,CString alb,CString fol,int ret,int time,BOOL f,BOOL ff)
 {
 	// 旧プレイリストに KPI 再生として保存された動画も CDouga 再生へ移行する。
@@ -4149,7 +4719,14 @@ int CPlayList::Add(CString name,int sub,int loop1,int loop2,CString art,CString 
 			}
 			m_lc.SetItemCount(playcnt+1);
 		}
-		_tcscpy(pc[playcnt].name,name);
+		CString dispName = name;
+		// Load では MIDI ファイルを開かない（起動で全 .mid を読むと固まる）。
+		// 番号だけの表示名や「???(file.mid)」は内蔵の曲名表から足す。
+		if (ff || dispName.Find(_T("???")) >= 0)
+			PlMidiMaybeTitle(dispName, folNorm, 1);
+		else
+			PlMidiMaybeTitle(dispName, folNorm, 0);
+		_tcscpy(pc[playcnt].name, dispName);
 		_tcscpy(pc[playcnt].art,art);
 		_tcscpy(pc[playcnt].alb,alb);
 		_tcscpy(pc[playcnt].fol, folNorm);
@@ -10849,6 +11426,23 @@ void CPlayList::OnTimer(UINT nIDEvent)
 		if (want != s_plJakTimerMs) {
 			s_plJakTimerMs = want;
 			SetTimer(41, want, NULL);
+		}
+		if (pc && playcnt > 0 && ::IsWindow(m_lc.GetSafeHwnd())) {
+			int t = m_lc.GetTopIndex();
+			if (t < 0) t = 0;
+			int pg = m_lc.GetCountPerPage() + 2;
+			if (pg < 4) pg = 4;
+			int budget = 2;
+			BOOL midDirty = FALSE;
+			const int nDisp = m_lc.GetItemCount();
+			for (int disp = t; budget > 0 && disp < t + pg && disp < nDisp && disp < playcnt; ++disp) {
+				if (PlMidProbeIfNeeded(pc[disp].fol)) {
+					midDirty = TRUE;
+					--budget;
+				}
+			}
+			if (midDirty)
+				m_lc.Invalidate(FALSE);
 		}
 	}
 	if (nIDEvent == 40) {

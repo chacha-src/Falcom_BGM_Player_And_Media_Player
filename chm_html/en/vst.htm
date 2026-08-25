@@ -43,6 +43,7 @@
 <dt>WAV out</dt>
 <dd>Writes this host's mix as a WAV file. With main-playback thru on, the player's sound is included. Press again to finish the file. Very long recordings are fine.</dd>
 </dl>
+<p>The plug-in list is kept in <code>%LOCALAPPDATA%\oggYSED\vstscan.cache</code> — the same durable folder as resume data, not the temp directory. Disk Cleanup and reboots leave it alone, and it is no longer discarded after 24 hours. Use Rescan after you install or remove plug-ins.</p>
 <h2>MIDI In 1-16ch / 17-32ch</h2>
 <p>MIDI In 1, 2, and 3 list each device as <b>name 1-16ch</b> and <b>name 17-32ch</b>. 1-16ch feeds Parts 1–16; 17-32ch feeds Parts 17–32. Use that to split keyboards by bank, or assign the same device to several inputs so one keyboard reaches 32 parts (Super-MPU style). Super-MPU devices whose name contains MPU also forward 1-16ch to 17–32 automatically, and honour F5 cable-select. The wiring canvas right-click menu has the same MIDI In 1 / 2 / 3 submenus.</p>
 <p><b>Main play</b> is not hardware: it is <b>Main-playback thru</b>. Whatever the media player is sounding (mp3, KPI, video audio, and so on) arrives and mixes with this host's VSTs. When the file is MIDI, that SMF also merges with MIDI In 1–3. WAV out records that mix. While thru is on, the player's own speakers are silent; sound comes only from this host's audio output. Thru can run together with the three MIDI inputs.</p>
