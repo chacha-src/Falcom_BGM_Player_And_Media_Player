@@ -181,6 +181,22 @@ static void MmGlowTick(BYTE& g)
 	if (g < 6) g = 0;
 }
 
+static void MmGlowTickMs(BYTE& g, int dtMs)
+{
+	if (!g || dtMs <= 0) return;
+	while (dtMs >= 16) {
+		MmGlowTick(g);
+		dtMs -= 16;
+		if (!g) return;
+	}
+	if (dtMs <= 0) return;
+	int ng = ((int)g * (128 - dtMs)) / 128;
+	if (ng < 6) ng = 0;
+	g = (BYTE)ng;
+}
+
+#define WM_MM_PULSE (WM_APP + 520)
+
 /* 行の汚れ判定は「絵に出る量」で見る。lev と glow は毎フレーム減衰するので
    生の値で比べると全行が常に不一致になり、32行を毎回塗り直してしまう。 */
 static int MmLevPix(float lev, int bh)
@@ -1155,20 +1171,20 @@ void CMmHelpDlg::OnPaint()
 		L"· Satir renkleri: kullanilan partlar beyaz / biraz koyu beyaz. Davul tum satiri sicak boyar. Nota/CC/SysEx yoksa gri. Mini klavyeye tiklayinca serit (davulsa sicak ton) doner."));
 	y += lh;
 	body(L, y, LL14(
-		L"・変化の光 …… PC# / BNK / Map は発音中も行の交互色のままです。音色が変わるとインスト欄が琥珀に点きます。Lev/Vol などのバーはフェードしません。",
-		L"· Change glow: PC# / BNK / Map keep the row stripe while notes play. An instrument change still ambers that cell. Meter bars do not fade.",
-		L"· Lueur : PC# / BNK / Map gardent le zebrage pendant les notes. Changement de timbre = ambre. Les barres ne fondent pas.",
-		L"· Bagliore: PC# / BNK / Map restano a strisce mentre suonano. Cambio timbro = ambra. Le barre non sfumano.",
-		L"· Brillo: PC# / BNK / Map siguen la raya al sonar. Cambio de timbre = ambar. Las barras no se desvanecen.",
-		L"· 변화 빛: PC# / BNK / Map는 발음 중에도 교차색입니다. 음색이 바뀌면 인스트 칸이 호박색. Lev/Vol 등 바는 페이드하지 않습니다.",
-		L"· 变化光：PC# / BNK / Map 发音时仍保持行条纹。音色变化时乐器栏呈琥珀。Lev/Vol 等条不淡出。",
-		L"· توهج: PC# / BNK / Map تبقى مخططة أثناء العزف. تغيير الآلة يُamber الخلية. الأشرطة لا تتلاشى.",
-		L"· Подсветка: PC# / BNK / Map остаются полосатыми, пока звучат. Смена тембра — янтарь. Полоски не затухают.",
-		L"· Leuchten: PC# / BNK / Map bleiben gestreift beim Klingen. Klangwechsel faerbt die Instrumentzelle amber. Balken blenden nicht aus.",
-		L"· Brilho: PC# / BNK / Map mantem a faixa ao soar. Troca de timbre = ambar. As barras nao esmaecem.",
-		L"· Gloed: PC# / BNK / Map blijven gestreept tijdens klank. Klankwissel maakt het instrumentvak amber. Balken faden niet.",
-		L"· Swiatlo: PC# / BNK / Map zostaja w pasach gdy graja. Zmiana barwy = bursztyn. Paski nie wygasaja.",
-		L"· Pariltı: PC# / BNK / Map seslenirken seritte kalir. Timbir degisince enstruman hucresi kehribar. Cubuklar solmaz."));
+		L"・変化の光 …… A01–B16 は発音中だけ緑に点き、離すと消えます。PC# / BNK / Map は行の交互色のままです。音色が変わるとインスト欄が琥珀に点きます。Lev/Vol などのバーはフェードしません。",
+		L"· Change glow: A01–B16 light green while sounding, then fade. PC# / BNK / Map keep the row stripe. An instrument change ambers that cell. Meter bars do not fade.",
+		L"· Lueur : A01–B16 vert pendant le son, puis fondu. PC# / BNK / Map gardent le zebrage. Changement de timbre = ambre. Les barres ne fondent pas.",
+		L"· Bagliore: A01–B16 verde mentre suona, poi sfuma. PC# / BNK / Map restano a strisce. Cambio timbro = ambra. Le barre non sfumano.",
+		L"· Brillo: A01–B16 verde al sonar, luego se apaga. PC# / BNK / Map siguen la raya. Cambio de timbre = ambar. Las barras no se desvanecen.",
+		L"· 변화 빛: A01–B16은 발음 중 초록으로 켜졌다가 꺼집니다. PC# / BNK / Map는 교차색 그대로. 음색이 바뀌면 인스트 칸이 호박색. Lev/Vol 등 바는 페이드하지 않습니다.",
+		L"· 变化光：A01–B16 发音时亮绿，松开后淡出。PC# / BNK / Map 保持行条纹。音色变化时乐器栏呈琥珀。Lev/Vol 等条不淡出。",
+		L"· توهج: A01–B16 أخضر أثناء العزف ثم يخفت. PC# / BNK / Map تبقى مخططة. تغيير الآلة يُamber الخلية. الأشرطة لا تتلاشى.",
+		L"· Подсветка: A01–B16 зелёные, пока звучат, потом гаснут. PC# / BNK / Map остаются полосатыми. Смена тембра — янтарь. Полоски не затухают.",
+		L"· Leuchten: A01–B16 gruen beim Klingen, dann aus. PC# / BNK / Map bleiben gestreift. Klangwechsel faerbt die Instrumentzelle amber. Balken blenden nicht aus.",
+		L"· Brilho: A01–B16 verde ao soar, depois some. PC# / BNK / Map mantem a faixa. Troca de timbre = ambar. As barras nao esmaecem.",
+		L"· Gloed: A01–B16 groen tijdens klank, daarna uit. PC# / BNK / Map blijven gestreept. Klankwissel maakt het instrumentvak amber. Balken faden niet.",
+		L"· Swiatlo: A01–B16 zielone gdy graja, potem gasna. PC# / BNK / Map zostaja w pasach. Zmiana barwy = bursztyn. Paski nie wygasaja.",
+		L"· Pariltı: A01–B16 seslenirken yesil, sonra solar. PC# / BNK / Map seritte kalir. Timbir degisince enstruman hucresi kehribar. Cubuklar solmaz."));
 	y += lh;
 	body(L, y, LL14(
 		L"・先頭のノートが乗るまでは SysEx/CC は遅れません（頭のダンプを表示遅延に引きずらない）。一度ノートが乗ったら、SysEx/CC も聞こえる位置に合わせて遅らせます。追いつき中は同じアドレスの SysEx / 同じ CC は最後の値だけ適用します。",
@@ -1187,20 +1203,20 @@ void CMmHelpDlg::OnPaint()
 		L"· Nota gorene kadar SysEx/CC gecikmez. Ilk nota geldikten sonra duyulan konuma gore gecikir. Yetisirken her adresin son SysEx'i ve her CC turunun son degeri uygulanir."));
 	y += lh;
 	body(L, y, LL14(
-		L"・描画は 16ms ごとに「絵が変わった行」だけです。バーは1ピクセル動いたときだけ、ミニ鍵盤は押している音が変わったときだけ塗り直すので、32パートが同時に鳴っても全面を描き直しません。",
-		L"· Every 16ms only rows whose picture changed are repainted: a bar when it moves by a pixel, the mini keyboard only when the held notes change. Even with all 32 parts sounding, the table is not fully repainted.",
-		L"· Toutes les 16 ms, seules les lignes dont l'image change sont repeintes : une barre quand elle bouge d'un pixel, le mini clavier quand les notes tenues changent.",
-		L"· Ogni 16 ms si ridisegnano solo le righe la cui immagine cambia: una barra quando si muove di un pixel, la mini tastiera quando cambiano le note tenute.",
-		L"· Cada 16 ms solo se repintan las filas cuya imagen cambia: una barra cuando se mueve un pixel, el mini teclado cuando cambian las notas pulsadas.",
-		L"· 16ms마다 그림이 바뀐 행만 다시 그립니다. 바는 1픽셀 움직였을 때, 미니 건반은 누르고 있는 음이 바뀌었을 때만 칠합니다.",
-		L"· 每 16ms 只重绘画面真正变化的行：柱条移动一个像素时、迷你键盘按住的音变化时。即使 32 个声部同时发声也不整屏重绘。",
-		L"· كل 16ms تُعاد الصفوف التي تغيّرت صورتها فقط: الشريط عند تحركه بكسل، ولوحة المفاتيح عند تغيّر النغمات المضغوطة.",
-		L"· Каждые 16 мс перерисовываются только строки, чья картинка изменилась: полоса — при сдвиге на пиксель, мини-клавиатура — при смене зажатых нот.",
-		L"· Alle 16 ms werden nur Zeilen neu gezeichnet, deren Bild sich aendert: ein Balken bei einem Pixel Bewegung, die Mini-Tastatur nur bei geaenderten Noten.",
-		L"· A cada 16 ms so se repintam as linhas cuja imagem muda: a barra quando move um pixel, o mini teclado quando as notas presas mudam.",
-		L"· Elke 16 ms worden alleen rijen hertekend waarvan het beeld verandert: een balk bij een pixel beweging, het minitoetsenbord bij gewijzigde noten.",
-		L"· Co 16 ms rysowane sa tylko wiersze, ktorych obraz sie zmienil: pasek gdy przesunie sie o piksel, mini klawiatura gdy zmienia sie trzymane nuty.",
-		L"· Her 16ms'de yalnizca goruntusu degisen satirlar cizilir: cubuk bir piksel oynadiginda, mini klavye basili notalar degistiginde."));
+		L"・描画は 16ms を下限に、「絵が変わった行」だけです。UI が暇なときはそれより細かく同期します（他が忙しいときは 16ms 程度）。バーは1ピクセル動いたときだけ、ミニ鍵盤は押している音が変わったときだけ塗り直すので、32パートが同時に鳴っても全面を描き直しません。",
+		L"· Paint floor is 16ms; only rows whose picture changed. When the UI is idle it syncs more often (about 16ms when something else is busy). A bar when it moves by a pixel, the mini keyboard only when the held notes change. Even with all 32 parts sounding, the table is not fully repainted.",
+		L"· Plancher 16 ms : seules les lignes changeantes. UI idle = plus souvent (~16 ms si le reste est occupe). Barre au pixel, mini clavier aux notes tenues.",
+		L"· Soglia 16 ms: solo le righe cambiate. UI idle = piu spesso (~16 ms se altro e occupato). Barra al pixel, mini tastiera alle note tenute.",
+		L"· Suelo 16 ms: solo filas que cambian. UI idle = mas a menudo (~16 ms si otro esta ocupado). Barra al pixel, mini teclado a las notas.",
+		L"· 그리기는 16ms가 하한이고 그림이 바뀐 행만입니다. UI가 한가하면 더 자주 맞춥니다(다른 작업이 바쁘면 약 16ms). 바는 1픽셀, 미니 건반은 누른 음이 바뀔 때만.",
+		L"· 绘制下限 16ms，只重绘变化的行。界面空闲时更密（别处忙时约 16ms）。柱条移动一像素、迷你键盘按住的音变化时才重绘。",
+		L"· الحد 16ms: الصفوف المتغيّرة فقط. عند فراغ الواجهة يتزامن أكثر (~16ms إن كان غيرها مشغولاً).",
+		L"· Пол 16 мс: только изменившиеся строки. На простое UI чаще (~16 мс, если занято другое).",
+		L"· Untergrenze 16 ms, nur geaenderte Zeilen. UI idle oefter (~16 ms wenn anderes beschaeftigt ist).",
+		L"· Piso 16 ms: so linhas mudadas. UI ociosa = mais vezes (~16 ms se outro estiver ocupado).",
+		L"· Vloer 16 ms: alleen gewijzigde rijen. UI idle vaker (~16 ms als iets anders bezig is).",
+		L"· Prog 16 ms: tylko zmienione wiersze. UI wolne = czesciej (~16 ms gdy inne jest zajete).",
+		L"· Taban 16ms: yalnizca degisen satirlar. UI bossa daha sik (baska mesgulse ~16ms)."));
 	y += lh;
 	body(L, y, LL14(
 		L"・Vol/Pan/Exp/Rev/Crs/Var はドラッグまたはホイールで送出（ダブルクリックで初期値）。PC# はホイールでプログラム変更。右端のミニ鍵盤はクリックで発音。曲の CC より約2.5秒優先します。",
@@ -1287,7 +1303,7 @@ CMidiMonitorDlg::CMidiMonitorDlg(CWnd* pParent)
 	, m_usecQn(500000), m_tsNum(4), m_tsDen(4), m_keySf(0), m_keyMin(0), m_transpose(0)
 	, m_sysMode(0), m_revType(4), m_choType(2), m_varType(0), m_revPacked(0), m_choPacked(0), m_varPacked(0), m_varConn(1), m_ins1(0), m_ins2(0)
 	, m_noteCount(0), m_masterVol(100)
-	, m_notesPeak(0), m_notesPeakHold(0), m_layW(0)
+	, m_notesPeak(0), m_notesPeakHoldUntil(0), m_layW(0)
 	, m_dragKind(0), m_dragPart(-1), m_playPart(-1), m_playNote(-1)
 	, m_viewMode(0), m_mapForce(0), m_gsMapKind(0), m_fileHasXg(0), m_fileHasGm(0), m_fileHasSd(0), m_gs32(0), m_mirrorToB(0)
 	, m_tsEvN(0), m_maxTick(0)
@@ -1295,7 +1311,8 @@ CMidiMonitorDlg::CMidiMonitorDlg(CWnd* pParent)
 	, m_frozen(false), m_alwaysOnTop(false), m_paintDisabled(false)
 	, m_rotDragging(false), m_rotDragYaw0(0), m_rotDragPitch0(0), m_soft3dTourUntil(0)
 	, m_hoverCol(-1), m_hoverPart(-1)
-	, m_layHeadH(0), m_layRowH(0), m_layFootH(0), m_persistAge(0), m_drumGlow(0), m_dispBpm(-1)
+	, m_layHeadH(0), m_layRowH(0), m_layFootH(0), m_lastPersistTick(0), m_mmTimerId(0), m_pulsePosted(0)
+	, m_visQpcFreq(0), m_lastVisQpc(0), m_drumGlow(0), m_dispBpm(-1)
 	, m_dirtyRows(0xFFFFFFFFu), m_rowLive(0), m_nameNeed(0), m_burstApply(0)
 	, m_dirtyHead(true), m_fullDraw(true), m_volDragging(false)
 {
@@ -1342,6 +1359,7 @@ BEGIN_MESSAGE_MAP(CMidiMonitorDlg, CCustomBlurDialogExBase)
 	ON_WM_PAINT()
 	ON_WM_ERASEBKGND()
 	ON_WM_TIMER()
+	ON_MESSAGE(WM_MM_PULSE, &CMidiMonitorDlg::OnMmPulse)
 	ON_WM_SIZE()
 	ON_WM_MOVE()
 	ON_WM_SHOWWINDOW()
@@ -1525,7 +1543,7 @@ void CMidiMonitorDlg::ResetParts()
 	}
 	m_noteCount = 0;
 	m_notesPeak = 0;
-	m_notesPeakHold = 0;
+	m_notesPeakHoldUntil = 0;
 	m_dirtyRows = 0xFFFFFFFFu;
 	m_dirtyHead = true;
 	m_fullDraw = true;
@@ -1686,6 +1704,7 @@ void CMidiMonitorDlg::ApplyShort(int port, DWORD msg, BOOL fromUser, BOOL liveEx
 			if (p.held < 1) p.held = 1;
 			const float lv = (float)d2 / 127.f;
 			if (lv > p.lev) p.lev = lv;
+			MmBumpFade(p.fadeCh, m_burstApply);
 			m_dirtyRows |= (1u << part);
 			if (p.isDrum) m_drumGlow = 255;
 		} else {
@@ -3095,7 +3114,7 @@ void CMidiMonitorDlg::DrawPartRow(CDC& dc, int i, int y, int rowH, int w, UINT d
 	
 	const Part& s = m_show[i];
 	const int bh = rowH - Scale(4, dpi);
-	int textLDirty = (forceKeys || p.heard != s.heard || p.isDrum != s.isDrum
+	int textLDirty = (forceKeys || p.heard != s.heard || p.isDrum != s.isDrum || (p.held > 0) != (s.held > 0)
 		|| p.pc != s.pc || p.bankMsb != s.bankMsb || p.bankLsb != s.bankLsb || p.mapId != s.mapId
 		|| wcscmp(p.name, s.name) != 0
 		|| MmGlowSig(p.fadeCh) != MmGlowSig(s.fadeCh)
@@ -3170,10 +3189,14 @@ void CMidiMonitorDlg::DrawPartRow(CDC& dc, int i, int y, int rowH, int w, UINT d
 	}
 
 	if (textLDirty) {
-		dc.SetTextColor(tx);
+		if (p.held > 0 && !unused)
+			dc.SetTextColor(drum ? RGB(255, 220, 180) : RGB(255, 255, 255));
+		else
+			dc.SetTextColor(tx);
 		wchar_t chs[8];
 		_snwprintf_s(chs, _TRUNCATE, L"%c%02d", (i < 16) ? L'A' : L'B', (i % 16) + 1);
 		dc.TextOut(Scale(4, dpi), y + 1, chs);
+		dc.SetTextColor(tx);
 		wchar_t pcb[48];
 		int isXg = 0, mapId = 0, bankMsb = 0;
 		MmResolveLookup(m_mapForce, m_sysMode, p.mapId, p.bankMsb, &isXg, &mapId, &bankMsb);
@@ -3390,27 +3413,55 @@ void CMidiMonitorDlg::DrawMonitor2D(CDC& dc, int w, int h, UINT dpi)
 
 void CMidiMonitorDlg::TickVisuals()
 {
+	int dtMs = 0;
+	LARGE_INTEGER now;
+	if (!m_visQpcFreq) {
+		LARGE_INTEGER f;
+		if (::QueryPerformanceFrequency(&f) && f.QuadPart > 0)
+			m_visQpcFreq = f.QuadPart;
+	}
+	if (m_visQpcFreq && ::QueryPerformanceCounter(&now)) {
+		if (m_lastVisQpc) {
+			const LONGLONG d = now.QuadPart - m_lastVisQpc;
+			dtMs = (int)(d * 1000 / m_visQpcFreq);
+			if (dtMs < 0) dtMs = 0;
+			if (dtMs > 64) dtMs = 64;
+		}
+		m_lastVisQpc = now.QuadPart;
+	} else {
+		dtMs = 16;
+	}
 	DWORD live = 0;
 	int drumHit = 0;
 	for (int i = 0; i < PART_MAX; ++i) {
 		Part& p = m_part[i];
-		if (p.held <= 0) {
-			p.lev *= 0.90f;
+		if (dtMs > 0 && p.held <= 0) {
+			int left = dtMs;
+			while (left >= 16) {
+				p.lev *= 0.90f;
+				left -= 16;
+			}
+			if (left > 0)
+				p.lev *= 1.f - 0.10f * (float)left / 16.f;
 			if (p.lev < 0.002f) p.lev = 0;
 		}
-		MmGlowTick(p.glowVol);
-		MmGlowTick(p.glowExp);
-		MmGlowTick(p.glowPan);
-		MmGlowTick(p.glowRev);
-		MmGlowTick(p.glowCrs);
-		MmGlowTick(p.glowVar);
-		MmGlowTick(p.fadeCh);
-		MmGlowTick(p.fadeInst);
-		MmGlowTick(p.fadeVib);
-		MmGlowTick(p.fadeFilt);
-		MmGlowTick(p.fadeEnv);
-		MmGlowTick(p.fadeEq);
-		MmGlowTick(p.fadeNrpn);
+		if (dtMs > 0) {
+			MmGlowTickMs(p.glowVol, dtMs);
+			MmGlowTickMs(p.glowExp, dtMs);
+			MmGlowTickMs(p.glowPan, dtMs);
+			MmGlowTickMs(p.glowRev, dtMs);
+			MmGlowTickMs(p.glowCrs, dtMs);
+			MmGlowTickMs(p.glowVar, dtMs);
+			MmGlowTickMs(p.fadeCh, dtMs);
+			MmGlowTickMs(p.fadeInst, dtMs);
+			MmGlowTickMs(p.fadeVib, dtMs);
+			MmGlowTickMs(p.fadeFilt, dtMs);
+			MmGlowTickMs(p.fadeEnv, dtMs);
+			MmGlowTickMs(p.fadeEq, dtMs);
+			MmGlowTickMs(p.fadeNrpn, dtMs);
+		}
+		if (p.held > 0 && p.fadeCh < 96)
+			p.fadeCh = 96;
 		const int busy = (p.held > 0 || p.lev > 0.002f
 			|| p.glowVol || p.glowExp || p.glowPan || p.glowRev || p.glowCrs || p.glowVar
 			|| p.fadeCh || p.fadeInst || p.fadeVib || p.fadeFilt || p.fadeEnv || p.fadeEq || p.fadeNrpn);
@@ -3418,11 +3469,19 @@ void CMidiMonitorDlg::TickVisuals()
 		if (p.isDrum && p.held > 0)
 			drumHit = 1;
 	}
-	TickNotePeak();
+	TickNotePeak(dtMs);
 	if (drumHit) m_drumGlow = 255;
-	else if (m_drumGlow) {
-		m_drumGlow = m_drumGlow * 5 / 6;
-		if (m_drumGlow < 8) m_drumGlow = 0;
+	else if (m_drumGlow && dtMs > 0) {
+		int left = dtMs;
+		while (left >= 16) {
+			m_drumGlow = m_drumGlow * 5 / 6;
+			left -= 16;
+			if (m_drumGlow < 8) { m_drumGlow = 0; break; }
+		}
+		if (m_drumGlow && left > 0) {
+			m_drumGlow = m_drumGlow * (96 - left) / 96;
+			if (m_drumGlow < 8) m_drumGlow = 0;
+		}
 	}
 	m_rowLive = live;
 }
@@ -3475,26 +3534,28 @@ void CMidiMonitorDlg::UpdateNoteMeter()
 	}
 	if ((float)m_noteCount > m_notesPeak) {
 		m_notesPeak = (float)m_noteCount;
-		m_notesPeakHold = 45;
+		m_notesPeakHoldUntil = GetTickCount() + 720;
 		m_dirtyHead = true;
 	}
 }
 
-void CMidiMonitorDlg::TickNotePeak()
+void CMidiMonitorDlg::TickNotePeak(int dtMs)
 {
 	UpdateNoteMeter();
 	if ((float)m_noteCount > m_notesPeak) {
 		m_notesPeak = (float)m_noteCount;
-		m_notesPeakHold = 45;
+		m_notesPeakHoldUntil = GetTickCount() + 720;
 		m_dirtyHead = true;
 		return;
 	}
-	if (m_notesPeakHold > 0) {
-		m_notesPeakHold--;
-		return;
+	if (m_notesPeakHoldUntil) {
+		if ((int)(GetTickCount() - m_notesPeakHoldUntil) < 0)
+			return;
+		m_notesPeakHoldUntil = 0;
 	}
+	if (dtMs < 1) return;
 	if (m_notesPeak > (float)m_noteCount + 0.02f) {
-		m_notesPeak -= 0.16f;
+		m_notesPeak -= 0.16f * (float)dtMs / 16.f;
 		if (m_notesPeak < (float)m_noteCount)
 			m_notesPeak = (float)m_noteCount;
 		m_dirtyHead = true;
@@ -4002,6 +4063,7 @@ BOOL CMidiMonitorDlg::OnInitDialog()
 	CCC_CaptionLayout(m_hWnd);
 	LayoutHelpBtn();
 	SetTimer(1, 16, nullptr);
+	StartMmPulseTimer();
 	LoadCurrentMidi();
 	return TRUE;
 }
@@ -4136,28 +4198,67 @@ BOOL CMidiMonitorDlg::OnEraseBkgnd(CDC* pDC)
 
 void CMidiMonitorDlg::OnTimer(UINT_PTR nIDEvent)
 {
-	if (nIDEvent == 1) {
-		if (++m_persistAge >= 32) {
-			PersistPos();
-			m_persistAge = 0;
-		}
-		if (!IsIconic() && IsWindowVisible() && !m_paintDisabled) {
-			if (m_playNote >= 0 && ::GetCapture() != m_hWnd)
-				ReleasePlayNote();
-			if (!m_frozen) {
-				SyncFromPlayback();
-				DrainLiveTap();
-				MarkHostOccupiedParts();
-				TickVisuals();
-			} else {
-				DrainLiveTap();
-			}
-			if (!m_volDragging)
-				PollAppVolume();
-			InvalidateDirty();
-		}
-	}
+	if (nIDEvent == 1)
+		PulseRefresh();
 	CCustomBlurDialogExBase::OnTimer(nIDEvent);
+}
+
+LRESULT CMidiMonitorDlg::OnMmPulse(WPARAM, LPARAM)
+{
+	InterlockedExchange(&m_pulsePosted, 0);
+	PulseRefresh();
+	return 0;
+}
+
+void CALLBACK CMidiMonitorDlg::MmPulseTimerProc(UINT /*uTimerID*/, UINT /*uMsg*/, DWORD_PTR dwUser, DWORD_PTR, DWORD_PTR)
+{
+	CMidiMonitorDlg* p = (CMidiMonitorDlg*)dwUser;
+	if (!p || !p->m_hWnd) return;
+	if (InterlockedCompareExchange(&p->m_pulsePosted, 1, 0) != 0)
+		return;
+	if (!::PostMessage(p->m_hWnd, WM_MM_PULSE, 0, 0))
+		InterlockedExchange(&p->m_pulsePosted, 0);
+}
+
+void CMidiMonitorDlg::PulseRefresh()
+{
+	if (!::IsWindow(m_hWnd) || m_paintDisabled) return;
+	if (IsIconic() || !IsWindowVisible()) return;
+	if (m_playNote >= 0 && ::GetCapture() != m_hWnd)
+		ReleasePlayNote();
+	if (!m_frozen) {
+		SyncFromPlayback();
+		DrainLiveTap();
+		MarkHostOccupiedParts();
+		TickVisuals();
+	} else {
+		DrainLiveTap();
+	}
+	if (!m_volDragging)
+		PollAppVolume();
+	const DWORD now = GetTickCount();
+	if (!m_lastPersistTick || (int)(now - m_lastPersistTick) >= 500) {
+		PersistPos();
+		m_lastPersistTick = now;
+	}
+	InvalidateDirty();
+}
+
+void CMidiMonitorDlg::StartMmPulseTimer()
+{
+	if (m_mmTimerId || m_paintDisabled || m_frozen) return;
+	if (!::IsWindow(m_hWnd) || !IsWindowVisible() || IsIconic()) return;
+	m_pulsePosted = 0;
+	m_mmTimerId = ::timeSetEvent(1, 1, CMidiMonitorDlg::MmPulseTimerProc, (DWORD_PTR)this,
+		TIME_PERIODIC | TIME_KILL_SYNCHRONOUS);
+}
+
+void CMidiMonitorDlg::StopMmPulseTimer()
+{
+	if (!m_mmTimerId) return;
+	::timeKillEvent(m_mmTimerId);
+	m_mmTimerId = 0;
+	m_pulsePosted = 0;
 }
 
 void CMidiMonitorDlg::OnSize(UINT nType, int cx, int cy)
@@ -4171,6 +4272,9 @@ void CMidiMonitorDlg::OnSize(UINT nType, int cx, int cy)
 	if (nType != SIZE_MINIMIZED) {
 		CCC_CaptionLayout(m_hWnd);
 		LayoutHelpBtn();
+		StartMmPulseTimer();
+	} else {
+		StopMmPulseTimer();
 	}
 	Invalidate(FALSE);
 }
@@ -4188,7 +4292,10 @@ void CMidiMonitorDlg::OnShowWindow(BOOL bShow, UINT nStatus)
 		SnapshotLiveNotes();
 		MarkHostOccupiedParts();
 		PollAppVolume();
+		StartMmPulseTimer();
 		Invalidate(FALSE);
+	} else {
+		StopMmPulseTimer();
 	}
 }
 
@@ -4204,6 +4311,7 @@ void CMidiMonitorDlg::OnClose()
 
 void CMidiMonitorDlg::OnDestroy()
 {
+	StopMmPulseTimer();
 	KillTimer(1);
 	ReleasePlayNote();
 	PersistPos();
@@ -4214,6 +4322,7 @@ void CMidiMonitorDlg::OnDestroy()
 void CMidiMonitorDlg::DetachForDestroy()
 {
 	m_paintDisabled = true;
+	StopMmPulseTimer();
 	KillTimer(1);
 	PersistPos();
 	ReleasePaintBuffers();
@@ -4233,12 +4342,7 @@ void CMidiMonitorDlg::ResetPlaybackState()
 
 void CMidiMonitorDlg::PumpSyncNow()
 {
-	if (!::IsWindow(m_hWnd) || m_paintDisabled) return;
-	if (!m_frozen) {
-		SyncFromPlayback();
-		PollAppVolume();
-	}
-	InvalidateDirty();
+	PulseRefresh();
 }
 
 void CMidiMonitorDlg::PersistPos()
@@ -4428,6 +4532,10 @@ void CMidiMonitorDlg::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
 		SyncSoft3DFromSave(); Invalidate(FALSE);
 	} else if (cmd == IDM_MM_FREEZE) {
 		m_frozen = !m_frozen;
+		if (m_frozen)
+			StopMmPulseTimer();
+		else
+			StartMmPulseTimer();
 	} else if (cmd == IDM_MM_TOPMOST) {
 		m_alwaysOnTop = !m_alwaysOnTop;
 		savedata.midimontopmost = m_alwaysOnTop ? 1 : 0;

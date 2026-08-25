@@ -24241,6 +24241,12 @@ void COggDlg::timerp()
 			&& m_AnalyzerDlg->IsWindowVisible() && !m_AnalyzerDlg->IsIconic())
 			m_AnalyzerDlg->UpdateWindow();
 	}
+	if (plf == 1 && m_MidiMonitorDlg && ::IsWindow(m_MidiMonitorDlg->GetSafeHwnd()) && Ms2DrawDue(ms2)) {
+		m_MidiMonitorDlg->PumpSyncNow();
+		if (::IsWindow(m_MidiMonitorDlg->GetSafeHwnd())
+			&& m_MidiMonitorDlg->IsWindowVisible() && !m_MidiMonitorDlg->IsIconic())
+			m_MidiMonitorDlg->UpdateWindow();
+	}
 
 	// スペアナは不透明で先に描く（ピーク／現在を保持）。バナー文字は後から SRCINVERT（XOR）。
 	// コンテキストメニュー Track 中もスペアナ／EQコード供給は止めない（見た目とコード更新を維持）。

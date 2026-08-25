@@ -50,7 +50,7 @@ END
 //
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 0,9,1,857
+ FILEVERSION 0,9,1,858
  PRODUCTVERSION 1,0,0,1
  FILEFLAGSMASK 0x3fL
 #ifdef _DEBUG
@@ -68,10 +68,10 @@ BEGIN
         BEGIN
             VALUE "Comments", "Falcom BGM Player & Media Player"
             VALUE "CompanyName", "Pre Prayer Power Soft"
-            VALUE "FileDescription", "Falcom BGM Player & Media Player Ver 0.9a Rel.2026.08.25"
-            VALUE "FileVersion", "0.9.1.857"
+            VALUE "FileDescription", "Falcom BGM Player & Media Player Ver 0.9a Rel.2026.08.26"
+            VALUE "FileVersion", "0.9.1.858"
             VALUE "InternalName", "KpiHost64"
-            VALUE "LegalCopyright", "Copyright (C) 2026.08.25"
+            VALUE "LegalCopyright", "Copyright (C) 2026.08.26"
             VALUE "LegalTrademarks", "Pre Prayer Power Soft"
             VALUE "OriginalFilename", "KpiHost64.exe"
             VALUE "ProductName", "Falcom BGM Player & Media Player"
