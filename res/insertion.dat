@@ -1,0 +1,591 @@
+﻿# insertion.dat — GS/XG insertion (EFX) names and parameter maps
+# T fam msb lsb Name
+#   G = SC-88Pro 16-bit type (40 03 00/01)
+#   8 = SC-88 1-byte type (40 03 00 only, lsb unused)
+#   X = XG insertion/variation type (03 0n 00/01 or 02 01 40/41)
+# P n Name kind [extra]
+#   n = 1-based PARAMETER n
+#     GS address 40 03 (02+n)   XG address AL (01+n)
+#   kind:
+#     u  0-127, hide if 0; extra 127 = hide if 127 (Level)
+#     g  dB (value-64), hide if 0 dB
+#     q  Q 0.5/1/2/4/9, hide if 0
+#     p  pan L63..R63, hide if center
+#     b  Off/On, hide if Off
+#     e  enum (comma list), hide if index 0
+#     f  mid-freq table, hide if 0
+
+# ---- SC-88 1-byte fallback (pre-Pro) ----
+T 8 00 00 Thru
+T 8 01 00 Stereo EQ
+T 8 02 00 Overdrive
+T 8 03 00 Distortion
+T 8 04 00 Phaser
+T 8 05 00 Spectrum
+T 8 06 00 Enhancer
+T 8 07 00 Auto Wah
+T 8 08 00 Rotary
+T 8 09 00 Compressor
+T 8 0A 00 Limiter
+T 8 0B 00 Hexa Chorus
+T 8 0C 00 Trem Chorus
+T 8 0D 00 Space-D
+T 8 0E 00 St. Chorus
+T 8 0F 00 St. Flanger
+T 8 10 00 Step Flanger
+T 8 11 00 St. Delay
+T 8 12 00 Mod Delay
+T 8 13 00 3D Delay
+T 8 14 00 4-Tap Delay
+T 8 15 00 Time Delay
+T 8 16 00 Reverb
+T 8 17 00 Gate Reverb
+T 8 18 00 3D Reverb
+T 8 19 00 2V Pitch
+T 8 1A 00 Fb Pitch
+T 8 1B 00 Reverb+Delay
+T 8 1C 00 Chorus+Delay
+T 8 1D 00 Amp Sim
+
+# ---- SC-88Pro 16-bit types ----
+T G 00 00 Thru
+
+T G 01 00 Stereo-EQ
+P 1 LowFreq e 200Hz,400Hz
+P 2 LowGain g
+P 3 HiFreq e 4kHz,8kHz
+P 4 HiGain g
+P 5 M1Freq f
+P 6 M1Q q
+P 7 M1Gain g
+P 8 M2Freq f
+P 9 M2Q q
+P 10 M2Gain g
+P 20 Level u 127
+
+T G 01 01 Spectrum
+P 1 Band1 g
+P 2 Band2 g
+P 3 Band3 g
+P 4 Band4 g
+P 5 Band5 g
+P 6 Band6 g
+P 7 Band7 g
+P 8 Band8 g
+P 9 Width q
+P 19 Pan p
+P 20 Level u 127
+
+T G 01 02 Enhancer
+P 1 Sens u
+P 2 Mix u
+P 17 LowGain g
+P 18 HiGain g
+P 20 Level u 127
+
+T G 01 03 Humanizer
+P 1 Drive u
+P 2 DriveSw b
+P 3 Vowel e a,i,u,e,o
+P 4 Accel u
+P 17 LowGain g
+P 18 HiGain g
+P 19 Pan p
+P 20 Level u 127
+
+T G 01 10 Overdrive
+P 1 Drive u
+P 2 Amp e Small,BltIn,2-Stk,3-Stk
+P 3 AmpSw b
+P 17 LowGain g
+P 18 HiGain g
+P 19 Pan p
+P 20 Level u 127
+
+T G 01 11 Distortion
+P 1 Drive u
+P 2 Amp e Small,BltIn,2-Stk,3-Stk
+P 3 AmpSw b
+P 17 LowGain g
+P 18 HiGain g
+P 19 Pan p
+P 20 Level u 127
+
+T G 01 20 Phaser
+P 1 Manual f
+P 2 Rate u
+P 3 Depth u
+P 4 Reso u
+P 5 Mix u
+P 17 LowGain g
+P 18 HiGain g
+P 20 Level u 127
+
+T G 01 21 Auto-Wah
+P 1 FilType e LPF,BPF
+P 2 Sens u
+P 3 Manual u
+P 4 Peak u
+P 5 Rate u
+P 6 Depth u
+P 17 LowGain g
+P 18 HiGain g
+P 19 Pan p
+P 20 Level u 127
+
+T G 01 22 Rotary
+P 1 LowSlow u
+P 2 LowFast u
+P 3 HiSlow u
+P 4 HiFast u
+P 5 Speed e Slow,Fast
+P 17 LowGain g
+P 18 HiGain g
+P 20 Level u 127
+
+T G 01 23 Stereo Flanger
+P 1 PreDly u
+P 2 Rate u
+P 3 Depth u
+P 4 Fbk u
+P 17 LowGain g
+P 18 HiGain g
+P 20 Level u 127
+
+T G 01 24 Step Flanger
+P 1 Rate u
+P 2 Depth u
+P 3 Fbk u
+P 4 StepRate u
+P 20 Level u 127
+
+T G 01 25 Tremolo
+P 1 Rate u
+P 2 Depth u
+P 20 Level u 127
+
+T G 01 26 Auto Pan
+P 1 Rate u
+P 2 Depth u
+P 20 Level u 127
+
+T G 01 30 Compressor
+P 1 Attack u
+P 2 Sustain u
+P 17 LowGain g
+P 18 HiGain g
+P 19 Pan p
+P 20 Level u 127
+
+T G 01 31 Limiter
+P 1 Threshold u
+P 2 Release u
+P 19 Pan p
+P 20 Level u 127
+
+T G 01 40 Hexa Chorus
+P 1 PreDly u
+P 2 Rate u
+P 3 Depth u
+P 4 Dev u
+P 20 Level u 127
+
+T G 01 41 Tremolo-Chorus
+P 1 PreDly u
+P 2 ChoRate u
+P 3 ChoDpt u
+P 4 TrmRate u
+P 5 TrmDpt u
+P 20 Level u 127
+
+T G 01 42 Stereo-Chorus
+P 1 PreDly u
+P 2 Rate u
+P 3 Depth u
+P 20 Level u 127
+
+T G 01 43 Space D
+P 1 PreDly u
+P 20 Level u 127
+
+T G 01 44 3D Chorus
+P 1 PreDly u
+P 2 Rate u
+P 3 Depth u
+P 20 Level u 127
+
+T G 01 50 Stereo-Delay
+P 1 DlyL u
+P 2 DlyR u
+P 3 Fbk u
+P 20 Level u 127
+
+T G 01 51 Modulation-Delay
+P 1 Dly u
+P 2 Fbk u
+P 3 Rate u
+P 4 Depth u
+P 20 Level u 127
+
+T G 01 52 3 Tap Delay
+P 1 Dly1 u
+P 2 Dly2 u
+P 3 Dly3 u
+P 4 Fbk u
+P 20 Level u 127
+
+T G 01 53 4 Tap-Delay
+P 1 Dly1 u
+P 2 Dly2 u
+P 3 Dly3 u
+P 4 Dly4 u
+P 5 Fbk u
+P 20 Level u 127
+
+T G 01 54 Time Control Delay
+P 1 Dly u
+P 2 Fbk u
+P 20 Level u 127
+
+T G 01 55 Reverb
+P 1 Type e Room1,Room2,Stage1,Stage2,Hall1,Hall2
+P 2 Time u
+P 20 Level u 127
+
+T G 01 56 Gate-Reverb
+P 1 Type e Gate,Reverse
+P 2 Time u
+P 20 Level u 127
+
+T G 01 57 3D Delay
+P 1 Dly u
+P 2 Fbk u
+P 20 Level u 127
+
+T G 01 60 2-Voice Pitch Shifter
+P 1 Coarse1 g
+P 2 Fine1 g
+P 3 Coarse2 g
+P 16 Balance u
+P 20 Level u 127
+
+T G 01 61 FBK Pitch Shifter
+P 1 Coarse g
+P 2 Fine g
+P 3 Fbk u
+P 16 Balance u
+P 20 Level u 127
+
+T G 01 70 3D Auto
+P 1 Rate u
+P 2 Depth u
+P 20 Level u 127
+
+T G 01 71 3D Manual
+P 1 Azimuth g
+P 20 Level u 127
+
+T G 01 72 Lo-Fi 1
+P 1 Bit u
+P 2 Sample u
+P 20 Level u 127
+
+T G 01 73 Lo-Fi 2
+P 1 Bit u
+P 2 Sample u
+P 20 Level u 127
+
+T G 02 00 Overdrive->Chorus
+P 1 Drive u
+P 2 ChoRate u
+P 3 ChoDpt u
+P 20 Level u 127
+
+T G 02 01 Overdrive->Flanger
+P 1 Drive u
+P 2 FlgRate u
+P 3 FlgDpt u
+P 20 Level u 127
+
+T G 02 02 Overdrive->Delay
+P 1 Drive u
+P 2 Dly u
+P 3 Fbk u
+P 20 Level u 127
+
+T G 02 03 Distortion->Chorus
+P 1 Drive u
+P 2 ChoRate u
+P 3 ChoDpt u
+P 20 Level u 127
+
+T G 02 04 Distortion->Flanger
+P 1 Drive u
+P 2 FlgRate u
+P 3 FlgDpt u
+P 20 Level u 127
+
+T G 02 05 Distortion->Delay
+P 1 Drive u
+P 2 Dly u
+P 3 Fbk u
+P 20 Level u 127
+
+T G 02 06 Enhancer->Chorus
+P 1 Sens u
+P 2 Mix u
+P 20 Level u 127
+
+T G 02 07 Enhancer->Flanger
+P 1 Sens u
+P 2 Mix u
+P 20 Level u 127
+
+T G 02 08 Enhancer->Delay
+P 1 Sens u
+P 2 Dly u
+P 20 Level u 127
+
+T G 02 09 Chorus->Delay
+P 1 ChoRate u
+P 2 ChoDpt u
+P 3 Dly u
+P 20 Level u 127
+
+T G 02 0A Flanger->Delay
+P 1 FlgRate u
+P 2 FlgDpt u
+P 3 Dly u
+P 20 Level u 127
+
+T G 02 0B Chorus->Flanger
+P 1 ChoRate u
+P 2 FlgRate u
+P 20 Level u 127
+
+T G 03 00 Rotary Multi
+P 1 Drive u
+P 5 Speed e Slow,Fast
+P 20 Level u 127
+
+T G 04 00 GTR Multi 1
+P 1 Drive u
+P 17 LowGain g
+P 18 HiGain g
+P 20 Level u 127
+
+T G 04 01 GTR Multi 2
+P 1 Drive u
+P 17 LowGain g
+P 18 HiGain g
+P 20 Level u 127
+
+T G 04 02 GTR Multi 3
+P 1 Drive u
+P 17 LowGain g
+P 18 HiGain g
+P 20 Level u 127
+
+T G 04 03 Clean Gt Multi 1
+P 17 LowGain g
+P 18 HiGain g
+P 20 Level u 127
+
+T G 04 04 Clean Gt Multi 2
+P 17 LowGain g
+P 18 HiGain g
+P 20 Level u 127
+
+T G 04 05 Bass Multi
+P 1 Drive u
+P 17 LowGain g
+P 18 HiGain g
+P 20 Level u 127
+
+T G 04 06 Rhodes Multi
+P 1 Drive u
+P 20 Level u 127
+
+T G 05 00 Keyboard Multi
+P 1 Drive u
+P 20 Level u 127
+
+T G 11 00 Chorus/Delay
+P 1 ChoRate u
+P 2 Dly u
+P 20 Level u 127
+
+T G 11 01 Flanger/Delay
+P 1 FlgRate u
+P 2 Dly u
+P 20 Level u 127
+
+T G 11 02 Chorus/Flanger
+P 1 ChoRate u
+P 2 FlgRate u
+P 20 Level u 127
+
+T G 11 03 OD1/OD2
+P 1 Drive1 u
+P 2 Drive2 u
+P 20 Level u 127
+
+T G 11 04 OD/Rotary
+P 1 Drive u
+P 5 Speed e Slow,Fast
+P 20 Level u 127
+
+T G 11 05 OD/Phaser
+P 1 Drive u
+P 2 Depth u
+P 20 Level u 127
+
+T G 11 06 OD/Auto Wah
+P 1 Drive u
+P 2 Sens u
+P 20 Level u 127
+
+T G 11 07 PH/Rotary
+P 1 Depth u
+P 5 Speed e Slow,Fast
+P 20 Level u 127
+
+T G 11 08 PH/Auto Wah
+P 1 Depth u
+P 2 Sens u
+P 20 Level u 127
+
+# ---- XG insertion / variation types ----
+T X 00 00 Thru
+T X 01 00 Hall 1
+T X 01 01 Hall 2
+T X 02 00 Room 1
+T X 02 01 Room 2
+T X 02 02 Room 3
+T X 03 00 Stage 1
+T X 03 01 Stage 2
+T X 04 00 Plate
+T X 05 00 Delay L,C,R
+T X 06 00 Delay L,R
+T X 07 00 Echo
+T X 08 00 Cross Delay
+T X 09 00 ER 1
+T X 09 01 ER 2
+T X 0A 00 Gate Reverb
+T X 0B 00 Reverse Gate
+T X 10 00 White Room
+T X 11 00 Tunnel
+T X 12 00 Canyon
+T X 13 00 Basement
+T X 14 00 Karaoke 1
+T X 14 01 Karaoke 2
+T X 14 02 Karaoke 3
+T X 41 00 Chorus 1
+T X 41 01 Chorus 2
+T X 41 02 Chorus 3
+T X 41 03 Chorus 4
+T X 42 00 Celeste 1
+T X 42 01 Celeste 2
+T X 42 02 Celeste 3
+T X 42 03 Celeste 4
+T X 43 00 Flanger 1
+T X 43 01 Flanger 2
+T X 43 02 Flanger 3
+T X 44 00 Symphonic
+T X 45 00 Rotary Speaker
+T X 46 00 Tremolo
+T X 47 00 Auto Pan
+T X 48 00 Phaser 1
+T X 48 01 Phaser 2
+T X 49 00 Distortion
+P 1 Drive u
+P 2 EQLow g
+P 3 LPF u
+P 4 Output u 127
+P 5 DryWet u
+T X 49 01 Comp+Distortion
+P 1 Drive u
+P 4 Output u 127
+T X 4A 00 Over Drive
+P 1 Drive u
+P 2 EQLow g
+P 3 LPF u
+P 4 Output u 127
+P 5 DryWet u
+T X 4B 00 Amp Simulator
+P 1 Drive u
+P 2 Amp e Off,Stack,Combo,Tube
+P 4 Output u 127
+P 5 DryWet u
+T X 4C 00 3-Band EQ
+P 1 LowGain g
+P 2 MidFreq f
+P 3 MidGain g
+P 4 MidQ q
+P 5 HiGain g
+T X 4D 00 2-Band EQ
+P 1 LowGain g
+P 2 HiGain g
+T X 4E 00 Auto Wah
+P 1 LFOFreq u
+P 2 LFODpt u
+P 3 Cutoff u
+P 4 Reso u
+T X 4E 01 Auto Wah+Dist
+P 1 Drive u
+P 2 Cutoff u
+T X 4E 02 Auto Wah+Od
+P 1 Drive u
+P 2 Cutoff u
+T X 50 00 Pitch Change
+P 1 Pitch g
+P 2 Fine g
+T X 50 01 Pitch Change 2
+P 1 Pitch g
+T X 51 00 Aural Exciter
+P 1 HPF u
+P 2 Drive u
+P 3 Mix u
+T X 52 00 Touch Wah 1
+P 1 Sens u
+P 2 Cutoff u
+P 3 Reso u
+T X 52 01 Touch Wah+Dist
+P 1 Drive u
+P 2 Sens u
+T X 52 02 Touch Wah+Od
+P 1 Drive u
+P 2 Sens u
+T X 52 03 Touch Wah 2
+P 1 Sens u
+T X 53 00 Compressor
+P 1 Attack u
+P 2 Release u
+P 3 Threshold u
+P 4 Ratio u
+T X 54 00 Noise Gate
+P 1 Attack u
+P 2 Release u
+P 3 Threshold u
+T X 55 00 Voice Cancel
+T X 56 00 2-Way Rotary
+P 1 Speed e Slow,Fast
+P 2 Drive u
+T X 57 00 Ensemble Detune
+T X 58 00 Ambience
+T X 5D 00 Talking Mod
+T X 5E 00 Lo-Fi
+T X 5F 00 Dist+Delay
+P 1 Drive u
+P 2 Dly u
+T X 5F 01 Overdrive+Delay
+P 1 Drive u
+P 2 Dly u
+T X 60 00 Comp+Dist+Delay
+P 1 Drive u
+T X 60 01 Comp+Od+Delay
+P 1 Drive u
+T X 61 00 Wah+Dist+Delay
+P 1 Drive u
+T X 61 01 Wah+Od+Delay
+P 1 Drive u
