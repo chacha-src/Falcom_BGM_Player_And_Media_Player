@@ -32,7 +32,6 @@ public:
 	};
 
 	void PumpSyncNow();
-	void PulseRefresh();
 	void ResetPlaybackState();
 	void DetachForDestroy();
 	void PaletteApplySoft3D();
@@ -51,7 +50,6 @@ protected:
 	afx_msg void OnPaint();
 	afx_msg BOOL OnEraseBkgnd(CDC* pDC);
 	afx_msg void OnTimer(UINT_PTR nIDEvent);
-	afx_msg LRESULT OnMmPulse(WPARAM wParam, LPARAM lParam);
 	afx_msg void OnSize(UINT nType, int cx, int cy);
 	afx_msg void OnMove(int x, int y);
 	afx_msg void OnShowWindow(BOOL bShow, UINT nStatus);
@@ -143,10 +141,7 @@ private:
 	void DrawPartRow(CDC& dc, int i, int y, int rowH, int w, UINT dpi, int forceKeys);
 	void BuildInsLine(int slot, wchar_t* out, int outN);
 	void TickVisuals();
-	void TickNotePeak(int dtMs);
-	void StartMmPulseTimer();
-	void StopMmPulseTimer();
-	static void CALLBACK MmPulseTimerProc(UINT uTimerID, UINT uMsg, DWORD_PTR dwUser, DWORD_PTR dw1, DWORD_PTR dw2);
+	void TickNotePeak();
 	void UpdateNoteMeter();
 	void PollAppVolume();
 	void InvalidateDirty();
@@ -258,7 +253,7 @@ private:
 	int m_noteCount;
 	int m_masterVol;
 	float m_notesPeak;
-	DWORD m_notesPeakHoldUntil;
+	int m_notesPeakHold;
 	int m_layW;
 	int m_dragKind;
 	int m_dragPart;
@@ -282,11 +277,7 @@ private:
 	int m_layHeadH;
 	int m_layRowH;
 	int m_layFootH;
-	DWORD m_lastPersistTick;
-	UINT m_mmTimerId;
-	volatile LONG m_pulsePosted;
-	LONGLONG m_visQpcFreq;
-	LONGLONG m_lastVisQpc;
+	int m_persistAge;
 	int m_drumGlow;
 	int m_dispBpm;
 	DWORD m_dirtyRows;
