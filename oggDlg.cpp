@@ -24283,6 +24283,7 @@ void COggDlg::timerp()
 			&& m_AnalyzerDlg->IsWindowVisible() && !m_AnalyzerDlg->IsIconic())
 			m_AnalyzerDlg->UpdateWindow();
 	}
+	// MIDI モニタ: 同期は毎ティック。UpdateWindow だけ Ms2DrawDue（鍵盤が間引きで止まるのを防ぐ）
 	if (plf == 1 && m_MidiMonitorDlg && ::IsWindow(m_MidiMonitorDlg->GetSafeHwnd())) {
 		m_MidiMonitorDlg->PumpSyncNow();
 		if (::IsWindow(m_MidiMonitorDlg->GetSafeHwnd())

@@ -18,12 +18,22 @@ extern COggDlg* og;
 /* クロスフェードで B(スロット1)が現行になった後も、UI から正しいエンジンを見る */
 void MmBindVstActiveSlot();
 extern save savedata;
+
+/*
+ * MIDI モニタの描画ペース
+ *   タイマ1 (16ms): 位置保存 + PumpIdle（本体）
+ *   タイマ2 (4ms): IdlePulse（キューが空で CPU に余裕があるときだけ追加同期）
+ *   COggApp::OnIdle: 同じく IdlePulse。TRUE を返すと OnIdle が回り続けるので基底へ返す。
+ *   timerp: PumpSyncNow は毎ティック。UpdateWindow だけ Ms2DrawDue。
+ * QS_POSTMESSAGE で IdlePulse を止めると timerp の投稿でstarveするので見ない。
+ */
 extern CString filen;
 extern int mode;
 extern int tempo;
 extern int pitch;
 extern __int64 playb;
 extern int playy;
+extern int wavbit_sample_Hz;
 
 namespace {
 
@@ -60,6 +70,22 @@ enum {
 };
 
 HMIDIOUT s_kpiLiveOut = NULL;
+
+// イベント時刻のサンプルレート。VST はエンジン、KPI MIDI は実際に開いたレート
+// （savedata.samples だと 48k 設定＋44.1k KPI でモニタだけ走る）。
+static int MmWantMonitorSampleRate()
+{
+	if (mode == MODE_VST_MIDI) {
+		MmBindVstActiveSlot();
+		const int r = VstMidiGetRate();
+		if (r > 0) return r;
+	} else if (mode == -3 && wavbit_sample_Hz >= 8000) {
+		return wavbit_sample_Hz;
+	}
+	if (savedata.samples >= 8000)
+		return savedata.samples;
+	return 44100;
+}
 
 static void MmCloseKpiLiveOut()
 {
@@ -206,7 +232,8 @@ static ULONGLONG MmFileTimeU64(const FILETIME& ft)
 	return u.QuadPart;
 }
 
-/* GetSystemTimes の idle が全体の 8% 未満なら他アプリが忙しい */
+/* GetSystemTimes の idle が全体の 8% 未満なら他アプリが忙しい → IdlePulse をスキップ。
+   初回は差分が無いので slack あり扱い。 */
 static int MmCpuHasSlack()
 {
 	FILETIME idle, ker, user;
@@ -233,6 +260,7 @@ static int MmCpuHasSlack()
 	return (int)(di * 100ull / sys) >= 8;
 }
 
+/* QPC の freq と now。freq 未取得なら一度だけ QueryPerformanceFrequency。 */
 static void MmQpcPair(LONGLONG& freq, LONGLONG& now)
 {
 	if (freq < 1) {
@@ -1731,7 +1759,7 @@ void CMidiMonitorDlg::ApplyShort(int port, DWORD msg, BOOL fromUser, BOOL liveEx
 	if (st == 0x90) {
 		if (d2 > 0) {
 			p.noteOn[d1] = (BYTE)d2;
-			p.noteFlash[d1] = 48;
+			p.noteFlash[d1] = 48; // ~48ms。Note Off がすぐ来ても鍵盤が点く
 			p.lastNote = d1;
 			p.lastVel = d2;
 			p.held++;
@@ -2095,7 +2123,7 @@ void CMidiMonitorDlg::LoadCurrentMidi()
 		}
 		return;
 	}
-	if (_wcsicmp(m_loadedPath, mid) == 0)
+	if (_wcsicmp(m_loadedPath, mid) == 0 && m_sampleRate == MmWantMonitorSampleRate())
 		return;
 
 	UnloadMidi();
@@ -2277,14 +2305,7 @@ void CMidiMonitorDlg::LoadCurrentMidi()
 		delete[] ev; delete[] data; delete[] sxData; return;
 	}
 	std::stable_sort(ev, ev + count, MmCmpEvStable);
-	int sr = 44100;
-	if (mode == MODE_VST_MIDI) {
-		MmBindVstActiveSlot();
-		int r = VstMidiGetRate();
-		if (r > 0) sr = r;
-	} else if (savedata.samples >= 8000) {
-		sr = savedata.samples;
-	}
+	const int sr = MmWantMonitorSampleRate();
 	m_sampleRate = sr;
 	unsigned __int64 lastTick = 0;
 	unsigned tempoU = 500000;
@@ -2683,6 +2704,8 @@ void CMidiMonitorDlg::ApplyDueEvents(int lastDue)
 	m_burstApply = savedBurst;
 }
 
+// playb を鍵盤・CC 表示へ進める。VST/KPI は DS カーソルより先なので 700ms 引く。
+// ExtrapolateHeard でサンプルが止まっている間も QPC で少し先読みする。
 void CMidiMonitorDlg::SyncFromPlayback()
 {
 	if (m_frozen) return;
@@ -2707,6 +2730,15 @@ void CMidiMonitorDlg::SyncFromPlayback()
 			if (pbRaw < 0) pbRaw = 0;
 			if (pbHeard < 0) pbHeard = 0;
 		}
+	} else if (mode == -3) {
+		// mid(kpi): playb はデコード書き込み位置で、DS 再生カーソルより先。
+		// イベント時刻は KPI の実レート。VST プラグイン遅延は無い。
+		const int sr = (m_sampleRate > 0) ? m_sampleRate : 44100;
+		const double sec = OggGetGdiPlaybackTimeSec();
+		pbRaw = (__int64)(sec * (double)sr + 0.5);
+		pbHeard = pbRaw - (__int64)sr * 700 / 1000;
+		if (pbRaw < 0) pbRaw = 0;
+		if (pbHeard < 0) pbHeard = 0;
 	}
 	if (pbRaw < m_lastPlayb) {
 		ResetParts();
@@ -2868,6 +2900,7 @@ void CMidiMonitorDlg::DrawPanBar(CDC& dc, int x, int y, int bw, int bh, int pan,
 	dc.FillSolidRect(px, y + 1, 2, bh - 2, c);
 }
 
+// A0..C8。noteOn か noteFlash なら点灯（短い音でも flash で見える）。
 void CMidiMonitorDlg::DrawMiniKeys(CDC& dc, const CRect& rc, const Part& p, COLORREF keyW, COLORREF keyB)
 {
 	if (rc.Width() < 20 || rc.Height() < 6) return;
@@ -2887,7 +2920,7 @@ void CMidiMonitorDlg::DrawMiniKeys(CDC& dc, const CRect& rc, const Part& p, COLO
 		int x0 = rc.left + wi * ww / whites;
 		int x1 = rc.left + (wi + 1) * ww / whites;
 		COLORREF c = keyW;
-		if (p.noteOn[n] || p.noteFlash[n]) c = RGB(220, 40, 40);
+		if (p.noteOn[n] || p.noteFlash[n]) c = RGB(220, 40, 40); // 短い音は flash だけでも点灯
 		dc.FillSolidRect(x0, rc.top, max(1, x1 - x0 - 1), hh, c);
 		wi++;
 	}
@@ -2899,7 +2932,7 @@ void CMidiMonitorDlg::DrawMiniKeys(CDC& dc, const CRect& rc, const Part& p, COLO
 		int bw = max(2, ww / whites * 6 / 10);
 		int x0 = xw - bw / 2;
 		COLORREF c = keyB;
-		if (p.noteOn[n] || p.noteFlash[n]) c = RGB(255, 70, 70);
+		if (p.noteOn[n] || p.noteFlash[n]) c = RGB(255, 70, 70); // 黒鍵も flash で点灯
 		dc.FillSolidRect(x0, rc.top, bw, hh * 6 / 10, c);
 	}
 }
@@ -3516,6 +3549,7 @@ void CMidiMonitorDlg::DrawMonitor2D(CDC& dc, int w, int h, UINT dpi)
 	DrawInsFoot(dc, LayFootY(), w, footH, dpi);
 }
 
+// noteFlash は実時間 dt で減らす。lev/glow は 16ms ステップ（追いつき最大 4）。
 void CMidiMonitorDlg::TickVisuals()
 {
 	const DWORD now = GetTickCount();
@@ -3635,6 +3669,7 @@ void CMidiMonitorDlg::PollAppVolume()
 	}
 }
 
+// ヘッダの NOTES 本数と MAX ピーク。新しいピークは hold=90（~1.4s @16ms）。
 void CMidiMonitorDlg::UpdateNoteMeter()
 {
 	int notes = 0;
@@ -3647,17 +3682,18 @@ void CMidiMonitorDlg::UpdateNoteMeter()
 	}
 	if ((float)m_noteCount > m_notesPeak) {
 		m_notesPeak = (float)m_noteCount;
-		m_notesPeakHold = 45;
+		m_notesPeakHold = 90;
 		m_dirtyHead = true;
 	}
 }
 
+// hold 中は下げない。その後 0.07/tick。速すぎると MAX がすぐ消えて「止まった」ように見える。
 void CMidiMonitorDlg::TickNotePeak()
 {
 	UpdateNoteMeter();
 	if ((float)m_noteCount > m_notesPeak) {
 		m_notesPeak = (float)m_noteCount;
-		m_notesPeakHold = 45;
+		m_notesPeakHold = 90;
 		m_dirtyHead = true;
 		return;
 	}
@@ -3666,7 +3702,7 @@ void CMidiMonitorDlg::TickNotePeak()
 		return;
 	}
 	if (m_notesPeak > (float)m_noteCount + 0.02f) {
-		m_notesPeak -= 0.16f;
+		m_notesPeak -= 0.07f;
 		if (m_notesPeak < (float)m_noteCount)
 			m_notesPeak = (float)m_noteCount;
 		m_dirtyHead = true;
@@ -3954,6 +3990,7 @@ bool CMidiMonitorDlg::HitVolBar(CPoint clientPt) const
 	return m_volBarRc.PtInRect(f) ? true : false;
 }
 
+// 変化した行だけ Invalidate。lev/glow はピクセル量子化して比べる（生値だと毎フレーム全行）。
 void CMidiMonitorDlg::InvalidateDirty()
 {
 	if (!::IsWindow(m_hWnd)) return;
@@ -4187,8 +4224,8 @@ BOOL CMidiMonitorDlg::OnInitDialog()
 	EnableMainWindowLock(&savedata.midimonMainLock, TRUE);
 	CCC_CaptionLayout(m_hWnd);
 	LayoutHelpBtn();
-	SetTimer(1, 16, nullptr);
-	SetTimer(2, 4, nullptr);
+	SetTimer(1, 16, nullptr); // 本体。PersistPos もここ
+	SetTimer(2, 4, nullptr);  // IdlePulse。OnIdle と同じ入口
 	LoadCurrentMidi();
 	return TRUE;
 }
@@ -4321,6 +4358,7 @@ BOOL CMidiMonitorDlg::OnEraseBkgnd(CDC* pDC)
 	return TRUE;
 }
 
+// 1=16ms 本体。2=4ms 追加パルス（OnIdle と同じ IdlePulse）。
 void CMidiMonitorDlg::OnTimer(UINT_PTR nIDEvent)
 {
 	if (nIDEvent == 1) {
@@ -4412,6 +4450,7 @@ void CMidiMonitorDlg::ResetPlaybackState()
 		Invalidate(FALSE);
 }
 
+// キュー消化。描画は InvalidateDirty まで。3D の追加パルスは IdlePulse 側で弾く。
 void CMidiMonitorDlg::PumpIdle()
 {
 	if (!::IsWindow(m_hWnd) || m_paintDisabled) return;
@@ -4431,6 +4470,8 @@ void CMidiMonitorDlg::PumpIdle()
 	InvalidateDirty();
 }
 
+// pbHeard が前回と同じ（サンプルが進んでいない）ときだけ QPC で先読み。
+// 一時停止 (playy==0) と巻き戻しは補間しない。行き過ぎは sr/40 で切る。
 void CMidiMonitorDlg::ExtrapolateHeard(__int64& pbHeard)
 {
 	LONGLONG now = 0;
@@ -4460,6 +4501,8 @@ void CMidiMonitorDlg::ExtrapolateHeard(__int64& pbHeard)
 	pbHeard += extra;
 }
 
+// キー/マウスボタン待ちがあるときは触らない。QS_POSTMESSAGE は見ない（timerp でstarve）。
+// 前面 ~4ms、裏 ~16ms。idle<8% ならスキップ。UpdateWindow は dirty のときだけ。
 void CMidiMonitorDlg::IdlePulse()
 {
 	if (!::IsWindow(m_hWnd) || m_paintDisabled) return;
@@ -4493,6 +4536,7 @@ void CMidiMonitorDlg::IdlePulse()
 	SwitchToThread();
 }
 
+// timerp 用。同期は毎ティック。描画の間引きは呼び出し側の Ms2DrawDue。
 void CMidiMonitorDlg::PumpSyncNow()
 {
 	PumpIdle();

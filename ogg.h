@@ -30,7 +30,7 @@ public:
 	//{{AFX_VIRTUAL(COggApp)
 	public:
 	virtual BOOL InitInstance();
-	virtual BOOL OnIdle(LONG lCount);
+	virtual BOOL OnIdle(LONG lCount); // MIDI モニタ IdlePulse。TRUE を返して回し続けない
 	virtual LRESULT ProcessWndProcException(CException* e, const MSG* pMsg);
 	//}}AFX_VIRTUAL
 

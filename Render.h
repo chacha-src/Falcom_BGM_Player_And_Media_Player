@@ -165,7 +165,7 @@ public:
 	CCustomStandardButton m_vstExtraBrowse;
 	CCustomStandardButton m_vstMultiBrowse;
 	CCustomStandardButton m_vstScanNow;
-	afx_msg void OnMidPreferKpi();
+	afx_msg void OnMidPreferKpi(); // midPlayPrefer=0。リストの MID(KPI) を即更新。再生中は次曲から
 	afx_msg void OnMidPreferVst();
 	afx_msg void OnVstExtraBrowse();
 	afx_msg void OnVstMultiBrowse();

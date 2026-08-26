@@ -1356,18 +1356,23 @@ void CRender::OnKpiPluginReload()
 extern HFONT	hFont;
 #include "afxdlgs.h"
 
+// チェックは midPlayPrefer。リスト表示は即 Refresh。今鳴っている曲のエンジンは次の再生までそのまま。
 void CRender::OnMidPreferKpi()
 {
 	savedata.midPlayPrefer = 0;
 	m_midPreferKpi.SetCheck(BST_CHECKED);
 	m_midPreferVst.SetCheck(BST_UNCHECKED);
+	extern CPlayList* pl;
+	if (pl) pl->RefreshMidiPlayModes();
 }
 
 void CRender::OnMidPreferVst()
 {
-	savedata.midPlayPrefer = 1;
+	savedata.midPlayPrefer = 1; // 1=VST。リストは MID(VST) へ。再生中は次曲から
 	m_midPreferKpi.SetCheck(BST_UNCHECKED);
 	m_midPreferVst.SetCheck(BST_CHECKED);
+	extern CPlayList* pl;
+	if (pl) pl->RefreshMidiPlayModes();
 }
 
 void CRender::LayoutMidiVstRows()

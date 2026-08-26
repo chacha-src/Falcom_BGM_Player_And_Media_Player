@@ -59,7 +59,8 @@ public:
 	void AddFilePath(LPCTSTR path);
 	void plug(CString ff,KMPMODULE *mod);
 	void plugs(CString ext1,playlistdata *p,TCHAR* kpi, BYTE& kv);
-	void FixMidiMode(playlistdata0& item); // .mid 等が動画(-2)のまま残っていたら振り直し
+	void FixMidiMode(playlistdata0& item); // MIDI は midPlayPrefer に合わせて -30/-3。動画(-2)の焼き付きも引き直す
+	void RefreshMidiPlayModes(); // 全 MIDI 行を Fix。再生中エンジンは切らない（次曲から）
 	void plugswinamp(CString ext1, playlistdata *p, TCHAR* kpi, BYTE& kv);
 	void plugsxmplay(CString ext1, playlistdata *p, TCHAR* kpi, BYTE& kv);
 	void plugsaimp(CString ext1, playlistdata *p, TCHAR* kpi, BYTE& kv);

@@ -7,7 +7,38 @@
 #include <algorithm>
 #pragma comment(lib, "uxtheme.lib")
 
+// ============================================================================
+// CCustomPopupMenu.cpp — 自前コンテキストメニュー実装
+//
+// 【骨格（EnsureChromePrefix / HandleChromeClick）】
+//   ルート先頭にフォント／アクリル／立体アクセント／KPI／MIDI KPI|VST優先／描画方法。
+//   骨格 ID は Track が 0 を返す。MIDI は savedata.midPlayPrefer を書き、
+//   PlRefreshMidiPlayModes() でプレイリストの MID(VST)/MID(KPI) を即更新する。
+//   PlayList.h は IDD_PLAYLIST 欠落のためこの cpp から include しない
+//   （extern void PlRefreshMidiPlayModes();）。
+//
+// 【行アニメ m_lineAnimPhase】
+//   0=idle（一枚パネル） / 1=enter / 2=exit
+//   行チップ系は HWND を飛行余白つきに拡げ UpdateLayeredWindow(α)。
+//   マゼンタキー kChipChromaKey → α=0。定着は m_bridgePanel で一枚パネルを
+//   強制してから ULW 解除（行き過ぎ整列の点滅防止）。
+//
+// 【Track / モーダル / z】
+//   Track → CreatePopupAt（WS_EX_TOPMOST|NOACTIVATE）→ RunModalLoop。
+//   入場中 16ms MsgWait。定着後 33ms で前面監視。
+//   CCUSTOM_POPUP_RELAX_DISMISS_PROP で FG/KillFocus 自動閉じを抑止
+//   （外側クリック・Esc・アプリ非アクティブは有効）。
+//
+// 【sticky / スクロール】
+//   先頭 m_stickyCount 行は固定。本文のみ m_scrollY。HitTest も帯を分ける。
+//
+// 【内包 CCustom*】
+//   SyncEmbeddedChildren がラベル下へ HWND を置く。飛行中は隠して代理描画。
+// ============================================================================
+
 extern void MpPersistSavedataQuick();
+// PlayList.h は IDD_PLAYLIST 欠落のため include しない（骨格 MIDI 優先の即時反映用）
+extern void PlRefreshMidiPlayModes();
 
 #ifndef WM_APP_KPI_PLUGIN
 #define WM_APP_KPI_PLUGIN (WM_APP + 58)
@@ -35,6 +66,7 @@ BEGIN_MESSAGE_MAP(CCustomPopupMenu, CWnd)
 END_MESSAGE_MAP()
 
 namespace {
+	// タイマ: Tip / 淫女 / 行アニメ(入場16ms・idle33ms兼用) / レ点バウンス / 強制定着
 	enum { kTipTimer = 7701, kInwomanTimer = 7702, kAnimTimer = 7703, kBounceTimer = 7704, kSettleTimer = 7705 };
 	// BigBang内部マーカー（画面には出さない。ULWでα=0へ変換）
 	static const COLORREF kChipChromaKey = RGB(255, 0, 255);
@@ -410,6 +442,7 @@ namespace {
 		--s_popSoftBusy;
 	}
 
+// ---- パネル／行チップ描画（GDI）。飛行中の余白は kChipChromaKey → ULW で α=0 ----
 static COLORREF BlendRGB(COLORREF a, COLORREF b, int t)
 	{
 		const int u = 256 - t;
@@ -909,6 +942,7 @@ static COLORREF BlendRGB(COLORREF a, COLORREF b, int t)
 		dc.RestoreDC(clip);
 	}
 
+	// 骨格フォントサイズスライダー。savedata を即書き、開チェーンを Relayout。
 	static void FontSizeCb(void* ctx, int value)
 	{
 		CCustomPopupMenu* menu = (CCustomPopupMenu*)ctx;
@@ -921,6 +955,9 @@ static COLORREF BlendRGB(COLORREF a, COLORREF b, int t)
 	}
 }
 
+// 固定配列メニューの構築。HWND はまだ作らない（Track→CreatePopupAt）。
+// モーダル状態（m_tracking / m_done / m_result / m_hot / m_openSub）と飛行フラグをゼロ初期化。
+// 所有フォント・メモリBMPはデストラクタで破棄。
 CCustomPopupMenu::CCustomPopupMenu()
 	: m_itemCount(0), m_subCount(0), m_sliderCount(0), m_editCount(0)
 	, m_comboCount(0), m_listCount(0), m_rangeCount(0), m_progressCount(0), m_buttonCount(0)
@@ -941,6 +978,9 @@ CCustomPopupMenu::CCustomPopupMenu()
 	m_previewFace[0] = 0;
 }
 
+// Track 途中の例外／早期 return でも s_trackingRoot を残さない。
+// Speana・Soft3D・淫女タイマが永久停止しないよう根を切ってから Reset。
+// 所有 HFONT とバックバッファ、残 HWND を破棄。
 CCustomPopupMenu::~CCustomPopupMenu()
 {
 	// Track 中例外／途中 return でも Speana・Soft3D・淫女タイマが永久停止しないよう掃除
@@ -954,6 +994,9 @@ CCustomPopupMenu::~CCustomPopupMenu()
 	if (GetSafeHwnd()) DestroyWindow();
 }
 
+// 項目・サブ・内包 CCustom* HWND を破棄し、骨格注入フラグも戻す。
+// 再 Track の前に呼ぶ。開いているツリーは DestroyPopupTree。
+// m_stickyCount も 0。呼び出し側が SetStickyLeading し直す。
 void CCustomPopupMenu::Reset()
 {
 	DestroyPopupTree();
@@ -972,6 +1015,8 @@ void CCustomPopupMenu::Reset()
 	ZeroMemory(m_choiceSets, sizeof(m_choiceSets));
 }
 
+// 固定長 wchar へ lstrcpyn。dst 必須。src==NULL なら空文字。
+// バッファ末尾は API 側で終端される前提。
 void CCustomPopupMenu::CopyText(wchar_t* dst, int dstN, LPCTSTR src)
 {
 	if (!dst || dstN <= 0) return;
@@ -980,6 +1025,8 @@ void CCustomPopupMenu::CopyText(wchar_t* dst, int dstN, LPCTSTR src)
 	lstrcpynW(dst, src, dstN);
 }
 
+// スライダー／Edit／Combo／List／Range／Progress／Button。
+// ラベル行 + 子 HWND。ホバーピル対象外（操作は子へ）。
 BOOL CCustomPopupMenu::IsInteractiveKind(int kind) const
 {
 	return kind == CCUSTOM_POPUP_SLIDER || kind == CCUSTOM_POPUP_EDIT
@@ -988,6 +1035,8 @@ BOOL CCustomPopupMenu::IsInteractiveKind(int kind) const
 		|| kind == CCUSTOM_POPUP_BUTTON;
 }
 
+// 骨格専用 ID（アクリル／Soft強め／フォント／KPI／MIDI KPI|VST／描画方法）。
+// Track の戻り値には出さない（呼び出し元へは 0）。
 BOOL CCustomPopupMenu::IsChromeCommand(UINT id) const
 {
 	return id == CCUSTOM_POPUP_ID_ACRYLIC
@@ -1003,6 +1052,8 @@ BOOL CCustomPopupMenu::IsChromeCommand(UINT id) const
 			&& id < CCUSTOM_POPUP_ID_ANIM0 + (UINT)POPUP_ANIM_COUNT);
 }
 
+// 全 Add* の共通登録。添字類は -1、A-B は未設定 -1。
+// 配列上限超過は FALSE。tip があれば hasTip。
 BOOL CCustomPopupMenu::AddItemBase(int kind, UINT id, LPCTSTR text, LPCTSTR tip, BOOL enabled, BOOL checked)
 {
 	if (m_itemCount >= CCUSTOM_POPUP_MAX_ITEMS) return FALSE;
@@ -1021,12 +1072,18 @@ BOOL CCustomPopupMenu::AddItemBase(int kind, UINT id, LPCTSTR text, LPCTSTR tip,
 	return TRUE;
 }
 
+// 通常コマンド行。クリックで CloseChain(id)。
+// 骨格 ID は Track が 0 に正規化する。
 BOOL CCustomPopupMenu::AddCommand(UINT id, LPCTSTR text, LPCTSTR tip, BOOL enabled)
 { return AddItemBase(CCUSTOM_POPUP_CMD, id, text, tip, enabled, FALSE); }
 
+// レ点トグル行。チェック描画とバウンスは HandleChromeClick / OnLButtonDown。
+// 呼び出し元は Track 戻り値または FindItem で状態を読む。
 BOOL CCustomPopupMenu::AddCheck(UINT id, LPCTSTR text, BOOL checked, LPCTSTR tip, BOOL enabled)
 { return AddItemBase(CCUSTOM_POPUP_CHECK, id, text, tip, enabled, checked); }
 
+// 区切り線。連続セパレータは二重線になるので弾く（成功扱い）。
+// 高さは CCUSTOM_POPUP_SEP_H（DPI スケール）。
 BOOL CCustomPopupMenu::AddSeparator()
 {
 	// 連続セパレータは見た目が二重線になるので弾く
@@ -1035,6 +1092,9 @@ BOOL CCustomPopupMenu::AddSeparator()
 	return AddItemBase(CCUSTOM_POPUP_SEP, 0, NULL, NULL, TRUE, FALSE);
 }
 
+// 子 CCustomPopupMenu を new してこのインスタンスが所有する。
+// ホバーで OpenSubAt。失敗時は new した子を delete して NULL。
+// 子は SetSkipChrome(TRUE) しない限り、ルート骨格は親だけ。
 CCustomPopupMenu* CCustomPopupMenu::AddSubMenu(LPCTSTR text, LPCTSTR tip)
 {
 	if (m_subCount >= CCUSTOM_POPUP_MAX_SUBS || m_itemCount >= CCUSTOM_POPUP_MAX_ITEMS) return NULL;
@@ -1049,6 +1109,9 @@ CCustomPopupMenu* CCustomPopupMenu::AddSubMenu(LPCTSTR text, LPCTSTR tip)
 	return sub;
 }
 
+// ラベル行 + CCustomSliderCtrl（スライダー方式）。cb はドラッグ中も呼ばれる。
+// vmin/vmax は入れ替え可。id は Find/Get 用で 0 でもよい。
+// 実 HWND は SyncEmbeddedChildren で Create。
 BOOL CCustomPopupMenu::AddSlider(LPCTSTR label, int vmin, int vmax, int vpos,
 	CCustomPopupSliderCb cb, void* ctx, LPCTSTR tip, UINT id)
 {
@@ -1062,6 +1125,8 @@ BOOL CCustomPopupMenu::AddSlider(LPCTSTR label, int vmin, int vmax, int vpos,
 	return TRUE;
 }
 
+// Edit/Combo/List の文字列セットを m_choiceSets 固定配列へコピー。
+// 失敗は -1（件数 0 またはセット上限）。
 int CCustomPopupMenu::AllocChoiceSet(const LPCTSTR* items, int count)
 {
 	if (!items || count <= 0) return -1;
@@ -1074,6 +1139,8 @@ int CCustomPopupMenu::AllocChoiceSet(const LPCTSTR* items, int count)
 	return m_choiceSetCount++;
 }
 
+// 初期文字列は choiceSet[0] に置く。Create 時 SetWindowText の EN_CHANGE は抑止。
+// NotifyEditFromHwnd が cb を呼ぶ。
 BOOL CCustomPopupMenu::AddEdit(LPCTSTR label, LPCTSTR initial, CCustomPopupEditCb cb, void* ctx, LPCTSTR tip, UINT id)
 {
 	if (m_editCount >= CCUSTOM_POPUP_MAX_EDITS) return FALSE;
@@ -1086,6 +1153,8 @@ BOOL CCustomPopupMenu::AddEdit(LPCTSTR label, LPCTSTR initial, CCustomPopupEditC
 	return TRUE;
 }
 
+// ドロップダウン。curSel は範囲クランプ。物理 index で保持。
+// CBN_SELCHANGE → NotifyChoiceFromHwnd。リスト HWND はチェーンヒットに含める。
 BOOL CCustomPopupMenu::AddCombo(LPCTSTR label, const LPCTSTR* items, int count, int curSel,
 	CCustomPopupChoiceCb cb, void* ctx, LPCTSTR tip, UINT id)
 {
@@ -1101,6 +1170,8 @@ BOOL CCustomPopupMenu::AddCombo(LPCTSTR label, const LPCTSTR* items, int count, 
 	return TRUE;
 }
 
+// リストボックス行（高さ LIST_H）。LBN_SELCHANGE で cb。
+// スクロール時は sticky 下の本文クリップと同期して Show/Hide。
 BOOL CCustomPopupMenu::AddList(LPCTSTR label, const LPCTSTR* items, int count, int curSel,
 	CCustomPopupChoiceCb cb, void* ctx, LPCTSTR tip, UINT id)
 {
@@ -1116,6 +1187,8 @@ BOOL CCustomPopupMenu::AddList(LPCTSTR label, const LPCTSTR* items, int count, i
 	return TRUE;
 }
 
+// 再生ヘッド + ループ選択 + A-B。未設定 A-B は -1 のまま。
+// LiveMirrorRange で Track 中の再生追従。ドラッグ中は無視。
 BOOL CCustomPopupMenu::AddRangeSlider(LPCTSTR label, int vmin, int vmax, int vpos,
 	int selMin, int selMax, int abA, int abB,
 	CCustomPopupRangeCb cb, void* ctx, LPCTSTR tip, UINT id)
@@ -1134,6 +1207,8 @@ BOOL CCustomPopupMenu::AddRangeSlider(LPCTSTR label, int vmin, int vmax, int vpo
 	return TRUE;
 }
 
+// 表示専用プログレス。SetProgressPos で追従。showPercent で % 描画。
+// 操作ヒットは子 HWND。行ピルは出さない。
 BOOL CCustomPopupMenu::AddProgress(LPCTSTR label, int vmin, int vmax, int vpos,
 	BOOL showPercent, LPCTSTR tip, UINT id)
 {
@@ -1148,6 +1223,8 @@ BOOL CCustomPopupMenu::AddProgress(LPCTSTR label, int vmin, int vmax, int vpos,
 	return TRUE;
 }
 
+// 内包 CCustomStandardButton。closeOnClick なら BN_CLICKED で CloseChain(id)。
+// cb は閉じる前に呼ばれる。
 BOOL CCustomPopupMenu::AddButton(UINT id, LPCTSTR text,
 	CCustomPopupButtonCb cb, void* ctx, LPCTSTR tip, BOOL closeOnClick)
 {
@@ -1160,12 +1237,17 @@ BOOL CCustomPopupMenu::AddButton(UINT id, LPCTSTR text,
 	return TRUE;
 }
 
+// popupMenuPoint/Bold/Italic/Face をクランプして MpPersistSavedataQuick。
+// プレビュー中の面は CommitFace 側で savedata へ書く。
 void CCustomPopupMenu::PersistPopupFont()
 {
 	ClampPopupFontSave();
 	MpPersistSavedataQuick();
 }
 
+// savedata（またはホバープレビュー面）から HFONT を作り直す。
+// 旧 m_fontOwned を Delete。失敗時は DEFAULT_GUI_FONT。
+// ポイント・太字・斜体は全カスタムメニュー共通。
 void CCustomPopupMenu::RebuildMenuFont()
 {
 	if (m_fontOwned) { ::DeleteObject(m_fontOwned); m_fontOwned = NULL; }
@@ -1190,6 +1272,8 @@ void CCustomPopupMenu::RebuildMenuFont()
 	m_font = m_fontOwned ? m_fontOwned : (HFONT)::GetStockObject(DEFAULT_GUI_FONT);
 }
 
+// ルートと全サブへ RebuildMenuFont。開いている窓は背景のみ Invalidate。
+// 子 HWND は RefreshEmbeddedChildren（全窓 Redraw は点滅の元）。
 void CCustomPopupMenu::RefreshFontChain()
 {
 	CCustomPopupMenu* root = RootMenu();
@@ -1211,6 +1295,9 @@ void CCustomPopupMenu::RefreshFontChain()
 	}
 }
 
+// フォントサイズ変更後、開いている窓の寸法・sticky・スクロールを張り直す。
+// 飛行余白 pad を除いたコンテンツ原点で SetWindowPos（z は触らない）。
+// 本文高さ不足時も sticky 下に最低 3 行相当を確保。
 void CCustomPopupMenu::RelayoutOpenChain()
 {
 	CCustomPopupMenu* root = RootMenu();
@@ -1258,6 +1345,8 @@ void CCustomPopupMenu::RelayoutOpenChain()
 	}
 }
 
+// フォント面ホバー中の一時プレビュー。ルートの m_previewing に載せる。
+// 確定はクリック→CommitFace。離脱は ClearPreviewFace。
 void CCustomPopupMenu::ApplyPreviewFace(LPCTSTR face)
 {
 	CCustomPopupMenu* root = RootMenu();
@@ -1267,6 +1356,8 @@ void CCustomPopupMenu::ApplyPreviewFace(LPCTSTR face)
 	root->RefreshFontChain();
 }
 
+// ホバープレビュー解除。savedata の面へ戻して RefreshFontChain。
+// プレビュー中でなければ何もしない。
 void CCustomPopupMenu::ClearPreviewFace()
 {
 	CCustomPopupMenu* root = RootMenu();
@@ -1276,6 +1367,8 @@ void CCustomPopupMenu::ClearPreviewFace()
 	root->RefreshFontChain();
 }
 
+// 面を savedata.popupMenuFace へ確定保存し、プレビューを終了。
+// 以降のメニューにも残る。
 void CCustomPopupMenu::CommitFace(LPCTSTR face)
 {
 	if (!face || !face[0]) return;
@@ -1286,6 +1379,11 @@ void CCustomPopupMenu::CommitFace(LPCTSTR face)
 	RefreshFontChain();
 }
 
+// ルート先頭へ骨格を注入（サブ・skipChrome・再入は無視）。
+// フォント（サイズ/太字/斜体 + 面一覧、先頭4行 sticky）、アクリル、立体アクセント強め。
+// プラグイン: KPI DL / 再読込、MIDI再生 KPI優先 / VST優先（midPlayPrefer）。
+// メニュー描画方法（popupMenuAnim）。最後に呼び出し元項目を後ろへ戻す。
+// 骨格クリックは HandleChromeClick。Track 戻り値は骨格 ID なら 0。
 void CCustomPopupMenu::EnsureChromePrefix()
 {
 	if (m_skipChrome || m_chromeInjected || m_parentMenu) return;
@@ -1550,6 +1648,9 @@ void CCustomPopupMenu::EnsureChromePrefix()
 		m_items[m_itemCount++] = savedItems[i];
 }
 
+// DPI スケールで行高・幅を測り、各 item.rc（スクロール前コンテンツ座標）を置く。
+// 先頭 m_stickyCount 行の下端が m_stickyH。本文だけが後で m_scrollY する。
+// レ点列はチェック無し行も確保（ラベル位置揃え）。
 void CCustomPopupMenu::MeasureLayout()
 {
 	UINT dpi = PopupDpiFromHwnd(m_hWnd);
@@ -1592,6 +1693,7 @@ void CCustomPopupMenu::MeasureLayout()
 		else if (it.kind == CCUSTOM_POPUP_BUTTON) h = SH(CCUSTOM_POPUP_BUTTON_H);
 		it.rc.SetRect(SH(CCUSTOM_POPUP_RIBBON_W) + SH(2), y, m_menuW - SH(6), y + h);
 		y += h;
+		// 固定ヘッダ下端。本文スクロール（m_scrollY）はこの下から
 		if (i + 1 == m_stickyCount)
 			m_stickyH = y;
 	}
@@ -1601,6 +1703,10 @@ void CCustomPopupMenu::MeasureLayout()
 	m_scrollMax = 0;
 }
 
+// 内包 CCustom* をラベル行下へ配置。未 Create ならここで Create。
+// sticky 行は常に画面内。本文は sticky 下＋飛行 pad の交差で Show/Hide。
+// 毎回 UpdateWindow すると定着直後に点滅するので、移動／初回表示だけ描く。
+// Edit の初期 SetWindowText は m_suppressEditNotify で EN_CHANGE を無視。
 void CCustomPopupMenu::SyncEmbeddedChildren()
 {
 	UINT dpi = PopupDpiFromHwnd(m_hWnd);
@@ -1747,6 +1853,8 @@ void CCustomPopupMenu::SyncEmbeddedChildren()
 	}
 }
 
+// FALSE で全子 HWND を隠す（入場／退場チップ飛行中）。
+// TRUE は onScreen 判定込みの SyncEmbeddedChildren に任せる。
 void CCustomPopupMenu::ShowEmbedded(BOOL show)
 {
 	if (!show) {
@@ -1770,6 +1878,8 @@ void CCustomPopupMenu::ShowEmbedded(BOOL show)
 	SyncEmbeddedChildren();
 }
 
+// 親 BufferedPaint が子を潰したあとの再描画。ERASE 無し（白フラッシュ防止）。
+// 可視子だけ RDW_UPDATENOW。
 void CCustomPopupMenu::RefreshEmbeddedChildren()
 {
 	if (!GetSafeHwnd()) return;
@@ -1780,6 +1890,8 @@ void CCustomPopupMenu::RefreshEmbeddedChildren()
 	}
 }
 
+// 定着後に子 HWND を確実表示。マウス未移動でも着地させる。
+// WM_APP+0x51C を Post して親描画後の潰しを再 Refresh。
 void CCustomPopupMenu::RevealEmbeddedAfterAnim()
 {
 	if (!GetSafeHwnd()) return;
@@ -1789,6 +1901,8 @@ void CCustomPopupMenu::RevealEmbeddedAfterAnim()
 	PostMessage(WM_APP + 0x51C, 0, 0);
 }
 
+// 入場飛行が視覚的に静止したか（fade≈255 かつ ox/oy≈0）。
+// phase!=1 は FALSE。橋渡し判定に使い、行き過ぎで点滅させない。
 BOOL CCustomPopupMenu::ChipFlightRowsAtRest() const
 {
 	if (m_lineAnimPhase != 1 || m_itemCount <= 0)
@@ -1806,6 +1920,10 @@ BOOL CCustomPopupMenu::ChipFlightRowsAtRest() const
 	return any;
 }
 
+// 行オフセットとフェード。未出現は FALSE。
+// m_lineAnimPhase: 0=idle（オフセット無し） / 1=enter / 2=exit。
+// クラシックは常に静止。放射系は起点距離、インデックス系は上から遅延。
+// BigBang は easeOutBack の行き過ぎ→整列。退場は逆スタガ。
 BOOL CCustomPopupMenu::CalcLineAnim(int idx, int* ox, int* oy, int* fade, float* pT) const
 {
 	if (ox) *ox = 0;
@@ -2061,6 +2179,10 @@ BOOL CCustomPopupMenu::CalcLineAnim(int idx, int* ox, int* oy, int* fade, float*
 	return (fade ? *fade : 256) > 8;
 }
 
+// 入場。クラシック／skipChrome は即時表示（ヒットずれ防止）。
+// EXPAND は RGN が上下に開く。行チップ系は BeginChipFlight + ULW。
+// phase=1。kAnimTimer 16ms と kSettleTimer（所要+余裕）で強制定着。
+// 内包コントロールは飛行中隠す。
 void CCustomPopupMenu::AnimateIn()
 {
 	if (!GetSafeHwnd()) return;
@@ -2104,6 +2226,7 @@ void CCustomPopupMenu::AnimateIn()
 	}
 
 	ShowWindow(SW_SHOWNA);
+	// phase 1=enter（CalcLineAnim / ForceChipPresent）。0=idle 2=exit
 	m_lineAnimPhase = 1;
 	m_lineAnimStart = GetTickCount64();
 	if (UsesRowChipFlight(style))
@@ -2117,6 +2240,9 @@ void CCustomPopupMenu::AnimateIn()
 	SetTimer(kSettleTimer, (UINT)max(50, ChipEnterTotalMs(style, m_asSubmenu, m_itemCount, m_lineAnimOrigin) + 30), NULL);
 }
 
+// 決定後は複雑な行飛行退場を使わず、短いフェードで即閉じる。
+// ULW 中なら最終パネルを不透明 GDI へ焼いてからレイヤ解除（点滅防止）。
+// skipChrome サブは AnimateWindow 無しで Hide。
 void CCustomPopupMenu::AnimateOut()
 {
 	if (!GetSafeHwnd() || !IsWindowVisible()) return;
@@ -2185,6 +2311,11 @@ void CCustomPopupMenu::AnimateOut()
 		ShowWindow(SW_HIDE);
 }
 
+// ポップアップ HWND を作り AnimateIn。オーナーは WS_EX_NOACTIVATE | TOPMOST。
+// 行チップは DROPSHADOW 無しクラス（右端黒バー対策）。作業領域へクランプ。
+// ルートは右に収まらなければ左展開（サブが親に重なってクリック不能になるのを防ぐ）。
+// クリック最近傍行が m_lineAnimOrigin（上下に広がる起点）。
+// z は wndTopMost。子 HWND はアニメ完了まで隠す。
 BOOL CCustomPopupMenu::CreatePopupAt(CPoint screenPt, CCustomPopupMenu* parentMenu, CCustomPopupMenu* root)
 {
 	EnsurePopupClass();
@@ -2287,6 +2418,8 @@ BOOL CCustomPopupMenu::CreatePopupAt(CPoint screenPt, CCustomPopupMenu* parentMe
 	return TRUE;
 }
 
+// 飛行／RGN／タイマを止めて即非表示。退出アニメ無し。
+// レイヤ解除より先に隠す（透明→不透明の最終フレ防止）。
 void CCustomPopupMenu::AbortAnimAndHide()
 {
 	if (!GetSafeHwnd()) return;
@@ -2309,6 +2442,9 @@ void CCustomPopupMenu::AbortAnimAndHide()
 	::SetWindowRgn(m_hWnd, NULL, FALSE);
 }
 
+// 開サブ・内包 HWND・チップを破棄。animateOut=FALSE はホバー離脱用（即消し）。
+// AnimateOut の Peek 中に新規 Track が走ると二重メニューになるので、
+// s_trackingRoot 解放はウィンドウ破棄後。
 void CCustomPopupMenu::DestroyPopupTree(BOOL animateOut)
 {
 	CloseOpenSub();
@@ -2346,6 +2482,8 @@ void CCustomPopupMenu::DestroyPopupTree(BOOL animateOut)
 	}
 }
 
+// 開いているサブを退出アニメ無しで破棄（ホバーで引きずられないように）。
+// フォント面プレビューも Clear。
 void CCustomPopupMenu::CloseOpenSub()
 {
 	if (m_openSub >= 0 && m_openSub < m_itemCount) {
@@ -2358,6 +2496,8 @@ void CCustomPopupMenu::CloseOpenSub()
 	ClearPreviewFace();
 }
 
+// ルートに結果を書いて m_done。RunModalLoop が抜けて DestroyPopupTree。
+// 骨格コマンドも一旦 id を載せ、Track 出口で 0 にする。
 void CCustomPopupMenu::CloseChain(UINT result)
 {
 	CCustomPopupMenu* root = RootMenu();
@@ -2366,9 +2506,13 @@ void CCustomPopupMenu::CloseChain(UINT result)
 	root->m_done = TRUE;
 }
 
+// チェーンの根。m_root が無ければ this。
+// フォント／閉じる／モーダルフラグは根で共有する。
 CCustomPopupMenu* CCustomPopupMenu::RootMenu()
 { return m_root ? m_root : this; }
 
+// 自分・開サブ・コンボリスト・親↔サブ隙間がヒットなら TRUE。
+// 飛行余白の穴（RGN 外）は中身／チップのみ。外側クリック閉じ判定に使う。
 BOOL CCustomPopupMenu::IsPointInChain(CPoint screenPt) const
 {
 	if (GetSafeHwnd()) {
@@ -2423,6 +2567,8 @@ BOOL CCustomPopupMenu::IsPointInChain(CPoint screenPt) const
 	return FALSE;
 }
 
+// 見た目のメニュー本体（飛行 pad 内のコンテンツ、または行ヒット）。
+// 余白クリックを HTTRANSPARENT にする判定の土台。
 BOOL CCustomPopupMenu::ScreenPtOnMenuBody(CPoint screenPt) const
 {
 	if (!GetSafeHwnd()) return FALSE;
@@ -2438,6 +2584,8 @@ BOOL CCustomPopupMenu::ScreenPtOnMenuBody(CPoint screenPt) const
 	return body.PtInRect(c) ? TRUE : FALSE;
 }
 
+// 開いている子孫サブの本体上か。親 OnMouseMove がサブ操作を奪わないため。
+// 左折り返しで重なってもサブ優先。
 BOOL CCustomPopupMenu::ScreenPtOnOpenSubBody(CPoint screenPt) const
 {
 	if (m_openSub < 0 || m_openSub >= m_itemCount) return FALSE;
@@ -2447,6 +2595,8 @@ BOOL CCustomPopupMenu::ScreenPtOnOpenSubBody(CPoint screenPt) const
 	return m_subs[si]->ScreenPtOnOpenSubBody(screenPt);
 }
 
+// 自分／子／owner トップレベル／コンボリスト／開サブなら関連。
+// Track(子コントロール) 時 FG はトップレベルになる点に注意。
 BOOL CCustomPopupMenu::IsHwndRelated(HWND h) const
 {
 	if (!h || !::IsWindow(h)) return FALSE;
@@ -2476,6 +2626,8 @@ BOOL CCustomPopupMenu::IsHwndRelated(HWND h) const
 	return FALSE;
 }
 
+// オーナートップレベルに CCUSTOM_POPUP_RELAX_DISMISS_PROP があれば FG/KillFocus で閉じない
+// （PrintWindow/WGC が他窓を前面化してもメニュー維持。外側クリック/Esc は有効）
 static BOOL PopupOwnerRelaxesDismiss(CWnd* owner)
 {
 	if (!owner || !owner->GetSafeHwnd()) return FALSE;
@@ -2484,6 +2636,9 @@ static BOOL PopupOwnerRelaxesDismiss(CWnd* owner)
 	return (::GetProp(root, CCUSTOM_POPUP_RELAX_DISMISS_PROP) != NULL) ? TRUE : FALSE;
 }
 
+// 前面が自分チェーンか owner か。違えばモーダルが閉じる。
+// CCUSTOM_POPUP_RELAX_DISMISS_PROP（キャプチャ等）なら FG 変動では閉じない。
+// 外側クリック・Esc・WM_ACTIVATEAPP(FALSE) は別経路。
 BOOL CCustomPopupMenu::IsForegroundOurs() const
 {
 	HWND fg = ::GetForegroundWindow();
@@ -2497,6 +2652,8 @@ BOOL CCustomPopupMenu::IsForegroundOurs() const
 	return FALSE;
 }
 
+// 画面上の行矩形。sticky 以外は -m_scrollY。飛行中は +m_flightPad。
+// HitTest / 描画 / 子配置の共通座標。
 CRect CCustomPopupMenu::ItemViewRect(int idx) const
 {
 	if (idx < 0 || idx >= m_itemCount)
@@ -2509,6 +2666,10 @@ CRect CCustomPopupMenu::ItemViewRect(int idx) const
 	return r;
 }
 
+// 行チップ飛行開始。WS_EX_LAYERED を付け HWND を飛行余白つきに拡げる。
+// 余白は kChipChromaKey。PresentChipLayered→UpdateLayeredWindow(α抜き)。
+// 表示中の一枚→行だけ切替時は先に拡大 ULW を出して追従（点滅防止）。
+// 定着は CommitChipFlightSettle（m_bridgePanel で一枚パネルを強制）。
 void CCustomPopupMenu::BeginChipFlight()
 {
 	if (!GetSafeHwnd()) return;
@@ -2561,6 +2722,9 @@ void CCustomPopupMenu::BeginChipFlight()
 		SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOREDRAW);
 }
 
+// 飛行余白を畳んで通常サイズへ。optDst 済みなら HWND は既に最終位置。
+// 飛行サイズのときだけ +pad（二重加算すると一枚状態が右へずれる）。
+// RGN は解除。レイヤ自体の外しは呼び出し側。
 void CCustomPopupMenu::EndChipFlight()
 {
 	if (!GetSafeHwnd()) return;
@@ -2585,6 +2749,9 @@ void CCustomPopupMenu::EndChipFlight()
 	::SetWindowRgn(m_hWnd, NULL, FALSE);
 }
 
+// 32bit DIB にコピーし、マゼンタキーを α=0、他を α=255 にして ULW。
+// optDst!=NULL ならその画面座標に最終サイズで出す（畳む前の先送り）。
+// 通常飛行は窓サイズに合わせて余白を透明埋め。
 BOOL CCustomPopupMenu::PresentChipLayered(HDC hdcSrc, int w, int h, const POINT* optDst, BYTE opacity)
 {
 	if (!GetSafeHwnd() || !hdcSrc || w <= 0 || h <= 0) return FALSE;
@@ -2650,6 +2817,8 @@ BOOL CCustomPopupMenu::PresentChipLayered(HDC hdcSrc, int w, int h, const POINT*
 	return ok;
 }
 
+// ULW 解除後の同期焼き込み。BufferedPaint + MakeOpaque（Win11 の α=0 対策）。
+// 失敗時は素の BitBlt。
 void CCustomPopupMenu::BlitOpaqueToWindow(HDC hdcSrc, int w, int h)
 {
 	if (!GetSafeHwnd() || !hdcSrc || w <= 0 || h <= 0) return;
@@ -2668,6 +2837,8 @@ void CCustomPopupMenu::BlitOpaqueToWindow(HDC hdcSrc, int w, int h)
 	}
 }
 
+// UpdateLayeredWindow 使用中は Invalidate だけではコマが進まない。
+// PaintToDC→PresentChipLayered をタイマから直接呼ぶ。
 void CCustomPopupMenu::ForceChipPresent()
 {
 	if (!GetSafeHwnd()) return;
@@ -2686,6 +2857,10 @@ void CCustomPopupMenu::ForceChipPresent()
 	mDC.SelectObject(ob);
 }
 
+// 飛行→定着。phase=0 で焼き、m_bridgePanel で一枚パネルを強制（点滅防止）。
+// easeOutBack の行き過ぎを残したまま ULW 解除すると操作不能に見える。
+// 先に畳んでレイヤを外し、不透明 GDI へ同期焼き込みしてから子を出す。
+// 全窓 RedrawWindow は使わない。
 void CCustomPopupMenu::CommitChipFlightSettle()
 {
 	if (!GetSafeHwnd()) return;
@@ -2742,6 +2917,8 @@ void CCustomPopupMenu::CommitChipFlightSettle()
 	RefreshEmbeddedChildren();
 }
 
+// 背景アニメ用。可視子 HWND をリージョン除外して Invalidate。
+// InvalidateRect 全塗りは BufferedPaint が子を潰す。
 void CCustomPopupMenu::InvalidateBgOnly()
 {
 	if (!GetSafeHwnd()) return;
@@ -2761,6 +2938,8 @@ void CCustomPopupMenu::InvalidateBgOnly()
 	InvalidateRgn(&rgn, FALSE);
 }
 
+// 本文スクロール（sticky より下のみ）。先に SyncEmbeddedChildren。
+// 親は子領域を除外して塗る。範囲は 0..m_scrollMax。
 void CCustomPopupMenu::SetScrollY(int y)
 {
 	if (y < 0) y = 0;
@@ -2774,6 +2953,8 @@ void CCustomPopupMenu::SetScrollY(int y)
 	RefreshEmbeddedChildren();
 }
 
+// ホイール一段を SCROLL_STEP（DPI）×ノッチで SetScrollY。
+// scrollMax==0 なら FALSE（チェーンの次へ）。
 BOOL CCustomPopupMenu::OnWheelDelta(int delta)
 {
 	if (m_scrollMax <= 0) return FALSE;
@@ -2785,6 +2966,8 @@ BOOL CCustomPopupMenu::OnWheelDelta(int delta)
 	return TRUE;
 }
 
+// カーソル下の自分 or 開サブへホイールを渡す。モーダル Peek から呼ぶ。
+// ヒットしなければ FALSE。
 BOOL CCustomPopupMenu::HandleWheelInChain(CPoint screenPt, int delta)
 {
 	if (GetSafeHwnd()) {
@@ -2800,6 +2983,8 @@ BOOL CCustomPopupMenu::HandleWheelInChain(CPoint screenPt, int delta)
 	return FALSE;
 }
 
+// レ点バウンス（CCustomCheckBox と同じ 8→0、28ms）。
+// CloseChain 直前でも起動しておく（1 フレームでも見える）。
 void CCustomPopupMenu::StartCheckBounce(int idx)
 {
 	if (idx < 0 || idx >= m_itemCount) return;
@@ -2810,6 +2995,9 @@ void CCustomPopupMenu::StartCheckBounce(int idx)
 	InvalidateBgOnly();
 }
 
+// 出現アニメ中断→一枚状態。サブ遷移・クリック・所要超過で使う。
+// 行チップ中は CommitChipFlightSettle。マウス未移動でも HitTest で hot 同期。
+// その後 idle 背景用に kAnimTimer 33ms。
 void CCustomPopupMenu::SnapAnimToIdle()
 {
 	if (!GetSafeHwnd() || m_lineAnimPhase == 0) return;
@@ -2842,6 +3030,9 @@ void CCustomPopupMenu::SnapAnimToIdle()
 	SetTimer(kAnimTimer, 33, NULL);
 }
 
+// 指定行のサブを開く。出現中なら先に SnapAnimToIdle（飛行余白だと座標が狂う）。
+// 右に余地がなければ左へ。親と overlap して隙間クリックで全体が閉じないようにする。
+// z は子 CreatePopupAt が TOPMOST。
 void CCustomPopupMenu::OpenSubAt(int idx)
 {
 	if (idx < 0 || idx >= m_itemCount) return;
@@ -2879,6 +3070,9 @@ void CCustomPopupMenu::OpenSubAt(int idx)
 	sub->CreatePopupAt(CPoint(placeLeft ? xLeft : xRight, y), this, RootMenu());
 }
 
+// ホバー行。余白(idx<0)でも開サブへ渡る途中なら閉じない（橋矩形）。
+// FONT_FACE は ApplyPreviewFace。サブ行なら OpenSubAt、それ以外は CloseOpenSub。
+// Invalidate は背景のみ（BufferedPaint が子を潰す）。
 void CCustomPopupMenu::SetHot(int idx)
 {
 	if (idx == m_hot) return;
@@ -2949,12 +3143,16 @@ void CCustomPopupMenu::SetHot(int idx)
 	}
 }
 
+// ツールチップを現在 hot に合わせる。TTN_NEEDTEXT は OnTtnNeedText。
+// m_tipHot を更新して TTM_UPDATE。
 void CCustomPopupMenu::UpdateTip()
 {
 	m_tipHot = m_hot;
 	if (m_tip.GetSafeHwnd()) m_tip.SendMessage(TTM_UPDATE, 0, 0);
 }
 
+// ホバー／クリックは常に定着レイアウト座標。飛行中の見た目矩形は重なる。
+// sticky 帯（+flightPad）より上は先頭固定行のみ。セパレータはヒットしない。
 int CCustomPopupMenu::HitTest(CPoint pt) const
 {
 	// ホバー／クリックは常に定着レイアウト座標で判定。
@@ -2978,6 +3176,10 @@ int CCustomPopupMenu::HitTest(CPoint pt) const
 	return -1;
 }
 
+// メニュー全面を dc へ。phase!=0 の行チップはキー塗り + チップ or 橋渡し一枚。
+// m_bridgePanel / ChipFlightRowsAtRest のときは行枠のまま放置せずパネル化（点滅防止）。
+// idle は sticky を先に描き、本文をクリップ。右端にスクロールサム。
+// 飛行／退場中の内包コントロールは DrawInteractiveProxy。
 void CCustomPopupMenu::PaintToDC(CDC& dc)
 {
 	CRect rc; GetClientRect(&rc);
@@ -3264,6 +3466,9 @@ void CCustomPopupMenu::PaintToDC(CDC& dc)
 	dc.SelectObject(oldFont);
 }
 
+// 子 HWND をクリップ除外してメモリBMPへ PaintToDC。
+// チップ飛行中は ULW へ Present して return（GDI 面を汚さない）。
+// 通常は BufferedPaint+Opaque。MakeOpaque が子を潰したら Refresh。
 void CCustomPopupMenu::OnPaint()
 {
 	CPaintDC dc(this);
@@ -3325,8 +3530,12 @@ void CCustomPopupMenu::OnPaint()
 		RefreshEmbeddedChildren();
 }
 
+// 消去抑制。背景は OnPaint / ULW 側。チラつき防止。
+// TRUE を返してデフォルト塗りを止める。
 BOOL CCustomPopupMenu::OnEraseBkgnd(CDC*) { return TRUE; }
 
+// 定着後 Post の遅延 Refresh。phase!=0 では何もしない。
+// Sync 連打は点滅するので潰された子の再描画だけ。
 LRESULT CCustomPopupMenu::OnRefreshEmbedded(WPARAM, LPARAM)
 {
 	if (!GetSafeHwnd() || m_lineAnimPhase != 0)
@@ -3336,6 +3545,8 @@ LRESULT CCustomPopupMenu::OnRefreshEmbedded(WPARAM, LPARAM)
 	return 0;
 }
 
+// PrintWindow / キャプチャ向け。チップ中はキー塗り+PaintToDC。
+// 通常は BufferedPaint+Opaque。
 LRESULT CCustomPopupMenu::OnPrintClient(WPARAM wParam, LPARAM)
 {
 	if (HDC hdc = (HDC)wParam) {
@@ -3361,6 +3572,8 @@ LRESULT CCustomPopupMenu::OnPrintClient(WPARAM wParam, LPARAM)
 	return 0;
 }
 
+// 飛行余白が親を覆うときだけ HTTRANSPARENT。左折り返しで本体が親に重なるときは取る。
+// パッドの穴（チップも定着行も無い）も下へ通す。
 LRESULT CCustomPopupMenu::OnNcHitTest(CPoint point)
 {
 	// 飛行余白が親を覆うときだけ透過。左折り返しで本体が親に重なるときは
@@ -3395,6 +3608,8 @@ LRESULT CCustomPopupMenu::OnNcHitTest(CPoint point)
 	return CWnd::OnNcHitTest(point);
 }
 
+// 入場所要を超えた／静止したら Snap（ホバー不能の防止）。
+// カーソルが開サブ本体上なら親 hot を触らない。
 void CCustomPopupMenu::OnMouseMove(UINT nFlags, CPoint point)
 {
 	// タイマ定着が遅れても、操作開始で入場アニメを終わらせる（ホバーハイライト不能の防止）
@@ -3415,6 +3630,8 @@ void CCustomPopupMenu::OnMouseMove(UINT nFlags, CPoint point)
 	CWnd::OnMouseMove(nFlags, point);
 }
 
+// サブ行以外の hot をクリア。FONT_FACE ならプレビュー解除。
+// サブ行は Leave しても開いたまま（橋を渡るため）。
 void CCustomPopupMenu::OnMouseLeave()
 {
 	if (m_hot >= 0 && m_items[m_hot].kind != CCUSTOM_POPUP_SUB) {
@@ -3425,6 +3642,13 @@ void CCustomPopupMenu::OnMouseLeave()
 	}
 }
 
+// 骨格項目のクリック処理。TRUE なら通常コマンドへ落とさない。
+// アクリルは aero 切替+通知して閉じる。Soft強めは保存して描き直し。
+// KPI DL/再読込は WM_APP_KPI_PLUGIN をメインへ Post して閉じる。
+// MID_KPI / MID_VST は savedata.midPlayPrefer を書き、レ点を排他更新。
+// 続けて PlRefreshMidiPlayModes() でプレイリストの MID(VST)/MID(KPI) を即更新。
+// PlayList.h は IDD_PLAYLIST 欠落のためこの cpp から include しない（extern）。
+// フォント太字/斜体は即 Relayout。面確定と描画方法は保存して閉じる。
 BOOL CCustomPopupMenu::HandleChromeClick(int idx)
 {
 	if (idx < 0 || idx >= m_itemCount) return FALSE;
@@ -3453,6 +3677,9 @@ BOOL CCustomPopupMenu::HandleChromeClick(int idx)
 			main->PostMessage(WM_APP_KPI_PLUGIN, wp, 0);
 		return TRUE;
 	}
+	// MIDI再生 KPI/VST 優先。savedata.midPlayPrefer を書き、レ点を排他。
+	// PlayList.h は IDD_PLAYLIST 欠落のため include せず、extern PlRefreshMidiPlayModes()
+	// でプレイリストの MID(VST)/MID(KPI) 表示を即更新する。
 	if (it.id == CCUSTOM_POPUP_ID_MID_KPI || it.id == CCUSTOM_POPUP_ID_MID_VST) {
 		savedata.midPlayPrefer = (it.id == CCUSTOM_POPUP_ID_MID_VST) ? 1 : 0;
 		for (int i = 0; i < m_itemCount; ++i) {
@@ -3462,6 +3689,11 @@ BOOL CCustomPopupMenu::HandleChromeClick(int idx)
 		}
 		StartCheckBounce(idx);
 		MpPersistSavedataQuick();
+		{
+			// ファイル先頭の extern と同じ。PlayList.h は IDD_PLAYLIST 欠落のため include しない
+			extern void PlRefreshMidiPlayModes();
+			PlRefreshMidiPlayModes();
+		}
 		InvalidateBgOnly();
 		return TRUE;
 	}
@@ -3509,6 +3741,8 @@ BOOL CCustomPopupMenu::HandleChromeClick(int idx)
 	return FALSE;
 }
 
+// アニメ中も定着 HitTest で行決定。Snap はサブを開くときだけ（誤爆一枚化防止）。
+// 骨格は HandleChromeClick。CMD/CHECK は CloseChain(id)。
 void CCustomPopupMenu::OnLButtonDown(UINT nFlags, CPoint point)
 {
 	// アニメ中も見た目ヒットで行決定。定着スナップはサブを開くときだけ（OpenSubAt内）。
@@ -3527,9 +3761,13 @@ void CCustomPopupMenu::OnLButtonDown(UINT nFlags, CPoint point)
 	CWnd::OnLButtonDown(nFlags, point);
 }
 
+// 既定処理へ委譲。行決定は Down 側。
+// キャプチャ残留はモーダル終了時 PopupEatDismissClickTail。
 void CCustomPopupMenu::OnLButtonUp(UINT nFlags, CPoint point)
 { CWnd::OnLButtonUp(nFlags, point); }
 
+// Esc で閉じる（子 Edit フォーカス中も）。上下で enabled 行へ。
+// Right でサブ、Left で親へ戻る。Enter は骨格 or CMD/CHECK/SUB。
 void CCustomPopupMenu::OnKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags)
 {
 	CWnd* f = GetFocus();
@@ -3568,6 +3806,9 @@ void CCustomPopupMenu::OnKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags)
 	CWnd::OnKeyDown(nChar, nRepCnt, nFlags);
 }
 
+// フォーカスがチェーン外なら CloseChain(0)。
+// RELAX_DISMISS（画面キャプチャ等の偽 KillFocus）では閉じない。
+// 外側クリックと Esc は RunModalLoop 側。
 void CCustomPopupMenu::OnKillFocus(CWnd* pNewWnd)
 {
 	CWnd::OnKillFocus(pNewWnd);
@@ -3582,6 +3823,8 @@ void CCustomPopupMenu::OnKillFocus(CWnd* pNewWnd)
 		root->CloseChain(0);
 }
 
+// この窓上のホイール。チェーン跨ぎは RunModalLoop の HandleWheelInChain。
+// クライアント座標へ直して OnWheelDelta。
 BOOL CCustomPopupMenu::OnMouseWheel(UINT nFlags, short zDelta, CPoint pt)
 {
 	ScreenToClient(&pt);
@@ -3590,6 +3833,8 @@ BOOL CCustomPopupMenu::OnMouseWheel(UINT nFlags, short zDelta, CPoint pt)
 	return CWnd::OnMouseWheel(nFlags, zDelta, pt);
 }
 
+// 内包スライダー / Range のスクロール通知。item を同期して cb。
+// Range は NotifyRangeFromHwnd（nSBCode / dragTarget 付き）。
 void CCustomPopupMenu::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
 {
 	if (!pScrollBar) return;
@@ -3613,6 +3858,8 @@ void CCustomPopupMenu::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar
 	CWnd::OnHScroll(nSBCode, nPos, pScrollBar);
 }
 
+// 該当 Range の pos/選択/A-B を item へ写し rangeCb。
+// ラベルの % 表示更新のため背景 Invalidate。
 void CCustomPopupMenu::NotifyRangeFromHwnd(HWND hwnd, UINT nSBCode)
 {
 	for (int i = 0; i < m_itemCount; ++i) {
@@ -3631,6 +3878,8 @@ void CCustomPopupMenu::NotifyRangeFromHwnd(HWND hwnd, UINT nSBCode)
 	}
 }
 
+// 内包ボタン BN_CLICKED。cb の後、closeOnClick なら CloseChain(id)。
+// id==0 でも閉じる設定なら Track は 0。
 void CCustomPopupMenu::NotifyButtonFromHwnd(HWND hwnd)
 {
 	for (int i = 0; i < m_itemCount; ++i) {
@@ -3644,6 +3893,8 @@ void CCustomPopupMenu::NotifyButtonFromHwnd(HWND hwnd)
 	}
 }
 
+// EN_CHANGE / KILLFOCUS。Create 初期値は m_suppressEditNotify で無視。
+// editCb へ現在テキスト。
 void CCustomPopupMenu::NotifyEditFromHwnd(HWND hwnd)
 {
 	if (m_suppressEditNotify) return;
@@ -3657,6 +3908,8 @@ void CCustomPopupMenu::NotifyEditFromHwnd(HWND hwnd)
 	}
 }
 
+// Combo または List の選択変更。choiceSel を更新して choiceCb。
+// Combo は物理 index（フィルタ無し前提）。
 void CCustomPopupMenu::NotifyChoiceFromHwnd(HWND hwnd, BOOL fromList)
 {
 	for (int i = 0; i < m_itemCount; ++i) {
@@ -3681,6 +3934,8 @@ void CCustomPopupMenu::NotifyChoiceFromHwnd(HWND hwnd, BOOL fromList)
 	}
 }
 
+// 子からの EN_/CBN_/LBN_/BN_ を Notify* へ振り分け。
+// 親 CWnd::OnCommand も呼ぶ。
 BOOL CCustomPopupMenu::OnCommand(WPARAM wParam, LPARAM lParam)
 {
 	const UINT code = HIWORD(wParam);
@@ -3694,6 +3949,8 @@ BOOL CCustomPopupMenu::OnCommand(WPARAM wParam, LPARAM lParam)
 	return CWnd::OnCommand(wParam, lParam);
 }
 
+// ツールチップ文字列。m_tipHot の hasTip を LPSTR_TEXTCALLBACK へ。
+// 無ければ FALSE。
 BOOL CCustomPopupMenu::OnTtnNeedText(UINT, NMHDR* pNMHDR, LRESULT* pResult)
 {
 	*pResult = 0;
@@ -3705,6 +3962,8 @@ BOOL CCustomPopupMenu::OnTtnNeedText(UINT, NMHDR* pNMHDR, LRESULT* pResult)
 	return TRUE;
 }
 
+// z-order 無視で親行ホバーを同期（開サブの即閉じ用）。タイマから呼ぶ。
+// 子孫本体が親に重なっているときは親判定しない。
 void CCustomPopupMenu::SyncHotFromCursor()
 {
 	// サブHWNDが親を覆っていても、カーソル下の親行でホバーを同期（非サブ→即 CloseOpenSub）
@@ -3736,6 +3995,10 @@ void CCustomPopupMenu::SyncHotFromCursor()
 		CloseOpenSub(); // hot は合っているがサブが残っている場合
 }
 
+// 淫女／行アニメ／定着／レ点バウンス。
+// EXPAND は定位置行の外接で RGN。チップ入場は ForceChipPresent。
+// 所要超過 or atRest で SnapAnimToIdle。idle は背景のみ再描画。
+// phase: 0 idle / 1 enter / 2 exit（退場は現状短いフェード優先）。
 void CCustomPopupMenu::OnTimer(UINT_PTR nIDEvent)
 {
 	if (nIDEvent == kInwomanTimer) {
@@ -3829,6 +4092,12 @@ void CCustomPopupMenu::OnTimer(UINT_PTR nIDEvent)
 	CWnd::OnTimer(nIDEvent);
 }
 
+// Track の心。m_tracking 中 Peek+Dispatch。WM_QUIT は再投稿。
+// 入場中は 16ms MsgWait（長い timeout だと WM_TIMER が合成されずチップが止まる）。
+// 定着後は 33ms で IsForegroundOurs（ACTIVATEAPP はキューに乗らない）。
+// 外側クリックで閉じる。右は reopen 武装、左は閉じるだけ。DOWN の対 UP も食う。
+// RELAX_DISMISS でもアプリ非アクティブと外側クリックは有効。
+// 他トップレベルへ移ったあとは owner を SetForeground しない。
 void CCustomPopupMenu::RunModalLoop()
 {
 	m_tracking = TRUE; m_done = FALSE; m_result = 0;
@@ -3957,6 +4226,10 @@ void CCustomPopupMenu::RunModalLoop()
 		::SetForegroundWindow(hCap);
 }
 
+// 表示エントリ。ネスト禁止（GetTrackingRoot があれば 0）。
+// EnsureChromePrefix → s_trackingRoot を先に立ててから CreatePopupAt（Soft3D 抑制）。
+// HWND は TOPMOST + NOACTIVATE。RunModalLoop 後にタイマキックと reopen 投函。
+// 骨格コマンドは 0 を返す。選択コマンド ID が戻り値。
 UINT CCustomPopupMenu::Track(CPoint screenPt, CWnd* pOwner)
 {
 	// AnimateOut 中などにネストして呼ばれると二重メニューになる
@@ -3994,6 +4267,8 @@ UINT CCustomPopupMenu::Track(CPoint screenPt, CWnd* pOwner)
 	return m_result;
 }
 
+// id 完全一致の先頭 index。id==0 は -1（骨格セパレータ等と衝突しない）。
+// 内部用。公開 FindItemById はこれを呼ぶ。
 int CCustomPopupMenu::FindItemIndexById(UINT id) const
 {
 	if (id == 0) return -1;
@@ -4002,23 +4277,31 @@ int CCustomPopupMenu::FindItemIndexById(UINT id) const
 	return -1;
 }
 
+// 公開照会。id の項目 index。無ければ -1。
+// Track 中も可。id==0 は探さない。
 int CCustomPopupMenu::FindItemById(UINT id) const
 {
 	return FindItemIndexById(id);
 }
 
+// CCustomPopupItemKind。範囲外は -1。
+// セパレータ／サブ／内包の判定用。
 int CCustomPopupMenu::GetItemKind(int idx) const
 {
 	if (idx < 0 || idx >= m_itemCount) return -1;
 	return m_items[idx].kind;
 }
 
+// 項目のコマンド ID。範囲外は 0。
+// 骨格 ID もそのまま返す（Track 出口とは別）。
 UINT CCustomPopupMenu::GetItemId(int idx) const
 {
 	if (idx < 0 || idx >= m_itemCount) return 0;
 	return m_items[idx].id;
 }
 
+// スライダー位置。HWND があれば実値、なければ item.sliderPos。
+// 種類不一致は FALSE。Track 中も可。
 BOOL CCustomPopupMenu::GetSliderPos(UINT id, int* outPos) const
 {
 	const int idx = FindItemIndexById(id);
@@ -4032,6 +4315,8 @@ BOOL CCustomPopupMenu::GetSliderPos(UINT id, int* outPos) const
 	return TRUE;
 }
 
+// スライダー位置を書き、HWND があれば SetPos。範囲クランプ。
+// ラベル再描画のため背景 Invalidate。
 BOOL CCustomPopupMenu::SetSliderPos(UINT id, int pos)
 {
 	const int idx = FindItemIndexById(id);
@@ -4047,6 +4332,8 @@ BOOL CCustomPopupMenu::SetSliderPos(UINT id, int pos)
 	return TRUE;
 }
 
+// Edit 現在文字列。HWND 優先、なければ choiceSet[0]。
+// buf 必須。
 BOOL CCustomPopupMenu::GetEditText(UINT id, wchar_t* buf, int bufCch) const
 {
 	const int idx = FindItemIndexById(id);
@@ -4062,6 +4349,8 @@ BOOL CCustomPopupMenu::GetEditText(UINT id, wchar_t* buf, int bufCch) const
 	return TRUE;
 }
 
+// Combo/List の選択 index。HWND があれば実選択。
+// 該当なしは FALSE。
 BOOL CCustomPopupMenu::GetChoiceSel(UINT id, int* outSel) const
 {
 	const int idx = FindItemIndexById(id);
@@ -4084,6 +4373,8 @@ BOOL CCustomPopupMenu::GetChoiceSel(UINT id, int* outSel) const
 	return FALSE;
 }
 
+// Range のヘッド／ループ／A-B。HWND があれば実値。
+// 各 out は NULL 可。
 BOOL CCustomPopupMenu::GetRangeValues(UINT id, int* pos, int* selMin, int* selMax, int* abA, int* abB) const
 {
 	const int idx = FindItemIndexById(id);
@@ -4104,9 +4395,13 @@ BOOL CCustomPopupMenu::GetRangeValues(UINT id, int* pos, int* selMin, int* selMa
 	return TRUE;
 }
 
+// Track 中のルート。GetTrackingRoot が dangling this を返さないよう HWND も保持
 CCustomPopupMenu* CCustomPopupMenu::s_trackingRoot = NULL;
 HWND CCustomPopupMenu::s_trackingHwnd = NULL;
 
+// 現在 Track 中のルート。無ければ NULL。
+// HWND 破棄済みなら dangling this を返さず NULL（s_trackingHwnd で検知）。
+// Soft3D / Speana の重さガードがこれを見る。
 CCustomPopupMenu* CCustomPopupMenu::GetTrackingRoot()
 {
 	if (s_trackingRoot == NULL)
@@ -4120,6 +4415,8 @@ CCustomPopupMenu* CCustomPopupMenu::GetTrackingRoot()
 	return s_trackingRoot;
 }
 
+// Track 中の再生追従。ドラッグ中は無視。id==0 なら先頭の Range。
+// 範囲も更新してラベルを描き直す。
 BOOL CCustomPopupMenu::LiveMirrorRange(UINT id, int pos, int selMin, int selMax, int mn, int mx, int abA, int abB)
 {
 	int idx = -1;
@@ -4152,6 +4449,8 @@ BOOL CCustomPopupMenu::LiveMirrorRange(UINT id, int pos, int selMin, int selMax,
 	return TRUE;
 }
 
+// プログレス位置。HWND があれば実値。
+// 種類不一致は FALSE。
 BOOL CCustomPopupMenu::GetProgressPos(UINT id, int* outPos) const
 {
 	const int idx = FindItemIndexById(id);
@@ -4165,6 +4464,8 @@ BOOL CCustomPopupMenu::GetProgressPos(UINT id, int* outPos) const
 	return TRUE;
 }
 
+// プログレス位置を書き、HWND があれば SetPos。
+// ラベル同期のため背景 Invalidate。
 BOOL CCustomPopupMenu::SetProgressPos(UINT id, int pos)
 {
 	const int idx = FindItemIndexById(id);
@@ -4180,6 +4481,8 @@ BOOL CCustomPopupMenu::SetProgressPos(UINT id, int pos)
 	return TRUE;
 }
 
+// 内包スライダー HWND ラッパ。未 Create / 不一致は NULL。
+// Track 中の直接操作・スタイル変更用。
 CCustomSliderCtrl* CCustomPopupMenu::GetSliderCtrl(UINT id)
 {
 	const int idx = FindItemIndexById(id);
@@ -4189,6 +4492,8 @@ CCustomSliderCtrl* CCustomPopupMenu::GetSliderCtrl(UINT id)
 	return &m_sliders[it.sliderIndex];
 }
 
+// 内包 Edit。未 Create / 不一致は NULL。
+// 初期値セットは EN_CHANGE に注意。
 CCustomEdit* CCustomPopupMenu::GetEditCtrl(UINT id)
 {
 	const int idx = FindItemIndexById(id);
@@ -4198,6 +4503,8 @@ CCustomEdit* CCustomPopupMenu::GetEditCtrl(UINT id)
 	return &m_edits[it.editIndex];
 }
 
+// 内包 Combo。未 Create / 不一致は NULL。
+// ドロップダウンリスト HWND は IsPointInChain も見ている。
 CCustomComboBox* CCustomPopupMenu::GetComboCtrl(UINT id)
 {
 	const int idx = FindItemIndexById(id);
@@ -4207,6 +4514,8 @@ CCustomComboBox* CCustomPopupMenu::GetComboCtrl(UINT id)
 	return &m_combos[it.comboIndex];
 }
 
+// 内包 ListBox。未 Create / 不一致は NULL。
+// スクロールで画面外なら Sync が Hide。
 CCustomListBox* CCustomPopupMenu::GetListCtrl(UINT id)
 {
 	const int idx = FindItemIndexById(id);
@@ -4216,6 +4525,8 @@ CCustomListBox* CCustomPopupMenu::GetListCtrl(UINT id)
 	return &m_lists[it.listIndex];
 }
 
+// 内包 Range。未 Create / 不一致は NULL。
+// LiveMirrorRange より細かい操作が必要なとき。
 CCustomRangeSliderCtrl* CCustomPopupMenu::GetRangeSliderCtrl(UINT id)
 {
 	const int idx = FindItemIndexById(id);
@@ -4225,6 +4536,8 @@ CCustomRangeSliderCtrl* CCustomPopupMenu::GetRangeSliderCtrl(UINT id)
 	return &m_ranges[it.rangeIndex];
 }
 
+// 内包 Progress。未 Create / 不一致は NULL。
+// SetProgressPos で足りる場合はそちら。
 CCustomProgressCtrl* CCustomPopupMenu::GetProgressCtrl(UINT id)
 {
 	const int idx = FindItemIndexById(id);
@@ -4234,6 +4547,8 @@ CCustomProgressCtrl* CCustomPopupMenu::GetProgressCtrl(UINT id)
 	return &m_progresses[it.progressIndex];
 }
 
+// 内包 Button。未 Create / 不一致は NULL。
+// キャプション変更など。閉じる動作は buttonCloseOnClick。
 CCustomStandardButton* CCustomPopupMenu::GetButtonCtrl(UINT id)
 {
 	const int idx = FindItemIndexById(id);

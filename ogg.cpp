@@ -187,11 +187,12 @@ LRESULT COggApp::ProcessWndProcException(CException* e, const MSG* pMsg)
 	return CWinApp::ProcessWndProcException(e, pMsg);
 }
 
+// MIDI モニタの追加同期。TRUE は返さない（メッセージループを独占する）。
 BOOL COggApp::OnIdle(LONG lCount)
 {
 	if (og && og->m_MidiMonitorDlg && ::IsWindow(og->m_MidiMonitorDlg->GetSafeHwnd()))
 		og->m_MidiMonitorDlg->IdlePulse();
-	return CWinApp::OnIdle(lCount);
+	return CWinApp::OnIdle(lCount); // TRUE を返すと OnIdle が回り続けて他の UI を食う
 }
 
 BOOL COggApp::InitInstance()

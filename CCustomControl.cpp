@@ -19,9 +19,24 @@
 #pragma comment(lib, "imm32.lib")
 #pragma comment(lib, "windowscodecs.lib")
 
+// ============================================================================
+// CCustom アーキテクチャ（このファイル: 共通ヘルパ + CCustom* サブクラス）
+//
+// 親ダイアログ = DWM アクリル / Mica ガラス。ExtendFrame(-1) でクライアント全体が
+// ガラス源になる。子は原則不透明に塗る（BufferedPaint / CCustomOpaqueFixer）。
+// 例外: ラベル・スライダー等はクロマキーでガラスを透かす。
+//
+// CCC_AERO_CHROMA_KEY は RGB(1,1,1)。黒 RGB(0,0,0) は本文文字に使うためキーにできない。
+// SetAeroMode(TRUE)  = ガラスを透かす（クロマ blit）
+// SetAeroMode(FALSE) = ソリッド（不透明面）。ポップアップ配下は常に FALSE。
+//
+// CCC_* はここに集約した描画ヘルパ。CCustom* は標準 Win32/MFC 控件のサブクラス。
+// ============================================================================
+
+// Per-Monitor DPI。Win10+ は GetDpiForWindow、失敗時は LOGPIXELSX。未取得は 96。
 static UINT CCC_GetControlDpi(HWND hWnd)
 {
-    if (!hWnd) return 96;
+    if (!hWnd) return 96; // 96 = 100% DPI の規約値（MulDiv の分母）
     typedef UINT(WINAPI* PFN_GetDpiForWindow)(HWND);
     static PFN_GetDpiForWindow s_fn = nullptr;
     static BOOL s_got = FALSE;
@@ -42,6 +57,7 @@ static UINT CCC_GetControlDpi(HWND hWnd)
     return (dpi > 0) ? dpi : 96;
 }
 
+// 96dpi 基準の px を対象 DPI へ。ダイアログ単位ではなく「デザイン時ピクセル」。
 static int CCC_ScaleDpi(int value, UINT dpi)
 {
     return MulDiv(value, (int)dpi, 96);
@@ -50,6 +66,8 @@ static int CCC_ScaleDpi(int value, UINT dpi)
 static BOOL CCC_CaptionIsGlyphOnly(const CString& s);
 static void CCC_CaptionApplySharedIcon(CCustomStandardButton* p, UINT iconId);
 
+// ドロップシャドウが矩形外へはみ出す量。フィット縮小の予算から引く。
+// nSD=角度(度) nDist=距離 nBlur=ぼかし。bSE=FALSE なら pad=0。
 static void CCC_ComputeShadowPad(int nSD, int nDist, int nBlur, BOOL bSE, UINT dpi,
     int& padX, int& padY)
 {
@@ -57,7 +75,7 @@ static void CCC_ComputeShadowPad(int nSD, int nDist, int nBlur, BOOL bSE, UINT d
     if (!bSE || nDist <= 0 || nBlur <= 0) return;
     const int dist = CCC_ScaleDpi(nDist, dpi);
     const int blur = CCC_ScaleDpi(nBlur, dpi);
-    const double rad = nSD * 3.14159265358979323846 / 180.0;
+    const double rad = nSD * 3.14159265358979323846 / 180.0; // 度→ラジアン
     padX = (int)floor(dist * cos(rad) + (blur + 1) / 2 + 0.5);
     padY = (int)floor(dist * sin(rad) + (blur + 1) / 2 + 0.5);
     if (padX < 0) padX = 0;
@@ -65,10 +83,12 @@ static void CCC_ComputeShadowPad(int nSD, int nDist, int nBlur, BOOL bSE, UINT d
 }
 
 #ifdef SubclassWindow
-#undef SubclassWindow
+#undef SubclassWindow // MFC マクロと CWnd::SubclassWindow が衝突するため
 #endif
 
 #if CCUSTOM_AERO_SUPPORT
+// 祖先にアクリル有効な CCustomDialog / CCustomDialogEx があるか。
+// 子の透過判定（CCC_UseTransPaint）と OpaqueFixer 要否の入口。
 BOOL CCC_IsBlurDialogChild(HWND hWnd)
 {
     for (HWND h = hWnd; h; h = ::GetParent(h))
@@ -125,6 +145,8 @@ static BOOL CCC_UseTransPaint(HWND hWnd, BOOL bAeroMode)
     return bAeroMode && !CCC_IsBlurDialogChild(hWnd);
 }
 
+// クロマキー子の見た目は親のガラス面。子 Invalidate だけでは残像が残るので
+// 親の該当矩形も消す。不透明子では何もしない（親消去は兄弟を抉る）。
 void CCC_InvalidateParent(HWND hWnd, BOOL bAeroMode)
 {
     if (!CCC_UseTransPaint(hWnd, bAeroMode)) return;
@@ -133,7 +155,7 @@ void CCC_InvalidateParent(HWND hWnd, BOOL bAeroMode)
     RECT rc = {};
     ::GetWindowRect(hWnd, &rc);
     ::MapWindowPoints(NULL, hParent, (LPPOINT)&rc, 2);
-    ::InflateRect(&rc, 6, 6);
+    ::InflateRect(&rc, 6, 6); // 影・角デコのはみ出し
     ::InvalidateRect(hParent, &rc, FALSE);
 }
 
@@ -146,13 +168,15 @@ static MARGINS CCC_CaptionHostMargins(HWND hWnd)
     return margins;
 }
 
+// Win11 のアクリル/Mica を再適用。savedata.aero 切替やキャプション常時ガラス時。
+// SYSTEMBACKDROP_TYPE=3 + REDIRECTIONBITMAP_ALPHA + ExtendFrame(-1) が揃わないと黒帯。
 void CCC_RefreshDwmBlur(HWND hWnd)
 {
     if (!hWnd || !::IsWindow(hWnd) || !CCC_IsWin11()) return;
     if (!CCC_IsAeroEnabled() && !CCC_AcrylicCaption(hWnd)) return;
     BOOL compositionEnabled = FALSE;
     if (!::DwmIsCompositionEnabled(&compositionEnabled) || !compositionEnabled) return;
-    const int backdropType = 3;
+    const int backdropType = 3; // DWMSBT_TRANSIENTWINDOW（アクリル系。2=Mica）
     ::DwmSetWindowAttribute(hWnd, DWMWA_SYSTEMBACKDROP_TYPE, &backdropType, sizeof(backdropType));
 #ifndef DWMWA_REDIRECTIONBITMAP_ALPHA
 #define DWMWA_REDIRECTIONBITMAP_ALPHA 39
@@ -163,6 +187,8 @@ void CCC_RefreshDwmBlur(HWND hWnd)
     ::DwmExtendFrameIntoClientArea(hWnd, &margins);
 }
 
+// 先にキー色で塗り潰してから TransparentBlt。残像防止（Win10 / 非 DWM 経路）。
+// Win11 アクリルでは α が残るので CCC_BlitChromaNF 側を使う。
 static void CCC_ClearDestBlt(HDC hdcDest, int x, int y, int w, int h,
     HDC hdcSrc, int srcX, int srcY, COLORREF clrKey)
 {
@@ -185,6 +211,8 @@ static void CCC_MakeRectOpaquePreserve(HDC hdc, const RECT& rc);
 #endif
 static void CCC_DrawInwomanDlgBody(CDC* pDC, const CRect& rc);
 
+// ダイアログ WM_ERASEBKGND 共通。Win11 アクリルは消去しない（ガラス源を残す）。
+// キャプション帯だけアクリルのときは本文だけ不透明塗り。淫女は本文に重ねる。
 static BOOL DlgOnEraseBkgnd(CDC* pDC, CBrush& brDlg, BOOL bAeroEnabled, HWND hWnd)
 {
     UNREFERENCED_PARAMETER(hWnd);
@@ -195,7 +223,7 @@ static BOOL DlgOnEraseBkgnd(CDC* pDC, CBrush& brDlg, BOOL bAeroEnabled, HWND hWn
     {
         CRect r;
         ::GetClientRect(hWnd, &r);
-        pDC->FillSolidRect(&r, RGB(248, 248, 248));
+        pDC->FillSolidRect(&r, RGB(248, 248, 248)); // Win10 フォールバック（ガラス不可）
         return TRUE;
     }
 #else
@@ -227,6 +255,8 @@ static BOOL DlgOnEraseBkgnd(CDC* pDC, CBrush& brDlg, BOOL bAeroEnabled, HWND hWn
     return TRUE;
 }
 
+// ダイアログ WM_PAINT のアクリル側。Win11 は薄いグレーで隙間だけ（子は ClipChildren）。
+// 実体のガラスは DWM。ここをべた塗りするとアクリルが死ぬので BeginPaint だけでも可。
 static void DlgOnPaintAero(CWnd* pWnd, BOOL bAeroEnabled)
 {
 #if CCUSTOM_AERO_SUPPORT
@@ -235,7 +265,7 @@ static void DlgOnPaintAero(CWnd* pWnd, BOOL bAeroEnabled)
         CPaintDC dc(pWnd);
         CRect rect;
         pWnd->GetClientRect(&rect);
-        dc.FillSolidRect(&rect, RGB(250, 250, 250));
+        dc.FillSolidRect(&rect, RGB(250, 250, 250)); // 隙間の薄い下地（子の下は見えない）
         return;
     }
 #else
@@ -266,7 +296,7 @@ static void CCC_FillRectOpaqueBits(HDC hdc, const RECT& rc, COLORREF clr)
 
     // 再利用DIB + AlphaBlend（毎フレ BeginBufferedPaint + 画素ループを避ける）
     {
-        static CCC_ChromaBlitCache s_fillCaches[4];
+        static CCC_ChromaBlitCache s_fillCaches[4]; // サイズ別 4 スロット（交互サイズで破棄しない）
         static COLORREF s_fillClr[4] = { 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu };
         static unsigned s_fillNext = 0;
         CCC_ChromaBlitCache* pCache = nullptr;
@@ -288,7 +318,7 @@ static void CCC_FillRectOpaqueBits(HDC hdc, const RECT& rc, COLORREF clr)
         }
         if (pCache && pCache->pBits && pCache->hdcDib) {
             if (s_fillClr[hit] != clr) {
-                const UINT32 px = 0xFF000000u
+                const UINT32 px = 0xFF000000u // A=255 不透明。DIB は 0xAARRGGBB
                     | ((UINT32)GetRValue(clr) << 16)
                     | ((UINT32)GetGValue(clr) << 8)
                     | (UINT32)GetBValue(clr);
@@ -356,6 +386,8 @@ static void CCC_FillRectOpaqueBits(HDC hdc, const RECT& rc, COLORREF clr)
     ::DeleteObject(hDib);
 }
 
+// BufferedPaint バッファを α=0 でクリア。未クリアだと前回の不透明画素が残る。
+// rowLength==w なら一括 ZeroMemory、違うなら行ストライド付き。
 static void CCC_InitBPClear(HPAINTBUFFER hBP, int w, int h)
 {
     RGBQUAD* pPixels = nullptr;
@@ -374,11 +406,14 @@ static void CCC_InitBPClear(HPAINTBUFFER hBP, int w, int h)
     }
 }
 
+// COLORREF(0x00BBGGRR) → DIB の 0x00RRGGBB マスク。α は見ない。
 static UINT32 CCC_RgbMask(COLORREF clr)
 {
     return (UINT32)(GetRValue(clr) << 16) | (UINT32)(GetGValue(clr) << 8) | GetBValue(clr);
 }
 
+// 32bit DIB のキー色画素を α=0、それ以外を α=255。クロマ blit の本体。
+// キーは CCC_AERO_CHROMA_KEY(1,1,1)。黒文字を抜かないこと。
 static void CCC_AlphaFromChromaRect(void* pBits, int dibW, int dibH, const RECT& rc, COLORREF clrKey)
 {
     if (!pBits || dibW <= 0 || dibH <= 0) return;
@@ -411,6 +446,7 @@ static void CCC_AlphaFromChromaRect(void* pBits, int dibW, int dibH, const RECT&
     }
 }
 
+// 全面版。部分更新は CCC_AlphaFromChromaRect。
 static void CCC_AlphaFromChroma(void* pBits, int w, int h, COLORREF clrKey)
 {
     if (!pBits || w <= 0 || h <= 0) return;
@@ -418,6 +454,7 @@ static void CCC_AlphaFromChroma(void* pBits, int w, int h, COLORREF clrKey)
     CCC_AlphaFromChromaRect(pBits, w, h, rc, clrKey);
 }
 
+// top-down 32bit DIB。α 付き合成（GdiAlphaBlend / AC_SRC_ALPHA）用。
 static HBITMAP CCC_CreateAlphaDib32(HDC hdcRef, int w, int h, void** ppBits)
 {
     if (ppBits) *ppBits = nullptr;
@@ -441,6 +478,7 @@ static HBITMAP CCC_CreateAlphaDib32(HDC hdcRef, int w, int h, void** ppBits)
     return hBmp;
 }
 
+// 再利用 DIB を破棄。Ensure のサイズ不一致時やコントロール破棄時。
 void CCC_ChromaBlitCache::Release()
 {
     if (hdcDib) {
@@ -456,6 +494,7 @@ void CCC_ChromaBlitCache::Release()
     dibH = 0;
 }
 
+// 指定サイズの 32bit DIB+DC を用意。同じサイズなら再利用（毎フレ Create 回避）。
 BOOL CCC_ChromaBlitCache::Ensure(HDC hdcRef, int w, int h)
 {
     if (w <= 0 || h <= 0 || !hdcRef) return FALSE;
@@ -477,6 +516,7 @@ BOOL CCC_ChromaBlitCache::Ensure(HDC hdcRef, int w, int h)
     return TRUE;
 }
 
+// 縦スクロール用: 下の行を上へ memmove。新規帯は呼び出し側が UpdateRect。
 void CCC_ChromaBlitCache::ScrollRows(int y, int height, int scrollPx)
 {
     if (!pBits || dibW <= 0 || scrollPx <= 0 || height <= scrollPx || y < 0 || y + height > dibH)
@@ -488,6 +528,7 @@ void CCC_ChromaBlitCache::ScrollRows(int y, int height, int scrollPx)
     memmove(dst, src, (size_t)preserveH * (size_t)dibW * sizeof(UINT32));
 }
 
+// 矩形内を左へ scrollPx ずらす（波形スクロール用）。α 付き画素をそのまま memmove。
 void CCC_ChromaBlitCache::ScrollCols(int x, int y, int width, int height, int scrollPx)
 {
     // 矩形内を左へ scrollPx ずらす(波形スクロール用)。アルファ付きピクセルをそのまま移動。
@@ -503,6 +544,7 @@ void CCC_ChromaBlitCache::ScrollCols(int x, int y, int width, int height, int sc
     }
 }
 
+// 差分矩形を SRCCOPY 後、キー色だけ α=0。ピアノ/波形の部分更新向き。
 BOOL CCC_ChromaBlitCache::UpdateRect(HDC hdcSrc, int srcX, int srcY, int dx, int dy, int rw, int rh, COLORREF clrKey)
 {
     if (!hdcSrc || rw <= 0 || rh <= 0 || !pBits || !hdcDib) return FALSE;
@@ -520,6 +562,7 @@ BOOL CCC_ChromaBlitCache::UpdateRect(HDC hdcSrc, int srcX, int srcY, int dx, int
     return TRUE;
 }
 
+// クロマ無し。BitBlt 後 α=255。キャプションガラス下の本文提示用。
 BOOL CCC_ChromaBlitCache::UpdateOpaqueRect(HDC hdcSrc, int srcX, int srcY, int dx, int dy, int rw, int rh)
 {
     if (!hdcSrc || rw <= 0 || rh <= 0 || !pBits || !hdcDib) return FALSE;
@@ -536,6 +579,7 @@ BOOL CCC_ChromaBlitCache::UpdateOpaqueRect(HDC hdcSrc, int srcX, int srcY, int d
     return TRUE;
 }
 
+// 単色塗り + キー色を α=0。ベタ塗りのあと文字だけ残すとき。
 BOOL CCC_ChromaBlitCache::FillOpaqueRect(int x, int y, int rw, int rh, COLORREF color, COLORREF chromaKey)
 {
     if (!hdcDib || !pBits || rw <= 0 || rh <= 0) return FALSE;
@@ -551,6 +595,7 @@ BOOL CCC_ChromaBlitCache::FillOpaqueRect(int x, int y, int rw, int rh, COLORREF 
     return TRUE;
 }
 
+// 矩形の α を強制 255。オーバーレイ焼き込み後の「ガラスに穴」防止。
 void CCC_ChromaBlitCache::MakeRectOpaque(int x, int y, int rw, int rh)
 {
     if (!pBits || rw <= 0 || rh <= 0 || dibW <= 0) return;
@@ -570,6 +615,7 @@ void CCC_ChromaBlitCache::MakeRectOpaque(int x, int y, int rw, int rh)
     }
 }
 
+// キャッシュ DIB の部分矩形を画面へ。GdiAlphaBlend 優先（BeginBufferedPaint は 60fps で重い）。
 BOOL CCC_ChromaBlitCache::BlitRect(HDC hdcDest, int x, int y, int w, int h)
 {
     if (!hdcDest || w <= 0 || h <= 0 || !pBits || !hdcDib || dibW <= 0 || dibH <= 0) return FALSE;
@@ -594,6 +640,7 @@ BOOL CCC_ChromaBlitCache::BlitRect(HDC hdcDest, int x, int y, int w, int h)
     return TRUE;
 }
 
+// 全面提示。dest は画面座標（キャプション下 y>0 でも buffer 原点と混同しない）。
 BOOL CCC_ChromaBlitCache::BlitFull(HDC hdcDest, int x, int y, int w, int h)
 {
     if (!hdcDest || w <= 0 || h <= 0 || !pBits || !hdcDib || dibW != w || dibH != h) return FALSE;
@@ -617,6 +664,8 @@ BOOL CCC_ChromaBlitCache::BlitFull(HDC hdcDest, int x, int y, int w, int h)
     return TRUE;
 }
 
+// キャッシュ DIB へ描いてキー→α、GdiAlphaBlend。失敗時のみ BeginBufferedPaint。
+// 先にキー色で全面初期化してから Stretch/BitBlt（残像防止）。
 static BOOL CCC_BlitChromaCachedRect(HDC hdcDest, const RECT& rect, HDC hdcSrc, int srcX, int srcY,
     int destW, int destH, int srcW, int srcH, COLORREF clrKey, CCC_ChromaBlitCache& cache)
 {
@@ -708,6 +757,7 @@ static BOOL CCC_BlitChromaNFRect(HDC hdcDest, const RECT& rect, HDC hdcSrc, int 
     return TRUE;
 }
 
+// アクリル上の矩形を α=0 に戻す（隙間をガラスにする）。clrKey は互換のため残置。
 void CCC_ClearRectChroma(HDC hdcDest, const RECT& rect, COLORREF clrKey)
 {
     const int w = rect.right - rect.left;
@@ -724,6 +774,8 @@ void CCC_ClearRectChroma(HDC hdcDest, const RECT& rect, COLORREF clrKey)
     }
 }
 
+// アクリルホスト上に定数αの矩形。本文パネルの透け・淫女の火照り帯。
+// alpha>=255 は不透明経路。SourceConstantAlpha のみ（プレマルチ不要）。
 void CCC_FillRectAlpha(HDC hdc, const RECT& rc, COLORREF clr, BYTE alpha)
 {
 	const int w = rc.right - rc.left;
@@ -766,6 +818,7 @@ void CCC_FillRectAlpha(HDC hdc, const RECT& rc, COLORREF clr, BYTE alpha)
 	::DeleteObject(hDib);
 }
 
+// 子の隙間だけガラス（α=0）。親 OnPaint から。pPreserveRect はバナー等を残す除外。
 void CCC_PaintAeroGaps(CDC& dc, CWnd* pWnd, const RECT* pPreserveRect)
 {
     if (!pWnd || !pWnd->GetSafeHwnd()) return;
@@ -788,6 +841,7 @@ void CCC_PaintAeroGaps(CDC& dc, CWnd* pWnd, const RECT* pPreserveRect)
     CCC_ClearRectChroma(dc.GetSafeHdc(), rcClip, CCC_AERO_CHROMA_KEY);
 }
 
+// DC クリップから可視の子 HWND 矩形を差し引く。隙間塗りが子の上に乗らないように。
 void CCC_ClipNoChildren(CDC& dc, CWnd* pWnd)
 {
     if (!pWnd || !pWnd->GetSafeHwnd()) return;
@@ -815,7 +869,7 @@ static void CCC_BlitToRectOpaque(HDC hdcDest, const RECT& rect, HDC hdcSrc, int 
 {
     if (destW <= 0 || destH <= 0 || !hdcDest || !hdcSrc) return;
 
-    static CCC_ChromaBlitCache s_opaqueCaches[8];
+    static CCC_ChromaBlitCache s_opaqueCaches[8]; // バナー等の複数サイズ共存
     static unsigned s_opaqueNext = 0;
     CCC_ChromaBlitCache* pCache = nullptr;
     for (auto& c : s_opaqueCaches) {
@@ -865,6 +919,7 @@ static void CCC_BlitToRectOpaque(HDC hdcDest, const RECT& rect, HDC hdcSrc, int 
         ::BitBlt(hdcDest, rect.left, rect.top, destW, destH, hdcSrc, srcX, srcY, SRCCOPY);
 }
 
+// 拡縮つき不透明 blit。キャプションガラス下のバナー/ジャケット等。
 void CCC_BlitStretchOpaque(HDC hdcDest, int x, int y, int destW, int destH,
     HDC hdcSrc, int srcX, int srcY, int srcW, int srcH)
 {
@@ -872,6 +927,8 @@ void CCC_BlitStretchOpaque(HDC hdcDest, int x, int y, int destW, int destH,
     CCC_BlitToRectOpaque(hdcDest, rect, hdcSrc, srcX, srcY, destW, destH, srcW, srcH, TRUE);
 }
 
+// 互換クロマ: memDC にキー塗り→Stretch/BitBlt→TransparentBlt。
+// Win11 DWM では α が残るので NF 経路を優先すること。
 static void CCC_BlitToRectChroma(HDC hdcDest, const RECT& rect, HDC hdcSrc, int srcX, int srcY,
     int destW, int destH, int srcW, int srcH, COLORREF clrKey, BOOL bStretch)
 {
@@ -897,6 +954,7 @@ static void CCC_BlitToRectChroma(HDC hdcDest, const RECT& rect, HDC hdcSrc, int 
     dcSrc.Detach();
 }
 
+// 拡縮つきクロマ（旧 TransparentBlt 経路）。ちらつき許容のフォールバック。
 void CCC_BlitStretchChroma(HDC hdcDest, int x, int y, int destW, int destH,
     HDC hdcSrc, int srcX, int srcY, int srcW, int srcH, COLORREF clrKey)
 {
@@ -904,6 +962,7 @@ void CCC_BlitStretchChroma(HDC hdcDest, int x, int y, int destW, int destH,
     CCC_BlitToRectChroma(hdcDest, rect, hdcSrc, srcX, srcY, destW, destH, srcW, srcH, clrKey, TRUE);
 }
 
+// 拡縮つき残像なしクロマ。4 スロットプール（サイズ交互で毎フレ Ensure しない）。
 void CCC_BlitStretchNF(HDC hdcDest, int x, int y, int destW, int destH,
     HDC hdcSrc, int srcX, int srcY, int srcW, int srcH, COLORREF clrKey)
 {
@@ -932,12 +991,14 @@ void CCC_BlitStretchNF(HDC hdcDest, int x, int y, int destW, int destH,
         CCC_BlitToRectChroma(hdcDest, rect, hdcSrc, srcX, srcY, destW, destH, srcW, srcH, clrKey, TRUE);
 }
 
+// 等倍クロマ。UI アニメには CCC_BlitChromaNF（残像なし）を使う。
 void CCC_BlitChroma(HDC hdcDest, int x, int y, int w, int h, HDC hdcSrc, int srcX, int srcY, COLORREF clrKey)
 {
     RECT rect = { x, y, x + w, y + h };
     CCC_BlitToRectChroma(hdcDest, rect, hdcSrc, srcX, srcY, w, h, w, h, clrKey, FALSE);
 }
 
+// 等倍・残像なしクロマ。静的 1 本キャッシュ。失敗時は一時 DIB → 旧 TransparentBlt。
 void CCC_BlitChromaNF(HDC hdcDest, int x, int y, int w, int h, HDC hdcSrc, int srcX, int srcY, COLORREF clrKey)
 {
     // UI スレッド想定。DIB を再利用して毎フレーム CreateDIBSection を避ける。
@@ -950,6 +1011,7 @@ void CCC_BlitChromaNF(HDC hdcDest, int x, int y, int w, int h, HDC hdcSrc, int s
         CCC_BlitChroma(hdcDest, x, y, w, h, hdcSrc, srcX, srcY, clrKey);
 }
 
+// 呼び出し側キャッシュ付き等倍クロマ。失敗時は一時 DIB（静的 NF キャッシュは使わない）。
 BOOL CCC_BlitChromaCached(HDC hdcDest, int x, int y, int w, int h,
     HDC hdcSrc, int srcX, int srcY, COLORREF clrKey, CCC_ChromaBlitCache& cache)
 {
@@ -963,11 +1025,13 @@ BOOL CCC_BlitChromaCached(HDC hdcDest, int x, int y, int w, int h,
     return TRUE;
 }
 
+// DWM アクリル向けエイリアス。中身は残像なしクロマ。
 void CCC_BlitChromaDwm(HDC hdcDest, int x, int y, int w, int h, HDC hdcSrc, int srcX, int srcY, COLORREF clrKey)
 {
     CCC_BlitChromaNF(hdcDest, x, y, w, h, hdcSrc, srcX, srcY, clrKey);
 }
 
+// Win11+aero は NF（α 合成）、それ以外は ClearDestBlt（TransparentBlt）。
 static void CCC_BlitChromaTrans(HDC hdcDest, int x, int y, int w, int h,
     HDC hdcSrc, int srcX, int srcY, COLORREF clrKey)
 {
@@ -981,6 +1045,7 @@ static void CCC_BlitChromaTrans(HDC hdcDest, int x, int y, int w, int h,
 // ============================================================================
 // アイコンを透明色を抜いて描画する関数
 // ============================================================================
+// ImageList アイコンを mask 色抜きで中央配置。ボタン/リストのグリフ用。
 static void DrawTransparentIcon(CDC * pDC, CImageList * pIL, int idx, CRect rc, COLORREF mask)
 {
     if (!pIL || idx < 0) return;
@@ -1008,6 +1073,7 @@ static void DrawTransparentIcon(CDC * pDC, CImageList * pIL, int idx, CRect rc, 
     mDC.DeleteDC();
 }
 
+// 2色 GradientFill。nDir は度。45/135 付近で横、それ以外は縦。bR で始終点入替。
 static void DrawGradientBackground(CDC* pDC, const CRect& rect, COLORREF cS, COLORREF cE, int nDir)
 {
     int d = nDir % 360;
@@ -1039,6 +1105,7 @@ static void DrawGradientBackground(CDC* pDC, const CRect& rect, COLORREF cS, COL
 }
 
 #if CCUSTOM_AERO_SUPPORT
+// 背景がクロマキーか。透過ラベルの影省略判定などに使う。
 static BOOL CCC_IsChromaBg(COLORREF clrBg)
 {
     return clrBg == CCC_AERO_CHROMA_KEY;
@@ -1094,6 +1161,7 @@ static void CCC_RemapSolidColorInDC(CDC& dc, const CRect& r, COLORREF clrFrom, C
     s_mem.SelectObject(old);
 }
 #else
+// アクリル無効ビルド。キー判定は常に偽。
 static BOOL CCC_IsChromaBg(COLORREF) { return FALSE; }
 #endif
 
@@ -1113,6 +1181,7 @@ constexpr int kSegFontPool = 48;
 SegFontSlot g_segFontPool[kSegFontPool];
 unsigned g_segFontRR = 0;
 
+// LOGFONT 一致で再利用。不一致はラウンドロビンで上書き（48 スロット）。
 CFont* CCC_GetPooledSegFont(const LOGFONT& lt)
 {
     for (int i = 0; i < kSegFontPool; ++i) {
@@ -1151,6 +1220,7 @@ constexpr int kSegPenPool = 64;
 SegPenSlot g_segPenPool[kSegPenPool];
 unsigned g_segPenRR = 0;
 
+// 幅+色で再利用。スライダー枠線の毎フレーム CreatePen を止める。
 CPen* CCC_GetPooledPen(int width, COLORREF color)
 {
     if (width < 1) width = 1;
@@ -1183,6 +1253,7 @@ constexpr int kSegBrushPool = 32;
 SegBrushSlot g_segBrushPool[kSegBrushPool];
 unsigned g_segBrushRR = 0;
 
+// ブラシプール。スライダー等の毎フレーム CreateSolidBrush 嵐を止める。
 CBrush* CCC_GetPooledBrush(COLORREF color)
 {
     for (int i = 0; i < kSegBrushPool; ++i) {
@@ -1205,6 +1276,7 @@ CBrush* CCC_GetPooledBrush(COLORREF color)
 }
 } // namespace
 
+// テキスト影用 top-down 32bit DIB。α は後段で書き込む。
 static HBITMAP CCC_CreateShadowDib32(HDC hdcRef, int w, int h, void** ppBits)
 {
     if (ppBits) *ppBits = nullptr;
@@ -1230,6 +1302,7 @@ static HBITMAP CCC_CreateShadowDib32(HDC hdcRef, int w, int h, void** ppBits)
     return hBmp;
 }
 
+// 分離ボックスぼかし（横→縦）。テキスト影の nBlur。半径0は何もしない。
 static void CCC_BoxBlurAlpha(BYTE* alpha, BYTE* tmp, int w, int h, int radius)
 {
     if (!alpha || !tmp || radius <= 0 || w <= 0 || h <= 0) return;
@@ -1263,6 +1336,9 @@ static void CCC_BoxBlurAlpha(BYTE* alpha, BYTE* tmp, int w, int h, int radius)
     }
 }
 
+// ソフトドロップシャドウ。黒文字を α マップ→ボックスぼかし→プレマルチ合成。
+// bAeroTrans 時は peakA を下げてもクロマ段で半透明が黒縁になるため呼び出し側で省略。
+// DIB/α バッファは静的再利用（毎描画 CreateDIBSection を抑制）。
 static void DrawTextShadow(CDC* pDC, const CRect& rect, const CString& str, UINT fmt,
     COLORREF clrS, int nSD, int nDist, int nBlur, COLORREF clrBg, BOOL bAeroTrans,
     float scaleX = 1.0f, float scaleY = 1.0f)
@@ -1389,7 +1465,7 @@ static void DrawTextShadow(CDC* pDC, const CRect& rect, const CString& str, UINT
     const int tintR = (GetRValue(clrS) * 3 + 32) / 4;
     const int tintG = (GetGValue(clrS) * 3 + 28) / 4;
     const int tintB = (GetBValue(clrS) * 3 + 40) / 4;
-    const int peakA = bAeroTrans ? 88 : 112;
+    const int peakA = bAeroTrans ? 88 : 112; // 透過時は薄く（それでも呼び出し側は省略推奨）
 
     for (int y = 0; y < bh; ++y) {
         UINT32* row = px + y * s_shadowCache.capW;
@@ -1413,6 +1489,7 @@ static void DrawTextShadow(CDC* pDC, const CRect& rect, const CString& str, UINT
     // hDib はキャッシュ保持のため Delete しない
 }
 
+// 影付き単色文字。bAeroTrans 時はソフトシャドウ省略（クロマで黒縁になる）。
 static void DrawTextWithShadow(CDC* pDC, const CRect& rect, const CString& str, UINT fmt, COLORREF clrT, COLORREF clrS, int nSD, int nDist, int nBlur, BOOL bSE, COLORREF clrBg, BOOL bAeroTrans = FALSE)
 {
     // アクリル透過は最終段がクロマキー(α=0/255)のため、ソフトシャドウの
@@ -1424,6 +1501,7 @@ static void DrawTextWithShadow(CDC* pDC, const CRect& rect, const CString& str, 
     pDC->DrawText(str, rt, fmt);
 }
 
+// グラデ文字。4px スライスでクリップ描画。透過時は影省略。斜めは 45/135/225/315。
 static void DrawTextWithGradient(CDC* pDC, const CRect& rect, const CString& str, UINT fmt, COLORREF cS, COLORREF cE, int nDir, COLORREF clrSh, int nSD, int nDist, int nBlur, BOOL bSE, COLORREF clrBg, int nActW = -1, BOOL bFB = FALSE, BOOL bAeroTrans = FALSE)
 {
     if (str.IsEmpty()) return;
@@ -1452,7 +1530,7 @@ static void DrawTextWithGradient(CDC* pDC, const CRect& rect, const CString& str
     if (nd < 0) nd += 360;
 
     pDC->SetBkMode(TRANSPARENT);
-    const int kB = 4;
+    const int kB = 4; // グラデスライス幅 px（細すぎると重い）
 
     auto doSlice = [&](CRect sl)
     {
@@ -1564,6 +1642,7 @@ static void DrawShine(CDC* pDC, int cx, int cy, int rx, int ry, COLORREF c = RGB
     pDC->SelectObject(ob);
 }
 
+// ハート（8点ポリゴン）。リスト行デコ・淫女ハート目。べた塗りなのでクロマでも安全。
 static void DrawHeart(CDC* pDC, CRect rc, COLORREF c)
 {
     CBrush br(c);
@@ -1590,6 +1669,7 @@ static void DrawHeart(CDC* pDC, CRect rc, COLORREF c)
     pDC->SelectObject(op);
 }
 
+// 4本十字の星。選択行のアクセント。線幅2。
 static void DrawStar(CDC* pDC, int cx, int cy, int sz, COLORREF c)
 {
     CPen p(PS_SOLID, 2, c);
@@ -1607,6 +1687,7 @@ static void DrawStar(CDC* pDC, int cx, int cy, int sz, COLORREF c)
     pDC->SelectObject(op);
 }
 
+// 音符（玉+符幹+旗）。ボタン装飾用。
 static void DrawMusicNote(CDC* pDC, CRect rc, COLORREF c)
 {
     CBrush br(c);
@@ -1638,6 +1719,7 @@ static void DrawMusicNote(CDC* pDC, CRect rc, COLORREF c)
     pDC->SelectObject(op);
 }
 
+// ダイヤ（外枠クリスタル+内側色）。リスト/ボタンの宝石デコ。
 static void DrawDiamond(CDC* pDC, CRect rc, COLORREF c)
 {
     int cx = rc.CenterPoint().x;
@@ -1681,6 +1763,7 @@ static void DrawDiamond(CDC* pDC, CRect rc, COLORREF c)
     pDC->SelectObject(op);
 }
 
+// 王冠（7頂点+3宝石）。選択強調用。
 static void DrawCrown(CDC* pDC, int cx, int cy, int sz, COLORREF c)
 {
     CBrush br(c);
@@ -1708,6 +1791,7 @@ static void DrawCrown(CDC* pDC, int cx, int cy, int sz, COLORREF c)
     pDC->SelectObject(op);
 }
 
+// 点々のレース線。リスト行の区切り。8px 間隔で交互にオフセット。
 static void DrawLaceLine(CDC* pDC, int x1, int y1, int x2, int y2, COLORREF c)
 {
     CPen p(PS_SOLID, 1, c);
@@ -1727,6 +1811,7 @@ static void DrawLaceLine(CDC* pDC, int x1, int y1, int x2, int y2, COLORREF c)
     pDC->SelectObject(op);
 }
 
+// リボン（中央帯+左右ループ）。Edit 枠の脇デコなど。
 static void DrawRibbon(CDC* pDC, CRect rc, COLORREF c)
 {
     CBrush br(c);
@@ -1757,6 +1842,7 @@ static void DrawRibbon(CDC* pDC, CRect rc, COLORREF c)
     pDC->SelectObject(op);
 }
 
+// 5弁の花。リスト行アイコンの一種。
 static void DrawFlower(CDC* pDC, int cx, int cy, int sz, COLORREF c)
 {
     CBrush br(c);
@@ -1785,6 +1871,7 @@ static void DrawFlower(CDC* pDC, int cx, int cy, int sz, COLORREF c)
     pDC->SelectObject(op);
 }
 
+// はなまる（8弁+中心ハート）。達成/選択のデコ。cC=芯 cP=花弁。
 static void DrawHanamaru(CDC* pDC, CRect rc, COLORREF cC, COLORREF cP)
 {
     int cx = rc.CenterPoint().x;
@@ -1869,6 +1956,7 @@ static void DrawHanamaru(CDC* pDC, CRect rc, COLORREF cC, COLORREF cP)
 
 static void DrawSoftJkChip(CDC* pDC, const CRect& rc, int animTick, BOOL hot);
 
+// ボタン角のつる+小さな花。bPA=対角ペアの向き。押下時は 1px オフセット。
 static void DrawDecorations(CDC* pDC, CRect rect, BOOL bPA, BOOL bPushed)
 {
     CPen pV(PS_SOLID, 1, COLOR_VINE_DECO);
@@ -1931,17 +2019,19 @@ static void DrawDecorations(CDC* pDC, CRect rect, BOOL bPA, BOOL bPushed)
     pDC->SelectObject(ob);
 }
 
+// ラベルが複数行か。フィット縮小の経路分岐。
 static BOOL CCC_TextHasBreak(const CString& str)
 {
     return str.Find(_T('\n')) >= 0 || str.Find(_T('\r')) >= 0;
 }
 
+// フィット用の必要サイズ。改行ありは DT_CALCRECT、なしは GetTextExtent。
 static CSize CCC_MeasureFitText(CDC* pDC, const CString& str, BOOL hasBreak)
 {
     if (!pDC)
         return CSize(0, 0);
     if (hasBreak) {
-        CRect mc(0, 0, 32767, 32767);
+        CRect mc(0, 0, 32767, 32767); // DT_CALCRECT 用の十分広い仮矩形
         pDC->DrawText(str, &mc, DT_CALCRECT | DT_LEFT | DT_TOP | DT_NOPREFIX);
         return CSize((std::max)(0, mc.Width()), (std::max)(0, mc.Height()));
     }
@@ -2008,7 +2098,7 @@ static void DrawFitControlText(CDC* pDC, CRect rc, const CString& str, UINT fmt,
     if (scaleX < minScaleX)
         scaleX = minScaleX;
     if (scaleX < 0.99f)
-        scaleX *= 0.98f;
+        scaleX *= 0.98f; // 右端クリップ余裕
 
     int yTop = rc.top;
     if ((fmt & DT_VCENTER) && need.cy < availH)
@@ -2061,6 +2151,7 @@ static void DrawFitControlText(CDC* pDC, CRect rc, const CString& str, UINT fmt,
     restoreFont();
 }
 
+// ボタン中央テキスト。無効は灰、押下は 1px ずらしてフィット縮小（下限 0.50）。
 static void DrawSmartText(CDC* pDC, CRect rect, CString str, BOOL bDis, BOOL bPushed)
 {
     if (str.IsEmpty()) return;
@@ -2075,6 +2166,8 @@ static void DrawSmartText(CDC* pDC, CRect rect, CString str, BOOL bDis, BOOL bPu
     DrawFitControlText(pDC, rt, str, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX, 0.50f);
 }
 
+// ラベル本文。収まるなら影/グラデ直描き。足りなければ WorldTransform で X（必要なら Y）縮小。
+// アクリル透過時は半透明影を焼かない（クロマで黒縁になる）。SaveDC 失敗時は省略記号。
 static void DrawFittedText(CDC& dc, const CRect& rect, const CString& str, UINT fmt,
     BOOL bGrad, COLORREF cGS, COLORREF cGE, int nDir,
     COLORREF clrSh, int nSD, int nDist, int nBlur, BOOL bSE, COLORREF clrBg, BOOL bPreferWide,
@@ -2129,7 +2222,7 @@ static void DrawFittedText(CDC& dc, const CRect& rect, const CString& str, UINT 
     float scaleX = 1.0f;
     if (needW > nBudgetW)
         scaleX = (float)nBudgetW / (float)needW;
-    scaleX *= 0.98f;
+    scaleX *= 0.98f; // 右端クリップ余裕
     if (scaleX < 0.50f) scaleX = 0.50f;
     if (scaleX > 1.0f) scaleX = 1.0f;
 
@@ -2226,6 +2319,7 @@ static void CCC_ExtractSavLrc(CString& text, BOOL& bSav, BOOL& bLrc, CString ext
     text = head + rest;
 }
 
+// 印チップの地色。16/32ch=藤、MONO/LR/数値=薄荷、その他マップ=薄金。
 static COLORREF CCC_MarkChipBg(const CString& lab)
 {
     if (lab.CompareNoCase(_T("16ch")) == 0)
@@ -2318,6 +2412,7 @@ static int CCC_DrawSavLrcChips(CDC* pDC, int x, int midY, BOOL bSav, BOOL bLrc,
     return x;
 }
 
+// チップ列の消費幅（描画せず）。リスト列幅計算用。パディングは DrawMarkChip と揃える。
 static int CCC_MeasureSavLrcChips(CDC* pDC, BOOL bSav, BOOL bLrc, const CString extra[], int extraN)
 {
     if (!pDC || (!bSav && !bLrc && extraN <= 0)) return 0;
@@ -2348,6 +2443,7 @@ static int CCC_MeasureSavLrcChips(CDC* pDC, BOOL bSav, BOOL bLrc, const CString 
     return w;
 }
 
+// リストセル文字列。収まるなら直描き、足りなければ X 縮小（下限 0.12）。省略記号は SaveDC 失敗時のみ。
 static void DrawListSubitemCellText(CDC* pDC, const CString& str, const CRect& rcInner, UINT uAlignFmt = DT_LEFT)
 {
     if (!pDC || str.IsEmpty() || rcInner.Width() <= 0 || rcInner.Height() <= 0) return;
@@ -2389,7 +2485,7 @@ static void DrawListSubitemCellText(CDC* pDC, const CString& str, const CRect& r
         float wd = (float)sz.cx * scale;
         if (wd <= (float)nBudget) break;
         scale *= (float)nBudget / wd;
-        if (scale < 0.12f) { scale = 0.12f; break; }
+        if (scale < 0.12f) { scale = 0.12f; break; } // 12% 未満は読めないので打ち切り
     }
     scale *= 0.95f;
     if (scale < 0.12f) scale = 0.12f;
@@ -2411,6 +2507,7 @@ static void DrawListSubitemCellText(CDC* pDC, const CString& str, const CRect& r
     pDC->RestoreDC(-1);
 }
 
+// DrawSmartText の fmt 指定版（左寄せチェック等）。フィット下限 0.50。
 static void DrawSmartText2(CDC* pDC, CRect rect, CString str, UINT fmt, BOOL bDis, BOOL bPushed)
 {
     if (str.IsEmpty()) return;
@@ -2425,6 +2522,7 @@ static void DrawSmartText2(CDC* pDC, CRect rect, CString str, UINT fmt, BOOL bDi
     DrawFitControlText(pDC, rl, str, fmt, 0.50f);
 }
 
+// 定数αの単色塗り。1x1 ビットマップを引き伸ばす（毎呼び出し CreateBitmap は GDI 断片化）。
 static void FillRectAlpha(CDC* pDC, const CRect& rc, COLORREF clr, BYTE alpha)
 {
     // 単色塗りは 1x1 を引き伸ばして AlphaBlend する。
@@ -2477,6 +2575,8 @@ static void CCC_InwomanPulse(DWORD t, double& breath, double& twitch, double& cl
 static void CCC_DrawVibrator(CDC* pDC, int cx, int cy, int sz, double t, double twitch, double breath, double climax, BOOL bAeroTrans);
 static void CCC_DrawLoveFluid(CDC* pDC, const CRect& rc, double breath, double twitch, double climax, BOOL bAeroTrans);
 
+// Soft2D/3D の非プレマルチ画素をプレマルチへ直し PresentAlpha。
+// UI スレッド専用。s_uiSoftBusy と対で再入禁止。
 static void SoftPremultPresent(GdiSoftFB::Framebuffer& fb, HDC dst, int dx, int dy, int w, int h, BYTE constA)
 {
     if (!fb.color || !fb.hdc || fb.w != w || fb.h != h || !dst) return;
@@ -3097,7 +3197,8 @@ static void DrawLooseRibbon(CDC* pDC, const CRect& rc, COLORREF c, float angleDe
 }
 
 // ============================================================================
-// 隠し機能: 裏演出 (入口は F12×7 → F11×7 → F12 を2秒押し、出口は F12×5)
+// 【隠し機能 / イースターエッグ】inwoman / CCC_Iw*
+// ユーザー向けヘルプ・操作説明には載せない。入口/出口の手順は CCC_InwomanHotkey のみ。
 // ============================================================================
 static UINT_PTR g_inwomanTimer = 0;
 static int      g_f12Count = 0;
@@ -3107,8 +3208,9 @@ static DWORD    g_seqT0 = 0;      // 現バースト最初の時刻
 static DWORD    g_armT0 = 0;      // 直前段階の達成時刻
 static DWORD    g_holdT0 = 0;     // F12 押し始め
 
-enum { IW_BURST_MS = 3000, IW_GAP_MS = 4000, IW_HOLD_MS = 2000 };
+enum { IW_BURST_MS = 3000, IW_GAP_MS = 4000, IW_HOLD_MS = 2000 }; // 閾値の意味は CCC_InwomanHotkey
 
+// 連打シーケンスを初期化。タイムアウト・誤キー・出入り完了時。
 static void CCC_IwSeqReset()
 {
     g_f12Count = 0;
@@ -3140,6 +3242,7 @@ static BOOL CALLBACK CCC_InwomanInvalidateChild(HWND hChild, LPARAM)
     return TRUE;
 }
 
+// 可視トップ窓を列挙。aero=0 のとき親も消さず無効化、子は OwnerDraw のみ。
 static BOOL CALLBACK CCC_InwomanTopProc(HWND hTop, LPARAM)
 {
     if (::IsWindowVisible(hTop))
@@ -3151,11 +3254,13 @@ static BOOL CALLBACK CCC_InwomanTopProc(HWND hTop, LPARAM)
     return TRUE;
 }
 
+// UI スレッドの全トップ窓へアニメ Invalidate。タイマーから。
 static void CCC_InwomanInvalidateAll()
 {
     ::EnumThreadWindows(::GetCurrentThreadId(), CCC_InwomanTopProc, 0);
 }
 
+// 隠し演出 ON（savedata.inwoman=1）。シーケンスはリセット。ヘルプ非掲載。
 static void CCC_IwEnter()
 {
     CCC_IwSeqReset();
@@ -3163,6 +3268,7 @@ static void CCC_IwEnter()
     CCC_InwomanInvalidateAll();
 }
 
+// 最終段の長押しをタイマー側でも見る（キーリピート欠落対策）。手順は CCC_InwomanHotkey。
 static void CCC_IwPollHold(DWORD now)
 {
     if (g_iwSeq != 2)
@@ -3182,6 +3288,7 @@ static void CCC_IwPollHold(DWORD now)
         CCC_IwEnter();
 }
 
+// 180ms 周期。未入場なら長押し判定のみ。入場中はキャプチャ/メニュー中以外で再描画。
 static void CALLBACK CCC_InwomanTimerProc(HWND, UINT, UINT_PTR, DWORD)
 {
     const DWORD now = ::GetTickCount();
@@ -3195,6 +3302,7 @@ static void CALLBACK CCC_InwomanTimerProc(HWND, UINT, UINT_PTR, DWORD)
     CCC_InwomanInvalidateAll();
 }
 
+// 冪等。各ダイアログ PreTranslate / サブクラス時に呼ぶ。間隔は入力飢餓を避けるため 180ms。
 void CCC_StartInwomanTimer()
 {
     if (g_inwomanTimer == 0)
@@ -3202,6 +3310,7 @@ void CCC_StartInwomanTimer()
         g_inwomanTimer = ::SetTimer(NULL, 0, 180, CCC_InwomanTimerProc);
 }
 
+// 隠し演出の入口/出口。各メインダイアログの PreTranslateMessage から。ヘルプ非掲載。
 BOOL CCC_InwomanHotkey(MSG* pMsg, CWnd* pWnd)
 {
     UNREFERENCED_PARAMETER(pWnd);
@@ -3418,6 +3527,7 @@ static void CCC_InwomanBitBlt(HDC dst, int w, int h, HDC src, COLORREF gap)
     ::BitBlt(dst, ox, oy, w, h, src, 0, 0, SRCCOPY);
 }
 
+// α 付き最終転送。ピクン時は座標だけずらす（隙間塗りは fixer 側が下地済み）。
 static void CCC_InwomanAlphaBlend(HDC dst, int w, int h, HDC src)
 {
     if (!dst || !src || w <= 0 || h <= 0) return;
@@ -3606,7 +3716,7 @@ static void CCC_DrawVibrator(CDC* pDC, int cx, int cy, int sz, double t, double 
     const double iku = (climax > twitch) ? climax : twitch;
     cx += (int)(2 * sin(t / 11.0) + 2 * cos(t / 7.0) + 3 * twitch + 4 * climax);
     cy += (int)(1 * sin(t / 9.0) - 2 * twitch - 3 * climax);
-    const int kind = ((int)(t / 2600)) & 3; // 0ロータ 1電マ 2吸引 3クンニ
+    const int kind = ((int)(t / 2600)) & 3; // 約2.6秒で切替。0ロータ 1電マ 2吸引 3クンニ
     const COLORREF body = RGB(236, 110, 188);
     const COLORREF tip  = RGB(255, 190, 230);
     const COLORREF fluid = RGB(240, 244, 255);
@@ -3738,13 +3848,14 @@ static const UINT kIwResId[IW_COUNT] = {
     IDR_IW_FLUID, IDR_IW_ROTOR, IDR_IW_VIBE
 };
 
+// RCDATA の IWJ1 ジャムを PNG バイト列へ。ヘルプ非掲載の裏リソース。
 static BOOL CCC_IwUnjam(const BYTE* src, DWORD n, std::vector<BYTE>& out)
 {
     if (!src || n < 8 || memcmp(src, "IWJ1", 4) != 0)
         return FALSE;
     DWORD sz = 0;
     memcpy(&sz, src + 4, 4);
-    if (sz == 0 || sz > 8 * 1024 * 1024 || 8 + sz > n)
+    if (sz == 0 || sz > 8 * 1024 * 1024 || 8 + sz > n) // 8MB 上限（壊れたリソース対策）
         return FALSE;
     out.resize(sz);
     const BYTE* p = src + 8;
@@ -3753,6 +3864,7 @@ static BOOL CCC_IwUnjam(const BYTE* src, DWORD n, std::vector<BYTE>& out)
     return TRUE;
 }
 
+// WIC で PNG→32bit PBGRA DIB。COM 未初期化ならここで CoInitialize。
 static BOOL CCC_IwDecodePng(const BYTE* png, DWORD n, CCC_IwBmp& b)
 {
     if (!png || n < 24)
@@ -3783,7 +3895,7 @@ static BOOL CCC_IwDecodePng(const BYTE* png, DWORD n, CCC_IwBmp& b)
     if (FAILED(conv->Initialize(frame, GUID_WICPixelFormat32bppPBGRA, WICBitmapDitherTypeNone,
         NULL, 0.0, WICBitmapPaletteTypeCustom))) goto done;
     conv->GetSize(&w, &h);
-    if (w < 2 || h < 2 || w > 2048 || h > 2048) goto done;
+    if (w < 2 || h < 2 || w > 2048 || h > 2048) goto done; // 異常サイズ拒否
     bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
     bi.bmiHeader.biWidth = (LONG)w;
     bi.bmiHeader.biHeight = -(LONG)h;
@@ -3816,6 +3928,7 @@ done:
     return ok;
 }
 
+// スチルを遅延ロード。失敗も tried にして再試行しない。
 static BOOL CCC_IwEnsure(int idx)
 {
     if (idx < 0 || idx >= IW_COUNT)
@@ -3841,6 +3954,7 @@ static BOOL CCC_IwEnsure(int idx)
     return CCC_IwDecodePng(png.data(), (DWORD)png.size(), b);
 }
 
+// 裏スチルを定数αで拡縮合成。alpha<8 は無視（ノイズ防止）。
 static void CCC_IwBlit(CDC* pDC, int x, int y, int dw, int dh, int idx, BYTE alpha)
 {
     if (!pDC || dw < 2 || dh < 2 || alpha < 8)
@@ -4051,6 +4165,7 @@ static void CCC_DrawInwomanDlgBody(CDC* pDC, const CRect& rc)
         (BYTE)(90 + (int)(50 * heat)));
 }
 
+// aero=0 の GDI キャンバスへ裸体オーバーレイ。アクリル時はガラスと干渉するので描かない。
 void CCC_DrawInwomanOnRect(CDC* pDC, const CRect& rc)
 {
     if (!pDC || !CCC_IsInwoman() || CCC_IsAeroEnabled())
@@ -4058,6 +4173,7 @@ void CCC_DrawInwomanOnRect(CDC* pDC, const CRect& rc)
     CCC_DrawInwomanDlgBody(pDC, rc);
 }
 
+// クライアント本文（キャプション帯を除く）へ。ピアノロール等の GDI 面。
 void CCC_DrawInwomanOnClient(CDC* pDC, HWND hWnd)
 {
     if (!pDC || !hWnd || !CCC_IsInwoman() || CCC_IsAeroEnabled())
@@ -4070,12 +4186,14 @@ void CCC_DrawInwomanOnClient(CDC* pDC, HWND hWnd)
     CCC_DrawInwomanDlgBody(pDC, r);
 }
 
+// カスタムキャプション描画の前に本文へ淫女を重ねる（aero=0 のみ中で弾く）。
 void CCC_CaptionPaintGdi(CDC& dc, HWND hDlg)
 {
     CCC_DrawInwomanOnClient(&dc, hDlg);
     CCC_CaptionPaint(dc, hDlg);
 }
 
+// ソリッドダイアログの WM_PAINT。本文を地色で塗ってから淫女。キャプション帯は塗らない。
 static void DlgPaintSolidInwoman(CWnd* pWnd)
 {
     CPaintDC dc(pWnd);
@@ -4091,6 +4209,8 @@ static void DlgPaintSolidInwoman(CWnd* pWnd)
 // ============================================================================
 // 子コントロールを一括でサブクラス化する処理
 // ============================================================================
+// 未サブクラスの可視子をクラス名で CCustom* に置換。既に CWnd がある子は触らない。
+// アイコン/ビットマップ Static は描画が消えるので除外。SetAeroMode(FALSE)=ソリッド。
 template<typename DlgBase>
 static void DoSubclassChildControls(DlgBase* pDlg)
 {
@@ -4223,6 +4343,8 @@ static void DoSubclassChildControls(DlgBase* pDlg)
 // ダイアログ共通処理
 // ============================================================================
 
+// WM_CTLCOLOR 共通。Win11 アクリルは DLG/STATIC/BTN を NULL_BRUSH（ガラス残し）。
+// EDIT/LISTBOX は不透明ブラシ（文字可読）。コンボ内 Edit は COMBO_BG。
 static HBRUSH DlgOnCtlColor(CDC* pDC, CWnd* pWnd, UINT nC, CBrush& brDlg, BOOL bAeroEnabled)
 {
 #if CCUSTOM_AERO_SUPPORT
@@ -4233,7 +4355,7 @@ static HBRUSH DlgOnCtlColor(CDC* pDC, CWnd* pWnd, UINT nC, CBrush& brDlg, BOOL b
         if (nC == CTLCOLOR_DLG)
         {
             pDC->SetBkMode(TRANSPARENT);
-            return (HBRUSH)GetStockObject(NULL_BRUSH);
+            return (HBRUSH)GetStockObject(NULL_BRUSH); // ガラスを塗らない
         }
         if (nC == CTLCOLOR_EDIT)
         {
@@ -4362,6 +4484,7 @@ static const int kListHeartStepMs = 26;
 static const UINT_PTR kGroupSoftTimerId     = 4126; // GroupBox ゆらゆら（500ms）
 static const UINT_PTR kTabSoftTimerId       = 4127; // 選択タブ Soft（220ms）
 
+// 標準 CEdit をオーナードロー化。アクリル下は BufferedPaint 不透明面 + 自前キャレット。
 CCustomEdit::CCustomEdit()
     : m_bHasFocus(FALSE), m_bAutoDelete(FALSE), m_bAeroMode(FALSE), m_bSelDrag(FALSE), m_bCaretOn(TRUE)
     , m_lastSel0(-1), m_lastSel1(-1)
@@ -4369,18 +4492,21 @@ CCustomEdit::CCustomEdit()
     m_brBackground.CreateSolidBrush(COLOR_EDIT_BG);
 }
 
+// フォント/ブラシのみ解放。HWND は PostNcDestroy。
 CCustomEdit::~CCustomEdit()
 {
     if (m_fontBold.GetSafeHandle()) m_fontBold.DeleteObject();
     if (m_brBackground.GetSafeHandle()) m_brBackground.DeleteObject();
 }
 
+// DoSubclassChildControls 経由は EnableAutoDelete 済み。ここで delete this。
 void CCustomEdit::PostNcDestroy()
 {
     CEdit::PostNcDestroy();
     if (m_bAutoDelete) delete this;
 }
 
+// 親フォントをコピーして SetFont。ウィンドウ紐づけ HFONT は Delete しない（例外の温床）。
 void CCustomEdit::PreSubclassWindow()
 {
     CEdit::PreSubclassWindow();
@@ -4401,6 +4527,7 @@ void CCustomEdit::PreSubclassWindow()
         CEdit::SetFont(&m_fontBold);
 }
 
+// 反射 CTLCOLOR。既定描画が残る経路用。アクリル本体は PaintOpaqueClient。
 HBRUSH CCustomEdit::CtlColor(CDC* pDC, UINT)
 {
     pDC->SetBkColor(COLOR_EDIT_BG);
@@ -4408,6 +4535,7 @@ HBRUSH CCustomEdit::CtlColor(CDC* pDC, UINT)
     return (HBRUSH)m_brBackground.GetSafeHandle();
 }
 
+// 複数行の可視範囲だけ描く。選択ハイライトは行跨ぎ対応。パスワードは呼び出し側で置換済み。
 void CCustomEdit::DrawMultilineVisibleText(CDC& dc, const CRect& rc)
 {
     // スクロール位置を EM_POSFROMCHAR / FIRSTVISIBLELINE で反映（全文明け DrawText はスクロール無視）
@@ -4504,7 +4632,7 @@ void CCustomEdit::DrawMultilineVisibleText(CDC& dc, const CRect& rc)
         CString line;
         if (maxc > 0) {
             TCHAR* buf = line.GetBuffer(maxc + 4);
-            *((WORD*)buf) = (WORD)(maxc + 2);
+            *((WORD*)buf) = (WORD)(maxc + 2); // EM_GETLINE: 先頭 WORD にバッファ文字数
             const int got = (int)SendMessage(EM_GETLINE, (WPARAM)li, (LPARAM)buf);
             line.ReleaseBuffer(got > 0 ? got : 0);
             while (!line.IsEmpty()) {
@@ -4546,6 +4674,7 @@ void CCustomEdit::DrawMultilineVisibleText(CDC& dc, const CRect& rc)
     dc.RestoreDC(savedDc);
 }
 
+// クライアント文字+選択+キャレット。ES_PASSWORD は U+25CF。単一行の POSFROMCHAR は (short) 必須。
 void CCustomEdit::DrawClientText(CDC& dc, const CRect& r)
 {
     CString text;
@@ -4698,6 +4827,7 @@ void CCustomEdit::DrawClientText(CDC& dc, const CRect& r)
     DrawCaretIfNeeded(dc);
 }
 
+// 自前キャレット座標。EM_POSFROMCHAR 失敗時は GetTextExtent で補う。DPI で幅 2px 以上。
 BOOL CCustomEdit::GetCaretClientPos(CPoint& pt, int& lineH)
 {
     pt.x = 0;
@@ -4861,6 +4991,7 @@ BOOL CCustomEdit::GetCaretClientPos(CPoint& pt, int& lineH)
     return TRUE;
 }
 
+// フォーカスかつ非選択かつ点灯中のみ。システムキャレットは Opaque blit で消えるので使わない。
 void CCustomEdit::DrawCaretIfNeeded(CDC& dc)
 {
     if (!m_bHasFocus || !m_bCaretOn)
@@ -4897,6 +5028,7 @@ void CCustomEdit::DrawCaretIfNeeded(CDC& dc)
     dc.FillSolidRect(&caret, RGB(80, 20, 40));
 }
 
+// IME 変換/候補ウィンドウをキャレットへ。再入ロック必須（Imm → 再描画 → Imm で落ちる）。
 void CCustomEdit::SyncImePos()
 {
     if (!GetSafeHwnd() || !m_bHasFocus)
@@ -4933,6 +5065,7 @@ void CCustomEdit::SyncImePos()
     InterlockedExchange(&s_busy, 0);
 }
 
+// GetCaretBlinkTime。0/INFINITE は 530ms。
 void CCustomEdit::StartCaretBlink()
 {
     StopCaretBlink();
@@ -4943,6 +5076,7 @@ void CCustomEdit::StartCaretBlink()
     SetTimer(kEditCaretTimerId, blink, NULL);
 }
 
+// キャレットタイマー停止。旧 Opaque タイマーも殺す（互換 ID）。
 void CCustomEdit::StopCaretBlink()
 {
     KillTimer(kEditCaretTimerId);
@@ -4950,6 +5084,7 @@ void CCustomEdit::StopCaretBlink()
     m_bCaretOn = FALSE;
 }
 
+// アクリルホストは同期不透明描画（Invalidate だと一瞬ガラス）。それ以外は Invalidate+Update。
 void CCustomEdit::RepaintClient()
 {
     if (!GetSafeHwnd())
@@ -4968,6 +5103,7 @@ void CCustomEdit::RepaintClient()
     UpdateWindow();
 }
 
+// BufferedPaint + MakeOpaque で本文。失敗時は FillRectOpaqueBits。システムキャレットは隠す。
 void CCustomEdit::PaintOpaqueClient(CDC& dc)
 {
     CRect r;
@@ -5012,6 +5148,7 @@ void CCustomEdit::PaintOpaqueClient(CDC& dc)
     dc.RestoreDC(savedDc);
 }
 
+// 同期 Send 再入を避け、CCC_WM_POST_OPAQUE_PAINT を1回ポスト。
 void CCustomEdit::ScheduleOpaqueRepaint()
 {
     // SendMessage 同期再入を避け、キューに1回まとめる
@@ -5019,6 +5156,7 @@ void CCustomEdit::ScheduleOpaqueRepaint()
         PostMessage(CCC_WM_POST_OPAQUE_PAINT);
 }
 
+// ポストされた不透明再描画。ホストがガラスのときだけ枠+本文。
 LRESULT CCustomEdit::OnPostOpaquePaint(WPARAM, LPARAM)
 {
 #if CCUSTOM_AERO_SUPPORT
@@ -5032,6 +5170,7 @@ LRESULT CCustomEdit::OnPostOpaquePaint(WPARAM, LPARAM)
     return 0;
 }
 
+// ガラス下は自前不透明。それ以外は既定 CEdit（テーマ）。
 void CCustomEdit::OnPaint()
 {
 #if CCUSTOM_AERO_SUPPORT
@@ -5045,6 +5184,7 @@ void CCustomEdit::OnPaint()
     Default();
 }
 
+// ガラス下は不透明地だけ塗って TRUE（ちらつき防止）。他は FALSE で既定へ。
 BOOL CCustomEdit::OnEraseBkgnd(CDC* pDC)
 {
 #if CCUSTOM_AERO_SUPPORT
@@ -5060,6 +5200,7 @@ BOOL CCustomEdit::OnEraseBkgnd(CDC* pDC)
     return FALSE;
 }
 
+// 角丸枠+フォーカス時キラキラ。top-1 のデコは親アクリルを抉るので禁止。
 void CCustomEdit::DrawEditFrame(CDC& dc, const CRect& r)
 {
     CPen p(PS_SOLID, 2, m_bHasFocus ? RGB(255, 140, 180) : RGB(255, 182, 193));
@@ -5087,6 +5228,7 @@ void CCustomEdit::DrawEditFrame(CDC& dc, const CRect& r)
     DrawRibbon(&dc, rR, RGB(255, 200, 220));
 }
 
+// NC 枠を WindowDC で不透明化。ガラス透過で枠が消えるのを防ぐ。
 void CCustomEdit::PaintOpaqueFrame()
 {
     if (!GetSafeHwnd()) return;
@@ -5121,6 +5263,7 @@ void CCustomEdit::PaintOpaqueFrame()
     DrawEditFrame(dc, r);
 }
 
+// NC のあと本文を載せ直す（不透明 NC がクライアントまで塗ることがある）。
 void CCustomEdit::OnNcPaint()
 {
     PaintOpaqueFrame();
@@ -5134,6 +5277,7 @@ void CCustomEdit::OnNcPaint()
 #endif
 }
 
+// OpaqueFixer / 印刷。ガラス下は FillRectOpaqueBits してから文字。
 LRESULT CCustomEdit::OnPrintClient(WPARAM wParam, LPARAM lParam)
 {
     UNREFERENCED_PARAMETER(lParam);
@@ -5154,6 +5298,7 @@ LRESULT CCustomEdit::OnPrintClient(WPARAM wParam, LPARAM lParam)
     return 0;
 }
 
+// 文字変更。Invalidate せず Opaque ポスト（既定描画→アクリル一瞬を避ける）。
 void CCustomEdit::OnEnUpdate()
 {
     // OpaqueFixer が WM_CHAR 等で既に不透明描画する。ここでは Invalidate せず
@@ -5163,6 +5308,7 @@ void CCustomEdit::OnEnUpdate()
     SyncImePos();
 }
 
+// 選択が変わったときだけ再描画。アクリル下は兄弟 Edit の不透明面も立て直す。
 void CCustomEdit::RepaintIfSelChanged()
 {
     int s0 = 0, s1 = 0;
@@ -5195,18 +5341,21 @@ void CCustomEdit::RepaintIfSelChanged()
 #endif
 }
 
+// 矢印等で選択が動くので既定処理後に選択再描画。
 void CCustomEdit::OnKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags)
 {
     CEdit::OnKeyDown(nChar, nRepCnt, nFlags);
     RepaintIfSelChanged();
 }
 
+// KeyUp でも選択が変わる（Shift 解放など）。
 void CCustomEdit::OnKeyUp(UINT nChar, UINT nRepCnt, UINT nFlags)
 {
     CEdit::OnKeyUp(nChar, nRepCnt, nFlags);
     RepaintIfSelChanged();
 }
 
+// クリック一瞬アクリル対策で先に不透明面。ドラッグ選択は 33ms タイマー。
 void CCustomEdit::OnLButtonDown(UINT nFlags, CPoint point)
 {
 #if CCUSTOM_AERO_SUPPORT
@@ -5235,12 +5384,14 @@ void CCustomEdit::OnLButtonDown(UINT nFlags, CPoint point)
 #endif
 }
 
+// 単語選択後のハイライト更新。
 void CCustomEdit::OnLButtonDblClk(UINT nFlags, CPoint point)
 {
     CEdit::OnLButtonDblClk(nFlags, point);
     RepaintIfSelChanged();
 }
 
+// ドラッグ選択終了。
 void CCustomEdit::OnLButtonUp(UINT nFlags, CPoint point)
 {
     CEdit::OnLButtonUp(nFlags, point);
@@ -5249,12 +5400,13 @@ void CCustomEdit::OnLButtonUp(UINT nFlags, CPoint point)
     RepaintIfSelChanged();
 }
 
+// 複数行で既定が無視するとき LineScroll。ガラス下は不透明再描画。
 BOOL CCustomEdit::OnMouseWheel(UINT nFlags, short zDelta, CPoint pt)
 {
     BOOL r = CEdit::OnMouseWheel(nFlags, zDelta, pt);
     if (!r && (GetStyle() & ES_MULTILINE)) {
         // フォーカス無し等で既定が無視するとき
-        LineScroll((zDelta > 0) ? -3 : 3);
+        LineScroll((zDelta > 0) ? -3 : 3); // 3行（WHEEL_DELTA 単位ではなく固定）
         r = TRUE;
     }
 #if CCUSTOM_AERO_SUPPORT
@@ -5267,6 +5419,7 @@ BOOL CCustomEdit::OnMouseWheel(UINT nFlags, short zDelta, CPoint pt)
     return r;
 }
 
+// 縦スクロール後、ガラス下は本文を不透明に載せ直す。
 void CCustomEdit::OnVScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
 {
     CEdit::OnVScroll(nSBCode, nPos, pScrollBar);
@@ -5279,6 +5432,7 @@ void CCustomEdit::OnVScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
 #endif
 }
 
+// 横スクロール後、ガラス下は本文を不透明に載せ直す。
 void CCustomEdit::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
 {
     CEdit::OnHScroll(nSBCode, nPos, pScrollBar);
@@ -5291,6 +5445,7 @@ void CCustomEdit::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
 #endif
 }
 
+// ドラッグ中は選択更新。ホバーだけでもテーマが α=0 を載せるので Opaque ポスト。
 void CCustomEdit::OnMouseMove(UINT nFlags, CPoint point)
 {
     CEdit::OnMouseMove(nFlags, point);
@@ -5303,6 +5458,7 @@ void CCustomEdit::OnMouseMove(UINT nFlags, CPoint point)
 #endif
 }
 
+// 選択ドラッグ / キャレット点滅。旧 Opaque タイマー ID は殺すだけ。
 void CCustomEdit::OnTimer(UINT_PTR nIDEvent)
 {
     if (nIDEvent == kEditSelTimerId)
@@ -5339,6 +5495,7 @@ void CCustomEdit::OnTimer(UINT_PTR nIDEvent)
     CEdit::OnTimer(nIDEvent);
 }
 
+// 再表示時に不透明面を立て直す（最小化復帰で消える）。
 void CCustomEdit::OnShowWindow(BOOL bShow, UINT nStatus)
 {
     CEdit::OnShowWindow(bShow, nStatus);
@@ -5347,6 +5504,7 @@ void CCustomEdit::OnShowWindow(BOOL bShow, UINT nStatus)
     UNREFERENCED_PARAMETER(nStatus);
 }
 
+// システムキャレットは隠して自前点滅。FRAMECHANGED は親ガラス消去の元凶なので使わない。
 void CCustomEdit::OnSetFocus(CWnd* p)
 {
     CEdit::OnSetFocus(p);
@@ -5364,6 +5522,7 @@ void CCustomEdit::OnSetFocus(CWnd* p)
     SyncImePos();
 }
 
+// 点滅停止して枠色を非フォーカスへ。不透明面は残す。
 void CCustomEdit::OnKillFocus(CWnd* p)
 {
     CEdit::OnKillFocus(p);
@@ -5378,12 +5537,14 @@ void CCustomEdit::OnKillFocus(CWnd* p)
     }
 }
 
+// 変換開始。候補位置を合わせてから既定。
 LRESULT CCustomEdit::OnImeStartComposition(WPARAM wParam, LPARAM lParam)
 {
     SyncImePos();
     return Default();
 }
 
+// 変換中は毎フレーム Opaque しない（再入クラッシュ）。確定時のみ。
 LRESULT CCustomEdit::OnImeComposition(WPARAM wParam, LPARAM lParam)
 {
     LRESULT r = Default();
@@ -5394,6 +5555,7 @@ LRESULT CCustomEdit::OnImeComposition(WPARAM wParam, LPARAM lParam)
     return r;
 }
 
+// 候補開閉・位置変更で IME ウィンドウを追従。
 LRESULT CCustomEdit::OnImeNotify(WPARAM wParam, LPARAM lParam)
 {
     LRESULT r = Default();
@@ -5419,6 +5581,7 @@ BEGIN_MESSAGE_MAP(CCustomStatic, CStatic)
     ON_MESSAGE(WM_GETTEXTLENGTH, OnGetTextLength)
 END_MESSAGE_MAP()
 
+// ラベル。ガラス上はクロマキー、ソリッド指定/Opaque ホストでは不透明。!@ 書式セグメント対応。
 CCustomStatic::CCustomStatic()
     : m_bAutoDelete(FALSE),
     m_clrGradStart(RGB(255, 255, 255)), m_clrGradEnd(RGB(255, 255, 255)),
@@ -5432,6 +5595,7 @@ CCustomStatic::CCustomStatic()
     m_bSolidFill(FALSE), m_clrSolidFill(COLOR_DIALOG_BG)
 {}
 
+// バックストアとクロマキャッシュを解放。
 CCustomStatic::~CCustomStatic()
 {
     if (m_font.GetSafeHandle()) m_font.DeleteObject();
@@ -5441,12 +5605,14 @@ CCustomStatic::~CCustomStatic()
 #endif
 }
 
+// 自動サブクラス時はここで delete this。
 void CCustomStatic::PostNcDestroy()
 {
     CStatic::PostNcDestroy();
     if (m_bAutoDelete) delete this;
 }
 
+// !@B / !@I / !@Crrggbb / !@F±nn をセグメントへ。Mid 一括（1文字ずつは断片化）。
 void CCustomStatic::ParseFormattedText(const CString& str)
 {
     // Mid で一括コピー。文字単位 cur+= は CString 再確保が積み、長時間で断片化する。
@@ -5528,6 +5694,7 @@ void CCustomStatic::ParseFormattedText(const CString& str)
     FlushTo(len);
 }
 
+// 書式セグメントを横に並べて描く。透過時の黒文字は RGB(2,2,2)（キー 1,1,1 と衝突回避）。
 void CCustomStatic::DrawSegmentedText(CDC* pDC, const CRect& rect, const LOGFONT& lf, int h, int w, UINT fmt)
 {
     CSize tot = MeasureSegmentedText(pDC, lf, h, w);
@@ -5551,7 +5718,7 @@ void CCustomStatic::DrawSegmentedText(CDC* pDC, const CRect& rect, const LOGFONT
         CSize sz = pDC->GetTextExtent(m_segs[i].text);
         CRect sr = { xP, rect.top, xP + sz.cx, rect.bottom };
         COLORREF tc = m_segs[i].bHasColor ? m_segs[i].clrText : RGB(0, 0, 0);
-        if (bTrans && tc == RGB(0, 0, 0)) tc = RGB(2, 2, 2);
+        if (bTrans && tc == RGB(0, 0, 0)) tc = RGB(2, 2, 2); // キー RGB(1,1,1) と区別
 
         if (m_bGradEnable) DrawTextWithGradient(pDC, sr, m_segs[i].text, DT_VCENTER | DT_SINGLELINE | DT_LEFT, m_clrGradStart, m_clrGradEnd, m_nGradDirection, m_clrShadow, m_nShadowDirection, m_nShadowDistance, m_nShadowBlur, m_bShadowEnable, clrBg, sz.cx, FALSE, bTrans);
         else DrawTextWithShadow(pDC, sr, m_segs[i].text, DT_VCENTER | DT_SINGLELINE | DT_LEFT, tc, m_clrShadow, m_nShadowDirection, m_nShadowDistance, m_nShadowBlur, m_bShadowEnable, clrBg, bTrans);
@@ -5561,6 +5728,7 @@ void CCustomStatic::DrawSegmentedText(CDC* pDC, const CRect& rect, const LOGFONT
     }
 }
 
+// 文字グラデ。角度は 0..359。キャッシュ無効化して Invalidate。
 void CCustomStatic::SetGradation(COLORREF s, COLORREF e, int d, BOOL en)
 {
     m_clrGradStart = s; m_clrGradEnd = e;
@@ -5571,6 +5739,7 @@ void CCustomStatic::SetGradation(COLORREF s, COLORREF e, int d, BOOL en)
     if (GetSafeHwnd()) Invalidate();
 }
 
+// グラデ設定の取得。NULL ポインタは無視。
 void CCustomStatic::GetGradation(COLORREF* ps, COLORREF* pe, int* pd, BOOL* pbe) const
 {
     if (ps) *ps = m_clrGradStart;
@@ -5579,6 +5748,7 @@ void CCustomStatic::GetGradation(COLORREF* ps, COLORREF* pe, int* pd, BOOL* pbe)
     if (pbe) *pbe = m_bGradEnable;
 }
 
+// ドロップシャドウ。blur は 0..20。アクリル透過時は描画側で省略。
 void CCustomStatic::SetDropShadow(COLORREF c, int d, int dist, int blur, BOOL en)
 {
     m_clrShadow = c;
@@ -5590,6 +5760,7 @@ void CCustomStatic::SetDropShadow(COLORREF c, int d, int dist, int blur, BOOL en
     if (GetSafeHwnd()) Invalidate();
 }
 
+// 影設定の取得。
 void CCustomStatic::GetDropShadow(COLORREF* pc, int* pd, int* pdist, int* pblur, BOOL* pbe) const
 {
     if (pc) *pc = m_clrShadow;
@@ -5599,6 +5770,7 @@ void CCustomStatic::GetDropShadow(COLORREF* pc, int* pd, int* pdist, int* pblur,
     if (pbe) *pbe = m_bShadowEnable;
 }
 
+// 余白があれば文字を横に伸ばす（lfWidth 探索）。EQ コード等。
 void CCustomStatic::SetPreferWideMode(BOOL b)
 {
     m_bPreferWideMode = b;
@@ -5607,11 +5779,13 @@ void CCustomStatic::SetPreferWideMode(BOOL b)
     if (GetSafeHwnd()) Invalidate();
 }
 
+// ワイド優先モードか。
 BOOL CCustomStatic::GetPreferWideMode() const
 {
     return m_bPreferWideMode;
 }
 
+// フォントをコピー所有。元 HFONT は触らない。フィットキャッシュを捨てる。
 void CCustomStatic::SetFont(CFont* pF, BOOL bR)
 {
     if (pF)
@@ -5625,6 +5799,7 @@ void CCustomStatic::SetFont(CFont* pF, BOOL bR)
     }
 }
 
+// 初期キャプションを内部バッファへ。親フォントを継承。
 void CCustomStatic::PreSubclassWindow()
 {
     CStatic::PreSubclassWindow();
@@ -5637,6 +5812,7 @@ void CCustomStatic::PreSubclassWindow()
     }
 }
 
+// 透過時は消去しない（親ガラスを残す）。ソリッド時は COLOR_DIALOG_BG。
 BOOL CCustomStatic::OnEraseBkgnd(CDC* pDC)
 {
 #if CCUSTOM_AERO_SUPPORT
@@ -5651,6 +5827,7 @@ BOOL CCustomStatic::OnEraseBkgnd(CDC* pDC)
     return TRUE;
 }
 
+// memDC に描いてクロマ or 不透明 blit。透過時は最初からキー色塗り（リマップ失敗でピンク残る）。
 void CCustomStatic::DrawClient(CDC& dc)
 {
     CRect rect;
@@ -5790,7 +5967,7 @@ void CCustomStatic::DrawClient(CDC& dc)
             if (szFit.cy < rectWithMargin.Height())
             {
                 const double stretch = (double)rectWithMargin.Height() / fitHeight;
-                if (stretch <= 1.35)
+                if (stretch <= 1.35) // 縦に伸ばしすぎると潰れるので 135% まで
                 {
                     finalHeight = rectWithMargin.Height();
                     finalWidth = max(1, (int)(baseWidth / stretch));
@@ -5840,7 +6017,7 @@ void CCustomStatic::DrawClient(CDC& dc)
                 CFont* pOld = memDC.SelectObject(pTry);
                 CSize size;
                 if (hasBreak) {
-                    CRect mc(0, 0, 32767, 32767);
+                    CRect mc(0, 0, 32767, 32767); // DT_CALCRECT 用の十分広い仮矩形
                     memDC.DrawText(strText, &mc, DT_CALCRECT | DT_LEFT | DT_TOP | DT_NOPREFIX);
                     size = CSize(mc.Width(), mc.Height());
                 } else {
@@ -5875,7 +6052,7 @@ void CCustomStatic::DrawClient(CDC& dc)
             {
                 scaleX = (float)availW / (float)needW;
                 const float kMinScaleX = 0.50f;
-                scaleX *= 0.98f;
+                scaleX *= 0.98f; // 右端クリップ余裕
                 if (scaleX < kMinScaleX) scaleX = kMinScaleX;
                 if (scaleX > 1.0f) scaleX = 1.0f;
             }
@@ -6003,6 +6180,7 @@ void CCustomStatic::DrawClient(CDC& dc)
     memDC.DeleteDC();
 }
 
+// 透過は DrawClient のみ（MakeOpaque 禁止）。ガラス下ソリッドは BufferedPaintMakeOpaque。
 void CCustomStatic::OnPaint()
 {
     CPaintDC dc(this);
@@ -6047,6 +6225,7 @@ void CCustomStatic::OnPaint()
     DrawClient(dc);
 }
 
+// OpaqueFixer 経由。DrawClient に委譲。
 LRESULT CCustomStatic::OnPrintClient(WPARAM wParam, LPARAM)
 {
     if (HDC hDC = (HDC)wParam)
@@ -6059,6 +6238,7 @@ LRESULT CCustomStatic::OnPrintClient(WPARAM wParam, LPARAM)
     return 0;
 }
 
+// WM_SETTEXT。同一文字列は Invalidate しない（EQ コードの無駄再描画防止）。透過時は親も消す。
 LRESULT CCustomStatic::OnSetText(WPARAM, LPARAM lp)
 {
     LPCTSTR t = (LPCTSTR)lp;
@@ -6081,6 +6261,7 @@ LRESULT CCustomStatic::OnSetText(WPARAM, LPARAM lp)
     return TRUE;
 }
 
+// 内部 m_strText を返す（書式タグ込み）。既定 Static は !@ を解釈しない。
 LRESULT CCustomStatic::OnGetText(WPARAM w, LPARAM l)
 {
     int n = (int)w;
@@ -6093,11 +6274,13 @@ LRESULT CCustomStatic::OnGetText(WPARAM w, LPARAM l)
     return cp;
 }
 
+// WM_GETTEXTLENGTH。m_strText の文字数。
 LRESULT CCustomStatic::OnGetTextLength(WPARAM, LPARAM)
 {
     return m_strText.GetLength();
 }
 
+// 書式セグメントの合計サイズ。フォントはプールから。
 CSize CCustomStatic::MeasureSegmentedText(CDC* pDC, const LOGFONT& lf, int h, int w)
 {
     CSize tot(0, 0);
@@ -6136,22 +6319,26 @@ BEGIN_MESSAGE_MAP(CCustomListBox, CListBox)
     ON_WM_ERASEBKGND()
 END_MESSAGE_MAP()
 
+// オーナードロー ListBox。行デコ+交互色。ガラス下は不透明 Fill。
 CCustomListBox::CCustomListBox() : m_bAutoDelete(FALSE), m_bAeroMode(FALSE)
 {
     m_brBackground.CreateSolidBrush(COLOR_LIST_BG);
 }
 
+// 背景ブラシのみ。
 CCustomListBox::~CCustomListBox()
 {
     if (m_brBackground.GetSafeHandle()) m_brBackground.DeleteObject();
 }
 
+// 自動サブクラス時は delete this。
 void CCustomListBox::PostNcDestroy()
 {
     CListBox::PostNcDestroy();
     if (m_bAutoDelete) delete this;
 }
 
+// LBS_OWNERDRAWFIXED を後付け。MeasureItem が走らないことがあるので SetItemHeight も。
 void CCustomListBox::PreSubclassWindow()
 {
     CListBox::PreSubclassWindow();
@@ -6173,6 +6360,7 @@ void CCustomListBox::PreSubclassWindow()
     SetItemHeight(0, h);
 }
 
+// 反射 CTLCOLOR。非オーナードロー残骸用。本体は DrawItem。
 HBRUSH CCustomListBox::CtlColor(CDC* pDC, UINT)
 {
     pDC->SetBkColor(COLOR_LIST_BG);
@@ -6180,11 +6368,13 @@ HBRUSH CCustomListBox::CtlColor(CDC* pDC, UINT)
     return (HBRUSH)m_brBackground.GetSafeHandle();
 }
 
+// 既定に任せる（オーナードローは DrawItem）。ガラス穴は OnEraseBkgnd 側。
 void CCustomListBox::OnPaint()
 {
     Default();
 }
 
+// OpaqueFixer 用。全アイテムを DrawItem。選択は GetSel。
 LRESULT CCustomListBox::OnPrintClient(WPARAM wParam, LPARAM)
 {
     CDC* pDC = CDC::FromHandle((HDC)wParam);
@@ -6212,6 +6402,7 @@ LRESULT CCustomListBox::OnPrintClient(WPARAM wParam, LPARAM)
     return 0;
 }
 
+// ガラス下は FillRectOpaqueBits（素 Fill は透過穴）。それ以外は FillSolidRect。
 BOOL CCustomListBox::OnEraseBkgnd(CDC* pDC)
 {
     if (pDC)
@@ -6226,6 +6417,8 @@ BOOL CCustomListBox::OnEraseBkgnd(CDC* pDC)
     return TRUE;
 }
 
+// 行背景（選択/縞）+ 左デコ + テキスト。ガラス下の部分描画は不透明 Fill 必須。
+// m_bAeroMode かつ非 Blur 子のときだけ半透明。黒文字は RGB(1,1,1) に寄せない（キー衝突）。
 void CCustomListBox::DrawItem(LPDRAWITEMSTRUCT lp)
 {
     if (lp->itemID == (UINT)-1) return;
@@ -6238,7 +6431,7 @@ void CCustomListBox::DrawItem(LPDRAWITEMSTRUCT lp)
     if (CCC_HostNeedsChildOpaque(m_hWnd))
         CCC_FillRectOpaqueBits(pDC->GetSafeHdc(), r, bg);
     else if (bListAero)
-        FillRectAlpha(pDC, r, bg, (lp->itemState & ODS_SELECTED) ? 180 : AERO_ALPHA_SEMI);
+        FillRectAlpha(pDC, r, bg, (lp->itemState & ODS_SELECTED) ? 180 : AERO_ALPHA_SEMI); // ガラス上の半透明行（Blur 子は不透明経路）
     else
         pDC->FillSolidRect(&r, bg);
 
@@ -6297,6 +6490,7 @@ void CCustomListBox::DrawItem(LPDRAWITEMSTRUCT lp)
     rt.DeflateRect(1, 1);
 
     const BOOL bSel = (lp->itemState & ODS_SELECTED) != 0;
+    // aero 時の非選択文字は (1,1,1)=キーそのもの → 抜ける。意図は「ほぼ黒」。キーと衝突。
     COLORREF tc = bSel ? COLOR_LIST_SEL_TEXT : (m_bAeroMode ? RGB(1, 1, 1) : COLOR_EDIT_TEXT);
     pDC->SetTextColor(tc);
     pDC->SetBkMode(TRANSPARENT);
@@ -6308,6 +6502,7 @@ void CCustomListBox::DrawItem(LPDRAWITEMSTRUCT lp)
     if (lp->itemID < (UINT)(GetCount() - 1)) DrawLaceLine(pDC, r.left + 15, r.bottom - 1, r.right - 15, r.bottom - 1, RGB(200, 180, 220));
 }
 
+// 行高。DPI スケールの 24px 相当。フォント実測は PreSubclass の SetItemHeight 側。
 void CCustomListBox::MeasureItem(LPMEASUREITEMSTRUCT lp)
 {
     UINT dpi = 96;
@@ -6330,6 +6525,9 @@ BEGIN_MESSAGE_MAP(CCustomComboBox, CComboBox)
     ON_CONTROL_REFLECT(CBN_DROPDOWN, &CCustomComboBox::OnDropdown)
 END_MESSAGE_MAP()
 
+// オーナードローコンボ。無効行は論理インデックスから除外する。
+// m_brBackground はドロップリスト CtlColor 用。選択欄本体は PaintClient が塗る。
+// m_bAeroMode は半透明フィル切替。キャプションガラス下では HostNeedsChildOpaque が勝つ。
 CCustomComboBox::CCustomComboBox()
     : m_bAutoDelete(FALSE), m_clrLabelText(RGB(240, 240, 255)),
     m_clrLabelBg(RGB(80, 60, 120)), m_bAeroMode(FALSE)
@@ -6337,17 +6535,22 @@ CCustomComboBox::CCustomComboBox()
     m_brBackground.CreateSolidBrush(COLOR_COMBO_BG);
 }
 
+// 背景ブラシのみ解放。HWND は既に破棄済み想定（PostNcDestroy 後）。
 CCustomComboBox::~CCustomComboBox()
 {
     if (m_brBackground.GetSafeHandle()) m_brBackground.DeleteObject();
 }
 
+// サブクラス解放後。EnableAutoDelete 時のみ delete this（ダイアログスタック配置では使わない）。
 void CCustomComboBox::PostNcDestroy()
 {
     CComboBox::PostNcDestroy();
     if (m_bAutoDelete) delete this;
 }
 
+// 物理行を追加し、bD なら無効ラベルとして記録する。
+// 有効行だけ m_vSelectableIndices に積み、Get/SetCurSel の論理インデックスになる。
+// 途中挿入はしない（常に末尾追加）。途中へ入れると論理/物理がずれる。
 int CCustomComboBox::AddString(LPCTSTR lp, BOOL bD)
 {
     int n = CComboBox::AddString(lp);
@@ -6360,6 +6563,8 @@ int CCustomComboBox::AddString(LPCTSTR lp, BOOL bD)
     return n;
 }
 
+// 論理インデックスを返す。無効行は飛ばす。未選択・無効行選択中は -1。
+// 物理値が欲しいときは GetCurSelPhysical（基底 GetCurSel）。
 int CCustomComboBox::GetCurSel() const
 {
     int np = CComboBox::GetCurSel();
@@ -6369,6 +6574,10 @@ int CCustomComboBox::GetCurSel() const
     return -1;
 }
 
+// 論理インデックスで選択。範囲外は末尾有効行へクランプ。n<0 はクリア。
+// 選択直後の WM_DRAWITEM(ODS_COMBOBOXEDIT) が枠を壊すため、
+// CCC_WM_POST_OPAQUE_PAINT を Post して閉じた欄の不透明再描画を1フレーム遅らせる。
+// SendMessage 同期再入はしない（描画中に再び DrawItem が走る）。
 int CCustomComboBox::SetCurSel(int n)
 {
     if (n < 0) {
@@ -6386,6 +6595,7 @@ int CCustomComboBox::SetCurSel(int n)
     return r;
 }
 
+// 無効アイテム（グループ見出し）の文字色・背景。ドロップリスト DrawItem が参照する。
 void CCustomComboBox::SetLabelColor(COLORREF ct, COLORREF cb)
 {
     m_clrLabelText = ct;
@@ -6393,18 +6603,21 @@ void CCustomComboBox::SetLabelColor(COLORREF ct, COLORREF cb)
     if (GetSafeHwnd()) Invalidate();
 }
 
+// NULL ポインタは触らない。呼び出し側は片方だけ取ることができる。
 void CCustomComboBox::GetLabelColor(COLORREF* pct, COLORREF* pcb) const
 {
     if (pct) *pct = m_clrLabelText;
     if (pcb) *pcb = m_clrLabelBg;
 }
 
+// 論理→物理。無効行を除いた n 番目の実インデックス。範囲外は -1。
 int CCustomComboBox::LogicalToPhysical(int n) const
 {
     if (n < 0 || n >= (int)m_vSelectableIndices.size()) return -1;
     return m_vSelectableIndices[n];
 }
 
+// 物理→論理。無効行や欠番は -1（選択対象ではない）。
 int CCustomComboBox::PhysicalToLogical(int n) const
 {
     for (int i = 0; i < (int)m_vSelectableIndices.size(); i++)
@@ -6412,6 +6625,9 @@ int CCustomComboBox::PhysicalToLogical(int n) const
     return -1;
 }
 
+// VARIABLE を外し FIXED+HASSTRINGS。未指定のままだと MeasureItem が効かない。
+// CLIPSIBLINGS は縦長 HWND（ドロップ確保）時に下段兄弟へはみ出すのを防ぐ。
+// 選択欄高さ 19px@96dpi は MP ツールバーと揃える。28 はドロップ行のみ。
 void CCustomComboBox::PreSubclassWindow()
 {
     CComboBox::PreSubclassWindow();
@@ -6423,6 +6639,8 @@ void CCustomComboBox::PreSubclassWindow()
     SetItemHeight(0, CCC_ScaleDpi(28, dpi));
 }
 
+// ドロップリスト（子 LISTBOX）の背景だけ返す。選択欄は OnPaint/DrawItem が描く。
+// ここで選択欄まで塗ると王冠・枠がシステム色で消える。
 HBRUSH CCustomComboBox::CtlColor(CDC* pDC, UINT nC)
 {
     if (nC == CTLCOLOR_LISTBOX)
@@ -6462,6 +6680,8 @@ static void CCC_ComboClipToClosedField(HWND hWnd, CRect& r)
         r.bottom = r.top + closedH;
 }
 
+// 閉じた選択欄だけ消す。ドロップ領域まで高さがある HWND を全面塗ると下段ボタンが消える。
+// アクリル/キャプションガラス下の素 FillSolidRect は α=0 穴になるので OpaqueBits。
 BOOL CCustomComboBox::OnEraseBkgnd(CDC* pDC)
 {
     if (pDC)
@@ -6479,6 +6699,11 @@ BOOL CCustomComboBox::OnEraseBkgnd(CDC* pDC)
     return TRUE;
 }
 
+// 閉じた選択欄のオーナードロー本体。メモリDCに描いてから blit。
+// bTrans（Aero かつ Blur 子でない）は黒下地+α半透明。それ以外は不透明 COLOR_COMBO_BG。
+// 最後: 透過は ClearDestBlt（黒クロマ抜き）、不透明は InwomanBitBlt。
+// クロマ blit をガラス親で使うと未描画が穴。HostNeedsChildOpaque 時は OnPaint 側で MakeOpaque。
+// CBS_DROPDOWN/SIMPLE は編集欄テキスト優先（CurSel で上書きすると手入力が消える）。
 void CCustomComboBox::PaintClient(CDC& dc)
 {
     CRect r;
@@ -6600,6 +6825,7 @@ void CCustomComboBox::PaintClient(CDC& dc)
 
     CCC_DrawInwoman(&mDC, r, bTrans);
 
+    // 透過: 黒クロマ抜き。不透明: 背景色キーの BitBlt（ガラス親では OnPaint が MakeOpaque）
     if (bTrans) CCC_ClearDestBlt(dc.GetSafeHdc(), 0, 0, r.Width(), r.Height(), mDC.GetSafeHdc(), 0, 0, RGB(0, 0, 0));
     else CCC_InwomanBitBlt(dc.GetSafeHdc(), r.Width(), r.Height(), mDC.GetSafeHdc(), COLOR_COMBO_BG);
 
@@ -6608,6 +6834,9 @@ void CCustomComboBox::PaintClient(CDC& dc)
     mDC.DeleteDC();
 }
 
+// CPaintDC + 閉じた欄へクリップ。BufferedPaint+MakeOpaque でポップアップ子の素 BitBlt 消えを防ぐ。
+// WM_PRINTCLIENT とは別経路。こちらは更新リージョン付き。PrintClient で MakeOpaque すると
+// ドロップ確保中の縦長バッファまで不透明化し王冠が巨大化する。
 void CCustomComboBox::OnPaint()
 {
     CPaintDC dc(this);
@@ -6633,8 +6862,12 @@ void CCustomComboBox::OnPaint()
     PaintClient(dc);
 }
 
+// 親 OpaqueFixer / WM_PRINT から来る。CPaintDC を作らない（更新リージョンが空になる）。
+// PaintClient 直呼び。ここでも BeginBufferedPaint すると二重バッファ＋縦長 HWND で破綻する。
+// 戻り 0 で既定処理を抑止（システムが選択欄を上書きしない）。
 LRESULT CCustomComboBox::OnPrintClient(WPARAM wParam, LPARAM)
 {
+    // CPaintDC 禁止。親バッファへ PaintClient のみ（MakeOpaque は OnPaint 側）
     if (HDC hDC = (HDC)wParam)
     {
         CDC dc;
@@ -6645,6 +6878,10 @@ LRESULT CCustomComboBox::OnPrintClient(WPARAM wParam, LPARAM)
     return 0;
 }
 
+// ODS_COMBOBOXEDIT（閉じた欄）は項目塗りをせず PaintClient へ。素塗りは枠・王冠を消し、
+// アクリル下では α=0 穴。選択チェンジ直後の DRAWITEM が主因。
+// ドロップ行は無効/選択/ゼブラ。HostNeeds なら OpaqueBits、Aero なら黒+α。
+// ホバー相当の選択行は SoftJkHeart。無効行はラベル色＋イタリック。
 void CCustomComboBox::DrawItem(LPDRAWITEMSTRUCT lp)
 {
     if (lp->itemID == (UINT)-1) return;
@@ -6774,6 +7011,7 @@ void CCustomComboBox::DrawItem(LPDRAWITEMSTRUCT lp)
     }
 }
 
+// ドロップダウン行高 28px@96dpi。選択欄高さは PreSubclass の SetItemHeight(-1)。
 void CCustomComboBox::MeasureItem(LPMEASUREITEMSTRUCT lp)
 {
     UINT dpi = 96;
@@ -6782,11 +7020,14 @@ void CCustomComboBox::MeasureItem(LPMEASUREITEMSTRUCT lp)
     lp->itemHeight = (UINT)CCC_ScaleDpi(28, dpi);
 }
 
+// 開く直前に文字列幅へ DroppedWidth を合わせる。狭いと無効ラベルが切れる。
 void CCustomComboBox::OnDropdown()
 {
     UpdateDropDownWidth();
 }
 
+// 無効アイテムが選ばれたら次の有効行へスキップ。前後とも無効ならクリア。
+// ここで TRUE を返すと親の CBN_SELCHANGE が欠けるので、スキップ時のみ TRUE。
 BOOL CCustomComboBox::OnCommand(WPARAM wP, LPARAM lP)
 {
     WORD wN = HIWORD(wP);
@@ -6823,6 +7064,7 @@ BOOL CCustomComboBox::OnCommand(WPARAM wP, LPARAM lP)
     return CComboBox::OnCommand(wP, lP);
 }
 
+// 全アイテムのテキスト幅 + スクロールバー + アイコン余白。ウィンドウ幅より狭くしない。
 void CCustomComboBox::UpdateDropDownWidth()
 {
     CClientDC dc(this);
@@ -6859,12 +7101,15 @@ BEGIN_MESSAGE_MAP(CCustomSliderCtrl, CSliderCtrl)
     ON_WM_TIMER()
 END_MESSAGE_MAP()
 
+// モード0/1/2 のオーナードローつまみ。シマー点はホバー中だけ発生し、離脱後は慣性で消える。
+// backstore は毎描画 CreateCompatibleBitmap を避ける。chromaCache は Win11 アクリル用。
 CCustomSliderCtrl::CCustomSliderCtrl() : m_bAutoDelete(FALSE), m_nMode(0), m_bAeroMode(FALSE),
     m_nShimmer(0), m_bHover(FALSE), m_nSparkleN(0), m_nSparkleSpawnAcc(0),
     m_backstoreW(0), m_backstoreH(0)
 {
     ZeroMemory(m_sparklePos, sizeof(m_sparklePos));
 }
+// バックストアとクロマキャッシュを解放。タイマーは HWND 破棄で止まる。
 CCustomSliderCtrl::~CCustomSliderCtrl()
 {
     if (m_memBackstore.GetSafeHandle()) m_memBackstore.DeleteObject();
@@ -6873,6 +7118,8 @@ CCustomSliderCtrl::~CCustomSliderCtrl()
 #endif
 }
 
+// きらめき軌跡の長さ（px）。横は左端〜つまみ、縦はつまみ〜下端（アクティブ側）。
+// 範囲が潰れていると 0。DrawSlider の座標計算と一致させること。
 int CCustomSliderCtrl::SparkleSpan(BOOL* pbVert)
 {
     CRect r;
@@ -6894,6 +7141,9 @@ int CCustomSliderCtrl::SparkleSpan(BOOL* pbVert)
     return tB - tP;
 }
 
+// 40ms タイマから呼ぶ。生存点を進め、span 到達で消滅。
+// bSpawn（ホバー中）だけ先頭に等間隔発生。密着防止で gap/2 以内はスキップ。
+// 離脱後は bSpawn=FALSE で残点だけ流し、全滅したら OnTimer が KillTimer。
 void CCustomSliderCtrl::SparkleTick(BOOL bSpawn)
 {
     const int speed = 4;
@@ -6942,6 +7192,7 @@ void CCustomSliderCtrl::SparkleTick(BOOL bSpawn)
     }
 }
 
+// ホバー解除。残点がある間はタイマを止めない（慣性きらめき）。点ゼロなら即 Kill。
 LRESULT CCustomSliderCtrl::OnMouseLeaveMsg(WPARAM, LPARAM)
 {
     m_bHover = FALSE;
@@ -6952,6 +7203,8 @@ LRESULT CCustomSliderCtrl::OnMouseLeaveMsg(WPARAM, LPARAM)
     return 0;
 }
 
+// kSliderShimmerTimerId: Shimmer カウンタ＋ SparkleTick。非ホバーかつ点ゼロで停止。
+// Invalidate(FALSE) のみ。Erase するとアクリル下で黒フラッシュする。
 void CCustomSliderCtrl::OnTimer(UINT_PTR nIDEvent)
 {
     if (nIDEvent == kSliderShimmerTimerId)
@@ -6966,17 +7219,21 @@ void CCustomSliderCtrl::OnTimer(UINT_PTR nIDEvent)
     CSliderCtrl::OnTimer(nIDEvent);
 }
 
+// EnableAutoDelete 時のみ delete this。
 void CCustomSliderCtrl::PostNcDestroy()
 {
     CSliderCtrl::PostNcDestroy();
     if (m_bAutoDelete) delete this;
 }
 
+// 0=音符バー / 1=紫ダイヤ / 2=緑ダイヤ。未知値は DrawSlider が mode1 扱い。
 void CCustomSliderCtrl::SetMode(int m)
 {
     m_nMode = m;
     if (GetSafeHwnd()) Invalidate(FALSE);
 }
+// 値が同じなら何もしない。MirrorSeekVol 等が 60fps で呼ぶと
+// UpdateWindow + 親アクリル Invalidate が毎フレ走り全体が約2倍重くなる。
 void CCustomSliderCtrl::SetPos(int nPos, BOOL bRedraw)
 {
 	// 値が同じなら何もしない。MirrorSeekVol 等が 60fps で呼ぶと
@@ -6993,6 +7250,7 @@ void CCustomSliderCtrl::SetPos(int nPos, BOOL bRedraw)
 		UpdateWindow();
 	}
 }
+// アクリル時も子は WS_EX_TRANSPARENT にしない（クリックが親へ抜ける）。描画側でクロマ/不透明を分ける。
 void CCustomSliderCtrl::SetAeroMode(BOOL b)
 {
     m_bAeroMode = b;
@@ -7004,11 +7262,15 @@ void CCustomSliderCtrl::SetAeroMode(BOOL b)
         Invalidate(FALSE);
     }
 }
+// 基底へ委譲のみ。テーマ無効化は RangeSlider 側（こちらは標準トラックを自前上書き）。
 void CCustomSliderCtrl::PreSubclassWindow()
 {
     CSliderCtrl::PreSubclassWindow();
 }
 
+// メモリDCへ DrawSlider。HostNeedsChildOpaque ならクロマ禁止（穴抜き禁止）。
+// 透過: クロマキー塗り→ BlitChromaCached（Win11）/ BlitChromaTrans。
+// 不透明: COLOR_DIALOG_BG 塗り→ InwomanBitBlt。クロマ blit を不透明ホストで使うと縁が溶ける。
 void CCustomSliderCtrl::PaintClient(CDC& dc)
 {
     CRect r;
@@ -7058,6 +7320,8 @@ void CCustomSliderCtrl::PaintClient(CDC& dc)
     mDC.DeleteDC();
 }
 
+// CCustomOpaqueFixer の BufferedPaint 面へ直描き。MakeOpaque は呼び出し側。
+// Attach/Detach のみ。hdcBuf を DeleteDC してはいけない。
 void CCustomSliderCtrl::PaintOpaqueIntoBuffer(HDC hdcBuf)
 {
     if (!hdcBuf || !m_hWnd) return;
@@ -7072,6 +7336,8 @@ void CCustomSliderCtrl::PaintOpaqueIntoBuffer(HDC hdcBuf)
     mem.Detach();
 }
 
+// ガラス親向け α=255。BeginBufferedPaint+MakeOpaque。失敗時はメモリDC+InwomanBitBlt。
+// クロマ blit は使わない（未描画が透明穴になる）。
 void CCustomSliderCtrl::PaintOpaqueClient(CDC& dc)
 {
     CRect r;
@@ -7105,6 +7371,9 @@ void CCustomSliderCtrl::PaintOpaqueClient(CDC& dc)
     ::EndBufferedPaint(hBP, TRUE);
 }
 
+// HostNeeds → PaintOpaqueClient。透過時は MakeOpaque 禁止（クロマを潰す）。
+// 不透明は BufferedPaint+MakeOpaque（ポップアップ子や Win11 で素 BitBlt が消える）。
+// WM_PRINTCLIENT は OnPrintClient → PaintClient。CPaintDC を Print 経路で作らない。
 void CCustomSliderCtrl::OnPaint()
 {
     CPaintDC dc(this);
@@ -7145,6 +7414,8 @@ void CCustomSliderCtrl::OnPaint()
     PaintClient(dc);
 }
 
+// 親の印刷/OpaqueFixer 用。PaintClient 直呼び（CPaintDC なし）。
+// ここで PaintOpaqueClient すると Fixer のバッファと二重 MakeOpaque になる。
 LRESULT CCustomSliderCtrl::OnPrintClient(WPARAM wParam, LPARAM)
 {
     if (HDC hDC = (HDC)wParam)
@@ -7157,6 +7428,8 @@ LRESULT CCustomSliderCtrl::OnPrintClient(WPARAM wParam, LPARAM)
     return 0;
 }
 
+// 透過時は消さない（親アクリルを残す）。不透明時だけ COLOR_DIALOG_BG。
+// TRUE 返却で既定消去を抑止。
 BOOL CCustomSliderCtrl::OnEraseBkgnd(CDC* pDC)
 {
 #if CCUSTOM_AERO_SUPPORT
@@ -7171,6 +7444,8 @@ BOOL CCustomSliderCtrl::OnEraseBkgnd(CDC* pDC)
     return TRUE;
 }
 
+// Default でつまみ移動を処理してからホバー開始。初回だけ TrackMouseEvent(LEAVE)。
+// 点が無ければ先頭に1つ置き、40ms シマータイマを張る。
 LRESULT CCustomSliderCtrl::OnMouseMoveMsg(WPARAM w, LPARAM l)
 {
     LRESULT r = Default();
@@ -7185,7 +7460,7 @@ LRESULT CCustomSliderCtrl::OnMouseMoveMsg(WPARAM w, LPARAM l)
             m_nSparkleN = 1;
             m_nSparkleSpawnAcc = 0;
         }
-        SetTimer(kSliderShimmerTimerId, 40, NULL);
+        SetTimer(kSliderShimmerTimerId, 40, NULL); // きらめき SparkleTick。LEAVE 後も残点がある間は止めない
     }
 #if CCUSTOM_AERO_SUPPORT
     CCC_InvalidateParent(m_hWnd, m_bAeroMode);
@@ -7193,6 +7468,7 @@ LRESULT CCustomSliderCtrl::OnMouseMoveMsg(WPARAM w, LPARAM l)
     Invalidate(FALSE);
     return r;
 }
+// 既定ドラッグのあと親アクリルと自分を Invalidate。描画は次の WM_PAINT へ。
 LRESULT CCustomSliderCtrl::OnLButtonDownMsg(WPARAM w, LPARAM l)
 {
     LRESULT r = Default();
@@ -7202,6 +7478,7 @@ LRESULT CCustomSliderCtrl::OnLButtonDownMsg(WPARAM w, LPARAM l)
     Invalidate(FALSE);
     return r;
 }
+// 既定確定のあと再描画。シマーはホバー中なら継続。
 LRESULT CCustomSliderCtrl::OnLButtonUpMsg(WPARAM w, LPARAM l)
 {
     LRESULT r = Default();
@@ -7212,6 +7489,8 @@ LRESULT CCustomSliderCtrl::OnLButtonUpMsg(WPARAM w, LPARAM l)
     return r;
 }
 
+// モード分岐の後、ホバー/残点のきらめきをトラック上に重ねる。
+// 横は左→つまみ、縦は下→つまみ方向。span<=8 は点を描かない。
 void CCustomSliderCtrl::DrawSlider(CDC* pDC)
 {
     CRect r;
@@ -7272,7 +7551,8 @@ void CCustomSliderCtrl::DrawSlider(CDC* pDC)
     }
 }
 
-// 描画モード0：バーと音符のつまみ
+// 描画モード0: 楔形バー＋音符つまみ。ホバー時は SoftJkHeart ではなく SoftJkThumb を重ねる。
+// リージョン AND で進捗色を乗せる。縦は下端がアクティブ。
 void CCustomSliderCtrl::DrawMode0(CDC* pDC, const CRect& rect, int nMin, int nMax, int nPos)
 {
     int nR = nMax - nMin;
@@ -7338,7 +7618,7 @@ void CCustomSliderCtrl::DrawMode0(CDC* pDC, const CRect& rect, int nMin, int nMa
     }
 }
 
-// 描画モード1：紫系グラデーションとダイヤのつまみ
+// 描画モード1: 紫グラデ線＋ダイヤ。ペン/ブラシはプール（毎描画 CreatePen 禁止）。
 void CCustomSliderCtrl::DrawMode1(CDC* pDC, const CRect& rect, int nMin, int nMax, int nPos)
 {
     int nR = nMax - nMin;
@@ -7429,7 +7709,7 @@ void CCustomSliderCtrl::DrawMode1(CDC* pDC, const CRect& rect, int nMin, int nMa
     }
 }
 
-// 描画モード2：緑系グラデーションとダイヤのつまみ
+// 描画モード2: 緑グラデ線＋ダイヤ。mode1 と同構造、色だけ差し替え。
 void CCustomSliderCtrl::DrawMode2(CDC* pDC, const CRect& rect, int nMin, int nMax, int nPos)
 {
     int nR = nMax - nMin;
@@ -7539,6 +7819,8 @@ BEGIN_MESSAGE_MAP(CCustomRangeSliderCtrl, CSliderCtrl)
     ON_NOTIFY_EX_RANGE(TTN_NEEDTEXTA, 0, 0xFFFF, OnTtnNeedText)
 END_MESSAGE_MAP()
 
+// 再生位置 + loop1/2 + A-B。loop つまみは既定ロック（シークを食わない）。
+// 波形・キュー・LRC・拍グリッド・ホバー拡大はすべてオプション。未設定は描かない。
 CCustomRangeSliderCtrl::CCustomRangeSliderCtrl()
     : m_bAutoDelete(FALSE), m_nMin(0), m_nMax(100), m_nSelMin(0), m_nSelMax(100),
     m_nAbA(-1), m_nAbB(-1), m_bSelLocked(TRUE),
@@ -7554,6 +7836,7 @@ CCustomRangeSliderCtrl::CCustomRangeSliderCtrl()
     ZeroMemory(m_lrcFrames, sizeof(m_lrcFrames));
     ZeroMemory(m_ribbon, sizeof(m_ribbon));
 }
+// バックストアとクロマキャッシュを解放。ツールチップ HWND は MFC が破棄。
 CCustomRangeSliderCtrl::~CCustomRangeSliderCtrl()
 {
     if (m_memBackstore.GetSafeHandle()) m_memBackstore.DeleteObject();
@@ -7562,11 +7845,13 @@ CCustomRangeSliderCtrl::~CCustomRangeSliderCtrl()
 #endif
 }
 
+// EnableAutoDelete 時のみ delete this。
 void CCustomRangeSliderCtrl::PostNcDestroy()
 {
     CSliderCtrl::PostNcDestroy();
     if (m_bAutoDelete) delete this;
 }
+// 子を TRANSPARENT にしない。描画は PaintClient のクロマ/不透明分岐。
 void CCustomRangeSliderCtrl::SetAeroMode(BOOL b)
 {
     m_bAeroMode = b;
@@ -7578,6 +7863,8 @@ void CCustomRangeSliderCtrl::SetAeroMode(BOOL b)
         Invalidate(FALSE);
     }
 }
+// UxTheme を空にしてオーナードローを優先（標準トラックが枠を残すのを防ぐ）。
+// 基底の Range/Pos を内部 min/max/logical へ同期。
 void CCustomRangeSliderCtrl::PreSubclassWindow()
 {
     CSliderCtrl::PreSubclassWindow();
@@ -7599,6 +7886,7 @@ void CCustomRangeSliderCtrl::PreSubclassWindow()
     m_nLogicalPos = m_nVisualPos = CSliderCtrl::GetPos();
 }
 
+// ホバー時刻チップへ RelayEvent。親 PreTranslate からも呼ばれる想定。
 BOOL CCustomRangeSliderCtrl::PreTranslateMessage(MSG* pMsg)
 {
     if (m_hoverTip.GetSafeHwnd())
@@ -7606,6 +7894,8 @@ BOOL CCustomRangeSliderCtrl::PreTranslateMessage(MSG* pMsg)
     return CSliderCtrl::PreTranslateMessage(pMsg);
 }
 
+// ドラッグ中は無視（親の再生追従がつまみを引き戻す）。非表示なら Invalidate しない。
+// 同一値は描画しない。
 void CCustomRangeSliderCtrl::SetPos(int p)
 {
     if (m_bDragging) return;
@@ -7618,12 +7908,14 @@ void CCustomRangeSliderCtrl::SetPos(int p)
         Invalidate(FALSE);
 }
 
+// ドラッグ中は見た目位置。親が確定シークに旧 LogicalPos を使わないための分岐。
 int CCustomRangeSliderCtrl::GetPos() const
 {
     // ドラッグ中は見た目位置を返す（親の確定シークが旧 LogicalPos を拾わない）
     return m_bDragging ? m_nVisualPos : m_nLogicalPos;
 }
 
+// 内部 min/max と基底 Range を同期。変化なしなら b のときだけ再描画。
 void CCustomRangeSliderCtrl::SetRange(int mn, int mx, BOOL b)
 {
     if (mn == m_nMin && mx == m_nMax) {
@@ -7637,6 +7929,7 @@ void CCustomRangeSliderCtrl::SetRange(int mn, int mx, BOOL b)
         Invalidate(FALSE);
 }
 
+// loop1/2。mn>mx は入れ替え。A-B（m_nAbA/B）とは別変数。
 void CCustomRangeSliderCtrl::SetSelection(int mn, int mx)
 {
     if (mn > mx) { int t = mn; mn = mx; mx = t; }
@@ -7647,6 +7940,7 @@ void CCustomRangeSliderCtrl::SetSelection(int mn, int mx)
         Invalidate(FALSE);
 }
 
+// A-B。-1 は未設定。A のみでつまみ表示、B>A で区間塗り。非表示なら Invalidate しない。
 void CCustomRangeSliderCtrl::SetAB(int a, int b)
 {
     if (a == m_nAbA && b == m_nAbB) return;
@@ -7656,12 +7950,14 @@ void CCustomRangeSliderCtrl::SetAB(int a, int b)
         Invalidate(FALSE);
 }
 
+// 未設定は -1 のまま返す。
 void CCustomRangeSliderCtrl::GetAB(int& a, int& b) const
 {
     a = m_nAbA;
     b = m_nAbB;
 }
 
+// TRUE で loop つまみドラッグ不可（既定）。A-B は常に可。HitTest がシークを優先する。
 void CCustomRangeSliderCtrl::SetSelectionLocked(BOOL bLocked)
 {
     if ((bLocked ? TRUE : FALSE) == m_bSelLocked) return;
@@ -7670,6 +7966,7 @@ void CCustomRangeSliderCtrl::SetSelectionLocked(BOOL bLocked)
         Invalidate(FALSE);
 }
 
+// 0..1 ピークを内部コピー（最大 kWavePeaksMax）。count<=0 で消去。同一内容は描画しない。
 void CCustomRangeSliderCtrl::SetWavePeaks(const float* peaks, int count)
 {
     if (count <= 0 || !peaks) {
@@ -7698,11 +7995,14 @@ void CCustomRangeSliderCtrl::SetWavePeaks(const float* peaks, int count)
         Invalidate(FALSE);
 }
 
+// 波形オーバービューを消す。SetWavePeaks(NULL,0) へ委譲。
 void CCustomRangeSliderCtrl::ClearWavePeaks()
 {
     SetWavePeaks(NULL, 0);
 }
 
+// 再生位置ビンへ最大合成。フル概観（より多い bins）が載っている間は壊さない。
+// 近傍 0.7 でならす。60fps 呼び出しでも amp が小さければ Invalidate しない。
 void CCustomRangeSliderCtrl::AccumulateWaveAtPos(int pos, float amp, int bins)
 {
     if (m_nMax <= m_nMin) return;
@@ -7729,6 +8029,7 @@ void CCustomRangeSliderCtrl::AccumulateWaveAtPos(int pos, float amp, int bins)
         Invalidate(FALSE);
 }
 
+// キューマーカー（フレーム）。クリックは HitTest 10+i → GetCueClick。
 void CCustomRangeSliderCtrl::SetCues(const int* frames, int count)
 {
     if (count <= 0 || !frames) {
@@ -7753,11 +8054,13 @@ void CCustomRangeSliderCtrl::SetCues(const int* frames, int count)
         Invalidate(FALSE);
 }
 
+// キュー全消去。
 void CCustomRangeSliderCtrl::ClearCues()
 {
     SetCues(NULL, 0);
 }
 
+// LRC 時刻線。クリックは HitTest 30+i → GetLrcClick。
 void CCustomRangeSliderCtrl::SetLrcMarkers(const int* frames, int count)
 {
     if (count <= 0 || !frames) {
@@ -7782,22 +8085,26 @@ void CCustomRangeSliderCtrl::SetLrcMarkers(const int* frames, int count)
         Invalidate(FALSE);
 }
 
+// LRC マーカー全消去。
 void CCustomRangeSliderCtrl::ClearLrcMarkers()
 {
     SetLrcMarkers(NULL, 0);
 }
 
+// 範囲外は -1。クリック後のジャンプ先フレーム。
 int CCustomRangeSliderCtrl::GetLrcFrame(int idx) const
 {
     if (idx < 0 || idx >= m_lrcCount) return -1;
     return m_lrcFrames[idx];
 }
 
+// 波形があるときホバー拡大レンズ。ドラッグ中は Draw 側で出さない。
 void CCustomRangeSliderCtrl::SetHoverZoom(BOOL on)
 {
     m_bHoverZoom = on ? TRUE : FALSE;
 }
 
+// スペアナ細いバー（最大 64）。同一内容は描画しない。
 void CCustomRangeSliderCtrl::SetMeterRibbon(const float* bins, int n)
 {
     if (n <= 0 || !bins) {
@@ -7826,6 +8133,7 @@ void CCustomRangeSliderCtrl::SetMeterRibbon(const float* bins, int n)
         Invalidate(FALSE);
 }
 
+// 書き出しクロスフェード帯。0 で非表示。フレーム換算は timeBaseHz。
 void CCustomRangeSliderCtrl::SetXfadePreviewMs(int ms)
 {
     if (ms < 0) ms = 0;
@@ -7835,6 +8143,7 @@ void CCustomRangeSliderCtrl::SetXfadePreviewMs(int ms)
         Invalidate(FALSE);
 }
 
+// ホバー時刻・拍グリッド・xfade のフレーム換算。8000 未満は 44100 へ戻す。
 void CCustomRangeSliderCtrl::SetTimeBaseHz(int hz)
 {
     if (hz < 8000) hz = 44100;
@@ -7842,16 +8151,19 @@ void CCustomRangeSliderCtrl::SetTimeBaseHz(int hz)
     m_timeBaseHz = hz;
 }
 
+// 拍グリッド。オフセット/拍子は現状値を維持。
 void CCustomRangeSliderCtrl::SetBeatGrid(float bpm, BOOL enabled)
 {
 	SetBeatGrid(bpm, enabled, m_beatOffsetMs, m_beatMeter);
 }
 
+// 位相オフセット付き。拍子は現状値。
 void CCustomRangeSliderCtrl::SetBeatGrid(float bpm, BOOL enabled, int offsetMs)
 {
 	SetBeatGrid(bpm, enabled, offsetMs, m_beatMeter);
 }
 
+// bpm<=1 は 120。拍子 2..16（既定 4）。同一設定は Invalidate しない。
 void CCustomRangeSliderCtrl::SetBeatGrid(float bpm, BOOL enabled, int offsetMs, int beatsPerBar)
 {
     if (bpm <= 1.f) bpm = 120.f;
@@ -7867,6 +8179,7 @@ void CCustomRangeSliderCtrl::SetBeatGrid(float bpm, BOOL enabled, int offsetMs, 
         Invalidate(FALSE);
 }
 
+// 遅延生成。LPSTR_TEXTCALLBACK で OnTtnNeedText へ。
 void CCustomRangeSliderCtrl::EnsureHoverTip()
 {
     if (m_hoverTip.GetSafeHwnd()) return;
@@ -7880,6 +8193,7 @@ void CCustomRangeSliderCtrl::EnsureHoverTip()
     m_hoverTip.AddTool(this, LPSTR_TEXTCALLBACK, &r, 1);
 }
 
+// ピクセル→値→絶対時刻と残り。テキスト変化時だけ UpdateTipText。
 void CCustomRangeSliderCtrl::UpdateHoverTip(CPoint p)
 {
     EnsureHoverTip();
@@ -7909,6 +8223,7 @@ void CCustomRangeSliderCtrl::UpdateHoverTip(CPoint p)
     }
 }
 
+// TTN_NEEDTEXT W/A。TTF_IDISHWND は無視（ツール ID=1 固定）。静的バッファを渡す。
 BOOL CCustomRangeSliderCtrl::OnTtnNeedText(UINT, NMHDR* pNMHDR, LRESULT* pResult)
 {
     *pResult = 0;
@@ -7936,6 +8251,8 @@ BOOL CCustomRangeSliderCtrl::OnTtnNeedText(UINT, NMHDR* pNMHDR, LRESULT* pResult
     return FALSE;
 }
 
+// 再生追従一括更新。ドラッグ中は無視。ab に 0x80000000 はその項目を触らない。
+// 見た目 px が変わったときだけ Invalidate。UPDATENOW 禁止（timerp 内同期描画が二重になる）。
 void CCustomRangeSliderCtrl::SetPlaybackMirror(int nPos, int selMin, int selMax, int rangeMin, int rangeMax,
     int abA, int abB)
 {
@@ -8002,12 +8319,15 @@ void CCustomRangeSliderCtrl::SetPlaybackMirror(int nPos, int selMin, int selMax,
         Invalidate(FALSE);
 }
 
+// loop 選択を範囲内へクランプして返す。
 void CCustomRangeSliderCtrl::GetSelection(int& mn, int& mx) const
 {
     mn = max(m_nMin, min(m_nMax, m_nSelMin));
     mx = max(m_nMin, min(m_nMax, m_nSelMax));
 }
 
+// スライダーと同様。キャプションのみアクリルのホストでは穴抜き禁止（HostNeeds で bTrans オフ）。
+// 透過はクロマ blit、不透明は InwomanBitBlt。
 void CCustomRangeSliderCtrl::PaintClient(CDC& dc)
 {
     CRect r;
@@ -8059,6 +8379,7 @@ void CCustomRangeSliderCtrl::PaintClient(CDC& dc)
     mDC.DeleteDC();
 }
 
+// OpaqueFixer バッファへ直描き。MakeOpaque は呼び出し側。
 void CCustomRangeSliderCtrl::PaintOpaqueIntoBuffer(HDC hdcBuf)
 {
     if (!hdcBuf || !m_hWnd) return;
@@ -8073,6 +8394,7 @@ void CCustomRangeSliderCtrl::PaintOpaqueIntoBuffer(HDC hdcBuf)
     mem.Detach();
 }
 
+// α=255 BufferedPaint。失敗時はメモリDC。クロマ禁止。
 void CCustomRangeSliderCtrl::PaintOpaqueClient(CDC& dc)
 {
     CRect r;
@@ -8106,6 +8428,8 @@ void CCustomRangeSliderCtrl::PaintOpaqueClient(CDC& dc)
     ::EndBufferedPaint(hBP, TRUE);
 }
 
+// HostNeeds → OpaqueClient。透過は PaintClient（MakeOpaque しない）。
+// WM_PRINTCLIENT は Print 経路。CPaintDC と混ぜない。
 void CCustomRangeSliderCtrl::OnPaint()
 {
     CPaintDC dc(this);
@@ -8139,6 +8463,7 @@ void CCustomRangeSliderCtrl::OnPaint()
     PaintClient(dc);
 }
 
+// PaintClient 直呼び。ここで OpaqueClient すると Fixer と二重になる。
 LRESULT CCustomRangeSliderCtrl::OnPrintClient(WPARAM wParam, LPARAM)
 {
     if (HDC hDC = (HDC)wParam)
@@ -8151,6 +8476,7 @@ LRESULT CCustomRangeSliderCtrl::OnPrintClient(WPARAM wParam, LPARAM)
     return 0;
 }
 
+// 透過時は親を残す。不透明時だけ背景塗り。
 BOOL CCustomRangeSliderCtrl::OnEraseBkgnd(CDC* pDC)
 {
 #if CCUSTOM_AERO_SUPPORT
@@ -8165,6 +8491,9 @@ BOOL CCustomRangeSliderCtrl::OnEraseBkgnd(CDC* pDC)
     return TRUE;
 }
 
+// 奥から波形→拍グリッド→トラック/loop/A-B/キュー/LRC→ホバー拡大→再生ハート。
+// 波形ありは R2_XORPEN（バーと波形を同時に読む）。数字・ハッチは一時 COPY に戻す。
+// 再生つまみはホバー/ドラッグ中 SoftJkHeart、通常は DrawHeart。
 void CCustomRangeSliderCtrl::DrawRangeSlider(CDC* pDC)
 {
     CRect r;
@@ -8424,6 +8753,7 @@ void CCustomRangeSliderCtrl::DrawRangeSlider(CDC* pDC)
     if (oldPen) pDC->SelectObject(oldPen);
 }
 
+// 左右 14px 余白。範囲潰れは左端。
 int CCustomRangeSliderCtrl::ValueToPixel(int v) const
 {
     CRect r;
@@ -8433,6 +8763,7 @@ int CCustomRangeSliderCtrl::ValueToPixel(int v) const
     return 14 + (int)((long long)(max(m_nMin, min(m_nMax, v)) - m_nMin) * w / (m_nMax - m_nMin));
 }
 
+// 余白外は min/max へクランプ。
 int CCustomRangeSliderCtrl::PixelToValue(int x) const
 {
     CRect r;
@@ -8442,8 +8773,13 @@ int CCustomRangeSliderCtrl::PixelToValue(int x) const
     return m_nMin + (int)((double)(max(14, min(r.Width() - 14, x)) - 14) / w * (m_nMax - m_nMin) + 0.5);
 }
 
+// 戻り値: 0=なし 1=loop最小 2=loop最大 3=シーク 4=A 5=B。
+// 10+i=キュー、30+i=LRC。優先は A-B → キュー/LRC →（ロック解除時のみ）loop → シーク。
+// ロック中は loop を当てず 0 を返し、OnLButtonDown がトラック空白＝シークへ落とす。
+// つまみ矩形は描画より少し広い（掴みやすくするため）。
 int CCustomRangeSliderCtrl::HitTest(CPoint p) const
 {
+    // 0 none / 1 loop min / 2 loop max / 3 seek / 4 A / 5 B （10+ cue, 30+ LRC）
     CRect r;
     GetClientRect(&r);
     int cy = r.Height() / 2;
@@ -8476,6 +8812,8 @@ int CCustomRangeSliderCtrl::HitTest(CPoint p) const
     if (CRect(xM - 10, cy - 14, xM + 10, cy + 14).PtInRect(p)) return 3;
     return 0;
 }
+// Alt+ドラッグは拍グリッド位相（target=99）。キュー/LRC はクリック通知のみ（ドラッグしない）。
+// ロック中の loop ヒットは 0 扱い→トラックシーク。空白クリックもシーク（target=3）。
 void CCustomRangeSliderCtrl::OnLButtonDown(UINT f, CPoint p)
 {
 #if CCUSTOM_AERO_SUPPORT
@@ -8519,6 +8857,8 @@ void CCustomRangeSliderCtrl::OnLButtonDown(UINT f, CPoint p)
     SetCapture();
     RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW | RDW_NOERASE);
 }
+// シーク確定は SB_THUMBPOSITION（ENDSCROLL と衝突しない）。
+// loop/A-B/グリッドは TB_ENDTRACK。親は GetDragTarget で判別。
 void CCustomRangeSliderCtrl::OnLButtonUp(UINT f, CPoint p)
 {
     if (m_bDragging)
@@ -8550,6 +8890,8 @@ void CCustomRangeSliderCtrl::OnLButtonUp(UINT f, CPoint p)
         RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW | RDW_ERASE);
     }
 }
+// 非ドラッグ: 時刻チップとホバー拡大 X。ドラッグ: target ごとに値更新＋ THUMBTRACK。
+// ハートは m_bHoverTracking で Soft 化（DrawRangeSlider）。
 void CCustomRangeSliderCtrl::OnMouseMove(UINT f, CPoint p)
 {
     if (!m_bHoverTracking) {
@@ -8614,6 +8956,7 @@ void CCustomRangeSliderCtrl::OnMouseMove(UINT f, CPoint p)
     }
 }
 
+// 拡大レンズとチップを閉じ、通常ハートへ戻す。
 void CCustomRangeSliderCtrl::OnMouseLeave()
 {
     m_bHoverTracking = FALSE;
@@ -8623,6 +8966,7 @@ void CCustomRangeSliderCtrl::OnMouseLeave()
     Invalidate(FALSE);
 }
 
+// A-B / ロック解除 loop はサイズ左右、キューはハンド。それ以外は既定。
 BOOL CCustomRangeSliderCtrl::OnSetCursor(CWnd* pWnd, UINT nHitTest, UINT message)
 {
     if (nHitTest == HTCLIENT && GetSafeHwnd()) {
@@ -8638,6 +8982,7 @@ BOOL CCustomRangeSliderCtrl::OnSetCursor(CWnd* pWnd, UINT nHitTest, UINT message
     return CSliderCtrl::OnSetCursor(pWnd, nHitTest, message);
 }
 
+// 親へクライアント座標変換して転送（シーク上コンテキストメニュー）。
 void CCustomRangeSliderCtrl::OnRButtonUp(UINT nFlags, CPoint point)
 {
     // 親ダイアログへクライアント座標を変換して渡す（シーク上のコンテキストメニュー拡充用）
@@ -8691,6 +9036,8 @@ void CCustomListCtrl::OnDropFiles(HDROP hDropInfo)
     CListCtrlA::OnDropFiles(hDropInfo);
 }
 
+// カスタムドローリスト。ホバー行と選択行の♡矩形だけタイマー再描画する。
+// リスト全体 Invalidate は再生中ピアノ提示を遅らせるので使わない。
 CCustomListCtrl::CCustomListCtrl()
     : m_bAutoDelete(FALSE), m_nHotItem(-1), m_bAeroMode(FALSE)
 {
@@ -8699,16 +9046,19 @@ CCustomListCtrl::CCustomListCtrl()
     m_heartRcHot.SetRectEmpty();
 }
 
+// 背景ブラシのみ。ハートタイマは HWND 破棄で停止。
 CCustomListCtrl::~CCustomListCtrl()
 {
     if (m_brBackground.GetSafeHandle()) m_brBackground.DeleteObject();
 }
 
+// EnableAutoDelete 時のみ delete this。
 void CCustomListCtrl::PostNcDestroy()
 {
     CListCtrlA::PostNcDestroy();
     if (m_bAutoDelete) delete this;
 }
+// CLIPCHILDREN + DOUBLEBUFFER。親 ACCEPTFILES だけではリスト上が受け取れないので DragAcceptFiles。
 void CCustomListCtrl::PreSubclassWindow()
 {
     CListCtrlA::PreSubclassWindow();
@@ -8721,6 +9071,7 @@ void CCustomListCtrl::PreSubclassWindow()
     DragAcceptFiles(TRUE);
 }
 
+// Ctrl+A 等のキー処理後、アクリル下では不透明再描画を予約（選択が一気に変わる）。
 BOOL CCustomListCtrl::PreTranslateMessage(MSG* pMsg)
 {
     const BOOL handled = CListCtrlA::PreTranslateMessage(pMsg);
@@ -8729,6 +9080,7 @@ BOOL CCustomListCtrl::PreTranslateMessage(MSG* pMsg)
         ScheduleOpaqueRepaint();
     return handled;
 }
+// リスト本体色。セルは OnCustomDraw が上書きする。
 HBRUSH CCustomListCtrl::CtlColor(CDC* pDC, UINT)
 {
     pDC->SetBkColor(COLOR_LIST_BG);
@@ -8736,6 +9088,7 @@ HBRUSH CCustomListCtrl::CtlColor(CDC* pDC, UINT)
     return (HBRUSH)m_brBackground.GetSafeHandle();
 }
 
+// SubItemHitTest でホバー行更新。LEAVE を張り、♡タイマは CustomDraw が必要なら開始。
 void CCustomListCtrl::OnMouseMove(UINT f, CPoint p)
 {
     LVHITTESTINFO h;
@@ -8747,17 +9100,21 @@ void CCustomListCtrl::OnMouseMove(UINT f, CPoint p)
     CListCtrl::OnMouseMove(f, p);
 }
 
+// ホバー解除。Opaque ホストでは UpdateHotItem が POST_OPAQUE_PAINT する。
 void CCustomListCtrl::OnMouseLeave()
 {
     UpdateHotItem(-1);
     CListCtrl::OnMouseLeave();
 }
+// CCC_WM_POST_OPAQUE_PAINT を Post。Send 同期再入禁止。キューに1回まとまる。
 void CCustomListCtrl::ScheduleOpaqueRepaint()
 {
     if (GetSafeHwnd())
         PostMessage(CCC_WM_POST_OPAQUE_PAINT);
 }
 
+// ガラス親のときだけ PaintOpaqueClient。未処理なら無視（メッセージは無害）。
+// ホバー行変更・サイズ変更・Ctrl+A から来る。
 LRESULT CCustomListCtrl::OnPostOpaquePaint(WPARAM, LPARAM)
 {
 #if CCUSTOM_AERO_SUPPORT
@@ -8770,17 +9127,20 @@ LRESULT CCustomListCtrl::OnPostOpaquePaint(WPARAM, LPARAM)
     return 0;
 }
 
+// OpaqueFixer が直後に全面描画する。ここでの Invalidate は名前列ちらつきの元。ホット行だけ捨てる。
 void CCustomListCtrl::OnVScroll(UINT n, UINT p, CScrollBar* s)
 {
     CListCtrl::OnVScroll(n, p, s);
     // OpaqueFixer が直後に全面描画する。ここでの Invalidate は名前列ちらつきの元。
     m_nHotItem = -1;
 }
+// 横スクロール後もホット索引だけ破棄（部分 Invalidate しない）。
 void CCustomListCtrl::OnHScroll(UINT n, UINT p, CScrollBar* s)
 {
     CListCtrl::OnHScroll(n, p, s);
     m_nHotItem = -1;
 }
+// ホット行の再 Invalidate 禁止。索引だけ合わせて直後の Opaque に任せる。
 BOOL CCustomListCtrl::OnMouseWheel(UINT n, short z, CPoint p)
 {
     BOOL r = CListCtrl::OnMouseWheel(n, z, p);
@@ -8795,6 +9155,8 @@ BOOL CCustomListCtrl::OnMouseWheel(UINT n, short z, CPoint p)
     return r;
 }
 
+// kListSoftTimerId: 選択/ホバー♡の矩形だけ Invalidate（30ms）。両方空なら Kill。
+// kListScrollOpaqueTimerId: スクロール後の遅延不透明塗り。
 void CCustomListCtrl::OnTimer(UINT_PTR nIDEvent)
 {
     if (nIDEvent == kListSoftTimerId)
@@ -8828,6 +9190,7 @@ void CCustomListCtrl::OnTimer(UINT_PTR nIDEvent)
     CListCtrl::OnTimer(nIDEvent);
 }
 
+// サイズ変化でアクリル穴が残ることがあるので遅延 Opaque。
 void CCustomListCtrl::OnWindowPosChanged(WINDOWPOS* lpwndpos)
 {
     CListCtrl::OnWindowPosChanged(lpwndpos);
@@ -8837,6 +9200,8 @@ void CCustomListCtrl::OnWindowPosChanged(WINDOWPOS* lpwndpos)
 #endif
 }
 
+// ホバー行切替。古い♡矩形は捨てる（前の行を回し続けない）。
+// ガラス親は部分 Invalidate が α=0 穴になるので POST_OPAQUE_PAINT のみ。
 void CCustomListCtrl::UpdateHotItem(int n)
 {
     if (m_nHotItem == n) return;
@@ -8867,6 +9232,7 @@ void CCustomListCtrl::UpdateHotItem(int n)
     }
 }
 
+// カーソル位置からホット行を取り直す（外部から呼ぶ用）。
 void CCustomListCtrl::UpdateHotItemFromCursor()
 {
     if (!GetSafeHwnd()) return;
@@ -8878,6 +9244,7 @@ void CCustomListCtrl::UpdateHotItemFromCursor()
     UpdateHotItem(SubItemHitTest(&h));
 }
 
+// 可視範囲 RedrawItems。ガラス親では使わず Opaque 全面を優先すること。
 void CCustomListCtrl::RedrawVisibleItems()
 {
     int t = GetTopIndex();
@@ -8887,11 +9254,17 @@ void CCustomListCtrl::RedrawVisibleItems()
     if (t >= 0 && b >= t) RedrawItems(t, b);
 }
 
+// FALSE=既定消去させない。空きは FillEmptyBelowVisible が交互色で塗る。
+// TRUE+Fill だと PREPAINT と二重になり黒ちらつきする。
 BOOL CCustomListCtrl::OnEraseBkgnd(CDC*)
 {
     return FALSE;
 }
 
+// 可視最終行より下（と PREPAINT 時は行下地）をゼブラ不透明で塗る。
+// belowItemsOnly=TRUE（描画後）: 行の上に塗ると文字/ジャケが消えるので空きだけ。
+// FALSE: 行下地ごと（ITEMPREPAINT が同色で上書き）。OnPaint では TRUE のみ使う。
+// 素 FillRect はアクリルで α=0 黒。32bpp DIB α=255 を AlphaBlend。ネスト BP は黒フラッシュ。
 void CCustomListCtrl::FillEmptyBelowVisible(HDC hdc, BOOL belowItemsOnly)
 {
     if (!hdc || !m_hWnd) return;
@@ -9044,6 +9417,8 @@ void CCustomListCtrl::FillEmptyBelowVisible(HDC hdc, BOOL belowItemsOnly)
         ::SelectClipRgn(hdc, NULL);
 }
 
+// Fixer バッファへ Fill + WM_PRINTCLIENT。PrintClient が空きを黒くしクリップを残す →
+// クリップ解除して FillEmptyBelowVisible で交互色に塗り直す。
 void CCustomListCtrl::PaintOpaqueIntoBuffer(HDC hdcBuf)
 {
     if (!hdcBuf || !m_hWnd) return;
@@ -9061,6 +9436,8 @@ void CCustomListCtrl::PaintOpaqueIntoBuffer(HDC hdcBuf)
     FillEmptyBelowVisible(hdcBuf);
 }
 
+// BufferedPaint 内で PrintClient。失敗時 Default + FillEmpty。
+// OnPrintClient は DefWindowProc のみ（ここへ戻ると無限再入）。
 void CCustomListCtrl::PaintOpaqueClient(CDC& dc)
 {
     CRect r;
@@ -9084,14 +9461,19 @@ void CCustomListCtrl::PaintOpaqueClient(CDC& dc)
     ::EndBufferedPaint(hBP, TRUE);
 }
 
+// Default（NM_CUSTOMDRAW）のあと空きを FillEmpty。CPaintDC を自前で取らない。
+// WM_PRINTCLIENT は OnPrintClient。OnPaint から Print を呼ぶと二重描画。
+// 横スクロールバーは出さない（最終列を右端まで伸ばしている）。
 void CCustomListCtrl::OnPaint()
 {
-    Default();
+    Default(); // NM_CUSTOMDRAW。PrintClient は別経路（ここから送ると二重）
     CClientDC dc(this);
     FillEmptyBelowVisible(dc.GetSafeHdc());
     ShowScrollBar(SB_HORZ, FALSE);
 }
 
+// 既定に委譲して CustomDraw を走らせるだけ。FillEmpty は呼び出し側（Opaque/OnPaint）。
+// ここで PaintOpaqueClient すると SendMessage(WM_PRINTCLIENT) と再入する。
 LRESULT CCustomListCtrl::OnPrintClient(WPARAM wParam, LPARAM lParam)
 {
     return DefWindowProc(WM_PRINTCLIENT, (WPARAM)wParam, (LPARAM)lParam);
@@ -9170,6 +9552,11 @@ static void CCC_DrawListCheckBox(CDC* pDC, const CRect& rc, bool checked)
     ::DeleteObject(dib);
 }
 
+// SUBITEM でセル全面を自前描画し CDRF_SKIPDEFAULT。
+// PREPAINT で FillEmpty しない（名前列と二重→黒ちらつき）。
+// ガラス: OpaqueBits。Aero: 黒+α。通常: FillSolid。
+// 選択/ホバー行は SoftJkHeart を♪の奥に描き、♡矩形だけ kListSoftTimerId で回す。
+// チェックは CCC_DrawListCheckBox（素 Rectangle は α=0）。
 void CCustomListCtrl::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
 {
     NMLVCUSTOMDRAW* p = reinterpret_cast<NMLVCUSTOMDRAW*>(pNMHDR);
@@ -9533,6 +9920,8 @@ BEGIN_MESSAGE_MAP(CCustomTreeCtrl, CTreeCtrl)
 	ON_MESSAGE(CCC_WM_POST_OPAQUE_PAINT, OnPostOpaquePaint)
 END_MESSAGE_MAP()
 
+// フル行選択のオーナードローツリー。ホット項目は行全体 Invalidate。
+// ゼブラは描画順 m_nItemDrawIndex（階層ではなく可視順）。
 CCustomTreeCtrl::CCustomTreeCtrl()
 	: m_bAutoDelete(FALSE), m_hHotItem(NULL), m_nItemDrawIndex(0)
 	, m_clrBk(COLOR_LIST_BG), m_bAeroMode(FALSE)
@@ -9540,11 +9929,13 @@ CCustomTreeCtrl::CCustomTreeCtrl()
 	m_brBackground.CreateSolidBrush(COLOR_LIST_BG);
 }
 
+// 背景ブラシのみ。
 CCustomTreeCtrl::~CCustomTreeCtrl()
 {
 	if (m_brBackground.GetSafeHandle()) m_brBackground.DeleteObject();
 }
 
+// 内部ブラシと TreeView_SetBkColor を揃える。空きギャップ塗りもこの色。
 COLORREF CCustomTreeCtrl::SetBkColor(COLORREF clr)
 {
 	COLORREF clrOld = m_clrBk;
@@ -9557,12 +9948,15 @@ COLORREF CCustomTreeCtrl::SetBkColor(COLORREF clr)
 	return clrOld;
 }
 
+// EnableAutoDelete 時のみ delete this。
 void CCustomTreeCtrl::PostNcDestroy()
 {
 	CTreeCtrl::PostNcDestroy();
 	if (m_bAutoDelete) delete this;
 }
 
+// TVS_EX_FULLROWSELECT + DOUBLEBUFFER。ラベル以外の行クリックも項目扱い（HitTest と整合）。
+// 標準ヒットはアイコン/ラベルだけなので、拡張無しだと行右端が NOWHERE になる。
 void CCustomTreeCtrl::PreSubclassWindow()
 {
 	CTreeCtrl::PreSubclassWindow();
@@ -9572,14 +9966,17 @@ void CCustomTreeCtrl::PreSubclassWindow()
 		dwEx | TVS_EX_DOUBLEBUFFER | TVS_EX_FULLROWSELECT);
 }
 
+// 消去しない。空きは OnPaint のギャップ塗り。TRUE+Fill は CustomDraw と競合する。
 BOOL CCustomTreeCtrl::OnEraseBkgnd(CDC*) { return FALSE; }
 
+// スクロール直後のチラつき回避。POST_OPAQUE_PAINT を Post（Send 再入禁止）。
 void CCustomTreeCtrl::ScheduleOpaqueRepaint()
 {
 	if (GetSafeHwnd())
 		PostMessage(CCC_WM_POST_OPAQUE_PAINT);
 }
 
+// ガラス親のとき PaintOpaqueClient。ホバー部分 Invalidate の穴を全面不透明で潰す。
 LRESULT CCustomTreeCtrl::OnPostOpaquePaint(WPARAM, LPARAM)
 {
 #if CCUSTOM_AERO_SUPPORT
@@ -9592,11 +9989,13 @@ LRESULT CCustomTreeCtrl::OnPostOpaquePaint(WPARAM, LPARAM)
 	return 0;
 }
 
+// DefWindowProc のみ。CustomDraw を走らせる。OpaqueClient へ戻さない（再入防止）。
 LRESULT CCustomTreeCtrl::OnPrintClient(WPARAM wParam, LPARAM lParam)
 {
 	return DefWindowProc(WM_PRINTCLIENT, wParam, lParam);
 }
 
+// Fixer バッファへ背景 + WM_PRINTCLIENT。MakeOpaque は呼び出し側。
 void CCustomTreeCtrl::PaintOpaqueIntoBuffer(HDC hdcBuf)
 {
 	if (!hdcBuf || !m_hWnd) return;
@@ -9607,6 +10006,7 @@ void CCustomTreeCtrl::PaintOpaqueIntoBuffer(HDC hdcBuf)
 	::SendMessage(m_hWnd, WM_PRINTCLIENT, (WPARAM)hdcBuf, PRF_CLIENT | PRF_ERASEBKGND);
 }
 
+// BufferedPaint+MakeOpaque。失敗時 Default。クロマ blit は使わない。
 void CCustomTreeCtrl::PaintOpaqueClient(CDC& dc)
 {
 	CRect r;
@@ -9623,6 +10023,10 @@ void CCustomTreeCtrl::PaintOpaqueClient(CDC& dc)
 	::EndBufferedPaint(hBP, TRUE);
 }
 
+// OpaqueFixer 未装着でもアクリル穴を避ける（遅延生成 Lib ツリー等）。
+// CPaintDC は更新矩形クリップのため、フルクライアントは GetDC へ描く。
+// 最終可視行より下は HitTest で行が無いときだけ塗る（追いついていない行を潰さない）。
+// WM_PRINTCLIENT は Print 経路。
 void CCustomTreeCtrl::OnPaint()
 {
 #if CCUSTOM_AERO_SUPPORT
@@ -9676,6 +10080,7 @@ void CCustomTreeCtrl::OnPaint()
 	}
 }
 
+// サイズ変化後のガラス穴対策。
 void CCustomTreeCtrl::OnWindowPosChanged(WINDOWPOS* lpwndpos)
 {
 	CTreeCtrl::OnWindowPosChanged(lpwndpos);
@@ -9685,6 +10090,7 @@ void CCustomTreeCtrl::OnWindowPosChanged(WINDOWPOS* lpwndpos)
 #endif
 }
 
+// ホイール後 33ms 遅延の不透明塗り。連続ホイールでタイマが上書きされる。
 void CCustomTreeCtrl::OnTimer(UINT_PTR nIDEvent)
 {
 	if (nIDEvent == kTreeScrollOpaqueTimerId)
@@ -9702,6 +10108,7 @@ void CCustomTreeCtrl::OnTimer(UINT_PTR nIDEvent)
 	CTreeCtrl::OnTimer(nIDEvent);
 }
 
+// ルート=0。インデントと接続線の X 計算用。
 int CCustomTreeCtrl::GetItemLevel(HTREEITEM hItem) const
 {
 	int nLevel = 0;
@@ -9714,6 +10121,7 @@ int CCustomTreeCtrl::GetItemLevel(HTREEITEM hItem) const
 	return nLevel;
 }
 
+// ラベル幅ではなくクライアント全幅（フル行選択の見た目と一致）。
 void CCustomTreeCtrl::InvalidateItemRow(HTREEITEM hItem)
 {
 	if (!hItem || !GetSafeHwnd()) return;
@@ -9728,6 +10136,7 @@ void CCustomTreeCtrl::InvalidateItemRow(HTREEITEM hItem)
 	}
 }
 
+// 可視行の Y 帯だけでヒット。右端空白も ONITEM。ボタン矩形は見ない。
 HTREEITEM CCustomTreeCtrl::HitTestRowAtPoint(CPoint pt, UINT* pFlags)
 {
 	CRect rcClient;
@@ -9752,6 +10161,7 @@ HTREEITEM CCustomTreeCtrl::HitTestRowAtPoint(CPoint pt, UINT* pFlags)
 	return NULL;
 }
 
+// 自前 SelectItem 後に TVN_SELCHANGED を親へ。既定 LButtonDown を食うため必須。
 void CCustomTreeCtrl::NotifySelChangedByMouse(HTREEITEM hNew, HTREEITEM hOld)
 {
 	NM_TREEVIEW nmtv = {};
@@ -9775,6 +10185,7 @@ void CCustomTreeCtrl::NotifySelChangedByMouse(HTREEITEM hNew, HTREEITEM hOld)
 	GetParent()->SendMessage(WM_NOTIFY, (WPARAM)nmtv.hdr.idFrom, (LPARAM)&nmtv);
 }
 
+// フル行ヒットと整合する TVN_BEGINDRAG。既定はラベル上だけで始まる。
 void CCustomTreeCtrl::NotifyBeginDrag(HTREEITEM hItem, CPoint pt)
 {
 	if (!hItem || !GetParent()) return;
@@ -9792,6 +10203,8 @@ void CCustomTreeCtrl::NotifyBeginDrag(HTREEITEM hItem, CPoint pt)
 	GetParent()->SendMessage(WM_NOTIFY, (WPARAM)nmtv.hdr.idFrom, (LPARAM)&nmtv);
 }
 
+// +/- ボタンとラベルは既定。それ以外の行（アイコン右〜右端）は HitTestRowAtPoint。
+// FULLROWSELECT と OnLButtonDown の選択がこれで揃う。
 HTREEITEM CCustomTreeCtrl::HitTest(CPoint pt, UINT* pFlags)
 {
 	UINT flags = 0;
@@ -9817,6 +10230,7 @@ HTREEITEM CCustomTreeCtrl::HitTest(CPoint pt, UINT* pFlags)
 	return NULL;
 }
 
+// 展開ボタンは既定へ。行ヒットは SelectItem + 自前 SELCHANGED。DragDetect で BEGINDRAG。
 void CCustomTreeCtrl::OnLButtonDown(UINT nFlags, CPoint point)
 {
 	UINT uFlags = 0;
@@ -9842,6 +10256,7 @@ void CCustomTreeCtrl::OnLButtonDown(UINT nFlags, CPoint point)
 	CTreeCtrl::OnLButtonDown(nFlags, point);
 }
 
+// ホット行切替。ガラス親は部分 Invalidate+UpdateWindow が α=0 穴 → Post 全面不透明。
 void CCustomTreeCtrl::OnMouseMove(UINT nFlags, CPoint point)
 {
 	UINT      uFlags = 0;
@@ -9867,6 +10282,7 @@ void CCustomTreeCtrl::OnMouseMove(UINT nFlags, CPoint point)
 	CTreeCtrl::OnMouseMove(nFlags, point);
 }
 
+// ホット解除。ガラスは全面 Opaque、それ以外は行だけ。
 void CCustomTreeCtrl::OnMouseLeave()
 {
 	if (m_hHotItem)
@@ -9882,6 +10298,7 @@ void CCustomTreeCtrl::OnMouseLeave()
 	}
 }
 
+// スクロール後にホットをカーソルへ追従。ガラスは Opaque 予約。
 void CCustomTreeCtrl::OnVScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
 {
 	CTreeCtrl::OnVScroll(nSBCode, nPos, pScrollBar);
@@ -9897,6 +10314,7 @@ void CCustomTreeCtrl::OnVScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
 	Invalidate(FALSE);
 }
 
+// ホイール後ホット更新。ガラスは即 Post + 33ms タイマ（中間フレームの穴対策）。
 BOOL CCustomTreeCtrl::OnMouseWheel(UINT nFlags, short zDelta, CPoint pt)
 {
 	BOOL r = CTreeCtrl::OnMouseWheel(nFlags, zDelta, pt);
@@ -9918,6 +10336,9 @@ BOOL CCustomTreeCtrl::OnMouseWheel(UINT nFlags, short zDelta, CPoint pt)
 	return r;
 }
 
+// ITEMPREPAINT で行全体（クライアント幅）を塗って SKIPDEFAULT。
+// 標準はラベル幅だけ選択色→右端が親アクリルの穴に見える。
+// ガラスは OpaqueBits。選択行は左に SoftJkHeart。フォーカスは点線枠。
 void CCustomTreeCtrl::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
 {
 	NMTVCUSTOMDRAW* pTVCD = reinterpret_cast<NMTVCUSTOMDRAW*>(pNMHDR);
@@ -9937,11 +10358,11 @@ void CCustomTreeCtrl::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
 		if (!hItem) { *pResult = CDRF_DODEFAULT; break; }
 
 		CRect rcRow;
-		GetItemRect(hItem, &rcRow, FALSE);
+		GetItemRect(hItem, &rcRow, FALSE); // FALSE=行全体。TRUE だとラベル幅だけになり右端が穴
 		CRect rcClient;
 		GetClientRect(&rcClient);
 		rcRow.left = rcClient.left;
-		rcRow.right = rcClient.right;
+		rcRow.right = rcClient.right; // TVS_EX_FULLROWSELECT の見た目（標準選択色はラベル幅）
 
 		BOOL bSel = (GetItemState(hItem, TVIS_SELECTED) & TVIS_SELECTED) != 0;
 		BOOL bHot = (hItem == m_hHotItem);
@@ -10092,12 +10513,15 @@ BEGIN_MESSAGE_MAP(CCustomTabCtrl, CTabCtrl)
 	ON_NOTIFY_REFLECT_EX(TCN_SELCHANGE, OnSelChange)
 END_MESSAGE_MAP()
 
+// 等幅オーナードロータブ。縦置き TCS_VERTICAL / TCS_RIGHT 対応。
+// 選択タブの Soft 揺れは常時タイマを張らず、描画時の TickCount で足す。
 CCustomTabCtrl::CCustomTabCtrl()
 	: m_bAutoDelete(FALSE), m_bAeroMode(FALSE), m_nHotItem(-1), m_bTracking(FALSE)
 {
 	m_brBackground.CreateSolidBrush(COLOR_DIALOG_BG);
 }
 
+// ブラシとタブフォントを解放。
 CCustomTabCtrl::~CCustomTabCtrl()
 {
 	if (m_brBackground.GetSafeHandle()) m_brBackground.DeleteObject();
@@ -10105,24 +10529,28 @@ CCustomTabCtrl::~CCustomTabCtrl()
 	if (m_fontTabSel.GetSafeHandle()) m_fontTabSel.DeleteObject();
 }
 
+// EnableAutoDelete 時のみ delete this。
 void CCustomTabCtrl::PostNcDestroy()
 {
 	CTabCtrl::PostNcDestroy();
 	if (m_bAutoDelete) delete this;
 }
 
+// TCS_VERTICAL。未作成 HWND は FALSE。
 BOOL CCustomTabCtrl::IsVertical() const
 {
 	if (!::IsWindow(m_hWnd)) return FALSE;
 	return (::GetWindowLong(m_hWnd, GWL_STYLE) & TCS_VERTICAL) ? TRUE : FALSE;
 }
 
+// TCS_RIGHT（縦のとき右側）。文字の escapement 2700/900 切替に使う。
 BOOL CCustomTabCtrl::IsRightSide() const
 {
 	if (!::IsWindow(m_hWnd)) return FALSE;
 	return (::GetWindowLong(m_hWnd, GWL_STYLE) & TCS_RIGHT) ? TRUE : FALSE;
 }
 
+// 親フォントから通常/太字。縦書きは DrawTabItem が escapement 付き一時フォントを作る。
 void CCustomTabCtrl::RebuildFonts()
 {
 	LOGFONT lf = {};
@@ -10155,6 +10583,7 @@ void CCustomTabCtrl::RebuildFonts()
 	m_fontTabSel.CreateFontIndirect(&lfBold);
 }
 
+// TCS_FIXEDWIDTH で等分。縦は高さをスロット分割、横は幅。DPI 下限あり。
 void CCustomTabCtrl::LayoutEqualTabs(int nSlots)
 {
 	if (!::IsWindow(m_hWnd) || nSlots < 1) return;
@@ -10179,6 +10608,8 @@ void CCustomTabCtrl::LayoutEqualTabs(int nSlots)
 	Invalidate(FALSE);
 }
 
+// テーマ無効 + OWNERDRAWFIXED を外して FIXEDWIDTH（自前 DrawToDC）。
+// オーナードローメッセージは使わず OnPaint で描く。
 void CCustomTabCtrl::PreSubclassWindow()
 {
 	CTabCtrl::PreSubclassWindow();
@@ -10193,6 +10624,7 @@ void CCustomTabCtrl::PreSubclassWindow()
 	RebuildFonts();
 }
 
+// Aero タブは消さない。SetAeroMode(FALSE) は不透明塗り（親アクリルでも穴を開けない）。
 BOOL CCustomTabCtrl::OnEraseBkgnd(CDC* pDC)
 {
 #if CCUSTOM_AERO_SUPPORT
@@ -10208,12 +10640,14 @@ BOOL CCustomTabCtrl::OnEraseBkgnd(CDC* pDC)
 	return TRUE;
 }
 
+// 選択変更・サイズ変更の遅延不透明。POST_OPAQUE_PAINT。
 void CCustomTabCtrl::ScheduleOpaqueRepaint()
 {
 	if (GetSafeHwnd())
 		PostMessage(CCC_WM_POST_OPAQUE_PAINT);
 }
 
+// Win11 アクリル時 PaintOpaqueClient。
 LRESULT CCustomTabCtrl::OnPostOpaquePaint(WPARAM, LPARAM)
 {
 #if CCUSTOM_AERO_SUPPORT
@@ -10225,8 +10659,11 @@ LRESULT CCustomTabCtrl::OnPostOpaquePaint(WPARAM, LPARAM)
 	return 0;
 }
 
+// DrawToDC 直呼び（不透明）。DefWindowProc だとシステムタブが上書きする。
+// OnPaint のクロマ経路は使わない（印刷バッファに穴を作らない）。
 LRESULT CCustomTabCtrl::OnPrintClient(WPARAM wParam, LPARAM lParam)
 {
+	// OnPaint と違い常に不透明 DrawToDC。CPaintDC / クロマ blit は使わない
 	HDC hdc = (HDC)wParam;
 	if (!hdc) return 0;
 	CRect rc;
@@ -10238,6 +10675,7 @@ LRESULT CCustomTabCtrl::OnPrintClient(WPARAM wParam, LPARAM lParam)
 	return 0;
 }
 
+// AdjustRect 後のページ枠。見出し専用帯（高さほぼ無し）では描かない。
 void CCustomTabCtrl::DrawPagePanel(CDC* pDC, const CRect& rcClient)
 {
 	CRect rcDisp = rcClient;
@@ -10259,6 +10697,8 @@ void CCustomTabCtrl::DrawPagePanel(CDC* pDC, const CRect& rcClient)
 	pDC->SelectObject(pOldPen);
 }
 
+// 角丸グラデ。選択横タブは Soft 立体。常時 Soft タイマは張らない（UI スレッドを食う）。
+// 縦は GM_ADVANCED + escapement で TextOut。横は DrawText 中央。
 void CCustomTabCtrl::DrawTabItem(CDC* pDC, int nItem, CRect rc, BOOL bSelected, BOOL bHot)
 {
 	if (rc.Width() <= 2 || rc.Height() <= 2) return;
@@ -10410,6 +10850,7 @@ void CCustomTabCtrl::DrawTabItem(CDC* pDC, int nItem, CRect rc, BOOL bSelected, 
 	pDC->SetBkMode(nOldBk);
 }
 
+// 背景（クロマ or ダイアログ色）→ページパネル→非選択タブ→選択タブ（前面）。
 void CCustomTabCtrl::DrawToDC(CDC* pDC, const CRect& rcClient, BOOL bAeroChroma)
 {
 	if (!pDC || rcClient.IsRectEmpty()) return;
@@ -10434,6 +10875,7 @@ void CCustomTabCtrl::DrawToDC(CDC* pDC, const CRect& rcClient, BOOL bAeroChroma)
 	}
 }
 
+// Fixer バッファへ不透明 DrawToDC。
 void CCustomTabCtrl::PaintOpaqueIntoBuffer(HDC hdcBuf)
 {
 	if (!hdcBuf || !m_hWnd) return;
@@ -10446,6 +10888,7 @@ void CCustomTabCtrl::PaintOpaqueIntoBuffer(HDC hdcBuf)
 	dc.Detach();
 }
 
+// BufferedPaint+MakeOpaque。失敗時 Default。
 void CCustomTabCtrl::PaintOpaqueClient(CDC& dc)
 {
 	CRect r;
@@ -10464,6 +10907,10 @@ void CCustomTabCtrl::PaintOpaqueClient(CDC& dc)
 	::EndBufferedPaint(hBP, TRUE);
 }
 
+// HostNeeds / 非 Aero → OpaqueClient（α=255）。
+// Aero 透過: メモリDCをクロマ塗り→ページ領域を ExcludeClip して BlitChromaTrans。
+// ページ内側を blit すると子ダイアログを上書きする。
+// WM_PRINTCLIENT は常に不透明 DrawToDC。
 void CCustomTabCtrl::OnPaint()
 {
 	CPaintDC dcPaint(this);
@@ -10509,6 +10956,7 @@ void CCustomTabCtrl::OnPaint()
 	memDC.DeleteDC();
 }
 
+// 等幅再計算。Invalidate のみ（同期描画しない）。
 void CCustomTabCtrl::OnSize(UINT nType, int cx, int cy)
 {
 	CTabCtrl::OnSize(nType, cx, cy);
@@ -10517,6 +10965,7 @@ void CCustomTabCtrl::OnSize(UINT nType, int cx, int cy)
 	Invalidate(FALSE);
 }
 
+// ガラス穴対策の遅延 Opaque。
 void CCustomTabCtrl::OnWindowPosChanged(WINDOWPOS* lpwndpos)
 {
 	CTabCtrl::OnWindowPosChanged(lpwndpos);
@@ -10526,6 +10975,8 @@ void CCustomTabCtrl::OnWindowPosChanged(WINDOWPOS* lpwndpos)
 #endif
 }
 
+// kTabSoftTimerId: 互換。現在は DrawTabItem が Kill する（常時揺れ禁止）。
+// kTabScrollOpaqueTimerId: 遅延不透明。
 void CCustomTabCtrl::OnTimer(UINT_PTR nIDEvent)
 {
 	if (nIDEvent == kTabSoftTimerId) {
@@ -10549,6 +11000,7 @@ void CCustomTabCtrl::OnTimer(UINT_PTR nIDEvent)
 	CTabCtrl::OnTimer(nIDEvent);
 }
 
+// ホバー切替用。タブ矩形を少し膨らませて角丸はみ出しを拾う。
 void CCustomTabCtrl::InvalidateTabItem(int nItem)
 {
 	if (nItem < 0 || !::IsWindow(m_hWnd)) return;
@@ -10558,6 +11010,7 @@ void CCustomTabCtrl::InvalidateTabItem(int nItem)
 	InvalidateRect(&rc, FALSE);
 }
 
+// ホットタブ切替。LEAVE を張り、前後のタブだけ Invalidate。
 void CCustomTabCtrl::OnMouseMove(UINT nFlags, CPoint point)
 {
 	if (!m_bTracking) {
@@ -10578,6 +11031,7 @@ void CCustomTabCtrl::OnMouseMove(UINT nFlags, CPoint point)
 	CTabCtrl::OnMouseMove(nFlags, point);
 }
 
+// ホット解除。
 void CCustomTabCtrl::OnMouseLeave()
 {
 	m_bTracking = FALSE;
@@ -10588,6 +11042,8 @@ void CCustomTabCtrl::OnMouseLeave()
 	CTabCtrl::OnMouseLeave();
 }
 
+// REFLECT_EX。FALSE を返し親の ON_NOTIFY(TCN_SELCHANGE) も通す。
+// 選択タブの不透明再描画を予約（アクリル下で古い選択色が残る）。
 BOOL CCustomTabCtrl::OnSelChange(NMHDR*, LRESULT* pResult)
 {
 	Invalidate(FALSE);
@@ -10618,6 +11074,9 @@ BEGIN_MESSAGE_MAP(CCustomStandardButton, CButton)
     ON_WM_TIMER()
 END_MESSAGE_MAP()
 
+// カスタム標準ボタン。グラデ/影/アイコン/スパークル軌道の初期値。
+// 常時 Soft3D タイマーは張らない（ピアノロール 60fps を食うため）。
+// ホバー／フォーカス時だけ 33ms のキラキラタイマーを後から張る。
 CCustomStandardButton::CCustomStandardButton()
     : m_bAutoDelete(FALSE), m_bMouseOver(FALSE), m_nAnimTick(0), m_bAnimRunning(FALSE),
     m_nSparkleN(0), m_nSparkleSpawnAcc(0),
@@ -10632,11 +11091,17 @@ CCustomStandardButton::CCustomStandardButton()
     m_brBackground.CreateSolidBrush(COLOR_BUTTON_BG);
 }
 
+// 外部からアニメ再開を頼む入口。実体は UpdateAnimTimer。
+// HWND 未作成でも呼べるが、そちらで即 return する。
 void CCustomStandardButton::EnsureAnimTimer()
 {
     UpdateAnimTimer();
 }
 
+// スパークル点を 1 ティック進める。speed=7px、幅の 1/6 間隔で発生。
+// bSpawn=FALSE は残点の移動のみ（マウス離脱後も点が消えるまで描く）。
+// flat ボタンは点を持たない。端(W-2)に達した点は捨てる。
+// 発生時、先頭付近に点がいると重ね発生を止めて帯が真っ白になるのを防ぐ。
 void CCustomStandardButton::SparkleTick(BOOL bSpawn)
 {
     if (m_bFlat) {
@@ -10651,6 +11116,8 @@ void CCustomStandardButton::SparkleTick(BOOL bSpawn)
         m_nSparkleN = 0;
         return;
     }
+    // 点は左→右へ 7px/tick。gap 未満では新規 spawn しない。
+    // ホバー終了後も残点が endPos に消えるまでタイマーが生きる。
     const int speed = 7;
     const int gap = max(20, W / 6);
     const int endPos = W - 2;
@@ -10687,6 +11154,9 @@ void CCustomStandardButton::SparkleTick(BOOL bSpawn)
     }
 }
 
+// 33ms キラキラタイマーの ON/OFF。常時軌道はうざいのでやめる。
+// 条件: 有効 かつ (ホバー or フォーカス or 残点あり)。
+// 不要になったら KillTimer + Invalidate。キャプション chrome でも同じ ID。
 void CCustomStandardButton::UpdateAnimTimer()
 {
     if (!GetSafeHwnd()) return;
@@ -10716,6 +11186,9 @@ static void CCC_ButtonSoftTimerSync(HWND hWnd, BOOL /*bFlat*/)
 		::KillTimer(hWnd, kButtonSoftTimerId);
 }
 
+// kButtonSoftTimerId: 残骸。キャプション chrome では即 Kill。
+// kButtonAnimTimerId: ティック++、ホバー中のみ spawn、残点ゼロで停止。
+// Invalidate(FALSE) だけ。Erase するとアクリルが抜ける。
 void CCustomStandardButton::OnTimer(UINT_PTR nIDEvent)
 {
     if (nIDEvent == kButtonSoftTimerId)
@@ -10731,6 +11204,7 @@ void CCustomStandardButton::OnTimer(UINT_PTR nIDEvent)
     if (nIDEvent == kButtonAnimTimerId)
     {
         m_nAnimTick++;
+        // ホバー中だけ新規点。flat（キャプション）は動かさない。
         SparkleTick(m_bMouseOver && !m_bFlat);
         UpdateAnimTimer(); // 残点ゼロ＆非ホバーなら停止
         Invalidate(FALSE);
@@ -10739,6 +11213,8 @@ void CCustomStandardButton::OnTimer(UINT_PTR nIDEvent)
     CButton::OnTimer(nIDEvent);
 }
 
+// CCustomStandardButton の破棄。ブラシ／フォント／所有アイコンを解放。
+// HWND は既に無い。所有 GDI/アイコンだけここで解放する。
 CCustomStandardButton::~CCustomStandardButton()
 {
     if (m_brBackground.GetSafeHandle()) m_brBackground.DeleteObject();
@@ -10746,12 +11222,16 @@ CCustomStandardButton::~CCustomStandardButton()
     if (m_bIconOwnedOut && m_hIconOut) { ::DestroyIcon(m_hIconOut); m_hIconOut = NULL; }
 }
 
+// HWND 破棄後。基底の PostNcDestroy のあと m_bAutoDelete なら this を delete。
+// サブクラス解除後。new したコントロールはここで自殺する。
 void CCustomStandardButton::PostNcDestroy()
 {
     CButton::PostNcDestroy();
     if (m_bAutoDelete) delete this;
 }
 
+// 塗りグラデ。角度は 0..359。HWND があれば Invalidate(FALSE)。
+// 無効角度は正規化。即再描画。
 void CCustomStandardButton::SetGradation(COLORREF s, COLORREF e, int d, BOOL en)
 {
     m_clrGradStart = s;
@@ -10762,6 +11242,8 @@ void CCustomStandardButton::SetGradation(COLORREF s, COLORREF e, int d, BOOL en)
     if (GetSafeHwnd()) Invalidate(FALSE);
 }
 
+// グラデ設定の読み出し。NULL ポインタは飛ばす。
+// 出力ポインタは個別に省略可。
 void CCustomStandardButton::GetGradation(COLORREF* ps, COLORREF* pe, int* pd, BOOL* pbe) const
 {
     if (ps) *ps = m_clrGradStart;
@@ -10770,6 +11252,8 @@ void CCustomStandardButton::GetGradation(COLORREF* ps, COLORREF* pe, int* pd, BO
     if (pbe) *pbe = m_bGradEnable;
 }
 
+// ドロップシャドウ。blur は 0..20。未作成 HWND では描画しない。
+// 距離は 0 以上。描画は PaintClient 側。
 void CCustomStandardButton::SetDropShadow(COLORREF c, int d, int dist, int blur, BOOL en)
 {
     m_clrShadow = c;
@@ -10781,6 +11265,8 @@ void CCustomStandardButton::SetDropShadow(COLORREF c, int d, int dist, int blur,
     if (GetSafeHwnd()) Invalidate(FALSE);
 }
 
+// 影パラメータの読み出し。NULL は飛ばす。
+// 出力ポインタは個別に省略可。
 void CCustomStandardButton::GetDropShadow(COLORREF* pc, int* pd, int* pdist, int* pblur, BOOL* pbe) const
 {
     if (pc) *pc = m_clrShadow;
@@ -10790,6 +11276,8 @@ void CCustomStandardButton::GetDropShadow(COLORREF* pc, int* pd, int* pdist, int
     if (pbe) *pbe = m_bShadowEnable;
 }
 
+// リソース ID からアイコンを LoadImage。所有して DestroyIcon。
+// in/out の 2 枚。0 は無し。オートグリフ済み扱いにする。
 DWORD CCustomStandardButton::SetIcon(int nIconIn, int nIconOut)
 {
     HICON hIn = NULL;
@@ -10813,6 +11301,8 @@ DWORD CCustomStandardButton::SetIcon(int nIconIn, int nIconOut)
     return 0;
 }
 
+// 外部 HICON。所有しない（呼び出し側が寿命管理）。
+// 以前所有していたアイコンだけ Destroy。
 DWORD CCustomStandardButton::SetIcon(HICON hIconIn, HICON hIconOut)
 {
     if (m_bIconOwnedIn && m_hIconIn && m_hIconIn != hIconIn)
@@ -10829,6 +11319,8 @@ DWORD CCustomStandardButton::SetIcon(HICON hIconIn, HICON hIconOut)
     return 0;
 }
 
+// ダイアログ ID から共有アイコンを一度だけ載せる。所有しない。
+// 既にアイコンがある／一度試した ID は再 Load しない。
 void CCustomStandardButton::EnsureAutoGlyph()
 {
     if (m_hIconIn || m_bAutoGlyphDone || !GetSafeHwnd())
@@ -10844,6 +11336,8 @@ void CCustomStandardButton::EnsureAutoGlyph()
     m_bIconOwnedIn = FALSE;
 }
 
+// flat=キャプション chrome 等。スパークル無し、枠は細く。Soft タイマーは殺す。
+// chrome ボタンはスパークル無し。
 void CCustomStandardButton::SetFlat(BOOL bFlat)
 {
     m_bFlat = bFlat;
@@ -10853,6 +11347,8 @@ void CCustomStandardButton::SetFlat(BOOL bFlat)
     }
 }
 
+// アクリル透過オプトイン。親の隙間も Invalidate。
+// 親の隙間再描画も忘れない。
 void CCustomStandardButton::SetAeroMode(BOOL b)
 {
     m_bAeroMode = b ? TRUE : FALSE;
@@ -10862,6 +11358,8 @@ void CCustomStandardButton::SetAeroMode(BOOL b)
     }
 }
 
+// サブクラス直後。UxTheme を空にして既定テーマとカスタム OnPaint の白抜けを防ぐ。
+// テーマ空指定はメニュー後の白抜け対策。
 void CCustomStandardButton::PreSubclassWindow()
 {
     CButton::PreSubclassWindow();
@@ -10879,11 +11377,17 @@ void CCustomStandardButton::PreSubclassWindow()
     EnsureAutoGlyph();
 }
 
+// WM_CTLCOLOR 反射。親が背景を塗るときのブラシ。
+// 背景ブラシ。テキスト色は OnPaint 側。
 HBRUSH CCustomStandardButton::CtlColor(CDC*, UINT)
 {
     return (HBRUSH)m_brBackground.GetSafeHandle();
 }
 
+// ボタン本体。メモリ DC にサテン/グラデ/ジェリー/スパークル/アイコン/文字。
+// アクリル透過時はクロマ塗り＋薄いティントのみ（白枠は不透明板に見える）。
+// 無効でも質感は描き、最後にグレーヴェール。隠し淫女は短く重ねるだけ。
+// 最後に BitBlt またはクロマ合成。キャプション帯のグリフ専用文字は出さない。
 void CCustomStandardButton::PaintClient(CDC& dc, const CRect& r)
 {
     if (r.Width() <= 0 || r.Height() <= 0) return;
@@ -11179,6 +11683,9 @@ void CCustomStandardButton::PaintClient(CDC& dc, const CRect& r)
     mDC.DeleteDC();
 }
 
+// ガラス上では GDI が α=0 のまま合成され消えるので、全面不透明にして出す。
+// キャプション常時アクリル後は BeginBufferedPaint 連打を避け AlphaBlend。
+// 失敗時だけ BufferedPaint + MakeOpaque。中身は PaintClient。
 void CCustomStandardButton::PaintOpaqueClient(CDC& dc)
 {
     CRect r;
@@ -11218,6 +11725,8 @@ void CCustomStandardButton::PaintOpaqueClient(CDC& dc)
     ::EndBufferedPaint(hBP, TRUE);
 }
 
+// CPaintDC を待たず即描画。オプトイン透過はクロマ、ホスト α は不透明パス。
+// キャプション chrome かつ親が AcrylicCaption のときも不透明パス。
 void CCustomStandardButton::RepaintClient()
 {
     if (!GetSafeHwnd())
@@ -11249,6 +11758,8 @@ void CCustomStandardButton::RepaintClient()
     PaintClient(dc, r);
 }
 
+// WM_PAINT。透過はクロマ、ホストガラスは不透明パス、それ以外は素描画。
+// CPaintDC。経路分岐は aero / ホストガラス / 通常。
 void CCustomStandardButton::OnPaint()
 {
 #if CCUSTOM_AERO_SUPPORT
@@ -11275,6 +11786,8 @@ void CCustomStandardButton::OnPaint()
     PaintClient(dc, r);
 }
 
+// WM_PRINTCLIENT。OpaqueFixer の BufferedPaint 先へ同じ内容を描く。
+// fixer の BufferedPaint 先。戻り 0。
 LRESULT CCustomStandardButton::OnPrintClient(WPARAM wParam, LPARAM)
 {
     CDC* pDC = CDC::FromHandle((HDC)wParam);
@@ -11296,6 +11809,8 @@ LRESULT CCustomStandardButton::OnPrintClient(WPARAM wParam, LPARAM)
     return 0;
 }
 
+// テーマ無効時、Default の押下描画は空/白→アクリル上では完全透過。
+// 状態だけ更新してからカスタムで描き直す。
 LRESULT CCustomStandardButton::OnBmSetState(WPARAM wParam, LPARAM)
 {
     // テーマ無効時、Default の押下描画は空/白になり、アクリル上では完全透過に見える。
@@ -11307,6 +11822,8 @@ LRESULT CCustomStandardButton::OnBmSetState(WPARAM wParam, LPARAM)
     return lr;
 }
 
+// 消去握りつぶし。アクリル上で ERASE だけだと完全透過のまま残る。
+// TRUE で既定塗りを止める。
 BOOL CCustomStandardButton::OnEraseBkgnd(CDC* pDC)
 {
 #if CCUSTOM_AERO_SUPPORT
@@ -11331,6 +11848,8 @@ BOOL CCustomStandardButton::OnEraseBkgnd(CDC* pDC)
     return TRUE;
 }
 
+// 初回ホバーで TME_LEAVE を張り、スパークル先頭点を 0 から起動。
+// 既に点が残っているときは位置をリセットしない（離脱後の残点を生かす）。
 void CCustomStandardButton::OnMouseMove(UINT f, CPoint p)
 {
     if (!m_bMouseOver)
@@ -11351,6 +11870,8 @@ void CCustomStandardButton::OnMouseMove(UINT f, CPoint p)
     CButton::OnMouseMove(f, p);
 }
 
+// ホバー解除。残点がある間は UpdateAnimTimer が 33ms を維持する。
+// 親アクリルの隙間も Invalidate。
 LRESULT CCustomStandardButton::OnMouseLeave(WPARAM, LPARAM)
 {
     m_bMouseOver = FALSE;
@@ -11361,6 +11882,8 @@ LRESULT CCustomStandardButton::OnMouseLeave(WPARAM, LPARAM)
     return 0;
 }
 
+// フォーカスでキラキラ／鼓動を再開。
+// フォーカス枠と鼓動アニメ。
 void CCustomStandardButton::OnSetFocus(CWnd* p)
 {
     CButton::OnSetFocus(p);
@@ -11368,6 +11891,8 @@ void CCustomStandardButton::OnSetFocus(CWnd* p)
     Invalidate(FALSE);
 }
 
+// フォーカス喪失。残点が無ければタイマー停止。
+// 残点が無ければ 33ms を止める。
 void CCustomStandardButton::OnKillFocus(CWnd* p)
 {
     CButton::OnKillFocus(p);
@@ -11375,6 +11900,8 @@ void CCustomStandardButton::OnKillFocus(CWnd* p)
     Invalidate(FALSE);
 }
 
+// 無効化でアニメ停止。質感は OnPaint 側でヴェール。
+// 無効でも質感は描き、ヴェールで沈める。
 void CCustomStandardButton::OnEnable(BOOL b)
 {
     CButton::OnEnable(b);
@@ -11398,19 +11925,26 @@ BEGIN_MESSAGE_MAP(CCustomCheckBox, CButton)
     ON_MESSAGE(WM_PRINTCLIENT, OnPrintClient)
 END_MESSAGE_MAP()
 
+// CCustomCheckBox のコンストラクタ。描画フラグとブラシを初期化。
+// HWND はまだ無い。タイマーは PreSubclass/OnCreate で張る。
 CCustomCheckBox::CCustomCheckBox()
     : m_bAutoDelete(FALSE), m_bIsFlatStyle(FALSE), m_bIsPressed(FALSE),
     m_bIsHot(FALSE), m_bTracking(FALSE), m_nCheck(0), m_bAeroMode(FALSE), m_nBounce(0)
 {}
 
+// チェック ON のぷるん。m_nBounce=8、28ms で減衰しながら Invalidate。
+// レ点矩形を sin で膨らませる（OnDrawLayer）。HWND 無しでは何もしない。
 void CCustomCheckBox::StartCheckBounce()
 {
     if (!GetSafeHwnd()) return;
+    // 8 フレームの減衰バウンス（28ms × 約 0.2 秒）。
     m_nBounce = 8;
     SetTimer(kCheckBounceTimerId, 28, NULL);
     Invalidate();
 }
 
+// バウンス: カウントを減らし 0 で Kill。ホバー: ホット中だけ再描画。
+// ホバータイマーは Soft3D ヨー用。非ホットなら即停止。
 void CCustomCheckBox::OnTimer(UINT_PTR nIDEvent)
 {
     if (nIDEvent == kCheckBounceTimerId)
@@ -11428,19 +11962,26 @@ void CCustomCheckBox::OnTimer(UINT_PTR nIDEvent)
     CButton::OnTimer(nIDEvent);
 }
 
+// CCustomCheckBox の破棄。所有 GDI は無い（空）。
 CCustomCheckBox::~CCustomCheckBox() {}
 
+// HWND 破棄後。基底の PostNcDestroy のあと m_bAutoDelete なら this を delete。
+// サブクラス解除後。new したコントロールはここで自殺する。
 void CCustomCheckBox::PostNcDestroy()
 {
     CButton::PostNcDestroy();
     if (m_bAutoDelete) delete this;
 }
 
+// オーナードローなので CButton::GetCheck ではなく内部値。
+// オーナードロー後は CButton の値が信用できない。
 int CCustomCheckBox::GetCheck()
 {
     return m_nCheck;
 }
 
+// 内部 m_nCheck と CButton を同期。CHECKED ならバウンス開始。
+// プログラムからの Set でも ON 時は同じ演出。
 void CCustomCheckBox::SetCheck(int n)
 {
     m_nCheck = n;
@@ -11449,6 +11990,8 @@ void CCustomCheckBox::SetCheck(int n)
     Invalidate();
 }
 
+// サブクラス直後。UxTheme を空にして既定テーマとカスタム OnPaint の白抜けを防ぐ。
+// テーマ空指定はメニュー後の白抜け対策。
 void CCustomCheckBox::PreSubclassWindow()
 {
     HMODULE h = LoadLibrary(_T("UxTheme.dll"));
@@ -11465,11 +12008,15 @@ void CCustomCheckBox::PreSubclassWindow()
     CButton::PreSubclassWindow();
 }
 
+// フォントを基底へ渡す。自前 HFONT は持たない。
+// 親フォントをそのまま使う。
 void CCustomCheckBox::SetFont(CFont* p, BOOL b)
 {
     CButton::SetFont(p, b);
 }
 
+// 帯の空きは HTCAPTION ドラッグ。最大化中は先に復元。
+// 帯ドラッグは HTCAPTION。
 void CCustomCheckBox::OnLButtonDown(UINT n, CPoint p)
 {
     m_bIsPressed = m_bIsHot = TRUE;
@@ -11477,6 +12024,8 @@ void CCustomCheckBox::OnLButtonDown(UINT n, CPoint p)
     Invalidate();
 }
 
+// キャプチャ内・矩形内ならトグル。ON でバウンス、親へ BN_CLICKED。
+// 外で離すとキャンセル（押下フラグだけ落とす）。
 void CCustomCheckBox::OnLButtonUp(UINT n, CPoint p)
 {
     if (m_bIsPressed)
@@ -11496,6 +12045,8 @@ void CCustomCheckBox::OnLButtonUp(UINT n, CPoint p)
     }
 }
 
+// ホット追跡。初回だけ TME_LEAVE。矩形内外でホバータイマーを張る/止める。
+// ホット変化時だけ Invalidate（Soft3D ヨー用）。
 void CCustomCheckBox::OnMouseMove(UINT n, CPoint p)
 {
     if (!m_bTracking)
@@ -11516,6 +12067,8 @@ void CCustomCheckBox::OnMouseMove(UINT n, CPoint p)
     }
 }
 
+// ホット解除。ホバータイマーも止める。
+// ホット／トラッキング解除。
 void CCustomCheckBox::OnMouseLeave()
 {
     m_bIsHot = m_bTracking = FALSE;
@@ -11523,6 +12076,8 @@ void CCustomCheckBox::OnMouseLeave()
     Invalidate();
 }
 
+// WM_PAINT。透過はクロマ、ホストガラスは不透明パス、それ以外は素描画。
+// CPaintDC。経路分岐は aero / ホストガラス / 通常。
 void CCustomCheckBox::OnPaint()
 {
     CPaintDC dc(this);
@@ -11568,6 +12123,8 @@ void CCustomCheckBox::OnPaint()
     mem.SelectObject(ob);
 }
 
+// WM_PRINTCLIENT。OpaqueFixer の BufferedPaint 先へ同じ内容を描く。
+// fixer の BufferedPaint 先。戻り 0。
 LRESULT CCustomCheckBox::OnPrintClient(WPARAM w, LPARAM)
 {
     CDC* pDC = CDC::FromHandle((HDC)w);
@@ -11577,11 +12134,15 @@ LRESULT CCustomCheckBox::OnPrintClient(WPARAM w, LPARAM)
     return 0;
 }
 
+// 消去握りつぶし。アクリル上で ERASE だけだと完全透過のまま残る。
+// TRUE で既定塗りを止める。
 BOOL CCustomCheckBox::OnEraseBkgnd(CDC*)
 {
     return TRUE;
 }
 
+// アクリル透過時、クロマ塗りしたメモリ DC に drawFn してクロマ合成。
+// 非透過は destDC へ直接。チェック／他コントロール共用。
 static void CCC_CompositeTrans(HWND hWnd, BOOL bAeroMode, CDC& destDC, const CRect& rect, std::function<void(CDC&)> drawFn)
 {
     const BOOL bTrans = CCC_UseTransPaint(hWnd, bAeroMode);
@@ -11602,6 +12163,10 @@ static void CCC_CompositeTrans(HWND hWnd, BOOL bAeroMode, CDC& destDC, const CRe
     memDC.SelectObject(pOld);
 }
 
+// 本体描画。flat/pushlike はボタン塗り、通常はローズ枠＋レ点。
+// バウンス中はレ点を枠からはみ出して膨らませる（隣にはみ出さないようクランプ）。
+// キャプション帯の「メインに追従」は白文字（暗色だと黒帯に溶ける）。
+// 隠し淫女は短く重ねるだけ。
 void CCustomCheckBox::OnDrawLayer(CDC* pDC, CRect rect)
 {
     const int rw = rect.Width();
@@ -11689,6 +12254,7 @@ void CCustomCheckBox::OnDrawLayer(CDC* pDC, CRect rect)
                 // チェックON時のぷるんバウンス
                 if (m_nBounce > 0)
                 {
+                    // 半周期の sin でレ点を最大 +20%。クライアント内にクランプ済み。
                     const double bf = sin(3.14159265 * (8 - m_nBounce) / 8.0);
                     rk.InflateRect((int)(rk.Width() * 0.20 * bf), (int)(rk.Height() * 0.20 * bf));
                 }
@@ -11720,12 +12286,6 @@ void CCustomCheckBox::OnDrawLayer(CDC* pDC, CRect rect)
 }
 
 // ============================================================================
-// カスタムグループボックスコントロール
-// ============================================================================
-// ============================================================================
-// CCustomProgressCtrl
-// ============================================================================
-// ============================================================================
 // CCustomLevelMeter
 // ============================================================================
 IMPLEMENT_DYNAMIC(CCustomLevelMeter, CStatic)
@@ -11736,21 +12296,28 @@ BEGIN_MESSAGE_MAP(CCustomLevelMeter, CStatic)
 	ON_MESSAGE(WM_PRINTCLIENT, OnPrintClient)
 END_MESSAGE_MAP()
 
+// CCustomLevelMeter のコンストラクタ。描画フラグとブラシを初期化。
+// HWND はまだ無い。タイマーは PreSubclass/OnCreate で張る。
 CCustomLevelMeter::CCustomLevelMeter()
 	: m_bAutoDelete(FALSE), m_level(0), m_bAeroMode(FALSE)
 {
 }
 
+// CCustomLevelMeter の破棄。所有 GDI は無い（空）。
 CCustomLevelMeter::~CCustomLevelMeter()
 {
 }
 
+// HWND 破棄後。基底の PostNcDestroy のあと m_bAutoDelete なら this を delete。
+// サブクラス解除後。new したコントロールはここで自殺する。
 void CCustomLevelMeter::PostNcDestroy()
 {
 	CStatic::PostNcDestroy();
 	if (m_bAutoDelete) delete this;
 }
 
+// 0..1000。変化時のみ Invalidate(FALSE)。
+// 変化なしなら描かない。
 void CCustomLevelMeter::SetLevel(int n)
 {
 	if (n < 0) n = 0;
@@ -11761,6 +12328,8 @@ void CCustomLevelMeter::SetLevel(int n)
 		Invalidate(FALSE);
 }
 
+// 縦レベル。0..1000。ホスト不透明が要るときは α=255 塗り。
+// 850 超で赤、650 超で黄。トラックは暗い紺。
 void CCustomLevelMeter::PaintClient(CDC& dc)
 {
 	CRect r;
@@ -11799,18 +12368,24 @@ void CCustomLevelMeter::PaintClient(CDC& dc)
 	}
 }
 
+// WM_PAINT。透過はクロマ、ホストガラスは不透明パス、それ以外は素描画。
+// CPaintDC。経路分岐は aero / ホストガラス / 通常。
 void CCustomLevelMeter::OnPaint()
 {
 	CPaintDC dc(this);
 	PaintClient(dc);
 }
 
+// 消去握りつぶし。アクリル上で ERASE だけだと完全透過のまま残る。
+// TRUE で既定塗りを止める。
 BOOL CCustomLevelMeter::OnEraseBkgnd(CDC* pDC)
 {
 	UNREFERENCED_PARAMETER(pDC);
 	return TRUE;
 }
 
+// WM_PRINTCLIENT。OpaqueFixer の BufferedPaint 先へ同じ内容を描く。
+// fixer の BufferedPaint 先。戻り 0。
 LRESULT CCustomLevelMeter::OnPrintClient(WPARAM wParam, LPARAM)
 {
 	if (HDC hDC = (HDC)wParam) {
@@ -11821,6 +12396,9 @@ LRESULT CCustomLevelMeter::OnPrintClient(WPARAM wParam, LPARAM)
 	return 0;
 }
 
+// ============================================================================
+// CCustomProgressCtrl
+// ============================================================================
 IMPLEMENT_DYNAMIC(CCustomProgressCtrl, CWnd)
 
 BEGIN_MESSAGE_MAP(CCustomProgressCtrl, CWnd)
@@ -11830,6 +12408,8 @@ BEGIN_MESSAGE_MAP(CCustomProgressCtrl, CWnd)
 END_MESSAGE_MAP()
 
 namespace {
+// 進捗バー用の線形補間。t は 0..1 にクランプ。
+// peach→mid→lilac の横方向ミックスに使う。
 COLORREF ProgLerp(COLORREF a, COLORREF b, double t)
 {
 	if (t < 0) t = 0;
@@ -11840,6 +12420,8 @@ COLORREF ProgLerp(COLORREF a, COLORREF b, double t)
 		(int)(GetBValue(a) + (GetBValue(b) - GetBValue(a)) * t + 0.5));
 }
 
+// 各チャネルを add だけ明るく（255 クランプ）。
+// キャンディグラデのハイライト帯に使う。
 COLORREF ProgLighten(COLORREF c, int add)
 {
 	return RGB(
@@ -11848,6 +12430,8 @@ COLORREF ProgLighten(COLORREF c, int add)
 		(std::min)(255, GetBValue(c) + add));
 }
 
+// 各チャネルを sub だけ暗く（0 クランプ）。
+// バー下縁の陰影に使う。
 COLORREF ProgDarken(COLORREF c, int sub)
 {
 	return RGB(
@@ -11857,6 +12441,8 @@ COLORREF ProgDarken(COLORREF c, int sub)
 }
 } // namespace
 
+// CCustomProgressCtrl のコンストラクタ。描画フラグとブラシを初期化。
+// HWND はまだ無い。タイマーは PreSubclass/OnCreate で張る。
 CCustomProgressCtrl::CCustomProgressCtrl()
 	: m_bAutoDelete(FALSE)
 	, m_nMin(0), m_nMax(100), m_nPos(0)
@@ -11869,6 +12455,7 @@ CCustomProgressCtrl::CCustomProgressCtrl()
 	m_brBackground.CreateSolidBrush(COLOR_DIALOG_BG);
 }
 
+// CCustomProgressCtrl の破棄。背景ブラシ・％フォント・クロマキャッシュを解放。
 CCustomProgressCtrl::~CCustomProgressCtrl()
 {
 	if (m_brBackground.GetSafeHandle())
@@ -11880,6 +12467,8 @@ CCustomProgressCtrl::~CCustomProgressCtrl()
 #endif
 }
 
+// 子ウィンドウ生成。CS_HREDRAW|VREDRAW は部分更新で重ね描きしやすいので付けない。
+// WS_CHILD。背景は自前。
 BOOL CCustomProgressCtrl::Create(DWORD dwStyle, const RECT& rect, CWnd* pParentWnd, UINT nID)
 {
 	// CS_HREDRAW|VREDRAW は部分更新時に重ね描きしやすいので外す
@@ -11888,12 +12477,16 @@ BOOL CCustomProgressCtrl::Create(DWORD dwStyle, const RECT& rect, CWnd* pParentW
 	return CWnd::Create(cls, _T(""), dwStyle | WS_CHILD, rect, pParentWnd, nID);
 }
 
+// HWND 破棄後。基底の PostNcDestroy のあと m_bAutoDelete なら this を delete。
+// サブクラス解除後。new したコントロールはここで自殺する。
 void CCustomProgressCtrl::PostNcDestroy()
 {
 	CWnd::PostNcDestroy();
 	if (m_bAutoDelete) delete this;
 }
 
+// 進捗範囲。上下逆転は入れ替え、pos をクランプ。
+// pos も範囲内へ。
 void CCustomProgressCtrl::SetRange(int nLower, int nUpper)
 {
 	if (nUpper < nLower) { int t = nLower; nLower = nUpper; nUpper = t; }
@@ -11904,12 +12497,16 @@ void CCustomProgressCtrl::SetRange(int nLower, int nUpper)
 	if (GetSafeHwnd()) Invalidate(FALSE);
 }
 
+// 進捗 min/max の読み出し。
+// コピーアウト。
 void CCustomProgressCtrl::GetRange(int& nLower, int& nUpper) const
 {
 	nLower = m_nMin;
 	nUpper = m_nMax;
 }
 
+// 進捗位置。UpdateWindow は PeekMessage と競合してちらつくので Invalidate のみ。
+// 同期 UpdateWindow はしない。
 int CCustomProgressCtrl::SetPos(int nPos)
 {
 	const int old = m_nPos;
@@ -11928,6 +12525,8 @@ int CCustomProgressCtrl::SetPos(int nPos)
 	return old;
 }
 
+// トラック／フィル両端色。
+// 次回 Paint で反映。
 void CCustomProgressCtrl::SetColors(COLORREF track, COLORREF fillStart, COLORREF fillEnd)
 {
 	m_clrTrack = track;
@@ -11936,6 +12535,8 @@ void CCustomProgressCtrl::SetColors(COLORREF track, COLORREF fillStart, COLORREF
 	if (GetSafeHwnd()) Invalidate(FALSE);
 }
 
+// アクリル透過オプトイン。親の隙間も Invalidate。
+// 親の隙間再描画も忘れない。
 void CCustomProgressCtrl::SetAeroMode(BOOL b)
 {
 	m_bAeroMode = b;
@@ -11948,6 +12549,11 @@ void CCustomProgressCtrl::SetAeroMode(BOOL b)
 	}
 }
 
+// キャンディバー。丸角トラック＋ 3 色グラデ（peach→pink→lilac）＋斜め縞。
+// 上 1/3 を明るく、下 1/3 を落とす縦陰影。先端にハイライト玉。
+// ホバー時のみ Soft3D ジェム。％は縁取り白文字（グラデ上でも読む）。
+// 透過時はドロップシャドウを描かない（半透明塗りが穴になる）。
+// 隠し淫女は最後に短く重ねるだけ。
 void CCustomProgressCtrl::DrawProgressLayer(CDC& dc, const CRect& r, BOOL bAeroTrans)
 {
 	if (r.Width() <= 0 || r.Height() <= 0) return;
@@ -11996,6 +12602,7 @@ void CCustomProgressCtrl::DrawProgressLayer(CDC& dc, const CRect& r, BOOL bAeroT
 		clip.CreateRoundRectRgn(track.left, track.top, track.right + 1, track.bottom + 1, rr * 2, rr * 2);
 		const int oldClip = dc.SelectClipRgn(&clip);
 
+	// 列ごとに 3 帯。縞は 7px 周期。クリップは丸角リージョン。
 		// 3色キャンディグラデ (peach → pink → lilac) + 縦方向の陰影 + 斜め縞
 		const COLORREF midCol = ProgLerp(m_clrFill0, m_clrFill1, 0.45);
 		const COLORREF peach = ProgLighten(m_clrFill0, 18);
@@ -12129,6 +12736,8 @@ void CCustomProgressCtrl::DrawProgressLayer(CDC& dc, const CRect& r, BOOL bAeroT
 	CCC_DrawInwoman(&dc, r, bAeroTrans);
 }
 
+// クライアント全体へ DrawProgressLayer。矩形版へ委譲。
+// CPaintDC を持たない内部再描画からも使う。
 void CCustomProgressCtrl::PaintClient(CDC& dc)
 {
 	CRect r;
@@ -12136,6 +12745,8 @@ void CCustomProgressCtrl::PaintClient(CDC& dc)
 	PaintClient(dc, r);
 }
 
+// メモリ DC にキャンディバーを描き、透過ならクロマ、通常は BitBlt。
+// 隠し淫女は DrawProgressLayer 末尾。親アクリルの穴を開けない。
 void CCustomProgressCtrl::PaintClient(CDC& dc, const CRect& r)
 {
 	const int rw = r.Width();
@@ -12185,6 +12796,8 @@ void CCustomProgressCtrl::PaintClient(CDC& dc, const CRect& r)
 	mDC.DeleteDC();
 }
 
+// ガラス上は α=255 必須。BufferedPaint + DrawProgressLayer。
+// 失敗時もメモリ DC 経由で不透明強制（素 BitBlt は消える）。
 void CCustomProgressCtrl::PaintOpaqueClient(CDC& dc)
 {
 	CRect r;
@@ -12216,6 +12829,8 @@ void CCustomProgressCtrl::PaintOpaqueClient(CDC& dc)
 	::EndBufferedPaint(hBP, TRUE);
 }
 
+// fixer / PRINTCLIENT 用。不透明バッファへレイヤを描く。
+// PRINTCLIENT / fixer 共用。
 void CCustomProgressCtrl::PaintOpaqueIntoBuffer(HDC hdcBuf)
 {
 	if (!hdcBuf || !m_hWnd) return;
@@ -12228,6 +12843,8 @@ void CCustomProgressCtrl::PaintOpaqueIntoBuffer(HDC hdcBuf)
 	mem.Detach();
 }
 
+// WM_PAINT。透過はクロマ、ホストガラスは不透明パス、それ以外は素描画。
+// CPaintDC。経路分岐は aero / ホストガラス / 通常。
 void CCustomProgressCtrl::OnPaint()
 {
 	CPaintDC dc(this);
@@ -12258,6 +12875,8 @@ void CCustomProgressCtrl::OnPaint()
 	PaintClient(dc);
 }
 
+// 消去握りつぶし。アクリル上で ERASE だけだと完全透過のまま残る。
+// TRUE で既定塗りを止める。
 BOOL CCustomProgressCtrl::OnEraseBkgnd(CDC* pDC)
 {
 #if CCUSTOM_AERO_SUPPORT
@@ -12279,6 +12898,8 @@ BOOL CCustomProgressCtrl::OnEraseBkgnd(CDC* pDC)
 	return TRUE;
 }
 
+// WM_PRINTCLIENT。OpaqueFixer の BufferedPaint 先へ同じ内容を描く。
+// fixer の BufferedPaint 先。戻り 0。
 LRESULT CCustomProgressCtrl::OnPrintClient(WPARAM wParam, LPARAM)
 {
 	CDC* pDC = CDC::FromHandle((HDC)wParam);
@@ -12323,6 +12944,8 @@ struct SysProcPerfInfo {
 
 typedef LONG(WINAPI* PFN_NtQuerySystemInformation)(ULONG, PVOID, ULONG, PULONG);
 
+// FILETIME を 64bit に。GetSystemTimes 差分用。
+// 失敗時は何もしない／呼び出し側でフォールバック。
 static ULONGLONG FtToU64(const FILETIME& ft)
 {
 	ULARGE_INTEGER u;
@@ -12391,10 +13014,13 @@ CCustomSysPerfCtrl::CCustomSysPerfCtrl()
 	if (m_coreCount > kMaxCores) m_coreCount = kMaxCores;
 }
 
+// CCustomSysPerfCtrl の破棄。フォントは OnDestroy。ここは空。
 CCustomSysPerfCtrl::~CCustomSysPerfCtrl()
 {
 }
 
+// 子ウィンドウ生成。CS_HREDRAW|VREDRAW は部分更新で重ね描きしやすいので付けない。
+// WS_CHILD。背景は自前。
 BOOL CCustomSysPerfCtrl::Create(DWORD dwStyle, const RECT& rect, CWnd* pParentWnd, UINT nID)
 {
 	CString cls = AfxRegisterWndClass(CS_DBLCLKS,
@@ -12402,22 +13028,30 @@ BOOL CCustomSysPerfCtrl::Create(DWORD dwStyle, const RECT& rect, CWnd* pParentWn
 	return CWnd::Create(cls, _T(""), dwStyle | WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS, rect, pParentWnd, nID);
 }
 
+// HWND 破棄後。基底の PostNcDestroy のあと m_bAutoDelete なら this を delete。
+// サブクラス解除後。new したコントロールはここで自殺する。
 void CCustomSysPerfCtrl::PostNcDestroy()
 {
 	CWnd::PostNcDestroy();
 	if (m_bAutoDelete) delete this;
 }
 
+// コントロール DPI。スケール計算の基準。
+// Per-Monitor v2。
 UINT CCustomSysPerfCtrl::Dpi() const
 {
 	return CCC_GetControlDpi(m_hWnd);
 }
 
+// 96dpi 基準 px を現在 DPI へ。
+// 96dpi ピクセルを拡大。
 int CCustomSysPerfCtrl::S(int v) const
 {
 	return CCC_ScaleDpi(v, Dpi());
 }
 
+// アクリル透過オプトイン。親の隙間も Invalidate。
+// 親の隙間再描画も忘れない。
 void CCustomSysPerfCtrl::SetAeroMode(BOOL b)
 {
 	m_bAeroMode = b;
@@ -12430,6 +13064,8 @@ void CCustomSysPerfCtrl::SetAeroMode(BOOL b)
 	}
 }
 
+// CPU/メモリ表示モード。範囲外はクランプ。
+// 変化時のみ Invalidate。
 void CCustomSysPerfCtrl::SetViewMode(int mode)
 {
 	if (mode < VIEW_ALL) mode = VIEW_ALL;
@@ -12439,6 +13075,8 @@ void CCustomSysPerfCtrl::SetViewMode(int mode)
 	if (GetSafeHwnd()) Invalidate(FALSE);
 }
 
+// フォント・ツールチップ・初回 SMBIOS/CPU サンプル、1 秒タイマー。
+// 1 秒サンプリング開始。
 int CCustomSysPerfCtrl::OnCreate(LPCREATESTRUCT lpCreateStruct)
 {
 	if (CWnd::OnCreate(lpCreateStruct) == -1)
@@ -12466,6 +13104,8 @@ int CCustomSysPerfCtrl::OnCreate(LPCREATESTRUCT lpCreateStruct)
 	return 0;
 }
 
+// キャプション／追従エントリ解除、fixer 破棄。
+// KillTimer とフォント破棄。
 void CCustomSysPerfCtrl::OnDestroy()
 {
 	KillTimer(kSysPerfTimerId);
@@ -12478,6 +13118,8 @@ void CCustomSysPerfCtrl::OnDestroy()
 	CWnd::OnDestroy();
 }
 
+// ツールチップ Relay。ダイアログ側は F1 ヘルプ。隠し演出入力は短く見るだけ。
+// ツールチップ Relay。F1 はヘルプ。隠し演出は短く見るだけ。
 BOOL CCustomSysPerfCtrl::PreTranslateMessage(MSG* pMsg)
 {
 	if (m_tip.GetSafeHwnd())
@@ -12485,6 +13127,8 @@ BOOL CCustomSysPerfCtrl::PreTranslateMessage(MSG* pMsg)
 	return CWnd::PreTranslateMessage(pMsg);
 }
 
+// CPU％と利用可能メモリの短いチップ。
+// Unicode/ANSI 両対応。
 BOOL CCustomSysPerfCtrl::OnToolTipNotify(UINT, NMHDR* pNMHDR, LRESULT* pResult)
 {
 	if (!pNMHDR || !pResult) return FALSE;
@@ -12523,6 +13167,8 @@ BOOL CCustomSysPerfCtrl::OnToolTipNotify(UINT, NMHDR* pNMHDR, LRESULT* pResult)
 	return TRUE;
 }
 
+// 1 秒サンプリング。ポーズ中は SampleOnce しない。
+// 親アクリルの隙間も Invalidate。
 void CCustomSysPerfCtrl::OnTimer(UINT_PTR nIDEvent)
 {
 	if (nIDEvent != kSysPerfTimerId) {
@@ -12538,6 +13184,8 @@ void CCustomSysPerfCtrl::OnTimer(UINT_PTR nIDEvent)
 	}
 }
 
+// バイトを GB/MB 表示。10GB 未満も 1 桁。
+// 1GB 未満は MB。
 void CCustomSysPerfCtrl::FormatBytesGB(ULONGLONG bytes, CString& out)
 {
 	const double gb = (double)bytes / (1024.0 * 1024.0 * 1024.0);
@@ -12551,6 +13199,10 @@ void CCustomSysPerfCtrl::FormatBytesGB(ULONGLONG bytes, CString& out)
 	}
 }
 
+// SMBIOS を一度だけ読む（GetSystemFirmwareTable 'RSMB'）。
+// Type16=スロット数、Type17=実装 DIMM。size=0/FFFF は空。
+// 速度は Type17 の MT/s 最大、フォームファクタは最後の実装スロット。
+// 128KB 超や長さ壊れは捨てる。失敗しても m_bSmbiosDone は立てる。
 void CCustomSysPerfCtrl::SampleSmbiosOnce()
 {
 	if (m_bSmbiosDone) return;
@@ -12560,6 +13212,7 @@ void CCustomSysPerfCtrl::SampleSmbiosOnce()
 	m_memSlotsTotal = 0;
 	m_memFormFactor = 0;
 
+	// Raw SMBIOS。Type16 NumberOfSlots、Type17 Size/Speed。空スロットは size=0。
 	const DWORD sig = 'RSMB';
 	const DWORD need = GetSystemFirmwareTable(sig, 0, NULL, 0);
 	if (need == 0 || need > 128 * 1024)
@@ -12608,12 +13261,18 @@ void CCustomSysPerfCtrl::SampleSmbiosOnce()
 	m_memFormFactor = form;
 }
 
+// 1 秒サンプリング。全体 CPU は GetSystemTimes の差分（idle/kernel/user）。
+// kernel には idle が含まれるので busy= (ker+usr) - idle。
+// コア別は NtQuerySystemInformation(class=8)。メモリは GlobalMemoryStatusEx
+// ＋ GetPerformanceInfo。圧縮は Memory Compression プロセスの WS。
+// 初回は差分が取れないのでヒストリを進めない。
 void CCustomSysPerfCtrl::SampleOnce()
 {
 	BOOL wroteSample = FALSE;
 
 	// --- overall CPU ---
 	FILETIME idle = {}, ker = {}, usr = {};
+	// FILETIME 差分。ker に idle が含まれるので busy=(ker+usr)-idle。
 	if (GetSystemTimes(&idle, &ker, &usr)) {
 		if (m_bHaveTimes) {
 			const ULONGLONG di = FtToU64(idle) - FtToU64(m_ftIdlePrev);
@@ -12744,6 +13403,8 @@ void CCustomSysPerfCtrl::SampleOnce()
 	}
 }
 
+// メモリ／全体 CPU／コア格子の縦配分。メモリ行が潰れない比率。
+// VIEW_* で列の有無が変わる。
 void CCustomSysPerfCtrl::LayoutRects(const CRect& r, CRect& rcMem, CRect& rcOverall, CRect& rcGrid)
 {
 	rcMem.SetRectEmpty();
@@ -12789,6 +13450,8 @@ void CCustomSysPerfCtrl::LayoutRects(const CRect& r, CRect& rcMem, CRect& rcOver
 	}
 }
 
+// スパークライン（履歴リング）。透過時は線のみ。
+// リングバッファを折れ線に。
 void CCustomSysPerfCtrl::DrawSpark(CDC& dc, const CRect& rc, const BYTE* hist, int histCount, BOOL bAeroTrans)
 {
 	if (rc.Width() < 4 || rc.Height() < 4 || !hist) return;
@@ -12849,6 +13512,8 @@ void CCustomSysPerfCtrl::DrawSpark(CDC& dc, const CRect& rc, const BYTE* hist, i
 	dc.SelectObject(oldPen);
 }
 
+// 実装/使用/圧縮/キャッシュ等の段。SMBIOS 速度があれば併記。
+// 透過時はラベルを明るくしてガラス上で読む。
 void CCustomSysPerfCtrl::DrawMemory(CDC& dc, const CRect& rc, BOOL bAeroTrans)
 {
 	if (rc.IsRectEmpty()) return;
@@ -12985,6 +13650,8 @@ void CCustomSysPerfCtrl::DrawMemory(CDC& dc, const CRect& rc, BOOL bAeroTrans)
 	dc.SelectObject(oldFont);
 }
 
+// 全体 CPU％とスパーク。
+// 全体％＋履歴。
 void CCustomSysPerfCtrl::DrawOverallCpu(CDC& dc, const CRect& rc, BOOL bAeroTrans)
 {
 	if (rc.IsRectEmpty()) return;
@@ -13021,6 +13688,8 @@ void CCustomSysPerfCtrl::DrawOverallCpu(CDC& dc, const CRect& rc, BOOL bAeroTran
 	dc.SelectObject(oldFont);
 }
 
+// 論理コア格子。列数は自動またはコンテキスト指定。
+// 論理プロセッサ数まで。
 void CCustomSysPerfCtrl::DrawCoreGrid(CDC& dc, const CRect& rc, BOOL bAeroTrans)
 {
 	if (rc.IsRectEmpty() || m_coreCount <= 0) return;
@@ -13050,6 +13719,8 @@ void CCustomSysPerfCtrl::DrawCoreGrid(CDC& dc, const CRect& rc, BOOL bAeroTrans)
 	dc.SelectObject(oldPen);
 }
 
+// モードに応じてメモリ/CPU/格子を並べる。
+// 空矩形は描かない。
 void CCustomSysPerfCtrl::DrawPerfLayer(CDC& dc, const CRect& r, BOOL bAeroTrans)
 {
 	if (r.Width() <= 0 || r.Height() <= 0) return;
@@ -13070,6 +13741,8 @@ void CCustomSysPerfCtrl::DrawPerfLayer(CDC& dc, const CRect& r, BOOL bAeroTrans)
 	CCC_DrawInwoman(&dc, r, bAeroTrans);
 }
 
+// クライアント全体へ DrawPerfLayer。矩形版へ委譲。
+// ツールチップ更新後の Invalidate からも来る。
 void CCustomSysPerfCtrl::PaintClient(CDC& dc)
 {
 	CRect r;
@@ -13077,6 +13750,8 @@ void CCustomSysPerfCtrl::PaintClient(CDC& dc)
 	PaintClient(dc, r);
 }
 
+// メモリ DC に CPU/メモリ層を描き、透過ならクロマ、通常は BitBlt。
+// ホストガラスでは不透明経路（PaintOpaqueClient）を OnPaint 側が選ぶ。
 void CCustomSysPerfCtrl::PaintClient(CDC& dc, const CRect& r)
 {
 	const int rw = r.Width();
@@ -13126,6 +13801,8 @@ void CCustomSysPerfCtrl::PaintClient(CDC& dc, const CRect& r)
 	mDC.DeleteDC();
 }
 
+// ガラス上は α=255 必須。BufferedPaint に DrawPerfLayer を載せる。
+// 失敗時もメモリ DC 経由（素 BitBlt は消える）。
 void CCustomSysPerfCtrl::PaintOpaqueClient(CDC& dc)
 {
 	CRect r;
@@ -13156,6 +13833,8 @@ void CCustomSysPerfCtrl::PaintOpaqueClient(CDC& dc)
 	::EndBufferedPaint(hBP, TRUE);
 }
 
+// fixer / PRINTCLIENT 用。不透明バッファへレイヤを描く。
+// PRINTCLIENT / fixer 共用。
 void CCustomSysPerfCtrl::PaintOpaqueIntoBuffer(HDC hdcBuf)
 {
 	if (!hdcBuf || !m_hWnd) return;
@@ -13168,6 +13847,8 @@ void CCustomSysPerfCtrl::PaintOpaqueIntoBuffer(HDC hdcBuf)
 	mem.Detach();
 }
 
+// WM_PAINT。透過はクロマ、ホストガラスは不透明パス、それ以外は素描画。
+// CPaintDC。経路分岐は aero / ホストガラス / 通常。
 void CCustomSysPerfCtrl::OnPaint()
 {
 	CPaintDC dc(this);
@@ -13181,6 +13862,8 @@ void CCustomSysPerfCtrl::OnPaint()
 	PaintClient(dc);
 }
 
+// 消去握りつぶし。アクリル上で ERASE だけだと完全透過のまま残る。
+// TRUE で既定塗りを止める。
 BOOL CCustomSysPerfCtrl::OnEraseBkgnd(CDC* pDC)
 {
 #if CCUSTOM_AERO_SUPPORT
@@ -13202,6 +13885,8 @@ BOOL CCustomSysPerfCtrl::OnEraseBkgnd(CDC* pDC)
 	return TRUE;
 }
 
+// WM_PRINTCLIENT。OpaqueFixer の BufferedPaint 先へ同じ内容を描く。
+// fixer の BufferedPaint 先。戻り 0。
 LRESULT CCustomSysPerfCtrl::OnPrintClient(WPARAM wParam, LPARAM)
 {
 	CDC* pDC = CDC::FromHandle((HDC)wParam);
@@ -13217,6 +13902,8 @@ LRESULT CCustomSysPerfCtrl::OnPrintClient(WPARAM wParam, LPARAM)
 	return 0;
 }
 
+// 現状の数値をテキストでクリップボードへ。
+// CF_UNICODETEXT。
 void CCustomSysPerfCtrl::CopyStatsToClipboard()
 {
 	CString a, b, c, d, e, f, g;
@@ -13249,6 +13936,8 @@ void CCustomSysPerfCtrl::CopyStatsToClipboard()
 	}
 }
 
+// 表示モード・列数・ポーズ・コピー。
+// 画面座標。
 void CCustomSysPerfCtrl::ShowCtxMenu(CPoint screenPt)
 {
 	CCustomPopupMenu menu;
@@ -13363,6 +14052,8 @@ void CCustomSysPerfCtrl::ShowCtxMenu(CPoint screenPt)
 	}
 }
 
+// 右クリックで表示モード／列数／ポーズ／コピー。
+// クライアント座標をスクリーンへ。
 void CCustomSysPerfCtrl::OnRButtonUp(UINT nFlags, CPoint point)
 {
 	UNREFERENCED_PARAMETER(nFlags);
@@ -13371,6 +14062,8 @@ void CCustomSysPerfCtrl::OnRButtonUp(UINT nFlags, CPoint point)
 	ShowCtxMenu(pt);
 }
 
+// キーボードメニューキーからも同じメニュー。
+// (-1,-1) ならコントロール内に出す。
 void CCustomSysPerfCtrl::OnContextMenu(CWnd* pWnd, CPoint point)
 {
 	UNREFERENCED_PARAMETER(pWnd);
@@ -13384,6 +14077,8 @@ void CCustomSysPerfCtrl::OnContextMenu(CWnd* pWnd, CPoint point)
 }
 
 // ============================================================================
+// CCustomGroupBox
+// ============================================================================
 IMPLEMENT_DYNAMIC(CCustomGroupBox, CButton)
 
 BEGIN_MESSAGE_MAP(CCustomGroupBox, CButton)
@@ -13393,15 +14088,22 @@ BEGIN_MESSAGE_MAP(CCustomGroupBox, CButton)
     ON_WM_TIMER()
 END_MESSAGE_MAP()
 
+// CCustomGroupBox のコンストラクタ。描画フラグとブラシを初期化。
+// HWND はまだ無い。タイマーは PreSubclass/OnCreate で張る。
 CCustomGroupBox::CCustomGroupBox() : m_bAutoDelete(FALSE), m_bAeroMode(FALSE) {}
+// CCustomGroupBox の破棄。所有 GDI は無い（空）。
 CCustomGroupBox::~CCustomGroupBox() {}
 
+// HWND 破棄後。基底の PostNcDestroy のあと m_bAutoDelete なら this を delete。
+// サブクラス解除後。new したコントロールはここで自殺する。
 void CCustomGroupBox::PostNcDestroy()
 {
     CButton::PostNcDestroy();
     if (m_bAutoDelete) delete this;
 }
 
+// グループは兄弟の下に回り、兄弟領域へ描かない（WS_CLIPSIBLINGS）。
+// Soft3D ゆらゆら常時タイマーはピアノ等と競合するため張らず Kill する。
 void CCustomGroupBox::PreSubclassWindow()
 {
     CButton::PreSubclassWindow();
@@ -13411,6 +14113,8 @@ void CCustomGroupBox::PreSubclassWindow()
     KillTimer(kGroupSoftTimerId);
 }
 
+// 旧 Soft3D ゆらゆら（kGroupSoftTimerId）。可視なら Invalidate。
+// 常時タイマーは PreSubclass で Kill 済み。残骸 ID だけ処理。
 void CCustomGroupBox::OnTimer(UINT_PTR nIDEvent)
 {
     if (nIDEvent == kGroupSoftTimerId) {
@@ -13420,6 +14124,8 @@ void CCustomGroupBox::OnTimer(UINT_PTR nIDEvent)
     }
     CButton::OnTimer(nIDEvent);
 }
+// WM_PAINT。透過はクロマ、ホストガラスは不透明パス、それ以外は素描画。
+// CPaintDC。経路分岐は aero / ホストガラス / 通常。
 void CCustomGroupBox::OnPaint()
 {
     CPaintDC dc(this);
@@ -13428,6 +14134,8 @@ void CCustomGroupBox::OnPaint()
     DrawGroupBox(&dc, r);
 }
 
+// WM_PRINTCLIENT。OpaqueFixer の BufferedPaint 先へ同じ内容を描く。
+// fixer の BufferedPaint 先。戻り 0。
 LRESULT CCustomGroupBox::OnPrintClient(WPARAM wParam, LPARAM)
 {
     if (HDC hDC = (HDC)wParam)
@@ -13440,6 +14148,8 @@ LRESULT CCustomGroupBox::OnPrintClient(WPARAM wParam, LPARAM)
     return 0;
 }
 
+// 内側全面塗りは兄弟コントロールを消す。消去は親/子に任せる。
+// TRUE を返して既定の背景塗りを止める。
 BOOL CCustomGroupBox::OnEraseBkgnd(CDC* pDC)
 {
     // 内側全面塗りは兄弟コントロールを消す。消去は親/子に任せる。
@@ -13448,6 +14158,8 @@ BOOL CCustomGroupBox::OnEraseBkgnd(CDC* pDC)
 }
 
 // グループボックス矩形と重なる兄弟をクリップ除外(内側塗りつぶし防止)
+// グループ矩形と重なる可視兄弟をクリップ除外（内側塗りつぶし防止）。
+// z 順に依存せず、重なる兄弟はすべて除外する。
 static void CCC_ExcludeGroupBoxSiblings(HWND hGrp, HDC hdc)
 {
     if (!hGrp || !hdc) return;
@@ -13531,6 +14243,9 @@ static void CCC_BlitGroupBoxMinusSiblings(HWND hGrp, HDC hdcDest, int x, int y,
 
 static void CCC_DrawGroupBoxFrame(CDC& dc, const CRect& r, const CString& t, BOOL bTrans);
 
+// 枠だけ描く。内側はクロマ（フルアクリル）か不透明ピンク（キャプションのみガラス）。
+// 常にダブルバッファ。転送は兄弟矩形を差し引いたリージョン単位。
+// BeginBufferedPaint は DC クリップを無視しがちなので全面 Opaque は禁止。
 void CCustomGroupBox::DrawGroupBox(CDC* pDC, CRect& rect)
 {
     const int rw = rect.Width();
@@ -13602,24 +14317,31 @@ BEGIN_MESSAGE_MAP(CCustomDialog, CDialogEx)
     ON_MESSAGE(WM_USER + 1000, OnSubclassControls)
 END_MESSAGE_MAP()
 
+// CCustomDialog のコンストラクタ。描画フラグとブラシを初期化。
+// HWND はまだ無い。実初期化は OnInitDialog / PreCreateWindow。
 CCustomDialog::CCustomDialog() : m_bAeroEnabled(FALSE)
 {
     m_brDialog.CreateSolidBrush(COLOR_DIALOG_BG);
     m_brNull.CreateStockObject(NULL_BRUSH);
 }
 
+// CCustomDialog のコンストラクタ。描画フラグとブラシを初期化。
+// HWND はまだ無い。実初期化は OnInitDialog / PreCreateWindow。
 CCustomDialog::CCustomDialog(UINT n, CWnd* p) : CDialogEx(n, p), m_bAeroEnabled(FALSE)
 {
     m_brDialog.CreateSolidBrush(COLOR_DIALOG_BG);
     m_brNull.CreateStockObject(NULL_BRUSH);
 }
 
+// CCustomDialog の破棄。ダイアログ／NULL ブラシのみ。fixer は OnDestroy。
 CCustomDialog::~CCustomDialog()
 {
     if (m_brDialog.GetSafeHandle()) m_brDialog.DeleteObject();
     if (m_brNull.GetSafeHandle()) m_brNull.DeleteObject();
 }
 
+// 本文ぼかしフラグ。HWND があれば ApplyAero と子へ伝播。
+// 子へ PROPAGATE。
 void CCustomDialog::EnableAero(BOOL b)
 {
     m_bAeroEnabled = b;
@@ -13634,6 +14356,8 @@ void CCustomDialog::EnableAero(BOOL b)
 #endif
 }
 
+// 子を CCustom* へサブクラス。Blur 系はキャプション install を Post。
+// 子サブクラス。Blur はキャプションを Show 前に。
 BOOL CCustomDialog::OnInitDialog()
 {
     BOOL r = CDialogEx::OnInitDialog();
@@ -13641,28 +14365,38 @@ BOOL CCustomDialog::OnInitDialog()
     return r;
 }
 
+// 遅延サブクラス。初期化順で HWND が後から付く子用。
+// 遅延 HWND 用。
 LRESULT CCustomDialog::OnSubclassControls(WPARAM, LPARAM)
 {
     SubclassChildControls();
     return 0;
 }
 
+// 標準コントロールを CCustom* に差し替え（Edit/Button/List 等）。
+// 標準子を CCustom* へ。
 void CCustomDialog::SubclassChildControls()
 {
     DoSubclassChildControls(this);
 }
 
+// 未サブクラス子の背景。アクリル時は null brush 寄り。
+// サブクラス済み CCustom* は CtlColor 反射側。
 HBRUSH CCustomDialog::OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nC)
 {
     HBRUSH h = DlgOnCtlColor(pDC, pWnd, nC, m_brDialog, m_bAeroEnabled);
     return h ? h : CDialogEx::OnCtlColor(pDC, pWnd, nC);
 }
 
+// 消去握りつぶし。アクリル上で ERASE だけだと完全透過のまま残る。
+// TRUE で既定塗りを止める。
 BOOL CCustomDialog::OnEraseBkgnd(CDC* pDC)
 {
     return DlgOnEraseBkgnd(pDC, m_brDialog, m_bAeroEnabled, m_hWnd);
 }
 
+// WM_PAINT。透過はクロマ、ホストガラスは不透明パス、それ以外は素描画。
+// CPaintDC。経路分岐は aero / ホストガラス / 通常。
 void CCustomDialog::OnPaint()
 {
     if (m_bAeroEnabled)
@@ -13673,6 +14407,9 @@ void CCustomDialog::OnPaint()
         CDialogEx::OnPaint();
 }
 
+// CCC_GroupBoxesBack: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 void CCC_GroupBoxesBack(HWND hDlg)
 {
     if (!hDlg || !::IsWindow(hDlg)) return;
@@ -13686,11 +14423,17 @@ void CCC_GroupBoxesBack(HWND hDlg)
 #if CCUSTOM_AERO_SUPPORT
 static BOOL CCC_PaintChildDirect(HWND hWnd, HDC hdcBuf);
 
+// CCC_BtnSTNeedsChroma: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 static BOOL CCC_BtnSTNeedsChroma(HWND hWnd)
 {
     return CCC_IsBlurDialogChild(hWnd) && CCC_IsAeroEnabled() && CCC_IsWin11();
 }
 
+// CCC_RemapBtnSTChroma: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 static void CCC_RemapBtnSTChroma(CDC& dc, CButtonST* pBtn, const CRect& r)
 {
     CCC_RemapSolidColorInDC(dc, r, COLOR_DIALOG_BG, CCC_AERO_CHROMA_KEY);
@@ -13705,6 +14448,9 @@ static void CCC_RemapBtnSTChroma(CDC& dc, CButtonST* pBtn, const CRect& r)
         CCC_RemapSolidColorInDC(dc, r, cr, CCC_AERO_CHROMA_KEY);
 }
 
+// CCC_DrawButtonSTClient: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 static void CCC_DrawButtonSTClient(HWND hWnd, CButtonST* pBtn, HDC hdc, const RECT& rect)
 {
     if (!pBtn || !hdc) return;
@@ -13739,6 +14485,9 @@ static void CCC_DrawButtonSTClient(HWND hWnd, CButtonST* pBtn, HDC hdc, const RE
     }
 }
 
+// CCC_BlitBtnSTChroma: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 static void CCC_BlitBtnSTChroma(HDC hdcDest, HWND hWnd, CButtonST* pBtn, const RECT& rect)
 {
     const int width = rect.right - rect.left;
@@ -13759,6 +14508,9 @@ static void CCC_BlitBtnSTChroma(HDC hdcDest, HWND hWnd, CButtonST* pBtn, const R
     dcDest.Detach();
 }
 
+// CCC_ForcePaintButtonST: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 static void CCC_ForcePaintButtonST(HWND hWnd, CButtonST* pBtn)
 {
     if (!hWnd || !::IsWindow(hWnd) || !pBtn)
@@ -13796,12 +14548,19 @@ static BOOL CCC_FixerNeedsNcOpaque(HWND hWnd)
     return FALSE;
 }
 
+// Win11 ガラス: 子 GDI は α=0 のまま合成されるので、BufferedPaint で α=255 面を作る。
+// その上に WM_PRINTCLIENT → OnPrintClient。CControlFixer（白透過）は CCustom* に使わない。
 class CCustomOpaqueFixer
 {
 public:
+    // ガラス上の子 HWND を不透明面にする。clrBg は穴埋め、bChroma はキー抜き。
+    // Install で SetWindowSubclass。親の ExtendFrame(-1) があると GDI が消えるため必須。
     CCustomOpaqueFixer(COLORREF clrBg, BOOL bChroma = FALSE) : m_hWnd(NULL), m_bPrinting(FALSE), m_clrBg(clrBg), m_bChroma(bChroma) {}
+    // サブクラスと DIB キャッシュを外す。ダイアログ OnDestroy からも呼ばれる。
     ~CCustomOpaqueFixer() { Uninstall(); }
 
+    // 子 HWND に SetWindowSubclass。ガラス上の GDI を不透明面に差し替える。
+    // 既に Install 済み／無効 HWND は FALSE。dwRefData は this。
     BOOL Install(HWND hWnd)
     {
         if (m_hWnd) return FALSE;
@@ -13810,6 +14569,8 @@ public:
         return ::SetWindowSubclass(hWnd, SubclassProc, (UINT_PTR)this, (DWORD_PTR)this);
     }
 
+    // サブクラス解除と DIB キャッシュ解放。破棄経路からも呼ぶ。
+    // m_hWnd を NULL にして二重 Uninstall を無害化する。
     void Uninstall()
     {
         if (m_hWnd && ::IsWindow(m_hWnd))
@@ -13819,12 +14580,18 @@ public:
     }
 
 private:
-    HWND m_hWnd;
-    BOOL m_bPrinting;
-    COLORREF m_clrBg;
-    BOOL m_bChroma;
+    HWND m_hWnd;           // Install した子。Uninstall で NULL
+    BOOL m_bPrinting;      // WM_PRINTCLIENT 再入中。PaintOpaque を重ねない
+    COLORREF m_clrBg;      // 穴埋め色（リスト交互色の下地）
+    BOOL m_bChroma;        // TRUE=キー抜き（ラベル等）。FALSE=全面 α=255
     CCC_ChromaBlitCache m_dib;
 
+    // ガラス上では子の GDI が α=0 のまま DWM 合成され消える。
+    // WM_PAINT は BeginPaint のクリップを捨て、GetDC で全面 PaintOpaque。
+    // 部分 MakeOpaque は本文が透過して見えるので禁止。
+    // ERASE は更新矩形があるとき二重描画を避けて空返し。
+    // Edit/List のキー・クリックは SETREDRAW で既定の α=0 描画を止めてから載せる。
+    // WM_PRINTCLIENT 再入は Def へ（再帰 PaintOpaque は全面透過になる）。
     static LRESULT CALLBACK SubclassProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam,
         UINT_PTR uIdSubclass, DWORD_PTR dwRefData)
     {
@@ -14105,6 +14872,9 @@ private:
         return ::DefSubclassProc(hWnd, uMsg, wParam, lParam);
     }
 
+    // m_bPrinting 中は fixer が WM_PRINTCLIENT を握らない。
+    // CCustom* は CCC_PaintChildDirect、それ以外は WM_PRINTCLIENT。
+    // 再帰的に PaintOpaque へ渡すと OnPrintClient が呼ばれず全面透過。
     void PaintClientIntoBuffer(HWND hWnd, HDC hdcBuf)
     {
         m_bPrinting = TRUE;
@@ -14132,6 +14902,7 @@ private:
         HPAINTBUFFER hBP = ::BeginBufferedPaint(hdcWin, &rc, BPBF_TOPDOWNDIB, &params, &hdcBuf);
         if (hdcBuf && hBP)
         {
+            // BufferedPaint で α 面を 255 に揃えてから DWM へ返す。
             // 現在描画済みの内容(枠/スクロールバー含む)をバッファへ取り込み
             ::BitBlt(hdcBuf, 0, 0, w, h, hdcWin, 0, 0, SRCCOPY);
             // アルファを不透明化して書き戻す
@@ -14141,6 +14912,10 @@ private:
         ::ReleaseDC(hWnd, hdcWin);
     }
 
+    // 子を不透明面として dest へ出す。ガラス（ExtendFrame -1）では必須。
+    // クロマボタンはクロマ合成。通常は共有 DIB を α=255 にして AlphaBlend。
+    // 失敗時 BeginBufferedPaint + MakeOpaque。部分 MakeOpaque は周囲が穴になる。
+    // 淫女シェイク時だけ AlphaBlend 経路でずらす（短く、ホットキーは書かない）。
     void PaintOpaque(HWND hWnd, HDC hDestDC)
     {
         RECT rect = {};
@@ -14228,6 +15003,9 @@ private:
     }
 };
 
+// CCC_OpaqueBgForHwnd: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 static COLORREF CCC_OpaqueBgForHwnd(HWND hWnd)
 {
     if (CWnd* pw = CWnd::FromHandlePermanent(hWnd))
@@ -14252,6 +15030,9 @@ static COLORREF CCC_OpaqueBgForHwnd(HWND hWnd)
     return COLOR_DIALOG_BG;
 }
 
+// CCC_IsBlurControl: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 static BOOL CCC_IsBlurControl(HWND hWnd)
 {
     if (CWnd* pw = CWnd::FromHandlePermanent(hWnd))
@@ -14274,6 +15055,9 @@ static BOOL CCC_IsBlurControl(HWND hWnd)
 }
 
 // キャプションだけアクリル（本文 save.aero=0）。ホストは α ガラスだが本文は不透明必須。
+// CCC_CaptionOnlyHostGlass: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 static BOOL CCC_CaptionOnlyHostGlass(HWND hWnd)
 {
 #if CCUSTOM_AERO_SUPPORT
@@ -14290,6 +15074,9 @@ static BOOL CCC_CaptionOnlyHostGlass(HWND hWnd)
 #endif
 }
 
+// CCC_ShouldOpaqueFix: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 static BOOL CCC_ShouldOpaqueFix(HWND hWnd)
 {
     if (!::IsWindow(hWnd)) return FALSE;
@@ -14377,6 +15164,9 @@ static BOOL CCC_ShouldOpaqueFix(HWND hWnd)
     return FALSE;
 }
 
+// CCC_PaintChildDirect: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 static BOOL CCC_PaintChildDirect(HWND hWnd, HDC hdcBuf)
 {
     CWnd* pw = CWnd::FromHandlePermanent(hWnd);
@@ -14471,6 +15261,9 @@ static BOOL CCC_PaintChildDirect(HWND hWnd, HDC hdcBuf)
     return painted;
 }
 
+// CCC_ClearOpaqueFixerList: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 static void CCC_ClearOpaqueFixerList(CTypedPtrList<CPtrList, CCustomOpaqueFixer*>& fixers)
 {
     while (!fixers.IsEmpty())
@@ -14480,6 +15273,8 @@ static void CCC_ClearOpaqueFixerList(CTypedPtrList<CPtrList, CCustomOpaqueFixer*
     }
 }
 
+// 子を再帰走査し ShouldOpaqueFix なら fixer を Install。
+// CButtonST でクロマが要るものだけ bChroma。背景色はコントロール種別。
 static void CCC_InstallOpaqueFixers(HWND hParent, CTypedPtrList<CPtrList, CCustomOpaqueFixer*>& fixers)
 {
     for (HWND hChild = ::GetWindow(hParent, GW_CHILD); hChild; hChild = ::GetWindow(hChild, GW_HWNDNEXT))
@@ -14500,6 +15295,9 @@ static void CCC_InstallOpaqueFixers(HWND hParent, CTypedPtrList<CPtrList, CCusto
     }
 }
 
+// CCC_BlitGroupFrame: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 static void CCC_BlitGroupFrame(HDC hdcDest, int x, int y, int w, int h,
     HDC hdcSrc, COLORREF clrKey, const CRect& innerClient)
 {
@@ -14526,6 +15324,9 @@ static void CCC_BlitGroupFrame(HDC hdcDest, int x, int y, int w, int h,
     ::DeleteObject(hrgnScreen);
 }
 
+// 二重線の枠＋タイトルギャップ＋裾レース＋角リボン。
+// Soft3D ゆらゆらは GetTickCount/500（疎）。タイトル下地はクロマまたはダイアログ色。
+// 透過時の黒文字は RGB(2,2,2)（クロマ 1,1,1 と区別）。
 static void CCC_DrawGroupBoxFrame(CDC& dc, const CRect& r, const CString& t, BOOL bTrans)
 {
     CFont* pOF = dc.SelectObject(dc.GetCurrentFont());
@@ -14610,6 +15411,9 @@ static void CCC_DrawGroupBoxFrame(CDC& dc, const CRect& r, const CString& t, BOO
     dc.SelectObject(pOF);
 }
 
+// ぼかし ON: ApplyAero → CLIPCHILDREN → GroupBoxesBack → Win11 なら fixer。
+// 末尾 FRAMECHANGED は NC 再計算用。二重 REAPPLY は載せない。
+// 直後の CaptionApplyGlass / 初回 OnShowWindow が fixer を載せる。
 static void CCC_FinishBlurDlg(CWnd* pDlg, BOOL bAero, BOOL& bBlurApplied,
     CTypedPtrList<CPtrList, CCustomOpaqueFixer*>& fixers)
 {
@@ -14638,6 +15442,8 @@ static void CCC_FinishBlurDlg(CWnd* pDlg, BOOL bAero, BOOL& bBlurApplied,
     // ここで Post すると ALLCHILDREN 不透明化がもう一周する。
 }
 
+// fixer を張り直す。AcrylicCaption 時は save.aero OFF でも必要。
+// PostOpaque + ALLCHILDREN は各子 PaintOpaque が 2 回になるので Invalidate 1 回。
 static void CCC_ReapplyOpaqueFix(CWnd* pDlg, CTypedPtrList<CPtrList, CCustomOpaqueFixer*>& fixers)
 {
     if (!pDlg || !pDlg->GetSafeHwnd() || !CCC_IsWin11()) return;
@@ -14649,6 +15455,9 @@ static void CCC_ReapplyOpaqueFix(CWnd* pDlg, CTypedPtrList<CPtrList, CCustomOpaq
     pDlg->RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_ALLCHILDREN);
 }
 
+// CCC_ForceRepaintHwnd: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 void CCC_ForceRepaintHwnd(HWND hWnd)
 {
     if (!hWnd || !::IsWindow(hWnd))
@@ -14707,12 +15516,18 @@ void CCC_ForceRepaintHwnd(HWND hWnd)
     ::RedrawWindow(hWnd, NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW | RDW_ERASE);
 }
 
+// CCC_RefreshChildProc: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 static BOOL CALLBACK CCC_RefreshChildProc(HWND hChild, LPARAM)
 {
     CCC_ForceRepaintHwnd(hChild);
     return TRUE;
 }
 
+// CCC_RefreshKids: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 void CCC_RefreshKids(HWND hWnd)
 {
     if (!hWnd || !::IsWindow(hWnd))
@@ -14722,6 +15537,9 @@ void CCC_RefreshKids(HWND hWnd)
 #endif
 
 #if !CCUSTOM_AERO_SUPPORT
+// CCC_ForceRepaintHwnd: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 void CCC_ForceRepaintHwnd(HWND hWnd)
 {
     if (!hWnd || !::IsWindow(hWnd))
@@ -14757,12 +15575,18 @@ void CCC_ForceRepaintHwnd(HWND hWnd)
     ::RedrawWindow(hWnd, NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW | RDW_ERASE);
 }
 
+// CCC_RefreshChildProcNoAero: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 static BOOL CALLBACK CCC_RefreshChildProcNoAero(HWND hChild, LPARAM)
 {
     CCC_ForceRepaintHwnd(hChild);
     return TRUE;
 }
 
+// CCC_RefreshKids: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 void CCC_RefreshKids(HWND hWnd)
 {
     if (!hWnd || !::IsWindow(hWnd))
@@ -14822,6 +15646,9 @@ static const COLORREF CCC_CAP_TEXT = RGB(255, 248, 252);
 static CCC_CaptionEntry* CCC_FindCaption(HWND hWnd);
 
 // キャプション専用アクリル判定。savedata.aero / m_bAeroEnabled は見ない（帯は常時ガラス可）
+// CCC_AcrylicCaption: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 BOOL CCC_AcrylicCaption(HWND hWnd)
 {
 #if CCUSTOM_AERO_SUPPORT
@@ -14835,6 +15662,9 @@ BOOL CCC_AcrylicCaption(HWND hWnd)
 #endif
 }
 
+// CCC_IsCaptionChromeCtrl: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 static BOOL CCC_IsCaptionChromeCtrl(HWND hWnd)
 {
     if (!hWnd) return FALSE;
@@ -14859,6 +15689,9 @@ static BOOL CCC_IsCaptionChromeCtrl(HWND hWnd)
     return FALSE;
 }
 
+// CCC_IsCaptionHelpChromeId: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 static BOOL CCC_IsCaptionHelpChromeId(UINT id)
 {
     static const UINT kHelpChromeIds[] = {
@@ -14876,6 +15709,9 @@ static BOOL CCC_IsCaptionHelpChromeId(UINT id)
     return FALSE;
 }
 
+// CCC_FindCaptionHelpChrome: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 static HWND CCC_FindCaptionHelpChrome(HWND hDlg)
 {
     if (!hDlg || !::IsWindow(hDlg)) return NULL;
@@ -14896,12 +15732,18 @@ static HWND CCC_FindCaptionHelpChrome(HWND hDlg)
 }
 
 // 表示前でも HWND があれば「本」+「?」2 枠分を確保（追随が被るのを防ぐ）
+// CCC_CaptionHelpChromeReserve: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 static int CCC_CaptionHelpChromeReserve(HWND hDlg)
 {
     return CCC_FindCaptionHelpChrome(hDlg) ? (2 * (CCC_CAP_BTN + CCC_CAP_GAP)) : 0;
 }
 
 // PROPAGATE 後もキャプション帯は透過描画（チェック等）。ボタンは Opaque 経路。
+// CCC_CaptionChromeReapplyTrans: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 static void CCC_CaptionChromeReapplyTrans(HWND hDlg)
 {
 #if CCUSTOM_AERO_SUPPORT
@@ -14919,6 +15761,9 @@ static void CCC_CaptionChromeReapplyTrans(HWND hDlg)
 }
 
 // ClearRect が帯上の子画素を消すので、キャプション描画の最後に必ず載せ直す
+// CCC_CaptionPaintChromeNow: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 static void CCC_CaptionPaintChromeNow(HWND hDlg)
 {
     if (!hDlg || !::IsWindow(hDlg)) return;
@@ -14934,6 +15779,9 @@ static void CCC_CaptionPaintChromeNow(HWND hDlg)
 }
 
 // 本文 aero だけ解除（ホストの backdrop/α/ExtendFrame は触らない）
+// CCC_DisableBodyAeroOnly: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 static void CCC_DisableBodyAeroOnly(HWND hWnd)
 {
 #if CCUSTOM_AERO_SUPPORT
@@ -14946,6 +15794,9 @@ static void CCC_DisableBodyAeroOnly(HWND hWnd)
 }
 
 // AcrylicCaption ではない窓でも、DWM 既定キャプション（アイコン含む）の重ね描きを止める
+// CCC_CaptionHideDwmTitleChrome: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 static void CCC_CaptionHideDwmTitleChrome(HWND hWnd)
 {
 #if CCUSTOM_AERO_SUPPORT
@@ -14975,6 +15826,9 @@ static void CCC_CaptionHideDwmTitleChrome(HWND hWnd)
 #endif
 }
 
+// CCC_CaptionEnsureBackdrop: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 static void CCC_CaptionEnsureBackdrop(HWND hWnd)
 {
 #if CCUSTOM_AERO_SUPPORT
@@ -15031,6 +15885,9 @@ static void CCC_CaptionEnsureBackdrop(HWND hWnd)
 #endif
 }
 
+// CCC_CaptionEnsureHostAcrylic: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 void CCC_CaptionEnsureHostAcrylic(HWND hWnd)
 {
 #if CCUSTOM_AERO_SUPPORT
@@ -15041,6 +15898,9 @@ void CCC_CaptionEnsureHostAcrylic(HWND hWnd)
 }
 
 // 既存 RGB を保ったまま α=255 にする（ピアノ/アナライザ等の BitBlt 後の全透過を塞ぐ）
+// CCC_MakeRectOpaquePreserve: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 static void CCC_MakeRectOpaquePreserve(HDC hdc, const RECT& rc)
 {
     const int w = rc.right - rc.left;
@@ -15068,6 +15928,9 @@ static void CCC_MakeRectOpaquePreserve(HDC hdc, const RECT& rc)
 }
 
 // ホストアクリルを有効化してから fixer（描画フラグ m_bAeroEnabled は別）
+// CCC_CaptionApplyGlassAndFixers: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 static void CCC_CaptionApplyGlassAndFixers(CWnd* pDlg,
     CTypedPtrList<CPtrList, CCustomOpaqueFixer*>& fixers)
 {
@@ -15172,6 +16035,9 @@ static LRESULT CCC_CaptionHandleNcCalcSize(HWND hWnd, WPARAM wParam, LPARAM lPar
     return 0;
 }
 
+// CCC_FindCaption: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 static CCC_CaptionEntry* CCC_FindCaption(HWND hWnd)
 {
     for (int i = 0; i < g_captionCount; ++i) {
@@ -15181,6 +16047,9 @@ static CCC_CaptionEntry* CCC_FindCaption(HWND hWnd)
     return nullptr;
 }
 
+// CCC_GetOrCreateCaption: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 static CCC_CaptionEntry* CCC_GetOrCreateCaption(HWND hWnd)
 {
     if (CCC_CaptionEntry* e = CCC_FindCaption(hWnd))
@@ -15192,6 +16061,9 @@ static CCC_CaptionEntry* CCC_GetOrCreateCaption(HWND hWnd)
     return e;
 }
 
+// CCC_GetCustomCaptionHeight: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 int CCC_GetCustomCaptionHeight(HWND hDlg)
 {
     CCC_CaptionEntry* e = CCC_FindCaption(hDlg);
@@ -15200,6 +16072,9 @@ int CCC_GetCustomCaptionHeight(HWND hDlg)
     return e->height;
 }
 
+// CCC_CaptionDestroyBtn: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 static void CCC_CaptionDestroyBtn(CCustomStandardButton*& p)
 {
     if (!p)
@@ -15209,6 +16084,9 @@ static void CCC_CaptionDestroyBtn(CCustomStandardButton*& p)
     p = nullptr;
 }
 
+// CCC_CaptionUnregister: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 void CCC_CaptionUnregister(HWND hWnd)
 {
     for (int i = 0; i < g_captionCount; ++i) {
@@ -15228,6 +16106,8 @@ void CCC_CaptionUnregister(HWND hWnd)
     }
 }
 
+// キャプション用の flat CCustomStandardButton。共有アイコン、AutoDelete。
+// 失敗したら delete して nullptr。
 static CCustomStandardButton* CCC_CaptionMakeBtn(CWnd* pDlg, UINT id, LPCWSTR text)
 {
     CCustomStandardButton* p = new CCustomStandardButton();
@@ -15246,6 +16126,9 @@ static CCustomStandardButton* CCC_CaptionMakeBtn(CWnd* pDlg, UINT id, LPCWSTR te
     return p;
 }
 
+// CCC_CaptionSysBtnCount: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 static int CCC_CaptionSysBtnCount(const CCC_CaptionEntry* e)
 {
     int n = 1; // close
@@ -15254,6 +16137,9 @@ static int CCC_CaptionSysBtnCount(const CCC_CaptionEntry* e)
     return n;
 }
 
+// CCC_CaptionExtraBtnCount: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 static int CCC_CaptionExtraBtnCount(const CCC_CaptionEntry* e)
 {
     int n = 0;
@@ -15262,6 +16148,9 @@ static int CCC_CaptionExtraBtnCount(const CCC_CaptionEntry* e)
     return n;
 }
 
+// CCC_CaptionGetTitleRight: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 static void CCC_CaptionGetTitleRight(HWND hDlg, CCC_CaptionEntry* e, int& titleRight)
 {
     CRect cr;
@@ -15317,6 +16206,9 @@ static int CCC_CaptionPinLeft(HWND hDlg, const CCC_CaptionEntry* e)
     return x;
 }
 
+// CCC_CaptionPlaceHelpBtn: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 void CCC_CaptionPlaceHelpBtn(HWND hDlg, CWnd* pHelp)
 {
     if (!hDlg || !::IsWindow(hDlg) || !pHelp || !pHelp->GetSafeHwnd())
@@ -15383,6 +16275,9 @@ void CCC_CaptionPlaceHelpBtn(HWND hDlg, CWnd* pHelp)
     }
 }
 
+// CCC_CaptionRefreshDpi: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 void CCC_CaptionRefreshDpi(HWND hDlg)
 {
     CCC_CaptionEntry* e = CCC_FindCaption(hDlg);
@@ -15401,6 +16296,9 @@ void CCC_CaptionRefreshDpi(HWND hDlg)
     CCC_CaptionLayout(hDlg);
 }
 
+// 右から Close → Max? → Min? → Settings? → Pin。その左に help と追従。
+// SWP_NOCOPYBITS で帯アクリルのゴミコピーを避ける。
+// 追従を前面にしたあと help が沈まないよう再度 Top。
 void CCC_CaptionLayout(HWND hDlg)
 {
     CCC_CaptionEntry* e = CCC_FindCaption(hDlg);
@@ -15475,6 +16373,9 @@ void CCC_CaptionLayout(HWND hDlg)
     }
 }
 
+// CCC_ApplyDlgResourceIcon: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 void CCC_ApplyDlgResourceIcon(CWnd* w, UINT iconId)
 {
 	if (!w || !w->GetSafeHwnd() || iconId == 0)
@@ -15493,6 +16394,9 @@ void CCC_ApplyDlgResourceIcon(CWnd* w, UINT iconId)
 	w->SetIcon(hBig, FALSE);
 }
 
+// CCC_IconIdForDialogTemplate: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 UINT CCC_IconIdForDialogTemplate(UINT idd)
 {
 	if (idd == 0)
@@ -15560,6 +16464,9 @@ UINT CCC_IconIdForDialogTemplate(UINT idd)
 	return IDI_UI_APPS;
 }
 
+// CCC_ApplyWindowIconFromTemplate: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 void CCC_ApplyWindowIconFromTemplate(CWnd* w, UINT idd)
 {
 	CCC_ApplyDlgResourceIcon(w, CCC_IconIdForDialogTemplate(idd));
@@ -15578,6 +16485,9 @@ HCURSOR CCC_LoadUiCursor(UINT id)
 	return h;
 }
 
+// CCC_SetUiCursor: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 BOOL CCC_SetUiCursor(UINT id)
 {
 	HCURSOR h = CCC_LoadUiCursor(id);
@@ -15587,6 +16497,9 @@ BOOL CCC_SetUiCursor(UINT id)
 	return TRUE;
 }
 
+// CCC_LoadSharedIcon: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 HICON CCC_LoadSharedIcon(UINT iconId, int px)
 {
 	if (!iconId)
@@ -15603,6 +16516,9 @@ HICON CCC_LoadSharedIcon(UINT iconId, int px)
 	return h;
 }
 
+// CCC_CtlIconForCtrl: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 UINT CCC_CtlIconForCtrl(UINT id)
 {
 	if (id == 0)
@@ -15755,6 +16671,9 @@ UINT CCC_CtlIconForCtrl(UINT id)
 	}
 }
 
+// CCC_CaptionIsGlyphOnly: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 static BOOL CCC_CaptionIsGlyphOnly(const CString& s)
 {
 	if (s.IsEmpty())
@@ -15772,6 +16691,9 @@ static BOOL CCC_CaptionIsGlyphOnly(const CString& s)
 	return TRUE;
 }
 
+// CCC_CaptionApplySharedIcon: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 static void CCC_CaptionApplySharedIcon(CCustomStandardButton* p, UINT iconId)
 {
 	if (!p || !p->GetSafeHwnd() || !iconId)
@@ -15801,6 +16723,9 @@ static HICON CCC_CaptionGetTitleIcon(HWND hDlg)
 }
 
 // 帯いっぱい(barH-2)は大きすぎ、旧16は小さい。96dpi 帯32なら 24。
+// CCC_CaptionTitleIconSize: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 static int CCC_CaptionTitleIconSize(int barH)
 {
 	int isz = (barH * 3) / 4;
@@ -15813,6 +16738,9 @@ static int CCC_CaptionTitleIconSize(int barH)
 	return isz;
 }
 
+// カスタム帯。本文だけの再描画（60fps）では帯クリップ外なら触らない。
+// アクリル帯は ClearRect(α=0)+タイトル。EnsureBackdrop は毎フレーム呼ばない。
+// ClearRect はボタン画素も消すので最後に ChromeNow で載せ直す。
 void CCC_CaptionPaint(CDC& dc, HWND hDlg)
 {
     CCC_CaptionEntry* e = CCC_FindCaption(hDlg);
@@ -16006,6 +16934,9 @@ void CCC_CaptionPaint(CDC& dc, HWND hDlg)
     e->paintTitle[511] = 0;
 }
 
+// CCC_CaptionIsRenderClass: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 static BOOL CCC_CaptionIsRenderClass(CWnd* pDlg)
 {
     if (!pDlg || !pDlg->GetRuntimeClass())
@@ -16013,6 +16944,10 @@ static BOOL CCC_CaptionIsRenderClass(CWnd* pDlg)
     return strcmp(pDlg->GetRuntimeClass()->m_lpszClassName, "CRender") == 0;
 }
 
+// システム WS_CAPTION を描画から外し、クライアント先頭帯に min/max/close/pin/help。
+// FRAMECHANGED は ExtendFrame より先。後だとマージンが消えて黒帯＋縦幅ジャンプ。
+// NC 吸収分だけ子を下げる。capH で上乗せすると内容が余分に下がって見える。
+// 二重 install 禁止（installed なら return）。
 static void CCC_CaptionInstallCore(CWnd* pDlg, CToolTipCtrl* pTip); // MainLock 定義後に実装
 
 // ============================================================================
@@ -16060,6 +16995,9 @@ static const int CCC_MAINLOCK_MARGIN = 10;
 static void CCC_MainLockLayoutBtn(HWND hDlg);
 static void CCC_MainLockInvalidateOverlay(HWND hDlg);
 
+// CCC_ClampWindowPos: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 void CCC_ClampWindowPos(int& x, int& y, int w, int h)
 {
     if (w < 1) w = 1;
@@ -16092,6 +17030,9 @@ void CCC_ClampWindowPos(int& x, int& y, int w, int h)
     if (y + nh > rcWork.bottom) y = rcWork.bottom - nh;
 }
 
+// CCC_MainLockReleaseOverlayCache: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 static void CCC_MainLockReleaseOverlayCache(CCC_MainLockEntry* e)
 {
     if (!e || !e->pOverlay)
@@ -16107,6 +17048,9 @@ static void CCC_MainLockReleaseOverlayCache(CCC_MainLockEntry* e)
     e->pOverlay = nullptr;
 }
 
+// CCC_MainLockEnsureOverlayCachePtr: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 static CCC_MainLockOverlayCache* CCC_MainLockEnsureOverlayCachePtr(CCC_MainLockEntry* e)
 {
     if (!e)
@@ -16116,12 +17060,18 @@ static CCC_MainLockOverlayCache* CCC_MainLockEnsureOverlayCachePtr(CCC_MainLockE
     return e->pOverlay;
 }
 
+// CCC_MainLockMarkOverlayDirty: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 static void CCC_MainLockMarkOverlayDirty(CCC_MainLockEntry* e)
 {
     if (e && e->pOverlay)
         e->pOverlay->dirty = TRUE;
 }
 
+// CCC_FindMainLockEntry: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 static CCC_MainLockEntry* CCC_FindMainLockEntry(HWND hWnd)
 {
     for (int i = 0; i < g_mainLockCount; ++i) {
@@ -16131,6 +17081,9 @@ static CCC_MainLockEntry* CCC_FindMainLockEntry(HWND hWnd)
     return nullptr;
 }
 
+// CCC_GetOrCreateMainLockEntry: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 static CCC_MainLockEntry* CCC_GetOrCreateMainLockEntry(HWND hWnd)
 {
     if (CCC_MainLockEntry* e = CCC_FindMainLockEntry(hWnd))
@@ -16177,6 +17130,9 @@ static void CCC_ComputeMainLockAttach(HWND hWnd, CCC_MainLockEntry* e)
     }
 }
 
+// CCC_MainLockPlaceChild: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 static void CCC_MainLockPlaceChild(CCC_MainLockEntry& e, const RECT* pMainRect)
 {
     if (!pMainRect || !::IsWindow(e.hWnd))
@@ -16203,6 +17159,9 @@ static void CCC_MainLockPlaceChild(CCC_MainLockEntry& e, const RECT* pMainRect)
         SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOREDRAW);
 }
 
+// CCC_MainLockLabel: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 static const CString& CCC_MainLockLabel()
 {
     // 「メイン固定」だと何を固定するか不明瞭 → メイン窓への位置追従だと分かる文言へ
@@ -16215,6 +17174,9 @@ static const CString& CCC_MainLockLabel()
     return s;
 }
 
+// CCC_MainLockMeasureWidth: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 static int CCC_MainLockMeasureWidth(CWnd* pDlg)
 {
     if (!pDlg || !::IsWindow(pDlg->GetSafeHwnd()))
@@ -16230,6 +17192,9 @@ static int CCC_MainLockMeasureWidth(CWnd* pDlg)
     return max(CCC_MAINLOCK_MIN_W, 20 + sz.cx + 8);
 }
 
+// CCC_MainLockGetClientRect: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 static void CCC_MainLockGetClientRect(HWND hDlg, CRect& rc)
 {
     rc.SetRectEmpty();
@@ -16312,6 +17277,9 @@ static void CCC_MainLockGetClientRect(HWND hDlg, CRect& rc)
     }
 }
 
+// CCC_MainLockInvalidateOverlay: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 static void CCC_MainLockInvalidateOverlay(HWND hDlg)
 {
     CCC_MainLockEntry* e = CCC_FindMainLockEntry(hDlg);
@@ -16323,6 +17291,9 @@ static void CCC_MainLockInvalidateOverlay(HWND hDlg)
         ::InvalidateRect(hDlg, rc, FALSE);
 }
 
+// CCC_MainLockSetHeaderRow: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 void CCC_MainLockSetHeaderRow(HWND hDlg, int top, int height)
 {
     CCC_MainLockEntry* e = CCC_FindMainLockEntry(hDlg);
@@ -16336,6 +17307,9 @@ void CCC_MainLockSetHeaderRow(HWND hDlg, int top, int height)
         CCC_MainLockLayoutBtn(hDlg);
 }
 
+// CCC_MainLockClearHeaderRow: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 void CCC_MainLockClearHeaderRow(HWND hDlg)
 {
     CCC_MainLockEntry* e = CCC_FindMainLockEntry(hDlg);
@@ -16349,11 +17323,17 @@ void CCC_MainLockClearHeaderRow(HWND hDlg)
         CCC_MainLockLayoutBtn(hDlg);
 }
 
+// CCC_MainLockGetOverlayRect: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 void CCC_MainLockGetOverlayRect(HWND hDlg, CRect& rc)
 {
     CCC_MainLockGetClientRect(hDlg, rc);
 }
 
+// CCC_InvalidateRectMinusOverlay: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 void CCC_InvalidateRectMinusOverlay(HWND hDlg, const CRect& area)
 {
     // ロック矩形を更新領域から除外する。毎フレームの content blit → ロック再描画が
@@ -16385,6 +17365,9 @@ void CCC_InvalidateRectMinusOverlay(HWND hDlg, const CRect& area)
     if (rLock) ::DeleteObject(rLock);
 }
 
+// CCC_MainLockSyncBtnCheck: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 static void CCC_MainLockSyncBtnCheck(CCC_MainLockEntry* e)
 {
     if (!e || e->overlayPaint || !e->pLockBtn || !::IsWindow(e->pLockBtn->GetSafeHwnd()))
@@ -16392,6 +17375,9 @@ static void CCC_MainLockSyncBtnCheck(CCC_MainLockEntry* e)
     e->pLockBtn->SetCheck(e->locked ? BST_CHECKED : BST_UNCHECKED);
 }
 
+// CCC_ApplyMainLockState: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 static void CCC_ApplyMainLockState(CCC_MainLockEntry* e, BOOL locked)
 {
     if (!e)
@@ -16407,6 +17393,9 @@ static void CCC_ApplyMainLockState(CCC_MainLockEntry* e, BOOL locked)
         CCC_MainLockSyncBtnCheck(e);
 }
 
+// CCC_MainLockDestroyBtn: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 static void CCC_MainLockDestroyBtn(CCC_MainLockEntry* e)
 {
     if (!e || !e->pLockBtn)
@@ -16416,6 +17405,9 @@ static void CCC_MainLockDestroyBtn(CCC_MainLockEntry* e)
     e->pLockBtn = nullptr;
 }
 
+// CCC_MainLockEnsureBtn: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 static void CCC_MainLockEnsureBtn(CWnd* pDlg, CCC_MainLockEntry* e)
 {
     if (!pDlg || !e || !e->pSaveFlag || e->overlayPaint)
@@ -16448,6 +17440,9 @@ static void CCC_MainLockEnsureBtn(CWnd* pDlg, CCC_MainLockEntry* e)
     CCC_MainLockSyncBtnCheck(e);
 }
 
+// CCC_MainLockLayoutBtn: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 static void CCC_MainLockLayoutBtn(HWND hDlg)
 {
     if (g_mainLockInternalMove)
@@ -16474,6 +17469,9 @@ static void CCC_MainLockLayoutBtn(HWND hDlg)
     CCC_MainLockSyncBtnCheck(e);
 }
 
+// CCC_MainLockShowBtn: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 static void CCC_MainLockShowBtn(HWND hDlg, BOOL bShow)
 {
     CCC_MainLockEntry* e = CCC_FindMainLockEntry(hDlg);
@@ -16490,6 +17488,9 @@ static void CCC_MainLockShowBtn(HWND hDlg, BOOL bShow)
         e->pLockBtn->ShowWindow(SW_HIDE);
 }
 
+// CCC_MainLockDrawOverlay: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 static void CCC_MainLockDrawOverlay(CDC& dc, const CRect& rc, BOOL locked)
 {
 #if CCUSTOM_AERO_SUPPORT
@@ -16516,6 +17517,9 @@ static void CCC_MainLockDrawOverlay(CDC& dc, const CRect& rc, BOOL locked)
     dc.DrawText(CCC_MainLockLabel(), textRc, DT_SINGLELINE | DT_VCENTER | DT_LEFT | DT_NOPREFIX);
 }
 
+// CCC_MainLockPaintClient: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 void CCC_MainLockPaintClient(CDC& dc, HWND hDlg)
 {
     CCC_MainLockEntry* e = CCC_FindMainLockEntry(hDlg);
@@ -16575,6 +17579,9 @@ void CCC_MainLockPaintClient(CDC& dc, HWND hDlg)
     dc.RestoreDC(saved);
 }
 
+// CCC_MainLockOverlayHitTest: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 BOOL CCC_MainLockOverlayHitTest(HWND hDlg, CPoint ptClient)
 {
     CCC_MainLockEntry* e = CCC_FindMainLockEntry(hDlg);
@@ -16585,6 +17592,9 @@ BOOL CCC_MainLockOverlayHitTest(HWND hDlg, CPoint ptClient)
     return rc.PtInRect(ptClient);
 }
 
+// CCC_MainLockOverlayToggle: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 void CCC_MainLockOverlayToggle(HWND hDlg)
 {
     CCC_MainLockEntry* e = CCC_FindMainLockEntry(hDlg);
@@ -16593,6 +17603,8 @@ void CCC_MainLockOverlayToggle(HWND hDlg)
     CCC_ApplyMainLockState(e, !e->locked);
 }
 
+// トグル。ON なら現在位置から密着モードを計算し、以降メイン移動に追随。
+// 保存フラグがあれば *pSaved を更新。
 static void CCC_MainLockOnClicked(HWND hDlg)
 {
     CCC_MainLockEntry* e = CCC_FindMainLockEntry(hDlg);
@@ -16601,6 +17613,9 @@ static void CCC_MainLockOnClicked(HWND hDlg)
     CCC_ApplyMainLockState(e, e->pLockBtn->GetCheck() == BST_CHECKED);
 }
 
+// CCC_MainLockBringToFront: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 void CCC_MainLockBringToFront(HWND hDlg)
 {
     CCC_MainLockEntry* e = CCC_FindMainLockEntry(hDlg);
@@ -16628,6 +17643,9 @@ static const WCHAR CCC_GDIHELP_PROP_CH[] = L"CCC_GdiHelpCH";
 static GdiSoft3D::Context s_helpSoft3d;
 static GdiSoft2D::Context s_helpSoft2d;
 
+// CCC_GdiHelpFillDemoScene: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 static void CCC_GdiHelpFillDemoScene(GdiSoft3D::Context& ctx, int kind, DWORD tick)
 {
 	const float t = (float)tick * 0.09f;
@@ -16814,6 +17832,9 @@ static void CCC_GdiHelpFillDemoScene(GdiSoft3D::Context& ctx, int kind, DWORD ti
 	}
 }
 
+// CCC_GdiHelpDrawSoft3DDemo: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 int CCC_GdiHelpDrawSoft3DDemo(CDC& dc, int x, int y, int maxW, int maxH, int kind)
 {
 	if (maxW < 80 || maxH < 48) return y;
@@ -16861,6 +17882,9 @@ int CCC_GdiHelpDrawSoft3DDemo(CDC& dc, int x, int y, int maxW, int maxH, int kin
 	return y + h + lh + 8;
 }
 
+// CCC_GdiHelpDrawSoftDemoPair: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 int CCC_GdiHelpDrawSoftDemoPair(CDC& dc, int x, int y, int totalW, int demoH, int kind)
 {
 	if (totalW < 160 || demoH < 48) return y;
@@ -16972,6 +17996,9 @@ int CCC_GdiHelpDrawSoftDemoPair(CDC& dc, int x, int y, int totalW, int demoH, in
 	return y + demoH + lh + 8;
 }
 
+// CCC_GdiHelpLayoutCloseBtn: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 static void CCC_GdiHelpLayoutCloseBtn(CWnd* wnd, int footerH)
 {
     if (!wnd || !::IsWindow(wnd->GetSafeHwnd())) return;
@@ -16992,6 +18019,9 @@ static void CCC_GdiHelpLayoutCloseBtn(CWnd* wnd, int footerH)
         SWP_NOZORDER | SWP_NOACTIVATE);
 }
 
+// CCC_GdiHelpApplyClientSize: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 static void CCC_GdiHelpApplyClientSize(HWND hWnd, int clientW, int clientH)
 {
     if (!hWnd || !::IsWindow(hWnd) || clientW < 80 || clientH < 60) return;
@@ -17025,6 +18055,9 @@ static void CCC_GdiHelpApplyClientSize(HWND hWnd, int clientW, int clientH)
     CCC_GdiHelpLayoutCloseBtn(w, CCC_ScaleDpi(26, dpi));
 }
 
+// CCC_GdiHelpSubclassProc: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 static LRESULT CALLBACK CCC_GdiHelpSubclassProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam,
     UINT_PTR uIdSubclass, DWORD_PTR dwRefData)
 {
@@ -17055,6 +18088,9 @@ static LRESULT CALLBACK CCC_GdiHelpSubclassProc(HWND hWnd, UINT uMsg, WPARAM wPa
     return ::DefSubclassProc(hWnd, uMsg, wParam, lParam);
 }
 
+// CCC_GdiHelpEnsureSubclass: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 static void CCC_GdiHelpEnsureSubclass(HWND hWnd)
 {
     if (!hWnd || !::IsWindow(hWnd)) return;
@@ -17065,6 +18101,9 @@ static void CCC_GdiHelpEnsureSubclass(HWND hWnd)
     ::SetTimer(hWnd, CCC_GDIHELP_ANIM_TIMER, 40, NULL);
 }
 
+// CCC_GdiHelpScanExtent: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 static void CCC_GdiHelpScanExtent(const UINT32* bits, int w, int h, COLORREF bg, int* pMaxX, int* pMaxY)
 {
     const UINT32 bgPx = ((UINT32)GetRValue(bg) << 16) | ((UINT32)GetGValue(bg) << 8) | (UINT32)GetBValue(bg);
@@ -17089,6 +18128,9 @@ static void CCC_GdiHelpScanExtent(const UINT32* bits, int w, int h, COLORREF bg,
     *pMaxY = my + 1;
 }
 
+// CCC_GdiHelpBeginPaint: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 BOOL CCC_GdiHelpBeginPaint(CWnd* wnd, CDC& paintDc, CCC_GdiHelpPaint& hp)
 {
     hp.ok = FALSE;
@@ -17145,6 +18187,9 @@ BOOL CCC_GdiHelpBeginPaint(CWnd* wnd, CDC& paintDc, CCC_GdiHelpPaint& hp)
     return TRUE;
 }
 
+// CCC_GdiHelpEndPaint: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 void CCC_GdiHelpEndPaint(CCC_GdiHelpPaint& hp)
 {
     if (!hp.ok || !hp.wnd || !hp.pPaintDc || !hp.bits)
@@ -17232,6 +18277,9 @@ void CCC_GdiHelpEndPaint(CCC_GdiHelpPaint& hp)
         ::PostMessage(hWnd, CCC_WM_GDIHELP_FIT, (WPARAM)clientW, (LPARAM)clientH);
 }
 
+// CCC_PresentOwnedHelp: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 void CCC_PresentOwnedHelp(CWnd* help, CWnd* owner)
 {
     if (!help || !::IsWindow(help->GetSafeHwnd()))
@@ -17248,6 +18296,9 @@ void CCC_PresentOwnedHelp(CWnd* help, CWnd* owner)
     help->Invalidate(FALSE);
 }
 
+// CCC_MainLockGetReserveWidth: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 int CCC_MainLockGetReserveWidth(HWND hDlg)
 {
     CCC_MainLockEntry* e = CCC_FindMainLockEntry(hDlg);
@@ -17259,6 +18310,8 @@ int CCC_MainLockGetReserveWidth(HWND hDlg)
     return CCC_MainLockMeasureWidth(pDlg) + CCC_MAINLOCK_MARGIN;
 }
 
+// エントリ作成、保存フラグ接続、ボタンまたはオーバーレイを用意。
+// キャプション導入後は Layout が右端 chrome の左へ置く。
 void CCC_MainLockSetup(CWnd* pDlg, int* pSavedLockFlag, BOOL bOverlayPaint)
 {
     if (!pDlg || !::IsWindow(pDlg->GetSafeHwnd()) || !pSavedLockFlag)
@@ -17280,6 +18333,10 @@ void CCC_MainLockSetup(CWnd* pDlg, int* pSavedLockFlag, BOOL bOverlayPaint)
         CCC_MainLockBringToFront(pDlg->GetSafeHwnd());
 }
 
+// システム WS_CAPTION を描画から外し、クライアント先頭帯に min/max/close/pin/help。
+// FRAMECHANGED は ExtendFrame より先。後だとマージンが消えて黒帯＋縦幅ジャンプ。
+// NC 吸収分だけ子を下げる。capH で上乗せすると内容が余分に下がって見える。
+// 二重 install 禁止（installed なら return）。
 static void CCC_CaptionInstallCore(CWnd* pDlg, CToolTipCtrl* pTip)
 {
     if (!pDlg || !::IsWindow(pDlg->GetSafeHwnd()))
@@ -17402,6 +18459,9 @@ static void CCC_CaptionInstallCore(CWnd* pDlg, CToolTipCtrl* pTip)
     pDlg->Invalidate(FALSE);
 }
 
+// CCC_MainLockUnregister: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 void CCC_MainLockUnregister(HWND hWnd)
 {
     for (int i = 0; i < g_mainLockCount; ++i) {
@@ -17422,6 +18482,9 @@ void CCC_MainLockUnregister(HWND hWnd)
     }
 }
 
+// CCC_MainLockOnMainMoving: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 void CCC_MainLockOnMainMoving(LPRECT pMainRect)
 {
     if (!pMainRect || g_mainLockInternalMove)
@@ -17459,15 +18522,24 @@ struct CCC_CascadeSnap {
 };
 static CCC_CascadeSnap g_cascadeSnap = {};
 
+// CCC_CascadeVertOverlap: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 static BOOL CCC_CascadeVertOverlap(const RECT& a, const RECT& b)
 {
     return a.top < b.bottom && b.top < a.bottom;
 }
+// CCC_CascadeHorzOverlap: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 static BOOL CCC_CascadeHorzOverlap(const RECT& a, const RECT& b)
 {
     return a.left < b.right && b.left < a.right;
 }
 // a の右辺に b が密着／めり込み／すぐ右
+// CCC_CascadeTouchRight: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 static BOOL CCC_CascadeTouchRight(const RECT& a, const RECT& b)
 {
     if (!CCC_CascadeVertOverlap(a, b)) return FALSE;
@@ -17477,6 +18549,9 @@ static BOOL CCC_CascadeTouchRight(const RECT& a, const RECT& b)
     return FALSE;
 }
 // a の左辺に b が密着／めり込み／すぐ左
+// CCC_CascadeTouchLeft: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 static BOOL CCC_CascadeTouchLeft(const RECT& a, const RECT& b)
 {
     if (!CCC_CascadeVertOverlap(a, b)) return FALSE;
@@ -17486,6 +18561,9 @@ static BOOL CCC_CascadeTouchLeft(const RECT& a, const RECT& b)
     return FALSE;
 }
 // a の下辺に b が密着／めり込み／すぐ下
+// CCC_CascadeTouchBottom: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 static BOOL CCC_CascadeTouchBottom(const RECT& a, const RECT& b)
 {
     if (!CCC_CascadeHorzOverlap(a, b)) return FALSE;
@@ -17495,6 +18573,9 @@ static BOOL CCC_CascadeTouchBottom(const RECT& a, const RECT& b)
     return FALSE;
 }
 // a の上辺に b が密着／めり込み／すぐ上
+// CCC_CascadeTouchTop: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 static BOOL CCC_CascadeTouchTop(const RECT& a, const RECT& b)
 {
     if (!CCC_CascadeHorzOverlap(a, b)) return FALSE;
@@ -17504,6 +18585,9 @@ static BOOL CCC_CascadeTouchTop(const RECT& a, const RECT& b)
     return FALSE;
 }
 
+// CCC_CascadeCollect: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 static void CCC_CascadeCollect(HWND hMain, CCC_CascadeSnap& snap, const RECT* pMainRcOpt)
 {
     ZeroMemory(&snap, sizeof(snap));
@@ -17529,12 +18613,18 @@ static void CCC_CascadeCollect(HWND hMain, CCC_CascadeSnap& snap, const RECT* pM
     }
 }
 
+// CCC_NeighborCascadeBegin: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 void CCC_NeighborCascadeBegin(HWND hMain)
 {
     CCC_CascadeCollect(hMain, g_cascadeSnap, NULL);
     g_cascadeSnap.active = TRUE;
 }
 
+// CCC_NeighborCascadeEnd: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 void CCC_NeighborCascadeEnd()
 {
     g_cascadeSnap.active = FALSE;
@@ -17542,6 +18632,9 @@ void CCC_NeighborCascadeEnd()
     g_cascadeSnap.n = 0;
 }
 
+// CCC_CascadeGrowReach: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 static void CCC_CascadeGrowReach(
     BYTE* reach, int n, const RECT* pOldMain, const RECT* liveRc,
     BOOL (*touchMain)(const RECT&, const RECT&),
@@ -17582,11 +18675,26 @@ static void CCC_CascadeGrowReach(
     }
 }
 
+// CCC_CascadeGapRight: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 static int CCC_CascadeGapRight(const RECT& m, const RECT& w) { return w.left - m.right; }
+// CCC_CascadeGapLeft: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 static int CCC_CascadeGapLeft(const RECT& m, const RECT& w) { return m.left - w.right; }
+// CCC_CascadeGapBottom: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 static int CCC_CascadeGapBottom(const RECT& m, const RECT& w) { return w.top - m.bottom; }
+// CCC_CascadeGapTop: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 static int CCC_CascadeGapTop(const RECT& m, const RECT& w) { return m.top - w.bottom; }
 
+// CCC_NeighborCascadeOnMainResize: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 void CCC_NeighborCascadeOnMainResize(const RECT* pOldMain, const RECT* pNewMain)
 {
     if (!pNewMain)
@@ -17727,11 +18835,17 @@ void CCC_NeighborCascadeOnMainResize(const RECT* pOldMain, const RECT* pNewMain)
     g_mainLockInternalMove = FALSE;
 }
 
+// CCC_MainLockPreferQuickPresent: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 BOOL CCC_MainLockPreferQuickPresent()
 {
     return GetTickCount() < g_mainLockQuickPresentUntil;
 }
 
+// CCC_MainLockRefreshOffsetsFor: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 void CCC_MainLockRefreshOffsetsFor(CWnd* pMain, const RECT* pOldMain)
 {
     if (!pMain || !::IsWindow(pMain->GetSafeHwnd()))
@@ -17899,11 +19013,17 @@ void CCC_MainLockRefreshOffsetsFor(CWnd* pMain, const RECT* pOldMain)
     }
 }
 
+// CCC_MainLockRefreshOffsets: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 void CCC_MainLockRefreshOffsets()
 {
     CCC_MainLockRefreshOffsetsFor(CCC_GetActiveMainWindow(), NULL);
 }
 
+// CCC_MainLockOnChildMoving: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 void CCC_MainLockOnChildMoving(CWnd* pDlg, LPRECT pRect)
 {
     if (!pDlg || !pRect || g_mainLockInternalMove)
@@ -17978,6 +19098,8 @@ BEGIN_MESSAGE_MAP(CCustomBlurDialogBase, CCustomDialog)
 #endif
 END_MESSAGE_MAP()
 
+// ダイアログクラスをコピーし背景ブラシとアイコンを空にする。
+// コピーした空/不正アイコンがキャプションに出るのを防ぐ。
 static BOOL RegisterBlurDialogWndClass(LPCTSTR pszClass, LPCTSTR pszNewClass)
 {
     WNDCLASS wc = {};
@@ -17992,10 +19114,17 @@ static BOOL RegisterBlurDialogWndClass(LPCTSTR pszClass, LPCTSTR pszNewClass)
     return AfxRegisterClass(&wc) != FALSE;
 }
 
+// CCustomBlurDialogBase のコンストラクタ。描画フラグとブラシを初期化。
+// HWND はまだ無い。実初期化は OnInitDialog / PreCreateWindow。
 CCustomBlurDialogBase::CCustomBlurDialogBase() : m_bBlurApplied(FALSE) {}
+// CCustomBlurDialogBase のコンストラクタ。描画フラグとブラシを初期化。
+// HWND はまだ無い。実初期化は OnInitDialog / PreCreateWindow。
 CCustomBlurDialogBase::CCustomBlurDialogBase(UINT n, CWnd* p) : CCustomDialog(n, p), m_bBlurApplied(FALSE) {}
+// CCustomBlurDialogBase の破棄。fixer / キャプションは OnDestroy。ここは空。
 CCustomBlurDialogBase::~CCustomBlurDialogBase() {}
 
+// AcrylicCaption 常時のため null brush 専用クラス。#32770 のクラスブラシは黒帯になる。
+// save.aero に関係なく登録する。
 BOOL CCustomBlurDialogBase::PreCreateWindow(CREATESTRUCT& cs)
 {
     if (!CCustomDialog::PreCreateWindow(cs))
@@ -18009,6 +19138,8 @@ BOOL CCustomBlurDialogBase::PreCreateWindow(CREATESTRUCT& cs)
     return TRUE;
 }
 
+// 子を CCustom* へサブクラス。Blur 系はキャプション install を Post。
+// 子サブクラス。Blur はキャプションを Show 前に。
 BOOL CCustomBlurDialogBase::OnInitDialog()
 {
     BOOL b = CCustomDialog::OnInitDialog();
@@ -18030,6 +19161,8 @@ BOOL CCustomBlurDialogBase::OnInitDialog()
     return b;
 }
 
+// 遅延キャプション導入。OnInit 時点では NC がまだ不安定。
+// Show 前に一度だけ。
 LRESULT CCustomBlurDialogBase::OnInstallCustomCaption(WPARAM, LPARAM)
 {
     CCC_CaptionInstallCore(this, &m_capTip);
@@ -18039,6 +19172,8 @@ LRESULT CCustomBlurDialogBase::OnInstallCustomCaption(WPARAM, LPARAM)
     return 0;
 }
 
+// カスタム帯分の NC 吸収。FRAMECHANGED と対。
+// 帯高さ分をクライアントへ取り込む。
 void CCustomBlurDialogBase::OnNcCalcSize(BOOL bCalcValidRects, NCCALCSIZE_PARAMS* lpncsp)
 {
     if (CCC_GetCustomCaptionHeight(m_hWnd) > 0 && bCalcValidRects && lpncsp) {
@@ -18048,21 +19183,31 @@ void CCustomBlurDialogBase::OnNcCalcSize(BOOL bCalcValidRects, NCCALCSIZE_PARAMS
     CCustomDialog::OnNcCalcSize(bCalcValidRects, lpncsp);
 }
 
+// 設定変更など強制再適用。bForce=TRUE で FinishBlur をやり直す。
+// 二重 FRAMECHANGED は Core 側の m_bInApplyBlur で防ぐ。
 void CCustomBlurDialogBase::RefreshAeroMode()
 {
     ApplyDwmBlurCore(TRUE);
 }
 
+// 通常経路。bForce=FALSE なので既適用なら何もしない。
+// FRAMECHANGED 連打で帯が凍るのをここで止める。
 void CCustomBlurDialogBase::ApplyDwmBlur()
 {
     ApplyDwmBlurCore(FALSE);
 }
 
+// ぼかしの唯一の入口。m_bInApplyBlur で同一 HWND 再入を防ぐ。
+// 全窓共通 static にしない（RefreshAll が後続窓をスキップするため）。
+// 既に m_bBlurApplied かつ !bForce なら二重適用しない（FRAMECHANGED で凍る）。
+// OFF は ApplyAero(FALSE) を使わず本文だけ解除（ホスト α を落とすと黒帯）。
+// キャプション導入済みなら GlassAndFixers を一度載せる。
 void CCustomBlurDialogBase::ApplyDwmBlurCore(BOOL bForce)
 {
     if (!m_hWnd || !::IsWindow(m_hWnd)) return;
 #if CCUSTOM_AERO_SUPPORT
     // 同一 HWND への再入のみ防止（全窓共通 static だと RefreshAll が後続窓をスキップする）
+    // 再入・二重 FRAMECHANGED 禁止。既適用かつ !bForce はすぐ return。
     if (m_bInApplyBlur) return;
     m_bInApplyBlur = TRUE;
 
@@ -18107,6 +19252,8 @@ void CCustomBlurDialogBase::ApplyDwmBlurCore(BOOL bForce)
 #endif
 }
 
+// 表示前にキャプション化（システム帯のフラッシュと NC 吸収ジャンプを隠す）。
+// 本文 aero は ApplyDwmBlur 1 回。本文 off で RefreshDwmBlur するとガラスに戻る。
 void CCustomBlurDialogBase::OnShowWindow(BOOL bShow, UINT nStatus)
 {
     // 表示前にキャプション化（システム帯のフラッシュと NC 吸収ジャンプを隠す）
@@ -18134,6 +19281,8 @@ void CCustomBlurDialogBase::OnShowWindow(BOOL bShow, UINT nStatus)
     UNREFERENCED_PARAMETER(nStatus);
 }
 
+// Win11+aero: 隙間＋帯。キャプションのみ時は帯の【後】に本文を不透明化。
+// EnsureBackdrop(ExtendFrame) が本文 α をガラスに戻すため順序が重要。
 void CCustomBlurDialogBase::OnPaint()
 {
     CPaintDC dc(this);
@@ -18164,6 +19313,8 @@ void CCustomBlurDialogBase::OnPaint()
         CCC_MainLockPaintClient(dc, m_hWnd);
 }
 
+// キャプション／追従エントリ解除、fixer 破棄。
+// 基底 OnDestroy の前に登録を外す。
 void CCustomBlurDialogBase::OnDestroy()
 {
     CCC_CaptionUnregister(m_hWnd);
@@ -18174,6 +19325,8 @@ void CCustomBlurDialogBase::OnDestroy()
     CCustomDialog::OnDestroy();
 }
 
+// キャプションボタン再配置。最大化アイコンの切替。
+// chrome 再配置。
 void CCustomBlurDialogBase::OnSize(UINT nType, int cx, int cy)
 {
     CCustomDialog::OnSize(nType, cx, cy);
@@ -18192,6 +19345,8 @@ void CCustomBlurDialogBase::OnSize(UINT nType, int cx, int cy)
     }
 }
 
+// SHOW で未適用ならぼかしを載せる（初期 Show 経路の穴埋め）。
+// 初回 SHOW のぼかし穴埋め。
 void CCustomBlurDialogBase::OnWindowPosChanged(WINDOWPOS* lpwndpos)
 {
     CCustomDialog::OnWindowPosChanged(lpwndpos);
@@ -18201,6 +19356,8 @@ void CCustomBlurDialogBase::OnWindowPosChanged(WINDOWPOS* lpwndpos)
 #endif
 }
 
+// DWM 構成変化。ぼかしを強制再適用。
+// DWM 再構成。
 void CCustomBlurDialogBase::OnCompositionChanged()
 {
 #if CCUSTOM_AERO_SUPPORT
@@ -18208,6 +19365,8 @@ void CCustomBlurDialogBase::OnCompositionChanged()
 #endif
 }
 
+// 子が増えたあと fixer を張り直す。追従ボタンを前面へ。
+// 動的に増えた子用。
 LRESULT CCustomBlurDialogBase::OnReapplyOpaqueFixers(WPARAM, LPARAM)
 {
 #if CCUSTOM_AERO_SUPPORT
@@ -18219,17 +19378,25 @@ LRESULT CCustomBlurDialogBase::OnReapplyOpaqueFixers(WPARAM, LPARAM)
     return 0;
 }
 
+// 子ダイアログをメイン窓へ位置追従させる。pSavedLockFlag は ini 等の保存先。
+// bOverlayPaint=TRUE ならキャプション内オーバーレイ（実ボタンを出さない）。
+// クリックは OnMainLockClicked / オーバーレイ HitTest。
 void CCustomBlurDialogBase::EnableMainWindowLock(int* pSavedLockFlag, BOOL bOverlayPaint)
 {
     m_pMainLockSave = pSavedLockFlag;
+    // 保存フラグを結び、帯内オーバーレイか実ボタンかを決める。
     CCC_MainLockSetup(this, pSavedLockFlag, bOverlayPaint);
 }
 
+// 「メインに追従」ボタン／オーバーレイのトグル入口。
+// 保存フラグも反転。
 void CCustomBlurDialogBase::OnMainLockClicked()
 {
     CCC_MainLockOnClicked(m_hWnd);
 }
 
+// 帯の空きは HTCAPTION ドラッグ。最大化中は先に復元。
+// 帯ドラッグは HTCAPTION。
 void CCustomBlurDialogBase::OnLButtonDown(UINT nFlags, CPoint point)
 {
     if (m_pMainLockSave && CCC_MainLockOverlayHitTest(m_hWnd, point)) {
@@ -18251,6 +19418,8 @@ void CCustomBlurDialogBase::OnLButtonDown(UINT nFlags, CPoint point)
     CCustomDialog::OnLButtonDown(nFlags, point);
 }
 
+// 帯ダブルクリックで最大化トグル（hasMax 時）。
+// 帯で最大化トグル。
 void CCustomBlurDialogBase::OnLButtonDblClk(UINT nFlags, CPoint point)
 {
     const int capH = CCC_GetCustomCaptionHeight(m_hWnd);
@@ -18266,6 +19435,8 @@ void CCustomBlurDialogBase::OnLButtonDblClk(UINT nFlags, CPoint point)
     CCustomDialog::OnLButtonDblClk(nFlags, point);
 }
 
+// コンテキストメニュー。キャプション帯ならシステムメニューへ。
+// 空き帯以外は既定の右クリック。
 void CCustomBlurDialogBase::OnRButtonUp(UINT nFlags, CPoint point)
 {
     const int capH = CCC_GetCustomCaptionHeight(m_hWnd);
@@ -18276,42 +19447,58 @@ void CCustomBlurDialogBase::OnRButtonUp(UINT nFlags, CPoint point)
     CWnd::OnRButtonUp(nFlags, point);
 }
 
+// カスタム×。システムメニューと同じ SC_CLOSE。
+// BN_CLICKED はメッセージマップ IDC_CAP_CLOSE。
 void CCustomBlurDialogBase::OnCapClose()
 {
     SendMessage(WM_SYSCOMMAND, SC_CLOSE, 0);
 }
 
+// カスタム最小化。SC_MINIMIZE（タスクバーへ）。
+// カスタム帯の Min ボタンから。
 void CCustomBlurDialogBase::OnCapMin()
 {
     SendMessage(WM_SYSCOMMAND, SC_MINIMIZE, 0);
 }
 
+// カスタム最大化／復元。手動ズームフラグも見る。
+// ポップアップでも THICKFRAME ならボタンを出す。
 void CCustomBlurDialogBase::OnCapMax()
 {
     CCC_CaptionToggleMaximize(this);
 }
 
+// 歯車。設定ダイアログを開く。
+// レンダラ系窓ではボタン自体を出さない。
 void CCustomBlurDialogBase::OnCapSettings()
 {
     CCC_CaptionOpenSettings(this);
 }
 
+// ピン。TOPMOST トグル。
+// アイコンは PIN / PINOFF を入れ替える。
 void CCustomBlurDialogBase::OnCapPin()
 {
     CCC_CaptionTogglePin(this);
 }
 
+// オフラインヘルプ（CHM）。F1 と同じ。
+// CHM。F1 と同じ。
 void CCustomBlurDialogBase::OnCapOfflineHelp()
 {
     OfflineHelpOpen(m_hWnd);
 }
 
+// キャプションボタンのツールチップは各 AddTool 側。ここでは握るだけ。
+// AddTool 側の文字列を使う。
 BOOL CCustomBlurDialogBase::OnTtnNeedText(UINT, NMHDR*, LRESULT* pResult)
 {
     *pResult = 0;
     return FALSE;
 }
 
+// ツールチップ Relay。ダイアログ側は F1 ヘルプ。隠し演出入力は短く見るだけ。
+// キャプションボタンのチップは m_capTip.RelayEvent。
 BOOL CCustomBlurDialogBase::PreTranslateMessage(MSG* pMsg)
 {
     if (CCC_InwomanHotkey(pMsg, this))
@@ -18326,6 +19513,8 @@ BOOL CCustomBlurDialogBase::PreTranslateMessage(MSG* pMsg)
     return CCustomDialog::PreTranslateMessage(pMsg);
 }
 
+// 移動中。追従 ON ならオフセットを更新。カスケード密着も見る。
+// 追従 ON ならオフセット更新。
 void CCustomBlurDialogBase::OnMoving(UINT fwSide, LPRECT pRect)
 {
     CCustomDialog::OnMoving(fwSide, pRect);
@@ -18344,24 +19533,31 @@ BEGIN_MESSAGE_MAP(CCustomDialogEx, CDialogEx)
     ON_MESSAGE(WM_USER + 1000, OnSubclassControls)
 END_MESSAGE_MAP()
 
+// CCustomDialogEx のコンストラクタ。描画フラグとブラシを初期化。
+// HWND はまだ無い。実初期化は OnInitDialog / PreCreateWindow。
 CCustomDialogEx::CCustomDialogEx() : m_bAeroEnabled(FALSE)
 {
     m_brDialog.CreateSolidBrush(COLOR_DIALOG_BG);
     m_brNull.CreateStockObject(NULL_BRUSH);
 }
 
+// CCustomDialogEx のコンストラクタ。描画フラグとブラシを初期化。
+// HWND はまだ無い。実初期化は OnInitDialog / PreCreateWindow。
 CCustomDialogEx::CCustomDialogEx(UINT n, CWnd* p) : CDialogEx(n, p), m_bAeroEnabled(FALSE)
 {
     m_brDialog.CreateSolidBrush(COLOR_DIALOG_BG);
     m_brNull.CreateStockObject(NULL_BRUSH);
 }
 
+// CCustomDialogEx の破棄。ダイアログ／NULL ブラシのみ。fixer は OnDestroy。
 CCustomDialogEx::~CCustomDialogEx()
 {
     if (m_brDialog.GetSafeHandle()) m_brDialog.DeleteObject();
     if (m_brNull.GetSafeHandle()) m_brNull.DeleteObject();
 }
 
+// 本文ぼかしフラグ。HWND があれば ApplyAero と子へ伝播。
+// 子へ PROPAGATE。
 void CCustomDialogEx::EnableAero(BOOL b)
 {
     m_bAeroEnabled = b;
@@ -18376,6 +19572,8 @@ void CCustomDialogEx::EnableAero(BOOL b)
 #endif
 }
 
+// 子を CCustom* へサブクラス。Blur 系はキャプション install を Post。
+// 子サブクラス。Blur はキャプションを Show 前に。
 BOOL CCustomDialogEx::OnInitDialog()
 {
     BOOL b = CDialogEx::OnInitDialog();
@@ -18383,28 +19581,38 @@ BOOL CCustomDialogEx::OnInitDialog()
     return b;
 }
 
+// 遅延サブクラス。初期化順で HWND が後から付く子用。
+// 遅延 HWND 用。
 LRESULT CCustomDialogEx::OnSubclassControls(WPARAM, LPARAM)
 {
     SubclassChildControls();
     return 0;
 }
 
+// 標準コントロールを CCustom* に差し替え（Edit/Button/List 等）。
+// 標準子を CCustom* へ。
 void CCustomDialogEx::SubclassChildControls()
 {
     DoSubclassChildControls(this);
 }
 
+// 未サブクラス子の背景。アクリル時は null brush 寄り。
+// サブクラス済み CCustom* は CtlColor 反射側。
 HBRUSH CCustomDialogEx::OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nC)
 {
     HBRUSH h = DlgOnCtlColor(pDC, pWnd, nC, m_brDialog, m_bAeroEnabled);
     return h ? h : CDialogEx::OnCtlColor(pDC, pWnd, nC);
 }
 
+// 消去握りつぶし。アクリル上で ERASE だけだと完全透過のまま残る。
+// TRUE で既定塗りを止める。
 BOOL CCustomDialogEx::OnEraseBkgnd(CDC* pDC)
 {
     return DlgOnEraseBkgnd(pDC, m_brDialog, m_bAeroEnabled, m_hWnd);
 }
 
+// WM_PAINT。透過はクロマ、ホストガラスは不透明パス、それ以外は素描画。
+// CPaintDC。経路分岐は aero / ホストガラス / 通常。
 void CCustomDialogEx::OnPaint()
 {
     if (m_bAeroEnabled)
@@ -18415,6 +19623,9 @@ void CCustomDialogEx::OnPaint()
         CDialogEx::OnPaint();
 }
 
+// CCC_CaptionTrackContextMenu: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 static void CCC_CaptionTrackContextMenu(CWnd* pDlg, CPoint ptClient, int* pMainLockSave)
 {
     if (!pDlg || !::IsWindow(pDlg->GetSafeHwnd()))
@@ -18564,6 +19775,9 @@ static void CCC_CaptionTrackContextMenu(CWnd* pDlg, CPoint ptClient, int* pMainL
         pDlg->SendMessage(WM_SYSCOMMAND, cmd, 0);
 }
 
+// CCC_CaptionOpenSettings: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 static void CCC_CaptionOpenSettings(CWnd* pDlg)
 {
     CWnd* pMain = AfxGetMainWnd();
@@ -18575,6 +19789,9 @@ static void CCC_CaptionOpenSettings(CWnd* pDlg)
         pMain->SendMessage(WM_COMMAND, MAKEWPARAM(IDC_BUTTON21, BN_CLICKED), 0);
 }
 
+// CCC_CaptionToggleMaximize: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 static void CCC_CaptionToggleMaximize(CWnd* pDlg)
 {
     if (!pDlg || !::IsWindow(pDlg->GetSafeHwnd()))
@@ -18632,6 +19849,9 @@ static void CCC_CaptionToggleMaximize(CWnd* pDlg)
     }
 }
 
+// CCC_CaptionTogglePin: カスタム UI / アクリル補助。
+// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
+// 詳細は呼び出し元のコメントを優先。
 static void CCC_CaptionTogglePin(CWnd* pDlg)
 {
     if (!pDlg) return;
@@ -18676,10 +19896,17 @@ BEGIN_MESSAGE_MAP(CCustomBlurDialogExBase, CCustomDialogEx)
 #endif
 END_MESSAGE_MAP()
 
+// CCustomBlurDialogExBase のコンストラクタ。描画フラグとブラシを初期化。
+// HWND はまだ無い。実初期化は OnInitDialog / PreCreateWindow。
 CCustomBlurDialogExBase::CCustomBlurDialogExBase() : m_bBlurApplied(FALSE) {}
+// CCustomBlurDialogExBase のコンストラクタ。描画フラグとブラシを初期化。
+// HWND はまだ無い。実初期化は OnInitDialog / PreCreateWindow。
 CCustomBlurDialogExBase::CCustomBlurDialogExBase(UINT n, CWnd* p) : CCustomDialogEx(n, p), m_bBlurApplied(FALSE) {}
+// CCustomBlurDialogExBase の破棄。fixer / キャプションは OnDestroy。ここは空。
 CCustomBlurDialogExBase::~CCustomBlurDialogExBase() {}
 
+// AcrylicCaption 常時のため null brush 専用クラス。#32770 のクラスブラシは黒帯になる。
+// save.aero に関係なく CCustomBlurDlgEx を登録する。
 BOOL CCustomBlurDialogExBase::PreCreateWindow(CREATESTRUCT& cs)
 {
     if (!CCustomDialogEx::PreCreateWindow(cs))
@@ -18692,6 +19919,8 @@ BOOL CCustomBlurDialogExBase::PreCreateWindow(CREATESTRUCT& cs)
     return TRUE;
 }
 
+// 子を CCustom* へサブクラス。Blur 系はキャプション install を Post。
+// 子サブクラス。Blur はキャプションを Show 前に。
 BOOL CCustomBlurDialogExBase::OnInitDialog()
 {
     BOOL b = CCustomDialogEx::OnInitDialog();
@@ -18711,6 +19940,8 @@ BOOL CCustomBlurDialogExBase::OnInitDialog()
     return b;
 }
 
+// 遅延キャプション導入。OnInit 時点では NC がまだ不安定。
+// Show 前に一度だけ。
 LRESULT CCustomBlurDialogExBase::OnInstallCustomCaption(WPARAM, LPARAM)
 {
     CCC_CaptionInstallCore(this, &m_capTip);
@@ -18720,6 +19951,8 @@ LRESULT CCustomBlurDialogExBase::OnInstallCustomCaption(WPARAM, LPARAM)
     return 0;
 }
 
+// カスタム帯分の NC 吸収。FRAMECHANGED と対。
+// 帯高さ分をクライアントへ取り込む。
 void CCustomBlurDialogExBase::OnNcCalcSize(BOOL bCalcValidRects, NCCALCSIZE_PARAMS* lpncsp)
 {
     if (CCC_GetCustomCaptionHeight(m_hWnd) > 0 && bCalcValidRects && lpncsp) {
@@ -18729,20 +19962,28 @@ void CCustomBlurDialogExBase::OnNcCalcSize(BOOL bCalcValidRects, NCCALCSIZE_PARA
     CCustomDialogEx::OnNcCalcSize(bCalcValidRects, lpncsp);
 }
 
+// 設定変更からの強制ぼかし再適用。
+// bForce。
 void CCustomBlurDialogExBase::RefreshAeroMode()
 {
     ApplyDwmBlurCore(TRUE);
 }
 
+// 二重適用しない通常経路（bForce=FALSE）。
+// 既適用なら何もしない。
 void CCustomBlurDialogExBase::ApplyDwmBlur()
 {
     ApplyDwmBlurCore(FALSE);
 }
 
+// DialogEx 版。再入ガードと !bForce の二重適用禁止は Base と同じ。
+// FRAMECHANGED を重ねると NC 吸収がループし帯が凍って見える。
+// ぼかし OFF もホスト backdrop は残し、fixer を張り直す。
 void CCustomBlurDialogExBase::ApplyDwmBlurCore(BOOL bForce)
 {
     if (!m_hWnd || !::IsWindow(m_hWnd)) return;
 #if CCUSTOM_AERO_SUPPORT
+    // 再入・二重 FRAMECHANGED 禁止。既適用かつ !bForce はすぐ return。
     if (m_bInApplyBlur) return;
     m_bInApplyBlur = TRUE;
 
@@ -18784,6 +20025,8 @@ void CCustomBlurDialogExBase::ApplyDwmBlurCore(BOOL bForce)
 #endif
 }
 
+// 表示前にキャプション化（システム帯のフラッシュと NC 吸収ジャンプを隠す）。
+// 本文 aero は ApplyDwmBlur 1 回。本文 off で RefreshDwmBlur するとガラスに戻る。
 void CCustomBlurDialogExBase::OnShowWindow(BOOL bShow, UINT nStatus)
 {
     if (bShow) {
@@ -18810,6 +20053,8 @@ void CCustomBlurDialogExBase::OnShowWindow(BOOL bShow, UINT nStatus)
     UNREFERENCED_PARAMETER(nStatus);
 }
 
+// WM_PAINT。透過はクロマ、ホストガラスは不透明パス、それ以外は素描画。
+// CPaintDC。経路分岐は aero / ホストガラス / 通常。
 void CCustomBlurDialogExBase::OnPaint()
 {
     CPaintDC dc(this);
@@ -18839,6 +20084,8 @@ void CCustomBlurDialogExBase::OnPaint()
         CCC_MainLockPaintClient(dc, m_hWnd);
 }
 
+// キャプション／追従エントリ解除、fixer 破棄。
+// 基底 OnDestroy の前に登録を外す。
 void CCustomBlurDialogExBase::OnDestroy()
 {
     CCC_CaptionUnregister(m_hWnd);
@@ -18849,6 +20096,8 @@ void CCustomBlurDialogExBase::OnDestroy()
     CCustomDialogEx::OnDestroy();
 }
 
+// キャプションボタン再配置。最大化アイコンの切替。
+// chrome 再配置。
 void CCustomBlurDialogExBase::OnSize(UINT nType, int cx, int cy)
 {
     CCustomDialogEx::OnSize(nType, cx, cy);
@@ -18867,6 +20116,8 @@ void CCustomBlurDialogExBase::OnSize(UINT nType, int cx, int cy)
     }
 }
 
+// SHOW で未適用ならぼかしを載せる（初期 Show 経路の穴埋め）。
+// 初回 SHOW のぼかし穴埋め。
 void CCustomBlurDialogExBase::OnWindowPosChanged(WINDOWPOS* lpwndpos)
 {
     CCustomDialogEx::OnWindowPosChanged(lpwndpos);
@@ -18876,6 +20127,8 @@ void CCustomBlurDialogExBase::OnWindowPosChanged(WINDOWPOS* lpwndpos)
 #endif
 }
 
+// DWM 構成変化。ぼかしを強制再適用。
+// DWM 再構成。
 void CCustomBlurDialogExBase::OnCompositionChanged()
 {
 #if CCUSTOM_AERO_SUPPORT
@@ -18883,6 +20136,8 @@ void CCustomBlurDialogExBase::OnCompositionChanged()
 #endif
 }
 
+// 子が増えたあと fixer を張り直す。追従ボタンを前面へ。
+// 動的に増えた子用。
 LRESULT CCustomBlurDialogExBase::OnReapplyOpaqueFixers(WPARAM, LPARAM)
 {
 #if CCUSTOM_AERO_SUPPORT
@@ -18895,17 +20150,24 @@ LRESULT CCustomBlurDialogExBase::OnReapplyOpaqueFixers(WPARAM, LPARAM)
     return 0;
 }
 
+// DialogEx 版。保存フラグとオーバーレイ描画の有無を CCC_MainLockSetup へ渡す。
+// キャプション帯の「メインに追従」と同じ状態機械。
 void CCustomBlurDialogExBase::EnableMainWindowLock(int* pSavedLockFlag, BOOL bOverlayPaint)
 {
     m_pMainLockSave = pSavedLockFlag;
+    // 保存フラグを結び、帯内オーバーレイか実ボタンかを決める。
     CCC_MainLockSetup(this, pSavedLockFlag, bOverlayPaint);
 }
 
+// 「メインに追従」ボタン／オーバーレイのトグル入口。
+// 保存フラグも反転。
 void CCustomBlurDialogExBase::OnMainLockClicked()
 {
     CCC_MainLockOnClicked(m_hWnd);
 }
 
+// 帯の空きは HTCAPTION ドラッグ。最大化中は先に復元。
+// 帯ドラッグは HTCAPTION。
 void CCustomBlurDialogExBase::OnLButtonDown(UINT nFlags, CPoint point)
 {
     if (m_pMainLockSave && CCC_MainLockOverlayHitTest(m_hWnd, point)) {
@@ -18926,6 +20188,8 @@ void CCustomBlurDialogExBase::OnLButtonDown(UINT nFlags, CPoint point)
     CCustomDialogEx::OnLButtonDown(nFlags, point);
 }
 
+// 帯ダブルクリックで最大化トグル（hasMax 時）。
+// 帯で最大化トグル。
 void CCustomBlurDialogExBase::OnLButtonDblClk(UINT nFlags, CPoint point)
 {
     const int capH = CCC_GetCustomCaptionHeight(m_hWnd);
@@ -18941,6 +20205,8 @@ void CCustomBlurDialogExBase::OnLButtonDblClk(UINT nFlags, CPoint point)
     CCustomDialogEx::OnLButtonDblClk(nFlags, point);
 }
 
+// コンテキストメニュー。キャプション帯ならシステムメニューへ。
+// 空き帯以外は既定の右クリック。
 void CCustomBlurDialogExBase::OnRButtonUp(UINT nFlags, CPoint point)
 {
     const int capH = CCC_GetCustomCaptionHeight(m_hWnd);
@@ -18951,42 +20217,58 @@ void CCustomBlurDialogExBase::OnRButtonUp(UINT nFlags, CPoint point)
     CWnd::OnRButtonUp(nFlags, point);
 }
 
+// カスタム×。システムメニューと同じ SC_CLOSE。
+// BN_CLICKED はメッセージマップ IDC_CAP_CLOSE。
 void CCustomBlurDialogExBase::OnCapClose()
 {
     SendMessage(WM_SYSCOMMAND, SC_CLOSE, 0);
 }
 
+// カスタム最小化。SC_MINIMIZE（タスクバーへ）。
+// カスタム帯の Min ボタンから。
 void CCustomBlurDialogExBase::OnCapMin()
 {
     SendMessage(WM_SYSCOMMAND, SC_MINIMIZE, 0);
 }
 
+// カスタム最大化／復元。手動ズームフラグも見る。
+// ポップアップでも THICKFRAME ならボタンを出す。
 void CCustomBlurDialogExBase::OnCapMax()
 {
     CCC_CaptionToggleMaximize(this);
 }
 
+// 歯車。設定ダイアログを開く。
+// レンダラ系窓ではボタン自体を出さない。
 void CCustomBlurDialogExBase::OnCapSettings()
 {
     CCC_CaptionOpenSettings(this);
 }
 
+// ピン。TOPMOST トグル。
+// アイコンは PIN / PINOFF を入れ替える。
 void CCustomBlurDialogExBase::OnCapPin()
 {
     CCC_CaptionTogglePin(this);
 }
 
+// オフラインヘルプ（CHM）。F1 と同じ。
+// CHM。F1 と同じ。
 void CCustomBlurDialogExBase::OnCapOfflineHelp()
 {
     OfflineHelpOpen(m_hWnd);
 }
 
+// キャプションボタンのツールチップは各 AddTool 側。ここでは握るだけ。
+// AddTool 側の文字列を使う。
 BOOL CCustomBlurDialogExBase::OnTtnNeedText(UINT, NMHDR*, LRESULT* pResult)
 {
     *pResult = 0;
     return FALSE;
 }
 
+// ツールチップ Relay。ダイアログ側は F1 ヘルプ。隠し演出入力は短く見るだけ。
+// キャプションボタンのチップは m_capTip.RelayEvent。
 BOOL CCustomBlurDialogExBase::PreTranslateMessage(MSG* pMsg)
 {
     if (CCC_InwomanHotkey(pMsg, this))
@@ -19001,6 +20283,8 @@ BOOL CCustomBlurDialogExBase::PreTranslateMessage(MSG* pMsg)
     return CCustomDialogEx::PreTranslateMessage(pMsg);
 }
 
+// 移動中。追従 ON ならオフセットを更新。カスケード密着も見る。
+// 追従 ON ならオフセット更新。
 void CCustomBlurDialogExBase::OnMoving(UINT fwSide, LPRECT pRect)
 {
     CCustomDialogEx::OnMoving(fwSide, pRect);

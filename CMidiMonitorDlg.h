@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 // CMidiMonitorDlg : MIDI 32パート・モニタ（XG/GS 風）
 // SMF を再生位置に同期して CC/ノート/SysEx を表示。音色名は SASAMI_GS/XG/EX.DAT。
 #include "afxdialogex.h"
@@ -31,8 +31,8 @@ public:
 		int sysexOff;          // m_sx へのオフセット。SysEx でなければ -1
 	};
 
-	void PumpSyncNow();
-	void IdlePulse();
+	void PumpSyncNow(); // timerp から。同期は毎ティック、UpdateWindow は Ms2DrawDue 側
+	void IdlePulse();   // OnIdle / タイマ2。CPU 余裕があるときだけ PumpIdle
 	void ResetPlaybackState();
 	void DetachForDestroy();
 	void PaletteApplySoft3D();
@@ -96,7 +96,7 @@ private:
 		int rpnLsb;
 		int dataMsb;
 		BYTE noteOn[NOTE_MAX];    // ベロシティ。0=オフ
-		BYTE noteFlash[NOTE_MAX]; // 鍵盤の点滅残り
+		BYTE noteFlash[NOTE_MAX]; // Note On で 48。TickVisuals が ms 減算。短い音でも鍵盤が点く
 		int lastNote;
 		int lastVel;
 		int isDrum;
@@ -177,8 +177,8 @@ private:
 	void RefreshPartName(Part& p);
 	void LookupToneName(int isXg, int mapId, int bankMsb, int bankLsb, int pc, int isDrum, wchar_t* out, int outN);
 	void PersistPos();
-	void PumpIdle();
-	void ExtrapolateHeard(__int64& pbHeard);
+	void PumpIdle(); // 同期＋ライブタップ＋TickVisuals＋InvalidateDirty。描画はしない
+	void ExtrapolateHeard(__int64& pbHeard); // playy==0 は補間しない。上限は sr/40（約 25ms）
 	void SyncSoft3DFromSave();
 	bool IsView3D() const { return m_viewMode == 1; }
 	int Scale(int v96, UINT dpi) const { return MulDiv(v96, (int)dpi, 96); }
@@ -262,7 +262,7 @@ private:
 	int m_noteCount;
 	int m_masterVol;
 	float m_notesPeak;
-	int m_notesPeakHold;
+	int m_notesPeakHold; // ピーク据え置き残り。90 ティック≒1.4s（16ms 基準）。落ちは 0.07/tick
 	int m_layW;
 	int m_dragKind;
 	int m_dragPart;
@@ -288,12 +288,12 @@ private:
 	int m_layFootH;
 	int m_layExtra;
 	int m_persistAge;
-	int m_visAcc;
+	int m_visAcc;        // 発光・lev 減衰の余り ms。16ms 単位で最大 4 ステップ
 	DWORD m_visLastMs;
-	__int64 m_pbAnchor;
+	__int64 m_pbAnchor;  // ExtrapolateHeard: 前回の pbHeard。同じ値なら QPC で補間
 	LONGLONG m_pbQpc;
 	LONGLONG m_pbFreq;
-	LONGLONG m_idleLastQpc;
+	LONGLONG m_idleLastQpc; // IdlePulse の最短間隔（前面 4ms / 裏 16ms）
 	int m_drumGlow;
 	int m_dispBpm;
 	DWORD m_dirtyRows;

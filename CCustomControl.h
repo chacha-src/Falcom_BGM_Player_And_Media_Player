@@ -33,52 +33,67 @@
 #define CCUSTOM_AERO_SUPPORT 0
 #endif
 
-#define CCC_MSG_INSTALL_CAPTION       (WM_APP + 314)
+// CCustom* 一覧（実装は CCustomControl.cpp / CCustomPopupMenu.cpp）
+//   子控件: Edit / Static / ListBox / ComboBox / ListCtrl / TreeCtrl / TabCtrl
+//           StandardButton / Slider / RangeSlider / CheckBox / LevelMeter
+//           Progress / SysPerf / GroupBox
+//   ダイアログ: CCustomDialog(Ex) → CCustomBlurDialog(Ex)Base
+//   ポップアップ: CCustomPopupMenu（不透明。ガラスは載せない）
+//   ガラス子の α=255 化: CCustomOpaqueFixer（cpp 内クラス。ヘッダは前方宣言のみ）
+
+#define CCC_MSG_INSTALL_CAPTION       (WM_APP + 314) // キャプション帯を後付け（Show 前に Post）
 
 #if CCUSTOM_AERO_SUPPORT
-#define CCC_MSG_REAPPLY_OPAQUE_FIXERS (WM_APP + 311)
-#define CCC_WM_POST_OPAQUE_PAINT      (WM_APP + 312)
-#define CCC_MSG_REFRESH_CHILDREN      (WM_APP + 313)
+#define CCC_MSG_REAPPLY_OPAQUE_FIXERS (WM_APP + 311) // 子 HWND 増減後に fixer を張り直し
+#define CCC_WM_POST_OPAQUE_PAINT      (WM_APP + 312) // 1 フレーム遅延の不透明再描画（再入回避）
+#define CCC_MSG_REFRESH_CHILDREN      (WM_APP + 313) // 子の Invalidate 一括
 // 透過合成のクロマキー（黒文字 RGB(0,0,0) と区別するため 1,1,1 を使用）
 #define CCC_AERO_CHROMA_KEY RGB(1, 1, 1)
 
 struct CCC_ChromaBlitCache {
-    HBITMAP hDib = NULL;
+    HBITMAP hDib = NULL;      // 32bpp DIB。α 付き
     HDC     hdcDib = NULL;
     HGDIOBJ hOldBmp = NULL;
-    void*   pBits = nullptr;
+    void*   pBits = nullptr;  // トップダウン。ピッチは 4*dibW
     int     dibW = 0;
     int     dibH = 0;
-    void Release();
-    BOOL Ensure(HDC hdcRef, int w, int h);
-    void ScrollRows(int y, int height, int scrollPx);
+    void Release(); // DIB/DC 解放。Ensure の作り直し前にも呼ぶ
+    BOOL Ensure(HDC hdcRef, int w, int h); // 同じサイズなら再利用
+    void ScrollRows(int y, int height, int scrollPx); // 縦スクロール差分
     void ScrollCols(int x, int y, int width, int height, int scrollPx);
     BOOL UpdateRect(HDC hdcSrc, int srcX, int srcY, int dx, int dy, int rw, int rh, COLORREF clrKey);
     // クロマ無し: BitBlt + α=255。キャプションガラス下の本文提示用（差分更新向き）
     BOOL UpdateOpaqueRect(HDC hdcSrc, int srcX, int srcY, int dx, int dy, int rw, int rh);
-    BOOL FillOpaqueRect(int x, int y, int rw, int rh, COLORREF color, COLORREF chromaKey);
-    BOOL BlitRect(HDC hdcDest, int x, int y, int w, int h);
-    BOOL BlitFull(HDC hdcDest, int x, int y, int w, int h);
+    BOOL FillOpaqueRect(int x, int y, int rw, int rh, COLORREF color, COLORREF chromaKey); // color==key なら α=0
+    BOOL BlitRect(HDC hdcDest, int x, int y, int w, int h); // 差分矩形
+    BOOL BlitFull(HDC hdcDest, int x, int y, int w, int h); // 全面
     // BlitFull 前にオーバーレイ等を焼き込んだ矩形のアルファを不透明にする
     void MakeRectOpaque(int x, int y, int rw, int rh);
 };
 
+// 子 HWND を除外して親の隙間だけ塗る（WS_CLIPCHILDREN と対）。dc は親。
 void CCC_ClipNoChildren(CDC& dc, CWnd* pWnd);
+// 不透明伸縮。ガラス上の本文パネル縮小に使う。α は触らない。
 void CCC_BlitStretchOpaque(HDC hdcDest, int x, int y, int destW, int destH,
     HDC hdcSrc, int srcX, int srcY, int srcW, int srcH);
+// クロマ伸縮。clrKey 画素を α=0 にしてガラスを透かす。
 void CCC_BlitStretchChroma(HDC hdcDest, int x, int y, int destW, int destH,
     HDC hdcSrc, int srcX, int srcY, int srcW, int srcH, COLORREF clrKey);
+// 非フリッカー版伸縮（オフスクリーン DIB）。ラベルの毎フレーム伸縮向け。
 void CCC_BlitStretchNF(HDC hdcDest, int x, int y, int destW, int destH,
     HDC hdcSrc, int srcX, int srcY, int srcW, int srcH, COLORREF clrKey);
+// 1:1 クロマ。ソースの clrKey を α=0。黒文字はキーにしない（RGB(1,1,1) を使う）。
 void CCC_BlitChroma(HDC hdcDest, int x, int y, int w, int h, HDC hdcSrc, int srcX, int srcY, COLORREF clrKey);
 void CCC_BlitChromaNF(HDC hdcDest, int x, int y, int w, int h, HDC hdcSrc, int srcX, int srcY, COLORREF clrKey);
 BOOL CCC_BlitChromaCached(HDC hdcDest, int x, int y, int w, int h,
     HDC hdcSrc, int srcX, int srcY, COLORREF clrKey, CCC_ChromaBlitCache& cache);
+// DWM 合成向け。BufferedPaint 面へ直接。OpaqueFixer 内から呼ぶ。
 void CCC_BlitChromaDwm(HDC hdcDest, int x, int y, int w, int h, HDC hdcSrc, int srcX, int srcY, COLORREF clrKey);
+// アクリル時のみ親を Invalidate（ラベル SetText の既定）。NoParentInvalidate 時は呼ばない。
 void CCC_InvalidateParent(HWND hWnd, BOOL bAeroMode);
-void CCC_RefreshDwmBlur(HWND hWnd);
-void CCC_PaintAeroGaps(CDC& dc, CWnd* pWnd, const RECT* pPreserveRect = nullptr);
-void CCC_ClearRectChroma(HDC hdcDest, const RECT& rect, COLORREF clrKey);
+void CCC_RefreshDwmBlur(HWND hWnd); // 組成変更後にぼかしを張り直す（FRAMECHANGED は呼び出し側）
+void CCC_PaintAeroGaps(CDC& dc, CWnd* pWnd, const RECT* pPreserveRect = nullptr); // 子の隙間だけ薄グレー
+void CCC_ClearRectChroma(HDC hdcDest, const RECT& rect, COLORREF clrKey); // 矩形をキー色で潰して透かす
 // アクリルホスト上に定数αの矩形を塗る（本文パネルの透け用）
 void CCC_FillRectAlpha(HDC hdc, const RECT& rc, COLORREF clr, BYTE alpha);
 #endif
@@ -202,16 +217,16 @@ enum ACCENT_STATE
 
 struct ACCENT_POLICY
 {
-    int AccentState;
-    int AccentFlags;
-    int GradientColor;
-    int AnimationId;
+    int AccentState;    // ACCENT_ENABLE_BLURBEHIND 等。0=無効
+    int AccentFlags;    // 未使用寄り。0 でよい
+    int GradientColor;  // AABBGGRR。アクリル時のティント
+    int AnimationId;    // 未使用。0
 };
 
 struct WINCOMPATTRDATA
 {
-    WINDOWCOMPOSITIONATTRIB Attrib;
-    PVOID pvData;
+    WINDOWCOMPOSITIONATTRIB Attrib; // WCA_ACCENT_POLICY
+    PVOID pvData;                   // ACCENT_POLICY*
     SIZE_T cbData;
 };
 
@@ -265,6 +280,7 @@ static inline BOOL CCC_IsAeroEnabled()
     return savedata.aero == 1;
 }
 
+// Win10 非公開 SetWindowCompositionAttribute。失敗しても FALSE を返すだけ（必須ではない）。
 static inline BOOL CCC_SetWindowCompositionAccent(HWND hWnd, const ACCENT_POLICY& policy)
 {
     HMODULE hUser = ::GetModuleHandleW(L"user32.dll");
@@ -545,6 +561,9 @@ private:
 // ============================================================================
 // カスタムエディットコントロール
 // CCustomEdit
+//
+// ガラス親では OpaqueFixer。システムキャレットは不透明化で消えるため自前点滅。
+// IME 候補は SyncImePos。複数行は可視行だけ DrawMultilineVisibleText。
 // ============================================================================
 class CCustomEdit : public CEdit
 {
@@ -601,19 +620,19 @@ protected:
 
 private:
     CBrush m_brBackground; // 背景塗りつぶし用ブラシ
-    void DrawEditFrame(CDC& dc, const CRect& rWin);
+    void DrawEditFrame(CDC& dc, const CRect& rWin); // NC 相当の枠。フォーカス色
     CFont m_fontBold;      // 内部キャッシュフォント(太字固定ではない)
 
     BOOL m_bHasFocus;      // 現在フォーカスを持っているかどうか
     BOOL m_bSelDrag;       // マウスで範囲選択中
     BOOL m_bCaretOn;       // 自前キャレット点滅
-    int m_lastSel0;
-    int m_lastSel1;
-    void PaintOpaqueClient(CDC& dc);
-    void ScheduleOpaqueRepaint();
-    void RepaintIfSelChanged();
-    void DrawMultilineVisibleText(CDC& dc, const CRect& rc);
-    void StartCaretBlink();
+    int m_lastSel0;        // 選択始端。変化検知用スナップ
+    int m_lastSel1;        // 選択終端
+    void PaintOpaqueClient(CDC& dc);     // OpaqueFixer 面へ本文＋枠＋自前キャレット
+    void ScheduleOpaqueRepaint();        // CCC_WM_POST_OPAQUE_PAINT を Post（再入回避）
+    void RepaintIfSelChanged();          // 選択矩形だけ Invalidate
+    void DrawMultilineVisibleText(CDC& dc, const CRect& rc); // ES_MULTILINE 可視行のみ
+    void StartCaretBlink(); // 500ms。システムキャレットは隠したまま
     void StopCaretBlink();
 };
 
@@ -758,6 +777,9 @@ private:
 // ============================================================================
 // カスタムリストボックスコントロール
 // CCustomListBox
+//
+// オーナードロー。交互色＋選択ラベンダー。ガラス親では不透明バッファ。
+// ドロップダウン内（コンボ子）でも同じ経路。空領域は最終行より下を塗る。
 // ============================================================================
 class CCustomListBox : public CListBox
 {
@@ -782,8 +804,8 @@ protected:
     virtual void PostNcDestroy();
 
     // オーナードロー関連
-    virtual void DrawItem(LPDRAWITEMSTRUCT lp);
-    virtual void MeasureItem(LPMEASUREITEMSTRUCT lp);
+    virtual void DrawItem(LPDRAWITEMSTRUCT lp);       // 交互色＋選択ラベンダー
+    virtual void MeasureItem(LPMEASUREITEMSTRUCT lp); // 行高。DPI 連動
 
     // メッセージハンドラ
     afx_msg HBRUSH CtlColor(CDC*, UINT);
@@ -801,6 +823,10 @@ private:
 // ============================================================================
 // カスタムコンボボックスコントロール
 // CCustomComboBox
+//
+// オーナードロー。無効行は論理インデックスから除外（グループ見出し）。
+// GetCurSel は論理、GetCurSelPhysical は基底。閉じた欄は PaintClient。
+// ガラス親では不透明。ドロップリストは CtlColor + DrawItem。
 // ============================================================================
 class CCustomComboBox : public CComboBox
 {
@@ -872,12 +898,16 @@ protected:
 
     DECLARE_MESSAGE_MAP()
 
-    void PaintClient(CDC& dc);
+    void PaintClient(CDC& dc); // 閉じた欄。ドロップリスト本体は DrawItem
 };
 
 // ============================================================================
 // カスタムリストコントロール
 // CCustomListCtrl
+//
+// CListCtrlA 派生。NM_CUSTOMDRAW で交互色・選択・ホバー♡。
+// ガラス親では PaintOpaqueClient（最終行より下も交互色で α=255）。
+// WS_EX_ACCEPTFILES 時は OnDropFiles が親へ転送（リストが親を覆うため）。
 // ============================================================================
 class CCustomListCtrl : public CListCtrlA
 {
@@ -950,6 +980,10 @@ private:
 // ============================================================================
 // カスタムツリーコントロール (KotoriClient CCustomTreeCtrl 移植)
 // CCustomTreeCtrl — リスト同様にアクリル下では不透明バッファ描画
+//
+// 標準 TreeView の NM_CUSTOMDRAW を横取りし、行全体を交互色＋選択色で塗る。
+// ガラス親の上では OnEraseBkgnd=FALSE、PaintOpaqueClient で α=255 にする。
+// ドラッグ開始は親へ TVN_BEGINDRAG 相当を自前通知（フル行ヒットと整合させる）。
 // ============================================================================
 #ifndef TVS_EX_FULLROWSELECT
 #define TVS_EX_FULLROWSELECT 0x00000020
@@ -964,17 +998,17 @@ public:
 	void EnableAutoDelete(BOOL bEnable = TRUE) { m_bAutoDelete = bEnable; }
 	BOOL m_bAutoDelete;
 
-	COLORREF SetBkColor(COLORREF clr);
+	COLORREF SetBkColor(COLORREF clr); // 内部 m_clrBk。TreeView 本体色も合わせる
 	COLORREF GetBkColor() const { return m_clrBk; }
-	HTREEITEM HitTest(CPoint pt, UINT* pFlags = NULL);
+	HTREEITEM HitTest(CPoint pt, UINT* pFlags = NULL); // アイコン以外の行クリックも項目扱い
 
 	void SetAeroMode(BOOL b)
 	{
 		m_bAeroMode = b;
 		if (GetSafeHwnd()) Invalidate();
 	}
-	void PaintOpaqueIntoBuffer(HDC hdcBuf);
-	void ScheduleOpaqueRepaint();
+	void PaintOpaqueIntoBuffer(HDC hdcBuf); // OpaqueFixer の BufferedPaint 面へ直描き
+	void ScheduleOpaqueRepaint();           // スクロール直後のチラつき回避（遅延 WM）
 
 protected:
 	BOOL m_bAeroMode;
@@ -996,22 +1030,27 @@ protected:
 	DECLARE_MESSAGE_MAP()
 
 private:
-	int  GetItemLevel(HTREEITEM hItem) const;
-	void InvalidateItemRow(HTREEITEM hItem);
-	HTREEITEM HitTestRowAtPoint(CPoint pt, UINT* pFlags);
-	void NotifySelChangedByMouse(HTREEITEM hNew, HTREEITEM hOld);
-	void NotifyBeginDrag(HTREEITEM hItem, CPoint pt);
-	void PaintOpaqueClient(CDC& dc);
+	int  GetItemLevel(HTREEITEM hItem) const;      // ルート=0。インデント描画用
+	void InvalidateItemRow(HTREEITEM hItem);       // フル行矩形だけ Invalidate
+	HTREEITEM HitTestRowAtPoint(CPoint pt, UINT* pFlags); // アイコン外の行ヒット
+	void NotifySelChangedByMouse(HTREEITEM hNew, HTREEITEM hOld); // 親へ TVN_SELCHANGED
+	void NotifyBeginDrag(HTREEITEM hItem, CPoint pt);             // 親へ TVN_BEGINDRAG 相当
+	void PaintOpaqueClient(CDC& dc);               // α=255 でクライアント全面
 
-	HTREEITEM m_hHotItem;
-	int       m_nItemDrawIndex;
-	COLORREF  m_clrBk;
+	HTREEITEM m_hHotItem;    // ホバー行。ハート／ハイライト用。NULL=なし
+	int       m_nItemDrawIndex; // CustomDraw の交互色インデックス
+	COLORREF  m_clrBk;       // SetBkColor。TreeView 本体色と同期
 	CBrush    m_brBackground;
 };
 
 // ============================================================================
 // カスタムタブコントロール
-// CCustomTabCtrl — listing4 準拠オーナードロー（横置き既定 / 縦置き対応）+ アクリル不透明
+// CCustomTabCtrl
+//
+// 標準 Tab の中身を自前描画（等幅スロット、選択パネル、ホバー）。
+// TCS_VERTICAL / TCS_RIGHT も IsVertical / IsRightSide で分岐する。
+// 選択タブは Soft 立体の軽い揺れタイマー (kTabSoftTimerId)。
+// listing4 準拠オーナードロー。ガラス親では不透明バッファ。
 // ============================================================================
 class CCustomTabCtrl : public CTabCtrl
 {
@@ -1022,18 +1061,18 @@ public:
 	void EnableAutoDelete(BOOL bEnable = TRUE) { m_bAutoDelete = bEnable; }
 	BOOL m_bAutoDelete;
 
-	BOOL IsVertical() const;
-	BOOL IsRightSide() const;
-	void RebuildFonts();
-	void LayoutEqualTabs(int nSlots = 3);
+	BOOL IsVertical() const;   // TCS_VERTICAL
+	BOOL IsRightSide() const;  // TCS_RIGHT（縦タブの右側）
+	void RebuildFonts();       // DPI 変更後。選択タブは少し大きい
+	void LayoutEqualTabs(int nSlots = 3); // 等幅スロット。既定 3 は EQ 等
 
 	void SetAeroMode(BOOL b)
 	{
 		m_bAeroMode = b;
 		if (GetSafeHwnd()) Invalidate(FALSE);
 	}
-	void PaintOpaqueIntoBuffer(HDC hdcBuf);
-	void ScheduleOpaqueRepaint();
+	void PaintOpaqueIntoBuffer(HDC hdcBuf); // OpaqueFixer 面へ直描き
+	void ScheduleOpaqueRepaint();           // 遅延 WM（スクロール直後のチラつき回避）
 
 protected:
 	BOOL m_bAeroMode;
@@ -1053,17 +1092,17 @@ protected:
 	DECLARE_MESSAGE_MAP()
 
 private:
-	void PaintOpaqueClient(CDC& dc);
-	void DrawToDC(CDC* pDC, const CRect& rcClient, BOOL bAeroChroma);
+	void PaintOpaqueClient(CDC& dc); // α=255 クライアント全面
+	void DrawToDC(CDC* pDC, const CRect& rcClient, BOOL bAeroChroma); // タブ＋ページパネル
 	void DrawTabItem(CDC* pDC, int nItem, CRect rc, BOOL bSelected, BOOL bHot);
-	void DrawPagePanel(CDC* pDC, const CRect& rcClient);
-	void InvalidateTabItem(int nItem);
+	void DrawPagePanel(CDC* pDC, const CRect& rcClient); // 本文側の薄いパネル
+	void InvalidateTabItem(int nItem); // 1 タブ分だけ
 
 	CBrush m_brBackground;
 	CFont  m_fontTab;
-	CFont  m_fontTabSel;
-	int    m_nHotItem;
-	BOOL   m_bTracking;
+	CFont  m_fontTabSel;  // 選択タブ用（やや大きい）
+	int    m_nHotItem;    // ホバー。-1=なし
+	BOOL   m_bTracking;   // TrackMouseEvent 済み
 };
 
 // ============================================================================
@@ -1170,7 +1209,7 @@ public:
     void EnableAutoDelete(BOOL b = TRUE) { m_bAutoDelete = b; }
     BOOL m_bAutoDelete;
 
-    // 描画モードの設定・取得（0, 1, 2 などでデザインを切り替えます）
+    // 描画モードの設定・取得（0=楔＋音符、1=紫ダイヤ、2=緑ダイヤ）
     void SetMode(int m);
     int GetMode() const { return m_nMode; }
 
@@ -1200,11 +1239,11 @@ protected:
 
     DECLARE_MESSAGE_MAP()
 
-    void PaintClient(CDC& dc);
-    void PaintOpaqueClient(CDC& dc);
+    void PaintClient(CDC& dc);       // トラック＋つまみ＋スパークル
+    void PaintOpaqueClient(CDC& dc); // ガラス下 α=255。クロマは PaintClient 側
 
 private:
-    UINT m_nShimmer; // 流れるシマー用カウンタ（互換・予備）
+    UINT m_nShimmer; // 流れるシマー用カウンタ（ホバーキラキラ／DrawSoftJkThumb）
     BOOL m_bHover;   // マウスがスライダー上にあるか
     enum { kSliderSparkleMax = 48 };
     int m_nSparkleN;                    // 生存中の流れる点の数
@@ -1220,10 +1259,10 @@ private:
 #endif
 
     // 描画モードごとの実際の描画処理
-    void DrawSlider(CDC* pDC);
-    void DrawMode0(CDC* pDC, const CRect& r, int mn, int mx, int pos);
-    void DrawMode1(CDC* pDC, const CRect& r, int mn, int mx, int pos);
-    void DrawMode2(CDC* pDC, const CRect& r, int mn, int mx, int pos);
+    void DrawSlider(CDC* pDC); // TBS_VERT は各 Mode 内で分岐
+    void DrawMode0(CDC* pDC, const CRect& r, int mn, int mx, int pos); // 楔形バー＋音符つまみ
+    void DrawMode1(CDC* pDC, const CRect& r, int mn, int mx, int pos); // 紫グラデ線＋ダイヤ
+    void DrawMode2(CDC* pDC, const CRect& r, int mn, int mx, int pos); // 緑グラデ線＋ダイヤ（mode1 と同型）
 };
 
 // ============================================================================
@@ -1342,7 +1381,7 @@ protected:
 
     DECLARE_MESSAGE_MAP()
 
-    void PaintClient(CDC& dc);
+    void PaintClient(CDC& dc);       // 波形・loop・A-B・シークを重ねる
     void PaintOpaqueClient(CDC& dc);
 
 private:
@@ -1396,6 +1435,9 @@ private:
 // ============================================================================
 // カスタムチェックボックスコントロール
 // CCustomCheckBox
+//
+// 自前レ点。ON 時 8 フレームのぷるんバウンス (m_nBounce)。
+// アクリル時は箱以外をクロマ。ポップアップのレ点バウンスと同じカウンタ規約。
 // ============================================================================
 class CCustomCheckBox : public CButton
 {
@@ -1453,6 +1495,9 @@ private:
 // ============================================================================
 // 縦レベルメータ (録音/キャプチャ/マイク検出)
 // CCustomLevelMeter
+//
+// 0..1000。緑→黄→赤の縦バー。ピークホールドは持たない（親が SetLevel する）。
+// アクリル時はトラック以外をクロマ。変化なしなら Invalidate しない。
 // ============================================================================
 class CCustomLevelMeter : public CStatic
 {
@@ -1473,9 +1518,9 @@ protected:
 	afx_msg LRESULT OnPrintClient(WPARAM wParam, LPARAM lParam);
 	DECLARE_MESSAGE_MAP()
 
-	void PaintClient(CDC& dc);
+	void PaintClient(CDC& dc); // 縦バー。aero 時はクロマ下地
 
-	int m_level;
+	int m_level;       // 0..1000。SetLevel がクランプ
 	BOOL m_bAeroMode;
 };
 
@@ -1512,15 +1557,15 @@ protected:
 	DECLARE_MESSAGE_MAP()
 
 private:
-	void PaintClient(CDC& dc);
-	void PaintClient(CDC& dc, const CRect& r);
-	void DrawProgressLayer(CDC& dc, const CRect& r, BOOL bAeroTrans);
-	void PaintOpaqueClient(CDC& dc);
+	void PaintClient(CDC& dc);                 // クライアント全面
+	void PaintClient(CDC& dc, const CRect& r); // 指定矩形（OpaqueFixer 用）
+	void DrawProgressLayer(CDC& dc, const CRect& r, BOOL bAeroTrans); // トラック＋塗り＋％
+	void PaintOpaqueClient(CDC& dc);           // α=255
 
-	int m_nMin, m_nMax, m_nPos;
-	BOOL m_bShowPercent;
+	int m_nMin, m_nMax, m_nPos; // 範囲と現在値。SetPos はクランプして返す
+	BOOL m_bShowPercent;        // 中央に % 文字
 	BOOL m_bAeroMode;
-	COLORREF m_clrTrack, m_clrFill0, m_clrFill1;
+	COLORREF m_clrTrack, m_clrFill0, m_clrFill1; // 空トラック、塗り始端/終端
 	CBrush m_brBackground;
 	CFont m_fontPct;
 #if CCUSTOM_AERO_SUPPORT
@@ -1531,20 +1576,23 @@ private:
 // ============================================================================
 // システム性能パネル (メモリ数値 + CPU 全体/コア別グラフ・アクリル/淫女対応)
 // CCustomSysPerfCtrl
+//
+// タイマ ~1Hz で GetSystemTimes。初回差分は捨てる (m_bHaveTimes)。
+// SMBIOS は起動時一度。右クリックで表示切替・コピー・一時停止。
 // ============================================================================
 class CCustomSysPerfCtrl : public CWnd
 {
 	DECLARE_DYNAMIC(CCustomSysPerfCtrl)
 public:
 	enum {
-		VIEW_ALL = 0,
-		VIEW_MEM,
-		VIEW_CPU_OVERALL,
-		VIEW_CPU_GRID,
-		VIEW_CPU_BOTH
+		VIEW_ALL = 0,        // メモリ＋全体CPU＋コアグリッド
+		VIEW_MEM,            // メモリ数値のみ
+		VIEW_CPU_OVERALL,    // 全体 CPU スパークのみ
+		VIEW_CPU_GRID,       // コア別グリッドのみ
+		VIEW_CPU_BOTH        // 全体＋コア
 	};
-	static const int kMaxCores = 64;
-	static const int kHistLen = 60;
+	static const int kMaxCores = 64; // NtQuerySystemInformation 上限に合わせる
+	static const int kHistLen = 60;  // スパーク履歴（約 1 分 @1Hz）
 
 	CCustomSysPerfCtrl();
 	virtual ~CCustomSysPerfCtrl();
@@ -1572,40 +1620,40 @@ protected:
 	DECLARE_MESSAGE_MAP()
 
 private:
-	void PaintClient(CDC& dc);
-	void PaintClient(CDC& dc, const CRect& r);
-	void DrawPerfLayer(CDC& dc, const CRect& r, BOOL bAeroTrans);
+	void PaintClient(CDC& dc);                 // クライアント全面
+	void PaintClient(CDC& dc, const CRect& r); // OpaqueFixer 用の指定矩形
+	void DrawPerfLayer(CDC& dc, const CRect& r, BOOL bAeroTrans); // 3 区画の配置＋描画
 	void PaintOpaqueClient(CDC& dc);
-	void SampleOnce();
-	void SampleSmbiosOnce();
+	void SampleOnce();           // GetSystemTimes + メモリ。タイマから ~1Hz
+	void SampleSmbiosOnce();     // メモリスロット/速度。起動時一度だけ
 	void LayoutRects(const CRect& r, CRect& rcMem, CRect& rcOverall, CRect& rcGrid);
 	void DrawMemory(CDC& dc, const CRect& rc, BOOL bAeroTrans);
 	void DrawOverallCpu(CDC& dc, const CRect& rc, BOOL bAeroTrans);
 	void DrawCoreGrid(CDC& dc, const CRect& rc, BOOL bAeroTrans);
 	void DrawSpark(CDC& dc, const CRect& rc, const BYTE* hist, int histCount, BOOL bAeroTrans);
 	void FormatBytesGB(ULONGLONG bytes, CString& out);
-	void CopyStatsToClipboard();
+	void CopyStatsToClipboard(); // 右クリック「コピー」
 	void ShowCtxMenu(CPoint screenPt);
 	UINT Dpi() const;
-	int  S(int v) const;
+	int  S(int v) const; // 96dpi 基準 px → 実 DPI
 
 	BOOL m_bAeroMode;
-	BOOL m_bPaused;
-	BOOL m_bSmbiosDone;
+	BOOL m_bPaused;      // 右クリック一時停止。SampleOnce を止める
+	BOOL m_bSmbiosDone;  // SampleSmbiosOnce 済み
 	int  m_viewMode;
-	int  m_gridCols; // 0=auto
+	int  m_gridCols; // 0=auto（コア数から列を決める）
 	int  m_coreCount;
-	int  m_histCount;
-	int  m_histPos;
+	int  m_histCount;    // 埋まった履歴本数（立ち上がり）
+	int  m_histPos;      // リング書き込み位置
 	BYTE m_overallHist[kHistLen];
 	BYTE m_coreHist[kMaxCores][kHistLen];
-	BYTE m_overallNow;
+	BYTE m_overallNow;   // 直近サンプル 0..100
 	BYTE m_coreNow[kMaxCores];
 
-	FILETIME m_ftIdlePrev;
+	FILETIME m_ftIdlePrev; // GetSystemTimes 差分用
 	FILETIME m_ftKerPrev;
 	FILETIME m_ftUsrPrev;
-	BOOL m_bHaveTimes;
+	BOOL m_bHaveTimes;     // 初回は差分が取れない
 	ULONGLONG m_coreIdlePrev[kMaxCores];
 	ULONGLONG m_coreKerPrev[kMaxCores];
 	ULONGLONG m_coreUsrPrev[kMaxCores];
@@ -1623,7 +1671,7 @@ private:
 	UINT m_memSpeedMTs;
 	UINT m_memSlotsUsed;
 	UINT m_memSlotsTotal;
-	UINT m_memFormFactor; // SMBIOS form factor
+	UINT m_memFormFactor; // SMBIOS form factor（DIMM 等）
 	BOOL m_bHaveCompressed;
 
 	CString m_tipText;
@@ -1638,6 +1686,9 @@ private:
 // ============================================================================
 // カスタムグループボックスコントロール
 // CCustomGroupBox
+//
+// 枠＋キャプションのみ。兄弟の下に回り（WS_CLIPSIBLINGS）、兄弟領域へ描かない。
+// Soft3D 常時タイマーはピアノ等と競合するため Kill する。アクリル時は枠をクロマ。
 // ============================================================================
 class CCustomGroupBox : public CButton
 {
@@ -1736,8 +1787,8 @@ protected:
 
     DECLARE_MESSAGE_MAP()
 
-    CBrush m_brDialog;   // ダイアログの背景塗りつぶし用ブラシ
-    BOOL m_bAeroEnabled; // アクリルぼかしが有効かどうか
+    CBrush m_brDialog;   // ダイアログの背景塗りつぶし用ブラシ（aero=0）
+    BOOL m_bAeroEnabled; // EnableAero 後。子伝播と OnPaint 隙間塗りの判定
 
     // Windows 11 のアクリル背景時に使用する透明ブラシ (NULL_BRUSH 相当)
     CBrush m_brNull;
@@ -1750,6 +1801,10 @@ private:
 // ============================================================================
 // ぼかし適用済みカスタムダイアログの基底クラス (CDialog派生)
 // CCustomBlurDialogBase
+//
+// EnableAero + OpaqueFixer 一覧 + カスタムキャプション（min/max/close/pin/help）。
+// ApplyDwmBlurCore を二重に走らせない（FRAMECHANGED でフリーズする）。
+// EnableMainWindowLock はメイン位置へ追従するチェック。
 // ============================================================================
 class CCustomBlurDialogBase : public CCustomDialog
 {
@@ -1799,17 +1854,20 @@ protected:
     DECLARE_MESSAGE_MAP()
 
 private:
-    void ApplyDwmBlurCore(BOOL bForce);
-    BOOL m_bBlurApplied;
-    BOOL m_bInApplyBlur = FALSE;
-    CTypedPtrList<CPtrList, CCustomOpaqueFixer*> m_opaqueFixers;
-    int* m_pMainLockSave = nullptr;
-    CToolTipCtrl m_capTip;
+    void ApplyDwmBlurCore(BOOL bForce); // bForce でも二重 FRAMECHANGED は避ける
+    BOOL m_bBlurApplied;                // 既適用。RefreshAeroMode がクリアする
+    BOOL m_bInApplyBlur = FALSE;        // 再入防止（組成変更からの再入）
+    CTypedPtrList<CPtrList, CCustomOpaqueFixer*> m_opaqueFixers; // 子 HWND ごと。OnDestroy で解除
+    int* m_pMainLockSave = nullptr;     // savedata の追従フラグ。EnableMainWindowLock が渡す
+    CToolTipCtrl m_capTip;              // キャプションボタン（min/max/close/pin/help）
 };
 
 // ============================================================================
-// カスタムダイアログクラス (CDialogEx派生)
+// カスタムダイアログクラス (CDialogEx 派生・非 Blur)
 // CCustomDialogEx
+//
+// CCustomDialog と同型だが、もともと CDialogEx だった窓向け。
+// ぼかし＋キャプションは CCustomBlurDialogExBase。
 // ============================================================================
 class CCustomDialogEx : public CDialogEx
 {
@@ -1834,8 +1892,8 @@ protected:
 
     DECLARE_MESSAGE_MAP()
 
-    CBrush m_brDialog;   // ダイアログの背景塗りつぶし用ブラシ
-    BOOL m_bAeroEnabled; // アクリルぼかしが有効かどうか
+    CBrush m_brDialog;   // ダイアログの背景塗りつぶし用ブラシ（aero=0）
+    BOOL m_bAeroEnabled; // EnableAero 後。子伝播と OnPaint 隙間塗りの判定
 
     // Windows 11 のアクリル背景時に使用する透明ブラシ (NULL_BRUSH 相当)
     CBrush m_brNull;
@@ -1848,6 +1906,9 @@ private:
 // ============================================================================
 // ぼかし適用済みカスタムダイアログの基底クラス (CDialogEx派生)
 // CCustomBlurDialogExBase
+//
+// CCustomBlurDialogBase と同型。もともと CDialogEx だった窓向け。
+// ApplyDwmBlurCore を二重に走らせない（FRAMECHANGED でフリーズする）。
 // ============================================================================
 class CCustomBlurDialogExBase : public CCustomDialogEx
 {
@@ -1897,12 +1958,12 @@ protected:
     DECLARE_MESSAGE_MAP()
 
 private:
-    void ApplyDwmBlurCore(BOOL bForce);
-    BOOL m_bBlurApplied;
-    BOOL m_bInApplyBlur = FALSE;
-    CTypedPtrList<CPtrList, CCustomOpaqueFixer*> m_opaqueFixers;
-    int* m_pMainLockSave = nullptr;
-    CToolTipCtrl m_capTip;
+    void ApplyDwmBlurCore(BOOL bForce); // bForce でも二重 FRAMECHANGED は避ける
+    BOOL m_bBlurApplied;                // 既適用。RefreshAeroMode がクリアする
+    BOOL m_bInApplyBlur = FALSE;        // 再入防止（組成変更からの再入）
+    CTypedPtrList<CPtrList, CCustomOpaqueFixer*> m_opaqueFixers; // 子 HWND ごと。OnDestroy で解除
+    int* m_pMainLockSave = nullptr;     // savedata の追従フラグ。EnableMainWindowLock が渡す
+    CToolTipCtrl m_capTip;              // キャプションボタン（min/max/close/pin/help）
 };
 
 #include "CCustomPopupMenu.h"

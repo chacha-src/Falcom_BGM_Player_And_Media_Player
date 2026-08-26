@@ -4614,8 +4614,12 @@ int CPlayList::Add(CString name,int sub,int loop1,int loop2,CString art,CString 
 		case -14:s=LL14(L"幻想三国志1", L"Fantasia Sango 1", L"Fantasia Sango 1", L"Fantasia Sango 1", L"Fantasia Sango 1", L"환상삼국지 1", L"幻想三国志1", L"Fantasia Sango 1", L"Fantasia Sango 1", L"Fantasia Sango 1", L"Fantasia Sango 1", L"Fantasia Sango 1", L"Fantasia Sango 1", L"Fantasia Sango 1");break;
 		case -15:s=LL14(L"幻想三国志2", L"Fantasia Sango 2", L"Fantasia Sango 2", L"Fantasia Sango 2", L"Fantasia Sango 2", L"환상삼국지 2", L"幻想三国志2", L"Fantasia Sango 2", L"Fantasia Sango 2", L"Fantasia Sango 2", L"Fantasia Sango 2", L"Fantasia Sango 2", L"Fantasia Sango 2", L"Fantasia Sango 2");break;
 		case -3:
+			// KPI 再生。MIDI/プロジェクトは MID(KPI)。他拡張子は従来の「〜ファイル」。
 			ss = fol.Right(fol.GetLength() - fol.ReverseFind('.') - 1);
-			s.Format(LL14(L"%sファイル", L"%s File", L"%s fichier", L"%s file", L"%s archivo", L"%s 파일", L"%s文件", L"ملف %s", L"файл %s", L"%s-Datei", L"arquivo %s", L"%s bestand", L"plik %s", L"%s dosyası"), ss);
+			if (VstIsMidiExt(fol) || VstIsProjectExt(fol))
+				s.Format(LL14(L"%s(KPI)", L"%s(KPI)", L"%s(KPI)", L"%s(KPI)", L"%s(KPI)", L"%s(KPI)", L"%s(KPI)", L"%s(KPI)", L"%s(KPI)", L"%s(KPI)", L"%s(KPI)", L"%s(KPI)", L"%s(KPI)", L"%s(KPI)"), ss);
+			else
+				s.Format(LL14(L"%sファイル", L"%s File", L"%s fichier", L"%s file", L"%s archivo", L"%s 파일", L"%s文件", L"ملف %s", L"файл %s", L"%s-Datei", L"arquivo %s", L"%s bestand", L"plik %s", L"%s dosyası"), ss);
 			break;
 
 		case MODE_PLUGIN_WINAMP:
@@ -4634,6 +4638,7 @@ int CPlayList::Add(CString name,int sub,int loop1,int loop2,CString art,CString 
 			break;
 
 		case MODE_VST_MIDI:
+			// 自前 VST ホスト。表示は MID(VST)。優先切替は FixMidiMode。
 			ss = fol.Right(fol.GetLength() - fol.ReverseFind('.') - 1);
 			s.Format(LL14(L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)"), ss);
 			break;
@@ -10755,16 +10760,40 @@ if (fff == 0)
 
 
 
+// MIDI/プロジェクト行の game 列。sub=-30 → MID(VST)、-3 → MID(KPI)。拡張子だけ差し替える。
+static void PlApplyMidiGameLabel(playlistdata0& item)
+{
+	if (!VstIsMidiExt(item.fol) && !VstIsProjectExt(item.fol))
+		return;
+	CString ss = item.fol;
+	const int dot = ss.ReverseFind(_T('.'));
+	if (dot >= 0) ss = ss.Mid(dot + 1);
+	CString game;
+	if (item.sub == MODE_VST_MIDI)
+		game.Format(LL14(L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)"), ss);
+	else if (item.sub == -3)
+		game.Format(LL14(L"%s(KPI)", L"%s(KPI)", L"%s(KPI)", L"%s(KPI)", L"%s(KPI)", L"%s(KPI)", L"%s(KPI)", L"%s(KPI)", L"%s(KPI)", L"%s(KPI)", L"%s(KPI)", L"%s(KPI)", L"%s(KPI)", L"%s(KPI)"), ss);
+	else
+		return;
+	_tcsncpy_s(item.game, game, _TRUNCATE);
+}
+
+// savedata.midPlayPrefer に合わせて sub を -30(VST) / -3(KPI) へ。
+// 既に希望どおりなら plugs() は呼ばずラベルだけ揃える（KPI優先なのに -30 で early-return すると表示が固まっていた）。
+// 再生中のエンジンは切らない。動画ファイルの -2 は触らない。
 void CPlayList::FixMidiMode(playlistdata0& item)
 {
 	if (VstIsMidiExt(item.fol) || VstIsProjectExt(item.fol)) {
 		const int preferVst = (savedata.midPlayPrefer == 1) ? 1 : 0;
-		// VST優先で既に -30、KPI優先で既に -3 → そのまま。
-		// KPIもVSTも無い -2 は許容（KPI優先時の再試行のみ下で行う）。
-		if (preferVst && item.sub == MODE_VST_MIDI) return;
-		if (!preferVst && item.sub == -3) return;
-		if (!preferVst && item.sub == MODE_VST_MIDI) return;
-		if (!preferVst && item.sub != -2) return;
+		// VST優先で既に -30、KPI優先で既に -3 → そのまま（表示だけ揃える）。
+		if (preferVst && item.sub == MODE_VST_MIDI) {
+			PlApplyMidiGameLabel(item);
+			return;
+		}
+		if (!preferVst && item.sub == -3) {
+			PlApplyMidiGameLabel(item);
+			return;
+		}
 	}
 	else {
 		// 非MIDI: 保存済み -2(DirectShow) だけ引き直す。
@@ -10781,15 +10810,17 @@ void CPlayList::FixMidiMode(playlistdata0& item)
 	TCHAR kpiBuf[512]; kpiBuf[0] = 0;
 	BYTE kv = 0;
 	plugs(item.fol, &p, kpiBuf, kv);
-	if (p.sub == item.sub) return;
+	if (p.sub == MODE_VST_MIDI || (p.sub == -3 && (VstIsMidiExt(item.fol) || VstIsProjectExt(item.fol)))) {
+		item.sub = p.sub;
+		PlApplyMidiGameLabel(item);
+		return;
+	}
 	item.sub = p.sub;
 	CString ss = item.fol;
 	const int dot = ss.ReverseFind(_T('.'));
 	if (dot >= 0) ss = ss.Mid(dot + 1);
 	CString game;
-	if (p.sub == MODE_VST_MIDI)
-		game.Format(LL14(L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)"), ss);
-	else if (p.sub == MODE_PLUGIN_WINAMP)
+	if (p.sub == MODE_PLUGIN_WINAMP)
 		game.Format(LL14(L"%sファイル(Winamp)", L"%s File(Winamp)", L"%s fichier(Winamp)", L"%s file(Winamp)", L"%s archivo(Winamp)", L"%s 파일(Winamp)", L"%s文件(Winamp)", L"ملف %s(Winamp)", L"файл %s(Winamp)", L"%s-Datei(Winamp)", L"arquivo %s(Winamp)", L"%s bestand(Winamp)", L"plik %s(Winamp)", L"%s dosyası(Winamp)"), ss);
 	else if (p.sub == MODE_PLUGIN_XMPLAY)
 		game.Format(LL14(L"%sファイル(XMPlay)", L"%s File(XMPlay)", L"%s fichier(XMPlay)", L"%s file(XMPlay)", L"%s archivo(XMPlay)", L"%s 파일(XMPlay)", L"%s文件(XMPlay)", L"ملف %s(XMPlay)", L"файл %s(XMPlay)", L"%s-Datei(XMPlay)", L"arquivo %s(XMPlay)", L"%s bestand(XMPlay)", L"plik %s(XMPlay)", L"%s dosyası(XMPlay)"), ss);
@@ -10800,9 +10831,34 @@ void CPlayList::FixMidiMode(playlistdata0& item)
 	_tcsncpy_s(item.game, game, _TRUNCATE);
 }
 
+// 全 MIDI 行を Fix。変化があればリストだけ再描画。ポップアップ／レンダ設定の両方から来る。
+void CPlayList::RefreshMidiPlayModes()
+{
+	if (!pc || playcnt <= 0) return;
+	int any = 0;
+	for (int i = 0; i < playcnt; ++i) {
+		if (!VstIsMidiExt(pc[i].fol) && !VstIsProjectExt(pc[i].fol)) continue;
+		const int oldSub = pc[i].sub;
+		TCHAR oldGame[256];
+		_tcsncpy_s(oldGame, pc[i].game, _TRUNCATE);
+		FixMidiMode(pc[i]);
+		if (pc[i].sub != oldSub || _tcscmp(pc[i].game, oldGame) != 0)
+			any = 1;
+	}
+	if (any && m_lc.GetSafeHwnd())
+		m_lc.RedrawWindow();
+}
+
+// CCustomPopupMenu.cpp からは PlayList.h を include できない（IDD_PLAYLIST 欠落）ので extern する。
+void PlRefreshMidiPlayModes()
+{
+	extern CPlayList* pl;
+	if (pl) pl->RefreshMidiPlayModes();
+}
+
 void CPlayList::plugs(CString fff, playlistdata *p,TCHAR* kpi, BYTE& kv)
 {
-	// MIDI/プロジェクト: 動画(-2)扱いにはしない。VST優先なら -30、否则 KPI、最後に VST へフォールバック。
+	// MIDI/プロジェクト: 動画(-2)にはしない。VST優先なら -30。でなければ KPI、最後に VST へフォールバック。
 	const int isMidiOrProj = (VstIsMidiExt(fff) || VstIsProjectExt(fff)) ? 1 : 0;
 	if (p && isMidiOrProj) {
 		wchar_t mid[VST_PATH_CHARS]; mid[0] = 0;

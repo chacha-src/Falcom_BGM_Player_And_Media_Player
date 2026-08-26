@@ -6,7 +6,7 @@
 // ・DWM アクリル透過は載せない不透明ポップアップ
 // ・描画は BufferedPaint+Opaque / 淫女オーバーレイ正式対応（ちらつき禁止）
 // ・項目は固定配列。std::function / vector は使わない
-// ・ルート先頭にフォント／アクリル（骨格注入）。フォントはホバーで即プレビュー
+// ・ルート先頭にフォント／アクリル／KPI／MIDI KPI|VST優先（骨格注入）。フォントはホバーで即プレビュー
 // ・チェック以外の CCustom* 内包は「ラベル + コントロール」のスライダー方式
 //
 // 【公開API（他アプリ向け）】
@@ -91,10 +91,13 @@ enum {
 	CCUSTOM_POPUP_ID_ANIM9 = 0x00E00129,
 	// Soft 立体アクセント強め（アクリルの下）
 	CCUSTOM_POPUP_ID_SOFTBOOST = 0x00E0012A,
-	CCUSTOM_POPUP_ID_KPI_DL = 0x00E0012B,
-	CCUSTOM_POPUP_ID_KPI_RELOAD = 0x00E0012C,
-	CCUSTOM_POPUP_ID_MID_KPI = 0x00E0012D,
-	CCUSTOM_POPUP_ID_MID_VST = 0x00E0012E
+	CCUSTOM_POPUP_ID_KPI_DL = 0x00E0012B,     // KPI Plugins.zip を exe 横へ展開（WM_APP_KPI_PLUGIN）
+	CCUSTOM_POPUP_ID_KPI_RELOAD = 0x00E0012C, // exe 配下 .kpi を再読込
+	// MIDI 再生優先。HandleChromeClick が savedata.midPlayPrefer を書き
+	// extern PlRefreshMidiPlayModes() でプレイリストの MID(VST)/MID(KPI) を即更新。
+	// PlayList.h は IDD_PLAYLIST 欠落のため CCustomPopupMenu.cpp から include しない。
+	CCUSTOM_POPUP_ID_MID_KPI = 0x00E0012D,    // KPI 優先（midPlayPrefer=0）
+	CCUSTOM_POPUP_ID_MID_VST = 0x00E0012E     // 自前 VST ホスト優先（midPlayPrefer=1）
 };
 
 enum {
@@ -133,44 +136,44 @@ typedef void (*CCustomPopupRangeCb)(void* ctx, int pos, int selMin, int selMax, 
 typedef void (*CCustomPopupButtonCb)(void* ctx, UINT id);
 
 struct CCustomPopupItem {
-	int kind;
-	UINT id;
-	wchar_t text[CCUSTOM_POPUP_TEXT_LEN];
+	int kind;                 // CCustomPopupItemKind
+	UINT id;                  // コマンドID。0 可。骨格は CCUSTOM_POPUP_ID_*（Track は 0 を返す）
+	wchar_t text[CCUSTOM_POPUP_TEXT_LEN]; // ラベル（FONT_FACE 行は面名）
 	wchar_t tip[CCUSTOM_POPUP_TIP_LEN];
 	BOOL enabled;
-	BOOL checked;
+	BOOL checked;             // CHECK のレ点。描画方法／MIDI優先の排他にも使う
 	BOOL hasTip;
-	int sliderMin;
+	int sliderMin;            // Slider / Range / Progress 共用
 	int sliderMax;
 	int sliderPos;
-	int rangeSelMin;
+	int rangeSelMin;          // ループ選択
 	int rangeSelMax;
-	int rangeAbA;
+	int rangeAbA;             // A-B（未設定は -1）
 	int rangeAbB;
 	BOOL progressShowPct;
-	BOOL buttonCloseOnClick;
+	BOOL buttonCloseOnClick;  // TRUE なら BN_CLICKED で Track が id を返す
 	CCustomPopupSliderCb sliderCb;
 	CCustomPopupEditCb editCb;
 	CCustomPopupChoiceCb choiceCb;
 	CCustomPopupRangeCb rangeCb;
 	CCustomPopupButtonCb buttonCb;
-	void* ctrlCtx;
-	int subIndex;
-	int sliderIndex;
+	void* ctrlCtx;            // 各 cb のユーザコンテキスト
+	int subIndex;             // m_subs[]。無ければ -1
+	int sliderIndex;          // 以下、対応配列の添字。無ければ -1
 	int editIndex;
 	int comboIndex;
 	int listIndex;
 	int rangeIndex;
 	int progressIndex;
 	int buttonIndex;
-	int choiceSet;
+	int choiceSet;            // m_choiceSets[]（Edit/Combo/List）
 	int choiceSel;
-	CRect rc;
+	CRect rc;                 // MeasureLayout 後のコンテンツ座標（スクロール前）
 };
 
 struct CCustomPopupChoiceSet {
 	wchar_t items[CCUSTOM_POPUP_MAX_CHOICES][CCUSTOM_POPUP_CHOICE_LEN];
-	int count;
+	int count; // 有効件数
 };
 
 class CCustomPopupMenu : public CWnd
@@ -244,11 +247,11 @@ public:
 	CCustomStandardButton* GetButtonCtrl(UINT id);
 
 protected:
-	CCustomPopupItem m_items[CCUSTOM_POPUP_MAX_ITEMS];
+	CCustomPopupItem m_items[CCUSTOM_POPUP_MAX_ITEMS]; // ルート／サブ共通。骨格は先頭に注入
 	int m_itemCount;
-	CCustomPopupMenu* m_subs[CCUSTOM_POPUP_MAX_SUBS];
+	CCustomPopupMenu* m_subs[CCUSTOM_POPUP_MAX_SUBS]; // AddSubMenu が new。DestroyPopupTree で解放
 	int m_subCount;
-	CCustomSliderCtrl m_sliders[CCUSTOM_POPUP_MAX_SLIDERS];
+	CCustomSliderCtrl m_sliders[CCUSTOM_POPUP_MAX_SLIDERS]; // 内包。飛行中は隠して代理描画
 	int m_sliderCount;
 	CCustomEdit m_edits[CCUSTOM_POPUP_MAX_EDITS];
 	int m_editCount;
@@ -262,79 +265,79 @@ protected:
 	int m_progressCount;
 	CCustomStandardButton m_buttons[CCUSTOM_POPUP_MAX_BUTTONS];
 	int m_buttonCount;
-	CCustomPopupChoiceSet m_choiceSets[CCUSTOM_POPUP_MAX_CHOICE_SETS];
+	CCustomPopupChoiceSet m_choiceSets[CCUSTOM_POPUP_MAX_CHOICE_SETS]; // Combo/List/Edit 共用
 	int m_choiceSetCount;
 
-	BOOL m_bAeroMode;
-	BOOL m_tracking;
-	BOOL m_done;
-	UINT m_result;
-	int m_hot;
-	int m_openSub;
-	CWnd* m_owner;
-	CCustomPopupMenu* m_parentMenu;
-	CCustomPopupMenu* m_root;
+	BOOL m_bAeroMode;   // 互換フラグ。本体は不透明パネル
+	BOOL m_tracking;    // RunModalLoop / Track 中
+	BOOL m_done;        // モーダル終了要求（CloseChain が立てる）
+	UINT m_result;      // Track 戻り。骨格 ID は出口で 0
+	int m_hot;          // ホバー行。-1=なし
+	int m_openSub;      // 開いているサブの項目 index。-1=なし
+	CWnd* m_owner;      // Track の owner（前面復帰・関連 HWND・relax-dismiss）
+	CCustomPopupMenu* m_parentMenu; // サブなら親。ルートは NULL
+	CCustomPopupMenu* m_root;       // チェーン根。NULL なら this
 	static CCustomPopupMenu* s_trackingRoot;
 	static HWND s_trackingHwnd; // 破棄検知用（dangling this を触らない）
 	CToolTipCtrl m_tip;
-	int m_tipHot;
-	CBitmap m_memBmp;
+	int m_tipHot;       // ツールチップ対象行（m_hot のスナップ）
+	CBitmap m_memBmp;   // OnPaint バックバッファ
 	int m_memW;
 	int m_memH;
-	HFONT m_font;
+	HFONT m_font;       // 使用中（所有またはストック）
 	HFONT m_fontOwned;
-	int m_menuW;
+	int m_menuW;       // コンテンツ幅（飛行 pad 除外）
 	int m_menuH;       // 表示ウィンドウ高さ（クランプ後）
 	int m_contentH;    // 全項目のコンテンツ高さ
 	int m_scrollY;     // 縦スクロール（固定ヘッダより下のみ）
 	int m_scrollMax;
 	int m_stickyCount; // 先頭から固定する項目数（フォントのサイズ/太字等）
 	int m_stickyH;     // 固定ヘッダの高さ
-	BOOL m_asSubmenu;
-	int m_animTick;
+	BOOL m_asSubmenu;   // 親付きで CreatePopupAt した子
+	int m_animTick;     // 背景ストライプ／Soft 周期
 	int m_lineAnimPhase; // 0=idle 1=enter 2=exit
 	ULONGLONG m_lineAnimStart;
 	int m_lineAnimOrigin; // クリック位置に近い行（上下に広がる起点）
 	int m_lineAnimOriginY; // クライアントY（起点）
 	int m_flightPad; // 行チップ飛行余白（0=通常。コンテンツは (pad,pad) 起点）
 	BOOL m_bridgePanel; // 飛行⇔定着の橋渡しで一枚パネルを強制（点滅防止）
-	BOOL m_skipChrome;
-	BOOL m_chromeInjected;
+	BOOL m_skipChrome;      // TRUE なら骨格を付けない（フォント／KPI サブ等）
+	BOOL m_chromeInjected;  // EnsureChromePrefix 済み
 	wchar_t m_previewFace[32];
-	BOOL m_previewing;
+	BOOL m_previewing;      // フォント面ホバー中（未確定）
 	int m_bounceIdx;   // レ点バウンス中の項目（-1=なし）
 	int m_nBounce;     // CCustomCheckBox と同じ 8→0
 	BOOL m_suppressEditNotify; // Create 時 SetWindowText の EN_CHANGE を無視
 
-	void CopyText(wchar_t* dst, int dstN, LPCTSTR src);
+	void CopyText(wchar_t* dst, int dstN, LPCTSTR src); // 固定長コピー。溢れは切る
 	BOOL AddItemBase(int kind, UINT id, LPCTSTR text, LPCTSTR tip, BOOL enabled, BOOL checked);
-	int AllocChoiceSet(const LPCTSTR* items, int count);
-	void MeasureLayout();
+	int AllocChoiceSet(const LPCTSTR* items, int count); // m_choiceSets 空きを取る
+	void MeasureLayout(); // rc / 幅 / stickyH / contentH。フォント変更後も呼ぶ
 	BOOL CreatePopupAt(CPoint screenPt, CCustomPopupMenu* parentMenu, CCustomPopupMenu* root);
 	// animateOut=FALSE: ホバー離脱など。退出アニメ無しで即消す（誤ってサブ退場が引きずられるのを防ぐ）
 	void DestroyPopupTree(BOOL animateOut = TRUE);
 	void AbortAnimAndHide(); // 飛行／RGN／タイマを止めて非表示
 	void SyncHotFromCursor(); // z-order無視で親行ホバーを同期（開サブの即閉じ用）
-	void CloseChain(UINT result);
-	void PaintToDC(CDC& dc);
-	CRect ItemViewRect(int idx) const;
-	int HitTest(CPoint pt) const;
+	void CloseChain(UINT result); // ルートまで閉じて m_result を確定
+	void PaintToDC(CDC& dc); // 背面ストライプ＋行。飛行中はチップ面へ
+	CRect ItemViewRect(int idx) const; // スクロール後の可視矩形
+	int HitTest(CPoint pt) const; // クライアント。sticky 帯を先に見る
 	void SetHot(int idx);
 	void OpenSubAt(int idx);
 	void CloseOpenSub();
-	void SyncEmbeddedChildren();
+	void SyncEmbeddedChildren(); // ラベル下へ HWND を置く。飛行中は Hide
 	void ShowEmbedded(BOOL show);
 	void RefreshEmbeddedChildren(); // 親描画で子が塗り潰された場合の再描画
 	void RevealEmbeddedAfterAnim(); // 定着後に子HWNDを確実表示
 	BOOL ChipFlightRowsAtRest() const; // 出現飛行が視覚的に静止したか
 	void UpdateTip();
-	BOOL IsPointInChain(CPoint screenPt) const;
+	BOOL IsPointInChain(CPoint screenPt) const; // ルート〜開サブのどれかの上
 	BOOL ScreenPtOnMenuBody(CPoint screenPt) const;
 	BOOL ScreenPtOnOpenSubBody(CPoint screenPt) const;
-	BOOL IsHwndRelated(HWND h) const;
+	BOOL IsHwndRelated(HWND h) const; // 内包 CCustom* も含む
 	BOOL IsForegroundOurs() const;
 	BOOL IsInteractiveKind(int kind) const;
-	BOOL IsChromeCommand(UINT id) const;
+	BOOL IsChromeCommand(UINT id) const; // Track が 0 を返す骨格 ID
 	CCustomPopupMenu* RootMenu();
 	void RunModalLoop();
 	void AnimateIn();
@@ -350,39 +353,39 @@ protected:
 	void SnapAnimToIdle(); // 出現アニメ中断→一枚状態（サブ遷移・クリック用）
 	// phase中の行オフセット/フェード(ox,oy,fade0..256)。未出現は FALSE
 	BOOL CalcLineAnim(int idx, int* ox, int* oy, int* fade, float* pT = NULL) const;
-	void NotifyEditFromHwnd(HWND hwnd);
-	void NotifyChoiceFromHwnd(HWND hwnd, BOOL fromList);
-	void NotifyRangeFromHwnd(HWND hwnd, UINT nSBCode);
-	void NotifyButtonFromHwnd(HWND hwnd);
-	void ApplyPreviewFace(LPCTSTR face);
+	void NotifyEditFromHwnd(HWND hwnd); // EN_CHANGE → editCb
+	void NotifyChoiceFromHwnd(HWND hwnd, BOOL fromList); // Combo/List 選択 → choiceCb
+	void NotifyRangeFromHwnd(HWND hwnd, UINT nSBCode); // シーク追従。dragTarget 付き
+	void NotifyButtonFromHwnd(HWND hwnd); // BN_CLICKED。closeOnClick なら CloseChain
+	void ApplyPreviewFace(LPCTSTR face); // ホバー即プレビュー。未確定
 	void ClearPreviewFace();
-	void CommitFace(LPCTSTR face);
-	void EnsureChromePrefix();
+	void CommitFace(LPCTSTR face); // savedata へ確定
+	void EnsureChromePrefix(); // ルート先頭へ骨格行を一度だけ注入
 	void RebuildMenuFont();
-	BOOL HandleChromeClick(int idx);
-	void StartCheckBounce(int idx);
-	void SetScrollY(int y);
+	BOOL HandleChromeClick(int idx); // 骨格。MIDI は PlRefreshMidiPlayModes。TRUE=消費
+	void StartCheckBounce(int idx); // レ点 8→0
+	void SetScrollY(int y); // sticky 下のみ
 	BOOL OnWheelDelta(int delta);
-	BOOL HandleWheelInChain(CPoint screenPt, int delta);
+	BOOL HandleWheelInChain(CPoint screenPt, int delta); // 開サブ優先
 	void InvalidateBgOnly(); // 背景アニメ用：子コントロールを巻き込まない
 	int FindItemIndexById(UINT id) const;
 
-	virtual BOOL OnCommand(WPARAM wParam, LPARAM lParam);
+	virtual BOOL OnCommand(WPARAM wParam, LPARAM lParam); // 内包 BN_CLICKED / CBN_SELCHANGE
 
-	afx_msg void OnPaint();
-	afx_msg BOOL OnEraseBkgnd(CDC* pDC);
+	afx_msg void OnPaint(); // BufferedPaint。飛行中は ULW 側
+	afx_msg BOOL OnEraseBkgnd(CDC* pDC); // 常に TRUE（ちらつき防止）
 	afx_msg LRESULT OnPrintClient(WPARAM wParam, LPARAM lParam);
-	afx_msg LRESULT OnRefreshEmbedded(WPARAM wParam, LPARAM lParam);
-	afx_msg LRESULT OnNcHitTest(CPoint point);
+	afx_msg LRESULT OnRefreshEmbedded(WPARAM wParam, LPARAM lParam); // 子が親に潰されたあと
+	afx_msg LRESULT OnNcHitTest(CPoint point); // クライアント扱い（ドラッグ移動しない）
 	afx_msg void OnMouseMove(UINT nFlags, CPoint point);
 	afx_msg void OnMouseLeave();
 	afx_msg void OnLButtonDown(UINT nFlags, CPoint point);
 	afx_msg void OnLButtonUp(UINT nFlags, CPoint point);
-	afx_msg void OnKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags);
-	afx_msg void OnKillFocus(CWnd* pNewWnd);
+	afx_msg void OnKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags); // Esc 閉じ / 矢印
+	afx_msg void OnKillFocus(CWnd* pNewWnd); // relax-dismiss 時は抑止
 	afx_msg BOOL OnMouseWheel(UINT nFlags, short zDelta, CPoint pt);
-	afx_msg void OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar);
+	afx_msg void OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar); // 内包 Range
 	afx_msg BOOL OnTtnNeedText(UINT id, NMHDR* pNMHDR, LRESULT* pResult);
-	afx_msg void OnTimer(UINT_PTR nIDEvent);
+	afx_msg void OnTimer(UINT_PTR nIDEvent); // Tip / 淫女 / 行アニメ / バウンス / 定着
 	DECLARE_MESSAGE_MAP()
 };
