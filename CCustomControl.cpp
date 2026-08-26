@@ -3097,14 +3097,17 @@ static void DrawLooseRibbon(CDC* pDC, const CRect& rc, COLORREF c, float angleDe
 }
 
 // ============================================================================
-// 隠し機能: 裏演出 (入口は複合連打、出口は F12×5)
+// 隠し機能: 裏演出 (入口は F12×7 → F11×7 → F12 を2秒押し、出口は F12×5)
 // ============================================================================
 static UINT_PTR g_inwomanTimer = 0;
 static int      g_f12Count = 0;
 static int      g_f11Count = 0;
-static int      g_iwSeq = 0;      // 0=F12集め / 1=F11集め
+static int      g_iwSeq = 0;      // 0=F12集め / 1=F11集め / 2=F12押しっぱなし
 static DWORD    g_seqT0 = 0;      // 現バースト最初の時刻
-static DWORD    g_armT0 = 0;      // F12条件達成時刻
+static DWORD    g_armT0 = 0;      // 直前段階の達成時刻
+static DWORD    g_holdT0 = 0;     // F12 押し始め
+
+enum { IW_BURST_MS = 3000, IW_GAP_MS = 4000, IW_HOLD_MS = 2000 };
 
 static void CCC_IwSeqReset()
 {
@@ -3113,6 +3116,7 @@ static void CCC_IwSeqReset()
     g_iwSeq = 0;
     g_seqT0 = 0;
     g_armT0 = 0;
+    g_holdT0 = 0;
 }
 
 // ちらつき対策: 背景消去を伴う全画面再描画はやめ、オーナードロー(ダブルバッファ)の
@@ -3152,9 +3156,39 @@ static void CCC_InwomanInvalidateAll()
     ::EnumThreadWindows(::GetCurrentThreadId(), CCC_InwomanTopProc, 0);
 }
 
+static void CCC_IwEnter()
+{
+    CCC_IwSeqReset();
+    savedata.inwoman = 1;
+    CCC_InwomanInvalidateAll();
+}
+
+static void CCC_IwPollHold(DWORD now)
+{
+    if (g_iwSeq != 2)
+        return;
+    if (g_holdT0 == 0) {
+        if (g_armT0 && (now - g_armT0) > IW_GAP_MS)
+            CCC_IwSeqReset();
+        return;
+    }
+    if ((::GetAsyncKeyState(VK_F12) & 0x8000) == 0) {
+        g_holdT0 = 0;
+        if (g_armT0 && (now - g_armT0) > IW_GAP_MS)
+            CCC_IwSeqReset();
+        return;
+    }
+    if ((now - g_holdT0) >= IW_HOLD_MS)
+        CCC_IwEnter();
+}
+
 static void CALLBACK CCC_InwomanTimerProc(HWND, UINT, UINT_PTR, DWORD)
 {
-    if (!CCC_IsInwoman()) return; // 通常モード時は何もしない
+    const DWORD now = ::GetTickCount();
+    if (!CCC_IsInwoman()) {
+        CCC_IwPollHold(now);
+        return;
+    }
     // クリック／ドラッグ中に全控件 Invalidate すると BN_CLICKED が欠落しやすい
     if (::GetCapture() != NULL) return;
     if (CCustomPopupMenu::GetTrackingRoot() != NULL) return;
@@ -3172,22 +3206,27 @@ BOOL CCC_InwomanHotkey(MSG* pMsg, CWnd* pWnd)
 {
     UNREFERENCED_PARAMETER(pWnd);
     CCC_StartInwomanTimer();
-    if (!pMsg || pMsg->message != WM_KEYDOWN)
+    if (!pMsg)
         return FALSE;
-    // キーリピートは連打に数えない
-    if (pMsg->lParam & (1 << 30))
-        return FALSE;
+
     const WPARAM vk = pMsg->wParam;
-    if (vk != VK_F12 && vk != VK_F11)
+    const DWORD now = ::GetTickCount();
+
+    if (pMsg->message == WM_KEYUP) {
+        if (!CCC_IsInwoman() && g_iwSeq == 2 && vk == VK_F12)
+            g_holdT0 = 0;
+        return FALSE;
+    }
+    if (pMsg->message != WM_KEYDOWN)
         return FALSE;
 
-    const DWORD now = ::GetTickCount();
-    const DWORD burstMs = 3000;
-    const DWORD gapMs = 4000;
+    const int wasDown = (pMsg->lParam & (1 << 30)) ? 1 : 0;
 
-    // 出口: 入っているときだけ F12 を 2〜3 秒以内に5回
+    // 出口: 入っているときだけ F12 を 2秒以内に5回
     if (CCC_IsInwoman())
     {
+        if (wasDown)
+            return FALSE;
         if (vk != VK_F12)
             return FALSE;
         if (g_f12Count == 0 || (now - g_seqT0) > 2000)
@@ -3205,7 +3244,36 @@ BOOL CCC_InwomanHotkey(MSG* pMsg, CWnd* pWnd)
         return FALSE;
     }
 
-    // 入口: F12 を burstMs 以内に7回以上 → 続けて F11 を burstMs 以内に7回
+    if (vk != VK_F12 && vk != VK_F11)
+        return FALSE;
+
+    // 入口最終段: F12 を IW_HOLD_MS 押しっぱなし
+    if (g_iwSeq == 2)
+    {
+        if (vk != VK_F12) {
+            CCC_IwSeqReset();
+            return FALSE;
+        }
+        if (!wasDown) {
+            if (g_armT0 && (now - g_armT0) > IW_GAP_MS) {
+                CCC_IwSeqReset();
+                return FALSE;
+            }
+            g_holdT0 = now;
+        }
+        if (g_holdT0 && (now - g_holdT0) >= IW_HOLD_MS
+            && (::GetAsyncKeyState(VK_F12) & 0x8000)) {
+            CCC_IwEnter();
+            return TRUE;
+        }
+        return FALSE;
+    }
+
+    // キーリピートは連打に数えない
+    if (wasDown)
+        return FALSE;
+
+    // 入口: F12 を burst 以内に7回以上 → 続けて F11 を burst 以内に7回 → F12 長押し
     if (vk == VK_F12)
     {
         if (g_iwSeq == 1)
@@ -3213,7 +3281,7 @@ BOOL CCC_InwomanHotkey(MSG* pMsg, CWnd* pWnd)
             // F11待ち中の F12 は入り口やり直し
             CCC_IwSeqReset();
         }
-        if (g_f12Count == 0 || (now - g_seqT0) > burstMs)
+        if (g_f12Count == 0 || (now - g_seqT0) > IW_BURST_MS)
         {
             g_f12Count = 0;
             g_seqT0 = now;
@@ -3234,24 +3302,25 @@ BOOL CCC_InwomanHotkey(MSG* pMsg, CWnd* pWnd)
         return FALSE;
     if (g_f11Count == 0)
     {
-        if ((now - g_armT0) > gapMs)
+        if ((now - g_armT0) > IW_GAP_MS)
         {
             CCC_IwSeqReset();
             return FALSE;
         }
         g_seqT0 = now;
     }
-    else if ((now - g_seqT0) > burstMs)
+    else if ((now - g_seqT0) > IW_BURST_MS)
     {
         CCC_IwSeqReset();
         return FALSE;
     }
     if (++g_f11Count >= 7)
     {
-        CCC_IwSeqReset();
-        savedata.inwoman = 1;
-        CCC_InwomanInvalidateAll();
-        return TRUE;
+        g_iwSeq = 2;
+        g_holdT0 = 0;
+        g_armT0 = now;
+        g_seqT0 = 0;
+        return FALSE;
     }
     return FALSE;
 }

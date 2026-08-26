@@ -1295,7 +1295,7 @@ CMidiMonitorDlg::CMidiMonitorDlg(CWnd* pParent)
 	, m_frozen(false), m_alwaysOnTop(false), m_paintDisabled(false)
 	, m_rotDragging(false), m_rotDragYaw0(0), m_rotDragPitch0(0), m_soft3dTourUntil(0)
 	, m_hoverCol(-1), m_hoverPart(-1)
-	, m_layHeadH(0), m_layRowH(0), m_layFootH(0), m_persistAge(0), m_drumGlow(0), m_dispBpm(-1)
+	, m_layHeadH(0), m_layRowH(0), m_layFootH(0), m_layExtra(0), m_persistAge(0), m_drumGlow(0), m_dispBpm(-1)
 	, m_dirtyRows(0xFFFFFFFFu), m_rowLive(0), m_nameNeed(0), m_burstApply(0)
 	, m_dirtyHead(true), m_fullDraw(true), m_volDragging(false)
 {
@@ -3403,11 +3403,15 @@ void CMidiMonitorDlg::DrawInsFoot(CDC& dc, int y, int w, int footH, UINT dpi)
 {
 	BuildInsLine(0, m_insLine[0], 220);
 	BuildInsLine(1, m_insLine[1], 220);
-	const int rowH = footH / 2;
+	int lineH = footH / 2;
+	if (lineH < 1) lineH = 1;
 	CFont* oldF = dc.SelectObject(&m_fontTiny);
 	for (int s = 0; s < 2; ++s) {
-		const int yy = y + s * rowH;
-		dc.FillSolidRect(0, yy, w, rowH, (s == 0) ? RGB(18, 20, 28) : RGB(14, 16, 22));
+		const int yy = y + s * lineH;
+		int rh = lineH;
+		if (s == 1) rh = footH - lineH;
+		if (rh < 1) rh = 1;
+		dc.FillSolidRect(0, yy, w, rh, (s == 0) ? RGB(18, 20, 28) : RGB(14, 16, 22));
 		dc.SetBkMode(TRANSPARENT);
 		dc.SetTextColor((m_insLine[s][4] && wcsstr(m_insLine[s], L"Thru") == m_insLine[s] + 5)
 			? RGB(120, 124, 136) : RGB(220, 214, 190));
@@ -3418,24 +3422,41 @@ void CMidiMonitorDlg::DrawInsFoot(CDC& dc, int y, int w, int footH, UINT dpi)
 	dc.SelectObject(oldF);
 }
 
+int CMidiMonitorDlg::LayPartY(int i) const
+{
+	if (i < 0) i = 0;
+	if (i > PART_MAX) i = PART_MAX;
+	const int extra = (m_layExtra < 0) ? 0 : m_layExtra;
+	return m_layHeadH + i * m_layRowH + ((i < extra) ? i : extra);
+}
+
+int CMidiMonitorDlg::LayPartH(int i) const
+{
+	if (i < 0 || i >= PART_MAX) return m_layRowH;
+	return m_layRowH + ((i < m_layExtra) ? 1 : 0);
+}
+
 void CMidiMonitorDlg::DrawMonitor2D(CDC& dc, int w, int h, UINT dpi)
 {
 	const int headH = Scale(78, dpi);
-	const int footH = Scale(32, dpi);
+	const int footH = Scale(28, dpi);
 	dc.FillSolidRect(0, headH, w, h - headH, MM_BG);
 	DrawHeader(dc, w, headH, dpi);
 	int bodyH = h - headH - footH;
 	if (bodyH < PART_MAX) bodyH = PART_MAX;
 	int rowH = bodyH / PART_MAX;
 	if (rowH < Scale(10, dpi)) rowH = Scale(10, dpi);
+	int extra = bodyH - rowH * PART_MAX;
+	if (extra < 0) extra = 0;
+	if (extra > PART_MAX) extra = PART_MAX;
 	m_layHeadH = headH;
 	m_layRowH = rowH;
 	m_layFootH = footH;
+	m_layExtra = extra;
 	m_layW = w;
 	for (int i = 0; i < PART_MAX; ++i)
-		DrawPartRow(dc, i, headH + i * rowH, rowH, w, dpi, 1);
-	const int footY = headH + PART_MAX * rowH;
-	DrawInsFoot(dc, footY, w, footH, dpi);
+		DrawPartRow(dc, i, LayPartY(i), LayPartH(i), w, dpi, 1);
+	DrawInsFoot(dc, LayFootY(), w, footH, dpi);
 }
 
 void CMidiMonitorDlg::TickVisuals()
@@ -3757,14 +3778,22 @@ int CMidiMonitorDlg::HitMonitor(CPoint clientPt, int& part, CRect& cell) const
 	if (!m_volBarRc.IsRectEmpty() && m_volBarRc.PtInRect(f))
 		return MM_HIT_APPVOL;
 	if (f.y < m_layHeadH) return MM_HIT_NONE;
-	const int row = (f.y - m_layHeadH) / m_layRowH;
+	const int footY = LayFootY();
+	if (f.y >= footY) return MM_HIT_NONE;
+	int row = 0;
+	const int y0 = f.y - m_layHeadH;
+	if (m_layExtra > 0 && m_layRowH + 1 > 0 && y0 < m_layExtra * (m_layRowH + 1))
+		row = y0 / (m_layRowH + 1);
+	else if (m_layRowH > 0)
+		row = m_layExtra + (y0 - m_layExtra * (m_layRowH + 1)) / m_layRowH;
 	if (row < 0 || row >= PART_MAX) return MM_HIT_NONE;
 	part = row;
 	const UINT dpi = WindowDpi();
-	const int y = m_layHeadH + row * m_layRowH;
+	const int y = LayPartY(row);
+	const int rowH = LayPartH(row);
 	const int w = m_layW;
 	const int meterX = Scale(280, dpi);
-	const int bh = m_layRowH - Scale(4, dpi);
+	const int bh = rowH - Scale(4, dpi);
 	const int by = y + Scale(2, dpi);
 	const int bw = Scale(6, dpi);
 	auto hitBar = [&](int x, int bwBar, CRect& out) -> bool {
@@ -3777,9 +3806,9 @@ int CMidiMonitorDlg::HitMonitor(CPoint clientPt, int& part, CRect& cell) const
 	if (hitBar(meterX + Scale(36, dpi), bw, cell)) return MM_HIT_REV;
 	if (hitBar(meterX + Scale(44, dpi), bw, cell)) return MM_HIT_CRS;
 	if (hitBar(meterX + Scale(52, dpi), bw, cell)) return MM_HIT_VAR;
-	CRect krc(Scale(672, dpi), y + 1, w - Scale(4, dpi), y + m_layRowH - 2);
+	CRect krc(Scale(672, dpi), y + 1, w - Scale(4, dpi), y + rowH - 2);
 	if (krc.PtInRect(f)) { cell = krc; return MM_HIT_KEYS; }
-	CRect pcRc(Scale(40, dpi), y, Scale(140, dpi), y + m_layRowH);
+	CRect pcRc(Scale(40, dpi), y, Scale(140, dpi), y + rowH);
 	if (pcRc.PtInRect(f)) { cell = pcRc; return MM_HIT_PC; }
 	return MM_HIT_NONE;
 }
@@ -3796,8 +3825,9 @@ void CMidiMonitorDlg::ApplyDragValue(CPoint clientPt)
 	int part = m_dragPart;
 	HitMonitor(clientPt, part, cell);
 	part = m_dragPart;
-	const int y = m_layHeadH + part * m_layRowH;
-	const int bh = m_layRowH - Scale(4, dpi);
+	const int y = LayPartY(part);
+	const int rowH = LayPartH(part);
+	const int bh = rowH - Scale(4, dpi);
 	const int by = y + Scale(2, dpi);
 	int v = 0;
 	if (m_dragKind == MM_HIT_PAN) {
@@ -3902,7 +3932,7 @@ void CMidiMonitorDlg::InvalidateDirty()
 		acc.SetRect(0, capH, w, capH + m_layHeadH);
 		any = 1;
 		if (m_layFootH > 0 && m_layRowH > 0) {
-			const int fy = capH + m_layHeadH + PART_MAX * m_layRowH;
+			const int fy = capH + LayFootY();
 			CRect fr(0, fy, w, fy + m_layFootH);
 			acc.UnionRect(&acc, &fr);
 		}
@@ -3910,8 +3940,8 @@ void CMidiMonitorDlg::InvalidateDirty()
 	if (m_layRowH > 0 && m_layHeadH > 0) {
 		for (int i = 0; i < PART_MAX; ++i) {
 			if ((m_dirtyRows & (1u << i)) == 0) continue;
-			const int y = capH + m_layHeadH + i * m_layRowH;
-			CRect r(0, y, w, y + m_layRowH);
+			const int y = capH + LayPartY(i);
+			CRect r(0, y, w, y + LayPartH(i));
 			if (!any) { acc = r; any = 1; }
 			else acc.UnionRect(&acc, &r);
 		}
@@ -4117,11 +4147,11 @@ void CMidiMonitorDlg::OnPaint()
 			if (m_dirtyHead) {
 				DrawHeader(m_frameDC, w, m_layHeadH, dpi);
 				if (m_layFootH > 0)
-					DrawInsFoot(m_frameDC, m_layHeadH + PART_MAX * m_layRowH, w, m_layFootH, dpi);
+					DrawInsFoot(m_frameDC, LayFootY(), w, m_layFootH, dpi);
 			}
 			for (int i = 0; i < PART_MAX; ++i) {
 				if (m_dirtyRows & (1u << i))
-					DrawPartRow(m_frameDC, i, m_layHeadH + i * m_layRowH, m_layRowH, w, dpi, 0);
+					DrawPartRow(m_frameDC, i, LayPartY(i), LayPartH(i), w, dpi, 0);
 			}
 		}
 		m_dirtyRows = 0;

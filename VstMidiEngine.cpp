@@ -546,6 +546,29 @@ static int VstIoSlot()
 	return s;
 }
 
+static volatile LONG g_midiKeepAlive[2];
+
+static void MidiKeepAliveIfCcSx(DWORD msg)
+{
+	const int st = (int)(msg & 0xf0);
+	if (st == 0xb0 || (msg & 0xff) == 0xf0)
+		InterlockedExchange(&g_midiKeepAlive[VstIoSlot()], 1);
+}
+
+extern "C" int VstMidiEventsPending(void)
+{
+	const int s = VstIoSlot();
+	EnterCriticalSection(&g_engs[s].cs);
+	const int p = (g_engs[s].events && g_engs[s].eventPos < g_engs[s].eventCount) ? 1 : 0;
+	LeaveCriticalSection(&g_engs[s].cs);
+	return p;
+}
+
+extern "C" int VstMidiTakeKeepAlive(void)
+{
+	return (int)InterlockedExchange(&g_midiKeepAlive[VstIoSlot()], 0);
+}
+
 extern "C" void VstMidiSetIoSlot(int slot)
 {
 	if (slot < 0 || slot >= 2) slot = 0;
@@ -3083,6 +3106,7 @@ static void FlushInjectQueue(__int64 start, int frames)
 		const LONG w = g_injSxW;
 		while (r != w) {
 			const int i = (int)(r & (INJ_SX_N - 1));
+			MidiKeepAliveIfCcSx(0xf0);
 			BroadcastSongSysex(g_injSx[i], g_injSxLen[i], 0, (int)g_injSxPort[i]);
 			++r;
 		}
@@ -3106,6 +3130,7 @@ static void FlushInjectQueue(__int64 start, int frames)
 		}
 		if (ofs < 0) ofs = 0;
 		if (frames > 0 && ofs >= frames) ofs = frames - 1;
+		MidiKeepAliveIfCcSx(g_injMsg[i]);
 		EmitSongShort((int)g_injPort[i], g_injMsg[i], start, frames, ofs);
 		++r;
 	}
@@ -3167,6 +3192,7 @@ static void DispatchDueEvents(__int64 start, int frames)
 			const int n = PrepareSongSysex(raw, rawLen, (int)g_injSxPort[i], buf,
 				(int)sizeof(buf), &units, &rhyBb);
 			if (n > 0) {
+				MidiKeepAliveIfCcSx(0xf0);
 				if (units & 1) pushSx(0, buf, n, start, (int)g_injSxPort[i]);
 				if (units & 2) pushSx(1, buf, n, start, (int)g_injSxPort[i]);
 				if (units & 4) pushSx(2, buf, n, start, (int)g_injSxPort[i]);
@@ -3199,6 +3225,7 @@ static void DispatchDueEvents(__int64 start, int frames)
 			it.sample = start + ofs;
 			it.port = (int)g_injPort[i];
 			it.sysexOff = -1;
+			MidiKeepAliveIfCcSx(it.msg);
 			routeShort(it);
 			++r;
 		}
@@ -3211,6 +3238,7 @@ static void DispatchDueEvents(__int64 start, int frames)
 		if ((e.msg & 0xff) == 0xff) continue;
 
 		if ((e.msg & 0xff) == 0xf0 && e.sysexOff >= 0 && g_eng.sysexData) {
+			MidiKeepAliveIfCcSx(0xf0);
 			const int rawLen = (int)e.aux;
 			if (e.sysexOff + rawLen > g_eng.sysexBytes) continue;
 			const BYTE* raw = g_eng.sysexData + e.sysexOff;
@@ -3263,6 +3291,7 @@ static void DispatchDueEvents(__int64 start, int frames)
 			continue;
 		}
 
+		MidiKeepAliveIfCcSx(e.msg);
 		routeShort(e);
 	}
 	if (g_eng.events && g_eng.eventCount > 0 && g_eng.eventPos >= g_eng.eventCount &&
@@ -4544,6 +4573,7 @@ static void DispatchEnsemble(__int64 start, int frames)
 		e.msg = SongOverrideMsg(e.port, e.msg);
 		if ((e.msg & 0xff) == 0xff) continue;
 		if ((e.msg & 0xff) == 0xf0 && e.sysexOff >= 0 && g_eng.sysexData) {
+			MidiKeepAliveIfCcSx(0xf0);
 			const int len = (int)e.aux;
 			if (e.sysexOff + len <= g_eng.sysexBytes) {
 				__int64 d = e.sample - start;
@@ -4552,6 +4582,7 @@ static void DispatchEnsemble(__int64 start, int frames)
 			}
 			continue;
 		}
+		MidiKeepAliveIfCcSx(e.msg);
 		const int ch = (int)(e.msg & 15);
 		const int slot = g_eng.chSlot[ch];
 		if (slot < 0) continue;
@@ -5870,6 +5901,7 @@ extern "C" void VstMidiClose(void)
 	FreeSong();
 	LeaveCriticalSection(&g_eng.cs);
 	g_reportedLatencySamples[VstIoSlot()] = 0;
+	InterlockedExchange(&g_midiKeepAlive[VstIoSlot()], 0);
 }
 
 extern "C" void VstMidiCloseSlot(int slot)

@@ -179,6 +179,9 @@ private:
 	void SyncSoft3DFromSave();
 	bool IsView3D() const { return m_viewMode == 1; }
 	int Scale(int v96, UINT dpi) const { return MulDiv(v96, (int)dpi, 96); }
+	int LayPartY(int i) const;
+	int LayPartH(int i) const;
+	int LayFootY() const { return LayPartY(PART_MAX); }
 	UINT WindowDpi() const;
 
 	CCustomStandardButton m_help;
@@ -280,6 +283,7 @@ private:
 	int m_layHeadH;
 	int m_layRowH;
 	int m_layFootH;
+	int m_layExtra;
 	int m_persistAge;
 	int m_drumGlow;
 	int m_dispBpm;

@@ -597,9 +597,11 @@ bool KpiHost64Client::VstOpen(const std::wstring& midPath, const std::wstring& v
 }
 
 bool KpiHost64Client::VstRender(uint32_t bytesWanted, std::vector<uint8_t>& outPcm, bool& outEof,
-	const uint8_t* injPorts, const uint32_t* injMsgs, const int32_t* injOfs, uint32_t injCount, uint32_t slot)
+	const uint8_t* injPorts, const uint32_t* injMsgs, const int32_t* injOfs, uint32_t injCount, uint32_t slot,
+	uint32_t* outMidiFlags)
 {
 	if (slot > 1) slot = 0;
+	if (outMidiFlags) *outMidiFlags = 0;
 	KPIHOST64_RenderReq rr{};
 	rr.sessionId = slot;
 	rr.bytesWanted = bytesWanted;
@@ -623,7 +625,8 @@ bool KpiHost64Client::VstRender(uint32_t bytesWanted, std::vector<uint8_t>& outP
 	if (!SendRequest(KPIHOST64_CMD_VST_RENDER, req.data(), (uint32_t)req.size(), reply, st)) return false;
 	if (st != KPIHOST64_STATUS_OK || reply.size() < sizeof(KPIHOST64_RenderReply)) return false;
 	const KPIHOST64_RenderReply* r = (const KPIHOST64_RenderReply*)reply.data();
-	outEof = r->eof != 0;
+	if (outMidiFlags) *outMidiFlags = r->eof;
+	outEof = (r->eof & KPIHOST64_EOF_SHORT) != 0;
 	outPcm.clear();
 	if (r->bytesReturned > 0 && reply.size() >= sizeof(KPIHOST64_RenderReply) + r->bytesReturned) {
 		outPcm.resize(r->bytesReturned);

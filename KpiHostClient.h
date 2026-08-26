@@ -41,7 +41,7 @@ public:
 	bool VstRender(uint32_t bytesWanted, std::vector<uint8_t>& outPcm, bool& outEof,
 		const uint8_t* injPorts = nullptr, const uint32_t* injMsgs = nullptr,
 		const int32_t* injOfs = nullptr, uint32_t injCount = 0,
-		uint32_t slot = 0);
+		uint32_t slot = 0, uint32_t* outMidiFlags = nullptr);
 	bool VstSeek(uint64_t posSample, uint32_t slot = 0);
 	bool VstClose(uint32_t slot = 0);
 	bool VstCloseAll();

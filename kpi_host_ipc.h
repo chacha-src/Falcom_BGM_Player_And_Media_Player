@@ -101,11 +101,18 @@ struct KPIHOST64_RenderReq
 	uint32_t bytesWanted;
 };
 
+/* eof 下位: 1=短い読み / 2=まだ MIDI イベントが残っている / 4=この塊で SysEx か CC を送った */
+enum {
+	KPIHOST64_EOF_SHORT = 1u,
+	KPIHOST64_EOF_MIDI_PENDING = 2u,
+	KPIHOST64_EOF_MIDI_KEEPALIVE = 4u
+};
+
 struct KPIHOST64_RenderReply
 {
 	uint32_t sessionId;
 	uint32_t bytesReturned;
-	uint32_t eof; // 1 if decoder returned < requested
+	uint32_t eof; // bit0=短い読み bit1=MIDI未消化 bit2=この塊でSysEx/CC
 	// followed by PCM bytes
 };
 

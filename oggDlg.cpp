@@ -19435,6 +19435,7 @@ enum : int { VST_PF_CHUNK = 64 * 1024, VST_PF_SECONDS = 4 };
 struct VstPrefetch
 {
 	std::vector<uint8_t> ring;
+	std::vector<uint8_t> hold; // 1=このバイトは SysEx/CC 中 or まだ曲イベントが残っている
 	size_t head = 0;
 	size_t used = 0;
 	int bpf = 4;
@@ -19452,7 +19453,15 @@ struct VstPrefetch
 VstPrefetch g_vstPf[XF_SLOTS];
 } // namespace
 
-static bool VstRemoteRenderSlot(int slot, uint32_t bytesWanted, std::vector<uint8_t>& pcm, bool& eof)
+static int g_vstPcmHold = 0;
+
+static int VstMidiHoldFromFlags(uint32_t f)
+{
+	return (f & (KPIHOST64_EOF_MIDI_PENDING | KPIHOST64_EOF_MIDI_KEEPALIVE)) ? 1 : 0;
+}
+
+static bool VstRemoteRenderSlot(int slot, uint32_t bytesWanted, std::vector<uint8_t>& pcm, bool& eof,
+	uint32_t* outMidiFlags = nullptr)
 {
 	if (slot < 0 || slot >= XF_SLOTS) slot = 0;
 	BYTE ports[64];
@@ -19479,8 +19488,11 @@ static bool VstRemoteRenderSlot(int slot, uint32_t bytesWanted, std::vector<uint
 		}
 	}
 	VstMidiSetIoSlot(slot);
-	return g_kpiHost.VstRender(bytesWanted, pcm, eof, ports,
-		reinterpret_cast<const uint32_t*>(msgs), ofs, (uint32_t)n, (uint32_t)slot);
+	uint32_t midiFlags = 0;
+	const bool ok = g_kpiHost.VstRender(bytesWanted, pcm, eof, ports,
+		reinterpret_cast<const uint32_t*>(msgs), ofs, (uint32_t)n, (uint32_t)slot, &midiFlags);
+	if (outMidiFlags) *outMidiFlags = midiFlags;
+	return ok;
 }
 
 static bool VstRemoteRender(uint32_t bytesWanted, std::vector<uint8_t>& pcm, bool& eof)
@@ -19505,9 +19517,11 @@ static unsigned __stdcall VstPrefetchProc(void* arg)
 		}
 		std::vector<uint8_t> pcm;
 		bool eof = false;
+		uint32_t midiFlags = 0;
 		EnterCriticalSection(&pf.rcs);
-		const bool ok = VstRemoteRenderSlot(slot, (uint32_t)VST_PF_CHUNK, pcm, eof);
+		const bool ok = VstRemoteRenderSlot(slot, (uint32_t)VST_PF_CHUNK, pcm, eof, &midiFlags);
 		if (ok) {
+			const uint8_t holdB = (uint8_t)VstMidiHoldFromFlags(midiFlags);
 			EnterCriticalSection(&pf.cs);
 			const size_t cap = pf.ring.size();
 			size_t left = pcm.size();
@@ -19518,6 +19532,8 @@ static unsigned __stdcall VstPrefetchProc(void* arg)
 				size_t run = cap - at;
 				if (run > left) run = left;
 				memcpy(pf.ring.data() + at, src, run);
+				if (pf.hold.size() == cap)
+					memset(pf.hold.data() + at, holdB, run);
 				src += run; left -= run;
 				pf.used += run;
 			}
@@ -19554,6 +19570,7 @@ void VstPrefetchStop(int slot)
 	if (pf.csReady) {
 		EnterCriticalSection(&pf.cs);
 		pf.ring.clear();
+		pf.hold.clear();
 		pf.head = pf.used = 0;
 		pf.eof = false;
 		LeaveCriticalSection(&pf.cs);
@@ -19587,6 +19604,7 @@ void VstPrefetchStart(int slot, int rate, int channels, int bits, int prefill, d
 	}
 	EnterCriticalSection(&pf.cs);
 	pf.ring.assign(bytes, 0);
+	pf.hold.assign(bytes, 0);
 	pf.head = pf.used = 0;
 	pf.eof = false;
 	pf.bpf = (bpf > 0) ? bpf : 4;
@@ -19611,12 +19629,13 @@ void VstPrefetchStart(int slot, int rate, int channels, int bits, int prefill, d
 	}
 }
 
-static int VstPrefetchRead(int slot, BYTE* dst, int cnt)
+static int VstPrefetchRead(int slot, BYTE* dst, int cnt, int* outHold)
 {
 	if (slot < 0 || slot >= XF_SLOTS) return -1;
 	VstPrefetch& pf = g_vstPf[slot];
 	if (!pf.thread || !pf.csReady) return -1;
 	int copied = 0;
+	int hold = 0;
 	EnterCriticalSection(&pf.cs);
 	const size_t cap = pf.ring.size();
 	while (cap && copied < cnt && pf.used) {
@@ -19624,6 +19643,12 @@ static int VstPrefetchRead(int slot, BYTE* dst, int cnt)
 		if (run > pf.used) run = pf.used;
 		if (run > cap - pf.head) run = cap - pf.head;
 		memcpy(dst + copied, pf.ring.data() + pf.head, run);
+		if (!hold && pf.hold.size() == cap) {
+			const uint8_t* h = pf.hold.data() + pf.head;
+			for (size_t i = 0; i < run; ++i) {
+				if (h[i]) { hold = 1; break; }
+			}
+		}
 		pf.head = (pf.head + run) % cap;
 		pf.used -= run;
 		copied += (int)run;
@@ -19641,19 +19666,23 @@ static int VstPrefetchRead(int slot, BYTE* dst, int cnt)
 	}
 	LeaveCriticalSection(&pf.cs);
 	SetEvent(pf.room);
+	if (outHold) *outHold = hold;
 	return copied;
 }
 
 int readvst(BYTE* bw, int cnt)
 {
 	if (!bw || cnt <= 0) return 0;
+	g_vstPcmHold = 0;
 	const int slot = VstBindIoSlot();
 	if (g_vstRemote64Slot[slot]) {
 		VstPrefetch& pf = g_vstPf[slot];
 		if (!pf.thread)
 			VstPrefetchStart(slot, wavbit_sample_Hz, wavchannel, abs(wavsam_depth), 0);
-		int got = VstPrefetchRead(slot, bw, cnt);
+		int hold = 0;
+		int got = VstPrefetchRead(slot, bw, cnt, &hold);
 		if (got < 0) got = 0;
+		g_vstPcmHold |= hold;
 		if (got >= cnt)
 			return got;
 		/* 足りない分は同期レンダで埋め切る。半端な長さで返すと呼び出し側が残りを
@@ -19665,11 +19694,14 @@ int readvst(BYTE* bw, int cnt)
 		if (pf.csReady) {
 			EnterCriticalSection(&pf.rcs);
 			for (int guard = 0; guard < 8 && got < cnt; ++guard) {
-				const int add = VstPrefetchRead(slot, bw + got, cnt - got);
-				if (add > 0) { got += add; continue; }
+				hold = 0;
+				const int add = VstPrefetchRead(slot, bw + got, cnt - got, &hold);
+				if (add > 0) { g_vstPcmHold |= hold; got += add; continue; }
 				pcm.clear();
-				if (!VstRemoteRenderSlot(slot, (uint32_t)(cnt - got), pcm, eof))
+				uint32_t midiFlags = 0;
+				if (!VstRemoteRenderSlot(slot, (uint32_t)(cnt - got), pcm, eof, &midiFlags))
 					break;
+				g_vstPcmHold |= VstMidiHoldFromFlags(midiFlags);
 				int n = (int)pcm.size();
 				if (n <= 0)
 					break;
@@ -19680,9 +19712,11 @@ int readvst(BYTE* bw, int cnt)
 			LeaveCriticalSection(&pf.rcs);
 			return got;
 		}
-		if (!VstRemoteRenderSlot(slot, (uint32_t)(cnt - got), pcm, eof)
-			&& !VstRemoteRenderSlot(slot, (uint32_t)(cnt - got), pcm, eof))
+		uint32_t midiFlags = 0;
+		if (!VstRemoteRenderSlot(slot, (uint32_t)(cnt - got), pcm, eof, &midiFlags)
+			&& !VstRemoteRenderSlot(slot, (uint32_t)(cnt - got), pcm, eof, &midiFlags))
 			return got;
+		g_vstPcmHold |= VstMidiHoldFromFlags(midiFlags);
 		int n = (int)pcm.size();
 		if (n > cnt - got) n = cnt - got;
 		if (n > 0) {
@@ -19691,16 +19725,24 @@ int readvst(BYTE* bw, int cnt)
 		}
 		return got;
 	}
-	return VstMidiRead(bw, cnt);
+	const int n = VstMidiRead(bw, cnt);
+	if (VstMidiEventsPending() || VstMidiTakeKeepAlive())
+		g_vstPcmHold = 1;
+	return n;
 }
 
 // mid VST: 演奏後も VST が無音/残響を出し続ける／length 超過後に 0 埋めが続くのを
 // KPI と同様の無音連続で打ち切る（約4秒）。x86 直読み・KpiHost64 経由ともここで見る。
+// 初期化 SysEx/CC や曲の残りイベントがある塊では 4 秒を進めない。
 static int VstSilenceAccum(BYTE* pcm, int bytes)
 {
 	if (bytes <= 0) return 0;
 	const bool exporting = (wavExportPath.GetLength() > 0 || g_isWavExportRendering);
 	if (exporting) return 0;
+	if (g_vstPcmHold) {
+		kpi_silence_bytes = 0;
+		return 0;
+	}
 	if (IsBlockSilent(pcm, bytes, abs(wavsam_depth)))
 		kpi_silence_bytes += bytes;
 	else

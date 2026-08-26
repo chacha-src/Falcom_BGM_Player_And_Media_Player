@@ -85,7 +85,7 @@ void CCC_FillRectAlpha(HDC hdc, const RECT& rc, COLORREF clr, BYTE alpha);
 
 // ============================================================================
 // 隠し機能: 複合ファンクション連打で入る裏演出 (savedata.inwoman==1)。
-// 出口は F12 を短時間に5回。入り口は cpp 側のシーケンス。
+// 出口は F12 を短時間に5回。入り口は F12×7 → F11×7 → F12 を2秒押しっぱなし。
 // ============================================================================
 extern save savedata;
 static inline BOOL CCC_IsInwoman()

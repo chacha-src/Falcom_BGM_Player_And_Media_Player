@@ -28,8 +28,8 @@
 <ul>
 <li>曲の中に <b>XG System On</b>（XGリセット）があれば → <b>XG VST</b></li>
 <li>それが無ければ → <b>GS VST</b></li>
-<li>片方だけ指定してあるときは、その片方で両方をまかないます。</li>
-<li>両方とも空のときは、Windows の MIDI へ落ちます。音源が無いのでこのプレイヤー側では無音ですが、曲は最後まで進みます。</li>
+<li>片方だけ指定してあるときは、指定したほうで GS も XG も再生します。</li>
+<li>両方とも空のときは、Windows の MIDI 出力になります。音源が無いのでこのプレイヤー側では無音ですが、曲は最後まで進みます。</li>
 </ul>
 <h2>32パート（Port A / Port B）</h2>
 <p>32パートの曲は、前半16パートと後半16パートを別々の音源で鳴らします。ドラムがどのパートかは曲の指定に従います。<a href="midi-monitor.htm">MIDIモニタ</a> の A01–A16 / B01–B16 も同じ分け方です。</p>
@@ -56,7 +56,7 @@
 <p>プロジェクトフォルダに .mid が無いときは、「MIDIが見つかりません。同フォルダに .mid をエクスポートしてください。」と出ることがあります。</p>
 </div>
 <div class="note"><span class="label">注意</span>
-<p>「VST MIDIを開けませんでした。」と出るときは、指定した DLL のパス、32/64bit の食い違い、KpiHost64.exe の有無を順に確かめてください。</p>
+<p>「VST MIDIを開けませんでした。」と出るときは、指定した DLL のパス、32ビットと64ビットの不一致、KpiHost64.exe の有無を順に確かめてください。</p>
 </div>
 <div class="related"><span class="label">あわせて読みたい</span><ul><li><a href="render.htm">レンダリング設定</a></li><li><a href="midi-monitor.htm">MIDIモニタ</a></li><li><a href="vst.htm">VSTホストで音源を鳴らす</a></li><li><a href="kpi.htm">KPIプラグインで対応形式をふやす</a></li><li><a href="playlist.htm">プレイリストを使う</a></li><li><a href="crossfade.htm">連続再生クロスフェード</a></li></ul></div>
 

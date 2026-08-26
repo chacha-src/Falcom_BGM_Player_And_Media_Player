@@ -63,8 +63,12 @@ uint32_t VstHost64_Render(int slot, uint32_t bytesWanted, std::vector<uint8_t>& 
 	if (got < 0) got = 0;
 	if ((uint32_t)got < bytesWanted) {
 		out.resize((size_t)got);
-		eof = 1;
+		eof |= KPIHOST64_EOF_SHORT;
 	}
+	if (VstMidiEventsPending())
+		eof |= KPIHOST64_EOF_MIDI_PENDING;
+	if (VstMidiTakeKeepAlive())
+		eof |= KPIHOST64_EOF_MIDI_KEEPALIVE;
 	return KPIHOST64_STATUS_OK;
 }
 

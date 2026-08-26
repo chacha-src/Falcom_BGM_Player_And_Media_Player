@@ -68,6 +68,10 @@ int VstMidiOpen(const wchar_t* midPath, const wchar_t hints[][128],
 	int hintCount, HWND parentForWait);
 void VstMidiClose(void);
 int VstMidiRead(BYTE* dst, int bytesWanted);
+// 1 = まだ曲の MIDI イベントが残っている（初期化 SysEx/CC のあいだ無音停止しない）。
+int VstMidiEventsPending(void);
+// 直近の再生ブロックで SysEx か CC を送った。呼ぶとクリア。
+int VstMidiTakeKeepAlive(void);
 // 1 = VST/ensemble が PCM を出す。マッパーのみは 0（PCM は無音でも曲は続く）。
 int VstMidiHasPluginAudio(void);
 void VstMidiLog(const wchar_t* msg);
