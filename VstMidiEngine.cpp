@@ -1,8 +1,6 @@
-﻿// One engine source for both hosts. KpiHost64.exe compiles this same file
-// through VstMidiEngine_k64.cpp; it used to keep a private copy, which quietly
-// meant every VST2 hosting fix landed only in ogg.exe while the x64 plug-ins
-// that actually run inside KpiHost64 kept the old code. stdafx.h routes itself
-// to the MFC-free header when KPIHOST64_BUILD is set.
+﻿// 本体と KpiHost64 が同じソースを使う。KpiHost64.exe は VstMidiEngine_k64.cpp 経由。
+// 以前はホスト側にコピーがあり、VST2 修正が ogg.exe にしか入らなかった。
+// KPIHOST64_BUILD 時は stdafx.h が MFC 無しヘッダへ切り替わる。
 #include "stdafx.h"
 #include "VstMidiEngine.h"
 #include "Vst3Host.h"
@@ -374,23 +372,20 @@ static int GsDt1IsPortReset(const BYTE* d, int n)
 }
 
 enum { SAMPLE_RATE = 44100, BLOCK_FRAMES = 512, MAX_MIDI_EVENTS = 500000 };
-// Loading is not proof of anything: an unauthorised or half-installed
-// instrument opens cleanly, reports its name, accepts every note and returns
-// digital silence. The only honest test is to play something and look at the
-// output. Peak is in the same units as the render log, and 0.001 sits well
-// above an idle noise floor (~0.00002 observed) and far below a real note
-// (~0.06 observed).
-enum { PROBE_AUDIBLE_MILLI = 1 }; // peak x1000
-enum { CACHE_MAGIC = 0x43545356, CACHE_VERSION = 12 }; // single-file .vst3 (Kontakt) + standard roots
+// Load 成功だけでは足りない。未認証・インストール途中の音源は MIDI を受けても無音。
+// プローブ音を鳴らしてピークを見る。0.001 は無音フロア（~0.00002）より上、実音（~0.06）より下。
+enum { PROBE_AUDIBLE_MILLI = 1 }; // ピーク ×1000
+enum { CACHE_MAGIC = 0x43545356, CACHE_VERSION = 12 }; // 単体 .vst3（Kontakt）＋標準ルート
 
+// SMF をサンプル位置へ展開した 1 イベント。モニタの MmEv と同型に近い。
 struct MidiItem {
 	unsigned __int64 tick;
 	__int64 sample;
-	DWORD msg; // 0xff tempo, 0xf0 sysex, else channel short
-	DWORD aux; // tempo usec/qn, or sysex byte length
-	int port; // SMF MIDI Port meta (FF 21): 0=ch1-16, 1=17-32, 2=33-48
-	int sysexOff; // offset into EngineState::sysexData; -1 if not sysex
-	int seq; // parse order; same-tick tie-break so qsort stays stable
+	DWORD msg; // 0xff=テンポ、0xf0=SysEx、それ以外はチャンネルショート
+	DWORD aux; // テンポ usec/qn、または SysEx バイト長
+	int port; // SMF MIDI Port メタ（FF 21）: 0=ch1-16, 1=17-32, 2=33-48
+	int sysexOff; // EngineState::sysexData へのオフセット。SysEx でなければ -1
+	int seq; // パース順。同時 tick の qsort を安定させる
 };
 
 struct Voice {
@@ -400,7 +395,7 @@ struct Voice {
 	float velocity;
 	BYTE note;
 	BYTE channel;
-	BYTE stage; // 0 free, 1 attack, 2 sustain, 3 release
+	BYTE stage; // 0 空き, 1 attack, 2 sustain, 3 release
 };
 
 struct DrumV {
@@ -418,15 +413,13 @@ enum { LIVE_PEND_EVENTS = 512, LIVE_PEND_SYSEX_BYTES = 4096 };
 
 struct LivePendEv {
 	DWORD msg;
-	int sysexOff; // <0 for a plain short message
+	int sysexOff; // 普通のショートなら <0
 	int sysexLen;
 };
 
-// VST2 wants effProcessEvents once per block, carrying every event for that
-// block. Sending one event per call makes the plug-in keep only the last one,
-// which silently eats notes and, when the lost one is a note-off, leaves the
-// voice ringing forever. So live input is collected here and handed over in a
-// single call right before the part is rendered.
+// VST2 はブロックあたり effProcessEvents を 1 回、そのブロックの全イベントを載せる。
+// 1 イベントずつ呼ぶと最後の 1 個しか残らず、note-off が落ちて鳴りっぱなしになる。
+// ライブ入力はここに溜めて、パート描画直前にまとめて渡す。
 struct LivePending {
 	int count;
 	int sysexUsed;
@@ -441,9 +434,9 @@ struct LivePart {
 	AEffect* effect;
 	Vst3Inst* vst3;
 	int isMulti;
-	int remote; // 1=hosted by KpiHost64 (wrong-arch plug-in)
-	int sendCh; // -1 = channel as received, 0..15 = forced
-	int prog;   // program last picked from the slot menu
+	int remote; // 1=KpiHost64 がホスト（アーキが合わないプラグイン）
+	int sendCh; // -1=届いたチャンネルのまま、0..15=強制
+	int prog;   // スロットメニューで最後に選んだプログラム
 	HWND edWnd;
 	LivePending pend;
 };
@@ -472,14 +465,14 @@ struct EngineState {
 	DWORD fileBytes;
 	MidiItem* events;
 	int eventCount;
-	int eventPos;
+	int eventPos;          // 次に送るイベント。シークで巻き戻す
 	__int64 playSample;
 	__int64 lengthSamples;
 	HMODULE module;
 	AEffect* effect;
 	Vst3Inst* vst3;
-	// Extra multi-timbral instances for SMF ports (SC-88 style 32/48ch).
-	// Port0 = effect/vst3, port1 = effectB (VST2), port2+ = vst3C or effectC.
+	// SMF ポート用の追加マルチ（SC-88 風 32/48ch）。
+	// Port0 = effect/vst3、port1 = effectB（VST2）、port2+ = vst3C または effectC。
 	HMODULE moduleB;
 	AEffect* effectB;
 	HMODULE moduleC;
@@ -487,8 +480,8 @@ struct EngineState {
 	Vst3Inst* vst3C;
 	BYTE* sysexData;
 	int sysexBytes;
-	int maxMidiPort; // highest FF 21 port seen (0=16ch only)
-	int mirrorToB;   // GS/XG 32-part with no FF 21: copy ch MIDI to unit B
+	int maxMidiPort; // 見た FF 21 の最大（0=16ch のみ）
+	int mirrorToB;   // GS/XG 32 パートで FF 21 無し: ch MIDI を unit B へコピー
 	int usingBuiltin;
 	int useEnsemble;
 	int useDrums;
@@ -496,7 +489,7 @@ struct EngineState {
 	HMIDIOUT midiOut;
 	MixSlot mix[MIX_SLOTS];
 	int mixCount;
-	int chSlot[16]; // -1=silent, else mix index
+	int chSlot[16]; // -1=無音、それ以外は mix インデックス
 	Voice voices[32];
 	DrumV drums[16];
 	BYTE noteState[16][128];
@@ -572,7 +565,7 @@ extern "C" int VstMidiTakeKeepAlive(void)
 extern "C" void VstMidiSetIoSlot(int slot)
 {
 	if (slot < 0 || slot >= 2) slot = 0;
-	t_vstIoSlot = slot;
+	t_vstIoSlot = slot; // スレッドローカル。クロスフェード中に A 再生しながら B を開ける
 }
 
 extern "C" int VstMidiGetIoSlot(void)
@@ -5130,6 +5123,7 @@ static int ResolvePickedPluginArch(const wchar_t* src, wchar_t* outPath, int out
 	return arch ? arch : want;
 }
 
+// savedata の GS/XG パスから再生に使う DLL を選ぶ。両方空なら 0（マッパー）。
 extern "C" int VstPickPreferredPlugin(wchar_t* outPath, int outChars)
 {
 	wchar_t pick[VST_PATH_CHARS];
@@ -5141,6 +5135,7 @@ extern "C" int VstPickPreferredPlugin(wchar_t* outPath, int outChars)
 	return ResolvePickedPluginArch(pick, outPath, outChars);
 }
 
+// 1 = x64 VSTi を KpiHost64 で開く。midPath で XG/GS を選ぶ。両方空なら 0。
 extern "C" int VstShouldOpenRemote64(const wchar_t* midPath, wchar_t* outDll, int outChars)
 {
 	if (!outDll || outChars <= 0) return 0;
@@ -5807,6 +5802,7 @@ static int LoadFirstAudibleCandidate(const wchar_t* preferred, wchar_t* outPath,
 	return 0;
 }
 
+// SMF を読み、GS/XG 指定の VSTi（またはマッパー）で曲再生を始める。スロットは TLS。
 extern "C" int VstMidiOpen(const wchar_t* midPath,
 	const wchar_t hints[][128], int hintCount, HWND parentForWait)
 {
@@ -5912,6 +5908,7 @@ extern "C" void VstMidiCloseSlot(int slot)
 	VstMidiSetIoSlot(prev);
 }
 
+// 現在スロットの PCM。注入キューと残響余白もここで進める。
 extern "C" int VstMidiRead(BYTE* dst, int bytesWanted)
 {
 	if (!dst || bytesWanted <= 0) return 0;
@@ -6073,6 +6070,7 @@ static void SeekFastForwardEvents(__int64 ffEnd)
 	micro();
 }
 
+// サンプル絶対位置へ。VSTi は巻き戻してイベントを再送する。
 extern "C" int VstMidiSeekSamples(__int64 samplePos)
 {
 	EnterCriticalSection(&g_eng.cs);
@@ -6420,9 +6418,8 @@ extern "C" int VstLiveLoadPart(int part1to32,
 	if (wasRemote) LiveRemoteUnload(part1to32);
 
 #ifndef KPIHOST64_BUILD
-	// x64 plug-in in a 32-bit process: hand it to KpiHost64. Slot state is
-	// updated outside the engine lock because the pipe call can start the
-	// host process, which takes far too long to hold the audio lock for.
+	// 32bit 本体に x64 プラグイン: KpiHost64 へ渡す。
+	// パイプがホスト起動まで待つので、オーディオロックの外でスロット状態を更新する。
 	const int arch = PlugFileArch(pluginPath, isVst3);
 	if (arch != HostArch()) {
 		const int rc = LiveRemoteLoad(part1to32, pluginPath, isVst3);
@@ -6439,8 +6436,7 @@ extern "C" int VstLiveLoadPart(int part1to32,
 			return 0;
 		}
 		if (arch == 64) return rc;
-		// arch 0 (bundle whose Contents we could not see) already tried
-		// remote; fall through to a local open.
+		// arch 0（Contents が見えなかったバンドル）はリモートを試済み。ローカルオープンへ。
 	}
 #endif
 

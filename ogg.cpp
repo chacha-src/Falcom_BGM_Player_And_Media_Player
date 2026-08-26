@@ -5,6 +5,7 @@
 #include "Windows.h"
 #include "ogg.h"
 #include "oggDlg.h"
+#include "CMidiMonitorDlg.h"
 #include "CMediaPlayerDlg.h"
 #include "UpdateCheck.h"
 #include "OfflineHelp.h"
@@ -59,6 +60,7 @@ TCHAR karento2[1024];
 CString ndd;
 void *Mutex;
 TCHAR* nd;
+// 既存インスタンスの窓か。MP（らいら）か本編タイトルか。二重起動 mutex 用。
 static BOOL OggWndTitleIsPlayer(const CString& s, BOOL* isMp)
 {
 	static const TCHAR* const kMpTitles[] = {
@@ -101,9 +103,9 @@ static BOOL OggWndTitleIsPlayer(const CString& s, BOOL* isMp)
 }
 
 struct OggFindInst {
-	HWND vis;
-	HWND ogAny;
-	HWND mpAny;
+	HWND vis;   // 可視のプレイヤー窓（優先して前面へ）
+	HWND ogAny; // 本編
+	HWND mpAny; // メディアプレイヤー
 };
 
 BOOL CALLBACK ew(HWND hwnd, LPARAM lParam)
@@ -127,6 +129,8 @@ BOOL CALLBACK ew(HWND hwnd, LPARAM lParam)
 	return TRUE;
 }
 
+// mutex が既にあるとき: 既存窓を前面に出し、コマンドラインがあれば WM_COPYDATA。
+// 再生は始めない（二度目のダブルクリックで曲が飛ぶのを防ぐ）。見つからなければそのまま exit。
 static void OggActivateOrForwardExisting()
 {
 	OggFindInst st = {};
@@ -181,6 +185,13 @@ LRESULT COggApp::ProcessWndProcException(CException* e, const MSG* pMsg)
 		OutputDebugString(line);
 	}
 	return CWinApp::ProcessWndProcException(e, pMsg);
+}
+
+BOOL COggApp::OnIdle(LONG lCount)
+{
+	if (og && og->m_MidiMonitorDlg && ::IsWindow(og->m_MidiMonitorDlg->GetSafeHwnd()))
+		og->m_MidiMonitorDlg->IdlePulse();
+	return CWinApp::OnIdle(lCount);
 }
 
 BOOL COggApp::InitInstance()

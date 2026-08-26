@@ -1,5 +1,10 @@
 ﻿#pragma once
-// Minimal stand-in when compiling VST engine into KpiHost64 (no MFC).
+// ============================================================================
+// KpiHost64 用の最小 stdafx
+// ----------------------------------------------------------------------------
+// 本体の VstMidiEngine.cpp は MFC の save 構造体を参照する。ホストには MFC が
+// 無いので、再生に必要なフィールドだけここに置く。言語は本体が PING で送る。
+// ============================================================================
 #ifndef KPIHOST64_STDAFX_H
 #define KPIHOST64_STDAFX_H
 #include <windows.h>
@@ -10,12 +15,12 @@
 #include <math.h>
 #include <shlobj.h>
 struct save {
-	int lang; // 0=ja … 13=tr — same codes as the player; parent sends via PING
-	int midPlayPrefer;
-	wchar_t vstExtraPath[520]; // XG explicit VSTi (empty ok)
+	int lang; // 0=ja … 13=tr。本体の savedata.lang と同じ。PING で上書き
+	int midPlayPrefer; // 本体と同名。ホスト側ではほぼ未使用
+	wchar_t vstExtraPath[520]; // XG 明示 VSTi。空でもよい
 	int vstHostMainLock;
 	int vstHostWinX, vstHostWinY, vstHostWinW, vstHostWinH;
-	wchar_t vstMultiDll[520];  // GS explicit VSTi (empty=XG if set, else Mapper)
+	wchar_t vstMultiDll[520];  // GS 明示 VSTi。両方空なら MIDI マッパー
 	wchar_t vstMultiName[128];
 	wchar_t midiOutName[32];
 };

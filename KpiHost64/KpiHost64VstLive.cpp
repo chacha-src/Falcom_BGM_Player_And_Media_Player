@@ -9,26 +9,26 @@
 
 namespace {
 
-// LIVE_MAX_BUFFERED is the play-out latency the keyboard has to live with, so
-// keep it small; the app only pre-rolls a quarter of it before it starts.
+// LIVE_MAX_BUFFERED は鍵盤が感じるレイテンシ。小さく保つ。
+// 本体は再生開始前にこの 1/4 だけ先読みする。
 enum { LIVE_RENDER_FRAMES = 512, LIVE_MAX_BUFFERED = 2048 };
 
-volatile LONG g_liveParts = 0;
+volatile LONG g_liveParts = 0; // 載っているパート数。アイドル終了抑制に使う
 
 struct LiveAudioState {
-	HANDLE hMap = NULL;
-	KPIHOST64_VstLiveAudioShm* shm = NULL;
+	HANDLE hMap = NULL;                         // 音声共有メモリのファイルマッピング
+	KPIHOST64_VstLiveAudioShm* shm = NULL;      // 本体が読む PCM リング
 	HANDLE hMidiMap = NULL;
-	KPIHOST64_VstLiveMidiShm* midiShm = NULL;
-	HANDLE stopEvent = NULL;
-	HANDLE wakeEvent = NULL;
+	KPIHOST64_VstLiveMidiShm* midiShm = NULL;   // 本体が書くノートリング
+	HANDLE stopEvent = NULL;                    // レンダースレッド終了
+	HANDLE wakeEvent = NULL;                    // 本体がノートを置いた合図
 	HANDLE thread = NULL;
 	volatile LONG running = 0;
 };
 
 LiveAudioState g_liveAudio;
 
-static float* ShmL(KPIHOST64_VstLiveAudioShm* s) { return (float*)(s + 1); }
+static float* ShmL(KPIHOST64_VstLiveAudioShm* s) { return (float*)(s + 1); } // ヘッダ直後が L 平面
 static float* ShmR(KPIHOST64_VstLiveAudioShm* s) { return ShmL(s) + s->capacity; }
 static KPIHOST64_VstLiveMidiEvent* ShmMidiEvents(KPIHOST64_VstLiveMidiShm* s)
 {
@@ -64,7 +64,7 @@ static void LiveAudioDrainMidi()
 	uint32_t r = m->readPos;
 	const uint32_t w = m->writePos;
 	while (r != w) {
-		const uint32_t idx = r & (cap - 1);
+		const uint32_t idx = r & (cap - 1); // capacity は 2 の冪。ロック無しラップ
 		const uint32_t port = ev[idx].port;
 		const DWORD msg = (DWORD)ev[idx].msg;
 		r++;
@@ -79,6 +79,7 @@ static int LiveAudioStopSignalled()
 		WaitForSingleObject(g_liveAudio.stopEvent, 0) == WAIT_OBJECT_0;
 }
 
+// 共有メモリへ PCM を書き続ける。ノートはブロック直前に Drain。
 static unsigned __stdcall LiveAudioThreadProc(void*)
 {
 	CoInitializeEx(NULL, COINIT_MULTITHREADED);
@@ -97,7 +98,7 @@ static unsigned __stdcall LiveAudioThreadProc(void*)
 			const uint32_t buffered = wr - r;
 			if (buffered >= cap - LIVE_RENDER_FRAMES) break;
 			if (buffered >= LIVE_MAX_BUFFERED) break;
-			LiveAudioDrainMidi();
+			LiveAudioDrainMidi(); // このブロックに載せるノートを先に渡す
 			VstLiveRender(tl, tr, LIVE_RENDER_FRAMES);
 			uint32_t wp = wr;
 			float* sl = ShmL(s);
@@ -138,15 +139,12 @@ static int LiveAudioStopThread()
 }
 
 // ---------------------------------------------------------------------------
-// Plug-in UI thread
+// プラグイン UI スレッド
 //
-// Every plug-in lifecycle call (load, unload, editor open/close) is marshalled
-// onto one dedicated thread that owns a permanently running message loop.
-// The pipe thread only forwards requests. This mirrors VSTHost, where module
-// loading and all GUI work happen on the single application UI thread; audio
-// is the only thing that runs elsewhere. Without it, SC-VA's editor is created
-// on a thread that has no relationship to the one that initialised the plug-in
-// module, so the view paints once and then never receives another update.
+// ロード／アンロード／エディタ開閉は、メッセージループを持ち続ける専用スレッドへ
+// Marshal する。パイプスレッドは依頼を転送するだけ。
+// VSTHost と同じく、モジュール初期化と GUI は同一 UI スレッド、音声だけ別。
+// これをやらないと SC-VA のエディタがパイプスレッドで作られ、一度描画して止まる。
 // ---------------------------------------------------------------------------
 
 enum {
@@ -163,8 +161,8 @@ enum {
 };
 
 struct UiLoadRequest {
-	int part;
-	const wchar_t* path;
+	int part;            // 1..32
+	const wchar_t* path; // 呼び出し元スタック。SendMessage 同期なので生存する
 	int isVst3;
 };
 
@@ -267,9 +265,9 @@ uint32_t VstHost64_LiveLoad(uint32_t part1to32, const wchar_t* path, uint32_t is
 	if (!path || !*path || part1to32 < 1 || part1to32 > 32)
 		return KPIHOST64_STATUS_BAD_REQUEST;
 	if (!EnsureUiThread()) return KPIHOST64_STATUS_FAIL;
-	// The audio thread holds the engine lock inside processReplacing. Load
-	// takes that lock on the UI thread, so stop rendering first. Do not start
-	// audio here: the app calls VstLiveAudioStart afterwards to open the rings.
+	// オーディオスレッドが processReplacing 内でエンジンロックを持つ。
+	// Load は UI スレッドで同じロックを取るので、先にレンダーを止める。
+	// ここでは音声を再開しない。本体が VstLiveAudioStart でリングを開く。
 	const LONG hadParts = InterlockedCompareExchange(&g_liveParts, 0, 0);
 	if (hadParts > 0)
 		VstHost64_LiveAudioStop();
@@ -346,6 +344,7 @@ uint32_t VstHost64_LiveRender(uint32_t frames, std::vector<uint8_t>& reply)
 	return KPIHOST64_STATUS_OK;
 }
 
+// 音声・MIDI 共有メモリを作り、優先度高めのレンダースレッドを起こす。
 uint32_t VstHost64_LiveAudioStart()
 {
 	if (g_liveAudio.thread) {
@@ -454,8 +453,7 @@ uint32_t VstHost64_LiveSetSendChannel(uint32_t part1to32, int32_t sendCh)
 	return KPIHOST64_STATUS_OK;
 }
 
-// Program names live on the controller, which belongs to the plug-in UI
-// thread, so every query is marshalled there as well.
+// プログラム名はコントローラ側＝プラグイン UI スレッドの所有物なので、問い合わせもそちらへ。
 uint32_t VstHost64_LivePrograms(uint32_t part1to32, uint32_t first, uint32_t count,
 	std::vector<uint8_t>& reply)
 {

@@ -23,15 +23,16 @@ public:
 	static constexpr int EV_MAX = 500000;
 
 	struct MmEv {
-		unsigned __int64 tick;
-		__int64 sample;
-		DWORD msg;
-		DWORD aux;
-		int port;
-		int sysexOff;
+		unsigned __int64 tick; // SMF tick
+		__int64 sample;        // 再生サンプル位置（テンポ変化込み）
+		DWORD msg;             // ショート、または 0xff テンポ / 0xf0 SysEx / 0xfe 拍子 / 0xfd 調
+		DWORD aux;             // テンポ usec、SysEx 長、拍子パックなど
+		int port;              // 0=A 1=B（FF 21）
+		int sysexOff;          // m_sx へのオフセット。SysEx でなければ -1
 	};
 
 	void PumpSyncNow();
+	void IdlePulse();
 	void ResetPlaybackState();
 	void DetachForDestroy();
 	void PaletteApplySoft3D();
@@ -67,17 +68,17 @@ protected:
 
 private:
 	struct Part {
-		int pc;
-		int bankMsb;
-		int bankLsb;
-		int mapId;
-		int vol;
-		int exp;
-		int pan;
-		int rev;
-		int crs;
-		int var;
-		int dt;
+		int pc;         // プログラム 0..127
+		int bankMsb;    // CC0
+		int bankLsb;    // CC32（GS マップ）
+		int mapId;      // 表示用マップ（55/88/XG など）
+		int vol;        // CC7
+		int exp;        // CC11
+		int pan;        // CC10
+		int rev;        // CC91
+		int crs;        // CC93
+		int var;        // CC94
+		int dt;         // デチューン
 		int vibRat;
 		int vibDpt;
 		int vibDly;
@@ -94,16 +95,16 @@ private:
 		int rpnMsb;
 		int rpnLsb;
 		int dataMsb;
-		BYTE noteOn[NOTE_MAX];
-		BYTE noteFlash[NOTE_MAX];
+		BYTE noteOn[NOTE_MAX];    // ベロシティ。0=オフ
+		BYTE noteFlash[NOTE_MAX]; // 鍵盤の点滅残り
 		int lastNote;
 		int lastVel;
 		int isDrum;
-		int held;
-		int rxCh;   // 0-15, 16=off (GS Rx Channel)
+		int held;       // 押鍵数。メータはフェードさせない（glow は使わない）
+		int rxCh;   // 0-15, 16=off（GS Rx Channel）
 		int rxPort; // 0=A 1=B 2=both
 		float lev;
-		BYTE glowVol;
+		BYTE glowVol;   // 旧: メータ発光。いまは 0 のまま（バーをフェードさせない）
 		BYTE glowExp;
 		BYTE glowPan;
 		BYTE glowRev;
@@ -116,7 +117,7 @@ private:
 		BYTE fadeEnv;
 		BYTE fadeEq;
 		BYTE fadeNrpn;
-		BYTE heard;
+		BYTE heard;     // このパートにイベントが来た
 		BYTE efxOn;
 		BYTE insMark;
 		wchar_t name[NAME_CHARS];
@@ -154,7 +155,7 @@ private:
 	int HitMonitor(CPoint clientPt, int& part, CRect& cell) const;
 	int KeyAt(const CRect& rc, CPoint pt) const;
 	void InjectShort(int part, DWORD msg);
-	void DrainLiveTap();
+	void DrainLiveTap();       // VST ホスト鍵盤／ハード MIDI をモニタへ
 	void SnapshotLiveNotes();
 	void MarkHostOccupiedParts();
 	void LatchPart(int part, BYTE bit);
@@ -163,8 +164,8 @@ private:
 	void ReleasePlayNote();
 	void SyncFromPlayback();
 	void UpdatePlayPos();
-	void ApplyDueEvents(int lastDue);
-	void LoadCurrentMidi();
+	void ApplyDueEvents(int lastDue); // playb までに届いた SMF イベント
+	void LoadCurrentMidi();           // 再生中パスの SMF をパース。起動時は呼ばない
 	void UnloadMidi();
 	void ResetParts();
 	void InitPartDefaults(int i, BYTE heard);
@@ -176,6 +177,8 @@ private:
 	void RefreshPartName(Part& p);
 	void LookupToneName(int isXg, int mapId, int bankMsb, int bankLsb, int pc, int isDrum, wchar_t* out, int outN);
 	void PersistPos();
+	void PumpIdle();
+	void ExtrapolateHeard(__int64& pbHeard);
 	void SyncSoft3DFromSave();
 	bool IsView3D() const { return m_viewMode == 1; }
 	int Scale(int v96, UINT dpi) const { return MulDiv(v96, (int)dpi, 96); }
@@ -207,12 +210,12 @@ private:
 	int m_fontH;
 
 	Part m_part[PART_MAX];
-	MmEv* m_ev;
+	MmEv* m_ev;          // EV_MAX まで。malloc。Load 失敗時 NULL
 	int m_evCount;
-	int m_evPos;
+	int m_evPos;         // ApplyDueEvents が次に読む位置
 	int m_hadNote;
 	__int64 m_hearPlayb;
-	BYTE* m_sx;
+	BYTE* m_sx;          // SysEx プール
 	int m_sxBytes;
 	int m_division;
 	int m_sampleRate;
@@ -224,7 +227,7 @@ private:
 	int m_fileHasGm;
 	int m_fileHasSd;
 	int m_gs32;      // GS Port B / XG 17-32 SysEx
-	int m_mirrorToB; // no FF 21: channel MIDI arrives on both cables
+	int m_mirrorToB; // FF 21 無し: チャンネル MIDI が両ケーブルに届く
 	struct MmTsEv {
 		unsigned __int64 tick;
 		int num;
@@ -285,6 +288,12 @@ private:
 	int m_layFootH;
 	int m_layExtra;
 	int m_persistAge;
+	int m_visAcc;
+	DWORD m_visLastMs;
+	__int64 m_pbAnchor;
+	LONGLONG m_pbQpc;
+	LONGLONG m_pbFreq;
+	LONGLONG m_idleLastQpc;
 	int m_drumGlow;
 	int m_dispBpm;
 	DWORD m_dirtyRows;

@@ -3,6 +3,7 @@
 #include "KpiHostClient.h"
 #include <tlhelp32.h>
 
+// %TEMP%\ogg_kpi64_client.log。ホスト側の ogg_kpi64_host.log と対。
 static void AppendLogLine(const wchar_t* line)
 {
 	if (!line) return;
@@ -26,6 +27,7 @@ static void AppendLogLine(const wchar_t* line)
 	CloseHandle(h);
 }
 
+// リトルエンディアン u32。パイプペイロード用。
 static void AppendU32(std::vector<uint8_t>& b, uint32_t v)
 {
 	b.push_back((uint8_t)(v & 0xFF));
@@ -34,6 +36,7 @@ static void AppendU32(std::vector<uint8_t>& b, uint32_t v)
 	b.push_back((uint8_t)((v >> 24) & 0xFF));
 }
 
+// [u32 文字数][wchar_t[]]。ホストの ReadWString と対。
 static void AppendWString(std::vector<uint8_t>& b, const std::wstring& s)
 {
 	AppendU32(b, (uint32_t)s.size());
@@ -104,6 +107,7 @@ static bool FindHostExeRecursive(const std::wstring& baseDir, std::wstring& outP
 	return false;
 }
 
+// パイプを閉じる。次の EnsureConnected でホストを起こし直す。
 void KpiHost64Client::Disconnect()
 {
 	if (m_hPipe != INVALID_HANDLE_VALUE) {
@@ -113,6 +117,7 @@ void KpiHost64Client::Disconnect()
 	m_sentLang = -1;
 }
 
+// 本体 exe の隣（または配下）の KpiHost64.exe を CreateProcess。既に動いていればパイプ接続側が拾う。
 bool KpiHost64Client::StartHostProcess()
 {
 	wchar_t exePath[MAX_PATH]{};
@@ -222,6 +227,7 @@ bool KpiHost64Client::SyncHostLang()
 	return ok;
 }
 
+// 未接続ならホスト起動→パイプ。接続済みなら言語だけ同期。
 bool KpiHost64Client::EnsureConnected()
 {
 	if (m_hPipe == INVALID_HANDLE_VALUE) {
@@ -247,10 +253,8 @@ struct PipeLock
 	~PipeLock() { LeaveCriticalSection(cs); }
 };
 
-// The pipe is a byte stream, so a single ReadFile may return less than asked
-// for. Treating that as an error used to drop the connection mid-song, which
-// the playback thread turns into a zero-filled buffer, i.e. a hole in the
-// audio.
+// パイプはバイトストリームなので、1 回の ReadFile が要求より短いことがある。
+// それをエラーにすると曲の途中で切断し、再生スレッドが無音バッファを出す。
 enum : uint32_t { PIPE_MAX_REPLY_BYTES = 64u * 1024u * 1024u };
 
 bool PipeXfer(HANDLE pipe, void* buf, uint32_t bytes, int writing, DWORD timeoutMs)
@@ -317,6 +321,7 @@ bool PipeSkip(HANDLE pipe, uint32_t bytes, DWORD timeoutMs)
 }
 } // namespace
 
+// ヘッダ＋ペイロードを送り、同じ requestId の応答を待つ。古い応答は捨てて再同期。
 bool KpiHost64Client::SendRequest(uint32_t cmd, const void* payload, uint32_t payloadBytes,
 	std::vector<uint8_t>& outReplyPayload, uint32_t& outStatus, DWORD timeoutMs)
 {
@@ -571,6 +576,7 @@ bool KpiHost64Client::ForeignClose(uint32_t sessionId)
 	return st == KPIHOST64_STATUS_OK;
 }
 
+// 曲スロットを開く。slot はクロスフェード用 0/1。vstDllPath=GS、extraScanPath=XG。
 bool KpiHost64Client::VstOpen(const std::wstring& midPath, const std::wstring& vstDllPath,
 	const std::wstring& extraScanPath, KPIHOST64_ForeignOpenReply& out, uint32_t slot)
 {
@@ -596,6 +602,7 @@ bool KpiHost64Client::VstOpen(const std::wstring& midPath, const std::wstring& v
 	return true;
 }
 
+// inj* はモニタ／鍵盤からのショート。ホストが次ブロックで VSTi へ注入する。
 bool KpiHost64Client::VstRender(uint32_t bytesWanted, std::vector<uint8_t>& outPcm, bool& outEof,
 	const uint8_t* injPorts, const uint32_t* injMsgs, const int32_t* injOfs, uint32_t injCount, uint32_t slot,
 	uint32_t* outMidiFlags)

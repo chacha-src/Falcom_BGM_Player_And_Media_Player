@@ -1,4 +1,4 @@
-﻿// KpiHost64 VST MIDI session bridge — two song slots for live crossfade
+﻿// KpiHost64 曲ファイル用 VST MIDI — クロスフェードのためスロット 2 本
 #include "kpihost_stdafx.h"
 #include "../kpi_host_ipc.h"
 #include "../VstMidiEngine.h"
@@ -6,7 +6,7 @@
 #include <vector>
 #include <string>
 
-static int g_vstOpen[2] = { 0, 0 };
+static int g_vstOpen[2] = { 0, 0 }; // スロットが SMF+VSTi を開いていれば 1
 
 static int ClampSlot(int slot)
 {
@@ -26,7 +26,7 @@ uint32_t VstHost64_Open(int slot, const wchar_t* midPath, const wchar_t* vstDllP
 	} else {
 		savedata.vstExtraPath[0] = 0;
 	}
-	// GS may be empty when only XG is set; VstMidiOpen peeks the SMF and picks.
+	// GS は XG だけ指定のとき空でよい。VstMidiOpen が SMF を覗いて選ぶ。
 	if (vstDllPath && vstDllPath[0]) {
 		wcsncpy_s(savedata.vstMultiDll, _countof(savedata.vstMultiDll), vstDllPath, _TRUNCATE);
 		savedata.vstMultiName[0] = 0;
@@ -50,6 +50,7 @@ uint32_t VstHost64_Open(int slot, const wchar_t* midPath, const wchar_t* vstDllP
 	return KPIHOST64_STATUS_OK;
 }
 
+// PCM を読む。短い読み・MIDI 未消化・この塊の SysEx/CC を eof ビットに載せる。
 uint32_t VstHost64_Render(int slot, uint32_t bytesWanted, std::vector<uint8_t>& out, uint32_t& eof)
 {
 	slot = ClampSlot(slot);
@@ -74,7 +75,7 @@ uint32_t VstHost64_Render(int slot, uint32_t bytesWanted, std::vector<uint8_t>& 
 
 int VstHost64_SongActive()
 {
-	return (g_vstOpen[0] || g_vstOpen[1]) ? 1 : 0;
+	return (g_vstOpen[0] || g_vstOpen[1]) ? 1 : 0; // アイドル終了を止める
 }
 
 uint32_t VstHost64_Seek(int slot, uint64_t posSample)
@@ -89,7 +90,7 @@ uint32_t VstHost64_Close(int slot)
 {
 	slot = ClampSlot(slot);
 	if (g_vstOpen[slot]) {
-		VstMidiCloseSlot(slot);
+		VstMidiCloseSlot(slot); // 片方だけ。クロスフェード中のもう片方は残す
 		g_vstOpen[slot] = 0;
 	}
 	return KPIHOST64_STATUS_OK;

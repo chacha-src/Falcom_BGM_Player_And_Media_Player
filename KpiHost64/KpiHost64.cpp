@@ -1,4 +1,18 @@
-﻿#include <windows.h>
+﻿// ============================================================================
+// KpiHost64.exe — 64bit KPI / VST / 外部プラグインのパイプサーバ
+// ----------------------------------------------------------------------------
+// 32bit 本体は x64 DLL を LoadLibrary できない。このプロセスが名前付きパイプ
+// \\.\pipe\ogg_kpi64 を待ち、Open/Render/Seek/Close を実行する。
+//
+// スレッド:
+//   wmain / ServeOnce … パイプ 1 本を直列処理（本体側も同時リクエストしない）
+//   VST ライブ音声   … 別スレッド＋共有メモリ（KpiHost64VstLive.cpp）
+//   VST ライブ GUI   … 専用 UI スレッド（SC-VA エディタ用）
+//
+// アイドル 30 秒で接続が来なければ、KPI セッションもライブパートも無ければ終了。
+// ライブが載っているあいだはタイムアウトしない（落とすと音源ごと消える）。
+// ============================================================================
+#include <windows.h>
 #include <unknwn.h>
 #include <string>
 #include <vector>
@@ -16,6 +30,7 @@
 #include "KpiHost64VstLive.h"
 #include "..\VstMidiEngine.h"
 
+// パスのディレクトリ部分（末尾に \\ または / を残す）。ファイル名だけなら空。
 static std::wstring DirNameOf(const std::wstring& path)
 {
 	size_t p = path.find_last_of(L"\\/");
@@ -23,6 +38,7 @@ static std::wstring DirNameOf(const std::wstring& path)
 	return path.substr(0, p + 1);
 }
 
+// 1 段上のディレクトリ。KPI の依存 DLL が親フォルダにあることがある。
 static std::wstring ParentDirOf(const std::wstring& path)
 {
 	if (path.empty()) return L"";
@@ -34,6 +50,7 @@ static std::wstring ParentDirOf(const std::wstring& path)
 	return path.substr(0, p + 1);
 }
 
+// KPI が隣のサブフォルダの DLL を探すので、深さ depth まで列挙する。ジャンクションは辿らない。
 static void CollectSubDirsRecursive(const std::wstring& baseDir, int depth, std::vector<std::wstring>& out)
 {
 	if (depth <= 0 || baseDir.empty()) return;
@@ -57,6 +74,7 @@ static void CollectSubDirsRecursive(const std::wstring& baseDir, int depth, std:
 	FindClose(h);
 }
 
+// KpiHost64.exe のあるフォルダとその配下（深さ 3）。AddDllDirectory 用。
 static std::vector<std::wstring> GetExeRelatedDllDirs()
 {
 	std::vector<std::wstring> dirs;
@@ -69,6 +87,7 @@ static std::vector<std::wstring> GetExeRelatedDllDirs()
 	return dirs;
 }
 
+// 複数ディレクトリを AddDllDirectory し、スコープ終了で全部 Remove。LoadLibraryEx のあいだだけ有効。
 struct ScopedDllDirectories
 {
 	std::vector<DLL_DIRECTORY_COOKIE> cookies;
@@ -87,6 +106,7 @@ struct ScopedDllDirectories
 	}
 };
 
+// 1 ディレクトリ版。KPI 本体のフォルダ／その親用。
 struct ScopedDllDirectory
 {
 	DLL_DIRECTORY_COOKIE cookie = 0;
@@ -100,6 +120,7 @@ struct ScopedDllDirectory
 	}
 };
 
+// %TEMP%\ogg_kpi64_host.log へ 1 行追記。失敗しても再生は続ける（デバッグ用）。
 static void AppendHostLogLine(const wchar_t* line)
 {
 	if (!line) return;
@@ -117,10 +138,12 @@ static void AppendHostLogLine(const wchar_t* line)
 	CloseHandle(h);
 }
 
+// KPI v5 がホストに求める設定ストア。実体は KpiV5ConfigStore（ini 相当）。
+// Volume は本体のゲインに任せるので、プラグインには常にフルスケールを返す。
 class DummyConfig : public IKpiConfig
 {
-	long m_ref = 1;
-	std::wstring m_pluginName;
+	long m_ref = 1;              // COM 参照カウント
+	std::wstring m_pluginName;   // DLL 名（kbpsf2 など）。キーの名前空間
 public:
 	DummyConfig(const wchar_t* pluginName) : m_pluginName(pluginName ? pluginName : L"") {}
 	ULONG STDMETHODCALLTYPE AddRef() override { return InterlockedIncrement(&m_ref); }
@@ -144,6 +167,7 @@ public:
 			sec && key &&
 			_wcsicmp(sec, L"General") == 0 &&
 			_wcsicmp(key, L"IgnoreVolumeTag") == 0) {
+			// kbpsf2 の曲内音量タグは本体ゲインと二重になるので無視する。
 			def = 1;
 		}
 		return KpiV5GetInt(m_pluginName, sec ? sec : L"", key ? key : L"", def);
@@ -181,6 +205,7 @@ public:
 	}
 };
 
+// kpi_CreateInstance に渡すプロバイダ。プラグインが IKpiConfig を要求したら DummyConfig を渡す。
 class HostProvider : public IKpiUnkProvider
 {
 	long m_ref = 1;
@@ -212,6 +237,7 @@ public:
 	}
 };
 
+// 壊れた KPI が SEH で落ちてもホストごと死なないように包む。
 static HRESULT SafeKpiCreateInstance(pfn_kpiCreateInstance cr, REFIID riid, void** ppvObject, IKpiUnknown* pUnknown)
 {
 	HRESULT hr = E_FAIL;
@@ -224,6 +250,7 @@ static HRESULT SafeKpiCreateInstance(pfn_kpiCreateInstance cr, REFIID riid, void
 	return hr;
 }
 
+// 壊れた KPI の Open が SEH で落ちてもホストを生かす。
 static DWORD SafeModuleOpen(IKpiDecoderModule* mod, const KPI_MEDIAINFO* req, IKpiFile* file, IKpiFolder* folder, IKpiDecoder** ppDec)
 {
 	DWORD count = 0;
@@ -236,6 +263,7 @@ static DWORD SafeModuleOpen(IKpiDecoderModule* mod, const KPI_MEDIAINFO* req, IK
 	return count;
 }
 
+// 曲番号を選び KPI_MEDIAINFO を得る。タグは捨てる（NullTagInfo）。
 static DWORD SafeDecoderSelect(IKpiDecoder* dec, uint32_t songNo, const KPI_MEDIAINFO** ppSel)
 {
 	DWORD selected = 0;
@@ -312,10 +340,11 @@ static UINT64 SafeDecoderSeek(IKpiDecoder* dec, UINT64 posSample, DWORD flag, bo
 
 class HostFile;
 
+// KPI が「同じフォルダの .minipsf / .psf2lib」を開くためのフォルダ実装。
 class HostFolder : public IKpiFolder
 {
 	long m_ref = 1;
-	std::wstring m_baseDir;
+	std::wstring m_baseDir; // メディアファイルのあるディレクトリ
 public:
 	HostFolder(const std::wstring& baseDir) : m_baseDir(baseDir) {}
 	ULONG STDMETHODCALLTYPE AddRef() override { return InterlockedIncrement(&m_ref); }
@@ -346,13 +375,14 @@ public:
 	BOOL WINAPI OpenFolder(const wchar_t* cszName, IKpiFolder** ppFolder) override;
 };
 
+// KPI の IKpiFile。巨大 psf2lib は Read を分割し、GetBuffer は一度メモリへ載せる。
 class HostFile : public IKpiFile
 {
 	long m_ref = 1;
 	HANDLE m_h = INVALID_HANDLE_VALUE;
-	std::wstring m_path;
-	std::wstring m_name;
-	BYTE* m_buf = NULL;
+	std::wstring m_path; // フルパス（GetRealFileW / CreateClone 用）
+	std::wstring m_name; // ファイル名だけ（GetFileName）
+	BYTE* m_buf = NULL;  // GetBuffer 用キャッシュ。未要求なら NULL
 	size_t m_bufSize = 0;
 public:
 	HostFile() {}
@@ -510,8 +540,8 @@ static std::wstring TrimString(const std::wstring& str) {
 }
 
 static std::wstring UrlDecode(const std::wstring& str) {
-	// Decode %XX as UTF-8 bytes first (for non-ASCII file names),
-	// then fallback to direct wide-char mapping if conversion fails.
+	// PSF の lib 名が %XX のことがある。先に UTF-8 バイトとして %XX を戻し、
+	// MultiByteToWideChar できなければ 1 バイトずつ widen する。
 	std::string bytes;
 	bytes.reserve(str.size());
 	for (size_t i = 0; i < str.length(); ++i) {
@@ -529,8 +559,7 @@ static std::wstring UrlDecode(const std::wstring& str) {
 			bytes.push_back((char)str[i]);
 		}
 		else {
-			// Keep non-ASCII wide chars via best-effort ANSI fallback.
-			// (Most KPI lib names are ASCII; this path is for robustness.)
+			// ワイドの非 ASCII はこの経路では捨てる（lib 名はほぼ ASCII）。
 			bytes.push_back('?');
 		}
 	}
@@ -542,13 +571,14 @@ static std::wstring UrlDecode(const std::wstring& str) {
 		MultiByteToWideChar(CP_UTF8, 0, bytes.c_str(), (int)bytes.size(), &out[0], wlen);
 		return out;
 	}
-	// Fallback: byte-by-byte widening.
+	// UTF-8 にならなかったときの最終手段。
 	std::wstring out;
 	out.reserve(bytes.size());
 	for (size_t i = 0; i < bytes.size(); ++i) out.push_back((unsigned char)bytes[i]);
 	return out;
 }
 
+// PSF の lib 名。URL デコードしてから開き、失敗したら生の名前で再試行。
 BOOL WINAPI HostFolder::OpenFile(const wchar_t* cszName, IKpiFile** ppFile)
 {
 	if (!ppFile) return FALSE;
@@ -595,26 +625,28 @@ BOOL WINAPI HostFolder::OpenFolder(const wchar_t* cszName, IKpiFolder** ppFolder
 	return TRUE;
 }
 
+// 開いている KPI デコーダ 1 本。Render/Seek/Close は sessionId でここを探す。
 struct Session
 {
-	HMODULE hDll = NULL;
+	HMODULE hDll = NULL;                 // LoadLibrary した KPI DLL。Close で FreeLibrary
 	IKpiDecoderModule* mod = NULL;
 	IKpiDecoder* dec = NULL;
 	HostFile* file = NULL;
 	HostFolder* folder = NULL;
-	KPI_MEDIAINFO request{};
-	KPI_MEDIAINFO selected{};
-	int sourceBitsPerSample = 16;
-	DWORD openedSongCount = 0;
+	KPI_MEDIAINFO request{};             // 本体が希望したフォーマット
+	KPI_MEDIAINFO selected{};            // 実際に開いたフォーマット
+	int sourceBitsPerSample = 16;        // MIDI シークの破棄 Render でバッファサイズ計算
+	DWORD openedSongCount = 0;           // マルチソング形式の曲数
 	DWORD channels = 2;
-	DWORD bps = 16;
-	uint32_t zeroRenderStreak = 0;
-	std::wstring mediaPath;
+	DWORD bps = 16;                      // 絶対値（float は nBitsPerSample が負）
+	uint32_t zeroRenderStreak = 0;       // 連続 0 サンプル。ループ無し曲の EOF 判定
+	std::wstring mediaPath;              // MIDI なら Seek を「先頭＋破棄再生」にする
 };
 
 static uint32_t g_nextSessionId = 1;
 static std::unordered_map<uint32_t, Session> g_sessions;
 
+// パイプはバイトモードなので、要求サイズまで繰り返して読む。途中で切れたらクライアント切断。
 static bool ReadExact(HANDLE h, void* buf, DWORD bytes)
 {
 	uint8_t* p = (uint8_t*)buf;
@@ -641,6 +673,7 @@ static bool WriteExact(HANDLE h, const void* buf, DWORD bytes)
 	return true;
 }
 
+// ペイロードから [u32 文字数][wchar_t[]] を読む。p を進める。
 static bool ReadWString(const uint8_t*& p, const uint8_t* end, std::wstring& out)
 {
 	if (end - p < 4) return false;
@@ -663,6 +696,7 @@ static void SendReply(HANDLE pipe, uint32_t cmd, uint32_t reqId, uint32_t status
 	if (payloadBytes && payload) WriteExact(pipe, payload, payloadBytes);
 }
 
+// KPI DLL を一時ロードして supportExts を取る。セッションは残さない。
 static uint32_t Cmd_ListExts(const std::wstring& kpiPath, std::vector<uint8_t>& out)
 {
 	out.clear();
@@ -697,6 +731,7 @@ static uint32_t Cmd_ListExts(const std::wstring& kpiPath, std::vector<uint8_t>& 
 	}
 
 	if (exts.empty()) {
+		// v5 入口が無い／空なら旧 KMP の GetKMPModule。
 		if (auto fn = (pfnGetKMPModule)GetProcAddress(h, SZ_KMP_GETMODULE)) {
 			KMPMODULE* m = fn();
 			if (m && m->ppszSupportExts) {
@@ -730,6 +765,7 @@ static uint32_t Cmd_ListExts(const std::wstring& kpiPath, std::vector<uint8_t>& 
 	return KPIHOST64_STATUS_OK;
 }
 
+// メディアを開き Session をマップへ入れる。成功時 out は OpenReply + KPI_MEDIAINFO。
 static uint32_t Cmd_Open(const std::wstring& kpiPath, const std::wstring& mediaPath, const KPI_MEDIAINFO& request, uint32_t songNo, std::vector<uint8_t>& out)
 {
 	out.clear();
@@ -824,6 +860,7 @@ static uint32_t Cmd_Open(const std::wstring& kpiPath, const std::wstring& mediaP
 	return KPIHOST64_STATUS_OK;
 }
 
+// PCM を samplesWanted まで読む。KPI は 576 サンプルずつ。out は RenderReply + PCM。
 static uint32_t Cmd_Render(uint32_t sessionId, uint32_t bytesWanted, std::vector<uint8_t>& out)
 {
 	out.clear();
@@ -844,7 +881,7 @@ static uint32_t Cmd_Render(uint32_t sessionId, uint32_t bytesWanted, std::vector
 	bool hadRenderException = false;
 	pcm.reserve((size_t)samplesWanted * bytesPerFrame);
 	DWORD remain = samplesWanted;
-	const DWORD kChunkSamples = 576;
+	const DWORD kChunkSamples = 576; // 小さめに切って KPI の内部バッファ溢れを避ける
 
 	while (remain > 0) {
 		const DWORD ask = (remain > kChunkSamples) ? kChunkSamples : remain;
@@ -852,6 +889,7 @@ static uint32_t Cmd_Render(uint32_t sessionId, uint32_t bytesWanted, std::vector
 		part.resize((size_t)ask * bytesPerFrame);
 		DWORD got = SafeDecoderRender(s.dec, part.data(), ask, &hadRenderException);
 		if (got == 0 && hadRenderException && s.selected.qwLoop == (UINT64)-1) {
+			// 無限ループ曲で SEH したら先頭へ戻して一度だけリトライ。
 			bool seekEx = false;
 			SafeDecoderSeek(s.dec, 0, 0, &seekEx);
 			got = SafeDecoderRender(s.dec, part.data(), ask, &hadRenderException);
@@ -869,7 +907,7 @@ static uint32_t Cmd_Render(uint32_t sessionId, uint32_t bytesWanted, std::vector
 	rep.sessionId = sessionId;
 	rep.bytesReturned = gotBytes;
 	if (gotSamples == 0) s.zeroRenderStreak++; else s.zeroRenderStreak = 0;
-	if (s.selected.qwLoop == (UINT64)-1) rep.eof = 0;
+	if (s.selected.qwLoop == (UINT64)-1) rep.eof = 0; // 無限ループは短い読みでも終わらせない
 	else rep.eof = (s.zeroRenderStreak >= 3) ? 1 : 0;
 
 	out.resize(sizeof(rep) + gotBytes);
@@ -878,6 +916,7 @@ static uint32_t Cmd_Render(uint32_t sessionId, uint32_t bytesWanted, std::vector
 	return KPIHOST64_STATUS_OK;
 }
 
+// MIDI KPI は Seek が音色を戻さないので、この拡張子だけ破棄再生でシークする。
 static bool IsMidiLikePathW(const std::wstring& path)
 {
 	size_t d = path.find_last_of(L'.');
@@ -890,6 +929,7 @@ static bool IsMidiLikePathW(const std::wstring& path)
 	return e == L".mid" || e == L".midi" || e == L".kar" || e == L".rmi";
 }
 
+// MIDI は破棄 Render でシーク。それ以外はデコーダの Seek。
 static uint32_t Cmd_Seek(uint32_t sessionId, uint64_t posSample, uint32_t flag, std::vector<uint8_t>& out)
 {
 	out.clear();
@@ -941,6 +981,7 @@ static uint32_t Cmd_Seek(uint32_t sessionId, uint64_t posSample, uint32_t flag, 
 	return KPIHOST64_STATUS_OK;
 }
 
+// デコーダ・ファイル・DLL を解放してマップから消す。
 static uint32_t Cmd_Close(uint32_t sessionId)
 {
 	auto it = g_sessions.find(sessionId);
@@ -956,12 +997,12 @@ static uint32_t Cmd_Close(uint32_t sessionId)
 	return KPIHOST64_STATUS_OK;
 }
 
+// 1 クライアント接続のあいだ、ヘッダ＋ペイロードを読んで応答する。切断で抜ける。
 static void ServeOnce(HANDLE pipe)
 {
 	for (;;) {
 		KPIHOST64_MsgHeader h{};
-		// Byte-mode pipe: a header can arrive in pieces, and giving up on a
-		// short read would drop the client mid-song.
+		// バイトモードなのでヘッダが分割到着する。短い読みで切ると曲の途中で落ちる。
 		if (!ReadExact(pipe, &h, sizeof(h))) break;
 
 		std::vector<uint8_t> payload;
@@ -978,6 +1019,7 @@ static void ServeOnce(HANDLE pipe)
 
 		switch (h.cmd) {
 		case KPIHOST64_CMD_PING:
+			// 任意ペイロード: u32 lang。ホスト側 VST メッセージの言語に使う。
 			if (payload.size() >= sizeof(uint32_t)) {
 				int lang = (int)*(const uint32_t*)payload.data();
 				if (lang < 0 || lang > 13) lang = 1;
@@ -1129,6 +1171,7 @@ static void ServeOnce(HANDLE pipe)
 			break;
 		}
 		case KPIHOST64_CMD_VST_RENDER: {
+			// RenderReq の後ろに任意で注入ショート（モニタ／鍵盤からの CC）。次ブロックで送る。
 			if ((size_t)(end - p) < sizeof(KPIHOST64_RenderReq)) { status = KPIHOST64_STATUS_BAD_REQUEST; break; }
 			auto* rr = (const KPIHOST64_RenderReq*)p;
 			int slot = (rr->sessionId == 1) ? 1 : 0;
@@ -1278,7 +1321,7 @@ int wmain(int argc, wchar_t** argv)
 		KPIHOST64_PIPE_NAME,
 		PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED,
 		PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
-		1,
+		1,                 // インスタンス 1。本体はパイプを直列利用
 		1024 * 1024,
 		1024 * 1024,
 		0,
@@ -1286,7 +1329,7 @@ int wmain(int argc, wchar_t** argv)
 	);
 	if (pipe == INVALID_HANDLE_VALUE) return 2;
 
-	const DWORD idleMs = 30000;
+	const DWORD idleMs = 30000; // 接続待ちタイムアウト。セッションが空ならプロセス終了
 	for (;;) {
 		OVERLAPPED ov{};
 		ov.hEvent = CreateEventW(NULL, TRUE, FALSE, NULL);
@@ -1309,8 +1352,7 @@ int wmain(int argc, wchar_t** argv)
 			CancelIoEx(pipe, &ov);
 			CloseHandle(ov.hEvent);
 			if (g_sessions.empty() && !VstHost64_LiveActive()) {
-				// The app did not come back within the idle window, so the
-				// song session it was streaming is not coming back either.
+				// アイドル窓のあいだ本体が戻ってこない＝ストリーミング中の曲も戻らない。
 				if (VstHost64_SongActive())
 					(void)VstHost64_CloseAll();
 				break;
@@ -1321,9 +1363,8 @@ int wmain(int argc, wchar_t** argv)
 		CloseHandle(ov.hEvent);
 		ServeOnce(pipe);
 		DisconnectNamedPipe(pipe);
-		// The app owns the live parts; once it is gone nothing can drive them,
-		// and keeping them loaded would pin this process (and the plug-in)
-		// alive forever because live parts suppress the idle timeout.
+		// ライブパートは本体が所有する。本体が切れたあとも載せると、
+		// LiveActive がアイドル終了を止めてホスト（とプラグイン）が残る。
 		if (VstHost64_LiveActive())
 			(void)VstHost64_LiveUnloadAll();
 	}

@@ -1620,7 +1620,7 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 		if (!m_botVst.GetSafeHwnd())
 			m_botVst.Create(_T("VST"), WS_CHILD | BS_PUSHBUTTON | WS_TABSTOP, rc, this, IDC_MP_BOT_VST);
 		if (!m_botMidi.GetSafeHwnd())
-			m_botMidi.Create(_T("MIDI"), WS_CHILD | BS_PUSHBUTTON | WS_TABSTOP, rc, this, IDC_MP_BOT_MIDI);
+			m_botMidi.Create(_T("MIDI"), WS_CHILD | BS_PUSHBUTTON | WS_TABSTOP, rc, this, IDC_MP_BOT_MIDI); // VST と CD のあいだ
 		if (!m_botCd.GetSafeHwnd())
 			m_botCd.Create(_T("CD"), WS_CHILD | BS_PUSHBUTTON | WS_TABSTOP, rc, this, IDC_MP_BOT_CD);
 		if (!m_botMaze.GetSafeHwnd())
@@ -4036,7 +4036,7 @@ void CMediaPlayerDlg::SyncPushToggleButtons()
 		MpSetPushToggle(m_cmdroll, cmdRollOpen, RGB(200, 170, 255), RGB(160, 120, 240), RGB(230, 220, 255), RGB(200, 185, 250));
 		m_lastToggleCmdRoll = cmdRollOpen;
 	}
-	const int midiOpen = savedata.midimonwindow ? 1 : 0;
+	const int midiOpen = savedata.midimonwindow ? 1 : 0; // CMidiMonitorDlg.h をここに include しない（重複宣言）
 	if (m_botMidi.GetSafeHwnd() && midiOpen != m_lastToggleMidiMon) {
 		MpSetPushToggle(m_botMidi, midiOpen, RGB(90, 170, 230), RGB(50, 130, 200), RGB(230, 245, 255), RGB(155, 195, 235));
 		m_lastToggleMidiMon = midiOpen;
@@ -6719,7 +6719,7 @@ void CMediaPlayerDlg::OnAnalyzer()
 void CMediaPlayerDlg::OnMidiMonitor()
 {
 	if (og && ::IsWindow(og->GetSafeHwnd()))
-		og->PostMessage(WM_OGG_TOGGLE_SUBUI, 3, 0);  // 3=MIDI monitor
+		og->PostMessage(WM_OGG_TOGGLE_SUBUI, 3, 0);  // 3=MIDI モニタ
 }
 
 void CMediaPlayerDlg::OnProTools()

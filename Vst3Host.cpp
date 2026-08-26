@@ -1,5 +1,5 @@
-﻿// Shared by ogg.exe and KpiHost64.exe (via Vst3Host_k64.cpp). Keep it that
-// way: a second copy under KpiHost64 is how x64 plug-in fixes get lost.
+﻿// ogg.exe と KpiHost64.exe（Vst3Host_k64.cpp 経由）が同じソース。
+// KpiHost64 配下にコピーを置くと x64 プラグインの修正が片方にしか入らない。
 #include "stdafx.h"
 #include "Vst3Host.h"
 
@@ -29,8 +29,8 @@ using namespace Steinberg;
 using namespace Steinberg::Vst;
 
 enum { VST3_MAX_EVENTS = 2048, VST3_MAX_BUSES = 64, VST3_BLOCK = 512, VST3_SLICE = 64 };
-// Drum machines and multi-out samplers (Groove Agent has 32 output buses) can
-// route voices away from the master bus, so every bus is summed into the mix.
+// Groove Agent のように出力バスが多数あるドラム／マルチアウトは、
+// マスター以外に声が乗るので、全バスをミックスへ足す。
 enum { VST3_MAX_MIX_BUSES = 32 };
 
 static wchar_t g_vst3Fail[256];
@@ -47,9 +47,8 @@ static int IidEqual(const TUID a, const TUID b)
 }
 
 
-// A real attribute list, not a stub. Plug-ins built from two components talk
-// to themselves through host messages, and the ones that carry their program
-// state that way stay mute if the attributes are silently dropped.
+// 本物の attribute list。2 コンポーネント構成のプラグインはホスト経由で会話する。
+// スタブだとプログラム状態が落ち、無音のままになる。
 class AttrList : public IAttributeList {
 public:
 	enum { MAX_ATTRS = 64, MAX_STR = 256 };
@@ -626,24 +625,24 @@ private:
 struct Vst3Inst {
 	HMODULE module;
 	Steinberg::IPluginFactory* factory;
-	Steinberg::Vst::IComponent* component;
+	Steinberg::Vst::IComponent* component;       // プロセッサ側
 	Steinberg::Vst::IAudioProcessor* processor;
-	Steinberg::Vst::IEditController* controller;
+	Steinberg::Vst::IEditController* controller; // GUI／プログラム。UI スレッド所有
 	Steinberg::Vst::IMidiMapping* midiMap;
 	Steinberg::Vst::IUnitInfo* units;
-	Steinberg::Vst::ParamID progParam;
+	Steinberg::Vst::ParamID progParam;           // プログラム変更パラメータ。無ければ 0
 	Steinberg::Vst::ProgramListID progListId;
 	int progCount;
 	int hasProgParam;
-	int midiInCh;
-	int instrumentClass; // 1 = VST3 subcategory contains Instrument
+	int midiInCh;          // MIDI 入力チャンネル数
+	int instrumentClass;   // 1 = VST3 subcategory に Instrument
 	int sawFactory2;
 	Vst3Detail::HostApplication host;
 	Vst3Detail::CompHandler handler;
 	Vst3Detail::PlugFrame frame;
-	Steinberg::IPlugView* view;
-	Vst3Detail::FixedEventList pending;
-	Vst3Detail::FixedEventList blockEvents;
+	Steinberg::IPlugView* view;                  // エディタ。無ければ NULL
+	Vst3Detail::FixedEventList pending;          // 次ブロック以降へ持ち越す MIDI
+	Vst3Detail::FixedEventList blockEvents;      // 今スライスに載せる分
 	Vst3Detail::HostParamChanges params;
 	Vst3Detail::EmptyParameterChanges outParams;
 	Steinberg::Vst::ProcessContext ctx;
@@ -659,11 +658,11 @@ struct Vst3Inst {
 	int active;
 	int processing;
 	__int64 samplePos;
-	float* extraBufs; // (mixOutBuses-1) x 2 x VST3_BLOCK, summed into the mix
-	CRITICAL_SECTION paramCs;
+	float* extraBufs; // (mixOutBuses-1) x 2 x VST3_BLOCK。マスターへ加算
+	CRITICAL_SECTION paramCs; // コントローラからの performEdit と Process の交差
 	int paramCsReady;
 	enum { SX_STORE = 4096 };
-	BYTE sxStore[SX_STORE];
+	BYTE sxStore[SX_STORE]; // SysEx をイベントが参照するあいだ保持
 	int sxUsed;
 
 	Vst3Inst()
@@ -1181,6 +1180,7 @@ void Vst3EditorClose(Vst3Inst* v)
 	v->frame.SetWindow(NULL);
 }
 
+// 64 サンプルずつ切って process。イベントは sampleOffset でこのスライスに載るものだけ渡す。
 void Vst3Process(Vst3Inst* v, float* outL, float* outR, int frames)
 {
 	using namespace Steinberg;

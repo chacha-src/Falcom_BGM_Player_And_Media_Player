@@ -220,6 +220,7 @@ public:
 	// キャプチャ右〜終了左のツールショートカット（コンテキストでON/OFF）
 	CCustomStandardButton m_botDj, m_botTag, m_botBpm, m_botSleep;
 	CCustomStandardButton m_botMirror, m_botSsViz, m_botAlarm, m_botRemote, m_botVst, m_botMidi, m_botCd, m_botMaze, m_botRace;
+	// m_botMidi: VST と CD のあいだ。開いているあいだ凹む（savedata.midimonwindow）。bit 4096。
 	int m_mpBotShort; // 底バー短縮段階 0=フル 1=中 2=短（切替〜レース）
 	CCustomStatic m_kaisuuL;
 	CCustomEdit m_kaisuu;
@@ -326,7 +327,7 @@ public:
 	int  m_lastToggleAnalyzer;
 	int  m_lastTogglePrompt;
 	int  m_lastToggleCmdRoll;
-	int  m_lastToggleMidiMon;
+	int  m_lastToggleMidiMon; // MIDI モニタ窓の凹み。HWND を見ず savedata.midimonwindow
 	int  m_dsvolSlW;         // DS音量スライダー幅(DoLayout)。ラベル省略判定に使用
 	int  m_mpBtnShort;       // 0=フル 1=EQ系短縮 2=フェード/JK等短縮 3=最小幅用の超短縮
 	int  m_mpPromptShort;    // 0=プロンプト 1=指示(幅不足時)

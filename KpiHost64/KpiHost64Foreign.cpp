@@ -1,4 +1,4 @@
-﻿// KpiHost64 foreign plugin decode (Winamp / XMPlay / AIMP) — no MFC
+﻿// KpiHost64 外部入力プラグイン（Winamp in_ / XMPlay / AIMP）。MFC 無し。
 #include <windows.h>
 #include <string>
 #include <vector>
@@ -13,28 +13,29 @@
 #include "..\third_party\aimp\apiPlugin.h"
 #include "..\third_party\aimp\apiDecoders.h"
 
+// 外部デコーダ 1 本。kind で Winamp / XMPlay / AIMP のどの経路か決まる。
 struct ForeignSession
 {
-	uint32_t kind = 0;
+	uint32_t kind = 0; // 1=Winamp 2=XMPlay 3=AIMP
 	HMODULE dll = NULL;
-	// winamp
+	// Winamp in_: 偽 Out_Module へ Write させ、リングから本体が読む
 	In_Module* waIn = nullptr;
 	Out_Module waOut{};
 	CRITICAL_SECTION cs{};
 	bool csInit = false;
-	std::vector<uint8_t> ring;
+	std::vector<uint8_t> ring; // PCM リング。プラグインスレッドが書き、Render が読む
 	int ringR = 0, ringW = 0, ringUsed = 0;
 	int rate = 44100, ch = 2, bits = 16;
 	int playing = 0;
-	__int64 written = 0;
-	int flushMs = 0;
-	// xmplay
+	__int64 written = 0; // 書き込んだバイト累計
+	int flushMs = 0;     // Flush で渡された再生位置（ms）
+	// XMPlay
 	XMPIN* xmp = nullptr;
 	std::vector<float> fbuf;
 	std::vector<uint8_t> pending;
 	size_t pendOff = 0;
 	int eof = 0;
-	// aimp
+	// AIMP
 	IAIMPPlugin* aimpPlug = nullptr;
 	IAIMPAudioDecoder* aimpDec = nullptr;
 	IAIMPExtensionAudioDecoderOld* aimpExt = nullptr;
@@ -50,7 +51,7 @@ static ForeignSession* ForeignGet(uint32_t id)
 	return it == g_foreign.end() ? nullptr : it->second;
 }
 
-// ---- Winamp out stubs (per-session via TLS-like: only one session plays) ----
+// Winamp の out スタブ。同時に再生するセッションは 1 本（g_waCur）。
 static ForeignSession* g_waCur = nullptr;
 static volatile LONG g_waEof = 0;
 
@@ -116,8 +117,9 @@ static void __cdecl FWa_VSASetInfo(int, int) {}
 static int __cdecl FWa_dsp_isactive() { return 0; }
 static int __cdecl FWa_dsp_dosamples(short* s, int n, int, int, int) { return n; }
 static void __cdecl FWa_EQSet(int, char[10], int) {}
-static void __cdecl FWa_SetInfo(int, int, int, int) {}
+static void FWa_SetInfo(int, int, int, int) {}
 
+// in_ モジュールに偽 out を繋ぐ。可視化／DSP は全部 nop。
 static void BindWa(ForeignSession* s, HWND hwnd)
 {
 	ZeroMemory(&s->waOut, sizeof(s->waOut));
@@ -246,6 +248,7 @@ static HWND WaEnsureWnd()
 
 typedef In_Module* (__cdecl* pfn_wa)();
 
+// DLL を一時ロードして拡張子文字列だけ取る。セッションは残さない。
 uint32_t ForeignHost_ListExts(uint32_t kind, const std::wstring& path, std::wstring& outExts)
 {
 	outExts.clear();
@@ -273,6 +276,7 @@ uint32_t ForeignHost_ListExts(uint32_t kind, const std::wstring& path, std::wstr
 	return KPIHOST64_STATUS_NOT_SUPPORTED;
 }
 
+// いまは Winamp in_ のみ。XMPlay/AIMP x64 は列挙しない（再生経路が無い）。
 uint32_t ForeignHost_Open(uint32_t kind, const std::wstring& dll, const std::wstring& media, KPIHOST64_ForeignOpenReply& reply)
 {
 	ZeroMemory(&reply, sizeof(reply));

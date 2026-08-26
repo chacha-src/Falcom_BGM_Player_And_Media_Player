@@ -4247,6 +4247,7 @@ static bool IsPlaylistDropAllowedExt(const CString& pathOrName)
 	return false;
 }
 
+// ビッグエンディアン n バイト（MThd の長さ・トラック数など）。
 static unsigned PlMidiBe(const BYTE* p, int n)
 {
 	unsigned v = 0;
@@ -4255,6 +4256,7 @@ static unsigned PlMidiBe(const BYTE* p, int n)
 	return v;
 }
 
+// SMF 可変長（delta time / メタ長）。最大 4 バイト。
 static int PlMidiVar(const BYTE*& q, const BYTE* end, unsigned& out)
 {
 	out = 0;
@@ -4280,6 +4282,7 @@ static void PlMidiTrimW(wchar_t* w)
 		w[--n] = 0;
 }
 
+// UTF-8 → CP932 → ACP。MB_ERR_INVALID_CHARS 無しの 932 は壊れたバイトを '?' にして曲名に見える。
 static void PlMidiDecodeText(const char* tmp, wchar_t* w, int cap)
 {
 	w[0] = 0;
@@ -4307,6 +4310,7 @@ static void PlMidiDecodeText(const char* tmp, wchar_t* w, int cap)
 		w[0] = 0;
 }
 
+// 1 トラックから FF 03（曲名）と FF 01（テキスト）を拾う。著作権 FF 02 は見ない。
 static void PlMidiScanTrack(const BYTE* tr, const BYTE* end, wchar_t* t03, int c03, wchar_t* t01, int c01)
 {
 	BYTE run = 0;
@@ -4360,6 +4364,7 @@ static void PlMidiScanTrack(const BYTE* tr, const BYTE* end, wchar_t* t03, int c
 	}
 }
 
+// SMF/RMID を最大 1MB 読んで曲名を出す。UNC は呼ぶ側がスキップする（起動固まり防止）。
 static int PlMidiPeekTitle(const wchar_t* path, wchar_t* out, int outCap)
 {
 	out[0] = 0;
@@ -4373,7 +4378,7 @@ static int PlMidiPeekTitle(const wchar_t* path, wchar_t* out, int outCap)
 		return 0;
 	}
 	DWORD toRead = (sz.QuadPart > (LONGLONG)(1024 * 1024)) ? (1024 * 1024) : (DWORD)sz.QuadPart;
-	BYTE* data = (BYTE*)malloc(toRead);
+	BYTE* data = (BYTE*)malloc(toRead); // new と混在させない（起動時の断片化対策）
 	DWORD got = 0;
 	if (!data || !ReadFile(f, data, toRead, &got, NULL) || got < 14) {
 		CloseHandle(f);
@@ -4384,6 +4389,7 @@ static int PlMidiPeekTitle(const wchar_t* path, wchar_t* out, int outCap)
 	const BYTE* smf = data;
 	DWORD smfSize = got;
 	if (got >= 20 && memcmp(data, "RIFF", 4) == 0 && memcmp(data + 8, "RMID", 4) == 0) {
+		// RMID: RIFF の data チャンクが SMF。
 		DWORD off = 12;
 		while (off + 8 <= got) {
 			const DWORD cksz = (DWORD)data[off + 4] | ((DWORD)data[off + 5] << 8)
@@ -4427,6 +4433,7 @@ static int PlMidiPeekTitle(const wchar_t* path, wchar_t* out, int outCap)
 	return 1;
 }
 
+// stem のあとに続く G/M/D などだけならコード名として許可。
 static int PlMidiCodeRestOk(const CString& rest)
 {
 	for (int i = 0; i < rest.GetLength(); ++i) {
@@ -4442,6 +4449,7 @@ static int PlMidiCodeRestOk(const CString& rest)
 	return 1;
 }
 
+// タイトルがファイル名そのもの、または stem のあとに G/M/D だけなら曲名ではない。
 static int PlMidiTitleIsCode(const wchar_t* title, const CString& stem, const CString& leaf)
 {
 	if (!title || !title[0])
@@ -4454,6 +4462,8 @@ static int PlMidiTitleIsCode(const wchar_t* title, const CString& stem, const CS
 	return 0;
 }
 
+// 表示名がファイル名のままなら SMF 曲名を「title(xxxx.mid)」にする。
+// doPeek=0 は起動 Load。ディスクを開かず、番号だけの名前は内蔵表から足す。
 static void PlMidiMaybeTitle(CString& name, const CString& fol, int doPeek)
 {
 	if (!VstIsMidiExt(fol))
