@@ -1,4 +1,4 @@
-#include "stdafx.h"
+﻿#include "stdafx.h"
 #include "CMidiMonitorDlg.h"
 #include "oggDlg.h"
 #include "PlayList.h"
@@ -1107,8 +1107,8 @@ void CMmHelpDlg::OnPaint()
 		L"· Lev seviyedir. Baslik DS DirectSound sesidir (MP DS ile eslenir, ana ses degil). Notes gercek polifonidir; koyu cubuk MAX'tir (sonra duser). DRUM davul vurusudur. Saginda: olcu/toplam, vurus/olcu, tick/zaman tabani."));
 	y += lh;
 	body(L, y, LL14(
-		L"・INSERTION 1/2 は ON/OFF ではなく、曲の SysEx から引いた正式名称です（Thru、Distortion、Stereo-EQ など）。B16 の下2行に、接続パートと効いているパラメータ（Drive、EQ ゲイン、Rev/Cho 送り）を文字で出します。",
-		L"· INSERTION 1/2 shows official names from the song SysEx (Thru, Distortion, Stereo-EQ…), not ON/OFF. Two rows under B16 list connected parts and active parameters (Drive, EQ gains, Rev/Cho sends).",
+		L"・INSERTION 1/2 は ON/OFF ではなく、曲の SysEx から引いた正式名称です（Thru、Distortion、Overdrive、Stereo-EQ など）。かかっているパートはインスト名の左に橙の◆を出します。B16 の下2行に、接続パートと効いているパラメータ（Drive、EQ ゲイン、Rev/Cho 送り）を文字で出します。",
+		L"· INSERTION 1/2 shows official names from the song SysEx (Thru, Distortion, Overdrive, Stereo-EQ…), not ON/OFF. Parts using it get an orange ◆ left of the instrument name. Two rows under B16 list connected parts and active parameters (Drive, EQ gains, Rev/Cho sends).",
 		L"· INSERTION 1/2 affiche le nom officiel (Thru, Distortion…), pas ON/OFF. Insertion XG, Variation en insertion, ou EFX GS.",
 		L"· INSERTION 1/2 mostra il nome ufficiale (Thru, Distortion…), non ON/OFF. Insertion XG, Variation in insertion, o EFX GS.",
 		L"· INSERTION 1/2 muestra el nombre oficial (Thru, Distortion…), no ON/OFF. Insercion XG, Variation como insercion, o EFX GS.",
@@ -1155,8 +1155,8 @@ void CMmHelpDlg::OnPaint()
 		L"· Satir renkleri: kullanilan partlar beyaz / biraz koyu beyaz. Davul tum satiri sicak boyar. Nota/CC/SysEx yoksa gri. Mini klavyeye tiklayinca serit (davulsa sicak ton) doner."));
 	y += lh;
 	body(L, y, LL14(
-		L"・変化の光 …… A01–B16 は発音中だけ緑に点き、離すと消えます。PC# / BNK / Map は行の交互色のままです。音色が変わるとインスト欄が琥珀に点きます。Lev/Vol などのバーはフェードしません。",
-		L"· Change glow: A01–B16 light green while sounding, then fade. PC# / BNK / Map keep the row stripe. An instrument change ambers that cell. Meter bars do not fade.",
+		L"・変化の光 …… A01–B16 は発音中だけ緑に点き、離すと消えます。PC# / BNK / Map は行の交互色のままです。音色が変わるとインスト欄が琥珀に点きます。EFX/インサーションが乗っているパートはインスト名の左が橙の◆です。Lev/Vol などのバーはフェードしません。",
+		L"· Change glow: A01–B16 light green while sounding, then fade. PC# / BNK / Map keep the row stripe. An instrument change ambers that cell. Parts with EFX/insertion show an orange ◆ left of the name. Meter bars do not fade.",
 		L"· Lueur : A01–B16 vert pendant le son, puis fondu. PC# / BNK / Map gardent le zebrage. Changement de timbre = ambre. Les barres ne fondent pas.",
 		L"· Bagliore: A01–B16 verde mentre suona, poi sfuma. PC# / BNK / Map restano a strisce. Cambio timbro = ambra. Le barre non sfumano.",
 		L"· Brillo: A01–B16 verde al sonar, luego se apaga. PC# / BNK / Map siguen la raya. Cambio de timbre = ambar. Las barras no se desvanecen.",
@@ -1910,7 +1910,10 @@ void CMidiMonitorDlg::ApplySysex(const BYTE* d, int n, int livePort)
 					}
 				}
 			}
-			if (eff) m_dirtyHead = true;
+			if (eff) {
+				m_dirtyHead = true;
+				SyncXgInsParts();
+			}
 		}
 	}
 	if (n >= 11 && d[1] == 0x41 && d[3] == 0x42 && d[4] == 0x12 && d[5] == 0x40 && d[6] == 0x01) {
@@ -1920,8 +1923,9 @@ void CMidiMonitorDlg::ApplySysex(const BYTE* d, int n, int livePort)
 	}
 	if (n >= 11 && d[1] == 0x41 && d[3] == 0x42 && d[4] == 0x12 && d[5] == 0x40 && d[6] == 0x03) {
 		const int hasF7g = (n > 0 && d[n - 1] == 0xf7) ? 1 : 0;
-		int nval = n - 9 - hasF7g - 1;
-		if (nval < 1) nval = n - 9 - hasF7g;
+		/* F0 41 dv 42 12 40 03 AL | data… | CS | [F7] — CS を data に入れない */
+		int nval = n - 8 - hasF7g - 1;
+		if (nval < 0) nval = 0;
 		for (int i = 0; i < nval; ++i) {
 			const int a = (int)d[7] + i;
 			if (a < 0 || a >= 32) continue;
@@ -1952,6 +1956,7 @@ void CMidiMonitorDlg::ApplySysex(const BYTE* d, int n, int livePort)
 					if (a == 0x22) {
 						p.efxOn = (vv != 0) ? 1 : 0;
 						m_dirtyHead = true;
+						m_dirtyRows |= (1u << part);
 					}
 					continue;
 				}
@@ -3098,6 +3103,7 @@ void CMidiMonitorDlg::DrawPartRow(CDC& dc, int i, int y, int rowH, int w, UINT d
 	const int bh = rowH - Scale(4, dpi);
 	int textLDirty = (forceKeys || p.heard != s.heard || p.isDrum != s.isDrum || (p.held > 0) != (s.held > 0)
 		|| p.pc != s.pc || p.bankMsb != s.bankMsb || p.bankLsb != s.bankLsb || p.mapId != s.mapId
+		|| p.efxOn != s.efxOn || PartHasInsertion(i) != (int)s.insMark
 		|| wcscmp(p.name, s.name) != 0
 		|| MmGlowSig(p.fadeCh) != MmGlowSig(s.fadeCh)
 		|| MmGlowSig(p.fadeInst) != MmGlowSig(s.fadeInst)) ? 1 : 0;
@@ -3185,8 +3191,14 @@ void CMidiMonitorDlg::DrawPartRow(CDC& dc, int i, int y, int rowH, int w, UINT d
 		const int sys = isXg ? 2 : ((mapId == 5) ? 0 : 1);
 		_snwprintf_s(pcb, _TRUNCATE, L"%03d %03d %s", p.pc + 1, p.bankMsb, MmMapLabel(sys, mapId, bankMsb, p.bankLsb));
 		dc.TextOut(Scale(40, dpi), y + 1, pcb);
+		int nameX = Scale(148, dpi);
+		if (PartHasInsertion(i)) {
+			dc.SetTextColor(RGB(255, 112, 48));
+			dc.TextOut(nameX, y + 1, L"◆");
+			nameX += Scale(12, dpi);
+		}
 		dc.SetTextColor(tx);
-		dc.TextOut(Scale(148, dpi), y + 1, shownName);
+		dc.TextOut(nameX, y + 1, shownName);
 		wcsncpy_s(m_plugShown[i], shownName, _TRUNCATE);
 	}
 
@@ -3235,6 +3247,39 @@ void CMidiMonitorDlg::DrawPartRow(CDC& dc, int i, int y, int rowH, int w, UINT d
 	}
 	dc.SelectObject(oldF);
 	m_show[i] = m_part[i];
+	m_show[i].insMark = (BYTE)(PartHasInsertion(i) ? 1 : 0);
+}
+
+int CMidiMonitorDlg::PartHasInsertion(int i) const
+{
+	if (i < 0 || i >= PART_MAX) return 0;
+	if (!m_part[i].efxOn) return 0;
+	if (m_sysMode == 1 && m_ins1 == 0) return 0;
+	return 1;
+}
+
+void CMidiMonitorDlg::SyncXgInsParts()
+{
+	if (m_sysMode != 2) return;
+	BYTE on[PART_MAX];
+	memset(on, 0, sizeof(on));
+	if (m_ins1 != 0) {
+		const int pv = m_insBlk[0][0x0C];
+		if (pv >= 0 && pv < PART_MAX) on[pv] = 1;
+	}
+	if (m_ins2 != 0) {
+		const int pv = m_insBlk[1][0x0C];
+		if (pv >= 0 && pv < PART_MAX) on[pv] = 1;
+	}
+	if (m_ins1 == 0 && m_varConn == 0 && m_varPacked != 0) {
+		const int pv = m_varBlk[0x1B];
+		if (pv >= 0 && pv < PART_MAX) on[pv] = 1;
+	}
+	for (int i = 0; i < PART_MAX; ++i) {
+		if (m_part[i].efxOn == on[i]) continue;
+		m_part[i].efxOn = on[i];
+		m_dirtyRows |= (1u << i);
+	}
 }
 
 void CMidiMonitorDlg::BuildInsLine(int slot, wchar_t* out, int outN)
@@ -3807,6 +3852,8 @@ void CMidiMonitorDlg::InvalidateDirty()
 				|| MmGlowSig(a.fadeEnv) != MmGlowSig(b.fadeEnv)
 				|| MmGlowSig(a.fadeEq) != MmGlowSig(b.fadeEq)
 				|| MmGlowSig(a.fadeNrpn) != MmGlowSig(b.fadeNrpn)
+				|| a.efxOn != b.efxOn
+				|| PartHasInsertion(i) != (int)b.insMark
 				|| wcscmp(a.name, b.name) != 0)
 				diff |= (1u << i);
 		}

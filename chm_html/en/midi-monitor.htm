@@ -40,7 +40,7 @@
 <h2>The 32-row channel table</h2>
 <p>Each row is one part. The top 16 rows are the first half; the bottom 16 are the second. Drums follow the song (channel 10 is not always drums). During VST playback, GS Reset is followed by rhythm mode on A10/B10; XG songs get a drum bank on channel 10. See <a href="vst-midi.htm">Playing .mid through a VST</a>.</p>
 <p>While catching up, only the last SysEx per address and the last CC of each type are applied. A dump that walks all 32 channels several times is collapsed to the latest state at the play position.</p>
-<p>The paint floor is 16ms; only rows whose picture changed are repainted. When the UI is idle it syncs more often (about 16ms when something else is busy). A bar when it moves by a pixel, the mini keyboard only when the held notes change. Even with all 32 parts sounding, the table is not fully repainted.</p>
+<p>Every 16ms only rows whose picture changed are repainted: a bar when it moves by a pixel, the mini keyboard only when the held notes change. Even with all 32 parts sounding, the table is not fully repainted.</p>
 <dl>
 <dt>PC# / BNK / Map / Instrument</dt>
 <dd>Program, bank, GS/XG map, and instrument name (from the built-in SASAMI GS/XG tables).</dd>
@@ -60,6 +60,7 @@
 <li>A01–B16 light green while sounding, then fade.</li>
 <li>PC# / BNK / Map keep the row stripe while notes play.</li>
 <li>An instrument change ambers that cell. Meter bars do not fade.</li>
+<li>Parts with EFX/insertion show an orange ◆ to the left of the instrument name.</li>
 </ul>
 <h2>Playing from the mini keyboard and sliders</h2>
 <p>Clicks on the mini keyboard and drags on volume actually reach the sound, not just the display. During <a href="vst-midi.htm">Playing .mid through a VST</a>, they enter the same module as the song. Clicking a key does not rewind the song. When playback uses Windows MIDI, the same output is used. During <a href="kpi.htm">Adding formats with KPI plug-ins</a> MIDI playback, keys go to the MIDI-out device in Rendering.</p>

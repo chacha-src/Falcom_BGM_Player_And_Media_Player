@@ -118,6 +118,7 @@ private:
 		BYTE fadeNrpn;
 		BYTE heard;
 		BYTE efxOn;
+		BYTE insMark;
 		wchar_t name[NAME_CHARS];
 	};
 
@@ -140,6 +141,8 @@ private:
 	void DrawInsFoot(CDC& dc, int y, int w, int footH, UINT dpi);
 	void DrawPartRow(CDC& dc, int i, int y, int rowH, int w, UINT dpi, int forceKeys);
 	void BuildInsLine(int slot, wchar_t* out, int outN);
+	void SyncXgInsParts();
+	int PartHasInsertion(int i) const;
 	void TickVisuals();
 	void TickNotePeak();
 	void UpdateNoteMeter();
