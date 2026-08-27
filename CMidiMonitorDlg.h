@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 // CMidiMonitorDlg : MIDI 32パート・モニタ（XG/GS 風）
 // SMF を再生位置に同期して CC/ノート/SysEx を表示。音色名は SASAMI_GS/XG/EX.DAT。
 #include "afxdialogex.h"
@@ -101,6 +101,7 @@ private:
 		int lastNote;
 		int lastVel;
 		int isDrum;
+		BYTE xgPartMode; // XG 08 pp 06。0=Normal 1+=Drum（MSB127 と OR）
 		int held;       // 押鍵数。メータはフェードさせない（glow は使わない）
 		int rxCh;   // 0-15, 16=off（GS Rx Channel）
 		int rxPort; // 0=A 1=B 2=both
@@ -127,6 +128,7 @@ private:
 	Part m_show[PART_MAX];
 	int m_showBpm, m_showTpc, m_showNotes, m_showPeak, m_showVol, m_showSys;
 	int m_showRev, m_showCho, m_showVar, m_showVarPacked, m_showVarConn, m_showIns1, m_showIns2, m_showDrum;
+	int m_showIns3, m_showIns4, m_showDly;
 	int m_showRevPacked, m_showChoPacked;
 	int m_showDiv, m_showTsN, m_showTsD, m_showTransp, m_showKeySf, m_showKeyMin, m_showFrozen;
 	int m_showBar, m_showBars, m_showBeat, m_showTick, m_showTpm, m_showNum;
@@ -175,6 +177,8 @@ private:
 	void ApplyShort(int port, DWORD msg, BOOL fromUser = FALSE, BOOL liveExact = FALSE);
 	void ApplySysex(const BYTE* d, int n, int livePort = -1);
 	void ApplyNrpn(Part& p);
+	void ApplyXgPartByte(int part, int addr, BYTE v);
+	void ApplyGsPartByte(Part& p, int kind, int addr, BYTE v, int* changed, int* mark);
 	void RefreshPartName(Part& p);
 	void LookupToneName(int isXg, int mapId, int bankMsb, int bankLsb, int pc, int isDrum, wchar_t* out, int outN);
 	void PersistPos();
@@ -255,10 +259,13 @@ private:
 	int m_varConn;   // XG 02 01 5A: 0=INSERTION, 1=SYSTEM
 	int m_ins1;      // XG TYPE (MSB<<8)|LSB, or GS EFX (MSB<<8)|LSB
 	int m_ins2;
+	int m_ins3;      // XG Insertion 3 (MU2000 等 03 02)
+	int m_ins4;      // XG Insertion 4 (03 03)
+	int m_dlyType;   // GS Delay Macro 40 01 50（ヘッダ Variation 列）
 	BYTE m_gsEfx[32];
 	BYTE m_gsEfxHasLsb;
 	DWORD m_gsEfxMask;
-	BYTE m_insBlk[2][24];
+	BYTE m_insBlk[4][48];
 	BYTE m_varBlk[32];
 	int m_noteCount;
 	int m_masterVol;
@@ -307,6 +314,8 @@ private:
 	CRect m_volBarRc;
 	CRect m_notesBarRc;
 	wchar_t m_plugShown[PART_MAX][40];
-	wchar_t m_insLine[2][220];
-	wchar_t m_showInsLine[2][220];
+	wchar_t m_insLine[4][220];
+	wchar_t m_showInsLine[4][220];
+	int InsFootCount() const;
+	int InsPacked(int slot) const;
 };

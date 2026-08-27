@@ -33,10 +33,12 @@
 <li>BPM, tempo %, key, time base, meter, transpose, file name (sequence name beside it when present; a name that is only "???" is omitted)</li>
 <li>DS volume %, note count, DRUM</li>
 <li>To the right of DRUM: current bar/total (001/051), beat/beats-in-the-bar (1/4→2/4→3/4→4/4), tick-in-bar / ticks-per-bar (0000/1920). They follow the play position. If the meter changes, the beat denominator follows it.</li>
-<li>Reverb / chorus / variation (XG TYPE MSB/LSB; GS from 40 01 30/38. Before a song message, the reset default of that mode)</li>
-<li>SYS (GM / GS / XG), INSERTION 1 / 2 (names from the song SysEx: Thru, Distortion, Stereo-EQ… — XG insertion, Variation used as insertion, or GS/88Pro EFX)</li>
-<li>Two rows under B16: INSERTION 1 and 2 details. Connected parts, active parameters (Drive, EQ gains…), EFX sends to Rev/Cho/Delay. Manual names, not hex (res/insertion.dat)</li>
+<li>Reverb / chorus / variation (XG TYPE MSB/LSB. GS Variation column is the Delay macro 40 01 50; Rev/Cho from 40 01 30/38. Before a song message, the reset default of that mode)</li>
+<li>SYS (GM / GS / XG), INSERTION (names from the song SysEx: Thru, Distortion, Stereo-EQ… — XG Insertion 1–4, Variation used as insertion, or GS/88Pro EFX)</li>
+<li>Under B16: INSERTION details (two rows, or four when INS3/4 is used). Connected parts, active parameters (Drive, EQ gains…), EFX sends to Rev/Cho/Delay. Manual names, not hex (res/insertion.dat)</li>
 </ul>
+<h2>How SysEx is read</h2>
+<p>Values come from the SysEx written in the song. GS DT1 is Roland F0 41 dv 42 12 and Korg NS5R/NX5R-compatible F0 42 3n 42 12. Part 1x covers bank / program / Rx channel / rhythm plus key shift, level, pan, and chorus / reverb / delay send. 2x is vibrato, TVF (cutoff / resonance), and TVA (attack / decay / release). 4x address 22 is EFX ON. System 40 01 includes Delay (address 50) as well as Reverb / Chorus. XG Multi Part 08 (A01–A16) and 09 (B01–B16) cover bank, PC, Part Mode, volume, pan, sends, vibrato, filter, and EG. EQ frequency becomes Hz only for table index 0–15. Insertion is 03 00–03 (MU100 03 10 = INS2). SD-90 GS dumps use the same DT1; tone names also use native bank MSB.</p>
 <h2>The 32-row channel table</h2>
 <p>Each row is one part. The top 16 rows are the first half; the bottom 16 are the second. Drums follow the song (channel 10 is not always drums). During VST playback, GS Reset is followed by rhythm mode on A10/B10; XG songs get a drum bank on channel 10. See <a href="vst-midi.htm">Playing .mid through a VST</a>.</p>
 <p>While catching up, only the last SysEx per address and the last CC of each type are applied. A dump that walks all 32 channels several times is collapsed to the latest state at the play position.</p>

@@ -351,6 +351,11 @@ static const wchar_t* kGsCho[] = {
 	L"Chorus 1", L"Chorus 2", L"Chorus 3", L"Chorus 4",
 	L"Feedback Chorus", L"Flanger", L"Short Delay", L"Short Delay FB"
 };
+static const wchar_t* kGsDly[] = {
+	L"Delay 1", L"Delay 2", L"Delay 3", L"Delay 4",
+	L"Pan Delay 1", L"Pan Delay 2", L"Pan Delay 3", L"Pan Delay 4",
+	L"Delay to Rev", L"Pan Repeat"
+};
 struct MmXgTn { BYTE msb; BYTE lsb; const wchar_t* n; };
 static const MmXgTn kXgTypeNm[] = {
 	{ 0x00, 0x00, L"Thru" },
@@ -406,11 +411,16 @@ static BOOL MmLoadFileDat(const wchar_t* path, BYTE** out, int* outN);
 
 static int MmXgUnpack(const BYTE* d, int n, int* ah, int* am, int* al, const BYTE** data, int* ndata)
 {
-	if (!d || n < 8 || d[0] != 0xf0 || d[1] != 0x43 || d[3] != 0x4c)
+	if (!d || n < 8 || d[0] != 0xf0)
+		return 0;
+	if (d[1] != 0x43 && d[1] != 0x42)
+		return 0;
+	if (d[3] != 0x4c)
 		return 0;
 	const int hasF7 = (n > 0 && d[n - 1] == 0xf7) ? 1 : 0;
 	const int cmd = d[2] & 0xf0;
-	if (cmd == 0x10) {
+	/* Yamaha 43 1n 4C。Korg NS5R/NX5R の XG 互換は 42 3n 4C */
+	if (cmd == 0x10 || (d[1] == 0x42 && cmd == 0x30)) {
 		*ah = d[4] & 127;
 		*am = d[5] & 127;
 		*al = d[6] & 127;
@@ -723,6 +733,28 @@ static int MmGs1xToPart(int x)
 	return x;
 }
 
+static int MmGsDt1Hdr(const BYTE* d, int n)
+{
+	if (!d || n < 10 || d[0] != 0xf0 || d[4] != 0x12) return 0;
+	if (d[1] == 0x41 && d[3] == 0x42) return 1; // Roland GS / SC-8850 / SD
+	if (d[1] == 0x42 && d[3] == 0x42) return 1; // Korg NS5R/NX5R GS 互換
+	return 0;
+}
+
+static int MmXgBassHz(int v)
+{
+	static const int t[] = { 32, 40, 50, 63, 80, 100, 125, 160, 200, 250, 315, 400, 500, 630, 800, 1000 };
+	if (v < 0 || v > 15) return -1;
+	return t[v];
+}
+
+static int MmXgTrebleHz(int v)
+{
+	static const int t[] = { 500, 630, 800, 1000, 1250, 1600, 2000, 2500, 3150, 4000, 5000, 6300, 8000, 10000, 12500, 16000 };
+	if (v < 0 || v > 15) return -1;
+	return t[v];
+}
+
 static BOOL MmLoadResDat(int id, BYTE** out, int* outN)
 {
 	*out = NULL;
@@ -836,6 +868,13 @@ static int MmExBank(int mapId, int msb, int lsb, int isDrum)
 	return msb;
 }
 
+// XG ドラム: リズムバンク MSB 127、または Multi Part の Part Mode≠Normal。
+// ch10 固定にしない（mildgrov の A11=#Apogee Kit など追加キット用）。
+static int MmXgPartIsDrum(int bankMsb, int partMode)
+{
+	return (bankMsb == 127 || partMode != 0) ? 1 : 0;
+}
+
 static int MmMsbLooksKorg(int m)
 {
 	return m == 56 || m == 61 || m == 62 || m == 82 || m == 83 ||
@@ -901,6 +940,10 @@ static const wchar_t* MmEffName(int mode, int kind, int type)
 	if (kind == 1) {
 		if (type >= 0 && type < (int)(sizeof(kGsCho) / sizeof(kGsCho[0]))) return kGsCho[type];
 		return L"Chorus 1";
+	}
+	if (kind == 2) {
+		if (type >= 0 && type < (int)(sizeof(kGsDly) / sizeof(kGsDly[0]))) return kGsDly[type];
+		return L"Delay 1";
 	}
 	return L"OFF";
 }
@@ -1184,20 +1227,36 @@ void CMmHelpDlg::OnPaint()
 		L"· Lev seviyedir. Baslik DS DirectSound sesidir (MP DS ile eslenir, ana ses degil). Notes gercek polifonidir; koyu cubuk MAX'tir (sonra duser). DRUM davul vurusudur. Saginda: olcu/toplam, vurus/olcu, tick/zaman tabani."));
 	y += lh;
 	body(L, y, LL14(
-		L"・INSERTION 1/2 は ON/OFF ではなく、曲の SysEx から引いた正式名称です（Thru、Distortion、Overdrive、Stereo-EQ など）。かかっているパートはインスト名の左に橙の◆を出します。B16 の下2行に、接続パートと効いているパラメータ（Drive、EQ ゲイン、Rev/Cho 送り）を文字で出します。",
-		L"· INSERTION 1/2 shows official names from the song SysEx (Thru, Distortion, Overdrive, Stereo-EQ…), not ON/OFF. Parts using it get an orange ◆ left of the instrument name. Two rows under B16 list connected parts and active parameters (Drive, EQ gains, Rev/Cho sends).",
-		L"· INSERTION 1/2 affiche le nom officiel (Thru, Distortion…), pas ON/OFF. Insertion XG, Variation en insertion, ou EFX GS.",
-		L"· INSERTION 1/2 mostra il nome ufficiale (Thru, Distortion…), non ON/OFF. Insertion XG, Variation in insertion, o EFX GS.",
-		L"· INSERTION 1/2 muestra el nombre oficial (Thru, Distortion…), no ON/OFF. Insercion XG, Variation como insercion, o EFX GS.",
-		L"· INSERTION 1/2는 ON/OFF가 아니라 효과의 정식 이름입니다(Thru, Distortion…). XG 인서션, 인서션 연결된 Variation, 또는 GS EFX.",
-		L"· INSERTION 1/2 显示正式效果名（Thru、Distortion 等），不是 ON/OFF。XG 插入、作插入连接的 Variation，或 GS EFX。",
-		L"· INSERTION 1/2 يعرض اسم المؤثر الرسمي (Thru, Distortion…) وليس ON/OFF.",
-		L"· INSERTION 1/2 показывает официальное имя эффекта (Thru, Distortion…), не ON/OFF. XG insertion, Variation как insertion или GS EFX.",
-		L"· INSERTION 1/2 zeigt den offiziellen Effektnamen (Thru, Distortion…), nicht ON/OFF. XG-Insertion, Variation als Insertion oder GS-EFX.",
-		L"· INSERTION 1/2 mostra o nome oficial (Thru, Distortion…), nao ON/OFF. Insercao XG, Variation como insercao ou EFX GS.",
-		L"· INSERTION 1/2 toont de officiële effectnaam (Thru, Distortion…), niet ON/OFF. XG-insertion, Variation als insertion of GS-EFX.",
-		L"· INSERTION 1/2 pokazuje oficjalna nazwe efektu (Thru, Distortion…), nie ON/OFF. Insercja XG, Variation jako insercja lub GS EFX.",
-		L"· INSERTION 1/2 resmi efekt adini gosterir (Thru, Distortion…), ON/OFF degil. XG insertion, insertion bagli Variation veya GS EFX."));
+		L"・INSERTION は ON/OFF ではなく、曲の SysEx から引いた正式名称です（Thru、Distortion、Overdrive、Stereo-EQ など）。XG は Insertion 1–4（03 00–03。MU100 の 03 10 は INS2）。GS は 88Pro EFX（40 03）。Variation をインサーション接続したときも出します。かかっているパートはインスト名の左に橙の◆を出します。B16 の下に接続パートと効いているパラメータ（Drive、EQ ゲイン、Rev/Cho 送り）を文字で出します。INS3/4 がある曲は4行になります。",
+		L"· INSERTION shows official names from the song SysEx (Thru, Distortion, Overdrive, Stereo-EQ…), not ON/OFF. XG: Insertion 1–4 (03 00–03; MU100 03 10 = INS2). GS: 88Pro EFX (40 03). Variation used as insertion is included. Parts using it get an orange ◆ left of the instrument name. Rows under B16 list connected parts and active parameters. Songs with INS3/4 get four rows.",
+		L"· INSERTION affiche le nom officiel (Thru, Distortion…), pas ON/OFF. XG Insertion 1–4, Variation en insertion, ou EFX GS.",
+		L"· INSERTION mostra il nome ufficiale (Thru, Distortion…), non ON/OFF. XG Insertion 1–4, Variation in insertion, o EFX GS.",
+		L"· INSERTION muestra el nombre oficial (Thru, Distortion…), no ON/OFF. Insercion XG 1–4, Variation como insercion, o EFX GS.",
+		L"· INSERTION은 ON/OFF가 아니라 효과의 정식 이름입니다. XG 인서션 1–4, 인서션 연결된 Variation, 또는 GS EFX.",
+		L"· INSERTION 显示正式效果名，不是 ON/OFF。XG 插入 1–4、作插入连接的 Variation，或 GS EFX。",
+		L"· INSERTION يعرض اسم المؤثر الرسمي وليس ON/OFF. XG 1–4 أو Variation أو GS EFX.",
+		L"· INSERTION показывает официальное имя эффекта, не ON/OFF. XG 1–4, Variation как insertion или GS EFX.",
+		L"· INSERTION zeigt den offiziellen Effektnamen, nicht ON/OFF. XG 1–4, Variation als Insertion oder GS-EFX.",
+		L"· INSERTION mostra o nome oficial, nao ON/OFF. Insercao XG 1–4, Variation como insercao ou EFX GS.",
+		L"· INSERTION toont de officiële effectnaam, niet ON/OFF. XG 1–4, Variation als insertion of GS-EFX.",
+		L"· INSERTION pokazuje oficjalna nazwe efektu, nie ON/OFF. XG 1–4, Variation jako insercja lub GS EFX.",
+		L"· INSERTION resmi efekt adini gosterir, ON/OFF degil. XG 1–4, insertion bagli Variation veya GS EFX."));
+	y += lh;
+	body(L, y, LL14(
+		L"・SysEx …… GS は Roland DT1（F0 41 dv 42 12）と Korg 互換（F0 42 3n 42 12）を同じに扱います。パート 1x はバンク/PC/受信ch/リズム切替に加え、キーシフト・レベル・パン・Cho/Rev/Delay 送り。2x はビブラート・TVF・TVA。4x 22 は EFX ON。システム 40 01 は Rev/Cho に加え Delay（50）。XG は Multi Part 08（A01–16）と 09（B01–16）のバンク/PC/Part Mode/音量/パン/送り/TVF/EG、EQ 周波数は 0–15 の表のときだけ Hz にします。SD-90 の GS ダンプも同じ DT1。音色名は SASAMI_GS/XG/EX（SD ネイティブバンク MSB、Korg は EX）。",
+		L"· SysEx: GS DT1 is Roland F0 41 dv 42 12 and Korg-compatible F0 42 3n 42 12. Part 1x: bank/PC/Rx/rhythm plus key shift, level, pan, Cho/Rev/Delay send. 2x: vibrato, TVF, TVA. 4x 22: EFX ON. System 40 01 includes Delay (50) as well as Rev/Cho. XG Multi Part 08 (A01–16) and 09 (B01–16): bank/PC/Part Mode/volume/pan/sends/TVF/EG. EQ frequency becomes Hz only for index 0–15. SD-90 GS dumps use the same DT1. Names from SASAMI_GS/XG/EX (SD native MSB, Korg EX).",
+		L"· SysEx GS DT1 (Roland / Korg 42 42 12). Mixer, TVF/TVA, Delay, EFX. XG 08/09 et Insertion 1–4. SD-90 en GS = meme DT1.",
+		L"· SysEx GS DT1 (Roland / Korg). Mixer, TVF/TVA, Delay, EFX. XG 08/09 e Insertion 1–4. SD-90 GS = stesso DT1.",
+		L"· SysEx GS DT1 (Roland / Korg). Mixer, TVF/TVA, Delay, EFX. XG 08/09 e Insertion 1–4. SD-90 GS = el mismo DT1.",
+		L"· SysEx GS DT1(Roland/Korg). 믹서·TVF/TVA·Delay·EFX. XG 08/09와 Insertion 1–4. SD-90 GS는 같은 DT1.",
+		L"· SysEx：GS DT1（Roland／Korg 兼容）。混音、TVF/TVA、Delay、EFX。XG 08/09 与 Insertion 1–4。SD-90 的 GS 转储同 DT1。",
+		L"· SysEx GS DT1 (Roland / Korg). Mixer و TVF و Delay و EFX. XG 08/09 و Insertion 1–4.",
+		L"· SysEx GS DT1 (Roland / Korg). Микшер, TVF/TVA, Delay, EFX. XG 08/09 и Insertion 1–4. SD-90 GS — тот же DT1.",
+		L"· SysEx GS-DT1 (Roland / Korg). Mixer, TVF/TVA, Delay, EFX. XG 08/09 und Insertion 1–4. SD-90 GS = dasselbe DT1.",
+		L"· SysEx GS DT1 (Roland / Korg). Mixer, TVF/TVA, Delay, EFX. XG 08/09 e Insertion 1–4. SD-90 GS = o mesmo DT1.",
+		L"· SysEx GS DT1 (Roland / Korg). Mixer, TVF/TVA, Delay, EFX. XG 08/09 en Insertion 1–4. SD-90 GS = dezelfde DT1.",
+		L"· SysEx GS DT1 (Roland / Korg). Mixer, TVF/TVA, Delay, EFX. XG 08/09 i Insertion 1–4. SD-90 GS = to samo DT1.",
+		L"· SysEx GS DT1 (Roland / Korg). Mixer, TVF/TVA, Delay, EFX. XG 08/09 ve Insertion 1–4. SD-90 GS ayni DT1."));
 	y += lh;
 	body(L, y, LL14(
 		L"・VST 再生では GS リセットのあと A10/B10 へ USE FOR RHYTHM を送り、XG では ch10 にドラムバンク(MSB127)を送ります。曲の SysEx が後から上書きします。右クリック「操作」→「ドラムモード」でも再送できます。88map の ORCHESTRA はキット名のことがあります。",
@@ -1216,8 +1275,8 @@ void CMmHelpDlg::OnPaint()
 		L"· VST'de GS Reset sonrasi A10/B10'a USE FOR RHYTHM gider. XG ch10'a davul bankasi MSB 127 gonderir. Parca SysEx ezebilir. Sag tik Islemler → Davul modu. 88map'te ORCHESTRA kit adi olabilir."));
 	y += lh;
 	body(L, y, LL14(
-		L"・行の色 …… 使っているパートは白と少し暗い白を交互。ドラムパートは行全体を暖色にします。ノート/CC/SysEx が一度も無いチャンネルは灰色。ミニ鍵盤をクリックして鳴らすと交互色（ドラムなら暖色）に戻ります。",
-		L"· Row colors: used parts alternate white / off-white. Drum parts tint the whole row warm. Channels with no note/CC/SysEx stay gray. Click a mini-keyboard to play and the row returns to the stripe (or drum tint).",
+		L"・行の色 …… 使っているパートは白と少し暗い白を交互。ドラムパートは行全体を暖色にします（XG はバンク MSB 127 や Part Mode。ch10 以外の追加キットも含む）。ノート/CC/SysEx が一度も無いチャンネルは灰色。ミニ鍵盤をクリックして鳴らすと交互色（ドラムなら暖色）に戻ります。",
+		L"· Row colors: used parts alternate white / off-white. Drum parts tint the whole row warm (XG: bank MSB 127 / Part Mode, not only ch10). Channels with no note/CC/SysEx stay gray. Click a mini-keyboard to play and the row returns to the stripe (or drum tint).",
 		L"· Couleurs : parties utilisees en blanc / blanc casse alterne. Batterie = ligne chaude. Sans note/CC/SysEx = gris. Clic sur le mini clavier : la bande (ou teinte batterie) revient.",
 		L"· Colori: parti usate in bianco / bianco sporco alternato. Batteria = riga calda. Senza nota/CC/SysEx = grigio. Clic sulla mini tastiera: torna la riga (o tinta batteria).",
 		L"· Colores: partes usadas en blanco / blanco roto. Bateria = fila calida. Sin nota/CC/SysEx = gris. Clic en el mini teclado: vuelve la franja (o tinte de bateria).",
@@ -1362,7 +1421,7 @@ CMidiMonitorDlg::CMidiMonitorDlg(CWnd* pParent)
 	, m_ev(NULL), m_evCount(0), m_evPos(0), m_hadNote(0), m_hearPlayb(-1), m_sx(NULL), m_sxBytes(0)
 	, m_division(480), m_sampleRate(44100), m_lastPlayb(-1)
 	, m_usecQn(500000), m_tsNum(4), m_tsDen(4), m_keySf(0), m_keyMin(0), m_transpose(0)
-	, m_sysMode(0), m_revType(4), m_choType(2), m_varType(0), m_revPacked(0), m_choPacked(0), m_varPacked(0), m_varConn(1), m_ins1(0), m_ins2(0)
+	, m_sysMode(0), m_revType(4), m_choType(2), m_varType(0), m_revPacked(0), m_choPacked(0), m_varPacked(0), m_varConn(1), m_ins1(0), m_ins2(0), m_ins3(0), m_ins4(0), m_dlyType(0)
 	, m_noteCount(0), m_masterVol(100)
 	, m_notesPeak(0), m_notesPeakHold(0), m_layW(0)
 	, m_dragKind(0), m_dragPart(-1), m_playPart(-1), m_playNote(-1)
@@ -1393,11 +1452,18 @@ CMidiMonitorDlg::CMidiMonitorDlg(CWnd* pParent)
 	memset(m_varBlk, 0, sizeof(m_varBlk));
 	m_insLine[0][0] = 0;
 	m_insLine[1][0] = 0;
+	m_insLine[2][0] = 0;
+	m_insLine[3][0] = 0;
 	m_showInsLine[0][0] = 0;
 	m_showInsLine[1][0] = 0;
+	m_showInsLine[2][0] = 0;
+	m_showInsLine[3][0] = 0;
 	m_showBpm = -1;
 	m_showVarPacked = -1;
 	m_showVarConn = -1;
+	m_showIns3 = -1;
+	m_showIns4 = -1;
+	m_showDly = -1;
 	m_showBar = m_showBars = m_showBeat = m_showTick = m_showTpm = m_showNum = -1;
 	m_showTitle[0] = 0;
 	memset(m_tsEv, 0, sizeof(m_tsEv));
@@ -1544,7 +1610,18 @@ void CMidiMonitorDlg::InitPartDefaults(int i, BYTE heard)
 			p.bankLsb = 0;
 		}
 	}
+	p.xgPartMode = 0;
 	p.isDrum = ((i % 16) == 9) ? 1 : 0;
+	if (m_sysMode == 2) {
+		if ((i % 16) == 9) {
+			p.xgPartMode = 1;
+			if (p.bankMsb == 0)
+				p.bankMsb = 127;
+			p.isDrum = 1;
+		} else {
+			p.isDrum = MmXgPartIsDrum(p.bankMsb, p.xgPartMode);
+		}
+	}
 	p.heard = heard;
 	p.rxCh = i % 16;
 	p.rxPort = (i >= 16) ? 1 : 0;
@@ -1586,6 +1663,9 @@ void CMidiMonitorDlg::ResetParts()
 	memset(m_varBlk, 0, sizeof(m_varBlk));
 	m_ins1 = 0;
 	m_ins2 = 0;
+	m_ins3 = 0;
+	m_ins4 = 0;
+	m_dlyType = 0;
 	if (m_sysMode == 2) {
 		m_revType = 1;
 		m_choType = 0x41;
@@ -1728,6 +1808,123 @@ void CMidiMonitorDlg::ApplyNrpn(Part& p)
 	}
 }
 
+void CMidiMonitorDlg::ApplyXgPartByte(int part, int a, BYTE v)
+{
+	if (part < 0 || part >= PART_MAX) return;
+	Part& p = m_part[part];
+	const int vv = v & 127;
+	int chg = 0, inst = 0, vib = 0, filt = 0, env = 0, eq = 0;
+	if (a == 0x00) {
+		p.bankMsb = vv; chg = 1; inst = 1;
+		if (m_sysMode == 2) p.isDrum = MmXgPartIsDrum(p.bankMsb, p.xgPartMode);
+	} else if (a == 0x01) {
+		p.bankLsb = vv; chg = 1; inst = 1;
+	} else if (a == 0x02) {
+		p.pc = vv; chg = 1; inst = 1;
+	} else if (a == 0x03) {
+		p.rxCh = (vv < 16) ? vv : 16; chg = 1; inst = 1;
+	} else if (a == 0x06) {
+		p.xgPartMode = (BYTE)((vv != 0) ? 1 : 0); chg = 1;
+		if (m_sysMode == 2) p.isDrum = MmXgPartIsDrum(p.bankMsb, p.xgPartMode);
+	} else if (a == 0x07) {
+		p.dt = vv - 0x40; chg = 1;
+	} else if (a == 0x09) {
+		p.vol = vv; chg = 1;
+	} else if (a == 0x0C) {
+		p.pan = vv; chg = 1;
+	} else if (a == 0x10) {
+		p.crs = vv; chg = 1;
+	} else if (a == 0x11) {
+		p.rev = vv; chg = 1;
+	} else if (a == 0x12) {
+		p.var = vv; chg = 1;
+	} else if (a == 0x13) {
+		p.vibRat = vv - 64; chg = 1; vib = 1;
+	} else if (a == 0x14) {
+		p.vibDpt = vv - 64; chg = 1; vib = 1;
+	} else if (a == 0x15) {
+		p.vibDly = vv - 64; chg = 1; vib = 1;
+	} else if (a == 0x16) {
+		p.lpf = vv - 64; chg = 1; filt = 1;
+	} else if (a == 0x17) {
+		p.rsn = vv - 64; chg = 1; filt = 1;
+	} else if (a == 0x18) {
+		p.atk = vv - 64; chg = 1; env = 1;
+	} else if (a == 0x19) {
+		p.dcy = vv - 64; chg = 1; env = 1;
+	} else if (a == 0x1A) {
+		p.rls = vv - 64; chg = 1; env = 1;
+	} else if (a == 0x70 || a == 0x71) {
+		chg = 1; eq = 1;
+	} else if (a == 0x72 || a == 0x74) {
+		const int hz = MmXgBassHz(vv);
+		if (hz > 0) p.eqLow = hz;
+		chg = 1; eq = 1;
+	} else if (a == 0x73 || a == 0x75) {
+		const int hz = MmXgTrebleHz(vv);
+		if (hz > 0) p.eqHigh = hz;
+		chg = 1; eq = 1;
+	} else if (a >= 0x70 && a <= 0x77) {
+		chg = 1; eq = 1;
+	}
+	if (!chg) return;
+	p.heard = 1;
+	if (inst) {
+		MmBumpFade(p.fadeInst, m_burstApply);
+		m_nameNeed |= (1u << part);
+	}
+	if (vib) MmBumpFade(p.fadeVib, m_burstApply);
+	if (filt) MmBumpFade(p.fadeFilt, m_burstApply);
+	if (env) MmBumpFade(p.fadeEnv, m_burstApply);
+	if (eq) MmBumpFade(p.fadeEq, m_burstApply);
+	m_dirtyRows |= (1u << part);
+}
+
+void CMidiMonitorDlg::ApplyGsPartByte(Part& p, int kind, int a, BYTE v, int* changed, int* mark)
+{
+	const int vv = v & 127;
+	if (kind == 1) {
+		if (a == 0x00) { p.bankMsb = vv; *changed = 1; *mark = 1; }
+		else if (a == 0x01) { p.pc = vv; *changed = 1; *mark = 1; }
+		else if (a == 0x02) {
+			p.rxCh = (vv >= 0x10) ? 16 : vv;
+			*changed = 1; *mark = 1;
+		} else if (a == 0x15) {
+			p.isDrum = (vv != 0) ? 1 : 0;
+			*changed = 1;
+			*mark = 1;
+		} else if (a == 0x16) {
+			p.dt = vv - 0x40; *changed = 1;
+		} else if (a == 0x19) {
+			p.vol = vv; *changed = 1;
+		} 		else if (a == 0x1B) {
+			p.pan = vv; *changed = 1;
+		} else if (a == 0x22) {
+			p.crs = vv; *changed = 1;
+		} else if (a == 0x23) {
+			p.rev = vv; *changed = 1;
+		} else if (a == 0x24 || a == 0x2A) {
+			p.var = vv; *changed = 1;
+		}
+	} else if (kind == 2) {
+		const int s = vv - 64;
+		if (a == 0x00) { p.vibRat = s; *changed = 1; MmBumpFade(p.fadeVib, m_burstApply); }
+		else if (a == 0x01) { p.vibDpt = s; *changed = 1; MmBumpFade(p.fadeVib, m_burstApply); }
+		else if (a == 0x02) { p.vibDly = s; *changed = 1; MmBumpFade(p.fadeVib, m_burstApply); }
+		else if (a == 0x03) { p.lpf = s; *changed = 1; MmBumpFade(p.fadeFilt, m_burstApply); }
+		else if (a == 0x04) { p.rsn = s; *changed = 1; MmBumpFade(p.fadeFilt, m_burstApply); }
+		else if (a == 0x05) { p.atk = s; *changed = 1; MmBumpFade(p.fadeEnv, m_burstApply); }
+		else if (a == 0x06) { p.dcy = s; *changed = 1; MmBumpFade(p.fadeEnv, m_burstApply); }
+		else if (a == 0x07) { p.rls = s; *changed = 1; MmBumpFade(p.fadeEnv, m_burstApply); }
+	} else if (kind == 4) {
+		if (a == 0x22) {
+			p.efxOn = (vv != 0) ? 1 : 0;
+			*changed = 1;
+			m_dirtyHead = true;
+		}
+	}
+}
+
 void CMidiMonitorDlg::ApplyShort(int port, DWORD msg, BOOL fromUser, BOOL liveExact)
 {
 	const int st = msg & 0xf0;
@@ -1794,6 +1991,12 @@ void CMidiMonitorDlg::ApplyShort(int port, DWORD msg, BOOL fromUser, BOOL liveEx
 				else if (p.mapId < 9 && VstMidiBankMsbIsSdNative(d2)) p.mapId = 6;
 				else if (p.mapId < 9 && MmMsbLooksKorg(d2)) p.mapId = 10;
 			}
+			if (m_sysMode == 2)
+				p.isDrum = MmXgPartIsDrum(p.bankMsb, p.xgPartMode);
+			else if (p.bankMsb == 120 && (m_gsMapKind == 9 || p.mapId == 9 || p.mapId == 14))
+				p.isDrum = 1;
+			else if ((p.mapId == 11 || m_gsMapKind == 11) && p.bankMsb == 122)
+				p.isDrum = 1;
 			MmBumpFade(p.fadeInst, m_burstApply);
 			m_nameNeed |= (1u << part);
 			m_dirtyRows |= (1u << part);
@@ -1954,6 +2157,7 @@ void CMidiMonitorDlg::ApplySysex(const BYTE* d, int n, int livePort)
 	{
 		int ah = 0, am = 0, al = 0, nd = 0;
 		const BYTE* data = NULL;
+		const int footBefore = InsFootCount();
 		if (MmXgUnpack(d, n, &ah, &am, &al, &data, &nd)) {
 			int eff = 0;
 			for (int i = 0; i < nd; ++i) {
@@ -1980,92 +2184,91 @@ void CMidiMonitorDlg::ApplySysex(const BYTE* d, int n, int livePort)
 						m_varBlk[a - 0x40] = v;
 						eff = 1;
 					}
-				} else if (ah == 0x03 && (am == 0x00 || am == 0x01 || am == 0x10)) {
-					const int slot = (am == 0x00) ? 0 : 1;
-					int* dst = (slot == 0) ? &m_ins1 : &m_ins2;
+				} else if (ah == 0x03 && (am == 0x00 || am == 0x01 || am == 0x02 || am == 0x03 || am == 0x10)) {
+					int slot = 1;
+					if (am == 0x00) slot = 0;
+					else if (am == 0x02) slot = 2;
+					else if (am == 0x03) slot = 3;
+					else slot = 1;
+					int* dst = &m_ins1;
+					if (slot == 1) dst = &m_ins2;
+					else if (slot == 2) dst = &m_ins3;
+					else if (slot == 3) dst = &m_ins4;
 					if (a == 0x00) { *dst = (v << 8) | (*dst & 0x7f); eff = 1; }
 					else if (a == 0x01) { *dst = (*dst & 0x7f00) | v; eff = 1; }
-					if (a < 24) {
+					if (a < 48) {
 						m_insBlk[slot][a] = v;
 						eff = 1;
 					}
+				} else if ((ah == 0x08 || ah == 0x09) && am >= 0 && am < 16) {
+					const int part = (ah == 0x09) ? (16 + am) : am;
+					if (ah == 0x09)
+						m_gs32 = 1;
+					ApplyXgPartByte(part, a, v);
 				}
 			}
 			if (eff) {
 				m_dirtyHead = true;
+				if (InsFootCount() != footBefore)
+					m_fullDraw = true;
 				SyncXgInsParts();
 			}
 		}
 	}
-	if (n >= 11 && d[1] == 0x41 && d[3] == 0x42 && d[4] == 0x12 && d[5] == 0x40 && d[6] == 0x01) {
-		if (d[7] == 0x30) m_revType = d[8];
-		else if (d[7] == 0x38) m_choType = d[8];
-		m_dirtyHead = true;
-	}
-	if (n >= 11 && d[1] == 0x41 && d[3] == 0x42 && d[4] == 0x12 && d[5] == 0x40 && d[6] == 0x03) {
+	if (MmGsDt1Hdr(d, n)) {
+		if (m_sysMode != 2)
+			m_sysMode = 1;
 		const int hasF7g = (n > 0 && d[n - 1] == 0xf7) ? 1 : 0;
-		/* F0 41 dv 42 12 40 03 AL | data… | CS | [F7] — CS を data に入れない */
+		const int aa = d[5], bb = d[6], cc = d[7];
 		int nval = n - 8 - hasF7g - 1;
 		if (nval < 0) nval = 0;
-		for (int i = 0; i < nval; ++i) {
-			const int a = (int)d[7] + i;
-			if (a < 0 || a >= 32) continue;
-			m_gsEfx[a] = d[8 + i] & 127;
-			m_gsEfxMask |= (1u << a);
-			if (a == 0x01) m_gsEfxHasLsb = 1;
-			m_ins1 = (m_gsEfx[0] << 8) | m_gsEfx[1];
+		int blk = 0;
+		if (aa == 0x50) blk = 1;
+		else if (aa == 0x60) blk = 2;
+		if (livePort >= 0) blk += livePort;
+
+		if ((aa == 0x40 || aa == 0x50) && bb == 0x01) {
+			for (int i = 0; i < nval; ++i) {
+				const int a = cc + i;
+				const BYTE vv = d[8 + i] & 127;
+				if (a == 0x30) m_revType = vv;
+				else if (a == 0x38) m_choType = vv;
+				else if (a == 0x50) m_dlyType = vv;
+			}
 			m_dirtyHead = true;
 		}
-	}
-	const int hasF7 = (n > 0 && d[n - 1] == 0xf7) ? 1 : 0;
-	if (n >= 10 && d[1] == 0x41 && d[3] == 0x42 && d[4] == 0x12 &&
-		(d[5] == 0x40 || d[5] == 0x50) &&
-		((d[6] >= 0x10 && d[6] <= 0x1f) || (d[6] >= 0x40 && d[6] <= 0x4f))) {
-		int blk = (d[5] == 0x50) ? 1 : 0;
-		if (livePort >= 0) blk += livePort;
-		const int part = blk * 16 + MmGs1xToPart(d[6]);
-		if (part >= 0 && part < PART_MAX) {
-			Part& p = m_part[part];
-			const int nval = n - 9 - hasF7;
-			int changed = 0;
-			int mark = 0;
-			const int efxBlk = ((d[6] & 0xf0) == 0x40) ? 1 : 0;
+		if (aa == 0x40 && bb == 0x03) {
 			for (int i = 0; i < nval; ++i) {
-				const int a = (int)d[7] + i;
-				const BYTE vv = d[8 + i];
-				if (efxBlk) {
-					if (a == 0x22) {
-						p.efxOn = (vv != 0) ? 1 : 0;
-						m_dirtyHead = true;
-						m_dirtyRows |= (1u << part);
-					}
-					continue;
-				}
-				if (a == 0x00) {
-					p.bankMsb = vv & 127;
-					changed = 1;
-					mark = 1;
-				} else if (a == 0x01) {
-					p.pc = vv & 127;
-					changed = 1;
-					mark = 1;
-				} else if (a == 0x02) {
-					if (vv >= 0x10) p.rxCh = 16;
-					else p.rxCh = (int)vv;
-					changed = 1;
-					mark = 1;
-				} else if (a == 0x15) {
-					p.isDrum = (vv != 0) ? 1 : 0;
-					changed = 1;
-				}
+				const int a = cc + i;
+				if (a < 0 || a >= 32) continue;
+				m_gsEfx[a] = d[8 + i] & 127;
+				m_gsEfxMask |= (1u << a);
+				if (a == 0x01) m_gsEfxHasLsb = 1;
+				m_ins1 = (m_gsEfx[0] << 8) | m_gsEfx[1];
+				m_dirtyHead = true;
 			}
-			if (mark)
-				p.heard = 1;
-			if (changed) {
-				if (mark)
-					MmBumpFade(p.fadeInst, m_burstApply);
-				m_nameNeed |= (1u << part);
-				m_dirtyRows |= (1u << part);
+		}
+		if ((aa == 0x40 || aa == 0x50) && blk <= 1 &&
+			((bb >= 0x10 && bb <= 0x1f) || (bb >= 0x20 && bb <= 0x2f) || (bb >= 0x40 && bb <= 0x4f))) {
+			if (aa == 0x50)
+				m_gs32 = 1;
+			const int part = blk * 16 + MmGs1xToPart(bb);
+			if (part >= 0 && part < PART_MAX) {
+				Part& p = m_part[part];
+				const int kind = (bb >> 4) & 0x0f;
+				int changed = 0, mark = 0;
+				for (int i = 0; i < nval; ++i) {
+					const int a = cc + i;
+					ApplyGsPartByte(p, kind, a, d[8 + i], &changed, &mark);
+				}
+				if (changed) {
+					p.heard = 1;
+					if (mark) {
+						MmBumpFade(p.fadeInst, m_burstApply);
+						m_nameNeed |= (1u << part);
+					}
+					m_dirtyRows |= (1u << part);
+				}
 			}
 		}
 	}
@@ -2398,9 +2601,6 @@ void CMidiMonitorDlg::LoadCurrentMidi()
 		m_gsMapKind = (resolved == 8 || (resolved >= 1 && resolved <= 6) ||
 			(resolved >= 9 && resolved <= 18)) ? resolved : 0;
 	}
-	m_gs32 = gs32;
-	m_mirrorToB = (gs32 && !sawFf21) ? 1 : 0;
-	const int wantB = (gs32 || maxPort >= 1) ? 1 : 0;
 	BYTE chUse[PART_MAX];
 	memset(chUse, 0, sizeof(chUse));
 	for (int i = 0; i < count; ++i) {
@@ -2408,10 +2608,19 @@ void CMidiMonitorDlg::LoadCurrentMidi()
 		if (msg == 0xff || msg == 0xfe || msg == 0xfd || msg == 0xf0) {
 			if (msg != 0xf0 || ev[i].sysexOff < 0) continue;
 			const int n = (int)ev[i].aux;
-			if (ev[i].sysexOff + n > sxUsed || n < 10) continue;
+			if (ev[i].sysexOff + n > sxUsed || n < 8) continue;
 			const BYTE* d = sxData + ev[i].sysexOff;
-			if (d[0] != 0xf0 || d[1] != 0x41 || d[3] != 0x42 || d[4] != 0x12) continue;
-			if (d[6] < 0x10 || d[6] > 0x1f) continue;
+			int ah = 0, am = 0, al = 0, nd = 0;
+			const BYTE* xd = NULL;
+			if (MmXgUnpack(d, n, &ah, &am, &al, &xd, &nd) && (ah == 0x08 || ah == 0x09) && am >= 0 && am < 16) {
+				const int part = (ah == 0x09) ? (16 + am) : am;
+				if (part >= 0 && part < PART_MAX) chUse[part] = 1;
+				if (ah == 0x09) gs32 = 1;
+				continue;
+			}
+			if (!MmGsDt1Hdr(d, n)) continue;
+			if (!((d[6] >= 0x10 && d[6] <= 0x1f) || (d[6] >= 0x20 && d[6] <= 0x2f) || (d[6] >= 0x40 && d[6] <= 0x4f)))
+				continue;
 			if (d[5] != 0x40 && d[5] != 0x50) continue;
 			if (d[7] == 0x15 && n <= 12) continue;
 			const int blk = (d[5] == 0x50) ? 1 : 0;
@@ -2426,6 +2635,9 @@ void CMidiMonitorDlg::LoadCurrentMidi()
 		if (idx >= PART_MAX) idx = PART_MAX - 1;
 		chUse[idx] = 1;
 	}
+	m_gs32 = gs32;
+	m_mirrorToB = (gs32 && !sawFf21) ? 1 : 0;
+	const int wantB = (gs32 || maxPort >= 1) ? 1 : 0;
 	if (!hasXg && m_fileHasGm == 0 && count + 8 < EV_MAX && sxUsed + 44 <= sxCap) {
 		const BYTE rhyA[11] = { 0xf0, 0x41, 0x10, 0x42, 0x12, 0x40, 0x10, 0x15, 0x01, 0x1a, 0xf7 };
 		const BYTE rhyB[11] = { 0xf0, 0x41, 0x10, 0x42, 0x12, 0x50, 0x10, 0x15, 0x01, 0x0a, 0xf7 };
@@ -3061,9 +3273,11 @@ void CMidiMonitorDlg::DrawHeader(CDC& dc, int w, int headH, UINT dpi)
 	dc.SelectObject(&m_fontHead);
 	dc.SetTextColor(MM_HEAD_TX);
 	const wchar_t* sysN = (m_sysMode == 2) ? L"XG" : (m_sysMode == 1) ? L"GS" : L"GM";
-	wchar_t ins1n[48], ins2n[48], revN[48], choN[48], varN[48];
+	wchar_t ins1n[48], ins2n[48], ins3n[48], ins4n[48], revN[48], choN[48], varN[48];
 	MmInsDisp(m_sysMode, 0, m_ins1, m_varPacked, m_varConn, ins1n, 48, m_gsEfxHasLsb);
 	MmInsDisp(m_sysMode, 1, m_ins2, 0, 1, ins2n, 48, m_gsEfxHasLsb);
+	MmInsDisp(m_sysMode, 2, m_ins3, 0, 1, ins3n, 48, m_gsEfxHasLsb);
+	MmInsDisp(m_sysMode, 3, m_ins4, 0, 1, ins4n, 48, m_gsEfxHasLsb);
 	if (m_sysMode == 2) {
 		MmXgEffTypeName((m_revPacked >> 8) & 127, m_revPacked & 127, revN, 48);
 		MmXgEffTypeName((m_choPacked >> 8) & 127, m_choPacked & 127, choN, 48);
@@ -3071,11 +3285,19 @@ void CMidiMonitorDlg::DrawHeader(CDC& dc, int w, int headH, UINT dpi)
 	} else {
 		wcsncpy_s(revN, MmEffName(m_sysMode, 0, m_revType), _TRUNCATE);
 		wcsncpy_s(choN, MmEffName(m_sysMode, 1, m_choType), _TRUNCATE);
-		wcsncpy_s(varN, L"—", _TRUNCATE);
+		if (m_sysMode == 1)
+			wcsncpy_s(varN, MmEffName(1, 2, m_dlyType), _TRUNCATE);
+		else
+			wcsncpy_s(varN, L"—", _TRUNCATE);
 	}
-	wchar_t line3[400];
-	_snwprintf_s(line3, _TRUNCATE, L"Reverb  %s     Chorus  %s     Variation  %s     SYS  %s     INSERTION 1/2  %s / %s",
-		revN, choN, varN, sysN, ins1n, ins2n);
+	wchar_t line3[480];
+	if (m_sysMode == 2 && (m_ins3 != 0 || m_ins4 != 0)) {
+		_snwprintf_s(line3, _TRUNCATE, L"Reverb  %s     Chorus  %s     Variation  %s     SYS  %s     INSERTION 1-4  %s / %s / %s / %s",
+			revN, choN, varN, sysN, ins1n, ins2n, ins3n, ins4n);
+	} else {
+		_snwprintf_s(line3, _TRUNCATE, L"Reverb  %s     Chorus  %s     Variation  %s     SYS  %s     INSERTION 1/2  %s / %s",
+			revN, choN, varN, sysN, ins1n, ins2n);
+	}
 	dc.TextOut(Scale(8, dpi), Scale(36, dpi), line3);
 
 	dc.SelectObject(&m_fontTiny);
@@ -3163,6 +3385,9 @@ void CMidiMonitorDlg::DrawHeader(CDC& dc, int w, int headH, UINT dpi)
 	m_showVarConn = m_varConn;
 	m_showIns1 = m_ins1;
 	m_showIns2 = m_ins2;
+	m_showIns3 = m_ins3;
+	m_showIns4 = m_ins4;
+	m_showDly = m_dlyType;
 	m_showDrum = m_drumGlow;
 	m_showDiv = m_division;
 	m_showTsN = m_tsNum;
@@ -3349,17 +3574,29 @@ int CMidiMonitorDlg::PartHasInsertion(int i) const
 	return 1;
 }
 
+int CMidiMonitorDlg::InsFootCount() const
+{
+	if (m_sysMode == 2 && (m_ins3 != 0 || m_ins4 != 0))
+		return 4;
+	return 2;
+}
+
+int CMidiMonitorDlg::InsPacked(int slot) const
+{
+	if (slot == 1) return m_ins2;
+	if (slot == 2) return m_ins3;
+	if (slot == 3) return m_ins4;
+	return m_ins1;
+}
+
 void CMidiMonitorDlg::SyncXgInsParts()
 {
 	if (m_sysMode != 2) return;
 	BYTE on[PART_MAX];
 	memset(on, 0, sizeof(on));
-	if (m_ins1 != 0) {
-		const int pv = m_insBlk[0][0x0C];
-		if (pv >= 0 && pv < PART_MAX) on[pv] = 1;
-	}
-	if (m_ins2 != 0) {
-		const int pv = m_insBlk[1][0x0C];
+	for (int s = 0; s < 4; ++s) {
+		if (InsPacked(s) == 0) continue;
+		const int pv = m_insBlk[s][0x0C];
 		if (pv >= 0 && pv < PART_MAX) on[pv] = 1;
 	}
 	if (m_ins1 == 0 && m_varConn == 0 && m_varPacked != 0) {
@@ -3379,13 +3616,13 @@ void CMidiMonitorDlg::BuildInsLine(int slot, wchar_t* out, int outN)
 	out[0] = 0;
 	MmEnsureInsDat();
 	wchar_t name[48];
-	MmInsDisp(m_sysMode, slot, (slot == 0) ? m_ins1 : m_ins2, m_varPacked, m_varConn, name, 48, m_gsEfxHasLsb);
+	MmInsDisp(m_sysMode, slot, InsPacked(slot), m_varPacked, m_varConn, name, 48, m_gsEfxHasLsb);
 	int used = 0;
 	wchar_t head[80];
 	_snwprintf_s(head, _TRUNCATE, L"INS%d %s", slot + 1, name);
 	used = MmInsAppend(out, outN, used, head);
 
-	int packed = (slot == 0) ? m_ins1 : m_ins2;
+	int packed = InsPacked(slot);
 	int fromVar = 0;
 	if (slot == 0 && m_sysMode == 2 && packed == 0 && m_varConn == 0 && m_varPacked != 0) {
 		packed = m_varPacked;
@@ -3480,7 +3717,7 @@ void CMidiMonitorDlg::BuildInsLine(int slot, wchar_t* out, int outN)
 		if (t && blk) {
 			for (int i = 0; i < t->np; ++i) {
 				const int addr = 1 + t->p[i].n;
-				if (addr < 0 || addr >= 24) continue;
+				if (addr < 0 || addr >= 48) continue;
 				wchar_t one[48];
 				if (!MmInsFmtP(t->p[i], blk[addr], one, 48)) continue;
 				used = MmInsAppend(out, outN, used, one);
@@ -3492,17 +3729,18 @@ void CMidiMonitorDlg::BuildInsLine(int slot, wchar_t* out, int outN)
 
 void CMidiMonitorDlg::DrawInsFoot(CDC& dc, int y, int w, int footH, UINT dpi)
 {
-	BuildInsLine(0, m_insLine[0], 220);
-	BuildInsLine(1, m_insLine[1], 220);
-	int lineH = footH / 2;
+	const int nLine = InsFootCount();
+	for (int s = 0; s < nLine; ++s)
+		BuildInsLine(s, m_insLine[s], 220);
+	int lineH = (nLine > 0) ? (footH / nLine) : footH;
 	if (lineH < 1) lineH = 1;
 	CFont* oldF = dc.SelectObject(&m_fontTiny);
-	for (int s = 0; s < 2; ++s) {
+	for (int s = 0; s < nLine; ++s) {
 		const int yy = y + s * lineH;
 		int rh = lineH;
-		if (s == 1) rh = footH - lineH;
+		if (s == nLine - 1) rh = footH - lineH * (nLine - 1);
 		if (rh < 1) rh = 1;
-		dc.FillSolidRect(0, yy, w, rh, (s == 0) ? RGB(18, 20, 28) : RGB(14, 16, 22));
+		dc.FillSolidRect(0, yy, w, rh, (s & 1) ? RGB(14, 16, 22) : RGB(18, 20, 28));
 		dc.SetBkMode(TRANSPARENT);
 		dc.SetTextColor((m_insLine[s][4] && wcsstr(m_insLine[s], L"Thru") == m_insLine[s] + 5)
 			? RGB(120, 124, 136) : RGB(220, 214, 190));
@@ -3530,7 +3768,7 @@ int CMidiMonitorDlg::LayPartH(int i) const
 void CMidiMonitorDlg::DrawMonitor2D(CDC& dc, int w, int h, UINT dpi)
 {
 	const int headH = Scale(78, dpi);
-	const int footH = Scale(28, dpi);
+	const int footH = Scale(14 * InsFootCount(), dpi);
 	dc.FillSolidRect(0, headH, w, h - headH, MM_BG);
 	DrawHeader(dc, w, headH, dpi);
 	int bodyH = h - headH - footH;
@@ -4041,7 +4279,8 @@ void CMidiMonitorDlg::InvalidateDirty()
 			|| m_revType != m_showRev || m_choType != m_showCho || m_varType != m_showVar
 			|| m_revPacked != m_showRevPacked || m_choPacked != m_showChoPacked
 			|| m_varPacked != m_showVarPacked || m_varConn != m_showVarConn
-			|| m_ins1 != m_showIns1 || m_ins2 != m_showIns2 || m_drumGlow != m_showDrum
+			|| m_ins1 != m_showIns1 || m_ins2 != m_showIns2 || m_ins3 != m_showIns3 || m_ins4 != m_showIns4
+			|| m_dlyType != m_showDly || m_drumGlow != m_showDrum
 			|| m_division != m_showDiv || m_tsNum != m_showTsN || m_tsDen != m_showTsD
 			|| transp != m_showTransp || m_keySf != m_showKeySf || m_keyMin != m_showKeyMin
 			|| (m_frozen ? 1 : 0) != m_showFrozen
@@ -4049,11 +4288,15 @@ void CMidiMonitorDlg::InvalidateDirty()
 			|| m_posTick != m_showTick || m_posTpm != m_showTpm || m_posNum != m_showNum
 			|| wcscmp(m_titleBuf, m_showTitle) != 0);
 		if (!m_dirtyHead) {
-			wchar_t l0[220], l1[220];
-			BuildInsLine(0, l0, 220);
-			BuildInsLine(1, l1, 220);
-			if (wcscmp(l0, m_showInsLine[0]) != 0 || wcscmp(l1, m_showInsLine[1]) != 0)
-				m_dirtyHead = true;
+			const int nLine = InsFootCount();
+			for (int s = 0; s < nLine; ++s) {
+				wchar_t ln[220];
+				BuildInsLine(s, ln, 220);
+				if (wcscmp(ln, m_showInsLine[s]) != 0) {
+					m_dirtyHead = true;
+					break;
+				}
+			}
 		}
 	}
 	if (m_fullDraw || IsView3D()) {
@@ -4759,6 +5002,11 @@ void CMidiMonitorDlg::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
 		BuildInsLine(0, m_insLine[0], 220);
 		BuildInsLine(1, m_insLine[1], 220);
 		n += _snwprintf_s(buf + n, _countof(buf) - n, _TRUNCATE, L"%s\r\n%s\r\n", m_insLine[0], m_insLine[1]);
+		if (InsFootCount() > 2) {
+			BuildInsLine(2, m_insLine[2], 220);
+			BuildInsLine(3, m_insLine[3], 220);
+			n += _snwprintf_s(buf + n, _countof(buf) - n, _TRUNCATE, L"%s\r\n%s\r\n", m_insLine[2], m_insLine[3]);
+		}
 		if (OpenClipboard()) {
 			EmptyClipboard();
 			const size_t bytes = (wcslen(buf) + 1) * sizeof(wchar_t);
@@ -4804,6 +5052,8 @@ void CMidiMonitorDlg::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
 			d[9] = (BYTE)((0x80 - (sum & 0x7f)) & 0x7f);
 			ApplySysex(d, 11);
 			m_part[part].isDrum = 1;
+			if (m_sysMode == 2)
+				m_part[part].xgPartMode = 1;
 			RefreshPartName(m_part[part]);
 			m_dirtyRows |= (1u << part);
 			if (m_sysMode == 2) {

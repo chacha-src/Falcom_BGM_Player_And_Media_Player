@@ -33,10 +33,12 @@
 <li>BPM、テンポ%、調、タイムベース、拍子、Transpose、ファイル名（シーケンス名があれば横に出す。「???」だけの名前は出さない）</li>
 <li>全体の音量%（DS）、ノート数、DRUM</li>
 <li>DRUM の右：いまの小節/総小節（001/051）、いまの拍/1小節の拍数（1/4→2/4→3/4→4/4）、小節内 tick / 1小節の tick（0000/1920）。再生位置に合わせて動きます。拍子が途中で変われば分母も変わります。</li>
-<li>リバーブ／コーラス／バリエーション（XG は TYPE の MSB/LSB、GS は 40 01 30/38 の値そのもの。届いていないときは機種のリセット初期値）</li>
-<li>SYS（GM / GS / XG）、INSERTION 1 / 2（ON/OFF ではなく Thru・Distortion・Stereo-EQ など。XG インサーション／Variation をインサーション接続したとき／GS・88Pro の EFX。名前は曲の SysEx から引きます）</li>
-<li>B16 の下2行：INSERTION 1 と 2 の詳細。接続パート、Drive や EQ ゲインなど効いているパラメータ、EFX から Rev/Cho/Delay への送り。HEX ではなく取扱説明書の名称です（res/insertion.dat）</li>
+<li>リバーブ／コーラス／バリエーション（XG は TYPE の MSB/LSB。GS の Variation 列は Delay マクロ 40 01 50。Rev/Cho は 40 01 30/38。届いていないときは機種のリセット初期値）</li>
+<li>SYS（GM / GS / XG）、INSERTION（ON/OFF ではなく Thru・Distortion・Stereo-EQ など。XG は Insertion 1–4、Variation をインサーション接続したとき、GS・88Pro の EFX。名前は曲の SysEx から引きます）</li>
+<li>B16 の下：INSERTION の詳細（通常2行、INS3/4 がある曲は4行）。接続パート、Drive や EQ ゲインなど効いているパラメータ、EFX から Rev/Cho/Delay への送り。HEX ではなく取扱説明書の名称です（res/insertion.dat）</li>
 </ul>
+<h2>SysEx の拾い方</h2>
+<p>表示している値は、曲に書いてある SysEx をそのまま解釈します。GS は Roland DT1（F0 41 dv 42 12）と Korg NS5R/NX5R の互換 DT1（F0 42 3n 42 12）を同じに扱います。パート 1x はバンク／プログラム／受信チャンネル／リズム切替に加え、キーシフト・レベル・パン・コーラス／リバーブ／ディレイ送り。2x はビブラート・TVF（カットオフ／レゾナンス）・TVA（アタック／ディケイ／リリース）。4x の 22 は EFX ON。システム 40 01 は Reverb／Chorus に加え Delay（アドレス 50）です。XG は Multi Part 08（A01–A16）と 09（B01–B16）でバンク・PC・Part Mode・音量・パン・送り・ビブラート・フィルタ・EG、EQ 周波数は 0–15 の表のときだけ Hz にします。Insertion は 03 00–03（MU100 の 03 10 は INS2）。SD-90 の GS ダンプも同じ DT1 で、音色名はネイティブバンク MSB からも引きます。</p>
 <h2>32行のチャンネル表</h2>
 <p>各行が1パートです。上の16行が前半、下の16行が後半です。ドラムは曲の指定に従います（10番だけがドラム、とは限りません）。VST 再生では GS リセットのあと A10/B10 をリズムへ切り替えます。XG では ch10 にドラムバンクを送ります。<a href="vst-midi.htm">.mid を VST 音源で鳴らす</a> もご覧ください。</p>
 <p>再生位置へ追いつくときは、同じ種類の SysEx とコントロールチェンジは最後の値だけを使います。32チャンネル分の初期化が続く場合も、途中の値は使わず、再生位置の最新の状態に合わせます。</p>
