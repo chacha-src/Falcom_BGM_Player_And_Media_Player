@@ -5211,9 +5211,13 @@ void CMediaPlayerDlg::OnSize(UINT nType, int cx, int cy)
 				if (m_savedAnalyzerVisible) ::ShowWindow(og->m_AnalyzerDlg->m_hWnd, SW_HIDE);
 			}
 		}
+		if (og && ::IsWindow(og->GetSafeHwnd()))
+			og->HideMidiMonitorForMinimize();
 		return;
 	}
 	if (::IsWindow(m_hWnd)) {
+		if (nType == SIZE_RESTORED && og && ::IsWindow(og->GetSafeHwnd()))
+			og->RestoreMidiMonitorAfterMinimize();
 		if (nType == SIZE_RESTORED && m_mini.GetSafeHwnd() && m_mini.GetCheck() && og && ::IsWindow(og->GetSafeHwnd())) {
 			if (m_savedEqVisible && og->m_EqualizerDlg && ::IsWindow(og->m_EqualizerDlg->GetSafeHwnd()))
 				::ShowWindow(og->m_EqualizerDlg->m_hWnd, SW_SHOW);

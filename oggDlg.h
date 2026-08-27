@@ -1,4 +1,4 @@
-// oggDlg.h : ヘッダー ファイル
+﻿// oggDlg.h : ヘッダー ファイル
 //
 #include "afxmt.h"
 //#include "afxcmn.h"
@@ -123,6 +123,8 @@ public:
 	void TogglePianoRoll();
 	void ToggleAnalyzer();
 	void ToggleMidiMonitor();
+	void HideMidiMonitorForMinimize();
+	void RestoreMidiMonitorAfterMinimize();
 	void ShowPianoRollTune();
 	void FeedPianoRoll(const void* pData, int bytes);
 	// x,y は論理座標(*4)。戻り値は描画文字列のピクセル幅(hFont / GetTextExtent)。
@@ -180,6 +182,7 @@ public:
 	CPianoRollTuneDlg* m_PianoRollTuneDlg = nullptr;
 	CAnalyzerDlg* m_AnalyzerDlg = nullptr;
 	CMidiMonitorDlg* m_MidiMonitorDlg = nullptr;
+	int m_midiMonHiddenForMin = 0; // 本体最小化で MIDI モニタを隠した（復帰で戻す）
 	bool m_cascadePrevValid = false;
 	CRect m_cascadePrevRc;
 	// SyncAnalyzerFromPlayCursor: bufwav3 上の前回終端バイト位置

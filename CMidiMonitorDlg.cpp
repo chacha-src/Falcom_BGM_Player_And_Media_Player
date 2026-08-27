@@ -1422,6 +1422,7 @@ BEGIN_MESSAGE_MAP(CMidiMonitorDlg, CCustomBlurDialogExBase)
 	ON_WM_ERASEBKGND()
 	ON_WM_TIMER()
 	ON_WM_SIZE()
+	ON_WM_SYSCOMMAND()
 	ON_WM_MOVE()
 	ON_WM_SHOWWINDOW()
 	ON_WM_CLOSE()
@@ -4376,16 +4377,28 @@ void CMidiMonitorDlg::OnTimer(UINT_PTR nIDEvent)
 void CMidiMonitorDlg::OnSize(UINT nType, int cx, int cy)
 {
 	CCustomBlurDialogExBase::OnSize(nType, cx, cy);
+	if (nType == SIZE_MINIMIZED) {
+		ShowWindow(SW_HIDE);
+		return;
+	}
 	ReleasePaintBuffers();
 #if CCUSTOM_AERO_SUPPORT
-	if (nType != SIZE_MINIMIZED && CCC_IsAeroEnabled())
+	if (CCC_IsAeroEnabled())
 		CCC_RefreshDwmBlur(m_hWnd);
 #endif
-	if (nType != SIZE_MINIMIZED) {
-		CCC_CaptionLayout(m_hWnd);
-		LayoutHelpBtn();
-	}
+	CCC_CaptionLayout(m_hWnd);
+	LayoutHelpBtn();
 	Invalidate(FALSE);
+}
+
+// タスクバー／システムメニューの最小化はアイコン化せず隠す（所有ポップアップの残骸防止）。
+void CMidiMonitorDlg::OnSysCommand(UINT nID, LPARAM lParam)
+{
+	if ((nID & 0xFFF0) == SC_MINIMIZE) {
+		ShowWindow(SW_HIDE);
+		return;
+	}
+	CDialogEx::OnSysCommand(nID, lParam);
 }
 
 void CMidiMonitorDlg::OnMove(int x, int y)

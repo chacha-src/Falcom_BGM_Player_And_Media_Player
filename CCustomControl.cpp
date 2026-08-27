@@ -1336,6 +1336,80 @@ static void CCC_BoxBlurAlpha(BYTE* alpha, BYTE* tmp, int w, int h, int radius)
     }
 }
 
+// アクリル帯の白文字。壁紙が白いと消えるので 1px 黒縁を先に置く。
+static void CCC_DrawTextBlackEdge(HDC hdc, LPCWSTR text, int cch, const RECT* rc, UINT fmt, COLORREF fill)
+{
+    if (!hdc || !text || !rc)
+        return;
+    const int oldBk = ::SetBkMode(hdc, TRANSPARENT);
+    const COLORREF oldFg = ::SetTextColor(hdc, RGB(0, 0, 0));
+    static const POINT kOff[8] = {
+        { -1, -1 }, { 0, -1 }, { 1, -1 }, { -1, 0 },
+        { 1, 0 }, { -1, 1 }, { 0, 1 }, { 1, 1 }
+    };
+    for (int i = 0; i < 8; ++i) {
+        RECT r = *rc;
+        ::OffsetRect(&r, kOff[i].x, kOff[i].y);
+        ::DrawTextW(hdc, text, cch, &r, fmt);
+    }
+    ::SetTextColor(hdc, fill);
+    RECT rf = *rc;
+    ::DrawTextW(hdc, text, cch, &rf, fmt);
+    ::SetTextColor(hdc, oldFg);
+    ::SetBkMode(hdc, oldBk);
+}
+
+static void CCC_DrawTextBlackEdge(CDC& dc, LPCTSTR text, CRect rc, UINT fmt, COLORREF fill)
+{
+    if (!dc.GetSafeHdc() || !text)
+        return;
+    CCC_DrawTextBlackEdge(dc.GetSafeHdc(), text, -1, &rc, fmt, fill);
+}
+
+#ifndef WP_CAPTION
+#define WP_CAPTION 1
+#endif
+#ifndef CS_ACTIVE
+#define CS_ACTIVE 1
+#define CS_INACTIVE 2
+#endif
+
+// アクリル帯タイトル専用。ゼロ埋め DIB へ GDI DrawText すると ClearType が黒に溶けて
+// 白文字が灰色＋白ハローになる。「メインに追随」は窓DCへ直描きなのでその問題が無い。
+static void CCC_DrawCaptionTitleComposited(HDC hdcMem, HWND hDlg, LPCWSTR title, RECT* textRc, BOOL active)
+{
+    if (!hdcMem || !title || !textRc)
+        return;
+    static HTHEME s_capTheme = NULL;
+    if (!s_capTheme && hDlg)
+        s_capTheme = ::OpenThemeData(hDlg, L"WINDOW");
+    const UINT fmt = DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX;
+    const int st = active ? CS_ACTIVE : CS_INACTIVE;
+    if (s_capTheme) {
+        DTTOPTS opt = {};
+        opt.dwSize = sizeof(opt);
+        opt.dwFlags = DTT_COMPOSITED | DTT_TEXTCOLOR;
+        opt.crText = RGB(0, 0, 0);
+        // 1px だと合成後に消えるので 2px まで。内側は白で塗り潰す。
+        static const POINT kOff[] = {
+            { -2, -2 }, { -1, -2 }, { 0, -2 }, { 1, -2 }, { 2, -2 },
+            { -2, -1 }, { -1, -1 }, { 0, -1 }, { 1, -1 }, { 2, -1 },
+            { -2,  0 }, { -1,  0 },            { 1,  0 }, { 2,  0 },
+            { -2,  1 }, { -1,  1 }, { 0,  1 }, { 1,  1 }, { 2,  1 },
+            { -2,  2 }, { -1,  2 }, { 0,  2 }, { 1,  2 }, { 2,  2 }
+        };
+        for (int i = 0; i < (int)_countof(kOff); ++i) {
+            RECT r = *textRc;
+            ::OffsetRect(&r, kOff[i].x, kOff[i].y);
+            ::DrawThemeTextEx(s_capTheme, hdcMem, WP_CAPTION, st, title, -1, fmt, &r, &opt);
+        }
+        opt.crText = RGB(255, 255, 255);
+        ::DrawThemeTextEx(s_capTheme, hdcMem, WP_CAPTION, st, title, -1, fmt, textRc, &opt);
+        return;
+    }
+    CCC_DrawTextBlackEdge(hdcMem, title, -1, textRc, fmt, RGB(255, 255, 255));
+}
+
 // ソフトドロップシャドウ。黒文字を α マップ→ボックスぼかし→プレマルチ合成。
 // bAeroTrans 時は peakA を下げてもクロマ段で半透明が黒縁になるため呼び出し側で省略。
 // DIB/α バッファは静的再利用（毎描画 CreateDIBSection を抑制）。
@@ -12237,9 +12311,9 @@ void CCustomCheckBox::OnDrawLayer(CDC* pDC, CRect rect)
                 const BOOL bCapLock = (GetDlgCtrlID() == IDC_MAINWIN_LOCK)
                     && (CCC_GetCustomCaptionHeight(::GetParent(m_hWnd)) > 0);
                 if (bCapLock) {
-                    dc.SetBkMode(TRANSPARENT);
-                    dc.SetTextColor(bD ? RGB(180, 180, 180) : RGB(255, 255, 255));
-                    DrawFitControlText(&dc, rt, t, DT_LEFT | DT_VCENTER | DT_NOPREFIX, 0.50f);
+                    dc.Draw3dRect(&rcB, RGB(0, 0, 0), RGB(0, 0, 0));
+                    const COLORREF fill = bD ? RGB(180, 180, 180) : RGB(255, 255, 255);
+                    CCC_DrawTextBlackEdge(dc, t, rt, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX, fill);
                 }
                 else {
                     DrawSmartText2(&dc, rt, t, DT_LEFT | DT_VCENTER | DT_NOPREFIX, bD, FALSE);
@@ -16804,7 +16878,6 @@ void CCC_CaptionPaint(CDC& dc, HWND hDlg)
         const int w = bar.Width();
         const int h = bar.Height();
         static CCC_ChromaBlitCache s_capDib;
-        static HTHEME s_capTheme = NULL;
         if (s_capDib.Ensure(dc.GetSafeHdc(), w, h) && s_capDib.pBits && s_capDib.hdcDib) {
             ::ZeroMemory(s_capDib.pBits, static_cast<size_t>(w) * static_cast<size_t>(h) * 4u);
             HDC hdcMem = s_capDib.hdcDib;
@@ -16819,25 +16892,7 @@ void CCC_CaptionPaint(CDC& dc, HWND hDlg)
             }
 
             RECT textRc = { textLeft, 0, titleRight - 4, h };
-
-            if (!s_capTheme)
-                s_capTheme = ::OpenThemeData(hDlg, L"WINDOW");
-            if (s_capTheme) {
-                DTTOPTS opt = {};
-                opt.dwSize = sizeof(opt);
-                opt.dwFlags = DTT_COMPOSITED | DTT_TEXTCOLOR | DTT_GLOWSIZE;
-                opt.crText = RGB(255, 255, 255);
-                opt.iGlowSize = 10;
-                ::DrawThemeTextEx(s_capTheme, hdcMem, 0, 0, title, -1,
-                    DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX,
-                    &textRc, &opt);
-            }
-            else {
-                ::SetBkMode(hdcMem, TRANSPARENT);
-                ::SetTextColor(hdcMem, RGB(255, 255, 255));
-                ::DrawTextW(hdcMem, title, -1, &textRc,
-                    DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
-            }
+            CCC_DrawCaptionTitleComposited(hdcMem, hDlg, title, &textRc, active);
 
             // DrawIconEx 等が α=0 のまま残す画素を、非ゼロ RGB だけ不透明化
             {
@@ -17500,6 +17555,8 @@ static void CCC_MainLockDrawOverlay(CDC& dc, const CRect& rc, BOOL locked)
 #endif
 
     CRect chk(rc.left + 3, rc.top + 4, rc.left + 17, rc.top + 18);
+    dc.FillSolidRect(&chk, RGB(255, 249, 252));
+    dc.Draw3dRect(&chk, RGB(0, 0, 0), RGB(0, 0, 0));
     dc.DrawEdge(chk, EDGE_SUNKEN, BF_RECT);
     if (locked) {
         CPen pen(PS_SOLID, 2, COLOR_CHECK);
@@ -17510,11 +17567,10 @@ static void CCC_MainLockDrawOverlay(CDC& dc, const CRect& rc, BOOL locked)
         dc.SelectObject(pOldPen);
     }
 
-    dc.SetBkMode(TRANSPARENT);
-    dc.SetTextColor(RGB(255, 255, 255));
     CRect textRc = rc;
     textRc.left += 20;
-    dc.DrawText(CCC_MainLockLabel(), textRc, DT_SINGLELINE | DT_VCENTER | DT_LEFT | DT_NOPREFIX);
+    CCC_DrawTextBlackEdge(dc, CCC_MainLockLabel(), textRc,
+        DT_SINGLELINE | DT_VCENTER | DT_LEFT | DT_NOPREFIX, RGB(255, 255, 255));
 }
 
 // CCC_MainLockPaintClient: カスタム UI / アクリル補助。
@@ -18377,8 +18433,9 @@ static void CCC_CaptionInstallCore(CWnd* pDlg, CToolTipCtrl* pTip)
     pDlg->GetClientRect(&rcBefore);
 
     // モーダル枠だけ外す。WS_CAPTION は DWM 用に維持。
-    // システムの min/max ボタンはカスタム側で描くのでスタイルから外す（残骸防止）
-    pDlg->ModifyStyle(DS_MODALFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX, 0);
+    // WS_MINIMIZEBOX / WS_MAXIMIZEBOX は残す。無いと前面窓のタスクバー再クリックで
+    // 最小化せず再アクティブだけになる。システムの min/max は NC 吸収済みで描かない。
+    pDlg->ModifyStyle(DS_MODALFRAME, 0);
     // ホスト α 時は CLIPCHILDREN 必須（親塗りがリスト等のスクロールバーを潰すのを防ぐ）
     pDlg->ModifyStyle(0, WS_CLIPCHILDREN | WS_CLIPSIBLINGS);
     // キャプション帯は常時アクリル（本文の不透明化は描画側）。歌詞も同様。

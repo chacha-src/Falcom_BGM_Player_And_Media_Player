@@ -30887,6 +30887,7 @@ void COggDlg::OnSize(UINT nType, int cx, int cy)
 		}
 		if (maini)
 			maini->ShowWindow(SW_MINIMIZE);
+		HideMidiMonitorForMinimize();
 		SetTimer(4924, 100, NULL);
 	}
 	if (nType == SIZE_RESTORED) {
@@ -30912,6 +30913,7 @@ void COggDlg::OnSize(UINT nType, int cx, int cy)
 		GetWindowRect(&r);
 		if (maini)
 			maini->ShowWindow(SW_RESTORE);
+		RestoreMidiMonitorAfterMinimize();
 	}
 
 	if (nType != SIZE_MINIMIZED && ::IsWindow(m_hWnd)) {
@@ -33339,6 +33341,33 @@ void COggDlg::ToggleAnalyzer()
 	}
 }
 
+// 本体最小化時: MIDI モニタは og 所有かつ TOPMOST 可のため OS が隠さない。
+// 見えていたら HIDE。復帰は RestoreMidiMonitorAfterMinimize。
+void COggDlg::HideMidiMonitorForMinimize()
+{
+	if (m_midiMonHiddenForMin)
+		return;
+	if (!m_MidiMonitorDlg || !::IsWindow(m_MidiMonitorDlg->GetSafeHwnd()))
+		return;
+	if (!m_MidiMonitorDlg->IsWindowVisible())
+		return;
+	m_midiMonHiddenForMin = 1;
+	m_MidiMonitorDlg->ShowWindow(SW_HIDE);
+}
+
+// 本体復帰時: 最小化で隠した MIDI モニタだけ戻す（閉じ済みは出さない）。
+void COggDlg::RestoreMidiMonitorAfterMinimize()
+{
+	if (!m_midiMonHiddenForMin)
+		return;
+	m_midiMonHiddenForMin = 0;
+	if (savedata.midimonwindow != 1)
+		return;
+	if (!m_MidiMonitorDlg || !::IsWindow(m_MidiMonitorDlg->GetSafeHwnd()))
+		return;
+	m_MidiMonitorDlg->ShowWindow(SW_SHOWNOACTIVATE);
+}
+
 void COggDlg::ToggleMidiMonitor()
 {
 	if (!m_MidiMonitorDlg)
@@ -33355,6 +33384,7 @@ void COggDlg::ToggleMidiMonitor()
 		savedata.midimonwindow = 1;
 	}
 	else {
+		m_midiMonHiddenForMin = 0;
 		m_MidiMonitorDlg->DetachForDestroy();
 		m_MidiMonitorDlg->DestroyWindow();
 		savedata.midimonwindow = 0;
