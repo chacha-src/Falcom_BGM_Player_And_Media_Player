@@ -15706,6 +15706,10 @@ struct CCC_CaptionEntry {
     int paintH = 0;
     int paintTitleRight = 0;
     wchar_t paintTitle[512] = {};
+    // WS_SYSMENU を外す前に、About などアプリ追加のシステムメニュー項目を退避
+    UINT sysExtraId[8] = {};
+    wchar_t sysExtraText[8][256] = {};
+    int sysExtraCount = 0;
 };
 
 static CCC_CaptionEntry g_captions[64];
@@ -15873,9 +15877,20 @@ static void CCC_DisableBodyAeroOnly(HWND hWnd)
 // 詳細は呼び出し元のコメントを優先。
 static void CCC_CaptionHideDwmTitleChrome(HWND hWnd)
 {
-#if CCUSTOM_AERO_SUPPORT
 	if (!hWnd || !::IsWindow(hWnd))
 		return;
+#if CCUSTOM_AERO_SUPPORT
+#ifndef WTNCA_NODRAWCAPTION
+#define WTNCA_NODRAWCAPTION 0x00000001
+#endif
+#ifndef WTNCA_NODRAWICON
+#define WTNCA_NODRAWICON 0x00000002
+#endif
+	WTA_OPTIONS opts = {};
+	opts.dwFlags = WTNCA_NODRAWCAPTION | WTNCA_NODRAWICON;
+	opts.dwMask = WTNCA_NODRAWCAPTION | WTNCA_NODRAWICON;
+	::SetWindowThemeAttribute(hWnd, WTA_NONCLIENT, &opts, sizeof(opts));
+
 	BOOL compositionEnabled = FALSE;
 	if (!::DwmIsCompositionEnabled(&compositionEnabled) || !compositionEnabled)
 		return;
@@ -15895,8 +15910,6 @@ static void CCC_CaptionHideDwmTitleChrome(HWND hWnd)
 	::DwmSetWindowAttribute(hWnd, DWMWA_CAPTION_COLOR, &colorNone, sizeof(colorNone));
 	::DwmSetWindowAttribute(hWnd, DWMWA_TEXT_COLOR, &colorNone, sizeof(colorNone));
 	::DwmSetWindowAttribute(hWnd, DWMWA_BORDER_COLOR, &colorNone, sizeof(colorNone));
-#else
-	UNREFERENCED_PARAMETER(hWnd);
 #endif
 }
 
@@ -15954,6 +15967,8 @@ static void CCC_CaptionEnsureBackdrop(HWND hWnd)
     const MARGINS margins = CCC_CaptionHostMargins(hWnd);
     ::DwmExtendFrameIntoClientArea(hWnd, &margins);
     ::SetClassLongPtr(hWnd, GCLP_HBRBACKGROUND, 0);
+    // backdrop 後に DWM がシステム帯を戻すことがあるので、描画抑制を最後に再適用
+    CCC_CaptionHideDwmTitleChrome(hWnd);
 #else
     UNREFERENCED_PARAMETER(hWnd);
 #endif
@@ -16085,10 +16100,13 @@ static LRESULT CCC_CaptionHandleNcCalcSize(HWND hWnd, WPARAM wParam, LPARAM lPar
 {
     if (CCC_GetCustomCaptionHeight(hWnd) <= 0)
         return defResult;
-    if (!wParam || !lParam)
+    if (!lParam)
         return defResult;
 
-    NCCALCSIZE_PARAMS* p = reinterpret_cast<NCCALCSIZE_PARAMS*>(lParam);
+    // wParam=FALSE は RECT*。ここを既定に落とすとシステムキャプション NC が復活する。
+    RECT* rc = wParam
+        ? &(reinterpret_cast<NCCALCSIZE_PARAMS*>(lParam)->rgrc[0])
+        : reinterpret_cast<RECT*>(lParam);
     const DWORD style = (DWORD)::GetWindowLong(hWnd, GWL_STYLE);
     const UINT dpi = CCC_GetControlDpi(hWnd);
     int frameX = 0, frameY = 0;
@@ -16101,9 +16119,9 @@ static LRESULT CCC_CaptionHandleNcCalcSize(HWND hWnd, WPARAM wParam, LPARAM lPar
         frameY = ::GetSystemMetricsForDpi(SM_CYBORDER, dpi);
     }
     // rgrc[0] = 新しい窓矩形。上は NC ゼロ（クライアントが天辺まで）。キャプションはクライアント描画。
-    p->rgrc[0].left += frameX;
-    p->rgrc[0].right -= frameX;
-    p->rgrc[0].bottom -= frameY;
+    rc->left += frameX;
+    rc->right -= frameX;
+    rc->bottom -= frameY;
     // top はそのまま（窓上端 = クライアント上端）。DWM のシステムタイトル帯を作らない。
     UNREFERENCED_PARAMETER(frameY);
     return 0;
@@ -18432,15 +18450,35 @@ static void CCC_CaptionInstallCore(CWnd* pDlg, CToolTipCtrl* pTip)
     CRect rcBefore;
     pDlg->GetClientRect(&rcBefore);
 
-    // モーダル枠だけ外す。WS_CAPTION は DWM 用に維持。
-    // WS_MINIMIZEBOX / WS_MAXIMIZEBOX は残す。無いと前面窓のタスクバー再クリックで
-    // 最小化せず再アクティブだけになる。システムの min/max は NC 吸収済みで描かない。
-    pDlg->ModifyStyle(DS_MODALFRAME, 0);
+    // About 等は OnInit でシステムメニューへ足している。SYSMENU を外す前に退避。
+    e->sysExtraCount = 0;
+    if (HMENU hSys = ::GetSystemMenu(hWnd, FALSE)) {
+        const int nSys = ::GetMenuItemCount(hSys);
+        for (int i = 0; i < nSys && e->sysExtraCount < 8; ++i) {
+            const UINT id = ::GetMenuItemID(hSys, i);
+            if (id == 0 || id == (UINT)-1)
+                continue;
+            if (id >= 0xF000)
+                continue;
+            e->sysExtraId[e->sysExtraCount] = id;
+            e->sysExtraText[e->sysExtraCount][0] = 0;
+            ::GetMenuStringW(hSys, i, e->sysExtraText[e->sysExtraCount], 256, MF_BYPOSITION);
+            if (e->sysExtraText[e->sysExtraCount][0])
+                ++e->sysExtraCount;
+        }
+    }
+
+    // WS_SYSMENU を外す。Win11 DWM は SYSMENU があるとシステム min/max/close を
+    // クライアントへ重ね描きする（テーマ／CAPTION_COLOR では消えない）。Firefox/Edge と同じ。
+    // WS_CAPTION + MINIMIZEBOX + MAXIMIZEBOX は残す（タスクバー再クリック最小化・スナップ）。
+    pDlg->ModifyStyle(DS_MODALFRAME | WS_SYSMENU, 0);
     // ホスト α 時は CLIPCHILDREN 必須（親塗りがリスト等のスクロールバーを潰すのを防ぐ）
     pDlg->ModifyStyle(0, WS_CLIPCHILDREN | WS_CLIPSIBLINGS);
     // キャプション帯は常時アクリル（本文の不透明化は描画側）。歌詞も同様。
     e->acrylicCaption = TRUE;
     e->installed = TRUE;
+    // WS_CAPTION は残すので、DWM/テーマのシステム帯描画だけ止める（カスタム帯のみ）
+    CCC_CaptionHideDwmTitleChrome(hWnd);
 
     // 先に NC 吸収（FRAMECHANGED）。ExtendFrame より後に FRAMECHANGED すると
     // DWM マージンが消えて「一瞬アクリル→黒帯」＋クライアント縦幅変化になる。
@@ -19150,6 +19188,9 @@ BEGIN_MESSAGE_MAP(CCustomBlurDialogBase, CCustomDialog)
     ON_NOTIFY_EX_RANGE(TTN_NEEDTEXTA, 0, 0xFFFF, OnTtnNeedText)
     ON_MESSAGE(CCC_MSG_INSTALL_CAPTION, OnInstallCustomCaption)
     ON_WM_NCCALCSIZE()
+    ON_WM_NCACTIVATE()
+    ON_MESSAGE(0x00AE, OnNcThemeCaptionPaint)
+    ON_MESSAGE(0x00AF, OnNcThemeCaptionPaint)
 #if CCUSTOM_AERO_SUPPORT
     ON_MESSAGE(CCC_MSG_REAPPLY_OPAQUE_FIXERS, OnReapplyOpaqueFixers)
 #endif
@@ -19233,11 +19274,35 @@ LRESULT CCustomBlurDialogBase::OnInstallCustomCaption(WPARAM, LPARAM)
 // 帯高さ分をクライアントへ取り込む。
 void CCustomBlurDialogBase::OnNcCalcSize(BOOL bCalcValidRects, NCCALCSIZE_PARAMS* lpncsp)
 {
-    if (CCC_GetCustomCaptionHeight(m_hWnd) > 0 && bCalcValidRects && lpncsp) {
-        CCC_CaptionHandleNcCalcSize(m_hWnd, TRUE, reinterpret_cast<LPARAM>(lpncsp), 0);
+    if (CCC_GetCustomCaptionHeight(m_hWnd) > 0 && lpncsp) {
+        CCC_CaptionHandleNcCalcSize(m_hWnd, bCalcValidRects ? TRUE : FALSE, reinterpret_cast<LPARAM>(lpncsp), 0);
         return;
     }
     CCustomDialog::OnNcCalcSize(bCalcValidRects, lpncsp);
+}
+
+// システムキャプションの再描画を止める。lParam=-1 が定石。帯の活性色はクライアント側で。
+BOOL CCustomBlurDialogBase::OnNcActivate(BOOL bActive)
+{
+    if (CCC_GetCustomCaptionHeight(m_hWnd) > 0) {
+        const BOOL r = (BOOL)::DefWindowProc(m_hWnd, WM_NCACTIVATE, (WPARAM)bActive, (LPARAM)-1);
+        const int capH = CCC_GetCustomCaptionHeight(m_hWnd);
+        CRect cr;
+        GetClientRect(&cr);
+        if (cr.bottom > capH)
+            cr.bottom = capH;
+        InvalidateRect(&cr, FALSE);
+        return r;
+    }
+    return CCustomDialog::OnNcActivate(bActive);
+}
+
+// WM_NCUAHDRAWCAPTION / WM_NCUAHDRAWFRAME。テーマのシステム帯描画を捨てる。
+LRESULT CCustomBlurDialogBase::OnNcThemeCaptionPaint(WPARAM, LPARAM)
+{
+    if (CCC_GetCustomCaptionHeight(m_hWnd) > 0)
+        return 0;
+    return Default();
 }
 
 // 設定変更など強制再適用。bForce=TRUE で FinishBlur をやり直す。
@@ -19776,8 +19841,21 @@ static void CCC_CaptionTrackContextMenu(CWnd* pDlg, CPoint ptClient, int* pMainL
                 L"Zablokuj pozycje/rozmiar", L"Ana pencere konum/boyut kilitle"));
     }
     {
-        HMENU hSys = ::GetSystemMenu(hWnd, FALSE);
-        if (hSys) {
+        if (e && e->sysExtraCount > 0) {
+            menu.AddSeparator();
+            for (int i = 0; i < e->sysExtraCount; ++i) {
+                if (!e->sysExtraText[i][0])
+                    continue;
+                menu.AddCommand(e->sysExtraId[i], e->sysExtraText[i],
+                    LL14(L"このシステムメニュー／キャプチャ操作を実行", L"Run this system-menu / capture action",
+                        L"Executer cette action systeme / capture", L"Esegui questa azione di sistema / cattura",
+                        L"Ejecutar esta accion de sistema / captura", L"이 시스템 메뉴/캡처 동작 실행",
+                        L"执行此系统菜单/捕获操作", L"تشغيل أمر قائمة النظام / الالتقاط هذا",
+                        L"Выполнить эту команду системного меню / захвата", L"Diesen Systemmenü-/Capture-Befehl ausführen",
+                        L"Executar esta acao de menu do sistema / captura", L"Deze systeemmenu-/capture-actie uitvoeren",
+                        L"Wykonaj te polecenie menu systemu / przechwytu", L"Bu sistem menusu / yakalama eylemini calistir"));
+            }
+        } else if (HMENU hSys = ::GetSystemMenu(hWnd, FALSE)) {
             const int nSys = ::GetMenuItemCount(hSys);
             BOOL anyCustom = FALSE;
             for (int i = 0; i < nSys; ++i) {
@@ -19948,6 +20026,9 @@ BEGIN_MESSAGE_MAP(CCustomBlurDialogExBase, CCustomDialogEx)
     ON_NOTIFY_EX_RANGE(TTN_NEEDTEXTA, 0, 0xFFFF, OnTtnNeedText)
     ON_MESSAGE(CCC_MSG_INSTALL_CAPTION, OnInstallCustomCaption)
     ON_WM_NCCALCSIZE()
+    ON_WM_NCACTIVATE()
+    ON_MESSAGE(0x00AE, OnNcThemeCaptionPaint)
+    ON_MESSAGE(0x00AF, OnNcThemeCaptionPaint)
 #if CCUSTOM_AERO_SUPPORT
     ON_MESSAGE(CCC_MSG_REAPPLY_OPAQUE_FIXERS, OnReapplyOpaqueFixers)
 #endif
@@ -20012,11 +20093,35 @@ LRESULT CCustomBlurDialogExBase::OnInstallCustomCaption(WPARAM, LPARAM)
 // 帯高さ分をクライアントへ取り込む。
 void CCustomBlurDialogExBase::OnNcCalcSize(BOOL bCalcValidRects, NCCALCSIZE_PARAMS* lpncsp)
 {
-    if (CCC_GetCustomCaptionHeight(m_hWnd) > 0 && bCalcValidRects && lpncsp) {
-        CCC_CaptionHandleNcCalcSize(m_hWnd, TRUE, reinterpret_cast<LPARAM>(lpncsp), 0);
+    if (CCC_GetCustomCaptionHeight(m_hWnd) > 0 && lpncsp) {
+        CCC_CaptionHandleNcCalcSize(m_hWnd, bCalcValidRects ? TRUE : FALSE, reinterpret_cast<LPARAM>(lpncsp), 0);
         return;
     }
     CCustomDialogEx::OnNcCalcSize(bCalcValidRects, lpncsp);
+}
+
+// システムキャプションの再描画を止める。lParam=-1 が定石。帯の活性色はクライアント側で。
+BOOL CCustomBlurDialogExBase::OnNcActivate(BOOL bActive)
+{
+    if (CCC_GetCustomCaptionHeight(m_hWnd) > 0) {
+        const BOOL r = (BOOL)::DefWindowProc(m_hWnd, WM_NCACTIVATE, (WPARAM)bActive, (LPARAM)-1);
+        const int capH = CCC_GetCustomCaptionHeight(m_hWnd);
+        CRect cr;
+        GetClientRect(&cr);
+        if (cr.bottom > capH)
+            cr.bottom = capH;
+        InvalidateRect(&cr, FALSE);
+        return r;
+    }
+    return CCustomDialogEx::OnNcActivate(bActive);
+}
+
+// WM_NCUAHDRAWCAPTION / WM_NCUAHDRAWFRAME。テーマのシステム帯描画を捨てる。
+LRESULT CCustomBlurDialogExBase::OnNcThemeCaptionPaint(WPARAM, LPARAM)
+{
+    if (CCC_GetCustomCaptionHeight(m_hWnd) > 0)
+        return 0;
+    return Default();
 }
 
 // 設定変更からの強制ぼかし再適用。

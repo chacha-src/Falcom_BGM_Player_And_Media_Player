@@ -1838,6 +1838,8 @@ protected:
     afx_msg LRESULT OnReapplyOpaqueFixers(WPARAM wParam, LPARAM lParam);
     afx_msg LRESULT OnInstallCustomCaption(WPARAM wParam, LPARAM lParam);
     afx_msg void OnNcCalcSize(BOOL bCalcValidRects, NCCALCSIZE_PARAMS* lpncsp);
+    afx_msg BOOL OnNcActivate(BOOL bActive);
+    afx_msg LRESULT OnNcThemeCaptionPaint(WPARAM wParam, LPARAM lParam);
     afx_msg void OnMainLockClicked();
     afx_msg void OnLButtonDown(UINT nFlags, CPoint point);
     afx_msg void OnLButtonDblClk(UINT nFlags, CPoint point);
@@ -1942,6 +1944,8 @@ protected:
     afx_msg LRESULT OnReapplyOpaqueFixers(WPARAM wParam, LPARAM lParam);
     afx_msg LRESULT OnInstallCustomCaption(WPARAM wParam, LPARAM lParam);
     afx_msg void OnNcCalcSize(BOOL bCalcValidRects, NCCALCSIZE_PARAMS* lpncsp);
+    afx_msg BOOL OnNcActivate(BOOL bActive);
+    afx_msg LRESULT OnNcThemeCaptionPaint(WPARAM wParam, LPARAM lParam);
     afx_msg void OnMainLockClicked();
     afx_msg void OnLButtonDown(UINT nFlags, CPoint point);
     afx_msg void OnLButtonDblClk(UINT nFlags, CPoint point);
