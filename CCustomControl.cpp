@@ -12366,6 +12366,7 @@ IMPLEMENT_DYNAMIC(CCustomLevelMeter, CStatic)
 
 BEGIN_MESSAGE_MAP(CCustomLevelMeter, CStatic)
 	ON_WM_PAINT()
+	ON_WM_NCPAINT()
 	ON_WM_ERASEBKGND()
 	ON_MESSAGE(WM_PRINTCLIENT, OnPrintClient)
 END_MESSAGE_MAP()
@@ -12380,6 +12381,24 @@ CCustomLevelMeter::CCustomLevelMeter()
 // CCustomLevelMeter の破棄。所有 GDI は無い（空）。
 CCustomLevelMeter::~CCustomLevelMeter()
 {
+}
+
+// テーマ枠(WS_BORDER)は α=0 の白縁になるので外す。クライアント＝窓全体。
+void CCustomLevelMeter::PreSubclassWindow()
+{
+	CStatic::PreSubclassWindow();
+	ModifyStyle(WS_BORDER, 0);
+	ModifyStyleEx(WS_EX_STATICEDGE | WS_EX_CLIENTEDGE | WS_EX_DLGMODALFRAME | WS_EX_WINDOWEDGE, 0);
+	HMODULE h = ::LoadLibrary(_T("UxTheme.dll"));
+	if (h)
+	{
+		typedef HRESULT(WINAPI* S)(HWND, LPCWSTR, LPCWSTR);
+		if (S p = (S)::GetProcAddress(h, "SetWindowTheme"))
+			p(m_hWnd, L"", L"");
+		::FreeLibrary(h);
+	}
+	SetWindowPos(NULL, 0, 0, 0, 0,
+		SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
 }
 
 // HWND 破棄後。基底の PostNcDestroy のあと m_bAutoDelete なら this を delete。
@@ -12402,58 +12421,88 @@ void CCustomLevelMeter::SetLevel(int n)
 		Invalidate(FALSE);
 }
 
-// 縦レベル。0..1000。ホスト不透明が要るときは α=255 塗り。
+// 縦レベル。0..1000。余白・枠は作らずクライアント全面をトラック色で埋める。
+// （2px 余白や WS_BORDER はガラスに抜けて黒バー周囲が透けて見えた）
 // 850 超で赤、650 超で黄。トラックは暗い紺。
 void CCustomLevelMeter::PaintClient(CDC& dc)
 {
 	CRect r;
 	GetClientRect(&r);
 	if (r.Width() <= 0 || r.Height() <= 0) return;
-#if CCUSTOM_AERO_SUPPORT
-	const BOOL needOpaque = CCC_HostNeedsChildOpaque(m_hWnd);
-#else
-	const BOOL needOpaque = FALSE;
-#endif
-	const BOOL bTrans = !needOpaque && CCC_UseTransPaint(m_hWnd, m_bAeroMode);
-	if (needOpaque)
-		CCC_FillRectOpaqueBits(dc.GetSafeHdc(), r, COLOR_DIALOG_BG);
-	else
-		dc.FillSolidRect(&r, bTrans ? CCC_AERO_CHROMA_KEY : COLOR_DIALOG_BG);
-
-	CRect track = r;
-	track.DeflateRect(2, 2);
-	if (needOpaque)
-		CCC_FillRectOpaqueBits(dc.GetSafeHdc(), track, RGB(40, 44, 56));
-	else
-		dc.FillSolidRect(&track, RGB(40, 44, 56));
-	const int h = track.Height();
+	const COLORREF clrTrack = RGB(40, 44, 56);
+	dc.FillSolidRect(&r, clrTrack);
+	const int h = r.Height();
 	int fillH = (int)(((__int64)h * m_level) / 1000);
 	if (m_level > 0 && fillH < 1) fillH = 1;
 	if (fillH > h) fillH = h;
 	if (fillH > 0) {
-		CRect fill(track.left, track.bottom - fillH, track.right, track.bottom);
+		CRect fill(r.left, r.bottom - fillH, r.right, r.bottom);
 		COLORREF c = RGB(80, 220, 120);
 		if (m_level > 850) c = RGB(255, 70, 70);
 		else if (m_level > 650) c = RGB(255, 200, 60);
-		if (needOpaque)
-			CCC_FillRectOpaqueBits(dc.GetSafeHdc(), fill, c);
-		else
-			dc.FillSolidRect(&fill, c);
+		dc.FillSolidRect(&fill, c);
 	}
 }
 
-// WM_PAINT。透過はクロマ、ホストガラスは不透明パス、それ以外は素描画。
-// CPaintDC。経路分岐は aero / ホストガラス / 通常。
+// fixer / PRINTCLIENT 用。不透明バッファへレイヤを描く。
+void CCustomLevelMeter::PaintOpaqueIntoBuffer(HDC hdcBuf)
+{
+	if (!hdcBuf || !m_hWnd) return;
+	CDC mem;
+	mem.Attach(hdcBuf);
+	PaintClient(mem);
+	mem.Detach();
+}
+
+// WM_PAINT。BufferedPaint で全面 α=255。素 FillRect は Win11 で縁が透ける。
 void CCustomLevelMeter::OnPaint()
 {
 	CPaintDC dc(this);
+#if CCUSTOM_AERO_SUPPORT
+	CRect r;
+	GetClientRect(&r);
+	if (r.Width() <= 0 || r.Height() <= 0) return;
+	BP_PAINTPARAMS params = { sizeof(BP_PAINTPARAMS) };
+	params.dwFlags = BPPF_ERASE;
+	HDC hdcBuf = NULL;
+	HPAINTBUFFER hBP = ::BeginBufferedPaint(dc.GetSafeHdc(), &r, BPBF_TOPDOWNDIB, &params, &hdcBuf);
+	if (hdcBuf && hBP)
+	{
+		CDC dcBuf;
+		dcBuf.Attach(hdcBuf);
+		PaintClient(dcBuf);
+		dcBuf.Detach();
+		::BufferedPaintMakeOpaque(hBP, &r);
+		::EndBufferedPaint(hBP, TRUE);
+		return;
+	}
+	if (CCC_HostNeedsChildOpaque(m_hWnd))
+	{
+		PaintClient(dc);
+		CCC_MakeRectOpaquePreserve(dc.GetSafeHdc(), r);
+		return;
+	}
+#endif
 	PaintClient(dc);
 }
 
+// 枠が残っていてもテーマの透明白縁は描かない。本体は OnPaint。
+void CCustomLevelMeter::OnNcPaint()
+{
+}
+
 // 消去握りつぶし。アクリル上で ERASE だけだと完全透過のまま残る。
-// TRUE で既定塗りを止める。
 BOOL CCustomLevelMeter::OnEraseBkgnd(CDC* pDC)
 {
+#if CCUSTOM_AERO_SUPPORT
+	if (pDC)
+	{
+		CRect r;
+		GetClientRect(&r);
+		CCC_FillRectOpaqueBits(pDC->GetSafeHdc(), r, RGB(40, 44, 56));
+		return TRUE;
+	}
+#endif
 	UNREFERENCED_PARAMETER(pDC);
 	return TRUE;
 }
@@ -15088,6 +15137,7 @@ static COLORREF CCC_OpaqueBgForHwnd(HWND hWnd)
         if (dynamic_cast<CCustomComboBox*>(pw)) return COLOR_COMBO_BG;
         if (dynamic_cast<CCustomStandardButton*>(pw) || dynamic_cast<CButtonST*>(pw)) return COLOR_BUTTON_BG;
         if (dynamic_cast<CCustomProgressCtrl*>(pw)) return COLOR_DIALOG_BG;
+        if (dynamic_cast<CCustomLevelMeter*>(pw)) return COLOR_DIALOG_BG;
         if (dynamic_cast<CCustomSysPerfCtrl*>(pw)) return COLOR_DIALOG_BG;
         if (dynamic_cast<CCustomEdit*>(pw)) return COLOR_EDIT_BG;
     }
@@ -15117,6 +15167,7 @@ static BOOL CCC_IsBlurControl(HWND hWnd)
         if (dynamic_cast<CCustomGroupBox*>(pw)) return TRUE;
         if (dynamic_cast<CCustomCheckBox*>(pw)) return TRUE;
         if (dynamic_cast<CCustomProgressCtrl*>(pw)) return TRUE;
+        if (dynamic_cast<CCustomLevelMeter*>(pw)) return TRUE;
         if (dynamic_cast<CCustomSysPerfCtrl*>(pw)) return TRUE;
     }
     TCHAR cls[64] = {};
@@ -15190,6 +15241,7 @@ static BOOL CCC_ShouldOpaqueFix(HWND hWnd)
             if (dynamic_cast<CCustomRangeSliderCtrl*>(pw)) return TRUE;
             if (dynamic_cast<CCustomCheckBox*>(pw)) return TRUE;
             if (dynamic_cast<CCustomProgressCtrl*>(pw)) return TRUE;
+            if (dynamic_cast<CCustomLevelMeter*>(pw)) return TRUE;
             if (dynamic_cast<CCustomSysPerfCtrl*>(pw)) return TRUE;
         }
         TCHAR cls[64] = {};
@@ -15295,6 +15347,12 @@ static BOOL CCC_PaintChildDirect(HWND hWnd, HDC hdcBuf)
     else if (auto* pProg = dynamic_cast<CCustomProgressCtrl*>(pw))
     {
         pProg->PaintOpaqueIntoBuffer(hdcBuf);
+        dc.Detach();
+        return TRUE;
+    }
+    else if (auto* pMeter = dynamic_cast<CCustomLevelMeter*>(pw))
+    {
+        pMeter->PaintOpaqueIntoBuffer(hdcBuf);
         dc.Detach();
         return TRUE;
     }

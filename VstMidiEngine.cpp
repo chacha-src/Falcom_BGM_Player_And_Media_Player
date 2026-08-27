@@ -5,6 +5,7 @@
 #include "VstMidiEngine.h"
 #include "Vst3Host.h"
 #include "third_party/vst2/aeffect.h"
+#include "kb_sasami/source/sasami_midi.h"
 
 #include <math.h>
 #include <stdlib.h>
@@ -505,6 +506,8 @@ struct EngineState {
 	int gmResetMode; // 0=GM+GS, 1=GS, 2=XG（シーク巻き戻し時に再送）
 	int gsMapLsb;    // 0=なし 1=SC-55 2=SC-88 3=88Pro 4=8820/50（CC#32）
 	int songGm;      // 1=GM  2=GM2（GM On のみ。GM2 は ch10 に MSB120）
+	__int64 loopStartSample;
+	__int64 loopEndSample;
 
 	EngineState() : csReady(0), fileData(NULL), fileBytes(0), events(NULL),
 		eventCount(0), eventPos(0), playSample(0), lengthSamples(0),
@@ -512,7 +515,8 @@ struct EngineState {
 		moduleB(NULL), effectB(NULL), moduleC(NULL), effectC(NULL), vst3C(NULL),
 		sysexData(NULL), sysexBytes(0), maxMidiPort(0), mirrorToB(0), usingBuiltin(1),
 		useEnsemble(0), useDrums(0), useMapper(0), midiOut(NULL), mixCount(0),
-		ringRead(0), ringCount(0), gmResetMode(0), gsMapLsb(0), songGm(0)
+		ringRead(0), ringCount(0), gmResetMode(0), gsMapLsb(0), songGm(0),
+		loopStartSample(0), loopEndSample(0)
 	{
 		InitializeCriticalSection(&cs);
 		csReady = 1;
@@ -2031,6 +2035,25 @@ static int LoadSmf(const wchar_t* path)
 					ev[count].sysexOff = -1;
 					ev[count].seq = count;
 					++count;
+				} else if (type == 0x06 && ml > 0) {
+					char tmp[64];
+					unsigned n = ml;
+					if (n > 63) n = 63;
+					memcpy(tmp, q, n);
+					tmp[n] = 0;
+					int mark = 0;
+					if (_stricmp(tmp, "loopStart") == 0) mark = -2;
+					else if (_stricmp(tmp, "loopEnd") == 0) mark = -3;
+					if (mark && count < MAX_MIDI_EVENTS) {
+						ev[count].tick = tick;
+						ev[count].sample = 0;
+						ev[count].msg = 0xff;
+						ev[count].aux = 0;
+						ev[count].port = curPort;
+						ev[count].sysexOff = mark;
+						ev[count].seq = count;
+						++count;
+					}
 				} else if (type == 0x21 && ml >= 1) {
 					// RP-019 MIDI Port Prefix — port A/B/C for 16/32/48ch modules.
 					curPort = (int)q[0];
@@ -2354,9 +2377,35 @@ static int LoadSmf(const wchar_t* path)
 	RxListenInit();
 	/* 最後のノートの残響を鳴らし切るための余白。クロスフェードは
 	 * この余白を除いた「音の終わり」を基準にする（XfTailPadBytes）。 */
-	g_eng.lengthSamples = sample + SAMPLE_RATE * VST_TAIL_PAD_SEC;
-	EnsLog(L"LoadSmf events=%d maxPort=%d gs32=%d ff21=%d mirrorB=%d sysexBytes=%d (ports: %dch)",
-		count, maxPort, gs32, sawFf21, g_eng.mirrorToB, sxUsed, (maxPort + 1) * 16);
+	g_eng.loopStartSample = 0;
+	g_eng.loopEndSample = 0;
+	{
+		__int64 markS = 0, markE = 0, ccS = 0, ccE = 0;
+		for (int i = 0; i < count; ++i) {
+			if ((ev[i].msg & 0xff) == 0xff) {
+				if (ev[i].sysexOff == -2) markS = ev[i].sample;
+				if (ev[i].sysexOff == -3) markE = ev[i].sample;
+			} else if ((ev[i].msg & 0xf0) == 0xb0 && ((ev[i].msg >> 8) & 0x7f) == 111) {
+				const int v = (int)((ev[i].msg >> 16) & 0x7f);
+				if (v == 0) ccS = ev[i].sample;
+				else ccE = ev[i].sample;
+			}
+		}
+		if (markE > markS) {
+			g_eng.loopStartSample = markS;
+			g_eng.loopEndSample = markE;
+		} else if (ccE > ccS) {
+			g_eng.loopStartSample = ccS;
+			g_eng.loopEndSample = ccE;
+		}
+	}
+	if (g_eng.loopEndSample > g_eng.loopStartSample)
+		g_eng.lengthSamples = g_eng.loopEndSample;
+	else
+		g_eng.lengthSamples = sample + SAMPLE_RATE * VST_TAIL_PAD_SEC;
+	EnsLog(L"LoadSmf events=%d maxPort=%d gs32=%d ff21=%d mirrorB=%d sysexBytes=%d (ports: %dch) loop=%lld..%lld",
+		count, maxPort, gs32, sawFf21, g_eng.mirrorToB, sxUsed, (maxPort + 1) * 16,
+		(long long)g_eng.loopStartSample, (long long)g_eng.loopEndSample);
 	return 0;
 }
 
@@ -3288,7 +3337,8 @@ static void DispatchDueEvents(__int64 start, int frames)
 		routeShort(e);
 	}
 	if (g_eng.events && g_eng.eventCount > 0 && g_eng.eventPos >= g_eng.eventCount &&
-		!g_vstHeldFlushed[VstIoSlot()]) {
+		!g_vstHeldFlushed[VstIoSlot()] &&
+		!(g_eng.loopEndSample > g_eng.loopStartSample)) {
 		g_vstHeldFlushed[VstIoSlot()] = 1;
 		const __int64 offAt = (end > start) ? (end - 1) : start;
 		n0 = VstFlushHeld(batch0, n0, SONG_BATCH, 0, offAt);
@@ -4723,6 +4773,8 @@ static void FreeSong()
 	g_eng.useDrums = 0;
 	g_eng.gsMapLsb = 0;
 	g_eng.songGm = 0;
+	g_eng.loopStartSample = 0;
+	g_eng.loopEndSample = 0;
 }
 
 static void ResetSequence()
@@ -5161,7 +5213,8 @@ extern "C" int VstHasX64Instruments(void)
 
 extern "C" int VstIsMidiExt(const wchar_t* path)
 {
-	return EqExt(path, L".mid") || EqExt(path, L".midi") || EqExt(path, L".kar") || EqExt(path, L".rmi");
+	return EqExt(path, L".mid") || EqExt(path, L".midi") || EqExt(path, L".kar") || EqExt(path, L".rmi")
+		|| EqExt(path, L".mpy") || EqExt(path, L".mpw2");
 }
 
 extern "C" int VstIsProjectExt(const wchar_t* path)
@@ -5182,7 +5235,10 @@ extern "C" int VstResolvePlayPath(const wchar_t* inPath, wchar_t* outMid,
 	outMid[0] = 0;
 	int hc = 0;
 	if (outHintCount) *outHintCount = 0;
-	if (VstIsMidiExt(inPath)) {
+	if (SasamiPathIsMidi(inPath)) {
+		return SasamiConvertPathToMidiFile(inPath, outMid, outMidChars) ? 1 : 0;
+	}
+	if (EqExt(inPath, L".mid") || EqExt(inPath, L".midi") || EqExt(inPath, L".kar") || EqExt(inPath, L".rmi")) {
 		SafeCopy(outMid, outMidChars, inPath);
 		return 1;
 	}
@@ -5908,6 +5964,39 @@ extern "C" void VstMidiCloseSlot(int slot)
 	VstMidiSetIoSlot(prev);
 }
 
+static int SongHasLoop(void)
+{
+	return (g_eng.loopEndSample > g_eng.loopStartSample) ? 1 : 0;
+}
+
+static int EventIsResetSysex(const MidiItem& e)
+{
+	if ((e.msg & 0xff) != 0xf0 || e.sysexOff < 0 || !g_eng.sysexData) return 0;
+	const int n = (int)e.aux;
+	if (e.sysexOff + n > g_eng.sysexBytes) return 0;
+	const BYTE* d = g_eng.sysexData + e.sysexOff;
+	if (VstMidiSysexIsGsReset(d, n) || VstMidiSysexIsXgOn(d, n) || VstMidiSysexIsGmOn(d, n))
+		return 1;
+	return 0;
+}
+
+static void WrapSongLoop(void)
+{
+	g_eng.playSample = g_eng.loopStartSample;
+	g_eng.eventPos = 0;
+	while (g_eng.eventPos < g_eng.eventCount &&
+		g_eng.events[g_eng.eventPos].sample < g_eng.loopStartSample)
+		g_eng.eventPos++;
+	if (g_eng.loopStartSample == 0) {
+		while (g_eng.eventPos < g_eng.eventCount &&
+			g_eng.events[g_eng.eventPos].sample == 0 &&
+			EventIsResetSysex(g_eng.events[g_eng.eventPos]))
+			g_eng.eventPos++;
+	}
+	g_vstHeldFlushed[VstIoSlot()] = 0;
+	g_eng.ringRead = g_eng.ringCount = 0;
+}
+
 // 現在スロットの PCM。注入キューと残響余白もここで進める。
 extern "C" int VstMidiRead(BYTE* dst, int bytesWanted)
 {
@@ -5920,12 +6009,18 @@ extern "C" int VstMidiRead(BYTE* dst, int bytesWanted)
 	int written = 0;
 	while (written < bytesWanted) {
 		if (!g_eng.ringCount) {
-			const int past = (!g_eng.events || g_eng.playSample >= g_eng.lengthSamples) ? 1 : 0;
+			if (SongHasLoop() && g_eng.playSample > g_eng.loopEndSample)
+				WrapSongLoop();
+			const int looping = SongHasLoop();
+			const int past = (!g_eng.events || (!looping && g_eng.playSample >= g_eng.lengthSamples)) ? 1 : 0;
 			if (past && (g_injW == g_injR) && g_liveTailFrames <= 0)
 				break;
 			int frames = BLOCK_FRAMES;
-			if (!past && g_eng.lengthSamples - g_eng.playSample < frames)
-				frames = (int)(g_eng.lengthSamples - g_eng.playSample);
+			if (!past) {
+				__int64 lim = looping ? (g_eng.loopEndSample + 1) : g_eng.lengthSamples;
+				if (lim - g_eng.playSample < frames)
+					frames = (int)(lim - g_eng.playSample);
+			}
 			if (frames < 1) frames = BLOCK_FRAMES;
 			if (g_eng.useEnsemble) {
 				DispatchEnsemble(g_eng.playSample, frames);

@@ -170,6 +170,14 @@ public:
 			// kbpsf2 の曲内音量タグは本体ゲインと二重になるので無視する。
 			def = 1;
 		}
+		if (_wcsicmp(m_pluginName.c_str(), L"kbsasami") == 0 &&
+			sec && key && _wcsicmp(sec, L"kbsasami") == 0) {
+			if (_wcsicmp(key, L"raira") == 0)
+				return 1;
+			// KpiHost64 は midPlayPrefer を持たないのでレジストリ値 (本体が Sync 済み)
+			if (_wcsicmp(key, L"vst") == 0)
+				return KpiV5GetInt(m_pluginName, L"kbsasami", L"vst", 1);
+		}
 		return KpiV5GetInt(m_pluginName, sec ? sec : L"", key ? key : L"", def);
 	}
 	void WINAPI SetFloat(const wchar_t* sec, const wchar_t* key, double v) override {

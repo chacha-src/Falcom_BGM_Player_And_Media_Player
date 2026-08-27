@@ -1,0 +1,175 @@
+﻿#include "sasami_file.h"
+
+#include <windows.h>
+#include <string.h>
+#include <ctype.h>
+
+static const wchar_t* SasamiExtOf(const wchar_t* path)
+{
+	if (!path) return L"";
+	const wchar_t* dot = wcsrchr(path, L'.');
+	return dot ? dot : L"";
+}
+
+static int SasamiEqExt(const wchar_t* path, const wchar_t* ext)
+{
+	const wchar_t* p = SasamiExtOf(path);
+	while (*p && *ext) {
+		wchar_t a = *p++;
+		wchar_t b = *ext++;
+		if (a >= L'A' && a <= L'Z') a = (wchar_t)(a - L'A' + L'a');
+		if (b >= L'A' && b <= L'Z') b = (wchar_t)(b - L'A' + L'a');
+		if (a != b) return 0;
+	}
+	return *p == 0 && *ext == 0;
+}
+
+bool SasamiExtIsMidi(const wchar_t* path)
+{
+	return SasamiEqExt(path, L".mpy") || SasamiEqExt(path, L".mpw2");
+}
+
+bool SasamiExtIsFm(const wchar_t* path)
+{
+	return SasamiEqExt(path, L".fpy");
+}
+
+SasamiKind SasamiKindFromPath(const wchar_t* path)
+{
+	if (SasamiEqExt(path, L".fpy")) return SASAMI_KIND_FPY;
+	if (SasamiEqExt(path, L".mpw2")) return SASAMI_KIND_MPW2;
+	if (SasamiEqExt(path, L".mpy")) return SASAMI_KIND_MPY;
+	return SASAMI_KIND_UNKNOWN;
+}
+
+bool SasamiOffOk(const SasamiSong& s, uint32_t off, uint32_t need)
+{
+	return (uint64_t)off + need <= (uint64_t)s.dataSize;
+}
+
+uint8_t SasamiGet(const SasamiSong& s, uint32_t off)
+{
+	if (off >= s.dataSize) return 0;
+	return s.data[off];
+}
+
+uint16_t SasamiGet16(const SasamiSong& s, uint32_t off)
+{
+	return (uint16_t)(SasamiGet(s, off) | ((uint16_t)SasamiGet(s, off + 1) << 8));
+}
+
+uint32_t SasamiGet24(const SasamiSong& s, uint32_t off)
+{
+	return (uint32_t)SasamiGet(s, off)
+		| ((uint32_t)SasamiGet(s, off + 1) << 8)
+		| ((uint32_t)SasamiGet(s, off + 2) << 16);
+}
+
+static void SasamiReadTitle(SasamiSong* out)
+{
+	out->titleSjis[0] = 0;
+	const uint32_t base = (out->kind == SASAMI_KIND_FPY) ? 0x50u : 0x160u;
+	if (base >= out->dataSize) return;
+	char buf[66];
+	memset(buf, 0, sizeof(buf));
+	const size_t n = (out->dataSize - base < 64) ? (out->dataSize - base) : 64;
+	memcpy(buf, &out->data[base], n);
+	int last = 0;
+	for (int i = 0; i < 64 && buf[i]; i++) last = i + 1;
+	if (last > 0) {
+		memcpy(out->titleSjis, buf, (size_t)last);
+		out->titleSjis[last] = 0;
+	}
+}
+
+bool SasamiLoadMemory(const uint8_t* bytes, size_t size, SasamiKind hint, SasamiSong* out)
+{
+	if (!bytes || !out || size < 32) return false;
+	if (size > SASAMI_MAX_FILE) return false;
+	memset(out, 0, sizeof(*out));
+	memcpy(out->data, bytes, size);
+	out->dataSize = (uint32_t)size;
+	out->kind = hint;
+	out->mpyVersion = 1;
+	out->trackCount = 0;
+
+	if (hint == SASAMI_KIND_FPY) {
+		out->kind = SASAMI_KIND_FPY;
+		out->fmOpna10ch = (SasamiGet16(*out, 0x1E) == 0xFFFF) ? 1 : 0;
+		out->versionWord = SasamiGet16(*out, 0x1C);
+		out->trackCount = 10;
+		for (int ch = 0; ch < 10; ch++) {
+			const uint16_t ptr = SasamiGet16(*out, (uint32_t)(ch * 2));
+			uint32_t off = (ptr >= 0x1000) ? (uint32_t)(ptr - 0x1000) : ptr;
+			out->tracks[ch].fileOff = off;
+			out->tracks[ch].part = -1;
+			out->tracks[ch].unused = (ptr == 0 || ptr == 0x10F0 || off >= size) ? 1 : 0;
+		}
+		SasamiReadTitle(out);
+		return true;
+	}
+
+	if (size < 0x84) return false;
+
+	const int isV2header =
+		(bytes[0] == 0xEE && bytes[1] == 0xEE && bytes[2] == 0xEE);
+	out->mpyVersion = isV2header ? 2 : 1;
+	if (hint == SASAMI_KIND_MPW2) out->kind = SASAMI_KIND_MPW2;
+	else out->kind = SASAMI_KIND_MPY;
+	if (isV2header) out->kind = SASAMI_KIND_MPW2;
+
+	out->versionWord = (unsigned)bytes[0x80] + ((unsigned)bytes[0x81] << 8);
+	out->dualPort = bytes[0x82];
+	out->wideTracks = bytes[0x83];
+	out->trackCount = (bytes[0x83] == 1) ? 64 : 32;
+	if (out->trackCount > 64) out->trackCount = 64;
+
+	if (out->mpyVersion == 1) {
+		for (int ch = 0; ch < out->trackCount; ch++) {
+			int packed;
+			if (ch > 31)
+				packed = 0x100 + (ch - 32) * 3;
+			else
+				packed = ch * 3;
+			const uint16_t addr = SasamiGet16(*out, (uint32_t)packed);
+			uint32_t off = (addr >= 0x1000) ? (uint32_t)(addr - 0x1000) : addr;
+			out->tracks[ch].fileOff = off;
+			out->tracks[ch].part = SasamiGet(*out, (uint32_t)packed + 2) & 0x0F;
+			out->tracks[ch].unused = (addr == 0x10F0 || off == 0xF0 || addr == 0) ? 1 : 0;
+		}
+	} else {
+		if (size < 0x200 + 64 * 4) return false;
+		for (int ch = 0; ch < out->trackCount; ch++) {
+			const uint32_t packed = 0x200 + (uint32_t)ch * 4;
+			const uint32_t addr = SasamiGet24(*out, packed);
+			uint32_t off = (addr >= 0x1000) ? (addr - 0x1000) : addr;
+			out->tracks[ch].fileOff = off;
+			out->tracks[ch].part = SasamiGet(*out, packed + 3) & 0x0F;
+			out->tracks[ch].unused = (off == 0xF0 || addr == 0) ? 1 : 0;
+		}
+	}
+	SasamiReadTitle(out);
+	if (out->kind == SASAMI_KIND_MPY || out->kind == SASAMI_KIND_MPW2) {
+		if (out->wideTracks == 1 && !out->titleSjis[0] && size > 0x160)
+			SasamiReadTitle(out);
+	}
+	return true;
+}
+
+bool SasamiLoadFileW(const wchar_t* path, SasamiSong* out)
+{
+	if (!path || !out) return false;
+	HANDLE h = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+	if (h == INVALID_HANDLE_VALUE) return false;
+	LARGE_INTEGER li;
+	if (!GetFileSizeEx(h, &li) || li.QuadPart <= 0 || li.QuadPart > SASAMI_MAX_FILE) {
+		CloseHandle(h);
+		return false;
+	}
+	static uint8_t s_loadBuf[SASAMI_MAX_FILE];
+	DWORD n = 0;
+	const BOOL ok = ReadFile(h, s_loadBuf, (DWORD)li.QuadPart, &n, NULL);
+	CloseHandle(h);
+	if (!ok || n == 0) return false;
+	return SasamiLoadMemory(s_loadBuf, n, SasamiKindFromPath(path), out);
+}

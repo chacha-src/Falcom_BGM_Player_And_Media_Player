@@ -1497,7 +1497,8 @@ private:
 // CCustomLevelMeter
 //
 // 0..1000。緑→黄→赤の縦バー。ピークホールドは持たない（親が SetLevel する）。
-// アクリル時はトラック以外をクロマ。変化なしなら Invalidate しない。
+// 全体を不透明に塗る（余白クロマや WS_BORDER の α=0 だと黒バー周囲が透ける）。
+// 変化なしなら Invalidate しない。
 // ============================================================================
 class CCustomLevelMeter : public CStatic
 {
@@ -1509,16 +1510,19 @@ public:
 	int GetLevel() const { return m_level; }
 	void SetAeroMode(BOOL b) { m_bAeroMode = b; if (GetSafeHwnd()) Invalidate(FALSE); }
 	void EnableAutoDelete(BOOL b = TRUE) { m_bAutoDelete = b; }
+	void PaintOpaqueIntoBuffer(HDC hdcBuf);
 	BOOL m_bAutoDelete;
 
 protected:
+	virtual void PreSubclassWindow();
 	virtual void PostNcDestroy();
 	afx_msg void OnPaint();
+	afx_msg void OnNcPaint();
 	afx_msg BOOL OnEraseBkgnd(CDC* pDC);
 	afx_msg LRESULT OnPrintClient(WPARAM wParam, LPARAM lParam);
 	DECLARE_MESSAGE_MAP()
 
-	void PaintClient(CDC& dc); // 縦バー。aero 時はクロマ下地
+	void PaintClient(CDC& dc); // クライアント全面を不透明トラック＋レベル
 
 	int m_level;       // 0..1000。SetLevel がクランプ
 	BOOL m_bAeroMode;

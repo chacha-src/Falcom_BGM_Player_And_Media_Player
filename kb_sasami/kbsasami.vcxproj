@@ -1,0 +1,129 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" ToolsVersion="14.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="uni_2026_de|Win32">
+      <Configuration>uni_2026_de</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="uni_2026_de|x64">
+      <Configuration>uni_2026_de</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="uni_avx2_vs2026|Win32">
+      <Configuration>uni_avx2_vs2026</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="uni_avx2_vs2026|x64">
+      <Configuration>uni_avx2_vs2026</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <ProjectGuid>{B8E4C12A-7D3F-4A91-9E2B-5C6D8F0A1B22}</ProjectGuid>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+    <RootNamespace>kbsasami</RootNamespace>
+    <Keyword>Win32Proj</Keyword>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Label="Configuration">
+    <ConfigurationType>DynamicLibrary</ConfigurationType>
+    <PlatformToolset>v145</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+    <UseOfMfc>false</UseOfMfc>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="ExtensionSettings" />
+  <PropertyGroup>
+    <TargetExt>.kpi</TargetExt>
+    <TargetName>kbsasami</TargetName>
+    <GenerateManifest>false</GenerateManifest>
+    <OutDir>$(ProjectDir)out\$(Platform)\$(Configuration)\</OutDir>
+    <IntDir>$(ProjectDir)_temp\$(Platform)\$(Configuration)\</IntDir>
+  </PropertyGroup>
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <SDLCheck>false</SDLCheck>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <AdditionalIncludeDirectories>$(ProjectDir)source;$(ProjectDir)source\ymfm;$(ProjectDir)source\fmmidi;C:\projects\APPLICATION3\kpi_sources_20240712\kpisdk;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>WIN32;_WINDOWS;_CRT_SECURE_NO_WARNINGS;_HAS_AUTO_PTR_ETC=1;NOMINMAX;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+      <ExceptionHandling>Sync</ExceptionHandling>
+    </ClCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+      <ModuleDefinitionFile>$(ProjectDir)kbsasami.def</ModuleDefinitionFile>
+      <AdditionalDependencies>kernel32.lib;user32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)'=='uni_avx2_vs2026'">
+    <ClCompile>
+      <Optimization>MaxSpeed</Optimization>
+      <PreprocessorDefinitions>NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <EnableEnhancedInstructionSet>AdvancedVectorExtensions2</EnableEnhancedInstructionSet>
+    </ClCompile>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)'=='uni_2026_de'">
+    <ClCompile>
+      <Optimization>Disabled</Optimization>
+      <PreprocessorDefinitions>_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Platform)'=='Win32'">
+    <PostBuildEvent>
+      <Command>if not exist "$(ProjectDir)..\$(Configuration)\1\Plugins\kbsasami\" mkdir "$(ProjectDir)..\$(Configuration)\1\Plugins\kbsasami\"
+if not exist "C:\projects\APPLICATION3\ogg_binary\Plugins\kbsasami\" mkdir "C:\projects\APPLICATION3\ogg_binary\Plugins\kbsasami\"
+copy /Y "$(TargetPath)" "$(ProjectDir)..\$(Configuration)\1\Plugins\kbsasami\kbsasami.kpi"
+copy /Y "$(TargetPath)" "C:\projects\APPLICATION3\ogg_binary\Plugins\kbsasami\kbsasami.kpi"
+copy /Y "$(ProjectDir)data\programs.txt" "$(ProjectDir)..\$(Configuration)\1\Plugins\kbsasami\programs.txt"
+copy /Y "$(ProjectDir)data\programs.txt" "C:\projects\APPLICATION3\ogg_binary\Plugins\kbsasami\programs.txt"
+copy /Y "$(ProjectDir)kbsasami.txt" "$(ProjectDir)..\$(Configuration)\1\Plugins\kbsasami\kbsasami.txt"
+copy /Y "$(ProjectDir)kbsasami.txt" "C:\projects\APPLICATION3\ogg_binary\Plugins\kbsasami\kbsasami.txt"
+if exist "C:\projects\APPLICATION3\ogg_binary\Plugins\Kobarin\fmpmd\ym2608_adpcm_rom.bin" copy /Y "C:\projects\APPLICATION3\ogg_binary\Plugins\Kobarin\fmpmd\ym2608_adpcm_rom.bin" "$(ProjectDir)..\$(Configuration)\1\Plugins\kbsasami\ym2608_adpcm_rom.bin"
+if exist "C:\projects\APPLICATION3\ogg_binary\Plugins\Kobarin\fmpmd\ym2608_adpcm_rom.bin" copy /Y "C:\projects\APPLICATION3\ogg_binary\Plugins\Kobarin\fmpmd\ym2608_adpcm_rom.bin" "C:\projects\APPLICATION3\ogg_binary\Plugins\kbsasami\ym2608_adpcm_rom.bin"
+if exist "C:\projects\APPLICATION3\ogg_binary\Plugins\Kobarin\fmpmd\Rhythm\2608_BD.WAV" copy /Y "C:\projects\APPLICATION3\ogg_binary\Plugins\Kobarin\fmpmd\Rhythm\2608_*.WAV" "$(ProjectDir)..\$(Configuration)\1\Plugins\kbsasami\"
+if exist "C:\projects\APPLICATION3\ogg_binary\Plugins\Kobarin\fmpmd\Rhythm\2608_BD.WAV" copy /Y "C:\projects\APPLICATION3\ogg_binary\Plugins\Kobarin\fmpmd\Rhythm\2608_*.WAV" "C:\projects\APPLICATION3\ogg_binary\Plugins\kbsasami\"</Command>
+    </PostBuildEvent>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Platform)'=='x64'">
+    <PostBuildEvent>
+      <Command>if not exist "$(ProjectDir)..\$(Configuration)\1\Plugins\kbsasami\x64\" mkdir "$(ProjectDir)..\$(Configuration)\1\Plugins\kbsasami\x64\"
+if not exist "C:\projects\APPLICATION3\ogg_binary\Plugins\kbsasami\x64\" mkdir "C:\projects\APPLICATION3\ogg_binary\Plugins\kbsasami\x64\"
+copy /Y "$(TargetPath)" "$(ProjectDir)..\$(Configuration)\1\Plugins\kbsasami\x64\kbsasami.kpi"
+copy /Y "$(TargetPath)" "C:\projects\APPLICATION3\ogg_binary\Plugins\kbsasami\x64\kbsasami.kpi"
+copy /Y "$(ProjectDir)data\programs.txt" "$(ProjectDir)..\$(Configuration)\1\Plugins\kbsasami\x64\programs.txt"
+copy /Y "$(ProjectDir)data\programs.txt" "C:\projects\APPLICATION3\ogg_binary\Plugins\kbsasami\x64\programs.txt"
+if exist "C:\projects\APPLICATION3\ogg_binary\Plugins\Kobarin\fmpmd\ym2608_adpcm_rom.bin" copy /Y "C:\projects\APPLICATION3\ogg_binary\Plugins\Kobarin\fmpmd\ym2608_adpcm_rom.bin" "$(ProjectDir)..\$(Configuration)\1\Plugins\kbsasami\x64\ym2608_adpcm_rom.bin"
+if exist "C:\projects\APPLICATION3\ogg_binary\Plugins\Kobarin\fmpmd\ym2608_adpcm_rom.bin" copy /Y "C:\projects\APPLICATION3\ogg_binary\Plugins\Kobarin\fmpmd\ym2608_adpcm_rom.bin" "C:\projects\APPLICATION3\ogg_binary\Plugins\kbsasami\x64\ym2608_adpcm_rom.bin"
+if exist "C:\projects\APPLICATION3\ogg_binary\Plugins\Kobarin\fmpmd\Rhythm\2608_BD.WAV" copy /Y "C:\projects\APPLICATION3\ogg_binary\Plugins\Kobarin\fmpmd\Rhythm\2608_*.WAV" "$(ProjectDir)..\$(Configuration)\1\Plugins\kbsasami\x64\"
+if exist "C:\projects\APPLICATION3\ogg_binary\Plugins\Kobarin\fmpmd\Rhythm\2608_BD.WAV" copy /Y "C:\projects\APPLICATION3\ogg_binary\Plugins\Kobarin\fmpmd\Rhythm\2608_*.WAV" "C:\projects\APPLICATION3\ogg_binary\Plugins\kbsasami\x64\"</Command>
+    </PostBuildEvent>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ClCompile Include="source\kbsasami_decoder.cpp" />
+    <ClCompile Include="source\kbsasami_module.cpp" />
+    <ClCompile Include="source\sasami_file.cpp" />
+    <ClCompile Include="source\sasami_midi.cpp" />
+    <ClCompile Include="source\sasami_fm.cpp" />
+    <ClCompile Include="source\fmmidi\sequencer.cpp" />
+    <ClCompile Include="source\fmmidi\midisynth.cpp" />
+    <ClCompile Include="source\ymfm\ymfm_opn.cpp" />
+    <ClCompile Include="source\ymfm\ymfm_adpcm.cpp" />
+    <ClCompile Include="source\ymfm\ymfm_ssg.cpp" />
+    <ClCompile Include="C:\projects\APPLICATION3\kpi_sources_20240712\kpisdk\kpi.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="source\kbsasami_decoder.h" />
+    <ClInclude Include="source\kbsasami_module.h" />
+    <ClInclude Include="source\sasami_file.h" />
+    <ClInclude Include="source\sasami_midi.h" />
+    <ClInclude Include="source\sasami_fm.h" />
+    <ClInclude Include="source\sasami_neiro.inc" />
+    <None Include="kbsasami.def" />
+    <Text Include="kbsasami.txt" />
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets" />
+</Project>

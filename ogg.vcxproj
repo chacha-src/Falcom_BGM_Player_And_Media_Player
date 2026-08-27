@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003" DefaultTargets="Build" ToolsVersion="14.0">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="uni_2026_de|Win32">
@@ -617,6 +617,14 @@
     <ClCompile Include="itiran_YSF.cpp" />
     <ClCompile Include="itiran_YSO.cpp" />
     <ClCompile Include="kpi.cpp" />
+    <ClCompile Include="kb_sasami\source\sasami_file.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+    </ClCompile>
+    <ClCompile Include="kb_sasami\source\sasami_midi.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+    </ClCompile>
     <ClCompile Include="KpiV5ConfigDlg.cpp" />
     <ClCompile Include="KpiV5ConfigStore.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
@@ -771,6 +779,8 @@
     <ClInclude Include="itiran_YSF.h" />
     <ClInclude Include="itiran_YSO.h" />
     <ClInclude Include="kpi.h" />
+    <ClInclude Include="kb_sasami\source\sasami_file.h" />
+    <ClInclude Include="kb_sasami\source\sasami_midi.h" />
     <ClInclude Include="KpiV5ConfigDlg.h" />
     <ClInclude Include="KpiV5ConfigStore.h" />
     <ClInclude Include="Kpilist.h" />

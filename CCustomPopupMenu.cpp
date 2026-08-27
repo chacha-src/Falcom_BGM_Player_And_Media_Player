@@ -2,6 +2,7 @@
 #include "CCustomPopupMenu.h"
 #include "GdiSoft2D.h"
 #include "GdiSoft3D.h"
+#include "KpiV5ConfigStore.h"
 #include <uxtheme.h>
 #include <math.h>
 #include <algorithm>
@@ -3682,6 +3683,7 @@ BOOL CCustomPopupMenu::HandleChromeClick(int idx)
 	// でプレイリストの MID(VST)/MID(KPI) 表示を即更新する。
 	if (it.id == CCUSTOM_POPUP_ID_MID_KPI || it.id == CCUSTOM_POPUP_ID_MID_VST) {
 		savedata.midPlayPrefer = (it.id == CCUSTOM_POPUP_ID_MID_VST) ? 1 : 0;
+		KpiV5SyncKbsasamiOptions(savedata.midPlayPrefer);
 		for (int i = 0; i < m_itemCount; ++i) {
 			CCustomPopupItem& x = m_items[i];
 			if (x.id == CCUSTOM_POPUP_ID_MID_KPI) x.checked = (savedata.midPlayPrefer == 0) ? TRUE : FALSE;

@@ -1,4 +1,4 @@
-﻿
+
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 18
 VisualStudioVersion = 18.2.11415.280
@@ -6,6 +6,8 @@ MinimumVisualStudioVersion = 10.0.40219.1
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "ogg", "ogg.vcxproj", "{A09FBD07-606E-41CD-B055-88B68D6E8809}"
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "KpiHost64", "KpiHost64\KpiHost64.vcxproj", "{8B16900E-38CD-4B12-9B7C-6418C5AAAF27}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "kbsasami", "kb_sasami\kbsasami.vcxproj", "{B8E4C12A-7D3F-4A91-9E2B-5C6D8F0A1B22}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -29,6 +31,14 @@ Global
 		{8B16900E-38CD-4B12-9B7C-6418C5AAAF27}.uni_avx2_vs2026|x64(KpiHost64のみ).ActiveCfg = uni_avx2_vs2026|x64
 		{8B16900E-38CD-4B12-9B7C-6418C5AAAF27}.uni_avx2_vs2026|x64(KpiHost64のみ).Build.0 = uni_avx2_vs2026|x64
 		{8B16900E-38CD-4B12-9B7C-6418C5AAAF27}.uni_avx2_vs2026|x86(oggのみ).ActiveCfg = uni_avx2_vs2026|x64
+		{B8E4C12A-7D3F-4A91-9E2B-5C6D8F0A1B22}.avx2_vs2026_debug|x64(KpiHost64のみ).ActiveCfg = uni_2026_de|x64
+		{B8E4C12A-7D3F-4A91-9E2B-5C6D8F0A1B22}.avx2_vs2026_debug|x64(KpiHost64のみ).Build.0 = uni_2026_de|x64
+		{B8E4C12A-7D3F-4A91-9E2B-5C6D8F0A1B22}.avx2_vs2026_debug|x86(oggのみ).ActiveCfg = uni_2026_de|Win32
+		{B8E4C12A-7D3F-4A91-9E2B-5C6D8F0A1B22}.avx2_vs2026_debug|x86(oggのみ).Build.0 = uni_2026_de|Win32
+		{B8E4C12A-7D3F-4A91-9E2B-5C6D8F0A1B22}.uni_avx2_vs2026|x64(KpiHost64のみ).ActiveCfg = uni_avx2_vs2026|x64
+		{B8E4C12A-7D3F-4A91-9E2B-5C6D8F0A1B22}.uni_avx2_vs2026|x64(KpiHost64のみ).Build.0 = uni_avx2_vs2026|x64
+		{B8E4C12A-7D3F-4A91-9E2B-5C6D8F0A1B22}.uni_avx2_vs2026|x86(oggのみ).ActiveCfg = uni_avx2_vs2026|Win32
+		{B8E4C12A-7D3F-4A91-9E2B-5C6D8F0A1B22}.uni_avx2_vs2026|x86(oggのみ).Build.0 = uni_avx2_vs2026|Win32
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

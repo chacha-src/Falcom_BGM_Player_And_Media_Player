@@ -3670,15 +3670,30 @@ static void EnsureKpiTeardownEvent()
 static void KpiTeardownJobRun(KpiTeardownJob* j)
 {
 	if (!j) return;
+	// v5 COM オブジェクトは DLL 内。FreeLibrary より先に Release しないと
+	// 曲終端の自動停止で解放済みコードへ飛ぶ。
+	if (j->dec) {
+		j->dec->Release();
+		j->dec = NULL;
+	}
+	if (j->module) {
+		j->module->Release();
+		j->module = NULL;
+	}
 	if (j->mod) {
 		if (j->mod->Close && j->kmp1) j->mod->Close(j->kmp1);
 		if (j->mod->Deinit) j->mod->Deinit();
+		j->mod = NULL;
+		j->kmp1 = NULL;
 	}
-	if (j->hDll) FreeLibrary(j->hDll);
-	if (j->dec) j->dec->Release();
-	if (j->module) j->module->Release();
-	if (j->remote && j->remoteSessionId)
+	if (j->remote && j->remoteSessionId) {
 		g_kpiHost.Close(j->remoteSessionId);
+		j->remoteSessionId = 0;
+	}
+	if (j->hDll) {
+		FreeLibrary(j->hDll);
+		j->hDll = NULL;
+	}
 }
 
 static unsigned __stdcall KpiTeardownThread(void* p)
@@ -4150,6 +4165,14 @@ public:
 			_wcsicmp(sec, L"General") == 0 &&
 			_wcsicmp(key, L"IgnoreVolumeTag") == 0) {
 			def = 1;
+		}
+		// kbsasami: このアプリでは常に raira=1。vst は midPlayPrefer の逆を返す
+		if (_wcsicmp(m_pluginName.c_str(), L"kbsasami") == 0 &&
+			sec && key && _wcsicmp(sec, L"kbsasami") == 0) {
+			if (_wcsicmp(key, L"raira") == 0)
+				return 1;
+			if (_wcsicmp(key, L"vst") == 0)
+				return (savedata.midPlayPrefer == 1) ? 0 : 1;
 		}
 		return KpiV5GetInt(m_pluginName, sec ? sec : L"", key ? key : L"", def);
 	}
@@ -4932,6 +4955,7 @@ void COgg_KickTimerp()
 BOOL COggDlg::OnInitDialog()
 {
 	CCustomBlurDialogBase::OnInitDialog();
+	KpiV5SyncKbsasamiOptions(savedata.midPlayPrefer);
 	// メディアプレイヤーモード起動時は OnInitDialog 中もメイン画面を出さない
 	if (savedata.playerMode == 1)
 		ShowWindow(SW_HIDE);
@@ -20054,7 +20078,8 @@ int readkpi(BYTE* bw, int cnt)
 					if (r > 0 && !kpiDecEof) {
 						// 不定長（loop2==0）のゲーム系、および mid/midi（演奏後も無音が続く場合）。
 						// 総長が分かる非MIDIでは末尾の弱い音量を誤って切らない。
-						const bool midiLike = (sss == "mid" || sss == "midi" || sss == "kar" || sss == "rmi");
+						const bool midiLike = (sss == "mid" || sss == "midi" || sss == "kar" || sss == "rmi"
+							|| sss == "mpy" || sss == "mpw2");
 						if ((loop2 == 0 || midiLike) && !(wavExportPath.GetLength() > 0 || g_isWavExportRendering)) {
 							if (IsBlockSilent((const BYTE*)bufkpi + cnt3, (int)r, abs(wavsam_depth))) {
 								kpi_silence_bytes += r;
@@ -22519,6 +22544,9 @@ static void KpiMidiSeekAccurate(__int64 samplePos)
 static void KpiSeekToPlayb(__int64 samplePos)
 {
 	kpi_silence_bytes = 0;
+	if (samplePos < 0) samplePos = 0;
+	if (loop2 > 0 && samplePos > (__int64)loop2)
+		samplePos = loop2;
 	const CString path = !filen.IsEmpty() ? filen : (og ? CString(og->kpi) : CString());
 	if (IsMidiLikePath(path)) {
 		KpiMidiSeekAccurate(samplePos);

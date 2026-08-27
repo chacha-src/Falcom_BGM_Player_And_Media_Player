@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 // CMidiMonitorDlg : MIDI 32パート・モニタ（XG/GS 風）
 // SMF を再生位置に同期して CC/ノート/SysEx を表示。音色名は SASAMI_GS/XG/EX.DAT。
 #include "afxdialogex.h"
@@ -224,6 +224,8 @@ private:
 	int m_sxBytes;
 	int m_division;
 	int m_sampleRate;
+	__int64 m_loopStartSample;
+	__int64 m_loopEndSample;
 	__int64 m_lastPlayb;
 	wchar_t m_loadedPath[520];
 	wchar_t m_titleBuf[280];

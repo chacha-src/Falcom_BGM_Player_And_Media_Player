@@ -1,0 +1,44 @@
+﻿-------------------------------------------------------------------------------
+[ 名称 ]     SASAMI FM / MIDI Decoder
+[ファイル名] kbsasami.kpi
+[バージョン] 1.00
+[対応拡張子] fpy / mpy / mpw2
+[ Platform ] x86(32bit) / x64(64bit)
+-------------------------------------------------------------------------------
+[概要]
+
+PC-98 ささみ (SASAMI) の曲データを再生します。
+
+  .fpy   FM (YM2608/OPNA) コマンドを ymfm で PCM 化
+  .mpy   MIDI SASAMI Ver1
+  .mpw2  MIDI SASAMI Ver2.2
+
+[設定] kbsasami.vst / kbsasami.raira
+
+  セクション kbsasami:
+
+  kbsasami.vst
+    本家 KbMedia Player: 0 = FM MIDI (プラグイン内 fmmidi / programs.txt)
+                         1 = VST 側を想定 (本家では通常 0)
+  kbsasami.raira
+    0 = 本家互換 (vst をそのまま解釈)
+    1 = このアプリ専用。vst の 0 と 1 を内部で入れ替える
+
+  このアプリは常に raira=1 を書き込み、midPlayPrefer に合わせて
+  vst に逆値を自動代入します。結果として:
+    midPlayPrefer=KPI → 実効 vst=0 (fmmidi)
+    midPlayPrefer=VST → 実効 vst=1 (KPI は MIDI を開かずホストが VST)
+
+[FM リズム]
+
+OPNA リズムは次のいずれか（プラグインフォルダ、または本体 Plugins 内の
+fmpmd / kpis98）:
+
+  ym2608_adpcm_rom.bin     ymfm が使う ADPCM-A ROM
+  2608_BD/SD/TOP/HH/TOM/RIM.WAV   fmgen 形式の PCM
+
+[著作]
+
+SASAMI コマンドは既存 SASAMI / SASAMI11 / SASAMIM / アセンブラソースから移植。
+FM コアは ymfm (Aaron Giles, BSD-3-Clause)。
+プラグイン内 MIDI PCM は fmmidi (yuno) を SMF 経由で使用。

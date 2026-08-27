@@ -1,4 +1,4 @@
-﻿#include "stdafx.h"
+#include "stdafx.h"
 #include "CMidiMonitorDlg.h"
 #include "oggDlg.h"
 #include "PlayList.h"
@@ -1419,7 +1419,7 @@ CMidiMonitorDlg::CMidiMonitorDlg(CWnd* pParent)
 #endif
 	, m_fontDpi(0), m_fontH(0)
 	, m_ev(NULL), m_evCount(0), m_evPos(0), m_hadNote(0), m_hearPlayb(-1), m_sx(NULL), m_sxBytes(0)
-	, m_division(480), m_sampleRate(44100), m_lastPlayb(-1)
+	, m_division(480), m_sampleRate(44100), m_loopStartSample(0), m_loopEndSample(0), m_lastPlayb(-1)
 	, m_usecQn(500000), m_tsNum(4), m_tsDen(4), m_keySf(0), m_keyMin(0), m_transpose(0)
 	, m_sysMode(0), m_revType(4), m_choType(2), m_varType(0), m_revPacked(0), m_choPacked(0), m_varPacked(0), m_varConn(1), m_ins1(0), m_ins2(0), m_ins3(0), m_ins4(0), m_dlyType(0)
 	, m_noteCount(0), m_masterVol(100)
@@ -1704,6 +1704,8 @@ void CMidiMonitorDlg::UnloadMidi()
 	m_evCount = m_evPos = 0;
 	m_hadNote = 0;
 	m_sxBytes = 0;
+	m_loopStartSample = 0;
+	m_loopEndSample = 0;
 	m_loadedPath[0] = 0;
 	m_titleBuf[0] = 0;
 	m_gsMapKind = 0;
@@ -2744,6 +2746,22 @@ void CMidiMonitorDlg::LoadCurrentMidi()
 		m_part[i].heard = chUse[i];
 	MarkHostOccupiedParts();
 	delete[] data;
+	m_loopStartSample = 0;
+	m_loopEndSample = 0;
+	{
+		__int64 ccS = 0, ccE = 0;
+		for (int i = 0; i < count; ++i) {
+			if ((ev[i].msg & 0xf0) != 0xb0) continue;
+			if (((ev[i].msg >> 8) & 0x7f) != 111) continue;
+			const int v = (int)((ev[i].msg >> 16) & 0x7f);
+			if (v == 0) ccS = ev[i].sample;
+			else ccE = ev[i].sample;
+		}
+		if (ccE > ccS) {
+			m_loopStartSample = ccS;
+			m_loopEndSample = ccE;
+		}
+	}
 	m_lastPlayb = -1;
 	m_evPos = 0;
 	m_hadNote = 0;
@@ -2953,7 +2971,30 @@ void CMidiMonitorDlg::SyncFromPlayback()
 		if (pbRaw < 0) pbRaw = 0;
 		if (pbHeard < 0) pbHeard = 0;
 	}
-	if (pbRaw < m_lastPlayb) {
+	if (m_loopEndSample > m_loopStartSample) {
+		const __int64 ls = m_loopStartSample;
+		const __int64 le = m_loopEndSample;
+		const __int64 span = le - ls;
+		auto wrapFwd = [&](__int64 s) -> __int64 {
+			if (s <= le) return s;
+			if (span <= 0) return ls;
+			return ls + ((s - le - 1) % span);
+		};
+		pbRaw = wrapFwd(pbRaw);
+		pbHeard = wrapFwd(pbHeard);
+		if (pbRaw >= ls && pbHeard < ls) {
+			const __int64 behind = ls - pbHeard;
+			pbHeard = le - ((behind - 1) % span);
+			if (pbHeard < ls) pbHeard = ls;
+		}
+	}
+	ExtrapolateHeard(pbHeard);
+	if (m_loopEndSample > m_loopStartSample && pbHeard > m_loopEndSample) {
+		const __int64 span = m_loopEndSample - m_loopStartSample;
+		if (span > 0)
+			pbHeard = m_loopStartSample + ((pbHeard - m_loopEndSample - 1) % span);
+	}
+	if (pbRaw < m_lastPlayb || (m_hearPlayb >= 0 && pbHeard < m_hearPlayb)) {
 		ResetParts();
 		m_evPos = 0;
 		m_hadNote = 0;
@@ -2961,7 +3002,6 @@ void CMidiMonitorDlg::SyncFromPlayback()
 		m_pbQpc = 0;
 	}
 	m_lastPlayb = pbRaw;
-	ExtrapolateHeard(pbHeard);
 	m_hearPlayb = pbHeard;
 
 	m_burstApply = 0;

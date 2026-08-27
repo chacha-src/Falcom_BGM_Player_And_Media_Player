@@ -1,4 +1,4 @@
-﻿// PlayList.cpp : 実装ファイル
+// PlayList.cpp : 実装ファイル
 //
 
 #include "stdafx.h"
@@ -21,6 +21,7 @@
 #include "PluginKinds.h"
 #include "VstMidiEngine.h"
 #include "PluginAimp.h"
+#include "kb_sasami/source/sasami_midi.h"
 #include "mp3image.h"
 #include "CMidiMonitorDlg.h"
 #include "CMediaPlayerDlg.h"
@@ -109,6 +110,7 @@ extern 	CString kpif[400];
 extern  BOOL kpichk[200];
 extern 	int kpicnt;
 extern BYTE plugkind[150];
+extern BYTE kpiarch[150];
 extern CString ext[150][300];
 extern BYTE kvar[150][300];
 extern COggDlg *og;
@@ -10875,6 +10877,58 @@ void CPlayList::plugs(CString fff, playlistdata *p,TCHAR* kpi, BYTE& kv)
 			return;
 		}
 	}
+	if (p && SasamiPathIsMidi(fff)) {
+		// KPI MIDI: SMF 化して kbfmmidi に渡さない。kbsasami が programs.txt の fmmidi 音色で鳴らす。
+		// 同梱の 64bit kbfmmidi は依存 DLL 不足で KpiHost64 が開けない。
+		CString wantExt = fff.Right(fff.GetLength() - fff.ReverseFind(L'.'));
+		wantExt.MakeLower();
+		int pick = -1;
+		BYTE kvS = 0;
+		for (int i = 0; i < kpicnt; i++) {
+			if (plugkind[i] != PLUGKIND_KPI || kpichk[i] != 1) continue;
+			int hit = 0;
+			BYTE kvHit = 0;
+			for (int j = 0;; j++) {
+				if (ext[i][j] == L"") break;
+				if (ext[i][j] == wantExt) {
+					hit = 1;
+					kvHit = kvar[i][j];
+					break;
+				}
+			}
+			if (!hit) continue;
+			if (pick < 0) {
+				pick = i;
+				kvS = kvHit;
+			}
+			if (kpiarch[i] != 64) {
+				pick = i;
+				kvS = kvHit;
+				break;
+			}
+		}
+		CString ftS = fff.Right(fff.GetLength() - fff.ReverseFind(L'\\') - 1);
+		if (pick >= 0) {
+			_tcscpy(p->fol, fff);
+			p->sub = -3;
+			_tcscpy(p->name, ftS);
+			p->alb[0] = 0; p->art[0] = 0; p->loop1 = p->loop2 = p->ret2 = 0;
+			if (kpi) _tcscpy(kpi, kpif[pick]);
+			kv = kvS;
+			return;
+		}
+		wchar_t midS[VST_PATH_CHARS];
+		midS[0] = 0;
+		if (SasamiConvertPathToMidiFile(fff, midS, VST_PATH_CHARS)) {
+			_tcscpy(p->fol, fff);
+			p->sub = MODE_VST_MIDI;
+			_tcscpy(p->name, ftS);
+			p->alb[0] = 0; p->art[0] = 0; p->loop1 = p->loop2 = p->ret2 = 0;
+			if (kpi) _tcscpy(kpi, midS);
+			kv = 0;
+			return;
+		}
+	}
 	if (IsDougaVideoFile(fff)) {
 		if (kpi)
 			kpi[0] = 0;
@@ -10887,6 +10941,8 @@ void CPlayList::plugs(CString fff, playlistdata *p,TCHAR* kpi, BYTE& kv)
 	int flg=0;
 	for(int i=0;i<kpicnt;i++){
 		if (plugkind[i] != PLUGKIND_KPI) continue;
+		CString fileExt = fff.Right(fff.GetLength()-fff.ReverseFind('.')); fileExt.MakeLower();
+		if (fileExt == L".mpy" || fileExt == L".mpw2") continue;
 		for(int j=0;;j++){
 			if(ext[i][j]=="") break;
 			ss=fff.Right(fff.GetLength()-fff.ReverseFind('.'));ss.MakeLower();

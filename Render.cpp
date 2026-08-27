@@ -15,6 +15,7 @@
 #include "XfadePlayback.h"
 #include "AudioDevSync.h"
 #include "VstMidiEngine.h"
+#include "KpiV5ConfigStore.h"
 #include <mutex>
 #include <mmdeviceapi.h>
 #include <FunctionDiscoveryKeys_devpkey.h>
@@ -1362,6 +1363,7 @@ void CRender::OnMidPreferKpi()
 	savedata.midPlayPrefer = 0;
 	m_midPreferKpi.SetCheck(BST_CHECKED);
 	m_midPreferVst.SetCheck(BST_UNCHECKED);
+	KpiV5SyncKbsasamiOptions(savedata.midPlayPrefer);
 	extern CPlayList* pl;
 	if (pl) pl->RefreshMidiPlayModes();
 }
@@ -1371,6 +1373,7 @@ void CRender::OnMidPreferVst()
 	savedata.midPlayPrefer = 1; // 1=VST。リストは MID(VST) へ。再生中は次曲から
 	m_midPreferKpi.SetCheck(BST_UNCHECKED);
 	m_midPreferVst.SetCheck(BST_CHECKED);
+	KpiV5SyncKbsasamiOptions(savedata.midPlayPrefer);
 	extern CPlayList* pl;
 	if (pl) pl->RefreshMidiPlayModes();
 }

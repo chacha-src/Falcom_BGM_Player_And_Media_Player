@@ -369,6 +369,12 @@
     <ClCompile Include="kpi.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="kb_sasami\source\sasami_file.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="kb_sasami\source\sasami_midi.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="KpiV5ConfigDlg.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
