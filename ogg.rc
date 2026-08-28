@@ -1,4 +1,4 @@
-// Microsoft Visual C++ generated resource script.
+﻿// Microsoft Visual C++ generated resource script.
 //
 #pragma code_page(65001)
 
@@ -356,6 +356,18 @@ IDR_S3TEX_M_BRICK2      RCDATA                  "res\\s3tex\\m_brick2.png"
 IDR_S3TEX_R_ENV2        RCDATA                  "res\\s3tex\\r_env2.png"
 
 IDR_S3TEX_M_ENV         RCDATA                  "res\\s3tex\\m_env.png"
+
+IDR_S3TEX_R_SKY3        RCDATA                  "res\\s3tex\\r_sky3.png"
+
+IDR_S3TEX_R_SKY4        RCDATA                  "res\\s3tex\\r_sky4.png"
+
+IDR_S3TEX_M_SKY         RCDATA                  "res\\s3tex\\m_sky.png"
+
+IDR_S3TEX_M_SKY2        RCDATA                  "res\\s3tex\\m_sky2.png"
+
+IDR_S3TEX_R_WATER_D     RCDATA                  "res\\s3tex\\r_water_d.png"
+
+IDR_S3TEX_R_OBS_D       RCDATA                  "res\\s3tex\\r_obs_d.png"
 
 
 /////////////////////////////////////////////////////////////////////////////
@@ -1698,7 +1710,7 @@ END
 
 IDD_SOFT3DRACE DIALOGEX 0, 0, 560, 390
 STYLE DS_SETFONT | DS_FIXEDSYS | WS_MINIMIZEBOX | WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME
-CAPTION "Soft3D Race"
+CAPTION "Aerial Race"
 FONT 8, "MS Shell Dlg", 400, 0, 0x1
 BEGIN
     PUSHBUTTON      "?",IDC_S3R_HELP,528,2,24,16
@@ -1726,7 +1738,7 @@ END
 
 IDD_S3R_HELP DIALOGEX 0, 0, 560, 420
 STYLE DS_SETFONT | DS_FIXEDSYS | WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME
-CAPTION "Soft3D Race Guide"
+CAPTION "Aerial Race Guide"
 FONT 8, "MS Shell Dlg", 400, 0, 0x1
 BEGIN
     DEFPUSHBUTTON   "Close",IDOK,246,392,68,18
@@ -1734,7 +1746,7 @@ END
 
 IDD_SOFT3DMAZE DIALOGEX 0, 0, 520, 380
 STYLE DS_SETFONT | DS_FIXEDSYS | WS_MINIMIZEBOX | WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME
-CAPTION "Soft3D 迷路"
+CAPTION "迷路"
 FONT 8, "MS Shell Dlg", 400, 0, 0x1
 BEGIN
     PUSHBUTTON      "?",IDC_S3M_HELP,488,2,24,16
@@ -1756,7 +1768,7 @@ END
 
 IDD_S3M_HELP DIALOGEX 0, 0, 560, 520
 STYLE DS_SETFONT | DS_FIXEDSYS | WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME
-CAPTION "Soft3D迷路ガイド"
+CAPTION "迷路ガイド"
 FONT 8, "MS Shell Dlg", 400, 0, 0x1
 BEGIN
     DEFPUSHBUTTON   "閉じる",IDOK,246,492,68,18

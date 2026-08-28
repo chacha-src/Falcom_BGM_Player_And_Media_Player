@@ -73,6 +73,7 @@ public:
 	ID3D11PixelShader* m_psWall;
 	ID3D11VertexShader* m_vsSolid;
 	ID3D11PixelShader* m_psSolid;
+	ID3D11PixelShader* m_psCloud; // 雲・VFXビルボード（安価）
 	ID3D11VertexShader* m_vsHud;
 	ID3D11PixelShader* m_psHud;
 	ID3D11PixelShader* m_psHudLine;
@@ -120,6 +121,10 @@ public:
 	ID3D11ShaderResourceView* m_srvGlass;
 	ID3D11Texture2D* m_texBrick2;
 	ID3D11ShaderResourceView* m_srvBrick2;
+	ID3D11Texture2D* m_texSky;
+	ID3D11ShaderResourceView* m_srvSky;
+	ID3D11Texture2D* m_texSky2;
+	ID3D11ShaderResourceView* m_srvSky2;
 	ID3D11Texture2D* m_texClear;
 	ID3D11ShaderResourceView* m_srvClear;
 	int m_clearTexW, m_clearTexH;
@@ -192,6 +197,7 @@ protected:
 	CPoint m_dragOrigin;
 	int m_dragging;
 	int m_dragTurnAcc;
+	int m_dragDidTurn; // ドラッグで旋回した場合、クリック移動はしない
 	DECLARE_MESSAGE_MAP()
 };
 
@@ -287,14 +293,30 @@ protected:
 	void FreeGrid();
 	BOOL AllocGrid(int n, int nFloors);
 	void BindFloor(int f);
+	int GridOk(int f, int x, int z) const {
+		return (m_n > 0 && f >= 0 && f < m_nFloors && x >= 0 && z >= 0 && x < m_n && z < m_n
+			&& m_grids[f] && m_visits[f]) ? 1 : 0;
+	}
 	BYTE& Cell(int x, int z) { return m_grids[m_floor][(size_t)z * (size_t)m_n + (size_t)x]; }
-	BYTE CellAt(int x, int z) const { return m_grids[m_floor][(size_t)z * (size_t)m_n + (size_t)x]; }
+	BYTE CellAt(int x, int z) const {
+		if (!GridOk(m_floor, x, z)) return (BYTE)CELL_WALL;
+		return m_grids[m_floor][(size_t)z * (size_t)m_n + (size_t)x];
+	}
 	BYTE& Visit(int x, int z) { return m_visits[m_floor][(size_t)z * (size_t)m_n + (size_t)x]; }
-	BYTE VisitAt(int x, int z) const { return m_visits[m_floor][(size_t)z * (size_t)m_n + (size_t)x]; }
+	BYTE VisitAt(int x, int z) const {
+		if (!GridOk(m_floor, x, z)) return 0;
+		return m_visits[m_floor][(size_t)z * (size_t)m_n + (size_t)x];
+	}
 	BYTE& CellF(int f, int x, int z) { return m_grids[f][(size_t)z * (size_t)m_n + (size_t)x]; }
-	BYTE CellAtF(int f, int x, int z) const { return m_grids[f][(size_t)z * (size_t)m_n + (size_t)x]; }
+	BYTE CellAtF(int f, int x, int z) const {
+		if (!GridOk(f, x, z)) return (BYTE)CELL_WALL;
+		return m_grids[f][(size_t)z * (size_t)m_n + (size_t)x];
+	}
 	BYTE& VisitF(int f, int x, int z) { return m_visits[f][(size_t)z * (size_t)m_n + (size_t)x]; }
-	BYTE VisitAtF(int f, int x, int z) const { return m_visits[f][(size_t)z * (size_t)m_n + (size_t)x]; }
+	BYTE VisitAtF(int f, int x, int z) const {
+		if (!GridOk(f, x, z)) return 0;
+		return m_visits[f][(size_t)z * (size_t)m_n + (size_t)x];
+	}
 	int ReadSizeFromUi();
 	void SetSizeToUi(int n);
 	int ReadBasementsFromUi();
@@ -335,6 +357,9 @@ protected:
 	void ResetPortalFx();
 	void BeginPortalWarp(int toX, int toZ);
 	void TickPortalFx(float dt);
+	void SpawnFxBurst(int kind, float x, float y, float z, float nx, float ny, float nz, int count, float speed, float r, float g, float b);
+	void TickFx(float dt);
+	void PulseEventFlash(float r, float g, float b, float a);
 	BOOL EnsureGoalReachable();
 	void ClearNavPath();
 	BOOL ComputeNavHint();
@@ -392,7 +417,9 @@ public:
 	float OverviewBaseSide(int viewW, int viewH) const;
 	virtual BOOL OnInitDialog();
 	virtual void OnOK() {}
-	virtual void OnCancel() { DestroyWindow(); }
+	virtual void OnCancel() { RequestDestroyWindow(); }
+	void RequestDestroyWindow();
+	afx_msg void OnClose();
 	afx_msg void OnGen();
 	afx_msg void OnNavi();
 	afx_msg void OnCloseBtn();
@@ -470,6 +497,24 @@ public:
 	int m_iceSlideLeft;
 	float m_stepFromX, m_stepFromZ;
 	float m_darkT;
+	float m_eventFlashA, m_eventFlashR, m_eventFlashG, m_eventFlashB;
+	enum {
+		S3M_FX_N = 160,
+		FX_SPARK = 0,
+		FX_PICK = 1,
+		FX_SMOKE = 2,
+		FX_EMBER = 3,
+		FX_DUST = 4
+	};
+	struct S3mFx {
+		float x, y, z;
+		float vx, vy, vz;
+		float life, lifeMax, size;
+		float r, g, b;
+		int kind;
+	};
+	S3mFx m_fx[S3M_FX_N];
+	int m_fxCursor;
 	int m_portalFx;
 	float m_portalFxT;
 	float m_portalToX, m_portalToZ;

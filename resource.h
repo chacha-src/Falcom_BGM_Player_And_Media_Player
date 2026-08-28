@@ -330,6 +330,12 @@
 #define IDR_S3TEX_M_BRICK2              328
 #define IDR_S3TEX_R_ENV2                329
 #define IDR_S3TEX_M_ENV                 330
+#define IDR_S3TEX_R_SKY3                331
+#define IDR_S3TEX_R_SKY4                332
+#define IDR_S3TEX_M_SKY                 333
+#define IDR_S3TEX_M_SKY2                334
+#define IDR_S3TEX_R_WATER_D             335
+#define IDR_S3TEX_R_OBS_D               336
 #define IDC_STATIC11                    1000
 #define IDC_BUTTON1                     1001
 #define IDC_BUTTON5                     1002

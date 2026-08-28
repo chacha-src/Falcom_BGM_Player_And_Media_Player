@@ -115,21 +115,21 @@
 		<param name="Name" value="bonus">
 		<param name="Name" value="English: The bonus games">
 		<param name="Local" value="en\games.htm">
-		<param name="Name" value="English: Bonus: the Soft3D maze">
+		<param name="Name" value="English: Bonus: the maze">
 		<param name="Local" value="en\maze.htm">
-		<param name="Name" value="English: Bonus: the Soft3D aerial race">
+		<param name="Name" value="English: Bonus: the aerial race">
 		<param name="Local" value="en\race.htm">
 		<param name="Name" value="English: The photo frame">
 		<param name="Local" value="en\photoframe.htm">
 		</OBJECT>
 	<LI> <OBJECT type="text/sitemap">
-		<param name="Name" value="Bonus: the Soft3D aerial race">
-		<param name="Name" value="English: Bonus: the Soft3D aerial race">
+		<param name="Name" value="Bonus: the aerial race">
+		<param name="Name" value="English: Bonus: the aerial race">
 		<param name="Local" value="en\race.htm">
 		</OBJECT>
 	<LI> <OBJECT type="text/sitemap">
-		<param name="Name" value="Bonus: the Soft3D maze">
-		<param name="Name" value="English: Bonus: the Soft3D maze">
+		<param name="Name" value="Bonus: the maze">
+		<param name="Name" value="English: Bonus: the maze">
 		<param name="Local" value="en\maze.htm">
 		</OBJECT>
 	<LI> <OBJECT type="text/sitemap">
@@ -327,13 +327,13 @@
 		</OBJECT>
 	<LI> <OBJECT type="text/sitemap">
 		<param name="Name" value="DirectX 11">
-		<param name="Name" value="日本語: おまけ：Soft3D迷路">
+		<param name="Name" value="日本語: おまけ：迷路">
 		<param name="Local" value="ja\maze.htm">
-		<param name="Name" value="English: Bonus: the Soft3D maze">
+		<param name="Name" value="English: Bonus: the maze">
 		<param name="Local" value="en\maze.htm">
-		<param name="Name" value="日本語: おまけ：Soft3D空中レース">
+		<param name="Name" value="日本語: おまけ：空中レース">
 		<param name="Local" value="ja\race.htm">
-		<param name="Name" value="English: Bonus: the Soft3D aerial race">
+		<param name="Name" value="English: Bonus: the aerial race">
 		<param name="Local" value="en\race.htm">
 		<param name="Name" value="日本語: おまけのお遊び">
 		<param name="Local" value="ja\games.htm">
@@ -764,7 +764,7 @@
 		</OBJECT>
 	<LI> <OBJECT type="text/sitemap">
 		<param name="Name" value="maze">
-		<param name="Name" value="English: Bonus: the Soft3D maze">
+		<param name="Name" value="English: Bonus: the maze">
 		<param name="Local" value="en\maze.htm">
 		<param name="Name" value="English: The bonus games">
 		<param name="Local" value="en\games.htm">
@@ -1100,7 +1100,7 @@
 		</OBJECT>
 	<LI> <OBJECT type="text/sitemap">
 		<param name="Name" value="race">
-		<param name="Name" value="English: Bonus: the Soft3D aerial race">
+		<param name="Name" value="English: Bonus: the aerial race">
 		<param name="Local" value="en\race.htm">
 		<param name="Name" value="English: The bonus games">
 		<param name="Local" value="en\games.htm">
@@ -1293,7 +1293,7 @@
 		<param name="Local" value="en\midi-monitor.htm">
 		<param name="Name" value="English: Seeing the music on a piano roll">
 		<param name="Local" value="en\pianoroll.htm">
-		<param name="Name" value="English: Bonus: the Soft3D maze">
+		<param name="Name" value="English: Bonus: the maze">
 		<param name="Local" value="en\maze.htm">
 		</OBJECT>
 	<LI> <OBJECT type="text/sitemap">
@@ -1302,14 +1302,6 @@
 		<param name="Local" value="ja\midi-monitor.htm">
 		<param name="Name" value="English: MIDI monitor">
 		<param name="Local" value="en\midi-monitor.htm">
-		<param name="Name" value="日本語: おまけ：Soft3D迷路">
-		<param name="Local" value="ja\maze.htm">
-		<param name="Name" value="English: Bonus: the Soft3D maze">
-		<param name="Local" value="en\maze.htm">
-		<param name="Name" value="日本語: おまけ：Soft3D空中レース">
-		<param name="Local" value="ja\race.htm">
-		<param name="Name" value="English: Bonus: the Soft3D aerial race">
-		<param name="Local" value="en\race.htm">
 		<param name="Name" value="日本語: ピアノロールで音を見る">
 		<param name="Local" value="ja\pianoroll.htm">
 		<param name="Name" value="English: Seeing the music on a piano roll">
@@ -1680,9 +1672,9 @@
 		<param name="Name" value="おまけ">
 		<param name="Name" value="日本語: おまけのお遊び">
 		<param name="Local" value="ja\games.htm">
-		<param name="Name" value="日本語: おまけ：Soft3D迷路">
+		<param name="Name" value="日本語: おまけ：迷路">
 		<param name="Local" value="ja\maze.htm">
-		<param name="Name" value="日本語: おまけ：Soft3D空中レース">
+		<param name="Name" value="日本語: おまけ：空中レース">
 		<param name="Local" value="ja\race.htm">
 		<param name="Name" value="日本語: フォトフレーム">
 		<param name="Local" value="ja\photoframe.htm">
@@ -1693,13 +1685,13 @@
 		<param name="Local" value="ja\games.htm">
 		</OBJECT>
 	<LI> <OBJECT type="text/sitemap">
-		<param name="Name" value="おまけ：Soft3D空中レース">
-		<param name="Name" value="日本語: おまけ：Soft3D空中レース">
+		<param name="Name" value="おまけ：空中レース">
+		<param name="Name" value="日本語: おまけ：空中レース">
 		<param name="Local" value="ja\race.htm">
 		</OBJECT>
 	<LI> <OBJECT type="text/sitemap">
-		<param name="Name" value="おまけ：Soft3D迷路">
-		<param name="Name" value="日本語: おまけ：Soft3D迷路">
+		<param name="Name" value="おまけ：迷路">
+		<param name="Name" value="日本語: おまけ：迷路">
 		<param name="Local" value="ja\maze.htm">
 		</OBJECT>
 	<LI> <OBJECT type="text/sitemap">
@@ -2219,7 +2211,7 @@
 		</OBJECT>
 	<LI> <OBJECT type="text/sitemap">
 		<param name="Name" value="レース">
-		<param name="Name" value="日本語: おまけ：Soft3D空中レース">
+		<param name="Name" value="日本語: おまけ：空中レース">
 		<param name="Local" value="ja\race.htm">
 		<param name="Name" value="日本語: おまけのお遊び">
 		<param name="Local" value="ja\games.htm">
@@ -2456,7 +2448,7 @@
 		<param name="Local" value="ja\midi-monitor.htm">
 		<param name="Name" value="日本語: ピアノロールで音を見る">
 		<param name="Local" value="ja\pianoroll.htm">
-		<param name="Name" value="日本語: おまけ：Soft3D迷路">
+		<param name="Name" value="日本語: おまけ：迷路">
 		<param name="Local" value="ja\maze.htm">
 		</OBJECT>
 	<LI> <OBJECT type="text/sitemap">
@@ -2493,7 +2485,7 @@
 		</OBJECT>
 	<LI> <OBJECT type="text/sitemap">
 		<param name="Name" value="迷路">
-		<param name="Name" value="日本語: おまけ：Soft3D迷路">
+		<param name="Name" value="日本語: おまけ：迷路">
 		<param name="Local" value="ja\maze.htm">
 		<param name="Name" value="日本語: おまけのお遊び">
 		<param name="Local" value="ja\games.htm">

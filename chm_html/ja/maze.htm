@@ -1,29 +1,33 @@
-<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+﻿<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
 <html>
 <head>
 <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
-<title>おまけ：Soft3D迷路</title>
+<title>おまけ：迷路</title>
 <link rel="stylesheet" type="text/css" href="../css/help.css">
 </head>
 <body>
 
 <div class="topnav"><a href="index.htm">目次</a> &nbsp;|&nbsp; <a href="../en/maze.htm">English</a></div>
 
-<h1>おまけ：Soft3D迷路</h1>
+<h1>おまけ：迷路</h1>
 
 <p class="lead">メディアプレイヤー下段の「迷路」ボタンから開ける、DirectX 11 の一人称迷路です。BGMを聴きながらの息抜き用で、本編の再生機能とは別枠のおまけです。進んだところは自動で保存されるので、開き直すと続きから遊べます。</p>
 <div class="shot">
-<img src="../img/maze.png" alt="Soft3D 迷路">
-<p class="cap">Soft3D 迷路</p>
+<img src="../img/maze.png" alt="迷路">
+<p class="cap">迷路</p>
 </div>
 <h2>操作</h2>
 <table class="grid">
 <tr><th>操作</th><th>働き</th></tr>
-<tr><td><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> / 矢印</td><td>移動</td></tr>
-<tr><td><kbd>Q</kbd> / <kbd>E</kbd>（または <kbd>←</kbd><kbd>→</kbd>）</td><td>旋回</td></tr>
+<tr><td><kbd>W</kbd><kbd>S</kbd> / <kbd>↑</kbd><kbd>↓</kbd></td><td>前後に移動</td></tr>
+<tr><td><kbd>A</kbd><kbd>D</kbd> / <kbd>Shift</kbd>+<kbd>←</kbd><kbd>→</kbd></td><td>横移動（ストレイフ）</td></tr>
+<tr><td><kbd>Q</kbd><kbd>E</kbd> / <kbd>←</kbd><kbd>→</kbd></td><td>旋回</td></tr>
+<tr><td>画面クリック（上下／左右）</td><td>前後／横移動。左右ドラッグで旋回</td></tr>
+<tr><td>パッド左スティック・十字</td><td>前後と横移動</td></tr>
+<tr><td>パッド右スティック / LB·RB</td><td>旋回</td></tr>
 <tr><td><kbd>SPACE</kbd> / ホイールクリック</td><td>全体マップの切り替え</td></tr>
 <tr><td>右クリック</td><td>サイズの再生成、ミニマップ、アイテムの種類など</td></tr>
-<tr><td><kbd>?</kbd> ヘルプ</td><td>Soft3D と説明の凡例表</td></tr>
+<tr><td><kbd>?</kbd> ヘルプ</td><td>見た目と説明の凡例表</td></tr>
 </table>
 <h2>マップの見かた</h2>
 <ul>
@@ -36,7 +40,7 @@
 <h2>地下へ潜る</h2>
 <p>「地下」のコンボで、地下0〜3階までを作れます。</p>
 <ul>
-<li>壁と床のモチーフは階ごとに変わります。地上はレンガに草木、B1は湿った石、B2は錆びた金属、B3は火山岩です。いずれもライセンスフリーの写真テクスチャ50枚（テーマ＋細部、アイテム／ギミック／ガラス、512）をexeに埋め込んでいます（別ファイルは不要です）。地下は室内キューブと照明で壁が見える明るさにし、反射と乱反射があります。</li>
+<li>壁と床のモチーフは階ごとに変わります。地上はレンガに草木、B1は湿った石、B2は錆びた金属、B3は火山岩です。いずれもライセンスフリーの写真テクスチャ56枚（テーマ＋細部、雲カード、アイテム／ギミック／ガラス、512）をexeに埋め込んでいます（別ファイルは不要です）。地下は室内キューブと照明で壁が見える明るさにし、反射と乱反射があります。</li>
 <li><b>橙色の階段</b>が下り、<b>水色の階段</b>が上りです。斜め2マスで移動します。</li>
 <li>半透明のトラップ（粘液・棘・氷・闇）や窓・鏡にも、上に小さなラベルが出ます。ワープはしません。</li>
 <li>古いセーブで階段が同じマスに重なっている場合は、自動で作り直されます。</li>
@@ -55,13 +59,13 @@
 <p>テンポやピッチをいじりすぎて元に戻したくなったら、右クリックの「テンポ／ピッチを開いた時に戻す」を使ってください。迷路を開いた時点の値に戻ります。</p>
 </div>
 <div class="note"><span class="label">注意</span>
-<p><a href="race.htm">おまけ：Soft3D空中レース</a> と同時には開けません。「DirectX 11 の初期化に失敗しました」と出る場合は、グラフィックドライバを更新してみてください。</p>
+<p><a href="race.htm">おまけ：空中レース</a> と同時には開けません。「DirectX 11 の初期化に失敗しました」と出る場合は、グラフィックドライバを更新してみてください。</p>
 </div>
-<div class="related"><span class="label">あわせて読みたい</span><ul><li><a href="race.htm">おまけ：Soft3D空中レース</a></li><li><a href="games.htm">おまけのお遊び</a></li><li><a href="tempo-pitch.htm">テンポとピッチを変える</a></li><li><a href="eq.htm">イコライザーと環境モデル</a></li><li><a href="help-buttons.htm">各画面の「？」操作ガイド</a></li></ul></div>
+<div class="related"><span class="label">あわせて読みたい</span><ul><li><a href="race.htm">おまけ：空中レース</a></li><li><a href="games.htm">おまけのお遊び</a></li><li><a href="tempo-pitch.htm">テンポとピッチを変える</a></li><li><a href="eq.htm">イコライザーと環境モデル</a></li><li><a href="help-buttons.htm">各画面の「？」操作ガイド</a></li></ul></div>
 
 <div class="botnav">
 <span class="prev">&#171; 前へ: <a href="games.htm">おまけのお遊び</a></span>
-<span class="next">次へ: <a href="race.htm">おまけ：Soft3D空中レース</a> &#187;</span>
+<span class="next">次へ: <a href="race.htm">おまけ：空中レース</a> &#187;</span>
 <span class="up"><a href="index.htm">目次</a></span>
 <div class="clear"></div>
 </div>

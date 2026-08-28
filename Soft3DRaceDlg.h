@@ -64,6 +64,19 @@ public:
 	ID3D11DepthStencilView* m_shadowDsv;
 	ID3D11ShaderResourceView* m_shadowSrv;
 	enum { S3R_SHADOW_SIZE = 1024 };
+	// バックミラー／水面反射用の小RT
+	enum { S3R_REAR_W = 320, S3R_REAR_H = 180, S3R_REFLECT_SIZE = 384 };
+	ID3D11Texture2D* m_rearTex;
+	ID3D11RenderTargetView* m_rearRtv;
+	ID3D11ShaderResourceView* m_srvRear;
+	ID3D11Texture2D* m_rearDs;
+	ID3D11DepthStencilView* m_rearDsv;
+	ID3D11Texture2D* m_reflectTex;
+	ID3D11RenderTargetView* m_reflectRtv;
+	ID3D11ShaderResourceView* m_srvReflect;
+	ID3D11Texture2D* m_reflectDs;
+	ID3D11DepthStencilView* m_reflectDsv;
+	BOOL EnsureAuxTargets();
 
 	ID3D11VertexShader* m_vsTess;
 	ID3D11HullShader* m_hsTess;
@@ -72,6 +85,8 @@ public:
 	ID3D11VertexShader* m_vsSolid;
 	ID3D11VertexShader* m_vsInst; // 機体・障害の GPU インスタンス
 	ID3D11PixelShader* m_psSolid;
+	ID3D11PixelShader* m_psCloud; // 雲カード専用（影・fbmなし）
+	ID3D11PixelShader* m_psWater; // 水面＋平面反射
 	ID3D11PixelShader* m_psTerr; // 地形専用（傾斜・河川・テーマ着色）
 	ID3D11PixelShader* m_psCraft; // 機体専用（キャラテクスチャ）
 	ID3D11VertexShader* m_vsHud;
@@ -130,8 +145,12 @@ public:
 	ID3D11ShaderResourceView* m_srvBand;
 	ID3D11Texture2D* m_texWater;
 	ID3D11ShaderResourceView* m_srvWater;
+	ID3D11Texture2D* m_texWaterD;
+	ID3D11ShaderResourceView* m_srvWaterD;
 	ID3D11Texture2D* m_texObs;
 	ID3D11ShaderResourceView* m_srvObs;
+	ID3D11Texture2D* m_texObsD;
+	ID3D11ShaderResourceView* m_srvObsD;
 	ID3D11Texture2D* m_texEnv;
 	ID3D11ShaderResourceView* m_srvEnv;
 	ID3D11Texture2D* m_texEnv2;
@@ -140,6 +159,10 @@ public:
 	ID3D11ShaderResourceView* m_srvSky;
 	ID3D11Texture2D* m_texSky2;
 	ID3D11ShaderResourceView* m_srvSky2;
+	ID3D11Texture2D* m_texSky3;
+	ID3D11ShaderResourceView* m_srvSky3;
+	ID3D11Texture2D* m_texSky4;
+	ID3D11ShaderResourceView* m_srvSky4;
 	ID3D11Texture2D* m_texItem;
 	ID3D11ShaderResourceView* m_srvItem;
 	ID3D11Texture2D* m_texWood;
@@ -153,6 +176,9 @@ public:
 	ID3D11Texture2D* m_texHud;
 	ID3D11ShaderResourceView* m_srvHud;
 	int m_hudTexW, m_hudTexH;
+	ID3D11Texture2D* m_texGauge;
+	ID3D11ShaderResourceView* m_srvGauge;
+	int m_gaugeTexW, m_gaugeTexH;
 	ID3D11Texture2D* m_texStand;
 	ID3D11ShaderResourceView* m_srvStand;
 	int m_standTexW, m_standTexH;
@@ -189,6 +215,8 @@ public:
 	void ReleaseClearTexture();
 	BOOL BakeHudTexture(const wchar_t* text);
 	void ReleaseHudTexture();
+	BOOL BakeGaugeTexture(float kmh, float rpm01);
+	void ReleaseGaugeTexture();
 	struct S3rStandRow {
 		wchar_t name[16];
 		int rank;
@@ -199,7 +227,7 @@ public:
 		float lapSec[4];
 		int retired;
 	};
-	BOOL BakeStandingsTexture(const S3rStandRow* rows, int nRows);
+	BOOL BakeStandingsTexture(const S3rStandRow* rows, int nRows, int nitroStock, int nitroMax, float nitroPulse);
 	void ReleaseStandingsTexture();
 	struct S3rBubbleRow {
 		wchar_t text[40];
@@ -238,7 +266,14 @@ public:
 	enum { IDD = IDD_SOFT3DRACE };
 	enum {
 		S3R_MAX_CRAFT = 12,
+		S3R_NITRO_MAX = 5,
 		S3R_BLAST_N = 72,
+		S3R_FX_N = 240,
+		FX_SPARK = 0,
+		FX_SMOKE = 1,
+		FX_DUST = 2,
+		FX_PICK = 3,
+		FX_EMBER = 4,
 		S3R_MAX_OBS = 640,
 		S3R_MAX_ITEMS = 64,
 		S3R_SPLINE_MAX = 96,
@@ -362,6 +397,7 @@ protected:
 	void BakeStaticMeshes();
 	void RenderScene();
 	void EnsureHudBake();
+	void EnsureGaugeBake();
 	void EnsureStandingsBake();
 
 	void SplinePoint(float t, float& x, float& y, float& z) const;
@@ -380,6 +416,7 @@ protected:
 	float BandSpeedFactor(float lat, float vert) const; // 帯横軸中央=最大、上下オフセットで減速
 	float PathArcBetween(float t0, float t1) const;
 	float GroundY(float x, float z) const;
+	float RawGroundY(float x, float z) const;
 	float EffectiveLaps() const;
 	float CourseScale() const;
 	int EffectiveTheme() const;
@@ -390,7 +427,11 @@ public:
 	void TickFrame();
 	void InputAccel(BOOL on) { m_accelHeld = on ? 1 : 0; }
 	void InputBrake(BOOL on) { m_brakeHeld = on ? 1 : 0; }
-	void InputLookback(BOOL on) { m_lookback = on ? 1 : 0; }
+	void InputLookback(BOOL on) {
+		const int want = on ? 1 : 0;
+		if (want != m_lookback) m_camSmoothInit = 0; // トンネル補間を即座に切り替える
+		m_lookback = want;
+	}
 	void InputSteerDelta(float dyaw, float dpitch); // マウス: 自機の向き
 	void InputCameraDelta(float dyaw, float dpitch); // パッド右スティック等: 追従カメラオフセット
 	void InputZoom(int dir);
@@ -428,6 +469,8 @@ public:
 		float yaw, pitch;
 		float vx, vy, vz;
 		float fuel, hp;
+		float throttle; // 0..1 ペダル（平滑）
+		float rpm;      // 0..1 アイドル〜レッドゾーン
 		float pathT;
 		float lapProgress;
 		int lap;
@@ -436,8 +479,14 @@ public:
 		int isPlayer;
 		int colorIdx;
 		float boostT, slowT, agilityT, fogT, dofT, flashT;
+		float nitroT;   // ニトロ発動中の残り秒
+		int nitroStock; // 所持ニトロ数
 		float smokeT;
 		float explodeT; // 爆破演出残り秒
+		float dmgAccum; // 被弾累積（回復ゾーンでも減らさない）
+		float hitFlashT;
+		float fxEmitT;
+		float fxHitCool;
 		float bestLap;
 		float raceTime;
 		float finishTime;
@@ -445,6 +494,8 @@ public:
 		int retired; // 1=高速シミュでも到達できずリタイア
 		float aiSteerBias;
 		float aiSkill;
+		float aiWeaveAmp;   // ラインからの横・縦ゆらぎ（個体差）
+		float aiBrakeHabit; // カーブでブレーキする癖 0..1
 		// 帯上の最終位置（コースアウト復帰地点）
 		float chkX, chkY, chkZ;
 		float chkYaw, chkPitch;
@@ -454,6 +505,7 @@ public:
 		int offBand; // 1=帯外フリー走行中
 		float obsHitCool; // >0 の間は障害HPを重ねない（押し出しは毎フレ）
 		float craftHitCool; // >0 の間は機体接触HPを重ねない
+		float craftKnockT; // 接触ノック中はレールに戻さない
 		float aiCutT; // ショートカット合流目標 pathT（未使用時 -1）
 		float aiCutTimer;
 		float aiCutCool; // >0 の間は通常ライン走行（カット禁止・中央固定）
@@ -466,10 +518,26 @@ public:
 	int MaxAiRetire() const;
 	void SpawnBlast(float x, float y, float z);
 	void TickBlast(float dt);
+	void ApplyCraftDamage(S3rCraft& c, float dmg, int flash);
+	void SpawnFxBurst(int kind, float x, float y, float z, float nx, float ny, float nz, int count, float speed, float r, float g, float b);
+	void TickFx(float dt);
+	struct S3rFx {
+		float x, y, z;
+		float vx, vy, vz;
+		float life, lifeMax, size;
+		float r, g, b;
+		int kind;
+	};
 	void RespawnCraftToCheckpoint(S3rCraft& c, float fuelAmt, float cool);
+	void TickEngine(S3rCraft& c, float thrIn, int brake, float dt);
+	BOOL TryUseNitro(S3rCraft& c);
+	float NitroSpeedMul(const S3rCraft& c) const;
+	float NitroThrustMul(const S3rCraft& c) const;
 	// ショートカット失敗／帯外危険時：帯中央へ戻しライン固定へ
 	void AbortAiToLine(S3rCraft& c, float lineLockSec);
+	void ApplyStartGridPose(S3rCraft& c, int i);
 	void AlignCraftToPath(S3rCraft& c, float lookAhead=0.02f);
+	float FinishSimRailSpeed(const S3rCraft& c) const;
 	struct S3rObs {
 		float x, y, z;
 		float yaw, pitch;
@@ -524,6 +592,8 @@ public:
 	float m_confetti[96][6]; // x y z vx vy life
 	float m_blast[S3R_BLAST_N][7]; // x y z vx vy vz life
 	int m_blastCursor;
+	S3rFx m_fx[S3R_FX_N];
+	int m_fxCursor;
 	int m_themeActive;
 	int m_layoutKind; // 0楕円 1八の字 2スタジアム 3箱型凸 4腎臓凹 5ピーナッツ 6三角凸
 	int m_lapsTarget;
@@ -533,8 +603,11 @@ public:
 	float m_camSx, m_camSy, m_camSz; // 酔い対策：カメラ位置スムーズ
 	float m_camAx, m_camAy, m_camAz; // 注視点スムーズ
 	int m_camSmoothInit;
+	float m_camTunnelT; // トンネル内カメラへのゆっくり補間 0..1
+	float m_frameDt; // TickFrame の dt。カメラ補間用
 	int m_lookback;
 	int m_accelHeld, m_brakeHeld;
+	int m_nitroBtnHeld;
 	int m_mouseLook;
 	CPoint m_lastMouse;
 	DWORD m_lastTick;
@@ -555,6 +628,7 @@ public:
 	CStringW m_clearBakeText;
 	float m_clearBakeA;
 	int m_hudDirty;
+	int m_gaugeKmhQ, m_gaugeRpmQ;
 	int m_clearDirty;
 	int m_standDirty;
 	float m_reverbFogBoost;
@@ -566,6 +640,7 @@ public:
 	float m_hm[S3R_HM_N * S3R_HM_N];
 	float m_hmRaw[S3R_HM_N * S3R_HM_N];
 	float m_hmPathDist[S3R_HM_N * S3R_HM_N];
+	unsigned char m_pathDeep[S3R_PATH_SAMPLES];
 	float m_hmX0, m_hmZ0, m_hmStep;
 	int m_hmReady;
 	float m_waterY;

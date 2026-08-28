@@ -280,11 +280,11 @@
 			    <param name="Local" value="ja\games.htm">
 			    </OBJECT>
 			<LI> <OBJECT type="text/sitemap">
-			    <param name="Name" value="おまけ：Soft3D迷路">
+			    <param name="Name" value="おまけ：迷路">
 			    <param name="Local" value="ja\maze.htm">
 			    </OBJECT>
 			<LI> <OBJECT type="text/sitemap">
-			    <param name="Name" value="おまけ：Soft3D空中レース">
+			    <param name="Name" value="おまけ：空中レース">
 			    <param name="Local" value="ja\race.htm">
 			    </OBJECT>
 		</UL>
@@ -589,11 +589,11 @@
 			    <param name="Local" value="en\games.htm">
 			    </OBJECT>
 			<LI> <OBJECT type="text/sitemap">
-			    <param name="Name" value="Bonus: the Soft3D maze">
+			    <param name="Name" value="Bonus: the maze">
 			    <param name="Local" value="en\maze.htm">
 			    </OBJECT>
 			<LI> <OBJECT type="text/sitemap">
-			    <param name="Name" value="Bonus: the Soft3D aerial race">
+			    <param name="Name" value="Bonus: the aerial race">
 			    <param name="Local" value="en\race.htm">
 			    </OBJECT>
 		</UL>

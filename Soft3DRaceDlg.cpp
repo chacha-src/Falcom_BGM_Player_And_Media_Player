@@ -1,4 +1,4 @@
-﻿// Soft3DRaceDlg.cpp — Soft3D aerial race (Catmull-Rom power band / cute bird-ships)
+﻿// Soft3DRaceDlg.cpp — aerial race (Catmull-Rom power band / cute bird-ships)
 #include "stdafx.h"
 #include "ogg.h"
 #include "Soft3DRaceDlg.h"
@@ -48,6 +48,7 @@ struct S3RFrameCB {
 	S3RMat viewProj;
 	S3RMat lightVP;
 	S3RFloat4 eyePos, fogParams, dofParams, screenSize, misc, lightDir, peel;
+	S3RMat reflectVP; // 水面平面反射（未使用時は単位）
 };
 
 static S3RMat S3rMatMul(const S3RMat& a, const S3RMat& b)
@@ -111,6 +112,14 @@ static float S3rNormAngle(float a)
 }
 static float S3rClamp(float v, float lo, float hi) { return v < lo ? lo : (v > hi ? hi : v); }
 static float S3rLerp(float a, float b, float t) { return a + (b - a) * t; }
+static float S3rDtK(float dt, float tau)
+{
+	if (tau < 1e-4f) return 1.f;
+	if (dt < 0.f) dt = 0.f;
+	float k = 1.f - expf(-dt / tau);
+	if (k > 1.f) k = 1.f;
+	return k;
+}
 static float S3rSaturate(float v) { return S3rClamp(v, 0.f, 1.f); }
 static BOOL S3rWorldToNdc(const S3RMat& vp, float x, float y, float z, float& ndcX, float& ndcY, float& clipW)
 {
@@ -162,6 +171,172 @@ static void S3rNorm3(float& x, float& y, float& z)
 {
 	float l = sqrtf(x*x+y*y+z*z); if (l < 1e-6f) { x=0;y=1;z=0; return; }
 	x/=l;y/=l;z/=l;
+}
+static float S3rTunR(float bandHalf)
+{
+	float r = bandHalf * 2.24f;
+	if (r < 10.8f) r = 10.8f;
+	return r;
+}
+static int S3rPathIdx(float t)
+{
+	int n = CSoft3DRaceDlg::S3R_PATH_SAMPLES;
+	int i = (int)floorf(t * (float)n);
+	i %= n; if (i < 0) i += n;
+	return i;
+}
+static float S3rTunFlare(const unsigned char* deep, int i)
+{
+	if (!deep[i]) return 0.f;
+	const int n = CSoft3DRaceDlg::S3R_PATH_SAMPLES;
+	const int win = 24;
+	int edge = win;
+	for (int d = 1; d <= win; d++) {
+		int ip = i + d; if (ip >= n) ip -= n;
+		int im = i - d; if (im < 0) im += n;
+		if (!deep[ip] || !deep[im]) { edge = d; break; }
+	}
+	if (edge >= win) return 0.f;
+	float u = 1.f - (float)edge / (float)win;
+	return u * u * (3.f - 2.f * u);
+}
+static int S3rPathNearDeep(const unsigned char* deep, int i, int win)
+{
+	if (deep[i]) return 1;
+	const int n = CSoft3DRaceDlg::S3R_PATH_SAMPLES;
+	for (int d = 1; d <= win; d++) {
+		int ip = i + d; if (ip >= n) ip -= n;
+		int im = i - d; if (im < 0) im += n;
+		if (deep[ip] || deep[im]) return 1;
+	}
+	return 0;
+}
+static float S3rAiMinPaceFrac(int lv)
+{
+	if (lv <= CSoft3DRaceDlg::AI_SUPER_EASY) return 0.66f;
+	if (lv <= CSoft3DRaceDlg::AI_EASY) return 0.76f;
+	if (lv <= CSoft3DRaceDlg::AI_NORMAL) return 0.86f;
+	if (lv <= CSoft3DRaceDlg::AI_HARD) return 0.91f;
+	return 0.95f;
+}
+static float S3rAiMaxPaceFrac(int lv)
+{
+	if (lv <= CSoft3DRaceDlg::AI_SUPER_EASY) return 0.86f;
+	if (lv <= CSoft3DRaceDlg::AI_EASY) return 0.91f;
+	if (lv <= CSoft3DRaceDlg::AI_NORMAL) return 0.98f;
+	if (lv <= CSoft3DRaceDlg::AI_HARD) return 1.01f;
+	return 1.06f;
+}
+
+// 見た目メッシュに合わせた当たり（幹シリンダ＋冠球＋横枝/土管AABB）。単位はメッシュローカル。
+static void S3rThemeColShapes(int theme, float& tR, float& tH, float& cY, float& cR, float& bX, float& bY, float& bT, float& bZ)
+{
+	tR = 0.42f; tH = 2.5f; cY = 2.6f; cR = 1.05f; bX = 0.f; bY = 0.f; bT = 0.f; bZ = 0.f;
+	if (theme == 1) { tR = 0.36f; tH = 2.65f; cY = 3.55f; cR = 1.50f; } // forest: 枝は別AABB（交差の隙間を塞がない）
+	else if (theme == 6) { tR = 0.22f; tH = 1.05f; cY = 1.85f; cR = 1.18f; } // grass
+	else if (theme == 3) { tR = 0.58f; tH = 4.15f; cY = 4.55f; cR = 0.85f; bX = 2.20f; bY = 1.80f; bT = 0.28f; bZ = 0.28f; } // oil
+	else if (theme == 4) { tR = 0.78f; tH = 4.70f; cY = 4.95f; cR = 0.28f; } // night
+	else if (theme == 2) { tR = 0.62f; tH = 3.45f; cY = 3.75f; cR = 0.45f; bX = 1.38f; bY = 3.35f; bT = 0.22f; bZ = 0.42f; } // ruins
+	else if (theme == 7) { tR = 1.05f; tH = 2.75f; cY = 2.40f; cR = 0.85f; bX = 1.90f; bY = 0.50f; bT = 0.55f; bZ = 1.70f; } // mesa
+	else if (theme == 5) { tR = 1.10f; tH = 0.55f; cY = 1.15f; cR = 1.08f; bX = 1.82f; bY = 1.05f; bT = 0.22f; bZ = 0.22f; } // under
+	else if (theme == 8) { tR = 0.32f; tH = 0.55f; cY = 1.70f; cR = 1.20f; } // cloud
+}
+
+struct S3rObsHit { int hit; float nx, ny, nz, push; };
+
+static void S3rAccumObsHit(S3rObsHit& h, float dx, float dy, float dz, float rad)
+{
+	const float d2 = dx * dx + dy * dy + dz * dz;
+	if (d2 >= rad * rad) return;
+	float d = sqrtf(d2);
+	float pen = rad - d;
+	float nx, ny, nz;
+	if (d > 1e-4f) { nx = dx / d; ny = dy / d; nz = dz / d; }
+	else { nx = 0.f; ny = 1.f; nz = 0.f; pen = rad; }
+	if (!h.hit || pen > h.push) {
+		h.hit = 1; h.push = pen; h.nx = nx; h.ny = ny; h.nz = nz;
+	}
+}
+
+static void S3rHitSphereAabb(S3rObsHit& h, float px, float py, float pz,
+	float x0, float x1, float y0, float y1, float z0, float z1, float cr)
+{
+	const float qx = (px < x0) ? x0 : ((px > x1) ? x1 : px);
+	const float qy = (py < y0) ? y0 : ((py > y1) ? y1 : py);
+	const float qz = (pz < z0) ? z0 : ((pz > z1) ? z1 : pz);
+	float dx = px - qx, dy = py - qy, dz = pz - qz;
+	const float d2 = dx * dx + dy * dy + dz * dz;
+	if (d2 > 1e-8f) {
+		S3rAccumObsHit(h, dx, dy, dz, cr);
+		return;
+	}
+	const float px0 = px - x0, px1 = x1 - px;
+	const float py0 = py - y0, py1 = y1 - py;
+	const float pz0 = pz - z0, pz1 = z1 - pz;
+	float best = px0, nx = -1.f, ny = 0.f, nz = 0.f;
+	if (px1 < best) { best = px1; nx = 1.f; ny = 0.f; nz = 0.f; }
+	if (py0 < best) { best = py0; nx = 0.f; ny = -1.f; nz = 0.f; }
+	if (py1 < best) { best = py1; nx = 0.f; ny = 1.f; nz = 0.f; }
+	if (pz0 < best) { best = pz0; nx = 0.f; ny = 0.f; nz = -1.f; }
+	if (pz1 < best) { best = pz1; nx = 0.f; ny = 0.f; nz = 1.f; }
+	const float push = best + cr;
+	if (!h.hit || push > h.push) {
+		h.hit = 1; h.push = push; h.nx = nx; h.ny = ny; h.nz = nz;
+	}
+}
+
+static S3rObsHit S3rCraftVsObs(int theme, const CSoft3DRaceDlg::S3rObs& o, float cx, float cy, float cz, float craftR)
+{
+	S3rObsHit h; h.hit = 0; h.nx = 0.f; h.ny = 1.f; h.nz = 0.f; h.push = 0.f;
+	float tR, tH, cY, cR, bX, bY, bT, bZ;
+	S3rThemeColShapes(theme, tR, tH, cY, cR, bX, bY, bT, bZ);
+	const float cs = cosf(o.yaw), sn = sinf(o.yaw);
+	const float dx = cx - o.x, dy = cy - o.y, dz = cz - o.z;
+	const float lx = dx * cs - dz * sn;
+	const float ly = dy;
+	const float lz = dx * sn + dz * cs;
+	const float sx = (o.sx > 1e-4f) ? o.sx : 1.f;
+	const float sy = (o.sy > 1e-4f) ? o.sy : 1.f;
+	const float sz = (o.sz > 1e-4f) ? o.sz : 1.f;
+	const float xzS = 0.5f * (sx + sz);
+
+	{
+		const float r = tR * xzS + craftR;
+		const float y0 = 0.f, y1 = tH * sy;
+		const float qy = (ly < y0) ? y0 : ((ly > y1) ? y1 : ly);
+		float hx = lx, hy = ly - qy, hz = lz;
+		if (hx * hx + hz * hz < 1e-8f && ly >= y0 && ly <= y1) {
+			const float push = r;
+			if (!h.hit || push > h.push) { h.hit = 1; h.push = push; h.nx = 1.f; h.ny = 0.f; h.nz = 0.f; }
+		} else {
+			S3rAccumObsHit(h, hx, hy, hz, r);
+		}
+	}
+	S3rAccumObsHit(h, lx, ly - cY * sy, lz, cR * xzS + craftR);
+	if (bT > 1e-4f) {
+		S3rHitSphereAabb(h, lx, ly, lz,
+			-bX * sx, bX * sx, (bY - bT) * sy, (bY + bT) * sy, -bZ * sz, bZ * sz, craftR);
+	}
+	if (theme == 1) {
+		S3rAccumObsHit(h, lx, ly - 2.45f * sy, lz, 1.42f * xzS + craftR);
+		S3rAccumObsHit(h, lx, ly - 5.05f * sy, lz, 0.78f * xzS + craftR);
+		S3rHitSphereAabb(h, lx, ly, lz, -2.18f * sx, 2.18f * sx, 2.12f * sy, 2.45f * sy, -0.16f * sz, 0.16f * sz, craftR);
+		S3rHitSphereAabb(h, lx, ly, lz, -0.16f * sx, 0.16f * sx, 2.50f * sy, 2.86f * sy, -1.88f * sz, 1.88f * sz, craftR);
+		S3rHitSphereAabb(h, lx, ly, lz, -1.58f * sx, 1.58f * sx, 3.10f * sy, 3.42f * sy, -0.14f * sz, 0.14f * sz, craftR);
+	} else if (theme == 2) {
+		S3rHitSphereAabb(h, lx, ly, lz, -1.28f * sx, -0.82f * sx, 0.f, 3.25f * sy, -0.32f * sz, 0.32f * sz, craftR);
+		S3rHitSphereAabb(h, lx, ly, lz, 0.82f * sx, 1.28f * sx, 0.f, 3.25f * sy, -0.32f * sz, 0.32f * sz, craftR);
+	} else if (theme == 3) {
+		S3rHitSphereAabb(h, lx, ly, lz, -1.42f * sx, -0.62f * sx, 0.f, 1.95f * sy, -0.48f * sz, 0.48f * sz, craftR);
+		S3rHitSphereAabb(h, lx, ly, lz, 0.62f * sx, 1.42f * sx, 0.f, 1.40f * sy, -0.42f * sz, 0.42f * sz, craftR);
+	}
+
+	if (h.hit) {
+		const float nx = h.nx, nz = h.nz;
+		h.nx = nx * cs + nz * sn;
+		h.nz = -nx * sn + nz * cs;
+	}
+	return h;
 }
 static DWORD S3rRand(DWORD& rng)
 {
@@ -263,6 +438,20 @@ static float S3rAxisN(LONG v)
 	if (fabsf(f) < 0.18f) return 0.f;
 	return S3rClamp(f, -1.f, 1.f);
 }
+// DirectInput の Z/Rz は機種で ±1000 か 0..65535。後者の静止は中央付近で、/1000 すると常時フルブレーキになる。
+static void S3rSplitTriggerAxis(LONG v, float& neg, float& pos)
+{
+	neg = 0.f; pos = 0.f;
+	if (v >= -1200 && v <= 1200) {
+		if (v > 220) pos = S3rClamp((float)v / 1000.f, 0.f, 1.f);
+		else if (v < -220) neg = S3rClamp((float)(-v) / 1000.f, 0.f, 1.f);
+		return;
+	}
+	float n = ((float)v - 32767.f) / 32767.f;
+	const float dz = 0.24f;
+	if (n > dz) pos = S3rClamp((n - dz) / (1.f - dz), 0.f, 1.f);
+	else if (n < -dz) neg = S3rClamp((-n - dz) / (1.f - dz), 0.f, 1.f);
+}
 static void UpdateJoypadState(S3rJoyState& out)
 {
 	memset(&out, 0, sizeof(out));
@@ -279,11 +468,12 @@ static void UpdateJoypadState(S3rJoyState& out)
 	out.ly = S3rAxisN(st.lY);
 	out.rx = S3rAxisN(st.lRx);
 	out.ry = S3rAxisN(st.lRy);
-	out.lt = S3rClamp((float)st.lZ / 1000.f, 0.f, 1.f);
-	// Some pads report triggers on slider / Rz
-	float rt = S3rClamp((float)st.lRz / 1000.f, 0.f, 1.f);
-	if (rt < 0.01f && st.rglSlider[0] > 0) rt = S3rClamp(st.rglSlider[0] / 1000.f, 0.f, 1.f);
-	out.rt = rt;
+	float zNeg=0.f, zPos=0.f, sNeg=0.f, sPos=0.f;
+	S3rSplitTriggerAxis(st.lZ, zNeg, zPos);
+	S3rSplitTriggerAxis(st.rglSlider[0], sNeg, sPos);
+	// Xbox DInput: Z が LT/RT の合成（中央静止）。Rz は右スティックなのでトリガーに使わない。
+	out.lt = max(zNeg, sNeg);
+	out.rt = max(zPos, sPos);
 	for (int i = 0; i < 8; i++) if (st.rgbButtons[i] & 0x80) out.buttons |= (1 << i);
 	DWORD pov = st.rgdwPOV[0];
 	if (pov != 0xFFFFFFFF && (LOWORD(pov) != 0xFFFF))
@@ -330,10 +520,10 @@ BOOL CS3rHelpDlg::OnInitDialog()
 	CDialog::OnInitDialog();
 	CCC_ApplyWindowIconFromTemplate(this, IDD);
 	SetWindowText(LL14(
-		L"Soft3D空中レースガイド", L"Soft3D aerial race guide", L"Guide course aérienne Soft3D", L"Guida gara aerea Soft3D",
-		L"Guía carrera aérea Soft3D", L"Soft3D 공중 레이스 가이드", L"Soft3D 空中竞速指南", L"دليل سباق Soft3D الجوي",
-		L"Руководство Soft3D-гонки", L"Soft3D-Luftrennen-Anleitung", L"Guia corrida aérea Soft3D", L"Soft3D-luchtracegids",
-		L"Przewodnik Soft3D wyścigu", L"Soft3D hava yarışı kılavuzu"));
+		L"空中レースガイド", L"Aerial race guide", L"Guide course aérienne", L"Guida gara aerea",
+		L"Guía carrera aérea", L"공중 레이스 가이드", L"空中竞速指南", L"دليل السباق الجوي",
+		L"Руководство по гонке", L"Luftrennen-Anleitung", L"Guia corrida aérea", L"Luchtracegids",
+		L"Przewodnik wyścigu", L"Hava yarışı kılavuzu"));
 	if (CWnd* pOk = GetDlgItem(IDOK))
 		pOk->SetWindowText(LL14(L"閉じる", L"Close", L"Fermer", L"Chiudi", L"Cerrar", L"닫기", L"关闭", L"إغلاق",
 			L"Закрыть", L"Schliessen", L"Fechar", L"Sluiten", L"Zamknij", L"Kapat"));
@@ -366,21 +556,21 @@ void CS3rHelpDlg::OnPaint()
 	const int contentW = max(200, rc.Width() - L * 2);
 
 	dc.SetTextColor(RGB(55, 45, 95));
-	dc.TextOut(L, y, LL14(L"Soft3D 空中レース — 操作と画面の見方", L"Soft3D aerial race — controls and visuals",
-		L"Course aérienne Soft3D — commandes et visuels", L"Gara aerea Soft3D — comandi e visuali",
-		L"Carrera aérea Soft3D — controles y visuales", L"Soft3D 공중 레이스 — 조작과 화면", L"Soft3D 空中竞速 — 操作与画面",
-		L"سباق Soft3D الجوي — التحكم والعرض", L"Воздушная гонка Soft3D — управление и вид", L"Soft3D-Luftrennen — Steuerung und Ansicht",
-		L"Corrida aérea Soft3D — controles e visuais", L"Soft3D-luchtrace — bediening en beeld",
-		L"Wyścig powietrzny Soft3D — sterowanie i widok", L"Soft3D hava yarışı — kontroller ve görüntü"));
+	dc.TextOut(L, y, LL14(L"空中レース — 操作と画面の見方", L"Aerial race — controls and visuals",
+		L"Course aérienne — commandes et visuels", L"Gara aerea — comandi e visuali",
+		L"Carrera aérea — controles y visuales", L"공중 레이스 — 조작과 화면", L"空中竞速 — 操作与画面",
+		L"السباق الجوي — التحكم والعرض", L"Воздушная гонка — управление и вид", L"Luftrennen — Steuerung und Ansicht",
+		L"Corrida aérea — controles e visuais", L"Luchtrace — bediening en beeld",
+		L"Wyścig powietrzny — sterowanie i widok", L"Hava yarışı — kontroller ve görüntü"));
 	y += lh + 6;
 
 	y = CCC_GdiHelpDrawSoftDemoPair(dc, L, y, contentW, min(160, max(120, rc.Height() / 4)),
 		CCC_HELPDEMO_KRACE);
 
 	dc.SetTextColor(RGB(55, 45, 85));
-	dc.TextOut(L, y, LL14(L"凡例（Soft3D と説明）", L"Legend (Soft3D & description)", L"Légende (Soft3D et description)", L"Legenda (Soft3D e descrizione)", L"Leyenda (Soft3D y descripción)",
-		L"범례(Soft3D와 설명)", L"图例（Soft3D 与说明）", L"Legend (Soft3D & description)", L"Легенда (Soft3D и описание)", L"Legende (Soft3D & Beschreibung)", L"Legenda (Soft3D e descrição)", L"Legenda (Soft3D en uitleg)",
-		L"Legenda (Soft3D i opis)", L"Gösterge (Soft3D ve açıklama)"));
+	dc.TextOut(L, y, LL14(L"凡例（見た目と説明）", L"Legend (preview & description)", L"Légende (aperçu et description)", L"Legenda (anteprima e descrizione)", L"Leyenda (vista y descripción)",
+		L"범례(모습과 설명)", L"图例（外观与说明）", L"Legend (preview & description)", L"Легенда (вид и описание)", L"Legende (Vorschau & Beschreibung)", L"Legenda (visual e descrição)", L"Legenda (weergave en uitleg)",
+		L"Legenda (podgląd i opis)", L"Gösterge (görünüm ve açıklama)"));
 	y += lh + 2;
 
 	const int sw = max(16, lh + 2);
@@ -391,7 +581,7 @@ void CS3rHelpDlg::OnPaint()
 	auto legendHead = [&]() {
 		dc.FillSolidRect(L, y, contentW, rowH, RGB(232, 230, 242));
 		dc.SetTextColor(RGB(55, 45, 85));
-		dc.TextOut(L + 4, y + 2, L"Soft3D");
+		dc.TextOut(L + 4, y + 2, LL14(L"見た目", L"Preview", L"Aperçu", L"Anteprima", L"Vista", L"모습", L"外观", L"معاينة", L"Вид", L"Vorschau", L"Visual", L"Weergave", L"Podgląd", L"Görünüm"));
 		dc.TextOut(descX, y + 2, LL14(L"説明", L"Description", L"Description", L"Descrizione", L"Descripción",
 			L"설명", L"说明", L"Description", L"Описание", L"Beschreibung", L"Descrição", L"Beschrijving", L"Opis", L"Açıklama"));
 		y += rowH;
@@ -442,6 +632,22 @@ void CS3rHelpDlg::OnPaint()
 	legendRow(RGB(80, 230, 130),
 		LL14(L"アイテム球", L"Item orbs", L"Sphères d'objets", L"Sfere oggetto", L"Orbes de objeto", L"아이템 구", L"道具球", L"Item orbs", L"Сферы предметов", L"Item-Kugeln", L"Orbes de item", L"Item-bollen", L"Kule przedmiotów", L"Öğe küreleri"),
 		LL14(L"触れると再生テンポ／ピッチ等＋レース効果。球の上に小さなラベル", L"Touch for playback + race buffs. Small label above the orb", L"Toucher = lecture + buffs. Petite étiquette", L"Tocco = riproduzione + buff. Piccola etichetta", L"Tocar = reproducción + buffs. Etiqueta pequeña", L"접촉 시 재생+레이스 버프. 구 위에 작은 라벨", L"触碰改播放并带竞速效果。球上有小标签", L"Playback + race effects. Small label above", L"Воспроизведение + баффы. Маленькая метка сверху", L"Playback + Buffs. Kleines Label oben", L"Reprodução + buffs. Rótulo pequeno acima", L"Weergave + buffs. Klein label erboven", L"Odtwarzanie + buffy. Mała etykieta u góry", L"Oynatma + buff. Üstte küçük etiket"));
+	legendRow(RGB(40, 200, 255),
+		LL14(L"ニトロ", L"Nitro", L"Nitro", L"Nitro", L"Nitro", L"니트로", L"氮气加速", L"Nitro", L"Нитро", L"Nitro", L"Nitro", L"Nitro", L"Nitro", L"Nitro"),
+		LL14(L"最初1・周回ごとに+1（最大5）。N／Ctrl／パッドX・Y。発動中は障害をすり抜け、自機は敵に当たってもノックバックしない",
+			L"Start with 1; +1 each lap (max 5). N / Ctrl / pad X·Y. While active: pass obstacles; you are not knocked back by rivals",
+			L"Départ 1; +1/tour (max 5). N/Ctrl/pad X·Y. Icônes sous classement. IA aussi; effet 2/3",
+			L"Parti con 1; +1 a giro (max 5). N/Ctrl/pad X·Y. Icone sotto classifica. Anche IA; effetto 2/3",
+			L"Empiezas con 1; +1 por vuelta (máx 5). N/Ctrl/pad X·Y. Iconos bajo clasificación. IA también; efecto 2/3",
+			L"시작 1개·랩마다 +1(최대5). N/Ctrl/패드 X·Y. 순위판 아래 아이콘. CPU도 획득, 효과는 자기의 2/3",
+			L"开局1个；每圈+1（最多5）。N/Ctrl/手柄X·Y。排名板下有图标。CPU同样获得，效果为自机的2/3",
+			L"Start with 1; +1 each lap (max 5). N/Ctrl/pad X·Y. Icons under standings. CPU 2/3 power",
+			L"Старт с 1; +1 за круг (макс 5). N/Ctrl/pad X·Y. Иконки под таблицей. У ИИ тоже; сила 2/3",
+			L"Start mit 1; +1/Runde (max 5). N/Ctrl/Pad X·Y. Icons unter Rangliste. KI auch; Wirkung 2/3",
+			L"Começa com 1; +1 por volta (máx 5). N/Ctrl/pad X·Y. Ícones sob classificação. CPU também; efeito 2/3",
+			L"Start met 1; +1 per ronde (max 5). N/Ctrl/pad X·Y. Iconen onder stand. CPU ook; effect 2/3",
+			L"Start z 1; +1 na okrążenie (maks 5). N/Ctrl/pad X·Y. Ikony pod tabelą. CPU też; efekt 2/3",
+			L"Başta 1; turda +1 (en fazla 5). N/Ctrl/pad X·Y. Sıralama altında ikon. CPU da alır; etki 2/3"));
 	legendRow(RGB(140, 200, 255),
 		LL14(L"デモ走行（生成〜スタート前）", L"Demo (after generate, before Start)", L"Démo (après Générer)", L"Demo (dopo Genera)", L"Demo (tras Generar)", L"데모(생성~시작 전)", L"演示（生成到开始前）", L"Demo until Start", L"Демо до Старта", L"Demo bis Start", L"Demo até Iniciar", L"Demo tot Start", L"Demo do Start", L"Demo → Başlat"),
 		LL14(L"俯瞰でコース全体を見せ、自機もAI走行。マウスで視点。スタートで本番", L"Overview of whole course; your craft is AI too. Mouse pans. Start = race", L"Vue d'ensemble; votre craft en IA. Souris=vue. Démarrer=course", L"Vista d'insieme; anche il tuo craft in IA. Mouse=vista. Avvia=gara", L"Vista general; tu nave también IA. Ratón=vista. Iniciar=carrera", L"전체 조감+자기 AI. 마우스 시점. 시작=본경기", L"俯瞰全图，自机也AI跑。鼠标转视角。开始进正式赛", L"Overview + AI you; mouse pans; Start races", L"Обзор; ваш аппарат ИИ; мышь; Старт=гонка", L"Überblick; Ihr Craft KI; Maus; Start=Rennen", L"Visão geral; sua nave IA; mouse; Iniciar=corrida", L"Overzicht; jouw craft AI; muis; Start=race", L"Przegląd; Twój craft AI; mysz; Start=wyścig", L"Genel bakış; gemin AI; fare; Başlat=yarış"));
@@ -469,20 +675,34 @@ void CS3rHelpDlg::OnPaint()
 		L"Muis: bewegen=yaw/pitch  LMB=gas  RMB=rem  wiel=zoom  MMB=achteruit",
 		L"Mysz: ruch=yaw/pitch  LMB=gaz  RMB=hamulec  kółko=zoom  MMB=wstecz",
 		L"Fare: hareket=yaw/pitch  LMB=gaz  RMB=fren  teker=zoom  MMB=geri bak"));
-	line(LL14(L"パッド: 左ステック=操舵　RT/A=加速　LT/B=ブレーキ　ハット=代替操舵　右ステック=カメラオフセット",
-		L"Pad: left stick=steer  RT/A=accel  LT/B=brake  hat=alt steer  right stick=camera offset",
-		L"Manette : stick G=diriger  RT/A=accél  LT/B=frein  chapeau=alt  stick D=caméra",
-		L"Pad: stick SX=sterzo  RT/A=accel  LT/B=freno  hat=alt  stick DX=camera",
-		L"Mando: stick izq=girar  RT/A=acel  LT/B=freno  hat=alt  stick der=cámara",
-		L"패드: 왼쪽 스틱=조향  RT/A=가속  LT/B=브레이크  햇=대체  오른쪽 스틱=카메라",
-		L"手柄：左摇杆=转向  RT/A=加速  LT/B=刹车  十字=备用  右摇杆=相机偏移",
-		L"Pad: left stick=steer  RT/A=accel  LT/B=brake  hat=alt  right stick=camera",
-		L"Геймпад: левый стик=руль  RT/A=газ  LT/B=тормоз  hat=alt  правый стик=камера",
-		L"Pad: linker Stick=Lenken  RT/A=Gas  LT/B=Bremse  Hut=alt  rechter Stick=Kamera",
-		L"Controle: stick esq=dirigir  RT/A=acel  LT/B=freio  hat=alt  stick dir=câmera",
-		L"Pad: linker stick=sturen  RT/A=gas  LT/B=rem  hat=alt  rechter stick=camera",
-		L"Pad: lewy stick=ster  RT/A=gaz  LT/B=hamulec  hat=alt  prawy stick=kamera",
-		L"Pad: sol çubuk=direksiyon  RT/A=gaz  LT/B=fren  hat=alt  sağ çubuk=kamera"));
+	line(LL14(L"パッド: 左ステック=操舵　RT/A=加速　LT/B=ブレーキ　ハット=代替操舵　右ステック=カメラオフセット　X/Y=ニトロ",
+		L"Pad: left stick=steer  RT/A=accel  LT/B=brake  hat=alt steer  right stick=camera offset  X/Y=nitro",
+		L"Manette : stick G=diriger  RT/A=accél  LT/B=frein  chapeau=alt  stick D=caméra  X/Y=nitro",
+		L"Pad: stick SX=sterzo  RT/A=accel  LT/B=freno  hat=alt  stick DX=camera  X/Y=nitro",
+		L"Mando: stick izq=girar  RT/A=acel  LT/B=freno  hat=alt  stick der=cámara  X/Y=nitro",
+		L"패드: 왼쪽 스틱=조향  RT/A=가속  LT/B=브레이크  햇=대체  오른쪽 스틱=카메라  X/Y=니트로",
+		L"手柄：左摇杆=转向  RT/A=加速  LT/B=刹车  十字=备用  右摇杆=相机偏移  X/Y=氮气",
+		L"Pad: left stick=steer  RT/A=accel  LT/B=brake  hat=alt  right stick=camera  X/Y=nitro",
+		L"Геймпад: левый стик=руль  RT/A=газ  LT/B=тормоз  hat=alt  правый стик=камера  X/Y=нитро",
+		L"Pad: linker Stick=Lenken  RT/A=Gas  LT/B=Bremse  Hut=alt  rechter Stick=Kamera  X/Y=Nitro",
+		L"Controle: stick esq=dirigir  RT/A=acel  LT/B=freio  hat=alt  stick dir=câmera  X/Y=nitro",
+		L"Pad: linker stick=sturen  RT/A=gas  LT/B=rem  hat=alt  rechter stick=camera  X/Y=nitro",
+		L"Pad: lewy stick=ster  RT/A=gaz  LT/B=hamulec  hat=alt  prawy stick=kamera  X/Y=nitro",
+		L"Pad: sol çubuk=direksiyon  RT/A=gaz  LT/B=fren  hat=alt  sağ çubuk=kamera  X/Y=nitro"));
+	line(LL14(L"ニトロ: N または Ctrl（パッドは X/Y）。スタート時1個・1周完了ごとに+1（最大5）。発動中は噴射エフェクト。CPUも同じ取得だが効きは自機の2/3。",
+		L"Nitro: N or Ctrl (pad X/Y). Start with 1; +1 per completed lap (max 5). Exhaust VFX while active. CPU gains the same; power is 2/3 of yours.",
+		L"Nitro : N ou Ctrl (pad X/Y). Départ 1; +1/tour (max 5). Effet de jet. IA aussi; puissance 2/3.",
+		L"Nitro: N o Ctrl (pad X/Y). Parti con 1; +1 a giro (max 5). Effetto scarico. Anche IA; potenza 2/3.",
+		L"Nitro: N o Ctrl (pad X/Y). Empiezas con 1; +1 por vuelta (máx 5). Efecto de escape. IA también; potencia 2/3.",
+		L"니트로: N 또는 Ctrl(패드 X/Y). 시작 1개·랩 완료마다 +1(최대5). 분사 이펙트. CPU도 동일 획득, 효과는 2/3.",
+		L"氮气：N或Ctrl（手柄X/Y）。开局1个；每完成1圈+1（最多5）。发动时有喷射特效。CPU同样获得，效果为自机的2/3。",
+		L"Nitro: N or Ctrl (pad X/Y). Start 1; +1/lap (max 5). Exhaust VFX. CPU same stock; 2/3 power.",
+		L"Нитро: N или Ctrl (pad X/Y). Старт 1; +1/круг (макс 5). Эффект выхлопа. У ИИ то же; сила 2/3.",
+		L"Nitro: N oder Ctrl (Pad X/Y). Start 1; +1/Runde (max 5). Abgas-VFX. KI ebenso; Wirkung 2/3.",
+		L"Nitro: N ou Ctrl (pad X/Y). Começa com 1; +1/volta (máx 5). Efeito de jato. CPU igual; potência 2/3.",
+		L"Nitro: N of Ctrl (pad X/Y). Start 1; +1/ronde (max 5). Uitlaat-VFX. CPU ook; kracht 2/3.",
+		L"Nitro: N lub Ctrl (pad X/Y). Start 1; +1/okrążenie (maks 5). Efekt dyszy. CPU też; moc 2/3.",
+		L"Nitro: N veya Ctrl (pad X/Y). Başta 1; turda +1 (en fazla 5). Egzoz efekti. CPU aynı; güç 2/3."));
 	line(LL14(L"上下反転コンボ: マウス上下とパッド上下のピッチを反転（savedataに保存）",
 		L"Invert-Y combo: flips mouse/pad pitch (saved in savedata)",
 		L"Combo inversion Y : inverse le tangage souris/manette (sauvé)",
@@ -525,48 +745,48 @@ void CS3rHelpDlg::OnPaint()
 		L"Botsing ≈1/30 HP. Rivalen exploderen bij HP 0. Super makkelijk: max. ~4 van 12. Intens is te verslaan.",
 		L"Zderzenie ≈1/30 HP. Rywale wybuchają przy HP 0. Super łatwy: maks. ~4 z 12. Intensywny da się wygrać.",
 		L"Çarpışma ≈1/30 HP. Rakipler HP 0’da patlar ve çekilir. Çok kolay: 12’de en fazla ~4. Yoğun da yenilebilir."));
-	line(LL14(L"右のミニマップ下に順位パネル（名前の右へLAPを2行・最大4枠。入りきらない周は出さない）。自機行だけ色が違う。ゴール後は表彰台で1〜3位を表示。",
-		L"Standings under the minimap (name/rank; up to 4 recent LAP times in two rows). Your row is tinted. After finish: podium 1–3.",
-		L"Classement sous la minimap (nom/rang/tours). Votre ligne est teintée. Après: podium 1–3.",
-		L"Classifica sotto minimap (nome/grado/giri). La tua riga è evidenziata. Poi podio 1–3.",
-		L"Clasificación bajo el minimapa (nombre/puesto/vueltas). Tu fila resalta. Luego podio 1–3.",
-		L"미니맵 아래 순위판(이름·순위·최근 랩). 자행만 색 다름. 종료 후 시상대 1~3.",
-		L"小地图下为排名板（名字/名次/近几圈）。自机行异色。完赛后领奖台1–3名。",
-		L"Standings under minimap; your row highlighted. Podium 1–3 after finish.",
-		L"Таблица под миникартой; ваша строка выделена. Подиум 1–3 после финиша.",
-		L"Rangliste unter der Minimap; Ihre Zeile hervorgehoben. Danach Podium 1–3.",
-		L"Classificação sob o minimapa; sua linha destacada. Pódio 1–3 após a chegada.",
-		L"Stand onder minimap; jouw rij gekleurd. Daarna podium 1–3.",
-		L"Tabela pod minimapą; Twój wiersz wyróżniony. Potem podium 1–3.",
-		L"Minimapi altında sıralama; satırın farklı. Bitince podyum 1–3."));
-	line(LL14(L"カメラは左右・上下とも遅れて追従し、3D酔いを抑えます。急坂では視点が徐々に下から見上げるようになります。地形は丘・谷・川があり、巨大な山は外側が固体のままトンネルで通ります。カメラとコースの間の壁や天井は透けます。木や建物は帯にめり込んでよく、通れる隙間を抜けます。",
-		L"Camera lags on both axes to reduce motion sickness. On steep climbs it eases to a look-up from below. Hills/valleys/rivers; mountains stay solid outside with a tunnel for the band. Walls between camera and the course fade. Trees and buildings may clip into the band; fly the gaps.",
-		L"Caméra en retard. En montée elle passe en contre-plongée. Collines/vallées/rivières; montagnes tunnélées. Arbres et bâtiments peuvent s'enfoncer dans la bande; passez les trous.",
-		L"Camera in ritardo. In salita dal basso. Colline/valli/fiumi; montagne con tunnel. Alberi ed edifici possono entrare nella fascia; passa i varchi.",
-		L"Cámara con retraso. En subida contrapicado. Colinas/valles/ríos; montañas con túnel. Árboles y edificios pueden meterse en la banda; pasa los huecos.",
-		L"카메라는 좌우·상하 지연 추종. 급경사에서는 아래에서 올려다봄. 언덕·계곡·강, 산은 터널. 나무·건물이 밴드에 파고들어도 틈으로 통과.",
-		L"相机延迟跟随以减轻晕动。急坡时从下往上看。丘谷河；大山走隧道。树和建筑可嵌入光带，从空隙穿过。",
-		L"Lagging chase cam; steep climbs ease to a look-up. Hills/valleys/rivers; tunneled mountains. Props may clip the band; fly the gaps.",
-		L"Камера с запаздыванием; на подъёме снизу. Холмы, долины, реки; туннели в горах. Деревья могут входить в ленту — летите в просветы.",
-		L"Nachlaufende Kamera; an Steigungen von unten. Hügel/Täler/Flüsse; Tunnel durch Berge. Bäume dürfen ins Band ragen; Lücken durchfliegen.",
-		L"Câmera atrasada; em subidas de baixo. Colinas/vales/rios; túneis nas montanhas. Árvores podem entrar na faixa; passe pelos vãos.",
-		L"Nalopende camera; bij helling van onder. Heuvels/dalen/rivieren; tunnels door bergen. Bomen mogen in de band steken; vlieg door gaten.",
-		L"Opóźniona kamera; na stromiźnie od dołu. Wzgórza/doliny/rzeki; tunele w górach. Drzewa mogą wchodzić w pas; leć prześwitami.",
-		L"Gecikmeli kamera; dik yokuşta alttan. Tepe/vadi/ırmak; dağ tünelleri. Ağaçlar banta gömülebilir; boşluktan geçin."));
-	line(LL14(L"テーマで森〜雲の庭まで変化。地形もオブジェクトもテーマごと。ライセンスフリーの写真テクスチャ50枚（512）をexeに埋め込んでいます（別ファイル不要）。地面はテーマ写真に細部を重ね、水面・機体・空の雲カードとキューブも写真。反射と乱反射があり、アイテムは結晶球です。生成のたびに輪郭も抽選（楕円／高低差のある八の字／角の丸い凸型／くびれた凹型）。八の字の交差は段差なので横切ってショートカットできない。枝下／土管の間／山のトンネル／急坂／開けた区間が混在。",
-		L"Themes from forest to cloud garden. Terrain and props change per theme. Fifty license-free photo textures (512px) are embedded in the exe (no extra files): theme albedo plus detail, water, craft, cloud cards and a sky cube. Wrap lighting and reflection; items are crystal orbs. Each Generate also picks a plan: oval, figure-8 with a height split (no flat shortcut through the crossing), rounded convex, or a concave pinch. Mix of canopy gaps, pipe gaps, mountain tunnels, steep climbs and open stretches.",
-		L"Thèmes forêt→jardin de nuages. 50 textures photo 512 dans l'exe (albédo+détail, eau, nuages, ciel). Réflexion ; objets en orbes. Générer tire aussi le tracé: ovale, 8 avec dénivelé (pas de coupe à plat), convexe arrondi ou concave. Branches, tuyaux, tunnels, pentes, ouvert.",
-		L"Temi foresta→giardino di nubi. 50 texture foto 512 nell'exe (albedo+dettaglio, acqua, nubi, cielo). Riflessione; oggetti a sfera. Genera estrae anche il tracciato: ovale, 8 con dislivello, convesso o concavo. Rami, tubi, tunnel, salite, aperti.",
-		L"Temas bosque→jardín de nubes. 50 texturas foto 512 en el exe (albedo+detalle, agua, nubes, cielo). Reflexión; objetos en orbe. Generar también elige el trazado: óvalo, 8 con desnivel, convexo o cóncavo. Ramas, tuberías, túneles, pendientes.",
-		L"테마: 숲~구름 정원. 라이선스 프리 사진 텍스처 50장(512)을 exe에 내장. 지면은 테마+세부, 수면·기체·구름 카드·하늘도 사진. 반사·난반사, 아이템은 결정 구. 생성마다 윤곽도 추첨(타원/고저 8자/볼록/오목). 8자 교차는 단차라 가로질러 숏컷 불가. 가지/파이프/터널/급경사/개방 혼합.",
-		L"主题从森林到云之庭。许可证自由照片纹理50张、512、嵌入exe。地面为主题加细节，水面/机体/云卡/天空亦为照片。反射与漫反射，道具为结晶球。每次生成也抽轮廓：椭圆／带高低差的8字（交叉处不能平切）／圆角凸形／收腰凹形。枝下/管隙/山洞/急坡/开阔混在。",
-		L"Themes forest→cloud garden. 50 photo textures 512 in the exe (albedo+detail, water, cloud cards, sky cube). Reflection; crystal item orbs. Generate also picks oval, a height-split figure-8 (no flat shortcut), rounded convex or a concave pinch. Branches/pipes/tunnels/climbs/open.",
-		L"Темы лес→облачный сад. 50 фототекстур 512 в exe (альбедо+деталь, вода, облака, небо). Отражение; предметы-сферы. Создать также выбирает овал, восьмёрку с перепадом, выпуклый или вогнутый контур.",
-		L"Themen Wald→Wolkengarten. 50 Fototexturen 512 in der exe (Albedo+Detail, Wasser, Wolken, Himmel). Reflexion; Item-Kugeln. Erzeugen wählt auch Oval, Achter mit Höhensprung, konvex oder konkav.",
-		L"Temas floresta→jardim de nuvens. 50 texturas foto 512 no exe (albedo+detalhe, água, nuvens, céu). Reflexão; orbes de item. Gerar também escolhe oval, 8 com desnível, convexo ou côncavo.",
-		L"Thema's bos→wolken tuin. 50 fototexturen 512 in de exe (albedo+detail, water, wolken, lucht). Reflectie; item-bollen. Genereren kiest ook ovaal, 8-vorm met hoogteverschil, convex of concaaf.",
-		L"Tematy las→ogród chmur. 50 tekstur zdjęciowych 512 w exe (albedo+szczegół, woda, chmury, niebo). Odbicie; kule przedmiotów. Generuj losuje też owal, ósemkę z przewyższeniem, wypukły lub wklęsły.",
-		L"Temalar orman→bulut bahçesi. 50 adet 512 fotoğraf dokusu exe içinde (albedo+ayrıntı, su, bulut, gök). Yansıma; öğe küreleri. Üret oval, yükseklik farklı 8, dışbükey veya içbükey de seçer."));
+	line(LL14(L"右のミニマップ下に順位パネル（名前の右へLAPを2行・最大4枠。入りきらない周は出さない）。下段に自機ニトロ所持アイコン。自機行だけ色が違う。ゴール後は表彰台で1〜3位を表示。",
+		L"Standings under the minimap (name/rank; up to 4 recent LAP times in two rows). Nitro stock icons below. Your row is tinted. After finish: podium 1–3.",
+		L"Classement sous la minimap (nom/rang/tours). Icônes nitro en bas. Votre ligne est teintée. Après: podium 1–3.",
+		L"Classifica sotto minimap (nome/grado/giri). Icone nitro sotto. La tua riga è evidenziata. Poi podio 1–3.",
+		L"Clasificación bajo el minimapa (nombre/puesto/vueltas). Iconos nitro abajo. Tu fila resalta. Luego podio 1–3.",
+		L"미니맵 아래 순위판(이름·순위·최근 랩). 하단에 니트로 아이콘. 자행만 색 다름. 종료 후 시상대 1~3.",
+		L"小地图下为排名板（名字/名次/近几圈）。底部有氮气库存图标。自机行异色。完赛后领奖台1–3名。",
+		L"Standings under minimap; nitro icons below; your row highlighted. Podium 1–3 after finish.",
+		L"Таблица под миникартой; иконки нитро внизу; ваша строка выделена. Подиум 1–3 после финиша.",
+		L"Rangliste unter der Minimap; Nitro-Icons unten; Ihre Zeile hervorgehoben. Danach Podium 1–3.",
+		L"Classificação sob o minimapa; ícones nitro abaixo; sua linha destacada. Pódio 1–3 após a chegada.",
+		L"Stand onder minimap; nitro-iconen onder; jouw rij gekleurd. Daarna podium 1–3.",
+		L"Tabela pod minimapą; ikony nitro poniżej; Twój wiersz wyróżniony. Potem podium 1–3.",
+		L"Minimapi altında sıralama; altta nitro ikonları; satırın farklı. Bitince podyum 1–3."));
+	line(LL14(L"カメラは左右・上下とも遅れて追従し、3D酔いを抑えます。急坂では視点が徐々に下から見上げるようになります。トンネル前では視点が低くなりますが、MMB後方視はそのときも優先されます。画面上中央にバックミラー（後方カメラ）、水面には平面反射があります。地形は丘・谷・川があり、巨大な山は外側が固体のままトンネルで通ります。カメラとコースの間の壁や天井は透けます。木や建物は帯にめり込んでよく、通れる隙間を抜けます。",
+		L"Camera lags on both axes to reduce motion sickness. On steep climbs it eases to a look-up from below. Near tunnels the view dips, but MMB lookback still wins. Top-center rearview mirror (rear camera); water uses a planar reflection. Hills/valleys/rivers; mountains stay solid outside with a tunnel for the band. Walls between camera and the course fade. Trees and buildings may clip into the band; fly the gaps.",
+		L"Caméra en retard. En montée contre-plongée. Près des tunnels la vue baisse, mais MMB recul prime. Rétroviseur en haut; réflexion plane sur l'eau. Collines/vallées/rivières; montagnes tunnélées. Arbres et bâtiments peuvent s'enfoncer dans la bande; passez les trous.",
+		L"Camera in ritardo. In salita dal basso. Vicino ai tunnel la vista scende, ma MMB dietro ha priorità. Specchietto in alto; riflessione planare sull'acqua. Colline/valli/fiumi; montagne con tunnel. Alberi ed edifici possono entrare nella fascia; passa i varchi.",
+		L"Cámara con retraso. En subida contrapicado. Cerca de túneles baja la vista, pero MMB atrás manda. Retrovisor arriba; reflexión planar en el agua. Colinas/valles/ríos; montañas con túnel. Árboles y edificios pueden meterse en la banda; pasa los huecos.",
+		L"카메라는 좌우·상하 지연 추종. 급경사에서는 아래에서 올려다봄. 터널 앞에서 시점이 내려가지만 MMB 후방이 우선. 상단 중앙 백미러, 수면은 평면 반사. 언덕·계곡·강, 산은 터널. 나무·건물이 밴드에 파고들어도 틈으로 통과.",
+		L"相机延迟跟随以减轻晕动。急坡时从下往上看。隧道前视角会下降，但中键后视仍优先。画面上方中央有后视镜；水面为平面反射。丘谷河；大山走隧道。树和建筑可嵌入光带，从空隙穿过。",
+		L"Lagging chase cam; steep climbs ease to a look-up. Near tunnels the view dips but MMB lookback wins. Top-center rearview; planar water reflection. Hills/valleys/rivers; tunneled mountains. Props may clip the band; fly the gaps.",
+		L"Камера с запаздыванием; на подъёме снизу. У тоннеля вид опускается, но MMB назад важнее. Зеркало сверху; отражение воды. Холмы, долины, реки; туннели в горах. Деревья могут входить в ленту — летите в просветы.",
+		L"Nachlaufende Kamera; an Steigungen von unten. Vor Tunneln senkt sich die Sicht, MMB-Rückblick hat Vorrang. Rückspiegel oben; planare Wasserreflexion. Hügel/Täler/Flüsse; Tunnel durch Berge. Bäume dürfen ins Band ragen; Lücken durchfliegen.",
+		L"Câmera atrasada; em subidas de baixo. Perto de túneis a vista desce, mas MMB atrás manda. Retrovisor no topo; reflexão planar na água. Colinas/vales/rios; túneis nas montanhas. Árvores podem entrar na faixa; passe pelos vãos.",
+		L"Nalopende camera; bij helling van onder. Bij tunnels daalt het zicht, maar MMB-achteruit wint. Achteruitkijkspiegel bovenaan; vlakke waterreflectie. Heuvels/dalen/rivieren; tunnels door bergen. Bomen mogen in de band steken; vlieg door gaten.",
+		L"Opóźniona kamera; na stromiźnie od dołu. Przy tunelach widok opada, ale MMB wstecz ma pierwszeństwo. Lusterko u góry; odbicie wody. Wzgórza/doliny/rzeki; tunele w górach. Drzewa mogą wchodzić w pas; leć prześwitami.",
+		L"Gecikmeli kamera; dik yokuşta alttan. Tünel önünde bakış iner ama MMB geri bak öncelikli. Üstte dikiz aynası; suda düzlemsel yansıma. Tepe/vadi/ırmak; dağ tünelleri. Ağaçlar banta gömülebilir; boşluktan geçin."));
+	line(LL14(L"テーマで森〜雲の庭まで変化。地形もオブジェクトもテーマごと。ライセンスフリーの写真テクスチャ56枚（512）をexeに埋め込んでいます（別ファイル不要）。地面はテーマ写真に細部を重ね、水面・機体・空の雲カード（複数種）とキューブも写真。反射と乱反射があり、アイテムは結晶球です。生成のたびに輪郭も抽選（楕円／高低差のある八の字／角の丸い凸型／くびれた凹型）。八の字の交差は段差なので横切ってショートカットできない。枝下／土管の間／山のトンネル／急坂／開けた区間が混在。",
+		L"Themes from forest to cloud garden. Terrain and props change per theme. Fifty-six license-free photo textures (512px) are embedded in the exe (no extra files): theme albedo plus detail, water, craft, several cloud cards and a sky cube. Wrap lighting and reflection; items are crystal orbs. Each Generate also picks a plan: oval, figure-8 with a height split (no flat shortcut through the crossing), rounded convex, or a concave pinch. Mix of canopy gaps, pipe gaps, mountain tunnels, steep climbs and open stretches.",
+		L"Thèmes forêt→jardin de nuages. 56 textures photo 512 dans l'exe (albédo+détail, eau, nuages, ciel). Réflexion ; objets en orbes. Générer tire aussi le tracé: ovale, 8 avec dénivelé (pas de coupe à plat), convexe arrondi ou concave. Branches, tuyaux, tunnels, pentes, ouvert.",
+		L"Temi foresta→giardino di nubi. 56 texture foto 512 nell'exe (albedo+dettaglio, acqua, nubi, cielo). Riflessione; oggetti a sfera. Genera estrae anche il tracciato: ovale, 8 con dislivello, convesso o concavo. Rami, tubi, tunnel, salite, aperti.",
+		L"Temas bosque→jardín de nubes. 56 texturas foto 512 en el exe (albedo+detalle, agua, nubes, cielo). Reflexión; objetos en orbe. Generar también elige el trazado: óvalo, 8 con desnivel, convexo o cóncavo. Ramas, tuberías, túneles, pendientes.",
+		L"테마: 숲~구름 정원. 라이선스 프리 사진 텍스처 56장(512)을 exe에 내장. 지면은 테마+세부, 수면·기체·구름 카드·하늘도 사진. 반사·난반사, 아이템은 결정 구. 생성마다 윤곽도 추첨(타원/고저 8자/볼록/오목). 8자 교차는 단차라 가로질러 숏컷 불가. 가지/파이프/터널/급경사/개방 혼합.",
+		L"主题从森林到云之庭。许可证自由照片纹理56张、512、嵌入exe。地面为主题加细节，水面/机体/云卡/天空亦为照片。反射与漫反射，道具为结晶球。每次生成也抽轮廓：椭圆／带高低差的8字（交叉处不能平切）／圆角凸形／收腰凹形。枝下/管隙/山洞/急坡/开阔混在。",
+		L"Themes forest→cloud garden. 56 photo textures 512 in the exe (albedo+detail, water, cloud cards, sky cube). Reflection; crystal item orbs. Generate also picks oval, a height-split figure-8 (no flat shortcut), rounded convex or a concave pinch. Branches/pipes/tunnels/climbs/open.",
+		L"Темы лес→облачный сад. 56 фототекстур 512 в exe (альбедо+деталь, вода, облака, небо). Отражение; предметы-сферы. Создать также выбирает овал, восьмёрку с перепадом, выпуклый или вогнутый контур.",
+		L"Themen Wald→Wolkengarten. 56 Fototexturen 512 in der exe (Albedo+Detail, Wasser, Wolken, Himmel). Reflexion; Item-Kugeln. Erzeugen wählt auch Oval, Achter mit Höhensprung, konvex oder konkav.",
+		L"Temas floresta→jardim de nuvens. 56 texturas foto 512 no exe (albedo+detalhe, água, nuvens, céu). Reflexão; orbes de item. Gerar também escolhe oval, 8 com desnível, convexo ou côncavo.",
+		L"Thema's bos→wolken tuin. 56 fototexturen 512 in de exe (albedo+detail, water, wolken, lucht). Reflectie; item-bollen. Genereren kiest ook ovaal, 8-vorm met hoogteverschil, convex of concaaf.",
+		L"Tematy las→ogród chmur. 56 tekstur zdjęciowych 512 w exe (albedo+szczegół, woda, chmury, niebo). Odbicie; kule przedmiotów. Generuj losuje też owal, ósemkę z przewyższeniem, wypukły lub wklęsły.",
+		L"Temalar orman→bulut bahçesi. 56 adet 512 fotoğraf dokusu exe içinde (albedo+ayrıntı, su, bulut, gök). Yansıma; öğe küreleri. Üret oval, yükseklik farklı 8, dışbükey veya içbükey de seçer."));
 	line(LL14(L"アイテム球の上に、機体と同じ系統の小さなラベルが出ます（種類が分かります）。",
 		L"A small craft-style label sits above each item orb so you can tell the type.",
 		L"Petite étiquette (comme les appareils) au-dessus de chaque orbe.",
@@ -609,20 +829,20 @@ void CS3rHelpDlg::OnPaint()
 		L"PCM-SFX: motoren, aftellen/START, ronde, finish, podium, course-out, items, hits. Weergave-menu.",
 		L"SFX PCM: silniki, odliczanie/START, okrążenie, meta, podium, poza torem, przedmioty, uderzenia.",
 		L"PCM SFX: motor, geri sayım/BAŞLA, tur, bitiş, podyum, kurs dışı, öğe, çarpışma. Görünüm menüsü."));
-	line(LL14(L"迷路 Soft3D と同時には開けません。AI／敵機数／長さ／周回／テーマ／密度はコンボで変更（保存されます）。軽量〜美麗（11〜19と美麗は分割描画で約88〜160倍）。5が既定。",
-		L"Cannot open with Soft3D maze at once. AI/opponents/length/laps/theme/density combos persist. Light–Fine (11–19 and Fine split-draw ~88–160×). Default 5.",
-		L"Pas avec le labyrinthe Soft3D. Combos sauvés. Léger–Fin (11–19 et Fin en plusieurs buffers, ~88–160×). Défaut 5.",
-		L"Non insieme al labirinto Soft3D. Combo salvate. Leggero–Fine (11–19 e Fine a più buffer, ~88–160×). Predef. 5.",
-		L"No a la vez con el laberinto Soft3D. Combos se guardan. Ligero–Fino (11–19 y Fino en varios buffers, ~88–160×). Predet. 5.",
-		L"미로 Soft3D와 동시 불가. 콤보 저장. 가벼움~미려(11–19·미려는 분할 묘화 약88–160배). 기본 5.",
-		L"不可与 Soft3D 迷宫同时开。设置会保存。轻量〜美丽（11–19与美丽为分块绘制约88–160倍）。默认5。",
-		L"Not with Soft3D maze. Combos persist. Light–Fine (11–19 and Fine split-draw ~88–160×). Default 5.",
-		L"Не вместе с лабиринтом Soft3D. Комбо сохраняются. Лёгкий–Изящный (11–19 и Fine, ~88–160×). По умолч. 5.",
-		L"Nicht zusammen mit Soft3D-Labyrinth. Kombos gespeichert. Leicht–Fein (11–19 und Fein, ~88–160×). Standard 5.",
-		L"Não junto com o labirinto Soft3D. Combos salvos. Leve–Belo (11–19 e Belo, ~88–160×). Padrão 5.",
-		L"Niet samen met Soft3D-doolhof. Combo's bewaard. Licht–Fijn (11–19 en Fijn, ~88–160×). Standaard 5.",
-		L"Nie razem z labiryntem Soft3D. Combo zapisywane. Lekki–Piękny (11–19 i Fine, ~88–160×). Domyślnie 5.",
-		L"Soft3D labirent ile birlikte değil. Kombolar kaydedilir. Hafif–Güzel (11–19 ve Fine, ~88–160×). Varsayılan 5."));
+	line(LL14(L"迷路と同時には開けません。AI／敵機数／長さ／周回／テーマ／密度はコンボで変更（保存されます）。軽量〜美麗（11〜19と美麗は分割描画で約88〜160倍）。5が既定。",
+		L"Cannot open with the maze at once. AI/opponents/length/laps/theme/density combos persist. Light–Fine (11–19 and Fine split-draw ~88–160×). Default 5.",
+		L"Pas avec le labyrinthe. Combos sauvés. Léger–Fin (11–19 et Fin en plusieurs buffers, ~88–160×). Défaut 5.",
+		L"Non insieme al labirinto. Combo salvate. Leggero–Fine (11–19 e Fine a più buffer, ~88–160×). Predef. 5.",
+		L"No a la vez con el laberinto. Combos se guardan. Ligero–Fino (11–19 y Fino en varios buffers, ~88–160×). Predet. 5.",
+		L"미로와 동시 불가. 콤보 저장. 가벼움~미려(11–19·미려는 분할 묘화 약88–160배). 기본 5.",
+		L"不可与 迷宫同时开。设置会保存。轻量〜美丽（11–19与美丽为分块绘制约88–160倍）。默认5。",
+		L"Not with maze. Combos persist. Light–Fine (11–19 and Fine split-draw ~88–160×). Default 5.",
+		L"Не вместе с лабиринтом. Комбо сохраняются. Лёгкий–Изящный (11–19 и Fine, ~88–160×). По умолч. 5.",
+		L"Nicht zusammen mit dem Labyrinth. Kombos gespeichert. Leicht–Fein (11–19 und Fein, ~88–160×). Standard 5.",
+		L"Não junto com o labirinto. Combos salvos. Leve–Belo (11–19 e Belo, ~88–160×). Padrão 5.",
+		L"Niet samen met het doolhof. Combo's bewaard. Licht–Fijn (11–19 en Fijn, ~88–160×). Standaard 5.",
+		L"Nie razem z labiryntem. Combo zapisywane. Lekki–Piękny (11–19 i Fine, ~88–160×). Domyślnie 5.",
+		L"Labirent ile birlikte değil. Kombolar kaydedilir. Hafif–Güzel (11–19 ve Fine, ~88–160×). Varsayılan 5."));
 	CCC_GdiHelpEndPaint(hp);
 }
 
@@ -655,8 +875,10 @@ CS3rView::CS3rView()
 	: m_ready(FALSE), m_vw(0), m_vh(0), m_dev(NULL), m_imm(NULL), m_swap(NULL), m_bbRtv(NULL)
 	, m_dsTex(NULL), m_dsv(NULL), m_dsSrv(NULL), m_sceneTex(NULL), m_sceneRtv(NULL), m_sceneSrv(NULL)
 	, m_postTex(NULL), m_postRtv(NULL), m_postSrv(NULL), m_shadowTex(NULL), m_shadowDsv(NULL), m_shadowSrv(NULL)
+	, m_rearTex(NULL), m_rearRtv(NULL), m_srvRear(NULL), m_rearDs(NULL), m_rearDsv(NULL)
+	, m_reflectTex(NULL), m_reflectRtv(NULL), m_srvReflect(NULL), m_reflectDs(NULL), m_reflectDsv(NULL)
 	, m_vsTess(NULL), m_hsTess(NULL), m_dsTess(NULL)
-	, m_psBand(NULL), m_vsSolid(NULL), m_vsInst(NULL), m_psSolid(NULL), m_psTerr(NULL), m_psCraft(NULL), m_vsHud(NULL), m_psHud(NULL), m_psHudLine(NULL), m_vsPost(NULL)
+	, m_psBand(NULL), m_vsSolid(NULL), m_vsInst(NULL), m_psSolid(NULL), m_psCloud(NULL), m_psWater(NULL), m_psTerr(NULL), m_psCraft(NULL), m_vsHud(NULL), m_psHud(NULL), m_psHudLine(NULL), m_vsPost(NULL)
 	, m_psSsr(NULL), m_psDof(NULL), m_psFinal(NULL), m_csNoise(NULL), m_ilPatch(NULL), m_ilSolid(NULL), m_ilInst(NULL), m_ilHud(NULL)
 	, m_cbFrame(NULL), m_vbDyn(NULL)
 	, m_vbTerrParts(0), m_vbBandParts(0), m_vbWaterParts(0), m_vbSceneryParts(0)
@@ -665,14 +887,16 @@ CS3rView::CS3rView()
 	, m_obsNvGpu(0), m_obsNiGpu(0), m_obsInstN(0), m_craftNvGpu(0), m_craftNiGpu(0)
 	, m_cpuDynScratch(NULL), m_cpuDynScratchBytes(0), m_cpuHudScratch(NULL), m_cpuHudScratchBytes(0)
 	, m_cpuBakeScratch(NULL), m_cpuBakeScratchBytes(0)
-	, m_texBand(NULL), m_srvBand(NULL), m_texWater(NULL), m_srvWater(NULL), m_texObs(NULL), m_srvObs(NULL)
+	, m_texBand(NULL), m_srvBand(NULL), m_texWater(NULL), m_srvWater(NULL), m_texWaterD(NULL), m_srvWaterD(NULL)
+	, m_texObs(NULL), m_srvObs(NULL), m_texObsD(NULL), m_srvObsD(NULL)
 	, m_texEnv(NULL), m_srvEnv(NULL), m_texEnv2(NULL), m_srvEnv2(NULL)
-	, m_texSky(NULL), m_srvSky(NULL), m_texSky2(NULL), m_srvSky2(NULL)
+	, m_texSky(NULL), m_srvSky(NULL), m_texSky2(NULL), m_srvSky2(NULL), m_texSky3(NULL), m_srvSky3(NULL), m_texSky4(NULL), m_srvSky4(NULL)
 	, m_texItem(NULL), m_srvItem(NULL), m_texWood(NULL), m_srvWood(NULL)
 	, m_texCraft(NULL), m_srvCraft(NULL), m_texCraftD(NULL), m_srvCraftD(NULL)
 	, m_texNoise(NULL), m_srvNoise(NULL), m_uavNoise(NULL)
 	, m_texClear(NULL), m_srvClear(NULL), m_clearTexW(0), m_clearTexH(0)
 	, m_texHud(NULL), m_srvHud(NULL), m_hudTexW(0), m_hudTexH(0)
+	, m_texGauge(NULL), m_srvGauge(NULL), m_gaugeTexW(0), m_gaugeTexH(0)
 	, m_texStand(NULL), m_srvStand(NULL), m_standTexW(0), m_standTexH(0)
 	, m_texBubble(NULL), m_srvBubble(NULL), m_bubbleTexW(0), m_bubbleTexH(0), m_bubbleN(0)
 	, m_texItemLab(NULL), m_srvItemLab(NULL), m_itemLabN(0)
@@ -697,8 +921,8 @@ CS3rView::~CS3rView() { ReleaseDx(); }
 BOOL CS3rView::CreateShaders()
 {
 	static const char* hlsl =
-		"cbuffer F:register(b0){row_major float4x4 VP;row_major float4x4 LightVP;float4 Eye;float4 Fog;float4 Dof;float4 Screen;float4 Misc;float4 LightDir;float4 Peel;}"
-		"Texture2D T0:register(t0);Texture2D T1:register(t1);Texture2D Depth:register(t2);TextureCube Env:register(t3);Texture2D ShadowMap:register(t4);Texture2D NoiseMap:register(t5);"
+		"cbuffer F:register(b0){row_major float4x4 VP;row_major float4x4 LightVP;float4 Eye;float4 Fog;float4 Dof;float4 Screen;float4 Misc;float4 LightDir;float4 Peel;row_major float4x4 ReflectVP;}"
+		"Texture2D T0:register(t0);Texture2D T1:register(t1);Texture2D Depth:register(t2);TextureCube Env:register(t3);Texture2D ShadowMap:register(t4);Texture2D NoiseMap:register(t5);Texture2D ReflectMap:register(t6);"
 		"SamplerState SL:register(s0);SamplerState SP:register(s1);SamplerComparisonState SCmp:register(s2);"
 		"struct V{float3 p:POSITION;float3 n:NORMAL;float2 uv:TEXCOORD0;float4 c:TEXCOORD1;};"
 		"struct P{float3 p:POSITION;float3 n:NORMAL;float2 uv:TEXCOORD0;float4 c:TEXCOORD1;};"
@@ -731,12 +955,15 @@ BOOL CS3rView::CreateShaders()
 		"if(any(uv<0)||any(uv>1)||z<=0||z>=1)return 1;"
 		"const float2 o[8]={float2(-.326,-.406),float2(-.84,-.074),float2(-.696,.457),float2(-.203,.621),float2(.962,-.195),float2(.473,-.48),float2(.519,.767),float2(.185,-.893)};"
 		"float s=0;const float t=2./1024.;[unroll]for(int k=0;k<8;k++)s+=ShadowMap.SampleCmpLevelZero(SCmp,uv+o[k]*t,z);return pow(saturate(s*.125),1.25);}"
-		"float4 PSB(D i):SV_Target{float4 a=T0.Sample(SL,i.uv)*i.c;float3 n=normalize(i.n);float3 l=normalize(LightDir.xyz);float sh=ShadowAt(i.w,n);"
-		"float nd=lerp(.12,max(saturate(dot(n,l)),.2),sh);float3 v=normalize(Eye.xyz-i.w);float fr=pow(1-saturate(dot(n,v)),2.8);"
+		"float4 PSB(D i):SV_Target{if(Fog.w>0.5&&i.w.y<Fog.z+0.08)discard;float4 a=T0.Sample(SL,i.uv)*i.c;float3 n=normalize(i.n);float3 l=normalize(LightDir.xyz);float sh=ShadowAt(i.w,n);"
+		"float nd=lerp(.12,max(saturate(dot(n,l)),.2),sh);float3 v=normalize(Eye.xyz-i.w);float F=0.06+(1.-0.06)*pow(1.-saturate(dot(n,v)),4.2);"
 		"float3 env=Env.Sample(SL,reflect(-v,n)).rgb;float pulse=.55+.45*sin(Misc.w*2.+i.uv.x*12.);"
-		"float3 col=a.rgb*nd+env*(.08+fr*.22)+float3(1,.95,.8)*pow(saturate(dot(reflect(-l,n),v)),48)*sh*.45;"
-		"col*=lerp(0.55,1.0,sh);col+=a.rgb*pulse*.12;float d=length(Eye.xyz-i.w),fg=saturate((d-Fog.x)/max(.01,Fog.y-Fog.x));fg=fg*fg*(3-2*fg);"
-		"float al=saturate(.22+a.a*.45+fr*.15);return float4(lerp(col,float3(.55,.72,.95),fg*.55),al);}"
+		"float3 col=a.rgb*nd+env*(.06+F*.28)+float3(1,.95,.8)*pow(saturate(dot(reflect(-l,n),v)),48)*sh*.45;"
+		"col*=lerp(0.55,1.0,sh);col+=a.rgb*pulse*.12;col=lerp(col,env*1.05,F*.22);"
+		"float d=length(Eye.xyz-i.w),fg=saturate((d-Fog.x)/max(.01,Fog.y-Fog.x));fg=fg*fg*(3-2*fg);"
+		"float al=saturate(.22+a.a*.45+F*.18);float nw=saturate((5.-abs(i.w.y-Fog.z))/5.);al=saturate(lerp(al,max(al,.88),nw));"
+		"if(Dof.w>0.5){col+=a.rgb*(.08+.10*pulse)+env*F*.12;al=saturate(al+.06);}"
+		"return float4(lerp(col,float3(.55,.72,.95),fg*.55),al);}"
 		"D VSS(V x){D o;o.w=x.p;o.n=x.n;o.uv=x.uv;o.c=x.c;o.p=mul(float4(x.p,1),VP);return o;}"
 		"D VSSI(V x,float4 iw:TEXCOORD2,float4 isc:TEXCOORD3,float4 ic:TEXCOORD4){"
 		"float cy=cos(iw.w),sy=sin(iw.w),cp=cos(isc.w),sp=sin(isc.w);float3 p=x.p*isc.xyz;"
@@ -747,7 +974,7 @@ BOOL CS3rView::CreateShaders()
 		"HO VSH(HV x){HO o;o.p=float4(x.p,0,1);o.uv=x.uv;o.c=x.c;return o;}"
 		"float4 PSH(HO i):SV_Target{if(i.uv.x<-0.5)return i.c;float4 t=T0.Sample(SL,i.uv);return float4(t.rgb*i.c.rgb,t.a*i.c.a);}"
 		"float4 PSLINE(HO i):SV_Target{float t=saturate(1.-abs(i.uv.y-.5)*2.4);float cap=saturate(min(i.uv.x,1.-i.uv.x)*10.);return float4(i.c.rgb,i.c.a*t*cap);}"
-		"float4 PSS(D i):SV_Target{float3 n=normalize(i.n);float3 l=normalize(LightDir.xyz);float sh=ShadowAt(i.w,n);"
+		"float4 PSS(D i):SV_Target{if(Fog.w>0.5&&i.w.y<Fog.z+0.08)discard;float3 n=normalize(i.n);float3 l=normalize(LightDir.xyz);float sh=ShadowAt(i.w,n);"
 		"float nz=fbm(i.w.xz*12.+i.w.y*10.+Misc.w*.02)*0.15;"
 		"n=normalize(n+float3(nz,nz*0.5,nz)*0.8);"
 		"float3 v=normalize(Eye.xyz-i.w);float ndl=saturate(dot(n,l));float wrap=saturate(dot(n,l)*.5+.5);"
@@ -761,10 +988,50 @@ BOOL CS3rView::CreateShaders()
 		"float fr=pow(1-saturate(dot(n,v)),2.2);float ndc=lerp(nd,saturate(.74+wrap*.28),uvk);"
 		"float3 c=base*ndc+env*(.12+fr*.28)*(1.-uvk*.7)+float3(1,.96,.88)*sp*.42*(1.-uvk);"
 		"float d=length(Eye.xyz-i.w),fg=saturate((d-Fog.x)/max(.01,Fog.y-Fog.x));fg=fg*fg*(3-2*fg);"
-		"float al=saturate(i.c.a*lerp(1,tex4.a,uvk));if(al<0.04&&uvk>0.5)discard;"
+		"float al=saturate(i.c.a*lerp(1,tex4.a*tex4.a,uvk));if(al<0.08&&uvk>0.5)discard;"
 		"float pe=PeelAmt(i.w);if(Peel.w>=0){if(pe>0.16)discard;return float4(lerp(c,float3(.55,.7,.92),fg*.45),al);}"
 		"if(pe<0.16)discard;return float4(lerp(c,float3(.55,.7,.92),fg*.45),al*(1.-pe*0.86));}"
-		"float4 PST(D i):SV_Target{float3 n=normalize(i.n);float3 l=normalize(LightDir.xyz);float sh=ShadowAt(i.w,n);"
+		"float4 PSCLoud(D i):SV_Target{"
+		"float4 t0=T0.Sample(SL,i.uv);float2 j=float2(.018,-.014)*(0.55+0.45*sin(Misc.w*.7+i.uv.x*6.));"
+		"float4 t1=T0.Sample(SL,saturate(i.uv+j));float dens=saturate(max(t0.a,t1.a*0.85)*i.c.a);if(dens<0.08)discard;"
+		"float3 albedo=saturate((t0.rgb*0.72+t1.rgb*0.28)*i.c.rgb);"
+		"float3 n=normalize(i.n);float3 l=normalize(LightDir.xyz);float3 v=normalize(Eye.xyz-i.w);"
+		"float nl=saturate(dot(n,l)*.55+.45);float nv=saturate(dot(n,v));"
+		"float thin=dens*dens*(1.15-dens);float powder=pow(thin,1.35);"
+		"float silver=pow(saturate(1.-nv),2.4)*pow(saturate(dot(v,l)*.5+.5),3.5)*dens;"
+		"float3 sunC=float3(1.05,.93,.78);float3 skyC=float3(.52,.68,.95);"
+		"float3 amb=lerp(skyC,sunC,nl*.55+.25);"
+		"float3 c=albedo*amb*(.55+.55*nl);"
+		"c+=sunC*powder*1.55*(.4+nl*.6);c+=sunC*silver*1.1;"
+		"c*=lerp(float3(.88,.92,1.06),float3(1.06,.98,.90),saturate((i.w.y-Eye.y)*.015+.5));"
+		"float d=length(Eye.xyz-i.w),fg=saturate((d-Fog.x)/max(.01,Fog.y-Fog.x));fg=fg*fg*(3-2*fg);"
+		"float al=saturate(dens*1.05);return float4(lerp(c,float3(.55,.7,.92),fg*.32),al);}"
+		"float4 PlanarMir(float3 w){float4 rp=mul(float4(w,1),ReflectVP);float iw=max(rp.w,1e-5);float2 muv=rp.xy/iw*float2(.5,-.5)+.5;"
+		"float mb=(rp.w>0)*saturate(min(min(muv.x,1.-muv.x),min(muv.y,1.-muv.y))*8.);"
+		"return float4(ReflectMap.Sample(SL,saturate(muv)).rgb,mb);}"
+		"float4 PSW(D i):SV_Target{float3 n=normalize(i.n);float3 l=normalize(LightDir.xyz);"
+		"float2 wp=i.w.xz*0.085+Misc.w*float2(.031,-.024);float w1=fbm(wp),w2=fbm(wp.yx*1.7+float2(Misc.w*.05,0));"
+		"n=normalize(n+float3((w1-.5)*1.15+(w2-.5)*.45,0,(w2-.5)*1.05+(w1-.5)*.35)*.55);"
+		"float sh=ShadowAt(i.w,n);float3 v=normalize(Eye.xyz-i.w);float ndl=saturate(dot(n,l));float wrap=saturate(dot(n,l)*.5+.5);"
+		"float nd=lerp(.32,max(ndl,.26),sh);nd=saturate(nd*.52+wrap*wrap*.52);"
+		"float3 tex=T0.Sample(SL,i.w.xz*0.0045+Misc.w*0.001+n.xz*0.012).rgb;"
+		"float3 det=T1.Sample(SL,i.w.xz*0.018+n.xz*0.04).rgb;"
+		"float3 deep=float3(.08,.22,.32);float3 shallow=float3(.32,.58,.62);"
+		"float depthK=saturate((Fog.z+2.5-i.w.y)*.18);float3 waterAlb=lerp(shallow,deep,depthK);"
+		"float3 base=saturate(tex*lerp(float3(1,1,1),det*1.25,0.42))*waterAlb;"
+		"float3 env=Env.Sample(SL,reflect(-v,n)).rgb;"
+		"float4 mir=PlanarMir(i.w+float3(n.x,0,n.z)*6.5);"
+		"float4 mirB=PlanarMir(i.w+float3(n.z,-0.05,-n.x)*3.2);if(mirB.a>mir.a*.85)mir=lerp(mir,mirB,.45);"
+		"float ndv=saturate(dot(n,v));float F=0.02+0.98*pow(1.-ndv,5.);"
+		"float mk=mir.a*saturate(0.12+F*0.92);"
+		"float3 c=base*nd*(1.-F*.55)+env*(.06+F*.18);"
+		"c=lerp(c,mir.rgb,mk*F);"
+		"float glitter=pow(saturate(dot(reflect(-l,n),v)),90)*sh;"
+		"c+=float3(.75,.9,1.)*glitter*(.22+F*.45);"
+		"c+=float3(.55,.75,.9)*pow(saturate(dot(reflect(-l,n),v)),28)*sh*.18;"
+		"float d=length(Eye.xyz-i.w),fg=saturate((d-Fog.x)/max(.01,Fog.y-Fog.x));fg=fg*fg*(3-2*fg);"
+		"return float4(lerp(c,float3(.42,.60,.80),fg*.28),saturate(0.62+F*.34));}"
+		"float4 PST(D i):SV_Target{if(Fog.w>0.5&&i.w.y<Fog.z+0.08)discard;float3 n=normalize(i.n);float3 l=normalize(LightDir.xyz);float sh=ShadowAt(i.w,n);"
 		"float slope=saturate(1.-n.y);float h=i.w.y;float th=Eye.w;"
 		"float nLo=fbm(i.w.xz*0.028), nHi=fbm(i.w.xz*0.11);"
 		"n=normalize(n+float3(nHi-.45,0,nLo-.45)*slope*0.55);"
@@ -791,12 +1058,14 @@ BOOL CS3rView::CreateShaders()
 		"if(th>5.5&&th<6.6) base=lerp(base,float3(.95,.72,.48),saturate((h-28.)/22.)*0.35);"
 		"float sp=pow(saturate(dot(reflect(-l,n),v)),40)*sh*lerp(.08,.28,slope);"
 		"float3 env=Env.Sample(SL,reflect(-v,n)).rgb;float fr=pow(1-saturate(dot(n,v)),2.4);"
-		"float3 c=base*nd+env*(.10+fr*.26)+float3(1,.97,.9)*sp;"
+		"float hemi=saturate(n.y*.5+.5);float3 hemiC=lerp(float3(.55,.48,.42),float3(.72,.82,.98),hemi);"
+		"float3 c=base*nd*lerp(float3(1,1,1),hemiC,0.22)+env*(.10+fr*.26)+float3(1,.97,.9)*sp;"
 		"float specW=saturate(low*(1.-slope)*0.65);c+=float3(.25,.4,.5)*pow(saturate(dot(reflect(-l,n),v)),24)*specW*sh;"
 		"float d=length(Eye.xyz-i.w),fg=saturate((d-Fog.x)/max(.01,Fog.y-Fog.x));fg=fg*fg*(3-2*fg);"
+		"float hFog=saturate((Fog.z+18.-h)/28.);c=lerp(c,float3(.62,.74,.92),hFog*fg*.25);"
 		"float pe=PeelAmt(i.w);if(Peel.w>=0){if(pe>0.16)discard;return float4(lerp(c,float3(.55,.7,.92),fg*.42),1);}"
 		"if(pe<0.16)discard;return float4(lerp(c,float3(.55,.7,.92),fg*.42),saturate(1.-pe*0.86));}"
-		"float4 PSC(D i):SV_Target{float3 n=normalize(i.n);float3 l=normalize(LightDir.xyz);float sh=ShadowAt(i.w,n);"
+		"float4 PSC(D i):SV_Target{if(Fog.w>0.5&&i.w.y<Fog.z+0.08)discard;float3 n=normalize(i.n);float3 l=normalize(LightDir.xyz);float sh=ShadowAt(i.w,n);"
 		"float3 v=normalize(Eye.xyz-i.w);"
 		"float3 albedo=T0.Sample(SL,i.uv).rgb;"
 		"float3 det=T1.Sample(SL,i.uv*4.6).rgb;"
@@ -821,7 +1090,11 @@ BOOL CS3rView::CreateShaders()
 		"float v=saturate(1-dot((i.uv-.5)*1.1,(i.uv-.5)*1.1));c.rgb*=lerp(.86,1.08,v);"
 		"float th=Eye.w;float3 tone=float3(1.02,.98,.96);if(th>6.5)tone=float3(1.05,.92,.85);else if(th>5.5)tone=float3(.9,1.02,1.08);"
 		"else if(th>4.5)tone=float3(.88,.92,1.08);else if(th>3.5)tone=float3(.95,.95,1.02);else if(th>2.5)tone=float3(1.0,.9,.85);"
-		"else if(th>1.5)tone=float3(.95,1.02,.92);c.rgb=saturate(c.rgb*tone);if(Misc.x>0.01)c.rgb=lerp(c.rgb,1,Misc.x*.35);return c;}"
+		"else if(th>1.5)tone=float3(.95,1.02,.92);c.rgb=saturate(c.rgb*tone);"
+		"float3 x=max(c.rgb,0);c.rgb=saturate((x*(2.51*x+.03))/(x*(2.43*x+.59)+.14));"
+		"float lum=dot(c.rgb,float3(.299,.587,.114));c.rgb+=c.rgb*saturate(lum-.72)*.28;"
+		"c.rgb=lerp(c.rgb,c.rgb*c.rgb*(3.-2.*c.rgb),0.08);"
+		"if(Misc.x>0.01)c.rgb=lerp(c.rgb,1,Misc.x*.35);return c;}"
 		"RWTexture2D<float4> NoiseOut:register(u0);"
 		"[numthreads(8,8,1)]void CSNoise(uint3 id:SV_DispatchThreadID){"
 		"uint2 p=id.xy;if(p.x>=64||p.y>=64)return;float2 uv=(float2(p)+.5)/64.;"
@@ -871,6 +1144,18 @@ BOOL CS3rView::CreateShaders()
 		for(int i=0;i<12;i++) S3R_RELEASE(b[i]); S3R_RELEASE(bcs); S3R_RELEASE(bcraft); S3R_RELEASE(bline); S3R_RELEASE(bterr); S3R_RELEASE(err); return FALSE;
 	}
 	S3R_RELEASE(err);
+	ID3DBlob* bwater=NULL;
+	if(FAILED(D3DCompile(hlsl,(SIZE_T)strlen(hlsl),NULL,NULL,NULL,"PSW","ps_5_0",D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&bwater,&err))){
+		m_dxFailHr = E_FAIL;
+		for(int i=0;i<12;i++) S3R_RELEASE(b[i]); S3R_RELEASE(bcs); S3R_RELEASE(bcraft); S3R_RELEASE(bline); S3R_RELEASE(bterr); S3R_RELEASE(binst); S3R_RELEASE(err); return FALSE;
+	}
+	S3R_RELEASE(err);
+	ID3DBlob* bcloud=NULL;
+	if(FAILED(D3DCompile(hlsl,(SIZE_T)strlen(hlsl),NULL,NULL,NULL,"PSCLoud","ps_5_0",D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&bcloud,&err))){
+		m_dxFailHr = E_FAIL;
+		for(int i=0;i<12;i++) S3R_RELEASE(b[i]); S3R_RELEASE(bcs); S3R_RELEASE(bcraft); S3R_RELEASE(bline); S3R_RELEASE(bterr); S3R_RELEASE(binst); S3R_RELEASE(bwater); S3R_RELEASE(err); return FALSE;
+	}
+	S3R_RELEASE(err);
 	HRESULT hr=S_OK;
 	if(FAILED(hr=m_dev->CreateVertexShader(b[0]->GetBufferPointer(),b[0]->GetBufferSize(),NULL,&m_vsTess))) goto fail_sh;
 	if(FAILED(hr=m_dev->CreateHullShader(b[1]->GetBufferPointer(),b[1]->GetBufferSize(),NULL,&m_hsTess))) goto fail_sh;
@@ -879,6 +1164,8 @@ BOOL CS3rView::CreateShaders()
 	if(FAILED(hr=m_dev->CreateVertexShader(b[4]->GetBufferPointer(),b[4]->GetBufferSize(),NULL,&m_vsSolid))) goto fail_sh;
 	if(FAILED(hr=m_dev->CreateVertexShader(binst->GetBufferPointer(),binst->GetBufferSize(),NULL,&m_vsInst))) goto fail_sh;
 	if(FAILED(hr=m_dev->CreatePixelShader(b[5]->GetBufferPointer(),b[5]->GetBufferSize(),NULL,&m_psSolid))) goto fail_sh;
+	if(FAILED(hr=m_dev->CreatePixelShader(bcloud->GetBufferPointer(),bcloud->GetBufferSize(),NULL,&m_psCloud))) goto fail_sh;
+	if(FAILED(hr=m_dev->CreatePixelShader(bwater->GetBufferPointer(),bwater->GetBufferSize(),NULL,&m_psWater))) goto fail_sh;
 	if(FAILED(hr=m_dev->CreatePixelShader(bcraft->GetBufferPointer(),bcraft->GetBufferSize(),NULL,&m_psCraft))) goto fail_sh;
 	if(FAILED(hr=m_dev->CreateVertexShader(b[6]->GetBufferPointer(),b[6]->GetBufferSize(),NULL,&m_vsHud))) goto fail_sh;
 	if(FAILED(hr=m_dev->CreatePixelShader(b[7]->GetBufferPointer(),b[7]->GetBufferSize(),NULL,&m_psHud))) goto fail_sh;
@@ -908,11 +1195,11 @@ BOOL CS3rView::CreateShaders()
 	if(FAILED(hr=m_dev->CreateInputLayout(il,4,b[4]->GetBufferPointer(),b[4]->GetBufferSize(),&m_ilSolid))) goto fail_sh;
 	if(FAILED(hr=m_dev->CreateInputLayout(ii,7,binst->GetBufferPointer(),binst->GetBufferSize(),&m_ilInst))) goto fail_sh;
 	if(FAILED(hr=m_dev->CreateInputLayout(ih,3,b[6]->GetBufferPointer(),b[6]->GetBufferSize(),&m_ilHud))) goto fail_sh;
-	for(int i=0;i<12;i++) S3R_RELEASE(b[i]); S3R_RELEASE(bcs); S3R_RELEASE(bcraft); S3R_RELEASE(bline); S3R_RELEASE(bterr); S3R_RELEASE(binst);
+	for(int i=0;i<12;i++) S3R_RELEASE(b[i]); S3R_RELEASE(bcs); S3R_RELEASE(bcraft); S3R_RELEASE(bline); S3R_RELEASE(bterr); S3R_RELEASE(binst); S3R_RELEASE(bwater); S3R_RELEASE(bcloud);
 	return TRUE;
 fail_sh:
 	m_dxFailHr = hr;
-	for(int i=0;i<12;i++) S3R_RELEASE(b[i]); S3R_RELEASE(bcs); S3R_RELEASE(bcraft); S3R_RELEASE(bline); S3R_RELEASE(bterr); S3R_RELEASE(binst);
+	for(int i=0;i<12;i++) S3R_RELEASE(b[i]); S3R_RELEASE(bcs); S3R_RELEASE(bcraft); S3R_RELEASE(bline); S3R_RELEASE(bterr); S3R_RELEASE(binst); S3R_RELEASE(bwater); S3R_RELEASE(bcloud);
 	return FALSE;
 }
 
@@ -1052,8 +1339,14 @@ BOOL CS3rView::CreateProcTextures()
 	if(Soft3DTexLoadPngRes(IDR_S3TEX_R_WATER,pix,W,H)){
 		if(!upload2d(&m_texWater,&m_srvWater)){delete[] pix;return FALSE;}
 	}
+	if(Soft3DTexLoadPngRes(IDR_S3TEX_R_WATER_D,pix,W,H)){
+		if(!upload2d(&m_texWaterD,&m_srvWaterD)){delete[] pix;return FALSE;}
+	}
 	if(Soft3DTexLoadPngRes(IDR_S3TEX_R_OBS,pix,W,H)){
 		if(!upload2d(&m_texObs,&m_srvObs)){delete[] pix;return FALSE;}
+	}
+	if(Soft3DTexLoadPngRes(IDR_S3TEX_R_OBS_D,pix,W,H)){
+		if(!upload2d(&m_texObsD,&m_srvObsD)){delete[] pix;return FALSE;}
 	}
 	// env cube: stacked +X -X +Y -Y +Z -Z photo strip, else procedural sky
 	d.ArraySize=6; d.MiscFlags=D3D11_RESOURCE_MISC_TEXTURECUBE;
@@ -1087,6 +1380,8 @@ BOOL CS3rView::CreateProcTextures()
 	d.ArraySize=1; d.MiscFlags=0;
 	if(Soft3DTexLoadPngRes(IDR_S3TEX_R_SKY,pix,W,H)){ if(!upload2d(&m_texSky,&m_srvSky)){delete[] pix;return FALSE;} }
 	if(Soft3DTexLoadPngRes(IDR_S3TEX_R_SKY2,pix,W,H)){ if(!upload2d(&m_texSky2,&m_srvSky2)){delete[] pix;return FALSE;} }
+	if(Soft3DTexLoadPngRes(IDR_S3TEX_R_SKY3,pix,W,H)){ if(!upload2d(&m_texSky3,&m_srvSky3)){delete[] pix;return FALSE;} }
+	if(Soft3DTexLoadPngRes(IDR_S3TEX_R_SKY4,pix,W,H)){ if(!upload2d(&m_texSky4,&m_srvSky4)){delete[] pix;return FALSE;} }
 	if(Soft3DTexLoadPngRes(IDR_S3TEX_R_ITEM,pix,W,H)){ if(!upload2d(&m_texItem,&m_srvItem)){delete[] pix;return FALSE;} }
 	if(Soft3DTexLoadPngRes(IDR_S3TEX_R_WOOD,pix,W,H)){ if(!upload2d(&m_texWood,&m_srvWood)){delete[] pix;return FALSE;} }
 	delete[] pix;
@@ -1140,6 +1435,13 @@ BOOL CS3rView::InitDx()
 	if(FAILED(hr)){xa->GetParent(__uuidof(IDXGIFactory),(void**)&f1);DXGI_SWAP_CHAIN_DESC o={};o.BufferDesc.Format=DXGI_FORMAT_B8G8R8A8_UNORM;o.SampleDesc.Count=1;o.BufferUsage=DXGI_USAGE_RENDER_TARGET_OUTPUT;o.BufferCount=1;o.OutputWindow=m_hWnd;o.Windowed=TRUE;o.SwapEffect=DXGI_SWAP_EFFECT_DISCARD;hr=f1?f1->CreateSwapChain(m_dev,&o,&m_swap):E_FAIL;}
 	S3R_RELEASE(f1);S3R_RELEASE(f2);S3R_RELEASE(xa);S3R_RELEASE(xd);
 	if(FAILED(hr)||!m_swap){ m_dxFailStage = 4; m_dxFailHr = hr; return FALSE; }
+	{
+		IDXGIFactory* fa=NULL;
+		if(SUCCEEDED(m_swap->GetParent(__uuidof(IDXGIFactory),(void**)&fa)) && fa){
+			fa->MakeWindowAssociation(m_hWnd, DXGI_MWA_NO_ALT_ENTER|DXGI_MWA_NO_WINDOW_CHANGES);
+			fa->Release();
+		}
+	}
 	D3D11_BUFFER_DESC bd={};bd.ByteWidth=((sizeof(S3RFrameCB)+15)/16)*16;bd.Usage=D3D11_USAGE_DYNAMIC;bd.BindFlags=D3D11_BIND_CONSTANT_BUFFER;bd.CPUAccessFlags=D3D11_CPU_ACCESS_WRITE;
 	if(FAILED(hr=m_dev->CreateBuffer(&bd,NULL,&m_cbFrame))){ m_dxFailStage = 5; m_dxFailHr = hr; return FALSE; }
 	if(!CreateShaders()){ m_dxFailStage = 6; if(m_dxFailHr==S_OK) m_dxFailHr = E_FAIL; return FALSE; }
@@ -1174,8 +1476,41 @@ BOOL CS3rView::InitDx()
 		D3D11_SHADER_RESOURCE_VIEW_DESC sd={};sd.Format=DXGI_FORMAT_R24_UNORM_X8_TYPELESS;sd.ViewDimension=D3D11_SRV_DIMENSION_TEXTURE2D;sd.Texture2D.MipLevels=1;
 		if(FAILED(hr=m_dev->CreateShaderResourceView(m_shadowTex,&sd,&m_shadowSrv))){ m_dxFailStage = 10; m_dxFailHr = hr; return FALSE; }
 	}
+	if(!EnsureAuxTargets()){ m_dxFailStage = 10; m_dxFailHr = E_FAIL; return FALSE; }
 	CRect rc;GetClientRect(&rc);
 	if(!ResizeDx(max(8,rc.Width()),max(8,rc.Height()))){ m_dxFailStage = 11; m_dxFailHr = E_FAIL; return FALSE; }
+	return TRUE;
+}
+
+BOOL CS3rView::EnsureAuxTargets()
+{
+	if(!m_dev) return FALSE;
+	auto makeColor=[&](int w,int h,ID3D11Texture2D** tex,ID3D11RenderTargetView** rtv,ID3D11ShaderResourceView** srv)->BOOL{
+		if(*tex) return TRUE;
+		D3D11_TEXTURE2D_DESC d={};d.Width=w;d.Height=h;d.MipLevels=1;d.ArraySize=1;d.Format=DXGI_FORMAT_B8G8R8A8_UNORM;d.SampleDesc.Count=1;d.BindFlags=D3D11_BIND_RENDER_TARGET|D3D11_BIND_SHADER_RESOURCE;
+		if(FAILED(m_dev->CreateTexture2D(&d,NULL,tex))) return FALSE;
+		if(FAILED(m_dev->CreateRenderTargetView(*tex,NULL,rtv))) return FALSE;
+		if(FAILED(m_dev->CreateShaderResourceView(*tex,NULL,srv))) return FALSE;
+		return TRUE;
+	};
+	auto makeDepth=[&](int w,int h,ID3D11Texture2D** tex,ID3D11DepthStencilView** dsv)->BOOL{
+		if(*tex) return TRUE;
+		D3D11_TEXTURE2D_DESC d={};d.Width=w;d.Height=h;d.MipLevels=1;d.ArraySize=1;d.Format=DXGI_FORMAT_R24G8_TYPELESS;d.SampleDesc.Count=1;d.BindFlags=D3D11_BIND_DEPTH_STENCIL;
+		if(FAILED(m_dev->CreateTexture2D(&d,NULL,tex))) return FALSE;
+		D3D11_DEPTH_STENCIL_VIEW_DESC dd={};dd.Format=DXGI_FORMAT_D24_UNORM_S8_UINT;dd.ViewDimension=D3D11_DSV_DIMENSION_TEXTURE2D;
+		if(FAILED(m_dev->CreateDepthStencilView(*tex,&dd,dsv))) return FALSE;
+		return TRUE;
+	};
+	if(!makeColor(S3R_REAR_W,S3R_REAR_H,&m_rearTex,&m_rearRtv,&m_srvRear)) return FALSE;
+	if(!makeDepth(S3R_REAR_W,S3R_REAR_H,&m_rearDs,&m_rearDsv)) return FALSE;
+	if(!makeColor(S3R_REFLECT_SIZE,S3R_REFLECT_SIZE,&m_reflectTex,&m_reflectRtv,&m_srvReflect)) return FALSE;
+	if(!makeDepth(S3R_REFLECT_SIZE,S3R_REFLECT_SIZE,&m_reflectDs,&m_reflectDsv)) return FALSE;
+	if (m_imm) {
+		float zc[4] = {0.35f,0.48f,0.62f,1.f};
+		if (m_rearRtv) { m_imm->ClearRenderTargetView(m_rearRtv, zc); }
+		float wc[4] = {0.42f,0.58f,0.72f,1.f};
+		if (m_reflectRtv) { m_imm->ClearRenderTargetView(m_reflectRtv, wc); }
+	}
 	return TRUE;
 }
 
@@ -1201,6 +1536,7 @@ BOOL CS3rView::ResizeDx(int w,int h)
 void CS3rView::PresentFrame(){if(m_swap&&m_ready)m_swap->Present(0,0);}
 void CS3rView::ReleaseClearTexture(){S3R_RELEASE(m_srvClear);S3R_RELEASE(m_texClear);m_clearTexW=m_clearTexH=0;}
 void CS3rView::ReleaseHudTexture(){S3R_RELEASE(m_srvHud);S3R_RELEASE(m_texHud);m_hudTexW=m_hudTexH=0;}
+void CS3rView::ReleaseGaugeTexture(){S3R_RELEASE(m_srvGauge);S3R_RELEASE(m_texGauge);m_gaugeTexW=m_gaugeTexH=0;}
 void CS3rView::ReleaseStandingsTexture(){S3R_RELEASE(m_srvStand);S3R_RELEASE(m_texStand);m_standTexW=m_standTexH=0;}
 void CS3rView::ReleaseBubbleTexture()
 {
@@ -1261,13 +1597,110 @@ BOOL CS3rView::BakeHudTexture(const wchar_t* text)
 	m_hudTexW = w; m_hudTexH = h;
 	return SUCCEEDED(hr);
 }
-BOOL CS3rView::BakeStandingsTexture(const S3rStandRow* rows, int nRows)
+BOOL CS3rView::BakeGaugeTexture(float kmh, float rpm01)
+{
+	ReleaseGaugeTexture();
+	if (!m_dev) return FALSE;
+	if (kmh < 0.f) kmh = 0.f;
+	if (rpm01 < 0.f) rpm01 = 0.f;
+	if (rpm01 > 1.f) rpm01 = 1.f;
+	const int w = 560, h = 250;
+	Soft3DTextD2DCanvas* cv = Soft3DTextD2D_Begin(w, h);
+	if (!cv) return FALSE;
+	const float a0 = 3.9269908f;
+	const float sweep = 4.7123890f;
+	auto dial = [&](float cx, float cy, float rad, float t, int tach) {
+		Soft3DTextD2D_FillEllipse(cv, cx, cy, rad + 5.f, rad + 5.f, 235, 22, 24, 30);
+		Soft3DTextD2D_FillEllipse(cv, cx, cy, rad, rad, 245, 8, 10, 16);
+		Soft3DTextD2D_FillEllipse(cv, cx, cy, rad * 0.70f, rad * 0.70f, 200, 14, 16, 22);
+		const int nTick = tach ? 18 : 26;
+		for (int i = 0; i <= nTick; i++) {
+			float u = (float)i / (float)nTick;
+			float th = a0 - u * sweep;
+			float cth = cosf(th), sth = sinf(th);
+			int major = (i % 2) == 0;
+			float r0 = rad * (major ? 0.76f : 0.84f);
+			float r1 = rad * 0.97f;
+			float x0 = cx + cth * r0, y0 = cy - sth * r0;
+			float x1 = cx + cth * r1, y1 = cy - sth * r1;
+			float qx = sth * (major ? 2.4f : 1.15f), qy = cth * (major ? 2.4f : 1.15f);
+			BYTE ar = 210, ag = 220, ab = 235;
+			if (tach && u >= 0.78f) { ar = 255; ag = 48; ab = 42; }
+			Soft3DTextD2D_FillTriangle(cv, x0 + qx, y0 + qy, x0 - qx, y0 - qy, x1, y1, 255, ar, ag, ab);
+		}
+		if (t < 0.f) t = 0.f; if (t > 1.05f) t = 1.05f;
+		float th = a0 - t * sweep;
+		float cth = cosf(th), sth = sinf(th);
+		float tipx = cx + cth * rad * 0.86f, tipy = cy - sth * rad * 0.86f;
+		float hx = -sth * 6.5f, hy = -cth * 6.5f;
+		BYTE nr = tach ? 255 : 255, ng = tach ? 196 : 72, nb = tach ? 48 : 48;
+		Soft3DTextD2D_FillTriangle(cv, tipx, tipy, cx + hx, cy - hy, cx - hx, cy + hy, 255, nr, ng, nb);
+		Soft3DTextD2D_FillEllipse(cv, cx, cy, 9.f, 9.f, 255, 228, 228, 236);
+		Soft3DTextD2D_FillEllipse(cv, cx, cy, 4.f, 4.f, 255, 40, 40, 48);
+	};
+	const float spdT = kmh / 2600.f;
+	dial(138.f, 128.f, 112.f, spdT, 0);
+	dial(412.f, 128.f, 100.f, rpm01, 1);
+	{
+		const float cx = 138.f, cy = 128.f, rad = 112.f;
+		const wchar_t* labs[] = { L"0", L"5", L"10", L"15", L"20", L"25" };
+		for (int i = 0; i < 6; i++) {
+			float u = (float)i / 5.f;
+			float th = a0 - u * sweep;
+			float r = rad * 0.58f;
+			float x = cx + cosf(th) * r - 16.f;
+			float y = cy - sinf(th) * r - 10.f;
+			Soft3DTextD2D_DrawText(cv, labs[i], x, y, 36.f, 22.f, 15.f, 1, 1, 1, 230, 210, 220, 235);
+		}
+		wchar_t sp[32];
+		swprintf_s(sp, L"%.0f", kmh);
+		Soft3DTextD2D_DrawTextShadow(cv, sp, cx - 56.f, cy - 20.f, 112.f, 40.f,
+			32.f, 1, 1, 1, 255, 255, 255, 255, 1.6f, 1.6f, 180, 0, 0, 0);
+		Soft3DTextD2D_DrawText(cv, L"km/h", cx - 44.f, cy + 16.f, 88.f, 22.f, 16.f, 1, 1, 1, 240, 255, 210, 80);
+	}
+	{
+		const float cx = 412.f, cy = 128.f, rad = 100.f;
+		const wchar_t* labs[] = { L"0", L"2", L"4", L"6", L"8", L"9" };
+		for (int i = 0; i < 6; i++) {
+			float u = (i == 5) ? 1.f : ((float)i / 5.f) * (8.f / 9.f);
+			float th = a0 - u * sweep;
+			float r = rad * 0.56f;
+			float x = cx + cosf(th) * r - 12.f;
+			float y = cy - sinf(th) * r - 9.f;
+			BYTE ar = (i >= 4) ? 255 : 210, ag = (i >= 4) ? 90 : 220, ab = (i >= 4) ? 80 : 235;
+			Soft3DTextD2D_DrawText(cv, labs[i], x, y, 28.f, 20.f, 14.f, 1, 1, 1, 230, ar, ag, ab);
+		}
+		wchar_t rp[32];
+		swprintf_s(rp, L"%.1f", rpm01 * 9.f);
+		Soft3DTextD2D_DrawTextShadow(cv, rp, cx - 44.f, cy - 18.f, 88.f, 32.f,
+			24.f, 1, 1, 1, 255, 255, 220, 190, 1.5f, 1.5f, 180, 0, 0, 0);
+		Soft3DTextD2D_DrawText(cv, L"x1000rpm", cx - 52.f, cy + 14.f, 104.f, 20.f, 13.f, 1, 1, 1, 240, 255, 120, 70);
+	}
+	const BYTE* bits = NULL; UINT stride = 0;
+	if (!Soft3DTextD2D_End(cv, &bits, &stride) || !bits) { Soft3DTextD2D_Release(cv); return FALSE; }
+	D3D11_TEXTURE2D_DESC d = {};
+	d.Width = w; d.Height = h; d.MipLevels = 1; d.ArraySize = 1;
+	d.Format = DXGI_FORMAT_B8G8R8A8_UNORM; d.SampleDesc.Count = 1;
+	d.Usage = D3D11_USAGE_IMMUTABLE; d.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+	D3D11_SUBRESOURCE_DATA sd = { bits, stride, 0 };
+	HRESULT hr = m_dev->CreateTexture2D(&d, &sd, &m_texGauge);
+	if (SUCCEEDED(hr)) hr = m_dev->CreateShaderResourceView(m_texGauge, NULL, &m_srvGauge);
+	Soft3DTextD2D_Release(cv);
+	m_gaugeTexW = w; m_gaugeTexH = h;
+	return SUCCEEDED(hr);
+}
+BOOL CS3rView::BakeStandingsTexture(const S3rStandRow* rows, int nRows, int nitroStock, int nitroMax, float nitroPulse)
 {
 	if (!m_dev || !rows || nRows < 1) return FALSE;
 	ReleaseStandingsTexture();
 	if (nRows > 12) nRows = 12;
+	if (nitroMax < 1) nitroMax = 1;
+	if (nitroMax > 8) nitroMax = 8;
+	if (nitroStock < 0) nitroStock = 0;
+	if (nitroStock > nitroMax) nitroStock = nitroMax;
 	const int rowH = 72;
-	const int w = 400, h = nRows * rowH + 8;
+	const int nitroStrip = 52;
+	const int w = 400, h = nRows * rowH + 8 + nitroStrip;
 	Soft3DTextD2DCanvas* cv = Soft3DTextD2D_Begin(w, h);
 	if (!cv) return FALSE;
 	for (int i = 0; i < nRows; i++) {
@@ -1308,6 +1741,40 @@ BOOL CS3rView::BakeStandingsTexture(const S3rStandRow* rows, int nRows)
 				Soft3DTextD2D_DrawTextShadow(cv, one, lapX0 + (float)col * colW, lapY0 + (float)row * lapH, colW - 2.f, lapH,
 					16.f, 1, 0, 1, 255, 210, 230, 245, 1.3f, 1.3f, 200, 0, 0, 0);
 			}
+		}
+	}
+	// 順位パネル下：自機ニトロ所持アイコン
+	{
+		float y0 = (float)(4 + nRows * rowH + 2);
+		Soft3DTextD2D_FillRect(cv, 3.f, y0, (float)(w - 6), (float)(nitroStrip - 6), 210, 18, 22, 40);
+		const wchar_t* lab = LL14(L"ニトロ", L"NITRO", L"NITRO", L"NITRO", L"NITRO",
+			L"니트로", L"氮气", L"نيترو", L"НИТРО", L"NITRO", L"NITRO", L"NITRO", L"NITRO", L"NİTRO");
+		Soft3DTextD2D_DrawTextShadow(cv, lab, 10.f, y0 + 6.f, 70.f, 28.f,
+			16.f, 1, 0, 1, 255, 120, 220, 255, 1.2f, 1.2f, 180, 0, 0, 0);
+		const float iconR = 14.f;
+		const float gap = 8.f;
+		float x0 = 88.f;
+		float cy = y0 + (float)(nitroStrip - 6) * 0.5f;
+		BYTE pulse = (BYTE)(40.f + 80.f * (nitroPulse > 0.f ? nitroPulse : 0.f));
+		for (int i = 0; i < nitroMax; i++) {
+			float cx = x0 + (float)i * (iconR * 2.f + gap);
+			const int filled = (i < nitroStock);
+			if (filled) {
+				Soft3DTextD2D_FillEllipse(cv, cx, cy + 2.f, iconR * 0.72f, iconR * 0.95f, 255, 30, 160, 255);
+				Soft3DTextD2D_FillEllipse(cv, cx, cy - 6.f, iconR * 0.38f, iconR * 0.32f, 255, 80, 200, 255);
+				Soft3DTextD2D_FillTriangle(cv, cx - 5.f, cy - 10.f, cx + 5.f, cy - 10.f, cx, cy - 20.f,
+					255, 255, (BYTE)(140 + pulse / 2), 40);
+				Soft3DTextD2D_FillEllipse(cv, cx - 3.f, cy, 3.5f, 5.f, 160, 200, 255, 255);
+			} else {
+				Soft3DTextD2D_FillEllipse(cv, cx, cy + 2.f, iconR * 0.72f, iconR * 0.95f, 120, 50, 60, 80);
+				Soft3DTextD2D_FillEllipse(cv, cx, cy - 6.f, iconR * 0.38f, iconR * 0.32f, 100, 70, 80, 100);
+			}
+		}
+		if (nitroPulse > 0.05f) {
+			wchar_t act[24];
+			swprintf_s(act, L"ACTIVE");
+			Soft3DTextD2D_DrawTextShadow(cv, act, 300.f, y0 + 10.f, 90.f, 24.f,
+				14.f, 1, 2, 1, 255, 255, (BYTE)(180 + pulse / 2), 80, 1.2f, 1.2f, 200, 0, 0, 0);
 		}
 	}
 	const BYTE* bits = NULL; UINT stride = 0;
@@ -1398,12 +1865,14 @@ BOOL CS3rView::BakeItemLabTexture(const wchar_t* const* labels, int nLabels)
 void CS3rView::ReleaseDx()
 {
 	m_ready=FALSE;if(m_imm){m_imm->ClearState();m_imm->Flush();}
-	ReleaseClearTexture();ReleaseHudTexture();ReleaseStandingsTexture();ReleaseBubbleTexture();ReleaseItemLabTexture();
+	ReleaseClearTexture();ReleaseHudTexture();ReleaseGaugeTexture();ReleaseStandingsTexture();ReleaseBubbleTexture();ReleaseItemLabTexture();
 	S3R_RELEASE(m_uavNoise);S3R_RELEASE(m_srvNoise);S3R_RELEASE(m_texNoise);
 	S3R_RELEASE(m_srvWood);S3R_RELEASE(m_texWood);S3R_RELEASE(m_srvItem);S3R_RELEASE(m_texItem);
+	S3R_RELEASE(m_srvSky4);S3R_RELEASE(m_texSky4);S3R_RELEASE(m_srvSky3);S3R_RELEASE(m_texSky3);
 	S3R_RELEASE(m_srvSky2);S3R_RELEASE(m_texSky2);S3R_RELEASE(m_srvSky);S3R_RELEASE(m_texSky);
 	S3R_RELEASE(m_srvEnv2);S3R_RELEASE(m_texEnv2);S3R_RELEASE(m_srvEnv);S3R_RELEASE(m_texEnv);S3R_RELEASE(m_srvCraftD);S3R_RELEASE(m_texCraftD);S3R_RELEASE(m_srvCraft);S3R_RELEASE(m_texCraft);
-	S3R_RELEASE(m_srvWater);S3R_RELEASE(m_texWater);S3R_RELEASE(m_srvObs);S3R_RELEASE(m_texObs);S3R_RELEASE(m_srvBand);S3R_RELEASE(m_texBand);
+	S3R_RELEASE(m_srvWaterD);S3R_RELEASE(m_texWaterD);S3R_RELEASE(m_srvWater);S3R_RELEASE(m_texWater);
+	S3R_RELEASE(m_srvObsD);S3R_RELEASE(m_texObsD);S3R_RELEASE(m_srvObs);S3R_RELEASE(m_texObs);S3R_RELEASE(m_srvBand);S3R_RELEASE(m_texBand);
 	for(int i=0;i<S3R_THEME_N;i++){S3R_RELEASE(m_srvThemeD[i]);S3R_RELEASE(m_texThemeD[i]);S3R_RELEASE(m_srvTheme[i]);S3R_RELEASE(m_texTheme[i]);}
 	S3R_RELEASE(m_bsAdd);S3R_RELEASE(m_bsAlpha);S3R_RELEASE(m_bsOpaque);S3R_RELEASE(m_dssOff);S3R_RELEASE(m_dssRead);S3R_RELEASE(m_dssWrite);S3R_RELEASE(m_rsShadow);S3R_RELEASE(m_rsNoCull);S3R_RELEASE(m_rsSolid);S3R_RELEASE(m_sampCmp);S3R_RELEASE(m_sampPoint);S3R_RELEASE(m_sampLin);
 	S3R_RELEASE(m_vbHud);
@@ -1419,8 +1888,10 @@ void CS3rView::ReleaseDx()
 	delete[] m_cpuDynScratch; m_cpuDynScratch=NULL; m_cpuDynScratchBytes=0;
 	delete[] m_cpuHudScratch; m_cpuHudScratch=NULL; m_cpuHudScratchBytes=0;
 	delete[] m_cpuBakeScratch; m_cpuBakeScratch=NULL; m_cpuBakeScratchBytes=0;
-	S3R_RELEASE(m_csNoise);S3R_RELEASE(m_psFinal);S3R_RELEASE(m_psDof);S3R_RELEASE(m_psSsr);S3R_RELEASE(m_vsPost);S3R_RELEASE(m_psHudLine);S3R_RELEASE(m_psHud);S3R_RELEASE(m_vsHud);S3R_RELEASE(m_psCraft);S3R_RELEASE(m_psTerr);S3R_RELEASE(m_psSolid);S3R_RELEASE(m_vsInst);S3R_RELEASE(m_vsSolid);S3R_RELEASE(m_psBand);S3R_RELEASE(m_dsTess);S3R_RELEASE(m_hsTess);S3R_RELEASE(m_vsTess);
+	S3R_RELEASE(m_csNoise);S3R_RELEASE(m_psFinal);S3R_RELEASE(m_psDof);S3R_RELEASE(m_psSsr);S3R_RELEASE(m_vsPost);S3R_RELEASE(m_psHudLine);S3R_RELEASE(m_psHud);S3R_RELEASE(m_vsHud);S3R_RELEASE(m_psCraft);S3R_RELEASE(m_psTerr);S3R_RELEASE(m_psWater);S3R_RELEASE(m_psCloud);S3R_RELEASE(m_psSolid);S3R_RELEASE(m_vsInst);S3R_RELEASE(m_vsSolid);S3R_RELEASE(m_psBand);S3R_RELEASE(m_dsTess);S3R_RELEASE(m_hsTess);S3R_RELEASE(m_vsTess);
 	S3R_RELEASE(m_shadowSrv);S3R_RELEASE(m_shadowDsv);S3R_RELEASE(m_shadowTex);
+	S3R_RELEASE(m_srvRear);S3R_RELEASE(m_rearRtv);S3R_RELEASE(m_rearTex);S3R_RELEASE(m_rearDsv);S3R_RELEASE(m_rearDs);
+	S3R_RELEASE(m_srvReflect);S3R_RELEASE(m_reflectRtv);S3R_RELEASE(m_reflectTex);S3R_RELEASE(m_reflectDsv);S3R_RELEASE(m_reflectDs);
 	S3R_RELEASE(m_postSrv);S3R_RELEASE(m_postRtv);S3R_RELEASE(m_postTex);S3R_RELEASE(m_sceneSrv);S3R_RELEASE(m_sceneRtv);S3R_RELEASE(m_sceneTex);S3R_RELEASE(m_dsSrv);S3R_RELEASE(m_dsv);S3R_RELEASE(m_dsTex);S3R_RELEASE(m_bbRtv);S3R_RELEASE(m_swap);S3R_RELEASE(m_imm);S3R_RELEASE(m_dev);m_vw=m_vh=0;
 }
 void CS3rView::ClearTerrMesh()
@@ -1597,17 +2068,17 @@ CSoft3DRaceDlg::CSoft3DRaceDlg(CWnd* p)
 	, m_knotN(0), m_pathLen(0), m_craftN(0), m_obsN(0), m_itemN(0)
 	, m_craftNv(0), m_craftNi(0), m_obsNv(0), m_obsNi(0)
 	, m_phase(PHASE_IDLE), m_countT(0), m_countShown(-1), m_podiumT(0)
-	, m_finishSimT(0), m_aiRaceLv(AI_NORMAL), m_blastCursor(0)
+	, m_finishSimT(0), m_aiRaceLv(AI_NORMAL), m_blastCursor(0), m_fxCursor(0)
 	, m_themeActive(THEME_FOREST), m_layoutKind(0), m_lapsTarget(3), m_bandHalf(6.f)
 	, m_demoCamT(0.f), m_demoCamElev(0.f), m_demoMidX(0), m_demoMidY(0), m_demoMidZ(0), m_demoRad(80.f)
 	, m_hmX0(0), m_hmZ0(0), m_hmStep(1.f), m_hmReady(0), m_waterY(8.f), m_carveN(0)
 	, m_camYawOff(0), m_camPitchOff(0.22f), m_camZoom(1.f)
-	, m_camSx(0), m_camSy(0), m_camSz(0), m_camAx(0), m_camAy(0), m_camAz(0), m_camSmoothInit(0)
-	, m_lookback(0), m_accelHeld(0), m_brakeHeld(0), m_mouseLook(0)
+	, m_camSx(0), m_camSy(0), m_camSz(0), m_camAx(0), m_camAy(0), m_camAz(0), m_camSmoothInit(0), m_camTunnelT(0), m_frameDt(1.f/60.f)
+	, m_lookback(0), m_accelHeld(0), m_brakeHeld(0), m_nitroBtnHeld(0), m_mouseLook(0)
 	, m_lastTick(0), m_inTick(0), m_rng(1), m_genSeed(1), m_spaceToggleTick(0)
 	, m_baseTempoPos(100), m_basePitchPos(200), m_anim(0), m_raceClock(0), m_playerSpdEma(0), m_playerAccel(0)
 	, m_wrongWay(0), m_overlayHold(0), m_sfxHitCool(0)
-	, m_clearBakeA(0), m_hudDirty(1), m_clearDirty(1), m_standDirty(1)
+	, m_clearBakeA(0), m_hudDirty(1), m_gaugeKmhQ(-1), m_gaugeRpmQ(-1), m_clearDirty(1), m_standDirty(1)
 	, m_reverbFogBoost(0), m_eqDofBoost(0)
 	, m_podiumBaseX(0), m_podiumBaseY(0), m_podiumBaseZ(0)
 {
@@ -1625,9 +2096,11 @@ CSoft3DRaceDlg::CSoft3DRaceDlg(CWnd* p)
 	memset(m_podiumOrder,0,sizeof(m_podiumOrder));
 	memset(m_confetti,0,sizeof(m_confetti));
 	memset(m_blast,0,sizeof(m_blast));
+	memset(m_fx,0,sizeof(m_fx));
 	memset(m_hm,0,sizeof(m_hm));
 	memset(m_hmRaw,0,sizeof(m_hmRaw));
 	memset(m_hmPathDist,0,sizeof(m_hmPathDist));
+	memset(m_pathDeep,0,sizeof(m_pathDeep));
 	memset(m_carveX0,0,sizeof(m_carveX0)); memset(m_carveY0,0,sizeof(m_carveY0)); memset(m_carveZ0,0,sizeof(m_carveZ0));
 	memset(m_carveX1,0,sizeof(m_carveX1)); memset(m_carveY1,0,sizeof(m_carveY1)); memset(m_carveZ1,0,sizeof(m_carveZ1));
 	memset(m_carveCeil,0,sizeof(m_carveCeil));
@@ -1696,6 +2169,15 @@ void CSoft3DRaceDlg::PostNcDestroy()
 	delete this;
 }
 void CSoft3DRaceDlg::LayoutHelpBtn() { CCC_CaptionPlaceHelpBtn(m_hWnd, &m_help); }
+static BOOL S3rPeekOwn(HWND root, MSG* msg, UINT fmin, UINT fmax)
+{
+	if (!root || !msg) return FALSE;
+	MSG p = {};
+	if (!::PeekMessage(&p, NULL, fmin, fmax, PM_NOREMOVE)) return FALSE;
+	if (!p.hwnd || (p.hwnd != root && !::IsChild(root, p.hwnd))) return FALSE;
+	return ::PeekMessage(msg, p.hwnd, p.message, p.message, PM_REMOVE) ? TRUE : FALSE;
+}
+
 void CSoft3DRaceDlg::PumpQueued(BOOL input)
 {
 	HWND root = GetSafeHwnd();
@@ -1704,11 +2186,11 @@ void CSoft3DRaceDlg::PumpQueued(BOOL input)
 	int n = 0;
 	const int cap = input ? 18 : 10;
 	while (n < cap) {
-		if (!::PeekMessage(&msg, NULL, WM_PAINT, WM_PAINT, PM_REMOVE)) {
+		if (!S3rPeekOwn(root, &msg, WM_PAINT, WM_PAINT)) {
 			if (!input) break;
-			if (!::PeekMessage(&msg, NULL, WM_MOUSEFIRST, WM_MOUSELAST, PM_REMOVE)
-				&& !::PeekMessage(&msg, NULL, WM_KEYFIRST, WM_KEYLAST, PM_REMOVE)
-				&& !::PeekMessage(&msg, NULL, WM_NCMOUSEMOVE, WM_NCMBUTTONDBLCLK, PM_REMOVE))
+			if (!S3rPeekOwn(root, &msg, WM_MOUSEFIRST, WM_MOUSELAST)
+				&& !S3rPeekOwn(root, &msg, WM_KEYFIRST, WM_KEYLAST)
+				&& !S3rPeekOwn(root, &msg, WM_NCMOUSEMOVE, WM_NCMBUTTONDBLCLK))
 				break;
 		}
 		if (msg.message == WM_QUIT) { ::PostQuitMessage((int)msg.wParam); return; }
@@ -1891,10 +2373,86 @@ float CSoft3DRaceDlg::RaceSpeedCap(int boosted) const
 	if (boosted) u *= 1.12f;
 	return u;
 }
+float CSoft3DRaceDlg::NitroSpeedMul(const S3rCraft& c) const
+{
+	if (c.nitroT <= 0.f) return 1.f;
+	// 自機 +30%。CPU は難易度で近づける（強烈はほぼ同等）
+	float excess = 0.30f;
+	if (!c.isPlayer) {
+		if (m_aiRaceLv >= AI_FEROCIOUS) excess *= 0.92f;
+		else if (m_aiRaceLv >= AI_HARD) excess *= 0.80f;
+		else if (m_aiRaceLv >= AI_NORMAL) excess *= 0.72f;
+		else excess *= (2.f / 3.f);
+	}
+	return 1.f + excess;
+}
+float CSoft3DRaceDlg::NitroThrustMul(const S3rCraft& c) const
+{
+	if (c.nitroT <= 0.f) return 1.f;
+	float excess = 0.38f;
+	if (!c.isPlayer) {
+		if (m_aiRaceLv >= AI_FEROCIOUS) excess *= 0.92f;
+		else if (m_aiRaceLv >= AI_HARD) excess *= 0.80f;
+		else if (m_aiRaceLv >= AI_NORMAL) excess *= 0.72f;
+		else excess *= (2.f / 3.f);
+	}
+	return 1.f + excess;
+}
+BOOL CSoft3DRaceDlg::TryUseNitro(S3rCraft& c)
+{
+	if (!c.alive || c.finished || c.retired) return FALSE;
+	if (c.nitroStock <= 0 || c.nitroT > 0.05f) return FALSE;
+	if (m_phase != PHASE_RACE) return FALSE;
+	c.nitroStock--;
+	c.nitroT = 2.85f;
+	m_standDirty = 1;
+	SpawnFxBurst(FX_EMBER, c.x, c.y + 0.15f, c.z,
+		-sinf(c.yaw)*cosf(c.pitch), -sinf(c.pitch), -cosf(c.yaw)*cosf(c.pitch),
+		12, 8.5f, 0.35f, 0.85f, 1.f);
+	if (c.isPlayer)
+		Soft3DSfxUi(S3SFX_BOOST, 0);
+	else
+		Soft3DSfxOneShot(S3SFX_BOOST, c.x, c.y, c.z);
+	return TRUE;
+}
 float CSoft3DRaceDlg::SpeedToKmh(float vx, float vy, float vz) const
 {
 	// 表示のみ20倍（≈80→1600 km/h 帯）
 	return sqrtf(vx * vx + vy * vy + vz * vz) * 3.6f * 20.f;
+}
+static float S3rEngPower(float rpm, float thr)
+{
+	if (rpm < 0.f) rpm = 0.f;
+	if (rpm > 1.f) rpm = 1.f;
+	if (thr < 0.f) thr = 0.f;
+	if (thr > 1.f) thr = 1.f;
+	float p = 0.16f + rpm * rpm * (0.95f + 0.22f * rpm);
+	return p * thr;
+}
+void CSoft3DRaceDlg::TickEngine(S3rCraft& c, float thrIn, int brake, float dt)
+{
+	if (thrIn < 0.f) thrIn = 0.f;
+	if (thrIn > 1.f) thrIn = 1.f;
+	if (brake) thrIn = 0.f;
+	if (c.fuel <= 0.01f) thrIn = 0.f;
+	else if (c.fuel < 5.f) thrIn *= 0.25f;
+	float thrRate = (thrIn > c.throttle) ? 3.15f : 5.4f;
+	c.throttle = S3rLerp(c.throttle, thrIn, min(1.f, thrRate * dt));
+	const float idle = 0.08f;
+	float spd = sqrtf(c.vx * c.vx + c.vy * c.vy + c.vz * c.vz);
+	float cap = RaceSpeedCap(c.boostT > 0.f ? 1 : 0) * NitroSpeedMul(c);
+	float load = S3rSaturate(spd / max(1.f, cap));
+	float rpmT = idle + c.throttle * (0.92f - idle);
+	if (c.throttle < 0.10f)
+		rpmT = S3rLerp(idle, idle + load * 0.48f, 0.70f);
+	if (c.boostT > 0.f) rpmT = min(1.f, rpmT + 0.07f);
+	if (c.nitroT > 0.f) rpmT = min(1.f, rpmT + (c.isPlayer ? 0.14f : 0.09f));
+	if (c.slowT > 0.f) rpmT *= 0.72f;
+	float rpmRate = (rpmT > c.rpm) ? 2.45f : 3.55f;
+	if (brake) rpmRate = 7.2f;
+	c.rpm = S3rLerp(c.rpm, rpmT, min(1.f, rpmRate * dt));
+	if (c.rpm < idle * 0.6f) c.rpm = idle * 0.6f;
+	if (c.rpm > 1.f) c.rpm = 1.f;
 }
 float CSoft3DRaceDlg::BandSpeedFactor(float lat, float vert) const
 {
@@ -1935,6 +2493,7 @@ void CSoft3DRaceDlg::RespawnCraftToCheckpoint(S3rCraft& c, float fuelAmt, float 
 	c.pitch = S3rClamp(asinf(S3rClamp(ty, -1.f, 1.f)), -0.55f, 0.55f);
 	float keep = 16.f / 3.6f;
 	c.vx = tx * keep; c.vy = ty * keep; c.vz = tz * keep;
+	c.throttle = 0.f; c.rpm = 0.08f;
 	c.fuel = fuelAmt;
 	c.offBandT = 0.f;
 	c.offBand = 0;
@@ -1954,6 +2513,7 @@ void CSoft3DRaceDlg::AbortAiToLine(S3rCraft& c, float lineLockSec)
 	c.pitch = S3rClamp(asinf(S3rClamp(ty, -1.f, 1.f)), -0.55f, 0.55f);
 	float keep = RaceSpeedCap(0) * 0.55f;
 	c.vx = tx * keep; c.vy = ty * keep; c.vz = tz * keep;
+	c.throttle = 0.f; c.rpm = 0.08f;
 	c.fuel = max(c.fuel, 75.f);
 	c.offBand = 0; c.offBandT = 0.f;
 	c.courseOutCool = max(c.courseOutCool, 0.85f);
@@ -2064,6 +2624,27 @@ float CSoft3DRaceDlg::GroundY(float x, float z) const
 	const float h10 = m_hm[j * S3R_HM_N + i + 1];
 	const float h01 = m_hm[(j + 1) * S3R_HM_N + i];
 	const float h11 = m_hm[(j + 1) * S3R_HM_N + i + 1];
+	const float hx0 = h00 + (h10 - h00) * fu;
+	const float hx1 = h01 + (h11 - h01) * fu;
+	return hx0 + (hx1 - hx0) * fv;
+}
+float CSoft3DRaceDlg::RawGroundY(float x, float z) const
+{
+	if (!m_hmReady || m_hmStep < 1e-4f) return 8.f;
+	float u = (x - m_hmX0) / m_hmStep;
+	float v = (z - m_hmZ0) / m_hmStep;
+	int i = (int)floorf(u);
+	int j = (int)floorf(v);
+	float fu = u - (float)i;
+	float fv = v - (float)j;
+	if (i < 0) { i = 0; fu = 0.f; }
+	if (j < 0) { j = 0; fv = 0.f; }
+	if (i >= S3R_HM_N - 1) { i = S3R_HM_N - 2; fu = 1.f; }
+	if (j >= S3R_HM_N - 1) { j = S3R_HM_N - 2; fv = 1.f; }
+	const float h00 = m_hmRaw[j * S3R_HM_N + i];
+	const float h10 = m_hmRaw[j * S3R_HM_N + i + 1];
+	const float h01 = m_hmRaw[(j + 1) * S3R_HM_N + i];
+	const float h11 = m_hmRaw[(j + 1) * S3R_HM_N + i + 1];
 	const float hx0 = h00 + (h10 - h00) * fu;
 	const float hx1 = h01 + (h11 - h01) * fu;
 	return hx0 + (hx1 - hx0) * fv;
@@ -2370,17 +2951,16 @@ void CSoft3DRaceDlg::GenerateCourseWithSeed(DWORD seed)
 		}
 		m_pathCumLen[i] = m_pathLen; px=x;py=y;pz=z;
 	}
-	// コース帯に浅い溝＋山は滑らかにくりぬき（格子の段差を出さない）
+	// コース帯に浅い溝＋山は円形トンネル（坑口を広げ、床は下半円）
 	{
 		for (int i = 0; i < S3R_HM_N * S3R_HM_N; i++) m_hmPathDist[i] = 1e8f;
-		const float innerR = m_bandHalf * 1.18f;
-		const float outerR = m_bandHalf * 3.15f;
+		memset(m_pathDeep, 0, sizeof(m_pathDeep));
 		const float grooveR = m_bandHalf * 1.85f;
+		const float tunR0 = S3rTunR(m_bandHalf);
+		const float outerR = max(grooveR, tunR0 * 1.42f);
 		const int span = (int)ceilf(outerR / max(0.01f, m_hmStep)) + 2;
 		for (int i = 0; i < S3R_PATH_SAMPLES; i++) {
 			float qx = m_pathSampleXYZ[i][0], qy = m_pathSampleXYZ[i][1], qz = m_pathSampleXYZ[i][2];
-			float i0f = (qx - m_hmX0) / m_hmStep;
-			float j0f = (qz - m_hmZ0) / m_hmStep;
 			float gq = 0.f;
 			{
 				float u = (qx - m_hmX0) / m_hmStep, v = (qz - m_hmZ0) / m_hmStep;
@@ -2393,16 +2973,26 @@ void CSoft3DRaceDlg::GenerateCourseWithSeed(DWORD seed)
 				float r01 = m_hmRaw[(jj + 1) * S3R_HM_N + ii], r11 = m_hmRaw[(jj + 1) * S3R_HM_N + ii + 1];
 				gq = r00 + (r10 - r00) * fu + ((r01 + (r11 - r01) * fu) - (r00 + (r10 - r00) * fu)) * fv;
 			}
-			float floorY = qy - 2.2f;
+			m_pathDeep[i] = (gq > qy + 1.8f * sc) ? 1 : 0;
+		}
+		for (int i = 0; i < S3R_PATH_SAMPLES; i++) {
+			float qx = m_pathSampleXYZ[i][0], qy = m_pathSampleXYZ[i][1], qz = m_pathSampleXYZ[i][2];
+			float i0f = (qx - m_hmX0) / m_hmStep;
+			float j0f = (qz - m_hmZ0) / m_hmStep;
+			int deepCore = m_pathDeep[i] ? 1 : 0;
+			int deep = deepCore || S3rPathNearDeep(m_pathDeep, i, 22);
+			float flare = S3rTunFlare(m_pathDeep, i);
+			if (!deepCore && deep) flare = 1.f;
+			float tunR = tunR0 * (1.f + 0.85f * flare);
+			float floorY = deep ? (qy - tunR) : (qy - 2.2f);
 			if (floorY < 1.f) floorY = 1.f;
-			int deep = (gq > qy + 1.8f * sc) ? 1 : 0;
 			int i0 = (int)i0f - span, j0 = (int)j0f - span;
 			int i1 = (int)i0f + span, j1 = (int)j0f + span;
 			if (i0 < 0) i0 = 0; if (j0 < 0) j0 = 0;
 			if (i1 > S3R_HM_N - 1) i1 = S3R_HM_N - 1;
 			if (j1 > S3R_HM_N - 1) j1 = S3R_HM_N - 1;
-			float inR = deep ? innerR : (grooveR * 0.42f);
-			float outR = deep ? outerR : grooveR;
+			float inR = deep ? 0.f : (grooveR * 0.42f);
+			float outR = deep ? tunR : grooveR;
 			for (int jz = j0; jz <= j1; jz++) {
 				for (int ix = i0; ix <= i1; ix++) {
 					float wx = m_hmX0 + (float)ix * m_hmStep;
@@ -2412,22 +3002,30 @@ void CSoft3DRaceDlg::GenerateCourseWithSeed(DWORD seed)
 					int idx = jz * S3R_HM_N + ix;
 					if (dd < m_hmPathDist[idx]) m_hmPathDist[idx] = dd;
 					if (dd > outR) continue;
-					float t = (dd - inR) / max(0.01f, outR - inR);
-					if (t < 0.f) t = 0.f; if (t > 1.f) t = 1.f;
-					t = t * t * (3.f - 2.f * t);
-					float lo = deep ? floorY : (qy - 2.8f);
-					if (lo < floorY) lo = floorY;
-					float cut = lo + (m_hmRaw[idx] - lo) * t;
+					float cut;
+					if (deep) {
+						if (!deepCore && m_hmRaw[idx] < qy + 1.4f) continue;
+						float h = sqrtf(max(0.f, tunR * tunR - dd * dd));
+						cut = qy - h;
+						if (cut < 1.f) cut = 1.f;
+					} else {
+						float t = (dd - inR) / max(0.01f, outR - inR);
+						if (t < 0.f) t = 0.f; if (t > 1.f) t = 1.f;
+						t = t * t * (3.f - 2.f * t);
+						float lo = qy - 2.8f;
+						if (lo < floorY) lo = floorY;
+						cut = lo + (m_hmRaw[idx] - lo) * t;
+					}
 					if (m_hm[idx] > cut) m_hm[idx] = cut;
 				}
 			}
 			if (deep && m_carveN < S3R_CARVE_MAX && (i % 8) == 0) {
 				int k = m_carveN++;
-				float hw = m_bandHalf * 1.72f;
+				float hw = tunR * 1.08f;
 				m_carveX0[k] = qx - hw; m_carveX1[k] = qx + hw;
 				m_carveZ0[k] = qz - hw; m_carveZ1[k] = qz + hw;
-				m_carveY0[k] = floorY - 1.2f;
-				m_carveY1[k] = gq + 1.5f;
+				m_carveY0[k] = qy - tunR - 1.2f;
+				m_carveY1[k] = qy + tunR + 1.2f;
 				m_carveCeil[k] = 1;
 			}
 		}
@@ -2443,6 +3041,7 @@ void CSoft3DRaceDlg::GenerateCourseWithSeed(DWORD seed)
 						int idx = jz * S3R_HM_N + ix;
 						float d = m_hmPathDist[idx];
 						if (d <= inB || d >= outB) continue;
+						if (m_hmRaw[idx] > tmp[idx] + 3.5f) continue;
 						float acc = 0.f; int n = 0;
 						for (int dj = -1; dj <= 1; dj++) for (int di = -1; di <= 1; di++) {
 							int x2 = ix + di, z2 = jz + dj;
@@ -2746,9 +3345,14 @@ void CSoft3DRaceDlg::PlaceObstaclesAndItems()
 		return 0;
 	};
 
+	auto inTunnelLane=[&](float t)->int{
+		return S3rPathNearDeep(m_pathDeep, S3rPathIdx(t), 12);
+	};
+
 	// 帯にめり込む両脇（枝・土管・傘が光帯を貫く。片側は通れる）
 	for (int g=0;g<48 && m_obsN+4<S3R_MAX_OBS;g++){
 		float t=(float)g/48.f;
+		if (inTunnelLane(t)) continue;
 		float px,py,pz,tx,ty,tz,nx,ny,nz,bx,by,bz;
 		SplineFrame(t,px,py,pz,tx,ty,tz,nx,ny,nz,bx,by,bz);
 		float hs= 1.10f + S3rRand01(rng)*0.55f;
@@ -2767,6 +3371,7 @@ void CSoft3DRaceDlg::PlaceObstaclesAndItems()
 	for (int i=0;i<wantSlalom && m_obsN<S3R_MAX_OBS;i++){
 		float t = (float)i / (float)wantSlalom + S3rRand01(rng)*0.01f;
 		if (t >= 1.f) t -= 1.f;
+		if (inTunnelLane(t)) continue;
 		float px,py,pz,tx,ty,tz,nx,ny,nz,bx,by,bz;
 		SplineFrame(t,px,py,pz,tx,ty,tz,nx,ny,nz,bx,by,bz);
 		float side = ((i&1)?1.f:-1.f);
@@ -2792,6 +3397,7 @@ void CSoft3DRaceDlg::PlaceObstaclesAndItems()
 	int wantAir = 36;
 	for (int i=0;i<wantAir && m_obsN<S3R_MAX_OBS;i++){
 		float t = S3rRand01(rng);
+		if (inTunnelLane(t)) continue;
 		float px,py,pz,tx,ty,tz,nx,ny,nz,bx,by,bz;
 		SplineFrame(t,px,py,pz,tx,ty,tz,nx,ny,nz,bx,by,bz);
 		float side = (S3rRand01(rng) < 0.5f) ? 1.f : -1.f;
@@ -2821,6 +3427,7 @@ void CSoft3DRaceDlg::PlaceObstaclesAndItems()
 		float along = (S3rRand01(rng)*2.f-1.f)*(ring<0.72f?12.f:24.f);
 		float ox = px + bx * side * dist + tx * along;
 		float oz = pz + bz * side * dist + tz * along;
+		if (inTunnelLane(t) && dist < m_bandHalf * 4.8f) continue;
 		float s = 0.90f + S3rRand01(rng) * (ring<0.38f ? 0.70f : 0.95f);
 		if (blocksLane(ox, oz, solidR * s)) continue;
 		float gy = GroundY(ox, oz) - 0.18f;
@@ -2861,6 +3468,7 @@ void CSoft3DRaceDlg::ResetRaceState()
 	m_phase=PHASE_IDLE; m_countT=0; m_countShown=-1; m_podiumT=0; m_raceClock=0;
 	m_camYawOff=0; m_camPitchOff=0.22f;
 	m_camSmoothInit=0;
+	m_camTunnelT=0.f;
 	m_mouseLook=0;
 	m_camZoom = (savedata.s3r_zoom>=50&&savedata.s3r_zoom<=250)? (savedata.s3r_zoom/100.f) : 1.f;
 	m_lookback=0; m_accelHeld=0; m_brakeHeld=0;
@@ -2878,21 +3486,19 @@ void CSoft3DRaceDlg::ResetRaceState()
 		int tmp=namePick[i]; namePick[i]=namePick[j]; namePick[j]=tmp;
 	}
 	// 超簡単はラインが甘く遅め。強烈は上限近く
-	float aiLineTable[5]={0.18f, 0.38f, 0.62f, 0.80f, 0.92f};
+	float aiLineTable[5]={0.22f, 0.48f, 0.78f, 0.90f, 0.97f};
 	int aiLv=ReadAiFromUi();
 	m_aiRaceLv = aiLv;
 	m_finishSimT = 0.f;
 	for (int i=0;i<m_craftN;i++){
 		S3rCraft& c=m_crafts[i]; memset(&c,0,sizeof(c));
 		c.isPlayer=(i==0); c.alive=1; c.colorIdx=i%12; c.hp=100.f; c.fuel=100.f;
+		c.throttle=0.f; c.rpm=0.08f;
+		c.nitroStock = 1; c.nitroT = 0.f;
+		c.dmgAccum = 0.f; c.hitFlashT = 0.f; c.fxEmitT = 0.f; c.fxHitCool = 0.f;
 		wcscpy_s(c.name, kS3rGirlNames[namePick[i % 100]]);
 		c.lapTimesN = 0;
-		// 短いコースでも追いつけるよう、スタート隊列は密着（旧0.012は長すぎ）
-		const float packT = 0.0034f;
-		c.pathT = (float)i * packT; if(c.pathT>0.9f)c.pathT=0.01f;
-		float px,py,pz,tx,ty,tz,nx,ny,nz,bx,by,bz; SplineFrame(c.pathT,px,py,pz,tx,ty,tz,nx,ny,nz,bx,by,bz);
-		float lane=(i-(m_craftN-1)*0.5f)*0.52f;
-		c.x=px+bx*lane; c.y=py+by*lane; c.z=pz+bz*lane;
+		ApplyStartGridPose(c, i);
 		AlignCraftToPath(c, 0.06f);
 		if (c.isPlayer) {
 			c.aiSkill = 0.f;
@@ -2900,22 +3506,34 @@ void CSoft3DRaceDlg::ResetRaceState()
 			float tier = (m_craftN <= 2) ? 0.5f : (float)(i - 1) / (float)(m_craftN - 2);
 			float base = aiLineTable[aiLv];
 			float spread = 0.28f - 0.035f * (float)aiLv;
-			c.aiSkill = S3rClamp(base + (tier - 0.5f) * spread + (S3rRand01(m_rng) - 0.5f) * 0.10f, 0.06f, 0.97f);
+			c.aiSkill = S3rClamp(base + (tier - 0.5f) * spread + (S3rRand01(m_rng) - 0.5f) * 0.10f, 0.08f, 0.99f);
 		}
 		// レーン好みは弱め（端寄り暴走→帯外ループを減らす）
 		c.aiSteerBias=(S3rRand01(m_rng)*2.f-1.f) * 0.55f;
+		if (c.isPlayer) {
+			c.aiWeaveAmp = 0.f;
+			c.aiBrakeHabit = 0.f;
+		} else {
+			c.aiWeaveAmp = S3rClamp(0.24f + (1.f - c.aiSkill) * 0.42f + S3rRand01(m_rng) * 0.28f, 0.20f, 0.98f);
+			c.aiBrakeHabit = S3rClamp(0.10f + S3rRand01(m_rng) * 0.72f + (1.f - c.aiSkill) * 0.22f, 0.08f, 1.f);
+			if (aiLv >= AI_FEROCIOUS) { c.aiWeaveAmp *= 0.52f; c.aiBrakeHabit *= 0.40f; }
+			else if (aiLv >= AI_HARD) { c.aiWeaveAmp *= 0.70f; c.aiBrakeHabit *= 0.60f; }
+			else if (aiLv >= AI_NORMAL) { c.aiWeaveAmp *= 0.86f; c.aiBrakeHabit *= 0.80f; }
+		}
 		c.bestLap=1e9f;
-		// チェックポイントは帯中央（端で保存すると復帰ループの温床）
-		c.chkX=px; c.chkY=py; c.chkZ=pz;
-		c.chkYaw=c.yaw; c.chkPitch=c.pitch; c.chkPathT=c.pathT;
+		c.chkYaw=c.yaw; c.chkPitch=c.pitch;
 		c.offBandT=0.f; c.courseOutCool=0.f; c.offBand=0;
 		c.aiCutT=-1.f; c.aiCutTimer=0.f; c.aiCutCool=c.isPlayer?0.f:8.f;
 	}
+	UpdateRanks();
 	for (int i=0;i<m_itemN;i++) m_items[i].taken=0;
 	for (int i=0;i<96;i++) memset(m_confetti[i],0,sizeof(m_confetti[i]));
 	memset(m_blast,0,sizeof(m_blast));
 	m_blastCursor=0;
+	memset(m_fx,0,sizeof(m_fx));
+	m_fxCursor=0;
 	m_clearBakeText=L""; m_clearDirty=1; m_hudDirty=1;
+	m_gaugeKmhQ=-1; m_gaugeRpmQ=-1;
 }
 
 void CSoft3DRaceDlg::BeginDemoPreview()
@@ -2950,6 +3568,32 @@ void CSoft3DRaceDlg::StartRace()
 	UpdateStatus();
 }
 
+void CSoft3DRaceDlg::ApplyStartGridPose(S3rCraft& c, int i)
+{
+	// 2列交互のグリッド。i=0 自機が最後尾、奇数スロットは半車分前へずらして詰める
+	if (i < 0) i = 0;
+	const int n = (m_craftN < 1) ? 1 : m_craftN;
+	if (i >= n) i = n - 1;
+	const int row = i / 2;
+	const int col = i & 1;
+	const float plen = (m_pathLen > 1.f) ? m_pathLen : 800.f;
+	const float rowPitch = 2.55f / plen;
+	const float colStagger = 0.90f / plen;
+	c.pathT = (float)row * rowPitch + (float)col * colStagger;
+	if (c.pathT < 0.f) c.pathT = 0.f;
+	if (c.pathT > 0.9f) c.pathT = 0.01f;
+	float px, py, pz, tx, ty, tz, nx, ny, nz, bx, by, bz;
+	SplineFrame(c.pathT, px, py, pz, tx, ty, tz, nx, ny, nz, bx, by, bz);
+	float laneOff = 1.22f;
+	const float half = BandHalfWidth();
+	if (laneOff > half * 0.42f) laneOff = half * 0.42f;
+	const float lane = (col == 0) ? -laneOff : laneOff;
+	c.x = px + bx * lane;
+	c.y = py + by * lane;
+	c.z = pz + bz * lane;
+	c.chkX = px; c.chkY = py; c.chkZ = pz; c.chkPathT = c.pathT;
+}
+
 void CSoft3DRaceDlg::AlignCraftToPath(S3rCraft& c, float lookAhead)
 {
 	if (lookAhead < 0.02f) lookAhead = 0.02f;
@@ -2974,6 +3618,45 @@ void CSoft3DRaceDlg::AlignCraftToPath(S3rCraft& c, float lookAhead)
 	float pitchSrc = (len > 1e-4f) ? (dy / len) : 0.f;
 	c.pitch = S3rClamp(asinf(S3rClamp(pitchSrc, -1.f, 1.f)), -0.85f, 0.85f);
 	c.chkYaw = c.yaw; c.chkPitch = c.pitch;
+}
+
+float CSoft3DRaceDlg::FinishSimRailSpeed(const S3rCraft& c) const
+{
+	// 自機ゴール後の裏シミュ：上限巡航だと後続LAPが実レースより速くなるので、
+	// 自機の平均周回を基準にし、順位が後ろほど少し遅らせる
+	const float plen = (m_pathLen > 1.f) ? m_pathLen : 800.f;
+	const float cap = max(1.f, RaceSpeedCap(0));
+	const S3rCraft& pl = m_crafts[0];
+	float refLap = 0.f;
+	int n = pl.lapTimesN;
+	if (n > 0) {
+		for (int k = 0; k < n; k++) refLap += pl.lapTimes[k];
+		refLap /= (float)n;
+	} else if (pl.finished && m_lapsTarget > 0 && pl.finishTime > 1.f) {
+		refLap = pl.finishTime / (float)m_lapsTarget;
+	}
+	if (refLap < 12.f) refLap = plen / (cap * 0.70f);
+	int behind = 0;
+	if (c.rank > 0 && pl.rank > 0 && c.rank > pl.rank) behind = c.rank - pl.rank;
+	else if (!c.isPlayer) behind = 1;
+	float want = refLap * (1.f + 0.032f * (float)behind + 0.04f * (1.f - c.aiSkill));
+	if (c.lapTimesN > 0 && c.lap >= 1) {
+		float own = 0.f;
+		int m = 0;
+		for (int k = 0; k < c.lapTimesN; k++) {
+			float t = c.lapTimes[k];
+			if (t > refLap * 0.60f && t < refLap * 1.85f) { own += t; m++; }
+		}
+		if (m > 0) {
+			own /= (float)m;
+			if (own > want) want = S3rLerp(want, own, 0.55f);
+		}
+	}
+	if (want < refLap) want = refLap;
+	float spd = plen / max(8.f, want);
+	if (spd > cap * 0.78f) spd = cap * 0.78f;
+	if (spd < cap * 0.40f) spd = cap * 0.40f;
+	return spd;
 }
 
 void CSoft3DRaceDlg::InputSteerDelta(float dyaw, float dpitch)
@@ -3087,11 +3770,31 @@ void CSoft3DRaceDlg::TryPickupCraft(int ci)
 		float dx=c.x-it.x, dy=c.y-it.y, dz=c.z-it.z;
 		if (dx*dx+dy*dy+dz*dz < 2.2f*2.2f) {
 			it.taken = 1;
+			float ir, ig, ib; S3rItemLabRgb(it.kind, ir, ig, ib);
+			SpawnFxBurst(FX_PICK, it.x, it.y + 0.4f, it.z, 0.f, 1.f, 0.f, 16, 7.2f, ir, ig, ib);
+			if (it.kind == KIND_TEMPO)
+				SpawnFxBurst(FX_EMBER, it.x, it.y + 0.2f, it.z, 0.f, 1.f, 0.f, 10, 5.5f, 0.35f, 1.f, 0.45f);
+			else if (it.kind == KIND_TEMPO_DN)
+				SpawnFxBurst(FX_SMOKE, it.x, it.y + 0.15f, it.z, 0.f, 1.f, 0.f, 10, 3.2f, 0.35f, 0.15f, 0.55f);
+			else if (it.kind == KIND_PITCH_UP || it.kind == KIND_PITCH_DN)
+				SpawnFxBurst(FX_SPARK, it.x, it.y + 0.35f, it.z, 0.f, 1.f, 0.f, 14, 8.0f, ir, ig, ib);
+			else if (it.kind == KIND_VOL_UP || it.kind == KIND_VOL_DN)
+				SpawnFxBurst(FX_EMBER, it.x, it.y + 0.25f, it.z, 0.f, 1.f, 0.f, 8, 4.5f, ir, ig, ib);
+			else if (it.kind == KIND_REVERB)
+				SpawnFxBurst(FX_SMOKE, it.x, it.y + 0.2f, it.z, 0.f, 1.f, 0.f, 8, 2.8f, 0.2f, 0.85f, 0.95f);
+			else if (it.kind == KIND_EQ || it.kind == KIND_EQ_FLAT)
+				SpawnFxBurst(FX_SPARK, it.x, it.y + 0.3f, it.z, 0.f, 1.f, 0.f, 12, 6.5f, ir, ig, ib);
 			if (c.isPlayer) {
 				ApplyItem(it.kind);
 				Soft3DSfxOneShot(S3SFX_ITEM, it.x, it.y, it.z);
 				if (it.kind == KIND_TEMPO) Soft3DSfxUi(S3SFX_BOOST, 0);
 				else if (it.kind == KIND_TEMPO_DN) Soft3DSfxUi(S3SFX_SLOW, 0);
+				float flashAmt = 0.28f;
+				if (it.kind == KIND_TEMPO || it.kind == KIND_VOL_UP) flashAmt = 0.42f;
+				else if (it.kind == KIND_TEMPO_DN) flashAmt = 0.32f;
+				else if (it.kind == KIND_NEXT || it.kind == KIND_PREV || it.kind == KIND_XFADE || it.kind == KIND_RANDOM)
+					flashAmt = 0.38f;
+				c.flashT = max(c.flashT, flashAmt);
 			} else {
 				if (it.kind==KIND_TEMPO) c.boostT=max(c.boostT,3.5f);
 				else if (it.kind==KIND_TEMPO_DN) c.slowT=max(c.slowT,3.f);
@@ -3135,13 +3838,7 @@ void CSoft3DRaceDlg::TickCountdown(float dt)
 	for (int i = 0; i < m_craftN; i++) {
 		S3rCraft& c = m_crafts[i];
 		if (!c.alive) continue;
-		float px, py, pz, tx, ty, tz, nx, ny, nz, bx, by, bz;
-		SplineFrame(c.pathT, px, py, pz, tx, ty, tz, nx, ny, nz, bx, by, bz);
-		float lane = (i - (m_craftN - 1) * 0.5f) * 0.52f;
-		c.x = px + bx * lane;
-		c.y = py + by * lane;
-		c.z = pz + bz * lane;
-		c.chkX = px; c.chkY = py; c.chkZ = pz; c.chkPathT = c.pathT;
+		ApplyStartGridPose(c, i);
 		AlignCraftToPath(c, 0.06f);
 		c.vx = c.vy = c.vz = 0.f;
 	}
@@ -3171,15 +3868,19 @@ void CSoft3DRaceDlg::TickCountdown(float dt)
 			m_clearBakeA = 1.f;
 			m_clearDirty = 1;
 			Soft3DSfxUi(S3SFX_GO, 0);
+			{
+				S3rCraft& pl = m_crafts[0];
+				pl.flashT = max(pl.flashT, 0.55f);
+				SpawnFxBurst(FX_PICK, pl.x, pl.y + 0.4f, pl.z, 0.f, 1.f, 0.f, 22, 9.5f, 1.f, 0.92f, 0.35f);
+				SpawnFxBurst(FX_EMBER, pl.x, pl.y + 0.2f, pl.z, 0.f, 1.f, 0.f, 14, 7.0f, 1.f, 0.55f, 0.15f);
+				SpawnBlast(pl.x, pl.y, pl.z);
+			}
 		}
 		if (m_countT >= 6.0f) {
 			for (int i = 0; i < m_craftN; i++) {
 				if (!m_crafts[i].alive) continue;
 				S3rCraft& c = m_crafts[i];
-				float px, py, pz, tx, ty, tz, nx, ny, nz, bx, by, bz;
-				SplineFrame(c.pathT, px, py, pz, tx, ty, tz, nx, ny, nz, bx, by, bz);
-				float lane = (i - (m_craftN - 1) * 0.5f) * 0.52f;
-				c.x = px + bx * lane; c.y = py + by * lane; c.z = pz + bz * lane;
+				ApplyStartGridPose(c, i);
 				AlignCraftToPath(c, 0.06f);
 				float ax, ay, az; SplinePoint(c.pathT + 0.06f, ax, ay, az);
 				float dx = ax - c.x, dy = ay - c.y, dz = az - c.z;
@@ -3238,12 +3939,12 @@ void CSoft3DRaceDlg::TickPodium(float dt)
 float CSoft3DRaceDlg::AiPaceIndep(float sk) const
 {
 	// 超簡単はほぼ自機ペース。強烈は上限近くで独立
-	static const float kIndep[5] = { 0.00f, 0.10f, 0.36f, 0.65f, 0.85f };
+	static const float kIndep[5] = { 0.20f, 0.38f, 0.68f, 0.84f, 0.95f };
 	int lv = m_aiRaceLv;
 	if (lv < 0) lv = 0;
 	if (lv > 4) lv = 4;
 	float indep = kIndep[lv];
-	indep = S3rClamp(indep + (sk - 0.78f) * 0.12f, 0.f, 0.92f);
+	indep = S3rClamp(indep + (sk - 0.78f) * 0.12f, 0.f, 0.97f);
 	return indep;
 }
 
@@ -3251,30 +3952,34 @@ void CSoft3DRaceDlg::AiCapPair(float sk, float raceCap, float pace, float plNow,
 {
 	softFloor = raceCap * (0.18f + 0.28f * sk);
 	float hold = max(plNow, pace);
-	hardCap = S3rLerp(hold * (1.02f + 0.14f * sk), raceCap * (0.88f + 0.06f * sk), indep);
 	if (finishRush) {
 		softFloor = raceCap * (0.72f + 0.12f * sk);
-		if (hardCap < 9.f) hardCap = 9.f;
+		hardCap = raceCap * 0.96f;
 		if (softFloor > hardCap) softFloor = hardCap;
 		return;
 	}
 	if (demo) {
+		hardCap = raceCap * 0.62f;
 		if (hardCap < 9.f) hardCap = 9.f;
 		if (softFloor > hardCap) softFloor = hardCap;
 		return;
 	}
 	int lv = m_aiRaceLv;
+	float maxF = S3rAiMaxPaceFrac(lv);
+	float absMax = raceCap * maxF;
+	float minHold = raceCap * S3rAiMinPaceFrac(lv);
+	if (hold < minHold) hold = minHold;
+	hardCap = S3rLerp(hold * (0.98f + 0.04f * sk), absMax, indep);
 	if (lv <= AI_EASY) {
-		softFloor = raceCap * ((lv <= AI_SUPER_EASY) ? (0.05f + 0.10f * sk) : (0.10f + 0.16f * sk));
-		if (hold < 1.2f) hold = 1.2f;
-		float slack = (lv <= AI_SUPER_EASY) ? 1.04f : 1.12f;
-		if (softFloor > hold * slack) softFloor = hold * slack;
-		float hmax = hold * ((lv <= AI_SUPER_EASY) ? 1.05f : 1.15f);
+		softFloor = minHold * (0.92f + 0.04f * sk);
+		float slack = (lv <= AI_SUPER_EASY) ? 1.02f : 1.06f;
+		float hmax = hold * slack;
+		if (hmax > absMax) hmax = absMax;
 		if (hardCap > hmax) hardCap = hmax;
-		if (hardCap < 2.f) hardCap = 2.f;
-	} else {
-		if (hardCap < 9.f) hardCap = 9.f;
 	}
+	if (hardCap > absMax) hardCap = absMax;
+	if (hardCap < minHold) hardCap = minHold;
+	if (hardCap < 9.f) hardCap = 9.f;
 	if (softFloor > hardCap) softFloor = hardCap;
 }
 
@@ -3363,6 +4068,114 @@ void CSoft3DRaceDlg::TickBlast(float dt)
 	}
 }
 
+void CSoft3DRaceDlg::ApplyCraftDamage(S3rCraft& c, float dmg, int flash)
+{
+	if (dmg <= 0.f) return;
+	if (!c.alive || c.retired || c.finished) return;
+	c.hp -= dmg;
+	c.dmgAccum += dmg;
+	if (c.dmgAccum > 400.f) c.dmgAccum = 400.f;
+	if (flash && c.isPlayer)
+		c.hitFlashT = max(c.hitFlashT, min(0.42f, 0.14f + dmg * 0.016f));
+}
+
+void CSoft3DRaceDlg::SpawnFxBurst(int kind, float x, float y, float z,
+	float nx, float ny, float nz, int count, float speed, float r, float g, float b)
+{
+	if (count < 1) return;
+	float ln = sqrtf(nx * nx + ny * ny + nz * nz);
+	if (ln > 1e-4f) { nx /= ln; ny /= ln; nz /= ln; }
+	else { nx = 0.f; ny = 1.f; nz = 0.f; }
+	for (int n = 0; n < count; n++) {
+		int i = m_fxCursor % S3R_FX_N;
+		m_fxCursor++;
+		S3rFx& p = m_fx[i];
+		float a = S3rRand01(m_rng) * 6.2831853f;
+		float e = S3rRand01(m_rng) * 2.f - 0.35f;
+		float sp = speed * (0.40f + S3rRand01(m_rng) * 0.90f);
+		float jx = cosf(a), jz = sinf(a);
+		p.x = x + jx * 0.12f; p.y = y + 0.08f; p.z = z + jz * 0.12f;
+		p.vx = nx * sp + jx * sp * 0.55f;
+		p.vy = ny * sp + e * sp * 0.42f;
+		p.vz = nz * sp + jz * sp * 0.55f;
+		p.kind = kind;
+		p.r = r; p.g = g; p.b = b;
+		if (kind == FX_SMOKE) {
+			p.vy += 1.6f + S3rRand01(m_rng) * 1.8f;
+			p.life = 0.55f + S3rRand01(m_rng) * 0.70f;
+			p.size = 0.22f + S3rRand01(m_rng) * 0.28f;
+			p.vx *= 0.35f; p.vz *= 0.35f;
+		} else if (kind == FX_DUST) {
+			p.life = 0.28f + S3rRand01(m_rng) * 0.32f;
+			p.size = 0.16f + S3rRand01(m_rng) * 0.18f;
+			p.vy *= 0.45f;
+		} else if (kind == FX_PICK) {
+			p.life = 0.38f + S3rRand01(m_rng) * 0.28f;
+			p.size = 0.12f + S3rRand01(m_rng) * 0.14f;
+			p.vy += 2.4f;
+		} else if (kind == FX_EMBER) {
+			p.life = 0.35f + S3rRand01(m_rng) * 0.40f;
+			p.size = 0.08f + S3rRand01(m_rng) * 0.10f;
+			p.vy += 0.8f;
+		} else {
+			p.life = 0.18f + S3rRand01(m_rng) * 0.22f;
+			p.size = 0.06f + S3rRand01(m_rng) * 0.09f;
+		}
+		p.lifeMax = p.life;
+	}
+}
+
+void CSoft3DRaceDlg::TickFx(float dt)
+{
+	for (int i = 0; i < S3R_FX_N; i++) {
+		S3rFx& p = m_fx[i];
+		if (p.life <= 0.f) continue;
+		p.x += p.vx * dt; p.y += p.vy * dt; p.z += p.vz * dt;
+		if (p.kind == FX_SMOKE) {
+			p.vy += 2.2f * dt;
+			p.vx *= (1.f - 1.15f * dt);
+			p.vz *= (1.f - 1.15f * dt);
+			p.life -= dt;
+		} else if (p.kind == FX_DUST) {
+			p.vy -= 7.5f * dt;
+			p.vx *= (1.f - 2.4f * dt);
+			p.vz *= (1.f - 2.4f * dt);
+			p.life -= dt;
+		} else if (p.kind == FX_PICK) {
+			p.vy -= 4.5f * dt;
+			p.vx *= (1.f - 0.8f * dt);
+			p.vz *= (1.f - 0.8f * dt);
+			p.life -= dt;
+		} else if (p.kind == FX_EMBER) {
+			p.vy -= 9.f * dt;
+			p.vx *= (1.f - 1.1f * dt);
+			p.vz *= (1.f - 1.1f * dt);
+			p.life -= dt;
+		} else {
+			p.vy -= 18.f * dt;
+			p.vx *= (1.f - 1.6f * dt);
+			p.vz *= (1.f - 1.6f * dt);
+			p.life -= dt * 1.15f;
+		}
+	}
+	for (int ci = 0; ci < m_craftN; ci++) {
+		S3rCraft& c = m_crafts[ci];
+		if (!c.alive || c.retired || c.finished) continue;
+		if (c.dmgAccum < 10.f) continue;
+		c.fxEmitT -= dt;
+		if (c.fxEmitT > 0.f) continue;
+		float sev = S3rSaturate((c.dmgAccum - 10.f) / 140.f);
+		c.fxEmitT = 0.075f - sev * 0.042f;
+		float fx = sinf(c.yaw) * cosf(c.pitch), fy = sinf(c.pitch), fz = cosf(c.yaw) * cosf(c.pitch);
+		float bx = c.x - fx * 0.85f, by = c.y - fy * 0.85f + 0.22f, bz = c.z - fz * 0.85f;
+		int nSm = 1 + (int)(sev * 2.4f);
+		float sg = 0.20f - 0.10f * sev;
+		SpawnFxBurst(FX_SMOKE, bx, by, bz, -fx, 0.65f, -fz, nSm, 1.6f + sev * 1.2f, sg, sg, sg);
+		if (sev > 0.52f)
+			SpawnFxBurst(FX_EMBER, bx, by, bz, -fx, 0.2f, -fz, 1 + (int)(sev * 2.f), 3.2f, 1.f, 0.38f, 0.08f);
+	}
+}
+
 void CSoft3DRaceDlg::EnterPodium()
 {
 	m_podiumT = 0.f;
@@ -3412,10 +4225,10 @@ void CSoft3DRaceDlg::TickAi(float dt)
 		// デモは自機ペースに依存せず見やすい巡航速度で
 		paceRef = RaceSpeedCap(0) * 0.58f;
 	} else if (finishRush) {
-		// 自機ゴール後：残り機は上限付近で駆け込む
 		paceRef = RaceSpeedCap(0) * 0.96f;
-	} else if (m_aiRaceLv >= AI_NORMAL && paceRef < 6.f) {
-		paceRef = 6.f;
+	} else {
+		float minP = RaceSpeedCap(0) * S3rAiMinPaceFrac(m_aiRaceLv);
+		if (paceRef < minP) paceRef = minP;
 	}
 
 	const int i0 = demo ? 0 : 1;
@@ -3441,6 +4254,7 @@ void CSoft3DRaceDlg::TickAi(float dt)
 
 		if (c.aiCutCool > 0.f) c.aiCutCool = max(0.f, c.aiCutCool - dt);
 		if (finishRush) c.aiCutCool = max(c.aiCutCool, 12.f);
+		if (c.craftKnockT > 0.f) continue;
 		const int lineLock = (c.aiCutCool > 0.f) ? 1 : 0;
 
 		// 計画ショートカットの維持／終了判定
@@ -3538,30 +4352,81 @@ void CSoft3DRaceDlg::TickAi(float dt)
 			}
 		}
 
-		float phase = m_anim * (0.25f + (1.f - sk) * 0.4f) + (float)i * 1.1f;
-		float wanderAmp = lineLock ? 0.f : ((1.f - sk) * ((m_aiRaceLv <= AI_EASY) ? 0.48f : 0.20f));
-		float laneLim = lineLock ? 0.08f : (0.12f + 0.40f * (1.f - sk));
-		float laneFrac = S3rClamp(sinf(phase) * wanderAmp + c.aiSteerBias * wanderAmp * 0.35f, -laneLim, laneLim);
-		float vertFrac = S3rClamp(cosf(phase * 0.7f) * wanderAmp * 0.55f, -0.22f, 0.22f);
+		float phase = m_anim;
+		float w1 = 1.05f + 0.31f * (float)i;
+		float w2 = 2.35f + 0.17f * (float)i;
+		float w3 = 0.72f + 0.23f * (float)i;
+		float wLat = sinf(phase * w1 + (float)i * 1.73f) * 0.58f
+			+ sinf(phase * w2 + (float)i * 0.91f) * 0.42f;
+		float wVert = cosf(phase * w3 + (float)i * 2.09f) * 0.52f
+			+ sinf(phase * (1.68f + 0.14f * (float)i) + (float)i * 1.31f) * 0.48f;
+		float weave = lineLock ? 0.10f : (0.26f + 0.62f * c.aiWeaveAmp);
+		if (m_aiRaceLv >= AI_NORMAL) weave *= 0.72f;
+		if (m_aiRaceLv >= AI_HARD) weave *= 0.70f;
+		if (m_aiRaceLv >= AI_FEROCIOUS) weave *= 0.62f;
+		float laneLim = lineLock ? 0.16f : S3rClamp(0.34f + 0.46f * c.aiWeaveAmp, 0.28f, 0.82f);
+		float vertLim = lineLock ? 0.12f : S3rClamp(0.28f + 0.34f * c.aiWeaveAmp, 0.22f, 0.62f);
+		float laneFrac = S3rClamp(wLat * weave + c.aiSteerBias * 0.28f, -laneLim, laneLim);
+		float vertFrac = S3rClamp(wVert * weave * 0.92f, -vertLim, vertLim);
 
-		// 障害の先読み：上手いAIは空き側へ、下手は反応が遅い／逆側へ寄る
+		// 障害・機体の先読み。難易度で視距と避け方が変わる
 		float dodge = 0.f;
 		if (!cutting && !lineLock) {
-			const float lookW = 0.028f + 0.040f * sk;
-			for (int o = 0; o < m_obsN; o++) {
-				if (!m_obs[o].hazard || m_obs[o].damage <= 0.f) continue;
-				float dT = m_obs[o].pathT - c.pathT;
+			const int lv = m_aiRaceLv;
+			float lookW = 0.022f + 0.018f * sk;
+			if (lv >= AI_EASY) lookW = 0.030f + 0.028f * sk;
+			if (lv >= AI_NORMAL) lookW = 0.040f + 0.036f * sk;
+			if (lv >= AI_HARD) lookW = 0.050f + 0.042f * sk;
+			if (lv >= AI_FEROCIOUS) lookW = 0.058f + 0.048f * sk;
+			float obsGain = 0.12f + 0.22f * sk;
+			if (lv >= AI_EASY) obsGain = 0.38f + 0.40f * sk;
+			if (lv >= AI_NORMAL) obsGain = 0.55f + 0.55f * sk;
+			if (lv >= AI_HARD) obsGain = 0.72f + 0.70f * sk;
+			float obsSign = 1.f;
+			if (lv <= AI_SUPER_EASY && sk < 0.28f) obsSign = -0.35f;
+			else if (lv <= AI_SUPER_EASY) obsSign = 0.55f;
+			else if (lv <= AI_EASY && sk < 0.32f) obsSign = 0.70f;
+			if (c.nitroT <= 0.f) {
+				for (int o = 0; o < m_obsN; o++) {
+					if (!m_obs[o].hazard || m_obs[o].damage <= 0.f) continue;
+					float dT = m_obs[o].pathT - c.pathT;
+					while (dT > 0.5f) dT -= 1.f;
+					while (dT < -0.5f) dT += 1.f;
+					if (dT <= 0.002f || dT > lookW) continue;
+					float olat, overt, ocx, ocy, ocz;
+					BandLocal(m_obs[o].x, m_obs[o].y, m_obs[o].z, m_obs[o].pathT, olat, overt, ocx, ocy, ocz);
+					if (fabsf(olat) > half * 1.20f) continue;
+					float urg = 1.f - dT / lookW;
+					float away = (olat >= 0.f) ? -1.f : 1.f;
+					dodge += away * urg * obsGain * obsSign;
+					if (lv >= AI_HARD && fabsf(overt) < half * 0.55f)
+						vertFrac = S3rClamp(vertFrac + ((overt >= 0.f) ? -0.18f : 0.18f) * urg, -0.28f, 0.28f);
+				}
+			}
+			float packGain = 0.06f + 0.10f * sk;
+			if (lv >= AI_EASY) packGain = 0.22f + 0.28f * sk;
+			if (lv >= AI_NORMAL) packGain = 0.40f + 0.38f * sk;
+			if (lv >= AI_HARD) packGain = 0.58f + 0.42f * sk;
+			float lookC = lookW * ((lv <= AI_SUPER_EASY) ? 0.45f : 0.85f);
+			for (int j = 0; j < m_craftN; j++) {
+				if (j == i) continue;
+				const S3rCraft& o = m_crafts[j];
+				if (!o.alive || o.retired || o.finished) continue;
+				float wdx = o.x - c.x, wdy = o.y - c.y, wdz = o.z - c.z;
+				float wd = sqrtf(wdx * wdx + wdy * wdy + wdz * wdz);
+				float dT = o.pathT - c.pathT;
 				while (dT > 0.5f) dT -= 1.f;
 				while (dT < -0.5f) dT += 1.f;
-				if (dT <= 0.002f || dT > lookW) continue;
+				if (wd > 12.f && (dT <= 0.001f || dT > lookC)) continue;
+				if (dT < -0.012f && wd > 6.5f) continue;
 				float olat, overt, ocx, ocy, ocz;
-				BandLocal(m_obs[o].x, m_obs[o].y, m_obs[o].z, m_obs[o].pathT, olat, overt, ocx, ocy, ocz);
-				if (fabsf(olat) > half * 1.20f) continue;
-				float urg = 1.f - dT / lookW;
-				float away = (olat >= 0.f) ? -1.f : 1.f;
-				if (sk > 0.55f) dodge += away * urg * (0.40f + 0.70f * sk);
-				else if (sk > 0.28f) dodge += away * urg * sk * 0.50f;
-				else dodge += -away * urg * 0.16f;
+				BandLocal(o.x, o.y, o.z, o.pathT, olat, overt, ocx, ocy, ocz);
+				float dLat = lat - olat;
+				if (fabsf(dLat) > half * 1.12f) continue;
+				float away = (dLat > 0.18f) ? 1.f : ((dLat < -0.18f) ? -1.f : ((i > j) ? 1.f : -1.f));
+				float urg = (wd < 12.f) ? (1.f - wd / 12.f) : (1.f - S3rSaturate(dT / max(0.008f, lookC)));
+				if (wd < 3.4f) urg = max(urg, 0.85f);
+				dodge += away * urg * packGain;
 			}
 			laneFrac = S3rClamp(laneFrac + dodge * 0.42f, -laneLim, laneLim);
 		}
@@ -3573,31 +4438,37 @@ void CSoft3DRaceDlg::TickAi(float dt)
 		} else {
 			SplineFrame(look, px,py,pz, tx,ty,tz, nx,ny,nz, bx,by,bz);
 		}
-		float aimx = px + (cutting || lineLock ? 0.f : bx * (laneFrac * half * 0.45f));
-		float aimy = py + (cutting || lineLock ? 0.f : by * (laneFrac * half * 0.45f));
-		float aimz = pz + (cutting || lineLock ? 0.f : bz * (laneFrac * half * 0.45f));
-		if (!cutting && !lineLock) {
-			aimx += nx * (vertFrac * half * 0.30f);
-			aimy += ny * (vertFrac * half * 0.30f);
-			aimz += nz * (vertFrac * half * 0.30f);
+		float aimx = px + (cutting ? 0.f : bx * (laneFrac * half));
+		float aimy = py + (cutting ? 0.f : by * (laneFrac * half));
+		float aimz = pz + (cutting ? 0.f : bz * (laneFrac * half));
+		if (!cutting) {
+			aimx += nx * (vertFrac * half * 0.82f);
+			aimy += ny * (vertFrac * half * 0.82f);
+			aimz += nz * (vertFrac * half * 0.82f);
 		}
 
-		// レールばね：ライン固定中は中央へ強く、カット中は弱め
+		// レールばね：目標レーン（蛇行）へ。中央固定だと直線で減速しない
 		{
-			float rail = cutting ? (1.0f + 1.5f * sk) : (lineLock ? (12.f + 8.f * sk) : (1.6f + 14.f * sk));
+			float wantLat = cutting ? 0.f : (laneFrac * half);
+			float wantVert = cutting ? 0.f : (vertFrac * half * 0.82f);
+			float dLat = lat - wantLat;
+			float dVert = vert - wantVert;
+			float rail = cutting ? (1.0f + 1.5f * sk) : (lineLock ? (4.5f + 3.5f * sk) : (2.0f + 5.5f * sk));
 			if (c.offBand && !cutting) rail *= 2.2f;
-			c.vx += (-bx * lat - nx * vert) * rail * dt;
-			c.vy += (-by * lat - ny * vert) * rail * dt;
-			c.vz += (-bz * lat - nz * vert) * rail * dt;
+			c.vx += (-bx * dLat - nx * dVert) * rail * dt;
+			c.vy += (-by * dLat - ny * dVert) * rail * dt;
+			c.vz += (-bz * dLat - nz * dVert) * rail * dt;
 			if (!cutting) {
 				float outV = c.vx*bx + c.vy*by + c.vz*bz;
-				if ((lat > 0.f && outV > 0.f) || (lat < 0.f && outV < 0.f)) {
-					float kill = min(1.f, (1.2f + 7.f * sk) * dt);
+				float latErr = lat - wantLat;
+				if ((latErr > 0.f && outV > 0.f) || (latErr < 0.f && outV < 0.f)) {
+					float kill = min(1.f, (0.7f + 3.5f * sk) * dt);
 					c.vx -= bx * outV * kill; c.vy -= by * outV * kill; c.vz -= bz * outV * kill;
 				}
 				float outN = c.vx*nx + c.vy*ny + c.vz*nz;
-				if ((vert > 0.f && outN > 0.f) || (vert < 0.f && outN < 0.f)) {
-					float kill = min(1.f, (1.2f + 7.f * sk) * dt);
+				float vertErr = vert - wantVert;
+				if ((vertErr > 0.f && outN > 0.f) || (vertErr < 0.f && outN < 0.f)) {
+					float kill = min(1.f, (0.7f + 3.5f * sk) * dt);
 					c.vx -= nx * outN * kill; c.vy -= ny * outN * kill; c.vz -= nz * outN * kill;
 				}
 			}
@@ -3619,63 +4490,98 @@ void CSoft3DRaceDlg::TickAi(float dt)
 		c.pitch = S3rLerp(c.pitch, wantPitch, min(1.f, turnRate * dt));
 		c.pitch = S3rClamp(c.pitch, -1.05f, 1.05f);
 
-		float raceCap = RaceSpeedCap(c.boostT > 0.f ? 1 : 0);
+		float raceCap = RaceSpeedCap(c.boostT > 0.f ? 1 : 0) * NitroSpeedMul(c);
 		float indep = finishRush ? 0.92f : AiPaceIndep(sk);
-		float rubber = paceRef * (0.86f + 0.18f * sk);
-		float freeT = raceCap * (0.50f + 0.38f * sk);
+		float maxF = S3rAiMaxPaceFrac(m_aiRaceLv);
+		float rubber = paceRef * (0.90f + 0.06f * sk);
+		float freeT = raceCap * maxF;
 		float targetSpd = S3rLerp(rubber, freeT, indep);
 		float hardCap = 9.f, softFloor = 0.f;
 		AiCapPair(sk, raceCap, paceRef, plNow, indep, demo, finishRush, softFloor, hardCap);
 		if (targetSpd < softFloor) targetSpd = softFloor;
 		if (targetSpd > hardCap) targetSpd = hardCap;
+		float absCeil = RaceSpeedCap(0) * maxF;
+		if (c.nitroT > 0.f) absCeil = min(raceCap, RaceSpeedCap(0) * 1.16f);
+		if (targetSpd > absCeil) targetSpd = absCeil;
 		if (fabsf(dodge) > 0.12f) {
-			float hesitate = (m_aiRaceLv <= AI_EASY) ? 0.38f : (0.14f * (1.f - sk));
+			float hesitate = 0.06f * (1.f - sk);
+			if (m_aiRaceLv <= AI_SUPER_EASY) hesitate = 0.10f;
+			else if (m_aiRaceLv <= AI_EASY) hesitate = 0.08f;
 			targetSpd *= (1.f - hesitate * S3rSaturate(fabsf(dodge)));
 		}
 
 		float lead = ((float)c.lap + c.pathT) - plProg;
-		// 超簡単は少しでも先行したら抑える。強烈でもリードを伸ばしすぎない（勝てる設定）
 		if (!finishRush && lead > 0.f) {
-			float leadStart = (m_aiRaceLv <= AI_SUPER_EASY) ? 0.012f : ((m_aiRaceLv <= AI_EASY) ? 0.04f : 0.10f);
+			float leadStart = (m_aiRaceLv <= AI_SUPER_EASY) ? 0.06f : ((m_aiRaceLv <= AI_EASY) ? 0.08f : 0.14f);
 			if (lead > leadStart) {
-				float cut = S3rSaturate((lead - leadStart) / 0.22f);
-				float damp = (m_aiRaceLv <= AI_SUPER_EASY) ? 0.62f : (0.30f - 0.16f * indep);
-				if (m_aiRaceLv >= AI_FEROCIOUS) damp = 0.18f;
+				float cut = S3rSaturate((lead - leadStart) / 0.28f);
+				float damp = (m_aiRaceLv <= AI_SUPER_EASY) ? 0.22f : (0.18f - 0.10f * indep);
+				if (m_aiRaceLv >= AI_HARD) damp = 0.08f;
+				if (m_aiRaceLv >= AI_FEROCIOUS) damp = 0.035f;
 				targetSpd *= (1.f - cut * damp * (1.f - 0.40f * sk));
 			}
-		} else if (lead < -0.04f) {
-			float catchUp = S3rSaturate((-lead - 0.04f) / 0.30f);
-			float catchAmt = 0.12f + 0.22f * sk + 0.18f * indep;
-			if (m_aiRaceLv <= AI_SUPER_EASY) catchAmt *= 0.22f;
-			else if (m_aiRaceLv <= AI_EASY) catchAmt *= 0.50f;
+		} else if (lead < -0.03f) {
+			float catchUp = S3rSaturate((-lead - 0.03f) / 0.22f);
+			float catchAmt = 0.20f + 0.24f * sk + 0.20f * indep;
+			if (m_aiRaceLv <= AI_SUPER_EASY) catchAmt *= 0.70f;
+			else if (m_aiRaceLv <= AI_EASY) catchAmt *= 0.88f;
 			targetSpd *= (1.f + catchUp * catchAmt);
 			if (finishRush) targetSpd = max(targetSpd, raceCap * 0.82f);
-			if (targetSpd > hardCap) targetSpd = hardCap;
+			float catchCeil = absCeil;
+			if (m_aiRaceLv >= AI_NORMAL)
+				catchCeil = min(raceCap, absCeil * (1.f + 0.10f * catchUp));
+			if (m_aiRaceLv >= AI_FEROCIOUS)
+				catchCeil = min(raceCap * 1.10f, RaceSpeedCap(0) * 1.12f);
+			if (targetSpd > catchCeil) targetSpd = catchCeil;
 		}
 
-		float thrust = (46.f + 42.f * sk) * scv;
-		if (finishRush) thrust *= 1.20f;
-		if (cutting) {
-			thrust *= 1.12f;
-			targetSpd = min(max(targetSpd, raceCap * (0.66f + 0.18f * sk)), raceCap * 0.94f);
-		} else if (c.offBand) {
-			thrust *= 0.12f;
-			targetSpd = min(targetSpd, 30.f / 3.6f);
-		} else {
+		float spdNow = sqrtf(c.vx*c.vx + c.vy*c.vy + c.vz*c.vz);
+		float bend = 0.f, bendAhead = 0.f;
+		if (!cutting) {
+			float t0x,t0y,t0z,t1x,t1y,t1z,t2x,t2y,t2z;
+			SplineTangent(c.pathT + 0.008f, t0x,t0y,t0z);
+			SplineTangent(c.pathT + 0.038f, t1x,t1y,t1z);
+			SplineTangent(c.pathT + 0.085f, t2x,t2y,t2z);
+			float a0 = t0x*t1x + t0y*t1y + t0z*t1z;
+			float a1 = t0x*t2x + t0y*t2y + t0z*t2z;
+			bend = S3rSaturate(1.f - a0);
+			bendAhead = S3rSaturate(1.f - a1);
+			if (bendAhead > bend) bend = bendAhead;
+		}
+		float wantThr = 0.f;
+		if (spdNow < targetSpd * 0.86f) wantThr = 1.f;
+		else if (spdNow < targetSpd * 1.04f) wantThr = 0.62f + 0.38f * S3rSaturate((targetSpd - spdNow) / max(0.01f, targetSpd * 0.18f));
+		else wantThr = 0.52f;
+		int aiBrake = 0;
+		if (!cutting && !finishRush) {
+			float need = S3rSaturate((bend - 0.08f) / 0.42f);
+			wantThr *= (1.f - need * (0.22f * (1.f - 0.45f * sk)));
+			float habit = c.aiBrakeHabit;
+			float trig = 0.38f - 0.22f * habit;
+			if (habit > 0.22f && need > trig && spdNow > targetSpd * 0.42f) {
+				aiBrake = 1;
+				wantThr *= (1.f - need * (0.40f + 0.45f * habit));
+			}
+		}
+		if (c.offBand && !cutting) wantThr *= 0.70f;
+		if (c.boostT>0) wantThr = min(1.f, wantThr * 1.05f);
+		if (c.nitroT>0) wantThr = min(1.f, wantThr * 1.08f);
+		if (c.slowT>0) wantThr *= 0.62f;
+		TickEngine(c, wantThr, aiBrake, dt);
+		float thrust = ((m_aiRaceLv >= AI_NORMAL) ? 70.f : (58.f + 10.f * sk)) * scv * S3rEngPower(c.rpm, c.throttle);
+		if (finishRush) thrust *= 1.18f;
+		if (cutting) thrust *= 1.10f;
+		else if (!c.offBand) {
 			thrust *= BandSpeedFactor(lat, vert);
 			targetSpd *= BandSpeedFactor(lat, vert);
 		}
-		float spdNow = sqrtf(c.vx*c.vx + c.vy*c.vy + c.vz*c.vz);
-		if (spdNow > targetSpd) thrust *= 0.06f;
-		else if (spdNow > targetSpd * 0.92f) thrust *= 0.35f;
 
-		if (!cutting) {
-			float t0x,t0y,t0z,t1x,t1y,t1z;
-			SplineTangent(c.pathT + 0.01f, t0x,t0y,t0z);
-			SplineTangent(c.pathT + 0.05f, t1x,t1y,t1z);
-			float align = t0x*t1x + t0y*t1y + t0z*t1z;
-			float bend = S3rSaturate(1.f - align);
-			thrust *= (1.f - bend * (0.38f * (1.f - 0.55f * sk)));
+		if (!cutting)
+			thrust *= (1.f - bend * (0.18f * (1.f - 0.50f * sk)));
+		if (aiBrake) {
+			c.vx *= (1.f - (1.6f + 2.2f * c.aiBrakeHabit) * dt);
+			c.vy *= (1.f - (1.6f + 2.2f * c.aiBrakeHabit) * dt);
+			c.vz *= (1.f - (1.6f + 2.2f * c.aiBrakeHabit) * dt);
 		}
 
 		float edgeDanger = max(latAbs / max(0.01f, half), vertAbs / max(0.01f, half * 0.85f));
@@ -3689,6 +4595,7 @@ void CSoft3DRaceDlg::TickAi(float dt)
 			}
 		}
 		if (c.boostT>0) thrust *= 1.06f;
+		if (c.nitroT>0) thrust *= NitroThrustMul(c);
 		if (c.slowT>0) thrust *= 0.62f;
 		if (c.fuel < 8.f) thrust *= 0.35f;
 		if (c.fuel <= 0.01f) thrust = 0.f;
@@ -3709,6 +4616,18 @@ void CSoft3DRaceDlg::TickAi(float dt)
 			float climb = thrust * (0.15f + 0.35f * ty) * dt;
 			c.vx += tx * climb; c.vy += ty * climb; c.vz += tz * climb;
 		}
+
+		// CPU ニトロ：遅れている／ラストスパートで使用（効きは難易度で自機に近づく）
+		if (!demo && c.nitroStock > 0 && c.nitroT <= 0.f && !c.offBand) {
+			float lead = ((float)c.lap + c.pathT) - plProg;
+			BOOL wantN = FALSE;
+			if (finishRush) wantN = TRUE;
+			else if (lead < -0.06f) wantN = TRUE;
+			else if (lead < -0.02f && sk > 0.28f && S3rRand01(m_rng) < min(0.42f, 2.2f * dt)) wantN = TRUE;
+			else if (m_aiRaceLv >= AI_HARD && c.lap >= m_lapsTarget - 1 && lead < 0.05f) wantN = TRUE;
+			if (lead > 0.22f) wantN = FALSE;
+			if (wantN) TryUseNitro(c);
+		}
 	}
 }
 
@@ -3725,6 +4644,14 @@ void CSoft3DRaceDlg::TickItems(float dt)
 		S3rCraft& c=m_crafts[i];
 		if (c.boostT>0) c.boostT-=dt; if (c.slowT>0) c.slowT-=dt; if (c.agilityT>0) c.agilityT-=dt;
 		if (c.fogT>0) c.fogT-=dt; if (c.dofT>0) c.dofT-=dt; if (c.flashT>0) c.flashT-=dt;
+		if (c.hitFlashT>0) c.hitFlashT=max(0.f,c.hitFlashT-dt);
+		if (c.nitroT>0) {
+			c.nitroT-=dt;
+			if (c.nitroT<=0.f) {
+				c.nitroT=0.f;
+				if (c.isPlayer) m_standDirty = 1;
+			}
+		}
 		if (c.explodeT>0) c.explodeT-=dt;
 		if (c.smokeT>0) c.smokeT-=dt;
 		TryPickupCraft(i);
@@ -3746,6 +4673,7 @@ void CSoft3DRaceDlg::TickPhysics(float dt)
 		if (pl.courseOutCool > 0.f) {
 			// 復帰クール中は入力推力を切って帯へ定着させる
 			m_playerAccel = 0;
+			TickEngine(pl, 0.f, 0, dt);
 		} else {
 		float steerX = joy.connected ? joy.lx : 0.f;
 		float steerY = joy.connected ? -joy.ly : 0.f;
@@ -3768,23 +4696,49 @@ void CSoft3DRaceDlg::TickPhysics(float dt)
 			m_camYawOff = S3rNormAngle(m_camYawOff + joy.rx * 1.5f * dt);
 			m_camPitchOff = S3rClamp(m_camPitchOff - joy.ry * 0.9f * dt, 0.05f, 0.42f);
 		}
-		BOOL accel = m_accelHeld || (joy.connected && (joy.rt > 0.15f || (joy.buttons & 1)));
-		BOOL brake = m_brakeHeld || (joy.connected && (joy.lt > 0.15f || (joy.buttons & 2)));
+		BOOL keyAccel = (GetAsyncKeyState('W') & 0x8000) || (GetAsyncKeyState(VK_UP) & 0x8000)
+			|| (GetAsyncKeyState(VK_SPACE) & 0x8000);
+		BOOL keyBrake = (GetAsyncKeyState('S') & 0x8000) || (GetAsyncKeyState(VK_DOWN) & 0x8000);
+		BOOL lmb = FALSE, rmb = FALSE;
+		{
+			HWND vw = m_view.GetSafeHwnd();
+			if (vw && (m_accelHeld || ::GetCapture() == vw))
+				lmb = (GetAsyncKeyState(VK_LBUTTON) & 0x8000) ? TRUE : FALSE;
+			if (vw && (m_brakeHeld || ::GetCapture() == vw))
+				rmb = (GetAsyncKeyState(VK_RBUTTON) & 0x8000) ? TRUE : FALSE;
+			if (!lmb) lmb = m_accelHeld ? TRUE : FALSE;
+			if (!rmb) rmb = m_brakeHeld ? TRUE : FALSE;
+		}
+		BOOL accel = lmb || keyAccel || (joy.connected && (joy.rt > 0.22f || (joy.buttons & 1)));
+		BOOL brake = rmb || keyBrake || (joy.connected && (joy.lt > 0.28f || (joy.buttons & 2)));
+		// マウス／キーのアクセルはパッドの誤ブレーキに負けない
+		if (lmb || keyAccel) brake = FALSE;
+		// ニトロ: N / Ctrl / パッド X・Y（ボタン2・3）
+		BOOL nitroBtn = (GetAsyncKeyState('N') & 0x8000) || (GetAsyncKeyState(VK_CONTROL) & 0x8000)
+			|| (joy.connected && (joy.buttons & ((1 << 2) | (1 << 3))));
+		if (nitroBtn && !m_nitroBtnHeld)
+			TryUseNitro(pl);
+		m_nitroBtnHeld = nitroBtn ? 1 : 0;
 		float fx=sinf(pl.yaw)*cosf(pl.pitch), fy=sinf(pl.pitch), fz=cosf(pl.yaw)*cosf(pl.pitch);
 		const float scv = SpeedScale();
-		// 直線で物理上限付近に届く推力（表示は×20）
-		float thrust = accel ? (72.f * scv) : 0.f;
-		if (pl.boostT>0) thrust *= 1.25f;
+		float thrIn = 0.f;
+		if (accel) {
+			if (lmb || keyAccel) thrIn = 1.f;
+			else if (joy.connected && joy.rt > 0.22f) thrIn = S3rClamp(joy.rt, 0.f, 1.f);
+			else thrIn = 1.f;
+		}
+		TickEngine(pl, thrIn, brake ? 1 : 0, dt);
+		float thrust = (70.f * scv) * S3rEngPower(pl.rpm, pl.throttle);
+		if (pl.boostT>0) thrust *= 1.18f;
+		if (pl.nitroT>0) thrust *= NitroThrustMul(pl);
 		if (pl.slowT>0) thrust *= 0.55f;
-		if (pl.fuel < 5.f) thrust *= 0.25f;
-		if (pl.fuel <= 0.01f) thrust = 0.f;
-		if (pl.offBand) thrust *= 0.55f;
+		if (pl.offBand) thrust *= 0.62f;
 		else {
 			float plat, pvert, pcx, pcy, pcz;
 			BandLocal(pl.x, pl.y, pl.z, pl.pathT, plat, pvert, pcx, pcy, pcz);
 			thrust *= BandSpeedFactor(plat, pvert);
 		}
-		if (accel) { pl.vx+=fx*thrust*dt; pl.vy+=fy*thrust*dt; pl.vz+=fz*thrust*dt; }
+		if (thrust > 0.2f) { pl.vx+=fx*thrust*dt; pl.vy+=fy*thrust*dt; pl.vz+=fz*thrust*dt; }
 		// 急勾配：アクセル中はコース接線の上昇成分を補助（ピッチ制限だけでは足りない対策）
 		if (accel && thrust > 1.f && !pl.offBand) {
 			float px,py,pz,tx,ty,tz,nx,ny,nz,bx,by,bz; SplineFrame(pl.pathT+0.03f,px,py,pz,tx,ty,tz,nx,ny,nz,bx,by,bz);
@@ -3804,6 +4758,7 @@ void CSoft3DRaceDlg::TickPhysics(float dt)
 		}
 	} else {
 		m_playerAccel = 0;
+		m_nitroBtnHeld = 0;
 	}
 	// 自機の実速度を平滑化（AIのペース基準）。減速時は速めに落とす
 	{
@@ -3832,7 +4787,7 @@ void CSoft3DRaceDlg::TickPhysics(float dt)
 			c.x = rcx; c.y = rcy; c.z = rcz;
 			c.yaw = atan2f(rtx, rtz);
 			c.pitch = S3rClamp(asinf(S3rClamp(rty, -1.f, 1.f)), -0.55f, 0.55f);
-			float railCap = RaceSpeedCap(0) * 0.92f;
+			float railCap = FinishSimRailSpeed(c);
 			c.vx = rtx * railCap; c.vy = rty * railCap; c.vz = rtz * railCap;
 		}
 
@@ -3846,6 +4801,7 @@ void CSoft3DRaceDlg::TickPhysics(float dt)
 			latSpd=sqrtf(lx*lx+ly*ly+lz*lz);
 			// 完全固定せず、ある程度スライドを残す
 			float grip=(c.offBand?0.55f:1.45f)*(c.agilityT>0?1.35f:1.f);
+			if (c.craftKnockT > 0.f) grip *= 0.12f;
 			c.vx-=lx*min(1.f,grip*dt); c.vy-=ly*min(1.f,grip*dt); c.vz-=lz*min(1.f,grip*dt);
 			along=c.vx*fx+c.vy*fy+c.vz*fz;
 			lx=c.vx-fx*along; ly=c.vy-fy*along; lz=c.vz-fz*along;
@@ -3861,8 +4817,8 @@ void CSoft3DRaceDlg::TickPhysics(float dt)
 		// 空気抵抗＋コース曲率による衰退（自機・敵共通。難所で 70→30km/h 付近まで落ちる）
 		{
 			spd = sqrtf(c.vx*c.vx+c.vy*c.vy+c.vz*c.vz);
-			float lin = c.offBand ? 2.4f : 0.22f;
-			float quad = c.offBand ? 0.008f : 0.00135f;
+			float lin = c.offBand ? 0.50f : 0.22f;
+			float quad = c.offBand ? 0.0021f : 0.00135f;
 			if (c.isPlayer && !m_playerAccel && !demo) lin += 0.7f;
 			float t0x,t0y,t0z,t1x,t1y,t1z;
 			SplineTangent(c.pathT, t0x,t0y,t0z);
@@ -3874,18 +4830,21 @@ void CSoft3DRaceDlg::TickPhysics(float dt)
 			c.vx*=(1.f-damp*dt); c.vy*=(1.f-damp*dt); c.vz*=(1.f-damp*dt);
 		}
 		// 絶対上限（帯横軸中央で最大。上下に浮くと落ちる）
-		float maxSpd = RaceSpeedCap(c.boostT > 0.f ? 1 : 0);
+		float maxSpd = RaceSpeedCap(c.boostT > 0.f ? 1 : 0) * NitroSpeedMul(c);
 		if (!c.isPlayer || demo) {
 			const float plNow = sqrtf(m_crafts[0].vx*m_crafts[0].vx + m_crafts[0].vy*m_crafts[0].vy + m_crafts[0].vz*m_crafts[0].vz);
 			const int finishRush = (!demo && m_phase == PHASE_FINISH) ? 1 : 0;
 			float pace = demo ? (RaceSpeedCap(0) * 0.58f) : (finishRush ? RaceSpeedCap(0) * 0.96f : m_playerSpdEma);
 			if (!demo && !finishRush && pace < plNow) pace = plNow;
-			if (m_aiRaceLv >= AI_NORMAL && pace < 6.f) pace = 6.f;
+			if (!demo && !finishRush) {
+				float minP = RaceSpeedCap(0) * S3rAiMinPaceFrac(m_aiRaceLv);
+				if (pace < minP) pace = minP;
+			}
 			float sk = c.aiSkill;
 			if (demo && c.isPlayer && sk < 0.45f) sk = 0.70f;
 			float indep = demo ? 0.50f : (finishRush ? 0.92f : AiPaceIndep(sk));
-			float rubber = pace * (0.86f + 0.18f * sk);
-			float freeT = maxSpd * (0.66f + 0.22f * sk);
+			float rubber = pace * (0.90f + 0.06f * sk);
+			float freeT = maxSpd * S3rAiMaxPaceFrac(m_aiRaceLv);
 			float aiCap = S3rLerp(rubber, freeT, indep);
 			float hardCap = 9.f, softFloor = 0.f;
 			AiCapPair(sk, maxSpd, pace, plNow, indep, demo, finishRush, softFloor, hardCap);
@@ -3901,17 +4860,35 @@ void CSoft3DRaceDlg::TickPhysics(float dt)
 			maxSpd *= BandSpeedFactor(blat, bvert);
 		}
 		if (c.offBand) {
-			// 計画カット中だけ帯外でもレース速度を維持（事故帯外は≈30km/h）
+			// 計画カット中だけ帯外でもレース速度を維持（フリー走行は上限だけ落とす）
 			int cutting = ((!c.isPlayer || demo) && c.aiCutT >= 0.f && c.aiCutTimer > 0.f) ? 1 : 0;
 			if (cutting) maxSpd = min(maxSpd, RaceSpeedCap(0) * (0.72f + 0.12f * c.aiSkill));
-			else maxSpd = min(maxSpd * 0.45f, 30.f / 3.6f);
+			else maxSpd *= 0.78f;
+		}
+		if (!c.isPlayer || demo) {
+			float ceil = RaceSpeedCap(0) * S3rAiMaxPaceFrac(m_aiRaceLv);
+			if (c.nitroT > 0.f)
+				ceil = min(RaceSpeedCap(c.boostT > 0.f ? 1 : 0) * NitroSpeedMul(c), RaceSpeedCap(0) * 1.16f);
+			if (!demo && m_phase == PHASE_RACE) {
+				const S3rCraft& pl0 = m_crafts[0];
+				float lead = ((float)c.lap + c.pathT) - ((float)pl0.lap + pl0.pathT);
+				if (lead < -0.08f && m_aiRaceLv >= AI_NORMAL) {
+					float boost = S3rSaturate((-lead - 0.08f) / 0.22f);
+					float extra = (m_aiRaceLv >= AI_FEROCIOUS) ? 0.10f : ((m_aiRaceLv >= AI_HARD) ? 0.07f : 0.06f);
+					ceil = min(RaceSpeedCap(0) * (S3rAiMaxPaceFrac(m_aiRaceLv) + extra * boost),
+						RaceSpeedCap(c.boostT > 0.f ? 1 : 0) * NitroSpeedMul(c));
+				}
+			}
+			if (maxSpd > ceil) maxSpd = ceil;
 		}
 		spd=sqrtf(c.vx*c.vx+c.vy*c.vy+c.vz*c.vz);
-		if (spd>maxSpd){ float s=maxSpd/spd; c.vx*=s;c.vy*=s;c.vz*=s; }
+		if (c.craftKnockT <= 0.f && spd>maxSpd){ float s=maxSpd/spd; c.vx*=s;c.vy*=s;c.vz*=s; }
 
 		if (c.courseOutCool > 0.f) c.courseOutCool = max(0.f, c.courseOutCool - dt);
 		if (c.obsHitCool > 0.f) c.obsHitCool = max(0.f, c.obsHitCool - dt);
 		if (c.craftHitCool > 0.f) c.craftHitCool = max(0.f, c.craftHitCool - dt);
+		if (c.fxHitCool > 0.f) c.fxHitCool = max(0.f, c.fxHitCool - dt);
+		if (c.craftKnockT > 0.f) c.craftKnockT = max(0.f, c.craftKnockT - dt);
 
 		c.x+=c.vx*dt; c.y+=c.vy*dt; c.z+=c.vz*dt;
 
@@ -3921,58 +4898,110 @@ void CSoft3DRaceDlg::TickPhysics(float dt)
 		const float preHalf = BandHalfWidth();
 		const int onLane = (fabsf(preLat) <= preHalf * 1.55f && fabsf(preVert) <= preHalf * 1.35f) ? 1 : 0;
 
-		// 地形ヒット。光帯上は溝クリアランス不足で地面に食い込むのでスキップ。帯外AIは当たったらラインへ
-		if (!aiFinishRail && !onLane) {
+		// 地形ヒット。床=ノックアップ、天井(トンネル)=ノックダウン、壁=横弾き。
+		// 光帯上の床は溝クリアランス不足で常時当たるので、深くめり込んだときだけ。
+		if (!aiFinishRail) {
 			float gy = GroundY(c.x, c.z);
-			const float clearance = 1.35f;
+			const float rawH = RawGroundY(c.x, c.z);
 			int hitTerr = 0;
-			if (c.y < gy + clearance) {
-				c.y = gy + clearance;
-				if (c.vy < 0.f) c.vy = -c.vy * 0.25f;
-				c.hp -= 16.f * dt;
-				c.vx *= (1.f - 1.5f * dt); c.vz *= (1.f - 1.5f * dt);
-				hitTerr = 1;
+			spd = sqrtf(c.vx*c.vx+c.vy*c.vy+c.vz*c.vz);
+
+			const float floorClear = onLane ? 0.42f : 1.22f;
+			const int inTun = (rawH > gy + 3.2f) ? 1 : 0;
+			int tunSeg = inTun;
+			if (!tunSeg) {
+				int pi = S3rPathIdx(c.pathT);
+				if (m_pathDeep[pi]) tunSeg = 1;
+				else {
+					const int n = S3R_PATH_SAMPLES;
+					for (int d = 1; d <= 28 && !tunSeg; d++) {
+						int ip = pi + d; if (ip >= n) ip -= n;
+						int im = pi - d; if (im < 0) im += n;
+						if (m_pathDeep[ip] || m_pathDeep[im]) tunSeg = 1;
+					}
+				}
 			}
-			float rawH = gy;
-			if (m_hmReady && m_hmStep > 1e-4f) {
-				float u = (c.x - m_hmX0) / m_hmStep, v = (c.z - m_hmZ0) / m_hmStep;
-				int ii = (int)floorf(u), jj = (int)floorf(v);
-				float fu = u - (float)ii, fv = v - (float)jj;
-				if (ii < 0) { ii = 0; fu = 0.f; } if (jj < 0) { jj = 0; fv = 0.f; }
-				if (ii >= S3R_HM_N - 1) { ii = S3R_HM_N - 2; fu = 1.f; }
-				if (jj >= S3R_HM_N - 1) { jj = S3R_HM_N - 2; fv = 1.f; }
-				float r00=m_hmRaw[jj*S3R_HM_N+ii], r10=m_hmRaw[jj*S3R_HM_N+ii+1];
-				float r01=m_hmRaw[(jj+1)*S3R_HM_N+ii], r11=m_hmRaw[(jj+1)*S3R_HM_N+ii+1];
-				rawH = r00+(r10-r00)*fu+((r01+(r11-r01)*fu)-(r00+(r10-r00)*fu))*fv;
-			}
-			if (rawH > gy + 4.0f && c.y < rawH - 0.35f) {
-				float ceilY = rawH - 1.15f;
-				if (c.y > ceilY) {
-					c.y = ceilY;
-					if (c.vy > 0.f) c.vy = -c.vy * 0.22f;
-					c.hp -= 10.f * dt;
+			const int useTube = (inTun || (tunSeg && onLane)) ? 1 : 0;
+
+			if (!useTube) {
+				if (c.y < gy + floorClear) {
+					c.y = gy + floorClear;
+					if (c.vy < 8.f) c.vy = 9.5f + min(8.f, 0.18f * spd);
+					c.vx *= 0.94f; c.vz *= 0.94f;
+					c.rpm *= 0.92f; c.throttle *= 0.85f;
+					ApplyCraftDamage(c, onLane ? (8.f * dt) : (16.f * dt), 0);
 					hitTerr = 1;
 				}
 			}
-			if (c.isPlayer && !demo) {
+
+			if (useTube) {
+				float tunR = S3rTunR(m_bandHalf);
+				int pi = S3rPathIdx(c.pathT);
+				tunR *= (1.f + 0.85f * S3rTunFlare(m_pathDeep, pi));
+				if (!m_pathDeep[pi] && tunSeg) tunR *= 1.25f;
+				float qx,qy,qz,tx,ty,tz,nnx,nny,nnz,bbx,bby,bbz;
+				SplineFrame(c.pathT, qx,qy,qz, tx,ty,tz, nnx,nny,nnz, bbx,bby,bbz);
+				const float tubeFloor = qy - tunR * 0.92f;
+				if (c.y < tubeFloor + floorClear) {
+					c.y = tubeFloor + floorClear;
+					if (c.vy < 0.f) c.vy = 0.f;
+				}
+				const float ceilY = qy + tunR * 0.92f;
+				if (c.y > ceilY) {
+					c.y = ceilY;
+					if (c.vy > -8.f) c.vy = -9.5f - min(8.f, 0.18f * spd);
+					c.vx *= 0.93f; c.vz *= 0.93f;
+					c.rpm *= 0.90f; c.throttle *= 0.82f;
+					ApplyCraftDamage(c, 12.f * dt, 0);
+					hitTerr = 1;
+				}
+				float ddx = c.x - qx, ddy = c.y - qy, ddz = c.z - qz;
+				float lat = ddx*bbx + ddy*bby + ddz*bbz;
+				float vert = ddx*nnx + ddy*nny + ddz*nnz;
+				float rad = sqrtf(lat*lat + vert*vert);
+				float lim = tunR * 0.90f;
+				if (rad > lim && rad > 1e-4f) {
+					float k = (rad - lim) / rad;
+					c.x -= (bbx*lat + nnx*vert) * k;
+					c.y -= (bby*lat + nny*vert) * k;
+					c.z -= (bbz*lat + nnz*vert) * k;
+					float nxw = (bbx*lat + nnx*vert) / rad;
+					float nyw = (bby*lat + nny*vert) / rad;
+					float nzw = (bbz*lat + nnz*vert) / rad;
+					float vin = c.vx*nxw + c.vy*nyw + c.vz*nzw;
+					if (vin > 0.f) { c.vx -= nxw*vin; c.vy -= nyw*vin; c.vz -= nzw*vin; }
+					const float kick = 4.2f + 0.08f * spd;
+					c.vx -= nxw * kick; c.vy -= nyw * kick * 0.55f; c.vz -= nzw * kick;
+					ApplyCraftDamage(c, 12.f * dt, 0);
+					hitTerr = 1;
+				}
+			} else {
 				const float pr = 0.95f;
 				const float cliff = 3.2f;
 				float gL = GroundY(c.x - pr, c.z);
 				float gR = GroundY(c.x + pr, c.z);
 				float gF = GroundY(c.x, c.z - pr);
 				float gB = GroundY(c.x, c.z + pr);
-				if (gL > gy + cliff) { c.x += pr * 0.40f; if (c.vx < 0.f) c.vx = -c.vx * 0.25f; }
-				if (gR > gy + cliff) { c.x -= pr * 0.40f; if (c.vx > 0.f) c.vx = -c.vx * 0.25f; }
-				if (gF > gy + cliff) { c.z += pr * 0.40f; if (c.vz < 0.f) c.vz = -c.vz * 0.25f; }
-				if (gB > gy + cliff) { c.z -= pr * 0.40f; if (c.vz > 0.f) c.vz = -c.vz * 0.25f; }
+				const float wallKick = 10.f + 0.20f * spd;
+				if (!onLane) {
+					if (gL > gy + cliff) { c.x += pr * 0.40f; if (c.vx < wallKick) c.vx = wallKick; hitTerr = 1; }
+					if (gR > gy + cliff) { c.x -= pr * 0.40f; if (c.vx > -wallKick) c.vx = -wallKick; hitTerr = 1; }
+					if (gF > gy + cliff) { c.z += pr * 0.40f; if (c.vz < wallKick) c.vz = wallKick; hitTerr = 1; }
+					if (gB > gy + cliff) { c.z -= pr * 0.40f; if (c.vz > -wallKick) c.vz = -wallKick; hitTerr = 1; }
+				}
 			}
-			if (hitTerr && (!c.isPlayer || demo))
+			if (hitTerr && c.fxHitCool <= 0.f) {
+				SpawnFxBurst(FX_DUST, c.x, c.y, c.z, 0.f, 1.f, 0.f, 7, 5.5f, 0.55f, 0.42f, 0.28f);
+				SpawnFxBurst(FX_SPARK, c.x, c.y + 0.3f, c.z, 0.f, 1.f, 0.f, 5, 8.5f, 1.f, 0.82f, 0.35f);
+				c.fxHitCool = 0.15f;
+			}
+			if (hitTerr && (!c.isPlayer || demo) && c.craftKnockT <= 0.12f)
 				AbortAiToLine(c, 18.f);
 		}
 
 		float prevT=c.pathT;
 		spd=sqrtf(c.vx*c.vx+c.vy*c.vy+c.vz*c.vz);
-		if ((!c.isPlayer || demo) && !aiFinishRail && spd < 5.0f && c.courseOutCool <= 0.f) {
+		if ((!c.isPlayer || demo) && !aiFinishRail && spd < 5.0f && c.courseOutCool <= 0.f && c.craftKnockT <= 0.f) {
 			AbortAiToLine(c, 10.f);
 			spd=sqrtf(c.vx*c.vx+c.vy*c.vy+c.vz*c.vz);
 		}
@@ -4004,14 +5033,15 @@ void CSoft3DRaceDlg::TickPhysics(float dt)
 			SplineFrame(c.pathT, cx,cy,cz, tx,ty,tz, nx,ny,nz, bx,by,bz);
 			float pull = min(1.f, 0.55f * dt);
 			float rail = 0.08f;
-			if (!c.isPlayer || demo) {
+			if (c.craftKnockT > 0.f) rail = 0.f;
+			else if (!c.isPlayer || demo) {
 				float sk = c.aiSkill;
 				if (demo && c.isPlayer && sk < 0.45f) sk = 0.70f;
 				int plRank = (m_crafts[0].rank > 0) ? m_crafts[0].rank : 1;
 				int aiRank = (c.rank > 0) ? c.rank : 2;
 				if (!demo && aiRank > plRank) sk = S3rClamp(sk + (float)(aiRank - plRank) * 0.07f, 0.f, 1.f);
-				rail = 0.22f + 0.28f * sk;
-				if (!demo && m_aiRaceLv <= AI_EASY) rail = 0.08f + 0.20f * sk;
+				rail = 0.05f + 0.06f * sk;
+				if (!demo && m_aiRaceLv <= AI_EASY) rail = 0.035f + 0.04f * sk;
 				// 計画カット中は帯内レールを弱めて弦へ出やすくする
 				if (c.aiCutT >= 0.f && c.aiCutTimer > 0.f) rail = 0.04f;
 			}
@@ -4021,7 +5051,9 @@ void CSoft3DRaceDlg::TickPhysics(float dt)
 		} else if (c.courseOutCool <= 0.f) {
 			c.offBand = 1;
 			c.offBandT += dt;
-			if (!c.isPlayer || demo) {
+			if (c.craftKnockT > 0.f) {
+				// 機体同士の吹っ飛び中はレールへ引き戻さない
+			} else if (!c.isPlayer || demo) {
 				const int cutting = (c.aiCutT >= 0.f && c.aiCutTimer > 0.f) ? 1 : 0;
 				if (cutting) {
 					// 計画ショートカット中：緩い燃料減＋合流点へ。危険なら即ライン復帰
@@ -4044,11 +5076,11 @@ void CSoft3DRaceDlg::TickPhysics(float dt)
 					}
 				} else {
 					// 事故帯外：早めにラインへ戻す（COURSE OUT 連発を避ける）
-					c.fuel = max(0.f, c.fuel - 14.f * dt);
-					float starve = 1.f + (1.f - c.fuel / 100.f) * 1.6f;
-					c.vx *= (1.f - 2.0f * starve * dt);
-					c.vy *= (1.f - 2.0f * starve * dt);
-					c.vz *= (1.f - 2.0f * starve * dt);
+					c.fuel = max(0.f, c.fuel - 8.f * dt);
+					float starve = 1.f + (1.f - c.fuel / 100.f) * 0.70f;
+					c.vx *= (1.f - 0.65f * starve * dt);
+					c.vy *= (1.f - 0.65f * starve * dt);
+					c.vz *= (1.f - 0.65f * starve * dt);
 					float tx,ty,tz,nx,ny,nz,bx,by,bz;
 					SplineFrame(c.pathT, cx,cy,cz, tx,ty,tz, nx,ny,nz, bx,by,bz);
 					float hx = cx - c.x, hy = cy - c.y, hz = cz - c.z;
@@ -4066,16 +5098,21 @@ void CSoft3DRaceDlg::TickPhysics(float dt)
 				}
 			} else {
 				// 自機：帯外フリー走行。推進力0で離脱地点（帯中央）へ復帰
-				c.fuel = max(0.f, c.fuel - 24.f * dt);
-				float starve = 1.f + (1.f - c.fuel / 100.f) * 2.2f;
-				c.vx *= (1.f - 2.2f * starve * dt); c.vy *= (1.f - 2.2f * starve * dt); c.vz *= (1.f - 2.2f * starve * dt);
-				if (c.fuel <= 0.01f) {
+				c.fuel = max(0.f, c.fuel - 11.f * dt);
+				float starve = 1.f + (1.f - c.fuel / 100.f) * 0.85f;
+				c.vx *= (1.f - 0.72f * starve * dt); c.vy *= (1.f - 0.72f * starve * dt); c.vz *= (1.f - 0.72f * starve * dt);
+					if (c.fuel <= 0.01f) {
 					RespawnCraftToCheckpoint(c, 80.f, 2.0f);
 					if (m_phase == PHASE_RACE) {
 						m_clearBakeText = LL14(L"COURSE OUT", L"COURSE OUT", L"HORS PISTE", L"FUORI PISTA", L"FUERA DE PISTA",
 							L"코스 아웃", L"冲出赛道", L"خارج المسار", L"ВНЕ ТРАССЫ", L"COURSE OUT", L"FORA DA PISTA", L"COURSE OUT", L"POZA TORU", L"KURS DIŞI");
 						m_clearBakeA = 1.f; m_clearDirty = 1; m_overlayHold = 1.5f;
 						Soft3DSfxUi(S3SFX_COURSEOUT, 0);
+						if (c.isPlayer) {
+							c.flashT = max(c.flashT, 0.40f);
+							SpawnFxBurst(FX_DUST, c.x, c.y + 0.1f, c.z, 0.f, 1.f, 0.f, 18, 5.5f, 0.55f, 0.48f, 0.35f);
+							SpawnFxBurst(FX_SMOKE, c.x, c.y + 0.2f, c.z, 0.f, 1.f, 0.f, 8, 2.8f, 0.35f, 0.35f, 0.38f);
+						}
 					}
 				}
 			}
@@ -4112,9 +5149,8 @@ void CSoft3DRaceDlg::TickPhysics(float dt)
 			float honestMin = (m_pathLen > 1.f) ? (m_pathLen / max(1.f, RaceSpeedCap(1) * 1.25f)) : minLap;
 			if (honestMin < minLap) honestMin = minLap;
 			if (m_phase == PHASE_FINISH && !c.isPlayer) {
-				// レール巡航の実ラップ時間。25秒床は短コースで周回を永久に落とす
-				float rushMin = (m_pathLen > 1.f) ? (m_pathLen / max(1.f, RaceSpeedCap(1) * 1.55f)) : 8.f;
-				if (rushMin < 6.f) rushMin = 6.f;
+				float rushMin = (m_pathLen > 1.f) ? (m_pathLen / max(1.f, FinishSimRailSpeed(c) * 1.12f)) : 12.f;
+				if (rushMin < 12.f) rushMin = 12.f;
 				honestMin = rushMin;
 			}
 			BOOL crossed = (prevT > 0.82f && c.pathT < 0.18f && dT > 0.f && dT < 0.35f);
@@ -4129,6 +5165,10 @@ void CSoft3DRaceDlg::TickPhysics(float dt)
 					c.lapTimesN++;
 				}
 				c.lap++;
+				if (c.nitroStock < S3R_NITRO_MAX) {
+					c.nitroStock++;
+					m_standDirty = 1;
+				}
 				if (c.raceTime > 0.5f && c.raceTime < c.bestLap) c.bestLap = c.raceTime;
 				c.raceTime = 0.f;
 				m_standDirty = 1;
@@ -4142,6 +5182,10 @@ void CSoft3DRaceDlg::TickPhysics(float dt)
 							m_clearBakeText = LL14(L"FINISH!", L"FINISH!", L"ARRIVÉE!", L"ARRIVO!", L"¡META!", L"피니시!", L"完赛!", L"نهاية!", L"ФИНИШ!", L"ZIEL!", L"CHEGADA!", L"FINISH!", L"META!", L"BİTİŞ!");
 							m_clearBakeA=1.f; m_clearDirty=1; m_overlayHold = 99.f;
 							Soft3DSfxUi(S3SFX_FINISH, 0);
+							c.flashT = max(c.flashT, 0.70f);
+							SpawnBlast(c.x, c.y, c.z);
+							SpawnFxBurst(FX_PICK, c.x, c.y + 0.5f, c.z, 0.f, 1.f, 0.f, 28, 10.f, 1.f, 0.85f, 0.25f);
+							SpawnFxBurst(FX_EMBER, c.x, c.y + 0.3f, c.z, 0.f, 1.f, 0.f, 18, 8.f, 1.f, 0.55f, 0.12f);
 						}
 					}
 				} else if (c.isPlayer && m_phase == PHASE_RACE) {
@@ -4150,6 +5194,9 @@ void CSoft3DRaceDlg::TickPhysics(float dt)
 					m_clearBakeText = lapBuf;
 					m_clearBakeA = 1.f; m_clearDirty = 1; m_overlayHold = 1.8f;
 					Soft3DSfxUi(S3SFX_LAP, c.lap);
+					c.flashT = max(c.flashT, 0.38f);
+					SpawnFxBurst(FX_PICK, c.x, c.y + 0.45f, c.z, 0.f, 1.f, 0.f, 18, 8.5f, 0.35f, 0.95f, 1.f);
+					SpawnFxBurst(FX_SPARK, c.x, c.y + 0.25f, c.z, 0.f, 1.f, 0.f, 12, 7.0f, 1.f, 1.f, 0.55f);
 				}
 			}
 		}
@@ -4161,7 +5208,11 @@ void CSoft3DRaceDlg::TickPhysics(float dt)
 			SplineFrame(c.pathT + 0.01f, px,py,pz, tx,ty,tz, nx,ny,nz, bx,by,bz);
 			float along = c.vx*tx + c.vy*ty + c.vz*tz;
 			const int ww = (spd > 12.f && along < -0.2f * spd) ? 1 : 0;
-			if (ww && !m_wrongWay) Soft3DSfxUi(S3SFX_WRONG, 0);
+			if (ww && !m_wrongWay) {
+				Soft3DSfxUi(S3SFX_WRONG, 0);
+				c.flashT = max(c.flashT, 0.28f);
+				SpawnFxBurst(FX_SPARK, c.x, c.y + 0.3f, c.z, 0.f, 1.f, 0.f, 10, 5.5f, 1.f, 0.25f, 0.15f);
+			}
 			m_wrongWay = ww;
 			if (ww && m_overlayHold <= 0.f) {
 				m_clearBakeText = LL14(L"逆走中", L"WRONG WAY", L"SENS INVERSE", L"CONTROMANO", L"SENTIDO CONTRARIO",
@@ -4174,67 +5225,68 @@ void CSoft3DRaceDlg::TickPhysics(float dt)
 			}
 		}
 
-		// 障害物: 貫通させず、空き側へ弾く。HPはヒットごとに約1/10（回復帯を考慮）
-		if (!aiFinishRail) {
+		// 障害物: 幹・枝・冠・横梁まで見た目どおり当たる。法線方向へノックバック。
+		// ニトロ中はすり抜け（自機・AIとも）
+		if (!aiFinishRail && c.nitroT <= 0.f) {
+			S3rObsHit best; best.hit = 0; best.nx = 0.f; best.ny = 1.f; best.nz = 0.f; best.push = 0.f;
 			int hitO = -1;
-			float hitD2 = 1e12f, hitRr = 1.f;
-			float hitDx = 0.f, hitDy = 0.f, hitDz = 0.f, hitOcx = 0.f, hitOcy = 0.f, hitOcz = 0.f;
+			const float craftR = 0.92f;
 			for (int o=0;o<m_obsN;o++){
-				if (!m_obs[o].hazard || m_obs[o].damage <= 0.f) continue;
-				const float ocx=m_obs[o].x, ocy=m_obs[o].y+m_obs[o].sy*0.38f, ocz=m_obs[o].z;
-				const float dx=c.x-ocx, dy=c.y-ocy, dz=c.z-ocz;
-				const float halfY=max(0.85f, m_obs[o].sy*0.50f);
-				if (fabsf(dy) > halfY) continue;
-				float rr=0.82f*max(m_obs[o].sx, m_obs[o].sz);
-				if (rr < 0.80f) rr = 0.80f;
-				const float d2=dx*dx+dy*dy+dz*dz;
-				if (d2 < rr*rr && d2 < hitD2) {
-					hitO=o; hitD2=d2; hitRr=rr;
-					hitDx=dx; hitDy=dy; hitDz=dz;
-					hitOcx=ocx; hitOcy=ocy; hitOcz=ocz;
-				}
+				S3rObsHit h = S3rCraftVsObs(m_themeActive, m_obs[o], c.x, c.y, c.z, craftR);
+				if (!h.hit) continue;
+				if (!best.hit || h.push > best.push) { best = h; hitO = o; }
 			}
-			if (hitO >= 0) {
-				float d=sqrtf(hitD2);
-				float nx, ny, nz;
-				if (d > 1e-4f) { nx=hitDx/d; ny=hitDy/d; nz=hitDz/d; }
-				else { nx=0.f; ny=1.f; nz=0.f; }
-				float px,py,pz,tx,ty,tz,nnx,nny,nnz,bx,by,bz;
-				SplineFrame(c.pathT, px,py,pz, tx,ty,tz, nnx,nny,nnz, bx,by,bz);
-				const float obsLat=(hitOcx-px)*bx+(hitOcy-py)*by+(hitOcz-pz)*bz;
-				float ox=-bx, oy=-by, oz=-bz;
-				if (obsLat > 0.12f) { ox=-bx; oy=-by; oz=-bz; }
-				else if (obsLat < -0.12f) { ox=bx; oy=by; oz=bz; }
-				else {
-					const float clat=(c.x-px)*bx+(c.y-py)*by+(c.z-pz)*bz;
-					if (clat >= 0.f) { ox=bx; oy=by; oz=bz; }
-					else { ox=-bx; oy=-by; oz=-bz; }
+			if (best.hit && hitO >= 0) {
+				float nx = best.nx, ny = best.ny, nz = best.nz;
+				S3rNorm3(nx, ny, nz);
+				float knx = nx, kny = ny, knz = nz;
+				if (fabsf(ny) <= 0.50f) {
+					float px,py,pz,tx,ty,tz,nnx,nny,nnz,bx,by,bz;
+					SplineFrame(c.pathT, px,py,pz, tx,ty,tz, nnx,nny,nnz, bx,by,bz);
+					const float obsLat=(m_obs[hitO].x-px)*bx+(m_obs[hitO].y-py)*by+(m_obs[hitO].z-pz)*bz;
+					float ox=-bx, oy=-by, oz=-bz;
+					if (obsLat > 0.12f) { ox=-bx; oy=-by; oz=-bz; }
+					else if (obsLat < -0.12f) { ox=bx; oy=by; oz=bz; }
+					else {
+						const float clat=(c.x-px)*bx+(c.y-py)*by+(c.z-pz)*bz;
+						if (clat >= 0.f) { ox=bx; oy=by; oz=bz; }
+						else { ox=-bx; oy=-by; oz=-bz; }
+					}
+					knx = nx * 0.78f + ox * 0.22f;
+					kny = ny * 0.78f + oy * 0.22f;
+					knz = nz * 0.78f + oz * 0.22f;
+					S3rNorm3(knx, kny, knz);
 				}
-				float knx=nx*0.32f+ox*0.68f;
-				float kny=ny*0.32f+oy*0.68f;
-				float knz=nz*0.32f+oz*0.68f;
-				S3rNorm3(knx,kny,knz);
-				const float push=(hitRr-d)+0.28f;
-				c.x+=knx*push; c.y+=kny*push; c.z+=knz*push;
-				float vin=c.vx*knx+c.vy*kny+c.vz*knz;
+				const float push = best.push + 0.22f;
+				c.x += knx * push; c.y += kny * push; c.z += knz * push;
+				float vin = c.vx * knx + c.vy * kny + c.vz * knz;
 				if (vin < 0.f) {
-					c.vx-=knx*vin; c.vy-=kny*vin; c.vz-=knz*vin;
+					c.vx -= knx * vin; c.vy -= kny * vin; c.vz -= knz * vin;
 				}
-				const float kick=12.f+0.28f*spd;
-				c.vx+=knx*kick; c.vy+=kny*kick*0.35f; c.vz+=knz*kick;
-				if (c.obsHitCool <= 0.f) {
-					c.hp-=10.f;
-					c.obsHitCool=0.48f;
+				const float kick = 4.0f + 0.08f * spd;
+				const float yk = (fabsf(kny) > 0.50f) ? 1.05f : 0.50f;
+				c.vx += knx * kick; c.vy += kny * kick * yk; c.vz += knz * kick;
+				c.rpm *= 0.88f; c.throttle *= 0.80f;
+				if (c.fxHitCool <= 0.f) {
+					SpawnFxBurst(FX_SPARK, c.x, c.y + 0.35f, c.z, knx, kny, knz, 10, 9.5f, 1.f, 0.85f, 0.38f);
+					SpawnFxBurst(FX_SMOKE, c.x, c.y + 0.2f, c.z, knx, 0.7f, knz, 4, 2.4f, 0.28f, 0.26f, 0.24f);
+					c.fxHitCool = 0.16f;
+				}
+				if (m_obs[hitO].hazard && m_obs[hitO].damage > 0.f && c.obsHitCool <= 0.f) {
+					ApplyCraftDamage(c, 10.f, 1);
+					c.obsHitCool = 0.48f;
+					SpawnFxBurst(FX_EMBER, c.x, c.y + 0.4f, c.z, knx, kny, knz, 6, 7.5f, 1.f, 0.40f, 0.10f);
 					if (c.isPlayer && !demo) {
 						Soft3DSfxOneShot(S3SFX_HIT, c.x, c.y, c.z);
-						m_sfxHitCool=0.22f;
+						m_sfxHitCool = 0.22f;
 					}
 				}
 			}
 		}
 	}
 
-	// 機体同士：少し弾く。HPは約1/30（dt非依存）。残骸は静止障害
+	// 機体同士：少し弾く。HPは約1/30（dt非依存）。残骸は静止障害。
+	// 自機ニトロ中はこちらはノックバックもダメージも受けない（相手は通常どおり弾かれる）
 	for (int i=0;i<m_craftN;i++){
 		S3rCraft& c=m_crafts[i];
 		for (int j=i+1;j<m_craftN;j++){
@@ -4247,20 +5299,38 @@ void CSoft3DRaceDlg::TickPhysics(float dt)
 			const float rr=2.2f;
 			if (d2 >= rr*rr || d2 <= 1e-4f) continue;
 			float d=sqrtf(d2); float nx=dx/d, ny=dy/d, nz=dz/d;
-			float push=(rr-d)*0.5f;
-			if (cGo) { c.x+=nx*push; c.y+=ny*push; c.z+=nz*push; }
-			if (oGo) { o.x-=nx*push; o.y-=ny*push; o.z-=nz*push; }
-			float vinC=c.vx*nx+c.vy*ny+c.vz*nz;
-			float vinO=o.vx*nx+o.vy*ny+o.vz*nz;
-			if (cGo && vinC < 0.f) { c.vx-=nx*vinC; c.vy-=ny*vinC; c.vz-=nz*vinC; }
-			if (oGo && vinO > 0.f) { o.vx-=nx*vinO; o.vy-=ny*vinO; o.vz-=nz*vinO; }
-			const float kick=8.f;
-			if (cGo) { c.vx+=nx*kick; c.vy+=ny*kick*0.25f; c.vz+=nz*kick; }
-			if (oGo) { o.vx-=nx*kick; o.vy-=ny*kick*0.25f; o.vz-=nz*kick; }
-			const float dmg=100.f/30.f;
+			const int cRam = (c.isPlayer && c.nitroT > 0.f) ? 1 : 0;
+			const int oRam = (o.isPlayer && o.nitroT > 0.f) ? 1 : 0;
+			const float gap = rr - d;
+			if (cRam && !oRam) {
+				if (oGo) { o.x -= nx * gap; o.y -= ny * gap; o.z -= nz * gap; }
+			} else if (oRam && !cRam) {
+				if (cGo) { c.x += nx * gap; c.y += ny * gap; c.z += nz * gap; }
+			} else {
+				float push = gap * 0.5f;
+				if (cGo) { c.x+=nx*push; c.y+=ny*push; c.z+=nz*push; }
+				if (oGo) { o.x-=nx*push; o.y-=ny*push; o.z-=nz*push; }
+			}
 			if (c.craftHitCool <= 0.f && o.craftHitCool <= 0.f) {
-				if (cGo) { c.hp-=dmg; c.craftHitCool=0.38f; }
-				if (oGo) { o.hp-=dmg; o.craftHitCool=0.38f; }
+				float closing = (c.vx - o.vx)*nx + (c.vy - o.vy)*ny + (c.vz - o.vz)*nz;
+				float bounce = 12.5f + 0.48f * fabsf(closing);
+				if (cGo && !cRam) {
+					if (closing < 0.f) { c.vx -= nx * closing * 0.50f; c.vy -= ny * closing * 0.50f; c.vz -= nz * closing * 0.50f; }
+					c.vx += nx * bounce; c.vy += ny * bounce * 0.42f; c.vz += nz * bounce;
+					c.craftKnockT = max(c.craftKnockT, 0.85f);
+					c.rpm *= 0.88f; c.throttle *= 0.80f;
+				}
+				if (oGo && !oRam) {
+					if (closing < 0.f) { o.vx += nx * closing * 0.50f; o.vy += ny * closing * 0.50f; o.vz += nz * closing * 0.50f; }
+					o.vx -= nx * bounce; o.vy -= ny * bounce * 0.42f; o.vz -= nz * bounce;
+					o.craftKnockT = max(o.craftKnockT, 0.85f);
+					o.rpm *= 0.88f; o.throttle *= 0.80f;
+				}
+				const float dmg=100.f/30.f;
+				if (cGo && !cRam) { ApplyCraftDamage(c, dmg, 1); c.craftHitCool=0.38f; }
+				if (oGo && !oRam) { ApplyCraftDamage(o, dmg, 1); o.craftHitCool=0.38f; }
+				SpawnFxBurst(FX_SPARK, (c.x+o.x)*0.5f, (c.y+o.y)*0.5f+0.25f, (c.z+o.z)*0.5f,
+					nx, ny, nz, 8, 7.5f, 1.f, 0.88f, 0.45f);
 				if (!demo && m_sfxHitCool <= 0.f && (c.isPlayer || o.isPlayer)) {
 					Soft3DSfxOneShot(S3SFX_HIT, c.x, c.y, c.z);
 					m_sfxHitCool = 0.22f;
@@ -4287,15 +5357,11 @@ void CSoft3DRaceDlg::TickPhysics(float dt)
 			Soft3DSfxUi(S3SFX_GAMEOVER, 0);
 			continue;
 		}
-		if (CountAiRetired() >= MaxAiRetire()) {
-			c.hp = 42.f;
-			AbortAiToLine(c, 16.f);
-		} else {
-			RetireCraft(c);
-			Soft3DSfxOneShot(S3SFX_HIT, c.x, c.y, c.z);
-		}
+		RetireCraft(c);
+		Soft3DSfxOneShot(S3SFX_HIT, c.x, c.y, c.z);
 	}
 	TickBlast(dt);
+	TickFx(dt);
 
 	if (m_phase == PHASE_RACE || m_phase == PHASE_FINISH) m_raceClock += dt;
 	else if (demo) m_raceClock += dt;
@@ -4339,23 +5405,37 @@ void CSoft3DRaceDlg::EnsureHudBake()
 	if (!m_view.m_ready) return;
 	if (!m_hudDirty && m_view.m_srvHud) return;
 	S3rCraft& pl=m_crafts[0];
-	float kmh = SpeedToKmh(pl.vx, pl.vy, pl.vz);
 	wchar_t buf[512];
 	if (pl.bestLap<=1e8f) {
-		swprintf_s(buf, L"Lap %d/%d   #%d/%d\nHP %.0f   Thrust %.0f   %.0f km/h\nTime %.2f   BestLap %.2f",
-			min(m_lapsTarget, pl.lap+1), m_lapsTarget, pl.rank, m_craftN, pl.hp, pl.fuel, kmh, m_raceClock, pl.bestLap);
+		swprintf_s(buf, L"Lap %d/%d   #%d/%d\nHP %.0f   Thrust %.0f\nTime %.2f   BestLap %.2f",
+			min(m_lapsTarget, pl.lap+1), m_lapsTarget, pl.rank, m_craftN, pl.hp, pl.fuel, m_raceClock, pl.bestLap);
 	} else {
-		swprintf_s(buf, L"Lap %d/%d   #%d/%d\nHP %.0f   Thrust %.0f   %.0f km/h\nTime %.2f   BestLap --",
-			min(m_lapsTarget, pl.lap+1), m_lapsTarget, pl.rank, m_craftN, pl.hp, pl.fuel, kmh, m_raceClock);
+		swprintf_s(buf, L"Lap %d/%d   #%d/%d\nHP %.0f   Thrust %.0f\nTime %.2f   BestLap --",
+			min(m_lapsTarget, pl.lap+1), m_lapsTarget, pl.rank, m_craftN, pl.hp, pl.fuel, m_raceClock);
 	}
 	m_hudBakeText = buf;
 	m_view.BakeHudTexture(m_hudBakeText);
 	m_hudDirty = 0;
 }
 
+void CSoft3DRaceDlg::EnsureGaugeBake()
+{
+	if (!m_view.m_ready) return;
+	S3rCraft& pl = m_crafts[0];
+	float kmh = SpeedToKmh(pl.vx, pl.vy, pl.vz);
+	int ik = (int)(kmh + 0.5f);
+	int ir = (int)(pl.rpm * 90.f + 0.5f);
+	if (ik == m_gaugeKmhQ && ir == m_gaugeRpmQ && m_view.m_srvGauge) return;
+	m_gaugeKmhQ = ik;
+	m_gaugeRpmQ = ir;
+	m_view.BakeGaugeTexture(kmh, pl.rpm);
+}
+
 void CSoft3DRaceDlg::EnsureStandingsBake()
 {
 	if (!m_view.m_ready) return;
+	// ニトロ発動中はパルス表示のため毎フレ更新
+	if (m_crafts[0].nitroT > 0.f) m_standDirty = 1;
 	if (!m_standDirty && m_view.m_srvStand) return;
 	CS3rView::S3rStandRow rows[S3R_MAX_CRAFT];
 	int order[S3R_MAX_CRAFT];
@@ -4398,7 +5478,9 @@ void CSoft3DRaceDlg::EnsureStandingsBake()
 			}
 		}
 	}
-	m_view.BakeStandingsTexture(rows, m_craftN);
+	m_view.BakeStandingsTexture(rows, m_craftN,
+		m_crafts[0].nitroStock, S3R_NITRO_MAX,
+		(m_crafts[0].nitroT > 0.f) ? S3rSaturate(m_crafts[0].nitroT / 2.85f) : 0.f);
 	{
 		CS3rView::S3rBubbleRow bub[S3R_MAX_CRAFT];
 		for (int i = 0; i < m_craftN; i++) {
@@ -4437,7 +5519,6 @@ void CSoft3DRaceDlg::BakeStaticMeshes()
 	const int segs = S3MeshScaleCount(220, 4096);
 	const int gN = S3MeshScaleCount(72, 1200);
 	const int tSegs = S3MeshScaleCount(220, 4096);
-	const int pN = S3MeshScaleCount(8, 96);
 	const int wN = S3MeshScaleCount(28, 512);
 	UINT bakeMax = m_view.m_cpuBakeScratchBytes / (UINT)sizeof(S3RVertex);
 	bakeMax = (bakeMax / 12u) * 12u;
@@ -4592,13 +5673,40 @@ void CSoft3DRaceDlg::BakeStaticMeshes()
 	auto terrPatch=[&](float xa,float za,float xb,float zb, float u0,float v0,float u1,float v1){
 		if (!need(6)) return;
 		float y00=GroundY(xa,za), y10=GroundY(xb,za), y11=GroundY(xb,zb), y01=GroundY(xa,zb);
-		float nx=(y00-y10)+(y01-y11), nz=(y00-y01)+(y10-y11), ny=(xb-xa)*2.f; S3rNorm3(nx,ny,nz);
-		put(xa,y00,za,nx,ny,nz,u0,v0,gr,gg,gb,1.f);
-		put(xa,y01,zb,nx,ny,nz,u0,v1,gr,gg,gb,1.f);
-		put(xb,y11,zb,nx,ny,nz,u1,v1,gr,gg,gb,1.f);
-		put(xa,y00,za,nx,ny,nz,u0,v0,gr,gg,gb,1.f);
-		put(xb,y11,zb,nx,ny,nz,u1,v1,gr,gg,gb,1.f);
-		put(xb,y10,za,nx,ny,nz,u1,v0,gr,gg,gb,1.f);
+		float r00=rawY(xa,za), r10=rawY(xb,za), r11=rawY(xb,zb), r01=rawY(xa,zb);
+		float pd = pathD(xa,za);
+		float pd1 = pathD(xb,za); if (pd1 < pd) pd = pd1;
+		float pd2 = pathD(xb,zb); if (pd2 < pd) pd = pd2;
+		float pd3 = pathD(xa,zb); if (pd3 < pd) pd = pd3;
+		float pdC = pathD((xa + xb) * 0.5f, (za + zb) * 0.5f);
+		const float tunR = S3rTunR(m_bandHalf) * 1.20f;
+		float yMn = y00; if (y10 < yMn) yMn = y10; if (y11 < yMn) yMn = y11; if (y01 < yMn) yMn = y01;
+		float yMx = y00; if (y10 > yMx) yMx = y10; if (y11 > yMx) yMx = y11; if (y01 > yMx) yMx = y01;
+		const int hole = (pdC < tunR || pd < tunR * 0.96f) ? 1 : 0;
+		const int steepLip = ((pdC < tunR * 1.12f || pd < tunR) && (yMx - yMn) > tunR * 0.38f) ? 1 : 0;
+		if (!steepLip) {
+			float nx=(y00-y10)+(y01-y11), nz=(y00-y01)+(y10-y11), ny=(xb-xa)*2.f; S3rNorm3(nx,ny,nz);
+			put(xa,y00,za,nx,ny,nz,u0,v0,gr,gg,gb,1.f);
+			put(xa,y01,zb,nx,ny,nz,u0,v1,gr,gg,gb,1.f);
+			put(xb,y11,zb,nx,ny,nz,u1,v1,gr,gg,gb,1.f);
+			put(xa,y00,za,nx,ny,nz,u0,v0,gr,gg,gb,1.f);
+			put(xb,y11,zb,nx,ny,nz,u1,v1,gr,gg,gb,1.f);
+			put(xb,y10,za,nx,ny,nz,u1,v0,gr,gg,gb,1.f);
+		}
+		float cap = (r00-y00);
+		if (r10-y10 < cap) cap = r10-y10;
+		if (r11-y11 < cap) cap = r11-y11;
+		if (r01-y01 < cap) cap = r01-y01;
+		if (!hole && cap > 4.2f && pd > tunR * 0.98f && need(6)) {
+			float cxn=(r10-r00)+(r11-r01), czn=(r01-r00)+(r11-r10), cyn=(xb-xa)*2.f;
+			S3rNorm3(cxn,cyn,czn);
+			put(xa,r00,za,cxn,cyn,czn,u0,v0,gr,gg,gb,1.f);
+			put(xa,r01,zb,cxn,cyn,czn,u0,v1,gr,gg,gb,1.f);
+			put(xb,r11,zb,cxn,cyn,czn,u1,v1,gr,gg,gb,1.f);
+			put(xa,r00,za,cxn,cyn,czn,u0,v0,gr,gg,gb,1.f);
+			put(xb,r11,zb,cxn,cyn,czn,u1,v1,gr,gg,gb,1.f);
+			put(xb,r10,za,cxn,cyn,czn,u1,v0,gr,gg,gb,1.f);
+		}
 	};
 	const float refineR = m_bandHalf * 3.8f;
 	n = 0;
@@ -4619,6 +5727,8 @@ void CSoft3DRaceDlg::BakeStaticMeshes()
 					sub = (yspan > 5.f) ? 6 : 3;
 				else
 					sub = (yspan > 5.f) ? 2 : 1;
+				if (dmin < S3rTunR(m_bandHalf) * 1.4f)
+					sub = max(sub, (axis <= 1) ? 8 : 3);
 			}
 			float us = (u1 - u0) / (float)sub, vs = (v1 - v0) / (float)sub;
 			float xs = (xb - xa) / (float)sub, zs = (zb - za) / (float)sub;
@@ -4629,52 +5739,68 @@ void CSoft3DRaceDlg::BakeStaticMeshes()
 		}
 	}
 	{
-		float cr=gr*0.70f, cg=gg*0.70f, cb=gb*0.70f;
-		const float holeR = m_bandHalf * 1.52f;
-		const float lipR = m_bandHalf * 2.55f;
+		float cr=gr*0.58f, cg=gg*0.54f, cb=gb*0.50f;
+		float lipRcol=gr*0.42f, lipGcol=gg*0.40f, lipBcol=gb*0.38f;
+		const float baseR = S3rTunR(m_bandHalf);
+		const int ringN = S3MeshScaleCount(16, 32);
+		auto ringPt=[&](float px,float py,float pz, float bx,float by,float bz, float nx,float ny,float nz,
+			float ang, float rad, float& ox, float& oy, float& oz){
+			float ca=cosf(ang), sa=sinf(ang);
+			ox = px + (bx*ca + nx*sa)*rad;
+			oy = py + (by*ca + ny*sa)*rad;
+			oz = pz + (bz*ca + nz*sa)*rad;
+		};
 		for (int i = 0; i < tSegs; i++) {
 			float t0 = (float)i / (float)tSegs, t1 = (float)(i + 1) / (float)tSegs;
+			int i0 = S3rPathIdx(t0), i1s = S3rPathIdx(t1);
+			int deep0 = m_pathDeep[i0] ? 1 : 0;
+			int deep1 = m_pathDeep[i1s] ? 1 : 0;
+			if (!deep0 && !deep1) continue;
 			float p0x,p0y,p0z,t0x,t0y,t0z,n0x,n0y,n0z,b0x,b0y,b0z;
 			float p1x,p1y,p1z,t1x,t1y,t1z,n1x,n1y,n1z,b1x,b1y,b1z;
 			SplineFrame(t0,p0x,p0y,p0z,t0x,t0y,t0z,n0x,n0y,n0z,b0x,b0y,b0z);
 			SplineFrame(t1,p1x,p1y,p1z,t1x,t1y,t1z,n1x,n1y,n1z,b1x,b1y,b1z);
-			float gc0 = GroundY(p0x, p0z), rc0 = rawY(p0x, p0z);
-			float gc1 = GroundY(p1x, p1z), rc1 = rawY(p1x, p1z);
-			if (rc0 < gc0 + 5.2f && rc1 < gc1 + 5.2f) continue;
-			for (int s = 0; s < 2; s++) {
-				float sg = (s == 0) ? -1.f : 1.f;
-				for (int p = 0; p < pN - 1; p++) {
-					float a0 = (float)p / (float)(pN - 1) * 1.5707963f;
-					float a1 = (float)(p + 1) / (float)(pN - 1) * 1.5707963f;
-					auto prof=[&](float ang, float px, float pz, float bx, float bz, float gy, float ry,
-						float& ox, float& oy, float& oz){
-						float ca = 1.f - cosf(ang);
-						float rr = holeR + (lipR - holeR) * ca;
-						ox = px + bx * sg * rr;
-						oz = pz + bz * sg * rr;
-						oy = gy + (ry - gy) * sinf(ang) + 0.05f;
-					};
-					float ax,ay,az, bx2,by2,bz2, cx2,cy2,cz2, dx,dy,dz;
-					prof(a0, p0x,p0z, b0x,b0z, gc0,rc0, ax,ay,az);
-					prof(a0, p1x,p1z, b1x,b1z, gc1,rc1, bx2,by2,bz2);
-					prof(a1, p1x,p1z, b1x,b1z, gc1,rc1, cx2,cy2,cz2);
-					prof(a1, p0x,p0z, b0x,b0z, gc0,rc0, dx,dy,dz);
-					float e1x=bx2-ax, e1y=by2-ay, e1z=bz2-az;
-					float e2x=dx-ax, e2y=dy-ay, e2z=dz-az;
-					float wnx=e1y*e2z-e1z*e2y, wny=e1z*e2x-e1x*e2z, wnz=e1x*e2y-e1y*e2x;
-					S3rNorm3(wnx,wny,wnz);
-					if (wnx * (-sg * b0x) + wnz * (-sg * b0z) < 0.f) { wnx=-wnx; wny=-wny; wnz=-wnz; }
-					quad(ax,ay,az, bx2,by2,bz2, cx2,cy2,cz2, dx,dy,dz, wnx,wny,wnz, cr,cg,cb);
-				}
+			float flare0 = S3rTunFlare(m_pathDeep, i0);
+			float flare1 = S3rTunFlare(m_pathDeep, i1s);
+			float rad0 = baseR * (1.f + 0.85f * flare0);
+			float rad1 = baseR * (1.f + 0.85f * flare1);
+			int portal = (deep0 != deep1 || flare0 > 0.55f || flare1 > 0.55f) ? 1 : 0;
+			for (int p = 0; p < ringN; p++) {
+				float a0 = (float)p / (float)ringN * (float)(M_PI * 2.0);
+				float a1 = (float)(p + 1) / (float)ringN * (float)(M_PI * 2.0);
+				float sa = sinf(a0);
+				if (!portal && sa < -0.72f) continue;
+				float ax,ay,az, bx2,by2,bz2, cx2,cy2,cz2, dx,dy,dz;
+				ringPt(p0x,p0y,p0z, b0x,b0y,b0z, n0x,n0y,n0z, a0, rad0, ax,ay,az);
+				ringPt(p1x,p1y,p1z, b1x,b1y,b1z, n1x,n1y,n1z, a0, rad1, bx2,by2,bz2);
+				ringPt(p1x,p1y,p1z, b1x,b1y,b1z, n1x,n1y,n1z, a1, rad1, cx2,cy2,cz2);
+				ringPt(p0x,p0y,p0z, b0x,b0y,b0z, n0x,n0y,n0z, a1, rad0, dx,dy,dz);
+				float ca=cosf(a0), ss=sinf(a0);
+				float wnx=-(b0x*ca + n0x*ss), wny=-(b0y*ca + n0y*ss), wnz=-(b0z*ca + n0z*ss);
+				S3rNorm3(wnx,wny,wnz);
+				quad(ax,ay,az, bx2,by2,bz2, cx2,cy2,cz2, dx,dy,dz, wnx,wny,wnz, cr,cg,cb);
 			}
-			if (rc0 > gc0 + 6.f && rc1 > gc1 + 6.f) {
-				float y0 = gc0 + (rc0 - gc0) * 0.86f;
-				float y1 = gc1 + (rc1 - gc1) * 0.86f;
-				float lx0 = p0x - b0x * holeR, lz0 = p0z - b0z * holeR;
-				float rx0 = p0x + b0x * holeR, rz0 = p0z + b0z * holeR;
-				float lx1 = p1x - b1x * holeR, lz1 = p1z - b1z * holeR;
-				float rx1 = p1x + b1x * holeR, rz1 = p1z + b1z * holeR;
-				quad(lx0,y0,lz0, rx0,y0,rz0, rx1,y1,rz1, lx1,y1,lz1, 0.f,-1.f,0.f, cr,cg,cb);
+			if (portal) {
+				float lip0 = rad0 * 1.16f, lip1 = rad1 * 1.16f;
+				for (int p = 0; p < ringN; p++) {
+					float a0 = (float)p / (float)ringN * (float)(M_PI * 2.0);
+					float a1 = (float)(p + 1) / (float)ringN * (float)(M_PI * 2.0);
+					float ax,ay,az, bx2,by2,bz2, cx2,cy2,cz2, dx,dy,dz;
+					ringPt(p0x,p0y,p0z, b0x,b0y,b0z, n0x,n0y,n0z, a0, rad0, ax,ay,az);
+					ringPt(p0x,p0y,p0z, b0x,b0y,b0z, n0x,n0y,n0z, a0, lip0, bx2,by2,bz2);
+					ringPt(p0x,p0y,p0z, b0x,b0y,b0z, n0x,n0y,n0z, a1, lip0, cx2,cy2,cz2);
+					ringPt(p0x,p0y,p0z, b0x,b0y,b0z, n0x,n0y,n0z, a1, rad0, dx,dy,dz);
+					float wnx=t0x, wny=t0y, wnz=t0z;
+					S3rNorm3(wnx,wny,wnz);
+					quad(ax,ay,az, bx2,by2,bz2, cx2,cy2,cz2, dx,dy,dz, wnx,wny,wnz, lipRcol,lipGcol,lipBcol);
+					ringPt(p1x,p1y,p1z, b1x,b1y,b1z, n1x,n1y,n1z, a0, rad1, ax,ay,az);
+					ringPt(p1x,p1y,p1z, b1x,b1y,b1z, n1x,n1y,n1z, a0, lip1, bx2,by2,bz2);
+					ringPt(p1x,p1y,p1z, b1x,b1y,b1z, n1x,n1y,n1z, a1, lip1, cx2,cy2,cz2);
+					ringPt(p1x,p1y,p1z, b1x,b1y,b1z, n1x,n1y,n1z, a1, rad1, dx,dy,dz);
+					wnx=t1x; wny=t1y; wnz=t1z;
+					S3rNorm3(wnx,wny,wnz);
+					quad(ax,ay,az, bx2,by2,bz2, cx2,cy2,cz2, dx,dy,dz, wnx,wny,wnz, lipRcol,lipGcol,lipBcol);
+				}
 			}
 		}
 	}
@@ -4733,6 +5859,15 @@ void CSoft3DRaceDlg::BakeStaticMeshes()
 			float xb = xa + wStep, zb = za + wStep;
 			float y00=GroundY(xa,za), y10=GroundY(xb,za), y11=GroundY(xb,zb), y01=GroundY(xa,zb);
 			if (y00>wy+0.9f || y10>wy+0.9f || y11>wy+0.9f || y01>wy+0.9f) continue;
+			{
+				float mx = (xa + xb) * 0.5f, mz = (za + zb) * 0.5f;
+				float pd = pathD(mx, mz);
+				float pd0 = pathD(xa, za); if (pd0 < pd) pd = pd0;
+				float pd1 = pathD(xb, za); if (pd1 < pd) pd = pd1;
+				float pd2 = pathD(xb, zb); if (pd2 < pd) pd = pd2;
+				float pd3 = pathD(xa, zb); if (pd3 < pd) pd = pd3;
+				if (pd < m_bandHalf * 1.35f) continue;
+			}
 			if (!need(6)) continue;
 			put(xa,wy,za,0,1,0,0,0,wr,wg,wb,wa);
 			put(xb,wy,za,0,1,0,1,0,wr,wg,wb,wa);
@@ -4817,6 +5952,7 @@ void CSoft3DRaceDlg::RenderScene()
 		m_clearDirty = 0;
 	}
 	EnsureHudBake();
+	EnsureGaugeBake();
 	EnsureStandingsBake();
 
 	S3rCraft& pl = m_crafts[0];
@@ -4844,7 +5980,49 @@ void CSoft3DRaceDlg::RenderScene()
 		float kUp = S3rSaturate((climb - 0.10f) / 0.42f);
 		ay += kUp * 5.4f;
 	}
+	float tunAmt = 0.f;
+	if (m_phase != PHASE_DEMO && m_phase != PHASE_PODIUM && !m_lookback) {
+		int pi = S3rPathIdx(pl.pathT);
+		if (m_pathDeep[pi]) tunAmt = 1.f;
+		else {
+			float gyP = GroundY(pl.x, pl.z);
+			float ryP = RawGroundY(pl.x, pl.z);
+			if (ryP > gyP + 3.5f && pl.y + 2.5f < ryP)
+				tunAmt = S3rSaturate((ryP - gyP - 3.5f) / 8.f);
+			const int tunLook = 48;
+			for (int d = 1; d <= tunLook && tunAmt < 0.999f; d++) {
+				int ip = pi + d; if (ip >= S3R_PATH_SAMPLES) ip -= S3R_PATH_SAMPLES;
+				int im = pi - d; if (im < 0) im += S3R_PATH_SAMPLES;
+				if (m_pathDeep[ip] || m_pathDeep[im]) {
+					float u = 1.f - (float)d / (float)tunLook;
+					float a = u * u * (3.f - 2.f * u);
+					if (a > tunAmt) tunAmt = a;
+					break;
+				}
+			}
+		}
+	}
+	float camDt = m_frameDt;
+	if (camDt < 0.0008f) camDt = 1.f / 60.f;
+	if (camDt > 0.05f) camDt = 0.05f;
 	{
+		float tunTau = (tunAmt >= m_camTunnelT) ? 1.25f : 0.90f;
+		if (m_lookback) tunTau = 0.22f;
+		m_camTunnelT = S3rLerp(m_camTunnelT, tunAmt, S3rDtK(camDt, tunTau));
+	}
+	const float tunK = m_lookback ? 0.f : m_camTunnelT;
+	if (tunK > 0.001f && m_phase != PHASE_DEMO && m_phase != PHASE_PODIUM) {
+		// 機体の後ろに寄せるだけ。スプライン接線へ視線を向けない（自動視点で進行方向が変わって見えないように）
+		float tunDist = 6.15f * m_camZoom;
+		float tunH = 1.42f * m_camZoom;
+		float tcx = pl.x - sinf(yaw) * tunDist * back;
+		float tcy = pl.y + tunH;
+		float tcz = pl.z - cosf(yaw) * tunDist * back;
+		cx = S3rLerp(cx, tcx, tunK);
+		cy = S3rLerp(cy, tcy, tunK);
+		cz = S3rLerp(cz, tcz, tunK);
+	}
+	if (tunK < 0.35f) {
 		float gyc = GroundY(cx, cz) + 2.4f;
 		if (cy < gyc) cy = gyc;
 	}
@@ -4875,19 +6053,43 @@ void CSoft3DRaceDlg::RenderScene()
 		m_camAx = ax; m_camAy = ay; m_camAz = az;
 		m_camSmoothInit = 1;
 	} else {
-		// 左右も遅れて追う（急な視点振りで酔わない）
-		m_camSx = S3rLerp(m_camSx, cx, 0.11f);
-		m_camSy = S3rLerp(m_camSy, cy, 0.07f);
-		m_camSz = S3rLerp(m_camSz, cz, 0.11f);
-		m_camAx = S3rLerp(m_camAx, ax, 0.10f);
-		m_camAy = S3rLerp(m_camAy, ay, 0.06f);
-		m_camAz = S3rLerp(m_camAz, az, 0.10f);
+		float posTau = S3rLerp(0.10f, 0.28f, m_lookback ? 0.f : m_camTunnelT);
+		float hTau = S3rLerp(0.15f, 0.38f, m_lookback ? 0.f : m_camTunnelT);
+		float lookTau = S3rLerp(0.11f, 0.30f, m_lookback ? 0.f : m_camTunnelT);
+		if (m_lookback) { posTau = 0.038f; hTau = 0.045f; lookTau = 0.040f; }
+		m_camSx = S3rLerp(m_camSx, cx, S3rDtK(camDt, posTau));
+		m_camSy = S3rLerp(m_camSy, cy, S3rDtK(camDt, hTau));
+		m_camSz = S3rLerp(m_camSz, cz, S3rDtK(camDt, posTau));
+		m_camAx = S3rLerp(m_camAx, ax, S3rDtK(camDt, lookTau));
+		m_camAy = S3rLerp(m_camAy, ay, S3rDtK(camDt, lookTau * 1.25f));
+		m_camAz = S3rLerp(m_camAz, az, S3rDtK(camDt, lookTau));
 	}
 	cx = m_camSx; cy = m_camSy; cz = m_camSz;
 	ax = m_camAx; ay = m_camAy; az = m_camAz;
 	if (m_phase != PHASE_PODIUM && m_phase != PHASE_DEMO) {
-		float gyc = GroundY(cx, cz) + 2.2f;
-		if (cy < gyc) cy = gyc;
+		if (!m_lookback && m_camTunnelT > 0.22f) {
+			float tunR = S3rTunR(m_bandHalf) * 0.80f;
+			float gyc = GroundY(cx, cz) + 1.12f;
+			if (cy < gyc) cy = gyc;
+			float cap = py + tunR;
+			float cap2 = pl.y + tunR * 0.68f;
+			if (cap2 < cap) cap = cap2;
+			if (cy > cap) cy = cap;
+			float ddx = cx - px, ddy = cy - py, ddz = cz - pz;
+			float lat = ddx * bx + ddy * by + ddz * bz;
+			float vert = ddx * nx + ddy * ny + ddz * nz;
+			float along = ddx * tx + ddy * ty + ddz * tz;
+			float rad = sqrtf(lat * lat + vert * vert);
+			if (rad > tunR && rad > 1e-4f) {
+				float s = tunR / rad;
+				cx = px + tx * along + bx * lat * s + nx * vert * s;
+				cy = py + ty * along + by * lat * s + ny * vert * s;
+				cz = pz + tz * along + bz * lat * s + nz * vert * s;
+			}
+		} else {
+			float gyc = GroundY(cx, cz) + 2.2f;
+			if (cy < gyc) cy = gyc;
+		}
 	}
 
 	const float fov = ((m_phase == PHASE_DEMO) ? 68.f : 58.f) / m_camZoom * (float)(M_PI/180.0);
@@ -4904,16 +6106,40 @@ void CSoft3DRaceDlg::RenderScene()
 	fogFar *= (1.f - 0.35f * m_reverbFogBoost);
 	cb.fogParams = {fogNear, fogFar, m_waterY, 0.f};
 	float dofStart=38.f, dofRise=55.f, dofAmp=1.6f + 2.5f*m_eqDofBoost + (pl.dofT>0?2.2f:0.f);
-	cb.dofParams = {dofStart, dofRise, dofAmp, 0.f};
+	const BOOL hq = (m_phase == PHASE_RACE || m_phase == PHASE_COUNTDOWN || m_phase == PHASE_FINISH);
+	if (!hq) { dofStart = 80.f; dofRise = 40.f; dofAmp = 0.6f; } // デモ俯瞰はDOF弱め
+	cb.dofParams = {dofStart, dofRise, dofAmp, hq ? 1.f : 0.f};
 	cb.screenSize = {(float)w,(float)h,1.f/w,1.f/h};
-	cb.misc = {pl.flashT>0?0.55f:0.f, m_clearBakeA, 1.f/tanf(fov*.5f), m_anim};
+	{
+		float flash = pl.flashT > 0.f ? 0.55f : 0.f;
+		if (pl.nitroT > 0.f) {
+			float np = S3rSaturate(pl.nitroT / 2.85f);
+			float pulse = 0.22f + 0.18f * (0.5f + 0.5f * sinf(m_anim * 28.f));
+			flash = max(flash, pulse * (0.55f + 0.45f * np));
+		}
+		if (pl.hitFlashT > 0.f)
+			flash = max(flash, S3rSaturate(pl.hitFlashT / 0.38f) * 0.48f);
+		if (m_wrongWay)
+			flash = max(flash, 0.18f + 0.12f * (0.5f + 0.5f * sinf(m_anim * 14.f)));
+		cb.misc = {flash, m_clearBakeA, 1.f/tanf(fov*.5f), m_anim};
+	}
 	{
 		float pr = m_bandHalf * 1.85f;
 		if (pr < 10.f) pr = 10.f;
 		if (pr > 22.f) pr = 22.f;
 		// 俯瞰デモで peel すると視線方向の円柱が画面中央の○に見える
 		if (m_phase == PHASE_PODIUM || m_phase == PHASE_DEMO) pr = 0.f;
+		pr *= (1.f - 0.90f * (m_lookback ? 0.f : m_camTunnelT));
 		cb.peel = {pl.x, pl.y, pl.z, pr};
+	}
+	{
+		// 平面反射: メインと同じ FOV/アスペクト。水平面なので up を反転（迷路の鏡床と同じ）
+		S3RMat id = {}; id.m[0]=id.m[5]=id.m[10]=id.m[15]=1.f;
+		cb.reflectVP = id;
+		const float wy = m_waterY;
+		float rey = 2.f * wy - cy, ray = 2.f * wy - ay;
+		cb.reflectVP = S3rMatMul(S3rLookAt(cx, rey, cz, ax, ray, az, 0.f, -1.f, 0.f),
+			S3rPerspective(fov, (float)w / (float)h, zNear, zFar));
 	}
 
 	D3D11_MAPPED_SUBRESOURCE map={};
@@ -4980,7 +6206,7 @@ void CSoft3DRaceDlg::RenderScene()
 	}
 	// sky cards + items（深度書き込みなし）
 	phase=3;
-	UINT nSky=0, nSky2=0, nItem=0;
+	UINT nSky=0, nSky2=0, nSky3=0, nSky4=0, nItem=0, nShaft=0;
 	{
 		float rx = ax - cx, ry = ay - cy, rz = az - cz; S3rNorm3(rx,ry,rz);
 		float ux=0,uy=1,uz=0;
@@ -5001,28 +6227,55 @@ void CSoft3DRaceDlg::RenderScene()
 			put(x0,y0,z0, -rx,-ry,-rz, 0,0, r,g,b,a); put(x1,y1,z1, -rx,-ry,-rz, 1,0, r,g,b,a); put(x2,y2,z2, -rx,-ry,-rz, 1,1, r,g,b,a);
 			put(x0,y0,z0, -rx,-ry,-rz, 0,0, r,g,b,a); put(x2,y2,z2, -rx,-ry,-rz, 1,1, r,g,b,a); put(x3,y3,z3, -rx,-ry,-rz, 0,1, r,g,b,a);
 		};
-		for (int bi=0;bi<16;bi++){
-			float ang = (float)bi * (float)(M_PI*2.0/16.0) + m_anim*0.018f;
+		const BOOL liteSky = (m_phase == PHASE_DEMO || m_phase == PHASE_PODIUM);
+		const int nCard1 = liteSky ? S3MeshScaleCount(4, 6) : S3MeshScaleCount(10, 12);
+		const int nCard2 = liteSky ? S3MeshScaleCount(3, 4) : S3MeshScaleCount(8, 10);
+		const int nCard3 = liteSky ? S3MeshScaleCount(2, 3) : S3MeshScaleCount(6, 8);
+		const int nCard4 = liteSky ? 0 : S3MeshScaleCount(6, 8);
+		for (int bi=0;bi<nCard1;bi++){
+			float ang = (float)bi * (float)(M_PI*2.0/(double)nCard1) + m_anim*0.018f;
 			float dist = 170.f + 50.f*(bi%4);
 			float bx0 = pl.x + cosf(ang)*dist;
 			float by0 = pl.y + 38.f + 14.f*sinf(ang*1.3f+m_anim*0.05f);
 			float bz0 = pl.z + sinf(ang)*dist;
 			float hs = 38.f + 22.f*(float)(bi%5);
 			float vs = 14.f + 10.f*(float)((bi*3)%4);
-			card(bx0,by0,bz0, hs, vs, br,bg,bb,.88f);
+			card(bx0,by0,bz0, hs, vs, br,bg,bb,.90f);
 		}
 		nSky = nTrans;
-		for (int bi=0;bi<12;bi++){
-			float ang = (float)bi * (float)(M_PI*2.0/12.0) - m_anim*0.012f + 0.4f;
+		for (int bi=0;bi<nCard2;bi++){
+			float ang = (float)bi * (float)(M_PI*2.0/(double)nCard2) - m_anim*0.012f + 0.4f;
 			float dist = 130.f + 36.f*(bi%3);
 			float bx0 = pl.x + cosf(ang)*dist;
 			float by0 = pl.y + 28.f + 10.f*sinf(ang*1.7f+m_anim*0.08f);
 			float bz0 = pl.z + sinf(ang)*dist;
 			float hs = 48.f + 18.f*(float)(bi%3);
 			float vs = 9.f + 6.f*(float)(bi%4);
-			card(bx0,by0,bz0, hs, vs, br,bg,bb,.78f);
+			card(bx0,by0,bz0, hs, vs, br,bg,bb,.82f);
 		}
 		nSky2 = nTrans - nSky;
+		for (int bi=0;bi<nCard3;bi++){
+			float ang = (float)bi * (float)(M_PI*2.0/(double)nCard3) + m_anim*0.009f + 1.1f;
+			float dist = 200.f + 40.f*(bi%3);
+			float bx0 = pl.x + cosf(ang)*dist;
+			float by0 = pl.y + 48.f + 12.f*sinf(ang*0.9f+m_anim*0.04f);
+			float bz0 = pl.z + sinf(ang)*dist;
+			float hs = 52.f + 16.f*(float)(bi%4);
+			float vs = 16.f + 8.f*(float)(bi%3);
+			card(bx0,by0,bz0, hs, vs, br,bg,bb,.86f);
+		}
+		nSky3 = nTrans - nSky - nSky2;
+		for (int bi=0;bi<nCard4;bi++){
+			float ang = (float)bi * (float)(M_PI*2.0/(double)nCard4) - m_anim*0.015f + 2.2f;
+			float dist = 110.f + 28.f*(bi%4);
+			float bx0 = pl.x + cosf(ang)*dist;
+			float by0 = pl.y + 22.f + 8.f*sinf(ang*2.1f+m_anim*0.07f);
+			float bz0 = pl.z + sinf(ang)*dist;
+			float hs = 36.f + 14.f*(float)(bi%3);
+			float vs = 8.f + 5.f*(float)(bi%4);
+			card(bx0,by0,bz0, hs, vs, br,bg,bb,.78f);
+		}
+		nSky4 = nTrans - nSky - nSky2 - nSky3;
 	}
 	for (int i=0;i<m_itemN;i++){
 		S3rItem& it=m_items[i]; if (it.taken) continue;
@@ -5068,7 +6321,7 @@ void CSoft3DRaceDlg::RenderScene()
 			put(x00,y0,z00,0,1,0,0,0,r,g,b,.88f); put(x11,y1,z11,0,1,0,1,1,r,g,b,.88f); put(x01,y1,z01,0,1,0,0,1,r,g,b,.88f);
 		}
 	}
-	nItem = nTrans - nSky - nSky2;
+	nItem = nTrans - nSky - nSky2 - nSky3 - nSky4;
 	// podium confetti
 	if (m_phase==PHASE_PODIUM){
 		for (int i=0;i<96;i++){
@@ -5087,6 +6340,21 @@ void CSoft3DRaceDlg::RenderScene()
 		float a=S3rSaturate(life*1.4f);
 		float r=1.f, g=0.38f+0.45f*S3rSaturate(life), b=0.10f;
 		put(x-s,y,z,0,1,0,0,0,r,g,b,a); put(x+s,y,z,0,1,0,1,0,r,g,b,a); put(x,y+s,z,0,1,0,.5f,1,r,g,b,a);
+	}
+	for (int i=0;i<S3R_FX_N;i++){
+		S3rFx& p=m_fx[i];
+		if (p.life<=0.f) continue;
+		float u=S3rSaturate(p.life / max(0.02f, p.lifeMax));
+		float s=p.size;
+		float a=u;
+		if (p.kind==FX_SMOKE) { s *= 1.15f + (1.f-u)*1.85f; a = 0.40f * u; }
+		else if (p.kind==FX_DUST) { s *= 1.1f + (1.f-u)*1.2f; a = 0.48f * u; }
+		else if (p.kind==FX_PICK) { s *= 0.85f + u * 0.55f; a = 0.90f * u; }
+		else if (p.kind==FX_EMBER) { s *= 0.75f + u * 0.50f; a = 0.88f * u; }
+		else { s *= 0.70f + u * 0.55f; a = 0.92f * u; }
+		put(p.x-s,p.y,p.z,0,1,0,0,0,p.r,p.g,p.b,a);
+		put(p.x+s,p.y,p.z,0,1,0,1,0,p.r,p.g,p.b,a);
+		put(p.x,p.y+s,p.z,0,1,0,.5f,1,p.r,p.g,p.b,a);
 	}
 	for (int i=0;i<m_craftN;i++){
 		S3rCraft& c=m_crafts[i];
@@ -5117,6 +6385,131 @@ void CSoft3DRaceDlg::RenderScene()
 				put(px-s,py,pz,0,1,0,0,0,g,g,g,0.35f*u); put(px+s,py,pz,0,1,0,1,0,g,g,g,0.35f*u); put(px,py+s,pz,0,1,0,.5f,1,g,g,g,0.35f*u);
 			}
 		}
+		if (c.alive && !c.retired && c.dmgAccum > 8.f) {
+			float sev = S3rSaturate((c.dmgAccum - 8.f) / 130.f);
+			float fx = sinf(c.yaw)*cosf(c.pitch), fy = sinf(c.pitch), fz = cosf(c.yaw)*cosf(c.pitch);
+			float rx = cosf(c.yaw), rz = -sinf(c.yaw);
+			const int nPuff = 3 + (int)(sev * 9.f);
+			for (int k = 0; k < nPuff; k++) {
+				float t = ((float)k + fmodf(m_anim * (3.4f + 2.2f * sev) + (float)i * 0.37f, 1.f)) / (float)nPuff;
+				float along = 0.40f + t * (1.15f + sev * 2.0f);
+				float wob = sinf(m_anim * 2.8f + (float)k * 1.8f + (float)i) * (0.16f + 0.38f * t);
+				float px = c.x - fx * along + rx * wob;
+				float py = c.y - fy * along + 0.22f + t * (0.70f + sev * 1.55f);
+				float pz = c.z - fz * along + rz * wob;
+				float s = (0.20f + t * 0.42f + sev * 0.28f);
+				float aa = (1.f - t) * (0.22f + 0.38f * sev);
+				float g = 0.14f + 0.16f * t;
+				float r = g, b = g;
+				if (sev > 0.58f && (k & 1)) {
+					float em = (sev - 0.58f) / 0.42f;
+					r = S3rLerp(g, 0.62f, em); g = S3rLerp(g, 0.22f, em); b = S3rLerp(b, 0.06f, em);
+					aa *= 0.85f;
+				}
+				put(px-s,py,pz,0,1,0,0,0,r,g,b,aa); put(px+s,py,pz,0,1,0,1,0,r,g,b,aa); put(px,py+s,pz,0,1,0,.5f,1,r,g,b,aa);
+			}
+		}
+		// ニトロ噴射（後方シアン／オレンジの炎）
+		if (c.nitroT > 0.f && c.alive && !c.retired) {
+			float fx = sinf(c.yaw)*cosf(c.pitch), fy = sinf(c.pitch), fz = cosf(c.yaw)*cosf(c.pitch);
+			float rx = cosf(c.yaw), rz = -sinf(c.yaw);
+			float life = S3rSaturate(c.nitroT / 2.85f);
+			const int jets = c.isPlayer ? 14 : 10;
+			for (int k = 0; k < jets; k++) {
+				float t = ((float)k + fmodf(m_anim * 18.f, 1.f)) / (float)jets;
+				float along = 0.55f + t * (2.4f + 1.1f * life);
+				float wob = sinf(m_anim * 22.f + (float)k * 1.7f + (float)i) * (0.12f + 0.18f * t);
+				float px = c.x - fx * along + rx * wob;
+				float py = c.y - fy * along - 0.08f - t * 0.35f;
+				float pz = c.z - fz * along + rz * wob;
+				float s = (0.18f + (1.f - t) * 0.55f) * (0.85f + 0.35f * life);
+				float aa = (1.f - t) * (0.55f + 0.40f * life);
+				float r = 0.25f + 0.75f * (1.f - t);
+				float g = 0.55f + 0.40f * t;
+				float b = 1.f;
+				if (t > 0.45f) { r = 1.f; g = 0.55f + 0.35f * (1.f - t); b = 0.15f; }
+				put(px-s,py,pz,0,1,0,0,0,r,g,b,aa); put(px+s,py,pz,0,1,0,1,0,r,g,b,aa); put(px,py+s,pz,0,1,0,.5f,1,r,g,b,aa);
+			}
+		}
+		// テンポ加速トレイル（緑）
+		if (c.boostT > 0.f && c.alive && !c.retired && c.nitroT <= 0.f) {
+			float fx = sinf(c.yaw)*cosf(c.pitch), fy = sinf(c.pitch), fz = cosf(c.yaw)*cosf(c.pitch);
+			float rx = cosf(c.yaw), rz = -sinf(c.yaw);
+			float life = S3rSaturate(c.boostT / 4.5f);
+			const int jets = 8;
+			for (int k = 0; k < jets; k++) {
+				float t = ((float)k + fmodf(m_anim * 14.f, 1.f)) / (float)jets;
+				float along = 0.40f + t * (1.6f + 0.7f * life);
+				float wob = sinf(m_anim * 16.f + (float)k * 1.4f + (float)i) * (0.10f + 0.14f * t);
+				float px = c.x - fx * along + rx * wob;
+				float py = c.y - fy * along - t * 0.22f;
+				float pz = c.z - fz * along + rz * wob;
+				float s = (0.12f + (1.f - t) * 0.32f) * (0.8f + 0.25f * life);
+				float aa = (1.f - t) * (0.35f + 0.25f * life);
+				put(px-s,py,pz,0,1,0,0,0,.25f,1.f,.45f,aa); put(px+s,py,pz,0,1,0,1,0,.25f,1.f,.45f,aa); put(px,py+s,pz,0,1,0,.5f,1,.25f,1.f,.45f,aa);
+			}
+		}
+		// 減速ヘイズ（紫）
+		if (c.slowT > 0.f && c.alive && !c.retired) {
+			float life = S3rSaturate(c.slowT / 4.0f);
+			for (int k = 0; k < 6; k++) {
+				float ang = (float)k * 1.047f + m_anim * 1.6f;
+				float rad = 0.35f + 0.25f * sinf(m_anim * 3.f + (float)k);
+				float px = c.x + cosf(ang) * rad;
+				float py = c.y + 0.15f + (float)k * 0.08f;
+				float pz = c.z + sinf(ang) * rad;
+				float s = 0.22f + life * 0.18f;
+				float aa = 0.22f * life;
+				put(px-s,py,pz,0,1,0,0,0,.45f,.18f,.75f,aa); put(px+s,py,pz,0,1,0,1,0,.45f,.18f,.75f,aa); put(px,py+s,pz,0,1,0,.5f,1,.45f,.18f,.75f,aa);
+			}
+		}
+		// 機動バフの黄スパーク
+		if (c.agilityT > 0.f && c.alive && !c.retired) {
+			float life = S3rSaturate(c.agilityT / 5.f);
+			for (int k = 0; k < 5; k++) {
+				float ang = (float)k * 1.256f + m_anim * 9.f;
+				float px = c.x + cosf(ang) * 0.55f;
+				float py = c.y + 0.25f + 0.15f * sinf(m_anim * 12.f + (float)k);
+				float pz = c.z + sinf(ang) * 0.55f;
+				float s = 0.08f + 0.06f * life;
+				float aa = 0.45f * life;
+				put(px-s,py,pz,0,1,0,0,0,1.f,.85f,.25f,aa); put(px+s,py,pz,0,1,0,1,0,1.f,.85f,.25f,aa); put(px,py+s,pz,0,1,0,.5f,1,1.f,.85f,.25f,aa);
+			}
+		}
+	}
+	// HQ: トンネル内ライトシャフト（末尾に置き additive 描画）
+	{
+		const UINT shaftBeg = nBand + nWorld + nCraft + nTrans;
+		if ((m_phase == PHASE_RACE || m_phase == PHASE_COUNTDOWN || m_phase == PHASE_FINISH)
+			&& m_camTunnelT > 0.12f && !m_lookback) {
+			float sunR=1.f, sunG=.92f, sunB=.72f;
+			if (m_themeActive==THEME_NIGHT){ sunR=.45f; sunG=.55f; sunB=.95f; }
+			else if (m_themeActive==THEME_UNDER){ sunR=.35f; sunG=.75f; sunB=.9f; }
+			else if (m_themeActive==THEME_MESA){ sunR=1.f; sunG=.7f; sunB=.4f; }
+			float rx = ax - cx, ry = ay - cy, rz = az - cz; S3rNorm3(rx,ry,rz);
+			float ux=0,uy=1,uz=0;
+			float ssx=uy*rz-uz*ry, ssy=uz*rx-ux*rz, ssz=ux*ry-uy*rx; S3rNorm3(ssx,ssy,ssz);
+			float u2x=ry*ssz-rz*ssy, u2y=rz*ssx-rx*ssz, u2z=rx*ssy-ry*ssx;
+			const float tk = m_camTunnelT;
+			for (int i=0;i<7;i++){
+				float t = (float)i / 6.f;
+				float along = 4.f + t * 28.f;
+				float side = ((i%3)-1) * 1.1f;
+				float px = pl.x + noseX * along + (-noseZ) * side;
+				float py = pl.y + 2.2f + noseY * along * 0.35f + sinf(m_anim*1.5f+(float)i)*.4f;
+				float pz = pl.z + noseZ * along + noseX * side;
+				float hs = 0.35f + t * 1.8f;
+				float vs = 6.f + t * 14.f;
+				float a = (0.10f + 0.12f * (1.f-t)) * tk;
+				float x0=px-ssx*hs-u2x*vs, y0=py-ssy*hs-u2y*vs, z0=pz-ssz*hs-u2z*vs;
+				float x1=px+ssx*hs-u2x*vs, y1=py+ssy*hs-u2y*vs, z1=pz+ssz*hs-u2z*vs;
+				float x2=px+ssx*hs+u2x*vs, y2=py+ssy*hs+u2y*vs, z2=pz+ssz*hs+u2z*vs;
+				float x3=px-ssx*hs+u2x*vs, y3=py-ssy*hs+u2y*vs, z3=pz+ssz*hs+u2z*vs;
+				put(x0,y0,z0,-rx,-ry,-rz,0,0,sunR,sunG,sunB,a); put(x1,y1,z1,-rx,-ry,-rz,1,0,sunR,sunG,sunB,a); put(x2,y2,z2,-rx,-ry,-rz,1,1,sunR,sunG,sunB,a);
+				put(x0,y0,z0,-rx,-ry,-rz,0,0,sunR,sunG,sunB,a); put(x2,y2,z2,-rx,-ry,-rz,1,1,sunR,sunG,sunB,a); put(x3,y3,z3,-rx,-ry,-rz,0,1,sunR,sunG,sunB,a);
+			}
+			nShaft = (nBand + nWorld + nCraft + nTrans) - shaftBeg;
+		}
 	}
 
 	UINT craftDrawN = 0;
@@ -5145,6 +6538,19 @@ void CSoft3DRaceDlg::RenderScene()
 						cr = S3rLerp(cr, 1.f, 0.65f);
 						cg = S3rLerp(cg, 0.45f, 0.50f);
 					}
+				} else if (c.nitroT > 0.f) {
+					float np = S3rSaturate(c.nitroT / 2.85f);
+					float pulse = 0.55f + 0.45f * (0.5f + 0.5f * sinf(m_anim * 26.f + (float)i));
+					cr = S3rLerp(cr, 0.35f, 0.55f * np * pulse);
+					cg = S3rLerp(cg, 0.85f, 0.45f * np * pulse);
+					cb = S3rLerp(cb, 1.f, 0.70f * np * pulse);
+					sc = 1.1f + 0.08f * np;
+				}
+				if (c.alive && !c.retired && c.dmgAccum > 10.f) {
+					float soot = S3rSaturate(c.dmgAccum / 160.f);
+					cr *= 1.f - 0.48f * soot;
+					cg *= 1.f - 0.52f * soot;
+					cb *= 1.f - 0.50f * soot;
 				}
 				ci[craftDrawN++] = {c.x, c.y, c.z, c.yaw, sc, sc, sc, c.pitch, cr, cg, cb, a};
 			}
@@ -5243,6 +6649,225 @@ void CSoft3DRaceDlg::RenderScene()
 		if (nSolid) dc->Draw(nSolid, nBand);
 	}
 
+	// 水面平面反射マップ（ゲーム中フル／デモは省略）
+	if (hq && m_view.m_reflectRtv && m_view.m_vbWaterParts > 0 && m_phase != PHASE_PODIUM
+		&& pl.y < m_waterY + 55.f) {
+		S3RFrameCB cbRef = cb;
+		cbRef.viewProj = cb.reflectVP;
+		cbRef.peel = {0,0,0,0};
+		cbRef.eyePos = {cx, 2.f * m_waterY - cy, cz, (float)(m_themeActive-1)};
+		cbRef.lightDir.w = 1.f;
+		cbRef.fogParams.w = 1.f; // Fog.z=水面Y → 水面下を discard
+		if (SUCCEEDED(dc->Map(m_view.m_cbFrame,0,D3D11_MAP_WRITE_DISCARD,0,&map))){ memcpy(map.pData,&cbRef,sizeof(cbRef)); dc->Unmap(m_view.m_cbFrame,0); }
+		D3D11_VIEWPORT rvp={0,0,(float)CS3rView::S3R_REFLECT_SIZE,(float)CS3rView::S3R_REFLECT_SIZE,0,1};
+		dc->RSSetViewports(1,&rvp);
+		float rclear[4]={clearC[0],clearC[1],clearC[2],1.f};
+		dc->OMSetRenderTargets(1,&m_view.m_reflectRtv,m_view.m_reflectDsv);
+		dc->ClearRenderTargetView(m_view.m_reflectRtv, rclear);
+		dc->ClearDepthStencilView(m_view.m_reflectDsv, D3D11_CLEAR_DEPTH, 1, 0);
+		dc->RSSetState(m_view.m_rsNoCull); dc->OMSetDepthStencilState(m_view.m_dssWrite,0); dc->OMSetBlendState(m_view.m_bsOpaque,NULL,0xffffffff);
+		dc->VSSetConstantBuffers(0,1,&m_view.m_cbFrame); dc->PSSetConstantBuffers(0,1,&m_view.m_cbFrame);
+		dc->HSSetConstantBuffers(0,1,&m_view.m_cbFrame); dc->DSSetConstantBuffers(0,1,&m_view.m_cbFrame);
+		dc->IASetInputLayout(m_view.m_ilSolid); dc->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+		dc->VSSetShader(m_view.m_vsSolid,NULL,0); dc->HSSetShader(NULL,NULL,0); dc->DSSetShader(NULL,NULL,0);
+		ID3D11SamplerState* smpR[]={m_view.m_sampLin,m_view.m_sampPoint,m_view.m_sampCmp};
+		dc->PSSetSamplers(0,3,smpR); dc->DSSetSamplers(0,1,&m_view.m_sampLin);
+		int thIdxR=m_themeActive-1; if(thIdxR<0)thIdxR=0; if(thIdxR>7)thIdxR=7;
+		ID3D11ShaderResourceView* themeR=m_view.m_srvTheme[thIdxR];
+		ID3D11ShaderResourceView* themeDR=m_view.m_srvThemeD[thIdxR]?m_view.m_srvThemeD[thIdxR]:themeR;
+		ID3D11ShaderResourceView* envR=m_view.m_srvEnv;
+		if(m_view.m_srvEnv2 && (m_themeActive==THEME_CLOUD||m_themeActive==THEME_GRASS||m_themeActive==THEME_FOREST||m_themeActive==THEME_MESA||m_themeActive==THEME_UNDER))
+			envR=m_view.m_srvEnv2;
+		ID3D11ShaderResourceView* shR=m_view.m_shadowSrv;
+		ID3D11ShaderResourceView* noiseR=m_view.m_srvNoise;
+		ID3D11ShaderResourceView* obsR=m_view.m_srvObs?m_view.m_srvObs:themeDR;
+		ID3D11ShaderResourceView* bandR=m_view.m_srvBand;
+		if (m_view.m_vbTerrParts > 0) {
+			dc->PSSetShader(m_view.m_psTerr,NULL,0);
+			ID3D11ShaderResourceView* srvs[]={themeR,themeDR,NULL,envR,shR,noiseR};
+			dc->PSSetShaderResources(0,6,srvs);
+			drawParts(m_view.m_vbTerr, m_view.m_vbTerrN, m_view.m_vbTerrParts, 3);
+		}
+		dc->PSSetShader(m_view.m_psSolid,NULL,0);
+		{
+			ID3D11ShaderResourceView* scenT1=m_view.m_srvWood?m_view.m_srvWood:obsR;
+			ID3D11ShaderResourceView* srvs[]={themeR,scenT1,NULL,envR,shR,noiseR};
+			dc->PSSetShaderResources(0,6,srvs);
+			if (m_view.m_vbSceneryParts > 0)
+				drawParts(m_view.m_vbScenery, m_view.m_vbSceneryN, m_view.m_vbSceneryParts, 3);
+		}
+		{
+			ID3D11ShaderResourceView* osrvs[]={themeR,obsR,NULL,envR,shR,noiseR};
+			dc->PSSetShaderResources(0,6,osrvs);
+		}
+		drawObsGpu();
+		if (craftDrawN) {
+			dc->RSSetState(m_view.m_rsSolid);
+			dc->PSSetShader(m_view.m_psCraft ? m_view.m_psCraft : m_view.m_psSolid,NULL,0);
+			ID3D11ShaderResourceView* craftSrv = m_view.m_srvCraft ? m_view.m_srvCraft : themeR;
+			ID3D11ShaderResourceView* craftDet = m_view.m_srvCraftD ? m_view.m_srvCraftD : craftSrv;
+			ID3D11ShaderResourceView* srvs[]={craftSrv,craftDet,NULL,envR,shR,noiseR};
+			dc->PSSetShaderResources(0,6,srvs);
+			drawCraftGpu();
+		}
+		if (m_view.m_vbBandParts > 0) {
+			dc->RSSetState(m_view.m_rsNoCull); dc->OMSetDepthStencilState(m_view.m_dssRead,0); dc->OMSetBlendState(m_view.m_bsAlpha,NULL,0xffffffff);
+			dc->IASetInputLayout(m_view.m_ilPatch); dc->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_4_CONTROL_POINT_PATCHLIST);
+			dc->VSSetShader(m_view.m_vsTess,NULL,0); dc->HSSetShader(m_view.m_hsTess,NULL,0); dc->DSSetShader(m_view.m_dsTess,NULL,0); dc->PSSetShader(m_view.m_psBand,NULL,0);
+			ID3D11ShaderResourceView* srvs[]={bandR,themeR,NULL,envR,shR,noiseR};
+			dc->PSSetShaderResources(0,6,srvs); dc->DSSetShaderResources(5,1,&noiseR); dc->DSSetShaderResources(0,1,&bandR);
+			drawParts(m_view.m_vbBand, m_view.m_vbBandN, m_view.m_vbBandParts, 4);
+			dc->HSSetShader(NULL,NULL,0); dc->DSSetShader(NULL,NULL,0);
+		}
+		if (nSky || nSky2 || nSky3 || nSky4) {
+			dc->IASetInputLayout(m_view.m_ilSolid); dc->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+			dc->VSSetShader(m_view.m_vsSolid,NULL,0);
+			dc->PSSetShader(m_view.m_psCloud ? m_view.m_psCloud : m_view.m_psSolid,NULL,0);
+			dc->RSSetState(m_view.m_rsNoCull);
+			dc->OMSetBlendState(m_view.m_bsAlpha,NULL,0xffffffff); dc->OMSetDepthStencilState(m_view.m_dssRead,0);
+			bindMesh(m_view.m_vbDyn);
+			const UINT t0 = nBand+nWorld+nCraft;
+			ID3D11ShaderResourceView* s1=m_view.m_srvSky, *s2=m_view.m_srvSky2?m_view.m_srvSky2:s1;
+			ID3D11ShaderResourceView* s3=m_view.m_srvSky3?m_view.m_srvSky3:s1;
+			ID3D11ShaderResourceView* s4=m_view.m_srvSky4?m_view.m_srvSky4:s2;
+			auto bindT=[&](ID3D11ShaderResourceView* a, ID3D11ShaderResourceView* b){
+				ID3D11ShaderResourceView* srvs[]={a?a:themeR, b?b:(a?a:themeDR), NULL, envR, shR, noiseR};
+				dc->PSSetShaderResources(0,6,srvs);
+			};
+			if(nSky){ bindT(s1,s2); dc->Draw(nSky, t0); }
+			if(nSky2){ bindT(s2,s1); dc->Draw(nSky2, t0+nSky); }
+			if(nSky3){ bindT(s3,s4); dc->Draw(nSky3, t0+nSky+nSky2); }
+			if(nSky4){ bindT(s4,s3); dc->Draw(nSky4, t0+nSky+nSky2+nSky3); }
+		}
+		ID3D11ShaderResourceView* nullsR[6]={}; dc->PSSetShaderResources(0,6,nullsR);
+	}
+
+	// バックミラー（ゲーム中フル／デモ俯瞰は省略）
+	if (hq && m_view.m_rearRtv && !m_lookback && m_phase != PHASE_PODIUM) {
+		float rcx = pl.x + noseX * 2.2f;
+		float rcy = pl.y + 1.85f + noseY * 0.35f;
+		float rcz = pl.z + noseZ * 2.2f;
+		float rax = pl.x - noseX * 36.f;
+		float ray = pl.y + 1.2f - noseY * 1.5f;
+		float raz = pl.z - noseZ * 36.f;
+		S3RFrameCB cbRear = cb;
+		cbRear.viewProj = S3rMatMul(S3rLookAt(rcx,rcy,rcz, rax,ray,raz, 0,1,0),
+			S3rPerspective(55.f * (float)(M_PI/180.0), (float)CS3rView::S3R_REAR_W/(float)CS3rView::S3R_REAR_H, 0.45f, 520.f));
+		cbRear.eyePos = {rcx,rcy,rcz,(float)(m_themeActive-1)};
+		cbRear.peel = {0,0,0,0};
+		cbRear.lightDir.w = 1.f;
+		if (SUCCEEDED(dc->Map(m_view.m_cbFrame,0,D3D11_MAP_WRITE_DISCARD,0,&map))){ memcpy(map.pData,&cbRear,sizeof(cbRear)); dc->Unmap(m_view.m_cbFrame,0); }
+		D3D11_VIEWPORT mvp={0,0,(float)CS3rView::S3R_REAR_W,(float)CS3rView::S3R_REAR_H,0,1};
+		dc->RSSetViewports(1,&mvp);
+		float mclear[4]={clearC[0],clearC[1],clearC[2],1.f};
+		dc->OMSetRenderTargets(1,&m_view.m_rearRtv,m_view.m_rearDsv);
+		dc->ClearRenderTargetView(m_view.m_rearRtv, mclear);
+		dc->ClearDepthStencilView(m_view.m_rearDsv, D3D11_CLEAR_DEPTH, 1, 0);
+		dc->RSSetState(m_view.m_rsNoCull); dc->OMSetDepthStencilState(m_view.m_dssWrite,0); dc->OMSetBlendState(m_view.m_bsOpaque,NULL,0xffffffff);
+		dc->VSSetConstantBuffers(0,1,&m_view.m_cbFrame); dc->PSSetConstantBuffers(0,1,&m_view.m_cbFrame);
+		dc->HSSetConstantBuffers(0,1,&m_view.m_cbFrame); dc->DSSetConstantBuffers(0,1,&m_view.m_cbFrame);
+		dc->IASetInputLayout(m_view.m_ilSolid); dc->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+		dc->VSSetShader(m_view.m_vsSolid,NULL,0); dc->HSSetShader(NULL,NULL,0); dc->DSSetShader(NULL,NULL,0);
+		ID3D11SamplerState* smpM[]={m_view.m_sampLin,m_view.m_sampPoint,m_view.m_sampCmp};
+		dc->PSSetSamplers(0,3,smpM); dc->DSSetSamplers(0,1,&m_view.m_sampLin);
+		int thIdxM=m_themeActive-1; if(thIdxM<0)thIdxM=0; if(thIdxM>7)thIdxM=7;
+		ID3D11ShaderResourceView* themeM=m_view.m_srvTheme[thIdxM];
+		ID3D11ShaderResourceView* themeDM=m_view.m_srvThemeD[thIdxM]?m_view.m_srvThemeD[thIdxM]:themeM;
+		ID3D11ShaderResourceView* envM=m_view.m_srvEnv;
+		if(m_view.m_srvEnv2 && (m_themeActive==THEME_CLOUD||m_themeActive==THEME_GRASS||m_themeActive==THEME_FOREST||m_themeActive==THEME_MESA||m_themeActive==THEME_UNDER))
+			envM=m_view.m_srvEnv2;
+		ID3D11ShaderResourceView* shM=m_view.m_shadowSrv;
+		ID3D11ShaderResourceView* noiseM=m_view.m_srvNoise;
+		ID3D11ShaderResourceView* obsM=m_view.m_srvObs?m_view.m_srvObs:themeDM;
+		ID3D11ShaderResourceView* waterM=m_view.m_srvWater?m_view.m_srvWater:themeM;
+		ID3D11ShaderResourceView* bandM=m_view.m_srvBand;
+		if (m_view.m_vbTerrParts > 0) {
+			dc->PSSetShader(m_view.m_psTerr,NULL,0);
+			ID3D11ShaderResourceView* srvs[]={themeM,themeDM,NULL,envM,shM,noiseM};
+			dc->PSSetShaderResources(0,6,srvs);
+			drawParts(m_view.m_vbTerr, m_view.m_vbTerrN, m_view.m_vbTerrParts, 3);
+		}
+		dc->PSSetShader(m_view.m_psSolid,NULL,0);
+		{
+			ID3D11ShaderResourceView* scenT1=m_view.m_srvWood?m_view.m_srvWood:obsM;
+			ID3D11ShaderResourceView* srvs[]={themeM,scenT1,NULL,envM,shM,noiseM};
+			dc->PSSetShaderResources(0,6,srvs);
+			if (m_view.m_vbSceneryParts > 0)
+				drawParts(m_view.m_vbScenery, m_view.m_vbSceneryN, m_view.m_vbSceneryParts, 3);
+		}
+		{
+			ID3D11ShaderResourceView* osrvs[]={themeM,obsM,NULL,envM,shM,noiseM};
+			dc->PSSetShaderResources(0,6,osrvs);
+		}
+		drawObsGpu();
+		if (nWorld > nTerr) {
+			dc->RSSetState(m_view.m_rsNoCull); dc->OMSetDepthStencilState(m_view.m_dssWrite,0); dc->OMSetBlendState(m_view.m_bsOpaque,NULL,0xffffffff);
+			dc->IASetInputLayout(m_view.m_ilSolid); dc->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+			dc->VSSetShader(m_view.m_vsSolid,NULL,0); dc->HSSetShader(NULL,NULL,0); dc->DSSetShader(NULL,NULL,0);
+			dc->PSSetShader(m_view.m_psSolid,NULL,0);
+			ID3D11ShaderResourceView* srvs[]={themeM,obsM,NULL,envM,shM,noiseM};
+			dc->PSSetShaderResources(0,6,srvs);
+			bindMesh(m_view.m_vbDyn);
+			dc->Draw(nWorld - nTerr, nBand + nTerr);
+		}
+		if (craftDrawN) {
+			dc->RSSetState(m_view.m_rsSolid);
+			dc->PSSetShader(m_view.m_psCraft ? m_view.m_psCraft : m_view.m_psSolid,NULL,0);
+			ID3D11ShaderResourceView* craftSrv = m_view.m_srvCraft ? m_view.m_srvCraft : themeM;
+			ID3D11ShaderResourceView* craftDet = m_view.m_srvCraftD ? m_view.m_srvCraftD : craftSrv;
+			ID3D11ShaderResourceView* srvs[]={craftSrv,craftDet,NULL,envM,shM,noiseM};
+			dc->PSSetShaderResources(0,6,srvs);
+			drawCraftGpu();
+		}
+		dc->IASetInputLayout(m_view.m_ilSolid); dc->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+		dc->VSSetShader(m_view.m_vsSolid,NULL,0);
+		dc->PSSetShader((m_view.m_psWater && m_view.m_srvReflect) ? m_view.m_psWater : m_view.m_psSolid,NULL,0);
+		dc->RSSetState(m_view.m_rsNoCull);
+		dc->OMSetBlendState(m_view.m_bsAlpha,NULL,0xffffffff); dc->OMSetDepthStencilState(m_view.m_dssRead,0);
+		{
+			ID3D11ShaderResourceView* srvs[]={waterM,themeDM,NULL,envM,shM,noiseM};
+			dc->PSSetShaderResources(0,6,srvs);
+			if (m_view.m_srvReflect) dc->PSSetShaderResources(6,1,&m_view.m_srvReflect);
+		}
+		if (m_view.m_vbWaterParts > 0)
+			drawParts(m_view.m_vbWater, m_view.m_vbWaterN, m_view.m_vbWaterParts, 3);
+		{
+			ID3D11ShaderResourceView* nullR=NULL; dc->PSSetShaderResources(6,1,&nullR);
+		}
+		if (m_view.m_vbBandParts > 0) {
+			dc->RSSetState(m_view.m_rsNoCull); dc->OMSetDepthStencilState(m_view.m_dssRead,0); dc->OMSetBlendState(m_view.m_bsAlpha,NULL,0xffffffff);
+			dc->IASetInputLayout(m_view.m_ilPatch); dc->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_4_CONTROL_POINT_PATCHLIST);
+			dc->VSSetShader(m_view.m_vsTess,NULL,0); dc->HSSetShader(m_view.m_hsTess,NULL,0); dc->DSSetShader(m_view.m_dsTess,NULL,0); dc->PSSetShader(m_view.m_psBand,NULL,0);
+			ID3D11ShaderResourceView* srvs[]={bandM,themeM,NULL,envM,shM,noiseM};
+			dc->PSSetShaderResources(0,6,srvs); dc->DSSetShaderResources(5,1,&noiseM); dc->DSSetShaderResources(0,1,&bandM);
+			drawParts(m_view.m_vbBand, m_view.m_vbBandN, m_view.m_vbBandParts, 4);
+			dc->HSSetShader(NULL,NULL,0); dc->DSSetShader(NULL,NULL,0);
+		}
+		dc->IASetInputLayout(m_view.m_ilSolid); dc->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+		dc->VSSetShader(m_view.m_vsSolid,NULL,0);
+		dc->RSSetState(m_view.m_rsNoCull);
+		dc->OMSetBlendState(m_view.m_bsAlpha,NULL,0xffffffff); dc->OMSetDepthStencilState(m_view.m_dssRead,0);
+		if (nSky || nSky2 || nSky3 || nSky4 || nItem) {
+			bindMesh(m_view.m_vbDyn);
+			const UINT t0 = nBand+nWorld+nCraft;
+			ID3D11ShaderResourceView* s1=m_view.m_srvSky, *s2=m_view.m_srvSky2?m_view.m_srvSky2:s1;
+			ID3D11ShaderResourceView* s3=m_view.m_srvSky3?m_view.m_srvSky3:s1;
+			ID3D11ShaderResourceView* s4=m_view.m_srvSky4?m_view.m_srvSky4:s2;
+			ID3D11PixelShader* cloudPs = m_view.m_psCloud ? m_view.m_psCloud : m_view.m_psSolid;
+			auto bindT=[&](ID3D11ShaderResourceView* a, ID3D11ShaderResourceView* b){
+				ID3D11ShaderResourceView* srvs[]={a?a:themeM, b?b:(a?a:themeDM), NULL, envM, shM, noiseM};
+				dc->PSSetShaderResources(0,6,srvs);
+			};
+			dc->PSSetShader(cloudPs,NULL,0);
+			if(nSky){ bindT(s1,s2); dc->Draw(nSky, t0); }
+			if(nSky2){ bindT(s2,s1); dc->Draw(nSky2, t0+nSky); }
+			if(nSky3){ bindT(s3,s4); dc->Draw(nSky3, t0+nSky+nSky2); }
+			if(nSky4){ bindT(s4,s3); dc->Draw(nSky4, t0+nSky+nSky2+nSky3); }
+			if(nItem){ dc->PSSetShader(m_view.m_psSolid,NULL,0); bindT(m_view.m_srvItem, m_view.m_srvItem); dc->Draw(nItem, t0+nSky+nSky2+nSky3+nSky4); }
+		}
+		ID3D11ShaderResourceView* nullsM[6]={}; dc->PSSetShaderResources(0,6,nullsM);
+	}
+
 	// color pass
 	D3D11_VIEWPORT vp={0,0,(float)w,(float)h,0,1}; dc->RSSetViewports(1,&vp);
 	dc->OMSetRenderTargets(1,&m_view.m_sceneRtv,m_view.m_dsv);
@@ -5264,7 +6889,9 @@ void CSoft3DRaceDlg::RenderScene()
 	int thIdx=m_themeActive-1; if(thIdx<0)thIdx=0; if(thIdx>7)thIdx=7; ID3D11ShaderResourceView* themeSrv=m_view.m_srvTheme[thIdx];
 	ID3D11ShaderResourceView* themeDet=m_view.m_srvThemeD[thIdx]?m_view.m_srvThemeD[thIdx]:themeSrv;
 	ID3D11ShaderResourceView* obsSrv=m_view.m_srvObs?m_view.m_srvObs:themeDet;
+	ID3D11ShaderResourceView* obsDet=m_view.m_srvObsD?m_view.m_srvObsD:obsSrv;
 	ID3D11ShaderResourceView* waterSrv=m_view.m_srvWater?m_view.m_srvWater:themeSrv;
+	ID3D11ShaderResourceView* waterDet=m_view.m_srvWaterD?m_view.m_srvWaterD:themeDet;
 
 	UINT stride=sizeof(S3RVertex), off=0; dc->IASetVertexBuffers(0,1,&m_view.m_vbDyn,&stride,&off);
 	dc->RSSetState(m_view.m_rsNoCull); dc->OMSetDepthStencilState(m_view.m_dssWrite,0); dc->OMSetBlendState(m_view.m_bsOpaque,NULL,0xffffffff);
@@ -5285,7 +6912,7 @@ void CSoft3DRaceDlg::RenderScene()
 			drawParts(m_view.m_vbScenery, m_view.m_vbSceneryN, m_view.m_vbSceneryParts, 3);
 		}
 		{
-			ID3D11ShaderResourceView* osrvs[]={themeSrv,obsSrv,NULL,envSrv,shSrv,noiseSrv};
+			ID3D11ShaderResourceView* osrvs[]={obsSrv,obsDet,NULL,envSrv,shSrv,noiseSrv};
 			dc->PSSetShaderResources(0,6,osrvs);
 		}
 		drawObsGpu();
@@ -5310,7 +6937,7 @@ void CSoft3DRaceDlg::RenderScene()
 		dc->PSSetShaderResources(0,6,srvs);
 		drawCraftGpu();
 	}
-	if ((nWorld || m_view.m_vbTerrParts || m_view.m_vbSceneryParts) && cb.peel.w > 0.05f) {
+	if (hq && (nWorld || m_view.m_vbTerrParts || m_view.m_vbSceneryParts) && cb.peel.w > 0.05f) {
 		S3RFrameCB cbPeel = cb;
 		cbPeel.peel.w = -cb.peel.w;
 		if (SUCCEEDED(dc->Map(m_view.m_cbFrame,0,D3D11_MAP_WRITE_DISCARD,0,&map))){ memcpy(map.pData,&cbPeel,sizeof(cbPeel)); dc->Unmap(m_view.m_cbFrame,0); }
@@ -5340,6 +6967,24 @@ void CSoft3DRaceDlg::RenderScene()
 		}
 		if (SUCCEEDED(dc->Map(m_view.m_cbFrame,0,D3D11_MAP_WRITE_DISCARD,0,&map))){ memcpy(map.pData,&cb,sizeof(cb)); dc->Unmap(m_view.m_cbFrame,0); }
 	}
+	dc->IASetInputLayout(m_view.m_ilSolid); dc->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+	dc->VSSetShader(m_view.m_vsSolid,NULL,0);
+	dc->PSSetShader((m_view.m_psWater && m_view.m_srvReflect) ? m_view.m_psWater : m_view.m_psSolid,NULL,0);
+	dc->RSSetState(m_view.m_rsNoCull);
+	dc->OMSetBlendState(m_view.m_bsAlpha,NULL,0xffffffff); dc->OMSetDepthStencilState(m_view.m_dssRead,0);
+	{
+		ID3D11ShaderResourceView* srvs[]={waterSrv,waterDet,NULL,envSrv,shSrv,noiseSrv};
+		dc->PSSetShaderResources(0,6,srvs);
+		if (m_view.m_srvReflect) dc->PSSetShaderResources(6,1,&m_view.m_srvReflect);
+	}
+	if (m_view.m_vbWaterParts > 0) {
+		drawParts(m_view.m_vbWater, m_view.m_vbWaterN, m_view.m_vbWaterParts, 3);
+	}
+	{
+		ID3D11ShaderResourceView* nullR = NULL;
+		dc->PSSetShaderResources(6,1,&nullR);
+		dc->PSSetShader(m_view.m_psSolid,NULL,0);
+	}
 	{
 		if (m_view.m_vbBandParts > 0){
 			dc->RSSetState(m_view.m_rsNoCull); dc->OMSetDepthStencilState(m_view.m_dssRead,0); dc->OMSetBlendState(m_view.m_bsAlpha,NULL,0xffffffff);
@@ -5352,47 +6997,56 @@ void CSoft3DRaceDlg::RenderScene()
 		}
 	}
 	dc->IASetInputLayout(m_view.m_ilSolid); dc->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-	dc->VSSetShader(m_view.m_vsSolid,NULL,0); dc->PSSetShader(m_view.m_psSolid,NULL,0);
-	dc->RSSetState(m_view.m_rsNoCull);
-	dc->OMSetBlendState(m_view.m_bsAlpha,NULL,0xffffffff); dc->OMSetDepthStencilState(m_view.m_dssRead,0);
-	{
-		ID3D11ShaderResourceView* srvs[]={waterSrv,themeDet,NULL,envSrv,shSrv,noiseSrv};
-		dc->PSSetShaderResources(0,6,srvs);
-	}
-	if (m_view.m_vbWaterParts > 0) {
-		drawParts(m_view.m_vbWater, m_view.m_vbWaterN, m_view.m_vbWaterParts, 3);
-	}
+	dc->VSSetShader(m_view.m_vsSolid,NULL,0);
+	dc->HSSetShader(NULL,NULL,0); dc->DSSetShader(NULL,NULL,0);
 	if (nTrans){
 		bindMesh(m_view.m_vbDyn);
 		const UINT t0 = nBand+nWorld+nCraft;
+		ID3D11ShaderResourceView* s1=m_view.m_srvSky, *s2=m_view.m_srvSky2?m_view.m_srvSky2:s1;
+		ID3D11ShaderResourceView* s3=m_view.m_srvSky3?m_view.m_srvSky3:s1;
+		ID3D11ShaderResourceView* s4=m_view.m_srvSky4?m_view.m_srvSky4:s2;
+		ID3D11PixelShader* cloudPs = m_view.m_psCloud ? m_view.m_psCloud : m_view.m_psSolid;
 		auto bindT=[&](ID3D11ShaderResourceView* a, ID3D11ShaderResourceView* b){
 			ID3D11ShaderResourceView* srvs[]={a?a:themeSrv, b?b:(a?a:themeDet), NULL, envSrv, shSrv, noiseSrv};
 			dc->PSSetShaderResources(0,6,srvs);
 		};
-		if(nSky){ bindT(m_view.m_srvSky, m_view.m_srvSky2); dc->Draw(nSky, t0); }
-		if(nSky2){ bindT(m_view.m_srvSky2, m_view.m_srvSky); dc->Draw(nSky2, t0+nSky); }
-		if(nItem){ bindT(m_view.m_srvItem, m_view.m_srvItem); dc->Draw(nItem, t0+nSky+nSky2); }
-		const UINT nRest = nTrans - nSky - nSky2 - nItem;
-		if(nRest){ bindT(themeSrv, themeDet); dc->Draw(nRest, t0+nSky+nSky2+nItem); }
+		dc->PSSetShader(cloudPs,NULL,0);
+		if(nSky){ bindT(s1,s2); dc->Draw(nSky, t0); }
+		if(nSky2){ bindT(s2,s1); dc->Draw(nSky2, t0+nSky); }
+		if(nSky3){ bindT(s3,s4); dc->Draw(nSky3, t0+nSky+nSky2); }
+		if(nSky4){ bindT(s4,s3); dc->Draw(nSky4, t0+nSky+nSky2+nSky3); }
+		dc->PSSetShader(m_view.m_psSolid,NULL,0);
+		if(nItem){ bindT(m_view.m_srvItem, m_view.m_srvItem); dc->Draw(nItem, t0+nSky+nSky2+nSky3+nSky4); }
+		const UINT nRest = nTrans - nSky - nSky2 - nSky3 - nSky4 - nItem - nShaft;
+		if(nRest){ bindT(themeSrv, themeDet); dc->Draw(nRest, t0+nSky+nSky2+nSky3+nSky4+nItem); }
+		if(nShaft){
+			dc->OMSetBlendState(m_view.m_bsAdd,NULL,0xffffffff);
+			bindT(themeSrv, themeDet);
+			dc->Draw(nShaft, t0+nSky+nSky2+nSky3+nSky4+nItem+nRest);
+			dc->OMSetBlendState(m_view.m_bsAlpha,NULL,0xffffffff);
+		}
 	}
 
-	// post SSR -> DOF -> FIN
+	// post: デモはDOF省略、ゲーム中はDOF→FIN（god rayはFIN側）
 	ID3D11ShaderResourceView* nulls[6]={}; dc->PSSetShaderResources(0,6,nulls);
-	dc->OMSetRenderTargets(1,&m_view.m_postRtv,NULL);
 	dc->OMSetDepthStencilState(m_view.m_dssOff,0); dc->OMSetBlendState(m_view.m_bsOpaque,NULL,0xffffffff);
-	dc->VSSetShader(m_view.m_vsPost,NULL,0); dc->PSSetShader(m_view.m_psSsr,NULL,0);
-	ID3D11ShaderResourceView* p0[]={m_view.m_sceneSrv,NULL,m_view.m_dsSrv}; dc->PSSetShaderResources(0,3,p0);
-	dc->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST); dc->Draw(3,0);
-
-	dc->OMSetRenderTargets(1,&m_view.m_sceneRtv,NULL); dc->PSSetShaderResources(0,6,nulls);
-	dc->PSSetShader(m_view.m_psDof,NULL,0);
-	ID3D11ShaderResourceView* p1[]={m_view.m_postSrv,NULL,m_view.m_dsSrv}; dc->PSSetShaderResources(0,3,p1);
-	dc->Draw(3,0);
-
-	dc->OMSetRenderTargets(1,&m_view.m_bbRtv,NULL); dc->PSSetShaderResources(0,6,nulls);
-	dc->PSSetShader(m_view.m_psFinal,NULL,0);
-	ID3D11ShaderResourceView* p2[]={m_view.m_sceneSrv}; dc->PSSetShaderResources(0,1,p2);
-	dc->Draw(3,0);
+	dc->VSSetShader(m_view.m_vsPost,NULL,0);
+	dc->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+	if (hq) {
+		dc->OMSetRenderTargets(1,&m_view.m_postRtv,NULL);
+		dc->PSSetShader(m_view.m_psDof,NULL,0);
+		ID3D11ShaderResourceView* p1[]={m_view.m_sceneSrv,NULL,m_view.m_dsSrv}; dc->PSSetShaderResources(0,3,p1);
+		dc->Draw(3,0);
+		dc->OMSetRenderTargets(1,&m_view.m_bbRtv,NULL); dc->PSSetShaderResources(0,6,nulls);
+		dc->PSSetShader(m_view.m_psFinal,NULL,0);
+		ID3D11ShaderResourceView* p2[]={m_view.m_postSrv}; dc->PSSetShaderResources(0,1,p2);
+		dc->Draw(3,0);
+	} else {
+		dc->OMSetRenderTargets(1,&m_view.m_bbRtv,NULL);
+		dc->PSSetShader(m_view.m_psFinal,NULL,0);
+		ID3D11ShaderResourceView* p2[]={m_view.m_sceneSrv}; dc->PSSetShaderResources(0,1,p2);
+		dc->Draw(3,0);
+	}
 
 	// HUD quads + baked countdown / status textures
 	{
@@ -5453,6 +7107,13 @@ void CSoft3DRaceDlg::RenderScene()
 			float b = (fr < 0.25f) ? 0.25f : 1.f;
 			hq(-0.95f,0.80f,-0.95f+0.5f*fr,0.86f, r,g,b,.9f);
 		}
+		if (pl.hitFlashT > 0.f && (m_phase == PHASE_RACE || m_phase == PHASE_FINISH)) {
+			float a = S3rSaturate(pl.hitFlashT / 0.38f) * 0.40f;
+			hq(-1.f, -1.f, 1.f, -0.68f, 1.f, 0.10f, 0.06f, a);
+			hq(-1.f, 0.68f, 1.f, 1.f, 1.f, 0.10f, 0.06f, a);
+			hq(-1.f, -1.f, -0.74f, 1.f, 1.f, 0.10f, 0.06f, a);
+			hq(0.74f, -1.f, 1.f, 1.f, 1.f, 0.10f, 0.06f, a);
+		}
 
 		dc->OMSetRenderTargets(1,&m_view.m_bbRtv,NULL);
 		// 直前の solid パスが CULL_BACK のままだと HUD 四角が消える
@@ -5474,9 +7135,25 @@ void CSoft3DRaceDlg::RenderScene()
 		};
 		flushHud(NULL);
 
+		// バックミラー（上中央・ミニマップ左）。MMB後方視中は本体が後ろ向きなので隠す
+		if (m_view.m_srvRear && !m_lookback
+			&& (m_phase == PHASE_RACE || m_phase == PHASE_COUNTDOWN || m_phase == PHASE_FINISH || m_phase == PHASE_DEMO)) {
+			const float bx0 = -0.18f, by0 = 0.78f, bx1 = 0.42f, by1 = 0.948f;
+			hq(bx0 - 0.012f, by0 - 0.016f, bx1 + 0.012f, by1 + 0.016f, 0.06f, 0.07f, 0.10f, 0.88f);
+			hq(bx0 - 0.004f, by0 - 0.006f, bx1 + 0.004f, by1 + 0.006f, 0.18f, 0.22f, 0.28f, 0.55f);
+			flushHud(NULL);
+			ht(bx0, by0, bx1, by1, 0.96f);
+			flushHud(m_view.m_srvRear);
+		}
+
 		if (m_view.m_srvHud) {
 			ht(-0.96f, 0.42f, -0.28f, 0.78f, 0.92f);
 			flushHud(m_view.m_srvHud);
+		}
+		if (m_view.m_srvGauge && (m_phase == PHASE_RACE || m_phase == PHASE_COUNTDOWN || m_phase == PHASE_FINISH
+			|| m_phase == PHASE_DEMO || m_phase == PHASE_PODIUM)) {
+			ht(-0.985f, -0.975f, -0.50f, -0.575f, 0.97f);
+			flushHud(m_view.m_srvGauge);
 		}
 		// ミニマップ下にマージン → 残り縦を最大12台で等分。実台数ぶんだけ上から積む
 		if (m_view.m_srvStand && (m_phase == PHASE_RACE || m_phase == PHASE_COUNTDOWN || m_phase == PHASE_FINISH || m_phase == PHASE_PODIUM || m_phase == PHASE_DEMO)) {
@@ -5485,9 +7162,12 @@ void CSoft3DRaceDlg::RenderScene()
 			const float availBot = -0.96f;
 			const float slotH = (availTop - availBot) / 12.f;
 			const int n = max(1, min(m_craftN, 12));
-			float panelH = slotH * (float)n;
+			const float rowPart = (float)(n * 72 + 8);
+			const float fullPart = rowPart + 52.f; // ニトロ帯
+			float panelH = slotH * (float)n * (fullPart / max(1.f, rowPart));
 			float sy1 = availTop;
 			float sy0 = sy1 - panelH;
+			if (sy0 < availBot) sy0 = availBot;
 			ht(0.54f, sy0, 0.995f, sy1, 0.98f);
 			flushHud(m_view.m_srvStand);
 		}
@@ -5793,9 +7473,9 @@ BOOL CSoft3DRaceDlg::OnInitDialog()
 	if (savedata.s3r_invert_y != 0) savedata.s3r_invert_y = 1;
 	if (savedata.s3_mesh_density < 0 || savedata.s3_mesh_density > S3_MESH_DENSITY_MAX) savedata.s3_mesh_density = 5;
 
-	SetWindowText(LL14(L"Soft3D 空中レース", L"Soft3D aerial race", L"Course aérienne Soft3D", L"Gara aerea Soft3D", L"Carrera aérea Soft3D",
-		L"Soft3D 공중 레이스", L"Soft3D 空中竞速", L"سباق Soft3D الجوي", L"Воздушная гонка Soft3D", L"Soft3D-Luftrennen",
-		L"Corrida aérea Soft3D", L"Soft3D-luchtrace", L"Wyścig powietrzny Soft3D", L"Soft3D hava yarışı"));
+	SetWindowText(LL14(L"空中レース", L"Aerial race", L"Course aérienne", L"Gara aerea", L"Carrera aérea",
+		L"공중 레이스", L"空中竞速", L"السباق الجوي", L"Воздушная гонка", L"Luftrennen",
+		L"Corrida aérea", L"Luchtrace", L"Wyścig powietrzny", L"Hava yarışı"));
 	m_aiL.SetWindowText(LL14(L"AI", L"AI", L"IA", L"IA", L"IA", L"AI", L"AI", L"AI", L"ИИ", L"KI", L"IA", L"AI", L"SI", L"YZ"));
 	m_oppL.SetWindowText(LL14(L"台数", L"Opponents", L"Adversaires", L"Avversari", L"Rivales", L"대수", L"对手数", L"خصوم", L"Соперники", L"Gegner", L"Oponentes", L"Tegenstanders", L"Rywalе", L"Rakip"));
 	m_lenL.SetWindowText(LL14(L"距離", L"Length", L"Longueur", L"Lunghezza", L"Longitud", L"거리", L"长度", L"طول", L"Длина", L"Länge", L"Comprimento", L"Lengte", L"Długość", L"Uzunluk"));
@@ -5806,20 +7486,20 @@ BOOL CSoft3DRaceDlg::OnInitDialog()
 	m_start.SetWindowText(LL14(L"スタート", L"Start", L"Démarrer", L"Via", L"Iniciar", L"시작", L"开始", L"ابدأ", L"Старт", L"Start", L"Iniciar", L"Start", L"Start", L"Başlat"));
 	m_gen.SetWindowText(LL14(L"生成", L"Generate", L"Générer", L"Genera", L"Generar", L"생성", L"生成", L"توليد", L"Создать", L"Erzeugen", L"Gerar", L"Genereren", L"Generuj", L"Oluştur"));
 	m_close.SetWindowText(LL14(L"閉じる", L"Close", L"Fermer", L"Chiudi", L"Cerrar", L"닫기", L"关闭", L"إغلاق", L"Закрыть", L"Schließen", L"Fechar", L"Sluiten", L"Zamknij", L"Kapat"));
-	m_hint.SetWindowText(LL14(L"マウス: 機体の向き / LMB加速 / RMBブレーキ / ホイールズーム / MMB後方　パッド対応　ステータス右クリック=設定",
-		L"Mouse: steer craft / LMB accel / RMB brake / wheel zoom / MMB lookback  Pad OK  Right-click status=settings",
-		L"Souris : braquer / LMB accél / RMB frein / molette zoom / MMB recul  Manette OK  Clic droit statut=réglages",
-		L"Mouse: sterza / LMB accel / RMB freno / rotella zoom / MMB dietro  Pad OK  Clic destro stato=impostazioni",
-		L"Ratón: dirigir / LMB acel / RMB freno / rueda zoom / MMB atrás  Mando OK  Clic derecho estado=ajustes",
-		L"마우스: 기체 조종 / LMB가속 / RMB브레이크 / 휠줌 / MMB후방  패드 OK  상태 우클릭=설정",
-		L"鼠标：转向机体 / 左键加速 / 右键刹车 / 滚轮缩放 / 中键后视  手柄可用  状态栏右键=设置",
-		L"Mouse steer craft / LMB accel / RMB brake / wheel zoom / MMB lookback",
-		L"Мышь: рулить / ЛКМ газ / ПКМ тормоз / колесо зум / СКМ назад",
-		L"Maus: steuern / LMB Gas / RMB Bremse / Rad Zoom / MMB Rückblick",
-		L"Mouse: dirigir / LMB acel / RMB freio / roda zoom / MMB atrás",
-		L"Muis: sturen / LMB gas / RMB rem / wiel zoom / MMB achteruit",
-		L"Mysz: steruj / LMB gaz / RMB hamulec / kółko zoom / MMB wstecz",
-		L"Fare: yönlendir / LMB gaz / RMB fren / teker zoom / MMB geri"));
+	m_hint.SetWindowText(LL14(L"マウス: 機体の向き / LMB・W・↑・Space加速 / RMB・S・↓ブレーキ / ホイールズーム / MMB後方 / N・Ctrl=ニトロ　パッド対応　ステータス右クリック=設定",
+		L"Mouse: steer / LMB·W·Up·Space accel / RMB·S·Down brake / wheel zoom / MMB lookback / N·Ctrl=nitro  Pad OK  Right-click status=settings",
+		L"Souris : braquer / LMB accél / RMB frein / molette zoom / MMB recul / N·Ctrl=nitro  Manette OK  Clic droit statut=réglages",
+		L"Mouse: sterza / LMB accel / RMB freno / rotella zoom / MMB dietro / N·Ctrl=nitro  Pad OK  Clic destro stato=impostazioni",
+		L"Ratón: dirigir / LMB acel / RMB freno / rueda zoom / MMB atrás / N·Ctrl=nitro  Mando OK  Clic derecho estado=ajustes",
+		L"마우스: 기체 조종 / LMB가속 / RMB브레이크 / 휠줌 / MMB후방 / N·Ctrl=니트로  패드 OK  상태 우클릭=설정",
+		L"鼠标：转向机体 / 左键加速 / 右键刹车 / 滚轮缩放 / 中键后视 / N·Ctrl=氮气  手柄可用  状态栏右键=设置",
+		L"Mouse steer craft / LMB accel / RMB brake / wheel zoom / MMB lookback / N·Ctrl=nitro",
+		L"Мышь: рулить / ЛКМ газ / ПКМ тормоз / колесо зум / СКМ назад / N·Ctrl=нитро",
+		L"Maus: steuern / LMB Gas / RMB Bremse / Rad Zoom / MMB Rückblick / N·Ctrl=Nitro",
+		L"Mouse: dirigir / LMB acel / RMB freio / roda zoom / MMB atrás / N·Ctrl=nitro",
+		L"Muis: sturen / LMB gas / RMB rem / wiel zoom / MMB achteruit / N·Ctrl=nitro",
+		L"Mysz: steruj / LMB gaz / RMB hamulec / kółko zoom / MMB wstecz / N·Ctrl=nitro",
+		L"Fare: yönlendir / LMB gaz / RMB fren / teker zoom / MMB geri / N·Ctrl=nitro"));
 
 	m_ai.AddString(LL14(L"超簡単", L"Super easy", L"Très facile", L"Facilissimo", L"Muy fácil", L"매우 쉬움", L"超简单", L"سهل جداً", L"Очень легко", L"Sehr leicht", L"Muito fácil", L"Zeer makkelijk", L"Bardzo łatwy", L"Çok kolay"));
 	m_ai.AddString(LL14(L"簡単", L"Easy", L"Facile", L"Facile", L"Fácil", L"쉬움", L"简单", L"سهل", L"Легко", L"Leicht", L"Fácil", L"Makkelijk", L"Łatwy", L"Kolay"));
@@ -5892,6 +7572,9 @@ void CSoft3DRaceDlg::OnGen() { GenerateCourse(); PersistUi(); }
 void CSoft3DRaceDlg::RequestDestroyWindow()
 {
 	m_view.m_ready = FALSE;
+	S3rReleaseJoypad();
+	if (GetSafeHwnd() && IsWindowVisible())
+		ShowWindow(SW_HIDE);
 	if (m_inTick) {
 		PostMessage(WM_CLOSE);
 		return;
@@ -5929,13 +7612,19 @@ void CSoft3DRaceDlg::TickFrame()
 {
 	if (m_inTick) return;
 	m_inTick = 1;
-	if (!GetSafeHwnd() || !m_view.m_ready) { m_inTick = 0; return; }
+	auto endTick=[&](){
+		const int pend = (GetSafeHwnd() && !m_view.m_ready && !IsWindowVisible()) ? 1 : 0;
+		m_inTick = 0;
+		if (pend) DestroyWindow();
+	};
+	if (!GetSafeHwnd() || !m_view.m_ready) { endTick(); return; }
 	PumpQueued(TRUE);
-	if (!GetSafeHwnd() || !m_view.m_ready) { m_inTick = 0; return; }
+	if (!GetSafeHwnd() || !m_view.m_ready) { endTick(); return; }
 	const DWORD now = GetTickCount();
 	float dt = (float)(now - m_lastTick) * 0.001f;
 	m_lastTick = now;
 	if (dt < 0.f) dt = 0.f; if (dt > 0.05f) dt = 0.05f;
+	m_frameDt = dt;
 	m_anim += dt;
 
 	if (m_phase == PHASE_COUNTDOWN) TickCountdown(dt);
@@ -5959,13 +7648,13 @@ void CSoft3DRaceDlg::TickFrame()
 				// 詰まった場合はレール上で残り距離を走らせて完走（偽リタイアにしない）
 				if (!AllAliveFinished() && m_finishSimT > 180.f) {
 					const float plen = (m_pathLen > 1.f) ? m_pathLen : 800.f;
-					float spd = RaceSpeedCap(0) * 0.88f;
-					if (spd < 8.f) spd = 8.f;
 					for (int i = 0; i < m_craftN; i++) {
 						S3rCraft& c = m_crafts[i];
 						if (!c.alive || c.finished || c.retired) continue;
 						float remainT = (float)m_lapsTarget - ((float)c.lap + c.pathT);
 						if (remainT < 0.02f) remainT = 0.02f;
+						float spd = FinishSimRailSpeed(c);
+						if (spd < 8.f) spd = 8.f;
 						float extra = remainT * plen / spd;
 						int lapsLeft = m_lapsTarget - c.lap;
 						if (lapsLeft < 1) lapsLeft = 1;
@@ -6045,7 +7734,7 @@ void CSoft3DRaceDlg::TickFrame()
 	m_view.RequestRedraw();
 	if (GetSafeHwnd())
 		PumpQueued(FALSE);
-	m_inTick = 0;
+	endTick();
 }
 
 void CSoft3DRaceDlg::OnTimer(UINT_PTR id)
@@ -6066,8 +7755,10 @@ void CSoft3DRaceDlg::OnDestroy()
 {
 	m_view.m_ready = FALSE;
 	PersistUi(); PersistWindowRect();
-	Soft3DSfxShutdown();
-	RestoreAudioBaseline();
+	if (!IsSoft3DMazeOpen()) {
+		Soft3DSfxShutdown();
+		RestoreAudioBaseline();
+	}
 	S3rReleaseJoypad();
 	CCustomBlurDialogBase::OnDestroy();
 	if (og && ::IsWindow(og->GetSafeHwnd()))
@@ -6090,7 +7781,21 @@ void OpenSoft3DRaceModeless(CWnd* p)
 }
 void CloseSoft3DRaceIfOpen()
 {
-	if (g_s3r && g_s3r->GetSafeHwnd()) g_s3r->RequestDestroyWindow();
+	if (!g_s3r) return;
+	HWND hw = g_s3r->GetSafeHwnd();
+	if (!hw || !::IsWindow(hw)) return;
+	g_s3r->RequestDestroyWindow();
+	for (int i = 0; i < 24; i++) {
+		if (!g_s3r || !g_s3r->GetSafeHwnd() || !::IsWindow(g_s3r->GetSafeHwnd()))
+			break;
+		MSG msg = {};
+		HWND cur = g_s3r->GetSafeHwnd();
+		if (!cur || !::PeekMessage(&msg, cur, 0, 0, PM_REMOVE))
+			break;
+		if (msg.message == WM_QUIT) { ::PostQuitMessage((int)msg.wParam); break; }
+		::TranslateMessage(&msg);
+		::DispatchMessage(&msg);
+	}
 }
 BOOL IsSoft3DRaceOpen()
 {
