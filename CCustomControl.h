@@ -1497,7 +1497,7 @@ private:
 // CCustomLevelMeter
 //
 // 0..1000。緑→黄→赤の縦バー。ピークホールドは持たない（親が SetLevel する）。
-// 全体を不透明に塗る（余白クロマや WS_BORDER の α=0 だと黒バー周囲が透ける）。
+// バー寸法は旧 WS_BORDER+Deflate(2,2) と同じ。余白と枠だけ不透明に塗る。
 // 変化なしなら Invalidate しない。
 // ============================================================================
 class CCustomLevelMeter : public CStatic
@@ -1522,7 +1522,7 @@ protected:
 	afx_msg LRESULT OnPrintClient(WPARAM wParam, LPARAM lParam);
 	DECLARE_MESSAGE_MAP()
 
-	void PaintClient(CDC& dc); // クライアント全面を不透明トラック＋レベル
+	void PaintClient(CDC& dc); // 余白はダイアログ色、内側がレベルバー
 
 	int m_level;       // 0..1000。SetLevel がクランプ
 	BOOL m_bAeroMode;

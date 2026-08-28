@@ -12421,22 +12421,41 @@ void CCustomLevelMeter::SetLevel(int n)
 		Invalidate(FALSE);
 }
 
-// 縦レベル。0..1000。余白・枠は作らずクライアント全面をトラック色で埋める。
-// （2px 余白や WS_BORDER はガラスに抜けて黒バー周囲が透けて見えた）
+// 縦レベル。0..1000。バー寸法は旧実装と同じ（NC枠1px + Deflate 2px）。
+// テーマ WS_BORDER は α=0 なので外し、同じ位置を不透明な 1px 枠で描く。
+// 余白は COLOR_DIALOG_BG（親と同じ）で埋め、クロマで抜かない。
 // 850 超で赤、650 超で黄。トラックは暗い紺。
 void CCustomLevelMeter::PaintClient(CDC& dc)
 {
 	CRect r;
 	GetClientRect(&r);
 	if (r.Width() <= 0 || r.Height() <= 0) return;
-	const COLORREF clrTrack = RGB(40, 44, 56);
-	dc.FillSolidRect(&r, clrTrack);
-	const int h = r.Height();
+
+	dc.FillSolidRect(&r, COLOR_DIALOG_BG);
+
+	if (r.Width() >= 2 && r.Height() >= 2) {
+		const COLORREF clrFrame = RGB(255, 255, 255);
+		dc.FillSolidRect(r.left, r.top, r.Width(), 1, clrFrame);
+		dc.FillSolidRect(r.left, r.bottom - 1, r.Width(), 1, clrFrame);
+		dc.FillSolidRect(r.left, r.top, 1, r.Height(), clrFrame);
+		dc.FillSolidRect(r.right - 1, r.top, 1, r.Height(), clrFrame);
+	}
+
+	CRect track = r;
+	track.DeflateRect(3, 3); // 1px 枠 + 旧 DeflateRect(2,2)
+	if (track.Width() <= 0 || track.Height() <= 0) {
+		track = r;
+		track.DeflateRect(1, 1);
+		if (track.Width() <= 0 || track.Height() <= 0) return;
+	}
+
+	dc.FillSolidRect(&track, RGB(40, 44, 56));
+	const int h = track.Height();
 	int fillH = (int)(((__int64)h * m_level) / 1000);
 	if (m_level > 0 && fillH < 1) fillH = 1;
 	if (fillH > h) fillH = h;
 	if (fillH > 0) {
-		CRect fill(r.left, r.bottom - fillH, r.right, r.bottom);
+		CRect fill(track.left, track.bottom - fillH, track.right, track.bottom);
 		COLORREF c = RGB(80, 220, 120);
 		if (m_level > 850) c = RGB(255, 70, 70);
 		else if (m_level > 650) c = RGB(255, 200, 60);
@@ -12499,7 +12518,7 @@ BOOL CCustomLevelMeter::OnEraseBkgnd(CDC* pDC)
 	{
 		CRect r;
 		GetClientRect(&r);
-		CCC_FillRectOpaqueBits(pDC->GetSafeHdc(), r, RGB(40, 44, 56));
+		CCC_FillRectOpaqueBits(pDC->GetSafeHdc(), r, COLOR_DIALOG_BG);
 		return TRUE;
 	}
 #endif
