@@ -39,8 +39,16 @@ struct SasamiSong {
 	int fmOpna10ch;
 };
 
+struct SasamiTags {
+	char titleSjis[65];
+	char composerSjis[65];
+	char commentSjis[65];
+};
+
 bool SasamiExtIsMidi(const wchar_t* path);
 bool SasamiExtIsFm(const wchar_t* path);
+bool SasamiExtIsAny(const wchar_t* path);
+bool SasamiPeekTagsW(const wchar_t* path, SasamiTags* out);
 SasamiKind SasamiKindFromPath(const wchar_t* path);
 
 bool SasamiLoadMemory(const uint8_t* bytes, size_t size, SasamiKind hint, SasamiSong* out);

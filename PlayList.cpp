@@ -2720,6 +2720,66 @@ static void PlMicLevSliderCb(void* /*ctx*/, int value)
 
 void MpSurroundAmountSliderCb(void* /*ctx*/, int value);
 
+static void PlAddMapForceItems(CCustomPopupMenu* map, int baseId, int midiForce)
+{
+	if (!map) return;
+	map->AddCheck(baseId + 0, LL14(L"自動 (SysEx / 曲名)", L"Auto (SysEx / title)", L"Auto (SysEx / titre)", L"Auto (SysEx / titolo)", L"Auto (SysEx / titulo)", L"자동 (SysEx / 제목)", L"自动 (SysEx / 曲名)", L"تلقائي (SysEx / عنوان)", L"Авто (SysEx / название)", L"Auto (SysEx / Titel)", L"Auto (SysEx / titulo)", L"Auto (SysEx / titel)", L"Auto (SysEx / tytul)", L"Otomatik (SysEx / baslik)"), midiForce == 0);
+	map->AddCheck(baseId + 1, L"GS", midiForce == 1);
+	map->AddCheck(baseId + 2, L"XG", midiForce == 2);
+	map->AddSeparator();
+	map->AddCheck(baseId + 3, L"55map", midiForce == 3);
+	map->AddCheck(baseId + 4, L"88map", midiForce == 4);
+	map->AddCheck(baseId + 5, L"88Promap", midiForce == 5);
+	map->AddCheck(baseId + 6, L"8820map", midiForce == 6);
+	map->AddCheck(baseId + 7, L"GMmap", midiForce == 7);
+	map->AddCheck(baseId + 8, L"SDmap", midiForce == 8);
+	map->AddCheck(baseId + 9, L"LAmap", midiForce == 9);
+	CCustomPopupMenu* etc = map->AddSubMenu(
+		LL14(L"ETC (EX)", L"ETC (EX)", L"ETC (EX)", L"ETC (EX)", L"ETC (EX)", L"ETC (EX)", L"ETC (EX)", L"ETC (EX)", L"ETC (EX)", L"ETC (EX)", L"ETC (EX)", L"ETC (EX)", L"ETC (EX)", L"ETC (EX)"),
+		LL14(L"GS/XG 以外（SASAMI_EX.DAT）", L"Non-GS/XG (SASAMI_EX.DAT)", L"Hors GS/XG (SASAMI_EX.DAT)", L"Non GS/XG (SASAMI_EX.DAT)", L"Fuera de GS/XG (SASAMI_EX.DAT)", L"GS/XG 이외 (SASAMI_EX.DAT)", L"GS/XG 以外（SASAMI_EX.DAT）", L"غير GS/XG (SASAMI_EX.DAT)", L"Не GS/XG (SASAMI_EX.DAT)", L"Nicht GS/XG (SASAMI_EX.DAT)", L"Fora GS/XG (SASAMI_EX.DAT)", L"Geen GS/XG (SASAMI_EX.DAT)", L"Poza GS/XG (SASAMI_EX.DAT)", L"GS/XG disi (SASAMI_EX.DAT)"));
+	if (etc) {
+		etc->AddCheck(baseId + 10, L"GM2map", midiForce == 10);
+		etc->AddCheck(baseId + 11, L"NSmap", midiForce == 11);
+		etc->AddCheck(baseId + 12, L"KWmap", midiForce == 12);
+		etc->AddCheck(baseId + 13, L"SGmap", midiForce == 13);
+		etc->AddCheck(baseId + 14, L"KRmap", midiForce == 14);
+		etc->AddCheck(baseId + 15, L"PAmap", midiForce == 15);
+		etc->AddCheck(baseId + 16, L"CSmap", midiForce == 16);
+		etc->AddCheck(baseId + 17, L"GEMmap", midiForce == 17);
+		etc->AddCheck(baseId + 18, L"LKmap", midiForce == 18);
+		etc->AddCheck(baseId + 19, L"PVmap", midiForce == 19);
+	}
+}
+
+static void PlApplySasamiMapForce(CPlayList* pl, int force)
+{
+	extern COggDlg* og;
+	extern CString filen;
+	int i = -1;
+	while ((i = pl->m_lc.GetNextItem(i, LVNI_ALL | LVNI_SELECTED)) >= 0) {
+		if (!pl->pc || i >= pl->playcnt || !pl->pc[i].fol[0]) continue;
+#ifndef _UNICODE
+		if (!SasamiExtIsMidi(CStringW(pl->pc[i].fol))) continue;
+		const wchar_t* folW = CStringW(pl->pc[i].fol);
+#else
+		if (!SasamiExtIsMidi(pl->pc[i].fol)) continue;
+		const wchar_t* folW = pl->pc[i].fol;
+#endif
+		PlMidForceSet(pl->pc[i].fol, force);
+		SasamiInvalidateTempMidi(folW);
+		if (og && og->m_MidiMonitorDlg && ::IsWindow(og->m_MidiMonitorDlg->GetSafeHwnd())) {
+			if (filen.GetLength() > 0 && _wcsicmp(filen, folW) == 0)
+				og->m_MidiMonitorDlg->ReloadCurrentMidi();
+			else {
+				const wchar_t* loaded = og->m_MidiMonitorDlg->LoadedMidiPath();
+				if (loaded && loaded[0] && _wcsicmp(loaded, folW) == 0)
+					og->m_MidiMonitorDlg->ReloadCurrentMidi();
+			}
+		}
+	}
+	PlMidNotifyMarkViews();
+}
+
 int CPlayList::ShowTrackContextMenu(CPoint pt, CWnd* pOwner)
 {
 	int Lindex = -1;
@@ -2831,15 +2891,22 @@ int CPlayList::ShowTrackContextMenu(CPoint pt, CWnd* pOwner)
 	}
 	int midiForce = 0;
 	BOOL anyMidi = FALSE;
+	BOOL anySasamiMidi = FALSE;
+	BOOL anyOtherMidi = FALSE;
 	{
 		int i = -1;
 		while ((i = m_lc.GetNextItem(i, LVNI_ALL | LVNI_SELECTED)) >= 0) {
 			if (!pc || i >= playcnt || !pc[i].fol[0]) continue;
 #ifndef _UNICODE
-			if (!VstIsMidiExt(CStringW(pc[i].fol))) continue;
+			const int isSas = SasamiExtIsMidi(CStringW(pc[i].fol)) ? 1 : 0;
+			const int isMid = VstIsMidiExt(CStringW(pc[i].fol)) ? 1 : 0;
 #else
-			if (!VstIsMidiExt(pc[i].fol)) continue;
+			const int isSas = SasamiExtIsMidi(pc[i].fol) ? 1 : 0;
+			const int isMid = VstIsMidiExt(pc[i].fol) ? 1 : 0;
 #endif
+			if (!isMid) continue;
+			if (isSas) anySasamiMidi = TRUE;
+			else anyOtherMidi = TRUE;
 			if (!anyMidi) {
 				int f = 0;
 				if (PlMidDiskGet(pc[i].fol, NULL, NULL, NULL, &f) < 0)
@@ -2850,39 +2917,21 @@ int CPlayList::ShowTrackContextMenu(CPoint pt, CWnd* pOwner)
 			anyMidi = TRUE;
 		}
 	}
-	if (anyMidi) {
+	if (anySasamiMidi) {
+		menu.AddSeparator();
+		CCustomPopupMenu* sm = menu.AddSubMenu(
+			LL14(L"ささみ☆ﾐ 音源モード", L"Sasami MIDI map", L"Carte Sasami MIDI", L"Mappa Sasami MIDI", L"Mapa Sasami MIDI", L"사사미 MIDI 맵", L"ささみ☆ﾐ 音源模式", L"خريطة Sasami MIDI", L"Карта Sasami MIDI", L"Sasami-Klangkarte", L"Mapa Sasami MIDI", L"Sasami MIDI-kaart", L"Mapa Sasami MIDI", L"Sasami MIDI haritasi"),
+			LL14(L".mpy/.mpw2 の SMF 変換音源。55map / 88map / XG 等", L"Sound source for .mpy/.mpw2 SMF conversion (55map, 88map, XG…)", L"Source sonore pour conversion SMF .mpy/.mpw2", L"Sorgente per conversione SMF .mpy/.mpw2", L"Fuente sonora para conversion SMF .mpy/.mpw2", L".mpy/.mpw2 SMF 변환 음원(55map, 88map, XG 등)", L".mpy/.mpw2 的 SMF 转换音源（55map/88map/XG 等）", L"مصدر صوت لتحويل SMF لـ .mpy/.mpw2", L"Источник звука для SMF из .mpy/.mpw2", L"Klangquelle fur .mpy/.mpw2-SMF-Konvertierung", L"Fonte sonora para conversao SMF .mpy/.mpw2", L"Geluidbron voor .mpy/.mpw2 SMF-conversie", L"Zrodlo dzwieku konwersji SMF .mpy/.mpw2", L".mpy/.mpw2 SMF donusum ses kaynagi"));
+		if (sm)
+			PlAddMapForceItems(sm, PL_CTX_SASAMIM_BASE, midiForce);
+	}
+	if (anyOtherMidi) {
 		menu.AddSeparator();
 		CCustomPopupMenu* map = menu.AddSubMenu(
 			LL14(L"音色マップ", L"Tone map", L"Carte de timbres", L"Mappa timbri", L"Mapa de timbres", L"음색 맵", L"音色映射", L"خريطة الأصوات", L"Карта тембров", L"Klangkarte", L"Mapa de timbres", L"Klankkaart", L"Mapa barw", L"Timbir haritasi"),
 			LL14(L"この MIDI の印（16ch/32ch と XG/88 など）。自動判定か 55map 等を選べます", L"MIDI badges (16ch/32ch and XG/88…). Auto-detect or pick 55map etc.", L"Badges MIDI (16ch/32ch et XG/88…). Auto ou 55map…", L"Badge MIDI (16ch/32ch e XG/88…). Auto o 55map…", L"Insignias MIDI (16ch/32ch y XG/88…). Auto o 55map…", L"이 MIDI 표시(16ch/32ch와 XG/88 등). 자동 또는 55map 등", L"此 MIDI 标记（16ch/32ch 与 XG/88 等）。可自动判定或选 55map 等", L"شارات MIDI (16ch/32ch و XG/88…). تلقائي أو 55map…", L"Значки MIDI (16ch/32ch и XG/88…). Авто или 55map…", L"MIDI-Abzeichen (16ch/32ch und XG/88…). Auto oder 55map…", L"Selos MIDI (16ch/32ch e XG/88…). Auto ou 55map…", L"MIDI-badges (16ch/32ch en XG/88…). Auto of 55map…", L"Odznaki MIDI (16ch/32ch i XG/88…). Auto lub 55map…", L"MIDI rozetleri (16ch/32ch ve XG/88…). Otomatik veya 55map…"));
-		if (map) {
-			map->AddCheck(PL_CTX_MIDMAP_BASE + 0, LL14(L"自動 (SysEx / 曲名)", L"Auto (SysEx / title)", L"Auto (SysEx / titre)", L"Auto (SysEx / titolo)", L"Auto (SysEx / titulo)", L"자동 (SysEx / 제목)", L"自动 (SysEx / 曲名)", L"تلقائي (SysEx / عنوان)", L"Авто (SysEx / название)", L"Auto (SysEx / Titel)", L"Auto (SysEx / titulo)", L"Auto (SysEx / titel)", L"Auto (SysEx / tytul)", L"Otomatik (SysEx / baslik)"), midiForce == 0);
-			map->AddCheck(PL_CTX_MIDMAP_BASE + 1, L"GS", midiForce == 1);
-			map->AddCheck(PL_CTX_MIDMAP_BASE + 2, L"XG", midiForce == 2);
-			map->AddSeparator();
-			map->AddCheck(PL_CTX_MIDMAP_BASE + 3, L"55map", midiForce == 3);
-			map->AddCheck(PL_CTX_MIDMAP_BASE + 4, L"88map", midiForce == 4);
-			map->AddCheck(PL_CTX_MIDMAP_BASE + 5, L"88Promap", midiForce == 5);
-			map->AddCheck(PL_CTX_MIDMAP_BASE + 6, L"8820map", midiForce == 6);
-			map->AddCheck(PL_CTX_MIDMAP_BASE + 7, L"GMmap", midiForce == 7);
-			map->AddCheck(PL_CTX_MIDMAP_BASE + 8, L"SDmap", midiForce == 8);
-			map->AddCheck(PL_CTX_MIDMAP_BASE + 9, L"LAmap", midiForce == 9);
-			CCustomPopupMenu* etc = map->AddSubMenu(
-				LL14(L"ETC (EX)", L"ETC (EX)", L"ETC (EX)", L"ETC (EX)", L"ETC (EX)", L"ETC (EX)", L"ETC (EX)", L"ETC (EX)", L"ETC (EX)", L"ETC (EX)", L"ETC (EX)", L"ETC (EX)", L"ETC (EX)", L"ETC (EX)"),
-				LL14(L"GS/XG 以外（SASAMI_EX.DAT）", L"Non-GS/XG (SASAMI_EX.DAT)", L"Hors GS/XG (SASAMI_EX.DAT)", L"Non GS/XG (SASAMI_EX.DAT)", L"Fuera de GS/XG (SASAMI_EX.DAT)", L"GS/XG 이외 (SASAMI_EX.DAT)", L"GS/XG 以外（SASAMI_EX.DAT）", L"غير GS/XG (SASAMI_EX.DAT)", L"Не GS/XG (SASAMI_EX.DAT)", L"Nicht GS/XG (SASAMI_EX.DAT)", L"Fora GS/XG (SASAMI_EX.DAT)", L"Geen GS/XG (SASAMI_EX.DAT)", L"Poza GS/XG (SASAMI_EX.DAT)", L"GS/XG disi (SASAMI_EX.DAT)"));
-			if (etc) {
-				etc->AddCheck(PL_CTX_MIDMAP_BASE + 10, L"GM2map", midiForce == 10);
-				etc->AddCheck(PL_CTX_MIDMAP_BASE + 11, L"NSmap", midiForce == 11);
-				etc->AddCheck(PL_CTX_MIDMAP_BASE + 12, L"KWmap", midiForce == 12);
-				etc->AddCheck(PL_CTX_MIDMAP_BASE + 13, L"SGmap", midiForce == 13);
-				etc->AddCheck(PL_CTX_MIDMAP_BASE + 14, L"KRmap", midiForce == 14);
-				etc->AddCheck(PL_CTX_MIDMAP_BASE + 15, L"PAmap", midiForce == 15);
-				etc->AddCheck(PL_CTX_MIDMAP_BASE + 16, L"CSmap", midiForce == 16);
-				etc->AddCheck(PL_CTX_MIDMAP_BASE + 17, L"GEMmap", midiForce == 17);
-				etc->AddCheck(PL_CTX_MIDMAP_BASE + 18, L"LKmap", midiForce == 18);
-				etc->AddCheck(PL_CTX_MIDMAP_BASE + 19, L"PVmap", midiForce == 19);
-			}
-		}
+		if (map)
+			PlAddMapForceItems(map, PL_CTX_MIDMAP_BASE, midiForce);
 	}
 	menu.AddSeparator();
 	CCustomPopupMenu* subExport = menu.AddSubMenu(
@@ -3722,6 +3771,9 @@ void CPlayList::HandleTrackContextCmd(int cmd)
 	}
 	else if (cmd == PL_CTX_MIDIMON) {
 		if (og && ::IsWindow(og->GetSafeHwnd())) og->ToggleMidiMonitor();
+	}
+	else if (cmd >= PL_CTX_SASAMIM_BASE && cmd <= PL_CTX_SASAMIM_LAST) {
+		PlApplySasamiMapForce(this, (int)(cmd - PL_CTX_SASAMIM_BASE));
 	}
 	else if (cmd >= PL_CTX_MIDMAP_BASE && cmd <= PL_CTX_MIDMAP_LAST) {
 		const int force = (int)(cmd - PL_CTX_MIDMAP_BASE);
@@ -4572,6 +4624,85 @@ static void PlMidiMaybeTitle(CString& name, const CString& fol, int doPeek)
 	name = out;
 }
 
+static int PlSasamiExtIs(const CString& fol)
+{
+	return SasamiExtIsAny(fol) ? 1 : 0;
+}
+
+// fpy/mpy/mpw2 の先頭文字列から曲名・アーティスト・コメントを拾う。
+static void PlSasamiMaybeTags(CString& name, CString& art, CString& alb, const CString& fol, int doPeek)
+{
+	if (!PlSasamiExtIs(fol))
+		return;
+	CString leaf = fol;
+	const int slash = max(leaf.ReverseFind(_T('\\')), leaf.ReverseFind(_T('/')));
+	if (slash >= 0 && slash + 1 < leaf.GetLength())
+		leaf = leaf.Mid(slash + 1);
+	if (leaf.IsEmpty())
+		return;
+	CString stem = leaf;
+	const int dot = stem.ReverseFind(_T('.'));
+	if (dot > 0)
+		stem = stem.Left(dot);
+	CString cur = name;
+	cur.Trim();
+	if (cur.IsEmpty())
+		cur = leaf;
+	int allow = (cur.CompareNoCase(leaf) == 0 || cur.CompareNoCase(stem) == 0);
+	if (!allow) {
+		CString wrap;
+		wrap.Format(_T("(%s)"), (LPCTSTR)leaf);
+		const int wl = wrap.GetLength();
+		if (cur.GetLength() > wl && cur.Right(wl).CompareNoCase(wrap) == 0) {
+			CString inner = cur.Left(cur.GetLength() - wl);
+			inner.Trim();
+			int junk = inner.GetLength() > 0;
+			for (int i = 0; junk && i < inner.GetLength(); ++i) {
+				const TCHAR c = inner[i];
+				if (c == _T(' ') || c == _T('\t')) continue;
+				if (c != _T('?') && c != _T('*') && c != _T('.') && c != _T('-') && c != _T('_') && c != _T('!'))
+					junk = 0;
+			}
+			if (junk || PlMidiTitleIsCode(inner, stem, leaf))
+				allow = 1;
+		}
+	}
+	if (!allow)
+		return;
+	wchar_t title[256] = {}, composer[256] = {}, comment[256] = {};
+	if (doPeek) {
+		if (!(PathIsNetworkPath(fol) || (fol.GetLength() >= 2 && fol[0] == _T('\\') && fol[1] == _T('\\')))) {
+			SasamiTags tags = {};
+			if (SasamiPeekTagsW(fol, &tags)) {
+				PlMidiDecodeText(tags.titleSjis, title, 256);
+				PlMidiDecodeText(tags.composerSjis, composer, 256);
+				PlMidiDecodeText(tags.commentSjis, comment, 256);
+			}
+		}
+	}
+	if (PlMidiTitleIsCode(title, stem, leaf))
+		title[0] = 0;
+	if (title[0] && _wcsicmp(title, leaf) != 0 && _wcsicmp(title, stem) != 0) {
+		CString out;
+		out.Format(_T("%s(%s)"), title, (LPCTSTR)leaf);
+		if (out.GetLength() >= 1023)
+			out = out.Left(1023);
+		name = out;
+	}
+	if (composer[0]) {
+		CString a(composer);
+		a.Trim();
+		if (!a.IsEmpty())
+			art = a;
+	}
+	if (comment[0]) {
+		CString c(comment);
+		c.Trim();
+		if (!c.IsEmpty())
+			alb = c;
+	}
+}
+
 int CPlayList::Add(CString name,int sub,int loop1,int loop2,CString art,CString alb,CString fol,int ret,int time,BOOL f,BOOL ff)
 {
 	// 旧プレイリストに KPI 再生として保存された動画も CDouga 再生へ移行する。
@@ -4739,10 +4870,13 @@ int CPlayList::Add(CString name,int sub,int loop1,int loop2,CString art,CString 
 		CString dispName = name;
 		// Load では MIDI ファイルを開かない（起動で全 .mid を読むと固まる）。
 		// 番号だけの表示名や「???(file.mid)」は内蔵の曲名表から足す。
-		if (ff || dispName.Find(_T("???")) >= 0)
+		if (ff || dispName.Find(_T("???")) >= 0) {
 			PlMidiMaybeTitle(dispName, folNorm, 1);
-		else
+			PlSasamiMaybeTags(dispName, art, alb, folNorm, 1);
+		} else {
 			PlMidiMaybeTitle(dispName, folNorm, 0);
+			PlSasamiMaybeTags(dispName, art, alb, folNorm, 0);
+		}
 		_tcscpy(pc[playcnt].name, dispName);
 		_tcscpy(pc[playcnt].art,art);
 		_tcscpy(pc[playcnt].alb,alb);

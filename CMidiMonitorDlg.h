@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 // CMidiMonitorDlg : MIDI 32パート・モニタ（XG/GS 風）
 // SMF を再生位置に同期して CC/ノート/SysEx を表示。音色名は SASAMI_GS/XG/EX.DAT。
 #include "afxdialogex.h"
@@ -41,7 +41,9 @@ public:
 	void ShowHelpSheet();
 	GdiSoft3D::Cam m_cam;
 	void ApplyMapForce(int force);
+	void ReloadCurrentMidi();
 	const wchar_t* LoadedMidiPath() const { return m_loadedPath; }
+	const wchar_t* LoadedSourcePath() const { return m_sourcePath; }
 
 protected:
 	virtual void DoDataExchange(CDataExchange* pDX);
@@ -228,6 +230,7 @@ private:
 	__int64 m_loopEndSample;
 	__int64 m_lastPlayb;
 	wchar_t m_loadedPath[520];
+	wchar_t m_sourcePath[520];
 	wchar_t m_titleBuf[280];
 	int m_gsMapKind; // 0=なし 1=55 2=88 3=88Pro 4=8820 5=GM 6=SD 8=LA 9..=ETC
 	int m_fileHasXg;

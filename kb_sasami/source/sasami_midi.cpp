@@ -246,7 +246,104 @@ static void WriteSmf(int nports, uint8_t* out, int outCap, int* outSize)
 
 } // namespace
 
-bool SasamiConvertToSmf(const SasamiSong& song, SasamiMidiMap map, uint8_t* out, int outCap, int* outSize)
+static uint64_t SasamiCacheHashPathW(const wchar_t* path)
+{
+	uint64_t h = 14695981039346656037ULL;
+	if (!path) return h;
+	for (const wchar_t* p = path; *p; ++p) {
+		wchar_t c = *p;
+		if (c >= L'A' && c <= L'Z') c = (wchar_t)(c - L'A' + L'a');
+		if (c == L'/') c = L'\\';
+		h ^= (uint64_t)(unsigned short)c;
+		h *= 1099511628211ULL;
+	}
+	return h;
+}
+
+void SasamiMapForceToSel(int mapForce, SasamiMidiMap* map, int* gsBankLsb)
+{
+	SasamiMidiMap m = SASAMI_MAP_GS88;
+	int lsb = 2;
+	switch (mapForce) {
+	case 1: m = SASAMI_MAP_GS88; lsb = 2; break;
+	case 2: m = SASAMI_MAP_XG; lsb = 0; break;
+	case 3: m = SASAMI_MAP_GS55; lsb = 1; break;
+	case 4: m = SASAMI_MAP_GS88; lsb = 2; break;
+	case 5: m = SASAMI_MAP_GS88; lsb = 3; break;
+	case 6: m = SASAMI_MAP_GS88; lsb = 4; break;
+	case 7: m = SASAMI_MAP_GM; lsb = 0; break;
+	case 8: m = SASAMI_MAP_GM; lsb = 0; break;
+	case 9: m = SASAMI_MAP_GM; lsb = 0; break;
+	default:
+		if (mapForce >= 10) { m = SASAMI_MAP_GM; lsb = 0; }
+		break;
+	}
+	if (map) *map = m;
+	if (gsBankLsb) *gsBankLsb = lsb;
+}
+
+int SasamiReadMidMapForceW(const wchar_t* fol, int* outForce)
+{
+	if (!fol || !fol[0] || !outForce) return 0;
+	*outForce = 0;
+	wchar_t base[MAX_PATH] = {};
+	if (!GetEnvironmentVariableW(L"LOCALAPPDATA", base, MAX_PATH) || !base[0])
+		return 0;
+	wchar_t path[MAX_PATH] = {};
+	_snwprintf_s(path, _TRUNCATE, L"%s\\oggYSED\\midflag\\%016I64X",
+		base, (unsigned long long)SasamiCacheHashPathW(fol));
+	HANDLE h = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ, NULL,
+		OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+	if (h == INVALID_HANDLE_VALUE) return 0;
+	BYTE b[8] = {};
+	DWORD rd = 0;
+	const BOOL ok = ReadFile(h, b, 8, &rd, NULL);
+	CloseHandle(h);
+	if (!ok || rd < 5 || b[0] != 1) return 0;
+	*outForce = (int)b[4];
+	return 1;
+}
+
+int SasamiResolveMapForceW(const wchar_t* fol, int globalDefault)
+{
+	int pf = 0;
+	if (SasamiReadMidMapForceW(fol, &pf) && pf > 0)
+		return pf;
+	if (globalDefault > 0)
+		return globalDefault;
+	return 4;
+}
+
+static int SasamiRegistryMapDefault()
+{
+	HKEY hKey = NULL;
+	if (RegOpenKeyExW(HKEY_CURRENT_USER,
+		L"Software\\Kobarin's Soft\\oggYSEDbgm\\KpiV5Config\\kbsasami\\kbsasami",
+		0, KEY_READ, &hKey) != ERROR_SUCCESS)
+		return 4;
+	wchar_t buf[32] = {};
+	DWORD sz = sizeof(buf);
+	DWORD type = 0;
+	if (RegQueryValueExW(hKey, L"map", NULL, &type, (LPBYTE)buf, &sz) != ERROR_SUCCESS) {
+		RegCloseKey(hKey);
+		return 4;
+	}
+	RegCloseKey(hKey);
+	const int v = _wtoi(buf);
+	return (v >= 0 && v <= 19) ? v : 4;
+}
+
+static void SasamiTempMidiPath(const wchar_t* src, wchar_t* dest, int destChars);
+
+void SasamiInvalidateTempMidi(const wchar_t* src)
+{
+	if (!src || !src[0] || !SasamiExtIsMidi(src)) return;
+	wchar_t dest[MAX_PATH] = {};
+	SasamiTempMidiPath(src, dest, MAX_PATH);
+	DeleteFileW(dest);
+}
+
+bool SasamiConvertToSmf(const SasamiSong& song, SasamiMidiMap map, int gsBankLsb, uint8_t* out, int outCap, int* outSize)
 {
 	if (!out || !outSize || outCap <= 0) return false;
 	*outSize = 0;
@@ -318,8 +415,10 @@ bool SasamiConvertToSmf(const SasamiSong& song, SasamiMidiMap map, uint8_t* out,
 			PushShort(0, p, (uint8_t)(0xB0 | ch), 11, 127);
 			PushShort(0, p, (uint8_t)(0xB0 | ch), 10, 64);
 			PushShort(0, p, (uint8_t)(0xE0 | ch), 0x00, 0x40);
-			if (map == SASAMI_MAP_GS88)
-				PushShort(0, p, (uint8_t)(0xB0 | ch), 32, 2);
+			if (map == SASAMI_MAP_GS88 && gsBankLsb > 0)
+				PushShort(0, p, (uint8_t)(0xB0 | ch), 32, (uint8_t)gsBankLsb);
+			else if (map == SASAMI_MAP_GS55 && gsBankLsb > 0)
+				PushShort(0, p, (uint8_t)(0xB0 | ch), 32, (uint8_t)gsBankLsb);
 		}
 	}
 
@@ -362,8 +461,10 @@ bool SasamiConvertToSmf(const SasamiSong& song, SasamiMidiMap map, uint8_t* out,
 			PushShort(tick, 1, (uint8_t)(0xB0 | ch), 11, 127);
 			PushShort(tick, 1, (uint8_t)(0xB0 | ch), 10, 64);
 			PushShort(tick, 1, (uint8_t)(0xE0 | ch), 0x00, 0x40);
-			if (map == SASAMI_MAP_GS88)
-				PushShort(tick, 1, (uint8_t)(0xB0 | ch), 32, 2);
+			if (map == SASAMI_MAP_GS88 && gsBankLsb > 0)
+				PushShort(tick, 1, (uint8_t)(0xB0 | ch), 32, (uint8_t)gsBankLsb);
+			else if (map == SASAMI_MAP_GS55 && gsBankLsb > 0)
+				PushShort(tick, 1, (uint8_t)(0xB0 | ch), 32, (uint8_t)gsBankLsb);
 		}
 	};
 
@@ -1054,8 +1155,12 @@ int SasamiConvertPathToMidiFile(const wchar_t* src, wchar_t* dest, int destChars
 	SasamiTempMidiPath(src, dest, destChars);
 	static SasamiSong s_song;
 	if (!SasamiLoadFileW(src, &s_song)) return 0;
+	const int force = SasamiResolveMapForceW(src, SasamiRegistryMapDefault());
+	SasamiMidiMap map = SASAMI_MAP_GS88;
+	int gsLsb = 2;
+	SasamiMapForceToSel(force, &map, &gsLsb);
 	int sz = 0;
-	if (!SasamiConvertToSmf(s_song, SASAMI_MAP_GS88, s_smfWork, SASAMI_MAX_SMF, &sz)) return 0;
+	if (!SasamiConvertToSmf(s_song, map, gsLsb, s_smfWork, SASAMI_MAX_SMF, &sz)) return 0;
 	HANDLE h = CreateFileW(dest, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
 	if (h == INVALID_HANDLE_VALUE) return 0;
 	DWORD w = 0;

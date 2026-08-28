@@ -11,6 +11,7 @@ extern HINSTANCE g_hKpi;
 static const wchar_t SEC_KBSASAMI[] = L"kbsasami";
 static const wchar_t KEY_VST[] = L"vst";
 static const wchar_t KEY_RAIRA[] = L"raira";
+static const wchar_t KEY_MAP[] = L"map";
 
 static uint8_t s_fileBuf[SASAMI_MAX_FILE];
 
@@ -37,6 +38,7 @@ KbSasamiDecoder::KbSasamiDecoder(IKpiConfig* pConfig)
 	m_fmMode = false;
 	m_raira = 0;
 	m_vst = 0;
+	m_mapDefault = 4;
 	m_titleSjis[0] = 0;
 	m_loopStart = -1.0;
 	m_loopEnd = -1.0;
@@ -62,10 +64,13 @@ void KbSasamiDecoder::ReadOptions()
 {
 	m_raira = 0;
 	m_vst = 0;
+	m_mapDefault = 4;
 	if (m_pConfig) {
 		m_raira = (int)m_pConfig->GetInt(SEC_KBSASAMI, KEY_RAIRA, 0);
 		m_vst = (int)m_pConfig->GetInt(SEC_KBSASAMI, KEY_VST, 0);
+		m_mapDefault = (int)m_pConfig->GetInt(SEC_KBSASAMI, KEY_MAP, 4);
 	}
+	if (m_mapDefault < 0 || m_mapDefault > 19) m_mapDefault = 4;
 	if (m_raira)
 		m_vst = m_vst ? 0 : 1;
 }
@@ -210,7 +215,12 @@ DWORD __fastcall KbSasamiDecoder::Open(const KPI_MEDIAINFO* cpRequest, IKpiFile*
 
 	m_fmMode = false;
 	m_smfSize = 0;
-	if (!SasamiConvertToSmf(s_song, SASAMI_MAP_GS88, m_smf, SASAMI_MAX_SMF, &m_smfSize)) return 0;
+	const wchar_t* pathForMap = (real && real[0]) ? real : name;
+	const int mapForce = SasamiResolveMapForceW(pathForMap, m_mapDefault);
+	SasamiMidiMap map = SASAMI_MAP_GS88;
+	int gsLsb = 2;
+	SasamiMapForceToSel(mapForce, &map, &gsLsb);
+	if (!SasamiConvertToSmf(s_song, map, gsLsb, m_smf, SASAMI_MAX_SMF, &m_smfSize)) return 0;
 	LoadProgramsTxt();
 	MemFile mf;
 	mf.p = m_smf;

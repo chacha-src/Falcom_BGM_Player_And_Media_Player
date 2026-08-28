@@ -29,6 +29,15 @@ PC-98 ささみ (SASAMI) の曲データを再生します。
     midPlayPrefer=KPI → 実効 vst=0 (fmmidi)
     midPlayPrefer=VST → 実効 vst=1 (KPI は MIDI を開かずホストが VST)
 
+[設定] kbsasami.map
+
+  .mpy / .mpw2 の SMF 変換音源 (MIDI モニタの mapForce と同じ番号):
+
+    0=自動(この値を既定として使用)  1=GS  2=XG  3=55map  4=88map
+    5=88Promap  6=8820map  7=GMmap  8=SDmap  9=LAmap  10..19=ETC
+
+  プレイリストの「ささみ☆ﾐ 音源モード」で曲ごとに上書き可能。
+
 [FM リズム]
 
 OPNA リズムは次のいずれか（プラグインフォルダ、または本体 Plugins 内の

@@ -1,4 +1,4 @@
-#include "stdafx.h"
+﻿#include "stdafx.h"
 #include "CMidiMonitorDlg.h"
 #include "oggDlg.h"
 #include "PlayList.h"
@@ -8,6 +8,7 @@
 #include "VstMidiEngine.h"
 #include "VstHostDlg.h"
 #include "PluginKinds.h"
+#include "kb_sasami/source/sasami_midi.h"
 #include <math.h>
 #include <mmsystem.h>
 
@@ -1438,6 +1439,7 @@ CMidiMonitorDlg::CMidiMonitorDlg(CWnd* pParent)
 	, m_dirtyHead(true), m_fullDraw(true), m_volDragging(false)
 {
 	m_loadedPath[0] = 0;
+	m_sourcePath[0] = 0;
 	m_titleBuf[0] = 0;
 	m_hoverTip[0] = 0;
 	m_volBarRc.SetRectEmpty();
@@ -1792,6 +1794,12 @@ void CMidiMonitorDlg::ApplyMapForce(int force)
 	m_dirtyRows = 0xFFFFFFFFu;
 	m_dirtyHead = true;
 	m_fullDraw = true;
+}
+
+void CMidiMonitorDlg::ReloadCurrentMidi()
+{
+	m_loadedPath[0] = 0;
+	LoadCurrentMidi();
 }
 
 void CMidiMonitorDlg::ApplyNrpn(Part& p)
@@ -2327,8 +2335,13 @@ void CMidiMonitorDlg::LoadCurrentMidi()
 			UnloadMidi();
 			ResetParts();
 		}
+		m_sourcePath[0] = 0;
 		return;
 	}
+	if (src && src[0])
+		MmCopyW(m_sourcePath, 520, src);
+	else
+		m_sourcePath[0] = 0;
 	if (_wcsicmp(m_loadedPath, mid) == 0 && m_sampleRate == MmWantMonitorSampleRate())
 		return;
 
@@ -2767,10 +2780,10 @@ void CMidiMonitorDlg::LoadCurrentMidi()
 	m_hadNote = 0;
 	{
 		int force = 0;
-		if (PlMidDiskGet(m_loadedPath, NULL, NULL, NULL, &force) >= 0)
-			ApplyMapForce(force);
-		else
-			ApplyMapForce(0);
+		const wchar_t* mapPath = m_sourcePath[0] ? m_sourcePath : m_loadedPath;
+		if (PlMidDiskGet(mapPath, NULL, NULL, NULL, &force) < 0)
+			force = 0;
+		ApplyMapForce(force);
 	}
 	UpdatePlayPos();
 }
@@ -4964,8 +4977,12 @@ void CMidiMonitorDlg::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
 		}
 	}
 	CCustomPopupMenu* map = menu.AddSubMenu(
-		LL14(L"音色マップ", L"Tone map", L"Carte de timbres", L"Mappa timbri", L"Mapa de timbres", L"음색 맵", L"音色映射", L"خريطة الأصوات", L"Карта тембров", L"Klangkarte", L"Mapa de timbres", L"Klankkaart", L"Mapa barw", L"Timbir haritasi"),
-		LL14(L"名前引きに使う音色マップ（自動／GS／XG／55／88／LA など）", L"Tone map for names (Auto / GS / XG / 55 / 88 / LA…)", L"Carte de timbres pour les noms (Auto / GS / XG / 55 / 88 / LA…)", L"Mappa timbri per i nomi (Auto / GS / XG / 55 / 88 / LA…)", L"Mapa de timbres para nombres (Auto / GS / XG / 55 / 88 / LA…)", L"이름에 쓸 음색 맵 (자동 / GS / XG / 55 / 88 / LA…)", L"用于查名的音色映射（自动／GS／XG／55／88／LA 等）", L"خريطة الأصوات للأسماء (Auto / GS / XG / 55 / 88 / LA…)", L"Карта тембров для имён (Auto / GS / XG / 55 / 88 / LA…)", L"Klangkarte fuer Namen (Auto / GS / XG / 55 / 88 / LA…)", L"Mapa de timbres para nomes (Auto / GS / XG / 55 / 88 / LA…)", L"Klankkaart voor namen (Auto / GS / XG / 55 / 88 / LA…)", L"Mapa barw do nazw (Auto / GS / XG / 55 / 88 / LA…)", L"Isimler icin timbir haritasi (Auto / GS / XG / 55 / 88 / LA…)"));
+		(m_sourcePath[0] && SasamiPathIsMidi(m_sourcePath))
+			? LL14(L"ささみ☆ﾐ 音源モード", L"Sasami MIDI map", L"Carte Sasami MIDI", L"Mappa Sasami MIDI", L"Mapa Sasami MIDI", L"사사미 MIDI 맵", L"ささみ☆ﾐ 音源模式", L"خريطة Sasami MIDI", L"Карта Sasami MIDI", L"Sasami-Klangkarte", L"Mapa Sasami MIDI", L"Sasami MIDI-kaart", L"Mapa Sasami MIDI", L"Sasami MIDI haritasi")
+			: LL14(L"音色マップ", L"Tone map", L"Carte de timbres", L"Mappa timbri", L"Mapa de timbres", L"음색 맵", L"音色映射", L"خريطة الأصوات", L"Карта тембров", L"Klangkarte", L"Mapa de timbres", L"Klankkaart", L"Mapa barw", L"Timbir haritasi"),
+		(m_sourcePath[0] && SasamiPathIsMidi(m_sourcePath))
+			? LL14(L".mpy/.mpw2 の SMF 変換音源。55map / 88map / XG 等", L"Sound source for .mpy/.mpw2 SMF conversion (55map, 88map, XG…)", L"Source sonore pour conversion SMF .mpy/.mpw2", L"Sorgente per conversione SMF .mpy/.mpw2", L"Fuente sonora para conversion SMF .mpy/.mpw2", L".mpy/.mpw2 SMF 변환 음원", L".mpy/.mpw2 的 SMF 转换音源", L"مصدر صوت لتحويل SMF لـ .mpy/.mpw2", L"Источник звука для SMF из .mpy/.mpw2", L"Klangquelle fur .mpy/.mpw2-SMF", L"Fonte sonora para conversao SMF .mpy/.mpw2", L"Geluidbron voor .mpy/.mpw2 SMF", L"Zrodlo dzwieku konwersji SMF .mpy/.mpw2", L".mpy/.mpw2 SMF donusum ses kaynagi")
+			: LL14(L"名前引きに使う音色マップ（自動／GS／XG／55／88／LA など）", L"Tone map for names (Auto / GS / XG / 55 / 88 / LA…)", L"Carte de timbres pour les noms (Auto / GS / XG / 55 / 88 / LA…)", L"Mappa timbri per i nomi (Auto / GS / XG / 55 / 88 / LA…)", L"Mapa de timbres para nombres (Auto / GS / XG / 55 / 88 / LA…)", L"이름에 쓸 음색 맵 (자동 / GS / XG / 55 / 88 / LA…)", L"用于查名的音色映射（自动／GS／XG／55／88／LA 等）", L"خريطة الأصوات للأسماء (Auto / GS / XG / 55 / 88 / LA…)", L"Карта тембров для имён (Auto / GS / XG / 55 / 88 / LA…)", L"Klangkarte fuer Namen (Auto / GS / XG / 55 / 88 / LA…)", L"Mapa de timbres para nomes (Auto / GS / XG / 55 / 88 / LA…)", L"Klankkaart voor namen (Auto / GS / XG / 55 / 88 / LA…)", L"Mapa barw do nazw (Auto / GS / XG / 55 / 88 / LA…)", L"Isimler icin timbir haritasi (Auto / GS / XG / 55 / 88 / LA…)"));
 	if (map) {
 		map->AddCheck(IDM_MM_MAP_AUTO, LL14(L"自動 (SysEx / 曲名)", L"Auto (SysEx / title)", L"Auto (SysEx / titre)", L"Auto (SysEx / titolo)", L"Auto (SysEx / titulo)", L"자동 (SysEx / 제목)", L"自动 (SysEx / 曲名)", L"تلقائي (SysEx / عنوان)", L"Авто (SysEx / название)", L"Auto (SysEx / Titel)", L"Auto (SysEx / titulo)", L"Auto (SysEx / titel)", L"Auto (SysEx / tytul)", L"Otomatik (SysEx / baslik)"), m_mapForce == 0);
 		map->AddCheck(IDM_MM_MAP_GS, L"GS", m_mapForce == 1);
@@ -5126,9 +5143,19 @@ void CMidiMonitorDlg::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
 		else if (cmd == IDM_MM_MAP_LA) force = 9;
 		else force = 10 + (int)(cmd - IDM_MM_MAP_GM2);
 		ApplyMapForce(force);
-		if (m_loadedPath[0]) {
-			PlMidForceSet(m_loadedPath, force);
-			PlMidNotifyMarkViews();
+		const wchar_t* flagPath = m_sourcePath[0] ? m_sourcePath : m_loadedPath;
+		if (flagPath[0]) {
+#ifndef _UNICODE
+			PlMidForceSet(CString(flagPath), force);
+#else
+			PlMidForceSet(flagPath, force);
+#endif
+			if (m_sourcePath[0] && SasamiPathIsMidi(m_sourcePath)) {
+				SasamiInvalidateTempMidi(m_sourcePath);
+				ReloadCurrentMidi();
+			} else {
+				PlMidNotifyMarkViews();
+			}
 		}
 		Invalidate(FALSE);
 	} else if (cmd == ID_MP_OPEN_EQ || cmd == ID_MP_OPEN_PIANOROLL || cmd == ID_MP_OPEN_ANALYZER) {

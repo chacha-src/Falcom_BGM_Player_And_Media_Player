@@ -1,4 +1,4 @@
-#include <windows.h>
+﻿#include <windows.h>
 #include "kbsasami_module.h"
 #include "kbsasami_decoder.h"
 #include "kpi.h"
@@ -29,6 +29,7 @@ static const wchar_t kExts[] = L".fpy/.mpy/.mpw2";
 static const wchar_t SEC_KBSASAMI[] = L"kbsasami";
 static const wchar_t KEY_VST[] = L"vst";
 static const wchar_t KEY_RAIRA[] = L"raira";
+static const wchar_t KEY_MAP[] = L"map";
 
 KbSasamiDecoderModule::KbSasamiDecoderModule(IKpiConfig* pConfig)
 	: m_ModuleInfo{
@@ -102,6 +103,11 @@ BOOL WINAPI KbSasamiDecoderModule::EnumConfig(IKpiConfigEnumerator* pEnumerator)
 			L"false(0): original KbMedia Player (interpret vst as-is)\r\n"
 			L"true(1): this app. Swaps vst 0/1 internally.\r\n"
 			L"This app always writes raira=1." },
+		{ KPI_CFG_TYPE_INT, SEC_KBSASAMI, KEY_MAP, L"kbsasami.map",
+			L"4", NULL, NULL, NULL, NULL,
+			L"MIDI map for .mpy/.mpw2 SMF conversion (same as monitor mapForce).\r\n"
+			L"0=Auto(use this default) 1=GS 2=XG 3=55map 4=88map 5=88Promap 6=8820map\r\n"
+			L"7=GMmap 8=SDmap 9=LAmap 10..19=ETC maps. Per-file override in playlist." },
 		{ 0, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL }
 	};
 	for (int i = 0; sec[i].cszSection; i++)

@@ -274,6 +274,7 @@ const std::vector<KpiV5ConfigEntry>& GetKpiV5KnownEntries()
 		{ L"kbsasami", L"kbsasami", L"raira", L"1" },
 		// midPlayPrefer=0(KPI/FM) → 保存1、raira で反転して実効0。VST優先時は保存0→実効1
 		{ L"kbsasami", L"kbsasami", L"vst", L"1" },
+		{ L"kbsasami", L"kbsasami", L"map", L"4" },
 	};
 	return entries;
 }

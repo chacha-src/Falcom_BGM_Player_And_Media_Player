@@ -34,6 +34,128 @@ bool SasamiExtIsFm(const wchar_t* path)
 	return SasamiEqExt(path, L".fpy");
 }
 
+bool SasamiExtIsAny(const wchar_t* path)
+{
+	return SasamiExtIsFm(path) || SasamiExtIsMidi(path);
+}
+
+static int SasamiSjisFieldOk(const char* s, int n)
+{
+	if (!s || n <= 0) return 0;
+	int len = 0;
+	int bad = 0;
+	for (int i = 0; i < n && s[i]; i++) {
+		const unsigned char c = (unsigned char)s[i];
+		len++;
+		if (c < 0x20 && c != 0x09)
+			bad++;
+	}
+	if (len < 1) return 0;
+	return bad * 4 <= len;
+}
+
+static void SasamiReadSjisField(const uint8_t* data, size_t size, uint32_t off, char* out, int outCap)
+{
+	out[0] = 0;
+	if (!data || outCap < 2 || off >= size) return;
+	const size_t n = (size - off < 64) ? (size - off) : 64;
+	char buf[66];
+	memset(buf, 0, sizeof(buf));
+	memcpy(buf, data + off, n);
+	if (!SasamiSjisFieldOk(buf, (int)n)) return;
+	int last = 0;
+	for (int i = 0; i < 64 && buf[i]; i++) last = i + 1;
+	if (last <= 0) return;
+	memcpy(out, buf, (size_t)last);
+	out[last] = 0;
+}
+
+static int SasamiCiEq(const char* s, const char* lit)
+{
+	for (; *lit; ++s, ++lit) {
+		char a = *s;
+		char b = *lit;
+		if (a >= 'A' && a <= 'Z') a = (char)(a - 'A' + 'a');
+		if (b >= 'A' && b <= 'Z') b = (char)(b - 'A' + 'a');
+		if (a != b) return 0;
+	}
+	return 1;
+}
+
+static const char* SasamiFindCi(const char* s, const char* lit)
+{
+	if (!s || !lit || !lit[0]) return NULL;
+	for (const char* p = s; *p; ++p) {
+		if (SasamiCiEq(p, lit))
+			return p;
+	}
+	return NULL;
+}
+
+static void SasamiSplitEmbeddedComposer(SasamiTags* tags)
+{
+	if (!tags || !tags->titleSjis[0] || tags->composerSjis[0]) return;
+	char* t = tags->titleSjis;
+	int best = -1;
+	static const char* marks[] = { " Comp/Arr:", " Comp:", " Comp/", " Arr:" };
+	for (int m = 0; m < (int)(sizeof(marks) / sizeof(marks[0])); ++m) {
+		for (char* p = t; *p; ++p) {
+			if (*p != ' ' && *p != '\t') continue;
+			if (!SasamiCiEq(p + 1, marks[m] + 1)) continue;
+			if (best < 0 || (int)(p - t) < best)
+				best = (int)(p - t);
+			break;
+		}
+	}
+	if (best < 0) {
+		const char* hit = SasamiFindCi(t, "omp/");
+		if (!hit) hit = SasamiFindCi(t, "omp:");
+		if (hit) {
+			const char* q = hit;
+			while (q > t && q[-1] != ' ' && q[-1] != '\t') --q;
+			best = (int)(q - t);
+		}
+	}
+	if (best < 0) return;
+	char comp[65];
+	strncpy_s(comp, t + best, _TRUNCATE);
+	while (comp[0] == ' ' || comp[0] == '\t')
+		memmove(comp, comp + 1, strlen(comp));
+	strncpy_s(tags->composerSjis, comp, _TRUNCATE);
+	t[best] = 0;
+	while (best > 0 && (t[best - 1] == ' ' || t[best - 1] == '\t'))
+		t[--best] = 0;
+}
+
+static void SasamiReadTagsFromMemory(const uint8_t* data, size_t size, SasamiKind kind, SasamiTags* out)
+{
+	memset(out, 0, sizeof(*out));
+	if (!data || !out || size < 0x90) return;
+	const uint32_t base = (kind == SASAMI_KIND_FPY) ? 0x50u : 0x160u;
+	SasamiReadSjisField(data, size, base, out->titleSjis, 65);
+	SasamiReadSjisField(data, size, base + 0x40u, out->composerSjis, 65);
+	SasamiReadSjisField(data, size, base + 0x80u, out->commentSjis, 65);
+	SasamiSplitEmbeddedComposer(out);
+}
+
+bool SasamiPeekTagsW(const wchar_t* path, SasamiTags* out)
+{
+	if (!path || !out) return false;
+	memset(out, 0, sizeof(*out));
+	const SasamiKind kind = SasamiKindFromPath(path);
+	if (kind == SASAMI_KIND_UNKNOWN) return false;
+	HANDLE h = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING,
+		FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, NULL);
+	if (h == INVALID_HANDLE_VALUE) return false;
+	uint8_t buf[0x240];
+	DWORD got = 0;
+	const BOOL ok = ReadFile(h, buf, sizeof(buf), &got, NULL);
+	CloseHandle(h);
+	if (!ok || got < 0x90) return false;
+	SasamiReadTagsFromMemory(buf, got, kind, out);
+	return out->titleSjis[0] || out->composerSjis[0] || out->commentSjis[0];
+}
+
 SasamiKind SasamiKindFromPath(const wchar_t* path)
 {
 	if (SasamiEqExt(path, L".fpy")) return SASAMI_KIND_FPY;
