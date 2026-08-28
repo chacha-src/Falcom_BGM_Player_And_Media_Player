@@ -2321,11 +2321,16 @@ void CMidiMonitorDlg::ApplyEvent(const MmEv& e)
 
 void CMidiMonitorDlg::LoadCurrentMidi()
 {
+	const wchar_t* src = filen;
+	const int wantSr = MmWantMonitorSampleRate();
+	if (src && src[0] && m_sourcePath[0] && _wcsicmp(src, m_sourcePath) == 0
+		&& m_loadedPath[0] && m_ev && m_evCount > 0 && m_sampleRate == wantSr)
+		return;
+
 	wchar_t mid[520];
 	mid[0] = 0;
 	wchar_t hints[8][128];
 	int hc = 0;
-	const wchar_t* src = filen;
 	if (src && src[0])
 		VstResolvePlayPath(src, mid, 520, hints, 8, &hc);
 	if (!mid[0] && src)

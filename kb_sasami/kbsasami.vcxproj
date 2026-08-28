@@ -106,6 +106,8 @@ if exist "C:\projects\APPLICATION3\ogg_binary\Plugins\Kobarin\fmpmd\Rhythm\2608_
     <ClCompile Include="source\kbsasami_module.cpp" />
     <ClCompile Include="source\sasami_file.cpp" />
     <ClCompile Include="source\sasami_midi.cpp" />
+    <ClCompile Include="source\sasami_misao.cpp" />
+    <ClCompile Include="source\sasami_misao_synth.cpp" />
     <ClCompile Include="source\sasami_fm.cpp" />
     <ClCompile Include="source\fmmidi\sequencer.cpp" />
     <ClCompile Include="source\fmmidi\midisynth.cpp" />

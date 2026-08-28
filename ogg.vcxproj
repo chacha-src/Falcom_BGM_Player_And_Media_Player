@@ -626,6 +626,10 @@
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
+    <ClCompile Include="kb_sasami\source\sasami_misao.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+    </ClCompile>
     <ClCompile Include="KpiV5ConfigDlg.cpp" />
     <ClCompile Include="KpiV5ConfigStore.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>

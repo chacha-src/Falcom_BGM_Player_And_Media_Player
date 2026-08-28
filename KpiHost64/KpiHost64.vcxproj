@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" ToolsVersion="14.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="uni_avx2_vs2026|x64">
@@ -64,6 +64,7 @@
     <ClCompile Include="..\KpiV5ConfigStore.cpp" />
     <ClCompile Include="..\kb_sasami\source\sasami_file.cpp" />
     <ClCompile Include="..\kb_sasami\source\sasami_midi.cpp" />
+    <ClCompile Include="..\kb_sasami\source\sasami_misao.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="KpiHost64.rc" />

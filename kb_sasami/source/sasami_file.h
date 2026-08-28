@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include <stdint.h>
 #include <stddef.h>
@@ -19,6 +19,8 @@ enum SasamiMidiMap {
 
 enum { SASAMI_MAX_FILE = 2 * 1024 * 1024 };
 
+enum { SASAMI_MISAO_MAX_CH = 16 };
+
 struct SasamiTrack {
 	uint32_t fileOff;
 	int part;
@@ -37,6 +39,9 @@ struct SasamiSong {
 	uint32_t dataSize;
 	char titleSjis[65];
 	int fmOpna10ch;
+	int misaoEnabled;
+	int misaoChCount;
+	SasamiTrack misaoTracks[SASAMI_MISAO_MAX_CH];
 };
 
 struct SasamiTags {

@@ -1,4 +1,5 @@
 ﻿#include "sasami_midi.h"
+#include "sasami_misao.h"
 
 #include <windows.h>
 #include <algorithm>
@@ -111,6 +112,33 @@ static void PushShort(uint32_t tick, int port, uint8_t st, uint8_t a, uint8_t b)
 	uint8_t d[3] = { st, a, b };
 	const int n = ((st & 0xF0) == 0xC0 || (st & 0xF0) == 0xD0) ? 2 : 3;
 	PushEv(tick, port, d, n);
+}
+
+// MMODE1J / MMJ4: per-channel init (pitch bend range ±2 octaves, GS bank, volumes).
+static void PushMmodeChannelInit(uint32_t tick, int port, int ch, SasamiMidiMap map, int gsBankLsb, int flg88)
+{
+	PushShort(tick, port, (uint8_t)(0xB0 | ch), 0x65, 0);
+	PushShort(tick, port, (uint8_t)(0xB0 | ch), 0x64, 0);
+	PushShort(tick, port, (uint8_t)(0xB0 | ch), 0x06, 0x18);
+	PushShort(tick, port, (uint8_t)(0xB0 | ch), 0x01, 0);
+	PushShort(tick, port, (uint8_t)(0xB0 | ch), 0x00, 0);
+	if (flg88 != 2) {
+		uint8_t cc32 = 0;
+		if (map == SASAMI_MAP_GS55)
+			cc32 = 2;
+		else if (map == SASAMI_MAP_GS88) {
+			if (gsBankLsb == 3) cc32 = 3;
+			else if (gsBankLsb == 4) cc32 = 4;
+			else cc32 = 1;
+		}
+		if (cc32)
+			PushShort(tick, port, (uint8_t)(0xB0 | ch), 32, cc32);
+	}
+	PushShort(tick, port, (uint8_t)(0xB0 | ch), 7, 100);
+	PushShort(tick, port, (uint8_t)(0xB0 | ch), 10, 64);
+	PushShort(tick, port, (uint8_t)(0xB0 | ch), 11, 127);
+	PushShort(tick, port, (uint8_t)(0xB0 | ch), 0x40, 0);
+	PushShort(tick, port, (uint8_t)(0xE0 | ch), 0x00, 0x40);
 }
 
 static void PushGs(uint32_t tick, int port, uint8_t a, uint8_t b, uint8_t c, uint8_t v)
@@ -364,12 +392,56 @@ static int SasamiRegistryMapDefault()
 
 static void SasamiTempMidiPath(const wchar_t* src, wchar_t* dest, int destChars);
 
+struct SasamiTempCache {
+	wchar_t src[MAX_PATH];
+	FILETIME srcWrite;
+	DWORD srcSize;
+	int mapForce;
+};
+static SasamiTempCache s_tempCache;
+
+static int SasamiReadSourceStamp(const wchar_t* src, FILETIME* writeTime, DWORD* size)
+{
+	if (!src || !src[0] || !writeTime || !size) return 0;
+	HANDLE h = CreateFileW(src, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING,
+		FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, NULL);
+	if (h == INVALID_HANDLE_VALUE) return 0;
+	LARGE_INTEGER li;
+	if (!GetFileSizeEx(h, &li) || li.QuadPart <= 0 || li.QuadPart > 0x7FFFFFFF) {
+		CloseHandle(h);
+		return 0;
+	}
+	FILETIME c, a, w;
+	if (!GetFileTime(h, &c, &a, &w)) {
+		CloseHandle(h);
+		return 0;
+	}
+	CloseHandle(h);
+	*writeTime = w;
+	*size = (DWORD)li.QuadPart;
+	return 1;
+}
+
+static int SasamiTempCacheValid(const wchar_t* src, int mapForce, const wchar_t* dest)
+{
+	if (!src || !src[0] || !dest || !dest[0] || !s_tempCache.src[0]) return 0;
+	if (_wcsicmp(s_tempCache.src, src) != 0 || s_tempCache.mapForce != mapForce) return 0;
+	FILETIME wt;
+	DWORD sz = 0;
+	if (!SasamiReadSourceStamp(src, &wt, &sz)) return 0;
+	if (CompareFileTime(&s_tempCache.srcWrite, &wt) != 0 || s_tempCache.srcSize != sz) return 0;
+	const DWORD attr = GetFileAttributesW(dest);
+	return (attr != INVALID_FILE_ATTRIBUTES && !(attr & FILE_ATTRIBUTE_DIRECTORY)) ? 1 : 0;
+}
+
 void SasamiInvalidateTempMidi(const wchar_t* src)
 {
 	if (!src || !src[0] || !SasamiExtIsMidi(src)) return;
 	wchar_t dest[MAX_PATH] = {};
 	SasamiTempMidiPath(src, dest, MAX_PATH);
 	DeleteFileW(dest);
+	if (s_tempCache.src[0] && _wcsicmp(s_tempCache.src, src) == 0)
+		memset(&s_tempCache, 0, sizeof(s_tempCache));
 }
 
 bool SasamiConvertToSmf(const SasamiSong& song, SasamiMidiMap map, int gsBankLsb, uint8_t* out, int outCap, int* outSize)
@@ -438,16 +510,8 @@ bool SasamiConvertToSmf(const SasamiSong& song, SasamiMidiMap map, int gsBankLsb
 		if (map == SASAMI_MAP_XG) PushEv(0, p, kXgOn, 9);
 		else if (map == SASAMI_MAP_GM) PushEv(0, p, kGmOn, 6);
 		else PushEv(0, p, kGsReset, 11);
-		for (int ch = 0; ch < 16; ch++) {
-			PushShort(0, p, (uint8_t)(0xB0 | ch), 7, 100);
-			PushShort(0, p, (uint8_t)(0xB0 | ch), 11, 127);
-			PushShort(0, p, (uint8_t)(0xB0 | ch), 10, 64);
-			PushShort(0, p, (uint8_t)(0xE0 | ch), 0x00, 0x40);
-			if (map == SASAMI_MAP_GS88 && gsBankLsb > 0)
-				PushShort(0, p, (uint8_t)(0xB0 | ch), 32, (uint8_t)gsBankLsb);
-			else if (map == SASAMI_MAP_GS55 && gsBankLsb > 0)
-				PushShort(0, p, (uint8_t)(0xB0 | ch), 32, (uint8_t)gsBankLsb);
-		}
+		for (int ch = 0; ch < 16; ch++)
+			PushMmodeChannelInit(0, p, ch, map, gsBankLsb, flg88);
 	}
 
 	uint32_t tick = 0;
@@ -484,16 +548,8 @@ bool SasamiConvertToSmf(const SasamiSong& song, SasamiMidiMap map, int gsBankLsb
 		if (map == SASAMI_MAP_XG) PushEv(tick, 1, kXgOn, 9);
 		else if (map == SASAMI_MAP_GM) PushEv(tick, 1, kGmOn, 6);
 		else PushEv(tick, 1, kGsReset, 11);
-		for (int ch = 0; ch < 16; ch++) {
-			PushShort(tick, 1, (uint8_t)(0xB0 | ch), 7, 100);
-			PushShort(tick, 1, (uint8_t)(0xB0 | ch), 11, 127);
-			PushShort(tick, 1, (uint8_t)(0xB0 | ch), 10, 64);
-			PushShort(tick, 1, (uint8_t)(0xE0 | ch), 0x00, 0x40);
-			if (map == SASAMI_MAP_GS88 && gsBankLsb > 0)
-				PushShort(tick, 1, (uint8_t)(0xB0 | ch), 32, (uint8_t)gsBankLsb);
-			else if (map == SASAMI_MAP_GS55 && gsBankLsb > 0)
-				PushShort(tick, 1, (uint8_t)(0xB0 | ch), 32, (uint8_t)gsBankLsb);
-		}
+		for (int ch = 0; ch < 16; ch++)
+			PushMmodeChannelInit(tick, 1, ch, map, gsBankLsb, flg88);
 	};
 
 	while (tick < SASAMI_MAX_TICKS) {
@@ -1033,11 +1089,6 @@ bool SasamiConvertToSmf(const SasamiSong& song, SasamiMidiMap map, int gsBankLsb
 			if (tr[i].everJump) loopAlive++;
 			else finiteAlive++;
 		}
-		if (finiteAlive == 0 && loopAlive > 0 && gLoopEnd > 0 && tick >= gLoopEnd) {
-			for (int i = 0; i < song.trackCount && i < 64; i++)
-				tr[i].alive = 0;
-			break;
-		}
 		if (finiteAlive == 0 && loopAlive > 0)
 			stopLoopers = 1;
 	}
@@ -1156,6 +1207,20 @@ bool SasamiConvertToSmf(const SasamiSong& song, SasamiMidiMap map, int gsBankLsb
 	for (int i = 0; i < s_evCount; i++) {
 		if (s_evs[i].port >= nports) nports = s_evs[i].port + 1;
 	}
+
+	if (SasamiMisaoActive(song)) {
+		enum { kMisaoEvMax = 8192 };
+		static SasamiMisaoEv s_misaoEv[kMisaoEvMax];
+		unsigned misaoTicks = 0;
+		const int nMisao = SasamiMisaoBuildEvents(song, s_misaoEv, kMisaoEvMax, &misaoTicks);
+		for (int i = 0; i < nMisao; i++) {
+			const SasamiMisaoEv& me = s_misaoEv[i];
+			PushEv(me.tick, me.port, me.bytes, me.len);
+			if (me.port + 1 > nports) nports = me.port + 1;
+		}
+		(void)misaoTicks;
+	}
+
 	WriteSmf(nports, out, outCap, outSize);
 	return *outSize > 22;
 }
@@ -1199,9 +1264,11 @@ int SasamiConvertPathToMidiFile(const wchar_t* src, wchar_t* dest, int destChars
 	if (!SasamiExtIsMidi(src)) return 0;
 	if (!EnsureMidiWork()) return 0;
 	SasamiTempMidiPath(src, dest, destChars);
+	const int force = SasamiResolveMapForceW(src, SasamiRegistryMapDefault());
+	if (SasamiTempCacheValid(src, force, dest))
+		return 1;
 	static SasamiSong s_song;
 	if (!SasamiLoadFileW(src, &s_song)) return 0;
-	const int force = SasamiResolveMapForceW(src, SasamiRegistryMapDefault());
 	SasamiMidiMap map = SASAMI_MAP_GS88;
 	int gsLsb = 2;
 	SasamiMapForceToSel(force, &map, &gsLsb);
@@ -1212,5 +1279,18 @@ int SasamiConvertPathToMidiFile(const wchar_t* src, wchar_t* dest, int destChars
 	DWORD w = 0;
 	const BOOL ok = WriteFile(h, s_smfWork, (DWORD)sz, &w, NULL);
 	CloseHandle(h);
-	return ok && (int)w == sz;
+	if (!ok || (int)w != sz) return 0;
+	{
+		FILETIME wt;
+		DWORD fsz = 0;
+		if (SasamiReadSourceStamp(src, &wt, &fsz)) {
+			wcsncpy_s(s_tempCache.src, src, _TRUNCATE);
+			s_tempCache.srcWrite = wt;
+			s_tempCache.srcSize = fsz;
+			s_tempCache.mapForce = force;
+		} else {
+			memset(&s_tempCache, 0, sizeof(s_tempCache));
+		}
+	}
+	return 1;
 }

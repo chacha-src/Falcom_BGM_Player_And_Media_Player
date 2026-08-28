@@ -2,6 +2,8 @@ C:\projects\APPLICATION3\ogg_all2022\kb_sasami\source\kbsasami_decoder.cpp;C:\pr
 C:\projects\APPLICATION3\ogg_all2022\kb_sasami\source\kbsasami_module.cpp;C:\projects\APPLICATION3\ogg_all2022\kb_sasami\_temp\x64\uni_avx2_vs2026\kbsasami_module.obj
 C:\projects\APPLICATION3\ogg_all2022\kb_sasami\source\sasami_file.cpp;C:\projects\APPLICATION3\ogg_all2022\kb_sasami\_temp\x64\uni_avx2_vs2026\sasami_file.obj
 C:\projects\APPLICATION3\ogg_all2022\kb_sasami\source\sasami_midi.cpp;C:\projects\APPLICATION3\ogg_all2022\kb_sasami\_temp\x64\uni_avx2_vs2026\sasami_midi.obj
+C:\projects\APPLICATION3\ogg_all2022\kb_sasami\source\sasami_misao.cpp;C:\projects\APPLICATION3\ogg_all2022\kb_sasami\_temp\x64\uni_avx2_vs2026\sasami_misao.obj
+C:\projects\APPLICATION3\ogg_all2022\kb_sasami\source\sasami_misao_synth.cpp;C:\projects\APPLICATION3\ogg_all2022\kb_sasami\_temp\x64\uni_avx2_vs2026\sasami_misao_synth.obj
 C:\projects\APPLICATION3\ogg_all2022\kb_sasami\source\sasami_fm.cpp;C:\projects\APPLICATION3\ogg_all2022\kb_sasami\_temp\x64\uni_avx2_vs2026\sasami_fm.obj
 C:\projects\APPLICATION3\ogg_all2022\kb_sasami\source\fmmidi\sequencer.cpp;C:\projects\APPLICATION3\ogg_all2022\kb_sasami\_temp\x64\uni_avx2_vs2026\sequencer.obj
 C:\projects\APPLICATION3\ogg_all2022\kb_sasami\source\fmmidi\midisynth.cpp;C:\projects\APPLICATION3\ogg_all2022\kb_sasami\_temp\x64\uni_avx2_vs2026\midisynth.obj

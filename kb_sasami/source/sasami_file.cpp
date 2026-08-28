@@ -1,4 +1,5 @@
 ﻿#include "sasami_file.h"
+#include "sasami_misao.h"
 
 #include <windows.h>
 #include <string.h>
@@ -187,6 +188,62 @@ uint32_t SasamiGet24(const SasamiSong& s, uint32_t off)
 		| ((uint32_t)SasamiGet(s, off + 2) << 16);
 }
 
+static void SasamiLoadMisaoTracks(SasamiSong* out)
+{
+	out->misaoEnabled = 0;
+	out->misaoChCount = 0;
+	memset(out->misaoTracks, 0, sizeof(out->misaoTracks));
+	if (!out || out->dataSize < 0xF2) return;
+
+	const int isFpy = (out->kind == SASAMI_KIND_FPY);
+	const int isMpy = (out->kind == SASAMI_KIND_MPY || out->kind == SASAMI_KIND_MPW2);
+	if (!isFpy && !isMpy) return;
+
+	const uint8_t f0 = SasamiGet(*out, 0xF0);
+	const int ppSig = isMpy && out->dataSize > 0xF3
+		&& out->data[0xF1] == 'P' && out->data[0xF2] == 'P'
+		&& (out->data[0xF3] == '\n' || out->data[0xF3] == 0);
+
+	if (isFpy && (f0 == 0 || f0 == 0xFF)) {
+		/* extended FPY may still have 0xD0 tracks without classic f0=1 flag */
+	} else if (isMpy && !ppSig && f0 == 0) {
+		return;
+	}
+
+	int maxCh = 0;
+	int anyValid = 0;
+	for (int i = 0; i < SASAMI_MISAO_MAX_CH; i++) {
+		const uint16_t ptr = SasamiGet16(*out, (uint32_t)(0xD0 + i * 2));
+		const uint32_t off = (ptr >= 0x1000) ? (uint32_t)(ptr - 0x1000) : ptr;
+		out->misaoTracks[i].fileOff = off;
+		out->misaoTracks[i].unused = SasamiMisaoTrackValid(*out, ptr) ? 0 : 1;
+		if (!out->misaoTracks[i].unused && off) {
+			anyValid = 1;
+			if (i + 1 > maxCh) maxCh = i + 1;
+		}
+	}
+	if (!anyValid) return;
+
+	out->misaoEnabled = 1;
+	if (isFpy) {
+		if (f0 == 1) {
+			const int f1 = SasamiGet(*out, 0xF1);
+			out->misaoChCount = (f1 > 0 && f1 <= SASAMI_MISAO_MAX_CH) ? f1 : maxCh;
+		} else {
+			out->misaoChCount = maxCh;
+		}
+	} else if (ppSig) {
+		out->misaoChCount = (f0 > 0 && f0 <= SASAMI_MISAO_MAX_CH) ? f0 : maxCh;
+	} else {
+		const int f1 = SasamiGet(*out, 0xF1);
+		out->misaoChCount = (f1 > 0 && f1 <= SASAMI_MISAO_MAX_CH) ? f1 : maxCh;
+		if (out->misaoChCount <= 0 && f0 > 0 && f0 <= SASAMI_MISAO_MAX_CH)
+			out->misaoChCount = f0;
+	}
+	if (maxCh > out->misaoChCount) out->misaoChCount = maxCh;
+	if (out->misaoChCount > SASAMI_MISAO_MAX_CH) out->misaoChCount = SASAMI_MISAO_MAX_CH;
+}
+
 static void SasamiReadTitle(SasamiSong* out)
 {
 	out->titleSjis[0] = 0;
@@ -228,6 +285,7 @@ bool SasamiLoadMemory(const uint8_t* bytes, size_t size, SasamiKind hint, Sasami
 			out->tracks[ch].unused = (ptr == 0 || ptr == 0x10F0 || off >= size) ? 1 : 0;
 		}
 		SasamiReadTitle(out);
+		SasamiLoadMisaoTracks(out);
 		return true;
 	}
 
@@ -275,6 +333,7 @@ bool SasamiLoadMemory(const uint8_t* bytes, size_t size, SasamiKind hint, Sasami
 		if (out->wideTracks == 1 && !out->titleSjis[0] && size > 0x160)
 			SasamiReadTitle(out);
 	}
+	SasamiLoadMisaoTracks(out);
 	return true;
 }
 

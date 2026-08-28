@@ -1,4 +1,5 @@
 ﻿#include "sasami_fm.h"
+#include "sasami_misao.h"
 
 #include "ymfm.h"
 #include "ymfm_opn.h"
@@ -180,6 +181,8 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 	int rhythmHaveWav;
 	int rhythmtl;
 	uint8_t rhythmkey;
+	SasamiMisaoSynth misao;
+	int misaoActive;
 
 	Impl() : chip(*this)
 	{
@@ -215,6 +218,7 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 		rhythmHaveWav = 0;
 		rhythmtl = 0;
 		rhythmkey = 0;
+		misaoActive = 0;
 		adpcmRomSize = 0;
 		for (int i = 0; i < 6; i++) {
 			rhythm[i].sampleLen = 0;
@@ -537,6 +541,7 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 			unsigned t = w1;
 			if (t == 0) t = kDefaultT;
 			T = t;
+			if (misaoActive) misao.SetTempoT(T);
 			pc[ch] = addr + 3;
 			return 1;
 		}
@@ -675,6 +680,7 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 		if (!any) ended = 1;
 		ticksPlayed++;
 		if (measureLen && ticksPlayed >= kMaxTicks) ended = 1;
+		if (misaoActive) misao.TickOnce();
 	}
 
 	void ClockFm(int outputs = 8)
@@ -774,6 +780,8 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 			if (pc[ch] == 0xF0) alive[ch] = 0;
 		}
 		InitChip();
+		if (misaoActive) misao.Reset();
+		if (misaoActive) misao.SetTempoT(T);
 	}
 
 	uint32_t CountTicks()
@@ -896,6 +904,9 @@ bool SasamiFmPlayer::Open(const SasamiSong& song, uint32_t sampleRate, const wch
 	m_hostRate = m->hostRate;
 	m->LoadRhythm(rhythmDir);
 	m->PrepareRhythmSteps();
+	m->misaoActive = SasamiMisaoActive(song) ? 1 : 0;
+	if (m->misaoActive)
+		m->misaoActive = m->misao.Open(song, m->hostRate, rhythmDir, &m->T) ? 1 : 0;
 	m->chip.set_fidelity(ymfm::OPN_FIDELITY_MED);
 	m->chipRate = m->chip.sample_rate(kOpnaClock);
 	if (m->chipRate < 8000) m->chipRate = kOpnaClock / 144;
@@ -906,7 +917,7 @@ bool SasamiFmPlayer::Open(const SasamiSong& song, uint32_t sampleRate, const wch
 		uint64_t samples = 0;
 		uint64_t carry = 0;
 		uint32_t guard = 0;
-		while (!m->ended && guard++ < kMaxTicks) {
+		while ((!m->ended || (m->misaoActive && !m->misao.Ended())) && guard++ < kMaxTicks) {
 			carry += (uint64_t)m->hostRate * m->T;
 			samples += carry / kTickDen;
 			carry %= kTickDen;
@@ -924,6 +935,7 @@ bool SasamiFmPlayer::Open(const SasamiSong& song, uint32_t sampleRate, const wch
 void SasamiFmPlayer::Close()
 {
 	std::lock_guard<std::mutex> lk(m_lock);
+	if (m) m->misao.Close();
 	delete m;
 	m = NULL;
 	m_totalSamples = 0;
@@ -944,11 +956,20 @@ uint32_t SasamiFmPlayer::RenderUnlocked(int16_t* interleavedStereo, uint32_t fra
 	uint32_t out = 0;
 	while (out < want) {
 		if (m->samplesLeftInTick == 0) {
-			if (m->ended) {
+			const int misaoDone = !m->misaoActive || m->misao.Ended();
+			if (m->ended && misaoDone) {
 				memset(interleavedStereo + out * 2, 0, (size_t)(want - out) * 2 * sizeof(int16_t));
 				out = want;
 				m->eofSent = 1;
 				break;
+			}
+			if (m->ended && !misaoDone) {
+				m->tickCarry += (uint64_t)m->hostRate * m->T;
+				const uint32_t sl = (uint32_t)(m->tickCarry / kTickDen);
+				m->tickCarry %= kTickDen;
+				if (m->misaoActive) m->misao.TickOnce();
+				m->samplesLeftInTick = sl ? sl : 1;
+				continue;
 			}
 			m->tickCarry += (uint64_t)m->hostRate * m->T;
 			const uint32_t sl = (uint32_t)(m->tickCarry / kTickDen);
@@ -962,6 +983,18 @@ uint32_t SasamiFmPlayer::RenderUnlocked(int16_t* interleavedStereo, uint32_t fra
 		for (uint32_t i = 0; i < take; i++) {
 			int16_t L, R;
 			m->HostSample(&L, &R);
+			if (m->misaoActive) {
+				double mix[2] = { 0.0, 0.0 };
+				m->misao.SynthesizeMix(mix, 1);
+				int l = L + (int)(mix[0] * 32767.0);
+				int r = R + (int)(mix[1] * 32767.0);
+				if (l > 32767) l = 32767;
+				if (l < -32768) l = -32768;
+				if (r > 32767) r = 32767;
+				if (r < -32768) r = -32768;
+				L = (int16_t)l;
+				R = (int16_t)r;
+			}
 			interleavedStereo[(out + i) * 2] = L;
 			interleavedStereo[(out + i) * 2 + 1] = R;
 		}
