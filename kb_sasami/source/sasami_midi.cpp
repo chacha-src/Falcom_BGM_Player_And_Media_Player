@@ -121,6 +121,35 @@ static void PushGs(uint32_t tick, int port, uint8_t a, uint8_t b, uint8_t c, uin
 	PushEv(tick, port, sx, 11);
 }
 
+static void PushExclBody(uint32_t tick, int port, int xg, uint8_t devId, const uint8_t* body, int bodyLen)
+{
+	if (!body || bodyLen <= 0 || bodyLen > 110) return;
+	uint8_t sx[128];
+	int n = 0;
+	int sum = 0;
+	if (xg) {
+		sx[n++] = 0xF0;
+		sx[n++] = 0x43;
+		sx[n++] = 0x10;
+		sx[n++] = devId;
+	} else {
+		sx[n++] = 0xF0;
+		sx[n++] = 0x41;
+		sx[n++] = 0x10;
+		sx[n++] = devId;
+		sx[n++] = 0x12;
+	}
+	for (int i = 0; i < bodyLen; i++) {
+		sx[n] = body[i];
+		sum += sx[n];
+		n++;
+	}
+	if (!xg)
+		sx[n++] = (uint8_t)((128 - (sum % 128)) & 0x7F);
+	sx[n++] = 0xF7;
+	PushEv(tick, port, sx, n);
+}
+
 static int GsPartIdx(int ch)
 {
 	if (ch == 9) return 0;
@@ -354,7 +383,6 @@ bool SasamiConvertToSmf(const SasamiSong& song, SasamiMidiMap map, int gsBankLsb
 	const int ver = song.mpyVersion;
 	const int flg88 = (map == SASAMI_MAP_GS88) ? 1 : ((map == SASAMI_MAP_XG) ? 2 : 0);
 	const int isGm = (map == SASAMI_MAP_GM) ? 1 : 0;
-	const int level2 = (ver == 2) ? 1 : 0;
 
 	s_evSeq = 0;
 	s_evCount = 0;
@@ -532,14 +560,18 @@ bool SasamiConvertToSmf(const SasamiSong& song, SasamiMidiMap map, int gsBankLsb
 					tr[i].addr = addr + 3;
 					if (tr[i].count != 0) again = 0;
 					break;
-				case 4: // master vol
-					PushGs(tick, port, 0x40, 0x00, 0x04, b1);
+				case 4: { // master vol: LCD 10 00 16 + GS 40 00 04 + GM master
+					const uint8_t lcd[4] = { 0x10, 0x00, 0x16, b1 };
+					PushExclBody(tick, port, (flg88 == 2) ? 1 : 0, 0x42, lcd, 4);
+					if (!isGm && flg88 != 2)
+						PushGs(tick, port, 0x40, 0x00, 0x04, b1);
 					{
 						uint8_t sx[8] = { 0xF0, 0x7F, 0x7F, 0x04, 0x01, 0x00, b1, 0xF7 };
 						PushEv(tick, port, sx, 8);
 					}
 					tr[i].addr = addr + 3;
 					break;
+				}
 				case 5: { // track vol: M58CHK 88=b1, 55=b2
 					if (!(flg88 == 2 && song.versionWord >= 36000)) {
 						const uint8_t vol = (flg88 == 1) ? b1 : b2;
@@ -672,10 +704,12 @@ bool SasamiConvertToSmf(const SasamiSong& song, SasamiMidiMap map, int gsBankLsb
 					PushShort(tick, port, (uint8_t)(0xB0 | ch), 10, (flg88 == 1) ? b2 : b1);
 					tr[i].addr = addr + 3;
 					break;
-				case 13:
-					// LAREV: 4 bytes. GS88 で 3 バイト legato にすると以降が全部ずれる。
+				case 13: { // LAREV: EXCLOUT + 10 00 01 b1 b2 b3 + EXCLEND
+					const uint8_t body[6] = { 0x10, 0x00, 0x01, b1, b2, b3 };
+					PushExclBody(tick, port, (flg88 == 2) ? 1 : 0, 0x42, body, 6);
 					tr[i].addr = addr + 4;
 					break;
+				}
 				case 14: { // GS/XG reverb
 					if (flg88 == 2) {
 						uint8_t msb = 2, lsb = 0;
@@ -741,11 +775,7 @@ bool SasamiConvertToSmf(const SasamiSong& song, SasamiMidiMap map, int gsBankLsb
 					tr[i].addr = addr + 4;
 					break;
 				}
-				case 16:
-					if (level2 && map == SASAMI_MAP_GS55) {
-						const int gi = GsPartIdx(ch);
-						PushGs(tick, port, 0x40, (uint8_t)(0x40 + gi), 0x22, b1);
-					}
+				case 16: // WHAT1: 原版は内部用スタブ（MIDI 出力なし）
 					tr[i].addr = addr + 3;
 					break;
 				case 17:
@@ -770,11 +800,7 @@ bool SasamiConvertToSmf(const SasamiSong& song, SasamiMidiMap map, int gsBankLsb
 					tr[i].pedal = 0;
 					tr[i].addr = addr + 3;
 					break;
-				case 22:
-					if (level2 && map == SASAMI_MAP_GS55) {
-						if (b1 < 128) PushShort(tick, port, (uint8_t)(0xB0 | ch), 0x10, b1);
-						if (b2 < 128) PushShort(tick, port, (uint8_t)(0xB0 | ch), 0x11, b2);
-					}
+				case 22: // WHAT2: 原版は内部ワーク書き込みのみ（MIDI 出力なし）
 					tr[i].addr = addr + 3;
 					break;
 				case 23:
@@ -795,58 +821,76 @@ bool SasamiConvertToSmf(const SasamiSong& song, SasamiMidiMap map, int gsBankLsb
 				case 25:
 					tr[i].addr = addr + 3;
 					break;
-				case 26:
+				case 26: // PICH2 → WHAT4  fall-through（原版どおり一体）
 					PushShort(tick, port, (uint8_t)(0xB0 | ch), 0x65, 0);
 					PushShort(tick, port, (uint8_t)(0xB0 | ch), 0x64, 0);
+					PushShort(tick, port, (uint8_t)(0xB0 | ch), 0x06, 0);
 					PushShort(tick, port, (uint8_t)(0xB0 | ch), 0x06, b1);
-					PushShort(tick, port, (uint8_t)(0xB0 | ch), 0x65, 0x7F);
-					PushShort(tick, port, (uint8_t)(0xB0 | ch), 0x64, 0x7F);
+					PushShort(tick, port, (uint8_t)(0xB0 | ch), 0x26, 0);
 					tr[i].addr = addr + 3;
 					break;
-				case 27:
+				case 27: // WHAT4 (PICH2 続き): CC6 + RPN null
 					PushShort(tick, port, (uint8_t)(0xB0 | ch), 0x06, b1);
-					PushShort(tick, port, (uint8_t)(0xB0 | ch), 0x65, 0x7F);
-					PushShort(tick, port, (uint8_t)(0xB0 | ch), 0x64, 0x7F);
+					PushShort(tick, port, (uint8_t)(0xB0 | ch), 0x26, 0);
 					tr[i].addr = addr + 3;
 					break;
-				case 28:
+				case 28: { // TITL: GS LCD 11 文字 (M_MUSIC+0C0)
+					uint8_t body[14];
+					body[0] = 0x10;
+					body[1] = 0;
+					body[2] = 0;
+					for (int k = 0; k < 11; k++) {
+						const uint32_t titOff = 0xC0u + (uint32_t)k;
+						body[3 + k] = SasamiOffOk(song, titOff, 1) ? SasamiGet(song, titOff) : 0;
+					}
+					PushExclBody(tick, port, 0, 0x45, body, 14);
 					tr[i].addr = addr + 3;
 					break;
-				case 29:
+				}
+				case 29: // KAKU1
 					tr[i].drum = b1;
 					if (flg88 == 2) {
-						if (b1 > 5)
-							PushShort(tick, port, (uint8_t)(0xB0 | ch), 0, b1);
-						else
-							PushShort(tick, port, (uint8_t)(0xB0 | ch), 0, (uint8_t)((b1 != 0) ? 127 : 0));
+						PushShort(tick, port, (uint8_t)(0xB0 | ch), 0, (uint8_t)((b1 != 0) ? 127 : 0));
 						tr[i].drum = 0;
-					} else {
+					} else if (!isGm) {
 						PushGs(tick, port, 0x40, (uint8_t)(0x10 + GsPartIdx(ch)), 0x15, b1);
 					}
 					tr[i].addr = addr + 3;
 					break;
-				case 30:
-					PushGs(tick, port, 0x40, (uint8_t)(0x10 + GsPartIdx(ch)), 0x30, b1);
+				case 30: // KAKU2
+					if (flg88 == 2)
+						PushShort(tick, port, (uint8_t)(0xB0 | ch), 0, (uint8_t)((b1 != 0) ? 127 : 0));
+					else if (!isGm)
+						PushGs(tick, port, 0x40, (uint8_t)(0x10 + GsPartIdx(ch)), 0x30, b1);
 					tr[i].addr = addr + 3;
 					break;
-				case 31:
-					PushGs(tick, port, 0x40, (uint8_t)(0x10 + GsPartIdx(ch)), 0x36, b1);
+				case 31: // KAKU3
+					if (flg88 == 2)
+						PushShort(tick, port, (uint8_t)(0xB0 | ch), 0, (uint8_t)((b1 != 0) ? 127 : 0));
+					else if (!isGm)
+						PushGs(tick, port, 0x40, (uint8_t)(0x10 + GsPartIdx(ch)), 0x36, b1);
 					tr[i].addr = addr + 3;
 					break;
-				case 32:
-					PushGs(tick, port, 0x40, (uint8_t)(0x10 + GsPartIdx(ch)), 0x32, b1);
+				case 32: // KAKU4
+					if (flg88 == 2)
+						PushShort(tick, port, (uint8_t)(0xB0 | ch), 0, (uint8_t)((b1 != 0) ? 127 : 0));
+					else if (!isGm)
+						PushGs(tick, port, 0x40, (uint8_t)(0x10 + GsPartIdx(ch)), 0x32, b1);
 					tr[i].addr = addr + 3;
 					break;
-				case 33:
-					PushGs(tick, port, 0x40, (uint8_t)(0x10 + GsPartIdx(ch)), 0x33, b1);
+				case 33: // KAKU5
+					if (flg88 == 2)
+						PushShort(tick, port, (uint8_t)(0xB0 | ch), 0, (uint8_t)((b1 != 0) ? 127 : 0));
+					else if (!isGm)
+						PushGs(tick, port, 0x40, (uint8_t)(0x10 + GsPartIdx(ch)), 0x33, b1);
 					tr[i].addr = addr + 3;
 					break;
 				case 34:
 					PushShort(tick, port, (uint8_t)(0xB0 | ch), 11, b1);
 					tr[i].addr = addr + 3;
 					break;
-				case 35:
-					if (flg88 == 1) {
+				case 35: // MD5588: 原版は XG のみ CC32/CC0
+					if (flg88 == 2) {
 						PushShort(tick, port, (uint8_t)(0xB0 | ch), 32, (uint8_t)(b1 + 1));
 						PushShort(tick, port, (uint8_t)(0xB0 | ch), 0, 0);
 					}
@@ -893,7 +937,9 @@ bool SasamiConvertToSmf(const SasamiSong& song, SasamiMidiMap map, int gsBankLsb
 					uint32_t p = addr + 1;
 					int match = 0;
 					while (SasamiOffOk(song, p, 1) && SasamiGet(song, p) != 0xFE) {
-						if (SasamiGet(song, p) == flg88) match = 1;
+						const uint8_t tag = SasamiGet(song, p);
+						if (tag == (uint8_t)flg88) match = 1;
+						else if (tag == 3 && flg88 == 0 && isGm) match = 1;
 						p++;
 					}
 					if (!match) {
