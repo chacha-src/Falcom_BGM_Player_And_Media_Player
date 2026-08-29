@@ -495,6 +495,8 @@ void MpTaskbarReplay();
 void MpTaskbarNextTrack();
 void MpTaskbarPrevTrack();
 double OggGetGdiPlaybackTimeSec();
+/* バナーと同じ可聴 PCM フレーム（playb − DS 書込先行）。FM モニタ同期用 */
+__int64 OggGetHeardPcmFrames();
 // テンポ/ピッチ スライダー(0..400, 200=100%) → 表示% / RB 換算（MP と本体で共通）
 float TempoPercentFromPos(int tempoPos);
 double TempoPlaybackRateFromPos(int tempoPos);

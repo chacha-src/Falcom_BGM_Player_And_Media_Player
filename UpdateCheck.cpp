@@ -90,8 +90,14 @@ static time_t HttpGetLastModified(const CString& url)
 	InternetSetOption(hInternet, INTERNET_OPTION_CONNECT_TIMEOUT, &timeout, sizeof(timeout));
 	InternetSetOption(hInternet, INTERNET_OPTION_RECEIVE_TIMEOUT, &timeout, sizeof(timeout));
 
-	DWORD flags = INTERNET_FLAG_RELOAD | INTERNET_FLAG_NO_CACHE_WRITE | INTERNET_FLAG_PRAGMA_NOCACHE;
-	if (url.Find(_T("https://")) == 0) flags |= INTERNET_FLAG_SECURE;
+	// ppp.oohara.jp の証明書期限切れでも検知できるようにする（サイレント更新と同じ）。
+	DWORD flags = INTERNET_FLAG_RELOAD | INTERNET_FLAG_NO_CACHE_WRITE | INTERNET_FLAG_PRAGMA_NOCACHE
+		| INTERNET_FLAG_NO_UI;
+	if (url.Find(_T("https://")) == 0) {
+		flags |= INTERNET_FLAG_SECURE
+			| INTERNET_FLAG_IGNORE_CERT_DATE_INVALID
+			| INTERNET_FLAG_IGNORE_CERT_CN_INVALID;
+	}
 
 	// キャッシュを確実に回避するため、URLの末尾に現在時刻を付けますわ
 	CString noCacheUrl;
@@ -222,7 +228,8 @@ static void NotifySiteDownloadCount(const CString& zipUrl)
 	HINTERNET hReq = HttpOpenRequest(hConnect, _T("POST"), _T("/top/abcd"),
 		NULL, NULL, NULL,
 		INTERNET_FLAG_SECURE | INTERNET_FLAG_RELOAD | INTERNET_FLAG_NO_CACHE_WRITE
-		| INTERNET_FLAG_NO_COOKIES | INTERNET_FLAG_PRAGMA_NOCACHE, 0);
+		| INTERNET_FLAG_NO_COOKIES | INTERNET_FLAG_PRAGMA_NOCACHE | INTERNET_FLAG_NO_UI
+		| INTERNET_FLAG_IGNORE_CERT_DATE_INVALID | INTERNET_FLAG_IGNORE_CERT_CN_INVALID, 0);
 	if (!hReq) {
 		InternetCloseHandle(hConnect);
 		InternetCloseHandle(hInternet);
@@ -254,8 +261,13 @@ static bool HttpDownloadToFile(const CString& url, const CString& localPath)
 	InternetSetOption(hInternet, INTERNET_OPTION_RECEIVE_TIMEOUT, &timeout, sizeof(timeout));
 	InternetSetOption(hInternet, INTERNET_OPTION_SEND_TIMEOUT, &timeout, sizeof(timeout));
 
-	DWORD flags = INTERNET_FLAG_RELOAD | INTERNET_FLAG_NO_CACHE_WRITE | INTERNET_FLAG_PRAGMA_NOCACHE;
-	if (url.Find(_T("https://")) == 0) flags |= INTERNET_FLAG_SECURE;
+	DWORD flags = INTERNET_FLAG_RELOAD | INTERNET_FLAG_NO_CACHE_WRITE | INTERNET_FLAG_PRAGMA_NOCACHE
+		| INTERNET_FLAG_KEEP_CONNECTION | INTERNET_FLAG_NO_UI;
+	if (url.Find(_T("https://")) == 0) {
+		flags |= INTERNET_FLAG_SECURE
+			| INTERNET_FLAG_IGNORE_CERT_DATE_INVALID
+			| INTERNET_FLAG_IGNORE_CERT_CN_INVALID;
+	}
 
 	// キャッシュ回避
 	CString noCacheUrl;

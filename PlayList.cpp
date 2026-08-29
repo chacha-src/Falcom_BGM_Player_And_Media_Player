@@ -1858,6 +1858,26 @@ int PlMidDiskGet(LPCTSTR fol, int* ch32, int* mapKind, int* sysMode, int* mapFor
 	return 0;
 }
 
+static int PlMidDiskGetFmByte(LPCTSTR fol, BYTE* outFm)
+{
+	if (outFm) *outFm = 0xFF;
+	if (!fol || !fol[0]) return -1;
+	CString dir = PlYsedCacheDir(_T("midflag"));
+	if (dir.IsEmpty()) return -1;
+	CString path;
+	path.Format(_T("%s\\%016I64X"), (LPCTSTR)dir, PlCacheHashPath(fol));
+	HANDLE h = ::CreateFile(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL,
+		OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+	if (h == INVALID_HANDLE_VALUE) return -1;
+	BYTE b[8] = {};
+	DWORD rd = 0;
+	const BOOL ok = ::ReadFile(h, b, 8, &rd, NULL);
+	::CloseHandle(h);
+	if (!ok || rd < 5 || b[0] != 1) return -1;
+	if (outFm) *outFm = (rd >= 6) ? b[5] : (BYTE)0xFF;
+	return 0;
+}
+
 void PlMidDiskSet(LPCTSTR fol, int ch32, int mapKind, int sysMode, int mapForce)
 {
 	if (!fol || !fol[0]) return;
@@ -1865,6 +1885,18 @@ void PlMidDiskSet(LPCTSTR fol, int ch32, int mapKind, int sysMode, int mapForce)
 	if (dir.IsEmpty()) return;
 	CString path;
 	path.Format(_T("%s\\%016I64X"), (LPCTSTR)dir, PlCacheHashPath(fol));
+	BYTE keepFm = 0xFF;
+	{
+		HANDLE hr = ::CreateFile(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL,
+			OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+		if (hr != INVALID_HANDLE_VALUE) {
+			BYTE old[8] = {};
+			DWORD rd = 0;
+			if (::ReadFile(hr, old, 8, &rd, NULL) && rd >= 6 && old[0] == 1)
+				keepFm = old[5];
+			::CloseHandle(hr);
+		}
+	}
 	HANDLE h = ::CreateFile(path, GENERIC_WRITE, FILE_SHARE_READ, NULL,
 		CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
 	if (h == INVALID_HANDLE_VALUE) return;
@@ -1874,9 +1906,70 @@ void PlMidDiskSet(LPCTSTR fol, int ch32, int mapKind, int sysMode, int mapForce)
 	b[2] = (BYTE)((mapKind < 0) ? 0 : (mapKind > 18) ? 18 : mapKind);
 	b[3] = (BYTE)((sysMode < 0) ? 0 : (sysMode > 2) ? 2 : sysMode);
 	b[4] = (BYTE)((mapForce < 0) ? 0 : (mapForce > 19) ? 19 : mapForce);
+	b[5] = keepFm;
 	DWORD wr = 0;
 	::WriteFile(h, b, 8, &wr, NULL);
 	::CloseHandle(h);
+}
+
+int PlFmForceGet(LPCTSTR fol)
+{
+	BYTE fm = 0xFF;
+	if (PlMidDiskGetFmByte(fol, &fm) < 0) return -1;
+	if (fm > 2) return -1;
+	return (int)fm;
+}
+
+void PlFmForceSet(LPCTSTR fol, int fmMode)
+{
+	if (!fol || !fol[0]) return;
+	CString dir = PlYsedCacheDir(_T("midflag"));
+	if (dir.IsEmpty()) return;
+	CString path;
+	path.Format(_T("%s\\%016I64X"), (LPCTSTR)dir, PlCacheHashPath(fol));
+	BYTE b[8] = {};
+	b[0] = 1;
+	b[5] = 0xFF;
+	{
+		HANDLE hr = ::CreateFile(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL,
+			OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+		if (hr != INVALID_HANDLE_VALUE) {
+			DWORD rd = 0;
+			BYTE old[8] = {};
+			if (::ReadFile(hr, old, 8, &rd, NULL) && rd >= 5 && old[0] == 1)
+				memcpy(b, old, 8);
+			::CloseHandle(hr);
+		}
+	}
+	if (fmMode < 0 || fmMode > 2)
+		b[5] = 0xFF;
+	else
+		b[5] = (BYTE)fmMode;
+	b[0] = 1;
+	HANDLE h = ::CreateFile(path, GENERIC_WRITE, FILE_SHARE_READ, NULL,
+		CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+	if (h == INVALID_HANDLE_VALUE) return;
+	DWORD wr = 0;
+	::WriteFile(h, b, 8, &wr, NULL);
+	::CloseHandle(h);
+}
+
+static int PlFmGlobalDefault()
+{
+	HKEY hKey = NULL;
+	if (::RegOpenKeyEx(HKEY_CURRENT_USER,
+		_T("Software\\Kobarin's Soft\\oggYSEDbgm\\KpiV5Config\\kbsasami\\kbsasami"),
+		0, KEY_READ, &hKey) != ERROR_SUCCESS)
+		return 2;
+	TCHAR buf[32] = {};
+	DWORD sz = sizeof(buf);
+	DWORD type = 0;
+	int v = 2;
+	if (::RegQueryValueEx(hKey, _T("fmmode"), NULL, &type, (LPBYTE)buf, &sz) == ERROR_SUCCESS)
+		v = _ttoi(buf);
+	::RegCloseKey(hKey);
+	if (v < 0 || v > 2) v = 2;
+	return v;
 }
 
 int PlMidProbe(LPCTSTR fol)
@@ -1950,7 +2043,15 @@ void PlFormatRowMarks(int row, LPCTSTR fol, CString& out)
 		lrc = (c == 0);
 		const int cc = PlChDiskGet(fol);
 		if (cc > 0) ch = cc;
-		if (PlMidDiskGet(fol, &midCh32, &midKind, &midSys, &midForce) >= 0)
+#ifndef _UNICODE
+		const int isMidi = VstIsMidiExt(CStringW(fol)) ? 1 : 0;
+		const int isFm = SasamiExtIsFm(CStringW(fol)) ? 1 : 0;
+#else
+		const int isMidi = VstIsMidiExt(fol) ? 1 : 0;
+		const int isFm = SasamiExtIsFm(fol) ? 1 : 0;
+#endif
+		/* midflag は FPY の fmmode にも使う。16ch/GM 印は MIDI のみ */
+		if (isMidi && !isFm && PlMidDiskGet(fol, &midCh32, &midKind, &midSys, &midForce) >= 0)
 			midOk = TRUE;
 	}
 	// [SAV]=曲ごと保存 / [LRC]=歌詞 / [MONO]|[LR]|[2.1]…=チャンネル / MIDI 16ch·マップ
@@ -1973,6 +2074,21 @@ void PlFormatRowMarks(int row, LPCTSTR fol, CString& out)
 			out += _T("[");
 			out += map;
 			out += _T("]");
+		}
+	}
+	if (fol && fol[0]) {
+#ifndef _UNICODE
+		const int isFm = SasamiExtIsFm(CStringW(fol)) ? 1 : 0;
+		CStringW folW(fol);
+#else
+		const int isFm = SasamiExtIsFm(fol) ? 1 : 0;
+		const wchar_t* folW = fol;
+#endif
+		if (isFm) {
+			const int mode = SasamiResolveFmModeW(folW, PlFmGlobalDefault());
+			if (mode == 0) out += _T("[BEEP]");
+			else if (mode == 1) out += _T("[OPN]");
+			else out += _T("[OPNA]");
 		}
 	}
 }
@@ -2782,6 +2898,21 @@ static void PlApplySasamiMapForce(CPlayList* pl, int force)
 	PlMidNotifyMarkViews();
 }
 
+static void PlApplySasamiFmForce(CPlayList* pl, int fmMode)
+{
+	int i = -1;
+	while ((i = pl->m_lc.GetNextItem(i, LVNI_ALL | LVNI_SELECTED)) >= 0) {
+		if (!pl->pc || i >= pl->playcnt || !pl->pc[i].fol[0]) continue;
+#ifndef _UNICODE
+		if (!SasamiExtIsFm(CStringW(pl->pc[i].fol))) continue;
+#else
+		if (!SasamiExtIsFm(pl->pc[i].fol)) continue;
+#endif
+		PlFmForceSet(pl->pc[i].fol, fmMode);
+	}
+	PlMidNotifyMarkViews();
+}
+
 int CPlayList::ShowTrackContextMenu(CPoint pt, CWnd* pOwner)
 {
 	int Lindex = -1;
@@ -2935,6 +3066,29 @@ int CPlayList::ShowTrackContextMenu(CPoint pt, CWnd* pOwner)
 				L"Muestra u oculta el monitor OPNA .fpy", L"SASAMI .fpy OPNA 레지스터/건반 모니터를 열거나 닫습니다", L"打开或关闭 SASAMI .fpy 的 OPNA 寄存器/键盘监视器", L"يظهر أو يخفي مراقب OPNA لـ .fpy",
 				L"Показывает или скрывает монитор OPNA для .fpy", L"Blendet den OPNA-Monitor fuer .fpy ein oder aus", L"Mostra ou oculta o monitor OPNA .fpy", L"Toont of verbergt de OPNA-monitor voor .fpy",
 				L"Pokazuje lub ukrywa monitor OPNA .fpy", L"SASAMI .fpy OPNA kayit/klavye izleyicisini acar veya kapatir"));
+		int fmForce = -1;
+		{
+			int i = -1;
+			while ((i = m_lc.GetNextItem(i, LVNI_ALL | LVNI_SELECTED)) >= 0) {
+				if (!pc || i >= playcnt || !pc[i].fol[0]) continue;
+#ifndef _UNICODE
+				if (!SasamiExtIsFm(CStringW(pc[i].fol))) continue;
+#else
+				if (!SasamiExtIsFm(pc[i].fol)) continue;
+#endif
+				fmForce = PlFmForceGet(pc[i].fol);
+				break;
+			}
+		}
+		const int fmResolved = (fmForce >= 0) ? fmForce : PlFmGlobalDefault();
+		CCustomPopupMenu* fm = menu.AddSubMenu(
+			LL14(L"ささみ☆ﾐ FMモード", L"Sasami FM mode", L"Mode FM Sasami", L"Modo FM Sasami", L"Modo FM Sasami", L"사사미 FM 모드", L"ささみ☆ﾐ FM模式", L"وضع FM لـ Sasami", L"Режим FM Sasami", L"Sasami-FM-Modus", L"Modo FM Sasami", L"Sasami FM-modus", L"Tryb FM Sasami", L"Sasami FM modu"),
+			LL14(L".fpy 再生音源。BEEP / OPN / OPNA（/B /N 相当）", L"Playback chip for .fpy: BEEP / OPN / OPNA", L"Puce de lecture .fpy : BEEP / OPN / OPNA", L"Chip di riproduzione .fpy: BEEP / OPN / OPNA", L"Chip de reproduccion .fpy: BEEP / OPN / OPNA", L".fpy 재생 음원: BEEP / OPN / OPNA", L".fpy 播放音源：BEEP / OPN / OPNA", L"شريحة تشغيل .fpy: BEEP / OPN / OPNA", L"Чип воспроизведения .fpy: BEEP / OPN / OPNA", L"Wiedergabechip fur .fpy: BEEP / OPN / OPNA", L"Chip de reproducao .fpy: BEEP / OPN / OPNA", L"Afspeelchip voor .fpy: BEEP / OPN / OPNA", L"Chip odtwarzania .fpy: BEEP / OPN / OPNA", L".fpy calma cipi: BEEP / OPN / OPNA"));
+		if (fm) {
+			fm->AddCheck(PL_CTX_SASAMIFM_BASE + 0, L"BEEP", fmResolved == 0);
+			fm->AddCheck(PL_CTX_SASAMIFM_BASE + 1, L"OPN", fmResolved == 1);
+			fm->AddCheck(PL_CTX_SASAMIFM_BASE + 2, L"OPNA", fmResolved == 2);
+		}
 	}
 	if (anySasamiMidi) {
 		menu.AddSeparator();
@@ -3793,6 +3947,9 @@ void CPlayList::HandleTrackContextCmd(int cmd)
 	}
 	else if (cmd == PL_CTX_FMMON) {
 		if (og && ::IsWindow(og->GetSafeHwnd())) og->ToggleFmMonitor();
+	}
+	else if (cmd >= PL_CTX_SASAMIFM_BASE && cmd <= PL_CTX_SASAMIFM_LAST) {
+		PlApplySasamiFmForce(this, (int)(cmd - PL_CTX_SASAMIFM_BASE));
 	}
 	else if (cmd >= PL_CTX_SASAMIM_BASE && cmd <= PL_CTX_SASAMIM_LAST) {
 		PlApplySasamiMapForce(this, (int)(cmd - PL_CTX_SASAMIM_BASE));

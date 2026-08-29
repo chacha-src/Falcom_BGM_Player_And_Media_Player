@@ -225,6 +225,8 @@ void PlMidDiskSet(LPCTSTR fol, int ch32, int mapKind, int sysMode, int mapForce)
 int PlMidProbe(LPCTSTR fol);          // 非MIDIは 0。未キャッシュなら走査して登録
 int PlMidProbeIfNeeded(LPCTSTR fol);  // 走査したとき 1
 void PlMidForceSet(LPCTSTR fol, int mapForce); // 0=自動 1..19=モニタと同じ
+int PlFmForceGet(LPCTSTR fol); // -1=グローバル従属 / 0=BEEP / 1=OPN / 2=OPNA
+void PlFmForceSet(LPCTSTR fol, int fmMode); // -1 clear, else 0..2
 void PlMidNotifyMarkViews();
 
 enum {
@@ -285,6 +287,8 @@ enum {
 	PL_CTX_SASAMIM_BASE = 74, // ささみ☆ﾐ 音源モード（mpy/mpw2）
 	PL_CTX_SASAMIM_LAST = PL_CTX_SASAMIM_BASE + 19,
 	PL_CTX_FMMON = 94, // SASAMI FPY FMモニタ
+	PL_CTX_SASAMIFM_BASE = 95, // ささみ☆ﾐ FMモード +0=BEEP +1=OPN +2=OPNA
+	PL_CTX_SASAMIFM_LAST = PL_CTX_SASAMIFM_BASE + 2,
 	PL_CTX_MOVE_BASE = 42500,
 	PL_CTX_COPY_BASE = 43500,
 	PL_CTX_MOVE_MAX = PL_CTX_MOVE_BASE + 999,

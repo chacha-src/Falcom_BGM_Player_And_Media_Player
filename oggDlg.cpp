@@ -23718,7 +23718,52 @@ static void BannerDrawCorrMeter(CDC& dst)
 	dst.SelectObject(oldF);
 }
 
-// GDI バナー時間表示(timerp の t3)と同じ実再生位置(秒)。プロンプト実行の基準時刻。
+// GDI バナー／FMモニタ共用の可聴位置。
+// DS 通知スレッドの g_heardBytes（累積書込 − oldw基準キュー）が本命。
+// GetCurrentPosition の WriteCursor はドライバ実装で先行量が足りず、密な CH だけ先走って見える。
+static long g_dsQueuedSamplesCache = 0;
+
+static void OggRefreshDsQueuedSamplesCache()
+{
+	extern volatile LONG g_dsDeviceOpBusy;
+	extern LPDIRECTSOUNDBUFFER8 m_dsb;
+	if (!m_dsb || InterlockedCompareExchange(&g_dsDeviceOpBusy, 0, 0) != 0)
+		return;
+	ULONG hp = 0, hw = 0;
+	const int bpf = PcmOutBytesPerFrame();
+	if (m_dsb->GetCurrentPosition(&hp, &hw) == DS_OK)
+		g_dsQueuedSamplesCache = DsQueuedSamples(hp, hw, bpf);
+}
+
+__int64 OggGetHeardPcmFrames()
+{
+	extern __int64 g_heardBytes;
+	extern __int64 g_dsWrittenBytes;
+	const int bpf = PcmOutBytesPerFrame();
+	const int bpfSafe = (bpf > 0) ? bpf : 4;
+
+	/* DS スレッドが更新する実聴バイト → フレーム（playb より正確） */
+	if (g_heardBytes > 0 && g_dsWrittenBytes > 0) {
+		__int64 fr = g_heardBytes / bpfSafe;
+		if (fr < 0) fr = 0;
+		return fr;
+	}
+
+	OggRefreshDsQueuedSamplesCache();
+	__int64 pb = 0;
+	{
+		std::lock_guard<std::mutex> lk(cl2);
+		pb = playb;
+	}
+	const long q = g_dsQueuedSamplesCache;
+	if (q > 0 && pb > q)
+		pb -= q;
+	else if (q > 0)
+		pb = 0;
+	if (pb < 0) pb = 0;
+	return pb;
+}
+
 double OggGetGdiPlaybackTimeSec()
 {
 	if (wavbit_sample_Hz <= 0) return 0.0;
@@ -23726,25 +23771,7 @@ double OggGetGdiPlaybackTimeSec()
 	const double rateDiv = (double)wavbit_sample_Hz / wavv2;
 	if (rateDiv <= 0.0) return 0.0;
 
-	__int64 pb = 0;
-	{
-		std::lock_guard<std::mutex> lk(cl2);
-		pb = playb;
-	}
-
-	static long s_lastQSamplesHeard = 0;
-	const int bpfHeardNow = PcmOutBytesPerFrame();
-	if (m_dsb && InterlockedCompareExchange(&g_dsDeviceOpBusy, 0, 0) == 0) {
-		ULONG hp = 0, hw = 0;
-		if (m_dsb->GetCurrentPosition(&hp, &hw) == DS_OK)
-			s_lastQSamplesHeard = DsQueuedSamples(hp, hw, bpfHeardNow);
-	}
-	const long qSamplesHeard = s_lastQSamplesHeard;
-	if (qSamplesHeard > 0 && pb > qSamplesHeard)
-		pb -= qSamplesHeard;
-	else if (qSamplesHeard > 0)
-		pb = 0;
-
+	const __int64 pb = OggGetHeardPcmFrames();
 	double t3 = (double)pb / rateDiv;
 	if ((mode == -9) && wavchannel > 2) t3 *= wavchannel / 2.0;
 	if (t3 < 0.0) t3 = 0.0;
@@ -23976,18 +24003,9 @@ void COggDlg::timerp()
 	// 実再生位置補正: playb はデコード先頭（先読み分だけ先）。DS 再生カーソルがまだ消化していない
 	// キュー分(qSamples)を差し引くと「実際に聴こえている位置」になる。時間表示・スライダーで共用。
 	// DS Lock 中は GetCurrentPosition もドライバで固まることがあるため、直前値を使う。
-	long qSamplesHeard = 0;
-	{
-		static long s_lastQSamplesHeard = 0;
-		const int bpfHeardNow = PcmOutBytesPerFrame();
-		g_outBytesPerFrame = bpfHeardNow; // DS スレッドの短フェード尺計算用に共有
-		if (m_dsb && InterlockedCompareExchange(&g_dsDeviceOpBusy, 0, 0) == 0) {
-			ULONG hp = 0, hw = 0;
-			if (m_dsb->GetCurrentPosition(&hp, &hw) == DS_OK)
-				s_lastQSamplesHeard = DsQueuedSamples(hp, hw, bpfHeardNow);
-		}
-		qSamplesHeard = s_lastQSamplesHeard;
-	}
+	OggRefreshDsQueuedSamplesCache();
+	g_outBytesPerFrame = PcmOutBytesPerFrame(); // DS スレッドの短フェード尺計算用に共有
+	const long qSamplesHeard = g_dsQueuedSamplesCache;
 
 	//時間
 	// ※ttt はグローバル(UINT)。ここにローカル ttt を置くと MP カラオケ/3秒ルール等が
@@ -24326,6 +24344,14 @@ void COggDlg::timerp()
 			&& m_MidiMonitorDlg->IsWindowVisible() && !m_MidiMonitorDlg->IsIconic()
 			&& Ms2DrawDue(ms2))
 			m_MidiMonitorDlg->UpdateWindow();
+	}
+	// FM モニタ: 可聴サンプル位置へ同期（MIDI と同じ timerp 駆動）
+	if (plf == 1 && m_FmMonitorDlg && ::IsWindow(m_FmMonitorDlg->GetSafeHwnd())) {
+		m_FmMonitorDlg->PumpSyncNow();
+		if (::IsWindow(m_FmMonitorDlg->GetSafeHwnd())
+			&& m_FmMonitorDlg->IsWindowVisible() && !m_FmMonitorDlg->IsIconic()
+			&& Ms2DrawDue(ms2))
+			m_FmMonitorDlg->UpdateWindow();
 	}
 
 	// スペアナは不透明で先に描く（ピーク／現在を保持）。バナー文字は後から SRCINVERT（XOR）。

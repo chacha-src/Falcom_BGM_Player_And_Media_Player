@@ -184,7 +184,9 @@ BOOL KpiInstall_DownloadAndExtract(LPCTSTR exeDir, KpiInstallProgressFn progress
 
 	const TCHAR* url = L"https://ppp.oohara.jp/download/Plugins.zip";
 	const DWORD flags = INTERNET_FLAG_RELOAD | INTERNET_FLAG_NO_CACHE_WRITE
-		| INTERNET_FLAG_KEEP_CONNECTION | INTERNET_FLAG_NO_UI;
+		| INTERNET_FLAG_KEEP_CONNECTION | INTERNET_FLAG_NO_UI
+		| INTERNET_FLAG_SECURE
+		| INTERNET_FLAG_IGNORE_CERT_DATE_INVALID | INTERNET_FLAG_IGNORE_CERT_CN_INVALID;
 	HINTERNET hUrl = InternetOpenUrl(hInet, url, NULL, 0, flags, 0);
 	if (!hUrl) {
 		InternetCloseHandle(hInet);
@@ -280,5 +282,177 @@ BOOL KpiInstall_DownloadAndExtract(LPCTSTR exeDir, KpiInstallProgressFn progress
 		progress(ok ? 100 : 92, ctx);
 		KpiInstallPump();
 	}
+	return ok;
+}
+
+// ---------------------------------------------------------------------------
+// kbsasami サイレント更新
+// ZIP: https://ppp.oohara.jp/download/kbsasami.zip
+// 中身: kbsasami\kbsasami.kpi (+txt) / kbsasami\x64\kbsasami.kpi
+// 配置: exeDir\Plugins\kbsasami\ …
+// ---------------------------------------------------------------------------
+
+static const TCHAR* KBSASAMI_ZIP_URL = L"https://ppp.oohara.jp/download/kbsasami.zip";
+
+static time_t KpiInstallFileMtimeUtc(LPCTSTR path)
+{
+	if (!path || !path[0]) return 0;
+	WIN32_FILE_ATTRIBUTE_DATA fad = {};
+	if (!GetFileAttributesEx(path, GetFileExInfoStandard, &fad))
+		return 0;
+	ULARGE_INTEGER ull;
+	ull.LowPart = fad.ftLastWriteTime.dwLowDateTime;
+	ull.HighPart = fad.ftLastWriteTime.dwHighDateTime;
+	if (ull.QuadPart < 116444736000000000ULL)
+		return 0;
+	return (time_t)((ull.QuadPart - 116444736000000000ULL) / 10000000ULL);
+}
+
+// Last-Modified（UTC）。失敗は 0。期限切れ証明書のサイト向けに DATE/CN 無視。
+static time_t KpiInstallHttpLastModified(LPCTSTR url)
+{
+	if (!url || !url[0]) return 0;
+	HINTERNET hInet = InternetOpen(L"oggKbsasamiUpdate/1.0", INTERNET_OPEN_TYPE_PRECONFIG, NULL, NULL, 0);
+	if (!hInet) return 0;
+	DWORD timeout = 8000;
+	InternetSetOption(hInet, INTERNET_OPTION_CONNECT_TIMEOUT, &timeout, sizeof(timeout));
+	InternetSetOption(hInet, INTERNET_OPTION_RECEIVE_TIMEOUT, &timeout, sizeof(timeout));
+
+	CString noCache;
+	noCache.Format(L"%s?t=%lld", url, (long long)time(NULL));
+	const DWORD flags = INTERNET_FLAG_RELOAD | INTERNET_FLAG_NO_CACHE_WRITE | INTERNET_FLAG_PRAGMA_NOCACHE
+		| INTERNET_FLAG_SECURE
+		| INTERNET_FLAG_IGNORE_CERT_DATE_INVALID | INTERNET_FLAG_IGNORE_CERT_CN_INVALID
+		| INTERNET_FLAG_NO_UI;
+	HINTERNET hUrl = InternetOpenUrl(hInet, noCache, NULL, 0, flags, 0);
+	if (!hUrl) {
+		InternetCloseHandle(hInet);
+		return 0;
+	}
+	DWORD status = 0, slen = sizeof(status);
+	if (!HttpQueryInfo(hUrl, HTTP_QUERY_STATUS_CODE | HTTP_QUERY_FLAG_NUMBER, &status, &slen, NULL)
+		|| status != 200) {
+		InternetCloseHandle(hUrl);
+		InternetCloseHandle(hInet);
+		return 0;
+	}
+	time_t result = 0;
+	char rawDate[256] = {};
+	DWORD rawLen = sizeof(rawDate);
+	if (HttpQueryInfoA(hUrl, HTTP_QUERY_LAST_MODIFIED, rawDate, &rawLen, NULL)) {
+		SYSTEMTIME st = {};
+		if (InternetTimeToSystemTimeA(rawDate, &st, 0)) {
+			FILETIME ft;
+			SystemTimeToFileTime(&st, &ft);
+			ULARGE_INTEGER ull;
+			ull.LowPart = ft.dwLowDateTime;
+			ull.HighPart = ft.dwHighDateTime;
+			result = (time_t)((ull.QuadPart - 116444736000000000ULL) / 10000000ULL);
+		}
+	}
+	InternetCloseHandle(hUrl);
+	InternetCloseHandle(hInet);
+	return result;
+}
+
+static BOOL KpiInstallHttpDownloadFile(LPCTSTR url, LPCTSTR destPath)
+{
+	if (!url || !destPath) return FALSE;
+	DeleteFile(destPath);
+	HINTERNET hInet = InternetOpen(L"oggKbsasamiUpdate/1.0", INTERNET_OPEN_TYPE_PRECONFIG, NULL, NULL, 0);
+	if (!hInet) return FALSE;
+	DWORD timeout = 120000;
+	InternetSetOption(hInet, INTERNET_OPTION_CONNECT_TIMEOUT, &timeout, sizeof(timeout));
+	InternetSetOption(hInet, INTERNET_OPTION_RECEIVE_TIMEOUT, &timeout, sizeof(timeout));
+	InternetSetOption(hInet, INTERNET_OPTION_SEND_TIMEOUT, &timeout, sizeof(timeout));
+
+	CString noCache;
+	noCache.Format(L"%s?t=%lld", url, (long long)time(NULL));
+	const DWORD flags = INTERNET_FLAG_RELOAD | INTERNET_FLAG_NO_CACHE_WRITE | INTERNET_FLAG_PRAGMA_NOCACHE
+		| INTERNET_FLAG_SECURE | INTERNET_FLAG_KEEP_CONNECTION
+		| INTERNET_FLAG_IGNORE_CERT_DATE_INVALID | INTERNET_FLAG_IGNORE_CERT_CN_INVALID
+		| INTERNET_FLAG_NO_UI;
+	HINTERNET hUrl = InternetOpenUrl(hInet, noCache, NULL, 0, flags, 0);
+	if (!hUrl) {
+		InternetCloseHandle(hInet);
+		return FALSE;
+	}
+	DWORD status = 0, slen = sizeof(status);
+	if (!HttpQueryInfo(hUrl, HTTP_QUERY_STATUS_CODE | HTTP_QUERY_FLAG_NUMBER, &status, &slen, NULL)
+		|| status < 200 || status >= 300) {
+		InternetCloseHandle(hUrl);
+		InternetCloseHandle(hInet);
+		return FALSE;
+	}
+	HANDLE hFile = CreateFile(destPath, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+	if (hFile == INVALID_HANDLE_VALUE) {
+		InternetCloseHandle(hUrl);
+		InternetCloseHandle(hInet);
+		return FALSE;
+	}
+	BYTE buf[16384];
+	DWORD read = 0;
+	ULONGLONG total = 0;
+	BOOL ok = TRUE;
+	while (InternetReadFile(hUrl, buf, sizeof(buf), &read) && read > 0) {
+		DWORD wr = 0;
+		if (!WriteFile(hFile, buf, read, &wr, NULL) || wr != read) {
+			ok = FALSE;
+			break;
+		}
+		total += read;
+	}
+	CloseHandle(hFile);
+	InternetCloseHandle(hUrl);
+	InternetCloseHandle(hInet);
+	if (!ok || total < 1000ULL) {
+		DeleteFile(destPath);
+		return FALSE;
+	}
+	return TRUE;
+}
+
+BOOL KpiInstall_SilentUpdateKbsasami(LPCTSTR exeDir)
+{
+	if (!exeDir || !exeDir[0])
+		return FALSE;
+
+	DWORD netFlags = 0;
+	if (!InternetGetConnectedState(&netFlags, 0))
+		return FALSE;
+
+	TCHAR pluginsDir[MAX_PATH * 2] = {};
+	_sntprintf_s(pluginsDir, _TRUNCATE, L"%sPlugins", exeDir);
+	TCHAR localX86[MAX_PATH * 2] = {};
+	TCHAR localX64[MAX_PATH * 2] = {};
+	_sntprintf_s(localX86, _TRUNCATE, L"%s\\kbsasami\\kbsasami.kpi", pluginsDir);
+	_sntprintf_s(localX64, _TRUNCATE, L"%s\\kbsasami\\x64\\kbsasami.kpi", pluginsDir);
+
+	const time_t t86 = KpiInstallFileMtimeUtc(localX86);
+	const time_t t64 = KpiInstallFileMtimeUtc(localX64);
+	const BOOL missing = (t86 == 0 || t64 == 0);
+	const time_t localNewest = (t86 > t64) ? t86 : t64;
+
+	const time_t serverMod = KpiInstallHttpLastModified(KBSASAMI_ZIP_URL);
+	// 両方あり、かつサーバがローカルより新しくない → 何もしない
+	if (!missing && serverMod != 0 && serverMod <= localNewest + 120)
+		return FALSE;
+	// ローカルありで日付が取れない → 毎回落とさない
+	if (!missing && serverMod == 0)
+		return FALSE;
+
+	CreateDirectory(pluginsDir, NULL);
+
+	TCHAR tmp[MAX_PATH] = {};
+	GetTempPath(MAX_PATH, tmp);
+	TCHAR zipPath[MAX_PATH] = {};
+	_sntprintf_s(zipPath, _TRUNCATE, L"%sogg_kpi_kbsasami.zip", tmp);
+	if (!KpiInstallHttpDownloadFile(KBSASAMI_ZIP_URL, zipPath))
+		return FALSE;
+
+	CString err;
+	// ZIP ルートが kbsasami\… なので Plugins\ 直下へ展開する
+	const BOOL ok = KpiInstallExtractZip(zipPath, pluginsDir, err);
+	DeleteFile(zipPath);
 	return ok;
 }

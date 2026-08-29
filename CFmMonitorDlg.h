@@ -18,6 +18,7 @@ public:
 #endif
 
 	void IdlePulse();
+	void PumpSyncNow(); /* timerp: 可聴位置へ dump 同期（UpdateWindow は呼び出し側） */
 	void DetachForDestroy();
 	void LayoutHelpBtn();
 	void PersistGeom();
@@ -39,12 +40,14 @@ protected:
 	afx_msg void OnSysCommand(UINT nID, LPARAM lParam);
 
 private:
-	enum { HIST_MAX = 128 };
+	enum { HIST_MAX = 256 }; /* リングと同程度。tick 単位 dump を遅延分保持 */
 
 	int PollDump();
+	void PushHistDump(const SasamiFmMonDump& d);
 	void ApplyDump(const SasamiFmMonDump& d);
 	void TickFades();
-	int DelayMs() const;
+	void InvalidateDirtyRegions();
+	uint64_t HeardSample(uint32_t sampleRate);
 	int PcmRows() const;
 	bool EnsureFrameBuffer(CDC& refDC, int w, int h);
 	void ReleasePaintBuffers();
@@ -68,7 +71,7 @@ private:
 	SasamiFmMonDump m_dump;
 	SasamiFmMonDump m_prev;
 	SasamiFmMonDump m_hist[HIST_MAX];
-	ULONGLONG m_histMs[HIST_MAX];
+	uint64_t m_histSamp[HIST_MAX]; /* dump.curSample（デコード書き込み位置） */
 	int m_histN;
 	int m_histHead;
 	BYTE m_fade[0x200];
@@ -80,6 +83,11 @@ private:
 	wchar_t m_lastSong[260];
 	uint32_t m_lastSeq;
 	uint64_t m_lastCurSample;
+	uint64_t m_lastHeardSamp;
+	uint64_t m_heardAnchor;
+	LONGLONG m_heardQpc;
+	LONGLONG m_heardFreq;
+	uint32_t m_ringGenLast; /* fmmon_ring.opna の消費済み gen */
 	int m_haveDump;
 	int m_dirtyHead;
 	int m_dirtyHex;
@@ -91,6 +99,7 @@ private:
 	int m_persistAge;
 	int m_userClosing; /* 1=ユーザーが×で閉じた → fmmonwindow=0 */
 	ULONGLONG m_lastPollMs;
+	int m_lastPlayy; /* FmMonIsLive() の前回値。停止遷移で鍵盤クリア */
 
 	struct Layout {
 		int w, h, dpi;

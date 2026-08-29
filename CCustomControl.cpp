@@ -2402,6 +2402,12 @@ static COLORREF CCC_MarkChipBg(const CString& lab)
         return RGB(230, 176, 255);
     if (lab.CompareNoCase(_T("MONO")) == 0 || lab.CompareNoCase(_T("LR")) == 0)
         return RGB(186, 236, 210);
+    if (lab.CompareNoCase(_T("BEEP")) == 0)
+        return RGB(255, 210, 170);
+    if (lab.CompareNoCase(_T("OPN")) == 0)
+        return RGB(186, 220, 255);
+    if (lab.CompareNoCase(_T("OPNA")) == 0)
+        return RGB(200, 255, 210);
     BOOL audioNum = !lab.IsEmpty();
     for (int k = 0; k < lab.GetLength(); ++k) {
         const TCHAR c = lab[k];

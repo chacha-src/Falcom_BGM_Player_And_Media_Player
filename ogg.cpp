@@ -9,6 +9,7 @@
 #include "CFmMonitorDlg.h"
 #include "CMediaPlayerDlg.h"
 #include "UpdateCheck.h"
+#include "KpiPluginInstall.h"
 #include "OfflineHelp.h"
 #include "SongParams.h"
 #include "ProAudio.h"
@@ -2188,6 +2189,8 @@ BOOL COggApp::InitInstance()
 	// モード選択画面やメイン画面を開く前に更新を確認する。
 	// 更新があればそのまま適用・再起動し、なければ通常の起動を続ける。
 	RunStartupUpdateCheck();
+	// kbsasami.kpi（x86/x64）をサイレント更新。plug() 前なので DLL ロック無し。
+	KpiInstall_SilentUpdateKbsasami(karento2);
 	OfflineHelpEnsureAvailable();
 
 	// 起動時のモード選択(ファルコムbgm特化型画面 / メディアプレイヤー画面)
