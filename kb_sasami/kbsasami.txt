@@ -22,7 +22,9 @@ PC-98 ささみ (SASAMI) の曲データを再生します。
                          1 = VST 側を想定 (本家では通常 0)
   kbsasami.raira
     0 = 本家互換 (vst をそのまま解釈)
-    1 = このアプリ専用。vst の 0 と 1 を内部で入れ替える
+    1 = このアプリ専用。vst の 0 と 1 を内部で入れ替え、
+        FPY 再生時は %TEMP%\ogg_kbsasami\ に OPNA レジスタ dump
+        （fmmon_live.opna / <曲名>.opna）を出して FM モニタと同期する
 
   このアプリは常に raira=1 を書き込み、midPlayPrefer に合わせて
   vst に逆値を自動代入します。結果として:

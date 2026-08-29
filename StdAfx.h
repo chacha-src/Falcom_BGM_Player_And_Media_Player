@@ -816,6 +816,10 @@ struct save{
 	// 最後に /top/abcd へ回数を足した時刻(UTC time_t)。0=未加算。
 	// 前1日以内に加算済みなら再加算しない（失敗リトライで回数だけ増えるのを防ぐ）。
 	__int64 updateDlCountTime;
+
+	// --- FMモニタ (SASAMI FPY / OPNA。末尾追記) ---
+	int fmmonwindow;
+	int fmmonx, fmmony, fmmonw, fmmonh;
 };
 extern save savedata;
 /* コード間隔(ms)。16..500。旧.dat や未設定は 25。 */

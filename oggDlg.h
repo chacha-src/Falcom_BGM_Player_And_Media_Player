@@ -7,6 +7,7 @@
 
 // プレイリスト行の表示用メタデータを og 側へ反映(未再生時のバナー/情報パネル用)
 void ApplyPlaylistRowDisplay(const playlistdata0& row);
+void OggPersistSaveDatNow();
 
 #ifndef WM_TIMERP_VSYNC_TICK
 #define WM_TIMERP_VSYNC_TICK (WM_APP + 70)
@@ -28,8 +29,8 @@ void ApplyPlaylistRowDisplay(const playlistdata0& row);
 #endif
 // MP から EQ/ピアノ/アナの開閉を遅延実行(ボタンハンドラ内 Create/Destroy 回避)
 // wParam: 1=piano toggle, 2=analyzer toggle, 3=MIDI monitor toggle
-//         10..17=起動時サブUI復元(1メッセージ=1 Create、次を PostMessage)
-//         10=EQ 11=ピアノ 12=Tune 13=アナライザ 14=プロンプト 15=ロール 16=DJパッド 17=MIDIモニタ
+//         10..18=起動時サブUI復元(1メッセージ=1 Create、次を PostMessage)
+//         10=EQ 11=ピアノ 12=Tune 13=アナライザ 14=プロンプト 15=ロール 16=DJパッド 17=MIDIモニタ 18=FMモニタ
 #ifndef WM_OGG_TOGGLE_SUBUI
 #define WM_OGG_TOGGLE_SUBUI (WM_APP + 102)
 #endif
@@ -94,6 +95,7 @@ class CPianoRoll;
 class CPianoRollTuneDlg;
 class CAnalyzerDlg;
 class CMidiMonitorDlg;
+class CFmMonitorDlg;
 class CDouga;
 class CPlayList;
 class CRender;
@@ -123,6 +125,7 @@ public:
 	void TogglePianoRoll();
 	void ToggleAnalyzer();
 	void ToggleMidiMonitor();
+	void ToggleFmMonitor();
 	void HideMidiMonitorForMinimize();
 	void RestoreMidiMonitorAfterMinimize();
 	void ShowPianoRollTune();
@@ -182,6 +185,7 @@ public:
 	CPianoRollTuneDlg* m_PianoRollTuneDlg = nullptr;
 	CAnalyzerDlg* m_AnalyzerDlg = nullptr;
 	CMidiMonitorDlg* m_MidiMonitorDlg = nullptr;
+	CFmMonitorDlg* m_FmMonitorDlg = nullptr;
 	int m_midiMonHiddenForMin = 0; // 本体最小化で MIDI モニタを隠した（復帰で戻す）
 	bool m_cascadePrevValid = false;
 	CRect m_cascadePrevRc;

@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 // 設定・プレイリスト等の .dat を exe 隣の oggYSEDbgm_uni_avx2.dat (zstd) にまとめる。
 // 実体は %TEMP% へ必要時展開し、保存時にアーカイブへ戻す。
 
@@ -20,6 +20,8 @@ BOOL DatArc_Commit(LPCTSTR leaf);
 BOOL DatArc_Delete(LPCTSTR leaf);
 BOOL DatArc_Rename(LPCTSTR fromLeaf, LPCTSTR toLeaf);
 BOOL DatArc_FlushAll();
+/* ステージ指紋を無効化して次の Commit で必ず再読込させる */
+void DatArc_InvalidateLeaf(LPCTSTR leaf);
 
 // 連続 Save 時に全アーカイブ再圧縮を1回にまとめる (TRUEで保留、FALSEで保留分を flush)
 void DatArc_FlushSuspend(BOOL suspend);

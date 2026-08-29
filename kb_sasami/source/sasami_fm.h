@@ -10,6 +10,8 @@ public:
 	~SasamiFmPlayer();
 	bool Open(const SasamiSong& song, uint32_t sampleRate, const wchar_t* rhythmDir);
 	void Close();
+	// raira=1 時: %TEMP%\ogg_kbsasami\ に OPNA レジスタ dump を出す（FMモニタ同期用）
+	void SetFmMonDump(int enable, const wchar_t* sourcePath);
 	uint32_t Render(int16_t* interleavedStereo, uint32_t frames);
 	uint64_t SeekSample(uint64_t sample);
 	uint64_t TotalSamples() const { return m_totalSamples; }

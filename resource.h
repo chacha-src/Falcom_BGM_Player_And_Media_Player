@@ -276,6 +276,8 @@
 #define IDC_CD_ABCLR                    4382
 #define IDD_MIDIMONITOR                 277
 #define IDD_MM_HELP                     278
+#define IDD_FMMONITOR                   348
+#define IDD_FM_HELP                     349
 #define IDR_SASAMI_GS                   279
 #define IDR_SASAMI_XG                   280
 #define IDR_SASAMI_EX                   346
@@ -1545,6 +1547,7 @@
 #define IDC_VST_MULTI_BROWSE            4324
 #define IDC_VST_SCAN_NOW                4325
 #define IDC_MM_HELP                     4326
+#define IDC_FM_HELP                     4327
 #define IDC_SLIDER_SURROUND             4327
 #define IDC_STATIC_R_SURROUND           4328
 #define IDC_STATIC_SURROUND_VAL         4329

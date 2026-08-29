@@ -189,6 +189,8 @@ DWORD __fastcall KbSasamiDecoder::Open(const KPI_MEDIAINFO* cpRequest, IKpiFile*
 		if (sl) *sl = 0;
 		else plugDir[0] = 0;
 		if (!m_fm.Open(s_song, rate, plugDir)) return 0;
+		if (m_raira)
+			m_fm.SetFmMonDump(1, pathForKind);
 		m_MediaInfo.dwSampleRate = m_fm.SampleRate();
 		m_MediaInfo.dwChannels = 2;
 		m_MediaInfo.nBitsPerSample = 16;

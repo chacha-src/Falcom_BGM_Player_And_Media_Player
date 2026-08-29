@@ -1,4 +1,4 @@
-// PlayList.cpp : 実装ファイル
+﻿// PlayList.cpp : 実装ファイル
 //
 
 #include "stdafx.h"
@@ -22,8 +22,10 @@
 #include "VstMidiEngine.h"
 #include "PluginAimp.h"
 #include "kb_sasami/source/sasami_midi.h"
+#include "kb_sasami/source/sasami_file.h"
 #include "mp3image.h"
 #include "CMidiMonitorDlg.h"
+#include "CFmMonitorDlg.h"
 #include "CMediaPlayerDlg.h"
 #include "CMissingFilesDlg.h"
 #include "MpPlayerAddons.h"
@@ -2892,6 +2894,7 @@ int CPlayList::ShowTrackContextMenu(CPoint pt, CWnd* pOwner)
 	int midiForce = 0;
 	BOOL anyMidi = FALSE;
 	BOOL anySasamiMidi = FALSE;
+	BOOL anySasamiFm = FALSE;
 	BOOL anyOtherMidi = FALSE;
 	{
 		int i = -1;
@@ -2899,11 +2902,14 @@ int CPlayList::ShowTrackContextMenu(CPoint pt, CWnd* pOwner)
 			if (!pc || i >= playcnt || !pc[i].fol[0]) continue;
 #ifndef _UNICODE
 			const int isSas = SasamiExtIsMidi(CStringW(pc[i].fol)) ? 1 : 0;
+			const int isFm = SasamiExtIsFm(CStringW(pc[i].fol)) ? 1 : 0;
 			const int isMid = VstIsMidiExt(CStringW(pc[i].fol)) ? 1 : 0;
 #else
 			const int isSas = SasamiExtIsMidi(pc[i].fol) ? 1 : 0;
+			const int isFm = SasamiExtIsFm(pc[i].fol) ? 1 : 0;
 			const int isMid = VstIsMidiExt(pc[i].fol) ? 1 : 0;
 #endif
+			if (isFm) anySasamiFm = TRUE;
 			if (!isMid) continue;
 			if (isSas) anySasamiMidi = TRUE;
 			else anyOtherMidi = TRUE;
@@ -2916,6 +2922,19 @@ int CPlayList::ShowTrackContextMenu(CPoint pt, CWnd* pOwner)
 			}
 			anyMidi = TRUE;
 		}
+	}
+	if (anySasamiFm) {
+		menu.AddSeparator();
+		menu.AddCheck(PL_CTX_FMMON,
+			LL14(L"FMモニタ", L"FM Monitor", L"Moniteur FM", L"Monitor FM",
+				L"Monitor FM", L"FM 모니터", L"FM 监视器", L"مراقب FM",
+				L"FM-монитор", L"FM-Monitor", L"Monitor FM", L"FM-monitor",
+				L"Monitor FM", L"FM izleyici"),
+			savedata.fmmonwindow ? TRUE : FALSE,
+			LL14(L"SASAMI .fpy の OPNA レジスタ／鍵盤モニタを開く／閉じる", L"Show or hide the OPNA register/keyboard monitor for SASAMI .fpy", L"Affiche ou masque le moniteur OPNA .fpy", L"Mostra o nasconde il monitor OPNA .fpy",
+				L"Muestra u oculta el monitor OPNA .fpy", L"SASAMI .fpy OPNA 레지스터/건반 모니터를 열거나 닫습니다", L"打开或关闭 SASAMI .fpy 的 OPNA 寄存器/键盘监视器", L"يظهر أو يخفي مراقب OPNA لـ .fpy",
+				L"Показывает или скрывает монитор OPNA для .fpy", L"Blendet den OPNA-Monitor fuer .fpy ein oder aus", L"Mostra ou oculta o monitor OPNA .fpy", L"Toont of verbergt de OPNA-monitor voor .fpy",
+				L"Pokazuje lub ukrywa monitor OPNA .fpy", L"SASAMI .fpy OPNA kayit/klavye izleyicisini acar veya kapatir"));
 	}
 	if (anySasamiMidi) {
 		menu.AddSeparator();
@@ -3771,6 +3790,9 @@ void CPlayList::HandleTrackContextCmd(int cmd)
 	}
 	else if (cmd == PL_CTX_MIDIMON) {
 		if (og && ::IsWindow(og->GetSafeHwnd())) og->ToggleMidiMonitor();
+	}
+	else if (cmd == PL_CTX_FMMON) {
+		if (og && ::IsWindow(og->GetSafeHwnd())) og->ToggleFmMonitor();
 	}
 	else if (cmd >= PL_CTX_SASAMIM_BASE && cmd <= PL_CTX_SASAMIM_LAST) {
 		PlApplySasamiMapForce(this, (int)(cmd - PL_CTX_SASAMIM_BASE));

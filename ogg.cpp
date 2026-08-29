@@ -6,6 +6,7 @@
 #include "ogg.h"
 #include "oggDlg.h"
 #include "CMidiMonitorDlg.h"
+#include "CFmMonitorDlg.h"
 #include "CMediaPlayerDlg.h"
 #include "UpdateCheck.h"
 #include "OfflineHelp.h"
@@ -192,6 +193,8 @@ BOOL COggApp::OnIdle(LONG lCount)
 {
 	if (og && og->m_MidiMonitorDlg && ::IsWindow(og->m_MidiMonitorDlg->GetSafeHwnd()))
 		og->m_MidiMonitorDlg->IdlePulse();
+	if (og && og->m_FmMonitorDlg && ::IsWindow(og->m_FmMonitorDlg->GetSafeHwnd()))
+		og->m_FmMonitorDlg->IdlePulse();
 	return CWinApp::OnIdle(lCount); // TRUE を返すと OnIdle が回り続けて他の UI を食う
 }
 
@@ -394,6 +397,11 @@ BOOL COggApp::InitInstance()
 	savedata.midiOutName[0] = 0;
 	savedata.midimonwindow = 0;
 	savedata.midimonx = -1;
+	savedata.fmmonwindow = 0;
+	savedata.fmmonx = -1;
+	savedata.fmmony = 0;
+	savedata.fmmonw = 0;
+	savedata.fmmonh = 0;
 	savedata.midimony = 0;
 	savedata.midimonw = 0;
 	savedata.midimonh = 0;
@@ -1997,6 +2005,57 @@ BOOL COggApp::InitInstance()
 		savedata.midimon3dyaw = -220;
 		savedata.midimon3dpitch = 260;
 		savedata.midimon3dzoom = 100;
+	}
+	if (datFileSize < (int)(offsetof(save, fmmonwindow) + sizeof(savedata.fmmonwindow))) {
+		savedata.fmmonwindow = 0;
+		savedata.fmmonx = -1;
+		savedata.fmmony = 0;
+		savedata.fmmonw = 0;
+		savedata.fmmonh = 0;
+	} else if (savedata.fmmonw < 200 || savedata.fmmonh < 120
+		|| savedata.fmmonw > 10000 || savedata.fmmonh > 10000) {
+		savedata.fmmonw = 0;
+		savedata.fmmonh = 0;
+	}
+	if (savedata.fmmonwindow != 0 && savedata.fmmonwindow != 1)
+		savedata.fmmonwindow = 0;
+	/* DatArc 内 fmmon_geom.dat（なければ旧 exe隣 .bin）で開閉・位置を上書き */
+	{
+		CString staged = DatArc_Path(L"fmmon_geom.dat");
+		wchar_t gp[MAX_PATH] = {};
+		if (!staged.IsEmpty())
+			wcsncpy_s(gp, staged, _TRUNCATE);
+		else {
+			GetModuleFileNameW(NULL, gp, MAX_PATH);
+			wchar_t* sl = wcsrchr(gp, L'\\');
+			if (sl) sl[1] = 0;
+			wcscat_s(gp, L"fmmon_geom.bin");
+		}
+		HANDLE hf = CreateFileW(gp, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+		if (hf == INVALID_HANDLE_VALUE && staged.IsEmpty() == FALSE) {
+			/* staged 失敗時は exe隣も試す */
+			GetModuleFileNameW(NULL, gp, MAX_PATH);
+			wchar_t* sl = wcsrchr(gp, L'\\');
+			if (sl) sl[1] = 0;
+			wcscat_s(gp, L"fmmon_geom.bin");
+			hf = CreateFileW(gp, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+		}
+		if (hf != INVALID_HANDLE_VALUE) {
+			struct { char magic[4]; int version; int open; int x, y, w, h; } g = {};
+			DWORD rd = 0;
+			if (ReadFile(hf, &g, sizeof(g), &rd, NULL) && rd == sizeof(g)
+				&& g.magic[0] == 'F' && g.magic[1] == 'M' && g.magic[2] == 'M' && g.magic[3] == 'G'
+				&& g.version == 1) {
+				if (g.open == 0 || g.open == 1) savedata.fmmonwindow = g.open;
+				if (g.w >= 280 && g.w <= 4000) savedata.fmmonw = g.w;
+				if (g.h >= 180 && g.h <= 3000) savedata.fmmonh = g.h;
+				if (g.x > -30000 && g.y > -30000) {
+					savedata.fmmonx = g.x;
+					savedata.fmmony = g.y;
+				}
+			}
+			CloseHandle(hf);
+		}
 	}
 	{
 		extern void MpFeatInitDefaults();

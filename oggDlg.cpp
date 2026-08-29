@@ -30,6 +30,7 @@ int flacmode = 0;
 #include "CPianoRollTuneDlg.h"
 #include "CAnalyzerDlg.h"
 #include "CMidiMonitorDlg.h"
+#include "CFmMonitorDlg.h"
 #include "CProToolsDlg.h"
 #include "TranscodeExport.h"
 #include "CPromptEngine.h"
@@ -1961,6 +1962,7 @@ COggDlg::COggDlg(CWnd* pParent /*=NULL*/)
 	m_PianoRollTuneDlg = new CPianoRollTuneDlg();
 	m_AnalyzerDlg = new CAnalyzerDlg();
 	m_MidiMonitorDlg = new CMidiMonitorDlg();
+	m_FmMonitorDlg = new CFmMonitorDlg();
 }
 
 void COggDlg::DoDataExchange(CDataExchange* pDX)
@@ -23114,6 +23116,11 @@ BOOL COggDlg::DestroyWindow()
 		m_MidiMonitorDlg->DetachForDestroy();
 		m_MidiMonitorDlg->DestroyWindow();
 	}
+	if (m_FmMonitorDlg && ::IsWindow(m_FmMonitorDlg->GetSafeHwnd())) {
+		savedata.fmmonwindow = 1;
+		m_FmMonitorDlg->DetachForDestroy();
+		m_FmMonitorDlg->DestroyWindow();
+	}
 	if (::IsWindow(m_PianoRollTuneDlg->GetSafeHwnd())) {
 		m_PianoRollTuneDlg->DestroyWindow();
 	}
@@ -23122,6 +23129,7 @@ BOOL COggDlg::DestroyWindow()
 	delete m_PianoRollTuneDlg; m_PianoRollTuneDlg = nullptr;
 	delete m_AnalyzerDlg; m_AnalyzerDlg = nullptr;
 	delete m_MidiMonitorDlg; m_MidiMonitorDlg = nullptr;
+	delete m_FmMonitorDlg; m_FmMonitorDlg = nullptr;
 	if (m_pDlgColor)delete m_pDlgColor;
 	if (ptl) ptl->Release();
 	if (pcdl) pcdl->Release();
@@ -25784,7 +25792,7 @@ void timerog1(UINT nIDEvent)
 				return;
 			}
 		}
-		// 同期一括 Create はしない。1窓ずつ WM_OGG_TOGGLE_SUBUI(10..16) で復元。
+		// 同期一括 Create はしない。1窓ずつ WM_OGG_TOGGLE_SUBUI(10..18) で復元。
 		og->PostMessage(WM_OGG_TOGGLE_SUBUI, 10, 0);
 	}
 
@@ -30213,11 +30221,18 @@ void COggDlg::OnCheck6()
 	}
 }
 
+static void OggPersistSaveDat();
+void OggPersistSaveDatNow()
+{
+	OggPersistSaveDat();
+}
+
 static void OggPersistSaveDat()
 {
 	TCHAR tmp_savedir[1024];
 	_tgetcwd(tmp_savedir, 1000);
 	DatArc_Chdir();
+	DatArc_InvalidateLeaf(L"oggYSEDbgmu.dat");
 	CFile ab;
 #if _UNICODE
 	if (ab.Open(L"oggYSEDbgmu.dat", CFile::modeCreate | CFile::modeWrite | CFile::shareExclusive, NULL) == TRUE) {
@@ -31156,8 +31171,9 @@ LRESULT COggDlg::OnToggleSubUiMsg(WPARAM wParam, LPARAM)
 		ToggleAnalyzer();
 	else if (wParam == 3)
 		ToggleMidiMonitor();
-	else if (wParam >= 10 && wParam <= 17) {
+	else if (wParam >= 10 && wParam <= 18) {
 		// 起動時サブUI復元: 開くだけ(トグルしない)。1メッセージ=最大1 Create。
+		// 10=EQ .. 17=MIDIモニタ 18=FMモニタ
 		// SW_SHOWNOACTIVATE でフォーカス奪取・ちらつきを抑える。
 		g_oggSubUiRestoring = 1;
 		try {
@@ -31235,6 +31251,18 @@ LRESULT COggDlg::OnToggleSubUiMsg(WPARAM wParam, LPARAM)
 					m_MidiMonitorDlg->ShowWindow(SW_SHOWNOACTIVATE);
 			}
 		}
+		else if (wParam == 18) {
+			if (savedata.fmmonwindow == 1 && m_FmMonitorDlg) {
+				if (!::IsWindow(m_FmMonitorDlg->GetSafeHwnd())) {
+					if (!m_FmMonitorDlg->Create(IDD_FMMONITOR, this))
+						savedata.fmmonwindow = 0;
+				}
+				if (savedata.fmmonwindow == 1 && ::IsWindow(m_FmMonitorDlg->GetSafeHwnd())) {
+					m_FmMonitorDlg->ShowWindow(SW_SHOWNOACTIVATE);
+					m_FmMonitorDlg->RestoreGeom();
+				}
+			}
+		}
 		}
 		catch (CException* e) {
 			e->Delete();
@@ -31242,7 +31270,7 @@ LRESULT COggDlg::OnToggleSubUiMsg(WPARAM wParam, LPARAM)
 		g_oggSubUiRestoring = 0;
 		// 閉じている窓の空メッセージを飛ばし、次に復元が要る番号へ
 		WPARAM next = wParam + 1;
-		while (next <= 17) {
+		while (next <= 18) {
 			BOOL need = FALSE;
 			if (next == 10)
 				need = (savedata.eqwindow == 1 && m_EqualizerDlg);
@@ -31260,10 +31288,12 @@ LRESULT COggDlg::OnToggleSubUiMsg(WPARAM wParam, LPARAM)
 				need = (savedata.mpDjPadwindow == 1);
 			else if (next == 17)
 				need = (savedata.midimonwindow == 1 && m_MidiMonitorDlg);
+			else if (next == 18)
+				need = (savedata.fmmonwindow == 1 && m_FmMonitorDlg);
 			if (need) break;
 			++next;
 		}
-		if (next <= 17)
+		if (next <= 18)
 			PostMessage(WM_OGG_TOGGLE_SUBUI, next, 0);
 		else {
 			// 復元完了: 押下見た目を一度だけ同期(復元中は抑止していた)
@@ -33425,6 +33455,33 @@ void COggDlg::ToggleMidiMonitor()
 	extern CMediaPlayerDlg* mp;
 	if (mp && ::IsWindow(mp->GetSafeHwnd()))
 		mp->SyncPushToggleButtons();
+}
+
+void COggDlg::ToggleFmMonitor()
+{
+	if (!m_FmMonitorDlg)
+		return;
+	if (!::IsWindow(m_FmMonitorDlg->GetSafeHwnd()))
+	{
+		if (!m_FmMonitorDlg->Create(IDD_FMMONITOR, this)) {
+			savedata.fmmonwindow = 0;
+			OggPersistSaveDatNow();
+			return;
+		}
+		savedata.fmmonwindow = 1;
+		m_FmMonitorDlg->ShowWindow(SW_SHOW);
+		m_FmMonitorDlg->RestoreGeom();
+		m_FmMonitorDlg->SetFocus();
+		m_FmMonitorDlg->PersistGeom();
+		OggPersistSaveDatNow();
+	}
+	else {
+		/* メニューから閉じる */
+		savedata.fmmonwindow = 0;
+		m_FmMonitorDlg->PersistGeom();
+		m_FmMonitorDlg->DestroyWindow();
+		OggPersistSaveDatNow();
+	}
 }
 
 void COggDlg::ShowPianoRollTune()

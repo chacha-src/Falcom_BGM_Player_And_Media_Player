@@ -507,6 +507,9 @@
     <ClCompile Include="CMidiMonitorDlg.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="CFmMonitorDlg.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="GdiSoft3D.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -1174,6 +1177,12 @@
     <ClInclude Include="CMidiMonitorDlg.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="CFmMonitorDlg.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="kb_sasami\source\sasami_fmmon.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="GdiSoft3D.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -1289,6 +1298,12 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="XfadePlayback.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="kb_sasami\source\sasami_file.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="kb_sasami\source\sasami_midi.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
@@ -1598,6 +1613,7 @@
     <None Include="res\iw\fluid.iwj" />
     <None Include="res\iw\rotor.iwj" />
     <None Include="res\iw\vibe.iwj" />
+    <None Include="res\insertion.dat" />
   </ItemGroup>
   <ItemGroup>
     <Text Include="codec\APPLE_LICENSE.txt">
@@ -1635,5 +1651,11 @@
     <Image Include="res\s3tex\m_brick2.png" />
     <Image Include="res\s3tex\r_env2.png" />
     <Image Include="res\s3tex\m_env.png" />
+    <Image Include="res\s3tex\r_sky3.png" />
+    <Image Include="res\s3tex\r_sky4.png" />
+    <Image Include="res\s3tex\m_sky.png" />
+    <Image Include="res\s3tex\m_sky2.png" />
+    <Image Include="res\s3tex\r_water_d.png" />
+    <Image Include="res\s3tex\r_obs_d.png" />
   </ItemGroup>
 </Project>

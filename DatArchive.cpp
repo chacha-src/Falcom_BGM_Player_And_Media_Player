@@ -1,4 +1,4 @@
-#include "stdafx.h"
+﻿#include "stdafx.h"
 #include "DatArchive.h"
 #include <shlwapi.h>
 #include <zstd.h>
@@ -105,6 +105,7 @@ static BOOL DatArc_IsPackableLeaf(LPCTSTR leaf)
 
 	if (_tcsicmp(leaf, _T("oggYSEDbgmu.dat")) == 0) return TRUE;
 	if (_tcsicmp(leaf, _T("oggYSEDbgm.dat")) == 0) return TRUE;
+	if (_tcsicmp(leaf, _T("fmmon_geom.dat")) == 0) return TRUE;
 	if (_tcsnicmp(leaf, _T("oggYSEDbgmu_"), 12) == 0) return TRUE;
 	if (_tcsnicmp(leaf, _T("oggYSEDbgm_"), 11) == 0) return TRUE;
 	if (_tcsnicmp(leaf, _T("playlistu"), 9) == 0) return TRUE;
@@ -625,11 +626,23 @@ BOOL DatArc_Commit(LPCTSTR leaf)
 	if (!g_ready || !leaf || !leaf[0]) return FALSE;
 	if (!DatArc_IsPackableLeaf(leaf)) return FALSE;
 	DatArc_AddIndex(leaf);
+	/* 同サイズ上書きだと指紋が残って古い塊が再利用されることがある */
+	{
+		const int i = DatArc_FindIndex(leaf);
+		if (i >= 0) g_ent[i].stageFpValid = 0;
+	}
 	if (g_flushSuspend > 0) {
 		g_flushDirty = TRUE;
 		return TRUE;
 	}
 	return DatArc_RebuildFromStage();
+}
+
+void DatArc_InvalidateLeaf(LPCTSTR leaf)
+{
+	if (!g_ready || !leaf || !leaf[0]) return;
+	const int i = DatArc_FindIndex(leaf);
+	if (i >= 0) g_ent[i].stageFpValid = 0;
 }
 
 BOOL DatArc_Delete(LPCTSTR leaf)
