@@ -11,7 +11,9 @@ extern HINSTANCE g_hKpi;
 static const wchar_t SEC_KBSASAMI[] = L"kbsasami";
 static const wchar_t KEY_VST[] = L"vst";
 static const wchar_t KEY_RAIRA[] = L"raira";
-static const wchar_t KEY_MAP[] = L"map";
+static const wchar_t KEY_MIDIMODE[] = L"midimode";
+static const wchar_t KEY_MAP_LEGACY[] = L"map";
+static const wchar_t KEY_FMMODE[] = L"fmmode";
 
 static uint8_t s_fileBuf[SASAMI_MAX_FILE];
 
@@ -39,6 +41,7 @@ KbSasamiDecoder::KbSasamiDecoder(IKpiConfig* pConfig)
 	m_raira = 0;
 	m_vst = 0;
 	m_mapDefault = 4;
+	m_fmModeDefault = 2;
 	m_titleSjis[0] = 0;
 	m_loopStart = -1.0;
 	m_loopEnd = -1.0;
@@ -65,12 +68,17 @@ void KbSasamiDecoder::ReadOptions()
 	m_raira = 0;
 	m_vst = 0;
 	m_mapDefault = 4;
+	m_fmModeDefault = 2;
 	if (m_pConfig) {
 		m_raira = (int)m_pConfig->GetInt(SEC_KBSASAMI, KEY_RAIRA, 0);
 		m_vst = (int)m_pConfig->GetInt(SEC_KBSASAMI, KEY_VST, 0);
-		m_mapDefault = (int)m_pConfig->GetInt(SEC_KBSASAMI, KEY_MAP, 4);
+		m_mapDefault = (int)m_pConfig->GetInt(SEC_KBSASAMI, KEY_MIDIMODE, -1);
+		if (m_mapDefault < 0)
+			m_mapDefault = (int)m_pConfig->GetInt(SEC_KBSASAMI, KEY_MAP_LEGACY, 4);
+		m_fmModeDefault = (int)m_pConfig->GetInt(SEC_KBSASAMI, KEY_FMMODE, 2);
 	}
 	if (m_mapDefault < 0 || m_mapDefault > 19) m_mapDefault = 4;
+	if (m_fmModeDefault < 0 || m_fmModeDefault > 2) m_fmModeDefault = 2;
 	if (m_raira)
 		m_vst = m_vst ? 0 : 1;
 }
@@ -188,8 +196,9 @@ DWORD __fastcall KbSasamiDecoder::Open(const KPI_MEDIAINFO* cpRequest, IKpiFile*
 		wchar_t* sl = wcsrchr(plugDir, L'\\');
 		if (sl) *sl = 0;
 		else plugDir[0] = 0;
-		if (!m_fm.Open(s_song, rate, plugDir)) return 0;
-		if (m_raira)
+		const int fmMode = SasamiResolveFmModeW(pathForKind, m_fmModeDefault);
+		if (!m_fm.Open(s_song, rate, plugDir, fmMode)) return 0;
+		if (m_raira && (fmMode == 1 || fmMode == 2))
 			m_fm.SetFmMonDump(1, pathForKind);
 		m_MediaInfo.dwSampleRate = m_fm.SampleRate();
 		m_MediaInfo.dwChannels = 2;

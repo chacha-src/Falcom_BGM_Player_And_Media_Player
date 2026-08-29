@@ -16,6 +16,9 @@
 #include "sasami_neiro.inc"
 
 static const uint32_t kOpnaClock = 7987200;
+/* OPN モードも ym2608 を使い、SCH(0x29) を立てず FM3+SSG3 にする。
+   ym2203 直結は SSG 出力が ch 分離で、ホスト側合算だとノイズがボソボソになる。
+   SSG/ノイズは OPNA と同じ MixTo1 + psgvolume 経路を使う。 */
 static const uint32_t kTickDen = 1248000;
 static const unsigned kDefaultT = 13000;
 static const uint32_t kMaxTicks = 200000;
@@ -146,8 +149,18 @@ static int LoadWavMono16Fixed(const wchar_t* path, int16_t* pcm, int pcmCap, uin
 	return 0;
 }
 
+struct BeepVoice {
+	int on;
+	double phase;
+	double step; // cycles per host sample
+	int amp;
+};
+
 struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 	ymfm::ym2608 chip;
+	int playFmMode; // 0=BEEP 1=OPN(FM3+SSG3) 2=OPNA
+	BeepVoice beep[10];
+	int beepTdm; /* BEEP 時分割: 今スピーカーに出す ch（本家 WORKBP） */
 	SasamiSong song;
 	uint8_t adpcmRom[FM_ADPCM_ROM];
 	int adpcmRomSize;
@@ -155,7 +168,7 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 	uint8_t rzm[6];
 	uint8_t lrWk[16];
 	int16_t detune[12];
-	uint16_t pitch[12];
+	uint16_t pitchBase[12]; /* DETUNE 加算前（原版 FMSSGPITCH） */
 	uint8_t waitb[12];
 	uint8_t loopCnt[12];
 	uint8_t vol[12];
@@ -183,7 +196,13 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 	int rhythmHaveWav;
 	int rhythmtl;
 	uint8_t rhythmkey;
+	uint8_t rhythmPulsePend; /* 0x10 key-on の生ヒット（値不変の連打用） */
+	uint8_t rhythmHitCnt[6]; /* 累積（UI は差分で取りこぼし防止） */
+	uint8_t keyOnHitCnt[6];
+	uint8_t ssgHitCnt[3];
 	uint32_t rhythmFlashLeft[6]; // モニタ点滅用（key-on 後しばらく残す）
+	uint32_t dumpRingGen;
+	SasamiFmMonDump dumpRingSlot[SASAMI_FMMON_RING];
 	SasamiMisaoSynth misao;
 	int misaoActive;
 	uint8_t regs[0x200];
@@ -193,15 +212,16 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 	uint64_t dumpLastFlushSample;
 	uint32_t dumpSeq;
 	wchar_t dumpSrc[MAX_PATH];
+	wchar_t dumpNamedDone[MAX_PATH]; /* 曲名.opna は曲ごと1回だけ（毎 Flush はオーディオを詰まらせる） */
 
-	Impl() : chip(*this)
+	Impl() : chip(*this), playFmMode(2)
 	{
 		memset(ssg, 0, sizeof(ssg));
 		ssg[7] = 0xBF;
 		memset(rzm, 0, sizeof(rzm));
 		memset(lrWk, 0, sizeof(lrWk));
 		memset(detune, 0, sizeof(detune));
-		memset(pitch, 0, sizeof(pitch));
+		memset(pitchBase, 0, sizeof(pitchBase));
 		memset(waitb, 0, sizeof(waitb));
 		memset(loopCnt, 0, sizeof(loopCnt));
 		memset(vol, 0, sizeof(vol));
@@ -214,6 +234,8 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 		memset(regs, 0, sizeof(regs));
 		memset(keyOnFm, 0, sizeof(keyOnFm));
 		memset(rhythmFlashLeft, 0, sizeof(rhythmFlashLeft));
+		memset(beep, 0, sizeof(beep));
+		beepTdm = -1;
 		regs[0xB4] = regs[0xB5] = regs[0xB6] = 0xC0;
 		regs[0x1B4] = regs[0x1B5] = regs[0x1B6] = 0xC0;
 		dumpEnable = 0;
@@ -221,6 +243,7 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 		dumpLastFlushSample = 0;
 		dumpSeq = 0;
 		dumpSrc[0] = 0;
+		dumpNamedDone[0] = 0;
 		chCount = 6;
 		fm10 = 0;
 		measureLen = 0;
@@ -238,6 +261,12 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 		rhythmHaveWav = 0;
 		rhythmtl = 0;
 		rhythmkey = 0;
+		rhythmPulsePend = 0;
+		memset(rhythmHitCnt, 0, sizeof(rhythmHitCnt));
+		memset(keyOnHitCnt, 0, sizeof(keyOnHitCnt));
+		memset(ssgHitCnt, 0, sizeof(ssgHitCnt));
+		dumpRingGen = 0;
+		memset(dumpRingSlot, 0, sizeof(dumpRingSlot));
 		misaoActive = 0;
 		adpcmRomSize = 0;
 		for (int i = 0; i < 6; i++) {
@@ -262,10 +291,13 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 	{
 		if (reg == 0x10) {
 			if (!(data & 0x80)) {
+				/* 同一値の連打でも WAV は再トリガされる → モニタも pulse で拾う */
+				rhythmPulsePend = (uint8_t)(rhythmPulsePend | (data & 0x3F));
 				rhythmkey |= (uint8_t)(data & 0x3F);
 				const uint32_t flash = (hostRate > 0) ? (hostRate / 6) : 8000; // ~167ms
 				for (int i = 0; i < 6; i++) {
 					if (!(data & (1 << i))) continue;
+					rhythmHitCnt[i]++;
 					rhythmFlashLeft[i] = flash;
 					if (rhythmHaveWav && rhythm[i].sampleLen)
 						rhythm[i].pos = 0;
@@ -319,7 +351,12 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 		if (chBits <= 2) idx = chBits;
 		else if (chBits >= 4 && chBits <= 6) idx = chBits - 1;
 		if (idx < 0 || idx > 5) return;
-		keyOnFm[idx] = (data & 0xF0) ? 1 : 0;
+		if (data & 0xF0) {
+			keyOnHitCnt[idx]++;
+			keyOnFm[idx] = 1;
+		} else {
+			keyOnFm[idx] = 0;
+		}
 	}
 
 	void MarkDump()
@@ -336,27 +373,31 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 		CreateDirectoryW(dir, NULL);
 	}
 
-	void WriteDumpFile(const wchar_t* path, const SasamiFmMonDump& d)
+	void WriteBlobFile(const wchar_t* path, const void* data, DWORD bytes)
 	{
-		/* rename 競合で読取が途切れると UI が止→一気に進む。共有付き上書きにする */
 		HANDLE h = CreateFileW(path, GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE,
 			NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
 		if (h == INVALID_HANDLE_VALUE) return;
 		DWORD wr = 0;
 		SetFilePointer(h, 0, NULL, FILE_BEGIN);
-		WriteFile(h, &d, sizeof(d), &wr, NULL);
-		if (wr == sizeof(d))
+		WriteFile(h, data, bytes, &wr, NULL);
+		if (wr == bytes)
 			SetEndOfFile(h);
 		CloseHandle(h);
+	}
+
+	void WriteDumpFile(const wchar_t* path, const SasamiFmMonDump& d)
+	{
+		WriteBlobFile(path, &d, (DWORD)sizeof(d));
 	}
 
 	void FlushDump(uint64_t curSample)
 	{
 		if (!dumpEnable) return;
-		/* レジスタ更新 or ~60Hz（リズム sounding / sample 表示用） */
-		const uint32_t period = (hostRate > 0) ? (hostRate / 60) : 800;
-		if (!dumpDirty && (curSample - dumpLastFlushSample) < period)
-			return;
+		/* dirty のみ。レート制限しない — 同じ Render 塊の終端時刻にまとめると
+		   密な FM3/4・SSG の tick 単位の変化が消え、聞こえる音とずれる。
+		   履歴はリングへ積む（UI が gen 差分で読む）。 */
+		if (!dumpDirty) return;
 		dumpDirty = 0;
 		dumpLastFlushSample = curSample;
 		SasamiFmMonDump d;
@@ -385,6 +426,12 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 			}
 			d.rhythmKey = bits;
 		}
+		d.rhythmPulse = rhythmPulsePend;
+		rhythmPulsePend = 0;
+		memcpy(d.rhythmHitCnt, rhythmHitCnt, sizeof(rhythmHitCnt));
+		memcpy(d.keyOnHitCnt, keyOnHitCnt, sizeof(keyOnHitCnt));
+		memcpy(d.ssgHitCnt, ssgHitCnt, sizeof(ssgHitCnt));
+		d.padHit = (uint8_t)playFmMode; /* 0=BEEP 1=OPN 2=OPNA（モニタ見出し用） */
 		d.fm10 = fm10 ? 1 : 0;
 		d.pcmCount = 0;
 		memset(d.pcmOn, 0, sizeof(d.pcmOn));
@@ -402,7 +449,46 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 		wchar_t live[MAX_PATH];
 		_snwprintf_s(live, _TRUNCATE, L"%s\\fmmon_live.opna", dir);
 		WriteDumpFile(live, d);
-		if (dumpSrc[0]) {
+		/* リング: 未読 live 上書きでも Flush 履歴を残す（スロット1個だけ更新） */
+		{
+			const uint32_t idx = dumpRingGen % SASAMI_FMMON_RING;
+			dumpRingSlot[idx] = d;
+			dumpRingGen++;
+			wchar_t ringPath[MAX_PATH];
+			_snwprintf_s(ringPath, _TRUNCATE, L"%s\\fmmon_ring.opna", dir);
+			HANDLE h = CreateFileW(ringPath, GENERIC_READ | GENERIC_WRITE,
+				FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+			if (h != INVALID_HANDLE_VALUE) {
+				LARGE_INTEGER sz;
+				sz.QuadPart = 0;
+				GetFileSizeEx(h, &sz);
+				if ((ULONGLONG)sz.QuadPart < sizeof(SasamiFmMonRing)) {
+					SasamiFmMonRing blank;
+					memset(&blank, 0, sizeof(blank));
+					blank.magic[0] = 'O'; blank.magic[1] = 'P'; blank.magic[2] = 'N'; blank.magic[3] = 'R';
+					blank.version = SASAMI_FMMON_RING_VERSION;
+					DWORD wr = 0;
+					SetFilePointer(h, 0, NULL, FILE_BEGIN);
+					WriteFile(h, &blank, sizeof(blank), &wr, NULL);
+					SetEndOfFile(h);
+				}
+				DWORD wr = 0;
+				LARGE_INTEGER off;
+				off.QuadPart = (LONGLONG)offsetof(SasamiFmMonRing, slot) + (LONGLONG)idx * (LONGLONG)sizeof(SasamiFmMonDump);
+				SetFilePointerEx(h, off, NULL, FILE_BEGIN);
+				WriteFile(h, &d, sizeof(d), &wr, NULL);
+				SasamiFmMonRing hdr;
+				memset(&hdr, 0, sizeof(hdr));
+				hdr.magic[0] = 'O'; hdr.magic[1] = 'P'; hdr.magic[2] = 'N'; hdr.magic[3] = 'R';
+				hdr.version = SASAMI_FMMON_RING_VERSION;
+				hdr.gen = dumpRingGen;
+				off.QuadPart = 0;
+				SetFilePointerEx(h, off, NULL, FILE_BEGIN);
+				WriteFile(h, &hdr, (DWORD)offsetof(SasamiFmMonRing, slot), &wr, NULL);
+				CloseHandle(h);
+			}
+		}
+		if (dumpSrc[0] && wcscmp(dumpNamedDone, dumpSrc) != 0) {
 			const wchar_t* name = dumpSrc;
 			for (const wchar_t* p = dumpSrc; *p; p++)
 				if (*p == L'\\' || *p == L'/') name = p + 1;
@@ -414,22 +500,61 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 				wchar_t named[MAX_PATH];
 				_snwprintf_s(named, _TRUNCATE, L"%s\\%s.opna", dir, stem);
 				WriteDumpFile(named, d);
+				wcsncpy_s(dumpNamedDone, dumpSrc, _TRUNCATE);
 			}
 		}
 	}
 
+	void BeepOff(int ch)
+	{
+		if (ch < 0 || ch >= 10) return;
+		beep[ch].on = 0;
+	}
+
+	void BeepNote(int ch, uint8_t note, int keyOn)
+	{
+		if (ch < 0 || ch >= 10 || IsRhythm(ch)) return;
+		if (!keyOn) {
+			BeepOff(ch);
+			return;
+		}
+		const int nidx = note & 0x0F;
+		int oct = (note >> 4) & 0x0F;
+		if (oct == 0) oct = 1;
+		uint16_t per = kPsgHz[nidx & 15];
+		const int sh = oct - 1;
+		if (sh > 0 && sh < 16) per = (uint16_t)(per >> sh);
+		if (per == 0) per = 1;
+		/* Soft PC-speaker style: SSG-like period → Hz, square mix */
+		const double freq = ((double)kOpnaClock / 64.0) / (double)per;
+		const double hr = hostRate ? (double)hostRate : 44100.0;
+		beep[ch].step = freq / hr;
+		if (beep[ch].step > 0.45) beep[ch].step = 0.45;
+		beep[ch].amp = 5200; /* 時分割1声なので同時加算より大きめ */
+		beep[ch].on = 1;
+		if (beep[ch].phase < 0.0 || beep[ch].phase >= 1.0)
+			beep[ch].phase = 0.0;
+	}
+
 	void FmOut(uint8_t reg, uint8_t data)
 	{
-		chip.write(0, reg);
-		chip.write(1, data);
 		regs[reg] = data;
 		if (reg < 16) ssg[reg] = data;
+		if (playFmMode == 0) {
+			if (reg == 0x28) NoteKeyOnReg(data);
+			return;
+		}
+		/* OPN/OPNA とも ym2608。OPN はリズム無効 */
+		chip.write(0, reg);
+		chip.write(1, data);
 		if (reg == 0x28) NoteKeyOnReg(data);
-		RhythmReg(reg, data);
+		if (playFmMode == 2)
+			RhythmReg(reg, data);
 		MarkDump();
 	}
 	void Fm2Out(uint8_t reg, uint8_t data)
 	{
+		if (playFmMode != 2) return;
 		chip.write(2, reg);
 		chip.write(3, data);
 		regs[0x100 | reg] = data;
@@ -448,12 +573,20 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 
 	void KeyOff(int ch)
 	{
+		if (playFmMode == 0) {
+			BeepOff(ch);
+			if (IsSsg(ch)) {
+				const int s = ch - 3;
+				ssgOn[s] = 0;
+			}
+			return;
+		}
 		const int k = OpnKey(ch);
 		if (k >= 0) FmOut(0x28, (uint8_t)k);
+		/* 原版 FKYU は SSG のミキサ(07h)を触らない。FMSSGKEY クリアのみ。
+		   休符のたびに tone disable すると単極性 SSG/ノイズがゲートされボソボソになる。 */
 		if (IsSsg(ch)) {
 			const int s = ch - 3;
-			ssg[7] |= (uint8_t)(1 << s);
-			FmOut(7, ssg[7]);
 			ssgOn[s] = 0;
 		}
 	}
@@ -491,13 +624,22 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 		wr(0x4C);
 	}
 
-	void WriteFnum(int ch, uint16_t fn)
+	int SsgSlot(int ch)
 	{
-		fn = (uint16_t)(fn + detune[ch]);
-		pitch[ch] = fn;
+		if (ch == 10) return 2;
+		if (IsSsg(ch)) return ch - 3;
+		return -1;
+	}
+
+	void WriteFnum(int ch, uint16_t fnBase)
+	{
+		pitchBase[ch] = fnBase;
+		int32_t fn = (int32_t)fnBase + (int32_t)detune[ch];
+		if (fn < 0) fn = 0;
+		if (fn > 0x3FFF) fn = 0x3FFF;
 		const int k = OpnKey(ch);
 		if (k < 0) return;
-		const uint8_t hi = (uint8_t)(fn >> 8);
+		const uint8_t hi = (uint8_t)((uint16_t)fn >> 8);
 		const uint8_t lo = (uint8_t)fn;
 		if (IsFm2(ch)) {
 			const int slot = k - 4;
@@ -507,6 +649,29 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 			FmOut((uint8_t)(0xA4 + k), hi);
 			FmOut((uint8_t)(0xA0 + k), lo);
 		}
+	}
+
+	void WriteSsgPeriod(int ch, uint16_t perBase)
+	{
+		pitchBase[ch] = perBase;
+		const int s = SsgSlot(ch);
+		if (s < 0) return;
+		int32_t per = (int32_t)perBase + (int32_t)detune[ch];
+		if (per < 0) per = 0;
+		if (per > 0x0FFF) per = 0x0FFF;
+		FmOut((uint8_t)(s * 2), (uint8_t)per);
+		FmOut((uint8_t)(s * 2 + 1), (uint8_t)((uint16_t)per >> 8));
+	}
+
+	void ApplyDetuneNow(int ch)
+	{
+		const int s = SsgSlot(ch);
+		if (s >= 0) {
+			WriteSsgPeriod(ch, pitchBase[ch]);
+			return;
+		}
+		if (OpnKey(ch) >= 0)
+			WriteFnum(ch, pitchBase[ch]);
 	}
 
 	void LoadVoice(int ch, uint16_t raw)
@@ -574,6 +739,10 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 	void NoteFm(int ch, uint8_t note, uint8_t wait, int keyOn)
 	{
 		waitb[ch] = wait;
+		if (playFmMode == 0) {
+			BeepNote(ch, note, keyOn);
+			return;
+		}
 		const int k = OpnKey(ch);
 		if (k < 0) return;
 		const int nidx = note & 0x0F;
@@ -600,20 +769,27 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 	void NoteSsg(int ch, uint8_t note, uint8_t wait)
 	{
 		waitb[ch] = wait;
-		int s = ch - 3;
-		if (ch == 10) s = 2;
+		if (playFmMode == 0) {
+			BeepNote(ch, note, 1);
+			const int s = SsgSlot(ch);
+			if (s >= 0) {
+				ssgHitCnt[s]++;
+				ssgOn[s] = 1;
+			}
+			return;
+		}
+		const int s = SsgSlot(ch);
+		if (s < 0) return;
 		const int nidx = note & 0x0F;
 		int oct = (note >> 4) & 0x0F;
 		if (oct == 0) oct = 1;
 		uint16_t per = kPsgHz[nidx & 15];
 		const int sh = oct - 1;
 		if (sh > 0 && sh < 16) per = (uint16_t)(per >> sh);
-		per = (uint16_t)(per + detune[ch]);
-		pitch[ch] = per;
-		FmOut((uint8_t)(s * 2), (uint8_t)per);
-		FmOut((uint8_t)(s * 2 + 1), (uint8_t)(per >> 8));
+		WriteSsgPeriod(ch, per);
 		ssg[7] = (uint8_t)(ssg[7] & ~(1 << s));
 		FmOut(7, ssg[7]);
+		ssgHitCnt[s]++;
 		ssgOn[s] = 1;
 	}
 
@@ -723,11 +899,12 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 			}
 			return 1;
 		}
-		case 15: { // PPICH
-			int s = IsSsg(ch) ? (ch - 3) : 0;
-			uint16_t per = w1;
-			FmOut((uint8_t)(s * 2), (uint8_t)per);
-			FmOut((uint8_t)(s * 2 + 1), (uint8_t)(per >> 8));
+		case 15: { // PPICH: 原版 MOV AX,[DI+1]; XCHG AH,AL → (b1<<8)|b2、その後 DETUNE 加算
+			const int s = SsgSlot(ch);
+			if (s >= 0) {
+				const uint16_t per = (uint16_t)((b1 << 8) | b2);
+				WriteSsgPeriod(ch, per);
+			}
 			pc[ch] = addr + 3;
 			return 1;
 		}
@@ -751,8 +928,9 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 				return JumpTo(ch, addr, w1);
 			pc[ch] = addr + 3;
 			return 1;
-		case 18:
+		case 18: // FDETUN
 			detune[ch] = (int16_t)(w1 - 0x8000);
+			ApplyDetuneNow(ch);
 			pc[ch] = addr + 3;
 			return 1;
 		case 19: { // frzmvl
@@ -827,6 +1005,8 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 		ticksPlayed++;
 		if (measureLen && ticksPlayed >= kMaxTicks) ended = 1;
 		if (misaoActive) misao.TickOnce();
+		if (playFmMode == 0)
+			BeepAdvanceTdm();
 	}
 
 	void ClockFm(int outputs = 8)
@@ -834,6 +1014,7 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 		// ymfm samples key-on only when FM is clocked. MED fidelity clocks
 		// once per 6 output samples, so a bare keyoff+keyon write never
 		// retriggers the envelope (notes decay via SR until silent).
+		if (playFmMode == 0) return;
 		ymfm::ym2608::output_data o;
 		for (int i = 0; i < outputs; i++)
 			chip.generate(&o, 1);
@@ -846,20 +1027,70 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 		const int n = (int)ymfm::ym2608::OUTPUTS;
 		const int32_t a = o.data[0];
 		const int32_t b = o.data[1 % n];
-		const int32_t c = o.data[2 % n];
+		const int32_t c = o.data[2 % n]; /* MixTo1 SSG（ノイズ含む） */
 		curL = a + c;
 		curR = b + c;
 	}
 
+	void BeepAdvanceTdm()
+	{
+		/* 本家 BPLYOL: ゲート中スロットを WORKBP で回し、1 tick に1音だけ PIT へ */
+		const int n = (chCount > 10) ? 10 : chCount;
+		if (n <= 0) { beepTdm = -1; return; }
+		int start = beepTdm;
+		if (start < 0 || start >= n) start = n - 1;
+		for (int i = 0; i < n; i++) {
+			int ch = start + 1 + i;
+			if (ch >= n) ch -= n;
+			if (IsRhythm(ch)) continue;
+			if (beep[ch].on && beep[ch].step > 0.0) {
+				beepTdm = ch;
+				return;
+			}
+		}
+		beepTdm = -1;
+	}
+
+	void HostSampleBeep(int16_t* L, int16_t* R)
+	{
+		if (beepTdm < 0 || beepTdm >= 10 || !beep[beepTdm].on || beep[beepTdm].step <= 0.0) {
+			*L = *R = 0;
+			return;
+		}
+		BeepVoice& v = beep[beepTdm];
+		v.phase += v.step;
+		if (v.phase >= 1.0) v.phase -= floor(v.phase);
+		const int32_t s = (v.phase < 0.5) ? v.amp : -v.amp;
+		const int16_t o = Clamp16((int)((int64_t)s * kMasterPct / 100));
+		*L = o;
+		*R = o;
+	}
+
 	void HostSample(int16_t* L, int16_t* R)
 	{
+		if (playFmMode == 0) {
+			HostSampleBeep(L, R);
+			return;
+		}
+		/* 間引きだけだと SSG ノイズ LFSR がエイリアスしてボソボソになる。
+		   1 host sample 分の chip 出力を平均してから出す。 */
+		int64_t sumL = 0, sumR = 0;
+		int nGen = 0;
 		chipAcc += (int64_t)chipRate;
 		while (chipAcc >= (int64_t)hostRate) {
 			chipAcc -= (int64_t)hostRate;
 			ChipSample();
+			sumL += curL;
+			sumR += curR;
+			nGen++;
+		}
+		if (nGen > 0) {
+			curL = (int32_t)(sumL / nGen);
+			curR = (int32_t)(sumR / nGen);
 		}
 		int32_t l = curL, r = curR;
-		MixRhythm(&l, &r);
+		if (playFmMode == 2)
+			MixRhythm(&l, &r);
 		TickRhythmFlash();
 		*L = Clamp16((int)((int64_t)l * kMasterPct / 100));
 		*R = Clamp16((int)((int64_t)r * kMasterPct / 100));
@@ -867,43 +1098,76 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 
 	void InitChip()
 	{
+		memset(beep, 0, sizeof(beep));
+		beepTdm = -1;
+		if (playFmMode == 0) {
+			ssg[7] = 0xBF;
+			rhythmkey = 0;
+			rhythmPulsePend = 0;
+			memset(rhythmHitCnt, 0, sizeof(rhythmHitCnt));
+			memset(keyOnHitCnt, 0, sizeof(keyOnHitCnt));
+			memset(ssgHitCnt, 0, sizeof(ssgHitCnt));
+			curL = curR = 0;
+			return;
+		}
 		chip.reset();
 		chip.setfmvolume(kFmVolume);
 		chip.setpsgvolume(kPsgVolume);
-		FmOut(0x29, 0x83);
-		FmOut(0x10, 0xDF);
+		/* リズム/ADPCM-A は両モードで明示 mute（OPN でゴミが FM に混ざるとノイズに聞こえる） */
+		FmOut(0x10, 0xBF);
 		FmOut(0x11, 0x3F);
-		for (int i = 0; i < 6; i++) {
-			rzm[i] = kRzmDef[i];
-			FmOut((uint8_t)(0x18 + i), rzm[i]);
+		if (playFmMode == 2) {
+			/* OPNA: SCH で FM6ch + リズム音色レベル */
+			FmOut(0x29, 0x83);
+			for (int i = 0; i < 6; i++) {
+				rzm[i] = kRzmDef[i];
+				FmOut((uint8_t)(0x18 + i), rzm[i]);
+			}
 		}
+		/* OPN: 0x29 を書かず FM3+SSG3（SCH オフ = YM2203 相当） */
 		FmOut(0x28, 0x00);
 		FmOut(0x28, 0x01);
 		FmOut(0x28, 0x02);
 		FmOut(0x07, 0xBF);
 		ssg[7] = 0xBF;
 		rhythmkey = 0;
+		rhythmPulsePend = 0;
+		memset(rhythmHitCnt, 0, sizeof(rhythmHitCnt));
+		memset(keyOnHitCnt, 0, sizeof(keyOnHitCnt));
+		memset(ssgHitCnt, 0, sizeof(ssgHitCnt));
+		dumpRingGen = 0;
+		memset(dumpRingSlot, 0, sizeof(dumpRingSlot));
 		memset(rhythmFlashLeft, 0, sizeof(rhythmFlashLeft));
-		if (rhythmHaveWav) {
+		if (playFmMode == 2 && rhythmHaveWav) {
 			for (int i = 0; i < 6; i++)
 				rhythm[i].pos = rhythm[i].size;
 		}
-		FmOut(0x28, 0x04);
-		FmOut(0x28, 0x05);
-		FmOut(0x28, 0x06);
+		if (playFmMode == 2) {
+			FmOut(0x28, 0x04);
+			FmOut(0x28, 0x05);
+			FmOut(0x28, 0x06);
+		}
 		for (int i = 0; i < 3; i++) {
 			FmOut((uint8_t)(0xB4 + i), 0xC0);
-			Fm2Out((uint8_t)(0xB4 + i), 0xC0);
 			lrWk[i] = 0xC0;
-			lrWk[i + 4] = 0xC0;
+			if (playFmMode == 2) {
+				Fm2Out((uint8_t)(0xB4 + i), 0xC0);
+				lrWk[i + 4] = 0xC0;
+			}
 		}
 		ChipSample();
 	}
 
 	void SetupSong()
 	{
-		fm10 = song.fmOpna10ch ? 1 : 0;
-		chCount = fm10 ? 10 : 6;
+		if (playFmMode == 1) {
+			/* OPN: always 6ch (FM0-2+SSG); skip bank1/rhythm */
+			fm10 = 0;
+			chCount = 6;
+		} else {
+			fm10 = song.fmOpna10ch ? 1 : 0;
+			chCount = fm10 ? 10 : 6;
+		}
 		T = kDefaultT;
 		ended = 0;
 		eofSent = 0;
@@ -1041,23 +1305,30 @@ SasamiFmPlayer::SasamiFmPlayer() : m(NULL), m_hostRate(44100), m_totalSamples(0)
 }
 SasamiFmPlayer::~SasamiFmPlayer() { Close(); }
 
-bool SasamiFmPlayer::Open(const SasamiSong& song, uint32_t sampleRate, const wchar_t* rhythmDir)
+bool SasamiFmPlayer::Open(const SasamiSong& song, uint32_t sampleRate, const wchar_t* rhythmDir, int fmMode)
 {
 	Close();
 	if (song.kind != SASAMI_KIND_FPY || song.dataSize == 0) return false;
 	std::lock_guard<std::mutex> lk(m_lock);
 	m = new Impl();
 	m->song = song;
+	m->playFmMode = (fmMode < 0 || fmMode > 2) ? 2 : fmMode;
 	m->hostRate = sampleRate < 8000 ? 44100 : sampleRate;
 	m_hostRate = m->hostRate;
-	m->LoadRhythm(rhythmDir);
+	if (m->playFmMode == 2)
+		m->LoadRhythm(rhythmDir);
 	m->PrepareRhythmSteps();
 	m->misaoActive = SasamiMisaoActive(song) ? 1 : 0;
 	if (m->misaoActive)
 		m->misaoActive = m->misao.Open(song, m->hostRate, rhythmDir, &m->T) ? 1 : 0;
-	m->chip.set_fidelity(ymfm::OPN_FIDELITY_MED);
-	m->chipRate = m->chip.sample_rate(kOpnaClock);
-	if (m->chipRate < 8000) m->chipRate = kOpnaClock / 144;
+	if (m->playFmMode == 1 || m->playFmMode == 2) {
+		/* MAX: SSG を高レートで生成→HostSample 平均でエイリアスを抑える（ノイズ向け） */
+		m->chip.set_fidelity(ymfm::OPN_FIDELITY_MAX);
+		m->chipRate = m->chip.sample_rate(kOpnaClock);
+		if (m->chipRate < 8000) m->chipRate = kOpnaClock / 8;
+	} else {
+		m->chipRate = m->hostRate;
+	}
 	strncpy_s(m_title, song.titleSjis, _TRUNCATE);
 	{
 		m->measureLen = 1;
@@ -1097,14 +1368,24 @@ void SasamiFmPlayer::SetFmMonDump(int enable, const wchar_t* sourcePath)
 {
 	std::lock_guard<std::mutex> lk(m_lock);
 	if (!m) return;
+	/* dump は OPN/OPNA 再生時（BEEP は無効） */
+	if (enable && m->playFmMode == 0)
+		enable = 0;
 	m->dumpEnable = enable ? 1 : 0;
 	m->dumpSrc[0] = 0;
+	m->dumpNamedDone[0] = 0;
 	if (sourcePath && sourcePath[0])
 		wcsncpy_s(m->dumpSrc, sourcePath, _TRUNCATE);
 	if (m->dumpEnable) {
 		m->dumpDirty = 1;
+		m->dumpLastFlushSample = 0; /* 有効化時は即1枚 */
 		m->FlushDump(m_curSample);
 	}
+}
+
+int SasamiFmPlayer::PlayFmMode() const
+{
+	return m ? m->playFmMode : 2;
 }
 
 uint32_t SasamiFmPlayer::Render(int16_t* interleavedStereo, uint32_t frames)
@@ -1113,7 +1394,7 @@ uint32_t SasamiFmPlayer::Render(int16_t* interleavedStereo, uint32_t frames)
 	return RenderUnlocked(interleavedStereo, frames);
 }
 
-uint32_t SasamiFmPlayer::RenderUnlocked(int16_t* interleavedStereo, uint32_t frames)
+	uint32_t SasamiFmPlayer::RenderUnlocked(int16_t* interleavedStereo, uint32_t frames)
 {
 	if (!m || !interleavedStereo || frames == 0) return 0;
 	if (m->eofSent) return 0;
@@ -1140,6 +1421,11 @@ uint32_t SasamiFmPlayer::RenderUnlocked(int16_t* interleavedStereo, uint32_t fra
 			const uint32_t sl = (uint32_t)(m->tickCarry / kTickDen);
 			m->tickCarry %= kTickDen;
 			m->TickOnce();
+			/* この tick のレジスタ変化は「ここから出る PCM」と同時に聞こえる。
+			   ブロック終端へまとめて stamp すると 1 Render 内の複数 tick が
+			   同一 curSample になり、密な CH3/4・SSG だけ大きくずれる。 */
+			if (m->dumpEnable)
+				m->FlushDump(m_curSample + out);
 			m->samplesLeftInTick = sl;
 			if (sl == 0) continue;
 		}
@@ -1167,7 +1453,8 @@ uint32_t SasamiFmPlayer::RenderUnlocked(int16_t* interleavedStereo, uint32_t fra
 		out += take;
 	}
 	m_curSample += out;
-	if (m->dumpEnable) m->FlushDump(m_curSample);
+	if (m->dumpEnable)
+		m->FlushDump(m_curSample);
 	return out;
 }
 

@@ -9,7 +9,7 @@
 
 PC-98 ささみ (SASAMI) の曲データを再生します。
 
-  .fpy   FM (YM2608/OPNA) コマンドを ymfm で PCM 化
+  .fpy   FM (BEEP / OPN=FM3+SSG3 / OPNA) コマンドを PCM 化
   .mpy   MIDI SASAMI Ver1
   .mpw2  MIDI SASAMI Ver2.2
 
@@ -23,22 +23,34 @@ PC-98 ささみ (SASAMI) の曲データを再生します。
   kbsasami.raira
     0 = 本家互換 (vst をそのまま解釈)
     1 = このアプリ専用。vst の 0 と 1 を内部で入れ替え、
-        FPY 再生時は %TEMP%\ogg_kbsasami\ に OPNA レジスタ dump
+        FPY 再生時は %TEMP%\ogg_kbsasami\ に OPN/OPNA レジスタ dump
         （fmmon_live.opna / <曲名>.opna）を出して FM モニタと同期する
+        ※ dump は fmmode=OPN/OPNA（BEEP は対象外）
 
   このアプリは常に raira=1 を書き込み、midPlayPrefer に合わせて
   vst に逆値を自動代入します。結果として:
     midPlayPrefer=KPI → 実効 vst=0 (fmmidi)
     midPlayPrefer=VST → 実効 vst=1 (KPI は MIDI を開かずホストが VST)
 
-[設定] kbsasami.map
+[設定] kbsasami.midimode
 
   .mpy / .mpw2 の SMF 変換音源 (MIDI モニタの mapForce と同じ番号):
 
     0=自動(この値を既定として使用)  1=GS  2=XG  3=55map  4=88map
     5=88Promap  6=8820map  7=GMmap  8=SDmap  9=LAmap  10..19=ETC
 
+  旧キー kbsasami.map があれば midimode 未設定時に引き継ぎます。
   プレイリストの「ささみ☆ﾐ 音源モード」で曲ごとに上書き可能。
+
+[設定] kbsasami.fmmode
+
+  .fpy の再生音源 (SASAMI /B /N 相当):
+
+    0=BEEP  ソフト矩形波（PC スピーカ風）
+    1=OPN   YM2608 を SCH オフで FM3+SSG3（/N 相当。SSG は OPNA と同経路）
+    2=OPNA  YM2608・ヘッダどおり 6/10ch（既定）
+
+  プレイリストの「ささみ☆ﾐ FMモード」で曲ごとに上書き可能。
 
 [FM リズム]
 
@@ -48,8 +60,4 @@ fmpmd / kpis98）:
   ym2608_adpcm_rom.bin     ymfm が使う ADPCM-A ROM
   2608_BD/SD/TOP/HH/TOM/RIM.WAV   fmgen 形式の PCM
 
-[著作]
-
-SASAMI コマンドは既存 SASAMI / SASAMI11 / SASAMIM / アセンブラソースから移植。
-FM コアは ymfm (Aaron Giles, BSD-3-Clause)。
-プラグイン内 MIDI PCM は fmmidi (yuno) を SMF 経由で使用。
+-------------------------------------------------------------------------------

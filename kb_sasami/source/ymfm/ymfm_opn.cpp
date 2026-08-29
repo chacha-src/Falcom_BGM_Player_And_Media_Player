@@ -1,4 +1,4 @@
-// BSD 3-Clause License
+﻿// BSD 3-Clause License
 //
 // Copyright (c) 2021, Aaron Giles
 // All rights reserved.
@@ -1326,7 +1326,8 @@ void ym2608::generate(output_data *output, uint32_t numsamples)
 
 	// resample the SSG as configured
 	m_ssg_resampler.resample(output - numsamples, numsamples);
-	(output - numsamples)->data[2] = (output - numsamples)->data[2] * psgvolume / 65536;
+	for (uint32_t i = 0; i < numsamples; i++)
+		(output - numsamples + i)->data[2] = (output - numsamples + i)->data[2] * psgvolume / 65536;
 }
 
 

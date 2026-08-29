@@ -16,7 +16,7 @@ static const DWORD kPluginVersion = 1;
 static const wchar_t kDescription[] = L"SASAMI FM/MIDI Decoder v" KBSASAMI_VERSION_STR L" (FPY / MPY / MPW2)";
 static const wchar_t kCopyright[] =
 	L"kbsasami.kpi SASAMI player\n"
-	L"FM: ymfm (Aaron Giles) YM2608/OPNA\n"
+	L"FM: ymfm YM2608 (OPNA / OPN=SCH-off) + soft BEEP\n"
 	L"MIDI PCM path: fmmidi (yuno) via SMF conversion\n"
 	L"Commands ported from SASAMI / SASAMI11 / SASAMIM";
 
@@ -29,7 +29,8 @@ static const wchar_t kExts[] = L".fpy/.mpy/.mpw2";
 static const wchar_t SEC_KBSASAMI[] = L"kbsasami";
 static const wchar_t KEY_VST[] = L"vst";
 static const wchar_t KEY_RAIRA[] = L"raira";
-static const wchar_t KEY_MAP[] = L"map";
+static const wchar_t KEY_MIDIMODE[] = L"midimode";
+static const wchar_t KEY_FMMODE[] = L"fmmode";
 
 KbSasamiDecoderModule::KbSasamiDecoderModule(IKpiConfig* pConfig)
 	: m_ModuleInfo{
@@ -103,11 +104,18 @@ BOOL WINAPI KbSasamiDecoderModule::EnumConfig(IKpiConfigEnumerator* pEnumerator)
 			L"false(0): original KbMedia Player (interpret vst as-is)\r\n"
 			L"true(1): this app. Swaps vst 0/1 internally.\r\n"
 			L"This app always writes raira=1." },
-		{ KPI_CFG_TYPE_INT, SEC_KBSASAMI, KEY_MAP, L"kbsasami.map",
+		{ KPI_CFG_TYPE_INT, SEC_KBSASAMI, KEY_MIDIMODE, L"kbsasami.midimode",
 			L"4", NULL, NULL, NULL, NULL,
 			L"MIDI map for .mpy/.mpw2 SMF conversion (same as monitor mapForce).\r\n"
 			L"0=Auto(use this default) 1=GS 2=XG 3=55map 4=88map 5=88Promap 6=8820map\r\n"
 			L"7=GMmap 8=SDmap 9=LAmap 10..19=ETC maps. Per-file override in playlist." },
+		{ KPI_CFG_TYPE_INT, SEC_KBSASAMI, KEY_FMMODE, L"kbsasami.fmmode",
+			L"2", NULL, NULL, NULL, NULL,
+			L"FM sound source for .fpy (like SASAMI /B /N).\r\n"
+			L"0=BEEP (PC-speaker style square)\r\n"
+			L"1=OPN (YM2608 SCH-off, FM3+SSG3; same SSG path as OPNA)\r\n"
+			L"2=OPNA (YM2608, 6/10ch from file header; default)\r\n"
+			L"Per-file override in playlist context menu." },
 		{ 0, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL }
 	};
 	for (int i = 0; sec[i].cszSection; i++)

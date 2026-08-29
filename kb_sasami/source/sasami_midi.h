@@ -14,6 +14,8 @@ bool SasamiConvertToSmf(const SasamiSong& song, SasamiMidiMap map, int gsBankLsb
 void SasamiMapForceToSel(int mapForce, SasamiMidiMap* map, int* gsBankLsb);
 int SasamiReadMidMapForceW(const wchar_t* fol, int* outForce);
 int SasamiResolveMapForceW(const wchar_t* fol, int globalDefault);
+int SasamiReadFmForceW(const wchar_t* fol, int* outForce); // 1 if b[5] valid 0..2
+int SasamiResolveFmModeW(const wchar_t* fol, int globalDefault); // 0..2
 void SasamiInvalidateTempMidi(const wchar_t* src);
 
 #ifdef __cplusplus

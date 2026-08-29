@@ -29,7 +29,8 @@ private:
 	bool m_fmMode;
 	int m_raira; // 1=このアプリ専用経路
 	int m_vst;   // 解釈後: 0=FM MIDI(fmmidi), 1=VST側に任せる
-	int m_mapDefault; // kbsasami.map (0..19)
+	int m_mapDefault; // kbsasami.midimode (0..19)
+	int m_fmModeDefault; // kbsasami.fmmode 0=BEEP 1=OPN 2=OPNA
 	char m_titleSjis[65];
 	double m_loopStart;
 	double m_loopEnd;

@@ -361,6 +361,29 @@ int SasamiReadMidMapForceW(const wchar_t* fol, int* outForce)
 	return 1;
 }
 
+int SasamiReadFmForceW(const wchar_t* fol, int* outForce)
+{
+	if (!fol || !fol[0] || !outForce) return 0;
+	*outForce = -1;
+	wchar_t base[MAX_PATH] = {};
+	if (!GetEnvironmentVariableW(L"LOCALAPPDATA", base, MAX_PATH) || !base[0])
+		return 0;
+	wchar_t path[MAX_PATH] = {};
+	_snwprintf_s(path, _TRUNCATE, L"%s\\oggYSED\\midflag\\%016I64X",
+		base, (unsigned long long)SasamiCacheHashPathW(fol));
+	HANDLE h = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ, NULL,
+		OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+	if (h == INVALID_HANDLE_VALUE) return 0;
+	BYTE b[8] = {};
+	DWORD rd = 0;
+	const BOOL ok = ReadFile(h, b, 8, &rd, NULL);
+	CloseHandle(h);
+	if (!ok || rd < 6 || b[0] != 1) return 0;
+	if (b[5] > 2) return 0;
+	*outForce = (int)b[5];
+	return 1;
+}
+
 int SasamiResolveMapForceW(const wchar_t* fol, int globalDefault)
 {
 	int pf = 0;
@@ -369,6 +392,16 @@ int SasamiResolveMapForceW(const wchar_t* fol, int globalDefault)
 	if (globalDefault > 0)
 		return globalDefault;
 	return 4;
+}
+
+int SasamiResolveFmModeW(const wchar_t* fol, int globalDefault)
+{
+	int pf = -1;
+	if (SasamiReadFmForceW(fol, &pf) && pf >= 0 && pf <= 2)
+		return pf;
+	if (globalDefault >= 0 && globalDefault <= 2)
+		return globalDefault;
+	return 2;
 }
 
 static int SasamiRegistryMapDefault()
@@ -381,12 +414,16 @@ static int SasamiRegistryMapDefault()
 	wchar_t buf[32] = {};
 	DWORD sz = sizeof(buf);
 	DWORD type = 0;
-	if (RegQueryValueExW(hKey, L"map", NULL, &type, (LPBYTE)buf, &sz) != ERROR_SUCCESS) {
-		RegCloseKey(hKey);
-		return 4;
+	int v = -1;
+	if (RegQueryValueExW(hKey, L"midimode", NULL, &type, (LPBYTE)buf, &sz) == ERROR_SUCCESS)
+		v = _wtoi(buf);
+	else {
+		sz = sizeof(buf);
+		type = 0;
+		if (RegQueryValueExW(hKey, L"map", NULL, &type, (LPBYTE)buf, &sz) == ERROR_SUCCESS)
+			v = _wtoi(buf);
 	}
 	RegCloseKey(hKey);
-	const int v = _wtoi(buf);
 	return (v >= 0 && v <= 19) ? v : 4;
 }
 
