@@ -198,8 +198,13 @@ DWORD __fastcall KbSasamiDecoder::Open(const KPI_MEDIAINFO* cpRequest, IKpiFile*
 		else plugDir[0] = 0;
 		const int fmMode = SasamiResolveFmModeW(pathForKind, m_fmModeDefault);
 		if (!m_fm.Open(s_song, rate, plugDir, fmMode)) return 0;
-		if (m_raira && (fmMode == 1 || fmMode == 2))
+		/* FMモニタ dump は OPN/OPNA なら常時 ON。
+		   以前は m_raira 依存だったが、IKpiConfig が NullConfig になると
+		   raira が 0 のまま音声だけ再生され、live が更新されずモニタが固まる。 */
+		if (fmMode == 1 || fmMode == 2)
 			m_fm.SetFmMonDump(1, pathForKind);
+		else
+			m_fm.SetFmMonDump(0, pathForKind);
 		m_MediaInfo.dwSampleRate = m_fm.SampleRate();
 		m_MediaInfo.dwChannels = 2;
 		m_MediaInfo.nBitsPerSample = 16;

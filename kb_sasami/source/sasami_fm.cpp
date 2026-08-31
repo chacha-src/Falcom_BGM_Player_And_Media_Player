@@ -376,13 +376,10 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 	void WriteBlobFile(const wchar_t* path, const void* data, DWORD bytes)
 	{
 		HANDLE h = CreateFileW(path, GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE,
-			NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+			NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
 		if (h == INVALID_HANDLE_VALUE) return;
 		DWORD wr = 0;
-		SetFilePointer(h, 0, NULL, FILE_BEGIN);
 		WriteFile(h, data, bytes, &wr, NULL);
-		if (wr == bytes)
-			SetEndOfFile(h);
 		CloseHandle(h);
 	}
 
@@ -1383,11 +1380,22 @@ void SasamiFmPlayer::SetFmMonDump(int enable, const wchar_t* sourcePath)
 	if (enable && m->playFmMode == 0)
 		enable = 0;
 	m->dumpEnable = enable ? 1 : 0;
-	m->dumpSrc[0] = 0;
 	m->dumpNamedDone[0] = 0;
 	if (sourcePath && sourcePath[0])
 		wcsncpy_s(m->dumpSrc, sourcePath, _TRUNCATE);
+	else
+		m->dumpSrc[0] = 0;
 	if (m->dumpEnable) {
+		/* 曲切替: 古い live/ring（前曲の DO-- など）を消してから書き直す */
+		wchar_t dir[MAX_PATH];
+		m->EnsureDumpDir(dir, MAX_PATH);
+		wchar_t live[MAX_PATH], ring[MAX_PATH];
+		_snwprintf_s(live, _TRUNCATE, L"%s\\fmmon_live.opna", dir);
+		_snwprintf_s(ring, _TRUNCATE, L"%s\\fmmon_ring.opna", dir);
+		DeleteFileW(live);
+		DeleteFileW(ring);
+		m->dumpSeq = 0;
+		m->dumpRingGen = 0;
 		m->dumpDirty = 1;
 		m->dumpLastFlushSample = 0; /* 有効化時は即1枚 */
 		m->FlushDump(m_curSample);

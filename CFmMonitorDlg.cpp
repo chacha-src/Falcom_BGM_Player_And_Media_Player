@@ -1,4 +1,4 @@
-#include "stdafx.h"
+﻿#include "stdafx.h"
 #include "ogg.h"
 #include "oggDlg.h"
 #include "CFmMonitorDlg.h"
@@ -8,8 +8,69 @@
 #include <math.h>
 
 extern save savedata;
+extern CString filen;
+extern CString fnn;
+extern int mode;
 
 namespace {
+
+static void FmPathStem(const wchar_t* path, wchar_t* stem, int n)
+{
+	if (!stem || n < 2) return;
+	stem[0] = 0;
+	if (!path || !path[0]) return;
+	const wchar_t* base = path;
+	for (const wchar_t* p = path; *p; p++)
+		if (*p == L'\\' || *p == L'/') base = p + 1;
+	wcsncpy_s(stem, n, base, _TRUNCATE);
+	wchar_t* dot = wcsrchr(stem, L'.');
+	if (dot && dot != stem) *dot = 0;
+}
+
+/* KPI .fpy 再生中だけ dump の曲名を filen/fnn と照合（古い live を拾わない） */
+static int FmMonPlayFpyStem(wchar_t* stem, int n)
+{
+	if (mode != -3 || !stem || n < 2) return 0;
+	stem[0] = 0;
+	const wchar_t* tryPaths[2] = { (LPCWSTR)fnn, (LPCWSTR)filen };
+	for (int i = 0; i < 2; i++) {
+		const wchar_t* p = tryPaths[i];
+		if (!p || !p[0]) continue;
+		wchar_t tmp[260];
+		FmPathStem(p, tmp, 260);
+		if (!tmp[0]) continue;
+		/* 拡張子が .fpy のとき、または stem が取れてパスに .fpy を含むとき */
+		const wchar_t* dot = wcsrchr(p, L'.');
+		int isFpy = 0;
+		if (dot && _wcsicmp(dot, L".fpy") == 0)
+			isFpy = 1;
+		else {
+			for (const wchar_t* q = p; *q; q++) {
+				if (_wcsnicmp(q, L".fpy", 4) == 0
+					&& (q[4] == 0 || q[4] == L'\\' || q[4] == L'/' || q[4] == L' ' || q[4] == L')')) {
+					isFpy = 1;
+					break;
+				}
+			}
+		}
+		if (!isFpy) continue;
+		wcsncpy_s(stem, n, tmp, _TRUNCATE);
+		return stem[0] != 0;
+	}
+	return 0;
+}
+
+static int FmDumpMatchesPlay(const SasamiFmMonDump& d)
+{
+	wchar_t playStem[260];
+	if (!FmMonPlayFpyStem(playStem, 260))
+		return 1;
+	if (!d.sourcePath[0])
+		return 0;
+	wchar_t dumpStem[260];
+	FmPathStem(d.sourcePath, dumpStem, 260);
+	return dumpStem[0] && _wcsicmp(playStem, dumpStem) == 0;
+}
 
 #pragma pack(push, 1)
 struct FmMonGeomFile {
@@ -1736,8 +1797,38 @@ void CFmMonitorDlg::ApplyDump(const SasamiFmMonDump& d)
 	if (chgKeys) m_dirtyKeys = 1;
 }
 
+void CFmMonitorDlg::ResetDumpSync()
+{
+	m_histN = 0;
+	m_histHead = 0;
+	m_ringGenLast = 0;
+	m_lastCurSample = 0;
+	m_lastHeardSamp = 0;
+	m_heardAnchor = 0;
+	m_lastSeq = 0;
+	m_readFail = 0;
+	m_haveDump = 0;
+	m_lastSong[0] = 0;
+	memset(&m_dump, 0, sizeof(m_dump));
+	memset(&m_prev, 0, sizeof(m_prev));
+	m_dirtyHead = m_dirtyHex = m_dirtyPanels = m_dirtyKeys = 1;
+	m_panelDirtyMask = 0x3F;
+}
+
 void CFmMonitorDlg::PushHistDump(const SasamiFmMonDump& d)
 {
+	if (FmMonIsLive() && !FmDumpMatchesPlay(d))
+		return;
+	if (d.sourcePath[0]) {
+		if ((m_lastSong[0] && wcscmp(m_lastSong, d.sourcePath) != 0)
+			|| (m_haveDump && m_dump.sourcePath[0]
+				&& wcscmp(m_dump.sourcePath, d.sourcePath) != 0)) {
+			ResetDumpSync();
+		}
+	}
+	if (m_haveDump && d.curSample + 10000 < m_lastCurSample)
+		ResetDumpSync();
+
 	if (m_histN > 0) {
 		const int lastI = (m_histHead + m_histN - 1) % HIST_MAX;
 		if (d.seq == m_hist[lastI].seq && d.curSample == m_hist[lastI].curSample
@@ -1764,24 +1855,29 @@ int CFmMonitorDlg::PollDump()
 	struct Cb { CFmMonitorDlg* self; int got; } cb = { this, 0 };
 	auto thunk = [](const SasamiFmMonDump& d, void* p) {
 		Cb* c = (Cb*)p;
+		const int nBefore = c->self->m_histN;
 		c->self->PushHistDump(d);
-		c->got = 1;
+		if (c->self->m_histN > nBefore)
+			c->got = 1;
 	};
 
-	int got = 0;
-	if (FmDrainRingSlots(&m_ringGenLast, thunk, &cb)) {
-		m_readFail = 0;
-		got = (cb.got || m_histN > 0) ? 1 : 0;
-	} else {
+	const int ringOk = FmDrainRingSlots(&m_ringGenLast, thunk, &cb) ? 1 : 0;
+	int got = (cb.got || m_histN > 0) ? 1 : 0;
+
+	/* リングファイルだけ残って live を読まない／gen リセット後に取りこぼすのを防ぐ */
+	if (!cb.got) {
 		SasamiFmMonDump d;
-		if (!FmReadDump(&d)) {
+		if (FmReadDump(&d)) {
+			m_readFail = 0;
+			const int nBefore = m_histN;
+			PushHistDump(d);
+			if (m_histN > nBefore)
+				got = 1;
+		} else if (!ringOk) {
 			if (m_haveDump) {
 				if (++m_readFail > 45) {
 					m_haveDump = 0;
-					m_histN = 0;
-					m_histHead = 0;
-					m_ringGenLast = 0;
-					m_readFail = 0;
+					ResetDumpSync();
 					m_fullDraw = 1;
 					m_panelDirtyMask = 0x3F;
 					m_dirtyHead = m_dirtyHex = m_dirtyPanels = m_dirtyKeys = 1;
@@ -1789,9 +1885,8 @@ int CFmMonitorDlg::PollDump()
 			}
 			return 0;
 		}
+	} else {
 		m_readFail = 0;
-		got = 1;
-		PushHistDump(d);
 	}
 	if (!got || m_histN <= 0) return 0;
 
@@ -1810,8 +1905,21 @@ int CFmMonitorDlg::PollDump()
 		if (m_histSamp[i] <= heard)
 			bestN = n;
 	}
-	if (bestN < 0)
-		return 1; /* 全部がまだ先 → 音に合わせて待つ */
+	if (bestN < 0) {
+		if (!FmMonIsLive())
+			return m_haveDump ? 1 : 0;
+		/* 可聴位置より先だけ溜まっている → 最小 curSample を表示（起動直後など） */
+		uint64_t minS = UINT64_MAX;
+		for (int n = 0; n < m_histN; n++) {
+			const int i = (m_histHead + n) % HIST_MAX;
+			if (m_histSamp[i] < minS) {
+				minS = m_histSamp[i];
+				bestN = n;
+			}
+		}
+		if (bestN < 0)
+			return m_haveDump ? 1 : 0;
+	}
 
 	int curN = -1;
 	for (int n = 0; n < m_histN; n++) {
@@ -1935,9 +2043,15 @@ void CFmMonitorDlg::PumpSyncNow()
 		m_dirtyPanels = 1;
 		m_fullDraw = 1;
 	}
+	if (m_lastPlayy == 0 && live == 1)
+		ResetDumpSync();
 	m_lastPlayy = live;
-	if (live)
+	if (live) {
+		wchar_t playStem[260];
+		if (FmMonPlayFpyStem(playStem, 260) && m_haveDump && !FmDumpMatchesPlay(m_dump))
+			ResetDumpSync();
 		PollDump();
+	}
 	TickFades();
 	InvalidateDirtyRegions();
 }

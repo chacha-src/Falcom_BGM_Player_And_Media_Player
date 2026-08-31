@@ -43,6 +43,7 @@ private:
 	enum { HIST_MAX = 256 }; /* リングと同程度。tick 単位 dump を遅延分保持 */
 
 	int PollDump();
+	void ResetDumpSync();
 	void PushHistDump(const SasamiFmMonDump& d);
 	void ApplyDump(const SasamiFmMonDump& d);
 	void TickFades();
