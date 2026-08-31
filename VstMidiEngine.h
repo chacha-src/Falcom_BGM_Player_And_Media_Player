@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include <Windows.h>
 #include "PluginKinds.h"
@@ -78,6 +78,9 @@ int VstMidiGetRate(void);
 int VstMidiGetChannels(void);
 int VstMidiGetBits(void);
 __int64 VstMidiGetLengthSamples(void);
+/* Song engine sample → tick (for score playhead). 1 if events loaded. */
+int VstMidiTickAtSample(__int64 sample, unsigned* outTick);
+__int64 VstMidiGetPlaySample(void);
 // 曲長に含まれる残響用の余白（秒）。最終イベント以降は音楽としては終わっている。
 #define VST_TAIL_PAD_SEC 2
 double VstMidiTailPadSec(void);
@@ -122,6 +125,12 @@ void VstMidiInjectSysex(int portIndex0to2, const unsigned char* data, int bytes)
 int VstMidiStealInjects(BYTE* ports, DWORD* msgs, int* sampleOfs, int maxCount);
 
 int VstLiveLoadPart(int part1to32, const wchar_t* pluginPath, int isVst3);
+/* MPW3 トレイラの VST パスをパートへロード。戻り=ロードした数（0=トレイラ無し）
+   openEditor: 1=初回ロード時にエディタ（HALion Home）を開く。再生時は 0。 */
+int VstApplyMpw3Binds(const wchar_t* mpw3Path, int openEditor);
+/* .mpsmv preview: route SMF notes to live VST parts (HALion) instead of GM mapper. */
+void VstSongUseLiveBindsSet(int enable);
+int VstSongUseLiveBinds(void);
 void VstLiveUnloadPart(int part1to32);
 // ホスト窓が閉じるとき: 先にリモート音声を止め、全部のパートを降ろす。
 void VstLiveShutdown(void);
@@ -129,6 +138,8 @@ void VstLiveShutdown(void);
 void VstLiveAbandonHostPlugins(int on);
 void VstLiveAllNotesOff();
 void VstLiveMidiShort(int portIndex0to2, DWORD shortMsg);
+void VstLiveMidiToPart(int part1to32, DWORD shortMsg);
+void VstLiveMidiSongShort(int portIndex0to2, DWORD shortMsg);
 void VstLiveMidiSysex(int portIndex0to2, const unsigned char* data, int bytes);
 void VstLiveThruSet(int enable);
 int VstLiveThruIsOn(void);
@@ -138,7 +149,40 @@ void VstLiveThruPcmPush(const BYTE* pcm, int bytes, int rate, int ch, int bits);
 void VstLiveThruPcmMix(float* L, float* R, int frames);
 int VstLiveRender(float* L, float* R, int frames);
 int VstLiveEditorOpen(int part1to32);
+/* Queue editor open without blocking the caller (local + remote). */
+int VstLiveEditorOpenAsync(int part1to32);
+/* Drop pending async opens (call when closing score / exiting). */
+void VstLiveEditorOpenCancelPending(void);
 void VstLiveEditorClose(int part1to32);
+/* ogg 終了時: KpiHost64 上の VST 設定画面をすべて閉じる（プラグインは載せたまま）。 */
+void VstLiveEditorCloseAllRemote(void);
+/* Score / note-props HWND receives WM_VST_LIVE_EDITOR_CLOSED (w=part, l=prog). */
+#ifndef WM_VST_LIVE_EDITOR_CLOSED
+#define WM_VST_LIVE_EDITOR_CLOSED (WM_APP + 9120)
+#endif
+/* Deferred UI refresh after editor close (no pipe during teardown). */
+#ifndef WM_VST_LIVE_EDITOR_CLOSED_UI
+#define WM_VST_LIVE_EDITOR_CLOSED_UI (WM_VST_LIVE_EDITOR_CLOSED + 1)
+#endif
+void VstLiveEditorSetNotifyHwnd(HWND hwnd);
+/* Optional second listener (VST Host UI) — same WM_VST_LIVE_EDITOR_CLOSED. */
+void VstLiveEditorSetNotifyHwnd2(HWND hwnd);
+/* Clear "editor closing" quiet flag (score calls after deferred UI refresh). */
+void VstLiveEditorClearClosingQuiet(void);
+/* Keep VST process() + waveOut running (Host AudioThread equivalent).
+   Required for HALion MediaBay keyboard / editor notes when score is open. */
+void VstLiveMonitorEnsure(void);
+void VstLiveMonitorStop(void);
+/* Poll Host64 editorClosedSeq without needing the audio mix thread. */
+void VstLivePollRemoteEditorClosed(void);
+/* 1 = part loaded. outPath may be NULL. */
+int VstLivePartIsLoaded(int part1to32);
+/* 1 = any live part is hosted in KpiHost64 (x64). */
+int VstLiveAnyRemotePart(void);
+/* 1 = editor HWND alive (Host64: HALion Home/MediaBay up — do not PROG/STATE IPC). */
+int VstLivePartEditorIsOpen(int part1to32);
+/* Copy live plugin path for part; returns 1 if non-empty. */
+int VstLivePartGetPath(int part1to32, wchar_t* outPath, int outCch);
 
 // パートがプラグインへ渡す MIDI チャンネル。-1=届いたチャンネルのまま。
 // 0..15=強制。自チャンネルしか聴かないドラムキットでも、どのスロットでも鳴る。
@@ -153,6 +197,22 @@ int VstLiveProgramName(int part1to32, int index, wchar_t* out, int outChars);
 int VstLiveProgramNames(int part1to32, int first, int count, wchar_t* out,
 	int stride);
 int VstLiveSetProgram(int part1to32, int index);
+/* VST3 state chunk: which 0=component, 1=controller. Get*: malloc; caller free. */
+int VstLiveGetState(int part1to32, int which, unsigned char** outBytes, int* outLen);
+int VstLiveSetState(int part1to32, int which, const unsigned char* bytes, int len);
+int VstLiveApplyStates(int part1to32,
+	const unsigned char* comp, int compLen,
+	const unsigned char* ctrl, int ctrlLen);
+/* Snapshot live VST3 states into caller buffers (malloc). Returns 1 if any blob. */
+int VstLiveCaptureStates(int part1to32,
+	unsigned char** outComp, int* outCompLen,
+	unsigned char** outCtrl, int* outCtrlLen);
+/* 1 if part is multi-timbral (SC-VA etc.). */
+int VstLivePartIsMulti(int part1to32);
+/* GS/XG bank+PC to the live part (MIDI), and store as current prog. */
+void VstLiveSendBankProgram(int part1to32, int bankMsb, int bankLsb, int prog0to127);
+/* Fire a short preview note (renders to waveOut). */
+void VstLiveAuditionNote(int part1to32, int noteMidi, int velocity, int durMs);
 
 // パートがいま聴いている内容。UI がチャンネルを点灯するのに使う。
 struct VstLiveActInfo {

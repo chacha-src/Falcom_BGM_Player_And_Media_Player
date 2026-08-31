@@ -1,4 +1,4 @@
-﻿#include "stdafx.h"
+#include "stdafx.h"
 #include "CCustomControl.h"
 #include "resource.h"
 #include "CImageBase.h"
@@ -896,7 +896,8 @@ static void CCC_BlitToRectOpaque(HDC hdcDest, const RECT& rect, HDC hdcSrc, int 
             return;
     }
 
-    // フォールバック: 旧 BeginBufferedPaint 経路
+    // フォールバック: BeginBufferedPaint。バッファ原点は target rect 左上(0,0)。
+    // rect.left/top で書くと枠外→BPPF_ERASE の黒だけが残り譜面が真っ黒になる。
     BP_PAINTPARAMS params = { sizeof(BP_PAINTPARAMS) };
     params.dwFlags = BPPF_ERASE;
     HDC hdcBuf = NULL;
@@ -904,11 +905,11 @@ static void CCC_BlitToRectOpaque(HDC hdcDest, const RECT& rect, HDC hdcSrc, int 
     if (hdcBuf && hBP)
     {
         ::SetStretchBltMode(hdcBuf, COLORONCOLOR);
-        if (bStretch)
-            ::StretchBlt(hdcBuf, rect.left, rect.top, destW, destH, hdcSrc, srcX, srcY, srcW, srcH, SRCCOPY);
+        if (bStretch && (destW != srcW || destH != srcH))
+            ::StretchBlt(hdcBuf, 0, 0, destW, destH, hdcSrc, srcX, srcY, srcW, srcH, SRCCOPY);
         else
-            ::BitBlt(hdcBuf, rect.left, rect.top, destW, destH, hdcSrc, srcX, srcY, SRCCOPY);
-        ::BufferedPaintMakeOpaque(hBP, &rect);
+            ::BitBlt(hdcBuf, 0, 0, destW, destH, hdcSrc, srcX, srcY, SRCCOPY);
+        ::BufferedPaintMakeOpaque(hBP, NULL);
         ::EndBufferedPaint(hBP, TRUE);
         return;
     }
@@ -4566,7 +4567,7 @@ static const UINT_PTR kTabSoftTimerId       = 4127; // 選択タブ Soft（220ms
 
 // 標準 CEdit をオーナードロー化。アクリル下は BufferedPaint 不透明面 + 自前キャレット。
 CCustomEdit::CCustomEdit()
-    : m_bHasFocus(FALSE), m_bAutoDelete(FALSE), m_bAeroMode(FALSE), m_bSelDrag(FALSE), m_bCaretOn(TRUE)
+    : m_bHasFocus(FALSE), m_bAutoDelete(FALSE), m_bAeroMode(FALSE), m_bMmlSyntax(FALSE), m_bSelDrag(FALSE), m_bCaretOn(TRUE)
     , m_lastSel0(-1), m_lastSel1(-1)
 {
     m_brBackground.CreateSolidBrush(COLOR_EDIT_BG);
@@ -4743,6 +4744,74 @@ void CCustomEdit::DrawMultilineVisibleText(CDC& dc, const CRect& rc)
             if (!post.IsEmpty()) {
                 dc.SetTextColor(COLOR_EDIT_TEXT);
                 dc.ExtTextOut(cx, y, ETO_CLIPPED, &rc, post, post.GetLength(), NULL);
+            }
+        } else if (m_bMmlSyntax && !line.IsEmpty()) {
+            /* Folded @VSTSTATEB64 summary: @VSTSTATEB64 …(N bytes, L lines)… */
+            if (line.Find(L"VSTSTATEB64") >= 0 || line.Find(L"VSTCTRLB64") >= 0) {
+                if (line.Find(L"…(") >= 0 && line.Find(L"lines)") >= 0) {
+                    dc.SetTextColor(RGB(120, 120, 130));
+                    dc.ExtTextOut(x, y, ETO_CLIPPED, &rc, line, line.GetLength(), NULL);
+                    continue;
+                }
+            }
+            /* SASAMI MML: コメント灰・@/#コマンド青・音符緑・数字茶・それ以外通常色 */
+            int cx = x;
+            const int n = line.GetLength();
+            int i = 0;
+            while (i < n) {
+                COLORREF col = COLOR_EDIT_TEXT;
+                int j = i + 1;
+                const TCHAR c0 = line[i];
+                if (c0 == _T(';') || (c0 == _T('/') && i + 1 < n && line[i + 1] == _T('/'))) {
+                    col = RGB(120, 120, 130);
+                    j = n;
+                } else if (c0 == _T('[') || c0 == _T(']')) {
+                    col = RGB(180, 40, 40);
+                    j = i + 1;
+                } else if (c0 == _T('@') || c0 == _T('#')) {
+                    col = RGB(40, 70, 180);
+                    while (j < n) {
+                        const TCHAR c = line[j];
+                        if (c == _T(' ') || c == _T('\t') || c == _T(';') || c == _T('/')) break;
+                        ++j;
+                    }
+                } else if ((c0 >= _T('0') && c0 <= _T('9')) || c0 == _T('.') || c0 == _T('-')) {
+                    col = RGB(140, 90, 40);
+                    while (j < n) {
+                        const TCHAR c = line[j];
+                        if (!((c >= _T('0') && c <= _T('9')) || c == _T('.') || c == _T('-'))) break;
+                        ++j;
+                    }
+                } else if ((c0 >= _T('a') && c0 <= _T('g')) || (c0 >= _T('A') && c0 <= _T('G'))
+                    || c0 == _T('r') || c0 == _T('R') || c0 == _T('o') || c0 == _T('O')
+                    || c0 == _T('l') || c0 == _T('L') || c0 == _T('v') || c0 == _T('V')
+                    || c0 == _T('t') || c0 == _T('T') || c0 == _T('<') || c0 == _T('>')
+                    || c0 == _T('+') || c0 == _T('&') || c0 == _T('^')) {
+                    col = RGB(20, 120, 70);
+                    while (j < n) {
+                        const TCHAR c = line[j];
+                        if (c == _T(' ') || c == _T('\t') || c == _T(';') || c == _T('#') || c == _T('@')) break;
+                        if ((c >= _T('0') && c <= _T('9')) || c == _T('.') || c == _T('-')) break;
+                        ++j;
+                    }
+                } else {
+                    while (j < n) {
+                        const TCHAR c = line[j];
+                        if (c == _T(';') || c == _T('@') || c == _T('#') || c == _T('/')
+                            || (c >= _T('0') && c <= _T('9'))
+                            || (c >= _T('a') && c <= _T('g')) || (c >= _T('A') && c <= _T('G'))
+                            || c == _T('r') || c == _T('R') || c == _T('o') || c == _T('O')
+                            || c == _T('l') || c == _T('L') || c == _T('v') || c == _T('V')
+                            || c == _T('t') || c == _T('T'))
+                            break;
+                        ++j;
+                    }
+                }
+                CString run = line.Mid(i, j - i);
+                dc.SetTextColor(col);
+                dc.ExtTextOut(cx, y, ETO_CLIPPED, &rc, run, run.GetLength(), NULL);
+                cx += dc.GetTextExtent(run).cx;
+                i = j;
             }
         } else {
             dc.SetTextColor(COLOR_EDIT_TEXT);
@@ -6641,6 +6710,13 @@ int CCustomComboBox::AddString(LPCTSTR lp, BOOL bD)
         if (!bD) m_vSelectableIndices.push_back(n);
     }
     return n;
+}
+
+void CCustomComboBox::ResetContent()
+{
+    CComboBox::ResetContent();
+    m_vDisabledItems.clear();
+    m_vSelectableIndices.clear();
 }
 
 // 論理インデックスを返す。無効行は飛ばす。未選択・無効行選択中は -1。
@@ -11525,11 +11601,11 @@ void CCustomStandardButton::PaintClient(CDC& dc, const CRect& r)
         DrawGlossHighlight(&mDC, rg, m_bFlat ? 4 : 8);
         if (!m_bFlat)
             DrawJellyEdges(&mDC, rg, 8, RGB(120, 40, 80));
-        // Soft3D: 通常ボタンは背景ゆらぎ、flat でも角チップ（キャプション帯以外）
-        if (!CCC_IsCaptionChromeCtrl(m_hWnd) && r.Width() >= 24 && r.Height() >= 16)
+        // Soft3D: flat ボタンはチップも禁止（αブレンドがアクリル透過に見える）
+        if (!m_bFlat && !CCC_IsCaptionChromeCtrl(m_hWnd) && r.Width() >= 24 && r.Height() >= 16)
         {
             const int tick = (int)(::GetTickCount64() / 80) + (int)(m_nAnimTick / 2);
-            if (!m_bFlat && r.Width() >= 36 && r.Height() >= 20)
+            if (r.Width() >= 36 && r.Height() >= 20)
                 DrawSoftJkBackdrop(&mDC, rg, tick, m_bMouseOver || bP);
             else {
                 const int cs = min(12, min(r.Width(), r.Height()) / 2);

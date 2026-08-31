@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" ToolsVersion="14.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="uni_2026_de|Win32">
@@ -50,6 +50,8 @@
       <PreprocessorDefinitions>WIN32;_WINDOWS;_CRT_SECURE_NO_WARNINGS;_HAS_AUTO_PTR_ETC=1;NOMINMAX;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
       <ExceptionHandling>Sync</ExceptionHandling>
+      <!-- Source is UTF-8; without this CP932 eats multi-byte comments and merges lines (dumpRingGen vanished). -->
+      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
@@ -105,6 +107,7 @@ if exist "C:\projects\APPLICATION3\ogg_binary\Plugins\Kobarin\fmpmd\Rhythm\2608_
     <ClCompile Include="source\kbsasami_decoder.cpp" />
     <ClCompile Include="source\kbsasami_module.cpp" />
     <ClCompile Include="source\sasami_file.cpp" />
+    <ClCompile Include="source\sasami_write.cpp" />
     <ClCompile Include="source\sasami_midi.cpp" />
     <ClCompile Include="source\sasami_misao.cpp" />
     <ClCompile Include="source\sasami_misao_synth.cpp" />
@@ -120,6 +123,7 @@ if exist "C:\projects\APPLICATION3\ogg_binary\Plugins\Kobarin\fmpmd\Rhythm\2608_
     <ClInclude Include="source\kbsasami_decoder.h" />
     <ClInclude Include="source\kbsasami_module.h" />
     <ClInclude Include="source\sasami_file.h" />
+    <ClInclude Include="source\sasami_write.h" />
     <ClInclude Include="source\sasami_midi.h" />
     <ClInclude Include="source\sasami_fm.h" />
     <ClInclude Include="source\sasami_neiro.inc" />

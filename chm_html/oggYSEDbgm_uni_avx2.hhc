@@ -251,6 +251,10 @@
 			    <param name="Local" value="ja\tools.htm">
 			    </OBJECT>
 			<LI> <OBJECT type="text/sitemap">
+			    <param name="Name" value="SASAMI Composer（曲を作る）">
+			    <param name="Local" value="ja\sasami-composer.htm">
+			    </OBJECT>
+			<LI> <OBJECT type="text/sitemap">
 			    <param name="Name" value="ボイスチェンジャー">
 			    <param name="Local" value="ja\voice.htm">
 			    </OBJECT>
@@ -558,6 +562,10 @@
 			<LI> <OBJECT type="text/sitemap">
 			    <param name="Name" value="The companion tools">
 			    <param name="Local" value="en\tools.htm">
+			    </OBJECT>
+			<LI> <OBJECT type="text/sitemap">
+			    <param name="Name" value="SASAMI Composer (create songs)">
+			    <param name="Local" value="en\sasami-composer.htm">
 			    </OBJECT>
 			<LI> <OBJECT type="text/sitemap">
 			    <param name="Name" value="The voice changer">

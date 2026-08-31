@@ -417,16 +417,32 @@ void OfflineHelpOpen(HWND hwndOwner, int preferredEn)
 		}
 	}
 
+	OfflineHelpOpenTopic(hwndOwner, L"index", preferredEn);
+}
+
+void OfflineHelpOpenTopic(HWND hwndOwner, const wchar_t* slug, int preferredEn)
+{
+	const CString path = OfflineHelpGetChmPath();
+	if (!OfflineHelpFileLooksOk(path))
+	{
+		if (!OfflineHelpTryCopyFromTempDirs(path))
+			OfflineHelpEnsureAvailable();
+		if (!OfflineHelpFileLooksOk(path))
+			return; /* 呼び出し側 OfflineHelpOpen が案内済み、または直接呼び出し時は黙って戻る */
+	}
+
 	const bool useEn = OfflineHelpPreferEnglish(preferredEn);
+	const wchar_t* page = (slug && slug[0]) ? slug : L"index";
 	CString topic;
-	topic.Format(_T("%s::/%s/index.htm"), (LPCTSTR)path, useEn ? _T("en") : _T("ja"));
+	topic.Format(_T("%s::/%s/%s.htm"), (LPCTSTR)path, useEn ? _T("en") : _T("ja"), page);
 
 	HWND hh = HtmlHelp(hwndOwner ? hwndOwner : GetDesktopWindow(), topic, HH_DISPLAY_TOPIC, 0);
-	if (!hh)
-	{
-		// トピック指定が失敗したら CHM 本体だけ開く
-		hh = HtmlHelp(hwndOwner ? hwndOwner : GetDesktopWindow(), path, HH_DISPLAY_TOPIC, 0);
+	if (!hh && _wcsicmp(page, L"index") != 0) {
+		topic.Format(_T("%s::/%s/index.htm"), (LPCTSTR)path, useEn ? _T("en") : _T("ja"));
+		hh = HtmlHelp(hwndOwner ? hwndOwner : GetDesktopWindow(), topic, HH_DISPLAY_TOPIC, 0);
 	}
+	if (!hh)
+		hh = HtmlHelp(hwndOwner ? hwndOwner : GetDesktopWindow(), path, HH_DISPLAY_TOPIC, 0);
 	if (!hh)
 		ShellExecute(hwndOwner, _T("open"), path, NULL, NULL, SW_SHOWNORMAL);
 }

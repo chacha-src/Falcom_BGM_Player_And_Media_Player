@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "stdafx.h"
 #include "afxdialogex.h"
@@ -577,6 +577,9 @@ public:
     BOOL m_bAutoDelete;
     void SetAeroMode(BOOL b) { m_bAeroMode = b; if (GetSafeHwnd()) Invalidate(FALSE); }
     BOOL m_bAeroMode;
+    /* MML/コマンド色分け（SASAMI テキスト等）。通常 Edit は無効のまま */
+    void SetMmlSyntax(BOOL b) { m_bMmlSyntax = b; if (GetSafeHwnd()) Invalidate(FALSE); }
+    BOOL m_bMmlSyntax;
 
     // 最小化復帰等: WM_PRINTCLIENT は Edit 本文を描かないため明示的に再描画
     void RepaintClient();
@@ -841,6 +844,7 @@ public:
 
     // 文字列を追加します。bDisabled = TRUE の場合は無効化されたアイテムとして扱われます
     int AddString(LPCTSTR lp, BOOL bDisabled = FALSE);
+    void ResetContent();
 
     // 選択項目の取得と設定（無効化されたアイテムをスキップした「論理的な」インデックスを使用）
     int GetCurSel() const;

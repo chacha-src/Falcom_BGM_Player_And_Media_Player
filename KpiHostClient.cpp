@@ -1,4 +1,4 @@
-﻿#include "stdafx.h"
+#include "stdafx.h"
 
 #include "KpiHostClient.h"
 #include <tlhelp32.h>
@@ -257,6 +257,15 @@ struct PipeLock
 // それをエラーにすると曲の途中で切断し、再生スレッドが無音バッファを出す。
 enum : uint32_t { PIPE_MAX_REPLY_BYTES = 64u * 1024u * 1024u };
 
+/* During VST LIVE_LOAD, pump more UI so HALion/MediaBay in KpiHost64 can finish
+   while our wait banner stays responsive (host path feels the same). */
+static volatile long g_kpiPipeUiPump = 0;
+
+extern "C" void KpiPipeSetUiPump(int on)
+{
+	InterlockedExchange(&g_kpiPipeUiPump, on ? 1 : 0);
+}
+
 bool PipeXfer(HANDLE pipe, void* buf, uint32_t bytes, int writing, DWORD timeoutMs)
 {
 	uint8_t* p = (uint8_t*)buf;
@@ -277,7 +286,50 @@ bool PipeXfer(HANDLE pipe, void* buf, uint32_t bytes, int writing, DWORD timeout
 				CloseHandle(ov.hEvent);
 				return false;
 			}
-			if (WaitForSingleObject(ov.hEvent, left) != WAIT_OBJECT_0) {
+			for (;;) {
+				const DWORD elapsed2 = GetTickCount() - t0;
+				if (elapsed2 >= timeoutMs) {
+					CancelIoEx(pipe, &ov);
+					WaitForSingleObject(ov.hEvent, 2000);
+					CloseHandle(ov.hEvent);
+					return false;
+				}
+				const DWORD slice = timeoutMs - elapsed2;
+				const DWORD waitMs = slice > 100 ? 100 : slice;
+				const DWORD qs = InterlockedCompareExchange(&g_kpiPipeUiPump, 0, 0)
+					? (QS_ALLINPUT) : (QS_PAINT | QS_TIMER | QS_POSTMESSAGE);
+				const DWORD wr = MsgWaitForMultipleObjects(1, &ov.hEvent, FALSE, waitMs, qs);
+				if (wr == WAIT_OBJECT_0)
+					break;
+				if (wr == WAIT_OBJECT_0 + 1) {
+					MSG msg;
+					if (InterlockedCompareExchange(&g_kpiPipeUiPump, 0, 0)) {
+						while (PeekMessageW(&msg, NULL, 0, 0, PM_REMOVE)) {
+							if (msg.message == WM_QUIT) {
+								PostQuitMessage((int)msg.wParam);
+								CancelIoEx(pipe, &ov);
+								CloseHandle(ov.hEvent);
+								return false;
+							}
+							TranslateMessage(&msg);
+							DispatchMessageW(&msg);
+						}
+					} else {
+						while (PeekMessageW(&msg, NULL, WM_PAINT, WM_PAINT, PM_REMOVE))
+							DispatchMessageW(&msg);
+						while (PeekMessageW(&msg, NULL, WM_TIMER, WM_TIMER, PM_REMOVE))
+							DispatchMessageW(&msg);
+						while (PeekMessageW(&msg, NULL, WM_QUIT, WM_QUIT, PM_REMOVE)) {
+							PostQuitMessage((int)msg.wParam);
+							CancelIoEx(pipe, &ov);
+							CloseHandle(ov.hEvent);
+							return false;
+						}
+					}
+					continue;
+				}
+				if (wr == WAIT_TIMEOUT)
+					continue;
 				CancelIoEx(pipe, &ov);
 				WaitForSingleObject(ov.hEvent, 2000);
 				CloseHandle(ov.hEvent);
@@ -687,7 +739,11 @@ bool KpiHost64Client::VstLiveLoad(uint32_t part1to32, const std::wstring& plugin
 	memcpy(p, &lr, sizeof(lr)); p += sizeof(lr);
 	memcpy(p, &nPath, sizeof(nPath)); p += sizeof(nPath);
 	memcpy(p, pluginPath.c_str(), nPath * sizeof(wchar_t));
-	return SendSimple(KPIHOST64_CMD_VST_LIVE_LOAD, req.data(), (uint32_t)req.size());
+	/* HALion MediaBay can take minutes; pump UI while waiting. */
+	KpiPipeSetUiPump(1);
+	const bool ok = SendSimple(KPIHOST64_CMD_VST_LIVE_LOAD, req.data(), (uint32_t)req.size(), 300000);
+	KpiPipeSetUiPump(0);
+	return ok;
 }
 
 bool KpiHost64Client::VstLiveUnload(uint32_t part1to32)
@@ -743,6 +799,11 @@ bool KpiHost64Client::VstLiveEditorClose(uint32_t part1to32)
 	return SendSimple(KPIHOST64_CMD_VST_LIVE_EDITOR_CLOSE, &u, sizeof(u), 8000);
 }
 
+bool KpiHost64Client::VstLiveEditorCloseAll()
+{
+	return SendSimple(KPIHOST64_CMD_VST_LIVE_EDITOR_CLOSE_ALL, NULL, 0, 120000);
+}
+
 bool KpiHost64Client::VstLiveSetSendChannel(uint32_t part1to32, int32_t sendCh)
 {
 	KPIHOST64_VstLiveSendChReq r{};
@@ -790,5 +851,39 @@ bool KpiHost64Client::VstLiveSetProgram(uint32_t part1to32, uint32_t index)
 	r.part = part1to32;
 	r.index = index;
 	return SendSimple(KPIHOST64_CMD_VST_LIVE_SET_PROGRAM, &r, sizeof(r));
+}
+
+bool KpiHost64Client::VstLiveGetState(uint32_t part1to32, uint32_t which,
+	std::vector<uint8_t>& outBytes)
+{
+	outBytes.clear();
+	KPIHOST64_VstLiveStateReq r{};
+	r.part = part1to32;
+	r.which = which;
+	r.bytes = 0;
+	std::vector<uint8_t> reply;
+	uint32_t st = 0;
+	if (!SendRequest(KPIHOST64_CMD_VST_LIVE_GET_STATE, &r, sizeof(r), reply, st, 10000))
+		return false;
+	if (st != KPIHOST64_STATUS_OK || reply.size() < sizeof(KPIHOST64_VstLiveStateReply))
+		return false;
+	auto* head = (const KPIHOST64_VstLiveStateReply*)reply.data();
+	if (reply.size() < sizeof(*head) + head->bytes) return false;
+	if (head->bytes)
+		outBytes.assign(reply.begin() + sizeof(*head), reply.begin() + sizeof(*head) + head->bytes);
+	return true;
+}
+
+bool KpiHost64Client::VstLiveSetState(uint32_t part1to32, uint32_t which,
+	const uint8_t* bytes, uint32_t len)
+{
+	if (!bytes || !len) return false;
+	std::vector<uint8_t> req(sizeof(KPIHOST64_VstLiveStateReq) + len);
+	auto* r = (KPIHOST64_VstLiveStateReq*)req.data();
+	r->part = part1to32;
+	r->which = which;
+	r->bytes = len;
+	memcpy(req.data() + sizeof(*r), bytes, len);
+	return SendSimple(KPIHOST64_CMD_VST_LIVE_SET_STATE, req.data(), (uint32_t)req.size(), 120000);
 }
 

@@ -40,6 +40,9 @@
 #include "Soft3DMazeDlg.h"
 #include "VstHostDlg.h"
 #include "CdPlayerDlg.h"
+#include "CSasamiTextDlg.h"
+#include "CSasamiMidiScoreDlg.h"
+#include "CSasamiFmScoreDlg.h"
 #include "Soft3DRaceDlg.h"
 #include "CDesktopLyricsWnd.h"
 #include "Douga.h"
@@ -1388,6 +1391,9 @@ BEGIN_MESSAGE_MAP(CMediaPlayerDlg, CCustomBlurDialogExBase)
 	ON_COMMAND(ID_MP_OPEN_ANALYZER, &CMediaPlayerDlg::OnAnalyzer)
 	ON_COMMAND(ID_MP_OPEN_PIANOROLL, &CMediaPlayerDlg::OnPiano)
 	ON_COMMAND(ID_MP_OPEN_MIDIMON, &CMediaPlayerDlg::OnMidiMonitor)
+	ON_COMMAND(ID_MP_SASAMI_TEXT, &CMediaPlayerDlg::OnMpSasamiText)
+	ON_COMMAND(ID_MP_SASAMI_MIDI, &CMediaPlayerDlg::OnMpSasamiMidi)
+	ON_COMMAND(ID_MP_SASAMI_FM, &CMediaPlayerDlg::OnMpSasamiFm)
 	ON_COMMAND(ID_MP_OPEN_EQ, &CMediaPlayerDlg::OnEq)
 	ON_COMMAND(ID_MP_OPEN_PROTOOLS, &CMediaPlayerDlg::OnProTools)
 	ON_COMMAND(ID_MP_LRC_EXPAND, &CMediaPlayerDlg::OnLrcExpand)
@@ -11765,6 +11771,22 @@ void CMediaPlayerDlg::ShowToolsExtrasMenu(CPoint screenPt)
 			LL14(L"練習用の区間・設定をパックとして書き出します", L"Export practice ranges and settings as a pack", L"Exporter plages/reglages de pratique en pack", L"Esporta intervalli/impostazioni pratica come pack", L"Exportar rangos/ajustes de practica como pack", L"연습 구간·설정을 팩으로 내보내기", L"将练习区间与设置导出为包", L"تصدير نطاقات/إعدادات التدريب كحزمة", L"Экспортировать диапазоны/настройки практики пакетом", L"Ubungsbereiche/-einstellungen als Paket exportieren", L"Exportar intervalos/ajustes de pratica como pacote", L"Oefenbereiken/-instellingen als pakket exporteren", L"Eksportuj zakresy/ustawienia cwiczen jako pakiet", L"Alisirma aralik/ayarlarini paket olarak disa aktar"));
 		}
 	}
+	menu.AddSeparator();
+	{
+		CCustomPopupMenu* sub = menu.AddSubMenu(
+			L"SASAMI",
+			LL14(L"SASAMI Composer（テキスト／MIDIスコア／FMスコア）", L"SASAMI Composer (text / MIDI score / FM score)", L"SASAMI Composer (texte / partition MIDI / FM)", L"SASAMI Composer (testo / partitura MIDI / FM)", L"SASAMI Composer (texto / partitura MIDI / FM)",
+				L"SASAMI Composer (텍스트/MIDI/FM)", L"SASAMI Composer（文本/MIDI/FM）", L"SASAMI Composer (نص/MIDI/FM)", L"SASAMI Composer (текст/MIDI/FM)", L"SASAMI Composer (Text/MIDI/FM)",
+				L"SASAMI Composer (texto/MIDI/FM)", L"SASAMI Composer (tekst/MIDI/FM)", L"SASAMI Composer (tekst/MIDI/FM)", L"SASAMI Composer (metin/MIDI/FM)"));
+		if (sub) {
+			sub->AddCommand(ID_MP_SASAMI_TEXT,
+				LL14(L"テキスト作曲…", L"Text compose…", L"Composer texte…", L"Componi testo…", L"Componer texto…", L"텍스트 작곡…", L"文本作曲…", L"تأليف نص…", L"Текст…", L"Text komponieren…", L"Compor texto…", L"Tekst componeren…", L"Komponuj tekst…", L"Metin bestele…"));
+			sub->AddCommand(ID_MP_SASAMI_MIDI,
+				LL14(L"MIDIスコア…", L"MIDI score…", L"Partition MIDI…", L"Partitura MIDI…", L"Partitura MIDI…", L"MIDI 스코어…", L"MIDI 乐谱…", L"نوتة MIDI…", L"MIDI-партитура…", L"MIDI-Partitur…", L"Partitura MIDI…", L"MIDI-partituur…", L"Partytura MIDI…", L"MIDI skor…"));
+			sub->AddCommand(ID_MP_SASAMI_FM,
+				LL14(L"FMスコア…", L"FM score…", L"Partition FM…", L"Partitura FM…", L"Partitura FM…", L"FM 스코어…", L"FM 乐谱…", L"نوتة FM…", L"FM-партитура…", L"FM-Partitur…", L"Partitura FM…", L"FM-partituur…", L"Partytura FM…", L"FM skor…"));
+		}
+	}
 	const UINT cmd = menu.Track(screenPt, this);
 	// メニュー閉鎖時に LRC オフセットの端数(1–9ms)を捨てない
 	if (lrcCtx.pendingMs != 0) {
@@ -13086,6 +13108,9 @@ void CMediaPlayerDlg::OnMpTunerPractice() { OpenTunerPracticeModeless(this); }
 void CMediaPlayerDlg::OnMpPhotoFrame() { OpenPhotoFrameModeless(this); }
 void CMediaPlayerDlg::OnMpSoft3DMaze() { OpenSoft3DMazeModeless(this); }
 void CMediaPlayerDlg::OnMpVstHost() { OpenVstHostModeless(this); }
+void CMediaPlayerDlg::OnMpSasamiText() { CSasamiTextDlg::OpenOwned(this); }
+void CMediaPlayerDlg::OnMpSasamiMidi() { CSasamiMidiScoreDlg::OpenOwned(this); }
+void CMediaPlayerDlg::OnMpSasamiFm() { CSasamiFmScoreDlg::OpenOwned(this); }
 void CMediaPlayerDlg::OnMpCdPlayer() { OpenCdPlayerModeless(this); }
 void CMediaPlayerDlg::OnMpSoft3DRace() { OpenSoft3DRaceModeless(this); }
 void CMediaPlayerDlg::OnMpRemote()

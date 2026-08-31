@@ -1,4 +1,4 @@
-﻿// PlayList.cpp : 実装ファイル
+// PlayList.cpp : 実装ファイル
 //
 
 #include "stdafx.h"
@@ -11255,7 +11255,7 @@ void CPlayList::plugs(CString fff, playlistdata *p,TCHAR* kpi, BYTE& kv)
 	for(int i=0;i<kpicnt;i++){
 		if (plugkind[i] != PLUGKIND_KPI) continue;
 		CString fileExt = fff.Right(fff.GetLength()-fff.ReverseFind('.')); fileExt.MakeLower();
-		if (fileExt == L".mpy" || fileExt == L".mpw2") continue;
+		if (fileExt == L".mpy" || fileExt == L".mpw2" || fileExt == L".mpsmv") continue;
 		for(int j=0;;j++){
 			if(ext[i][j]=="") break;
 			ss=fff.Right(fff.GetLength()-fff.ReverseFind('.'));ss.MakeLower();

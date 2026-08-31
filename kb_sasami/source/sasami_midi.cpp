@@ -1,4 +1,4 @@
-﻿#include "sasami_midi.h"
+#include "sasami_midi.h"
 #include "sasami_misao.h"
 
 #include <windows.h>
@@ -486,7 +486,7 @@ bool SasamiConvertToSmf(const SasamiSong& song, SasamiMidiMap map, int gsBankLsb
 	if (!out || !outSize || outCap <= 0) return false;
 	*outSize = 0;
 	if (!EnsureMidiWork()) return false;
-	if (song.kind != SASAMI_KIND_MPY && song.kind != SASAMI_KIND_MPW2) return false;
+	if (song.kind != SASAMI_KIND_MPY && song.kind != SASAMI_KIND_MPW2 && song.kind != SASAMI_KIND_MPW3) return false;
 	if (song.trackCount <= 0) return false;
 
 	const int ver = song.mpyVersion;
@@ -518,7 +518,16 @@ bool SasamiConvertToSmf(const SasamiSong& song, SasamiMidiMap map, int gsBankLsb
 		if (tr[i].alive && tr[i].addr == 0xF0) tr[i].alive = 0;
 		if (tr[i].alive) nAlive++;
 	}
-	if (nAlive == 0) return false;
+	/* Empty score / all-unused tracks: still emit a minimal SMF so VST preview
+	   (.mpsmv with binds only) can open instead of "MIDI not found". */
+	if (nAlive == 0) {
+		const unsigned T = SASAMI_DEFAULT_T;
+		const uint32_t mpqn = (uint32_t)((500ull * T) / 13ull);
+		uint8_t d[6] = { 0xFF, 0x51, 0x03, (uint8_t)(mpqn >> 16), (uint8_t)(mpqn >> 8), (uint8_t)mpqn };
+		PushEv(0, 0, d, 6);
+		WriteSmf(1, out, outCap, outSize);
+		return *outSize > 22;
+	}
 
 	int nports = song.dualPort ? 2 : 1;
 	int port1Ready = (nports >= 2) ? 1 : 0;

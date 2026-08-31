@@ -1,4 +1,4 @@
-﻿#include "stdafx.h"
+#include "stdafx.h"
 #include "ogg.h"
 #include "CMpCommandPaletteDlg.h"
 #include "CMediaPlayerDlg.h"
@@ -70,6 +70,9 @@ enum {
 	PAL_WIN_CD,
 	PAL_WIN_PLAYLIST,
 	PAL_WIN_OGGHELP,
+	PAL_WIN_SASAMI_TEXT,
+	PAL_WIN_SASAMI_MIDI,
+	PAL_WIN_SASAMI_FM,
 	PAL_SWITCH_FALCOM
 };
 
@@ -139,6 +142,9 @@ const MpPalCmd kCmds[] = {
 	{ PAL_WIN_CD,           3 },
 	{ PAL_WIN_PLAYLIST,     3 },
 	{ PAL_WIN_OGGHELP,      3 },
+	{ PAL_WIN_SASAMI_TEXT,  3 },
+	{ PAL_WIN_SASAMI_MIDI,  3 },
+	{ PAL_WIN_SASAMI_FM,    3 },
 	{ PAL_SWITCH_FALCOM,    3 }
 };
 
@@ -380,6 +386,18 @@ const wchar_t* PalCmdName(int id)
 		return LL14(L"ファルコム画面の操作ガイド", L"Falcom view operation guide", L"Guide de la vue Falcom", L"Guida della vista Falcom", L"Guia de la vista Falcom",
 			L"팔콤 화면 조작 가이드", L"Falcom 界面操作指南", L"دليل تشغيل شاشة Falcom", L"Руководство по экрану Falcom", L"Falcom-Ansicht Anleitung",
 			L"Guia da tela Falcom", L"Handleiding Falcom-scherm", L"Przewodnik ekranu Falcom", L"Falcom ekrani kilavuzu");
+	case PAL_WIN_SASAMI_TEXT:
+		return LL14(L"SASAMI テキスト", L"SASAMI Text", L"Texte SASAMI", L"Testo SASAMI", L"Texto SASAMI",
+			L"SASAMI 텍스트", L"SASAMI 文本", L"نص SASAMI", L"Текст SASAMI", L"SASAMI Text",
+			L"Texto SASAMI", L"SASAMI-tekst", L"Tekst SASAMI", L"SASAMI Metin");
+	case PAL_WIN_SASAMI_MIDI:
+		return LL14(L"SASAMI MIDIスコア", L"SASAMI MIDI Score", L"Partition MIDI SASAMI", L"Partitura MIDI SASAMI", L"Partitura MIDI SASAMI",
+			L"SASAMI MIDI 스코어", L"SASAMI MIDI 乐谱", L"نوتة SASAMI MIDI", L"Партитура SASAMI MIDI", L"SASAMI MIDI-Partitur",
+			L"Partitura MIDI SASAMI", L"SASAMI MIDI-partituur", L"Partytura SASAMI MIDI", L"SASAMI MIDI Skor");
+	case PAL_WIN_SASAMI_FM:
+		return LL14(L"SASAMI FMスコア", L"SASAMI FM Score", L"Partition FM SASAMI", L"Partitura FM SASAMI", L"Partitura FM SASAMI",
+			L"SASAMI FM 스코어", L"SASAMI FM 乐谱", L"نوتة SASAMI FM", L"Партитура SASAMI FM", L"SASAMI FM-Partitur",
+			L"Partitura FM SASAMI", L"SASAMI FM-partituur", L"Partytura SASAMI FM", L"SASAMI FM Skor");
 	case PAL_SWITCH_FALCOM:
 		return LL14(L"ファルコム特化型画面へ切替", L"Switch to Falcom view", L"Basculer vers la vue Falcom", L"Passa alla vista Falcom", L"Cambiar a la vista Falcom",
 			L"팔콤 특화 화면으로 전환", L"切换到 Falcom 专用界面", L"التبديل إلى شاشة Falcom", L"Переключиться на экран Falcom", L"Zur Falcom-Ansicht wechseln",
@@ -904,6 +922,9 @@ void CMpCommandPaletteDlg::ExecCommand(int id)
 	case PAL_WIN_CD:        PalPostToMp(IDC_MP_BOT_CD); return;
 	case PAL_WIN_PLAYLIST:  PalPostToOg(IDC_BUTTON57); return;
 	case PAL_WIN_OGGHELP:   PalPostToOg(IDC_OGG_HELP); return;
+	case PAL_WIN_SASAMI_TEXT: PalPostToMp(ID_MP_SASAMI_TEXT); return;
+	case PAL_WIN_SASAMI_MIDI: PalPostToMp(ID_MP_SASAMI_MIDI); return;
+	case PAL_WIN_SASAMI_FM:   PalPostToMp(ID_MP_SASAMI_FM); return;
 	case PAL_SWITCH_FALCOM: PalPostToMp(IDC_MP_SWITCHMODE); return;
 	default: return;
 	}

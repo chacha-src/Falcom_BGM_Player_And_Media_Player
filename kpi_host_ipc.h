@@ -55,7 +55,11 @@ enum KPIHOST64_CMD : uint32_t
 	// パートグリッドのスロットメニュー用。MIDI チャンネル固定とプログラム一覧。
 	KPIHOST64_CMD_VST_LIVE_SEND_CH = 40,
 	KPIHOST64_CMD_VST_LIVE_PROGRAMS = 41,
-	KPIHOST64_CMD_VST_LIVE_SET_PROGRAM = 42
+	KPIHOST64_CMD_VST_LIVE_SET_PROGRAM = 42,
+	KPIHOST64_CMD_VST_LIVE_GET_STATE = 43,
+	KPIHOST64_CMD_VST_LIVE_SET_STATE = 44,
+	/* ogg 終了時: 開いているライブ VST エディタをすべて同期で閉じる */
+	KPIHOST64_CMD_VST_LIVE_EDITOR_CLOSE_ALL = 45
 };
 
 // ホスト → 本体の結果コード。KPIHOST64_ReplyHeader.status。
@@ -218,6 +222,23 @@ struct KPIHOST64_VstLiveSetProgramReq
 	uint32_t index;
 };
 
+/* which: 0=component, 1=controller */
+struct KPIHOST64_VstLiveStateReq
+{
+	uint32_t part;
+	uint32_t which;
+	uint32_t bytes; /* SET: payload length after this struct; GET: 0 */
+	/* SET 続き: bytes of state */
+};
+
+struct KPIHOST64_VstLiveStateReply
+{
+	uint32_t part;
+	uint32_t which;
+	uint32_t bytes;
+	/* 続き: bytes of state */
+};
+
 struct KPIHOST64_VstLiveRenderReq
 {
 	uint32_t frames; // ほしいステレオフレーム数（パイプ経由のときだけ）
@@ -236,12 +257,17 @@ struct KPIHOST64_VstLiveAudioShm
 	uint32_t sampleRate;
 	volatile uint32_t writePos; // ホストが進める（累積。マスクしてインデックスに）
 	volatile uint32_t readPos;  // 本体が進める
+	/* Host64 bumps on editor X; ogg monitor posts WM_VST_LIVE_EDITOR_CLOSED. */
+	volatile uint32_t editorClosedSeq;
+	volatile int32_t editorClosedPart; /* 1..32 */
+	volatile int32_t editorClosedProg; /* -1 if unknown */
+	uint32_t pad;
 	// 続き: capacity 個の float（L）＋ capacity 個の float（R）
 };
 
 struct KPIHOST64_VstLiveMidiEvent
 {
-	uint32_t port;
+	uint32_t port; /* 0..2 = resolve by MIDI ch; 0x80000000|part1to32 = direct part */
 	uint32_t msg;
 };
 
@@ -268,3 +294,20 @@ static const wchar_t* const KPIHOST64_VST_LIVE_MIDI_SHM_NAME =
 // 本体がノートを置いたあとホストの待ちを起こすイベント
 static const wchar_t* const KPIHOST64_VST_LIVE_EVENT_NAME =
 	L"Local\\ogg_kpi64_vstlive_wake";
+
+/* Always available (even if audio ring not started) — editor open/close notify. */
+static const wchar_t* const KPIHOST64_VST_LIVE_EDNOTIFY_NAME =
+	L"Local\\ogg_kpi64_vstlive_ednotify";
+
+#pragma pack(push, 1)
+struct KPIHOST64_VstLiveEdNotifyShm
+{
+	volatile uint32_t seq;       /* bumps on editor close */
+	volatile int32_t part;       /* 1..32 */
+	volatile int32_t prog;       /* -1 if unknown */
+	volatile uint32_t openMask;  /* bit0 = part1 editor open */
+	volatile uint32_t snapCompLen;
+	volatile uint32_t snapCtrlLen;
+	uint32_t pad;
+};
+#pragma pack(pop)

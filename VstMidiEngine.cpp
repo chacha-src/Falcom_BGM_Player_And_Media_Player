@@ -1,4 +1,4 @@
-// 本体と KpiHost64 が同じソースを使う。KpiHost64.exe は VstMidiEngine_k64.cpp 経由。
+﻿// 本体と KpiHost64 が同じソースを使う。KpiHost64.exe は VstMidiEngine_k64.cpp 経由。
 // 以前はホスト側にコピーがあり、VST2 修正が ogg.exe にしか入らなかった。
 // KPIHOST64_BUILD 時は stdafx.h が MFC 無しヘッダへ切り替わる。
 #include "stdafx.h"
@@ -6,6 +6,9 @@
 #include "Vst3Host.h"
 #include "third_party/vst2/aeffect.h"
 #include "kb_sasami/source/sasami_midi.h"
+#include "kb_sasami/source/sasami_file.h"
+#include <vector>
+#include <string>
 
 #include <math.h>
 #include <stdlib.h>
@@ -22,6 +25,7 @@
 #include "kpi_host_ipc.h"
 #include "KpiHostClient.h"
 #include "resource.h"
+#include "VstHostDlg.h"
 #else
 #include "KpiHost64VstLive.h"
 #endif
@@ -439,6 +443,7 @@ struct LivePart {
 	int sendCh; // -1=届いたチャンネルのまま、0..15=強制
 	int prog;   // スロットメニューで最後に選んだプログラム
 	HWND edWnd;
+	wchar_t path[VST_PATH_CHARS];
 	LivePending pend;
 };
 
@@ -3179,6 +3184,18 @@ static void FlushInjectQueue(__int64 start, int frames)
 	g_injR = r;
 }
 
+static volatile LONG g_songUseLiveBinds = 0;
+
+extern "C" void VstSongUseLiveBindsSet(int enable)
+{
+	InterlockedExchange(&g_songUseLiveBinds, enable ? 1 : 0);
+}
+
+extern "C" int VstSongUseLiveBinds(void)
+{
+	return (int)InterlockedCompareExchange(&g_songUseLiveBinds, 0, 0);
+}
+
 static void DispatchDueEvents(__int64 start, int frames)
 {
 	/* VST2 keeps only the last processEvents in a processReplacing, so this
@@ -3189,6 +3206,7 @@ static void DispatchDueEvents(__int64 start, int frames)
 	int n0 = 0, n1 = 0, n2 = 0;
 	int u0 = 0, u1 = 0, u2 = 0;
 	const __int64 end = start + frames;
+	const int liveBinds = (int)InterlockedCompareExchange(&g_songUseLiveBinds, 0, 0);
 	auto pushSx = [&](int unit, const BYTE* src, int srcLen, __int64 sample, int port) {
 		if (!src || srcLen <= 0) return;
 		MidiItem* batch = (unit == 0) ? batch0 : (unit == 1 ? batch1 : batch2);
@@ -3208,6 +3226,12 @@ static void DispatchDueEvents(__int64 start, int frames)
 	};
 	auto routeShort = [&](MidiItem e) {
 		if ((e.msg & 0xff) == 0xff) return;
+		if (liveBinds) {
+			int port = e.port < 0 ? 0 : e.port;
+			if (port > 1) port = 1;
+			VstLiveMidiSongShort(port, e.msg);
+			return;
+		}
 		if (g_eng.midiOut && (e.port <= 0 || !g_eng.effectB))
 			midiOutShortMsg(g_eng.midiOut, e.msg);
 		const int port = e.port < 0 ? 0 : e.port;
@@ -3229,15 +3253,25 @@ static void DispatchDueEvents(__int64 start, int frames)
 			const int i = (int)(r & (INJ_SX_N - 1));
 			const BYTE* raw = g_injSx[i];
 			const int rawLen = g_injSxLen[i];
-			BYTE buf[2048];
-			int units = 0, rhyBb = -1;
-			const int n = PrepareSongSysex(raw, rawLen, (int)g_injSxPort[i], buf,
-				(int)sizeof(buf), &units, &rhyBb);
-			if (n > 0) {
-				MidiKeepAliveIfCcSx(0xf0);
-				if (units & 1) pushSx(0, buf, n, start, (int)g_injSxPort[i]);
-				if (units & 2) pushSx(1, buf, n, start, (int)g_injSxPort[i]);
-				if (units & 4) pushSx(2, buf, n, start, (int)g_injSxPort[i]);
+			if (liveBinds) {
+				int port = (int)g_injSxPort[i];
+				if (port < 0) port = 0;
+				if (port > 1) port = 1;
+				if (raw && rawLen > 0) {
+					MidiKeepAliveIfCcSx(0xf0);
+					VstLiveMidiSysex(port, raw, rawLen);
+				}
+			} else {
+				BYTE buf[2048];
+				int units = 0, rhyBb = -1;
+				const int n = PrepareSongSysex(raw, rawLen, (int)g_injSxPort[i], buf,
+					(int)sizeof(buf), &units, &rhyBb);
+				if (n > 0) {
+					MidiKeepAliveIfCcSx(0xf0);
+					if (units & 1) pushSx(0, buf, n, start, (int)g_injSxPort[i]);
+					if (units & 2) pushSx(1, buf, n, start, (int)g_injSxPort[i]);
+					if (units & 4) pushSx(2, buf, n, start, (int)g_injSxPort[i]);
+				}
 			}
 			++r;
 		}
@@ -3284,6 +3318,12 @@ static void DispatchDueEvents(__int64 start, int frames)
 			const int rawLen = (int)e.aux;
 			if (e.sysexOff + rawLen > g_eng.sysexBytes) continue;
 			const BYTE* raw = g_eng.sysexData + e.sysexOff;
+			if (liveBinds) {
+				int port = e.port < 0 ? 0 : e.port;
+				if (port > 1) port = 1;
+				VstLiveMidiSysex(port, raw, rawLen);
+				continue;
+			}
 			BYTE buf[2048];
 			int units = 0, rhyBb = -1;
 			const int n = PrepareSongSysex(raw, rawLen, e.port, buf, (int)sizeof(buf),
@@ -3398,6 +3438,11 @@ static void RenderSongUnits(int frames)
 {
 	ZeroMemory(g_eng.outL, frames * sizeof(float));
 	ZeroMemory(g_eng.outR, frames * sizeof(float));
+	/* .mpsmv with HALion etc.: mix live parts (local + KpiHost64 SHM), not GS/mapper. */
+	if (InterlockedCompareExchange(&g_songUseLiveBinds, 0, 0)) {
+		VstLiveRender(g_eng.outL, g_eng.outR, frames);
+		return;
+	}
 	const int sl = VstIoSlot();
 	const __int64 t0 = g_songT0[sl];
 	for (int u = 0; u < 3; ++u)
@@ -5214,7 +5259,7 @@ extern "C" int VstHasX64Instruments(void)
 extern "C" int VstIsMidiExt(const wchar_t* path)
 {
 	return EqExt(path, L".mid") || EqExt(path, L".midi") || EqExt(path, L".kar") || EqExt(path, L".rmi")
-		|| EqExt(path, L".mpy") || EqExt(path, L".mpw2");
+		|| EqExt(path, L".mpy") || EqExt(path, L".mpw2") || EqExt(path, L".mpsmv");
 }
 
 extern "C" int VstIsProjectExt(const wchar_t* path)
@@ -5236,7 +5281,10 @@ extern "C" int VstResolvePlayPath(const wchar_t* inPath, wchar_t* outMid,
 	int hc = 0;
 	if (outHintCount) *outHintCount = 0;
 	if (SasamiPathIsMidi(inPath)) {
-		return SasamiConvertPathToMidiFile(inPath, outMid, outMidChars) ? 1 : 0;
+		if (SasamiConvertPathToMidiFile(inPath, outMid, outMidChars))
+			return 1;
+		/* Convert failed (corrupt/empty) — accept sibling .mid if present. */
+		return FindSidecar(inPath, outMid, outMidChars);
 	}
 	if (EqExt(inPath, L".mid") || EqExt(inPath, L".midi") || EqExt(inPath, L".kar") || EqExt(inPath, L".rmi")) {
 		SafeCopy(outMid, outMidChars, inPath);
@@ -5869,6 +5917,26 @@ extern "C" int VstMidiOpen(const wchar_t* midPath,
 	int rc = LoadSmf(midPath);
 	if (rc < 0) { LeaveCriticalSection(&g_eng.cs); return rc; }
 
+	/* Score .mpsmv: HALion already in live slots — do not open MIDI Mapper (GM piano). */
+	if (InterlockedCompareExchange(&g_songUseLiveBinds, 0, 0)) {
+		int anyLive = 0;
+		for (int i = 0; i < 32; ++i) {
+			const LivePart& p = g_eng.live[i];
+			if (p.effect || p.vst3 || p.remote) { anyLive = 1; break; }
+		}
+		g_eng.gmResetMode = 0;
+		g_eng.usingBuiltin = 0;
+		g_eng.useEnsemble = 0;
+		g_eng.eventPos = 0;
+		g_eng.playSample = 0;
+		g_eng.ringRead = g_eng.ringCount = 0;
+		ZeroMemory(g_eng.voices, sizeof(g_eng.voices));
+		ZeroMemory(g_eng.drums, sizeof(g_eng.drums));
+		ZeroMemory(g_eng.noteState, sizeof(g_eng.noteState));
+		LeaveCriticalSection(&g_eng.cs);
+		return anyLive ? 0 : -5;
+	}
+
 	int loaded = 0;
 	int resetMode = 0;
 	int probeMilli = 0;
@@ -5954,6 +6022,7 @@ extern "C" void VstMidiClose(void)
 	LeaveCriticalSection(&g_eng.cs);
 	g_reportedLatencySamples[VstIoSlot()] = 0;
 	InterlockedExchange(&g_midiKeepAlive[VstIoSlot()], 0);
+	InterlockedExchange(&g_songUseLiveBinds, 0);
 }
 
 extern "C" void VstMidiCloseSlot(int slot)
@@ -6232,6 +6301,52 @@ extern "C" int VstMidiGetRate(void) { return SAMPLE_RATE; }
 extern "C" int VstMidiGetChannels(void) { return 2; }
 extern "C" int VstMidiGetBits(void) { return 16; }
 extern "C" __int64 VstMidiGetLengthSamples(void) { return g_eng.lengthSamples; }
+
+static unsigned VstMidiTickAtSampleUnlocked(__int64 sample)
+{
+	if (!g_eng.events || g_eng.eventCount <= 0) return 0;
+	if (sample <= 0) return (unsigned)g_eng.events[0].tick;
+	int lo = 0, hi = g_eng.eventCount - 1, best = 0;
+	while (lo <= hi) {
+		const int mid = (lo + hi) >> 1;
+		if (g_eng.events[mid].sample <= sample) {
+			best = mid;
+			lo = mid + 1;
+		} else {
+			hi = mid - 1;
+		}
+	}
+	const MidiItem& a = g_eng.events[best];
+	if (best + 1 >= g_eng.eventCount)
+		return (unsigned)a.tick;
+	const MidiItem& b = g_eng.events[best + 1];
+	if (b.sample <= a.sample)
+		return (unsigned)a.tick;
+	const double tt = (double)(sample - a.sample) / (double)(b.sample - a.sample);
+	const double tick = (double)a.tick + ((double)b.tick - (double)a.tick) * tt;
+	if (tick < 0.0) return 0;
+	if (tick > 4000000000.0) return 4000000000u;
+	return (unsigned)(tick + 0.5);
+}
+
+extern "C" int VstMidiTickAtSample(__int64 sample, unsigned* outTick)
+{
+	if (!outTick) return 0;
+	EnterCriticalSection(&g_eng.cs);
+	if (!g_eng.events || g_eng.eventCount <= 0) {
+		LeaveCriticalSection(&g_eng.cs);
+		return 0;
+	}
+	*outTick = VstMidiTickAtSampleUnlocked(sample);
+	LeaveCriticalSection(&g_eng.cs);
+	return 1;
+}
+
+extern "C" __int64 VstMidiGetPlaySample(void)
+{
+	return g_eng.playSample;
+}
+
 extern "C" double VstMidiTailPadSec(void) { return (double)VST_TAIL_PAD_SEC; }
 
 static int ClampLat(int d)
@@ -6295,6 +6410,10 @@ struct LiveRemoteShm {
 
 static LiveRemoteShm g_liveShm;
 static volatile LONG g_liveShuttingDown = 0;
+#ifndef KPIHOST64_BUILD
+static HWND g_liveEdNotifyHwnd = NULL;
+static HWND g_liveEdNotifyHwnd2 = NULL;
+#endif
 
 // The wave-out thread reads the rings while the UI thread can unload a part and
 // unmap them, so the pointers themselves are published under this lock.
@@ -6370,7 +6489,7 @@ static void LiveRemoteStop()
 	LiveRemoteCloseShm();
 }
 
-static void LiveRemoteMidi(int portIndex0to2, DWORD msg)
+static void LiveRemoteMidiRaw(uint32_t portOrPart, DWORD msg)
 {
 	AcquireSRWLockExclusive(&g_liveShmLock);
 	KPIHOST64_VstLiveMidiShm* m = g_liveShm.midi;
@@ -6379,13 +6498,111 @@ static void LiveRemoteMidi(int portIndex0to2, DWORD msg)
 	const uint32_t cap = m->capacity;
 	const uint32_t w = m->writePos;
 	if (w - m->readPos < cap) { // else the host stopped draining
-		ev[w & (cap - 1)].port = (uint32_t)portIndex0to2;
+		ev[w & (cap - 1)].port = portOrPart;
 		ev[w & (cap - 1)].msg = (uint32_t)msg;
 		MemoryBarrier();
 		InterlockedExchange((LONG*)&m->writePos, (LONG)(w + 1));
 		if (g_liveShm.hWake) SetEvent(g_liveShm.hWake);
 	}
 	ReleaseSRWLockExclusive(&g_liveShmLock);
+}
+
+static void LiveRemoteMidi(int portIndex0to2, DWORD msg)
+{
+	if (portIndex0to2 < 0) portIndex0to2 = 0;
+	if (portIndex0to2 > 2) portIndex0to2 = 2;
+	LiveRemoteMidiRaw((uint32_t)portIndex0to2, msg);
+}
+
+static void LiveRemoteMidiToPart(int part1to32, DWORD msg)
+{
+	if (part1to32 < 1 || part1to32 > 32) return;
+	LiveRemoteMidiRaw(0x80000000u | (uint32_t)part1to32, msg);
+}
+
+static int LiveRemoteEnsureForSong(void)
+{
+	if (g_liveShm.parts <= 0) return 0;
+	if (g_liveShm.audio && g_liveShm.midi) return 1;
+	return LiveRemoteOpenShm();
+}
+
+static LONG g_seenEditorCloseSeq = 0;
+static LONG g_seenEdNotifySeq = 0;
+static uint32_t g_seenEdOpenMask = 0;
+static HANDLE g_edNotifyMap = NULL;
+static KPIHOST64_VstLiveEdNotifyShm* g_edNotify = NULL;
+
+static void LiveEdNotifyOpen(void)
+{
+	if (g_edNotify) return;
+	/* Must be read-write: poll uses Interlocked* on seq/openMask. */
+	g_edNotifyMap = OpenFileMappingW(FILE_MAP_ALL_ACCESS, FALSE, KPIHOST64_VST_LIVE_EDNOTIFY_NAME);
+	if (!g_edNotifyMap) return;
+	g_edNotify = (KPIHOST64_VstLiveEdNotifyShm*)MapViewOfFile(
+		g_edNotifyMap, FILE_MAP_ALL_ACCESS, 0, 0, sizeof(KPIHOST64_VstLiveEdNotifyShm));
+	if (!g_edNotify) {
+		CloseHandle(g_edNotifyMap);
+		g_edNotifyMap = NULL;
+	}
+}
+
+/* Caller should hold g_liveShmLock (shared or exclusive). */
+static void LiveRemoteDeliverEditorClosedUnlocked(void)
+{
+	KPIHOST64_VstLiveAudioShm* s = g_liveShm.audio;
+	if (!s) return;
+	const LONG seq = (LONG)InterlockedCompareExchange((LONG*)&s->editorClosedSeq, 0, 0);
+	if (seq == 0 || seq == g_seenEditorCloseSeq) return;
+	g_seenEditorCloseSeq = seq;
+	const int part = (int)s->editorClosedPart;
+	const int prog = (int)s->editorClosedProg;
+	if (part >= 1 && part <= 32) {
+		if (g_liveEdNotifyHwnd && IsWindow(g_liveEdNotifyHwnd))
+			PostMessageW(g_liveEdNotifyHwnd, WM_VST_LIVE_EDITOR_CLOSED,
+				(WPARAM)part, (LPARAM)prog);
+		if (g_liveEdNotifyHwnd2 && IsWindow(g_liveEdNotifyHwnd2))
+			PostMessageW(g_liveEdNotifyHwnd2, WM_VST_LIVE_EDITOR_CLOSED,
+				(WPARAM)part, (LPARAM)prog);
+	}
+}
+
+static void LiveEdNotifyPoll(void)
+{
+	LiveEdNotifyOpen();
+	if (!g_edNotify) return;
+	const LONG seq = (LONG)InterlockedCompareExchange((LONG*)&g_edNotify->seq, 0, 0);
+	const uint32_t mask = (uint32_t)InterlockedCompareExchange((LONG*)&g_edNotify->openMask, 0, 0);
+	/* Only seq bumps mean a real close (NotifyEditorClosed). Mask-only diffs
+	   fired false WM_VST_LIVE_EDITOR_CLOSED while HALion was still open →
+	   GET_STATE mid-edit / PushDocToText → crash; also killed monitor drain. */
+	if (seq == 0 || seq == g_seenEdNotifySeq) {
+		g_seenEdOpenMask = mask;
+		return;
+	}
+	g_seenEdNotifySeq = seq;
+	g_seenEdOpenMask = mask;
+	const int part = (int)g_edNotify->part;
+	const int prog = (int)g_edNotify->prog;
+	if (part >= 1 && part <= 32) {
+		if (g_liveEdNotifyHwnd && IsWindow(g_liveEdNotifyHwnd))
+			PostMessageW(g_liveEdNotifyHwnd, WM_VST_LIVE_EDITOR_CLOSED,
+				(WPARAM)part, (LPARAM)prog);
+		if (g_liveEdNotifyHwnd2 && IsWindow(g_liveEdNotifyHwnd2))
+			PostMessageW(g_liveEdNotifyHwnd2, WM_VST_LIVE_EDITOR_CLOSED,
+				(WPARAM)part, (LPARAM)prog);
+	}
+}
+
+extern "C" void VstLivePollRemoteEditorClosed(void)
+{
+	LiveEdNotifyPoll();
+	if (!g_liveShm.audio && g_liveShm.parts > 0)
+		LiveRemoteOpenShm();
+	if (!g_liveShm.audio) return;
+	AcquireSRWLockShared(&g_liveShmLock);
+	LiveRemoteDeliverEditorClosedUnlocked();
+	ReleaseSRWLockShared(&g_liveShmLock);
 }
 
 // Adds the host's output on top of whatever the local parts produced.
@@ -6427,12 +6644,22 @@ static void LiveRemoteMix(float* L, float* R, int frames)
 		g_liveShm.primed = 1;
 	}
 	if (g_liveShm.hWake) SetEvent(g_liveShm.hWake);
+	/* Host64 editor X → SHM seq; also polled from UI timer (no audio = no mix). */
+	LiveRemoteDeliverEditorClosedUnlocked();
 	ReleaseSRWLockExclusive(&g_liveShmLock);
 }
 
 static int LiveRemoteLoad(int part1to32, const wchar_t* pluginPath, int isVst3)
 {
 	const int prevParts = g_liveShm.parts;
+	if (prevParts > 0 && g_liveShm.audio) {
+		/* Adding a part while SampleTank/HALion already live: do NOT tear SHM
+		   or LiveAudioStop (that remapped rings and crashed 再生確認). */
+		if (!g_kpiHost.VstLiveLoad((uint32_t)part1to32, pluginPath, isVst3 != 0))
+			return -3;
+		g_liveShm.parts = prevParts + 1;
+		return 0;
+	}
 	// KpiHost64 tears the rings down while it loads; drop our views first so
 	// we reopen the mapping the host creates afterwards.
 	LiveRemoteCloseShm();
@@ -6470,9 +6697,12 @@ static int LiveRemoteActive() { return g_liveShm.parts > 0 && g_liveShm.audio !=
 #else  // KPIHOST64_BUILD: the plug-ins are already in-process here
 
 static void LiveRemoteMidi(int, DWORD) {}
+static void LiveRemoteMidiToPart(int, DWORD) {}
 static void LiveRemoteMix(float*, float*, int) {}
 static void LiveRemoteUnload(int) {}
 static int LiveRemoteActive() { return 0; }
+static int LiveRemoteEnsureForSong(void) { return 0; }
+extern "C" void VstLivePollRemoteEditorClosed(void) {}
 
 #endif
 
@@ -6503,12 +6733,29 @@ extern "C" int VstLiveLoadPart(int part1to32,
 	EnterCriticalSection(&g_eng.cs);
 	LivePart& p = g_eng.live[part1to32 - 1];
 	const int wasRemote = p.remote;
-	CloseEffect(p.module, p.effect);
-	Vst3Close(p.vst3); p.vst3 = NULL;
-	p.isMulti = 0;
-	p.remote = 0;
-	p.sendCh = -1;
-	p.prog = -1;
+	LeaveCriticalSection(&g_eng.cs);
+#ifndef KPIHOST64_BUILD
+	/* Stop remote audio only when THIS was the sole remote part. Stopping while
+	   other remotes (SampleTank) stay loaded remaps SHM and crashes preview. */
+	if (wasRemote && g_liveShm.parts <= 1)
+		LiveRemoteStop();
+#endif
+	/* Local editor: sync close before destroy (zombie SC-VA UI / Home clicks).
+	   Remote: do NOT Post async EDITOR_CLOSE — it races the next Load and can
+	   close the brand-new HALion window (empty MediaBay / "0 programs"). Host64
+	   Sync UNLOAD closes the editor on its UI thread before destroy. */
+	if (!wasRemote)
+		VstLiveEditorClose(part1to32);
+	EnterCriticalSection(&g_eng.cs);
+	LivePart& p2 = g_eng.live[part1to32 - 1];
+	CloseEffect(p2.module, p2.effect);
+	Vst3Close(p2.vst3); p2.vst3 = NULL;
+	p2.isMulti = 0;
+	p2.remote = 0;
+	p2.sendCh = -1;
+	p2.prog = -1;
+	p2.path[0] = 0;
+	p2.edWnd = NULL;
 	LeaveCriticalSection(&g_eng.cs);
 	if (wasRemote) LiveRemoteUnload(part1to32);
 
@@ -6527,6 +6774,7 @@ extern "C" int VstLiveLoadPart(int part1to32,
 			rp.isMulti = LiveIsMultiPath(pluginPath);
 			rp.sendCh = rp.isMulti ? -1 : 0;
 			rp.prog = -1;
+			wcsncpy_s(rp.path, pluginPath, _TRUNCATE);
 			LeaveCriticalSection(&g_eng.cs);
 			return 0;
 		}
@@ -6576,6 +6824,7 @@ extern "C" int VstLiveLoadPart(int part1to32,
 		p.prog = prog;
 		p.isMulti = LiveIsMultiPath(pluginPath);
 		p.sendCh = p.isMulti ? -1 : 0;
+		wcsncpy_s(p.path, pluginPath, _TRUNCATE);
 		vst3 = NULL;
 		module = NULL;
 		effect = NULL;
@@ -6891,6 +7140,9 @@ extern "C" void VstLiveAllNotesOff()
 	LivePanicRemote();
 }
 
+/* Soft-closed SampleTank keeps IPlugView on this hidden HWND until unload. */
+static HWND g_liveSoftHiddenWnd[33];
+
 extern "C" void VstLiveUnloadPart(int part1to32)
 {
 	if (part1to32 < 1 || part1to32 > 32) return;
@@ -6916,9 +7168,13 @@ extern "C" void VstLiveUnloadPart(int part1to32)
 #ifndef KPIHOST64_BUILD
 	// effEditClose / effClose while KpiHost64 is inside processReplacing is
 	// the usual "close the host and it hangs" path. Stop that thread first.
-	if (wasRemote) LiveRemoteStop();
+	if (wasRemote && g_liveShm.parts <= 1)
+		LiveRemoteStop();
 #endif
-	VstLiveEditorClose(part1to32);
+	/* Local: sync editor close. Remote: Sync UNLOAD on Host64 closes the editor
+	   — avoid async EDITOR_CLOSE racing a following LoadPart. */
+	if (!wasRemote)
+		VstLiveEditorClose(part1to32);
 	EnterCriticalSection(&g_eng.cs);
 	LivePanicPart(g_eng.live[part1to32 - 1]);
 	LivePart& p = g_eng.live[part1to32 - 1];
@@ -6927,7 +7183,18 @@ extern "C" void VstLiveUnloadPart(int part1to32)
 	Vst3Close(p.vst3); p.vst3 = NULL;
 	p.isMulti = 0;
 	p.remote = 0;
+	p.edWnd = NULL;
+	p.path[0] = 0;
 	LeaveCriticalSection(&g_eng.cs);
+	/* Soft-close may have left a hidden host HWND (SampleTank); destroy after view gone. */
+	{
+		HWND orphan = g_liveSoftHiddenWnd[part1to32];
+		g_liveSoftHiddenWnd[part1to32] = NULL;
+		if (orphan && IsWindow(orphan)) {
+			SetWindowLongPtrW(orphan, GWLP_USERDATA, 0);
+			DestroyWindow(orphan);
+		}
+	}
 	if (wasRemote) LiveRemoteUnload(part1to32);
 #ifndef KPIHOST64_BUILD
 	if (wasRemote && g_liveShm.parts > 0 &&
@@ -6936,9 +7203,21 @@ extern "C" void VstLiveUnloadPart(int part1to32)
 #endif
 }
 
+extern "C" void VstLiveEditorCloseAllRemote(void)
+{
+#ifndef KPIHOST64_BUILD
+	if (InterlockedCompareExchange(&g_liveShuttingDown, 0, 0))
+		return;
+	if (!g_kpiHost.EnsureConnected())
+		return;
+	(void)g_kpiHost.VstLiveEditorCloseAll();
+#endif
+}
+
 extern "C" void VstLiveShutdown(void)
 {
 #ifndef KPIHOST64_BUILD
+	VstLiveEditorCloseAllRemote();
 	InterlockedExchange(&g_liveShuttingDown, 1);
 	LiveRemoteStop();
 	g_kpiHost.VstLiveUnloadAll();
@@ -7433,6 +7712,56 @@ static int LivePartLoaded(int part)
 	return (p.effect || p.vst3 || p.remote) ? 1 : 0;
 }
 
+extern "C" int VstLivePartIsLoaded(int part1to32)
+{
+	if (part1to32 < 1 || part1to32 > 32) return 0;
+	return LivePartLoaded(part1to32 - 1);
+}
+
+extern "C" int VstLiveAnyRemotePart(void)
+{
+	for (int s = 0; s < 2; ++s) {
+		for (int i = 0; i < 32; ++i) {
+			if (g_engs[s].live[i].remote)
+				return 1;
+		}
+	}
+	return 0;
+}
+
+extern "C" int VstLivePartEditorIsOpen(int part1to32)
+{
+	if (part1to32 < 1 || part1to32 > 32) return 0;
+#ifdef KPIHOST64_BUILD
+	HWND h = g_eng.live[part1to32 - 1].edWnd;
+	return (h && IsWindow(h)) ? 1 : 0;
+#else
+	{
+		HWND h = g_eng.live[part1to32 - 1].edWnd;
+		if (h && IsWindow(h)) return 1;
+	}
+	LiveEdNotifyOpen();
+	if (g_edNotify) {
+		const uint32_t mask = (uint32_t)InterlockedCompareExchange(
+			(LONG*)&g_edNotify->openMask, 0, 0);
+		if (mask & (1u << (part1to32 - 1))) return 1;
+	}
+	return 0;
+#endif
+}
+
+extern "C" int VstLivePartGetPath(int part1to32, wchar_t* outPath, int outCch)
+{
+	if (part1to32 < 1 || part1to32 > 32 || !outPath || outCch < 2) return 0;
+	outPath[0] = 0;
+	EnterCriticalSection(&g_eng.cs);
+	const LivePart& p = g_eng.live[part1to32 - 1];
+	if (p.path[0])
+		wcsncpy_s(outPath, outCch, p.path, _TRUNCATE);
+	LeaveCriticalSection(&g_eng.cs);
+	return outPath[0] ? 1 : 0;
+}
+
 // Multi-timbral (SC-VA / SGP2 etc.): one instance receives all 16 channels
 // of its port block. The VST host UI covers only that block (parts 1–16 or
 // 17–32), so a module on A must not steal MIDI meant for empty B slots.
@@ -7443,6 +7772,24 @@ static int LiveMultiPart(int portIndex0to2)
 		if (g_eng.live[i].isMulti && LivePartLoaded(i))
 			return i;
 	return -1;
+}
+
+/* Score / per-channel VSTs (SampleTank + Groove Agent + HALion…): each MIDI
+   channel maps to its own live part. Multi-timbral alone keeps port-wide
+   routing (LiveMultiPart). Any loaded non-multi part → channel mode. */
+static int LivePortChannelMode(int portIndex0to2)
+{
+	if (portIndex0to2 < 0 || portIndex0to2 > 2) return 0;
+	const int b0 = portIndex0to2 * 16;
+	int nMono = 0, nMulti = 0;
+	for (int i = b0; i < b0 + 16 && i < 32; ++i) {
+		if (!LivePartLoaded(i)) continue;
+		if (g_eng.live[i].isMulti) nMulti++;
+		else nMono++;
+	}
+	if (nMono > 0) return 1;
+	if (nMulti > 1) return 1; /* odd: treat as per-ch */
+	return 0;
 }
 
 // The part decides which channel its plug-in sees. Status 0xF0 and above
@@ -7843,21 +8190,73 @@ extern "C" void VstLiveThruPoll(__int64 playSample)
 	}
 }
 
+extern "C" void VstLiveMidiSongShort(int portIndex0to2, DWORD shortMsg)
+{
+	if (portIndex0to2 < 0) portIndex0to2 = 0;
+	if (portIndex0to2 > 2) portIndex0to2 = 2;
+	/* Multiple live instruments (score) OR any dedicated part → per-part aim.
+	   Sole multi (SC-VA) keeps classic port-wide routing. */
+	const int multiOnly = (LiveMultiPart(portIndex0to2) >= 0 && !LivePortChannelMode(portIndex0to2));
+	if (!multiOnly) {
+		const int chPart = portIndex0to2 * 16 + (int)(shortMsg & 15);
+		VstLiveMidiToPart(chPart + 1, shortMsg);
+		return;
+	}
+	VstLiveMidiShort(portIndex0to2, shortMsg);
+}
+
+extern "C" void VstLiveMidiToPart(int part1to32, DWORD shortMsg)
+{
+	if (part1to32 < 1 || part1to32 > 32) return;
+	const int part = part1to32 - 1;
+	EnterCriticalSection(&g_eng.cs);
+	if (LivePartLoaded(part)) {
+		LivePart& lp = g_eng.live[part];
+		if (lp.effect || lp.vst3)
+			LivePendPush(lp, LiveSendMsg(lp, shortMsg));
+	}
+	LeaveCriticalSection(&g_eng.cs);
+	const int port = part / 16;
+	/* Activity map uses MIDI channel nibble; keep original msg channel. */
+	LiveActTrack(port, shortMsg);
+#ifndef KPIHOST64_BUILD
+	if (LiveRemoteEnsureForSong() || LiveRemoteActive())
+		LiveRemoteMidiToPart(part1to32, shortMsg);
+#endif
+}
+
 extern "C" void VstLiveMidiShort(int portIndex0to2, DWORD shortMsg)
 {
 	if (portIndex0to2 < 0 || portIndex0to2 > 2) return;
 	const int chPart = portIndex0to2 * 16 + (int)(shortMsg & 15);
+	/* Channel-mode score: never steal other channels into a multi. */
+	if (LivePortChannelMode(portIndex0to2)) {
+		VstLiveMidiToPart(chPart + 1, shortMsg);
+		return;
+	}
 	EnterCriticalSection(&g_eng.cs);
 	const int multi = LiveMultiPart(portIndex0to2);
-	const int part = (multi >= 0) ? multi : chPart;
-	const int occupied = (multi >= 0) || LivePartLoaded(chPart);
-	if (occupied && part >= 0 && part < 32)
-		LivePendPush(g_eng.live[part], LiveSendMsg(g_eng.live[part], shortMsg));
+	int part = (multi >= 0) ? multi : chPart;
+	if (LivePartLoaded(chPart) && !g_eng.live[chPart].isMulti)
+		part = chPart;
+	int localPlug = 0;
+	if (part >= 0 && part < 32 && LivePartLoaded(part)) {
+		LivePart& lp = g_eng.live[part];
+		if (lp.effect || lp.vst3) {
+			LivePendPush(lp, LiveSendMsg(lp, shortMsg));
+			localPlug = 1;
+		}
+	}
 	LeaveCriticalSection(&g_eng.cs);
-	if (!occupied) return;
-	// Remote parts route inside KpiHost64, which holds the same part layout.
 	LiveActTrack(portIndex0to2, shortMsg);
-	LiveRemoteMidi(portIndex0to2, shortMsg);
+#ifndef KPIHOST64_BUILD
+	if (LiveRemoteEnsureForSong() || LiveRemoteActive())
+		LiveRemoteMidi(portIndex0to2, shortMsg);
+	else
+		(void)localPlug;
+#else
+	(void)localPlug;
+#endif
 }
 
 extern "C" int VstLiveSendChannel(int part1to32)
@@ -8022,6 +8421,114 @@ extern "C" int VstLiveSetProgram(int part1to32, int index)
 	return ok;
 }
 
+extern "C" int VstLivePartIsMulti(int part1to32)
+{
+	if (part1to32 < 1 || part1to32 > 32) return 0;
+	return g_eng.live[part1to32 - 1].isMulti ? 1 : 0;
+}
+
+static void LivePartPushShort(int part1to32, DWORD msg)
+{
+	if (part1to32 < 1 || part1to32 > 32) return;
+	LivePart& p = g_eng.live[part1to32 - 1];
+	const DWORD out = LiveSendMsg(p, msg);
+	EnterCriticalSection(&g_eng.cs);
+	LivePendPush(p, out);
+	LeaveCriticalSection(&g_eng.cs);
+#ifndef KPIHOST64_BUILD
+	if (p.remote) {
+		const int port = (part1to32 - 1) / 16;
+		LiveRemoteMidi(port, msg);
+	}
+#endif
+}
+
+extern "C" void VstLiveSendBankProgram(int part1to32, int bankMsb, int bankLsb, int prog0to127)
+{
+	if (part1to32 < 1 || part1to32 > 32) return;
+	if (bankMsb < 0) bankMsb = 0;
+	if (bankLsb < 0) bankLsb = 0;
+	if (prog0to127 < 0) prog0to127 = 0;
+	bankMsb &= 127;
+	bankLsb &= 127;
+	prog0to127 &= 127;
+	LivePart& p = g_eng.live[part1to32 - 1];
+	const int ch = LivePartSendCh(p, part1to32) & 15;
+	LivePartPushShort(part1to32, (DWORD)(0xb0 | ch) | (0u << 8) | ((DWORD)bankMsb << 16));
+	LivePartPushShort(part1to32, (DWORD)(0xb0 | ch) | (32u << 8) | ((DWORD)bankLsb << 16));
+	LivePartPushShort(part1to32, (DWORD)(0xc0 | ch) | ((DWORD)prog0to127 << 8));
+	if (VstLiveProgramCount(part1to32) > prog0to127)
+		VstLiveSetProgram(part1to32, prog0to127);
+	else
+		p.prog = prog0to127;
+}
+
+extern "C" void VstLiveAuditionNote(int part1to32, int noteMidi, int velocity, int durMs)
+{
+	if (part1to32 < 1 || part1to32 > 32) return;
+	if (!VstLivePartIsLoaded(part1to32)) return;
+	if (noteMidi < 0) noteMidi = 60;
+	if (noteMidi > 127) noteMidi = 127;
+	if (velocity < 1) velocity = 100;
+	if (velocity > 127) velocity = 127;
+	if (durMs < 40) durMs = 40;
+	if (durMs > 2000) durMs = 2000;
+	LivePart& p = g_eng.live[part1to32 - 1];
+	const int ch = LivePartSendCh(p, part1to32) & 15;
+	const DWORD noteOn = (DWORD)(0x90 | ch) | ((DWORD)noteMidi << 8) | ((DWORD)velocity << 16);
+	const DWORD noteOff = (DWORD)(0x80 | ch) | ((DWORD)noteMidi << 8);
+	LivePartPushShort(part1to32, noteOn);
+	const int framesTotal = (SAMPLE_RATE * durMs) / 1000;
+	const int bpf = 4;
+	const int bytes = framesTotal * bpf;
+	BYTE* pcm = (BYTE*)HeapAlloc(GetProcessHeap(), 0, (SIZE_T)bytes);
+	if (!pcm) {
+		LivePartPushShort(part1to32, noteOff);
+		return;
+	}
+	int written = 0;
+	float L[BLOCK_FRAMES], R[BLOCK_FRAMES];
+	while (written < framesTotal) {
+		int n = framesTotal - written;
+		if (n > BLOCK_FRAMES) n = BLOCK_FRAMES;
+		VstLiveRender(L, R, n);
+		for (int i = 0; i < n; ++i) {
+			float l = L[i], r = R[i];
+			if (l < -1) l = -1; if (l > 1) l = 1;
+			if (r < -1) r = -1; if (r > 1) r = 1;
+			short* s = (short*)(pcm + (written + i) * bpf);
+			s[0] = (short)(l * 32767.0f);
+			s[1] = (short)(r * 32767.0f);
+		}
+		written += n;
+	}
+	LivePartPushShort(part1to32, noteOff);
+	for (int k = 0; k < 4; ++k)
+		VstLiveRender(L, R, BLOCK_FRAMES);
+	WAVEFORMATEX wfx = {};
+	wfx.wFormatTag = WAVE_FORMAT_PCM;
+	wfx.nChannels = 2;
+	wfx.nSamplesPerSec = SAMPLE_RATE;
+	wfx.wBitsPerSample = 16;
+	wfx.nBlockAlign = 4;
+	wfx.nAvgBytesPerSec = SAMPLE_RATE * 4;
+	HWAVEOUT hwo = NULL;
+	if (waveOutOpen(&hwo, WAVE_MAPPER, &wfx, 0, 0, CALLBACK_NULL) == MMSYSERR_NOERROR && hwo) {
+		WAVEHDR hdr = {};
+		hdr.lpData = (LPSTR)pcm;
+		hdr.dwBufferLength = (DWORD)bytes;
+		if (waveOutPrepareHeader(hwo, &hdr, sizeof(hdr)) == MMSYSERR_NOERROR) {
+			waveOutWrite(hwo, &hdr, sizeof(hdr));
+			const DWORD t0 = GetTickCount();
+			while (!(hdr.dwFlags & WHDR_DONE) && GetTickCount() - t0 < (DWORD)durMs + 500)
+				Sleep(10);
+			waveOutUnprepareHeader(hwo, &hdr, sizeof(hdr));
+		}
+		waveOutClose(hwo);
+	}
+	HeapFree(GetProcessHeap(), 0, pcm);
+}
+
 extern "C" void VstLiveMidiSysex(int portIndex0to2, const unsigned char* data,
 	int bytes)
 {
@@ -8038,9 +8545,17 @@ extern "C" void VstLiveMidiSysex(int portIndex0to2, const unsigned char* data,
 		for (int i = b0; i < b0 + 16 && i < 32; ++i)
 			if (LivePartLoaded(i)) { part = i; break; }
 	}
-	// Queued with the notes so a GS reset cannot wipe the events around it.
+	/* Fan-out GS/XG reset to every loaded part on this port (multi-VST score). */
 	if (part >= 0 && part < 32)
 		LivePendPushSysex(g_eng.live[part], data, bytes);
+	{
+		const int b0 = portIndex0to2 * 16;
+		for (int i = b0; i < b0 + 16 && i < 32; ++i) {
+			if (i == part) continue;
+			if (!LivePartLoaded(i)) continue;
+			LivePendPushSysex(g_eng.live[i], data, bytes);
+		}
+	}
 	LeaveCriticalSection(&g_eng.cs);
 }
 
@@ -8050,7 +8565,427 @@ extern "C" void VstLiveMidiSysex(int portIndex0to2, const unsigned char* data,
 // call here onto its plug-in UI thread.
 struct LiveEditorRect { short top, left, bottom, right; };
 
-enum { LIVE_EDITOR_IDLE_TIMER = 1 };
+/* Snapshot of getState taken while the editor is still open (before editClose).
+   Host64 notifies ogg asynchronously AFTER close — without this, GET often
+   returns empty/default HALion Home state. */
+static unsigned char* g_closeSnapComp[33];
+static int g_closeSnapCompLen[33];
+static unsigned char* g_closeSnapCtrl[33];
+static int g_closeSnapCtrlLen[33];
+
+static void LiveCloseSnapClear(int part1to32)
+{
+	if (part1to32 < 1 || part1to32 > 32) return;
+	if (g_closeSnapComp[part1to32]) { free(g_closeSnapComp[part1to32]); g_closeSnapComp[part1to32] = NULL; }
+	if (g_closeSnapCtrl[part1to32]) { free(g_closeSnapCtrl[part1to32]); g_closeSnapCtrl[part1to32] = NULL; }
+	g_closeSnapCompLen[part1to32] = g_closeSnapCtrlLen[part1to32] = 0;
+}
+
+static void LiveCloseSnapCapture(int part1to32)
+{
+	if (part1to32 < 1 || part1to32 > 32) return;
+	LiveCloseSnapClear(part1to32);
+	LivePart& p = g_eng.live[part1to32 - 1];
+	if (!p.vst3) return;
+	/* Soft-close path holds editPause and keeps the view — getState here is OK.
+	   (Old skip was for DestroyWindow/removed hang racing GET from ogg.) */
+	unsigned char* comp = NULL; int compLen = 0;
+	unsigned char* ctrl = NULL; int ctrlLen = 0;
+	EnterCriticalSection(&g_eng.cs);
+	__try {
+		Vst3GetComponentState(p.vst3, &comp, &compLen);
+		Vst3GetControllerState(p.vst3, &ctrl, &ctrlLen);
+	} __except (EXCEPTION_EXECUTE_HANDLER) {
+		if (comp) { free(comp); comp = NULL; compLen = 0; }
+		if (ctrl) { free(ctrl); ctrl = NULL; ctrlLen = 0; }
+	}
+	LeaveCriticalSection(&g_eng.cs);
+	g_closeSnapComp[part1to32] = comp;
+	g_closeSnapCompLen[part1to32] = compLen > 0 ? compLen : 0;
+	if (compLen <= 0 && comp) { free(comp); g_closeSnapComp[part1to32] = NULL; }
+	g_closeSnapCtrl[part1to32] = ctrl;
+	g_closeSnapCtrlLen[part1to32] = ctrlLen > 0 ? ctrlLen : 0;
+	if (ctrlLen <= 0 && ctrl) { free(ctrl); g_closeSnapCtrl[part1to32] = NULL; }
+}
+
+static int LivePathSoftState(const wchar_t* path)
+{
+	return ContainsI(path, L"SampleTank") || ContainsI(path, L"Sample Tank") ||
+		ContainsI(path, L"Kontakt") ? 1 : 0;
+}
+
+extern "C" int VstLiveGetState(int part1to32, int which, unsigned char** outBytes, int* outLen)
+{
+	if (outBytes) *outBytes = NULL;
+	if (outLen) *outLen = 0;
+	if (part1to32 < 1 || part1to32 > 32 || which < 0 || which > 1 || !outBytes || !outLen)
+		return 0;
+	/* Prefer snapshot taken while the editor was still open (MediaBay patch). */
+	if (which == 0 && g_closeSnapComp[part1to32] && g_closeSnapCompLen[part1to32] > 0) {
+		unsigned char* mem = (unsigned char*)malloc((size_t)g_closeSnapCompLen[part1to32]);
+		if (!mem) return 0;
+		memcpy(mem, g_closeSnapComp[part1to32], (size_t)g_closeSnapCompLen[part1to32]);
+		*outBytes = mem;
+		*outLen = g_closeSnapCompLen[part1to32];
+		return 1;
+	}
+	if (which == 1 && g_closeSnapCtrl[part1to32] && g_closeSnapCtrlLen[part1to32] > 0) {
+		unsigned char* mem = (unsigned char*)malloc((size_t)g_closeSnapCtrlLen[part1to32]);
+		if (!mem) return 0;
+		memcpy(mem, g_closeSnapCtrl[part1to32], (size_t)g_closeSnapCtrlLen[part1to32]);
+		*outBytes = mem;
+		*outLen = g_closeSnapCtrlLen[part1to32];
+		return 1;
+	}
+	LivePart& p = g_eng.live[part1to32 - 1];
+#ifndef KPIHOST64_BUILD
+	if (p.remote) {
+		/* Pipe returns Host64 close-snap when present; Host64 skips live getState
+		   for SampleTank/Kontakt (those hang). */
+		std::vector<uint8_t> blob;
+		if (!g_kpiHost.VstLiveGetState((uint32_t)part1to32, (uint32_t)which, blob))
+			return 0;
+		if (blob.empty()) return 0;
+		unsigned char* mem = (unsigned char*)malloc(blob.size());
+		if (!mem) return 0;
+		memcpy(mem, blob.data(), blob.size());
+		*outBytes = mem;
+		*outLen = (int)blob.size();
+		return 1;
+	}
+#endif
+	/* In-process soft plugs: close-snap only (above); never live getState. */
+	if (LivePathSoftState(p.path))
+		return 0;
+	int ok = 0;
+	EnterCriticalSection(&g_eng.cs);
+	if (p.vst3) {
+		if (which == 0)
+			ok = Vst3GetComponentState(p.vst3, outBytes, outLen);
+		else
+			ok = Vst3GetControllerState(p.vst3, outBytes, outLen);
+	}
+	LeaveCriticalSection(&g_eng.cs);
+	return ok;
+}
+
+/* Host64 Home-dismiss re-apply: SET_STATE must stash blobs in-process
+   (ogg's pending heaps are a different address space). */
+static void LivePendingStateStore(int part1to32,
+	const unsigned char* comp, int compLen,
+	const unsigned char* ctrl, int ctrlLen);
+static void LivePendingStateStoreWhich(int part1to32, int which,
+	const unsigned char* bytes, int len);
+
+extern "C" int VstLiveSetState(int part1to32, int which, const unsigned char* bytes, int len)
+{
+	if (part1to32 < 1 || part1to32 > 32 || which < 0 || which > 1 || !bytes || len <= 0)
+		return 0;
+	LivePart& p = g_eng.live[part1to32 - 1];
+#ifndef KPIHOST64_BUILD
+	if (p.remote) {
+		return g_kpiHost.VstLiveSetState((uint32_t)part1to32, (uint32_t)which,
+			bytes, (uint32_t)len) ? 1 : 0;
+	}
+#endif
+	int ok = 0;
+	EnterCriticalSection(&g_eng.cs);
+	if (p.vst3) {
+		if (which == 0)
+			ok = Vst3SetComponentState(p.vst3, bytes, len);
+		else
+			ok = Vst3SetControllerState(p.vst3, bytes, len);
+	}
+	LeaveCriticalSection(&g_eng.cs);
+	if (ok)
+		LivePendingStateStoreWhich(part1to32, which, bytes, len);
+	return ok;
+}
+
+extern "C" int VstLiveApplyStates(int part1to32,
+	const unsigned char* comp, int compLen,
+	const unsigned char* ctrl, int ctrlLen)
+{
+	if (part1to32 < 1 || part1to32 > 32 || !comp || compLen <= 0) return 0;
+	LivePart& p = g_eng.live[part1to32 - 1];
+#ifndef KPIHOST64_BUILD
+	if (p.remote) {
+		if (!g_kpiHost.VstLiveSetState((uint32_t)part1to32, 0, comp, (uint32_t)compLen))
+			return 0;
+		if (ctrl && ctrlLen > 0)
+			g_kpiHost.VstLiveSetState((uint32_t)part1to32, 1, ctrl, (uint32_t)ctrlLen);
+		return 1;
+	}
+#endif
+	int ok = 0;
+	EnterCriticalSection(&g_eng.cs);
+	if (p.vst3)
+		ok = Vst3ApplyStates(p.vst3, comp, compLen, ctrl, ctrlLen);
+	LeaveCriticalSection(&g_eng.cs);
+	return ok;
+}
+
+extern "C" int VstLiveCaptureStates(int part1to32,
+	unsigned char** outComp, int* outCompLen,
+	unsigned char** outCtrl, int* outCtrlLen)
+{
+	if (outComp) *outComp = NULL;
+	if (outCompLen) *outCompLen = 0;
+	if (outCtrl) *outCtrl = NULL;
+	if (outCtrlLen) *outCtrlLen = 0;
+	if (part1to32 < 1 || part1to32 > 32) return 0;
+	int any = 0;
+	if (outComp && outCompLen) {
+		if (VstLiveGetState(part1to32, 0, outComp, outCompLen) && *outCompLen > 0)
+			any = 1;
+	}
+	if (outCtrl && outCtrlLen) {
+		if (VstLiveGetState(part1to32, 1, outCtrl, outCtrlLen) && *outCtrlLen > 0)
+			any = 1;
+	}
+	return any;
+}
+
+
+enum { LIVE_EDITOR_IDLE_TIMER = 1, LIVE_EDITOR_HOME_TIMER = 2 };
+
+static int g_liveHomeAttempt[33];
+static int g_liveHomeApplyWait[33];
+static unsigned char* g_pendComp[33];
+static int g_pendCompLen[33];
+static unsigned char* g_pendCtrl[33];
+static int g_pendCtrlLen[33];
+
+static void LivePendingStateClear(int part1to32)
+{
+	if (part1to32 < 1 || part1to32 > 32) return;
+	if (g_pendComp[part1to32]) { free(g_pendComp[part1to32]); g_pendComp[part1to32] = NULL; }
+	if (g_pendCtrl[part1to32]) { free(g_pendCtrl[part1to32]); g_pendCtrl[part1to32] = NULL; }
+	g_pendCompLen[part1to32] = g_pendCtrlLen[part1to32] = 0;
+}
+
+static void LivePendingStateStoreWhich(int part1to32, int which,
+	const unsigned char* bytes, int len)
+{
+	if (part1to32 < 1 || part1to32 > 32 || !bytes || len <= 0) return;
+	unsigned char* c = (unsigned char*)malloc((size_t)len);
+	if (!c) return;
+	memcpy(c, bytes, (size_t)len);
+	if (which == 0) {
+		if (g_pendComp[part1to32]) free(g_pendComp[part1to32]);
+		g_pendComp[part1to32] = c;
+		g_pendCompLen[part1to32] = len;
+	} else {
+		if (g_pendCtrl[part1to32]) free(g_pendCtrl[part1to32]);
+		g_pendCtrl[part1to32] = c;
+		g_pendCtrlLen[part1to32] = len;
+	}
+}
+
+static void LivePendingStateStore(int part1to32,
+	const unsigned char* comp, int compLen,
+	const unsigned char* ctrl, int ctrlLen)
+{
+	if (part1to32 < 1 || part1to32 > 32 || !comp || compLen <= 0) return;
+	LivePendingStateClear(part1to32);
+	unsigned char* c = (unsigned char*)malloc((size_t)compLen);
+	if (!c) return;
+	memcpy(c, comp, (size_t)compLen);
+	g_pendComp[part1to32] = c;
+	g_pendCompLen[part1to32] = compLen;
+	if (ctrl && ctrlLen > 0) {
+		unsigned char* u = (unsigned char*)malloc((size_t)ctrlLen);
+		if (u) {
+			memcpy(u, ctrl, (size_t)ctrlLen);
+			g_pendCtrl[part1to32] = u;
+			g_pendCtrlLen[part1to32] = ctrlLen;
+		}
+	}
+}
+
+static void LivePendingStateApply(int part1to32)
+{
+	if (part1to32 < 1 || part1to32 > 32) return;
+	if (!g_pendComp[part1to32] || g_pendCompLen[part1to32] <= 0) return;
+	VstLiveApplyStates(part1to32, g_pendComp[part1to32], g_pendCompLen[part1to32],
+		g_pendCtrl[part1to32], g_pendCtrlLen[part1to32]);
+}
+
+static int LivePathNeedsHomeDismiss(const wchar_t* path)
+{
+	if (!path || !path[0]) return 0;
+	if (ContainsI(path, L"SampleTank") || ContainsI(path, L"Sample Tank"))
+		return 2;
+	if (ContainsI(path, L"HALion") && !ContainsI(path, L"Sonic"))
+		return 1;
+	return 0;
+}
+
+static HWND LiveFindHomeClickTarget(HWND host)
+{
+	if (!host || !IsWindow(host)) return NULL;
+	struct Ctx { HWND best; int bestArea; HWND empty; } ctx = {};
+	ctx.bestArea = -1;
+	EnumChildWindows(host, [](HWND c, LPARAM lp) -> BOOL {
+		Ctx* x = (Ctx*)lp;
+		wchar_t cls[128] = {}, title[256] = {};
+		GetClassNameW(c, cls, 128);
+		GetWindowTextW(c, title, 256);
+		RECT r = {};
+		GetClientRect(c, &r);
+		const int area = r.right * r.bottom;
+		const int stein = (wcsstr(cls, L"SteinbergWindow") != NULL) ? 1 : 0;
+		if (stein && wcsstr(title, L"empty"))
+			x->empty = c;
+		if (stein && area > x->bestArea) {
+			x->bestArea = area;
+			x->best = c;
+		}
+		return TRUE;
+	}, (LPARAM)&ctx);
+	if (ctx.empty) return ctx.empty;
+	return ctx.best;
+}
+
+static int LiveHomeTitleLooksOpen(HWND plug)
+{
+	if (!plug) return 0;
+	wchar_t title[256] = {};
+	GetWindowTextW(plug, title, 256);
+	if (!title[0]) return 0;
+	if (wcsstr(title, L"empty")) return 1;
+	if (wcsstr(title, L"Home")) return 1;
+	return 0;
+}
+
+static void LiveClickClientFrac(HWND hwnd, double fx, double fy)
+{
+	if (!hwnd || !IsWindow(hwnd)) return;
+	RECT cr = {};
+	if (!GetClientRect(hwnd, &cr) || cr.right < 8 || cr.bottom < 8) return;
+	if (fx < 0) fx = 0; if (fx > 1) fx = 1;
+	if (fy < 0) fy = 0; if (fy > 1) fy = 1;
+	POINT pt = { (int)(cr.right * fx + 0.5), (int)(cr.bottom * fy + 0.5) };
+	ClientToScreen(hwnd, &pt);
+	HWND top = GetAncestor(hwnd, GA_ROOT);
+	if (top) SetForegroundWindow(top);
+	else SetForegroundWindow(hwnd);
+	Sleep(40);
+	SetCursorPos(pt.x, pt.y);
+	for (int i = 0; i < 20; ++i) {
+		Sleep(25);
+		POINT cur = {};
+		GetCursorPos(&cur);
+		if (abs(cur.x - pt.x) <= 2 && abs(cur.y - pt.y) <= 2)
+			break;
+		SetCursorPos(pt.x, pt.y);
+	}
+	mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
+	Sleep(40);
+	mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
+}
+
+static BOOL CALLBACK LiveCloseMediaBayEnum(HWND h, LPARAM lp)
+{
+	HWND keepHost = (HWND)lp;
+	if (!IsWindowVisible(h) || h == keepHost) return TRUE;
+	wchar_t cls[128] = {}, title[256] = {};
+	GetClassNameW(h, cls, 128);
+	GetWindowTextW(h, title, 256);
+	if (!cls[0]) return TRUE;
+	if (wcscmp(cls, L"OggVstLiveEditor") == 0) return TRUE;
+	RECT wr = {};
+	GetWindowRect(h, &wr);
+	if (wr.left < -10000) return TRUE;
+	/* Never WM_CLOSE MediaBay / Library — user picks patches there; closing
+	   mid-browse crashes HALion. Only poke first-run modal blockers. */
+	if (wcsstr(title, L"MediaBay") || wcsstr(title, L"Media Bay") ||
+		wcsstr(title, L"Library") || wcsstr(title, L"Content"))
+		return TRUE;
+	const int stein = (wcsstr(cls, L"SteinbergWindow") != NULL) ? 1 : 0;
+	if (stein && (wcsstr(title, L"Select Media") || wcsstr(title, L"Missing") ||
+		wcsstr(title, L"Activation") || wcsstr(title, L"License"))) {
+		PostMessageW(h, WM_CLOSE, 0, 0);
+	}
+	return TRUE;
+}
+
+static void LiveDismissMediaBayObstructions(HWND host)
+{
+	EnumWindows(LiveCloseMediaBayEnum, (LPARAM)host);
+	HWND plug = LiveFindHomeClickTarget(host);
+	if (plug && IsWindow(plug) && LiveHomeTitleLooksOpen(plug)) {
+		PostMessageW(plug, WM_KEYDOWN, VK_ESCAPE, 1);
+		PostMessageW(plug, WM_KEYUP, VK_ESCAPE, 1 | (1u << 31));
+		SetForegroundWindow(host);
+	}
+}
+
+static void LiveEditorArmHomeDismiss(HWND host, int part1to32)
+{
+	if (!host || part1to32 < 1 || part1to32 > 32) return;
+	const wchar_t* path = g_eng.live[part1to32 - 1].path;
+	if (LivePathNeedsHomeDismiss(path) != 1) return;
+	/* Fresh tone assign: do NOT steal mouse / Esc / close dialogs — that races
+	   MediaBay + UI keyboard and crashes HALion. Only auto-dismiss when we
+	   must re-apply a pending song state after Home. */
+	if (!g_pendComp[part1to32] || g_pendCompLen[part1to32] <= 0)
+		return;
+	g_liveHomeAttempt[part1to32] = 0;
+	g_liveHomeApplyWait[part1to32] = 0;
+	SetTimer(host, LIVE_EDITOR_HOME_TIMER, 1500, NULL);
+}
+
+static void LiveEditorHomeTimerTick(HWND host, int part1to32)
+{
+	if (!host || part1to32 < 1 || part1to32 > 32) return;
+	/* Drop pending if user already cleared it / no blob left. */
+	if (!g_pendComp[part1to32] || g_pendCompLen[part1to32] <= 0) {
+		KillTimer(host, LIVE_EDITOR_HOME_TIMER);
+		g_liveHomeApplyWait[part1to32] = 0;
+		return;
+	}
+	HWND plug = LiveFindHomeClickTarget(host);
+	if (!plug) {
+		int& att = g_liveHomeAttempt[part1to32];
+		++att;
+		if (att <= 8) {
+			SetTimer(host, LIVE_EDITOR_HOME_TIMER, 500, NULL);
+			return;
+		}
+		LivePendingStateApply(part1to32);
+		LivePendingStateClear(part1to32);
+		g_liveHomeApplyWait[part1to32] = 0;
+		KillTimer(host, LIVE_EDITOR_HOME_TIMER);
+		return;
+	}
+	/* Home closed (or never shown): wait briefly then re-apply pending state. */
+	if (!LiveHomeTitleLooksOpen(plug) || g_liveHomeApplyWait[part1to32]) {
+		if (!g_liveHomeApplyWait[part1to32]) {
+			g_liveHomeApplyWait[part1to32] = 1;
+			SetTimer(host, LIVE_EDITOR_HOME_TIMER, 700, NULL);
+			return;
+		}
+		LivePendingStateApply(part1to32);
+		LivePendingStateClear(part1to32);
+		g_liveHomeApplyWait[part1to32] = 0;
+		KillTimer(host, LIVE_EDITOR_HOME_TIMER);
+		return;
+	}
+	int& att = g_liveHomeAttempt[part1to32];
+	++att;
+	if (att == 1)
+		LiveDismissMediaBayObstructions(host);
+	/* Soft: Esc only (no mouse_event). Synthetic clicks fight the user. */
+	if (att <= 3) {
+		PostMessageW(plug, WM_KEYDOWN, VK_ESCAPE, 1);
+		PostMessageW(plug, WM_KEYUP, VK_ESCAPE, 1 | (1u << 31));
+		SetTimer(host, LIVE_EDITOR_HOME_TIMER, 1000, NULL);
+		return;
+	}
+	g_liveHomeApplyWait[part1to32] = 1;
+	SetTimer(host, LIVE_EDITOR_HOME_TIMER, 700, NULL);
+}
 
 static LRESULT CALLBACK LiveEditorWndProc(HWND h, UINT m, WPARAM w, LPARAM l)
 {
@@ -8064,19 +8999,83 @@ static LRESULT CALLBACK LiveEditorWndProc(HWND h, UINT m, WPARAM w, LPARAM l)
 			}
 			return 0;
 		}
+		if (m == WM_TIMER && w == LIVE_EDITOR_HOME_TIMER) {
+			LiveEditorHomeTimerTick(h, part);
+			return 0;
+		}
 		if (m == WM_CLOSE) {
-#ifdef KPIHOST64_BUILD
-			VstHost64_LiveAudioStop();
-#endif
+			/* Do NOT LiveAudioStop here — tears down SHM while ogg drains and
+			   freezes when SampleTank editClose is slow. editPause inside
+			   VstLiveEditorClose is enough (same as EDITOR_OPEN path). */
 			VstLiveEditorClose(part);
-#ifdef KPIHOST64_BUILD
-			if (VstHost64_LiveActive())
-				VstHost64_LiveAudioStart();
-#endif
 			return 0;
 		}
 	}
 	return DefWindowProcW(h, m, w, l);
+}
+
+
+extern "C" int VstApplyMpw3Binds(const wchar_t* mpw3Path, int openEditor)
+{
+	if (!mpw3Path || !mpw3Path[0]) return 0;
+	SasamiSong song;
+	SasamiSongInit(&song);
+	if (!SasamiLoadFileW(mpw3Path, &song) || !song.hasMpw3Trailer) {
+		SasamiSongFree(&song);
+		return 0;
+	}
+	int n = 0;
+	HWND waitOwner = GetActiveWindow();
+	if (!waitOwner) waitOwner = GetForegroundWindow();
+	for (int i = 0; i < 32; i++) {
+		if (!song.vstPath[i][0]) continue;
+		const wchar_t* pp = song.vstPath[i];
+		const size_t len = wcslen(pp);
+		int is3 = 0;
+		if (len >= 5 && _wcsicmp(pp + len - 5, L".vst3") == 0)
+			is3 = 1;
+		int already = 0;
+		if (VstLivePartIsLoaded(i + 1)) {
+			wchar_t cur[520];
+			cur[0] = 0;
+			if (VstLivePartGetPath(i + 1, cur, 520) && cur[0] && _wcsicmp(cur, pp) == 0)
+				already = 1;
+		}
+		int loadedOk = already;
+		if (!already) {
+			const wchar_t* waitName = pp;
+			if (const wchar_t* slash = wcsrchr(pp, L'\\')) waitName = slash + 1;
+			VstWaitShowLoad(waitOwner, waitName);
+			loadedOk = (VstLiveLoadPart(i + 1, pp, is3) == 0) ? 1 : 0;
+			VstWaitHide();
+		}
+		if (!loadedOk) continue;
+		++n;
+		/* Dedicated plugs always speak on ch0 inside the instance. Legacy score
+		   files stored forceCh=partIndex (1,2,…) which made GA/HL ignore notes. */
+		if (LiveIsMultiPath(pp)) {
+			if (song.vstForceCh[i] >= 0)
+				VstLiveSetSendChannel(i + 1, song.vstForceCh[i]);
+			else
+				VstLiveSetSendChannel(i + 1, -1);
+		} else {
+			VstLiveSetSendChannel(i + 1, 0);
+		}
+		if (song.vstCompLen[i] > 0 && song.vstComp[i]) {
+			VstLiveApplyStates(i + 1, song.vstComp[i], (int)song.vstCompLen[i],
+				song.vstCtrl[i], (int)song.vstCtrlLen[i]);
+			LivePendingStateStore(i + 1, song.vstComp[i], (int)song.vstCompLen[i],
+				song.vstCtrl[i], (int)song.vstCtrlLen[i]);
+			if (openEditor && !already)
+				VstLiveEditorOpenAsync(i + 1);
+		} else if (song.vstProg[i] >= 0) {
+			VstLiveSetProgram(i + 1, song.vstProg[i]);
+			if (openEditor && !already && LivePathNeedsHomeDismiss(pp))
+				VstLiveEditorOpenAsync(i + 1);
+		}
+	}
+	SasamiSongFree(&song);
+	return n;
 }
 
 static HWND LiveEditorCreateHostWnd(int part1to32)
@@ -8103,17 +9102,301 @@ static HWND LiveEditorCreateHostWnd(int part1to32)
 	return h;
 }
 
+// ---------------------------------------------------------------------------
+// Live monitor audio (composer / tone map / editor).
+// Mirrors CVstHostDlg::AudioThread: keep process() fed and waveOut draining.
+// Without this, KpiHost64 SHM fills and HALionâs UI keyboard notes die instantly.
+// ---------------------------------------------------------------------------
+#ifndef KPIHOST64_BUILD
+enum { LIVE_MON_FRAMES = 512, LIVE_MON_BUFS = 4 };
+
+struct LiveMonitorState {
+	HANDLE thread;
+	HANDLE stop;
+	HANDLE wake;
+	HWAVEOUT wave;
+	volatile LONG running;
+	volatile LONG want;
+};
+static LiveMonitorState g_liveMon = {};
+
+static int LiveAnyPartLoadedUnlocked(void)
+{
+	for (int i = 0; i < 32; ++i) {
+		const LivePart& p = g_eng.live[i];
+		if (p.effect || p.vst3 || p.remote) return 1;
+	}
+	return 0;
+}
+
+static unsigned __stdcall LiveMonitorThreadProc(void*)
+{
+	WAVEHDR hdr[LIVE_MON_BUFS];
+	BYTE* pcm[LIVE_MON_BUFS];
+	memset(hdr, 0, sizeof(hdr));
+	memset(pcm, 0, sizeof(pcm));
+	const int bytes = LIVE_MON_FRAMES * 4;
+	for (int b = 0; b < LIVE_MON_BUFS; ++b) {
+		pcm[b] = (BYTE*)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, (SIZE_T)bytes);
+		if (!pcm[b]) goto done;
+		hdr[b].lpData = (LPSTR)pcm[b];
+		hdr[b].dwBufferLength = (DWORD)bytes;
+		waveOutPrepareHeader(g_liveMon.wave, &hdr[b], sizeof(WAVEHDR));
+		waveOutWrite(g_liveMon.wave, &hdr[b], sizeof(WAVEHDR));
+	}
+	InterlockedExchange(&g_liveMon.running, 1);
+	float L[LIVE_MON_FRAMES], R[LIVE_MON_FRAMES];
+	while (WaitForSingleObject(g_liveMon.stop, 0) != WAIT_OBJECT_0) {
+		/* Yield when VST Host dialog owns playback. */
+		extern CVstHostDlg* g_vstHostDlg;
+		if (g_vstHostDlg && ::IsWindow(g_vstHostDlg->GetSafeHwnd()))
+			break;
+		if (!LiveAnyPartLoadedUnlocked() && !InterlockedCompareExchange(&g_liveMon.want, 0, 0))
+			break;
+		int queued = 0;
+		for (int b = 0; b < LIVE_MON_BUFS; ++b) {
+			if (!(hdr[b].dwFlags & WHDR_DONE)) { ++queued; continue; }
+			waveOutUnprepareHeader(g_liveMon.wave, &hdr[b], sizeof(WAVEHDR));
+			VstLiveRender(L, R, LIVE_MON_FRAMES);
+			short* s = (short*)pcm[b];
+			for (int i = 0; i < LIVE_MON_FRAMES; ++i) {
+				float l = L[i], r = R[i];
+				if (l < -1) l = -1; if (l > 1) l = 1;
+				if (r < -1) r = -1; if (r > 1) r = 1;
+				s[i * 2] = (short)(l * 32767.f);
+				s[i * 2 + 1] = (short)(r * 32767.f);
+			}
+			hdr[b].dwFlags = 0;
+			waveOutPrepareHeader(g_liveMon.wave, &hdr[b], sizeof(WAVEHDR));
+			waveOutWrite(g_liveMon.wave, &hdr[b], sizeof(WAVEHDR));
+			++queued;
+		}
+		if (!queued) WaitForSingleObject(g_liveMon.wake, 30);
+		else WaitForSingleObject(g_liveMon.wake, 5);
+	}
+done:
+	InterlockedExchange(&g_liveMon.running, 0);
+	if (g_liveMon.wave) {
+		waveOutReset(g_liveMon.wave);
+		for (int b = 0; b < LIVE_MON_BUFS; ++b) {
+			if (pcm[b]) {
+				waveOutUnprepareHeader(g_liveMon.wave, &hdr[b], sizeof(WAVEHDR));
+				HeapFree(GetProcessHeap(), 0, pcm[b]);
+			}
+		}
+	}
+	return 0;
+}
+
+extern "C" void VstLiveMonitorStop(void)
+{
+	InterlockedExchange(&g_liveMon.want, 0);
+	if (g_liveMon.stop) SetEvent(g_liveMon.stop);
+	if (g_liveMon.wake) SetEvent(g_liveMon.wake);
+	if (g_liveMon.thread) {
+		WaitForSingleObject(g_liveMon.thread, 4000);
+		CloseHandle(g_liveMon.thread);
+		g_liveMon.thread = NULL;
+	}
+	if (g_liveMon.wave) {
+		waveOutClose(g_liveMon.wave);
+		g_liveMon.wave = NULL;
+	}
+	if (g_liveMon.stop) { CloseHandle(g_liveMon.stop); g_liveMon.stop = NULL; }
+	if (g_liveMon.wake) { CloseHandle(g_liveMon.wake); g_liveMon.wake = NULL; }
+	InterlockedExchange(&g_liveMon.running, 0);
+}
+
+extern "C" void VstLiveMonitorEnsure(void)
+{
+	InterlockedExchange(&g_liveMon.want, 1);
+	extern CVstHostDlg* g_vstHostDlg;
+	if (g_vstHostDlg && ::IsWindow(g_vstHostDlg->GetSafeHwnd()))
+		return; /* Host AudioThread already pumps. */
+	if (InterlockedCompareExchange(&g_liveMon.running, 0, 0))
+		return;
+	if (g_liveMon.thread) {
+		if (WaitForSingleObject(g_liveMon.thread, 0) == WAIT_OBJECT_0) {
+			CloseHandle(g_liveMon.thread);
+			g_liveMon.thread = NULL;
+		} else
+			return;
+	}
+	VstLiveMonitorStop(); /* clean handles */
+	InterlockedExchange(&g_liveMon.want, 1);
+	g_liveMon.stop = CreateEventW(NULL, TRUE, FALSE, NULL);
+	g_liveMon.wake = CreateEventW(NULL, FALSE, FALSE, NULL);
+	if (!g_liveMon.stop || !g_liveMon.wake) { VstLiveMonitorStop(); return; }
+	WAVEFORMATEX wf = { WAVE_FORMAT_PCM, 2, SAMPLE_RATE, SAMPLE_RATE * 4, 4, 16, 0 };
+	if (waveOutOpen(&g_liveMon.wave, WAVE_MAPPER, &wf,
+		(DWORD_PTR)g_liveMon.wake, 0, CALLBACK_EVENT) != MMSYSERR_NOERROR) {
+		g_liveMon.wave = NULL;
+		VstLiveMonitorStop();
+		return;
+	}
+	unsigned tid = 0;
+	g_liveMon.thread = (HANDLE)_beginthreadex(NULL, 0, LiveMonitorThreadProc, NULL, 0, &tid);
+	if (g_liveMon.thread)
+		SetThreadPriority(g_liveMon.thread, THREAD_PRIORITY_ABOVE_NORMAL);
+	else
+		VstLiveMonitorStop();
+}
+#else
+extern "C" void VstLiveMonitorEnsure(void) {}
+extern "C" void VstLiveMonitorStop(void) {}
+#endif
+
+
+static volatile LONG g_liveEditorClosing = 0;
+
+extern "C" void VstLiveEditorSetNotifyHwnd(HWND hwnd)
+{
+#ifndef KPIHOST64_BUILD
+	g_liveEdNotifyHwnd = hwnd;
+#else
+	(void)hwnd;
+#endif
+}
+
+extern "C" void VstLiveEditorSetNotifyHwnd2(HWND hwnd)
+{
+#ifndef KPIHOST64_BUILD
+	g_liveEdNotifyHwnd2 = hwnd;
+#else
+	(void)hwnd;
+#endif
+}
+
+extern "C" void VstLiveEditorClearClosingQuiet(void)
+{
+	InterlockedExchange(&g_liveEditorClosing, 0);
+}
+
+#ifndef KPIHOST64_BUILD
+enum { WM_VST_LIVE_ED_OPEN_ASYNC = WM_APP + 9101 };
+enum { WM_VST_LIVE_MON_ENSURE_DELAYED = WM_APP + 9102 };
+static HWND g_vstEdPumpWnd = NULL;
+static volatile LONG g_vstEdOpenCancel = 0;
+
+static LRESULT CALLBACK VstEdPumpWndProc(HWND h, UINT m, WPARAM w, LPARAM l)
+{
+	if (m == WM_VST_LIVE_ED_OPEN_ASYNC) {
+		if (InterlockedCompareExchange(&g_vstEdOpenCancel, 0, 0))
+			return 0;
+		(void)VstLiveEditorOpen((int)w);
+		return 0;
+	}
+	if (m == WM_VST_LIVE_MON_ENSURE_DELAYED) {
+		SetTimer(h, 1, 1500, NULL);
+		return 0;
+	}
+	if (m == WM_TIMER && w == 1) {
+		KillTimer(h, 1);
+		VstLiveMonitorEnsure();
+		return 0;
+	}
+	return DefWindowProcW(h, m, w, l);
+}
+
+static HWND VstEdPumpEnsure(void)
+{
+	if (g_vstEdPumpWnd && IsWindow(g_vstEdPumpWnd)) return g_vstEdPumpWnd;
+	static int reg = 0;
+	if (!reg) {
+		WNDCLASSEXW wc = {};
+		wc.cbSize = sizeof(wc);
+		wc.lpfnWndProc = VstEdPumpWndProc;
+		wc.hInstance = GetModuleHandleW(NULL);
+		wc.lpszClassName = L"OggVstLiveEdPump";
+		RegisterClassExW(&wc);
+		reg = 1;
+	}
+	g_vstEdPumpWnd = CreateWindowExW(0, L"OggVstLiveEdPump", L"", 0,
+		0, 0, 0, 0, HWND_MESSAGE, NULL, GetModuleHandleW(NULL), NULL);
+	return g_vstEdPumpWnd;
+}
+
+extern "C" void VstLiveEditorOpenCancelPending(void)
+{
+	InterlockedExchange(&g_vstEdOpenCancel, 1);
+	MSG msg;
+	while (g_vstEdPumpWnd && PeekMessageW(&msg, g_vstEdPumpWnd,
+		WM_VST_LIVE_ED_OPEN_ASYNC, WM_VST_LIVE_ED_OPEN_ASYNC, PM_REMOVE)) {
+	}
+}
+
+extern "C" int VstLiveEditorOpenAsync(int part1to32)
+{
+	if (part1to32 < 1 || part1to32 > 32) return -1;
+	InterlockedExchange(&g_vstEdOpenCancel, 0);
+	LivePart& p = g_eng.live[part1to32 - 1];
+	if (p.remote) {
+		/* Host-like: open editor + keep draining SHM so HALion UI keyboard sounds.
+		   (Crash was ednotify FILE_MAP_READ+Interlocked, not MonitorEnsure.) */
+		if (g_vstEdPumpWnd && IsWindow(g_vstEdPumpWnd))
+			KillTimer(g_vstEdPumpWnd, 1);
+		const int ok = g_kpiHost.VstLiveEditorOpen((uint32_t)part1to32) ? 0 : -5;
+		if (ok == 0) VstLiveMonitorEnsure();
+		return ok;
+	}
+	HWND pump = VstEdPumpEnsure();
+	if (!pump) return -4;
+	if (!PostMessageW(pump, WM_VST_LIVE_ED_OPEN_ASYNC, (WPARAM)part1to32, 0))
+		return -4;
+	return 0;
+}
+#else
+extern "C" void VstLiveEditorOpenCancelPending(void) {}
+extern "C" int VstLiveEditorOpenAsync(int part1to32)
+{
+	return VstLiveEditorOpen(part1to32);
+}
+#endif
+
+extern "C" void VstLiveSoftTeardownPart(int part1to32, void* hwnd)
+{
+	/* SampleTank: never destroy view/HWND here — that raced LiveAudio process()
+	   and crashed on 再生確認. Soft-close only hides; unload uses Vst3Close. */
+	(void)hwnd;
+#ifdef KPIHOST64_BUILD
+	if (part1to32 >= 1 && part1to32 <= 32)
+		VstHost64_ClearEditorOpenMask(part1to32);
+#else
+	(void)part1to32;
+#endif
+}
+
 extern "C" int VstLiveEditorOpen(int part1to32)
 {
 	if (part1to32 < 1 || part1to32 > 32) return -1;
 	LivePart& p = g_eng.live[part1to32 - 1];
 #ifndef KPIHOST64_BUILD
-	if (p.remote)
-		return g_kpiHost.VstLiveEditorOpen((uint32_t)part1to32) ? 0 : -5;
+	if (p.remote) {
+		const int ok = g_kpiHost.VstLiveEditorOpen((uint32_t)part1to32) ? 0 : -5;
+		if (ok == 0) VstLiveMonitorEnsure();
+		return ok;
+	}
 #endif
 	if (p.edWnd && IsWindow(p.edWnd)) {
 		ShowWindow(p.edWnd, SW_SHOW);
 		SetForegroundWindow(p.edWnd);
+		return 0;
+	}
+	/* Soft-close left the view attached to a hidden host — just show again. */
+	if (g_liveSoftHiddenWnd[part1to32] && IsWindow(g_liveSoftHiddenWnd[part1to32])) {
+		HWND host = g_liveSoftHiddenWnd[part1to32];
+		g_liveSoftHiddenWnd[part1to32] = NULL;
+		p.edWnd = host;
+		SetWindowLongPtrW(host, GWLP_USERDATA, (LONG_PTR)part1to32);
+		SetTimer(host, LIVE_EDITOR_IDLE_TIMER, 30, NULL);
+		ShowWindow(host, SW_SHOW);
+		SetForegroundWindow(host);
+#ifdef KPIHOST64_BUILD
+		VstHost64_NotifyEditorOpened(part1to32);
+#endif
+#ifndef KPIHOST64_BUILD
+		VstLiveMonitorEnsure();
+#endif
 		return 0;
 	}
 	const int wantVst3 = p.vst3 != NULL;
@@ -8162,6 +9445,14 @@ extern "C" int VstLiveEditorOpen(int part1to32)
 	SetTimer(host, LIVE_EDITOR_IDLE_TIMER, 30, NULL);
 	ShowWindow(host, SW_SHOW);
 	SetForegroundWindow(host);
+	LiveCloseSnapClear(part1to32);
+	LiveEditorArmHomeDismiss(host, part1to32);
+#ifdef KPIHOST64_BUILD
+	VstHost64_NotifyEditorOpened(part1to32);
+#endif
+#ifndef KPIHOST64_BUILD
+	VstLiveMonitorEnsure();
+#endif
 	return 0;
 }
 
@@ -8175,28 +9466,78 @@ extern "C" void VstLiveEditorClose(int part1to32)
 	}
 #endif
 	LivePart& p = g_eng.live[part1to32 - 1];
+	const int prog = p.prog;
 #ifndef KPIHOST64_BUILD
 	if (p.remote) {
 		if (InterlockedCompareExchange(&g_liveShuttingDown, 0, 0))
 			return;
-		const int resume = (g_liveShm.audio != NULL);
-		if (resume) LiveRemoteStop();
+		/* Host64 closes on its UI thread then bumps SHM editorClosedSeq;
+		   LiveRemoteMix posts WM_VST_LIVE_EDITOR_CLOSED for score capture. */
 		g_kpiHost.VstLiveEditorClose((uint32_t)part1to32);
-		if (resume && g_liveShm.parts > 0) LiveRemoteOpenShm();
 		return;
 	}
 #endif
 	HWND h = p.edWnd;
-	if (!h) return;
+	if (!h) {
+		/* Already soft-hidden — still allow hard close from unload. */
+		h = g_liveSoftHiddenWnd[part1to32];
+		if (!h) return;
+	}
+	const int softClose =
+		ContainsI(p.path, L"SampleTank") || ContainsI(p.path, L"Sample Tank") ||
+		ContainsI(p.path, L"Kontakt");
+	/* Snapshot getState WHILE editor is still open (view kept on soft-close). */
+	LiveCloseSnapCapture(part1to32);
+#ifdef KPIHOST64_BUILD
+	VstHost64_NotifyEditorSnapLens(part1to32,
+		(uint32_t)(g_closeSnapCompLen[part1to32] > 0 ? g_closeSnapCompLen[part1to32] : 0),
+		(uint32_t)(g_closeSnapCtrlLen[part1to32] > 0 ? g_closeSnapCtrlLen[part1to32] : 0));
+#endif
+#ifndef KPIHOST64_BUILD
+	if (g_liveEdNotifyHwnd && IsWindow(g_liveEdNotifyHwnd))
+		PostMessageW(g_liveEdNotifyHwnd, WM_VST_LIVE_EDITOR_CLOSED,
+			(WPARAM)part1to32, (LPARAM)prog);
+	if (g_liveEdNotifyHwnd2 && IsWindow(g_liveEdNotifyHwnd2))
+		PostMessageW(g_liveEdNotifyHwnd2, WM_VST_LIVE_EDITOR_CLOSED,
+			(WPARAM)part1to32, (LPARAM)prog);
+	InterlockedExchange(&g_liveEditorClosing, 1);
+	VstLiveMonitorStop();
+#else
+	VstHost64_EditorCloseBegin();
+	if (softClose) {
+		/* Hide only — do NOT setFrame/release/DestroyWindow (races process →
+		   Host64 crash on 再生確認). Keep IPlugView on the hidden HWND. */
+		VstHost64_NotifyEditorClosedEx(part1to32, prog, 1);
+		KillTimer(h, LIVE_EDITOR_IDLE_TIMER);
+		KillTimer(h, LIVE_EDITOR_HOME_TIMER);
+		ShowWindow(h, SW_HIDE);
+		g_liveSoftHiddenWnd[part1to32] = h;
+		p.edWnd = NULL;
+		VstHost64_EditorCloseEnd();
+		return;
+	}
+#endif
+	g_liveSoftHiddenWnd[part1to32] = NULL;
 	p.edWnd = NULL;
 	KillTimer(h, LIVE_EDITOR_IDLE_TIMER);
-	if (p.vst3) Vst3EditorClose(p.vst3);
+	KillTimer(h, LIVE_EDITOR_HOME_TIMER);
+	ShowWindow(h, SW_HIDE);
+	if (p.vst3)
+		Vst3EditorCloseEx(p.vst3, softClose ? 1 : 0);
 	if (p.effect && p.effect->dispatcher) {
 		__try { p.effect->dispatcher(p.effect, effEditClose, 0, 0, NULL, 0); }
 		__except (EXCEPTION_EXECUTE_HANDLER) {}
 	}
 	SetWindowLongPtrW(h, GWLP_USERDATA, 0);
 	DestroyWindow(h);
+#ifdef KPIHOST64_BUILD
+	VstHost64_EditorCloseEnd();
+	VstHost64_NotifyEditorClosed(part1to32, prog);
+#else
+	InterlockedExchange(&g_liveEditorClosing, 0);
+	if (VstLivePartIsLoaded(part1to32))
+		VstLiveMonitorEnsure();
+#endif
 }
 
 extern "C" int VstLiveRender(float* L, float* R, int frames)

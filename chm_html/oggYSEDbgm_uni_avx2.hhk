@@ -1189,6 +1189,16 @@
 		<param name="Local" value="en\live.htm">
 		</OBJECT>
 	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="SASAMI Composer (create songs)">
+		<param name="Name" value="English: SASAMI Composer (create songs)">
+		<param name="Local" value="en\sasami-composer.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="SASAMI Composer（曲を作る）">
+		<param name="Name" value="日本語: SASAMI Composer（曲を作る）">
+		<param name="Local" value="ja\sasami-composer.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
 		<param name="Name" value="save to WAV">
 		<param name="Name" value="English: Saving to WAV">
 		<param name="Local" value="en\wav-save.htm">

@@ -668,6 +668,9 @@ protected:
 	afx_msg void OnMpSoft3DMaze();
 	afx_msg void OnMpSoft3DRace();
 	afx_msg void OnMpVstHost();
+	afx_msg void OnMpSasamiText();
+	afx_msg void OnMpSasamiMidi();
+	afx_msg void OnMpSasamiFm();
 	afx_msg void OnMpCdPlayer();
 	afx_msg void OnMpRemote();
 	afx_msg void OnMpRemoteDlg();

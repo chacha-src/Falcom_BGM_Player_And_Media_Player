@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003" DefaultTargets="Build" ToolsVersion="14.0">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="uni_2026_de|Win32">
@@ -155,7 +155,7 @@
       <LanguageStandard>stdcpp17</LanguageStandard>
       <LanguageStandard_C>Default</LanguageStandard_C>
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
-      <AdditionalIncludeDirectories>$(ProjectDir)zstd;$(ProjectDir)third_party\signalsmith-stretch\include;$(ProjectDir)third_party\signalsmith-linear\include;$(ProjectDir)third_party\aimp;$(ProjectDir)third_party\vst3sdk;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)kb_sasami\source;$(ProjectDir)zstd;$(ProjectDir)third_party\signalsmith-stretch\include;$(ProjectDir)third_party\signalsmith-linear\include;$(ProjectDir)third_party\aimp;$(ProjectDir)third_party\vst3sdk;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <ResourceCompile>
       <PreprocessorDefinitions>NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
@@ -388,6 +388,22 @@
     <ClCompile Include="CPianoRoll.cpp" />
     <ClCompile Include="CMidiMonitorDlg.cpp" />
     <ClCompile Include="CFmMonitorDlg.cpp" />
+    <ClCompile Include="CSasamiTextDlg.cpp" />
+    <ClCompile Include="CSasamiMidiScoreDlg.cpp" />
+    <ClCompile Include="CSasamiFmScoreDlg.cpp" />
+    <ClCompile Include="CSasamiFmVoiceDlg.cpp" />
+    <ClCompile Include="CSasamiNotePaletteDlg.cpp" />
+    <ClCompile Include="CSasamiNotePropsDlg.cpp" />
+    <ClCompile Include="CSasamiVstPickDlg.cpp" />
+    <ClCompile Include="CSasamiToneMapDlg.cpp" />
+    <ClCompile Include="CSasamiVstPartMenu.cpp" />
+    <ClCompile Include="CSasamiStaffCore.cpp" />
+    <ClCompile Include="SasamiToneNames.cpp" />
+    <ClCompile Include="SasamiComposerDoc.cpp" />
+    <ClCompile Include="kb_sasami\source\sasami_write.cpp">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_2026_de|Win32'">NotUsing</PrecompiledHeader>
+    </ClCompile>
     <ClCompile Include="GdiSoft3D.cpp" />
     <ClCompile Include="GdiSoft2D.cpp" />
     <ClCompile Include="CAnalyzerDlg.cpp" />
@@ -496,6 +512,19 @@
     <ClInclude Include="CMidiMonitorDlg.h" />
     <ClInclude Include="CFmMonitorDlg.h" />
     <ClInclude Include="kb_sasami\source\sasami_fmmon.h" />
+    <ClInclude Include="CSasamiTextDlg.h" />
+    <ClInclude Include="CSasamiMidiScoreDlg.h" />
+    <ClInclude Include="CSasamiFmScoreDlg.h" />
+    <ClInclude Include="CSasamiFmVoiceDlg.h" />
+    <ClInclude Include="CSasamiNotePaletteDlg.h" />
+    <ClInclude Include="CSasamiNotePropsDlg.h" />
+    <ClInclude Include="CSasamiVstPickDlg.h" />
+    <ClInclude Include="CSasamiToneMapDlg.h" />
+    <ClInclude Include="CSasamiVstPartMenu.h" />
+    <ClInclude Include="SasamiToneNames.h" />
+    <ClInclude Include="CSasamiStaffCore.h" />
+    <ClInclude Include="SasamiComposerDoc.h" />
+    <ClInclude Include="kb_sasami\source\sasami_write.h" />
     <ClInclude Include="GdiSoft3D.h" />
     <ClInclude Include="GdiSoft2D.h" />
     <ClInclude Include="GdiSoftFB.h" />
@@ -1237,6 +1266,14 @@
     <Image Include="res\s3tex\r_water.png" />
     <Image Include="res\s3tex\r_water_d.png" />
     <Image Include="res\s3tex\r_wood.png" />
+    <Image Include="res\ui_score\clef_g.ico" />
+    <Image Include="res\ui_score\note_eighth.ico" />
+    <Image Include="res\ui_score\note_half.ico" />
+    <Image Include="res\ui_score\note_quarter.ico" />
+    <Image Include="res\ui_score\note_rest.ico" />
+    <Image Include="res\ui_score\note_whole.ico" />
+    <Image Include="res\ui_score\tool_erase.ico" />
+    <Image Include="res\ui_score\tool_pencil.ico" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

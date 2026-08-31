@@ -820,8 +820,44 @@ struct save{
 	// --- FMモニタ (SASAMI FPY / OPNA。末尾追記) ---
 	int fmmonwindow;
 	int fmmonx, fmmony, fmmonw, fmmonh;
+
+	/* --- ささみ MIDI/FM 作曲UI 位置・サイズ・拡大（末尾追記。旧.datは offsetof 初期化）---
+	   W=0 は未保存。譜面の拡大は pxBeat + staffScale、スクロールは scrollX/Y。 */
+	int sasamiMidiX, sasamiMidiY, sasamiMidiW, sasamiMidiH;
+	int sasamiMidiPxBeat, sasamiMidiStaffScale, sasamiMidiScrollX, sasamiMidiScrollY;
+	int sasamiFmX, sasamiFmY, sasamiFmW, sasamiFmH;
+	int sasamiFmPxBeat, sasamiFmStaffScale, sasamiFmScrollX, sasamiFmScrollY;
+	int sasamiTextX, sasamiTextY, sasamiTextW, sasamiTextH;
+	int sasamiNotePropsX, sasamiNotePropsY, sasamiNotePropsW, sasamiNotePropsH;
+	int sasamiNotePalW, sasamiNotePalH; /* 位置はカーソル基準、サイズのみ保持 */
+	int sasamiFmVoiceX, sasamiFmVoiceY, sasamiFmVoiceW, sasamiFmVoiceH;
+	int sasamiToneMapX, sasamiToneMapY, sasamiToneMapW, sasamiToneMapH;
+	int sasamiVstPickX, sasamiVstPickY, sasamiVstPickW, sasamiVstPickH;
 };
 extern save savedata;
+
+/* MIDI/FM 系ダイアログの位置・サイズ保存／復元（savedata 末尾フィールド用） */
+inline void ScSaveWndGeom(CWnd* w, int* x, int* y, int* ww, int* hh)
+{
+	if (!w || !::IsWindow(w->GetSafeHwnd()) || w->IsIconic()) return;
+	CRect r;
+	w->GetWindowRect(&r);
+	if (x) *x = r.left;
+	if (y) *y = r.top;
+	if (ww) *ww = r.Width();
+	if (hh) *hh = r.Height();
+}
+inline int ScRestoreWndGeom(CWnd* w, int x, int y, int ww, int hh, int minW, int minH)
+{
+	if (!w || !::IsWindow(w->GetSafeHwnd())) return 0;
+	if (ww < minW || hh < minH || ww > 12000 || hh > 12000) return 0;
+	RECT work = {};
+	SystemParametersInfo(SPI_GETWORKAREA, 0, &work, 0);
+	if (x < work.left - 80 || x > work.right - 40) x = work.left + 40;
+	if (y < work.top - 10 || y > work.bottom - 40) y = work.top + 40;
+	w->SetWindowPos(NULL, x, y, ww, hh, SWP_NOZORDER | SWP_NOACTIVATE);
+	return 1;
+}
 /* コード間隔(ms)。16..500。旧.dat や未設定は 25。 */
 inline int EqCodeIntervalMs()
 {

@@ -1,4 +1,4 @@
-﻿#include "sasami_fm.h"
+#include "sasami_fm.h"
 #include "sasami_misao.h"
 #include "sasami_fmmon.h"
 #include <windows.h>
@@ -582,7 +582,10 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 			return;
 		}
 		const int k = OpnKey(ch);
-		if (k >= 0) FmOut(0x28, (uint8_t)k);
+		if (k >= 0) {
+			FmOut(0x28, (uint8_t)k);
+			chip.flush_fm_clock();
+		}
 		/* 原版 FKYU は SSG のミキサ(07h)を触らない。FMSSGKEY クリアのみ。
 		   休符のたびに tone disable すると単極性 SSG/ノイズがゲートされボソボソになる。 */
 		if (IsSsg(ch)) {
@@ -725,6 +728,8 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 			alive[ch] = 0;
 			return 0;
 		}
+		if (dest < addr)
+			KeyOff(ch);
 		if (measureLen && dest < addr) {
 			backJumps[ch]++;
 			if (backJumps[ch] >= 2) {
@@ -738,6 +743,9 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 
 	void NoteFm(int ch, uint8_t note, uint8_t wait, int keyOn)
 	{
+		/* SASAMI waits of 0/1 still need a hold; ymfm also needs >=1 tick of
+		   key-on before the next key-off or the attack never clocks. */
+		if (wait < 2) wait = 2;
 		waitb[ch] = wait;
 		if (playFmMode == 0) {
 			BeepNote(ch, note, keyOn);
@@ -752,15 +760,16 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 		const uint8_t dl = (uint8_t)raw;
 		const uint16_t fn = (uint16_t)((dh << 8) | dl);
 		if (keyOn) {
+			/* Retrigger: key-off → clock → fnum → key-on → clock.
+			   Without the post-keyon clock, looped FNOTE streams (cmd14 rewind)
+			   often key-off the previous note before ymfm ever samples key-on —
+			   monitor lights up, audio stays silent. */
 			FmOut(0x28, (uint8_t)k);
-			ClockFm();
-			const uint8_t saved = vol[ch];
-			vol[ch] = 126;
-			ApplyTl(ch);
+			chip.flush_fm_clock();
 			WriteFnum(ch, fn);
-			vol[ch] = saved;
 			ApplyTl(ch);
 			FmOut(0x28, (uint8_t)(0xF0 | k));
+			chip.flush_fm_clock();
 		} else {
 			WriteFnum(ch, fn);
 		}
@@ -887,6 +896,8 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 			pc[ch] = addr + 3;
 			return 1;
 		case 14: {
+			/* Loop end: key-off before rewind so tied/overlapped notes don't stick mute. */
+			KeyOff(ch);
 			uint8_t c = loopCnt[ch];
 			if (c) c--;
 			if (c == 0) {
@@ -1427,7 +1438,12 @@ uint32_t SasamiFmPlayer::Render(int16_t* interleavedStereo, uint32_t frames)
 			if (m->dumpEnable)
 				m->FlushDump(m_curSample + out);
 			m->samplesLeftInTick = sl;
-			if (sl == 0) continue;
+			/* sl==0 で TickOnce を連続すると、FNOTE の key-on が generate されず
+			   次の key-off で消える（ループ内の短い音符が無音になる）。最低1sample出す。 */
+			if (sl == 0) {
+				m->chip.flush_fm_clock();
+				m->samplesLeftInTick = 1;
+			}
 		}
 		uint32_t take = m->samplesLeftInTick;
 		if (take > want - out) take = want - out;

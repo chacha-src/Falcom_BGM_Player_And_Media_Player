@@ -1,4 +1,4 @@
-﻿#include <windows.h>
+#include <windows.h>
 #include "kbsasami_module.h"
 #include "kbsasami_decoder.h"
 #include "kpi.h"
@@ -13,7 +13,7 @@ static const DWORD kPluginVersion = 1;
 #define KBSASAMI_VERSION_STR L"1.00"
 #endif
 
-static const wchar_t kDescription[] = L"SASAMI FM/MIDI Decoder v" KBSASAMI_VERSION_STR L" (FPY / MPY / MPW2)";
+static const wchar_t kDescription[] = L"SASAMI FM/MIDI Decoder v" KBSASAMI_VERSION_STR L" (FPY / MPY / MPW2 / MPSMV)";
 static const wchar_t kCopyright[] =
 	L"kbsasami.kpi SASAMI player\n"
 	L"FM: ymfm YM2608 (OPNA / OPN=SCH-off) + soft BEEP\n"
@@ -24,7 +24,7 @@ static const wchar_t kCopyright[] =
 static const GUID kGuid =
 { 0xa7c3e91f, 0x4b2d, 0x4e6a, { 0x9c, 0x18, 0x8f, 0x5d, 0x2a, 0x1b, 0x7e, 0x03 } };
 
-static const wchar_t kExts[] = L".fpy/.mpy/.mpw2";
+static const wchar_t kExts[] = L".fpy/.mpy/.mpw2/.mpsmv";
 
 static const wchar_t SEC_KBSASAMI[] = L"kbsasami";
 static const wchar_t KEY_VST[] = L"vst";

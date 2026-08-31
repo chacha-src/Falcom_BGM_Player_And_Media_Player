@@ -1294,6 +1294,10 @@ static void ServeOnce(HANDLE pipe)
 			status = VstHost64_LiveEditorClose(((const KPIHOST64_U32*)p)->v);
 			break;
 		}
+		case KPIHOST64_CMD_VST_LIVE_EDITOR_CLOSE_ALL: {
+			status = VstHost64_LiveEditorCloseAll();
+			break;
+		}
 		case KPIHOST64_CMD_VST_LIVE_SEND_CH: {
 			if ((size_t)(end - p) < sizeof(KPIHOST64_VstLiveSendChReq)) { status = KPIHOST64_STATUS_BAD_REQUEST; break; }
 			auto* sc = (const KPIHOST64_VstLiveSendChReq*)p;
@@ -1312,6 +1316,20 @@ static void ServeOnce(HANDLE pipe)
 			status = VstHost64_LiveSetProgram(sp->part, sp->index);
 			break;
 		}
+		case KPIHOST64_CMD_VST_LIVE_GET_STATE: {
+			if ((size_t)(end - p) < sizeof(KPIHOST64_VstLiveStateReq)) { status = KPIHOST64_STATUS_BAD_REQUEST; break; }
+			auto* gs = (const KPIHOST64_VstLiveStateReq*)p;
+			status = VstHost64_LiveGetState(gs->part, gs->which, reply);
+			break;
+		}
+		case KPIHOST64_CMD_VST_LIVE_SET_STATE: {
+			if ((size_t)(end - p) < sizeof(KPIHOST64_VstLiveStateReq)) { status = KPIHOST64_STATUS_BAD_REQUEST; break; }
+			auto* ss = (const KPIHOST64_VstLiveStateReq*)p;
+			const uint8_t* blob = p + sizeof(*ss);
+			if ((size_t)(end - p) < sizeof(*ss) + ss->bytes) { status = KPIHOST64_STATUS_BAD_REQUEST; break; }
+			status = VstHost64_LiveSetState(ss->part, ss->which, blob, ss->bytes);
+			break;
+		}
 		default:
 			status = KPIHOST64_STATUS_BAD_REQUEST;
 			break;
@@ -1324,6 +1342,19 @@ static void ServeOnce(HANDLE pipe)
 int wmain(int argc, wchar_t** argv)
 {
 	(void)argc; (void)argv;
+
+	/* HALion UI uses WebView2; a shared/locked user-data dir crashes
+	   EmbeddedBrowserWebView.dll inside this process. */
+	{
+		wchar_t ud[MAX_PATH];
+		ud[0] = 0;
+		GetTempPathW(MAX_PATH, ud);
+		wcsncat_s(ud, L"ogg_kpi64_webview2", _TRUNCATE);
+		CreateDirectoryW(ud, NULL);
+		SetEnvironmentVariableW(L"WEBVIEW2_USER_DATA_FOLDER", ud);
+		SetEnvironmentVariableW(L"WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
+			L"--disable-gpu --disable-gpu-compositing");
+	}
 
 	HANDLE pipe = CreateNamedPipeW(
 		KPIHOST64_PIPE_NAME,

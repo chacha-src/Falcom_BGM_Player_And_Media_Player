@@ -1,4 +1,4 @@
-﻿#include "stdafx.h"
+#include "stdafx.h"
 #include "CMidiMonitorDlg.h"
 #include "oggDlg.h"
 #include "PlayList.h"
@@ -8,6 +8,7 @@
 #include "VstMidiEngine.h"
 #include "VstHostDlg.h"
 #include "PluginKinds.h"
+#include "SasamiToneNames.h"
 #include "kb_sasami/source/sasami_midi.h"
 #include <math.h>
 #include <mmsystem.h>
@@ -1725,47 +1726,7 @@ void CMidiMonitorDlg::UnloadMidi()
 
 void CMidiMonitorDlg::LookupToneName(int isXg, int mapId, int bankMsb, int bankLsb, int pc, int isDrum, wchar_t* out, int outN)
 {
-	out[0] = 0;
-	MmEnsureDat();
-	if (isDrum) {
-		if (isXg) {
-			if (MmLookupXgOk(127, 0, pc, out, outN) && out[0]) return;
-		} else {
-			if (mapId >= 9 || bankMsb == 120) {
-				const int mid = (mapId >= 9) ? mapId : 9;
-				if (MmLookupEx(mid, MmExBank(mid, bankMsb, bankLsb, 1), pc, out, outN) && out[0]) return;
-			}
-			if (VstMidiBankMsbIsSdNative(bankMsb) || mapId == 6) {
-				if (MmLookupGs(6, bankMsb, pc, out, outN) && out[0]) return;
-			}
-			if (MmLookupGs(0, 0, pc, out, outN) && out[0]) return;
-		}
-		MmCopyW(out, outN, L"Standard Kit");
-		return;
-	}
-	if (isXg) {
-		if (MmLookupXgOk(bankMsb, bankLsb, pc, out, outN) && out[0]) return;
-	} else if (mapId >= 9) {
-		if (MmLookupEx(mapId, MmExBank(mapId, bankMsb, bankLsb, 0), pc, out, outN) && out[0]) return;
-	} else if (bankMsb == 121) {
-		if (MmLookupEx(9, bankLsb, pc, out, outN) && out[0]) return;
-	} else if (bankMsb == 126 || bankMsb == 127) {
-		if (MmLookupGs(1, bankMsb, pc, out, outN) && out[0]) return;
-	} else if (VstMidiBankMsbIsSdNative(bankMsb) || mapId == 6) {
-		if (MmLookupGs(6, bankMsb, pc, out, outN) && out[0]) return;
-		if (mapId == 6 && bankLsb >= 1 && bankLsb <= 4) {
-			if (MmLookupGs(bankLsb, bankMsb, pc, out, outN) && out[0]) return;
-		}
-	} else if (mapId == 8) {
-		const int b = (bankMsb == 126) ? 126 : 127;
-		if (MmLookupGs(1, b, pc, out, outN) && out[0]) return;
-	} else if (mapId != 5) {
-		if (MmLookupGs(mapId, bankMsb, pc, out, outN) && out[0]) return;
-	}
-	if (pc >= 0 && pc < 128)
-		MmCopyW(out, outN, kGmName[pc]);
-	else
-		MmCopyW(out, outN, L"—");
+	SasamiToneLookup(isXg, mapId, bankMsb, bankLsb, pc, isDrum, out, outN);
 }
 
 void CMidiMonitorDlg::RefreshPartName(Part& p)

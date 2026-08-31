@@ -403,6 +403,20 @@ BOOL COggApp::InitInstance()
 	savedata.fmmony = 0;
 	savedata.fmmonw = 0;
 	savedata.fmmonh = 0;
+	savedata.sasamiMidiW = savedata.sasamiMidiH = 0;
+	savedata.sasamiMidiPxBeat = 0;
+	savedata.sasamiMidiStaffScale = 0;
+	savedata.sasamiMidiScrollX = savedata.sasamiMidiScrollY = 0;
+	savedata.sasamiFmW = savedata.sasamiFmH = 0;
+	savedata.sasamiFmPxBeat = 0;
+	savedata.sasamiFmStaffScale = 0;
+	savedata.sasamiFmScrollX = savedata.sasamiFmScrollY = 0;
+	savedata.sasamiTextW = savedata.sasamiTextH = 0;
+	savedata.sasamiNotePropsW = savedata.sasamiNotePropsH = 0;
+	savedata.sasamiNotePalW = savedata.sasamiNotePalH = 0;
+	savedata.sasamiFmVoiceW = savedata.sasamiFmVoiceH = 0;
+	savedata.sasamiToneMapW = savedata.sasamiToneMapH = 0;
+	savedata.sasamiVstPickW = savedata.sasamiVstPickH = 0;
 	savedata.midimony = 0;
 	savedata.midimonw = 0;
 	savedata.midimonh = 0;
@@ -2020,6 +2034,22 @@ BOOL COggApp::InitInstance()
 	}
 	if (savedata.fmmonwindow != 0 && savedata.fmmonwindow != 1)
 		savedata.fmmonwindow = 0;
+	if (datFileSize < (int)(offsetof(save, sasamiMidiW) + sizeof(savedata.sasamiMidiW))) {
+		savedata.sasamiMidiW = savedata.sasamiMidiH = 0;
+		savedata.sasamiMidiPxBeat = 0;
+		savedata.sasamiMidiStaffScale = 0;
+		savedata.sasamiMidiScrollX = savedata.sasamiMidiScrollY = 0;
+		savedata.sasamiFmW = savedata.sasamiFmH = 0;
+		savedata.sasamiFmPxBeat = 0;
+		savedata.sasamiFmStaffScale = 0;
+		savedata.sasamiFmScrollX = savedata.sasamiFmScrollY = 0;
+		savedata.sasamiTextW = savedata.sasamiTextH = 0;
+		savedata.sasamiNotePropsW = savedata.sasamiNotePropsH = 0;
+		savedata.sasamiNotePalW = savedata.sasamiNotePalH = 0;
+		savedata.sasamiFmVoiceW = savedata.sasamiFmVoiceH = 0;
+		savedata.sasamiToneMapW = savedata.sasamiToneMapH = 0;
+		savedata.sasamiVstPickW = savedata.sasamiVstPickH = 0;
+	}
 	/* DatArc 内 fmmon_geom.dat（なければ旧 exe隣 .bin）で開閉・位置を上書き */
 	{
 		CString staged = DatArc_Path(L"fmmon_geom.dat");

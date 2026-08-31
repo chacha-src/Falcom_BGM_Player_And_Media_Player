@@ -550,6 +550,9 @@ public:
 	void setfmvolume(int32_t vol);
 	void setpsgvolume(int32_t vol);
 
+	/* keyon/off は FM クロック時にしか反映されない。generate 間引きを待たず強制クロックする */
+	void flush_fm_clock() { clock_fm_and_adpcm(); }
+
 protected:
 	// internal helpers
 	void update_prescale(uint8_t prescale);

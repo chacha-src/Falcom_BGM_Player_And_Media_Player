@@ -268,6 +268,29 @@ public:
 		return kResultOk;
 	}
 	void rewind() { pos = 0; }
+	const BYTE* bytes() const { return data; }
+	int32 length() const { return size; }
+	/* Adopt a copy of external bytes (for setState). */
+	tresult assignCopy(const void* src, int32 len)
+	{
+		if (data) { free(data); data = NULL; }
+		size = cap = pos = 0;
+		if (!src || len <= 0) return kResultOk;
+		data = (BYTE*)malloc((size_t)len);
+		if (!data) return kOutOfMemory;
+		memcpy(data, src, (size_t)len);
+		size = cap = len;
+		pos = 0;
+		return kResultOk;
+	}
+	/* Steal buffer for caller (malloc ownership). */
+	BYTE* steal(int32* outLen)
+	{
+		BYTE* p = data;
+		if (outLen) *outLen = size;
+		data = NULL; size = cap = pos = 0;
+		return p;
+	}
 private:
 	volatile LONG refs;
 	BYTE* data;
@@ -1168,11 +1191,18 @@ int Vst3EditorOpen(Vst3Inst* v, void* parentHwnd, int* outW, int* outH)
 
 void Vst3EditorClose(Vst3Inst* v)
 {
+	Vst3EditorCloseEx(v, 0);
+}
+
+/* soft!=0: skip view->removed() — SampleTank can hang forever there under editClose. */
+void Vst3EditorCloseEx(Vst3Inst* v, int soft)
+{
 	if (!v || !v->view) return;
 	Steinberg::IPlugView* view = v->view;
 	v->view = NULL;
 	__try {
-		view->removed();
+		if (!soft)
+			view->removed();
 		view->setFrame(NULL);
 		view->release();
 	}
@@ -1400,6 +1430,98 @@ int Vst3SetChannelProgram(Vst3Inst* v, int midiCh, int index)
 	Vst3SetProgram(v, index);
 	if (index >= 0 && index <= 127)
 		Vst3MidiShort(v, (0xc0 | midiCh) | ((index & 0x7f) << 8), 0);
+	return 1;
+}
+
+int Vst3GetComponentState(Vst3Inst* v, unsigned char** outBytes, int* outLen)
+{
+	using namespace Steinberg;
+	using namespace Steinberg::Vst;
+	using namespace Vst3Detail;
+	if (outBytes) *outBytes = NULL;
+	if (outLen) *outLen = 0;
+	if (!v || !v->ok || !v->component || !outBytes || !outLen) return 0;
+	MemStream st;
+	if (v->component->getState(&st) != kResultOk) return 0;
+	int32 n = 0;
+	BYTE* p = st.steal(&n);
+	if (!p || n <= 0) { if (p) free(p); return 0; }
+	*outBytes = p;
+	*outLen = (int)n;
+	return 1;
+}
+
+int Vst3GetControllerState(Vst3Inst* v, unsigned char** outBytes, int* outLen)
+{
+	using namespace Steinberg;
+	using namespace Steinberg::Vst;
+	using namespace Vst3Detail;
+	if (outBytes) *outBytes = NULL;
+	if (outLen) *outLen = 0;
+	if (!v || !v->ok || !v->controller || !outBytes || !outLen) return 0;
+	MemStream st;
+	if (v->controller->getState(&st) != kResultOk) return 0;
+	int32 n = 0;
+	BYTE* p = st.steal(&n);
+	if (!p || n <= 0) { if (p) free(p); return 0; }
+	*outBytes = p;
+	*outLen = (int)n;
+	return 1;
+}
+
+int Vst3SetComponentState(Vst3Inst* v, const unsigned char* bytes, int len)
+{
+	using namespace Steinberg;
+	using namespace Steinberg::Vst;
+	using namespace Vst3Detail;
+	if (!v || !v->ok || !v->component || !bytes || len <= 0) return 0;
+	MemStream st;
+	if (st.assignCopy(bytes, len) != kResultOk) return 0;
+	st.rewind();
+	if (v->component->setState(&st) != kResultOk) return 0;
+	if (v->controller) {
+		st.rewind();
+		v->controller->setComponentState(&st);
+	}
+	return 1;
+}
+
+int Vst3SetControllerState(Vst3Inst* v, const unsigned char* bytes, int len)
+{
+	using namespace Steinberg;
+	using namespace Steinberg::Vst;
+	using namespace Vst3Detail;
+	if (!v || !v->ok || !v->controller || !bytes || len <= 0) return 0;
+	MemStream st;
+	if (st.assignCopy(bytes, len) != kResultOk) return 0;
+	st.rewind();
+	return (v->controller->setState(&st) == kResultOk) ? 1 : 0;
+}
+
+int Vst3ApplyStates(Vst3Inst* v,
+	const unsigned char* comp, int compLen,
+	const unsigned char* ctrl, int ctrlLen)
+{
+	using namespace Steinberg;
+	using namespace Steinberg::Vst;
+	using namespace Vst3Detail;
+	if (!v || !v->ok || !v->component) return 0;
+	if (!comp || compLen <= 0) return 0;
+	MemStream stComp;
+	if (stComp.assignCopy(comp, compLen) != kResultOk) return 0;
+	stComp.rewind();
+	if (v->component->setState(&stComp) != kResultOk) return 0;
+	if (v->controller) {
+		stComp.rewind();
+		v->controller->setComponentState(&stComp);
+		if (ctrl && ctrlLen > 0) {
+			MemStream stCtrl;
+			if (stCtrl.assignCopy(ctrl, ctrlLen) == kResultOk) {
+				stCtrl.rewind();
+				v->controller->setState(&stCtrl);
+			}
+		}
+	}
 	return 1;
 }
 

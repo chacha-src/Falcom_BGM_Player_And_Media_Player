@@ -1,0 +1,98 @@
+#pragma once
+#include "afxdialogex.h"
+#include "CCustomControl.h"
+#include "SasamiComposerDoc.h"
+#include "CSasamiStaffCore.h"
+
+class CSasamiFmScoreDlg : public CCustomBlurDialogExBase
+{
+	DECLARE_DYNAMIC(CSasamiFmScoreDlg)
+public:
+	CSasamiFmScoreDlg(CWnd* pParent = nullptr);
+	virtual ~CSasamiFmScoreDlg();
+	enum { IDD = IDD_SASAMI_FM_SCORE };
+	static CSasamiFmScoreDlg* Instance();
+	static void OpenOwned(CWnd* owner);
+	void LoadFromDoc(const ScFmDoc& src);
+
+protected:
+	virtual void DoDataExchange(CDataExchange* pDX);
+	virtual BOOL OnInitDialog();
+	virtual BOOL PreTranslateMessage(MSG* pMsg);
+	virtual void PostNcDestroy();
+	DECLARE_MESSAGE_MAP()
+	afx_msg void OnPaint();
+	afx_msg BOOL OnEraseBkgnd(CDC* pDC);
+	afx_msg void OnSize(UINT nType, int cx, int cy);
+	afx_msg void OnClose();
+	afx_msg void OnDestroy();
+	afx_msg void OnLButtonDown(UINT nFlags, CPoint point);
+	afx_msg void OnLButtonUp(UINT nFlags, CPoint point);
+	afx_msg void OnLButtonDblClk(UINT nFlags, CPoint point);
+	afx_msg void OnMouseMove(UINT nFlags, CPoint point);
+	afx_msg BOOL OnSetCursor(CWnd* pWnd, UINT nHitTest, UINT message);
+	afx_msg BOOL OnMouseWheel(UINT nFlags, short zDelta, CPoint pt);
+	afx_msg void OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar);
+	afx_msg void OnVScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar);
+	afx_msg void OnContextMenu(CWnd* pWnd, CPoint point);
+	afx_msg void OnTimer(UINT_PTR nIDEvent);
+	afx_msg void OnBnClickedOpen();
+	afx_msg void OnBnClickedSave();
+	afx_msg void OnBnClickedPlay();
+	afx_msg void OnBnClickedHelp();
+	afx_msg void OnBnClickedTempo();
+	afx_msg void OnBnClickedVoice();
+	afx_msg void OnBnClickedExport();
+	afx_msg void OnBnClickedPencil();
+	afx_msg void OnBnClickedErase();
+	afx_msg void OnBnClickedSel();
+	afx_msg void OnBnClickedPal();
+	afx_msg void OnBnClickedPropUpd();
+	afx_msg void OnBnClickedMark();
+	afx_msg void OnBnClickedLoopA();
+	afx_msg void OnBnClickedLoopB();
+	afx_msg void OnBnClickedLoopClr();
+	afx_msg void OnBnClickedShowAll();
+	afx_msg void OnBnClickedText();
+	afx_msg void OnCbnSelchangeCh();
+	afx_msg LRESULT OnPalDur(WPARAM w, LPARAM l);
+	afx_msg LRESULT OnNoteProps(WPARAM w, LPARAM l);
+	afx_msg LRESULT OnDeferredInit(WPARAM w, LPARAM l);
+	void LayoutChrome();
+	void PersistUiGeom();
+	void RestoreUiGeom();
+	void SetupTooltips();
+	void UpdateScrollBars();
+	void ApplyLang();
+	void SyncPropFromSel();
+	void RefreshStrip();
+	void PlaceOrEditAt(CPoint pt);
+	int BuildToTemp(wchar_t* outPath, int outCch);
+	void OpenVoiceEditor();
+	void RefreshToneLabels();
+	void UpdateNoteCursor();
+	void UpdateHover(CPoint pt);
+	void UpdateHoverStatus(CPoint pt);
+	void OpenNotePropsForSel();
+	static uint8_t MidiToFmNoteByte(int midiNote);
+
+	CCustomStandardButton m_btnOpen, m_btnSave, m_btnPlay, m_btnHelp, m_btnTempo, m_btnVoice, m_btnExport;
+	CCustomStandardButton m_btnPencil, m_btnErase, m_btnSel, m_btnPal, m_btnPropUpd;
+	CCustomStandardButton m_btnMark, m_btnLoopA, m_btnLoopB, m_btnLoopClr, m_btnShowAll, m_btnText;
+	CCustomComboBox m_ch;
+	CCustomEdit m_edNote, m_edGt, m_edVel;
+	CCustomStatic m_status;
+	CToolTipCtrl m_tooltip;
+	CRect m_bodyRc, m_trackRc, m_gridRc, m_stripRc;
+	ScFmDoc m_doc;
+	ScStaffUi m_ui;
+	int m_curCh;
+	int m_placeRest;
+	int m_accidental;
+	HCURSOR m_noteCur;
+	int m_sbDrag; /* 0=none, 1=vert, 2=horz */
+	BOOL m_bInLayout;
+	wchar_t m_lastHoverSt[256];
+	wchar_t m_lastOut[MAX_PATH];
+	static CSasamiFmScoreDlg* s_inst;
+};

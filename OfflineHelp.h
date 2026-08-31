@@ -15,3 +15,6 @@ void OfflineHelpEnsureAvailable();
 // CHM を開く。無ければ Ensure を起動して案内し、あれば HtmlHelp / ShellExecute
 // preferredEn: TRUE=英語トピック優先, FALSE=日本語, -1=OS UI 言語で自動
 void OfflineHelpOpen(HWND hwndOwner, int preferredEn = -1);
+
+// 特定トピック（例: L"sasami-composer"）を開く。失敗時は index へ
+void OfflineHelpOpenTopic(HWND hwndOwner, const wchar_t* slug, int preferredEn = -1);

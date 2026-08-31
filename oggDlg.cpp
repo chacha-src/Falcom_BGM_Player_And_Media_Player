@@ -1,4 +1,4 @@
-﻿// oggDlg.cpp : インプリメンテーション ファイル
+// oggDlg.cpp : インプリメンテーション ファイル
 //
 //#define _DLL
 #include "stdafx.h"
@@ -3363,7 +3363,9 @@ static int VstBindIoSlot()
 static int VstRemoteNow()
 {
 	const int s = VstBindIoSlot();
-	return g_vstRemote64Slot[s];
+	if (g_vstRemote64Slot[s]) return 1;
+	/* .mpsmv live HALion etc. uses Host64 without Foreign VstOpen. */
+	return VstLiveAnyRemotePart() ? 1 : 0;
 }
 
 static void CloseVstMidiSessionSlot(int slot)
@@ -6868,29 +6870,48 @@ static int XfSoftOpenSlot(int slot, const CString& path, int openMode)
 		wchar_t hints[32][128]; int hc = 0;
 		if (!VstResolvePlayPath(path, mid, VST_PATH_CHARS, hints, 32, &hc))
 			return 0;
+		/* MPW3: bind into the SAME IoSlot we will Open (Close leaves TLS on slot 1). */
 		VstMidiSetIoSlot(slot);
 		CloseVstMidiSessionSlot(slot);
+		int liveBinds = 0;
+		{
+			CString pe = path;
+			pe.MakeLower();
+			if (pe.GetLength() >= 6 && pe.Right(6) == L".mpsmv")
+				liveBinds = VstApplyMpw3Binds(path, 0);
+		}
+		VstSongUseLiveBindsSet(liveBinds > 0 ? 1 : 0);
 		int remote = 0;
 		int rate = 44100, ch = 2, bits = 16;
 		int lenSamp = 0;
 #if !defined(_WIN64)
-		wchar_t vstPlug[VST_PATH_CHARS]; vstPlug[0] = 0;
-		if (VstShouldOpenRemote64(mid, vstPlug, VST_PATH_CHARS)) {
-			KPIHOST64_ForeignOpenReply orp{};
-			if (!g_kpiHost.VstOpen(std::wstring(mid), std::wstring(savedata.vstMultiDll),
-				std::wstring(savedata.vstExtraPath), orp, (uint32_t)slot))
-				return 0;
-			remote = 1;
-			rate = (int)orp.sampleRate;
-			ch = (int)orp.channels;
-			bits = orp.bitsPerSample;
-			lenSamp = (int)orp.lengthSamples;
-			VstMidiSetReportedLatencySamples((int)orp.latencySamples);
+		/* Live HALion (x64) already owns Host64 — do not also Foreign-open GS. */
+		if (liveBinds <= 0) {
+			wchar_t vstPlug[VST_PATH_CHARS]; vstPlug[0] = 0;
+			if (VstShouldOpenRemote64(mid, vstPlug, VST_PATH_CHARS)) {
+				KPIHOST64_ForeignOpenReply orp{};
+				if (!g_kpiHost.VstOpen(std::wstring(mid), std::wstring(savedata.vstMultiDll),
+					std::wstring(savedata.vstExtraPath), orp, (uint32_t)slot))
+					return 0;
+				remote = 1;
+				rate = (int)orp.sampleRate;
+				ch = (int)orp.channels;
+				bits = orp.bitsPerSample;
+				lenSamp = (int)orp.lengthSamples;
+				VstMidiSetReportedLatencySamples((int)orp.latencySamples);
+			}
 		}
 #endif
 		if (!remote) {
-			if (VstMidiOpen(mid, hints, hc, NULL) != 0)
+			/* Song PCM drains live SHM — stop monitor waveOut so they don't fight. */
+			if (liveBinds > 0) {
+				VstLiveMonitorStop();
+				VstLivePollRemoteEditorClosed();
+			}
+			if (VstMidiOpen(mid, hints, hc, NULL) != 0) {
+				VstSongUseLiveBindsSet(0);
 				return 0;
+			}
 			rate = VstMidiGetRate();
 			ch = VstMidiGetChannels();
 			bits = VstMidiGetBits();
@@ -11603,19 +11624,26 @@ void COggDlg::play()
 			m_saisai.EnableWindow(TRUE); endflg = 0; return;
 		}
 		CloseVstMidiSession();
+		/* Close leaves TLS on slot 1 — bind HALion into the active play slot. */
+		const int vstSlot = XfActiveSlot() == 1 ? 1 : 0;
+		VstMidiSetIoSlot(vstSlot);
+		int liveBinds = 0;
 		{
-			const int vstSlot = XfActiveSlot() == 1 ? 1 : 0;
-			VstMidiSetIoSlot(vstSlot);
+			CString pe = filen;
+			pe.MakeLower();
+			if (pe.GetLength() >= 6 && pe.Right(6) == L".mpsmv")
+				liveBinds = VstApplyMpw3Binds(filen, 0);
 		}
+		VstSongUseLiveBindsSet(liveBinds > 0 ? 1 : 0);
 		wchar_t vstPlug[VST_PATH_CHARS]; vstPlug[0] = 0;
 		int vstOk = 0;
 #if !defined(_WIN64)
 		int triedRemote = 0;
-		const int useRemote = VstShouldOpenRemote64(mid, vstPlug, VST_PATH_CHARS);
+		/* Live HALion owns Host64 — do not also Foreign-open SC-VA. */
+		const int useRemote = (liveBinds <= 0) && VstShouldOpenRemote64(mid, vstPlug, VST_PATH_CHARS);
 		if (useRemote) {
 			triedRemote = 1;
 			KPIHOST64_ForeignOpenReply orp{};
-			const int vstSlot = XfActiveSlot() == 1 ? 1 : 0;
 			if (g_kpiHost.VstOpen(std::wstring(mid), std::wstring(savedata.vstMultiDll),
 				std::wstring(savedata.vstExtraPath), orp, (uint32_t)vstSlot)) {
 				g_vstRemote64Slot[vstSlot] = 1;
@@ -11655,11 +11683,18 @@ void COggDlg::play()
 				L"x64 VST host acilamadi."),
 				LL14(L"VST MIDI", L"VST MIDI", L"VST MIDI", L"VST MIDI", L"VST MIDI", L"VST MIDI", L"VST MIDI", L"VST MIDI", L"VST MIDI", L"VST MIDI", L"VST MIDI", L"VST MIDI", L"VST MIDI", L"VST MIDI"),
 				MB_ICONERROR | MB_OK);
+			VstSongUseLiveBindsSet(0);
 			m_saisai.EnableWindow(TRUE); endflg = 0; return;
 		}
 #endif
 		if (!vstOk) {
+			if (liveBinds > 0) {
+				VstLiveMonitorStop();
+				/* Re-open Host64 live SHM if monitor teardown dropped the map. */
+				VstLivePollRemoteEditorClosed();
+			}
 			if (VstMidiOpen(mid, hints, hc, m_hWnd) != 0) {
+				VstSongUseLiveBindsSet(0);
 				MessageBox(LL14(
 					L"VST MIDIを開けませんでした。",
 					L"Could not open VST MIDI.",
@@ -11679,7 +11714,7 @@ void COggDlg::play()
 					MB_ICONERROR | MB_OK);
 				m_saisai.EnableWindow(TRUE); endflg = 0; return;
 			}
-			g_vstRemote64Slot[XfActiveSlot() == 1 ? 1 : 0] = 0;
+			g_vstRemote64Slot[vstSlot] = 0;
 			wavbit_sample_Hz = VstMidiGetRate();
 			wavchannel = VstMidiGetChannels();
 			wavsam_src = VstMidiGetBits();
@@ -20081,7 +20116,7 @@ int readkpi(BYTE* bw, int cnt)
 						// 不定長（loop2==0）のゲーム系、および mid/midi（演奏後も無音が続く場合）。
 						// 総長が分かる非MIDIでは末尾の弱い音量を誤って切らない。
 						const bool midiLike = (sss == "mid" || sss == "midi" || sss == "kar" || sss == "rmi"
-							|| sss == "mpy" || sss == "mpw2");
+							|| sss == "mpy" || sss == "mpw2" || sss == "mpsmv");
 						if ((loop2 == 0 || midiLike) && !(wavExportPath.GetLength() > 0 || g_isWavExportRendering)) {
 							if (IsBlockSilent((const BYTE*)bufkpi + cnt3, (int)r, abs(wavsam_depth))) {
 								kpi_silence_bytes += r;
@@ -23054,6 +23089,8 @@ BOOL COggDlg::DestroyWindow()
 {
 	// TODO: この位置に固有の処理を追加するか、または基本クラスを呼び出してください
 	//	ReleaseOggVorbis(&ogg);
+	VstLiveEditorOpenCancelPending();
+	VstLiveEditorCloseAllRemote(); /* パイプ切断前に KpiHost64 の VST UI を閉じる */
 	// 終了経路（MPの×以外の「終了」含む）でも開状態を保存してから子を破棄する
 	DesktopLyricsPrepareAppExit();
 	MpDjPadPrepareAppExit();

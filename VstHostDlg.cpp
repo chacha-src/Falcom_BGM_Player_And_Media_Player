@@ -8,6 +8,7 @@
 #include <process.h>
 #include <math.h>
 #include <mmsystem.h>
+#include <stdlib.h>
 
 #pragma comment(lib, "winmm.lib")
 
@@ -206,6 +207,7 @@ void MidiSysexRecycle()
 
 const DWORD VST_WIRE_MAGIC1 = 0x31525756; // "VWR1"
 const DWORD VST_WIRE_MAGIC2 = 0x32525756; // "VWR2" midiThru + MIDI In 3 hardware
+const DWORD VST_WIRE_MAGIC3 = 0x33525756; // "VWR3" + per-part VST3 state blobs
 
 struct VstWireFile {
 	DWORD magic;
@@ -1174,6 +1176,10 @@ CVstHostDlg::CVstHostDlg(CWnd* parent)
 	  m_wavFile(INVALID_HANDLE_VALUE), m_wavOn(0), m_wavBytes(0), m_volLevel(100)
 {
 	memset(m_presets, 0, sizeof(m_presets));
+	memset(m_presetComp, 0, sizeof(m_presetComp));
+	memset(m_presetCompLen, 0, sizeof(m_presetCompLen));
+	memset(m_presetCtrl, 0, sizeof(m_presetCtrl));
+	memset(m_presetCtrlLen, 0, sizeof(m_presetCtrlLen));
 	memset(m_slots, -1, sizeof(m_slots));
 	memset(m_midiHandles, 0, sizeof(m_midiHandles));
 	memset(m_midiDestMask, 0, sizeof(m_midiDestMask));
@@ -1184,6 +1190,7 @@ CVstHostDlg::CVstHostDlg(CWnd* parent)
 
 CVstHostDlg::~CVstHostDlg()
 {
+	ClearAllPresetStates();
 	DeleteCriticalSection(&m_wavLock);
 }
 
@@ -1226,12 +1233,17 @@ BEGIN_MESSAGE_MAP(CVstHostDlg, CCustomBlurDialogBase)
 	ON_WM_ACTIVATE()
 	ON_WM_LBUTTONDOWN()
 	ON_WM_HSCROLL()
+	ON_MESSAGE(WM_VST_LIVE_EDITOR_CLOSED, &CVstHostDlg::OnVstEditorClosed)
 END_MESSAGE_MAP()
 
 BOOL CVstHostDlg::OnInitDialog()
 {
 	CCustomBlurDialogBase::OnInitDialog();
 	CCC_BringDialogToForeground(this);
+	if (!ScRestoreWndGeom(this, savedata.vstHostWinX, savedata.vstHostWinY,
+		savedata.vstHostWinW, savedata.vstHostWinH, 720, 480))
+		SetWindowPos(NULL, 0, 0, 980, 640, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+	EnableMainWindowLock(&savedata.vstHostMainLock, TRUE);
 	SetWindowText(LL14(L"VSTホスト", L"VST Host", L"Hôte VST", L"Host VST", L"Host VST", L"VST 호스트",
 		L"VST 主机", L"مضيف VST", L"VST-хост", L"VST-Host", L"Host VST", L"VST-host", L"Host VST", L"VST ana bilgisayarı"));
 	m_help.SetWindowText(L"?");
@@ -1416,6 +1428,8 @@ BOOL CVstHostDlg::OnInitDialog()
 		StartAudio();
 	}
 	SetTimer(VST_ACTIVITY_TIMER, 50, NULL);
+	VstLiveEditorSetNotifyHwnd2(m_hWnd);
+	SetTimer(9122, 250, NULL);
 	PostMessage(CCC_MSG_REAPPLY_OPAQUE_FIXERS, 0, 0);
 	GetClientRect(&rc);
 	LayoutChildren(rc.Width(), rc.Height());
@@ -1739,13 +1753,12 @@ void CVstHostDlg::RebuildPluginList()
 	m_pluginFilter.GetWindowText(filter); filter.MakeLower();
 	if (m_pluginFilter.GetCurSel() == 0) filter.Empty();
 
-	// Silent after a real note probe is a broken install or an effect that
-	// should not occupy a part slot. Samplers waiting for a patch stay listed.
+	/* Prefer verified (isLiveOk) instruments. If verify left the list empty
+	   (busy slots / interrupted), fall back to all instruments so D&D works. */
 	CString names[100]; int indices[100]; int count = 0;
-	for (int i = 0; i < VstScanGetCount() && count < 100; ++i) {
-		const VstPluginInfo* pi = VstScanGet(i);
-		if (!pi || !pi->isInstrument || !pi->isLiveOk) continue;
-		if (pi->isAudible == 0) continue;
+	auto push = [&](const VstPluginInfo* pi, int i) {
+		if (!pi || !pi->isInstrument || count >= 100) return;
+		if (pi->isAudible == 0) return;
 		CString n(pi->name);
 		CString tags;
 		if (pi->arch == 64) tags += L"<x64>";
@@ -1756,12 +1769,22 @@ void CVstHostDlg::RebuildPluginList()
 				L"<timbre>", L"<음색선택>", L"<选音色>", L"<رقعة>",
 				L"<патч>", L"<Patch>", L"<timbre>", L"<patch>",
 				L"<barwa>", L"<yama>");
+		if (!pi->isLiveOk) tags += L"<?>";
 		CString shown = n;
 		if (!tags.IsEmpty()) shown += L" " + tags;
 		CString low(shown); low.MakeLower();
-		if (!filter.IsEmpty() && low.Find(filter) < 0) continue;
+		if (!filter.IsEmpty() && low.Find(filter) < 0) return;
 		names[count] = shown;
 		indices[count] = i; count++;
+	};
+	for (int i = 0; i < VstScanGetCount() && count < 100; ++i) {
+		const VstPluginInfo* pi = VstScanGet(i);
+		if (!pi || !pi->isLiveOk) continue;
+		push(pi, i);
+	}
+	if (count == 0) {
+		for (int i = 0; i < VstScanGetCount() && count < 100; ++i)
+			push(VstScanGet(i), i);
 	}
 	m_wire.SetPlugins(names, indices, count);
 	if (m_wire.GetSafeHwnd())
@@ -1777,8 +1800,32 @@ CString CVstHostDlg::DataPath() const
 	return CString(path) + L"vstwire.dat";
 }
 
+void CVstHostDlg::ClearPresetStates(int presetIndex)
+{
+	if (presetIndex < 0 || presetIndex >= 100) return;
+	for (int p = 0; p < 32; ++p) {
+		if (m_presetComp[presetIndex][p]) {
+			free(m_presetComp[presetIndex][p]);
+			m_presetComp[presetIndex][p] = NULL;
+		}
+		if (m_presetCtrl[presetIndex][p]) {
+			free(m_presetCtrl[presetIndex][p]);
+			m_presetCtrl[presetIndex][p] = NULL;
+		}
+		m_presetCompLen[presetIndex][p] = 0;
+		m_presetCtrlLen[presetIndex][p] = 0;
+	}
+}
+
+void CVstHostDlg::ClearAllPresetStates()
+{
+	for (int i = 0; i < 100; ++i)
+		ClearPresetStates(i);
+}
+
 void CVstHostDlg::LoadPresets()
 {
+	ClearAllPresetStates();
 	m_presetCount = 0;
 	memset(m_presets, 0, sizeof(m_presets));
 	CFile f;
@@ -1786,9 +1833,9 @@ void CVstHostDlg::LoadPresets()
 		DWORD magic = 0, count = 0;
 		if (f.Read(&magic, sizeof(magic)) == sizeof(magic) &&
 			f.Read(&count, sizeof(count)) == sizeof(count) &&
-			(magic == VST_WIRE_MAGIC1 || magic == VST_WIRE_MAGIC2)) {
+			(magic == VST_WIRE_MAGIC1 || magic == VST_WIRE_MAGIC2 || magic == VST_WIRE_MAGIC3)) {
 			m_presetCount = min(100, (int)count);
-			if (magic == VST_WIRE_MAGIC2) {
+			if (magic == VST_WIRE_MAGIC2 || magic == VST_WIRE_MAGIC3) {
 				for (int i = 0; i < m_presetCount; ++i) {
 					if (f.Read(&m_presets[i], sizeof(Preset)) != sizeof(Preset)) {
 						m_presetCount = i;
@@ -1808,24 +1855,59 @@ void CVstHostDlg::LoadPresets()
 					}
 				}
 			}
+			if (magic == VST_WIRE_MAGIC3) {
+				for (int i = 0; i < m_presetCount; ++i) {
+					for (int part = 0; part < 32; ++part) {
+						DWORD cLen = 0, tLen = 0;
+						if (f.Read(&cLen, 4) != 4 || f.Read(&tLen, 4) != 4) break;
+						if (cLen > 0 && cLen < 64 * 1024 * 1024) {
+							BYTE* b = (BYTE*)malloc(cLen);
+							if (b && f.Read(b, cLen) == cLen) {
+								m_presetComp[i][part] = b;
+								m_presetCompLen[i][part] = cLen;
+							} else { free(b); break; }
+						}
+						if (tLen > 0 && tLen < 64 * 1024 * 1024) {
+							BYTE* b = (BYTE*)malloc(tLen);
+							if (b && f.Read(b, tLen) == tLen) {
+								m_presetCtrl[i][part] = b;
+								m_presetCtrlLen[i][part] = tLen;
+							} else { free(b); break; }
+						}
+					}
+				}
+			}
 		}
 		f.Close();
 	}
 	RefreshPresetCombo(m_presetCount ? 0 : -1);
-	// ApplyPreset loads plug-ins and starts I/O. That must wait until
-	// scan/verify has finished, or a probe CloseEffect / SetDllDirectory
-	// leaves the already-loaded instance silent until the host is reopened.
 }
 
 BOOL CVstHostDlg::SavePresets()
 {
-	VstWireFile data = {};
-	data.magic = VST_WIRE_MAGIC2; data.count = m_presetCount;
-	memcpy(data.presets, m_presets, sizeof(Preset) * m_presetCount);
 	CFile f;
-	if (!f.Open(DataPath(), CFile::modeCreate | CFile::modeWrite | CFile::shareExclusive)) return FALSE;
-	f.Write(&data, sizeof(DWORD) * 2 + sizeof(Preset) * m_presetCount);
-	f.Close(); return TRUE;
+	if (!f.Open(DataPath(), CFile::modeCreate | CFile::modeWrite | CFile::shareExclusive))
+		return FALSE;
+	DWORD magic = VST_WIRE_MAGIC3;
+	DWORD count = (DWORD)m_presetCount;
+	f.Write(&magic, sizeof(magic));
+	f.Write(&count, sizeof(count));
+	for (int i = 0; i < m_presetCount; ++i)
+		f.Write(&m_presets[i], sizeof(Preset));
+	for (int i = 0; i < m_presetCount; ++i) {
+		for (int part = 0; part < 32; ++part) {
+			DWORD cLen = m_presetCompLen[i][part];
+			DWORD tLen = m_presetCtrlLen[i][part];
+			f.Write(&cLen, 4);
+			f.Write(&tLen, 4);
+			if (cLen && m_presetComp[i][part])
+				f.Write(m_presetComp[i][part], cLen);
+			if (tLen && m_presetCtrl[i][part])
+				f.Write(m_presetCtrl[i][part], tLen);
+		}
+	}
+	f.Close();
+	return TRUE;
 }
 
 void CVstHostDlg::RefreshPresetCombo(int select)
@@ -1848,12 +1930,33 @@ void CVstHostDlg::CaptureCurrent(Preset& p, LPCTSTR name)
 	p.outDev = ComboSelData(m_speakerOut);
 	if (p.outDev < 0) p.outDev = (int)WAVE_MAPPER;
 	m_wire.GetSlots(m_slots);
+	const int presetIdx = (int)(&p - m_presets);
+	const int storeStates = (presetIdx >= 0 && presetIdx < 100) ? 1 : 0;
+	if (storeStates) ClearPresetStates(presetIdx);
 	for (int i = 0; i < 32; ++i) {
 		p.partPluginIndex[i] = m_slots[i];
 		const VstPluginInfo* pi = VstScanGet(m_slots[i]);
 		if (pi) {
 			wcsncpy_s(p.path[i], pi->path, _TRUNCATE);
 			p.isVst3[i] = pi->isVst3 ? 1 : 0;
+		}
+		if (storeStates && VstLivePartIsLoaded(i + 1)) {
+			unsigned char* comp = NULL; int compLen = 0;
+			unsigned char* ctrl = NULL; int ctrlLen = 0;
+			if (VstLiveCaptureStates(i + 1, &comp, &compLen, &ctrl, &ctrlLen)) {
+				if (comp && compLen > 0) {
+					m_presetComp[presetIdx][i] = comp;
+					m_presetCompLen[presetIdx][i] = (DWORD)compLen;
+					comp = NULL;
+				}
+				if (ctrl && ctrlLen > 0) {
+					m_presetCtrl[presetIdx][i] = ctrl;
+					m_presetCtrlLen[presetIdx][i] = (DWORD)ctrlLen;
+					ctrl = NULL;
+				}
+			}
+			if (comp) free(comp);
+			if (ctrl) free(ctrl);
 		}
 	}
 }
@@ -1898,8 +2001,14 @@ void CVstHostDlg::ApplyPreset(int index)
 		}
 		VstWaitShowLoad(m_hWnd, waitName);
 		anyLoad = 1;
-		if (VstLiveLoadPart(part + 1, p.path[part], p.isVst3[part]) == 0)
+		if (VstLiveLoadPart(part + 1, p.path[part], p.isVst3[part]) == 0) {
 			m_slots[part] = scanIndex;
+			if (m_presetCompLen[index][part] > 0 && m_presetComp[index][part]) {
+				VstLiveApplyStates(part + 1,
+					m_presetComp[index][part], (int)m_presetCompLen[index][part],
+					m_presetCtrl[index][part], (int)m_presetCtrlLen[index][part]);
+			}
+		}
 	}
 	if (anyLoad) VstWaitHide();
 	m_wire.SetSlots(m_slots);
@@ -1936,7 +2045,20 @@ void CVstHostDlg::OnDelete()
 		L"¿Eliminar este preset?", L"이 프리셋을 삭제할까요?", L"删除此预设吗？", L"هل تريد حذف هذا الإعداد؟",
 		L"Удалить этот пресет?", L"Dieses Preset löschen?", L"Eliminar esta predefinição?", L"Deze preset verwijderen?",
 		L"Usunąć ten preset?", L"Bu ön ayar silinsin mi?"), NULL, MB_YESNO | MB_ICONQUESTION) != IDYES) return;
-	for (int n = i; n < m_presetCount - 1; ++n) m_presets[n] = m_presets[n + 1];
+	for (int n = i; n < m_presetCount - 1; ++n) {
+		m_presets[n] = m_presets[n + 1];
+		for (int part = 0; part < 32; ++part) {
+			m_presetComp[n][part] = m_presetComp[n + 1][part];
+			m_presetCompLen[n][part] = m_presetCompLen[n + 1][part];
+			m_presetCtrl[n][part] = m_presetCtrl[n + 1][part];
+			m_presetCtrlLen[n][part] = m_presetCtrlLen[n + 1][part];
+			m_presetComp[n + 1][part] = NULL;
+			m_presetCtrl[n + 1][part] = NULL;
+			m_presetCompLen[n + 1][part] = 0;
+			m_presetCtrlLen[n + 1][part] = 0;
+		}
+	}
+	ClearPresetStates(m_presetCount - 1);
 	m_presetCount--; SavePresets(); RefreshPresetCombo(min(i, m_presetCount - 1));
 }
 
@@ -1967,6 +2089,14 @@ void CVstHostDlg::OnRescan()
 	SetStatus(LL14(L"スキャン中…", L"Scanning…", L"Analyse…", L"Scansione…", L"Escaneando…", L"검색 중…", L"扫描中…",
 		L"جارٍ المسح…", L"Сканирование…", L"Scannen…", L"A procurar…", L"Scannen…", L"Skanowanie…", L"Taranıyor…"));
 	StopAudio();
+	/* Free every live slot first. VerifyLiveList needs a free part to probe;
+	   if the grid stays full, isLiveOk stays 0 and RebuildPluginList shows
+	   nothing — D&D has no palette after rescan. */
+	for (int i = 1; i <= 32; ++i)
+		VstLiveUnloadPart(i);
+	for (int i = 0; i < 32; ++i)
+		m_slots[i] = -1;
+	m_wire.SetSlots(m_slots);
 	VstScanInvalidate();
 	m_wire.SetPlugins(NULL, NULL, 0);
 	VstScanEnsure(m_hWnd);
@@ -2315,21 +2445,30 @@ UINT __stdcall CVstHostDlg::AudioThreadProc(void* ctx)
 BOOL CVstHostDlg::StartAudio()
 {
 	StopAudio();
+	/* Ensure score monitor released waveOut (OpenVstHostModeless also stops it). */
+	VstLiveMonitorStop();
 	WAVEFORMATEX wf = { WAVE_FORMAT_PCM, 2, 44100, 44100 * 4, 4, 16, 0 };
 	m_audioEvent = CreateEvent(NULL, FALSE, FALSE, NULL);
 	m_audioStop = CreateEvent(NULL, TRUE, FALSE, NULL);
 	if (!m_audioEvent || !m_audioStop) { StopAudio(); return FALSE; }
 	UINT dev = (UINT)ComboSelData(m_speakerOut);
 	if ((int)dev < 0) dev = WAVE_MAPPER;
-	if (waveOutOpen(&m_waveOut, dev, &wf, (DWORD_PTR)m_audioEvent, 0, CALLBACK_EVENT) != MMSYSERR_NOERROR) {
-		StopAudio(); return FALSE;
+	MMRESULT wo = waveOutOpen(&m_waveOut, dev, &wf, (DWORD_PTR)m_audioEvent, 0, CALLBACK_EVENT);
+	if (wo != MMSYSERR_NOERROR) {
+		/* One retry after a short settle — monitor close can race. */
+		Sleep(80);
+		VstLiveMonitorStop();
+		wo = waveOutOpen(&m_waveOut, dev, &wf, (DWORD_PTR)m_audioEvent, 0, CALLBACK_EVENT);
+	}
+	if (wo != MMSYSERR_NOERROR) {
+		m_waveOut = NULL;
+		StopAudio();
+		SetStatus(L"Audio open failed — pick another Speakers device or close other apps using the device");
+		return FALSE;
 	}
 	unsigned tid = 0;
 	MidiFifoInit();
 	m_audioThread = (HANDLE)_beginthreadex(NULL, 0, AudioThreadProc, this, 0, &tid);
-	// This thread now carries the MIDI timing as well, and it only has four
-	// 11 ms buffers of slack. TIME_CRITICAL was tried before and starved the
-	// UI, so stay one step below it.
 	if (m_audioThread) SetThreadPriority(m_audioThread, THREAD_PRIORITY_ABOVE_NORMAL);
 	return m_audioThread != NULL;
 }
@@ -2377,6 +2516,10 @@ void CVstHostDlg::SetStatus(LPCTSTR text)
 
 void CVstHostDlg::OnTimer(UINT_PTR id)
 {
+	if (id == 9122) {
+		VstLivePollRemoteEditorClosed();
+		return;
+	}
 	if (id == VST_ACTIVITY_TIMER) {
 		BindThruSong();
 		m_wire.RefreshActivity();
@@ -2399,6 +2542,57 @@ void CVstHostDlg::OnTimer(UINT_PTR id)
 		return;
 	}
 	CCustomBlurDialogBase::OnTimer(id);
+}
+
+void CVstHostDlg::CapturePartStateToCurrentPreset(int part1to32)
+{
+	if (part1to32 < 1 || part1to32 > 32) return;
+	const int pi = m_preset.GetCurSel();
+	if (pi < 0 || pi >= m_presetCount) return;
+	const int slot = part1to32 - 1;
+	unsigned char* comp = NULL; int compLen = 0;
+	unsigned char* ctrl = NULL; int ctrlLen = 0;
+	if (!VstLiveCaptureStates(part1to32, &comp, &compLen, &ctrl, &ctrlLen)) {
+		if (comp) free(comp);
+		if (ctrl) free(ctrl);
+		return;
+	}
+	if (m_presetComp[pi][slot]) { free(m_presetComp[pi][slot]); m_presetComp[pi][slot] = NULL; }
+	if (m_presetCtrl[pi][slot]) { free(m_presetCtrl[pi][slot]); m_presetCtrl[pi][slot] = NULL; }
+	m_presetCompLen[pi][slot] = m_presetCtrlLen[pi][slot] = 0;
+	if (comp && compLen > 0) {
+		m_presetComp[pi][slot] = comp;
+		m_presetCompLen[pi][slot] = (DWORD)compLen;
+		comp = NULL;
+	}
+	if (ctrl && ctrlLen > 0) {
+		m_presetCtrl[pi][slot] = ctrl;
+		m_presetCtrlLen[pi][slot] = (DWORD)ctrlLen;
+		ctrl = NULL;
+	}
+	if (comp) free(comp);
+	if (ctrl) free(ctrl);
+	SavePresets();
+	CString st;
+	st.Format(LL14(L"パート%d の音色状態をプリセットに保存 (%u+%u)",
+		L"Part %d tone state saved to preset (%u+%u)",
+		L"Partie %d état sauvé (%u+%u)", L"Parte %d stato salvato (%u+%u)",
+		L"Parte %d estado guardado (%u+%u)", L"파트 %d 상태 저장 (%u+%u)",
+		L"声部%d 状态已保存 (%u+%u)", L"Part %d saved (%u+%u)",
+		L"Парт %d сохранён (%u+%u)", L"Part %d gespeichert (%u+%u)",
+		L"Parte %d salvo (%u+%u)", L"Part %d opgeslagen (%u+%u)",
+		L"Część %d zapisana (%u+%u)", L"Part %d kaydedildi (%u+%u)"),
+		part1to32, (unsigned)m_presetCompLen[pi][slot], (unsigned)m_presetCtrlLen[pi][slot]);
+	SetStatus(st);
+}
+
+LRESULT CVstHostDlg::OnVstEditorClosed(WPARAM w, LPARAM l)
+{
+	(void)l;
+	const int part = (int)w;
+	if (part >= 1 && part <= 32)
+		CapturePartStateToCurrentPreset(part);
+	return 0;
 }
 
 void CVstHostDlg::ShowHelpSheet()
@@ -2434,7 +2628,13 @@ void CVstHostDlg::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
 
 void CVstHostDlg::OnDestroy()
 {
+	ScSaveWndGeom(this, &savedata.vstHostWinX, &savedata.vstHostWinY,
+		&savedata.vstHostWinW, &savedata.vstHostWinH);
+	extern void MpPersistSavedataQuick();
+	MpPersistSavedataQuick();
 	KillTimer(VST_ACTIVITY_TIMER);
+	KillTimer(9122);
+	VstLiveEditorSetNotifyHwnd2(NULL);
 	PcKeyReleaseAll();
 	StopWav();
 	StopAudio();
@@ -2452,9 +2652,13 @@ void CVstHostDlg::PostNcDestroy()
 
 void OpenVstHostModeless(CWnd* parent)
 {
+	/* Score/tone-map monitor holds waveOut; release so Host StartAudio can open it. */
+	VstLiveMonitorStop();
 	if (g_vstHostDlg && ::IsWindow(g_vstHostDlg->GetSafeHwnd())) {
 		g_vstHostDlg->ShowWindow(SW_SHOW);
 		g_vstHostDlg->SetForegroundWindow();
+		/* Re-arm audio if a previous StartAudio failed (waveOut busy). */
+		g_vstHostDlg->RestartIo();
 		return;
 	}
 	g_vstHostDlg = new CVstHostDlg(parent);
@@ -2463,5 +2667,12 @@ void OpenVstHostModeless(CWnd* parent)
 	}
 	g_vstHostDlg->ShowWindow(SW_SHOW);
 	g_vstHostDlg->SetForegroundWindow();
+}
+
+HWND VstHostDlgGetHwnd(void)
+{
+	if (!g_vstHostDlg || !::IsWindow(g_vstHostDlg->GetSafeHwnd()))
+		return NULL;
+	return g_vstHostDlg->GetSafeHwnd();
 }
 

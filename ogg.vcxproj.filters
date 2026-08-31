@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
     <Filter Include="Source Files">
@@ -510,6 +510,42 @@
     <ClCompile Include="CFmMonitorDlg.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="CSasamiTextDlg.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CSasamiMidiScoreDlg.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CSasamiFmScoreDlg.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CSasamiFmVoiceDlg.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CSasamiNotePaletteDlg.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CSasamiNotePropsDlg.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CSasamiVstPickDlg.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CSasamiToneMapDlg.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CSasamiVstPartMenu.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CSasamiStaffCore.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="SasamiComposerDoc.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="kb_sasami\source\sasami_write.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="GdiSoft3D.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -628,6 +664,9 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="OfflineHelp.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="SasamiToneNames.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
@@ -1183,6 +1222,42 @@
     <ClInclude Include="kb_sasami\source\sasami_fmmon.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="CSasamiTextDlg.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CSasamiMidiScoreDlg.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CSasamiFmScoreDlg.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CSasamiFmVoiceDlg.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CSasamiNotePaletteDlg.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CSasamiNotePropsDlg.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CSasamiVstPickDlg.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CSasamiToneMapDlg.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CSasamiVstPartMenu.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CSasamiStaffCore.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="SasamiComposerDoc.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="kb_sasami\source\sasami_write.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="GdiSoft3D.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -1304,6 +1379,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="kb_sasami\source\sasami_midi.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="SasamiToneNames.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
@@ -1657,5 +1735,29 @@
     <Image Include="res\s3tex\m_sky2.png" />
     <Image Include="res\s3tex\r_water_d.png" />
     <Image Include="res\s3tex\r_obs_d.png" />
+    <Image Include="res\ui_score\note_quarter.ico">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="res\ui_score\note_eighth.ico">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="res\ui_score\note_half.ico">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="res\ui_score\note_whole.ico">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="res\ui_score\note_rest.ico">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="res\ui_score\clef_g.ico">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="res\ui_score\tool_pencil.ico">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="res\ui_score\tool_erase.ico">
+      <Filter>Resource Files</Filter>
+    </Image>
   </ItemGroup>
 </Project>

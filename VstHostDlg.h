@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "afxwin.h"
 #include "CCustomControl.h"
@@ -87,6 +87,7 @@ public:
 	CString PluginName(int scanIndex) const;
 	BOOL PluginIsMulti(int scanIndex) const;
 	void PartPluginName(int part0to31, wchar_t* out, int outChars) const;
+	void RestartIo();
 
 	struct Preset {
 		wchar_t name[64];
@@ -115,6 +116,8 @@ protected:
 	void ApplyPreset(int index);
 	void LoadPresets();
 	BOOL SavePresets();
+	void ClearPresetStates(int presetIndex);
+	void ClearAllPresetStates();
 	CString DataPath() const;
 	BOOL PromptName(CString& name, LPCTSTR title);
 	void StartMidi();
@@ -123,7 +126,6 @@ protected:
 	void StopWav();
 	BOOL StartAudio();
 	void StopAudio();
-	void RestartIo();
 	void ShowHelpSheet();
 	void SetStatus(LPCTSTR text);
 	// PC keyboard as a one-row MIDI keyboard (Z=C4…). Skips Edit/Combo focus.
@@ -153,7 +155,9 @@ protected:
 	afx_msg void OnActivate(UINT nState, CWnd* pWndOther, BOOL bMinimized);
 	afx_msg void OnLButtonDown(UINT nFlags, CPoint point);
 	afx_msg void OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar);
+	afx_msg LRESULT OnVstEditorClosed(WPARAM w, LPARAM l);
 	void ApplyVolUi();
+	void CapturePartStateToCurrentPreset(int part1to32);
 
 	CCustomComboBox m_preset;
 	CCustomComboBox m_midiIn[3];
@@ -179,6 +183,10 @@ protected:
 
 	Preset m_presets[100];
 	int m_presetCount;
+	BYTE* m_presetComp[100][32];
+	DWORD m_presetCompLen[100][32];
+	BYTE* m_presetCtrl[100][32];
+	DWORD m_presetCtrlLen[100][32];
 	int m_slots[32];
 	HMIDIIN m_midiHandles[3];
 	// Per opened hardware handle (slots 0..2): bit0 = parts 1-16, bit1 = 17-32.
@@ -200,4 +208,6 @@ protected:
 
 extern CVstHostDlg* g_vstHostDlg;
 void OpenVstHostModeless(CWnd* parent);
+/* HWND of open VST Host, or NULL. Used by live monitor to yield waveOut. */
+HWND VstHostDlgGetHwnd(void);
 
