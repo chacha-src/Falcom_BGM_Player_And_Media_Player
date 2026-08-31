@@ -6,6 +6,11 @@
 
 CSasamiNotePaletteDlg* CSasamiNotePaletteDlg::s_inst = NULL;
 
+CSasamiNotePaletteDlg* CSasamiNotePaletteDlg::Instance()
+{
+	return (s_inst && ::IsWindow(s_inst->GetSafeHwnd())) ? s_inst : NULL;
+}
+
 IMPLEMENT_DYNAMIC(CSasamiNotePaletteDlg, CCustomBlurDialogExBase)
 
 CSasamiNotePaletteDlg::CSasamiNotePaletteDlg(CWnd* pParent)

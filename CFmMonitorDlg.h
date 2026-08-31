@@ -109,6 +109,7 @@ private:
 		int gridY0, gridY1, bankTitle, bankGap;
 		int fmX, fmW, pw, ph, gap;
 		int keysY, keysW, rowH, keyH, labelW;
+		int pcmRows; /* 鍵盤ブロック行数に効く。変化時は ComputeLayout 必須 */
 		CRect rcHead, rcHex, rcPanels, rcKeys;
 	} m_lay;
 	int m_layOk;

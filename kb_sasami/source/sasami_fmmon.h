@@ -9,7 +9,7 @@ enum { SASAMI_FMMON_RING = 256 };
 #pragma pack(push, 1)
 struct SasamiFmMonDump {
 	char magic[4];          // "OPNA"
-	uint32_t version;       // 4
+	uint32_t version;       // 5
 	uint32_t seq;           // increments on register writes
 	uint32_t sampleRate;
 	uint64_t curSample;
@@ -28,6 +28,7 @@ struct SasamiFmMonDump {
 	wchar_t sourcePath[260];
 	uint8_t pcmOn[SASAMI_FMMON_PCM_MAX];
 	uint8_t pcmNote[SASAMI_FMMON_PCM_MAX]; // MIDI note 0..127
+	uint8_t regWriteBits[64]; /* v5: regs[i] が直前 Flush 区間に書かれたら bit i */
 };
 
 /* リング: live 上書きで消えるフラッシュを UI が全部読めるようにする */
@@ -40,14 +41,14 @@ struct SasamiFmMonRing {
 };
 #pragma pack(pop)
 
-enum { SASAMI_FMMON_VERSION = 4 };
+enum { SASAMI_FMMON_VERSION = 5 };
 enum { SASAMI_FMMON_RING_VERSION = 1 };
 
 #ifdef __cplusplus
 inline bool SasamiFmMonMagicOk(const SasamiFmMonDump& d)
 {
 	return d.magic[0] == 'O' && d.magic[1] == 'P' && d.magic[2] == 'N' && d.magic[3] == 'A'
-		&& d.version >= 2 && d.version <= 4;
+		&& d.version >= 2 && d.version <= 5;
 }
 inline bool SasamiFmMonRingMagicOk(const SasamiFmMonRing& r)
 {

@@ -2,6 +2,7 @@
 #include "ogg.h"
 #include "oggDlg.h"
 #include "CFmMonitorDlg.h"
+#include "PlayList.h"
 #include "resource.h"
 #include "DatArchive.h"
 #include <algorithm>
@@ -11,6 +12,8 @@ extern save savedata;
 extern CString filen;
 extern CString fnn;
 extern int mode;
+extern CPlayList* pl;
+extern int plcnt;
 
 namespace {
 
@@ -27,49 +30,103 @@ static void FmPathStem(const wchar_t* path, wchar_t* stem, int n)
 	if (dot && dot != stem) *dot = 0;
 }
 
-/* KPI .fpy 再生中だけ dump の曲名を filen/fnn と照合（古い live を拾わない） */
-static int FmMonPlayFpyStem(wchar_t* stem, int n)
+/* "タイトル(ED4_01.FPY)" のような表示名から実ファイル stem を取る */
+static void FmExtractBestFpyStem(const wchar_t* path, wchar_t* stem, int n)
 {
-	if (mode != -3 || !stem || n < 2) return 0;
+	if (!stem || n < 2) return;
 	stem[0] = 0;
-	const wchar_t* tryPaths[2] = { (LPCWSTR)fnn, (LPCWSTR)filen };
-	for (int i = 0; i < 2; i++) {
-		const wchar_t* p = tryPaths[i];
-		if (!p || !p[0]) continue;
-		wchar_t tmp[260];
-		FmPathStem(p, tmp, 260);
-		if (!tmp[0]) continue;
-		/* 拡張子が .fpy のとき、または stem が取れてパスに .fpy を含むとき */
-		const wchar_t* dot = wcsrchr(p, L'.');
-		int isFpy = 0;
-		if (dot && _wcsicmp(dot, L".fpy") == 0)
-			isFpy = 1;
-		else {
-			for (const wchar_t* q = p; *q; q++) {
-				if (_wcsnicmp(q, L".fpy", 4) == 0
-					&& (q[4] == 0 || q[4] == L'\\' || q[4] == L'/' || q[4] == L' ' || q[4] == L')')) {
-					isFpy = 1;
-					break;
-				}
-			}
-		}
-		if (!isFpy) continue;
-		wcsncpy_s(stem, n, tmp, _TRUNCATE);
-		return stem[0] != 0;
+	if (!path || !path[0]) return;
+	const wchar_t* best = NULL;
+	int bestLen = 0;
+	for (const wchar_t* p = path; *p; p++) {
+		if (*p != L'(') continue;
+		const wchar_t* start = p + 1;
+		const wchar_t* close = wcschr(start, L')');
+		if (!close || close <= start + 4) continue;
+		if (_wcsnicmp(close - 4, L".fpy", 4) != 0) continue;
+		best = start;
+		bestLen = (int)(close - start - 4);
+	}
+	if (best && bestLen > 0 && bestLen < n) {
+		for (int i = 0; i < bestLen; i++)
+			stem[i] = best[i];
+		stem[bestLen] = 0;
+		return;
+	}
+	FmPathStem(path, stem, n);
+}
+
+static int FmIContainsFpyBase(const wchar_t* hay, const wchar_t* dumpStem)
+{
+	if (!hay || !hay[0] || !dumpStem || !dumpStem[0]) return 0;
+	wchar_t needle[280];
+	_snwprintf_s(needle, _TRUNCATE, L"%s.fpy", dumpStem);
+	const size_t nlen = wcslen(needle);
+	for (const wchar_t* p = hay; *p; p++) {
+		if (_wcsnicmp(p, needle, nlen) != 0) continue;
+		const wchar_t prev = (p == hay) ? L'\\' : p[-1];
+		const wchar_t next = p[nlen];
+		if ((prev == L'\\' || prev == L'/' || prev == L'(' || prev == L' ' || prev == L'\t')
+			&& (next == 0 || next == L')' || next == L' ' || next == L'\t'))
+			return 1;
 	}
 	return 0;
 }
 
+/* KPI .fpy 再生中: dump の実パス stem と filen(実体) / 表示名を照合 */
 static int FmDumpMatchesPlay(const SasamiFmMonDump& d)
 {
-	wchar_t playStem[260];
-	if (!FmMonPlayFpyStem(playStem, 260))
+	if (mode != -3)
 		return 1;
 	if (!d.sourcePath[0])
 		return 0;
 	wchar_t dumpStem[260];
 	FmPathStem(d.sourcePath, dumpStem, 260);
-	return dumpStem[0] && _wcsicmp(playStem, dumpStem) == 0;
+	if (!dumpStem[0])
+		return 0;
+
+	auto tryRaw = [&](const wchar_t* raw) -> int {
+		if (!raw || !raw[0]) return 0;
+		wchar_t playStem[260];
+		FmExtractBestFpyStem(raw, playStem, 260);
+		if (playStem[0] && _wcsicmp(playStem, dumpStem) == 0)
+			return 1;
+		return FmIContainsFpyBase(raw, dumpStem);
+	};
+
+	/* filen=実パスを先に。fnn は "曲名(ED4_01.FPY)" のことがあり stem が一致しない */
+	if (tryRaw((LPCWSTR)filen))
+		return 1;
+	if (tryRaw((LPCWSTR)fnn))
+		return 1;
+	if (pl && pl->pc && plcnt >= 0 && plcnt < pl->playcnt) {
+		if (tryRaw(pl->pc[plcnt].fol))
+			return 1;
+		if (tryRaw(pl->pc[plcnt].name))
+			return 1;
+	}
+
+	/* 再生側に .fpy 手がかりが無いときは弾かない（誤拒否防止） */
+	int haveFpyHint = 0;
+	const wchar_t* hints[4] = {
+		(LPCWSTR)filen, (LPCWSTR)fnn, NULL, NULL
+	};
+	if (pl && pl->pc && plcnt >= 0 && plcnt < pl->playcnt) {
+		hints[2] = pl->pc[plcnt].fol;
+		hints[3] = pl->pc[plcnt].name;
+	}
+	for (int i = 0; i < 4; i++) {
+		const wchar_t* h = hints[i];
+		if (!h || !h[0]) continue;
+		for (const wchar_t* q = h; *q; q++) {
+			if (_wcsnicmp(q, L".fpy", 4) == 0) {
+				haveFpyHint = 1;
+				break;
+			}
+		}
+		if (haveFpyHint) break;
+	}
+	return haveFpyHint ? 0 : 1;
 }
 
 #pragma pack(push, 1)
@@ -225,10 +282,21 @@ static int FmReadDump(SasamiFmMonDump* out)
 			continue;
 		}
 		SasamiFmMonDump tmp;
+		memset(&tmp, 0, sizeof(tmp));
 		DWORD rd = 0;
 		BOOL ok = ReadFile(h, &tmp, sizeof(tmp), &rd, NULL);
 		CloseHandle(h);
-		if (ok && rd == sizeof(tmp) && SasamiFmMonMagicOk(tmp)) {
+		if (ok && SasamiFmMonMagicOk(tmp)) {
+			const DWORD minPreV5 = (DWORD)offsetof(SasamiFmMonDump, regWriteBits);
+			if (tmp.version >= 5) {
+				if (rd < sizeof(tmp)) {
+					Sleep(1);
+					continue;
+				}
+			} else if (rd < minPreV5) {
+				Sleep(1);
+				continue;
+			}
 			*out = tmp;
 			return 1;
 		}
@@ -431,6 +499,7 @@ void CFmMonitorDlg::OnSize(UINT nType, int cx, int cy)
 	LayoutHelpBtn();
 	/* 初期化中の誤保存を避け、ユーザー操作後だけ位置を書く（タイマーで間引き） */
 	m_persistAge = 0;
+	m_layOk = 0;
 	m_fullDraw = 1;
 	m_dirtyHead = m_dirtyHex = m_dirtyPanels = m_dirtyKeys = 1;
 	Invalidate(FALSE);
@@ -1439,6 +1508,7 @@ void CFmMonitorDlg::ComputeLayout(int w, int h)
 	m_lay.h = h;
 	m_lay.dpi = (int)FmUiDpi(GetSafeHwnd());
 	const int pcmRows = PcmRows();
+	m_lay.pcmRows = pcmRows;
 	m_lay.pad = FmScale(4, m_lay.dpi);
 	m_lay.headH = FmScale(18, m_lay.dpi);
 	m_lay.gapHexKeys = FmScale(4, m_lay.dpi);
@@ -1586,7 +1656,9 @@ void CFmMonitorDlg::ComposeFrame(CDC& dc, int w, int h)
 		dc.FillSolidRect(0, 0, w, h, FM_BG);
 		return;
 	}
-	const int needLay = !m_layOk || m_lay.w != w || m_lay.h != h || m_fullDraw;
+	const int pcmNow = PcmRows();
+	const int needLay = !m_layOk || m_lay.w != w || m_lay.h != h || m_fullDraw
+		|| m_lay.pcmRows != pcmNow;
 	if (needLay)
 		ComputeLayout(w, h);
 
@@ -1619,6 +1691,8 @@ void CFmMonitorDlg::ApplyDump(const SasamiFmMonDump& d)
 		memset(m_fadePcm, 0, sizeof(m_fadePcm));
 		memset(m_fadeRzmPad, 0, sizeof(m_fadeRzmPad));
 		wcsncpy_s(m_lastSong, d.sourcePath, _TRUNCATE);
+		m_layOk = 0;
+		m_fullDraw = 1;
 		m_dirtyHead = 1;
 		m_dirtyKeys = 1;
 		m_panelDirtyMask = 0x3F;
@@ -1629,7 +1703,12 @@ void CFmMonitorDlg::ApplyDump(const SasamiFmMonDump& d)
 	BYTE panelMask = 0;
 	if (m_haveDump) {
 		for (int i = 0; i < 0x200; i++) {
-			if (d.regs[i] != m_dump.regs[i]) {
+			int wrote = (d.regs[i] != m_dump.regs[i]) ? 1 : 0;
+			/* v5: 同一値の再書き込み（00→00 含む）も変化扱い */
+			if (!wrote && d.version >= 5
+				&& (d.regWriteBits[i >> 3] & (uint8_t)(1u << (i & 7))))
+				wrote = 1;
+			if (wrote) {
 				FmBump(m_fade[i]);
 				m_touched[i] = 1;
 				chgHex = 1;
@@ -1700,7 +1779,9 @@ void CFmMonitorDlg::ApplyDump(const SasamiFmMonDump& d)
 		}
 		const int pcmN = (d.pcmCount < SASAMI_FMMON_PCM_MAX) ? d.pcmCount : SASAMI_FMMON_PCM_MAX;
 		if (d.pcmCount != m_dump.pcmCount) {
+			/* PCM 行の増減は top/keys 分割が変わる → リサイズ相当の全再レイアウト */
 			chgKeys = 1;
+			m_layOk = 0;
 			m_fullDraw = 1;
 		}
 		for (int i = 0; i < pcmN; i++) {
@@ -1782,6 +1863,9 @@ void CFmMonitorDlg::ApplyDump(const SasamiFmMonDump& d)
 		chgHex = chgKeys = 1;
 		panelMask = 0x3F;
 		m_dirtyHead = 1;
+		/* 直前曲の PCM 行数レイアウトが残っていることがある */
+		m_layOk = 0;
+		m_fullDraw = 1;
 	}
 
 	m_prev = m_dump;
@@ -1835,7 +1919,8 @@ void CFmMonitorDlg::PushHistDump(const SasamiFmMonDump& d)
 			&& d.rhythmPulse == m_hist[lastI].rhythmPulse
 			&& (d.version < 3 || memcmp(d.rhythmHitCnt, m_hist[lastI].rhythmHitCnt, 6) == 0)
 			&& (d.version < 4 || (memcmp(d.keyOnHitCnt, m_hist[lastI].keyOnHitCnt, 6) == 0
-				&& memcmp(d.ssgHitCnt, m_hist[lastI].ssgHitCnt, 3) == 0)))
+				&& memcmp(d.ssgHitCnt, m_hist[lastI].ssgHitCnt, 3) == 0))
+			&& (d.version < 5 || memcmp(d.regWriteBits, m_hist[lastI].regWriteBits, 64) == 0))
 			return;
 	}
 	if (m_histN < HIST_MAX) {
@@ -1952,6 +2037,7 @@ int CFmMonitorDlg::PollDump()
 			&& (show.version < 3 || memcmp(show.rhythmHitCnt, m_dump.rhythmHitCnt, 6) == 0)
 			&& (show.version < 4 || (memcmp(show.keyOnHitCnt, m_dump.keyOnHitCnt, 6) == 0
 				&& memcmp(show.ssgHitCnt, m_dump.ssgHitCnt, 3) == 0))
+			&& (show.version < 5 || memcmp(show.regWriteBits, m_dump.regWriteBits, 64) == 0)
 			&& memcmp(show.keyOnFm, m_dump.keyOnFm, sizeof(show.keyOnFm)) == 0
 			&& memcmp(show.ssgOn, m_dump.ssgOn, sizeof(show.ssgOn)) == 0
 			&& memcmp(show.pcmOn, m_dump.pcmOn, sizeof(show.pcmOn)) == 0
@@ -2047,8 +2133,7 @@ void CFmMonitorDlg::PumpSyncNow()
 		ResetDumpSync();
 	m_lastPlayy = live;
 	if (live) {
-		wchar_t playStem[260];
-		if (FmMonPlayFpyStem(playStem, 260) && m_haveDump && !FmDumpMatchesPlay(m_dump))
+		if (m_haveDump && !FmDumpMatchesPlay(m_dump))
 			ResetDumpSync();
 		PollDump();
 	}

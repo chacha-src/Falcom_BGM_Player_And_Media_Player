@@ -126,7 +126,7 @@ public:
 	void ToggleAnalyzer();
 	void ToggleMidiMonitor();
 	void ToggleFmMonitor();
-	void HideMidiMonitorForMinimize();
+	void HideMidiMonitorForMinimize(); /* FM/MIDI モニタ・譜面・VSTホスト等も隠す */
 	void RestoreMidiMonitorAfterMinimize();
 	void ShowPianoRollTune();
 	void FeedPianoRoll(const void* pData, int bytes);
@@ -186,7 +186,8 @@ public:
 	CAnalyzerDlg* m_AnalyzerDlg = nullptr;
 	CMidiMonitorDlg* m_MidiMonitorDlg = nullptr;
 	CFmMonitorDlg* m_FmMonitorDlg = nullptr;
-	int m_midiMonHiddenForMin = 0; // 本体最小化で MIDI モニタを隠した（復帰で戻す）
+	/* 本体最小化で隠した FM/MIDI 系（bit: 下記 kHideFmMidi*） */
+	int m_fmMidiToolsHiddenMask = 0;
 	bool m_cascadePrevValid = false;
 	CRect m_cascadePrevRc;
 	// SyncAnalyzerFromPlayCursor: bufwav3 上の前回終端バイト位置

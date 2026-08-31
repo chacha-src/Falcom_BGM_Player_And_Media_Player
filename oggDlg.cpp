@@ -1,4 +1,4 @@
-// oggDlg.cpp : インプリメンテーション ファイル
+﻿// oggDlg.cpp : インプリメンテーション ファイル
 //
 //#define _DLL
 #include "stdafx.h"
@@ -31,6 +31,12 @@ int flacmode = 0;
 #include "CAnalyzerDlg.h"
 #include "CMidiMonitorDlg.h"
 #include "CFmMonitorDlg.h"
+#include "CSasamiMidiScoreDlg.h"
+#include "CSasamiFmScoreDlg.h"
+#include "CSasamiTextDlg.h"
+#include "CSasamiNotePaletteDlg.h"
+#include "CSasamiNotePropsDlg.h"
+#include "VstHostDlg.h"
 #include "CProToolsDlg.h"
 #include "TranscodeExport.h"
 #include "CPromptEngine.h"
@@ -33462,31 +33468,73 @@ void COggDlg::ToggleAnalyzer()
 	}
 }
 
-// 本体最小化時: MIDI モニタは og 所有かつ TOPMOST 可のため OS が隠さない。
+// 本体最小化時: FM/MIDI モニタ・譜面・関連ツールは所有/TOPMOST で OS が隠さないことがある。
 // 見えていたら HIDE。復帰は RestoreMidiMonitorAfterMinimize。
-void COggDlg::HideMidiMonitorForMinimize()
+enum {
+	kHideFmMidi_MidiMon = 1 << 0,
+	kHideFmMidi_FmMon = 1 << 1,
+	kHideFmMidi_MidiScore = 1 << 2,
+	kHideFmMidi_FmScore = 1 << 3,
+	kHideFmMidi_Text = 1 << 4,
+	kHideFmMidi_NotePal = 1 << 5,
+	kHideFmMidi_NoteProps = 1 << 6,
+	kHideFmMidi_VstHost = 1 << 7,
+	kHideFmMidi_PrTune = 1 << 8,
+};
+
+static void HideFmMidiToolWnd(CWnd* w, int bit, int& mask)
 {
-	if (m_midiMonHiddenForMin)
+	if (!w || !::IsWindow(w->GetSafeHwnd()))
 		return;
-	if (!m_MidiMonitorDlg || !::IsWindow(m_MidiMonitorDlg->GetSafeHwnd()))
+	if (!w->IsWindowVisible())
 		return;
-	if (!m_MidiMonitorDlg->IsWindowVisible())
-		return;
-	m_midiMonHiddenForMin = 1;
-	m_MidiMonitorDlg->ShowWindow(SW_HIDE);
+	mask |= bit;
+	w->ShowWindow(SW_HIDE);
 }
 
-// 本体復帰時: 最小化で隠した MIDI モニタだけ戻す（閉じ済みは出さない）。
+void COggDlg::HideMidiMonitorForMinimize()
+{
+	if (m_fmMidiToolsHiddenMask)
+		return;
+	HideFmMidiToolWnd(m_MidiMonitorDlg, kHideFmMidi_MidiMon, m_fmMidiToolsHiddenMask);
+	HideFmMidiToolWnd(m_FmMonitorDlg, kHideFmMidi_FmMon, m_fmMidiToolsHiddenMask);
+	HideFmMidiToolWnd(CSasamiMidiScoreDlg::Instance(), kHideFmMidi_MidiScore, m_fmMidiToolsHiddenMask);
+	HideFmMidiToolWnd(CSasamiFmScoreDlg::Instance(), kHideFmMidi_FmScore, m_fmMidiToolsHiddenMask);
+	HideFmMidiToolWnd(CSasamiTextDlg::Instance(), kHideFmMidi_Text, m_fmMidiToolsHiddenMask);
+	HideFmMidiToolWnd(CSasamiNotePaletteDlg::Instance(), kHideFmMidi_NotePal, m_fmMidiToolsHiddenMask);
+	HideFmMidiToolWnd(CSasamiNotePropsDlg::Instance(), kHideFmMidi_NoteProps, m_fmMidiToolsHiddenMask);
+	HideFmMidiToolWnd(g_vstHostDlg, kHideFmMidi_VstHost, m_fmMidiToolsHiddenMask);
+	HideFmMidiToolWnd(m_PianoRollTuneDlg, kHideFmMidi_PrTune, m_fmMidiToolsHiddenMask);
+}
+
+// 本体復帰時: 最小化で隠した FM/MIDI 系だけ戻す（閉じ済みは出さない）。
 void COggDlg::RestoreMidiMonitorAfterMinimize()
 {
-	if (!m_midiMonHiddenForMin)
+	const int mask = m_fmMidiToolsHiddenMask;
+	if (!mask)
 		return;
-	m_midiMonHiddenForMin = 0;
-	if (savedata.midimonwindow != 1)
-		return;
-	if (!m_MidiMonitorDlg || !::IsWindow(m_MidiMonitorDlg->GetSafeHwnd()))
-		return;
-	m_MidiMonitorDlg->ShowWindow(SW_SHOWNOACTIVATE);
+	m_fmMidiToolsHiddenMask = 0;
+
+	auto restore = [](CWnd* w, int bit, int maskBits) {
+		if (!(maskBits & bit))
+			return;
+		if (!w || !::IsWindow(w->GetSafeHwnd()))
+			return;
+		w->ShowWindow(SW_SHOWNOACTIVATE);
+	};
+
+	if ((mask & kHideFmMidi_MidiMon) && savedata.midimonwindow == 1)
+		restore(m_MidiMonitorDlg, kHideFmMidi_MidiMon, mask);
+	if ((mask & kHideFmMidi_FmMon) && savedata.fmmonwindow == 1)
+		restore(m_FmMonitorDlg, kHideFmMidi_FmMon, mask);
+	restore(CSasamiMidiScoreDlg::Instance(), kHideFmMidi_MidiScore, mask);
+	restore(CSasamiFmScoreDlg::Instance(), kHideFmMidi_FmScore, mask);
+	restore(CSasamiTextDlg::Instance(), kHideFmMidi_Text, mask);
+	restore(CSasamiNotePaletteDlg::Instance(), kHideFmMidi_NotePal, mask);
+	restore(CSasamiNotePropsDlg::Instance(), kHideFmMidi_NoteProps, mask);
+	restore(g_vstHostDlg, kHideFmMidi_VstHost, mask);
+	if ((mask & kHideFmMidi_PrTune) && savedata.prTunewindow == 1)
+		restore(m_PianoRollTuneDlg, kHideFmMidi_PrTune, mask);
 }
 
 void COggDlg::ToggleMidiMonitor()
@@ -33505,7 +33553,7 @@ void COggDlg::ToggleMidiMonitor()
 		savedata.midimonwindow = 1;
 	}
 	else {
-		m_midiMonHiddenForMin = 0;
+		m_fmMidiToolsHiddenMask &= ~kHideFmMidi_MidiMon;
 		m_MidiMonitorDlg->DetachForDestroy();
 		m_MidiMonitorDlg->DestroyWindow();
 		savedata.midimonwindow = 0;
@@ -33540,6 +33588,7 @@ void COggDlg::ToggleFmMonitor()
 	}
 	else {
 		/* メニューから閉じる */
+		m_fmMidiToolsHiddenMask &= ~kHideFmMidi_FmMon;
 		savedata.fmmonwindow = 0;
 		m_FmMonitorDlg->PersistGeom();
 		m_FmMonitorDlg->DestroyWindow();

@@ -200,6 +200,7 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 	uint8_t rhythmHitCnt[6]; /* 累積（UI は差分で取りこぼし防止） */
 	uint8_t keyOnHitCnt[6];
 	uint8_t ssgHitCnt[3];
+	uint8_t regWritePend[64]; /* Flush 区間の regs 書き込み（00→00 含む） */
 	uint32_t rhythmFlashLeft[6]; // モニタ点滅用（key-on 後しばらく残す）
 	uint32_t dumpRingGen;
 	SasamiFmMonDump dumpRingSlot[SASAMI_FMMON_RING];
@@ -265,6 +266,7 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 		memset(rhythmHitCnt, 0, sizeof(rhythmHitCnt));
 		memset(keyOnHitCnt, 0, sizeof(keyOnHitCnt));
 		memset(ssgHitCnt, 0, sizeof(ssgHitCnt));
+		memset(regWritePend, 0, sizeof(regWritePend));
 		dumpRingGen = 0;
 		memset(dumpRingSlot, 0, sizeof(dumpRingSlot));
 		misaoActive = 0;
@@ -428,6 +430,8 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 		memcpy(d.rhythmHitCnt, rhythmHitCnt, sizeof(rhythmHitCnt));
 		memcpy(d.keyOnHitCnt, keyOnHitCnt, sizeof(keyOnHitCnt));
 		memcpy(d.ssgHitCnt, ssgHitCnt, sizeof(ssgHitCnt));
+		memcpy(d.regWriteBits, regWritePend, sizeof(regWritePend));
+		memset(regWritePend, 0, sizeof(regWritePend));
 		d.padHit = (uint8_t)playFmMode; /* 0=BEEP 1=OPN 2=OPNA（モニタ見出し用） */
 		d.fm10 = fm10 ? 1 : 0;
 		d.pcmCount = 0;
@@ -533,12 +537,19 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 			beep[ch].phase = 0.0;
 	}
 
+	void MarkRegWrite(unsigned idx)
+	{
+		if (idx >= 0x200) return;
+		regWritePend[idx >> 3] |= (uint8_t)(1u << (idx & 7));
+	}
 	void FmOut(uint8_t reg, uint8_t data)
 	{
 		regs[reg] = data;
+		MarkRegWrite(reg);
 		if (reg < 16) ssg[reg] = data;
 		if (playFmMode == 0) {
 			if (reg == 0x28) NoteKeyOnReg(data);
+			MarkDump();
 			return;
 		}
 		/* OPN/OPNA とも ym2608。OPN はリズム無効 */
@@ -555,6 +566,7 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 		chip.write(2, reg);
 		chip.write(3, data);
 		regs[0x100 | reg] = data;
+		MarkRegWrite(0x100u | reg);
 		MarkDump();
 	}
 
@@ -1115,6 +1127,7 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 			memset(rhythmHitCnt, 0, sizeof(rhythmHitCnt));
 			memset(keyOnHitCnt, 0, sizeof(keyOnHitCnt));
 			memset(ssgHitCnt, 0, sizeof(ssgHitCnt));
+			memset(regWritePend, 0, sizeof(regWritePend));
 			curL = curR = 0;
 			return;
 		}
@@ -1143,6 +1156,7 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 		memset(rhythmHitCnt, 0, sizeof(rhythmHitCnt));
 		memset(keyOnHitCnt, 0, sizeof(keyOnHitCnt));
 		memset(ssgHitCnt, 0, sizeof(ssgHitCnt));
+		memset(regWritePend, 0, sizeof(regWritePend));
 		dumpRingGen = 0;
 		memset(dumpRingSlot, 0, sizeof(dumpRingSlot));
 		memset(rhythmFlashLeft, 0, sizeof(rhythmFlashLeft));

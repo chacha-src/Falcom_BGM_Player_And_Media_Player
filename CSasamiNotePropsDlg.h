@@ -17,6 +17,7 @@ public:
 	HWND m_notify;
 
 	static CSasamiNotePropsDlg* OpenForEvent(CWnd* owner, ScEvent* ev, int isFm, int part1to32);
+	static CSasamiNotePropsDlg* Instance();
 	static void CloseOpen(void);
 	static void NotifyVstResult(int part1to32, int ok);
 	static void RaiseSelf(void);

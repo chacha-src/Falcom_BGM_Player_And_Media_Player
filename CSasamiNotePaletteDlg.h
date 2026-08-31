@@ -17,6 +17,7 @@ public:
 	HWND m_notify;
 
 	static CSasamiNotePaletteDlg* OpenNear(CWnd* owner, CPoint screenPt);
+	static CSasamiNotePaletteDlg* Instance();
 	void NotifyParent();
 
 protected:

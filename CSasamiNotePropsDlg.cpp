@@ -1,4 +1,4 @@
-#include "stdafx.h"
+﻿#include "stdafx.h"
 #include "ogg.h"
 #include "CSasamiNotePropsDlg.h"
 #include "CSasamiVstPartMenu.h"
@@ -9,6 +9,11 @@
 #include "OfflineHelp.h"
 
 CSasamiNotePropsDlg* CSasamiNotePropsDlg::s_inst = NULL;
+
+CSasamiNotePropsDlg* CSasamiNotePropsDlg::Instance()
+{
+	return (s_inst && ::IsWindow(s_inst->GetSafeHwnd())) ? s_inst : NULL;
+}
 
 IMPLEMENT_DYNAMIC(CSasamiNotePropsDlg, CCustomBlurDialogExBase)
 
