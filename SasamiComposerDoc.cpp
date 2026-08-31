@@ -1,4 +1,4 @@
-#include "stdafx.h"
+﻿#include "stdafx.h"
 #include "SasamiComposerDoc.h"
 #include "DatArchive.h"
 #include <string.h>
@@ -35,6 +35,32 @@ void ScMidiVstBindSetState(ScMidiVstBind* b, int ch0to31,
 	if (!b || ch0to31 < 0 || ch0to31 > 31) return;
 	SasamiVstBlobSet(&b->vstComp[ch0to31], &b->vstCompLen[ch0to31], comp, compLen);
 	SasamiVstBlobSet(&b->vstCtrl[ch0to31], &b->vstCtrlLen[ch0to31], ctrl, ctrlLen);
+}
+
+void ScMidiFxBindFreeStates(ScMidiFxBind* b)
+{
+	if (!b) return;
+	for (int ch = 0; ch < 32; ++ch)
+		for (int sl = 0; sl < ScMidiFxBind::SC_FX_SLOTS; ++sl) {
+			if (b->fxState[ch][sl]) { free(b->fxState[ch][sl]); b->fxState[ch][sl] = NULL; }
+			b->fxStateLen[ch][sl] = 0;
+		}
+}
+
+void ScMidiFxBindClear(ScMidiFxBind* b)
+{
+	if (!b) return;
+	ScMidiFxBindFreeStates(b);
+	memset(b, 0, sizeof(*b));
+}
+
+void ScMidiFxBindSetState(ScMidiFxBind* b, int ch0to31, int slot0to1,
+	const uint8_t* state, uint32_t stateLen)
+{
+	if (!b || ch0to31 < 0 || ch0to31 > 31 ||
+		slot0to1 < 0 || slot0to1 >= ScMidiFxBind::SC_FX_SLOTS) return;
+	SasamiVstBlobSet(&b->fxState[ch0to31][slot0to1],
+		&b->fxStateLen[ch0to31][slot0to1], state, stateLen);
 }
 
 static const char kB64Tab[] =
@@ -105,6 +131,7 @@ void ScMidiDocClear(ScMidiDoc* d)
 {
 	if (!d) return;
 	ScMidiVstBindFreeStates(&d->bind);
+	ScMidiFxBindFreeStates(&d->fxBind);
 	memset(d, 0, sizeof(*d));
 	d->tempoT = 13000;
 	d->numer = 4;
@@ -141,6 +168,31 @@ static int ScPush(ScEvent* ev, int* n, uint32_t tick, uint8_t ch, uint8_t kind, 
 	return 1;
 }
 
+/* Same tick+ch+kind → update (and drop duplicates). Avoids stacking |:2 |:6 at one beat. */
+static int ScUpsertMark(ScEvent* ev, int* n, uint32_t tick, uint8_t ch, uint8_t kind,
+	uint8_t a, uint8_t b, uint8_t c, uint16_t dur)
+{
+	if (!ev || !n) return 0;
+	int kept = -1;
+	for (int i = *n - 1; i >= 0; i--) {
+		if (ev[i].tick != tick || ev[i].ch != ch || ev[i].kind != kind) continue;
+		if (kept < 0) {
+			kept = i;
+			ev[i].a = a;
+			ev[i].b = b;
+			ev[i].c = c;
+			ev[i].dur = dur;
+		} else {
+			for (int j = i; j + 1 < *n; j++)
+				ev[j] = ev[j + 1];
+			(*n)--;
+			if (kept > i) kept--;
+		}
+	}
+	if (kept >= 0) return 1;
+	return ScPush(ev, n, tick, ch, kind, a, b, c, dur);
+}
+
 int ScMidiAddNote(ScMidiDoc* d, uint32_t tick, int ch, int note, int dur, int vel)
 {
 	if (!d || ch < 0 || ch >= SC_MIDI_CH) return 0;
@@ -165,18 +217,72 @@ int ScMidiAddJump(ScMidiDoc* d, uint32_t tick, int ch)
 	return ScPush(d->ev, &d->evCount, tick, (uint8_t)ch, SC_EV_FM_JUMP, 0, 0, 0, 0);
 }
 
-int ScMidiAddLoopStart(ScMidiDoc* d, uint32_t tick, int ch, int repeatN)
+int ScMidiAddLoopStart(ScMidiDoc* d, uint32_t tick, int ch, int repeatN, int stack)
 {
 	if (!d || ch < 0 || ch >= SC_MIDI_CH) return 0;
 	if (repeatN <= 0) repeatN = 2;
 	if (repeatN > 99) repeatN = 99;
-	return ScPush(d->ev, &d->evCount, tick, (uint8_t)ch, SC_EV_FM_LOOP_START, (uint8_t)repeatN, 0, 0, 0);
+	if (stack)
+		return ScPush(d->ev, &d->evCount, tick, (uint8_t)ch, SC_EV_FM_LOOP_START,
+			(uint8_t)repeatN, 0, 0, 0);
+	return ScUpsertMark(d->ev, &d->evCount, tick, (uint8_t)ch, SC_EV_FM_LOOP_START,
+		(uint8_t)repeatN, 0, 0, 0);
 }
 
-int ScMidiAddLoopEnd(ScMidiDoc* d, uint32_t tick, int ch)
+int ScMidiAddLoopEnd(ScMidiDoc* d, uint32_t tick, int ch, int stack)
 {
 	if (!d || ch < 0 || ch >= SC_MIDI_CH) return 0;
-	return ScPush(d->ev, &d->evCount, tick, (uint8_t)ch, SC_EV_FM_LOOP_END, 0, 0, 0, 0);
+	if (stack)
+		return ScPush(d->ev, &d->evCount, tick, (uint8_t)ch, SC_EV_FM_LOOP_END, 0, 0, 0, 0);
+	return ScUpsertMark(d->ev, &d->evCount, tick, (uint8_t)ch, SC_EV_FM_LOOP_END, 0, 0, 0, 0);
+}
+
+int ScMidiAddPedalOn(ScMidiDoc* d, uint32_t tick, int ch, int stack)
+{
+	if (!d || ch < 0 || ch >= SC_MIDI_CH) return 0;
+	if (stack)
+		return ScPush(d->ev, &d->evCount, tick, (uint8_t)ch, SC_EV_PEDAL_ON, 0, 0, 0, 0);
+	return ScUpsertMark(d->ev, &d->evCount, tick, (uint8_t)ch, SC_EV_PEDAL_ON, 0, 0, 0, 0);
+}
+
+int ScMidiAddPedalOff(ScMidiDoc* d, uint32_t tick, int ch, int stack)
+{
+	if (!d || ch < 0 || ch >= SC_MIDI_CH) return 0;
+	if (stack)
+		return ScPush(d->ev, &d->evCount, tick, (uint8_t)ch, SC_EV_PEDAL_OFF, 0, 0, 0, 0);
+	return ScUpsertMark(d->ev, &d->evCount, tick, (uint8_t)ch, SC_EV_PEDAL_OFF, 0, 0, 0, 0);
+}
+
+int ScMidiAddRpn(ScMidiDoc* d, uint32_t tick, int ch, int msb, int lsb, int data)
+{
+	if (!d || ch < 0 || ch >= SC_MIDI_CH) return 0;
+	if (msb < 0) msb = 0; if (msb > 127) msb = 127;
+	if (lsb < 0) lsb = 0; if (lsb > 127) lsb = 127;
+	if (data < 0) data = 0; if (data > 127) data = 127;
+	return ScPush(d->ev, &d->evCount, tick, (uint8_t)ch, SC_EV_RPN,
+		(uint8_t)msb, (uint8_t)lsb, (uint8_t)data, 0);
+}
+
+int ScMidiAddNrpn(ScMidiDoc* d, uint32_t tick, int ch, int msb, int lsb, int data)
+{
+	if (!d || ch < 0 || ch >= SC_MIDI_CH) return 0;
+	if (msb < 0) msb = 0; if (msb > 127) msb = 127;
+	if (lsb < 0) lsb = 0; if (lsb > 127) lsb = 127;
+	if (data < 0) data = 0; if (data > 127) data = 127;
+	return ScPush(d->ev, &d->evCount, tick, (uint8_t)ch, SC_EV_NRPN,
+		(uint8_t)msb, (uint8_t)lsb, (uint8_t)data, 0);
+}
+
+int ScMidiAddSysex(ScMidiDoc* d, uint32_t tick, int ch, const uint8_t* bytes, int len)
+{
+	if (!d || ch < 0 || ch >= SC_MIDI_CH || !bytes || len <= 0) return 0;
+	if (d->sysexCount >= ScMidiDoc::SC_SYSEX_MAX) return 0;
+	if (len > ScMidiDoc::SC_SYSEX_BYTES) len = ScMidiDoc::SC_SYSEX_BYTES;
+	const int idx = d->sysexCount++;
+	memcpy(d->sysex[idx], bytes, (size_t)len);
+	d->sysexLen[idx] = (uint16_t)len;
+	return ScPush(d->ev, &d->evCount, tick, (uint8_t)ch, SC_EV_SYSEX,
+		(uint8_t)idx, 0, 0, 0);
 }
 
 int ScFmAddNote(ScFmDoc* d, uint32_t tick, int ch, uint8_t noteByte, int dur)
@@ -203,18 +309,24 @@ int ScFmAddJump(ScFmDoc* d, uint32_t tick, int ch)
 	return ScPush(d->ev, &d->evCount, tick, (uint8_t)ch, SC_EV_FM_JUMP, 0, 0, 0, 0);
 }
 
-int ScFmAddLoopStart(ScFmDoc* d, uint32_t tick, int ch, int repeatN)
+int ScFmAddLoopStart(ScFmDoc* d, uint32_t tick, int ch, int repeatN, int stack)
 {
 	if (!d || ch < 0 || ch >= SC_FM_TOTAL) return 0;
 	if (repeatN <= 0) repeatN = 2;
 	if (repeatN > 99) repeatN = 99;
-	return ScPush(d->ev, &d->evCount, tick, (uint8_t)ch, SC_EV_FM_LOOP_START, (uint8_t)repeatN, 0, 0, 0);
+	if (stack)
+		return ScPush(d->ev, &d->evCount, tick, (uint8_t)ch, SC_EV_FM_LOOP_START,
+			(uint8_t)repeatN, 0, 0, 0);
+	return ScUpsertMark(d->ev, &d->evCount, tick, (uint8_t)ch, SC_EV_FM_LOOP_START,
+		(uint8_t)repeatN, 0, 0, 0);
 }
 
-int ScFmAddLoopEnd(ScFmDoc* d, uint32_t tick, int ch)
+int ScFmAddLoopEnd(ScFmDoc* d, uint32_t tick, int ch, int stack)
 {
 	if (!d || ch < 0 || ch >= SC_FM_TOTAL) return 0;
-	return ScPush(d->ev, &d->evCount, tick, (uint8_t)ch, SC_EV_FM_LOOP_END, 0, 0, 0, 0);
+	if (stack)
+		return ScPush(d->ev, &d->evCount, tick, (uint8_t)ch, SC_EV_FM_LOOP_END, 0, 0, 0, 0);
+	return ScUpsertMark(d->ev, &d->evCount, tick, (uint8_t)ch, SC_EV_FM_LOOP_END, 0, 0, 0, 0);
 }
 
 int ScFmAllocVoice(ScFmDoc* d, const uint8_t voice25[25])
@@ -245,9 +357,36 @@ int ScFmAddVolTl(ScFmDoc* d, uint32_t tick, int ch, int tl)
 	return ScPush(d->ev, &d->evCount, tick, (uint8_t)ch, SC_EV_FM_VOL, (uint8_t)tl, 0, 0, 0);
 }
 
+int ScFmAddPcmSample(ScFmDoc* d, uint32_t tick, int ch, int slot)
+{
+	if (!d || ch < SC_FM_CH || ch >= SC_FM_TOTAL) return 0;
+	if (slot < 0) slot = 0;
+	if (slot > 127) slot = 127;
+	return ScPush(d->ev, &d->evCount, tick, (uint8_t)ch, SC_EV_PCM_SAMPLE, (uint8_t)slot, 0, 0, 0);
+}
+
 
 static int IsWs(wchar_t c) { return c == L' ' || c == L'\t' || c == L'\r'; }
 static int IsDigit(wchar_t c) { return c >= L'0' && c <= L'9'; }
+static int IsHexDigit(wchar_t c)
+{
+	return (c >= L'0' && c <= L'9') || (c >= L'a' && c <= L'f') || (c >= L'A' && c <= L'F');
+}
+static int HexVal(wchar_t c)
+{
+	if (c >= L'0' && c <= L'9') return c - L'0';
+	if (c >= L'a' && c <= L'f') return c - L'a' + 10;
+	if (c >= L'A' && c <= L'F') return c - L'A' + 10;
+	return -1;
+}
+static int ContainsIW(const wchar_t* text, const wchar_t* needle)
+{
+	if (!text || !needle || !needle[0]) return 0;
+	const size_t n = wcslen(needle);
+	for (const wchar_t* p = text; *p; ++p)
+		if (_wcsnicmp(p, needle, n) == 0) return 1;
+	return 0;
+}
 
 static int ParseInt(const wchar_t** pp)
 {
@@ -256,6 +395,79 @@ static int ParseInt(const wchar_t** pp)
 	while (IsDigit(*p)) { v = v * 10 + (*p - L'0'); p++; any = 1; }
 	*pp = p;
 	return any ? v : -1;
+}
+
+static int ParseMidiTriplet(const wchar_t** pp, int* a, int* b, int* c)
+{
+	const wchar_t* p = *pp;
+	while (IsWs(*p)) p++;
+	int x = ParseInt(&p);
+	while (IsWs(*p) || *p == L',' || *p == L':') p++;
+	int y = ParseInt(&p);
+	while (IsWs(*p) || *p == L',' || *p == L':') p++;
+	int z = ParseInt(&p);
+	if (x < 0 || y < 0 || z < 0) return 0;
+	if (x > 127) x = 127;
+	if (y > 127) y = 127;
+	if (z > 127) z = 127;
+	if (a) *a = x; if (b) *b = y; if (c) *c = z;
+	*pp = p;
+	return 1;
+}
+
+static int ScNamedSysex(const wchar_t* s, uint8_t* out, int maxOut)
+{
+	if (!s || !out || maxOut < 16) return 0;
+	static const uint8_t gmOn[] = { 0xF0, 0x7E, 0x7F, 0x09, 0x01, 0xF7 };
+	static const uint8_t gm2On[] = { 0xF0, 0x7E, 0x7F, 0x09, 0x03, 0xF7 };
+	static const uint8_t gsReset[] = { 0xF0, 0x41, 0x10, 0x42, 0x12, 0x40, 0x00, 0x7F, 0x00, 0x41, 0xF7 };
+	static const uint8_t xgOn[] = { 0xF0, 0x43, 0x10, 0x4C, 0x00, 0x00, 0x7E, 0x00, 0xF7 };
+	static const uint8_t gsMasterVol[] = { 0xF0, 0x41, 0x10, 0x42, 0x12, 0x40, 0x00, 0x04, 0x64, 0x58, 0xF7 };
+	const uint8_t* src = NULL;
+	int n = 0;
+	if (ContainsIW(s, L"GM2")) { src = gm2On; n = (int)sizeof(gm2On); }
+	else if (ContainsIW(s, L"GM")) { src = gmOn; n = (int)sizeof(gmOn); }
+	else if (ContainsIW(s, L"GS") && ContainsIW(s, L"VOL")) { src = gsMasterVol; n = (int)sizeof(gsMasterVol); }
+	else if (ContainsIW(s, L"GS")) { src = gsReset; n = (int)sizeof(gsReset); }
+	else if (ContainsIW(s, L"XG")) { src = xgOn; n = (int)sizeof(xgOn); }
+	if (!src || n <= 0 || n > maxOut) return 0;
+	memcpy(out, src, (size_t)n);
+	return n;
+}
+
+static int ParseSysexBody(const wchar_t** pp, uint8_t* out, int maxOut)
+{
+	const wchar_t* p = *pp;
+	while (IsWs(*p)) p++;
+	wchar_t named[80];
+	int ni = 0;
+	if (*p == L'"') {
+		p++;
+		while (*p && *p != L'"' && ni < 79) named[ni++] = *p++;
+		named[ni] = 0;
+		if (*p == L'"') p++;
+		int n = ScNamedSysex(named, out, maxOut);
+		if (n > 0) { *pp = p; return n; }
+		p = named;
+	} else {
+		const wchar_t* q = p;
+		while (*q && *q != L'\r' && *q != L'\n' && ni < 79) named[ni++] = *q++;
+		named[ni] = 0;
+		int n = ScNamedSysex(named, out, maxOut);
+		if (n > 0) { *pp = q; return n; }
+	}
+	int n = 0;
+	while (*p && *p != L'\r' && *p != L'\n' && n < maxOut) {
+		while (IsWs(*p) || *p == L',' || *p == L':' || *p == L'{' || *p == L'}') p++;
+		if (p[0] == L'0' && (p[1] == L'x' || p[1] == L'X')) p += 2;
+		if (!IsHexDigit(*p)) break;
+		int hi = HexVal(*p++);
+		int lo = 0;
+		if (IsHexDigit(*p)) lo = HexVal(*p++);
+		out[n++] = (uint8_t)((hi << 4) | lo);
+	}
+	*pp = p;
+	return n;
 }
 
 static int NoteIndex(wchar_t c)
@@ -310,7 +522,7 @@ int ScCompileMidiMml(const wchar_t* text, ScMidiDoc* out, int* errLine, wchar_t*
 	int tempoWritten = 0;
 	int lastNoteEv = -1;
 	/* {n ... } / |:n ... :| expand: fixed stack */
-	enum { SC_LOOP_MAX = 8 };
+	enum { SC_LOOP_MAX = SC_LOOP_NEST_MAX };
 	const wchar_t* loopPos[SC_LOOP_MAX];
 	int loopLeft[SC_LOOP_MAX];
 	int loopSp = 0;
@@ -447,7 +659,65 @@ int ScCompileMidiMml(const wchar_t* text, ScMidiDoc* out, int* errLine, wchar_t*
 		/* @VST / @PROG / @BANK / @n[:m] / @letter… */
 		if (*p == L'@') {
 			p++;
-			if (_wcsnicmp(p, L"VST", 3) == 0) {
+			if (_wcsnicmp(p, L"VSTFX", 5) == 0) {
+				p += 5;
+				while (IsWs(*p)) p++;
+				int slot = ParseInt(&p);
+				if (slot < 0) slot = 0;
+				if (slot >= ScMidiFxBind::SC_FX_SLOTS) slot = ScMidiFxBind::SC_FX_SLOTS - 1;
+				while (IsWs(*p) || *p == L',' || *p == L':') p++;
+				if (*p != L'"') return fail(L"@VSTFX slot \"path\"");
+				p++;
+				wchar_t path[260]; int pi = 0;
+				while (*p && *p != L'"' && pi < 259) path[pi++] = *p++;
+				path[pi] = 0;
+				if (*p == L'"') p++;
+				wcsncpy_s(out->fxBind.fxPath[ch][slot], path, _TRUNCATE);
+				out->bind.isMpw3 = 1;
+				continue;
+			}
+			/* @VSTFXSTATEB64 slot  / @VSTFXSTATEB64+ slot */
+			if (_wcsnicmp(p, L"VSTFXSTATEB64", 13) == 0) {
+				p += 13;
+				int cont = 0;
+				if (*p == L'+') { cont = 1; p++; }
+				while (IsWs(*p)) p++;
+				int slot = ParseInt(&p);
+				if (slot < 0) slot = 0;
+				if (slot >= ScMidiFxBind::SC_FX_SLOTS) slot = ScMidiFxBind::SC_FX_SLOTS - 1;
+				while (IsWs(*p)) p++;
+				if (*p == 0x2026 || (*p == L'.' && p[1] == L'.')) {
+					while (*p && *p != L'\r' && *p != L'\n') p++;
+					continue;
+				}
+				wchar_t chunk[4096];
+				int ci = 0;
+				while (*p && *p != L'\r' && *p != L'\n' && ci < 4095)
+					chunk[ci++] = *p++;
+				chunk[ci] = 0;
+				uint8_t* decoded = NULL;
+				uint32_t dlen = 0;
+				if (!ScB64Decode(chunk, &decoded, &dlen)) return fail(L"fx b64");
+				uint8_t** dst = &out->fxBind.fxState[ch][slot];
+				uint32_t* dstLen = &out->fxBind.fxStateLen[ch][slot];
+				if (!cont) {
+					SasamiVstBlobSet(dst, dstLen, decoded, dlen);
+				} else if (decoded && dlen) {
+					uint32_t nl = *dstLen + dlen;
+					uint8_t* nb = (uint8_t*)realloc(*dst, nl ? nl : 1);
+					if (!nb) { free(decoded); return fail(L"oom"); }
+					memcpy(nb + *dstLen, decoded, dlen);
+					*dst = nb;
+					*dstLen = nl;
+				}
+				if (decoded) free(decoded);
+				out->bind.isMpw3 = 1;
+				continue;
+			}
+			if (_wcsnicmp(p, L"VST", 3) == 0 &&
+				_wcsnicmp(p, L"VSTSTATEB64", 11) != 0 &&
+				_wcsnicmp(p, L"VSTCTRLB64", 10) != 0 &&
+				_wcsnicmp(p, L"VSTFXSTATEB64", 13) != 0) {
 				p += 3;
 				while (IsWs(*p)) p++;
 				if (*p != L'"') return fail(L"@VST\"path\"");
@@ -458,6 +728,38 @@ int ScCompileMidiMml(const wchar_t* text, ScMidiDoc* out, int* errLine, wchar_t*
 				if (*p == L'"') p++;
 				wcsncpy_s(out->bind.vstPath[ch], path, _TRUNCATE);
 				out->bind.isMpw3 = 1;
+				continue;
+			}
+			if (_wcsnicmp(p, L"RPN", 3) == 0) {
+				p += 3;
+				int a = 0, b = 0, c = 0;
+				if (!ParseMidiTriplet(&p, &a, &b, &c)) return fail(L"@RPN msb,lsb,data");
+				if (!ScMidiAddRpn(out, tick[ch], ch, a, b, c)) return fail(L"overflow");
+				continue;
+			}
+			if (_wcsnicmp(p, L"NRPN", 4) == 0) {
+				p += 4;
+				int a = 0, b = 0, c = 0;
+				if (!ParseMidiTriplet(&p, &a, &b, &c)) return fail(L"@NRPN msb,lsb,data");
+				if (!ScMidiAddNrpn(out, tick[ch], ch, a, b, c)) return fail(L"overflow");
+				continue;
+			}
+			if (_wcsnicmp(p, L"EX", 2) == 0) {
+				p += 2;
+				uint8_t sx[ScMidiDoc::SC_SYSEX_BYTES];
+				int n = ParseSysexBody(&p, sx, ScMidiDoc::SC_SYSEX_BYTES);
+				if (n <= 0) return fail(L"@EX name-or-hex");
+				if (!ScMidiAddSysex(out, tick[ch], ch, sx, n)) return fail(L"overflow");
+				continue;
+			}
+			if (_wcsnicmp(p, L"PEDON", 5) == 0 || _wcsnicmp(p, L"PEDALON", 7) == 0) {
+				p += (_wcsnicmp(p, L"PEDALON", 7) == 0) ? 7 : 5;
+				if (!ScMidiAddPedalOn(out, tick[ch], ch, 1)) return fail(L"overflow");
+				continue;
+			}
+			if (_wcsnicmp(p, L"PEDOFF", 6) == 0 || _wcsnicmp(p, L"PEDALOFF", 8) == 0) {
+				p += (_wcsnicmp(p, L"PEDALOFF", 8) == 0) ? 8 : 6;
+				if (!ScMidiAddPedalOff(out, tick[ch], ch, 1)) return fail(L"overflow");
 				continue;
 			}
 			/* @VSTSTATEB64 / @VSTSTATEB64+ / @VSTCTRLB64 / @VSTCTRLB64+ */
@@ -603,7 +905,7 @@ int ScCompileMidiMml(const wchar_t* text, ScMidiDoc* out, int* errLine, wchar_t*
 				if (*p == L'{') skipBalanced(L'{', L'}');
 				continue;
 			}
-			/* @Vnnn → track volume (MPY cmd 5). @L/@R etc. still skipped below. */
+			/* @Vnnn → track volume (MPY cmd 5). */
 			if (*p == L'V' || *p == L'v') {
 				p++;
 				int n = ParseInt(&p);
@@ -612,7 +914,21 @@ int ScCompileMidiMml(const wchar_t* text, ScMidiDoc* out, int* errLine, wchar_t*
 				ScPush(out->ev, &out->evCount, tick[ch], (uint8_t)ch, SC_EV_VOL, (uint8_t)n, (uint8_t)n, 0, 0);
 				continue;
 			}
-			/* @P8192{...} / other @letter — skip args + optional {...} */
+			/* @P nnnn → pitch bend 14-bit (center 8192). @PROG already handled above. */
+			if (*p == L'P' || *p == L'p') {
+				if (_wcsnicmp(p, L"PROG", 4) != 0 && _wcsnicmp(p, L"PAN", 3) != 0) {
+					p++;
+					int n = ParseInt(&p);
+					if (n < 0) n = 0x2000;
+					if (n > 0x3FFF) n = 0x3FFF;
+					int a = 64 + (n - 0x2000) * 64 / 0x1FFF;
+					if (a < 0) a = 0;
+					if (a > 127) a = 127;
+					ScPush(out->ev, &out->evCount, tick[ch], (uint8_t)ch, SC_EV_PITCH, (uint8_t)a, 0, 0, 0);
+					continue;
+				}
+			}
+			/* other @letter — skip args + optional {...} */
 			if ((*p >= L'A' && *p <= L'Z') || (*p >= L'a' && *p <= L'z')) {
 				p++;
 				while (IsDigit(*p) || *p == L':' || *p == L'-' || *p == L'+' || *p == L'.') p++;
@@ -863,11 +1179,13 @@ int ScCompileMidiMml(const wchar_t* text, ScMidiDoc* out, int* errLine, wchar_t*
 		return fail(bad);
 	}
 	if (out->evCount <= 0) return fail(L"no events");
+	{
+		wchar_t lerr[160];
+		if (!ScValidateLoopBalance(out->ev, out->evCount, SC_MIDI_CH, lerr, 160))
+			return fail(lerr);
+	}
 	return 1;
 }
-
-
-/* FM note byte: high nibble octave, low nibble scale (same as sasami_fm NoteFm) */
 static int IsSsgCh(int ch) { return ch >= 3 && ch <= 5; }
 
 static uint8_t FmNoteByte(int mmlOct, int scale)
@@ -912,8 +1230,8 @@ int ScCompileFmText(const wchar_t* text, ScFmDoc* out, int* errLine, wchar_t* er
 	memset(volSet, 0, sizeof(volSet));
 	memset(chLoopLeft, 0, sizeof(chLoopLeft));
 	memset(chStart, 0, sizeof(chStart));
-	const wchar_t* loopPos[8];
-	int loopLeft[8];
+	const wchar_t* loopPos[SC_LOOP_NEST_MAX];
+	int loopLeft[SC_LOOP_NEST_MAX];
 	int loopSp = 0;
 	int line = 1;
 	const wchar_t* p = text;
@@ -1049,7 +1367,7 @@ int ScCompileFmText(const wchar_t* text, ScFmDoc* out, int* errLine, wchar_t* er
 			int n = ParseInt(&p);
 			if (n <= 0) n = 2;
 			if (n > 99) n = 99;
-			if (loopSp >= 8) return fail(L"loop nest too deep");
+			if (loopSp >= SC_LOOP_NEST_MAX) return fail(L"loop nest too deep");
 			loopPos[loopSp] = p;
 			loopLeft[loopSp] = n;
 			loopSp++;
@@ -1163,6 +1481,11 @@ int ScCompileFmText(const wchar_t* text, ScFmDoc* out, int* errLine, wchar_t* er
 		return fail(L"FM syntax error");
 	}
 	if (out->evCount <= 0) return fail(L"no events");
+	{
+		wchar_t lerr[160];
+		if (!ScValidateLoopBalance(out->ev, out->evCount, SC_FM_TOTAL, lerr, 160))
+			return fail(lerr);
+	}
 	return 1;
 }
 
@@ -1210,9 +1533,119 @@ static ScEvent* ScSortedEvBuf(void)
 	return s;
 }
 
+static int ScPutMisaoPcmSample(SasamiTrackStream* s, uint8_t slot, const wchar_t* relPath)
+{
+	if (!s || !relPath || !relPath[0]) return 1;
+	char path8[255];
+	int n = WideCharToMultiByte(CP_UTF8, 0, relPath, -1, path8, (int)sizeof(path8), NULL, NULL);
+	if (n <= 1)
+		n = WideCharToMultiByte(932, 0, relPath, -1, path8, (int)sizeof(path8), NULL, NULL);
+	if (n <= 1) return 0;
+	int len = n - 1; /* command 26 stores byte count without the trailing NUL. */
+	if (len > 255) len = 255;
+	uint8_t hdr[3] = { 26, slot, (uint8_t)len };
+	if (!SasamiStreamPut(s, hdr, 3)) return 0;
+	return SasamiStreamPut(s, (const uint8_t*)path8, (uint32_t)len);
+}
+
+static uint16_t ScPitchCenter64ToMisaoRaw(uint8_t v)
+{
+	int d = (int)v - 64;
+	int raw = 0x8000 + d * 0x0200;
+	if (raw < 0) raw = 0;
+	if (raw > 0xFFFF) raw = 0xFFFF;
+	return (uint16_t)raw;
+}
+
+static wchar_t s_scLastWriteErr[160];
+
+const wchar_t* ScGetLastWriteErr(void)
+{
+	return s_scLastWriteErr;
+}
+
+int ScValidateLoopBalance(const ScEvent* ev, int n, int chMax, wchar_t* errMsg, int errMsgCch)
+{
+	if (errMsg && errMsgCch > 0) errMsg[0] = 0;
+	if (!ev || n <= 0) return 1;
+	if (chMax <= 0) chMax = 1;
+	if (chMax > 64) chMax = 64;
+
+	ScEvent* sorted = ScSortedEvBuf();
+	if (!sorted) {
+		if (errMsg && errMsgCch > 0)
+			wcsncpy_s(errMsg, errMsgCch, L"oom", _TRUNCATE);
+		return 0;
+	}
+	if (n > SC_EV_MAX) n = SC_EV_MAX;
+	memcpy(sorted, ev, sizeof(ScEvent) * (size_t)n);
+	qsort(sorted, (size_t)n, sizeof(ScEvent), CmpEv);
+
+	int sp[64];
+	memset(sp, 0, sizeof(sp));
+	for (int i = 0; i < n; i++) {
+		const ScEvent& e = sorted[i];
+		const int ch = (int)e.ch;
+		if (ch < 0 || ch >= chMax) continue;
+		if (e.kind == SC_EV_FM_LOOP_START) {
+			if (sp[ch] >= SC_LOOP_NEST_MAX) {
+				const wchar_t* msg = L"loop nest too deep (max 16)";
+				if (errMsg && errMsgCch > 0) wcsncpy_s(errMsg, errMsgCch, msg, _TRUNCATE);
+				return 0;
+			}
+			sp[ch]++;
+		} else if (e.kind == SC_EV_FM_LOOP_END) {
+			if (sp[ch] <= 0) {
+				const wchar_t* msg = L"ループの不一致です (:| に対応する |: がありません)";
+				if (errMsg && errMsgCch > 0) wcsncpy_s(errMsg, errMsgCch, msg, _TRUNCATE);
+				return 0;
+			}
+			sp[ch]--;
+		}
+	}
+	for (int ch = 0; ch < chMax; ch++) {
+		if (sp[ch] > 0) {
+			const wchar_t* msg = L"ループの不一致です (|: が :| で閉じられていません)";
+			if (errMsg && errMsgCch > 0) wcsncpy_s(errMsg, errMsgCch, msg, _TRUNCATE);
+			return 0;
+		}
+	}
+	return 1;
+}
+
+int ScDocMaxLoopNest(const ScEvent* ev, int n, int chMax)
+{
+	if (!ev || n <= 0) return 0;
+	if (chMax <= 0) chMax = 1;
+	if (chMax > 64) chMax = 64;
+	ScEvent* sorted = ScSortedEvBuf();
+	if (!sorted) return 0;
+	if (n > SC_EV_MAX) n = SC_EV_MAX;
+	memcpy(sorted, ev, sizeof(ScEvent) * (size_t)n);
+	qsort(sorted, (size_t)n, sizeof(ScEvent), CmpEv);
+	int sp[64];
+	memset(sp, 0, sizeof(sp));
+	int maxD = 0;
+	for (int i = 0; i < n; i++) {
+		const ScEvent& e = sorted[i];
+		const int ch = (int)e.ch;
+		if (ch < 0 || ch >= chMax) continue;
+		if (e.kind == SC_EV_FM_LOOP_START) {
+			sp[ch]++;
+			if (sp[ch] > maxD) maxD = sp[ch];
+		} else if (e.kind == SC_EV_FM_LOOP_END) {
+			if (sp[ch] > 0) sp[ch]--;
+		}
+	}
+	return maxD;
+}
+
 int ScMidiDocToWrite(const ScMidiDoc* d, SasamiWriteMidi* w)
 {
+	s_scLastWriteErr[0] = 0;
 	if (!d || !w) return 0;
+	if (!ScValidateLoopBalance(d->ev, d->evCount, SC_MIDI_CH, s_scLastWriteErr, 160))
+		return 0;
 	SasamiWriteMidiClear(w);
 	w->trackCount = 32;
 	w->dualPort = d->bind.dualPort;
@@ -1245,7 +1678,7 @@ int ScMidiDocToWrite(const ScMidiDoc* d, SasamiWriteMidi* w)
 	int vel[SC_MIDI_CH];
 	int preambleDone[SC_MIDI_CH];
 	for (int i = 0; i < SC_MIDI_CH; i++) { vel[i] = 105; preambleDone[i] = 0; }
-	uint32_t loopBodyOff[SC_MIDI_CH][8];
+	uint32_t loopBodyOff[SC_MIDI_CH][SC_LOOP_NEST_MAX];
 	int loopWrSp[SC_MIDI_CH];
 	uint32_t chStreamJump[SC_MIDI_CH];
 	int chJumpSet[SC_MIDI_CH];
@@ -1256,25 +1689,32 @@ int ScMidiDocToWrite(const ScMidiDoc* d, SasamiWriteMidi* w)
 
 	/* DO--.MPY track header for VST SC-VA / GS:
 	   - MVOL80 + VOL117 + VELO105 (MVOL = GS master; without it SC-VA sits ~full → ~2x)
-	   - Classic inserts REST waits between init cmds (sum 0x83=131 before R8)
+	   - Init REST waits kept at 0 so score tick 0 == first audible note (classic
+	     DO-- used ~131 ticks of padding; that desynced the score playhead).
 	   - Default @L/@R ONLY on first track (global GS; per-track R 003C00 killed reverb) */
 	int globalFxDone = 0;
-	auto putPreamble = [&](SasamiTrackStream* s) -> int {
+	auto putPreamble = [&](SasamiTrackStream* s, uint32_t* outWaitTicks) -> int {
+		uint32_t waitSum = 0;
+		auto putRest = [&](uint8_t w8) -> int {
+			if (!SasamiStreamPut3(s, 8, 0, w8)) return 0;
+			waitSum += w8;
+			return 1;
+		};
 		if (!SasamiStreamPut3(s, 4, 80, 0)) return 0;           /* MVOL */
-		if (!SasamiStreamPut3(s, 8, 0, 0x0F)) return 0;
+		if (!putRest(0)) return 0;
 		if (!SasamiStreamPut3(s, 7, 0, 0)) return 0;            /* BANK 0 */
-		if (!SasamiStreamPut3(s, 8, 0, 0x0A)) return 0;
-		if (!SasamiStreamPut3(s, 16, 1, 0x0A)) return 0;        /* H1 */
-		if (!SasamiStreamPut3(s, 8, 0, 0x0A)) return 0;
+		if (!putRest(0)) return 0;
+		if (!SasamiStreamPut3(s, 16, 1, 0)) return 0;           /* H1 */
+		if (!putRest(0)) return 0;
 		if (!SasamiStreamPut3(s, 17, 60, 0)) return 0;          /* I60 */
-		if (!SasamiStreamPut3(s, 8, 0, 0x0A)) return 0;
+		if (!putRest(0)) return 0;
 		if (!SasamiStreamPut3(s, 5, 117, 117)) return 0;        /* VOL */
-		if (!SasamiStreamPut3(s, 8, 0, 0x0A)) return 0;
-		if (!SasamiStreamPut3(s, 0x13, 105, 0x0A)) return 0;    /* VELO */
-		if (!SasamiStreamPut3(s, 8, 0, 0x0A)) return 0;
-		if (!SasamiStreamPut3(s, 21, 0, 0x0A)) return 0;        /* PEDOFF */
-		if (!SasamiStreamPut3(s, 8, 0, 0x42)) return 0;
-		if (!SasamiStreamPut3(s, 35, 1, 0x42)) return 0;        /* MD5588 stub */
+		if (!putRest(0)) return 0;
+		if (!SasamiStreamPut3(s, 0x13, 105, 0)) return 0;       /* VELO */
+		if (!putRest(0)) return 0;
+		if (!SasamiStreamPut3(s, 21, 0, 0)) return 0;           /* PEDOFF */
+		if (!putRest(0)) return 0;
+		if (!SasamiStreamPut3(s, 35, 1, 0)) return 0;           /* MD5588 stub */
 		if (!globalFxDone) {
 			uint8_t L[4] = { 13, 0, 5, 0 };
 			uint8_t R[4] = { 14, 0, 60, 0 };
@@ -1282,6 +1722,7 @@ int ScMidiDocToWrite(const ScMidiDoc* d, SasamiWriteMidi* w)
 			if (!SasamiStreamPut(s, R, 4)) return 0;
 			globalFxDone = 1;
 		}
+		if (outWaitTicks) *outWaitTicks = waitSum;
 		return 1;
 	};
 
@@ -1295,7 +1736,10 @@ int ScMidiDocToWrite(const ScMidiDoc* d, SasamiWriteMidi* w)
 		else
 			s->part = ch & 15;
 		if (!preambleDone[ch]) {
-			if (!putPreamble(s)) return 0;
+			uint32_t preWait = 0;
+			if (!putPreamble(s, &preWait)) return 0;
+			/* Align stream time with score ticks (preamble waits used to skew this). */
+			lastTick[ch] = preWait;
 			preambleDone[ch] = 1;
 			vel[ch] = 105;
 		}
@@ -1342,6 +1786,40 @@ int ScMidiDocToWrite(const ScMidiDoc* d, SasamiWriteMidi* w)
 		case SC_EV_PAN:
 			if (!SasamiStreamPut3(s, 0x0C, e->a, e->a)) return 0;
 			break;
+		case SC_EV_PITCH: {
+			/* MIDI cmd 11 PICH: 14-bit bend, center 0x2000; a = 0..127 center 64 */
+			int bent = 0x2000 + ((int)e->a - 64) * (0x1FFF / 64);
+			if (bent < 0) bent = 0;
+			if (bent > 0x3FFF) bent = 0x3FFF;
+			if (!SasamiStreamPut3(s, 11, (uint8_t)(bent & 0x7F), (uint8_t)((bent >> 7) & 0x7F))) return 0;
+			break;
+		}
+		case SC_EV_RPN:
+			/* cmd 26 = RPN(0,0) pitch-bend sens; else cmd 41 CC stream (101/100/6). */
+			if (e->a == 0 && e->b == 0) {
+				if (!SasamiStreamPut3(s, 26, e->c, 0)) return 0;
+			} else {
+				if (!SasamiStreamPut3(s, 41, 0x65, e->a)) return 0;
+				if (!SasamiStreamPut3(s, 41, 0x64, e->b)) return 0;
+				if (!SasamiStreamPut3(s, 41, 0x06, e->c)) return 0;
+			}
+			break;
+		case SC_EV_NRPN: {
+			uint8_t nr[4] = { 37, e->a, e->b, e->c };
+			if (!SasamiStreamPut(s, nr, 4)) return 0;
+			break;
+		}
+		case SC_EV_SYSEX: {
+			const int si = (int)e->a;
+			if (si >= 0 && si < d->sysexCount && d->sysexLen[si] > 0) {
+				uint8_t cmd = 36;
+				if (!SasamiStreamPut(s, &cmd, 1)) return 0;
+				if (!SasamiStreamPut(s, d->sysex[si], d->sysexLen[si])) return 0;
+				cmd = 0xFF;
+				if (!SasamiStreamPut(s, &cmd, 1)) return 0;
+			}
+			break;
+		}
 		case SC_EV_JUMP_MARK: {
 			/* Q: J lands here (after R8/@V/@prog). Do not overwrite a prior |:. */
 			if (!chJumpSet[ch]) {
@@ -1353,7 +1831,7 @@ int ScMidiDocToWrite(const ScMidiDoc* d, SasamiWriteMidi* w)
 		case SC_EV_FM_LOOP_START: {
 			/* MPY cmd 23: count in b1. Soft-J prefers earlier Q over this |:. */
 			if (!SasamiStreamPut3(s, 23, e->a, 0)) return 0;
-			if (loopWrSp[ch] < 8) {
+			if (loopWrSp[ch] < SC_LOOP_NEST_MAX) {
 				loopBodyOff[ch][loopWrSp[ch]] = s->size;
 				if (!chJumpSet[ch]) {
 					chStreamJump[ch] = s->size - 3;
@@ -1364,7 +1842,10 @@ int ScMidiDocToWrite(const ScMidiDoc* d, SasamiWriteMidi* w)
 			break;
 		}
 		case SC_EV_FM_LOOP_END: {
-			if (loopWrSp[ch] <= 0) break;
+			if (loopWrSp[ch] <= 0) {
+				wcsncpy_s(s_scLastWriteErr, 160, L"ループの不一致です (:| に対応する |: がありません)", _TRUNCATE);
+				return 0;
+			}
 			loopWrSp[ch]--;
 			uint32_t bodyRel = loopBodyOff[ch][loopWrSp[ch]];
 			/* cmd 24: track-relative body; BuildMpy patches to abs 0x1xxx */
@@ -1382,6 +1863,14 @@ int ScMidiDocToWrite(const ScMidiDoc* d, SasamiWriteMidi* w)
 			if (!SasamiStreamPut3(s, 0x0A, (uint8_t)(mark & 0xFF), (uint8_t)(mark >> 8))) return 0;
 			break;
 		}
+		case SC_EV_PEDAL_ON:
+			/* MPY cmd 20 PDLON — CC64=127 */
+			if (!SasamiStreamPut3(s, 20, 0, 0)) return 0;
+			break;
+		case SC_EV_PEDAL_OFF:
+			/* MPY cmd 21 PDLOFF — CC64=0 */
+			if (!SasamiStreamPut3(s, 21, 0, 0)) return 0;
+			break;
 		case SC_EV_NOTE: {
 			int gate = (e->c >= 1 && e->c <= 100) ? e->c : 100;
 			uint32_t sounding = ((uint32_t)(e->dur ? e->dur : 1) * (uint32_t)gate) / 100u;
@@ -1408,7 +1897,7 @@ int ScMidiDocToWrite(const ScMidiDoc* d, SasamiWriteMidi* w)
 		}
 	}
 	/* VST-bound parts with no notes still need a live stream so SMF convert
-	   keeps nAlive>0 and preview can open the host. */
+	   keeps nAlive>0 and preview can open the host. Keep rest minimal. */
 	for (int ch = 0; ch < SC_MIDI_CH; ch++) {
 		if (w->tr[ch].used) continue;
 		if (!d->bind.vstPath[ch][0]) continue;
@@ -1416,8 +1905,9 @@ int ScMidiDocToWrite(const ScMidiDoc* d, SasamiWriteMidi* w)
 			w->tr[ch].part = d->trackPart[ch] & 15;
 		else
 			w->tr[ch].part = ch & 15;
-		if (!putPreamble(&w->tr[ch])) return 0;
-		if (!SasamiStreamPut3(&w->tr[ch], 8, 0, (uint8_t)(SC_PPQN * 4))) return 0;
+		uint32_t preWait = 0;
+		if (!putPreamble(&w->tr[ch], &preWait)) return 0;
+		if (!SasamiStreamPut3(&w->tr[ch], 8, 0, 1)) return 0;
 	}
 	for (int ch = 0; ch < SC_MIDI_CH; ch++) {
 		if (w->tr[ch].used)
@@ -1445,7 +1935,10 @@ int ScMidiDocToWrite(const ScMidiDoc* d, SasamiWriteMidi* w)
 
 int ScFmDocToWrite(const ScFmDoc* d, SasamiWriteFm* w)
 {
+	s_scLastWriteErr[0] = 0;
 	if (!d || !w) return 0;
+	if (!ScValidateLoopBalance(d->ev, d->evCount, SC_FM_TOTAL, s_scLastWriteErr, 160))
+		return 0;
 	SasamiWriteFmClear(w);
 	w->opna10 = d->opna10;
 	strncpy_s(w->titleSjis, d->titleSjis, _TRUNCATE);
@@ -1463,7 +1956,7 @@ int ScFmDocToWrite(const ScFmDoc* d, SasamiWriteFm* w)
 	uint32_t lastTick[SC_FM_TOTAL];
 	int chHadVoice[SC_FM_TOTAL];
 	int chHadVol[SC_FM_TOTAL];
-	uint32_t loopBodyOff[SC_FM_TOTAL][8];
+	uint32_t loopBodyOff[SC_FM_TOTAL][SC_LOOP_NEST_MAX];
 	int loopWrSp[SC_FM_TOTAL];
 	uint32_t chStreamJump[SC_FM_TOTAL]; /* stream offset for J target (first loop body or 0) */
 	int chJumpSet[SC_FM_TOTAL];
@@ -1476,6 +1969,8 @@ int ScFmDocToWrite(const ScFmDoc* d, SasamiWriteFm* w)
 	memset(chJumpSet, 0, sizeof(chJumpSet));
 	int misaoMax = 0;
 	int tempoWritten = 0;
+	int misaoHasPcmEv[SC_FM_MISAO];
+	memset(misaoHasPcmEv, 0, sizeof(misaoHasPcmEv));
 
 	/* Inject doc tempo if score has notes but no tempo event (else default length math). */
 	for (int i = 0; i < n; i++) {
@@ -1486,6 +1981,17 @@ int ScFmDocToWrite(const ScFmDoc* d, SasamiWriteFm* w)
 		if (!SasamiStreamPut3(s0, 9, (uint8_t)(d->tempoT & 0xFF), (uint8_t)((d->tempoT >> 8) & 0xFF)))
 			return 0;
 		tempoWritten = 1;
+	}
+	for (int i = 0; i < n; i++) {
+		const ScEvent* e = &sorted[i];
+		if (e->kind == SC_EV_PCM_SAMPLE && e->ch >= SC_FM_CH && e->ch < SC_FM_TOTAL)
+			misaoHasPcmEv[e->ch - SC_FM_CH] = 1;
+	}
+	for (int mi = 0; mi < SC_FM_MISAO; mi++) {
+		if (!d->pcmRelPath[mi][0] || misaoHasPcmEv[mi]) continue;
+		if (!ScPutMisaoPcmSample(&w->misao[mi], d->pcmSlot[mi], d->pcmRelPath[mi]))
+			return 0;
+		if (mi + 1 > misaoMax) misaoMax = mi + 1;
 	}
 
 	for (int i = 0; i < n; i++) {
@@ -1523,7 +2029,7 @@ int ScFmDocToWrite(const ScFmDoc* d, SasamiWriteFm* w)
 		case SC_EV_FM_LOOP_START: {
 			/* cmd 13: count in b1. Body starts at next stream offset. */
 			if (!SasamiStreamPut3(s, 13, e->a, 0)) return 0;
-			if (loopWrSp[ch] < 8) {
+			if (loopWrSp[ch] < SC_LOOP_NEST_MAX) {
 				loopBodyOff[ch][loopWrSp[ch]] = s->size; /* relative to track stream start */
 				if (!chJumpSet[ch]) {
 					/* J targets this first |: (matches DO--.FPY) */
@@ -1535,7 +2041,10 @@ int ScFmDocToWrite(const ScFmDoc* d, SasamiWriteFm* w)
 			break;
 		}
 		case SC_EV_FM_LOOP_END: {
-			if (loopWrSp[ch] <= 0) break;
+			if (loopWrSp[ch] <= 0) {
+				wcsncpy_s(s_scLastWriteErr, 160, L"ループの不一致です (:| に対応する |: がありません)", _TRUNCATE);
+				return 0;
+			}
 			loopWrSp[ch]--;
 			uint32_t bodyRel = loopBodyOff[ch][loopWrSp[ch]];
 			/* cmd 14: store track-relative body offset; BuildFpy patches to abs 0x1xxx */
@@ -1552,6 +2061,11 @@ int ScFmDocToWrite(const ScFmDoc* d, SasamiWriteFm* w)
 		}
 		case SC_EV_FM_VOICE: {
 			if (IsSsgCh(ch)) break; /* SSG has no FNEIRO */
+			if (ch >= SC_FM_CH) {
+				if (!SasamiStreamPut3(s, 2, e->a, 0)) return 0; /* Misao PNEIRO slot */
+				chHadVoice[ch] = 1;
+				break;
+			}
 			/* b==1: custom embedded voice index (patched in SasamiBuildFpy via 0xFE00|idx) */
 			uint16_t raw = (e->b == 1)
 				? (uint16_t)(0xFE00 | (e->a & 0x3F))
@@ -1569,6 +2083,17 @@ int ScFmDocToWrite(const ScFmDoc* d, SasamiWriteFm* w)
 			}
 			chHadVol[ch] = 1;
 			break;
+		case SC_EV_FM_PITCH: {
+			uint16_t raw = ScPitchCenter64ToMisaoRaw(e->a);
+			if (!SasamiStreamPut3(s, 12, (uint8_t)(raw & 0xFF), (uint8_t)(raw >> 8))) return 0;
+			break;
+		}
+		case SC_EV_PCM_SAMPLE:
+			if (ch >= SC_FM_CH) {
+				int mi = ch - SC_FM_CH;
+				if (!ScPutMisaoPcmSample(s, e->a, d->pcmRelPath[mi])) return 0;
+			}
+			break;
 		case SC_EV_FM_NOTE: {
 			if (ch == 6) {
 				int pad = e->a & 0x0F;
@@ -1576,16 +2101,31 @@ int ScFmDocToWrite(const ScFmDoc* d, SasamiWriteFm* w)
 				if (pad > 5) pad = 5;
 				const uint8_t mask = (uint8_t)(1 << pad);
 				if (!SasamiStreamPut3(s, 8, 0x10, mask)) return 0;
-				uint8_t wait = (e->dur > 255) ? 255 : (uint8_t)(e->dur < 2 ? 2 : e->dur);
+				uint32_t totalDur = e->dur ? e->dur : 2;
+				/* Coalesce following TIEs (same pitch) into one sounding length. */
+				for (int j = i + 1; j < n; j++) {
+					const ScEvent* te = &sorted[j];
+					if (te->ch != e->ch) break;
+					if (te->kind == SC_EV_TIE && te->a == e->a) {
+						totalDur += te->dur ? te->dur : 0;
+						continue;
+					}
+					if (te->kind == SC_EV_FM_NOTE || te->kind == SC_EV_FM_REST || te->kind == SC_EV_TIE)
+						break;
+				}
+				uint8_t wait = (totalDur > 255) ? 255 : (uint8_t)(totalDur < 2 ? 2 : totalDur);
 				if (!SasamiStreamPut3(s, 1, 0, wait)) return 0;
 				if (!SasamiStreamPut3(s, 8, 0x10, (uint8_t)(0x80 | mask))) return 0;
-				lastTick[ch] += e->dur ? e->dur : wait;
+				lastTick[ch] += totalDur;
 				break;
 			}
 			if (!IsSsgCh(ch)) {
 				if (!chHadVoice[ch]) {
 					uint16_t raw;
-					if (d->voiceCount > 0)
+					if (ch >= SC_FM_CH) {
+						int mi = ch - SC_FM_CH;
+						raw = d->pcmSlot[mi];
+					} else if (d->voiceCount > 0)
 						raw = (uint16_t)(0xFE00 | 0);
 					else
 						raw = (uint16_t)(0x900 + 1 * 0x30);
@@ -1600,8 +2140,44 @@ int ScFmDocToWrite(const ScFmDoc* d, SasamiWriteFm* w)
 				if (!SasamiStreamPut3(s, 4, 15, 0)) return 0; /* PSGVOL max */
 				chHadVol[ch] = 1;
 			}
-			uint8_t wait = (e->dur > 255) ? 255 : (uint8_t)(e->dur < 2 ? 2 : e->dur);
+			uint32_t totalDur = e->dur ? e->dur : 2;
+			for (int j = i + 1; j < n; j++) {
+				const ScEvent* te = &sorted[j];
+				if (te->ch != e->ch) break;
+				if (te->kind == SC_EV_TIE && te->a == e->a) {
+					totalDur += te->dur ? te->dur : 0;
+					continue;
+				}
+				if (te->kind == SC_EV_FM_NOTE || te->kind == SC_EV_FM_REST || te->kind == SC_EV_TIE)
+					break;
+			}
+			uint8_t wait = (totalDur > 255) ? 255 : (uint8_t)(totalDur < 2 ? 2 : totalDur);
 			if (!SasamiStreamPut3(s, 0, e->a, wait)) return 0;
+			lastTick[ch] += totalDur;
+			break;
+		}
+		case SC_EV_TIE: {
+			/* Consumed by preceding FM_NOTE coalesce; orphan TIE → time wait only. */
+			int consumed = 0;
+			for (int j = i - 1; j >= 0; j--) {
+				const ScEvent* pe = &sorted[j];
+				if (pe->ch != e->ch) continue;
+				if (pe->kind == SC_EV_FM_NOTE && pe->a == e->a) { consumed = 1; break; }
+				if (pe->kind == SC_EV_TIE && pe->a == e->a) continue;
+				break;
+			}
+			if (consumed) break;
+			if (e->tick > lastTick[ch]) {
+				uint32_t gap = e->tick - lastTick[ch];
+				while (gap > 0) {
+					uint8_t w8 = (gap > 255) ? 255 : (uint8_t)gap;
+					if (!SasamiStreamPut3(s, 1, 0, w8)) return 0;
+					gap -= w8;
+				}
+				lastTick[ch] = e->tick;
+			}
+			uint8_t wait = (e->dur > 255) ? 255 : (uint8_t)(e->dur < 2 ? 2 : e->dur);
+			if (!SasamiStreamPut3(s, 1, 0, wait)) return 0;
 			lastTick[ch] += e->dur ? e->dur : wait;
 			break;
 		}
@@ -1623,6 +2199,8 @@ int ScFmDocToWrite(const ScFmDoc* d, SasamiWriteFm* w)
 			SasamiStreamPut3(&w->misao[ch], 3, 0xF0, 0x00);
 	}
 	w->misaoChCount = misaoMax;
+	/* Nest depth ≥2 → FPY2 (classic FPY / ASM player is 1-deep only). */
+	w->fpy2 = (ScDocMaxLoopNest(d->ev, d->evCount, SC_FM_TOTAL) > 1) ? 1 : 0;
 	return 1;
 }
 
@@ -2040,6 +2618,8 @@ static int ScMidiDocToMmlImpl(const ScMidiDoc* d, wchar_t* out, int outCch, int 
 		if (d->ev[i].ch < SC_MIDI_CH) used[d->ev[i].ch] = 1;
 	for (int ch = 0; ch < SC_MIDI_CH; ch++) {
 		if (d->bind.vstPath[ch][0] || d->bind.vstProg[ch] >= 0) used[ch] = 1;
+		for (int sl = 0; sl < ScMidiFxBind::SC_FX_SLOTS; ++sl)
+			if (d->fxBind.fxPath[ch][sl][0]) used[ch] = 1;
 		if (!used[ch]) continue;
 		if (len >= cap - 64) return 0;
 		int part = d->trackPart[ch];
@@ -2047,6 +2627,21 @@ static int ScMidiDocToMmlImpl(const ScMidiDoc* d, wchar_t* out, int outCch, int 
 		ScAppendF(out, outCch, &len, L"\r\n[%d:%d]\r\n", (int)part + 1, ch + 1);
 		if (d->bind.vstPath[ch][0])
 			ScAppendF(out, outCch, &len, L"@VST\"%s\"\r\n", d->bind.vstPath[ch]);
+		for (int sl = 0; sl < ScMidiFxBind::SC_FX_SLOTS; ++sl) {
+			if (d->fxBind.fxPath[ch][sl][0])
+				ScAppendF(out, outCch, &len, L"@VSTFX %d \"%s\"\r\n", sl, d->fxBind.fxPath[ch][sl]);
+			if (d->fxBind.fxStateLen[ch][sl] && d->fxBind.fxState[ch][sl]) {
+				wchar_t tag0[48], tag1[48];
+				_snwprintf_s(tag0, _TRUNCATE, L"@VSTFXSTATEB64 %d", sl);
+				_snwprintf_s(tag1, _TRUNCATE, L"@VSTFXSTATEB64+ %d", sl);
+				if (embedB64Full)
+					ScAppendB64Lines(out, outCch, &len, tag0, tag1,
+						d->fxBind.fxState[ch][sl], d->fxBind.fxStateLen[ch][sl]);
+				else
+					ScAppendB64Placeholder(out, outCch, &len, tag0,
+						d->fxBind.fxState[ch][sl], d->fxBind.fxStateLen[ch][sl]);
+			}
+		}
 		if (d->bind.vstProg[ch] >= 0)
 			ScAppendF(out, outCch, &len, L"@PROG %d\r\n", d->bind.vstProg[ch]);
 		if (d->bind.vstBankMsb[ch] >= 0 || d->bind.vstBankLsb[ch] >= 0)
@@ -2056,110 +2651,240 @@ static int ScMidiDocToMmlImpl(const ScMidiDoc* d, wchar_t* out, int outCch, int 
 
 		int curOct = -1;
 		uint32_t expect = 0;
-		for (int i = 0; i < d->evCount; i++) {
+
+		/* Own buffer — do not reuse ScSortedEvBuf (writer may share). */
+		static ScEvent* chEv = NULL;
+		static uint8_t* consumed = NULL;
+		if (!chEv)
+			chEv = (ScEvent*)HeapAlloc(GetProcessHeap(), 0, sizeof(ScEvent) * (SIZE_T)SC_EV_MAX);
+		if (!consumed)
+			consumed = (uint8_t*)HeapAlloc(GetProcessHeap(), 0, (SIZE_T)SC_EV_MAX);
+		if (!chEv || !consumed) return 0;
+
+		int nCh = 0;
+		for (int i = 0; i < d->evCount; i++)
+			if (d->ev[i].ch == (uint8_t)ch) chEv[nCh++] = d->ev[i];
+		qsort(chEv, (size_t)nCh, sizeof(ScEvent), CmpEv);
+		memset(consumed, 0, (size_t)nCh);
+
+		auto fitPiece = [](int gap, int* lnOut, int* dotsOut) -> int {
+			static const int lens[] = { 1, 2, 4, 8, 16, 32, 64 };
+			int bestLn = 64, bestDots = 0, bestGot = 0;
+			for (int i = 0; i < 7; i++) {
+				int want = (SC_PPQN * 4) / lens[i];
+				if (want <= gap && want >= bestGot) {
+					bestGot = want; bestLn = lens[i]; bestDots = 0;
+				}
+				int dotted = want + want / 2;
+				if (dotted <= gap && dotted >= bestGot) {
+					bestGot = dotted; bestLn = lens[i]; bestDots = 1;
+				}
+			}
+			if (bestGot <= 0) {
+				bestGot = 1; bestLn = 64; bestDots = 0;
+			}
+			if (lnOut) *lnOut = bestLn;
+			if (dotsOut) *dotsOut = bestDots;
+			return bestGot;
+		};
+
+		auto emitGap = [&](uint32_t toTick) {
+			if (toTick <= expect) return;
+			uint32_t gap = toTick - expect;
+			while (gap > 0) {
+				int ln = 4, dots = 0;
+				int got = fitPiece((int)gap, &ln, &dots);
+				if (got > (int)gap) got = (int)gap;
+				ScAppendF(out, outCch, &len, L"r%d", ln);
+				for (int dti = 0; dti < dots; dti++) ScAppend(out, outCch, &len, L".");
+				ScAppend(out, outCch, &len, L" ");
+				expect += (uint32_t)got;
+				gap -= (uint32_t)got;
+				if (len >= cap - 64) return;
+			}
+		};
+
+		auto emitCc = [&](const ScEvent& e) {
+			if (e.kind == SC_EV_VELO)
+				ScAppendF(out, outCch, &len, L"v%d ", (int)e.a);
+			else if (e.kind == SC_EV_VOL)
+				ScAppendF(out, outCch, &len, L"@V%d ", (int)e.a);
+			else if (e.kind == SC_EV_PAN)
+				ScAppendF(out, outCch, &len, L"P%d ", (int)e.a);
+			else if (e.kind == SC_EV_PITCH) {
+				int bent = 0x2000 + ((int)e.a - 64) * (0x1FFF / 64);
+				if (bent < 0) bent = 0;
+				if (bent > 0x3FFF) bent = 0x3FFF;
+				ScAppendF(out, outCch, &len, L"@P%d ", bent);
+			}
+		};
+
+		auto isCc = [](uint8_t k) -> int {
+			return (k == SC_EV_VELO || k == SC_EV_VOL || k == SC_EV_PAN || k == SC_EV_PITCH) ? 1 : 0;
+		};
+
+		auto emitLen = [&](int durTicks, int asTie) {
+			int left = durTicks;
+			int first = 1;
+			while (left > 0) {
+				int ln = 4, dots = 0;
+				int got = fitPiece(left, &ln, &dots);
+				if (got > left) got = left;
+				if (asTie || !first) ScAppendF(out, outCch, &len, L"^%d", ln);
+				else ScAppendF(out, outCch, &len, L"%d", ln);
+				for (int dti = 0; dti < dots; dti++) ScAppend(out, outCch, &len, L".");
+				left -= got;
+				first = 0;
+				asTie = 1;
+			}
+		};
+
+		for (int i = 0; i < nCh; i++) {
 			if (len >= cap - 128) return 0;
-			const ScEvent& e = d->ev[i];
-			if (e.ch != (uint8_t)ch) continue;
+			if (consumed[i]) continue;
+			const ScEvent& e = chEv[i];
+
 			if (e.kind == SC_EV_TEMPO) {
+				emitGap(e.tick);
 				int t = e.a | (e.b << 8);
 				int b = t > 0 ? (int)((13000.0 * 120.0) / (double)t + 0.5) : 120;
 				ScAppendF(out, outCch, &len, L"t%d ", b);
 				continue;
 			}
-			if (e.kind == SC_EV_VELO) {
-				ScAppendF(out, outCch, &len, L"v%d ", (int)e.a);
-				continue;
-			}
-			if (e.kind == SC_EV_PAN) {
-				ScAppendF(out, outCch, &len, L"P%d ", (int)e.a);
-				continue;
-			}
 			if (e.kind == SC_EV_PROG) {
+				emitGap(e.tick);
 				ScAppendF(out, outCch, &len, L"@PROG %d ", (int)e.a);
 				continue;
 			}
 			if (e.kind == SC_EV_BANK) {
+				emitGap(e.tick);
 				ScAppendF(out, outCch, &len, L"@BANK %d,%d ", (int)e.a, (int)e.b);
 				continue;
 			}
-			if (e.kind == SC_EV_JUMP_MARK) {
-				if (e.tick > expect) {
-					uint32_t gap = e.tick - expect;
-					int dots = 0;
-					int ln = ScDurToLen((int)gap, &dots);
-					ScAppendF(out, outCch, &len, L"r%d", ln);
-					for (int dti = 0; dti < dots; dti++) ScAppend(out, outCch, &len, L".");
-					ScAppend(out, outCch, &len, L" ");
-					expect = e.tick;
-				}
-				ScAppend(out, outCch, &len, L"Q ");
+			if (e.kind == SC_EV_RPN) {
+				emitGap(e.tick);
+				ScAppendF(out, outCch, &len, L"@RPN %u,%u,%u ", (unsigned)e.a, (unsigned)e.b, (unsigned)e.c);
 				continue;
 			}
-			if (e.kind == SC_EV_FM_JUMP) {
-				if (e.tick > expect) {
-					uint32_t gap = e.tick - expect;
-					int dots = 0;
-					int ln = ScDurToLen((int)gap, &dots);
-					ScAppendF(out, outCch, &len, L"r%d", ln);
-					for (int dti = 0; dti < dots; dti++) ScAppend(out, outCch, &len, L".");
-					ScAppend(out, outCch, &len, L" ");
-					expect = e.tick;
-				}
-				ScAppend(out, outCch, &len, L"J ");
+			if (e.kind == SC_EV_NRPN) {
+				emitGap(e.tick);
+				ScAppendF(out, outCch, &len, L"@NRPN %u,%u,%u ", (unsigned)e.a, (unsigned)e.b, (unsigned)e.c);
 				continue;
 			}
-			if (e.kind == SC_EV_FM_LOOP_START) {
-				if (e.tick > expect) {
-					uint32_t gap = e.tick - expect;
-					int dots = 0;
-					int ln = ScDurToLen((int)gap, &dots);
-					ScAppendF(out, outCch, &len, L"r%d", ln);
-					for (int dti = 0; dti < dots; dti++) ScAppend(out, outCch, &len, L".");
+			if (e.kind == SC_EV_SYSEX) {
+				emitGap(e.tick);
+				const int si = (int)e.a;
+				if (si >= 0 && si < d->sysexCount && d->sysexLen[si] > 0) {
+					ScAppend(out, outCch, &len, L"@EX ");
+					for (int bi = 0; bi < d->sysexLen[si]; ++bi)
+						ScAppendF(out, outCch, &len, bi ? L" %02X" : L"%02X", (unsigned)d->sysex[si][bi]);
 					ScAppend(out, outCch, &len, L" ");
-					expect = e.tick;
 				}
-				ScAppendF(out, outCch, &len, L"|:%d ", e.a ? (int)e.a : 2);
 				continue;
 			}
-			if (e.kind == SC_EV_FM_LOOP_END) {
-				if (e.tick > expect) {
-					uint32_t gap = e.tick - expect;
-					int dots = 0;
-					int ln = ScDurToLen((int)gap, &dots);
-					ScAppendF(out, outCch, &len, L"r%d", ln);
-					for (int dti = 0; dti < dots; dti++) ScAppend(out, outCch, &len, L".");
-					ScAppend(out, outCch, &len, L" ");
-					expect = e.tick;
-				}
-				ScAppend(out, outCch, &len, L":| ");
+			if (e.kind == SC_EV_JUMP_MARK || e.kind == SC_EV_FM_JUMP ||
+				e.kind == SC_EV_FM_LOOP_START || e.kind == SC_EV_FM_LOOP_END ||
+				e.kind == SC_EV_PEDAL_ON || e.kind == SC_EV_PEDAL_OFF) {
+				emitGap(e.tick);
+				if (e.kind == SC_EV_JUMP_MARK) ScAppend(out, outCch, &len, L"Q ");
+				else if (e.kind == SC_EV_FM_JUMP) ScAppend(out, outCch, &len, L"J ");
+				else if (e.kind == SC_EV_FM_LOOP_START)
+					ScAppendF(out, outCch, &len, L"|:%d ", e.a ? (int)e.a : 2);
+				else if (e.kind == SC_EV_FM_LOOP_END) ScAppend(out, outCch, &len, L":| ");
+				else if (e.kind == SC_EV_PEDAL_ON) ScAppend(out, outCch, &len, L"@PEDON ");
+				else ScAppend(out, outCch, &len, L"@PEDOFF ");
 				continue;
 			}
+
+			if (isCc(e.kind)) {
+				emitGap(e.tick);
+				emitCc(e);
+				continue;
+			}
+
 			if (e.kind != SC_EV_NOTE && e.kind != SC_EV_REST) continue;
-			if (e.tick > expect) {
-				uint32_t gap = e.tick - expect;
-				int dots = 0;
-				int ln = ScDurToLen((int)gap, &dots);
-				ScAppendF(out, outCch, &len, L"r%d", ln);
-				for (int dti = 0; dti < dots; dti++) ScAppend(out, outCch, &len, L".");
-				ScAppend(out, outCch, &len, L" ");
+
+			const uint32_t noteTick = e.tick;
+			const uint32_t noteDur = e.dur ? e.dur : (uint32_t)SC_PPQN;
+			const uint32_t noteEnd = noteTick + noteDur;
+
+			int ccIdx[256];
+			int ccN = 0;
+			for (int j = 0; j < nCh && ccN < 256; j++) {
+				if (consumed[j]) continue;
+				const ScEvent& ccev = chEv[j];
+				if (!isCc(ccev.kind)) continue;
+				if (ccev.tick < noteTick) continue;
+				if (ccev.tick >= noteEnd) continue;
+				ccIdx[ccN++] = j;
 			}
-			int dots = 0;
-			int ln = ScDurToLen(e.dur ? e.dur : SC_PPQN, &dots);
-			if (e.kind == SC_EV_REST) {
-				ScAppendF(out, outCch, &len, L"r%d", ln);
-			} else {
-				int oct = 4;
-				wchar_t nm[8];
-				ScNoteName((int)e.a, &oct, nm);
-				if (oct != curOct) {
-					ScAppendF(out, outCch, &len, L"o%d ", oct);
-					curOct = oct;
+
+			emitGap(noteTick);
+			for (int c = 0; c < ccN; c++) {
+				if (chEv[ccIdx[c]].tick == noteTick) {
+					emitCc(chEv[ccIdx[c]]);
+					consumed[ccIdx[c]] = 1;
 				}
-				ScAppendF(out, outCch, &len, L"%s%d", nm, ln);
 			}
-			for (int dti = 0; dti < dots; dti++) ScAppend(out, outCch, &len, L".");
+
+			if (e.kind == SC_EV_REST) {
+				expect = noteTick;
+				for (int c = 0; c < ccN; c++) {
+					if (consumed[ccIdx[c]]) continue;
+					uint32_t ct = chEv[ccIdx[c]].tick;
+					emitGap(ct);
+					emitCc(chEv[ccIdx[c]]);
+					consumed[ccIdx[c]] = 1;
+				}
+				emitGap(noteEnd);
+				continue;
+			}
+
+			/* NOTE: a+8 v29 ^8 v45 … (timed CC inside the sounding note) */
+			int oct = 4;
+			wchar_t nm[8];
+			ScNoteName((int)e.a, &oct, nm);
+			if (oct != curOct) {
+				ScAppendF(out, outCch, &len, L"o%d ", oct);
+				curOct = oct;
+			}
+
+			uint32_t brk[260];
+			int brN = 0;
+			brk[brN++] = noteTick;
+			for (int c = 0; c < ccN; c++) {
+				uint32_t ct = chEv[ccIdx[c]].tick;
+				if (ct > noteTick && ct < noteEnd) brk[brN++] = ct;
+			}
+			brk[brN++] = noteEnd;
+			int wbr = 1;
+			for (int b = 1; b < brN; b++)
+				if (brk[b] != brk[wbr - 1]) brk[wbr++] = brk[b];
+			brN = wbr;
+
+			for (int b = 0; b + 1 < brN; b++) {
+				uint32_t t0 = brk[b];
+				uint32_t t1 = brk[b + 1];
+				int seg = (int)(t1 - t0);
+				if (seg <= 0) continue;
+				if (b == 0) {
+					ScAppendF(out, outCch, &len, L"%s", nm);
+					emitLen(seg, 0);
+				} else {
+					for (int c = 0; c < ccN; c++) {
+						if (consumed[ccIdx[c]]) continue;
+						if (chEv[ccIdx[c]].tick == t0) {
+							emitCc(chEv[ccIdx[c]]);
+							consumed[ccIdx[c]] = 1;
+						}
+					}
+					emitLen(seg, 1);
+				}
+			}
 			ScAppend(out, outCch, &len, L" ");
-			expect = e.tick + (e.dur ? e.dur : SC_PPQN);
+			expect = noteEnd;
+			for (int c = 0; c < ccN; c++)
+				if (chEv[ccIdx[c]].tick < noteEnd) consumed[ccIdx[c]] = 1;
 		}
 		/* VST blobs after notes — always on their own line(s). */
 		if (d->bind.vstCompLen[ch] && d->bind.vstComp[ch]) {
@@ -2213,6 +2938,15 @@ void ScMidiDocMergeVstBind(ScMidiDoc* dst, const ScMidiDoc* src)
 		if (!dst->bind.vstCtrlLen[ch] && src->bind.vstCtrlLen[ch] && src->bind.vstCtrl[ch])
 			SasamiVstBlobSet(&dst->bind.vstCtrl[ch], &dst->bind.vstCtrlLen[ch],
 				src->bind.vstCtrl[ch], src->bind.vstCtrlLen[ch]);
+		for (int sl = 0; sl < ScMidiFxBind::SC_FX_SLOTS; ++sl) {
+			if (!dst->fxBind.fxPath[ch][sl][0] && src->fxBind.fxPath[ch][sl][0])
+				wcsncpy_s(dst->fxBind.fxPath[ch][sl], src->fxBind.fxPath[ch][sl], _TRUNCATE);
+			if (!dst->fxBind.fxStateLen[ch][sl] && src->fxBind.fxStateLen[ch][sl] && src->fxBind.fxState[ch][sl])
+				SasamiVstBlobSet(&dst->fxBind.fxState[ch][sl], &dst->fxBind.fxStateLen[ch][sl],
+					src->fxBind.fxState[ch][sl], src->fxBind.fxStateLen[ch][sl]);
+			if (src->fxBind.fxBypass[ch][sl])
+				dst->fxBind.fxBypass[ch][sl] = src->fxBind.fxBypass[ch][sl];
+		}
 	}
 	if (src->bind.isMpw3) dst->bind.isMpw3 = 1;
 }

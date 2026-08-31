@@ -8,7 +8,7 @@ class SasamiFmPlayer {
 public:
 	SasamiFmPlayer();
 	~SasamiFmPlayer();
-	bool Open(const SasamiSong& song, uint32_t sampleRate, const wchar_t* rhythmDir, int fmMode = 2);
+	bool Open(const SasamiSong& song, uint32_t sampleRate, const wchar_t* rhythmDir, int fmMode = 2, const wchar_t* sampleBaseDir = NULL);
 	void Close();
 	// raira=1 かつ OPN/OPNA 再生時: %TEMP%\ogg_kbsasami\ にレジスタ dump（BEEP は無効）
 	void SetFmMonDump(int enable, const wchar_t* sourcePath);

@@ -1,4 +1,4 @@
-﻿// KpiPluginInstall.cpp — Plugins.zip を公式配布から取得し exe 隣へ展開
+// KpiPluginInstall.cpp — Plugins.zip を公式配布から取得し exe 隣へ展開
 #include "stdafx.h"
 #include "KpiPluginInstall.h"
 #include <wininet.h>
@@ -434,10 +434,10 @@ BOOL KpiInstall_SilentUpdateKbsasami(LPCTSTR exeDir)
 	const time_t localNewest = (t86 > t64) ? t86 : t64;
 
 	const time_t serverMod = KpiInstallHttpLastModified(KBSASAMI_ZIP_URL);
-	// 両方あり、かつサーバがローカルより新しくない → 何もしない
+	/* Have both and already at/newer than server → skip. */
 	if (!missing && serverMod != 0 && serverMod <= localNewest + 120)
 		return FALSE;
-	// ローカルありで日付が取れない → 毎回落とさない
+	/* Have local but Last-Modified unknown → don't re-fetch every launch. */
 	if (!missing && serverMod == 0)
 		return FALSE;
 

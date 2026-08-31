@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003" DefaultTargets="Build" ToolsVersion="14.0">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="uni_2026_de|Win32">
@@ -393,7 +393,10 @@
     <ClCompile Include="CSasamiFmScoreDlg.cpp" />
     <ClCompile Include="CSasamiFmVoiceDlg.cpp" />
     <ClCompile Include="CSasamiNotePaletteDlg.cpp" />
+    <ClCompile Include="CSasamiSimpleInputDlg.cpp" />
     <ClCompile Include="CSasamiNotePropsDlg.cpp" />
+    <ClCompile Include="CSasamiExcRpnDlg.cpp" />
+    <ClCompile Include="CSasamiInsertFxDlg.cpp" />
     <ClCompile Include="CSasamiVstPickDlg.cpp" />
     <ClCompile Include="CSasamiToneMapDlg.cpp" />
     <ClCompile Include="CSasamiVstPartMenu.cpp" />
@@ -517,7 +520,10 @@
     <ClInclude Include="CSasamiFmScoreDlg.h" />
     <ClInclude Include="CSasamiFmVoiceDlg.h" />
     <ClInclude Include="CSasamiNotePaletteDlg.h" />
+    <ClInclude Include="CSasamiSimpleInputDlg.h" />
     <ClInclude Include="CSasamiNotePropsDlg.h" />
+    <ClInclude Include="CSasamiExcRpnDlg.h" />
+    <ClInclude Include="CSasamiInsertFxDlg.h" />
     <ClInclude Include="CSasamiVstPickDlg.h" />
     <ClInclude Include="CSasamiToneMapDlg.h" />
     <ClInclude Include="CSasamiVstPartMenu.h" />

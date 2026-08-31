@@ -1,4 +1,4 @@
-﻿#include "stdafx.h"
+#include "stdafx.h"
 #include "ogg.h"
 #include "CSasamiVstPartMenu.h"
 #include "CSasamiVstPickDlg.h"
@@ -73,6 +73,8 @@ static int ScVstLoadPicked(CWnd* owner, int part1to32, ScMidiVstBind* bind)
 	if (!waitOwner) {
 		if (CWnd* main = AfxGetMainWnd()) waitOwner = main->GetSafeHwnd();
 	}
+	/* Preview/monitor must not hold Host64 SHM while SC-VA loads. */
+	VstLiveMonitorStop();
 	VstWaitShowLoad(waitOwner, waitName);
 	const int rc = VstLiveLoadPart(part1to32, path, is3);
 	VstWaitHide();
@@ -128,6 +130,7 @@ static int ScVstTryLoadPath(CWnd* owner, int part1to32, ScMidiVstBind* bind, con
 	const wchar_t* waitName = path;
 	if (const wchar_t* slash = wcsrchr(path, L'\\')) waitName = slash + 1;
 	HWND waitOwner = owner ? owner->GetSafeHwnd() : NULL;
+	VstLiveMonitorStop();
 	VstWaitShowLoad(waitOwner, waitName);
 	const int rc = VstLiveLoadPart(part1to32, path, is3);
 	VstWaitHide();
@@ -287,19 +290,26 @@ int ScVstAssignToneForPart(CWnd* owner, int part1to32, ScMidiVstBind* bind)
 	wchar_t path[520];
 	path[0] = 0;
 	VstLivePartGetPath(part1to32, path, 520);
+	/* Heal isMulti: tone map uses DetectMultiTimbral(path), but auto-editor
+	   used only IsMulti — mismatch opened SC-VA VST2 editor and froze on OK. */
 	int multi = VstLivePartIsMulti(part1to32) ||
 		(path[0] && VstDetectMultiTimbral(path));
 
 	if (multi) {
 		/* SC-VA / GS/XG multi → tone map; VST3… inside can switch to dedicated. */
-		CSasamiToneMapDlg::PickForPart(owner, part1to32, bind);
+		const int r = CSasamiToneMapDlg::PickForPart(owner, part1to32, bind);
+		if (r != IDOK)
+			return 0;
 		path[0] = 0;
 		VstLivePartGetPath(part1to32, path, 520);
 		multi = VstLivePartIsMulti(part1to32) ||
 			(path[0] && VstDetectMultiTimbral(path));
 		if (multi)
-			return 1;
-		/* Fell through to dedicated after VST3 pick. */
+			return 1; /* tone map applied — never open VST2 editor */
+		/* Fell through to dedicated after VST3 pick inside tone map. */
+		if (bind)
+			bind->isMpw3 = 1;
+		return 2;
 	}
 
 	/* Dedicated: load only. No MonitorEnsure here — waveOut+Render during HALion
@@ -307,5 +317,5 @@ int ScVstAssignToneForPart(CWnd* owner, int part1to32, ScMidiVstBind* bind)
 	if (bind)
 		bind->isMpw3 = 1;
 	(void)owner;
-	return 1;
+	return 2;
 }

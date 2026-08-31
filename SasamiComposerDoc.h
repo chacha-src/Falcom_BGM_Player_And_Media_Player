@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 /* Shared SASAMI Composer document: score events + text MML compile (fixed arrays, no std). */
 #include <stdint.h>
 #include <windows.h>
@@ -14,6 +14,8 @@ enum { SC_EV_MAX = 65536 };
 enum { SC_TEXT_MAX = 1024 * 1024 };
 enum { SC_VOICE_MAX = 64 };
 enum { SC_PPQN = 48 };
+/* Native |:…:| nest depth (ASM was 1; player supports up to 16 / FPY2). */
+enum { SC_LOOP_NEST_MAX = 16 };
 
 enum ScEvKind : uint8_t {
 	SC_EV_NOTE = 1,
@@ -34,7 +36,15 @@ enum ScEvKind : uint8_t {
 	SC_EV_FM_LOOP_START = 16, /* a = repeat count (PMD |:n) */
 	SC_EV_FM_LOOP_END = 17,   /* native FPY cmd 14 */
 	SC_EV_FM_JUMP = 18,       /* FJUMP / J — a/b = placeholder */
-	SC_EV_JUMP_MARK = 19      /* Q: soft-J land (before body); no MPY opcode */
+	SC_EV_JUMP_MARK = 19,     /* Q: soft-J land (before body); no MPY opcode */
+	SC_EV_PITCH = 20,         /* MIDI pitch bend; a=0..127 center 64 */
+	SC_EV_FM_PITCH = 21,      /* FM/Misao FPICH/PMPICH; a=0..127 center 64 */
+	SC_EV_PCM_SAMPLE = 22,    /* Misao: a=slot, path in ScFmDoc.pcmRelPath[ch-SC_FM_CH] */
+	SC_EV_RPN = 23,           /* MIDI RPN: a=MSB b=LSB c=data */
+	SC_EV_NRPN = 24,          /* MIDI NRPN: a=MSB b=LSB c=data */
+	SC_EV_SYSEX = 25,         /* MIDI SysEx: a=ScMidiDoc sysex pool index */
+	SC_EV_PEDAL_ON = 26,      /* MIDI sustain CC64=127 (MPY cmd 20) */
+	SC_EV_PEDAL_OFF = 27      /* MIDI sustain CC64=0 (MPY cmd 21) */
 };
 
 struct ScEvent {
@@ -61,11 +71,23 @@ struct ScMidiVstBind {
 	uint32_t vstCtrlLen[32];
 };
 
+struct ScMidiFxBind {
+	enum { SC_FX_SLOTS = 2 };
+	wchar_t fxPath[32][SC_FX_SLOTS][260];
+	int fxBypass[32][SC_FX_SLOTS];
+	uint8_t* fxState[32][SC_FX_SLOTS];
+	uint32_t fxStateLen[32][SC_FX_SLOTS];
+};
+
 void ScMidiVstBindClear(ScMidiVstBind* b);
 void ScMidiVstBindFreeStates(ScMidiVstBind* b);
 void ScMidiVstBindSetState(ScMidiVstBind* b, int ch0to31,
 	const uint8_t* comp, uint32_t compLen,
 	const uint8_t* ctrl, uint32_t ctrlLen);
+void ScMidiFxBindClear(ScMidiFxBind* b);
+void ScMidiFxBindFreeStates(ScMidiFxBind* b);
+void ScMidiFxBindSetState(ScMidiFxBind* b, int ch0to31, int slot0to1,
+	const uint8_t* state, uint32_t stateLen);
 
 
 struct ScMidiDoc {
@@ -75,6 +97,11 @@ struct ScMidiDoc {
 	int numer, denom;
 	char titleSjis[65];
 	ScMidiVstBind bind; /* VST paths / prog for MPW3 — streams built at write time */
+	ScMidiFxBind fxBind; /* per-part insert FX paths/state for score/live preview */
+	enum { SC_SYSEX_MAX = 64, SC_SYSEX_BYTES = 256 };
+	uint8_t sysex[SC_SYSEX_MAX][SC_SYSEX_BYTES];
+	uint16_t sysexLen[SC_SYSEX_MAX];
+	int sysexCount;
 	/* MICP [midiCh:dataArea]: events use dataArea-1 as track slot; part = midiCh-1 */
 	uint8_t trackPart[SC_MIDI_CH];
 };
@@ -87,6 +114,9 @@ struct ScFmDoc {
 	char titleSjis[65];
 	uint8_t voices[SC_VOICE_MAX][25];
 	int voiceCount;
+	/* Misao PCM: relative sample path per Misao track (empty = classic number/midisynth) */
+	wchar_t pcmRelPath[SC_FM_MISAO][260];
+	uint8_t pcmSlot[SC_FM_MISAO];
 };
 
 struct ScTextBuf {
@@ -103,17 +133,23 @@ int ScMidiAddRest(ScMidiDoc* d, uint32_t tick, int ch, int dur);
 /* Score marks: Q (jump land), J (jump), |:n (loop start), :| (loop end). */
 int ScMidiAddJumpMark(ScMidiDoc* d, uint32_t tick, int ch);     /* Q */
 int ScMidiAddJump(ScMidiDoc* d, uint32_t tick, int ch);         /* J */
-int ScMidiAddLoopStart(ScMidiDoc* d, uint32_t tick, int ch, int repeatN);
-int ScMidiAddLoopEnd(ScMidiDoc* d, uint32_t tick, int ch);
+int ScMidiAddLoopStart(ScMidiDoc* d, uint32_t tick, int ch, int repeatN, int stack);
+int ScMidiAddLoopEnd(ScMidiDoc* d, uint32_t tick, int ch, int stack);
+int ScMidiAddPedalOn(ScMidiDoc* d, uint32_t tick, int ch, int stack);
+int ScMidiAddPedalOff(ScMidiDoc* d, uint32_t tick, int ch, int stack);
+int ScMidiAddRpn(ScMidiDoc* d, uint32_t tick, int ch, int msb, int lsb, int data);
+int ScMidiAddNrpn(ScMidiDoc* d, uint32_t tick, int ch, int msb, int lsb, int data);
+int ScMidiAddSysex(ScMidiDoc* d, uint32_t tick, int ch, const uint8_t* bytes, int len);
 int ScFmAddNote(ScFmDoc* d, uint32_t tick, int ch, uint8_t noteByte, int dur);
 int ScFmAddRest(ScFmDoc* d, uint32_t tick, int ch, int dur);
 int ScFmAddJumpMark(ScFmDoc* d, uint32_t tick, int ch);
 int ScFmAddJump(ScFmDoc* d, uint32_t tick, int ch);
-int ScFmAddLoopStart(ScFmDoc* d, uint32_t tick, int ch, int repeatN);
-int ScFmAddLoopEnd(ScFmDoc* d, uint32_t tick, int ch);
+int ScFmAddLoopStart(ScFmDoc* d, uint32_t tick, int ch, int repeatN, int stack);
+int ScFmAddLoopEnd(ScFmDoc* d, uint32_t tick, int ch, int stack);
 int ScFmAllocVoice(ScFmDoc* d, const uint8_t voice25[25]); /* returns index or -1 */
 int ScFmAddVoiceSelect(ScFmDoc* d, uint32_t tick, int ch, int voiceIdx, int isCustom);
 int ScFmAddVolTl(ScFmDoc* d, uint32_t tick, int ch, int tl);
+int ScFmAddPcmSample(ScFmDoc* d, uint32_t tick, int ch, int slot);
 
 /* Compile MML / MML2 / MML3 text (UTF-16) into midi doc. errLine out optional. */
 int ScCompileMidiMml(const wchar_t* text, ScMidiDoc* out, int* errLine, wchar_t* errMsg, int errMsgCch);
@@ -139,6 +175,11 @@ int ScFmDocNoteCount(const ScFmDoc* d);
 /* Emit binary writers from docs */
 int ScMidiDocToWrite(const ScMidiDoc* d, SasamiWriteMidi* w);
 int ScFmDocToWrite(const ScFmDoc* d, SasamiWriteFm* w);
+/* Per-channel |: / :| balance. 1=ok. Optional err buffer. */
+int ScValidateLoopBalance(const ScEvent* ev, int n, int chMax, wchar_t* errMsg, int errMsgCch);
+/* Max simultaneous |: depth across channels (0 = none). */
+int ScDocMaxLoopNest(const ScEvent* ev, int n, int chMax);
+const wchar_t* ScGetLastWriteErr(void);
 
 /* Load .F wrapper → extract DAT text into wchar buffer */
 int ScExtractOldFToText(const wchar_t* path, wchar_t* out, int outCch);

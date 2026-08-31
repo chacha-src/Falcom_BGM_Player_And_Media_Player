@@ -447,6 +447,16 @@ struct LivePart {
 	LivePending pend;
 };
 
+struct LiveFxSlot {
+	HMODULE module;
+	AEffect* effect;
+	Vst3Inst* vst3;
+	int remote;
+	int bypass;
+	HWND edWnd;
+	wchar_t path[VST_PATH_CHARS];
+};
+
 enum { MIX_SLOTS = 16 };
 enum {
 	FAM_DRUM = 0, FAM_PIANO, FAM_CHROME, FAM_ORGAN, FAM_GUITAR, FAM_BASS,
@@ -508,6 +518,7 @@ struct EngineState {
 	__declspec(align(32)) float mixL[BLOCK_FRAMES];
 	__declspec(align(32)) float mixR[BLOCK_FRAMES];
 	LivePart live[32];
+	LiveFxSlot liveFx[32][2];
 	int gmResetMode; // 0=GM+GS, 1=GS, 2=XG（シーク巻き戻し時に再送）
 	int gsMapLsb;    // 0=なし 1=SC-55 2=SC-88 3=88Pro 4=8820/50（CC#32）
 	int songGm;      // 1=GM  2=GM2（GM On のみ。GM2 は ch10 に MSB120）
@@ -3660,6 +3671,30 @@ static void RenderEffect(AEffect* e, float* l, float* r, int frames)
 	__except (EXCEPTION_EXECUTE_HANDLER) {
 		ZeroMemory(l, frames * sizeof(float));
 		ZeroMemory(r, frames * sizeof(float));
+	}
+	if (e->numOutputs == 1) memcpy(r, l, frames * sizeof(float));
+}
+
+static void RenderFxEffect(AEffect* e, float* l, float* r, int frames)
+{
+	if (!e || !e->processReplacing || frames <= 0) return;
+	LiveDllDirFromEffect(e);
+	memcpy(g_eng.mixL, l, frames * sizeof(float));
+	memcpy(g_eng.mixR, r, frames * sizeof(float));
+	float* in[32], *out[32];
+	for (int i = 0; i < 32; ++i) {
+		in[i] = g_eng.zero;
+		out[i] = g_eng.zero;
+	}
+	in[0] = g_eng.mixL;
+	in[1] = g_eng.mixR;
+	out[0] = l;
+	out[1] = r;
+	ZeroMemory(g_eng.zero, frames * sizeof(float));
+	__try { e->processReplacing(e, in, out, frames); }
+	__except (EXCEPTION_EXECUTE_HANDLER) {
+		memcpy(l, g_eng.mixL, frames * sizeof(float));
+		memcpy(r, g_eng.mixR, frames * sizeof(float));
 	}
 	if (e->numOutputs == 1) memcpy(r, l, frames * sizeof(float));
 }
@@ -7223,8 +7258,11 @@ extern "C" void VstLiveShutdown(void)
 	g_kpiHost.VstLiveUnloadAll();
 	g_liveShm.parts = 0;
 #endif
-	for (int i = 1; i <= 32; ++i)
+	for (int i = 1; i <= 32; ++i) {
+		for (int sl = 0; sl < 2; ++sl)
+			VstLiveUnloadFx(i, sl);
 		VstLiveUnloadPart(i);
+	}
 #ifndef KPIHOST64_BUILD
 	InterlockedExchange(&g_liveShuttingDown, 0);
 #endif
@@ -7710,6 +7748,304 @@ static int LivePartLoaded(int part)
 	if (part < 0 || part >= 32) return 0;
 	const LivePart& p = g_eng.live[part];
 	return (p.effect || p.vst3 || p.remote) ? 1 : 0;
+}
+
+static VstIntPtr LiveVst2Dispatch(AEffect* e, VstInt32 op, VstInt32 index,
+	VstIntPtr value, void* ptr);
+
+static int LiveFxValid(int part1to32, int slot0to1)
+{
+	return part1to32 >= 1 && part1to32 <= 32 && slot0to1 >= 0 && slot0to1 < 2;
+}
+
+static void LiveFxCloseEditor(int part1to32, int slot0to1)
+{
+	if (!LiveFxValid(part1to32, slot0to1)) return;
+	LiveFxSlot& fx = g_eng.liveFx[part1to32 - 1][slot0to1];
+	HWND h = fx.edWnd;
+	fx.edWnd = NULL;
+	if (h && IsWindow(h)) {
+		KillTimer(h, 1);
+		ShowWindow(h, SW_HIDE);
+	}
+	if (fx.vst3) Vst3EditorClose(fx.vst3);
+	if (fx.effect && fx.effect->dispatcher) {
+		__try { fx.effect->dispatcher(fx.effect, effEditClose, 0, 0, NULL, 0); }
+		__except (EXCEPTION_EXECUTE_HANDLER) {}
+	}
+	if (h && IsWindow(h)) {
+		SetWindowLongPtrW(h, GWLP_USERDATA, 0);
+		DestroyWindow(h);
+	}
+}
+
+static LRESULT CALLBACK LiveFxEditorWndProc(HWND h, UINT m, WPARAM w, LPARAM l)
+{
+	const int code = (int)GetWindowLongPtrW(h, GWLP_USERDATA);
+	const int part = (code >> 8) & 0xFF;
+	const int slot = code & 0xFF;
+	if (LiveFxValid(part, slot)) {
+		LiveFxSlot& fx = g_eng.liveFx[part - 1][slot];
+		if (m == WM_TIMER && w == 1) {
+			if (fx.effect && fx.effect->dispatcher) {
+				__try { fx.effect->dispatcher(fx.effect, effEditIdle, 0, 0, NULL, 0); }
+				__except (EXCEPTION_EXECUTE_HANDLER) {}
+			}
+			return 0;
+		}
+		if (m == WM_CLOSE) {
+			LiveFxCloseEditor(part, slot);
+			return 0;
+		}
+	}
+	return DefWindowProcW(h, m, w, l);
+}
+
+static HWND LiveFxCreateEditorWnd(int part1to32, int slot0to1)
+{
+	static int registered = 0;
+	if (!registered) {
+		WNDCLASSEXW wc = {};
+		wc.cbSize = sizeof(wc);
+		wc.lpfnWndProc = LiveFxEditorWndProc;
+		wc.hInstance = GetModuleHandleW(NULL);
+		wc.hCursor = LoadCursorW(NULL, IDC_ARROW);
+		wc.hbrBackground = (HBRUSH)GetStockObject(BLACK_BRUSH);
+		wc.lpszClassName = L"OggVstLiveFxEditor";
+		RegisterClassExW(&wc);
+		registered = 1;
+	}
+	wchar_t title[80];
+	_snwprintf_s(title, _TRUNCATE, L"Insert FX %d.%d", part1to32, slot0to1 + 1);
+	HWND h = CreateWindowExW(0, L"OggVstLiveFxEditor", title,
+		WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
+		CW_USEDEFAULT, CW_USEDEFAULT, 640, 480, NULL, NULL,
+		GetModuleHandleW(NULL), NULL);
+	if (h) SetWindowLongPtrW(h, GWLP_USERDATA, (LONG_PTR)((part1to32 << 8) | slot0to1));
+	return h;
+}
+
+extern "C" int VstLiveLoadFx(int part1to32, int slot0to1,
+	const wchar_t* pluginPath, int isVst3)
+{
+	if (!LiveFxValid(part1to32, slot0to1) || !pluginPath || !pluginPath[0]) return -1;
+	LiveFxCloseEditor(part1to32, slot0to1);
+	LiveFxSlot& fx = g_eng.liveFx[part1to32 - 1][slot0to1];
+	EnterCriticalSection(&g_eng.cs);
+	CloseEffect(fx.module, fx.effect);
+	Vst3Close(fx.vst3); fx.vst3 = NULL;
+	fx.remote = 0;
+	fx.path[0] = 0;
+	LeaveCriticalSection(&g_eng.cs);
+
+	Vst3Inst* vst3 = NULL;
+	HMODULE module = NULL;
+	AEffect* effect = NULL;
+	int ok = 0;
+	if (isVst3) {
+		vst3 = Vst3Open(pluginPath);
+		ok = Vst3IsOk(vst3);
+		if (!ok) { Vst3Close(vst3); vst3 = NULL; }
+	} else {
+		ok = LoadVst2(pluginPath, module, effect);
+	}
+	if (!ok) {
+		if (vst3) Vst3Close(vst3);
+		if (effect || module) CloseEffect(module, effect);
+		return -2;
+	}
+	EnterCriticalSection(&g_eng.cs);
+	fx.vst3 = vst3;
+	fx.module = module;
+	fx.effect = effect;
+	fx.bypass = 0;
+	wcsncpy_s(fx.path, pluginPath, _TRUNCATE);
+	LeaveCriticalSection(&g_eng.cs);
+	return 0;
+}
+
+extern "C" void VstLiveUnloadFx(int part1to32, int slot0to1)
+{
+	if (!LiveFxValid(part1to32, slot0to1)) return;
+	LiveFxCloseEditor(part1to32, slot0to1);
+	EnterCriticalSection(&g_eng.cs);
+	LiveFxSlot& fx = g_eng.liveFx[part1to32 - 1][slot0to1];
+	CloseEffect(fx.module, fx.effect);
+	Vst3Close(fx.vst3); fx.vst3 = NULL;
+	fx.bypass = 0;
+	fx.path[0] = 0;
+	LeaveCriticalSection(&g_eng.cs);
+}
+
+extern "C" int VstLiveFxIsLoaded(int part1to32, int slot0to1)
+{
+	if (!LiveFxValid(part1to32, slot0to1)) return 0;
+	const LiveFxSlot& fx = g_eng.liveFx[part1to32 - 1][slot0to1];
+	return (fx.effect || fx.vst3) ? 1 : 0;
+}
+
+extern "C" int VstLiveFxGetPath(int part1to32, int slot0to1, wchar_t* outPath, int outCch)
+{
+	if (outPath && outCch > 0) outPath[0] = 0;
+	if (!LiveFxValid(part1to32, slot0to1) || !outPath || outCch <= 0) return 0;
+	wcsncpy_s(outPath, outCch, g_eng.liveFx[part1to32 - 1][slot0to1].path, _TRUNCATE);
+	return outPath[0] ? 1 : 0;
+}
+
+extern "C" int VstLiveFxParamCount(int part1to32, int slot0to1)
+{
+	if (!LiveFxValid(part1to32, slot0to1)) return 0;
+	LiveFxSlot& fx = g_eng.liveFx[part1to32 - 1][slot0to1];
+	if (fx.vst3) return Vst3ParamCount(fx.vst3);
+	if (fx.effect) return fx.effect->numParams > 0 ? fx.effect->numParams : 0;
+	return 0;
+}
+
+extern "C" float VstLiveFxGetParam(int part1to32, int slot0to1, int paramIndex)
+{
+	if (!LiveFxValid(part1to32, slot0to1) || paramIndex < 0) return 0.0f;
+	LiveFxSlot& fx = g_eng.liveFx[part1to32 - 1][slot0to1];
+	if (fx.vst3) return Vst3GetParam(fx.vst3, paramIndex);
+	if (fx.effect && paramIndex < fx.effect->numParams && fx.effect->getParameter)
+		return fx.effect->getParameter(fx.effect, paramIndex);
+	return 0.0f;
+}
+
+extern "C" int VstLiveFxSetParam(int part1to32, int slot0to1, int paramIndex, float value01)
+{
+	if (!LiveFxValid(part1to32, slot0to1) || paramIndex < 0) return 0;
+	if (value01 < 0.0f) value01 = 0.0f;
+	if (value01 > 1.0f) value01 = 1.0f;
+	LiveFxSlot& fx = g_eng.liveFx[part1to32 - 1][slot0to1];
+	if (fx.vst3) return Vst3SetParam(fx.vst3, paramIndex, value01);
+	if (fx.effect && paramIndex < fx.effect->numParams && fx.effect->setParameter) {
+		fx.effect->setParameter(fx.effect, paramIndex, value01);
+		return 1;
+	}
+	return 0;
+}
+
+extern "C" int VstLiveFxParamName(int part1to32, int slot0to1, int paramIndex, wchar_t* out, int outChars)
+{
+	if (out && outChars > 0) out[0] = 0;
+	if (!LiveFxValid(part1to32, slot0to1) || !out || outChars <= 0 || paramIndex < 0) return 0;
+	LiveFxSlot& fx = g_eng.liveFx[part1to32 - 1][slot0to1];
+	if (fx.vst3) return Vst3ParamName(fx.vst3, paramIndex, out, outChars);
+	if (fx.effect && fx.effect->dispatcher && paramIndex < fx.effect->numParams) {
+		char nm[64] = {};
+		LiveVst2Dispatch(fx.effect, effGetParamName, paramIndex, 0, nm);
+		if (nm[0]) MultiByteToWideChar(CP_ACP, 0, nm, -1, out, outChars);
+	}
+	if (!out[0]) _snwprintf_s(out, outChars, _TRUNCATE, L"Param %d", paramIndex + 1);
+	return 1;
+}
+
+extern "C" int VstLiveFxParamDisplay(int part1to32, int slot0to1, int paramIndex, wchar_t* out, int outChars)
+{
+	if (out && outChars > 0) out[0] = 0;
+	if (!LiveFxValid(part1to32, slot0to1) || !out || outChars <= 0 || paramIndex < 0) return 0;
+	LiveFxSlot& fx = g_eng.liveFx[part1to32 - 1][slot0to1];
+	if (fx.vst3) return Vst3ParamDisplay(fx.vst3, paramIndex, out, outChars);
+	if (fx.effect && fx.effect->dispatcher && paramIndex < fx.effect->numParams) {
+		char nm[64] = {};
+		LiveVst2Dispatch(fx.effect, effGetParamDisplay, paramIndex, 0, nm);
+		if (nm[0]) MultiByteToWideChar(CP_ACP, 0, nm, -1, out, outChars);
+	}
+	if (!out[0]) _snwprintf_s(out, outChars, _TRUNCATE, L"%.3f", VstLiveFxGetParam(part1to32, slot0to1, paramIndex));
+	return 1;
+}
+
+extern "C" int VstLiveFxEditorOpen(int part1to32, int slot0to1)
+{
+	if (!LiveFxValid(part1to32, slot0to1)) return -1;
+	LiveFxSlot& fx = g_eng.liveFx[part1to32 - 1][slot0to1];
+	if (!fx.effect && !fx.vst3) return -2;
+	if (fx.edWnd && IsWindow(fx.edWnd)) {
+		ShowWindow(fx.edWnd, SW_SHOW);
+		SetForegroundWindow(fx.edWnd);
+		return 0;
+	}
+	HWND host = LiveFxCreateEditorWnd(part1to32, slot0to1);
+	if (!host) return -3;
+	int cw = 640, ch = 420;
+	if (fx.vst3) {
+		if (Vst3EditorOpen(fx.vst3, host, &cw, &ch) != 0) {
+			DestroyWindow(host);
+			return -4;
+		}
+	} else if (fx.effect && fx.effect->dispatcher) {
+		__try { fx.effect->dispatcher(fx.effect, effEditOpen, 0, 0, host, 0); }
+		__except (EXCEPTION_EXECUTE_HANDLER) {}
+		struct FxEditorRect { short top, left, bottom, right; };
+		FxEditorRect* r = NULL;
+		__try { fx.effect->dispatcher(fx.effect, effEditGetRect, 0, 0, &r, 0); }
+		__except (EXCEPTION_EXECUTE_HANDLER) { r = NULL; }
+		if (r && r->right > r->left) cw = r->right - r->left;
+		if (r && r->bottom > r->top) ch = r->bottom - r->top;
+		SetTimer(host, 1, 33, NULL);
+	}
+	SetWindowPos(host, NULL, 0, 0, cw + 16, ch + 39, SWP_NOMOVE | SWP_NOZORDER);
+	ShowWindow(host, SW_SHOW);
+	SetForegroundWindow(host);
+	fx.edWnd = host;
+	return 0;
+}
+
+extern "C" void VstLiveFxSetBypass(int part1to32, int slot0to1, int bypass)
+{
+	if (!LiveFxValid(part1to32, slot0to1)) return;
+	g_eng.liveFx[part1to32 - 1][slot0to1].bypass = bypass ? 1 : 0;
+}
+
+extern "C" int VstLiveFxGetBypass(int part1to32, int slot0to1)
+{
+	if (!LiveFxValid(part1to32, slot0to1)) return 0;
+	return g_eng.liveFx[part1to32 - 1][slot0to1].bypass ? 1 : 0;
+}
+
+extern "C" int VstLiveFxCaptureState(int part1to32, int slot0to1,
+	unsigned char** outBytes, int* outLen)
+{
+	if (outBytes) *outBytes = NULL;
+	if (outLen) *outLen = 0;
+	if (!LiveFxValid(part1to32, slot0to1) || !outBytes || !outLen) return 0;
+	LiveFxSlot& fx = g_eng.liveFx[part1to32 - 1][slot0to1];
+	int ok = 0;
+	EnterCriticalSection(&g_eng.cs);
+	if (fx.vst3) {
+		ok = Vst3GetComponentState(fx.vst3, outBytes, outLen);
+	} else if (fx.effect && fx.effect->dispatcher) {
+		void* ptr = NULL;
+		const VstIntPtr sz = fx.effect->dispatcher(fx.effect, effGetChunk, 0, 0, &ptr, 0.0f);
+		if (sz > 0 && ptr) {
+			unsigned char* mem = (unsigned char*)malloc((size_t)sz);
+			if (mem) {
+				memcpy(mem, ptr, (size_t)sz);
+				*outBytes = mem;
+				*outLen = (int)sz;
+				ok = 1;
+			}
+		}
+	}
+	LeaveCriticalSection(&g_eng.cs);
+	return ok;
+}
+
+extern "C" int VstLiveFxApplyState(int part1to32, int slot0to1,
+	const unsigned char* bytes, int len)
+{
+	if (!LiveFxValid(part1to32, slot0to1) || !bytes || len <= 0) return 0;
+	LiveFxSlot& fx = g_eng.liveFx[part1to32 - 1][slot0to1];
+	int ok = 0;
+	EnterCriticalSection(&g_eng.cs);
+	if (fx.vst3) {
+		ok = Vst3SetComponentState(fx.vst3, bytes, len);
+	} else if (fx.effect && fx.effect->dispatcher) {
+		fx.effect->dispatcher(fx.effect, effSetChunk, 0, len, (void*)bytes, 0.0f);
+		ok = 1;
+	}
+	LeaveCriticalSection(&g_eng.cs);
+	return ok;
 }
 
 extern "C" int VstLivePartIsLoaded(int part1to32)
@@ -8298,10 +8634,19 @@ static VstIntPtr LiveVst2Dispatch(AEffect* e, VstInt32 op, VstInt32 index,
 	return rc;
 }
 
+/* SC-VA / Sound Canvas style: bank+PC MIDI only. Host64 PROGRAMS freezes UI. */
+static int LivePartSkipProgramList(const LivePart& p)
+{
+	if (p.isMulti) return 1;
+	if (p.path[0] && DetectMultiTimbralName(p.path)) return 1;
+	return 0;
+}
+
 extern "C" int VstLiveProgramCount(int part1to32)
 {
 	if (part1to32 < 1 || part1to32 > 32) return 0;
 	LivePart& p = g_eng.live[part1to32 - 1];
+	if (LivePartSkipProgramList(p)) return 0;
 #ifndef KPIHOST64_BUILD
 	if (p.remote) {
 		uint32_t total = 0, cur = 0;
@@ -8320,8 +8665,11 @@ extern "C" int VstLiveProgramCurrent(int part1to32)
 {
 	if (part1to32 < 1 || part1to32 > 32) return -1;
 	LivePart& p = g_eng.live[part1to32 - 1];
+	if (LivePartSkipProgramList(p))
+		return p.prog >= 0 ? p.prog : -1;
 #ifndef KPIHOST64_BUILD
 	if (p.remote) {
+		if (p.prog >= 0) return p.prog;
 		uint32_t total = 0, cur = 0xFFFFFFFFu;
 		std::vector<std::wstring> names;
 		if (!g_kpiHost.VstLivePrograms((uint32_t)part1to32, 0, 0, total, cur, names))
@@ -8341,6 +8689,7 @@ extern "C" int VstLiveProgramName(int part1to32, int index, wchar_t* out,
 	out[0] = 0;
 	if (part1to32 < 1 || part1to32 > 32 || index < 0) return 0;
 	LivePart& p = g_eng.live[part1to32 - 1];
+	if (LivePartSkipProgramList(p)) return 0;
 #ifndef KPIHOST64_BUILD
 	if (p.remote) {
 		uint32_t total = 0, cur = 0;
@@ -8372,8 +8721,9 @@ extern "C" int VstLiveProgramNames(int part1to32, int first, int count,
 	if (!out || stride <= 1 || count <= 0 || first < 0) return 0;
 	if (part1to32 < 1 || part1to32 > 32) return 0;
 	for (int i = 0; i < count; ++i) out[(size_t)i * stride] = 0;
-#ifndef KPIHOST64_BUILD
 	LivePart& p = g_eng.live[part1to32 - 1];
+	if (LivePartSkipProgramList(p)) return 0;
+#ifndef KPIHOST64_BUILD
 	if (p.remote) {
 		uint32_t total = 0, cur = 0;
 		std::vector<std::wstring> names;
@@ -8432,15 +8782,17 @@ static void LivePartPushShort(int part1to32, DWORD msg)
 	if (part1to32 < 1 || part1to32 > 32) return;
 	LivePart& p = g_eng.live[part1to32 - 1];
 	const DWORD out = LiveSendMsg(p, msg);
+#ifndef KPIHOST64_BUILD
+	/* Remote (SC-VA via Host64): SHM only — never wait on g_eng.cs held by
+	   local VstLiveRender, or the tone-map UI freezes on every note/PC. */
+	if (p.remote) {
+		LiveRemoteMidiToPart(part1to32, out);
+		return;
+	}
+#endif
 	EnterCriticalSection(&g_eng.cs);
 	LivePendPush(p, out);
 	LeaveCriticalSection(&g_eng.cs);
-#ifndef KPIHOST64_BUILD
-	if (p.remote) {
-		const int port = (part1to32 - 1) / 16;
-		LiveRemoteMidi(port, msg);
-	}
-#endif
 }
 
 extern "C" void VstLiveSendBankProgram(int part1to32, int bankMsb, int bankLsb, int prog0to127)
@@ -8457,10 +8809,72 @@ extern "C" void VstLiveSendBankProgram(int part1to32, int bankMsb, int bankLsb, 
 	LivePartPushShort(part1to32, (DWORD)(0xb0 | ch) | (0u << 8) | ((DWORD)bankMsb << 16));
 	LivePartPushShort(part1to32, (DWORD)(0xb0 | ch) | (32u << 8) | ((DWORD)bankLsb << 16));
 	LivePartPushShort(part1to32, (DWORD)(0xc0 | ch) | ((DWORD)prog0to127 << 8));
-	if (VstLiveProgramCount(part1to32) > prog0to127)
-		VstLiveSetProgram(part1to32, prog0to127);
-	else
-		p.prog = prog0to127;
+	p.prog = prog0to127;
+	/* Multi (SC-VA) / remote: bank+PC MIDI is enough. Never call ProgramCount/
+	   SetProgram here — Host64 PROGRAMS IPC freezes the UI after preview. */
+	if (p.isMulti || p.remote)
+		return;
+	if (p.vst3 || p.effect)
+		(void)VstLiveSetProgram(part1to32, prog0to127);
+}
+
+/* MIDI-only audition: note-on + delayed note-off on a message HWND (UI thread).
+   Never waveOut/Render — that deadlocks SC-VA with monitor/preview. */
+static int g_auditionPart = 0;
+static int g_auditionCh = 0;
+static DWORD g_auditionOff = 0;
+static HWND g_auditionWnd = NULL;
+static UINT_PTR g_auditionTimer = 0;
+
+static void AuditionKillTimer()
+{
+	if (g_auditionWnd && g_auditionTimer) {
+		KillTimer(g_auditionWnd, g_auditionTimer);
+		g_auditionTimer = 0;
+	}
+}
+
+extern "C" void VstLiveAuditionStop(void)
+{
+	AuditionKillTimer();
+	const int part = g_auditionPart;
+	const int ch = g_auditionCh & 15;
+	const DWORD off = g_auditionOff;
+	g_auditionPart = 0;
+	g_auditionOff = 0;
+	g_auditionCh = 0;
+	if (part < 1 || part > 32) return;
+	if (off)
+		LivePartPushShort(part, off);
+	/* Soft panic on the audition channel (remote-safe MIDI, no local PumpSilent). */
+	LivePartPushShort(part, (DWORD)(0xb0 | ch) | (64u << 8));
+	LivePartPushShort(part, (DWORD)(0xb0 | ch) | (120u << 8));
+	LivePartPushShort(part, (DWORD)(0xb0 | ch) | (123u << 8));
+}
+
+static LRESULT CALLBACK AuditionWndProc(HWND h, UINT msg, WPARAM w, LPARAM l)
+{
+	if (msg == WM_TIMER && w == 1) {
+		VstLiveAuditionStop();
+		return 0;
+	}
+	return DefWindowProcW(h, msg, w, l);
+}
+
+static HWND AuditionEnsureWnd(void)
+{
+	if (g_auditionWnd && IsWindow(g_auditionWnd)) return g_auditionWnd;
+	static ATOM s_atom = 0;
+	if (!s_atom) {
+		WNDCLASSW wc = {};
+		wc.lpfnWndProc = AuditionWndProc;
+		wc.hInstance = GetModuleHandleW(NULL);
+		wc.lpszClassName = L"OggVstAuditionMsg";
+		s_atom = RegisterClassW(&wc);
+	}
+	g_auditionWnd = CreateWindowExW(0, L"OggVstAuditionMsg", L"", 0,
+		0, 0, 0, 0, HWND_MESSAGE, NULL, GetModuleHandleW(NULL), NULL);
+	return g_auditionWnd;
 }
 
 extern "C" void VstLiveAuditionNote(int part1to32, int noteMidi, int velocity, int durMs)
@@ -8477,56 +8891,17 @@ extern "C" void VstLiveAuditionNote(int part1to32, int noteMidi, int velocity, i
 	const int ch = LivePartSendCh(p, part1to32) & 15;
 	const DWORD noteOn = (DWORD)(0x90 | ch) | ((DWORD)noteMidi << 8) | ((DWORD)velocity << 16);
 	const DWORD noteOff = (DWORD)(0x80 | ch) | ((DWORD)noteMidi << 8);
+	/* Cut previous audition first. */
+	VstLiveAuditionStop();
 	LivePartPushShort(part1to32, noteOn);
-	const int framesTotal = (SAMPLE_RATE * durMs) / 1000;
-	const int bpf = 4;
-	const int bytes = framesTotal * bpf;
-	BYTE* pcm = (BYTE*)HeapAlloc(GetProcessHeap(), 0, (SIZE_T)bytes);
-	if (!pcm) {
-		LivePartPushShort(part1to32, noteOff);
-		return;
+	g_auditionPart = part1to32;
+	g_auditionCh = ch;
+	g_auditionOff = noteOff;
+	HWND wnd = AuditionEnsureWnd();
+	if (wnd) {
+		g_auditionTimer = 1;
+		SetTimer(wnd, 1, (UINT)durMs, NULL);
 	}
-	int written = 0;
-	float L[BLOCK_FRAMES], R[BLOCK_FRAMES];
-	while (written < framesTotal) {
-		int n = framesTotal - written;
-		if (n > BLOCK_FRAMES) n = BLOCK_FRAMES;
-		VstLiveRender(L, R, n);
-		for (int i = 0; i < n; ++i) {
-			float l = L[i], r = R[i];
-			if (l < -1) l = -1; if (l > 1) l = 1;
-			if (r < -1) r = -1; if (r > 1) r = 1;
-			short* s = (short*)(pcm + (written + i) * bpf);
-			s[0] = (short)(l * 32767.0f);
-			s[1] = (short)(r * 32767.0f);
-		}
-		written += n;
-	}
-	LivePartPushShort(part1to32, noteOff);
-	for (int k = 0; k < 4; ++k)
-		VstLiveRender(L, R, BLOCK_FRAMES);
-	WAVEFORMATEX wfx = {};
-	wfx.wFormatTag = WAVE_FORMAT_PCM;
-	wfx.nChannels = 2;
-	wfx.nSamplesPerSec = SAMPLE_RATE;
-	wfx.wBitsPerSample = 16;
-	wfx.nBlockAlign = 4;
-	wfx.nAvgBytesPerSec = SAMPLE_RATE * 4;
-	HWAVEOUT hwo = NULL;
-	if (waveOutOpen(&hwo, WAVE_MAPPER, &wfx, 0, 0, CALLBACK_NULL) == MMSYSERR_NOERROR && hwo) {
-		WAVEHDR hdr = {};
-		hdr.lpData = (LPSTR)pcm;
-		hdr.dwBufferLength = (DWORD)bytes;
-		if (waveOutPrepareHeader(hwo, &hdr, sizeof(hdr)) == MMSYSERR_NOERROR) {
-			waveOutWrite(hwo, &hdr, sizeof(hdr));
-			const DWORD t0 = GetTickCount();
-			while (!(hdr.dwFlags & WHDR_DONE) && GetTickCount() - t0 < (DWORD)durMs + 500)
-				Sleep(10);
-			waveOutUnprepareHeader(hwo, &hdr, sizeof(hdr));
-		}
-		waveOutClose(hwo);
-	}
-	HeapFree(GetProcessHeap(), 0, pcm);
 }
 
 extern "C" void VstLiveMidiSysex(int portIndex0to2, const unsigned char* data,
@@ -9559,6 +9934,14 @@ extern "C" int VstLiveRender(float* L, float* R, int frames)
 				Vst3Process(g_eng.live[p].vst3, tl, tr, n);
 			else
 				RenderEffect(g_eng.live[p].effect, tl, tr, n);
+			for (int fx = 0; fx < 2; ++fx) {
+				LiveFxSlot& fs = g_eng.liveFx[p][fx];
+				if (fs.bypass) continue;
+				if (fs.effect)
+					RenderFxEffect(fs.effect, tl, tr, n);
+				/* VST3 insert FX load/param/editor is supported; audio-input processing
+				   needs a VST3 host input-bus path and is intentionally skipped here. */
+			}
 			for (int i = 0; i < n; ++i) {
 				L[pos + i] += tl[i];
 				R[pos + i] += tr[i];

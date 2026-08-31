@@ -189,7 +189,7 @@ DWORD __fastcall KbSasamiDecoder::Open(const KPI_MEDIAINFO* cpRequest, IKpiFile*
 	if (cpRequest && cpRequest->dwSampleRate >= 8000 && cpRequest->dwSampleRate <= 192000)
 		rate = cpRequest->dwSampleRate;
 
-	if (s_song.kind == SASAMI_KIND_FPY) {
+	if (s_song.kind == SASAMI_KIND_FPY || s_song.kind == SASAMI_KIND_FPY2) {
 		m_fmMode = true;
 		wchar_t plugDir[MAX_PATH];
 		GetModuleFileNameW(g_hKpi, plugDir, MAX_PATH);
@@ -197,7 +197,16 @@ DWORD __fastcall KbSasamiDecoder::Open(const KPI_MEDIAINFO* cpRequest, IKpiFile*
 		if (sl) *sl = 0;
 		else plugDir[0] = 0;
 		const int fmMode = SasamiResolveFmModeW(pathForKind, m_fmModeDefault);
-		if (!m_fm.Open(s_song, rate, plugDir, fmMode)) return 0;
+		wchar_t songDir[MAX_PATH];
+		songDir[0] = 0;
+		if (pathForKind && pathForKind[0]) {
+			wcsncpy_s(songDir, pathForKind, _TRUNCATE);
+			wchar_t* slSong = wcsrchr(songDir, L'\\');
+			if (!slSong) slSong = wcsrchr(songDir, L'/');
+			if (slSong) *slSong = 0;
+			else songDir[0] = 0;
+		}
+		if (!m_fm.Open(s_song, rate, plugDir, fmMode, songDir[0] ? songDir : plugDir)) return 0;
 		/* FMモニタ dump は OPN/OPNA なら常時 ON。
 		   以前は m_raira 依存だったが、IKpiConfig が NullConfig になると
 		   raira が 0 のまま音声だけ再生され、live が更新されずモニタが固まる。 */

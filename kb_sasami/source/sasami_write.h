@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 /* SASAMI binary writers: MPY / MPW2 / MPW3(.mpsmv) / FPY from packed track streams. */
 #include "sasami_file.h"
 #include <stdint.h>
@@ -40,6 +40,7 @@ struct SasamiWriteFm {
 	SasamiTrackStream misao[SASAMI_MISAO_MAX_CH];
 	int misaoChCount; /* 0 = no Misao region */
 	int opna10;
+	int fpy2; /* 1 = nest loops (versionWord@0x1C=2), prefer .fpy2 */
 	char titleSjis[65];
 	char composerSjis[65];
 	char commentSjis[65];

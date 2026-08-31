@@ -14,7 +14,7 @@ bool SasamiMisaoTrackValid(const SasamiSong& song, uint16_t ptr)
 	if (ptr == 0 || ptr == 0x10F0) return false;
 	uint32_t off = (ptr >= 0x1000) ? (uint32_t)(ptr - 0x1000) : ptr;
 	if (!SasamiOffOk(song, off, 3)) return false;
-	if (song.kind != SASAMI_KIND_FPY && off < 0x300) return false;
+	if (!SasamiKindIsFm(song.kind) && off < 0x300) return false;
 	const uint8_t cmd = SasamiGet(song, off);
 	return MisaoCmdValid(cmd);
 }
@@ -131,15 +131,25 @@ int SasamiMisaoBuildEvents(const SasamiSong& song, SasamiMisaoEv* out, int maxEv
 					break;
 				}
 				case 13:
-					ch[i].loopCnt = b1;
+					if (ch[i].loopSp < MisaoChState::MISAO_LOOP_NEST)
+						ch[i].loopCnt[ch[i].loopSp++] = b1;
+					else
+						ch[i].loopCnt[MisaoChState::MISAO_LOOP_NEST - 1] = b1;
 					ch[i].pc = addr + 3;
 					break;
 				case 14: {
-					uint8_t c = ch[i].loopCnt;
+					if (ch[i].loopSp == 0) {
+						ch[i].pc = addr + 3;
+						break;
+					}
+					uint8_t* cp = &ch[i].loopCnt[ch[i].loopSp - 1];
+					uint8_t c = *cp;
 					if (c) c--;
-					if (c == 0) ch[i].pc = addr + 3;
-					else {
-						ch[i].loopCnt = c;
+					if (c == 0) {
+						ch[i].loopSp--;
+						ch[i].pc = addr + 3;
+					} else {
+						*cp = c;
 						uint32_t dest = w1;
 						if (dest >= 0x1000) dest -= 0x1000;
 						ch[i].pc = dest;
@@ -162,6 +172,9 @@ int SasamiMisaoBuildEvents(const SasamiSong& song, SasamiMisaoEv* out, int maxEv
 				case 25:
 					pushShort((uint8_t)(0xB0 | i), 10, (uint8_t)MisaoPanCc(b1));
 					ch[i].pc = addr + 3;
+					break;
+				case 26:
+					ch[i].pc = SasamiOffOk(song, addr, (uint32_t)3 + b2) ? addr + 3 + b2 : addr + 3;
 					break;
 				default:
 					ch[i].pc = addr + 3;

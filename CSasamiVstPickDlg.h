@@ -11,8 +11,10 @@ public:
 	wchar_t m_path[520];
 	int m_isVst3;
 	int m_part;
+	int m_effectsOnly; /* 1 = insert FX picker (!instrument) */
 
 	static int PickForPart(CWnd* owner, int part1to32, wchar_t* outPath, int outCch, int* outIs3);
+	static int PickEffect(CWnd* owner, wchar_t* outPath, int outCch, int* outIs3);
 
 protected:
 	virtual BOOL OnInitDialog();

@@ -2,10 +2,13 @@
 #include "ogg.h"
 #include "CSasamiMidiScoreDlg.h"
 #include "CSasamiNotePaletteDlg.h"
+#include "CSasamiSimpleInputDlg.h"
 #include "CSasamiNotePropsDlg.h"
 #include "CSasamiVstPickDlg.h"
 #include "CSasamiVstPartMenu.h"
 #include "CSasamiTextDlg.h"
+#include "CSasamiExcRpnDlg.h"
+#include "CSasamiInsertFxDlg.h"
 #include "CCustomPopupMenu.h"
 #include "OfflineHelp.h"
 #include "PlayList.h"
@@ -69,6 +72,7 @@ CSasamiMidiScoreDlg::CSasamiMidiScoreDlg(CWnd* pParent)
 	: CCustomBlurDialogExBase(CSasamiMidiScoreDlg::IDD, pParent)
 	, m_curCh(0), m_placeRest(0), m_accidental(0), m_blankCur(NULL), m_sbDrag(0), m_bInLayout(FALSE), m_propMode(0)
 	, m_pendingEdClosePart(0), m_pendingEdCloseProg(-1), m_pendingEdOpenPart(0)
+	, m_clipN(0), m_clipBase(0)
 {
 	m_lastOut[0] = 0;
 	m_lastHoverSt[0] = 0;
@@ -149,6 +153,7 @@ void CSasamiMidiScoreDlg::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDC_SASAMI_MIDI_LOOPCLR, m_btnLoopClr);
 	DDX_Control(pDX, IDC_SASAMI_MIDI_SHOWALL, m_btnShowAll);
 	DDX_Control(pDX, IDC_SASAMI_MIDI_TEXT, m_btnText);
+	DDX_Control(pDX, IDC_SASAMI_MIDI_FX, m_btnFx);
 }
 
 BEGIN_MESSAGE_MAP(CSasamiMidiScoreDlg, CCustomBlurDialogExBase)
@@ -186,6 +191,7 @@ BEGIN_MESSAGE_MAP(CSasamiMidiScoreDlg, CCustomBlurDialogExBase)
 	ON_BN_CLICKED(IDC_SASAMI_MIDI_LOOPCLR, &CSasamiMidiScoreDlg::OnBnClickedLoopClr)
 	ON_BN_CLICKED(IDC_SASAMI_MIDI_SHOWALL, &CSasamiMidiScoreDlg::OnBnClickedShowAll)
 	ON_BN_CLICKED(IDC_SASAMI_MIDI_TEXT, &CSasamiMidiScoreDlg::OnBnClickedText)
+	ON_BN_CLICKED(IDC_SASAMI_MIDI_FX, &CSasamiMidiScoreDlg::OnBnClickedFx)
 	ON_CBN_SELCHANGE(IDC_SASAMI_MIDI_CH, &CSasamiMidiScoreDlg::OnCbnSelchangeCh)
 	ON_CBN_SELCHANGE(IDC_SASAMI_STRIP_KIND0, &CSasamiMidiScoreDlg::OnCbnStrip)
 	ON_CBN_SELCHANGE(IDC_SASAMI_STRIP_KIND1, &CSasamiMidiScoreDlg::OnCbnStrip)
@@ -193,7 +199,10 @@ BEGIN_MESSAGE_MAP(CSasamiMidiScoreDlg, CCustomBlurDialogExBase)
 	ON_CBN_SELCHANGE(IDC_SASAMI_STRIP_LANES, &CSasamiMidiScoreDlg::OnCbnStrip)
 	ON_MESSAGE(WM_SASAMI_PAL_DUR, &CSasamiMidiScoreDlg::OnPalDur)
 	ON_MESSAGE(WM_SASAMI_NOTE_PROPS, &CSasamiMidiScoreDlg::OnNoteProps)
+	ON_MESSAGE(WM_SASAMI_EXC_RPN_CHANGED, &CSasamiMidiScoreDlg::OnExcRpnChanged)
+	ON_MESSAGE(WM_SASAMI_INSERT_FX_CHANGED, &CSasamiMidiScoreDlg::OnInsertFxChanged)
 	ON_MESSAGE(WM_APP + 61, &CSasamiMidiScoreDlg::OnDeferredInit)
+	ON_MESSAGE(WM_APP + 62, &CSasamiMidiScoreDlg::OnDeferredPushText)
 	ON_MESSAGE(WM_APP + 7204, &CSasamiMidiScoreDlg::OnDeferredOpenVst)
 	ON_MESSAGE(WM_APP + 7206, &CSasamiMidiScoreDlg::OnDeferredProgLabels)
 	ON_MESSAGE(WM_VST_LIVE_EDITOR_CLOSED, &CSasamiMidiScoreDlg::OnVstEditorClosed)
@@ -225,6 +234,11 @@ void CSasamiMidiScoreDlg::ApplyLang()
 	m_btnShowAll.SetWindowText(L"32ch");
 	if (m_btnText.GetSafeHwnd())
 		m_btnText.SetWindowText(LL14(L"\u30c6\u30ad\u30b9\u30c8", L"Text", L"Texte", L"Testo", L"Texto", L"Text", L"Text", L"Text", L"Text", L"Text", L"Texto", L"Tekst", L"Tekst", L"Metin"));
+	if (m_btnFx.GetSafeHwnd())
+		m_btnFx.SetWindowText(LL14(
+			L"\u30A4\u30F3\u30B5\u30FC\u30C8FX", L"Insert FX", L"Insert FX", L"Insert FX", L"Insert FX",
+			L"Insert FX", L"Insert FX", L"Insert FX", L"Insert FX", L"Insert FX",
+			L"Insert FX", L"Insert FX", L"Insert FX", L"Insert FX"));
 }
 
 BOOL CSasamiMidiScoreDlg::OnInitDialog()
@@ -242,6 +256,7 @@ BOOL CSasamiMidiScoreDlg::OnInitDialog()
 	flatBtn(m_btnSel); flatBtn(m_btnPal); flatBtn(m_btnPropUpd); flatBtn(m_btnMark);
 	flatBtn(m_btnLoopA); flatBtn(m_btnLoopB); flatBtn(m_btnLoopClr); flatBtn(m_btnShowAll);
 	if (m_btnText.GetSafeHwnd()) flatBtn(m_btnText);
+	if (m_btnFx.GetSafeHwnd()) flatBtn(m_btnFx);
 	/* Score tool icons (embedded res\\ui_score / ui_ctl / ui_icons). */
 	if (m_btnOpen.GetSafeHwnd()) m_btnOpen.SetIcon(IDI_UI_FOLDER);
 	if (m_btnSave.GetSafeHwnd()) m_btnSave.SetIcon(IDI_UI_FILE);
@@ -275,7 +290,7 @@ BOOL CSasamiMidiScoreDlg::OnInitDialog()
 	m_edGt.SetWindowText(L"100");
 	m_edVel.SetWindowText(L"100");
 	m_status.SetWindowText(
-		L"MIDI1-32. Ruler=play/A-B. Preview=play+playhead. Tone gauge / dblclick note = VST/GT.");
+		L"Tone=VST. Exc/RPN lane=SysEx・RPN. Toolbar「Insert FX」=パート・インサートEFX。");
 	SyncStripCombos();
 	RefreshProgLabels();
 	UpdateNoteCursor();
@@ -311,12 +326,13 @@ void CSasamiMidiScoreDlg::SetupTooltips()
 	tip(m_btnPlay, L"Preview: apply VST binds then play");
 	tip(m_btnExport, L"Audio export");
 	tip(m_btnPencil, L"Pencil tool");
-	tip(m_btnErase, L"Eraser");
-	tip(m_btnSel, L"Select");
+	tip(m_btnErase, L"Eraser — click or drag over notes to delete");
+	tip(m_btnSel, L"Select notes (click / drag). Delete or Backspace removes selection.");
 	tip(m_btnPal, L"Note duration palette");
 	tip(m_btnTempo, L"Tempo tool");
 	tip(m_btnHelp, L"Help");
 	tip(m_btnText, L"Open text composer");
+	tip(m_btnFx, L"VST Insert FX (effect chain) for the current MIDI part — knobs / bypass / editor");
 	tip(m_btnShowAll, L"Show all 32 channels");
 	tip(m_stripKind0, L"Strip lane 1 kind (Expression/Volume/Pitch/Gate)");
 	tip(m_stripKind1, L"Strip lane 2 kind");
@@ -366,8 +382,12 @@ void CSasamiMidiScoreDlg::LayoutChrome()
 	if (m_stripKind1.GetSafeHwnd()) { m_stripKind1.MoveWindow(x, y, 180, 220); x += 186; }
 	if (m_stripDraw.GetSafeHwnd()) { m_stripDraw.MoveWindow(x, y, 100, 140); x += 106; }
 	if (m_stripLanes.GetSafeHwnd()) { m_stripLanes.MoveWindow(x, y, 64, 140); x += 70; }
+	if (m_stripKind0.GetSafeHwnd())
+		m_stripKind0.ShowWindow(m_ui.stripCount >= 1 ? SW_SHOW : SW_HIDE);
 	if (m_stripKind1.GetSafeHwnd())
 		m_stripKind1.ShowWindow(m_ui.stripCount >= 2 ? SW_SHOW : SW_HIDE);
+	if (m_stripDraw.GetSafeHwnd())
+		m_stripDraw.ShowWindow(m_ui.stripCount >= 1 ? SW_SHOW : SW_HIDE);
 	y += btnH + 6;
 	x = pad;
 	place(m_btnMark, 36);
@@ -376,17 +396,27 @@ void CSasamiMidiScoreDlg::LayoutChrome()
 	place(m_btnLoopClr, 40);
 	place(m_btnShowAll, 44);
 	place(m_btnText, 64);
+	place(m_btnFx, 78);
 	y += btnH + 4;
 	if (m_status.GetSafeHwnd())
 		m_status.MoveWindow(pad, y, max(200, rc.Width() - pad * 2 - sbW), 22);
 	y += 26;
 	if (y > rc.Height() - pad - sbH - 80)
 		y = max(cap + pad, rc.Height() - pad - sbH - 80);
-	m_bodyRc.SetRect(pad, y, max(pad + 40, rc.Width() - pad - sbW), max(y + 40, rc.Height() - pad - sbH));
-	const int stripH = min(ScStaffStripTotalH(&m_ui), max(8, m_bodyRc.Height() / 3));
-	m_trackRc.SetRect(m_bodyRc.left, m_bodyRc.top, m_bodyRc.left + SC_TRACK_COL_W, max(m_bodyRc.top + 8, m_bodyRc.bottom - stripH));
+	m_bodyRc.SetRect(pad, y, max(pad + 40, rc.Width() - pad - sbW), max(y + 40, rc.Height() - pad));
+	/* H-scroll track reserved at bottom of body; strip sits above it (not crushed). */
+	const int bodyBot = m_bodyRc.bottom - sbH;
+	int stripH = ScStaffStripTotalH(&m_ui);
+	if (stripH > 0) {
+		const int minStrip = stripH;
+		if (bodyBot - m_bodyRc.top - minStrip < 40)
+			stripH = max(0, bodyBot - m_bodyRc.top - 40);
+		else
+			stripH = minStrip;
+	}
+	m_trackRc.SetRect(m_bodyRc.left, m_bodyRc.top, m_bodyRc.left + SC_TRACK_COL_W, max(m_bodyRc.top + 8, bodyBot - stripH));
 	m_gridRc.SetRect(m_trackRc.right, m_bodyRc.top, m_bodyRc.right, m_trackRc.bottom);
-	m_stripRc.SetRect(m_gridRc.left, m_trackRc.bottom, m_bodyRc.right, m_bodyRc.bottom);
+	m_stripRc.SetRect(m_gridRc.left, m_trackRc.bottom, m_bodyRc.right, bodyBot);
 	m_ui.followViewW = max(1, m_gridRc.Width());
 	/* Scrollbars are in dialog STYLE — never ShowScrollBar/ModifyStyle here (re-enters OnSize→crash). */
 	UpdateScrollBars();
@@ -472,12 +502,34 @@ void CSasamiMidiScoreDlg::SyncStripCombos()
 	m_stripDraw.ResetContent();
 	m_stripDraw.AddString(L"Pencil");
 	m_stripDraw.AddString(L"Line");
-	if (m_ui.stripDraw < 0 || m_ui.stripDraw > 1) m_ui.stripDraw = SC_STRIP_DRAW_PENCIL;
+	m_stripDraw.AddString(L"Curve");
+	if (m_ui.stripDraw < 0 || m_ui.stripDraw > 2) m_ui.stripDraw = SC_STRIP_DRAW_PENCIL;
 	m_stripDraw.SetCurSel(m_ui.stripDraw);
 	m_stripLanes.ResetContent();
+	m_stripLanes.AddString(L"なし");
 	m_stripLanes.AddString(L"1");
 	m_stripLanes.AddString(L"2");
-	m_stripLanes.SetCurSel(m_ui.stripCount >= 2 ? 1 : 0);
+	int lanes = m_ui.stripCount;
+	if (lanes < 0) lanes = 0;
+	if (lanes > 2) lanes = 2;
+	m_stripLanes.SetCurSel(lanes);
+}
+
+void CSasamiMidiScoreDlg::OnCbnStrip()
+{
+	int k0 = m_stripKind0.GetCurSel();
+	int k1 = m_stripKind1.GetCurSel();
+	int draw = m_stripDraw.GetCurSel();
+	int lanes = m_stripLanes.GetCurSel();
+	if (k0 >= 0) m_ui.stripKind[0] = k0;
+	if (k1 >= 0) m_ui.stripKind[1] = k1;
+	if (draw >= 0) m_ui.stripDraw = draw;
+	if (lanes < 0) lanes = 0;
+	if (lanes > 2) lanes = 2;
+	m_ui.stripCount = lanes;
+	RefreshStrip();
+	LayoutChrome();
+	Invalidate(FALSE);
 }
 
 void CSasamiMidiScoreDlg::RefreshStrip()
@@ -582,6 +634,7 @@ void CSasamiMidiScoreDlg::OnPaint()
 		ScStaffPaintStaves(mem, grid, &m_ui, m_doc.ev, m_doc.evCount, 0, m_curCh, m_doc.tempoT);
 	if (strip.Width() > 2 && strip.Height() > 2)
 		ScStaffPaintStrip(mem, strip, &m_ui);
+	ScStaffPaintMarquee(mem, &m_ui);
 	CRect bodyRel(0, 0, body.Width(), body.Height());
 	ScStaffPaintScrollThumbs(mem, bodyRel, bodyRel, &m_ui, max(1, m_gridRc.Width()), max(1, m_gridRc.Height()));
 	CCC_BlitStretchOpaque(dc.GetSafeHdc(), body.left, body.top, body.Width(), body.Height(),
@@ -609,10 +662,28 @@ void CSasamiMidiScoreDlg::UpdateHover(CPoint pt)
 	if (m_ui.tool != SC_TOOL_PENCIL && m_ui.tool != SC_TOOL_TEMPO) return;
 	int hitTr = -1;
 	int hit = ScStaffHitNote(m_gridRc, &m_ui, m_doc.ev, m_doc.evCount, 0, pt, &hitTr);
+	/* Same recovery as PlaceOrEditAt — HitNote==-1 on gauge edge still allows staff hover. */
+	if (hit != -2 || hitTr < 0) {
+		int yCursor = m_gridRc.top + SC_RULER_H - m_ui.scrollY;
+		hitTr = -1;
+		hit = -1;
+		for (int tr = 0; tr < m_ui.trackCount; tr++) {
+			const int rowH = ScStaffRowH(&m_ui, tr);
+			const int rowTop = yCursor;
+			yCursor += rowH;
+			if (!m_ui.visible[tr]) continue;
+			const int noteTop = ScStaffRowNoteAreaTop(rowTop);
+			if (pt.y >= noteTop && pt.y < rowTop + rowH - SC_PART_GAP) {
+				hit = -2;
+				hitTr = tr;
+				break;
+			}
+		}
+	}
 	if (hit != -2 || hitTr < 0) return;
 	int staffTop = ScStaffVisibleLaneStaffTop(m_gridRc, &m_ui, hitTr);
 	if (staffTop < 0) return;
-	const int quant = m_ui.snapFit ? m_ui.placeDur : (SC_PPQN / 4);
+	const int quant = ScStaffPlaceQuant(&m_ui);
 	m_ui.hoverTick = ScStaffXToTick(pt.x, m_ui.scrollX, m_gridRc.left + SC_CLEF_MARGIN, m_ui.pxBeat, quant);
 	if (m_ui.tool == SC_TOOL_PENCIL) {
 		m_ui.placeRest = m_placeRest;
@@ -640,6 +711,37 @@ void CSasamiMidiScoreDlg::PlaceOrEditAt(CPoint pt)
 	/* Prog/Bank strip on score: select chip, never place notes */
 	int ctrlTr = -1;
 	int ctrl = ScStaffHitScoreCtrl(m_gridRc, &m_ui, m_doc.ev, m_doc.evCount, 0, pt, &ctrlTr);
+	int markTr = -1;
+	int mark = ScStaffHitStaffMark(m_gridRc, &m_ui, m_doc.ev, m_doc.evCount, 0, pt, &markTr);
+	int hitTr = -1;
+	int hit = ScStaffHitNote(m_gridRc, &m_ui, m_doc.ev, m_doc.evCount, 0, pt, &hitTr);
+
+	if (m_ui.tool == SC_TOOL_ERASER) {
+		int del = -1;
+		if (ctrl >= 0) del = ctrl;
+		else if (mark >= 0) del = mark;
+		else if (hit >= 0) del = hit;
+		if (del >= 0) {
+			ScStaffSelSetPrimary(&m_ui, del);
+			ScStaffSelDelete(m_doc.ev, &m_doc.evCount, &m_ui);
+			RefreshStrip();
+			PushDocToText();
+			InvalidateRect(m_bodyRc, FALSE);
+			m_status.SetWindowText(L"Deleted");
+		} else if (m_ui.stripCount > 0 && m_stripRc.PtInRect(pt)) {
+			int lane = 0, col = 0, val = 0;
+			if (ScStaffHitStrip(m_stripRc, &m_ui, pt, &lane, &col, &val)) {
+				m_ui.strip[lane][col & 255] = (m_ui.stripKind[lane] == SC_STRIP_PITCH) ? 64 : 0;
+				ScStaffApplyStripToDocMidi(&m_doc, m_curCh, &m_ui);
+				InvalidateRect(m_stripRc, FALSE);
+			}
+		} else {
+			m_ui.eraseDrag = 1;
+			SetCapture();
+		}
+		return;
+	}
+
 	if (ctrl >= 0) {
 		m_ui.selEv = ctrl;
 		m_curCh = m_doc.ev[ctrl].ch;
@@ -654,25 +756,25 @@ void CSasamiMidiScoreDlg::PlaceOrEditAt(CPoint pt)
 		InvalidateRect(m_gridRc, FALSE);
 		return;
 	}
-	if (ScStaffPtInScoreCtrlStrip(m_gridRc, &m_ui, pt, &ctrlTr))
-		return;
-	int hitTr = -1;
-	int hit = ScStaffHitNote(m_gridRc, &m_ui, m_doc.ev, m_doc.evCount, 0, pt, &hitTr);
-	if (m_ui.tool == SC_TOOL_ERASER) {
-		if (hit >= 0) {
-			for (int j = hit; j + 1 < m_doc.evCount; j++)
-				m_doc.ev[j] = m_doc.ev[j + 1];
-			m_doc.evCount--;
-			if (m_ui.selEv == hit) m_ui.selEv = -1;
-			else if (m_ui.selEv > hit) m_ui.selEv--;
-			RefreshStrip();
-			InvalidateRect(m_bodyRc, FALSE);
-		}
+	if (m_ui.tool == SC_TOOL_SELECT && mark >= 0) {
+		if (GetKeyState(VK_SHIFT) & 0x8000)
+			ScStaffSelAdd(&m_ui, mark);
+		else
+			ScStaffSelSetPrimary(&m_ui, mark);
+		m_curCh = m_doc.ev[mark].ch;
+		if (m_ch.GetSafeHwnd()) m_ch.SetCurSel(m_curCh);
+		m_status.SetWindowText(L"Mark selected — Delete/Backspace removes");
+		InvalidateRect(m_bodyRc, FALSE);
 		return;
 	}
+	if (ScStaffPtInScoreCtrlStrip(m_gridRc, &m_ui, pt, &ctrlTr))
+		return;
 	if (m_ui.tool == SC_TOOL_SELECT) {
 		if (hit >= 0) {
-			m_ui.selEv = hit;
+			if (GetKeyState(VK_SHIFT) & 0x8000)
+				ScStaffSelAdd(&m_ui, hit);
+			else
+				ScStaffSelSetPrimary(&m_ui, hit);
 			m_ui.dragEv = hit;
 			m_ui.dragOriginX = pt.x;
 			m_ui.dragMode = 2;
@@ -680,13 +782,31 @@ void CSasamiMidiScoreDlg::PlaceOrEditAt(CPoint pt)
 			m_ch.SetCurSel(m_curCh);
 			SyncPropFromSel();
 			RefreshStrip();
+			m_status.SetWindowText(L"Selected — Delete/Backspace removes. Exp/Vol/Pitch apply to this MIDI ch only.");
+			InvalidateRect(m_bodyRc, FALSE);
+		} else {
+			ScStaffSelClear(&m_ui);
+			m_ui.marqueeOn = 1;
+			m_ui.marqueeX0 = m_ui.marqueeX1 = pt.x;
+			m_ui.marqueeY0 = m_ui.marqueeY1 = pt.y;
+			SetCapture();
+			InvalidateRect(m_bodyRc, FALSE);
+		}
+		return;
+	}
+	if (m_ui.tool == SC_TOOL_TIE) {
+		if (hit >= 0) {
+			if (!ScStaffSelHas(&m_ui, hit))
+				ScStaffSelAdd(&m_ui, hit);
+			else
+				ScStaffTieSelected(m_doc.ev, m_doc.evCount, &m_ui);
 			InvalidateRect(m_bodyRc, FALSE);
 		}
 		return;
 	}
 	if (m_ui.tool == SC_TOOL_TEMPO) {
 		if (hit == -2 && hitTr >= 0) {
-			const int quant = m_ui.snapFit ? m_ui.placeDur : (SC_PPQN / 4);
+			const int quant = ScStaffPlaceQuant(&m_ui);
 			uint32_t tick = ScStaffXToTick(pt.x, m_ui.scrollX, m_gridRc.left + SC_CLEF_MARGIN, m_ui.pxBeat, quant);
 			if (m_doc.evCount < SC_EV_MAX) {
 				ScEvent& te = m_doc.ev[m_doc.evCount++];
@@ -706,6 +826,8 @@ void CSasamiMidiScoreDlg::PlaceOrEditAt(CPoint pt)
 	/* pencil */
 	if (hit >= 0) {
 		m_ui.selEv = hit;
+		ScStaffSelClear(&m_ui);
+		ScStaffSelAdd(&m_ui, hit);
 		m_ui.dragEv = hit;
 		m_ui.dragOriginX = pt.x;
 		{
@@ -715,6 +837,7 @@ void CSasamiMidiScoreDlg::PlaceOrEditAt(CPoint pt)
 			m_ui.dragMode = (pt.x >= x1 - 8) ? 1 : 2;
 		}
 		SyncPropFromSel();
+		m_status.SetWindowText(L"Note selected — Delete/Backspace to remove. Exp/Pitch are per-channel.");
 		InvalidateRect(m_bodyRc, FALSE);
 		return;
 	}
@@ -727,8 +850,8 @@ void CSasamiMidiScoreDlg::PlaceOrEditAt(CPoint pt)
 			const int rowTop = yCursor;
 			yCursor += rowH;
 			if (!m_ui.visible[tr]) continue;
-			const int staffTop = ScStaffRowStaffTop(rowTop);
-			if (pt.y >= staffTop && pt.y < rowTop + rowH) {
+			const int noteTop = ScStaffRowNoteAreaTop(rowTop);
+			if (pt.y >= noteTop && pt.y < rowTop + rowH - SC_PART_GAP) {
 				hit = -2;
 				hitTr = tr;
 				break;
@@ -739,7 +862,7 @@ void CSasamiMidiScoreDlg::PlaceOrEditAt(CPoint pt)
 		m_curCh = hitTr;
 		m_ch.SetCurSel(m_curCh);
 		m_ui.visible[hitTr] = 1;
-		const int quant = m_ui.snapFit ? m_ui.placeDur : (SC_PPQN / 4);
+		const int quant = ScStaffPlaceQuant(&m_ui);
 		uint32_t tick = ScStaffXToTick(pt.x, m_ui.scrollX, m_gridRc.left + SC_CLEF_MARGIN, m_ui.pxBeat, quant);
 		int staffTop = ScStaffVisibleLaneStaffTop(m_gridRc, &m_ui, hitTr);
 		if (staffTop < 0) return;
@@ -793,8 +916,8 @@ void CSasamiMidiScoreDlg::RefreshProgLabels()
 		const int ch = e.ch;
 		if (ch < 0 || ch >= 32) continue;
 		if (e.kind == SC_EV_PROG) {
-			if (m_doc.bind.vstProg[ch] < 0)
-				m_doc.bind.vstProg[ch] = (int)e.a;
+			/* Score PROG is canonical for this channel (tone map writes it). */
+			m_doc.bind.vstProg[ch] = (int)e.a;
 		} else if (e.kind == SC_EV_BANK) {
 			m_doc.bind.vstBankMsb[ch] = (int)e.a;
 			m_doc.bind.vstBankLsb[ch] = (int)e.b;
@@ -803,57 +926,15 @@ void CSasamiMidiScoreDlg::RefreshProgLabels()
 	for (int i = 0; i < m_ui.trackCount && i < 32; i++) {
 		wchar_t name[48];
 		name[0] = 0;
-		const int part = i + 1;
 		const int prog = m_doc.bind.vstProg[i];
 		const int msb = m_doc.bind.vstBankMsb[i] >= 0 ? m_doc.bind.vstBankMsb[i] : 0;
 		const int lsb = m_doc.bind.vstBankLsb[i] >= 0 ? m_doc.bind.vstBankLsb[i] : 0;
 		const int pc = prog >= 0 ? (prog & 127) : 0;
 
-		if (m_doc.bind.vstPath[i][0] || VstLivePartIsLoaded(part)) {
-			/* Prefer live VST name; HALion often has no list → Plugin:hash */
-			wchar_t tip[40];
-			tip[0] = 0;
-			if (m_ui.vstLabel[i][0])
-				wcsncpy_s(tip, m_ui.vstLabel[i], _TRUNCATE);
-			/* While HALion Home/editor is up, never PROGRAMS IPC (Host never does).
-			   SampleTank/Kontakt: PROGRAMS also deadlocks if Host64 is in editClose. */
-			const int softVst =
-				(wcsstr(m_doc.bind.vstPath[i], L"SampleTank") != NULL) ||
-				(wcsstr(m_doc.bind.vstPath[i], L"Sample Tank") != NULL) ||
-				(wcsstr(m_doc.bind.vstPath[i], L"Kontakt") != NULL);
-			if (VstLivePartIsLoaded(part) && !VstLivePartEditorIsOpen(part) && !softVst) {
-				wchar_t nm[64];
-				nm[0] = 0;
-				const int idx = prog >= 0 ? prog : VstLiveProgramCurrent(part);
-				if (idx >= 0 && VstLiveProgramName(part, idx, nm, 64) && nm[0] &&
-					_wcsnicmp(nm, L"MIDI Channel", 12) != 0 &&
-					_wcsnicmp(nm, L"Program ", 8) != 0) {
-					wcsncpy_s(name, nm, _TRUNCATE);
-				} else {
-					wchar_t path[520];
-					path[0] = 0;
-					VstLivePartGetPath(part, path, 520);
-					const wchar_t* base = tip[0] ? tip : L"VST";
-					if (!tip[0] && path[0]) {
-						const wchar_t* p = wcsrchr(path, L'\\');
-						p = p ? p + 1 : path;
-						wcsncpy_s(tip, p, _TRUNCATE);
-						wchar_t* dot = wcsrchr(tip, L'.');
-						if (dot) *dot = 0;
-						base = tip[0] ? tip : L"VST";
-					}
-					unsigned h = 2166136261u;
-					for (const wchar_t* p = path[0] ? path : base; *p; ++p)
-						h = (h ^ (unsigned)*p) * 16777619u;
-					h ^= (unsigned)(idx >= 0 ? idx : 0) * 0x9E3779B9u;
-					_snwprintf_s(name, _TRUNCATE, L"%s:%04X", base, (h >> 16) & 0xFFFFu);
-				}
-			} else if (VstLivePartIsLoaded(part) && tip[0]) {
-				wcsncpy_s(name, tip, _TRUNCATE);
-			} else if (tip[0]) {
-				_snwprintf_s(name, _TRUNCATE, L"%s (unloaded)", tip);
-			}
-		}
+		/* Never VstLiveProgramName/Current here — Host64 PROGRAMS IPC freezes
+		   the UI on tone-map return (and after preview). GS/XG table + tip only. */
+		if (m_ui.vstLabel[i][0] && prog < 0)
+			wcsncpy_s(name, m_ui.vstLabel[i], _TRUNCATE);
 		if (!name[0]) {
 			const int isDrum = (i == 9 || i == 25);
 			SasamiToneLookupAuto(msb, lsb, pc, isDrum, name, 48);
@@ -875,6 +956,71 @@ void CSasamiMidiScoreDlg::RefreshProgLabels()
 	}
 }
 
+/* Tone-map OK → tick-0 BANK/PROG from bind only (no edit boxes, no live IPC). */
+void CSasamiMidiScoreDlg::ApplyBindProgToScore(int ch0)
+{
+	if (ch0 < 0 || ch0 >= 32) return;
+	int prog = m_doc.bind.vstProg[ch0];
+	if (prog < 0) prog = 0;
+	if (prog > 127) prog = 127;
+	int msb = m_doc.bind.vstBankMsb[ch0];
+	if (msb < 0) msb = 0;
+	if (msb > 127) msb = 127;
+	int lsb = m_doc.bind.vstBankLsb[ch0];
+	if (lsb < 0) lsb = 0;
+	if (lsb > 127) lsb = 127;
+	m_doc.bind.vstProg[ch0] = prog;
+	m_doc.bind.vstBankMsb[ch0] = msb;
+	m_doc.bind.vstBankLsb[ch0] = lsb;
+
+	int foundProg = -1, foundBank = -1;
+	for (int i = 0; i < m_doc.evCount; i++) {
+		if (m_doc.ev[i].ch != (uint8_t)ch0) continue;
+		if (m_doc.ev[i].kind == SC_EV_PROG && m_doc.ev[i].tick == 0) foundProg = i;
+		if (m_doc.ev[i].kind == SC_EV_BANK && m_doc.ev[i].tick == 0) foundBank = i;
+	}
+	auto putEv = [&](int* found, uint8_t kind, uint8_t a, uint8_t b) {
+		if (*found >= 0) {
+			m_doc.ev[*found].a = a;
+			m_doc.ev[*found].b = b;
+			m_doc.ev[*found].c = 0;
+			m_doc.ev[*found].dur = 0;
+			return;
+		}
+		if (m_doc.evCount >= SC_EV_MAX) return;
+		ScEvent& e = m_doc.ev[m_doc.evCount++];
+		e.tick = 0; e.seq = (uint32_t)(m_doc.evCount - 1);
+		e.ch = (uint8_t)ch0; e.kind = kind;
+		e.a = a; e.b = b; e.c = 0; e.dur = 0;
+		*found = m_doc.evCount - 1;
+	};
+	putEv(&foundBank, SC_EV_BANK, (uint8_t)msb, (uint8_t)lsb);
+	putEv(&foundProg, SC_EV_PROG, (uint8_t)prog, (uint8_t)prog);
+	if (foundBank >= 0 && foundProg >= 0 &&
+		m_doc.ev[foundBank].tick == 0 && m_doc.ev[foundProg].tick == 0 &&
+		m_doc.ev[foundBank].seq > m_doc.ev[foundProg].seq) {
+		const uint32_t tmp = m_doc.ev[foundBank].seq;
+		m_doc.ev[foundBank].seq = m_doc.ev[foundProg].seq;
+		m_doc.ev[foundProg].seq = tmp;
+	}
+
+	wchar_t name[48];
+	name[0] = 0;
+	SasamiToneLookupAuto(msb, lsb, prog, (ch0 == 9 || ch0 == 25) ? 1 : 0, name, 48);
+	if (name[0])
+		_snwprintf_s(m_ui.progLabel[ch0], _TRUNCATE, L"%s", name);
+	else
+		_snwprintf_s(m_ui.progLabel[ch0], _TRUNCATE, L"Prog  %d", prog);
+
+	InvalidateRect(m_trackRc, FALSE);
+	if (m_bodyRc.Width() > 0)
+		InvalidateRect(m_bodyRc, FALSE);
+	CString st;
+	st.Format(L"MIDI %d  Prog %d (PC#%d)  Bank %d/%d",
+		ch0 + 1, prog, prog + 1, msb, lsb);
+	m_status.SetWindowText(st);
+}
+
 void CSasamiMidiScoreDlg::SyncVstBindsFromLive()
 {
 	__try {
@@ -894,10 +1040,40 @@ void CSasamiMidiScoreDlg::SyncVstBindsFromLive()
 		InvalidateRect(m_trackRc, FALSE);
 }
 
+void CSasamiMidiScoreDlg::SyncFxBindsToLive()
+{
+	__try {
+		for (int ch = 0; ch < 32; ++ch) {
+			for (int sl = 0; sl < ScMidiFxBind::SC_FX_SLOTS; ++sl) {
+				const wchar_t* path = m_doc.fxBind.fxPath[ch][sl];
+				if (!path[0]) continue;
+				wchar_t cur[520] = {};
+				int already = 0;
+				if (VstLiveFxIsLoaded(ch + 1, sl) &&
+					VstLiveFxGetPath(ch + 1, sl, cur, 520) && cur[0] &&
+					_wcsicmp(cur, path) == 0) {
+					already = 1;
+				} else {
+					const size_t n = wcslen(path);
+					const int is3 = (n >= 5 && _wcsicmp(path + n - 5, L".vst3") == 0) ? 1 : 0;
+					if (VstLiveLoadFx(ch + 1, sl, path, is3) != 0)
+						continue;
+				}
+				VstLiveFxSetBypass(ch + 1, sl, m_doc.fxBind.fxBypass[ch][sl]);
+				if (!already && m_doc.fxBind.fxStateLen[ch][sl] && m_doc.fxBind.fxState[ch][sl])
+					VstLiveFxApplyState(ch + 1, sl, m_doc.fxBind.fxState[ch][sl],
+						(int)m_doc.fxBind.fxStateLen[ch][sl]);
+			}
+		}
+	} __except (EXCEPTION_EXECUTE_HANDLER) {
+	}
+}
+
 LRESULT CSasamiMidiScoreDlg::OnDeferredInit(WPARAM, LPARAM)
 {
 	__try {
 		SyncVstBindsFromLive();
+		SyncFxBindsToLive();
 		RefreshProgLabels();
 	} __except (EXCEPTION_EXECUTE_HANDLER) {
 	}
@@ -906,6 +1082,19 @@ LRESULT CSasamiMidiScoreDlg::OnDeferredInit(WPARAM, LPARAM)
 	/* Start ednotify poll only after the window is fully up (not during Create). */
 	VstLiveEditorSetNotifyHwnd(m_hWnd);
 	SetTimer(9122, 250, NULL);
+	/* Note palette always visible while score is open. */
+	{
+		CRect r;
+		if (m_btnPal.GetSafeHwnd()) m_btnPal.GetWindowRect(&r);
+		else GetWindowRect(&r);
+		CSasamiNotePaletteDlg::OpenNear(this, CPoint(r.left, r.bottom + 4));
+	}
+	return 0;
+}
+
+LRESULT CSasamiMidiScoreDlg::OnDeferredPushText(WPARAM, LPARAM)
+{
+	PushDocToText();
 	return 0;
 }
 
@@ -919,7 +1108,8 @@ void CSasamiMidiScoreDlg::OpenVstForPart(int part1to32, int editorOnly)
 	   Right-click track uses ScVstShowPartMenu separately. */
 	(void)editorOnly;
 
-	const int ok = ScVstAssignToneForPart(this, part1to32, &m_doc.bind) ? 1 : 0;
+	const int assignRc = ScVstAssignToneForPart(this, part1to32, &m_doc.bind);
+	const int ok = (assignRc != 0) ? 1 : 0;
 
 	wchar_t path[520];
 	path[0] = 0;
@@ -935,44 +1125,42 @@ void CSasamiMidiScoreDlg::OpenVstForPart(int part1to32, int editorOnly)
 	}
 	if (m_doc.bind.vstPath[part1to32 - 1][0])
 		ScMidiSetVstLabel(&m_ui, part1to32 - 1, m_doc.bind.vstPath[part1to32 - 1]);
+	/* Tone map OK → score BANK/PROG only. MML sync deferred (never during EndDialog). */
+	if (ok) {
+		ApplyBindProgToScore(part1to32 - 1);
+		KillTimer(9124);
+		SetTimer(9124, 100, NULL);
+		if (m_bodyRc.Width() > 0)
+			InvalidateRect(m_bodyRc, FALSE);
+	}
 	CString st;
-	if (VstLivePartIsLoaded(part1to32)) {
-		st.Format(L"VST %s -> MIDI %d — opening editor…",
-			m_ui.vstLabel[part1to32 - 1][0] ? m_ui.vstLabel[part1to32 - 1] : L"(loaded)",
-			part1to32);
+	if (ok) {
+		st.Format(L"MIDI %d tone applied (Prog/Bank → score)", part1to32);
+	} else if (VstLivePartIsLoaded(part1to32)) {
+		st.Format(L"MIDI %d tone cancelled", part1to32);
 	} else {
 		st.Format(L"MIDI %d tone cleared / cancelled", part1to32);
 	}
 	m_status.SetWindowText(st);
 	InvalidateRect(m_trackRc, FALSE);
-	/* Do NOT NotifyVstResult/RaiseSelf here — avoid chrome refresh during Home open. */
-	if (ok && VstLivePartIsLoaded(part1to32) &&
-		!(VstLivePartIsMulti(part1to32))) {
-		m_pendingEdOpenPart = part1to32;
-		KillTimer(9123);
-		SetTimer(9123, 400, NULL);
+	/* Auto-open editor ONLY for dedicated VST3 (return 2). Tone-map / SC-VA VST2
+	   (return 1) must never open editor — effEditOpen / Host64 freezes on 入力. */
+	if (assignRc == 2 && VstLivePartIsLoaded(part1to32) && path[0]) {
+		const size_t n = wcslen(path);
+		const int isVst3 = (n >= 5 && _wcsicmp(path + n - 5, L".vst3") == 0) ? 1 : 0;
+		if (isVst3) {
+			m_pendingEdOpenPart = part1to32;
+			KillTimer(9123);
+			SetTimer(9123, 400, NULL);
+		}
 	}
 }
 
 LRESULT CSasamiMidiScoreDlg::OnDeferredProgLabels(WPARAM w, LPARAM)
 {
 	const int part = (int)w;
-	/* Editor still up (Home/MediaBay): Host-like — no PROGRAMS IPC. */
-	if (part >= 1 && part <= 32 && VstLivePartEditorIsOpen(part))
-		return 0;
-	if (part >= 1 && part <= 32 && VstLivePartIsLoaded(part)) {
-		const int liveProg = VstLiveProgramCurrent(part);
-		if (liveProg >= 0)
-			m_doc.bind.vstProg[part - 1] = liveProg;
-		const int prog = m_doc.bind.vstProg[part - 1];
-		if (prog >= 0) {
-			const int saveCh = m_curCh;
-			m_curCh = part - 1;
-			SyncProgPropFromCh(m_curCh);
-			ApplyProgPropToCh();
-			m_curCh = saveCh;
-		}
-	}
+	/* Never PROGRAMS IPC from UI timers — freezes Host64 (tone map / preview). */
+	(void)part;
 	RefreshProgLabels();
 	if (m_trackRc.Width() > 0)
 		InvalidateRect(m_trackRc, FALSE);
@@ -1077,7 +1265,13 @@ void CSasamiMidiScoreDlg::ApplyProgPropToCh()
 		if (m_doc.ev[i].kind == SC_EV_BANK && m_doc.ev[i].tick == 0) foundBank = i;
 	}
 	auto putEv = [&](int* found, uint8_t kind, uint8_t a, uint8_t b) {
-		if (*found >= 0) { m_doc.ev[*found].a = a; m_doc.ev[*found].b = b; return; }
+		if (*found >= 0) {
+			m_doc.ev[*found].a = a;
+			m_doc.ev[*found].b = b;
+			m_doc.ev[*found].c = 0;
+			m_doc.ev[*found].dur = 0;
+			return;
+		}
 		if (m_doc.evCount >= SC_EV_MAX) return;
 		ScEvent& e = m_doc.ev[m_doc.evCount++];
 		e.tick = 0; e.seq = (uint32_t)(m_doc.evCount - 1);
@@ -1085,12 +1279,24 @@ void CSasamiMidiScoreDlg::ApplyProgPropToCh()
 		e.a = a; e.b = b; e.c = 0; e.dur = 0;
 		*found = m_doc.evCount - 1;
 	};
-	putEv(&foundProg, SC_EV_PROG, (uint8_t)prog, (uint8_t)prog);
+	/* Bank before Prog so same-tick sort / SMF emit CC0/CC32 then PC. */
 	putEv(&foundBank, SC_EV_BANK, (uint8_t)msb, (uint8_t)lsb);
+	putEv(&foundProg, SC_EV_PROG, (uint8_t)prog, (uint8_t)prog);
+	/* Keep seq order: bank then prog when both newly created. */
+	if (foundBank >= 0 && foundProg >= 0 &&
+		m_doc.ev[foundBank].tick == 0 && m_doc.ev[foundProg].tick == 0 &&
+		m_doc.ev[foundBank].seq > m_doc.ev[foundProg].seq) {
+		const uint32_t tmp = m_doc.ev[foundBank].seq;
+		m_doc.ev[foundBank].seq = m_doc.ev[foundProg].seq;
+		m_doc.ev[foundProg].seq = tmp;
+	}
 	RefreshProgLabels();
 	InvalidateRect(m_trackRc, FALSE);
+	if (m_bodyRc.Width() > 0)
+		InvalidateRect(m_bodyRc, FALSE);
 	CString st;
-	st.Format(L"MIDI %d  Prog %d  Bank %d/%d", m_curCh + 1, prog, msb, lsb);
+	st.Format(L"MIDI %d  Prog %d (PC#%d)  Bank %d/%d",
+		m_curCh + 1, prog, prog + 1, msb, lsb);
 	m_status.SetWindowText(st);
 }
 
@@ -1178,8 +1384,10 @@ void CSasamiMidiScoreDlg::OnLButtonDown(UINT nFlags, CPoint point)
 			m_ui.visible[tr] = 1;
 			OpenVstForPart(tr + 1);
 		} else if (zone == SC_GAUGE_PROG) {
+			m_curCh = tr;
+			m_ch.SetCurSel(m_curCh);
 			m_ui.visible[tr] = 1;
-			EditProgForPart(tr);
+			CSasamiExcRpnDlg::OpenOwned(this, &m_doc, tr, m_ui.markerTick);
 		} else {
 			m_curCh = tr;
 			m_ch.SetCurSel(m_curCh);
@@ -1208,6 +1416,28 @@ void CSasamiMidiScoreDlg::OnLButtonDown(UINT nFlags, CPoint point)
 
 void CSasamiMidiScoreDlg::OnMouseMove(UINT nFlags, CPoint point)
 {
+	if ((nFlags & MK_LBUTTON) && m_ui.marqueeOn) {
+		m_ui.marqueeX1 = point.x;
+		m_ui.marqueeY1 = point.y;
+		InvalidateRect(m_bodyRc, FALSE);
+		return;
+	}
+	if ((nFlags & MK_LBUTTON) && m_ui.eraseDrag) {
+		int hitTr = -1;
+		int hit = ScStaffHitNote(m_gridRc, &m_ui, m_doc.ev, m_doc.evCount, 0, point, &hitTr);
+		int markTr = -1;
+		int mark = ScStaffHitStaffMark(m_gridRc, &m_ui, m_doc.ev, m_doc.evCount, 0, point, &markTr);
+		int ctrlTr = -1;
+		int ctrl = ScStaffHitScoreCtrl(m_gridRc, &m_ui, m_doc.ev, m_doc.evCount, 0, point, &ctrlTr);
+		int del = (ctrl >= 0) ? ctrl : ((mark >= 0) ? mark : hit);
+		if (del >= 0) {
+			ScStaffSelSetPrimary(&m_ui, del);
+			ScStaffSelDelete(m_doc.ev, &m_doc.evCount, &m_ui);
+			PushDocToText();
+			InvalidateRect(m_bodyRc, FALSE);
+		}
+		return;
+	}
 	if ((nFlags & MK_LBUTTON) && m_sbDrag) {
 		CPoint bp(point.x - m_bodyRc.left, point.y - m_bodyRc.top);
 		CRect bodyRel(0, 0, m_bodyRc.Width(), m_bodyRc.Height());
@@ -1275,7 +1505,7 @@ void CSasamiMidiScoreDlg::OnMouseMove(UINT nFlags, CPoint point)
 					if (note < 0) note = 0;
 					if (note > 127) note = 127;
 					e.a = (uint8_t)note;
-					const int quant = m_ui.snapFit ? m_ui.placeDur : (SC_PPQN / 4);
+					const int quant = ScStaffPlaceQuant(&m_ui);
 					e.tick = ScStaffXToTick(point.x, m_ui.scrollX, m_gridRc.left + SC_CLEF_MARGIN, m_ui.pxBeat, quant);
 					SyncPropFromSel();
 					InvalidateRect(m_gridRc, FALSE);
@@ -1318,6 +1548,26 @@ BOOL CSasamiMidiScoreDlg::OnSetCursor(CWnd* pWnd, UINT nHitTest, UINT message)
 void CSasamiMidiScoreDlg::OnLButtonUp(UINT nFlags, CPoint point)
 {
 	m_sbDrag = 0;
+	if (m_ui.marqueeOn) {
+		m_ui.marqueeX1 = point.x;
+		m_ui.marqueeY1 = point.y;
+		CRect r(min(m_ui.marqueeX0, m_ui.marqueeX1), min(m_ui.marqueeY0, m_ui.marqueeY1),
+			max(m_ui.marqueeX0, m_ui.marqueeX1), max(m_ui.marqueeY0, m_ui.marqueeY1));
+		ScStaffSelClear(&m_ui);
+		for (int i = 0; i < m_doc.evCount; i++) {
+			const ScEvent& e = m_doc.ev[i];
+			if (e.kind != SC_EV_NOTE && e.kind != SC_EV_REST) continue;
+			int st = ScStaffVisibleLaneStaffTop(m_gridRc, &m_ui, e.ch);
+			if (st < 0) continue;
+			int x = ScStaffTickToX(e.tick, m_ui.scrollX, m_gridRc.left + SC_CLEF_MARGIN, m_ui.pxBeat);
+			int y = (e.kind == SC_EV_REST) ? (st + 8) : ScStaffMidiNoteYTrack(&m_ui, e.ch, st, e.a);
+			if (r.PtInRect(CPoint(x, y)))
+				ScStaffSelAdd(&m_ui, i);
+		}
+		m_ui.marqueeOn = 0;
+		InvalidateRect(m_bodyRc, FALSE);
+	}
+	m_ui.eraseDrag = 0;
 	if (m_ui.dragEv <= -2000) {
 		ScStaffApplyStripToDocMidi(&m_doc, m_curCh, &m_ui);
 		m_ui.stripLineAnchorCol = -1;
@@ -1373,8 +1623,9 @@ void CSasamiMidiScoreDlg::OnLButtonDblClk(UINT nFlags, CPoint point)
 				InvalidateRect(m_bodyRc, FALSE);
 			} else if (zone == SC_GAUGE_TONE) OpenVstForPart(tr + 1);
 			else if (zone == SC_GAUGE_PROG) {
-				m_status.SetWindowText(L"Prog chips are on the score (right). Double-click a Prog at its tick.");
-				EditProgForPart(tr);
+				m_curCh = tr;
+				m_ch.SetCurSel(m_curCh);
+				CSasamiExcRpnDlg::OpenOwned(this, &m_doc, tr, m_ui.markerTick);
 			} else
 				OpenVstForPart(tr + 1);
 		}
@@ -1496,21 +1747,6 @@ void CSasamiMidiScoreDlg::OnCbnSelchangeCh()
 	}
 }
 
-void CSasamiMidiScoreDlg::OnCbnStrip()
-{
-	int k0 = m_stripKind0.GetCurSel();
-	int k1 = m_stripKind1.GetCurSel();
-	int draw = m_stripDraw.GetCurSel();
-	int lanes = m_stripLanes.GetCurSel();
-	if (k0 >= 0) m_ui.stripKind[0] = k0;
-	if (k1 >= 0) m_ui.stripKind[1] = k1;
-	if (draw >= 0) m_ui.stripDraw = draw;
-	m_ui.stripCount = (lanes == 1) ? 2 : 1;
-	RefreshStrip();
-	LayoutChrome();
-	Invalidate(FALSE);
-}
-
 void CSasamiMidiScoreDlg::OnBnClickedPencil()
 {
 	m_ui.tool = SC_TOOL_PENCIL;
@@ -1538,42 +1774,113 @@ void CSasamiMidiScoreDlg::OnBnClickedPal()
 
 LRESULT CSasamiMidiScoreDlg::OnPalDur(WPARAM w, LPARAM l)
 {
-	if (l & 0x40000000) {
-		m_ui.snapFit ^= 1;
-		CString s;
-		s.Format(L"Grid fit %s", m_ui.snapFit ? L"ON" : L"OFF");
-		m_status.SetWindowText(s);
-		InvalidateRect(m_gridRc, FALSE);
-		return 0;
-	}
-	if (l & 0x20000000) {
-		m_ui.tool = SC_TOOL_TEMPO;
-		UpdateNoteCursor();
-		return 0;
-	}
-	if (l & 0x10000000) {
-		m_edGt.SetFocus();
-		return 0;
+	if ((l & SASAMI_PAL_CMD) == SASAMI_PAL_CMD) {
+		switch ((int)(l & 0xFF)) {
+		case SASAMI_PAL_CMD_FIT: {
+			m_ui.snapFit ^= 1;
+			CString s;
+			s.Format(L"Grid fit %s", m_ui.snapFit ? L"ON" : L"OFF");
+			m_status.SetWindowText(s);
+			InvalidateRect(m_gridRc, FALSE);
+			return 0;
+		}
+		case SASAMI_PAL_CMD_TEMPO:
+			m_ui.tool = SC_TOOL_TEMPO;
+			UpdateNoteCursor();
+			m_status.SetWindowText(L"Tempo tool — click staff");
+			return 0;
+		case SASAMI_PAL_CMD_GT:
+			m_edGt.SetFocus();
+			return 0;
+		case SASAMI_PAL_CMD_PENCIL: OnBnClickedPencil(); return 0;
+		case SASAMI_PAL_CMD_ERASE: OnBnClickedErase(); return 0;
+		case SASAMI_PAL_CMD_SEL: OnBnClickedSel(); return 0;
+		case SASAMI_PAL_CMD_MARK: OnBnClickedMark(); return 0;
+		case SASAMI_PAL_CMD_LOOP_A: OnBnClickedLoopA(); return 0;
+		case SASAMI_PAL_CMD_LOOP_B: OnBnClickedLoopB(); return 0;
+		case SASAMI_PAL_CMD_LOOP_CLR: OnBnClickedLoopClr(); return 0;
+		case SASAMI_PAL_CMD_MARK_REPLACE:
+			m_ui.markStack = 0;
+			savedata.sasamiMarkStack = 0;
+			m_status.SetWindowText(L"マーク配置: 1重（同じ位置は置換）");
+			return 0;
+		case SASAMI_PAL_CMD_MARK_STACK:
+			m_ui.markStack = 1;
+			savedata.sasamiMarkStack = 1;
+			m_status.SetWindowText(L"マーク配置: ネスト（同じ位置に積み上げ）");
+			return 0;
+		case SASAMI_PAL_CMD_TIE:
+			m_ui.tool = SC_TOOL_TIE;
+			UpdateNoteCursor();
+			m_status.SetWindowText(L"Tie tool");
+			return 0;
+		case SASAMI_PAL_CMD_LOOP_START:
+		case SASAMI_PAL_CMD_LOOP_END:
+		case SASAMI_PAL_CMD_PED_ON:
+		case SASAMI_PAL_CMD_PED_OFF: {
+			/* Palette is a separate window — hover stays stale. Insert at red bar. */
+			const int ch = m_curCh;
+			uint32_t atTick = m_ui.markerTick;
+			int ok = 0;
+			if ((int)(l & 0xFF) == SASAMI_PAL_CMD_LOOP_START) {
+				int n = 2;
+				if (CSasamiSimpleInputDlg::AskNumber(this, L"ループ開始 |:",
+					L"繰り返し回数 (1–99)", 2, 1, 99, &n) != IDOK)
+					return 0;
+				ok = ScMidiAddLoopStart(&m_doc, atTick, ch, n, m_ui.markStack);
+			} else if ((int)(l & 0xFF) == SASAMI_PAL_CMD_LOOP_END) {
+				ok = ScMidiAddLoopEnd(&m_doc, atTick, ch, m_ui.markStack);
+			} else if ((int)(l & 0xFF) == SASAMI_PAL_CMD_PED_ON) {
+				ok = ScMidiAddPedalOn(&m_doc, atTick, ch, m_ui.markStack);
+			} else {
+				ok = ScMidiAddPedalOff(&m_doc, atTick, ch, m_ui.markStack);
+			}
+			if (ok) {
+				m_ui.visible[ch] = 1;
+				RefreshStrip();
+				PushDocToText();
+				InvalidateRect(m_bodyRc, FALSE);
+				CString st;
+				st.Format(L"MIDI %d mark @ %u (marker)", ch + 1, (unsigned)atTick);
+				m_status.SetWindowText(st);
+			}
+			return 0;
+		}
+		default:
+			return 0;
+		}
 	}
 	m_ui.tool = SC_TOOL_PENCIL;
-	m_ui.placeDur = (int)w;
-	if (m_ui.placeDur < 1) m_ui.placeDur = 1;
 	m_placeRest = (int)(l & 1);
 	m_ui.placeRest = m_placeRest;
 	m_ui.dotted = (l & 2) ? 1 : 0;
-	m_ui.triplet = (l & 4) ? 1 : 0;
+	m_ui.tuplet = (int)((l >> 4) & 0xF);
+	if (m_ui.tuplet != 3 && m_ui.tuplet != 5 && m_ui.tuplet != 6 && m_ui.tuplet != 8)
+		m_ui.tuplet = 0;
+	m_ui.triplet = (m_ui.tuplet == 3) ? 1 : 0;
 	m_accidental = (int)(signed char)((l >> 8) & 0xFF);
+	m_ui.placeAccidental = m_accidental;
 	int base = (int)((l >> 16) & 0xFFFF);
 	if (base > 0) m_ui.baseDur = base;
 	ScStaffRecomputePlaceDur(&m_ui);
+	/* wParam is authoritative final ticks from palette (guards recompute mismatch). */
+	if ((int)w > 0) m_ui.placeDur = (int)w;
+	if (m_ui.placeDur < 1) m_ui.placeDur = 1;
 	UpdateNoteCursor();
 	CString s;
-	s.Format(L"Dur=%d%s%s%s Fit%s",
+	s.Format(L"Dur=%d%s%s%s%s Fit%s",
 		m_ui.placeDur,
 		m_placeRest ? L" rest" : L"",
 		m_ui.dotted ? L" dot" : L"",
-		m_ui.triplet ? L" tri" : L"",
+		m_ui.tuplet ? L" tup" : L"",
+		m_accidental > 0 ? L" #" : (m_accidental < 0 ? L" b" : L""),
 		m_ui.snapFit ? L"ON" : L"OFF");
+	if (m_ui.tuplet) {
+		CString t;
+		t.Format(L"%d", m_ui.tuplet);
+		s += L" ";
+		s += t;
+	}
 	m_status.SetWindowText(s);
 	InvalidateRect(m_gridRc, FALSE);
 	return 0;
@@ -1653,7 +1960,8 @@ int CSasamiMidiScoreDlg::BuildToTemp(wchar_t* outPath, int outCch)
 	if (!ScMidiDocToWrite(tmp, wr)) {
 		HeapFree(GetProcessHeap(), 0, wr);
 		HeapFree(GetProcessHeap(), 0, tmp);
-		m_status.SetWindowText(L"Build failed");
+		const wchar_t* why = ScGetLastWriteErr();
+		m_status.SetWindowText(why && why[0] ? why : L"Build failed");
 		return 0;
 	}
 	HeapFree(GetProcessHeap(), 0, tmp);
@@ -1761,11 +2069,14 @@ void CSasamiMidiScoreDlg::LoadFromDoc(const ScMidiDoc& src)
 {
 	/* Deep-copy bind heaps — operator= would alias malloc'd state blobs. */
 	ScMidiVstBindFreeStates(&m_doc.bind);
+	ScMidiFxBindFreeStates(&m_doc.fxBind);
 	m_doc = src;
 	memset(&m_doc.bind.vstComp, 0, sizeof(m_doc.bind.vstComp));
 	memset(&m_doc.bind.vstCtrl, 0, sizeof(m_doc.bind.vstCtrl));
 	memset(&m_doc.bind.vstCompLen, 0, sizeof(m_doc.bind.vstCompLen));
 	memset(&m_doc.bind.vstCtrlLen, 0, sizeof(m_doc.bind.vstCtrlLen));
+	memset(&m_doc.fxBind.fxState, 0, sizeof(m_doc.fxBind.fxState));
+	memset(&m_doc.fxBind.fxStateLen, 0, sizeof(m_doc.fxBind.fxStateLen));
 	for (int i = 0; i < 32; i++) {
 		if (src.bind.vstCompLen[i] && src.bind.vstComp[i])
 			SasamiVstBlobSet(&m_doc.bind.vstComp[i], &m_doc.bind.vstCompLen[i],
@@ -1773,7 +2084,13 @@ void CSasamiMidiScoreDlg::LoadFromDoc(const ScMidiDoc& src)
 		if (src.bind.vstCtrlLen[i] && src.bind.vstCtrl[i])
 			SasamiVstBlobSet(&m_doc.bind.vstCtrl[i], &m_doc.bind.vstCtrlLen[i],
 				src.bind.vstCtrl[i], src.bind.vstCtrlLen[i]);
+		for (int sl = 0; sl < ScMidiFxBind::SC_FX_SLOTS; ++sl) {
+			if (src.fxBind.fxStateLen[i][sl] && src.fxBind.fxState[i][sl])
+				SasamiVstBlobSet(&m_doc.fxBind.fxState[i][sl], &m_doc.fxBind.fxStateLen[i][sl],
+					src.fxBind.fxState[i][sl], src.fxBind.fxStateLen[i][sl]);
+		}
 	}
+	SyncFxBindsToLive();
 	SyncMeterFromDoc();
 	RefreshProgLabels();
 	ScStaffEnsureStripFromDoc(&m_ui, m_doc.ev, m_doc.evCount, m_curCh);
@@ -1785,6 +2102,9 @@ void CSasamiMidiScoreDlg::LoadFromDoc(const ScMidiDoc& src)
 
 void CSasamiMidiScoreDlg::PushDocToText()
 {
+	/* No text window → nothing to sync (tone-map OK must not allocate 1MB MML). */
+	CSasamiTextDlg* t = CSasamiTextDlg::Instance();
+	if (!t || !::IsWindow(t->GetSafeHwnd())) return;
 	const int mmlCch = (int)(SC_TEXT_MAX / sizeof(wchar_t));
 	wchar_t* mml = (wchar_t*)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY,
 		(SIZE_T)mmlCch * sizeof(wchar_t));
@@ -1793,10 +2113,7 @@ void CSasamiMidiScoreDlg::PushDocToText()
 		HeapFree(GetProcessHeap(), 0, mml);
 		return;
 	}
-	if (CSasamiTextDlg* t = CSasamiTextDlg::Instance()) {
-		if (::IsWindow(t->GetSafeHwnd()))
-			t->SetMmlFromScore(mml);
-	}
+	t->SetMmlFromScore(mml);
 	HeapFree(GetProcessHeap(), 0, mml);
 }
 
@@ -1861,6 +2178,7 @@ void CSasamiMidiScoreDlg::RestoreUiGeom()
 		m_ui.scrollX = savedata.sasamiMidiScrollX;
 	if (savedata.sasamiMidiScrollY >= 0)
 		m_ui.scrollY = savedata.sasamiMidiScrollY;
+	m_ui.markStack = savedata.sasamiMarkStack ? 1 : 0;
 	if (!ScRestoreWndGeom(this, savedata.sasamiMidiX, savedata.sasamiMidiY,
 		savedata.sasamiMidiW, savedata.sasamiMidiH, 720, 420))
 		SetWindowPos(NULL, 0, 0, 1100, 720, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
@@ -1965,6 +2283,7 @@ void CSasamiMidiScoreDlg::OnBnClickedPlay()
 	/* Song playback and live-monitor both drain Host64 SHM — stop monitor first
 	   or preview is silent/jerky and editors go mute. */
 	VstLiveMonitorStop();
+	SyncFxBindsToLive();
 	/* Bake expression/volume strips into the doc before export. */
 	for (int i = 0; i < m_ui.trackCount; i++)
 		ScStaffApplyStripToDocMidi(&m_doc, i, &m_ui);
@@ -2049,6 +2368,17 @@ void CSasamiMidiScoreDlg::OnBnClickedShowAll()
 	m_status.SetWindowText(L"Showing all MIDI 1-32");
 }
 
+void CSasamiMidiScoreDlg::OnBnClickedFx()
+{
+	int part = m_curCh + 1;
+	if (m_curCh >= 0 && m_curCh < 32 && m_doc.trackPart[m_curCh] != 0xFF)
+		part = (int)m_doc.trackPart[m_curCh] + 1;
+	if (part < 1) part = 1;
+	if (part > 32) part = 32;
+	SyncFxBindsToLive();
+	CSasamiInsertFxDlg::OpenOwned(this, &m_doc, part);
+}
+
 void CSasamiMidiScoreDlg::OnTimer(UINT_PTR nIDEvent)
 {
 	if (nIDEvent == kScPreviewTimer) {
@@ -2078,6 +2408,11 @@ void CSasamiMidiScoreDlg::OnTimer(UINT_PTR nIDEvent)
 		m_pendingEdOpenPart = 0;
 		if (part >= 1 && part <= 32)
 			PostMessage(WM_APP + 7204, (WPARAM)part, 1);
+		return;
+	}
+	if (nIDEvent == 9124) {
+		KillTimer(9124);
+		PushDocToText();
 		return;
 	}
 	if (nIDEvent == 9121) {
@@ -2143,7 +2478,14 @@ LRESULT CSasamiMidiScoreDlg::OnNoteProps(WPARAM w, LPARAM l)
 		m_doc.bind.isMpw3 = 1;
 		if (VstLivePartIsLoaded((int)l)) {
 			m_doc.bind.vstForceCh[(int)l - 1] = VstLiveSendChannel((int)l);
-			m_doc.bind.vstProg[(int)l - 1] = VstLiveProgramCurrent((int)l);
+			/* Multi/remote (SC-VA VST2): never ProgramCurrent — Host64 PROGRAMS
+			   IPC freezes. Keep bind prog from tone map / score. */
+			if (!VstLivePartIsMulti((int)l) && path[0] &&
+				!VstDetectMultiTimbral(path)) {
+				const int cur = VstLiveProgramCurrent((int)l);
+				if (cur >= 0)
+					m_doc.bind.vstProg[(int)l - 1] = cur;
+			}
 		}
 		RefreshProgLabels();
 		InvalidateRect(m_trackRc, FALSE);
@@ -2151,6 +2493,26 @@ LRESULT CSasamiMidiScoreDlg::OnNoteProps(WPARAM w, LPARAM l)
 		/* From note-props VST: Assign (tone map / editor). NotifyVstResult inside. */
 		OpenVstForPart((int)l, 0);
 	}
+	return 0;
+}
+
+LRESULT CSasamiMidiScoreDlg::OnExcRpnChanged(WPARAM, LPARAM)
+{
+	RefreshStrip();
+	ScStaffUpdateContentExtent(&m_ui, m_doc.ev, m_doc.evCount);
+	InvalidateRect(m_bodyRc, FALSE);
+	PushDocToText();
+	PersistSession();
+	m_status.SetWindowText(L"Inserted Exc/RPN event");
+	return 0;
+}
+
+LRESULT CSasamiMidiScoreDlg::OnInsertFxChanged(WPARAM, LPARAM)
+{
+	SyncFxBindsToLive();
+	PushDocToText();
+	PersistSession();
+	m_status.SetWindowText(L"Insert FX updated");
 	return 0;
 }
 
@@ -2181,18 +2543,33 @@ void CSasamiMidiScoreDlg::OnContextMenu(CWnd* pWnd, CPoint point)
 			tr = hitTr;
 	}
 	int markEv = -1;
+	int delMarks[16];
+	int delN = 0;
 	{
 		int mtr = -1;
 		const int ctrl = ScStaffHitScoreCtrl(m_gridRc, &m_ui, m_doc.ev, m_doc.evCount, 0, client, &mtr);
 		if (ctrl >= 0 && ctrl < m_doc.evCount) {
 			const uint8_t k = m_doc.ev[ctrl].kind;
-			if (k == SC_EV_JUMP_MARK || k == SC_EV_FM_JUMP || k == SC_EV_FM_LOOP_START || k == SC_EV_FM_LOOP_END)
+			if (ScStaffIsStaffMarkKind(k, 0)
+				|| k == SC_EV_PROG || k == SC_EV_BANK || k == SC_EV_RPN || k == SC_EV_NRPN
+				|| k == SC_EV_SYSEX || k == SC_EV_VOL || k == SC_EV_PAN || k == SC_EV_VELO)
 				markEv = ctrl;
 			if (tr < 0 && mtr >= 0) tr = mtr;
 		}
+		delN = ScStaffCollectStaffMarksAt(m_gridRc, &m_ui, m_doc.ev, m_doc.evCount, 0, client, delMarks, 16);
+		if (delN > 0) {
+			markEv = delMarks[delN - 1]; /* top of stack */
+			if (tr < 0) tr = (int)m_doc.ev[markEv].ch;
+		} else if (markEv < 0) {
+			const int sm = ScStaffHitStaffMark(m_gridRc, &m_ui, m_doc.ev, m_doc.evCount, 0, client, &mtr);
+			if (sm >= 0 && sm < m_doc.evCount) {
+				markEv = sm;
+				if (tr < 0 && mtr >= 0) tr = mtr;
+			}
+		}
 	}
 	const int pxBeat = m_ui.pxBeat > 0 ? m_ui.pxBeat : SC_PX_BEAT_DEFAULT;
-	const int quant = (m_ui.snapFit && m_ui.placeDur > 0) ? m_ui.placeDur : (SC_PPQN / 4);
+	const int quant = ScStaffPlaceQuant(&m_ui);
 	uint32_t atTick = m_ui.markerTick;
 	if (m_gridRc.PtInRect(client) && client.x >= m_gridRc.left + SC_CLEF_MARGIN)
 		atTick = ScStaffXToTick(client.x, m_ui.scrollX, m_gridRc.left + SC_CLEF_MARGIN, pxBeat, quant);
@@ -2206,15 +2583,37 @@ void CSasamiMidiScoreDlg::OnContextMenu(CWnd* pWnd, CPoint point)
 			L"音色設定…", L"Tone settings…", L"Réglage du timbre…", L"Impostazioni timbro…", L"Ajustes de timbre…",
 			L"음색 설정…", L"音色设置…", L"إعدادات الطابع…", L"Настройки тембра…", L"Klang-Einstellungen…",
 			L"Ajustes de timbre…", L"Klankinstellingen…", L"Ustawienia barwy…", L"Tını ayarları…"));
+		menu.AddCommand(9011, LL14(
+			L"Exc / RPN / SysEx…", L"Exc / RPN / SysEx…", L"Exc / RPN / SysEx…", L"Exc / RPN / SysEx…", L"Exc / RPN / SysEx…",
+			L"Exc / RPN / SysEx…", L"Exc / RPN / SysEx…", L"Exc / RPN / SysEx…", L"Exc / RPN / SysEx…", L"Exc / RPN / SysEx…",
+			L"Exc / RPN / SysEx…", L"Exc / RPN / SysEx…", L"Exc / RPN / SysEx…", L"Exc / RPN / SysEx…"));
+		menu.AddCommand(9012, LL14(
+			L"Insert FX（VSTエフェクト）…", L"Insert FX (VST effect)…", L"Insert FX…", L"Insert FX…", L"Insert FX…",
+			L"Insert FX…", L"Insert FX…", L"Insert FX…", L"Insert FX…", L"Insert FX…",
+			L"Insert FX…", L"Insert FX…", L"Insert FX…", L"Insert FX…"));
 		menu.AddSeparator();
 		menu.AddCommand(9020, LL14(
-			L"ループ開始 (|:2)", L"Loop start (|:2)", L"Début de boucle (|:2)", L"Inizio loop (|:2)", L"Inicio de bucle (|:2)",
-			L"루프 시작 (|:2)", L"循环开始 (|:2)", L"بداية الحلقة (|:2)", L"Начало цикла (|:2)", L"Schleifenstart (|:2)",
-			L"Início do loop (|:2)", L"Lusbegin (|:2)", L"Początek pętli (|:2)", L"Döngü başlangıcı (|:2)"));
+			L"ループ開始 (|:n)…", L"Loop start (|:n)…", L"Début de boucle (|:n)…", L"Inizio loop (|:n)…", L"Inicio de bucle (|:n)…",
+			L"루프 시작 (|:n)…", L"循环开始 (|:n)…", L"بداية الحلقة (|:n)…", L"Начало цикла (|:n)…", L"Schleifenstart (|:n)…",
+			L"Início do loop (|:n)…", L"Lusbegin (|:n)…", L"Początek pętli (|:n)…", L"Döngü başlangıcı (|:n)…"));
 		menu.AddCommand(9021, LL14(
 			L"ループ終了 (:|)", L"Loop end (:|)", L"Fin de boucle (:|)", L"Fine loop (:|)", L"Fin de bucle (:|)",
 			L"루프 끝 (:|)", L"循环结束 (:|)", L"نهاية الحلقة (:|)", L"Конец цикла (:|)", L"Schleifenende (:|)",
 			L"Fim do loop (:|)", L"Luseinde (:|)", L"Koniec pętli (:|)", L"Döngü sonu (:|)"));
+		menu.AddCommand(9027, LL14(
+			L"ペダルON (Ped.)", L"Pedal ON (Ped.)", L"Pédale ON", L"Pedale ON", L"Pedal ON",
+			L"페달 ON", L"踏板ON", L"دواسة ON", L"Педаль ON", L"Pedal ON",
+			L"Pedal ON", L"Pedaal ON", L"Pedał ON", L"Pedal ON"));
+		menu.AddCommand(9028, LL14(
+			L"ペダルOFF (＊)", L"Pedal OFF (＊)", L"Pédale OFF", L"Pedale OFF", L"Pedal OFF",
+			L"페달 OFF", L"踏板OFF", L"دواسة OFF", L"Педаль OFF", L"Pedal OFF",
+			L"Pedal OFF", L"Pedaal OFF", L"Pedał OFF", L"Pedal OFF"));
+		if (markEv >= 0 && markEv < m_doc.evCount && m_doc.ev[markEv].kind == SC_EV_FM_LOOP_START) {
+			menu.AddCommand(9029, LL14(
+				L"ループ回数を変更…", L"Change loop count…", L"Changer le nombre…", L"Cambia ripetizioni…", L"Cambiar repeticiones…",
+				L"루프 횟수 변경…", L"更改循环次数…", L"تغيير العدد…", L"Изменить число…", L"Wiederholungen ändern…",
+				L"Alterar contagem…", L"Herhalingen wijzigen…", L"Zmień liczbę…", L"Tekrar sayısını değiştir…"));
+		}
 		menu.AddCommand(9022, LL14(
 			L"Qマーク（ジャンプ着地）", L"Q mark (jump land)", L"Marque Q (atterrissage)", L"Segno Q (atterraggio)", L"Marca Q (aterrizaje)",
 			L"Q 마크 (점프 착지)", L"Q标记（跳转着陆）", L"علامة Q", L"Метка Q", L"Q-Marke (Sprungziel)",
@@ -2223,7 +2622,30 @@ void CSasamiMidiScoreDlg::OnContextMenu(CWnd* pWnd, CPoint point)
 			L"Jジャンプ", L"J jump", L"Saut J", L"Salto J", L"Salto J",
 			L"J 점프", L"J跳转", L"قفزة J", L"Прыжок J", L"J-Sprung",
 			L"Salto J", L"J-sprong", L"Skok J", L"J atlayışı"));
-		if (markEv >= 0) {
+		if (delN > 1) {
+			for (int di = 0; di < delN; di++) {
+				const int ei = delMarks[di];
+				if (ei < 0 || ei >= m_doc.evCount) continue;
+				const ScEvent& e = m_doc.ev[ei];
+				CString lab;
+				if (e.kind == SC_EV_FM_LOOP_START)
+					lab.Format(L"削除 |:%u", (unsigned)(e.a ? e.a : 2));
+				else if (e.kind == SC_EV_FM_LOOP_END)
+					lab = L"削除 :|";
+				else if (e.kind == SC_EV_PEDAL_ON)
+					lab = L"削除 Ped.";
+				else if (e.kind == SC_EV_PEDAL_OFF)
+					lab = L"削除 ＊";
+				else if (e.kind == SC_EV_JUMP_MARK)
+					lab = L"削除 Q";
+				else if (e.kind == SC_EV_FM_JUMP)
+					lab = L"削除 J";
+				else
+					lab.Format(L"削除 #%d", di + 1);
+				menu.AddCommand(9100 + di, lab);
+			}
+			menu.AddCommand(9120, L"重なっているマークをすべて削除");
+		} else if (markEv >= 0) {
 			menu.AddCommand(9024, LL14(
 				L"このマークを削除", L"Delete this mark", L"Supprimer cette marque", L"Elimina questo segno", L"Eliminar esta marca",
 				L"이 마크 삭제", L"删除此标记", L"حذف هذه العلامة", L"Удалить метку", L"Marke löschen",
@@ -2294,11 +2716,47 @@ void CSasamiMidiScoreDlg::OnContextMenu(CWnd* pWnd, CPoint point)
 		m_ui.visible[tr] = 1;
 		OpenVstForPart(tr + 1);
 	}
+	else if (tr >= 0 && cmd == 9011) {
+		m_curCh = tr;
+		if (m_ch.GetSafeHwnd()) m_ch.SetCurSel(m_curCh);
+		m_ui.visible[tr] = 1;
+		m_ui.markerTick = atTick;
+		CSasamiExcRpnDlg::OpenOwned(this, &m_doc, tr, atTick);
+		m_status.SetWindowText(L"Exc/RPN: insert SysEx・RPN・NRPN at marker.");
+	}
+	else if (tr >= 0 && cmd == 9012) {
+		m_curCh = tr;
+		if (m_ch.GetSafeHwnd()) m_ch.SetCurSel(m_curCh);
+		m_ui.visible[tr] = 1;
+		SyncFxBindsToLive();
+		CSasamiInsertFxDlg::OpenOwned(this, &m_doc, tr + 1);
+		m_status.SetWindowText(L"Insert FX: pick VST effect, tweak knobs, Bypass/Editor.");
+	}
 	else if (tr >= 0 && cmd == 9020) {
-		if (ScMidiAddLoopStart(&m_doc, atTick, tr, 2)) afterMark();
+		int n = 2;
+		if (CSasamiSimpleInputDlg::AskNumber(this, L"ループ開始 |:",
+			L"繰り返し回数 (1–99)", 2, 1, 99, &n) == IDOK) {
+			if (ScMidiAddLoopStart(&m_doc, atTick, tr, n, m_ui.markStack)) afterMark();
+		}
 	}
 	else if (tr >= 0 && cmd == 9021) {
-		if (ScMidiAddLoopEnd(&m_doc, atTick, tr)) afterMark();
+		if (ScMidiAddLoopEnd(&m_doc, atTick, tr, m_ui.markStack)) afterMark();
+	}
+	else if (tr >= 0 && cmd == 9027) {
+		if (ScMidiAddPedalOn(&m_doc, atTick, tr, m_ui.markStack)) afterMark();
+	}
+	else if (tr >= 0 && cmd == 9028) {
+		if (ScMidiAddPedalOff(&m_doc, atTick, tr, m_ui.markStack)) afterMark();
+	}
+	else if (cmd == 9029 && markEv >= 0 && markEv < m_doc.evCount
+		&& m_doc.ev[markEv].kind == SC_EV_FM_LOOP_START) {
+		int n = m_doc.ev[markEv].a ? (int)m_doc.ev[markEv].a : 2;
+		if (CSasamiSimpleInputDlg::AskNumber(this, L"ループ回数",
+			L"繰り返し回数 (1–99)", n, 1, 99, &n) == IDOK) {
+			m_doc.ev[markEv].a = (uint8_t)n;
+			PushDocToText();
+			InvalidateRect(m_bodyRc, FALSE);
+		}
 	}
 	else if (tr >= 0 && cmd == 9022) {
 		if (ScMidiAddJumpMark(&m_doc, atTick, tr)) afterMark();
@@ -2312,6 +2770,40 @@ void CSasamiMidiScoreDlg::OnContextMenu(CWnd* pWnd, CPoint point)
 		m_doc.evCount--;
 		if (m_ui.selEv == markEv) m_ui.selEv = -1;
 		else if (m_ui.selEv > markEv) m_ui.selEv--;
+		RefreshStrip();
+		PushDocToText();
+		InvalidateRect(m_bodyRc, FALSE);
+	}
+	else if (cmd >= 9100 && cmd < 9100 + delN) {
+		const int ei = delMarks[cmd - 9100];
+		if (ei >= 0 && ei < m_doc.evCount) {
+			for (int j = ei; j + 1 < m_doc.evCount; j++)
+				m_doc.ev[j] = m_doc.ev[j + 1];
+			m_doc.evCount--;
+			if (m_ui.selEv == ei) m_ui.selEv = -1;
+			else if (m_ui.selEv > ei) m_ui.selEv--;
+			RefreshStrip();
+			PushDocToText();
+			InvalidateRect(m_bodyRc, FALSE);
+		}
+	}
+	else if (cmd == 9120 && delN > 0) {
+		/* Delete outer indices first so shifts don't invalidate. */
+		int sorted[16];
+		int sn = delN < 16 ? delN : 16;
+		memcpy(sorted, delMarks, sizeof(int) * (size_t)sn);
+		for (int a = 0; a < sn; a++)
+			for (int b = a + 1; b < sn; b++)
+				if (sorted[b] > sorted[a]) { int t = sorted[a]; sorted[a] = sorted[b]; sorted[b] = t; }
+		for (int di = 0; di < sn; di++) {
+			const int ei = sorted[di];
+			if (ei < 0 || ei >= m_doc.evCount) continue;
+			for (int j = ei; j + 1 < m_doc.evCount; j++)
+				m_doc.ev[j] = m_doc.ev[j + 1];
+			m_doc.evCount--;
+			if (m_ui.selEv == ei) m_ui.selEv = -1;
+			else if (m_ui.selEv > ei) m_ui.selEv--;
+		}
 		RefreshStrip();
 		PushDocToText();
 		InvalidateRect(m_bodyRc, FALSE);
@@ -2364,21 +2856,57 @@ void CSasamiMidiScoreDlg::OnContextMenu(CWnd* pWnd, CPoint point)
 
 void CSasamiMidiScoreDlg::OnKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags)
 {
+	const int ctrl = (GetKeyState(VK_CONTROL) & 0x8000) ? 1 : 0;
 	if (nChar == VK_DELETE || nChar == VK_BACK) {
-		if (m_ui.selEv >= 0 && m_ui.selEv < m_doc.evCount) {
-			int hit = m_ui.selEv;
-			for (int j = hit; j + 1 < m_doc.evCount; j++)
-				m_doc.ev[j] = m_doc.ev[j + 1];
-			m_doc.evCount--;
-			m_ui.selEv = -1;
+		if (ScStaffSelDelete(m_doc.ev, &m_doc.evCount, &m_ui)) {
+			RefreshStrip();
+			PushDocToText();
+			InvalidateRect(m_bodyRc, FALSE);
+			m_status.SetWindowText(L"Deleted selection.");
+		} else {
+			m_status.SetWindowText(L"Select a note/mark first (Select or click chip → Delete). Or use Eraser.");
+		}
+		return;
+	}
+	if (ctrl && (nChar == 'A' || nChar == 'a')) {
+		ScStaffSelClear(&m_ui);
+		for (int i = 0; i < m_doc.evCount; i++) {
+			uint8_t k = m_doc.ev[i].kind;
+			if (k == SC_EV_NOTE || k == SC_EV_REST || k == SC_EV_TIE)
+				ScStaffSelAdd(&m_ui, i);
+		}
+		InvalidateRect(m_bodyRc, FALSE);
+		return;
+	}
+	if (ctrl && (nChar == 'C' || nChar == 'c')) {
+		m_clipN = ScStaffSelCopy(m_doc.ev, m_doc.evCount, &m_ui, m_clip, SC_CLIP_MAX, &m_clipBase);
+		return;
+	}
+	if (ctrl && (nChar == 'X' || nChar == 'x')) {
+		m_clipN = ScStaffSelCopy(m_doc.ev, m_doc.evCount, &m_ui, m_clip, SC_CLIP_MAX, &m_clipBase);
+		if (m_clipN > 0 && ScStaffSelDelete(m_doc.ev, &m_doc.evCount, &m_ui)) {
 			RefreshStrip();
 			InvalidateRect(m_bodyRc, FALSE);
 		}
 		return;
 	}
+	if (ctrl && (nChar == 'V' || nChar == 'v')) {
+		if (m_clipN > 0) {
+			ScStaffSelPaste(m_doc.ev, &m_doc.evCount, SC_EV_MAX, m_clip, m_clipN, m_ui.markerTick, 0);
+			RefreshStrip();
+			InvalidateRect(m_bodyRc, FALSE);
+		}
+		return;
+	}
+	if (ctrl && (nChar == 'T' || nChar == 't')) {
+		if (ScStaffTieSelected(m_doc.ev, m_doc.evCount, &m_ui))
+			InvalidateRect(m_bodyRc, FALSE);
+		return;
+	}
 	if (nChar == VK_ESCAPE) {
 		m_ui.tool = SC_TOOL_SELECT;
 		m_ui.hoverValid = 0;
+		m_ui.marqueeOn = 0;
 		UpdateNoteCursor();
 		InvalidateRect(m_gridRc, FALSE);
 		return;
@@ -2399,6 +2927,10 @@ void CSasamiMidiScoreDlg::OnClose()
 	KillTimer(9122);
 	m_ui.previewActive = 0;
 	CSasamiNotePropsDlg::CloseOpen();
+	CSasamiExcRpnDlg::CloseOpen();
+	CSasamiInsertFxDlg::CloseOpen();
+	if (CSasamiNotePaletteDlg* pal = CSasamiNotePaletteDlg::Instance())
+		pal->DestroyWindow();
 	DestroyWindow();
 }
 void CSasamiMidiScoreDlg::OnDestroy()

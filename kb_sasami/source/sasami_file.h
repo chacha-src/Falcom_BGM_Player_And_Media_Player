@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include <stdint.h>
 #include <stddef.h>
@@ -8,8 +8,15 @@ enum SasamiKind {
 	SASAMI_KIND_FPY = 1,
 	SASAMI_KIND_MPY = 2,
 	SASAMI_KIND_MPW2 = 3,
-	SASAMI_KIND_MPW3 = 4 /* .mpsmv — MPW2 body + variable MPW3 VST trailer */
+	SASAMI_KIND_MPW3 = 4, /* .mpsmv — MPW2 body + variable MPW3 VST trailer */
+	SASAMI_KIND_FPY2 = 5  /* .fpy2 — FPY layout + versionWord=2, nested loops */
 };
+
+/* 1 = FM stream song (.fpy / .fpy2). */
+static inline int SasamiKindIsFm(SasamiKind k)
+{
+	return k == SASAMI_KIND_FPY || k == SASAMI_KIND_FPY2;
+}
 
 enum SasamiMidiMap {
 	SASAMI_MAP_GS55 = 0,

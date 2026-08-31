@@ -20,7 +20,7 @@ class SasamiMisaoSynth {
 public:
 	SasamiMisaoSynth();
 	~SasamiMisaoSynth();
-	bool Open(const SasamiSong& song, uint32_t sampleRate, const wchar_t* programsTxtDir, unsigned* sharedTempoT = NULL);
+	bool Open(const SasamiSong& song, uint32_t sampleRate, const wchar_t* programsTxtDir, unsigned* sharedTempoT = NULL, const wchar_t* sampleBaseDir = NULL);
 	void Close();
 	void Reset();
 	void SetTempoT(unsigned t);

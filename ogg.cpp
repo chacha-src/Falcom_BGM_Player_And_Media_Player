@@ -414,6 +414,7 @@ BOOL COggApp::InitInstance()
 	savedata.sasamiTextW = savedata.sasamiTextH = 0;
 	savedata.sasamiNotePropsW = savedata.sasamiNotePropsH = 0;
 	savedata.sasamiNotePalW = savedata.sasamiNotePalH = 0;
+	savedata.sasamiMarkStack = 0;
 	savedata.sasamiFmVoiceW = savedata.sasamiFmVoiceH = 0;
 	savedata.sasamiToneMapW = savedata.sasamiToneMapH = 0;
 	savedata.sasamiVstPickW = savedata.sasamiVstPickH = 0;
@@ -2046,6 +2047,7 @@ BOOL COggApp::InitInstance()
 		savedata.sasamiTextW = savedata.sasamiTextH = 0;
 		savedata.sasamiNotePropsW = savedata.sasamiNotePropsH = 0;
 		savedata.sasamiNotePalW = savedata.sasamiNotePalH = 0;
+		savedata.sasamiMarkStack = 0;
 		savedata.sasamiFmVoiceW = savedata.sasamiFmVoiceH = 0;
 		savedata.sasamiToneMapW = savedata.sasamiToneMapH = 0;
 		savedata.sasamiVstPickW = savedata.sasamiVstPickH = 0;
@@ -2219,7 +2221,8 @@ BOOL COggApp::InitInstance()
 	// モード選択画面やメイン画面を開く前に更新を確認する。
 	// 更新があればそのまま適用・再起動し、なければ通常の起動を続ける。
 	RunStartupUpdateCheck();
-	// kbsasami.kpi（x86/x64）をサイレント更新。plug() 前なので DLL ロック無し。
+	// kbsasami: 起動時に必ずチェック（未所持／サーバが新しければ取得）。最新ならスキップ。
+	// plug() 前なので DLL ロック無し。
 	KpiInstall_SilentUpdateKbsasami(karento2);
 	OfflineHelpEnsureAvailable();
 

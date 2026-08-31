@@ -4,12 +4,16 @@
 #include "CSasamiTextDlg.h"
 #include "CSasamiFmVoiceDlg.h"
 #include "CSasamiNotePaletteDlg.h"
+#include "CSasamiSimpleInputDlg.h"
 #include "CSasamiNotePropsDlg.h"
 #include "CCustomPopupMenu.h"
 #include "OfflineHelp.h"
 #include "PlayList.h"
 #include "VstMidiEngine.h"
 #include "kb_sasami/source/sasami_write.h"
+#include <shlwapi.h>
+
+#pragma comment(lib, "Shlwapi.lib")
 
 extern CPlayList* pl;
 
@@ -17,12 +21,54 @@ enum { kScFmPreviewTimer = 7102 };
 
 CSasamiFmScoreDlg* CSasamiFmScoreDlg::s_inst = NULL;
 
+static void ScFmDirOfPath(const wchar_t* path, wchar_t* out, int outCch)
+{
+	if (!out || outCch <= 0) return;
+	out[0] = 0;
+	if (!path || !path[0]) return;
+	wcsncpy_s(out, outCch, path, _TRUNCATE);
+	wchar_t* sl = wcsrchr(out, L'\\');
+	if (!sl) sl = wcsrchr(out, L'/');
+	if (sl) *sl = 0;
+	else out[0] = 0;
+}
+
+static void ScFmKpiPluginDir(wchar_t* out, int outCch)
+{
+	if (!out || outCch <= 0) return;
+	out[0] = 0;
+	wchar_t exe[MAX_PATH];
+	if (!GetModuleFileNameW(NULL, exe, MAX_PATH)) return;
+	ScFmDirOfPath(exe, out, outCch);
+	if (out[0])
+		wcsncat_s(out, outCch, L"\\Plugins\\kbsasami", _TRUNCATE);
+}
+
+static int ScFmRelativePathForSample(const wchar_t* full, const wchar_t* baseDir, wchar_t* out, int outCch)
+{
+	if (!full || !full[0] || !out || outCch <= 0) return 0;
+	out[0] = 0;
+	wchar_t rel[MAX_PATH];
+	if (baseDir && baseDir[0] &&
+		PathRelativePathToW(rel, baseDir, FILE_ATTRIBUTE_DIRECTORY, full, FILE_ATTRIBUTE_NORMAL) &&
+		rel[0] && rel[1] != L':') {
+		const wchar_t* p = rel;
+		if (p[0] == L'.' && (p[1] == L'\\' || p[1] == L'/')) p += 2;
+		wcsncpy_s(out, outCch, p, _TRUNCATE);
+		return 1;
+	}
+	const wchar_t* leaf = wcsrchr(full, L'\\');
+	if (!leaf) leaf = wcsrchr(full, L'/');
+	wcsncpy_s(out, outCch, leaf ? leaf + 1 : full, _TRUNCATE);
+	return out[0] != 0;
+}
+
 uint8_t CSasamiFmScoreDlg::MidiToFmNoteByte(int midiNote)
 {
 	int oct = midiNote / 12 - 1;
 	int scale = midiNote % 12;
-	if (oct < 1) oct = 1;
-	if (oct > 7) oct = 7;
+	if (oct < 0) oct = 0;
+	if (oct > 9) oct = 9;
 	if (scale < 0) scale = 0;
 	if (scale > 11) scale = 11;
 	return (uint8_t)(((oct & 0x0F) << 4) | (scale & 0x0F));
@@ -33,6 +79,7 @@ IMPLEMENT_DYNAMIC(CSasamiFmScoreDlg, CCustomBlurDialogExBase)
 CSasamiFmScoreDlg::CSasamiFmScoreDlg(CWnd* pParent)
 	: CCustomBlurDialogExBase(CSasamiFmScoreDlg::IDD, pParent)
 	, m_curCh(0), m_placeRest(0), m_accidental(0), m_noteCur(NULL), m_sbDrag(0), m_bInLayout(FALSE)
+	, m_clipN(0), m_clipBase(0)
 {
 	m_lastOut[0] = 0;
 	m_lastHoverSt[0] = 0;
@@ -96,6 +143,10 @@ void CSasamiFmScoreDlg::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDC_SASAMI_FM_LOOPCLR, m_btnLoopClr);
 	DDX_Control(pDX, IDC_SASAMI_FM_SHOWALL, m_btnShowAll);
 	DDX_Control(pDX, IDC_SASAMI_FM_TEXT, m_btnText);
+	DDX_Control(pDX, IDC_SASAMI_STRIP_KIND0, m_stripKind0);
+	DDX_Control(pDX, IDC_SASAMI_STRIP_KIND1, m_stripKind1);
+	DDX_Control(pDX, IDC_SASAMI_STRIP_DRAW, m_stripDraw);
+	DDX_Control(pDX, IDC_SASAMI_STRIP_LANES, m_stripLanes);
 }
 
 BEGIN_MESSAGE_MAP(CSasamiFmScoreDlg, CCustomBlurDialogExBase)
@@ -133,6 +184,11 @@ BEGIN_MESSAGE_MAP(CSasamiFmScoreDlg, CCustomBlurDialogExBase)
 	ON_BN_CLICKED(IDC_SASAMI_FM_SHOWALL, &CSasamiFmScoreDlg::OnBnClickedShowAll)
 	ON_BN_CLICKED(IDC_SASAMI_FM_TEXT, &CSasamiFmScoreDlg::OnBnClickedText)
 	ON_CBN_SELCHANGE(IDC_SASAMI_FM_CH, &CSasamiFmScoreDlg::OnCbnSelchangeCh)
+	ON_CBN_SELCHANGE(IDC_SASAMI_STRIP_KIND0, &CSasamiFmScoreDlg::OnCbnStrip)
+	ON_CBN_SELCHANGE(IDC_SASAMI_STRIP_KIND1, &CSasamiFmScoreDlg::OnCbnStrip)
+	ON_CBN_SELCHANGE(IDC_SASAMI_STRIP_DRAW, &CSasamiFmScoreDlg::OnCbnStrip)
+	ON_CBN_SELCHANGE(IDC_SASAMI_STRIP_LANES, &CSasamiFmScoreDlg::OnCbnStrip)
+	ON_WM_KEYDOWN()
 	ON_MESSAGE(WM_SASAMI_PAL_DUR, &CSasamiFmScoreDlg::OnPalDur)
 	ON_MESSAGE(WM_SASAMI_NOTE_PROPS, &CSasamiFmScoreDlg::OnNoteProps)
 	ON_MESSAGE(WM_APP + 61, &CSasamiFmScoreDlg::OnDeferredInit)
@@ -212,6 +268,13 @@ BOOL CSasamiFmScoreDlg::OnInitDialog()
 	m_ch.SetCurSel(0);
 	m_edVel.SetWindowText(L"100");
 	m_status.SetWindowText(L"FM score: pencil on staff. Dbl-click / Voice = timbre. Tone gauge shows @neiro / Voice#.");
+	if (m_stripKind0.GetSafeHwnd()) {
+		m_stripKind0.SetAeroMode(FALSE);
+		m_stripKind1.SetAeroMode(FALSE);
+		m_stripDraw.SetAeroMode(FALSE);
+		m_stripLanes.SetAeroMode(FALSE);
+		SyncStripCombos();
+	}
 	RefreshToneLabels();
 	RefreshStrip();
 	UpdateNoteCursor();
@@ -221,6 +284,97 @@ BOOL CSasamiFmScoreDlg::OnInitDialog()
 	return TRUE;
 }
 
+void CSasamiFmScoreDlg::SyncStripCombos()
+{
+	auto fillKind = [](CCustomComboBox& cb, int sel) {
+		cb.ResetContent();
+		for (int k = 0; k < SC_STRIP_KIND_COUNT; k++)
+			cb.AddString(ScStaffStripKindName(k));
+		if (sel < 0 || sel >= SC_STRIP_KIND_COUNT) sel = 0;
+		cb.SetCurSel(sel);
+	};
+	fillKind(m_stripKind0, m_ui.stripKind[0]);
+	fillKind(m_stripKind1, m_ui.stripKind[1]);
+	m_stripDraw.ResetContent();
+	m_stripDraw.AddString(L"Pencil");
+	m_stripDraw.AddString(L"Line");
+	m_stripDraw.AddString(L"Curve");
+	if (m_ui.stripDraw < 0 || m_ui.stripDraw > 2) m_ui.stripDraw = SC_STRIP_DRAW_PENCIL;
+	m_stripDraw.SetCurSel(m_ui.stripDraw);
+	m_stripLanes.ResetContent();
+	m_stripLanes.AddString(L"なし");
+	m_stripLanes.AddString(L"1");
+	m_stripLanes.AddString(L"2");
+	int lanes = m_ui.stripCount;
+	if (lanes < 0) lanes = 0;
+	if (lanes > 2) lanes = 2;
+	m_stripLanes.SetCurSel(lanes);
+}
+
+void CSasamiFmScoreDlg::OnCbnStrip()
+{
+	int k0 = m_stripKind0.GetCurSel();
+	int k1 = m_stripKind1.GetCurSel();
+	int draw = m_stripDraw.GetCurSel();
+	int lanes = m_stripLanes.GetCurSel();
+	if (k0 >= 0) m_ui.stripKind[0] = k0;
+	if (k1 >= 0) m_ui.stripKind[1] = k1;
+	if (draw >= 0) m_ui.stripDraw = draw;
+	if (lanes < 0) lanes = 0;
+	if (lanes > 2) lanes = 2;
+	m_ui.stripCount = lanes;
+	RefreshStrip();
+	LayoutChrome();
+	Invalidate(FALSE);
+}
+
+void CSasamiFmScoreDlg::OnKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags)
+{
+	const int ctrl = (GetKeyState(VK_CONTROL) & 0x8000) ? 1 : 0;
+	if (nChar == VK_DELETE || nChar == VK_BACK) {
+		if (ScStaffSelDelete(m_doc.ev, &m_doc.evCount, &m_ui)) {
+			RefreshStrip();
+			InvalidateRect(m_bodyRc, FALSE);
+		}
+		return;
+	}
+	if (ctrl && (nChar == 'A' || nChar == 'a')) {
+		ScStaffSelClear(&m_ui);
+		for (int i = 0; i < m_doc.evCount; i++) {
+			uint8_t k = m_doc.ev[i].kind;
+			if (k == SC_EV_FM_NOTE || k == SC_EV_FM_REST || k == SC_EV_TIE)
+				ScStaffSelAdd(&m_ui, i);
+		}
+		InvalidateRect(m_bodyRc, FALSE);
+		return;
+	}
+	if (ctrl && (nChar == 'C' || nChar == 'c')) {
+		m_clipN = ScStaffSelCopy(m_doc.ev, m_doc.evCount, &m_ui, m_clip, SC_CLIP_MAX, &m_clipBase);
+		return;
+	}
+	if (ctrl && (nChar == 'X' || nChar == 'x')) {
+		m_clipN = ScStaffSelCopy(m_doc.ev, m_doc.evCount, &m_ui, m_clip, SC_CLIP_MAX, &m_clipBase);
+		if (m_clipN > 0 && ScStaffSelDelete(m_doc.ev, &m_doc.evCount, &m_ui)) {
+			RefreshStrip();
+			InvalidateRect(m_bodyRc, FALSE);
+		}
+		return;
+	}
+	if (ctrl && (nChar == 'V' || nChar == 'v')) {
+		if (m_clipN > 0) {
+			ScStaffSelPaste(m_doc.ev, &m_doc.evCount, SC_EV_MAX, m_clip, m_clipN, m_ui.markerTick, 0);
+			RefreshStrip();
+			InvalidateRect(m_bodyRc, FALSE);
+		}
+		return;
+	}
+	if (ctrl && (nChar == 'T' || nChar == 't')) {
+		if (ScStaffTieSelected(m_doc.ev, m_doc.evCount, &m_ui))
+			InvalidateRect(m_bodyRc, FALSE);
+		return;
+	}
+	CCustomBlurDialogExBase::OnKeyDown(nChar, nRepCnt, nFlags);
+}
 
 void CSasamiFmScoreDlg::SetupTooltips()
 {
@@ -239,6 +393,10 @@ void CSasamiFmScoreDlg::SetupTooltips()
 
 LRESULT CSasamiFmScoreDlg::OnDeferredInit(WPARAM, LPARAM)
 {
+	CRect r;
+	if (m_btnPal.GetSafeHwnd()) m_btnPal.GetWindowRect(&r);
+	else GetWindowRect(&r);
+	CSasamiNotePaletteDlg::OpenNear(this, CPoint(r.left, r.bottom + 4));
 	return 0;
 }
 
@@ -246,6 +404,13 @@ BOOL CSasamiFmScoreDlg::PreTranslateMessage(MSG* pMsg)
 {
 	if (m_tooltip.GetSafeHwnd())
 		m_tooltip.RelayEvent(pMsg);
+	if (pMsg->message == WM_KEYDOWN) {
+		if (pMsg->wParam == VK_DELETE || pMsg->wParam == VK_BACK ||
+			((GetKeyState(VK_CONTROL) & 0x8000) && (pMsg->wParam == 'C' || pMsg->wParam == 'V' || pMsg->wParam == 'X' || pMsg->wParam == 'A' || pMsg->wParam == 'T'))) {
+			OnKeyDown((UINT)pMsg->wParam, 1, 0);
+			return TRUE;
+		}
+	}
 	return CCustomBlurDialogExBase::PreTranslateMessage(pMsg);
 }
 
@@ -284,6 +449,18 @@ void CSasamiFmScoreDlg::LayoutChrome()
 	if (m_btnPropUpd.GetSafeHwnd()) m_btnPropUpd.MoveWindow(x + 232, y, 52, btnH);
 	y += btnH + 6;
 	x = pad;
+	if (m_stripKind0.GetSafeHwnd()) { m_stripKind0.MoveWindow(x, y, 180, 220); x += 186; }
+	if (m_stripKind1.GetSafeHwnd()) { m_stripKind1.MoveWindow(x, y, 180, 220); x += 186; }
+	if (m_stripDraw.GetSafeHwnd()) { m_stripDraw.MoveWindow(x, y, 100, 140); x += 106; }
+	if (m_stripLanes.GetSafeHwnd()) { m_stripLanes.MoveWindow(x, y, 64, 140); x += 70; }
+	if (m_stripKind0.GetSafeHwnd())
+		m_stripKind0.ShowWindow(m_ui.stripCount >= 1 ? SW_SHOW : SW_HIDE);
+	if (m_stripKind1.GetSafeHwnd())
+		m_stripKind1.ShowWindow(m_ui.stripCount >= 2 ? SW_SHOW : SW_HIDE);
+	if (m_stripDraw.GetSafeHwnd())
+		m_stripDraw.ShowWindow(m_ui.stripCount >= 1 ? SW_SHOW : SW_HIDE);
+	y += btnH + 6;
+	x = pad;
 	place(m_btnMark, 36);
 	place(m_btnLoopA, 28);
 	place(m_btnLoopB, 28);
@@ -296,11 +473,19 @@ void CSasamiFmScoreDlg::LayoutChrome()
 	y += 26;
 	if (y > rc.Height() - pad - sbH - 80)
 		y = max(cap + pad, rc.Height() - pad - sbH - 80);
-	m_bodyRc.SetRect(pad, y, max(pad + 40, rc.Width() - pad - sbW), max(y + 40, rc.Height() - pad - sbH));
-	const int stripH = min(ScStaffStripTotalH(&m_ui), max(8, m_bodyRc.Height() / 3));
-	m_trackRc.SetRect(m_bodyRc.left, m_bodyRc.top, m_bodyRc.left + SC_TRACK_COL_W, max(m_bodyRc.top + 8, m_bodyRc.bottom - stripH));
+	m_bodyRc.SetRect(pad, y, max(pad + 40, rc.Width() - pad - sbW), max(y + 40, rc.Height() - pad));
+	const int bodyBot = m_bodyRc.bottom - sbH;
+	int stripH = ScStaffStripTotalH(&m_ui);
+	if (stripH > 0) {
+		const int minStrip = stripH;
+		if (bodyBot - m_bodyRc.top - minStrip < 40)
+			stripH = max(0, bodyBot - m_bodyRc.top - 40);
+		else
+			stripH = minStrip;
+	}
+	m_trackRc.SetRect(m_bodyRc.left, m_bodyRc.top, m_bodyRc.left + SC_TRACK_COL_W, max(m_bodyRc.top + 8, bodyBot - stripH));
 	m_gridRc.SetRect(m_trackRc.right, m_bodyRc.top, m_bodyRc.right, m_trackRc.bottom);
-	m_stripRc.SetRect(m_gridRc.left, m_trackRc.bottom, m_bodyRc.right, m_bodyRc.bottom);
+	m_stripRc.SetRect(m_gridRc.left, m_trackRc.bottom, m_bodyRc.right, bodyBot);
 	m_ui.followViewW = max(1, m_gridRc.Width());
 	/* Scrollbars in dialog STYLE — no ShowScrollBar/ModifyStyle (OnSize re-entry crash). */
 	UpdateScrollBars();
@@ -510,6 +695,26 @@ void CSasamiFmScoreDlg::PlaceOrEditAt(CPoint pt)
 {
 	int ctrlTr = -1;
 	int ctrl = ScStaffHitScoreCtrl(m_gridRc, &m_ui, m_doc.ev, m_doc.evCount, 1, pt, &ctrlTr);
+	int markTr = -1;
+	int mark = ScStaffHitStaffMark(m_gridRc, &m_ui, m_doc.ev, m_doc.evCount, 1, pt, &markTr);
+	int hitTr = -1;
+	int hit = ScStaffHitNote(m_gridRc, &m_ui, m_doc.ev, m_doc.evCount, 1, pt, &hitTr);
+
+	if (m_ui.tool == SC_TOOL_ERASER) {
+		int del = -1;
+		if (ctrl >= 0) del = ctrl;
+		else if (mark >= 0) del = mark;
+		else if (hit >= 0) del = hit;
+		if (del >= 0) {
+			ScStaffSelSetPrimary(&m_ui, del);
+			ScStaffSelDelete(m_doc.ev, &m_doc.evCount, &m_ui);
+			RefreshStrip();
+			InvalidateRect(m_bodyRc, FALSE);
+			m_status.SetWindowText(L"Deleted");
+		}
+		return;
+	}
+
 	if (ctrl >= 0) {
 		m_ui.selEv = ctrl;
 		m_curCh = m_doc.ev[ctrl].ch;
@@ -517,31 +722,41 @@ void CSasamiFmScoreDlg::PlaceOrEditAt(CPoint pt)
 		InvalidateRect(m_gridRc, FALSE);
 		return;
 	}
-	if (ScStaffPtInScoreCtrlStrip(m_gridRc, &m_ui, pt, &ctrlTr))
-		return;
-	int hitTr = -1;
-	int hit = ScStaffHitNote(m_gridRc, &m_ui, m_doc.ev, m_doc.evCount, 1, pt, &hitTr);
-	if (m_ui.tool == SC_TOOL_ERASER) {
-		if (hit >= 0) {
-			for (int j = hit; j + 1 < m_doc.evCount; j++)
-				m_doc.ev[j] = m_doc.ev[j + 1];
-			m_doc.evCount--;
-			if (m_ui.selEv == hit) m_ui.selEv = -1;
-			else if (m_ui.selEv > hit) m_ui.selEv--;
-			RefreshStrip();
-			InvalidateRect(m_bodyRc, FALSE);
-		}
+	if (m_ui.tool == SC_TOOL_SELECT && mark >= 0) {
+		if (GetKeyState(VK_SHIFT) & 0x8000)
+			ScStaffSelAdd(&m_ui, mark);
+		else
+			ScStaffSelSetPrimary(&m_ui, mark);
+		m_curCh = m_doc.ev[mark].ch;
+		if (m_ch.GetSafeHwnd()) m_ch.SetCurSel(m_curCh);
+		m_status.SetWindowText(L"Mark selected — Delete/Backspace removes");
+		InvalidateRect(m_bodyRc, FALSE);
 		return;
 	}
+	if (ScStaffPtInScoreCtrlStrip(m_gridRc, &m_ui, pt, &ctrlTr))
+		return;
 	if (m_ui.tool == SC_TOOL_SELECT) {
 		if (hit >= 0) {
-			m_ui.selEv = hit;
+			if (GetKeyState(VK_SHIFT) & 0x8000)
+				ScStaffSelAdd(&m_ui, hit);
+			else
+				ScStaffSelSetPrimary(&m_ui, hit);
 			m_ui.dragEv = hit;
 			m_ui.dragOriginX = pt.x;
 			m_curCh = m_doc.ev[hit].ch;
 			m_ch.SetCurSel(m_curCh);
 			SyncPropFromSel();
 			RefreshStrip();
+			InvalidateRect(m_bodyRc, FALSE);
+		}
+		return;
+	}
+	if (m_ui.tool == SC_TOOL_TIE) {
+		if (hit >= 0) {
+			if (!ScStaffSelHas(&m_ui, hit))
+				ScStaffSelAdd(&m_ui, hit);
+			else
+				ScStaffTieSelected(m_doc.ev, m_doc.evCount, &m_ui);
 			InvalidateRect(m_bodyRc, FALSE);
 		}
 		return;
@@ -558,7 +773,7 @@ void CSasamiFmScoreDlg::PlaceOrEditAt(CPoint pt)
 		m_curCh = hitTr;
 		m_ch.SetCurSel(m_curCh);
 		m_ui.visible[hitTr] = 1;
-		const int quant = m_ui.snapFit ? m_ui.placeDur : (SC_PPQN / 4);
+		const int quant = ScStaffPlaceQuant(&m_ui);
 		uint32_t tick = ScStaffXToTick(pt.x, m_ui.scrollX, m_gridRc.left + SC_CLEF_MARGIN, m_ui.pxBeat, quant);
 		int staffTop = ScStaffVisibleLaneStaffTop(m_gridRc, &m_ui, hitTr);
 		if (staffTop < 0) return;
@@ -622,10 +837,27 @@ void CSasamiFmScoreDlg::UpdateHover(CPoint pt)
 	if (ScStaffPtInScoreCtrlStrip(m_gridRc, &m_ui, pt, NULL)) return;
 	int hitTr = -1;
 	int hit = ScStaffHitNote(m_gridRc, &m_ui, m_doc.ev, m_doc.evCount, 1, pt, &hitTr);
+	if (hit != -2 || hitTr < 0) {
+		int yCursor = m_gridRc.top + SC_RULER_H - m_ui.scrollY;
+		hitTr = -1;
+		hit = -1;
+		for (int tr = 0; tr < m_ui.trackCount; tr++) {
+			const int rowH = ScStaffRowH(&m_ui, tr);
+			const int rowTop = yCursor;
+			yCursor += rowH;
+			if (!m_ui.visible[tr]) continue;
+			const int noteTop = ScStaffRowNoteAreaTop(rowTop);
+			if (pt.y >= noteTop && pt.y < rowTop + rowH - SC_PART_GAP) {
+				hit = -2;
+				hitTr = tr;
+				break;
+			}
+		}
+	}
 	if (hit != -2 || hitTr < 0) return;
 	int staffTop = ScStaffVisibleLaneStaffTop(m_gridRc, &m_ui, hitTr);
 	if (staffTop < 0) return;
-	const int quant = m_ui.snapFit ? m_ui.placeDur : (SC_PPQN / 4);
+	const int quant = ScStaffPlaceQuant(&m_ui);
 	m_ui.hoverTick = ScStaffXToTick(pt.x, m_ui.scrollX, m_gridRc.left + SC_CLEF_MARGIN, m_ui.pxBeat, quant);
 	m_ui.hoverNote = ScStaffYToMidiNoteTrack(&m_ui, hitTr, staffTop, pt.y) + m_accidental;
 	m_ui.hoverTrack = hitTr;
@@ -660,6 +892,19 @@ void CSasamiFmScoreDlg::RefreshToneLabels()
 		if (e.b == 1 && e.a < m_doc.voiceCount) voiceForTrack[ch] = e.a;
 	}
 	for (int ch = 0; ch < m_ui.trackCount && ch < 32; ++ch) {
+		if (ch >= SC_FM_CH && ch < SC_FM_TOTAL) {
+			const int mi = ch - SC_FM_CH;
+			if (m_doc.pcmRelPath[mi][0]) {
+				const wchar_t* leaf = wcsrchr(m_doc.pcmRelPath[mi], L'\\');
+				if (!leaf) leaf = wcsrchr(m_doc.pcmRelPath[mi], L'/');
+				_snwprintf_s(m_ui.vstLabel[ch], _TRUNCATE, L"PCM %u", (unsigned)m_doc.pcmSlot[mi]);
+				wcsncpy_s(m_ui.progLabel[ch], leaf ? leaf + 1 : m_doc.pcmRelPath[mi], _TRUNCATE);
+			} else {
+				wcscpy_s(m_ui.vstLabel[ch], L"(no sample)");
+				wcscpy_s(m_ui.progLabel[ch], L"Misao MIDI synth");
+			}
+			continue;
+		}
 		const int vi = voiceForTrack[ch];
 		if (vi >= 0 && vi < m_doc.voiceCount) {
 			_snwprintf_s(m_ui.vstLabel[ch], _TRUNCATE, L"Voice#%d", vi);
@@ -674,6 +919,32 @@ void CSasamiFmScoreDlg::RefreshToneLabels()
 
 void CSasamiFmScoreDlg::OpenVoiceEditor()
 {
+	if (m_curCh >= SC_FM_CH && m_curCh < SC_FM_TOTAL) {
+		const int mi = m_curCh - SC_FM_CH;
+		CFileDialog dlg(TRUE, L"wav", NULL, OFN_FILEMUSTEXIST | OFN_HIDEREADONLY,
+			L"PCM samples (*.wav;*.mp3;*.flac)|*.wav;*.mp3;*.flac|All files (*.*)|*.*||", this);
+		if (dlg.DoModal() != IDOK) return;
+		wchar_t baseDir[MAX_PATH];
+		if (m_lastOut[0])
+			ScFmDirOfPath(m_lastOut, baseDir, MAX_PATH);
+		else
+			ScFmKpiPluginDir(baseDir, MAX_PATH);
+		wchar_t rel[260];
+		if (!ScFmRelativePathForSample(dlg.GetPathName(), baseDir, rel, 260)) {
+			m_status.SetWindowText(L"PCM sample path could not be made relative");
+			return;
+		}
+		wcsncpy_s(m_doc.pcmRelPath[mi], rel, _TRUNCATE);
+		m_doc.pcmSlot[mi] = (uint8_t)mi;
+		ScFmAddPcmSample(&m_doc, 0, m_curCh, m_doc.pcmSlot[mi]);
+		ScFmAddVoiceSelect(&m_doc, 0, m_curCh, m_doc.pcmSlot[mi], 0);
+		RefreshToneLabels();
+		InvalidateRect(m_trackRc, FALSE);
+		CString st;
+		st.Format(L"Misao PCM slot %u: %s", (unsigned)m_doc.pcmSlot[mi], rel);
+		m_status.SetWindowText(st);
+		return;
+	}
 	uint8_t v[25];
 	int vi = (m_doc.voiceCount > 0) ? 0 : -1;
 	for (int i = 0; i < m_doc.evCount; ++i) {
@@ -979,20 +1250,85 @@ void CSasamiFmScoreDlg::OnBnClickedPal()
 
 LRESULT CSasamiFmScoreDlg::OnPalDur(WPARAM w, LPARAM l)
 {
-	if (l & 0x40000000) {
-		m_ui.snapFit ^= 1;
-		InvalidateRect(m_gridRc, FALSE);
-		return 0;
+	if ((l & SASAMI_PAL_CMD) == SASAMI_PAL_CMD) {
+		switch ((int)(l & 0xFF)) {
+		case SASAMI_PAL_CMD_FIT:
+			m_ui.snapFit ^= 1;
+			InvalidateRect(m_gridRc, FALSE);
+			return 0;
+		case SASAMI_PAL_CMD_TEMPO:
+			m_ui.tool = SC_TOOL_TEMPO;
+			UpdateNoteCursor();
+			return 0;
+		case SASAMI_PAL_CMD_PENCIL: OnBnClickedPencil(); return 0;
+		case SASAMI_PAL_CMD_ERASE: OnBnClickedErase(); return 0;
+		case SASAMI_PAL_CMD_SEL: OnBnClickedSel(); return 0;
+		case SASAMI_PAL_CMD_MARK: OnBnClickedMark(); return 0;
+		case SASAMI_PAL_CMD_LOOP_A: OnBnClickedLoopA(); return 0;
+		case SASAMI_PAL_CMD_LOOP_B: OnBnClickedLoopB(); return 0;
+		case SASAMI_PAL_CMD_LOOP_CLR: OnBnClickedLoopClr(); return 0;
+		case SASAMI_PAL_CMD_MARK_REPLACE:
+			m_ui.markStack = 0;
+			savedata.sasamiMarkStack = 0;
+			m_status.SetWindowText(L"マーク配置: 1重（同じ位置は置換）");
+			return 0;
+		case SASAMI_PAL_CMD_MARK_STACK:
+			m_ui.markStack = 1;
+			savedata.sasamiMarkStack = 1;
+			m_status.SetWindowText(L"マーク配置: ネスト（同じ位置に積み上げ）");
+			return 0;
+		case SASAMI_PAL_CMD_TIE:
+			m_ui.tool = SC_TOOL_TIE;
+			UpdateNoteCursor();
+			return 0;
+		case SASAMI_PAL_CMD_LOOP_START:
+		case SASAMI_PAL_CMD_LOOP_END: {
+			/* Palette is a separate window — hover stays stale. Insert at red bar. */
+			uint32_t atTick = m_ui.markerTick;
+			const int ch = m_curCh;
+			int ok = 0;
+			if ((int)(l & 0xFF) == SASAMI_PAL_CMD_LOOP_START) {
+				int n = 2;
+				if (CSasamiSimpleInputDlg::AskNumber(this, L"ループ開始 |:",
+					L"繰り返し回数 (1–99)", 2, 1, 99, &n) != IDOK)
+					return 0;
+				ok = ScFmAddLoopStart(&m_doc, atTick, ch, n, m_ui.markStack);
+			} else {
+				ok = ScFmAddLoopEnd(&m_doc, atTick, ch, m_ui.markStack);
+			}
+			if (ok) {
+				m_ui.visible[ch] = 1;
+				RefreshStrip();
+				InvalidateRect(m_bodyRc, FALSE);
+				CString st;
+				st.Format(L"FM ch %d mark @ %u (marker)", ch + 1, (unsigned)atTick);
+				m_status.SetWindowText(st);
+			}
+			return 0;
+		}
+		case SASAMI_PAL_CMD_PED_ON:
+		case SASAMI_PAL_CMD_PED_OFF:
+			m_status.SetWindowText(L"Pedal is MIDI-only (not used on FM score).");
+			return 0;
+		default:
+			return 0;
+		}
 	}
-	m_ui.placeDur = (int)w;
-	if (m_ui.placeDur < 1) m_ui.placeDur = 1;
+	m_ui.tool = SC_TOOL_PENCIL;
 	m_placeRest = (int)(l & 1);
 	m_ui.placeRest = m_placeRest;
 	m_ui.dotted = (l & 2) ? 1 : 0;
-	m_ui.triplet = (l & 4) ? 1 : 0;
+	m_ui.tuplet = (int)((l >> 4) & 0xF);
+	if (m_ui.tuplet != 3 && m_ui.tuplet != 5 && m_ui.tuplet != 6 && m_ui.tuplet != 8)
+		m_ui.tuplet = 0;
+	m_ui.triplet = (m_ui.tuplet == 3) ? 1 : 0;
 	m_accidental = (int)(signed char)((l >> 8) & 0xFF);
+	m_ui.placeAccidental = m_accidental;
 	int base = (int)((l >> 16) & 0xFFFF);
 	if (base > 0) m_ui.baseDur = base;
+	ScStaffRecomputePlaceDur(&m_ui);
+	if ((int)w > 0) m_ui.placeDur = (int)w;
+	if (m_ui.placeDur < 1) m_ui.placeDur = 1;
 	UpdateNoteCursor();
 	InvalidateRect(m_gridRc, FALSE);
 	return 0;
@@ -1054,13 +1390,15 @@ int CSasamiFmScoreDlg::BuildToTemp(wchar_t* outPath, int outCch)
 	if (!ScFmDocToWrite(tmp, wr)) {
 		HeapFree(GetProcessHeap(), 0, wr);
 		HeapFree(GetProcessHeap(), 0, tmp);
-		m_status.SetWindowText(L"FPY build failed");
+		const wchar_t* why = ScGetLastWriteErr();
+		m_status.SetWindowText(why && why[0] ? why : L"FPY build failed");
 		return 0;
 	}
 	HeapFree(GetProcessHeap(), 0, tmp);
 	uint8_t* bin = (uint8_t*)HeapAlloc(GetProcessHeap(), 0, SASAMI_WRITE_MAX);
 	if (!bin) { SasamiWriteFmClear(wr); HeapFree(GetProcessHeap(), 0, wr); return 0; }
 	uint32_t sz = SasamiBuildFpy(wr, bin, SASAMI_WRITE_MAX);
+	const int isFpy2 = wr->fpy2 ? 1 : 0;
 	SasamiWriteFmClear(wr); HeapFree(GetProcessHeap(), 0, wr);
 	if (!sz) {
 		HeapFree(GetProcessHeap(), 0, bin);
@@ -1068,7 +1406,7 @@ int CSasamiFmScoreDlg::BuildToTemp(wchar_t* outPath, int outCch)
 	}
 	wchar_t dir[MAX_PATH];
 	GetTempPathW(MAX_PATH, dir);
-	_snwprintf_s(outPath, outCch, _TRUNCATE, L"%sogg_sasami_fm.fpy", dir);
+	_snwprintf_s(outPath, outCch, _TRUNCATE, L"%sogg_sasami_fm.%s", dir, isFpy2 ? L"fpy2" : L"fpy");
 	if (!SasamiWriteFileW(outPath, bin, sz)) {
 		HeapFree(GetProcessHeap(), 0, bin);
 		return 0;
@@ -1076,7 +1414,7 @@ int CSasamiFmScoreDlg::BuildToTemp(wchar_t* outPath, int outCch)
 	wcsncpy_s(m_lastOut, outPath, _TRUNCATE);
 	HeapFree(GetProcessHeap(), 0, bin);
 	CString ok;
-	ok.Format(L"OK %u bytes -> %s", sz, outPath);
+	ok.Format(L"OK %u bytes -> %s%s", sz, outPath, isFpy2 ? L" (FPY2 nest)" : L"");
 	m_status.SetWindowText(ok);
 	return 1;
 }
@@ -1258,18 +1596,31 @@ void CSasamiFmScoreDlg::OnContextMenu(CWnd* pWnd, CPoint point)
 			tr = hitTr;
 	}
 	int markEv = -1;
+	int delMarks[16];
+	int delN = 0;
 	{
 		int mtr = -1;
 		const int ctrl = ScStaffHitScoreCtrl(m_gridRc, &m_ui, m_doc.ev, m_doc.evCount, 1, client, &mtr);
 		if (ctrl >= 0 && ctrl < m_doc.evCount) {
 			const uint8_t k = m_doc.ev[ctrl].kind;
-			if (k == SC_EV_JUMP_MARK || k == SC_EV_FM_JUMP || k == SC_EV_FM_LOOP_START || k == SC_EV_FM_LOOP_END)
+			if (ScStaffIsStaffMarkKind(k, 1) || k == SC_EV_FM_VOICE)
 				markEv = ctrl;
 			if (tr < 0 && mtr >= 0) tr = mtr;
 		}
+		delN = ScStaffCollectStaffMarksAt(m_gridRc, &m_ui, m_doc.ev, m_doc.evCount, 1, client, delMarks, 16);
+		if (delN > 0) {
+			markEv = delMarks[delN - 1];
+			if (tr < 0) tr = (int)m_doc.ev[markEv].ch;
+		} else if (markEv < 0) {
+			const int sm = ScStaffHitStaffMark(m_gridRc, &m_ui, m_doc.ev, m_doc.evCount, 1, client, &mtr);
+			if (sm >= 0 && sm < m_doc.evCount) {
+				markEv = sm;
+				if (tr < 0 && mtr >= 0) tr = mtr;
+			}
+		}
 	}
 	const int pxBeat = m_ui.pxBeat > 0 ? m_ui.pxBeat : SC_PX_BEAT_DEFAULT;
-	const int quant = (m_ui.snapFit && m_ui.placeDur > 0) ? m_ui.placeDur : (SC_PPQN / 4);
+	const int quant = ScStaffPlaceQuant(&m_ui);
 	uint32_t atTick = m_ui.markerTick;
 	if (m_gridRc.PtInRect(client) && client.x >= m_gridRc.left + SC_CLEF_MARGIN)
 		atTick = ScStaffXToTick(client.x, m_ui.scrollX, m_gridRc.left + SC_CLEF_MARGIN, pxBeat, quant);
@@ -1285,13 +1636,19 @@ void CSasamiFmScoreDlg::OnContextMenu(CWnd* pWnd, CPoint point)
 			L"Ajustes de timbre…", L"Klankinstellingen…", L"Ustawienia barwy…", L"Tını ayarları…"));
 		menu.AddSeparator();
 		menu.AddCommand(9020, LL14(
-			L"ループ開始 (|:2)", L"Loop start (|:2)", L"Début de boucle (|:2)", L"Inizio loop (|:2)", L"Inicio de bucle (|:2)",
-			L"루프 시작 (|:2)", L"循环开始 (|:2)", L"بداية الحلقة (|:2)", L"Начало цикла (|:2)", L"Schleifenstart (|:2)",
-			L"Início do loop (|:2)", L"Lusbegin (|:2)", L"Początek pętli (|:2)", L"Döngü başlangıcı (|:2)"));
+			L"ループ開始 (|:n)…", L"Loop start (|:n)…", L"Début de boucle (|:n)…", L"Inizio loop (|:n)…", L"Inicio de bucle (|:n)…",
+			L"루프 시작 (|:n)…", L"循环开始 (|:n)…", L"بداية الحلقة (|:n)…", L"Начало цикла (|:n)…", L"Schleifenstart (|:n)…",
+			L"Início do loop (|:n)…", L"Lusbegin (|:n)…", L"Początek pętli (|:n)…", L"Döngü başlangıcı (|:n)…"));
 		menu.AddCommand(9021, LL14(
 			L"ループ終了 (:|)", L"Loop end (:|)", L"Fin de boucle (:|)", L"Fine loop (:|)", L"Fin de bucle (:|)",
 			L"루프 끝 (:|)", L"循环结束 (:|)", L"نهاية الحلقة (:|)", L"Конец цикла (:|)", L"Schleifenende (:|)",
 			L"Fim do loop (:|)", L"Luseinde (:|)", L"Koniec pętli (:|)", L"Döngü sonu (:|)"));
+		if (markEv >= 0 && markEv < m_doc.evCount && m_doc.ev[markEv].kind == SC_EV_FM_LOOP_START) {
+			menu.AddCommand(9029, LL14(
+				L"ループ回数を変更…", L"Change loop count…", L"Changer le nombre…", L"Cambia ripetizioni…", L"Cambiar repeticiones…",
+				L"루프 횟수 변경…", L"更改循环次数…", L"تغيير العدد…", L"Изменить число…", L"Wiederholungen ändern…",
+				L"Alterar contagem…", L"Herhalingen wijzigen…", L"Zmień liczbę…", L"Tekrar sayısını değiştir…"));
+		}
 		menu.AddCommand(9022, LL14(
 			L"Qマーク（ジャンプ着地）", L"Q mark (jump land)", L"Marque Q (atterrissage)", L"Segno Q (atterraggio)", L"Marca Q (aterrizaje)",
 			L"Q 마크 (점프 착지)", L"Q标记（跳转着陆）", L"علامة Q", L"Метка Q", L"Q-Marke (Sprungziel)",
@@ -1300,7 +1657,26 @@ void CSasamiFmScoreDlg::OnContextMenu(CWnd* pWnd, CPoint point)
 			L"Jジャンプ", L"J jump", L"Saut J", L"Salto J", L"Salto J",
 			L"J 점프", L"J跳转", L"قفزة J", L"Прыжок J", L"J-Sprung",
 			L"Salto J", L"J-sprong", L"Skok J", L"J atlayışı"));
-		if (markEv >= 0) {
+		if (delN > 1) {
+			for (int di = 0; di < delN; di++) {
+				const int ei = delMarks[di];
+				if (ei < 0 || ei >= m_doc.evCount) continue;
+				const ScEvent& e = m_doc.ev[ei];
+				CString lab;
+				if (e.kind == SC_EV_FM_LOOP_START)
+					lab.Format(L"削除 |:%u", (unsigned)(e.a ? e.a : 2));
+				else if (e.kind == SC_EV_FM_LOOP_END)
+					lab = L"削除 :|";
+				else if (e.kind == SC_EV_JUMP_MARK)
+					lab = L"削除 Q";
+				else if (e.kind == SC_EV_FM_JUMP)
+					lab = L"削除 J";
+				else
+					lab.Format(L"削除 #%d", di + 1);
+				menu.AddCommand(9100 + di, lab);
+			}
+			menu.AddCommand(9120, L"重なっているマークをすべて削除");
+		} else if (markEv >= 0) {
 			menu.AddCommand(9024, LL14(
 				L"このマークを削除", L"Delete this mark", L"Supprimer cette marque", L"Elimina questo segno", L"Eliminar esta marca",
 				L"이 마크 삭제", L"删除此标记", L"حذف هذه العلامة", L"Удалить метку", L"Marke löschen",
@@ -1351,10 +1727,23 @@ void CSasamiFmScoreDlg::OnContextMenu(CWnd* pWnd, CPoint point)
 		OpenVoiceEditor();
 	}
 	else if (tr >= 0 && cmd == 9020) {
-		if (ScFmAddLoopStart(&m_doc, atTick, tr, 2)) afterMark();
+		int n = 2;
+		if (CSasamiSimpleInputDlg::AskNumber(this, L"ループ開始 |:",
+			L"繰り返し回数 (1–99)", 2, 1, 99, &n) == IDOK) {
+			if (ScFmAddLoopStart(&m_doc, atTick, tr, n, m_ui.markStack)) afterMark();
+		}
 	}
 	else if (tr >= 0 && cmd == 9021) {
-		if (ScFmAddLoopEnd(&m_doc, atTick, tr)) afterMark();
+		if (ScFmAddLoopEnd(&m_doc, atTick, tr, m_ui.markStack)) afterMark();
+	}
+	else if (cmd == 9029 && markEv >= 0 && markEv < m_doc.evCount
+		&& m_doc.ev[markEv].kind == SC_EV_FM_LOOP_START) {
+		int n = m_doc.ev[markEv].a ? (int)m_doc.ev[markEv].a : 2;
+		if (CSasamiSimpleInputDlg::AskNumber(this, L"ループ回数",
+			L"繰り返し回数 (1–99)", n, 1, 99, &n) == IDOK) {
+			m_doc.ev[markEv].a = (uint8_t)n;
+			InvalidateRect(m_bodyRc, FALSE);
+		}
 	}
 	else if (tr >= 0 && cmd == 9022) {
 		if (ScFmAddJumpMark(&m_doc, atTick, tr)) afterMark();
@@ -1368,6 +1757,37 @@ void CSasamiFmScoreDlg::OnContextMenu(CWnd* pWnd, CPoint point)
 		m_doc.evCount--;
 		if (m_ui.selEv == markEv) m_ui.selEv = -1;
 		else if (m_ui.selEv > markEv) m_ui.selEv--;
+		RefreshToneLabels();
+		InvalidateRect(m_bodyRc, FALSE);
+	}
+	else if (cmd >= 9100 && cmd < 9100 + delN) {
+		const int ei = delMarks[cmd - 9100];
+		if (ei >= 0 && ei < m_doc.evCount) {
+			for (int j = ei; j + 1 < m_doc.evCount; j++)
+				m_doc.ev[j] = m_doc.ev[j + 1];
+			m_doc.evCount--;
+			if (m_ui.selEv == ei) m_ui.selEv = -1;
+			else if (m_ui.selEv > ei) m_ui.selEv--;
+			RefreshToneLabels();
+			InvalidateRect(m_bodyRc, FALSE);
+		}
+	}
+	else if (cmd == 9120 && delN > 0) {
+		int sorted[16];
+		int sn = delN < 16 ? delN : 16;
+		memcpy(sorted, delMarks, sizeof(int) * (size_t)sn);
+		for (int a = 0; a < sn; a++)
+			for (int b = a + 1; b < sn; b++)
+				if (sorted[b] > sorted[a]) { int t = sorted[a]; sorted[a] = sorted[b]; sorted[b] = t; }
+		for (int di = 0; di < sn; di++) {
+			const int ei = sorted[di];
+			if (ei < 0 || ei >= m_doc.evCount) continue;
+			for (int j = ei; j + 1 < m_doc.evCount; j++)
+				m_doc.ev[j] = m_doc.ev[j + 1];
+			m_doc.evCount--;
+			if (m_ui.selEv == ei) m_ui.selEv = -1;
+			else if (m_ui.selEv > ei) m_ui.selEv--;
+		}
 		RefreshToneLabels();
 		InvalidateRect(m_bodyRc, FALSE);
 	}
@@ -1409,6 +1829,7 @@ void CSasamiFmScoreDlg::RestoreUiGeom()
 		m_ui.scrollX = savedata.sasamiFmScrollX;
 	if (savedata.sasamiFmScrollY >= 0)
 		m_ui.scrollY = savedata.sasamiFmScrollY;
+	m_ui.markStack = savedata.sasamiMarkStack ? 1 : 0;
 	if (!ScRestoreWndGeom(this, savedata.sasamiFmX, savedata.sasamiFmY,
 		savedata.sasamiFmW, savedata.sasamiFmH, 720, 420))
 		SetWindowPos(NULL, 0, 0, 1100, 720, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
@@ -1424,6 +1845,8 @@ void CSasamiFmScoreDlg::OnClose()
 	VstLiveEditorOpenCancelPending();
 	VstLiveMonitorStop();
 	CSasamiNotePropsDlg::CloseOpen();
+	if (CSasamiNotePaletteDlg* pal = CSasamiNotePaletteDlg::Instance())
+		pal->DestroyWindow();
 	DestroyWindow();
 }
 void CSasamiFmScoreDlg::OnDestroy()

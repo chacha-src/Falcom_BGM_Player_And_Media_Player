@@ -1,4 +1,4 @@
-﻿// oggDlg.h : ヘッダー ファイル
+// oggDlg.h : ヘッダー ファイル
 //
 #include "afxmt.h"
 //#include "afxcmn.h"

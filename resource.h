@@ -1,4 +1,4 @@
-//{{NO_DEPENDENCIES}}
+﻿//{{NO_DEPENDENCIES}}
 // Microsoft Visual C++ で生成されたインクルード ファイル。
 // ogg.rc で使用
 //
@@ -365,6 +365,23 @@
 #define IDC_SASAMI_TM_LBL_MSB           4501
 #define IDC_SASAMI_TM_LBL_LSB           4502
 #define IDC_SASAMI_TEXT_B64FOLD         4503
+#define IDC_SASAMI_MIDI_FX              4504
+#define IDC_SASAMI_EXC_PRESET           4505
+#define IDC_SASAMI_EXC_HEX              4506
+#define IDC_SASAMI_EXC_MSB              4507
+#define IDC_SASAMI_EXC_LSB              4508
+#define IDC_SASAMI_EXC_DATA             4509
+#define IDC_SASAMI_EXC_RPN              4510
+#define IDC_SASAMI_EXC_NRPN             4511
+#define IDC_SASAMI_EXC_SYSEX            4512
+#define IDC_SASAMI_EXC_CLOSE            4513
+#define IDC_SASAMI_EXC_HINT             4514
+#define IDC_SASAMI_FX_SLOT              4515
+#define IDC_SASAMI_FX_PICK              4516
+#define IDC_SASAMI_FX_BYPASS            4517
+#define IDC_SASAMI_FX_EDITOR            4518
+#define IDC_SASAMI_FX_CLOSE             4519
+#define IDC_SASAMI_FX_HINT              4520
 #define IDC_SASAMI_FM_TEXT              4482
 #define IDC_SASAMI_TEXT_SCORE           4483
 #define IDC_SASAMI_TEXT_MODE            4484
@@ -382,6 +399,9 @@
 #define IDD_SASAMI_VST_PICK             4605
 #define IDD_SASAMI_NOTE_PROPS           4606
 #define IDD_SASAMI_TONE_MAP             4607
+#define IDD_SASAMI_EXC_RPN              4608
+#define IDD_SASAMI_INSERT_FX            4609
+#define IDD_SASAMI_SIMPLE_INPUT         4610
 #define IDI_SCORE_NOTE_Q                4701
 #define IDI_SCORE_NOTE_E                4702
 #define IDI_SCORE_NOTE_H                4703

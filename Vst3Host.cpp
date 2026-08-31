@@ -1433,6 +1433,89 @@ int Vst3SetChannelProgram(Vst3Inst* v, int midiCh, int index)
 	return 1;
 }
 
+int Vst3ParamCount(Vst3Inst* v)
+{
+	return (v && v->ok && v->controller) ? (int)v->controller->getParameterCount() : 0;
+}
+
+int Vst3ParamName(Vst3Inst* v, int index, wchar_t* out, int outChars)
+{
+	using namespace Steinberg;
+	using namespace Steinberg::Vst;
+	if (!out || outChars <= 0) return 0;
+	out[0] = 0;
+	if (!v || !v->ok || !v->controller || index < 0) return 0;
+	ParameterInfo pi = {};
+	if (v->controller->getParameterInfo(index, pi) != kResultOk) return 0;
+	int i = 0;
+	for (; i < outChars - 1 && i < 128 && pi.title[i]; ++i)
+		out[i] = (wchar_t)pi.title[i];
+	out[i] = 0;
+	return out[0] ? 1 : 0;
+}
+
+int Vst3ParamDisplay(Vst3Inst* v, int index, wchar_t* out, int outChars)
+{
+	using namespace Steinberg;
+	using namespace Steinberg::Vst;
+	if (!out || outChars <= 0) return 0;
+	out[0] = 0;
+	if (!v || !v->ok || !v->controller || index < 0) return 0;
+	ParameterInfo pi = {};
+	if (v->controller->getParameterInfo(index, pi) != kResultOk) return 0;
+	String128 s = {};
+	if (v->controller->getParamStringByValue(pi.id,
+		v->controller->getParamNormalized(pi.id), s) == kResultOk) {
+		int i = 0;
+		for (; i < outChars - 1 && i < 128 && s[i]; ++i)
+			out[i] = (wchar_t)s[i];
+		out[i] = 0;
+	}
+	if (!out[0]) _snwprintf_s(out, outChars, _TRUNCATE, L"%.3f", v->controller->getParamNormalized(pi.id));
+	return 1;
+}
+
+float Vst3GetParam(Vst3Inst* v, int index)
+{
+	using namespace Steinberg::Vst;
+	if (!v || !v->ok || !v->controller || index < 0) return 0.0f;
+	ParameterInfo pi = {};
+	if (v->controller->getParameterInfo(index, pi) != Steinberg::kResultOk) return 0.0f;
+	double x = v->controller->getParamNormalized(pi.id);
+	if (x < 0.0) x = 0.0;
+	if (x > 1.0) x = 1.0;
+	return (float)x;
+}
+
+int Vst3SetParam(Vst3Inst* v, int index, float value01)
+{
+	using namespace Steinberg;
+	using namespace Steinberg::Vst;
+	if (!v || !v->ok || !v->controller || index < 0) return 0;
+	ParameterInfo pi = {};
+	if (v->controller->getParameterInfo(index, pi) != kResultOk) return 0;
+	double x = value01;
+	if (x < 0.0) x = 0.0;
+	if (x > 1.0) x = 1.0;
+	IEditControllerHostEditing* hostEdit = NULL;
+	v->controller->queryInterface(IEditControllerHostEditing_iid, (void**)&hostEdit);
+	if (hostEdit) hostEdit->beginEditFromHost(pi.id);
+	v->controller->setParamNormalized(pi.id, x);
+	if (hostEdit) {
+		hostEdit->endEditFromHost(pi.id);
+		hostEdit->release();
+	}
+	EnterCriticalSection(&v->paramCs);
+	int32 qi = 0;
+	IParamValueQueue* q = v->params.addParameterData(pi.id, qi);
+	if (q) {
+		int32 pt = 0;
+		q->addPoint(0, x, pt);
+	}
+	LeaveCriticalSection(&v->paramCs);
+	return 1;
+}
+
 int Vst3GetComponentState(Vst3Inst* v, unsigned char** outBytes, int* outLen)
 {
 	using namespace Steinberg;

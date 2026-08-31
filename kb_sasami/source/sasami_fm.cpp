@@ -1,4 +1,4 @@
-#include "sasami_fm.h"
+﻿#include "sasami_fm.h"
 #include "sasami_misao.h"
 #include "sasami_fmmon.h"
 #include <windows.h>
@@ -170,7 +170,9 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 	int16_t detune[12];
 	uint16_t pitchBase[12]; /* DETUNE 加算前（原版 FMSSGPITCH） */
 	uint8_t waitb[12];
-	uint8_t loopCnt[12];
+	enum { FM_LOOP_NEST = 16 };
+	uint8_t loopCnt[12][FM_LOOP_NEST];
+	uint8_t loopSp[12];
 	uint8_t vol[12];
 	uint32_t pc[12];
 	uint32_t voiceOff[12];
@@ -225,6 +227,7 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 		memset(pitchBase, 0, sizeof(pitchBase));
 		memset(waitb, 0, sizeof(waitb));
 		memset(loopCnt, 0, sizeof(loopCnt));
+		memset(loopSp, 0, sizeof(loopSp));
 		memset(vol, 0, sizeof(vol));
 		memset(pc, 0, sizeof(pc));
 		memset(voiceOff, 0, sizeof(voiceOff));
@@ -521,10 +524,15 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 		}
 		const int nidx = note & 0x0F;
 		int oct = (note >> 4) & 0x0F;
-		if (oct == 0) oct = 1;
+		if (oct > 9) oct = 9;
 		uint16_t per = kPsgHz[nidx & 15];
 		const int sh = oct - 1;
 		if (sh > 0 && sh < 16) per = (uint16_t)(per >> sh);
+		else if (sh < 0) {
+			int up = -sh;
+			if (up > 4) up = 4;
+			per = (uint16_t)(per << up);
+		}
 		if (per == 0) per = 1;
 		/* Soft PC-speaker style: SSG-like period → Hz, square mix */
 		const double freq = ((double)kOpnaClock / 64.0) / (double)per;
@@ -800,10 +808,15 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 		if (s < 0) return;
 		const int nidx = note & 0x0F;
 		int oct = (note >> 4) & 0x0F;
-		if (oct == 0) oct = 1;
+		if (oct > 9) oct = 9;
 		uint16_t per = kPsgHz[nidx & 15];
 		const int sh = oct - 1;
 		if (sh > 0 && sh < 16) per = (uint16_t)(per >> sh);
+		else if (sh < 0) {
+			int up = -sh;
+			if (up > 4) up = 4;
+			per = (uint16_t)(per << up);
+		}
 		WriteSsgPeriod(ch, per);
 		ssg[7] = (uint8_t)(ssg[7] & ~(1 << s));
 		FmOut(7, ssg[7]);
@@ -901,18 +914,27 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 			return 1;
 		}
 		case 13:
-			loopCnt[ch] = b1;
+			if (loopSp[ch] < FM_LOOP_NEST)
+				loopCnt[ch][loopSp[ch]++] = b1;
+			else
+				loopCnt[ch][FM_LOOP_NEST - 1] = b1; /* nest overflow: replace top */
 			pc[ch] = addr + 3;
 			return 1;
 		case 14: {
 			/* Loop end: key-off before rewind so tied/overlapped notes don't stick mute. */
 			KeyOff(ch);
-			uint8_t c = loopCnt[ch];
+			if (loopSp[ch] == 0) {
+				pc[ch] = addr + 3;
+				return 1;
+			}
+			uint8_t* cp = &loopCnt[ch][loopSp[ch] - 1];
+			uint8_t c = *cp;
 			if (c) c--;
 			if (c == 0) {
+				loopSp[ch]--;
 				pc[ch] = addr + 3;
 			} else {
-				loopCnt[ch] = c;
+				*cp = c;
 				uint32_t dest = w1;
 				if (dest >= 0x1000) dest -= 0x1000;
 				pc[ch] = dest;
@@ -1199,7 +1221,7 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 		chipAcc = 0;
 		for (int ch = 0; ch < 12; ch++) {
 			waitb[ch] = 0;
-			loopCnt[ch] = 0;
+			loopSp[ch] = 0;
 			vol[ch] = 127;
 			detune[ch] = 0;
 			backJumps[ch] = 0;
@@ -1327,10 +1349,10 @@ SasamiFmPlayer::SasamiFmPlayer() : m(NULL), m_hostRate(44100), m_totalSamples(0)
 }
 SasamiFmPlayer::~SasamiFmPlayer() { Close(); }
 
-bool SasamiFmPlayer::Open(const SasamiSong& song, uint32_t sampleRate, const wchar_t* rhythmDir, int fmMode)
+bool SasamiFmPlayer::Open(const SasamiSong& song, uint32_t sampleRate, const wchar_t* rhythmDir, int fmMode, const wchar_t* sampleBaseDir)
 {
 	Close();
-	if (song.kind != SASAMI_KIND_FPY || song.dataSize == 0) return false;
+	if (!SasamiKindIsFm(song.kind) || song.dataSize == 0) return false;
 	std::lock_guard<std::mutex> lk(m_lock);
 	m = new Impl();
 	m->song = song;
@@ -1342,7 +1364,7 @@ bool SasamiFmPlayer::Open(const SasamiSong& song, uint32_t sampleRate, const wch
 	m->PrepareRhythmSteps();
 	m->misaoActive = SasamiMisaoActive(song) ? 1 : 0;
 	if (m->misaoActive)
-		m->misaoActive = m->misao.Open(song, m->hostRate, rhythmDir, &m->T) ? 1 : 0;
+		m->misaoActive = m->misao.Open(song, m->hostRate, rhythmDir, &m->T, sampleBaseDir) ? 1 : 0;
 	if (m->playFmMode == 1 || m->playFmMode == 2) {
 		/* MAX: SSG を高レートで生成→HostSample 平均でエイリアスを抑える（ノイズ向け） */
 		m->chip.set_fidelity(ymfm::OPN_FIDELITY_MAX);

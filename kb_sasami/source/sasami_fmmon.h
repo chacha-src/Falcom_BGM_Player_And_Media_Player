@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 // OPNA FM monitor dump — kbsasami (raira=1) writes, 本体 FMモニタ reads.
 #include <stdint.h>
 

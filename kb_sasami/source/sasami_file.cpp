@@ -1,4 +1,4 @@
-#include "sasami_file.h"
+﻿#include "sasami_file.h"
 #include "sasami_misao.h"
 
 #include <windows.h>
@@ -34,7 +34,7 @@ bool SasamiExtIsMidi(const wchar_t* path)
 
 bool SasamiExtIsFm(const wchar_t* path)
 {
-	return SasamiEqExt(path, L".fpy");
+	return SasamiEqExt(path, L".fpy") || SasamiEqExt(path, L".fpy2");
 }
 
 bool SasamiExtIsAny(const wchar_t* path)
@@ -134,7 +134,7 @@ static void SasamiReadTagsFromMemory(const uint8_t* data, size_t size, SasamiKin
 {
 	memset(out, 0, sizeof(*out));
 	if (!data || !out || size < 0x90) return;
-	const uint32_t base = (kind == SASAMI_KIND_FPY) ? 0x50u : 0x160u;
+	const uint32_t base = SasamiKindIsFm(kind) ? 0x50u : 0x160u;
 	SasamiReadSjisField(data, size, base, out->titleSjis, 65);
 	SasamiReadSjisField(data, size, base + 0x40u, out->composerSjis, 65);
 	SasamiReadSjisField(data, size, base + 0x80u, out->commentSjis, 65);
@@ -161,6 +161,7 @@ bool SasamiPeekTagsW(const wchar_t* path, SasamiTags* out)
 
 SasamiKind SasamiKindFromPath(const wchar_t* path)
 {
+	if (SasamiEqExt(path, L".fpy2")) return SASAMI_KIND_FPY2;
 	if (SasamiEqExt(path, L".fpy")) return SASAMI_KIND_FPY;
 	if (SasamiEqExt(path, L".mpsmv")) return SASAMI_KIND_MPW3;
 	if (SasamiEqExt(path, L".mpw2")) return SASAMI_KIND_MPW2;
@@ -233,7 +234,7 @@ static void SasamiLoadMisaoTracks(SasamiSong* out)
 	memset(out->misaoTracks, 0, sizeof(out->misaoTracks));
 	if (!out || out->dataSize < 0xF2) return;
 
-	const int isFpy = (out->kind == SASAMI_KIND_FPY);
+	const int isFpy = SasamiKindIsFm(out->kind);
 	const int isMpy = (out->kind == SASAMI_KIND_MPY || out->kind == SASAMI_KIND_MPW2 || out->kind == SASAMI_KIND_MPW3);
 	if (!isFpy && !isMpy) return;
 
@@ -285,7 +286,7 @@ static void SasamiLoadMisaoTracks(SasamiSong* out)
 static void SasamiReadTitle(SasamiSong* out)
 {
 	out->titleSjis[0] = 0;
-	const uint32_t base = (out->kind == SASAMI_KIND_FPY) ? 0x50u : 0x160u;
+	const uint32_t base = SasamiKindIsFm(out->kind) ? 0x50u : 0x160u;
 	if (base >= out->dataSize) return;
 	char buf[66];
 	memset(buf, 0, sizeof(buf));
@@ -314,10 +315,15 @@ bool SasamiLoadMemory(const uint8_t* bytes, size_t size, SasamiKind hint, Sasami
 	out->mpyVersion = 1;
 	out->trackCount = 0;
 
-	if (hint == SASAMI_KIND_FPY) {
-		out->kind = SASAMI_KIND_FPY;
+	if (hint == SASAMI_KIND_FPY || hint == SASAMI_KIND_FPY2) {
+		out->kind = hint;
 		out->fmOpna10ch = (SasamiGet16(*out, 0x1E) == 0xFFFF) ? 1 : 0;
 		out->versionWord = SasamiGet16(*out, 0x1C);
+		/* versionWord==2 (or .fpy2 path) → nested-loop capable FPY2 */
+		if (out->versionWord == 2)
+			out->kind = SASAMI_KIND_FPY2;
+		else if (hint != SASAMI_KIND_FPY2)
+			out->kind = SASAMI_KIND_FPY;
 		out->trackCount = 10;
 		for (int ch = 0; ch < 10; ch++) {
 			const uint16_t ptr = SasamiGet16(*out, (uint32_t)(ch * 2));

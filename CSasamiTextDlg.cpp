@@ -430,6 +430,8 @@ int CSasamiTextDlg::CompileAndBuild(wchar_t* outPath, int outCch, int* isFm)
 	uint8_t* bin = (uint8_t*)HeapAlloc(GetProcessHeap(), 0, SASAMI_WRITE_MAX);
 	if (!bin) return 0;
 	uint32_t sz = 0;
+	int outFpy2 = 0;
+	int outMidiNest = 0;
 	if (m_modeFm) {
 		if (!ScCompileFmText(text, &m_fm, &errLine, err, 256)) {
 			CString s;
@@ -443,11 +445,13 @@ int CSasamiTextDlg::CompileAndBuild(wchar_t* outPath, int outCch, int* isFm)
 		if (!w) { HeapFree(GetProcessHeap(), 0, bin); return 0; }
 		if (!ScFmDocToWrite(&m_fm, w)) {
 			HeapFree(GetProcessHeap(), 0, w);
-			m_status.SetWindowText(LL14(L"FPY\u69cb\u7bc9\u5931\u6557", L"FPY build failed", L"Échec FPY", L"FPY fallito", L"FPY falló", L"FPY 실패", L"FPY失败", L"فشل FPY", L"Ошибка FPY", L"FPY fehlgeschlagen", L"Falha FPY", L"FPY mislukt", L"Błąd FPY", L"FPY başarısız"));
+			const wchar_t* why = ScGetLastWriteErr();
+			m_status.SetWindowText(why && why[0] ? why : LL14(L"FPY\u69cb\u7bc9\u5931\u6557", L"FPY build failed", L"Échec FPY", L"FPY fallito", L"FPY falló", L"FPY 실패", L"FPY失败", L"فشل FPY", L"Ошибка FPY", L"FPY fehlgeschlagen", L"Falha FPY", L"FPY mislukt", L"Błąd FPY", L"FPY başarısız"));
 			HeapFree(GetProcessHeap(), 0, bin);
 			RefreshChromeOpaque();
 			return 0;
 		}
+		outFpy2 = w->fpy2 ? 1 : 0;
 		sz = SasamiBuildFpy(w, bin, SASAMI_WRITE_MAX);
 		SasamiWriteFmClear(w);
 		HeapFree(GetProcessHeap(), 0, w);
@@ -465,15 +469,20 @@ int CSasamiTextDlg::CompileAndBuild(wchar_t* outPath, int outCch, int* isFm)
 		if (!w) { HeapFree(GetProcessHeap(), 0, bin); return 0; }
 		if (!ScMidiDocToWrite(&m_midi, w)) {
 			HeapFree(GetProcessHeap(), 0, w);
-			m_status.SetWindowText(LL14(L"MPY\u69cb\u7bc9\u5931\u6557", L"MPY build failed", L"Échec MPY", L"MPY fallito", L"MPY falló", L"MPY 실패", L"MPY失败", L"فشل MPY", L"Ошибка MPY", L"MPY fehlgeschlagen", L"Falha MPY", L"MPY mislukt", L"Błąd MPY", L"MPY başarısız"));
+			const wchar_t* why = ScGetLastWriteErr();
+			m_status.SetWindowText(why && why[0] ? why : LL14(L"MPY\u69cb\u7bc9\u5931\u6557", L"MPY build failed", L"Échec MPY", L"MPY fallito", L"MPY falló", L"MPY 실패", L"MPY失败", L"فشل MPY", L"Ошибка MPY", L"MPY fehlgeschlagen", L"Falha MPY", L"MPY mislukt", L"Błąd MPY", L"MPY başarısız"));
 			HeapFree(GetProcessHeap(), 0, bin);
 			RefreshChromeOpaque();
 			return 0;
 		}
+		outMidiNest = ScDocMaxLoopNest(m_midi.ev, m_midi.evCount, SC_MIDI_CH);
+		/* Nest≥2 → new MIDI form (MPW2/3). Classic MPY stays for 1-deep DO-- style. */
 		if (w->isMpw3)
 			sz = SasamiBuildMpw3(w, bin, SASAMI_WRITE_MAX);
+		else if (outMidiNest > 1)
+			sz = SasamiBuildMpw2(w, bin, SASAMI_WRITE_MAX);
 		else
-			sz = SasamiBuildMpy(w, bin, SASAMI_WRITE_MAX); /* classic MPY like DO--.MPY */
+			sz = SasamiBuildMpy(w, bin, SASAMI_WRITE_MAX);
 		SasamiWriteMidiClear(w);
 		HeapFree(GetProcessHeap(), 0, w);
 		if (isFm) *isFm = 0;
@@ -487,13 +496,14 @@ int CSasamiTextDlg::CompileAndBuild(wchar_t* outPath, int outCch, int* isFm)
 	wchar_t dir[MAX_PATH];
 	GetTempPathW(MAX_PATH, dir);
 	if (m_modeFm) {
-		_snwprintf_s(outPath, outCch, _TRUNCATE, L"%sogg_sasami_fm.fpy", dir);
-		/* Also refresh preview.fpy so old path keeps matching the latest compile. */
+		_snwprintf_s(outPath, outCch, _TRUNCATE, L"%sogg_sasami_fm.%s", dir, outFpy2 ? L"fpy2" : L"fpy");
 		wchar_t prevPath[MAX_PATH];
-		_snwprintf_s(prevPath, _TRUNCATE, L"%sogg_sasami_preview.fpy", dir);
+		_snwprintf_s(prevPath, _TRUNCATE, L"%sogg_sasami_preview.%s", dir, outFpy2 ? L"fpy2" : L"fpy");
 		SasamiWriteFileW(prevPath, bin, sz);
 	} else if (m_midi.bind.isMpw3)
 		_snwprintf_s(outPath, outCch, _TRUNCATE, L"%sogg_sasami_preview.mpsmv", dir);
+	else if (outMidiNest > 1)
+		_snwprintf_s(outPath, outCch, _TRUNCATE, L"%sogg_sasami_preview.mpw2", dir);
 	else
 		_snwprintf_s(outPath, outCch, _TRUNCATE, L"%sogg_sasami_preview.mpy", dir);
 	if (!SasamiWriteFileW(outPath, bin, sz)) {

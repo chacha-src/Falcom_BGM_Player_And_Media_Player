@@ -31,6 +31,11 @@ int Vst3ProgramCount(Vst3Inst* inst);
 int Vst3ProgramName(Vst3Inst* inst, int index, wchar_t* out, int outChars);
 int Vst3SetProgram(Vst3Inst* inst, int index);
 int Vst3SetChannelProgram(Vst3Inst* inst, int midiCh, int index); // midiCh=0..15
+int Vst3ParamCount(Vst3Inst* inst);
+int Vst3ParamName(Vst3Inst* inst, int index, wchar_t* out, int outChars);
+int Vst3ParamDisplay(Vst3Inst* inst, int index, wchar_t* out, int outChars);
+float Vst3GetParam(Vst3Inst* inst, int index);
+int Vst3SetParam(Vst3Inst* inst, int index, float value01);
 /* Component/controller state blobs. Get*: malloc'd buffer; caller free(). */
 int Vst3GetComponentState(Vst3Inst* inst, unsigned char** outBytes, int* outLen);
 int Vst3GetControllerState(Vst3Inst* inst, unsigned char** outBytes, int* outLen);

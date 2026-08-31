@@ -10,7 +10,9 @@ struct MisaoChState {
 	uint32_t pc;
 	int alive;
 	uint8_t wait;
-	uint8_t loopCnt;
+	enum { MISAO_LOOP_NEST = 16 };
+	uint8_t loopCnt[MISAO_LOOP_NEST];
+	uint8_t loopSp;
 	int backJumps;
 	uint8_t lastNote;
 	uint16_t pitchM;
@@ -48,7 +50,7 @@ static inline int MisaoCmdValid(uint8_t cmd)
 {
 	switch (cmd) {
 	case 0: case 1: case 2: case 3: case 9: case 10: case 11: case 12:
-	case 13: case 14: case 18: case 24: case 25:
+	case 13: case 14: case 18: case 24: case 25: case 26:
 		return 1;
 	default:
 		return (cmd >= 4 && cmd <= 8) || (cmd >= 15 && cmd <= 17) || (cmd >= 19 && cmd <= 23);

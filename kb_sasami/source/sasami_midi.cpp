@@ -23,7 +23,9 @@ struct MidiTrackState {
 	int port;
 	int note;
 	int vel;
-	int loop;
+	enum { MIDI_LOOP_NEST = 16 };
+	int loopStack[MIDI_LOOP_NEST];
+	int loopSp;
 	int drum;
 	int backJumps;
 	int loopSafety;
@@ -506,7 +508,7 @@ bool SasamiConvertToSmf(const SasamiSong& song, SasamiMidiMap map, int gsBankLsb
 		tr[i].port = 0;
 		tr[i].note = 0;
 		tr[i].vel = 100;
-		tr[i].loop = 0;
+		tr[i].loopSp = 0;
 		tr[i].drum = (tr[i].part == 9) ? 1 : 0;
 		tr[i].backJumps = 0;
 		tr[i].loopSafety = 0;
@@ -906,18 +908,28 @@ bool SasamiConvertToSmf(const SasamiSong& song, SasamiMidiMap map, int gsBankLsb
 					tr[i].addr = addr + 3;
 					break;
 				case 23:
-					tr[i].loop = b1;
+					if (tr[i].loopSp < MidiTrackState::MIDI_LOOP_NEST)
+						tr[i].loopStack[tr[i].loopSp++] = b1;
+					else
+						tr[i].loopStack[MidiTrackState::MIDI_LOOP_NEST - 1] = b1;
 					tr[i].addr = addr + 3;
 					break;
 				case 24: {
 					uint32_t nxt = 0;
 					const uint32_t dest = ReadJump(song, addr, ver, &nxt);
-					tr[i].loop--;
 					tr[i].loopSafety++;
-					if (tr[i].loop == 0 || tr[i].loopSafety > 128)
+					if (tr[i].loopSp <= 0 || tr[i].loopSafety > 4096) {
 						tr[i].addr = nxt;
-					else
+						break;
+					}
+					int* lp = &tr[i].loopStack[tr[i].loopSp - 1];
+					(*lp)--;
+					if (*lp == 0) {
+						tr[i].loopSp--;
+						tr[i].addr = nxt;
+					} else {
 						tr[i].addr = dest;
+					}
 					break;
 				}
 				case 25:
@@ -1001,17 +1013,26 @@ bool SasamiConvertToSmf(const SasamiSong& song, SasamiMidiMap map, int gsBankLsb
 				case 36: {
 					uint8_t buf[128];
 					int n = 0;
-					buf[n++] = 0xF0; buf[n++] = 0x41; buf[n++] = 0x10; buf[n++] = 0x42; buf[n++] = 0x12;
 					uint32_t p = addr + 1;
-					int sum = 0;
-					while (SasamiOffOk(song, p, 1) && SasamiGet(song, p) != 0xFF && n < 120) {
-						buf[n] = SasamiGet(song, p);
-						sum += buf[n];
-						n++;
-						p++;
+					if (SasamiOffOk(song, p, 1) && SasamiGet(song, p) == 0xF0) {
+						while (SasamiOffOk(song, p, 1) && SasamiGet(song, p) != 0xFF && n < 127) {
+							buf[n++] = SasamiGet(song, p++);
+							if (buf[n - 1] == 0xF7) break;
+						}
+						if (n > 0 && buf[n - 1] != 0xF7 && n < 128)
+							buf[n++] = 0xF7;
+					} else {
+						int sum = 0;
+						buf[n++] = 0xF0; buf[n++] = 0x41; buf[n++] = 0x10; buf[n++] = 0x42; buf[n++] = 0x12;
+						while (SasamiOffOk(song, p, 1) && SasamiGet(song, p) != 0xFF && n < 120) {
+							buf[n] = SasamiGet(song, p);
+							sum += buf[n];
+							n++;
+							p++;
+						}
+						buf[n++] = (uint8_t)((128 - (sum % 128)) & 0x7F);
+						buf[n++] = 0xF7;
 					}
-					buf[n++] = (uint8_t)((128 - (sum % 128)) & 0x7F);
-					buf[n++] = 0xF7;
 					PushEv(tick, port, buf, n);
 					tr[i].addr = p + 1;
 					break;

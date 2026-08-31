@@ -1,4 +1,4 @@
-// stdafx.h : 標準のシステム インクルード ファイルのインクルード ファイル、または
+﻿// stdafx.h : 標準のシステム インクルード ファイルのインクルード ファイル、または
 // 参照回数が多く、かつあまり変更されない、プロジェクト専用のインクルード ファイル
 // を記述します。
 
@@ -830,6 +830,7 @@ struct save{
 	int sasamiTextX, sasamiTextY, sasamiTextW, sasamiTextH;
 	int sasamiNotePropsX, sasamiNotePropsY, sasamiNotePropsW, sasamiNotePropsH;
 	int sasamiNotePalW, sasamiNotePalH; /* 位置はカーソル基準、サイズのみ保持 */
+	int sasamiMarkStack; /* 0=置換(1重), 1=ネスト積み上げ */
 	int sasamiFmVoiceX, sasamiFmVoiceY, sasamiFmVoiceW, sasamiFmVoiceH;
 	int sasamiToneMapX, sasamiToneMapY, sasamiToneMapW, sasamiToneMapH;
 	int sasamiVstPickX, sasamiVstPickY, sasamiVstPickW, sasamiVstPickH;

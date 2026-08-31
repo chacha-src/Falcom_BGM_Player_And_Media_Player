@@ -1,4 +1,4 @@
-﻿#include "stdafx.h"
+#include "stdafx.h"
 #include "ogg.h"
 #include "CSasamiNotePropsDlg.h"
 #include "CSasamiVstPartMenu.h"
@@ -85,27 +85,30 @@ void CSasamiNotePropsDlg::RefreshVstHint()
 	}
 	wchar_t progName[128];
 	progName[0] = 0;
-	const int prog = loaded ? VstLiveProgramCurrent(m_part) : -1;
+	const int multi = loaded && (VstLivePartIsMulti(m_part) ||
+		(path[0] && VstDetectMultiTimbral(path)));
+	/* Multi/remote SC-VA: never Program* IPC — freezes Host64. */
+	const int prog = (loaded && !multi) ? VstLiveProgramCurrent(m_part) : -1;
 	if (prog >= 0)
 		VstLiveProgramName(m_part, prog, progName, 128);
-	/* Multi (SC-VA): VST program list is often empty — use GS/XG name from PC. */
-	if (!progName[0] && prog >= 0) {
+	if (!progName[0] && prog >= 0)
 		SasamiToneLookupAuto(0, 0, prog, m_part == 10 ? 1 : 0, progName, 128);
-	}
 
 	CString h;
 	if (loaded) {
-		const int nProg = VstLiveProgramCount(m_part);
-		if (progName[0])
+		if (multi && base[0])
+			h.Format(L"VST: %s (part %d) — トーンマップ / GS·XG", base, m_part);
+		else if (progName[0])
 			h.Format(L"VST: %s | %s (part %d PC#%d)",
 				base[0] ? base : L"(plugin)", progName, m_part, prog + 1);
-		else if (nProg <= 0 && base[0])
-			/* HALion / MediaBay: no VST program list — patch lives inside the plug-in. */
-			h.Format(L"VST: %s (part %d) — MediaBay/内部パッチ（一覧APIなし）",
-				base, m_part);
-		else if (base[0])
-			h.Format(L"VST: %s (part %d) — トーンマップ / MediaBay で選択", base, m_part);
-		else
+		else if (base[0]) {
+			const int nProg = VstLiveProgramCount(m_part);
+			if (nProg <= 0)
+				h.Format(L"VST: %s (part %d) — MediaBay/内部パッチ（一覧APIなし）",
+					base, m_part);
+			else
+				h.Format(L"VST: %s (part %d) — トーンマップ / MediaBay で選択", base, m_part);
+		} else
 			h.Format(L"VST loaded on part %d — pick tone", m_part);
 		m_hint.SetWindowText(h);
 	} else {

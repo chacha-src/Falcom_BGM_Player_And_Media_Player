@@ -1,4 +1,4 @@
-#include "stdafx.h"
+﻿#include "stdafx.h"
 #include "ogg.h"
 #include "CSasamiVstPickDlg.h"
 #include "VstMidiEngine.h"
@@ -7,7 +7,7 @@ IMPLEMENT_DYNAMIC(CSasamiVstPickDlg, CCustomBlurDialogExBase)
 
 CSasamiVstPickDlg::CSasamiVstPickDlg(CWnd* pParent)
 	: CCustomBlurDialogExBase(IDD_SASAMI_VST_PICK, pParent)
-	, m_isVst3(0), m_part(1), m_scroll(0), m_sel(0), m_count(0)
+	, m_isVst3(0), m_part(1), m_effectsOnly(0), m_scroll(0), m_sel(0), m_count(0)
 {
 	m_path[0] = 0;
 }
@@ -18,6 +18,20 @@ int CSasamiVstPickDlg::PickForPart(CWnd* owner, int part1to32, wchar_t* outPath,
 	   picker behind the score and forced MediaBay dialogs the user did not ask for. */
 	CSasamiVstPickDlg dlg(owner);
 	dlg.m_part = part1to32;
+	dlg.m_effectsOnly = 0;
+	const INT_PTR r = dlg.DoModal();
+	if (r != IDOK) return (int)r;
+	if (outPath && outCch > 0)
+		wcsncpy_s(outPath, outCch, dlg.m_path, _TRUNCATE);
+	if (outIs3) *outIs3 = dlg.m_isVst3;
+	return IDOK;
+}
+
+int CSasamiVstPickDlg::PickEffect(CWnd* owner, wchar_t* outPath, int outCch, int* outIs3)
+{
+	CSasamiVstPickDlg dlg(owner);
+	dlg.m_part = 0;
+	dlg.m_effectsOnly = 1;
 	const INT_PTR r = dlg.DoModal();
 	if (r != IDOK) return (int)r;
 	if (outPath && outCch > 0)
@@ -49,19 +63,24 @@ END_MESSAGE_MAP()
 
 void CSasamiVstPickDlg::ApplyLang()
 {
-	SetWindowText(LL14(L"VST音色を選択", L"Select VST", L"Choisir VST", L"Scegli VST", L"Elegir VST",
-		L"VST 선택", L"选择 VST", L"اختر VST", L"Выбор VST", L"VST wählen",
-		L"Escolher VST", L"VST kiezen", L"Wybierz VST", L"VST seç"));
+	if (m_effectsOnly) {
+		SetWindowText(L"Select VST Insert FX");
+		m_hint.SetWindowText(L"Scanned effects only (not instruments). Double-click to choose.");
+	} else {
+		SetWindowText(LL14(L"VST音色を選択", L"Select VST", L"Choisir VST", L"Scegli VST", L"Elegir VST",
+			L"VST 선택", L"选择 VST", L"اختر VST", L"Выбор VST", L"VST wählen",
+			L"Escolher VST", L"VST kiezen", L"Wybierz VST", L"VST seç"));
+		CString h;
+		h.Format(LL14(
+			L"パート %d — スキャン済み音源（ダブルクリックで決定）。HALion等の音色数0は正常（MediaBayは設定画面内）",
+			L"Part %d — scanned instruments (double-click). HALion 0 programs is normal (MediaBay in editor)",
+			L"Partie %d", L"Parte %d", L"Parte %d", L"파트 %d", L"声部 %d", L"الجزء %d", L"Партия %d", L"Part %d", L"Parte %d", L"Deel %d", L"Partia %d", L"Parti %d"), m_part);
+		m_hint.SetWindowText(h);
+	}
 	m_ok.SetWindowText(L"OK");
 	m_cancel.SetWindowText(LL14(L"取消", L"Cancel", L"Annuler", L"Annulla", L"Cancelar", L"취소", L"取消", L"إلغاء", L"Отмена", L"Abbrechen", L"Cancelar", L"Annuleren", L"Anuluj", L"İptal"));
 	m_rescan.SetWindowText(LL14(L"再スキャン", L"Rescan", L"Rescan", L"Rescan", L"Rescan",
 		L"재스캔", L"重新扫描", L"Rescan", L"Rescan", L"Rescan", L"Rescan", L"Rescan", L"Rescan", L"Rescan"));
-	CString h;
-	h.Format(LL14(
-		L"パート %d — スキャン済み音源（ダブルクリックで決定）。HALion等の音色数0は正常（MediaBayは設定画面内）",
-		L"Part %d — scanned instruments (double-click). HALion 0 programs is normal (MediaBay in editor)",
-		L"Partie %d", L"Parte %d", L"Parte %d", L"파트 %d", L"声部 %d", L"الجزء %d", L"Партия %d", L"Part %d", L"Parte %d", L"Deel %d", L"Partia %d", L"Parti %d"), m_part);
-	m_hint.SetWindowText(h);
 }
 
 void CSasamiVstPickDlg::RebuildList()
@@ -72,12 +91,16 @@ void CSasamiVstPickDlg::RebuildList()
 	for (int i = 0; i < n && m_count < 512; i++) {
 		const VstPluginInfo* p = VstScanGet(i);
 		if (!p) continue;
-		if (!p->isInstrument) continue;
-		if (p->isLiveOk == 0) continue; /* prefer verified */
+		if (m_effectsOnly) {
+			if (p->isInstrument) continue;
+		} else {
+			if (!p->isInstrument) continue;
+			if (p->isLiveOk == 0) continue; /* prefer verified */
+		}
 		m_idx[m_count++] = i;
 	}
-	/* if none verified, show all instruments */
-	if (m_count == 0) {
+	/* if none verified, show all instruments (tone mode only) */
+	if (!m_effectsOnly && m_count == 0) {
 		for (int i = 0; i < n && m_count < 512; i++) {
 			const VstPluginInfo* p = VstScanGet(i);
 			if (!p || !p->isInstrument) continue;

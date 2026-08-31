@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include <Windows.h>
 #include "PluginKinds.h"
@@ -125,6 +125,20 @@ void VstMidiInjectSysex(int portIndex0to2, const unsigned char* data, int bytes)
 int VstMidiStealInjects(BYTE* ports, DWORD* msgs, int* sampleOfs, int maxCount);
 
 int VstLiveLoadPart(int part1to32, const wchar_t* pluginPath, int isVst3);
+int VstLiveLoadFx(int part1to32, int slot0to1, const wchar_t* pluginPath, int isVst3);
+void VstLiveUnloadFx(int part1to32, int slot0to1);
+int VstLiveFxIsLoaded(int part1to32, int slot0to1);
+int VstLiveFxGetPath(int part1to32, int slot0to1, wchar_t* outPath, int outCch);
+int VstLiveFxParamCount(int part1to32, int slot0to1);
+float VstLiveFxGetParam(int part1to32, int slot0to1, int paramIndex);
+int VstLiveFxSetParam(int part1to32, int slot0to1, int paramIndex, float value01);
+int VstLiveFxParamName(int part1to32, int slot0to1, int paramIndex, wchar_t* out, int outChars);
+int VstLiveFxParamDisplay(int part1to32, int slot0to1, int paramIndex, wchar_t* out, int outChars);
+int VstLiveFxEditorOpen(int part1to32, int slot0to1);
+void VstLiveFxSetBypass(int part1to32, int slot0to1, int bypass);
+int VstLiveFxGetBypass(int part1to32, int slot0to1);
+int VstLiveFxCaptureState(int part1to32, int slot0to1, unsigned char** outBytes, int* outLen);
+int VstLiveFxApplyState(int part1to32, int slot0to1, const unsigned char* bytes, int len);
 /* MPW3 トレイラの VST パスをパートへロード。戻り=ロードした数（0=トレイラ無し）
    openEditor: 1=初回ロード時にエディタ（HALion Home）を開く。再生時は 0。 */
 int VstApplyMpw3Binds(const wchar_t* mpw3Path, int openEditor);
@@ -211,8 +225,10 @@ int VstLiveCaptureStates(int part1to32,
 int VstLivePartIsMulti(int part1to32);
 /* GS/XG bank+PC to the live part (MIDI), and store as current prog. */
 void VstLiveSendBankProgram(int part1to32, int bankMsb, int bankLsb, int prog0to127);
-/* Fire a short preview note (renders to waveOut). */
+/* Fire a short preview note (MIDI only; auto note-off). */
 void VstLiveAuditionNote(int part1to32, int noteMidi, int velocity, int durMs);
+/* Cut any pending audition (call before closing tone map). */
+void VstLiveAuditionStop(void);
 
 // パートがいま聴いている内容。UI がチャンネルを点灯するのに使う。
 struct VstLiveActInfo {

@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include "afxdialogex.h"
 #include "CCustomControl.h"
 #include "SasamiComposerDoc.h"
@@ -63,12 +63,16 @@ protected:
 	afx_msg void OnBnClickedLoopClr();
 	afx_msg void OnBnClickedShowAll();
 	afx_msg void OnBnClickedText();
+	afx_msg void OnBnClickedFx();
 	afx_msg void OnCbnSelchangeCh();
 	afx_msg void OnCbnStrip();
 	afx_msg void OnTimer(UINT_PTR nIDEvent);
 	afx_msg LRESULT OnPalDur(WPARAM w, LPARAM l);
 	afx_msg LRESULT OnNoteProps(WPARAM w, LPARAM l);
+	afx_msg LRESULT OnExcRpnChanged(WPARAM w, LPARAM l);
+	afx_msg LRESULT OnInsertFxChanged(WPARAM w, LPARAM l);
 	afx_msg LRESULT OnDeferredInit(WPARAM w, LPARAM l);
+	afx_msg LRESULT OnDeferredPushText(WPARAM w, LPARAM l);
 	afx_msg LRESULT OnDeferredOpenVst(WPARAM w, LPARAM l);
 	afx_msg LRESULT OnDeferredProgLabels(WPARAM w, LPARAM l);
 	afx_msg LRESULT OnVstEditorClosed(WPARAM w, LPARAM l);
@@ -82,7 +86,9 @@ protected:
 	int BuildToTemp(wchar_t* outPath, int outCch);
 	void OpenVstForPart(int part1to32, int editorOnly = 0);
 	void SyncVstBindsFromLive();
+	void SyncFxBindsToLive();
 	void RefreshProgLabels();
+	void ApplyBindProgToScore(int ch0);
 	void EditProgForPart(int ch0);
 	void SyncProgPropFromCh(int ch0);
 	void ApplyProgPropToCh();
@@ -97,6 +103,7 @@ protected:
 	CCustomStandardButton m_btnOpen, m_btnSave, m_btnNew, m_btnPlay, m_btnHelp, m_btnTempo, m_btnExport;
 	CCustomStandardButton m_btnPencil, m_btnErase, m_btnSel, m_btnPal, m_btnPropUpd;
 	CCustomStandardButton m_btnMark, m_btnLoopA, m_btnLoopB, m_btnLoopClr, m_btnShowAll, m_btnText;
+	CCustomStandardButton m_btnFx;
 	CCustomComboBox m_ch, m_stripKind0, m_stripKind1, m_stripDraw, m_stripLanes;
 	CCustomEdit m_edNote, m_edGt, m_edVel;
 	CCustomStatic m_status;
@@ -104,6 +111,9 @@ protected:
 	CRect m_bodyRc, m_trackRc, m_gridRc, m_stripRc;
 	ScMidiDoc m_doc;
 	ScStaffUi m_ui;
+	ScEvent m_clip[SC_CLIP_MAX];
+	int m_clipN;
+	uint32_t m_clipBase;
 	int m_curCh;
 	int m_placeRest;
 	int m_accidental;

@@ -55,6 +55,8 @@ protected:
 	afx_msg void OnBnClickedShowAll();
 	afx_msg void OnBnClickedText();
 	afx_msg void OnCbnSelchangeCh();
+	afx_msg void OnCbnStrip();
+	afx_msg void OnKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags);
 	afx_msg LRESULT OnPalDur(WPARAM w, LPARAM l);
 	afx_msg LRESULT OnNoteProps(WPARAM w, LPARAM l);
 	afx_msg LRESULT OnDeferredInit(WPARAM w, LPARAM l);
@@ -65,6 +67,7 @@ protected:
 	void UpdateScrollBars();
 	void ApplyLang();
 	void SyncPropFromSel();
+	void SyncStripCombos();
 	void RefreshStrip();
 	void PlaceOrEditAt(CPoint pt);
 	int BuildToTemp(wchar_t* outPath, int outCch);
@@ -79,13 +82,16 @@ protected:
 	CCustomStandardButton m_btnOpen, m_btnSave, m_btnPlay, m_btnHelp, m_btnTempo, m_btnVoice, m_btnExport;
 	CCustomStandardButton m_btnPencil, m_btnErase, m_btnSel, m_btnPal, m_btnPropUpd;
 	CCustomStandardButton m_btnMark, m_btnLoopA, m_btnLoopB, m_btnLoopClr, m_btnShowAll, m_btnText;
-	CCustomComboBox m_ch;
+	CCustomComboBox m_ch, m_stripKind0, m_stripKind1, m_stripDraw, m_stripLanes;
 	CCustomEdit m_edNote, m_edGt, m_edVel;
 	CCustomStatic m_status;
 	CToolTipCtrl m_tooltip;
 	CRect m_bodyRc, m_trackRc, m_gridRc, m_stripRc;
 	ScFmDoc m_doc;
 	ScStaffUi m_ui;
+	ScEvent m_clip[SC_CLIP_MAX];
+	int m_clipN;
+	uint32_t m_clipBase;
 	int m_curCh;
 	int m_placeRest;
 	int m_accidental;

@@ -1,4 +1,4 @@
-#include "sasami_write.h"
+﻿#include "sasami_write.h"
 #include <windows.h>
 #include <string.h>
 #include <stdlib.h>
@@ -273,9 +273,15 @@ uint32_t SasamiBuildFpy(const SasamiWriteFm* w, uint8_t* out, uint32_t outCap)
 {
 	if (!w || !out || outCap < 0x300) return 0;
 	memset(out, 0, outCap > SASAMI_WRITE_MAX ? SASAMI_WRITE_MAX : outCap);
-	/* header: 10 track ptrs, version, opna flag */
-	out[0x1C] = 0x00;
-	out[0x1D] = 0x00;
+	/* header: 10 track ptrs, version, opna flag.
+	   versionWord@0x1C: 0 = classic FPY (1-deep loops), 2 = FPY2 (nested up to 16). */
+	if (w->fpy2) {
+		out[0x1C] = 0x02;
+		out[0x1D] = 0x00;
+	} else {
+		out[0x1C] = 0x00;
+		out[0x1D] = 0x00;
+	}
 	if (w->opna10) {
 		out[0x1E] = 0xFF;
 		out[0x1F] = 0xFF;
@@ -286,6 +292,10 @@ uint32_t SasamiBuildFpy(const SasamiWriteFm* w, uint8_t* out, uint32_t outCap)
 
 	uint32_t fileOff = 0x100; /* leave room for header/title */
 	uint32_t cursorAbs = 0x1000 + fileOff;
+	uint32_t fmStart[10];
+	uint32_t fmEnd[10];
+	memset(fmStart, 0, sizeof(fmStart));
+	memset(fmEnd, 0, sizeof(fmEnd));
 	for (int ch = 0; ch < 10; ch++) {
 		const SasamiTrackStream* s = &w->tr[ch];
 		if (!s->used || s->size == 0) {
@@ -294,7 +304,9 @@ uint32_t SasamiBuildFpy(const SasamiWriteFm* w, uint8_t* out, uint32_t outCap)
 		}
 		Put16(out + ch * 2, (uint16_t)cursorAbs);
 		if (fileOff + s->size + 3 > SASAMI_WRITE_MAX) return 0;
+		fmStart[ch] = fileOff;
 		memcpy(out + fileOff, s->bytes, s->size);
+		fmEnd[ch] = fileOff + s->size;
 		/* Patch track-relative loop/jump markers to absolute 0x1xxx file addresses.
 		   cmd14: w1 = body offset within this track stream
 		   cmd3 with 0xF000|rel: J target within this track stream */
@@ -372,14 +384,16 @@ uint32_t SasamiBuildFpy(const SasamiWriteFm* w, uint8_t* out, uint32_t outCap)
 		fileOff += 25;
 	}
 	/* Patch 3-byte aligned FNEIRO cmds in stream region (tracks start at 0x100) */
-	for (uint32_t i = 0x100; i + 2 < streamEnd; i += 3) {
-		if (out[i] != 2) continue;
-		uint16_t raw = (uint16_t)(out[i + 1] | (out[i + 2] << 8));
-		if ((raw & 0xFF00) != 0xFE00) continue;
-		int vi = (int)(raw & 0x3F);
-		if (vi < 0 || vi >= 64 || voiceAbs[vi] == 0) continue;
-		out[i + 1] = (uint8_t)(voiceAbs[vi] & 0xFF);
-		out[i + 2] = (uint8_t)(voiceAbs[vi] >> 8);
+	for (int ch = 0; ch < 10; ch++) {
+		for (uint32_t i = fmStart[ch]; i && i + 2 < fmEnd[ch]; i += 3) {
+			if (out[i] != 2) continue;
+			uint16_t raw = (uint16_t)(out[i + 1] | (out[i + 2] << 8));
+			if ((raw & 0xFF00) != 0xFE00) continue;
+			int vi = (int)(raw & 0x3F);
+			if (vi < 0 || vi >= 64 || voiceAbs[vi] == 0) continue;
+			out[i + 1] = (uint8_t)(voiceAbs[vi] & 0xFF);
+			out[i + 2] = (uint8_t)(voiceAbs[vi] >> 8);
+		}
 	}
 	return fileOff;
 }
