@@ -2658,6 +2658,16 @@ FONT 9, "Meiryo", 400, 0, 0x80
 BEGIN
 END
 
+IDD_SASAMI_CMD_HELP DIALOGEX 0, 0, 600, 420
+STYLE DS_SETFONT | WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME
+CAPTION "SASAMI Command Reference"
+FONT 9, "メイリオ", 400, 0, 0x80
+BEGIN
+    CONTROL         "",IDC_SCH_TABS,"SysTabControl32",WS_TABSTOP,7,7,586,24
+    PUSHBUTTON      "Copy",IDC_SCH_COPY,7,394,100,18
+    CONTROL         "",IDC_SCH_BODY,"Static",SS_OWNERDRAW | SS_NOTIFY,7,36,586,350
+END
+
 IDD_SASAMI_SIMPLE_INPUT DIALOGEX 0, 0, 240, 100
 STYLE DS_SETFONT | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "Input"
@@ -2747,7 +2757,7 @@ END
 //
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 0,9,1,902
+ FILEVERSION 0,9,1,903
  PRODUCTVERSION 1,0,0,1
  FILEFLAGSMASK 0x3fL
 #ifdef _DEBUG
@@ -2765,10 +2775,10 @@ BEGIN
         BEGIN
             VALUE "Comments", "Falcom BGM Player & Media Player"
             VALUE "CompanyName", "Pre Prayer Power Soft"
-            VALUE "FileDescription", "Falcom BGM Player & Media Player Ver 0.9a Rel.2026.08.31"
-            VALUE "FileVersion", "0.9.1.902"
+            VALUE "FileDescription", "Falcom BGM Player & Media Player Ver 0.9a Rel.2026.09.01"
+            VALUE "FileVersion", "0.9.1.903"
             VALUE "InternalName", "ogg YS/ED bgm"
-            VALUE "LegalCopyright", "Copyright (C) 2026.08.31"
+            VALUE "LegalCopyright", "Copyright (C) 2026.09.01"
             VALUE "LegalTrademarks", "Pre Prayer Power Soft"
             VALUE "OriginalFilename", "oggYSEDbgm_uni_avx2.exe"
             VALUE "ProductName", "Falcom BGM Player & Media Player"
@@ -3260,6 +3270,10 @@ BEGIN
     END
 
     IDD_PROTOOLS, DIALOG
+    BEGIN
+    END
+
+    IDD_SASAMI_CMD_HELP, DIALOG
     BEGIN
     END
 END

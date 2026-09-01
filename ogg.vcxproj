@@ -389,6 +389,7 @@
     <ClCompile Include="CMidiMonitorDlg.cpp" />
     <ClCompile Include="CFmMonitorDlg.cpp" />
     <ClCompile Include="CSasamiTextDlg.cpp" />
+    <ClCompile Include="CSasamiCmdHelpDlg.cpp" />
     <ClCompile Include="CSasamiMidiScoreDlg.cpp" />
     <ClCompile Include="CSasamiFmScoreDlg.cpp" />
     <ClCompile Include="CSasamiFmVoiceDlg.cpp" />
@@ -516,6 +517,7 @@
     <ClInclude Include="CFmMonitorDlg.h" />
     <ClInclude Include="kb_sasami\source\sasami_fmmon.h" />
     <ClInclude Include="CSasamiTextDlg.h" />
+    <ClInclude Include="CSasamiCmdHelpDlg.h" />
     <ClInclude Include="CSasamiMidiScoreDlg.h" />
     <ClInclude Include="CSasamiFmScoreDlg.h" />
     <ClInclude Include="CSasamiFmVoiceDlg.h" />

@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 // OPNA FM monitor dump — kbsasami (raira=1) writes, 本体 FMモニタ reads.
 #include <stdint.h>
 
@@ -29,6 +29,22 @@ struct SasamiFmMonDump {
 	uint8_t pcmOn[SASAMI_FMMON_PCM_MAX];
 	uint8_t pcmNote[SASAMI_FMMON_PCM_MAX]; // MIDI note 0..127
 	uint8_t regWriteBits[64]; /* v5: regs[i] が直前 Flush 区間に書かれたら bit i */
+	/* v6: PMD/FMP。kbsasami は version=5 のまま（この先は 0） */
+	uint8_t keyOnEx[3];       /* FM3EX1-3 */
+	uint8_t keyOnExHitCnt[3];
+	uint8_t keyMidi[6];       /* 0xFF=fnum から。FMP キー専用はここに MIDI */
+	uint8_t exMidi[3];
+	uint8_t ssgMidi[3];
+	uint8_t dumpFlags;        /* bit0=keys-only bit1=PPZ行 bit2=FM3EX行 bit3=MSX */
+	uint8_t pad6[3];          /* [0]=MSX deviceMask: PSG=1 OPLL=2 SCC=4 */
+};
+
+/* リングヘッダのみ（slot 全体 ~320KB をスタックに置かないこと） */
+struct SasamiFmMonRingHdr {
+	char magic[4];       // "OPNR"
+	uint32_t version;    // 1
+	uint32_t gen;        // 累積 Flush 回数。最新は slot[(gen-1)%RING]
+	uint32_t reserved;
 };
 
 /* リング: live 上書きで消えるフラッシュを UI が全部読めるようにする */
@@ -42,17 +58,38 @@ struct SasamiFmMonRing {
 #pragma pack(pop)
 
 enum { SASAMI_FMMON_VERSION = 5 };
+enum { SASAMI_FMMON_VERSION_V6 = 6 };
 enum { SASAMI_FMMON_RING_VERSION = 1 };
+enum {
+	SASAMI_FMMON_FLAG_KEYSONLY = 1,
+	SASAMI_FMMON_FLAG_PPZ = 2,
+	SASAMI_FMMON_FLAG_FM3EX = 4,
+	SASAMI_FMMON_FLAG_MSX = 8
+};
+enum {
+	SASAMI_FMMON_DEV_PSG = 1,
+	SASAMI_FMMON_DEV_OPLL = 2,
+	SASAMI_FMMON_DEV_SCC = 4
+};
 
 #ifdef __cplusplus
 inline bool SasamiFmMonMagicOk(const SasamiFmMonDump& d)
 {
 	return d.magic[0] == 'O' && d.magic[1] == 'P' && d.magic[2] == 'N' && d.magic[3] == 'A'
-		&& d.version >= 2 && d.version <= 5;
+		&& d.version >= 2 && d.version <= 6;
 }
-inline bool SasamiFmMonRingMagicOk(const SasamiFmMonRing& r)
+inline bool SasamiFmMonRingMagicOk(const SasamiFmMonRingHdr& r)
 {
 	return r.magic[0] == 'O' && r.magic[1] == 'P' && r.magic[2] == 'N' && r.magic[3] == 'R'
 		&& r.version == SASAMI_FMMON_RING_VERSION;
+}
+inline bool SasamiFmMonRingMagicOk(const SasamiFmMonRing& r)
+{
+	SasamiFmMonRingHdr h;
+	h.magic[0] = r.magic[0]; h.magic[1] = r.magic[1]; h.magic[2] = r.magic[2]; h.magic[3] = r.magic[3];
+	h.version = r.version;
+	h.gen = r.gen;
+	h.reserved = r.reserved;
+	return SasamiFmMonRingMagicOk(h);
 }
 #endif

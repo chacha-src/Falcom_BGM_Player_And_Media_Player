@@ -1,4 +1,4 @@
-﻿// Soft3DRaceDlg.cpp — aerial race (Catmull-Rom power band / cute bird-ships)
+// Soft3DRaceDlg.cpp — aerial race (Catmull-Rom power band / cute bird-ships)
 #include "stdafx.h"
 #include "ogg.h"
 #include "Soft3DRaceDlg.h"

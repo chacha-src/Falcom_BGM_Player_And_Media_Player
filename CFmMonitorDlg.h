@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 // CFmMonitorDlg : SASAMI FPY / OPNA (YM2608) レジスタ・鍵盤モニタ
 // kbsasami (raira=1) が %TEMP%\ogg_kbsasami\*.opna に出す dump を同期表示。
 #include "afxdialogex.h"
@@ -40,16 +40,25 @@ protected:
 	afx_msg void OnSysCommand(UINT nID, LPARAM lParam);
 
 private:
-	enum { HIST_MAX = 256 }; /* リングと同程度。tick 単位 dump を遅延分保持 */
+	enum { HIST_MAX = 256 }; /* リング容量 */
+	/* .fpy は可聴ラグ~700ms。短すぎると「まだ可聴前」の dump を捨てて無描画になる */
+	enum { HIST_SOFT = 192 };
 
 	int PollDump();
 	void ResetDumpSync();
 	void PushHistDump(const SasamiFmMonDump& d);
+	void TrimHistForHeard(uint64_t heard, uint32_t rate);
 	void ApplyDump(const SasamiFmMonDump& d);
 	void TickFades();
 	void InvalidateDirtyRegions();
 	uint64_t HeardSample(uint32_t sampleRate);
 	int PcmRows() const;
+	int ExRows() const;
+	int FmRows() const;
+	int SsgRows() const;
+	int KeysOnly() const;
+	int IsMsxDump() const;
+	unsigned MsxDevMask() const;
 	bool EnsureFrameBuffer(CDC& refDC, int w, int h);
 	void ReleasePaintBuffers();
 	void ComputeLayout(int w, int h);
@@ -78,10 +87,12 @@ private:
 	BYTE m_fade[0x200];
 	BYTE m_touched[0x200];
 	BYTE m_fadeKey[6];
+	BYTE m_fadeEx[3];
 	BYTE m_fadeSsg[3];
 	BYTE m_fadePcm[SASAMI_FMMON_PCM_MAX];
 	BYTE m_fadeRzmPad[6];
 	wchar_t m_lastSong[260];
+	wchar_t m_playIdent[260]; /* 再生中 stem。曲切替で ring 位置を捨てる */
 	uint32_t m_lastSeq;
 	uint64_t m_lastCurSample;
 	uint64_t m_lastHeardSamp;
@@ -110,6 +121,9 @@ private:
 		int fmX, fmW, pw, ph, gap;
 		int keysY, keysW, rowH, keyH, labelW;
 		int pcmRows; /* 鍵盤ブロック行数に効く。変化時は ComputeLayout 必須 */
+		int exRows;
+		int fmRows;
+		int ssgRows;
 		CRect rcHead, rcHex, rcPanels, rcKeys;
 	} m_lay;
 	int m_layOk;

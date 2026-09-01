@@ -1,4 +1,4 @@
-// oggDlg.cpp : インプリメンテーション ファイル
+﻿// oggDlg.cpp : インプリメンテーション ファイル
 //
 //#define _DLL
 #include "stdafx.h"
@@ -1311,6 +1311,8 @@ static int CountKpiFiles(CString ff)
 			CString ss = cf1.GetFileName();
 			if (!(ss == "." || ss == "..")) {
 				if (cf1.IsDirectory() != 0) {
+					if (ss.GetLength() >= 5 && ss.Left(5).CompareNoCase(_T(".ogg_")) == 0)
+						continue;
 					if (ff.Right(1) == "\\")
 						count += CountKpiFiles(ff + cf1.GetFileName());
 					else
@@ -5340,6 +5342,10 @@ BOOL COggDlg::OnInitDialog()
 	ttt_ = 5;
 	//	uTimerId = timeSetEvent(1, 0, TimeCallback, NULL, TIME_PERIODIC);
 #if WIN64
+	/* x64 本体はここでの plug 無し。サイレント更新だけ先に済ませる */
+	KpiInstall_SilentUpdateKbsasami(karento2);
+	KpiInstall_SilentUpdateFmpmd(karento2);
+	KpiInstall_SilentUpdateFmMonKpis(karento2);
 #else
 	CKpiLoadingWnd loadingWnd;
 	loadingWnd.Create(NULL);
@@ -5348,6 +5354,42 @@ BOOL COggDlg::OnInitDialog()
 	g_oggKpiLoading = 1;
 	g_nCurrentKpiIndex = 0;
 	if (ptl) ptl->SetProgressState(m_hWnd, TBPF_INDETERMINATE);
+	loadingWnd.SetStatusText(LL14(
+		L"プラグイン更新を確認中…\n（必要な場合のみ取得します）",
+		L"Checking for plugin updates…\n(Download only when needed)",
+		L"Verification des mises a jour plugins…\n(Telechargement seulement si besoin)",
+		L"Controllo aggiornamenti plugin…\n(Download solo se necessario)",
+		L"Comprobando actualizaciones de plugins…\n(Descarga solo si hace falta)",
+		L"플러그인 업데이트 확인 중…\n(필요할 때만 받습니다)",
+		L"正在检查插件更新…\n（仅在需要时下载）",
+		L"التحقق من تحديثات الإضافات…\n(التنزيل عند الحاجة فقط)",
+		L"Проверка обновлений плагинов…\n(Скачивание только при необходимости)",
+		L"Plugin-Updates werden geprueft…\n(Download nur bei Bedarf)",
+		L"A verificar atualizacoes de plugins…\n(Download so se necessario)",
+		L"Plugin-updates controleren…\n(Alleen downloaden indien nodig)",
+		L"Sprawdzanie aktualizacji wtyczek…\n(Pobieranie tylko gdy potrzeba)",
+		L"Eklenti guncellemeleri kontrol ediliyor…\n(Sadece gerekirse indirilir)"
+	));
+	/* KPI 読込ダイアログ表示中にサイレント更新（DLL ロック前） */
+	KpiInstall_SilentUpdateKbsasami(karento2);
+	KpiInstall_SilentUpdateFmpmd(karento2);
+	KpiInstall_SilentUpdateFmMonKpis(karento2);
+	loadingWnd.SetStatusText(LL14(
+		L"プラグイン読み込み中…\n（しばらく時間がかかる場合があります）",
+		L"Loading plugins…\n(This may take some time)",
+		L"Chargement des plugins…\n(Cela peut prendre du temps)",
+		L"Caricamento plugin…\n(Questo potrebbe richiedere del tempo)",
+		L"Cargando plugins…\n(Esto puede tardar un poco)",
+		L"플러그인 읽는 중…\n(시간이 다소 걸릴 수 있습니다)",
+		L"正在读取插件…\n（可能需要一些时间）",
+		L"جاري تحميل الإضافات…\n(قد يستغرق هذا بعض الوقت)",
+		L"Загрузка плагинов…\n(Это может занять некоторое время)",
+		L"Plugins werden geladen…\n(Dies kann einige Zeit dauern)",
+		L"A carregar plugins…\n(Isso pode levar algum tempo)",
+		L"Plugins laden…\n(Dit kan even duren)",
+		L"Wczytywanie wtyczek…\n(Może to zająć trochę czasu)",
+		L"Eklentiler yükleniyor…\n(Bu biraz zaman alabilir)"
+	));
 	plug(karento2, NULL);
 	g_pActiveLoadingWnd = NULL;
 	g_oggKpiLoading = 0;
@@ -20029,7 +20071,18 @@ int readkpi(BYTE* bw, int cnt)
 							const size_t remain = (g_kpiRemoteCache.size() > g_kpiRemoteCachePos) ? (g_kpiRemoteCache.size() - g_kpiRemoteCachePos) : 0;
 
 							if (remain < need && !g_kpiRemoteEof) {
-								const uint32_t want = (uint32_t)max((DWORD)need, (DWORD)(256 * 1024));
+								/* 旧: max(need, 256KB) → 約0.7〜1秒分を一括 Render。
+								   dump/playb が塊で進み FM モニタが秒更新になる。
+								   必要分＋約40ms だけ先読みする。 */
+								DWORD prefetch = (DWORD)need;
+								{
+									const DWORD bpf = srcBytesPerFrame > 0 ? srcBytesPerFrame : 4;
+									const DWORD sr = (wavbit_sample_Hz > 0) ? (DWORD)wavbit_sample_Hz : 44100;
+									const DWORD lead = bpf * (sr / 25u); /* ~40ms */
+									if (lead > prefetch) prefetch = lead;
+									if (prefetch < 4096u) prefetch = 4096u;
+								}
+								const uint32_t want = (uint32_t)prefetch;
 								std::vector<uint8_t> pcm;
 								bool eof = false;
 								if (!g_kpiHost.RenderBytes(g_kpiSession.sessionId, want, pcm, eof)) {
@@ -22221,6 +22274,34 @@ void COggDlg::dp(CString a)
 			if (IsForeignPluginMode(p.sub)) {
 				mode = modesub = p.sub;
 				play();
+				return;
+			}
+		}
+		/* チップ系は DirectShow に落とさない（.hes が動画窓だけ開く事故防止） */
+		{
+			CString chipExt = filen;
+			const int colon = chipExt.Find(L"::");
+			if (colon >= 0) chipExt = chipExt.Left(colon);
+			chipExt = chipExt.Right(chipExt.GetLength() - chipExt.ReverseFind(L'.'));
+			chipExt.MakeLower();
+			if (chipExt == L".hes" || chipExt == L".kss" || chipExt == L".nsf" || chipExt == L".nsfe"
+				|| chipExt == L".gbs" || chipExt == L".spc" || chipExt == L".vgm" || chipExt == L".vgz"
+				|| chipExt == L".s98" || chipExt == L".gym") {
+				AfxMessageBox(LL14(
+					L"対応する KPI プラグインが見つかりません。\nPlugins で kb_nez / kbgme 等を有効にしてください。",
+					L"No matching KPI plugin.\nEnable kb_nez / kbgme in Plugins.",
+					L"Aucun plugin KPI.\nActivez kb_nez / kbgme.",
+					L"Nessun plugin KPI.\nAbilita kb_nez / kbgme.",
+					L"Sin plugin KPI.\nActive kb_nez / kbgme.",
+					L"KPI 플러그인 없음.\nkb_nez / kbgme 를 켜세요.",
+					L"未找到 KPI 插件。\n请启用 kb_nez / kbgme。",
+					L"لا يوجد KPI.\nفعّل kb_nez / kbgme.",
+					L"Нет KPI.\nВключите kb_nez / kbgme.",
+					L"Kein KPI.\nkb_nez / kbgme aktivieren.",
+					L"Sem KPI.\nAtive kb_nez / kbgme.",
+					L"Geen KPI.\nZet kb_nez / kbgme aan.",
+					L"Brak KPI.\nWlacz kb_nez / kbgme.",
+					L"KPI yok.\nkb_nez / kbgme acin."));
 				return;
 			}
 		}
@@ -31240,6 +31321,8 @@ LRESULT COggDlg::OnToggleSubUiMsg(WPARAM wParam, LPARAM)
 		ToggleAnalyzer();
 	else if (wParam == 3)
 		ToggleMidiMonitor();
+	else if (wParam == 4)
+		ToggleFmMonitor();
 	else if (wParam >= 10 && wParam <= 18) {
 		// 起動時サブUI復元: 開くだけ(トグルしない)。1メッセージ=最大1 Create。
 		// 10=EQ .. 17=MIDIモニタ 18=FMモニタ
@@ -31991,6 +32074,9 @@ void COggDlg::plugloop(CString ff)
 			ss = cf1.GetFileName();
 			if (!(ss == "." || ss == "..")) {
 				if (cf1.IsDirectory() != 0) { //フォルダ？
+					/* 同梱バンドル等の隠し更新用フォルダは読み込まない */
+					if (ss.GetLength() >= 5 && ss.Left(5).CompareNoCase(_T(".ogg_")) == 0)
+						continue;
 					if (ff.Right(1) == "\\")
 						plugloop(ff + cf1.GetFileName());
 					else
@@ -33577,6 +33663,9 @@ void COggDlg::ToggleFmMonitor()
 		if (!m_FmMonitorDlg->Create(IDD_FMMONITOR, this)) {
 			savedata.fmmonwindow = 0;
 			OggPersistSaveDatNow();
+			extern CMediaPlayerDlg* mp;
+			if (mp && ::IsWindow(mp->GetSafeHwnd()))
+				mp->SyncPushToggleButtons();
 			return;
 		}
 		savedata.fmmonwindow = 1;
@@ -33594,6 +33683,9 @@ void COggDlg::ToggleFmMonitor()
 		m_FmMonitorDlg->DestroyWindow();
 		OggPersistSaveDatNow();
 	}
+	extern CMediaPlayerDlg* mp;
+	if (mp && ::IsWindow(mp->GetSafeHwnd()))
+		mp->SyncPushToggleButtons();
 }
 
 void COggDlg::ShowPianoRollTune()

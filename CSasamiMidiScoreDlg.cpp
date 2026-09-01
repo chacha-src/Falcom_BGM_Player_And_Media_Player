@@ -11,6 +11,7 @@
 #include "CSasamiInsertFxDlg.h"
 #include "CCustomPopupMenu.h"
 #include "OfflineHelp.h"
+#include "CSasamiCmdHelpDlg.h"
 #include "PlayList.h"
 #include "VstMidiEngine.h"
 #include "SasamiToneNames.h"
@@ -320,24 +321,25 @@ void CSasamiMidiScoreDlg::SetupTooltips()
 {
 	if (!CCustomControlUtility::BeginDialogToolTip(m_tooltip, this, TTS_NOPREFIX)) return;
 	auto tip = [&](CWnd& w, LPCWSTR s) { if (w.GetSafeHwnd()) m_tooltip.AddTool(&w, s); };
-	tip(m_btnOpen, L"Open (re-edit binary via Text composer)");
-	tip(m_btnSave, L"Save As MPW2/3 (includes VST paths if Tone assigned)");
-	tip(m_btnNew, L"New — clear score / text session");
-	tip(m_btnPlay, L"Preview: apply VST binds then play");
-	tip(m_btnExport, L"Audio export");
-	tip(m_btnPencil, L"Pencil tool");
+	tip(m_btnOpen, L"Open MPY/MPW/MML — re-edit via text composer");
+	tip(m_btnSave, L"Save As .mpw2 / .mpsmv (VST binds → mpsmv)");
+	tip(m_btnNew, L"New — clear score and text session");
+	tip(m_btnPlay, L"Preview — apply VST binds then play via playlist");
+	tip(m_btnExport, L"Audio export from compiled MIDI");
+	tip(m_btnPencil, L"Pencil — input notes on staff");
 	tip(m_btnErase, L"Eraser — click or drag over notes to delete");
-	tip(m_btnSel, L"Select notes (click / drag). Delete or Backspace removes selection.");
+	tip(m_btnSel, L"Select — click/drag notes or strip chips; Delete removes");
 	tip(m_btnPal, L"Note duration palette");
-	tip(m_btnTempo, L"Tempo tool");
-	tip(m_btnHelp, L"Help");
-	tip(m_btnText, L"Open text composer");
-	tip(m_btnFx, L"VST Insert FX (effect chain) for the current MIDI part — knobs / bypass / editor");
-	tip(m_btnShowAll, L"Show all 32 channels");
-	tip(m_stripKind0, L"Strip lane 1 kind (Expression/Volume/Pitch/Gate)");
+	tip(m_btnTempo, L"Tempo tool — click staff to set BPM");
+	tip(m_btnHelp, L"コマンド説明・譜面操作ガイド（MIDI/共通/譜面タブ）");
+	tip(m_btnText, L"Open text composer (MIDI/MICP MML)");
+	tip(m_btnFx, L"Insert FX — VST effect chain (@VSTFX), knobs/bypass/editor");
+	tip(m_btnMark, L"Mark tool — loop/jump markers (Q/J sync to MML)");
+	tip(m_btnShowAll, L"Show all 32 MIDI channels on staff");
+	tip(m_stripKind0, L"Strip lane 1: Expression / Volume / Pitch / Gate");
 	tip(m_stripKind1, L"Strip lane 2 kind");
-	tip(m_stripDraw, L"Strip draw mode");
-	tip(m_status, L"Status");
+	tip(m_stripDraw, L"Strip draw mode — paint CC curves per channel");
+	tip(m_status, L"Tool hints: Select+Delete, per-channel Exp/Vol/Pitch, compile errors");
 	CCustomControlUtility::FinalizeDialogToolTip(m_tooltip);
 }
 
@@ -2518,7 +2520,7 @@ LRESULT CSasamiMidiScoreDlg::OnInsertFxChanged(WPARAM, LPARAM)
 
 void CSasamiMidiScoreDlg::OnBnClickedHelp()
 {
-	OfflineHelpOpenTopic(m_hWnd, L"sasami-composer");
+	CSasamiCmdHelpDlg::Show(this, CSasamiCmdHelpDlg::kTabScore1);
 }
 
 void CSasamiMidiScoreDlg::OnBnClickedExport()

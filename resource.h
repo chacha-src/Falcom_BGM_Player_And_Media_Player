@@ -229,6 +229,7 @@
 #define IDD_CD_HELP                     345
 #define IDC_MP_BOT_CD                   4337
 #define IDC_MP_BOT_MIDI                 4383
+#define IDC_MP_BOT_FM                   4521
 #define IDC_CD_HELP                     4338
 #define IDC_CD_DRIVE                    4339
 #define IDC_CD_REFRESH                  4340
@@ -402,6 +403,10 @@
 #define IDD_SASAMI_EXC_RPN              4608
 #define IDD_SASAMI_INSERT_FX            4609
 #define IDD_SASAMI_SIMPLE_INPUT         4610
+#define IDD_SASAMI_CMD_HELP             4611
+#define IDC_SCH_TABS                    4620
+#define IDC_SCH_COPY                    4621
+#define IDC_SCH_BODY                    4622
 #define IDI_SCORE_NOTE_Q                4701
 #define IDI_SCORE_NOTE_E                4702
 #define IDI_SCORE_NOTE_H                4703
@@ -2091,7 +2096,7 @@
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NEXT_RESOURCE_VALUE        354
 #define _APS_NEXT_COMMAND_VALUE         33288
-#define _APS_NEXT_CONTROL_VALUE         4436
+#define _APS_NEXT_CONTROL_VALUE         4522
 #define _APS_NEXT_SYMED_VALUE           104
 #endif
 #endif

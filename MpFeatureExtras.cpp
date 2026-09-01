@@ -84,10 +84,22 @@ void MpFeatWriteNowPlaying()
 CString MpFeatStatusLine()
 {
 	CString s;
-	CString aac = savedata.mpRemoteOn
-		? (savedata.mpRemoteAac ? L"AAC:ON" : L"AAC:off")
-		: L"Remote:off";
-	CString mic = savedata.mic_device[0] ? L"Mic:set" : L"Mic:—";
+	CString aac;
+	if (!savedata.mpRemoteOn)
+		aac = LL14(L"リモート:オフ", L"Remote:off", L"Distant:off", L"Remoto:off", L"Remoto:off",
+			L"원격:끔", L"远程:关", L"بعيد:إيقاف", L"Удалён:выкл", L"Remote:aus",
+			L"Remoto:off", L"Remote:uit", L"Zdalny:wył", L"Uzak:kapalı");
+	else if (savedata.mpRemoteAac)
+		aac = LL14(L"配信AAC:ON", L"Stream AAC:ON", L"AAC flux:ON", L"AAC stream:ON", L"AAC stream:ON",
+			L"전송AAC:ON", L"推流AAC:ON", L"AAC بث:ON", L"AAC поток:ON", L"Stream-AAC:ON",
+			L"AAC stream:ON", L"Stream-AAC:ON", L"AAC stream:ON", L"Yayın AAC:ON");
+	else
+		aac = LL14(L"配信AAC:off", L"Stream AAC:off", L"AAC flux:off", L"AAC stream:off", L"AAC stream:off",
+			L"전송AAC:off", L"推流AAC:off", L"AAC بث:off", L"AAC поток:off", L"Stream-AAC:off",
+			L"AAC stream:off", L"Stream-AAC:off", L"AAC stream:off", L"Yayın AAC:off");
+	CString mic = savedata.mic_device[0]
+		? LL14(L"Mic:設定済", L"Mic:set", L"Mic:ok", L"Mic:ok", L"Mic:ok", L"Mic:설정됨", L"Mic:已设", L"Mic:مضبوط", L"Mic:задан", L"Mic:gesetzt", L"Mic:ok", L"Mic:ok", L"Mic:ustaw", L"Mic:ayarlı")
+		: LL14(L"Mic:—", L"Mic:—", L"Mic:—", L"Mic:—", L"Mic:—", L"Mic:—", L"Mic:—", L"Mic:—", L"Mic:—", L"Mic:—", L"Mic:—", L"Mic:—", L"Mic:—", L"Mic:—");
 	CString rate;
 	if (wavbit_sample_Hz > 0)
 		rate.Format(L"%dHz/%dch/%dbit", wavbit_sample_Hz, wavchannel, wavsam_depth);
@@ -95,11 +107,19 @@ CString MpFeatStatusLine()
 		rate = L"—";
 	CString key;
 	if (savedata.mpCamelot > 0)
-		key.Format(L"Key:%s", (LPCTSTR)MpCamelotLabel(savedata.mpCamelot));
+		key.Format(LL14(L"調性(Camelot):%s", L"Key(Camelot):%s", L"Tonalité(Camelot):%s", L"Tonalità(Camelot):%s", L"Tonalidad(Camelot):%s",
+			L"조성(Camelot):%s", L"调性(Camelot):%s", L"مفتاح(Camelot):%s", L"Тональность(Camelot):%s", L"Tonart(Camelot):%s",
+			L"Tom(Camelot):%s", L"Toonsoort(Camelot):%s", L"Tonacja(Camelot):%s", L"Ton(Camelot):%s"),
+			(LPCTSTR)MpCamelotLabel(savedata.mpCamelot));
 	else if (savedata.mpKeyRoot >= 0)
-		key = MpKeyDisplayName(savedata.mpKeyRoot, savedata.mpKeyMinor);
+		key.Format(LL14(L"調性:%s", L"Key:%s", L"Tonalité:%s", L"Tonalità:%s", L"Tonalidad:%s",
+			L"조성:%s", L"调性:%s", L"مفتاح:%s", L"Тональность:%s", L"Tonart:%s",
+			L"Tom:%s", L"Toonsoort:%s", L"Tonacja:%s", L"Ton:%s"),
+			(LPCTSTR)MpKeyDisplayName(savedata.mpKeyRoot, savedata.mpKeyMinor));
 	else
-		key = L"Key:—";
+		key = LL14(L"調性:—", L"Key:—", L"Tonalité:—", L"Tonalità:—", L"Tonalidad:—",
+			L"조성:—", L"调性:—", L"مفتاح:—", L"Тональность:—", L"Tonart:—",
+			L"Tom:—", L"Toonsoort:—", L"Tonacja:—", L"Ton:—");
 	s.Format(L"%s · %s · %s · %s", (LPCTSTR)rate, (LPCTSTR)mic, (LPCTSTR)aac, (LPCTSTR)key);
 	return s;
 }

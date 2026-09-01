@@ -1341,7 +1341,74 @@ static void ServeOnce(HANDLE pipe)
 
 int wmain(int argc, wchar_t** argv)
 {
-	(void)argc; (void)argv;
+	/* CLI probe:
+	   KpiHost64.exe <kpiPath> <mediaPath>              → Open only
+	   KpiHost64.exe <kpiPath> <mediaPath> render [N]   → Open + Render N buffers, dump stats */
+	if (argc >= 3 && argv[1] && argv[1][0] && argv[2] && argv[2][0]
+		&& (wcsstr(argv[1], L".kpi") || wcsstr(argv[1], L".KPI"))) {
+		KPI_MEDIAINFO req{};
+		ZeroMemory(&req, sizeof(req));
+		req.dwSampleRate = 0;
+		req.dwChannels = 2;
+		req.nBitsPerSample = 16;
+		std::vector<uint8_t> out;
+		const uint32_t st = Cmd_Open(argv[1], argv[2], req, 1, out);
+		wprintf(L"KpiOpenProbe status=%u kpi=%s media=%s outBytes=%zu\n",
+			st, argv[1], argv[2], out.size());
+		fflush(stdout);
+		if (st != KPIHOST64_STATUS_OK || out.size() < sizeof(KPIHOST64_OpenReply) + sizeof(KPI_MEDIAINFO))
+			return 1;
+
+		KPIHOST64_OpenReply rep{};
+		KPI_MEDIAINFO info{};
+		memcpy(&rep, out.data(), sizeof(rep));
+		memcpy(&info, out.data() + sizeof(rep), sizeof(info));
+		wprintf(L"session=%u rate=%u ch=%u\n", rep.sessionId, info.dwSampleRate, info.dwChannels);
+
+		const bool doRender = (argc >= 4 && _wcsicmp(argv[3], L"render") == 0);
+		if (doRender) {
+			const int loops = (argc >= 5) ? _wtoi(argv[4]) : 40;
+			const uint32_t bytesWanted = (info.dwSampleRate ? info.dwSampleRate : 44100) / 50
+				* (info.dwChannels ? info.dwChannels : 2) * 2; /* ~20ms */
+			wchar_t live[MAX_PATH];
+			GetTempPathW(MAX_PATH, live);
+			wcsncat_s(live, L"ogg_kbsasami\\fmmon_live.opna", _TRUNCATE);
+			FILETIME lastWrite{};
+			int wrote = 0;
+			for (int i = 0; i < loops; i++) {
+				std::vector<uint8_t> rout;
+				const uint32_t rst = Cmd_Render(rep.sessionId, bytesWanted, rout);
+				if (rst != KPIHOST64_STATUS_OK) {
+					wprintf(L"render fail i=%d status=%u\n", i, rst);
+					break;
+				}
+				WIN32_FILE_ATTRIBUTE_DATA fad{};
+				if (GetFileAttributesExW(live, GetFileExInfoStandard, &fad)) {
+					if (CompareFileTime(&fad.ftLastWriteTime, &lastWrite) != 0) {
+						lastWrite = fad.ftLastWriteTime;
+						wrote++;
+						HANDLE h = CreateFileW(live, GENERIC_READ, FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE,
+							NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+						if (h != INVALID_HANDLE_VALUE) {
+							unsigned char buf[64]{};
+							DWORD rd = 0;
+							ReadFile(h, buf, sizeof(buf), &rd, NULL);
+							CloseHandle(h);
+							if (rd >= 24) {
+								const unsigned ver = *(unsigned*)(buf + 4);
+								const unsigned seq = *(unsigned*)(buf + 8);
+								wprintf(L"  live upd#%d ver=%u seq=%u\n", wrote, ver, seq);
+							}
+						}
+					}
+				}
+			}
+			wprintf(L"liveUpdates=%d path=%s\n", wrote, live);
+			/* close session via map erase path: Free by reopen not needed for probe */
+		}
+		fflush(stdout);
+		return 0;
+	}
 
 	/* HALion UI uses WebView2; a shared/locked user-data dir crashes
 	   EmbeddedBrowserWebView.dll inside this process. */

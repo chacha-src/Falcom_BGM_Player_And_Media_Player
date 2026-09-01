@@ -8,6 +8,7 @@
 #include "CSasamiNotePropsDlg.h"
 #include "CCustomPopupMenu.h"
 #include "OfflineHelp.h"
+#include "CSasamiCmdHelpDlg.h"
 #include "PlayList.h"
 #include "VstMidiEngine.h"
 #include "kb_sasami/source/sasami_write.h"
@@ -380,14 +381,18 @@ void CSasamiFmScoreDlg::SetupTooltips()
 {
 	if (!CCustomControlUtility::BeginDialogToolTip(m_tooltip, this, TTS_NOPREFIX)) return;
 	auto tip = [&](CWnd& w, LPCWSTR s) { if (w.GetSafeHwnd()) m_tooltip.AddTool(&w, s); };
-	tip(m_btnOpen, L"Open FM MML/DAT (.mml .txt .dat .f) into score");
-	tip(m_btnSave, L"Save As FPY");
-	tip(m_btnPlay, L"Preview FPY (tick gaps must export as rests)");
-	tip(m_btnExport, L"Audio export");
-	tip(m_btnVoice, L"FM voice editor: params + preview beep, then apply to part");
-	tip(m_btnText, L"Text composer");
-	tip(m_btnHelp, L"Help");
-	tip(m_status, L"Status");
+	tip(m_btnOpen, L"Open FM MML/DAT (.mml .txt .dat .f) — score and text sync");
+	tip(m_btnSave, L"Save As .fpy / .fpy2 (loop nest≥2 → fpy2)");
+	tip(m_btnPlay, L"Preview compiled FPY (tick gaps export as rests)");
+	tip(m_btnExport, L"Audio export from compiled FM");
+	tip(m_btnPencil, L"Pencil — place notes on staff");
+	tip(m_btnErase, L"Eraser — click/drag to delete notes");
+	tip(m_btnSel, L"Select tool — click note/mark, Delete/Backspace removes");
+	tip(m_btnPal, L"Note duration palette (quarter/eighth/etc.)");
+	tip(m_btnVoice, L"FM voice editor — 25-byte params, preview beep, apply to part");
+	tip(m_btnText, L"Open text composer (FM/OPNA MML)");
+	tip(m_btnHelp, L"コマンド説明・譜面操作ガイド（FM/共通/譜面タブ）");
+	tip(m_status, L"Tool hints, compile status, selection feedback");
 	CCustomControlUtility::FinalizeDialogToolTip(m_tooltip);
 }
 
@@ -1572,7 +1577,7 @@ LRESULT CSasamiFmScoreDlg::OnNoteProps(WPARAM w, LPARAM)
 	return 0;
 }
 
-void CSasamiFmScoreDlg::OnBnClickedHelp() { OfflineHelpOpenTopic(m_hWnd, L"sasami-composer"); }
+void CSasamiFmScoreDlg::OnBnClickedHelp() { CSasamiCmdHelpDlg::Show(this, CSasamiCmdHelpDlg::kTabScore2); }
 
 void CSasamiFmScoreDlg::OnBnClickedExport()
 {

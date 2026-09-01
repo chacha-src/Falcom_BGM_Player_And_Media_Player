@@ -6,6 +6,7 @@
 #include "CSasamiFmVoiceDlg.h"
 #include "CCustomPopupMenu.h"
 #include "OfflineHelp.h"
+#include "CSasamiCmdHelpDlg.h"
 #include "PlayList.h"
 #include "kb_sasami/source/sasami_write.h"
 #include <shlobj.h>
@@ -281,15 +282,15 @@ void CSasamiTextDlg::SetupTooltips()
 	tip(m_btnOpen, L"Open MML/DAT/text");
 	tip(m_btnSave, L"Save As MML/text (binary = Export)");
 	tip(m_btnNew, L"New — clear text / score session");
-	tip(m_btnCompile, L"Compile to temp FPY/MPW");
-	tip(m_btnPlay, L"Compile and preview via playlist");
-	tip(m_btnVst, L"FM: open voice editor (params + preview). MIDI: insert @VST commands");
-	tip(m_btnExport, L"Export compiled binary / audio");
-	tip(m_btnHelp, L"Help");
-	tip(m_btnScore, L"Open staff score for current mode");
-	tip(m_btnMode, L"Toggle MIDI/MICP <-> FM/OPNA (auto-detect on compile)");
-	tip(m_btnB64Fold, L"Fold/unfold @VSTSTATEB64 and @VSTCTRLB64 blocks");
-	tip(m_status, L"Status / compile errors");
+	tip(m_btnCompile, L"Compile to temp .fpy/.mpy/.mpw2/.mpsmv (see 共通 tab in Help)");
+	tip(m_btnPlay, L"Compile and add preview file to playlist");
+	tip(m_btnVst, L"FM: voice editor. MIDI: insert @VST/@PROG/@BANK block");
+	tip(m_btnExport, L"Export audio from compiled binary");
+	tip(m_btnHelp, L"コマンド説明（MIDI/FM/共通/譜面タブ）。Copyで一覧コピー。");
+	tip(m_btnScore, L"Open staff score editor for current mode");
+	tip(m_btnMode, L"Toggle MIDI/MICP ↔ FM/OPNA (;MIDI / OPNA also auto-detect)");
+	tip(m_btnB64Fold, L"Fold/unfold long @VSTSTATEB64 / @VSTCTRLB64 lines");
+	tip(m_status, L"Compile errors (L#: msg), mode, output path");
 	CCustomControlUtility::FinalizeDialogToolTip(m_tooltip);
 }
 
@@ -655,7 +656,7 @@ void CSasamiTextDlg::OnBnClickedPlay()
 
 void CSasamiTextDlg::OnBnClickedHelp()
 {
-	OfflineHelpOpenTopic(m_hWnd, L"sasami-composer");
+	CSasamiCmdHelpDlg::Show(this, m_modeFm ? CSasamiCmdHelpDlg::kTabFm1 : CSasamiCmdHelpDlg::kTabMidi1);
 }
 
 void CSasamiTextDlg::OnBnClickedExport()

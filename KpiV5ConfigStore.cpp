@@ -243,7 +243,9 @@ const std::vector<KpiV5ConfigEntry>& GetKpiV5KnownEntries()
 		{ L"kbgme", L"SupportExt", L"EnableAY", L"1" },
 		{ L"kbgme", L"SupportExt", L"EnableGBS", L"1" },
 		{ L"kbgme", L"SupportExt", L"EnableGYM", L"0" },
-		{ L"kbgme", L"SupportExt", L"EnableHES", L"0" },
+		/* HES: 0 のままだと plugs が KPI を見つけられず DirectShow(動画)に落ちる。
+		   nez 優先でも、kbgme 側も宣言しておく（チェック ON のプラグが無ければ動画化）。 */
+		{ L"kbgme", L"SupportExt", L"EnableHES", L"1" },
 		{ L"kbgme", L"SupportExt", L"EnableKSS", L"0" },
 		{ L"kbgme", L"SupportExt", L"EnableNSF", L"0" },
 		{ L"kbgme", L"SupportExt", L"EnableSAP", L"0" },

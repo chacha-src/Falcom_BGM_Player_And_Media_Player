@@ -467,13 +467,17 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 				sz.QuadPart = 0;
 				GetFileSizeEx(h, &sz);
 				if ((ULONGLONG)sz.QuadPart < sizeof(SasamiFmMonRing)) {
-					SasamiFmMonRing blank;
+					/* リング全体(~320KB)をスタックに置かない */
+					SasamiFmMonRingHdr blank;
 					memset(&blank, 0, sizeof(blank));
 					blank.magic[0] = 'O'; blank.magic[1] = 'P'; blank.magic[2] = 'N'; blank.magic[3] = 'R';
 					blank.version = SASAMI_FMMON_RING_VERSION;
 					DWORD wr = 0;
 					SetFilePointer(h, 0, NULL, FILE_BEGIN);
 					WriteFile(h, &blank, sizeof(blank), &wr, NULL);
+					LARGE_INTEGER end;
+					end.QuadPart = (LONGLONG)sizeof(SasamiFmMonRing);
+					SetFilePointerEx(h, end, NULL, FILE_BEGIN);
 					SetEndOfFile(h);
 				}
 				DWORD wr = 0;
@@ -481,14 +485,14 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 				off.QuadPart = (LONGLONG)offsetof(SasamiFmMonRing, slot) + (LONGLONG)idx * (LONGLONG)sizeof(SasamiFmMonDump);
 				SetFilePointerEx(h, off, NULL, FILE_BEGIN);
 				WriteFile(h, &d, sizeof(d), &wr, NULL);
-				SasamiFmMonRing hdr;
+				SasamiFmMonRingHdr hdr;
 				memset(&hdr, 0, sizeof(hdr));
 				hdr.magic[0] = 'O'; hdr.magic[1] = 'P'; hdr.magic[2] = 'N'; hdr.magic[3] = 'R';
 				hdr.version = SASAMI_FMMON_RING_VERSION;
 				hdr.gen = dumpRingGen;
 				off.QuadPart = 0;
 				SetFilePointerEx(h, off, NULL, FILE_BEGIN);
-				WriteFile(h, &hdr, (DWORD)offsetof(SasamiFmMonRing, slot), &wr, NULL);
+				WriteFile(h, &hdr, sizeof(hdr), &wr, NULL);
 				CloseHandle(h);
 			}
 		}

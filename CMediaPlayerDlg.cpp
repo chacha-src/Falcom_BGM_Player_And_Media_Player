@@ -990,6 +990,7 @@ CMediaPlayerDlg::CMediaPlayerDlg(CWnd* pParent)
 	m_lastTogglePrompt = -1;
 	m_lastToggleCmdRoll = -1;
 	m_lastToggleMidiMon = -1;
+	m_lastToggleFmMon = -1;
 	m_dsvolSlW = 0;
 	m_mpBtnShort = -1;
 	m_mpBotShort = -1;
@@ -1244,6 +1245,7 @@ BEGIN_MESSAGE_MAP(CMediaPlayerDlg, CCustomBlurDialogExBase)
 	ON_BN_CLICKED(IDC_MP_BOT_REMOTE, &CMediaPlayerDlg::OnMpRemote)
 	ON_BN_CLICKED(IDC_MP_BOT_VST, &CMediaPlayerDlg::OnMpVstHost)
 	ON_BN_CLICKED(IDC_MP_BOT_MIDI, &CMediaPlayerDlg::OnMidiMonitor)
+	ON_BN_CLICKED(IDC_MP_BOT_FM, &CMediaPlayerDlg::OnFmMonitor)
 	ON_BN_CLICKED(IDC_MP_BOT_CD, &CMediaPlayerDlg::OnMpCdPlayer)
 	ON_BN_CLICKED(IDC_MP_BOT_MAZE, &CMediaPlayerDlg::OnMpSoft3DMaze)
 	ON_BN_CLICKED(IDC_MP_BOT_RACE, &CMediaPlayerDlg::OnMpSoft3DRace)
@@ -1627,6 +1629,8 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 			m_botVst.Create(_T("VST"), WS_CHILD | BS_PUSHBUTTON | WS_TABSTOP, rc, this, IDC_MP_BOT_VST);
 		if (!m_botMidi.GetSafeHwnd())
 			m_botMidi.Create(_T("MIDI"), WS_CHILD | BS_PUSHBUTTON | WS_TABSTOP, rc, this, IDC_MP_BOT_MIDI); // VST と CD のあいだ
+		if (!m_botFm.GetSafeHwnd())
+			m_botFm.Create(_T("FM"), WS_CHILD | BS_PUSHBUTTON | WS_TABSTOP, rc, this, IDC_MP_BOT_FM);
 		if (!m_botCd.GetSafeHwnd())
 			m_botCd.Create(_T("CD"), WS_CHILD | BS_PUSHBUTTON | WS_TABSTOP, rc, this, IDC_MP_BOT_CD);
 		if (!m_botMaze.GetSafeHwnd())
@@ -1657,7 +1661,12 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 				if (!bots[bi]->GetSafeHwnd()) continue;
 				bots[bi]->SetGradation(botGrad[bi][0], botGrad[bi][1], 0, TRUE);
 			}
+			if (m_botFm.GetSafeHwnd())
+				m_botFm.SetGradation(RGB(255, 245, 220), RGB(240, 195, 120), 0, TRUE);
 			MpMakePushToggle(&m_botMidi);
+			MpMakePushToggle(&m_botFm);
+			if (m_botMidi.GetSafeHwnd()) m_botMidi.SetIcon(0);
+			if (m_botFm.GetSafeHwnd()) m_botFm.SetIcon(0);
 		}
 		if (!m_findFilter.GetSafeHwnd())
 			m_findFilter.Create(_T("Filter"), WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX | WS_TABSTOP, rc, this, IDC_MP_FINDFILTER);
@@ -2074,6 +2083,7 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 	if (m_botRemote.GetSafeHwnd()) m_botRemote.SetFont(&m_fontChk, TRUE);
 	if (m_botVst.GetSafeHwnd()) m_botVst.SetFont(&m_fontChk, TRUE);
 	if (m_botMidi.GetSafeHwnd()) m_botMidi.SetFont(&m_fontChk, TRUE);
+	if (m_botFm.GetSafeHwnd()) m_botFm.SetFont(&m_fontChk, TRUE);
 	if (m_botCd.GetSafeHwnd()) m_botCd.SetFont(&m_fontChk, TRUE);
 	if (m_botMaze.GetSafeHwnd()) m_botMaze.SetFont(&m_fontChk, TRUE);
 	if (m_botRace.GetSafeHwnd()) m_botRace.SetFont(&m_fontChk, TRUE);
@@ -2332,6 +2342,22 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 		addTip(m_botVst, LL14(L"VSTホスト（配線・MIDI入力）", L"VST host (wiring / MIDI in)", L"Hote VST (cablage / entree MIDI)", L"Host VST (cablaggio / MIDI in)", L"Host VST (cableado / MIDI in)", L"VST 호스트(배선/MIDI 입력)", L"VST主机（接线/MIDI输入）", L"مضيف VST (توصيل/إدخال MIDI)", L"Хост VST (коммутация/MIDI in)", L"VST-Host (Verdrahtung/MIDI-In)", L"Host VST (cabos/MIDI in)", L"VST-host (bedrading/MIDI in)", L"Host VST (okablowanie/MIDI in)", L"VST host (kablolama/MIDI giris)"));
 	if (m_botMidi.GetSafeHwnd())
 		addTip(m_botMidi, LL14(L"MIDIモニタを開閉します（開いているあいだ凹みます）。", L"Toggle the MIDI monitor (stays depressed while open).", L"Afficher/masquer le moniteur MIDI (enfonce tant qu'il est ouvert).", L"Apri/chiudi il monitor MIDI (premuto mentre e aperto).", L"Abrir/cerrar el monitor MIDI (hundido mientras esta abierto).", L"MIDI 모니터 열기/닫기(열려 있는 동안 눌림).", L"打开/关闭 MIDI 监视器（打开时保持按下）。", L"فتح/إغلاق مراقب MIDI (يبقى مضغوطاً وهو مفتوح).", L"Открыть/закрыть MIDI-монитор (утоплен, пока открыт).", L"MIDI-Monitor ein/aus (eingedruckt solange offen).", L"Abrir/fechar o monitor MIDI (afundado enquanto aberto).", L"MIDI-monitor aan/uit (ingedrukt zolang open).", L"Wlacz/wylacz monitor MIDI (wcisniety gdy otwarty).", L"MIDI monitoru ac/kapa (acikken basili kalir)."));
+	if (m_botFm.GetSafeHwnd())
+		addTip(m_botFm, LL14(
+			L"FMモニタ(.fpy/PMD/FMP)。旧fmpmdのみ不可・Plugins更新で反映",
+			L"FM monitor (.fpy/PMD/FMP). Old fmpmd alone will not work; update Plugins",
+			L"Moniteur FM (.fpy/PMD/FMP). Ancien fmpmd seul: non. Mettez a jour Plugins",
+			L"Monitor FM (.fpy/PMD/FMP). Solo vecchio fmpmd: no. Aggiorna Plugins",
+			L"Monitor FM (.fpy/PMD/FMP). Solo fmpmd viejo: no. Actualice Plugins",
+			L"FM 모니터(.fpy/PMD/FMP). 옛 fmpmd만으로는 불가. Plugins 갱신으로 반영",
+			L"FM监视器(.fpy/PMD/FMP)。仅旧 fmpmd 不可用；更新 Plugins 后生效",
+			L"مراقب FM (.fpy/PMD/FMP). fmpmd القديم وحده لا يكفي؛ حدّث Plugins",
+			L"FM-монитор (.fpy/PMD/FMP). Один старый fmpmd не работает; обновите Plugins",
+			L"FM-Monitor (.fpy/PMD/FMP). Altes fmpmd allein reicht nicht; Plugins aktualisieren",
+			L"Monitor FM (.fpy/PMD/FMP). So fmpmd antigo nao basta; atualize Plugins",
+			L"FM-monitor (.fpy/PMD/FMP). Alleen oude fmpmd werkt niet; werk Plugins bij",
+			L"Monitor FM (.fpy/PMD/FMP). Sam stary fmpmd nie wystarczy; zaktualizuj Plugins",
+			L"FM izleyici (.fpy/PMD/FMP). Yalniz eski fmpmd yetmez; Plugins guncelleyin"));
 	if (m_botCd.GetSafeHwnd())
 		addTip(m_botCd, LL14(L"CDプレイヤー（再生・取り込み・曲目検索・書き込み）", L"CD player (play / rip / lookup / burn)", L"Lecteur CD (lecture / extraction / recherche / gravure)", L"Lettore CD (play / estrazione / ricerca / masterizza)", L"Reproductor CD (reproducir / extraer / buscar / grabar)", L"CD 플레이어(재생/추출/검색/굽기)", L"CD播放器（播放/抓轨/检索/刻录）", L"مشغل CD (تشغيل/استخراج/بحث/حرق)", L"CD-плеер (воспроизведение/извлечение/поиск/запись)", L"CD-Player (Play/Rip/Suche/Brennen)", L"Leitor de CD (play / extrair / pesquisa / gravar)", L"CD-speler (afspelen / rippen / zoeken / branden)", L"Odtwarzacz CD (odtwarzanie / zgrywanie / szukanie / nagranie)", L"CD oynatici (oynat / aktar / ara / yaz)"));
 	if (m_botMaze.GetSafeHwnd())
@@ -3823,6 +3849,7 @@ void CMediaPlayerDlg::DoLayout()
 			if (m_botRemote.GetSafeHwnd()) m_botRemote.SetWindowText(L"Rem");
 			if (m_botVst.GetSafeHwnd()) m_botVst.SetWindowText(L"VST");
 			if (m_botMidi.GetSafeHwnd()) m_botMidi.SetWindowText(L"MIDI");
+			if (m_botFm.GetSafeHwnd()) m_botFm.SetWindowText(L"FM");
 			if (m_botCd.GetSafeHwnd()) m_botCd.SetWindowText(L"CD");
 			if (m_botMaze.GetSafeHwnd()) m_botMaze.SetWindowText(L"Mz");
 			if (m_botRace.GetSafeHwnd()) m_botRace.SetWindowText(L"Rc");
@@ -3850,6 +3877,8 @@ void CMediaPlayerDlg::DoLayout()
 				m_botVst.SetWindowText(LL14(L"VST", L"VST", L"VST", L"VST", L"VST", L"VST", L"VST", L"VST", L"VST", L"VST", L"VST", L"VST", L"VST", L"VST"));
 			if (m_botMidi.GetSafeHwnd())
 				m_botMidi.SetWindowText(L"MIDI");
+			if (m_botFm.GetSafeHwnd())
+				m_botFm.SetWindowText(L"FM");
 			if (m_botCd.GetSafeHwnd())
 				m_botCd.SetWindowText(LL14(L"CD", L"CD", L"CD", L"CD", L"CD", L"CD", L"CD", L"CD", L"CD", L"CD", L"CD", L"CD", L"CD", L"CD"));
 			if (m_botMaze.GetSafeHwnd())
@@ -3864,6 +3893,7 @@ void CMediaPlayerDlg::DoLayout()
 	MoveCtl(&m_resetdata, bx, botY, rsW, swH); bx += rsW + gapLead;
 	MoveCtl(&m_record, bx, botY, recW, swH); bx += recW + gapLead;
 	MoveCtl(&m_capture, bx, botY, capW, swH); bx += capW + gapLead;
+	BOOL midiColShown = FALSE;
 	for (int i = 0; i < 13; ++i) {
 		CCustomStandardButton* b = botBtn[i];
 		if (!b->GetSafeHwnd()) continue;
@@ -3876,10 +3906,26 @@ void CMediaPlayerDlg::DoLayout()
 			if (b->IsWindowVisible()) b->ShowWindow(SW_HIDE);
 			continue;
 		}
-		MoveCtl(b, bx, botY, bw, swH);
-		if (!b->IsWindowVisible()) b->ShowWindow(SW_SHOW);
+		if (b == &m_botMidi) {
+			const int stackGap = max(1, (int)(1 * s));
+			const int statusTop = H - uxBandH - max(2, (int)(2 * s));
+			int midiH = (statusTop - botY - stackGap) / 2;
+			if (midiH < 14) midiH = 14;
+			MoveCtl(b, bx, botY, bw, midiH);
+			if (!b->IsWindowVisible()) b->ShowWindow(SW_SHOW);
+			if (m_botFm.GetSafeHwnd()) {
+				MoveCtl(&m_botFm, bx, botY + midiH + stackGap, bw, midiH);
+				if (!m_botFm.IsWindowVisible()) m_botFm.ShowWindow(SW_SHOW);
+			}
+			midiColShown = TRUE;
+		} else {
+			MoveCtl(b, bx, botY, bw, swH);
+			if (!b->IsWindowVisible()) b->ShowWindow(SW_SHOW);
+		}
 		bx += bw + gapBot;
 	}
+	if (!midiColShown && m_botFm.GetSafeHwnd() && m_botFm.IsWindowVisible())
+		m_botFm.ShowWindow(SW_HIDE);
 	MoveCtl(&m_exit, exitLeft, botY, exW, swH);
 
 	if (s_mpLayoutDefer) {
@@ -4046,6 +4092,11 @@ void CMediaPlayerDlg::SyncPushToggleButtons()
 	if (m_botMidi.GetSafeHwnd() && midiOpen != m_lastToggleMidiMon) {
 		MpSetPushToggle(m_botMidi, midiOpen, RGB(90, 170, 230), RGB(50, 130, 200), RGB(230, 245, 255), RGB(155, 195, 235));
 		m_lastToggleMidiMon = midiOpen;
+	}
+	const int fmOpen = savedata.fmmonwindow ? 1 : 0;
+	if (m_botFm.GetSafeHwnd() && fmOpen != m_lastToggleFmMon) {
+		MpSetPushToggle(m_botFm, fmOpen, RGB(230, 170, 50), RGB(200, 130, 20), RGB(255, 245, 220), RGB(240, 195, 120));
+		m_lastToggleFmMon = fmOpen;
 	}
 }
 
@@ -6730,6 +6781,12 @@ void CMediaPlayerDlg::OnMidiMonitor()
 {
 	if (og && ::IsWindow(og->GetSafeHwnd()))
 		og->PostMessage(WM_OGG_TOGGLE_SUBUI, 3, 0);  // 3=MIDI モニタ
+}
+
+void CMediaPlayerDlg::OnFmMonitor()
+{
+	if (og && ::IsWindow(og->GetSafeHwnd()))
+		og->PostMessage(WM_OGG_TOGGLE_SUBUI, 4, 0);  // 4=FM モニタ
 }
 
 void CMediaPlayerDlg::OnProTools()
@@ -11774,7 +11831,9 @@ void CMediaPlayerDlg::ShowToolsExtrasMenu(CPoint screenPt)
 	menu.AddSeparator();
 	{
 		CCustomPopupMenu* sub = menu.AddSubMenu(
-			L"SASAMI",
+			LL14(L"ささみ関連コンポーザ", L"Sasami-related composer", L"Compositeur Sasami", L"Compositore Sasami", L"Compositor Sasami",
+				L"사사미 관련 컴포저", L"笹见相关作曲器", L"ملحن ساسامي", L"Композитор Sasami", L"Sasami-Komponist",
+				L"Compositor Sasami", L"Sasami-componist", L"Kompozytor Sasami", L"Sasami besteci"),
 			LL14(L"SASAMI Composer（テキスト／MIDIスコア／FMスコア）", L"SASAMI Composer (text / MIDI score / FM score)", L"SASAMI Composer (texte / partition MIDI / FM)", L"SASAMI Composer (testo / partitura MIDI / FM)", L"SASAMI Composer (texto / partitura MIDI / FM)",
 				L"SASAMI Composer (텍스트/MIDI/FM)", L"SASAMI Composer（文本/MIDI/FM）", L"SASAMI Composer (نص/MIDI/FM)", L"SASAMI Composer (текст/MIDI/FM)", L"SASAMI Composer (Text/MIDI/FM)",
 				L"SASAMI Composer (texto/MIDI/FM)", L"SASAMI Composer (tekst/MIDI/FM)", L"SASAMI Composer (tekst/MIDI/FM)", L"SASAMI Composer (metin/MIDI/FM)"));

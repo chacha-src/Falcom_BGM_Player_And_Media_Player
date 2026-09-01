@@ -1,4 +1,4 @@
-// PlayList.cpp : 実装ファイル
+﻿// PlayList.cpp : 実装ファイル
 //
 
 #include "stdafx.h"
@@ -3062,10 +3062,21 @@ int CPlayList::ShowTrackContextMenu(CPoint pt, CWnd* pOwner)
 				L"FM-монитор", L"FM-Monitor", L"Monitor FM", L"FM-monitor",
 				L"Monitor FM", L"FM izleyici"),
 			savedata.fmmonwindow ? TRUE : FALSE,
-			LL14(L"SASAMI .fpy の OPNA レジスタ／鍵盤モニタを開く／閉じる", L"Show or hide the OPNA register/keyboard monitor for SASAMI .fpy", L"Affiche ou masque le moniteur OPNA .fpy", L"Mostra o nasconde il monitor OPNA .fpy",
-				L"Muestra u oculta el monitor OPNA .fpy", L"SASAMI .fpy OPNA 레지스터/건반 모니터를 열거나 닫습니다", L"打开或关闭 SASAMI .fpy 的 OPNA 寄存器/键盘监视器", L"يظهر أو يخفي مراقب OPNA لـ .fpy",
-				L"Показывает или скрывает монитор OPNA для .fpy", L"Blendet den OPNA-Monitor fuer .fpy ein oder aus", L"Mostra ou oculta o monitor OPNA .fpy", L"Toont of verbergt de OPNA-monitor voor .fpy",
-				L"Pokazuje lub ukrywa monitor OPNA .fpy", L"SASAMI .fpy OPNA kayit/klavye izleyicisini acar veya kapatir"));
+			LL14(
+				L".fpy/PMD/FMP の FMモニタ。旧fmpmd.kpiのみでは不可（Plugins更新で対応版へ）",
+				L"FM monitor for .fpy/PMD/FMP. Old fmpmd.kpi alone will not work; update Plugins",
+				L"Moniteur FM pour .fpy/PMD/FMP. Ancien fmpmd.kpi seul: non (mettez a jour Plugins)",
+				L"Monitor FM per .fpy/PMD/FMP. Solo vecchio fmpmd.kpi: no (aggiorna Plugins)",
+				L"Monitor FM para .fpy/PMD/FMP. Solo fmpmd.kpi viejo: no (actualice Plugins)",
+				L".fpy/PMD/FMP용 FM 모니터. 옛 fmpmd.kpi만으로는 불가(Plugins 갱신으로 대응판)",
+				L".fpy/PMD/FMP 的 FM监视器。仅旧 fmpmd.kpi 不可用（更新 Plugins 获对应版）",
+				L"مراقب FM لـ .fpy/PMD/FMP. fmpmd.kpi القديم وحده لا يكفي (حدّث Plugins)",
+				L"FM-монитор для .fpy/PMD/FMP. Один старый fmpmd.kpi не работает (обновите Plugins)",
+				L"FM-Monitor fuer .fpy/PMD/FMP. Altes fmpmd.kpi allein reicht nicht (Plugins aktualisieren)",
+				L"Monitor FM para .fpy/PMD/FMP. So fmpmd.kpi antigo nao basta (atualize Plugins)",
+				L"FM-monitor voor .fpy/PMD/FMP. Alleen oude fmpmd.kpi werkt niet (werk Plugins bij)",
+				L"Monitor FM dla .fpy/PMD/FMP. Sam stary fmpmd.kpi nie wystarczy (zaktualizuj Plugins)",
+				L".fpy/PMD/FMP icin FM izleyici. Yalniz eski fmpmd.kpi yetmez (Plugins guncelleyin)"));
 		int fmForce = -1;
 		{
 			int i = -1;
@@ -4446,7 +4457,7 @@ static bool IsPlaylistDropAllowedExt(const CString& pathOrName)
 		// チップ / マルチ曲ヘルパ
 		_T(".kss"), _T(".nsf"), _T(".nsfe"), _T(".gbs"), _T(".hes"), _T(".nes"),
 		_T(".spc"), _T(".vgm"), _T(".vgz"), _T(".gym"), _T(".s98"),
-		_T(".ovi"), _T(".opi"), _T(".ozi"), _T(".m"), _T(".mz"),
+		_T(".ovi"), _T(".opi"), _T(".ozi"), _T(".m"), _T(".m2"), _T(".mz"), _T(".mp"), _T(".ms"),
 		_T(".psf"), _T(".psf2"), _T(".minipsf"), _T(".minipsf2"),
 		_T(".ssf"), _T(".dsf"), _T(".usf"), _T(".gsf"), _T(".2sf"),
 		_T(".ncsf"), _T(".snsf"),
@@ -11252,14 +11263,24 @@ void CPlayList::plugs(CString fff, playlistdata *p,TCHAR* kpi, BYTE& kv)
 
 	CString ss,ft;
 	int flg=0;
+	/* ".hes::0001" だと ReverseFind('.') が ".hes::0001" になり KPI 照合が死ぬ → DirectShow 化 */
+	auto fileExtOf = [](const CString& path) -> CString {
+		CString s = path;
+		const int colon = s.Find(L"::");
+		if (colon >= 0) s = s.Left(colon);
+		const int dot = s.ReverseFind(L'.');
+		if (dot < 0) return CString();
+		CString e = s.Mid(dot);
+		e.MakeLower();
+		return e;
+	};
+	const CString wantExt = fileExtOf(fff);
 	for(int i=0;i<kpicnt;i++){
 		if (plugkind[i] != PLUGKIND_KPI) continue;
-		CString fileExt = fff.Right(fff.GetLength()-fff.ReverseFind('.')); fileExt.MakeLower();
-		if (fileExt == L".mpy" || fileExt == L".mpw2" || fileExt == L".mpsmv") continue;
+		if (wantExt == L".mpy" || wantExt == L".mpw2" || wantExt == L".mpsmv") continue;
 		for(int j=0;;j++){
 			if(ext[i][j]=="") break;
-			ss=fff.Right(fff.GetLength()-fff.ReverseFind('.'));ss.MakeLower();
-			if(ext[i][j]==ss){
+			if(ext[i][j]==wantExt){
 				ss=kpif[i];
 				if (kpichk[i] == 1) {
 					flg = 1;
@@ -11269,6 +11290,33 @@ void CPlayList::plugs(CString fff, playlistdata *p,TCHAR* kpi, BYTE& kv)
 			}
 		}
 		if(flg==1)break;
+	}
+	/* HES/KSS 等: チェック ON の KPI が無いと呼び出し側が動画(-2)に落とす。
+	   未チェックでも対応 KPI があれば拾う（nez OFF + kbgme HES 無効の事故防止）。 */
+	if (flg != 1 && !wantExt.IsEmpty()) {
+		static const LPCTSTR kChip[] = {
+			_T(".hes"), _T(".kss"), _T(".nsf"), _T(".nsfe"), _T(".gbs"), _T(".nes"),
+			_T(".spc"), _T(".vgm"), _T(".vgz"), _T(".s98"), _T(".gym")
+		};
+		int isChip = 0;
+		for (int c = 0; c < _countof(kChip); ++c) {
+			if (wantExt == kChip[c]) { isChip = 1; break; }
+		}
+		if (isChip) {
+			for (int i = 0; i < kpicnt; i++) {
+				if (plugkind[i] != PLUGKIND_KPI) continue;
+				for (int j = 0;; j++) {
+					if (ext[i][j] == L"") break;
+					if (ext[i][j] == wantExt) {
+						ss = kpif[i];
+						flg = 1;
+						kv = kvar[i][j];
+						break;
+					}
+				}
+				if (flg == 1) break;
+			}
+		}
 	}
 	if(flg==1){
 		_tcscpy(p->fol,fff);
