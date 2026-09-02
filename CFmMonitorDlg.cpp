@@ -44,7 +44,13 @@ static int FmIsMonExtSuffix(const wchar_t* p)
 	static const wchar_t* kExt[] = {
 		L".fpy2", L".fpy", L".m2", L".mz", L".mp", L".ms", L".m",
 		L".opi", L".ovi", L".ozi",
-		L".s98", L".vgm", L".vgz", L".gym", L".mid", L".midi", L".rmi",
+		L".s98", L".vgm", L".vgz", L".gym", L".ssl",
+		L".mdx", L".mdc", L".cmf", L".laa",
+		L".sc68", L".sndh",
+		/* 長い拡張子を先に（.psf が .psf2/.minipsf を食わない） */
+		L".minipsf2", L".psf2", L".minipsf", L".psf",
+		L".minigsf", L".gsf", L".nsfe", L".nsf", L".ncsf", L".spc", L".sid",
+		L".midi", L".mid", L".rmi",
 		L".kss", L".hes", L".mgs", L".bgm", L".opx", L".mpk", L".mbm"
 	};
 	for (int i = 0; i < (int)(sizeof(kExt)/sizeof(kExt[0])); i++) {
@@ -71,7 +77,13 @@ static void FmExtractBestMonStem(const wchar_t* path, wchar_t* stem, int n)
 	static const wchar_t* kExt[] = {
 		L".fpy2", L".fpy", L".m2", L".mz", L".mp", L".ms", L".m",
 		L".opi", L".ovi", L".ozi",
-		L".s98", L".vgm", L".vgz", L".gym", L".mid", L".midi", L".rmi",
+		L".s98", L".vgm", L".vgz", L".gym", L".ssl",
+		L".mdx", L".mdc", L".cmf", L".laa",
+		L".sc68", L".sndh",
+		/* 長い拡張子を先に（.psf が .psf2/.minipsf を食わない） */
+		L".minipsf2", L".psf2", L".minipsf", L".psf",
+		L".minigsf", L".gsf", L".nsfe", L".nsf", L".ncsf", L".spc", L".sid",
+		L".midi", L".mid", L".rmi",
 		L".kss", L".hes", L".mgs", L".bgm", L".opx", L".mpk", L".mbm"
 	};
 	for (const wchar_t* p = path; *p; p++) {
@@ -135,6 +147,7 @@ static int FmPlayPathHasExt(const wchar_t* ext)
 		const wchar_t* h = hints[i];
 		if (!h || !h[0]) continue;
 		const size_t len = wcslen(h);
+		/* 末尾一致（"song.psf"）。".psf2" の末尾4文字は "psf2" なので ".psf" には当たらない */
 		if (len >= el && _wcsnicmp(h + len - (int)el, ext, el) == 0) return 1;
 		for (const wchar_t* q = h; *q; q++) {
 			if (*q != L'.') continue;
@@ -159,6 +172,10 @@ static int FmDumpMatchesPlay(const SasamiFmMonDump& d)
 		return 1;
 	/* MSX KPI dump は path 表記ゆれが激しいので KPI 再生中は常に受け入れる */
 	if (d.version >= 6 && (d.dumpFlags & SASAMI_FMMON_FLAG_MSX))
+		return 1;
+	/* keys-only（PSF/SID/GSF/NCSF 等）も path 表記ゆれで捨てない */
+	if (d.version >= 6 && (d.dumpFlags & SASAMI_FMMON_FLAG_KEYSONLY)
+		&& FmPlayHasMonHint())
 		return 1;
 	/* PMDWin 直書き / KPI エイリアス path は実曲名と一致しないので、
 	   再生中が PMD/FMP/FPY なら受け入れる。 */
@@ -787,12 +804,12 @@ void CFmMonitorDlg::OnBnClickedHelp()
 {
 	AfxMessageBox(LL14(
 		L"SASAMI .fpy / PMD / FMP の OPNA 鍵盤（とレジスタ）を表示します。\n"
-		L"PMD はフル dump、FMP は鍵盤＋PPZ（レジスタ非対応）。\n"
+		L"PMD / FMP ともフル dump（レジスタ＋鍵盤）。取得失敗時のみ FMP は鍵盤のみ。\n"
 		L"旧 fmpmd.kpi のみでは PMD/FMP は動きません。起動時に Plugins.zip が新しければ\n"
 		L"サイレント更新されます（Render の KPI プラグイン DL でも取得可）。\n"
 		L"kbsasami.raira=1 時、%TEMP%\\ogg_kbsasami\\ に dump を書き出します。",
 		L"Shows OPNA keys (and registers) for SASAMI .fpy / PMD / FMP.\n"
-		L"PMD: full dump. FMP: keys + PPZ (no registers).\n"
+		L"PMD/FMP: full dump; FMP falls back to keys-only if regs unavailable.\n"
 		L"Old fmpmd.kpi alone will not drive PMD/FMP.\n"
 		L"At startup, Plugins.zip is silently updated when newer\n"
 		L"(or use KPI plugin download in Render).\n"
@@ -1001,6 +1018,12 @@ int CFmMonitorDlg::PcmRows() const
 {
 	if (!m_haveDump) return 0;
 	if (IsMsxDump()) {
+		if (MsxDevMask() & SASAMI_FMMON_DEV_HES) {
+			int n = m_dump.pcmCount;
+			if (n < 3) n = 3;
+			if (n > SASAMI_FMMON_PCM_MAX) n = SASAMI_FMMON_PCM_MAX;
+			return n;
+		}
 		if (MsxDevMask() & SASAMI_FMMON_DEV_SCC) {
 			int n = m_dump.pcmCount;
 			if (n < 5) n = 5;
@@ -1085,11 +1108,40 @@ static int FmPlayHeardLagMs()
 	   dump 最新−ラグで追う前提の遅延（ホスト先行分）。 */
 	if (FmPlayPathHasExt(L".kss")) return 600; /* 500 でも僅かに先行 → +100ms */
 	if (FmPlayPathHasExt(L".s98") || FmPlayPathHasExt(L".vgm") || FmPlayPathHasExt(L".vgz")
-		|| FmPlayPathHasExt(L".hes")
+		|| FmPlayPathHasExt(L".hes") || FmPlayPathHasExt(L".gym") || FmPlayPathHasExt(L".ssl")
+		|| FmPlayPathHasExt(L".mdx") || FmPlayPathHasExt(L".mdc")
+		|| FmPlayPathHasExt(L".cmf") || FmPlayPathHasExt(L".laa")
+		|| FmPlayPathHasExt(L".sc68") || FmPlayPathHasExt(L".sndh")
+		|| FmPlayPathHasExt(L".nsf") || FmPlayPathHasExt(L".nsfe")
+		|| FmPlayPathHasExt(L".spc") || FmPlayPathHasExt(L".psf") || FmPlayPathHasExt(L".minipsf")
+		|| FmPlayPathHasExt(L".psf2") || FmPlayPathHasExt(L".minipsf2")
+		|| FmPlayPathHasExt(L".gsf") || FmPlayPathHasExt(L".minigsf")
+		|| FmPlayPathHasExt(L".ncsf") || FmPlayPathHasExt(L".sid")
 		|| FmPlayPathHasExt(L".mid") || FmPlayPathHasExt(L".midi")
 		|| FmPlayLooksLikeMsx())
 		return 600;
 	return 550; /* PMD ほか */
+}
+
+/* dump 側 curSample で追う形式（巨大 KPI バッファ / keys-only 含む） */
+static int FmPlayPreferDumpClock()
+{
+	if (FmPlayLooksLikeMsx()) return 1;
+	if (FmPlayPathHasExt(L".kss") || FmPlayPathHasExt(L".hes")
+		|| FmPlayPathHasExt(L".vgm") || FmPlayPathHasExt(L".vgz")
+		|| FmPlayPathHasExt(L".gym") || FmPlayPathHasExt(L".ssl")
+		|| FmPlayPathHasExt(L".s98")
+		|| FmPlayPathHasExt(L".mdx") || FmPlayPathHasExt(L".mdc")
+		|| FmPlayPathHasExt(L".cmf") || FmPlayPathHasExt(L".laa")
+		|| FmPlayPathHasExt(L".sc68") || FmPlayPathHasExt(L".sndh")
+		|| FmPlayPathHasExt(L".nsf") || FmPlayPathHasExt(L".nsfe")
+		|| FmPlayPathHasExt(L".spc") || FmPlayPathHasExt(L".psf") || FmPlayPathHasExt(L".minipsf")
+		|| FmPlayPathHasExt(L".psf2") || FmPlayPathHasExt(L".minipsf2")
+		|| FmPlayPathHasExt(L".gsf") || FmPlayPathHasExt(L".minigsf")
+		|| FmPlayPathHasExt(L".ncsf") || FmPlayPathHasExt(L".sid")
+		|| FmPlayPathHasExt(L".mid") || FmPlayPathHasExt(L".midi"))
+		return 1;
+	return 0;
 }
 
 uint64_t CFmMonitorDlg::HeardSample(uint32_t sampleRate)
@@ -1100,11 +1152,12 @@ uint64_t CFmMonitorDlg::HeardSample(uint32_t sampleRate)
 	const uint32_t srDump = sampleRate > 0 ? sampleRate : 44100;
 
 	__int64 frames = 0;
-	/* KSS/HES 等 MSX: GDI/playb は巨大 KPI バッファで 0.5〜1s 跳び → Apply が秒間引きになる。
-	   dump 側 curSample（チャンク後は ~10ms）から固定ラグで可聴位置を作る。 */
+	/* 巨大 KPI バッファ / keys-only: GDI 跳びを避け dump curSample−ラグで追う。 */
+	const unsigned lastFlags = (m_histN > 0)
+		? m_hist[(m_histHead + m_histN - 1) % HIST_MAX].dumpFlags : 0u;
 	const int useDumpClock = (mode == -3 && m_histN > 0
-		&& (FmPlayLooksLikeMsx()
-			|| (m_hist[(m_histHead + m_histN - 1) % HIST_MAX].dumpFlags & SASAMI_FMMON_FLAG_MSX))) ? 1 : 0;
+		&& (FmPlayPreferDumpClock()
+			|| (lastFlags & (SASAMI_FMMON_FLAG_MSX | SASAMI_FMMON_FLAG_KEYSONLY)))) ? 1 : 0;
 	if (useDumpClock) {
 		const int li = (m_histHead + m_histN - 1) % HIST_MAX;
 		const uint64_t latest = m_histSamp[li];
@@ -1971,7 +2024,9 @@ void CFmMonitorDlg::DrawChannelKeys(CDC& dc, int x, int y, int w, int rowH, int 
 		else
 			wcscpy_s(noise, L"N---");
 		wchar_t lab[48];
-		_snwprintf_s(lab, _TRUNCATE, L"%s %s %s", msx ? kPsg[i] : kSsg[i], note, noise);
+		_snwprintf_s(lab, _TRUNCATE, L"%s %s %s",
+			(msx && !(MsxDevMask() & SASAMI_FMMON_DEV_HES)) ? kPsg[i] : kSsg[i],
+			note, noise);
 		drawLabel(yy, lab, fade, RGB(100, 180, 255));
 
 		CRect krc(x + labelW, yy + (rowH - keyH) / 2, x + labelW + pianoW, yy + (rowH - keyH) / 2 + keyH);
@@ -1993,8 +2048,10 @@ void CFmMonitorDlg::DrawChannelKeys(CDC& dc, int x, int y, int w, int rowH, int 
 		wchar_t lab[40];
 		const int ppz = (m_haveDump && m_dump.version >= 6
 			&& (m_dump.dumpFlags & SASAMI_FMMON_FLAG_PPZ));
-		const wchar_t* pref = msx ? L"SCC" : (ppz ? L"PPZ" : L"PCM");
-		_snwprintf_s(lab, _TRUNCATE, L"%s%d %s", pref, i + 1, note);
+		const int hes = msx && (MsxDevMask() & SASAMI_FMMON_DEV_HES);
+		const wchar_t* pref = hes ? L"SSG" : (msx ? L"SCC" : (ppz ? L"PPZ" : L"PCM"));
+		const int num = hes ? (i + 4) : (i + 1);
+		_snwprintf_s(lab, _TRUNCATE, L"%s%d %s", pref, num, note);
 		drawLabel(yy, lab, fade, RGB(220, 160, 80));
 
 		CRect krc(x + labelW, yy + (rowH - keyH) / 2, x + labelW + pianoW, yy + (rowH - keyH) / 2 + keyH);
@@ -2130,20 +2187,30 @@ void CFmMonitorDlg::DrawHead(CDC& dc)
 				L"FMP  клавиши+PPZ", L"FMP  Tasten+PPZ", L"FMP  teclas+PPZ", L"FMP  toetsen+PPZ",
 				L"FMP  klawisze+PPZ", L"FMP  tuslar+PPZ");
 		else if (IsMsxDump()) {
-			static wchar_t msxChip[80];
+			static wchar_t msxChip[96];
 			const unsigned m = MsxDevMask();
-			_snwprintf_s(msxChip, _TRUNCATE, L"MSX  %s%s%s",
-				(m & SASAMI_FMMON_DEV_PSG) ? L"PSG " : L"",
-				(m & SASAMI_FMMON_DEV_OPLL) ? L"OPLL/FMPAC " : L"",
-				(m & SASAMI_FMMON_DEV_SCC) ? L"SCC" : L"");
+			if (m & SASAMI_FMMON_DEV_HES)
+				_snwprintf_s(msxChip, _TRUNCATE, L"HES  SSG1-6 (HuC6280)");
+			else
+				_snwprintf_s(msxChip, _TRUNCATE, L"MSX  %s%s%s",
+					(m & SASAMI_FMMON_DEV_PSG) ? L"PSG " : L"",
+					(m & SASAMI_FMMON_DEV_OPLL) ? L"OPLL/FMPAC " : L"",
+					(m & SASAMI_FMMON_DEV_SCC) ? L"SCC" : L"");
 			chip = msxChip;
 		}
 		else if (m_dump.version >= 6 && (m_dump.dumpFlags & SASAMI_FMMON_FLAG_FM3EX)
-			&& !(m_dump.dumpFlags & SASAMI_FMMON_FLAG_KEYSONLY))
-			chip = LL14(L"PMD  OPNA+EX/PPZ", L"PMD  OPNA+EX/PPZ", L"PMD  OPNA+EX/PPZ", L"PMD  OPNA+EX/PPZ",
-				L"PMD  OPNA+EX/PPZ", L"PMD  OPNA+EX/PPZ", L"PMD  OPNA+EX/PPZ", L"PMD  OPNA+EX/PPZ",
-				L"PMD  OPNA+EX/PPZ", L"PMD  OPNA+EX/PPZ", L"PMD  OPNA+EX/PPZ", L"PMD  OPNA+EX/PPZ",
-				L"PMD  OPNA+EX/PPZ", L"PMD  OPNA+EX/PPZ");
+			&& !(m_dump.dumpFlags & SASAMI_FMMON_FLAG_KEYSONLY)) {
+			const int isFmp = (m_dump.dumpFlags & SASAMI_FMMON_FLAG_FMP) ? 1 : 0;
+			chip = isFmp
+				? LL14(L"FMP  OPNA+EX/PPZ", L"FMP  OPNA+EX/PPZ", L"FMP  OPNA+EX/PPZ", L"FMP  OPNA+EX/PPZ",
+					L"FMP  OPNA+EX/PPZ", L"FMP  OPNA+EX/PPZ", L"FMP  OPNA+EX/PPZ", L"FMP  OPNA+EX/PPZ",
+					L"FMP  OPNA+EX/PPZ", L"FMP  OPNA+EX/PPZ", L"FMP  OPNA+EX/PPZ", L"FMP  OPNA+EX/PPZ",
+					L"FMP  OPNA+EX/PPZ", L"FMP  OPNA+EX/PPZ")
+				: LL14(L"PMD  OPNA+EX/PPZ", L"PMD  OPNA+EX/PPZ", L"PMD  OPNA+EX/PPZ", L"PMD  OPNA+EX/PPZ",
+					L"PMD  OPNA+EX/PPZ", L"PMD  OPNA+EX/PPZ", L"PMD  OPNA+EX/PPZ", L"PMD  OPNA+EX/PPZ",
+					L"PMD  OPNA+EX/PPZ", L"PMD  OPNA+EX/PPZ", L"PMD  OPNA+EX/PPZ", L"PMD  OPNA+EX/PPZ",
+					L"PMD  OPNA+EX/PPZ", L"PMD  OPNA+EX/PPZ");
+		}
 		else if (m_dump.padHit == 1)
 			chip = L"OPN   FM×3+SSG×3";
 		else if (m_dump.padHit == 0)

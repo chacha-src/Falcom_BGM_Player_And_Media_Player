@@ -5,6 +5,7 @@
 #include "ogg.h"
 #include "Kpilist.h"
 #include "PluginKinds.h"
+#include "KpiPluginInstall.h"
 #include <algorithm>
 
 // 先に使用するファイルスコープ関数の前方宣言
@@ -359,22 +360,33 @@ void CKpiListCtrl::BuildToolTipText(int row, int col, CString& out)
 	else if (kpiarch[kpiIdx] == 64)
 		arch = L"x64";
 
+	BOOL fmMon = FALSE, midMon = FALSE;
+	KpiPlugin_ProbeMonitorCaps(kpif[kpiIdx], &fmMon, &midMon);
+	CString mon;
+	if (fmMon || midMon) {
+		mon = L"\n";
+		mon += LL14(L"モニタ：", L"Monitor: ", L"Moniteur : ", L"Monitor: ", L"Monitor: ", L"모니터: ", L"监视器：", L"الشاشة: ", L"Монитор: ", L"Monitor: ", L"Monitor: ", L"Monitor: ", L"Monitor: ", L"Monitör: ");
+		if (fmMon) mon += L"[FMmon]";
+		if (fmMon && midMon) mon += L" ";
+		if (midMon) mon += L"[MIDmon]";
+	}
+
 	out.Format(LL14(
-		L"パス：%s\nバージョン：%s\nCPU：%s\n拡張子：%s",
-		L"Path: %s\nVersion: %s\nCPU: %s\nExtensions: %s",
-		L"Chemin : %s\nVersion : %s\nCPU : %s\nExtensions : %s",
-		L"Percorso: %s\nVersione: %s\nCPU: %s\nEstensioni: %s",
-		L"Ruta: %s\nVersión: %s\nCPU: %s\nExtensiones: %s",
-		L"경로: %s\n버전: %s\nCPU: %s\n확장자: %s",
-		L"路径：%s\n版本：%s\nCPU：%s\n扩展名：%s",
-		L"المسار: %s\nالإصدار: %s\nالمعالج: %s\nالامتدادات: %s",
-		L"Путь: %s\nВерсия: %s\nЦП: %s\nРасширения: %s",
-		L"Pfad: %s\nVersion: %s\nCPU: %s\nErweiterungen: %s",
-		L"Caminho: %s\nVersão: %s\nCPU: %s\nExtensões: %s",
-		L"Pad: %s\nVersie: %s\nCPU: %s\nExtensies: %s",
-		L"Ścieżka: %s\nWersja: %s\nCPU: %s\nRozszerzenia: %s",
-		L"Yol: %s\nSürüm: %s\nCPU: %s\nUzantılar: %s"),
-		(LPCTSTR)kpif[kpiIdx], (LPCTSTR)ver, (LPCTSTR)arch, (LPCTSTR)exts);
+		L"パス：%s\nバージョン：%s\nCPU：%s\n拡張子：%s%s",
+		L"Path: %s\nVersion: %s\nCPU: %s\nExtensions: %s%s",
+		L"Chemin : %s\nVersion : %s\nCPU : %s\nExtensions : %s%s",
+		L"Percorso: %s\nVersione: %s\nCPU: %s\nEstensioni: %s%s",
+		L"Ruta: %s\nVersión: %s\nCPU: %s\nExtensiones: %s%s",
+		L"경로: %s\n버전: %s\nCPU: %s\n확장자: %s%s",
+		L"路径：%s\n版本：%s\nCPU：%s\n扩展名：%s%s",
+		L"المسار: %s\nالإصدار: %s\nالمعالج: %s\nالامتدادات: %s%s",
+		L"Путь: %s\nВерсия: %s\nЦП: %s\nРасширения: %s%s",
+		L"Pfad: %s\nVersion: %s\nCPU: %s\nErweiterungen: %s%s",
+		L"Caminho: %s\nVersão: %s\nCPU: %s\nExtensões: %s%s",
+		L"Pad: %s\nVersie: %s\nCPU: %s\nExtensies: %s%s",
+		L"Ścieżka: %s\nWersja: %s\nCPU: %s\nRozszerzenia: %s%s",
+		L"Yol: %s\nSürüm: %s\nCPU: %s\nUzantılar: %s%s"),
+		(LPCTSTR)kpif[kpiIdx], (LPCTSTR)ver, (LPCTSTR)arch, (LPCTSTR)exts, (LPCTSTR)mon);
 }
 
 BOOL CKpilist::OnInitDialog()
@@ -823,7 +835,16 @@ void CKpilist::FillKpiList()
 				s = s.Left(s.GetLength() - 1);
 
 			const int a2 = kpif[j].ReverseFind(L'\\');
-			_tcscpy(buf, kpif[j].Right(kpif[j].GetLength() - a2 - 1));
+			CString leaf = kpif[j].Right(kpif[j].GetLength() - a2 - 1);
+			BOOL fmMon = FALSE, midMon = FALSE;
+			KpiPlugin_ProbeMonitorCaps(kpif[j], &fmMon, &midMon);
+			CString disp;
+			if (fmMon) disp += L"[FMmon]";
+			if (midMon) disp += L"[MIDmon]";
+			if (!disp.IsEmpty())
+				disp += L" ";
+			disp += leaf;
+			_tcscpy(buf, disp);
 			LvItem.pszText = buf;
 			LvItem.iItem = m_lc.GetItemCount();
 			LvItem.mask = LVIF_TEXT | LVIF_PARAM;

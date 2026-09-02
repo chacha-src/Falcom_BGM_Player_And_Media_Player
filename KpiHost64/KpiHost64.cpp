@@ -1366,45 +1366,100 @@ int wmain(int argc, wchar_t** argv)
 		wprintf(L"session=%u rate=%u ch=%u\n", rep.sessionId, info.dwSampleRate, info.dwChannels);
 
 		const bool doRender = (argc >= 4 && _wcsicmp(argv[3], L"render") == 0);
-		if (doRender) {
-			const int loops = (argc >= 5) ? _wtoi(argv[4]) : 40;
-			const uint32_t bytesWanted = (info.dwSampleRate ? info.dwSampleRate : 44100) / 50
-				* (info.dwChannels ? info.dwChannels : 2) * 2; /* ~20ms */
-			wchar_t live[MAX_PATH];
-			GetTempPathW(MAX_PATH, live);
-			wcsncat_s(live, L"ogg_kbsasami\\fmmon_live.opna", _TRUNCATE);
-			FILETIME lastWrite{};
-			int wrote = 0;
+		const bool doWav = (argc >= 4 && _wcsicmp(argv[3], L"wav") == 0);
+		if (doRender || doWav) {
+			const int loops = (argc >= 5) ? _wtoi(argv[4]) : (doWav ? 50 : 40);
+			const int bps = info.nBitsPerSample;
+			wprintf(L"mediaInfo rate=%u ch=%u bps=%d length=%llu\n",
+				info.dwSampleRate, info.dwChannels, bps, (unsigned long long)info.qwLength);
+			const uint32_t bytesWanted = (info.dwSampleRate ? info.dwSampleRate : 44100) / 10
+				* (info.dwChannels ? info.dwChannels : 2) * ((bps == 16 || bps == 0) ? 2 : 8); /* ~100ms */
+			int64_t totalSamples = 0;
+			int64_t nonZero = 0;
+			int64_t clipped = 0;
+			int peak = 0;
+			std::vector<int16_t> wavPcm;
 			for (int i = 0; i < loops; i++) {
 				std::vector<uint8_t> rout;
 				const uint32_t rst = Cmd_Render(rep.sessionId, bytesWanted, rout);
-				if (rst != KPIHOST64_STATUS_OK) {
-					wprintf(L"render fail i=%d status=%u\n", i, rst);
+				if (rst != KPIHOST64_STATUS_OK || rout.size() < sizeof(KPIHOST64_RenderReply)) {
+					wprintf(L"render fail i=%d status=%u size=%zu\n", i, rst, rout.size());
 					break;
 				}
-				WIN32_FILE_ATTRIBUTE_DATA fad{};
-				if (GetFileAttributesExW(live, GetFileExInfoStandard, &fad)) {
-					if (CompareFileTime(&fad.ftLastWriteTime, &lastWrite) != 0) {
-						lastWrite = fad.ftLastWriteTime;
-						wrote++;
-						HANDLE h = CreateFileW(live, GENERIC_READ, FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE,
-							NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
-						if (h != INVALID_HANDLE_VALUE) {
-							unsigned char buf[64]{};
-							DWORD rd = 0;
-							ReadFile(h, buf, sizeof(buf), &rd, NULL);
-							CloseHandle(h);
-							if (rd >= 24) {
-								const unsigned ver = *(unsigned*)(buf + 4);
-								const unsigned seq = *(unsigned*)(buf + 8);
-								wprintf(L"  live upd#%d ver=%u seq=%u\n", wrote, ver, seq);
-							}
-						}
+				KPIHOST64_RenderReply rr{};
+				memcpy(&rr, rout.data(), sizeof(rr));
+				const uint8_t* pcm = rout.data() + sizeof(rr);
+				const size_t pcmBytes = rout.size() - sizeof(rr);
+				if (!doWav) {
+					wprintf(L"render[%d] bytes=%u eof=%u pcmPayload=%zu\n", i, rr.bytesReturned, rr.eof, pcmBytes);
+				}
+				if ((bps == 16 || bps == 0) && pcmBytes >= 2) {
+					const int16_t* s = (const int16_t*)pcm;
+					const size_t n = pcmBytes / 2;
+					for (size_t k = 0; k < n; k++) {
+						int v = s[k];
+						if (v < 0) v = -v;
+						if (v > peak) peak = v;
+						if (v >= 32767) clipped++;
+						if (s[k] != 0) nonZero++;
 					}
+					totalSamples += (int64_t)n;
+					if (doWav) {
+						wavPcm.insert(wavPcm.end(), s, s + n);
+					}
+				} else if (bps == -64 && pcmBytes >= 8) {
+					const double* d = (const double*)pcm;
+					const size_t n = pcmBytes / 8;
+					for (size_t k = 0; k < n; k++) {
+						double fv = d[k];
+						if (fv > 1.0) fv = 1.0;
+						if (fv < -1.0) fv = -1.0;
+						int16_t s16 = (int16_t)(fv * 32767.0);
+						int v = s16 < 0 ? -s16 : s16;
+						if (v > peak) peak = v;
+						if (v >= 32767) clipped++;
+						if (s16 != 0) nonZero++;
+						if (doWav) wavPcm.push_back(s16);
+					}
+					totalSamples += (int64_t)n;
+				}
+				if (rr.eof || rr.bytesReturned == 0)
+					break;
+			}
+			wprintf(L"PCM stats: totalSamples=%lld nonZero=%lld peak=%d clipped=%lld\n",
+				(long long)totalSamples, (long long)nonZero, peak, (long long)clipped);
+			if (doWav && !wavPcm.empty()) {
+				wchar_t wavPath[MAX_PATH];
+				GetTempPathW(MAX_PATH, wavPath);
+				wcsncat_s(wavPath, L"kbpsf2_probe.wav", _TRUNCATE);
+				HANDLE h = CreateFileW(wavPath, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+				if (h != INVALID_HANDLE_VALUE) {
+					const uint32_t rate = info.dwSampleRate ? info.dwSampleRate : 48000;
+					const uint16_t ch = (uint16_t)(info.dwChannels ? info.dwChannels : 2);
+					const uint16_t bpsOut = 16;
+					const uint32_t dataBytes = (uint32_t)(wavPcm.size() * sizeof(int16_t));
+					const uint32_t byteRate = rate * ch * (bpsOut / 8);
+					const uint16_t blockAlign = (uint16_t)(ch * (bpsOut / 8));
+					BYTE hdr[44];
+					memcpy(hdr + 0, "RIFF", 4);
+					*(uint32_t*)(hdr + 4) = 36 + dataBytes;
+					memcpy(hdr + 8, "WAVEfmt ", 8);
+					*(uint32_t*)(hdr + 16) = 16;
+					*(uint16_t*)(hdr + 20) = 1;
+					*(uint16_t*)(hdr + 22) = ch;
+					*(uint32_t*)(hdr + 24) = rate;
+					*(uint32_t*)(hdr + 28) = byteRate;
+					*(uint16_t*)(hdr + 32) = blockAlign;
+					*(uint16_t*)(hdr + 34) = bpsOut;
+					memcpy(hdr + 36, "data", 4);
+					*(uint32_t*)(hdr + 40) = dataBytes;
+					DWORD wr = 0;
+					WriteFile(h, hdr, 44, &wr, NULL);
+					WriteFile(h, wavPcm.data(), dataBytes, &wr, NULL);
+					CloseHandle(h);
+					wprintf(L"WAV written: %s samples=%zu\n", wavPath, wavPcm.size());
 				}
 			}
-			wprintf(L"liveUpdates=%d path=%s\n", wrote, live);
-			/* close session via map erase path: Free by reopen not needed for probe */
 		}
 		fflush(stdout);
 		return 0;

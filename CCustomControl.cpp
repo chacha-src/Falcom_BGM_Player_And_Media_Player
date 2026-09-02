@@ -2397,6 +2397,10 @@ static void CCC_ExtractSavLrc(CString& text, BOOL& bSav, BOOL& bLrc, CString ext
 // 印チップの地色。16/32ch=藤、MONO/LR/数値=薄荷、その他マップ=薄金。
 static COLORREF CCC_MarkChipBg(const CString& lab)
 {
+    if (lab.CompareNoCase(_T("FMmon")) == 0)
+        return RGB(186, 220, 255); /* OPN 寄り・FM モニタ */
+    if (lab.CompareNoCase(_T("MIDmon")) == 0)
+        return RGB(230, 176, 255); /* 32ch 寄り・MIDI ノート dump */
     if (lab.CompareNoCase(_T("16ch")) == 0)
         return RGB(196, 186, 255);
     if (lab.CompareNoCase(_T("32ch")) == 0)

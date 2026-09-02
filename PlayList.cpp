@@ -4458,9 +4458,9 @@ static bool IsPlaylistDropAllowedExt(const CString& pathOrName)
 		_T(".kss"), _T(".nsf"), _T(".nsfe"), _T(".gbs"), _T(".hes"), _T(".nes"),
 		_T(".spc"), _T(".vgm"), _T(".vgz"), _T(".gym"), _T(".s98"),
 		_T(".ovi"), _T(".opi"), _T(".ozi"), _T(".m"), _T(".m2"), _T(".mz"), _T(".mp"), _T(".ms"),
-		_T(".psf"), _T(".psf2"), _T(".minipsf"), _T(".minipsf2"),
-		_T(".ssf"), _T(".dsf"), _T(".usf"), _T(".gsf"), _T(".2sf"),
-		_T(".ncsf"), _T(".snsf"),
+		_T(".psf"), _T(".minipsf"), _T(".psf2"), _T(".minipsf2"),
+		_T(".ssf"), _T(".dsf"), _T(".usf"), _T(".gsf"), _T(".minigsf"), _T(".2sf"),
+		_T(".ncsf"), _T(".snsf"), _T(".sid"),
 		_T(".adx"), _T(".ahx"), _T(".hca"), _T(".awb"), _T(".acb"),
 		_T(".at3"), _T(".at9"), _T(".vag"), _T(".xa"), _T(".nub"),
 		_T(".bgm"), _T(".bms"), _T(".bme"), _T(".bml"),
@@ -11296,7 +11296,9 @@ void CPlayList::plugs(CString fff, playlistdata *p,TCHAR* kpi, BYTE& kv)
 	if (flg != 1 && !wantExt.IsEmpty()) {
 		static const LPCTSTR kChip[] = {
 			_T(".hes"), _T(".kss"), _T(".nsf"), _T(".nsfe"), _T(".gbs"), _T(".nes"),
-			_T(".spc"), _T(".vgm"), _T(".vgz"), _T(".s98"), _T(".gym")
+			_T(".spc"), _T(".vgm"), _T(".vgz"), _T(".s98"), _T(".gym"),
+			_T(".sid"), _T(".minigsf"), _T(".gsf"), _T(".ncsf"),
+			_T(".minipsf2"), _T(".psf2"), _T(".minipsf"), _T(".psf")
 		};
 		int isChip = 0;
 		for (int c = 0; c < _countof(kChip); ++c) {

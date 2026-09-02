@@ -1,4 +1,4 @@
-// KpiPluginInstall.cpp — Plugins.zip を公式配布から取得し exe 隣へ展開
+﻿// KpiPluginInstall.cpp — Plugins.zip を公式配布から取得し exe 隣へ展開
 #include "stdafx.h"
 #include "KpiPluginInstall.h"
 #include <wininet.h>
@@ -1101,29 +1101,111 @@ BOOL KpiInstall_SilentUpdateFmpmd(LPCTSTR exeDir)
 	return did;
 }
 
-/* バンドル → 既存 Plugins のみ更新（無い KPI は触らない） */
+/* バンドル → 既存 Plugins / x64\Plugins のみ更新（無いものは触らない）。供給は x64 のみ。 */
 BOOL KpiInstall_SilentUpdateFmMonKpis(LPCTSTR exeDir)
 {
 	if (!exeDir || !exeDir[0])
 		return FALSE;
 
+	/* gateRel: 非 NULL なら「同ツリー上のゲートファイルがあるときだけ」更新
+	   （付属 DLL/BIN 用。ゲート自体が無くても dst があれば従来どおり更新） */
 	struct Entry {
-		const TCHAR* relDst; /* under Plugins\ */
-		const TCHAR* bundleName;
+		const TCHAR* relDst;     /* under <root>\ */
+		const TCHAR* bundleName; /* under Plugins\.ogg_kpi_fmmon\ */
+		const TCHAR* gateRel;    /* under <root>\ ; optional */
 	};
 	static const Entry kTab[] = {
-		{ L"Kobarin\\kbfmmidi\\kbfmmidi.kpi", L"kbfmmidi.kpi" },
-		{ L"Kobarin\\kbvgm\\kbvgm.kpi", L"kbvgm.kpi" },
-		{ L"kbvgm.kpi", L"kbvgm.kpi" }, /* ルート直下に置いてある場合 */
-		{ L"Mamiya\\kbs98\\kbs98.kpi", L"kbs98.kpi" },
-		{ L"OK\\kbmsxplug\\kbmsxplug.kpi", L"kbmsxplug.kpi" },
-		{ L"Kobarin\\kbgme\\kbgme.kpi", L"kbgme.kpi" },
-		/* z_5 退避先にもあれば更新 */
-		{ L"z_5_Plugins\\Kobarin\\kbfmmidi\\kbfmmidi.kpi", L"kbfmmidi.kpi" },
-		{ L"z_5_Plugins\\Kobarin\\kbvgm\\kbvgm.kpi", L"kbvgm.kpi" },
-		{ L"z_5_Plugins\\OK\\kbmsxplug\\kbmsxplug.kpi", L"kbmsxplug.kpi" },
-		{ L"z_5_Plugins\\Kobarin\\kbgme\\kbgme.kpi", L"kbgme.kpi" },
-		{ L"z_5_Plugins\\Mamiya\\kbs98\\kbs98.kpi", L"kbs98.kpi" },
+		/* --- FM/MIDI モニタ既存 --- */
+		{ L"Kobarin\\kbfmmidi\\kbfmmidi.kpi", L"kbfmmidi.kpi", NULL },
+		{ L"Kobarin\\kbvgm\\kbvgm.kpi", L"kbvgm.kpi", NULL },
+		{ L"kbvgm.kpi", L"kbvgm.kpi", NULL },
+		{ L"Mamiya\\kbs98\\kbs98.kpi", L"kbs98.kpi", NULL },
+		{ L"OK\\kbmsxplug\\kbmsxplug.kpi", L"kbmsxplug.kpi", NULL },
+		{ L"Kobarin\\kbgme\\kbgme.kpi", L"kbgme.kpi", NULL },
+		{ L"OK\\kbgme\\kbgme.kpi", L"kbgme.kpi", NULL },
+		/* --- keys-only / チップ拡張（引用リスト） --- */
+		{ L"Mamiya\\kbmdx\\kbmdx.kpi", L"kbmdx.kpi", NULL },
+		{ L"Kobarin\\kbfmoplmidi\\kbfmoplmidi.kpi", L"kbfmoplmidi.kpi", NULL },
+		{ L"Kobarin\\kbsc68\\kbsc68.kpi", L"kbsc68.kpi", NULL },
+		/* --- dump 系: NSF → SPC → PSF / PSF2 --- */
+		{ L"Kobarin\\kbnsfplug\\kbnsfplug.kpi", L"kbnsfplug.kpi", NULL },
+		{ L"Kobarin\\kbsnesapu\\kbsnesapu.kpi", L"kbsnesapu.kpi", NULL },
+		{ L"Audio\\kbsnesapu.kpi", L"kbsnesapu.kpi", NULL },
+		{ L"S_Kino\\kbspc\\kbspc.kpi", L"kbsnesapu.kpi", NULL }, /* 旧名配置でも更新 */
+		/* PSF 系は Kobarin 内のみ更新（Plugins\kbpsf / kbpsf2 は触らない） */
+		{ L"Kobarin\\kbpsf\\kbpsf.kpi", L"kbpsf.kpi", NULL },
+		{ L"Kobarin\\kbpsf\\viopsf.bin", L"viopsf.bin", L"Kobarin\\kbpsf\\kbpsf.kpi" },
+		{ L"Kobarin\\kbpsf\\kbzlib.dll", L"kbzlib.dll", L"Kobarin\\kbpsf\\kbpsf.kpi" },
+		{ L"Kobarin\\kbpsf\\spuPeopsSound.dll", L"spuPeopsSound.dll", L"Kobarin\\kbpsf\\kbpsf.kpi" },
+		{ L"Kobarin\\kbpsf\\spumednafen.dll", L"spumednafen.dll", L"Kobarin\\kbpsf\\kbpsf.kpi" },
+		{ L"Kobarin\\kbpsf\\spumame.dll", L"spumame.dll", L"Kobarin\\kbpsf\\kbpsf.kpi" },
+		{ L"Kobarin\\kbpsf2\\kbpsf2.kpi", L"kbpsf2.kpi", NULL },
+		{ L"Kobarin\\kbpsf2\\viopsf2.bin", L"viopsf2.bin", L"Kobarin\\kbpsf2\\kbpsf2.kpi" },
+		{ L"Kobarin\\kbpsf2\\kbzlib.dll", L"kbzlib.dll", L"Kobarin\\kbpsf2\\kbpsf2.kpi" },
+		/* --- MIDI っぽく出せる / pitch+KON（対応中の枠） --- */
+		{ L"Kobarin\\kbncsf\\kbncsf.kpi", L"kbncsf.kpi", NULL },
+		{ L"Kobarin\\kbxsf\\kbncsf\\kbncsf.kpi", L"kbncsf.kpi", NULL },
+		{ L"Kobarin\\kbum\\kbum.kpi", L"kbum.kpi", NULL },
+		{ L"Kobarin\\kbmod\\kbmod.kpi", L"kbmod.kpi", NULL },
+		{ L"Kobarin\\kbpxtone\\kbpxtone.kpi", L"kbpxtone.kpi", NULL },
+		{ L"Kobarin\\kb2sf\\kb2sf.kpi", L"kb2sf.kpi", NULL },
+		{ L"kbvio2sf.kpi", L"kbvio2sf.kpi", NULL },
+		{ L"Kobarin\\kbvio2sf\\kbvio2sf.kpi", L"kbvio2sf.kpi", NULL },
+		{ L"Kobarin\\kbqsf\\kbqsf.kpi", L"kbqsf.kpi", NULL },
+		{ L"Kobarin\\kbusf\\kbusf.kpi", L"kbusf.kpi", NULL },
+		{ L"Kobarin\\kbssf\\kbssf.kpi", L"kbssf.kpi", NULL },
+		{ L"Kobarin\\kbdsf\\kbdsf.kpi", L"kbdsf.kpi", NULL },
+		{ L"Kobarin\\kbsid\\kbsid.kpi", L"kbsid.kpi", NULL },
+		{ L"Mamiya\\kbsid\\kbsid.kpi", L"kbsid.kpi", NULL },
+		{ L"Mamiya\\kpisidplay\\sidplay.kpi", L"kbsid.kpi", NULL }, /* 旧配置の別称 */
+		{ L"Kobarin\\kbgsf\\kbgsf.kpi", L"kbgsf.kpi", NULL },
+		{ L"Kobarin\\kbgsf\\viogsf.bin", L"viogsf.bin", L"Kobarin\\kbgsf\\kbgsf.kpi" },
+		{ L"Kobarin\\kbxsf\\kbgsf\\kbgsf.kpi", L"kbgsf.kpi", NULL },
+		{ L"Kobarin\\kbxsf\\kbgsf\\viogsf.bin", L"viogsf.bin", L"Kobarin\\kbxsf\\kbgsf\\kbgsf.kpi" },
+		{ L"Kobarin\\kbsap\\kbsap.kpi", L"kbsap.kpi", NULL },
+		{ L"Kobarin\\kbwsr\\kbwsr.kpi", L"kbwsr.kpi", NULL },
+		{ L"Kobarin\\kbnezplug\\kbnezplug.kpi", L"kbnezplug.kpi", NULL },
+		{ L"Audio\\nezplug\\nezplug.kpi", L"kbnezplug.kpi", NULL },
+		{ L"Mamiya\\nezplug\\nezplug.kpi", L"kbnezplug.kpi", NULL },
+		{ L"Mamiya\\kbgym\\kbgym.kpi", L"kbgym.kpi", NULL },
+		{ L"OK\\kbgym\\kbgym.kpi", L"kbgym.kpi", NULL },
+		/* z_5 退避先 */
+		{ L"z_5_Plugins\\Kobarin\\kbfmmidi\\kbfmmidi.kpi", L"kbfmmidi.kpi", NULL },
+		{ L"z_5_Plugins\\Kobarin\\kbvgm\\kbvgm.kpi", L"kbvgm.kpi", NULL },
+		{ L"z_5_Plugins\\OK\\kbmsxplug\\kbmsxplug.kpi", L"kbmsxplug.kpi", NULL },
+		{ L"z_5_Plugins\\Kobarin\\kbgme\\kbgme.kpi", L"kbgme.kpi", NULL },
+		{ L"z_5_Plugins\\Mamiya\\kbs98\\kbs98.kpi", L"kbs98.kpi", NULL },
+		{ L"z_5_Plugins\\Mamiya\\kbmdx\\kbmdx.kpi", L"kbmdx.kpi", NULL },
+		{ L"z_5_Plugins\\Kobarin\\kbfmoplmidi\\kbfmoplmidi.kpi", L"kbfmoplmidi.kpi", NULL },
+		{ L"z_5_Plugins\\Kobarin\\kbsc68\\kbsc68.kpi", L"kbsc68.kpi", NULL },
+		{ L"z_5_Plugins\\Kobarin\\kbnsfplug\\kbnsfplug.kpi", L"kbnsfplug.kpi", NULL },
+		{ L"z_5_Plugins\\Kobarin\\kbsnesapu\\kbsnesapu.kpi", L"kbsnesapu.kpi", NULL },
+		{ L"z_5_Plugins\\Kobarin\\kbpsf\\kbpsf.kpi", L"kbpsf.kpi", NULL },
+		{ L"z_5_Plugins\\Kobarin\\kbpsf2\\kbpsf2.kpi", L"kbpsf2.kpi", NULL },
+		{ L"z_5_Plugins\\Kobarin\\kbpsf2\\viopsf2.bin", L"viopsf2.bin", L"z_5_Plugins\\Kobarin\\kbpsf2\\kbpsf2.kpi" },
+		{ L"z_5_Plugins\\Kobarin\\kbpsf2\\kbzlib.dll", L"kbzlib.dll", L"z_5_Plugins\\Kobarin\\kbpsf2\\kbpsf2.kpi" },
+		{ L"z_5_Plugins\\Kobarin\\kbncsf\\kbncsf.kpi", L"kbncsf.kpi", NULL },
+		{ L"z_5_Plugins\\Kobarin\\kbum\\kbum.kpi", L"kbum.kpi", NULL },
+		{ L"z_5_Plugins\\Kobarin\\kbmod\\kbmod.kpi", L"kbmod.kpi", NULL },
+		{ L"z_5_Plugins\\Kobarin\\kbpxtone\\kbpxtone.kpi", L"kbpxtone.kpi", NULL },
+		{ L"z_5_Plugins\\Kobarin\\kb2sf\\kb2sf.kpi", L"kb2sf.kpi", NULL },
+		{ L"z_5_Plugins\\Kobarin\\kbqsf\\kbqsf.kpi", L"kbqsf.kpi", NULL },
+		{ L"z_5_Plugins\\Kobarin\\kbusf\\kbusf.kpi", L"kbusf.kpi", NULL },
+		{ L"z_5_Plugins\\Kobarin\\kbssf\\kbssf.kpi", L"kbssf.kpi", NULL },
+		{ L"z_5_Plugins\\Kobarin\\kbdsf\\kbdsf.kpi", L"kbdsf.kpi", NULL },
+		{ L"z_5_Plugins\\Kobarin\\kbsid\\kbsid.kpi", L"kbsid.kpi", NULL },
+		{ L"z_5_Plugins\\Kobarin\\kbgsf\\kbgsf.kpi", L"kbgsf.kpi", NULL },
+		{ L"z_5_Plugins\\Kobarin\\kbsap\\kbsap.kpi", L"kbsap.kpi", NULL },
+		{ L"z_5_Plugins\\Kobarin\\kbwsr\\kbwsr.kpi", L"kbwsr.kpi", NULL },
+		{ L"z_5_Plugins\\Kobarin\\kbnezplug\\kbnezplug.kpi", L"kbnezplug.kpi", NULL },
+		{ L"z_5_Plugins\\Mamiya\\kbgym\\kbgym.kpi", L"kbgym.kpi", NULL },
+		{ L"z_5_Plugins\\OK\\kbgym\\kbgym.kpi", L"kbgym.kpi", NULL },
+	};
+
+	/* Plugins と x64\Plugins。供給は x64 バンドルのみ（x86 は plugins.zip 側で廃止予定） */
+	static const TCHAR* kRoots[] = {
+		L"Plugins",
+		L"x64\\Plugins",
 	};
 
 	TCHAR bundleDir[MAX_PATH * 2] = {};
@@ -1132,21 +1214,208 @@ BOOL KpiInstall_SilentUpdateFmMonKpis(LPCTSTR exeDir)
 		return FALSE;
 
 	BOOL did = FALSE;
-	for (int i = 0; i < (int)(sizeof(kTab) / sizeof(kTab[0])); i++) {
-		TCHAR dst[MAX_PATH * 2] = {};
-		TCHAR src[MAX_PATH * 2] = {};
-		_sntprintf_s(dst, _TRUNCATE, L"%sPlugins\\%s", exeDir, kTab[i].relDst);
-		_sntprintf_s(src, _TRUNCATE, L"%s\\%s", bundleDir, kTab[i].bundleName);
-		if (!KpiInstallFileExists(dst))
-			continue; /* 無ければ無更新 */
-		if (!KpiInstallFileExists(src))
-			continue;
-		const time_t tDst = KpiInstallFileMtimeUtc(dst);
-		const time_t tSrc = KpiInstallFileMtimeUtc(src);
-		if (tSrc != 0 && tDst != 0 && tSrc <= tDst + 2)
-			continue; /* 既に同等以上 */
-		if (CopyFile(src, dst, FALSE))
-			did = TRUE;
+	for (int r = 0; r < (int)(sizeof(kRoots) / sizeof(kRoots[0])); r++) {
+		for (int i = 0; i < (int)(sizeof(kTab) / sizeof(kTab[0])); i++) {
+			TCHAR dst[MAX_PATH * 2] = {};
+			TCHAR src[MAX_PATH * 2] = {};
+			_sntprintf_s(dst, _TRUNCATE, L"%s%s\\%s", exeDir, kRoots[r], kTab[i].relDst);
+
+			/* 常に x64: .ogg_kpi_fmmon\x64\ → 無ければ直下 */
+			{
+				TCHAR prefer[MAX_PATH * 2] = {};
+				_sntprintf_s(prefer, _TRUNCATE, L"%s\\x64\\%s", bundleDir, kTab[i].bundleName);
+				if (KpiInstallFileExists(prefer))
+					_tcscpy_s(src, prefer);
+				else
+					_sntprintf_s(src, _TRUNCATE, L"%s\\%s", bundleDir, kTab[i].bundleName);
+			}
+
+			if (kTab[i].gateRel) {
+				TCHAR gate[MAX_PATH * 2] = {};
+				_sntprintf_s(gate, _TRUNCATE, L"%s%s\\%s", exeDir, kRoots[r], kTab[i].gateRel);
+				if (!KpiInstallFileExists(gate))
+					continue; /* 親 KPI が無い付属は触らない */
+			} else if (!KpiInstallFileExists(dst)) {
+				continue; /* KPI 本体は所持分のみ更新 */
+			}
+
+			if (!KpiInstallFileExists(src))
+				continue;
+			const time_t tDst = KpiInstallFileExists(dst) ? KpiInstallFileMtimeUtc(dst) : 0;
+			const time_t tSrc = KpiInstallFileMtimeUtc(src);
+			if (tSrc != 0 && tDst != 0 && tSrc <= tDst + 2)
+				continue; /* 既に同等以上 */
+
+			{
+				TCHAR dir[MAX_PATH * 2] = {};
+				_tcsncpy_s(dir, dst, _TRUNCATE);
+				TCHAR* slash = _tcsrchr(dir, L'\\');
+				if (slash) {
+					*slash = 0;
+					KpiInstallMkDirDeep(dir);
+				}
+			}
+			if (CopyFile(src, dst, FALSE))
+				did = TRUE;
+		}
 	}
 	return did;
+}
+
+/* ---- KPI 一覧用: 改造 dump の有無（同名ストックと区別） ---- */
+
+static BOOL KpiProbeMemHas(const BYTE* base, size_t n, const void* needle, size_t needleLen)
+{
+	if (!base || !needle || needleLen == 0 || n < needleLen) return FALSE;
+	const BYTE* nd = (const BYTE*)needle;
+	const BYTE* p = base;
+	const BYTE* end = base + (n - needleLen + 1);
+	while (p < end) {
+		p = (const BYTE*)memchr(p, nd[0], (size_t)(end - p));
+		if (!p) return FALSE;
+		if (memcmp(p, nd, needleLen) == 0) return TRUE;
+		++p;
+	}
+	return FALSE;
+}
+
+static BOOL KpiProbeStemIsKeysOnlyMid(LPCTSTR path)
+{
+	if (!path || !path[0]) return FALSE;
+	const TCHAR* base = path;
+	for (const TCHAR* p = path; *p; ++p) {
+		if (*p == L'\\' || *p == L'/')
+			base = p + 1;
+	}
+	TCHAR stem[128] = {};
+	_tcsncpy_s(stem, base, _TRUNCATE);
+	TCHAR* dot = _tcsrchr(stem, L'.');
+	if (dot) *dot = 0;
+	static const TCHAR* kKeys[] = {
+		L"kbfmmidi", L"kbfmoplmidi", L"kbmdx", L"kbncsf", L"kbnsfplug",
+		L"kbsnesapu", L"kbspc", L"kbsid", L"sidplay", L"kbpsf", L"kbpsf2",
+		L"kbgsf", L"kbum", L"kbmod", L"kbpxtone", L"kb2sf", L"kbvio2sf",
+		L"kbqsf", L"kbusf", L"kbssf", L"kbdsf", L"kbsap", L"kbwsr", L"kbnezplug",
+		L"nezplug",
+	};
+	for (int i = 0; i < (int)_countof(kKeys); ++i) {
+		if (_tcsicmp(stem, kKeys[i]) == 0)
+			return TRUE;
+	}
+	return FALSE;
+}
+
+static void KpiProbeOneFile(LPCTSTR path, BOOL* hasDump, BOOL* tagFm, BOOL* tagMid)
+{
+	if (!path || !path[0]) return;
+	HANDLE h = CreateFile(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+		NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+	if (h == INVALID_HANDLE_VALUE) return;
+	LARGE_INTEGER sz = {};
+	if (!GetFileSizeEx(h, &sz) || sz.QuadPart <= 0 || sz.QuadPart > (LONGLONG)(64 * 1024 * 1024)) {
+		CloseHandle(h);
+		return;
+	}
+	HANDLE map = CreateFileMapping(h, NULL, PAGE_READONLY, 0, 0, NULL);
+	if (!map) { CloseHandle(h); return; }
+	const BYTE* base = (const BYTE*)MapViewOfFile(map, FILE_MAP_READ, 0, 0, 0);
+	if (base) {
+		const size_t n = (size_t)sz.QuadPart;
+		/* UTF-16LE "fmmon_live" — dump 改造の共通しるし */
+		static const BYTE kFmLiveUtf16[] = {
+			'f',0,'m',0,'m',0,'o',0,'n',0,'_',0,'l',0,'i',0,'v',0,'e',0
+		};
+		static const char kTagFm[] = "ogg.FMmon";
+		static const char kTagMid[] = "ogg.MIDmon";
+		static const char kPmdSnap[] = "pmdwin_fmmon_snapshot";
+		if (KpiProbeMemHas(base, n, kFmLiveUtf16, sizeof(kFmLiveUtf16)))
+			*hasDump = TRUE;
+		if (KpiProbeMemHas(base, n, kTagFm, sizeof(kTagFm) - 1))
+			*tagFm = TRUE;
+		if (KpiProbeMemHas(base, n, kTagMid, sizeof(kTagMid) - 1))
+			*tagMid = TRUE;
+		if (KpiProbeMemHas(base, n, kPmdSnap, sizeof(kPmdSnap) - 1)) {
+			*hasDump = TRUE;
+			*tagFm = TRUE;
+		}
+		UnmapViewOfFile(base);
+	}
+	CloseHandle(map);
+	CloseHandle(h);
+}
+
+void KpiPlugin_ProbeMonitorCaps(LPCTSTR path, BOOL* outFmMon, BOOL* outMidMon)
+{
+	if (outFmMon) *outFmMon = FALSE;
+	if (outMidMon) *outMidMon = FALSE;
+	if (!path || !path[0]) return;
+
+	/* path + mtime キャッシュ（フィルタ再描画で毎回全 PE を踏まない） */
+	struct CapEnt {
+		TCHAR path[MAX_PATH];
+		FILETIME ft;
+		BOOL fm, mid;
+		BOOL used;
+	};
+	static CapEnt s_cache[96];
+	WIN32_FILE_ATTRIBUTE_DATA fad = {};
+	const BOOL haveFt = GetFileAttributesEx(path, GetFileExInfoStandard, &fad);
+	if (haveFt) {
+		for (int i = 0; i < (int)_countof(s_cache); ++i) {
+			if (!s_cache[i].used) continue;
+			if (_tcsicmp(s_cache[i].path, path) != 0) continue;
+			if (CompareFileTime(&s_cache[i].ft, &fad.ftLastWriteTime) != 0) break;
+			if (outFmMon) *outFmMon = s_cache[i].fm;
+			if (outMidMon) *outMidMon = s_cache[i].mid;
+			return;
+		}
+	}
+
+	BOOL hasDump = FALSE, tagFm = FALSE, tagMid = FALSE;
+	KpiProbeOneFile(path, &hasDump, &tagFm, &tagMid);
+
+	/* fmpmd.kpi 本体に dump が無くても同フォルダ PMDWin.dll を見る */
+	if (!hasDump) {
+		TCHAR dir[MAX_PATH] = {};
+		_tcsncpy_s(dir, path, _TRUNCATE);
+		TCHAR* slash = _tcsrchr(dir, L'\\');
+		if (slash) {
+			*slash = 0;
+			TCHAR sib[MAX_PATH];
+			_sntprintf_s(sib, _TRUNCATE, L"%s\\PMDWin.dll", dir);
+			KpiProbeOneFile(sib, &hasDump, &tagFm, &tagMid);
+			if (!hasDump) {
+				_sntprintf_s(sib, _TRUNCATE, L"%s\\PMDWinx86\\PMDWin.dll", dir);
+				KpiProbeOneFile(sib, &hasDump, &tagFm, &tagMid);
+			}
+		}
+	}
+
+	BOOL fm = FALSE, mid = FALSE;
+	if (tagFm || tagMid) {
+		fm = tagFm;
+		mid = tagMid;
+		/* タグ無しの旧改造バイナリ向け: dump ありなら少なくとも片方は立てる */
+		if (hasDump && !fm && !mid)
+			fm = TRUE;
+	} else if (hasDump) {
+		/* 旧: fmmon_live のみ。keys-only 系は [MIDmon]、レジスタ系は [FMmon] */
+		if (KpiProbeStemIsKeysOnlyMid(path))
+			mid = TRUE;
+		else
+			fm = TRUE;
+	}
+
+	if (outFmMon) *outFmMon = fm;
+	if (outMidMon) *outMidMon = mid;
+
+	if (haveFt) {
+		static int s_next = 0;
+		CapEnt& e = s_cache[s_next++ % (int)_countof(s_cache)];
+		_tcsncpy_s(e.path, path, _TRUNCATE);
+		e.ft = fad.ftLastWriteTime;
+		e.fm = fm;
+		e.mid = mid;
+		e.used = TRUE;
+	}
 }

@@ -35,7 +35,7 @@ struct SasamiFmMonDump {
 	uint8_t keyMidi[6];       /* 0xFF=fnum から。FMP キー専用はここに MIDI */
 	uint8_t exMidi[3];
 	uint8_t ssgMidi[3];
-	uint8_t dumpFlags;        /* bit0=keys-only bit1=PPZ行 bit2=FM3EX行 bit3=MSX */
+	uint8_t dumpFlags;        /* bit0=keys-only bit1=PPZ bit2=FM3EX bit3=MSX bit4=FMP */
 	uint8_t pad6[3];          /* [0]=MSX deviceMask: PSG=1 OPLL=2 SCC=4 */
 };
 
@@ -64,12 +64,14 @@ enum {
 	SASAMI_FMMON_FLAG_KEYSONLY = 1,
 	SASAMI_FMMON_FLAG_PPZ = 2,
 	SASAMI_FMMON_FLAG_FM3EX = 4,
-	SASAMI_FMMON_FLAG_MSX = 8
+	SASAMI_FMMON_FLAG_MSX = 8,
+	SASAMI_FMMON_FLAG_FMP = 16
 };
 enum {
 	SASAMI_FMMON_DEV_PSG = 1,
 	SASAMI_FMMON_DEV_OPLL = 2,
-	SASAMI_FMMON_DEV_SCC = 4
+	SASAMI_FMMON_DEV_SCC = 4,
+	SASAMI_FMMON_DEV_HES = 8 /* HuC6280: SSG1-3 + pcm=SSG4-6 */
 };
 
 #ifdef __cplusplus
