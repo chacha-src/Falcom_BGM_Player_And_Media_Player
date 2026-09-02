@@ -717,10 +717,31 @@ static BOOL MmReadVar(const BYTE*& q, const BYTE* end, unsigned& out)
 	return FALSE;
 }
 
+static int MmEvSoftRank(DWORD msg)
+{
+	const int st = (int)(msg & 0xF0);
+	const int d1 = (int)((msg >> 8) & 0x7F);
+	const int d2 = (int)((msg >> 16) & 0x7F);
+	/* Same-tick order mirrors score CmpEv: setup CC → notes → tear-down CC.
+	   CC64 on before notes; CC64 off after. */
+	if (st == 0xB0) {
+		if (d1 == 64) return (d2 >= 64) ? 1 : 5;
+		return 2;
+	}
+	if (st == 0xC0 || st == 0xE0) return 2;
+	if (st == 0x90 && d2 != 0) return 4;
+	if (st == 0x80 || (st == 0x90 && d2 == 0)) return 5;
+	if ((msg & 0xFF) == 0xFF) return 0; /* meta / tempo first */
+	return 3;
+}
+
 static bool MmCmpEvStable(const CMidiMonitorDlg::MmEv& a, const CMidiMonitorDlg::MmEv& b)
 {
 	if (a.tick != b.tick)
 		return a.tick < b.tick;
+	const int ra = MmEvSoftRank(a.msg), rb = MmEvSoftRank(b.msg);
+	if (ra != rb)
+		return ra < rb;
 	const int ca = (int)(a.msg & 15), cb = (int)(b.msg & 15);
 	if (ca != cb)
 		return ca < cb;

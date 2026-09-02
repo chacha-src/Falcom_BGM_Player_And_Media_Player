@@ -1,11 +1,16 @@
 #include "stdafx.h"
 #include "ogg.h"
+#include "oggDlg.h"
 #include "CSasamiFmVoiceDlg.h"
+#include "CSasamiStaffCore.h"
 #include "PlayList.h"
 #include "kb_sasami/source/sasami_write.h"
 
 /* Built-in SASAMI neiro bank (48 bytes/slot, first 25 used as OPN voice) */
 #include "kb_sasami/source/sasami_neiro.inc"
+
+#define IDC_SASAMI_FV_HEX   4486
+#define IDC_SASAMI_FV_APPLY 4487
 
 extern CPlayList* pl;
 
@@ -55,6 +60,8 @@ BEGIN_MESSAGE_MAP(CSasamiFmVoiceDlg, CCustomBlurDialogExBase)
 	ON_WM_PAINT()
 	ON_WM_ERASEBKGND()
 	ON_WM_SIZE()
+	ON_WM_ENTERSIZEMOVE()
+	ON_WM_EXITSIZEMOVE()
 	ON_WM_LBUTTONDOWN()
 	ON_WM_LBUTTONUP()
 	ON_WM_MOUSEMOVE()
@@ -62,7 +69,178 @@ BEGIN_MESSAGE_MAP(CSasamiFmVoiceDlg, CCustomBlurDialogExBase)
 	ON_BN_CLICKED(IDC_SASAMI_FV_OK, &CSasamiFmVoiceDlg::OnBnClickedOk)
 	ON_BN_CLICKED(IDC_SASAMI_FV_CANCEL, &CSasamiFmVoiceDlg::OnBnClickedCancel)
 	ON_CBN_SELCHANGE(IDC_SASAMI_FV_PRESET, &CSasamiFmVoiceDlg::OnCbnPreset)
+	ON_BN_CLICKED(IDC_SASAMI_FV_APPLY, &CSasamiFmVoiceDlg::OnBnClickedApplyHex)
 END_MESSAGE_MAP()
+
+static int VoiceApplyFromText(const wchar_t* txt, uint8_t out[25])
+{
+	if (!txt || !out) return 0;
+	memset(out, 0, 25);
+	auto hx = [](wchar_t c) -> int {
+		if (c >= L'0' && c <= L'9') return c - L'0';
+		if (c >= L'a' && c <= L'f') return c - L'a' + 10;
+		if (c >= L'A' && c <= L'F') return c - L'A' + 10;
+		return -1;
+	};
+	int n = 0;
+	for (const wchar_t* p = txt; *p && n < 25; p++) {
+		int hi = hx(*p);
+		if (hi < 0) continue;
+		p++;
+		int lo = hx(*p);
+		if (lo < 0) break;
+		out[n++] = (uint8_t)((hi << 4) | lo);
+	}
+	if (n == 25) return 1;
+	n = 0;
+	const wchar_t* p = txt;
+	while (*p && n < 25) {
+		while (*p && (*p == L' ' || *p == L',' || *p == L'\t' || *p == L'\r' || *p == L'\n')) p++;
+		if (!*p) break;
+		int v = 0, any = 0;
+		while (*p && iswdigit(*p)) { v = v * 10 + (*p - L'0'); p++; any = 1; }
+		if (!any) break;
+		if (v > 255) v = 255;
+		out[n++] = (uint8_t)v;
+	}
+	return n == 25 ? 1 : 0;
+}
+
+static void VoiceFormatHex(const uint8_t v[25], wchar_t* out, int outCch)
+{
+	if (!v || !out || outCch < 4) return;
+	int pos = 0;
+	for (int i = 0; i < 25 && pos + 3 < outCch; i++)
+		pos += _snwprintf_s(out + pos, outCch - pos, _TRUNCATE, i ? L" %02X" : L"%02X", v[i]);
+}
+
+static void VoiceFrameRect(CDC& dc, CRect r, COLORREF c)
+{
+	CPen pen(PS_SOLID, 1, c);
+	CPen* op = dc.SelectObject(&pen);
+	dc.SelectStockObject(NULL_BRUSH);
+	dc.Rectangle(r);
+	dc.SelectObject(op);
+}
+
+/* YM2608 / OPN ALGO 0..7 — same layout as CFmMonitorDlg::FmDrawAlgo */
+static void VoiceDrawAlgo(CDC& dc, CRect rc, int alg)
+{
+	const COLORREF bg = RGB(28, 44, 36);
+	dc.FillSolidRect(rc, bg);
+	VoiceFrameRect(dc, rc, RGB(90, 150, 120));
+	dc.SetBkMode(OPAQUE);
+	dc.SetBkColor(bg);
+	dc.SetTextColor(RGB(180, 230, 200));
+	wchar_t at[16];
+	_snwprintf_s(at, _TRUNCATE, L"ALGO %d", alg & 7);
+	dc.TextOut(rc.left + 3, rc.top + 1, at);
+
+	const int fontPx = 12;
+	const int margin = 6;
+	const int top = rc.top + fontPx + 3;
+	const int bot = rc.bottom - 4;
+	const int left = rc.left + margin;
+	const int right = rc.right - margin;
+	const int bw = max(14, (right - left - 20) / 4);
+	const int bh = max(10, (bot - top - 10) / 3);
+	CRect box[4];
+
+	auto place = [&](int i, int col, int row, int cols, int rows) {
+		const int cellW = (right - left) / max(1, cols);
+		const int cellH = (bot - top) / max(1, rows);
+		const int cx = left + col * cellW + cellW / 2;
+		const int cy = top + row * cellH + cellH / 2;
+		box[i].SetRect(cx - bw / 2, cy - bh / 2, cx + bw / 2, cy + bh / 2);
+	};
+
+	alg &= 7;
+	switch (alg) {
+	case 0: place(0, 0, 1, 4, 3); place(1, 1, 1, 4, 3); place(2, 2, 1, 4, 3); place(3, 3, 1, 4, 3); break;
+	case 1: place(0, 0, 0, 3, 3); place(1, 0, 2, 3, 3); place(2, 1, 1, 3, 3); place(3, 2, 1, 3, 3); break;
+	case 2: place(0, 0, 0, 3, 3); place(1, 0, 2, 3, 3); place(2, 1, 2, 3, 3); place(3, 2, 1, 3, 3); break;
+	case 3: place(0, 0, 0, 3, 3); place(1, 1, 0, 3, 3); place(2, 1, 2, 3, 3); place(3, 2, 1, 3, 3); break;
+	case 4: place(0, 0, 0, 2, 2); place(1, 1, 0, 2, 2); place(2, 0, 1, 2, 2); place(3, 1, 1, 2, 2); break;
+	case 5: place(0, 0, 1, 2, 3); place(1, 1, 0, 2, 3); place(2, 1, 1, 2, 3); place(3, 1, 2, 2, 3); break;
+	case 6: place(0, 0, 0, 2, 3); place(1, 1, 0, 2, 3); place(2, 1, 1, 2, 3); place(3, 1, 2, 2, 3); break;
+	default: place(0, 0, 1, 4, 3); place(1, 1, 1, 4, 3); place(2, 2, 1, 4, 3); place(3, 3, 1, 4, 3); break;
+	}
+
+	CPen wire(PS_SOLID, 1, RGB(140, 210, 170));
+	CPen* oldp = dc.SelectObject(&wire);
+	auto wireTo = [&](int a, int b) {
+		const POINT pa = { box[a].CenterPoint().x, box[a].CenterPoint().y };
+		const POINT pb = { box[b].CenterPoint().x, box[b].CenterPoint().y };
+		const int ax = (pa.x < pb.x) ? box[a].right : ((pa.x > pb.x) ? box[a].left : pa.x);
+		const int ay = (pa.y < pb.y) ? box[a].bottom : ((pa.y > pb.y) ? box[a].top : pa.y);
+		const int bx = (pb.x < pa.x) ? box[b].right : ((pb.x > pa.x) ? box[b].left : pb.x);
+		const int by = (pb.y < pa.y) ? box[b].bottom : ((pb.y > pa.y) ? box[b].top : pb.y);
+		dc.MoveTo(ax, ay);
+		if (ax != bx && ay != by) { dc.LineTo(bx, ay); dc.LineTo(bx, by); }
+		else dc.LineTo(bx, by);
+	};
+	switch (alg) {
+	case 0: wireTo(0, 1); wireTo(1, 2); wireTo(2, 3); break;
+	case 1: wireTo(0, 2); wireTo(1, 2); wireTo(2, 3); break;
+	case 2: wireTo(1, 2); wireTo(2, 3); wireTo(0, 3); break;
+	case 3: wireTo(0, 1); wireTo(1, 3); wireTo(2, 3); break;
+	case 4: wireTo(0, 1); wireTo(2, 3); break;
+	case 5: wireTo(0, 1); wireTo(0, 2); wireTo(0, 3); break;
+	case 6: wireTo(0, 1); break;
+	default: break;
+	}
+	dc.SelectObject(oldp);
+
+	for (int i = 0; i < 4; i++) {
+		dc.FillSolidRect(box[i], RGB(44, 68, 54));
+		VoiceFrameRect(dc, box[i], RGB(120, 180, 140));
+		wchar_t s[8];
+		_snwprintf_s(s, _TRUNCATE, L"S%d", i + 1);
+		dc.SetBkColor(RGB(44, 68, 54));
+		dc.SetTextColor(RGB(240, 250, 245));
+		CSize sz = dc.GetTextExtent(s);
+		dc.TextOut(box[i].left + (box[i].Width() - sz.cx) / 2,
+			box[i].top + (box[i].Height() - sz.cy) / 2, s);
+	}
+	CPen fb(PS_SOLID, 1, RGB(255, 190, 100));
+	CPen* op = dc.SelectObject(&fb);
+	const int cx = box[0].left;
+	dc.Arc(cx - 10, box[0].top - 7, cx + 8, box[0].bottom + 7,
+		cx, box[0].top, cx, box[0].bottom);
+	dc.MoveTo(cx - 1, box[0].top);
+	dc.LineTo(cx - 4, box[0].top - 4);
+	dc.SelectObject(op);
+}
+
+BOOL CSasamiFmVoiceDlg::PreTranslateMessage(MSG* pMsg)
+{
+	if (pMsg->message == WM_KEYDOWN && pMsg->wParam == 'V'
+		&& (GetKeyState(VK_CONTROL) & 0x8000)) {
+		if (OpenClipboard()) {
+			HANDLE h = GetClipboardData(CF_UNICODETEXT);
+			if (h) {
+				const wchar_t* txt = (const wchar_t*)GlobalLock(h);
+				if (txt) {
+					uint8_t tmp[25];
+					if (VoiceApplyFromText(txt, tmp)) {
+						memcpy(m_voice, tmp, 25);
+						SyncHexToEdit();
+						InvalidateRect(m_bodyRc, FALSE);
+						PreviewBeep();
+					}
+					GlobalUnlock(h);
+				}
+			}
+			CloseClipboard();
+		}
+		return TRUE;
+	}
+	if (pMsg->message == WM_KEYDOWN && pMsg->wParam == VK_SPACE) {
+		PreviewBeep();
+		return TRUE;
+	}
+	return CCustomBlurDialogExBase::PreTranslateMessage(pMsg);
+}
 
 void CSasamiFmVoiceDlg::ApplyLang()
 {
@@ -89,7 +267,13 @@ void CSasamiFmVoiceDlg::LayoutChrome()
 	/* Closed combo height must stay ~line height; large H overlaps the knob body. */
 	if (m_cmbPreset.GetSafeHwnd())
 		m_cmbPreset.MoveWindow(pad + 292, y, 180, 28);
-	y += 40;
+	y += 36;
+	const int applyW = 72;
+	if (m_edHex.GetSafeHwnd())
+		m_edHex.MoveWindow(pad, y, max(120, rc.Width() - pad * 2 - applyW - 4), 24);
+	if (m_btnApplyHex.GetSafeHwnd())
+		m_btnApplyHex.MoveWindow(rc.Width() - pad - applyW, y, applyW, 24);
+	y += 30;
 	m_bodyRc.SetRect(pad, y, rc.Width() - pad, rc.Height() - pad);
 
 	const int algoW = max(150, m_bodyRc.Width() / 4);
@@ -114,6 +298,18 @@ BOOL CSasamiFmVoiceDlg::OnInitDialog()
 	m_btnOk.SetFlat(TRUE);
 	m_btnCancel.SetFlat(TRUE);
 	if (m_cmbPreset.GetSafeHwnd()) m_cmbPreset.SetAeroMode(FALSE);
+	if (!m_edHex.GetSafeHwnd()) {
+		m_edHex.Create(WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL,
+			CRect(0, 0, 400, 24), this, IDC_SASAMI_FV_HEX);
+		m_edHex.SetAeroMode(FALSE);
+	}
+	if (!m_btnApplyHex.GetSafeHwnd()) {
+		m_btnApplyHex.Create(
+			LL14(L"適用", L"Apply", L"Appliquer", L"Applica", L"Aplicar", L"적용", L"应用", L"تطبيق", L"Применить", L"Anwenden", L"Aplicar", L"Toepassen", L"Zastosuj", L"Uygula"),
+			WS_CHILD | WS_VISIBLE | WS_TABSTOP, CRect(0, 0, 72, 24), this, IDC_SASAMI_FV_APPLY);
+		m_btnApplyHex.SetAeroMode(FALSE);
+		m_btnApplyHex.SetFlat(TRUE);
+	}
 	ApplyLang();
 	if (m_cmbPreset.GetSafeHwnd()) {
 		m_cmbPreset.ResetContent();
@@ -128,9 +324,34 @@ BOOL CSasamiFmVoiceDlg::OnInitDialog()
 	}
 	if (!ScRestoreWndGeom(this, savedata.sasamiFmVoiceX, savedata.sasamiFmVoiceY,
 		savedata.sasamiFmVoiceW, savedata.sasamiFmVoiceH, 640, 420))
-		SetWindowPos(NULL, 0, 0, 780, 560, SWP_NOMOVE | SWP_NOZORDER);
+		SetWindowPos(NULL, 0, 0, 780, 580, SWP_NOMOVE | SWP_NOZORDER);
 	LayoutChrome();
+	SyncHexToEdit();
 	return TRUE;
+}
+
+void CSasamiFmVoiceDlg::SyncHexToEdit()
+{
+	if (!m_edHex.GetSafeHwnd()) return;
+	wchar_t buf[160];
+	VoiceFormatHex(m_voice, buf, 160);
+	m_edHex.SetWindowText(buf);
+}
+
+void CSasamiFmVoiceDlg::OnBnClickedApplyHex()
+{
+	if (!m_edHex.GetSafeHwnd()) return;
+	CString txt;
+	m_edHex.GetWindowText(txt);
+	uint8_t tmp[25];
+	if (!VoiceApplyFromText(txt, tmp)) {
+		MessageBeep(MB_ICONHAND);
+		return;
+	}
+	memcpy(m_voice, tmp, 25);
+	SyncHexToEdit();
+	InvalidateRect(m_bodyRc, FALSE);
+	PreviewBeep();
 }
 
 void CSasamiFmVoiceDlg::OnCbnPreset()
@@ -142,21 +363,46 @@ void CSasamiFmVoiceDlg::OnCbnPreset()
 	const int nNeiro = (int)(sizeof(kSasamiNeiro) / 0x30);
 	if (idx < 0 || idx >= nNeiro) return;
 	memcpy(m_voice, kSasamiNeiro + idx * 0x30, 25);
+	SyncHexToEdit();
 	InvalidateRect(m_bodyRc, FALSE);
+}
+
+void CSasamiFmVoiceDlg::OnEnterSizeMove()
+{
+}
+
+void CSasamiFmVoiceDlg::OnExitSizeMove()
+{
+	if (::IsWindow(m_hWnd) && !IsIconic()) {
+		LayoutChrome();
+		RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_UPDATENOW);
+	}
 }
 
 void CSasamiFmVoiceDlg::OnSize(UINT nType, int cx, int cy)
 {
 	CCustomBlurDialogExBase::OnSize(nType, cx, cy);
-	if (m_btnOk.GetSafeHwnd()) LayoutChrome();
+	if (m_btnOk.GetSafeHwnd()) {
+		LayoutChrome();
+		/* リサイズで旧 body 矩形が残る — クライアント全体を消してから再描画 */
+		Invalidate(FALSE);
+	}
 }
 
 BOOL CSasamiFmVoiceDlg::OnEraseBkgnd(CDC* pDC)
 {
 	if (!pDC) return TRUE;
-	CRect rc; GetClientRect(&rc);
+	CRect clip;
+	if (pDC->GetClipBox(&clip) == ERROR)
+		return TRUE;
+	/* クリップ領域全体を消す（return TRUE のみだとリサイズで残像が連鎖する） */
+	pDC->FillSolidRect(&clip, RGB(20, 27, 24));
 	const int cap = CCC_GetCustomCaptionHeight(m_hWnd);
-	pDC->FillSolidRect(0, cap, rc.Width(), max(0, m_bodyRc.top - cap), RGB(24, 29, 27));
+	if (m_bodyRc.top > cap) {
+		CRect chrome(clip.left, max(clip.top, cap), clip.right, min(clip.bottom, m_bodyRc.top));
+		if (chrome.top < chrome.bottom)
+			pDC->FillSolidRect(&chrome, RGB(24, 29, 27));
+	}
 	return TRUE;
 }
 
@@ -189,21 +435,9 @@ void CSasamiFmVoiceDlg::OnPaint()
 	mem.SetBkMode(TRANSPARENT);
 	mem.SetTextColor(RGB(198, 226, 211));
 	CFont* oldF = mem.SelectObject(GetFont());
-	CRect algo(5, 5, max(145, body.Width()/4)-5, max(90, body.Height()-86));
-	mem.FillSolidRect(algo, RGB(28,44,36)); mem.Rectangle(algo);
-	CString title; title.Format(L"ALGORITHM %d", m_voice[24] & 7);
-	mem.DrawText(title, algo, DT_CENTER|DT_TOP|DT_SINGLELINE);
-	CRect boxes[4]; const int alg = m_voice[24]&7;
-	for (int i=0;i<4;++i) {
-		int x = algo.left+12 + (algo.Width()-34) * i / 3;
-		int y = algo.CenterPoint().y + ((alg==7 || i==3) ? 8 : ((i&1)?18:-18));
-		boxes[i].SetRect(x,y,x+22,y+18);
-	}
-	CPen wire(PS_SOLID,1,RGB(126,202,161)); CPen* oldP=mem.SelectObject(&wire);
-	for(int i=0;i<3;++i){ mem.MoveTo(boxes[i].CenterPoint()); mem.LineTo(boxes[i+1].CenterPoint()); }
-	mem.SelectObject(oldP);
-	for(int i=0;i<4;++i){ mem.FillSolidRect(boxes[i],RGB(51,79,64)); CString s; s.Format(L"%d",i+1); mem.DrawText(s,boxes[i],DT_CENTER|DT_VCENTER|DT_SINGLELINE); }
-	static const wchar_t* names[5]={L"TL",L"AR",L"DR",L"SR",L"RR"};
+	CRect algo(5, 5, max(145, body.Width() / 4) - 5, max(120, body.Height() - 86));
+	VoiceDrawAlgo(mem, algo, m_voice[24] & 7);
+	static const wchar_t* names[5] = { L"TL", L"AR", L"DR", L"SR", L"RR" };
 	for(int opi=0;opi<4;++opi) for(int p=0;p<5;++p) {
 		CRect kr=m_knobRc[opi*5+p]; kr.OffsetRect(-body.left,-body.top);
 		int idx=0,val=0,vmax=31;
@@ -258,8 +492,13 @@ void CSasamiFmVoiceDlg::OnMouseMove(UINT nFlags, CPoint point)
 
 void CSasamiFmVoiceDlg::OnLButtonUp(UINT nFlags, CPoint point)
 {
-	if(m_dragKnob>=0){ m_dragKnob=-1; if(GetCapture()==this) ReleaseCapture(); return; }
-	CCustomBlurDialogExBase::OnLButtonUp(nFlags,point);
+	if (m_dragKnob >= 0) {
+		m_dragKnob = -1;
+		if (GetCapture() == this) ReleaseCapture();
+		SyncHexToEdit();
+		return;
+	}
+	CCustomBlurDialogExBase::OnLButtonUp(nFlags, point);
 }
 
 int CSasamiFmVoiceDlg::PreviewBeep()
@@ -267,13 +506,14 @@ int CSasamiFmVoiceDlg::PreviewBeep()
 	ScFmDoc* doc = (ScFmDoc*)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(ScFmDoc));
 	if (!doc) return 0;
 	ScFmDocClear(doc);
+	doc->tempoT = 13000;
 	int vi = ScFmAllocVoice(doc, m_voice);
 	int ok = 0;
 	if (vi >= 0) {
 		ScFmAddVoiceSelect(doc, 0, 0, vi, 1);
-		ScFmAddVolTl(doc, 0, 0, 16);
-		ScFmAddNote(doc, 0, 0, (uint8_t)((4 << 4) | 0), 48);
-		ScFmAddRest(doc, 48, 0, 24);
+		ScFmAddVolTl(doc, 0, 0, 32);
+		ScFmAddNote(doc, 0, 0, (uint8_t)((4 << 4) | 0), SC_PPQN * 2);
+		ScFmAddRest(doc, SC_PPQN * 2, 0, SC_PPQN / 4);
 		SasamiWriteFm* w = (SasamiWriteFm*)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(SasamiWriteFm));
 		if (w && ScFmDocToWrite(doc, w)) {
 			uint8_t* bin = (uint8_t*)HeapAlloc(GetProcessHeap(), 0, SASAMI_WRITE_MAX);
@@ -282,10 +522,16 @@ int CSasamiFmVoiceDlg::PreviewBeep()
 				if (sz) {
 					wchar_t dir[MAX_PATH], path[MAX_PATH];
 					GetTempPathW(MAX_PATH, dir);
-					_snwprintf_s(path, _TRUNCATE, L"%sogg_sasami_voice_prev.fpy", dir);
-					ok = SasamiWriteFileW(path, bin, sz);
-					if (ok && pl) pl->AddFilePath(path);
-					else ok = 0;
+					/* ogg_sasami_score* → resume prompt を出さずホスト再生 */
+					_snwprintf_s(path, _TRUNCATE, L"%sogg_sasami_score_voice.fpy", dir);
+					if (SasamiWriteFileW(path, bin, sz)) {
+						ok = ScStaffStartHostPreview(path, NULL, doc->tempoT);
+						if (!ok) {
+							ScStaffUi ui;
+							ScStaffUiInit(&ui, 1, 1);
+							ok = ScStaffPreviewViaWavout(path, &ui, doc->tempoT);
+						}
+					}
 				}
 				HeapFree(GetProcessHeap(), 0, bin);
 			}
@@ -294,6 +540,7 @@ int CSasamiFmVoiceDlg::PreviewBeep()
 		if (w) HeapFree(GetProcessHeap(), 0, w);
 	}
 	HeapFree(GetProcessHeap(), 0, doc);
+	if (!ok) MessageBeep(MB_ICONHAND);
 	return ok;
 }
 

@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "CCustomControl.h"
 #include "resource.h"

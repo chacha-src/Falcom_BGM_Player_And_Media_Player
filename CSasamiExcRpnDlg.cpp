@@ -1,4 +1,4 @@
-﻿#include "stdafx.h"
+#include "stdafx.h"
 #include "ogg.h"
 #include "CSasamiExcRpnDlg.h"
 #include "VstMidiEngine.h"

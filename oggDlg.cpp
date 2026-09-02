@@ -1,4 +1,4 @@
-﻿// oggDlg.cpp : インプリメンテーション ファイル
+// oggDlg.cpp : インプリメンテーション ファイル
 //
 //#define _DLL
 #include "stdafx.h"
@@ -35,6 +35,7 @@ int flacmode = 0;
 #include "CSasamiFmScoreDlg.h"
 #include "CSasamiTextDlg.h"
 #include "CSasamiNotePaletteDlg.h"
+#include "CSasamiLayoutPaletteDlg.h"
 #include "CSasamiNotePropsDlg.h"
 #include "VstHostDlg.h"
 #include "CProToolsDlg.h"
@@ -33566,6 +33567,7 @@ enum {
 	kHideFmMidi_NoteProps = 1 << 6,
 	kHideFmMidi_VstHost = 1 << 7,
 	kHideFmMidi_PrTune = 1 << 8,
+	kHideFmMidi_LayoutPal = 1 << 9,
 };
 
 static void HideFmMidiToolWnd(CWnd* w, int bit, int& mask)
@@ -33588,6 +33590,7 @@ void COggDlg::HideMidiMonitorForMinimize()
 	HideFmMidiToolWnd(CSasamiFmScoreDlg::Instance(), kHideFmMidi_FmScore, m_fmMidiToolsHiddenMask);
 	HideFmMidiToolWnd(CSasamiTextDlg::Instance(), kHideFmMidi_Text, m_fmMidiToolsHiddenMask);
 	HideFmMidiToolWnd(CSasamiNotePaletteDlg::Instance(), kHideFmMidi_NotePal, m_fmMidiToolsHiddenMask);
+	HideFmMidiToolWnd(CSasamiLayoutPaletteDlg::Instance(), kHideFmMidi_LayoutPal, m_fmMidiToolsHiddenMask);
 	HideFmMidiToolWnd(CSasamiNotePropsDlg::Instance(), kHideFmMidi_NoteProps, m_fmMidiToolsHiddenMask);
 	HideFmMidiToolWnd(g_vstHostDlg, kHideFmMidi_VstHost, m_fmMidiToolsHiddenMask);
 	HideFmMidiToolWnd(m_PianoRollTuneDlg, kHideFmMidi_PrTune, m_fmMidiToolsHiddenMask);
@@ -33617,6 +33620,7 @@ void COggDlg::RestoreMidiMonitorAfterMinimize()
 	restore(CSasamiFmScoreDlg::Instance(), kHideFmMidi_FmScore, mask);
 	restore(CSasamiTextDlg::Instance(), kHideFmMidi_Text, mask);
 	restore(CSasamiNotePaletteDlg::Instance(), kHideFmMidi_NotePal, mask);
+	restore(CSasamiLayoutPaletteDlg::Instance(), kHideFmMidi_LayoutPal, mask);
 	restore(CSasamiNotePropsDlg::Instance(), kHideFmMidi_NoteProps, mask);
 	restore(g_vstHostDlg, kHideFmMidi_VstHost, mask);
 	if ((mask & kHideFmMidi_PrTune) && savedata.prTunewindow == 1)

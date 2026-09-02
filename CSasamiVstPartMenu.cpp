@@ -319,3 +319,21 @@ int ScVstAssignToneForPart(CWnd* owner, int part1to32, ScMidiVstBind* bind)
 	(void)owner;
 	return 2;
 }
+
+int ScMidiPartAllowMidScoreTone(const ScMidiVstBind* bind, int ch0)
+{
+	if (ch0 < 0 || ch0 >= 32) return 0;
+	wchar_t path[520];
+	path[0] = 0;
+	if (bind && bind->vstPath[ch0][0])
+		wcsncpy_s(path, bind->vstPath[ch0], _TRUNCATE);
+	else if (VstLivePartIsLoaded(ch0 + 1))
+		VstLivePartGetPath(ch0 + 1, path, 520);
+	if (!path[0]) return 0;
+	const size_t n = wcslen(path);
+	if (n >= 5 && _wcsicmp(path + n - 5, L".vst3") == 0)
+		return 0;
+	if (VstLivePartIsLoaded(ch0 + 1) && VstLivePartIsMulti(ch0 + 1))
+		return 1;
+	return VstDetectMultiTimbral(path) ? 1 : 0;
+}

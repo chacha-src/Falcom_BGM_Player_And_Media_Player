@@ -34,6 +34,15 @@ struct MidiTrackState {
 	int pedal;
 	uint32_t loopStartTick;
 	uint32_t loopEndTick;
+	/* Wave3 soft FX (cmd 46/47) — expand into SMF curves while note is held */
+	int softMode;   /* -1 off, 0=vib, 1=trem */
+	int softDelay;
+	int softDepth;
+	int softPhase;
+	int portaSemi;  /* signed, 0=off */
+	int portaDelay;
+	int portaGlide;
+	int portaLeft;
 };
 
 enum { SASAMI_MAX_EV = 49152, SASAMI_MAX_FIRST = 16384 };
@@ -189,14 +198,15 @@ static int GsPartIdx(int ch)
 
 static uint32_t ReadJump(const SasamiSong& s, uint32_t addr, int ver, uint32_t* nextOff)
 {
-	if (ver == 1) {
-		const uint16_t a = SasamiGet16(s, addr + 1);
-		*nextOff = addr + 3;
-		return (a >= 0x1000) ? (uint32_t)(a - 0x1000) : a;
-	}
-	const uint32_t a = SasamiGet24(s, addr + 1);
-	*nextOff = addr + 4;
-	return (a >= 0x1000) ? (a - 0x1000) : a;
+	/* MPY and MPW2/3 track *streams* always use 3-byte cmd 10/24 with a 16-bit
+	   absolute (0x1xxx). mpyVersion==2 only widens the track pointer TABLE at
+	   0x200 to 24-bit — it must not change in-stream jump encoding. Reading
+	   24-bit here made every J/:| on .mpw2 land on garbage (Space preview
+	   died in ~3s, Loop数=0). */
+	(void)ver;
+	const uint16_t a = SasamiGet16(s, addr + 1);
+	*nextOff = addr + 3;
+	return (a >= 0x1000) ? (uint32_t)(a - 0x1000) : a;
 }
 
 static uint8_t* TrkPtr(int t)
@@ -517,6 +527,9 @@ bool SasamiConvertToSmf(const SasamiSong& song, SasamiMidiMap map, int gsBankLsb
 		tr[i].pedal = 0;
 		tr[i].loopStartTick = 0xFFFFFFFFu;
 		tr[i].loopEndTick = 0;
+		tr[i].softMode = -1;
+		tr[i].softDelay = tr[i].softDepth = tr[i].softPhase = 0;
+		tr[i].portaSemi = tr[i].portaDelay = tr[i].portaGlide = tr[i].portaLeft = 0;
 		if (tr[i].alive && tr[i].addr == 0xF0) tr[i].alive = 0;
 		if (tr[i].alive) nAlive++;
 	}
@@ -732,6 +745,13 @@ bool SasamiConvertToSmf(const SasamiSong& song, SasamiMidiMap map, int gsBankLsb
 						again = 0;
 						break;
 					}
+					/* Only kill true self-jumps (bad patch). Forward J and
+					   0xE000→first-|: must keep working for normal .mpw2. */
+					if (dest == addr) {
+						killTrack(i);
+						again = 0;
+						break;
+					}
 					if (dest < addr) {
 						tr[i].everJump = 1;
 						tr[i].backJumps++;
@@ -782,6 +802,9 @@ bool SasamiConvertToSmf(const SasamiSong& song, SasamiMidiMap map, int gsBankLsb
 									}
 								}
 							}
+							/* Unknown land tick → 0 so loopStart marker still emits. */
+							if (destTick == 0xFFFFFFFFu)
+								destTick = 0;
 							tr[i].loopStartTick = destTick;
 							tr[i].loopEndTick = tick;
 							if (tick > gLoopEnd) gLoopEnd = tick;
@@ -1133,6 +1156,29 @@ bool SasamiConvertToSmf(const SasamiSong& song, SasamiMidiMap map, int gsBankLsb
 						PushShort(tick, port, (uint8_t)(0xB0 | ch), 10, b2);
 					tr[i].addr = addr + 3;
 					break;
+				case 46: {
+					/* Soft vib/trem: [46][mode][delay][depth] */
+					uint8_t depth = 40;
+					if (SasamiOffOk(song, addr, 4))
+						depth = SasamiGet(song, addr + 3);
+					tr[i].softMode = (int)(b1 & 1);
+					tr[i].softDelay = (int)b2;
+					tr[i].softDepth = (int)depth;
+					tr[i].softPhase = 0;
+					tr[i].addr = addr + 4;
+					break;
+				}
+				case 47: {
+					uint8_t glide = 24;
+					if (SasamiOffOk(song, addr, 4))
+						glide = SasamiGet(song, addr + 3);
+					tr[i].portaSemi = (int)b1 - 64;
+					tr[i].portaDelay = (int)b2;
+					tr[i].portaGlide = (int)glide;
+					tr[i].portaLeft = (int)glide;
+					tr[i].addr = addr + 4;
+					break;
+				}
 				default:
 					if (cmd == 0) {
 						killTrack(i);
@@ -1147,7 +1193,44 @@ bool SasamiConvertToSmf(const SasamiSong& song, SasamiMidiMap map, int gsBankLsb
 		}
 		if (!any) break;
 		for (int i = 0; i < song.trackCount && i < 64; i++) {
-			if (tr[i].alive && tr[i].count > 0) tr[i].count--;
+			if (!tr[i].alive) continue;
+			if (tr[i].count > 0) tr[i].count--;
+			/* Soft FX while sounding */
+			if (tr[i].note) {
+				const int ch = tr[i].part;
+				const int port = tr[i].port;
+				if (tr[i].portaSemi != 0 && tr[i].portaGlide > 0) {
+					if (tr[i].portaDelay > 0) tr[i].portaDelay--;
+					else if (tr[i].portaLeft > 0) {
+						int done = tr[i].portaGlide - tr[i].portaLeft;
+						int bend = 0x2000 + (tr[i].portaSemi * 0x200 * done) / tr[i].portaGlide;
+						if (bend < 0) bend = 0;
+						if (bend > 0x3FFF) bend = 0x3FFF;
+						PushShort(tick, port, (uint8_t)(0xE0 | ch), (uint8_t)(bend & 0x7F), (uint8_t)((bend >> 7) & 0x7F));
+						tr[i].portaLeft--;
+					}
+				}
+				if (tr[i].softMode >= 0 && tr[i].softDepth > 0) {
+					if (tr[i].softDelay > 0) tr[i].softDelay--;
+					else {
+						tr[i].softPhase = (tr[i].softPhase + 1) & 63;
+						/* triangle 0..depth */
+						int ph = tr[i].softPhase;
+						int tri = (ph < 32) ? ph : (64 - ph);
+						int amt = (tri * tr[i].softDepth) / 32;
+						if (tr[i].softMode == 0) {
+							int bend = 0x2000 + (amt - tr[i].softDepth / 2) * 16;
+							if (bend < 0) bend = 0;
+							if (bend > 0x3FFF) bend = 0x3FFF;
+							PushShort(tick, port, (uint8_t)(0xE0 | ch), (uint8_t)(bend & 0x7F), (uint8_t)((bend >> 7) & 0x7F));
+						} else {
+							int cc = 127 - amt;
+							if (cc < 1) cc = 1;
+							PushShort(tick, port, (uint8_t)(0xB0 | ch), 11, (uint8_t)cc);
+						}
+					}
+				}
+			}
 		}
 		tick++;
 		int finiteAlive = 0, loopAlive = 0;

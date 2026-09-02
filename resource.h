@@ -332,6 +332,27 @@
 #define IDC_SASAMI_STRIP_KIND1          4459
 #define IDC_SASAMI_STRIP_DRAW           4460
 #define IDC_SASAMI_STRIP_LANES          4461
+#define IDC_SASAMI_STRIP_STEP           4623
+#define IDC_SASAMI_SCORE_HELPBAR        4624
+#define IDC_SASAMI_STRIP_KIND2          4625
+#define IDC_SASAMI_STRIP_HGT0           4627
+#define IDC_SASAMI_STRIP_HGT1           4628
+#define IDC_SASAMI_STRIP_HGT2           4629
+#define IDC_SASAMI_MIDI_INDEV           4626
+#define IDC_SASAMI_MIDI_INCH            4627
+#define IDC_SASAMI_MIDI_INMODE          4628
+#define IDC_SASAMI_MIDI_ARR             4629
+#define IDC_SASAMI_MIDI_CHORD           4630
+#define IDC_SASAMI_MIDI_PATT            4631
+#define IDC_SASAMI_MIDI_ROLL            4632
+#define IDC_SASAMI_MIDI_FOLLOW          4633
+#define IDC_SASAMI_MIDI_LAYOUT          4522
+#define IDC_SASAMI_FM_LAYOUT            4523
+#define IDD_SASAMI_PIANO_ROLL           4634
+#define IDC_SASAMI_FM_INDEV             4635
+#define IDC_SASAMI_FM_INMODE            4636
+#define IDC_SASAMI_FM_ARR               4637
+#define IDC_SASAMI_FM_ROLL              4638
 #define IDC_SASAMI_NP_NOTE              4462
 #define IDC_SASAMI_NP_GT                4463
 #define IDC_SASAMI_NP_VEL               4464
@@ -404,6 +425,7 @@
 #define IDD_SASAMI_INSERT_FX            4609
 #define IDD_SASAMI_SIMPLE_INPUT         4610
 #define IDD_SASAMI_CMD_HELP             4611
+#define IDD_SASAMI_LAYOUT_PAL           4612
 #define IDC_SCH_TABS                    4620
 #define IDC_SCH_COPY                    4621
 #define IDC_SCH_BODY                    4622
@@ -2096,7 +2118,7 @@
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NEXT_RESOURCE_VALUE        354
 #define _APS_NEXT_COMMAND_VALUE         33288
-#define _APS_NEXT_CONTROL_VALUE         4522
+#define _APS_NEXT_CONTROL_VALUE         4524
 #define _APS_NEXT_SYMED_VALUE           104
 #endif
 #endif

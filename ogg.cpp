@@ -418,6 +418,11 @@ BOOL COggApp::InitInstance()
 	savedata.sasamiFmVoiceW = savedata.sasamiFmVoiceH = 0;
 	savedata.sasamiToneMapW = savedata.sasamiToneMapH = 0;
 	savedata.sasamiVstPickW = savedata.sasamiVstPickH = 0;
+	savedata.sasamiNotePalX = savedata.sasamiNotePalY = -1;
+	savedata.sasamiLayoutPalW = savedata.sasamiLayoutPalH = 0;
+	savedata.sasamiLayoutPalX = savedata.sasamiLayoutPalY = -1;
+	savedata.sasamiLayPalW = savedata.sasamiLayPalH = 0;
+	savedata.sasamiLayPalX = savedata.sasamiLayPalY = -1;
 	savedata.midimony = 0;
 	savedata.midimonw = 0;
 	savedata.midimonh = 0;
@@ -2051,6 +2056,35 @@ BOOL COggApp::InitInstance()
 		savedata.sasamiFmVoiceW = savedata.sasamiFmVoiceH = 0;
 		savedata.sasamiToneMapW = savedata.sasamiToneMapH = 0;
 		savedata.sasamiVstPickW = savedata.sasamiVstPickH = 0;
+	}
+	if (datFileSize < (int)(offsetof(save, sasamiNotePalX) + sizeof(savedata.sasamiNotePalX))) {
+		savedata.sasamiNotePalX = -1;
+		savedata.sasamiNotePalY = -1;
+	}
+	if (datFileSize < (int)(offsetof(save, sasamiLayoutPalX) + sizeof(savedata.sasamiLayoutPalX))) {
+		savedata.sasamiLayoutPalW = savedata.sasamiLayoutPalH = 0;
+		savedata.sasamiLayoutPalX = -1;
+		savedata.sasamiLayoutPalY = -1;
+	}
+	if (datFileSize < (int)(offsetof(save, sasamiPartStripCount) + sizeof(savedata.sasamiPartStripCount))) {
+		memset(savedata.sasamiPartStripCount, 0, sizeof(savedata.sasamiPartStripCount));
+		memset(savedata.sasamiPartStripKind, 0, sizeof(savedata.sasamiPartStripKind));
+		memset(savedata.sasamiPartStripHgt, 0, sizeof(savedata.sasamiPartStripHgt));
+	}
+	if (datFileSize < (int)(offsetof(save, sasamiGlobalTempoBandOn) + sizeof(savedata.sasamiGlobalTempoBandOn))) {
+		savedata.sasamiGlobalTempoBandOn = 1;
+		savedata.sasamiGlobalTempoBandHgt = 0;
+		for (int pb = 0; pb < 32; pb++) {
+			savedata.sasamiPartBandMask[pb] = 27u; /* expr|vol|reverb|chorus */
+			for (int bh = 0; bh < 8; bh++)
+				savedata.sasamiPartBandHgt[pb][bh] = 2;
+		}
+	}
+	if (datFileSize < (int)(offsetof(save, sasamiLayPalX) + sizeof(savedata.sasamiLayPalX))) {
+		savedata.sasamiLayPalX = savedata.sasamiLayoutPalX;
+		savedata.sasamiLayPalY = savedata.sasamiLayoutPalY;
+		savedata.sasamiLayPalW = savedata.sasamiLayoutPalW;
+		savedata.sasamiLayPalH = savedata.sasamiLayoutPalH;
 	}
 	/* DatArc 内 fmmon_geom.dat（なければ旧 exe隣 .bin）で開閉・位置を上書き */
 	{

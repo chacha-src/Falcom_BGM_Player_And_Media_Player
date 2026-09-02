@@ -24,6 +24,7 @@ struct SasamiWriteMidi {
 	char commentSjis[65];
 	/* MPW3 / .mpsmv VST bind */
 	int isMpw3;
+	int mpw3Ver; /* 1=classic trailer, 2=+macro footer */
 	wchar_t vstPath[32][260];
 	int vstProg[32];
 	int vstBankMsb[32];
@@ -33,6 +34,10 @@ struct SasamiWriteMidi {
 	uint32_t vstCompLen[32];
 	uint8_t* vstCtrl[32];
 	uint32_t vstCtrlLen[32];
+	/* Wave3 macros (ver≥2). UTF-16LE packed; optional. */
+	wchar_t macroName[32][32];
+	wchar_t macroBody[32][2048];
+	int macroCount;
 };
 
 struct SasamiWriteFm {
@@ -47,6 +52,10 @@ struct SasamiWriteFm {
 	uint8_t voices[64][25];
 	uint16_t voiceAddr[64];
 	int voiceCount;
+	/* Wave3: FPY2 footer macros */
+	wchar_t macroName[32][32];
+	wchar_t macroBody[32][2048];
+	int macroCount;
 };
 
 void SasamiWriteMidiClear(SasamiWriteMidi* w);

@@ -19,7 +19,7 @@ IMPLEMENT_DYNAMIC(CSasamiTextDlg, CCustomBlurDialogExBase)
 
 CSasamiTextDlg::CSasamiTextDlg(CWnd* pParent)
 	: CCustomBlurDialogExBase(CSasamiTextDlg::IDD, pParent)
-	, m_modeFm(0), m_b64Expanded(0), m_b64RefreshLock(FALSE)
+	, m_modeFm(0), m_b64Expanded(0), m_b64RefreshLock(FALSE), m_textDirty(0)
 {
 	m_lastOut[0] = 0;
 	ScMidiDocClear(&m_midi);
@@ -33,10 +33,22 @@ CSasamiTextDlg* CSasamiTextDlg::Instance() { return s_inst; }
 void CSasamiTextDlg::OpenOwned(CWnd* owner)
 {
 	const int created = !(s_inst && ::IsWindow(s_inst->GetSafeHwnd()));
+	auto syncFromScore = [&]() {
+		if (CSasamiFmScoreDlg* fm = dynamic_cast<CSasamiFmScoreDlg*>(owner))
+			fm->PushDocToText();
+		else if (CSasamiMidiScoreDlg* sc = dynamic_cast<CSasamiMidiScoreDlg*>(owner))
+			sc->PushDocToText();
+		else if (CSasamiFmScoreDlg* fm = CSasamiFmScoreDlg::Instance()) {
+			if (::IsWindow(fm->GetSafeHwnd()))
+				fm->PushDocToText();
+		} else if (CSasamiMidiScoreDlg* sc = CSasamiMidiScoreDlg::Instance()) {
+			if (::IsWindow(sc->GetSafeHwnd()))
+				sc->PushDocToText();
+		}
+	};
 	if (!created) {
 		CCC_PresentOwnedHelp(s_inst, owner ? owner : AfxGetMainWnd());
-		if (CSasamiMidiScoreDlg* sc = CSasamiMidiScoreDlg::Instance())
-			sc->PushDocToText();
+		syncFromScore();
 		return;
 	}
 	s_inst = new CSasamiTextDlg(owner);
@@ -45,17 +57,34 @@ void CSasamiTextDlg::OpenOwned(CWnd* owner)
 		s_inst = NULL;
 		return;
 	}
-	if (CSasamiMidiScoreDlg* sc = CSasamiMidiScoreDlg::Instance())
-		sc->PushDocToText();
-	else {
+	if (dynamic_cast<CSasamiFmScoreDlg*>(owner) || dynamic_cast<CSasamiMidiScoreDlg*>(owner))
+		syncFromScore();
+	else if (CSasamiFmScoreDlg* fm = CSasamiFmScoreDlg::Instance()) {
+		if (::IsWindow(fm->GetSafeHwnd()))
+			fm->PushDocToText();
+	} else if (CSasamiMidiScoreDlg* sc = CSasamiMidiScoreDlg::Instance()) {
+		if (::IsWindow(sc->GetSafeHwnd()))
+			sc->PushDocToText();
+	} else {
 		const int mmlCch = (int)(SC_TEXT_MAX / sizeof(wchar_t));
 		wchar_t* mml = (wchar_t*)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY,
 			(SIZE_T)mmlCch * sizeof(wchar_t));
+		ScFmDoc* fdoc = (ScFmDoc*)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(ScFmDoc));
 		ScMidiDoc* doc = (ScMidiDoc*)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(ScMidiDoc));
-		if (mml && doc && ScSessionLoadLastMidi(doc, mml, mmlCch) && mml[0]) {
+		if (mml && fdoc && ScSessionLoadLastFm(fdoc, mml, mmlCch) && mml[0]) {
+			s_inst->m_modeFm = 1;
+			s_inst->m_textFull = mml;
+			s_inst->m_b64Expanded = 1;
+			s_inst->m_fm = *fdoc;
+			s_inst->ApplyB64ViewToEdit();
+		} else if (mml && doc && ScSessionLoadLastMidi(doc, mml, mmlCch) && mml[0]) {
 			s_inst->m_textFull = mml;
 			s_inst->m_b64Expanded = ScMmlContainsVstB64(mml) ? 0 : 1;
 			s_inst->ApplyB64ViewToEdit();
+		}
+		if (fdoc) {
+			ScFmDocClear(fdoc);
+			HeapFree(GetProcessHeap(), 0, fdoc);
 		}
 		if (doc) {
 			ScMidiDocClear(doc);
@@ -360,7 +389,7 @@ void CSasamiTextDlg::ReloadFullTextFromScore()
 
 void CSasamiTextDlg::ScheduleScoreSync()
 {
-	if (m_modeFm || m_b64RefreshLock) return;
+	if (m_b64RefreshLock) return;
 	KillTimer(kTextScoreSyncTimer);
 	SetTimer(kTextScoreSyncTimer, 600, NULL);
 }
@@ -369,7 +398,7 @@ void CSasamiTextDlg::OnTimer(UINT_PTR nIDEvent)
 {
 	if (nIDEvent == kTextScoreSyncTimer) {
 		KillTimer(kTextScoreSyncTimer);
-		if (!m_modeFm && !m_b64RefreshLock)
+		if (!m_b64RefreshLock)
 			PushTextToScore();
 		return;
 	}
@@ -403,6 +432,7 @@ void CSasamiTextDlg::OnBnClickedB64Fold()
 void CSasamiTextDlg::OnEnChange()
 {
 	if (m_b64RefreshLock) return;
+	m_textDirty = 1;
 	if (!m_b64Expanded && !m_modeFm && ScMmlContainsVstB64(m_textFull)) {
 		m_b64Expanded = 1;
 		ApplyB64ViewToEdit();
@@ -410,7 +440,7 @@ void CSasamiTextDlg::OnEnChange()
 	SyncTextFullFromEdit();
 	ColorizeEdit();
 	UpdateB64FoldButton();
-	if (!m_modeFm && !m_b64RefreshLock)
+	if (!m_b64RefreshLock)
 		ScheduleScoreSync();
 }
 
@@ -477,8 +507,7 @@ int CSasamiTextDlg::CompileAndBuild(wchar_t* outPath, int outCch, int* isFm)
 			return 0;
 		}
 		outMidiNest = ScDocMaxLoopNest(m_midi.ev, m_midi.evCount, SC_MIDI_CH);
-		/* Nest≥2 → new MIDI form (MPW2/3). Classic MPY stays for 1-deep DO-- style. */
-		if (w->isMpw3)
+		if (ScMidiDocNeedsMpsmv(&m_midi) || w->isMpw3)
 			sz = SasamiBuildMpw3(w, bin, SASAMI_WRITE_MAX);
 		else if (outMidiNest > 1)
 			sz = SasamiBuildMpw2(w, bin, SASAMI_WRITE_MAX);
@@ -554,6 +583,7 @@ void CSasamiTextDlg::OnBnClickedCompile()
 	wchar_t path[MAX_PATH];
 	int isFm = 0;
 	if (CompileAndBuild(path, MAX_PATH, &isFm) && !isFm) {
+		m_textDirty = 1; /* force text→score even if mirror was clean */
 		PushTextToScore();
 		PersistSession();
 	}
@@ -615,6 +645,7 @@ void CSasamiTextDlg::OnBnClickedOpen()
 	m_textFull = buf;
 	m_b64Expanded = ScMmlContainsVstB64(buf) ? 0 : 1;
 	ApplyB64ViewToEdit();
+	m_textDirty = 1;
 	/* .dat: PC98/OPNA dumps with @n → FM by default. @VST / ;MIDI → MIDI. */
 	m_modeFm = 0;
 	CString low = path; low.MakeLower();
@@ -635,7 +666,16 @@ void CSasamiTextDlg::OnBnClickedOpen()
 		m_modeFm = 0;
 	ApplyLang();
 	CString st;
-	st.Format(L"%s  [%s]  (use ->MIDI / ->FM to switch)", (LPCTSTR)path, m_modeFm ? L"FM" : L"MIDI/MICP");
+	if (m_modeFm) {
+		wchar_t err[256];
+		int errLine = 0;
+		if (CompileFmCache(&errLine, err, 256))
+			st.Format(L"%s  [FM]  %d events (Score で譜面化)", (LPCTSTR)path, m_fm.evCount);
+		else
+			st.Format(L"%s  [FM]  compile L%d: %s", (LPCTSTR)path, errLine, err);
+	} else {
+		st.Format(L"%s  [%s]  (use ->MIDI / ->FM to switch)", (LPCTSTR)path, L"MIDI/MICP");
+	}
 	m_status.SetWindowText(st);
 	ColorizeEdit();
 	RefreshChromeOpaque();
@@ -678,7 +718,19 @@ void CSasamiTextDlg::OnBnClickedInsertVst()
 		if (dlg.DoEdit(this, v) == IDOK) {
 			if (m_fm.voiceCount < 1) m_fm.voiceCount = 1;
 			memcpy(m_fm.voices[0], v, 25);
-			m_status.SetWindowText(L"FM voice updated (slot 0). Preview in editor, then compile.");
+			wchar_t hex[160];
+			int pos = 0;
+			for (int b = 0; b < 25 && pos + 4 < 160; b++)
+				pos += _snwprintf_s(hex + pos, 160 - pos, _TRUNCATE, b ? L" %02X" : L"%02X", v[b]);
+			CString ins;
+			ins.Format(L"\r\n@VOICEHEX 0 %s\r\n@CV0\r\n", hex);
+			SyncTextFullFromEdit();
+			m_textFull += ins;
+			m_textDirty = 1;
+			ApplyB64ViewToEdit();
+			ColorizeEdit();
+			ScheduleScoreSync();
+			m_status.SetWindowText(L"FM voice slot 0 → @VOICEHEX/@CV0 inserted");
 		}
 		RefreshChromeOpaque();
 		return;
@@ -727,9 +779,14 @@ void CSasamiTextDlg::OnClose()
 {
 	KillTimer(kTextScoreSyncTimer);
 	PersistSession();
-	/* Avoid huge ScMidiDoc on stack while tearing down — sync only if score lives. */
-	if (!m_modeFm) {
-		if (CSasamiMidiScoreDlg* sc = CSasamiMidiScoreDlg::Instance()) {
+	/* Open/close without edits must not recompile — expand→fold corrupts engraving. */
+	if (m_textDirty) {
+		if (m_modeFm) {
+			if (CSasamiFmScoreDlg* sc = CSasamiFmScoreDlg::Instance()) {
+				if (::IsWindow(sc->GetSafeHwnd()))
+					PushTextToScore();
+			}
+		} else if (CSasamiMidiScoreDlg* sc = CSasamiMidiScoreDlg::Instance()) {
 			if (::IsWindow(sc->GetSafeHwnd()))
 				PushTextToScore();
 		}
@@ -752,12 +809,20 @@ void CSasamiTextDlg::PostNcDestroy()
 
 void CSasamiTextDlg::OnBnClickedScore()
 {
-	if (!m_modeFm)
-		PushTextToScore();
-	if (m_modeFm)
+	if (m_modeFm) {
+		wchar_t err[256];
+		int errLine = 0;
+		if (!CompileFmCache(&errLine, err, 256)) {
+			CString st;
+			st.Format(L"Cannot open FM score — compile L%d: %s", errLine, err);
+			m_status.SetWindowText(st);
+			return;
+		}
 		CSasamiFmScoreDlg::OpenOwned(this);
-	else
-		CSasamiMidiScoreDlg::OpenOwned(this);
+		return;
+	}
+	PushTextToScore();
+	CSasamiMidiScoreDlg::OpenOwned(this);
 }
 
 void CSasamiTextDlg::OnBnClickedNew()
@@ -778,10 +843,12 @@ CString CSasamiTextDlg::GetMmlText() const
 void CSasamiTextDlg::SetFmTextFromScore(const wchar_t* text)
 {
 	if (!text || !m_edit.GetSafeHwnd()) return;
+	KillTimer(kTextScoreSyncTimer);
 	m_modeFm = 1;
 	m_textFull = text;
 	m_b64Expanded = 1;
 	ApplyB64ViewToEdit();
+	m_textDirty = 0;
 	ApplyLang();
 	ColorizeEdit();
 	RefreshChromeOpaque();
@@ -791,9 +858,11 @@ void CSasamiTextDlg::SetFmTextFromScore(const wchar_t* text)
 void CSasamiTextDlg::SetMmlFromScore(const wchar_t* mml)
 {
 	if (!mml || !m_edit.GetSafeHwnd()) return;
+	KillTimer(kTextScoreSyncTimer);
 	m_textFull = mml;
 	m_b64Expanded = 0;
 	ApplyB64ViewToEdit();
+	m_textDirty = 0;
 	int tracks = 0;
 	for (int i = 0; mml[i]; i++)
 		if (mml[i] == L'[' && (i == 0 || mml[i - 1] == L'\n' || mml[i - 1] == L'\r'))
@@ -805,9 +874,11 @@ void CSasamiTextDlg::SetMmlFromScore(const wchar_t* mml)
 
 void CSasamiTextDlg::NewDocument()
 {
+	KillTimer(kTextScoreSyncTimer);
 	m_textFull = L"; SASAMI MML / MML3\r\n@METER 4/4\r\n#1\r\nt120\r\nl4 o4\r\n";
 	m_b64Expanded = 1;
 	ApplyB64ViewToEdit();
+	m_textDirty = 0;
 	ScMidiDocClear(&m_midi);
 	ScFmDocClear(&m_fm);
 	ScSessionClearLast();
@@ -817,6 +888,22 @@ void CSasamiTextDlg::NewDocument()
 			if (empty) {
 				empty->tempoT = 13000;
 				sc->LoadFromDoc(*empty);
+				HeapFree(GetProcessHeap(), 0, empty);
+			}
+		}
+	}
+	if (CSasamiFmScoreDlg* fm = CSasamiFmScoreDlg::Instance()) {
+		if (::IsWindow(fm->GetSafeHwnd())) {
+			ScFmDoc* empty = (ScFmDoc*)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(ScFmDoc));
+			if (empty) {
+				ScFmDocClear(empty);
+				static const uint8_t kDefVoice[25] = {
+					0x3B, 0x00, 0x00, 0x20, 0x28, 0x20, 0x1A, 0x0D, 0x9F, 0x9E, 0xDE, 0x9E,
+					0x05, 0x05, 0x05, 0x05, 0x0F, 0x0B, 0x0C, 0x0B, 0x8A, 0xF6, 0x86, 0xF7, 0x1B
+				};
+				ScFmAllocVoice(empty, kDefVoice);
+				fm->LoadFromDoc(*empty);
+				ScFmDocClear(empty);
 				HeapFree(GetProcessHeap(), 0, empty);
 			}
 		}
@@ -842,9 +929,24 @@ void CSasamiTextDlg::RestoreUiGeom()
 void CSasamiTextDlg::PersistSession()
 {
 	PersistUiGeom();
-	if (m_modeFm) return;
 	SyncTextFullFromEdit();
 	CString text = m_textFull;
+	if (m_modeFm) {
+		ScFmDoc* doc = (ScFmDoc*)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(ScFmDoc));
+		if (!doc) {
+			ScSessionSaveLastFm(&m_fm, text);
+			return;
+		}
+		wchar_t err[128];
+		int errLine = 0;
+		if (ScCompileFmText(text, doc, &errLine, err, 128))
+			ScSessionSaveLastFm(doc, text);
+		else
+			ScSessionSaveLastFm(&m_fm, text);
+		ScFmDocClear(doc);
+		HeapFree(GetProcessHeap(), 0, doc);
+		return;
+	}
 	ScMidiDoc* doc = (ScMidiDoc*)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(ScMidiDoc));
 	if (!doc) {
 		ScSessionSaveLastMidi(&m_midi, text);
@@ -860,9 +962,62 @@ void CSasamiTextDlg::PersistSession()
 	HeapFree(GetProcessHeap(), 0, doc);
 }
 
+int CSasamiTextDlg::CompileFmCache(int* errLine, wchar_t* err, int errCch)
+{
+	if (!m_modeFm) return 0;
+	SyncTextFullFromEdit();
+	CString text = m_textFull;
+	if (text.IsEmpty()) return 0;
+	ScFmDoc tmp;
+	ScFmDocClear(&tmp);
+	wchar_t localErr[128];
+	int localLine = 0;
+	wchar_t* emsg = err && errCch > 0 ? err : localErr;
+	int emsgCch = err && errCch > 0 ? errCch : 128;
+	int* eline = errLine ? errLine : &localLine;
+	if (!ScCompileFmText(text, &tmp, eline, emsg, emsgCch))
+		return 0;
+	if (tmp.voiceCount < 1) {
+		static const uint8_t kDefVoice[25] = {
+			0x3B, 0x00, 0x00, 0x20, 0x28, 0x20, 0x1A, 0x0D, 0x9F, 0x9E, 0xDE, 0x9E,
+			0x05, 0x05, 0x05, 0x05, 0x0F, 0x0B, 0x0C, 0x0B, 0x8A, 0xF6, 0x86, 0xF7, 0x1B
+		};
+		ScFmAllocVoice(&tmp, kDefVoice);
+	}
+	ScFmDocClear(&m_fm);
+	m_fm = tmp;
+	memset(&tmp.ev, 0, sizeof(tmp.ev));
+	tmp.evCount = 0;
+	return 1;
+}
+
 void CSasamiTextDlg::PushTextToScore()
 {
-	if (m_modeFm) return;
+	if (!m_textDirty) return;
+	if (m_modeFm) {
+		wchar_t err[128];
+		int errLine = 0;
+		if (!CompileFmCache(&errLine, err, 128)) {
+			if (CSasamiFmScoreDlg* sc = CSasamiFmScoreDlg::Instance()) {
+				if (::IsWindow(sc->GetSafeHwnd())) {
+					CString s;
+					s.Format(L"Text→score sync failed L%d: %s", errLine, err);
+					m_status.SetWindowText(s);
+				}
+			}
+			return;
+		}
+		if (CSasamiFmScoreDlg* sc = CSasamiFmScoreDlg::Instance()) {
+			if (::IsWindow(sc->GetSafeHwnd())) {
+				sc->LoadFromDoc(m_fm);
+				MarkTextSyncedToScore();
+				CString st;
+				st.Format(L"FM score synced from text (%d events)", m_fm.evCount);
+				m_status.SetWindowText(st);
+			}
+		}
+		return;
+	}
 	SyncTextFullFromEdit();
 	CString text = m_textFull;
 	ScMidiDoc* doc = (ScMidiDoc*)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(ScMidiDoc));
@@ -892,6 +1047,7 @@ void CSasamiTextDlg::PushTextToScore()
 	if (CSasamiMidiScoreDlg* sc = CSasamiMidiScoreDlg::Instance()) {
 		if (::IsWindow(sc->GetSafeHwnd())) {
 			sc->LoadFromDoc(m_midi);
+			m_textDirty = 0;
 			m_status.SetWindowText(L"Score synced from text");
 		}
 	}

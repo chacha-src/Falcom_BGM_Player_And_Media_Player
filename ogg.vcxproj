@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003" DefaultTargets="Build" ToolsVersion="14.0">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="uni_2026_de|Win32">
@@ -393,6 +393,7 @@
     <ClCompile Include="CSasamiMidiScoreDlg.cpp" />
     <ClCompile Include="CSasamiFmScoreDlg.cpp" />
     <ClCompile Include="CSasamiFmVoiceDlg.cpp" />
+    <ClCompile Include="CSasamiLayoutPaletteDlg.cpp" />
     <ClCompile Include="CSasamiNotePaletteDlg.cpp" />
     <ClCompile Include="CSasamiSimpleInputDlg.cpp" />
     <ClCompile Include="CSasamiNotePropsDlg.cpp" />
@@ -402,6 +403,11 @@
     <ClCompile Include="CSasamiToneMapDlg.cpp" />
     <ClCompile Include="CSasamiVstPartMenu.cpp" />
     <ClCompile Include="CSasamiStaffCore.cpp" />
+    <ClCompile Include="CSasamiScoreMidiIn.cpp" />
+    <ClCompile Include="CSasamiScoreHist.cpp" />
+    <ClCompile Include="CSasamiScoreArrange.cpp" />
+    <ClCompile Include="CSasamiPianoRollView.cpp" />
+    <ClCompile Include="CSasamiPianoRollDlg.cpp" />
     <ClCompile Include="SasamiToneNames.cpp" />
     <ClCompile Include="SasamiComposerDoc.cpp" />
     <ClCompile Include="kb_sasami\source\sasami_write.cpp">
@@ -521,6 +527,7 @@
     <ClInclude Include="CSasamiMidiScoreDlg.h" />
     <ClInclude Include="CSasamiFmScoreDlg.h" />
     <ClInclude Include="CSasamiFmVoiceDlg.h" />
+    <ClInclude Include="CSasamiLayoutPaletteDlg.h" />
     <ClInclude Include="CSasamiNotePaletteDlg.h" />
     <ClInclude Include="CSasamiSimpleInputDlg.h" />
     <ClInclude Include="CSasamiNotePropsDlg.h" />

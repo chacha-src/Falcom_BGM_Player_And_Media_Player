@@ -907,6 +907,89 @@ static int PeArch(const wchar_t* path)
 	return 0;
 }
 
+static DWORD PeRvaToOffset(HANDLE f, DWORD rva, const IMAGE_SECTION_HEADER* sec, int nSec)
+{
+	for (int i = 0; i < nSec; i++) {
+		const DWORD va = sec[i].VirtualAddress;
+		const DWORD vs = (sec[i].Misc.VirtualSize > sec[i].SizeOfRawData)
+			? sec[i].Misc.VirtualSize : sec[i].SizeOfRawData;
+		if (rva >= va && rva < va + vs)
+			return sec[i].PointerToRawData + (rva - va);
+	}
+	return 0;
+}
+
+static int PeHasExportName(const wchar_t* path, const char* exportName)
+{
+	if (!path || !exportName || !exportName[0]) return 0;
+	HANDLE f = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
+		NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+	if (f == INVALID_HANDLE_VALUE) return 0;
+	IMAGE_DOS_HEADER dos = {};
+	DWORD got = 0;
+	if (!ReadFile(f, &dos, sizeof(dos), &got, NULL) || dos.e_magic != IMAGE_DOS_SIGNATURE) {
+		CloseHandle(f); return 0;
+	}
+	SetFilePointer(f, dos.e_lfanew, NULL, FILE_BEGIN);
+	DWORD sig = 0;
+	IMAGE_FILE_HEADER fh = {};
+	if (!ReadFile(f, &sig, sizeof(sig), &got, NULL) || sig != IMAGE_NT_SIGNATURE ||
+		!ReadFile(f, &fh, sizeof(fh), &got, NULL)) {
+		CloseHandle(f); return 0;
+	}
+	WORD optMagic = 0;
+	if (!ReadFile(f, &optMagic, sizeof(optMagic), &got, NULL)) {
+		CloseHandle(f); return 0;
+	}
+	SetFilePointer(f, (LONG)(dos.e_lfanew + sizeof(DWORD) + sizeof(IMAGE_FILE_HEADER)), NULL, FILE_BEGIN);
+	DWORD exportRva = 0;
+	IMAGE_SECTION_HEADER sec[96] = {};
+	const int nSec = fh.NumberOfSections > 96 ? 96 : fh.NumberOfSections;
+	if (optMagic == IMAGE_NT_OPTIONAL_HDR64_MAGIC) {
+		IMAGE_OPTIONAL_HEADER64 oh = {};
+		if (!ReadFile(f, &oh, sizeof(oh), &got, NULL)) { CloseHandle(f); return 0; }
+		exportRva = oh.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].VirtualAddress;
+	} else {
+		IMAGE_OPTIONAL_HEADER32 oh = {};
+		if (!ReadFile(f, &oh, sizeof(oh), &got, NULL)) { CloseHandle(f); return 0; }
+		exportRva = oh.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].VirtualAddress;
+	}
+	if (!exportRva) { CloseHandle(f); return 0; }
+	SetFilePointer(f, (LONG)(dos.e_lfanew + sizeof(DWORD) + sizeof(IMAGE_FILE_HEADER) +
+		fh.SizeOfOptionalHeader), NULL, FILE_BEGIN);
+	if (!ReadFile(f, sec, (DWORD)(nSec * sizeof(IMAGE_SECTION_HEADER)), &got, NULL)) {
+		CloseHandle(f); return 0;
+	}
+	const DWORD expOff = PeRvaToOffset(f, exportRva, sec, nSec);
+	if (!expOff) { CloseHandle(f); return 0; }
+	IMAGE_EXPORT_DIRECTORY exp = {};
+	SetFilePointer(f, (LONG)expOff, NULL, FILE_BEGIN);
+	if (!ReadFile(f, &exp, sizeof(exp), &got, NULL) || !exp.NumberOfNames) {
+		CloseHandle(f); return 0;
+	}
+	const DWORD namesOff = PeRvaToOffset(f, exp.AddressOfNames, sec, nSec);
+	if (!namesOff) { CloseHandle(f); return 0; }
+	int found = 0;
+	for (DWORD i = 0; i < exp.NumberOfNames && !found; i++) {
+		DWORD nameRva = 0;
+		SetFilePointer(f, (LONG)(namesOff + i * sizeof(DWORD)), NULL, FILE_BEGIN);
+		if (!ReadFile(f, &nameRva, sizeof(nameRva), &got, NULL) || !nameRva) continue;
+		const DWORD nameOff = PeRvaToOffset(f, nameRva, sec, nSec);
+		if (!nameOff) continue;
+		char nm[128] = {};
+		SetFilePointer(f, (LONG)nameOff, NULL, FILE_BEGIN);
+		if (!ReadFile(f, nm, sizeof(nm) - 1, &got, NULL)) continue;
+		if (!strcmp(nm, exportName)) found = 1;
+	}
+	CloseHandle(f);
+	return found;
+}
+
+static int PeLooksLikeVst2Module(const wchar_t* path)
+{
+	return PeHasExportName(path, "VSTPluginMain") || PeHasExportName(path, "main");
+}
+
 static int HostArch()
 {
 #ifdef _WIN64
@@ -1097,8 +1180,10 @@ static void ProbeVst2(const wchar_t* path)
 		wcsncpy_s(base, VST_NAME_CHARS, L"SOUND Canvas VA", _TRUNCATE);
 	if (!arch) return;
 	if (arch != HostArch()) {
-		AddPlugin(path, base, arch, 0, 0);
-		return; // Never LoadLibrary a wrong-machine image.
+		/* Never LoadLibrary a wrong-machine image; only list if PE exports VST entry. */
+		if (PeLooksLikeVst2Module(path))
+			AddPlugin(path, base, arch, 0, 0);
+		return;
 	}
 	HMODULE mod = NULL;
 	{

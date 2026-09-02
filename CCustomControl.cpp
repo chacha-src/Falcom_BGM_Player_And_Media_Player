@@ -1,4 +1,4 @@
-#include "stdafx.h"
+﻿#include "stdafx.h"
 #include "CCustomControl.h"
 #include "resource.h"
 #include "CImageBase.h"
@@ -20366,9 +20366,18 @@ void CCustomBlurDialogExBase::OnShowWindow(BOOL bShow, UINT nStatus)
 #if CCUSTOM_AERO_SUPPORT
     if (CCC_IsAeroEnabled())
     {
-        ApplyDwmBlur();
-        CCC_RefreshDwmBlur(m_hWnd);
-        CCC_CaptionEnsureBackdrop(m_hWnd);
+        /* EnableAero(FALSE) した窓は本文を不透明のままにする。
+           RefreshDwmBlur は backdrop/α を戻して本文ガラス化するので呼ばない。 */
+        if (m_bAeroEnabled) {
+            ApplyDwmBlur();
+            CCC_RefreshDwmBlur(m_hWnd);
+            CCC_CaptionEnsureBackdrop(m_hWnd);
+        } else {
+            CCC_DisableBodyAeroOnly(m_hWnd);
+            CCC_PrepareDialogSurface(m_hWnd, FALSE);
+            if (CCC_GetCustomCaptionHeight(m_hWnd) > 0)
+                CCC_CaptionApplyGlassAndFixers(this, m_opaqueFixers);
+        }
     }
     // 本文 off は CaptionInstall 直後の ApplyGlassAndFixers 1 回。
     // 後段 RefreshDwmBlur は本文不透明を潰すので呼ばない。
@@ -20445,7 +20454,8 @@ void CCustomBlurDialogExBase::OnWindowPosChanged(WINDOWPOS* lpwndpos)
 {
     CCustomDialogEx::OnWindowPosChanged(lpwndpos);
 #if CCUSTOM_AERO_SUPPORT
-    if (lpwndpos && (lpwndpos->flags & SWP_SHOWWINDOW) && !m_bBlurApplied && CCC_IsAeroEnabled())
+    if (lpwndpos && (lpwndpos->flags & SWP_SHOWWINDOW) && m_bAeroEnabled
+        && !m_bBlurApplied && CCC_IsAeroEnabled())
         ApplyDwmBlur();
 #endif
 }
@@ -20455,7 +20465,12 @@ void CCustomBlurDialogExBase::OnWindowPosChanged(WINDOWPOS* lpwndpos)
 void CCustomBlurDialogExBase::OnCompositionChanged()
 {
 #if CCUSTOM_AERO_SUPPORT
-    ApplyDwmBlurCore(TRUE);
+    if (m_bAeroEnabled)
+        ApplyDwmBlurCore(TRUE);
+    else {
+        CCC_DisableBodyAeroOnly(m_hWnd);
+        CCC_PrepareDialogSurface(m_hWnd, FALSE);
+    }
 #endif
 }
 

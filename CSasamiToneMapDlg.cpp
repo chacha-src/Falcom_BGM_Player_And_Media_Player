@@ -31,7 +31,7 @@ static const int kMapCount = (int)(sizeof(kMaps) / sizeof(kMaps[0]));
 CSasamiToneMapDlg::CSasamiToneMapDlg(CWnd* pParent)
 	: CCustomBlurDialogExBase(IDD_SASAMI_TONE_MAP, pParent)
 	, m_part(1), m_prog(0), m_bankMsb(0), m_bankLsb(0), m_mapSel(0)
-	, m_pickedVst3(0), m_bind(NULL), m_scroll(0), m_cellH(18)
+	, m_pickedVst3(0), m_bind(NULL), m_scroll(0), m_cellH(18), m_auditionHold(0)
 {
 	memset(m_names, 0, sizeof(m_names));
 }
@@ -82,6 +82,7 @@ BEGIN_MESSAGE_MAP(CSasamiToneMapDlg, CCustomBlurDialogExBase)
 	ON_WM_PAINT()
 	ON_WM_ERASEBKGND()
 	ON_WM_LBUTTONDOWN()
+	ON_WM_LBUTTONUP()
 	ON_WM_LBUTTONDBLCLK()
 	ON_WM_SIZE()
 	ON_WM_MOUSEWHEEL()
@@ -355,8 +356,24 @@ BOOL CSasamiToneMapDlg::OnEraseBkgnd(CDC*) { return TRUE; }
 void CSasamiToneMapDlg::OnLButtonDown(UINT nFlags, CPoint point)
 {
 	const int pc = HitTone(point);
-	if (pc >= 0) ApplyTone(pc, 1);
+	if (pc >= 0) {
+		ApplyTone(pc, 0);
+		if (VstLivePartIsLoaded(m_part)) {
+			VstLiveSendBankProgram(m_part, m_bankMsb, m_bankLsb, m_prog);
+			VstLiveAuditionNote(m_part, (m_part == 10 || m_part == 26) ? 36 : 60, 100, 60000);
+			m_auditionHold = 1;
+		}
+	}
 	CCustomBlurDialogExBase::OnLButtonDown(nFlags, point);
+}
+
+void CSasamiToneMapDlg::OnLButtonUp(UINT nFlags, CPoint point)
+{
+	if (m_auditionHold) {
+		VstLiveAuditionStop();
+		m_auditionHold = 0;
+	}
+	CCustomBlurDialogExBase::OnLButtonUp(nFlags, point);
 }
 
 void CSasamiToneMapDlg::OnLButtonDblClk(UINT nFlags, CPoint point)

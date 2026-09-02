@@ -8,7 +8,7 @@ class CSasamiNotePaletteDlg : public CCustomBlurDialogExBase
 public:
 	CSasamiNotePaletteDlg(CWnd* pParent = nullptr);
 	enum { IDD = IDD_SASAMI_NOTE_PAL };
-	enum { kCellCount = 32 };
+	enum { kCellCount = 48 };
 	int m_baseDur;
 	int m_durTicks;
 	int m_rest;
@@ -31,7 +31,9 @@ protected:
 	afx_msg BOOL OnEraseBkgnd(CDC* pDC);
 	afx_msg void OnLButtonDown(UINT nFlags, CPoint point);
 	afx_msg void OnSize(UINT nType, int cx, int cy);
+	afx_msg void OnMove(int x, int y);
 	afx_msg void OnClose();
+	afx_msg void OnDestroy();
 	afx_msg BOOL OnTtnNeedText(UINT id, NMHDR* pNMHDR, LRESULT* pResult);
 
 	void LayoutChrome();
@@ -67,5 +69,64 @@ enum {
 	SASAMI_PAL_CMD_PED_ON = 14,
 	SASAMI_PAL_CMD_PED_OFF = 15,
 	SASAMI_PAL_CMD_MARK_REPLACE = 16, /* place mode: replace same tick */
-	SASAMI_PAL_CMD_MARK_STACK = 17    /* place mode: nest/stack */
+	SASAMI_PAL_CMD_MARK_STACK = 17,   /* place mode: nest/stack */
+	SASAMI_PAL_CMD_OTTAVA_8VA = 18,
+	SASAMI_PAL_CMD_OTTAVA_8VB = 19,
+	SASAMI_PAL_CMD_OTTAVA_16VA = 20,
+	SASAMI_PAL_CMD_OTTAVA_16VB = 21,
+	SASAMI_PAL_CMD_OTTAVA_32VA = 22,
+	SASAMI_PAL_CMD_OTTAVA_32VB = 23,
+	SASAMI_PAL_CMD_OTTAVA_LOCO = 24,
+	SASAMI_PAL_CMD_METER_24 = 30,
+	SASAMI_PAL_CMD_METER_34 = 31,
+	SASAMI_PAL_CMD_METER_44 = 32,
+	SASAMI_PAL_CMD_METER_54 = 33,
+	SASAMI_PAL_CMD_METER_68 = 34,
+	SASAMI_PAL_CMD_METER_78 = 35,
+	SASAMI_PAL_CMD_METER_98 = 36,
+	SASAMI_PAL_CMD_METER_CUSTOM = 37,
+	SASAMI_PAL_CMD_METER_DEL = 38,
+	SASAMI_PAL_CMD_KEY = 39,
+	SASAMI_PAL_CMD_CLEF_G = 40,
+	SASAMI_PAL_CMD_CLEF_F = 41,
+	SASAMI_PAL_CMD_CLEF_GF = 42,
+	SASAMI_PAL_CMD_CLEF_DR = 43,
+	SASAMI_PAL_CMD_TR_PLUS = 44,
+	SASAMI_PAL_CMD_TR_MINUS = 45,
+	SASAMI_PAL_CMD_TR_SEL_P12 = 46,
+	SASAMI_PAL_CMD_TR_SEL_M12 = 47,
+	SASAMI_PAL_CMD_TR_PART_PLUS = 48,
+	SASAMI_PAL_CMD_TR_PART_MINUS = 49,
+	SASAMI_PAL_CMD_TR_ALL_PLUS = 50,
+	SASAMI_PAL_CMD_TR_ALL_MINUS = 51,
+	SASAMI_PAL_CMD_METER_14 = 52,
+	SASAMI_PAL_CMD_METER_22 = 53,
+	SASAMI_PAL_CMD_METER_38 = 54,
+	SASAMI_PAL_CMD_METER_48 = 55,
+	SASAMI_PAL_CMD_METER_58 = 56,
+	SASAMI_PAL_CMD_METER_88 = 57,
+	SASAMI_PAL_CMD_METER_108 = 58,
+	SASAMI_PAL_CMD_METER_118 = 59,
+	SASAMI_PAL_CMD_METER_128 = 60,
+	SASAMI_PAL_CMD_METER_138 = 61,
+	SASAMI_PAL_CMD_METER_158 = 62,
+	SASAMI_PAL_CMD_METER_64 = 63,
+	SASAMI_PAL_CMD_METER_32 = 64,
+	SASAMI_PAL_CMD_METER_74 = 65,
+	SASAMI_PAL_CMD_KEY_BASE = 70 /* +0..14 → keySig -7..+7 */
+};
+enum { WM_SASAMI_PAL_QUERY_STATE = WM_APP + 7202 };
+enum { WM_SASAMI_PAL_LAYOUT = WM_APP + 7203 };
+enum {
+	SASAMI_PAL_LAYOUT_METER = 1,
+	SASAMI_PAL_LAYOUT_KEY = 2
+};
+struct SasamiPalLayoutState {
+	int meterN;
+	int meterD;
+	int keySig;
+	int clef;
+	int nSel;
+	int previewNote; /* midi pitch of primary selection, or -1 */
+	int curCh;
 };

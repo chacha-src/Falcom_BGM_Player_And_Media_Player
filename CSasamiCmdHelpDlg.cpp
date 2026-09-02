@@ -517,11 +517,17 @@ void CSasamiCmdHelpDlg::PaintChapter(CDC& dc, int chapter, int maxTextW, int& ou
 		y = SchDrawCmd(dc, accentFont, L, y, lh, L"@BANK msb,lsb", L"… バンクセレクト MSB/LSB。");
 		y = SchDrawCmd(dc, accentFont, L, y, lh, L"@V100", L"… トラック音量 cmd5（譜面 Vol ストリップ）。");
 		y = SchDrawCmd(dc, accentFont, L, y, lh, L"@P8192", L"… 14bit ピッチ（8192=中央。譜面 Pitch ストリップ）。");
-		y = SchDrawCmd(dc, accentFont, L, y, lh, L"@METER 4/4", L"… 拍子。MPW3 譜面グリッド・小節線。");
+		y = SchDrawCmd(dc, accentFont, L, y, lh, L"@METER 4/4", L"… 拍子。小節頭に縦配置表示。曲途中の変更も可（@TS 別名）。");
 		y = SchDrawCmd(dc, accentFont, L, y, lh, L"@RPN msb,lsb,data", L"… RPN 送信（譜面 Exc/RPN メニュー）。");
 		y = SchDrawCmd(dc, accentFont, L, y, lh, L"@NRPN msb,lsb,data", L"… NRPN 送信。");
 		y = SchDrawCmd(dc, accentFont, L, y, lh, L"@EX F0..F7", L"… SysEx（名前または F0…F7 16進列）。");
 		y = SchDrawCmd(dc, accentFont, L, y, lh, L"@PEDON / @PEDOFF", L"… サスティンペダル（@PEDALON/OFF も可）。");
+		y = SchDrawCmd(dc, accentFont, L, y, lh, L"@CC n,v", L"… 汎用 CC（.mpsmv）。");
+		y = SchDrawCmd(dc, accentFont, L, y, lh, L"@MOD @SOFT @SOST @REV @CHO", L"… CC1/67/66/91/93（.mpsmv）。");
+		y = SchDrawCmd(dc, accentFont, L, y, lh, L"@SVIB mode,delay,depth", L"… 遅延後スムーズビブラート/トレモロ（KPI内補間）。");
+		y = SchDrawCmd(dc, accentFont, L, y, lh, L"@SPORTA semi,delay,glide", L"… スムーズポルタメント。");
+		y = SchDrawCmd(dc, accentFont, L, y, lh, L"@MACRO name {…}", L"… マクロ定義（mpsmv ver2 フッタ）。");
+		y = SchDrawCmd(dc, accentFont, L, y, lh, L"@CALL name", L"… マクロ呼び出し。");
 		y = SchDrawCmd(dc, accentFont, L, y, lh, L"@TS 4/4", L"… 拍子（@METER の別名）。");
 		y = SchTitle(dc, boldFont, L, titleLh, y, L"VST バインド（.mpsmv / MPW3）");
 		y = SchDrawCmd(dc, accentFont, L, y, lh, L"@VST\"path\"", L"… インスト VST パス（譜面 Tone 行クリックでも設定）。");
@@ -532,7 +538,7 @@ void CSasamiCmdHelpDlg::PaintChapter(CDC& dc, int chapter, int maxTextW, int& ou
 		y = SchMuted(dc, L, maxTextW, lh, y, L"テキスト UI「B64折畳」… 長い @VSTSTATEB64 行を … に畳んで編集。");
 		y = SchTitle(dc, boldFont, L, titleLh, y, L"ループ・ジャンプ");
 		y = SchDrawCmd(dc, accentFont, L, y, lh, L"|:2 … :|", L"… PMD/MICP ネイティブループ（バイナリ内展開しない）。");
-		y = SchDrawCmd(dc, accentFont, L, y, lh, L"{:16 … }:", L"… MICP テキスト展開ループ（.mpw2 向け）。");
+		y = SchDrawCmd(dc, accentFont, L, y, lh, L"{:16 … }:", L"… .mpsmv/.fpy2: ネイティブ |: :|（非展開）。旧形式は展開。");
 		y = SchDrawCmd(dc, accentFont, L, y, lh, L"Q", L"… ソフトループ開始マーク。");
 		y = SchDrawCmd(dc, accentFont, L, y, lh, L"J", L"… チャンネル先頭／Q へ FJUMP。");
 		y = SchDrawCmd(dc, accentFont, L, y, lh, L"q95", L"… ゲート長 %（発音率）。");
@@ -589,6 +595,15 @@ void CSasamiCmdHelpDlg::PaintChapter(CDC& dc, int chapter, int maxTextW, int& ou
 		y = SchDrawCmd(dc, accentFont, L, y, lh, L"|:2 … :|", L"… PMD ネイティブループ（FPY cmd13/14、展開しない）。");
 		y = SchDrawCmd(dc, accentFont, L, y, lh, L"{:4 … }:", L"… MICP 展開ループ（テキスト上で繰返し）。");
 		y = SchDrawCmd(dc, accentFont, L, y, lh, L"Q / J", L"… ソフトループマーク／FJUMP（チャンネル先頭へ）。");
+		y = SchTitle(dc, boldFont, L, titleLh, y, L"FPY2 専用命令");
+		y = SchDrawCmd(dc, accentFont, L, y, lh, L"@PCM \"path\"", L"… Misao wav/mp3/flac。未保存=フルパス、保存で隣へコピー。");
+		y = SchDrawCmd(dc, accentFont, L, y, lh, L"@LFO ams,en", L"… FLFO + LFO enable。");
+		y = SchDrawCmd(dc, accentFont, L, y, lh, L"@DETUNE n", L"… FDETUN（0x8000中心）。");
+		y = SchDrawCmd(dc, accentFont, L, y, lh, L"@EX1..4 data", L"… EX レジスタ。");
+		y = SchDrawCmd(dc, accentFont, L, y, lh, L"@FLR mask", L"… ステレオ B4。");
+		y = SchDrawCmd(dc, accentFont, L, y, lh, L"@FSLR len", L"… キーオフなしウェイト。");
+		y = SchDrawCmd(dc, accentFont, L, y, lh, L"@LEGATO", L"… 次音符 fhokry（cmd24）。");
+		y = SchDrawCmd(dc, accentFont, L, y, lh, L"@SVIB @SPORTA", L"… ソフトFX（KPI内補間）。");
 		y = SchTitle(dc, boldFont, L, titleLh, y, L"FPY と FPY2");
 		{
 			const wchar_t* ln[] = {
@@ -611,9 +626,9 @@ void CSasamiCmdHelpDlg::PaintChapter(CDC& dc, int chapter, int maxTextW, int& ou
 		y = SchTitle(dc, boldFont, L, titleLh, y, L"出力形式（コンパイル時の自動選択）");
 		y = SchDrawCmd(dc, accentFont, L, y, lh, L".mpy", L"… クラシック MICP。ループ 1 段、VST なし。");
 		y = SchDrawCmd(dc, accentFont, L, y, lh, L".mpw2", L"… ループネスト 2 段以上。SMF 変換向け。");
-		y = SchDrawCmd(dc, accentFont, L, y, lh, L".mpsmv", L"… @VST / @VSTFX / @METER 等 MPW3。VST ライブ再生。");
+		y = SchDrawCmd(dc, accentFont, L, y, lh, L".mpsmv", L"… VST / CC / @SVIB / {: :} / @MACRO 等 MPW3。");
 		y = SchDrawCmd(dc, accentFont, L, y, lh, L".fpy", L"… FM OPNA、ループ 1 段。");
-		y = SchDrawCmd(dc, accentFont, L, y, lh, L".fpy2", L"… FM、ループ 2 段以上。");
+		y = SchDrawCmd(dc, accentFont, L, y, lh, L".fpy2", L"… Misao PCM / 新命令 / ネスト / {: :} 非展開。");
 		y = SchTitle(dc, boldFont, L, titleLh, y, L"テキスト ↔ 譜面");
 		{
 			const wchar_t* ln[] = {
@@ -651,16 +666,17 @@ void CSasamiCmdHelpDlg::PaintChapter(CDC& dc, int chapter, int maxTextW, int& ou
 		y = SchTitle(dc, boldFont, L, titleLh, y, L"操作");
 		{
 			const wchar_t* ln[] = {
-				L"  Pencil … 音符入力（パレットから音長・付点・♯♭・3連符）。",
+				L"  Pencil … 音符入力（配置時に VST でその場発音。パレットで音長・付点・♯♭）。",
 				L"  Eraser … 消しゴム。Select … 矩形選択→Delete/Backspace。",
+				L"  Space … ルーラーマーカー位置から再生／停止。Home … マーカーを先頭へ。",
 				L"  Tempo … テンポ変更（t コマンド同期）。Mark … ループ/Q/J 位置。",
 				L"  Tone 行 … Prog/Bank/VST。クリックで VST ピッカー／プラグイン UI。",
-				L"  Exp/Vol/Pitch ストリップ … CC レーン。チャンネル別に描画。",
+				L"  Exp/Vol/Pitch ストリップ … CC レーン。レーン数・1/4〜1/64 解像度を切替可。",
 				L"  Insert FX … VST エフェクトチェーン（@VSTFX）。",
 				L"  Exc/RPN … SysEx・RPN・NRPN プリセット挿入。",
 				L"  A/B ルーラ … ループ範囲。Text … テキストコンポーザへ。"
 			};
-			y = SchLines(dc, L, maxTextW, lh, y, ln, 8);
+			y = SchLines(dc, L, maxTextW, lh, y, ln, 9);
 		}
 	} else if (chapter == kTabScore2) {
 		y = SchTitle(dc, boldFont, L, titleLh, y, L"FM 譜面 UI（譜面2）");
@@ -671,12 +687,13 @@ void CSasamiCmdHelpDlg::PaintChapter(CDC& dc, int chapter, int maxTextW, int& ou
 			const wchar_t* ln[] = {
 				L"  Voice … FM 音色エディタ（25byte パラメータ）。@n で割当。",
 				L"  Pencil/Eraser/Select … MIDI 譜面と同様の編集ツール。",
+				L"  Space … マーカーから再生／停止。Home … マーカー先頭。ストリップ解像度 1/4〜1/64。",
 				L"  Save As … .fpy / .fpy2（ループネスト深さから自動選択）。",
 				L"  Tick 空白 … 休符 r として MML 出力。",
 				L"  Text … FM MML テキストへ逆同期。",
 				L"  FM モニタ … コンパイル結果を鍵盤で試聴。"
 			};
-			y = SchLines(dc, L, maxTextW, lh, y, ln, 6);
+			y = SchLines(dc, L, maxTextW, lh, y, ln, 7);
 		}
 	} else if (chapter == kTabScore3) {
 		y = SchTitle(dc, boldFont, L, titleLh, y, L"テキスト ↔ 譜面 連携（譜面3）");

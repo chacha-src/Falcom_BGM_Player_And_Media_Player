@@ -1,4 +1,4 @@
-﻿#include "sasami_fm.h"
+#include "sasami_fm.h"
 #include "sasami_misao.h"
 #include "sasami_fmmon.h"
 #include <windows.h>
@@ -170,6 +170,13 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 	int16_t detune[12];
 	uint16_t pitchBase[12]; /* DETUNE 加算前（原版 FMSSGPITCH） */
 	uint8_t waitb[12];
+	int8_t softMode[12];
+	uint8_t softDepth[12];
+	uint8_t softDelay[12];
+	uint8_t softPhase[12];
+	int8_t softPortaSemi[12];
+	uint8_t softPortaLeft[12];
+	uint8_t softPortaGlide[12];
 	enum { FM_LOOP_NEST = 16 };
 	uint8_t loopCnt[12][FM_LOOP_NEST];
 	uint8_t loopSp[12];
@@ -226,6 +233,13 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 		memset(detune, 0, sizeof(detune));
 		memset(pitchBase, 0, sizeof(pitchBase));
 		memset(waitb, 0, sizeof(waitb));
+		memset(softMode, 0xFF, sizeof(softMode)); /* -1 = off */
+		memset(softDepth, 0, sizeof(softDepth));
+		memset(softDelay, 0, sizeof(softDelay));
+		memset(softPhase, 0, sizeof(softPhase));
+		memset(softPortaSemi, 0, sizeof(softPortaSemi));
+		memset(softPortaLeft, 0, sizeof(softPortaLeft));
+		memset(softPortaGlide, 0, sizeof(softPortaGlide));
 		memset(loopCnt, 0, sizeof(loopCnt));
 		memset(loopSp, 0, sizeof(loopSp));
 		memset(vol, 0, sizeof(vol));
@@ -1016,6 +1030,14 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 			pc[ch] = addr + 3;
 			return 1;
 		case 23:
+			/* FPY2 EX1–4: b1=ex index, b2=data — classic no-op preserved when unused */
+			if (b1 >= 1 && b1 <= 4) {
+				/* Store into rhythm/aux work; EX1≈noise freq style poke via PSG reg when SSG */
+				if (IsSsg(ch) && b1 == 1)
+					FmOut(6, b2); /* SSG noise period */
+				else if (IsSsg(ch) && b1 == 2)
+					FmOut(7, b2); /* mixer */
+			}
 			pc[ch] = addr + 3;
 			return 1;
 		case 24: // fhokry note without key-off
@@ -1024,6 +1046,22 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 			else waitb[ch] = b2;
 			pc[ch] = addr + 3;
 			return 0;
+		case 25: {
+			/* Soft vib/trem: b1=(mode<<7)|depth, b2=delay — applied in TickOnce via detune/vol */
+			softMode[ch] = (b1 >> 7) & 1;
+			softDepth[ch] = b1 & 0x7F;
+			softDelay[ch] = b2;
+			softPhase[ch] = 0;
+			pc[ch] = addr + 3;
+			return 1;
+		}
+		case 29: {
+			softPortaSemi[ch] = (int)b1 - 64;
+			softPortaLeft[ch] = b2 ? b2 : 24;
+			softPortaGlide[ch] = softPortaLeft[ch];
+			pc[ch] = addr + 3;
+			return 1;
+		}
 		default:
 			if (cmd == 0) { alive[ch] = 0; return 0; }
 			pc[ch] = addr + 3;
@@ -1040,6 +1078,32 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 			any = 1;
 			if (waitb[ch] >= 2) {
 				waitb[ch]--;
+				/* Soft FX during note sustain */
+				if (softMode[ch] >= 0 && softDepth[ch] > 0 && !IsRhythm(ch)) {
+					if (softDelay[ch] > 0) softDelay[ch]--;
+					else {
+						softPhase[ch] = (softPhase[ch] + 1) & 63;
+						int ph = softPhase[ch];
+						int tri = (ph < 32) ? ph : (64 - ph);
+						int amt = (tri * softDepth[ch]) / 32;
+						if (softMode[ch] == 0) {
+							detune[ch] = (int16_t)((amt - softDepth[ch] / 2) * 8);
+							ApplyDetuneNow(ch);
+						} else {
+							uint8_t nv = (uint8_t)((vol[ch] > amt) ? (vol[ch] - amt) : 0);
+							uint8_t save = vol[ch];
+							vol[ch] = nv;
+							ApplyTl(ch);
+							vol[ch] = save;
+						}
+					}
+				}
+				if (softPortaSemi[ch] != 0 && softPortaGlide[ch] > 0 && softPortaLeft[ch] > 0) {
+					int done = softPortaGlide[ch] - softPortaLeft[ch];
+					detune[ch] = (int16_t)((softPortaSemi[ch] * 64 * done) / softPortaGlide[ch]);
+					ApplyDetuneNow(ch);
+					softPortaLeft[ch]--;
+				}
 				continue;
 			}
 			int guard = 0;

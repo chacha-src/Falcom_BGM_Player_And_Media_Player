@@ -1,4 +1,4 @@
-﻿// stdafx.h : 標準のシステム インクルード ファイルのインクルード ファイル、または
+// stdafx.h : 標準のシステム インクルード ファイルのインクルード ファイル、または
 // 参照回数が多く、かつあまり変更されない、プロジェクト専用のインクルード ファイル
 // を記述します。
 
@@ -829,11 +829,30 @@ struct save{
 	int sasamiFmPxBeat, sasamiFmStaffScale, sasamiFmScrollX, sasamiFmScrollY;
 	int sasamiTextX, sasamiTextY, sasamiTextW, sasamiTextH;
 	int sasamiNotePropsX, sasamiNotePropsY, sasamiNotePropsW, sasamiNotePropsH;
-	int sasamiNotePalW, sasamiNotePalH; /* 位置はカーソル基準、サイズのみ保持 */
+	int sasamiNotePalW, sasamiNotePalH; /* サイズ。位置は末尾 sasamiNotePalX/Y */
 	int sasamiMarkStack; /* 0=置換(1重), 1=ネスト積み上げ */
 	int sasamiFmVoiceX, sasamiFmVoiceY, sasamiFmVoiceW, sasamiFmVoiceH;
 	int sasamiToneMapX, sasamiToneMapY, sasamiToneMapW, sasamiToneMapH;
 	int sasamiVstPickX, sasamiVstPickY, sasamiVstPickW, sasamiVstPickH;
+	/* 音パレット位置（末尾追記。W/H は既存 sasamiNotePalW/H。旧.dat / 未設定は x=-1 → OpenNear のカーソル位置） */
+	int sasamiNotePalX, sasamiNotePalY;
+	/* 譜表レイアウトパレット（拍子・記号）位置・サイズ */
+	int sasamiLayoutPalW, sasamiLayoutPalH;
+	int sasamiLayoutPalX, sasamiLayoutPalY;
+	/* MIDI/FM score: bitmask of enabled parts (ch index). 0 = auto-detect from doc. */
+	unsigned sasamiMidiPartMask;
+	unsigned sasamiFmPartMask;
+	/* Per-part strip layout (count 0..3, kind 0..14, height 0=wide 1=normal 2=narrow). */
+	unsigned char sasamiPartStripCount[32];
+	unsigned char sasamiPartStripKind[32][3];
+	unsigned char sasamiPartStripHgt[32][3];
+	/* Global tempo band + per-part CC band visibility/heights. */
+	unsigned char sasamiGlobalTempoBandOn;
+	unsigned char sasamiGlobalTempoBandHgt;
+	unsigned sasamiPartBandMask[32];
+	unsigned char sasamiPartBandHgt[32][8];
+	/* 譜表レイアウトパレット位置（save 末尾。旧 sasamiLayoutPal* から移行） */
+	int sasamiLayPalX, sasamiLayPalY, sasamiLayPalW, sasamiLayPalH;
 };
 extern save savedata;
 

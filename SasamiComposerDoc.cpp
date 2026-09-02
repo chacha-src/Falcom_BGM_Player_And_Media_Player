@@ -1,4 +1,4 @@
-﻿#include "stdafx.h"
+#include "stdafx.h"
 #include "SasamiComposerDoc.h"
 #include "DatArchive.h"
 #include <string.h>
@@ -6,6 +6,10 @@
 #include <math.h>
 #include <stdarg.h>
 #include <stdlib.h>
+
+static void ScMidiFoldPolyVoicesForScore(ScMidiDoc* d);
+static int ContainsIW(const wchar_t* text, const wchar_t* needle);
+static int IsDigit(wchar_t c);
 
 void ScMidiVstBindFreeStates(ScMidiVstBind* b)
 {
@@ -24,6 +28,8 @@ void ScMidiVstBindClear(ScMidiVstBind* b)
 	memset(b, 0, sizeof(*b));
 	for (int i = 0; i < 32; i++) {
 		b->vstProg[i] = -1;
+		b->vstBankMsb[i] = -1;
+		b->vstBankLsb[i] = -1;
 		b->vstForceCh[i] = -1;
 	}
 }
@@ -138,6 +144,8 @@ void ScMidiDocClear(ScMidiDoc* d)
 	d->denom = 4;
 	for (int i = 0; i < 32; i++) {
 		d->bind.vstProg[i] = -1;
+		d->bind.vstBankMsb[i] = -1;
+		d->bind.vstBankLsb[i] = -1;
 		d->bind.vstForceCh[i] = -1;
 		d->trackPart[i] = 0xFF;
 	}
@@ -150,6 +158,8 @@ void ScFmDocClear(ScFmDoc* d)
 	memset(d, 0, sizeof(*d));
 	d->tempoT = 13000;
 	d->opna10 = 1;
+	d->numer = 4;
+	d->denom = 4;
 }
 
 static int ScPush(ScEvent* ev, int* n, uint32_t tick, uint8_t ch, uint8_t kind, uint8_t a, uint8_t b, uint8_t c, uint16_t dur)
@@ -164,6 +174,8 @@ static int ScPush(ScEvent* ev, int* n, uint32_t tick, uint8_t ch, uint8_t kind, 
 	e->b = b;
 	e->c = c;
 	e->dur = dur;
+	e->flags = 0;
+	e->pad0 = 0;
 	(*n)++;
 	return 1;
 }
@@ -182,6 +194,8 @@ static int ScUpsertMark(ScEvent* ev, int* n, uint32_t tick, uint8_t ch, uint8_t 
 			ev[i].b = b;
 			ev[i].c = c;
 			ev[i].dur = dur;
+			/* Bump seq so upsert wins over opposite marks left at same tick. */
+			ev[i].seq = (uint32_t)(*n);
 		} else {
 			for (int j = i; j + 1 < *n; j++)
 				ev[j] = ev[j + 1];
@@ -193,10 +207,55 @@ static int ScUpsertMark(ScEvent* ev, int* n, uint32_t tick, uint8_t ch, uint8_t 
 	return ScPush(ev, n, tick, ch, kind, a, b, c, dur);
 }
 
-int ScMidiAddNote(ScMidiDoc* d, uint32_t tick, int ch, int note, int dur, int vel)
+/* Drop all events of kind at tick+ch (used so 8va ↔ loco replace each other). */
+static void ScRemoveMarkKindAt(ScEvent* ev, int* n, uint32_t tick, uint8_t ch, uint8_t kind)
+{
+	if (!ev || !n) return;
+	for (int i = *n - 1; i >= 0; i--) {
+		if (ev[i].tick != tick || ev[i].ch != ch || ev[i].kind != kind) continue;
+		for (int j = i; j + 1 < *n; j++)
+			ev[j] = ev[j + 1];
+		(*n)--;
+	}
+}
+
+int ScMarkKindExists(const ScEvent* ev, int n, uint32_t tick, uint8_t ch, uint8_t kind)
+{
+	if (!ev) return 0;
+	for (int i = 0; i < n; i++)
+		if (ev[i].tick == tick && ev[i].ch == ch && ev[i].kind == kind)
+			return 1;
+	return 0;
+}
+
+/* stack=0: placing the same mark again at tick removes it (toggle).
+   stack=1: always push (nest / pile). */
+int ScToggleOrAddMark(ScEvent* ev, int* n, uint32_t tick, uint8_t ch, uint8_t kind,
+	uint8_t a, uint8_t b, uint8_t c, uint16_t dur, int stack)
+{
+	if (!ev || !n) return 0;
+	if (!stack && ScMarkKindExists(ev, *n, tick, ch, kind)) {
+		ScRemoveMarkKindAt(ev, n, tick, ch, kind);
+		return 1;
+	}
+	return ScPush(ev, n, tick, ch, kind, a, b, c, dur);
+}
+
+int ScDeleteMarksAt(ScEvent* ev, int* evCount, uint32_t tick, int ch, uint8_t kind)
+{
+	if (!ev || !evCount || ch < 0) return 0;
+	const int before = *evCount;
+	ScRemoveMarkKindAt(ev, evCount, tick, (uint8_t)ch, kind);
+	return before - *evCount;
+}
+
+int ScMidiAddNote(ScMidiDoc* d, uint32_t tick, int ch, int note, int dur, int vel, int gatePct)
 {
 	if (!d || ch < 0 || ch >= SC_MIDI_CH) return 0;
-	return ScPush(d->ev, &d->evCount, tick, (uint8_t)ch, SC_EV_NOTE, (uint8_t)(note & 127), (uint8_t)(vel & 127), 0, (uint16_t)dur);
+	int g = gatePct;
+	if (g < 1) g = 1;
+	if (g > 100) g = 100;
+	return ScPush(d->ev, &d->evCount, tick, (uint8_t)ch, SC_EV_NOTE, (uint8_t)(note & 127), (uint8_t)(vel & 127), (uint8_t)g, (uint16_t)dur);
 }
 
 int ScMidiAddRest(ScMidiDoc* d, uint32_t tick, int ch, int dur)
@@ -205,16 +264,93 @@ int ScMidiAddRest(ScMidiDoc* d, uint32_t tick, int ch, int dur)
 	return ScPush(d->ev, &d->evCount, tick, (uint8_t)ch, SC_EV_REST, 0, 0, 0, (uint16_t)dur);
 }
 
-int ScMidiAddJumpMark(ScMidiDoc* d, uint32_t tick, int ch)
+static uint32_t ScAllocSeqBeforeTick(ScEvent* ev, int n, uint32_t tick, uint8_t ch, int need)
 {
-	if (!d || ch < 0 || ch >= SC_MIDI_CH) return 0;
-	return ScPush(d->ev, &d->evCount, tick, (uint8_t)ch, SC_EV_JUMP_MARK, 0, 0, 0, 0);
+	if (!ev || need < 1) return 0;
+	uint32_t minSeq = 0xFFFFFFFFu;
+	int found = 0;
+	for (int i = 0; i < n; i++) {
+		if (ev[i].tick != tick || ev[i].ch != ch) continue;
+		found = 1;
+		if (ev[i].seq < minSeq) minSeq = ev[i].seq;
+	}
+	if (!found) return (uint32_t)n;
+	if (minSeq >= (uint32_t)need)
+		return minSeq - (uint32_t)need;
+	for (int i = 0; i < n; i++) {
+		if (ev[i].tick == tick && ev[i].ch == ch)
+			ev[i].seq += (uint32_t)need;
+	}
+	return 0;
 }
 
-int ScMidiAddJump(ScMidiDoc* d, uint32_t tick, int ch)
+int ScMidiApplyProgBankAt(ScMidiDoc* d, int ch0, uint32_t tick, int prog, int msb, int lsb)
+{
+	if (!d || ch0 < 0 || ch0 >= SC_MIDI_CH) return 0;
+	if (prog < 0) prog = 0;
+	if (prog > 127) prog = 127;
+	if (msb < 0) msb = 0;
+	if (msb > 127) msb = 127;
+	if (lsb < 0) lsb = 0;
+	if (lsb > 127) lsb = 127;
+
+	int foundBank = -1, foundProg = -1;
+	for (int i = 0; i < d->evCount; i++) {
+		if (d->ev[i].ch != (uint8_t)ch0 || d->ev[i].tick != tick) continue;
+		if (d->ev[i].kind == SC_EV_BANK) foundBank = i;
+		if (d->ev[i].kind == SC_EV_PROG) foundProg = i;
+	}
+
+	const uint32_t seqBank = ScAllocSeqBeforeTick(d->ev, d->evCount, tick, (uint8_t)ch0, 2);
+	const uint32_t seqProg = seqBank + 1;
+
+	auto upsert = [&](int* found, uint8_t kind, uint8_t a, uint8_t b, uint32_t seq) {
+		if (*found >= 0) {
+			d->ev[*found].a = a;
+			d->ev[*found].b = b;
+			d->ev[*found].c = 0;
+			d->ev[*found].dur = 0;
+			d->ev[*found].seq = seq;
+			return;
+		}
+		if (d->evCount >= SC_EV_MAX) return;
+		ScEvent& e = d->ev[d->evCount++];
+		e.tick = tick;
+		e.seq = seq;
+		e.ch = (uint8_t)ch0;
+		e.kind = kind;
+		e.a = a;
+		e.b = b;
+		e.c = 0;
+		e.dur = 0;
+		e.flags = 0;
+		e.pad0 = 0;
+		*found = d->evCount - 1;
+	};
+
+	upsert(&foundBank, SC_EV_BANK, (uint8_t)msb, (uint8_t)lsb, seqBank);
+	upsert(&foundProg, SC_EV_PROG, (uint8_t)prog, (uint8_t)prog, seqProg);
+
+	if (tick == 0) {
+		d->bind.vstProg[ch0] = prog;
+		d->bind.vstBankMsb[ch0] = msb;
+		d->bind.vstBankLsb[ch0] = lsb;
+	}
+	return (foundBank >= 0 || foundProg >= 0) ? 1 : 0;
+}
+
+int ScMidiAddJumpMark(ScMidiDoc* d, uint32_t tick, int ch, int stack)
 {
 	if (!d || ch < 0 || ch >= SC_MIDI_CH) return 0;
-	return ScPush(d->ev, &d->evCount, tick, (uint8_t)ch, SC_EV_FM_JUMP, 0, 0, 0, 0);
+	return ScToggleOrAddMark(d->ev, &d->evCount, tick, (uint8_t)ch, SC_EV_JUMP_MARK,
+		0, 0, 0, 0, stack);
+}
+
+int ScMidiAddJump(ScMidiDoc* d, uint32_t tick, int ch, int stack)
+{
+	if (!d || ch < 0 || ch >= SC_MIDI_CH) return 0;
+	return ScToggleOrAddMark(d->ev, &d->evCount, tick, (uint8_t)ch, SC_EV_FM_JUMP,
+		0, 0, 0, 0, stack);
 }
 
 int ScMidiAddLoopStart(ScMidiDoc* d, uint32_t tick, int ch, int repeatN, int stack)
@@ -222,35 +358,63 @@ int ScMidiAddLoopStart(ScMidiDoc* d, uint32_t tick, int ch, int repeatN, int sta
 	if (!d || ch < 0 || ch >= SC_MIDI_CH) return 0;
 	if (repeatN <= 0) repeatN = 2;
 	if (repeatN > 99) repeatN = 99;
-	if (stack)
-		return ScPush(d->ev, &d->evCount, tick, (uint8_t)ch, SC_EV_FM_LOOP_START,
-			(uint8_t)repeatN, 0, 0, 0);
-	return ScUpsertMark(d->ev, &d->evCount, tick, (uint8_t)ch, SC_EV_FM_LOOP_START,
-		(uint8_t)repeatN, 0, 0, 0);
+	return ScToggleOrAddMark(d->ev, &d->evCount, tick, (uint8_t)ch, SC_EV_FM_LOOP_START,
+		(uint8_t)repeatN, 0, 0, 0, stack);
 }
 
 int ScMidiAddLoopEnd(ScMidiDoc* d, uint32_t tick, int ch, int stack)
 {
 	if (!d || ch < 0 || ch >= SC_MIDI_CH) return 0;
-	if (stack)
-		return ScPush(d->ev, &d->evCount, tick, (uint8_t)ch, SC_EV_FM_LOOP_END, 0, 0, 0, 0);
-	return ScUpsertMark(d->ev, &d->evCount, tick, (uint8_t)ch, SC_EV_FM_LOOP_END, 0, 0, 0, 0);
+	return ScToggleOrAddMark(d->ev, &d->evCount, tick, (uint8_t)ch, SC_EV_FM_LOOP_END,
+		0, 0, 0, 0, stack);
 }
 
 int ScMidiAddPedalOn(ScMidiDoc* d, uint32_t tick, int ch, int stack)
 {
 	if (!d || ch < 0 || ch >= SC_MIDI_CH) return 0;
-	if (stack)
-		return ScPush(d->ev, &d->evCount, tick, (uint8_t)ch, SC_EV_PEDAL_ON, 0, 0, 0, 0);
-	return ScUpsertMark(d->ev, &d->evCount, tick, (uint8_t)ch, SC_EV_PEDAL_ON, 0, 0, 0, 0);
+	return ScToggleOrAddMark(d->ev, &d->evCount, tick, (uint8_t)ch, SC_EV_PEDAL_ON,
+		0, 0, 0, 0, stack);
 }
 
 int ScMidiAddPedalOff(ScMidiDoc* d, uint32_t tick, int ch, int stack)
 {
 	if (!d || ch < 0 || ch >= SC_MIDI_CH) return 0;
-	if (stack)
-		return ScPush(d->ev, &d->evCount, tick, (uint8_t)ch, SC_EV_PEDAL_OFF, 0, 0, 0, 0);
-	return ScUpsertMark(d->ev, &d->evCount, tick, (uint8_t)ch, SC_EV_PEDAL_OFF, 0, 0, 0, 0);
+	return ScToggleOrAddMark(d->ev, &d->evCount, tick, (uint8_t)ch, SC_EV_PEDAL_OFF,
+		0, 0, 0, 0, stack);
+}
+
+int ScMidiAddOttava(ScMidiDoc* d, uint32_t tick, int ch, int octaves, int stack)
+{
+	if (!d || ch < 0 || ch >= SC_MIDI_CH) return 0;
+	if (octaves == 0)
+		return ScMidiAddOttavaEnd(d, tick, ch, stack);
+	if (octaves < -3) octaves = -3;
+	if (octaves > 3) octaves = 3;
+	const uint8_t a = (uint8_t)(int8_t)octaves;
+	ScRemoveMarkKindAt(d->ev, &d->evCount, tick, (uint8_t)ch, SC_EV_OTTAVA_END);
+	if (!stack && ScMarkKindExists(d->ev, d->evCount, tick, (uint8_t)ch, SC_EV_OTTAVA)) {
+		int same = 0;
+		for (int i = 0; i < d->evCount; i++) {
+			if (d->ev[i].tick == tick && d->ev[i].ch == (uint8_t)ch
+				&& d->ev[i].kind == SC_EV_OTTAVA && d->ev[i].a == a)
+				same = 1;
+		}
+		ScRemoveMarkKindAt(d->ev, &d->evCount, tick, (uint8_t)ch, SC_EV_OTTAVA);
+		if (same) return 1; /* toggled off */
+	} else if (stack) {
+		return ScPush(d->ev, &d->evCount, tick, (uint8_t)ch, SC_EV_OTTAVA, a, 0, 0, 0);
+	} else {
+		ScRemoveMarkKindAt(d->ev, &d->evCount, tick, (uint8_t)ch, SC_EV_OTTAVA);
+	}
+	return ScPush(d->ev, &d->evCount, tick, (uint8_t)ch, SC_EV_OTTAVA, a, 0, 0, 0);
+}
+
+int ScMidiAddOttavaEnd(ScMidiDoc* d, uint32_t tick, int ch, int stack)
+{
+	if (!d || ch < 0 || ch >= SC_MIDI_CH) return 0;
+	ScRemoveMarkKindAt(d->ev, &d->evCount, tick, (uint8_t)ch, SC_EV_OTTAVA);
+	return ScToggleOrAddMark(d->ev, &d->evCount, tick, (uint8_t)ch, SC_EV_OTTAVA_END,
+		0, 0, 0, 0, stack);
 }
 
 int ScMidiAddRpn(ScMidiDoc* d, uint32_t tick, int ch, int msb, int lsb, int data)
@@ -297,16 +461,18 @@ int ScFmAddRest(ScFmDoc* d, uint32_t tick, int ch, int dur)
 	return ScPush(d->ev, &d->evCount, tick, (uint8_t)ch, SC_EV_FM_REST, 0, 0, 0, (uint16_t)dur);
 }
 
-int ScFmAddJumpMark(ScFmDoc* d, uint32_t tick, int ch)
+int ScFmAddJumpMark(ScFmDoc* d, uint32_t tick, int ch, int stack)
 {
 	if (!d || ch < 0 || ch >= SC_FM_TOTAL) return 0;
-	return ScPush(d->ev, &d->evCount, tick, (uint8_t)ch, SC_EV_JUMP_MARK, 0, 0, 0, 0);
+	return ScToggleOrAddMark(d->ev, &d->evCount, tick, (uint8_t)ch, SC_EV_JUMP_MARK,
+		0, 0, 0, 0, stack);
 }
 
-int ScFmAddJump(ScFmDoc* d, uint32_t tick, int ch)
+int ScFmAddJump(ScFmDoc* d, uint32_t tick, int ch, int stack)
 {
 	if (!d || ch < 0 || ch >= SC_FM_TOTAL) return 0;
-	return ScPush(d->ev, &d->evCount, tick, (uint8_t)ch, SC_EV_FM_JUMP, 0, 0, 0, 0);
+	return ScToggleOrAddMark(d->ev, &d->evCount, tick, (uint8_t)ch, SC_EV_FM_JUMP,
+		0, 0, 0, 0, stack);
 }
 
 int ScFmAddLoopStart(ScFmDoc* d, uint32_t tick, int ch, int repeatN, int stack)
@@ -314,19 +480,49 @@ int ScFmAddLoopStart(ScFmDoc* d, uint32_t tick, int ch, int repeatN, int stack)
 	if (!d || ch < 0 || ch >= SC_FM_TOTAL) return 0;
 	if (repeatN <= 0) repeatN = 2;
 	if (repeatN > 99) repeatN = 99;
-	if (stack)
-		return ScPush(d->ev, &d->evCount, tick, (uint8_t)ch, SC_EV_FM_LOOP_START,
-			(uint8_t)repeatN, 0, 0, 0);
-	return ScUpsertMark(d->ev, &d->evCount, tick, (uint8_t)ch, SC_EV_FM_LOOP_START,
-		(uint8_t)repeatN, 0, 0, 0);
+	return ScToggleOrAddMark(d->ev, &d->evCount, tick, (uint8_t)ch, SC_EV_FM_LOOP_START,
+		(uint8_t)repeatN, 0, 0, 0, stack);
 }
 
 int ScFmAddLoopEnd(ScFmDoc* d, uint32_t tick, int ch, int stack)
 {
 	if (!d || ch < 0 || ch >= SC_FM_TOTAL) return 0;
-	if (stack)
-		return ScPush(d->ev, &d->evCount, tick, (uint8_t)ch, SC_EV_FM_LOOP_END, 0, 0, 0, 0);
-	return ScUpsertMark(d->ev, &d->evCount, tick, (uint8_t)ch, SC_EV_FM_LOOP_END, 0, 0, 0, 0);
+	return ScToggleOrAddMark(d->ev, &d->evCount, tick, (uint8_t)ch, SC_EV_FM_LOOP_END,
+		0, 0, 0, 0, stack);
+}
+
+int ScFmAddOttava(ScFmDoc* d, uint32_t tick, int ch, int octaves, int stack)
+{
+	if (!d || ch < 0 || ch >= SC_FM_TOTAL) return 0;
+	if (octaves == 0)
+		return ScFmAddOttavaEnd(d, tick, ch, stack);
+	if (octaves < -3) octaves = -3;
+	if (octaves > 3) octaves = 3;
+	const uint8_t a = (uint8_t)(int8_t)octaves;
+	ScRemoveMarkKindAt(d->ev, &d->evCount, tick, (uint8_t)ch, SC_EV_OTTAVA_END);
+	if (!stack && ScMarkKindExists(d->ev, d->evCount, tick, (uint8_t)ch, SC_EV_OTTAVA)) {
+		int same = 0;
+		for (int i = 0; i < d->evCount; i++) {
+			if (d->ev[i].tick == tick && d->ev[i].ch == (uint8_t)ch
+				&& d->ev[i].kind == SC_EV_OTTAVA && d->ev[i].a == a)
+				same = 1;
+		}
+		ScRemoveMarkKindAt(d->ev, &d->evCount, tick, (uint8_t)ch, SC_EV_OTTAVA);
+		if (same) return 1;
+	} else if (stack) {
+		return ScPush(d->ev, &d->evCount, tick, (uint8_t)ch, SC_EV_OTTAVA, a, 0, 0, 0);
+	} else {
+		ScRemoveMarkKindAt(d->ev, &d->evCount, tick, (uint8_t)ch, SC_EV_OTTAVA);
+	}
+	return ScPush(d->ev, &d->evCount, tick, (uint8_t)ch, SC_EV_OTTAVA, a, 0, 0, 0);
+}
+
+int ScFmAddOttavaEnd(ScFmDoc* d, uint32_t tick, int ch, int stack)
+{
+	if (!d || ch < 0 || ch >= SC_FM_TOTAL) return 0;
+	ScRemoveMarkKindAt(d->ev, &d->evCount, tick, (uint8_t)ch, SC_EV_OTTAVA);
+	return ScToggleOrAddMark(d->ev, &d->evCount, tick, (uint8_t)ch, SC_EV_OTTAVA_END,
+		0, 0, 0, 0, stack);
 }
 
 int ScFmAllocVoice(ScFmDoc* d, const uint8_t voice25[25])
@@ -345,8 +541,36 @@ int ScFmAddVoiceSelect(ScFmDoc* d, uint32_t tick, int ch, int voiceIdx, int isCu
 	if (!d || ch < 0 || ch >= SC_FM_TOTAL) return 0;
 	if (voiceIdx < 0) voiceIdx = 0;
 	if (voiceIdx > 63) voiceIdx = 63;
-	return ScPush(d->ev, &d->evCount, tick, (uint8_t)ch, SC_EV_FM_VOICE,
-		(uint8_t)voiceIdx, isCustom ? 1 : 0, 0, 0);
+
+	int found = -1, foundVol = -1;
+	for (int i = 0; i < d->evCount; i++) {
+		if (d->ev[i].ch != (uint8_t)ch || d->ev[i].tick != tick) continue;
+		if (d->ev[i].kind == SC_EV_FM_VOICE) found = i;
+		if (d->ev[i].kind == SC_EV_FM_VOL) foundVol = i;
+	}
+
+	const uint32_t seq = ScAllocSeqBeforeTick(d->ev, d->evCount, tick, (uint8_t)ch, 1);
+	if (found >= 0) {
+		d->ev[found].a = (uint8_t)voiceIdx;
+		d->ev[found].b = isCustom ? 1 : 0;
+		d->ev[found].seq = seq;
+	} else if (d->evCount < SC_EV_MAX) {
+		ScEvent& e = d->ev[d->evCount++];
+		e.tick = tick;
+		e.seq = seq;
+		e.ch = (uint8_t)ch;
+		e.kind = SC_EV_FM_VOICE;
+		e.a = (uint8_t)voiceIdx;
+		e.b = isCustom ? 1 : 0;
+		e.c = 0;
+		e.dur = 0;
+		e.flags = 0;
+		e.pad0 = 0;
+		found = d->evCount - 1;
+	}
+	if (foundVol >= 0 && d->ev[foundVol].seq <= seq)
+		d->ev[foundVol].seq = seq + 1;
+	return found >= 0 ? 1 : 0;
 }
 
 int ScFmAddVolTl(ScFmDoc* d, uint32_t tick, int ch, int tl)
@@ -354,7 +578,36 @@ int ScFmAddVolTl(ScFmDoc* d, uint32_t tick, int ch, int tl)
 	if (!d || ch < 0 || ch >= SC_FM_TOTAL) return 0;
 	if (tl < 0) tl = 0;
 	if (tl > 127) tl = 127;
-	return ScPush(d->ev, &d->evCount, tick, (uint8_t)ch, SC_EV_FM_VOL, (uint8_t)tl, 0, 0, 0);
+
+	int found = -1, voiceIdx = -1;
+	for (int i = 0; i < d->evCount; i++) {
+		if (d->ev[i].ch != (uint8_t)ch || d->ev[i].tick != tick) continue;
+		if (d->ev[i].kind == SC_EV_FM_VOL) found = i;
+		if (d->ev[i].kind == SC_EV_FM_VOICE) voiceIdx = i;
+	}
+
+	uint32_t seq = ScAllocSeqBeforeTick(d->ev, d->evCount, tick, (uint8_t)ch, 1);
+	if (voiceIdx >= 0 && d->ev[voiceIdx].seq + 1 > seq)
+		seq = d->ev[voiceIdx].seq + 1;
+
+	if (found >= 0) {
+		d->ev[found].a = (uint8_t)tl;
+		d->ev[found].seq = seq;
+		return 1;
+	}
+	if (d->evCount >= SC_EV_MAX) return 0;
+	ScEvent& e = d->ev[d->evCount++];
+	e.tick = tick;
+	e.seq = seq;
+	e.ch = (uint8_t)ch;
+	e.kind = SC_EV_FM_VOL;
+	e.a = (uint8_t)tl;
+	e.b = 0;
+	e.c = 0;
+	e.dur = 0;
+	e.flags = 0;
+	e.pad0 = 0;
+	return 1;
 }
 
 int ScFmAddPcmSample(ScFmDoc* d, uint32_t tick, int ch, int slot)
@@ -362,9 +615,327 @@ int ScFmAddPcmSample(ScFmDoc* d, uint32_t tick, int ch, int slot)
 	if (!d || ch < SC_FM_CH || ch >= SC_FM_TOTAL) return 0;
 	if (slot < 0) slot = 0;
 	if (slot > 127) slot = 127;
-	return ScPush(d->ev, &d->evCount, tick, (uint8_t)ch, SC_EV_PCM_SAMPLE, (uint8_t)slot, 0, 0, 0);
+
+	int found = -1;
+	for (int i = 0; i < d->evCount; i++) {
+		if (d->ev[i].ch != (uint8_t)ch || d->ev[i].tick != tick) continue;
+		if (d->ev[i].kind == SC_EV_PCM_SAMPLE) found = i;
+	}
+
+	const uint32_t seq = ScAllocSeqBeforeTick(d->ev, d->evCount, tick, (uint8_t)ch, 1);
+	if (found >= 0) {
+		d->ev[found].a = (uint8_t)slot;
+		d->ev[found].seq = seq;
+		return 1;
+	}
+	if (d->evCount >= SC_EV_MAX) return 0;
+	ScEvent& e = d->ev[d->evCount++];
+	e.tick = tick;
+	e.seq = seq;
+	e.ch = (uint8_t)ch;
+	e.kind = SC_EV_PCM_SAMPLE;
+	e.a = (uint8_t)slot;
+	e.b = 0;
+	e.c = 0;
+	e.dur = 0;
+	e.flags = 0;
+	e.pad0 = 0;
+	return 1;
 }
 
+int ScMidiAddCc(ScMidiDoc* d, uint32_t tick, int ch, int cc, int val)
+{
+	if (!d || ch < 0 || ch >= SC_MIDI_CH) return 0;
+	if (cc < 0) cc = 0;
+	if (cc > 127) cc = 127;
+	if (val < 0) val = 0;
+	if (val > 127) val = 127;
+	d->needMpsmv = 1;
+	d->bind.isMpw3 = 1;
+	return ScPush(d->ev, &d->evCount, tick, (uint8_t)ch, SC_EV_CC, (uint8_t)cc, (uint8_t)val, 0, 0);
+}
+
+int ScMidiAddMeter(ScMidiDoc* d, uint32_t tick, int numer, int denom)
+{
+	if (!d || d->evCount >= SC_EV_MAX) return 0;
+	if (numer < 1) numer = 4;
+	if (numer > 32) numer = 32;
+	if (denom < 1) denom = 4;
+	if (denom > 32) denom = 32;
+	for (int i = d->evCount - 1; i >= 0; i--) {
+		if (d->ev[i].kind != SC_EV_METER || d->ev[i].tick != tick) continue;
+		for (int j = i; j + 1 < d->evCount; j++)
+			d->ev[j] = d->ev[j + 1];
+		d->evCount--;
+	}
+	d->numer = numer;
+	d->denom = denom;
+	d->needMpsmv = 1;
+	d->bind.isMpw3 = 1;
+	return ScPush(d->ev, &d->evCount, tick, 0, SC_EV_METER, (uint8_t)numer, (uint8_t)denom, 0, 0);
+}
+
+int ScMidiAddClef(ScMidiDoc* d, uint32_t tick, int ch, int clef)
+{
+	if (!d || ch < 0 || ch >= 32 || d->evCount >= SC_EV_MAX) return 0;
+	if (clef < 0) clef = 0;
+	if (clef > 3) clef = 3;
+	for (int i = d->evCount - 1; i >= 0; i--) {
+		if (d->ev[i].kind != SC_EV_CLEF || d->ev[i].tick != tick || d->ev[i].ch != (uint8_t)ch) continue;
+		for (int j = i; j + 1 < d->evCount; j++)
+			d->ev[j] = d->ev[j + 1];
+		d->evCount--;
+	}
+	return ScPush(d->ev, &d->evCount, tick, (uint8_t)ch, SC_EV_CLEF, (uint8_t)clef, 0, 0, 0);
+}
+
+int ScMidiAddKey(ScMidiDoc* d, uint32_t tick, int keySig)
+{
+	if (!d || d->evCount >= SC_EV_MAX) return 0;
+	if (keySig < -7) keySig = -7;
+	if (keySig > 7) keySig = 7;
+	for (int i = d->evCount - 1; i >= 0; i--) {
+		if (d->ev[i].kind != SC_EV_KEY || d->ev[i].tick != tick) continue;
+		for (int j = i; j + 1 < d->evCount; j++)
+			d->ev[j] = d->ev[j + 1];
+		d->evCount--;
+	}
+	return ScPush(d->ev, &d->evCount, tick, 0, SC_EV_KEY, (uint8_t)(int8_t)keySig, 0, 0, 0);
+}
+
+int ScFmAddMeter(ScFmDoc* d, uint32_t tick, int numer, int denom)
+{
+	if (!d || d->evCount >= SC_EV_MAX) return 0;
+	if (numer < 1) numer = 4;
+	if (numer > 32) numer = 32;
+	if (denom < 1) denom = 4;
+	if (denom > 32) denom = 32;
+	for (int i = d->evCount - 1; i >= 0; i--) {
+		if (d->ev[i].kind != SC_EV_METER || d->ev[i].tick != tick) continue;
+		for (int j = i; j + 1 < d->evCount; j++)
+			d->ev[j] = d->ev[j + 1];
+		d->evCount--;
+	}
+	d->numer = numer;
+	d->denom = denom;
+	return ScPush(d->ev, &d->evCount, tick, 0, SC_EV_METER, (uint8_t)numer, (uint8_t)denom, 0, 0);
+}
+
+int ScFmAddClef(ScFmDoc* d, uint32_t tick, int ch, int clef)
+{
+	if (!d || ch < 0 || ch >= SC_FM_TOTAL || d->evCount >= SC_EV_MAX) return 0;
+	if (clef < 0) clef = 0;
+	if (clef > 3) clef = 3;
+	for (int i = d->evCount - 1; i >= 0; i--) {
+		if (d->ev[i].kind != SC_EV_CLEF || d->ev[i].tick != tick || d->ev[i].ch != (uint8_t)ch) continue;
+		for (int j = i; j + 1 < d->evCount; j++)
+			d->ev[j] = d->ev[j + 1];
+		d->evCount--;
+	}
+	return ScPush(d->ev, &d->evCount, tick, (uint8_t)ch, SC_EV_CLEF, (uint8_t)clef, 0, 0, 0);
+}
+
+int ScFmAddKey(ScFmDoc* d, uint32_t tick, int keySig)
+{
+	if (!d || d->evCount >= SC_EV_MAX) return 0;
+	if (keySig < -7) keySig = -7;
+	if (keySig > 7) keySig = 7;
+	for (int i = d->evCount - 1; i >= 0; i--) {
+		if (d->ev[i].kind != SC_EV_KEY || d->ev[i].tick != tick) continue;
+		for (int j = i; j + 1 < d->evCount; j++)
+			d->ev[j] = d->ev[j + 1];
+		d->evCount--;
+	}
+	return ScPush(d->ev, &d->evCount, tick, 0, SC_EV_KEY, (uint8_t)(int8_t)keySig, 0, 0, 0);
+}
+
+int ScFmAddEx(ScFmDoc* d, uint32_t tick, int ch, int exN, int data)
+{
+	if (!d || ch < 0 || ch >= SC_FM_TOTAL) return 0;
+	if (exN < 1) exN = 1;
+	if (exN > 4) exN = 4;
+	if (data < 0) data = 0;
+	if (data > 255) data = 255;
+	d->needFpy2 = 1;
+	return ScPush(d->ev, &d->evCount, tick, (uint8_t)ch, SC_EV_FM_EX, (uint8_t)exN, (uint8_t)data, 0, 0);
+}
+
+int ScFmAddLfo(ScFmDoc* d, uint32_t tick, int ch, int amsPms, int enable)
+{
+	if (!d || ch < 0 || ch >= SC_FM_TOTAL) return 0;
+	d->needFpy2 = 1;
+	return ScPush(d->ev, &d->evCount, tick, (uint8_t)ch, SC_EV_FM_LFO,
+		(uint8_t)(amsPms & 0x3F), (uint8_t)(enable & 0xFF), 0, 0);
+}
+
+int ScFmAddDetune(ScFmDoc* d, uint32_t tick, int ch, int rawCentered)
+{
+	if (!d || ch < 0 || ch >= SC_FM_TOTAL) return 0;
+	if (rawCentered < 0) rawCentered = 0;
+	if (rawCentered > 0xFFFF) rawCentered = 0xFFFF;
+	d->needFpy2 = 1;
+	return ScPush(d->ev, &d->evCount, tick, (uint8_t)ch, SC_EV_FM_DETUNE,
+		(uint8_t)(rawCentered & 0xFF), (uint8_t)((rawCentered >> 8) & 0xFF), 0, 0);
+}
+
+int ScFmAddFlr(ScFmDoc* d, uint32_t tick, int ch, int lrMask)
+{
+	if (!d || ch < 0 || ch >= SC_FM_TOTAL) return 0;
+	d->needFpy2 = 1;
+	return ScPush(d->ev, &d->evCount, tick, (uint8_t)ch, SC_EV_FM_FLR, (uint8_t)(lrMask & 0xC0), 0, 0, 0);
+}
+
+int ScAddSoftVib(ScEvent* ev, int* n, uint32_t tick, int ch, int mode, int delayLen, int depth)
+{
+	if (!ev || !n) return 0;
+	if (mode < 0) mode = 0;
+	if (mode > 1) mode = 1;
+	if (delayLen < 0) delayLen = 0;
+	if (delayLen > 255) delayLen = 255;
+	if (depth < 0) depth = 0;
+	if (depth > 127) depth = 127;
+	return ScPush(ev, n, tick, (uint8_t)ch, SC_EV_SOFT_VIB, (uint8_t)mode, (uint8_t)delayLen, (uint8_t)depth, 0);
+}
+
+int ScAddSoftPorta(ScEvent* ev, int* n, uint32_t tick, int ch, int semiDelta, int delayLen, int glideLen)
+{
+	if (!ev || !n) return 0;
+	int a = semiDelta + 64;
+	if (a < 0) a = 0;
+	if (a > 127) a = 127;
+	if (delayLen < 0) delayLen = 0;
+	if (delayLen > 255) delayLen = 255;
+	if (glideLen < 1) glideLen = 1;
+	if (glideLen > 255) glideLen = 255;
+	return ScPush(ev, n, tick, (uint8_t)ch, SC_EV_SOFT_PORTA, (uint8_t)a, (uint8_t)delayLen, (uint8_t)glideLen, 0);
+}
+
+int ScTextNeedsMpsmv(const wchar_t* text)
+{
+	if (!text || !text[0]) return 0;
+	if (ContainsIW(text, L"@VST") || ContainsIW(text, L"@METER") || ContainsIW(text, L"@TS"))
+		return 1;
+	if (ContainsIW(text, L"@MACRO") || ContainsIW(text, L"@CALL"))
+		return 1;
+	if (ContainsIW(text, L"@SVIB") || ContainsIW(text, L"@SPORTA"))
+		return 1;
+	if (ContainsIW(text, L"@CC") || ContainsIW(text, L"@MOD") || ContainsIW(text, L"@SOFT")
+		|| ContainsIW(text, L"@SOST") || ContainsIW(text, L"@REV") || ContainsIW(text, L"@CHO")
+		|| ContainsIW(text, L"@CHORUS") || ContainsIW(text, L"@REVERB"))
+		return 1;
+	/* Soft-loop {:n … }: — new-format native (no expand). */
+	for (const wchar_t* p = text; *p; ++p) {
+		if (p[0] == L'{' && p[1] == L':') return 1;
+	}
+	return 0;
+}
+
+int ScTextNeedsFpy2(const wchar_t* text)
+{
+	if (!text || !text[0]) return 0;
+	if (ContainsIW(text, L"@MACRO") || ContainsIW(text, L"@CALL"))
+		return 1;
+	if (ContainsIW(text, L"@SVIB") || ContainsIW(text, L"@SPORTA"))
+		return 1;
+	if (ContainsIW(text, L"@PCM") || ContainsIW(text, L"@LFO") || ContainsIW(text, L"@DETUNE")
+		|| ContainsIW(text, L"@DETUN") || ContainsIW(text, L"@FSLR") || ContainsIW(text, L"@FLR")
+		|| ContainsIW(text, L"@LEGATO") || ContainsIW(text, L"@FHOKRY"))
+		return 1;
+	if (ContainsIW(text, L"@EX1") || ContainsIW(text, L"@EX2") || ContainsIW(text, L"@EX3") || ContainsIW(text, L"@EX4"))
+		return 1;
+	for (const wchar_t* p = text; *p; ++p) {
+		if (p[0] == L'{' && p[1] == L':') return 1;
+	}
+	return 0;
+}
+
+int ScMidiDocNeedsMpsmv(const ScMidiDoc* d)
+{
+	if (!d) return 0;
+	if (d->needMpsmv || d->bind.isMpw3 || d->usedSoftLoopNative) return 1;
+	if (d->macros.count > 0) return 1;
+	for (int i = 0; i < 32; i++)
+		if (d->bind.vstPath[i][0] || d->fxBind.fxPath[i][0][0] || d->fxBind.fxPath[i][1][0])
+			return 1;
+	for (int i = 0; i < d->evCount; i++) {
+		const uint8_t k = d->ev[i].kind;
+		if (k == SC_EV_CC || k == SC_EV_SOFT_VIB || k == SC_EV_SOFT_PORTA)
+			return 1;
+	}
+	return 0;
+}
+
+int ScFmDocNeedsFpy2(const ScFmDoc* d)
+{
+	if (!d) return 0;
+	if (d->needFpy2 || d->usedSoftLoopNative) return 1;
+	if (d->macros.count > 0) return 1;
+	if (ScDocMaxLoopNest(d->ev, d->evCount, SC_FM_TOTAL) > 1) return 1;
+	for (int i = 0; i < SC_FM_MISAO; i++)
+		if (d->pcmRelPath[i][0]) return 1;
+	for (int i = 0; i < d->evCount; i++) {
+		const uint8_t k = d->ev[i].kind;
+		if (k == SC_EV_PCM_SAMPLE || k == SC_EV_FM_EX || k == SC_EV_FM_LFO
+			|| k == SC_EV_FM_DETUNE || k == SC_EV_FM_LEGATO || k == SC_EV_FM_FSLR
+			|| k == SC_EV_FM_FLR || k == SC_EV_SOFT_VIB || k == SC_EV_SOFT_PORTA)
+			return 1;
+	}
+	return 0;
+}
+
+int ScFmDocCommitPcmBesideFpy2(ScFmDoc* d, const wchar_t* fpy2Path)
+{
+	if (!d || !fpy2Path || !fpy2Path[0]) return 0;
+	wchar_t dir[MAX_PATH];
+	wcsncpy_s(dir, fpy2Path, _TRUNCATE);
+	wchar_t* sl = wcsrchr(dir, L'\\');
+	if (!sl) sl = wcsrchr(dir, L'/');
+	if (sl) *sl = 0;
+	else dir[0] = 0;
+	if (!dir[0]) return 0;
+	for (int mi = 0; mi < SC_FM_MISAO; mi++) {
+		if (!d->pcmRelPath[mi][0]) continue;
+		const wchar_t* src = d->pcmRelPath[mi];
+		const int isAbs = (src[0] && src[1] == L':') || src[0] == L'\\' || src[0] == L'/';
+		if (!isAbs && !d->pcmAbsUntilSave[mi]) continue;
+		const wchar_t* leaf = wcsrchr(src, L'\\');
+		if (!leaf) leaf = wcsrchr(src, L'/');
+		leaf = leaf ? leaf + 1 : src;
+		wchar_t dest[MAX_PATH];
+		_snwprintf_s(dest, _TRUNCATE, L"%s\\%s", dir, leaf);
+		if (_wcsicmp(src, dest) != 0) {
+			if (!CopyFileW(src, dest, FALSE)) {
+				/* already beside or copy failed — keep trying relative rewrite if dest exists */
+				if (GetFileAttributesW(dest) == INVALID_FILE_ATTRIBUTES)
+					continue;
+			}
+		}
+		wcsncpy_s(d->pcmRelPath[mi], leaf, _TRUNCATE);
+		d->pcmAbsUntilSave[mi] = 0;
+	}
+	return 1;
+}
+
+static int ScMacroFind(const ScMacroTable* t, const wchar_t* name)
+{
+	if (!t || !name || !name[0]) return -1;
+	for (int i = 0; i < t->count; i++)
+		if (_wcsicmp(t->name[i], name) == 0) return i;
+	return -1;
+}
+
+static int ScMacroAdd(ScMacroTable* t, const wchar_t* name, const wchar_t* body)
+{
+	if (!t || !name || !name[0] || !body) return 0;
+	int ix = ScMacroFind(t, name);
+	if (ix < 0) {
+		if (t->count >= SC_MACRO_MAX) return 0;
+		ix = t->count++;
+		wcsncpy_s(t->name[ix], name, _TRUNCATE);
+	}
+	wcsncpy_s(t->body[ix], body, _TRUNCATE);
+	return 1;
+}
 
 static int IsWs(wchar_t c) { return c == L' ' || c == L'\t' || c == L'\r'; }
 static int IsDigit(wchar_t c) { return c >= L'0' && c <= L'9'; }
@@ -513,15 +1084,22 @@ int ScCompileMidiMml(const wchar_t* text, ScMidiDoc* out, int* errLine, wchar_t*
 	if (errLine) *errLine = 0;
 	if (errMsg && errMsgCch > 0) errMsg[0] = 0;
 
+	const int nativeSoft = ScTextNeedsMpsmv(text);
+	if (nativeSoft) {
+		out->needMpsmv = 1;
+		out->bind.isMpw3 = 1;
+		out->usedSoftLoopNative = 1;
+	}
+
 	int ch = 0;
 	uint32_t tick[SC_MIDI_CH];
 	memset(tick, 0, sizeof(tick));
-	int oct = 4, defLen = 4, vel = 105, pan = 64;
+	int oct = 4, defLen = 4, vel = 105, pan = 64, gatePct = 100;
 	int line = 1;
 	const wchar_t* p = text;
 	int tempoWritten = 0;
 	int lastNoteEv = -1;
-	/* {n ... } / |:n ... :| expand: fixed stack */
+	/* {n ... } / |:n ... :| expand: fixed stack (classic). New format uses native |:. */
 	enum { SC_LOOP_MAX = SC_LOOP_NEST_MAX };
 	const wchar_t* loopPos[SC_LOOP_MAX];
 	int loopLeft[SC_LOOP_MAX];
@@ -530,6 +1108,10 @@ int ScCompileMidiMml(const wchar_t* text, ScMidiDoc* out, int* errLine, wchar_t*
 	int chLoopLeft[SC_MIDI_CH];
 	memset(chStart, 0, sizeof(chStart));
 	memset(chLoopLeft, 0, sizeof(chLoopLeft));
+	/* @CALL expand stack (prevent infinite recurse) */
+	enum { SC_CALL_MAX = 8 };
+	const wchar_t* callRet[SC_CALL_MAX];
+	int callSp = 0;
 
 	auto fail = [&](const wchar_t* msg) -> int {
 		if (errLine) *errLine = line;
@@ -762,6 +1344,136 @@ int ScCompileMidiMml(const wchar_t* text, ScMidiDoc* out, int* errLine, wchar_t*
 				if (!ScMidiAddPedalOff(out, tick[ch], ch, 1)) return fail(L"overflow");
 				continue;
 			}
+			/* @CC n,v / @MOD v / @SOFT v / @SOST v / @REV v / @CHO v */
+			if (_wcsnicmp(p, L"CC", 2) == 0 && !((p[2] >= L'A' && p[2] <= L'Z') || (p[2] >= L'a' && p[2] <= L'z'))) {
+				p += 2;
+				while (IsWs(*p)) p++;
+				int cc = ParseInt(&p);
+				while (IsWs(*p) || *p == L',' || *p == L':') p++;
+				int val = ParseInt(&p);
+				if (cc < 0 || val < 0) return fail(L"@CC n,v");
+				if (!ScMidiAddCc(out, tick[ch], ch, cc, val)) return fail(L"overflow");
+				continue;
+			}
+			if (_wcsnicmp(p, L"MOD", 3) == 0 && !((p[3] >= L'A' && p[3] <= L'Z') || (p[3] >= L'a' && p[3] <= L'z'))) {
+				p += 3; while (IsWs(*p)) p++;
+				int val = ParseInt(&p); if (val < 0) val = 0;
+				if (!ScMidiAddCc(out, tick[ch], ch, 1, val)) return fail(L"overflow");
+				continue;
+			}
+			if (_wcsnicmp(p, L"SOFT", 4) == 0) {
+				p += 4; while (IsWs(*p)) p++;
+				int val = ParseInt(&p); if (val < 0) val = 0;
+				if (!ScMidiAddCc(out, tick[ch], ch, 67, val)) return fail(L"overflow");
+				continue;
+			}
+			if (_wcsnicmp(p, L"SOST", 4) == 0) {
+				p += 4; while (IsWs(*p)) p++;
+				int val = ParseInt(&p); if (val < 0) val = 0;
+				if (!ScMidiAddCc(out, tick[ch], ch, 66, val)) return fail(L"overflow");
+				continue;
+			}
+			if (_wcsnicmp(p, L"REVERB", 6) == 0 || (_wcsnicmp(p, L"REV", 3) == 0 && !((p[3] >= L'A' && p[3] <= L'Z') || (p[3] >= L'a' && p[3] <= L'z')))) {
+				p += (_wcsnicmp(p, L"REVERB", 6) == 0) ? 6 : 3;
+				while (IsWs(*p)) p++;
+				int val = ParseInt(&p); if (val < 0) val = 0;
+				if (!ScMidiAddCc(out, tick[ch], ch, 91, val)) return fail(L"overflow");
+				continue;
+			}
+			if (_wcsnicmp(p, L"CHORUS", 6) == 0 || (_wcsnicmp(p, L"CHO", 3) == 0 && !((p[3] >= L'A' && p[3] <= L'Z') || (p[3] >= L'a' && p[3] <= L'z')))) {
+				p += (_wcsnicmp(p, L"CHORUS", 6) == 0) ? 6 : 3;
+				while (IsWs(*p)) p++;
+				int val = ParseInt(&p); if (val < 0) val = 0;
+				if (!ScMidiAddCc(out, tick[ch], ch, 93, val)) return fail(L"overflow");
+				continue;
+			}
+			if (_wcsnicmp(p, L"DELAY", 5) == 0 || (_wcsnicmp(p, L"DEL", 3) == 0 && !((p[3] >= L'A' && p[3] <= L'Z') || (p[3] >= L'a' && p[3] <= L'z')))) {
+				p += (_wcsnicmp(p, L"DELAY", 5) == 0) ? 5 : 3;
+				while (IsWs(*p)) p++;
+				int val = ParseInt(&p); if (val < 0) val = 0;
+				if (!ScMidiAddCc(out, tick[ch], ch, 94, val)) return fail(L"overflow");
+				continue;
+			}
+			if (_wcsnicmp(p, L"EXP", 3) == 0 && !((p[3] >= L'A' && p[3] <= L'Z') || (p[3] >= L'a' && p[3] <= L'z'))) {
+				p += 3; while (IsWs(*p)) p++;
+				int val = ParseInt(&p); if (val < 0) val = 0;
+				if (!ScMidiAddCc(out, tick[ch], ch, 11, val)) return fail(L"overflow");
+				continue;
+			}
+			if (_wcsnicmp(p, L"PORTA", 5) == 0) {
+				p += 5; while (IsWs(*p)) p++;
+				int val = ParseInt(&p); if (val < 0) val = 0;
+				if (!ScMidiAddCc(out, tick[ch], ch, 65, val)) return fail(L"overflow");
+				continue;
+			}
+			if (_wcsnicmp(p, L"PORT", 4) == 0 && !((p[4] >= L'A' && p[4] <= L'Z') || (p[4] >= L'a' && p[4] <= L'z'))) {
+				p += 4; while (IsWs(*p)) p++;
+				int val = ParseInt(&p); if (val < 0) val = 0;
+				if (!ScMidiAddCc(out, tick[ch], ch, 5, val)) return fail(L"overflow");
+				continue;
+			}
+			if (_wcsnicmp(p, L"GATE", 4) == 0) {
+				p += 4; while (IsWs(*p)) p++;
+				int val = ParseInt(&p); if (val < 1) val = 1; if (val > 100) val = 100;
+				gatePct = val;
+				continue;
+			}
+			if (_wcsnicmp(p, L"SVIB", 4) == 0) {
+				p += 4; while (IsWs(*p) || *p == L',' || *p == L':') p++;
+				int mode = ParseInt(&p); if (mode < 0) mode = 0;
+				while (IsWs(*p) || *p == L',' || *p == L':') p++;
+				int delay = ParseInt(&p); if (delay < 0) delay = 24;
+				while (IsWs(*p) || *p == L',' || *p == L':') p++;
+				int depth = ParseInt(&p); if (depth < 0) depth = 40;
+				out->needMpsmv = 1; out->bind.isMpw3 = 1;
+				if (!ScAddSoftVib(out->ev, &out->evCount, tick[ch], ch, mode, delay, depth)) return fail(L"overflow");
+				continue;
+			}
+			if (_wcsnicmp(p, L"SPORTA", 6) == 0) {
+				p += 6; while (IsWs(*p) || *p == L',' || *p == L':') p++;
+				int semi = ParseInt(&p); if (semi < -64) semi = -64; if (semi > 63) semi = 63;
+				/* allow leading + */
+				while (IsWs(*p) || *p == L',' || *p == L':') p++;
+				int delay = ParseInt(&p); if (delay < 0) delay = 0;
+				while (IsWs(*p) || *p == L',' || *p == L':') p++;
+				int glide = ParseInt(&p); if (glide < 0) glide = 24;
+				out->needMpsmv = 1; out->bind.isMpw3 = 1;
+				if (!ScAddSoftPorta(out->ev, &out->evCount, tick[ch], ch, semi, delay, glide)) return fail(L"overflow");
+				continue;
+			}
+			if (_wcsnicmp(p, L"MACRO", 5) == 0) {
+				p += 5; while (IsWs(*p)) p++;
+				wchar_t name[SC_MACRO_NAME]; int ni = 0;
+				while (*p && !IsWs(*p) && *p != L'{' && ni < SC_MACRO_NAME - 1) name[ni++] = *p++;
+				name[ni] = 0;
+				while (IsWs(*p)) p++;
+				if (*p != L'{') return fail(L"@MACRO name {…}");
+				p++;
+				wchar_t body[SC_MACRO_BODY]; int bi = 0; int depth = 1;
+				while (*p && depth > 0 && bi < SC_MACRO_BODY - 1) {
+					if (*p == L'{') depth++;
+					else if (*p == L'}') { depth--; if (depth == 0) { p++; break; } }
+					if (*p == L'\n') line++;
+					body[bi++] = *p++;
+				}
+				body[bi] = 0;
+				if (!ScMacroAdd(&out->macros, name, body)) return fail(L"macro overflow");
+				out->needMpsmv = 1; out->bind.isMpw3 = 1;
+				continue;
+			}
+			if (_wcsnicmp(p, L"CALL", 4) == 0) {
+				p += 4; while (IsWs(*p)) p++;
+				wchar_t name[SC_MACRO_NAME]; int ni = 0;
+				while (*p && !IsWs(*p) && *p != L'\n' && *p != L';' && ni < SC_MACRO_NAME - 1) name[ni++] = *p++;
+				name[ni] = 0;
+				int ix = ScMacroFind(&out->macros, name);
+				if (ix < 0) return fail(L"@CALL unknown macro");
+				if (callSp >= SC_CALL_MAX) return fail(L"@CALL nest too deep");
+				callRet[callSp++] = p;
+				p = out->macros.body[ix];
+				out->needMpsmv = 1; out->bind.isMpw3 = 1;
+				continue;
+			}
 			/* @VSTSTATEB64 / @VSTSTATEB64+ / @VSTCTRLB64 / @VSTCTRLB64+ */
 			if (_wcsnicmp(p, L"VSTSTATEB64", 11) == 0 || _wcsnicmp(p, L"VSTCTRLB64", 10) == 0) {
 				const int isCtrl = (_wcsnicmp(p, L"VSTCTRLB64", 10) == 0) ? 1 : 0;
@@ -835,6 +1547,8 @@ int ScCompileMidiMml(const wchar_t* text, ScMidiDoc* out, int* errLine, wchar_t*
 				out->numer = numer;
 				out->denom = denom;
 				out->bind.isMpw3 = 1;
+				ScPush(out->ev, &out->evCount, tick[ch], (uint8_t)ch, SC_EV_METER,
+					(uint8_t)numer, (uint8_t)denom, 0, 0);
 				continue;
 			}
 			if (_wcsnicmp(p, L"TS", 2) == 0 && !((p[2] >= L'A' && p[2] <= L'Z') || (p[2] >= L'a' && p[2] <= L'z'))) {
@@ -850,6 +1564,8 @@ int ScCompileMidiMml(const wchar_t* text, ScMidiDoc* out, int* errLine, wchar_t*
 				out->numer = numer;
 				out->denom = denom;
 				out->bind.isMpw3 = 1;
+				ScPush(out->ev, &out->evCount, tick[ch], (uint8_t)ch, SC_EV_METER,
+					(uint8_t)numer, (uint8_t)denom, 0, 0);
 				continue;
 			}
 			/* @63:85 tone — DO--.MPY stores PROG as (n-1),(m-1) in one cmd2 (no separate BANK). */
@@ -939,13 +1655,24 @@ int ScCompileMidiMml(const wchar_t* text, ScMidiDoc* out, int* errLine, wchar_t*
 			return fail(L"unknown @ command");
 		}
 
-		/* {n ... } / {:n ... }:  repeat (MICP PC98). n<=0 → 2 */
+		/* {n ... } / {:n ... }:  classic = expand; new format = native |: :| */
 		if (*p == L'{') {
 			p++;
-			if (*p == L':') p++; /* {:16 ... }: style */
+			int softColon = 0;
+			if (*p == L':') { softColon = 1; p++; }
 			int n = ParseInt(&p);
 			if (n <= 0) n = 2;
 			if (n > 99) n = 99;
+			if (nativeSoft && softColon) {
+				if (!ScPush(out->ev, &out->evCount, tick[ch], (uint8_t)ch, SC_EV_FM_LOOP_START,
+					(uint8_t)n, 0, 0, 0)) return fail(L"overflow");
+				/* push sentinel so }: closes native */
+				if (loopSp >= SC_LOOP_MAX) return fail(L"loop nest too deep");
+				loopPos[loopSp] = NULL; /* NULL = native soft */
+				loopLeft[loopSp] = -1;
+				loopSp++;
+				continue;
+			}
 			if (loopSp >= SC_LOOP_MAX) return fail(L"loop nest too deep");
 			loopPos[loopSp] = p;
 			loopLeft[loopSp] = n;
@@ -955,13 +1682,28 @@ int ScCompileMidiMml(const wchar_t* text, ScMidiDoc* out, int* errLine, wchar_t*
 		if (*p == L'}') {
 			p++;
 			if (*p == L':') p++; /* closing }: */
-			if (loopSp <= 0) continue;
+			if (loopSp <= 0) {
+				/* end of @CALL body */
+				if (callSp > 0) { p = callRet[--callSp]; continue; }
+				continue;
+			}
 			loopSp--;
+			if (loopLeft[loopSp] < 0) {
+				/* native soft close */
+				if (!ScPush(out->ev, &out->evCount, tick[ch], (uint8_t)ch, SC_EV_FM_LOOP_END,
+					0, 0, 0, 0)) return fail(L"overflow");
+				continue;
+			}
 			loopLeft[loopSp]--;
 			if (loopLeft[loopSp] > 0) {
 				p = loopPos[loopSp];
 				loopSp++;
 			}
+			continue;
+		}
+		/* end of macro body (NUL) → resume */
+		if (*p == 0 && callSp > 0) {
+			p = callRet[--callSp];
 			continue;
 		}
 
@@ -981,7 +1723,9 @@ int ScCompileMidiMml(const wchar_t* text, ScMidiDoc* out, int* errLine, wchar_t*
 		if (*p == L'q') {
 			p++;
 			int n = ParseInt(&p);
-			(void)n; /* gate ratio — applied at write time later */
+			if (n < 1) n = 1;
+			if (n > 100) n = 100;
+			gatePct = n;
 			continue;
 		}
 
@@ -1057,11 +1801,12 @@ int ScCompileMidiMml(const wchar_t* text, ScMidiDoc* out, int* errLine, wchar_t*
 			continue;
 		}
 
-		/* rests */
+		/* rests / time-skip:
+		   r = timing only (no score REST) — used for polyphony padding & empty gaps.
+		   R = visible score rest (SC_EV_REST). Expand→fold round-trips cleanly. */
 		if (*p == L'r' || *p == L'R') {
 			/* drum 'r' (ride) only when followed by length-like and ch is drum? MICP: lowercase r on drum part.
-			   Heuristic: if ch==9 (MIDI10) and next is letter not digit/dot, treat as drum later.
-			   Plain R/r + optional len = rest. */
+			   Heuristic: if ch==9 (MIDI10) and next is letter not digit/dot, treat as drum later. */
 			const wchar_t rc = *p;
 			p++;
 			if (rc == L'r' && ch == 9 && *p && !IsDigit(*p) && *p != L'.' && NoteIndex(*p) < 0 && *p != L'^') {
@@ -1069,7 +1814,7 @@ int ScCompileMidiMml(const wchar_t* text, ScMidiDoc* out, int* errLine, wchar_t*
 				int len, dots;
 				parseLenDots(&len, &dots);
 				int dur = LenToTicks(len, defLen, dots);
-				if (!ScMidiAddNote(out, tick[ch], ch, 51, dur, vel)) return fail(L"event overflow");
+				if (!ScMidiAddNote(out, tick[ch], ch, 51, dur, vel, gatePct)) return fail(L"event overflow");
 				lastNoteEv = out->evCount - 1;
 				tick[ch] += (uint32_t)dur;
 				continue;
@@ -1077,7 +1822,9 @@ int ScCompileMidiMml(const wchar_t* text, ScMidiDoc* out, int* errLine, wchar_t*
 			int len, dots;
 			parseLenDots(&len, &dots);
 			int dur = LenToTicks(len, defLen, dots);
-			if (!ScMidiAddRest(out, tick[ch], ch, dur)) return fail(L"event overflow");
+			if (rc == L'R') {
+				if (!ScMidiAddRest(out, tick[ch], ch, dur)) return fail(L"event overflow");
+			}
 			tick[ch] += (uint32_t)dur;
 			lastNoteEv = -1;
 			continue;
@@ -1095,7 +1842,7 @@ int ScCompileMidiMml(const wchar_t* text, ScMidiDoc* out, int* errLine, wchar_t*
 					(uint8_t)(out->tempoT & 0xFF), (uint8_t)((out->tempoT >> 8) & 0xFF), 0, 0);
 				tempoWritten = 1;
 			}
-			if (!ScMidiAddNote(out, tick[ch], ch, drum, dur, vel)) return fail(L"event overflow");
+			if (!ScMidiAddNote(out, tick[ch], ch, drum, dur, vel, gatePct)) return fail(L"event overflow");
 			lastNoteEv = out->evCount - 1;
 			tick[ch] += (uint32_t)dur;
 			continue;
@@ -1110,8 +1857,8 @@ int ScCompileMidiMml(const wchar_t* text, ScMidiDoc* out, int* errLine, wchar_t*
 			int len, dots;
 			parseLenDots(&len, &dots);
 			int dur = LenToTicks(len, defLen, dots);
-			/* SASAMI MPY note byte = O*12+scale (DO-- O3D → 0x26). Not GM (O+1)*12. */
-			int note = oct * 12 + ni + sharp;
+			/* Score / GM MIDI: MML o4 c = MIDI 60. (MPY stream byte uses same after write.) */
+			int note = (oct + 1) * 12 + ni + sharp;
 			if (note < 0) note = 0;
 			if (note > 127) note = 127;
 			if (!tempoWritten) {
@@ -1119,7 +1866,7 @@ int ScCompileMidiMml(const wchar_t* text, ScMidiDoc* out, int* errLine, wchar_t*
 					(uint8_t)(out->tempoT & 0xFF), (uint8_t)((out->tempoT >> 8) & 0xFF), 0, 0);
 				tempoWritten = 1;
 			}
-			if (!ScMidiAddNote(out, tick[ch], ch, note, dur, vel)) return fail(L"event overflow");
+			if (!ScMidiAddNote(out, tick[ch], ch, note, dur, vel, gatePct)) return fail(L"event overflow");
 			lastNoteEv = out->evCount - 1;
 			tick[ch] += (uint32_t)dur;
 			continue;
@@ -1184,6 +1931,8 @@ int ScCompileMidiMml(const wchar_t* text, ScMidiDoc* out, int* errLine, wchar_t*
 		if (!ScValidateLoopBalance(out->ev, out->evCount, SC_MIDI_CH, lerr, 160))
 			return fail(lerr);
 	}
+	/* Score UI: one lane per MIDI part — fold [1:2][1:3] chord voices back. */
+	ScMidiFoldPolyVoicesForScore(out);
 	return 1;
 }
 static int IsSsgCh(int ch) { return ch >= 3 && ch <= 5; }
@@ -1210,6 +1959,46 @@ static uint8_t SsgNoteByte(int mmlOct, int scale)
 	return (uint8_t)(((oct & 0x0F) << 4) | (scale & 0x0F));
 }
 
+static int ScParseVoiceBytesFromWs(const wchar_t** pp, uint8_t* out, int need)
+{
+	if (!pp || !*pp || !out || need <= 0) return 0;
+	auto hx = [](wchar_t c) -> int {
+		if (c >= L'0' && c <= L'9') return c - L'0';
+		if (c >= L'a' && c <= L'f') return c - L'a' + 10;
+		if (c >= L'A' && c <= L'F') return c - L'A' + 10;
+		return -1;
+	};
+	const wchar_t* start = *pp;
+	const wchar_t* p = start;
+	int n = 0;
+	while (*p && n < need) {
+		while (*p && (IsWs(*p) || *p == L',')) p++;
+		if (!*p) break;
+		int hi = hx(*p);
+		if (hi < 0) break;
+		p++;
+		if (!*p) break;
+		int lo = hx(*p);
+		if (lo < 0) break;
+		p++;
+		out[n++] = (uint8_t)((hi << 4) | lo);
+	}
+	if (n == need) { *pp = p; return 1; }
+	n = 0;
+	p = start;
+	while (*p && n < need) {
+		while (*p && (IsWs(*p) || *p == L',' || *p == L'\r' || *p == L'\n')) p++;
+		if (!*p) break;
+		int v = 0, any = 0;
+		while (*p && iswdigit(*p)) { v = v * 10 + (*p - L'0'); p++; any = 1; }
+		if (!any) break;
+		if (v > 255) v = 255;
+		out[n++] = (uint8_t)v;
+	}
+	if (n == need) { *pp = p; return 1; }
+	return 0;
+}
+
 int ScCompileFmText(const wchar_t* text, ScFmDoc* out, int* errLine, wchar_t* errMsg, int errMsgCch)
 {
 	if (!text || !out) return 0;
@@ -1217,15 +2006,21 @@ int ScCompileFmText(const wchar_t* text, ScFmDoc* out, int* errLine, wchar_t* er
 	if (errLine) *errLine = 0;
 	if (errMsg && errMsgCch > 0) errMsg[0] = 0;
 
+	const int nativeSoft = ScTextNeedsFpy2(text);
+	if (nativeSoft) {
+		out->needFpy2 = 1;
+		out->usedSoftLoopNative = 1;
+	}
+
 	int ch = 0;
-	uint32_t tick[SC_FM_CH];
+	uint32_t tick[SC_FM_TOTAL];
 	memset(tick, 0, sizeof(tick));
 	int oct = 4, defLen = 4;
 	int gatePct = 100;
-	int voiceSet[SC_FM_CH];
-	int volSet[SC_FM_CH];
-	int chLoopLeft[SC_FM_CH];
-	const wchar_t* chStart[SC_FM_CH];
+	int voiceSet[SC_FM_TOTAL];
+	int volSet[SC_FM_TOTAL];
+	int chLoopLeft[SC_FM_TOTAL];
+	const wchar_t* chStart[SC_FM_TOTAL];
 	memset(voiceSet, 0, sizeof(voiceSet));
 	memset(volSet, 0, sizeof(volSet));
 	memset(chLoopLeft, 0, sizeof(chLoopLeft));
@@ -1233,6 +2028,9 @@ int ScCompileFmText(const wchar_t* text, ScFmDoc* out, int* errLine, wchar_t* er
 	const wchar_t* loopPos[SC_LOOP_NEST_MAX];
 	int loopLeft[SC_LOOP_NEST_MAX];
 	int loopSp = 0;
+	enum { SC_CALL_MAX = 8 };
+	const wchar_t* callRet[SC_CALL_MAX];
+	int callSp = 0;
 	int line = 1;
 	const wchar_t* p = text;
 	int tempoWritten = 0;
@@ -1268,7 +2066,7 @@ int ScCompileFmText(const wchar_t* text, ScFmDoc* out, int* errLine, wchar_t* er
 		if (*p == L']') { p++; continue; }
 		if (_wcsnicmp(p, L"OPNA", 4) == 0) { p += 4; out->opna10 = 1; continue; }
 		if (_wcsnicmp(p, L"OPN", 3) == 0) { p += 3; out->opna10 = 0; continue; }
-		if (*p == L't' || *p == L'T') {
+		if ((*p == L't' || *p == L'T') && ch != 6) {
 			p++;
 			int bpm = ParseInt(&p);
 			if (bpm < 0) return fail(L"tBPM");
@@ -1286,7 +2084,7 @@ int ScCompileFmText(const wchar_t* text, ScFmDoc* out, int* errLine, wchar_t* er
 			oct = n;
 			continue;
 		}
-		if (*p == L'l' || *p == L'L') {
+		if ((*p == L'l' || *p == L'L') && IsDigit(p[1])) {
 			p++;
 			int n = ParseInt(&p);
 			if (n <= 0) return fail(L"lN");
@@ -1360,13 +2158,23 @@ int ScCompileFmText(const wchar_t* text, ScFmDoc* out, int* errLine, wchar_t* er
 			while (*p == L'.') p++;
 			continue;
 		}
-		/* {n ... } / {:n ... }: repeat */
+		/* {n ... } / {:n ... }: classic expand; fpy2 native soft */
 		if (*p == L'{') {
 			p++;
-			if (*p == L':') p++;
+			int softColon = 0;
+			if (*p == L':') { softColon = 1; p++; }
 			int n = ParseInt(&p);
 			if (n <= 0) n = 2;
 			if (n > 99) n = 99;
+			if (nativeSoft && softColon) {
+				if (!ScPush(out->ev, &out->evCount, tick[ch], (uint8_t)ch, SC_EV_FM_LOOP_START,
+					(uint8_t)n, 0, 0, 0)) return fail(L"overflow");
+				if (loopSp >= SC_LOOP_NEST_MAX) return fail(L"loop nest too deep");
+				loopPos[loopSp] = NULL;
+				loopLeft[loopSp] = -1;
+				loopSp++;
+				continue;
+			}
 			if (loopSp >= SC_LOOP_NEST_MAX) return fail(L"loop nest too deep");
 			loopPos[loopSp] = p;
 			loopLeft[loopSp] = n;
@@ -1376,8 +2184,16 @@ int ScCompileFmText(const wchar_t* text, ScFmDoc* out, int* errLine, wchar_t* er
 		if (*p == L'}') {
 			p++;
 			if (*p == L':') p++;
-			if (loopSp <= 0) continue;
+			if (loopSp <= 0) {
+				if (callSp > 0) { p = callRet[--callSp]; continue; }
+				continue;
+			}
 			loopSp--;
+			if (loopLeft[loopSp] < 0) {
+				if (!ScPush(out->ev, &out->evCount, tick[ch], (uint8_t)ch, SC_EV_FM_LOOP_END,
+					0, 0, 0, 0)) return fail(L"overflow");
+				continue;
+			}
 			loopLeft[loopSp]--;
 			if (loopLeft[loopSp] > 0) {
 				p = loopPos[loopSp];
@@ -1385,11 +2201,226 @@ int ScCompileFmText(const wchar_t* text, ScFmDoc* out, int* errLine, wchar_t* er
 			}
 			continue;
 		}
+		if (*p == 0 && callSp > 0) {
+			p = callRet[--callSp];
+			continue;
+		}
 		if (*p == L'@') {
 			p++;
+			if (_wcsnicmp(p, L"METER", 5) == 0) {
+				p += 5;
+				while (IsWs(*p)) p++;
+				int numer = ParseInt(&p);
+				while (IsWs(*p) || *p == L'/' || *p == L',' || *p == L':') p++;
+				int denom = ParseInt(&p);
+				if (numer < 1) numer = 4;
+				if (numer > 32) numer = 32;
+				if (denom < 1) denom = 4;
+				if (denom > 32) denom = 32;
+				out->numer = numer;
+				out->denom = denom;
+				ScPush(out->ev, &out->evCount, tick[ch], (uint8_t)ch, SC_EV_METER,
+					(uint8_t)numer, (uint8_t)denom, 0, 0);
+				continue;
+			}
+			if (_wcsnicmp(p, L"TS", 2) == 0 && !((p[2] >= L'A' && p[2] <= L'Z') || (p[2] >= L'a' && p[2] <= L'z'))) {
+				p += 2;
+				while (IsWs(*p)) p++;
+				int numer = ParseInt(&p);
+				while (IsWs(*p) || *p == L'/' || *p == L',' || *p == L':') p++;
+				int denom = ParseInt(&p);
+				if (numer < 1) numer = 4;
+				if (numer > 32) numer = 32;
+				if (denom < 1) denom = 4;
+				if (denom > 32) denom = 32;
+				out->numer = numer;
+				out->denom = denom;
+				ScPush(out->ev, &out->evCount, tick[ch], (uint8_t)ch, SC_EV_METER,
+					(uint8_t)numer, (uint8_t)denom, 0, 0);
+				continue;
+			}
+			if (_wcsnicmp(p, L"VOICEHEX", 8) == 0) {
+				p += 8;
+				while (IsWs(*p)) p++;
+				int idx = ParseInt(&p);
+				if (idx < 0 || idx >= SC_VOICE_MAX) return fail(L"@VOICEHEX index");
+				uint8_t vb[25];
+				if (!ScParseVoiceBytesFromWs(&p, vb, 25)) return fail(L"@VOICEHEX 25 bytes");
+				memcpy(out->voices[idx], vb, 25);
+				if (idx >= out->voiceCount) out->voiceCount = idx + 1;
+				continue;
+			}
+			if (_wcsnicmp(p, L"CV", 2) == 0) {
+				p += 2;
+				int n = ParseInt(&p);
+				if (n < 0) n = 0;
+				if (n >= SC_VOICE_MAX) n = SC_VOICE_MAX - 1;
+				if (!IsSsgCh(ch)) {
+					ScPush(out->ev, &out->evCount, tick[ch], (uint8_t)ch, SC_EV_FM_VOICE,
+						(uint8_t)n, 1, 0, 0);
+					voiceSet[ch] = 1;
+				}
+				continue;
+			}
+			if (_wcsnicmp(p, L"PCM", 3) == 0) {
+				p += 3; while (IsWs(*p)) p++;
+				if (*p != L'"') return fail(L"@PCM \"path\"");
+				p++;
+				wchar_t path[260]; int pi = 0;
+				while (*p && *p != L'"' && pi < 259) path[pi++] = *p++;
+				path[pi] = 0;
+				if (*p == L'"') p++;
+				int mi = (ch >= SC_FM_CH) ? (ch - SC_FM_CH) : 0;
+				if (mi < 0) mi = 0;
+				if (mi >= SC_FM_MISAO) mi = SC_FM_MISAO - 1;
+				if (ch < SC_FM_CH) ch = SC_FM_CH + mi;
+				wcsncpy_s(out->pcmRelPath[mi], path, _TRUNCATE);
+				out->pcmSlot[mi] = (uint8_t)mi;
+				out->pcmAbsUntilSave[mi] = (path[0] && path[1] == L':') || path[0] == L'\\' || path[0] == L'/' ? 1 : 0;
+				out->needFpy2 = 1;
+				if (!ScFmAddPcmSample(out, tick[ch], ch, out->pcmSlot[mi])) return fail(L"overflow");
+				continue;
+			}
+			if (_wcsnicmp(p, L"EX", 2) == 0 && IsDigit(p[2])) {
+				p += 2;
+				int exN = ParseInt(&p);
+				while (IsWs(*p) || *p == L',' || *p == L':') p++;
+				int data = ParseInt(&p); if (data < 0) data = 0;
+				if (!ScFmAddEx(out, tick[ch], ch, exN, data)) return fail(L"overflow");
+				continue;
+			}
+			if (_wcsnicmp(p, L"LFO", 3) == 0) {
+				p += 3; while (IsWs(*p) || *p == L',' || *p == L':') p++;
+				int ams = ParseInt(&p); if (ams < 0) ams = 0;
+				while (IsWs(*p) || *p == L',' || *p == L':') p++;
+				int en = ParseInt(&p); if (en < 0) en = 8;
+				if (!ScFmAddLfo(out, tick[ch], ch, ams, en)) return fail(L"overflow");
+				continue;
+			}
+			if (_wcsnicmp(p, L"DETUNE", 6) == 0 || _wcsnicmp(p, L"DETUN", 5) == 0) {
+				p += (_wcsnicmp(p, L"DETUNE", 6) == 0) ? 6 : 5;
+				while (IsWs(*p)) p++;
+				int neg = 0;
+				if (*p == L'-') { neg = 1; p++; }
+				else if (*p == L'+') p++;
+				int v = ParseInt(&p); if (v < 0) v = 0;
+				if (neg) v = -v;
+				int raw = 0x8000 + v;
+				if (raw < 0) raw = 0;
+				if (raw > 0xFFFF) raw = 0xFFFF;
+				if (!ScFmAddDetune(out, tick[ch], ch, raw)) return fail(L"overflow");
+				continue;
+			}
+			if (_wcsnicmp(p, L"FLR", 3) == 0) {
+				p += 3; while (IsWs(*p)) p++;
+				int lr = ParseInt(&p); if (lr < 0) lr = 0xC0;
+				if (!ScFmAddFlr(out, tick[ch], ch, lr)) return fail(L"overflow");
+				continue;
+			}
+			if (_wcsnicmp(p, L"FSLR", 4) == 0) {
+				p += 4; while (IsWs(*p)) p++;
+				int wait = ParseInt(&p); if (wait < 1) wait = 2;
+				if (wait > 255) wait = 255;
+				out->needFpy2 = 1;
+				if (!ScPush(out->ev, &out->evCount, tick[ch], (uint8_t)ch, SC_EV_FM_FSLR, 0, 0, 0, (uint16_t)wait))
+					return fail(L"overflow");
+				tick[ch] += (uint32_t)wait;
+				continue;
+			}
+			if (_wcsnicmp(p, L"LEGATO", 6) == 0 || _wcsnicmp(p, L"FHOKRY", 6) == 0) {
+				p += 6;
+				/* mark next note as legato — set flag on following note via c=1 on voice? Store pending */
+				out->needFpy2 = 1;
+				/* encode as zero-dur marker; writer converts next FM_NOTE to cmd24 */
+				if (!ScPush(out->ev, &out->evCount, tick[ch], (uint8_t)ch, SC_EV_FM_LEGATO, 1, 0, 0, 0))
+					return fail(L"overflow");
+				continue;
+			}
+			if (_wcsnicmp(p, L"SVIB", 4) == 0) {
+				p += 4; while (IsWs(*p) || *p == L',' || *p == L':') p++;
+				int mode = ParseInt(&p); if (mode < 0) mode = 0;
+				while (IsWs(*p) || *p == L',' || *p == L':') p++;
+				int delay = ParseInt(&p); if (delay < 0) delay = 24;
+				while (IsWs(*p) || *p == L',' || *p == L':') p++;
+				int depth = ParseInt(&p); if (depth < 0) depth = 40;
+				out->needFpy2 = 1;
+				if (!ScAddSoftVib(out->ev, &out->evCount, tick[ch], ch, mode, delay, depth)) return fail(L"overflow");
+				continue;
+			}
+			if (_wcsnicmp(p, L"SPORTA", 6) == 0) {
+				p += 6; while (IsWs(*p) || *p == L',' || *p == L':') p++;
+				int neg = 0;
+				if (*p == L'-') { neg = 1; p++; }
+				else if (*p == L'+') p++;
+				int semi = ParseInt(&p); if (semi < 0) semi = 0;
+				if (neg) semi = -semi;
+				while (IsWs(*p) || *p == L',' || *p == L':') p++;
+				int delay = ParseInt(&p); if (delay < 0) delay = 0;
+				while (IsWs(*p) || *p == L',' || *p == L':') p++;
+				int glide = ParseInt(&p); if (glide < 0) glide = 24;
+				out->needFpy2 = 1;
+				if (!ScAddSoftPorta(out->ev, &out->evCount, tick[ch], ch, semi, delay, glide)) return fail(L"overflow");
+				continue;
+			}
+			if (_wcsnicmp(p, L"MACRO", 5) == 0) {
+				p += 5; while (IsWs(*p)) p++;
+				wchar_t name[SC_MACRO_NAME]; int ni = 0;
+				while (*p && !IsWs(*p) && *p != L'{' && ni < SC_MACRO_NAME - 1) name[ni++] = *p++;
+				name[ni] = 0;
+				while (IsWs(*p)) p++;
+				if (*p != L'{') return fail(L"@MACRO name {…}");
+				p++;
+				wchar_t body[SC_MACRO_BODY]; int bi = 0; int depth = 1;
+				while (*p && depth > 0 && bi < SC_MACRO_BODY - 1) {
+					if (*p == L'{') depth++;
+					else if (*p == L'}') { depth--; if (depth == 0) { p++; break; } }
+					if (*p == L'\n') line++;
+					body[bi++] = *p++;
+				}
+				body[bi] = 0;
+				if (!ScMacroAdd(&out->macros, name, body)) return fail(L"macro overflow");
+				out->needFpy2 = 1;
+				continue;
+			}
+			if (_wcsnicmp(p, L"CALL", 4) == 0) {
+				p += 4; while (IsWs(*p)) p++;
+				wchar_t name[SC_MACRO_NAME]; int ni = 0;
+				while (*p && !IsWs(*p) && *p != L'\n' && ni < SC_MACRO_NAME - 1) name[ni++] = *p++;
+				name[ni] = 0;
+				int ix = ScMacroFind(&out->macros, name);
+				if (ix < 0) return fail(L"@CALL unknown macro");
+				if (callSp >= SC_CALL_MAX) return fail(L"@CALL nest too deep");
+				callRet[callSp++] = p;
+				p = out->macros.body[ix];
+				out->needFpy2 = 1;
+				continue;
+			}
 			if (*p == L'~' || *p == L'#' || *p == L'!' || *p == L'%' || *p == L'^' || *p == L'*') {
 				p++;
 				while (IsDigit(*p) || *p == L':' || *p == L'-' || *p == L'+' || *p == L'.') p++;
+				continue;
+			}
+			/* @Vnnn — PC98 DAT volume alias (same as V). */
+			if (*p == L'V' || *p == L'v') {
+				p++;
+				int n = ParseInt(&p);
+				if (n < 0) n = 15;
+				if (IsSsgCh(ch) || ch == 6) {
+					if (n > 15) {
+						/* @V100 style → scale to 0..15 */
+						if (n > 127) n = 127;
+						n = (n * 15) / 127;
+					}
+					ScPush(out->ev, &out->evCount, tick[ch], (uint8_t)ch, SC_EV_FM_VOL, (uint8_t)n, 1, 0, 0);
+				} else {
+					int tl;
+					if (n <= 15) tl = (15 - n) * 8;
+					else { if (n > 127) n = 127; tl = 127 - n; }
+					if (tl < 0) tl = 0;
+					if (tl > 127) tl = 127;
+					ScPush(out->ev, &out->evCount, tick[ch], (uint8_t)ch, SC_EV_FM_VOL, (uint8_t)tl, 0, 0, 0);
+				}
+				volSet[ch] = 1;
 				continue;
 			}
 			if ((*p >= L'A' && *p <= L'Z') || (*p >= L'a' && *p <= L'z')) {
@@ -1429,6 +2460,46 @@ int ScCompileFmText(const wchar_t* text, ScFmDoc* out, int* errLine, wchar_t* er
 			tick[ch] += (uint32_t)dur;
 			continue;
 		}
+		/* OPNA RHY (ch7 / index 6): pad letters + pitch→pad. Store pad 0..5 in note byte. */
+		if (ch == 6) {
+			int pad = -1;
+			const wchar_t rc = *p;
+			int consumedNote = 0;
+			if (rc == L'b' || rc == L'B') { pad = 0; p++; }           /* BD */
+			else if (rc == L's' || rc == L'S') { pad = 1; p++; }      /* SD */
+			else if (rc == L'h' || rc == L'H' || rc == L'l' || rc == L'L') { pad = 3; p++; } /* HH */
+			else if (rc == L't' || rc == L'T' || rc == L'm' || rc == L'M') { pad = 4; p++; } /* TOM */
+			else if (rc == L'i' || rc == L'I') { pad = 5; p++; }      /* RIM */
+			else {
+				int ni = NoteIndex(rc);
+				if (ni >= 0) {
+					p++;
+					if (*p == L'#' || *p == L'+') { ni++; p++; }
+					else if (*p == L'-') { ni--; p++; }
+					if (ni < 0) ni = 0;
+					/* c=0 .. f=5 → pads; g/a/b wrap */
+					pad = ni % 6;
+					consumedNote = 1;
+					(void)consumedNote;
+				}
+			}
+			if (pad >= 0) {
+				int len = ParseInt(&p);
+				int dots = 0;
+				while (*p == L'.') { dots++; p++; }
+				int dur = LenToTicks(len, defLen, dots);
+				if (!tempoWritten) {
+					ScPush(out->ev, &out->evCount, 0, 0, SC_EV_FM_TEMPO,
+						(uint8_t)(out->tempoT & 0xFF), (uint8_t)((out->tempoT >> 8) & 0xFF), 0, 0);
+					tempoWritten = 1;
+				}
+				if (!ScPush(out->ev, &out->evCount, tick[ch], (uint8_t)ch, SC_EV_FM_NOTE,
+					(uint8_t)pad, 0, (uint8_t)gatePct, (uint16_t)dur))
+					return fail(L"overflow");
+				tick[ch] += (uint32_t)dur;
+				continue;
+			}
+		}
 		int ni = NoteIndex(*p);
 		if (ni >= 0) {
 			p++;
@@ -1440,10 +2511,11 @@ int ScCompileFmText(const wchar_t* text, ScFmDoc* out, int* errLine, wchar_t* er
 			int dots = 0;
 			while (*p == L'.') { dots++; p++; }
 			int dur = LenToTicks(len, defLen, dots);
-			/* gate % shortens sounding wait; step advances by full dur */
+			/* gate % shortens sounding wait; full dur stored for score/MML round-trip */
 			int wait = (dur * gatePct) / 100;
 			if (wait < 2) wait = 2;
 			if (wait > 255) wait = 255;
+			(void)wait;
 			if (!tempoWritten) {
 				ScPush(out->ev, &out->evCount, 0, 0, SC_EV_FM_TEMPO, (uint8_t)(out->tempoT & 0xFF), (uint8_t)((out->tempoT >> 8) & 0xFF), 0, 0);
 				tempoWritten = 1;
@@ -1463,8 +2535,15 @@ int ScCompileFmText(const wchar_t* text, ScFmDoc* out, int* errLine, wchar_t* er
 				volSet[ch] = 1;
 			}
 			const uint8_t nb = IsSsgCh(ch) ? SsgNoteByte(oct, ni) : FmNoteByte(oct, ni);
-			if (!ScFmAddNote(out, tick[ch], ch, nb, wait)) return fail(L"overflow");
+			if (!ScPush(out->ev, &out->evCount, tick[ch], (uint8_t)ch, SC_EV_FM_NOTE, nb, 0, (uint8_t)gatePct, (uint16_t)dur))
+				return fail(L"overflow");
 			tick[ch] += (uint32_t)dur;
+			continue;
+		}
+		/* Skip leftover lowercase PMD-ish tokens so drum dumps with m/l/n don't fail melodic parts. */
+		if ((*p >= L'a' && *p <= L'z') && NoteIndex(*p) < 0) {
+			p++;
+			while (IsDigit(*p) || *p == L':' || *p == L'-' || *p == L'+' || *p == L'.') p++;
 			continue;
 		}
 		if ((*p >= L'A' && *p <= L'Z') && NoteIndex(*p) < 0
@@ -1485,6 +2564,36 @@ int ScCompileFmText(const wchar_t* text, ScFmDoc* out, int* errLine, wchar_t* er
 		wchar_t lerr[160];
 		if (!ScValidateLoopBalance(out->ev, out->evCount, SC_FM_TOTAL, lerr, 160))
 			return fail(lerr);
+	}
+	/* FMP/PMD dumps sometimes put rhythm under [10] with @N… while SASAMI RHY is ch7.
+	   If RHY has no notes and [10] has @N + notes, fold them onto RHY pads. */
+	{
+		const wchar_t* p10 = text ? wcsstr(text, L"[10]") : NULL;
+		int hasAtN = 0;
+		if (p10) {
+			for (const wchar_t* q = p10; *q && q < p10 + 500; q++) {
+				if (q[0] == L'@' && (q[1] == L'N' || q[1] == L'n')) { hasAtN = 1; break; }
+			}
+		}
+		if (hasAtN) {
+			int n6 = 0, n9 = 0;
+			for (int i = 0; i < out->evCount; i++) {
+				if (out->ev[i].kind != SC_EV_FM_NOTE) continue;
+				if (out->ev[i].ch == 6) n6++;
+				if (out->ev[i].ch == 9) n9++;
+			}
+			if (n6 == 0 && n9 > 0) {
+				for (int i = 0; i < out->evCount; i++) {
+					if (out->ev[i].ch != 9) continue;
+					out->ev[i].ch = 6;
+					if (out->ev[i].kind == SC_EV_FM_NOTE || out->ev[i].kind == SC_EV_TIE) {
+						int pad = (int)(out->ev[i].a & 0x0F) % 6;
+						if (pad < 0) pad = 0;
+						out->ev[i].a = (uint8_t)pad;
+					}
+				}
+			}
+		}
 	}
 	return 1;
 }
@@ -1517,8 +2626,38 @@ static int CmpEv(const void* a, const void* b)
 	if (ea->ch != eb->ch) return (int)ea->ch - (int)eb->ch;
 	if (ea->tick < eb->tick) return -1;
 	if (ea->tick > eb->tick) return 1;
-	/* Same tick: preserve MML emission order. Rank-sorting broke DO-- `:||:`
-	   (LOOP_START ranked before LOOP_END → empty cmd13/14, stack corruption). */
+	/* Same tick (MICP / score↔text / write):
+	   Q → :| → |: → setup cmds (Ped./8va/CC/…) → notes → tear-down (＊/loco/…) → J
+	   :| before |: keeps `:||:` as close-then-open. */
+	auto softRank = [](uint8_t k) -> int {
+		if (k == SC_EV_JUMP_MARK) return 0;
+		if (k == SC_EV_FM_LOOP_END) return 1;
+		if (k == SC_EV_FM_LOOP_START) return 2;
+		/* Enter / arm before sounding */
+		if (k == SC_EV_PEDAL_ON || k == SC_EV_OTTAVA
+			|| k == SC_EV_SLUR_START || k == SC_EV_CRESC || k == SC_EV_DIM
+			|| k == SC_EV_TEMPO || k == SC_EV_VELO || k == SC_EV_PROG || k == SC_EV_BANK
+			|| k == SC_EV_VOL || k == SC_EV_PAN || k == SC_EV_PITCH
+			|| k == SC_EV_RPN || k == SC_EV_NRPN || k == SC_EV_SYSEX || k == SC_EV_COMMENT
+			|| k == SC_EV_FM_TEMPO || k == SC_EV_FM_VOICE || k == SC_EV_FM_VOL
+			|| k == SC_EV_FM_PITCH || k == SC_EV_PCM_SAMPLE
+			|| k == SC_EV_CC || k == SC_EV_FM_EX || k == SC_EV_FM_LFO || k == SC_EV_FM_DETUNE
+			|| k == SC_EV_FM_FLR || k == SC_EV_SOFT_VIB || k == SC_EV_SOFT_PORTA
+			|| k == SC_EV_FM_LEGATO || k == SC_EV_METER)
+			return 3;
+		if (k == SC_EV_NOTE || k == SC_EV_REST || k == SC_EV_TIE
+			|| k == SC_EV_FM_NOTE || k == SC_EV_FM_REST || k == SC_EV_FM_FSLR)
+			return 4;
+		/* Leave / disarm after sounding */
+		if (k == SC_EV_PEDAL_OFF || k == SC_EV_OTTAVA_END || k == SC_EV_SLUR_END)
+			return 5;
+		if (k == SC_EV_FM_JUMP) return 6;
+		return -1;
+	};
+	const int ra = softRank(ea->kind);
+	const int rb = softRank(eb->kind);
+	if (ra >= 0 && rb >= 0 && ra != rb)
+		return ra - rb;
 	if (ea->seq < eb->seq) return -1;
 	if (ea->seq > eb->seq) return 1;
 	return 0;
@@ -1531,6 +2670,241 @@ static ScEvent* ScSortedEvBuf(void)
 	if (!s)
 		s = (ScEvent*)HeapAlloc(GetProcessHeap(), 0, sizeof(ScEvent) * (SIZE_T)SC_EV_MAX);
 	return s;
+}
+
+/* Second buffer for MML export (writer may hold ScSortedEvBuf). */
+static ScEvent* ScExportEvBuf(void)
+{
+	static ScEvent* s = NULL;
+	if (!s)
+		s = (ScEvent*)HeapAlloc(GetProcessHeap(), 0, sizeof(ScEvent) * (SIZE_T)SC_EV_MAX);
+	return s;
+}
+
+/*
+ * SASAMI MIDI streams are monophonic. Score chords share one visual track;
+ * for MPW/MML they must become [midiCh:1] [midiCh:2] … with rests padding.
+ * Remaps overlapping NOTE events onto free dataArea slots sharing MIDI part.
+ * Mutates ev[].ch and trackPart[] (working copies only).
+ */
+static void ScMidiExpandChordVoices(ScEvent* ev, int n, uint8_t trackPart[SC_MIDI_CH])
+{
+	if (!ev || n <= 0 || !trackPart) return;
+
+	uint8_t occupied[SC_MIDI_CH];
+	memset(occupied, 0, sizeof(occupied));
+	for (int i = 0; i < n; i++) {
+		const int ch = (int)ev[i].ch;
+		if (ch >= 0 && ch < SC_MIDI_CH) occupied[ch] = 1;
+	}
+
+	auto allocSlot = [&]() -> int {
+		for (int s = 0; s < SC_MIDI_CH; s++) {
+			if (!occupied[s]) {
+				occupied[s] = 1;
+				return s;
+			}
+		}
+		return -1;
+	};
+
+	/* Snapshot which lanes were primary before we steal empties for voices. */
+	uint8_t primary[SC_MIDI_CH];
+	memcpy(primary, occupied, sizeof(primary));
+
+	int* idxs = (int*)HeapAlloc(GetProcessHeap(), 0, sizeof(int) * (SIZE_T)max(1, n));
+	if (!idxs) return;
+
+	for (int home = 0; home < SC_MIDI_CH; home++) {
+		if (!primary[home]) continue;
+		int nIdx = 0;
+		for (int i = 0; i < n; i++) {
+			if ((int)ev[i].ch != home) continue;
+			if (ev[i].kind != SC_EV_NOTE) continue;
+			idxs[nIdx++] = i;
+		}
+		if (nIdx < 2) continue; /* no overlap possible with 0–1 notes */
+
+		/* Sort by tick, then pitch (low→high so bass stays on [n:1]). */
+		for (int a = 0; a < nIdx; a++) {
+			for (int b = a + 1; b < nIdx; b++) {
+				const ScEvent& ea = ev[idxs[a]];
+				const ScEvent& eb = ev[idxs[b]];
+				int swap = 0;
+				if (eb.tick < ea.tick) swap = 1;
+				else if (eb.tick == ea.tick && eb.a < ea.a) swap = 1;
+				else if (eb.tick == ea.tick && eb.a == ea.a && eb.seq < ea.seq) swap = 1;
+				if (swap) {
+					int t = idxs[a]; idxs[a] = idxs[b]; idxs[b] = t;
+				}
+			}
+		}
+
+		int part = trackPart[home] != 0xFF ? (int)trackPart[home] : home;
+		if (part < 0) part = 0;
+		if (part > 15) part &= 15;
+
+		enum { kMaxVoice = 16 };
+		int voiceSlot[kMaxVoice];
+		uint32_t voiceEnd[kMaxVoice];
+		voiceSlot[0] = home;
+		voiceEnd[0] = 0;
+		int nVoice = 1;
+
+		for (int k = 0; k < nIdx; k++) {
+			ScEvent& e = ev[idxs[k]];
+			const uint32_t t0 = e.tick;
+			const uint32_t t1 = t0 + (e.dur ? e.dur : 1u);
+			int v = -1;
+			for (int i = 0; i < nVoice; i++) {
+				if (voiceEnd[i] <= t0) { v = i; break; }
+			}
+			if (v < 0) {
+				if (nVoice >= kMaxVoice) continue; /* leave on home — sequential fallback */
+				const int slot = allocSlot();
+				if (slot < 0) continue;
+				v = nVoice++;
+				voiceSlot[v] = slot;
+				voiceEnd[v] = 0;
+				trackPart[slot] = (uint8_t)part;
+			}
+			e.ch = (uint8_t)voiceSlot[v];
+			voiceEnd[v] = t1;
+		}
+	}
+	HeapFree(GetProcessHeap(), 0, idxs);
+}
+
+/*
+ * Text→score: merge [midiCh:2][midiCh:3]… back onto one visual lane so chords
+ * stay on MIDI 1 (etc.). Export still expands to multi dataArea for playback.
+ *
+ * Secondary-lane rests/banks are polyphony padding from MML emit — drop them
+ * or the score sprouts bogus rests and duplicate Bank chips after every open/close.
+ */
+static void ScMidiFoldPolyVoicesForScore(ScMidiDoc* d)
+{
+	if (!d || d->evCount <= 0) return;
+
+	int homeOfPart[16];
+	for (int i = 0; i < 16; i++) homeOfPart[i] = -1;
+
+	auto partOf = [&](int ch) -> int {
+		if (ch < 0 || ch >= SC_MIDI_CH) return -1;
+		int p = d->trackPart[ch];
+		if (p == 0xFF) p = ch;
+		if (p < 0) return -1;
+		if (p > 15) p &= 15;
+		return p;
+	};
+
+	for (int ch = 0; ch < SC_MIDI_CH; ch++) {
+		const int p = partOf(ch);
+		if (p < 0) continue;
+		int has = 0;
+		for (int i = 0; i < d->evCount; i++)
+			if ((int)d->ev[i].ch == ch) { has = 1; break; }
+		if (!has && !d->bind.vstPath[ch][0] && d->bind.vstProg[ch] < 0
+			&& d->bind.vstBankMsb[ch] < 0 && d->bind.vstBankLsb[ch] < 0)
+			continue;
+		if (homeOfPart[p] < 0)
+			homeOfPart[p] = ch;
+		else if (d->bind.vstPath[ch][0] && !d->bind.vstPath[homeOfPart[p]][0])
+			homeOfPart[p] = ch;
+		else if (ch < homeOfPart[p]
+			&& (d->bind.vstPath[ch][0] || !d->bind.vstPath[homeOfPart[p]][0]))
+			homeOfPart[p] = ch;
+	}
+
+	uint8_t remap[SC_MIDI_CH];
+	uint8_t isHome[SC_MIDI_CH];
+	memset(isHome, 0, sizeof(isHome));
+	for (int ch = 0; ch < SC_MIDI_CH; ch++)
+		remap[ch] = (uint8_t)ch;
+	for (int p = 0; p < 16; p++)
+		if (homeOfPart[p] >= 0) isHome[homeOfPart[p]] = 1;
+	for (int ch = 0; ch < SC_MIDI_CH; ch++) {
+		const int p = partOf(ch);
+		if (p < 0 || homeOfPart[p] < 0) continue;
+		remap[ch] = (uint8_t)homeOfPart[p];
+	}
+
+	/* Rebuild event list: keep home events; fold only NOTE/TIE from other lanes. */
+	int w = 0;
+	int changed = 0;
+	for (int i = 0; i < d->evCount; i++) {
+		ScEvent e = d->ev[i];
+		const int ch = (int)e.ch;
+		if (ch < 0 || ch >= SC_MIDI_CH) {
+			d->ev[w++] = e;
+			continue;
+		}
+		const int home = (int)remap[ch];
+		if (home == ch) {
+			d->ev[w++] = e;
+			continue;
+		}
+		changed = 1;
+		/* Drop padding rests / duplicate ctrl from secondary dataAreas. */
+		if (e.kind == SC_EV_REST || e.kind == SC_EV_BANK || e.kind == SC_EV_PROG
+			|| e.kind == SC_EV_TEMPO || e.kind == SC_EV_VOL || e.kind == SC_EV_PAN
+			|| e.kind == SC_EV_VELO || e.kind == SC_EV_PITCH)
+			continue;
+		if (e.kind != SC_EV_NOTE && e.kind != SC_EV_TIE)
+			continue;
+		e.ch = (uint8_t)home;
+		d->ev[w++] = e;
+	}
+	d->evCount = w;
+
+	/* Collapse duplicate rests at the same tick on home (3× r4 from [1:1..3]). */
+	w = 0;
+	for (int i = 0; i < d->evCount; i++) {
+		const ScEvent& e = d->ev[i];
+		if (e.kind == SC_EV_REST) {
+			int dup = 0;
+			for (int j = 0; j < w; j++) {
+				if (d->ev[j].kind == SC_EV_REST && d->ev[j].ch == e.ch
+					&& d->ev[j].tick == e.tick && d->ev[j].dur == e.dur) {
+					dup = 1; break;
+				}
+			}
+			if (dup) { changed = 1; continue; }
+		}
+		d->ev[w++] = e;
+	}
+	d->evCount = w;
+
+	if (!changed) {
+		/* Still normalize trackPart for homes even if nothing remapped. */
+	}
+
+	for (int ch = 0; ch < SC_MIDI_CH; ch++) {
+		const int home = (int)remap[ch];
+		if (home == ch) continue;
+		if (d->bind.vstPath[ch][0] && !d->bind.vstPath[home][0])
+			wcsncpy_s(d->bind.vstPath[home], d->bind.vstPath[ch], _TRUNCATE);
+		if (d->bind.vstProg[ch] >= 0 && d->bind.vstProg[home] < 0)
+			d->bind.vstProg[home] = d->bind.vstProg[ch];
+		if (d->bind.vstBankMsb[ch] >= 0 && d->bind.vstBankMsb[home] < 0)
+			d->bind.vstBankMsb[home] = d->bind.vstBankMsb[ch];
+		if (d->bind.vstBankLsb[ch] >= 0 && d->bind.vstBankLsb[home] < 0)
+			d->bind.vstBankLsb[home] = d->bind.vstBankLsb[ch];
+		d->bind.vstPath[ch][0] = 0;
+		d->bind.vstProg[ch] = -1;
+		d->bind.vstBankMsb[ch] = -1;
+		d->bind.vstBankLsb[ch] = -1;
+		d->trackPart[ch] = 0xFF;
+		for (int sl = 0; sl < ScMidiFxBind::SC_FX_SLOTS; ++sl) {
+			if (d->fxBind.fxPath[ch][sl][0] && !d->fxBind.fxPath[home][sl][0])
+				wcsncpy_s(d->fxBind.fxPath[home][sl], d->fxBind.fxPath[ch][sl], _TRUNCATE);
+			d->fxBind.fxPath[ch][sl][0] = 0;
+		}
+	}
+	for (int p = 0; p < 16; p++) {
+		if (homeOfPart[p] < 0) continue;
+		d->trackPart[homeOfPart[p]] = (uint8_t)p;
+	}
 }
 
 static int ScPutMisaoPcmSample(SasamiTrackStream* s, uint8_t slot, const wchar_t* relPath)
@@ -1671,6 +3045,10 @@ int ScMidiDocToWrite(const ScMidiDoc* d, SasamiWriteMidi* w)
 	int n = d->evCount;
 	if (n > SC_EV_MAX) n = SC_EV_MAX;
 	memcpy(sorted, d->ev, sizeof(ScEvent) * (size_t)n);
+	uint8_t xPart[SC_MIDI_CH];
+	memcpy(xPart, d->trackPart, sizeof(xPart));
+	/* Chord tones on one score lane → extra [midiCh:dataArea] streams. */
+	ScMidiExpandChordVoices(sorted, n, xPart);
 	qsort(sorted, (size_t)n, sizeof(ScEvent), CmpEv);
 
 	uint32_t lastTick[SC_MIDI_CH];
@@ -1693,6 +3071,8 @@ int ScMidiDocToWrite(const ScMidiDoc* d, SasamiWriteMidi* w)
 	     DO-- used ~131 ticks of padding; that desynced the score playhead).
 	   - Default @L/@R ONLY on first track (global GS; per-track R 003C00 killed reverb) */
 	int globalFxDone = 0;
+	int pedalOffDone[16];
+	memset(pedalOffDone, 0, sizeof(pedalOffDone));
 	auto putPreamble = [&](SasamiTrackStream* s, uint32_t* outWaitTicks) -> int {
 		uint32_t waitSum = 0;
 		auto putRest = [&](uint8_t w8) -> int {
@@ -1712,7 +3092,16 @@ int ScMidiDocToWrite(const ScMidiDoc* d, SasamiWriteMidi* w)
 		if (!putRest(0)) return 0;
 		if (!SasamiStreamPut3(s, 0x13, 105, 0)) return 0;       /* VELO */
 		if (!putRest(0)) return 0;
-		if (!SasamiStreamPut3(s, 21, 0, 0)) return 0;           /* PEDOFF */
+		/* PEDOFF once per MIDI part only. Chord voices share a part; if every
+		   dataArea stream emits PEDOFF at tick 0, later streams wipe PEDON
+		   from the home lane and sustain never engages. */
+		{
+			const int part = (int)(s->part & 15);
+			if (!pedalOffDone[part]) {
+				if (!SasamiStreamPut3(s, 21, 0, 0)) return 0;   /* PEDOFF */
+				pedalOffDone[part] = 1;
+			}
+		}
 		if (!putRest(0)) return 0;
 		if (!SasamiStreamPut3(s, 35, 1, 0)) return 0;           /* MD5588 stub */
 		if (!globalFxDone) {
@@ -1731,8 +3120,8 @@ int ScMidiDocToWrite(const ScMidiDoc* d, SasamiWriteMidi* w)
 		int ch = e->ch;
 		if (ch < 0 || ch >= SC_MIDI_CH) continue;
 		SasamiTrackStream* s = &w->tr[ch];
-		if (d->trackPart[ch] != 0xFF)
-			s->part = d->trackPart[ch] & 15;
+		if (xPart[ch] != 0xFF)
+			s->part = xPart[ch] & 15;
 		else
 			s->part = ch & 15;
 		if (!preambleDone[ch]) {
@@ -1743,9 +3132,18 @@ int ScMidiDocToWrite(const ScMidiDoc* d, SasamiWriteMidi* w)
 			preambleDone[ch] = 1;
 			vel[ch] = 105;
 		}
-		/* Only notes/rests consume time gaps — loops/meta stay tight like DO--.MPY. */
-		if ((e->kind == SC_EV_NOTE || e->kind == SC_EV_REST || e->kind == SC_EV_TIE)
-			&& e->tick > lastTick[ch]) {
+		/* Advance stream to this event's score tick — Q/J/|: / CC must not fire early. */
+		const int needsTime =
+			e->kind == SC_EV_NOTE || e->kind == SC_EV_REST || e->kind == SC_EV_TIE
+			|| e->kind == SC_EV_JUMP_MARK || e->kind == SC_EV_FM_JUMP
+			|| e->kind == SC_EV_FM_LOOP_START || e->kind == SC_EV_FM_LOOP_END
+			|| e->kind == SC_EV_PEDAL_ON || e->kind == SC_EV_PEDAL_OFF
+			|| e->kind == SC_EV_TEMPO || e->kind == SC_EV_PROG || e->kind == SC_EV_BANK
+			|| e->kind == SC_EV_VOL || e->kind == SC_EV_PAN || e->kind == SC_EV_VELO
+			|| e->kind == SC_EV_PITCH || e->kind == SC_EV_RPN || e->kind == SC_EV_NRPN
+			|| e->kind == SC_EV_SYSEX || e->kind == SC_EV_COMMENT
+			|| e->kind == SC_EV_CC || e->kind == SC_EV_SOFT_VIB || e->kind == SC_EV_SOFT_PORTA;
+		if (needsTime && e->tick > lastTick[ch]) {
 			uint32_t gap = e->tick - lastTick[ch];
 			while (gap > 0) {
 				uint8_t w8 = (gap > 255) ? 255 : (uint8_t)gap;
@@ -1821,11 +3219,9 @@ int ScMidiDocToWrite(const ScMidiDoc* d, SasamiWriteMidi* w)
 			break;
 		}
 		case SC_EV_JUMP_MARK: {
-			/* Q: J lands here (after R8/@V/@prog). Do not overwrite a prior |:. */
-			if (!chJumpSet[ch]) {
-				chStreamJump[ch] = s->size;
-				chJumpSet[ch] = 1;
-			}
+			/* Q always wins as soft-J land (overrides an earlier |:). */
+			chStreamJump[ch] = s->size;
+			chJumpSet[ch] = 1;
 			break;
 		}
 		case SC_EV_FM_LOOP_START: {
@@ -1854,12 +3250,19 @@ int ScMidiDocToWrite(const ScMidiDoc* d, SasamiWriteMidi* w)
 			break;
 		}
 		case SC_EV_FM_JUMP: {
-			/* Local Q/|: → 0xF000|rel. Else 0xE000 = song-first |: (DO-- [5:8]). */
+			/* Local Q/|: → track-relative (Finalize → abs 0x1xxx).
+			   Prefer full 16-bit rel when <0x1000; legacy F000|rel12 also OK.
+			   Else 0xE000 = song-first |: (DO-- [5:8]). */
 			uint16_t mark;
-			if (chJumpSet[ch])
-				mark = (uint16_t)(0xF000 | (chStreamJump[ch] & 0x0FFF));
-			else
+			if (chJumpSet[ch]) {
+				const uint32_t rel = chStreamJump[ch];
+				if (rel < 0x1000)
+					mark = (uint16_t)rel; /* full rel — Finalize promotes */
+				else
+					mark = (uint16_t)(0xF000 | (rel & 0x0FFF));
+			} else {
 				mark = 0xE000;
+			}
 			if (!SasamiStreamPut3(s, 0x0A, (uint8_t)(mark & 0xFF), (uint8_t)(mark >> 8))) return 0;
 			break;
 		}
@@ -1871,6 +3274,19 @@ int ScMidiDocToWrite(const ScMidiDoc* d, SasamiWriteMidi* w)
 			/* MPY cmd 21 PDLOFF — CC64=0 */
 			if (!SasamiStreamPut3(s, 21, 0, 0)) return 0;
 			break;
+		case SC_EV_CC:
+			if (!SasamiStreamPut3(s, 41, e->a, e->b)) return 0;
+			break;
+		case SC_EV_SOFT_VIB: {
+			uint8_t t[4] = { 46, e->a, e->b, e->c };
+			if (!SasamiStreamPut(s, t, 4)) return 0;
+			break;
+		}
+		case SC_EV_SOFT_PORTA: {
+			uint8_t t[4] = { 47, e->a, e->b, e->c };
+			if (!SasamiStreamPut(s, t, 4)) return 0;
+			break;
+		}
 		case SC_EV_NOTE: {
 			int gate = (e->c >= 1 && e->c <= 100) ? e->c : 100;
 			uint32_t sounding = ((uint32_t)(e->dur ? e->dur : 1) * (uint32_t)gate) / 100u;
@@ -1901,8 +3317,8 @@ int ScMidiDocToWrite(const ScMidiDoc* d, SasamiWriteMidi* w)
 	for (int ch = 0; ch < SC_MIDI_CH; ch++) {
 		if (w->tr[ch].used) continue;
 		if (!d->bind.vstPath[ch][0]) continue;
-		if (d->trackPart[ch] != 0xFF)
-			w->tr[ch].part = d->trackPart[ch] & 15;
+		if (xPart[ch] != 0xFF)
+			w->tr[ch].part = xPart[ch] & 15;
 		else
 			w->tr[ch].part = ch & 15;
 		uint32_t preWait = 0;
@@ -1921,7 +3337,7 @@ int ScMidiDocToWrite(const ScMidiDoc* d, SasamiWriteMidi* w)
 	}
 	if (!hiUsed) {
 		w->trackCount = 16;
-		int need3 = d->bind.isMpw3 ? 1 : 0;
+		int need3 = ScMidiDocNeedsMpsmv(d) ? 1 : 0;
 		for (int i = 0; i < 16; i++) {
 			if (d->bind.vstPath[i][0]) { need3 = 1; break; }
 		}
@@ -1929,6 +3345,15 @@ int ScMidiDocToWrite(const ScMidiDoc* d, SasamiWriteMidi* w)
 	} else {
 		w->trackCount = 32;
 		w->isMpw3 = 1;
+	}
+	if (w->isMpw3) {
+		w->mpw3Ver = (d->macros.count > 0 || d->needMpsmv) ? 2 : 1;
+		w->macroCount = d->macros.count;
+		if (w->macroCount > 32) w->macroCount = 32;
+		for (int i = 0; i < w->macroCount; i++) {
+			wcsncpy_s(w->macroName[i], d->macros.name[i], _TRUNCATE);
+			wcsncpy_s(w->macroBody[i], d->macros.body[i], _TRUNCATE);
+		}
 	}
 	return 1;
 }
@@ -2002,7 +3427,16 @@ int ScFmDocToWrite(const ScFmDoc* d, SasamiWriteFm* w)
 		if (ch >= SC_FM_CH && (ch - SC_FM_CH + 1) > misaoMax)
 			misaoMax = ch - SC_FM_CH + 1;
 
-		if (e->kind == SC_EV_FM_NOTE || e->kind == SC_EV_FM_REST) {
+		if (e->kind == SC_EV_FM_NOTE || e->kind == SC_EV_FM_REST
+			|| e->kind == SC_EV_JUMP_MARK || e->kind == SC_EV_FM_JUMP
+			|| e->kind == SC_EV_FM_LOOP_START || e->kind == SC_EV_FM_LOOP_END
+			|| e->kind == SC_EV_FM_TEMPO || e->kind == SC_EV_FM_VOICE
+			|| e->kind == SC_EV_FM_VOL || e->kind == SC_EV_FM_PITCH || e->kind == SC_EV_VELO
+			|| e->kind == SC_EV_CC
+			|| e->kind == SC_EV_PCM_SAMPLE || e->kind == SC_EV_TIE
+			|| e->kind == SC_EV_FM_EX || e->kind == SC_EV_FM_LFO || e->kind == SC_EV_FM_DETUNE
+			|| e->kind == SC_EV_FM_FLR || e->kind == SC_EV_FM_FSLR || e->kind == SC_EV_FM_LEGATO
+			|| e->kind == SC_EV_SOFT_VIB || e->kind == SC_EV_SOFT_PORTA) {
 			if (e->tick > lastTick[ch]) {
 				uint32_t gap = e->tick - lastTick[ch];
 				while (gap > 0) {
@@ -2019,11 +3453,9 @@ int ScFmDocToWrite(const ScFmDoc* d, SasamiWriteFm* w)
 			if (!SasamiStreamPut3(s, 9, e->a, e->b)) return 0;
 			break;
 		case SC_EV_JUMP_MARK: {
-			/* Q: J lands here. Do not overwrite a prior |:. */
-			if (!chJumpSet[ch]) {
-				chStreamJump[ch] = s->size;
-				chJumpSet[ch] = 1;
-			}
+			/* Q always wins as soft-J land (overrides an earlier |:). */
+			chStreamJump[ch] = s->size;
+			chJumpSet[ch] = 1;
 			break;
 		}
 		case SC_EV_FM_LOOP_START: {
@@ -2032,7 +3464,7 @@ int ScFmDocToWrite(const ScFmDoc* d, SasamiWriteFm* w)
 			if (loopWrSp[ch] < SC_LOOP_NEST_MAX) {
 				loopBodyOff[ch][loopWrSp[ch]] = s->size; /* relative to track stream start */
 				if (!chJumpSet[ch]) {
-					/* J targets this first |: (matches DO--.FPY) */
+					/* J targets this first |: only if no Q yet (matches DO--.FPY) */
 					chStreamJump[ch] = s->size - 3;
 					chJumpSet[ch] = 1;
 				}
@@ -2083,6 +3515,17 @@ int ScFmDocToWrite(const ScFmDoc* d, SasamiWriteFm* w)
 			}
 			chHadVol[ch] = 1;
 			break;
+		case SC_EV_VELO: {
+			int tl = 127 - (int)e->a;
+			if (tl < 0) tl = 0;
+			if (tl > 127) tl = 127;
+			if (!SasamiStreamPut3(s, 11, (uint8_t)tl, 0)) return 0;
+			chHadVol[ch] = 1;
+			break;
+		}
+		case SC_EV_CC:
+			if (!SasamiStreamPut3(s, 41, e->a, e->b)) return 0;
+			break;
 		case SC_EV_FM_PITCH: {
 			uint16_t raw = ScPitchCenter64ToMisaoRaw(e->a);
 			if (!SasamiStreamPut3(s, 12, (uint8_t)(raw & 0xFF), (uint8_t)(raw >> 8))) return 0;
@@ -2094,6 +3537,40 @@ int ScFmDocToWrite(const ScFmDoc* d, SasamiWriteFm* w)
 				if (!ScPutMisaoPcmSample(s, e->a, d->pcmRelPath[mi])) return 0;
 			}
 			break;
+		case SC_EV_FM_EX:
+			/* fpy2: cmd23 carries EX1–4 (classic player no-ops cmd23). */
+			if (!SasamiStreamPut3(s, 23, e->a, e->b)) return 0;
+			break;
+		case SC_EV_FM_LFO:
+			if (!SasamiStreamPut3(s, 21, e->a, 0)) return 0;
+			if (!SasamiStreamPut3(s, 22, e->b, 0)) return 0;
+			break;
+		case SC_EV_FM_DETUNE:
+			if (!SasamiStreamPut3(s, 18, e->a, e->b)) return 0;
+			break;
+		case SC_EV_FM_FLR:
+			if (!SasamiStreamPut3(s, 16, e->a, 0)) return 0;
+			break;
+		case SC_EV_FM_FSLR: {
+			uint8_t wait = (e->dur > 255) ? 255 : (uint8_t)(e->dur < 1 ? 1 : e->dur);
+			if (!SasamiStreamPut3(s, 10, 0, wait)) return 0;
+			lastTick[ch] += wait;
+			break;
+		}
+		case SC_EV_FM_LEGATO:
+			chHadVoice[ch] = chHadVoice[ch] | 0x80; /* high bit = legato pending */
+			break;
+		case SC_EV_SOFT_VIB: {
+			/* 3-byte: cmd25 — b1=(mode<<7)|depth, b2=delay (FM+Misao; Misao PCM is cmd26) */
+			uint8_t packed = (uint8_t)(((e->a & 1) << 7) | (e->c & 0x7F));
+			if (!SasamiStreamPut3(s, 25, packed, e->b)) return 0;
+			break;
+		}
+		case SC_EV_SOFT_PORTA: {
+			/* cmd 29 free on both: b1=semi+64, b2=max(delay,glide) approx; depth=glide in unused — use b2=glide, delay ignored if 0 */
+			if (!SasamiStreamPut3(s, 29, e->a, e->c ? e->c : e->b)) return 0;
+			break;
+		}
 		case SC_EV_FM_NOTE: {
 			if (ch == 6) {
 				int pad = e->a & 0x0F;
@@ -2151,8 +3628,20 @@ int ScFmDocToWrite(const ScFmDoc* d, SasamiWriteFm* w)
 				if (te->kind == SC_EV_FM_NOTE || te->kind == SC_EV_FM_REST || te->kind == SC_EV_TIE)
 					break;
 			}
-			uint8_t wait = (totalDur > 255) ? 255 : (uint8_t)(totalDur < 2 ? 2 : totalDur);
-			if (!SasamiStreamPut3(s, 0, e->a, wait)) return 0;
+			uint32_t sounding = totalDur;
+			if (e->c >= 1 && e->c <= 100)
+				sounding = (totalDur * (uint32_t)e->c) / 100u;
+			if (sounding < 2) sounding = 2;
+			uint8_t wait = (sounding > 255) ? 255 : (uint8_t)sounding;
+			{
+				const int legato = (chHadVoice[ch] & 0x80) ? 1 : 0;
+				chHadVoice[ch] = (uint8_t)(chHadVoice[ch] & 0x7F);
+				if (legato) {
+					if (!SasamiStreamPut3(s, 24, e->a, wait)) return 0; /* fhokry */
+				} else {
+					if (!SasamiStreamPut3(s, 0, e->a, wait)) return 0;
+				}
+			}
 			lastTick[ch] += totalDur;
 			break;
 		}
@@ -2200,7 +3689,15 @@ int ScFmDocToWrite(const ScFmDoc* d, SasamiWriteFm* w)
 	}
 	w->misaoChCount = misaoMax;
 	/* Nest depth ≥2 → FPY2 (classic FPY / ASM player is 1-deep only). */
-	w->fpy2 = (ScDocMaxLoopNest(d->ev, d->evCount, SC_FM_TOTAL) > 1) ? 1 : 0;
+	w->fpy2 = ScFmDocNeedsFpy2(d) ? 1 : 0;
+	if (w->fpy2) {
+		w->macroCount = d->macros.count;
+		if (w->macroCount > 32) w->macroCount = 32;
+		for (int i = 0; i < w->macroCount; i++) {
+			wcsncpy_s(w->macroName[i], d->macros.name[i], _TRUNCATE);
+			wcsncpy_s(w->macroBody[i], d->macros.body[i], _TRUNCATE);
+		}
+	}
 	return 1;
 }
 
@@ -2612,17 +4109,28 @@ static int ScMidiDocToMmlImpl(const ScMidiDoc* d, wchar_t* out, int outCch, int 
 		bpm = (int)((13000.0 * 120.0) / (double)d->tempoT + 0.5);
 	ScAppendF(out, outCch, &len, L"t%d\r\n", bpm);
 
+	/* Working copy — expand chords onto [midiCh:2]… without mutating the score doc. */
+	ScEvent* work = ScExportEvBuf();
+	if (!work) return 0;
+	int nWork = d->evCount;
+	if (nWork > SC_EV_MAX) nWork = SC_EV_MAX;
+	if (nWork > 0)
+		memcpy(work, d->ev, sizeof(ScEvent) * (size_t)nWork);
+	uint8_t xPart[SC_MIDI_CH];
+	memcpy(xPart, d->trackPart, sizeof(xPart));
+	ScMidiExpandChordVoices(work, nWork, xPart);
+
 	int used[SC_MIDI_CH];
 	memset(used, 0, sizeof(used));
-	for (int i = 0; i < d->evCount; i++)
-		if (d->ev[i].ch < SC_MIDI_CH) used[d->ev[i].ch] = 1;
+	for (int i = 0; i < nWork; i++)
+		if (work[i].ch < SC_MIDI_CH) used[work[i].ch] = 1;
 	for (int ch = 0; ch < SC_MIDI_CH; ch++) {
 		if (d->bind.vstPath[ch][0] || d->bind.vstProg[ch] >= 0) used[ch] = 1;
 		for (int sl = 0; sl < ScMidiFxBind::SC_FX_SLOTS; ++sl)
 			if (d->fxBind.fxPath[ch][sl][0]) used[ch] = 1;
 		if (!used[ch]) continue;
 		if (len >= cap - 64) return 0;
-		int part = d->trackPart[ch];
+		int part = xPart[ch];
 		if (part == 0xFF) part = (uint8_t)ch;
 		ScAppendF(out, outCch, &len, L"\r\n[%d:%d]\r\n", (int)part + 1, ch + 1);
 		if (d->bind.vstPath[ch][0])
@@ -2644,7 +4152,9 @@ static int ScMidiDocToMmlImpl(const ScMidiDoc* d, wchar_t* out, int outCch, int 
 		}
 		if (d->bind.vstProg[ch] >= 0)
 			ScAppendF(out, outCch, &len, L"@PROG %d\r\n", d->bind.vstProg[ch]);
-		if (d->bind.vstBankMsb[ch] >= 0 || d->bind.vstBankLsb[ch] >= 0)
+		/* Don't stamp @BANK on chord voice lanes (empty bind slots used to be 0,0). */
+		if ((d->bind.vstPath[ch][0] || d->bind.vstProg[ch] >= 0)
+			&& (d->bind.vstBankMsb[ch] >= 0 || d->bind.vstBankLsb[ch] >= 0))
 			ScAppendF(out, outCch, &len, L"@BANK %d,%d\r\n",
 				d->bind.vstBankMsb[ch] >= 0 ? d->bind.vstBankMsb[ch] : 0,
 				d->bind.vstBankLsb[ch] >= 0 ? d->bind.vstBankLsb[ch] : 0);
@@ -2662,8 +4172,8 @@ static int ScMidiDocToMmlImpl(const ScMidiDoc* d, wchar_t* out, int outCch, int 
 		if (!chEv || !consumed) return 0;
 
 		int nCh = 0;
-		for (int i = 0; i < d->evCount; i++)
-			if (d->ev[i].ch == (uint8_t)ch) chEv[nCh++] = d->ev[i];
+		for (int i = 0; i < nWork; i++)
+			if (work[i].ch == (uint8_t)ch) chEv[nCh++] = work[i];
 		qsort(chEv, (size_t)nCh, sizeof(ScEvent), CmpEv);
 		memset(consumed, 0, (size_t)nCh);
 
@@ -2695,6 +4205,7 @@ static int ScMidiDocToMmlImpl(const ScMidiDoc* d, wchar_t* out, int outCch, int 
 				int ln = 4, dots = 0;
 				int got = fitPiece((int)gap, &ln, &dots);
 				if (got > (int)gap) got = (int)gap;
+				/* lowercase r = time skip on recompile (no SC_EV_REST) */
 				ScAppendF(out, outCch, &len, L"r%d", ln);
 				for (int dti = 0; dti < dots; dti++) ScAppend(out, outCch, &len, L".");
 				ScAppend(out, outCch, &len, L" ");
@@ -2716,11 +4227,24 @@ static int ScMidiDocToMmlImpl(const ScMidiDoc* d, wchar_t* out, int outCch, int 
 				if (bent < 0) bent = 0;
 				if (bent > 0x3FFF) bent = 0x3FFF;
 				ScAppendF(out, outCch, &len, L"@P%d ", bent);
+			} else if (e.kind == SC_EV_CC) {
+				switch ((int)e.a) {
+				case 1: ScAppendF(out, outCch, &len, L"@MOD %d ", (int)e.b); break;
+				case 5: ScAppendF(out, outCch, &len, L"@PORT %d ", (int)e.b); break;
+				case 11: ScAppendF(out, outCch, &len, L"@EXP %d ", (int)e.b); break;
+				case 65: ScAppendF(out, outCch, &len, L"@PORTA %d ", (int)e.b); break;
+				case 66: ScAppendF(out, outCch, &len, L"@SOST %d ", (int)e.b); break;
+				case 67: ScAppendF(out, outCch, &len, L"@SOFT %d ", (int)e.b); break;
+				case 91: ScAppendF(out, outCch, &len, L"@REV %d ", (int)e.b); break;
+				case 93: ScAppendF(out, outCch, &len, L"@CHO %d ", (int)e.b); break;
+				case 94: ScAppendF(out, outCch, &len, L"@DEL %d ", (int)e.b); break;
+				default: ScAppendF(out, outCch, &len, L"@CC %d,%d ", (int)e.a, (int)e.b); break;
+				}
 			}
 		};
 
 		auto isCc = [](uint8_t k) -> int {
-			return (k == SC_EV_VELO || k == SC_EV_VOL || k == SC_EV_PAN || k == SC_EV_PITCH) ? 1 : 0;
+			return (k == SC_EV_VELO || k == SC_EV_VOL || k == SC_EV_PAN || k == SC_EV_PITCH || k == SC_EV_CC) ? 1 : 0;
 		};
 
 		auto emitLen = [&](int durTicks, int asTie) {
@@ -2749,6 +4273,13 @@ static int ScMidiDocToMmlImpl(const ScMidiDoc* d, wchar_t* out, int outCch, int 
 				int t = e.a | (e.b << 8);
 				int b = t > 0 ? (int)((13000.0 * 120.0) / (double)t + 0.5) : 120;
 				ScAppendF(out, outCch, &len, L"t%d ", b);
+				continue;
+			}
+			if (e.kind == SC_EV_METER) {
+				if (e.tick == 0) continue;
+				emitGap(e.tick);
+				ScAppendF(out, outCch, &len, L"@METER %d/%d ",
+					e.a > 0 ? (int)e.a : 4, e.b > 0 ? (int)e.b : 4);
 				continue;
 			}
 			if (e.kind == SC_EV_PROG) {
@@ -2828,15 +4359,35 @@ static int ScMidiDocToMmlImpl(const ScMidiDoc* d, wchar_t* out, int outCch, int 
 			}
 
 			if (e.kind == SC_EV_REST) {
-				expect = noteTick;
+				emitGap(noteTick);
+				for (int c = 0; c < ccN; c++) {
+					if (chEv[ccIdx[c]].tick == noteTick) {
+						emitCc(chEv[ccIdx[c]]);
+						consumed[ccIdx[c]] = 1;
+					}
+				}
+				uint32_t left = noteDur;
+				while (left > 0) {
+					int ln = 4, dots = 0;
+					int got = fitPiece((int)left, &ln, &dots);
+					if (got > (int)left) got = (int)left;
+					ScAppendF(out, outCch, &len, L"R%d", ln);
+					for (int dti = 0; dti < dots; dti++) ScAppend(out, outCch, &len, L".");
+					ScAppend(out, outCch, &len, L" ");
+					left -= (uint32_t)got;
+					if (len >= cap - 64) break;
+				}
 				for (int c = 0; c < ccN; c++) {
 					if (consumed[ccIdx[c]]) continue;
 					uint32_t ct = chEv[ccIdx[c]].tick;
-					emitGap(ct);
-					emitCc(chEv[ccIdx[c]]);
-					consumed[ccIdx[c]] = 1;
+					if (ct > noteTick && ct < noteEnd) {
+						/* mid-rest CC: rare; keep timing with skip */
+						(void)ct;
+						emitCc(chEv[ccIdx[c]]);
+						consumed[ccIdx[c]] = 1;
+					}
 				}
-				emitGap(noteEnd);
+				expect = noteEnd;
 				continue;
 			}
 
@@ -2920,6 +4471,326 @@ int ScMidiDocToMmlFull(const ScMidiDoc* d, wchar_t* out, int outCch)
 	return ScMidiDocToMmlImpl(d, out, outCch, 1);
 }
 
+static void ScFmNoteNameFromByte(uint8_t nb, int isSsg, int* octOut, wchar_t* nameOut)
+{
+	static const wchar_t* nm[12] = {
+		L"c", L"c+", L"d", L"d+", L"e", L"f", L"f+", L"g", L"g+", L"a", L"a+", L"b"
+	};
+	int scale = nb & 0x0F;
+	if (scale < 0) scale = 0;
+	if (scale > 11) scale = 11;
+	const int octNib = (nb >> 4) & 0x0F;
+	*octOut = isSsg ? octNib : (octNib + 1);
+	wcscpy_s(nameOut, 8, nm[scale]);
+}
+
+static int ScFmTlToV(int tl, int isSsg, uint8_t bFlag)
+{
+	if (isSsg || bFlag == 1) {
+		if (tl < 0) tl = 0;
+		if (tl > 15) tl = 15;
+		return tl;
+	}
+	if (tl <= 120 && (tl % 8) == 0) return 15 - tl / 8;
+	if (tl < 0) tl = 0;
+	if (tl > 127) tl = 127;
+	return 127 - tl;
+}
+
+int ScFmDocToMml(const ScFmDoc* d, wchar_t* out, int outCch)
+{
+	if (!d || !out || outCch < 64) return 0;
+	out[0] = 0;
+	int len = 0;
+	const int cap = outCch - 1;
+	ScAppend(out, outCch, &len, L"; SASAMI FM score↔text\r\n");
+	if (d->titleSjis[0]) {
+		wchar_t tit[80];
+		MultiByteToWideChar(932, 0, d->titleSjis, -1, tit, 80);
+		ScAppendF(out, outCch, &len, L"TIT\"%s\"\r\n", tit);
+	}
+	ScAppend(out, outCch, &len, d->opna10 ? L"OPNA\r\n" : L"OPN\r\n");
+	int bpm = 120;
+	if (d->tempoT > 0)
+		bpm = (int)((13000.0 * 120.0) / (double)d->tempoT + 0.5);
+	ScAppendF(out, outCch, &len, L"t%d\r\n", bpm);
+	if (d->numer > 0 && d->denom > 0 && (d->numer != 4 || d->denom != 4))
+		ScAppendF(out, outCch, &len, L"@METER %d/%d\r\n", d->numer, d->denom);
+	for (int vi = 0; vi < d->voiceCount && vi < SC_VOICE_MAX; vi++) {
+		wchar_t hex[160];
+		int pos = 0;
+		for (int b = 0; b < 25 && pos + 4 < 160; b++)
+			pos += _snwprintf_s(hex + pos, 160 - pos, _TRUNCATE, b ? L" %02X" : L"%02X", d->voices[vi][b]);
+		ScAppendF(out, outCch, &len, L"@VOICEHEX %d %s\r\n", vi, hex);
+	}
+	for (int mi = 0; mi < d->macros.count && mi < SC_MACRO_MAX; mi++)
+		ScAppendF(out, outCch, &len, L"@MACRO %s {%s}\r\n", d->macros.name[mi], d->macros.body[mi]);
+
+	ScEvent* sorted = ScSortedEvBuf();
+	if (!sorted) return 0;
+	int n = d->evCount;
+	if (n > SC_EV_MAX) n = SC_EV_MAX;
+	if (n > 0)
+		memcpy(sorted, d->ev, sizeof(ScEvent) * (size_t)n);
+	qsort(sorted, (size_t)n, sizeof(ScEvent), CmpEv);
+
+	int used[SC_FM_TOTAL];
+	memset(used, 0, sizeof(used));
+	for (int i = 0; i < n; i++)
+		if (sorted[i].ch < SC_FM_TOTAL) used[sorted[i].ch] = 1;
+	for (int mi = 0; mi < SC_FM_MISAO; mi++)
+		if (d->pcmRelPath[mi][0]) used[SC_FM_CH + mi] = 1;
+
+	auto fitPiece = [](int gap, int* lnOut, int* dotsOut) -> int {
+		static const int lens[] = { 1, 2, 4, 8, 16, 32, 64 };
+		int bestLn = 64, bestDots = 0, bestGot = 0;
+		for (int i = 0; i < 7; i++) {
+			int want = (SC_PPQN * 4) / lens[i];
+			if (want <= gap && want >= bestGot) {
+				bestGot = want; bestLn = lens[i]; bestDots = 0;
+			}
+			int dotted = want + want / 2;
+			if (dotted <= gap && dotted >= bestGot) {
+				bestGot = dotted; bestLn = lens[i]; bestDots = 1;
+			}
+		}
+		if (bestGot <= 0) { bestGot = 1; bestLn = 64; bestDots = 0; }
+		if (lnOut) *lnOut = bestLn;
+		if (dotsOut) *dotsOut = bestDots;
+		return bestGot;
+	};
+
+	for (int ch = 0; ch < SC_FM_TOTAL; ch++) {
+		if (!used[ch]) continue;
+		if (len >= cap - 128) return 0;
+		ScAppendF(out, outCch, &len, L"\r\n[%d]\r\n", ch + 1);
+		if (ch >= SC_FM_CH) {
+			const int mi = ch - SC_FM_CH;
+			if (mi >= 0 && mi < SC_FM_MISAO && d->pcmRelPath[mi][0])
+				ScAppendF(out, outCch, &len, L"@PCM\"%s\"\r\n", d->pcmRelPath[mi]);
+		}
+		ScAppend(out, outCch, &len, L"l4 o4\r\n");
+
+		int curOct = 4;
+		uint32_t expect = 0;
+		const int isSsg = (ch >= 3 && ch <= 5) ? 1 : 0;
+
+		auto emitGap = [&](uint32_t toTick) {
+			if (toTick <= expect) return;
+			uint32_t gap = toTick - expect;
+			while (gap > 0) {
+				int ln = 4, dots = 0;
+				int got = fitPiece((int)gap, &ln, &dots);
+				if (got > (int)gap) got = (int)gap;
+				ScAppendF(out, outCch, &len, L"r%d", ln);
+				for (int dti = 0; dti < dots; dti++) ScAppend(out, outCch, &len, L".");
+				ScAppend(out, outCch, &len, L" ");
+				expect += (uint32_t)got;
+				gap -= (uint32_t)got;
+				if (len >= cap - 64) return;
+			}
+		};
+
+		auto emitCc = [&](const ScEvent& e) {
+			if (e.kind == SC_EV_VELO)
+				ScAppendF(out, outCch, &len, L"v%d ", (int)e.a);
+			else if (e.kind == SC_EV_FM_VOL)
+				ScAppendF(out, outCch, &len, L"v%d ", ScFmTlToV((int)e.a, isSsg, e.b));
+			else if (e.kind == SC_EV_FM_PITCH)
+				ScAppendF(out, outCch, &len, L"@PITCH %d ", (int)e.a);
+			else if (e.kind == SC_EV_CC) {
+				switch ((int)e.a) {
+				case 1: ScAppendF(out, outCch, &len, L"@MOD %d ", (int)e.b); break;
+				case 5: ScAppendF(out, outCch, &len, L"@PORT %d ", (int)e.b); break;
+				case 11: ScAppendF(out, outCch, &len, L"@EXP %d ", (int)e.b); break;
+				case 65: ScAppendF(out, outCch, &len, L"@PORTA %d ", (int)e.b); break;
+				case 66: ScAppendF(out, outCch, &len, L"@SOST %d ", (int)e.b); break;
+				case 67: ScAppendF(out, outCch, &len, L"@SOFT %d ", (int)e.b); break;
+				case 91: ScAppendF(out, outCch, &len, L"@REV %d ", (int)e.b); break;
+				case 93: ScAppendF(out, outCch, &len, L"@CHO %d ", (int)e.b); break;
+				case 94: ScAppendF(out, outCch, &len, L"@DEL %d ", (int)e.b); break;
+				default: ScAppendF(out, outCch, &len, L"@CC %d,%d ", (int)e.a, (int)e.b); break;
+				}
+			}
+		};
+
+		for (int i = 0; i < n; i++) {
+			if (sorted[i].ch != (uint8_t)ch) continue;
+			if (len >= cap - 128) return 0;
+			const ScEvent& e = sorted[i];
+
+			if (e.kind == SC_EV_FM_TEMPO) {
+				emitGap(e.tick);
+				int t = e.a | (e.b << 8);
+				int b = t > 0 ? (int)((13000.0 * 120.0) / (double)t + 0.5) : 120;
+				ScAppendF(out, outCch, &len, L"t%d ", b);
+				continue;
+			}
+			if (e.kind == SC_EV_JUMP_MARK) {
+				emitGap(e.tick);
+				ScAppend(out, outCch, &len, L"Q ");
+				continue;
+			}
+			if (e.kind == SC_EV_FM_JUMP) {
+				emitGap(e.tick);
+				ScAppend(out, outCch, &len, L"J ");
+				continue;
+			}
+			if (e.kind == SC_EV_FM_LOOP_START) {
+				emitGap(e.tick);
+				ScAppendF(out, outCch, &len, L"|: %d ", e.a ? (int)e.a : 2);
+				continue;
+			}
+			if (e.kind == SC_EV_FM_LOOP_END) {
+				emitGap(e.tick);
+				ScAppend(out, outCch, &len, L":| ");
+				continue;
+			}
+			if (e.kind == SC_EV_FM_VOICE && !isSsg) {
+				emitGap(e.tick);
+				if (e.b == 1)
+					ScAppendF(out, outCch, &len, L"@CV%d ", (int)e.a);
+				else
+					ScAppendF(out, outCch, &len, L"@%d ", (int)e.a);
+				continue;
+			}
+			if (e.kind == SC_EV_FM_EX) {
+				emitGap(e.tick);
+				ScAppendF(out, outCch, &len, L"@EX%d %d ", (int)e.a, (int)e.b);
+				continue;
+			}
+			if (e.kind == SC_EV_FM_LFO) {
+				emitGap(e.tick);
+				ScAppendF(out, outCch, &len, L"@LFO %d,%d ", (int)e.a, (int)e.b);
+				continue;
+			}
+			if (e.kind == SC_EV_FM_DETUNE) {
+				emitGap(e.tick);
+				const int centered = (int)(int16_t)(uint16_t)(e.a | (e.b << 8)) - 0x8000;
+				ScAppendF(out, outCch, &len, L"@DETUNE %d ", centered);
+				continue;
+			}
+			if (e.kind == SC_EV_FM_FLR) {
+				emitGap(e.tick);
+				ScAppendF(out, outCch, &len, L"@FLR %d ", (int)e.a);
+				continue;
+			}
+			if (e.kind == SC_EV_FM_LEGATO) {
+				emitGap(e.tick);
+				ScAppend(out, outCch, &len, L"@LEGATO ");
+				continue;
+			}
+			if (e.kind == SC_EV_SOFT_VIB) {
+				emitGap(e.tick);
+				ScAppendF(out, outCch, &len, L"@SVIB %d,%d,%d ", (int)e.a, (int)e.b, (int)e.c);
+				continue;
+			}
+			if (e.kind == SC_EV_SOFT_PORTA) {
+				emitGap(e.tick);
+				const int semi = (int)e.a - 64;
+				ScAppendF(out, outCch, &len, L"@SPORTA %d,%d,%d ", semi, (int)e.b, (int)e.c);
+				continue;
+			}
+			if (e.kind == SC_EV_PCM_SAMPLE && ch >= SC_FM_CH) {
+				emitGap(e.tick);
+				const int mi = ch - SC_FM_CH;
+				if (mi >= 0 && mi < SC_FM_MISAO && d->pcmRelPath[mi][0])
+					ScAppendF(out, outCch, &len, L"@PCM\"%s\" ", d->pcmRelPath[mi]);
+				continue;
+			}
+			if (e.kind == SC_EV_VELO || e.kind == SC_EV_FM_VOL || e.kind == SC_EV_FM_PITCH || e.kind == SC_EV_CC) {
+				emitGap(e.tick);
+				emitCc(e);
+				continue;
+			}
+			if (e.kind == SC_EV_TIE) continue;
+
+			if (e.kind == SC_EV_FM_REST || e.kind == SC_EV_FM_FSLR) {
+				emitGap(e.tick);
+				if (e.kind == SC_EV_FM_FSLR) {
+					ScAppendF(out, outCch, &len, L"@FSLR %d ", e.dur ? (int)e.dur : 2);
+					expect = e.tick + (uint32_t)(e.dur ? e.dur : 2);
+					continue;
+				}
+				const int dur = e.dur ? (int)e.dur : 2;
+				int dots = 0;
+				int ln = ScDurToLen(dur, &dots);
+				ScAppendF(out, outCch, &len, L"r%d", ln);
+				for (int dti = 0; dti < dots; dti++) ScAppend(out, outCch, &len, L".");
+				ScAppend(out, outCch, &len, L" ");
+				expect = e.tick + (uint32_t)dur;
+				continue;
+			}
+			if (e.kind != SC_EV_FM_NOTE) continue;
+
+			emitGap(e.tick);
+			const int gate = (e.c >= 1 && e.c <= 100) ? (int)e.c : 100;
+			if (gate != 100)
+				ScAppendF(out, outCch, &len, L"q%d ", gate);
+			int totalDur = e.dur ? (int)e.dur : 2;
+			int j = i + 1;
+			while (j < n) {
+				if (sorted[j].ch != (uint8_t)ch) break;
+				if (sorted[j].kind == SC_EV_TIE && sorted[j].a == e.a) {
+					totalDur += sorted[j].dur ? (int)sorted[j].dur : 0;
+					j++;
+					continue;
+				}
+				break;
+			}
+			if (ch == 6) {
+				static const wchar_t* kPadLet[6] = { L"b", L"s", L"c", L"h", L"m", L"i" };
+				int pad = (int)(e.a & 0x0F);
+				if (pad > 5) pad = pad % 6;
+				int left = totalDur;
+				int first = 1;
+				while (left > 0) {
+					int ln = 4, dots = 0;
+					int got = fitPiece(left, &ln, &dots);
+					if (got > left) got = left;
+					if (!first)
+						ScAppend(out, outCch, &len, L"^");
+					ScAppendF(out, outCch, &len, L"%s%d", kPadLet[pad], ln);
+					for (int dti = 0; dti < dots; dti++) ScAppend(out, outCch, &len, L".");
+					left -= got;
+					first = 0;
+					if (len >= cap - 64) break;
+				}
+				ScAppend(out, outCch, &len, L" ");
+				expect = e.tick + (uint32_t)totalDur;
+				i = j - 1;
+				continue;
+			}
+			int oct = 4;
+			wchar_t nm[8];
+			ScFmNoteNameFromByte(e.a, isSsg, &oct, nm);
+			if (oct != curOct) {
+				ScAppendF(out, outCch, &len, L"o%d ", oct);
+				curOct = oct;
+			}
+			int left = totalDur;
+			int first = 1;
+			while (left > 0) {
+				int ln = 4, dots = 0;
+				int got = fitPiece(left, &ln, &dots);
+				if (got > left) got = left;
+				if (!first)
+					ScAppend(out, outCch, &len, L"^");
+				ScAppendF(out, outCch, &len, L"%s%d", nm, ln);
+				for (int dti = 0; dti < dots; dti++) ScAppend(out, outCch, &len, L".");
+				left -= got;
+				first = 0;
+				if (len >= cap - 64) break;
+			}
+			ScAppend(out, outCch, &len, L" ");
+			expect = e.tick + (uint32_t)totalDur;
+			i = j - 1;
+		}
+		ScAppend(out, outCch, &len, L"\r\n");
+	}
+	return len > 0 ? 1 : 0;
+}
+
 void ScMidiDocMergeVstBind(ScMidiDoc* dst, const ScMidiDoc* src)
 {
 	if (!dst || !src) return;
@@ -2962,6 +4833,93 @@ struct ScSessionHdr {
 #pragma pack(pop)
 
 static const wchar_t* kScSessionLeaf = L"sasami_composer_last.dat";
+static const wchar_t* kScSessionLeafFm = L"sasami_composer_last_fm.dat";
+
+int ScSessionSaveLastFm(const ScFmDoc* d, const wchar_t* mmlOpt)
+{
+	if (!d) return 0;
+	const int mmlCch = (int)(SC_TEXT_MAX / sizeof(wchar_t));
+	wchar_t* mmlBuf = (wchar_t*)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY,
+		(SIZE_T)mmlCch * sizeof(wchar_t));
+	if (!mmlBuf) return 0;
+	if (mmlOpt && mmlOpt[0])
+		wcsncpy_s(mmlBuf, mmlCch, mmlOpt, _TRUNCATE);
+	else if (!ScFmDocToMml(d, mmlBuf, mmlCch)) {
+		HeapFree(GetProcessHeap(), 0, mmlBuf);
+		return 0;
+	}
+
+	DatArc_Chdir();
+	CString path = DatArc_Path(kScSessionLeafFm);
+	HANDLE h = CreateFileW(path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+	if (h == INVALID_HANDLE_VALUE) {
+		HeapFree(GetProcessHeap(), 0, mmlBuf);
+		return 0;
+	}
+
+	ScSessionHdr hdr;
+	memset(&hdr, 0, sizeof(hdr));
+	memcpy(hdr.magic, "SASAMI2", 7);
+	hdr.ver = 1;
+	hdr.flags = d->opna10 ? 1u : 0u;
+	hdr.mmlBytes = (uint32_t)((wcslen(mmlBuf) + 1) * sizeof(wchar_t));
+	hdr.reserved[0] = (uint32_t)d->tempoT;
+	hdr.reserved[1] = (uint32_t)d->numer;
+	hdr.reserved[2] = (uint32_t)d->denom;
+	hdr.reserved[3] = (uint32_t)d->evCount;
+	hdr.reserved[4] = (uint32_t)d->voiceCount;
+	hdr.reserved[5] = d->needFpy2 ? 1u : 0u;
+	DWORD wr = 0;
+	BOOL ok = WriteFile(h, &hdr, sizeof(hdr), &wr, NULL) && wr == sizeof(hdr);
+	if (ok) ok = WriteFile(h, mmlBuf, hdr.mmlBytes, &wr, NULL) && wr == hdr.mmlBytes;
+	if (ok) {
+		BYTE pad[4096];
+		memset(pad, 0, sizeof(pad));
+		ok = WriteFile(h, pad, sizeof(pad), &wr, NULL) != 0;
+	}
+	HeapFree(GetProcessHeap(), 0, mmlBuf);
+	CloseHandle(h);
+	if (ok) DatArc_Commit(kScSessionLeafFm);
+	return ok ? 1 : 0;
+}
+
+int ScSessionLoadLastFm(ScFmDoc* d, wchar_t* mmlOut, int mmlCch)
+{
+	if (!d) return 0;
+	DatArc_Chdir();
+	CString path = DatArc_Path(kScSessionLeafFm);
+	HANDLE h = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+	if (h == INVALID_HANDLE_VALUE) return 0;
+	ScSessionHdr hdr;
+	DWORD rd = 0;
+	if (!ReadFile(h, &hdr, sizeof(hdr), &rd, NULL) || rd != sizeof(hdr) ||
+		memcmp(hdr.magic, "SASAMI2", 7) != 0 || hdr.ver < 1) {
+		CloseHandle(h);
+		return 0;
+	}
+	if (hdr.mmlBytes < sizeof(wchar_t) || hdr.mmlBytes > SC_TEXT_MAX) {
+		CloseHandle(h);
+		return 0;
+	}
+	wchar_t* buf = (wchar_t*)malloc(hdr.mmlBytes + sizeof(wchar_t));
+	if (!buf) { CloseHandle(h); return 0; }
+	if (!ReadFile(h, buf, hdr.mmlBytes, &rd, NULL) || rd != hdr.mmlBytes) {
+		free(buf); CloseHandle(h); return 0;
+	}
+	CloseHandle(h);
+	buf[hdr.mmlBytes / sizeof(wchar_t) - 1] = 0;
+	if (mmlOut && mmlCch > 0)
+		wcsncpy_s(mmlOut, mmlCch, buf, _TRUNCATE);
+	wchar_t err[128];
+	int errLine = 0;
+	int ok = ScCompileFmText(buf, d, &errLine, err, 128);
+	free(buf);
+	if (!ok) return 0;
+	if (hdr.reserved[1] > 0) d->numer = (int)hdr.reserved[1];
+	if (hdr.reserved[2] > 0) d->denom = (int)hdr.reserved[2];
+	if (hdr.flags & 1u) d->opna10 = 1;
+	return 1;
+}
 
 int ScSessionSaveLastMidi(const ScMidiDoc* d, const wchar_t* mmlOpt)
 {
@@ -3052,4 +5010,5 @@ void ScSessionClearLast(void)
 {
 	DatArc_Chdir();
 	DatArc_Delete(kScSessionLeaf);
+	DatArc_Delete(kScSessionLeafFm);
 }

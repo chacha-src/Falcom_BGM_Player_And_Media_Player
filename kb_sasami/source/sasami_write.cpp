@@ -12,6 +12,7 @@ void SasamiWriteMidiClear(SasamiWriteMidi* w)
 	}
 	memset(w, 0, sizeof(*w));
 	w->trackCount = 32;
+	w->mpw3Ver = 1;
 	for (int i = 0; i < 32; i++) {
 		w->vstProg[i] = -1;
 		w->vstForceCh[i] = -1;
@@ -112,13 +113,19 @@ static uint32_t FinalizeMidiTracks(const SasamiWriteMidi* w, uint8_t* out, uint3
 					p[2] = (uint8_t)(abs >> 8);
 				} else if (cmd == 0x0A) {
 					uint16_t w1 = (uint16_t)(p[1] | (p[2] << 8));
-					if ((w1 & 0xF000) == 0xF000) {
+					if (w1 == 0xE000) {
+						/* resolved in second pass once firstLoopAbs known */
+					} else if ((w1 & 0xF000) == 0xF000) {
+						/* Legacy soft-rel: 0xF000 | rel12 */
 						uint16_t rel = (uint16_t)(w1 & 0x0FFF);
 						uint16_t abs = (uint16_t)(0x1000 + trackFileOff + rel);
 						p[1] = (uint8_t)(abs & 0xFF);
 						p[2] = (uint8_t)(abs >> 8);
-					} else if (w1 == 0xE000) {
-						/* resolved in second pass once firstLoopAbs known */
+					} else if (w1 < 0x1000) {
+						/* Full track-relative (score Q/J); keep 0x10F0 end as-is */
+						uint16_t abs = (uint16_t)(0x1000 + trackFileOff + w1);
+						p[1] = (uint8_t)(abs & 0xFF);
+						p[2] = (uint8_t)(abs >> 8);
 					}
 				}
 				i += 3;
@@ -236,7 +243,7 @@ uint32_t SasamiBuildMpw3(const SasamiWriteMidi* w, uint8_t* out, uint32_t outCap
 	out[sz++] = 'P';
 	out[sz++] = 'W';
 	out[sz++] = '3';
-	uint32_t ver = 1;
+	uint32_t ver = (w->mpw3Ver >= 2) ? (uint32_t)w->mpw3Ver : 1u;
 	memcpy(out + sz, &ver, 4); sz += 4;
 	for (int i = 0; i < 32; i++) {
 		wchar_t path[260];
@@ -264,6 +271,34 @@ uint32_t SasamiBuildMpw3(const SasamiWriteMidi* w, uint8_t* out, uint32_t outCap
 		if (tLen && w->vstCtrl[i]) {
 			memcpy(out + sz, w->vstCtrl[i], tLen);
 			sz += tLen;
+		}
+	}
+	/* ver≥2: "MACR" + count + name[64wchar] + bodyLen + body */
+	if (ver >= 2 && w->macroCount > 0) {
+		int mc = w->macroCount;
+		if (mc > 32) mc = 32;
+		uint64_t need = 8;
+		for (int i = 0; i < mc; i++) {
+			uint32_t bl = (uint32_t)(wcslen(w->macroBody[i]) * sizeof(wchar_t));
+			need += 64 * sizeof(wchar_t) + 4 + bl;
+		}
+		if (sz + need <= outCap && sz + need <= SASAMI_WRITE_MAX) {
+			out[sz++] = 'M'; out[sz++] = 'A'; out[sz++] = 'C'; out[sz++] = 'R';
+			uint32_t mcu = (uint32_t)mc;
+			memcpy(out + sz, &mcu, 4); sz += 4;
+			for (int i = 0; i < mc; i++) {
+				wchar_t nm[64];
+				memset(nm, 0, sizeof(nm));
+				wcsncpy_s(nm, w->macroName[i], _TRUNCATE);
+				memcpy(out + sz, nm, sizeof(nm));
+				sz += (uint32_t)sizeof(nm);
+				uint32_t bl = (uint32_t)(wcslen(w->macroBody[i]) * sizeof(wchar_t));
+				memcpy(out + sz, &bl, 4); sz += 4;
+				if (bl) {
+					memcpy(out + sz, w->macroBody[i], bl);
+					sz += bl;
+				}
+			}
 		}
 	}
 	return sz;
@@ -393,6 +428,35 @@ uint32_t SasamiBuildFpy(const SasamiWriteFm* w, uint8_t* out, uint32_t outCap)
 			if (vi < 0 || vi >= 64 || voiceAbs[vi] == 0) continue;
 			out[i + 1] = (uint8_t)(voiceAbs[vi] & 0xFF);
 			out[i + 2] = (uint8_t)(voiceAbs[vi] >> 8);
+		}
+	}
+	/* FPY2 macro footer: "FPY2MACR" + same layout as MPW3 MACR */
+	if (w->fpy2 && w->macroCount > 0) {
+		int mc = w->macroCount;
+		if (mc > 32) mc = 32;
+		uint64_t need = 12;
+		for (int i = 0; i < mc; i++) {
+			uint32_t bl = (uint32_t)(wcslen(w->macroBody[i]) * sizeof(wchar_t));
+			need += 64 * sizeof(wchar_t) + 4 + bl;
+		}
+		if (fileOff + need <= outCap && fileOff + need <= SASAMI_WRITE_MAX) {
+			memcpy(out + fileOff, "FPY2MACR", 8);
+			fileOff += 8;
+			uint32_t mcu = (uint32_t)mc;
+			memcpy(out + fileOff, &mcu, 4); fileOff += 4;
+			for (int i = 0; i < mc; i++) {
+				wchar_t nm[64];
+				memset(nm, 0, sizeof(nm));
+				wcsncpy_s(nm, w->macroName[i], _TRUNCATE);
+				memcpy(out + fileOff, nm, sizeof(nm));
+				fileOff += (uint32_t)sizeof(nm);
+				uint32_t bl = (uint32_t)(wcslen(w->macroBody[i]) * sizeof(wchar_t));
+				memcpy(out + fileOff, &bl, 4); fileOff += 4;
+				if (bl) {
+					memcpy(out + fileOff, w->macroBody[i], bl);
+					fileOff += bl;
+				}
+			}
 		}
 	}
 	return fileOff;
