@@ -1,13 +1,15 @@
-﻿#include "stdafx.h"
+#include "stdafx.h"
 #include "ogg.h"
 #include "oggDlg.h"
 #include "CFmMonitorDlg.h"
 #include "CMediaPlayerDlg.h"
 #include "PlayList.h"
+#include "PluginKinds.h"
 #include "resource.h"
 #include "DatArchive.h"
 #include <algorithm>
 #include <math.h>
+#include <string.h>
 
 extern save savedata;
 extern CString filen;
@@ -44,7 +46,7 @@ static int FmIsMonExtSuffix(const wchar_t* p)
 	static const wchar_t* kExt[] = {
 		L".fpy2", L".fpy", L".m2", L".mz", L".mp", L".ms", L".m",
 		L".opi", L".ovi", L".ozi",
-		L".s98", L".vgm", L".vgz", L".gym", L".ssl",
+		L".s98", L".vgm", L".vgz", L".gym", L".ssl", L".dro", L".cym", L".mym", L".x1f",
 		L".mdx", L".mdc", L".cmf", L".laa",
 		L".sc68", L".sndh",
 		/* 長い拡張子を先に（.psf が .psf2/.minipsf を食わない） */
@@ -481,6 +483,34 @@ static int FmReadLatestRingDump(SasamiFmMonDump* out)
 	return 1;
 }
 
+/* keys-only: PCM hit を keyOnHitCnt/ssg/ex/rhythm にパッキング（shadow と対） */
+static uint8_t FmKeysOnlyPackedHit(const SasamiFmMonDump& d, int pcm)
+{
+	if (pcm < 0 || pcm >= SASAMI_FMMON_PCM_MAX) return 0;
+	if (pcm < 6) return d.keyOnHitCnt[pcm];
+	if (pcm < 9) return d.ssgHitCnt[pcm - 6];
+	if (pcm < 12) return d.keyOnExHitCnt[pcm - 9];
+	return d.rhythmHitCnt[pcm - 12];
+}
+static void FmKeysOnlySetPackedHit(SasamiFmMonDump& d, int pcm, uint8_t v)
+{
+	if (pcm < 0 || pcm >= SASAMI_FMMON_PCM_MAX) return;
+	if (pcm < 6) d.keyOnHitCnt[pcm] = v;
+	else if (pcm < 9) d.ssgHitCnt[pcm - 6] = v;
+	else if (pcm < 12) d.keyOnExHitCnt[pcm - 9] = v;
+	else d.rhythmHitCnt[pcm - 12] = v;
+}
+static void FmKeysOnlyMergePackedHits(SasamiFmMonDump& dst, const SasamiFmMonDump& src)
+{
+	for (int i = 0; i < SASAMI_FMMON_PCM_MAX; i++) {
+		const uint8_t a = FmKeysOnlyPackedHit(dst, i);
+		const uint8_t b = FmKeysOnlyPackedHit(src, i);
+		if (b > a) FmKeysOnlySetPackedHit(dst, i, b);
+		if (src.pcmOn[i] && src.pcmNote[i] != 0xFF)
+			dst.pcmNote[i] = src.pcmNote[i];
+	}
+}
+
 /* リング全体(~320KB)を毎回読まず、未消費スロットだけ読む */
 static int FmDrainRingSlots(uint32_t* genLast,
 	void (*onSlot)(const SasamiFmMonDump&, void*), void* ctx)
@@ -526,7 +556,7 @@ static int FmDrainRingSlots(uint32_t* genLast,
 	if (to - from > SASAMI_FMMON_RING)
 		from = to - SASAMI_FMMON_RING;
 	/* 遅れ時は中間を OR マージしてから最新帯を読む（飛ばすと 16 分パルスが消える） */
-	enum { kMaxDrain = 12 };
+	enum { kMaxDrain = 24 };
 	SasamiFmMonDump skipMerged;
 	int haveSkip = 0;
 	if ((to - from) > (uint32_t)kMaxDrain) {
@@ -571,6 +601,15 @@ static int FmDrainRingSlots(uint32_t* genLast,
 				}
 				skipMerged.rhythmPulse = (uint8_t)(skipMerged.rhythmPulse | d.rhythmPulse);
 				skipMerged.rhythmKey = (uint8_t)(skipMerged.rhythmKey | d.rhythmKey);
+				/* keys-only PCM: gate は OR しない（張り付き）。hit/note だけ畳む */
+				if (d.dumpFlags & SASAMI_FMMON_FLAG_KEYSONLY)
+					FmKeysOnlyMergePackedHits(skipMerged, d);
+				else {
+					for (int i = 0; i < SASAMI_FMMON_PCM_MAX; i++) {
+						if (d.pcmOn[i] && d.pcmNote[i] != 0xFF)
+							skipMerged.pcmNote[i] = d.pcmNote[i];
+					}
+				}
 				if (d.curSample >= skipMerged.curSample) {
 					skipMerged.curSample = d.curSample;
 					skipMerged.seq = d.seq;
@@ -613,6 +652,14 @@ static int FmDrainRingSlots(uint32_t* genLast,
 			}
 			d.rhythmPulse = (uint8_t)(d.rhythmPulse | skipMerged.rhythmPulse);
 			d.rhythmKey = (uint8_t)(d.rhythmKey | skipMerged.rhythmKey);
+			if (skipMerged.dumpFlags & SASAMI_FMMON_FLAG_KEYSONLY)
+				FmKeysOnlyMergePackedHits(d, skipMerged);
+			else {
+				for (int i = 0; i < SASAMI_FMMON_PCM_MAX; i++) {
+					if (skipMerged.pcmNote[i] != 0xFF && skipMerged.pcmNote[i] != 0)
+						d.pcmNote[i] = skipMerged.pcmNote[i];
+				}
+			}
 			haveSkip = 0;
 		}
 		onSlot(d, ctx);
@@ -628,6 +675,46 @@ static const wchar_t* kRzmName[6] = { L"BD", L"SD", L"TOP", L"HH", L"TOM", L"RIM
 
 static constexpr COLORREF FM_BG = RGB(28, 32, 40);
 /* クロマキーは使わない（白抜け防止）。描画は常に不透明 Stretch/BitBlt */
+
+static int FmIsArcadePcmProfile(unsigned p)
+{
+	return (p == SASAMI_FMMON_KEYS_QSOUND
+		|| p == SASAMI_FMMON_KEYS_RF5C
+		|| p == SASAMI_FMMON_KEYS_C352
+		|| p == SASAMI_FMMON_KEYS_SEGAPCM
+		|| p == SASAMI_FMMON_KEYS_OKI) ? 1 : 0;
+}
+
+static int FmArcadePcmChannels(unsigned p)
+{
+	if (p == SASAMI_FMMON_KEYS_OKI) return 4;
+	if (p == SASAMI_FMMON_KEYS_RF5C) return 8;
+	return 16;
+}
+
+static const wchar_t* FmArcadePcmName(unsigned p)
+{
+	switch (p) {
+	case SASAMI_FMMON_KEYS_QSOUND: return L"QSound";
+	case SASAMI_FMMON_KEYS_RF5C: return L"RF5C/K053260";
+	case SASAMI_FMMON_KEYS_C352: return L"C352";
+	case SASAMI_FMMON_KEYS_SEGAPCM: return L"SegaPCM";
+	case SASAMI_FMMON_KEYS_OKI: return L"OKI6295";
+	default: return L"ArcadePCM";
+	}
+}
+
+static const wchar_t* FmArcadePcmShort(unsigned p)
+{
+	switch (p) {
+	case SASAMI_FMMON_KEYS_QSOUND: return L"QS";
+	case SASAMI_FMMON_KEYS_RF5C: return L"RF";
+	case SASAMI_FMMON_KEYS_C352: return L"C352";
+	case SASAMI_FMMON_KEYS_SEGAPCM: return L"SPCM";
+	case SASAMI_FMMON_KEYS_OKI: return L"OKI";
+	default: return L"PCM";
+	}
+}
 
 } // namespace
 
@@ -1037,34 +1124,88 @@ int CFmMonitorDlg::PcmRows() const
 	if (n > SASAMI_FMMON_PCM_MAX) n = SASAMI_FMMON_PCM_MAX;
 	if (m_dump.version >= 6 && (m_dump.dumpFlags & SASAMI_FMMON_FLAG_PPZ) && n < 8)
 		n = 8;
+	if (m_dump.version >= 6
+		&& (m_dump.dumpFlags & (SASAMI_FMMON_FLAG_ADPCM | SASAMI_FMMON_FLAG_PCM86))) {
+		/* PPZ+ADPCM: ADPCM at pcm[8] → need 9 rows. Alone: just pcm[0]=ADPCM. */
+		if (m_dump.dumpFlags & SASAMI_FMMON_FLAG_PPZ) {
+			if (n < 9) n = 9;
+		} else if (n < 1) {
+			n = 1;
+		}
+	}
+	/* MDX OPM + PDX */
+	if (IsOpmDump() && n > 0)
+		return n;
+	if (IsOpmDump())
+		return 0;
+	/* OPL3 / DualOPL2: ch10-18 in pcm slots */
+	if (IsOplDump() && ChipProfile() == SASAMI_FMMON_KEYS_OPL3)
+		return 9;
+	if (IsOplDump())
+		return 0;
 	return n;
 }
 
 int CFmMonitorDlg::ExRows() const
 {
 	if (!m_haveDump || m_dump.version < 6) return 0;
+	if (IsYm2610Dump()) return 0; /* no FM3-EX split on YM2610 monitor */
+	if (IsOpmDump() || ChipProfile() == SASAMI_FMMON_KEYS_MDX)
+		return 2; /* OPM7-8 */
+	if (IsOplDump())
+		return 3; /* OPL7-9 (with FmRows 6 → 9ch) */
 	if (IsMsxDump())
 		return (MsxDevMask() & SASAMI_FMMON_DEV_OPLL) ? 3 : 0;
-	if (m_dump.dumpFlags & SASAMI_FMMON_FLAG_FM3EX) return 3;
+	if (KeysOnly()) return 0;
 	for (int i = 0; i < 3; i++)
-		if (m_dump.keyOnEx[i] || m_dump.keyOnExHitCnt[i])
+		if (m_dump.keyOnEx[i])
 			return 3;
+	/*
+	 * FMP: WinFMP often leaves regs[0x27]=0x9F (multi-freq bits) even without
+	 * G/H/I parts — trust KPI FLAG_FM3EX (extend / real GHI / sticky EX gate).
+	 * PMD: FLAG or 0x27 CH3 effect/multi-freq (bits7-6).
+	 */
+	if (m_dump.dumpFlags & SASAMI_FMMON_FLAG_FMP)
+		return (m_dump.dumpFlags & SASAMI_FMMON_FLAG_FM3EX) ? 3 : 0;
+	/* Non-FMP: FLAG or CH3 multi-freq (0x27 bits7-6). Never use 0x27 for FMP. */
+	if (m_dump.dumpFlags & SASAMI_FMMON_FLAG_FM3EX)
+		return 3;
+	if ((m_dump.regs[0x27] & 0xC0) != 0)
+		return 3;
 	return 0;
 }
 
 int CFmMonitorDlg::FmRows() const
 {
 	if (!m_haveDump) return 6;
+	if (IsOpmDump() || ChipProfile() == SASAMI_FMMON_KEYS_MDX)
+		return 6; /* OPM1-6; +ExRows=2 → 8 */
+	if (IsOplDump())
+		return 6; /* OPL1-6; +ExRows=3 → 9 */
+	if (KeysOnly()) return 0;
 	if (IsMsxDump())
 		return (MsxDevMask() & SASAMI_FMMON_DEV_OPLL) ? 6 : 0;
+	if (m_dump.padHit == 5) return 0; /* SN76489 */
+	if (IsYm2610Dump()) return 4; /* YM2610 FM×4 (ch 1,2,4,5) */
+	if (!m_dump.fm10 && m_dump.padHit == 1) return 3; /* OPN */
 	return 6;
 }
 
 int CFmMonitorDlg::SsgRows() const
 {
 	if (!m_haveDump) return 3;
+	if (IsOplDump() || KeysOnly()) return 0;
+	if (IsOpmDump()) {
+		/* X1 OPM+AY / dual: show SSG when gated or labeled AY */
+		for (int i = 0; i < 3; i++)
+			if (m_dump.ssgOn[i]) return 3;
+		if (m_dump.titleSjis[0] && strstr(m_dump.titleSjis, "AY"))
+			return 3;
+		return 0;
+	}
 	if (IsMsxDump())
 		return (MsxDevMask() & SASAMI_FMMON_DEV_PSG) ? 3 : 0;
+	if (m_dump.padHit == 5) return 3; /* SN76489 tones */
 	return 3;
 }
 
@@ -1080,10 +1221,129 @@ int CFmMonitorDlg::IsMsxDump() const
 		&& (m_dump.dumpFlags & SASAMI_FMMON_FLAG_MSX)) ? 1 : 0;
 }
 
+int CFmMonitorDlg::IsOpmDump() const
+{
+	return (m_haveDump && m_dump.version >= 6
+		&& (m_dump.dumpFlags & SASAMI_FMMON_FLAG_OPM)) ? 1 : 0;
+}
+
+int CFmMonitorDlg::IsOplDump() const
+{
+	if (!m_haveDump || m_dump.version < 6) return 0;
+	const unsigned p = (unsigned)m_dump.pad6[1];
+	return (p == SASAMI_FMMON_KEYS_OPL2 || p == SASAMI_FMMON_KEYS_OPL3) ? 1 : 0;
+}
+
+int CFmMonitorDlg::IsYm2610Dump() const
+{
+	return (m_haveDump && m_dump.padHit == 6) ? 1 : 0;
+}
+
+int CFmMonitorDlg::IsArcadePcmDump() const
+{
+	if (!m_haveDump || m_dump.version < 6) return 0;
+	return FmIsArcadePcmProfile((unsigned)m_dump.pad6[1]);
+}
+
 unsigned CFmMonitorDlg::MsxDevMask() const
 {
 	if (!IsMsxDump()) return 0;
 	return (unsigned)m_dump.pad6[0];
+}
+
+unsigned CFmMonitorDlg::ChipProfile() const
+{
+	if (!m_haveDump || m_dump.version < 6) return SASAMI_FMMON_KEYS_GENERIC;
+	if (IsOpmDump()) return SASAMI_FMMON_KEYS_MDX;
+	if (IsOplDump()) return (unsigned)m_dump.pad6[1];
+	if (KeysOnly() || IsMsxDump())
+		return (unsigned)m_dump.pad6[1];
+	/* Hybrid OPN + arcade PCM (e.g. SegaOut YM2203+SegaPCM). */
+	if (FmIsArcadePcmProfile((unsigned)m_dump.pad6[1]))
+		return (unsigned)m_dump.pad6[1];
+	return SASAMI_FMMON_KEYS_GENERIC;
+}
+
+unsigned CFmMonitorDlg::ViewCaps() const
+{
+	if (!m_haveDump || m_dump.version < 6) return 0;
+	unsigned c = (unsigned)m_dump.pad6[2];
+	if (c) {
+		/* UI can draw MSX regs/panels even if older KPI omitted caps */
+		if (IsMsxDump()) {
+			const unsigned m = MsxDevMask();
+			if (m & (SASAMI_FMMON_DEV_PSG | SASAMI_FMMON_DEV_OPLL
+				| SASAMI_FMMON_DEV_SCC | SASAMI_FMMON_DEV_HES))
+				c |= SASAMI_FMMON_VIEW_REGS;
+			if (m & SASAMI_FMMON_DEV_OPLL)
+				c |= SASAMI_FMMON_VIEW_PANELS;
+		}
+		return c;
+	}
+	/* Legacy dumps without pad6[2] */
+	if (IsOpmDump() && !(m_dump.dumpFlags & SASAMI_FMMON_FLAG_KEYSONLY))
+		return SASAMI_FMMON_VIEW_KEYS | SASAMI_FMMON_VIEW_REGS | SASAMI_FMMON_VIEW_PANELS;
+	if (IsOplDump())
+		return SASAMI_FMMON_VIEW_KEYS | SASAMI_FMMON_VIEW_REGS | SASAMI_FMMON_VIEW_PANELS;
+	if (IsArcadePcmDump()) {
+		for (int i = 0; i < 0x200; i++)
+			if (m_dump.regs[i] != 0)
+				return SASAMI_FMMON_VIEW_KEYS | SASAMI_FMMON_VIEW_REGS | SASAMI_FMMON_VIEW_PANELS;
+		return SASAMI_FMMON_VIEW_KEYS;
+	}
+	if (KeysOnly()) return SASAMI_FMMON_VIEW_KEYS;
+	if (IsMsxDump()) {
+		unsigned v = SASAMI_FMMON_VIEW_KEYS;
+		const unsigned m = MsxDevMask();
+		if (m & (SASAMI_FMMON_DEV_PSG | SASAMI_FMMON_DEV_OPLL
+			| SASAMI_FMMON_DEV_SCC | SASAMI_FMMON_DEV_HES))
+			v |= SASAMI_FMMON_VIEW_REGS;
+		if (m & SASAMI_FMMON_DEV_OPLL)
+			v |= SASAMI_FMMON_VIEW_PANELS;
+		return v;
+	}
+	return SASAMI_FMMON_VIEW_KEYS | SASAMI_FMMON_VIEW_REGS | SASAMI_FMMON_VIEW_PANELS;
+}
+
+int CFmMonitorDlg::HideRhythm() const
+{
+	/* MSX FMPAC / OPLL: show rhythm keys when OPLL is present (reg $0E). */
+	if (IsMsxDump()) {
+		if (MsxDevMask() & SASAMI_FMMON_DEV_OPLL)
+			return 0;
+		return 1;
+	}
+	if (KeysOnly() || IsOpmDump() || IsYm2610Dump()) return 1;
+	/* OPN / SN / non-OPNA: no ADPCM-A rhythm row */
+	if (m_haveDump && !m_dump.fm10) return 1;
+	return 0;
+}
+
+int CFmMonitorDlg::HasViewRegs() const
+{
+	return (ViewCaps() & SASAMI_FMMON_VIEW_REGS) ? 1 : 0;
+}
+
+int CFmMonitorDlg::HasViewPanels() const
+{
+	return (ViewCaps() & SASAMI_FMMON_VIEW_PANELS) ? 1 : 0;
+}
+
+int CFmMonitorDlg::PreferOpnaShell() const
+{
+	/* 停止中に最後の OPNA/OPM 等ダンプが残っている場合はそのまま */
+	if (!m_haveDump)
+		return 1;
+	if (FmIsArcadePcmProfile(ChipProfile()))
+		return 0;
+	/* PC/AT BEEP/CMS/MPU: real aux regs — do not force empty OPNA shell. */
+	if (KeysOnly() && HasViewRegs() && m_dump.titleSjis[0]
+		&& strstr(m_dump.titleSjis, "PC/AT"))
+		return 0;
+	/* MIDI / SPC 等 keys-only で専用 hex・パネルが無い → OPNA をデフォルト殻に */
+	if (KeysOnly() && !IsOpmDump() && !IsOplDump() && !IsMsxDump())
+		return 1;
+	return 0;
 }
 
 /* KPI(FPY) は MIDI モニタと同じ可聴補正を使う。
@@ -1101,22 +1361,32 @@ static int FmPlayLooksLikeFmp()
 		|| FmPlayPathHasExt(L".ozi")) ? 1 : 0;
 }
 
+static int FmPlayLooksLikeKeysOnlyXsf()
+{
+	/* PSF/SPC/GSF/NCSF/SID/NSF keys-only。細分化後にモニタが僅かに先行しやすい */
+	return (FmPlayPathHasExt(L".psf2") || FmPlayPathHasExt(L".minipsf2")
+		|| FmPlayPathHasExt(L".psf") || FmPlayPathHasExt(L".minipsf")
+		|| FmPlayPathHasExt(L".spc")
+		|| FmPlayPathHasExt(L".gsf") || FmPlayPathHasExt(L".minigsf")
+		|| FmPlayPathHasExt(L".ncsf") || FmPlayPathHasExt(L".sid")
+		|| FmPlayPathHasExt(L".nsf") || FmPlayPathHasExt(L".nsfe")) ? 1 : 0;
+}
+
 static int FmPlayHeardLagMs()
 {
 	if (FmPlayLooksLikeFpy() || FmPlayLooksLikeFmp()) return 700;
+	/* keys-only XSF 系: 600 だと表示が少し先行 → +150ms */
+	if (FmPlayLooksLikeKeysOnlyXsf()) return 750;
 	/* KSS: KPI/DS が大きな塊で playb が進むため GDI 追従だとかたまる。
 	   dump 最新−ラグで追う前提の遅延（ホスト先行分）。 */
 	if (FmPlayPathHasExt(L".kss")) return 600; /* 500 でも僅かに先行 → +100ms */
+	if (FmPlayPathHasExt(L".zip")) return 600; /* CEmu hoot archive */
 	if (FmPlayPathHasExt(L".s98") || FmPlayPathHasExt(L".vgm") || FmPlayPathHasExt(L".vgz")
 		|| FmPlayPathHasExt(L".hes") || FmPlayPathHasExt(L".gym") || FmPlayPathHasExt(L".ssl")
+		|| FmPlayPathHasExt(L".dro") || FmPlayPathHasExt(L".cym") || FmPlayPathHasExt(L".mym")
 		|| FmPlayPathHasExt(L".mdx") || FmPlayPathHasExt(L".mdc")
 		|| FmPlayPathHasExt(L".cmf") || FmPlayPathHasExt(L".laa")
 		|| FmPlayPathHasExt(L".sc68") || FmPlayPathHasExt(L".sndh")
-		|| FmPlayPathHasExt(L".nsf") || FmPlayPathHasExt(L".nsfe")
-		|| FmPlayPathHasExt(L".spc") || FmPlayPathHasExt(L".psf") || FmPlayPathHasExt(L".minipsf")
-		|| FmPlayPathHasExt(L".psf2") || FmPlayPathHasExt(L".minipsf2")
-		|| FmPlayPathHasExt(L".gsf") || FmPlayPathHasExt(L".minigsf")
-		|| FmPlayPathHasExt(L".ncsf") || FmPlayPathHasExt(L".sid")
 		|| FmPlayPathHasExt(L".mid") || FmPlayPathHasExt(L".midi")
 		|| FmPlayLooksLikeMsx())
 		return 600;
@@ -1127,6 +1397,8 @@ static int FmPlayHeardLagMs()
 static int FmPlayPreferDumpClock()
 {
 	if (FmPlayLooksLikeMsx()) return 1;
+	/* CEmu hoot zip（arcus2.zip::0001 等）も dump.curSample で追う */
+	if (FmPlayPathHasExt(L".zip")) return 1;
 	if (FmPlayPathHasExt(L".kss") || FmPlayPathHasExt(L".hes")
 		|| FmPlayPathHasExt(L".vgm") || FmPlayPathHasExt(L".vgz")
 		|| FmPlayPathHasExt(L".gym") || FmPlayPathHasExt(L".ssl")
@@ -1152,16 +1424,22 @@ uint64_t CFmMonitorDlg::HeardSample(uint32_t sampleRate)
 	const uint32_t srDump = sampleRate > 0 ? sampleRate : 44100;
 
 	__int64 frames = 0;
-	/* 巨大 KPI バッファ / keys-only: GDI 跳びを避け dump curSample−ラグで追う。 */
+	/* 巨大 KPI バッファ / keys-only: GDI 跳びを避け dump curSample−ラグで追う。
+	   CEmu (MODE_CEMU=-1000) の hoot zip も同様。 */
 	const unsigned lastFlags = (m_histN > 0)
 		? m_hist[(m_histHead + m_histN - 1) % HIST_MAX].dumpFlags : 0u;
-	const int useDumpClock = (mode == -3 && m_histN > 0
+	const int isKpiOrCemu = (mode == -3 || IsCemuMode(mode)) ? 1 : 0;
+	const int useDumpClock = (isKpiOrCemu && m_histN > 0
 		&& (FmPlayPreferDumpClock()
 			|| (lastFlags & (SASAMI_FMMON_FLAG_MSX | SASAMI_FMMON_FLAG_KEYSONLY)))) ? 1 : 0;
 	if (useDumpClock) {
 		const int li = (m_histHead + m_histN - 1) % HIST_MAX;
 		const uint64_t latest = m_histSamp[li];
-		const uint64_t lag = (uint64_t)srDump * (uint32_t)FmPlayHeardLagMs() / 1000u;
+		unsigned lagMs = (unsigned)FmPlayHeardLagMs();
+		/* 拡張子判定漏れでも keys-only dump は同系の遅れを使う */
+		if ((lastFlags & SASAMI_FMMON_FLAG_KEYSONLY) && lagMs < 750u)
+			lagMs = 750u;
+		const uint64_t lag = (uint64_t)srDump * lagMs / 1000u;
 		frames = (latest > lag) ? (__int64)(latest - lag) : 0;
 	} else if (mode == -3) {
 		const double sec = OggGetGdiPlaybackTimeSec();
@@ -1206,7 +1484,7 @@ int CFmMonitorDlg::ContentHeight(int dpi, int pcmRows) const
 	const int hexH = 2 * (FmScale(18, dpi) + 16 * cellH) + bankGap;
 	const int fmPanelH = (std::max)(hexH, FmScale(320, dpi));
 	const int rowH = FmScale(14, dpi);
-	const int chRows = FmRows() + ExRows() + SsgRows() + pcmRows + (IsMsxDump() ? 0 : 1);
+	const int chRows = FmRows() + ExRows() + SsgRows() + pcmRows + (HideRhythm() ? 0 : 1);
 	const int keys = FmScale(4, dpi) + chRows * rowH;
 	return head + fmPanelH + keys + pad;
 }
@@ -1350,8 +1628,10 @@ static void FmReleaseFontCache()
 	}
 }
 
-void CFmMonitorDlg::DrawHexBank(CDC& dc, int x, int y, int cellW, int cellH, int gapExtra, int bankBase, const wchar_t* title)
+void CFmMonitorDlg::DrawHexBank(CDC& dc, int x, int y, int cellW, int cellH, int gapExtra, int bankBase, const wchar_t* title, int rowCount)
 {
+	if (rowCount < 1) rowCount = 1;
+	if (rowCount > 16) rowCount = 16;
 	const int fontPx = (std::max)(8, (std::min)(cellH - 2, cellW * 2 / 3));
 	HFONT font = FmMakeFont(fontPx);
 	HFONT oldf = (HFONT)dc.SelectObject(font);
@@ -1374,7 +1654,7 @@ void CFmMonitorDlg::DrawHexBank(CDC& dc, int x, int y, int cellW, int cellH, int
 	const COLORREF baseTouched = RGB(48, 72, 58);
 	const COLORREF hi = RGB(80, 200, 120);
 
-	for (int row = 0; row < 16; row++) {
+	for (int row = 0; row < rowCount; row++) {
 		_snwprintf_s(hdr, _TRUNCATE, L"%X", row);
 		dc.SetTextColor(RGB(160, 180, 170));
 		dc.SetBkMode(TRANSPARENT);
@@ -1383,6 +1663,7 @@ void CFmMonitorDlg::DrawHexBank(CDC& dc, int x, int y, int cellW, int cellH, int
 		const int opsRow = FmHexRowIsFmOps(row);
 		for (int col = 0; col < 16; col++) {
 			const int idx = bankBase + row * 16 + col;
+			if (idx < 0 || idx >= 0x200) continue;
 			const int px = x + FmHexColX(col, cellW, gapExtra);
 			const int py = y + row * cellH;
 			const int inGroup = FmHexColInOpGroup(col);
@@ -1645,8 +1926,16 @@ static void FmDrawEnvelope(CDC& dc, const CRect& rc, int ar, int dr, int sr, int
 void CFmMonitorDlg::DrawFmChPanel(CDC& dc, const CRect& rc, int ch)
 {
 	if (rc.Width() < 100 || rc.Height() < 80) return;
-	const int bank = (ch < 3) ? 0 : 0x100;
-	const int slot = (ch < 3) ? ch : (ch - 3);
+	int bank, slot;
+	if (IsYm2610Dump() && ch >= 0 && ch < 4) {
+		static const int kB[4] = { 0, 0, 0x100, 0x100 };
+		static const int kS[4] = { 1, 2, 0, 1 };
+		bank = kB[ch];
+		slot = kS[ch];
+	} else {
+		bank = (ch < 3) ? 0 : 0x100;
+		slot = (ch < 3) ? ch : (ch - 3);
+	}
 	auto reg = [&](int r) -> uint8_t {
 		return m_haveDump ? m_dump.regs[bank + r] : 0;
 	};
@@ -1938,12 +2227,31 @@ void CFmMonitorDlg::DrawChannelKeys(CDC& dc, int x, int y, int w, int rowH, int 
 
 	static const wchar_t* kFmName[6] = { L"FM1", L"FM2", L"FM3", L"FM4", L"FM5", L"FM6" };
 	static const wchar_t* kOplName[6] = { L"OPL1", L"OPL2", L"OPL3", L"OPL4", L"OPL5", L"OPL6" };
+	static const wchar_t* kOpmName[8] = {
+		L"OPM1", L"OPM2", L"OPM3", L"OPM4", L"OPM5", L"OPM6", L"OPM7", L"OPM8"
+	};
+	static const wchar_t* kExName[3] = { L"EX1", L"EX2", L"EX3" };
+	static const wchar_t* kOplEx[3] = { L"OPL7", L"OPL8", L"OPL9" };
 	const int fmN = FmRows();
+	const int exN = ExRows();
 	const int msx = IsMsxDump();
-	for (int ch = 0; ch < fmN; ch++, row++) {
+	const int opm = IsOpmDump() || (ChipProfile() == SASAMI_FMMON_KEYS_MDX);
+	const int opl = IsOplDump();
+	/* OPNA: EX is FM3 split → nest between FM3 and FM4. OPM/MSX/OPL keep ch7+ after. */
+	const int nestEx = (!opm && !msx && !opl && exN > 0 && fmN >= 6) ? 1 : 0;
+
+	auto drawFmCh = [&](int ch) {
 		const int yy = y + row * rowH;
-		const int bank = (ch < 3) ? 0 : 0x100;
-		const int slot = (ch < 3) ? ch : (ch - 3);
+		int bank, slot;
+		if (IsYm2610Dump() && ch >= 0 && ch < 4) {
+			static const int kB[4] = { 0, 0, 0x100, 0x100 };
+			static const int kS[4] = { 1, 2, 0, 1 };
+			bank = kB[ch];
+			slot = kS[ch];
+		} else {
+			bank = (ch < 3) ? 0 : 0x100;
+			slot = (ch < 3) ? ch : (ch - 3);
+		}
 		const uint8_t a4 = m_haveDump ? m_dump.regs[bank + 0xA4 + slot] : 0;
 		const uint8_t a0 = m_haveDump ? m_dump.regs[bank + 0xA0 + slot] : 0;
 		const BYTE fade = live ? m_fadeKey[ch] : (BYTE)0;
@@ -1954,7 +2262,7 @@ void CFmMonitorDlg::DrawChannelKeys(CDC& dc, int x, int y, int w, int rowH, int 
 		if (keyLit && m_haveDump) {
 			if (m_dump.version >= 6 && m_dump.keyMidi[ch] != 0xFF)
 				midi = (int)m_dump.keyMidi[ch];
-			else if (!KeysOnly() && !msx && gate)
+			else if (!KeysOnly() && !msx && !opm && gate)
 				/* FMP 鍵盤のみは regs が空/ゴミ。休符中の fnum フォールバックで偽ノートが出る */
 				midi = ApproxMidiFromFnum(a4, a0);
 		}
@@ -1962,17 +2270,24 @@ void CFmMonitorDlg::DrawChannelKeys(CDC& dc, int x, int y, int w, int rowH, int 
 		wchar_t note[16];
 		FmFormatNoteName(midi, note, 16);
 		wchar_t lab[40];
-		_snwprintf_s(lab, _TRUNCATE, L"%s %s", msx ? kOplName[ch] : kFmName[ch], note);
+		const wchar_t* nm;
+		if (opl) {
+			static const wchar_t* kOplName[6] = {
+				L"OPL1", L"OPL2", L"OPL3", L"OPL4", L"OPL5", L"OPL6"
+			};
+			nm = kOplName[ch];
+		} else {
+			nm = opm ? kOpmName[ch] : (msx ? kOplName[ch] : kFmName[ch]);
+		}
+		_snwprintf_s(lab, _TRUNCATE, L"%s %s", nm, note);
 		drawLabel(yy, lab, fade, RGB(80, 220, 120));
 
 		CRect krc(x + labelW, yy + (rowH - keyH) / 2, x + labelW + pianoW, yy + (rowH - keyH) / 2 + keyH);
 		DrawPiano108(dc, krc, midi, keyLit);
-	}
+		row++;
+	};
 
-	static const wchar_t* kExName[3] = { L"EX1", L"EX2", L"EX3" };
-	static const wchar_t* kOplEx[3] = { L"OPL7", L"OPL8", L"OPL9" };
-	const int exN = ExRows();
-	for (int i = 0; i < exN; i++, row++) {
+	auto drawExCh = [&](int i) {
 		const int yy = y + row * rowH;
 		const BYTE fade = live ? m_fadeEx[i] : (BYTE)0;
 		const int gate = live && m_haveDump && m_dump.keyOnEx[i];
@@ -1980,7 +2295,7 @@ void CFmMonitorDlg::DrawChannelKeys(CDC& dc, int x, int y, int w, int rowH, int 
 		int midi = -1;
 		if (keyLit && m_haveDump) {
 			if (m_dump.exMidi[i] != 0xFF) midi = (int)m_dump.exMidi[i];
-			else if (!KeysOnly() && !msx && gate) {
+			else if (!KeysOnly() && !msx && !opm && gate) {
 				/* EX fnum: EX1 AC/A8, EX2 AE/AA, EX3 AD/A9 */
 				static const int kA4[3] = { 0xAC, 0xAE, 0xAD };
 				static const int kA0[3] = { 0xA8, 0xAA, 0xA9 };
@@ -1990,10 +2305,27 @@ void CFmMonitorDlg::DrawChannelKeys(CDC& dc, int x, int y, int w, int rowH, int 
 		wchar_t note[16];
 		FmFormatNoteName(midi, note, 16);
 		wchar_t lab[40];
-		_snwprintf_s(lab, _TRUNCATE, L"%s %s", msx ? kOplEx[i] : kExName[i], note);
+		const wchar_t* nm;
+		if (opl) {
+			static const wchar_t* kOplEx[3] = { L"OPL7", L"OPL8", L"OPL9" };
+			nm = kOplEx[i];
+		} else {
+			nm = opm ? kOpmName[6 + i] : (msx ? kOplEx[i] : kExName[i]);
+		}
+		_snwprintf_s(lab, _TRUNCATE, L"%s %s", nm, note);
 		drawLabel(yy, lab, fade, RGB(180, 120, 255));
 		CRect krc(x + labelW, yy + (rowH - keyH) / 2, x + labelW + pianoW, yy + (rowH - keyH) / 2 + keyH);
 		DrawPiano108(dc, krc, midi, keyLit);
+		row++;
+	};
+
+	if (nestEx) {
+		for (int ch = 0; ch < 3; ch++) drawFmCh(ch);
+		for (int i = 0; i < exN; i++) drawExCh(i);
+		for (int ch = 3; ch < fmN; ch++) drawFmCh(ch);
+	} else {
+		for (int ch = 0; ch < fmN; ch++) drawFmCh(ch);
+		for (int i = 0; i < exN; i++) drawExCh(i);
 	}
 
 	static const wchar_t* kSsg[3] = { L"SSG1", L"SSG2", L"SSG3" };
@@ -2049,16 +2381,73 @@ void CFmMonitorDlg::DrawChannelKeys(CDC& dc, int x, int y, int w, int rowH, int 
 		const int ppz = (m_haveDump && m_dump.version >= 6
 			&& (m_dump.dumpFlags & SASAMI_FMMON_FLAG_PPZ));
 		const int hes = msx && (MsxDevMask() & SASAMI_FMMON_DEV_HES);
-		const wchar_t* pref = hes ? L"SSG" : (msx ? L"SCC" : (ppz ? L"PPZ" : L"PCM"));
-		const int num = hes ? (i + 4) : (i + 1);
-		_snwprintf_s(lab, _TRUNCATE, L"%s%d %s", pref, num, note);
+		const unsigned prof = ChipProfile();
+		const int adpcmRow = (m_haveDump && m_dump.version >= 6
+			&& (m_dump.dumpFlags & (SASAMI_FMMON_FLAG_ADPCM | SASAMI_FMMON_FLAG_PCM86))
+			&& (((m_dump.dumpFlags & SASAMI_FMMON_FLAG_PPZ) && i == 8)
+				|| (!(m_dump.dumpFlags & SASAMI_FMMON_FLAG_PPZ) && i == 0)));
+		const wchar_t* pref = nullptr;
+		int num = i + 1;
+		if (IsYm2610Dump()) {
+			/* ADA1-6 = ADPCM-A, ADB = ADPCM-B (when present at index 6) */
+			if (i < 6) {
+				pref = L"ADA";
+				num = i + 1;
+			} else {
+				pref = L"ADB";
+				num = 1;
+			}
+		} else if (adpcmRow) {
+			pref = (m_dump.dumpFlags & SASAMI_FMMON_FLAG_PCM86) ? L"86PCM" : L"ADPCM";
+			num = 0;
+		}
+		else if (hes) { pref = L"SSG"; num = i + 4; }
+		else if (msx) { pref = L"SCC"; }
+		else if (opl) { pref = L"OPL"; num = i + 10; }
+		else if (opm || prof == SASAMI_FMMON_KEYS_MDX) {
+			pref = (m_haveDump && strstr(m_dump.titleSjis, "GA20")) ? L"GA20" : L"PDX";
+		}
+		else if (ppz && i < 8) { pref = L"PPZ"; }
+		else {
+			switch (prof) {
+			case SASAMI_FMMON_KEYS_SPC: pref = L"DSP"; break;
+			case SASAMI_FMMON_KEYS_NSF:
+				if (i == 0) { pref = L"PU1"; num = 0; }
+				else if (i == 1) { pref = L"PU2"; num = 0; }
+				else if (i == 2) { pref = L"TRI"; num = 0; }
+				else if (i == 3) { pref = L"NOI"; num = 0; }
+				else if (i == 4) { pref = L"DMC"; num = 0; }
+				else { pref = L"NSF"; num = i + 1; }
+				break;
+			case SASAMI_FMMON_KEYS_SID: pref = L"SID"; break;
+			case SASAMI_FMMON_KEYS_PSF: pref = L"SPU"; break;
+			case SASAMI_FMMON_KEYS_GSF: {
+				static const wchar_t* kGb[4] = { L"SQ1", L"SQ2", L"WAV", L"NOI" };
+				pref = (i < 4) ? kGb[i] : L"GB";
+				num = (i < 4) ? 0 : (i + 1);
+				break;
+			}
+			case SASAMI_FMMON_KEYS_NCSF: pref = L"NDS"; break;
+			case SASAMI_FMMON_KEYS_MIDI: pref = L"CH"; break;
+			case SASAMI_FMMON_KEYS_QSOUND: pref = L"QS"; break;
+			case SASAMI_FMMON_KEYS_RF5C: pref = L"RF"; break;
+			case SASAMI_FMMON_KEYS_C352: pref = L"C352"; break;
+			case SASAMI_FMMON_KEYS_SEGAPCM: pref = L"SPCM"; break;
+			case SASAMI_FMMON_KEYS_OKI: pref = L"OKI"; break;
+			default: pref = L"CH"; break;
+			}
+		}
+		if (num <= 0)
+			_snwprintf_s(lab, _TRUNCATE, L"%s %s", pref, note);
+		else
+			_snwprintf_s(lab, _TRUNCATE, L"%s%d %s", pref, num, note);
 		drawLabel(yy, lab, fade, RGB(220, 160, 80));
 
 		CRect krc(x + labelW, yy + (rowH - keyH) / 2, x + labelW + pianoW, yy + (rowH - keyH) / 2 + keyH);
 		DrawPiano108(dc, krc, midi, keyLit);
 	}
 
-	if (!msx) {
+	if (!HideRhythm()) {
 	const int rzmY = y + row * rowH + (rowH / 5);
 	dc.SetTextColor(RGB(200, 210, 220));
 	dc.TextOut(x, rzmY + 2, L"RHY");
@@ -2095,7 +2484,7 @@ void CFmMonitorDlg::ComputeLayout(int w, int h)
 	m_lay.headH = FmScale(18, m_lay.dpi);
 	m_lay.gapHexKeys = FmScale(4, m_lay.dpi);
 	const int chRows = fmRows + exRows + ssgRows + pcmRows;
-	const int keyBlockRows = chRows + (IsMsxDump() ? 0 : 1);
+	const int keyBlockRows = chRows + (HideRhythm() ? 0 : 1);
 	m_lay.bankGap = FmScale(8, m_lay.dpi);
 
 	int avail = h - m_lay.pad - m_lay.headH - m_lay.gapHexKeys - m_lay.pad;
@@ -2156,8 +2545,13 @@ void CFmMonitorDlg::ComputeLayout(int w, int h)
 	m_lay.fmX = m_lay.pad + m_lay.hexColW + FmScale(4, m_lay.dpi);
 	m_lay.fmW = (std::max)(100, w - m_lay.pad - m_lay.fmX);
 	m_lay.gap = FmScale(3, m_lay.dpi);
-	m_lay.pw = (m_lay.fmW - m_lay.gap * 2) / 3;
-	m_lay.ph = (m_lay.topH - m_lay.gap) / 2;
+	{
+		const int fmN = FmRows();
+		const int cols = (fmN <= 2) ? (std::max)(1, fmN) : ((fmN <= 4) ? 2 : 3);
+		const int rows = (fmN <= 0) ? 1 : ((fmN + cols - 1) / cols);
+		m_lay.pw = (m_lay.fmW - m_lay.gap * (cols - 1)) / (std::max)(1, cols);
+		m_lay.ph = (m_lay.topH - m_lay.gap * (rows - 1)) / (std::max)(1, rows);
+	}
 	m_lay.keysY = m_lay.topY + m_lay.topH + m_lay.gapHexKeys;
 	m_lay.keysW = (std::max)(120, w - m_lay.pad * 2);
 
@@ -2181,11 +2575,59 @@ void CFmMonitorDlg::DrawHead(CDC& dc)
 		for (const wchar_t* p = m_dump.sourcePath; *p; p++)
 			if (*p == L'\\' || *p == L'/') stem = p + 1;
 		const wchar_t* chip;
-		if (KeysOnly())
-			chip = LL14(L"FMP  鍵盤+PPZ", L"FMP  keys+PPZ", L"FMP  touches+PPZ", L"FMP  tasti+PPZ",
-				L"FMP  teclas+PPZ", L"FMP  건반+PPZ", L"FMP  键盘+PPZ", L"FMP  مفاتيح+PPZ",
-				L"FMP  клавиши+PPZ", L"FMP  Tasten+PPZ", L"FMP  teclas+PPZ", L"FMP  toetsen+PPZ",
-				L"FMP  klawisze+PPZ", L"FMP  tuslar+PPZ");
+		if (m_dump.titleSjis[0]
+			&& (IsOpmDump() || ChipProfile() == SASAMI_FMMON_KEYS_MDX
+				|| (!(m_dump.dumpFlags & SASAMI_FMMON_FLAG_FMP)
+					&& !(m_dump.dumpFlags & SASAMI_FMMON_FLAG_KEYSONLY)
+					&& !IsOplDump() && !IsMsxDump()))) {
+			/* CEmu identity in titleSjis ("PC-88  OPNA+ADPCM", "X1  OPM+AY", …) */
+			static wchar_t idChip[96];
+			MultiByteToWideChar(CP_ACP, 0, m_dump.titleSjis, -1, idChip, 96);
+			chip = idChip;
+		}
+		else if (IsOpmDump() || ChipProfile() == SASAMI_FMMON_KEYS_MDX)
+			chip = HasViewRegs()
+				? L"MDX  OPM×8 (+regs)"
+				: L"MDX  OPM×8 (keys)";
+		else if (IsOplDump()) {
+			static wchar_t oplChip[96];
+			if (m_dump.titleSjis[0]) {
+				MultiByteToWideChar(CP_ACP, 0, m_dump.titleSjis, -1, oplChip, 96);
+				chip = oplChip;
+			} else {
+				const unsigned hw = (unsigned)m_dump.pad6[0];
+				const wchar_t* kind = (hw == 1) ? L"OPL2×9" :
+					(hw == 3) ? L"DualOPL2×18" : L"OPL3×18";
+				_snwprintf_s(oplChip, _TRUNCATE, L"OPL  %s", kind);
+				chip = oplChip;
+			}
+		}
+		else if (KeysOnly()) {
+			switch (ChipProfile()) {
+			case SASAMI_FMMON_KEYS_SPC: chip = L"SPC  S-DSP×8"; break;
+			case SASAMI_FMMON_KEYS_NSF: chip = L"NSF  APU(+exp)"; break;
+			case SASAMI_FMMON_KEYS_SID: chip = L"SID  ×3"; break;
+			case SASAMI_FMMON_KEYS_PSF: chip = L"PSF  SPU"; break;
+			case SASAMI_FMMON_KEYS_GSF: chip = L"GSF  GB APU×4"; break;
+			case SASAMI_FMMON_KEYS_NCSF: chip = L"NCSF  Nitro"; break;
+			case SASAMI_FMMON_KEYS_MIDI: {
+				static wchar_t midChip[96];
+				if (m_dump.titleSjis[0]) {
+					MultiByteToWideChar(CP_ACP, 0, m_dump.titleSjis, -1, midChip, 96);
+					chip = midChip;
+				} else {
+					chip = L"MIDI";
+				}
+				break;
+			}
+			case SASAMI_FMMON_KEYS_QSOUND: chip = L"AC  QSound×16"; break;
+			case SASAMI_FMMON_KEYS_RF5C: chip = L"AC  RF5C68×8"; break;
+			case SASAMI_FMMON_KEYS_C352: chip = L"AC  C352×16"; break;
+			case SASAMI_FMMON_KEYS_SEGAPCM: chip = L"Sega  SegaPCM×8/16"; break;
+			case SASAMI_FMMON_KEYS_OKI: chip = L"AC  OKI×4"; break;
+			default: chip = L"Keys  CH×n"; break;
+			}
+		}
 		else if (IsMsxDump()) {
 			static wchar_t msxChip[96];
 			const unsigned m = MsxDevMask();
@@ -2198,19 +2640,23 @@ void CFmMonitorDlg::DrawHead(CDC& dc)
 					(m & SASAMI_FMMON_DEV_SCC) ? L"SCC" : L"");
 			chip = msxChip;
 		}
-		else if (m_dump.version >= 6 && (m_dump.dumpFlags & SASAMI_FMMON_FLAG_FM3EX)
-			&& !(m_dump.dumpFlags & SASAMI_FMMON_FLAG_KEYSONLY)) {
+		else if (m_dump.version >= 6 && ExRows() > 0
+			&& !(m_dump.dumpFlags & SASAMI_FMMON_FLAG_KEYSONLY)
+			&& !IsOpmDump() && !IsMsxDump()) {
 			const int isFmp = (m_dump.dumpFlags & SASAMI_FMMON_FLAG_FMP) ? 1 : 0;
-			chip = isFmp
-				? LL14(L"FMP  OPNA+EX/PPZ", L"FMP  OPNA+EX/PPZ", L"FMP  OPNA+EX/PPZ", L"FMP  OPNA+EX/PPZ",
-					L"FMP  OPNA+EX/PPZ", L"FMP  OPNA+EX/PPZ", L"FMP  OPNA+EX/PPZ", L"FMP  OPNA+EX/PPZ",
-					L"FMP  OPNA+EX/PPZ", L"FMP  OPNA+EX/PPZ", L"FMP  OPNA+EX/PPZ", L"FMP  OPNA+EX/PPZ",
-					L"FMP  OPNA+EX/PPZ", L"FMP  OPNA+EX/PPZ")
-				: LL14(L"PMD  OPNA+EX/PPZ", L"PMD  OPNA+EX/PPZ", L"PMD  OPNA+EX/PPZ", L"PMD  OPNA+EX/PPZ",
-					L"PMD  OPNA+EX/PPZ", L"PMD  OPNA+EX/PPZ", L"PMD  OPNA+EX/PPZ", L"PMD  OPNA+EX/PPZ",
-					L"PMD  OPNA+EX/PPZ", L"PMD  OPNA+EX/PPZ", L"PMD  OPNA+EX/PPZ", L"PMD  OPNA+EX/PPZ",
-					L"PMD  OPNA+EX/PPZ", L"PMD  OPNA+EX/PPZ");
+			static wchar_t opnaChip[96];
+			const wchar_t* base = isFmp ? L"FMP  OPNA+EX" : L"PMD  OPNA+EX";
+			const wchar_t* pcm =
+				(m_dump.dumpFlags & SASAMI_FMMON_FLAG_PCM86) ? L"+86PCM" :
+				(m_dump.dumpFlags & SASAMI_FMMON_FLAG_ADPCM) ? L"+ADPCM" : L"";
+			const wchar_t* ppz = (m_dump.dumpFlags & SASAMI_FMMON_FLAG_PPZ) ? L"/PPZ" : L"";
+			_snwprintf_s(opnaChip, _TRUNCATE, L"%s%s%s", base, pcm, ppz);
+			chip = opnaChip;
 		}
+		else if (m_dump.padHit == 5)
+			chip = L"SN76489  Tone×3+Noise";
+		else if (m_dump.padHit == 6)
+			chip = L"YM2610  FM×4+SSG×3+ADPCM";
 		else if (m_dump.padHit == 1)
 			chip = L"OPN   FM×3+SSG×3";
 		else if (m_dump.padHit == 0)
@@ -2220,7 +2666,7 @@ void CFmMonitorDlg::DrawHead(CDC& dc)
 		_snwprintf_s(head, _TRUNCATE,
 			L"%s   seq=%u  %uHz  %s%s",
 			chip, m_dump.seq, m_dump.sampleRate,
-			stem, m_dump.fm10 ? L"  [10ch]" : L"");
+			stem, (m_dump.fm10 && !IsYm2610Dump()) ? L"  [10ch]" : L"");
 	} else {
 		_snwprintf_s(head, _TRUNCATE, L"%s",
 			LL14(L"OPN/OPNA dump 待機中（PMD/FMPは新Plugins要）",
@@ -2246,27 +2692,132 @@ void CFmMonitorDlg::DrawHexArea(CDC& dc)
 {
 	if (!m_layOk) return;
 	dc.FillSolidRect(m_lay.rcHex, FM_BG);
-	if (KeysOnly() || IsMsxDump()) {
+	if (IsOpmDump() && HasViewRegs()) {
+		DrawHexBank(dc, m_lay.hexX, m_lay.gridY0, m_lay.cellW, m_lay.cellH, m_lay.gapExtra, 0x000, L"OPM $00-$FF");
+		CGdiObject* old = dc.SelectStockObject(DEFAULT_GUI_FONT);
+		dc.SetBkMode(TRANSPARENT);
+		dc.SetTextColor(RGB(120, 130, 140));
+		dc.TextOut(m_lay.hexX, m_lay.gridY1, L"(YM2151 single map)");
+		dc.SelectObject(old);
+		return;
+	}
+		if (IsOplDump() && HasViewRegs()) {
+		const int opl3 = (ChipProfile() == SASAMI_FMMON_KEYS_OPL3) ? 1 : 0;
+		const int pcat = (m_dump.titleSjis[0]
+			&& strstr(m_dump.titleSjis, "PC/AT")) ? 1 : 0;
+		DrawHexBank(dc, m_lay.hexX, m_lay.gridY0, m_lay.cellW, m_lay.cellH, m_lay.gapExtra, 0x000,
+			opl3 ? L"OPL port0 / chip0"
+			: (pcat ? L"AdLib/SB OPL2 $00-$FF" : L"OPL2 $00-$FF"));
+		if (opl3) {
+			DrawHexBank(dc, m_lay.hexX, m_lay.gridY1, m_lay.cellW, m_lay.cellH, m_lay.gapExtra, 0x100,
+				L"OPL port1 / chip1");
+		} else {
+			CGdiObject* old = dc.SelectStockObject(DEFAULT_GUI_FONT);
+			dc.SetBkMode(TRANSPARENT);
+			dc.SetTextColor(RGB(120, 130, 140));
+			dc.TextOut(m_lay.hexX, m_lay.gridY1,
+				pcat ? L"(YM3812 · PC/AT AdLib/Sound Blaster)" : L"(YM3812 single map)");
+			dc.SelectObject(old);
+		}
+		return;
+	}
+	/* PC/AT BEEP / GameBlaster / MPU — aux regs in keys-only dumps */
+	if (KeysOnly() && HasViewRegs() && m_dump.titleSjis[0]
+		&& strstr(m_dump.titleSjis, "PC/AT")) {
+		const char* t = m_dump.titleSjis;
+		if (strstr(t, "BEEP")) {
+			DrawHexBank(dc, m_lay.hexX, m_lay.gridY0, m_lay.cellW, m_lay.cellH, m_lay.gapExtra, 0x000,
+				L"BEEP PIT2/61 $00-$0F", 1);
+			CGdiObject* old = dc.SelectStockObject(DEFAULT_GUI_FONT);
+			dc.SetBkMode(TRANSPARENT);
+			dc.SetTextColor(RGB(120, 130, 140));
+			dc.TextOut(m_lay.hexX, m_lay.gridY1,
+				L"(00-01=PIT2 reload  02=port61  03=gate  04=MIDI)");
+			dc.SelectObject(old);
+			return;
+		}
+		if (strstr(t, "GameBlaster") || strstr(t, "SAA")) {
+			DrawHexBank(dc, m_lay.hexX, m_lay.gridY0, m_lay.cellW, m_lay.cellH, m_lay.gapExtra, 0x000,
+				L"SAA0 $00-$1F", 2);
+			DrawHexBank(dc, m_lay.hexX, m_lay.gridY1, m_lay.cellW, m_lay.cellH, m_lay.gapExtra, 0x020,
+				L"SAA1 $20-$3F", 2);
+			return;
+		}
+		if (strstr(t, "MPU") || strstr(t, "MIDI")) {
+			DrawHexBank(dc, m_lay.hexX, m_lay.gridY0, m_lay.cellW, m_lay.cellH, m_lay.gapExtra, 0x010,
+				L"MPU note/ch $10-$1F", 1);
+			CGdiObject* old = dc.SelectStockObject(DEFAULT_GUI_FONT);
+			dc.SetBkMode(TRANSPARENT);
+			dc.SetTextColor(RGB(120, 130, 140));
+			dc.TextOut(m_lay.hexX, m_lay.gridY1,
+				L"(per-channel last note; 0=off)");
+			dc.SelectObject(old);
+			return;
+		}
+	}
+	if (IsMsxDump() && HasViewRegs()) {
+		const unsigned m = MsxDevMask();
+		const int cellH = m_lay.cellH;
+		const int gapY = (std::max)(cellH + 4, cellH * 2); /* title+colhdr overhead */
+		int y = m_lay.gridY0;
+		CGdiObject* old = dc.SelectStockObject(DEFAULT_GUI_FONT);
+		dc.SetBkMode(TRANSPARENT);
+		dc.SetTextColor(RGB(120, 130, 140));
+
+		if (m & (SASAMI_FMMON_DEV_PSG | SASAMI_FMMON_DEV_HES)) {
+			DrawHexBank(dc, m_lay.hexX, y, m_lay.cellW, cellH, m_lay.gapExtra, 0x000,
+				(m & SASAMI_FMMON_DEV_HES) ? L"HuC/PSG $00-$0F (ch1-3)" : L"PSG/AY $00-$0F", 1);
+			y += gapY + cellH;
+		}
+		if (m & SASAMI_FMMON_DEV_OPLL) {
+			DrawHexBank(dc, m_lay.hexX, y, m_lay.cellW, cellH, m_lay.gapExtra, 0x040,
+				L"OPLL/FMPAC $00-$3F (@+$40)", 4);
+			y += gapY + 4 * cellH;
+		}
+		if (m & SASAMI_FMMON_DEV_SCC) {
+			DrawHexBank(dc, m_lay.hexX, y, m_lay.cellW, cellH, m_lay.gapExtra, 0x080,
+				L"SCC ctrl $80-$8F (freq/vol/on; waves N/A)", 1);
+			y += gapY + cellH;
+		}
+		if (m & SASAMI_FMMON_DEV_HES) {
+			DrawHexBank(dc, m_lay.hexX, y, m_lay.cellW, cellH, m_lay.gapExtra, 0x090,
+				L"HuC ch4-6 @+$90 (per/vol/ctl)", 1);
+		}
+		dc.SelectObject(old);
+		return;
+	}
+	if (IsArcadePcmDump() && HasViewRegs()) {
+		const unsigned prof = ChipProfile();
+		wchar_t title[64];
+		_snwprintf_s(title, _TRUNCATE, L"%s regs $00-$FF", FmArcadePcmName(prof));
+		DrawHexBank(dc, m_lay.hexX, m_lay.gridY0, m_lay.cellW, m_lay.cellH, m_lay.gapExtra,
+			0x000, title);
+		if (prof == SASAMI_FMMON_KEYS_QSOUND || prof == SASAMI_FMMON_KEYS_C352) {
+			_snwprintf_s(title, _TRUNCATE, L"%s regs $100-$1FF", FmArcadePcmName(prof));
+			DrawHexBank(dc, m_lay.hexX, m_lay.gridY1, m_lay.cellW, m_lay.cellH, m_lay.gapExtra,
+				0x100, title);
+		} else {
+			CGdiObject* old = dc.SelectStockObject(DEFAULT_GUI_FONT);
+			dc.SetBkMode(TRANSPARENT);
+			dc.SetTextColor(RGB(120, 130, 140));
+			dc.TextOut(m_lay.hexX, m_lay.gridY1, L"(single arcade PCM register bank)");
+			dc.SelectObject(old);
+		}
+		return;
+	}
+	/* 起動直後・MIDI等 keys-only・通常 OPNA: Bank0/1 */
+	if (PreferOpnaShell() || HasViewRegs()) {
+		const wchar_t* b0 = IsYm2610Dump() ? L"Bank0 SSG/FM/ADPCM-B" : L"Bank0";
+		const wchar_t* b1 = IsYm2610Dump() ? L"Bank1 ADPCM-A/FM" : L"Bank1";
+		DrawHexBank(dc, m_lay.hexX, m_lay.gridY0, m_lay.cellW, m_lay.cellH, m_lay.gapExtra, 0x000, b0);
+		DrawHexBank(dc, m_lay.hexX, m_lay.gridY1, m_lay.cellW, m_lay.cellH, m_lay.gapExtra, 0x100, b1);
+		return;
+	}
+	if (IsMsxDump()) {
 		CGdiObject* old = dc.SelectStockObject(DEFAULT_GUI_FONT);
 		dc.SetBkMode(TRANSPARENT);
 		dc.SetTextColor(RGB(140, 145, 155));
-		dc.TextOut(m_lay.pad + 8, m_lay.topY + 8,
-			IsMsxDump()
-			? L"MSX: OPNA hex N/A — PSG / OPLL(FMPAC) / SCC keys"
-			: LL14(L"レジスタ非対応（FMP: 鍵盤のみ）",
-				L"Registers unsupported (FMP: keys only)",
-				L"Registres non pris en charge (FMP: touches seulement)",
-				L"Registri non supportati (FMP: solo tasti)",
-				L"Registros no admitidos (FMP: solo teclas)",
-				L"레지스터 비대응(FMP: 건반만)",
-				L"不支持寄存器（FMP：仅键盘）",
-				L"السجلات غير مدعومة (FMP: مفاتيح فقط)",
-				L"Регистры не поддерживаются (FMP: только клавиши)",
-				L"Register nicht unterstuetzt (FMP: nur Tasten)",
-				L"Registradores nao suportados (FMP: so teclas)",
-				L"Registers niet ondersteund (FMP: alleen toetsen)",
-				L"Rejestry nieobslugiwane (FMP: tylko klawisze)",
-				L"Kayitlar desteklenmiyor (FMP: yalniz tuslar)"));
+		dc.TextOut(m_lay.pad + 8, m_lay.topY + 8, L"MSX: no chip regs in dump");
 		dc.SelectObject(old);
 		return;
 	}
@@ -2274,47 +2825,1002 @@ void CFmMonitorDlg::DrawHexArea(CDC& dc)
 	DrawHexBank(dc, m_lay.hexX, m_lay.gridY1, m_lay.cellW, m_lay.cellH, m_lay.gapExtra, 0x100, L"Bank1");
 }
 
+void CFmMonitorDlg::DrawOpmChPanel(CDC& dc, const CRect& rc, int ch)
+{
+	/* YM2151: 8ch×4op。レジスタは ch + op*8。表示順 S1..S4 = OP1,OP2,OP3,OP4
+	   (= M1,C1,M2,C2) で OPN ALGO 図と対応。 */
+	if (rc.Width() < 100 || rc.Height() < 80 || ch < 0 || ch > 7) return;
+	static const int kSOff[4] = { 0, 16, 8, 24 };
+	auto reg = [&](int r) -> uint8_t {
+		return m_haveDump ? m_dump.regs[r & 0xFF] : 0;
+	};
+
+	const int savedDC = dc.SaveDC();
+	dc.IntersectClipRect(rc);
+
+	const COLORREF headBg = RGB(40, 52, 72);
+	const COLORREF bodyBg = RGB(28, 34, 44);
+	const COLORREF rowBg = RGB(32, 40, 52);
+	const int pad = (std::max)(3, rc.Width() / 90);
+	const int headH = (std::max)(72, rc.Height() * 30 / 100);
+	dc.FillSolidRect(rc.left, rc.top, rc.Width(), headH, headBg);
+	dc.FillSolidRect(rc.left, rc.top + headH, rc.Width(), rc.Height() - headH, bodyBg);
+	FmFrameRect(dc, rc, RGB(120, 150, 190));
+
+	const uint8_t rl = reg(0x20 + ch);
+	const uint8_t kc = reg(0x28 + ch);
+	const uint8_t kf = reg(0x30 + ch);
+	const uint8_t pams = reg(0x38 + ch);
+	const int alg = rl & 7;
+	const int fb = (rl >> 3) & 7;
+	const int panL = (rl >> 6) & 1;
+	const int panR = (rl >> 7) & 1;
+	const int pan = (panL && panR) ? 3 : (panL ? 1 : (panR ? 2 : 0));
+	const int pms = (pams >> 4) & 7;
+	const int ams = pams & 3;
+	int midi = -1;
+	int keyed = 0;
+	if (m_haveDump) {
+		if (ch < 6) {
+			keyed = m_dump.keyOnFm[ch] ? 1 : 0;
+			if (m_dump.keyMidi[ch] != 0xFF) midi = (int)m_dump.keyMidi[ch];
+		} else {
+			keyed = m_dump.keyOnEx[ch - 6] ? 1 : 0;
+			if (m_dump.exMidi[ch - 6] != 0xFF) midi = (int)m_dump.exMidi[ch - 6];
+		}
+	}
+
+	const int titlePx = (std::max)(11, headH / 8);
+	HFONT titleFont = FmMakeFont(titlePx);
+	HFONT oldf = (HFONT)dc.SelectObject(titleFont);
+	dc.SetBkMode(OPAQUE);
+	dc.SetBkColor(headBg);
+	dc.SetTextColor(RGB(220, 235, 255));
+	wchar_t title[24];
+	_snwprintf_s(title, _TRUNCATE, L"OPM%d", ch + 1);
+	dc.TextOut(rc.left + pad, rc.top + 2, title);
+
+	const int headInnerTop = rc.top + titlePx + 4;
+	const int headInnerBot = rc.top + headH - pad;
+	const int innerW = rc.Width() - pad * 2;
+	const int algoW = innerW * 36 / 100;
+	const int infoW = innerW * 30 / 100;
+	const int knobBandW = innerW - algoW - infoW - pad * 2;
+
+	CRect algo(rc.left + pad, headInnerTop, rc.left + pad + algoW, headInnerBot);
+	FmDrawAlgo(dc, algo, alg, (std::max)(9, titlePx - 1));
+
+	CRect knobsRc(algo.right + pad, headInnerTop, algo.right + pad + knobBandW, headInnerBot);
+	{
+		const int cellW = knobsRc.Width() / 2;
+		const int cellH = knobsRc.Height() / 2;
+		const struct { int v; int vmax; const wchar_t* n; } k4[4] = {
+			{ ams, 3, L"AMS" }, { pms, 7, L"PMS" }, { fb, 7, L"FB" }, { pan, 3, L"PAN" }
+		};
+		for (int i = 0; i < 4; i++) {
+			CRect c(
+				knobsRc.left + (i % 2) * cellW + 1,
+				knobsRc.top + (i / 2) * cellH + 1,
+				knobsRc.left + (i % 2) * cellW + cellW - 1,
+				knobsRc.top + (i / 2) * cellH + cellH - 1);
+			FmDrawParamInCell(dc, c, k4[i].v, k4[i].vmax, k4[i].n, headBg);
+		}
+	}
+
+	CRect infoRc(rc.right - pad - infoW, headInnerTop, rc.right - pad, headInnerBot);
+	{
+		const int infoPx = (std::max)(10, (std::min)(14, infoRc.Height() / 5));
+		HFONT infoFont = FmMakeFont(infoPx);
+		dc.SelectObject(infoFont);
+		dc.SetBkColor(headBg);
+		dc.SetTextColor(RGB(230, 240, 255));
+		wchar_t line[64];
+		int iy = infoRc.top + 2;
+		wchar_t note[16];
+		FmFormatNoteName(midi, note, 16);
+		_snwprintf_s(line, _TRUNCATE, L"%s %s", keyed ? L"KEY" : L"---", note);
+		dc.TextOut(infoRc.left + 2, iy, line);
+		iy += infoPx + 2;
+		_snwprintf_s(line, _TRUNCATE, L"KC:%02X KF:%02X", kc, kf);
+		dc.TextOut(infoRc.left + 2, iy, line);
+		iy += infoPx + 4;
+		dc.TextOut(infoRc.left + 2, iy, L"SLOT");
+		iy += infoPx + 2;
+		const int box = (std::max)(12, (std::min)(infoPx + 2, (infoRc.Width() - 8) / 4 - 2));
+		for (int s = 0; s < 4; s++) {
+			const int sx = infoRc.left + 2 + s * (box + 2);
+			dc.FillSolidRect(sx, iy, box, box, keyed ? RGB(90, 160, 220) : RGB(40, 48, 58));
+			FmFrameRect(dc, CRect(sx, iy, sx + box, iy + box), RGB(100, 140, 180));
+			wchar_t sn[4];
+			_snwprintf_s(sn, _TRUNCATE, L"%d", s + 1);
+			dc.SetTextColor(RGB(245, 250, 255));
+			CSize sz = dc.GetTextExtent(sn);
+			dc.TextOut(sx + (box - sz.cx) / 2, iy + (box - sz.cy) / 2, sn);
+		}
+		FmDeleteFont(infoFont);
+	}
+
+	const int bodyTop = rc.top + headH + pad;
+	const int bodyBot = rc.bottom - pad;
+	const int slotH = (bodyBot - bodyTop) / 4;
+	if (slotH < 24) {
+		dc.SelectObject(oldf);
+		FmDeleteFont(titleFont);
+		dc.RestoreDC(savedDC);
+		return;
+	}
+
+	for (int op = 0; op < 4; op++) {
+		const int yy = bodyTop + op * slotH;
+		CRect row(rc.left + pad, yy, rc.right - pad, yy + slotH - 2);
+		dc.FillSolidRect(row, rowBg);
+		const int off = kSOff[op] + ch;
+		const uint8_t dtMul = reg(0x40 + off);
+		const uint8_t tl = reg(0x60 + off);
+		const uint8_t ksAr = reg(0x80 + off);
+		const uint8_t amDr = reg(0xA0 + off);
+		const uint8_t dt2D2 = reg(0xC0 + off);
+		const uint8_t slRr = reg(0xE0 + off);
+		const int mul = dtMul & 0x0F;
+		const int dt1 = (dtMul >> 4) & 0x07;
+		const int ar = ksAr & 0x1F;
+		const int ks = (ksAr >> 6) & 3;
+		const int d1r = amDr & 0x1F;
+		const int ame = (amDr >> 7) & 1;
+		const int d2r = dt2D2 & 0x1F;
+		const int dt2 = (dt2D2 >> 6) & 3;
+		const int sl = (slRr >> 4) & 0x0F;
+		const int rr = slRr & 0x0F;
+		const int tl7 = tl & 0x7F;
+
+		const int labW = (std::max)(16, (std::min)(28, row.Width() / 18));
+		const int flagW = (std::max)(28, (std::min)(44, row.Width() / 10));
+		const int envW = (std::max)(36, (std::min)(72, row.Width() / 6));
+		const int paramLeft = row.left + labW + 2;
+		const int envRight = paramLeft + envW;
+		const int flagLeft = row.right - flagW;
+		const int paramW = (std::max)(48, flagLeft - 2 - envRight - 2);
+
+		const int labPx = (std::max)(10, (std::min)(14, row.Height() / 3));
+		HFONT labFont = FmMakeFont(labPx);
+		dc.SelectObject(labFont);
+		dc.SetBkMode(OPAQUE);
+		dc.SetBkColor(rowBg);
+		dc.SetTextColor(RGB(170, 200, 230));
+		wchar_t sn[8];
+		_snwprintf_s(sn, _TRUNCATE, L"S%d", op + 1);
+		CSize snZ = dc.GetTextExtent(sn);
+		dc.TextOut(row.left + (labW - snZ.cx) / 2, row.top + (row.Height() - snZ.cy) / 2, sn);
+
+		CRect env(paramLeft, row.top + 2, envRight, row.bottom - 2);
+		FmDrawEnvelope(dc, env, ar, d1r, d2r, rr, sl, tl7);
+
+		const int cols = 6;
+		const int cellW = paramW / cols;
+		const int gapY = 1;
+		const int topRowH = row.Height() * 58 / 100;
+		const int botRowH = row.Height() - topRowH - gapY;
+		CRect band(envRight + 2, row.top + 1, envRight + 2 + cellW * cols, row.bottom - 1);
+		const struct { int v; int vmax; const wchar_t* n; } topP[6] = {
+			{ ar, 31, L"AR" }, { d1r, 31, L"D1R" }, { d2r, 31, L"D2R" },
+			{ rr, 15, L"RR" }, { sl, 15, L"D1L" }, { tl7, 127, L"TL" }
+		};
+		for (int i = 0; i < 6; i++) {
+			CRect c(band.left + i * cellW, band.top, band.left + (i + 1) * cellW - 1, band.top + topRowH);
+			FmDrawParamInCell(dc, c, topP[i].v, topP[i].vmax, topP[i].n, rowBg);
+		}
+		if (botRowH >= 16) {
+			const struct { int v; int vmax; const wchar_t* n; } botP[3] = {
+				{ mul, 15, L"MUL" }, { dt1, 7, L"DT1" }, { dt2, 3, L"DT2" }
+			};
+			for (int i = 0; i < 3; i++) {
+				CRect c(band.left + i * cellW, band.top + topRowH + gapY,
+					band.left + (i + 1) * cellW - 1, band.bottom);
+				FmDrawParamInCell(dc, c, botP[i].v, botP[i].vmax, botP[i].n, rowBg);
+			}
+		}
+
+		{
+			const int half = flagW / 2;
+			const int lampPx = (std::max)(8, (std::min)(11, row.Height() / 4));
+			HFONT lf = FmMakeFont(lampPx);
+			dc.SelectObject(lf);
+			dc.SetBkColor(rowBg);
+			dc.SetTextColor(RGB(190, 210, 230));
+			dc.TextOut(flagLeft + 1, row.top + 1, L"AM");
+			const int lamp = (std::max)(8, (std::min)(half - 4, row.Height() / 3));
+			dc.FillSolidRect(flagLeft + 2, row.top + lampPx + 2, lamp, lamp,
+				ame ? RGB(80, 180, 220) : RGB(40, 48, 56));
+			FmFrameRect(dc, CRect(flagLeft + 2, row.top + lampPx + 2, flagLeft + 2 + lamp, row.top + lampPx + 2 + lamp),
+				RGB(90, 130, 160));
+			dc.TextOut(flagLeft + half, row.top + 1, L"KS");
+			wchar_t ksS[4];
+			_snwprintf_s(ksS, _TRUNCATE, L"%d", ks);
+			dc.TextOut(flagLeft + half, row.top + lampPx + 2, ksS);
+			FmDeleteFont(lf);
+		}
+		FmDeleteFont(labFont);
+	}
+
+	dc.SelectObject(oldf);
+	FmDeleteFont(titleFont);
+	dc.RestoreDC(savedDC);
+}
+
+void CFmMonitorDlg::DrawOplChPanel(CDC& dc, const CRect& rc, int ch)
+{
+	/* YM3812/YMF262: 9 or 18 × 2op. Operator slot table per chip half. */
+	if (rc.Width() < 80 || rc.Height() < 56 || ch < 0 || ch > 17) return;
+	static const int kOp1[9] = { 0, 1, 2, 6, 7, 8, 12, 13, 14 };
+	static const int kOp2[9] = { 3, 4, 5, 9, 10, 11, 15, 16, 17 };
+	const int bank = (ch >= 9) ? 0x100 : 0;
+	const int loc = ch % 9;
+	auto reg = [&](int r) -> uint8_t {
+		return m_haveDump ? m_dump.regs[bank + (r & 0xFF)] : 0;
+	};
+
+	const int savedDC = dc.SaveDC();
+	dc.IntersectClipRect(rc);
+	const COLORREF headBg = RGB(36, 56, 52);
+	const COLORREF bodyBg = RGB(28, 34, 36);
+	const COLORREF rowBg = RGB(32, 42, 40);
+	const int pad = (std::max)(3, rc.Width() / 90);
+	const int headH = (std::max)(56, rc.Height() * 34 / 100);
+	dc.FillSolidRect(rc.left, rc.top, rc.Width(), headH, headBg);
+	dc.FillSolidRect(rc.left, rc.top + headH, rc.Width(), rc.Height() - headH, bodyBg);
+	FmFrameRect(dc, rc, RGB(100, 170, 150));
+
+	int gate = 0;
+	int midi = -1;
+	if (m_haveDump) {
+		if (ch < 6) {
+			gate = m_dump.keyOnFm[ch] ? 1 : 0;
+			if (m_dump.keyMidi[ch] != 0xFF) midi = (int)m_dump.keyMidi[ch];
+		} else if (ch < 9) {
+			gate = m_dump.keyOnEx[ch - 6] ? 1 : 0;
+			if (m_dump.exMidi[ch - 6] != 0xFF) midi = (int)m_dump.exMidi[ch - 6];
+		} else {
+			const int p = ch - 9;
+			gate = m_dump.pcmOn[p] ? 1 : 0;
+			if (m_dump.pcmNote[p] != 0xFF) midi = (int)m_dump.pcmNote[p];
+		}
+	}
+	const uint8_t fbCon = reg(0xC0 + loc);
+	const int fb = (fbCon >> 1) & 7;
+	const int conn = fbCon & 1; /* 0=FM, 1=AM */
+	const uint8_t b0 = reg(0xB0 + loc);
+	const uint8_t a0 = reg(0xA0 + loc);
+	const int fnum = a0 | ((b0 & 3) << 8);
+	const int blk = (b0 >> 2) & 7;
+
+	const int titlePx = (std::max)(10, headH / 7);
+	HFONT titleFont = FmMakeFont(titlePx);
+	HFONT oldf = (HFONT)dc.SelectObject(titleFont);
+	dc.SetBkMode(OPAQUE);
+	dc.SetBkColor(headBg);
+	dc.SetTextColor(RGB(210, 255, 230));
+	wchar_t title[24];
+	_snwprintf_s(title, _TRUNCATE, L"OPL%d", ch + 1);
+	dc.TextOut(rc.left + pad, rc.top + 2, title);
+
+	const int headInnerTop = rc.top + titlePx + 4;
+	const int headInnerBot = rc.top + headH - pad;
+	const int innerW = rc.Width() - pad * 2;
+	const int algoW = innerW * 34 / 100;
+	const int infoW = innerW * 34 / 100;
+	const int knobBandW = innerW - algoW - infoW - pad * 2;
+
+	/* 2-op connection diagram */
+	{
+		CRect algo(rc.left + pad, headInnerTop, rc.left + pad + algoW, headInnerBot);
+		dc.FillSolidRect(algo, RGB(24, 40, 36));
+		FmFrameRect(dc, algo, RGB(80, 140, 120));
+		HFONT af = FmMakeFont((std::max)(9, titlePx - 1));
+		dc.SelectObject(af);
+		dc.SetBkColor(RGB(24, 40, 36));
+		dc.SetTextColor(RGB(170, 230, 200));
+		dc.TextOut(algo.left + 3, algo.top + 1, conn ? L"AM" : L"FM");
+		const int bw = (std::max)(18, algo.Width() / 3);
+		const int bh = (std::max)(12, algo.Height() / 4);
+		const int cy = algo.CenterPoint().y + 2;
+		CRect mBox(algo.left + 6, cy - bh / 2, algo.left + 6 + bw, cy + bh / 2);
+		CRect cBox = conn
+			? CRect(algo.right - 6 - bw, cy - bh / 2, algo.right - 6, cy + bh / 2)
+			: CRect(algo.right - 6 - bw, cy - bh / 2, algo.right - 6, cy + bh / 2);
+		if (!conn) {
+			/* Mod → Car */
+			cBox = CRect(algo.right - 6 - bw, cy - bh / 2, algo.right - 6, cy + bh / 2);
+			CPen wire(PS_SOLID, 1, RGB(140, 210, 170));
+			CPen* op = dc.SelectObject(&wire);
+			dc.MoveTo(mBox.right, cy);
+			dc.LineTo(cBox.left, cy);
+			dc.SelectObject(op);
+		} else {
+			/* Mod || Car (additive) */
+			mBox = CRect(algo.left + 8, algo.top + titlePx + 6, algo.left + 8 + bw, algo.top + titlePx + 6 + bh);
+			cBox = CRect(algo.left + 8, algo.bottom - 6 - bh, algo.left + 8 + bw, algo.bottom - 6);
+			CPen wire(PS_SOLID, 1, RGB(140, 210, 170));
+			CPen* op = dc.SelectObject(&wire);
+			const int mx = algo.right - 10;
+			dc.MoveTo(mBox.right, mBox.CenterPoint().y);
+			dc.LineTo(mx, mBox.CenterPoint().y);
+			dc.LineTo(mx, cBox.CenterPoint().y);
+			dc.LineTo(cBox.right, cBox.CenterPoint().y);
+			dc.SelectObject(op);
+		}
+		dc.FillSolidRect(mBox, RGB(44, 68, 54));
+		FmFrameRect(dc, mBox, RGB(120, 180, 140));
+		dc.FillSolidRect(cBox, RGB(44, 68, 54));
+		FmFrameRect(dc, cBox, RGB(120, 180, 140));
+		dc.SetTextColor(RGB(240, 250, 245));
+		dc.SetBkColor(RGB(44, 68, 54));
+		CSize zs = dc.GetTextExtent(L"M");
+		dc.TextOut(mBox.left + (mBox.Width() - zs.cx) / 2, mBox.top + (mBox.Height() - zs.cy) / 2, L"M");
+		zs = dc.GetTextExtent(L"C");
+		dc.TextOut(cBox.left + (cBox.Width() - zs.cx) / 2, cBox.top + (cBox.Height() - zs.cy) / 2, L"C");
+		FmDeleteFont(af);
+	}
+
+	CRect knobsRc(rc.left + pad + algoW + pad, headInnerTop,
+		rc.left + pad + algoW + pad + knobBandW, headInnerBot);
+	{
+		const int cellW = knobsRc.Width() / 2;
+		const int cellH = knobsRc.Height() / 2;
+		const struct { int v; int vmax; const wchar_t* n; } k4[4] = {
+			{ fb, 7, L"FB" }, { conn, 1, L"CON" }, { blk, 7, L"BLK" }, { fnum & 0x3FF, 1023, L"FN" }
+		};
+		for (int i = 0; i < 4; i++) {
+			CRect c(
+				knobsRc.left + (i % 2) * cellW + 1,
+				knobsRc.top + (i / 2) * cellH + 1,
+				knobsRc.left + (i % 2) * cellW + cellW - 1,
+				knobsRc.top + (i / 2) * cellH + cellH - 1);
+			FmDrawParamInCell(dc, c, k4[i].v, k4[i].vmax, k4[i].n, headBg);
+		}
+	}
+
+	CRect infoRc(rc.right - pad - infoW, headInnerTop, rc.right - pad, headInnerBot);
+	{
+		const int infoPx = (std::max)(10, (std::min)(14, infoRc.Height() / 4));
+		HFONT infoFont = FmMakeFont(infoPx);
+		dc.SelectObject(infoFont);
+		dc.SetBkColor(headBg);
+		dc.SetTextColor(RGB(230, 245, 235));
+		wchar_t line[64];
+		wchar_t note[16];
+		FmFormatNoteName(midi, note, 16);
+		_snwprintf_s(line, _TRUNCATE, L"%s %s", gate ? L"KEY" : L"---", note);
+		dc.TextOut(infoRc.left + 2, infoRc.top + 2, line);
+		_snwprintf_s(line, _TRUNCATE, L"F#%03X B%d", fnum & 0x3FF, blk);
+		dc.TextOut(infoRc.left + 2, infoRc.top + 2 + infoPx + 2, line);
+		FmDeleteFont(infoFont);
+	}
+
+	const int bodyTop = rc.top + headH + pad;
+	const int bodyBot = rc.bottom - pad;
+	const int slotH = (bodyBot - bodyTop) / 2;
+	if (slotH < 22) {
+		dc.SelectObject(oldf);
+		FmDeleteFont(titleFont);
+		dc.RestoreDC(savedDC);
+		return;
+	}
+
+	const int ops[2] = { kOp1[loc], kOp2[loc] };
+	for (int oi = 0; oi < 2; oi++) {
+		const int yy = bodyTop + oi * slotH;
+		CRect row(rc.left + pad, yy, rc.right - pad, yy + slotH - 2);
+		dc.FillSolidRect(row, rowBg);
+		const int op = ops[oi];
+		const uint8_t av = reg(0x20 + op);
+		const uint8_t tl = reg(0x40 + op);
+		const uint8_t adr = reg(0x60 + op);
+		const uint8_t srr = reg(0x80 + op);
+		const uint8_t ws = reg(0xE0 + op);
+		const int mul = av & 0x0F;
+		const int ksr = (av >> 4) & 1;
+		const int egT = (av >> 5) & 1;
+		const int vib = (av >> 6) & 1;
+		const int am = (av >> 7) & 1;
+		const int tl6 = tl & 0x3F;
+		const int ksl = (tl >> 6) & 3;
+		const int ar = (adr >> 4) & 0x0F;
+		const int dr = adr & 0x0F;
+		const int sl = (srr >> 4) & 0x0F;
+		const int rr = srr & 0x0F;
+		const int wave = ws & 7;
+
+		const int labW = (std::max)(16, (std::min)(28, row.Width() / 16));
+		const int flagW = (std::max)(36, (std::min)(52, row.Width() / 8));
+		const int envW = (std::max)(36, (std::min)(72, row.Width() / 6));
+		const int paramLeft = row.left + labW + 2;
+		const int envRight = paramLeft + envW;
+		const int flagLeft = row.right - flagW;
+		const int paramW = (std::max)(48, flagLeft - 2 - envRight - 2);
+
+		HFONT labFont = FmMakeFont((std::max)(10, (std::min)(14, row.Height() / 3)));
+		dc.SelectObject(labFont);
+		dc.SetBkMode(OPAQUE);
+		dc.SetBkColor(rowBg);
+		dc.SetTextColor(RGB(170, 220, 190));
+		wchar_t sn[8];
+		_snwprintf_s(sn, _TRUNCATE, L"%c", oi == 0 ? L'M' : L'C');
+		CSize snZ = dc.GetTextExtent(sn);
+		dc.TextOut(row.left + (labW - snZ.cx) / 2, row.top + (row.Height() - snZ.cy) / 2, sn);
+
+		/* OPL AR/DR are 0..15 — scale for envelope viz like OPN 0..31 */
+		CRect env(paramLeft, row.top + 2, envRight, row.bottom - 2);
+		FmDrawEnvelope(dc, env, ar * 2, dr * 2, 0, rr * 2, sl, tl6 * 2);
+
+		const int cols = 6;
+		const int cellW = paramW / cols;
+		const int gapY = 1;
+		const int topRowH = row.Height() * 58 / 100;
+		const int botRowH = row.Height() - topRowH - gapY;
+		CRect band(envRight + 2, row.top + 1, envRight + 2 + cellW * cols, row.bottom - 1);
+		const struct { int v; int vmax; const wchar_t* n; } topP[6] = {
+			{ ar, 15, L"AR" }, { dr, 15, L"DR" }, { sl, 15, L"SL" },
+			{ rr, 15, L"RR" }, { tl6, 63, L"TL" }, { mul, 15, L"MUL" }
+		};
+		for (int i = 0; i < 6; i++) {
+			CRect c(band.left + i * cellW, band.top, band.left + (i + 1) * cellW - 1, band.top + topRowH);
+			FmDrawParamInCell(dc, c, topP[i].v, topP[i].vmax, topP[i].n, rowBg);
+		}
+		if (botRowH >= 14) {
+			const struct { int v; int vmax; const wchar_t* n; } botP[3] = {
+				{ ksl, 3, L"KSL" }, { wave, 7, L"WS" }, { egT, 1, L"EG" }
+			};
+			for (int i = 0; i < 3; i++) {
+				CRect c(band.left + i * cellW, band.top + topRowH + gapY,
+					band.left + (i + 1) * cellW - 1, band.bottom);
+				FmDrawParamInCell(dc, c, botP[i].v, botP[i].vmax, botP[i].n, rowBg);
+			}
+		}
+
+		{
+			const int lampPx = (std::max)(8, (std::min)(11, row.Height() / 4));
+			HFONT lf = FmMakeFont(lampPx);
+			dc.SelectObject(lf);
+			dc.SetBkColor(rowBg);
+			dc.SetTextColor(RGB(190, 220, 200));
+			const int lamp = (std::max)(7, (std::min)(flagW / 3 - 2, row.Height() / 3));
+			dc.TextOut(flagLeft + 1, row.top + 1, L"AM");
+			dc.FillSolidRect(flagLeft + 2, row.top + lampPx + 2, lamp, lamp,
+				am ? RGB(80, 200, 140) : RGB(40, 48, 44));
+			dc.TextOut(flagLeft + flagW / 3, row.top + 1, L"VB");
+			dc.FillSolidRect(flagLeft + flagW / 3 + 1, row.top + lampPx + 2, lamp, lamp,
+				vib ? RGB(80, 180, 220) : RGB(40, 48, 44));
+			dc.TextOut(flagLeft + 2 * flagW / 3, row.top + 1, L"KS");
+			wchar_t ksS[4];
+			_snwprintf_s(ksS, _TRUNCATE, L"%d", ksr);
+			dc.TextOut(flagLeft + 2 * flagW / 3, row.top + lampPx + 2, ksS);
+			FmDeleteFont(lf);
+		}
+		FmDeleteFont(labFont);
+	}
+
+	dc.SelectObject(oldf);
+	FmDeleteFont(titleFont);
+	dc.RestoreDC(savedDC);
+}
+
+void CFmMonitorDlg::DrawOpllChPanel(CDC& dc, const CRect& rc, int ch)
+{
+	/* YM2413: 9ch。USR=regs $00-$07、preset=チップ内蔵音色 ROM（emu2413 YM2413 set）。 */
+	if (rc.Width() < 80 || rc.Height() < 56 || ch < 0 || ch > 8) return;
+	static const wchar_t* kInst[16] = {
+		L"USR", L"Vln", L"Gtr", L"Pno", L"Flt", L"Clr", L"Obo", L"Trp",
+		L"Org", L"Hrn", L"Syn", L"Hps", L"Vib", L"SyB", L"AcB", L"EGt"
+	};
+	/* default_inst[0] melodic 1..15（0 は USR なので未使用）— emu2413 YM2413 ROM */
+	static const uint8_t kRom[16][8] = {
+		{ 0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00 },
+		{ 0x71,0x61,0x1e,0x17,0xd0,0x78,0x00,0x17 },
+		{ 0x13,0x41,0x1a,0x0d,0xd8,0xf7,0x23,0x13 },
+		{ 0x13,0x01,0x99,0x00,0xf2,0xc4,0x21,0x23 },
+		{ 0x11,0x61,0x0e,0x07,0x8d,0x64,0x70,0x27 },
+		{ 0x32,0x21,0x1e,0x06,0xe1,0x76,0x01,0x28 },
+		{ 0x31,0x22,0x16,0x05,0xe0,0x71,0x00,0x18 },
+		{ 0x21,0x61,0x1d,0x07,0x82,0x81,0x11,0x07 },
+		{ 0x33,0x21,0x2d,0x13,0xb0,0x70,0x00,0x07 },
+		{ 0x61,0x61,0x1b,0x06,0x64,0x65,0x10,0x17 },
+		{ 0x41,0x61,0x0b,0x18,0x85,0xf0,0x81,0x07 },
+		{ 0x33,0x01,0x83,0x11,0xea,0xef,0x10,0x04 },
+		{ 0x17,0xc1,0x24,0x07,0xf8,0xf8,0x22,0x12 },
+		{ 0x61,0x50,0x0c,0x05,0xd2,0xf5,0x40,0x42 },
+		{ 0x01,0x01,0x55,0x03,0xe9,0x90,0x03,0x02 },
+		{ 0x41,0x41,0x89,0x03,0xf1,0xe4,0xc0,0x13 },
+	};
+	auto reg = [&](int r) -> uint8_t {
+		return m_haveDump ? m_dump.regs[0x40 + (r & 0x3F)] : 0;
+	};
+
+	const int savedDC = dc.SaveDC();
+	dc.IntersectClipRect(rc);
+	const COLORREF headBg = RGB(48, 44, 64);
+	const COLORREF bodyBg = RGB(30, 28, 40);
+	const COLORREF rowBg = RGB(36, 34, 48);
+	const int pad = (std::max)(3, rc.Width() / 90);
+	const int headH = (std::max)(56, rc.Height() * 34 / 100);
+	dc.FillSolidRect(rc.left, rc.top, rc.Width(), headH, headBg);
+	dc.FillSolidRect(rc.left, rc.top + headH, rc.Width(), rc.Height() - headH, bodyBg);
+	FmFrameRect(dc, rc, RGB(150, 130, 190));
+
+	int gate = 0;
+	int midi = -1;
+	if (m_haveDump) {
+		if (ch < 6) {
+			gate = m_dump.keyOnFm[ch] ? 1 : 0;
+			if (m_dump.keyMidi[ch] != 0xFF) midi = (int)m_dump.keyMidi[ch];
+		} else {
+			gate = m_dump.keyOnEx[ch - 6] ? 1 : 0;
+			if (m_dump.exMidi[ch - 6] != 0xFF) midi = (int)m_dump.exMidi[ch - 6];
+		}
+	}
+	const uint8_t r30 = reg(0x30 + ch);
+	const int inst = (r30 >> 4) & 0x0F;
+	const int vol = r30 & 0x0F;
+	const uint8_t r20 = reg(0x20 + ch);
+	const uint8_t r10 = reg(0x10 + ch);
+	const int fnum = r10 | ((r20 & 1) << 8);
+	const int blk = (r20 >> 1) & 7;
+	const int sus = (r20 >> 5) & 1;
+	const int custom = (inst == 0) ? 1 : 0;
+
+	/* 8-byte patch: USR=shadow regs, else YM2413 ROM */
+	uint8_t patch[8];
+	if (custom) {
+		for (int i = 0; i < 8; i++) patch[i] = reg(i);
+	} else {
+		memcpy(patch, kRom[inst], 8);
+	}
+	const int fb = patch[3] & 7;
+
+	const int titlePx = (std::max)(10, headH / 7);
+	HFONT titleFont = FmMakeFont(titlePx);
+	HFONT oldf = (HFONT)dc.SelectObject(titleFont);
+	dc.SetBkMode(OPAQUE);
+	dc.SetBkColor(headBg);
+	dc.SetTextColor(RGB(230, 220, 255));
+	wchar_t title[24];
+	_snwprintf_s(title, _TRUNCATE, L"OPLL%d", ch + 1);
+	dc.TextOut(rc.left + pad, rc.top + 2, title);
+
+	const int headInnerTop = rc.top + titlePx + 4;
+	const int headInnerBot = rc.top + headH - pad;
+	const int innerW = rc.Width() - pad * 2;
+	const int algoW = innerW * 32 / 100;
+	const int infoW = innerW * 36 / 100;
+	const int knobBandW = innerW - algoW - infoW - pad * 2;
+
+	{
+		CRect algo(rc.left + pad, headInnerTop, rc.left + pad + algoW, headInnerBot);
+		dc.FillSolidRect(algo, RGB(32, 28, 48));
+		FmFrameRect(dc, algo, RGB(120, 100, 160));
+		HFONT af = FmMakeFont((std::max)(9, titlePx - 1));
+		dc.SelectObject(af);
+		dc.SetBkColor(RGB(32, 28, 48));
+		dc.SetTextColor(RGB(210, 190, 255));
+		dc.TextOut(algo.left + 3, algo.top + 1, kInst[inst]);
+		wchar_t sub[32];
+		_snwprintf_s(sub, _TRUNCATE, L"FM FB%d%s", fb, custom ? L"" : L" ROM");
+		dc.TextOut(algo.left + 3, algo.top + titlePx + 2, sub);
+		/* M → C 簡易図 */
+		{
+			const int bw = (std::max)(16, algo.Width() / 4);
+			const int bh = (std::max)(10, (algo.Height() - titlePx * 2) / 3);
+			const int cy = algo.bottom - bh - 4;
+			CRect mBox(algo.left + 6, cy, algo.left + 6 + bw, cy + bh);
+			CRect cBox(algo.right - 6 - bw, cy, algo.right - 6, cy + bh);
+			CPen wire(PS_SOLID, 1, RGB(170, 150, 220));
+			CPen* op = dc.SelectObject(&wire);
+			dc.MoveTo(mBox.right, mBox.CenterPoint().y);
+			dc.LineTo(cBox.left, cBox.CenterPoint().y);
+			dc.SelectObject(op);
+			dc.FillSolidRect(mBox, RGB(56, 48, 72));
+			FmFrameRect(dc, mBox, RGB(150, 130, 190));
+			dc.FillSolidRect(cBox, RGB(56, 48, 72));
+			FmFrameRect(dc, cBox, RGB(150, 130, 190));
+			dc.SetBkColor(RGB(56, 48, 72));
+			dc.SetTextColor(RGB(240, 235, 255));
+			CSize zs = dc.GetTextExtent(L"M");
+			dc.TextOut(mBox.left + (mBox.Width() - zs.cx) / 2, mBox.top + (mBox.Height() - zs.cy) / 2, L"M");
+			zs = dc.GetTextExtent(L"C");
+			dc.TextOut(cBox.left + (cBox.Width() - zs.cx) / 2, cBox.top + (cBox.Height() - zs.cy) / 2, L"C");
+		}
+		FmDeleteFont(af);
+	}
+
+	CRect knobsRc(rc.left + pad + algoW + pad, headInnerTop,
+		rc.left + pad + algoW + pad + knobBandW, headInnerBot);
+	{
+		const int cellW = knobsRc.Width() / 2;
+		const int cellH = knobsRc.Height() / 2;
+		const struct { int v; int vmax; const wchar_t* n; } k4[4] = {
+			{ inst, 15, L"INS" }, { vol, 15, L"VOL" }, { fb, 7, L"FB" }, { sus, 1, L"SUS" }
+		};
+		for (int i = 0; i < 4; i++) {
+			CRect c(
+				knobsRc.left + (i % 2) * cellW + 1,
+				knobsRc.top + (i / 2) * cellH + 1,
+				knobsRc.left + (i % 2) * cellW + cellW - 1,
+				knobsRc.top + (i / 2) * cellH + cellH - 1);
+			FmDrawParamInCell(dc, c, k4[i].v, k4[i].vmax, k4[i].n, headBg);
+		}
+	}
+
+	CRect infoRc(rc.right - pad - infoW, headInnerTop, rc.right - pad, headInnerBot);
+	{
+		const int infoPx = (std::max)(10, (std::min)(14, infoRc.Height() / 4));
+		HFONT infoFont = FmMakeFont(infoPx);
+		dc.SelectObject(infoFont);
+		dc.SetBkColor(headBg);
+		dc.SetTextColor(RGB(235, 230, 255));
+		wchar_t line[64];
+		wchar_t note[16];
+		FmFormatNoteName(midi, note, 16);
+		_snwprintf_s(line, _TRUNCATE, L"%s %s", gate ? L"KEY" : L"---", note);
+		dc.TextOut(infoRc.left + 2, infoRc.top + 2, line);
+		_snwprintf_s(line, _TRUNCATE, L"F#%03X B%d", fnum & 0x1FF, blk);
+		dc.TextOut(infoRc.left + 2, infoRc.top + 2 + infoPx + 2, line);
+		FmDeleteFont(infoFont);
+	}
+
+	const int bodyTop = rc.top + headH + pad;
+	const int bodyBot = rc.bottom - pad;
+	const int slotH = (bodyBot - bodyTop) / 2;
+	if (slotH < 22) {
+		dc.SelectObject(oldf);
+		FmDeleteFont(titleFont);
+		dc.RestoreDC(savedDC);
+		return;
+	}
+
+	for (int oi = 0; oi < 2; oi++) {
+		const int yy = bodyTop + oi * slotH;
+		CRect row(rc.left + pad, yy, rc.right - pad, yy + slotH - 2);
+		dc.FillSolidRect(row, rowBg);
+
+		const uint8_t r0 = patch[oi];
+		const uint8_t r2 = patch[2 + oi];
+		const uint8_t r4 = patch[4 + oi];
+		const uint8_t r6 = patch[6 + oi];
+		const int mul = r0 & 0x0F;
+		const int ksr = (r0 >> 4) & 1;
+		const int egT = (r0 >> 5) & 1;
+		const int vib = (r0 >> 6) & 1;
+		const int am = (r0 >> 7) & 1;
+		const int ksl = (r2 >> 6) & 3;
+		/* Carrier TL はチャンネル VOL（ROM 側 TL は常に0相当） */
+		int tl = (oi == 0) ? (r2 & 0x3F) : (vol * 4);
+		int tlMax = (oi == 0) ? 63 : 60;
+		const wchar_t* tlName = (oi == 0) ? L"TL" : L"VOL";
+		if (oi == 1) { tl = vol; tlMax = 15; }
+		const int ar = (r4 >> 4) & 0x0F;
+		const int dr = r4 & 0x0F;
+		const int sl = (r6 >> 4) & 0x0F;
+		const int rr = r6 & 0x0F;
+		const int wave = (oi == 0) ? ((patch[3] >> 3) & 1) : ((patch[3] >> 4) & 1);
+
+		const int labW = (std::max)(16, (std::min)(28, row.Width() / 16));
+		const int flagW = (std::max)(36, (std::min)(52, row.Width() / 8));
+		const int envW = (std::max)(36, (std::min)(72, row.Width() / 6));
+		const int paramLeft = row.left + labW + 2;
+		const int envRight = paramLeft + envW;
+		const int flagLeft = row.right - flagW;
+		const int paramW = (std::max)(48, flagLeft - 2 - envRight - 2);
+
+		HFONT labFont = FmMakeFont((std::max)(10, (std::min)(14, row.Height() / 3)));
+		dc.SelectObject(labFont);
+		dc.SetBkMode(OPAQUE);
+		dc.SetBkColor(rowBg);
+		dc.SetTextColor(RGB(190, 180, 230));
+		wchar_t sn[8];
+		_snwprintf_s(sn, _TRUNCATE, L"%c", oi == 0 ? L'M' : L'C');
+		CSize snZ = dc.GetTextExtent(sn);
+		dc.TextOut(row.left + (labW - snZ.cx) / 2, row.top + (row.Height() - snZ.cy) / 2, sn);
+
+		CRect env(paramLeft, row.top + 2, envRight, row.bottom - 2);
+		const int tlEnv = (oi == 0) ? tl : (vol * 4);
+		FmDrawEnvelope(dc, env, ar * 2, dr * 2, 0, rr * 2, sl, tlEnv);
+
+		const int cols = 6;
+		const int cellW = paramW / cols;
+		const int gapY = 1;
+		const int topRowH = row.Height() * 58 / 100;
+		const int botRowH = row.Height() - topRowH - gapY;
+		CRect band(envRight + 2, row.top + 1, envRight + 2 + cellW * cols, row.bottom - 1);
+		const struct { int v; int vmax; const wchar_t* n; } topP[6] = {
+			{ ar, 15, L"AR" }, { dr, 15, L"DR" }, { sl, 15, L"SL" },
+			{ rr, 15, L"RR" }, { tl, tlMax, tlName }, { mul, 15, L"MUL" }
+		};
+		for (int i = 0; i < 6; i++) {
+			CRect c(band.left + i * cellW, band.top, band.left + (i + 1) * cellW - 1, band.top + topRowH);
+			FmDrawParamInCell(dc, c, topP[i].v, topP[i].vmax, topP[i].n, rowBg);
+		}
+		if (botRowH >= 14) {
+			const struct { int v; int vmax; const wchar_t* n; } botP[3] = {
+				{ ksl, 3, L"KSL" }, { wave, 1, L"WS" }, { egT, 1, L"EG" }
+			};
+			for (int i = 0; i < 3; i++) {
+				CRect c(band.left + i * cellW, band.top + topRowH + gapY,
+					band.left + (i + 1) * cellW - 1, band.bottom);
+				FmDrawParamInCell(dc, c, botP[i].v, botP[i].vmax, botP[i].n, rowBg);
+			}
+		}
+		{
+			const int lampPx = (std::max)(8, (std::min)(11, row.Height() / 4));
+			HFONT lf = FmMakeFont(lampPx);
+			dc.SelectObject(lf);
+			dc.SetBkColor(rowBg);
+			dc.SetTextColor(RGB(200, 190, 230));
+			const int lamp = (std::max)(7, (std::min)(flagW / 3 - 2, row.Height() / 3));
+			dc.TextOut(flagLeft + 1, row.top + 1, L"AM");
+			dc.FillSolidRect(flagLeft + 2, row.top + lampPx + 2, lamp, lamp,
+				am ? RGB(150, 120, 220) : RGB(40, 36, 48));
+			dc.TextOut(flagLeft + flagW / 3, row.top + 1, L"VB");
+			dc.FillSolidRect(flagLeft + flagW / 3 + 1, row.top + lampPx + 2, lamp, lamp,
+				vib ? RGB(80, 180, 220) : RGB(40, 36, 48));
+			dc.TextOut(flagLeft + 2 * flagW / 3, row.top + 1, L"KS");
+			wchar_t ksS[4];
+			_snwprintf_s(ksS, _TRUNCATE, L"%d", ksr);
+			dc.TextOut(flagLeft + 2 * flagW / 3, row.top + lampPx + 2, ksS);
+			FmDeleteFont(lf);
+		}
+		FmDeleteFont(labFont);
+	}
+
+	dc.SelectObject(oldf);
+	FmDeleteFont(titleFont);
+	dc.RestoreDC(savedDC);
+}
+
+void CFmMonitorDlg::DrawArcadePcmChPanel(CDC& dc, const CRect& rc, int ch, unsigned profile)
+{
+	if (rc.Width() < 70 || rc.Height() < 46 || ch < 0) return;
+	const int savedDC = dc.SaveDC();
+	dc.IntersectClipRect(rc);
+
+	const COLORREF headBg = RGB(62, 44, 34);
+	const COLORREF bodyBg = RGB(34, 34, 42);
+	const COLORREF barBg = RGB(24, 26, 30);
+	const int pad = (std::max)(3, rc.Width() / 80);
+	const int headH = (std::max)(22, rc.Height() / 3);
+	dc.FillSolidRect(rc.left, rc.top, rc.Width(), headH, headBg);
+	dc.FillSolidRect(rc.left, rc.top + headH, rc.Width(), rc.Height() - headH, bodyBg);
+	FmFrameRect(dc, rc, RGB(170, 120, 85));
+
+	auto b = [&](int idx) -> uint8_t {
+		return (m_haveDump && idx >= 0 && idx < 0x200) ? m_dump.regs[idx] : 0;
+	};
+	auto wHiLo = [&](int idx) -> unsigned {
+		return ((unsigned)b(idx) << 8) | (unsigned)b(idx + 1);
+	};
+	auto wLoHi = [&](int idx) -> unsigned {
+		return (unsigned)b(idx) | ((unsigned)b(idx + 1) << 8);
+	};
+
+	int pitch = 0;
+	int vol = 0;
+	int pan = 0;
+	int ctl = 0;
+	if (profile == SASAMI_FMMON_KEYS_QSOUND) {
+		const int base = ch * 16;
+		pitch = (int)wHiLo(base + 4);
+		vol = (int)wHiLo(base + 12) & 0xFFFF;
+		pan = (int)wHiLo(base + 8) & 0xFF;
+		ctl = (int)wHiLo(base + 6);
+	} else if (profile == SASAMI_FMMON_KEYS_C352) {
+		const int base = ch * 16;
+		ctl = (int)wLoHi(base + 0);
+		vol = (int)wLoHi(base + 2) & 0xFFFF;
+		pitch = ((int)(wLoHi(base + 6) & 0xFF) << 8) | (int)(wLoHi(base + 4) & 0xFF);
+		pan = ((int)wLoHi(base + 8) + (int)wLoHi(base + 10)) & 0xFF;
+	} else if (profile == SASAMI_FMMON_KEYS_SEGAPCM) {
+		/* Discrete: 0x42+8*ch … / 0xC6+8*ch. 315-5218: 0x02+8*ch / 0x86+8*ch. */
+		const int dLo = 0x40 + ch * 8;
+		const int dHi = 0xc0 + ch * 8;
+		if (b(dLo + 2) | b(dLo + 3) | b(dLo + 7) | b(dHi + 6)) {
+			vol = b(dLo + 2);
+			pan = b(dLo + 3);
+			pitch = b(dLo + 7);
+			ctl = b(dHi + 6);
+		} else {
+			const int base = ch * 8;
+			vol = b(base + 2);
+			pan = b(base + 3);
+			pitch = b(base + 7);
+			ctl = b(base + 0x86);
+		}
+	} else if (profile == SASAMI_FMMON_KEYS_RF5C) {
+		vol = b(0x00);
+		pan = b(0x01);
+		pitch = b(0x02) | (b(0x03) << 8);
+		ctl = b(0x08);
+	} else if (profile == SASAMI_FMMON_KEYS_OKI) {
+		ctl = b(0);
+		vol = b(0x10 + ch) ? 255 : 0;
+		pan = ch;
+		pitch = b(1);
+	}
+
+	const int live = FmMonIsLive();
+	const int gate = live && m_haveDump && ch < SASAMI_FMMON_PCM_MAX && m_dump.pcmOn[ch];
+	const BYTE fade = (live && ch < SASAMI_FMMON_PCM_MAX) ? m_fadePcm[ch] : (BYTE)0;
+	const int lit = gate || fade >= 40;
+	int midi = -1;
+	if (lit && m_haveDump && ch < SASAMI_FMMON_PCM_MAX && m_dump.pcmNote[ch] != 0xFF)
+		midi = (int)m_dump.pcmNote[ch];
+	wchar_t note[16];
+	FmFormatNoteName(midi, note, 16);
+
+	const int titlePx = (std::max)(9, (std::min)(13, headH - 6));
+	HFONT titleFont = FmMakeFont(titlePx);
+	HFONT oldf = (HFONT)dc.SelectObject(titleFont);
+	dc.SetBkMode(OPAQUE);
+	dc.SetBkColor(headBg);
+	dc.SetTextColor(RGB(250, 230, 210));
+	wchar_t title[32];
+	_snwprintf_s(title, _TRUNCATE, L"%s%d", FmArcadePcmShort(profile), ch + 1);
+	dc.TextOut(rc.left + pad, rc.top + 2, title);
+
+	const int lamp = (std::max)(9, headH - 8);
+	FmFillFade(dc, rc.right - pad - lamp, rc.top + 4, lamp, lamp,
+		RGB(42, 44, 48), RGB(255, 150, 70), lit ? (BYTE)255 : fade);
+
+	const int infoPx = (std::max)(8, (std::min)(12, (rc.Height() - headH) / 4));
+	HFONT infoFont = FmMakeFont(infoPx);
+	dc.SelectObject(infoFont);
+	dc.SetBkMode(OPAQUE);
+	dc.SetBkColor(bodyBg);
+	dc.SetTextColor(RGB(220, 225, 230));
+	int y = rc.top + headH + pad;
+	wchar_t line[64];
+	_snwprintf_s(line, _TRUNCATE, L"%s  P:%04X", note, pitch & 0xFFFF);
+	dc.TextOut(rc.left + pad, y, line);
+	y += infoPx + 2;
+	_snwprintf_s(line, _TRUNCATE, L"V:%04X  Pan:%02X", vol & 0xFFFF, pan & 0xFF);
+	dc.TextOut(rc.left + pad, y, line);
+	y += infoPx + 2;
+	_snwprintf_s(line, _TRUNCATE, L"Ctl:%04X", ctl & 0xFFFF);
+	dc.TextOut(rc.left + pad, y, line);
+
+	CRect bar(rc.left + pad, rc.bottom - pad - (std::max)(6, infoPx / 2),
+		rc.right - pad, rc.bottom - pad);
+	dc.FillSolidRect(bar, barBg);
+	FmFrameRect(dc, bar, RGB(80, 80, 88));
+	int level = vol;
+	if (profile == SASAMI_FMMON_KEYS_QSOUND || profile == SASAMI_FMMON_KEYS_C352)
+		level = (std::min)(255, vol >> 8);
+	if (level < 0) level = 0;
+	if (level > 255) level = 255;
+	CRect fill(bar.left + 1, bar.top + 1,
+		bar.left + 1 + (bar.Width() - 2) * level / 255, bar.bottom - 1);
+	dc.FillSolidRect(fill, lit ? RGB(255, 150, 70) : RGB(120, 95, 70));
+
+	dc.SelectObject(oldf);
+	FmDeleteFont(infoFont);
+	FmDeleteFont(titleFont);
+	dc.RestoreDC(savedDC);
+}
+
 void CFmMonitorDlg::DrawPanelsArea(CDC& dc)
 {
 	if (!m_layOk) return;
-	if (KeysOnly() || IsMsxDump()) {
+	if (IsArcadePcmDump() && HasViewPanels()) {
+		dc.FillSolidRect(m_lay.rcPanels, FM_BG);
+		const unsigned prof = ChipProfile();
+		const int nCh = FmArcadePcmChannels(prof);
+		const int cols = (nCh >= 16) ? 4 : (nCh >= 8 ? 4 : 2);
+		const int rows = (nCh + cols - 1) / cols;
+		const int gap = m_lay.gap;
+		const int pw = (m_lay.rcPanels.Width() - gap * (cols - 1) - 8) / cols;
+		const int ph = (m_lay.rcPanels.Height() - gap * (rows - 1) - 8) / rows;
+		for (int i = 0; i < nCh; i++) {
+			const int c = i % cols;
+			const int r = i / cols;
+			CRect pr(
+				m_lay.fmX + 4 + c * (pw + gap),
+				m_lay.topY + 4 + r * (ph + gap),
+				m_lay.fmX + 4 + c * (pw + gap) + pw,
+				m_lay.topY + 4 + r * (ph + gap) + ph);
+			DrawArcadePcmChPanel(dc, pr, i, prof);
+		}
+		m_panelDirtyMask = 0;
+		return;
+	}
+	if (IsOplDump() && HasViewPanels()) {
+		dc.FillSolidRect(m_lay.rcPanels, FM_BG);
+		const int nCh = (ChipProfile() == SASAMI_FMMON_KEYS_OPL3) ? 18 : 9;
+		const int cols = (nCh > 9) ? 6 : 3;
+		const int rows = (nCh + cols - 1) / cols;
+		const int gap = m_lay.gap;
+		const int pw = (m_lay.rcPanels.Width() - gap * (cols - 1) - 8) / cols;
+		const int ph = (m_lay.rcPanels.Height() - gap * (rows - 1) - 8) / rows;
+		for (int i = 0; i < nCh; i++) {
+			const int c = i % cols;
+			const int r = i / cols;
+			CRect pr(
+				m_lay.fmX + 4 + c * (pw + gap),
+				m_lay.topY + 4 + r * (ph + gap),
+				m_lay.fmX + 4 + c * (pw + gap) + pw,
+				m_lay.topY + 4 + r * (ph + gap) + ph);
+			DrawOplChPanel(dc, pr, i);
+		}
+		m_panelDirtyMask = 0;
+		return;
+	}
+	if (IsOpmDump() && HasViewPanels()) {
+		dc.FillSolidRect(m_lay.rcPanels, FM_BG);
+		const int cols = 4;
+		const int rows = 2;
+		const int gap = m_lay.gap;
+		const int pw = (m_lay.rcPanels.Width() - gap * (cols - 1) - 8) / cols;
+		const int ph = (m_lay.rcPanels.Height() - gap * (rows - 1) - 8) / rows;
+		for (int i = 0; i < 8; i++) {
+			const int c = i % cols;
+			const int r = i / cols;
+			CRect pr(
+				m_lay.fmX + 4 + c * (pw + gap),
+				m_lay.topY + 4 + r * (ph + gap),
+				m_lay.fmX + 4 + c * (pw + gap) + pw,
+				m_lay.topY + 4 + r * (ph + gap) + ph);
+			DrawOpmChPanel(dc, pr, i);
+		}
+		m_panelDirtyMask = 0;
+		return;
+	}
+	if (IsMsxDump() && HasViewPanels()
+		&& (MsxDevMask() & SASAMI_FMMON_DEV_OPLL)) {
+		dc.FillSolidRect(m_lay.rcPanels, FM_BG);
+		const int cols = 3;
+		const int rows = 3;
+		const int gap = m_lay.gap;
+		const int pw = (m_lay.rcPanels.Width() - gap * (cols - 1) - 8) / cols;
+		const int ph = (m_lay.rcPanels.Height() - gap * (rows - 1) - 8) / rows;
+		for (int i = 0; i < 9; i++) {
+			const int c = i % cols;
+			const int r = i / cols;
+			CRect pr(
+				m_lay.fmX + 4 + c * (pw + gap),
+				m_lay.topY + 4 + r * (ph + gap),
+				m_lay.fmX + 4 + c * (pw + gap) + pw,
+				m_lay.topY + 4 + r * (ph + gap) + ph);
+			DrawOpllChPanel(dc, pr, i);
+		}
+		m_panelDirtyMask = 0;
+		return;
+	}
+	if (IsMsxDump() && !(MsxDevMask() & SASAMI_FMMON_DEV_OPLL)
+		&& !PreferOpnaShell()) {
 		dc.FillSolidRect(m_lay.rcPanels, FM_BG);
 		CGdiObject* old = dc.SelectStockObject(DEFAULT_GUI_FONT);
 		dc.SetBkMode(TRANSPARENT);
 		dc.SetTextColor(RGB(140, 145, 155));
 		dc.TextOut(m_lay.fmX + 8, m_lay.topY + 8,
-			IsMsxDump()
-			? L"MSX: OPNA panels N/A"
-			: LL14(L"パネル非対応（鍵盤のみ）",
-				L"Panels unsupported (keys only)",
-				L"Panneaux non pris en charge (touches seulement)",
-				L"Pannelli non supportati (solo tasti)",
-				L"Paneles no admitidos (solo teclas)",
-				L"패널 비대응(건반만)",
-				L"不支持面板（仅键盘）",
-				L"اللوحات غير مدعومة (مفاتيح فقط)",
-				L"Панели не поддерживаются (только клавиши)",
-				L"Panels nicht unterstuetzt (nur Tasten)",
-				L"Paineis nao suportados (so teclas)",
-				L"Panelen niet ondersteund (alleen toetsen)",
-				L"Panele nieobslugiwane (tylko klawisze)",
-				L"Paneller desteklenmiyor (yalniz tuslar)"));
+			L"MSX: no OPLL - panels N/A (PSG/SCC keys)");
 		dc.SelectObject(old);
 		m_panelDirtyMask = 0;
 		return;
 	}
+	/* OPNA/OPN パネル（起動直後・MIDI keys-only・通常 OPN(A)） */
 	BYTE mask = m_panelDirtyMask;
-	if (mask == 0) mask = 0x3F;
-	if (mask == 0x3F)
+	const int fmN = FmRows();
+	const int fmMaskBits = (fmN >= 6) ? 0x3F : ((1 << fmN) - 1);
+	if (PreferOpnaShell() || !HasViewPanels() || KeysOnly())
+		mask = (BYTE)fmMaskBits;
+	if (mask == 0) mask = (BYTE)fmMaskBits;
+	if (mask == (BYTE)fmMaskBits)
 		dc.FillSolidRect(m_lay.rcPanels, FM_BG);
-	for (int i = 0; i < 6; i++) {
+	const int cols = (fmN <= 2) ? (std::max)(1, fmN) : ((fmN <= 4) ? 2 : 3);
+	for (int i = 0; i < fmN && i < 6; i++) {
 		if (!(mask & (1 << i))) continue;
-		const int c = i % 3;
-		const int r = i / 3;
+		const int c = i % cols;
+		const int r = i / cols;
 		CRect pr(m_lay.fmX + c * (m_lay.pw + m_lay.gap), m_lay.topY + r * (m_lay.ph + m_lay.gap),
 			m_lay.fmX + c * (m_lay.pw + m_lay.gap) + m_lay.pw,
 			m_lay.topY + r * (m_lay.ph + m_lay.gap) + m_lay.ph);
-		if (mask != 0x3F)
+		if (mask != (BYTE)fmMaskBits)
 			dc.FillSolidRect(pr, FM_BG);
 		DrawFmChPanel(dc, pr, i);
 	}
@@ -2385,14 +3891,17 @@ void CFmMonitorDlg::ApplyDump(const SasamiFmMonDump& d)
 	int chgHex = 0, chgKeys = 0;
 	BYTE panelMask = 0;
 	const int keysOnly = (d.version >= 6 && (d.dumpFlags & SASAMI_FMMON_FLAG_KEYSONLY)) ? 1 : 0;
+	const int arcadeRegs = (keysOnly && d.version >= 6
+		&& FmIsArcadePcmProfile((unsigned)d.pad6[1])
+		&& ((unsigned)d.pad6[2] & SASAMI_FMMON_VIEW_REGS)) ? 1 : 0;
+	const int pcatAuxRegs = (keysOnly && d.version >= 6
+		&& ((unsigned)d.pad6[2] & SASAMI_FMMON_VIEW_REGS)
+		&& d.titleSjis[0] && strstr(d.titleSjis, "PC/AT")) ? 1 : 0;
+	const int softRegs = (arcadeRegs || pcatAuxRegs) ? 1 : 0;
 	if (m_haveDump) {
-		if (!keysOnly) for (int i = 0; i < 0x200; i++) {
-			int wrote = (d.regs[i] != m_dump.regs[i]) ? 1 : 0;
-			/* v5: 同一値の再書き込み（00→00 含む）も変化扱い */
-			if (!wrote && d.version >= 5
-				&& (d.regWriteBits[i >> 3] & (uint8_t)(1u << (i & 7))))
-				wrote = 1;
-			if (wrote) {
+		if (!keysOnly || softRegs) for (int i = 0; i < 0x200; i++) {
+			/* 値変化した番地だけフェード（同一値の sticky writeBits では光らせない） */
+			if (d.regs[i] != m_dump.regs[i]) {
 				FmBump(m_fade[i]);
 				m_touched[i] = 1;
 				chgHex = 1;
@@ -2401,9 +3910,19 @@ void CFmMonitorDlg::ApplyDump(const SasamiFmMonDump& d)
 				m_touched[i] = 1;
 		}
 		/* チャンネル単位: ALG(B0) / AMS·PMS·PAN(B4) / Fnum / オペレータ / keyOn */
-		for (int ch = 0; ch < 6; ch++) {
-			const int bank = (ch < 3) ? 0 : 0x100;
-			const int slot = (ch < 3) ? ch : (ch - 3);
+		const int ym2610 = (d.padHit == 6) ? 1 : 0;
+		const int fmChN = ym2610 ? 4 : 6;
+		for (int ch = 0; ch < fmChN; ch++) {
+			int bank, slot;
+			if (ym2610) {
+				static const int kB[4] = { 0, 0, 0x100, 0x100 };
+				static const int kS[4] = { 1, 2, 0, 1 };
+				bank = kB[ch];
+				slot = kS[ch];
+			} else {
+				bank = (ch < 3) ? 0 : 0x100;
+				slot = (ch < 3) ? ch : (ch - 3);
+			}
 			int dirty = 0;
 			if (d.keyOnFm[ch] != m_dump.keyOnFm[ch]) {
 				dirty = 1;
@@ -2491,7 +4010,13 @@ void CFmMonitorDlg::ApplyDump(const SasamiFmMonDump& d)
 				FmBump(m_fadePcm[i]);
 			else if (d.pcmOn[i] && d.pcmNote[i] != m_dump.pcmNote[i])
 				FmBump(m_fadePcm[i]);
-			if (d.pcmOn[i] != m_dump.pcmOn[i] || d.pcmNote[i] != m_dump.pcmNote[i])
+			/* keys-only: パック済み hit（短い on→off で gate が最終 off でも点灯） */
+			if ((d.dumpFlags & SASAMI_FMMON_FLAG_KEYSONLY)
+				&& FmKeysOnlyPackedHit(d, i) != FmKeysOnlyPackedHit(m_dump, i))
+				FmBump(m_fadePcm[i]);
+			if (d.pcmOn[i] != m_dump.pcmOn[i] || d.pcmNote[i] != m_dump.pcmNote[i]
+				|| ((d.dumpFlags & SASAMI_FMMON_FLAG_KEYSONLY)
+					&& FmKeysOnlyPackedHit(d, i) != FmKeysOnlyPackedHit(m_dump, i)))
 				chgKeys = 1;
 		}
 		for (int i = 0; i < 6; i++) {
@@ -2576,13 +4101,22 @@ void CFmMonitorDlg::ApplyDump(const SasamiFmMonDump& d)
 	m_lastSeq = d.seq;
 	m_lastCurSample = d.curSample;
 	m_haveDump = 1;
-	if (!keysOnly && chgHex) m_dirtyHex = 1;
+	if ((!keysOnly || softRegs) && chgHex) m_dirtyHex = 1;
 	if (!keysOnly && panelMask) {
 		m_panelDirtyMask = (BYTE)(m_panelDirtyMask | panelMask);
 		m_dirtyPanels = 1;
 	}
-	if (keysOnly) {
-		/* keep hex/panels gray */
+	if (softRegs && (chgHex || chgKeys || panelMask)) {
+		m_panelDirtyMask = 0x3F;
+		m_dirtyPanels = 1;
+	}
+	if (keysOnly && PreferOpnaShell()) {
+		/* MIDI等: OPNA 殻を出す。初回/曲切替は fullDraw、通常更新は hex/panels 据え置き */
+		if (m_fullDraw || chgHex) {
+			m_dirtyHex = 1;
+			m_panelDirtyMask = 0x3F;
+			m_dirtyPanels = 1;
+		}
 	}
 	if (chgKeys) m_dirtyKeys = 1;
 }
@@ -2636,6 +4170,7 @@ void CFmMonitorDlg::PushHistDump(const SasamiFmMonDump& d)
 			&& (d.version < 4 || (memcmp(d.keyOnHitCnt, m_hist[lastI].keyOnHitCnt, 6) == 0
 				&& memcmp(d.ssgHitCnt, m_hist[lastI].ssgHitCnt, 3) == 0))
 			&& (d.version < 5 || memcmp(d.regWriteBits, m_hist[lastI].regWriteBits, 64) == 0)
+			&& (d.version < 6 || memcmp(d.keyOnExHitCnt, m_hist[lastI].keyOnExHitCnt, 3) == 0)
 			&& (d.pcmCount == m_hist[lastI].pcmCount
 				&& memcmp(d.pcmOn, m_hist[lastI].pcmOn, SASAMI_FMMON_PCM_MAX) == 0
 				&& memcmp(d.pcmNote, m_hist[lastI].pcmNote, SASAMI_FMMON_PCM_MAX) == 0))
@@ -2827,6 +4362,21 @@ int CFmMonitorDlg::PollDump()
 			for (int i = 0; i < SASAMI_FMMON_PCM_MAX; i++) {
 				if (s.pcmOn[i])
 					merged.pcmNote[i] = s.pcmNote[i];
+				/* 短い on→最終 off: hit を合成して fadePcm が点く */
+				if (s.pcmOn[i] && !merged.pcmOn[i]
+					&& (merged.dumpFlags & SASAMI_FMMON_FLAG_KEYSONLY)) {
+					const uint8_t sh = FmKeysOnlyPackedHit(s, i);
+					const uint8_t mh = FmKeysOnlyPackedHit(merged, i);
+					const uint8_t dh = FmKeysOnlyPackedHit(m_dump, i);
+					if (sh > mh)
+						FmKeysOnlySetPackedHit(merged, i, sh);
+					else if (sh <= dh && mh <= dh)
+						FmKeysOnlySetPackedHit(merged, i, (uint8_t)(dh + 1));
+				} else if (s.pcmOn[i] && (merged.dumpFlags & SASAMI_FMMON_FLAG_KEYSONLY)) {
+					const uint8_t sh = FmKeysOnlyPackedHit(s, i);
+					if (sh > FmKeysOnlyPackedHit(merged, i))
+						FmKeysOnlySetPackedHit(merged, i, sh);
+				}
 			}
 			merged.rhythmPulse = (uint8_t)(merged.rhythmPulse | s.rhythmPulse);
 			merged.rhythmKey = (uint8_t)(merged.rhythmKey | s.rhythmKey);

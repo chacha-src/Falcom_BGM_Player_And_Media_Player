@@ -1,4 +1,4 @@
-﻿// KpiPluginInstall.cpp — Plugins.zip を公式配布から取得し exe 隣へ展開
+// KpiPluginInstall.cpp — Plugins.zip を公式配布から取得し exe 隣へ展開
 #include "stdafx.h"
 #include "KpiPluginInstall.h"
 #include <wininet.h>
@@ -40,6 +40,8 @@ static BOOL KpiInstallMkDirDeep(const TCHAR* path)
 	return TRUE;
 }
 
+static time_t KpiInstallFileMtimeUtc(LPCTSTR path);
+
 static BOOL KpiInstallSafeRelPath(const char* nameInZip, CString& outRel)
 {
 	outRel.Empty();
@@ -55,7 +57,43 @@ static BOOL KpiInstallSafeRelPath(const char* nameInZip, CString& outRel)
 	return TRUE;
 }
 
-static BOOL KpiInstallExtractZip(const TCHAR* zipPath, const TCHAR* destDir, CString& errOut)
+/* ZIP エントリ日時（DOS/tmu）→ time_t。比較用（タイムゾーン差は許容）。 */
+static time_t KpiInstallZipInfoMtimeUtc(const unz_file_info64& fi)
+{
+	if (fi.tmu_date.tm_year < 1980 || fi.tmu_date.tm_mon < 0 || fi.tmu_date.tm_mon > 11
+		|| fi.tmu_date.tm_mday < 1 || fi.tmu_date.tm_mday > 31)
+		return 0;
+	SYSTEMTIME st = {};
+	st.wYear = (WORD)fi.tmu_date.tm_year;
+	st.wMonth = (WORD)(fi.tmu_date.tm_mon + 1);
+	st.wDay = (WORD)fi.tmu_date.tm_mday;
+	st.wHour = (WORD)fi.tmu_date.tm_hour;
+	st.wMinute = (WORD)fi.tmu_date.tm_min;
+	st.wSecond = (WORD)fi.tmu_date.tm_sec;
+	FILETIME ft = {};
+	if (!SystemTimeToFileTime(&st, &ft))
+		return 0;
+	ULARGE_INTEGER ull;
+	ull.LowPart = ft.dwLowDateTime;
+	ull.HighPart = ft.dwHighDateTime;
+	if (ull.QuadPart < 116444736000000000ULL)
+		return 0;
+	return (time_t)((ull.QuadPart - 116444736000000000ULL) / 10000000ULL);
+}
+
+/* 退避・無効化ツリーは展開しない（重複 KPI/古い DLL を戻さない） */
+static BOOL KpiInstallZipRelIsJunk(const CString& rel)
+{
+	CString u(rel);
+	u.MakeLower();
+	if (u.Find(L"_fmmon_bak") >= 0) return TRUE;
+	if (u.Find(L"_fmmon_kpi_bak") >= 0) return TRUE;
+	if (u.Find(L".ogg_unused") >= 0) return TRUE;
+	return FALSE;
+}
+
+/* mergeNewerOnly: 無い→追加、ZIP の方が新しい→上書き。ローカルが新しければスキップ。 */
+static BOOL KpiInstallExtractZip(const TCHAR* zipPath, const TCHAR* destDir, CString& errOut, BOOL mergeNewerOnly)
 {
 	errOut.Empty();
 	zlib_filefunc64_def ffunc = {};
@@ -86,7 +124,7 @@ static BOOL KpiInstallExtractZip(const TCHAR* zipPath, const TCHAR* destDir, CSt
 		if (unzGetCurrentFileInfo64(uf, &fi, filename_inzip, sizeof(filename_inzip), NULL, 0, NULL, 0) != UNZ_OK)
 			break;
 		CString rel;
-		if (!KpiInstallSafeRelPath(filename_inzip, rel)) {
+		if (!KpiInstallSafeRelPath(filename_inzip, rel) || KpiInstallZipRelIsJunk(rel)) {
 			if ((ZPOS64_T)(i + 1) < gi.number_entry) unzGoToNextFile(uf);
 			continue;
 		}
@@ -98,6 +136,17 @@ static BOOL KpiInstallExtractZip(const TCHAR* zipPath, const TCHAR* destDir, CSt
 			KpiInstallMkDirDeep(outPath);
 			if ((ZPOS64_T)(i + 1) < gi.number_entry) unzGoToNextFile(uf);
 			continue;
+		}
+		if (mergeNewerOnly) {
+			const time_t tDst = KpiInstallFileMtimeUtc(outPath);
+			if (tDst != 0) {
+				const time_t tZip = KpiInstallZipInfoMtimeUtc(fi);
+				/* ローカルが ZIP 以上に新しい → スキップ（自前ビルド KPI/DLL を守る） */
+				if (tZip == 0 || tZip <= tDst + 2) {
+					if ((ZPOS64_T)(i + 1) < gi.number_entry) unzGoToNextFile(uf);
+					continue;
+				}
+			}
 		}
 		{
 			const int slash = outPath.ReverseFind(L'\\');
@@ -132,12 +181,28 @@ static BOOL KpiInstallExtractZip(const TCHAR* zipPath, const TCHAR* destDir, CSt
 			DeleteFile(outPath);
 		} else {
 			extracted++;
+			/* ZIP 日時を残すと次回マージ判定が安定する */
+			const time_t tZip = KpiInstallZipInfoMtimeUtc(fi);
+			if (tZip != 0) {
+				FILETIME ft;
+				ULARGE_INTEGER ull;
+				ull.QuadPart = ((ULONGLONG)tZip * 10000000ULL) + 116444736000000000ULL;
+				ft.dwLowDateTime = ull.LowPart;
+				ft.dwHighDateTime = ull.HighPart;
+				HANDLE h2 = CreateFile(outPath, FILE_WRITE_ATTRIBUTES, FILE_SHARE_READ, NULL,
+					OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+				if (h2 != INVALID_HANDLE_VALUE) {
+					SetFileTime(h2, NULL, NULL, &ft);
+					CloseHandle(h2);
+				}
+			}
 		}
 		if ((ZPOS64_T)(i + 1) < gi.number_entry)
 			unzGoToNextFile(uf);
 	}
 	unzClose(uf);
-	if (extracted <= 0) {
+	/* マージ時は「全部スキップ」も成功（既に最新） */
+	if (extracted <= 0 && !mergeNewerOnly) {
 		errOut = LL14(L"ZIP からファイルを展開できませんでした。", L"Could not extract files from ZIP.",
 			L"Extraction ZIP impossible.", L"Estrazione ZIP non riuscita.", L"No se pudo extraer el ZIP.",
 			L"ZIP에서 파일을 펼 수 없습니다.", L"无法从 ZIP 解压文件。", L"تعذر استخراج الملفات من ZIP.",
@@ -276,7 +341,7 @@ BOOL KpiInstall_DownloadAndExtract(LPCTSTR exeDir, KpiInstallProgressFn progress
 		progress(92, ctx);
 		KpiInstallPump();
 	}
-	ok = KpiInstallExtractZip(zipPath, exeDir, errOut);
+	ok = KpiInstallExtractZip(zipPath, exeDir, errOut, FALSE);
 	DeleteFile(zipPath);
 	if (progress) {
 		progress(ok ? 100 : 92, ctx);
@@ -286,13 +351,13 @@ BOOL KpiInstall_DownloadAndExtract(LPCTSTR exeDir, KpiInstallProgressFn progress
 }
 
 // ---------------------------------------------------------------------------
-// kbsasami サイレント更新
-// ZIP: https://ppp.oohara.jp/download/kbsasami.zip
-// 中身: kbsasami\kbsasami.kpi (+txt) / kbsasami\x64\kbsasami.kpi
-// 配置: exeDir\Plugins\kbsasami\ …
+// Plugins.zip サイレント更新（kbsasami / fmpmd / 依存 DLL 共通）
+// ZIP: https://ppp.oohara.jp/download/Plugins.zip
+// DL 条件: Plugins フォルダ無し → 無条件 / ZIP Last-Modified が exe より新しい
+// それ以外は DL しない（HEAD 相当の日時確認のみ）
 // ---------------------------------------------------------------------------
 
-static const TCHAR* KBSASAMI_ZIP_URL = L"https://ppp.oohara.jp/download/kbsasami.zip";
+static const TCHAR* PLUGINS_ZIP_URL = L"https://ppp.oohara.jp/download/Plugins.zip";
 
 static time_t KpiInstallFileMtimeUtc(LPCTSTR path)
 {
@@ -415,70 +480,71 @@ static BOOL KpiInstallHttpDownloadFile(LPCTSTR url, LPCTSTR destPath)
 
 static void KpiInstallEnsureRhythmAssets(LPCTSTR exeDir);
 
-BOOL KpiInstall_SilentUpdateKbsasami(LPCTSTR exeDir)
+/* 起動1回だけ Plugins.zip を検討（kbsasami / fmpmd の二重 DL 防止） */
+static BOOL KpiInstallSilentMaybeFetchPluginsZip(LPCTSTR exeDir)
 {
+	static BOOL s_done = FALSE;
+	static BOOL s_did = FALSE;
+	if (s_done)
+		return s_did;
+	s_done = TRUE;
+
 	if (!exeDir || !exeDir[0])
 		return FALSE;
 
 	DWORD netFlags = 0;
-	if (!InternetGetConnectedState(&netFlags, 0)) {
-		KpiInstallEnsureRhythmAssets(exeDir);
+	if (!InternetGetConnectedState(&netFlags, 0))
 		return FALSE;
-	}
 
 	TCHAR pluginsDir[MAX_PATH * 2] = {};
 	_sntprintf_s(pluginsDir, _TRUNCATE, L"%sPlugins", exeDir);
-	TCHAR localX86[MAX_PATH * 2] = {};
-	TCHAR localX64[MAX_PATH * 2] = {};
-	_sntprintf_s(localX86, _TRUNCATE, L"%s\\kbsasami\\kbsasami.kpi", pluginsDir);
-	_sntprintf_s(localX64, _TRUNCATE, L"%s\\kbsasami\\x64\\kbsasami.kpi", pluginsDir);
+	const BOOL pluginsMissing =
+		(GetFileAttributes(pluginsDir) == INVALID_FILE_ATTRIBUTES) ? TRUE : FALSE;
 
-	const time_t t86 = KpiInstallFileMtimeUtc(localX86);
-	const time_t t64 = KpiInstallFileMtimeUtc(localX64);
-	const BOOL missing = (t86 == 0 || t64 == 0);
-	const time_t localNewest = (t86 > t64) ? t86 : t64;
+	TCHAR exePath[MAX_PATH] = {};
+	GetModuleFileName(NULL, exePath, MAX_PATH);
+	const time_t exeMt = KpiInstallFileMtimeUtc(exePath);
 
-	const time_t serverMod = KpiInstallHttpLastModified(KBSASAMI_ZIP_URL);
-	/* Have both and already at/newer than server → skip. */
-	if (!missing && serverMod != 0 && serverMod <= localNewest + 120) {
-		KpiInstallEnsureRhythmAssets(exeDir);
-		return FALSE;
-	}
-	/* Have local but Last-Modified unknown → don't re-fetch every launch. */
-	if (!missing && serverMod == 0) {
-		KpiInstallEnsureRhythmAssets(exeDir);
-		return FALSE;
+	BOOL doDownload = FALSE;
+	if (pluginsMissing) {
+		/* Plugins 自体が無い → 無条件で取得 */
+		doDownload = TRUE;
+	} else {
+		const time_t serverMod = KpiInstallHttpLastModified(PLUGINS_ZIP_URL);
+		/* ZIP が exe より新しければ更新。判定不能・古ければ DL しない */
+		if (serverMod != 0 && exeMt != 0 && serverMod > exeMt + 120)
+			doDownload = TRUE;
 	}
 
-	CreateDirectory(pluginsDir, NULL);
+	if (!doDownload)
+		return FALSE;
 
 	TCHAR tmp[MAX_PATH] = {};
 	GetTempPath(MAX_PATH, tmp);
 	TCHAR zipPath[MAX_PATH] = {};
-	_sntprintf_s(zipPath, _TRUNCATE, L"%sogg_kpi_kbsasami.zip", tmp);
-	if (!KpiInstallHttpDownloadFile(KBSASAMI_ZIP_URL, zipPath)) {
-		KpiInstallEnsureRhythmAssets(exeDir);
+	_sntprintf_s(zipPath, _TRUNCATE, L"%sogg_kpi_Plugins_silent.zip", tmp);
+	if (!KpiInstallHttpDownloadFile(PLUGINS_ZIP_URL, zipPath))
 		return FALSE;
-	}
 
 	CString err;
-	// ZIP ルートが kbsasami\… なので Plugins\ 直下へ展開する
-	const BOOL ok = KpiInstallExtractZip(zipPath, pluginsDir, err);
+	/* 無い→追加、ZIP が新しい→上書き。自前の新しい KPI/DLL は残す */
+	const BOOL ok = KpiInstallExtractZip(zipPath, exeDir, err, TRUE);
 	DeleteFile(zipPath);
-	/* リズム rom/WAV は kbsasami.zip に無いことが多い → fmpmd 側から欠落分ミラー */
-	KpiInstallEnsureRhythmAssets(exeDir);
-	return ok;
+	s_did = ok ? TRUE : FALSE;
+	return s_did;
 }
 
-// ---------------------------------------------------------------------------
-// fmpmd サイレント更新
-// - Plugins.zip（oohara）: KPI / ym2608_adpcm_rom.bin / 2608_*.WAV 欠落時、または ZIP が exe より新しいとき
-//   （これらは既存 Plugins.zip 同梱。新規の第三者配布はしない）
-// - 公式 DLL: WinFMP（c60）・PDZFZ8XWin（aosoft）。PMDWin は c60 ではなく Plugins.zip（fmmon 付き）
-// - Plugins\Kobarin\fmpmd・Rhythm・kbsasami が無くても作成し、欠落分をミラー
-// ---------------------------------------------------------------------------
+BOOL KpiInstall_SilentUpdateKbsasami(LPCTSTR exeDir)
+{
+	if (!exeDir || !exeDir[0])
+		return FALSE;
+	/* kbsasami も Plugins.zip 同梱分から展開（専用 kbsasami.zip は使わない） */
+	const BOOL did = KpiInstallSilentMaybeFetchPluginsZip(exeDir);
+	KpiInstallEnsureRhythmAssets(exeDir);
+	return did;
+}
 
-static const TCHAR* PLUGINS_ZIP_URL = L"https://ppp.oohara.jp/download/Plugins.zip";
+
 static const TCHAR* C60_WINFMP_ZIP_URL = L"https://c60.la.coocan.jp/download/WinFMP052.zip";
 static const TCHAR* AOSOFT_PDZF_ZIP_URL = L"https://aosoft.jp/cgi-bin/download.cgi?file=pdzfz8x_Release_v2.0.1.zip";
 
@@ -511,32 +577,6 @@ static BOOL KpiInstallFileExists(LPCTSTR path)
 }
 
 /* Plugins.zip 同梱のリズム資産（既存配布物）。欠落時のみ補完する */
-static BOOL KpiInstallRhythmAssetsIncomplete(LPCTSTR dir)
-{
-	if (!dir || !dir[0]) return TRUE;
-	TCHAR rom[MAX_PATH * 2] = {};
-	TCHAR romR[MAX_PATH * 2] = {};
-	_sntprintf_s(rom, _TRUNCATE, L"%s\\ym2608_adpcm_rom.bin", dir);
-	_sntprintf_s(romR, _TRUNCATE, L"%s\\Rhythm\\ym2608_adpcm_rom.bin", dir);
-	if (!KpiInstallFileExists(rom) && !KpiInstallFileExists(romR))
-		return TRUE;
-
-	static const TCHAR* kNames[6] = { L"BD", L"SD", L"TOP", L"HH", L"TOM", L"RIM" };
-	for (int i = 0; i < 6; i++) {
-		TCHAR a[MAX_PATH * 2] = {}, b[MAX_PATH * 2] = {}, c[MAX_PATH * 2] = {}, d[MAX_PATH * 2] = {};
-		_sntprintf_s(a, _TRUNCATE, L"%s\\2608_%s.WAV", dir, kNames[i]);
-		_sntprintf_s(b, _TRUNCATE, L"%s\\Rhythm\\2608_%s.WAV", dir, kNames[i]);
-		_sntprintf_s(c, _TRUNCATE, L"%s\\wav\\2608_%s.WAV", dir, kNames[i]);
-		/* ZIP 由来の RiM 表記ゆれ */
-		if (i == 5)
-			_sntprintf_s(d, _TRUNCATE, L"%s\\Rhythm\\2608_RiM.WAV", dir);
-		if (!KpiInstallFileExists(a) && !KpiInstallFileExists(b)
-			&& !KpiInstallFileExists(c) && !KpiInstallFileExists(d))
-			return TRUE;
-	}
-	return FALSE;
-}
-
 static void KpiInstallCopyIfMissing(LPCTSTR src, LPCTSTR dst)
 {
 	if (!KpiInstallFileExists(src) || !dst || !dst[0]) return;
@@ -795,7 +835,7 @@ static BOOL KpiInstallZipCopyOne(LPCTSTR zipUrl, LPCTSTR workDir, LPCTSTR relSrc
 	}
 	CreateDirectory(extractDir, NULL);
 	CString err;
-	const BOOL okEx = KpiInstallExtractZip(zipPath, extractDir, err);
+	const BOOL okEx = KpiInstallExtractZip(zipPath, extractDir, err, FALSE);
 	DeleteFile(zipPath);
 	if (!okEx) return FALSE;
 	TCHAR src[MAX_PATH * 2] = {};
@@ -843,7 +883,7 @@ static BOOL KpiInstallFetchOfficialFmpmdDlls(LPCTSTR fmpmdDir, WORD want)
 			_sntprintf_s(exDir, _TRUNCATE, L"%s\\_plex", work);
 			CreateDirectory(exDir, NULL);
 			CString err;
-			if (KpiInstallExtractZip(zipPath, exDir, err)) {
+			if (KpiInstallExtractZip(zipPath, exDir, err, FALSE)) {
 				TCHAR src[MAX_PATH * 2] = {};
 				if (want64)
 					_sntprintf_s(src, _TRUNCATE, L"%s\\Plugins\\Kobarin\\fmpmd\\PMDWin.dll", exDir);
@@ -991,108 +1031,42 @@ BOOL KpiInstall_SilentUpdateFmpmd(LPCTSTR exeDir)
 	if (!exeDir || !exeDir[0])
 		return FALSE;
 
-	KpiInstallEnsureFmpmdDirs(exeDir);
-
 	DWORD netFlags = 0;
 	const BOOL online = InternetGetConnectedState(&netFlags, 0) ? TRUE : FALSE;
 
+	/* Plugins.zip はフォルダ作成前に判定（空 Plugins を先に作らない） */
+	BOOL did = FALSE;
+	if (online)
+		did = KpiInstallSilentMaybeFetchPluginsZip(exeDir);
+
+	KpiInstallEnsureFmpmdDirs(exeDir);
+
 	TCHAR fmpmdDir[MAX_PATH * 2] = {};
 	_sntprintf_s(fmpmdDir, _TRUNCATE, L"%sPlugins\\Kobarin\\fmpmd", exeDir);
-	TCHAR localPmd[MAX_PATH * 2] = {};
-	TCHAR localFmp[MAX_PATH * 2] = {};
-	TCHAR stampPath[MAX_PATH * 2] = {};
 	TCHAR localPmdDll[MAX_PATH * 2] = {};
 	TCHAR localWinDll[MAX_PATH * 2] = {};
 	TCHAR localPdzDll[MAX_PATH * 2] = {};
-	_sntprintf_s(localPmd, _TRUNCATE, L"%s\\kbpmd.kpi", fmpmdDir);
-	_sntprintf_s(localFmp, _TRUNCATE, L"%s\\kbfmp.kpi", fmpmdDir);
-	_sntprintf_s(stampPath, _TRUNCATE, L"%s\\.ogg_plugins_zip_mtime", fmpmdDir);
 	_sntprintf_s(localPmdDll, _TRUNCATE, L"%s\\PMDWin.dll", fmpmdDir);
 	_sntprintf_s(localWinDll, _TRUNCATE, L"%s\\WinFMP.dll", fmpmdDir);
 	_sntprintf_s(localPdzDll, _TRUNCATE, L"%s\\PDZFZ8XWin.dll", fmpmdDir);
 
 	const WORD want = KpiInstallWantedFmpmdMachine(fmpmdDir);
-	const BOOL dllBad =
-		KpiInstallPmdWinNeedsReplace(localPmdDll, want)
-		|| KpiInstallDllNeedsArchFix(localWinDll, want)
-		|| KpiInstallDllNeedsArchFix(localPdzDll, want);
-
-	const time_t tPmd = KpiInstallFileMtimeUtc(localPmd);
-	const time_t tFmp = KpiInstallFileMtimeUtc(localFmp);
-	const BOOL haveNew = (tPmd != 0 && tFmp != 0);
-	const BOOL rhythmNeed = KpiInstallRhythmAssetsIncomplete(fmpmdDir);
-
-	TCHAR exePath[MAX_PATH] = {};
-	GetModuleFileName(NULL, exePath, MAX_PATH);
-	const time_t exeMt = KpiInstallFileMtimeUtc(exePath);
-
-	BOOL did = FALSE;
 	if (online) {
-		/* DLL arch 不一致・欠落は公式から即補正（Plugins.zip の PDZF は x86 のみのため別取得） */
+		const BOOL dllBad =
+			KpiInstallPmdWinNeedsReplace(localPmdDll, want)
+			|| KpiInstallDllNeedsArchFix(localWinDll, want)
+			|| KpiInstallDllNeedsArchFix(localPdzDll, want);
+		/* arch 不一致は公式 ZIP（Plugins.zip 外）から補正 */
 		if (dllBad) {
 			if (KpiInstallFetchOfficialFmpmdDlls(fmpmdDir, want))
 				did = TRUE;
 		}
-
-		const time_t serverMod = KpiInstallHttpLastModified(PLUGINS_ZIP_URL);
-		BOOL doDownload = FALSE;
-		if (!haveNew || rhythmNeed) {
-			/* KPI 欠落、または rom/リズム WAV 欠落 → Plugins.zip（既存同梱物） */
-			doDownload = TRUE;
-			/* リズム欠落時は stamp でスキップしない（前回 ZIP に含まれなかった場合の再取得） */
-			if (!rhythmNeed && serverMod != 0) {
-				const time_t stamped = KpiInstallFileMtimeUtc(stampPath);
-				if (stamped != 0 && serverMod <= stamped + 120)
-					doDownload = FALSE;
-			}
-		} else if (serverMod != 0 && exeMt != 0 && serverMod > exeMt + 120) {
-			doDownload = TRUE;
-		}
-
-		if (doDownload) {
-			TCHAR tmp[MAX_PATH] = {};
-			GetTempPath(MAX_PATH, tmp);
-			TCHAR zipPath[MAX_PATH] = {};
-			_sntprintf_s(zipPath, _TRUNCATE, L"%sogg_kpi_Plugins_silent.zip", tmp);
-			if (KpiInstallHttpDownloadFile(PLUGINS_ZIP_URL, zipPath)) {
-				CString err;
-				const BOOL ok = KpiInstallExtractZip(zipPath, exeDir, err);
-				DeleteFile(zipPath);
-				if (ok) {
-					did = TRUE;
-					KpiInstallNormalizeFmpmdDllLayout(fmpmdDir, want);
-					/* Plugins.zip の PDZF は x86 → 必要なら公式で上書き */
-					if (KpiInstallPmdWinNeedsReplace(localPmdDll, want)
-						|| KpiInstallDllNeedsArchFix(localWinDll, want)
-						|| KpiInstallDllNeedsArchFix(localPdzDll, want)) {
-						KpiInstallFetchOfficialFmpmdDlls(fmpmdDir, want);
-					}
-					const BOOL haveNewAfter =
-						(KpiInstallFileMtimeUtc(localPmd) != 0 && KpiInstallFileMtimeUtc(localFmp) != 0);
-					if (!haveNewAfter && serverMod != 0) {
-						CreateDirectory(fmpmdDir, NULL);
-						HANDLE h = CreateFile(stampPath, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
-						if (h != INVALID_HANDLE_VALUE) {
-							char buf[64];
-							int n = sprintf_s(buf, "%lld\n", (long long)serverMod);
-							DWORD wr = 0;
-							if (n > 0) WriteFile(h, buf, (DWORD)n, &wr, NULL);
-							CloseHandle(h);
-							FILETIME ft;
-							ULARGE_INTEGER ull;
-							ull.QuadPart = ((ULONGLONG)serverMod * 10000000ULL) + 116444736000000000ULL;
-							ft.dwLowDateTime = ull.LowPart;
-							ft.dwHighDateTime = ull.HighPart;
-							HANDLE h2 = CreateFile(stampPath, FILE_WRITE_ATTRIBUTES, 0, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
-							if (h2 != INVALID_HANDLE_VALUE) {
-								SetFileTime(h2, NULL, NULL, &ft);
-								CloseHandle(h2);
-							}
-						}
-					} else if (haveNewAfter) {
-						DeleteFile(stampPath);
-					}
-				}
+		if (did) {
+			KpiInstallNormalizeFmpmdDllLayout(fmpmdDir, want);
+			if (KpiInstallPmdWinNeedsReplace(localPmdDll, want)
+				|| KpiInstallDllNeedsArchFix(localWinDll, want)
+				|| KpiInstallDllNeedsArchFix(localPdzDll, want)) {
+				KpiInstallFetchOfficialFmpmdDlls(fmpmdDir, want);
 			}
 		}
 	}
@@ -1117,10 +1091,28 @@ BOOL KpiInstall_SilentUpdateFmMonKpis(LPCTSTR exeDir)
 	static const Entry kTab[] = {
 		/* --- FM/MIDI モニタ既存 --- */
 		{ L"Kobarin\\kbfmmidi\\kbfmmidi.kpi", L"kbfmmidi.kpi", NULL },
+		{ L"Kobarin\\fmpmd\\kbfmp.kpi", L"kbfmp.kpi", NULL },
+		{ L"Kobarin\\fmpmd\\kbpmd.kpi", L"kbpmd.kpi", NULL },
+		{ L"Kobarin\\fmpmd\\PMDWin.dll", L"PMDWin.dll", L"Kobarin\\fmpmd\\kbpmd.kpi" },
 		{ L"Kobarin\\kbvgm\\kbvgm.kpi", L"kbvgm.kpi", NULL },
 		{ L"kbvgm.kpi", L"kbvgm.kpi", NULL },
 		{ L"Mamiya\\kbs98\\kbs98.kpi", L"kbs98.kpi", NULL },
 		{ L"OK\\kbmsxplug\\kbmsxplug.kpi", L"kbmsxplug.kpi", NULL },
+		/* MSXplug 付属ドライバ（DLLではないが FMPAC/OPX/MBM 再生に必要） */
+		{ L"OK\\kbmsxplug\\FMPAC.ROM", L"FMPAC.ROM", L"OK\\kbmsxplug\\kbmsxplug.kpi" },
+		{ L"OK\\kbmsxplug\\MPK.BIN", L"MPK.BIN", L"OK\\kbmsxplug\\kbmsxplug.kpi" },
+		{ L"OK\\kbmsxplug\\MPK103.BIN", L"MPK103.BIN", L"OK\\kbmsxplug\\kbmsxplug.kpi" },
+		{ L"OK\\kbmsxplug\\OPX4KSS.BIN", L"OPX4KSS.BIN", L"OK\\kbmsxplug\\kbmsxplug.kpi" },
+		{ L"OK\\kbmsxplug\\MBR143.001", L"MBR143.001", L"OK\\kbmsxplug\\kbmsxplug.kpi" },
+		{ L"OK\\kbmsxplug\\MBR143.000", L"MBR143.000", L"OK\\kbmsxplug\\kbmsxplug.kpi" },
+		{ L"OK\\kbmsxplug\\MBR143.BAS", L"MBR143.BAS", L"OK\\kbmsxplug\\kbmsxplug.kpi" },
+		{ L"z_5_Plugins\\OK\\kbmsxplug\\FMPAC.ROM", L"FMPAC.ROM", L"z_5_Plugins\\OK\\kbmsxplug\\kbmsxplug.kpi" },
+		{ L"z_5_Plugins\\OK\\kbmsxplug\\MPK.BIN", L"MPK.BIN", L"z_5_Plugins\\OK\\kbmsxplug\\kbmsxplug.kpi" },
+		{ L"z_5_Plugins\\OK\\kbmsxplug\\MPK103.BIN", L"MPK103.BIN", L"z_5_Plugins\\OK\\kbmsxplug\\kbmsxplug.kpi" },
+		{ L"z_5_Plugins\\OK\\kbmsxplug\\OPX4KSS.BIN", L"OPX4KSS.BIN", L"z_5_Plugins\\OK\\kbmsxplug\\kbmsxplug.kpi" },
+		{ L"z_5_Plugins\\OK\\kbmsxplug\\MBR143.001", L"MBR143.001", L"z_5_Plugins\\OK\\kbmsxplug\\kbmsxplug.kpi" },
+		{ L"OK\\kbemidi\\kbemidi.kpi", L"kbemidi.kpi", NULL },
+		{ L"Kobarin\\kbemidi\\kbemidi.kpi", L"kbemidi.kpi", NULL },
 		{ L"Kobarin\\kbgme\\kbgme.kpi", L"kbgme.kpi", NULL },
 		{ L"OK\\kbgme\\kbgme.kpi", L"kbgme.kpi", NULL },
 		/* --- keys-only / チップ拡張（引用リスト） --- */
@@ -1130,6 +1122,7 @@ BOOL KpiInstall_SilentUpdateFmMonKpis(LPCTSTR exeDir)
 		/* --- dump 系: NSF → SPC → PSF / PSF2 --- */
 		{ L"Kobarin\\kbnsfplug\\kbnsfplug.kpi", L"kbnsfplug.kpi", NULL },
 		{ L"Kobarin\\kbsnesapu\\kbsnesapu.kpi", L"kbsnesapu.kpi", NULL },
+		{ L"Kobarin\\kbsnesapu\\snesapu.dll", L"snesapu.dll", L"Kobarin\\kbsnesapu\\kbsnesapu.kpi" },
 		{ L"Audio\\kbsnesapu.kpi", L"kbsnesapu.kpi", NULL },
 		{ L"S_Kino\\kbspc\\kbspc.kpi", L"kbsnesapu.kpi", NULL }, /* 旧名配置でも更新 */
 		/* PSF 系は Kobarin 内のみ更新（Plugins\kbpsf / kbpsf2 は触らない） */
@@ -1171,8 +1164,11 @@ BOOL KpiInstall_SilentUpdateFmMonKpis(LPCTSTR exeDir)
 		{ L"OK\\kbgym\\kbgym.kpi", L"kbgym.kpi", NULL },
 		/* z_5 退避先 */
 		{ L"z_5_Plugins\\Kobarin\\kbfmmidi\\kbfmmidi.kpi", L"kbfmmidi.kpi", NULL },
+		{ L"z_5_Plugins\\Kobarin\\fmpmd\\kbfmp.kpi", L"kbfmp.kpi", NULL },
+		{ L"z_5_Plugins\\Kobarin\\fmpmd\\kbpmd.kpi", L"kbpmd.kpi", NULL },
 		{ L"z_5_Plugins\\Kobarin\\kbvgm\\kbvgm.kpi", L"kbvgm.kpi", NULL },
 		{ L"z_5_Plugins\\OK\\kbmsxplug\\kbmsxplug.kpi", L"kbmsxplug.kpi", NULL },
+		{ L"z_5_Plugins\\OK\\kbemidi\\kbemidi.kpi", L"kbemidi.kpi", NULL },
 		{ L"z_5_Plugins\\Kobarin\\kbgme\\kbgme.kpi", L"kbgme.kpi", NULL },
 		{ L"z_5_Plugins\\Mamiya\\kbs98\\kbs98.kpi", L"kbs98.kpi", NULL },
 		{ L"z_5_Plugins\\Mamiya\\kbmdx\\kbmdx.kpi", L"kbmdx.kpi", NULL },
@@ -1292,7 +1288,7 @@ static BOOL KpiProbeStemIsKeysOnlyMid(LPCTSTR path)
 	TCHAR* dot = _tcsrchr(stem, L'.');
 	if (dot) *dot = 0;
 	static const TCHAR* kKeys[] = {
-		L"kbfmmidi", L"kbfmoplmidi", L"kbmdx", L"kbncsf", L"kbnsfplug",
+		L"kbfmmidi", L"kbfmoplmidi", L"kbemidi", L"kbmdx", L"kbncsf", L"kbnsfplug",
 		L"kbsnesapu", L"kbspc", L"kbsid", L"sidplay", L"kbpsf", L"kbpsf2",
 		L"kbgsf", L"kbum", L"kbmod", L"kbpxtone", L"kb2sf", L"kbvio2sf",
 		L"kbqsf", L"kbusf", L"kbssf", L"kbdsf", L"kbsap", L"kbwsr", L"kbnezplug",

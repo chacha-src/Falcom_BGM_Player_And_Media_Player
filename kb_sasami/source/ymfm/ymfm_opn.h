@@ -1,4 +1,4 @@
-// BSD 3-Clause License
+﻿// BSD 3-Clause License
 //
 // Copyright (c) 2021, Aaron Giles
 // All rights reserved.
@@ -464,6 +464,10 @@ public:
 
 	// generate one sample of sound
 	void generate(output_data *output, uint32_t numsamples = 1);
+
+	/* keyon/off applies on FM clock; force one so writes are not deferred
+	   across generate() thinning (mirror ym2608::flush_fm_clock). */
+	void flush_fm_clock() { clock_fm(); }
 
 protected:
 	// internal helpers

@@ -1,4 +1,4 @@
-#include "stdafx.h"
+﻿#include "stdafx.h"
 
 #include "KpiHostClient.h"
 #include <tlhelp32.h>
@@ -664,7 +664,7 @@ bool KpiHost64Client::VstRender(uint32_t bytesWanted, std::vector<uint8_t>& outP
 	KPIHOST64_RenderReq rr{};
 	rr.sessionId = slot;
 	rr.bytesWanted = bytesWanted;
-	if (injCount > 64) injCount = 64;
+	if (injCount > 512) injCount = 512;
 	if (!injPorts || !injMsgs) injCount = 0;
 	std::vector<uint8_t> req(sizeof(rr) + sizeof(uint32_t) +
 		(size_t)injCount * sizeof(KPIHOST64_VstLiveMidiReq));

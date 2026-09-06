@@ -1,0 +1,69 @@
+﻿/* CEmu detached M37702/M37710 (7700-series) - bus-callback core. */
+#ifndef CEMU_M37702CORE_H
+#define CEMU_M37702CORE_H
+#include <stdint.h>
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+typedef struct M37702Cpu M37702Cpu;
+typedef uint8_t (*M37702ReadFn)(void* ctx, uint32_t addr);
+typedef void (*M37702WriteFn)(void* ctx, uint32_t addr, uint8_t data);
+
+enum {
+	M37710_LINE_ADC = 0,
+	M37710_LINE_UART1XMIT,
+	M37710_LINE_UART1RECV,
+	M37710_LINE_UART0XMIT,
+	M37710_LINE_UART0RECV,
+	M37710_LINE_TIMERB2,
+	M37710_LINE_TIMERB1,
+	M37710_LINE_TIMERB0,
+	M37710_LINE_TIMERA4,
+	M37710_LINE_TIMERA3,
+	M37710_LINE_TIMERA2,
+	M37710_LINE_TIMERA1,
+	M37710_LINE_TIMERA0,
+	M37710_LINE_IRQ2,
+	M37710_LINE_IRQ1,
+	M37710_LINE_IRQ0,
+	M37710_LINE_WATCHDOG,
+	M37710_LINE_DEBUG,
+	M37710_LINE_BRK,
+	M37710_LINE_ZERODIV,
+	M37710_LINE_RESET,
+	M37710_LINE_TIMERA0TICK,
+	M37710_LINE_TIMERA1TICK,
+	M37710_LINE_TIMERA2TICK,
+	M37710_LINE_TIMERA3TICK,
+	M37710_LINE_TIMERA4TICK,
+	M37710_LINE_TIMERB0TICK,
+	M37710_LINE_TIMERB1TICK,
+	M37710_LINE_TIMERB2TICK,
+	M37710_LINE_MAX
+};
+
+enum {
+	M37710_PC=1, M37710_S, M37710_P, M37710_A, M37710_B, M37710_X, M37710_Y,
+	M37710_PB, M37710_DB, M37710_D, M37710_E,
+	M37710_NMI_STATE, M37710_IRQ_STATE
+};
+
+enum { M37702_CLEAR_LINE=0, M37702_ASSERT_LINE=1, M37702_HOLD_LINE=2 };
+
+M37702Cpu* M37702Create(void);
+void M37702Destroy(M37702Cpu* cpu);
+void M37702SetBus(M37702Cpu* cpu, void* ctx, M37702ReadFn read, M37702WriteFn write);
+/* Optional 16KB internal mask ROM mapped at 0xC000-0xFFFF (C69/C74/C76). */
+void M37702SetInternalRom(M37702Cpu* cpu, const uint8_t* data, unsigned size);
+void M37702Reset(M37702Cpu* cpu);
+int M37702Execute(M37702Cpu* cpu, int cycles);
+void M37702SetInputLine(M37702Cpu* cpu, int line, int state);
+uint32_t M37702Pc(const M37702Cpu* cpu);
+uint32_t M37702Sp(const M37702Cpu* cpu);
+uint32_t M37702IrqCount(const M37702Cpu* cpu);
+
+#ifdef __cplusplus
+}
+#endif
+#endif

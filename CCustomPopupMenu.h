@@ -97,7 +97,8 @@ enum {
 	// extern PlRefreshMidiPlayModes() でプレイリストの MID(VST)/MID(KPI) を即更新。
 	// PlayList.h は IDD_PLAYLIST 欠落のため CCustomPopupMenu.cpp から include しない。
 	CCUSTOM_POPUP_ID_MID_KPI = 0x00E0012D,    // KPI 優先（midPlayPrefer=0）
-	CCUSTOM_POPUP_ID_MID_VST = 0x00E0012E     // 自前 VST ホスト優先（midPlayPrefer=1）
+	CCUSTOM_POPUP_ID_MID_VST = 0x00E0012E,    // 自前 VST ホスト優先（midPlayPrefer=1）
+	CCUSTOM_POPUP_ID_CEMU_LIST = 0x00E0012F   // Cemu対応一覧（arcdata.zip があるときのみ）
 };
 
 enum {

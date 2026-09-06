@@ -1,4 +1,4 @@
-// oggDlg.h : ヘッダー ファイル
+﻿// oggDlg.h : ヘッダー ファイル
 //
 #include "afxmt.h"
 //#include "afxcmn.h"
@@ -386,6 +386,7 @@ public:
 	afx_msg void OnBnClickedButton51();
 	afx_msg LRESULT OnUpdateAvailable(WPARAM wParam, LPARAM lParam);
 	afx_msg LRESULT OnKpiPluginMsg(WPARAM wParam, LPARAM lParam);
+	afx_msg LRESULT OnCemuCatListMsg(WPARAM wParam, LPARAM lParam);
 	CCustomStandardButton d_san1;
 	afx_msg void OnBnClickedButton53();
 	CCustomStandardButton d_san2;
@@ -524,6 +525,9 @@ BOOL OggKpiDownloadPlugins(CWnd* owner, BOOL confirm, BOOL startupEmpty, BOOL re
 BOOL OggKpiReloadPlugins(CWnd* owner);
 #ifndef WM_APP_KPI_PLUGIN
 #define WM_APP_KPI_PLUGIN (WM_APP + 58) // wParam: 1=DL 2=再読込
+#endif
+#ifndef WM_APP_CEMU_CATLIST
+#define WM_APP_CEMU_CATLIST (WM_APP + 59) // Cemu対応一覧を開く
 #endif
 
 //{{AFX_INSERT_LOCATION}}

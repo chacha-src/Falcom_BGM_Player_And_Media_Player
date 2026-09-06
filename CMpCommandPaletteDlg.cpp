@@ -73,6 +73,8 @@ enum {
 	PAL_WIN_SASAMI_TEXT,
 	PAL_WIN_SASAMI_MIDI,
 	PAL_WIN_SASAMI_FM,
+	PAL_WIN_SASAMI_MIDI_ROLL,
+	PAL_WIN_SASAMI_FM_ROLL,
 	PAL_SWITCH_FALCOM
 };
 
@@ -145,6 +147,8 @@ const MpPalCmd kCmds[] = {
 	{ PAL_WIN_SASAMI_TEXT,  3 },
 	{ PAL_WIN_SASAMI_MIDI,  3 },
 	{ PAL_WIN_SASAMI_FM,    3 },
+	{ PAL_WIN_SASAMI_MIDI_ROLL, 3 },
+	{ PAL_WIN_SASAMI_FM_ROLL, 3 },
 	{ PAL_SWITCH_FALCOM,    3 }
 };
 
@@ -398,6 +402,14 @@ const wchar_t* PalCmdName(int id)
 		return LL14(L"SASAMI FMスコア", L"SASAMI FM Score", L"Partition FM SASAMI", L"Partitura FM SASAMI", L"Partitura FM SASAMI",
 			L"SASAMI FM 스코어", L"SASAMI FM 乐谱", L"نوتة SASAMI FM", L"Партитура SASAMI FM", L"SASAMI FM-Partitur",
 			L"Partitura FM SASAMI", L"SASAMI FM-partituur", L"Partytura SASAMI FM", L"SASAMI FM Skor");
+	case PAL_WIN_SASAMI_MIDI_ROLL:
+		return LL14(L"SASAMI MIDIピアノロール", L"SASAMI MIDI Piano Roll", L"Piano roll MIDI SASAMI", L"Piano roll MIDI SASAMI", L"Piano roll MIDI SASAMI",
+			L"SASAMI MIDI 피아노 롤", L"SASAMI MIDI 钢琴卷帘", L"رول بيانو SASAMI MIDI", L"SASAMI MIDI-пианоролл", L"SASAMI MIDI-Klavierrolle",
+			L"Piano roll MIDI SASAMI", L"SASAMI MIDI-piano-roll", L"Rolka SASAMI MIDI", L"SASAMI MIDI piyano rulosu");
+	case PAL_WIN_SASAMI_FM_ROLL:
+		return LL14(L"SASAMI FMピアノロール", L"SASAMI FM Piano Roll", L"Piano roll FM SASAMI", L"Piano roll FM SASAMI", L"Piano roll FM SASAMI",
+			L"SASAMI FM 피아노 롤", L"SASAMI FM 钢琴卷帘", L"رول بيانو SASAMI FM", L"SASAMI FM-пианоролл", L"SASAMI FM-Klavierrolle",
+			L"Piano roll FM SASAMI", L"SASAMI FM-piano-roll", L"Rolka SASAMI FM", L"SASAMI FM piyano rulosu");
 	case PAL_SWITCH_FALCOM:
 		return LL14(L"ファルコム特化型画面へ切替", L"Switch to Falcom view", L"Basculer vers la vue Falcom", L"Passa alla vista Falcom", L"Cambiar a la vista Falcom",
 			L"팔콤 특화 화면으로 전환", L"切换到 Falcom 专用界面", L"التبديل إلى شاشة Falcom", L"Переключиться на экран Falcom", L"Zur Falcom-Ansicht wechseln",
@@ -925,6 +937,8 @@ void CMpCommandPaletteDlg::ExecCommand(int id)
 	case PAL_WIN_SASAMI_TEXT: PalPostToMp(ID_MP_SASAMI_TEXT); return;
 	case PAL_WIN_SASAMI_MIDI: PalPostToMp(ID_MP_SASAMI_MIDI); return;
 	case PAL_WIN_SASAMI_FM:   PalPostToMp(ID_MP_SASAMI_FM); return;
+	case PAL_WIN_SASAMI_MIDI_ROLL: PalPostToMp(ID_MP_SASAMI_MIDI_ROLL); return;
+	case PAL_WIN_SASAMI_FM_ROLL:   PalPostToMp(ID_MP_SASAMI_FM_ROLL); return;
 	case PAL_SWITCH_FALCOM: PalPostToMp(IDC_MP_SWITCHMODE); return;
 	default: return;
 	}

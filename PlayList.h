@@ -198,6 +198,8 @@ BOOL PlTrackLooksMissing(int sub, LPCTSTR fol);
 int PlMissDiskGet(LPCTSTR fol);
 void PlMissDiskSet(LPCTSTR fol, int miss);
 void PlMissDiskForget(LPCTSTR fol);
+void PlRefreshMidiPlayModes();
+bool PlCemuAddZipAndPlay(LPCTSTR zipPhysical);
 // ジャケットサムネディスクキャッシュ(%LOCALAPPDATA%\oggYSED\jak)
 CString PlJakDiskPath(LPCTSTR fol, BOOL noneSentinel);
 void PlJakDiskForget(LPCTSTR fol);
@@ -289,6 +291,8 @@ enum {
 	PL_CTX_FMMON = 94, // SASAMI FPY FMモニタ
 	PL_CTX_SASAMIFM_BASE = 95, // ささみ☆ﾐ FMモード +0=BEEP +1=OPN +2=OPNA
 	PL_CTX_SASAMIFM_LAST = PL_CTX_SASAMIFM_BASE + 2,
+	PL_CTX_CEMUMODE_BASE = 98, // CEmu zip 音源モード (XML subtype: OPN/OPNA/MIDI…)
+	PL_CTX_CEMUMODE_LAST = PL_CTX_CEMUMODE_BASE + 23, // up to 24 modes
 	PL_CTX_MOVE_BASE = 42500,
 	PL_CTX_COPY_BASE = 43500,
 	PL_CTX_MOVE_MAX = PL_CTX_MOVE_BASE + 999,

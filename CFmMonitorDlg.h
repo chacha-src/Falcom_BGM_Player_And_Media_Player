@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 // CFmMonitorDlg : SASAMI FPY / OPNA (YM2608) レジスタ・鍵盤モニタ
 // kbsasami (raira=1) が %TEMP%\ogg_kbsasami\*.opna に出す dump を同期表示。
 #include "afxdialogex.h"
@@ -40,9 +40,9 @@ protected:
 	afx_msg void OnSysCommand(UINT nID, LPARAM lParam);
 
 private:
-	enum { HIST_MAX = 256 }; /* リング容量 */
-	/* .fpy は可聴ラグ~700ms。短すぎると「まだ可聴前」の dump を捨てて無描画になる */
-	enum { HIST_SOFT = 192 };
+	enum { HIST_MAX = 512 }; /* リング容量（keys-only 高解像度用） */
+	/* .fpy ~700ms / keys-only ~750ms。短すぎると可聴前 dump を捨てて無描画 */
+	enum { HIST_SOFT = 448 };
 
 	int PollDump();
 	void ResetDumpSync();
@@ -58,7 +58,18 @@ private:
 	int SsgRows() const;
 	int KeysOnly() const;
 	int IsMsxDump() const;
+	int IsOpmDump() const;
+	int IsOplDump() const;
+	int IsYm2610Dump() const;
+	int IsArcadePcmDump() const;
 	unsigned MsxDevMask() const;
+	unsigned ChipProfile() const;
+	unsigned ViewCaps() const;
+	int HideRhythm() const;
+	int HasViewRegs() const;
+	int HasViewPanels() const;
+	/* 起動直後／keys-only(MIDI等)でチップUIが無いとき OPNA 殻を出す */
+	int PreferOpnaShell() const;
 	bool EnsureFrameBuffer(CDC& refDC, int w, int h);
 	void ReleasePaintBuffers();
 	void ComputeLayout(int w, int h);
@@ -67,8 +78,12 @@ private:
 	void DrawPanelsArea(CDC& dc);
 	void DrawKeysArea(CDC& dc);
 	void ComposeFrame(CDC& dc, int w, int h);
-	void DrawHexBank(CDC& dc, int x, int y, int cellW, int cellH, int gapExtra, int bankBase, const wchar_t* title);
+	void DrawHexBank(CDC& dc, int x, int y, int cellW, int cellH, int gapExtra, int bankBase, const wchar_t* title, int rowCount = 16);
 	void DrawFmChPanel(CDC& dc, const CRect& rc, int ch);
+	void DrawOpmChPanel(CDC& dc, const CRect& rc, int ch);
+	void DrawOplChPanel(CDC& dc, const CRect& rc, int ch);
+	void DrawOpllChPanel(CDC& dc, const CRect& rc, int ch);
+	void DrawArcadePcmChPanel(CDC& dc, const CRect& rc, int ch, unsigned profile);
 	void DrawPiano108(CDC& dc, const CRect& rc, int midiNote, int lit);
 	void DrawChannelKeys(CDC& dc, int x, int y, int w, int rowH, int keyH, int labelW);
 	static int ApproxMidiFromFnum(uint8_t a4, uint8_t a0);

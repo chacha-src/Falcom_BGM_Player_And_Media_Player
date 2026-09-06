@@ -1,4 +1,4 @@
-// stdafx.h : 標準のシステム インクルード ファイルのインクルード ファイル、または
+﻿// stdafx.h : 標準のシステム インクルード ファイルのインクルード ファイル、または
 // 参照回数が多く、かつあまり変更されない、プロジェクト専用のインクルード ファイル
 // を記述します。
 
@@ -853,6 +853,11 @@ struct save{
 	unsigned char sasamiPartBandHgt[32][8];
 	/* 譜表レイアウトパレット位置（save 末尾。旧 sasamiLayoutPal* から移行） */
 	int sasamiLayPalX, sasamiLayPalY, sasamiLayPalW, sasamiLayPalH;
+
+	/* --- CEmu (hoot) データルート。空=exe\\data (末尾追記) --- */
+	TCHAR cemuDataPath[1024];
+	/* Cemu対応一覧ウィンドウ。W==0 は未保存 */
+	int cemuListX, cemuListY, cemuListW, cemuListH;
 };
 extern save savedata;
 

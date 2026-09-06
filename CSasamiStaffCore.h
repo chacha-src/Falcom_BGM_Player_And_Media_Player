@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 /* Shared staff-score geometry / paint / hit-test for SASAMI MIDI & FM score dialogs. */
 #include "SasamiComposerDoc.h"
 
@@ -227,6 +227,14 @@ struct ScStaffUi {
 	int patternMode; /* sticky: pencil places rhythm pattern until unchecked */
 	int patternId; /* ScPatternId */
 	int gridEmph; /* emphasize beat/bar lines */
+	/* SSW-like edit */
+	int pasteInsert;       /* 0=overwrite paste, 1=insert (shift later events) */
+	int rulerDragOn;       /* 1 while dragging on sticky ruler for all-part select */
+	uint32_t rulerT0, rulerT1;
+	int markerSolidTrack;  /* track with solid marker line; -1 = none (dotted only) */
+	int selRangeValid;     /* 1 if selRangeT0/T1 from marquee/ruler expansion */
+	uint32_t selRangeT0, selRangeT1;
+	int selRangeAllParts;  /* 1 = ruler / all-part blank-insert scope */
 };
 
 /* Ticks in one measure from meter (4/4 → 4*PPQN, 7/8 → 7*(PPQN/2)). */
@@ -496,3 +504,27 @@ int ScStaffTieSelected(ScEvent* ev, int evCount, ScStaffUi* u);
 int ScStaffCopyMeasure(const ScEvent* ev, int evCount, int track, uint32_t measTicks, int measIndex, int allTracks,
 	ScEvent* out, int outMax, uint32_t* outBaseTick);
 void ScStaffPaintMarquee(CDC& dc, const ScStaffUi* u);
+
+/* SSW-like edit helpers */
+int ScStaffIsNoteLike(uint8_t kind, int isFm);
+int ScStaffIsCtrlAttachKind(uint8_t kind, int isFm);
+uint32_t ScStaffEvEndTick(const ScEvent& e);
+int ScStaffNotePitchKey(const ScEvent& e, int isFm, int tr);
+void ScStaffExpandSelToFullNotes(ScEvent* ev, int evCount, ScStaffUi* u, int isFm,
+	uint32_t* ioT0, uint32_t* ioT1, int trackFilter /* -1=all */);
+int ScStaffSelectInRect(const CRect& grid, ScStaffUi* u, const ScEvent* ev, int evCount, int isFm,
+	const CRect& r, int expandFull);
+int ScStaffSelectTickRange(ScStaffUi* u, const ScEvent* ev, int evCount, int isFm,
+	uint32_t t0, uint32_t t1, int trackFilter /* -1=all */);
+int ScStaffSelAddTieChain(ScEvent* ev, int evCount, ScStaffUi* u, int seedIdx, int isFm);
+int ScStaffSelMoveBy(ScEvent* ev, int* evCount, ScStaffUi* u, int dTick, int dSemi, int isFm);
+int ScStaffSelCopyEx(const ScEvent* ev, int evCount, const ScStaffUi* u, int isFm,
+	ScEvent* out, int outMax, uint32_t* outBaseTick, uint32_t* outSpan);
+int ScStaffSelPasteEx(ScEvent* ev, int* evCount, int evMax, ScStaffUi* u, int isFm,
+	const ScEvent* clip, int clipN, uint32_t baseTick, uint32_t clipSpan, int insertMode);
+/* Insert empty time equal to current selection/range; shift later events (no rests).
+   all-parts when selRangeAllParts; otherwise channels in selection (or markerSolidTrack). */
+int ScStaffInsertBlankRange(ScEvent* ev, int evCount, ScStaffUi* u);
+void ScStaffShrinkContentIfNeeded(ScStaffUi* u, const ScEvent* ev, int evCount);
+void ScStaffEnterSelectTool(ScStaffUi* u); /* pencil→select, clear hover/marquee */
+int ScStaffNoteHasFx(const ScEvent* ev, int evCount, int noteIdx, int isFm, int* outPitch, int* outPan, int* outVol, int* outExpr);

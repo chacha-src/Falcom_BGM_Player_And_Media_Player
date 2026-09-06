@@ -1,4 +1,4 @@
-﻿#include "afxdialogex.h"
+#include "afxdialogex.h"
 #include "afxwin.h"
 #include "afxcmn.h"
 #if !defined(AFX_RENDER_H__F5FB1AA1_8545_4B26_80A3_4E0FA43C0548__INCLUDED_)
@@ -105,8 +105,10 @@ public:
 	CCustomStandardButton m_kpi;
 	CCustomStandardButton m_kpiPluginDl;
 	CCustomStandardButton m_kpiPluginReload;
+	CCustomStandardButton m_emuArcdataDl;
 	afx_msg void OnKpiPluginDl();
 	afx_msg void OnKpiPluginReload();
+	afx_msg void OnEmuArcdataDl();
 	afx_msg void OnFontMain();
 	afx_msg void OnFontList();
 	CCustomCheckBox m_mp3orig;

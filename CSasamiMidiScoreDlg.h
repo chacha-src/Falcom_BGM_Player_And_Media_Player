@@ -17,6 +17,16 @@ public:
 	static CSasamiMidiScoreDlg* Instance();
 	static void OpenOwned(CWnd* owner);
 	ScMidiDoc* Doc() { return &m_doc; }
+	ScStaffUi* Ui() { return &m_ui; }
+	int* CurPartPtr() { return &m_curCh; }
+	ScScoreHist* Hist() { return &m_hist; }
+	ScEvent* ClipBuf() { return m_clip; }
+	int* ClipCountPtr() { return &m_clipN; }
+	uint32_t* ClipBasePtr() { return &m_clipBase; }
+	uint32_t* ClipSpanPtr() { return &m_clipSpan; }
+	void NotifyEdited();
+	void RefreshBoundRoll();
+	void HistPush(); /* public for piano-roll / shared undo */
 	void LoadFromDoc(const ScMidiDoc& src);
 	void SyncMeterFromDoc();
 	void PushDocToText();
@@ -75,6 +85,7 @@ protected:
 	afx_msg void OnCbnStrip();
 	afx_msg void OnCbnMidiIn();
 	afx_msg void OnCbnFollow();
+	afx_msg void OnCbnPasteMode();
 	afx_msg void OnTimer(UINT_PTR nIDEvent);
 	afx_msg LRESULT OnPalDur(WPARAM w, LPARAM l);
 	afx_msg LRESULT OnPalQueryState(WPARAM w, LPARAM l);
@@ -113,7 +124,6 @@ protected:
 	void UpdateHoverStatus(CPoint pt);
 	void UpdateHelpBar();
 	void OpenNotePropsForSel();
-	void HistPush();
 	void SyncMidiInCombos();
 	void ApplyFollowScroll();
 	void ApplyMuteSoloToLive();
@@ -128,6 +138,7 @@ protected:
 	CCustomStandardButton m_btnFx, m_btnArr, m_btnLayout, m_btnChord, m_btnPatt, m_btnRoll;
 	CCustomComboBox m_ch, m_stripKind0, m_stripKind1, m_stripKind2, m_stripHgt0, m_stripHgt1, m_stripHgt2, m_stripDraw, m_stripLanes, m_stripStep;
 	CCustomComboBox m_midiInDev, m_midiInCh, m_midiInMode, m_follow;
+	CCustomComboBox m_pasteMode;
 	CCustomEdit m_edNote, m_edGt, m_edVel;
 	CCustomStatic m_status;
 	CCustomStatic m_helpBar;
@@ -141,6 +152,9 @@ protected:
 	ScEvent m_clip[SC_CLIP_MAX];
 	int m_clipN;
 	uint32_t m_clipBase;
+	uint32_t m_clipSpan;
+	int m_dragLastX, m_dragLastY;
+	int m_histDragPushed;
 	int m_curCh;
 	int m_placeRest;
 	int m_accidental;

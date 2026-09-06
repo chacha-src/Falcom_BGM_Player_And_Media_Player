@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include <Windows.h>
 #include "PluginKinds.h"
@@ -78,6 +78,7 @@ int VstMidiGetRate(void);
 int VstMidiGetChannels(void);
 int VstMidiGetBits(void);
 __int64 VstMidiGetLengthSamples(void);
+int VstMidiSongHasLoop(void);
 /* Song engine sample → tick (for score playhead). 1 if events loaded. */
 int VstMidiTickAtSample(__int64 sample, unsigned* outTick);
 __int64 VstMidiGetPlaySample(void);
@@ -103,6 +104,8 @@ int VstMidiFoldGsMapHint(int cur, int kind);
 int VstMidiSysexIsGmOn(const unsigned char* d, int n);
 int VstMidiSysexIsGsReset(const unsigned char* d, int n);
 int VstMidiSysexIsXgOn(const unsigned char* d, int n);
+/* Roland MT-32 / CM-32L / LAPC: F0 41 xx 16 … */
+int VstMidiSysexIsMt32(const unsigned char* d, int n);
 // 1 = GS Port B（50 xx）/ 32 バイト Voice Reserve / XG Multi Part 17-32。
 // 00 01 10 の 16 バイト Voice Reserve は普通の 16 パート GS なので 32ch ではない。
 int VstMidiSysexMarksGs32(const unsigned char* d, int n);

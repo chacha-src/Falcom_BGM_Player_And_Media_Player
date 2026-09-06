@@ -34,6 +34,7 @@ int flacmode = 0;
 #include "CSasamiMidiScoreDlg.h"
 #include "CSasamiFmScoreDlg.h"
 #include "CSasamiTextDlg.h"
+#include "CSasamiPianoRollDlg.h"
 #include "CSasamiNotePaletteDlg.h"
 #include "CSasamiLayoutPaletteDlg.h"
 #include "CSasamiNotePropsDlg.h"
@@ -58,6 +59,12 @@ int flacmode = 0;
 #include "dsound.h"
 #include "Douga.h"
 #include "PluginKinds.h"
+#include "CEmu/cemu_session.h"
+#include "CEmu/cemu_mgr.h"
+#include "CEmu/cemu_modepref.h"
+#include "CEmu/cemu_midi_live.h"
+#include "CEmu/fmmon/fmmon_shadow.h"
+#include "CEmu/fmmon/cemu_fmmon_bind.h"
 #include "VstMidiEngine.h"
 #include "PluginWinamp.h"
 #include "PluginXmplay.h"
@@ -105,6 +112,7 @@ int flacmode = 0;
 #include "PlayList.h"
 #include "Mp3Image.h"
 #include "Kpilist.h"
+#include "CEmuCatalogListDlg.h"
 #include "CInt24.h"
 #include "ZeroFol.h"
 int wavbit_sample_Hz;
@@ -549,6 +557,55 @@ static void ResumeDrainQueuedKeyDowns()
 
 // Space の KEYDOWN 中に MessageBox すると同じキーではいが押されるため、
 // ここでは投稿するだけ。TRUE=再生してよい / FALSE=確認待ち or キャンセル。
+/* CEmu MIDI capture/extract → TEMP\cemu_*.mid — never auto-add to playlist. */
+static int OggPathIsEphemeralCemuMidi(LPCTSTR path)
+{
+	if (!path || !path[0]) return 0;
+	const TCHAR* base = path;
+	for (const TCHAR* p = path; *p; ++p)
+		if (*p == _T('\\') || *p == _T('/')) base = p + 1;
+	/* cemu_mpu_*.mid (MPU capture) or cemu_<tick>_<name>.mid (zip extract). */
+	if (_tcsnicmp(base, _T("cemu_mpu_"), 9) == 0) return 1;
+	if (_tcsnicmp(base, _T("cemu_"), 5) != 0) return 0;
+	const TCHAR* dot = _tcsrchr(base, _T('.'));
+	if (!dot) return 0;
+	return (_tcsicmp(dot, _T(".mid")) == 0 || _tcsicmp(dot, _T(".midi")) == 0
+		|| _tcsicmp(dot, _T(".rmi")) == 0) ? 1 : 0;
+}
+
+/* LiveStart runs before goto open_mode_vst_midi; Close must not kill the emu. */
+static int g_cemuLiveKeepAcrossClose = 0;
+
+/* CC#111 (RPG Maker / common SMF loop) — Host64 path cannot see local VstMidiSongHasLoop. */
+static int OggMidiFileHasCc111Loop(LPCTSTR path)
+{
+	if (!path || !path[0]) return 0;
+	HANDLE h = CreateFile(path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
+	if (h == INVALID_HANDLE_VALUE) return 0;
+	LARGE_INTEGER li = {};
+	if (!GetFileSizeEx(h, &li) || li.QuadPart < 22 || li.QuadPart > 8 * 1024 * 1024) {
+		CloseHandle(h); return 0;
+	}
+	const DWORD n = (DWORD)li.QuadPart;
+	BYTE* buf = (BYTE*)malloc(n);
+	DWORD rd = 0;
+	const BOOL ok = buf && ReadFile(h, buf, n, &rd, NULL) && rd == n;
+	CloseHandle(h);
+	int sawStart = 0, sawEnd = 0;
+	if (ok) {
+		for (DWORD i = 0; i + 2 < rd; i++) {
+			const BYTE st = buf[i];
+			if ((st & 0xf0) != 0xb0) continue;
+			if (buf[i + 1] != 111) continue;
+			if (buf[i + 2] == 0) sawStart = 1;
+			if (buf[i + 2] == 127) sawEnd = 1;
+			if (sawStart && sawEnd) break;
+		}
+	}
+	free(buf);
+	return (sawStart && sawEnd) ? 1 : 0;
+}
+
 BOOL OggPrepareResumeBeforePlayback(LPCTSTR mediaPath)
 {
 	if (InterlockedCompareExchange(&g_inDougaTeardown, 0, 0) != 0)
@@ -793,8 +850,10 @@ extern IAudioRenderClient* pRenderClient;
 int randomno;
 int playwavkpi(BYTE* bw, int old, int l1, int l2);
 int playwavvst(BYTE* bw, int old, int l1, int l2);
+int playwavcemu(BYTE* bw, int old, int l1, int l2);
 int readkpi(BYTE* bw, int cnt);
 int readvst(BYTE* bw, int cnt);
+int readcemu(BYTE* bw, int cnt);
 int playwavwinamp(BYTE* bw, int old, int l1, int l2);
 int playwavxmplay(BYTE* bw, int old, int l1, int l2);
 int playwavaimp(BYTE* bw, int old, int l1, int l2);
@@ -1640,8 +1699,15 @@ void OggPluginLoadOnOneFileDone()
 {
 	if (g_pActiveLoadingWnd != NULL) {
 		g_nCurrentKpiIndex++;
-		g_pActiveLoadingWnd->SetPos(g_nCurrentKpiIndex);
+		/* 毎ファイルポンプは重いので数件ごと＋UI 更新は間引き */
+		const int idx = g_nCurrentKpiIndex;
+		if ((idx & 3) == 0 || idx == 1)
+			g_pActiveLoadingWnd->SetPos(idx);
+		else if (g_pActiveLoadingWnd->m_progress.GetSafeHwnd())
+			g_pActiveLoadingWnd->m_progress.SetPos(idx);
 	}
+	if ((g_nCurrentKpiIndex & 3) != 0)
+		return;
 	MSG msg;
 	while (::PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
 		if (msg.message == WM_QUIT) {
@@ -1657,6 +1723,7 @@ void OggPluginLoadOnOneFileDone()
 }
 
 #include "KpiPluginInstall.h"
+#include "KpiEnumCache.h"
 
 extern void COgg_KickTimerp();
 
@@ -1798,6 +1865,7 @@ BOOL OggKpiDownloadPlugins(CWnd* owner, BOOL confirm, BOOL startupEmpty, BOOL re
 			L"Wczytywanie wtyczek…\n(Pobrano — ponowne wczytanie)",
 			L"Eklentiler yükleniyor…\n(Indirme bitti — yeniden)"));
 		g_nCurrentKpiIndex = 0;
+		KpiEnumCache_Invalidate(); /* 更新後は必ず再列挙 */
 		if (og && ::IsWindow(og->GetSafeHwnd()))
 			og->plug(karento2, NULL);
 		OggKpiApplyAfterPlug();
@@ -1865,6 +1933,7 @@ BOOL OggKpiReloadPlugins(CWnd* owner)
 		L"Wczytywanie wtyczek…\n(Ponowne wczytanie)",
 		L"Eklentiler yükleniyor…\n(Yeniden)"));
 	g_nCurrentKpiIndex = 0;
+	KpiEnumCache_Invalidate(); /* 手動再読込はキャッシュ無視 */
 	og->plug(karento2, NULL);
 	OggKpiApplyAfterPlug();
 	if (ownWnd) {
@@ -2132,6 +2201,7 @@ BEGIN_MESSAGE_MAP(COggDlg, CCustomBlurDialogBase)
 	ON_MESSAGE(WM_APP + 1, dp1)
 	ON_MESSAGE(WM_APP + 2, dp2)
 	ON_MESSAGE(WM_APP_KPI_PLUGIN, OnKpiPluginMsg)
+	ON_MESSAGE(WM_APP_CEMU_CATLIST, OnCemuCatListMsg)
 	ON_MESSAGE(WM_TIMERP_VSYNC_TICK, &COggDlg::OnTimerpVsyncTick)
 	ON_MESSAGE(WM_SPEANA_TICK, &COggDlg::OnSpeanaTick)
 	ON_MESSAGE(WM_ENDPOINT_VOLUME, &COggDlg::OnEndpointVolume)
@@ -2426,6 +2496,8 @@ static void DecodeSourceIntoScratch(uint8_t* scratch, int sb)
 		playwavwav(scratch, 0, sb, 0);
 	else if (dm == -3)
 		playwavkpi(scratch, 0, sb, 0);
+	else if (dm == MODE_CEMU)
+		playwavcemu(scratch, 0, sb, 0);
 	else if (dm == MODE_VST_MIDI)
 		playwavvst(scratch, 0, sb, 0);
 	else if (dm == MODE_PLUGIN_WINAMP)
@@ -2511,6 +2583,8 @@ void DispatchPlaywavFill(BYTE* bufwav3, ULONG oldw, int len1, int len2)
 			playwavwav(bufwav3, oldw, len1, len2);
 		else if (dm == -3)
 			playwavkpi(bufwav3, oldw, len1, len2);
+		else if (dm == MODE_CEMU)
+			playwavcemu(bufwav3, oldw, len1, len2);
 		else if (dm == MODE_VST_MIDI)
 			playwavvst(bufwav3, oldw, len1, len2);
 		else if (dm == MODE_PLUGIN_WINAMP)
@@ -3402,8 +3476,16 @@ void MmBindVstActiveSlot()
 static void CloseVstMidiSession()
 {
 	VstPrefetchStopAll();
+	const int keepLive = g_cemuLiveKeepAcrossClose;
+	if (keepLive)
+		g_cemuLiveKeepAcrossClose = 0;
+	/* Close VST/Host64 first so Pump/Steal no longer touch live hard, then
+	   tear down emu. LiveStop-before-VST could deadlock (UI holds live CS
+	   while Host64 waits in Pump / UI waits on Host64). */
 	CloseVstMidiSessionSlot(0);
 	CloseVstMidiSessionSlot(1);
+	if (!keepLive)
+		CEmuMidiLiveStop();
 }
 
 static HWND ShowVstWaitPopup(HWND owner)
@@ -3444,9 +3526,22 @@ static HWND ShowVstWaitPopup(HWND owner)
 	return wnd;
 }
 static KpiHost64Session g_kpiSession;
+static CEmuSession g_cemuSession;
 static std::vector<uint8_t> g_kpiRemoteCache;
 static size_t g_kpiRemoteCachePos = 0;
 static bool g_kpiRemoteEof = false;
+
+/* Stop/exit must tear down CEmu hard+driver (and MIDI live) after the audio
+   thread has joined. Leaving MODE_CEMU open caused MP Exit crashes (np2/IO
+   hooks still live while the UI destroyed). Also closes an orphaned soft
+   session before MIDI LiveStart so two PC98 hards never share one np2. */
+static void CloseCemuPlaybackResources()
+{
+	g_cemuLiveKeepAcrossClose = 0;
+	CEmuMidiLiveStop();
+	CEmuSessionClose(&g_cemuSession);
+	CEmuSessionInit(&g_cemuSession);
+}
 
 static void ResetKpiRemoteCache()
 {
@@ -3475,21 +3570,34 @@ static void SetPcmByteLengthFromSamples(int samples, int bits, int channels)
 static bool SplitKpiSubsongPath(const CString& in, CString& outPath, uint32_t& outSel)
 {
 	outPath = in;
-	outSel = 1;
+	/* Do not reset outSel — callers pass ret2 / known 1-based index. Wiping to 1
+	   made CEmu (sfa etc.) always open title 1 when filen lacked ::NNNN. */
 
 	const int len = in.GetLength();
 	if (len < 5) return false;
-	if (in.GetAt(len - 5) != L':') return false;
 
-	const CString tail = in.Right(4);
-	for (int i = 0; i < 4; i++) {
-		if (tail[i] < L'0' || tail[i] > L'9') return false;
+	/* KPI / CEmu subsong: path::0001 (exactly 4 digits) */
+	if (in.GetAt(len - 5) == L':') {
+		const CString tail = in.Right(4);
+		bool allDigits = true;
+		for (int i = 0; i < 4; i++) {
+			if (tail[i] < L'0' || tail[i] > L'9') { allDigits = false; break; }
+		}
+		if (allDigits && len >= 6 && in.GetAt(len - 6) == L':') {
+			outPath = in.Left(len - 6);
+			outSel = (uint32_t)_tstoi(tail);
+			if (outSel == 0) outSel = 1;
+			return true;
+		}
 	}
 
-	outPath = in.Left(len - 6);
-	outSel = (uint32_t)_tstoi(tail);
-	if (outSel == 0) outSel = 1;
-	return true;
+	/* Winamp / KSS INFO 付き: path::KSS,45,title,1:08,,3 — 物理パスだけ残す */
+	const int cor = in.Find(L':', 6);
+	if (cor != -1) {
+		outPath = in.Left(cor);
+		return true;
+	}
+	return false;
 }
 
 // WAV 保存用の安全な出力パスを作る。
@@ -3621,14 +3729,17 @@ static void CollectSubDirsRecursive(const std::wstring& baseDir, int depth, std:
 
 static std::vector<std::wstring> GetExeRelatedDllDirs()
 {
-	std::vector<std::wstring> dirs;
+	static std::vector<std::wstring> s_dirs;
+	static int s_once = 0;
+	if (s_once) return s_dirs;
+	s_once = 1;
 	wchar_t exePath[MAX_PATH]{};
-	if (!GetModuleFileNameW(NULL, exePath, _countof(exePath))) return dirs;
+	if (!GetModuleFileNameW(NULL, exePath, _countof(exePath))) return s_dirs;
 	std::wstring exeDir = KpiDirOf(exePath);
-	if (exeDir.empty()) return dirs;
-	dirs.push_back(exeDir);
-	CollectSubDirsRecursive(exeDir, 3, dirs);
-	return dirs;
+	if (exeDir.empty()) return s_dirs;
+	s_dirs.push_back(exeDir);
+	CollectSubDirsRecursive(exeDir, 3, s_dirs);
+	return s_dirs;
 }
 
 static HMODULE LoadKpiLibraryWithDependencies(const wchar_t* path)
@@ -4848,7 +4959,8 @@ void ApplyPlaylistRowDisplay(const playlistdata0& row)
 	const int sub = row.sub;
 	// タグ/ゲーム曲はプレイリスト保存名を停止中の表示に使う(再生開始で上書き)
 	if (sub == -1 || sub == -6 || sub == 34 || sub == 35 || sub == 999 || sub == 21 ||
-		(sub >= 1 && sub <= 30) || sub == -11 || sub == -12 || sub == -13 || sub == -14 || sub == -15) {
+		(sub >= 1 && sub <= 30) || sub == -11 || sub == -12 || sub == -13 || sub == -14 || sub == -15 ||
+		sub == MODE_CEMU) {
 		if (row.name[0])
 			stitle = row.name;
 	}
@@ -5344,9 +5456,68 @@ BOOL COggDlg::OnInitDialog()
 	//	uTimerId = timeSetEvent(1, 0, TimeCallback, NULL, TIME_PERIODIC);
 #if WIN64
 	/* x64 本体はここでの plug 無し。サイレント更新だけ先に済ませる */
-	KpiInstall_SilentUpdateKbsasami(karento2);
-	KpiInstall_SilentUpdateFmpmd(karento2);
-	KpiInstall_SilentUpdateFmMonKpis(karento2);
+	{
+		BOOL upd = FALSE;
+		upd |= KpiInstall_SilentUpdateKbsasami(karento2);
+		upd |= KpiInstall_SilentUpdateFmpmd(karento2);
+		upd |= KpiInstall_SilentUpdateFmMonKpis(karento2);
+		if (upd) KpiEnumCache_Invalidate();
+	}
+	{
+		CKpiLoadingWnd loadingWnd;
+		loadingWnd.Create(NULL);
+		loadingWnd.Show();
+		g_pActiveLoadingWnd = &loadingWnd;
+		g_oggKpiLoading = 1;
+		loadingWnd.SetStatusText(CEmuCatalogCacheIsCurrent(CEmuMgrGet()->dataRoot) ? LL14(
+			L"アーカイブデータ読み込み中…\n（キャッシュから復元）",
+			L"Loading archive data…\n(Restoring from cache)",
+			L"Chargement des donnees archive…\n(Depuis le cache)",
+			L"Caricamento dati archivio…\n(Dalla cache)",
+			L"Cargando datos de archivo…\n(Desde la cache)",
+			L"아카이브 데이터 읽는 중…\n(캐시에서 복원)",
+			L"正在读取归档数据…\n（从缓存恢复）",
+			L"جاري تحميل بيانات الأرشيف…\n(من الذاكرة المؤقتة)",
+			L"Загрузка данных архива…\n(Из кэша)",
+			L"Archivdaten werden geladen…\n(Aus dem Cache)",
+			L"A carregar dados de arquivo…\n(Da cache)",
+			L"Archiefgegevens laden…\n(Uit cache)",
+			L"Wczytywanie danych archiwum…\n(Z cache)",
+			L"Arsiv verileri yukleniyor…\n(Onbellekten)"
+		) : LL14(
+			L"アーカイブデータ読み込み中…\n（初回のみ時間がかかります）",
+			L"Loading archive data…\n(First time may take a while)",
+			L"Chargement des donnees archive…\n(La 1re fois peut etre longue)",
+			L"Caricamento dati archivio…\n(La prima volta puo richiedere tempo)",
+			L"Cargando datos de archivo…\n(La primera vez puede tardar)",
+			L"아카이브 데이터 읽는 중…\n(처음만 시간이 걸릴 수 있습니다)",
+			L"正在读取归档数据…\n（首次可能较慢）",
+			L"جاري تحميل بيانات الأرشيف…\n(المرة الأولى قد تستغرق وقتاً)",
+			L"Загрузка данных архива…\n(В первый раз может занять время)",
+			L"Archivdaten werden geladen…\n(Beim ersten Mal kann es dauern)",
+			L"A carregar dados de arquivo…\n(A primeira vez pode demorar)",
+			L"Archiefgegevens laden…\n(De eerste keer kan langer duren)",
+			L"Wczytywanie danych archiwum…\n(Za pierwszym razem moze potrwac)",
+			L"Arsiv verileri yukleniyor…\n(Ilk seferde zaman alabilir)"
+		));
+		loadingWnd.SetRange(0, 100);
+		loadingWnd.SetPos(0);
+		struct Prog64 {
+			static void CB(int pos, int max, void* user) {
+				CKpiLoadingWnd* w = (CKpiLoadingWnd*)user;
+				if (!w || !w->GetSafeHwnd()) return;
+				if (max <= 0) max = 1;
+				if (pos < 0) pos = 0;
+				if (pos > max) pos = max;
+				w->SetRange(0, max);
+				w->SetPos(pos);
+			}
+		};
+		CEmuMgrEnsureCatalogEx(CEmuMgrGet(), &Prog64::CB, &loadingWnd);
+		g_pActiveLoadingWnd = NULL;
+		g_oggKpiLoading = 0;
+		loadingWnd.DestroyWindow();
+	}
 #else
 	CKpiLoadingWnd loadingWnd;
 	loadingWnd.Create(NULL);
@@ -5372,9 +5543,13 @@ BOOL COggDlg::OnInitDialog()
 		L"Eklenti guncellemeleri kontrol ediliyor…\n(Sadece gerekirse indirilir)"
 	));
 	/* KPI 読込ダイアログ表示中にサイレント更新（DLL ロック前） */
-	KpiInstall_SilentUpdateKbsasami(karento2);
-	KpiInstall_SilentUpdateFmpmd(karento2);
-	KpiInstall_SilentUpdateFmMonKpis(karento2);
+	{
+		BOOL upd = FALSE;
+		upd |= KpiInstall_SilentUpdateKbsasami(karento2);
+		upd |= KpiInstall_SilentUpdateFmpmd(karento2);
+		upd |= KpiInstall_SilentUpdateFmMonKpis(karento2);
+		if (upd) KpiEnumCache_Invalidate();
+	}
 	loadingWnd.SetStatusText(LL14(
 		L"プラグイン読み込み中…\n（しばらく時間がかかる場合があります）",
 		L"Loading plugins…\n(This may take some time)",
@@ -5392,6 +5567,53 @@ BOOL COggDlg::OnInitDialog()
 		L"Eklentiler yükleniyor…\n(Bu biraz zaman alabilir)"
 	));
 	plug(karento2, NULL);
+	loadingWnd.SetStatusText(CEmuCatalogCacheIsCurrent(CEmuMgrGet()->dataRoot) ? LL14(
+		L"アーカイブデータ読み込み中…\n（キャッシュから復元）",
+		L"Loading archive data…\n(Restoring from cache)",
+		L"Chargement des donnees archive…\n(Depuis le cache)",
+		L"Caricamento dati archivio…\n(Dalla cache)",
+		L"Cargando datos de archivo…\n(Desde la cache)",
+		L"아카이브 데이터 읽는 중…\n(캐시에서 복원)",
+		L"正在读取归档数据…\n（从缓存恢复）",
+		L"جاري تحميل بيانات الأرشيف…\n(من الذاكرة المؤقتة)",
+		L"Загрузка данных архива…\n(Из кэша)",
+		L"Archivdaten werden geladen…\n(Aus dem Cache)",
+		L"A carregar dados de arquivo…\n(Da cache)",
+		L"Archiefgegevens laden…\n(Uit cache)",
+		L"Wczytywanie danych archiwum…\n(Z cache)",
+		L"Arsiv verileri yukleniyor…\n(Onbellekten)"
+	) : LL14(
+		L"アーカイブデータ読み込み中…\n（初回のみ時間がかかります）",
+		L"Loading archive data…\n(First time may take a while)",
+		L"Chargement des donnees archive…\n(La 1re fois peut etre longue)",
+		L"Caricamento dati archivio…\n(La prima volta puo richiedere tempo)",
+		L"Cargando datos de archivo…\n(La primera vez puede tardar)",
+		L"아카이브 데이터 읽는 중…\n(처음만 시간이 걸릴 수 있습니다)",
+		L"正在读取归档数据…\n（首次可能较慢）",
+		L"جاري تحميل بيانات الأرشيف…\n(المرة الأولى قد تستغرق وقتاً)",
+		L"Загрузка данных архива…\n(В первый раз может занять время)",
+		L"Archivdaten werden geladen…\n(Beim ersten Mal kann es dauern)",
+		L"A carregar dados de arquivo…\n(A primeira vez pode demorar)",
+		L"Archiefgegevens laden…\n(De eerste keer kan langer duren)",
+		L"Wczytywanie danych archiwum…\n(Za pierwszym razem moze potrwac)",
+		L"Arsiv verileri yukleniyor…\n(Ilk seferde zaman alabilir)"
+	));
+	loadingWnd.SetRange(0, 100);
+	loadingWnd.SetPos(0);
+	{
+		struct Prog {
+			static void CB(int pos, int max, void* user) {
+				CKpiLoadingWnd* w = (CKpiLoadingWnd*)user;
+				if (!w || !w->GetSafeHwnd()) return;
+				if (max <= 0) max = 1;
+				if (pos < 0) pos = 0;
+				if (pos > max) pos = max;
+				w->SetRange(0, max);
+				w->SetPos(pos);
+			}
+		};
+		CEmuMgrEnsureCatalogEx(CEmuMgrGet(), &Prog::CB, &loadingWnd);
+	}
 	g_pActiveLoadingWnd = NULL;
 	g_oggKpiLoading = 0;
 	if (ptl) ptl->SetProgressState(m_hWnd, TBPF_NOPROGRESS);
@@ -10124,7 +10346,7 @@ void COggDlg::play()
 			DoEvent();
 	}
 	else if (mode == -3 || mode == -10 || mode == -9 || mode == -8 || mode == -7 || mode == -6 || mode == 34 || mode == 35 || mode == 30 || mode == 999
-		|| mode == MODE_VST_MIDI || IsForeignPluginMode(mode)) {
+		|| mode == MODE_VST_MIDI || mode == MODE_CEMU || IsForeignPluginMode(mode)) {
 		// 孤児 CWread が古い loop1/2 で SetSelection しないよう世代を進める
 		// VST MIDI / 外部プラグインは Ogg ロードに落とさない（.mid で LoadOggVorbis 失敗→即 return していた）
 		InterlockedIncrement(&g_cwreadEpoch);
@@ -11311,6 +11533,7 @@ void COggDlg::play()
 
 	}
 	else if (mode == -3) { // kpi
+open_mode_kpi:
 		ret2 = 0;
 		g_kpiRemote = false;
 		g_kpiPlaybackArch = ResolveKpiArchBits(CString(kpi), filen);
@@ -11335,20 +11558,20 @@ void COggDlg::play()
 			if (!g_kpiHost.Open((const wchar_t*)kpi, (const wchar_t*)ssMedia, req, sel, g_kpiSession)) {
 				CString depMsg;
 				depMsg.Format(LL14(
-					L"KPIを開けませんでした。\r\n依存DLLが見つからない可能性があります。\r\n\r\nKPI: %s\r\nログ: %%TEMP%%\\ogg_kpi64_host.log", /* 日本語 */
-					L"Could not open KPI.\r\nA required dependent DLL may be missing.\r\n\r\nKPI: %s\r\nLog: %%TEMP%%\\ogg_kpi64_host.log", /* 英語 */
-					L"Impossible d'ouvrir le KPI.\r\nUne DLL dépendante requise est peut-être manquante.\r\n\r\nKPI : %s\r\nJournal : %%TEMP%%\\ogg_kpi64_host.log", /* フランス語 */
-					L"Impossibile aprire il KPI.\r\nPotrebbe mancare una DLL dipendente richiesta.\r\n\r\nKPI: %s\r\nLog: %%TEMP%%\\ogg_kpi64_host.log", /* イタリア語 */
-					L"No se pudo abrir el KPI.\r\nPuede faltar una DLL dependiente requerida.\r\n\r\nKPI: %s\r\nRegistro: %%TEMP%%\\ogg_kpi64_host.log", /* スペイン語 */
-					L"KPI를 열 수 없습니다.\r\n필요한 종속 DLL이 없을 수 있습니다.\r\n\r\nKPI: %s\r\n로그: %%TEMP%%\\ogg_kpi64_host.log", /* 韓国語 */
-					L"无法打开KPI。\r\n可能缺少必需的依赖DLL。\r\n\r\nKPI: %s\r\n日志: %%TEMP%%\\ogg_kpi64_host.log", /* 中国語 */
-					L"تعذر فتح KPI.\r\nقد يكون هناك DLL تابع مطلوب مفقود.\r\n\r\nKPI: %s\r\nالسجل: %%TEMP%%\\ogg_kpi64_host.log", /* アラビア語 */
-					L"Не удалось открыть KPI.\r\nВозможно, отсутствует требуемая зависимая DLL.\r\n\r\nKPI: %s\r\nЛог: %%TEMP%%\\ogg_kpi64_host.log", /* ロシア語 */
-					L"KPI konnte nicht geöffnet werden.\r\nMöglicherweise fehlt eine erforderliche abhängige DLL.\r\n\r\nKPI: %s\r\nLog: %%TEMP%%\\ogg_kpi64_host.log", /* ドイツ語 */
-					L"Não foi possível abrir o KPI.\r\nPode faltar uma DLL dependente necessária.\r\n\r\nKPI: %s\r\nLog: %%TEMP%%\\ogg_kpi64_host.log", /* ポルトガル語 */
-					L"Kan KPI niet openen.\r\nMogelijk ontbreekt een vereiste afhankelijke DLL.\r\n\r\nKPI: %s\r\nLog: %%TEMP%%\\ogg_kpi64_host.log", /* オランダ語 */
-					L"Nie można otworzyć KPI.\r\nMoże brakować wymaganej zależnej biblioteki DLL.\r\n\r\nKPI: %s\r\nDziennik: %%TEMP%%\\ogg_kpi64_host.log", /* ポーランド語 */
-					L"KPI açılamadı.\r\nGerekli bir bağımlı DLL eksik olabilir.\r\n\r\nKPI: %s\r\nGünlük: %%TEMP%%\\ogg_kpi64_host.log"), /* トルコ語 */
+					L"KPIのOpenに失敗しました。\r\n依存DLL不足、または曲データ／PCM(PPC・P86・PPZ等)の読込失敗の可能性があります。\r\n\r\nKPI: %s\r\nログ: %%TEMP%%\\ogg_kpi64_host.log\r\n詳細: %%TEMP%%\\ogg_kbpmd_open.log （PMD時）", /* 日本語 */
+					L"KPI Open failed.\r\nA dependent DLL may be missing, or music/PCM (PPC/P86/PPZ) load may have failed.\r\n\r\nKPI: %s\r\nLog: %%TEMP%%\\ogg_kpi64_host.log\r\nDetail: %%TEMP%%\\ogg_kbpmd_open.log (PMD)", /* 英語 */
+					L"Echec Open KPI.\r\nDLL manquante ou echec chargement musique/PCM possible.\r\n\r\nKPI : %s\r\nJournal : %%TEMP%%\\ogg_kpi64_host.log", /* フランス語 */
+					L"Open KPI non riuscito.\r\nPossibile DLL mancante o fallimento caricamento musica/PCM.\r\n\r\nKPI: %s\r\nLog: %%TEMP%%\\ogg_kpi64_host.log", /* イタリア語 */
+					L"Fallo al Open del KPI.\r\nPuede faltar una DLL o fallar la carga de musica/PCM.\r\n\r\nKPI: %s\r\nRegistro: %%TEMP%%\\ogg_kpi64_host.log", /* スペイン語 */
+					L"KPI Open 실패.\r\n종속 DLL 부족 또는 곡/PCM 로드 실패 가능.\r\n\r\nKPI: %s\r\n로그: %%TEMP%%\\ogg_kpi64_host.log", /* 韓国語 */
+					L"KPI Open 失败。\r\n可能缺少依赖 DLL，或曲目/PCM 加载失败。\r\n\r\nKPI: %s\r\n日志: %%TEMP%%\\ogg_kpi64_host.log", /* 中国語 */
+					L"فشل Open لـ KPI.\r\nقد يكون DLL ناقصًا أو فشل تحميل الموسيقى/PCM.\r\n\r\nKPI: %s\r\nالسجل: %%TEMP%%\\ogg_kpi64_host.log", /* アラビア語 */
+					L"Сбой Open KPI.\r\nВозможно нет DLL или ошибка загрузки музыки/PCM.\r\n\r\nKPI: %s\r\nЛог: %%TEMP%%\\ogg_kpi64_host.log", /* ロシア語 */
+					L"KPI-Open fehlgeschlagen.\r\nFehlende DLL oder Musik/PCM-Ladefehler moeglich.\r\n\r\nKPI: %s\r\nLog: %%TEMP%%\\ogg_kpi64_host.log", /* ドイツ語 */
+					L"Falha no Open do KPI.\r\nDLL ausente ou falha ao carregar musica/PCM.\r\n\r\nKPI: %s\r\nLog: %%TEMP%%\\ogg_kpi64_host.log", /* ポルトガル語 */
+					L"KPI Open mislukt.\r\nOntbrekende DLL of mislukte muziek/PCM-lading.\r\n\r\nKPI: %s\r\nLog: %%TEMP%%\\ogg_kpi64_host.log", /* オランダ語 */
+					L"Open KPI nie powiodlo sie.\r\nBrak DLL lub blad ladowania muzyki/PCM.\r\n\r\nKPI: %s\r\nDziennik: %%TEMP%%\\ogg_kpi64_host.log", /* ポーランド語 */
+					L"KPI Open basarisiz.\r\nEksik DLL veya muzik/PCM yukleme hatasi olabilir.\r\n\r\nKPI: %s\r\nGunluk: %%TEMP%%\\ogg_kpi64_host.log"), /* トルコ語 */
 					(const wchar_t*)kpi);
 				MessageBox(depMsg, LL14(
 					L"KPI読み込みエラー",
@@ -11645,7 +11868,161 @@ void COggDlg::play()
 			}ff.Close();
 		}
 	}
+	else if (mode == MODE_CEMU) {
+		CString zipPath = filen;
+		uint32_t titleIdx = (ret2 > 0) ? (unsigned)ret2 : 1u;
+		SplitKpiSubsongPath(filen, zipPath, titleIdx);
+		wchar_t zipOut[CEMU_ZIP_PATH];
+		char dataDir[CEMU_DATA_DIR];
+		const CEmuGameEntry* ge = CEmuMgrResolveZip(CEmuMgrGet(), zipPath, zipOut, (int)_countof(zipOut), dataDir, (int)sizeof(dataDir));
+		const wchar_t* openPath = zipOut[0] ? zipOut : (LPCTSTR)zipPath;
+		const CString cemuPlZipPath = openPath;
+		/* MIDI mode: extract .mid from zip and play via CRender midPlayPrefer (KPI/VST). */
+		{
+			char modeTag[CEMU_MODE_TAG] = {};
+			if (!CEmuModePrefGet(openPath, modeTag, (int)sizeof(modeTag)))
+				CEmuModeTagFromEntry(ge, modeTag, (int)sizeof(modeTag));
+			if (CEmuModeIsMidiTag(modeTag)) {
+				wchar_t midPath[MAX_PATH] = {};
+				/* Prefer MIDI catalog row for title codes (Capture loads silp/MIDI). */
+				const CEmuGameEntry* midGe = ge;
+				{
+					char stem[CEMU_ARCHIVE_NAME] = {};
+					if (CEmuArchiveStemFromPath(openPath, stem, (int)sizeof(stem))) {
+						const CEmuGameEntry* pick = CEmuCatalogFindArchiveForZipMode(
+							&CEmuMgrGet()->catalog, stem, NULL, NULL, "MIDI");
+						if (pick) midGe = pick;
+					}
+				}
+				if (CEmuZipExtractFirstMidi(openPath, midPath, MAX_PATH) && midPath[0]) {
+					filen = midPath;
+					kpi[0] = 0;
+					/* Stash zip so playlist keeps the CEmu row (not TEMP mid). */
+					tagfile = cemuPlZipPath;
+					if (savedata.midPlayPrefer == 1) {
+						mode = modesub = MODE_VST_MIDI;
+						goto open_mode_vst_midi;
+					}
+					/* KPI prefer: resolve mid plugin via plugs */
+					if (pl) {
+						playlistdata row = {};
+						BYTE kv = 0;
+						_tcscpy_s(row.fol, midPath);
+						pl->plugs(CString(midPath), &row, kpi, kv);
+						if (row.sub == MODE_VST_MIDI || !kpi[0]) {
+							mode = modesub = MODE_VST_MIDI;
+							goto open_mode_vst_midi;
+						}
+						mode = modesub = -3;
+						goto open_mode_kpi;
+					}
+					mode = modesub = MODE_VST_MIDI;
+					goto open_mode_vst_midi;
+				}
+				/* No .mid in zip — live MPU-401 UART stream (stub SMF + inject). */
+				{
+					const unsigned capTitle = CEmuGameTitleCodeForIndex(
+						midGe ? midGe : ge, titleIdx);
+					/* Soft CEmu and Live share one np2 — never leave both open. */
+					CEmuSessionClose(&g_cemuSession);
+					CEmuSessionInit(&g_cemuSession);
+					if (CEmuMidiLiveStartPcat(openPath, capTitle, midPath, MAX_PATH)
+						&& midPath[0]) {
+						filen = midPath;
+						kpi[0] = 0;
+						tagfile = cemuPlZipPath;
+						/* CloseVstMidiSession must not LiveStop this session. */
+						g_cemuLiveKeepAcrossClose = 1;
+						if (savedata.midPlayPrefer == 1) {
+							mode = modesub = MODE_VST_MIDI;
+							goto open_mode_vst_midi;
+						}
+						if (pl) {
+							playlistdata row = {};
+							BYTE kv = 0;
+							_tcscpy_s(row.fol, midPath);
+							pl->plugs(CString(midPath), &row, kpi, kv);
+							if (row.sub == MODE_VST_MIDI || !kpi[0]) {
+								mode = modesub = MODE_VST_MIDI;
+								goto open_mode_vst_midi;
+							}
+							g_cemuLiveKeepAcrossClose = 0;
+							CEmuMidiLiveStop();
+							mode = modesub = -3;
+							goto open_mode_kpi;
+						}
+						mode = modesub = MODE_VST_MIDI;
+						goto open_mode_vst_midi;
+					}
+				}
+				/* Capture failed — fall through to CEmu (MPU soft path). */
+			}
+		}
+		const unsigned titleCode = CEmuGameTitleCodeForIndex(ge, titleIdx);
+		CEmuSessionClose(&g_cemuSession);
+		CEmuSessionInit(&g_cemuSession);
+		if (!CEmuSessionOpen(&g_cemuSession, openPath, titleCode, savedata.samples ? savedata.samples : 44100)) {
+			CString why;
+			if (ge) {
+				why.Format(
+					L"CEmu: このアーカイブはまだ再生できません。\n"
+					L"archive=%hs  platform=%hs  subtype=%hs\n\n"
+					L"対応済みの例:\n"
+					L"・pc88 / pc98(bootcs) / x1(mucom) / msx(kss)\n"
+					L"・x68k（zip 内 S98 / MDX。LZX 未対応）\n"
+					L"・アーケード: System16 / CPS1 / OutRun / After Burner / NeoGeo / QSound / C352 等\n"
+					L"・data\\roms は形式が混在。未配線のボード（Video System の YM2610 等）は未対応です。\n"
+					L"・MIDI モードは zip 内 .mid を KPI/VST 優先で再生します。",
+					ge->archive[0] ? ge->archive : "?",
+					ge->platform[0] ? ge->platform : "?",
+					ge->subtype[0] ? ge->subtype : "?");
+			} else {
+				why =
+					L"CEmu: アーカイブを開けません。\n"
+					L"カタログ照合に失敗したか、対応ハードがありません。\n"
+					L"data\\roms は全形式を想定していますが、未実装ボードは開けません。";
+			}
+			MessageBox(why, L"CEmu", MB_ICONERROR | MB_OK);
+			m_saisai.EnableWindow(TRUE); endflg = 0; return;
+		}
+		{
+			wchar_t virt[CEMU_ZIP_PATH];
+			CEmuFormatVirtualPath(openPath, titleIdx, virt, (int)_countof(virt));
+			filen = virt;
+		}
+		if (ge) {
+			wchar_t songLabel[CEMU_GAME_NAME];
+			songLabel[0] = 0;
+			CEmuGameTitleAt(ge, (int)titleIdx - 1, NULL, songLabel, (int)_countof(songLabel));
+			if (songLabel[0] == L'<' || wcsncmp(songLabel, L"<title", 6) == 0)
+				songLabel[0] = 0;
+			if (songLabel[0]) {
+				fnn = songLabel;
+				stitle = songLabel;
+			}
+			else if (ge->name[0])
+				fnn = ge->name;
+		}
+		ret2 = (int)titleIdx;
+		wavbit_sample_Hz = g_cemuSession.sampleRate;
+		wavchannel = 2;
+		wavsam_src = 16;
+		wavsam_depth = 16;
+		loop1 = 0;
+		loop2 = (g_cemuSession.lengthSamples > 0) ? (int)g_cemuSession.lengthSamples : 0;
+		SetPcmByteLengthFromSamples(loop2, wavsam_depth, wavchannel);
+		m_time.SetRange(0, (loop2 > 0) ? loop2 : 1, TRUE);
+		EqualiserSetFormatVolContext(1, FALSE);
+		g_openDecoderMode = mode;
+		FmMonShadowReset();
+		FmMonShadowSetSource(filen);
+		FmMonShadowSetSampleRate((uint32_t)wavbit_sample_Hz);
+		if (g_cemuSession.game)
+			CEmuFmMonBindFromGe(g_cemuSession.game);
+		wav_start();
+	}
 	else if (mode == MODE_VST_MIDI) {
+open_mode_vst_midi:
 		ret2 = 0;
 		EqualiserSetFormatVolContext(1, FALSE); // その他のkpi（x86 直読み / KpiHost64 経由とも本体 equaliser）
 		wchar_t mid[VST_PATH_CHARS]; mid[0] = 0;
@@ -11653,6 +12030,8 @@ void COggDlg::play()
 		CString src = filen;
 		if (kpi[0]) src = kpi; // plugs が解決済み mid を kpi に入れた場合
 		if (!VstResolvePlayPath(filen, mid, VST_PATH_CHARS, hints, 32, &hc)) {
+			g_cemuLiveKeepAcrossClose = 0;
+			CEmuMidiLiveStop();
 			MessageBox(LL14(
 				L"MIDIが見つかりません。同フォルダに .mid をエクスポートしてください。",
 				L"MIDI not found. Export a .mid next to the project.",
@@ -11704,6 +12083,15 @@ void COggDlg::play()
 				NormalizePlaybackWaveFormat();
 				loop1 = 0;
 				loop2 = (int)orp.lengthSamples;
+				if (CEmuMidiLiveActive()) {
+					/* Host64 length is huge; int loop2 must stay positive & finite.
+					   Playlist time=-1 keeps play open for inject. */
+					const int sixHr = (wavbit_sample_Hz > 0)
+						? (wavbit_sample_Hz * 60 * 60 * 6) : 0x3fffffff;
+					loop2 = (sixHr > 0) ? sixHr : 0x3fffffff;
+				} else if (orp.lengthSamples > (uint64_t)0x7fffffff) {
+					loop2 = 0x7fffffff;
+				}
 				SetPcmByteLengthFromSamples(loop2, wavsam_depth, wavchannel);
 				m_time.SetRange(0, (loop2 > 0) ? loop2 : 1, TRUE);
 				g_openDecoderMode = mode;
@@ -11733,6 +12121,8 @@ void COggDlg::play()
 				LL14(L"VST MIDI", L"VST MIDI", L"VST MIDI", L"VST MIDI", L"VST MIDI", L"VST MIDI", L"VST MIDI", L"VST MIDI", L"VST MIDI", L"VST MIDI", L"VST MIDI", L"VST MIDI", L"VST MIDI", L"VST MIDI"),
 				MB_ICONERROR | MB_OK);
 			VstSongUseLiveBindsSet(0);
+			g_cemuLiveKeepAcrossClose = 0;
+			CEmuMidiLiveStop();
 			m_saisai.EnableWindow(TRUE); endflg = 0; return;
 		}
 #endif
@@ -11744,6 +12134,8 @@ void COggDlg::play()
 			}
 			if (VstMidiOpen(mid, hints, hc, m_hWnd) != 0) {
 				VstSongUseLiveBindsSet(0);
+				g_cemuLiveKeepAcrossClose = 0;
+				CEmuMidiLiveStop();
 				MessageBox(LL14(
 					L"VST MIDIを開けませんでした。",
 					L"Could not open VST MIDI.",
@@ -11770,7 +12162,15 @@ void COggDlg::play()
 			wavsam_depth = wavsam_src;
 			NormalizePlaybackWaveFormat();
 			loop1 = 0;
-			loop2 = (int)VstMidiGetLengthSamples();
+			{
+				const __int64 len = VstMidiGetLengthSamples();
+				loop2 = (len > 0x7fffffff) ? 0x7fffffff : (int)len;
+			}
+			if (CEmuMidiLiveActive()) {
+				const int sixHr = (wavbit_sample_Hz > 0)
+					? (wavbit_sample_Hz * 60 * 60 * 6) : 0x3fffffff;
+				loop2 = (sixHr > 0) ? sixHr : 0x3fffffff;
+			}
 			SetPcmByteLengthFromSamples(loop2, wavsam_depth, wavchannel);
 			m_time.SetRange(0, (loop2 > 0) ? loop2 : 1, TRUE);
 			g_openDecoderMode = mode;
@@ -12724,7 +13124,7 @@ void COggDlg::play()
 					loop1 = 0; loop2 = 0; endf = 1;
 				}
 			}
-			if (mode == -3 || mode == -7 || mode == -8 || mode == -9 || mode == -10 || mode == 999 || IsForeignPluginMode(mode) || mode == MODE_VST_MIDI) endf = 1;
+			if (mode == -3 || mode == -7 || mode == -8 || mode == -9 || mode == -10 || mode == 999 || IsForeignPluginMode(mode) || mode == MODE_VST_MIDI || mode == MODE_CEMU) endf = 1;
 			loopcnt = 0;
 			if (g_openDecoderMode == INT_MIN)
 				g_openDecoderMode = mode;
@@ -12785,7 +13185,7 @@ void COggDlg::play()
 			loop1 = 0; loop2 = 0; endf = 1;
 		}
 	}
-	if (mode == -3 || mode == -7 || mode == -8 || mode == -9 || mode == -10 || mode == 999 || IsForeignPluginMode(mode) || mode == MODE_VST_MIDI) endf = 1;
+	if (mode == -3 || mode == -7 || mode == -8 || mode == -9 || mode == -10 || mode == 999 || IsForeignPluginMode(mode) || mode == MODE_VST_MIDI || mode == MODE_CEMU) endf = 1;
 	loopcnt = 0;
 	if (g_openDecoderMode == INT_MIN)
 		g_openDecoderMode = mode;
@@ -13188,7 +13588,7 @@ void COggDlg::play()
 			loop1 = 0; loop2 = 0; endf = 1;
 		}
 	}
-	if (mode == -3 || mode == -7 || mode == -8 || mode == -9 || mode == -10 || mode == 999 || IsForeignPluginMode(mode) || mode == MODE_VST_MIDI) endf = 1;
+	if (mode == -3 || mode == -7 || mode == -8 || mode == -9 || mode == -10 || mode == 999 || IsForeignPluginMode(mode) || mode == MODE_VST_MIDI || mode == MODE_CEMU) endf = 1;
 
 	if (loop1 == 0 && loop2 == 0) {
 		const int fullLen = m_time.GetMaxValue();
@@ -13459,11 +13859,35 @@ void COggDlg::play()
 			loop1 = 0; loop2 = 0; endf = 1;
 		}
 	}
-	if (mode == -3 || mode == -7 || mode == -8 || mode == -9 || mode == -10 || mode == 999 || IsForeignPluginMode(mode) || mode == MODE_VST_MIDI) endf = 1;
+	if (mode == -3 || mode == -7 || mode == -8 || mode == -9 || mode == -10 || mode == 999 || IsForeignPluginMode(mode) || mode == MODE_VST_MIDI || mode == MODE_CEMU) endf = 1;
 	loopcnt = 0;
 	if (pl && plw && !pl->m_tempMode) {
 		int plc = 1;
-		if (mode == -10)
+		const int ephemeralMid = OggPathIsEphemeralCemuMidi(filen);
+		if (ephemeralMid) {
+			/* Never Add TEMP\cemu_*.mid — stay on the zip / current row. */
+			plc = -1;
+			if (!tagfile.IsEmpty())
+				plc = pl->FindByPath(tagfile);
+			if (plc < 0)
+				plc = pl->FindByPath(fnn);
+			if (plc < 0 && plcnt >= 0 && plcnt < pl->playcnt)
+				plc = plcnt;
+			if (plc >= 0 && plc < pl->playcnt) {
+				pl->pc[plc].loop1 = loop1;
+				pl->pc[plc].loop2 = loop2;
+				const int midLoop = (mode == MODE_VST_MIDI)
+					&& (VstMidiSongHasLoop() || OggMidiFileHasCc111Loop(filen)
+						|| CEmuMidiLiveActive());
+				if (midLoop)
+					pl->pc[plc].time = -1;
+				else if (wavbit_sample_Hz > 0 && loop2 > 0)
+					pl->pc[plc].time = (int)(loop2 / wavbit_sample_Hz);
+				plcnt = plc;
+				pl->SIcon(plc);
+			}
+		}
+		else if (mode == -10)
 			plc = pl->Add(tagfile, mode, loop1, loop2, tagname, tagalbum, filen, 0, (oggsize / (2 * wavchannel * wavbit_sample_Hz / 4) / ((mode == -9) ? 4 : 1)), 1);
 		else if (mode == 999)
 			plc = pl->Add(tagfile, mode, loop1, loop2, tagname, tagalbum, filen, 0, (wavbit_sample_Hz > 0) ? (int)(loop2 / wavbit_sample_Hz) : 0, 1);
@@ -13497,7 +13921,7 @@ void COggDlg::play()
 		else
 			plc = pl->chk(fnn, mode, tagname, filen, 0);
 
-		{
+		if (!ephemeralMid) {
 			int syncIdx = plc;
 			if (syncIdx < 0 && pl->playcnt > 0)
 				syncIdx = pl->playcnt - 1;
@@ -13513,16 +13937,16 @@ void COggDlg::play()
 						pl->pc[syncIdx].time = oggsize / (2 * wavchannel * wavbit_sample_Hz);
 				}
 			}
-		}
 
-		if (plc == -1) {
-			int i = pl->m_lc.GetItemCount() - 1;
-			plcnt = i;
-			pl->SIcon(i);
-		}
-		else {
-			plcnt = plc;
-			pl->SIcon(plc);
+			if (plc == -1) {
+				int i = pl->m_lc.GetItemCount() - 1;
+				plcnt = i;
+				pl->SIcon(i);
+			}
+			else {
+				plcnt = plc;
+				pl->SIcon(plc);
+			}
 		}
 	}
 	// plcnt/SIcon 確定後に曲ごとパラメータを復元(通知スレッド開始より後が正しい)
@@ -13553,6 +13977,7 @@ void COggDlg::SetAdd(CString fnn, int mode, int loop1, int loop2, CString filen,
 {
 	// 一時PL: 自動追記しない(D&D/Fol 等の明示追加のみ)
 	if (pl && pl->m_tempMode) return;
+	if (OggPathIsEphemeralCemuMidi(filen)) return;
 	if (pl && plw) {
 		int plc;
 		plc = pl->Add(fnn, mode, loop1, loop2, _T(""), _T(""), filen, ret2, (int)time);
@@ -19570,16 +19995,59 @@ static int VstMidiHoldFromFlags(uint32_t f)
 	return (f & (KPIHOST64_EOF_MIDI_PENDING | KPIHOST64_EOF_MIDI_KEEPALIVE)) ? 1 : 0;
 }
 
+/* CEmu MPU live: advance emu in lockstep with VST PCM, inject shorts + monitor tap. */
+static int CEmuMidiLiveFramesFromBytes(uint32_t bytes)
+{
+	int bpf = 4;
+	if (wavchannel > 0 && abs(wavsam_depth) >= 8)
+		bpf = wavchannel * (abs(wavsam_depth) / 8);
+	if (bpf < 1) bpf = 4;
+	return (int)(bytes / (uint32_t)bpf);
+}
+
+static void CEmuMidiLivePumpAndInject(int frames)
+{
+	if (!CEmuMidiLiveActive() || frames <= 0) return;
+	/* Pump in Host64 BLOCK_FRAMES (512) steps. sampleOfs from each step is
+	 * 0..511 relative to that step; add base so Host64 sees ofs across the
+	 * full VstRender window (deferral peels them 512 at a time). */
+	enum { kStep = 512 };
+	int base = 0;
+	CEmuMidiLiveShort sh[512];
+	int total = 0;
+	while (base < frames) {
+		int n = frames - base;
+		if (n > kStep) n = kStep;
+		CEmuMidiLivePump(n);
+		while (total < 512) {
+			const int got = CEmuMidiLiveStealShorts(sh + total, 512 - total);
+			if (got <= 0) break;
+			for (int i = total; i < total + got; ++i)
+				sh[i].sampleOfs += base;
+			total += got;
+			if (got < 64) break;
+		}
+		base += n;
+	}
+	for (int i = 0; i < total; ++i) {
+		VstMidiInjectShort(0, sh[i].msg, sh[i].sampleOfs);
+		VstLiveTapPushShort(0, sh[i].msg);
+	}
+}
+
 static bool VstRemoteRenderSlot(int slot, uint32_t bytesWanted, std::vector<uint8_t>& pcm, bool& eof,
 	uint32_t* outMidiFlags = nullptr)
 {
 	if (slot < 0 || slot >= XF_SLOTS) slot = 0;
-	BYTE ports[64];
-	DWORD msgs[64];
-	int ofs[64];
+	/* Live MPU follows the audible slot only (avoid 2× emu during crossfade). */
+	if (slot == XfActiveSlot())
+		CEmuMidiLivePumpAndInject(CEmuMidiLiveFramesFromBytes(bytesWanted));
+	BYTE ports[512];
+	DWORD msgs[512];
+	int ofs[512];
 	/* ライブ鍵盤の注入は現行曲のエンジンだけに渡す */
-	const int n = (slot == XfActiveSlot()) ? VstMidiStealInjects(ports, msgs, ofs, 64) : 0;
-	if (n > 0) {
+	const int n = (slot == XfActiveSlot()) ? VstMidiStealInjects(ports, msgs, ofs, 512) : 0;
+	if (n > 0 && !CEmuMidiLiveActive()) {
 		int rewind = 0;
 		for (int i = 0; i < n; ++i) {
 			const int st = (int)(msgs[i] & 0xf0);
@@ -19587,7 +20055,8 @@ static bool VstRemoteRenderSlot(int slot, uint32_t bytesWanted, std::vector<uint
 		}
 		if (rewind) {
 			/* 先読みを捨てて今の位置から描き直す。VstSeek は GS リセットまで
-			 * 巻き戻すので、モニタ鍵盤を押しただけで他パートの音色が変わる。 */
+			 * 巻き戻すので、モニタ鍵盤を押しただけで他パートの音色が変わる。
+			 * CEmu live MPU の曲注入では捨てない（毎ノートでリング破壊になる）。 */
 			VstPrefetch& pf = g_vstPf[slot];
 			if (pf.csReady) {
 				EnterCriticalSection(&pf.cs);
@@ -19835,6 +20304,7 @@ int readvst(BYTE* bw, int cnt)
 		}
 		return got;
 	}
+	CEmuMidiLivePumpAndInject(CEmuMidiLiveFramesFromBytes((uint32_t)cnt));
 	const int n = VstMidiRead(bw, cnt);
 	if (VstMidiEventsPending() || VstMidiTakeKeepAlive())
 		g_vstPcmHold = 1;
@@ -19849,6 +20319,11 @@ static int VstSilenceAccum(BYTE* pcm, int bytes)
 	if (bytes <= 0) return 0;
 	const bool exporting = (wavExportPath.GetLength() > 0 || g_isWavExportRendering);
 	if (exporting) return 0;
+	/* Live MPU stream: boot/idle before first notes must not trip the 4s cut. */
+	if (CEmuMidiLiveActive()) {
+		kpi_silence_bytes = 0;
+		return 0;
+	}
 	if (g_vstPcmHold) {
 		kpi_silence_bytes = 0;
 		return 0;
@@ -20005,6 +20480,146 @@ int playwavvst(BYTE* bw, int old, int l1, int l2)
 				VstSeekLoopStart();
 			else
 				VstMarkPlaybackEof();
+		}
+		rrr += r2;
+	}
+	return rrr;
+}
+
+int readcemu(BYTE* bw, int cnt)
+{
+	if (!bw || cnt <= 0 || g_cemuSession.kind == 0) return 0;
+	const int bpf = PcmOutBytesPerFrame();
+	if (bpf <= 0) return 0;
+	const int frames = cnt / bpf;
+	if (frames <= 0) return 0;
+	if (g_cemuSession.lengthSamples > 0 && g_cemuSession.curSample >= g_cemuSession.lengthSamples)
+		return 0;
+	const int got = CEmuSessionRender(&g_cemuSession, (short*)bw, frames);
+	if (got <= 0) return 0;
+	g_cemuSession.curSample += (UINT64)got;
+	FmMonShadowAddSamples((uint32_t)got);
+	FmMonShadowFlush(0);
+	return got * bpf;
+}
+
+static void CEmuSeekLoopStart()
+{
+	PlaybackNoteLoop(loop1);
+	kpi_silence_bytes = 0;
+	CEmuSessionSeek(&g_cemuSession, loop1 > 0 ? (UINT64)loop1 : 0);
+	poss2 = poss3 = poss4 = poss6 = 0; poss5 = loop1;
+	cnt3 = 0;
+	RubberBand_DestroyBank(0);
+	reset = TRUE;
+	FmMonShadowReset();
+	FmMonShadowSetSource(g_cemuSession.path);
+	FmMonShadowSetSampleRate((uint32_t)wavbit_sample_Hz);
+	if (g_cemuSession.game)
+		CEmuFmMonBindFromGe(g_cemuSession.game);
+}
+
+static void CEmuMarkPlaybackEof()
+{
+	if (savedata.saverenzoku == 0)
+		fade1 = 1;
+	else
+		endflg = 1;
+}
+
+int playwavcemu(BYTE* bw, int old, int l1, int l2)
+{
+	EqualiserSetFormatVolContext(1, FALSE);
+	const bool exporting = (wavExportPath.GetLength() > 0 || g_isWavExportRendering);
+	const bool doLoop = WantPlaybackLoop() && !exporting
+		&& !g_cemuSession.endedBySilence; /* 無音終端の非ループ曲は Seek しても再開できない */
+	auto cemuHitEnd = [&](int got) -> bool {
+		if (exporting) return false;
+		if (g_cemuSession.endedBySilence
+			&& g_cemuSession.lengthSamples > 0
+			&& g_cemuSession.curSample >= g_cemuSession.lengthSamples)
+			return true;
+		if (g_cemuSession.lengthSamples == 0) return false;
+		if (g_cemuSession.lengthSamples > 0 && g_cemuSession.curSample >= g_cemuSession.lengthSamples)
+			return true;
+		if (got <= 0) return PlaybackShortMeansEof(got);
+		return false;
+	};
+	int rrr = readcemu(bw + old, l1);
+	if (rrr < 0) rrr = 0;
+	{
+		const int bpf = PcmOutBytesPerFrame();
+		if (bpf > 0)
+			AdvanceOutAndSrcPos(rrr / bpf);
+	}
+	if (rrr < l1) {
+		if (rrr > 0) ZeroMemory(bw + old + rrr, (SIZE_T)(l1 - rrr));
+		else ZeroMemory(bw + old, (SIZE_T)l1);
+		if (cemuHitEnd(rrr)) {
+			if (doLoop) {
+				CEmuSeekLoopStart();
+				const int got = readcemu(bw + old + rrr, l1 - rrr);
+				if (got > 0) {
+					const int bpf = PcmOutBytesPerFrame();
+					if (bpf > 0) AdvanceOutAndSrcPos(got / bpf);
+					rrr += got;
+					l1 = rrr;
+				}
+				else l1 = rrr;
+			}
+			else {
+				l1 = rrr;
+				CEmuMarkPlaybackEof();
+			}
+		}
+	}
+	if (rrr > 0) {
+		EqualiserSetFormatVolContext(1, FALSE);
+		equaliser(bw + old, rrr, reset);
+		if (og) og->FeedPianoRoll(bw + old, rrr);
+		reset = FALSE;
+	}
+	else if (cemuHitEnd(0)) {
+		if (doLoop) CEmuSeekLoopStart();
+		else CEmuMarkPlaybackEof();
+	}
+	if (l2 > 0) {
+		int r2 = readcemu(bw, l2);
+		if (r2 < 0) r2 = 0;
+		{
+			const int bpf = PcmOutBytesPerFrame();
+			if (bpf > 0) AdvanceOutAndSrcPos(r2 / bpf);
+		}
+		if (r2 < l2) {
+			if (r2 > 0) ZeroMemory(bw + r2, (SIZE_T)(l2 - r2));
+			else ZeroMemory(bw, (SIZE_T)l2);
+			if (cemuHitEnd(r2)) {
+				if (doLoop) {
+					CEmuSeekLoopStart();
+					const int got = readcemu(bw + r2, l2 - r2);
+					if (got > 0) {
+						const int bpf = PcmOutBytesPerFrame();
+						if (bpf > 0) AdvanceOutAndSrcPos(got / bpf);
+						r2 += got;
+						l2 = r2;
+					}
+					else l2 = r2;
+				}
+				else {
+					l2 = r2;
+					CEmuMarkPlaybackEof();
+				}
+			}
+		}
+		if (r2 > 0) {
+			EqualiserSetFormatVolContext(1, FALSE);
+			equaliser(bw, r2, reset);
+			if (og) og->FeedPianoRoll(bw, r2);
+			reset = FALSE;
+		}
+		else if (cemuHitEnd(0)) {
+			if (doLoop) CEmuSeekLoopStart();
+			else CEmuMarkPlaybackEof();
 		}
 		rrr += r2;
 	}
@@ -22272,9 +22887,60 @@ void COggDlg::dp(CString a)
 				play();
 				return;
 			}
+			if (p.sub == MODE_CEMU) {
+				if (p.fol[0]) filen = p.fol;
+				if (p.name[0]) fnn = p.name;
+				ret2 = p.ret2;
+				mode = modesub = MODE_CEMU;
+				play();
+				return;
+			}
 			if (IsForeignPluginMode(p.sub)) {
 				mode = modesub = p.sub;
 				play();
+				return;
+			}
+		}
+		/* hoot zip は DirectShow に落とさない */
+		{
+			CString zipExt = filen;
+			const int colon = zipExt.Find(L"::");
+			if (colon >= 0) zipExt = zipExt.Left(colon);
+			zipExt = zipExt.Right(zipExt.GetLength() - zipExt.ReverseFind(L'.'));
+			zipExt.MakeLower();
+			if (zipExt == L".zip") {
+				wchar_t zipOut[CEMU_ZIP_PATH];
+				char dataDir[CEMU_DATA_DIR];
+				const CEmuGameEntry* ge = CEmuMgrResolveZip(CEmuMgrGet(), filen, zipOut, (int)_countof(zipOut), dataDir, (int)sizeof(dataDir));
+				if (ge) {
+					const unsigned titleIdx = 1;
+					wchar_t virt[CEMU_ZIP_PATH];
+					CEmuFormatVirtualPath(zipOut, titleIdx, virt, (int)_countof(virt));
+					filen = virt;
+					ret2 = (int)titleIdx;
+					wchar_t songLabel[CEMU_GAME_NAME];
+					songLabel[0] = 0;
+					CEmuGameTitleAt(ge, 0, NULL, songLabel, (int)_countof(songLabel));
+					if (songLabel[0]) {
+						if (ge->name[0]) {
+							CString n;
+							n.Format(L"%s - %s", ge->name, songLabel);
+							fnn = n;
+						}
+						else
+							fnn = songLabel;
+					}
+					else if (ge->name[0])
+						fnn = ge->name;
+					mode = modesub = MODE_CEMU;
+					play();
+					return;
+				}
+				MessageBox(
+					L"CEmu: この zip は hoot カタログで特定できませんでした。\n"
+					L"・exe 隣の arcdata.zip / data\\xml を確認してください。\n"
+					L"・data\\roms は形式が混在します。未登録・未実装ボードは再生できません。",
+					L"CEmu", MB_ICONERROR | MB_OK);
 				return;
 			}
 		}
@@ -22919,12 +23585,19 @@ void COggDlg::stop()
 		_ccl.Leave();
 		// 曲切替中は上限付き。無限 Join は DS Lock 固着で UI 永久停止の原因になる。
 		// Join 中は DoEvent しない（再入 UAF 防止）
-		const DWORD joinTimeout = g_interactiveTrackChange
-			? (g_playbackNotifyJoinTimeoutMs ? g_playbackNotifyJoinTimeoutMs : 2500u)
-			: 0u;
+		// Exit(OnOK) sets g_playbackNotifyJoinTimeoutMs — honor it even when
+		// g_interactiveTrackChange is false (playlist end → 終了 used to hang).
+		DWORD joinTimeout = 0;
+		if (g_playbackNotifyJoinTimeoutMs)
+			joinTimeout = g_playbackNotifyJoinTimeoutMs;
+		else if (g_interactiveTrackChange)
+			joinTimeout = 2500u;
 		if (!WaitForPlaybackNotifyThreadExit(joinTimeout)) {
 			// タイムアウトでも停止フラグを残すと、続く play() の CWread/adbuf が
 			// IsPlaybackStopRequested で無音になる。デコーダは触らずフラグだけ戻す。
+			// CEmu は必ず解放する（vg2_98 終了ボタンで hooks/np2 が残ってクラッシュ）。
+			if (PeekOpenDecoderMode(mode) == MODE_CEMU || g_cemuSession.kind != 0)
+				CloseCemuPlaybackResources();
 			thn1 = FALSE;
 			stf = 0;
 			SongParams_OnSongStopped();
@@ -22951,6 +23624,10 @@ void COggDlg::stop()
 		if (stoppingMode == -7) dsd_.kpiClose(og->kmp);
 		if (stoppingMode == 999) wav_.Close();
 		if (stoppingMode == MODE_VST_MIDI) CloseVstMidiSession();
+		if (stoppingMode == MODE_CEMU
+			|| stoppingMode == MODE_VST_MIDI
+			|| g_cemuSession.kind != 0)
+			CloseCemuPlaybackResources();
 		if (stoppingMode == MODE_PLUGIN_WINAMP) PluginWinamp_Close();
 		if (stoppingMode == MODE_PLUGIN_XMPLAY) PluginXmplay_Close();
 		if (stoppingMode == MODE_PLUGIN_AIMP) PluginAimp_Close();
@@ -22996,6 +23673,9 @@ void COggDlg::stop()
 	MpPromptOnPlaybackStop();
 	/* notify 未稼働でも xfade チェック WAV を確定 */
 	PlaybackCcCloseIfNeeded(true);
+	/* Notify thread already gone (auto-stop / pause) still leaves CEmu open. */
+	if (g_cemuSession.kind != 0 || CEmuMidiLiveActive())
+		CloseCemuPlaybackResources();
 }
 
 BOOL COggDlg::stop1()
@@ -23137,6 +23817,10 @@ BOOL COggDlg::stop1()
 	if (stoppingMode == -7 && kmp) { dsd_.kpiClose(kmp); }
 	if (stoppingMode == 999) wav_.Close();
 	if (stoppingMode == MODE_VST_MIDI) CloseVstMidiSession();
+	if (stoppingMode == MODE_CEMU
+		|| stoppingMode == MODE_VST_MIDI
+		|| g_cemuSession.kind != 0)
+		CloseCemuPlaybackResources();
 	if (stoppingMode == MODE_PLUGIN_WINAMP) PluginWinamp_Close();
 	if (stoppingMode == MODE_PLUGIN_XMPLAY) PluginXmplay_Close();
 	if (stoppingMode == MODE_PLUGIN_AIMP) PluginAimp_Close();
@@ -24506,6 +25190,41 @@ void COggDlg::timerp()
 	}
 	if ((stitle != "" && mode == -1) || mode == 21 || mode == -6 || mode == 34 || mode == 35 || (mode == 999 && stitle != ""))
 		sss = stitle;
+	/* CEmu: name: = XML <name>（作品タイトル）。file: は曲名（<title>）。 */
+	if (mode == MODE_CEMU) {
+		auto cemuBannerCleanGameName = [](CString title) -> CString {
+			if (title.GetLength() > 0 && title[0] == _T('[')) {
+				const int rb = title.Find(_T(']'));
+				if (rb > 0 && rb + 1 < title.GetLength()) {
+					title = title.Mid(rb + 1);
+					title.Trim();
+				}
+			}
+			const int lp = title.ReverseFind(_T('('));
+			if (lp > 0) {
+				CString suf = title.Mid(lp);
+				if (suf.Find(_T("OPN")) >= 0)
+					title = title.Left(lp);
+				title.Trim();
+			}
+			return title;
+		};
+		CString workTitle;
+		if (g_cemuSession.game && g_cemuSession.game->name[0])
+			workTitle = cemuBannerCleanGameName(CString(g_cemuSession.game->name));
+		if (workTitle.IsEmpty()) {
+			CString fileName = filen;
+			const int slash = max(fileName.ReverseFind(_T('\\')), fileName.ReverseFind(_T('/')));
+			if (slash >= 0)
+				fileName = fileName.Mid(slash + 1);
+			const int colon = fileName.Find(_T("::"));
+			if (colon >= 0)
+				fileName = fileName.Left(colon);
+			workTitle = fileName;
+		}
+		if (!workTitle.IsEmpty())
+			sss = workTitle;
+	}
 	int si = mojisub(sss, 1, 0, 0xffffff);
 	if (si > nameViewW) {
 		int sss_w = si;   // 本文ピクセル幅（セパレータ開始位置の計算に使用）
@@ -24603,6 +25322,41 @@ void COggDlg::timerp()
 			archBits = ResolveKpiArchBits(CString(kpi), filen);
 		const CString arch = KpiArchLabel(archBits);
 		s.Format(LL14(L"file:kpiプラグイン(%s %s)", L"file:kpi plugin (%s %s)", L"file:Plugin kpi (%s %s)", L"file:Plugin kpi (%s %s)", L"file:Plugin kpi (%s %s)", L"file:kpi 플러그인(%s %s)", L"file:kpi 插件(%s %s)", L"file:إضافة kpi (%s %s)", L"file:Плагин kpi (%s %s)", L"file:kpi-Plugin (%s %s)", L"file:Plugin kpi (%s %s)", L"file:kpi-plugin (%s %s)", L"file:Wtyczka kpi (%s %s)", L"file:kpi eklentisi (%s %s)"), sss, arch);
+	}
+	if (mode == MODE_CEMU) {
+		/* file: = XML <title>（曲名）。zip::0001 は出さない。 */
+		auto cemuSongTitleOk = [](const CString& t) -> bool {
+			if (t.IsEmpty()) return false;
+			if (t.Find(_T("::")) >= 0) return false;
+			CString low = t; low.MakeLower();
+			if (low.Find(_T(".zip")) >= 0) return false;
+			if (t[0] == _T('<') || t.Left(6).CompareNoCase(_T("<title")) == 0) return false;
+			return true;
+		};
+		CString songTitle = stitle;
+		if (!cemuSongTitleOk(songTitle) && g_cemuSession.game) {
+			wchar_t songLabel[CEMU_GAME_NAME] = {};
+			const unsigned titleIdx = (ret2 > 0) ? (unsigned)ret2 : 1u;
+			CEmuGameTitleAt(g_cemuSession.game, (int)titleIdx - 1, NULL, songLabel, (int)_countof(songLabel));
+			if (songLabel[0] == L'<' || wcsncmp(songLabel, L"<title", 6) == 0)
+				songLabel[0] = 0;
+			songTitle = songLabel;
+		}
+		if (!cemuSongTitleOk(songTitle) && cemuSongTitleOk(fnn))
+			songTitle = fnn;
+		if (!cemuSongTitleOk(songTitle) && !tagfile.IsEmpty() && cemuSongTitleOk(tagfile))
+			songTitle = tagfile;
+		if (!cemuSongTitleOk(songTitle)) {
+			CString fileName = filen;
+			const int slash = max(fileName.ReverseFind(_T('\\')), fileName.ReverseFind(_T('/')));
+			if (slash >= 0)
+				fileName = fileName.Mid(slash + 1);
+			const int colon = fileName.Find(_T("::"));
+			if (colon >= 0)
+				fileName = fileName.Left(colon);
+			songTitle = fileName;
+		}
+		s.Format(_T("file:%s"), (LPCTSTR)songTitle);
 	}
 	if (mode == MODE_PLUGIN_WINAMP) {
 		const CString arch = KpiArchLabel(ResolveKpiArchBits(CString(kpi), filen));
@@ -26131,7 +26885,9 @@ void timerog1(UINT nIDEvent)
 			// RestoreSavedPlaybackRow 後の filen は既にリストにあることが多い。
 			// oggsize==0 の Add は time=0 で既存行を上書きしてしまうためスキップする。
 			// 一時PLも自動追記しない(起動時に最後の曲が載るのを防ぐ)。
-			if (pl && plw && !pl->m_tempMode && filen != "" && !(wavbit_sample_Hz == 0 || wavchannel == 0 || wavsam_depth == 0)) {
+			if (pl && plw && !pl->m_tempMode && filen != ""
+				&& !OggPathIsEphemeralCemuMidi(filen)
+				&& !(wavbit_sample_Hz == 0 || wavchannel == 0 || wavsam_depth == 0)) {
 				const int existing = pl->FindByPath(filen);
 				if (existing >= 0 && oggsize == 0) {
 					plcnt = existing;
@@ -26440,6 +27196,11 @@ LRESULT COggDlg::OnPlaybackAutoStopped(WPARAM, LPARAM)
 	if (stoppingMode == -7 && og) dsd_.kpiClose(og->kmp);
 	if (stoppingMode == 999) wav_.Close();
 	if (stoppingMode == MODE_VST_MIDI) CloseVstMidiSession();
+	if (stoppingMode == MODE_CEMU
+		|| stoppingMode == MODE_VST_MIDI
+		|| g_cemuSession.kind != 0
+		|| CEmuMidiLiveActive())
+		CloseCemuPlaybackResources();
 	if (stoppingMode == MODE_PLUGIN_WINAMP) PluginWinamp_Close();
 	if (stoppingMode == MODE_PLUGIN_XMPLAY) PluginXmplay_Close();
 	if (stoppingMode == MODE_PLUGIN_AIMP) PluginAimp_Close();
@@ -26472,6 +27233,12 @@ LRESULT COggDlg::OnKpiPluginMsg(WPARAM wParam, LPARAM)
 		OggKpiDownloadPlugins(this, TRUE, FALSE, TRUE);
 	else if (wParam == 2)
 		OggKpiReloadPlugins(this);
+	return 0;
+}
+
+LRESULT COggDlg::OnCemuCatListMsg(WPARAM, LPARAM)
+{
+	CEmuCatalogListDlg::ShowModal(this);
 	return 0;
 }
 
@@ -28998,6 +29765,20 @@ void COggDlg::OnRestart()
 						_tchdir(ss);
 					}
 					mode = modesub = p.sub;
+					play();
+					return;
+				}
+				if (p.sub == MODE_VST_MIDI) {
+					if (p.fol[0]) filen = p.fol;
+					mode = modesub = MODE_VST_MIDI;
+					play();
+					return;
+				}
+				if (p.sub == MODE_CEMU) {
+					if (p.fol[0]) filen = p.fol;
+					if (p.name[0]) fnn = p.name;
+					ret2 = p.ret2;
+					mode = modesub = MODE_CEMU;
 					play();
 					return;
 				}
@@ -32009,10 +32790,7 @@ void plus2(int& c)
 						else { ext[kpicnt][i] = L""; break; }
 					}
 					ext[kpicnt][299] = "";
-					if (mod1[kpicnt]) {
-						if (mod1[kpicnt]->Init)mod1[kpicnt]->Init();
-						if (mod1[kpicnt]->Deinit)mod1[kpicnt]->Deinit();
-					}
+					/* 列挙時の Init/Deinit は不要（再生時に改めて Load+Init）。重い KPI の起動遅延を避ける */
 				}
 				if (c && mod1[kpicnt])kpicnt++;
 			}
@@ -32025,6 +32803,15 @@ void COggDlg::plug(CString ff, KMPMODULE * mod)
 	kpicnt = 0;
 	for (int i = 0; i < 500; i++)
 		hDLLk1[i] = NULL;
+
+	/* キャッシュが有効なら LoadLibrary せず台帳だけ復元 */
+	if (KpiEnumCache_TryApply(ff)) {
+		if (g_pActiveLoadingWnd != NULL) {
+			g_pActiveLoadingWnd->SetRange(0, 1);
+			g_pActiveLoadingWnd->SetPos(1);
+		}
+		return;
+	}
 
 	int totalKpis = CountKpiFiles(ff);
 	if (totalKpis == 0 && !savedata.kpi_plugin_dl_skip) {
@@ -32041,6 +32828,8 @@ void COggDlg::plug(CString ff, KMPMODULE * mod)
 	plugloop(ff);
 	for (int i = kpicnt - 1; i >= 0; i--)
 		FreeLibrary(hDLLk1[i]);
+	if (kpicnt > 0)
+		KpiEnumCache_Save(ff);
 }
 void COggDlg::plugloop(CString ff)
 {
@@ -33568,6 +34357,8 @@ enum {
 	kHideFmMidi_VstHost = 1 << 7,
 	kHideFmMidi_PrTune = 1 << 8,
 	kHideFmMidi_LayoutPal = 1 << 9,
+	kHideFmMidi_MidiRoll = 1 << 10,
+	kHideFmMidi_FmRoll = 1 << 11,
 };
 
 static void HideFmMidiToolWnd(CWnd* w, int bit, int& mask)
@@ -33589,6 +34380,8 @@ void COggDlg::HideMidiMonitorForMinimize()
 	HideFmMidiToolWnd(CSasamiMidiScoreDlg::Instance(), kHideFmMidi_MidiScore, m_fmMidiToolsHiddenMask);
 	HideFmMidiToolWnd(CSasamiFmScoreDlg::Instance(), kHideFmMidi_FmScore, m_fmMidiToolsHiddenMask);
 	HideFmMidiToolWnd(CSasamiTextDlg::Instance(), kHideFmMidi_Text, m_fmMidiToolsHiddenMask);
+	HideFmMidiToolWnd(CSasamiPianoRollDlg::InstanceMidi(), kHideFmMidi_MidiRoll, m_fmMidiToolsHiddenMask);
+	HideFmMidiToolWnd(CSasamiPianoRollDlg::InstanceFm(), kHideFmMidi_FmRoll, m_fmMidiToolsHiddenMask);
 	HideFmMidiToolWnd(CSasamiNotePaletteDlg::Instance(), kHideFmMidi_NotePal, m_fmMidiToolsHiddenMask);
 	HideFmMidiToolWnd(CSasamiLayoutPaletteDlg::Instance(), kHideFmMidi_LayoutPal, m_fmMidiToolsHiddenMask);
 	HideFmMidiToolWnd(CSasamiNotePropsDlg::Instance(), kHideFmMidi_NoteProps, m_fmMidiToolsHiddenMask);
@@ -33619,6 +34412,8 @@ void COggDlg::RestoreMidiMonitorAfterMinimize()
 	restore(CSasamiMidiScoreDlg::Instance(), kHideFmMidi_MidiScore, mask);
 	restore(CSasamiFmScoreDlg::Instance(), kHideFmMidi_FmScore, mask);
 	restore(CSasamiTextDlg::Instance(), kHideFmMidi_Text, mask);
+	restore(CSasamiPianoRollDlg::InstanceMidi(), kHideFmMidi_MidiRoll, mask);
+	restore(CSasamiPianoRollDlg::InstanceFm(), kHideFmMidi_FmRoll, mask);
 	restore(CSasamiNotePaletteDlg::Instance(), kHideFmMidi_NotePal, mask);
 	restore(CSasamiLayoutPaletteDlg::Instance(), kHideFmMidi_LayoutPal, mask);
 	restore(CSasamiNotePropsDlg::Instance(), kHideFmMidi_NoteProps, mask);

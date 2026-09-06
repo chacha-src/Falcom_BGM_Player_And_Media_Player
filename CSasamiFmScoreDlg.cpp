@@ -1,4 +1,4 @@
-﻿#include "stdafx.h"
+#include "stdafx.h"
 #include "ogg.h"
 #include "CSasamiFmScoreDlg.h"
 #include "CSasamiTextDlg.h"
@@ -85,7 +85,8 @@ IMPLEMENT_DYNAMIC(CSasamiFmScoreDlg, CCustomBlurDialogExBase)
 CSasamiFmScoreDlg::CSasamiFmScoreDlg(CWnd* pParent)
 	: CCustomBlurDialogExBase(CSasamiFmScoreDlg::IDD, pParent)
 	, m_curCh(0), m_placeRest(0), m_accidental(0), m_noteCur(NULL), m_sbDrag(0), m_sbDragScroll0(0), m_sbDragAnchor(0), m_bInLayout(FALSE)
-	, m_clipN(0), m_clipBase(0), m_metroBeat(0)
+	, m_clipN(0), m_clipBase(0), m_clipSpan(0), m_dragLastX(0), m_dragLastY(0), m_histDragPushed(0)
+	, m_metroBeat(0)
 {
 	m_drawCursors.pencil = NULL;
 	m_drawCursors.line = NULL;
@@ -236,6 +237,7 @@ BEGIN_MESSAGE_MAP(CSasamiFmScoreDlg, CCustomBlurDialogExBase)
 	ON_CBN_SELCHANGE(IDC_SASAMI_STRIP_DRAW, &CSasamiFmScoreDlg::OnCbnStrip)
 	ON_CBN_SELCHANGE(IDC_SASAMI_STRIP_LANES, &CSasamiFmScoreDlg::OnCbnStrip)
 	ON_CBN_SELCHANGE(IDC_SASAMI_STRIP_STEP, &CSasamiFmScoreDlg::OnCbnStrip)
+	ON_CBN_SELCHANGE(IDC_SASAMI_PASTE_MODE, &CSasamiFmScoreDlg::OnCbnPasteMode)
 	ON_WM_KEYDOWN()
 	ON_MESSAGE(WM_SASAMI_PAL_DUR, &CSasamiFmScoreDlg::OnPalDur)
 	ON_MESSAGE(WM_SASAMI_PAL_QUERY_STATE, &CSasamiFmScoreDlg::OnPalQueryState)
@@ -246,28 +248,51 @@ END_MESSAGE_MAP()
 
 void CSasamiFmScoreDlg::ApplyLang()
 {
-	SetWindowText(LL14(L"SASAMI FM\u8b5c\u9762", L"SASAMI FM Score", L"Partition FM SASAMI", L"Partitura FM SASAMI", L"Partitura FM SASAMI",
-		L"SASAMI FM Score", L"SASAMI FM Score", L"SASAMI FM Score", L"SASAMI FM Score", L"SASAMI FM-Partitur",
+	SetWindowText(LL14(L"SASAMI FM譜面", L"SASAMI FM Score", L"Partition FM SASAMI", L"Partitura FM SASAMI", L"Partitura FM SASAMI",
+		L"SASAMI FM 악보", L"SASAMI FM 谱面", L"نتيجة SASAMI FM", L"Партитура SASAMI FM", L"SASAMI FM-Partitur",
 		L"Partitura FM SASAMI", L"SASAMI FM-partituur", L"Partytura SASAMI FM", L"SASAMI FM Skor"));
-	m_btnOpen.SetWindowText(LL14(L"\u958b\u304f", L"Open", L"Ouvrir", L"Apri", L"Abrir", L"Open", L"Open", L"Open", L"Open", L"Offnen", L"Abrir", L"Openen", L"Otworz", L"Ac"));
-	m_btnSave.SetWindowText(LL14(L"\u4fdd\u5b58", L"Save", L"Enregistrer", L"Salva", L"Guardar", L"Save", L"Save", L"Save", L"Save", L"Speichern", L"Salvar", L"Opslaan", L"Zapisz", L"Kaydet"));
-	m_btnPlay.SetWindowText(LL14(L"\u518d\u751f\u78ba\u8a8d", L"Preview", L"Apercu", L"Anteprima", L"Vista previa", L"Preview", L"Preview", L"Preview", L"Preview", L"Vorschau", L"Previa", L"Voorbeeld", L"Podglad", L"Onizle"));
-	m_btnExport.SetWindowText(LL14(L"\u66f8\u304d\u51fa\u3057", L"Export", L"Exporter", L"Esporta", L"Exportar", L"Export", L"Export", L"Export", L"Export", L"Export", L"Exportar", L"Exporteren", L"Eksport", L"Disa aktar"));
-	m_btnHelp.SetWindowText(LL14(L"\u30d8\u30eb\u30d7", L"Help", L"Aide", L"Guida", L"Ayuda", L"Help", L"Help", L"Help", L"Help", L"Hilfe", L"Ajuda", L"Help", L"Pomoc", L"Yardim"));
-	m_btnTempo.SetWindowText(LL14(L"\u30c6\u30f3\u30dd", L"Tempo", L"Tempo", L"Tempo", L"Tempo", L"Tempo", L"Tempo", L"Tempo", L"Tempo", L"Tempo", L"Tempo", L"Tempo", L"Tempo", L"Tempo"));
-	m_btnVoice.SetWindowText(LL14(L"\u97f3\u8272", L"Voice", L"Timbre", L"Voce", L"Voz", L"Voice", L"Voice", L"Voice", L"Voice", L"Klang", L"Voz", L"Klank", L"Glos", L"Ses"));
-	m_btnPencil.SetWindowText(LL14(L"\u97f3\u7b26", L"Notes", L"Notes", L"Note", L"Notas", L"Notes", L"音符", L"音符", L"Notes", L"Noten", L"Notas", L"Noten", L"Nuty", L"Nota"));
-	m_btnErase.SetWindowText(LL14(L"\u6d88\u3057\u30b4\u30e0", L"Erase", L"Gomme", L"Gomma", L"Borrar", L"Erase", L"Erase", L"Erase", L"Erase", L"Radierer", L"Borracha", L"Gum", L"Gumka", L"Silgi"));
-	m_btnSel.SetWindowText(LL14(L"\u9078\u629e", L"Select", L"Selection", L"Selezione", L"Seleccionar", L"Select", L"Select", L"Select", L"Select", L"Auswahl", L"Selecionar", L"Selecteren", L"Zaznacz", L"Sec"));
-	m_btnPal.SetWindowText(LL14(L"\u97f3\u7b26", L"Notes", L"Notes", L"Note", L"Notas", L"Notes", L"Notes", L"Notes", L"Notes", L"Noten", L"Notas", L"Noten", L"Nuty", L"Notalar"));
-	m_btnPropUpd.SetWindowText(LL14(L"\u66f4\u65b0", L"Update", L"Maj", L"Aggiorna", L"Actualizar", L"Update", L"Update", L"Update", L"Update", L"Aktualisieren", L"Atualizar", L"Bijwerken", L"Aktualizuj", L"Guncelle"));
+	m_btnOpen.SetWindowText(LL14(L"開く", L"Open", L"Ouvrir", L"Apri", L"Abrir",
+		L"열기", L"打开", L"فتح", L"Открыть", L"Öffnen", L"Abrir", L"Openen", L"Otwórz", L"Aç"));
+	m_btnSave.SetWindowText(LL14(L"保存", L"Save", L"Enregistrer", L"Salva", L"Guardar",
+		L"저장", L"保存", L"حفظ", L"Сохранить", L"Speichern", L"Salvar", L"Opslaan", L"Zapisz", L"Kaydet"));
+	m_btnPlay.SetWindowText(LL14(L"再生確認", L"Preview", L"Aperçu", L"Anteprima", L"Vista previa",
+		L"미리듣기", L"试听", L"معاينة", L"Просмотр", L"Vorschau", L"Prévia", L"Voorbeeld", L"Podgląd", L"Önizle"));
+	m_btnExport.SetWindowText(LL14(L"書き出し", L"Export", L"Exporter", L"Esporta", L"Exportar",
+		L"내보내기", L"导出", L"تصدير", L"Экспорт", L"Exportieren", L"Exportar", L"Exporteren", L"Eksport", L"Dışa aktar"));
+	m_btnHelp.SetWindowText(LL14(L"ヘルプ", L"Help", L"Aide", L"Guida", L"Ayuda",
+		L"도움말", L"帮助", L"مساعدة", L"Справка", L"Hilfe", L"Ajuda", L"Help", L"Pomoc", L"Yardım"));
+	m_btnTempo.SetWindowText(LL14(L"テンポ", L"Tempo", L"Tempo", L"Tempo", L"Tempo",
+		L"템포", L"速度", L"إيقاع", L"Темп", L"Tempo", L"Tempo", L"Tempo", L"Tempo", L"Tempo"));
+	m_btnVoice.SetWindowText(LL14(L"音色", L"Voice", L"Timbre", L"Voce", L"Voz",
+		L"음색", L"音色", L"طابع", L"Тембр", L"Klang", L"Voz", L"Klank", L"Głos", L"Ses"));
+	m_btnPencil.SetWindowText(LL14(L"音符", L"Notes", L"Notes", L"Note", L"Notas",
+		L"음표", L"音符", L"نغمات", L"Ноты", L"Noten", L"Notas", L"Noten", L"Nuty", L"Nota"));
+	m_btnErase.SetWindowText(LL14(L"消しゴム", L"Erase", L"Gomme", L"Gomma", L"Borrar",
+		L"지우개", L"橡皮", L"ممحاة", L"Ластик", L"Radierer", L"Borracha", L"Gum", L"Gumka", L"Silgi"));
+	m_btnSel.SetWindowText(LL14(L"選択", L"Select", L"Sélection", L"Selezione", L"Seleccionar",
+		L"선택", L"选择", L"تحديد", L"Выбор", L"Auswahl", L"Selecionar", L"Selecteren", L"Zaznacz", L"Seç"));
+	m_btnPal.SetWindowText(LL14(L"音符", L"Notes", L"Notes", L"Note", L"Notas",
+		L"음표", L"音符", L"نغمات", L"Ноты", L"Noten", L"Notas", L"Noten", L"Nuty", L"Notalar"));
+	m_btnPropUpd.SetWindowText(LL14(L"更新", L"Update", L"MAJ", L"Aggiorna", L"Actualizar",
+		L"업데이트", L"更新", L"تحديث", L"Обновить", L"Aktualisieren", L"Atualizar", L"Bijwerken", L"Aktualizuj", L"Güncelle"));
 	m_btnMark.SetWindowText(L">|");
 	m_btnLoopA.SetWindowText(L"A");
 	m_btnLoopB.SetWindowText(L"B");
 	m_btnLoopClr.SetWindowText(L"A-Bx");
-	m_btnShowAll.SetWindowText(L"All");
+	m_btnShowAll.SetWindowText(LL14(L"全表示", L"All", L"Tout", L"Tutto", L"Todo",
+		L"전체", L"全部", L"الكل", L"Все", L"Alle", L"Tudo", L"Alles", L"Wszystko", L"Tümü"));
 	if (m_btnText.GetSafeHwnd())
-		m_btnText.SetWindowText(LL14(L"\u30c6\u30ad\u30b9\u30c8", L"Text", L"Texte", L"Testo", L"Texto", L"Text", L"Text", L"Text", L"Text", L"Text", L"Texto", L"Tekst", L"Tekst", L"Metin"));
+		m_btnText.SetWindowText(LL14(L"テキスト", L"Text", L"Texte", L"Testo", L"Texto",
+			L"텍스트", L"文本", L"نص", L"Текст", L"Text", L"Texto", L"Tekst", L"Tekst", L"Metin"));
+	if (m_btnArr.GetSafeHwnd())
+		m_btnArr.SetWindowText(LL14(L"アレンジ", L"Arrange", L"Arranger", L"Arrangia", L"Arreglar",
+			L"어레인지", L"编曲", L"ترتيب", L"Аранжировка", L"Arrange", L"Arranjo", L"Arrangeren", L"Aranż", L"Aranje"));
+	if (m_btnLayout.GetSafeHwnd())
+		m_btnLayout.SetWindowText(LL14(L"譜表", L"Layout", L"Portée", L"Impaginazione", L"Diseño",
+			L"보표", L"谱表", L"تخطيط", L"Партитура", L"Notation", L"Layout", L"Layout", L"Układ", L"Düzen"));
+	if (m_btnRoll.GetSafeHwnd())
+		m_btnRoll.SetWindowText(LL14(L"ピアノロール", L"Piano roll", L"Piano roll", L"Piano roll", L"Piano roll",
+			L"피아노 롤", L"钢琴卷帘", L"رول البيانو", L"Пианоролл", L"Klavierrolle", L"Piano roll", L"Piano-roll", L"Rolka", L"Piyano rulosu"));
 	if (m_stripLanes.GetSafeHwnd())
 		SyncStripCombos();
 	UpdateHelpBar();
@@ -357,6 +382,20 @@ BOOL CSasamiFmScoreDlg::OnInitDialog()
 		ScStaffLoadPartStrip(&m_ui, m_curCh);
 		SyncStripCombos();
 	}
+	if (!m_pasteMode.GetSafeHwnd())
+		m_pasteMode.Create(WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP,
+			CRect(0, 0, 100, 120), this, IDC_SASAMI_PASTE_MODE);
+	m_pasteMode.ResetContent();
+	m_pasteMode.AddString(LL14(L"上書き", L"Overwrite", L"Écraser", L"Sovrascrivi", L"Sobrescribir",
+		L"덮어쓰기", L"覆盖", L"استبدال", L"Замена", L"Überschreiben", L"Sobrescrever", L"Overschrijven", L"Nadpisz", L"Üzerine yaz"));
+	m_pasteMode.AddString(LL14(L"挿入", L"Insert", L"Insérer", L"Inserisci", L"Insertar",
+		L"삽입", L"插入", L"إدراج", L"Вставка", L"Einfügen", L"Inserir", L"Invoegen", L"Wstaw", L"Ekle"));
+	m_pasteMode.SetCurSel(0);
+	m_pasteMode.SetAeroMode(FALSE);
+	m_ui.tool = SC_TOOL_SELECT;
+	m_ui.helpTopic = SC_HELP_SELECT;
+	m_ui.markerSolidTrack = m_curCh;
+	m_ui.pasteInsert = 0;
 	SyncMeterFromDoc();
 	RefreshToneLabels();
 	RefreshStrip();
@@ -467,6 +506,7 @@ void CSasamiFmScoreDlg::OnCbnStrip()
 void CSasamiFmScoreDlg::OnKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags)
 {
 	const int ctrl = (GetKeyState(VK_CONTROL) & 0x8000) ? 1 : 0;
+	const int shift = (GetKeyState(VK_SHIFT) & 0x8000) ? 1 : 0;
 	if (ctrl && (nChar == 'Z' || nChar == 'z')) {
 		if (ScScoreHistUndo(&m_hist, m_doc.ev, &m_doc.evCount, SC_EV_MAX)) {
 			RefreshStrip();
@@ -500,7 +540,7 @@ void CSasamiFmScoreDlg::OnKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags)
 	}
 	if (nChar == VK_HOME && !ctrl) {
 		m_ui.markerTick = 0;
-		m_status.SetWindowText(L"Marker → 0 (Home). Space plays from start.");
+		m_status.SetWindowText(LL14(L"マーカー→0 (Home)。Space で先頭から再生。", L"Marker → 0 (Home). Space plays from start.", L"Marqueur → 0 (Home). Espace lit depuis le début.", L"Marcatore → 0 (Home). Spazio riproduce dall’inizio.", L"Marcador → 0 (Home). Espacio reproduce desde el inicio.", L"마커→0 (Home). Space로 처음부터 재생.", L"标记→0 (Home)。Space 从开头播放。", L"علامة → 0 (Home). Space للتشغيل من البداية.", L"Маркер → 0 (Home). Space — воспроизведение с начала.", L"Markierung → 0 (Pos1). Leertaste spielt vom Anfang.", L"Marcador → 0 (Home). Espaço toca do início.", L"Markering → 0 (Home). Spatie speelt vanaf start.", L"Znacznik → 0 (Home). Spacja odtwarza od początku.", L"İşaret → 0 (Home). Space baştan çalar."));
 		InvalidateRect(m_bodyRc, FALSE);
 		return;
 	}
@@ -509,7 +549,7 @@ void CSasamiFmScoreDlg::OnKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags)
 			ScStaffStopHostPreview(&m_ui);
 			KillTimer(1);
 			KillTimer(kScFmPreviewTimer);
-			m_status.SetWindowText(L"Stopped (Space). Marker stays — Space again from marker.");
+			m_status.SetWindowText(LL14(L"停止 (Space)。マーカー位置は維持 — Space で再開。", L"Stopped (Space). Marker stays — Space again from marker.", L"Arrêté (Espace). Le marqueur reste — Espace pour reprendre.", L"Fermato (Spazio). Il marcatore resta — Spazio per riprendere.", L"Detenido (Espacio). El marcador permanece — Espacio para reanudar.", L"정지 (Space). 마커 유지 — Space로 재개.", L"已停止 (Space)。标记保留 — 再按 Space 从标记继续。", L"توقف (Space). العلامة تبقى — Space للاستئناف.", L"Стоп (Space). Маркер сохранён — Space для продолжения.", L"Gestoppt (Leertaste). Markierung bleibt — Leertaste zum Fortsetzen.", L"Parado (Espaço). Marcador permanece — Espaço para retomar.", L"Gestopt (Spatie). Markering blijft — Spatie om te hervatten.", L"Zatrzymano (Spacja). Znacznik zostaje — Spacja wznawia.", L"Durdu (Space). İşaret kalır — Space ile devam."));
 			InvalidateRect(m_bodyRc, FALSE);
 		} else {
 			OnBnClickedPlay();
@@ -519,6 +559,8 @@ void CSasamiFmScoreDlg::OnKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags)
 	if (nChar == VK_DELETE || nChar == VK_BACK) {
 		HistPush();
 		if (ScStaffSelDelete(m_doc.ev, &m_doc.evCount, &m_ui)) {
+			ScStaffShrinkContentIfNeeded(&m_ui, m_doc.ev, m_doc.evCount);
+			ScStaffUpdateContentExtent(&m_ui, m_doc.ev, m_doc.evCount);
 			RefreshStrip();
 			InvalidateRect(m_bodyRc, FALSE);
 		}
@@ -535,12 +577,26 @@ void CSasamiFmScoreDlg::OnKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags)
 		return;
 	}
 	if (ctrl && (nChar == 'C' || nChar == 'c')) {
-		m_clipN = ScStaffSelCopy(m_doc.ev, m_doc.evCount, &m_ui, m_clip, SC_CLIP_MAX, &m_clipBase);
+		m_clipN = ScStaffSelCopyEx(m_doc.ev, m_doc.evCount, &m_ui, 1, m_clip, SC_CLIP_MAX, &m_clipBase, &m_clipSpan);
 		return;
 	}
 	if (ctrl && (nChar == 'X' || nChar == 'x')) {
-		m_clipN = ScStaffSelCopy(m_doc.ev, m_doc.evCount, &m_ui, m_clip, SC_CLIP_MAX, &m_clipBase);
+		HistPush();
+		m_clipN = ScStaffSelCopyEx(m_doc.ev, m_doc.evCount, &m_ui, 1, m_clip, SC_CLIP_MAX, &m_clipBase, &m_clipSpan);
 		if (m_clipN > 0 && ScStaffSelDelete(m_doc.ev, &m_doc.evCount, &m_ui)) {
+			ScStaffShrinkContentIfNeeded(&m_ui, m_doc.ev, m_doc.evCount);
+			ScStaffUpdateContentExtent(&m_ui, m_doc.ev, m_doc.evCount);
+			RefreshStrip();
+			InvalidateRect(m_bodyRc, FALSE);
+		}
+		return;
+	}
+	if (ctrl && shift && (nChar == 'V' || nChar == 'v')) {
+		if (m_clipN > 0) {
+			HistPush();
+			ScStaffSelPasteEx(m_doc.ev, &m_doc.evCount, SC_EV_MAX, &m_ui, 1, m_clip, m_clipN, m_ui.markerTick, m_clipSpan, 1);
+			ScStaffShrinkContentIfNeeded(&m_ui, m_doc.ev, m_doc.evCount);
+			ScStaffUpdateContentExtent(&m_ui, m_doc.ev, m_doc.evCount);
 			RefreshStrip();
 			InvalidateRect(m_bodyRc, FALSE);
 		}
@@ -548,7 +604,12 @@ void CSasamiFmScoreDlg::OnKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags)
 	}
 	if (ctrl && (nChar == 'V' || nChar == 'v')) {
 		if (m_clipN > 0) {
-			ScStaffSelPaste(m_doc.ev, &m_doc.evCount, SC_EV_MAX, m_clip, m_clipN, m_ui.markerTick, 0);
+			HistPush();
+			int insert = m_ui.pasteInsert;
+			if (GetKeyState(VK_SHIFT) & 0x8000) insert = 1;
+			ScStaffSelPasteEx(m_doc.ev, &m_doc.evCount, SC_EV_MAX, &m_ui, 1, m_clip, m_clipN, m_ui.markerTick, m_clipSpan, insert);
+			ScStaffShrinkContentIfNeeded(&m_ui, m_doc.ev, m_doc.evCount);
+			ScStaffUpdateContentExtent(&m_ui, m_doc.ev, m_doc.evCount);
 			RefreshStrip();
 			InvalidateRect(m_bodyRc, FALSE);
 		}
@@ -559,6 +620,27 @@ void CSasamiFmScoreDlg::OnKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags)
 			InvalidateRect(m_bodyRc, FALSE);
 		return;
 	}
+	if (ctrl && shift && (nChar == 'I' || nChar == 'i')) {
+		if (m_ui.selRangeValid || m_ui.nSel > 0 || m_ui.selEv >= 0) {
+			HistPush();
+			if (ScStaffInsertBlankRange(m_doc.ev, m_doc.evCount, &m_ui)) {
+				ScStaffUpdateContentExtent(&m_ui, m_doc.ev, m_doc.evCount);
+				RefreshStrip();
+				InvalidateRect(m_bodyRc, FALSE);
+				m_status.SetWindowText(LL14(
+					L"範囲に空白を挿入（後ろずらし）", L"Inserted blank (shifted later events)", L"Espace inséré", L"Inserito vuoto", L"Espacio insertado",
+					L"빈 구간 삽입", L"已插入空白", L"أدرج فراغ", L"Вставлена пустота", L"Leerraum eingefügt", L"Vazio inserido", L"Leeg ingevoegd", L"Wstawiono pustkę", L"Boş eklendi"));
+			}
+		}
+		return;
+	}
+	if (nChar == VK_ESCAPE) {
+		ScStaffEnterSelectTool(&m_ui);
+		ScStaffSelClear(&m_ui);
+		UpdateNoteCursor();
+		InvalidateRect(m_bodyRc, FALSE);
+		return;
+	}
 	CCustomBlurDialogExBase::OnKeyDown(nChar, nRepCnt, nFlags);
 }
 
@@ -566,34 +648,55 @@ void CSasamiFmScoreDlg::SetupTooltips()
 {
 	if (!CCustomControlUtility::BeginDialogToolTip(m_tooltip, this, TTS_NOPREFIX)) return;
 	auto tip = [&](CWnd& w, LPCWSTR s) { if (w.GetSafeHwnd()) m_tooltip.AddTool(&w, s); };
-	tip(m_btnOpen, L"Open FM MML/DAT (.mml .txt .dat .f) — score and text sync");
-	tip(m_btnSave, L"Save As .fpy / .fpy2 (loop nest≥2 → fpy2)");
-	tip(m_btnPlay, L"Preview from marker (Space = play/stop)");
-	tip(m_btnExport, L"Audio export from compiled FM");
-	tip(m_btnPencil, L"Pencil — place notes on staff");
-	tip(m_btnErase, L"Eraser — click/drag to delete notes");
-	tip(m_btnSel, L"Select tool — click note/mark, Delete/Backspace removes");
-	tip(m_btnPal, L"Note duration palette (quarter/eighth/etc.)");
-	tip(m_btnVoice, L"FM voice editor — 25-byte params, preview beep, apply to part");
-	tip(m_btnText, L"Open text composer (FM/OPNA MML)");
-	tip(m_btnHelp, L"コマンド説明・譜面操作ガイド（FM/共通/譜面タブ）");
+	tip(m_btnOpen, LL14(L"FM MML/DAT を開く (.mml .txt .dat .f) — 譜面とテキスト同期", L"Open FM MML/DAT (.mml .txt .dat .f) — score and text sync", L"Ouvrir FM MML/DAT — sync partition/texte", L"Apri FM MML/DAT — sync partitura/testo", L"Abrir FM MML/DAT — sync partitura/texto",
+		L"FM MML/DAT 열기 — 악보/텍스트 동기화", L"打开 FM MML/DAT — 谱面与文本同步", L"فتح FM MML/DAT — مزامنة النوتة والنص", L"Открыть FM MML/DAT — синхр. партитуры и текста", L"FM MML/DAT öffnen — Partitur/Text sync", L"Abrir FM MML/DAT — sync partitura/texto", L"FM MML/DAT openen — partituur/tekst sync", L"Otwórz FM MML/DAT — sync partytury/tekstu", L"FM MML/DAT aç — parti/metin senkron"));
+	tip(m_btnSave, LL14(L".fpy / .fpy2 として保存（ループ入れ子≥2 → fpy2）", L"Save As .fpy / .fpy2 (loop nest≥2 → fpy2)", L"Enregistrer .fpy / .fpy2 (nid≥2 → fpy2)", L"Salva .fpy / .fpy2 (nid≥2 → fpy2)", L"Guardar .fpy / .fpy2 (nid≥2 → fpy2)",
+		L".fpy / .fpy2로 저장 (중첩≥2 → fpy2)", L"另存为 .fpy / .fpy2（嵌套≥2 → fpy2）", L"حفظ .fpy / .fpy2 (تداخل≥2 → fpy2)", L"Сохранить .fpy / .fpy2 (влож.≥2 → fpy2)", L"Speichern als .fpy / .fpy2 (Nest≥2 → fpy2)", L"Salvar .fpy / .fpy2 (nid≥2 → fpy2)", L"Opslaan als .fpy / .fpy2 (nest≥2 → fpy2)", L"Zapisz jako .fpy / .fpy2 (zagn.≥2 → fpy2)", L".fpy / .fpy2 kaydet (yuva≥2 → fpy2)"));
+	tip(m_btnPlay, LL14(L"マーカーからプレビュー（Space=再生/停止）", L"Preview from marker (Space = play/stop)", L"Aperçu depuis le marqueur (Espace)", L"Anteprima dal marcatore (Spazio)", L"Vista previa desde marcador (Espacio)",
+		L"마커부터 미리듣기 (Space)", L"从标记预览（Space）", L"معاينة من العلامة (Space)", L"Превью с маркера (Space)", L"Vorschau ab Markierung (Leertaste)", L"Prévia do marcador (Espaço)", L"Voorbeeld vanaf markering (Spatie)", L"Podgląd od znacznika (Spacja)", L"İşaretten önizle (Space)"));
+	tip(m_btnExport, LL14(L"コンパイル済みFMからオーディオ書き出し", L"Audio export from compiled FM", L"Export audio depuis FM compilé", L"Esporta audio da FM compilato", L"Exportar audio desde FM compilado",
+		L"컴파일 FM에서 오디오 내보내기", L"从编译 FM 导出音频", L"تصدير صوت من FM", L"Экспорт аудио из FM", L"Audio-Export aus FM", L"Exportar áudio do FM", L"Audio exporteren uit FM", L"Eksport audio z FM", L"FM’den ses dışa aktar"));
+	tip(m_btnPencil, LL14(L"鉛筆 — 五線に音符を配置", L"Pencil — place notes on staff", L"Crayon — notes sur la portée", L"Matita — note sul pentagramma", L"Lápiz — notas en el pentagrama",
+		L"연필 — 보표에 음표 배치", L"铅笔 — 在五线上放置音符", L"قلم — وضع نغمات على المدرج", L"Карандаш — ноты на нотоносце", L"Stift — Noten auf Notenzeile", L"Lápis — notas na pauta", L"Potlood — noten op notenbalk", L"Ołówek — nuty na pięciolinii", L"Kalem — portede nota yerleştir"));
+	tip(m_btnErase, LL14(L"消しゴム — クリック/ドラッグで削除", L"Eraser — click/drag to delete notes", L"Gomme — clic/glisser pour supprimer", L"Gomma — clic/trascina per cancellare", L"Borrar — clic/arrastrar para borrar",
+		L"지우개 — 클릭/드래그 삭제", L"橡皮 — 点击/拖动删除", L"ممحاة — انقر/اسحب للحذف", L"Ластик — клик/перетаскивание", L"Radierer — Klick/Ziehen löscht", L"Borracha — clique/arraste", L"Gum — klik/sleep wissen", L"Gumka — klik/przeciągnij", L"Silgi — tıkla/sürükle"));
+	tip(m_btnSel, LL14(L"選択 — 音符/マークをクリック、Delete/Backspaceで削除", L"Select tool — click note/mark, Delete/Backspace removes", L"Sélection — clic note/marque; Suppr", L"Selezione — clic nota/segno; Canc", L"Seleccionar — clic nota/marca; Supr",
+		L"선택 — 음표/마크 클릭, Delete/Backspace 삭제", L"选择 — 点击音符/标记；Delete/Backspace 删除", L"تحديد — انقر نغمة/علامة؛ Delete", L"Выбор — клик нота/знак; Delete", L"Auswahl — Klick Note/Zeichen; Entf", L"Selecionar — clique nota/marca; Del", L"Selecteren — klik noot/markering; Del", L"Zaznacz — klik nuta/znak; Del", L"Seç — nota/işaret tıkla; Del"));
+	tip(m_btnPal, LL14(L"音価パレット（4分・8分など）", L"Note duration palette (quarter/eighth/etc.)", L"Palette de durées (noire/croche…)", L"Tavolozza durate (semiminima/croma…)", L"Paleta de duraciones (negra/corchea…)",
+		L"음가 팔레트 (4분/8분 등)", L"时值调色板（四分/八分等）", L"لوحة المدد (ربع/ثمن…)", L"Палитра длительностей (четверть/восьмая…)", L"Notenwerte-Palette (Viertel/Achtel…)", L"Paleta de durações (semínima/colcheia…)", L"Duur-palet (kwart/achtste…)", L"Paleta wartości (ćwierć/ósemka…)", L"Süre paleti (dörtlük/sekizlik…)"));
+	tip(m_btnVoice, LL14(L"FM音色エディタ — 25バイト、プレビュー、パートへ適用", L"FM voice editor — 25-byte params, preview beep, apply to part", L"Éditeur timbre FM — 25 octets, aperçu, appliquer", L"Editor voce FM — 25 byte, anteprima, applica", L"Editor de voz FM — 25 bytes, vista previa, aplicar",
+		L"FM 음색 편집기 — 25바이트, 미리듣기, 파트 적용", L"FM 音色编辑器 — 25 字节、试听、应用到声部", L"محرر صوت FM — 25 بايت، معاينة، تطبيق", L"Редактор голоса FM — 25 байт, превью, применить", L"FM-Stimmen-Editor — 25 Byte, Vorschau, anwenden", L"Editor de voz FM — 25 bytes, prévia, aplicar", L"FM-stem-editor — 25 bytes, voorbeeld, toepassen", L"Edytor głosu FM — 25 bajtów, podgląd, zastosuj", L"FM ses düzenleyici — 25 bayt, önizle, uygula"));
+	tip(m_btnText, LL14(L"テキスト作曲を開く（FM/OPNA MML）", L"Open text composer (FM/OPNA MML)", L"Ouvrir compositeur texte (FM/OPNA)", L"Apri compositore testo (FM/OPNA)", L"Abrir compositor de texto (FM/OPNA)",
+		L"텍스트 작곡 열기 (FM/OPNA MML)", L"打开文本作曲（FM/OPNA MML）", L"فتح مؤلف النص (FM/OPNA)", L"Открыть текстовый композер (FM/OPNA)", L"Textkomponist öffnen (FM/OPNA)", L"Abrir compositor de texto (FM/OPNA)", L"Tekstcomponist openen (FM/OPNA)", L"Otwórz kompozytor tekstowy (FM/OPNA)", L"Metin besteciyi aç (FM/OPNA)"));
+	tip(m_btnHelp, LL14(L"コマンド説明・譜面操作ガイド（FM/共通/譜面タブ）", L"Command help and score guide (FM / common / score tabs)", L"Aide commandes / partition (onglets FM)", L"Guida comandi / partitura (schede FM)", L"Ayuda comandos / partitura (pestañas FM)",
+		L"명령 설명·악보 가이드 (FM/공통/악보)", L"命令说明与谱面指南（FM/共用/谱面）", L"دليل الأوامر والدرجات (FM)", L"Справка по командам и партитуре (FM)", L"Befehls-/Partiturhilfe (FM)", L"Ajuda de comandos / partitura (FM)", L"Commando-/partituurhulp (FM)", L"Pomoc: komendy / partytura (FM)", L"Komut / parti yardımı (FM)"));
 	tip(m_btnArr, LL14(L"アレンジ／和音／パターン", L"Arrange / Chord / Pattern", L"Arrange / Accords / Motifs", L"Arrange / Accordi / Pattern", L"Arrange / Acordes / Patrones",
 		L"어레인지/화음/패턴", L"编曲/和弦/型", L"ترتيب/وتر/نمط", L"Аранжировка/аккорд/паттерн", L"Arrange/Akkord/Muster", L"Arranjo/acorde/padrão", L"Arrange/akkoord/patroon", L"Aranż/akord/wzorzec", L"Arrange/akor/desen"));
-	tip(m_btnLayout, LL14(L"譜表 — 拍子・調号・移調（表示用）", L"Layout — meter, key, transpose (score display)", L"Portée — mesure, armure (affichage)", L"Impag. — misura (visualizzazione)", L"Layout — compás (visual)",
-		L"보표 — 박자·조표·이조", L"谱表 — 拍号·调号·移调（显示）", L"تخطيط", L"Партитура", L"Notation", L"Layout", L"Layout", L"Układ", L"Düzen"));
+	tip(m_btnLayout, LL14(L"譜表 — 拍子・調号・移調（表示用）", L"Layout — meter, key, transpose (score display)", L"Portée — mesure, armure, transposition (affichage)", L"Impag. — misura, armatura, trasposizione (visualizzazione)", L"Layout — compás, armadura, transposición (visual)",
+		L"보표 — 박자·조표·이조 (표시)", L"谱表 — 拍号·调号·移调（显示）", L"تخطيط — إيقاع ومفتاح ونقل (عرض)", L"Партитура — размер, тональность, транспонирование", L"Notation — Takt, Tonart, Transponieren (Anzeige)", L"Layout — compasso, armadura, transpor (exibição)", L"Layout — maat, toonsoort, transponeren (weergave)", L"Układ — metrum, tonacja, transpozycja (wyświetlanie)", L"Düzen — ölçü, armatür, transpoz (görünüm)"));
 	tip(m_btnRoll, LL14(L"ピアノロール分割＋別窓", L"Piano roll split + floating window", L"Piano roll split + fenêtre", L"Piano roll split + finestra", L"Piano roll split + ventana",
 		L"피아노 롤 분할+창", L"钢琴卷帘分割+浮动窗", L"رول بيانو+نافذة", L"Пианоролл+окно", L"Klavierrolle+Fenster", L"Piano roll+janela", L"Piano-roll+venster", L"Rolka+okno", L"Piyano rulosu+pencere"));
-	tip(m_midiInDev, LL14(L"譜面専用 MIDI In（Hostとは別）", L"Score MIDI In (independent of Host)", L"MIDI In partition", L"MIDI In partitura", L"MIDI In partitura",
-		L"악보 전용 MIDI In", L"谱面专用 MIDI In", L"MIDI In للنوتة", L"MIDI In партитуры", L"Partitur-MIDI-In", L"MIDI In da partitura", L"Partituur-MIDI-In", L"MIDI In partytury", L"Parti MIDI In"));
+	tip(m_midiInDev, LL14(L"譜面専用 MIDI In（Hostとは別）", L"Score MIDI In (independent of Host)", L"MIDI In partition (indépendant de Host)", L"MIDI In partitura (indipendente da Host)", L"MIDI In partitura (independiente de Host)",
+		L"악보 전용 MIDI In (Host와 별도)", L"谱面专用 MIDI In（独立于 Host）", L"MIDI In للنوتة (مستقل عن Host)", L"MIDI In партитуры (независимо от Host)", L"Partitur-MIDI-In (unabhängig von Host)", L"MIDI In da partitura (independente do Host)", L"Partituur-MIDI-In (los van Host)", L"MIDI In partytury (niezależnie od Host)", L"Parti MIDI In (Host’tan bağımsız)"));
 	tip(m_midiInMode, LL14(L"OFF / Step / Realtime", L"OFF / Step / Realtime", L"OFF / Pas / Temps réel", L"OFF / Step / Realtime", L"OFF / Paso / Tiempo real",
 		L"OFF / 스텝 / 실시간", L"关 / 步进 / 实时", L"OFF / خطوة / فوري", L"OFF / Шаг / Реалтайм", L"AUS / Schritt / Echtzeit", L"OFF / Passo / Tempo real", L"UIT / Stap / Realtime", L"WYŁ / Krok / Realtime", L"KAPALI / Adım / Gerçek zaman"));
-	tip(m_ch, L"編集対象パート (FM/SSG/RHY/Misao)");
-	tip(m_stripKind0, L"レーン1の種類: Exp/Vol(TL)/Pitch/Gate%/Pan");
-	tip(m_stripKind1, L"レーン2の種類");
-	tip(m_stripDraw, L"ストリップ描画: 鉛筆 / 直線 / 曲線");
-	tip(m_stripLanes, L"CC/パラメータレーン数: なし / ×1 / ×2");
-	tip(m_stripStep, L"ストリップ横解像度: 4分〜64分音符");
-	tip(m_status, L"Space=マーカーから再生/停止 · ルーラークリックで再生位置");
+	tip(m_ch, LL14(L"編集対象パート (FM/SSG/RHY/Misao)", L"Edit target part (FM/SSG/RHY/Misao)", L"Partie cible (FM/SSG/RHY/Misao)", L"Parte destinazione (FM/SSG/RHY/Misao)", L"Parte objetivo (FM/SSG/RHY/Misao)",
+		L"편집 파트 (FM/SSG/RHY/Misao)", L"编辑声部 (FM/SSG/RHY/Misao)", L"الجزء المستهدف (FM/SSG/RHY/Misao)", L"Целевая партия (FM/SSG/RHY/Misao)", L"Zielpart (FM/SSG/RHY/Misao)", L"Parte de edição (FM/SSG/RHY/Misao)", L"Doelpartij (FM/SSG/RHY/Misao)", L"Partia edycji (FM/SSG/RHY/Misao)", L"Düzenleme partisi (FM/SSG/RHY/Misao)"));
+	tip(m_stripKind0, LL14(L"レーン1の種類: Exp/Vol(TL)/Pitch/Gate%/Pan", L"Lane 1 kind: Exp/Vol(TL)/Pitch/Gate%/Pan", L"Type piste 1: Exp/Vol(TL)/Pitch/Gate%/Pan", L"Tipo corsia 1: Exp/Vol(TL)/Pitch/Gate%/Pan", L"Tipo pista 1: Exp/Vol(TL)/Pitch/Gate%/Pan",
+		L"레인1 종류: Exp/Vol(TL)/Pitch/Gate%/Pan", L"车道1类型: Exp/Vol(TL)/Pitch/Gate%/Pan", L"نوع الممر 1: Exp/Vol(TL)/Pitch/Gate%/Pan", L"Тип дорожки 1: Exp/Vol(TL)/Pitch/Gate%/Pan", L"Spur 1-Art: Exp/Vol(TL)/Pitch/Gate%/Pan", L"Tipo faixa 1: Exp/Vol(TL)/Pitch/Gate%/Pan", L"Baan 1-soort: Exp/Vol(TL)/Pitch/Gate%/Pan", L"Rodzaj toru 1: Exp/Vol(TL)/Pitch/Gate%/Pan", L"Şerit 1 türü: Exp/Vol(TL)/Pitch/Gate%/Pan"));
+	tip(m_stripKind1, LL14(L"レーン2の種類", L"Lane 2 kind", L"Type piste 2", L"Tipo corsia 2", L"Tipo pista 2",
+		L"레인2 종류", L"车道2类型", L"نوع الممر 2", L"Тип дорожки 2", L"Spur 2-Art", L"Tipo faixa 2", L"Baan 2-soort", L"Rodzaj toru 2", L"Şerit 2 türü"));
+	tip(m_stripDraw, LL14(L"ストリップ描画: 鉛筆 / 直線 / 曲線", L"Strip draw: Pencil / Line / Curve", L"Dessin strip: Crayon / Ligne / Courbe", L"Disegno strip: Matita / Linea / Curva", L"Dibujo strip: Lápiz / Línea / Curva",
+		L"스트립 그리기: 연필 / 직선 / 곡선", L"条带绘制: 铅笔 / 直线 / 曲线", L"رسم الشريط: قلم / خط / منحنى", L"Рисование полосы: карандаш / линия / кривая", L"Strip-Zeichnung: Stift / Linie / Kurve", L"Desenho faixa: Lápis / Linha / Curva", L"Strooktekenen: Potlood / Lijn / Kromme", L"Rysowanie pasa: Ołówek / Linia / Krzywa", L"Şerit çizimi: Kalem / Çizgi / Eğri"));
+	tip(m_stripLanes, LL14(L"CC/パラメータレーン数: なし / ×1 / ×2", L"CC/parameter lane count: none / ×1 / ×2", L"Nb pistes CC/param: aucune / ×1 / ×2", L"N. corsie CC/param: nessuna / ×1 / ×2", L"Nº pistas CC/param: ninguna / ×1 / ×2",
+		L"CC/파라미터 레인 수: 없음 / ×1 / ×2", L"CC/参数车道数: 无 / ×1 / ×2", L"عدد ممرات CC/معلمات: بلا / ×1 / ×2", L"Число CC/парам. дорожек: нет / ×1 / ×2", L"CC/Param-Spuren: keine / ×1 / ×2", L"Nº faixas CC/param: nenhuma / ×1 / ×2", L"CC/param-banen: geen / ×1 / ×2", L"Liczba torów CC/param: brak / ×1 / ×2", L"CC/param şerit sayısı: yok / ×1 / ×2"));
+	tip(m_stripStep, LL14(L"ストリップ横解像度: 4分〜64分音符", L"Strip horizontal resolution: 1/4–1/64", L"Résolution horizontale: 1/4–1/64", L"Risoluzione orizzontale: 1/4–1/64", L"Resolución horizontal: 1/4–1/64",
+		L"스트립 가로 해상도: 1/4–1/64", L"条带横向分辨率: 1/4–1/64", L"دقة أفقية: 1/4–1/64", L"Гор. разрешение: 1/4–1/64", L"Horiz. Auflösung: 1/4–1/64", L"Resolução horizontal: 1/4–1/64", L"Horiz. resolutie: 1/4–1/64", L"Rozdzielczość pozioma: 1/4–1/64", L"Yatay çözünürlük: 1/4–1/64"));
+	tip(m_status, LL14(L"Space=マーカーから再生/停止 · ルーラークリックで再生位置", L"Space=play/stop from marker · Ruler click sets play position", L"Espace=lecture/arrêt · Clic règle = position", L"Spazio=play/stop · Clic righello = posizione", L"Espacio=play/stop · Clic regla = posición",
+		L"Space=마커 재생/정지 · 눈금자 클릭으로 재생 위치", L"Space=从标记播放/停止 · 点标尺设播放位置", L"Space=تشغيل/إيقاف · نقر المسطرة = موضع التشغيل", L"Space=старт/стоп · Клик по линейке = позиция", L"Leertaste=Play/Stop · Klick Lineal = Position", L"Espaço=play/parar · Clique régua = posição", L"Spatie=play/stop · Klik liniaal = positie", L"Spacja=play/stop · Klik linijki = pozycja", L"Space=çal/dur · Cetvele tıkla = konum"));
+	if (m_pasteMode.GetSafeHwnd())
+		tip(m_pasteMode, LL14(L"ペースト: 上書き / 挿入（Ctrl+Shift+V=常に挿入）", L"Paste: overwrite / insert (Ctrl+Shift+V=always insert)", L"Coller: écraser / insérer (Ctrl+Shift+V)", L"Incolla: sovrascrivi / inserisci", L"Pegar: sobrescribir / insertar",
+			L"붙여넣기: 덮어쓰기/삽입 (Ctrl+Shift+V)", L"粘贴：覆盖/插入（Ctrl+Shift+V）", L"لصق: استبدال/إدراج (Ctrl+Shift+V)", L"Вставка: замена/вставка (Ctrl+Shift+V)", L"Einfügen: überschreiben/einfügen (Ctrl+Shift+V)", L"Colar: sobrescrever/inserir (Ctrl+Shift+V)", L"Plakken: overschrijven/invoegen (Ctrl+Shift+V)", L"Wklej: nadpisz/wstaw (Ctrl+Shift+V)", L"Yapıştır: üzerine yaz/ekle (Ctrl+Shift+V)"));
 	CCustomControlUtility::FinalizeDialogToolTip(m_tooltip);
 }
 
@@ -618,13 +721,25 @@ BOOL CSasamiFmScoreDlg::PreTranslateMessage(MSG* pMsg)
 				return TRUE;
 			}
 		}
-		if (pMsg->wParam == VK_DELETE || pMsg->wParam == VK_BACK ||
-			((GetKeyState(VK_CONTROL) & 0x8000) && (pMsg->wParam == 'C' || pMsg->wParam == 'V' || pMsg->wParam == 'X' || pMsg->wParam == 'A' || pMsg->wParam == 'T'))) {
+		const int ctrl = (GetKeyState(VK_CONTROL) & 0x8000) ? 1 : 0;
+		const int shift = (GetKeyState(VK_SHIFT) & 0x8000) ? 1 : 0;
+		if (pMsg->wParam == VK_DELETE || pMsg->wParam == VK_BACK || pMsg->wParam == VK_ESCAPE ||
+			(ctrl && (pMsg->wParam == 'Z' || pMsg->wParam == 'z' || pMsg->wParam == 'Y' || pMsg->wParam == 'y' ||
+				pMsg->wParam == 'C' || pMsg->wParam == 'c' || pMsg->wParam == 'V' || pMsg->wParam == 'v' ||
+				pMsg->wParam == 'X' || pMsg->wParam == 'x' || pMsg->wParam == 'A' || pMsg->wParam == 'a' ||
+				pMsg->wParam == 'T' || pMsg->wParam == 't' || pMsg->wParam == 'I' || pMsg->wParam == 'i')) ||
+			(ctrl && shift && (pMsg->wParam == 'V' || pMsg->wParam == 'v' ||
+				pMsg->wParam == 'I' || pMsg->wParam == 'i'))) {
 			OnKeyDown((UINT)pMsg->wParam, 1, 0);
 			return TRUE;
 		}
 	}
 	return CCustomBlurDialogExBase::PreTranslateMessage(pMsg);
+}
+
+void CSasamiFmScoreDlg::OnCbnPasteMode()
+{
+	m_ui.pasteInsert = (m_pasteMode.GetCurSel() == 1) ? 1 : 0;
 }
 
 void CSasamiFmScoreDlg::LayoutChrome()
@@ -673,7 +788,8 @@ void CSasamiFmScoreDlg::LayoutChrome()
 	x = pad;
 	layoutCombo(m_stripLanes, x, y, 120, cbH, 140); x += 126;
 	layoutCombo(m_stripStep, x, y, 88, cbH, 120); x += 94;
-	layoutCombo(m_stripDraw, x, y, 108, cbH, 140);
+	layoutCombo(m_stripDraw, x, y, 108, cbH, 140); x += 114;
+	layoutCombo(m_pasteMode, x, y, 100, cbH, 120);
 	y += cbH + 6;
 	if (m_ui.stripCount >= 1) {
 		x = pad;
@@ -724,7 +840,7 @@ void CSasamiFmScoreDlg::LayoutChrome()
 	if (m_status.GetSafeHwnd())
 		m_status.MoveWindow(pad, y, max(200, rc.Width() - pad * 2), 20);
 	y += 22;
-	const int helpH = 52;
+	const int helpH = 56;
 	const int rollH = m_ui.showRollSplit ? 140 : 0;
 	const int bodyBotLimit = rc.Height() - pad - helpH - rollH;
 	const int chromeBottom = y;
@@ -958,6 +1074,13 @@ void CSasamiFmScoreDlg::OnPaint()
 		ScStaffPaintStaves(mem, grid, &m_ui, m_doc.ev, m_doc.evCount, 1, m_curCh, m_doc.tempoT);
 	if (strip.Width() > 2 && strip.Height() > 2)
 		ScStaffPaintStrip(mem, strip, &m_ui);
+	if (m_ui.marqueeOn) {
+		m_ui.marqueeX0 -= panel.left; m_ui.marqueeX1 -= panel.left;
+		m_ui.marqueeY0 -= panel.top; m_ui.marqueeY1 -= panel.top;
+		ScStaffPaintMarquee(mem, &m_ui);
+		m_ui.marqueeX0 += panel.left; m_ui.marqueeX1 += panel.left;
+		m_ui.marqueeY0 += panel.top; m_ui.marqueeY1 += panel.top;
+	}
 	mem.SetBkMode(TRANSPARENT);
 	mem.SetTextColor(RGB(40, 60, 50));
 	CFont* oldF = mem.SelectObject(GetFont());
@@ -1027,7 +1150,7 @@ void CSasamiFmScoreDlg::PlaceOrEditAt(CPoint pt)
 			ScStaffSelDelete(m_doc.ev, &m_doc.evCount, &m_ui);
 			RefreshStrip();
 			InvalidateRect(m_bodyRc, FALSE);
-			m_status.SetWindowText(L"Deleted");
+			m_status.SetWindowText(LL14(L"削除しました", L"Deleted", L"Supprimé", L"Eliminato", L"Eliminado", L"삭제됨", L"已删除", L"تم الحذف", L"Удалено", L"Gelöscht", L"Apagado", L"Verwijderd", L"Usunięto", L"Silindi"));
 		}
 		return;
 	}
@@ -1038,7 +1161,7 @@ void CSasamiFmScoreDlg::PlaceOrEditAt(CPoint pt)
 		if (m_ch.GetSafeHwnd()) m_ch.SetCurSel(m_curCh);
 		if (ScStaffIsStaffMarkKind(m_doc.ev[ctrl].kind, 1)) {
 			ScStaffSelSetPrimary(&m_ui, ctrl);
-			m_status.SetWindowText(L"Mark selected — Delete/Backspace / Eraser removes |: :| 8va…");
+			m_status.SetWindowText(LL14(L"マーク選択 — Delete/Backspace/消しゴムで |: :| 8va… を削除", L"Mark selected — Delete/Backspace / Eraser removes |: :| 8va…", L"Marque sélectionnée — Suppr/Gomme enlève |: :| 8va…", L"Segno selezionato — Canc/Gomma rimuove |: :| 8va…", L"Marca seleccionada — Supr/Borrar quita |: :| 8va…", L"마크 선택 — Delete/Backspace/지우개로 |: :| 8va… 삭제", L"已选标记 — Delete/Backspace/橡皮删除 |: :| 8va…", L"علامة محددة — Delete/Backspace/الممحاة تزيل |: :| 8va…", L"Знак выбран — Delete/Backspace/ластик удаляет |: :| 8va…", L"Zeichen gewählt — Entf/Radierer entfernt |: :| 8va…", L"Marca selecionada — Del/borracha remove |: :| 8va…", L"Markering geselecteerd — Del/gum verwijdert |: :| 8va…", L"Zaznaczono znak — Del/gumka usuwa |: :| 8va…", L"İşaret seçili — Del/silgi |: :| 8va… siler"));
 		}
 		InvalidateRect(m_gridRc, FALSE);
 		return;
@@ -1050,7 +1173,7 @@ void CSasamiFmScoreDlg::PlaceOrEditAt(CPoint pt)
 			ScStaffSelSetPrimary(&m_ui, mark);
 		m_curCh = m_doc.ev[mark].ch;
 		if (m_ch.GetSafeHwnd()) m_ch.SetCurSel(m_curCh);
-		m_status.SetWindowText(L"Mark selected — Delete/Backspace removes");
+		m_status.SetWindowText(LL14(L"マーク選択 — Delete/Backspace で削除", L"Mark selected — Delete/Backspace removes", L"Marque sélectionnée — Suppr/Retour arrière", L"Segno selezionato — Canc/Backspace", L"Marca seleccionada — Supr/Retroceso", L"마크 선택 — Delete/Backspace로 삭제", L"已选标记 — Delete/Backspace 删除", L"علامة محددة — Delete/Backspace للحذف", L"Знак выбран — Delete/Backspace", L"Zeichen gewählt — Entf/Rücktaste", L"Marca selecionada — Del/Backspace", L"Markering geselecteerd — Del/Backspace", L"Zaznaczono znak — Del/Backspace", L"İşaret seçili — Del/Backspace"));
 		InvalidateRect(m_bodyRc, FALSE);
 		return;
 	}
@@ -1058,16 +1181,32 @@ void CSasamiFmScoreDlg::PlaceOrEditAt(CPoint pt)
 		return;
 	if (m_ui.tool == SC_TOOL_SELECT) {
 		if (hit >= 0) {
-			if (GetKeyState(VK_SHIFT) & 0x8000)
-				ScStaffSelAdd(&m_ui, hit);
-			else
-				ScStaffSelSetPrimary(&m_ui, hit);
+			const int ch = (int)m_doc.ev[hit].ch;
+			m_ui.markerSolidTrack = ch;
+			m_curCh = ch;
+			if (m_ch.GetSafeHwnd()) m_ch.SetCurSel(m_curCh);
+			if (ScStaffSelHas(&m_ui, hit) && !(GetKeyState(VK_SHIFT) & 0x8000)) {
+				/* keep existing selection */
+			} else if (GetKeyState(VK_SHIFT) & 0x8000) {
+				ScStaffSelAddTieChain(m_doc.ev, m_doc.evCount, &m_ui, hit, 1);
+			} else {
+				ScStaffSelClear(&m_ui);
+				ScStaffSelAddTieChain(m_doc.ev, m_doc.evCount, &m_ui, hit, 1);
+			}
 			m_ui.dragEv = hit;
-			m_ui.dragOriginX = pt.x;
-			m_curCh = m_doc.ev[hit].ch;
-			m_ch.SetCurSel(m_curCh);
+			m_ui.dragMode = 2;
+			m_dragLastX = pt.x;
+			m_dragLastY = pt.y;
+			m_histDragPushed = 0;
 			SyncPropFromSel();
 			RefreshStrip();
+			InvalidateRect(m_bodyRc, FALSE);
+		} else {
+			ScStaffSelClear(&m_ui);
+			m_ui.marqueeOn = 1;
+			m_ui.marqueeX0 = m_ui.marqueeX1 = pt.x;
+			m_ui.marqueeY0 = m_ui.marqueeY1 = pt.y;
+			SetCapture();
 			InvalidateRect(m_bodyRc, FALSE);
 		}
 		return;
@@ -1084,8 +1223,19 @@ void CSasamiFmScoreDlg::PlaceOrEditAt(CPoint pt)
 	}
 	if (hit >= 0) {
 		m_ui.selEv = hit;
+		ScStaffSelClear(&m_ui);
+		ScStaffSelAdd(&m_ui, hit);
 		m_ui.dragEv = hit;
 		m_ui.dragOriginX = pt.x;
+		{
+			const int pxBeat = m_ui.pxBeat > 0 ? m_ui.pxBeat : SC_PX_BEAT_DEFAULT;
+			int x1 = ScStaffTickToX(m_doc.ev[hit].tick + (m_doc.ev[hit].dur ? m_doc.ev[hit].dur : SC_PPQN / 4),
+				m_ui.scrollX, ScStaffGridLeftPx(m_gridRc.left, &m_ui, m_doc.ev, m_doc.evCount), pxBeat, &m_ui, m_doc.ev, m_doc.evCount);
+			m_ui.dragMode = (pt.x >= x1 - 8) ? 1 : 2;
+		}
+		m_dragLastX = pt.x;
+		m_dragLastY = pt.y;
+		m_histDragPushed = 0;
 		SyncPropFromSel();
 		InvalidateRect(m_bodyRc, FALSE);
 		return;
@@ -1094,6 +1244,7 @@ void CSasamiFmScoreDlg::PlaceOrEditAt(CPoint pt)
 		m_curCh = hitTr;
 		m_ch.SetCurSel(m_curCh);
 		m_ui.visible[hitTr] = 1;
+		m_ui.markerSolidTrack = hitTr;
 		const int quant = ScStaffPlaceQuant(&m_ui);
 		uint32_t tick = ScStaffXToTick(pt.x, m_ui.scrollX, ScStaffGridLeftPx(m_gridRc.left, &m_ui, m_doc.ev, m_doc.evCount), m_ui.pxBeat, quant, &m_ui, m_doc.ev, m_doc.evCount);
 		int staffTop = ScStaffVisibleLaneStaffTop(m_gridRc, &m_ui, hitTr);
@@ -1334,7 +1485,7 @@ void CSasamiFmScoreDlg::OpenVoiceEditor()
 		ScFmAddVolTl(&m_doc, atTick, m_curCh, 16);
 		RefreshToneLabels();
 		InvalidateRect(m_trackRc, FALSE);
-		m_status.SetWindowText(L"Voice updated (custom bank + FNEIRO/FVOL on current part)");
+		m_status.SetWindowText(LL14(L"音色を更新しました（カスタムバンク + 現パートの FNEIRO/FVOL）", L"Voice updated (custom bank + FNEIRO/FVOL on current part)", L"Timbre mis à jour (banque perso + FNEIRO/FVOL sur la partie courante)", L"Voce aggiornata (bank personalizzato + FNEIRO/FVOL sulla parte corrente)", L"Voz actualizada (banco personal + FNEIRO/FVOL en la parte actual)", L"음색 갱신됨 (커스텀 뱅크 + 현재 파트의 FNEIRO/FVOL)", L"音色已更新（自定义库 + 当前声部的 FNEIRO/FVOL）", L"تم تحديث الصوت (بنك مخصص + FNEIRO/FVOL للجزء الحالي)", L"Голос обновлён (свой банк + FNEIRO/FVOL на текущей партии)", L"Stimme aktualisiert (Custom-Bank + FNEIRO/FVOL der aktuellen Part)", L"Voz atualizada (banco custom + FNEIRO/FVOL na parte atual)", L"Stem bijgewerkt (custom bank + FNEIRO/FVOL op huidige partij)", L"Zaktualizowano głos (własny bank + FNEIRO/FVOL na bieżącej partii)", L"Ses güncellendi (özel bank + mevcut partide FNEIRO/FVOL)"));
 	}
 }
 
@@ -1343,6 +1494,45 @@ void CSasamiFmScoreDlg::OnLButtonDown(UINT nFlags, CPoint point)
 	const int capH = CCC_GetCustomCaptionHeight(m_hWnd);
 	if (capH > 0 && point.y >= 0 && point.y < capH) {
 		CCustomBlurDialogExBase::OnLButtonDown(nFlags, point);
+		return;
+	}
+	if (m_ui.showRollSplit && m_rollRc.PtInRect(point)) {
+		if (m_ui.tool == SC_TOOL_PENCIL) {
+			uint32_t tick = ScPianoRollXToTick(&m_rollView, m_rollRc, &m_ui, point.x);
+			tick = (tick / (uint32_t)ScStaffPlaceQuant(&m_ui)) * (uint32_t)ScStaffPlaceQuant(&m_ui);
+			int note = ScPianoRollYToNote(&m_rollView, m_rollRc, point.y);
+			HistPush();
+			ScFmAddNote(&m_doc, tick, m_curCh, MidiToFmNoteByte(note), m_ui.placeDur > 0 ? m_ui.placeDur : SC_PPQN / 4);
+			m_ui.markerTick = tick;
+			SyncTextIfOpen();
+			InvalidateRect(m_rollRc, FALSE);
+			InvalidateRect(m_bodyRc, FALSE);
+			return;
+		}
+		if (m_ui.tool == SC_TOOL_ERASER) {
+			int hit = ScPianoRollHitNote(&m_rollView, m_rollRc, m_doc.ev, m_doc.evCount, &m_ui, m_curCh, point);
+			if (hit < 0) hit = ScPianoRollHitResize(&m_rollView, m_rollRc, m_doc.ev, m_doc.evCount, &m_ui, m_curCh, point);
+			if (hit >= 0) {
+				HistPush();
+				ScStaffSelClear(&m_ui);
+				ScStaffSelAdd(&m_ui, hit);
+				ScStaffSelDelete(m_doc.ev, &m_doc.evCount, &m_ui);
+				InvalidateRect(m_rollRc, FALSE);
+				InvalidateRect(m_bodyRc, FALSE);
+			}
+			return;
+		}
+		int hit = ScPianoRollHitNote(&m_rollView, m_rollRc, m_doc.ev, m_doc.evCount, &m_ui, m_curCh, point);
+		if (hit >= 0) {
+			if (!(nFlags & MK_CONTROL)) ScStaffSelClear(&m_ui);
+			ScStaffSelAdd(&m_ui, hit);
+			m_ui.markerTick = m_doc.ev[hit].tick;
+		} else {
+			m_ui.markerTick = ScPianoRollXToTick(&m_rollView, m_rollRc, &m_ui, point.x);
+		}
+		InvalidateRect(m_rollRc, FALSE);
+		InvalidateRect(m_bodyRc, FALSE);
+		RefreshBoundRoll();
 		return;
 	}
 	CRect client; GetClientRect(&client);
@@ -1465,7 +1655,10 @@ void CSasamiFmScoreDlg::OnLButtonDown(UINT nFlags, CPoint point)
 			if (m_ui.loopBTick <= m_ui.loopATick)
 				m_ui.loopBTick = m_ui.loopATick + SC_PPQN * SC_MEASURE_BEATS;
 		} else {
+			m_ui.rulerDragOn = 1;
+			m_ui.rulerT0 = m_ui.rulerT1 = rulerTick;
 			m_ui.markerTick = rulerTick;
+			SetCapture();
 		}
 		m_ui.transportMode = 0;
 		InvalidateRect(m_bodyRc, FALSE);
@@ -1509,6 +1702,21 @@ void CSasamiFmScoreDlg::OnLButtonDown(UINT nFlags, CPoint point)
 
 void CSasamiFmScoreDlg::OnMouseMove(UINT nFlags, CPoint point)
 {
+	if ((nFlags & MK_LBUTTON) && m_ui.rulerDragOn) {
+		uint32_t rt = 0;
+		if (ScStaffHitRulerTick(m_gridRc, &m_ui, point, &rt, m_doc.ev, m_doc.evCount)) {
+			m_ui.rulerT1 = rt;
+			ScStaffSelectTickRange(&m_ui, m_doc.ev, m_doc.evCount, 1, m_ui.rulerT0, m_ui.rulerT1, -1);
+			InvalidateRect(m_bodyRc, FALSE);
+		}
+		return;
+	}
+	if ((nFlags & MK_LBUTTON) && m_ui.marqueeOn) {
+		m_ui.marqueeX1 = point.x;
+		m_ui.marqueeY1 = point.y;
+		InvalidateRect(m_bodyRc, FALSE);
+		return;
+	}
 	if ((nFlags & MK_LBUTTON) && m_sbDrag) {
 		CPoint bp(point.x - m_bodyRc.left, point.y - m_bodyRc.top);
 		CRect bodyRel(0, 0, m_bodyRc.Width(), m_bodyRc.Height());
@@ -1589,9 +1797,24 @@ void CSasamiFmScoreDlg::OnMouseMove(UINT nFlags, CPoint point)
 		if (lane < 0) lane = 0;
 		m_ui.strip[lane][scol] = (uint8_t)sval;
 		InvalidateRect(m_stripRc, FALSE);
+	} else if (m_ui.dragMode == 2 && (m_ui.nSel > 0 || m_ui.selEv >= 0) &&
+		(m_ui.tool == SC_TOOL_SELECT || m_ui.tool == SC_TOOL_PENCIL)) {
+		const int pxBeat = m_ui.pxBeat > 0 ? m_ui.pxBeat : SC_PX_BEAT_DEFAULT;
+		const int dTick = ((point.x - m_dragLastX) * SC_PPQN) / max(1, pxBeat);
+		const int gap = ScStaffLineGap(&m_ui);
+		const int dSemi = (m_dragLastY - point.y) / max(1, gap / 2);
+		if (dTick || dSemi) {
+			if (!m_histDragPushed) { HistPush(); m_histDragPushed = 1; }
+			if (ScStaffSelMoveBy(m_doc.ev, &m_doc.evCount, &m_ui, dTick, dSemi, 1)) {
+				m_dragLastX = point.x;
+				m_dragLastY = point.y;
+				SyncPropFromSel();
+				InvalidateRect(m_gridRc, FALSE);
+			}
+		}
 	} else if (m_ui.dragEv >= 0 && m_ui.dragEv < m_doc.evCount) {
 		ScEvent& e = m_doc.ev[m_ui.dragEv];
-		if (e.kind == SC_EV_FM_NOTE) {
+		if (e.kind == SC_EV_FM_NOTE && m_ui.dragMode == 1) {
 			int dx = point.x - m_ui.dragOriginX;
 			int dTicks = (dx * SC_PPQN) / max(1, m_ui.pxBeat);
 			int nd = (int)e.dur + dTicks;
@@ -1630,6 +1853,20 @@ BOOL CSasamiFmScoreDlg::OnSetCursor(CWnd* pWnd, UINT nHitTest, UINT message)
 void CSasamiFmScoreDlg::OnLButtonUp(UINT nFlags, CPoint point)
 {
 	m_sbDrag = 0;
+	if (m_ui.rulerDragOn) {
+		ScStaffSelectTickRange(&m_ui, m_doc.ev, m_doc.evCount, 1, m_ui.rulerT0, m_ui.rulerT1, -1);
+		m_ui.rulerDragOn = 0;
+		InvalidateRect(m_bodyRc, FALSE);
+	}
+	if (m_ui.marqueeOn) {
+		m_ui.marqueeX1 = point.x;
+		m_ui.marqueeY1 = point.y;
+		CRect r(min(m_ui.marqueeX0, m_ui.marqueeX1), min(m_ui.marqueeY0, m_ui.marqueeY1),
+			max(m_ui.marqueeX0, m_ui.marqueeX1), max(m_ui.marqueeY0, m_ui.marqueeY1));
+		ScStaffSelectInRect(m_gridRc, &m_ui, m_doc.ev, m_doc.evCount, 1, r, 1);
+		m_ui.marqueeOn = 0;
+		InvalidateRect(m_bodyRc, FALSE);
+	}
 	if (m_ui.dragEv == -3000) {
 		if (m_ui.bandEditTrack == -2) {
 			ScStaffApplyGlobalTempoToDocFm(&m_doc, &m_ui);
@@ -1646,6 +1883,8 @@ void CSasamiFmScoreDlg::OnLButtonUp(UINT nFlags, CPoint point)
 	} else {
 		m_ui.dragEv = -1;
 	}
+	m_ui.dragMode = 0;
+	m_histDragPushed = 0;
 	ReleaseCapture();
 	CCustomBlurDialogExBase::OnLButtonUp(nFlags, point);
 }
@@ -1832,7 +2071,11 @@ LRESULT CSasamiFmScoreDlg::OnPalDur(WPARAM w, LPARAM l)
 			m_ui.tool = SC_TOOL_TEMPO;
 			UpdateNoteCursor();
 			return 0;
-		case SASAMI_PAL_CMD_PENCIL: OnBnClickedPencil(); return 0;
+		case SASAMI_PAL_CMD_PENCIL:
+			ScStaffSelClear(&m_ui);
+			m_ui.marqueeOn = 0;
+			OnBnClickedPencil();
+			return 0;
 		case SASAMI_PAL_CMD_ERASE: OnBnClickedErase(); return 0;
 		case SASAMI_PAL_CMD_SEL: OnBnClickedSel(); return 0;
 		case SASAMI_PAL_CMD_MARK: OnBnClickedMark(); return 0;
@@ -1842,12 +2085,12 @@ LRESULT CSasamiFmScoreDlg::OnPalDur(WPARAM w, LPARAM l)
 		case SASAMI_PAL_CMD_MARK_REPLACE:
 			m_ui.markStack = 0;
 			savedata.sasamiMarkStack = 0;
-			m_status.SetWindowText(L"マーク配置: 1重（同じ位置にもう一度＝消す）");
+			m_status.SetWindowText(LL14(L"マーク配置: 1重（同じ位置にもう一度＝消す）", L"Mark place: single (same spot again = remove)", L"Placement: simple (même endroit = supprimer)", L"Posizione: singola (stesso punto = rimuovi)", L"Colocación: simple (mismo sitio = quitar)", L"마크 배치: 1중 (같은 위치 다시 = 삭제)", L"标记放置: 单层（同位置再放=删除）", L"وضع العلامة: مفرد (نفس الموضع = حذف)", L"Размещение: одно (то же место = удалить)", L"Zeichen: einfach (gleiche Stelle = löschen)", L"Marcação: simples (mesmo local = remover)", L"Markering: enkel (zelfde plek = wissen)", L"Znacznik: pojedynczy (to samo miejsce = usuń)", L"İşaret: tek (aynı yer = sil)"));
 			return 0;
 		case SASAMI_PAL_CMD_MARK_STACK:
 			m_ui.markStack = 1;
 			savedata.sasamiMarkStack = 1;
-			m_status.SetWindowText(L"マーク配置: ネスト（同じ位置に積み上げ）");
+			m_status.SetWindowText(LL14(L"マーク配置: ネスト（同じ位置に積み上げ）", L"Mark place: nest (stack at same spot)", L"Placement: nid (empiler au même endroit)", L"Posizione: nest (impila sullo stesso punto)", L"Colocación: anidar (apilar en el mismo sitio)", L"마크 배치: 중첩 (같은 위치에 쌓기)", L"标记放置: 嵌套（同位置叠加）", L"وضع العلامة: تداخل (تكديس بنفس الموضع)", L"Размещение: вложение (стек на том же месте)", L"Zeichen: Nest (stapeln an gleicher Stelle)", L"Marcação: aninhar (empilhar no mesmo local)", L"Markering: nest (stapelen opzelfde plek)", L"Znacznik: zagnieżdżenie (stos w tym samym miejscu)", L"İşaret: yuva (aynı yerde yığ)"));
 			return 0;
 		case SASAMI_PAL_CMD_TIE:
 			m_ui.tool = SC_TOOL_TIE;
@@ -1867,7 +2110,7 @@ LRESULT CSasamiFmScoreDlg::OnPalDur(WPARAM w, LPARAM l)
 					st.Format(L"Deleted %d mark(s) at red bar (FM %d)", n, ch + 1);
 					m_status.SetWindowText(st);
 				} else {
-					m_status.SetWindowText(L"No |: / :| at red bar — Eraser+click staff also works");
+					m_status.SetWindowText(LL14(L"赤バー位置に |: / :| はありません — 消しゴム+譜表クリックも可", L"No |: / :| at red bar — Eraser+click staff also works", L"Pas de |: / :| à la barre rouge — Gomme+clic sur la portée aussi", L"Nessun |: / :| sulla barra rossa — Gomma+clic sul rigo anche", L"No hay |: / :| en la barra roja — Borrar+clic en el pentagrama también", L"빨간 바에 |: / :| 없음 — 지우개+보표 클릭도 가능", L"红条处无 |: / :| — 橡皮+点击谱表也可", L"لا |: / :| عند الشريط الأحمر — الممحاة+النقر على المدرج أيضًا", L"Нет |: / :| на красной метке — ластик+клик по нотоносцу тоже", L"Kein |: / :| an roter Markierung — Radierer+Klick auf Notenzeile auch", L"Sem |: / :| na barra vermelha — borracha+clique na pauta também", L"Geen |: / :| op rode balk — gum+klik op notenbalk ook", L"Brak |: / :| na czerwonym pasku — gumka+klik pięciolinii też", L"Kırmızı çubukta |: / :| yok — silgi+porte tıklama da çalışır"));
 				}
 				return 0;
 			}
@@ -1905,7 +2148,7 @@ LRESULT CSasamiFmScoreDlg::OnPalDur(WPARAM w, LPARAM l)
 		}
 		case SASAMI_PAL_CMD_PED_ON:
 		case SASAMI_PAL_CMD_PED_OFF:
-			m_status.SetWindowText(L"Pedal is MIDI-only (not used on FM score).");
+			m_status.SetWindowText(LL14(L"ペダルは MIDI 専用（FM譜面では未使用）です。", L"Pedal is MIDI-only (not used on FM score).", L"Pédale réservée au MIDI (non utilisée en FM).", L"Pedale solo MIDI (non usata su spartito FM).", L"Pedal solo MIDI (no se usa en partitura FM).", L"페달은 MIDI 전용(FM 악보 미사용).", L"踏板仅限 MIDI（FM 谱面不用）。", L"الدواسة لـ MIDI فقط (غير مستخدمة في FM).", L"Педаль только для MIDI (не для FM).", L"Pedal nur MIDI (nicht in FM-Partitur).", L"Pedal só MIDI (não usado em partitura FM).", L"Pedaal alleen MIDI (niet in FM-partituur).", L"Pedał tylko MIDI (nie na partyturze FM).", L"Pedal yalnızca MIDI (FM skorda yok)."));
 			return 0;
 		case SASAMI_PAL_CMD_OTTAVA_8VA:
 		case SASAMI_PAL_CMD_OTTAVA_8VB:
@@ -1932,9 +2175,9 @@ LRESULT CSasamiFmScoreDlg::OnPalDur(WPARAM w, LPARAM l)
 				if (n > 0) {
 					RefreshStrip();
 					InvalidateRect(m_bodyRc, FALSE);
-					m_status.SetWindowText(L"Deleted ottava/loco at red bar");
+					m_status.SetWindowText(LL14(L"赤バー位置のオッターバ/loco を削除しました", L"Deleted ottava/loco at red bar", L"Ottava/loco supprimé à la barre rouge", L"Ottava/loco eliminato sulla barra rossa", L"Ottava/loco borrado en la barra roja", L"빨간 바의 옥타바/loco 삭제", L"已删除红条处的八度/loco", L"تم حذف ottava/loco عند الشريط الأحمر", L"Удалены ottava/loco на красной метке", L"Ottava/loco an roter Markierung gelöscht", L"Ottava/loco apagado na barra vermelha", L"Ottava/loco op rode balk verwijderd", L"Usunięto ottava/loco na czerwonym pasku", L"Kırmızı çubuktaki ottava/loco silindi"));
 				} else {
-					m_status.SetWindowText(L"No ottava at red bar");
+					m_status.SetWindowText(LL14(L"赤バー位置にオッターバはありません", L"No ottava at red bar", L"Pas d’ottava à la barre rouge", L"Nessuna ottava sulla barra rossa", L"No hay ottava en la barra roja", L"빨간 바에 옥타바 없음", L"红条处无八度记号", L"لا ottava عند الشريط الأحمر", L"Нет ottava на красной метке", L"Keine Ottava an roter Markierung", L"Sem ottava na barra vermelha", L"Geen ottava op rode balk", L"Brak ottavy na czerwonym pasku", L"Kırmızı çubukta ottava yok"));
 				}
 				return 0;
 			}
@@ -2378,6 +2621,12 @@ void CSasamiFmScoreDlg::OnContextMenu(CWnd* pWnd, CPoint point)
 {
 	CPoint client = point;
 	ScreenToClient(&client);
+	if (m_ui.tool == SC_TOOL_PENCIL || m_ui.tool == SC_TOOL_TEMPO) {
+		ScStaffEnterSelectTool(&m_ui);
+		UpdateNoteCursor();
+		InvalidateRect(m_bodyRc, FALSE);
+		return;
+	}
 	/* 左トラック列 → 譜面五線の順で、右クリック位置のパートを取る */
 	int tr = ScStaffHitTrack(m_trackRc, &m_ui, client);
 	if (tr < 0) {
@@ -2476,7 +2725,10 @@ void CSasamiFmScoreDlg::OnContextMenu(CWnd* pWnd, CPoint point)
 					lab.Format(L"削除 #%d", di + 1);
 				menu.AddCommand(9100 + di, lab);
 			}
-			menu.AddCommand(9120, L"重なっているマークをすべて削除");
+			menu.AddCommand(9120, LL14(
+			L"重なっているマークをすべて削除", L"Delete all overlapping marks", L"Supprimer toutes les marques superposées", L"Elimina tutti i segni sovrapposti", L"Borrar todas las marcas superpuestas",
+			L"겹친 마크 모두 삭제", L"删除所有重叠标记", L"حذف كل العلامات المتداخلة", L"Удалить все совпадающие знаки", L"Alle überlappenden Zeichen löschen",
+			L"Apagar todas as marcas sobrepostas", L"Alle overlappende markeringen wissen", L"Usuń wszystkie nachodzące znaki", L"Çakışan tüm işaretleri sil"));
 		} else if (markEv >= 0) {
 			menu.AddCommand(9024, LL14(
 				L"このマークを削除", L"Delete this mark", L"Supprimer cette marque", L"Elimina questo segno", L"Eliminar esta marca",
@@ -2493,8 +2745,19 @@ void CSasamiFmScoreDlg::OnContextMenu(CWnd* pWnd, CPoint point)
 			L"미리듣기 루프 B 여기로", L"预览循环B到此处", L"حلقة B هنا", L"Превью B сюда", L"Vorschau-Schleife B hier",
 			L"Loop B de prévia aqui", L"Voorbeeld-lus B hier", L"Podgląd pętli B tutaj", L"Önizleme döngü B buraya"));
 		menu.AddSeparator();
-		menu.AddCommand(9001, m_ui.mute[tr] ? L"Unmute" : L"Mute");
-		menu.AddCommand(9002, m_ui.solo[tr] ? L"Unsolo" : L"Solo");
+		menu.AddCommand(9001, m_ui.mute[tr]
+			? LL14(L"ミュート解除", L"Unmute", L"Réactiver", L"Riattiva", L"Activar", L"음소거 해제", L"取消静音", L"إلغاء كتم", L"Включить звук", L"Stummschaltung aus", L"Ativar som", L"Dempen uit", L"Włącz dźwięk", L"Sessizi aç")
+			: LL14(L"ミュート", L"Mute", L"Muet", L"Muto", L"Silenciar", L"음소거", L"静音", L"كتم", L"Выкл. звук", L"Stumm", L"Mudo", L"Dempen", L"Wycisz", L"Sessiz"));
+		menu.AddCommand(9002, m_ui.solo[tr]
+			? LL14(L"ソロ解除", L"Unsolo", L"Désolo", L"Togli solo", L"Quitar solo", L"솔로 해제", L"取消独奏", L"إلغاء منفرد", L"Снять соло", L"Solo aus", L"Tirar solo", L"Solo uit", L"Wyłącz solo", L"Soloyu kapat")
+			: LL14(L"ソロ", L"Solo", L"Solo", L"Solo", L"Solo", L"솔로", L"独奏", L"منفرد", L"Соло", L"Solo", L"Solo", L"Solo", L"Solo", L"Solo"));
+		menu.AddSeparator();
+	}
+	if (m_ui.selRangeValid || m_ui.nSel > 0 || m_ui.selEv >= 0) {
+		menu.AddCommand(9060, LL14(
+			L"範囲に空白を挿入（後ろずらし）\tCtrl+Shift+I", L"Insert blank in range (shift later)\tCtrl+Shift+I", L"Insérer vide (décaler)\tCtrl+Shift+I", L"Inserisci vuoto (sposta)\tCtrl+Shift+I", L"Insertar vacío (desplazar)\tCtrl+Shift+I",
+			L"범위에 빈 구간 삽입 (뒤로 밀기)\tCtrl+Shift+I", L"在范围内插入空白（后移）\tCtrl+Shift+I", L"إدراج فراغ\tCtrl+Shift+I", L"Вставить пустоту\tCtrl+Shift+I", L"Leerraum einfügen (nach rechts)\tCtrl+Shift+I",
+			L"Inserir vazio (deslocar)\tCtrl+Shift+I", L"Leeg invoegen (opschuiven)\tCtrl+Shift+I", L"Wstaw pustkę (przesuń)\tCtrl+Shift+I", L"Boş ekle (kaydır)\tCtrl+Shift+I"));
 		menu.AddSeparator();
 	}
 	menu.AddCommand(IDC_SASAMI_FM_PLAY, LL14(
@@ -2627,6 +2890,17 @@ void CSasamiFmScoreDlg::OnContextMenu(CWnd* pWnd, CPoint point)
 	else if (cmd == 9040) {
 		RunLayoutMenu(atTick, point);
 	}
+	else if (cmd == 9060) {
+		HistPush();
+		if (ScStaffInsertBlankRange(m_doc.ev, m_doc.evCount, &m_ui)) {
+			ScStaffUpdateContentExtent(&m_ui, m_doc.ev, m_doc.evCount);
+			RefreshStrip();
+			InvalidateRect(m_bodyRc, FALSE);
+			m_status.SetWindowText(LL14(
+				L"範囲に空白を挿入（後ろずらし）", L"Inserted blank (shifted later events)", L"Espace inséré", L"Inserito vuoto", L"Espacio insertado",
+				L"빈 구간 삽입", L"已插入空白", L"أدرج فراغ", L"Вставлена пустота", L"Leerraum eingefügt", L"Vazio inserido", L"Leeg ingevoegd", L"Wstawiono pustkę", L"Boş eklendi"));
+		}
+	}
 	else if (cmd) PostMessage(WM_COMMAND, cmd);
 }
 
@@ -2753,6 +3027,7 @@ void CSasamiFmScoreDlg::SyncTextIfOpen()
 	CSasamiTextDlg* t = CSasamiTextDlg::Instance();
 	if (!t || !::IsWindow(t->GetSafeHwnd()) || !t->IsFmMode()) return;
 	PushDocToText();
+	RefreshBoundRoll();
 }
 
 void CSasamiFmScoreDlg::OnBnClickedText()
@@ -3107,7 +3382,7 @@ void CSasamiFmScoreDlg::OnBnClickedRoll()
 {
 	m_ui.showRollSplit ^= 1;
 	LayoutChrome();
-	CSasamiPianoRollDlg::OpenOwned(this, m_doc.ev, &m_doc.evCount, &m_ui, &m_curCh, 1);
+	CSasamiPianoRollDlg::OpenForFm(this);
 	Invalidate(FALSE);
 }
 
@@ -3115,6 +3390,22 @@ void CSasamiFmScoreDlg::HistPush()
 {
 	ScScoreHistPush(&m_hist, m_doc.ev, m_doc.evCount);
 	SyncTextIfOpen();
+	RefreshBoundRoll();
+}
+
+void CSasamiFmScoreDlg::NotifyEdited()
+{
+	SyncTextIfOpen();
+	RefreshBoundRoll();
+	Invalidate(FALSE);
+}
+
+void CSasamiFmScoreDlg::RefreshBoundRoll()
+{
+	if (CSasamiPianoRollDlg* r = CSasamiPianoRollDlg::InstanceFm())
+		r->Refresh();
+	if (m_ui.showRollSplit)
+		InvalidateRect(m_rollRc, FALSE);
 }
 
 void CSasamiFmScoreDlg::SyncMidiInCombos()

@@ -19,6 +19,8 @@
 #include <algorithm>
 #include "Douga.h"
 #include "PluginKinds.h"
+#include "CEmu/cemu_mgr.h"
+#include "CEmu/cemu_modepref.h"
 #include "VstMidiEngine.h"
 #include "PluginAimp.h"
 #include "kb_sasami/source/sasami_midi.h"
@@ -27,6 +29,10 @@
 #include "CMidiMonitorDlg.h"
 #include "CFmMonitorDlg.h"
 #include "CMediaPlayerDlg.h"
+
+static void PlCemuFillPlaylistRow(const CEmuGameEntry* ge, const wchar_t* zipPhysical,
+	unsigned titleIndex1, playlistdata* p);
+static bool PlAddCemuZipEntries(CPlayList* pl, const CString& zipPath, int& syo, CString& syos, int& modesub, CString& fnn);
 #include "CMissingFilesDlg.h"
 #include "MpPlayerAddons.h"
 #include "CDesktopLyricsWnd.h"
@@ -2091,6 +2097,52 @@ void PlFormatRowMarks(int row, LPCTSTR fol, CString& out)
 			else out += _T("[OPNA]");
 		}
 	}
+	/* CEmu archive: [OPNA]/[OPN]/[MIDI]… — NEVER ResolveZip here.
+	   GetDispInfo paints every visible row; full zip extract starved all engines. */
+	{
+		extern CPlayList* pl;
+		const int isCemu = (pl && row >= 0 && row < pl->playcnt && pl->pc && pl->pc[row].sub == MODE_CEMU) ? 1 : 0;
+		if (isCemu && fol && fol[0]) {
+			char tag[CEMU_MODE_TAG] = {};
+			if (!CEmuModePrefGet(fol, tag, (int)sizeof(tag))) {
+				/* Prefer playlist alb "platform (TAG)" filled at add time. */
+				if (row >= 0 && row < pl->playcnt && pl->pc[row].alb[0]) {
+					const TCHAR* alb = pl->pc[row].alb;
+					const TCHAR* lp = _tcsrchr(alb, _T('('));
+					const TCHAR* rp = _tcsrchr(alb, _T(')'));
+					if (lp && rp && rp > lp + 1) {
+						char tmp[CEMU_MODE_TAG];
+						int n = 0;
+						for (const TCHAR* p = lp + 1; p < rp && n < CEMU_MODE_TAG - 1; p++) {
+							if (*p >= 32 && *p < 127) tmp[n++] = (char)*p;
+						}
+						tmp[n] = 0;
+						if (tmp[0]) strncpy_s(tag, tmp, _TRUNCATE);
+					}
+				}
+			}
+			if (!tag[0]) {
+				char stem[CEMU_ARCHIVE_NAME] = {};
+				wchar_t phys[CEMU_ZIP_PATH];
+				unsigned ti = 1;
+				CEmuParseVirtualPath(fol, phys, (int)_countof(phys), &ti);
+				if (CEmuArchiveStemFromPath(phys[0] ? phys : fol, stem, (int)sizeof(stem))) {
+					CEmuMgr* mgr = CEmuMgrGet();
+					if (mgr) {
+						CEmuMgrEnsureCatalog(mgr);
+						const CEmuGameEntry* ge = CEmuCatalogFindArchive(&mgr->catalog, stem, NULL);
+						CEmuModeTagFromEntry(ge, tag, (int)sizeof(tag));
+					}
+				}
+			}
+			if (tag[0]) {
+				CString t(tag);
+				out += _T("[");
+				out += t;
+				out += _T("]");
+			}
+		}
+	}
 }
 
 // プレイリスト窓用ジャケ(メモリLRU)。ディスクは PlJakDiskPath と共有。
@@ -2676,6 +2728,43 @@ static void PlPcFromPld(const playlistdata& pld, playlistdata0& out)
 	out.icon = 1;
 }
 
+/* playlistu.dat 1 件サイズ（game[256] 誤追加版との互換用） */
+static int PlPlaylistRecordBytes(ULONGLONG fileLen, ULONGLONG headBytes, int cnt)
+{
+	const int cur = (int)sizeof(playlistdata);
+	if (cnt <= 0 || fileLen <= headBytes + 24) return cur;
+	const ULONGLONG tail = 4ull * 6ull;
+	const ULONGLONG body = fileLen - headBytes - tail;
+	if (body == 0 || body % (ULONGLONG)cnt != 0) return cur;
+	const int rec = (int)(body / (ULONGLONG)cnt);
+	const int broken = cur + 256 * (int)sizeof(TCHAR);
+	if (rec == cur || rec == broken) return rec;
+	return cur;
+}
+
+static bool PlReadPlaylistRecord(CFile& f, int recBytes, playlistdata& pld)
+{
+	ZeroMemory(&pld, sizeof(pld));
+	if (recBytes == (int)sizeof(playlistdata))
+		return f.Read(&pld, sizeof(pld)) == sizeof(pld);
+	if (recBytes <= 0 || recBytes > 64 * 1024)
+		return false;
+	unsigned char* buf = (unsigned char*)malloc((size_t)recBytes);
+	if (!buf) return false;
+	const UINT rd = f.Read(buf, (UINT)recBytes);
+	if (rd != (UINT)recBytes) {
+		free(buf);
+		return false;
+	}
+	const int copyName = (int)min((size_t)recBytes, offsetof(playlistdata, sub));
+	memcpy(&pld, buf, (size_t)copyName);
+	if (recBytes >= copyName + (int)(6 * sizeof(int))) {
+		memcpy(&pld.sub, buf + copyName, 6 * sizeof(int));
+	}
+	free(buf);
+	return true;
+}
+
 static bool PlReadPlaylistTracks(int plIdx, std::vector<playlistdata0>& tracks)
 {
 	tracks.clear();
@@ -2913,6 +3002,106 @@ static void PlApplySasamiFmForce(CPlayList* pl, int fmMode)
 	PlMidNotifyMarkViews();
 }
 
+static CPlayList* s_cemuModeRestoreOwner = NULL;
+static std::vector<int> s_cemuModeRestoreSel;
+static int s_cemuModeRestoreFocus = -1;
+static int s_cemuModeRestoreTop = -1;
+static int s_cemuModeRestoreTopY = 0;
+static DWORD s_cemuModeRestoreDue = 0;
+
+static void PlRestoreCemuModeSelection(CPlayList* pl)
+{
+	if (!pl || pl != s_cemuModeRestoreOwner || !s_cemuModeRestoreDue) return;
+	/* Keep re-applying until the due window ends: playback restart can
+	   reshape the list after the first restore attempt. */
+	const DWORD now = GetTickCount();
+	if ((LONG)(now - s_cemuModeRestoreDue) < 0) return;
+	if (!::IsWindow(pl->m_lc.GetSafeHwnd())) return;
+	pl->m_lc.SetItemState(-1, 0, LVIS_SELECTED | LVIS_FOCUSED);
+	for (size_t n = 0; n < s_cemuModeRestoreSel.size(); ++n) {
+		const int i = s_cemuModeRestoreSel[n];
+		if (i >= 0 && i < pl->m_lc.GetItemCount())
+			pl->m_lc.SetItemState(i, LVIS_SELECTED, LVIS_SELECTED);
+	}
+	if (s_cemuModeRestoreFocus >= 0 && s_cemuModeRestoreFocus < pl->m_lc.GetItemCount()) {
+		pl->m_lc.SetItemState(s_cemuModeRestoreFocus, LVIS_FOCUSED, LVIS_FOCUSED);
+		pl->m_lc.SetSelectionMark(s_cemuModeRestoreFocus);
+		pl->m_lc.EnsureVisible(s_cemuModeRestoreFocus, FALSE);
+	}
+	if (s_cemuModeRestoreTop >= 0 && s_cemuModeRestoreTop < pl->m_lc.GetItemCount()) {
+		RECT r = {};
+		if (pl->m_lc.GetItemRect(s_cemuModeRestoreTop, &r, LVIR_BOUNDS))
+			pl->m_lc.Scroll(CSize(0, r.top - s_cemuModeRestoreTopY));
+	}
+	/* Hold restore state for ~1.5s of timer ticks after first due moment. */
+	if ((LONG)(now - s_cemuModeRestoreDue) > 1500) {
+		s_cemuModeRestoreDue = 0;
+		s_cemuModeRestoreOwner = NULL;
+		s_cemuModeRestoreSel.clear();
+	}
+}
+
+/* CEmu zip: apply XML sound mode tag (OPN/OPNA/MIDI…). Restart if that zip is playing. */
+static void PlApplyCemuModeTag(CPlayList* pl, const char* tag)
+{
+	if (!pl || !tag || !tag[0]) return;
+	extern COggDlg* og;
+	extern CString filen;
+	int touchPlaying = 0;
+	std::vector<int> selected;
+	int focus = pl->m_lc.GetNextItem(-1, LVNI_FOCUSED);
+	int top = pl->m_lc.GetTopIndex();
+	int topY = 0;
+	RECT topRect = {};
+	if (top >= 0 && pl->m_lc.GetItemRect(top, &topRect, LVIR_BOUNDS))
+		topY = topRect.top;
+	int i = -1;
+	while ((i = pl->m_lc.GetNextItem(i, LVNI_ALL | LVNI_SELECTED)) >= 0) {
+		selected.push_back(i);
+		if (!pl->pc || i >= pl->playcnt || !pl->pc[i].fol[0]) continue;
+		if (pl->pc[i].sub != MODE_CEMU) continue;
+		CEmuModePrefSet(pl->pc[i].fol, tag);
+		wchar_t zipOut[CEMU_ZIP_PATH];
+		char dataDir[CEMU_DATA_DIR];
+		const CEmuGameEntry* ge = CEmuMgrResolveZip(CEmuMgrGet(), pl->pc[i].fol, zipOut,
+			(int)_countof(zipOut), dataDir, (int)sizeof(dataDir));
+		/* Ensure absolute resolve path also sees the same stem-keyed pref. */
+		if (zipOut[0])
+			CEmuModePrefSet(zipOut, tag);
+		if (ge) {
+			if (ge->platform[0] && tag[0])
+				_snwprintf_s(pl->pc[i].alb, _TRUNCATE, L"%hs (%hs)", ge->platform, tag);
+			else if (ge->platform[0] && ge->subtype[0])
+				_snwprintf_s(pl->pc[i].alb, _TRUNCATE, L"%hs (%hs)", ge->platform, ge->subtype);
+		}
+		if (filen.GetLength() > 0) {
+			wchar_t physSel[CEMU_ZIP_PATH], physPlay[CEMU_ZIP_PATH];
+			unsigned t1 = 1, t2 = 1;
+			CEmuParseVirtualPath(pl->pc[i].fol, physSel, (int)_countof(physSel), &t1);
+			CEmuParseVirtualPath(filen, physPlay, (int)_countof(physPlay), &t2);
+			(void)t1; (void)t2;
+			if (physSel[0] && physPlay[0] && _wcsicmp(physSel, physPlay) == 0)
+				touchPlaying = 1;
+		}
+		RECT r;
+		pl->m_lc.GetItemRect(i, &r, LVIR_BOUNDS);
+		pl->m_lc.RedrawWindow(&r);
+	}
+	PlMidNotifyMarkViews();
+	if (touchPlaying) {
+		extern CString filen;
+		if (OggPrepareResumeBeforePlayback(filen) && og && ::IsWindow(og->GetSafeHwnd())) {
+			s_cemuModeRestoreOwner = pl;
+			s_cemuModeRestoreSel.swap(selected);
+			s_cemuModeRestoreFocus = focus;
+			s_cemuModeRestoreTop = top;
+			s_cemuModeRestoreTopY = topY;
+			s_cemuModeRestoreDue = GetTickCount() + 100;
+			RequestPlaybackRestart(og->GetSafeHwnd());
+		}
+	}
+}
+
 int CPlayList::ShowTrackContextMenu(CPoint pt, CWnd* pOwner)
 {
 	int Lindex = -1;
@@ -3027,10 +3216,16 @@ int CPlayList::ShowTrackContextMenu(CPoint pt, CWnd* pOwner)
 	BOOL anySasamiMidi = FALSE;
 	BOOL anySasamiFm = FALSE;
 	BOOL anyOtherMidi = FALSE;
+	BOOL anyCemu = FALSE;
+	CString cemuFol;
 	{
 		int i = -1;
 		while ((i = m_lc.GetNextItem(i, LVNI_ALL | LVNI_SELECTED)) >= 0) {
 			if (!pc || i >= playcnt || !pc[i].fol[0]) continue;
+			if (pc[i].sub == MODE_CEMU) {
+				anyCemu = TRUE;
+				if (cemuFol.IsEmpty()) cemuFol = pc[i].fol;
+			}
 #ifndef _UNICODE
 			const int isSas = SasamiExtIsMidi(CStringW(pc[i].fol)) ? 1 : 0;
 			const int isFm = SasamiExtIsFm(CStringW(pc[i].fol)) ? 1 : 0;
@@ -3116,6 +3311,58 @@ int CPlayList::ShowTrackContextMenu(CPoint pt, CWnd* pOwner)
 			LL14(L"この MIDI の印（16ch/32ch と XG/88 など）。自動判定か 55map 等を選べます", L"MIDI badges (16ch/32ch and XG/88…). Auto-detect or pick 55map etc.", L"Badges MIDI (16ch/32ch et XG/88…). Auto ou 55map…", L"Badge MIDI (16ch/32ch e XG/88…). Auto o 55map…", L"Insignias MIDI (16ch/32ch y XG/88…). Auto o 55map…", L"이 MIDI 표시(16ch/32ch와 XG/88 등). 자동 또는 55map 등", L"此 MIDI 标记（16ch/32ch 与 XG/88 等）。可自动判定或选 55map 等", L"شارات MIDI (16ch/32ch و XG/88…). تلقائي أو 55map…", L"Значки MIDI (16ch/32ch и XG/88…). Авто или 55map…", L"MIDI-Abzeichen (16ch/32ch und XG/88…). Auto oder 55map…", L"Selos MIDI (16ch/32ch e XG/88…). Auto ou 55map…", L"MIDI-badges (16ch/32ch en XG/88…). Auto of 55map…", L"Odznaki MIDI (16ch/32ch i XG/88…). Auto lub 55map…", L"MIDI rozetleri (16ch/32ch ve XG/88…). Otomatik veya 55map…"));
 		if (map)
 			PlAddMapForceItems(map, PL_CTX_MIDMAP_BASE, midiForce);
+	}
+	if (anyCemu && !cemuFol.IsEmpty()) {
+		wchar_t zipOut[CEMU_ZIP_PATH];
+		char dataDir[CEMU_DATA_DIR];
+		CEmuMgr* mgr = CEmuMgrGet();
+		const CEmuGameEntry* ge = CEmuMgrResolveZip(mgr, cemuFol, zipOut, (int)_countof(zipOut),
+			dataDir, (int)sizeof(dataDir));
+		CEmuArchiveMode modes[CEMU_MODE_MAX];
+		int modeN = 0;
+		if (mgr && ge) {
+			char stem[CEMU_ARCHIVE_NAME];
+			if (CEmuArchiveStemFromPath(zipOut[0] ? zipOut : (LPCWSTR)cemuFol, stem, (int)sizeof(stem)))
+				modeN = CEmuCatalogListArchiveModes(&mgr->catalog, stem,
+					dataDir[0] ? dataDir : NULL, NULL, modes, CEMU_MODE_MAX);
+		}
+		if (modeN > 1) {
+			char curTag[CEMU_MODE_TAG] = {};
+			if (!CEmuModePrefGet(cemuFol, curTag, (int)sizeof(curTag)))
+				CEmuModeTagFromEntry(ge, curTag, (int)sizeof(curTag));
+			menu.AddSeparator();
+			CCustomPopupMenu* cm = menu.AddSubMenu(
+				LL14(L"CEmu 音源モード", L"CEmu sound mode", L"Mode son CEmu", L"Modo audio CEmu",
+					L"Modo audio CEmu", L"CEmu 음원 모드", L"CEmu 音源模式", L"وضع صوت CEmu",
+					L"Режим звука CEmu", L"CEmu-Klangmodus", L"Modo de som CEmu", L"CEmu-geluidsmodus",
+					L"Tryb dźwięku CEmu", L"CEmu ses modu"),
+				LL14(L"XML に書かれた OPN/OPNA/OPL/OPM/MIDI 等。既定は MIDI 以外の最良。MIDI は CRender の KPI/VST 優先で再生",
+					L"OPN/OPNA/OPL/OPM/MIDI from XML. Default=best non-MIDI; MIDI uses CRender KPI/VST prefer",
+					L"OPN/OPNA/OPL/OPM/MIDI depuis XML. Defaut=meilleur non-MIDI; MIDI via KPI/VST CRender",
+					L"OPN/OPNA/OPL/OPM/MIDI da XML. Predef=miglior non-MIDI; MIDI via KPI/VST CRender",
+					L"OPN/OPNA/OPL/OPM/MIDI del XML. Predet=mejor no-MIDI; MIDI via KPI/VST CRender",
+					L"XML의 OPN/OPNA/OPL/OPM/MIDI. 기본=비MIDI 최선; MIDI는 CRender KPI/VST",
+					L"来自 XML 的 OPN/OPNA/OPL/OPM/MIDI。默认非 MIDI 最优；MIDI 用 CRender KPI/VST",
+					L"OPN/OPNA/OPL/OPM/MIDI من XML. الافتراضي=أفضل غير MIDI؛ MIDI عبر KPI/VST",
+					L"OPN/OPNA/OPL/OPM/MIDI из XML. По умолчанию лучший не-MIDI; MIDI через KPI/VST",
+					L"OPN/OPNA/OPL/OPM/MIDI aus XML. Standard=bester Nicht-MIDI; MIDI via KPI/VST",
+					L"OPN/OPNA/OPL/OPM/MIDI do XML. Padrao=melhor nao-MIDI; MIDI via KPI/VST",
+					L"OPN/OPNA/OPL/OPM/MIDI uit XML. Standaard=beste non-MIDI; MIDI via KPI/VST",
+					L"OPN/OPNA/OPL/OPM/MIDI z XML. Domyslnie najlepszy non-MIDI; MIDI przez KPI/VST",
+					L"XML OPN/OPNA/OPL/OPM/MIDI. Varsayilan=en iyi non-MIDI; MIDI CRender KPI/VST"));
+			if (cm) {
+				for (int mi = 0; mi < modeN && mi < CEMU_MODE_MAX; mi++) {
+					CString lab(modes[mi].tag);
+					if (modes[mi].isMidi)
+						lab += LL14(L" (KPI/VST)", L" (KPI/VST)", L" (KPI/VST)", L" (KPI/VST)",
+							L" (KPI/VST)", L" (KPI/VST)", L" (KPI/VST)", L" (KPI/VST)",
+							L" (KPI/VST)", L" (KPI/VST)", L" (KPI/VST)", L" (KPI/VST)",
+							L" (KPI/VST)", L" (KPI/VST)");
+					cm->AddCheck(PL_CTX_CEMUMODE_BASE + mi, lab,
+						curTag[0] && _stricmp(curTag, modes[mi].tag) == 0);
+				}
+			}
+		}
 	}
 	menu.AddSeparator();
 	CCustomPopupMenu* subExport = menu.AddSubMenu(
@@ -3962,6 +4209,29 @@ void CPlayList::HandleTrackContextCmd(int cmd)
 	else if (cmd >= PL_CTX_SASAMIFM_BASE && cmd <= PL_CTX_SASAMIFM_LAST) {
 		PlApplySasamiFmForce(this, (int)(cmd - PL_CTX_SASAMIFM_BASE));
 	}
+	else if (cmd >= PL_CTX_CEMUMODE_BASE && cmd <= PL_CTX_CEMUMODE_LAST) {
+		const int mi = (int)(cmd - PL_CTX_CEMUMODE_BASE);
+		CString cemuFol;
+		int i = -1;
+		while ((i = m_lc.GetNextItem(i, LVNI_ALL | LVNI_SELECTED)) >= 0) {
+			if (!pc || i >= playcnt || !pc[i].fol[0]) continue;
+			if (pc[i].sub == MODE_CEMU) { cemuFol = pc[i].fol; break; }
+		}
+		if (!cemuFol.IsEmpty()) {
+			wchar_t zipOut[CEMU_ZIP_PATH];
+			char dataDir[CEMU_DATA_DIR];
+			CEmuMgr* mgr = CEmuMgrGet();
+			CEmuMgrResolveZip(mgr, cemuFol, zipOut, (int)_countof(zipOut), dataDir, (int)sizeof(dataDir));
+			CEmuArchiveMode modes[CEMU_MODE_MAX];
+			int modeN = 0;
+			char stem[CEMU_ARCHIVE_NAME];
+			if (mgr && CEmuArchiveStemFromPath(zipOut[0] ? zipOut : (LPCWSTR)cemuFol, stem, (int)sizeof(stem)))
+				modeN = CEmuCatalogListArchiveModes(&mgr->catalog, stem,
+					dataDir[0] ? dataDir : NULL, NULL, modes, CEMU_MODE_MAX);
+			if (mi >= 0 && mi < modeN && modes[mi].tag[0])
+				PlApplyCemuModeTag(this, modes[mi].tag);
+		}
+	}
 	else if (cmd >= PL_CTX_SASAMIM_BASE && cmd <= PL_CTX_SASAMIM_LAST) {
 		PlApplySasamiMapForce(this, (int)(cmd - PL_CTX_SASAMIM_BASE));
 	}
@@ -4362,7 +4632,7 @@ int CPlayList::chk(CString name,int sub,CString art,CString fol,int ret)
 	// 単体メディアファイルはパス+形式(sub)で同一判定(タグ名とプレイリスト表示名の差異を吸収)
 	const bool pathKeyOnly = (sub == -1 || sub == -6 || sub == 33 || sub == 34 || sub == 35 ||
 		sub == -7 || sub == -8 || sub == -9 ||
-		sub == -10 || sub == 999 || sub == -2 || sub == -3 || sub == MODE_VST_MIDI);
+		sub == -10 || sub == 999 || sub == -2 || sub == -3 || sub == MODE_VST_MIDI || sub == MODE_CEMU);
 	for(int j=0;j<i;j++){
 		if (pathKeyOnly) {
 			if (_tcsicmp(pc[j].fol, fol) == 0 && pc[j].sub == sub)
@@ -4457,6 +4727,7 @@ static bool IsPlaylistDropAllowedExt(const CString& pathOrName)
 		// チップ / マルチ曲ヘルパ
 		_T(".kss"), _T(".nsf"), _T(".nsfe"), _T(".gbs"), _T(".hes"), _T(".nes"),
 		_T(".spc"), _T(".vgm"), _T(".vgz"), _T(".gym"), _T(".s98"),
+		_T(".zip"),
 		_T(".ovi"), _T(".opi"), _T(".ozi"), _T(".m"), _T(".m2"), _T(".mz"), _T(".mp"), _T(".ms"),
 		_T(".psf"), _T(".minipsf"), _T(".psf2"), _T(".minipsf2"),
 		_T(".ssf"), _T(".dsf"), _T(".usf"), _T(".gsf"), _T(".minigsf"), _T(".2sf"),
@@ -4965,6 +5236,28 @@ int CPlayList::Add(CString name,int sub,int loop1,int loop2,CString art,CString 
 			ss = fol.Right(fol.GetLength() - fol.ReverseFind('.') - 1);
 			s.Format(LL14(L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)"), ss);
 			break;
+
+		case MODE_CEMU: {
+			wchar_t phys[CEMU_ZIP_PATH];
+			unsigned ti = 1;
+			CEmuParseVirtualPath(fol, phys, (int)_countof(phys), &ti);
+			wchar_t zipOut[CEMU_ZIP_PATH];
+			char dataDir[CEMU_DATA_DIR];
+			const CEmuGameEntry* ge = CEmuMgrResolveZip(CEmuMgrGet(), phys, zipOut, (int)_countof(zipOut), dataDir, (int)sizeof(dataDir));
+			if (ge && ge->name[0])
+				s = ge->name;
+			else if (ge && ge->archive[0])
+				s = CString(ge->archive);
+			else {
+				char stem[CEMU_ARCHIVE_NAME] = {};
+				CEmuArchiveStemFromPath(phys[0] ? phys : (LPCWSTR)fol, stem, (int)sizeof(stem));
+				if (stem[0])
+					s = CString(stem);
+				else
+					s = LL14(L"hoot zip", L"hoot zip", L"hoot zip", L"hoot zip", L"hoot zip", L"hoot zip", L"hoot zip", L"hoot zip", L"hoot zip", L"hoot zip", L"hoot zip", L"hoot zip", L"hoot zip", L"hoot zip");
+			}
+			break;
+		}
 
 		case -2:
 			ss = fol.Right(fol.GetLength() - fol.ReverseFind('.') - 1);
@@ -11038,6 +11331,11 @@ if (fff == 0)
 				if (!IsPlaylistDropAllowedExt(sL) && !IsPlaylistDropAllowedExt(s)) {
 				}
 				else {
+					if (p.sub == MODE_CEMU) {
+						CString zp = p.fol[0] ? CString(p.fol) : fname1;
+						if (PlAddCemuZipEntries(this, zp, syo, syos, modesub, fnn))
+							continue;
+					}
 					if (syo == 0) {
 						syo = 1; syos = p.fol; modesub = p.sub; fnn = sL;
 					}
@@ -11045,9 +11343,8 @@ if (fff == 0)
 					if (PathIsDirectory(fol)) {
 						fol += L"\\" + sL;
 					}
-					
 
-					Add(p.name, p.sub, p.loop1, p.loop2, p.art, p.alb, fol, 0, 0);
+					Add(p.name, p.sub, p.loop1, p.loop2, p.art, p.alb, fol, p.ret2, 0);
 					fol = p.fol;
 					if (PathIsDirectory(fname_full) == FALSE) {
 						return;
@@ -11182,8 +11479,158 @@ void PlRefreshMidiPlayModes()
 	if (pl) pl->RefreshMidiPlayModes();
 }
 
+static void PlCemuFillPlaylistRow(const CEmuGameEntry* ge, const wchar_t* zipPhysical,
+	unsigned titleIndex1, playlistdata* p)
+{
+	if (!p || !zipPhysical || !zipPhysical[0]) return;
+	if (titleIndex1 == 0) titleIndex1 = 1;
+	p->art[0] = p->alb[0] = 0;
+	p->loop1 = p->loop2 = 0;
+	p->sub = MODE_CEMU;
+	p->ret2 = (int)titleIndex1;
+
+	wchar_t virt[CEMU_ZIP_PATH];
+	CEmuFormatVirtualPath(zipPhysical, titleIndex1, virt, (int)_countof(virt));
+	_tcscpy(p->fol, virt);
+
+	wchar_t songLabel[CEMU_GAME_NAME];
+	songLabel[0] = 0;
+	if (ge)
+		CEmuGameTitleAt(ge, (int)titleIndex1 - 1, NULL, songLabel, (int)_countof(songLabel));
+	if (songLabel[0] == L'<' || wcsncmp(songLabel, L"<title", 6) == 0)
+		songLabel[0] = 0;
+	if (songLabel[0])
+		wcsncpy_s(p->name, songLabel, _TRUNCATE);
+	else
+		CEmuFormatVirtualBasename(zipPhysical, titleIndex1, p->name, (int)_countof(p->name));
+
+	if (ge) {
+		if (ge->driverAlias[0])
+			wcsncpy_s(p->art, ge->driverAlias, _TRUNCATE);
+		else if (ge->name[0])
+			wcsncpy_s(p->art, ge->name, _TRUNCATE);
+		char modeTag[CEMU_MODE_TAG] = {};
+		if (!CEmuModePrefGet(zipPhysical, modeTag, (int)sizeof(modeTag)))
+			CEmuModeTagFromEntry(ge, modeTag, (int)sizeof(modeTag));
+		if (ge->platform[0] && modeTag[0])
+			_snwprintf_s(p->alb, _TRUNCATE, L"%hs (%hs)", ge->platform, modeTag);
+		else if (ge->platform[0] && ge->subtype[0])
+			_snwprintf_s(p->alb, _TRUNCATE, L"%hs (%hs)", ge->platform, ge->subtype);
+	}
+}
+
+static bool PlAddCemuZipEntries(CPlayList* pl, const CString& zipPath, int& syo, CString& syos, int& modesub, CString& fnn)
+{
+	if (!pl) return false;
+	CString zp = zipPath;
+	const int colon = zp.Find(L"::");
+	if (colon >= 0) zp = zp.Left(colon);
+	if (zp.Right(4).CompareNoCase(L".zip") != 0) return false;
+	wchar_t zipOut[CEMU_ZIP_PATH];
+	char dataDir[CEMU_DATA_DIR];
+	const CEmuGameEntry* ge = CEmuMgrResolveZip(CEmuMgrGet(), zp, zipOut, (int)_countof(zipOut), dataDir, (int)sizeof(dataDir));
+	if (!ge || CEmuGameTitleCount(ge) <= 0) return false;
+	const wchar_t* zipBase = zipOut[0] ? zipOut : (LPCTSTR)zp;
+	const int n = CEmuGameTitleCount(ge);
+	/* Prefer BGM-ish titles first (gra2 lists FADE OUT / SFX before BGM). */
+	int order[512];
+	int orderN = 0;
+	for (int pass = 0; pass < 3; pass++) {
+		for (int i = 0; i < n && orderN < (int)_countof(order); i++) {
+			unsigned code = 0;
+			CEmuGameTitleAt(ge, i, &code, NULL, 0);
+			const int dead = (code == 0xf9 || code == 0xf0 || code == 0x5f || code == 0xff);
+			const int bgm = (code >= 0xa0 && code <= 0xef && !dead);
+			int want = 0;
+			if (pass == 0 && bgm) want = 1;
+			else if (pass == 1 && !dead && !bgm) want = 1;
+			else if (pass == 2) want = 1;
+			if (!want) continue;
+			int dupe = 0;
+			for (int k = 0; k < orderN; k++)
+				if (order[k] == i) { dupe = 1; break; }
+			if (!dupe) order[orderN++] = i;
+		}
+	}
+	for (int oi = 0; oi < orderN; oi++) {
+		const int i = order[oi];
+		playlistdata row;
+		ZeroMemory(&row, sizeof(row));
+		PlCemuFillPlaylistRow(ge, zipBase, (unsigned)(i + 1), &row);
+		if (!row.name[0] || !row.fol[0]) continue;
+		if (syo == 0) {
+			syo = 1;
+			syos = row.fol;
+			modesub = row.sub;
+			fnn = row.name;
+		}
+		pl->Add(row.name, row.sub, row.loop1, row.loop2, row.art, row.alb, row.fol, row.ret2, 0);
+	}
+	return true;
+}
+
+bool PlCemuAddZipAndPlay(LPCTSTR zipPhysical)
+{
+	extern CPlayList* pl;
+	extern int gameon;
+	extern int plcnt;
+	if (!pl || !zipPhysical || !zipPhysical[0]) return false;
+	int syoLocal = 0;
+	CString syosLocal;
+	int modesubLocal = 0;
+	CString fnnLocal;
+	const int before = pl->playcnt;
+	if (!PlAddCemuZipEntries(pl, zipPhysical, syoLocal, syosLocal, modesubLocal, fnnLocal))
+		return false;
+	int playIdx = before;
+	if (playIdx < 0 || playIdx >= pl->playcnt) {
+		if (!syosLocal.IsEmpty())
+			playIdx = pl->FindByPath(syosLocal);
+	}
+	if (playIdx >= 0 && playIdx < pl->playcnt) {
+		plcnt = playIdx;
+		pl->Get(plcnt);
+		gameon = 0;
+		RequestPlaylistRestartAsync();
+	}
+	pl->Save();
+	if (pl->m_lc.GetSafeHwnd()) {
+		pl->m_lc.Invalidate();
+		pl->m_lc.UpdateWindow();
+	}
+	return true;
+}
+
 void CPlayList::plugs(CString fff, playlistdata *p,TCHAR* kpi, BYTE& kv)
 {
+	// CEmu: hoot アーカイブ zip（カタログ照合）
+	if (p) {
+		CString zipPath = fff;
+		unsigned titleIdx = 1;
+		{
+			wchar_t phys[CEMU_ZIP_PATH];
+			if (CEmuParseVirtualPath(fff, phys, (int)_countof(phys), &titleIdx))
+				zipPath = phys;
+		}
+		const int dot = zipPath.ReverseFind(L'.');
+		if (dot >= 0) {
+			CString zext = zipPath.Mid(dot);
+			zext.MakeLower();
+			if (zext == L".zip") {
+				wchar_t zipOut[CEMU_ZIP_PATH];
+				char dataDir[CEMU_DATA_DIR];
+				const CEmuGameEntry* ge = CEmuMgrResolveZip(CEmuMgrGet(), zipPath, zipOut, (int)_countof(zipOut), dataDir, (int)sizeof(dataDir));
+				if (ge) {
+					const wchar_t* zipBase = zipOut[0] ? zipOut : (LPCTSTR)zipPath;
+					PlCemuFillPlaylistRow(ge, zipBase, titleIdx, p);
+					if (kpi) kpi[0] = 0;
+					kv = 0;
+					return;
+				}
+			}
+		}
+	}
+
 	// MIDI/プロジェクト: 動画(-2)にはしない。VST優先なら -30。でなければ KPI、最後に VST へフォールバック。
 	const int isMidiOrProj = (VstIsMidiExt(fff) || VstIsProjectExt(fff)) ? 1 : 0;
 	if (p && isMidiOrProj) {
@@ -11558,6 +12005,13 @@ void CPlayList::Load(BOOL restoreSavedRow)
 			const ULONGLONG maxRec = (flen > head) ? (flen - head) / sizeof(playlistdata) : 0;
 			if (cnt < 0) cnt = 0;
 			if ((ULONGLONG)cnt > maxRec) cnt = (int)maxRec;
+			const int recBytes = PlPlaylistRecordBytes(flen, head, cnt);
+			if (recBytes != (int)sizeof(playlistdata) && cnt > 0) {
+				const ULONGLONG tail = 4ull * 6ull;
+				const ULONGLONG body = flen - head - tail;
+				if (body > 0 && body % (ULONGLONG)recBytes == 0)
+					cnt = (int)(body / (ULONGLONG)recBytes);
+			}
 		}
 		pc = (playlistdata0*)malloc(sizeof(playlistdata0) * ((size_t)cnt + 1));
 		if (!pc) cnt = 0;
@@ -11578,8 +12032,9 @@ void CPlayList::Load(BOOL restoreSavedRow)
 		}
 		playlistdata pld;
 		m_lc.SetItemCount(cnt);
+		const int recBytes = PlPlaylistRecordBytes(f.GetLength(), 4 + 4 * 4 + 5 * 4, cnt);
 		for(int i=0;i<cnt;i++){
-			if (f.Read(&pld, sizeof(pld)) != sizeof(pld))
+			if (!PlReadPlaylistRecord(f, recBytes, pld))
 				break;
 			pld.name[_countof(pld.name) - 1] = 0;
 			pld.art[_countof(pld.art) - 1] = 0;
@@ -11897,6 +12352,7 @@ void CPlayList::OnTimer(UINT nIDEvent)
 	}
 	if (nIDEvent == 41) {
 		PlMissTickScan(this);
+		PlRestoreCemuModeSelection(this);
 		static int s_plJakLastTop = -1;
 		const int topNow = ::IsWindow(m_lc.GetSafeHwnd()) ? m_lc.GetTopIndex() : -1;
 		if (topNow != s_plJakLastTop) {

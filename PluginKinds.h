@@ -1,4 +1,6 @@
-﻿#pragma once
+#pragma once
+
+#include "CEmu/cemu_types.h"
 
 // プラグイン台帳の種別（kpif[]/ext[][] と並列の plugkind[]）
 enum {
@@ -14,6 +16,7 @@ enum {
 	MODE_PLUGIN_XMPLAY = -21,
 	MODE_PLUGIN_AIMP = -22,
 	MODE_VST_MIDI = -30
+	/* MODE_CEMU / MODE_CEMU_BASE: CEmu/cemu_types.h */
 };
 
 // Buffwav 専用の負モード（dm < -10 一括は使わない）
@@ -25,4 +28,9 @@ inline bool IsBuffwavNegMode(int dm)
 inline bool IsForeignPluginMode(int dm)
 {
 	return dm == MODE_PLUGIN_WINAMP || dm == MODE_PLUGIN_XMPLAY || dm == MODE_PLUGIN_AIMP;
+}
+
+inline bool IsCemuMode(int dm)
+{
+	return CEmuIsCemuMode(dm);
 }

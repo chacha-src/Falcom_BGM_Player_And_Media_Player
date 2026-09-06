@@ -1375,7 +1375,7 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 		wchar_t exeDir[MAX_PATH];
 		GetModuleFileNameW(NULL, exeDir, MAX_PATH);
 		wchar_t* slash = wcsrchr(exeDir, L'\\');
-		if (slash) slash[1] = 0;
+		if (slash) *slash = 0;
 		else exeDir[0] = 0;
 
 		auto tryRomName = [&](const wchar_t* folder) {
@@ -1394,20 +1394,59 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 			_snwprintf_s(sub, _TRUNCATE, L"%s\\wav", folder);
 			return TryWavDir(sub);
 		};
+		auto tryFolder = [&](const wchar_t* folder) {
+			return tryRomName(folder) || tryWavNames(folder);
+		};
 
-		if (tryRomName(dir)) return;
-		if (tryWavNames(dir)) return;
+		if (tryFolder(dir)) return;
+		if (tryFolder(exeDir)) return;
+		_snwprintf_s(path, _TRUNCATE, L"%s\\Plugins\\kbsasami", exeDir);
+		if (tryFolder(path)) return;
+		_snwprintf_s(path, _TRUNCATE, L"%s\\Plugins\\Kobarin\\fmpmd", exeDir);
+		if (tryFolder(path)) return;
+		_snwprintf_s(path, _TRUNCATE, L"%s\\Plugins\\Mamiya\\kpis98", exeDir);
+		if (tryFolder(path)) return;
 
-		if (tryRomName(exeDir)) return;
-		_snwprintf_s(path, _TRUNCATE, L"%sPlugins\\kbsasami", exeDir);
-		if (tryRomName(path)) return;
-		if (tryWavNames(path)) return;
-		_snwprintf_s(path, _TRUNCATE, L"%sPlugins\\Kobarin\\fmpmd", exeDir);
-		if (tryRomName(path)) return;
-		if (tryWavNames(path)) return;
-		_snwprintf_s(path, _TRUNCATE, L"%sPlugins\\Mamiya\\kpis98", exeDir);
-		if (tryRomName(path)) return;
-		if (tryWavNames(path)) return;
+		/* BFS under exe: pick up Rhythm / Plugins / arbitrary depth copies. */
+		enum { kMaxDepth = 6, kQMax = 96 };
+		wchar_t q[kQMax][MAX_PATH];
+		int qDepth[kQMax];
+		int head = 0, tail = 0;
+		auto skipDir = [](const wchar_t* name) {
+			if (!name || !name[0] || name[0] == L'.') return 1;
+			if (!_wcsicmp(name, L"System Volume Information")) return 1;
+			if (!_wcsicmp(name, L"$Recycle.Bin")) return 1;
+			if (!_wcsicmp(name, L"node_modules")) return 1;
+			if (!_wcsicmp(name, L".git")) return 1;
+			return 0;
+		};
+		if (exeDir[0]) {
+			wcsncpy_s(q[tail], exeDir, _TRUNCATE);
+			qDepth[tail] = 0;
+			tail++;
+		}
+		while (head < tail) {
+			const wchar_t* cur = q[head];
+			const int d = qDepth[head];
+			head++;
+			/* depth 0 already tried above */
+			if (d > 0 && tryFolder(cur)) return;
+			if (d >= kMaxDepth) continue;
+			wchar_t pattern[MAX_PATH];
+			_snwprintf_s(pattern, _TRUNCATE, L"%s\\*", cur);
+			WIN32_FIND_DATAW fd;
+			HANDLE h = FindFirstFileW(pattern, &fd);
+			if (h == INVALID_HANDLE_VALUE) continue;
+			do {
+				if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) continue;
+				if (skipDir(fd.cFileName)) continue;
+				if (tail >= kQMax) break;
+				_snwprintf_s(q[tail], _TRUNCATE, L"%s\\%s", cur, fd.cFileName);
+				qDepth[tail] = d + 1;
+				tail++;
+			} while (FindNextFileW(h, &fd));
+			FindClose(h);
+		}
 	}
 };
 

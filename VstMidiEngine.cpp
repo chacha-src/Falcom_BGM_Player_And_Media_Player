@@ -1,4 +1,4 @@
-﻿// 本体と KpiHost64 が同じソースを使う。KpiHost64.exe は VstMidiEngine_k64.cpp 経由。
+// 本体と KpiHost64 が同じソースを使う。KpiHost64.exe は VstMidiEngine_k64.cpp 経由。
 // 以前はホスト側にコピーがあり、VST2 修正が ogg.exe にしか入らなかった。
 // KPIHOST64_BUILD 時は stdafx.h が MFC 無しヘッダへ切り替わる。
 #include "stdafx.h"
@@ -216,6 +216,13 @@ extern "C" int VstMidiSysexIsXgOn(const unsigned char* d, int n)
 {
 	if (!d || n < 9 || d[0] != 0xf0 || d[1] != 0x43) return 0;
 	return (d[3] == 0x4c && d[4] == 0x00 && d[5] == 0x00 && d[6] == 0x7e) ? 1 : 0;
+}
+
+extern "C" int VstMidiSysexIsMt32(const unsigned char* d, int n)
+{
+	/* Roland MT-32 family: F0 41 <dev> 16 … (model ID 0x16). */
+	if (!d || n < 5 || d[0] != 0xf0 || d[1] != 0x41) return 0;
+	return (d[3] == 0x16) ? 1 : 0;
 }
 
 extern "C" int VstMidiSysexMarksGs32(const unsigned char* d, int n)
@@ -522,6 +529,7 @@ struct EngineState {
 	int gmResetMode; // 0=GM+GS, 1=GS, 2=XG（シーク巻き戻し時に再送）
 	int gsMapLsb;    // 0=なし 1=SC-55 2=SC-88 3=88Pro 4=8820/50（CC#32）
 	int songGm;      // 1=GM  2=GM2（GM On のみ。GM2 は ch10 に MSB120）
+	int songLa;      // 1=MT-32/LA — Bank MSB 127（SC-VA Capital Tone）
 	__int64 loopStartSample;
 	__int64 loopEndSample;
 
@@ -531,7 +539,7 @@ struct EngineState {
 		moduleB(NULL), effectB(NULL), moduleC(NULL), effectC(NULL), vst3C(NULL),
 		sysexData(NULL), sysexBytes(0), maxMidiPort(0), mirrorToB(0), usingBuiltin(1),
 		useEnsemble(0), useDrums(0), useMapper(0), midiOut(NULL), mixCount(0),
-		ringRead(0), ringCount(0), gmResetMode(0), gsMapLsb(0), songGm(0),
+		ringRead(0), ringCount(0), gmResetMode(0), gsMapLsb(0), songGm(0), songLa(0),
 		loopStartSample(0), loopEndSample(0)
 	{
 		InitializeCriticalSection(&cs);
@@ -1663,7 +1671,8 @@ static unsigned ReadBE(const BYTE* p, int n)
 static int ReadVar(const BYTE*& p, const BYTE* end, unsigned& v)
 {
 	v = 0;
-	for (int i = 0; i < 4 && p < end; ++i) {
+	/* MIDI uses ≤4 bytes; allow 5 so oversized stubs still parse. */
+	for (int i = 0; i < 5 && p < end; ++i) {
 		BYTE c = *p++;
 		v = (v << 7) | (c & 0x7f);
 		if (!(c & 0x80)) return 1;
@@ -1901,6 +1910,8 @@ static int SmfBytesPeekListMarks(const BYTE* data, DWORD size, const wchar_t* pa
 						hasGm = 1;
 						if (off >= 5 && sx[4] == 0x03) hasGm2 = 1;
 					}
+					if (VstMidiSysexIsMt32(sx, off))
+						mapHint = VstMidiFoldGsMapHint(mapHint, 8);
 					if (VstMidiSysexMarksGs32(sx, off)) gs32 = 1;
 				}
 				q += sl;
@@ -2214,7 +2225,14 @@ static int LoadSmf(const wchar_t* path)
 					if (need >= 6) {
 						const BYTE* sx = sxData + off;
 						if (VstMidiSysexIsXgOn(sx, need)) hasXg = 1;
-						if (VstMidiSysexMarksGs32(sx, need)) gs32 = 1;
+						if (VstMidiSysexIsMt32(sx, need)) {
+							mapHint = VstMidiFoldGsMapHint(mapHint, 8);
+							/* Drop from event list — do not feed MT-32 SysEx to GS VST. */
+							sxUsed = off;
+							count--;
+						} else if (VstMidiSysexMarksGs32(sx, need)) {
+							gs32 = 1;
+						}
 					}
 				}
 				q += sl;
@@ -2284,6 +2302,8 @@ static int LoadSmf(const wchar_t* path)
 						if (n >= 5 && d[4] == 0x03) hasGm2 = 1;
 					}
 					if (VstMidiSysexIsGsReset(d, n)) hasGs = 1;
+					if (VstMidiSysexIsMt32(d, n))
+						mapHint = VstMidiFoldGsMapHint(mapHint, 8);
 				}
 				continue;
 			}
@@ -2317,7 +2337,7 @@ static int LoadSmf(const wchar_t* path)
 		}
 		int resolved = 0;
 		if (hasXg) resolved = 0;
-		else if (mapHint == 8) resolved = 1;
+		else if (mapHint == 8) resolved = 8;
 		else if (mapHint >= 9 && mapHint <= 18) resolved = mapHint;
 		else if (mapHint >= 1 && mapHint <= 4) resolved = mapHint;
 		else if (hasGm2 && !hasGs) resolved = 9;
@@ -2326,6 +2346,7 @@ static int LoadSmf(const wchar_t* path)
 		else if (cc32Max >= 1 && cc32Max <= 4) resolved = cc32Max;
 		else resolved = VstMidiGsMapDropFromUsed(pairs, nPairs);
 		g_eng.songGm = (resolved == 9) ? 2 : ((resolved == 5) ? 1 : 0);
+		g_eng.songLa = (resolved == 8) ? 1 : 0;
 		g_eng.gsMapLsb = (resolved >= 1 && resolved <= 4) ? resolved : 0;
 	}
 	if (g_eng.gsMapLsb && count + 64 < MAX_MIDI_EVENTS) {
@@ -2365,6 +2386,54 @@ static int LoadSmf(const wchar_t* path)
 			tmp[w++] = ev[i];
 			if (isGsReset(ev[i]))
 				w = appendMap(tmp, w, ev[i].tick, ev[i].sample);
+		}
+		delete[] ev;
+		ev = tmp;
+		count = w;
+	}
+	/* MT-32 / LA: SC-VA Capital Tone = Bank MSB 127. Native MT-32 streams have
+	   no CC#0 — without this, PCs land in GM/GS bank 0 (all Piano 1). */
+	if (g_eng.songLa && count + 64 < MAX_MIDI_EVENTS) {
+		auto putLaBank = [&](MidiItem* dst, int w, unsigned __int64 tick, __int64 samp, int port) -> int {
+			for (int ch = 0; ch < 16 && w + 2 <= MAX_MIDI_EVENTS; ++ch) {
+				if (ch == 9) continue; /* keep GS rhythm kit on ch10 */
+				dst[w].tick = tick; dst[w].sample = samp;
+				dst[w].msg = (0xb0 | ch) | (0u << 8) | (127u << 16);
+				dst[w].aux = 0; dst[w].port = port; dst[w].sysexOff = -1; dst[w].seq = w;
+				++w;
+				dst[w].tick = tick; dst[w].sample = samp;
+				dst[w].msg = (0xb0 | ch) | (32u << 8);
+				dst[w].aux = 0; dst[w].port = port; dst[w].sysexOff = -1; dst[w].seq = w;
+				++w;
+			}
+			return w;
+		};
+		MidiItem* tmp = new MidiItem[MAX_MIDI_EVENTS];
+		int w = putLaBank(tmp, 0, 0, 0, 0);
+		if (gs32 || maxPort >= 1)
+			w = putLaBank(tmp, w, 0, 0, 1);
+		BYTE chBank[32];
+		memset(chBank, 0xff, sizeof(chBank));
+		for (int i = 0; i < count && w < MAX_MIDI_EVENTS; ++i) {
+			const int st = (int)(ev[i].msg & 0xf0);
+			const int ch = (int)(ev[i].msg & 0x0f);
+			int idx = ev[i].port * 16 + ch;
+			if (idx < 0) idx = ch;
+			if (idx > 31) idx = 31;
+			if (st == 0xb0 && ((ev[i].msg >> 8) & 0x7f) == 0)
+				chBank[idx] = (BYTE)((ev[i].msg >> 16) & 0x7f);
+			if (st == 0xc0 && ch != 9 && chBank[idx] != 127 && w + 2 < MAX_MIDI_EVENTS) {
+				tmp[w].tick = ev[i].tick; tmp[w].sample = ev[i].sample;
+				tmp[w].msg = (0xb0 | ch) | (0u << 8) | (127u << 16);
+				tmp[w].aux = 0; tmp[w].port = ev[i].port; tmp[w].sysexOff = -1; tmp[w].seq = w;
+				++w;
+				tmp[w].tick = ev[i].tick; tmp[w].sample = ev[i].sample;
+				tmp[w].msg = (0xb0 | ch) | (32u << 8);
+				tmp[w].aux = 0; tmp[w].port = ev[i].port; tmp[w].sysexOff = -1; tmp[w].seq = w;
+				++w;
+				chBank[idx] = 127;
+			}
+			tmp[w++] = ev[i];
 		}
 		delete[] ev;
 		ev = tmp;
@@ -2464,8 +2533,8 @@ static int LoadSmf(const wchar_t* path)
 		ev = tmp;
 		count = w;
 	}
-	EnsLog(L"LoadSmf GS map lsb=%d xg=%d gm=%d title=[%s]",
-		g_eng.gsMapLsb, hasXg, g_eng.songGm, metaTitle[0] ? metaTitle : L"");
+	EnsLog(L"LoadSmf GS map lsb=%d xg=%d gm=%d la=%d title=[%s]",
+		g_eng.gsMapLsb, hasXg, g_eng.songGm, g_eng.songLa, metaTitle[0] ? metaTitle : L"");
 	g_eng.fileData = data;
 	g_eng.fileBytes = size;
 	g_eng.sysexData = sxData;
@@ -2891,6 +2960,10 @@ static int PrepareSongSysex(const BYTE* data, int len, int smfPort,
 		VstMidiSysexIsXgOn(data, len)) {
 		units = 1 | 2 | 4;
 		RxChReset();
+	} else if (VstMidiSysexIsMt32(data, len)) {
+		/* MT-32 DT1/display must not reach GS/SC-VA — it can mute the module
+		   after Bank 127 (Capital/LA) is selected. LA map uses CC+PC only. */
+		return 0;
 	} else if (len >= 8 && data[1] == 0x43 && data[3] == 0x4c && data[4] == 0x09) {
 		units = 2;
 		if (len <= (int)sizeof(tmp)) {
@@ -3031,7 +3104,7 @@ static void FlushUnitShorts(AEffect* effect, Vst3Inst* vst3, MidiItem* batch,
 	n = 0;
 }
 
-enum { SONG_INJ_CAP = 128, SONG_OV_PC = 6, SONG_OV_N = 7 };
+enum { SONG_INJ_CAP = 512, SONG_OV_PC = 6, SONG_OV_N = 7 };
 static volatile LONG g_injW = 0;
 static volatile LONG g_injR = 0;
 static DWORD g_injMsg[SONG_INJ_CAP];
@@ -3272,7 +3345,17 @@ static void FlushInjectQueue(__int64 start, int frames)
 				ofs = 0;
 		}
 		if (ofs < 0) ofs = 0;
-		if (frames > 0 && ofs >= frames) ofs = frames - 1;
+		/* Prefetch may inject with ofs spanning the whole IPC render (e.g. 16k
+		 * frames) while we dispatch in BLOCK_FRAMES (512). Do NOT clamp to
+		 * frames-1 — that crushed every note into ~12ms. Defer and shift. */
+		if (frames > 0 && ofs >= frames) {
+			for (LONG rr = r; rr != w; ++rr) {
+				const int j = (int)(rr & (SONG_INJ_CAP - 1));
+				if (g_injOfs[j] >= frames)
+					g_injOfs[j] -= frames;
+			}
+			break;
+		}
 		MidiKeepAliveIfCcSx(g_injMsg[i]);
 		EmitSongShort((int)g_injPort[i], g_injMsg[i], start, frames, ofs);
 		++r;
@@ -3391,7 +3474,17 @@ static void DispatchDueEvents(__int64 start, int frames)
 					ofs = 0;
 			}
 			if (ofs < 0) ofs = 0;
-			if (frames > 0 && ofs >= frames) ofs = frames - 1;
+			/* Same as FlushInjectQueue: live MPU injects are timed across the
+			 * full Host64 VstRender byte count, but we dispatch 512 frames at
+			 * a time. Clamping made every note the same ~BLOCK length. */
+			if (frames > 0 && ofs >= frames) {
+				for (LONG rr = r; rr != w; ++rr) {
+					const int j = (int)(rr & (SONG_INJ_CAP - 1));
+					if (g_injOfs[j] >= frames)
+						g_injOfs[j] -= frames;
+				}
+				break;
+			}
 			MidiItem it = {};
 			it.msg = g_injMsg[i];
 			it.sample = start + ofs;
@@ -4938,6 +5031,7 @@ static void FreeSong()
 	g_eng.useDrums = 0;
 	g_eng.gsMapLsb = 0;
 	g_eng.songGm = 0;
+	g_eng.songLa = 0;
 	g_eng.loopStartSample = 0;
 	g_eng.loopEndSample = 0;
 }
@@ -5543,6 +5637,24 @@ static void SendGmGsReset(AEffect* effect, Vst3Inst* vst3, int preferGs)
 		if (vst3) {
 			Vst3MidiShort(vst3, msb, 0);
 			Vst3MidiShort(vst3, lsb, 0);
+		}
+	} else if (g_eng.songLa) {
+		/* Capital Tone / MT-32 map on SC-VA etc. */
+		MidiItem la[32] = {};
+		int nla = 0;
+		for (int ch = 0; ch < 16 && nla + 2 <= 32; ++ch) {
+			if (ch == 9) continue;
+			la[nla++].msg = (0xb0 | ch) | (0u << 8) | (127u << 16);
+			la[nla++].msg = (0xb0 | ch) | (32u << 8);
+		}
+		if (effect) SendVstEvents(effect, la, nla, 0);
+		if (vst3) {
+			for (int i = 0; i < nla; ++i)
+				Vst3MidiShort(vst3, la[i].msg, 0);
+		}
+		if (g_eng.midiOut && effect == g_eng.effect) {
+			for (int i = 0; i < nla; ++i)
+				midiOutShortMsg(g_eng.midiOut, la[i].msg);
 		}
 	}
 	if (preferGs == 1 && g_eng.gsMapLsb >= 1 && g_eng.gsMapLsb <= 4) {
@@ -6158,6 +6270,11 @@ static int SongHasLoop(void)
 	return (g_eng.loopEndSample > g_eng.loopStartSample) ? 1 : 0;
 }
 
+extern "C" int VstMidiSongHasLoop(void)
+{
+	return SongHasLoop();
+}
+
 static int EventIsResetSysex(const MidiItem& e)
 {
 	if ((e.msg & 0xff) != 0xf0 || e.sysexOff < 0 || !g_eng.sysexData) return 0;
@@ -6171,6 +6288,25 @@ static int EventIsResetSysex(const MidiItem& e)
 
 static void WrapSongLoop(void)
 {
+	/* Kill hanging notes from the previous pass before seeking. */
+	for (int unit = 0; unit < 3; ++unit) {
+		AEffect* fx = (unit == 0) ? g_eng.effect : (unit == 1) ? g_eng.effectB : g_eng.effectC;
+		Vst3Inst* v3 = (unit == 0) ? g_eng.vst3 : (unit == 2) ? g_eng.vst3C : NULL;
+		if (!fx && !v3 && !(unit == 0 && g_eng.midiOut)) continue;
+		MidiItem off[16] = {};
+		for (int ch = 0; ch < 16; ++ch)
+			off[ch].msg = (0xb0 | ch) | (123 << 8);
+		if (fx) SendVstEvents(fx, off, 16, 0);
+		if (v3) {
+			for (int ch = 0; ch < 16; ++ch)
+				Vst3MidiShort(v3, off[ch].msg, 0);
+		}
+		if (unit == 0 && g_eng.midiOut) {
+			for (int ch = 0; ch < 16; ++ch)
+				midiOutShortMsg(g_eng.midiOut, off[ch].msg);
+		}
+	}
+	ZeroMemory(g_eng.noteState, sizeof(g_eng.noteState));
 	g_eng.playSample = g_eng.loopStartSample;
 	g_eng.eventPos = 0;
 	while (g_eng.eventPos < g_eng.eventCount &&

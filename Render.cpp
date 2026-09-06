@@ -1,4 +1,4 @@
-﻿// Render.cpp : インプリメンテーション ファイル
+// Render.cpp : インプリメンテーション ファイル
 //
 
 #include "stdafx.h"
@@ -16,12 +16,15 @@
 #include "AudioDevSync.h"
 #include "VstMidiEngine.h"
 #include "KpiV5ConfigStore.h"
+#include "CEmu/cemu_mgr.h"
 #include <mutex>
 #include <mmdeviceapi.h>
 #include <FunctionDiscoveryKeys_devpkey.h>
 #include <CommDlg.h>
 #include <ShlObj.h>
 #include <mmsystem.h>
+#include <wininet.h>
+#include <time.h>
 
 static void SerializeLogFont(const LOGFONT* lf, TCHAR* str, int maxLen)
 {
@@ -493,6 +496,7 @@ void CRender::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDCANCEL3, m_kpi);
 	DDX_Control(pDX, IDC_KPI_PLUGIN_DL, m_kpiPluginDl);
 	DDX_Control(pDX, IDC_KPI_PLUGIN_RELOAD, m_kpiPluginReload);
+	DDX_Control(pDX, ID_EmuDL, m_emuArcdataDl);
 	DDX_Control(pDX, IDC_CHECK47, m_mp3orig);
 	DDX_Control(pDX, IDC_CHECK48, m_audiost);
 	DDX_Control(pDX, IDC_CHECK49, m_24);
@@ -560,6 +564,7 @@ BEGIN_MESSAGE_MAP(CRender, CCustomBlurDialogExBase)
 	ON_BN_CLICKED(IDCANCEL3, &CRender::Onkpi)
 	ON_BN_CLICKED(IDC_KPI_PLUGIN_DL, &CRender::OnKpiPluginDl)
 	ON_BN_CLICKED(IDC_KPI_PLUGIN_RELOAD, &CRender::OnKpiPluginReload)
+	ON_BN_CLICKED(ID_EmuDL, &CRender::OnEmuArcdataDl)
 	ON_BN_CLICKED(IDC_FONT, &CRender::OnFontMain)
 	ON_BN_CLICKED(IDC_FONT2, &CRender::OnFontList)
 	ON_WM_CLOSE()
@@ -628,6 +633,7 @@ BOOL CRender::OnInitDialog()
 	SetDlgItemText(IDCANCEL3, LL14(L"プラグイン一覧", L"Plugins", L"Plugins", L"Plugin", L"Plugins", L"플러그인", L"插件", L"إضافات", L"Плагины", L"Plugins", L"Plugins", L"Plug-ins", L"Wtyczki", L"Eklentiler"));
 	SetDlgItemText(IDC_KPI_PLUGIN_DL, LL14(L"KPIプラグインDL", L"Download KPI", L"Telecharger KPI", L"Scarica KPI", L"Descargar KPI", L"KPI 다운로드", L"下载 KPI", L"تنزيل KPI", L"Скачать KPI", L"KPI laden", L"Baixar KPI", L"KPI downloaden", L"Pobierz KPI", L"KPI indir"));
 	SetDlgItemText(IDC_KPI_PLUGIN_RELOAD, LL14(L"プラグイン再読込", L"Reload plugins", L"Relire plugins", L"Ricarica plugin", L"Recargar plugins", L"플러그인 다시 읽기", L"重新加载插件", L"إعادة الإضافات", L"Перечитать плагины", L"Plugins neu laden", L"Recarregar plugins", L"Plugins herladen", L"Wczytaj wtyczki", L"Eklentileri yeniden"));
+	SetDlgItemText(ID_EmuDL, LL14(L"Emu Xml DL", L"Emu Xml DL", L"Emu Xml DL", L"Emu Xml DL", L"Emu Xml DL", L"Emu Xml DL", L"Emu Xml DL", L"Emu Xml DL", L"Emu Xml DL", L"Emu Xml DL", L"Emu Xml DL", L"Emu Xml DL", L"Emu Xml DL", L"Emu Xml DL"));
 	SetDlgItemText(IDCANCEL5, LL14(L"関連付け", L"File Association", L"Association de fichiers", L"Associazione file", L"Asociación de archivos", L"파일 연결", L"文件关联", L"ربط الملفات", L"Связь файлов", L"Dateizuordnung", L"Associação de ficheiros", L"Bestandskoppeling", L"Powiazanie plików", L"Dosya ilişkilendirme"));
 	SetDlgItemText(IDC_CHECK1, LL14(L"デフォルトでEVR使用(Vista以降)", L"Default EVR use (Vista+)", L"EVR par défaut (Vista+)", L"Uso EVR predefinito (Vista+)", L"Uso EVR predeterminado (Vista+)", L"기본 EVR 사용(Vista+)", L"默认使用 EVR（Vista+）", L"استخدام EVR افتراضي (Vista+)", L"Использовать EVR по умолчанию (Vista+)", L"EVR standardmäßig (Vista+)", L"Usar EVR por defeito (Vista+)", L"Standaard EVR (Vista+)", L"Domyślne EVR (Vista+)", L"Varsayılan EVR kullan (Vista+)"));
 	SetDlgItemText(IDC_CHECK2, LL14(L"デスクトップコンポジションを使用する", L"Use desktop composition", L"Utiliser la composition du bureau", L"Usa composizione desktop", L"Usar composición de escritorio", L"데스크톱 컴포지션 사용", L"使用桌面合成", L"استخدام تركيب سطح المكتب", L"Использовать композицию рабочего стола", L"Desktop-Komposition verwenden", L"Usar composição do ambiente de trabalho", L"Bureaubladcompositie gebruiken", L"Użyj kompozycji pulpitu", L"Masaüstü birleşimini kullan"));
@@ -1354,6 +1360,302 @@ void CRender::OnKpiPluginReload()
 	OggKpiReloadPlugins(this);
 }
 
+/* Plugins.zip と同様: Last-Modified がローカルより新しいときだけ本体を取る。 */
+static time_t RenderFileMtimeUtc(const wchar_t* path)
+{
+	if (!path || !path[0]) return 0;
+	WIN32_FILE_ATTRIBUTE_DATA fad = {};
+	if (!GetFileAttributesExW(path, GetFileExInfoStandard, &fad))
+		return 0;
+	ULARGE_INTEGER ull;
+	ull.LowPart = fad.ftLastWriteTime.dwLowDateTime;
+	ull.HighPart = fad.ftLastWriteTime.dwHighDateTime;
+	if (ull.QuadPart < 116444736000000000ULL)
+		return 0;
+	return (time_t)((ull.QuadPart - 116444736000000000ULL) / 10000000ULL);
+}
+
+static time_t RenderHttpLastModified(const wchar_t* url)
+{
+	if (!url || !url[0]) return 0;
+	HINTERNET hInet = InternetOpenW(L"oggCEmuArcdata/1.0", INTERNET_OPEN_TYPE_PRECONFIG, NULL, NULL, 0);
+	if (!hInet) return 0;
+	DWORD timeout = 8000;
+	InternetSetOption(hInet, INTERNET_OPTION_CONNECT_TIMEOUT, &timeout, sizeof(timeout));
+	InternetSetOption(hInet, INTERNET_OPTION_RECEIVE_TIMEOUT, &timeout, sizeof(timeout));
+
+	wchar_t noCache[512];
+	_snwprintf_s(noCache, _TRUNCATE, L"%s?t=%llu", url, (unsigned long long)time(NULL));
+	const DWORD flags = INTERNET_FLAG_RELOAD | INTERNET_FLAG_NO_CACHE_WRITE
+		| INTERNET_FLAG_PRAGMA_NOCACHE | INTERNET_FLAG_KEEP_CONNECTION
+		| INTERNET_FLAG_NO_UI | INTERNET_FLAG_SECURE
+		| INTERNET_FLAG_IGNORE_CERT_DATE_INVALID | INTERNET_FLAG_IGNORE_CERT_CN_INVALID;
+	HINTERNET hUrl = InternetOpenUrlW(hInet, noCache, NULL, 0, flags, 0);
+	if (!hUrl) {
+		InternetCloseHandle(hInet);
+		return 0;
+	}
+	DWORD status = 0, slen = sizeof(status);
+	if (!HttpQueryInfo(hUrl, HTTP_QUERY_STATUS_CODE | HTTP_QUERY_FLAG_NUMBER, &status, &slen, NULL)
+		|| status != 200) {
+		InternetCloseHandle(hUrl);
+		InternetCloseHandle(hInet);
+		return 0;
+	}
+	time_t result = 0;
+	char rawDate[256] = {};
+	DWORD rawLen = sizeof(rawDate);
+	if (HttpQueryInfoA(hUrl, HTTP_QUERY_LAST_MODIFIED, rawDate, &rawLen, NULL)) {
+		SYSTEMTIME st = {};
+		if (InternetTimeToSystemTimeA(rawDate, &st, 0)) {
+			FILETIME ft;
+			SystemTimeToFileTime(&st, &ft);
+			ULARGE_INTEGER ull;
+			ull.LowPart = ft.dwLowDateTime;
+			ull.HighPart = ft.dwHighDateTime;
+			result = (time_t)((ull.QuadPart - 116444736000000000ULL) / 10000000ULL);
+		}
+	}
+	InternetCloseHandle(hUrl);
+	InternetCloseHandle(hInet);
+	return result;
+}
+
+/* outSkipped=1: ローカルが最新（または判定不能で既存を維持）で本体 DL なし。 */
+static BOOL RenderDownloadArcdataZip(CString& errOut, BOOL* outSkipped)
+{
+	errOut.Empty();
+	if (outSkipped) *outSkipped = FALSE;
+	wchar_t exePath[MAX_PATH] = {};
+	if (!GetModuleFileNameW(NULL, exePath, MAX_PATH)) {
+		errOut = LL14(L"実行ファイルの場所を取得できません。", L"Could not resolve exe path.",
+			L"Impossible de trouver l'exe.", L"Impossibile risolvere percorso exe.",
+			L"No se pudo resolver la ruta del exe.", L"실행 파일 경로를 확인할 수 없습니다.",
+			L"无法解析程序路径。", L"تعذر تحديد مسار البرنامج.", L"Не удалось определить путь exe.",
+			L"Exe-Pfad nicht ermittelbar.", L"Nao foi possivel resolver o exe.",
+			L"Exe-pad niet te bepalen.", L"Nie mozna ustalic sciezki exe.", L"Exe yolu cozulemedi.");
+		return FALSE;
+	}
+	wchar_t* slash = wcsrchr(exePath, L'\\');
+	if (slash) *(slash + 1) = 0;
+	else exePath[0] = 0;
+
+	wchar_t destPath[MAX_PATH] = {};
+	_snwprintf_s(destPath, _TRUNCATE, L"%sarcdata.zip", exePath);
+	wchar_t tmpPath[MAX_PATH] = {};
+	_snwprintf_s(tmpPath, _TRUNCATE, L"%sarcdata.zip.part", exePath);
+
+	static const wchar_t* kUrl = L"https://ppp.oohara.jp/download/arcdata.zip";
+	const BOOL haveLocal =
+		(GetFileAttributesW(destPath) != INVALID_FILE_ATTRIBUTES) ? TRUE : FALSE;
+	if (haveLocal) {
+		const time_t localMt = RenderFileMtimeUtc(destPath);
+		const time_t remoteMt = RenderHttpLastModified(kUrl);
+		/* サーバが新しいときだけ再取得。判定不能・同等・古い → 既存を維持。 */
+		if (remoteMt == 0 || localMt == 0 || remoteMt <= localMt + 120) {
+			if (outSkipped) *outSkipped = TRUE;
+			return TRUE;
+		}
+	}
+
+	DeleteFileW(tmpPath);
+
+	HINTERNET hInet = InternetOpenW(L"oggCEmuArcdata/1.0", INTERNET_OPEN_TYPE_PRECONFIG, NULL, NULL, 0);
+	if (!hInet) {
+		errOut = LL14(L"ネットワークを初期化できません。", L"Could not init network.",
+			L"Reseau indisponible.", L"Rete non disponibile.", L"Red no disponible.",
+			L"네트워크 초기화 실패.", L"无法初始化网络。", L"تعذر تهيئة الشبكة.",
+			L"Сеть недоступна.", L"Netzwerk nicht initialisierbar.",
+			L"Nao foi possivel iniciar a rede.", L"Netwerk starten mislukt.",
+			L"Nie mozna zainicjowac sieci.", L"Ag baslatilamadi.");
+		return FALSE;
+	}
+	DWORD timeout = 600000;
+	InternetSetOption(hInet, INTERNET_OPTION_CONNECT_TIMEOUT, &timeout, sizeof(timeout));
+	InternetSetOption(hInet, INTERNET_OPTION_RECEIVE_TIMEOUT, &timeout, sizeof(timeout));
+	InternetSetOption(hInet, INTERNET_OPTION_SEND_TIMEOUT, &timeout, sizeof(timeout));
+
+	wchar_t noCache[512];
+	_snwprintf_s(noCache, _TRUNCATE, L"%s?t=%llu", kUrl, (unsigned long long)time(NULL));
+	const DWORD flags = INTERNET_FLAG_RELOAD | INTERNET_FLAG_NO_CACHE_WRITE
+		| INTERNET_FLAG_PRAGMA_NOCACHE | INTERNET_FLAG_KEEP_CONNECTION
+		| INTERNET_FLAG_NO_UI | INTERNET_FLAG_SECURE
+		| INTERNET_FLAG_IGNORE_CERT_DATE_INVALID | INTERNET_FLAG_IGNORE_CERT_CN_INVALID;
+	HINTERNET hUrl = InternetOpenUrlW(hInet, noCache, NULL, 0, flags, 0);
+	if (!hUrl) {
+		InternetCloseHandle(hInet);
+		errOut = LL14(L"ダウンロードに失敗しました。", L"Download failed.",
+			L"Echec du telechargement.", L"Download non riuscito.", L"Fallo la descarga.",
+			L"다운로드 실패.", L"下载失败。", L"فشل التنزيل.", L"Сбой загрузки.",
+			L"Download fehlgeschlagen.", L"Falha no download.", L"Download mislukt.",
+			L"Pobieranie nieudane.", L"Indirme basarisiz.");
+		return FALSE;
+	}
+
+	DWORD status = 0, slen = sizeof(status);
+	if (!HttpQueryInfo(hUrl, HTTP_QUERY_STATUS_CODE | HTTP_QUERY_FLAG_NUMBER, &status, &slen, NULL)
+		|| status < 200 || status >= 300) {
+		InternetCloseHandle(hUrl);
+		InternetCloseHandle(hInet);
+		errOut = LL14(L"ダウンロードに失敗しました（サーバー応答エラー）。",
+			L"Download failed (server error).", L"Echec du telechargement (serveur).",
+			L"Download non riuscito (server).", L"Fallo la descarga (servidor).",
+			L"다운로드 실패(서버 오류).", L"下载失败（服务器错误）。", L"فشل التنزيل (خطأ بالخادم).",
+			L"Сбой загрузки (ошибка сервера).", L"Download fehlgeschlagen (Server).",
+			L"Falha no download (servidor).", L"Download mislukt (server).",
+			L"Pobieranie nieudane (serwer).", L"Indirme basarisiz (sunucu).");
+		return FALSE;
+	}
+
+	HANDLE hFile = CreateFileW(tmpPath, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+	if (hFile == INVALID_HANDLE_VALUE) {
+		InternetCloseHandle(hUrl);
+		InternetCloseHandle(hInet);
+		errOut = LL14(L"一時ファイルを作成できません。", L"Could not create temp file.",
+			L"Fichier temporaire impossible.", L"Impossibile creare file temporaneo.",
+			L"No se pudo crear archivo temporal.", L"임시 파일을 만들 수 없습니다.",
+			L"无法创建临时文件。", L"تعذر إنشاء ملف مؤقت.", L"Не удалось создать временный файл.",
+			L"Temp-Datei nicht erstellbar.", L"Nao foi possivel criar arquivo temporario.",
+			L"Tijdelijk bestand maken mislukt.", L"Nie mozna utworzyc pliku tymczasowego.",
+			L"Gecici dosya olusturulamadi.");
+		return FALSE;
+	}
+
+	char buf[16384];
+	DWORD nread = 0;
+	ULONGLONG total = 0;
+	BOOL ok = TRUE;
+	while (InternetReadFile(hUrl, buf, sizeof(buf), &nread) && nread > 0) {
+		DWORD written = 0;
+		if (!WriteFile(hFile, buf, nread, &written, NULL) || written != nread) {
+			ok = FALSE;
+			break;
+		}
+		total += written;
+	}
+	CloseHandle(hFile);
+	InternetCloseHandle(hUrl);
+	InternetCloseHandle(hInet);
+
+	if (!ok || total < 64) {
+		DeleteFileW(tmpPath);
+		errOut = LL14(L"ダウンロードに失敗しました（ファイルが不正です）。",
+			L"Download failed (invalid file).", L"Echec du telechargement (fichier invalide).",
+			L"Download non riuscito (file non valido).", L"Fallo la descarga (archivo invalido).",
+			L"다운로드 실패(잘못된 파일).", L"下载失败（文件无效）。", L"فشل التنزيل (ملف غير صالح).",
+			L"Сбой загрузки (некорректный файл).", L"Download fehlgeschlagen (ungueltige Datei).",
+			L"Falha no download (arquivo invalido).", L"Download mislukt (ongeldig bestand).",
+			L"Pobieranie nieudane (nieprawidlowy plik).", L"Indirme basarisiz (gecersiz dosya).");
+		return FALSE;
+	}
+
+	DeleteFileW(destPath);
+	if (!MoveFileW(tmpPath, destPath)) {
+		if (!CopyFileW(tmpPath, destPath, FALSE)) {
+			DeleteFileW(tmpPath);
+			errOut = LL14(L"arcdata.zip を保存できません。", L"Could not save arcdata.zip.",
+				L"Impossible d'enregistrer arcdata.zip.", L"Impossibile salvare arcdata.zip.",
+				L"No se pudo guardar arcdata.zip.", L"arcdata.zip 를 저장할 수 없습니다.",
+				L"无法保存 arcdata.zip。", L"تعذر حفظ arcdata.zip.", L"Не удалось сохранить arcdata.zip.",
+				L"arcdata.zip konnte nicht gespeichert werden.", L"Nao foi possivel gravar arcdata.zip.",
+				L"arcdata.zip opslaan mislukt.", L"Nie mozna zapisac arcdata.zip.",
+				L"arcdata.zip kaydedilemedi.");
+			return FALSE;
+		}
+		DeleteFileW(tmpPath);
+	}
+	return TRUE;
+}
+
+void CRender::OnEmuArcdataDl()
+{
+	const int ans = AfxMessageBox(LL14(
+		L"hoot 互換の arcdata.zip を確認します。\nサーバ側が新しいときだけダウンロードし、\n実行ファイルと同じ場所に保存します。\nよろしいですか？",
+		L"Check hoot-compatible arcdata.zip.\nDownload only if the server copy is newer,\nand save it next to the executable.\nContinue?",
+		L"Verifier arcdata.zip (hoot).\nTelecharger seulement si plus recent.\nContinuer ?",
+		L"Controllare arcdata.zip (hoot).\nScaricare solo se piu recente.\nContinuare?",
+		L"Comprobar arcdata.zip (hoot).\nDescargar solo si es mas reciente.\nContinuar?",
+		L"hoot 호환 arcdata.zip 확인.\n서버가 더 새것일 때만 받아\n실행 파일 옆에 저장합니다.\n계속할까요?",
+		L"检查 hoot 兼容的 arcdata.zip。\n仅当服务器更新时下载并保存到程序同目录。\n继续？",
+		L"التحقق من arcdata.zip.\nالتنزيل فقط إذا كان أحدث. متابعة؟",
+		L"Проверить arcdata.zip.\nСкачать только если новее. Продолжить?",
+		L"arcdata.zip pruefen.\nNur bei neuerer Serverversion laden. Fortfahren?",
+		L"Verificar arcdata.zip.\nBaixar so se mais recente. Continuar?",
+		L"arcdata.zip controleren.\nAlleen downloaden als nieuwer. Doorgaan?",
+		L"Sprawdzic arcdata.zip.\nPobrac tylko gdy nowszy. Kontynuowac?",
+		L"arcdata.zip kontrol.\nSadece daha yeniyse indir. Devam?"),
+		MB_YESNO | MB_ICONQUESTION);
+	if (ans != IDYES)
+		return;
+
+	CWaitCursor wait;
+	if (m_emuArcdataDl.GetSafeHwnd())
+		m_emuArcdataDl.EnableWindow(FALSE);
+	CString err;
+	BOOL skipped = FALSE;
+	const BOOL ok = RenderDownloadArcdataZip(err, &skipped);
+	if (m_emuArcdataDl.GetSafeHwnd())
+		m_emuArcdataDl.EnableWindow(TRUE);
+
+	if (!ok) {
+		if (err.IsEmpty())
+			err = LL14(L"arcdata.zip の取得に失敗しました。", L"Failed to obtain arcdata.zip.",
+				L"Echec de l'obtention d'arcdata.zip.", L"Acquisizione arcdata.zip non riuscita.",
+				L"Fallo al obtener arcdata.zip.", L"arcdata.zip 확보 실패.", L"获取 arcdata.zip 失败。",
+				L"فشل الحصول على arcdata.zip.", L"Не удалось получить arcdata.zip.",
+				L"arcdata.zip konnte nicht geholt werden.", L"Falha ao obter arcdata.zip.",
+				L"arcdata.zip ophalen mislukt.", L"Nie udalo sie pobrac arcdata.zip.",
+				L"arcdata.zip alinamadi.");
+		AfxMessageBox(err, MB_ICONERROR);
+		return;
+	}
+
+	if (skipped) {
+		AfxMessageBox(LL14(
+			L"arcdata.zip は最新です。\nダウンロードは行いませんでした。",
+			L"arcdata.zip is already up to date.\nNo download was performed.",
+			L"arcdata.zip est deja a jour.\nAucun telechargement.",
+			L"arcdata.zip e gia aggiornato.\nNessun download.",
+			L"arcdata.zip ya esta actualizado.\nNo se descargo.",
+			L"arcdata.zip 는 최신입니다.\n다운로드하지 않았습니다.",
+			L"arcdata.zip 已是最新。\n未下载。",
+			L"arcdata.zip محدّث بالفعل.\nلم يتم التنزيل.",
+			L"arcdata.zip уже актуален.\nЗагрузка не выполнялась.",
+			L"arcdata.zip ist aktuell.\nKein Download.",
+			L"arcdata.zip ja esta atualizado.\nNenhum download.",
+			L"arcdata.zip is al actueel.\nGeen download.",
+			L"arcdata.zip jest aktualny.\nNie pobrano.",
+			L"arcdata.zip guncel.\nIndirme yapilmadi."),
+			MB_ICONINFORMATION);
+		return;
+	}
+
+	/* 配置完了を先に通知（保存先は常に exe 隣） */
+	AfxMessageBox(LL14(
+		L"完了しました。\narcdata.zip を実行ファイルと同じ場所に保存しました。",
+		L"Done.\narcdata.zip was saved next to the executable.",
+		L"Termine.\narcdata.zip enregistre a cote de l'exe.",
+		L"Completato.\narcdata.zip salvato accanto all'exe.",
+		L"Completado.\narcdata.zip guardado junto al exe.",
+		L"완료했습니다.\narcdata.zip 를 실행 파일과 같은 위치에 저장했습니다.",
+		L"完成。\narcdata.zip 已保存到程序同目录。",
+		L"اكتمل.\nتم حفظ arcdata.zip بجانب البرنامج.",
+		L"Готово.\narcdata.zip сохранён рядом с exe.",
+		L"Fertig.\narcdata.zip neben der Exe gespeichert.",
+		L"Concluido.\narcdata.zip gravado ao lado do exe.",
+		L"Klaar.\narcdata.zip naast de exe opgeslagen.",
+		L"Gotowe.\nZapisano arcdata.zip obok exe.",
+		L"Tamam.\narcdata.zip exe yanina kaydedildi."),
+		MB_ICONINFORMATION);
+
+	{
+		wchar_t root[MAX_PATH];
+		CEmuMgrGetEffectiveDataRoot(NULL, root, MAX_PATH);
+		CEmuCatalogInvalidateCache();
+		CEmuMgrReload(CEmuMgrGet(), root);
+	}
+}
+
 extern HFONT	hFont;
 #include "afxdlgs.h"
 
@@ -1595,6 +1897,13 @@ void CRender::OnBnClickedOk()
 		m_vstMultiDll.GetWindowText(dll);
 		_tcsncpy_s(savedata.vstExtraPath, extra, _TRUNCATE);
 		_tcsncpy_s(savedata.vstMultiDll, dll, _TRUNCATE);
+		/* CEmu は zip ドロップ＋ exe\\data 固定。旧カスタムパスは破棄 */
+		savedata.cemuDataPath[0] = 0;
+		{
+			wchar_t root[MAX_PATH];
+			CEmuMgrGetEffectiveDataRoot(NULL, root, MAX_PATH);
+			CEmuMgrReload(CEmuMgrGet(), root);
+		}
 		savedata.vstMultiName[0] = 0;
 		savedata.midiOutName[0] = 0;
 		int i = m_vstMultiCombo.GetCurSel();

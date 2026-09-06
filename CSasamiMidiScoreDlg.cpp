@@ -1,4 +1,4 @@
-﻿#include "stdafx.h"
+#include "stdafx.h"
 #include "ogg.h"
 #include "CSasamiMidiScoreDlg.h"
 #include "CSasamiNotePaletteDlg.h"
@@ -78,7 +78,8 @@ CSasamiMidiScoreDlg::CSasamiMidiScoreDlg(CWnd* pParent)
 	: CCustomBlurDialogExBase(CSasamiMidiScoreDlg::IDD, pParent)
 	, m_curCh(0), m_placeRest(0), m_accidental(0), m_blankCur(NULL), m_sbDrag(0), m_sbDragScroll0(0), m_sbDragAnchor(0), m_bInLayout(FALSE), m_propMode(0)
 	, m_pendingEdClosePart(0), m_pendingEdCloseProg(-1), m_pendingEdOpenPart(0)
-	, m_clipN(0), m_clipBase(0), m_metroBeat(0), m_metroTimer(0)
+	, m_clipN(0), m_clipBase(0), m_clipSpan(0), m_dragLastX(0), m_dragLastY(0), m_histDragPushed(0)
+	, m_metroBeat(0), m_metroTimer(0)
 {
 	m_drawCursors.pencil = NULL;
 	m_drawCursors.line = NULL;
@@ -236,6 +237,7 @@ BEGIN_MESSAGE_MAP(CSasamiMidiScoreDlg, CCustomBlurDialogExBase)
 	ON_CBN_SELCHANGE(IDC_SASAMI_STRIP_DRAW, &CSasamiMidiScoreDlg::OnCbnStrip)
 	ON_CBN_SELCHANGE(IDC_SASAMI_STRIP_LANES, &CSasamiMidiScoreDlg::OnCbnStrip)
 	ON_CBN_SELCHANGE(IDC_SASAMI_STRIP_STEP, &CSasamiMidiScoreDlg::OnCbnStrip)
+	ON_CBN_SELCHANGE(IDC_SASAMI_PASTE_MODE, &CSasamiMidiScoreDlg::OnCbnPasteMode)
 	ON_MESSAGE(WM_SASAMI_PAL_DUR, &CSasamiMidiScoreDlg::OnPalDur)
 	ON_MESSAGE(WM_SASAMI_PAL_QUERY_STATE, &CSasamiMidiScoreDlg::OnPalQueryState)
 	ON_MESSAGE(WM_SASAMI_PAL_LAYOUT, &CSasamiMidiScoreDlg::OnPalLayout)
@@ -253,44 +255,58 @@ END_MESSAGE_MAP()
 
 void CSasamiMidiScoreDlg::ApplyLang()
 {
-	SetWindowText(LL14(L"SASAMI MIDI\u8b5c\u9762", L"SASAMI MIDI Score", L"Partition MIDI SASAMI", L"Partitura MIDI SASAMI", L"Partitura MIDI SASAMI",
-		L"SASAMI MIDI Score", L"SASAMI MIDI Score", L"SASAMI MIDI Score", L"SASAMI MIDI Score", L"SASAMI MIDI-Partitur",
+	SetWindowText(LL14(L"SASAMI MIDI譜面", L"SASAMI MIDI Score", L"Partition MIDI SASAMI", L"Partitura MIDI SASAMI", L"Partitura MIDI SASAMI",
+		L"SASAMI MIDI 악보", L"SASAMI MIDI 谱面", L"نتيجة SASAMI MIDI", L"Партитура SASAMI MIDI", L"SASAMI MIDI-Partitur",
 		L"Partitura MIDI SASAMI", L"SASAMI MIDI-partituur", L"Partytura SASAMI MIDI", L"SASAMI MIDI Skor"));
-	m_btnOpen.SetWindowText(LL14(L"\u958b\u304f", L"Open", L"Ouvrir", L"Apri", L"Abrir", L"Open", L"Open", L"Open", L"Open", L"Offnen", L"Abrir", L"Openen", L"Otworz", L"Ac"));
-	m_btnSave.SetWindowText(LL14(L"\u4fdd\u5b58", L"Save", L"Enregistrer", L"Salva", L"Guardar", L"Save", L"Save", L"Save", L"Save", L"Speichern", L"Salvar", L"Opslaan", L"Zapisz", L"Kaydet"));
+	m_btnOpen.SetWindowText(LL14(L"開く", L"Open", L"Ouvrir", L"Apri", L"Abrir",
+		L"열기", L"打开", L"فتح", L"Открыть", L"Öffnen", L"Abrir", L"Openen", L"Otwórz", L"Aç"));
+	m_btnSave.SetWindowText(LL14(L"保存", L"Save", L"Enregistrer", L"Salva", L"Guardar",
+		L"저장", L"保存", L"حفظ", L"Сохранить", L"Speichern", L"Salvar", L"Opslaan", L"Zapisz", L"Kaydet"));
 	if (m_btnNew.GetSafeHwnd())
-		m_btnNew.SetWindowText(LL14(L"\u65b0\u898f", L"New", L"Nouveau", L"Nuovo", L"Nuevo", L"New", L"New", L"New", L"New", L"Neu", L"Novo", L"Nieuw", L"Nowy", L"Yeni"));
-	m_btnPlay.SetWindowText(LL14(L"\u518d\u751f\u78ba\u8a8d", L"Preview", L"Apercu", L"Anteprima", L"Vista previa", L"Preview", L"Preview", L"Preview", L"Preview", L"Vorschau", L"Previa", L"Voorbeeld", L"Podglad", L"Onizle"));
-	m_btnExport.SetWindowText(LL14(L"\u66f8\u304d\u51fa\u3057", L"Export", L"Exporter", L"Esporta", L"Exportar", L"Export", L"Export", L"Export", L"Export", L"Export", L"Exportar", L"Exporteren", L"Eksport", L"Disa aktar"));
-	m_btnHelp.SetWindowText(LL14(L"\u30d8\u30eb\u30d7", L"Help", L"Aide", L"Guida", L"Ayuda", L"Help", L"Help", L"Help", L"Help", L"Hilfe", L"Ajuda", L"Help", L"Pomoc", L"Yardim"));
-	m_btnTempo.SetWindowText(LL14(L"\u30c6\u30f3\u30dd", L"Tempo", L"Tempo", L"Tempo", L"Tempo", L"Tempo", L"Tempo", L"Tempo", L"Tempo", L"Tempo", L"Tempo", L"Tempo", L"Tempo", L"Tempo"));
-	m_btnPencil.SetWindowText(LL14(L"\u97f3\u7b26", L"Notes", L"Notes", L"Note", L"Notas", L"Notes", L"音符", L"音符", L"Notes", L"Noten", L"Notas", L"Noten", L"Nuty", L"Nota"));
-	m_btnErase.SetWindowText(LL14(L"\u6d88\u3057\u30b4\u30e0", L"Erase", L"Gomme", L"Gomma", L"Borrar", L"Erase", L"Erase", L"Erase", L"Erase", L"Radierer", L"Borracha", L"Gum", L"Gumka", L"Silgi"));
-	m_btnSel.SetWindowText(LL14(L"\u9078\u629e", L"Select", L"Selection", L"Selezione", L"Seleccionar", L"Select", L"Select", L"Select", L"Select", L"Auswahl", L"Selecionar", L"Selecteren", L"Zaznacz", L"Sec"));
-	m_btnPal.SetWindowText(LL14(L"\u97f3\u7b26", L"Notes", L"Notes", L"Note", L"Notas", L"Notes", L"Notes", L"Notes", L"Notes", L"Noten", L"Notas", L"Noten", L"Nuty", L"Notalar"));
-	m_btnPropUpd.SetWindowText(LL14(L"\u66f4\u65b0", L"Update", L"Maj", L"Aggiorna", L"Actualizar", L"Update", L"Update", L"Update", L"Update", L"Aktualisieren", L"Atualizar", L"Bijwerken", L"Aktualizuj", L"Guncelle"));
+		m_btnNew.SetWindowText(LL14(L"新規", L"New", L"Nouveau", L"Nuovo", L"Nuevo",
+			L"새로", L"新建", L"جديد", L"Новый", L"Neu", L"Novo", L"Nieuw", L"Nowy", L"Yeni"));
+	m_btnPlay.SetWindowText(LL14(L"再生確認", L"Preview", L"Aperçu", L"Anteprima", L"Vista previa",
+		L"미리듣기", L"试听", L"معاينة", L"Просмотр", L"Vorschau", L"Prévia", L"Voorbeeld", L"Podgląd", L"Önizle"));
+	m_btnExport.SetWindowText(LL14(L"書き出し", L"Export", L"Exporter", L"Esporta", L"Exportar",
+		L"내보내기", L"导出", L"تصدير", L"Экспорт", L"Exportieren", L"Exportar", L"Exporteren", L"Eksport", L"Dışa aktar"));
+	m_btnHelp.SetWindowText(LL14(L"ヘルプ", L"Help", L"Aide", L"Guida", L"Ayuda",
+		L"도움말", L"帮助", L"مساعدة", L"Справка", L"Hilfe", L"Ajuda", L"Help", L"Pomoc", L"Yardım"));
+	m_btnTempo.SetWindowText(LL14(L"テンポ", L"Tempo", L"Tempo", L"Tempo", L"Tempo",
+		L"템포", L"速度", L"إيقاع", L"Темп", L"Tempo", L"Tempo", L"Tempo", L"Tempo", L"Tempo"));
+	m_btnPencil.SetWindowText(LL14(L"音符", L"Notes", L"Notes", L"Note", L"Notas",
+		L"음표", L"音符", L"نغمات", L"Ноты", L"Noten", L"Notas", L"Noten", L"Nuty", L"Nota"));
+	m_btnErase.SetWindowText(LL14(L"消しゴム", L"Erase", L"Gomme", L"Gomma", L"Borrar",
+		L"지우개", L"橡皮", L"ممحاة", L"Ластик", L"Radierer", L"Borracha", L"Gum", L"Gumka", L"Silgi"));
+	m_btnSel.SetWindowText(LL14(L"選択", L"Select", L"Sélection", L"Selezione", L"Seleccionar",
+		L"선택", L"选择", L"تحديد", L"Выбор", L"Auswahl", L"Selecionar", L"Selecteren", L"Zaznacz", L"Seç"));
+	m_btnPal.SetWindowText(LL14(L"音符", L"Notes", L"Notes", L"Note", L"Notas",
+		L"음표", L"音符", L"نغمات", L"Ноты", L"Noten", L"Notas", L"Noten", L"Nuty", L"Notalar"));
+	m_btnPropUpd.SetWindowText(LL14(L"更新", L"Update", L"MAJ", L"Aggiorna", L"Actualizar",
+		L"업데이트", L"更新", L"تحديث", L"Обновить", L"Aktualisieren", L"Atualizar", L"Bijwerken", L"Aktualizuj", L"Güncelle"));
 	m_btnMark.SetWindowText(L">|");
 	m_btnLoopA.SetWindowText(L"A");
 	m_btnLoopB.SetWindowText(L"B");
 	m_btnLoopClr.SetWindowText(L"A-Bx");
 	m_btnShowAll.SetWindowText(L"32ch");
 	if (m_btnText.GetSafeHwnd())
-		m_btnText.SetWindowText(LL14(L"\u30c6\u30ad\u30b9\u30c8", L"Text", L"Texte", L"Testo", L"Texto", L"Text", L"Text", L"Text", L"Text", L"Text", L"Texto", L"Tekst", L"Tekst", L"Metin"));
+		m_btnText.SetWindowText(LL14(L"テキスト", L"Text", L"Texte", L"Testo", L"Texto",
+			L"텍스트", L"文本", L"نص", L"Текст", L"Text", L"Texto", L"Tekst", L"Tekst", L"Metin"));
 	if (m_btnFx.GetSafeHwnd())
-		m_btnFx.SetWindowText(LL14(
-			L"\u30A4\u30F3\u30B5\u30FC\u30C8FX", L"Insert FX", L"Insert FX", L"Insert FX", L"Insert FX",
-			L"Insert FX", L"Insert FX", L"Insert FX", L"Insert FX", L"Insert FX",
-			L"Insert FX", L"Insert FX", L"Insert FX", L"Insert FX"));
+		m_btnFx.SetWindowText(LL14(L"インサートFX", L"Insert FX", L"FX d’insertion", L"FX insert", L"FX de inserción",
+			L"인서트 FX", L"插入FX", L"إدراج FX", L"Вставка FX", L"Insert-FX", L"FX de inserção", L"Insert-FX", L"FX wstawiania", L"Insert FX"));
 	if (m_btnArr.GetSafeHwnd())
-		m_btnArr.SetWindowText(LL14(L"アレンジ", L"Arrange", L"Arrange", L"Arrange", L"Arran.", L"어레인지", L"编曲", L"ترتيب", L"Аранж", L"Arrange", L"Arranjo", L"Arrange", L"Aranż", L"Arrange"));
+		m_btnArr.SetWindowText(LL14(L"アレンジ", L"Arrange", L"Arranger", L"Arrangia", L"Arreglar",
+			L"어레인지", L"编曲", L"ترتيب", L"Аранжировка", L"Arrange", L"Arranjo", L"Arrangeren", L"Aranż", L"Aranje"));
 	if (m_btnLayout.GetSafeHwnd())
-		m_btnLayout.SetWindowText(LL14(L"譜表", L"Layout", L"Portée", L"Impag.", L"Layout", L"보표", L"谱表", L"تخطيط", L"Партитура", L"Notation", L"Layout", L"Layout", L"Układ", L"Düzen"));
+		m_btnLayout.SetWindowText(LL14(L"譜表", L"Layout", L"Portée", L"Impaginazione", L"Diseño",
+			L"보표", L"谱表", L"تخطيط", L"Партитура", L"Notation", L"Layout", L"Layout", L"Układ", L"Düzen"));
 	if (m_btnChord.GetSafeHwnd())
 		m_btnChord.SetWindowText(LL14(L"和音", L"Chord", L"Accord", L"Accordo", L"Acorde", L"화음", L"和弦", L"وتر", L"Аккорд", L"Akkord", L"Acorde", L"Akkoord", L"Akor", L"Akor"));
 	if (m_btnPatt.GetSafeHwnd())
 		m_btnPatt.SetWindowText(LL14(L"パターン", L"Pattern", L"Motif", L"Pattern", L"Patrón", L"패턴", L"型", L"نمط", L"Паттерн", L"Muster", L"Padrão", L"Patroon", L"Wzorzec", L"Desen"));
 	if (m_btnRoll.GetSafeHwnd())
-		m_btnRoll.SetWindowText(LL14(L"ピアノロール", L"Piano roll", L"Piano roll", L"Piano roll", L"Piano roll", L"피아노 롤", L"钢琴卷帘", L"رول بيانو", L"Пианоролл", L"Klavierrolle", L"Piano roll", L"Piano-roll", L"Rolka", L"Piyano rulosu"));
+		m_btnRoll.SetWindowText(LL14(L"ピアノロール", L"Piano roll", L"Piano roll", L"Piano roll", L"Piano roll",
+			L"피아노 롤", L"钢琴卷帘", L"رول البيانو", L"Пианоролл", L"Klavierrolle", L"Piano roll", L"Piano-roll", L"Rolka", L"Piyano rulosu"));
 	if (m_stripLanes.GetSafeHwnd())
 		SyncStripCombos();
 	SyncMidiInCombos();
@@ -366,12 +382,25 @@ BOOL CSasamiMidiScoreDlg::OnInitDialog()
 	m_edNote.SetWindowText(L"");
 	m_edGt.SetWindowText(L"100");
 	m_edVel.SetWindowText(L"100");
-	m_status.SetWindowText(
-		L"Tone=VST. Exc/RPN lane=SysEx・RPN. Toolbar「Insert FX」=パート・インサートEFX。");
+	m_status.SetWindowText(LL14(L"Tone=VST。Exc/RPNレーン=SysEx・RPN。ツールバー「Insert FX」=パート・インサートEFX。", L"Tone=VST. Exc/RPN lane=SysEx/RPN. Toolbar Insert FX=per-part insert EFX.", L"Tone=VST. Piste Exc/RPN=SysEx/RPN. Insert FX=EFX d’insertion par partie.", L"Tone=VST. Corsia Exc/RPN=SysEx/RPN. Insert FX=EFX insert per parte.", L"Tone=VST. Pista Exc/RPN=SysEx/RPN. Insert FX=EFX de inserción por parte.", L"Tone=VST. Exc/RPN 레인=SysEx/RPN. Insert FX=파트 인서트 EFX.", L"Tone=VST。Exc/RPN 条带=SysEx/RPN。Insert FX=声部插入 EFX。", L"Tone=VST. مسار Exc/RPN=SysEx/RPN. Insert FX=EFX إدراج لكل جزء.", L"Tone=VST. Полоса Exc/RPN=SysEx/RPN. Insert FX=EFX вставки по партии.", L"Tone=VST. Exc/RPN-Spur=SysEx/RPN. Insert FX=Insert-EFX je Part.", L"Tone=VST. Faixa Exc/RPN=SysEx/RPN. Insert FX=EFX de inserção por parte.", L"Tone=VST. Exc/RPN-baan=SysEx/RPN. Insert FX=insert-EFX per partij.", L"Tone=VST. Pas Exc/RPN=SysEx/RPN. Insert FX=EFX wstawiania na partię.", L"Tone=VST. Exc/RPN şeridi=SysEx/RPN. Insert FX=parti insert EFX."));
 	ScStaffLoadPartStrip(&m_ui, m_curCh);
 	SyncStripCombos();
-	RefreshProgLabels();
+	if (!m_pasteMode.GetSafeHwnd())
+		m_pasteMode.Create(WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP,
+			CRect(0, 0, 100, 120), this, IDC_SASAMI_PASTE_MODE);
+	m_pasteMode.ResetContent();
+	m_pasteMode.AddString(LL14(L"上書き", L"Overwrite", L"Écraser", L"Sovrascrivi", L"Sobrescribir",
+		L"덮어쓰기", L"覆盖", L"استبدال", L"Замена", L"Überschreiben", L"Sobrescrever", L"Overschrijven", L"Nadpisz", L"Üzerine yaz"));
+	m_pasteMode.AddString(LL14(L"挿入", L"Insert", L"Insérer", L"Inserisci", L"Insertar",
+		L"삽입", L"插入", L"إدراج", L"Вставка", L"Einfügen", L"Inserir", L"Invoegen", L"Wstaw", L"Ekle"));
+	m_pasteMode.SetCurSel(0);
+	m_pasteMode.SetAeroMode(FALSE);
+	m_ui.tool = SC_TOOL_SELECT;
+	m_ui.helpTopic = SC_HELP_SELECT;
+	m_ui.markerSolidTrack = m_curCh;
+	m_ui.pasteInsert = 0;
 	UpdateNoteCursor();
+	RefreshProgLabels();
 	ScStaffDrawCursorsInit(&m_drawCursors);
 	RefreshStrip();
 	LayoutChrome();
@@ -397,7 +426,15 @@ BOOL CSasamiMidiScoreDlg::PreTranslateMessage(MSG* pMsg)
 				return TRUE;
 			}
 		}
-		if (pMsg->wParam == VK_DELETE || pMsg->wParam == VK_BACK || pMsg->wParam == VK_ESCAPE) {
+		const int ctrl = (GetKeyState(VK_CONTROL) & 0x8000) ? 1 : 0;
+		const int shift = (GetKeyState(VK_SHIFT) & 0x8000) ? 1 : 0;
+		if (pMsg->wParam == VK_DELETE || pMsg->wParam == VK_BACK || pMsg->wParam == VK_ESCAPE ||
+			(ctrl && (pMsg->wParam == 'Z' || pMsg->wParam == 'z' || pMsg->wParam == 'Y' || pMsg->wParam == 'y' ||
+				pMsg->wParam == 'C' || pMsg->wParam == 'c' || pMsg->wParam == 'V' || pMsg->wParam == 'v' ||
+				pMsg->wParam == 'X' || pMsg->wParam == 'x' || pMsg->wParam == 'A' || pMsg->wParam == 'a' ||
+				pMsg->wParam == 'T' || pMsg->wParam == 't' || pMsg->wParam == 'I' || pMsg->wParam == 'i')) ||
+			(ctrl && shift && (pMsg->wParam == 'V' || pMsg->wParam == 'v' ||
+				pMsg->wParam == 'I' || pMsg->wParam == 'i'))) {
 			OnKeyDown((UINT)pMsg->wParam, 1, 0);
 			return TRUE;
 		}
@@ -405,6 +442,10 @@ BOOL CSasamiMidiScoreDlg::PreTranslateMessage(MSG* pMsg)
 	return CCustomBlurDialogExBase::PreTranslateMessage(pMsg);
 }
 
+void CSasamiMidiScoreDlg::OnCbnPasteMode()
+{
+	m_ui.pasteInsert = (m_pasteMode.GetCurSel() == 1) ? 1 : 0;
+}
 
 void CSasamiMidiScoreDlg::SetupTooltips()
 {
@@ -426,6 +467,8 @@ void CSasamiMidiScoreDlg::SetupTooltips()
 		L"지우개 — 클릭/드래그 삭제", L"橡皮 — 点击/拖动删除", L"ممحاة — انقر/اسحب للحذف", L"Ластик — клик/перетаскивание", L"Radierer — Klick/Ziehen löscht", L"Borracha — clique/arraste", L"Gum — klik/sleep wissen", L"Gumka — klik/przeciągnij", L"Silgi — tıkla/sürükle"));
 	tip(m_btnSel, LL14(L"選択 — クリック/ドラッグ、Deleteで削除", L"Select — click/drag notes or strip chips; Delete removes", L"Sélection — clic/glisser; Suppr", L"Selezione — clic/trascina; Canc", L"Seleccionar — clic/arrastrar; Supr",
 		L"선택 — 클릭/드래그, Delete 삭제", L"选择 — 点击/拖动；Delete删除", L"تحديد — نقر/سحب؛ Delete", L"Выбор — клик/перетаскивание; Delete", L"Auswahl — Klick/Ziehen; Entf", L"Selecionar — clique/arraste; Del", L"Selecteren — klik/sleep; Del", L"Zaznacz — klik/przeciągnij; Del", L"Seç — tıkla/sürükle; Del"));
+	tip(m_pasteMode, LL14(L"ペースト: 上書き / 挿入（Ctrl+Shift+V=常に挿入）", L"Paste: overwrite / insert (Ctrl+Shift+V=always insert)", L"Coller: écraser / insérer (Ctrl+Shift+V)", L"Incolla: sovrascrivi / inserisci (Ctrl+Shift+V)", L"Pegar: sobrescribir / insertar (Ctrl+Shift+V)",
+		L"붙여넣기: 덮어쓰기/삽입 (Ctrl+Shift+V)", L"粘贴：覆盖/插入（Ctrl+Shift+V）", L"لصق: استبدال/إدراج (Ctrl+Shift+V)", L"Вставка: замена/вставка (Ctrl+Shift+V)", L"Einfügen: überschreiben/einfügen (Ctrl+Shift+V)", L"Colar: sobrescrever/inserir (Ctrl+Shift+V)", L"Plakken: overschrijven/invoegen (Ctrl+Shift+V)", L"Wklej: nadpisz/wstaw (Ctrl+Shift+V)", L"Yapıştır: üzerine yaz/ekle (Ctrl+Shift+V)"));
 	tip(m_btnPal, LL14(L"音価パレット", L"Note duration palette", L"Palette de durées", L"Tavolozza durate", L"Paleta de duraciones",
 		L"음가 팔레트", L"时值调色板", L"لوحة المدد", L"Палитра длительностей", L"Notenwerte-Palette", L"Paleta de durações", L"Duur-palet", L"Paleta wartości", L"Süre paleti"));
 	tip(m_btnTempo, LL14(L"テンポ — 赤マーカー位置から次の変化点まで BPM を一括設定", L"Tempo — set BPM at red marker through next tempo change", L"Tempo — BPM au marqueur", L"Tempo — BPM al marcatore", L"Tempo — BPM en marcador",
@@ -524,7 +567,8 @@ void CSasamiMidiScoreDlg::LayoutChrome()
 	x = pad;
 	layoutCombo(m_stripLanes, x, y, 120, cbH, 140); x += 126;
 	layoutCombo(m_stripStep, x, y, 88, cbH, 120); x += 94;
-	layoutCombo(m_stripDraw, x, y, 108, cbH, 140);
+	layoutCombo(m_stripDraw, x, y, 108, cbH, 140); x += 114;
+	layoutCombo(m_pasteMode, x, y, 100, cbH, 120);
 	y += cbH + 6;
 	if (m_ui.stripCount >= 1) {
 		x = pad;
@@ -581,7 +625,7 @@ void CSasamiMidiScoreDlg::LayoutChrome()
 	if (m_status.GetSafeHwnd())
 		m_status.MoveWindow(pad, y, max(200, rc.Width() - pad * 2), 20);
 	y += 22;
-	const int helpH = 52;
+	const int helpH = 56;
 	const int rollH = m_ui.showRollSplit ? 140 : 0;
 	const int bodyBotLimit = rc.Height() - pad - helpH - rollH;
 	const int chromeBottom = y;
@@ -896,7 +940,13 @@ void CSasamiMidiScoreDlg::OnPaint()
 		ScStaffPaintStaves(mem, grid, &m_ui, m_doc.ev, m_doc.evCount, 0, m_curCh, m_doc.tempoT);
 	if (strip.Width() > 2 && strip.Height() > 2)
 		ScStaffPaintStrip(mem, strip, &m_ui);
-	ScStaffPaintMarquee(mem, &m_ui);
+	if (m_ui.marqueeOn) {
+		m_ui.marqueeX0 -= body.left; m_ui.marqueeX1 -= body.left;
+		m_ui.marqueeY0 -= body.top; m_ui.marqueeY1 -= body.top;
+		ScStaffPaintMarquee(mem, &m_ui);
+		m_ui.marqueeX0 += body.left; m_ui.marqueeX1 += body.left;
+		m_ui.marqueeY0 += body.top; m_ui.marqueeY1 += body.top;
+	}
 	CRect bodyRel(0, 0, body.Width(), body.Height());
 	CRect viewRel(0, 0, m_gridRc.Width(), m_trackRc.bottom - m_bodyRc.top);
 	/* Clear scroll gutter before thumbs — staff must not bleed into +/- / scrollbar. */
@@ -1014,7 +1064,7 @@ void CSasamiMidiScoreDlg::PlaceOrEditAt(CPoint pt)
 			RefreshStrip();
 			PushDocToText();
 			InvalidateRect(m_bodyRc, FALSE);
-			m_status.SetWindowText(L"Deleted");
+			m_status.SetWindowText(LL14(L"削除しました", L"Deleted", L"Supprimé", L"Eliminato", L"Eliminado", L"삭제됨", L"已删除", L"تم الحذف", L"Удалено", L"Gelöscht", L"Apagado", L"Verwijderd", L"Usunięto", L"Silindi"));
 		} else if (m_ui.stripCount > 0 && m_stripRc.PtInRect(pt)) {
 			int lane = 0, col = 0, val = 0;
 			if (ScStaffHitStrip(m_stripRc, &m_ui, pt, &lane, &col, &val)) {
@@ -1035,7 +1085,7 @@ void CSasamiMidiScoreDlg::PlaceOrEditAt(CPoint pt)
 		if (m_ch.GetSafeHwnd()) m_ch.SetCurSel(m_curCh);
 		if (ScStaffIsStaffMarkKind(m_doc.ev[ctrl].kind, 0)) {
 			ScStaffSelSetPrimary(&m_ui, ctrl);
-			m_status.SetWindowText(L"Mark selected — Delete/Backspace / Eraser removes |: :| Ped. 8va…");
+			m_status.SetWindowText(LL14(L"マーク選択 — Delete/Backspace/消しゴムで |: :| Ped. 8va… を削除", L"Mark selected — Delete/Backspace / Eraser removes |: :| Ped. 8va…", L"Marque sélectionnée — Suppr/Gomme enlève |: :| Ped. 8va…", L"Segno selezionato — Canc/Gomma rimuove |: :| Ped. 8va…", L"Marca seleccionada — Supr/Borrar quita |: :| Ped. 8va…", L"마크 선택 — Delete/Backspace/지우개로 |: :| Ped. 8va… 삭제", L"已选标记 — Delete/Backspace/橡皮删除 |: :| Ped. 8va…", L"علامة محددة — Delete/Backspace/الممحاة تزيل |: :| Ped. 8va…", L"Знак выбран — Delete/Backspace/ластик удаляет |: :| Ped. 8va…", L"Zeichen gewählt — Entf/Radierer entfernt |: :| Ped. 8va…", L"Marca selecionada — Del/borracha remove |: :| Ped. 8va…", L"Markering geselecteerd — Del/gum verwijdert |: :| Ped. 8va…", L"Zaznaczono znak — Del/gumka usuwa |: :| Ped. 8va…", L"İşaret seçili — Del/silgi |: :| Ped. 8va… siler"));
 			InvalidateRect(m_bodyRc, FALSE);
 			return;
 		}
@@ -1057,7 +1107,7 @@ void CSasamiMidiScoreDlg::PlaceOrEditAt(CPoint pt)
 			ScStaffSelSetPrimary(&m_ui, mark);
 		m_curCh = m_doc.ev[mark].ch;
 		if (m_ch.GetSafeHwnd()) m_ch.SetCurSel(m_curCh);
-		m_status.SetWindowText(L"Mark selected — Delete/Backspace removes");
+		m_status.SetWindowText(LL14(L"マーク選択 — Delete/Backspace で削除", L"Mark selected — Delete/Backspace removes", L"Marque sélectionnée — Suppr/Retour arrière", L"Segno selezionato — Canc/Backspace", L"Marca seleccionada — Supr/Retroceso", L"마크 선택 — Delete/Backspace로 삭제", L"已选标记 — Delete/Backspace 删除", L"علامة محددة — Delete/Backspace للحذف", L"Знак выбран — Delete/Backspace", L"Zeichen gewählt — Entf/Rücktaste", L"Marca selecionada — Del/Backspace", L"Markering geselecteerd — Del/Backspace", L"Zaznaczono znak — Del/Backspace", L"İşaret seçili — Del/Backspace"));
 		InvalidateRect(m_bodyRc, FALSE);
 		return;
 	}
@@ -1065,18 +1115,26 @@ void CSasamiMidiScoreDlg::PlaceOrEditAt(CPoint pt)
 		return;
 	if (m_ui.tool == SC_TOOL_SELECT) {
 		if (hit >= 0) {
-			if (GetKeyState(VK_SHIFT) & 0x8000)
-				ScStaffSelAdd(&m_ui, hit);
-			else
-				ScStaffSelSetPrimary(&m_ui, hit);
+			const int ch = (int)m_doc.ev[hit].ch;
+			m_ui.markerSolidTrack = ch;
+			m_curCh = ch;
+			if (m_ch.GetSafeHwnd()) m_ch.SetCurSel(m_curCh);
+			if (ScStaffSelHas(&m_ui, hit) && !(GetKeyState(VK_SHIFT) & 0x8000)) {
+				/* keep existing selection */
+			} else if (GetKeyState(VK_SHIFT) & 0x8000) {
+				ScStaffSelAddTieChain(m_doc.ev, m_doc.evCount, &m_ui, hit, 0);
+			} else {
+				ScStaffSelClear(&m_ui);
+				ScStaffSelAddTieChain(m_doc.ev, m_doc.evCount, &m_ui, hit, 0);
+			}
 			m_ui.dragEv = hit;
-			m_ui.dragOriginX = pt.x;
 			m_ui.dragMode = 2;
-			m_curCh = m_doc.ev[hit].ch;
-			m_ch.SetCurSel(m_curCh);
+			m_dragLastX = pt.x;
+			m_dragLastY = pt.y;
+			m_histDragPushed = 0;
 			SyncPropFromSel();
 			RefreshStrip();
-			m_status.SetWindowText(L"Selected — Delete/Backspace removes. Exp/Vol/Pitch apply to this MIDI ch only.");
+			m_status.SetWindowText(LL14(L"選択中 — Delete/Backspace で削除。Exp/Vol/Pitch はこの MIDI ch のみ。", L"Selected — Delete/Backspace removes. Exp/Vol/Pitch apply to this MIDI ch only.", L"Sélection — Suppr. Exp/Vol/Pitch = ce canal MIDI seulement.", L"Selezione — Canc. Exp/Vol/Pitch solo su questo ch MIDI.", L"Selección — Supr. Exp/Vol/Pitch solo en este ch MIDI.", L"선택됨 — Delete/Backspace 삭제. Exp/Vol/Pitch는 이 MIDI ch만.", L"已选 — Delete/Backspace 删除。Exp/Vol/Pitch 仅本 MIDI 通道。", L"محدد — Delete/Backspace. Exp/Vol/Pitch لهذه قناة MIDI فقط.", L"Выбрано — Delete/Backspace. Exp/Vol/Pitch только для этого MIDI ch.", L"Auswahl — Entf. Exp/Vol/Pitch nur für diesen MIDI-Kanal.", L"Selecionado — Del. Exp/Vol/Pitch só neste ch MIDI.", L"Geselecteerd — Del. Exp/Vol/Pitch alleen dit MIDI-kanaal.", L"Zaznaczono — Del. Exp/Vol/Pitch tylko ten kanał MIDI.", L"Seçili — Del. Exp/Vol/Pitch yalnızca bu MIDI ch."));
 			InvalidateRect(m_bodyRc, FALSE);
 		} else {
 			ScStaffSelClear(&m_ui);
@@ -1130,8 +1188,11 @@ void CSasamiMidiScoreDlg::PlaceOrEditAt(CPoint pt)
 				m_ui.scrollX, ScStaffGridLeftPx(m_gridRc.left, &m_ui, m_doc.ev, m_doc.evCount), pxBeat, &m_ui, m_doc.ev, m_doc.evCount);
 			m_ui.dragMode = (pt.x >= x1 - 8) ? 1 : 2;
 		}
+		m_dragLastX = pt.x;
+		m_dragLastY = pt.y;
+		m_histDragPushed = 0;
 		SyncPropFromSel();
-		m_status.SetWindowText(L"Note selected — Delete/Backspace to remove. Exp/Pitch are per-channel.");
+		m_status.SetWindowText(LL14(L"音符選択 — Delete/Backspace で削除。Exp/Pitch はチャンネル単位。", L"Note selected — Delete/Backspace to remove. Exp/Pitch are per-channel.", L"Note sélectionnée — Suppr. Exp/Pitch par canal.", L"Nota selezionata — Canc. Exp/Pitch per canale.", L"Nota seleccionada — Supr. Exp/Pitch por canal.", L"음표 선택 — Delete/Backspace 삭제. Exp/Pitch는 채널별.", L"已选音符 — Delete/Backspace 删除。Exp/Pitch 按通道。", L"نغمة محددة — Delete/Backspace. Exp/Pitch لكل قناة.", L"Нота выбрана — Delete/Backspace. Exp/Pitch по каналам.", L"Note gewählt — Entf. Exp/Pitch pro Kanal.", L"Nota selecionada — Del. Exp/Pitch por canal.", L"Noot geselecteerd — Del. Exp/Pitch per kanaal.", L"Zaznaczono nutę — Del. Exp/Pitch per kanał.", L"Nota seçili — Del. Exp/Pitch kanal bazlı."));
 		InvalidateRect(m_bodyRc, FALSE);
 		return;
 	}
@@ -1156,6 +1217,7 @@ void CSasamiMidiScoreDlg::PlaceOrEditAt(CPoint pt)
 		m_curCh = hitTr;
 		m_ch.SetCurSel(m_curCh);
 		m_ui.visible[hitTr] = 1;
+		m_ui.markerSolidTrack = hitTr;
 		const int quant = ScStaffPlaceQuant(&m_ui);
 		uint32_t tick = ScStaffXToTick(pt.x, m_ui.scrollX, ScStaffGridLeftPx(m_gridRc.left, &m_ui, m_doc.ev, m_doc.evCount), m_ui.pxBeat, quant, &m_ui, m_doc.ev, m_doc.evCount);
 		int staffTop = ScStaffVisibleLaneStaffTop(m_gridRc, &m_ui, hitTr);
@@ -1507,9 +1569,9 @@ LRESULT CSasamiMidiScoreDlg::OnDeferredOpenVst(WPARAM w, LPARAM l)
 	if (part < 1 || part > 32) return 0;
 	if (!::IsWindow(m_hWnd)) return 0;
 	KillTimer(9122);
-	m_status.SetWindowText(L"Opening VST editor…");
+	m_status.SetWindowText(LL14(L"VSTエディタを開いています…", L"Opening VST editor…", L"Ouverture de l’éditeur VST…", L"Apertura editor VST…", L"Abriendo editor VST…", L"VST 편집기 여는 중…", L"正在打开 VST 编辑器…", L"جارٍ فتح محرر VST…", L"Открытие редактора VST…", L"VST-Editor wird geöffnet…", L"Abrindo editor VST…", L"VST-editor openen…", L"Otwieranie edytora VST…", L"VST düzenleyici açılıyor…"));
 	VstLiveEditorOpenAsync(part);
-	m_status.SetWindowText(L"VST editor requested — Home/MediaBay で音色を選び閉じると @VSTSTATEB64");
+	m_status.SetWindowText(LL14(L"VSTエディタ要求 — Home/MediaBay で音色を選び閉じると @VSTSTATEB64", L"VST editor requested — pick a tone in Home/MediaBay; closing writes @VSTSTATEB64", L"Éditeur VST demandé — choisir un timbre dans Home/MediaBay ; fermer écrit @VSTSTATEB64", L"Editor VST richiesto — scegli un suono in Home/MediaBay; chiudendo scrive @VSTSTATEB64", L"Editor VST solicitado — elige un tono en Home/MediaBay; al cerrar escribe @VSTSTATEB64", L"VST 편집기 요청 — Home/MediaBay에서 음색 선택 후 닫으면 @VSTSTATEB64", L"已请求 VST 编辑器 — 在 Home/MediaBay 选音色并关闭后写入 @VSTSTATEB64", L"طُلب محرر VST — اختر صوتًا في Home/MediaBay؛ الإغلاق يكتب @VSTSTATEB64", L"Запрошен редактор VST — выберите тембр в Home/MediaBay; закрытие пишет @VSTSTATEB64", L"VST-Editor angefordert — Klang in Home/MediaBay wählen; Schließen schreibt @VSTSTATEB64", L"Editor VST solicitado — escolha um tom em Home/MediaBay; fechar grava @VSTSTATEB64", L"VST-editor gevraagd — kies een klank in Home/MediaBay; sluiten schrijft @VSTSTATEB64", L"Poproszono edytor VST — wybierz brzmienie w Home/MediaBay; zamknięcie zapisuje @VSTSTATEB64", L"VST düzenleyici istendi — Home/MediaBay’de ton seç; kapatınca @VSTSTATEB64 yazılır"));
 	SetTimer(9122, 250, NULL);
 	return 0;
 }
@@ -1614,7 +1676,7 @@ void CSasamiMidiScoreDlg::EditProgForPart(int ch0)
 	m_curCh = ch0;
 	if (m_ch.GetSafeHwnd()) m_ch.SetCurSel(m_curCh);
 	SyncProgPropFromCh(ch0);
-	m_status.SetWindowText(L"Prog edit: set Prog / MSB / LSB then Apply. Tone row opens VST.");
+	m_status.SetWindowText(LL14(L"Prog編集: Prog / MSB / LSB を設定して適用。Tone行でVSTを開きます。", L"Prog edit: set Prog / MSB / LSB then Apply. Tone row opens VST.", L"Édit. Prog : réglez Prog/MSB/LSB puis Appliquer. Ligne Tone ouvre le VST.", L"Modifica Prog: imposta Prog/MSB/LSB poi Applica. Riga Tone apre il VST.", L"Editar Prog: fija Prog/MSB/LSB y Aplicar. La fila Tone abre el VST.", L"Prog 편집: Prog/MSB/LSB 설정 후 적용. Tone 행에서 VST 열기.", L"Prog 编辑：设置 Prog/MSB/LSB 后应用。Tone 行打开 VST。", L"تحرير Prog: عيّن Prog/MSB/LSB ثم طبّق. صف Tone يفتح VST.", L"Правка Prog: задайте Prog/MSB/LSB и Применить. Строка Tone открывает VST.", L"Prog-Bearbeitung: Prog/MSB/LSB setzen, dann Anwenden. Tone-Zeile öffnet VST.", L"Editar Prog: defina Prog/MSB/LSB e Aplicar. Linha Tone abre o VST.", L"Prog bewerken: stel Prog/MSB/LSB in en Toepassen. Tone-rij opent VST.", L"Edycja Prog: ustaw Prog/MSB/LSB i Zastosuj. Wiersz Tone otwiera VST.", L"Prog düzenle: Prog/MSB/LSB ayarla, Uygula. Tone satırı VST açar."));
 }
 
 void CSasamiMidiScoreDlg::OnLButtonDown(UINT nFlags, CPoint point)
@@ -1622,6 +1684,47 @@ void CSasamiMidiScoreDlg::OnLButtonDown(UINT nFlags, CPoint point)
 	const int capH = CCC_GetCustomCaptionHeight(m_hWnd);
 	if (capH > 0 && point.y >= 0 && point.y < capH) {
 		CCustomBlurDialogExBase::OnLButtonDown(nFlags, point);
+		return;
+	}
+	/* Embedded piano-roll split: same tools as floating roll */
+	if (m_ui.showRollSplit && m_rollRc.PtInRect(point)) {
+		if (m_ui.tool == SC_TOOL_PENCIL) {
+			uint32_t tick = ScPianoRollXToTick(&m_rollView, m_rollRc, &m_ui, point.x);
+			tick = (tick / (uint32_t)ScStaffPlaceQuant(&m_ui)) * (uint32_t)ScStaffPlaceQuant(&m_ui);
+			int note = ScPianoRollYToNote(&m_rollView, m_rollRc, point.y);
+			HistPush();
+			ScMidiAddNote(&m_doc, tick, m_curCh, note, m_ui.placeDur > 0 ? m_ui.placeDur : SC_PPQN / 4, 100);
+			m_ui.markerTick = tick;
+			PushDocToText();
+			InvalidateRect(m_rollRc, FALSE);
+			InvalidateRect(m_bodyRc, FALSE);
+			return;
+		}
+		if (m_ui.tool == SC_TOOL_ERASER) {
+			int hit = ScPianoRollHitNote(&m_rollView, m_rollRc, m_doc.ev, m_doc.evCount, &m_ui, m_curCh, point);
+			if (hit < 0) hit = ScPianoRollHitResize(&m_rollView, m_rollRc, m_doc.ev, m_doc.evCount, &m_ui, m_curCh, point);
+			if (hit >= 0) {
+				HistPush();
+				ScStaffSelClear(&m_ui);
+				ScStaffSelAdd(&m_ui, hit);
+				ScStaffSelDelete(m_doc.ev, &m_doc.evCount, &m_ui);
+				PushDocToText();
+				InvalidateRect(m_rollRc, FALSE);
+				InvalidateRect(m_bodyRc, FALSE);
+			}
+			return;
+		}
+		int hit = ScPianoRollHitNote(&m_rollView, m_rollRc, m_doc.ev, m_doc.evCount, &m_ui, m_curCh, point);
+		if (hit >= 0) {
+			if (!(nFlags & MK_CONTROL)) ScStaffSelClear(&m_ui);
+			ScStaffSelAdd(&m_ui, hit);
+			m_ui.markerTick = m_doc.ev[hit].tick;
+		} else {
+			m_ui.markerTick = ScPianoRollXToTick(&m_rollView, m_rollRc, &m_ui, point.x);
+		}
+		InvalidateRect(m_rollRc, FALSE);
+		InvalidateRect(m_bodyRc, FALSE);
+		RefreshBoundRoll();
 		return;
 	}
 	CRect client; GetClientRect(&client);
@@ -1745,7 +1848,10 @@ void CSasamiMidiScoreDlg::OnLButtonDown(UINT nFlags, CPoint point)
 			if (m_ui.loopBTick <= m_ui.loopATick)
 				m_ui.loopBTick = m_ui.loopATick + SC_PPQN * SC_MEASURE_BEATS;
 		} else {
+			m_ui.rulerDragOn = 1;
+			m_ui.rulerT0 = m_ui.rulerT1 = rulerTick;
 			m_ui.markerTick = rulerTick;
+			SetCapture();
 		}
 		m_ui.transportMode = 0;
 		InvalidateRect(m_bodyRc, FALSE);
@@ -1809,6 +1915,15 @@ void CSasamiMidiScoreDlg::OnLButtonDown(UINT nFlags, CPoint point)
 
 void CSasamiMidiScoreDlg::OnMouseMove(UINT nFlags, CPoint point)
 {
+	if ((nFlags & MK_LBUTTON) && m_ui.rulerDragOn) {
+		uint32_t rt = 0;
+		if (ScStaffHitRulerTick(m_gridRc, &m_ui, point, &rt, m_doc.ev, m_doc.evCount)) {
+			m_ui.rulerT1 = rt;
+			ScStaffSelectTickRange(&m_ui, m_doc.ev, m_doc.evCount, 0, m_ui.rulerT0, m_ui.rulerT1, -1);
+			InvalidateRect(m_bodyRc, FALSE);
+		}
+		return;
+	}
 	if ((nFlags & MK_LBUTTON) && m_ui.marqueeOn) {
 		m_ui.marqueeX1 = point.x;
 		m_ui.marqueeY1 = point.y;
@@ -1911,41 +2026,36 @@ void CSasamiMidiScoreDlg::OnMouseMove(UINT nFlags, CPoint point)
 			}
 			InvalidateRect(m_stripRc, FALSE);
 		}
-	} else if (m_ui.dragEv >= 0 && m_ui.dragEv < m_doc.evCount &&
+	} else if (m_ui.dragMode == 2 && (m_ui.nSel > 0 || m_ui.selEv >= 0) &&
 		(m_ui.tool == SC_TOOL_SELECT || m_ui.tool == SC_TOOL_PENCIL)) {
-		ScEvent& e = m_doc.ev[m_ui.dragEv];
-		if (e.kind == SC_EV_NOTE) {
-			if (m_ui.dragMode == 2) {
-				/* move pitch + tick */
-				int hitTr = (int)e.ch;
-				int staffTop = ScStaffVisibleLaneStaffTop(m_gridRc, &m_ui, hitTr);
-				if (staffTop >= 0) {
-					const int gap = ScStaffLineGap(&m_ui);
-					(void)gap;
-					const int quant = ScStaffPlaceQuant(&m_ui);
-					e.tick = ScStaffXToTick(point.x, m_ui.scrollX, ScStaffGridLeftPx(m_gridRc.left, &m_ui, m_doc.ev, m_doc.evCount), m_ui.pxBeat, quant, &m_ui, m_doc.ev, m_doc.evCount);
-					int written = ScStaffYToMidiNoteTrack(&m_ui, hitTr, staffTop, point.y, e.tick, m_doc.ev, m_doc.evCount);
-					const int oct = ScStaffOttavaOctaves(m_doc.ev, m_doc.evCount, hitTr, e.tick);
-					int note = ScStaffWrittenToSounding(written, oct);
-					if (note < 0) note = 0;
-					if (note > 127) note = 127;
-					e.a = (uint8_t)note;
-					SyncPropFromSel();
-					InvalidateRect(m_gridRc, FALSE);
-				}
-			} else {
-				/* resize duration (edge drag) */
-				int dx = point.x - m_ui.dragOriginX;
-				int dTicks = (dx * SC_PPQN) / max(1, m_ui.pxBeat);
-				int nd = (int)e.dur + dTicks;
-				const int minD = SC_PPQN / 8;
-				if (nd < minD) nd = minD;
-				if (nd > 32000) nd = 32000;
-				e.dur = (uint16_t)nd;
-				m_ui.dragOriginX = point.x;
+		const int pxBeat = m_ui.pxBeat > 0 ? m_ui.pxBeat : SC_PX_BEAT_DEFAULT;
+		const int dTick = ((point.x - m_dragLastX) * SC_PPQN) / max(1, pxBeat);
+		const int gap = ScStaffLineGap(&m_ui);
+		const int dSemi = (m_dragLastY - point.y) / max(1, gap / 2);
+		if (dTick || dSemi) {
+			if (!m_histDragPushed) { HistPush(); m_histDragPushed = 1; }
+			if (ScStaffSelMoveBy(m_doc.ev, &m_doc.evCount, &m_ui, dTick, dSemi, 0)) {
+				m_dragLastX = point.x;
+				m_dragLastY = point.y;
 				SyncPropFromSel();
 				InvalidateRect(m_gridRc, FALSE);
 			}
+		}
+	} else if (m_ui.dragEv >= 0 && m_ui.dragEv < m_doc.evCount &&
+		(m_ui.tool == SC_TOOL_SELECT || m_ui.tool == SC_TOOL_PENCIL)) {
+		ScEvent& e = m_doc.ev[m_ui.dragEv];
+		if (e.kind == SC_EV_NOTE && m_ui.dragMode == 1) {
+			/* resize duration (edge drag) */
+			int dx = point.x - m_ui.dragOriginX;
+			int dTicks = (dx * SC_PPQN) / max(1, m_ui.pxBeat);
+			int nd = (int)e.dur + dTicks;
+			const int minD = SC_PPQN / 8;
+			if (nd < minD) nd = minD;
+			if (nd > 32000) nd = 32000;
+			e.dur = (uint16_t)nd;
+			m_ui.dragOriginX = point.x;
+			SyncPropFromSel();
+			InvalidateRect(m_gridRc, FALSE);
 		}
 	}
 	CCustomBlurDialogExBase::OnMouseMove(nFlags, point);
@@ -1975,22 +2085,17 @@ BOOL CSasamiMidiScoreDlg::OnSetCursor(CWnd* pWnd, UINT nHitTest, UINT message)
 void CSasamiMidiScoreDlg::OnLButtonUp(UINT nFlags, CPoint point)
 {
 	m_sbDrag = 0;
+	if (m_ui.rulerDragOn) {
+		ScStaffSelectTickRange(&m_ui, m_doc.ev, m_doc.evCount, 0, m_ui.rulerT0, m_ui.rulerT1, -1);
+		m_ui.rulerDragOn = 0;
+		InvalidateRect(m_bodyRc, FALSE);
+	}
 	if (m_ui.marqueeOn) {
 		m_ui.marqueeX1 = point.x;
 		m_ui.marqueeY1 = point.y;
 		CRect r(min(m_ui.marqueeX0, m_ui.marqueeX1), min(m_ui.marqueeY0, m_ui.marqueeY1),
 			max(m_ui.marqueeX0, m_ui.marqueeX1), max(m_ui.marqueeY0, m_ui.marqueeY1));
-		ScStaffSelClear(&m_ui);
-		for (int i = 0; i < m_doc.evCount; i++) {
-			const ScEvent& e = m_doc.ev[i];
-			if (e.kind != SC_EV_NOTE && e.kind != SC_EV_REST) continue;
-			int st = ScStaffVisibleLaneStaffTop(m_gridRc, &m_ui, e.ch);
-			if (st < 0) continue;
-			int x = ScStaffTickToX(e.tick, m_ui.scrollX, ScStaffGridLeftPx(m_gridRc.left, &m_ui, m_doc.ev, m_doc.evCount), m_ui.pxBeat, &m_ui, m_doc.ev, m_doc.evCount);
-			int y = (e.kind == SC_EV_REST) ? (st + 8) : ScStaffMidiNoteYTrack(&m_ui, e.ch, st, e.a);
-			if (r.PtInRect(CPoint(x, y)))
-				ScStaffSelAdd(&m_ui, i);
-		}
+		ScStaffSelectInRect(m_gridRc, &m_ui, m_doc.ev, m_doc.evCount, 0, r, 1);
 		m_ui.marqueeOn = 0;
 		InvalidateRect(m_bodyRc, FALSE);
 	}
@@ -2014,6 +2119,8 @@ void CSasamiMidiScoreDlg::OnLButtonUp(UINT nFlags, CPoint point)
 		m_ui.dragEv = -1;
 	}
 	m_ui.dragMode = 0;
+	if (m_histDragPushed) PushDocToText();
+	m_histDragPushed = 0;
 	ReleaseCapture();
 	CCustomBlurDialogExBase::OnLButtonUp(nFlags, point);
 }
@@ -2067,7 +2174,7 @@ void CSasamiMidiScoreDlg::OnLButtonDblClk(UINT nFlags, CPoint point)
 			/* Double-click = edit PC/Bank numbers; single-click opens tone/VST. */
 			m_propMode = 1;
 			EditProgForPart(m_curCh);
-			m_status.SetWindowText(L"Prog/Bank 数値編集。音色/VSTはシングルクリックまたは左Tone行。");
+			m_status.SetWindowText(LL14(L"Prog/Bank 数値編集。音色/VSTはシングルクリックまたは左Tone行。", L"Edit Prog/Bank numbers. Tone/VST: single-click or left Tone row.", L"Éditer Prog/Bank. Tone/VST : simple clic ou ligne Tone gauche.", L"Modifica Prog/Bank. Tone/VST: clic singolo o riga Tone a sinistra.", L"Editar números Prog/Bank. Tone/VST: un clic o fila Tone izquierda.", L"Prog/Bank 숫자 편집. 음색/VST: 한 번 클릭 또는 왼쪽 Tone 행.", L"编辑 Prog/Bank 数值。音色/VST：单击或左侧 Tone 行。", L"تحرير أرقام Prog/Bank. Tone/VST: نقرة واحدة أو صف Tone الأيسر.", L"Правка чисел Prog/Bank. Tone/VST: одиночный клик или строка Tone слева.", L"Prog/Bank-Zahlen bearbeiten. Tone/VST: Einfachklick oder linke Tone-Zeile.", L"Editar números Prog/Bank. Tone/VST: clique único ou linha Tone à esquerda.", L"Prog/Bank-cijfers bewerken. Tone/VST: enkele klik of linker Tone-rij.", L"Edycja liczb Prog/Bank. Tone/VST: pojedyncze kliknięcie lub lewy wiersz Tone.", L"Prog/Bank sayı düzenle. Tone/VST: tek tık veya sol Tone satırı."));
 			InvalidateRect(m_gridRc, FALSE);
 			return;
 		}
@@ -2298,12 +2405,16 @@ LRESULT CSasamiMidiScoreDlg::OnPalDur(WPARAM w, LPARAM l)
 		case SASAMI_PAL_CMD_TEMPO:
 			m_ui.tool = SC_TOOL_TEMPO;
 			UpdateNoteCursor();
-			m_status.SetWindowText(L"Tempo tool — click staff");
+			m_status.SetWindowText(LL14(L"テンポツール — 五線をクリック", L"Tempo tool — click staff", L"Outil tempo — clic portée", L"Strumento tempo — clic pentagramma", L"Herramienta tempo — clic pentagrama", L"템포 도구 — 보표 클릭", L"速度工具 — 点击五线", L"أداة الإيقاع — انقر المدرج", L"Инструмент темпа — клик по стану", L"Tempo-Werkzeug — Notensystem klicken", L"Ferramenta de tempo — clique na pauta", L"Tempo-gereedschap — klik notenbalk", L"Narzędzie tempa — kliknij pięciolinię", L"Tempo aracı — portede tıkla"));
 			return 0;
 		case SASAMI_PAL_CMD_GT:
 			m_edGt.SetFocus();
 			return 0;
-		case SASAMI_PAL_CMD_PENCIL: OnBnClickedPencil(); return 0;
+		case SASAMI_PAL_CMD_PENCIL:
+			ScStaffSelClear(&m_ui);
+			m_ui.marqueeOn = 0;
+			OnBnClickedPencil();
+			return 0;
 		case SASAMI_PAL_CMD_ERASE: OnBnClickedErase(); return 0;
 		case SASAMI_PAL_CMD_SEL: OnBnClickedSel(); return 0;
 		case SASAMI_PAL_CMD_MARK: OnBnClickedMark(); return 0;
@@ -2313,17 +2424,17 @@ LRESULT CSasamiMidiScoreDlg::OnPalDur(WPARAM w, LPARAM l)
 		case SASAMI_PAL_CMD_MARK_REPLACE:
 			m_ui.markStack = 0;
 			savedata.sasamiMarkStack = 0;
-			m_status.SetWindowText(L"マーク配置: 1重（同じ位置にもう一度＝消す）");
+			m_status.SetWindowText(LL14(L"マーク配置: 1重（同じ位置にもう一度＝消す）", L"Mark place: single (same spot again = remove)", L"Placement: simple (même endroit = supprimer)", L"Posizione: singola (stesso punto = rimuovi)", L"Colocación: simple (mismo sitio = quitar)", L"마크 배치: 1중 (같은 위치 다시 = 삭제)", L"标记放置: 单层（同位置再放=删除）", L"وضع العلامة: مفرد (نفس الموضع = حذف)", L"Размещение: одно (то же место = удалить)", L"Zeichen: einfach (gleiche Stelle = löschen)", L"Marcação: simples (mesmo local = remover)", L"Markering: enkel (zelfde plek = wissen)", L"Znacznik: pojedynczy (to samo miejsce = usuń)", L"İşaret: tek (aynı yer = sil)"));
 			return 0;
 		case SASAMI_PAL_CMD_MARK_STACK:
 			m_ui.markStack = 1;
 			savedata.sasamiMarkStack = 1;
-			m_status.SetWindowText(L"マーク配置: ネスト（同じ位置に積み上げ）");
+			m_status.SetWindowText(LL14(L"マーク配置: ネスト（同じ位置に積み上げ）", L"Mark place: nest (stack at same spot)", L"Placement: nid (empiler au même endroit)", L"Posizione: nest (impila sullo stesso punto)", L"Colocación: anidar (apilar en el mismo sitio)", L"마크 배치: 중첩 (같은 위치에 쌓기)", L"标记放置: 嵌套（同位置叠加）", L"وضع العلامة: تداخل (تكديس بنفس الموضع)", L"Размещение: вложение (стек на том же месте)", L"Zeichen: Nest (stapeln an gleicher Stelle)", L"Marcação: aninhar (empilhar no mesmo local)", L"Markering: nest (stapelen opzelfde plek)", L"Znacznik: zagnieżdżenie (stos w tym samym miejscu)", L"İşaret: yuva (aynı yerde yığ)"));
 			return 0;
 		case SASAMI_PAL_CMD_TIE:
 			m_ui.tool = SC_TOOL_TIE;
 			UpdateNoteCursor();
-			m_status.SetWindowText(L"Tie tool");
+			m_status.SetWindowText(LL14(L"タイツール", L"Tie tool", L"Outil liaison", L"Strumento legatura", L"Herramienta ligadura", L"타이 도구", L"连音工具", L"أداة الربط", L"Инструмент лиги", L"Bindebogen-Werkzeug", L"Ferramenta de ligadura", L"Boog-gereedschap", L"Narzędzie legato", L"Bağ aracı"));
 			return 0;
 		case SASAMI_PAL_CMD_LOOP_START:
 		case SASAMI_PAL_CMD_LOOP_END:
@@ -2347,7 +2458,7 @@ LRESULT CSasamiMidiScoreDlg::OnPalDur(WPARAM w, LPARAM l)
 					st.Format(L"Deleted %d mark(s) at red bar (MIDI %d)", n, ch + 1);
 					m_status.SetWindowText(st);
 				} else {
-					m_status.SetWindowText(L"No mark of that kind at red bar — move marker or click the glyph with Eraser");
+					m_status.SetWindowText(LL14(L"赤バー位置にその種類のマークはありません — マーカーを動かすか消しゴムで記号をクリック", L"No mark of that kind at red bar — move marker or click the glyph with Eraser", L"Pas de marque de ce type à la barre rouge — déplacez le marqueur ou cliquez le glyphe avec la Gomme", L"Nessun segno di quel tipo sulla barra rossa — sposta il marcatore o clicca il glifo con la Gomma", L"No hay marca de ese tipo en la barra roja — mueve el marcador o haz clic en el glifo con Borrar", L"빨간 바에 해당 종류 마크 없음 — 마커를 옮기거나 지우개로 기호 클릭", L"红条处无该类型标记 — 移动标记或用橡皮点击符号", L"لا علامة من هذا النوع عند الشريط الأحمر — حرّك العلامة أو انقر الرمز بالممحاة", L"Нет такого знака на красной метке — сдвиньте маркер или кликните глиф ластиком", L"Kein solches Zeichen an roter Markierung — Markierung verschieben oder Glyphe mit Radierer klicken", L"Sem marca desse tipo na barra vermelha — mova o marcador ou clique no glifo com a borracha", L"Geen markering van dat type op rode balk — verplaats markering of klik glyph met gum", L"Brak takiego znaku na czerwonym pasku — przesuń znacznik lub kliknij glif gumką", L"Kırmızı çubukta o tür işaret yok — işareti taşı veya silgiyle glife tıkla"));
 				}
 				return 0;
 			}
@@ -2421,9 +2532,9 @@ LRESULT CSasamiMidiScoreDlg::OnPalDur(WPARAM w, LPARAM l)
 					RefreshStrip();
 					PushDocToText();
 					InvalidateRect(m_bodyRc, FALSE);
-					m_status.SetWindowText(L"Deleted ottava/loco at red bar");
+					m_status.SetWindowText(LL14(L"赤バー位置のオッターバ/loco を削除しました", L"Deleted ottava/loco at red bar", L"Ottava/loco supprimé à la barre rouge", L"Ottava/loco eliminato sulla barra rossa", L"Ottava/loco borrado en la barra roja", L"빨간 바의 옥타바/loco 삭제", L"已删除红条处的八度/loco", L"تم حذف ottava/loco عند الشريط الأحمر", L"Удалены ottava/loco на красной метке", L"Ottava/loco an roter Markierung gelöscht", L"Ottava/loco apagado na barra vermelha", L"Ottava/loco op rode balk verwijderd", L"Usunięto ottava/loco na czerwonym pasku", L"Kırmızı çubuktaki ottava/loco silindi"));
 				} else {
-					m_status.SetWindowText(L"No ottava at red bar — Eraser+click staff label also works");
+					m_status.SetWindowText(LL14(L"赤バー位置にオッターバはありません — 消しゴム+譜表ラベルクリックも可", L"No ottava at red bar — Eraser+click staff label also works", L"Pas d’ottava à la barre rouge — Gomme+clic sur l’étiquette de portée aussi", L"Nessuna ottava sulla barra rossa — Gomma+clic sull’etichetta del rigo anche", L"No hay ottava en la barra roja — Borrar+clic en la etiqueta del pentagrama también", L"빨간 바에 옥타바 없음 — 지우개+보표 라벨 클릭도 가능", L"红条处无八度 — 橡皮+点击谱表标签也可", L"لا ottava عند الشريط الأحمر — الممحاة+النقر على تسمية المدرج أيضًا", L"Нет ottava на красной метке — ластик+клик по метке нотоносца тоже", L"Keine Ottava an roter Markierung — Radierer+Klick auf Notenzeilen-Label auch", L"Sem ottava na barra vermelha — borracha+clique no rótulo da pauta também", L"Geen ottava op rode balk — gum+klik op notenbalklabel ook", L"Brak ottavy na czerwonym pasku — gumka+klik etykiety pięciolinii też", L"Kırmızı çubukta ottava yok — silgi+porte etiketi tıklama da çalışır"));
 				}
 				return 0;
 			}
@@ -2629,7 +2740,7 @@ int CSasamiMidiScoreDlg::BuildToTemp(wchar_t* outPath, int outCch, uint32_t from
 	SasamiWriteMidiClear(wr); HeapFree(GetProcessHeap(), 0, wr);
 	if (!sz) {
 		HeapFree(GetProcessHeap(), 0, bin);
-		m_status.SetWindowText(L"Output size 0");
+		m_status.SetWindowText(LL14(L"出力サイズが0です", L"Output size 0", L"Taille de sortie 0", L"Dimensione output 0", L"Tamaño de salida 0", L"출력 크기 0", L"输出大小为0", L"حجم الإخراج 0", L"Размер вывода 0", L"Ausgabegröße 0", L"Tamanho de saída 0", L"Uitvoergrootte 0", L"Rozmiar wyjścia 0", L"Çıkış boyutu 0"));
 		return 0;
 	}
 	wchar_t dir[MAX_PATH];
@@ -2637,7 +2748,7 @@ int CSasamiMidiScoreDlg::BuildToTemp(wchar_t* outPath, int outCch, uint32_t from
 	_snwprintf_s(outPath, outCch, _TRUNCATE, L"%sogg_sasami_score.%s", dir, outMpsmv ? L"mpsmv" : L"mpw2");
 	if (!SasamiWriteFileW(outPath, bin, sz)) {
 		HeapFree(GetProcessHeap(), 0, bin);
-		m_status.SetWindowText(L"Write failed");
+		m_status.SetWindowText(LL14(L"書き込みに失敗しました", L"Write failed", L"Échec écriture", L"Scrittura non riuscita", L"Error al escribir", L"쓰기 실패", L"写入失败", L"فشل الكتابة", L"Ошибка записи", L"Schreiben fehlgeschlagen", L"Falha ao gravar", L"Schrijven mislukt", L"Zapis nieudany", L"Yazma başarısız"));
 		return 0;
 	}
 	wcsncpy_s(m_lastOut, outPath, _TRUNCATE);
@@ -2759,6 +2870,7 @@ void CSasamiMidiScoreDlg::PushDocToText()
 	}
 	t->SetMmlFromScore(mml);
 	HeapFree(GetProcessHeap(), 0, mml);
+	RefreshBoundRoll();
 }
 
 void CSasamiMidiScoreDlg::PullDocFromText()
@@ -2775,14 +2887,14 @@ void CSasamiMidiScoreDlg::PullDocFromText()
 	int errLine = 0;
 	if (!ScCompileMidiMml(text, tmp, &errLine, err, 128)) {
 		HeapFree(GetProcessHeap(), 0, tmp);
-		m_status.SetWindowText(L"Text compile failed — score left unchanged");
+		m_status.SetWindowText(LL14(L"テキストのコンパイルに失敗 — 譜面は変更しません", L"Text compile failed — score left unchanged", L"Échec compilation texte — partition inchangée", L"Compilazione testo non riuscita — partitura invariata", L"Falló la compilación de texto — partitura sin cambios", L"텍스트 컴파일 실패 — 악보 유지", L"文本编译失败 — 谱面未改", L"فشل تجميع النص — النتيجة دون تغيير", L"Ошибка компиляции текста — партитура без изменений", L"Textkompilierung fehlgeschlagen — Partitur unverändert", L"Falha na compilação do texto — partitura inalterada", L"Tekstcompilatie mislukt — partituur ongewijzigd", L"Kompilacja tekstu nieudana — partytura bez zmian", L"Metin derlemesi başarısız — skor değişmedi"));
 		return;
 	}
 	LoadFromDoc(*tmp);
 	/* LoadFromDoc copies events; free bind heaps owned by tmp. */
 	ScMidiDocClear(tmp);
 	HeapFree(GetProcessHeap(), 0, tmp);
-	m_status.SetWindowText(L"Score synced from text");
+	m_status.SetWindowText(LL14(L"テキストから譜面を同期しました", L"Score synced from text", L"Partition synchronisée depuis le texte", L"Partitura sincronizzata dal testo", L"Partitura sincronizada desde el texto", L"텍스트에서 악보 동기화", L"已从文本同步谱面", L"تمت مزامنة النتيجة من النص", L"Партитура синхронизирована из текста", L"Partitur aus Text synchronisiert", L"Partitura sincronizada do texto", L"Partituur gesynchroniseerd uit tekst", L"Partytura zsynchronizowana z tekstu", L"Skor metinden eşlendi"));
 }
 
 void CSasamiMidiScoreDlg::NewDocument()
@@ -2800,7 +2912,7 @@ void CSasamiMidiScoreDlg::NewDocument()
 		if (::IsWindow(t->GetSafeHwnd()))
 			t->SetMmlFromScore(L"; SASAMI MML / MML3\r\n@METER 4/4\r\n#1\r\nt120\r\nl4 o4\r\n");
 	}
-	m_status.SetWindowText(L"New document");
+	m_status.SetWindowText(LL14(L"新規ドキュメント", L"New document", L"Nouveau document", L"Nuovo documento", L"Documento nuevo", L"새 문서", L"新建文档", L"مستند جديد", L"Новый документ", L"Neues Dokument", L"Novo documento", L"Nieuw document", L"Nowy dokument", L"Yeni belge"));
 	if (m_bodyRc.Width() > 0)
 		InvalidateRect(m_bodyRc, FALSE);
 }
@@ -2864,7 +2976,7 @@ void CSasamiMidiScoreDlg::OnBnClickedOpen()
 	SasamiSongInit(&song);
 	if (!SasamiLoadFileW(path, &song)) {
 		SasamiSongFree(&song);
-		m_status.SetWindowText(L"Open failed");
+		m_status.SetWindowText(LL14(L"開けませんでした", L"Open failed", L"Échec ouverture", L"Apertura non riuscita", L"Error al abrir", L"열기 실패", L"打开失败", L"فشل الفتح", L"Не удалось открыть", L"Öffnen fehlgeschlagen", L"Falha ao abrir", L"Openen mislukt", L"Nie udało się otworzyć", L"Açılamadı"));
 		return;
 	}
 	int trailerN = 0;
@@ -2967,19 +3079,19 @@ void CSasamiMidiScoreDlg::OnBnClickedPlay()
 void CSasamiMidiScoreDlg::OnBnClickedMark()
 {
 	m_ui.transportMode = 1;
-	m_status.SetWindowText(L"Click ruler = play-from marker");
+	m_status.SetWindowText(LL14(L"ルーラークリック＝再生開始マーカー", L"Click ruler = play-from marker", L"Clic règle = marqueur de départ", L"Clic righello = marcatore di inizio", L"Clic regla = marcador de inicio", L"눈금자 클릭 = 재생 시작 마커", L"点击标尺＝播放起点标记", L"نقر المسطرة = علامة بدء التشغيل", L"Клик по линейке = маркер старта", L"Klick Lineal = Startmarkierung", L"Clique na régua = marcador de início", L"Klik liniaal = startmarkering", L"Klik linijki = znacznik startu", L"Cetvele tıkla = başlangıç işareti"));
 }
 
 void CSasamiMidiScoreDlg::OnBnClickedLoopA()
 {
 	m_ui.transportMode = 2;
-	m_status.SetWindowText(L"Click ruler for loop A");
+	m_status.SetWindowText(LL14(L"ルーラークリックでループA", L"Click ruler for loop A", L"Clic règle pour boucle A", L"Clic righello per loop A", L"Clic regla para bucle A", L"눈금자 클릭으로 루프 A", L"点击标尺设置循环A", L"نقر المسطرة لحلقة A", L"Клик по линейке для цикла A", L"Klick Lineal für Schleife A", L"Clique na régua para loop A", L"Klik liniaal voor lus A", L"Klik linijki dla pętli A", L"Döngü A için cetvele tıkla"));
 }
 
 void CSasamiMidiScoreDlg::OnBnClickedLoopB()
 {
 	m_ui.transportMode = 3;
-	m_status.SetWindowText(L"Click ruler for loop B");
+	m_status.SetWindowText(LL14(L"ルーラークリックでループB", L"Click ruler for loop B", L"Clic règle pour boucle B", L"Clic righello per loop B", L"Clic regla para bucle B", L"눈금자 클릭으로 루프 B", L"点击标尺设置循环B", L"نقر المسطرة لحلقة B", L"Клик по линейке для цикла B", L"Klick Lineal für Schleife B", L"Clique na régua para loop B", L"Klik liniaal voor lus B", L"Klik linijki dla pętli B", L"Döngü B için cetvele tıkla"));
 }
 
 void CSasamiMidiScoreDlg::OnBnClickedLoopClr()
@@ -3159,7 +3271,7 @@ LRESULT CSasamiMidiScoreDlg::OnExcRpnChanged(WPARAM, LPARAM)
 	InvalidateRect(m_bodyRc, FALSE);
 	PushDocToText();
 	PersistSession();
-	m_status.SetWindowText(L"Inserted Exc/RPN event");
+	m_status.SetWindowText(LL14(L"Exc/RPNイベントを挿入しました", L"Inserted Exc/RPN event", L"Événement Exc/RPN inséré", L"Evento Exc/RPN inserito", L"Evento Exc/RPN insertado", L"Exc/RPN 이벤트 삽입", L"已插入 Exc/RPN 事件", L"تم إدراج حدث Exc/RPN", L"Вставлено событие Exc/RPN", L"Exc/RPN-Ereignis eingefügt", L"Evento Exc/RPN inserido", L"Exc/RPN-event ingevoegd", L"Wstawiono zdarzenie Exc/RPN", L"Exc/RPN olayı eklendi"));
 	return 0;
 }
 
@@ -3168,7 +3280,7 @@ LRESULT CSasamiMidiScoreDlg::OnInsertFxChanged(WPARAM, LPARAM)
 	SyncFxBindsToLive();
 	PushDocToText();
 	PersistSession();
-	m_status.SetWindowText(L"Insert FX updated");
+	m_status.SetWindowText(LL14(L"インサートFXを更新しました", L"Insert FX updated", L"Insert FX mis à jour", L"Insert FX aggiornato", L"Insert FX actualizado", L"인서트 FX 업데이트", L"插入FX已更新", L"تم تحديث Insert FX", L"Insert FX обновлён", L"Insert-FX aktualisiert", L"Insert FX atualizado", L"Insert-FX bijgewerkt", L"Zaktualizowano Insert FX", L"Insert FX güncellendi"));
 	return 0;
 }
 
@@ -3188,6 +3300,12 @@ void CSasamiMidiScoreDlg::OnContextMenu(CWnd* pWnd, CPoint point)
 {
 	CPoint client = point;
 	ScreenToClient(&client);
+	if (m_ui.tool == SC_TOOL_PENCIL || m_ui.tool == SC_TOOL_TEMPO) {
+		ScStaffEnterSelectTool(&m_ui);
+		UpdateNoteCursor();
+		InvalidateRect(m_bodyRc, FALSE);
+		return;
+	}
 	/* 左トラック列 → 譜面五線（音符／空き／Prog帯）の順で、右クリック位置のパートを取る */
 	int tr = ScStaffHitTrack(m_trackRc, &m_ui, client);
 	if (tr < 0) {
@@ -3325,7 +3443,10 @@ void CSasamiMidiScoreDlg::OnContextMenu(CWnd* pWnd, CPoint point)
 					lab.Format(L"削除 #%d", di + 1);
 				menu.AddCommand(9100 + di, lab);
 			}
-			menu.AddCommand(9120, L"重なっているマークをすべて削除");
+			menu.AddCommand(9120, LL14(
+			L"重なっているマークをすべて削除", L"Delete all overlapping marks", L"Supprimer toutes les marques superposées", L"Elimina tutti i segni sovrapposti", L"Borrar todas las marcas superpuestas",
+			L"겹친 마크 모두 삭제", L"删除所有重叠标记", L"حذف كل العلامات المتداخلة", L"Удалить все совпадающие знаки", L"Alle überlappenden Zeichen löschen",
+			L"Apagar todas as marcas sobrepostas", L"Alle overlappende markeringen wissen", L"Usuń wszystkie nachodzące znaki", L"Çakışan tüm işaretleri sil"));
 		} else if (markEv >= 0) {
 			menu.AddCommand(9024, LL14(
 				L"このマークを削除", L"Delete this mark", L"Supprimer cette marque", L"Elimina questo segno", L"Eliminar esta marca",
@@ -3342,8 +3463,12 @@ void CSasamiMidiScoreDlg::OnContextMenu(CWnd* pWnd, CPoint point)
 			L"미리듣기 루프 B 여기로", L"预览循环B到此处", L"حلقة B هنا", L"Превью B сюда", L"Vorschau-Schleife B hier",
 			L"Loop B de prévia aqui", L"Voorbeeld-lus B hier", L"Podgląd pętli B tutaj", L"Önizleme döngü B buraya"));
 		menu.AddSeparator();
-		menu.AddCommand(9001, m_ui.mute[tr] ? L"Unmute" : L"Mute");
-		menu.AddCommand(9002, m_ui.solo[tr] ? L"Unsolo" : L"Solo");
+		menu.AddCommand(9001, m_ui.mute[tr]
+			? LL14(L"ミュート解除", L"Unmute", L"Réactiver", L"Riattiva", L"Activar", L"음소거 해제", L"取消静音", L"إلغاء كتم", L"Включить звук", L"Stummschaltung aus", L"Ativar som", L"Dempen uit", L"Włącz dźwięk", L"Sessizi aç")
+			: LL14(L"ミュート", L"Mute", L"Muet", L"Muto", L"Silenciar", L"음소거", L"静音", L"كتم", L"Выкл. звук", L"Stumm", L"Mudo", L"Dempen", L"Wycisz", L"Sessiz"));
+		menu.AddCommand(9002, m_ui.solo[tr]
+			? LL14(L"ソロ解除", L"Unsolo", L"Désolo", L"Togli solo", L"Quitar solo", L"솔로 해제", L"取消独奏", L"إلغاء منفرد", L"Снять соло", L"Solo aus", L"Tirar solo", L"Solo uit", L"Wyłącz solo", L"Soloyu kapat")
+			: LL14(L"ソロ", L"Solo", L"Solo", L"Solo", L"Solo", L"솔로", L"独奏", L"منفرد", L"Соло", L"Solo", L"Solo", L"Solo", L"Solo", L"Solo"));
 		if (VstLivePartIsLoaded(tr + 1)) {
 			menu.AddCommand(9003, LL14(
 				L"VST詳細…", L"VST details…", L"Détails VST…", L"Dettagli VST…", L"Detalles VST…",
@@ -3358,14 +3483,29 @@ void CSasamiMidiScoreDlg::OnContextMenu(CWnd* pWnd, CPoint point)
 			: (m_ui.clef[tr] == 1 ? L"譜表: ヘ音→大譜表"
 			: (m_ui.clef[tr] == 2 ? L"譜表: 大譜表→ドラム"
 			: L"譜表: ドラム→ト音")));
-		menu.AddCommand(9007, L"全トラックを大譜表に");
-		menu.AddCommand(9008, L"全トラックをト音に");
-		menu.AddCommand(9009, L"全トラックをドラム(キット)に");
+		menu.AddCommand(9007, LL14(
+			L"全トラックを大譜表に", L"All tracks → grand staff", L"Toutes les pistes → grande portée", L"Tutte le tracce → pentagramma grande", L"Todas las pistas → gran pentagrama",
+			L"모든 트랙 → 대보표", L"全部轨道→大谱表", L"كل المسارات → مدرج كبير", L"Все дорожки → большой стан", L"Alle Spuren → Akkolade",
+			L"Todas as faixas → pauta grande", L"Alle tracks → groot notenbalk", L"Wszystkie ścieżki → wielka pięciolinia", L"Tüm parçalar → büyük porte"));
+		menu.AddCommand(9008, LL14(
+			L"全トラックをト音に", L"All tracks → treble", L"Toutes les pistes → clé de sol", L"Tutte le tracce → chiave di violino", L"Todas las pistas → clave de sol",
+			L"모든 트랙 → 높은음자리", L"全部轨道→高音谱号", L"كل المسارات → مفتاح صول", L"Все дорожки → скрипичный ключ", L"Alle Spuren → Violinschlüssel",
+			L"Todas as faixas → clave de sol", L"Alle tracks → vioolsleutel", L"Wszystkie ścieżki → klucz wiolinowy", L"Tüm parçalar → sol anahtarı"));
+		menu.AddCommand(9009, LL14(
+			L"全トラックをドラム(キット)に", L"All tracks → drum/kit", L"Toutes les pistes → batterie", L"Tutte le tracce → batteria", L"Todas las pistas → batería",
+			L"모든 트랙 → 드럼/키트", L"全部轨道→鼓组", L"كل المسارات → طبول", L"Все дорожки → ударные", L"Alle Spuren → Drum/Kit",
+			L"Todas as faixas → bateria", L"Alle tracks → drum/kit", L"Wszystkie ścieżki → perkusja", L"Tüm parçalar → davul/kit"));
 		menu.AddSeparator();
 	}
 	menu.AddCommand(9006, LL14(
 		L"選択モード（鉛筆解除）", L"Select mode (exit pencil)", L"Mode selection", L"Modalita selezione", L"Modo seleccion",
 		L"Select mode", L"选择模式", L"Select mode", L"Select mode", L"Auswahlmodus", L"Modo selecao", L"Selectiemodus", L"Tryb zaznaczania", L"Secim modu"));
+	if (m_ui.selRangeValid || m_ui.nSel > 0 || m_ui.selEv >= 0) {
+		menu.AddCommand(9060, LL14(
+			L"範囲に空白を挿入（後ろずらし）\tCtrl+Shift+I", L"Insert blank in range (shift later)\tCtrl+Shift+I", L"Insérer vide (décaler)\tCtrl+Shift+I", L"Inserisci vuoto (sposta)\tCtrl+Shift+I", L"Insertar vacío (desplazar)\tCtrl+Shift+I",
+			L"범위에 빈 구간 삽입 (뒤로 밀기)\tCtrl+Shift+I", L"在范围内插入空白（后移）\tCtrl+Shift+I", L"إدراج فراغ\tCtrl+Shift+I", L"Вставить пустоту\tCtrl+Shift+I", L"Leerraum einfügen (nach rechts)\tCtrl+Shift+I",
+			L"Inserir vazio (deslocar)\tCtrl+Shift+I", L"Leeg invoegen (opschuiven)\tCtrl+Shift+I", L"Wstaw pustkę (przesuń)\tCtrl+Shift+I", L"Boş ekle (kaydır)\tCtrl+Shift+I"));
+	}
 	menu.AddCommand(IDC_SASAMI_MIDI_SHOWALL, LL14(
 		L"MIDI1-32をすべて表示", L"Show all MIDI 1-32", L"Afficher MIDI 1-32", L"Mostra MIDI 1-32", L"Mostrar MIDI 1-32",
 		L"Show MIDI 1-32", L"显示全部MIDI1-32", L"Show MIDI 1-32", L"Show MIDI 1-32", L"Alle MIDI 1-32", L"Mostrar MIDI 1-32", L"Toon MIDI 1-32", L"Pokaz MIDI 1-32", L"MIDI 1-32 tumu"));
@@ -3407,7 +3547,7 @@ void CSasamiMidiScoreDlg::OnContextMenu(CWnd* pWnd, CPoint point)
 		m_ui.visible[tr] = 1;
 		m_ui.markerTick = atTick;
 		CSasamiExcRpnDlg::OpenOwned(this, &m_doc, tr, atTick);
-		m_status.SetWindowText(L"Exc/RPN: insert SysEx・RPN・NRPN at marker.");
+		m_status.SetWindowText(LL14(L"Exc/RPN: マーカー位置に SysEx・RPN・NRPN を挿入。", L"Exc/RPN: insert SysEx/RPN/NRPN at marker.", L"Exc/RPN : insérer SysEx/RPN/NRPN au marqueur.", L"Exc/RPN: inserisci SysEx/RPN/NRPN sul marcatore.", L"Exc/RPN: insertar SysEx/RPN/NRPN en el marcador.", L"Exc/RPN: 마커에 SysEx/RPN/NRPN 삽입.", L"Exc/RPN：在标记处插入 SysEx/RPN/NRPN。", L"Exc/RPN: إدراج SysEx/RPN/NRPN عند العلامة.", L"Exc/RPN: вставка SysEx/RPN/NRPN на маркере.", L"Exc/RPN: SysEx/RPN/NRPN an Markierung einfügen.", L"Exc/RPN: inserir SysEx/RPN/NRPN no marcador.", L"Exc/RPN: SysEx/RPN/NRPN bij markering invoegen.", L"Exc/RPN: wstaw SysEx/RPN/NRPN na znaczniku.", L"Exc/RPN: işaretçide SysEx/RPN/NRPN ekle."));
 	}
 	else if (tr >= 0 && cmd == 9012) {
 		m_curCh = tr;
@@ -3415,7 +3555,7 @@ void CSasamiMidiScoreDlg::OnContextMenu(CWnd* pWnd, CPoint point)
 		m_ui.visible[tr] = 1;
 		SyncFxBindsToLive();
 		CSasamiInsertFxDlg::OpenOwned(this, &m_doc, tr + 1);
-		m_status.SetWindowText(L"Insert FX: pick VST effect, tweak knobs, Bypass/Editor.");
+		m_status.SetWindowText(LL14(L"Insert FX: VST エフェクトを選び、ノブ調整、Bypass/Editor。", L"Insert FX: pick VST effect, tweak knobs, Bypass/Editor.", L"Insert FX : choisir un effet VST, régler, Bypass/Éditeur.", L"Insert FX: scegli effetto VST, regola, Bypass/Editor.", L"Insert FX: elige efecto VST, ajusta, Bypass/Editor.", L"Insert FX: VST 이펙트 선택, 노브 조정, Bypass/Editor.", L"Insert FX：选择 VST 效果、调旋钮、Bypass/Editor。", L"Insert FX: اختر تأثير VST، اضبط، Bypass/Editor.", L"Insert FX: выберите эффект VST, крутите, Bypass/Editor.", L"Insert FX: VST-Effekt wählen, Drehregler, Bypass/Editor.", L"Insert FX: escolha efeito VST, ajuste, Bypass/Editor.", L"Insert FX: kies VST-effect, draai knoppen, Bypass/Editor.", L"Insert FX: wybierz efekt VST, pokrętła, Bypass/Editor.", L"Insert FX: VST efekti seç, düğmeleri ayarla, Bypass/Editor."));
 	}
 	else if (tr >= 0 && cmd == 9020) {
 		if (!m_ui.markStack
@@ -3617,12 +3757,25 @@ void CSasamiMidiScoreDlg::OnContextMenu(CWnd* pWnd, CPoint point)
 		UpdateNoteCursor();
 		InvalidateRect(m_bodyRc, FALSE);
 	}
+	else if (cmd == 9060) {
+		HistPush();
+		if (ScStaffInsertBlankRange(m_doc.ev, m_doc.evCount, &m_ui)) {
+			ScStaffUpdateContentExtent(&m_ui, m_doc.ev, m_doc.evCount);
+			RefreshStrip();
+			PushDocToText();
+			InvalidateRect(m_bodyRc, FALSE);
+			m_status.SetWindowText(LL14(
+				L"範囲に空白を挿入（後ろずらし）", L"Inserted blank (shifted later events)", L"Espace inséré", L"Inserito vuoto", L"Espacio insertado",
+				L"빈 구간 삽입", L"已插入空白", L"أدرج فراغ", L"Вставлена пустота", L"Leerraum eingefügt", L"Vazio inserido", L"Leeg ingevoegd", L"Wstawiono pustkę", L"Boş eklendi"));
+		}
+	}
 	else if (cmd) PostMessage(WM_COMMAND, cmd);
 }
 
 void CSasamiMidiScoreDlg::OnKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags)
 {
 	const int ctrl = (GetKeyState(VK_CONTROL) & 0x8000) ? 1 : 0;
+	const int shift = (GetKeyState(VK_SHIFT) & 0x8000) ? 1 : 0;
 	if (ctrl && (nChar == 'Z' || nChar == 'z')) {
 		if (ScScoreHistUndo(&m_hist, m_doc.ev, &m_doc.evCount, SC_EV_MAX)) {
 			RefreshStrip();
@@ -3669,7 +3822,7 @@ void CSasamiMidiScoreDlg::OnKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags)
 			ScStaffStopHostPreview(&m_ui);
 			KillTimer(kScPreviewTimer);
 			VstLiveMonitorEnsure();
-			m_status.SetWindowText(L"Stopped (Space). Marker stays — Space again to resume from marker.");
+			m_status.SetWindowText(LL14(L"停止 (Space)。マーカー位置は維持 — Space で再開。", L"Stopped (Space). Marker stays — Space again to resume from marker.", L"Arrêté (Espace). Le marqueur reste — Espace pour reprendre.", L"Fermato (Spazio). Il marcatore resta — Spazio per riprendere.", L"Detenido (Espacio). El marcador permanece — Espacio para reanudar.", L"정지 (Space). 마커 유지 — Space로 재개.", L"已停止 (Space)。标记保留 — 再按 Space 从标记继续。", L"توقف (Space). العلامة تبقى — Space للاستئناف.", L"Стоп (Space). Маркер сохранён — Space для продолжения.", L"Gestoppt (Leertaste). Markierung bleibt — Leertaste zum Fortsetzen.", L"Parado (Espaço). Marcador permanece — Espaço para retomar.", L"Gestopt (Spatie). Markering blijft — Spatie om te hervatten.", L"Zatrzymano (Spacja). Znacznik zostaje — Spacja wznawia.", L"Durdu (Space). İşaret kalır — Space ile devam."));
 			InvalidateRect(m_bodyRc, FALSE);
 		} else {
 			OnBnClickedPlay();
@@ -3679,12 +3832,14 @@ void CSasamiMidiScoreDlg::OnKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags)
 	if (nChar == VK_DELETE || nChar == VK_BACK) {
 		HistPush();
 		if (ScStaffSelDelete(m_doc.ev, &m_doc.evCount, &m_ui)) {
+			ScStaffShrinkContentIfNeeded(&m_ui, m_doc.ev, m_doc.evCount);
+			ScStaffUpdateContentExtent(&m_ui, m_doc.ev, m_doc.evCount);
 			RefreshStrip();
 			PushDocToText();
 			InvalidateRect(m_bodyRc, FALSE);
-			m_status.SetWindowText(L"Deleted selection.");
+			m_status.SetWindowText(LL14(L"選択を削除しました。", L"Deleted selection.", L"Sélection supprimée.", L"Selezione eliminata.", L"Selección eliminada.", L"선택 삭제됨.", L"已删除选区。", L"تم حذف التحديد.", L"Выделение удалено.", L"Auswahl gelöscht.", L"Seleção apagada.", L"Selectie verwijderd.", L"Usunięto zaznaczenie.", L"Seçim silindi."));
 		} else {
-			m_status.SetWindowText(L"Select a note/mark first (Select or click chip → Delete). Or use Eraser.");
+			m_status.SetWindowText(LL14(L"先に音符/マークを選択（選択ツールまたはチップをクリック→Delete）。または消しゴム。", L"Select a note/mark first (Select or click chip → Delete). Or use Eraser.", L"Sélectionnez d’abord une note/marque (outil Sélection ou puce → Suppr). Ou utilisez la gomme.", L"Seleziona prima una nota/segno (Selezione o chip → Canc). Oppure usa la gomma.", L"Seleccione primero una nota/marca (Seleccionar o chip → Supr). O use el borrador.", L"먼저 음표/마크 선택(선택 도구 또는 칩→Delete). 또는 지우개.", L"请先选择音符/标记（选择工具或点击芯片→Delete）。或使用橡皮。", L"حدد نغمة/علامة أولاً (أداة التحديد أو الرقاقة → Delete). أو استخدم الممحاة.", L"Сначала выберите ноту/знак (Выбор или чип → Delete). Или ластик.", L"Zuerst Note/Zeichen wählen (Auswahl oder Chip → Entf). Oder Radierer.", L"Selecione primeiro uma nota/marca (Selecionar ou chip → Del). Ou use a borracha.", L"Selecteer eerst een noot/markering (Selecteren of chip → Del). Of gebruik de gum.", L"Najpierw zaznacz nutę/znak (Zaznacz lub chip → Del). Albo użyj gumki.", L"Önce nota/işaret seçin (Seç veya çip → Del). Ya da silgi kullanın."));
 		}
 		return;
 	}
@@ -3699,21 +3854,43 @@ void CSasamiMidiScoreDlg::OnKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags)
 		return;
 	}
 	if (ctrl && (nChar == 'C' || nChar == 'c')) {
-		m_clipN = ScStaffSelCopy(m_doc.ev, m_doc.evCount, &m_ui, m_clip, SC_CLIP_MAX, &m_clipBase);
+		m_clipN = ScStaffSelCopyEx(m_doc.ev, m_doc.evCount, &m_ui, 0, m_clip, SC_CLIP_MAX, &m_clipBase, &m_clipSpan);
 		return;
 	}
 	if (ctrl && (nChar == 'X' || nChar == 'x')) {
-		m_clipN = ScStaffSelCopy(m_doc.ev, m_doc.evCount, &m_ui, m_clip, SC_CLIP_MAX, &m_clipBase);
+		HistPush();
+		m_clipN = ScStaffSelCopyEx(m_doc.ev, m_doc.evCount, &m_ui, 0, m_clip, SC_CLIP_MAX, &m_clipBase, &m_clipSpan);
 		if (m_clipN > 0 && ScStaffSelDelete(m_doc.ev, &m_doc.evCount, &m_ui)) {
+			ScStaffShrinkContentIfNeeded(&m_ui, m_doc.ev, m_doc.evCount);
+			ScStaffUpdateContentExtent(&m_ui, m_doc.ev, m_doc.evCount);
 			RefreshStrip();
+			PushDocToText();
+			InvalidateRect(m_bodyRc, FALSE);
+		}
+		return;
+	}
+	if (ctrl && shift && (nChar == 'V' || nChar == 'v')) {
+		if (m_clipN > 0) {
+			HistPush();
+			ScStaffSelPasteEx(m_doc.ev, &m_doc.evCount, SC_EV_MAX, &m_ui, 0, m_clip, m_clipN, m_ui.markerTick, m_clipSpan, 1);
+			ScStaffShrinkContentIfNeeded(&m_ui, m_doc.ev, m_doc.evCount);
+			ScStaffUpdateContentExtent(&m_ui, m_doc.ev, m_doc.evCount);
+			RefreshStrip();
+			PushDocToText();
 			InvalidateRect(m_bodyRc, FALSE);
 		}
 		return;
 	}
 	if (ctrl && (nChar == 'V' || nChar == 'v')) {
 		if (m_clipN > 0) {
-			ScStaffSelPaste(m_doc.ev, &m_doc.evCount, SC_EV_MAX, m_clip, m_clipN, m_ui.markerTick, 0);
+			HistPush();
+			int insert = m_ui.pasteInsert;
+			if (GetKeyState(VK_SHIFT) & 0x8000) insert = 1;
+			ScStaffSelPasteEx(m_doc.ev, &m_doc.evCount, SC_EV_MAX, &m_ui, 0, m_clip, m_clipN, m_ui.markerTick, m_clipSpan, insert);
+			ScStaffShrinkContentIfNeeded(&m_ui, m_doc.ev, m_doc.evCount);
+			ScStaffUpdateContentExtent(&m_ui, m_doc.ev, m_doc.evCount);
 			RefreshStrip();
+			PushDocToText();
 			InvalidateRect(m_bodyRc, FALSE);
 		}
 		return;
@@ -3723,12 +3900,26 @@ void CSasamiMidiScoreDlg::OnKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags)
 			InvalidateRect(m_bodyRc, FALSE);
 		return;
 	}
+	if (ctrl && shift && (nChar == 'I' || nChar == 'i')) {
+		if (m_ui.selRangeValid || m_ui.nSel > 0 || m_ui.selEv >= 0) {
+			HistPush();
+			if (ScStaffInsertBlankRange(m_doc.ev, m_doc.evCount, &m_ui)) {
+				ScStaffUpdateContentExtent(&m_ui, m_doc.ev, m_doc.evCount);
+				RefreshStrip();
+				PushDocToText();
+				InvalidateRect(m_bodyRc, FALSE);
+				m_status.SetWindowText(LL14(
+					L"範囲に空白を挿入（後ろずらし）", L"Inserted blank (shifted later events)", L"Espace inséré", L"Inserito vuoto", L"Espacio insertado",
+					L"빈 구간 삽입", L"已插入空白", L"أدرج فراغ", L"Вставлена пустота", L"Leerraum eingefügt", L"Vazio inserido", L"Leeg ingevoegd", L"Wstawiono pustkę", L"Boş eklendi"));
+			}
+		}
+		return;
+	}
 	if (nChar == VK_ESCAPE) {
-		m_ui.tool = SC_TOOL_SELECT;
-		m_ui.hoverValid = 0;
-		m_ui.marqueeOn = 0;
+		ScStaffEnterSelectTool(&m_ui);
+		ScStaffSelClear(&m_ui);
 		UpdateNoteCursor();
-		InvalidateRect(m_gridRc, FALSE);
+		InvalidateRect(m_bodyRc, FALSE);
 		return;
 	}
 	CCustomBlurDialogExBase::OnKeyDown(nChar, nRepCnt, nFlags);
@@ -3781,6 +3972,21 @@ void CSasamiMidiScoreDlg::OnBnClickedText()
 void CSasamiMidiScoreDlg::HistPush()
 {
 	ScScoreHistPush(&m_hist, m_doc.ev, m_doc.evCount);
+}
+
+void CSasamiMidiScoreDlg::NotifyEdited()
+{
+	PushDocToText();
+	RefreshBoundRoll();
+	Invalidate(FALSE);
+}
+
+void CSasamiMidiScoreDlg::RefreshBoundRoll()
+{
+	if (CSasamiPianoRollDlg* r = CSasamiPianoRollDlg::InstanceMidi())
+		r->Refresh();
+	if (m_ui.showRollSplit)
+		InvalidateRect(m_rollRc, FALSE);
 }
 
 void CSasamiMidiScoreDlg::SyncMidiInCombos()
@@ -4372,10 +4578,9 @@ void CSasamiMidiScoreDlg::OnBnClickedPatt()
 
 void CSasamiMidiScoreDlg::OnBnClickedRoll()
 {
-	/* Toggle split + open float window */
 	m_ui.showRollSplit ^= 1;
 	LayoutChrome();
-	CSasamiPianoRollDlg::OpenOwned(this, m_doc.ev, &m_doc.evCount, &m_ui, &m_curCh, 0);
+	CSasamiPianoRollDlg::OpenForMidi(this);
 	Invalidate(FALSE);
 }
 

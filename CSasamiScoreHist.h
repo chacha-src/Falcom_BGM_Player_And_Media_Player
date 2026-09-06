@@ -1,7 +1,7 @@
 #pragma once
 #include "SasamiComposerDoc.h"
 
-enum { SC_HIST_MAX = 32 };
+enum { SC_HIST_MAX = 10 };
 
 struct ScScoreHist {
 	ScEvent snap[SC_HIST_MAX][SC_EV_MAX];

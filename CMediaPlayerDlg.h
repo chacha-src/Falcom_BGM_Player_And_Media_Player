@@ -674,6 +674,8 @@ protected:
 	afx_msg void OnMpSasamiText();
 	afx_msg void OnMpSasamiMidi();
 	afx_msg void OnMpSasamiFm();
+	afx_msg void OnMpSasamiMidiRoll();
+	afx_msg void OnMpSasamiFmRoll();
 	afx_msg void OnMpCdPlayer();
 	afx_msg void OnMpRemote();
 	afx_msg void OnMpRemoteDlg();

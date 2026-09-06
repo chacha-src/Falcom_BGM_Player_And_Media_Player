@@ -1,4 +1,4 @@
-﻿// CMediaPlayerDlg.cpp : メディアプレイヤーモード画面(張りぼて)とモード選択ダイアログ
+// CMediaPlayerDlg.cpp : メディアプレイヤーモード画面(張りぼて)とモード選択ダイアログ
 //
 // 実体は COggDlg(og->) と CPlayList(pl->)。ここは表示と操作の取り次ぎだけを行う。
 // メディアプレイヤーモード中は og / pl のウィンドウを非表示にして裏で生かしておく。
@@ -43,6 +43,7 @@
 #include "CSasamiTextDlg.h"
 #include "CSasamiMidiScoreDlg.h"
 #include "CSasamiFmScoreDlg.h"
+#include "CSasamiPianoRollDlg.h"
 #include "Soft3DRaceDlg.h"
 #include "CDesktopLyricsWnd.h"
 #include "Douga.h"
@@ -1396,6 +1397,8 @@ BEGIN_MESSAGE_MAP(CMediaPlayerDlg, CCustomBlurDialogExBase)
 	ON_COMMAND(ID_MP_SASAMI_TEXT, &CMediaPlayerDlg::OnMpSasamiText)
 	ON_COMMAND(ID_MP_SASAMI_MIDI, &CMediaPlayerDlg::OnMpSasamiMidi)
 	ON_COMMAND(ID_MP_SASAMI_FM, &CMediaPlayerDlg::OnMpSasamiFm)
+	ON_COMMAND(ID_MP_SASAMI_MIDI_ROLL, &CMediaPlayerDlg::OnMpSasamiMidiRoll)
+	ON_COMMAND(ID_MP_SASAMI_FM_ROLL, &CMediaPlayerDlg::OnMpSasamiFmRoll)
 	ON_COMMAND(ID_MP_OPEN_EQ, &CMediaPlayerDlg::OnEq)
 	ON_COMMAND(ID_MP_OPEN_PROTOOLS, &CMediaPlayerDlg::OnProTools)
 	ON_COMMAND(ID_MP_LRC_EXPAND, &CMediaPlayerDlg::OnLrcExpand)
@@ -11834,9 +11837,9 @@ void CMediaPlayerDlg::ShowToolsExtrasMenu(CPoint screenPt)
 			LL14(L"ささみ関連コンポーザ", L"Sasami-related composer", L"Compositeur Sasami", L"Compositore Sasami", L"Compositor Sasami",
 				L"사사미 관련 컴포저", L"笹见相关作曲器", L"ملحن ساسامي", L"Композитор Sasami", L"Sasami-Komponist",
 				L"Compositor Sasami", L"Sasami-componist", L"Kompozytor Sasami", L"Sasami besteci"),
-			LL14(L"SASAMI Composer（テキスト／MIDIスコア／FMスコア）", L"SASAMI Composer (text / MIDI score / FM score)", L"SASAMI Composer (texte / partition MIDI / FM)", L"SASAMI Composer (testo / partitura MIDI / FM)", L"SASAMI Composer (texto / partitura MIDI / FM)",
-				L"SASAMI Composer (텍스트/MIDI/FM)", L"SASAMI Composer（文本/MIDI/FM）", L"SASAMI Composer (نص/MIDI/FM)", L"SASAMI Composer (текст/MIDI/FM)", L"SASAMI Composer (Text/MIDI/FM)",
-				L"SASAMI Composer (texto/MIDI/FM)", L"SASAMI Composer (tekst/MIDI/FM)", L"SASAMI Composer (tekst/MIDI/FM)", L"SASAMI Composer (metin/MIDI/FM)"));
+			LL14(L"SASAMI Composer（テキスト／MIDI・FMスコア／ピアノロール）", L"SASAMI Composer (text / MIDI·FM score / piano roll)", L"SASAMI Composer (texte / partition MIDI·FM / piano roll)", L"SASAMI Composer (testo / partitura MIDI·FM / piano roll)", L"SASAMI Composer (texto / partitura MIDI·FM / piano roll)",
+				L"SASAMI Composer (텍스트/MIDI·FM/피아노 롤)", L"SASAMI Composer（文本/MIDI·FM/钢琴卷帘）", L"SASAMI Composer (نص/MIDI·FM/رول)", L"SASAMI Composer (текст/MIDI·FM/ролл)", L"SASAMI Composer (Text/MIDI·FM/Klavierrolle)",
+				L"SASAMI Composer (texto/MIDI·FM/piano roll)", L"SASAMI Composer (tekst/MIDI·FM/piano-roll)", L"SASAMI Composer (tekst/MIDI·FM/rolka)", L"SASAMI Composer (metin/MIDI·FM/piyano rulosu)"));
 		if (sub) {
 			sub->AddCommand(ID_MP_SASAMI_TEXT,
 				LL14(L"テキスト作曲…", L"Text compose…", L"Composer texte…", L"Componi testo…", L"Componer texto…", L"텍스트 작곡…", L"文本作曲…", L"تأليف نص…", L"Текст…", L"Text komponieren…", L"Compor texto…", L"Tekst componeren…", L"Komponuj tekst…", L"Metin bestele…"));
@@ -11844,6 +11847,14 @@ void CMediaPlayerDlg::ShowToolsExtrasMenu(CPoint screenPt)
 				LL14(L"MIDIスコア…", L"MIDI score…", L"Partition MIDI…", L"Partitura MIDI…", L"Partitura MIDI…", L"MIDI 스코어…", L"MIDI 乐谱…", L"نوتة MIDI…", L"MIDI-партитура…", L"MIDI-Partitur…", L"Partitura MIDI…", L"MIDI-partituur…", L"Partytura MIDI…", L"MIDI skor…"));
 			sub->AddCommand(ID_MP_SASAMI_FM,
 				LL14(L"FMスコア…", L"FM score…", L"Partition FM…", L"Partitura FM…", L"Partitura FM…", L"FM 스코어…", L"FM 乐谱…", L"نوتة FM…", L"FM-партитура…", L"FM-Partitur…", L"Partitura FM…", L"FM-partituur…", L"Partytura FM…", L"FM skor…"));
+			sub->AddCommand(ID_MP_SASAMI_MIDI_ROLL,
+				LL14(L"MIDIピアノロール…", L"MIDI piano roll…", L"Piano roll MIDI…", L"Piano roll MIDI…", L"Piano roll MIDI…",
+					L"MIDI 피아노 롤…", L"MIDI 钢琴卷帘…", L"رول بيانو MIDI…", L"MIDI-пианоролл…", L"MIDI-Klavierrolle…",
+					L"Piano roll MIDI…", L"MIDI-piano-roll…", L"Rolka MIDI…", L"MIDI piyano rulosu…"));
+			sub->AddCommand(ID_MP_SASAMI_FM_ROLL,
+				LL14(L"FMピアノロール…", L"FM piano roll…", L"Piano roll FM…", L"Piano roll FM…", L"Piano roll FM…",
+					L"FM 피아노 롤…", L"FM 钢琴卷帘…", L"رول بيانو FM…", L"FM-пианоролл…", L"FM-Klavierrolle…",
+					L"Piano roll FM…", L"FM-piano-roll…", L"Rolka FM…", L"FM piyano rulosu…"));
 		}
 	}
 	const UINT cmd = menu.Track(screenPt, this);
@@ -13170,6 +13181,20 @@ void CMediaPlayerDlg::OnMpVstHost() { OpenVstHostModeless(this); }
 void CMediaPlayerDlg::OnMpSasamiText() { CSasamiTextDlg::OpenOwned(this); }
 void CMediaPlayerDlg::OnMpSasamiMidi() { CSasamiMidiScoreDlg::OpenOwned(this); }
 void CMediaPlayerDlg::OnMpSasamiFm() { CSasamiFmScoreDlg::OpenOwned(this); }
+void CMediaPlayerDlg::OnMpSasamiMidiRoll()
+{
+	CSasamiMidiScoreDlg::OpenOwned(this);
+	CSasamiMidiScoreDlg* sc = CSasamiMidiScoreDlg::Instance();
+	if (sc)
+		CSasamiPianoRollDlg::OpenForMidi(sc);
+}
+void CMediaPlayerDlg::OnMpSasamiFmRoll()
+{
+	CSasamiFmScoreDlg::OpenOwned(this);
+	CSasamiFmScoreDlg* sc = CSasamiFmScoreDlg::Instance();
+	if (sc)
+		CSasamiPianoRollDlg::OpenForFm(sc);
+}
 void CMediaPlayerDlg::OnMpCdPlayer() { OpenCdPlayerModeless(this); }
 void CMediaPlayerDlg::OnMpSoft3DRace() { OpenSoft3DRaceModeless(this); }
 void CMediaPlayerDlg::OnMpRemote()

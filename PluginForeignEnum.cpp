@@ -1,4 +1,4 @@
-﻿// 外部プラグイン列挙（exe 配下を KPI と同じ再帰で走査）
+// 外部プラグイン列挙（exe 配下を KPI と同じ再帰で走査）
 // 候補: in_*.dll / xmp-*.dll / 名前に aimp / または PE に入力系エクスポートがある DLL
 #include "stdafx.h"
 #include "PluginKinds.h"
@@ -153,11 +153,16 @@ int PluginForeign_CountCandidatesInDir(const CString& dirPath)
 		CString name = f.GetFileName();
 		CString path = f.GetFilePath();
 		if (name.IsEmpty() || name == L"." || name == L"..") continue;
-		if (ForeignProbeHints(name, path) != 0)
+		if (PluginForeign_IsCandidatePath(name, path))
 			count++;
 	} while (b);
 	f.Close();
 	return count;
+}
+
+int PluginForeign_IsCandidatePath(const CString& name, const CString& path)
+{
+	return ForeignProbeHints(name, path) != 0 ? 1 : 0;
 }
 
 void PluginForeign_EnumInDir(const CString& dirPath)

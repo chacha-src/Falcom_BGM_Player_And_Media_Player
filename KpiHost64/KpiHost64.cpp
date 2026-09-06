@@ -262,11 +262,17 @@ static HRESULT SafeKpiCreateInstance(pfn_kpiCreateInstance cr, REFIID riid, void
 static DWORD SafeModuleOpen(IKpiDecoderModule* mod, const KPI_MEDIAINFO* req, IKpiFile* file, IKpiFolder* folder, IKpiDecoder** ppDec)
 {
 	DWORD count = 0;
+	DWORD seh = 0;
 	__try {
 		count = mod->Open(req, file, folder, ppDec);
 	}
-	__except (EXCEPTION_EXECUTE_HANDLER) {
+	__except (seh = GetExceptionCode(), EXCEPTION_EXECUTE_HANDLER) {
 		count = 0;
+	}
+	if (seh) {
+		wchar_t buf[96];
+		_snwprintf_s(buf, _TRUNCATE, L"[OPEN] mod->Open SEH code=0x%lX", (unsigned long)seh);
+		AppendHostLogLine(buf);
 	}
 	return count;
 }
@@ -402,7 +408,24 @@ public:
 			m_bufSize = 0;
 		}
 	}
-	bool Open(const std::wstring& path) {
+	bool Open(const std::wstring& pathIn) {
+		/* Winamp INFO / ::0001 付きパスは物理パスだけ開く */
+		std::wstring path = pathIn;
+		if (path.size() >= 6) {
+			const size_t len = path.size();
+			if (path[len - 5] == L':') {
+				bool digits = true;
+				for (int i = 0; i < 4; i++) {
+					const wchar_t c = path[len - 4 + i];
+					if (c < L'0' || c > L'9') { digits = false; break; }
+				}
+				if (digits) path = path.substr(0, len - 6);
+			}
+		}
+		if (path.size() > 6) {
+			const size_t colon = path.find(L':', 6);
+			if (colon != std::wstring::npos) path = path.substr(0, colon);
+		}
 		m_path = path;
 		size_t p = path.find_last_of(L"\\/");
 		m_name = (p == std::wstring::npos) ? path : path.substr(p + 1);
@@ -412,7 +435,13 @@ public:
 			m_bufSize = 0;
 		}
 		m_h = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
-		if (m_h == INVALID_HANDLE_VALUE) return false;
+		if (m_h == INVALID_HANDLE_VALUE) {
+			wchar_t buf[1200];
+			_snwprintf_s(buf, _TRUNCATE, L"[HostFile] open FAIL err=%lu path=%s",
+				(unsigned long)GetLastError(), path.c_str());
+			AppendHostLogLine(buf);
+			return false;
+		}
 		LARGE_INTEGER sz{};
 		if (GetFileSizeEx(m_h, &sz)) {
 			AppendHostLogLine((L"[HostFile] opened bytes=" + std::to_wstring(sz.QuadPart) + L" path=" + path).c_str());
@@ -591,7 +620,10 @@ BOOL WINAPI HostFolder::OpenFile(const wchar_t* cszName, IKpiFile** ppFile)
 {
 	if (!ppFile) return FALSE;
 	*ppFile = NULL;
-	if (!cszName || !cszName[0]) return FALSE;
+	if (!cszName || !cszName[0]) {
+		AppendHostLogLine(L"[OpenFile] FAILED empty name");
+		return FALSE;
+	}
 
 	std::wstring nameStr = TrimString(cszName);
 	if (!nameStr.empty() && nameStr.front() == L'"' && nameStr.back() == L'"') {
@@ -1186,7 +1218,7 @@ static void ServeOnce(HANDLE pipe)
 			const uint8_t* q = p + sizeof(KPIHOST64_RenderReq);
 			if ((size_t)(end - q) >= sizeof(uint32_t)) {
 				uint32_t nInj = *(const uint32_t*)q; q += sizeof(uint32_t);
-				if (nInj > 64) nInj = 64;
+				if (nInj > 512) nInj = 512;
 				VstMidiSetIoSlot(slot);
 				for (uint32_t i = 0; i < nInj; ++i) {
 					if ((size_t)(end - q) < sizeof(KPIHOST64_VstLiveMidiReq)) break;

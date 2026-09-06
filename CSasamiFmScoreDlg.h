@@ -21,6 +21,18 @@ public:
 	void PullDocFromText(int force = 0);
 	void PersistSession();
 	const ScFmDoc* Doc() const { return &m_doc; }
+	ScFmDoc* DocMutable() { return &m_doc; }
+	ScStaffUi* Ui() { return &m_ui; }
+	int* CurPartPtr() { return &m_curCh; }
+	ScScoreHist* Hist() { return &m_hist; }
+	ScEvent* ClipBuf() { return m_clip; }
+	int* ClipCountPtr() { return &m_clipN; }
+	uint32_t* ClipBasePtr() { return &m_clipBase; }
+	uint32_t* ClipSpanPtr() { return &m_clipSpan; }
+	void NotifyEdited();
+	void RefreshBoundRoll();
+	static uint8_t MidiToFmNoteByte(int midiNote);
+	void HistPush();
 
 protected:
 	virtual void DoDataExchange(CDataExchange* pDX);
@@ -67,6 +79,7 @@ protected:
 	afx_msg void OnCbnSelchangeCh();
 	afx_msg void OnCbnStrip();
 	afx_msg void OnCbnMidiIn();
+	afx_msg void OnCbnPasteMode();
 	afx_msg void OnKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags);
 	afx_msg LRESULT OnPalDur(WPARAM w, LPARAM l);
 	afx_msg LRESULT OnPalQueryState(WPARAM w, LPARAM l);
@@ -98,11 +111,9 @@ protected:
 	void UpdateHoverStatus(CPoint pt);
 	void UpdateHelpBar();
 	void OpenNotePropsForSel();
-	void HistPush();
 	void SyncTextIfOpen();
 	void SyncMidiInCombos();
 	void ApplyFollowScroll();
-	static uint8_t MidiToFmNoteByte(int midiNote);
 
 	CCustomStandardButton m_btnOpen, m_btnSave, m_btnPlay, m_btnHelp, m_btnTempo, m_btnVoice, m_btnExport;
 	CCustomStandardButton m_btnPencil, m_btnErase, m_btnSel, m_btnPal, m_btnPropUpd;
@@ -110,6 +121,7 @@ protected:
 	CCustomStandardButton m_btnArr, m_btnLayout, m_btnRoll;
 	CCustomComboBox m_ch, m_stripKind0, m_stripKind1, m_stripKind2, m_stripHgt0, m_stripHgt1, m_stripHgt2, m_stripDraw, m_stripLanes, m_stripStep;
 	CCustomComboBox m_midiInDev, m_midiInMode;
+	CCustomComboBox m_pasteMode;
 	CCustomEdit m_edNote, m_edGt, m_edVel;
 	CCustomStatic m_status;
 	CCustomStatic m_helpBar;
@@ -123,6 +135,9 @@ protected:
 	ScEvent m_clip[SC_CLIP_MAX];
 	int m_clipN;
 	uint32_t m_clipBase;
+	uint32_t m_clipSpan;
+	int m_dragLastX, m_dragLastY;
+	int m_histDragPushed;
 	int m_curCh;
 	int m_placeRest;
 	int m_accidental;

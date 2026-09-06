@@ -3,6 +3,10 @@
 #include "GdiSoft2D.h"
 #include "GdiSoft3D.h"
 #include "KpiV5ConfigStore.h"
+#include "CEmu/cemu_catalog.h"
+#ifndef WM_APP_CEMU_CATLIST
+#define WM_APP_CEMU_CATLIST (WM_APP + 59)
+#endif
 #include <uxtheme.h>
 #include <math.h>
 #include <algorithm>
@@ -1049,6 +1053,7 @@ BOOL CCustomPopupMenu::IsChromeCommand(UINT id) const
 		|| id == CCUSTOM_POPUP_ID_KPI_RELOAD
 		|| id == CCUSTOM_POPUP_ID_MID_KPI
 		|| id == CCUSTOM_POPUP_ID_MID_VST
+		|| id == CCUSTOM_POPUP_ID_CEMU_LIST
 		|| (id >= CCUSTOM_POPUP_ID_ANIM0
 			&& id < CCUSTOM_POPUP_ID_ANIM0 + (UINT)POPUP_ANIM_COUNT);
 }
@@ -1583,6 +1588,33 @@ void CCustomPopupMenu::EnsureChromePrefix()
 			LL14(L".mid / プロジェクトを自前 VST ホストで再生します", L"Play .mid/projects via built-in VST host", L"Lire .mid/projets via hote VST integre", L"Riproduci .mid/progetti via host VST", L"Reproducir .mid/proyectos vía host VST",
 				L".mid/프로젝트를 내장 VST 호스트로 재생", L"通过内置 VST 主机播放 .mid/项目", L"تشغيل .mid/المشاريع عبر مضيف VST", L"Воспроизводить .mid/проекты через встроенный VST-хост", L".mid/Projekte über eingebauten VST-Host",
 				L"Tocar .mid/projetos via host VST", L".mid/projecten via ingebouwde VST-host", L"Odtwarzaj .mid/projekty przez wbudowany host VST", L".mid/projeleri dahili VST host ile cal"));
+	}
+
+	/* exe 隣に arcdata.zip があるときだけ Cemu対応一覧 */
+	{
+		wchar_t arc[MAX_PATH] = {};
+		CEmuCatalogGetExeArcdataPath(arc, MAX_PATH);
+		if (arc[0] && GetFileAttributesW(arc) != INVALID_FILE_ATTRIBUTES) {
+			AddCommand(CCUSTOM_POPUP_ID_CEMU_LIST,
+				LL14(L"Cemu対応一覧", L"Cemu Supported List", L"Liste compatible Cemu", L"Elenco supportato Cemu",
+					L"Lista compatible Cemu", L"Cemu 대응 목록", L"Cemu 对应一览", L"قائمة Cemu المدعومة",
+					L"Список поддержки Cemu", L"Cemu-Unterstützungsliste", L"Lista suportada Cemu", L"Cemu-ondersteuningslijst",
+					L"Lista obslugi Cemu", L"Cemu destek listesi"),
+				LL14(L"arcdata.zip の対応タイトルを一覧表示します",
+					L"Show titles supported by arcdata.zip",
+					L"Afficher les titres supportes par arcdata.zip",
+					L"Mostra i titoli supportati da arcdata.zip",
+					L"Mostrar titulos compatibles de arcdata.zip",
+					L"arcdata.zip 대응 타이틀을 목록으로 표시",
+					L"显示 arcdata.zip 支持的标题列表",
+					L"عرض العناوين المدعومة في arcdata.zip",
+					L"Показать поддерживаемые названия arcdata.zip",
+					L"Von arcdata.zip unterstützte Titel anzeigen",
+					L"Mostrar titulos suportados por arcdata.zip",
+					L"Toon door arcdata.zip ondersteunde titels",
+					L"Pokaz tytuly obslugiwane przez arcdata.zip",
+					L"arcdata.zip desteklenen basliklari listele"));
+		}
 	}
 
 	ClampPopupAnimSave();
@@ -3676,6 +3708,13 @@ BOOL CCustomPopupMenu::HandleChromeClick(int idx)
 		CWnd* main = AfxGetMainWnd();
 		if (main && ::IsWindow(main->GetSafeHwnd()))
 			main->PostMessage(WM_APP_KPI_PLUGIN, wp, 0);
+		return TRUE;
+	}
+	if (it.id == CCUSTOM_POPUP_ID_CEMU_LIST) {
+		CloseChain(0);
+		CWnd* main = AfxGetMainWnd();
+		if (main && ::IsWindow(main->GetSafeHwnd()))
+			main->PostMessage(WM_APP_CEMU_CATLIST, 0, 0);
 		return TRUE;
 	}
 	// MIDI再生 KPI/VST 優先。savedata.midPlayPrefer を書き、レ点を排他。

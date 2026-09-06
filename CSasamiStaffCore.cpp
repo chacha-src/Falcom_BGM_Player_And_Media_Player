@@ -1,4 +1,4 @@
-﻿#include "stdafx.h"
+#include "stdafx.h"
 #include "ogg.h"
 #include "CSasamiStaffCore.h"
 #include "CSasamiScoreArrange.h"
@@ -360,6 +360,13 @@ void ScStaffUiInit(ScStaffUi* u, int trackCount, int isFm)
 	u->patternMode = 0;
 	u->patternId = 0;
 	u->gridEmph = 1;
+	u->pasteInsert = 0;
+	u->rulerDragOn = 0;
+	u->rulerT0 = u->rulerT1 = 0;
+	u->markerSolidTrack = -1;
+	u->selRangeValid = 0;
+	u->selRangeT0 = u->selRangeT1 = 0;
+	u->selRangeAllParts = 0;
 	for (int L = 0; L < SC_STRIP_LANES_MAX; L++)
 		for (int i = 0; i < SC_STRIP_COLS_MAX; i++)
 			u->strip[L][i] = (u->stripKind[L] == SC_STRIP_PITCH) ? 64 : 100;
@@ -1436,62 +1443,62 @@ const wchar_t* ScStaffStripKindName(int kind)
 	switch (kind) {
 	case SC_STRIP_EXPR:
 		return LL14(L"Exp(CC11)", L"Exp (CC11)", L"Exp (CC11)", L"Esp (CC11)", L"Exp (CC11)",
-			L"Exp(CC11)", L"表情(CC11)", L"تعبير (CC11)", L"Exp (CC11)", L"Exp (CC11)",
+			L"표정(CC11)", L"表情(CC11)", L"تعبير (CC11)", L"Экспр. (CC11)", L"Exp (CC11)",
 			L"Exp (CC11)", L"Exp (CC11)", L"Exp (CC11)", L"Exp (CC11)");
 	case SC_STRIP_VOL:
 		return LL14(L"Vol(CC7/TL)", L"Vol (CC7/TL)", L"Vol (CC7/TL)", L"Vol (CC7/TL)", L"Vol (CC7/TL)",
-			L"Vol(CC7/TL)", L"音量(CC7/TL)", L"صوت (CC7/TL)", L"Vol (CC7/TL)", L"Vol (CC7/TL)",
+			L"볼륨(CC7/TL)", L"音量(CC7/TL)", L"صوت (CC7/TL)", L"Громк. (CC7/TL)", L"Vol (CC7/TL)",
 			L"Vol (CC7/TL)", L"Vol (CC7/TL)", L"Vol (CC7/TL)", L"Vol (CC7/TL)");
 	case SC_STRIP_PITCH:
 		return LL14(L"ピッチ", L"Pitch bend", L"Hauteur", L"Pitch", L"Tono",
 			L"피치", L"音高", L"طبقة", L"Высота", L"Pitch", L"Tom", L"Toonhoogte", L"Wysokość", L"Perde");
 	case SC_STRIP_GATE:
 		return LL14(L"Gate%", L"Gate %", L"Gate %", L"Gate %", L"Gate %",
-			L"Gate%", L"门控%", L"بوابة%", L"Gate %", L"Gate %", L"Gate %", L"Gate %", L"Gate %", L"Gate %");
+			L"게이트%", L"门控%", L"بوابة%", L"Gate %", L"Gate %", L"Gate %", L"Gate %", L"Gate %", L"Gate %");
 	case SC_STRIP_PAN:
 		return LL14(L"Pan(CC10)", L"Pan (CC10)", L"Pan (CC10)", L"Pan (CC10)", L"Pan (CC10)",
-			L"Pan(CC10)", L"声像(CC10)", L"بان (CC10)", L"Pan (CC10)", L"Pan (CC10)",
+			L"팬(CC10)", L"声像(CC10)", L"بان (CC10)", L"Пан (CC10)", L"Pan (CC10)",
 			L"Pan (CC10)", L"Pan (CC10)", L"Pan (CC10)", L"Pan (CC10)");
 	case SC_STRIP_MOD:
 		return LL14(L"Mod(CC1)", L"Mod (CC1)", L"Mod (CC1)", L"Mod (CC1)", L"Mod (CC1)",
-			L"Mod(CC1)", L"Mod(CC1)", L"Mod (CC1)", L"Mod (CC1)", L"Mod (CC1)",
+			L"모듈레이션(CC1)", L"调制(CC1)", L"تعديل (CC1)", L"Мод. (CC1)", L"Mod (CC1)",
 			L"Mod (CC1)", L"Mod (CC1)", L"Mod (CC1)", L"Mod (CC1)");
 	case SC_STRIP_PORTA_T:
 		return LL14(L"Port.T(CC5)", L"Port.time (CC5)", L"Port.t (CC5)", L"Port.t (CC5)", L"Port.t (CC5)",
-			L"Port.T(CC5)", L"滑音T(CC5)", L"Port.t", L"Port.t", L"Port.t",
-			L"Port.t", L"Port.t", L"Port.t", L"Port.t");
+			L"포르타멘토T(CC5)", L"滑音T(CC5)", L"زمن بورت. (CC5)", L"Port.t (CC5)", L"Port.t (CC5)",
+			L"Port.t (CC5)", L"Port.t (CC5)", L"Port.t (CC5)", L"Port.t (CC5)");
 	case SC_STRIP_HOLD:
 		return LL14(L"Hold(CC64)", L"Hold (CC64)", L"Hold (CC64)", L"Hold (CC64)", L"Hold (CC64)",
-			L"Hold(CC64)", L"ホールド(CC64)", L"Hold", L"Hold", L"Hold",
-			L"Hold", L"Hold", L"Hold", L"Hold");
+			L"홀드(CC64)", L"延音(CC64)", L"استدامة (CC64)", L"Hold (CC64)", L"Hold (CC64)",
+			L"Hold (CC64)", L"Hold (CC64)", L"Hold (CC64)", L"Hold (CC64)");
 	case SC_STRIP_PORTA:
 		return LL14(L"Port.(CC65)", L"Port. (CC65)", L"Port. (CC65)", L"Port. (CC65)", L"Port. (CC65)",
-			L"Port.(CC65)", L"Port.(CC65)", L"Port.", L"Port.", L"Port.",
-			L"Port.", L"Port.", L"Port.", L"Port.");
+			L"포르타멘토(CC65)", L"滑音开(CC65)", L"بورت. (CC65)", L"Port. (CC65)", L"Port. (CC65)",
+			L"Port. (CC65)", L"Port. (CC65)", L"Port. (CC65)", L"Port. (CC65)");
 	case SC_STRIP_SOST:
 		return LL14(L"Sost.(CC66)", L"Sost. (CC66)", L"Sost. (CC66)", L"Sost. (CC66)", L"Sost. (CC66)",
-			L"Sost.(CC66)", L"Sost.(CC66)", L"Sost.", L"Sost.", L"Sost.",
-			L"Sost.", L"Sost.", L"Sost.", L"Sost.");
+			L"소스테누토(CC66)", L"持续踏板(CC66)", L"سوست. (CC66)", L"Sost. (CC66)", L"Sost. (CC66)",
+			L"Sost. (CC66)", L"Sost. (CC66)", L"Sost. (CC66)", L"Sost. (CC66)");
 	case SC_STRIP_SOFT:
 		return LL14(L"Soft(CC67)", L"Soft (CC67)", L"Soft (CC67)", L"Soft (CC67)", L"Soft (CC67)",
-			L"Soft(CC67)", L"ソフト(CC67)", L"Soft", L"Soft", L"Soft",
-			L"Soft", L"Soft", L"Soft", L"Soft");
+			L"소프트(CC67)", L"柔音(CC67)", L"ناعم (CC67)", L"Soft (CC67)", L"Soft (CC67)",
+			L"Soft (CC67)", L"Soft (CC67)", L"Soft (CC67)", L"Soft (CC67)");
 	case SC_STRIP_REVERB:
 		return LL14(L"Reverb(CC91)", L"Reverb (CC91)", L"Reverb (CC91)", L"Reverb (CC91)", L"Reverb (CC91)",
-			L"Reverb(CC91)", L"リバーブ(CC91)", L"Reverb", L"Reverb", L"Reverb",
-			L"Reverb", L"Reverb", L"Reverb", L"Reverb");
+			L"리버브(CC91)", L"混响(CC91)", L"صدى (CC91)", L"Реверб (CC91)", L"Reverb (CC91)",
+			L"Reverb (CC91)", L"Reverb (CC91)", L"Reverb (CC91)", L"Reverb (CC91)");
 	case SC_STRIP_CHORUS:
 		return LL14(L"Chorus(CC93)", L"Chorus (CC93)", L"Chorus (CC93)", L"Chorus (CC93)", L"Chorus (CC93)",
-			L"Chorus(CC93)", L"コーラス(CC93)", L"Chorus", L"Chorus", L"Chorus",
-			L"Chorus", L"Chorus", L"Chorus", L"Chorus");
+			L"코러스(CC93)", L"合唱(CC93)", L"كورس (CC93)", L"Хорус (CC93)", L"Chorus (CC93)",
+			L"Chorus (CC93)", L"Chorus (CC93)", L"Chorus (CC93)", L"Chorus (CC93)");
 	case SC_STRIP_DELAY:
 		return LL14(L"Delay(CC94)", L"Delay (CC94)", L"Delay (CC94)", L"Delay (CC94)", L"Delay (CC94)",
-			L"Delay(CC94)", L"ディレイ(CC94)", L"Delay", L"Delay", L"Delay",
-			L"Delay", L"Delay", L"Delay", L"Delay");
+			L"딜레이(CC94)", L"延迟(CC94)", L"تأخير (CC94)", L"Дилей (CC94)", L"Delay (CC94)",
+			L"Delay (CC94)", L"Delay (CC94)", L"Delay (CC94)", L"Delay (CC94)");
 	case SC_STRIP_VEL:
-		return LL14(L"Vel", L"Velocity", L"Vélocité", L"Velocità", L"Velocidad",
-			L"Vel", L"ベロシティ", L"Vel", L"Vel", L"Vel",
-			L"Vel", L"Vel", L"Vel", L"Vel");
+		return LL14(L"ベロシティ", L"Velocity", L"Vélocité", L"Velocità", L"Velocidad",
+			L"벨로시티", L"力度", L"سرعة", L"Скорость", L"Anschlag",
+			L"Velocidade", L"Velocity", L"Velocity", L"Velocity");
 	default: return L"?";
 	}
 }
@@ -1520,8 +1527,8 @@ const wchar_t* ScStaffStripKindNameFm(int kind)
 			L"@PORT", L"@PORT", L"@PORT", L"@PORT", L"@PORT",
 			L"@PORT", L"@PORT", L"@PORT", L"@PORT");
 	case SC_STRIP_HOLD:
-		return LL14(L"Hold", L"Hold", L"Hold", L"Hold", L"Hold",
-			L"Hold", L"Hold", L"Hold", L"Hold", L"Hold",
+		return LL14(L"Hold", L"Hold", L"Hold", L"Sostenuto", L"Hold",
+			L"홀드", L"延音", L"استدامة", L"Hold", L"Hold",
 			L"Hold", L"Hold", L"Hold", L"Hold");
 	case SC_STRIP_PORTA:
 		return LL14(L"@PORTA", L"@PORTA", L"@PORTA", L"@PORTA", L"@PORTA",
@@ -1786,20 +1793,20 @@ void ScStaffFormatHelpBar(wchar_t* out, int cch, const ScStaffUi* u, int isFm, i
 		break;
 	case SC_HELP_SELECT:
 		wcscpy_s(out, cch, LL14(
-			L"【選択】クリック/矩形で複数選択。Delete/Backspaceで削除。Ctrl+C/X/V、Ctrl+Tでタイ。マーク（|:等）はTone行チップか五線記号をクリックしてからDelete。",
-			L"[Select] Click/marquee multi-select. Delete/Backspace removes. Ctrl+C/X/V; Ctrl+T ties. For marks (|:…): click Tone chip or staff glyph then Delete.",
-			L"【Sélection】Clic/rectangle multi. Suppr/Retour arrière. Ctrl+C/X/V; Ctrl+T = liaison. Marques (|:…): clic puce Tone ou glyphe puis Suppr.",
-			L"【Selezione】Clic/rettangolo multi. Canc/Backspace. Ctrl+C/X/V; Ctrl+T = legatura. Segni (|:…): clic chip Tone o glifo poi Canc.",
-			L"【Seleccionar】Clic/rectángulo multi. Supr/Retroceso. Ctrl+C/X/V; Ctrl+T = ligadura. Marcas (|:…): clic chip Tone o glifo luego Supr.",
-			L"【선택】클릭/사각 다중선택. Delete/Backspace 삭제. Ctrl+C/X/V, Ctrl+T 타이. 마크(|:…): Tone칩/기호 클릭 후 Delete.",
-			L"【选择】点击/框选多选。Delete/Backspace删除。Ctrl+C/X/V；Ctrl+T连音。标记(|:…):点音色条或谱面符号再Delete。",
-			L"【تحديد】نقر/مستطيل متعدد. Delete/Backspace للحذف. Ctrl+C/X/V؛ Ctrl+T للربط. العلامات (|:…): انقر رقاقة Tone أو الرمز ثم Delete.",
-			L"【Выбор】Клик/рамка. Delete/Backspace. Ctrl+C/X/V; Ctrl+T — лига. Знаки (|:…): клик по чипу Tone или глифу → Delete.",
-			L"【Auswahl】Klick/Rechteck. Entf/Rücktaste. Ctrl+C/X/V; Ctrl+T = Bindebogen. Zeichen (|:…): Tone-Chip oder Glyph → Entf.",
-			L"【Selecionar】Clique/retângulo multi. Del/Backspace. Ctrl+C/X/V; Ctrl+T = ligadura. Marcas (|:…): clique chip Tone ou glifo → Del.",
-			L"【Selecteren】Klik/rechthoek multi. Del/Backspace. Ctrl+C/X/V; Ctrl+T = boog. Markeringen (|:…): Tone-chip of glyph → Del.",
-			L"【Zaznacz】Klik/prostokąt. Del/Backspace. Ctrl+C/X/V; Ctrl+T = legato. Znaki (|:…): klik chip Tone lub glif → Del.",
-			L"【Seç】Tıkla/dikdörtgen çoklu. Del/Backspace. Ctrl+C/X/V; Ctrl+T bağ. İşaretler (|:…): Tone çipi veya glif → Del."));
+			L"【選択】矢印=範囲/移動。ESC・右クリで通常カーソル。Ctrl+C/X/V・Shift+V=貼付挿入、Ctrl+Z/Y(10)。\r\nルーラー=全パート範囲。Delete=削除。範囲に空白挿入(後ろずらし)=Ctrl+Shift+I / 右クリック。",
+			L"[Select] Arrow=range/move. ESC/RMB→arrow. Ctrl+C/X/V; Shift+V=paste-insert; Ctrl+Z/Y(10).\r\nRuler=all parts. Delete removes. Insert blank (shift later)=Ctrl+Shift+I / right-click.",
+			L"[Select] Flèche=plage. ESC/RMB. Ctrl+C/X/V; Shift+V; Ctrl+Z/Y.\r\nRègle=toutes parties. Insérer vide=Ctrl+Shift+I.",
+			L"[Select] Freccia=intervallo. ESC/RMB. Ctrl+C/X/V; Shift+V; Ctrl+Z/Y.\r\nRighello=tutte. Inserisci vuoto=Ctrl+Shift+I.",
+			L"[Select] Flecha=rango. ESC/RMB. Ctrl+C/X/V; Shift+V; Ctrl+Z/Y.\r\nRegla=todas. Insertar vacío=Ctrl+Shift+I.",
+			L"[선택] 화살표=범위/이동. ESC/우클릭. Ctrl+C/X/V; Shift+V; Ctrl+Z/Y.\r\n눈금자=전체. 빈 구간 삽입=Ctrl+Shift+I.",
+			L"[选择] 箭头=范围/移动。ESC/右键。Ctrl+C/X/V；Shift+V；Ctrl+Z/Y。\r\n标尺=全部声部。插入空白=Ctrl+Shift+I。",
+			L"[تحديد] سهم=نطاق/نقل. ESC/زر أيمن. Ctrl+C/X/V؛ Shift+V؛ Ctrl+Z/Y.\r\nالمسطرة=كل الأجزاء. إدراج فراغ=Ctrl+Shift+I.",
+			L"[Select] Диапазон/перенос. ESC/ПКМ. Ctrl+C/X/V; Shift+V; Ctrl+Z/Y.\r\nЛинейка=все. Вставить пустоту=Ctrl+Shift+I.",
+			L"[Select] Bereich/Bewegen. ESC/RMB. Ctrl+C/X/V; Shift+V; Ctrl+Z/Y.\r\nLineal=alle. Leerraum=Ctrl+Shift+I.",
+			L"[Select] Intervalo/mover. ESC/RMB. Ctrl+C/X/V; Shift+V; Ctrl+Z/Y.\r\nRégua=todas. Inserir vazio=Ctrl+Shift+I.",
+			L"[Select] Bereik/verplaatsen. ESC/RMB. Ctrl+C/X/V; Shift+V; Ctrl+Z/Y.\r\nLiniaal=alle. Leeg invoegen=Ctrl+Shift+I.",
+			L"[Select] Zakres/przenoszenie. ESC/RMB. Ctrl+C/X/V; Shift+V; Ctrl+Z/Y.\r\nLinijka=wszystkie. Wstaw pustkę=Ctrl+Shift+I.",
+			L"[Select] Aralık/taşı. ESC/sağ tık. Ctrl+C/X/V; Shift+V; Ctrl+Z/Y.\r\nCetvel=tümü. Boş ekle=Ctrl+Shift+I."));
 		break;
 	case SC_HELP_PENCIL:
 		wcscpy_s(out, cch, LL14(
@@ -3124,7 +3131,7 @@ static void ScStaffPaintLayoutClefGlyph(CDC& dc, int cm, int lx, int cy, int sta
 
 static void DrawGhostNote(CDC& dc, int x, int y, int dur, int rest, int accidental)
 {
-	ScStaffDrawSymbolEx(dc, x, y, dur, rest, RGB(80, 130, 220), 0, 1, accidental);
+	ScStaffDrawSymbolEx(dc, x, y, dur, rest, RGB(200, 50, 40), 0, 1, accidental);
 }
 
 /* Chord ghost: multi-head, grand-staff split via ScStaffMidiNoteYTrack, 2nds side-by-side. */
@@ -3758,6 +3765,16 @@ static void ScStaffPaintTrackNotes(CDC& dc, const ScStaffUi* u, const ScEvent* e
 		if (col.grp < 0 && col.nHeads == 1 && !col.heads[0].isTie) {
 			ScStaffDrawSymbol(dc, col.x, col.heads[0].y, col.heads[0].dur, 0,
 				col.heads[0].col, col.heads[0].selected, col.stemUp);
+			{
+				int hp = 0, hpan = 0, hvol = 0, hexp = 0;
+				if (ScStaffNoteHasFx(ev, evCount, col.heads[0].evIdx, isFm, &hp, &hpan, &hvol, &hexp)) {
+					int bx = col.x + 14, by = col.heads[0].y - 12;
+					if (hp) { dc.FillSolidRect(bx, by, 3, 8, RGB(0, 170, 150)); bx += 4; }
+					if (hpan) { dc.FillSolidRect(bx, by, 3, 8, RGB(150, 70, 190)); bx += 4; }
+					if (hvol) { dc.FillSolidRect(bx, by, 3, 8, RGB(220, 130, 40)); bx += 4; }
+					if (hexp) { dc.FillSolidRect(bx, by, 3, 8, RGB(240, 150, 50)); bx += 4; }
+				}
+			}
 			if (col.xEnd - col.x > 12) {
 				int gw = max(2, ((col.xEnd - col.x) * col.gatePct) / 100);
 				dc.FillSolidRect(col.x + 12, col.heads[0].y - 1, min(gw, 48), 2, RGB(100, 120, 180));
@@ -3772,6 +3789,16 @@ static void ScStaffPaintTrackNotes(CDC& dc, const ScStaffUi* u, const ScEvent* e
 			if (hd.selected)
 				dc.Draw3dRect(hx - 3, hd.y - 22, 20, 32, RGB(220, 140, 40), RGB(220, 140, 40));
 			ScStaffDrawOvalHead(dc, hx, hd.y, hollow, hd.col, ScStaffDurIsDotted(hd.dur));
+			{
+				int hp = 0, hpan = 0, hvol = 0, hexp = 0;
+				if (ScStaffNoteHasFx(ev, evCount, hd.evIdx, isFm, &hp, &hpan, &hvol, &hexp)) {
+					int bx = hx + 14, by = hd.y - 12;
+					if (hp) { dc.FillSolidRect(bx, by, 3, 8, RGB(0, 170, 150)); bx += 4; }
+					if (hpan) { dc.FillSolidRect(bx, by, 3, 8, RGB(150, 70, 190)); bx += 4; }
+					if (hvol) { dc.FillSolidRect(bx, by, 3, 8, RGB(220, 130, 40)); bx += 4; }
+					if (hexp) { dc.FillSolidRect(bx, by, 3, 8, RGB(240, 150, 50)); bx += 4; }
+				}
+			}
 			const int acc = hd.flags & SC_EF_ACC_MASK;
 			if (acc) {
 				dc.SetTextColor(hd.col);
@@ -4547,13 +4574,37 @@ void ScStaffPaintStaves(CDC& dc, const CRect& grid, const ScStaffUi* u,
 	/* Sticky tempo band + ruler on top of scrolled content. */
 	ScStaffPaintStickyHeader(dc, grid, u, ev, evCount, docTempoT, gridLeft, pxBeat, colMaxBand);
 
-	/* full-height playhead (below sticky header) */
+	/* Marker / playhead: dotted full-height; solid only on active (markerSolidTrack) row.
+	   Preview playhead stays solid full-height for visibility. */
 	{
 		uint32_t phTick = u->previewActive ? u->playheadTick : u->markerTick;
 		int xh = ScStaffTickToX(phTick, u->scrollX, gridLeft, pxBeat, u, ev, evCount);
 		if (xh >= gridLeft && xh <= grid.right) {
-			COLORREF hc = u->previewActive ? RGB(230, 40, 50) : RGB(200, 120, 120);
-			dc.FillSolidRect(xh, staffOriginY, 2, max(1, grid.bottom - staffOriginY), hc);
+			COLORREF hc = u->previewActive ? RGB(230, 40, 50) : RGB(200, 50, 50);
+			const int y0 = staffOriginY;
+			const int y1 = grid.bottom;
+			if (u->previewActive) {
+				dc.FillSolidRect(xh, y0, 2, max(1, y1 - y0), hc);
+			} else {
+				/* dotted full height */
+				for (int y = y0; y < y1; y += 6)
+					dc.FillSolidRect(xh, y, 1, min(3, y1 - y), RGB(200, 120, 120));
+				const int solidTr = u->markerSolidTrack;
+				if (solidTr >= 0 && solidTr < u->trackCount && u->visible[solidTr]) {
+					int ry = staffOriginY - u->scrollY;
+					for (int tr = 0; tr < u->trackCount; tr++) {
+						const int rowH = ScStaffRowH(u, tr);
+						if (tr == solidTr) {
+							const int top = max(ry, staffOriginY);
+							const int bot = min(ry + rowH, grid.bottom);
+							if (bot > top)
+								dc.FillSolidRect(xh, top, 2, bot - top, hc);
+							break;
+						}
+						ry += rowH;
+					}
+				}
+			}
 		}
 	}
 
@@ -6325,6 +6376,9 @@ void ScStaffSelClear(ScStaffUi* u)
 	if (!u) return;
 	u->nSel = 0;
 	u->selEv = -1;
+	u->selRangeValid = 0;
+	u->selRangeAllParts = 0;
+	u->selRangeT0 = u->selRangeT1 = 0;
 }
 
 void ScStaffSelAdd(ScStaffUi* u, int evIdx)
@@ -6474,10 +6528,628 @@ void ScStaffPaintMarquee(CDC& dc, const ScStaffUi* u)
 	if (!u || !u->marqueeOn) return;
 	CRect r(min(u->marqueeX0, u->marqueeX1), min(u->marqueeY0, u->marqueeY1),
 		max(u->marqueeX0, u->marqueeX1), max(u->marqueeY0, u->marqueeY1));
+	if (r.Width() < 2 || r.Height() < 2) return;
+	/* Acrylic-safe XOR stand-in: hatch fill + dotted border (offscreen blit path). */
+	CBrush hatch;
+	hatch.CreateHatchBrush(HS_DIAGCROSS, RGB(60, 120, 220));
+	int oldRop = dc.SetROP2(R2_MASKPEN);
+	CBrush* ob = dc.SelectObject(&hatch);
+	dc.PatBlt(r.left, r.top, r.Width(), r.Height(), PATCOPY);
+	dc.SelectObject(ob);
+	dc.SetROP2(oldRop);
 	CPen pen(PS_DOT, 1, RGB(40, 90, 200));
 	CPen* op = dc.SelectObject(&pen);
-	CBrush* ob = (CBrush*)dc.SelectStockObject(NULL_BRUSH);
+	CBrush* nb = (CBrush*)dc.SelectStockObject(NULL_BRUSH);
 	dc.Rectangle(r);
 	dc.SelectObject(op);
-	if (ob) dc.SelectObject(ob);
+	if (nb) dc.SelectObject(nb);
+}
+
+int ScStaffIsNoteLike(uint8_t kind, int isFm)
+{
+	if (isFm)
+		return kind == SC_EV_FM_NOTE || kind == SC_EV_FM_REST || kind == SC_EV_TIE;
+	return kind == SC_EV_NOTE || kind == SC_EV_REST || kind == SC_EV_TIE;
+}
+
+int ScStaffIsCtrlAttachKind(uint8_t kind, int isFm)
+{
+	if (kind == SC_EV_VOL || kind == SC_EV_VELO || kind == SC_EV_PAN || kind == SC_EV_PITCH
+		|| kind == SC_EV_CC || kind == SC_EV_SLUR_START || kind == SC_EV_SLUR_END)
+		return 1;
+	if (isFm && (kind == SC_EV_FM_VOL || kind == SC_EV_FM_PITCH))
+		return 1;
+	return 0;
+}
+
+uint32_t ScStaffEvEndTick(const ScEvent& e)
+{
+	uint32_t d = e.dur ? e.dur : (uint32_t)(SC_PPQN / 4);
+	return e.tick + d;
+}
+
+int ScStaffNotePitchKey(const ScEvent& e, int isFm, int tr)
+{
+	if (e.kind == SC_EV_REST || e.kind == SC_EV_FM_REST) return -1;
+	if (e.kind == SC_EV_FM_NOTE || (isFm && e.kind == SC_EV_TIE))
+		return ScStaffEvSoundingMidi(e, 1, tr);
+	return (int)e.a;
+}
+
+void ScStaffEnterSelectTool(ScStaffUi* u)
+{
+	if (!u) return;
+	u->tool = SC_TOOL_SELECT;
+	u->hoverValid = 0;
+	u->marqueeOn = 0;
+	u->rulerDragOn = 0;
+	u->helpTopic = SC_HELP_SELECT;
+}
+
+static int ScStaffFindPrevNoteSamePitch(const ScEvent* ev, int evCount, int idx, int isFm)
+{
+	if (!ev || idx < 0 || idx >= evCount) return -1;
+	const int ch = (int)ev[idx].ch;
+	const int pitch = ScStaffNotePitchKey(ev[idx], isFm, ch);
+	if (pitch < 0) return -1;
+	uint32_t bestEnd = 0;
+	int best = -1;
+	for (int i = 0; i < evCount; i++) {
+		if (i == idx) continue;
+		if ((int)ev[i].ch != ch) continue;
+		if (!ScStaffIsNoteLike(ev[i].kind, isFm)) continue;
+		if (ev[i].kind == SC_EV_REST || ev[i].kind == SC_EV_FM_REST) continue;
+		if (ScStaffNotePitchKey(ev[i], isFm, ch) != pitch) continue;
+		const uint32_t end = ScStaffEvEndTick(ev[i]);
+		if (end <= ev[idx].tick && end >= bestEnd) {
+			bestEnd = end;
+			best = i;
+		}
+	}
+	return best;
+}
+
+static int ScStaffFindNextNoteSamePitch(const ScEvent* ev, int evCount, int idx, int isFm)
+{
+	if (!ev || idx < 0 || idx >= evCount) return -1;
+	const int ch = (int)ev[idx].ch;
+	const int pitch = ScStaffNotePitchKey(ev[idx], isFm, ch);
+	if (pitch < 0) return -1;
+	const uint32_t myEnd = ScStaffEvEndTick(ev[idx]);
+	uint32_t bestTick = 0xFFFFFFFFu;
+	int best = -1;
+	for (int i = 0; i < evCount; i++) {
+		if (i == idx) continue;
+		if ((int)ev[i].ch != ch) continue;
+		if (!ScStaffIsNoteLike(ev[i].kind, isFm)) continue;
+		if (ev[i].kind == SC_EV_REST || ev[i].kind == SC_EV_FM_REST) continue;
+		if (ScStaffNotePitchKey(ev[i], isFm, ch) != pitch) continue;
+		if (ev[i].tick >= myEnd && ev[i].tick < bestTick) {
+			bestTick = ev[i].tick;
+			best = i;
+		}
+	}
+	return best;
+}
+
+int ScStaffSelAddTieChain(ScEvent* ev, int evCount, ScStaffUi* u, int seedIdx, int isFm)
+{
+	if (!ev || !u || seedIdx < 0 || seedIdx >= evCount) return 0;
+	if (!ScStaffIsNoteLike(ev[seedIdx].kind, isFm)) {
+		ScStaffSelAdd(u, seedIdx);
+		return 1;
+	}
+	int added = 0;
+	int cur = seedIdx;
+	/* walk backward through ties */
+	for (;;) {
+		int prev = ScStaffFindPrevNoteSamePitch(ev, evCount, cur, isFm);
+		if (prev < 0) break;
+		/* contiguous if prev ends at/near cur start (allow 1 tick slack) */
+		uint32_t pend = ScStaffEvEndTick(ev[prev]);
+		if (pend + 1 < ev[cur].tick) break;
+		if (ev[cur].kind != SC_EV_TIE && ev[prev].kind != SC_EV_TIE
+			&& pend != ev[cur].tick && pend + 1 != ev[cur].tick)
+			break;
+		cur = prev;
+	}
+	/* walk forward collecting chain */
+	for (;;) {
+		if (!ScStaffSelHas(u, cur)) {
+			ScStaffSelAdd(u, cur);
+			added++;
+		}
+		int next = ScStaffFindNextNoteSamePitch(ev, evCount, cur, isFm);
+		if (next < 0) break;
+		uint32_t cend = ScStaffEvEndTick(ev[cur]);
+		if (ev[next].tick > cend + 1) break;
+		if (ev[next].kind != SC_EV_TIE && cend != ev[next].tick && cend + 1 != ev[next].tick)
+			break;
+		cur = next;
+	}
+	return added;
+}
+
+void ScStaffExpandSelToFullNotes(ScEvent* ev, int evCount, ScStaffUi* u, int isFm,
+	uint32_t* ioT0, uint32_t* ioT1, int trackFilter)
+{
+	if (!ev || !u || !ioT0 || !ioT1) return;
+	uint32_t t0 = *ioT0, t1 = *ioT1;
+	if (t1 < t0) { uint32_t t = t0; t0 = t1; t1 = t; }
+	int grew = 1;
+	while (grew) {
+		grew = 0;
+		for (int i = 0; i < evCount; i++) {
+			const ScEvent& e = ev[i];
+			if (trackFilter >= 0 && (int)e.ch != trackFilter) continue;
+			if (!ScStaffIsNoteLike(e.kind, isFm)) continue;
+			const uint32_t n0 = e.tick;
+			const uint32_t n1 = ScStaffEvEndTick(e);
+			if (n1 <= t0 || n0 >= t1) continue; /* no overlap */
+			if (!ScStaffSelHas(u, i)) {
+				ScStaffSelAddTieChain(ev, evCount, u, i, isFm);
+				grew = 1;
+			}
+			/* expand range to cover full selected notes on this pass */
+			if (n0 < t0) { t0 = n0; grew = 1; }
+			if (n1 > t1) { t1 = n1; grew = 1; }
+		}
+		/* also expand by already-selected chain members */
+		for (int s = 0; s < u->nSel; s++) {
+			int i = u->selList[s];
+			if (i < 0 || i >= evCount) continue;
+			if (!ScStaffIsNoteLike(ev[i].kind, isFm)) continue;
+			uint32_t n0 = ev[i].tick, n1 = ScStaffEvEndTick(ev[i]);
+			if (n0 < t0) { t0 = n0; grew = 1; }
+			if (n1 > t1) { t1 = n1; grew = 1; }
+		}
+	}
+	*ioT0 = t0;
+	*ioT1 = t1;
+	u->selRangeValid = 1;
+	u->selRangeT0 = t0;
+	u->selRangeT1 = t1;
+}
+
+int ScStaffSelectTickRange(ScStaffUi* u, const ScEvent* ev, int evCount, int isFm,
+	uint32_t t0, uint32_t t1, int trackFilter)
+{
+	if (!u || !ev) return 0;
+	if (t1 < t0) { uint32_t t = t0; t0 = t1; t1 = t; }
+	ScStaffSelClear(u);
+	u->selRangeAllParts = (trackFilter < 0) ? 1 : 0;
+	for (int i = 0; i < evCount; i++) {
+		const ScEvent& e = ev[i];
+		if (trackFilter >= 0 && (int)e.ch != trackFilter) continue;
+		if (!ScStaffIsNoteLike(e.kind, isFm)) continue;
+		const uint32_t n0 = e.tick, n1 = ScStaffEvEndTick(e);
+		if (n1 <= t0 || n0 >= t1) continue;
+		ScStaffSelAdd((ScStaffUi*)u, i);
+	}
+	ScStaffExpandSelToFullNotes((ScEvent*)ev, evCount, u, isFm, &t0, &t1, trackFilter);
+	return u->nSel;
+}
+
+int ScStaffSelectInRect(const CRect& grid, ScStaffUi* u, const ScEvent* ev, int evCount, int isFm,
+	const CRect& r, int expandFull)
+{
+	if (!u || !ev) return 0;
+	const int pxBeat = u->pxBeat > 0 ? u->pxBeat : SC_PX_BEAT_DEFAULT;
+	const int gridLeft = ScStaffGridLeftPx(grid.left, u, ev, evCount);
+	uint32_t t0 = ScStaffXToTick(r.left, u->scrollX, gridLeft, pxBeat, 0, u, ev, evCount);
+	uint32_t t1 = ScStaffXToTick(r.right, u->scrollX, gridLeft, pxBeat, 0, u, ev, evCount);
+	if (t1 < t0) { uint32_t t = t0; t0 = t1; t1 = t; }
+	ScStaffSelClear(u);
+	u->selRangeAllParts = 0;
+	for (int i = 0; i < evCount; i++) {
+		const ScEvent& e = ev[i];
+		if (!ScStaffIsNoteLike(e.kind, isFm)) continue;
+		int st = ScStaffVisibleLaneStaffTop(grid, u, e.ch);
+		if (st < 0) continue;
+		int x0 = ScStaffTickToX(e.tick, u->scrollX, gridLeft, pxBeat, u, ev, evCount);
+		int x1 = ScStaffTickToX(ScStaffEvEndTick(e), u->scrollX, gridLeft, pxBeat, u, ev, evCount);
+		int midi = (e.kind == SC_EV_REST || e.kind == SC_EV_FM_REST) ? 60
+			: ScStaffEvWrittenMidi(ev, evCount, e, isFm, e.ch);
+		int y = (e.kind == SC_EV_REST || e.kind == SC_EV_FM_REST)
+			? (st + 8) : ScStaffMidiNoteYTrack(u, e.ch, st, midi, e.tick, ev, evCount);
+		CRect nr(min(x0, x1), y - 4, max(x0 + 2, x1), y + 8);
+		CRect inter;
+		if (!inter.IntersectRect(&nr, &r)) continue;
+		ScStaffSelAdd(u, i);
+	}
+	if (expandFull)
+		ScStaffExpandSelToFullNotes((ScEvent*)ev, evCount, u, isFm, &t0, &t1, -1);
+	/* sync marquee visual to expanded tick range if possible */
+	if (u->selRangeValid) {
+		int xA = ScStaffTickToX(u->selRangeT0, u->scrollX, gridLeft, pxBeat, u, ev, evCount);
+		int xB = ScStaffTickToX(u->selRangeT1, u->scrollX, gridLeft, pxBeat, u, ev, evCount);
+		u->marqueeX0 = min(xA, xB);
+		u->marqueeX1 = max(xA, xB);
+		/* keep Y from original rect */
+		u->marqueeY0 = r.top;
+		u->marqueeY1 = r.bottom;
+	}
+	return u->nSel;
+}
+
+static void ScStaffBreakTiesAroundSelection(ScEvent* ev, int evCount, ScStaffUi* u, int isFm)
+{
+	if (!ev || !u) return;
+	for (int i = 0; i < evCount; i++) {
+		if (!ScStaffSelHas(u, i)) continue;
+		if (ev[i].kind != SC_EV_TIE) continue;
+		int prev = ScStaffFindPrevNoteSamePitch(ev, evCount, i, isFm);
+		if (prev >= 0 && !ScStaffSelHas(u, prev)) {
+			/* convert this TIE to a normal note (keep pitch from prev sounding) */
+			const int ch = (int)ev[i].ch;
+			const int pitch = ScStaffNotePitchKey(ev[prev], isFm, ch);
+			if (isFm) {
+				ev[i].kind = SC_EV_FM_NOTE;
+				/* encode from sounding midi */
+				int oct = pitch / 12 - 1; if (oct < 0) oct = 0; if (oct > 9) oct = 9;
+				int sc = pitch % 12; if (sc < 0) sc = 0;
+				ev[i].a = (uint8_t)(((oct & 0x0F) << 4) | (sc & 0x0F));
+			} else {
+				ev[i].kind = SC_EV_NOTE;
+				ev[i].a = (uint8_t)(pitch < 0 ? 60 : pitch);
+			}
+		}
+	}
+	/* next after selection that is TIE → convert to note */
+	for (int i = 0; i < evCount; i++) {
+		if (ScStaffSelHas(u, i)) continue;
+		if (ev[i].kind != SC_EV_TIE) continue;
+		int prev = ScStaffFindPrevNoteSamePitch(ev, evCount, i, isFm);
+		if (prev >= 0 && ScStaffSelHas(u, prev)) {
+			const int ch = (int)ev[i].ch;
+			const int pitch = ScStaffNotePitchKey(ev[prev], isFm, ch);
+			if (isFm) {
+				ev[i].kind = SC_EV_FM_NOTE;
+				int oct = pitch / 12 - 1; if (oct < 0) oct = 0; if (oct > 9) oct = 9;
+				int sc = pitch % 12; if (sc < 0) sc = 0;
+				ev[i].a = (uint8_t)(((oct & 0x0F) << 4) | (sc & 0x0F));
+			} else {
+				ev[i].kind = SC_EV_NOTE;
+				ev[i].a = (uint8_t)(pitch < 0 ? 60 : pitch);
+			}
+		}
+	}
+	/* Soft-delete slurs that cross the selection boundary (keep indices stable). */
+	for (int i = 0; i < evCount; i++) {
+		if (ev[i].kind != SC_EV_SLUR_START) continue;
+		const int ch = (int)ev[i].ch;
+		int end = -1;
+		for (int j = 0; j < evCount; j++) {
+			if ((int)ev[j].ch != ch) continue;
+			if (ev[j].tick < ev[i].tick) continue;
+			if (ev[j].kind == SC_EV_SLUR_END) { end = j; break; }
+		}
+		if (end < 0) continue;
+		int midSel = 0, midOut = 0;
+		for (int k = 0; k < evCount; k++) {
+			if ((int)ev[k].ch != ch) continue;
+			if (!ScStaffIsNoteLike(ev[k].kind, isFm)) continue;
+			if (ev[k].tick < ev[i].tick || ev[k].tick > ev[end].tick) continue;
+			if (ScStaffSelHas(u, k)) midSel = 1; else midOut = 1;
+		}
+		const int inS = ScStaffSelHas(u, i);
+		const int inE = ScStaffSelHas(u, end);
+		if ((midSel || inS || inE) && midOut) {
+			ev[i].kind = SC_EV_CC; ev[i].a = 255; ev[i].b = 0;
+			ev[end].kind = SC_EV_CC; ev[end].a = 255; ev[end].b = 0;
+		}
+	}
+}
+
+static int ScStaffApplyPitchDelta(ScEvent& e, int dSemi, int isFm, int tr)
+{
+	if (e.kind == SC_EV_REST || e.kind == SC_EV_FM_REST) return 0;
+	if (isFm && tr == 6) {
+		/* rhythm pads: clamp pad index */
+		int pad = (int)(e.a & 0x0F);
+		if (pad > 5) pad = pad % 6;
+		pad += dSemi;
+		while (pad < 0) pad += 6;
+		pad %= 6;
+		e.a = (uint8_t)((e.a & 0xF0) | (pad & 0x0F));
+		if (e.kind == SC_EV_TIE) e.kind = SC_EV_FM_NOTE;
+		return 1;
+	}
+	int midi = ScStaffNotePitchKey(e, isFm, tr);
+	if (midi < 0) return 0;
+	midi += dSemi;
+	if (midi < 0) midi = 0;
+	if (midi > 127) midi = 127;
+	if (isFm || e.kind == SC_EV_FM_NOTE) {
+		int oct = midi / 12 - 1; if (oct < 0) oct = 0; if (oct > 9) oct = 9;
+		int sc = midi % 12;
+		e.a = (uint8_t)(((oct & 0x0F) << 4) | (sc & 0x0F));
+		if (e.kind == SC_EV_TIE) e.kind = SC_EV_FM_NOTE;
+		else if (e.kind != SC_EV_FM_NOTE) e.kind = SC_EV_FM_NOTE;
+	} else {
+		e.a = (uint8_t)midi;
+		if (e.kind == SC_EV_TIE) e.kind = SC_EV_NOTE;
+	}
+	return 1;
+}
+
+static void ScStaffRetieSelectedChains(ScEvent* ev, int evCount, ScStaffUi* u, int isFm)
+{
+	if (!ev || !u || u->nSel < 2) return;
+	/* sort selected indices by tick */
+	int idx[SC_SEL_MAX];
+	int n = 0;
+	for (int i = 0; i < u->nSel && n < SC_SEL_MAX; i++) {
+		int ix = u->selList[i];
+		if (ix >= 0 && ix < evCount) idx[n++] = ix;
+	}
+	for (int a = 0; a < n; a++)
+		for (int b = a + 1; b < n; b++)
+			if (ev[idx[b]].tick < ev[idx[a]].tick ||
+				(ev[idx[b]].tick == ev[idx[a]].tick && idx[b] < idx[a])) {
+				int t = idx[a]; idx[a] = idx[b]; idx[b] = t;
+			}
+	for (int i = 0; i + 1 < n; i++) {
+		ScEvent& a = ev[idx[i]];
+		ScEvent& b = ev[idx[i + 1]];
+		if ((int)a.ch != (int)b.ch) continue;
+		if (a.kind == SC_EV_REST || a.kind == SC_EV_FM_REST) continue;
+		if (b.kind == SC_EV_REST || b.kind == SC_EV_FM_REST) continue;
+		const int pa = ScStaffNotePitchKey(a, isFm, a.ch);
+		const int pb = ScStaffNotePitchKey(b, isFm, b.ch);
+		if (pa < 0 || pa != pb) continue;
+		if (ScStaffEvEndTick(a) != b.tick && ScStaffEvEndTick(a) + 1 != b.tick) continue;
+		/* follower becomes TIE */
+		b.kind = SC_EV_TIE;
+		b.a = a.a;
+	}
+}
+
+int ScStaffSelMoveBy(ScEvent* ev, int* evCount, ScStaffUi* u, int dTick, int dSemi, int isFm)
+{
+	if (!ev || !evCount || !u || (dTick == 0 && dSemi == 0)) return 0;
+	const int n = *evCount;
+	if (u->nSel < 1 && u->selEv < 0) return 0;
+	if (u->nSel < 1 && u->selEv >= 0)
+		ScStaffSelAdd(u, u->selEv);
+
+	ScStaffBreakTiesAroundSelection(ev, n, u, isFm);
+
+	int moved = 0;
+	for (int s = 0; s < u->nSel; s++) {
+		int i = u->selList[s];
+		if (i < 0 || i >= n) continue;
+		ScEvent& e = ev[i];
+		if (!ScStaffIsNoteLike(e.kind, isFm) && e.kind != SC_EV_SLUR_START && e.kind != SC_EV_SLUR_END)
+			continue;
+		if (dTick) {
+			int64_t t = (int64_t)e.tick + dTick;
+			if (t < 0) t = 0;
+			e.tick = (uint32_t)t;
+		}
+		if (dSemi && ScStaffIsNoteLike(e.kind, isFm))
+			ScStaffApplyPitchDelta(e, dSemi, isFm, e.ch);
+		moved++;
+	}
+	ScStaffRetieSelectedChains(ev, *evCount, u, isFm);
+	return moved;
+}
+
+int ScStaffSelCopyEx(const ScEvent* ev, int evCount, const ScStaffUi* u, int isFm,
+	ScEvent* out, int outMax, uint32_t* outBaseTick, uint32_t* outSpan)
+{
+	if (!ev || !u || !out || outMax < 1) return 0;
+	uint32_t t0 = 0xFFFFFFFFu, t1 = 0;
+	char take[SC_EV_MAX];
+	memset(take, 0, sizeof(take));
+	auto mark = [&](int i) {
+		if (i < 0 || i >= evCount) return;
+		take[i] = 1;
+		uint32_t n0 = ev[i].tick, n1 = ScStaffEvEndTick(ev[i]);
+		if (n0 < t0) t0 = n0;
+		if (n1 > t1) t1 = n1;
+	};
+	if (u->nSel > 0) {
+		for (int i = 0; i < u->nSel; i++) mark(u->selList[i]);
+	} else if (u->selEv >= 0) {
+		mark(u->selEv);
+	}
+	if (t0 == 0xFFFFFFFFu) return 0;
+	/* attach controllers in span on same channels as selected notes */
+	char chUsed[32];
+	memset(chUsed, 0, sizeof(chUsed));
+	for (int i = 0; i < evCount; i++)
+		if (take[i] && (int)ev[i].ch < 32) chUsed[ev[i].ch] = 1;
+	for (int i = 0; i < evCount; i++) {
+		if (take[i]) continue;
+		if ((int)ev[i].ch >= 32 || !chUsed[ev[i].ch]) continue;
+		if (!ScStaffIsCtrlAttachKind(ev[i].kind, isFm)) continue;
+		if (ev[i].tick < t0 || ev[i].tick >= t1) continue;
+		take[i] = 1;
+	}
+	int n = 0;
+	for (int i = 0; i < evCount && n < outMax; i++) {
+		if (!take[i]) continue;
+		out[n++] = ev[i];
+	}
+	if (outBaseTick) *outBaseTick = t0;
+	if (outSpan) *outSpan = (t1 > t0) ? (t1 - t0) : 0;
+	return n;
+}
+
+int ScStaffSelPasteEx(ScEvent* ev, int* evCount, int evMax, ScStaffUi* u, int isFm,
+	const ScEvent* clip, int clipN, uint32_t baseTick, uint32_t clipSpan, int insertMode)
+{
+	if (!ev || !evCount || !clip || clipN < 1) return 0;
+	uint32_t minT = 0xFFFFFFFFu, maxEnd = 0;
+	char chUsed[32];
+	memset(chUsed, 0, sizeof(chUsed));
+	for (int i = 0; i < clipN; i++) {
+		if (clip[i].tick < minT) minT = clip[i].tick;
+		uint32_t end = ScStaffEvEndTick(clip[i]);
+		if (end > maxEnd) maxEnd = end;
+		if ((int)clip[i].ch < 32) chUsed[clip[i].ch] = 1;
+	}
+	if (minT == 0xFFFFFFFFu) minT = 0;
+	uint32_t span = clipSpan;
+	if (span == 0) span = (maxEnd > minT) ? (maxEnd - minT) : 0;
+
+	if (insertMode && span > 0) {
+		for (int i = 0; i < *evCount; i++) {
+			if ((int)ev[i].ch >= 32 || !chUsed[ev[i].ch]) continue;
+			if (ev[i].tick >= baseTick)
+				ev[i].tick += span;
+		}
+	} else if (!insertMode && span > 0) {
+		/* overwrite: delete overlapping notes/ctrls on target channels */
+		char drop[SC_EV_MAX];
+		memset(drop, 0, sizeof(drop));
+		for (int i = 0; i < *evCount; i++) {
+			if ((int)ev[i].ch >= 32 || !chUsed[ev[i].ch]) continue;
+			const uint32_t n0 = ev[i].tick, n1 = ScStaffEvEndTick(ev[i]);
+			if (ScStaffIsNoteLike(ev[i].kind, isFm)) {
+				if (n1 <= baseTick || n0 >= baseTick + span) continue;
+				drop[i] = 1;
+			} else if (ScStaffIsCtrlAttachKind(ev[i].kind, isFm)) {
+				if (ev[i].tick >= baseTick && ev[i].tick < baseTick + span)
+					drop[i] = 1;
+			}
+		}
+		int w = 0;
+		for (int i = 0; i < *evCount; i++)
+			if (!drop[i]) ev[w++] = ev[i];
+		*evCount = w;
+	}
+
+	int added = 0;
+	for (int i = 0; i < clipN; i++) {
+		if (*evCount >= evMax) break;
+		ScEvent e = clip[i];
+		e.tick = baseTick + (e.tick - minT);
+		ev[(*evCount)++] = e;
+		added++;
+	}
+	if (u) {
+		uint32_t need = baseTick + span;
+		if (need > (uint32_t)u->contentTicks)
+			u->contentTicks = (int)need + ScStaffTicksPerMeasure(u);
+	}
+	return added;
+}
+
+int ScStaffInsertBlankRange(ScEvent* ev, int evCount, ScStaffUi* u)
+{
+	if (!ev || !u || evCount < 1) return 0;
+	uint32_t t0 = 0, t1 = 0;
+	if (u->selRangeValid && u->selRangeT1 > u->selRangeT0) {
+		t0 = u->selRangeT0;
+		t1 = u->selRangeT1;
+	} else {
+		t0 = 0xFFFFFFFFu;
+		t1 = 0;
+		auto consider = [&](int i) {
+			if (i < 0 || i >= evCount) return;
+			const uint32_t n0 = ev[i].tick;
+			const uint32_t n1 = ScStaffEvEndTick(ev[i]);
+			if (n0 < t0) t0 = n0;
+			if (n1 > t1) t1 = n1;
+		};
+		if (u->nSel > 0) {
+			for (int s = 0; s < u->nSel; s++)
+				consider(u->selList[s]);
+		} else if (u->selEv >= 0) {
+			consider(u->selEv);
+		} else {
+			return 0;
+		}
+		if (t0 == 0xFFFFFFFFu || t1 <= t0) return 0;
+		u->selRangeValid = 1;
+		u->selRangeT0 = t0;
+		u->selRangeT1 = t1;
+	}
+	const uint32_t span = t1 - t0;
+	if (span < 1) return 0;
+
+	char chUsed[32];
+	memset(chUsed, 0, sizeof(chUsed));
+	if (!u->selRangeAllParts) {
+		int any = 0;
+		if (u->nSel > 0) {
+			for (int s = 0; s < u->nSel; s++) {
+				int i = u->selList[s];
+				if (i < 0 || i >= evCount) continue;
+				if ((int)ev[i].ch < 32) { chUsed[ev[i].ch] = 1; any = 1; }
+			}
+		} else if (u->selEv >= 0 && u->selEv < evCount && (int)ev[u->selEv].ch < 32) {
+			chUsed[ev[u->selEv].ch] = 1;
+			any = 1;
+		}
+		if (!any) {
+			int tr = u->markerSolidTrack;
+			if (tr < 0 || tr >= 32) tr = 0;
+			chUsed[tr] = 1;
+		}
+	}
+
+	for (int i = 0; i < evCount; i++) {
+		if (!u->selRangeAllParts) {
+			if ((int)ev[i].ch >= 32 || !chUsed[ev[i].ch]) continue;
+		}
+		if (ev[i].tick >= t0)
+			ev[i].tick += span;
+	}
+	u->contentTicks += (int)span;
+	/* Keep the blank hole as the active range (same t0..t1). */
+	u->selRangeValid = 1;
+	u->selRangeT0 = t0;
+	u->selRangeT1 = t0 + span;
+	return 1;
+}
+
+void ScStaffShrinkContentIfNeeded(ScStaffUi* u, const ScEvent* ev, int evCount)
+{
+	if (!u) return;
+	const int floorTicks = SC_PPQN * SC_MEASURE_BEATS * SC_MEASURES_DEFAULT;
+	uint32_t maxEnd = 0;
+	for (int i = 0; i < evCount; i++) {
+		uint32_t end = ScStaffEvEndTick(ev[i]);
+		if (end > maxEnd) maxEnd = end;
+	}
+	const int tpm = ScStaffTicksPerMeasure(u);
+	uint32_t need = maxEnd + (uint32_t)(tpm * 2);
+	if ((int)need < floorTicks) need = (uint32_t)floorTicks;
+	/* round up to measure */
+	if (tpm > 0)
+		need = ((need + (uint32_t)tpm - 1) / (uint32_t)tpm) * (uint32_t)tpm;
+	u->contentTicks = (int)need;
+}
+
+int ScStaffNoteHasFx(const ScEvent* ev, int evCount, int noteIdx, int isFm,
+	int* outPitch, int* outPan, int* outVol, int* outExpr)
+{
+	if (outPitch) *outPitch = 0;
+	if (outPan) *outPan = 0;
+	if (outVol) *outVol = 0;
+	if (outExpr) *outExpr = 0;
+	if (!ev || noteIdx < 0 || noteIdx >= evCount) return 0;
+	const ScEvent& n = ev[noteIdx];
+	if (!ScStaffIsNoteLike(n.kind, isFm)) return 0;
+	const uint32_t n0 = n.tick, n1 = ScStaffEvEndTick(n);
+	const int ch = (int)n.ch;
+	int any = 0;
+	for (int i = 0; i < evCount; i++) {
+		if ((int)ev[i].ch != ch) continue;
+		if (ev[i].tick < n0 || ev[i].tick >= n1) continue;
+		const uint8_t k = ev[i].kind;
+		if (k == SC_EV_PITCH || k == SC_EV_FM_PITCH) {
+			if (ev[i].a != 64) { if (outPitch) *outPitch = 1; any = 1; }
+		} else if (k == SC_EV_PAN) {
+			if (ev[i].a != 64) { if (outPan) *outPan = 1; any = 1; }
+		} else if (k == SC_EV_VOL || k == SC_EV_FM_VOL) {
+			if (outVol) *outVol = 1; any = 1;
+		} else if (k == SC_EV_VELO || (k == SC_EV_CC && ev[i].a == 11)) {
+			if (outExpr) *outExpr = 1; any = 1;
+		}
+	}
+	return any;
 }

@@ -1,4 +1,4 @@
-// ogg.cpp : アプリケーション用クラスの定義を行います。
+﻿// ogg.cpp : アプリケーション用クラスの定義を行います。
 //
 
 #include "stdafx.h"
@@ -6,6 +6,7 @@
 #include "ogg.h"
 #include "oggDlg.h"
 #include "CMidiMonitorDlg.h"
+#include "CEmu/cemu_mgr.h"
 #include "CFmMonitorDlg.h"
 #include "CMediaPlayerDlg.h"
 #include "UpdateCheck.h"
@@ -272,6 +273,11 @@ BOOL COggApp::InitInstance()
 			}
 	}
 	_tchdir(karento2);
+	{
+		wchar_t cemuData[MAX_PATH];
+		_snwprintf_s(cemuData, _TRUNCATE, L"%sdata", karento2);
+		CEmuMgrInit(CEmuMgrGet(), cemuData);
+	}
 	if (DatArc_Init(karento2))
 		DatArc_Chdir();
 	ZeroMemory(&savedata,sizeof(save));
@@ -2086,6 +2092,17 @@ BOOL COggApp::InitInstance()
 		savedata.sasamiLayPalW = savedata.sasamiLayoutPalW;
 		savedata.sasamiLayPalH = savedata.sasamiLayoutPalH;
 	}
+	if (datFileSize < (int)(offsetof(save, cemuDataPath) + sizeof(savedata.cemuDataPath)))
+		savedata.cemuDataPath[0] = 0;
+	savedata.cemuDataPath[_countof(savedata.cemuDataPath) - 1] = 0;
+	if (datFileSize < (int)(offsetof(save, cemuListW) + sizeof(savedata.cemuListW))) {
+		savedata.cemuListX = savedata.cemuListY = 0;
+		savedata.cemuListW = savedata.cemuListH = 0;
+	}
+	/* UI パス欄は廃止。常に exe\\data（なければ hoot）。
+	   ルートは InitInstance 冒頭の CEmuMgrInit 済み。ここで Reload すると
+	   arcdata 全読込が起動を再度ブロックするため呼ばない。 */
+	savedata.cemuDataPath[0] = 0;
 	/* DatArc 内 fmmon_geom.dat（なければ旧 exe隣 .bin）で開閉・位置を上書き */
 	{
 		CString staged = DatArc_Path(L"fmmon_geom.dat");

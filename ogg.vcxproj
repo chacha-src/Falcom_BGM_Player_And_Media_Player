@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003" DefaultTargets="Build" ToolsVersion="14.0">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="uni_2026_de|Win32">
@@ -155,7 +155,7 @@
       <LanguageStandard>stdcpp17</LanguageStandard>
       <LanguageStandard_C>Default</LanguageStandard_C>
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
-      <AdditionalIncludeDirectories>$(ProjectDir)kb_sasami\source;$(ProjectDir)zstd;$(ProjectDir)third_party\signalsmith-stretch\include;$(ProjectDir)third_party\signalsmith-linear\include;$(ProjectDir)third_party\aimp;$(ProjectDir)third_party\vst3sdk;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)CEmu;$(ProjectDir)..\kpi_sources_20240712\kpi_decoder\kbmdx\source\portable_mdx\include;..\kpi_sources_20240712\kpi_decoder\kbmdx\source\mdc;$(ProjectDir)..\kpi_sources_20240712\kpi_decoder\kbmdx\source\portable_mdx\src\mxdrv;$(ProjectDir)..\kpi_sources_20240712\kpi_decoder\kbmdx\source\portable_mdx\src\x68sound;$(ProjectDir)kb_sasami\source;$(ProjectDir)kb_sasami\source\ymfm;$(ProjectDir)CEmu\s98;$(ProjectDir)CEmu\s98\device;$(ProjectDir)CEmu\s98\device\fmgen;$(ProjectDir)CEmu\z80;$(ProjectDir)CEmu\fmmon;$(ProjectDir)CEmu\vendor\np2\glue;$(ProjectDir)CEmu\vendor\np2\include;$(ProjectDir)CEmu\vendor\np2\cpu;$(ProjectDir)CEmu\vendor\musashi;$(ProjectDir)CEmu\vendor\mc6809;$(ProjectDir)CEmu\vendor\m6502;$(ProjectDir)CEmu\vendor\h6280;$(ProjectDir)CEmu\vendor\h8;$(ProjectDir)CEmu\vendor\hd63701;$(ProjectDir)CEmu\vendor\m6803;$(ProjectDir)CEmu\vendor\multipcm;$(ProjectDir)CEmu\vendor\v35;$(ProjectDir)CEmu\vendor\m37710;$(ProjectDir)CEmu\vendor\np2;$(ProjectDir)..\kpi_sources_20240712\kpi_decoder\kbs98\source\device;$(ProjectDir)..\kpi_sources_20240712\kpi_decoder\kbs98\source\device\mame;$(ProjectDir)..\kpi_sources_20240712\kpi_decoder\kbs98\source\device\emu2413;$(ProjectDir)zstd;$(ProjectDir)third_party\signalsmith-stretch\include;$(ProjectDir)third_party\signalsmith-linear\include;$(ProjectDir)third_party\aimp;$(ProjectDir)third_party\vst3sdk;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <ResourceCompile>
       <PreprocessorDefinitions>NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
@@ -388,6 +388,157 @@
     <ClCompile Include="CPianoRoll.cpp" />
     <ClCompile Include="CMidiMonitorDlg.cpp" />
     <ClCompile Include="CFmMonitorDlg.cpp" />
+    <ClCompile Include="CEmu\cemu_catalog.cpp" />
+    <ClCompile Include="CEmu\cemu_zipfs.cpp" />
+    <ClCompile Include="CEmu\cemu_modepref.cpp" />
+    <ClCompile Include="CEmu\cemu_midi_live.cpp" />
+    <ClCompile Include="CEmu\cemu_mgr.cpp" />
+    <ClCompile Include="CEmu\cemu_session.cpp" />
+    <ClCompile Include="CEmu\cemu_rhythm.cpp" />
+    <ClCompile Include="CEmu\chip\cemu_chip_opna.cpp" />
+    <ClCompile Include="CEmu\chip\cemu_chip_opm.cpp" />
+    <ClCompile Include="CEmu\chip\cemu_chip_sn76489.cpp" />
+    <ClCompile Include="CEmu\chip\cemu_chip_segapcm.cpp" />
+    <ClCompile Include="CEmu\chip\cemu_chip_ga20.cpp" />
+    <ClCompile Include="CEmu\chip\cemu_chip_irem_dac.cpp" />
+    <ClCompile Include="CEmu\chip\cemu_chip_oki6295.cpp" />
+    <ClCompile Include="CEmu\chip\cemu_chip_qsound.cpp" />
+    <ClCompile Include="CEmu\chip\cemu_chip_k053260.cpp" />
+    <ClCompile Include="CEmu\chip\cemu_chip_k054539.cpp" />
+    <ClCompile Include="CEmu\chip\cemu_chip_ym2610.cpp" />
+    <ClCompile Include="CEmu\chip\cemu_chip_ym2612.cpp" />
+    <ClCompile Include="CEmu\chip\cemu_chip_c352.cpp" />
+    <ClCompile Include="CEmu\chip\cemu_chip_c140.cpp" />
+    <ClCompile Include="CEmu\chip\cemu_chip_c30.cpp" />
+    <ClCompile Include="CEmu\chip\cemu_chip_msm5232.cpp" />
+    <ClCompile Include="CEmu\chip\cemu_chip_scsp.cpp" />
+    <ClCompile Include="CEmu\chip\cemu_chip_rf5c400.cpp" />
+    <ClCompile Include="CEmu\chip\cemu_chip_multipcm.cpp" />
+    <ClCompile Include="CEmu\chip\cemu_chip_es5505.cpp" />
+    <ClCompile Include="CEmu\chip\cemu_chip_rf5c68.cpp" />
+    <ClCompile Include="CEmu\chip\cemu_chip_ay.cpp" />
+    <ClCompile Include="CEmu\chip\cemu_chip_opl.cpp" />
+    <ClCompile Include="CEmu\chip\cemu_chip_saa1099.cpp" />
+    <ClCompile Include="CEmu\machine\cemu_pc88.cpp" />
+    <ClCompile Include="CEmu\machine\cemu_hard_pc88.cpp" />
+    <ClCompile Include="CEmu\driver\cemu_driver_pc88.cpp" />
+    <ClCompile Include="CEmu\machine\cemu_pc98.cpp" />
+    <ClCompile Include="CEmu\machine\cemu_hard_pc98.cpp" />
+    <ClCompile Include="CEmu\machine\cemu_dos98.cpp" />
+    <ClCompile Include="CEmu\driver\cemu_driver_pc98.cpp" />
+    <ClCompile Include="CEmu\machine\cemu_pcat.cpp" />
+    <ClCompile Include="CEmu\machine\cemu_hard_pcat.cpp" />
+    <ClCompile Include="CEmu\driver\cemu_driver_pcat.cpp" />
+    <ClCompile Include="CEmu\machine\cemu_ac.cpp" />
+    <ClCompile Include="CEmu\machine\cemu_hard_ac.cpp" />
+    <ClCompile Include="CEmu\machine\cemu_m37702_bus.cpp" />
+    <ClCompile Include="CEmu\machine\cemu_ac_board_spec.cpp" />
+    <ClCompile Include="CEmu\machine\cemu_hard_ac_p45.cpp" />
+    <ClCompile Include="CEmu\machine\cemu_sys86_hd63701.cpp" />
+    <ClCompile Include="CEmu\machine\cemu_sei80bu.cpp" />
+    <ClCompile Include="CEmu\machine\cemu_h6280_bus.cpp" />
+    <ClCompile Include="CEmu\machine\cemu_h8_bus.cpp" />
+    <ClCompile Include="CEmu\machine\cemu_hd63701_bus.cpp" />
+    <ClCompile Include="CEmu\machine\cemu_kabuki.cpp" />
+    <ClCompile Include="CEmu\driver\cemu_driver_ac.cpp" />
+    <ClCompile Include="CEmu\machine\cemu_hard_neogeo.cpp" />
+    <ClCompile Include="CEmu\driver\cemu_driver_neogeo.cpp" />
+    <ClCompile Include="CEmu\machine\cemu_sg1000.cpp" />
+    <ClCompile Include="CEmu\machine\cemu_hard_sg1000.cpp" />
+    <ClCompile Include="CEmu\driver\cemu_driver_sg1000.cpp" />
+    <ClCompile Include="CEmu\machine\cemu_x1.cpp" />
+    <ClCompile Include="CEmu\machine\cemu_msx.cpp" />
+    <ClCompile Include="CEmu\machine\cemu_hard_x1.cpp" />
+    <ClCompile Include="CEmu\driver\cemu_driver_x1.cpp" />
+    <ClCompile Include="CEmu\machine\cemu_fm7.cpp" />
+    <ClCompile Include="CEmu\machine\cemu_hard_fm7.cpp" />
+    <ClCompile Include="CEmu\driver\cemu_driver_fm7.cpp" />
+    <ClCompile Include="CEmu\vendor\mc6809\mc6809.c" />
+    <ClCompile Include="CEmu\vendor\m6502\m6502core.c" />
+    <ClCompile Include="CEmu\vendor\h6280\h6280core.c" />
+    <ClCompile Include="CEmu\vendor\h8\h8core.c" />
+    <ClCompile Include="CEmu\vendor\hd63701\hd63701core.cpp" />
+    <ClCompile Include="CEmu\vendor\hd63701\m6800.cpp" />
+    <ClCompile Include="CEmu\vendor\m6803\m6803core.c" />
+    <ClCompile Include="CEmu\vendor\multipcm\multipcm.c" />
+    <ClCompile Include="CEmu\machine\cemu_hard_msx.cpp" />
+    <ClCompile Include="CEmu\driver\cemu_driver_msx.cpp" />
+    <ClCompile Include="CEmu\machine\cemu_x68k.cpp" />
+    <ClCompile Include="CEmu\machine\cemu_hard_x68k.cpp" />
+    <ClCompile Include="CEmu\machine\cemu_x68k_dos.cpp" />
+    <ClCompile Include="CEmu\machine\cemu_m68k_bus.cpp" />
+    <ClCompile Include="CEmu\machine\cemu_v35_bus.cpp" />
+    <ClCompile Include="CEmu\machine\cemu_irem_cpu_tables.cpp" />
+    <ClCompile Include="CEmu\vendor\v35\v35core.c" />
+    <ClCompile Include="CEmu\vendor\m37710\m37702core.c" />
+    <ClCompile Include="CEmu\vendor\m37710\m37702o0.c" />
+    <ClCompile Include="CEmu\vendor\m37710\m37702o1.c" />
+    <ClCompile Include="CEmu\vendor\m37710\m37702o2.c" />
+    <ClCompile Include="CEmu\vendor\m37710\m37702o3.c" />
+    <ClCompile Include="CEmu\driver\cemu_driver_x68k.cpp" />
+    <ClCompile Include="CEmu\machine\cemu_hard_f3.cpp" />
+    <ClCompile Include="CEmu\machine\cemu_f3.cpp" />
+    <ClCompile Include="CEmu\driver\cemu_driver_f3.cpp" />
+    <ClCompile Include="CEmu\cemu_factory.cpp" />
+    <ClCompile Include="CEmu\vendor\musashi\m68kcpu.c" />
+    <ClCompile Include="CEmu\vendor\musashi\m68kops.c" />
+    <ClCompile Include="CEmu\vendor\musashi\m68kopac.c" />
+    <ClCompile Include="CEmu\vendor\musashi\m68kopdm.c" />
+    <ClCompile Include="CEmu\vendor\musashi\m68kopnz.c" />
+    <ClCompile Include="CEmu\vendor\np2\np2ffi.c" />
+    <ClCompile Include="CEmu\vendor\np2\cpu\i286c.c" />
+    <ClCompile Include="CEmu\vendor\np2\cpu\i286c_0f.c" />
+    <ClCompile Include="CEmu\vendor\np2\cpu\i286c_8x.c" />
+    <ClCompile Include="CEmu\vendor\np2\cpu\i286c_ea.c" />
+    <ClCompile Include="CEmu\vendor\np2\cpu\i286c_f6.c" />
+    <ClCompile Include="CEmu\vendor\np2\cpu\i286c_fe.c" />
+    <ClCompile Include="CEmu\vendor\np2\cpu\i286c_mn.c" />
+    <ClCompile Include="CEmu\vendor\np2\cpu\i286c_rp.c" />
+    <ClCompile Include="CEmu\vendor\np2\cpu\i286c_sf.c" />
+    <ClCompile Include="CEmu\vendor\np2\cpu\v30patch.c" />
+    <ClCompile Include="CEmu\vendor\np2\glue\np2mem.c" />
+    <ClCompile Include="CEmu\vendor\np2\glue\np2io.c" />
+
+    <ClCompile Include="CEmu\fmmon\fmmon_shadow.cpp" />
+    <ClCompile Include="CEmu\fmmon\cemu_fmmon_bind.cpp" />
+    <ClCompile Include="CEmu\fmmon\fmmon_write.cpp" />
+    <ClCompile Include="CEmu\z80\Ay_Cpu.cpp" />
+    <ClCompile Include="CEmu\z80\Ay_Cpu_irq.cpp" />
+    <ClCompile Include="CEmu\z80\cemu_z80_bus.cpp" />
+    <ClCompile Include="CEmu\mdx\cemu_mdx_decoder.cpp" />
+    <ClCompile Include="..\kpi_sources_20240712\kpi_decoder\kbmdx\source\mdc\mdc.c" />
+    <ClCompile Include="..\kpi_sources_20240712\kpi_decoder\kbmdx\source\portable_mdx\src\mdx_util.c" />
+    <ClCompile Include="..\kpi_sources_20240712\kpi_decoder\kbmdx\source\portable_mdx\src\mxdrv\mxdrv.cpp" />
+    <ClCompile Include="..\kpi_sources_20240712\kpi_decoder\kbmdx\source\portable_mdx\src\mxdrv\mxdrv_context.cpp" />
+    <ClCompile Include="..\kpi_sources_20240712\kpi_decoder\kbmdx\source\portable_mdx\src\mxdrv\sound_iocs.cpp" />
+    <ClCompile Include="..\kpi_sources_20240712\kpi_decoder\kbmdx\source\portable_mdx\src\x68sound\x68sound.cpp" />
+    <ClCompile Include="..\kpi_sources_20240712\kpi_decoder\kbmdx\source\portable_mdx\src\x68sound\x68sound_adpcm.cpp" />
+    <ClCompile Include="..\kpi_sources_20240712\kpi_decoder\kbmdx\source\portable_mdx\src\x68sound\x68sound_context.cpp" />
+    <ClCompile Include="..\kpi_sources_20240712\kpi_decoder\kbmdx\source\portable_mdx\src\x68sound\x68sound_lfo.cpp" />
+    <ClCompile Include="..\kpi_sources_20240712\kpi_decoder\kbmdx\source\portable_mdx\src\x68sound\x68sound_op.cpp" />
+    <ClCompile Include="..\kpi_sources_20240712\kpi_decoder\kbmdx\source\portable_mdx\src\x68sound\x68sound_opm.cpp" />
+    <ClCompile Include="..\kpi_sources_20240712\kpi_decoder\kbmdx\source\portable_mdx\src\x68sound\x68sound_pcm8.cpp" />
+    <ClCompile Include="CEmu\s98\cemu_s98_decoder.cpp" />
+    <ClCompile Include="CEmu\s98\device\s98fmgen.cpp" />
+    <ClCompile Include="CEmu\s98\device\s98mame.cpp" />
+    <ClCompile Include="CEmu\s98\device\s98opll.cpp" />
+    <ClCompile Include="CEmu\s98\device\s98sng.cpp" />
+    <ClCompile Include="CEmu\s98\device\fmgen\fmgen.cpp" />
+    <ClCompile Include="CEmu\s98\device\fmgen\fmtimer.cpp" />
+    <ClCompile Include="CEmu\s98\device\fmgen\opm.cpp" />
+    <ClCompile Include="CEmu\s98\device\fmgen\opna.cpp" />
+    <ClCompile Include="CEmu\s98\device\fmgen\psg.cpp" />
+    <ClCompile Include="CEmu\s98\device\fmgen\file.cpp" />
+    <ClCompile Include="kb_sasami\source\ymfm\ymfm_opn.cpp" />
+    <ClCompile Include="kb_sasami\source\ymfm\ymfm_adpcm.cpp" />
+    <ClCompile Include="kb_sasami\source\ymfm\ymfm_ssg.cpp" />
+    <ClCompile Include="..\kpi_sources_20240712\kpi_decoder\kbs98\source\device\mame\fmopl.c" />
+    <ClCompile Include="..\kpi_sources_20240712\kpi_decoder\kbs98\source\device\mame\ymf262.c" />
+    <ClCompile Include="..\kpi_sources_20240712\kpi_decoder\kbs98\source\device\emu2413\emu2413.c" />
+    <ClCompile Include="..\kpi_sources_20240712\kpi_decoder\kbs98\source\device\s_sng.c" />
+    <ClCompile Include="..\kpi_sources_20240712\kpi_decoder\kbs98\source\device\s_logtbl.c" />
+    <ClCompile Include="CEmuHelpDlg.cpp" />
+    <ClCompile Include="CEmuCatalogListDlg.cpp" />
     <ClCompile Include="CSasamiTextDlg.cpp" />
     <ClCompile Include="CSasamiCmdHelpDlg.cpp" />
     <ClCompile Include="CSasamiMidiScoreDlg.cpp" />
@@ -489,6 +640,7 @@
     <ClCompile Include="minizip\ioapi.c" />
     <ClCompile Include="minizip\iowin32.c" />
     <ClCompile Include="KpiPluginInstall.cpp" />
+    <ClCompile Include="KpiEnumCache.cpp" />
     <ClCompile Include="UpdateCheck.cpp">
       <PreprocessorDefinitions>NOUNCRYPT;USEWIN32IOAPI;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
@@ -521,6 +673,80 @@
     <ClInclude Include="CPianoRoll.h" />
     <ClInclude Include="CMidiMonitorDlg.h" />
     <ClInclude Include="CFmMonitorDlg.h" />
+    <ClInclude Include="CEmu\cemu_types.h" />
+    <ClInclude Include="CEmu\cemu_catalog.h" />
+    <ClInclude Include="CEmu\cemu_modepref.h" />
+    <ClInclude Include="CEmu\cemu_midi_live.h" />
+    <ClInclude Include="CEmu\cemu_zipfs.h" />
+    <ClInclude Include="CEmu\cemu_mgr.h" />
+    <ClInclude Include="CEmu\cemu_session.h" />
+    <ClInclude Include="CEmu\cemu_mdx.h" />
+    <ClInclude Include="CEmu\cemu_s98.h" />
+    <ClInclude Include="CEmu\cemu_kpi_min.h" />
+    <ClInclude Include="CEmu\chip\cemu_chip.h" />
+    <ClInclude Include="CEmu\chip\cemu_chip_opna.h" />
+    <ClInclude Include="CEmu\chip\cemu_chip_opm.h" />
+    <ClInclude Include="CEmu\chip\cemu_chip_sn76489.h" />
+    <ClInclude Include="CEmu\chip\cemu_chip_segapcm.h" />
+    <ClInclude Include="CEmu\chip\cemu_chip_ga20.h" />
+    <ClInclude Include="CEmu\chip\cemu_chip_irem_dac.h" />
+    <ClInclude Include="CEmu\chip\cemu_chip_oki6295.h" />
+    <ClInclude Include="CEmu\chip\cemu_chip_qsound.h" />
+    <ClInclude Include="CEmu\chip\cemu_chip_k053260.h" />
+    <ClInclude Include="CEmu\chip\cemu_chip_k054539.h" />
+    <ClInclude Include="CEmu\chip\cemu_chip_ym2610.h" />
+    <ClInclude Include="CEmu\chip\cemu_chip_ym2612.h" />
+    <ClInclude Include="CEmu\chip\cemu_chip_c352.h" />
+    <ClInclude Include="CEmu\chip\cemu_chip_c140.h" />
+    <ClInclude Include="CEmu\chip\cemu_chip_c30.h" />
+    <ClInclude Include="CEmu\chip\cemu_chip_es5505.h" />
+    <ClInclude Include="CEmu\machine\cemu_hard_f3.h" />
+    <ClInclude Include="CEmu\machine\cemu_f3.h" />
+    <ClInclude Include="CEmu\machine\cemu_m68k_bus.h" />
+    <ClInclude Include="CEmu\machine\cemu_v35_bus.h" />
+    <ClInclude Include="CEmu\machine\cemu_irem_cpu_tables.h" />
+    <ClInclude Include="CEmu\vendor\v35\v35core.h" />
+    <ClInclude Include="CEmu\driver\cemu_driver_f3.h" />
+    <ClInclude Include="CEmu\chip\cemu_chip_rf5c68.h" />
+    <ClInclude Include="CEmu\chip\cemu_chip_ay.h" />
+    <ClInclude Include="CEmu\chip\cemu_chip_opl.h" />
+    <ClInclude Include="CEmu\chip\cemu_chip_saa1099.h" />
+    <ClInclude Include="CEmu\machine\cemu_pcat.h" />
+    <ClInclude Include="CEmu\machine\cemu_hard_pcat.h" />
+    <ClInclude Include="CEmu\driver\cemu_driver_pcat.h" />
+    <ClInclude Include="CEmu\machine\cemu_pc88.h" />
+    <ClInclude Include="CEmu\machine\cemu_ac.h" />
+    <ClInclude Include="CEmu\machine\cemu_hard_ac.h" />
+    <ClInclude Include="CEmu\machine\cemu_ac_board_spec.h" />
+    <ClInclude Include="CEmu\machine\cemu_hard_neogeo.h" />
+    <ClInclude Include="CEmu\machine\cemu_sg1000.h" />
+    <ClInclude Include="CEmu\machine\cemu_hard_sg1000.h" />
+    <ClInclude Include="CEmu\driver\cemu_driver_sg1000.h" />
+    <ClInclude Include="CEmu\machine\cemu_x1.h" />
+    <ClInclude Include="CEmu\machine\cemu_msx.h" />
+    <ClInclude Include="CEmu\machine\cemu_hard_x1.h" />
+    <ClInclude Include="CEmu\driver\cemu_driver_x1.h" />
+    <ClInclude Include="CEmu\machine\cemu_fm7.h" />
+    <ClInclude Include="CEmu\machine\cemu_hard_fm7.h" />
+    <ClInclude Include="CEmu\driver\cemu_driver_fm7.h" />
+    <ClInclude Include="CEmu\vendor\mc6809\mc6809.h" />
+    <ClInclude Include="CEmu\machine\cemu_hard_msx.h" />
+    <ClInclude Include="CEmu\driver\cemu_driver_msx.h" />
+    <ClInclude Include="CEmu\driver\cemu_driver_ac.h" />
+    <ClInclude Include="CEmu\driver\cemu_driver_neogeo.h" />
+    <ClInclude Include="CEmu\z80\cemu_z80_bus.h" />
+    <ClInclude Include="CEmu\machine\cemu_hard.h" />
+    <ClInclude Include="CEmu\machine\cemu_hard_pc88.h" />
+    <ClInclude Include="CEmu\machine\cemu_pc98.h" />
+    <ClInclude Include="CEmu\machine\cemu_hard_pc98.h" />
+    <ClInclude Include="CEmu\machine\cemu_dos98.h" />
+    <ClInclude Include="CEmu\driver\cemu_driver.h" />
+    <ClInclude Include="CEmu\driver\cemu_driver_pc88.h" />
+    <ClInclude Include="CEmu\driver\cemu_driver_pc98.h" />
+    <ClInclude Include="CEmu\vendor\np2\np2ffi.h" />
+    <ClInclude Include="CEmu\fmmon\fmmon_shadow.h" />
+    <ClInclude Include="CEmuHelpDlg.h" />
+    <ClInclude Include="CEmuCatalogListDlg.h" />
     <ClInclude Include="kb_sasami\source\sasami_fmmon.h" />
     <ClInclude Include="CSasamiTextDlg.h" />
     <ClInclude Include="CSasamiCmdHelpDlg.h" />
@@ -1241,6 +1467,243 @@
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Update="minizip\unzip.c">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Update="CEmu\fmmon\fmmon_shadow.cpp">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Update="CEmu\fmmon\cemu_fmmon_bind.cpp">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Update="CEmu\fmmon\fmmon_write.cpp">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Update="CEmu\z80\Ay_Cpu.cpp">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Update="CEmu\z80\Ay_Cpu_irq.cpp">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Update="CEmu\mdx\cemu_mdx_decoder.cpp">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Update="..\kpi_sources_20240712\kpi_decoder\kbmdx\source\mdc\mdc.c">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Update="..\kpi_sources_20240712\kpi_decoder\kbmdx\source\portable_mdx\src\mdx_util.c">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Update="..\kpi_sources_20240712\kpi_decoder\kbmdx\source\portable_mdx\src\mxdrv\mxdrv.cpp">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Update="..\kpi_sources_20240712\kpi_decoder\kbmdx\source\portable_mdx\src\mxdrv\mxdrv_context.cpp">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Update="..\kpi_sources_20240712\kpi_decoder\kbmdx\source\portable_mdx\src\mxdrv\sound_iocs.cpp">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Update="..\kpi_sources_20240712\kpi_decoder\kbmdx\source\portable_mdx\src\x68sound\x68sound.cpp">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Update="..\kpi_sources_20240712\kpi_decoder\kbmdx\source\portable_mdx\src\x68sound\x68sound_adpcm.cpp">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Update="..\kpi_sources_20240712\kpi_decoder\kbmdx\source\portable_mdx\src\x68sound\x68sound_context.cpp">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Update="..\kpi_sources_20240712\kpi_decoder\kbmdx\source\portable_mdx\src\x68sound\x68sound_lfo.cpp">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Update="..\kpi_sources_20240712\kpi_decoder\kbmdx\source\portable_mdx\src\x68sound\x68sound_op.cpp">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Update="..\kpi_sources_20240712\kpi_decoder\kbmdx\source\portable_mdx\src\x68sound\x68sound_opm.cpp">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Update="..\kpi_sources_20240712\kpi_decoder\kbmdx\source\portable_mdx\src\x68sound\x68sound_pcm8.cpp">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Update="CEmu\s98\cemu_s98_decoder.cpp">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Update="CEmu\s98\device\s98fmgen.cpp">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Update="CEmu\s98\device\s98mame.cpp">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Update="CEmu\s98\device\s98opll.cpp">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Update="CEmu\s98\device\s98sng.cpp">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Update="CEmu\s98\device\fmgen\fmgen.cpp">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Update="CEmu\s98\device\fmgen\fmtimer.cpp">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Update="CEmu\s98\device\fmgen\opm.cpp">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Update="CEmu\s98\device\fmgen\opna.cpp">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Update="CEmu\s98\device\fmgen\psg.cpp">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Update="CEmu\s98\device\fmgen\file.cpp">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Update="kb_sasami\source\ymfm\ymfm_opn.cpp">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Update="kb_sasami\source\ymfm\ymfm_adpcm.cpp">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Update="kb_sasami\source\ymfm\ymfm_ssg.cpp">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Update="..\kpi_sources_20240712\kpi_decoder\kbs98\source\device\mame\fmopl.c">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Update="..\kpi_sources_20240712\kpi_decoder\kbs98\source\device\mame\ymf262.c">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Update="CEmu\vendor\musashi\m68kcpu.c">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <CompileAs Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">CompileAsC</CompileAs>
+    </ClCompile>
+    <ClCompile Update="CEmu\vendor\musashi\m68kops.c">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <CompileAs Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">CompileAsC</CompileAs>
+    </ClCompile>
+    <ClCompile Update="CEmu\vendor\musashi\m68kopac.c">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <CompileAs Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">CompileAsC</CompileAs>
+    </ClCompile>
+    <ClCompile Update="CEmu\vendor\musashi\m68kopdm.c">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <CompileAs Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">CompileAsC</CompileAs>
+    </ClCompile>
+    <ClCompile Update="CEmu\vendor\musashi\m68kopnz.c">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <CompileAs Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">CompileAsC</CompileAs>
+    </ClCompile>
+    <ClCompile Update="CEmu\vendor\m37710\m37702core.c">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <CompileAs Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">CompileAsC</CompileAs>
+    </ClCompile>
+    <ClCompile Update="CEmu\vendor\m37710\m37702o0.c">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <CompileAs Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">CompileAsC</CompileAs>
+    </ClCompile>
+    <ClCompile Update="CEmu\vendor\m37710\m37702o1.c">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <CompileAs Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">CompileAsC</CompileAs>
+    </ClCompile>
+    <ClCompile Update="CEmu\vendor\m37710\m37702o2.c">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <CompileAs Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">CompileAsC</CompileAs>
+    </ClCompile>
+    <ClCompile Update="CEmu\vendor\m37710\m37702o3.c">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <CompileAs Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">CompileAsC</CompileAs>
+    </ClCompile>
+    <ClCompile Update="CEmu\vendor\v35\v35core.c">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <CompileAs Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">CompileAsC</CompileAs>
+    </ClCompile>
+    <ClCompile Update="CEmu\vendor\mc6809\mc6809.c">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <CompileAs Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">CompileAsC</CompileAs>
+    </ClCompile>
+    <ClCompile Update="CEmu\vendor\m6502\m6502core.c">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <CompileAs Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">CompileAsC</CompileAs>
+    </ClCompile>
+    <ClCompile Update="CEmu\vendor\h6280\h6280core.c">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <CompileAs Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">CompileAsC</CompileAs>
+    </ClCompile>
+    <ClCompile Update="CEmu\vendor\h8\h8core.c">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <CompileAs Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">CompileAsC</CompileAs>
+    </ClCompile>
+    <ClCompile Update="CEmu\vendor\m6803\m6803core.c">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <CompileAs Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">CompileAsC</CompileAs>
+    </ClCompile>
+    <ClCompile Update="CEmu\vendor\multipcm\multipcm.c">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <CompileAs Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">CompileAsC</CompileAs>
+    </ClCompile>
+    <ClCompile Update="CEmu\vendor\hd63701\hd63701core.cpp">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Update="CEmu\vendor\hd63701\m6800.cpp">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Update="CEmu\vendor\np2\np2ffi.c">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">BYTESEX_LITTLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+    <ClCompile Update="CEmu\vendor\np2\cpu\i286c.c">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">BYTESEX_LITTLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+    <ClCompile Update="CEmu\vendor\np2\cpu\i286c_0f.c">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">BYTESEX_LITTLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+    <ClCompile Update="CEmu\vendor\np2\cpu\i286c_8x.c">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">BYTESEX_LITTLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+    <ClCompile Update="CEmu\vendor\np2\cpu\i286c_ea.c">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">BYTESEX_LITTLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+    <ClCompile Update="CEmu\vendor\np2\cpu\i286c_f6.c">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">BYTESEX_LITTLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+    <ClCompile Update="CEmu\vendor\np2\cpu\i286c_fe.c">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">BYTESEX_LITTLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+    <ClCompile Update="CEmu\vendor\np2\cpu\i286c_mn.c">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">BYTESEX_LITTLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+    <ClCompile Update="CEmu\vendor\np2\cpu\i286c_rp.c">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">BYTESEX_LITTLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+    <ClCompile Update="CEmu\vendor\np2\cpu\i286c_sf.c">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">BYTESEX_LITTLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+    <ClCompile Update="CEmu\vendor\np2\cpu\v30patch.c">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">BYTESEX_LITTLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+    <ClCompile Update="CEmu\vendor\np2\glue\np2mem.c">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">BYTESEX_LITTLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+    <ClCompile Update="CEmu\vendor\np2\glue\np2io.c">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">BYTESEX_LITTLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+    <ClCompile Update="..\kpi_sources_20240712\kpi_decoder\kbs98\source\device\emu2413\emu2413.c">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Update="..\kpi_sources_20240712\kpi_decoder\kbs98\source\device\s_sng.c">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Update="..\kpi_sources_20240712\kpi_decoder\kbs98\source\device\s_logtbl.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
     </ClCompile>
   </ItemGroup>
