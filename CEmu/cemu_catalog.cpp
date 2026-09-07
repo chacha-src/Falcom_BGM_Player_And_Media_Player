@@ -1343,8 +1343,9 @@ struct CEmuCatalogFp {
 	DWORD flags; /* 1=xml 2=xml2 4=hootXml | 0x200=parse v3 zip-identity */
 };
 
-/* 0x300: AttrValue accepts whitespace around '=' (xml2 spaced archives). */
-enum { CEMU_CAT_FP_PARSE_VER = 0x300 };
+/* 0x300: AttrValue accepts whitespace around '=' (xml2 spaced archives).
+   0x301: arcdata.zip loads xml in hoot.xml <list> order (xml2 before zzoriginal). */
+enum { CEMU_CAT_FP_PARSE_VER = 0x301 };
 
 static int CEmuCatalogMakeFp(const wchar_t* arcZip, const wchar_t* dataRoot,
 	const wchar_t* parent, CEmuCatalogFp* fp)
@@ -1558,6 +1559,119 @@ static int CEmuCatalogLoadCache(CEmuCatalog* cat, const CEmuCatalogFp* want,
 	return 1;
 }
 
+static void CEmuCatalogXmlDataDirHint(const char* fn, const char** ddOut)
+{
+	if (!ddOut) return;
+	*ddOut = NULL;
+	if (!fn) return;
+	if (CEmuStrStr(fn, "pc88")) *ddOut = "pc88";
+	else if (CEmuStrStr(fn, "pc98") || CEmuStrStr(fn, "pc9821"))
+		*ddOut = "pc98";
+	else if (CEmuStrStr(fn, "x68k") || CEmuStrStr(fn, "x68000"))
+		*ddOut = "x68k";
+	else if (CEmuStrStr(fn, "/msx") || CEmuStrStr(fn, "\\msx")
+		|| _strnicmp(fn, "msx", 3) == 0)
+		*ddOut = "msx";
+}
+
+static void CEmuCatalogNormZipPath(const char* in, char* out, int outCap)
+{
+	if (!out || outCap <= 0) return;
+	out[0] = 0;
+	if (!in) return;
+	int o = 0;
+	for (const char* p = in; *p && o + 1 < outCap; p++) {
+		char c = *p;
+		if (c == '\\') c = '/';
+		if (c >= 'A' && c <= 'Z') c = (char)(c + ('a' - 'A'));
+		out[o++] = c;
+	}
+	out[o] = 0;
+}
+
+static int CEmuCatalogZipPathEq(const char* a, const char* b)
+{
+	if (!a || !b) return 0;
+	if (_stricmp(a, b) == 0) return 1;
+	const size_t al = strlen(a), bl = strlen(b);
+	if (al >= bl && bl > 0 && _stricmp(a + (al - bl), b) == 0
+		&& (al == bl || a[al - bl - 1] == '/'))
+		return 1;
+	if (bl >= al && al > 0 && _stricmp(b + (bl - al), a) == 0
+		&& (bl == al || b[bl - al - 1] == '/'))
+		return 1;
+	return 0;
+}
+
+static int CEmuCatalogZipLocate(unzFile uf, const char* wantNorm)
+{
+	if (!uf || !wantNorm || !wantNorm[0]) return 0;
+	if (unzGoToFirstFile(uf) != UNZ_OK) return 0;
+	do {
+		unz_file_info64 fi;
+		char fn[512];
+		if (unzGetCurrentFileInfo64(uf, &fi, fn, sizeof(fn), NULL, 0, NULL, 0) != UNZ_OK)
+			continue;
+		char norm[512];
+		CEmuCatalogNormZipPath(fn, norm, (int)sizeof(norm));
+		if (CEmuCatalogZipPathEq(norm, wantNorm))
+			return 1;
+	} while (unzGoToNextFile(uf) == UNZ_OK);
+	return 0;
+}
+
+static int CEmuCatalogParseZipCurrent(CEmuCatalog* cat, unzFile uf, const char* fn)
+{
+	unz_file_info64 fi;
+	char cur[512];
+	if (unzGetCurrentFileInfo64(uf, &fi, cur, sizeof(cur), NULL, 0, NULL, 0) != UNZ_OK)
+		return 0;
+	if (fi.uncompressed_size == 0 || fi.uncompressed_size > 16 * 1024 * 1024)
+		return 0;
+	if (unzOpenCurrentFile(uf) != UNZ_OK) return 0;
+	char* buf = (char*)malloc((size_t)fi.uncompressed_size + 4);
+	int added = 0;
+	if (buf) {
+		int rd = unzReadCurrentFile(uf, buf, (unsigned)fi.uncompressed_size);
+		if (rd == (int)fi.uncompressed_size) {
+			buf[fi.uncompressed_size] = 0;
+			const char* dd = NULL;
+			CEmuCatalogXmlDataDirHint(fn && fn[0] ? fn : cur, &dd);
+			added = CEmuCatalogParseBuffer(cat, buf, dd);
+		}
+		free(buf);
+	}
+	unzCloseCurrentFile(uf);
+	return added;
+}
+
+/* Read hoot.xml <list>…</list> paths in document order (xml2 before zzoriginal). */
+static int CEmuCatalogParseHootLists(const char* hootXml, char (*lists)[256], int maxLists)
+{
+	if (!hootXml || !lists || maxLists <= 0) return 0;
+	int n = 0;
+	for (const char* p = hootXml; n < maxLists; ) {
+		p = CEmuStrStr(p, "<list>");
+		if (!p) break;
+		p += 6;
+		const char* e = CEmuStrStr(p, "</list>");
+		if (!e) break;
+		char raw[256];
+		int ln = (int)(e - p);
+		if (ln <= 0 || ln >= (int)sizeof(raw)) { p = e + 7; continue; }
+		memcpy(raw, p, (size_t)ln);
+		raw[ln] = 0;
+		CEmuTrim(raw);
+		CEmuDecodeXmlEntities(raw);
+		if (raw[0]) {
+			CEmuCatalogNormZipPath(raw, lists[n], 256);
+			if (lists[n][0]) n++;
+		}
+		p = e + 7;
+	}
+	return n;
+}
+
 static int CEmuCatalogLoadArcdataZip(CEmuCatalog* cat, const wchar_t* zipPath,
 	CEmuCatalogProgressFn progress, void* progressUser)
 {
@@ -1567,20 +1681,74 @@ static int CEmuCatalogLoadArcdataZip(CEmuCatalog* cat, const wchar_t* zipPath,
 	unzFile uf = unzOpen2_64(zipPath, &ffunc);
 	if (!uf) return 0;
 
-	int xmlN = 0;
-	if (unzGoToFirstFile(uf) == UNZ_OK) {
-		do {
-			unz_file_info64 fi;
-			char fn[512];
-			if (unzGetCurrentFileInfo64(uf, &fi, fn, sizeof(fn), NULL, 0, NULL, 0) != UNZ_OK)
-				continue;
-			const size_t fl = strlen(fn);
-			if (fl >= 5 && _stricmp(fn + fl - 4, ".xml") == 0)
-				xmlN++;
-		} while (unzGoToNextFile(uf) == UNZ_OK);
+	/* Prefer hoot.xml childlist order so xml2/sega.xml wins ties over
+	   xml/zzoriginal.xml (listed last as a fallback). Zip member order alone
+	   puts xml/ before xml2/ and picked the wrong daytona titlelist. */
+	char (*hootLists)[256] = NULL;
+	int hootN = 0;
+	char* hootBuf = NULL;
+	if (CEmuCatalogZipLocate(uf, "hoot.xml")) {
+		unz_file_info64 fi;
+		char fn[512];
+		if (unzGetCurrentFileInfo64(uf, &fi, fn, sizeof(fn), NULL, 0, NULL, 0) == UNZ_OK
+			&& fi.uncompressed_size > 0 && fi.uncompressed_size <= 4 * 1024 * 1024
+			&& unzOpenCurrentFile(uf) == UNZ_OK) {
+			hootBuf = (char*)malloc((size_t)fi.uncompressed_size + 4);
+			if (hootBuf) {
+				int rd = unzReadCurrentFile(uf, hootBuf, (unsigned)fi.uncompressed_size);
+				if (rd == (int)fi.uncompressed_size) {
+					hootBuf[fi.uncompressed_size] = 0;
+					hootLists = (char (*)[256])malloc(sizeof(*hootLists) * 1024);
+					if (hootLists)
+						hootN = CEmuCatalogParseHootLists(hootBuf, hootLists, 1024);
+				}
+			}
+			unzCloseCurrentFile(uf);
+		}
+	}
+	free(hootBuf);
+
+	int xmlN = hootN;
+	if (xmlN <= 0) {
+		xmlN = 0;
+		if (unzGoToFirstFile(uf) == UNZ_OK) {
+			do {
+				unz_file_info64 fi;
+				char fn[512];
+				if (unzGetCurrentFileInfo64(uf, &fi, fn, sizeof(fn), NULL, 0, NULL, 0) != UNZ_OK)
+					continue;
+				const size_t fl = strlen(fn);
+				if (fl >= 5 && _stricmp(fn + fl - 4, ".xml") == 0)
+					xmlN++;
+			} while (unzGoToNextFile(uf) == UNZ_OK);
+		}
 	}
 
 	int total = 0, done = 0;
+	char (*loaded)[256] = (char (*)[256])malloc(sizeof(*loaded) * 1024);
+	int loadedN = 0;
+	if (!loaded) {
+		free(hootLists);
+		unzClose(uf);
+		return 0;
+	}
+
+	for (int i = 0; i < hootN; i++) {
+		if (!hootLists[i][0]) continue;
+		if (_stricmp(hootLists[i], "hoot.xml") == 0) continue;
+		if (!CEmuCatalogZipLocate(uf, hootLists[i])) continue;
+		total += CEmuCatalogParseZipCurrent(cat, uf, hootLists[i]);
+		if (loadedN < 1024) {
+			strncpy_s(loaded[loadedN], hootLists[i], _TRUNCATE);
+			loadedN++;
+		}
+		done++;
+		CEmuCatalogProgress(progress, progressUser, done, xmlN > 0 ? xmlN : 1);
+	}
+	free(hootLists);
+	hootLists = NULL;
+
+	/* Remainder: any .xml not already pulled via hoot order. */
 	if (unzGoToFirstFile(uf) == UNZ_OK) {
 		do {
 			unz_file_info64 fi;
@@ -1590,36 +1758,24 @@ static int CEmuCatalogLoadArcdataZip(CEmuCatalog* cat, const wchar_t* zipPath,
 			const size_t fl = strlen(fn);
 			if (fl < 5) continue;
 			if (_stricmp(fn + fl - 4, ".xml") != 0) continue;
-			if (unzOpenCurrentFile(uf) != UNZ_OK) continue;
-			if (fi.uncompressed_size == 0 || fi.uncompressed_size > 16 * 1024 * 1024) {
-				unzCloseCurrentFile(uf);
+			char norm[512];
+			CEmuCatalogNormZipPath(fn, norm, (int)sizeof(norm));
+			if (CEmuCatalogZipPathEq(norm, "hoot.xml"))
 				continue;
-			}
-			char* buf = (char*)malloc((size_t)fi.uncompressed_size + 4);
-			if (buf) {
-				int rd = unzReadCurrentFile(uf, buf, (unsigned)fi.uncompressed_size);
-				if (rd == (int)fi.uncompressed_size) {
-					buf[fi.uncompressed_size] = 0;
-					/* dataDir from xml path only when unambiguous; else NULL
-					   and platform tags in the block set ac/pc88/…. */
-					const char* dd = NULL;
-					if (CEmuStrStr(fn, "pc88")) dd = "pc88";
-					else if (CEmuStrStr(fn, "pc98") || CEmuStrStr(fn, "pc9821"))
-						dd = "pc98";
-					else if (CEmuStrStr(fn, "x68k") || CEmuStrStr(fn, "x68000"))
-						dd = "x68k";
-					else if (CEmuStrStr(fn, "/msx") || CEmuStrStr(fn, "\\msx")
-						|| _strnicmp(fn, "msx", 3) == 0)
-						dd = "msx";
-					total += CEmuCatalogParseBuffer(cat, buf, dd);
+			int already = 0;
+			for (int j = 0; j < loadedN; j++) {
+				if (CEmuCatalogZipPathEq(loaded[j], norm)) {
+					already = 1;
+					break;
 				}
-				free(buf);
 			}
-			unzCloseCurrentFile(uf);
+			if (already) continue;
+			total += CEmuCatalogParseZipCurrent(cat, uf, fn);
 			done++;
 			CEmuCatalogProgress(progress, progressUser, done, xmlN > 0 ? xmlN : 1);
 		} while (unzGoToNextFile(uf) == UNZ_OK);
 	}
+	free(loaded);
 	unzClose(uf);
 	return total;
 }
@@ -1733,7 +1889,9 @@ static int CEmuGameHasOpt(const CEmuGameEntry* e, const char* name)
 	return 0;
 }
 
-/* Score how many code/bgm/voice rom names resolve inside zipFs. */
+/* Score how many code/bgm/voice rom names resolve inside zipFs.
+   Exact basename matches (MAME epr-16720.7) outweigh fuzzy digit-core hits
+   (zzoriginal 16720.epr) so xml2 titlelists win when the zip is MAME-named. */
 static int CEmuCatalogZipRomHits(const CEmuGameEntry* e, const CEmuZipFs* zipFs)
 {
 	if (!e || !zipFs) return 0;
@@ -1741,19 +1899,24 @@ static int CEmuCatalogZipRomHits(const CEmuGameEntry* e, const CEmuZipFs* zipFs)
 	for (int i = 0; i < e->romCount; i++) {
 		const char* t = e->rom[i].type;
 		if (!t || !t[0]) continue;
-		/* Include arcade PCM/ADPCM so Neo/CPS packs rank by real zip members. */
+		/* Include arcade PCM/ADPCM so Neo/CPS packs rank by real zip members.
+		   Model1 lists pcm0/pcm1 (daytona Dual MultiPCM). */
 		if (_stricmp(t, "code") != 0 && _stricmp(t, "bgm") != 0
 			&& _stricmp(t, "voice") != 0 && _stricmp(t, "song") != 0
 			&& _stricmp(t, "prog") != 0 && _stricmp(t, "x") != 0
 			&& _stricmp(t, "adpcma") != 0 && _stricmp(t, "adpcmb") != 0
 			&& _stricmp(t, "adpcm") != 0 && _stricmp(t, "pcm") != 0
+			&& _stricmp(t, "pcm0") != 0 && _stricmp(t, "pcm1") != 0
+			&& _stricmp(t, "pcm2") != 0
 			&& _stricmp(t, "sample") != 0 && _stricmp(t, "sound") != 0
 			&& _stricmp(t, "qsound") != 0 && _stricmp(t, "oki") != 0)
 			continue;
 		if (!e->rom[i].name[0]) continue;
 		unsigned sz = 0;
-		if (CEmuZipFsHas(zipFs, e->rom[i].name, &sz) && sz > 0)
-			hits++;
+		if (CEmuZipFsHasExact(zipFs, e->rom[i].name, &sz) && sz > 0)
+			hits += 3;
+		else if (CEmuZipFsHas(zipFs, e->rom[i].name, &sz) && sz > 0)
+			hits += 1;
 	}
 	return hits;
 }

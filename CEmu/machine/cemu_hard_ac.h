@@ -111,6 +111,7 @@ public:
 	void M62OnPort2Write(uint8_t val);
 	int SegaM1Audio() const { return segaM1Audio_; }
 	void SegaMidiInjectSong(uint16_t cmd);
+	void SegaMidiInjectSongMode(uint16_t cmd, int hiFirst);
 	void SegaMidiPush(uint8_t b);
 	uint8_t SegaUartRead(unsigned reg);
 	void SegaUartWrite(unsigned reg, uint8_t data);
@@ -200,6 +201,7 @@ public:
 	int Bank() const { return bank_; }
 	unsigned SoundRomSize() const { return soundRomSize_; }
 	unsigned PcmRomSize() const { return pcmRomSize_; }
+	const uint8_t* PcmRomData() const { return pcmRom_; }
 
 	/* Sega System1 periodic sound IRQ needs a plausible vector at 0x0038,
 	   and its latch NMI needs one at 0x0066; expose raw ROM bytes. */
@@ -481,6 +483,10 @@ public:
 	unsigned H8C352Writes() const { return h8C352Writes_; }
 	int H8MapKind() const { return h8MapKind_; } /* 0=sys12, 1=nd1 */
 	int M37702MapKind() const { return m37702MapKind_; } /* 0=sys11, 1=na1/nb, 2=sys22 */
+	/* Plain System 22: C74 mask ROM, driven only by its own Timer A0. */
+	int M37702MaskRom() const { return m37702MaskRom_; }
+	int M37702McuKind() const { return m37702McuKind_; }
+	uint8_t C352ReadLane(unsigned off) const;
 	const uint8_t* H8Shared() const { return h8Shared_; }
 
 	/* ---- Namco System 86 HD63701 + YM2151 + CUS30 ----
@@ -514,6 +520,8 @@ private:
 	uint16_t m37702Mailbox_[8];
 	int h8MapKind_;
 	int m37702MapKind_; /* 0=sys11 C76+C352, 1=na/nb C69+C140, 2=sys22 */
+	int m37702MaskRom_; /* sys22 with an internal C74 (not Super System 22) */
+	int m37702McuKind_; /* Namco MCU label: 0 unknown, else 69/70/74/75/76 */
 	int h8WordSwap_;
 	unsigned h8C352Writes_;
 	uint8_t h8C352Hi_;

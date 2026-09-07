@@ -320,7 +320,7 @@ void CEmuFmMonBindFromGe(const CEmuGameEntry* ge)
 		/* daytona / vf: MAME model2o → Model 1 audio board =
 		   YM3438 (OPN2: FM×6, no SSG) + 2× MultiPCM. */
 		strncpy_s(chip, "YM3438+MultiPCMx2", _TRUNCATE);
-		layout = 1; /* OPN2/OPNA-shaped FM×6 — not OPN+SSG (layout 0) */
+		layout = 3; /* OPN2 FM×6 — not OPNA [10ch]+SSG */
 		FmMonShadowSetKeysProfile(SASAMI_FMMON_KEYS_RF5C);
 	} else if (_strnicmp(sub, "model2", 6) == 0 || _strnicmp(sub, "model3", 6) == 0) {
 		strncpy_s(chip, "SCSPx32", _TRUNCATE);

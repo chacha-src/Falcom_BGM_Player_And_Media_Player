@@ -24,5 +24,7 @@ void CEmuZipFsClose(CEmuZipFs* fs);
 const unsigned char* CEmuZipFsFind(const CEmuZipFs* fs, const char* name, unsigned* outSize);
 /* Size-only lookup works for namesOnly fs (returns non-NULL dummy if size>0). */
 int CEmuZipFsHas(const CEmuZipFs* fs, const char* name, unsigned* outSize);
+/* Basename / full-path match only — no digit-core fuzzy (catalog rank). */
+int CEmuZipFsHasExact(const CEmuZipFs* fs, const char* name, unsigned* outSize);
 int CEmuZipFsExtractOne(const wchar_t* zipPath, const char* innerName,
 	unsigned char* buf, unsigned bufCap, unsigned* outSize);

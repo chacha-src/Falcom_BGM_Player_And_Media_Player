@@ -338,14 +338,40 @@ void CHardAc::SegaMidiPush(uint8_t b)
 
 void CHardAc::SegaMidiInjectSong(uint16_t cmd)
 {
+	/* Default: A0 + title as big-endian (hi, lo). Firmware @ $2AF2 uses
+	   byte0 as bank-table index and byte1 as song index. */
+	SegaMidiInjectSongMode(cmd, 1);
+}
+
+void CHardAc::SegaMidiInjectSongMode(uint16_t cmd, int hiFirst)
+{
+	/* Never leave the 68K MIDI framer mid-message: wiping the host FIFO while
+	   F01000 still expects data bytes makes the next status byte look like
+	   payload → wrong song + PCM stutter on re-inject. */
+	if (ms1Ram_) {
+		ms1Ram_[0x1000] = 0; /* expected remaining data bytes */
+		ms1Ram_[0x1001] = 0;
+		ms1Ram_[0x1008] = 0; /* running status */
+	}
 	segaMidiHead_ = segaMidiTail_ = 0;
 	segaMidiIrq_ = 0;
-	/* Hoot model2 / Model 1 audio: pre_cmd 0xA0 then 16-bit title (lo, hi).
-	   The 68000 firmware owns MultiPCM + YM3438 — do not poke chips or invent
-	   MIDI note-ons here (that produced the daytona rail-to-rail buzz). */
+	const uint8_t lo = (uint8_t)(cmd & 0xff);
+	const uint8_t hi = (uint8_t)((cmd >> 8) & 0xff);
+	/* Non-stop titles: queue Stop (0x1000) in the same FIFO before the
+	   real select so MultiPCM voices drop cleanly (avoids start stutter). */
+	if (cmd != 0x1000u) {
+		SegaMidiPush(0xa0);
+		SegaMidiPush(0x10);
+		SegaMidiPush(0x00);
+	}
 	SegaMidiPush(0xa0);
-	SegaMidiPush((uint8_t)(cmd & 0xff));
-	SegaMidiPush((uint8_t)((cmd >> 8) & 0xff));
+	if (hiFirst) {
+		SegaMidiPush(hi);
+		SegaMidiPush(lo);
+	} else {
+		SegaMidiPush(lo);
+		SegaMidiPush(hi);
+	}
 }
 
 uint8_t CHardAc::SegaUartRead(unsigned reg)

@@ -137,6 +137,22 @@ static uint8_t m37710_internal_r(m37710i_cpu_struct *cpustate, int offset)
 {
 	offset &= 0x7f;
 	switch (offset) {
+	/* Port P4 register. Bits configured as inputs read the pins, which is how
+	   the Namco C74 learns its role: 0x10 is the sound MCU, 0x00 the
+	   control-reading I/O board (namcos22.cpp mcu_port4_s22_r). */
+	case 0x0a:
+		if (cpustate->port_in[4]) {
+			const uint8_t dir = cpustate->m37710_regs[0x0c];
+			return (uint8_t)((cpustate->port_in[4] & ~dir)
+				| (cpustate->m37710_regs[0x0a] & dir));
+		}
+		return cpustate->m37710_regs[0x0a];
+	/* Port P6 register. On NA-1/NA-2 the pins read back as 0 whatever the
+	   BIOS wrote (MAME namcona1_state::port6_r); the same wiring flag that
+	   mirrors P5 bit 0 selects it. */
+	case 0x0e:
+		if (cpustate->port5_mirror) return 0;
+		return cpustate->m37710_regs[0x0e];
 	case 0x34: case 0x3c: return 0x08;
 	case 0x35: case 0x3d: return 0xff;
 	case 0x70: return (uint8_t)(cpustate->m37710_regs[offset] | 8);
@@ -150,6 +166,11 @@ static void m37710_internal_w(m37710i_cpu_struct *cpustate, int offset, uint8_t 
 	const uint8_t prev = cpustate->m37710_regs[offset & 0x7f];
 	offset &= 0x7f;
 	cpustate->m37710_regs[offset] = data;
+
+	/* On NA-1/NA-2 the C69's port P5 bit 0 is wired to follow bit 1; the BIOS
+	   toggles bit 1 and then spins at $CCD3 until bit 0 agrees. */
+	if (offset == 0x0b && cpustate->port5_mirror)
+		cpustate->m37710_regs[0x0b] = (uint8_t)((data & 0xfe) | ((data >> 1) & 1));
 
 	switch (offset) {
 	case 0x40:
@@ -268,8 +289,9 @@ void m37710i_update_irqs(m37710i_cpu_struct *cpustate)
 		FLAG_I = IFLAG_SET;
 		cpustate->ipl = (uint)curpri;
 		REG_PB = 0;
-		REG_PC = m37710_read_8(m37710_irq_vectors[wantedIRQ]) |
-			(m37710_read_8(m37710_irq_vectors[wantedIRQ] + 1) << 8);
+		int vec = m37710_irq_vectors[wantedIRQ];
+		REG_PC = m37710_read_8(vec) |
+			(m37710_read_8(vec + 1) << 8);
 		cpustate->irq_count++;
 	}
 }
@@ -378,6 +400,18 @@ uint32_t M37702Pc(const M37702Cpu* cpu)
 {
 	if (!cpu) return 0;
 	return (uint32_t)(cpu->s.pb | cpu->s.pc);
+}
+
+void M37702SetPortIn(M37702Cpu* cpu, int port, uint8_t value)
+{
+	if (!cpu || port < 0 || port >= 11) return;
+	cpu->s.port_in[port] = value;
+}
+
+void M37702SetPort5Mirror(M37702Cpu* cpu, int on)
+{
+	if (!cpu) return;
+	cpu->s.port5_mirror = (uint8_t)(on ? 1 : 0);
 }
 
 uint32_t M37702Sp(const M37702Cpu* cpu)

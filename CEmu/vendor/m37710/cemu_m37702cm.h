@@ -93,6 +93,10 @@ struct m37710i_cpu_struct
 	void (*set_line)(struct m37710i_cpu_struct *cpustate, int line, int state);
 	int  (*execute)(struct m37710i_cpu_struct *cpustate, int cycles);
 	uint32_t irq_count;
+	/* Keep new members at the end: the generated opcode tables are compiled
+	   into their own objects and only the offsets above are baked into them. */
+	uint8_t port_in[11];   /* level on each port's input pins */
+	uint8_t port5_mirror;  /* NA-1/NA-2: P5 bit 0 follows bit 1 */
 };
 
 typedef struct m37710i_cpu_struct m37710i_cpu_struct;

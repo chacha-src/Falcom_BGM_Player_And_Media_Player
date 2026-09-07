@@ -1057,23 +1057,51 @@ static int CEmuPc88PatchPort80GateParam(const uint8_t* mem)
 	return 0;
 }
 
-/* yaksa PATCH2: plant (0575)=0x21; play does IN (01)/OR A/JR Z skip.
-   Falcom-style vdata+voiceBank path must NOT force port01=0 (mute). */
-static int CEmuPc88PatchSong1(const uint8_t* mem)
+static int CEmuPc88PatchHootCmd01At(const uint8_t* mem, unsigned base)
 {
-	/* Many rips (triton2, shikinjo, xak_88, f_crisis) use a standard hoot PATCH
-	   that polls IN(00) and expects song==1 to play, jumping to STOP otherwise.
-	   Signature: IN A,(0); OR A; JR Z,xx; CP 1; JR NZ,xx; IN A,(1) */
-	if (!mem) return 0;
-	for (int i = 0; i < 0x40; i++) {
-		if (mem[i] == 0xDB && mem[i+1] == 0x00 && mem[i+2] == 0xB7 && mem[i+3] == 0x28
-			&& mem[i+5] == 0xFE && mem[i+6] == 0x01 && mem[i+7] == 0x20
-			&& mem[i+9] == 0xDB && mem[i+10] == 0x01)
+	/* IN A,(0); OR A; JR Z,poll; CP 1; JR NZ,stop; IN A,(1)
+	   rouge88, hchaser, blmnstry and pias88 hoist LD C,0 in front of the
+	   port 01 read so the command latch can be cleared with OUT (C),C.
+	   Accept that one insertion and nothing looser: the preamble alone is
+	   near-universal on PC-88 rips (220 of them), and matching it loosely
+	   would let this rule shadow every game-specific rule below it. */
+	for (unsigned i = base; i < base + 0x60 && i + 12 < 0x10000; i++) {
+		if (mem[i] != 0xDB || mem[i+1] != 0x00 || mem[i+2] != 0xB7
+			|| mem[i+3] != 0x28 || mem[i+5] != 0xFE || mem[i+6] != 0x01
+			|| mem[i+7] != 0x20)
+			continue;
+		if (mem[i+9] == 0xDB && mem[i+10] == 0x01)
+			return 1;
+		if (mem[i+9] == 0x0E && mem[i+10] == 0x00
+			&& mem[i+11] == 0xDB && mem[i+12] == 0x01)
 			return 1;
 	}
 	return 0;
 }
 
+static int CEmuPc88PatchHootCmd01(const uint8_t* mem, int initPc)
+{
+	/* The stock hoot PC-88 PATCH prologue, shared by ~134 rips (triton2,
+	   goonies88, valis, sorc88…). Its three ports are fixed:
+	     IN A,(00)  command, 1 = play (anything else takes the stop path)
+	     IN A,(01)  song / bank number, echoed with OUT (01),A
+	     IN A,(80)  the byte handed to the driver's play entry in A
+	   So port 01 is the title low byte and port 80 the title high byte;
+	   the signature says nothing about which song was asked for.
+	   Half of these rips stage PATCH at init_pc rather than page 0
+	   (sorc88 at C000, the F000 family, rouge88 at 1000), so the prologue
+	   has to be looked for there too or they all fall through to the
+	   generic rules and every song asks the driver for the same byte. */
+	if (!mem) return 0;
+	if (CEmuPc88PatchHootCmd01At(mem, 0))
+		return 1;
+	if (initPc > 0)
+		return CEmuPc88PatchHootCmd01At(mem, (unsigned)initPc);
+	return 0;
+}
+
+/* yaksa PATCH2: plant (0575)=0x21; play does IN (01)/OR A/JR Z skip.
+   Falcom-style vdata+voiceBank path must NOT force port01=0 (mute). */
 int CEmuPc88PatchYaksa2(const uint8_t* mem)
 {
 	if (!mem || mem[0] != 0x18)
@@ -1312,10 +1340,11 @@ uint8_t CHardPc88::PlaySongIndex() const
 			return (uint8_t)songNum;
 		return 1;
 	}
-	/* Standard hoot PATCH (triton2, shikinjo, xak_88, f_crisis): expects song==1. */
-	if (CEmuPc88PatchSong1(mem_)) {
-		return 1;
-	}
+	/* Stock hoot PATCH: port 80 is the byte passed to the driver's play
+	   entry, which these rips encode as the title high byte (triton2 effect
+	   id, goonies88 song, valis opening variant). */
+	if (CEmuPc88PatchHootCmd01(mem_, initPc_))
+		return (uint8_t)((titleCode_ >> 24) & 0xff);
 	/* makai88: port80 = BGM/SE select (title hi24), not the song number. */
 	if (CEmuPc88PatchMakaiIxIy(mem_))
 		return (uint8_t)((titleCode_ >> 24) & 0xff);
@@ -1413,11 +1442,24 @@ uint8_t CHardPc88::PlaySongIndex() const
 			return (uint8_t)songNum;
 		}
 	}
+	/* Title whose only non-zero field is the high byte (adrnalin MUS00-02…,
+	   dione, prontis EFFECT #nn): the low byte names the staged bank, which
+	   is bank 0, and the high byte is the play index the PATCH hands the
+	   driver via port 80. Returning the low byte asks every such title for
+	   song 0, and these drivers read song 0 as stop. */
+	if (songNum == 0 && ((titleCode_ >> 8) & 0xffffu) == 0
+		&& ((titleCode_ >> 24) & 0xffu) != 0)
+		return (uint8_t)((titleCode_ >> 24) & 0xffu);
 	return (uint8_t)songNum;
 }
 
 uint8_t CHardPc88::PlayParamIndex() const
 {
+	/* Stock hoot PATCH: port 01 is the song/bank number it echoes to the
+	   driver mailbox. Falling through to PlaySongIndex() here handed every
+	   one of those rips the port-80 play byte instead of the song. */
+	if (CEmuPc88PatchHootCmd01(mem_, initPc_))
+		return (uint8_t)(titleCode_ & 0xff);
 	/* makai88: port01 = song id written to (0274) BGM or (0276) SE. */
 	if (CEmuPc88PatchMakaiIxIy(mem_))
 		return (uint8_t)(titleCode_ & 0xff);
@@ -1454,6 +1496,11 @@ uint8_t CHardPc88::PlayParamIndex() const
 				&& (titleCode_ & 0xff00u) == 0))
 			return (uint8_t)(titleCode_ & 0xff);
 	}
+	/* High-byte-only titles: PlaySongIndex() hands the high byte to port 80,
+	   but port 01 stays the bank id. goonies88's PATCH takes its stop branch
+	   unless port 01 is 0, and adrnalin only echoes port 01 back out. */
+	if ((titleCode_ & 0xffu) == 0 && ((titleCode_ >> 8) & 0xffffu) == 0)
+		return 0;
 	return PlaySongIndex();
 }
 
@@ -1965,9 +2012,6 @@ uint8_t CHardPc88::PortIn(uint16_t port)
 		   BGM header byte avoids clobbering MS0A (bank# as song → mute). */
 		if (schemeMode_)
 			return mem_[0xc000];
-		/* Standard hoot PATCH: port 80 returns the effect number (hi24). */
-		if (CEmuPc88PatchSong1(mem_) && (titleCode_ & 0xffu) == 0xffu)
-			return (uint8_t)(titleCode_ >> 24);
 		return song;
 	case 0x40: {
 		const uint64_t hz = cpuHz_ > 0 ? (uint64_t)cpuHz_ : 4000000ull;
@@ -1997,17 +2041,11 @@ void CHardPc88::PortOut(uint16_t port, uint8_t data)
 		/* mucom88: OUT (0),song copies bank to [0x5d:0x5c]. KOEI uses
 		   port 0 as cmd/stop only — never bank-copy there. Non-mucom
 		   mfile sets (shnghai2) also OUT 0 as a latch with live 5C/5D.
-		   Standard hoot PATCH (Microcabin) also uses OUT (0),bank. */
+		   The stock hoot PATCH only ever writes 0 here to clear the command
+		   latch (triton2 0037, sorc88 0038/0042), so it is not a bank
+		   strobe: treating it as one restaged MUS00 over every song. */
 		if (mucomBankCopy_ && mfileSize_ > 0)
 			BankCopyBgm(data);
-		else if (CEmuPc88PatchSong1(mem_) && data < 128 && bgmBank_[data]) {
-			unsigned n = bgmBankSize_[data];
-			if (mdataAddr_ >= 0) {
-				if (mdataAddr_ + (int)n > 0x10000)
-					n = (unsigned)(0x10000 - mdataAddr_);
-				memcpy(mem_ + mdataAddr_, bgmBank_[data], n);
-			}
-		}
 		/* hoot scheme.cpp: OUT (0),bank → memcpy C000 + LOAD_FLAG@9012. */
 		/* hoot scheme.cpp: OUT (0),bank → memcpy C000 + LOAD_FLAG@9012.
 		   bothtec PATCH keeps an IN (00) poll at 9011 — guest OUT (0) is not

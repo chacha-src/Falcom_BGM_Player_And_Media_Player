@@ -1,4 +1,4 @@
-#include "stdafx.h"
+﻿#include "stdafx.h"
 #include "ogg.h"
 #include "oggDlg.h"
 #include "CFmMonitorDlg.h"
@@ -1196,6 +1196,9 @@ int CFmMonitorDlg::SsgRows() const
 {
 	if (!m_haveDump) return 3;
 	if (IsOplDump() || KeysOnly()) return 0;
+	/* OPN2 / YM3438: padHit=2 with fm10=0 — no SSG block. */
+	if (m_dump.padHit == 2 && !m_dump.fm10 && !IsYm2610Dump() && !IsOpmDump())
+		return 0;
 	if (IsOpmDump()) {
 		/* X1 OPM+AY / dual: show SSG when gated or labeled AY */
 		for (int i = 0; i < 3; i++)

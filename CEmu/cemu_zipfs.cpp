@@ -258,6 +258,25 @@ int CEmuZipFsHas(const CEmuZipFs* fs, const char* name, unsigned* outSize)
 	return 1;
 }
 
+int CEmuZipFsHasExact(const CEmuZipFs* fs, const char* name, unsigned* outSize)
+{
+	if (outSize) *outSize = 0;
+	if (!fs || !name) return 0;
+	char base[CEMU_ROM_NAME];
+	CEmuZipBaseName(name, base, (int)sizeof(base));
+	for (int i = 0; i < fs->fileCount; i++) {
+		char fn[CEMU_ROM_NAME];
+		char pathA[CEMU_ZIP_PATH];
+		WideCharToMultiByte(932, 0, fs->files[i].path, -1, pathA, (int)sizeof(pathA), NULL, NULL);
+		CEmuZipBaseName(pathA, fn, (int)sizeof(fn));
+		if (CEmuZipNameMatch(fn, base) || CEmuZipNameMatch(pathA, name)) {
+			if (outSize) *outSize = fs->files[i].size;
+			return fs->files[i].size > 0 ? 1 : 0;
+		}
+	}
+	return 0;
+}
+
 int CEmuZipFsExtractOne(const wchar_t* zipPath, const char* innerName,
 	unsigned char* buf, unsigned bufCap, unsigned* outSize)
 {

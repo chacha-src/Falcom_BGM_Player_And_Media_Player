@@ -51,7 +51,7 @@ static unsigned s_snTone[3] = { 0, 0, 0 };
 static unsigned s_snNoise = 0;
 static unsigned s_snVol[4] = { 0xF, 0xF, 0xF, 0xF };
 static int s_snMode = 0; /* SN76489 / SC-3000 keys+regs as SSG-shaped dump */
-static int s_opnaLayout = 1; /* 1=OPNA 6ch  0=OPN 3ch  2=YM2610 4ch  -1=other */
+static int s_opnaLayout = 1; /* 1=OPNA 6ch  0=OPN 3ch  2=YM2610 4ch  3=OPN2 6ch  -1=other */
 static int s_adpcmSeen = 0; /* ADPCM-B ever keyed */
 static int s_adpcmASeen = 0; /* YM2610 ADPCM-A ever keyed */
 static char s_identPlat[24];
@@ -273,10 +273,12 @@ void FmMonShadowGetIdentity(char* platform, unsigned platformLen,
 
 void FmMonShadowSetOpnaLayout(int layout)
 {
-	/* 1=OPNA(6ch)  0=OPN(3ch)  2=YM2610(4ch)  -1=non-OPN(A) e.g. OPM / SN */
+	/* 1=OPNA(6ch+SSG)  0=OPN(3ch)  2=YM2610(4ch)  3=OPN2/YM3438(6ch no SSG)
+	   -1=non-OPN(A) e.g. OPM / SN */
 	EnsureCs();
 	EnterCriticalSection(&s_cs);
 	if (layout == 2) s_opnaLayout = 2;
+	else if (layout == 3) s_opnaLayout = 3;
 	else if (layout > 0) s_opnaLayout = 1;
 	else if (layout < 0) s_opnaLayout = -1;
 	else s_opnaLayout = 0;
@@ -729,6 +731,9 @@ static void FillCommon(SasamiFmMonDump* d)
 	} else if (s_opnaLayout == 2) {
 		d->padHit = 6; /* YM2610 FM×4+SSG×3+ADPCM */
 		d->fm10 = 0;
+	} else if (s_opnaLayout == 3) {
+		d->padHit = 2; /* OPN2 / YM3438 FM×6, no SSG, no [10ch] */
+		d->fm10 = 0;
 	} else {
 		d->padHit = 2;
 		d->fm10 = 1;
@@ -826,7 +831,7 @@ void FmMonShadowFlush(int force)
 		if (s_keyEx[i]) anyEx = 1;
 	if (s_opnaLayout != 2 && (anyEx || (s_regs[0x27] & 0xC0) != 0)) {
 		d.dumpFlags = (uint8_t)(d.dumpFlags | SASAMI_FMMON_FLAG_FM3EX);
-		if (s_opnaLayout > 0)
+		if (s_opnaLayout == 1)
 			strncat_s(extras, "+EX", _TRUNCATE);
 	}
 	if (s_opnaLayout == 2) {
@@ -850,7 +855,7 @@ void FmMonShadowFlush(int force)
 		/* no OPNA rhythm row */
 		d.rhythmKey = 0;
 		d.rhythmPulse = 0;
-	} else if (s_opnaLayout > 0 && s_adpcmSeen && !s_oplMode && !s_msxDevMask && !s_snMode) {
+	} else if (s_opnaLayout == 1 && s_adpcmSeen && !s_oplMode && !s_msxDevMask && !s_snMode) {
 		/* OPNA ADPCM-B only when actually used (not every OPNA dump). */
 		d.dumpFlags = (uint8_t)(d.dumpFlags | SASAMI_FMMON_FLAG_ADPCM);
 		if (d.pcmCount < 1) d.pcmCount = 1;
@@ -1719,7 +1724,7 @@ void FmMonShadowApplyRf5cReg(unsigned ofs, unsigned data8)
 	LeaveCriticalSection(&s_cs);
 }
 
-/* Dual MultiPCM (daytona): chip0 → PCM rows 0-7, chip1 → 8-15. */
+/* Dual MultiPCM (daytona): chip0 → PCM rows 0-15, chip1 → 16-31. */
 void FmMonShadowApplyMultiPcm(int chipId, unsigned port, unsigned data8)
 {
 	static uint8_t s_slot[2];
@@ -1728,7 +1733,7 @@ void FmMonShadowApplyMultiPcm(int chipId, unsigned port, unsigned data8)
 	if (chipId < 0 || chipId > 1) return;
 	EnsureCs();
 	EnterCriticalSection(&s_cs);
-	ArcEnterKeys(SASAMI_FMMON_KEYS_RF5C, 16);
+	ArcEnterKeys(SASAMI_FMMON_KEYS_RF5C, 32);
 	port &= 3u;
 	data8 &= 0xFFu;
 	if (port == 1) {
@@ -1753,7 +1758,9 @@ void FmMonShadowApplyMultiPcm(int chipId, unsigned port, unsigned data8)
 	}
 	s_regs[chipId][slot][reg] = (uint8_t)data8;
 	if (reg == 4) {
-		const int pcmCh = chipId * 8 + (slot & 7);
+		/* Prefer low slot indices (songs usually use 0..15); wrap high slots. */
+		const int slotRow = (slot < 16) ? slot : (slot & 15);
+		const int pcmCh = chipId * 16 + slotRow;
 		const int on = (data8 & 0x80) != 0;
 		/* Octave in reg3[7:4], coarse pitch in reg2/3 — map to a rough MIDI. */
 		const unsigned oct = (s_regs[chipId][slot][3] >> 4) & 0x0fu;

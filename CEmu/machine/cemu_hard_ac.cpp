@@ -6,6 +6,7 @@
 #include "cemu_h6280_bus.h"
 #include "cemu_h8_bus.h"
 #include "cemu_m37702_bus.h"
+#include "cemu_namco_c7x_rom.h"
 #include "cemu_hd63701_bus.h"
 #include "cemu_irem_cpu_tables.h"
 extern "C" {
@@ -1284,6 +1285,8 @@ int CHardAc::Init(const CEmuGameEntry* ge, int sampleRate)
 	m37702Soft_ = 0;
 	m37702C140_ = 0;
 	m37702MapKind_ = 0;
+	m37702MaskRom_ = 0;
+	m37702McuKind_ = 0;
 	snkMapKind_ = 0;
 	snkStatus_ = 0;
 	terracreMap_ = 0;
@@ -1655,11 +1658,18 @@ int CHardAc::Init(const CEmuGameEntry* ge, int sampleRate)
 		   never contain, so all 11 NB-1 sets were rejected at open. */
 		const int naOnly = (ge && (_stricmp(ge->subtype, "na1") == 0
 			|| _stricmp(ge->subtype, "na2") == 0));
-		cpuHz_ = nd1 ? 16384000 : (naOnly ? 12500000
+		/* System 22's C74 is clocked 49.152 MHz / 3, not the 16.9344 MHz that
+		   System 11's C76 uses; the driver's tempo comes straight off it. */
+		cpuHz_ = (nd1 || sys22) ? 16384000 : (naOnly ? 12500000
 			: (naNb ? 16700000 : 16934400));
 		m37702Soft_ = 0;
 		m37702C140_ = naOnly ? 1 : 0;
 		m37702MapKind_ = naOnly ? 1 : (sys22 ? 2 : 0);
+		/* Namco relabelled the M37702 per platform and each label has its own
+		   16KB mask ROM (namcomcu.cpp): C69/C70 on NA-1/NA-2, C74 on System
+		   22, C75 on NB-1/NB-2 and System FL, C76 on System 11. The NA sets
+		   ship c69/c70 in the archive; the rest never do. */
+		m37702McuKind_ = sys22 ? 74 : (sys11 ? 76 : ((naNb && !naOnly) ? 75 : 0));
 		if (naOnly) {
 			opmHz_ = 8192000;
 			chip_ = CEmuChipC140Create((uint32_t)opmHz_, sampleRate_);
@@ -6408,6 +6418,17 @@ int CHardAc::LoadRomsNamcoM6809(CEmuZipFs* fs, const CEmuGameEntry* ge)
 	return 1;
 }
 
+/* One C352 byte lane, for the H8 boards. The register file reads back on real
+   hardware (MAME c352_device::read) and the Namco driver relies on it: it
+   scans the voice flags for a free voice and reads a voice's volume before
+   updating it. The H8 is big endian, so the even address is the high byte -
+   the opposite of the M37702 side. */
+uint8_t CHardAc::C352ReadLane(unsigned off) const
+{
+	const uint16_t w = CEmuChipC352Read(chip_, off >> 1);
+	return (off & 1u) ? (uint8_t)(w & 0xff) : (uint8_t)(w >> 8);
+}
+
 uint8_t CHardAc::H8Read8(uint32_t addr)
 {
 	addr &= 0xffffffu;
@@ -6421,10 +6442,8 @@ uint8_t CHardAc::H8Read8(uint32_t addr)
 			if (o == 0x4050u) return 0;
 			return h8Shared_[o];
 		}
-		if (addr >= 0x280000u && addr < 0x288000u && chip_) {
-			/* C352 is write-mostly; status reads return 0. */
-			return 0;
-		}
+		if (addr >= 0x280000u && addr < 0x288000u && chip_)
+			return C352ReadLane(addr - 0x280000u);
 		if (addr >= 0x300000u && addr < 0x300040u)
 			return 0xff;
 		return 0xff;
@@ -6435,8 +6454,8 @@ uint8_t CHardAc::H8Read8(uint32_t addr)
 		if (o == 0x4050u) return 0; /* auto-ack busy like Sys12 */
 		return h8Shared_[o];
 	}
-	if (addr >= 0xa00000u && addr < 0xa08000u)
-		return 0;
+	if (addr >= 0xa00000u && addr < 0xa08000u && chip_)
+		return C352ReadLane(addr - 0xa00000u);
 	/* DSW / inputs — open bus high keeps POST from hanging. */
 	if (addr >= 0xc00000u && addr < 0xc00040u)
 		return 0xff;
@@ -6510,28 +6529,49 @@ void CHardAc::M37702InjectSong(uint16_t cmd)
 	soundCmd_ = (uint8_t)(cmd & 0xff);
 	soundCmdPending_ = 1;
 	if (m37702MapKind_ == 1) {
-		/* NA-1/NB: 8-word mailbox at MCU 0x800; main write raises IRQ0. */
+		/* NA-1/NA-2: eight 16-bit mail slots at MCU $800. On the real board
+		   only the 68000 writing slot 4 raises the MCU's IRQ0, so that is the
+		   slot the command goes in (MAME mcu_mailbox_w_68k). */
 		m37702Mailbox_[0] = cmd;
 		m37702Mailbox_[1] = (uint16_t)(0x4000u | (cmd & 0x3fffu));
+		m37702Mailbox_[4] = cmd;
 		if (m37702_) M37702SetInputLine(m37702_, M37710_LINE_IRQ0, M37702_HOLD_LINE);
 		return;
 	}
 	if (!h8Shared_) return;
+	/* C74, C75 and C76 all run the same Namco sound driver, and its host
+	   interface sits at a fixed offset from one base in shared RAM: C74 puts
+	   it at MCU $5000, C75/C76 at $4000 (the two ROMs are otherwise the same
+	   code $1000 apart). Relative to that base:
+	     +$000  song request, bit 14 = "the main CPU filled this in"
+	     +$3FC  host write index into the request queue
+	     +$3FE  MCU read index
+	     +$400  queue of (u16 target address, u16 value) pokes
+	     +$480  $5A = "the main CPU is alive"
+	   The magic byte is deliberately left clear. Setting it switches the
+	   driver to the mode where every command arrives as a queued poke from
+	   the main CPU, and there is no main CPU here; with it clear the driver
+	   reads the song request at +$000 itself, which is what CEmu drives. */
 	const uint16_t w = (uint16_t)(0x4000u | (cmd & 0x3fffu));
-	const uint8_t hi = (uint8_t)(cmd >> 8);
-	const uint8_t lo = (uint8_t)(cmd & 0xff);
-	/* System 11 / 22 sound CPU is an M37702, which is little-endian.
-	   Wait, H8 is big-endian, so this shared RAM map was originally written
-	   for H8. If M37702 reads a 16-bit word from 0x4100, it expects the low
-	   byte at 0x4100. */
-	h8Shared_[0x0100] = (uint8_t)(w & 0xff);
-	h8Shared_[0x0101] = (uint8_t)(w >> 8);
-	h8Shared_[0x4050] = 0;
-	h8Shared_[0x0000] = lo;
-	h8Shared_[0x0001] = hi;
-	h8Shared_[0x0004] = 1;
-	h8Shared_[0x0005] = hi;
-	if (m37702_) M37702SetInputLine(m37702_, M37710_LINE_IRQ0, M37702_HOLD_LINE);
+	if (m37702McuKind_) {
+		const unsigned base = (m37702MapKind_ == 2) ? 0x1000u : 0x0000u;
+		h8Shared_[base + 0x000u] = (uint8_t)(w & 0xff);
+		h8Shared_[base + 0x001u] = (uint8_t)(w >> 8);
+	} else {
+		/* ND-1 and the other M37702 boards whose driver lives in the game's
+		   own data ROM rather than a Namco C7x mask ROM. */
+		h8Shared_[0x0100] = (uint8_t)(w & 0xff);
+		h8Shared_[0x0101] = (uint8_t)(w >> 8);
+		h8Shared_[0x4050] = 0;
+		h8Shared_[0x0000] = (uint8_t)(cmd & 0xff);
+		h8Shared_[0x0001] = (uint8_t)(cmd >> 8);
+		h8Shared_[0x0004] = 1;
+		h8Shared_[0x0005] = (uint8_t)(cmd >> 8);
+	}
+	/* System 22 polls the request off Timer A0, so it needs no host IRQ;
+	   System 11 / NB-1 service it from the 60 Hz IRQ0 handler. */
+	if (m37702MapKind_ != 2 && m37702_)
+		M37702SetInputLine(m37702_, M37710_LINE_IRQ0, M37702_HOLD_LINE);
 }
 
 uint8_t CHardAc::M37702Read8(uint32_t addr)
@@ -6548,13 +6588,15 @@ uint8_t CHardAc::M37702Read8(uint32_t addr)
 			const unsigned o = (unsigned)(addr - 0x1000u) & 0x1ffu;
 			return CEmuChipC140Read(chip_, o);
 		}
+		/* $2000 mirrors the first page of the 68000 work RAM and $200000 the
+		   whole of it, both byte swapped (MAME na1mcu_shared_r). */
 		if (addr >= 0x2000u && addr <= 0x2fffu && h8Shared_)
-			return h8Shared_[(addr - 0x2000u) & 0xfffu];
+			return h8Shared_[((addr - 0x2000u) & 0xfffu) ^ 1u];
 		if (addr >= 0x3000u && addr <= 0xafffu && m37702LocalRam_)
 			return m37702LocalRam_[addr - 0x3000u];
 		if (addr >= 0x200000u && addr <= 0x27ffffu && h8Shared_) {
 			const unsigned o = (unsigned)(addr - 0x200000u);
-			if (o < 0x10000u) return h8Shared_[o];
+			if (o < 0x10000u) return h8Shared_[o ^ 1u];
 			return 0;
 		}
 		/* Ports / ADC open-bus high. */
@@ -6569,8 +6611,18 @@ uint8_t CHardAc::M37702Read8(uint32_t addr)
 		return h8Rom_[addr - 0x280000u];
 	if (addr >= 0x4000u && addr <= 0xbfffu && h8Shared_)
 		return h8Shared_[addr - 0x4000u];
+	/* The C352 register file reads back (MAME c352_device::read), and the C7x
+	   driver depends on it: it scans the voices' flags to find a free one and
+	   reads a voice's current volume before updating it. With this window
+	   stuck at zero every voice looked idle and silent, so the driver kept
+	   re-allocating the same voices to one note, strobed key-on forever and
+	   never wrote a single volume or frequency. */
+	if (addr >= 0x2000u && addr <= 0x2fffu && chip_) {
+		const uint16_t w = CEmuChipC352Read(chip_, (unsigned)((addr - 0x2000u) >> 1));
+		return (addr & 1u) ? (uint8_t)(w >> 8) : (uint8_t)(w & 0xff);
+	}
 	if (addr >= 0x2000u && addr <= 0x2fffu)
-		return 0; /* C352 status */
+		return 0;
 	if (addr >= 0x510000u && addr <= 0x51ffffu)
 		return 0x80; /* fambowl open-bus stub */
 	return 0xff;
@@ -6595,7 +6647,7 @@ void CHardAc::M37702Write8(uint32_t addr, uint8_t v)
 			return;
 		}
 		if (addr >= 0x2000u && addr <= 0x2fffu && h8Shared_) {
-			h8Shared_[(addr - 0x2000u) & 0xfffu] = v;
+			h8Shared_[((addr - 0x2000u) & 0xfffu) ^ 1u] = v;
 			return;
 		}
 		if (addr >= 0x3000u && addr <= 0xafffu && m37702LocalRam_) {
@@ -6604,7 +6656,7 @@ void CHardAc::M37702Write8(uint32_t addr, uint8_t v)
 		}
 		if (addr >= 0x200000u && addr <= 0x27ffffu && h8Shared_) {
 			const unsigned o = (unsigned)(addr - 0x200000u);
-			if (o < 0x10000u) h8Shared_[o] = v;
+			if (o < 0x10000u) h8Shared_[o ^ 1u] = v;
 			return;
 		}
 		return;
@@ -6842,6 +6894,23 @@ int CHardAc::LoadRomsM37702(CEmuZipFs* fs, const CEmuGameEntry* ge)
 	h8C352HiValid_ = 0;
 	memset(h8C352Shadow_, 0, sizeof(h8C352Shadow_));
 
+	/* The C74/C75/C76 program is the MCU's mask ROM, which no archive carries;
+	   what they all list as type=bios is pr1data.8k, a 512KB *data* ROM that
+	   happens to hold a C7x image in its bank 0. Substituting it only ever
+	   half-worked: on System 22 it is Prop Cycle's revision with a different
+	   RAM vector base, and on Super System 22 / System 11 the $C000 image is
+	   just a loader whose Timer A0 handler ends in JMP ($BFBA) - a shared-RAM
+	   pointer the main CPU fills in after uploading the real sequencer. With
+	   the genuine mask ROMs below, none of that guesswork is needed. */
+	const unsigned char* maskRom = NULL;
+	switch (m37702McuKind_) {
+	case 74: maskRom = cemu_c74_rom; break;
+	case 75: maskRom = cemu_c75_rom; break;
+	case 76: maskRom = cemu_c76_rom; break;
+	default: break;
+	}
+	m37702MaskRom_ = (m37702MapKind_ == 2);
+
 	/* Internal MCU BIOS: c69/c70/c74/c76.bin (16KB @ catalog offset 0xC000). */
 	for (int i = 0; i < ge->romCount; i++) {
 		const CEmuRomEntry* r = &ge->rom[i];
@@ -6854,8 +6923,9 @@ int CHardAc::LoadRomsM37702(CEmuZipFs* fs, const CEmuGameEntry* ge)
 		/* System 11/22 and NB-1 have no c7x dump; the C74/C76 program is the
 		   shared pr1data.8k that all 29 of those sets carry as type=bios. It is
 		   a linear bank-0 image: file offset $FFD6-$FFFF holds the M37710
-		   vector table (reset = $C030), so $C000-$FFFF is the MCU ROM. */
-		const int isBios = (m37702MapKind_ != 1
+		   vector table (reset = $C030), so $C000-$FFFF is the MCU ROM. Only
+		   worth doing for boards we have no mask ROM for. */
+		const int isBios = (m37702MapKind_ != 1 && !maskRom
 			&& _stricmp(r->type, "bios") == 0 && sz >= 0x10000u);
 		if (isBios) isInt = 1;
 		if (!isInt) continue;
@@ -6882,6 +6952,14 @@ int CHardAc::LoadRomsM37702(CEmuZipFs* fs, const CEmuGameEntry* ge)
 			m37702IntRom_ = p;
 			m37702IntRomSize_ = sz > 0x4000u ? 0x4000u : sz;
 			break;
+		}
+	}
+	if (maskRom && !m37702IntRomSize_) {
+		uint8_t* p = (uint8_t*)malloc(0x4000u);
+		if (p) {
+			memcpy(p, maskRom, 0x4000u);
+			m37702IntRom_ = p;
+			m37702IntRomSize_ = 0x4000u;
 		}
 	}
 
@@ -6948,12 +7026,25 @@ int CHardAc::LoadRomsM37702(CEmuZipFs* fs, const CEmuGameEntry* ge)
 	if (m37702MapKind_ == 1 && !m37702IntRomSize_) return 0;
 	if (!m37702IntRomSize_ && !h8RomSize_) return 0;
 
-	/* PCM: NA1 uses ROM_LOAD16_BYTE pairs (offset 0 / 1). */
+	/* PCM. NA-1 lists its two wave ROMs as a ROM_LOAD16_BYTE pair, offset 0
+	   and offset 1, to be interleaved byte by byte. Everywhere else offset is
+	   a plain byte position and offset 0 just means "first ROM in the region"
+	   - which is most of System 22 / System 11 / NB-1. Decide by whether an
+	   offset 1 entry actually exists, so a lone offset 0 ROM is placed instead
+	   of being held back as the even half of a pair that never arrives. */
 	if (pcmRom_) { free(pcmRom_); pcmRom_ = NULL; pcmRomSize_ = 0; }
 	{
 		const unsigned char* evenData = NULL;
 		const unsigned char* oddData = NULL;
 		unsigned evenSz = 0, oddSz = 0;
+		int interleaved = 0;
+		for (int i = 0; i < ge->romCount; i++) {
+			const CEmuRomEntry* r = &ge->rom[i];
+			if (r->offset != 1) continue;
+			if (_stricmp(r->type, "pcm") == 0 || _stricmp(r->type, "voice") == 0
+				|| _stricmp(r->type, "sample") == 0 || _stricmp(r->type, "adpcm") == 0)
+				interleaved = 1;
+		}
 		for (int i = 0; i < ge->romCount; i++) {
 			const CEmuRomEntry* r = &ge->rom[i];
 			if (_stricmp(r->type, "pcm") != 0 && _stricmp(r->type, "voice") != 0
@@ -6962,8 +7053,8 @@ int CHardAc::LoadRomsM37702(CEmuZipFs* fs, const CEmuGameEntry* ge)
 			unsigned sz = 0;
 			const unsigned char* data = CEmuZipFsFind(fs, r->name, &sz);
 			if (!data || !sz) continue;
-			if (r->offset == 0) { evenData = data; evenSz = sz; }
-			else if (r->offset == 1) { oddData = data; oddSz = sz; }
+			if (interleaved && r->offset == 0) { evenData = data; evenSz = sz; }
+			else if (interleaved && r->offset == 1) { oddData = data; oddSz = sz; }
 			else {
 				int off = r->offset;
 				if (off < 0) off = 0;
@@ -7027,6 +7118,11 @@ int CHardAc::LoadRomsM37702(CEmuZipFs* fs, const CEmuGameEntry* ge)
 		}
 		M37702SetInternalRom(m37702_, introm, intsize);
 	}
+	/* System 22 wires port P4 bit 4 high on the CPU board so the shared C74
+	   program takes its sound-driver entry instead of the I/O-board one.
+	   Super System 22 has no second MCU and just reads the latch back. */
+	M37702SetPortIn(m37702_, 4, m37702MaskRom_ ? 0x10 : 0x00);
+	M37702SetPort5Mirror(m37702_, m37702MapKind_ == 1);
 	M37702Reset(m37702_);
 	m37702Soft_ = 0; /* real CPU attached */
 	return 1;

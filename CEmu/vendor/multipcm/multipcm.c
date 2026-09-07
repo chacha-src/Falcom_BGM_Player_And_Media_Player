@@ -1,4 +1,4 @@
-/*
+﻿/*
  * Sega System 32 Multi/Model 1/Model 2 custom PCM chip (315-5560) emulation.
  *
  * by Miguel Angel Horna (ElSemi) for Model 2 Emulator and MAME.
@@ -41,7 +41,9 @@
 #include "multipcm.h"
 
 //????
-#define MULTIPCM_CLOCKDIV   	(180.0)
+/* MAME gew_pcm / YMW-258-F: clock/224 → WORDCLK 10M/224 ≈ 44.643 kHz
+   (segam1audio DAC measure). Old VGM 180 made EG/LFO ~1.24× fast. */
+#define MULTIPCM_CLOCKDIV   	(224.0)
 //#define SHOW_WARNINGS
 static UINT8 didWarn = 0x00;
 
@@ -825,6 +827,7 @@ void multipcm_write_rom(UINT8 ChipID, offs_t ROMSize, offs_t DataStart, offs_t D
 			ptSample = (UINT8*)ptChip->ROM + CurSmpl * 12;
 			
 			TempSmpl->Start = (ptSample[0]<<16)|(ptSample[1]<<8)|(ptSample[2]<<0);
+			TempSmpl->Start &= 0x3fffff; /* strip YMW format / unknown high bits */
 			TempSmpl->Loop = (ptSample[3]<<8)|(ptSample[4]<<0);
 			TempSmpl->End = 0xffff-((ptSample[5]<<8)|(ptSample[6]<<0));
 			TempSmpl->LFOVIB = ptSample[7];

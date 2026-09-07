@@ -1183,10 +1183,14 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 		if (h8Board_) {
 			h8Acc_ = 0;
 			cmdIndex_ = 0;
+			/* Warm the driver through its own init, which is silent, then post
+			   the song and stop. Running the CPU on past the request would
+			   leave it permanently that far ahead of the rendered audio, and
+			   FmMon reads the live register shadow, so the keyboard would
+			   light up that much earlier than the note is heard. */
 			H8RunCycles(cpuHz_);
 			H8RunCycles(cpuHz_ / 2);
 			TryInjectCommand();
-			H8RunCycles(cpuHz_ / 4);
 			booted_ = 1;
 			triggered_ = 1;
 			nextCmdAt_ = (uint64_t)~0ull;
@@ -1195,10 +1199,11 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 		if (m37702Board_) {
 			m37702Acc_ = 0;
 			cmdIndex_ = 0;
+			/* Same as the H8 path above: nothing may run after the request or
+			   the CPU stays that far ahead of the audio for the whole song. */
 			M37702RunCycles(cpuHz_);
 			M37702RunCycles(cpuHz_ / 2);
 			TryInjectCommand();
-			M37702RunCycles(cpuHz_ / 4);
 			booted_ = 1;
 			triggered_ = 1;
 			nextCmdAt_ = (uint64_t)~0ull;
@@ -3433,11 +3438,23 @@ void CDriverAc::M37702RunCycles(int cycles)
 		const int used = M37702Execute(cpu, slice);
 		const int step = used > 0 ? used : slice;
 		hw_->AddCpuCycles((uint64_t)step);
-		/* ~60 Hz IRQ0 / IRQ2 (Sys11 / NA1 host tick). */
-		if ((hw_->CpuCycles() / (uint64_t)(hw_->cpuHz_ / 60 + 1))
+		/* ~60 Hz host tick. System 22 needs none of it - it sequences off
+		   Timer A0. Elsewhere IRQ0 is what the driver wants: on System 11 its
+		   handler sets the flag the main loop spins on. IRQ2 is the main-CPU
+		   handshake, and in the C7x mask ROMs that handler blocks on a reply
+		   we have no main CPU to send, parking the MCU at interrupt priority
+		   so the tick never returns; boards running their own driver out of
+		   the game ROM do expect it. NA-1/NA-2 want none either: there the
+		   only host interrupt is the 68000 writing mail slot 4, and a tick
+		   arriving before the C69 BIOS has filled its RAM vector table at
+		   $01E0 sends it through JMP ($01F0) into nothing. */
+		const int naC69 = (hw_->M37702MapKind() == 1 && !hw_->M37702McuKind());
+		if (hw_->M37702MapKind() != 2 && !naC69
+			&& (hw_->CpuCycles() / (uint64_t)(hw_->cpuHz_ / 60 + 1))
 			!= ((hw_->CpuCycles() - (uint64_t)step) / (uint64_t)(hw_->cpuHz_ / 60 + 1))) {
 			M37702SetInputLine(cpu, M37710_LINE_IRQ0, M37702_HOLD_LINE);
-			M37702SetInputLine(cpu, M37710_LINE_IRQ2, M37702_HOLD_LINE);
+			if (!hw_->M37702McuKind())
+				M37702SetInputLine(cpu, M37710_LINE_IRQ2, M37702_HOLD_LINE);
 		}
 		if (chip) chip->AdvanceClocks((uint64_t)step);
 		cycles -= step;

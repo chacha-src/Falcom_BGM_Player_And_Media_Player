@@ -60,6 +60,10 @@ void M37702Reset(M37702Cpu* cpu);
 int M37702Execute(M37702Cpu* cpu, int cycles);
 void M37702SetInputLine(M37702Cpu* cpu, int line, int state);
 uint32_t M37702Pc(const M37702Cpu* cpu);
+/* Level driven onto a port's input pins (ports 0-10). */
+void M37702SetPortIn(M37702Cpu* cpu, int port, uint8_t value);
+/* NA-1/NA-2 board wiring: port P5 bit 0 follows bit 1. */
+void M37702SetPort5Mirror(M37702Cpu* cpu, int on);
 uint32_t M37702Sp(const M37702Cpu* cpu);
 uint32_t M37702IrqCount(const M37702Cpu* cpu);
 

@@ -60,6 +60,15 @@ public:
 		heldL_ = heldR_ = 0;
 	}
 
+	uint16_t ReadReg(unsigned reg) const
+	{
+		const unsigned offset = reg & 0x3ffu;
+		if (offset < 0x100u)
+			return *VoiceRegConst((int)(offset / 8u), (int)(offset & 7u));
+		if (offset == 0x200u) return control_;
+		return 0;
+	}
+
 	void Write(uint32_t addr, uint32_t data) override
 	{
 		const unsigned offset = addr & 0x3ffu;
@@ -226,14 +235,9 @@ private:
 			Voice& v = v_[j];
 			int16_t s = 0;
 			if (v.flags & C352_FLG_BUSY) {
-				/* Some C76 dumps key before their envelope ISR reaches C352.
-				   Keep the programmed registers truthful (zero remains zero),
-				   but let the shared renderer bridge that transient state.
-				   Later register writes take effect immediately. */
-				const uint16_t step = v.freq ? v.freq : (uint16_t)0x2000;
-				const uint16_t vf = (v.vol_f || v.vol_r) ? v.vol_f : (uint16_t)0x8080;
-				const uint16_t vr = (v.vol_f || v.vol_r) ? v.vol_r : (uint16_t)0x8080;
-				const int32_t next = (int32_t)v.counter + (int32_t)step;
+				const uint16_t vf = v.vol_f;
+				const uint16_t vr = v.vol_r;
+				const int32_t next = (int32_t)v.counter + (int32_t)v.freq;
 				if (next & 0x10000)
 					FetchSample(v, j);
 				if ((next ^ (int32_t)v.counter) & 0x18000) {
@@ -327,4 +331,10 @@ CChip* CEmuChipC352Create(uint32_t clockHz, int sampleRate)
 void CEmuChipC352Destroy(CChip* c)
 {
 	delete c;
+}
+
+uint16_t CEmuChipC352Read(CChip* c, unsigned reg)
+{
+	CChipC352* p = dynamic_cast<CChipC352*>(c);
+	return p ? p->ReadReg(reg) : 0;
 }

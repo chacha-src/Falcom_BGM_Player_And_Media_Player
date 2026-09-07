@@ -5,6 +5,7 @@
 #include "cemu_mdx.h"
 #include "cemu_modepref.h"
 #include "machine/cemu_hard_pcat.h"
+#include "machine/cemu_hard_ac.h"
 #include <string.h>
 #include <stdlib.h>
 
@@ -589,7 +590,8 @@ int CEmuSessionOpen(CEmuSession* s, const wchar_t* path, unsigned titleCode, DWO
 }
 
 /* hard エミュ (PC88/98/AC/X68k): カタログに長さが無い。
-   一度鳴ったあと連続無音が続けば非ループ曲として終了。永久ループ曲は鳴り続けるので止まらない。 */
+   一度鳴ったあと連続無音が続けば非ループ曲として終了。永久ループ曲は鳴り続けるので止まらない。
+   Model1 MultiPCM は曲終了後に超低音がキーオンのまま残ることがある → 実曲レベル未満は無音扱い。 */
 static void CEmuSessionWatchHardSilence(CEmuSession* s, short* stereo, int frames)
 {
 	if (!s || !stereo || frames <= 0) return;
@@ -608,7 +610,8 @@ static void CEmuSessionWatchHardSilence(CEmuSession* s, short* stereo, int frame
 	const uint32_t settleNeed = (uint32_t)rate * 4u;
 	const uint32_t silenceNeed = (uint32_t)rate * 5u;
 	const uint32_t neverHeardNeed = (uint32_t)rate * 25u;
-	const int thresh = 80; /* ~ -52 dBFS。ノイズ床は無視 */
+	const int heardThresh = 500; /* 実曲。超低音ハミングはこれ未満 */
+	const int noiseFloor = 80;
 
 	s->silenceFrames += (uint32_t)frames;
 
@@ -620,13 +623,16 @@ static void CEmuSessionWatchHardSilence(CEmuSession* s, short* stereo, int frame
 		if (v > peak) peak = v;
 	}
 
-	if (peak >= thresh) {
+	if (peak >= heardThresh) {
 		s->silenceHeard = 1;
 		s->silenceRun = 0;
 		return;
 	}
 
 	if (!s->silenceHeard) {
+		if (peak >= noiseFloor) {
+			/* Weak boot noise only — do not count as a real attack. */
+		}
 		if (s->silenceFrames >= neverHeardNeed) {
 			s->endedBySilence = 1;
 			s->lengthSamples = s->curSample + (UINT64)frames;
@@ -639,6 +645,7 @@ static void CEmuSessionWatchHardSilence(CEmuSession* s, short* stereo, int frame
 	if (s->silenceFrames < settleNeed)
 		return;
 
+	/* After real music: near-silence OR stuck ultra-low hum. */
 	s->silenceRun += (uint32_t)frames;
 	if (s->silenceRun >= silenceNeed) {
 		s->endedBySilence = 1;
@@ -649,6 +656,16 @@ static void CEmuSessionWatchHardSilence(CEmuSession* s, short* stereo, int frame
 		if (s->kind == CEMU_KIND_PCAT && s->pcat.hard
 			&& s->pcat.hard->hardKind == CHard::KIND_PCAT)
 			((CHardPcat*)s->pcat.hard)->MuteAllSound();
+		/* Model1 MultiPCM: send Stop and reset chips so ultra-low dies. */
+		if (s->kind == CEMU_KIND_AC && s->ac.hard
+			&& s->ac.hard->hardKind == CHard::KIND_AC) {
+			CHardAc* ac = (CHardAc*)s->ac.hard;
+			if (ac->SegaM1Audio()) {
+				ac->SegaMidiInjectSong(0x1000);
+				if (ac->PcmChip()) ac->PcmChip()->Reset();
+				if (ac->Oki(1)) ac->Oki(1)->Reset();
+			}
+		}
 	}
 }
 
