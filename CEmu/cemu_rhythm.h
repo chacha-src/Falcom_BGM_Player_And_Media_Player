@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include "chip/cemu_chip.h"
 
 /* Directory (trailing '\\') containing 2608_BD.WAV etc., or empty. */

@@ -1,4 +1,4 @@
-#include <windows.h>
+﻿#include <windows.h>
 #include <string.h>
 #include <stdio.h>
 #include <math.h>
@@ -39,6 +39,7 @@ static int s_keysOnly = 0;
 static unsigned s_keysProfile = 0;
 static int s_opmRegsValid = 0;
 static int s_ga20Seen = 0; /* OPM+GA20: regs live at dump+$100 */
+static int s_aySeen = 0;   /* OPM+AY (X1): AY shadow owns $00-$0F */
 static int s_arcRegsValid = 0;
 static int s_auxRegsValid = 0; /* PC/AT BEEP PIT / GameBlaster SAA / … */
 static unsigned s_ssgClock = 7987200; /* OPNA default; MSX AY → 3579545 */
@@ -212,6 +213,7 @@ void FmMonShadowReset(void)
 	s_keysProfile = 0;
 	s_opmRegsValid = 0;
 	s_ga20Seen = 0;
+	s_aySeen = 0;
 	s_arcRegsValid = 0;
 	s_auxRegsValid = 0;
 	s_ssgClock = 7987200;
@@ -257,6 +259,18 @@ void FmMonShadowSetIdentity(const char* platform, const char* chip)
 	LeaveCriticalSection(&s_cs);
 }
 
+void FmMonShadowGetIdentity(char* platform, unsigned platformLen,
+	char* chip, unsigned chipLen)
+{
+	EnsureCs();
+	EnterCriticalSection(&s_cs);
+	if (platform && platformLen)
+		strncpy_s(platform, platformLen, s_identPlat, _TRUNCATE);
+	if (chip && chipLen)
+		strncpy_s(chip, chipLen, s_identChip, _TRUNCATE);
+	LeaveCriticalSection(&s_cs);
+}
+
 void FmMonShadowSetOpnaLayout(int layout)
 {
 	/* 1=OPNA(6ch)  0=OPN(3ch)  2=YM2610(4ch)  -1=non-OPN(A) e.g. OPM / SN */
@@ -293,14 +307,35 @@ void FmMonShadowSetOpmRegSnapshotEx(const unsigned char* regs256, int keyRegOrNe
 	EnterCriticalSection(&s_cs);
 	/* Preserve GA20 shadow in bank1 ($100+) across OPM snapshot refreshes. */
 	uint8_t ga20Keep[0x20];
+	uint8_t ga20BitsKeep[4];
 	const int keepGa20 = s_ga20Seen;
-	if (keepGa20)
+	if (keepGa20) {
 		memcpy(ga20Keep, s_regs + 0x100, sizeof(ga20Keep));
+		memcpy(ga20BitsKeep, s_bits + 32, sizeof(ga20BitsKeep));
+	}
+	/* Same for the X1's separate AY: its shadow lives at $00-$0F, which is
+	   also where OPM $00-$0F land. Letting the snapshot win there fed the SSG
+	   gate/note math OPM control bytes (reg $08 key-on read as channel A
+	   volume), so the SSG rows keyed at random. OPM only uses $01/$08/$0F in
+	   that range, none of which the register panel shows. */
+	uint8_t ayKeep[0x10];
+	uint8_t ayBitsKeep[2];
+	const int keepAy = s_aySeen;
+	if (keepAy) {
+		memcpy(ayKeep, s_regs, sizeof(ayKeep));
+		memcpy(ayBitsKeep, s_bits, sizeof(ayBitsKeep));
+	}
 	memcpy(s_regs, regs256, 256);
 	memset(s_regs + 256, 0, 0x200 - 256);
-	if (keepGa20)
-		memcpy(s_regs + 0x100, ga20Keep, sizeof(ga20Keep));
 	memset(s_bits, 0, sizeof(s_bits));
+	if (keepGa20) {
+		memcpy(s_regs + 0x100, ga20Keep, sizeof(ga20Keep));
+		memcpy(s_bits + 32, ga20BitsKeep, sizeof(ga20BitsKeep));
+	}
+	if (keepAy) {
+		memcpy(s_regs, ayKeep, sizeof(ayKeep));
+		memcpy(s_bits, ayBitsKeep, sizeof(ayBitsKeep));
+	}
 	s_opmRegsValid = 1;
 	s_opnaLayout = -1;
 	s_keysProfile = SASAMI_FMMON_KEYS_MDX;
@@ -574,14 +609,14 @@ void FmMonShadowPcmNote(int ch, int midiNote, int on)
 	if (ch < 0 || ch >= SASAMI_FMMON_PCM_MAX) return;
 	EnsureCs();
 	EnterCriticalSection(&s_cs);
-	/* Ensure arcade keys-only path stays armed (GX Reset+bind race). */
-	if (s_keysProfile == SASAMI_FMMON_KEYS_RF5C
+	/* Ensure arcade keys-only path stays armed (GX Reset+bind race).
+	   Skip if s_opnaLayout >= 0 (hybrid OPN+PCM like YM2203+SegaPCM) to keep FM rows. */
+	if (s_opnaLayout < 0 && (s_keysProfile == SASAMI_FMMON_KEYS_RF5C
 		|| s_keysProfile == SASAMI_FMMON_KEYS_C352
 		|| s_keysProfile == SASAMI_FMMON_KEYS_QSOUND
 		|| s_keysProfile == SASAMI_FMMON_KEYS_SEGAPCM
-		|| s_keysProfile == SASAMI_FMMON_KEYS_OKI) {
+		|| s_keysProfile == SASAMI_FMMON_KEYS_OKI)) {
 		s_keysOnly = 1;
-		s_opnaLayout = -1;
 		if (s_pcmCount < (uint8_t)(ch + 1))
 			s_pcmCount = (uint8_t)(ch + 1);
 	}
@@ -926,6 +961,7 @@ void FmMonShadowFlushKeysOnly(int force)
 			d.dumpFlags = SASAMI_FMMON_FLAG_OPM;
 			/* Include bank1 when GA20 (or other hybrid PCM) shadowed at $100+. */
 			memcpy(d.regs, s_regs, s_ga20Seen ? 0x200 : 256);
+			memcpy(d.regWriteBits, s_bits, sizeof(d.regWriteBits));
 			d.pad6[2] = (uint8_t)(SASAMI_FMMON_VIEW_KEYS
 				| SASAMI_FMMON_VIEW_REGS | SASAMI_FMMON_VIEW_PANELS);
 		} else {
@@ -1034,11 +1070,23 @@ void FmMonShadowSetSsgClock(unsigned clockHz)
 		s_ssgClock = clockHz;
 }
 
+void FmMonShadowDebugSsg(unsigned char regs16[16], unsigned char ssgOn[3],
+	unsigned char ssgMidi[3])
+{
+	EnsureCs();
+	EnterCriticalSection(&s_cs);
+	if (regs16) memcpy(regs16, s_regs, 16);
+	if (ssgOn) memcpy(ssgOn, s_ssg, 3);
+	if (ssgMidi) memcpy(ssgMidi, s_midiSsg, 3);
+	LeaveCriticalSection(&s_cs);
+}
+
 void FmMonShadowWriteAyReg(unsigned reg, unsigned data)
 {
 	/* AY-3-8910 / YM2149 → same SSG shadow as OPNA bank0 $00-$0F */
 	reg &= 0x0Fu;
 	data &= 0xFFu;
+	s_aySeen = 1;
 	FmMonShadowWriteReg(reg, data);
 }
 
@@ -1671,6 +1719,54 @@ void FmMonShadowApplyRf5cReg(unsigned ofs, unsigned data8)
 	LeaveCriticalSection(&s_cs);
 }
 
+/* Dual MultiPCM (daytona): chip0 → PCM rows 0-7, chip1 → 8-15. */
+void FmMonShadowApplyMultiPcm(int chipId, unsigned port, unsigned data8)
+{
+	static uint8_t s_slot[2];
+	static uint8_t s_reg[2];
+	static uint8_t s_regs[2][28][8];
+	if (chipId < 0 || chipId > 1) return;
+	EnsureCs();
+	EnterCriticalSection(&s_cs);
+	ArcEnterKeys(SASAMI_FMMON_KEYS_RF5C, 16);
+	port &= 3u;
+	data8 &= 0xFFu;
+	if (port == 1) {
+		s_slot[chipId] = (uint8_t)(data8 & 0x1fu);
+		LeaveCriticalSection(&s_cs);
+		return;
+	}
+	if (port == 2) {
+		s_reg[chipId] = (uint8_t)((data8 > 7u) ? 7u : data8);
+		LeaveCriticalSection(&s_cs);
+		return;
+	}
+	if (port != 0) {
+		LeaveCriticalSection(&s_cs);
+		return;
+	}
+	const int slot = (int)s_slot[chipId];
+	const int reg = (int)s_reg[chipId];
+	if (slot >= 28) {
+		LeaveCriticalSection(&s_cs);
+		return;
+	}
+	s_regs[chipId][slot][reg] = (uint8_t)data8;
+	if (reg == 4) {
+		const int pcmCh = chipId * 8 + (slot & 7);
+		const int on = (data8 & 0x80) != 0;
+		/* Octave in reg3[7:4], coarse pitch in reg2/3 — map to a rough MIDI. */
+		const unsigned oct = (s_regs[chipId][slot][3] >> 4) & 0x0fu;
+		const unsigned fns = ((unsigned)(s_regs[chipId][slot][3] & 0x0f) << 6)
+			| ((unsigned)s_regs[chipId][slot][2] >> 2);
+		int mid = 48 + (int)oct * 12 + (int)(fns / 85u);
+		if (mid < 12) mid = 12;
+		if (mid > 108) mid = 108;
+		ArcSetPcm(pcmCh, on, mid);
+	}
+	LeaveCriticalSection(&s_cs);
+}
+
 void FmMonShadowSetC352Clock(unsigned clockHz)
 {
 	if (clockHz >= 1000000u && clockHz <= 50000000u)
@@ -1865,18 +1961,28 @@ void FmMonShadowApplyGa20Reg(unsigned ofs, unsigned data8)
 	ofs &= 0x1Fu;
 	data8 &= 0xFFu;
 	s_ga20Seen = 1;
+	s_arcRegsValid = 1;
 	ArcMarkReg(0x100u + ofs, (uint8_t)data8);
 
 	const int ch = (int)(ofs >> 3);
 	const int r = (int)(ofs & 7);
-	if (ch >= 0 && ch < 4 && r == 6) {
-		const int on = (data8 & 2) != 0;
-		const unsigned rate = s_regs[0x100u + (unsigned)(ch << 3) + 4u];
+	if (ch < 0 || ch >= 4) {
+		LeaveCriticalSection(&s_cs);
+		return;
+	}
+	const uint8_t ctrl = s_regs[0x100u + (unsigned)(ch << 3) + 6u];
+	const unsigned rate = s_regs[0x100u + (unsigned)(ch << 3) + 4u];
+	const unsigned vol = s_regs[0x100u + (unsigned)(ch << 3) + 5u];
+	const int on = (ctrl & 2) != 0;
+	/* Refresh MIDI on key/rate/vol so the keyboard shows notes, not blank. */
+	if (r == 4 || r == 5 || r == 6 || on) {
 		int mid = 48 + ch * 3;
 		if (rate) {
-			const int m = MidiFromHz(200.0 + (double)rate * 8.0);
+			/* GA20 rate byte → rough Hz for piano label */
+			const int m = MidiFromHz(110.0 * (1.0 + (double)rate / 32.0));
 			if (m >= 0) mid = m;
-		}
+		} else if (vol)
+			mid = 60 + (int)(vol & 15);
 		ArcSetPcm(ch, on, on ? mid : -1);
 	}
 	LeaveCriticalSection(&s_cs);

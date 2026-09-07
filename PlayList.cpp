@@ -1,4 +1,4 @@
-﻿// PlayList.cpp : 実装ファイル
+// PlayList.cpp : 実装ファイル
 //
 
 #include "stdafx.h"

@@ -834,6 +834,7 @@ UINT WASAPIHandleNotifications(LPVOID lpvoid);
 void HandleNotifications_export();  // WAV出力専用（DirectSoundなし、ファイル書き込みのみ）
 void SignalPlaybackNotifyThreadStop();
 BOOL WaitForPlaybackNotifyThreadExit(DWORD timeoutMs = 2500);
+void KillPlaybackNotifyThread();
 extern DWORD g_playbackNotifyJoinTimeoutMs;
 extern volatile LONG g_interactiveTrackChange;
 void BeginPlaybackNotifyThread();
@@ -2334,6 +2335,38 @@ static int PcmOutBytesPerFrame()
 		ch = 2;
 	const int bpf = ch * (bits / 8);
 	return (bpf > 0) ? bpf : 4;
+}
+
+/* g_heardBytes / g_dsWrittenBytes は DS 出力フォーマットのバイト。
+   アップスケール時はソース (wavbit/PcmOutBytesPerFrame) とレート・bpf が違う。 */
+static int OggDsOutputBytesPerFrame()
+{
+	extern int g_pcm_upscale_active;
+	extern int g_ds_pcm_ch, g_ds_pcm_bits;
+	if (g_pcm_upscale_active) {
+		int ch = g_ds_pcm_ch;
+		int bits = g_ds_pcm_bits;
+		if (ch <= 0) ch = 2;
+		if (!(bits == 8 || bits == 16 || bits == 24 || bits == 32))
+			bits = 16;
+		const int bpf = ch * (bits / 8);
+		return (bpf > 0) ? bpf : 4;
+	}
+	return PcmOutBytesPerFrame();
+}
+
+/* DS 出力フレーム → ソース/playb/FmMon.curSample 空間 */
+static __int64 OggDsOutFramesToSrc(__int64 outFrames)
+{
+	extern int g_pcm_upscale_active;
+	extern int g_ds_pcm_rate;
+	if (outFrames <= 0 || !g_pcm_upscale_active)
+		return (outFrames < 0) ? 0 : outFrames;
+	const int outRate = (g_ds_pcm_rate >= 8000) ? g_ds_pcm_rate : 0;
+	const int srcRate = (wavbit_sample_Hz > 0) ? wavbit_sample_Hz : 0;
+	if (outRate > 0 && srcRate > 0 && outRate != srcRate)
+		return outFrames * (__int64)srcRate / (__int64)outRate;
+	return outFrames;
 }
 
 // PCM バイト長 → フレーム数（旧 oggsize/4 は 16bit stereo 専用で 7.1 で 4 倍になる）
@@ -13611,7 +13644,7 @@ open_mode_vst_midi:
 	InterlockedExchange(&g_tpLoopPending, 0);
 
 	int len1, len2, len3;
-	g_outBytesPerFrame = PcmOutBytesPerFrame();
+	g_outBytesPerFrame = OggDsOutputBytesPerFrame();
 	// クロスフェード早期終端用: 曲長→想定 DS バイト（実際の DS 出力フォーマット基準）。
 	g_expectedDsBytes = 0;
 	// KPI/外部: メタデータ長は目安。expected に載せると表示長ちょうどで atEof→プツリ切れになる。
@@ -23593,15 +23626,17 @@ void COggDlg::stop()
 		else if (g_interactiveTrackChange)
 			joinTimeout = 2500u;
 		if (!WaitForPlaybackNotifyThreadExit(joinTimeout)) {
-			// タイムアウトでも停止フラグを残すと、続く play() の CWread/adbuf が
-			// IsPlaybackStopRequested で無音になる。デコーダは触らずフラグだけ戻す。
-			// CEmu は必ず解放する（vg2_98 終了ボタンで hooks/np2 が残ってクラッシュ）。
-			if (PeekOpenDecoderMode(mode) == MODE_CEMU || g_cemuSession.kind != 0)
-				CloseCemuPlaybackResources();
-			thn1 = FALSE;
-			stf = 0;
-			SongParams_OnSongStopped();
-			return;
+			// If we are exiting the app (timeout was forced to 8000), we must kill the thread
+			// to prevent exit-time crashes due to globals being destroyed while it runs.
+			// For interactive track changes, we return early and keep the thread alive.
+			if (joinTimeout == 8000) {
+				KillPlaybackNotifyThread();
+			} else {
+				thn1 = FALSE;
+				stf = 0;
+				SongParams_OnSongStopped();
+				return;
+			}
 		}
 		SongParams_OnSongStopped();
 
@@ -24539,23 +24574,26 @@ static void OggRefreshDsQueuedSamplesCache()
 	if (!m_dsb || InterlockedCompareExchange(&g_dsDeviceOpBusy, 0, 0) != 0)
 		return;
 	ULONG hp = 0, hw = 0;
-	const int bpf = PcmOutBytesPerFrame();
-	if (m_dsb->GetCurrentPosition(&hp, &hw) == DS_OK)
-		g_dsQueuedSamplesCache = DsQueuedSamples(hp, hw, bpf);
+	const int bpf = OggDsOutputBytesPerFrame();
+	if (m_dsb->GetCurrentPosition(&hp, &hw) == DS_OK) {
+		const long qOut = DsQueuedSamples(hp, hw, bpf);
+		/* フォールバック経路の playb はソースフレームなのでソース相当へ */
+		g_dsQueuedSamplesCache = (long)OggDsOutFramesToSrc((__int64)qOut);
+	}
 }
 
 __int64 OggGetHeardPcmFrames()
 {
 	extern __int64 g_heardBytes;
 	extern __int64 g_dsWrittenBytes;
-	const int bpf = PcmOutBytesPerFrame();
+	const int bpf = OggDsOutputBytesPerFrame();
 	const int bpfSafe = (bpf > 0) ? bpf : 4;
 
-	/* DS スレッドが更新する実聴バイト → フレーム（playb より正確） */
+	/* DS スレッドが更新する実聴バイト → ソース空間フレーム（playb / FmMon と揃える） */
 	if (g_heardBytes > 0 && g_dsWrittenBytes > 0) {
 		__int64 fr = g_heardBytes / bpfSafe;
 		if (fr < 0) fr = 0;
-		return fr;
+		return OggDsOutFramesToSrc(fr);
 	}
 
 	OggRefreshDsQueuedSamplesCache();
@@ -24571,6 +24609,22 @@ __int64 OggGetHeardPcmFrames()
 		pb = 0;
 	if (pb < 0) pb = 0;
 	return pb;
+}
+
+// FM モニタ用: DS リングに積んだが、まだ再生カーソルが消化していないフレーム数（ソース空間）。
+// dump.curSample はデコード（ソース）進行なので、差し引きもソース換算で揃える。
+// -1 = DS 通知スレッドが未稼働（呼び出し側は従来の固定ラグへフォールバック）。
+__int64 OggGetDsQueuedFrames()
+{
+	extern __int64 g_dsWrittenBytes;
+	extern __int64 g_heardBytes;
+	const int bpf = OggDsOutputBytesPerFrame();
+	const int bpfSafe = (bpf > 0) ? bpf : 4;
+	if (g_heardBytes == 0 && g_dsWrittenBytes == 0)
+		return -1;
+	const __int64 qOut = (g_dsWrittenBytes - g_heardBytes) / bpfSafe;
+	const __int64 q = OggDsOutFramesToSrc(qOut >= 0 ? qOut : 0);
+	return (q >= 0) ? q : 0;
 }
 
 double OggGetGdiPlaybackTimeSec()
@@ -24813,7 +24867,7 @@ void COggDlg::timerp()
 	// キュー分(qSamples)を差し引くと「実際に聴こえている位置」になる。時間表示・スライダーで共用。
 	// DS Lock 中は GetCurrentPosition もドライバで固まることがあるため、直前値を使う。
 	OggRefreshDsQueuedSamplesCache();
-	g_outBytesPerFrame = PcmOutBytesPerFrame(); // DS スレッドの短フェード尺計算用に共有
+	g_outBytesPerFrame = OggDsOutputBytesPerFrame(); // DS 出力 bpf（短フェードは書込バイト空間）
 	const long qSamplesHeard = g_dsQueuedSamplesCache;
 
 	//時間
@@ -29078,7 +29132,7 @@ void COggDlg::OnOK()
 {
 	// TODO: この位置にその他の検証用のコードを追加してください
 	const DWORD prevJoin = g_playbackNotifyJoinTimeoutMs;
-	g_playbackNotifyJoinTimeoutMs = 8000;
+	g_playbackNotifyJoinTimeoutMs = 0;
 	stop();
 	g_playbackNotifyJoinTimeoutMs = prevJoin;
 	CCustomBlurDialogBase::OnOK();

@@ -1,6 +1,7 @@
-#include "StdAfx.h"
+﻿#include "StdAfx.h"
 #include "cemu_fmmon_bind.h"
 #include "fmmon_shadow.h"
+#include "../cemu_catalog.h"
 #include <string.h>
 
 static int HasChip(const CEmuGameEntry* ge, int id)
@@ -8,7 +9,129 @@ static int HasChip(const CEmuGameEntry* ge, int id)
 	if (!ge) return 0;
 	for (int i = 0; i < ge->chipCount && i < 8; i++)
 		if (ge->chipIds[i] == id) return 1;
+	/* Also honour the chips the catalog spells out in <name>. Most arcade
+	   entries carry no <chip> tag, so without this the subtype table decided
+	   everything and anything it did not recognise was labelled "OPM". */
+	for (int i = 0; i < ge->docChipCount && i < 12; i++)
+		if (ge->docChipIds[i] == id) return 1;
 	return 0;
+}
+
+/* Display name and monitor shape for each chip the catalog can document. */
+struct FmMonChipInfo {
+	int id;
+	const char* label;
+	int channels;   /* rows to show, 0 when the label carries no count */
+	int layout;     /* OPN(A)-shaped layout this chip implies, -1 = not OPN */
+	unsigned ssgHz; /* SSG/PSG clock to report, 0 when not applicable */
+	unsigned keys;  /* keyboard/panel profile this chip's rows need */
+	int isPcm;      /* sample player, so it picks the profile over the FM part */
+};
+
+/* Ordered so the FM part of a set is named before its PCM part, which is how
+   the monitor lays its rows out and how the catalog writes these names. */
+static const FmMonChipInfo kFmMonChips[] = {
+	{ CEMU_CHIP_OPNA,     "OPNA",      6,  1, 3993600u, SASAMI_FMMON_KEYS_MDX,     0 },
+	{ CEMU_CHIP_YM2610,   "YM2610",    4,  2, 2000000u, SASAMI_FMMON_KEYS_MDX,     0 },
+	{ CEMU_CHIP_OPN,      "YM2203",    3,  0, 1500000u, SASAMI_FMMON_KEYS_MDX,     0 },
+	{ CEMU_CHIP_YM2612,   "YM2612",    6,  0, 0u,       SASAMI_FMMON_KEYS_MDX,     0 },
+	{ CEMU_CHIP_OPM,      "OPM",       8, -1, 0u,       SASAMI_FMMON_KEYS_MDX,     0 },
+	{ CEMU_CHIP_OPL3,     "OPL3",     18, -1, 0u,       SASAMI_FMMON_KEYS_OPL3,    0 },
+	{ CEMU_CHIP_OPL2,     "OPL2",      9, -1, 0u,       SASAMI_FMMON_KEYS_OPL2,    0 },
+	{ CEMU_CHIP_OPLL,     "OPLL",      9, -1, 0u,       SASAMI_FMMON_KEYS_OPL2,    0 },
+	{ CEMU_CHIP_AY,       "AY-3-8910", 3, -1, 1500000u, SASAMI_FMMON_KEYS_MDX,     0 },
+	{ CEMU_CHIP_SN76489,  "SN76496",   4, -1, 3579545u, SASAMI_FMMON_KEYS_MDX,     0 },
+	{ CEMU_CHIP_SAA1099,  "SAA1099",   6, -1, 0u,       SASAMI_FMMON_KEYS_MDX,     0 },
+	{ CEMU_CHIP_K051649,  "SCC",       5, -1, 0u,       SASAMI_FMMON_KEYS_MDX,     0 },
+	{ CEMU_CHIP_MSM5232,  "MSM5232",   8, -1, 0u,       SASAMI_FMMON_KEYS_MDX,     0 },
+	{ CEMU_CHIP_QSOUND,   "QSound",   16, -1, 0u,       SASAMI_FMMON_KEYS_QSOUND,  1 },
+	{ CEMU_CHIP_C352,     "C352",     32, -1, 0u,       SASAMI_FMMON_KEYS_C352,    1 },
+	{ CEMU_CHIP_C140,     "C140",     24, -1, 0u,       SASAMI_FMMON_KEYS_C352,    1 },
+	{ CEMU_CHIP_C30,      "CUS30",     8, -1, 0u,       SASAMI_FMMON_KEYS_C352,    1 },
+	{ CEMU_CHIP_SCSP,     "SCSP",     32, -1, 0u,       SASAMI_FMMON_KEYS_RF5C,    1 },
+	{ CEMU_CHIP_MULTIPCM, "MultiPCM", 28, -1, 0u,       SASAMI_FMMON_KEYS_RF5C,    1 },
+	{ CEMU_CHIP_SEGAPCM,  "SegaPCM",  16, -1, 0u,       SASAMI_FMMON_KEYS_SEGAPCM, 1 },
+	{ CEMU_CHIP_RF5C400,  "RF5C400",  32, -1, 0u,       SASAMI_FMMON_KEYS_RF5C,    1 },
+	{ CEMU_CHIP_RF5C68,   "RF5C68",    8, -1, 0u,       SASAMI_FMMON_KEYS_RF5C,    1 },
+	{ CEMU_CHIP_K054539,  "K054539",   8, -1, 0u,       SASAMI_FMMON_KEYS_RF5C,    1 },
+	{ CEMU_CHIP_K053260,  "K053260",   4, -1, 0u,       SASAMI_FMMON_KEYS_RF5C,    1 },
+	{ CEMU_CHIP_K007232,  "K007232",   2, -1, 0u,       SASAMI_FMMON_KEYS_OKI,     1 },
+	{ CEMU_CHIP_K005289,  "K005289",   2, -1, 0u,       SASAMI_FMMON_KEYS_OKI,     1 },
+	{ CEMU_CHIP_X1_010,   "X1-010",   16, -1, 0u,       SASAMI_FMMON_KEYS_OKI,     1 },
+	{ CEMU_CHIP_YMZ280B,  "YMZ280B",   8, -1, 0u,       SASAMI_FMMON_KEYS_OKI,     1 },
+	{ CEMU_CHIP_ES5505,   "ES5505",   32, -1, 0u,       SASAMI_FMMON_KEYS_RF5C,    1 },
+	{ CEMU_CHIP_GA20,     "GA20",      4, -1, 0u,       SASAMI_FMMON_KEYS_OKI,     1 },
+	{ CEMU_CHIP_OKI6295,  "OKI6295",   4, -1, 0u,       SASAMI_FMMON_KEYS_OKI,     1 },
+	{ CEMU_CHIP_UPD7759,  "uPD7759",   1, -1, 0u,       SASAMI_FMMON_KEYS_OKI,     1 },
+	{ CEMU_CHIP_MSM5205,  "MSM5205",   1, -1, 0u,       SASAMI_FMMON_KEYS_OKI,     1 },
+	{ CEMU_CHIP_VLM5030,  "VLM5030",   1, -1, 0u,       SASAMI_FMMON_KEYS_OKI,     1 },
+	{ CEMU_CHIP_IREM_DAC, "DAC",       1, -1, 0u,       SASAMI_FMMON_KEYS_OKI,     1 }
+};
+
+static const FmMonChipInfo* FmMonFindChipInfo(int id)
+{
+	for (unsigned i = 0; i < _countof(kFmMonChips); i++)
+		if (kFmMonChips[i].id == id) return &kFmMonChips[i];
+	return NULL;
+}
+
+/* True when every chip the catalog documents is already named in the label.
+   Compared by chip identity, not spelling, so a hand-tuned "YM3438+MultiPCMx2"
+   still counts as covering a documented YM2612-class part. */
+static int FmMonLabelCoversDocChips(const CEmuGameEntry* ge, const char* label)
+{
+	if (!ge || ge->docChipCount <= 0) return 1;
+	int inLabel[12];
+	const int nLabel = CEmuCatalogChipsFromText(label, inLabel, 12);
+	for (int i = 0; i < ge->docChipCount && i < 12; i++) {
+		int found = 0;
+		for (int k = 0; k < nLabel; k++)
+			if (inLabel[k] == ge->docChipIds[i]) { found = 1; break; }
+		if (!found) return 0;
+	}
+	return 1;
+}
+
+/* Build the label from the documented chip set, in kFmMonChips order, and
+   report the FM shape and SSG clock the leading FM chip implies. */
+static int FmMonComposeDocLabel(const CEmuGameEntry* ge, char* out,
+	unsigned outLen, int* layoutOut, unsigned* ssgOut, unsigned* keysOut)
+{
+	if (!ge || ge->docChipCount <= 0 || !out || outLen < 8) return 0;
+	out[0] = 0;
+	int layout = -1;
+	int haveLayout = 0;
+	unsigned ssg = 0;
+	unsigned keys = 0;
+	int keysFromPcm = 0;
+	int written = 0;
+
+	for (unsigned k = 0; k < _countof(kFmMonChips); k++) {
+		const FmMonChipInfo* ci = &kFmMonChips[k];
+		int doc = 0;
+		for (int i = 0; i < ge->docChipCount && i < 12; i++)
+			if (ge->docChipIds[i] == ci->id) { doc = 1; break; }
+		if (!doc) continue;
+		if (written) strncat_s(out, outLen, "+", _TRUNCATE);
+		strncat_s(out, outLen, ci->label, _TRUNCATE);
+		written++;
+		if (!haveLayout) {
+			layout = ci->layout;
+			haveLayout = 1;
+		}
+		if (ci->ssgHz && !ssg) ssg = ci->ssgHz;
+		/* The sample player owns the key rows when there is one, since the
+		   FM part is already described by the layout. */
+		if (!keys || (ci->isPcm && !keysFromPcm)) {
+			keys = ci->keys;
+			keysFromPcm = ci->isPcm;
+		}
+	}
+	if (!written) return 0;
+	if (layoutOut) *layoutOut = layout;
+	if (ssgOut) *ssgOut = ssg;
+	if (keysOut) *keysOut = keys;
+	return 1;
 }
 
 void CEmuFmMonBindFromGe(const CEmuGameEntry* ge)
@@ -193,6 +316,16 @@ void CEmuFmMonBindFromGe(const CEmuGameEntry* ge)
 			layout = -1;
 			FmMonShadowSetKeysProfile(SASAMI_FMMON_KEYS_SEGAPCM);
 		}
+	} else if (_stricmp(sub, "model2") == 0 || _stricmp(sub, "model1") == 0) {
+		/* daytona / vf: MAME model2o → Model 1 audio board =
+		   YM3438 (OPN2: FM×6, no SSG) + 2× MultiPCM. */
+		strncpy_s(chip, "YM3438+MultiPCMx2", _TRUNCATE);
+		layout = 1; /* OPN2/OPNA-shaped FM×6 — not OPN+SSG (layout 0) */
+		FmMonShadowSetKeysProfile(SASAMI_FMMON_KEYS_RF5C);
+	} else if (_strnicmp(sub, "model2", 6) == 0 || _strnicmp(sub, "model3", 6) == 0) {
+		strncpy_s(chip, "SCSPx32", _TRUNCATE);
+		layout = -1;
+		FmMonShadowSetKeysProfile(SASAMI_FMMON_KEYS_RF5C);
 	} else if (HasChip(ge, CEMU_CHIP_RF5C68)) {
 		strncpy_s(chip, "RF5C68x8", _TRUNCATE);
 		layout = -1;
@@ -258,6 +391,9 @@ void CEmuFmMonBindFromGe(const CEmuGameEntry* ge)
 			strncpy_s(chip, "OPM+AY", _TRUNCATE);
 			layout = -1;
 			seedOpm = 1;
+			/* X1 AY master 2 MHz; CChipAy halves once → 1 MHz tone clock.
+			   FmMon /16 must use the post-divider clock or SSG MIDI is ~1oct off. */
+			FmMonShadowSetSsgClock(1000000u);
 		} else {
 			strncpy_s(chip, "OPM", _TRUNCATE);
 			layout = -1;
@@ -326,6 +462,27 @@ void CEmuFmMonBindFromGe(const CEmuGameEntry* ge)
 	} else {
 		strncpy_s(chip, "OPNA", _TRUNCATE);
 		layout = 1;
+	}
+
+	/* The subtype chain above is hand-maintained and cannot know every board,
+	   so anything it did not recognise came out labelled "OPM". When the
+	   catalog documents the chip set and the chain's label leaves one out,
+	   the catalog wins - it is the only per-archive record of the real
+	   hardware. Boards the chain does recognise keep their tuned labels. */
+	if (!FmMonLabelCoversDocChips(ge, chip)) {
+		char docLabel[48];
+		int docLayout = layout;
+		unsigned docSsg = 0, docKeys = 0;
+		if (FmMonComposeDocLabel(ge, docLabel, sizeof(docLabel),
+				&docLayout, &docSsg, &docKeys)) {
+			strncpy_s(chip, docLabel, _TRUNCATE);
+			layout = docLayout;
+			if (docSsg) FmMonShadowSetSsgClock(docSsg);
+			if (docKeys) FmMonShadowSetKeysProfile(docKeys);
+			/* A composed set is no longer guaranteed to be OPM-shaped, so
+			   drop the OPM snapshot seeding that assumed it was. */
+			if (docLayout != -1) seedOpm = 0;
+		}
 	}
 
 	FmMonShadowSetIdentity(plat, chip);

@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "cemu_hard.h"
 
@@ -50,11 +50,17 @@ public:
 	/* After PATCH boot: fill missing FE19 IM2 vectors when I!=0 page is empty. */
 	void FixupIm2AfterBoot();
 
+	/* Catalog offers RTC+VRTC: keep only the ones the IM2 table really uses. */
+	void PruneDeadTickSources();
+
 	/* gineiden: play plants sound ISR but leaves RTC slot empty — mirror. */
 	void FixupIm2AfterPlay();
 
 	/* gineiden: PATCH 4E2F clears OPN Timer B; re-arm like AMAIN 4E00. */
 	void ArmGineidenOpnTimer();
+	/* lizard88: re-arm Timer B + unmask after play CALL 9F0F. */
+	void ArmLizardOpnTimer();
+	void ArmFallbackOpnTimer();
 	/* navitune-class: title bits 8..23 select song inside code@mdata.
 	   Rewrite PATCH's LD BC,mdata for cmd07 before retarget play (no host stubs). */
 	void ApplyNavituneTitleSong();
@@ -68,6 +74,8 @@ public:
 	int NeedsYakyufanArm() const;
 	void ArmYakyufanPlay();
 	int NeedsGineidenArm() const { return armGineidenTimer_; }
+	int NeedsLizardArm() const { return armLizardTimer_; }
+	int NeedsLongPlayDrain() const { return longPlayDrain_; }
 	int NeedsNavituneArm() const { return armNavituneTimer_; }
 	int NeedsDeferredRtc() const { return deferRtcAfterPlay_; }
 	void EnableDeferredRtc()
@@ -178,6 +186,9 @@ private:
 
 	void SetSoundIrqPort(uint8_t data);
 
+	/* PC-8801 text window (I/O 70h / 78h): move the 1KB view at 8000-83FF. */
+	void SetTextWindow(uint8_t hi);
+
 
 
 	uint8_t mem_[0x10000];
@@ -194,6 +205,11 @@ private:
 	   open-bus 0xFF on IN would stick bit7 of 0x32 forever (arcus2 silence).
 	   Ports 0x32 and 0xAA share the byte at ioPorts_[0x32]. */
 	uint8_t ioPorts_[256];
+
+	/* Text-window base page (0x80 = window closed, i.e. plain main RAM), and
+	   the real 8000-83FF bytes hidden while it is open. */
+	uint8_t textWinHi_;
+	uint8_t textWinShadow_[0x400];
 
 	int mdataAddr_;
 
@@ -225,6 +241,12 @@ private:
 
 	/* gineiden: host re-arm OPN Timer B after PATCH clears it. */
 	int armGineidenTimer_;
+	/* lizard88: host re-arm OPN Timer B after play. */
+	int armLizardTimer_;
+	/* 1942_88: ADEE LDIR needs a longer cmd=1 drain. */
+	int longPlayDrain_;
+	/* yaksa PATCH2: catalog rom name — play index must stay nonzero. */
+	int yaksaPatch2_;
 	/* navitune-class: code@mdata + bgm same image; title fileOff → song. */
 	int armNavituneTimer_;
 	uint16_t naviSongAddr_; /* absolute song header (mdata+fileOff) */

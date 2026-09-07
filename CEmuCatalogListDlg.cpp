@@ -646,10 +646,10 @@ void CEmuCatalogListDlg::FillList()
 		CString title = pick->name[0] ? pick->name : L"(no name)";
 		CEmuStripModeParenFromTitle(title);
 		const int idx = m_lc.InsertItem(row, title);
-		CString a = pick->archive;
-		CString p = pick->platform;
+		CString a = CString(pick->archive);
+		CString p = CString(pick->platform);
 		CString s = CEmuJoinArchiveModeTags(cat, pick);
-		CString d = pick->dataDir;
+		CString d = CString(pick->dataDir);
 		m_lc.SetItemText(idx, 1, a);
 		m_lc.SetItemText(idx, 2, p);
 		m_lc.SetItemText(idx, 3, s);

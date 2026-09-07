@@ -1,4 +1,4 @@
-/*
+﻿/*
  * mem/dmax86.h -- HOOTRIP stub
  *
  * Mirrors np2kai/mem/dmax86.h: declares dmax86(). The i286c run loop calls

@@ -1,4 +1,4 @@
-/*
+﻿/*
  * bios/bios.h -- HOOTRIP stub
  *
  * i286c_mn.c and v30patch.c #include <bios/bios.h> and call biosfunc() from

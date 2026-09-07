@@ -1,4 +1,4 @@
-﻿#include "StdAfx.h"
+#include "StdAfx.h"
 #include "cemu_hard_pc88.h"
 #include "../cemu_zipfs.h"
 #include "../cemu_rhythm.h"
@@ -91,6 +91,9 @@ CHardPc88::CHardPc88()
 	, forcePlayEi_(0)
 	, mirrorSoundToRtc_(0)
 	, armGineidenTimer_(0)
+	, armLizardTimer_(0)
+	, longPlayDrain_(0)
+	, yaksaPatch2_(0)
 	, armNavituneTimer_(0)
 	, naviSongAddr_(0)
 	, deferRtcAfterPlay_(0)
@@ -105,6 +108,8 @@ CHardPc88::CHardPc88()
 	hardKind = KIND_PC88;
 	memset(mem_, 0, sizeof(mem_));
 	memset(ioPorts_, 0, sizeof(ioPorts_));
+	textWinHi_ = 0x80; /* window closed = plain main RAM at 8000-83FF */
+	memset(textWinShadow_, 0, sizeof(textWinShadow_));
 	memset(bgmBank_, 0, sizeof(bgmBank_));
 	memset(bgmBankSize_, 0, sizeof(bgmBankSize_));
 	memset(progBank_, 0, sizeof(progBank_));
@@ -280,6 +285,9 @@ int CHardPc88::Init(const CEmuGameEntry* ge, int sampleRate)
 	}
 	initPc_ = CEmuParseOptHex(ge, "init_pc", 0);
 	schemeMode_ = 0;
+	yaksaPatch2_ = 0;
+	armLizardTimer_ = 0;
+	longPlayDrain_ = 0;
 	/* Detect BOTHTEC Scheme OPNA: MUS2 + ADR_ (+ INT2). Catalog often parks
 	   PATCH at 0000 which stack-clobbers under SP=0100; hoot uses 0x9000. */
 	{
@@ -534,20 +542,61 @@ int CHardPc88::Init(const CEmuGameEntry* ge, int sampleRate)
 		if (hasNavi && hasPrg)
 			armNavituneTimer_ = 1;
 	}
-	/* yokosuka: catalog sets use_rtc AND use_vrtc; dual delivery starves
-	   the SOUND vector. Prefer VRTC (same family as thexder88). */
-	if (useRtc && useVrtc) {
-		int hasSoundHigh = 0;
+	/* lizard88: no catalog RTC/VRTC — player advances on OPN Timer B @vec08.
+	   PATCH boot arms timers then play CALL 9F0F may clear them; re-arm after
+	   cmd=1 like gineiden. */
+	if (!armGineidenTimer_ && !useRtc && !useVrtc) {
+		int main9f = 0, patch0 = 0;
 		for (int i = 0; i < ge->romCount; i++) {
 			const CEmuRomEntry* r = &ge->rom[i];
 			if (_stricmp(r->type, "code") != 0 || !r->name) continue;
-			if (r->offset >= 0xb000 && (_strnicmp(r->name, "SOUND", 5) == 0
-				|| _strnicmp(r->name, "sound", 5) == 0))
-				hasSoundHigh = 1;
+			if (r->offset == 0x9f00 && _strnicmp(r->name, "MAIN", 4) == 0)
+				main9f = 1;
+			if (r->offset == 0 && _strnicmp(r->name, "PATCH", 5) == 0)
+				patch0 = 1;
 		}
-		if (hasSoundHigh)
-			useRtc = 0;
+		if (main9f && patch0)
+			armLizardTimer_ = 1;
 	}
+	/* yaksa PATCH2: play under DI; vdata+voiceBank would zero port01 — force
+	   EI and keep song id on param (see PlaySongIndex). */
+	if (useVrtc) {
+		int patch2 = 0;
+		for (int i = 0; i < ge->romCount; i++) {
+			const CEmuRomEntry* r = &ge->rom[i];
+			if (_stricmp(r->type, "code") != 0 || !r->name) continue;
+			if (r->offset == 0 && _stricmp(r->name, "PATCH2") == 0)
+				patch2 = 1;
+		}
+		if (patch2) {
+			forcePlayEi_ = 1;
+			yaksaPatch2_ = 1;
+		}
+	}
+	/* 1942_88: ADEE LDIR needs a long cmd=1 drain before A343 arms I+Timer. */
+	if (!useRtc && !useVrtc) {
+		int progA3 = 0, musicF0 = 0, patch0 = 0;
+		for (int i = 0; i < ge->romCount; i++) {
+			const CEmuRomEntry* r = &ge->rom[i];
+			if (_stricmp(r->type, "code") != 0 || !r->name) continue;
+			if (r->offset == 0xa300 && _strnicmp(r->name, "PROG", 4) == 0)
+				progA3 = 1;
+			if (r->offset == 0xf000 && _strnicmp(r->name, "MUSIC", 5) == 0)
+				musicF0 = 1;
+			if (r->offset == 0 && _strnicmp(r->name, "PATCH", 5) == 0)
+				patch0 = 1;
+		}
+		if (progA3 && musicF0 && patch0) {
+			longPlayDrain_ = 1;
+			forcePlayEi_ = 1; /* Timer IM2 after A343 needs host EI */
+		}
+	}
+	/* A title that asks for both RTC and VRTC generally means it, and which
+	   of the two actually drives the player is decided by its IM2 table, not
+	   by a rom name — see PruneDeadTickSources, run once the stub has planted
+	   the table. (yokosuka: vec02→$0052 CALL SOUND+$0B0A, vec04→$B7EE; the
+	   old "exact SOUND @≥B000 ⇒ drop VRTC" rule killed the first and the song
+	   died a second in.) */
 	/* spitfl88 / tf88sr: PROG-only + PATCH@0 + no init_pc. IM2 table parks
 	   the real player on RTC (vec04); VRTC/SOUND slots are RET stubs
 	   (spitfl A820=C9, tf88 409E=ack+RET). Keep catalog RTC and force EI —
@@ -555,7 +604,7 @@ int CHardPc88::Init(const CEmuGameEntry* ge, int sampleRate)
 	   so they never match this filter. */
 	if (useRtc && !useVrtc) {
 		int codeRoms = 0, bgmRoms = 0, hasProg = 0, patchAt0 = 0;
-		int hasInitPc = 0;
+		int hasInitPc = 0, patchAtInit = 0;
 		for (int i = 0; i < ge->optCount; i++) {
 			if (_stricmp(ge->opt[i].name, "init_pc") == 0)
 				hasInitPc = 1;
@@ -568,11 +617,18 @@ int CHardPc88::Init(const CEmuGameEntry* ge, int sampleRate)
 			if (_strnicmp(r->name, "PROG", 4) == 0) hasProg = 1;
 			if (r->offset == 0 && _strnicmp(r->name, "PATCH", 5) == 0)
 				patchAt0 = 1;
+			if (hasInitPc && initPc_ >= 0 && r->offset == initPc_
+				&& _strnicmp(r->name, "PATCH", 5) == 0)
+				patchAtInit = 1;
 		}
 		if (!hasInitPc && hasProg && patchAt0 && bgmRoms == 0 && codeRoms <= 2) {
 			/* Keep useRtc; PATCH has no EI before poll. */
 			forcePlayEi_ = 1;
 		}
+		/* hangon88: PATCH@init_pc (8F00) IM2+poll, zero EI opcodes — RTC
+		   ISR never runs under DI. Same contract as spitfl forcePlayEi. */
+		if (patchAtInit && hasProg && bgmRoms == 0)
+			forcePlayEi_ = 1;
 	}
 	/* Direct play kick: Game Arts JR PATCH calls player+6 then relies on
 	   RTC ISR (vec04) to CALL player+0. Without RTC, host does the same
@@ -580,7 +636,7 @@ int CHardPc88::Init(const CEmuGameEntry* ge, int sampleRate)
 	   entry (PATCH's CALL 1033 alone stays silent). */
 	{
 		int play88 = 0, codeC000 = 0, codeRoms = 0, voiceF000 = 0, prog1000 = 0;
-		int patchJr = 0, soundB5 = 0;
+		int patchJr = 0, soundKick = 0;
 		for (int i = 0; i < ge->romCount; i++) {
 			const CEmuRomEntry* r = &ge->rom[i];
 			if (_stricmp(r->type, "code") != 0 || !r->name) continue;
@@ -594,9 +650,11 @@ int CHardPc88::Init(const CEmuGameEntry* ge, int sampleRate)
 				voiceF000 = 1;
 			if (r->offset == 0x1000 && _strnicmp(r->name, "PROG", 4) == 0)
 				prog1000 = 1;
-			if (r->offset >= 0xb000 && (_strnicmp(r->name, "SOUND", 5) == 0
-				|| _strnicmp(r->name, "sound", 5) == 0))
-				soundB5 = r->offset;
+			/* Exact "SOUND" only — SOUND1@D800 (makai88) must NOT kick B780
+			   (empty RAM); that left song mailbox 0274=0 forever. */
+			if (r->offset >= 0xb000 && r->offset < 0xe000
+				&& _stricmp(r->name, "SOUND") == 0)
+				soundKick = (int)r->offset + 0x1BD; /* B5C3+0x1BD → B780 */
 		}
 		if (play88) {
 			playKickBase_ = 0x6000;
@@ -614,9 +672,9 @@ int CHardPc88::Init(const CEmuGameEntry* ge, int sampleRate)
 			playKickInitOff_ = 0;
 			playKickEi_ = 1;
 			forcePlayEi_ = 1;
-		} else if (soundB5 && useVrtc && !useRtc) {
-			/* yokosuka: PATCH play is DI; CALL B780 (SOUND+0x1BD). */
-			playKickBase_ = 0xB780;
+		} else if (soundKick && (useRtc || useVrtc)) {
+			/* yokosuka: PATCH play is DI; CALL SOUND+0x1BD then RTC ticks. */
+			playKickBase_ = soundKick;
 			playKickInitOff_ = 0;
 			playKickEi_ = 1;
 		}
@@ -963,6 +1021,120 @@ static void CEmuPc88InstallFe19Im2(uint8_t* mem, Ay_Cpu* cpu)
 	}
 }
 
+/* yokosuka: cmd=1 + param==FF → IN (80); LD (E23C),A (effect request).
+   param!=FF → DI; CALL SOUND+0x1BD (BGM). Effect titles use low=FF and
+   hi24 = effect id on port 80. */
+static int CEmuPc88PatchYokosukaEff(const uint8_t* mem)
+{
+	if (!mem) return 0;
+	for (int i = 0; i + 4 < 0x80; i++) {
+		if (mem[i] == 0xDB && mem[i + 1] == 0x80
+			&& mem[i + 2] == 0x32 && mem[i + 3] == 0x3C && mem[i + 4] == 0xE2)
+			return 1;
+	}
+	return 0;
+}
+
+/* smariosp: IN (80); OR A; JR NZ → CALL play; else IN (01); LD (mailbox),A.
+   Port80 must be 0 for BGM so param lands in the song mailbox (makai-like). */
+static int CEmuPc88PatchPort80GateParam(const uint8_t* mem)
+{
+	if (!mem) return 0;
+	for (int i = 0; i + 12 < 0x80; i++) {
+		if (mem[i] != 0xDB || mem[i + 1] != 0x80 || mem[i + 2] != 0xB7)
+			continue;
+		if (mem[i + 3] != 0x20)
+			continue;
+		/* XOR A; LD (nn),A; IN A,(01); LD (nn),A */
+		int k = i + 5;
+		if (k + 7 >= 0x80) continue;
+		if (mem[k] == 0xAF && mem[k + 1] == 0x32
+			&& mem[k + 4] == 0xDB && mem[k + 5] == 0x01
+			&& mem[k + 6] == 0x32
+			&& mem[k + 2] == mem[k + 7] && mem[k + 3] == mem[k + 8])
+			return 1;
+	}
+	return 0;
+}
+
+/* yaksa PATCH2: plant (0575)=0x21; play does IN (01)/OR A/JR Z skip.
+   Falcom-style vdata+voiceBank path must NOT force port01=0 (mute). */
+static int CEmuPc88PatchSong1(const uint8_t* mem)
+{
+	/* Many rips (triton2, shikinjo, xak_88, f_crisis) use a standard hoot PATCH
+	   that polls IN(00) and expects song==1 to play, jumping to STOP otherwise.
+	   Signature: IN A,(0); OR A; JR Z,xx; CP 1; JR NZ,xx; IN A,(1) */
+	if (!mem) return 0;
+	for (int i = 0; i < 0x40; i++) {
+		if (mem[i] == 0xDB && mem[i+1] == 0x00 && mem[i+2] == 0xB7 && mem[i+3] == 0x28
+			&& mem[i+5] == 0xFE && mem[i+6] == 0x01 && mem[i+7] == 0x20
+			&& mem[i+9] == 0xDB && mem[i+10] == 0x01)
+			return 1;
+	}
+	return 0;
+}
+
+int CEmuPc88PatchYaksa2(const uint8_t* mem)
+{
+	if (!mem || mem[0] != 0x18)
+		return 0;
+	return (mem[0x10] == 0xF3 && mem[0x18] == 0x3E && mem[0x19] == 0x21
+		&& mem[0x1A] == 0x32 && mem[0x1B] == 0x75 && mem[0x1C] == 0x05) ? 1 : 0;
+}
+
+/* lizard88: MAIN@9F00 decrypt + page0 Timer ISR @009C (PUSH AF). */
+static int CEmuPc88PatchLizardTimer(const uint8_t* mem)
+{
+	if (!mem || mem[0] != 0x18 || mem[8] != 0x9C || mem[9] != 0x00)
+		return 0;
+	return (mem[0x9C] == 0xF5 && mem[0x9F00] == 0xC3) ? 1 : 0;
+}
+
+/* 1942_88: cmd=1 → CALL ADEE (LDIR MUSIC) then CALL A343 (I=80+Timer). */
+static int CEmuPc88Patch1942LongPlay(const uint8_t* mem)
+{
+	if (!mem)
+		return 0;
+	/* CD 34 00 … CD 43 A3 inside the cmd=1 handler. */
+	for (int i = 0; i + 8 < 0x40; i++) {
+		if (mem[i] == 0xCD && mem[i + 1] == 0x34 && mem[i + 2] == 0x00
+			&& mem[i + 6] == 0xCD && mem[i + 7] == 0x43 && mem[i + 8] == 0xA3)
+			return 1;
+	}
+	return 0;
+}
+
+/* makai88: LD IX,0274 / LD IY,0276. Play does IN A,(80); OR A; IN A,(01);
+   JR NZ → (IY)=param (SE), else (IX)=param (BGM). IN A,(n) leaves flags
+   alone, so port80 selects the mailbox and port01 is the song id.
+   Title hi24 = SE(nonzero)/BGM(0); low byte = song number. */
+static int CEmuPc88PatchMakaiIxIy(const uint8_t* mem)
+{
+	if (!mem) return 0;
+	int sawIx = 0, sawIy = 0;
+	for (int i = 0; i + 3 < 0x80; i++) {
+		if (mem[i] == 0xDD && mem[i + 1] == 0x21
+			&& mem[i + 2] == 0x74 && mem[i + 3] == 0x02)
+			sawIx = 1;
+		if (mem[i] == 0xFD && mem[i + 1] == 0x21
+			&& mem[i + 2] == 0x76 && mem[i + 3] == 0x02)
+			sawIy = 1;
+	}
+	if (!sawIx || !sawIy)
+		return 0;
+	for (int i = 0; i + 12 < 0x80; i++) {
+		if (mem[i] == 0xDB && mem[i + 1] == 0x80
+			&& mem[i + 2] == 0xB7
+			&& mem[i + 3] == 0xDB && mem[i + 4] == 0x01
+			&& mem[i + 5] == 0x20
+			&& mem[i + 7] == 0xDD && mem[i + 8] == 0x77
+			&& mem[i + 10] == 0xC9
+			&& mem[i + 11] == 0xFD && mem[i + 12] == 0x77)
+			return 1;
+	}
+	return 0;
+}
+
 /* PATCH play: IN A,(80); LD D,A; LD E,0; … LDIR uses DE = song<<8 as the
    far address (galfstrm/meltdown HL=4000→DE, duel HL=1000→DE). Port 80 must
    be the page high byte from title hi16. */
@@ -1129,6 +1301,30 @@ static void CEmuPc88PlantAsheSongTable(uint8_t* mem, unsigned songNum, int mdata
 
 uint8_t CHardPc88::PlaySongIndex() const
 {
+	/* yaksa PATCH2: IN (01)/OR A/JR Z skips play when param==0. Title
+	   0xPP00BB uses mid byte as play id (0x030002→03); never return 0. */
+	if (yaksaPatch2_ || CEmuPc88PatchYaksa2(mem_)) {
+		const unsigned mid = (titleCode_ >> 16) & 0xff;
+		const unsigned songNum = titleCode_ & 0xff;
+		if (mid != 0)
+			return (uint8_t)mid;
+		if (songNum != 0)
+			return (uint8_t)songNum;
+		return 1;
+	}
+	/* Standard hoot PATCH (triton2, shikinjo, xak_88, f_crisis): expects song==1. */
+	if (CEmuPc88PatchSong1(mem_)) {
+		return 1;
+	}
+	/* makai88: port80 = BGM/SE select (title hi24), not the song number. */
+	if (CEmuPc88PatchMakaiIxIy(mem_))
+		return (uint8_t)((titleCode_ >> 24) & 0xff);
+	/* smariosp: port80!=0 skips mailbox plant (CALL play without song id). */
+	if (CEmuPc88PatchPort80GateParam(mem_))
+		return (uint8_t)((titleCode_ >> 24) & 0xff);
+	/* yokosuka effects: low=FF, hi24 = id written to (E23C) via port 80. */
+	if (CEmuPc88PatchYokosukaEff(mem_) && (titleCode_ & 0xffu) == 0xffu)
+		return (uint8_t)((titleCode_ >> 24) & 0xff);
 	/* gineiden: each BGM_n.COM is one song staged at mdata; AMAIN indexes
 	   with B*6 from IN (80). Title low byte selected the bank — port 80
 	   must be 0 or play skips into the channel table and stays mute. */
@@ -1222,6 +1418,15 @@ uint8_t CHardPc88::PlaySongIndex() const
 
 uint8_t CHardPc88::PlayParamIndex() const
 {
+	/* makai88: port01 = song id written to (0274) BGM or (0276) SE. */
+	if (CEmuPc88PatchMakaiIxIy(mem_))
+		return (uint8_t)(titleCode_ & 0xff);
+	/* smariosp: port01 = song id for LD (mailbox),A when port80==0. */
+	if (CEmuPc88PatchPort80GateParam(mem_))
+		return (uint8_t)(titleCode_ & 0xff);
+	/* yokosuka: low=FF selects the effect mailbox path (param must stay FF). */
+	if (CEmuPc88PatchYokosukaEff(mem_) && (titleCode_ & 0xffu) == 0xffu)
+		return 0xff;
 	/* gineiden: param!=0 selects AMAIN vs DEMO jump patches; keep title. */
 	if (armGineidenTimer_)
 		return (uint8_t)(titleCode_ & 0xff);
@@ -1255,6 +1460,28 @@ uint8_t CHardPc88::PlayParamIndex() const
 void CHardPc88::FixupIm2AfterBoot()
 {
 	CEmuPc88InstallFe19Im2(mem_, cpu_);
+}
+
+/* The catalog says which clocks the machine offers; the stub's IM2 table says
+   which ones the player actually listens to. Once both are known, drop a
+   catalog clock whose vector is empty — delivering it would only cost the
+   guest spurious ISR entries — but never drop the last one standing, and
+   never guess when the table has not been planted yet. */
+void CHardPc88::PruneDeadTickSources()
+{
+	if (!mem_ || !cpu_ || cpu_->r.im != 2)
+		return;
+	if (!useVrtc || !useRtc)
+		return;
+	const unsigned iBase = ((unsigned)cpu_->r.i) << 8;
+	if (iBase + 9 >= 0x10000)
+		return;
+	const unsigned vrtc = (unsigned)mem_[iBase + 2] | ((unsigned)mem_[iBase + 3] << 8);
+	const unsigned rtc = (unsigned)mem_[iBase + 4] | ((unsigned)mem_[iBase + 5] << 8);
+	if (vrtc == 0 && rtc != 0)
+		useVrtc = 0;
+	else if (rtc == 0 && vrtc != 0)
+		useRtc = 0;
 }
 
 void CHardPc88::FixupIm2AfterPlay()
@@ -1307,6 +1534,41 @@ void CHardPc88::ArmGineidenOpnTimer()
 	PortOut(0x45, 0x2A);
 	ioPorts_[0x32] = (uint8_t)(ioPorts_[0x32] & 0x7F);
 	soundIrqMasked = 0;
+	cpu_->r.iff1 = 1;
+}
+
+void CHardPc88::ArmFallbackOpnTimer()
+{
+	if (!chip_ || !cpu_)
+		return;
+	/* Watchdog last resort: a rip whose boot never programmed any tick source
+	   still has a vector 08 handler, so give it a ~71Hz Timer B (the rate the
+	   stock PC-88 players use) and open the port 32 gate. */
+	PortOut(0x44, 0x26);
+	PortOut(0x45, 0xCF);
+	PortOut(0x44, 0x27);
+	PortOut(0x45, 0x3A);
+	ioPorts_[0x32] = (uint8_t)(ioPorts_[0x32] & 0x7F);
+	soundIrqMasked = 0;
+}
+
+void CHardPc88::ArmLizardOpnTimer()
+{
+	if (!armLizardTimer_ || !chip_ || !cpu_)
+		return;
+	/* Match PATCH@0077: Timer B load 0x69, mode 0x3A, unmask port32, EI. */
+	PortOut(0x44, 0x26);
+	PortOut(0x45, 0x69);
+	PortOut(0x44, 0x27);
+	PortOut(0x45, 0x3A);
+	ioPorts_[0x32] = (uint8_t)(ioPorts_[0x32] & 0x7F);
+	soundIrqMasked = 0;
+	/* A572 must stay 0. It is the "old BASIC ROM" flag A4E7 plants, and the
+	   stop routine reads it: zero takes A4D3, which writes OPN 07-0E from the
+	   FF 00 00 … table (mixer off, all volumes down); anything else takes
+	   A4CD, which only pokes port 40h and leaves the tone sounding. Forcing
+	   it to 1 here is what left every lizard88 title droning after its last
+	   note — 63 of the 211 stuck-note failures in the sweep. */
 	cpu_->r.iff1 = 1;
 }
 
@@ -1524,6 +1786,9 @@ int CHardPc88::NeedsPlayEi() const
 	/* Falcom specialty PATCH at E000: JR + IM2 table, DI on play. */
 	if (mem_[0xE000] == 0x18 && mem_[0xE017] == 0xF3 && mem_[0xE018] == 0xED)
 		return 1;
+	/* yaksa PATCH2: play leaves DI; VRTC needs host EI (forcePlayEi_ also). */
+	if (yaksaPatch2_ || CEmuPc88PatchYaksa2(mem_))
+		return 1;
 	/* lizard88/gineiden: JR PATCH returns to poll under DI; I-page sound
 	   vector lands on a PUSH AF ISR. Host EI lets Timer B keep playing.
 	   lizard parks the ISR at 009C on I=0 (page0 table in PATCH). */
@@ -1538,6 +1803,8 @@ int CHardPc88::NeedsPlayEi() const
 				return 1;
 		}
 	}
+	if (armLizardTimer_)
+		return 1;
 	return 0;
 }
 
@@ -1659,6 +1926,34 @@ void CHardPc88::SetSoundIrqPort(uint8_t data)
 	soundIrqMasked = (data & 0x80) != 0;
 }
 
+/* PC-8801 text window: the 1KB at 8000-83FF is a movable view of main RAM
+   whose base is (port 70h << 8); the documented way to close it again is to
+   write 80h, which puts the real 8000-83FF back. Port 78h steps the base.
+   The Z80 core indexes mem_ directly, so materialize the view by copying on
+   base changes — page flips are far rarer than the reads made through it.
+   yokosuka's byte fetcher is `OUT (70),H / LD H,80 / LD A,(HL)`, one flip per
+   fetch at worst, and without this every note it reads comes from page F0. */
+void CHardPc88::SetTextWindow(uint8_t hi)
+{
+	if (hi == textWinHi_)
+		return;
+	const unsigned oldBase = (unsigned)textWinHi_ << 8;
+	const unsigned newBase = (unsigned)hi << 8;
+	/* A base near the top of memory exposes only what fits below 64K. */
+	unsigned oldLen = (oldBase + 0x400 <= 0x10000) ? 0x400 : (0x10000 - oldBase);
+	unsigned newLen = (newBase + 0x400 <= 0x10000) ? 0x400 : (0x10000 - newBase);
+	if (textWinHi_ != 0x80)
+		memmove(mem_ + oldBase, mem_ + 0x8000, oldLen);
+	else
+		memcpy(textWinShadow_, mem_ + 0x8000, 0x400);
+	textWinHi_ = hi;
+	if (hi != 0x80)
+		memmove(mem_ + 0x8000, mem_ + newBase, newLen);
+	else
+		memcpy(mem_ + 0x8000, textWinShadow_, 0x400);
+}
+
+
 uint8_t CHardPc88::PortIn(uint16_t port)
 {
 	const uint8_t p = (uint8_t)(port & 0xff);
@@ -1670,6 +1965,9 @@ uint8_t CHardPc88::PortIn(uint16_t port)
 		   BGM header byte avoids clobbering MS0A (bank# as song → mute). */
 		if (schemeMode_)
 			return mem_[0xc000];
+		/* Standard hoot PATCH: port 80 returns the effect number (hi24). */
+		if (CEmuPc88PatchSong1(mem_) && (titleCode_ & 0xffu) == 0xffu)
+			return (uint8_t)(titleCode_ >> 24);
 		return song;
 	case 0x40: {
 		const uint64_t hz = cpuHz_ > 0 ? (uint64_t)cpuHz_ : 4000000ull;
@@ -1679,6 +1977,8 @@ uint8_t CHardPc88::PortIn(uint16_t port)
 	}
 	/* hoot: 0x32 and alias 0xAA share ioport[0x32] (default 0) */
 	case 0x32: case 0xAA: return ioPorts_[0x32];
+	/* Drivers save/restore the window base around their ISR. */
+	case 0x70: return textWinHi_;
 	/* A007 probes both 0x44-47 and alternate 0xA8-AD (firehawk/hoot) */
 	case 0x44: case 0xA8: return chip_ ? chip_->ReadStatus() : 0xff;
 	case 0x45: case 0xA9: return chip_ ? chip_->ReadData() : 0xff;
@@ -1696,9 +1996,18 @@ void CHardPc88::PortOut(uint16_t port, uint8_t data)
 		cmd = data;
 		/* mucom88: OUT (0),song copies bank to [0x5d:0x5c]. KOEI uses
 		   port 0 as cmd/stop only — never bank-copy there. Non-mucom
-		   mfile sets (shnghai2) also OUT 0 as a latch with live 5C/5D. */
+		   mfile sets (shnghai2) also OUT 0 as a latch with live 5C/5D.
+		   Standard hoot PATCH (Microcabin) also uses OUT (0),bank. */
 		if (mucomBankCopy_ && mfileSize_ > 0)
 			BankCopyBgm(data);
+		else if (CEmuPc88PatchSong1(mem_) && data < 128 && bgmBank_[data]) {
+			unsigned n = bgmBankSize_[data];
+			if (mdataAddr_ >= 0) {
+				if (mdataAddr_ + (int)n > 0x10000)
+					n = (unsigned)(0x10000 - mdataAddr_);
+				memcpy(mem_ + mdataAddr_, bgmBank_[data], n);
+			}
+		}
 		/* hoot scheme.cpp: OUT (0),bank → memcpy C000 + LOAD_FLAG@9012. */
 		/* hoot scheme.cpp: OUT (0),bank → memcpy C000 + LOAD_FLAG@9012.
 		   bothtec PATCH keeps an IN (00) poll at 9011 — guest OUT (0) is not
@@ -1828,6 +2137,13 @@ void CHardPc88::PortOut(uint16_t port, uint8_t data)
 	case 0x46: case 0xAC: if (chip_) chip_->Write(0x100, data); break;
 	case 0x45: case 0xA9: if (chip_) chip_->Write(1, data); break;
 	case 0x47: case 0xAD: if (chip_) chip_->Write(0x101, data); break;
+	case 0x70: SetTextWindow(data); break;
+	case 0x78: SetTextWindow((uint8_t)(textWinHi_ + 1)); break;
+	/* 5Ch-5Fh (GVRAM plane select over C000-FFFF) stay unimplemented on
+	   purpose: 237 rips strobe them and 89 keep code up there, so honouring
+	   them would swap a driver out from under itself. hoot ignores the ports,
+	   these rips were patched against hoot, and emulating the real mapping
+	   changed nothing measurable (arka88, 84 strobes, byte-identical). */
 	case 0xE4: if (chip_) chip_->AckIrq(); break;
 	case 0xE6: break; /* PC-88 IRQ level — ignored by hoot */
 	default: ioPorts_[p] = data; break;
@@ -1841,6 +2157,8 @@ int CHardPc88::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCo
 	const int isMucom = (_stricmp(ge->subtype, "muco") == 0 || _stricmp(ge->subtype, "mucom88") == 0);
 	titleCode_ = titleCode;
 	memset(mem_, 0, sizeof(mem_));
+	textWinHi_ = 0x80;
+	memset(textWinShadow_, 0, sizeof(textWinShadow_));
 	StageBanks(fs, ge);
 	const int preferMdatN = opnaMode || CEmuParseOptHex(ge, "use_pcmx8", 0);
 	for (int i = 0; i < ge->romCount; i++) {
@@ -1971,6 +2289,8 @@ int CHardPc88::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCo
 		}
 		if (main9f)
 			mem_[0x79D7] = 0x40;
+		/* A572 song-gate is planted after XOR-decrypt in the driver —
+		   LoadRoms runs before PATCH decrypts MAIN@9F00. */
 	}
 	/* f_crisis MMLEX@9A00 + bare DI PATCH: EI alone does not unlock audio
 	   (play wanders into MMLEX). Keep forcePlayEi_ clear until the MUSIC.OBJ

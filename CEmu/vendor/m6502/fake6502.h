@@ -1,4 +1,4 @@
-/* Fake6502 CPU emulator core v1.3 *******************
+﻿/* Fake6502 CPU emulator core v1.3 *******************
  *Original Author:Mike Chambers (miker00lz@gmail.com)*
  *                                                   *
  *New Author:David MHS Webster (github.com/gek169)   *

@@ -1,4 +1,4 @@
-/*
+﻿/*
  * io/iocore.h -- HOOTRIP stub
  *
  * Minimal replacement for np2kai/io/iocore.h. The i286c core needs only:

@@ -1,6 +1,7 @@
 ﻿#include "StdAfx.h"
 #include "cemu_chip_multipcm.h"
 #include "cemu_chip.h"
+#include "../fmmon/fmmon_shadow.h"
 #include <string.h>
 #include <stdlib.h>
 #include <math.h>
@@ -39,7 +40,10 @@ public:
 	}
 	void Write(uint32_t addr, uint32_t data) override
 	{
-		multipcm_w(chipId_, (offs_t)(addr & 3u), (UINT8)(data & 0xff));
+		const uint8_t v = (uint8_t)(data & 0xff);
+		const unsigned port = (unsigned)(addr & 3u);
+		multipcm_w(chipId_, (offs_t)port, (UINT8)v);
+		FmMonShadowApplyMultiPcm((int)chipId_, port, v);
 	}
 	void AdvanceClocks(uint64_t) override {}
 	void Render(int16_t* stereo, int frames) override

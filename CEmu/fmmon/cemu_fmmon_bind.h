@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include "../cemu_types.h"
 
 #ifdef __cplusplus

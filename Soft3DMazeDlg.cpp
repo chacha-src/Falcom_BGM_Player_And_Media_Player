@@ -1,4 +1,4 @@
-// Soft3DMazeDlg.cpp — 迷路（ミニマップ／訪問／コンテキスト設定／曲連動）
+﻿// Soft3DMazeDlg.cpp — 迷路（ミニマップ／訪問／コンテキスト設定／曲連動）
 
 #include "stdafx.h"
 #include "ogg.h"
@@ -7162,32 +7162,32 @@ void CSoft3DMazeDlg::RenderScene()
 	if(!overview && nCall>0 && m_view.m_psHudLine){
 		if(!m_view.m_srvCallout){
 			const wchar_t* labs[26]={
-				LL14(L"鍵", L"Key", L"Clé", L"Chiave", L"Llave", L"열쇠", L"钥匙", L"Key", L"Ключ", L"Schlüssel", L"Chave", L"Sleutel", L"Klucz", L"Anahtar"),
-				LL14(L"扉", L"Door", L"Porte", L"Porta", L"Puerta", L"문", L"门", L"Door", L"Дверь", L"Tür", L"Porta", L"Deur", L"Drzwi", L"Kapı"),
-				LL14(L"テンポ↑", L"Tempo↑", L"Tempo↑", L"Tempo↑", L"Tempo↑", L"템포↑", L"速度↑", L"Tempo↑", L"Темп↑", L"Tempo↑", L"Tempo↑", L"Tempo↑", L"Tempo↑", L"Tempo↑"),
-				LL14(L"テンポ↓", L"Tempo↓", L"Tempo↓", L"Tempo↓", L"Tempo↓", L"템포↓", L"速度↓", L"Tempo↓", L"Темп↓", L"Tempo↓", L"Tempo↓", L"Tempo↓", L"Tempo↓", L"Tempo↓"),
-				LL14(L"ピッチ↑", L"Pitch↑", L"Hauteur↑", L"Pitch↑", L"Tono↑", L"피치↑", L"音高↑", L"Pitch↑", L"Высота↑", L"Ton↑", L"Tom↑", L"Toon↑", L"Wys.↑", L"Perde↑"),
-				LL14(L"ピッチ↓", L"Pitch↓", L"Hauteur↓", L"Pitch↓", L"Tono↓", L"피치↓", L"音高↓", L"Pitch↓", L"Высота↓", L"Ton↓", L"Tom↓", L"Toon↓", L"Wys.↓", L"Perde↓"),
-				LL14(L"次の曲", L"Next", L"Suivant", L"Succ.", L"Siguiente", L"다음", L"下一曲", L"Next", L"След.", L"Nächster", L"Próxima", L"Volgend", L"Nast.", L"Sonraki"),
-				LL14(L"前の曲", L"Prev", L"Préc.", L"Prec.", L"Anterior", L"이전", L"上一曲", L"Prev", L"Пред.", L"Vorher", L"Anterior", L"Vorig", L"Poprz.", L"Önceki"),
-				LL14(L"音量↑", L"Vol↑", L"Vol↑", L"Vol↑", L"Vol↑", L"볼륨↑", L"音量↑", L"Vol↑", L"Громк.↑", L"Laut↑", L"Vol↑", L"Vol↑", L"Głoś↑", L"Ses↑"),
-				LL14(L"音量↓", L"Vol↓", L"Vol↓", L"Vol↓", L"Vol↓", L"볼륨↓", L"音量↓", L"Vol↓", L"Громк.↓", L"Laut↓", L"Vol↓", L"Vol↓", L"Głoś↓", L"Ses↓"),
+				LL14(L"鍵", L"Key", L"Clé", L"Chiave", L"Llave", L"열쇠", L"钥匙", L"مفتاح", L"Ключ", L"Schlüssel", L"Chave", L"Sleutel", L"Klucz", L"Anahtar"),
+				LL14(L"扉", L"Door", L"Porte", L"Porta", L"Puerta", L"문", L"门", L"باب", L"Дверь", L"Tür", L"Porta", L"Deur", L"Drzwi", L"Kapı"),
+				LL14(L"テンポ↑", L"Tempo↑", L"Tempo↑", L"Tempo↑", L"Tempo↑", L"템포↑", L"速度↑", L"إيقاع↑", L"Темп↑", L"Tempo↑", L"Tempo↑", L"Tempo↑", L"Tempo↑", L"Tempo↑"),
+				LL14(L"テンポ↓", L"Tempo↓", L"Tempo↓", L"Tempo↓", L"Tempo↓", L"템포↓", L"速度↓", L"إيقاع↓", L"Темп↓", L"Tempo↓", L"Tempo↓", L"Tempo↓", L"Tempo↓", L"Tempo↓"),
+				LL14(L"ピッチ↑", L"Pitch↑", L"Hauteur↑", L"Pitch↑", L"Tono↑", L"피치↑", L"音高↑", L"طبقة↑", L"Высота↑", L"Ton↑", L"Tom↑", L"Toon↑", L"Wys.↑", L"Perde↑"),
+				LL14(L"ピッチ↓", L"Pitch↓", L"Hauteur↓", L"Pitch↓", L"Tono↓", L"피치↓", L"音高↓", L"طبقة↓", L"Высота↓", L"Ton↓", L"Tom↓", L"Toon↓", L"Wys.↓", L"Perde↓"),
+				LL14(L"次の曲", L"Next", L"Suivant", L"Succ.", L"Siguiente", L"다음", L"下一曲", L"التالي", L"След.", L"Nächster", L"Próxima", L"Volgend", L"Nast.", L"Sonraki"),
+				LL14(L"前の曲", L"Prev", L"Préc.", L"Prec.", L"Anterior", L"이전", L"上一曲", L"السابق", L"Пред.", L"Vorher", L"Anterior", L"Vorig", L"Poprz.", L"Önceki"),
+				LL14(L"音量↑", L"Vol↑", L"Vol↑", L"Vol↑", L"Vol↑", L"볼륨↑", L"音量↑", L"صوت↑", L"Громк.↑", L"Laut↑", L"Vol↑", L"Vol↑", L"Głoś↑", L"Ses↑"),
+				LL14(L"音量↓", L"Vol↓", L"Vol↓", L"Vol↓", L"Vol↓", L"볼륨↓", L"音量↓", L"صوت↓", L"Громк.↓", L"Laut↓", L"Vol↓", L"Vol↓", L"Głoś↓", L"Ses↓"),
 				LL14(L"EQ", L"EQ", L"EQ", L"EQ", L"EQ", L"EQ", L"EQ", L"EQ", L"EQ", L"EQ", L"EQ", L"EQ", L"EQ", L"EQ"),
-				LL14(L"EQ平坦", L"EQ flat", L"EQ plat", L"EQ flat", L"EQ plano", L"EQ평탄", L"EQ平坦", L"EQ flat", L"EQ flat", L"EQ flach", L"EQ flat", L"EQ vlak", L"EQ płaski", L"EQ düz"),
-				LL14(L"リバーブ", L"Reverb", L"Réverb", L"Reverb", L"Reverb", L"리버브", L"混响", L"Reverb", L"Реверб", L"Hall", L"Reverb", L"Reverb", L"Pogłos", L"Reverb"),
-				LL14(L"クロスフェード", L"Crossfade", L"Fondu", L"Crossfade", L"Fundido", L"크로스페이드", L"交叉淡化", L"Xfade", L"Кроссфейд", L"Crossfade", L"Crossfade", L"Crossfade", L"Xfade", L"Xfade"),
-				LL14(L"ランダム", L"Random", L"Aléatoire", L"Casuale", L"Aleatorio", L"랜덤", L"随机", L"Random", L"Случ.", L"Zufall", L"Aleatório", L"Willekeurig", L"Losowo", L"Rastgele"),
-				LL14(L"階段↓", L"Stairs↓", L"Esc.↓", L"Scale↓", L"Esc.↓", L"계단↓", L"楼梯↓", L"Stairs↓", L"Лестн.↓", L"Treppe↓", L"Escadas↓", L"Trap↓", L"Schody↓", L"Merdiven↓"),
-				LL14(L"階段↑", L"Stairs↑", L"Esc.↑", L"Scale↑", L"Esc.↑", L"계단↑", L"楼梯↑", L"Stairs↑", L"Лестн.↑", L"Treppe↑", L"Escadas↑", L"Trap↑", L"Schody↑", L"Merdiven↑"),
-				LL14(L"ポータル", L"Portal", L"Portail", L"Portale", L"Portal", L"포털", L"传送门", L"Portal", L"Портал", L"Portal", L"Portal", L"Portaal", L"Portal", L"Portal"),
-				LL14(L"ゴール", L"Goal", L"But", L"Traguardo", L"Meta", L"골", L"终点", L"Goal", L"Цель", L"Ziel", L"Gol", L"Doel", L"Cel", L"Hedef"),
-				LL14(L"粘液", L"Slime", L"Slime", L"Melma", L"Limo", L"슬라임", L"粘液", L"Slime", L"Слизь", L"Schleim", L"Limo", L"Slijm", L"Szlam", L"Balçık"),
-				LL14(L"棘", L"Spikes", L"Piques", L"Spine", L"Pinchos", L"가시", L"尖刺", L"Spikes", L"Шипы", L"Stacheln", L"Espinhos", L"Stekels", L"Kolce", L"Diken"),
-				LL14(L"氷", L"Ice", L"Glace", L"Ghiaccio", L"Hielo", L"얼음", L"冰", L"Ice", L"Лёд", L"Eis", L"Gelo", L"IJs", L"Lód", L"Buz"),
-				LL14(L"闇", L"Dark", L"Obscur", L"Buio", L"Oscuro", L"어둠", L"黑暗", L"Dark", L"Тьма", L"Dunkel", L"Escuro", L"Donker", L"Mrok", L"Karanlık"),
-				LL14(L"窓", L"Window", L"Fenêtre", L"Finestra", L"Ventana", L"창문", L"窗", L"Window", L"Окно", L"Fenster", L"Janela", L"Raam", L"Okno", L"Pencere"),
-				LL14(L"鏡壁", L"Mirror wall", L"Mur miroir", L"Muro specchio", L"Muro espejo", L"거울벽", L"镜墙", L"Mirror wall", L"Стена-зеркало", L"Spiegelwand", L"Parede espelho", L"Spiegelwand", L"Ściana-lustro", L"Ayna duvar"),
-				LL14(L"鏡床", L"Mirror floor", L"Sol miroir", L"Pavimento specchio", L"Suelo espejo", L"거울바닥", L"镜地板", L"Mirror floor", L"Пол-зеркало", L"Spiegelboden", L"Chão espelho", L"Spiegelvloer", L"Podłoga-lustro", L"Ayna zemin")
+				LL14(L"EQ平坦", L"EQ flat", L"EQ plat", L"EQ flat", L"EQ plano", L"EQ평탄", L"EQ平坦", L"EQ مسطح", L"EQ плоск.", L"EQ flach", L"EQ flat", L"EQ vlak", L"EQ płaski", L"EQ düz"),
+				LL14(L"リバーブ", L"Reverb", L"Réverb", L"Reverb", L"Reverb", L"리버브", L"混响", L"صدى", L"Реверб", L"Hall", L"Reverb", L"Reverb", L"Pogłos", L"Reverb"),
+				LL14(L"クロスフェード", L"Crossfade", L"Fondu", L"Crossfade", L"Fundido", L"크로스페이드", L"交叉淡化", L"تلاشي", L"Кроссфейд", L"Crossfade", L"Crossfade", L"Crossfade", L"Xfade", L"Xfade"),
+				LL14(L"ランダム", L"Random", L"Aléatoire", L"Casuale", L"Aleatorio", L"랜덤", L"随机", L"عشوائي", L"Случ.", L"Zufall", L"Aleatório", L"Willekeurig", L"Losowo", L"Rastgele"),
+				LL14(L"階段↓", L"Stairs↓", L"Esc.↓", L"Scale↓", L"Esc.↓", L"계단↓", L"楼梯↓", L"سلم↓", L"Лестн.↓", L"Treppe↓", L"Escadas↓", L"Trap↓", L"Schody↓", L"Merdiven↓"),
+				LL14(L"階段↑", L"Stairs↑", L"Esc.↑", L"Scale↑", L"Esc.↑", L"계단↑", L"楼梯↑", L"سلم↑", L"Лестн.↑", L"Treppe↑", L"Escadas↑", L"Trap↑", L"Schody↑", L"Merdiven↑"),
+				LL14(L"ポータル", L"Portal", L"Portail", L"Portale", L"Portal", L"포털", L"传送门", L"بوابة", L"Портал", L"Portal", L"Portal", L"Portaal", L"Portal", L"Portal"),
+				LL14(L"ゴール", L"Goal", L"But", L"Traguardo", L"Meta", L"골", L"终点", L"هدف", L"Цель", L"Ziel", L"Gol", L"Doel", L"Cel", L"Hedef"),
+				LL14(L"粘液", L"Slime", L"Slime", L"Melma", L"Limo", L"슬라임", L"粘液", L"وحل", L"Слизь", L"Schleim", L"Limo", L"Slijm", L"Szlam", L"Balçık"),
+				LL14(L"棘", L"Spikes", L"Piques", L"Spine", L"Pinchos", L"가시", L"尖刺", L"أشواك", L"Шипы", L"Stacheln", L"Espinhos", L"Stekels", L"Kolce", L"Diken"),
+				LL14(L"氷", L"Ice", L"Glace", L"Ghiaccio", L"Hielo", L"얼음", L"冰", L"ثلج", L"Лёд", L"Eis", L"Gelo", L"IJs", L"Lód", L"Buz"),
+				LL14(L"闇", L"Dark", L"Obscur", L"Buio", L"Oscuro", L"어둠", L"黑暗", L"ظلام", L"Тьма", L"Dunkel", L"Escuro", L"Donker", L"Mrok", L"Karanlık"),
+				LL14(L"窓", L"Window", L"Fenêtre", L"Finestra", L"Ventana", L"창문", L"窗", L"نافذة", L"Окно", L"Fenster", L"Janela", L"Raam", L"Okno", L"Pencere"),
+				LL14(L"鏡壁", L"Mirror wall", L"Mur miroir", L"Muro specchio", L"Muro espejo", L"거울벽", L"镜墙", L"جدار مرآة", L"Стена-зеркало", L"Spiegelwand", L"Parede espelho", L"Spiegelwand", L"Ściana-lustro", L"Ayna duvar"),
+				LL14(L"鏡床", L"Mirror floor", L"Sol miroir", L"Pavimento specchio", L"Suelo espejo", L"거울바닥", L"镜地板", L"أرضية مرآة", L"Пол-зеркало", L"Spiegelboden", L"Chão espelho", L"Spiegelvloer", L"Podłoga-lustro", L"Ayna zemin")
 			};
 			m_view.BakeCalloutAtlas(labs, 26);
 		}
@@ -7710,18 +7710,18 @@ void CSoft3DMazeDlg::ShowContextMenu(CPoint screenPt)
 		itemSub->AddSeparator();
 		// 関連性順: テンポ→ピッチ→音量→曲送り→EQ→FX（窓は別扱い）
 		itemSub->AddCheck(30, LL14(L"アイテム: テンポ↑", L"Item: tempo↑", L"Objet: tempo↑", L"Oggetto: tempo↑", L"Objeto: tempo↑", L"아이템: 템포↑", L"道具：速度↑", L"عنصر: إيقاع↑", L"Предмет: темп↑", L"Item: Tempo↑", L"Item: tempo↑", L"Item: tempo↑", L"Przedmiot: tempo↑", L"Öğe: tempo↑"), (mask & ITEM_TEMPO) != 0);
-		itemSub->AddCheck(36, LL14(L"アイテム: テンポ↓", L"Item: tempo↓", L"Objet: tempo↓", L"Oggetto: tempo↓", L"Objeto: tempo↓", L"아이템: 템포↓", L"道具：速度↓", L"Item: tempo↓", L"Item: tempo↓", L"Item: Tempo↓", L"Item: tempo↓", L"Item: tempo↓", L"Przedmiot: tempo↓", L"Öğe: tempo↓"), (mask & ITEM_TEMPO_DN) != 0);
+		itemSub->AddCheck(36, LL14(L"アイテム: テンポ↓", L"Item: tempo↓", L"Objet: tempo↓", L"Oggetto: tempo↓", L"Objeto: tempo↓", L"아이템: 템포↓", L"道具：速度↓", L"عنصر: إيقاع↓", L"Предмет: темп↓", L"Item: Tempo↓", L"Item: tempo↓", L"Item: tempo↓", L"Przedmiot: tempo↓", L"Öğe: tempo↓"), (mask & ITEM_TEMPO_DN) != 0);
 		itemSub->AddCheck(31, LL14(L"アイテム: ピッチ↑", L"Item: pitch↑", L"Objet: hauteur↑", L"Oggetto: pitch↑", L"Objeto: tono↑", L"아이템: 피치↑", L"道具：音高↑", L"عنصر: طبقة↑", L"Предмет: высота↑", L"Item: Tonhöhe↑", L"Item: tom↑", L"Item: toon↑", L"Przedmiot: wysokość↑", L"Öğe: perde↑"), (mask & ITEM_PITCH_UP) != 0);
 		itemSub->AddCheck(32, LL14(L"アイテム: ピッチ↓", L"Item: pitch↓", L"Objet: hauteur↓", L"Oggetto: pitch↓", L"Objeto: tono↓", L"아이템: 피치↓", L"道具：音高↓", L"عنصر: طبقة↓", L"Предмет: высота↓", L"Item: Tonhöhe↓", L"Item: tom↓", L"Item: toon↓", L"Przedmiot: wysokość↓", L"Öğe: perde↓"), (mask & ITEM_PITCH_DN) != 0);
-		itemSub->AddCheck(38, LL14(L"アイテム: 音量↑", L"Item: volume↑", L"Objet: volume↑", L"Oggetto: volume↑", L"Objeto: volumen↑", L"아이템: 볼륨↑", L"道具：音量↑", L"Item: vol↑", L"Item: vol↑", L"Item: Lautstärke↑", L"Item: volume↑", L"Item: volume↑", L"Przedmiot: głośność↑", L"Öğe: ses↑"), (mask & ITEM_VOL_UP) != 0);
-		itemSub->AddCheck(39, LL14(L"アイテム: 音量↓", L"Item: volume↓", L"Objet: volume↓", L"Oggetto: volume↓", L"Objeto: volumen↓", L"아이템: 볼륨↓", L"道具：音量↓", L"Item: vol↓", L"Item: vol↓", L"Item: Lautstärke↓", L"Item: volume↓", L"Item: volume↓", L"Przedmiot: głośność↓", L"Öğe: ses↓"), (mask & ITEM_VOL_DN) != 0);
+		itemSub->AddCheck(38, LL14(L"アイテム: 音量↑", L"Item: volume↑", L"Objet: volume↑", L"Oggetto: volume↑", L"Objeto: volumen↑", L"아이템: 볼륨↑", L"道具：音量↑", L"عنصر: صوت↑", L"Предмет: громк↑", L"Item: Lautstärke↑", L"Item: volume↑", L"Item: volume↑", L"Przedmiot: głośność↑", L"Öğe: ses↑"), (mask & ITEM_VOL_UP) != 0);
+		itemSub->AddCheck(39, LL14(L"アイテム: 音量↓", L"Item: volume↓", L"Objet: volume↓", L"Oggetto: volume↓", L"Objeto: volumen↓", L"아이템: 볼륨↓", L"道具：音量↓", L"عنصر: صوت↓", L"Предмет: громк↓", L"Item: Lautstärke↓", L"Item: volume↓", L"Item: volume↓", L"Przedmiot: głośność↓", L"Öğe: ses↓"), (mask & ITEM_VOL_DN) != 0);
 		itemSub->AddCheck(33, LL14(L"アイテム: 次の曲", L"Item: next track", L"Objet: piste suivante", L"Oggetto: brano successivo", L"Objeto: pista siguiente", L"아이템: 다음 곡", L"道具：下一曲", L"عنصر: المسار التالي", L"Предмет: следующий трек", L"Item: nächster Titel", L"Item: próxima faixa", L"Item: volgend nummer", L"Przedmiot: następny utwór", L"Öğe: sonraki parça"), (mask & ITEM_NEXT) != 0);
-		itemSub->AddCheck(37, LL14(L"アイテム: 前の曲", L"Item: previous track", L"Objet: piste précédente", L"Oggetto: brano precedente", L"Objeto: pista anterior", L"아이템: 이전 곡", L"道具：上一曲", L"Item: prev", L"Item: prev", L"Item: vorheriger Titel", L"Item: faixa anterior", L"Item: vorig nummer", L"Przedmiot: poprzedni", L"Öğe: önceki"), (mask & ITEM_PREV) != 0);
+		itemSub->AddCheck(37, LL14(L"アイテム: 前の曲", L"Item: previous track", L"Objet: piste précédente", L"Oggetto: brano precedente", L"Objeto: pista anterior", L"아이템: 이전 곡", L"道具：上一曲", L"عنصر: السابق", L"Предмет: предыдущий", L"Item: vorheriger Titel", L"Item: faixa anterior", L"Item: vorig nummer", L"Przedmiot: poprzedni", L"Öğe: önceki"), (mask & ITEM_PREV) != 0);
 		itemSub->AddCheck(34, LL14(L"アイテム: EQ", L"Item: EQ", L"Objet: EQ", L"Oggetto: EQ", L"Objeto: EQ", L"아이템: EQ", L"道具：EQ", L"عنصر: EQ", L"Предмет: EQ", L"Item: EQ", L"Item: EQ", L"Item: EQ", L"Przedmiot: EQ", L"Öğe: EQ"), (mask & ITEM_EQ) != 0);
-		itemSub->AddCheck(42, LL14(L"アイテム: EQ平坦化", L"Item: EQ flatten", L"Objet: EQ plat", L"Oggetto: EQ flat", L"Objeto: EQ plano", L"아이템: EQ 평탄", L"道具：EQ平坦", L"Item: EQ flat", L"Item: EQ flat", L"Item: EQ flach", L"Item: EQ flat", L"Item: EQ flat", L"Przedmiot: EQ flat", L"Öğe: EQ düz"), (mask & ITEM_EQ_FLAT) != 0);
-		itemSub->AddCheck(40, LL14(L"アイテム: リバーブ", L"Item: reverb", L"Objet: réverb", L"Oggetto: reverb", L"Objeto: reverb", L"아이템: 리버브", L"道具：混响", L"Item: reverb", L"Item: reverb", L"Item: Hall", L"Item: reverb", L"Item: reverb", L"Przedmiot: pogłos", L"Öğe: reverb"), (mask & ITEM_REVERB) != 0);
-		itemSub->AddCheck(41, LL14(L"アイテム: クロスフェード", L"Item: crossfade", L"Objet: fondu croisé", L"Oggetto: crossfade", L"Objeto: fundido", L"아이템: 크로스페이드", L"道具：交叉淡化", L"Item: crossfade", L"Item: crossfade", L"Item: Crossfade", L"Item: crossfade", L"Item: crossfade", L"Przedmiot: crossfade", L"Öğe: crossfade"), (mask & ITEM_XFADE) != 0);
-		itemSub->AddCheck(43, LL14(L"アイテム: ランダム再生切替", L"Item: toggle random play", L"Objet: aléatoire on/off", L"Oggetto: casuale on/off", L"Objeto: aleatorio on/off", L"아이템: 랜덤 재생 전환", L"道具：随机播放切换", L"Item: random", L"Item: random", L"Item: Zufall umschalten", L"Item: aleatório", L"Item: willekeurig", L"Przedmiot: losowo", L"Öğe: rastgele"), (mask & ITEM_RANDOM) != 0);
+		itemSub->AddCheck(42, LL14(L"アイテム: EQ平坦化", L"Item: EQ flatten", L"Objet: EQ plat", L"Oggetto: EQ flat", L"Objeto: EQ plano", L"아이템: EQ 평탄", L"道具：EQ平坦", L"عنصر: EQ مسطح", L"Предмет: EQ плоск.", L"Item: EQ flach", L"Item: EQ flat", L"Item: EQ flat", L"Przedmiot: EQ flat", L"Öğe: EQ düz"), (mask & ITEM_EQ_FLAT) != 0);
+		itemSub->AddCheck(40, LL14(L"アイテム: リバーブ", L"Item: reverb", L"Objet: réverb", L"Oggetto: reverb", L"Objeto: reverb", L"아이템: 리버브", L"道具：混响", L"عنصر: صدى", L"Предмет: реверб", L"Item: Hall", L"Item: reverb", L"Item: reverb", L"Przedmiot: pogłos", L"Öğe: reverb"), (mask & ITEM_REVERB) != 0);
+		itemSub->AddCheck(41, LL14(L"アイテム: クロスフェード", L"Item: crossfade", L"Objet: fondu croisé", L"Oggetto: crossfade", L"Objeto: fundido", L"아이템: 크로스페이드", L"道具：交叉淡化", L"عنصر: تلاشي", L"Предмет: кроссфейд", L"Item: Crossfade", L"Item: crossfade", L"Item: crossfade", L"Przedmiot: crossfade", L"Öğe: crossfade"), (mask & ITEM_XFADE) != 0);
+		itemSub->AddCheck(43, LL14(L"アイテム: ランダム再生切替", L"Item: toggle random play", L"Objet: aléatoire on/off", L"Oggetto: casuale on/off", L"Objeto: aleatorio on/off", L"아이템: 랜덤 재생 전환", L"道具：随机播放切换", L"عنصر: عشوائي", L"Предмет: случ. вкл/выкл", L"Item: Zufall umschalten", L"Item: aleatório", L"Item: willekeurig", L"Przedmiot: losowo", L"Öğe: rastgele"), (mask & ITEM_RANDOM) != 0);
 		itemSub->AddSeparator();
 		itemSub->AddCheck(35, LL14(L"窓を配置", L"Place windows", L"Placer des fenêtres", L"Posiziona finestre", L"Colocar ventanas",
 			L"창 배치", L"放置窗户", L"وضع نوافذ", L"Размещать окна", L"Fenster platzieren", L"Colocar janelas", L"Ramen plaatsen", L"Umieść okna", L"Pencere yerleştir"), (mask & ITEM_WINDOW) != 0);

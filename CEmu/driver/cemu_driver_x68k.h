@@ -45,7 +45,7 @@ private:
 	void TickOpm(uint64_t cpuCycles);
 	void RunCycles(int cycles);
 	void ServiceSoftTimers(int cycles);
-	void CallUserHook(unsigned hook);
+	void CallUserHook(unsigned hook, int tickOpmDuring = 1);
 	void CallUserSubroutine(unsigned hook);
 	/* Find BOOT tst.b $E00000 poll; resume there when hunting songs after a
 	   dead/silent code left PC stuck outside the mailbox (aquales INTRO). */

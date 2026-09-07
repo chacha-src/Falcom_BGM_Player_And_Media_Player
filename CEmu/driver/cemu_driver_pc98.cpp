@@ -1,7 +1,14 @@
 ﻿#include "StdAfx.h"
 #include "cemu_driver_pc98.h"
 #include "../machine/cemu_hard_pc98.h"
+#include "../chip/cemu_chip_opna.h"
 #include "../vendor/np2/np2ffi.h"
+
+enum {
+	/* Matches the Z80 PC-88 watchdog: 2s of total register stillness is never
+	   part of a live song. */
+	PC98_WD_IDLE_MS = 2000
+};
 
 CDriverPc98::CDriverPc98()
 	: hw_(NULL)
@@ -14,6 +21,11 @@ CDriverPc98::CDriverPc98()
 	, cpuAcc_(0)
 	, cpuDebt_(0)
 	, titleCode_(0)
+	, wdSamples_(0)
+	, wdLastActive_(0)
+	, wdMotion_(0)
+	, wdReplays_(0)
+	, wdEverActive_(0)
 {
 }
 
@@ -35,6 +47,11 @@ int CDriverPc98::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigne
 	booted_ = 0;
 	triggered_ = 0;
 	titleCode_ = titleCode;
+	wdSamples_ = 0;
+	wdLastActive_ = 0;
+	wdMotion_ = 0;
+	wdReplays_ = 0;
+	wdEverActive_ = 0;
 
 	if (!hw_->LoadRoms(fs, ge, titleCode))
 		return 0;
@@ -85,6 +102,37 @@ void CDriverPc98::RunUntil(uint64_t endCycle)
 	}
 }
 
+/* Same stall watchdog as the Z80 PC-88 driver, minus the interrupt-source
+   repairs: on V30 the play trigger is a single BIOS-style call, so replaying
+   the track is the only cure a stalled rip needs. Note motion (key-ons,
+   F-num, SSG period) is the liveness signal — idle polling is not playing. */
+void CDriverPc98::WatchdogTick()
+{
+	CChip* chip = hw_ ? hw_->SoundChip() : NULL;
+	const int rate = hostRate_ > 0 ? hostRate_ : 44100;
+	if (!chip) return;
+	unsigned w = 0, k = 0, f = 0, s = 0, m = 0;
+	CEmuChipYm2608GetPlayMetrics(chip, &w, &k, &f, &s, &m);
+	const unsigned motion = k + f + s;
+	if (motion != wdMotion_) {
+		wdMotion_ = motion;
+		wdLastActive_ = wdSamples_;
+		wdEverActive_ = 1;
+		return;
+	}
+	if (wdSamples_ - wdLastActive_ < (uint64_t)rate * PC98_WD_IDLE_MS / 1000u)
+		return;
+	wdLastActive_ = wdSamples_;
+	/* Only while nothing has ever sounded — see CDriverPc88::WatchdogTick.
+	   Re-kicking a player that is already running restarts it from whatever
+	   state its RAM happens to hold, which is audibly worse than the silence
+	   it was trying to cure. */
+	if (wdEverActive_ || wdReplays_ >= 4)
+		return;
+	wdReplays_++;
+	hw_->TriggerPlay(titleCode_);
+}
+
 int CDriverPc98::Render(int16_t* stereo, int frames)
 {
 	if (!hw_ || !stereo || frames <= 0 || !booted_) return 0;
@@ -121,6 +169,8 @@ int CDriverPc98::Render(int16_t* stereo, int frames)
 			cpuDebt_ -= (int64_t)(hw_->cpuCycles_ - start);
 		}
 		chip->Render(stereo + i * 2, 1);
+		if ((++wdSamples_ & 511) == 0)
+			WatchdogTick();
 	}
 	return frames;
 }

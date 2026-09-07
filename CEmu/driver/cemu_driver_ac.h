@@ -29,6 +29,9 @@ private:
 	int cmdIndex_;
 	uint64_t nextCmdAt_;
 	uint64_t nextGngIrq_;
+	/* Last sampled K054539 timer output, for rising-edge NMI generation. */
+	int k054539TimerState_;
+	uint64_t k054539Residual_;
 	uint64_t nextM72Nmi_;  /* MASTER_CLOCK/8/512 = 7812.5 Hz sample pump */
 	int m72FakeNmi_;       /* game has an empty NMI handler — pump host-side */
 	int hasCpu_;           /* 0 for boards whose sound CPU CEmu cannot run */

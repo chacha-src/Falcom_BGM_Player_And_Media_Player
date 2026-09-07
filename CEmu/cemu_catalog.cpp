@@ -1,4 +1,4 @@
-#include "StdAfx.h"
+﻿#include "StdAfx.h"
 #include "cemu_catalog.h"
 #include "cemu_zipfs.h"
 #include "minizip/unzip.h"
@@ -325,7 +325,167 @@ static CEmuGameEntry* CEmuGameEntryFromBuild(const CEmuGameBuild* b)
 	return ge;
 }
 
+/* The chip names as they are written in the catalog's <name> field, mapped to
+   our chip ids. Longest / most specific spellings must come first so that
+   "YM2610B" is not consumed by a "YM2610" test, and so that a bare "OPN" does
+   not swallow "OPNA". */
+struct CEmuCatalogChipToken {
+	const char* token;
+	int chipId;
+};
+
+static const CEmuCatalogChipToken kCatalogChipTokens[] = {
+	{ "YM2608", CEMU_CHIP_OPNA },   { "OPNA", CEMU_CHIP_OPNA },
+	{ "YM2610B", CEMU_CHIP_YM2610 },{ "YM2610", CEMU_CHIP_YM2610 },
+	{ "OPNB", CEMU_CHIP_YM2610 },
+	{ "YM2612", CEMU_CHIP_YM2612 }, { "YM3438", CEMU_CHIP_YM2612 },
+	{ "OPN2", CEMU_CHIP_YM2612 },
+	{ "YM2203", CEMU_CHIP_OPN },
+	{ "YM2151", CEMU_CHIP_OPM },    { "OPM", CEMU_CHIP_OPM },
+	{ "YM2413", CEMU_CHIP_OPLL },   { "OPLL", CEMU_CHIP_OPLL },
+	{ "YMF262", CEMU_CHIP_OPL3 },   { "OPL3", CEMU_CHIP_OPL3 },
+	{ "YM3812", CEMU_CHIP_OPL2 },   { "OPL2", CEMU_CHIP_OPL2 },
+	{ "YM3526", CEMU_CHIP_OPL2 },   { "Y8950", CEMU_CHIP_OPL2 },
+	{ "YMZ280B", CEMU_CHIP_YMZ280B },
+	{ "MSM6295", CEMU_CHIP_OKI6295 }, { "OKIM6295", CEMU_CHIP_OKI6295 },
+	{ "OKI6295", CEMU_CHIP_OKI6295 }, { "M6295", CEMU_CHIP_OKI6295 },
+	{ "MSM5205", CEMU_CHIP_MSM5205 }, { "MSM5232", CEMU_CHIP_MSM5232 },
+	/* uPD7759 is written several ways in the rips, "uDP" typo included. */
+	{ "UPD7759", CEMU_CHIP_UPD7759 }, { "UDP7759", CEMU_CHIP_UPD7759 },
+	{ "UPD7751", CEMU_CHIP_UPD7759 }, { "UDP7751", CEMU_CHIP_UPD7759 },
+	{ "D7759", CEMU_CHIP_UPD7759 },
+	{ "VLM5030", CEMU_CHIP_VLM5030 },
+	{ "K054539", CEMU_CHIP_K054539 }, { "054539", CEMU_CHIP_K054539 },
+	{ "K54539", CEMU_CHIP_K054539 },
+	{ "K053260", CEMU_CHIP_K053260 }, { "053260", CEMU_CHIP_K053260 },
+	{ "K53260", CEMU_CHIP_K053260 },
+	{ "K007232", CEMU_CHIP_K007232 }, { "007232", CEMU_CHIP_K007232 },
+	{ "K7232", CEMU_CHIP_K007232 },
+	{ "K051649", CEMU_CHIP_K051649 }, { "051649", CEMU_CHIP_K051649 },
+	{ "SCC", CEMU_CHIP_K051649 },
+	{ "K005289", CEMU_CHIP_K005289 },
+	{ "SEGAPCM", CEMU_CHIP_SEGAPCM }, { "SEGA PCM", CEMU_CHIP_SEGAPCM },
+	{ "MULTIPCM", CEMU_CHIP_MULTIPCM },
+	{ "YMF292", CEMU_CHIP_SCSP },     { "SCSP", CEMU_CHIP_SCSP },
+	{ "RF5C400", CEMU_CHIP_RF5C400 }, { "RF5C68", CEMU_CHIP_RF5C68 },
+	{ "QSOUND", CEMU_CHIP_QSOUND },
+	{ "ES5506", CEMU_CHIP_ES5505 },   { "ES5505", CEMU_CHIP_ES5505 },
+	{ "C352", CEMU_CHIP_C352 },
+	{ "C219", CEMU_CHIP_C140 },       { "C140", CEMU_CHIP_C140 },
+	{ "CUS30", CEMU_CHIP_C30 },       { "C30", CEMU_CHIP_C30 },
+	{ "WSG", CEMU_CHIP_C30 },
+	{ "X1-010", CEMU_CHIP_X1_010 },   { "X1010", CEMU_CHIP_X1_010 },
+	{ "GA20", CEMU_CHIP_GA20 },
+	{ "SAA1099", CEMU_CHIP_SAA1099 },
+	{ "SN76496", CEMU_CHIP_SN76489 }, { "SN76489", CEMU_CHIP_SN76489 },
+	/* System E rips say "Sega PSG"; bare "PSG" is too vague to map. */
+	{ "SEGA PSG", CEMU_CHIP_SN76489 },
+	{ "AY-3-8910", CEMU_CHIP_AY },    { "AY8910", CEMU_CHIP_AY },
+	{ "YM2149", CEMU_CHIP_AY },       { "AY-3-8912", CEMU_CHIP_AY },
+	/* Last, so "Sega PSG" above has already taken its characters and only a
+	   PSG with no maker named falls through to the AY the MSX/arcade use. */
+	{ "PSG", CEMU_CHIP_AY }
+};
+
+/* Case-insensitive search that also ignores separators the catalog varies on
+   ("AY-3-8910" vs "AY3 8910"), so one spelling per chip is enough above.
+   Returns the offset just past the match, or -1 when the token is absent. */
+static int CEmuCatalogNameFindToken(const char* hay, const char* needle)
+{
+	for (const char* p = hay; *p; p++) {
+		const char* a = p;
+		const char* b = needle;
+		while (*b) {
+			while (*a == ' ' || *a == '-' || *a == '_') a++;
+			while (*b == ' ' || *b == '-' || *b == '_') b++;
+			if (!*b) break;
+			char ca = *a, cb = *b;
+			if (ca >= 'a' && ca <= 'z') ca = (char)(ca - 'a' + 'A');
+			if (cb >= 'a' && cb <= 'z') cb = (char)(cb - 'a' + 'A');
+			if (ca != cb) break;
+			a++; b++;
+		}
+		if (!*b) return (int)(a - hay);
+	}
+	return -1;
+}
+
+int CEmuCatalogChipsFromText(const char* text, int* ids, int maxIds)
+{
+	if (!text || !ids || maxIds <= 0) return 0;
+
+	/* Work on a copy and blank out each match, so a more specific spelling
+	   earlier in the table consumes its characters and a broader one cannot
+	   claim them again - "Sega PSG" must not also read as a bare "PSG". */
+	char buf[CEMU_GAME_NAME * 4];
+	strncpy_s(buf, text, _TRUNCATE);
+
+	int n = 0;
+	for (unsigned i = 0; i < _countof(kCatalogChipTokens); i++) {
+		const int id = kCatalogChipTokens[i].chipId;
+		const int end = CEmuCatalogNameFindToken(buf, kCatalogChipTokens[i].token);
+		if (end < 0) continue;
+		int start = end - (int)strlen(kCatalogChipTokens[i].token);
+		if (start < 0) start = 0;
+		for (int c = start; c < end && buf[c]; c++)
+			buf[c] = '\1';
+		int dup = 0;
+		for (int k = 0; k < n; k++)
+			if (ids[k] == id) { dup = 1; break; }
+		if (dup) continue;
+		ids[n++] = id;
+		if (n >= maxIds) break;
+	}
+	return n;
+}
+
+void CEmuCatalogAssignDocChips(CEmuGameEntry* ge)
+{
+	if (!ge) return;
+	ge->docChipCount = 0;
+	for (int i = 0; i < 12; i++) ge->docChipIds[i] = 0;
+
+	char nameA[CEMU_GAME_NAME * 4];
+	nameA[0] = 0;
+	WideCharToMultiByte(CP_ACP, 0, ge->name, -1, nameA, (int)sizeof(nameA), NULL, NULL);
+	if (!nameA[0]) return;
+	ge->docChipCount = CEmuCatalogChipsFromText(nameA, ge->docChipIds, 12);
+}
+
+/* Assign cpuId/chipIds using whatever is already in ge->docChipIds. */
+static void CEmuCatalogAssignHwIdsFromDoc(CEmuGameEntry* ge);
+
+void CEmuCatalogShareDocChips(CEmuCatalog* cat)
+{
+	if (!cat || cat->count <= 0) return;
+	/* The same archive is often listed twice - one row spells the chips out,
+	   the other is just the game title. Whichever row a zip resolves to
+	   should describe the same board, so let the terse row borrow. */
+	for (int i = 0; i < cat->count; i++) {
+		CEmuGameEntry* a = cat->entry[i];
+		if (!a || a->docChipCount > 0 || !a->archive[0]) continue;
+		for (int k = 0; k < cat->count; k++) {
+			const CEmuGameEntry* b = cat->entry[k];
+			if (!b || b->docChipCount <= 0) continue;
+			if (_stricmp(b->archive, a->archive) != 0) continue;
+			memcpy(a->docChipIds, b->docChipIds, sizeof(a->docChipIds));
+			a->docChipCount = b->docChipCount;
+			/* Chip ids fall back on the documented set when the subtype
+			   table has no entry, so redo that decision with the new info. */
+			CEmuCatalogAssignHwIdsFromDoc(a);
+			break;
+		}
+	}
+}
+
 void CEmuCatalogAssignHwIds(CEmuGameEntry* ge)
+{
+	if (!ge) return;
+	CEmuCatalogAssignDocChips(ge);
+	CEmuCatalogAssignHwIdsFromDoc(ge);
+}
+
+static void CEmuCatalogAssignHwIdsFromDoc(CEmuGameEntry* ge)
 {
 	if (!ge) return;
 	ge->cpuId = 0;
@@ -588,8 +748,16 @@ void CEmuCatalogAssignHwIds(CEmuGameEntry* ge)
 			ge->chipIds[ge->chipCount++] = CEMU_CHIP_OPM;
 			ge->chipIds[ge->chipCount++] = CEMU_CHIP_OKI6295;
 		} else {
+			/* Nothing above recognised this board. A Z80 + YM2151 is the
+			   commonest arcade sound section, so it is the guess - but when
+			   the catalog names the chips, prefer those over the guess. */
 			ge->cpuId = CEMU_CPU_Z80;
-			ge->chipIds[ge->chipCount++] = CEMU_CHIP_OPM;
+			if (ge->docChipCount > 0) {
+				for (int i = 0; i < ge->docChipCount && ge->chipCount < 8; i++)
+					ge->chipIds[ge->chipCount++] = ge->docChipIds[i];
+			} else {
+				ge->chipIds[ge->chipCount++] = CEMU_CHIP_OPM;
+			}
 		}
 	}
 	else if (_stricmp(plat, "msx") == 0) {
@@ -1368,6 +1536,10 @@ static int CEmuCatalogLoadCache(CEmuCatalog* cat, const CEmuCatalogFp* want,
 			CEmuDecodeXmlEntitiesW(e->driverAlias);
 			for (int ti = 0; ti < e->titleCount; ++ti)
 				CEmuDecodeXmlEntitiesW(e->title[ti].label);
+			/* Recomputed rather than trusted: the ids are a pure function of
+			   platform/subtype/name, and re-deriving them means a cache hit
+			   and a fresh XML parse agree even when that mapping changes. */
+			CEmuCatalogAssignHwIds(e);
 		}
 		if (!ok || !CEmuCatalogPushOwned(cat, e)) {
 			CEmuGameEntryFree(e);
@@ -1495,6 +1667,7 @@ int CEmuCatalogLoadEx(CEmuCatalog* cat, const wchar_t* dataRoot,
 
 	CEmuCatalogProgress(progress, progressUser, 0, 1);
 	if (CEmuCatalogLoadCache(cat, &fp, progress, progressUser)) {
+		CEmuCatalogShareDocChips(cat);
 		cat->loaded = 1;
 		return cat->count;
 	}
@@ -1521,6 +1694,7 @@ int CEmuCatalogLoadEx(CEmuCatalog* cat, const wchar_t* dataRoot,
 	if (cat->count > 0)
 		CEmuCatalogSaveCache(cat, &fp, progress, progressUser);
 
+	CEmuCatalogShareDocChips(cat);
 	cat->loaded = 1;
 	CEmuCatalogProgress(progress, progressUser, 1, 1);
 	return cat->count;
@@ -1597,6 +1771,24 @@ static int CEmuCatalogArchiveRank(const CEmuGameEntry* e, const CEmuZipFs* zipFs
 		rank -= 2500000;
 	if (CEmuGameHasOpt(e, "midiout"))
 		rank -= 800000;
+	/* undine: three twins share type=opna; demote PSG (.P) and bare OPN (.M)
+	   so zip resolve picks OPNA (.M2) for real FM+ADPCM performance. */
+	{
+		int hasP = 0, hasM = 0, hasM2 = 0;
+		for (int i = 0; i < e->romCount; i++) {
+			if (_stricmp(e->rom[i].type, "bgm") != 0) continue;
+			const char* nm = e->rom[i].name;
+			if (!nm) continue;
+			const size_t n = strlen(nm);
+			if (n >= 2 && _stricmp(nm + n - 2, ".P") == 0) hasP = 1;
+			else if (n >= 3 && _stricmp(nm + n - 3, ".M2") == 0) hasM2 = 1;
+			else if (n >= 2 && _stricmp(nm + n - 2, ".M") == 0) hasM = 1;
+		}
+		if (hasP && !hasM && !hasM2)
+			rank -= 1500000;
+		else if (hasM && !hasM2)
+			rank -= 500000;
+	}
 	/* Wing destge/destjyo OPNA MCM1/WMC1 hang under DI during init; the OPN
 	   sibling uses Y230 (same as working onryo OPN). Demote MCM1 so zip
 	   resolve picks Y230. onryo OPNA (M.VA) is untouched. */

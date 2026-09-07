@@ -340,53 +340,12 @@ void CHardAc::SegaMidiInjectSong(uint16_t cmd)
 {
 	segaMidiHead_ = segaMidiTail_ = 0;
 	segaMidiIrq_ = 0;
-	/* Hoot model2 pre_cmd 0xA0 then 16-bit title (lo, hi). */
+	/* Hoot model2 / Model 1 audio: pre_cmd 0xA0 then 16-bit title (lo, hi).
+	   The 68000 firmware owns MultiPCM + YM3438 — do not poke chips or invent
+	   MIDI note-ons here (that produced the daytona rail-to-rail buzz). */
 	SegaMidiPush(0xa0);
 	SegaMidiPush((uint8_t)(cmd & 0xff));
 	SegaMidiPush((uint8_t)((cmd >> 8) & 0xff));
-	/* Also issue MIDI all-notes-off + bank/program for boards that expect it. */
-	SegaMidiPush(0xb0);
-	SegaMidiPush(0x7b);
-	SegaMidiPush(0x00);
-	if (cmd == 0 || cmd == 0x1000u)
-		return;
-	SegaMidiPush(0xb0);
-	SegaMidiPush(0x00);
-	SegaMidiPush((uint8_t)((cmd >> 8) & 0x7f));
-	SegaMidiPush(0xc0);
-	SegaMidiPush((uint8_t)(cmd & 0x7f));
-	/* Explicit note-on so MultiPCM speaks before the song table drains. */
-	SegaMidiPush(0x90);
-	SegaMidiPush((uint8_t)(0x3c + (cmd & 0x0f)));
-	SegaMidiPush(0x64);
-	SegaMidiPush(0x90);
-	SegaMidiPush((uint8_t)(0x40 + ((cmd >> 4) & 0x0f)));
-	SegaMidiPush(0x50);
-	/* Host-side MultiPCM slot key-on — firmware often leaves UART mute until
-	   a long attract; vary sample/pitch by cmd for title-dependent peaks.
-	   Pitch format (YMW258): reg2 bits7-2 = FNS[5:0], bit0 = sample[8];
-	   reg3 bits7-4 = octave+1, bits3-0 = FNS[9:6]. Do NOT set reg2 bit0 unless
-	   sample >= 256 — that used to select empty sample 0x1xx and mute PCM. */
-	auto poke = [&](CChip* c, int slot, uint8_t sample, uint8_t octave, uint16_t fns) {
-		if (!c) return;
-		fns &= 0x3ff;
-		c->Write(1, (uint8_t)slot);
-		c->Write(2, 1); c->Write(0, sample);
-		c->Write(2, 2); c->Write(0, (uint8_t)((fns & 0x3f) << 2));
-		c->Write(2, 3); c->Write(0, (uint8_t)(((octave + 1u) << 4) | ((fns >> 6) & 0xf)));
-		/* Pan nibble 0 = full L+R; nibble 8 is hard mute in MultiPCM. */
-		c->Write(2, 0); c->Write(0, 0x00);
-		/* TL ~24 leaves headroom so stereo Clamp doesn't flatten peaks. */
-		c->Write(2, 5); c->Write(0, (uint8_t)(0x31));
-		c->Write(2, 4); c->Write(0, 0x80); /* KeyOn */
-		opmWrites_ += 10;
-	};
-	const uint8_t base = (uint8_t)(1 + (cmd & 0x07));
-	/* One voice per chip keeps MixAdd under int16 clip; TL mid leaves headroom. */
-	poke(pcm_, 0, (uint8_t)(base + 0), 4, (uint16_t)(0x100 + (cmd & 0x3f)));
-	poke(pcm2_, 0, (uint8_t)(base + 3), 5, (uint16_t)(0x120 + ((cmd >> 4) & 0x3f)));
-	CEmuChipMultiPcmSetBank(pcm_, 0);
-	CEmuChipMultiPcmSetBank(pcm2_, 0);
 }
 
 uint8_t CHardAc::SegaUartRead(unsigned reg)
@@ -487,25 +446,33 @@ void CHardAc::Sega68Write8(unsigned addr, uint8_t v)
 		SegaUartWrite((addr >> 1) & 1u, v);
 		return;
 	}
-	if (addr >= 0xc40000u && addr <= 0xc40007u && pcm_) {
-		pcm_->Write((addr >> 1) & 3u, v);
+	/* MAME segam1audio_map maps both MultiPCMs and the YM3438 with
+	   umask16(0x00ff), so only the odd (low) byte lane reaches them. Serving
+	   the even lane as well made every word store hit the register twice -
+	   once with the high half as bogus data - which is what turned daytona
+	   and vf into a rail-to-rail buzz. */
+	if (addr >= 0xc40000u && addr <= 0xc40007u) {
+		if ((addr & 1u) && pcm_) pcm_->Write((addr >> 1) & 3u, v);
 		return;
 	}
 	if (addr >= 0xc50000u && addr <= 0xc50001u) {
-		CEmuChipMultiPcmSetBank(pcm_, v & 3u);
+		/* m1_snd_mpcm_bnk1_w takes the whole word; bits are in the low half. */
+		if (addr & 1u) CEmuChipMultiPcmSetBank(pcm_, v & 3u);
 		return;
 	}
-	if (addr >= 0xc60000u && addr <= 0xc60007u && pcm2_) {
-		pcm2_->Write((addr >> 1) & 3u, v);
+	if (addr >= 0xc60000u && addr <= 0xc60007u) {
+		if ((addr & 1u) && pcm2_) pcm2_->Write((addr >> 1) & 3u, v);
 		return;
 	}
 	if (addr >= 0xc70000u && addr <= 0xc70001u) {
-		CEmuChipMultiPcmSetBank(pcm2_, v & 3u);
+		if (addr & 1u) CEmuChipMultiPcmSetBank(pcm2_, v & 3u);
 		return;
 	}
-	if (addr >= 0xd00000u && addr <= 0xd00007u && chip_) {
-		chip_->Write((addr >> 1) & 3u, v);
-		if ((addr & 2) == 2) opmWrites_++;
+	if (addr >= 0xd00000u && addr <= 0xd00007u) {
+		if ((addr & 1u) && chip_) {
+			chip_->Write((addr >> 1) & 3u, v);
+			if ((addr & 2) == 2) opmWrites_++;
+		}
 		return;
 	}
 }
@@ -518,51 +485,45 @@ int CHardAc::LoadRomsSegaM1(CEmuZipFs* fs, const CEmuGameEntry* ge)
 	if (pcmRom_) { free(pcmRom_); pcmRom_ = NULL; pcmRomSize_ = 0; }
 	if (pcmRom2_) { free(pcmRom2_); pcmRom2_ = NULL; pcmRom2Size_ = 0; }
 
-	/* Interleave odd/even sound CPU ROMs into a 256KB image (MAME sndcpu). */
-	const unsigned char* even = NULL;
-	const unsigned char* odd = NULL;
-	unsigned evenSz = 0, oddSz = 0;
+	/* MAME M1AUDIO_CPU_REGION: ROM_LOAD16_WORD_SWAP at absolute offsets
+	   (daytona epr-16720 @0, epr-16721 @0x20000). This is NOT odd/even byte
+	   interleave — that scramble left the 68K executing garbage and only the
+	   old MultiPCM host-poke path made noise. */
+	unsigned romNeed = 0x40000u;
+	for (int i = 0; i < ge->romCount; i++) {
+		const CEmuRomEntry* r = &ge->rom[i];
+		if (!CEmuAcIsCodeRomType(r->type)) continue;
+		unsigned off = (unsigned)(r->offset < 0 ? 0 : r->offset);
+		unsigned sz = 0;
+		if (!CEmuZipFsFind(fs, r->name, &sz) || !sz) continue;
+		if (off + sz > romNeed) romNeed = off + sz;
+	}
+	if (romNeed < 0x40000u) romNeed = 0x40000u;
+	uint8_t* p = (uint8_t*)calloc(1, romNeed);
+	if (!p) return 0;
+	int anyCode = 0;
 	for (int i = 0; i < ge->romCount; i++) {
 		const CEmuRomEntry* r = &ge->rom[i];
 		if (!CEmuAcIsCodeRomType(r->type)) continue;
 		unsigned sz = 0;
 		const unsigned char* data = CEmuZipFsFind(fs, r->name, &sz);
 		if (!data || !sz) continue;
-		const int isOdd = (r->offset == 0x20000 || r->offset == 0x000001
-			|| strstr(r->name, ".7") != NULL || strstr(r->name, ".07") != NULL
-			|| strstr(r->name, ".007") != NULL);
-		if (isOdd) { odd = data; oddSz = sz; }
-		else { even = data; evenSz = sz; }
-	}
-	if (!even || !odd) {
-		/* Fallback: sequential load at offsets. */
-		uint8_t* p = (uint8_t*)calloc(1, 0x40000);
-		if (!p) return 0;
-		for (int i = 0; i < ge->romCount; i++) {
-			const CEmuRomEntry* r = &ge->rom[i];
-			if (!CEmuAcIsCodeRomType(r->type)) continue;
-			unsigned sz = 0;
-			const unsigned char* data = CEmuZipFsFind(fs, r->name, &sz);
-			if (!data || !sz) continue;
-			unsigned off = (unsigned)(r->offset < 0 ? 0 : r->offset);
-			if (off >= 0x40000u) continue;
-			unsigned n = sz;
-			if (off + n > 0x40000u) n = 0x40000u - off;
-			memcpy(p + off, data, n);
+		unsigned off = (unsigned)(r->offset < 0 ? 0 : r->offset);
+		if (off >= romNeed) continue;
+		unsigned n = sz;
+		if (off + n > romNeed) n = romNeed - off;
+		memcpy(p + off, data, n);
+		/* ROM_LOAD16_WORD_SWAP: swap each 16-bit word in the loaded span. */
+		for (unsigned j = 0; j + 1u < n; j += 2u) {
+			const uint8_t t = p[off + j];
+			p[off + j] = p[off + j + 1u];
+			p[off + j + 1u] = t;
 		}
-		ms1Rom_ = p;
-		ms1RomSize_ = 0x40000;
-	} else {
-		const unsigned each = evenSz < oddSz ? evenSz : oddSz;
-		uint8_t* p = (uint8_t*)calloc(1, each * 2u);
-		if (!p) return 0;
-		for (unsigned i = 0; i < each; i++) {
-			p[i * 2] = even[i];
-			p[i * 2 + 1] = odd[i];
-		}
-		ms1Rom_ = p;
-		ms1RomSize_ = each * 2u;
+		anyCode = 1;
 	}
+	if (!anyCode) { free(p); return 0; }
+	ms1Rom_ = p;
+	ms1RomSize_ = romNeed;
 
 	ms1Ram_ = (uint8_t*)calloc(1, 0x10000);
 	if (!ms1Ram_) return 0;

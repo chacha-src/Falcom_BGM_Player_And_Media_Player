@@ -1,4 +1,4 @@
-// Soft3DRaceDlg.cpp — aerial race (Catmull-Rom power band / cute bird-ships)
+﻿// Soft3DRaceDlg.cpp — aerial race (Catmull-Rom power band / cute bird-ships)
 #include "stdafx.h"
 #include "ogg.h"
 #include "Soft3DRaceDlg.h"
@@ -1771,8 +1771,8 @@ BOOL CS3rView::BakeStandingsTexture(const S3rStandRow* rows, int nRows, int nitr
 			}
 		}
 		if (nitroPulse > 0.05f) {
-			wchar_t act[24];
-			swprintf_s(act, L"ACTIVE");
+			const wchar_t* act = LL14(L"発動中", L"ACTIVE", L"ACTIF", L"ATTIVO", L"ACTIVO",
+				L"발동중", L"生效中", L"نشط", L"АКТИВ", L"AKTIV", L"ATIVO", L"ACTIEF", L"AKTYWNY", L"AKTİF");
 			Soft3DTextD2D_DrawTextShadow(cv, act, 300.f, y0 + 10.f, 90.f, 24.f,
 				14.f, 1, 2, 1, 255, 255, (BYTE)(180 + pulse / 2), 80, 1.2f, 1.2f, 200, 0, 0, 0);
 		}
@@ -3496,7 +3496,7 @@ void CSoft3DRaceDlg::ResetRaceState()
 		c.throttle=0.f; c.rpm=0.08f;
 		c.nitroStock = 1; c.nitroT = 0.f;
 		c.dmgAccum = 0.f; c.hitFlashT = 0.f; c.fxEmitT = 0.f; c.fxHitCool = 0.f;
-		wcscpy_s(c.name, kS3rGirlNames[namePick[i % 100]]);
+		wcscpy_s(c.name, S3rGirlName(namePick[i % 100]));
 		c.lapTimesN = 0;
 		ApplyStartGridPose(c, i);
 		AlignCraftToPath(c, 0.06f);
@@ -5189,8 +5189,12 @@ void CSoft3DRaceDlg::TickPhysics(float dt)
 						}
 					}
 				} else if (c.isPlayer && m_phase == PHASE_RACE) {
-					wchar_t lapBuf[32];
-					swprintf_s(lapBuf, L"LAP %d/%d", min(m_lapsTarget, c.lap + 1), m_lapsTarget);
+					wchar_t lapBuf[48];
+					swprintf_s(lapBuf, LL14(
+						L"LAP %d/%d", L"LAP %d/%d", L"TOUR %d/%d", L"GIRO %d/%d", L"VUELTA %d/%d",
+						L"랩 %d/%d", L"圈 %d/%d", L"لفة %d/%d", L"КРУГ %d/%d", L"RUNDE %d/%d",
+						L"VOLTA %d/%d", L"RONDE %d/%d", L"OKR. %d/%d", L"TUR %d/%d"),
+						min(m_lapsTarget, c.lap + 1), m_lapsTarget);
 					m_clearBakeText = lapBuf;
 					m_clearBakeA = 1.f; m_clearDirty = 1; m_overlayHold = 1.8f;
 					Soft3DSfxUi(S3SFX_LAP, c.lap);
@@ -5390,10 +5394,36 @@ void CSoft3DRaceDlg::UpdateStatus()
 	S3rCraft& pl=m_crafts[0];
 	float kmh = SpeedToKmh(pl.vx, pl.vy, pl.vz);
 	if (m_phase == PHASE_DEMO) {
-		s.Format(_T("DEMO  Lap %d  Rank %d/%d  %.0f km/h  — Start to race"),
+		s.Format(LL14(L"デモ  周%d  順位 %d/%d  %.0f km/h  — スタートで本番",
+			L"DEMO  Lap %d  Rank %d/%d  %.0f km/h  — Start to race",
+			L"DÉMO  Tour %d  Rang %d/%d  %.0f km/h  — Démarrer",
+			L"DEMO  Giro %d  Pos %d/%d  %.0f km/h  — Avvia",
+			L"DEMO  Vuelta %d  Puesto %d/%d  %.0f km/h  — Iniciar",
+			L"데모  랩%d  순위 %d/%d  %.0f km/h  — 시작으로 본경기",
+			L"演示  圈%d  名次 %d/%d  %.0f km/h  — 按开始正式赛",
+			L"تجريبي  لفة %d  ترتيب %d/%d  %.0f كم/س  — ابدأ",
+			L"ДЕМО  Круг %d  Место %d/%d  %.0f км/ч  — Старт",
+			L"DEMO  Runde %d  Platz %d/%d  %.0f km/h  — Start",
+			L"DEMO  Volta %d  Pos %d/%d  %.0f km/h  — Iniciar",
+			L"DEMO  Ronde %d  Pos %d/%d  %.0f km/u  — Start",
+			L"DEMO  Okr. %d  Poz. %d/%d  %.0f km/h  — Start",
+			L"DEMO  Tur %d  Sıra %d/%d  %.0f km/s  — Başlat"),
 			pl.lap + 1, pl.rank, m_craftN, kmh);
 	} else {
-		s.Format(_T("Lap %d/%d  Rank %d/%d  HP %.0f  Thrust %.0f  %.0f km/h  Time %.1fs"),
+		s.Format(LL14(L"周 %d/%d  順位 %d/%d  HP %.0f  推進 %.0f  %.0f km/h  時間 %.1fs",
+			L"Lap %d/%d  Rank %d/%d  HP %.0f  Thrust %.0f  %.0f km/h  Time %.1fs",
+			L"Tour %d/%d  Rang %d/%d  PV %.0f  Poussée %.0f  %.0f km/h  Temps %.1fs",
+			L"Giro %d/%d  Pos %d/%d  HP %.0f  Spinta %.0f  %.0f km/h  Tempo %.1fs",
+			L"Vuelta %d/%d  Puesto %d/%d  HP %.0f  Empuje %.0f  %.0f km/h  Tiempo %.1fs",
+			L"랩 %d/%d  순위 %d/%d  HP %.0f  추진 %.0f  %.0f km/h  시간 %.1fs",
+			L"圈 %d/%d  名次 %d/%d  HP %.0f  推力 %.0f  %.0f km/h  时间 %.1fs",
+			L"لفة %d/%d  ترتيب %d/%d  HP %.0f  دفع %.0f  %.0f كم/س  وقت %.1fs",
+			L"Круг %d/%d  Место %d/%d  HP %.0f  Тяга %.0f  %.0f км/ч  Время %.1fs",
+			L"Runde %d/%d  Platz %d/%d  HP %.0f  Schub %.0f  %.0f km/h  Zeit %.1fs",
+			L"Volta %d/%d  Pos %d/%d  HP %.0f  Empuxo %.0f  %.0f km/h  Tempo %.1fs",
+			L"Ronde %d/%d  Pos %d/%d  HP %.0f  Stuw %.0f  %.0f km/u  Tijd %.1fs",
+			L"Okr. %d/%d  Poz. %d/%d  HP %.0f  Ciąg %.0f  %.0f km/h  Czas %.1fs",
+			L"Tur %d/%d  Sıra %d/%d  HP %.0f  İtki %.0f  %.0f km/s  Süre %.1fs"),
 			min(m_lapsTarget, pl.lap+1), m_lapsTarget, pl.rank, m_craftN, pl.hp, pl.fuel, kmh, m_raceClock);
 	}
 	m_status.SetWindowText(s);
@@ -5407,10 +5437,38 @@ void CSoft3DRaceDlg::EnsureHudBake()
 	S3rCraft& pl=m_crafts[0];
 	wchar_t buf[512];
 	if (pl.bestLap<=1e8f) {
-		swprintf_s(buf, L"Lap %d/%d   #%d/%d\nHP %.0f   Thrust %.0f\nTime %.2f   BestLap %.2f",
+		swprintf_s(buf, LL14(
+			L"周 %d/%d   #%d/%d\nHP %.0f   推進 %.0f\n時間 %.2f   ベスト %.2f",
+			L"Lap %d/%d   #%d/%d\nHP %.0f   Thrust %.0f\nTime %.2f   BestLap %.2f",
+			L"Tour %d/%d   #%d/%d\nPV %.0f   Poussée %.0f\nTemps %.2f   Meilleur %.2f",
+			L"Giro %d/%d   #%d/%d\nHP %.0f   Spinta %.0f\nTempo %.2f   Migliore %.2f",
+			L"Vuelta %d/%d   #%d/%d\nHP %.0f   Empuje %.0f\nTiempo %.2f   Mejor %.2f",
+			L"랩 %d/%d   #%d/%d\nHP %.0f   추진 %.0f\n시간 %.2f   베스트 %.2f",
+			L"圈 %d/%d   #%d/%d\nHP %.0f   推力 %.0f\n时间 %.2f   最佳 %.2f",
+			L"لفة %d/%d   #%d/%d\nHP %.0f   دفع %.0f\nوقت %.2f   أفضل %.2f",
+			L"Круг %d/%d   #%d/%d\nHP %.0f   Тяга %.0f\nВремя %.2f   Лучший %.2f",
+			L"Runde %d/%d   #%d/%d\nHP %.0f   Schub %.0f\nZeit %.2f   Beste %.2f",
+			L"Volta %d/%d   #%d/%d\nHP %.0f   Empuxo %.0f\nTempo %.2f   Melhor %.2f",
+			L"Ronde %d/%d   #%d/%d\nHP %.0f   Stuw %.0f\nTijd %.2f   Beste %.2f",
+			L"Okr. %d/%d   #%d/%d\nHP %.0f   Ciąg %.0f\nCzas %.2f   Najlep. %.2f",
+			L"Tur %d/%d   #%d/%d\nHP %.0f   İtki %.0f\nSüre %.2f   En iyi %.2f"),
 			min(m_lapsTarget, pl.lap+1), m_lapsTarget, pl.rank, m_craftN, pl.hp, pl.fuel, m_raceClock, pl.bestLap);
 	} else {
-		swprintf_s(buf, L"Lap %d/%d   #%d/%d\nHP %.0f   Thrust %.0f\nTime %.2f   BestLap --",
+		swprintf_s(buf, LL14(
+			L"周 %d/%d   #%d/%d\nHP %.0f   推進 %.0f\n時間 %.2f   ベスト --",
+			L"Lap %d/%d   #%d/%d\nHP %.0f   Thrust %.0f\nTime %.2f   BestLap --",
+			L"Tour %d/%d   #%d/%d\nPV %.0f   Poussée %.0f\nTemps %.2f   Meilleur --",
+			L"Giro %d/%d   #%d/%d\nHP %.0f   Spinta %.0f\nTempo %.2f   Migliore --",
+			L"Vuelta %d/%d   #%d/%d\nHP %.0f   Empuje %.0f\nTiempo %.2f   Mejor --",
+			L"랩 %d/%d   #%d/%d\nHP %.0f   추진 %.0f\n시간 %.2f   베스트 --",
+			L"圈 %d/%d   #%d/%d\nHP %.0f   推力 %.0f\n时间 %.2f   最佳 --",
+			L"لفة %d/%d   #%d/%d\nHP %.0f   دفع %.0f\nوقت %.2f   أفضل --",
+			L"Круг %d/%d   #%d/%d\nHP %.0f   Тяга %.0f\nВремя %.2f   Лучший --",
+			L"Runde %d/%d   #%d/%d\nHP %.0f   Schub %.0f\nZeit %.2f   Beste --",
+			L"Volta %d/%d   #%d/%d\nHP %.0f   Empuxo %.0f\nTempo %.2f   Melhor --",
+			L"Ronde %d/%d   #%d/%d\nHP %.0f   Stuw %.0f\nTijd %.2f   Beste --",
+			L"Okr. %d/%d   #%d/%d\nHP %.0f   Ciąg %.0f\nCzas %.2f   Najlep. --",
+			L"Tur %d/%d   #%d/%d\nHP %.0f   İtki %.0f\nSüre %.2f   En iyi --"),
 			min(m_lapsTarget, pl.lap+1), m_lapsTarget, pl.rank, m_craftN, pl.hp, pl.fuel, m_raceClock);
 	}
 	m_hudBakeText = buf;
@@ -7255,19 +7313,19 @@ void CSoft3DRaceDlg::RenderScene()
 				|| m_phase == PHASE_DEMO)) {
 			if (!m_view.m_srvItemLab) {
 				const wchar_t* labs[CS3rView::S3R_ITEMLAB_MAX] = {
-					LL14(L"テンポ↑", L"Tempo↑", L"Tempo↑", L"Tempo↑", L"Tempo↑", L"템포↑", L"速度↑", L"Tempo↑", L"Темп↑", L"Tempo↑", L"Tempo↑", L"Tempo↑", L"Tempo↑", L"Tempo↑"),
-					LL14(L"テンポ↓", L"Tempo↓", L"Tempo↓", L"Tempo↓", L"Tempo↓", L"템포↓", L"速度↓", L"Tempo↓", L"Темп↓", L"Tempo↓", L"Tempo↓", L"Tempo↓", L"Tempo↓", L"Tempo↓"),
-					LL14(L"ピッチ↑", L"Pitch↑", L"Hauteur↑", L"Pitch↑", L"Tono↑", L"피치↑", L"音高↑", L"Pitch↑", L"Высота↑", L"Ton↑", L"Tom↑", L"Toon↑", L"Wys.↑", L"Perde↑"),
-					LL14(L"ピッチ↓", L"Pitch↓", L"Hauteur↓", L"Pitch↓", L"Tono↓", L"피치↓", L"音高↓", L"Pitch↓", L"Высота↓", L"Ton↓", L"Tom↓", L"Toon↓", L"Wys.↓", L"Perde↓"),
-					LL14(L"次の曲", L"Next", L"Suivant", L"Succ.", L"Siguiente", L"다음", L"下一曲", L"Next", L"След.", L"Nächster", L"Próxima", L"Volgend", L"Nast.", L"Sonraki"),
-					LL14(L"前の曲", L"Prev", L"Préc.", L"Prec.", L"Anterior", L"이전", L"上一曲", L"Prev", L"Пред.", L"Vorher", L"Anterior", L"Vorig", L"Poprz.", L"Önceki"),
-					LL14(L"音量↑", L"Vol↑", L"Vol↑", L"Vol↑", L"Vol↑", L"볼륨↑", L"音量↑", L"Vol↑", L"Громк.↑", L"Laut↑", L"Vol↑", L"Vol↑", L"Głoś↑", L"Ses↑"),
-					LL14(L"音量↓", L"Vol↓", L"Vol↓", L"Vol↓", L"Vol↓", L"볼륨↓", L"音量↓", L"Vol↓", L"Громк.↓", L"Laut↓", L"Vol↓", L"Vol↓", L"Głoś↓", L"Ses↓"),
+					LL14(L"テンポ↑", L"Tempo↑", L"Tempo↑", L"Tempo↑", L"Tempo↑", L"템포↑", L"速度↑", L"إيقاع↑", L"Темп↑", L"Tempo↑", L"Tempo↑", L"Tempo↑", L"Tempo↑", L"Tempo↑"),
+					LL14(L"テンポ↓", L"Tempo↓", L"Tempo↓", L"Tempo↓", L"Tempo↓", L"템포↓", L"速度↓", L"إيقاع↓", L"Темп↓", L"Tempo↓", L"Tempo↓", L"Tempo↓", L"Tempo↓", L"Tempo↓"),
+					LL14(L"ピッチ↑", L"Pitch↑", L"Hauteur↑", L"Pitch↑", L"Tono↑", L"피치↑", L"音高↑", L"طبقة↑", L"Высота↑", L"Ton↑", L"Tom↑", L"Toon↑", L"Wys.↑", L"Perde↑"),
+					LL14(L"ピッチ↓", L"Pitch↓", L"Hauteur↓", L"Pitch↓", L"Tono↓", L"피치↓", L"音高↓", L"طبقة↓", L"Высота↓", L"Ton↓", L"Tom↓", L"Toon↓", L"Wys.↓", L"Perde↓"),
+					LL14(L"次の曲", L"Next", L"Suivant", L"Succ.", L"Siguiente", L"다음", L"下一曲", L"التالي", L"След.", L"Nächster", L"Próxima", L"Volgend", L"Nast.", L"Sonraki"),
+					LL14(L"前の曲", L"Prev", L"Préc.", L"Prec.", L"Anterior", L"이전", L"上一曲", L"السابق", L"Пред.", L"Vorher", L"Anterior", L"Vorig", L"Poprz.", L"Önceki"),
+					LL14(L"音量↑", L"Vol↑", L"Vol↑", L"Vol↑", L"Vol↑", L"볼륨↑", L"音量↑", L"صوت↑", L"Громк.↑", L"Laut↑", L"Vol↑", L"Vol↑", L"Głoś↑", L"Ses↑"),
+					LL14(L"音量↓", L"Vol↓", L"Vol↓", L"Vol↓", L"Vol↓", L"볼륨↓", L"音量↓", L"صوت↓", L"Громк.↓", L"Laut↓", L"Vol↓", L"Vol↓", L"Głoś↓", L"Ses↓"),
 					LL14(L"EQ", L"EQ", L"EQ", L"EQ", L"EQ", L"EQ", L"EQ", L"EQ", L"EQ", L"EQ", L"EQ", L"EQ", L"EQ", L"EQ"),
-					LL14(L"EQ平坦", L"EQ flat", L"EQ plat", L"EQ flat", L"EQ plano", L"EQ평탄", L"EQ平坦", L"EQ flat", L"EQ flat", L"EQ flach", L"EQ flat", L"EQ vlak", L"EQ płaski", L"EQ düz"),
-					LL14(L"リバーブ", L"Reverb", L"Réverb", L"Reverb", L"Reverb", L"리버브", L"混响", L"Reverb", L"Реверб", L"Hall", L"Reverb", L"Reverb", L"Pogłos", L"Reverb"),
-					LL14(L"クロスフェード", L"Crossfade", L"Fondu", L"Crossfade", L"Fundido", L"크로스페이드", L"交叉淡化", L"Xfade", L"Кроссфейд", L"Crossfade", L"Crossfade", L"Crossfade", L"Xfade", L"Xfade"),
-					LL14(L"ランダム", L"Random", L"Aléatoire", L"Casuale", L"Aleatorio", L"랜덤", L"随机", L"Random", L"Случ.", L"Zufall", L"Aleatório", L"Willekeurig", L"Losowo", L"Rastgele")
+					LL14(L"EQ平坦", L"EQ flat", L"EQ plat", L"EQ flat", L"EQ plano", L"EQ평탄", L"EQ平坦", L"EQ مسطح", L"EQ плоск.", L"EQ flach", L"EQ flat", L"EQ vlak", L"EQ płaski", L"EQ düz"),
+					LL14(L"リバーブ", L"Reverb", L"Réverb", L"Reverb", L"Reverb", L"리버브", L"混响", L"صدى", L"Реверб", L"Hall", L"Reverb", L"Reverb", L"Pogłos", L"Reverb"),
+					LL14(L"クロスフェード", L"Crossfade", L"Fondu", L"Crossfade", L"Fundido", L"크로스페이드", L"交叉淡化", L"تلاشي", L"Кроссфейд", L"Crossfade", L"Crossfade", L"Crossfade", L"Xfade", L"Xfade"),
+					LL14(L"ランダム", L"Random", L"Aléatoire", L"Casuale", L"Aleatorio", L"랜덤", L"随机", L"عشوائي", L"Случ.", L"Zufall", L"Aleatório", L"Willekeurig", L"Losowo", L"Rastgele")
 				};
 				m_view.BakeItemLabTexture(labs, CS3rView::S3R_ITEMLAB_MAX);
 			}
@@ -7403,19 +7461,19 @@ void CSoft3DRaceDlg::ShowContextMenu(CPoint screenPt)
 		itemSub->AddCommand(28, LL14(L"アイテムをすべてON", L"Enable all items", L"Activer tous les objets", L"Attiva tutti gli oggetti", L"Activar todos los objetos", L"아이템 모두 ON", L"全部道具开启", L"تفعيل كل العناصر", L"Включить все предметы", L"Alle Items ein", L"Ativar todos os itens", L"Alle items aan", L"Włącz wszystkie przedmioty", L"Tüm öğeleri aç"));
 		itemSub->AddCommand(29, LL14(L"アイテムをすべてOFF", L"Disable all items", L"Désactiver tous les objets", L"Disattiva tutti gli oggetti", L"Desactivar todos los objetos", L"아이템 모두 OFF", L"全部道具关闭", L"تعطيل كل العناصر", L"Выключить все предметы", L"Alle Items aus", L"Desativar todos os itens", L"Alle items uit", L"Wyłącz wszystkie przedmioty", L"Tüm öğeleri kapat"));
 		itemSub->AddSeparator();
-		itemSub->AddCheck(30, LL14(L"アイテム: テンポ↑", L"Item: tempo↑", L"Objet: tempo↑", L"Oggetto: tempo↑", L"Objeto: tempo↑", L"아이템: 템포↑", L"道具：速度↑", L"Item: tempo↑", L"Item: tempo↑", L"Item: Tempo↑", L"Item: tempo↑", L"Item: tempo↑", L"Przedmiot: tempo↑", L"Öğe: tempo↑"), (mask & ITEM_TEMPO) != 0);
-		itemSub->AddCheck(31, LL14(L"アイテム: テンポ↓", L"Item: tempo↓", L"Objet: tempo↓", L"Oggetto: tempo↓", L"Objeto: tempo↓", L"아이템: 템포↓", L"道具：速度↓", L"Item: tempo↓", L"Item: tempo↓", L"Item: Tempo↓", L"Item: tempo↓", L"Item: tempo↓", L"Przedmiot: tempo↓", L"Öğe: tempo↓"), (mask & ITEM_TEMPO_DN) != 0);
-		itemSub->AddCheck(32, LL14(L"アイテム: ピッチ↑", L"Item: pitch↑", L"Objet: pitch↑", L"Oggetto: pitch↑", L"Objeto: tono↑", L"아이템: 피치↑", L"道具：音高↑", L"Item: pitch↑", L"Item: pitch↑", L"Item: Ton↑", L"Item: tom↑", L"Item: toon↑", L"Przedmiot: wys↑", L"Öğe: perde↑"), (mask & ITEM_PITCH_UP) != 0);
-		itemSub->AddCheck(33, LL14(L"アイテム: ピッチ↓", L"Item: pitch↓", L"Objet: pitch↓", L"Oggetto: pitch↓", L"Objeto: tono↓", L"아이템: 피치↓", L"道具：音高↓", L"Item: pitch↓", L"Item: pitch↓", L"Item: Ton↓", L"Item: tom↓", L"Item: toon↓", L"Przedmiot: wys↓", L"Öğe: perde↓"), (mask & ITEM_PITCH_DN) != 0);
-		itemSub->AddCheck(34, LL14(L"アイテム: 次の曲", L"Item: next", L"Objet: suivant", L"Oggetto: succ", L"Objeto: siguiente", L"아이템: 다음", L"道具：下一曲", L"Item: next", L"Item: next", L"Item: nächster", L"Item: próxima", L"Item: volgend", L"Przedmiot: nast", L"Öğe: sonraki"), (mask & ITEM_NEXT) != 0);
-		itemSub->AddCheck(35, LL14(L"アイテム: 前の曲", L"Item: prev", L"Objet: préc", L"Oggetto: prec", L"Objeto: anterior", L"아이템: 이전", L"道具：上一曲", L"Item: prev", L"Item: prev", L"Item: vorheriger", L"Item: anterior", L"Item: vorig", L"Przedmiot: poprz", L"Öğe: önceki"), (mask & ITEM_PREV) != 0);
-		itemSub->AddCheck(36, LL14(L"アイテム: 音量↑", L"Item: vol↑", L"Objet: vol↑", L"Oggetto: vol↑", L"Objeto: vol↑", L"아이템: 볼륨↑", L"道具：音量↑", L"Item: vol↑", L"Item: vol↑", L"Item: Laut↑", L"Item: vol↑", L"Item: vol↑", L"Przedmiot: głoś↑", L"Öğe: ses↑"), (mask & ITEM_VOL_UP) != 0);
-		itemSub->AddCheck(37, LL14(L"アイテム: 音量↓", L"Item: vol↓", L"Objet: vol↓", L"Oggetto: vol↓", L"Objeto: vol↓", L"아이템: 볼륨↓", L"道具：音量↓", L"Item: vol↓", L"Item: vol↓", L"Item: Laut↓", L"Item: vol↓", L"Item: vol↓", L"Przedmiot: głoś↓", L"Öğe: ses↓"), (mask & ITEM_VOL_DN) != 0);
-		itemSub->AddCheck(38, LL14(L"アイテム: EQ", L"Item: EQ", L"Objet: EQ", L"Oggetto: EQ", L"Objeto: EQ", L"아이템: EQ", L"道具：EQ", L"Item: EQ", L"Item: EQ", L"Item: EQ", L"Item: EQ", L"Item: EQ", L"Przedmiot: EQ", L"Öğe: EQ"), (mask & ITEM_EQ) != 0);
-		itemSub->AddCheck(39, LL14(L"アイテム: EQ平坦", L"Item: EQ flat", L"Objet: EQ plat", L"Oggetto: EQ flat", L"Objeto: EQ plano", L"아이템: EQ평탄", L"道具：EQ平坦", L"Item: EQ flat", L"Item: EQ flat", L"Item: EQ flach", L"Item: EQ flat", L"Item: EQ flat", L"Przedmiot: EQ flat", L"Öğe: EQ düz"), (mask & ITEM_EQ_FLAT) != 0);
-		itemSub->AddCheck(40, LL14(L"アイテム: リバーブ", L"Item: reverb", L"Objet: réverb", L"Oggetto: reverb", L"Objeto: reverb", L"아이템: 리버브", L"道具：混响", L"Item: reverb", L"Item: reverb", L"Item: Hall", L"Item: reverb", L"Item: reverb", L"Przedmiot: pogłos", L"Öğe: reverb"), (mask & ITEM_REVERB) != 0);
-		itemSub->AddCheck(41, LL14(L"アイテム: クロスフェード", L"Item: crossfade", L"Objet: fondu", L"Oggetto: crossfade", L"Objeto: fundido", L"아이템: 크로스페이드", L"道具：交叉淡化", L"Item: xfade", L"Item: xfade", L"Item: Crossfade", L"Item: xfade", L"Item: xfade", L"Przedmiot: xfade", L"Öğe: xfade"), (mask & ITEM_XFADE) != 0);
-		itemSub->AddCheck(42, LL14(L"アイテム: ランダム", L"Item: random", L"Objet: aléatoire", L"Oggetto: casuale", L"Objeto: aleatorio", L"아이템: 랜덤", L"道具：随机", L"Item: random", L"Item: random", L"Item: Zufall", L"Item: aleatório", L"Item: willekeurig", L"Przedmiot: losowo", L"Öğe: rastgele"), (mask & ITEM_RANDOM) != 0);
+		itemSub->AddCheck(30, LL14(L"アイテム: テンポ↑", L"Item: tempo↑", L"Objet: tempo↑", L"Oggetto: tempo↑", L"Objeto: tempo↑", L"아이템: 템포↑", L"道具：速度↑", L"عنصر: إيقاع↑", L"Предмет: темп↑", L"Item: Tempo↑", L"Item: tempo↑", L"Item: tempo↑", L"Przedmiot: tempo↑", L"Öğe: tempo↑"), (mask & ITEM_TEMPO) != 0);
+		itemSub->AddCheck(31, LL14(L"アイテム: テンポ↓", L"Item: tempo↓", L"Objet: tempo↓", L"Oggetto: tempo↓", L"Objeto: tempo↓", L"아이템: 템포↓", L"道具：速度↓", L"عنصر: إيقاع↓", L"Предмет: темп↓", L"Item: Tempo↓", L"Item: tempo↓", L"Item: tempo↓", L"Przedmiot: tempo↓", L"Öğe: tempo↓"), (mask & ITEM_TEMPO_DN) != 0);
+		itemSub->AddCheck(32, LL14(L"アイテム: ピッチ↑", L"Item: pitch↑", L"Objet: pitch↑", L"Oggetto: pitch↑", L"Objeto: tono↑", L"아이템: 피치↑", L"道具：音高↑", L"عنصر: طبقة↑", L"Предмет: высота↑", L"Item: Ton↑", L"Item: tom↑", L"Item: toon↑", L"Przedmiot: wys↑", L"Öğe: perde↑"), (mask & ITEM_PITCH_UP) != 0);
+		itemSub->AddCheck(33, LL14(L"アイテム: ピッチ↓", L"Item: pitch↓", L"Objet: pitch↓", L"Oggetto: pitch↓", L"Objeto: tono↓", L"아이템: 피치↓", L"道具：音高↓", L"عنصر: طبقة↓", L"Предмет: высота↓", L"Item: Ton↓", L"Item: tom↓", L"Item: toon↓", L"Przedmiot: wys↓", L"Öğe: perde↓"), (mask & ITEM_PITCH_DN) != 0);
+		itemSub->AddCheck(34, LL14(L"アイテム: 次の曲", L"Item: next", L"Objet: suivant", L"Oggetto: succ", L"Objeto: siguiente", L"아이템: 다음", L"道具：下一曲", L"عنصر: التالي", L"Предмет: след.", L"Item: nächster", L"Item: próxima", L"Item: volgend", L"Przedmiot: nast", L"Öğe: sonraki"), (mask & ITEM_NEXT) != 0);
+		itemSub->AddCheck(35, LL14(L"アイテム: 前の曲", L"Item: prev", L"Objet: préc", L"Oggetto: prec", L"Objeto: anterior", L"아이템: 이전", L"道具：上一曲", L"عنصر: السابق", L"Предмет: пред.", L"Item: vorheriger", L"Item: anterior", L"Item: vorig", L"Przedmiot: poprz", L"Öğe: önceki"), (mask & ITEM_PREV) != 0);
+		itemSub->AddCheck(36, LL14(L"アイテム: 音量↑", L"Item: vol↑", L"Objet: vol↑", L"Oggetto: vol↑", L"Objeto: vol↑", L"아이템: 볼륨↑", L"道具：音量↑", L"عنصر: صوت↑", L"Предмет: громк↑", L"Item: Laut↑", L"Item: vol↑", L"Item: vol↑", L"Przedmiot: głoś↑", L"Öğe: ses↑"), (mask & ITEM_VOL_UP) != 0);
+		itemSub->AddCheck(37, LL14(L"アイテム: 音量↓", L"Item: vol↓", L"Objet: vol↓", L"Oggetto: vol↓", L"Objeto: vol↓", L"아이템: 볼륨↓", L"道具：音量↓", L"عنصر: صوت↓", L"Предмет: громк↓", L"Item: Laut↓", L"Item: vol↓", L"Item: vol↓", L"Przedmiot: głoś↓", L"Öğe: ses↓"), (mask & ITEM_VOL_DN) != 0);
+		itemSub->AddCheck(38, LL14(L"アイテム: EQ", L"Item: EQ", L"Objet: EQ", L"Oggetto: EQ", L"Objeto: EQ", L"아이템: EQ", L"道具：EQ", L"عنصر: EQ", L"Предмет: EQ", L"Item: EQ", L"Item: EQ", L"Item: EQ", L"Przedmiot: EQ", L"Öğe: EQ"), (mask & ITEM_EQ) != 0);
+		itemSub->AddCheck(39, LL14(L"アイテム: EQ平坦", L"Item: EQ flat", L"Objet: EQ plat", L"Oggetto: EQ flat", L"Objeto: EQ plano", L"아이템: EQ평탄", L"道具：EQ平坦", L"عنصر: EQ مسطح", L"Предмет: EQ плоск.", L"Item: EQ flach", L"Item: EQ flat", L"Item: EQ flat", L"Przedmiot: EQ flat", L"Öğe: EQ düz"), (mask & ITEM_EQ_FLAT) != 0);
+		itemSub->AddCheck(40, LL14(L"アイテム: リバーブ", L"Item: reverb", L"Objet: réverb", L"Oggetto: reverb", L"Objeto: reverb", L"아이템: 리버브", L"道具：混响", L"عنصر: صدى", L"Предмет: реверб", L"Item: Hall", L"Item: reverb", L"Item: reverb", L"Przedmiot: pogłos", L"Öğe: reverb"), (mask & ITEM_REVERB) != 0);
+		itemSub->AddCheck(41, LL14(L"アイテム: クロスフェード", L"Item: crossfade", L"Objet: fondu", L"Oggetto: crossfade", L"Objeto: fundido", L"아이템: 크로스페이드", L"道具：交叉淡化", L"عنصر: تلاشي", L"Предмет: кроссфейд", L"Item: Crossfade", L"Item: xfade", L"Item: xfade", L"Przedmiot: xfade", L"Öğe: xfade"), (mask & ITEM_XFADE) != 0);
+		itemSub->AddCheck(42, LL14(L"アイテム: ランダム", L"Item: random", L"Objet: aléatoire", L"Oggetto: casuale", L"Objeto: aleatorio", L"아이템: 랜덤", L"道具：随机", L"عنصر: عشوائي", L"Предмет: случ.", L"Item: Zufall", L"Item: aleatório", L"Item: willekeurig", L"Przedmiot: losowo", L"Öğe: rastgele"), (mask & ITEM_RANDOM) != 0);
 	}
 	menu.AddSeparator();
 	menu.AddCommand(45, LL14(L"テンポ／ピッチを開いた時に戻す", L"Reset tempo/pitch to open values", L"Remettre tempo/hauteur", L"Ripristina tempo/pitch", L"Restablecer tempo/tono", L"템포/피치 복원", L"恢复速度/音高", L"إعادة الإيقاع", L"Вернуть темп", L"Tempo zurück", L"Restaurar tempo", L"Tempo herstellen", L"Przywróć tempo", L"Tempo sıfırla"));

@@ -1,4 +1,4 @@
-/*
+﻿/*
  * mem/dmav30.h -- HOOTRIP stub
  *
  * Mirrors np2kai/mem/dmav30.h: declares dmav30(), called from v30patch.c's

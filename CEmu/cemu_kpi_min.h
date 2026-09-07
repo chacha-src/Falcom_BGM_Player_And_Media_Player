@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include <windows.h>
 
 /* S98 デコーダ内部専用（kpi_decoder.h の KPI_MEDIAINFO と衝突しない名前） */

@@ -1,4 +1,4 @@
-#include "s98types.h"
+﻿#include "s98types.h"
 
 enum {
 	S98DEVICETYPE_PSG_YM  = 1,

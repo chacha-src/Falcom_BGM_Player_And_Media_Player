@@ -1,4 +1,4 @@
-
+﻿
 static Uint32 DivFix(Uint32 p1, Uint32 p2, Uint32 fix)
 {
 	Uint32 ret;

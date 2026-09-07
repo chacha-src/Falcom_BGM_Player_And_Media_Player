@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 /* Shared OPNA/OPN2/MSX register shadow + dump writer for KPI FM monitor. */
 #include "sasami_fmmon.h"
 #include "fmmon_write.h"
@@ -14,6 +14,10 @@ void FmMonShadowAddSamples(uint32_t n);
 /* Platform + chip base label for FM monitor header (e.g. "PC-88","OPNA").
    Flush appends +EX/+ADPCM when applicable. Stored in dump.titleSjis. */
 void FmMonShadowSetIdentity(const char* platform, const char* chip);
+/* Read back what the monitor will label the chip as, so a probe can audit the
+   displayed sound mode against the board that was actually wired up. */
+void FmMonShadowGetIdentity(char* platform, unsigned platformLen,
+	char* chip, unsigned chipLen);
 /* 1=OPNA(6ch+ADPCM)  0=OPN(3ch)  2=YM2610/OPNB(4ch+SSG+ADPCM-A/B)  -1=non-OPN(A). */
 void FmMonShadowSetOpnaLayout(int layout);
 /* addr: 0x000-0x1FF (port1 = 0x100|reg). */
@@ -46,6 +50,11 @@ void FmMonShadowApplyK054539Reg(unsigned ofs, unsigned data8);
 
 /* MSX KSS: AY clock (Hz). Default OPNA-style until set. */
 void FmMonShadowSetSsgClock(unsigned clockHz);
+/* Read back the SSG bank ($00-$0F) and the gate/note the monitor derives from
+   it. Lets a probe check that a hybrid board's SSG rows survive the other
+   chip's register snapshots. */
+void FmMonShadowDebugSsg(unsigned char regs16[16], unsigned char ssgOn[3],
+	unsigned char ssgMidi[3]);
 /* MSX profile: dumpFlags MSX + deviceMask in pad6[0]. */
 void FmMonShadowSetMsxDevices(unsigned deviceMask);
 /* YM2413/FMPAC: 64 regs. Maps ch0-5→FM, ch6-8→EX. */
@@ -77,6 +86,8 @@ void FmMonShadowApplyC352Reg(unsigned ofs, unsigned data16);
 void FmMonShadowApplySegaPcmMem(unsigned addr, unsigned data8);
 void FmMonShadowApplyOki6295(unsigned data8);
 void FmMonShadowApplyGa20Reg(unsigned ofs, unsigned data8);
+/* YMW258 MultiPCM: chipId 0/1, port 0=data 1=slot 2=reg. */
+void FmMonShadowApplyMultiPcm(int chipId, unsigned port, unsigned data8);
 
 #ifdef __cplusplus
 }

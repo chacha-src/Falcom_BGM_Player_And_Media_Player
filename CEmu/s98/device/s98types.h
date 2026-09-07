@@ -1,4 +1,4 @@
-#ifndef S98TYPES_H__
+﻿#ifndef S98TYPES_H__
 #define S98TYPES_H__
 
 #if defined(_MSC_VER)

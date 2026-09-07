@@ -1,4 +1,4 @@
-﻿# Third-party credits
+# Third-party credits
 
 This project incorporates or is derived from the following open-source components.
 When redistributing, retain the licenses of the respective authors.

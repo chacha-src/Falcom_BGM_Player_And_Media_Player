@@ -1,4 +1,4 @@
-﻿# Third-party notices
+# Third-party notices
 
 This repository is intended for public distribution. Redistribution must
 comply with the licenses of embedded components listed in [CREDITS.md](CREDITS.md).

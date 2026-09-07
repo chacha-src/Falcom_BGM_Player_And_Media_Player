@@ -1,4 +1,4 @@
-﻿#include "StdAfx.h"
+#include "StdAfx.h"
 #include "cemu_x68k_dos.h"
 #include "cemu_hard_x68k.h"
 extern "C" {

@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 // CEmu — hoot アーカイブ互換サウンドエミュレーション (exe 内完結、オープンソース・期限なし)
 // mode/sub 帯: MODE_CEMU_BASE (-1000) から CPU / チップ / ドライバを割当
 
@@ -37,6 +37,21 @@ enum {
 	CEMU_CHIP_IREM_DAC = 23,
 	CEMU_CHIP_C140 = 24,
 	CEMU_CHIP_C30 = 25, /* Namco CUS30 / 15XX wavetable */
+	/* Chips the arcade catalog names but that had no id, so the monitor could
+	   never label them and they all fell through to a generic OPM. */
+	CEMU_CHIP_MSM5205 = 26,
+	CEMU_CHIP_MSM5232 = 27,
+	CEMU_CHIP_UPD7759 = 28,
+	CEMU_CHIP_VLM5030 = 29,
+	CEMU_CHIP_K007232 = 30,
+	CEMU_CHIP_K051649 = 31,
+	CEMU_CHIP_K005289 = 32,
+	CEMU_CHIP_MULTIPCM = 33,
+	CEMU_CHIP_SCSP = 34,
+	CEMU_CHIP_RF5C400 = 35,
+	CEMU_CHIP_X1_010 = 36,
+	CEMU_CHIP_SAA1099 = 37,
+	CEMU_CHIP_YMZ280B = 38,
 	CEMU_CHIP_MAX = 99
 };
 
@@ -107,6 +122,12 @@ struct CEmuGameEntry {
 	int cpuId;
 	int chipIds[8];
 	int chipCount;
+	/* Chips the catalog spells out in <name>, e.g. "Riot (YM2151+MSM6295)".
+	   Most arcade entries carry no <chip> tag, so this text is the only
+	   record of what the board really has. Kept separate from chipIds so it
+	   can label the monitor without disturbing board resolution. */
+	int docChipIds[12];
+	int docChipCount;
 };
 
 inline int CEmuModeFromChip(int chipId)

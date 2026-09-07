@@ -1,4 +1,4 @@
-/*
+﻿/*
  * pccore.h -- HOOTRIP stub
  *
  * The i286c core #includes <pccore.h> but, with SUPPORT_ASYNC_CPU undefined,

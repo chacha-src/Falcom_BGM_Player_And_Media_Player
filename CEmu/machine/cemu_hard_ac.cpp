@@ -28,6 +28,8 @@ extern "C" {
 #include "../chip/cemu_chip_sn76489.h"
 #include "../chip/cemu_chip_ay.h"
 #include "../chip/cemu_chip_opl.h"
+#include "../chip/cemu_chip_x1_010.h"
+#include "../chip/cemu_chip_ymz280b.h"
 #include "../chip/cemu_chip_msm5232.h"
 #include "../chip/cemu_chip_ga20.h"
 #include "../chip/cemu_chip_irem_dac.h"
@@ -36,6 +38,8 @@ extern "C" {
 #include "../chip/cemu_chip_rf5c400.h"
 #include "cemu_kabuki.h"
 #include "../chip/cemu_chip_multipcm.h"
+#include "../chip/cemu_chip_ymz280b.h"
+#include "../chip/cemu_chip_x1_010.h"
 #include "../s98/device/emu2413/emu2413.h"
 #define BLARGG_LITTLE_ENDIAN 1
 #include "../z80/Ay_Cpu.h"
@@ -107,6 +111,8 @@ CHardAc::CHardAc()
 	, konamiPcmAddr_(0xe800u)
 	, konamiBankAddr_(0)
 	, konamiPcmWindow_(0x40u)
+	, konamiPcm2Addr_(0u)
+	, konamiSoundCtrl_(0)
 	, konamiSh1NmiArm_(0)
 	, ms1Rom_(NULL)
 	, ms1RomSize_(0)
@@ -395,11 +401,31 @@ static int CEmuAcIsTaitoOpmSub(const char* sub)
 static int CEmuAcIsTaitoYm2203Sub(const char* sub)
 {
 	if (!sub || !sub[0]) return 0;
+	/* Taito's 8-bit boards (Z80 sound CPU) are YM2203 sets; only the later
+	   16-bit ones moved to the YM2151. Driving a 2203 rip through the OPM
+	   register map writes song data into OPM control regs, which is why these
+	   counted YM writes yet rendered silence. */
 	return (_stricmp(sub, "masterw") == 0
 		|| _stricmp(sub, "viofight") == 0
 		|| _stricmp(sub, "tnzs") == 0
 		|| _stricmp(sub, "chukatai") == 0
-		|| _stricmp(sub, "extrmatn") == 0) ? 1 : 0;
+		|| _stricmp(sub, "extrmatn") == 0
+		|| _stricmp(sub, "palamed") == 0
+		|| _stricmp(sub, "cachat") == 0
+		|| _stricmp(sub, "kurikint") == 0
+		|| _stricmp(sub, "plumppop") == 0
+		|| _stricmp(sub, "kikikai") == 0
+		|| _stricmp(sub, "bubblebobble") == 0
+		|| _stricmp(sub, "flipull") == 0
+		|| _stricmp(sub, "arkanoid") == 0
+		|| _stricmp(sub, "arkanoid2") == 0
+		|| _stricmp(sub, "kicknrun") == 0
+		|| _stricmp(sub, "ribl") == 0
+		|| _stricmp(sub, "momoko") == 0
+		|| _stricmp(sub, "masao") == 0
+		|| _stricmp(sub, "gladiatr") == 0
+		|| _stricmp(sub, "horshoes") == 0
+		|| _stricmp(sub, "ashnojoe") == 0) ? 1 : 0;
 }
 
 /* Konami Z80 + YM2151 + K007232 (PCM stubbed; FM is the BGM path).
@@ -407,11 +433,343 @@ static int CEmuAcIsTaitoYm2203Sub(const char* sub)
 static int CEmuAcIsKonamiK7232Sub(const char* sub)
 {
 	if (!sub || !sub[0]) return 0;
-	return (_stricmp(sub, "scontra") == 0
-		|| _stricmp(sub, "thundercross") == 0
-		|| _stricmp(sub, "crimfght") == 0
-		|| _stricmp(sub, "twin16") == 0
-		|| _stricmp(sub, "salamander") == 0) ? 1 : 0;
+	/* Konami "Z80 + YM2151 (+ K007232 PCM)" sound sections. The catalog names
+	   one driver type per game, so the same board reappears under a dozen
+	   labels; without these aliases they resolved to BOARD_UNKNOWN and played
+	   nothing at all. K007232 samples are still unsynthesized, so these come
+	   up as YM2151-only BGM rather than full mixes. */
+	static const char* const kSubs[] = {
+		"scontra", "thundercross", "crimfght", "twin16", "salamander",
+		"ajax", "gradius3", "chqflag", "88games", "bottom9", "flakattack",
+		"blkpanther", "bladestl", "fastlane", "hotchase", "combh",
+		"rollergames", "bigprowr", "crusherm", "combatsc", "contra",
+		"ddribble", "jackal", "gberet", "jailbrek", "hyperspt",
+		"labyrunr", "battlnts", "aliens2"
+	};
+	for (unsigned i = 0; i < sizeof(kSubs) / sizeof(kSubs[0]); i++)
+		if (_stricmp(sub, kSubs[i]) == 0) return 1;
+	return 0;
+}
+
+/* Seta/Allumer and Cave run the game's own main program, so it only reaches
+   its music code if the chip, work RAM and IRQ-cause registers decode exactly
+   where the real board puts them - and no two of these games agree. Each row
+   is the address_map from MAME (seta.cpp, seta2.cpp, atlus/cave.cpp).
+
+   kind 1 = X1-010 RAM window, kind 2 = Cave YMZ280B register/data pair. */
+struct CEmuAcM68kPcmSpec {
+	const char* sub;
+	int kind;
+	unsigned chipAddr;
+	unsigned chipSpan;
+	unsigned ramAddr;
+	unsigned ramSize;
+	unsigned irqAddr; /* Cave irq_cause_r window, 0 when the board has none */
+};
+
+static const CEmuAcM68kPcmSpec kAcM68kPcmSpecs[] = {
+	/* --- Seta / Allumer, X1-010 --- */
+	{ "blandia",  1, 0xc00000u, 0x4000u, 0x200000u, 0x10000u,  0 },
+	{ "daioh",    1, 0xc00000u, 0x4000u, 0x100000u, 0x10000u,  0 },
+	{ "drgnunit", 1, 0x100000u, 0x4000u, 0xf00000u, 0x10000u,  0 },
+	{ "madshark", 1, 0xd00000u, 0x4000u, 0x200000u, 0x10000u,  0 },
+	{ "atehate",  1, 0x100000u, 0x4000u, 0x900000u, 0x100000u, 0 },
+	{ "magspeed", 1, 0xd00000u, 0x4000u, 0x200000u, 0x10000u,  0 },
+	/* seta2 sets all agree on B00000. */
+	{ "grdians",  1, 0xb00000u, 0x4000u, 0x200000u, 0x10000u,  0 },
+	{ "myangel",  1, 0xb00000u, 0x4000u, 0x200000u, 0x10000u,  0 },
+	{ "myangel2", 1, 0xb00000u, 0x4000u, 0x200000u, 0x10000u,  0 },
+	/* --- Cave, YMZ280B --- */
+	{ "ddonpach", 2, 0x300000u, 4u, 0x100000u, 0x10000u, 0x800000u },
+	{ "uopoko",   2, 0x300000u, 4u, 0x100000u, 0x10000u, 0x600000u },
+	{ "guwange",  2, 0x800000u, 4u, 0x200000u, 0x10000u, 0x300000u },
+	{ "korokoro", 2, 0x240000u, 4u, 0x300000u, 0x10000u, 0x1c0000u }
+};
+
+static const CEmuAcM68kPcmSpec* CEmuAcFindM68kPcmSpec(const char* sub)
+{
+	if (!sub || !sub[0]) return NULL;
+	for (unsigned i = 0; i < _countof(kAcM68kPcmSpecs); i++) {
+		if (_stricmp(sub, kAcM68kPcmSpecs[i].sub) == 0)
+			return &kAcM68kPcmSpecs[i];
+	}
+	return NULL;
+}
+
+/* Some sets on the TECMO16 map socket a YM3812 where the Toaplan and Cave
+   sets put a YM2151. The catalog names the chips per game, and it disagrees
+   with the driver family: tecmo16 proper (riot/ginkun/fstarfrc) is
+   "YM2151+MSM6295", while rygar and tbowl are "YM3812+MSM5205". */
+static int CEmuAcIsTecmoOplSub(const char* sub)
+{
+	if (!sub || !sub[0]) return 0;
+	return (_stricmp(sub, "tbowl") == 0
+		|| _stricmp(sub, "spbactn") == 0
+		|| _stricmp(sub, "rygar") == 0) ? 1 : 0;
+}
+
+/* ------------------------------------------------------------------------
+   Driver-type alias table.
+
+   The catalog names one <driver type> per game, so a board that is already
+   emulated reappears under dozens of labels and every one of them resolved
+   to BOARD_UNKNOWN, i.e. dead silence. Each entry below routes a type to the
+   emulated board whose *sound section* matches it in MAME (sound CPU + FM/PSG
+   chips + latch style); the video hardware is irrelevant here.
+
+   This table is consulted only after the main chain returns UNKNOWN, so it
+   can never take a type away from a board that already handles it.
+
+   Types whose sound section needs a chip core CEmu does not have yet are
+   deliberately absent: Seta X1-010 (blandia/daioh/grdians/metafox/myangel/
+   atehate/stg/daikaiju/wingforc/madshark), Cave YMZ280B (ddonpach/guwange/
+   uopoko/korokoro), Taito F3 ES5505 (asurabld) and the Sega UFO/Print Club
+   sets. Mapping those anywhere would only trade silence for noise.
+   ------------------------------------------------------------------------ */
+struct CEmuAcAliasEntry {
+	const char* sub;
+	CEmuAcBoard board;
+};
+
+static const CEmuAcAliasEntry kAcAliases[] = {
+	/* --- Seta / Allumer: main 68000 + X1-010 RAM window at B00000 --- */
+	{ "blandia",    CEMU_AC_BOARD_M68K_PCM },
+	{ "daioh",      CEMU_AC_BOARD_M68K_PCM },
+	{ "drgnunit",   CEMU_AC_BOARD_M68K_PCM },
+	{ "metafox",    CEMU_AC_BOARD_M68K_PCM },
+	{ "madshark",   CEMU_AC_BOARD_M68K_PCM },
+	{ "wingforc",   CEMU_AC_BOARD_M68K_PCM },
+	{ "atehate",    CEMU_AC_BOARD_M68K_PCM },
+	{ "stg",        CEMU_AC_BOARD_M68K_PCM },
+	{ "grdians",    CEMU_AC_BOARD_M68K_PCM },
+	{ "myangel",    CEMU_AC_BOARD_M68K_PCM },
+	{ "myangel2",   CEMU_AC_BOARD_M68K_PCM },
+	{ "magspeed",   CEMU_AC_BOARD_M68K_PCM },
+	/* --- Cave: main 68000 + YMZ280B port pair at 300000 --- */
+	{ "ddonpach",   CEMU_AC_BOARD_M68K_PCM },
+	{ "guwange",    CEMU_AC_BOARD_M68K_PCM },
+	{ "uopoko",     CEMU_AC_BOARD_M68K_PCM },
+	{ "korokoro",   CEMU_AC_BOARD_M68K_PCM },
+	/* --- Konami: Z80 + 2x AY (timeplt sound board) --- */
+	{ "megazone",   CEMU_AC_BOARD_KONAMI_TIMEPLT },
+	{ "rocnrope",   CEMU_AC_BOARD_KONAMI_TIMEPLT },
+	{ "ironhors",   CEMU_AC_BOARD_KONAMI_TIMEPLT },
+	{ "scotrsht",   CEMU_AC_BOARD_KONAMI_TIMEPLT },
+	/* --- Konami: SN76489-based classics (System 1 sound section) --- */
+	{ "mikie",      CEMU_AC_BOARD_SEGA_SYS1 },
+	{ "shaolins",   CEMU_AC_BOARD_SEGA_SYS1 },
+	{ "kontest",    CEMU_AC_BOARD_SEGA_SYS1 },
+	{ "trackfld",   CEMU_AC_BOARD_SEGA_SYS1 },
+	{ "yiear",      CEMU_AC_BOARD_SEGA_SYS1 },
+	{ "sbasketb",   CEMU_AC_BOARD_SEGA_SYS1 },
+	{ "mrgoemon",   CEMU_AC_BOARD_SEGA_SYS1 },
+	{ "lomakai",    CEMU_AC_BOARD_SEGA_SYS1 },
+	/* --- Konami: Z80 + YM2151 (+ K007232) --- */
+	{ "mainevt",    CEMU_AC_BOARD_KONAMI_K7232 },
+	{ "tmnt",       CEMU_AC_BOARD_KONAMI_K7232 },
+	{ "hexion",     CEMU_AC_BOARD_KONAMI_K7232 },
+	{ "rocknrage",  CEMU_AC_BOARD_KONAMI_K7232 },
+	{ "weclemans",  CEMU_AC_BOARD_KONAMI_K7232 },
+	{ "gyruss",     CEMU_AC_BOARD_KONAMI_K7232 },
+	{ "hustler",    CEMU_AC_BOARD_KONAMI_SCRAMBLE },
+	/* --- Konami: Z80 + YM3812 (hcastle sound board) --- */
+	{ "spy",        CEMU_AC_BOARD_KONAMI_HCASTLE },
+	/* --- Konami: Z80 + YM2151 + K053260 --- */
+	{ "rollerg",    CEMU_AC_BOARD_KONAMI_PCM },
+	{ "surpatk",    CEMU_AC_BOARD_KONAMI_PCM },
+	{ "overdrive",  CEMU_AC_BOARD_KONAMI_PCM },
+	{ "ultraman",   CEMU_AC_BOARD_KONAMI_PCM },
+	/* --- Konami: 68000 + dual K054539 + K056800 (System GX family) --- */
+	{ "zr107",      CEMU_AC_BOARD_KONAMI_GX },
+	{ "polycomm",   CEMU_AC_BOARD_KONAMI_GX },
+
+	/* --- Taito: Z80 + YM2151 or YM2203 --- */
+	{ "arkanoid",   CEMU_AC_BOARD_TAITO_OPM },
+	{ "arkanoid2",  CEMU_AC_BOARD_TAITO_OPM },
+	{ "bubblebobble", CEMU_AC_BOARD_TAITO_OPM },
+	{ "flipull",    CEMU_AC_BOARD_TAITO_OPM },
+	{ "darius",     CEMU_AC_BOARD_TAITO_OPM },
+	{ "mlanding",   CEMU_AC_BOARD_TAITO_OPM },
+	{ "kicknrun",   CEMU_AC_BOARD_TAITO_OPM },
+	{ "plumppop",   CEMU_AC_BOARD_TAITO_OPM },
+	{ "kurikint",   CEMU_AC_BOARD_TAITO_OPM },
+	{ "kikikai",    CEMU_AC_BOARD_TAITO_OPM },
+	{ "ribl",       CEMU_AC_BOARD_TAITO_OPM },
+	{ "palamed",    CEMU_AC_BOARD_TAITO_OPM },
+	{ "cachat",     CEMU_AC_BOARD_TAITO_OPM },
+	{ "horshoes",   CEMU_AC_BOARD_TAITO_OPM },
+	{ "gladiatr",   CEMU_AC_BOARD_TAITO_OPM },
+	{ "volfied",    CEMU_AC_BOARD_TAITO_OPM },
+	{ "ashnojoe",   CEMU_AC_BOARD_TAITO_OPM },
+	{ "momoko",     CEMU_AC_BOARD_TAITO_OPM },
+	{ "masao",      CEMU_AC_BOARD_TAITO_OPM },
+	{ "bionicc",    CEMU_AC_BOARD_TAITO_OPM },
+	{ "lastduel",   CEMU_AC_BOARD_TAITO_OPM },
+	{ "madgear",    CEMU_AC_BOARD_TAITO_OPM },
+	{ "sf1",        CEMU_AC_BOARD_TAITO_OPM },
+	{ "2mindril",   CEMU_AC_BOARD_TAITO_OPM },
+	/* --- Taito: Z80 + YM2610 --- */
+	{ "wits",       CEMU_AC_BOARD_TAITO_YM2610 },
+	{ "insectx",    CEMU_AC_BOARD_TAITO_YM2610 },
+	{ "xsystem",    CEMU_AC_BOARD_TAITO_YM2610 },
+	{ "godzilla",   CEMU_AC_BOARD_TAITO_YM2610 },
+	{ "enmadaio",   CEMU_AC_BOARD_TAITO_YM2610 },
+	/* --- Z80 + AY + MSM5232 (flstory sound board) --- */
+	{ "lsasquad",   CEMU_AC_BOARD_FLSTORY },
+	{ "msisaac",    CEMU_AC_BOARD_FLSTORY },
+	{ "kage",       CEMU_AC_BOARD_FLSTORY },
+	{ "equites",    CEMU_AC_BOARD_FLSTORY },
+	/* --- Z80 + multiple AY-3-8910 --- */
+	{ "chaknpop",   CEMU_AC_BOARD_TAITO_SJ },
+	{ "retofinv",   CEMU_AC_BOARD_TAITO_SJ },
+	{ "pbaction",   CEMU_AC_BOARD_TAITO_SJ },
+	{ "solomon",    CEMU_AC_BOARD_TAITO_SJ },
+	{ "1942",       CEMU_AC_BOARD_TAITO_SJ },
+	{ "sonson",     CEMU_AC_BOARD_TAITO_SJ },
+	{ "sidearms",   CEMU_AC_BOARD_TAITO_SJ },
+	{ "exerizer",   CEMU_AC_BOARD_TAITO_SJ },
+	{ "fcombat",    CEMU_AC_BOARD_TAITO_SJ },
+	{ "ikki",       CEMU_AC_BOARD_TAITO_SJ },
+	{ "tubep",      CEMU_AC_BOARD_TAITO_SJ },
+	{ "btime",      CEMU_AC_BOARD_TAITO_SJ },
+	{ "bombjack",   CEMU_AC_BOARD_TAITO_SJ },
+	{ "popeye",     CEMU_AC_BOARD_TAITO_SJ },
+	{ "mrdo",       CEMU_AC_BOARD_TAITO_SJ },
+	{ "bankp",      CEMU_AC_BOARD_TAITO_SJ },
+	{ "disco",      CEMU_AC_BOARD_TAITO_SJ },
+	{ "swimmer",    CEMU_AC_BOARD_TAITO_SJ },
+	{ "magmax",     CEMU_AC_BOARD_TAITO_SJ },
+
+	/* --- Tecmo: Z80 + YM3812 pair / YM2151 + OKI --- */
+	{ "rygar",      CEMU_AC_BOARD_TECMO16 },
+	{ "tbowl",      CEMU_AC_BOARD_TECMO16 },
+	{ "wc90",       CEMU_AC_BOARD_TECMO16 },
+	{ "spbactn",    CEMU_AC_BOARD_TECMO16 },
+	/* --- Nichibutsu / Nihon Bussan: Z80 + YM3812 over I/O --- */
+	{ "argus",      CEMU_AC_BOARD_TERRACRE },
+	{ "valtric",    CEMU_AC_BOARD_TERRACRE },
+	{ "butasan",    CEMU_AC_BOARD_TERRACRE },
+	{ "cop01",      CEMU_AC_BOARD_TERRACRE },
+	{ "terracra",   CEMU_AC_BOARD_TERRACRE },
+	{ "ginganin",   CEMU_AC_BOARD_TERRACRE },
+	/* --- Toaplan: Z80 + YM3812 --- */
+	{ "tp",         CEMU_AC_BOARD_TOAPLAN1 },
+	{ "slapfght",   CEMU_AC_BOARD_TOAPLAN1 },
+	{ "daisenpuu",  CEMU_AC_BOARD_TOAPLAN1 },
+	{ "tekipaki",   CEMU_AC_BOARD_TOAPLAN1 },
+	{ "pipibibs",   CEMU_AC_BOARD_TOAPLAN1 },
+	{ "vimana",     CEMU_AC_BOARD_TOAPLAN1 },
+	{ "fireshrk",   CEMU_AC_BOARD_TOAPLAN1 },
+	{ "snowbros",   CEMU_AC_BOARD_TOAPLAN1 },
+	/* --- Toaplan 2 / Raizing: Z80 + YM2151 + OKI6295 --- */
+	{ "truxton2",   CEMU_AC_BOARD_TECMO16 },
+	{ "batrider",   CEMU_AC_BOARD_TECMO16 },
+	{ "bbakraid",   CEMU_AC_BOARD_TECMO16 },
+	{ "bgaregga",   CEMU_AC_BOARD_TECMO16 },
+	{ "mahou",      CEMU_AC_BOARD_TECMO16 },
+	/* --- Cave / Banpresto: Z80 + YM2151 + OKI6295 --- */
+	{ "agallet",    CEMU_AC_BOARD_TECMO16 },
+	{ "metmqstr",   CEMU_AC_BOARD_TECMO16 },
+	{ "mazinger",   CEMU_AC_BOARD_TECMO16 },
+	{ "hotdogst",   CEMU_AC_BOARD_TECMO16 },
+	{ "gaia",       CEMU_AC_BOARD_TECMO16 },
+	{ "dadandan",   CEMU_AC_BOARD_TECMO16 },
+	{ "pwrinst1",   CEMU_AC_BOARD_TECMO16 },
+	{ "pwrinst2",   CEMU_AC_BOARD_TECMO16 },
+	/* --- Kaneko / Tatsumi / misc Z80 + YM + OKI --- */
+	{ "djboy",      CEMU_AC_BOARD_TECMO16 },
+	{ "blazeon",    CEMU_AC_BOARD_TECMO16 },
+	{ "hvyunit",    CEMU_AC_BOARD_TECMO16 },
+	{ "bloodwar",   CEMU_AC_BOARD_TECMO16 },
+	{ "superx",     CEMU_AC_BOARD_TECMO16 },
+	{ "apache3",    CEMU_AC_BOARD_TECMO16 },
+	{ "cybertnk",   CEMU_AC_BOARD_TECMO16 },
+	{ "gigandes",   CEMU_AC_BOARD_TECMO16 },
+	{ "hyperduel",  CEMU_AC_BOARD_TECMO16 },
+	{ "crospang",   CEMU_AC_BOARD_TECMO16 },
+	/* --- Seibu / Korean YM3812 + OKI6295 --- */
+	{ "darkmist",   CEMU_AC_BOARD_SEIBU_OPL },
+	{ "panicr",     CEMU_AC_BOARD_SEIBU_OPL },
+	{ "cshooter",   CEMU_AC_BOARD_SEIBU_OPL },
+	{ "airbuster",  CEMU_AC_BOARD_SEIBU_OPL },
+	{ "nmg5",       CEMU_AC_BOARD_SEIBU_OPL },
+	{ "yunsun16",   CEMU_AC_BOARD_SEIBU_OPL },
+	{ "heberpop",   CEMU_AC_BOARD_SEIBU_OPL },
+	/* --- SNK: Z80 + YM3812 --- */
+	{ "sengoku",    CEMU_AC_BOARD_SNK_OPL },
+	{ "empcity",    CEMU_AC_BOARD_SNK_OPL },
+	/* --- UPL: Z80 + dual YM2203 on I/O --- */
+	{ "ninjakid2",  CEMU_AC_BOARD_ROBOKID },
+	{ "nmk004",     CEMU_AC_BOARD_ROBOKID },
+	{ "bjtwin",     CEMU_AC_BOARD_ROBOKID },
+	{ "tdragon2",   CEMU_AC_BOARD_ROBOKID },
+	{ "macross2",   CEMU_AC_BOARD_ROBOKID },
+	{ "msgundam",   CEMU_AC_BOARD_ROBOKID },
+	{ "tharrier",   CEMU_AC_BOARD_ROBOKID },
+	/* --- Technos: Z80 + YM2151 + OKI/ADPCM --- */
+	{ "ddragon",    CEMU_AC_BOARD_TECHNOS_DDRAGON2 },
+	{ "ctribe",     CEMU_AC_BOARD_TECHNOS_DDRAGON2 },
+	{ "kuniokun",   CEMU_AC_BOARD_TECHNOS_DDRAGON2 },
+	{ "nkdodge",    CEMU_AC_BOARD_TECHNOS_DDRAGON2 },
+	{ "excthour",   CEMU_AC_BOARD_TECHNOS_DDRAGON2 },
+	/* --- Sega Y-board / OutRun-class: Z80 + YM2151 + SegaPCM --- */
+	{ "pdrift",     CEMU_AC_BOARD_OUTRUN },
+	{ "spmonaco",   CEMU_AC_BOARD_OUTRUN },
+	{ "eropn",      CEMU_AC_BOARD_OUTRUN },
+	{ "eropnx2",    CEMU_AC_BOARD_OUTRUN },
+	/* --- Sega System 1/2-class Z80 + SN --- */
+	{ "angelkds",   CEMU_AC_BOARD_SEGA_SYS1 },
+	{ "calorie",    CEMU_AC_BOARD_SEGA_SYS1 },
+	{ "kageki",     CEMU_AC_BOARD_SEGA_SYS1 },
+	{ "perfrman",   CEMU_AC_BOARD_SEGA_SYS1 },
+	/* --- Banpresto on Sega System 16B / 24 --- */
+	{ "gundamex",   CEMU_AC_BOARD_SYS16B },
+	{ "sdgndmps",   CEMU_AC_BOARD_SYS16B },
+	/* --- Namco --- */
+	{ "pacman",     CEMU_AC_BOARD_NAMCO_WSG },
+	{ "jrpacman",   CEMU_AC_BOARD_NAMCO_WSG },
+	{ "rallyx",     CEMU_AC_BOARD_NAMCO_WSG },
+	{ "pengo",      CEMU_AC_BOARD_NAMCO_WSG },
+	{ "pp",         CEMU_AC_BOARD_NAMCO_WSG },
+	{ "pp2",        CEMU_AC_BOARD_NAMCO_WSG },
+	{ "tceptor",    CEMU_AC_BOARD_NAMCO_SYS86 },
+	{ "system21b",  CEMU_AC_BOARD_NAMCO_SYS2 }
+	/* No "gnet": Taito G-NET is a PS1 derivative driven by the SPU, and routing
+	   it at the C352 board faulted psyvaria/raycris/xiistag on open. */
+};
+
+static CEmuAcBoard CEmuAcAliasBoard(const char* sub)
+{
+	if (!sub || !sub[0]) return CEMU_AC_BOARD_UNKNOWN;
+	for (unsigned i = 0; i < sizeof(kAcAliases) / sizeof(kAcAliases[0]); i++)
+		if (_stricmp(sub, kAcAliases[i].sub) == 0)
+			return kAcAliases[i].board;
+	return CEMU_AC_BOARD_UNKNOWN;
+}
+
+/* Konami Z80 + YM2151 + K053260 sound boards under per-game driver names. */
+static int CEmuAcIsKonamiK053260Sub(const char* sub)
+{
+	if (!sub || !sub[0]) return 0;
+	static const char* const kSubs[] = {
+		"dbz", "dbz2", "glfgreat", "xmen", "asterix", "gijoe", "prmrsocr",
+		"tmnt2", "ssriders2", "qgakumon2"
+	};
+	for (unsigned i = 0; i < sizeof(kSubs) / sizeof(kSubs[0]); i++)
+		if (_stricmp(sub, kSubs[i]) == 0) return 1;
+	return 0;
+}
+
+/* Konami Z80 + K054539 (single chip) sound boards under per-game names. */
+static int CEmuAcIsKonamiK054539Sub(const char* sub)
+{
+	if (!sub || !sub[0]) return 0;
+	static const char* const kSubs[] = {
+		"lethal", "kabukiz", "gaiapolis", "martchmp", "premsocr"
+	};
+	for (unsigned i = 0; i < sizeof(kSubs) / sizeof(kSubs[0]); i++)
+		if (_stricmp(sub, kSubs[i]) == 0) return 1;
+	return 0;
 }
 
 /* Taito flstory / nycaptor-class: Z80 + AY-3-8910 + MSM5232. */
@@ -684,8 +1042,29 @@ CEmuAcBoard CEmuAcResolveBoard(const CEmuGameEntry* ge)
 	const int naNb = (_stricmp(ge->subtype, "na1") == 0 || _stricmp(ge->subtype, "na2") == 0
 		|| _stricmp(ge->subtype, "nb1") == 0 || _stricmp(ge->subtype, "nb2") == 0);
 	if (_stricmp(ge->subtype, "cps2") == 0 || _stricmp(ge->subtype, "cps1qs") == 0
+		|| _stricmp(ge->subtype, "cps2simm") == 0
 		|| _stricmp(ge->subtype, "zn") == 0 || hasQSound)
 		board = CEMU_AC_BOARD_CPS_QS;
+	/* Sega System 16B clones and derivatives: same Z80 + YM sound section
+	   under a different driver name, so reuse the working board. */
+	else if (_stricmp(ge->subtype, "deniam16b") == 0
+		|| _stricmp(ge->subtype, "deniam16c") == 0)
+		board = CEMU_AC_BOARD_SYS16B;
+	/* Sega System E: Z80 + dual SN76496, i.e. the System 1 sound section. */
+	else if (_stricmp(ge->subtype, "systeme") == 0)
+		board = CEMU_AC_BOARD_SEGA_SYS1;
+	/* Technos Double Dragon 3 shares ddragon2's Z80 + YM2151 + OKI6295. */
+	else if (_stricmp(ge->subtype, "ddragon3") == 0)
+		board = CEMU_AC_BOARD_TECHNOS_DDRAGON2;
+	/* Atari Gauntlet hw is the System 1 sound section (6502 + YM2151 + POKEY). */
+	else if (_stricmp(ge->subtype, "gauntlet") == 0)
+		board = CEMU_AC_BOARD_ATARI_SYS1;
+	/* Tehkan / Taito multi-AY sound CPUs share the Taito SJ layout. */
+	else if (_stricmp(ge->subtype, "starforce") == 0
+		|| _stricmp(ge->subtype, "swimmer") == 0
+		|| _stricmp(ge->subtype, "halleysc") == 0
+		|| _stricmp(ge->subtype, "worldcup") == 0)
+		board = CEMU_AC_BOARD_TAITO_SJ;
 	else if (_strnicmp(ge->subtype, "system18", 8) == 0)
 		board = CEMU_AC_BOARD_SYS18;
 	else if (_strnicmp(ge->subtype, "system24", 8) == 0)
@@ -694,10 +1073,13 @@ CEmuAcBoard CEmuAcResolveBoard(const CEmuGameEntry* ge)
 		|| _stricmp(ge->subtype, "system_multi") == 0
 		|| _stricmp(ge->subtype, "multi32") == 0)
 		board = CEMU_AC_BOARD_SYS32;
-	else if (_stricmp(ge->subtype, "systemgx") == 0
-		|| _stricmp(ge->subtype, "054539x2") == 0)
-		/* Dual K054539 + K056800 sound 68000 (metamrph/rungun/viostorm…).
-		   Must not fall through to Z80 KONAMI_PCM. */
+	else if (_stricmp(ge->subtype, "systemgx") == 0)
+		/* System GX proper (konamigx.cpp: tkmmpzdm/rungun2/racinfrc…) is the
+		   only dual-K054539 family with a 68000 sound CPU + K056800 mailbox.
+		   The mystwarr.cpp family shares the chips but runs a Z80, so its
+		   "054539x2" subtype must reach KONAMI_PCM instead — routing it here
+		   fed a Z80 program (DI/IM 1/JP at $0000) to Musashi and left the
+		   sound ROM unloaded (srom=0). */
 		board = CEMU_AC_BOARD_KONAMI_GX;
 	else if ((_stricmp(ge->platform, "namco") == 0
 		&& (_stricmp(ge->subtype, "system2") == 0
@@ -733,6 +1115,9 @@ CEmuAcBoard CEmuAcResolveBoard(const CEmuGameEntry* ge)
 		|| (_stricmp(ge->subtype, "c352") == 0 || hasC352))
 		board = CEMU_AC_BOARD_NAMCO_C352;
 	else if (_stricmp(ge->subtype, "053260") == 0 || _stricmp(ge->subtype, "054539") == 0
+		|| _stricmp(ge->subtype, "054539x2") == 0
+		|| CEmuAcIsKonamiK053260Sub(ge->subtype)
+		|| CEmuAcIsKonamiK054539Sub(ge->subtype)
 		|| hasK053260 || hasK054539
 		|| (_strnicmp(ge->platform, "konami", 6) == 0
 			&& (hasK053260 || hasK054539)))
@@ -878,6 +1263,8 @@ CEmuAcBoard CEmuAcResolveBoard(const CEmuGameEntry* ge)
 	else if (_strnicmp(ge->platform, "capcom", 6) == 0
 		&& (_strnicmp(ge->subtype, "cps1", 4) == 0 || ge->subtype[0] == 0))
 		board = CEMU_AC_BOARD_CPS1;
+	if (board == CEMU_AC_BOARD_UNKNOWN)
+		board = CEmuAcAliasBoard(ge->subtype);
 	return board;
 }
 
@@ -900,6 +1287,18 @@ int CHardAc::Init(const CEmuGameEntry* ge, int sampleRate)
 	snkMapKind_ = 0;
 	snkStatus_ = 0;
 	terracreMap_ = 0;
+	tecmoOpl_ = 0;
+	m68kPcmKind_ = 0;
+	m68kPcmAddr_ = 0;
+	m68kPcmSpan_ = 0;
+	m68kRamAddr_ = 0;
+	m68kRamSize_ = 0;
+	m68kIrqAddr_ = 0;
+	ms1RamAlloc_ = 0;
+	memset(m68kHiWord_, 0, sizeof(m68kHiWord_));
+	m68kVblankAcc_ = 0;
+	m68kVblankLevel_ = 0;
+	m68kVblankPending_ = 0;
 	flstoryNmiEn_ = 0;
 	segaM1Audio_ = 0;
 	chip3_ = NULL;
@@ -911,6 +1310,8 @@ int CHardAc::Init(const CEmuGameEntry* ge, int sampleRate)
 	gngCommandoMap_ = 0;
 	gngGaidenMap_ = 0;
 	konamiPcmWindow_ = 0x40u;
+	konamiPcm2Addr_ = 0u;
+	konamiSoundCtrl_ = 0;
 	sys16RomBoard_ = (board_ == CEMU_AC_BOARD_SYS16A) ? 0x5358u : 0x5797u;
 
 	if (board_ == CEMU_AC_BOARD_GNG) {
@@ -1247,14 +1648,25 @@ int CHardAc::Init(const CEmuGameEntry* ge, int sampleRate)
 		const int sys22 = (ge && (_stricmp(ge->subtype, "system22") == 0
 			|| _stricmp(ge->subtype, "sys22") == 0));
 		const int sysM377 = sys11 || sys22 || naNb;
-		cpuHz_ = nd1 ? 16384000 : (naNb ? 12500000 : 16934400);
+		/* NA-1/NA-2 and NB-1/NB-2 are not one family on the sound side: NA runs
+		   the C69/C70 internal ROM at $C000 driving a C219, while NB runs an
+		   external nX-spr0 program driving a C352 at 16.7 MHz. Treating NB as NA
+		   gave it the wrong PCM chip and demanded an internal BIOS the archives
+		   never contain, so all 11 NB-1 sets were rejected at open. */
+		const int naOnly = (ge && (_stricmp(ge->subtype, "na1") == 0
+			|| _stricmp(ge->subtype, "na2") == 0));
+		cpuHz_ = nd1 ? 16384000 : (naOnly ? 12500000
+			: (naNb ? 16700000 : 16934400));
 		m37702Soft_ = 0;
-		m37702C140_ = naNb ? 1 : 0;
-		m37702MapKind_ = naNb ? 1 : (sys22 ? 2 : 0);
-		if (naNb) {
+		m37702C140_ = naOnly ? 1 : 0;
+		m37702MapKind_ = naOnly ? 1 : (sys22 ? 2 : 0);
+		if (naOnly) {
 			opmHz_ = 8192000;
 			chip_ = CEmuChipC140Create((uint32_t)opmHz_, sampleRate_);
 			if (chip_) CEmuChipC140SetType(chip_, 2); /* C219 */
+		} else if (naNb) {
+			opmHz_ = 16700000;
+			chip_ = CEmuChipC352Create((uint32_t)opmHz_, sampleRate_);
 		} else {
 			opmHz_ = (!nd1 && !sysM377) ? 25401600 : 24576000;
 			chip_ = CEmuChipC352Create((uint32_t)opmHz_, sampleRate_);
@@ -1410,11 +1822,49 @@ int CHardAc::Init(const CEmuGameEntry* ge, int sampleRate)
 		chip2_ = NULL;
 		pcm_ = NULL;
 		pcmKind_ = 0;
+	} else if (board_ == CEMU_AC_BOARD_M68K_PCM) {
+		/* Seta/Allumer (MAME seta.cpp, seta2.cpp) put the X1-010's 8 KiB RAM
+		   window at B00000 and run the main 68000 at 16 MHz with a vblank
+		   IRQ2. Cave (MAME cave.cpp) puts the YMZ280B's register/data port
+		   pair at 300000 on the low byte lane, 16 MHz with vblank IRQ1. */
+		{
+			const CEmuAcM68kPcmSpec* sp = CEmuAcFindM68kPcmSpec(ge->subtype);
+			/* Unlisted sets fall back to the most common Seta layout. */
+			static const CEmuAcM68kPcmSpec kSetaDefault = {
+				"", 1, 0xb00000u, 0x4000u, 0x200000u, 0x10000u, 0
+			};
+			if (!sp) sp = &kSetaDefault;
+			m68kPcmKind_ = sp->kind;
+			m68kPcmAddr_ = sp->chipAddr;
+			m68kPcmSpan_ = sp->chipSpan;
+			m68kRamAddr_ = sp->ramAddr;
+			m68kRamSize_ = sp->ramSize;
+			m68kIrqAddr_ = sp->irqAddr;
+			cpuHz_ = 16000000;
+			if (sp->kind == 2) {
+				opmHz_ = 16934400;
+				m68kVblankLevel_ = 1; /* INPUT_MERGER_ANY_HIGH -> inputline 1 */
+				chip_ = CEmuChipYmz280bCreate((uint32_t)opmHz_, sampleRate_);
+			} else {
+				opmHz_ = 16000000;
+				m68kVblankLevel_ = 2;
+				chip_ = CEmuChipX1010Create((uint32_t)opmHz_, sampleRate_);
+			}
+		}
+		chip2_ = NULL;
+		pcm_ = NULL;
+		pcmKind_ = 0;
 	} else if (board_ == CEMU_AC_BOARD_TECMO16) {
-		/* MAME tecmo16: Z80 @ 4 MHz, YM2151 @ FC04, OKI @ FC00, latch @ FC08→NMI. */
+		/* MAME tecmo16: Z80 @ 4 MHz, FM @ FC04, OKI @ FC00, latch @ FC08→NMI.
+		   Tecmo's own sets (tecmo16/wc90/tbowl/spbactn/rygar) put a YM3812 in
+		   that socket, not a YM2151. Driving those rips through the OPM
+		   register map counted writes but rendered silence on all of them. */
+		tecmoOpl_ = CEmuAcIsTecmoOplSub(ge->subtype) ? 1 : 0;
 		cpuHz_ = 4000000;
 		opmHz_ = 4000000;
-		chip_ = CEmuChipYm2151Create((uint32_t)opmHz_, sampleRate_);
+		chip_ = tecmoOpl_
+			? CEmuChipYm3812Create((uint32_t)opmHz_, sampleRate_)
+			: CEmuChipYm2151Create((uint32_t)opmHz_, sampleRate_);
 		chip2_ = NULL;
 		pcm_ = CEmuChipOki6295Create(1000000u / 132u, sampleRate_);
 		pcmKind_ = 2;
@@ -1503,7 +1953,12 @@ int CHardAc::Init(const CEmuGameEntry* ge, int sampleRate)
 		pcmKind_ = 0;
 	} else if (board_ == CEMU_AC_BOARD_KONAMI_PCM) {
 		const int isK054539 = (_stricmp(ge->subtype, "054539") == 0
-			|| _stricmp(ge->subtype, "054539x2") == 0 || hasK054539) ? 1 : 0;
+			|| _stricmp(ge->subtype, "054539x2") == 0
+			|| CEmuAcIsKonamiK054539Sub(ge->subtype) || hasK054539) ? 1 : 0;
+		/* mystwarr.cpp sound_map puts K054539 #1 at E000-E22F and #2 at
+		   E400-E62F over the same 4 MB sample ROM. Single-chip boards
+		   (bucky/moomesa/xexex) only populate the first window. */
+		const int isK054539x2 = (_stricmp(ge->subtype, "054539x2") == 0) ? 1 : 0;
 		/* K053260 (parodius/simpsons/…): Z80+YM2151+K053260 @ 3.579545 MHz.
 		   Catalog defaults YM@F800 / PCM@FC00 (FA00 on ssriders-class).
 		   Bucky/Moo/X-Men K054539: YM@EC00, PCM@E000, bank@F800, K054321@F000. */
@@ -1523,6 +1978,12 @@ int CHardAc::Init(const CEmuGameEntry* ge, int sampleRate)
 			if (isK054539) {
 				pcm_ = CEmuChipK054539Create(18432000u, sampleRate_);
 				pcmKind_ = 4;
+				if (isK054539x2) {
+					pcm2_ = CEmuChipK054539Create(18432000u, sampleRate_);
+					konamiPcm2Addr_ = CEmuAcOptionValue(ge, "pcm2_addr", 0xe400u);
+					CEmuChipK054539SetFmMonBase(pcm_, 0);
+					CEmuChipK054539SetFmMonBase(pcm2_, 8);
+				}
 			} else {
 				pcm_ = CEmuChipK053260Create(3579545u, sampleRate_);
 				pcmKind_ = 3;
@@ -1890,6 +2351,15 @@ static unsigned CEmuGxK056800Off(unsigned addr)
 
 unsigned CHardAc::Ms1Read16(unsigned addr)
 {
+	if (board_ == CEMU_AC_BOARD_M68K_PCM) {
+		unsigned v = (M68kPcmRead8(addr) << 8) | M68kPcmRead8(addr + 1);
+		if (g_traceM68kRead && m68kRamSize_ && addr >= m68kRamAddr_ && addr - m68kRamAddr_ < m68kRamSize_) {
+			unsigned off = addr - m68kRamAddr_;
+			g_m68kReadCount[off]++;
+			g_m68kReadCount[off+1]++;
+		}
+		return v;
+	}
 	if (board_ == CEMU_AC_BOARD_SEGA_SCSP && segaM1Audio_)
 		return Sega68Read16(addr);
 	if (board_ == CEMU_AC_BOARD_KONAMI_GX) {
@@ -1941,8 +2411,99 @@ unsigned CHardAc::Ms1Read16(unsigned addr)
 	return 0xffff;
 }
 
+/* Seta/Cave: program ROM from 0, the PCM chip and work RAM each in the window
+   the real board decodes. Anything else reads as open bus - these programs
+   probe video and input registers constantly, and answering those with RAM
+   contents was enough to send some of them down a POST failure path. */
+unsigned CHardAc::M68kPcmRead8(unsigned addr)
+{
+	addr &= 0xffffffu;
+	if (m68kPcmSpan_ && addr - m68kPcmAddr_ < m68kPcmSpan_) {
+		if (!chip_) return 0;
+		const unsigned off = addr - m68kPcmAddr_;
+		/* Both chips answer only on the low byte lane. */
+		if (!(addr & 1))
+			return (m68kPcmKind_ == 1) ? m68kHiWord_[(off >> 1) & 0x1fffu] : 0;
+		if (m68kPcmKind_ == 2)
+			return CEmuChipYmz280bReadStatus(chip_);
+		/* MAME x1_010_device::word_r - the word offset *is* the register
+		   index, so the 16 KiB window maps the chip's 8 KiB register file. */
+		return CEmuChipX1010Read(chip_, off >> 1);
+	}
+	/* MAME cave_state::irq_cause_r: 0x0003 with the bit of each pending
+	   source flipped low, and reading +4 / +6 acknowledges that source. */
+	if (m68kIrqAddr_ && addr - m68kIrqAddr_ < 8u) {
+		const unsigned off = addr - m68kIrqAddr_;
+		unsigned res = 0x0003u;
+		if (m68kVblankPending_) res ^= 0x01u;
+		if (off == 5u || off == 4u) {
+			m68kVblankPending_ = 0;
+			ms1LatchIrq_ = 0;
+		}
+		return (off & 1) ? (uint8_t)(res & 0xff) : (uint8_t)(res >> 8);
+	}
+	if (ms1Rom_ && addr < ms1RomSize_) return ms1Rom_[addr];
+	if (m68kRamSize_ && addr - m68kRamAddr_ < m68kRamSize_)
+		return ms1Ram_ ? ms1Ram_[addr - m68kRamAddr_] : 0xff;
+	return 0xff;
+}
+
+void CHardAc::M68kPcmWrite8(unsigned addr, uint8_t v)
+{
+	addr &= 0xffffffu;
+	if (m68kPcmSpan_ && addr - m68kPcmAddr_ < m68kPcmSpan_) {
+		if (!chip_) return;
+		g_m68kPcmWrites++;
+		const unsigned off = addr - m68kPcmAddr_;
+		if (!(addr & 1)) {
+			/* High byte of the word never reaches the synthesiser; MAME keeps
+			   it in a side buffer purely so reads give it back. */
+			if (m68kPcmKind_ == 1)
+				m68kHiWord_[(off >> 1) & 0x1fffu] = v;
+			return;
+		}
+		if (m68kPcmKind_ == 2) {
+			/* +1 = register select, +3 = data. */
+			CEmuChipYmz280bWritePort(chip_, (off & 2) ? 1u : 0u, v);
+		} else {
+			CEmuChipX1010Write(chip_, off >> 1, v);
+		}
+		gxPcmWrites_++;
+		return;
+	}
+	if (ms1Rom_ && addr < ms1RomSize_) return;
+	if (m68kRamSize_ && addr - m68kRamAddr_ < m68kRamSize_) {
+		if (ms1Ram_) ms1Ram_[addr - m68kRamAddr_] = v;
+		return;
+	}
+}
+
+void CHardAc::M68kPcmTickVblank(int cycles)
+{
+	if (board_ != CEMU_AC_BOARD_M68K_PCM || cycles <= 0) return;
+	m68kVblankAcc_ += (uint64_t)cycles;
+	const uint64_t period = (uint64_t)(cpuHz_ > 0 ? cpuHz_ : 16000000) / 60u;
+	if (period && m68kVblankAcc_ >= period) {
+		m68kVblankAcc_ %= period;
+		m68kVblankPending_ = 1;
+		ms1LatchIrq_ = 1;
+	}
+}
+
+int g_traceM68kRead = 0;
+int g_m68kReadCount[0x10000];
+int g_m68kPcmWrites = 0;
+
 unsigned CHardAc::Ms1Read8(unsigned addr)
 {
+	if (board_ == CEMU_AC_BOARD_M68K_PCM) {
+		unsigned v = M68kPcmRead8(addr);
+		if (g_traceM68kRead && m68kRamSize_ && addr >= m68kRamAddr_ && addr - m68kRamAddr_ < m68kRamSize_) {
+			unsigned off = addr - m68kRamAddr_;
+			g_m68kReadCount[off]++;
+		}
+		return v;
+	}
 	if (board_ == CEMU_AC_BOARD_SEGA_SCSP && segaM1Audio_)
 		return Sega68Read8(addr);
 	if (board_ == CEMU_AC_BOARD_KONAMI_GX) {
@@ -1977,6 +2538,11 @@ unsigned CHardAc::Ms1Read8(unsigned addr)
 
 void CHardAc::Ms1Write16(unsigned addr, uint16_t v)
 {
+	if (board_ == CEMU_AC_BOARD_M68K_PCM) {
+		M68kPcmWrite8(addr & ~1u, (uint8_t)(v >> 8));
+		M68kPcmWrite8((addr & ~1u) | 1u, (uint8_t)v);
+		return;
+	}
 	if (board_ == CEMU_AC_BOARD_SEGA_SCSP && segaM1Audio_) {
 		Sega68Write16(addr, v);
 		return;
@@ -2045,6 +2611,10 @@ void CHardAc::Ms1Write16(unsigned addr, uint16_t v)
 
 void CHardAc::Ms1Write8(unsigned addr, uint8_t v)
 {
+	if (board_ == CEMU_AC_BOARD_M68K_PCM) {
+		M68kPcmWrite8(addr, v);
+		return;
+	}
 	if (board_ == CEMU_AC_BOARD_SEGA_SCSP && segaM1Audio_) {
 		Sega68Write8(addr, v);
 		return;
@@ -2107,6 +2677,8 @@ void CHardAc::Ms1Write8(unsigned addr, uint8_t v)
 
 int CHardAc::Ms1IrqLevel() const
 {
+	if (board_ == CEMU_AC_BOARD_M68K_PCM)
+		return ms1LatchIrq_ ? m68kVblankLevel_ : 0;
 	if (board_ == CEMU_AC_BOARD_SEGA_SCSP && segaM1Audio_)
 		return segaMidiIrq_ ? 2 : 0; /* 8251 RxRDY → IRQ2 */
 	if (board_ == CEMU_AC_BOARD_KONAMI_GX) {
@@ -2340,6 +2912,19 @@ void CHardAc::SetSoundCommand(uint8_t cmd)
 {
 	if (board_ == CEMU_AC_BOARD_KONAMI_GX) {
 		SetSoundCommandWord(cmd);
+		return;
+	}
+	if (board_ == CEMU_AC_BOARD_M68K_PCM) {
+		soundCmd_ = cmd;
+		soundCmdPending_ = 1;
+		/* HACK: The sound command address varies by game. The trace will tell us
+		   where the M68K is spinning. For now, try writing to the first few bytes. */
+		if (m68kRamSize_ >= 4 && ms1Ram_) {
+			ms1Ram_[0] = cmd;
+			ms1Ram_[1] = cmd;
+			ms1Ram_[2] = cmd;
+			ms1Ram_[3] = cmd;
+		}
 		return;
 	}
 	if (board_ == CEMU_AC_BOARD_MEGASYSTEM1) {
@@ -3639,7 +4224,8 @@ void CHardAc::MemWrite(uint16_t addr, uint8_t data)
 			if (chip_) {
 				chip_->Write(addr & 1, data);
 				if (addr & 1)
-					opmWrites_ = CEmuChipYm2151WriteCount(chip_);
+					opmWrites_ = tecmoOpl_ ? (opmWrites_ + 1)
+						: CEmuChipYm2151WriteCount(chip_);
 			}
 			return;
 		}
@@ -3836,6 +4422,11 @@ void CHardAc::MemWrite(uint16_t addr, uint8_t data)
 			konamiSh1NmiArm_ = 1;
 			return;
 		}
+		if (pcm2_ && konamiPcm2Addr_
+			&& addr >= konamiPcm2Addr_ && addr < konamiPcm2Addr_ + pcmWin) {
+			pcm2_->Write(addr - konamiPcm2Addr_, data);
+			return;
+		}
 		if (pcm && addr >= pcmBase && addr < pcmBase + pcmWin) {
 			pcm->Write(addr - pcmBase, data);
 			return;
@@ -3860,6 +4451,9 @@ void CHardAc::MemWrite(uint16_t addr, uint8_t data)
 			return;
 		}
 		if (konamiBankAddr_ && addr == konamiBankAddr_) {
+			/* mystwarr sound_ctrl_w: bits 0-2 bank, bit 4 gates K054539
+			   timer → NMI (clearing it also clears a pending NMI). */
+			konamiSoundCtrl_ = data;
 			SetBank((int)data);
 			return;
 		}
@@ -4318,6 +4912,9 @@ uint8_t CHardAc::MemRead(uint16_t addr)
 		if (pcmKind_ == 3 && opm == 0xf000u && chip_ && pcm_
 			&& (addr == 0xf000 || addr == 0xf001))
 			return chip_->ReadStatus();
+		if (pcm2_ && konamiPcm2Addr_
+			&& addr >= konamiPcm2Addr_ && addr < konamiPcm2Addr_ + pcmWin)
+			return pcm2_->ReadStatus();
 		if (addr >= pcmBase && addr < pcmBase + pcmWin) {
 			CChip* pcm = pcm_ ? pcm_ : chip_;
 			if (!pcm) return 0x00;
@@ -4739,6 +5336,36 @@ static int CEmuAcLoadMs1Code(uint8_t** dst, unsigned* dstSize,
 	*dst = p;
 	*dstSize = total;
 	return 1;
+}
+
+/* Seta packs carry a third program ROM above the even/odd pair - blandia's
+   ux001003.u202 covers 100000-1FFFFF. CEmuAcLoadMs1Code only interleaves the
+   first two, so the tail has to be placed separately, byte-swapped because
+   MAME loads these with ROM_LOAD16_WORD_SWAP. */
+static void CEmuAcLoadM68kPcmExtraCode(uint8_t** dst, unsigned* dstSize,
+	CEmuZipFs* fs, const CEmuGameEntry* ge)
+{
+	for (int i = 0; i < ge->romCount; i++) {
+		const CEmuRomEntry* r = &ge->rom[i];
+		if (_stricmp(r->type, "code") != 0) continue;
+		const unsigned off = (unsigned)(r->offset > 0 ? r->offset : 0);
+		if (off < 2u) continue; /* the interleaved pair */
+		unsigned sz = 0;
+		const unsigned char* data = CEmuZipFsFind(fs, r->name, &sz);
+		if (!data || !sz) continue;
+		const unsigned need = off + sz;
+		if (need > *dstSize) {
+			uint8_t* p = (uint8_t*)realloc(*dst, need);
+			if (!p) return;
+			memset(p + *dstSize, 0xff, need - *dstSize);
+			*dst = p;
+			*dstSize = need;
+		}
+		for (unsigned k = 0; k + 1 < sz; k += 2) {
+			(*dst)[off + k] = data[k + 1];
+			(*dst)[off + k + 1] = data[k];
+		}
+	}
 }
 
 /* pcm1 -> OKI #0 (0x0A0000), pcm2 -> OKI #1 (0x0C0000). */
@@ -5891,15 +6518,19 @@ void CHardAc::M37702InjectSong(uint16_t cmd)
 	}
 	if (!h8Shared_) return;
 	const uint16_t w = (uint16_t)(0x4000u | (cmd & 0x3fffu));
-	h8Shared_[0x0100] = (uint8_t)(w >> 8);
-	h8Shared_[0x0101] = (uint8_t)(w & 0xff);
-	h8Shared_[0x4050] = 0;
 	const uint8_t hi = (uint8_t)(cmd >> 8);
 	const uint8_t lo = (uint8_t)(cmd & 0xff);
-	h8Shared_[0x0000] = hi;
-	h8Shared_[0x0001] = lo;
+	/* System 11 / 22 sound CPU is an M37702, which is little-endian.
+	   Wait, H8 is big-endian, so this shared RAM map was originally written
+	   for H8. If M37702 reads a 16-bit word from 0x4100, it expects the low
+	   byte at 0x4100. */
+	h8Shared_[0x0100] = (uint8_t)(w & 0xff);
+	h8Shared_[0x0101] = (uint8_t)(w >> 8);
+	h8Shared_[0x4050] = 0;
+	h8Shared_[0x0000] = lo;
+	h8Shared_[0x0001] = hi;
 	h8Shared_[0x0004] = 1;
-	h8Shared_[0x0005] = lo;
+	h8Shared_[0x0005] = hi;
 	if (m37702_) M37702SetInputLine(m37702_, M37710_LINE_IRQ0, M37702_HOLD_LINE);
 }
 
@@ -5929,7 +6560,7 @@ uint8_t CHardAc::M37702Read8(uint32_t addr)
 		/* Ports / ADC open-bus high. */
 		return 0xff;
 	}
-	/* Sys11 C76 map. */
+	/* Sys11 C76 map. $C000-$FFFF is served by the core's int_rom window. */
 	if (h8Rom_ && addr >= 0x80000u && addr < 0x80000u + h8RomSize_)
 		return h8Rom_[addr - 0x80000u];
 	if (h8Rom_ && addr >= 0x200000u && addr < 0x200000u + h8RomSize_)
@@ -5983,22 +6614,24 @@ void CHardAc::M37702Write8(uint32_t addr, uint8_t v)
 		h8Shared_[addr - 0x4000u] = v;
 		return;
 	}
+	/* C352 at MCU $2000-$2FFF (MAME namcos11 c76_map). The M37702 is
+	   little-endian, so a word store puts the LOW half at the even address -
+	   the opposite of the big-endian H8 this shadow logic was written for.
+	   Swapping the halves put the key-on bit and the frequency in the wrong
+	   byte of every register, which is why the driver could write hundreds of
+	   registers without a single voice sounding.
+
+	   Register $202 is the key-on/key-off trigger and the chip only acts on a
+	   whole-word write to it (MAME returns early unless mem_mask is 0xffff),
+	   so hold the low half there until the high half arrives. */
 	if (addr >= 0x2000u && addr <= 0x2fffu && chip_) {
 		const unsigned reg = (unsigned)((addr - 0x2000u) >> 1);
 		uint16_t* shadow = &h8C352Shadow_[reg & 0x3ffu];
 		if (!(addr & 1u)) {
-			h8C352Hi_ = v;
-			h8C352HiValid_ = 1;
-			*shadow = (uint16_t)(((uint16_t)v << 8) | (*shadow & 0x00ffu));
-			chip_->Write(reg, *shadow);
-			h8C352Writes_++;
-			return;
-		}
-		if (h8C352HiValid_) {
-			*shadow = (uint16_t)(((uint16_t)h8C352Hi_ << 8) | v);
-			h8C352HiValid_ = 0;
-		} else {
 			*shadow = (uint16_t)((*shadow & 0xff00u) | v);
+			if (reg == 0x202u) return;
+		} else {
+			*shadow = (uint16_t)(((uint16_t)v << 8) | (*shadow & 0x00ffu));
 		}
 		chip_->Write(reg, *shadow);
 		h8C352Writes_++;
@@ -6215,15 +6848,22 @@ int CHardAc::LoadRomsM37702(CEmuZipFs* fs, const CEmuGameEntry* ge)
 		unsigned sz = 0;
 		const unsigned char* data = CEmuZipFsFind(fs, r->name, &sz);
 		if (!data || sz < 0x1000u) continue;
-		const int isInt = (r->offset == 0xc000) || CEmuAcContainsI(r->name, "c69")
+		int isInt = (r->offset == 0xc000) || CEmuAcContainsI(r->name, "c69")
 			|| CEmuAcContainsI(r->name, "c70") || CEmuAcContainsI(r->name, "c74")
 			|| CEmuAcContainsI(r->name, "c75") || CEmuAcContainsI(r->name, "c76");
+		/* System 11/22 and NB-1 have no c7x dump; the C74/C76 program is the
+		   shared pr1data.8k that all 29 of those sets carry as type=bios. It is
+		   a linear bank-0 image: file offset $FFD6-$FFFF holds the M37710
+		   vector table (reset = $C030), so $C000-$FFFF is the MCU ROM. */
+		const int isBios = (m37702MapKind_ != 1
+			&& _stricmp(r->type, "bios") == 0 && sz >= 0x10000u);
+		if (isBios) isInt = 1;
 		if (!isInt) continue;
 		uint8_t* p = (uint8_t*)malloc(sz);
 		if (!p) continue;
 		memcpy(p, data, sz);
 		m37702IntRom_ = p;
-		m37702IntRomSize_ = sz > 0x4000u ? 0x4000u : sz;
+		m37702IntRomSize_ = isBios ? sz : (sz > 0x4000u ? 0x4000u : sz);
 		break;
 	}
 	if (!m37702IntRomSize_) {
@@ -6257,6 +6897,9 @@ int CHardAc::LoadRomsM37702(CEmuZipFs* fs, const CEmuGameEntry* ge)
 			|| CEmuAcContainsI(r->name, "c74") || CEmuAcContainsI(r->name, "c75")
 			|| CEmuAcContainsI(r->name, "c76"))
 			continue;
+		/* Already claimed above as the bank-0 MCU image. */
+		if (m37702IntRomSize_ >= 0x10000u && _stricmp(r->type, "bios") == 0)
+			continue;
 		unsigned sz = 0;
 		const unsigned char* data = CEmuZipFsFind(fs, r->name, &sz);
 		if (!data || sz < 0x1000u) continue;
@@ -6266,6 +6909,19 @@ int CHardAc::LoadRomsM37702(CEmuZipFs* fs, const CEmuGameEntry* ge)
 		memcpy(h8Rom_, data, sz);
 		h8RomSize_ = sz;
 		break;
+	}
+	/* System 22 has one MCU ROM and MAME shows it through two windows:
+	   region("mcu", 0) at $200000 and region("mcu", 0xC000) at $C000. Having
+	   claimed it as the bank-0 image above, it still has to answer at
+	   $200000 - otherwise the driver's code and tables up there read as open
+	   bus and it never gets as far as a key-on. */
+	if (!h8RomSize_ && m37702MapKind_ != 1 && m37702IntRomSize_ >= 0x10000u) {
+		uint8_t* p = (uint8_t*)malloc(m37702IntRomSize_);
+		if (p) {
+			memcpy(p, m37702IntRom_, m37702IntRomSize_);
+			h8Rom_ = p;
+			h8RomSize_ = m37702IntRomSize_;
+		}
 	}
 	if (!h8RomSize_ && m37702MapKind_ != 1) {
 		for (int i = 0; i < fs->fileCount; i++) {
@@ -6285,9 +6941,12 @@ int CHardAc::LoadRomsM37702(CEmuZipFs* fs, const CEmuGameEntry* ge)
 			break;
 		}
 	}
-	/* NA1 needs internal BIOS; Sys11/22 need internal BIOS + external sprog. */
-	if (!m37702IntRomSize_) return 0;
-	if (m37702MapKind_ != 1 && !h8RomSize_) return 0;
+	/* Only the NA-1 map runs from the C69/C70 internal ROM. System 11/22 and
+	   NB-1 boot the external sound program (rr1data / teNsprog / nrN-spr0) and
+	   never ship a c7x dump, so demanding one there rejected 42 archives at
+	   open even though their MCU program and wave ROMs were all present. */
+	if (m37702MapKind_ == 1 && !m37702IntRomSize_) return 0;
+	if (!m37702IntRomSize_ && !h8RomSize_) return 0;
 
 	/* PCM: NA1 uses ROM_LOAD16_BYTE pairs (offset 0 / 1). */
 	if (pcmRom_) { free(pcmRom_); pcmRom_ = NULL; pcmRomSize_ = 0; }
@@ -6356,21 +7015,45 @@ int CHardAc::LoadRomsM37702(CEmuZipFs* fs, const CEmuGameEntry* ge)
 
 	CEmuM37702BusSetAc(this);
 	CEmuM37702BusAttach(m37702_, this);
-	M37702SetInternalRom(m37702_, m37702IntRom_, m37702IntRomSize_);
+	/* The core's int_rom window is addressed from $C000. A c69/c70 dump is
+	   exactly that 16KB, but pr1data.8k is a linear bank-0 image in which file
+	   offset equals address, so its ROM half starts at +$C000. */
+	{
+		const uint8_t* introm = m37702IntRom_;
+		unsigned intsize = m37702IntRomSize_;
+		if (introm && intsize >= 0x10000u) {
+			introm += 0xc000u;
+			intsize = 0x4000u;
+		}
+		M37702SetInternalRom(m37702_, introm, intsize);
+	}
 	M37702Reset(m37702_);
 	m37702Soft_ = 0; /* real CPU attached */
 	return 1;
 }
 
+static void CEmuAcLoadM68kPcmExtraCode(uint8_t** dst, unsigned* dstSize, CEmuZipFs* fs, const CEmuGameEntry* ge);
+
 int CHardAc::LoadRomsMs1(CEmuZipFs* fs, const CEmuGameEntry* ge)
 {
 	if (!CEmuAcLoadMs1Code(&ms1Rom_, &ms1RomSize_, fs, ge))
 		return 0;
-	if (!ms1Ram_) {
-		ms1Ram_ = (uint8_t*)malloc(0x10000);
-		if (!ms1Ram_) return 0;
+	if (board_ == CEMU_AC_BOARD_M68K_PCM)
+		CEmuAcLoadM68kPcmExtraCode(&ms1Rom_, &ms1RomSize_, fs, ge);
+	/* atehate answers 1 MiB of work RAM; the rest of the family uses 64 KiB. */
+	unsigned ramNeed = 0x10000u;
+	if (board_ == CEMU_AC_BOARD_M68K_PCM && m68kRamSize_ > ramNeed)
+		ramNeed = m68kRamSize_;
+	if (ms1Ram_ && ms1RamAlloc_ < ramNeed) {
+		free(ms1Ram_);
+		ms1Ram_ = NULL;
 	}
-	memset(ms1Ram_, 0, 0x10000);
+	if (!ms1Ram_) {
+		ms1Ram_ = (uint8_t*)malloc(ramNeed);
+		if (!ms1Ram_) return 0;
+		ms1RamAlloc_ = ramNeed;
+	}
+	memset(ms1Ram_, 0, ms1RamAlloc_);
 
 	if (!CEmuAcLoadMs1Oki(&pcmRom_, &pcmRomSize_, fs, ge, "pcm1"))
 		CEmuAcLoadMs1Oki(&pcmRom_, &pcmRomSize_, fs, ge, "pcm");
@@ -6399,6 +7082,10 @@ int CHardAc::LoadRomsMs1(CEmuZipFs* fs, const CEmuGameEntry* ge)
 	}
 	if (pcm_ && pcmRomSize_) pcm_->SetPcmRom(pcmRom_, pcmRomSize_);
 	if (pcm2_ && pcmRom2Size_) pcm2_->SetPcmRom(pcmRom2_, pcmRom2Size_);
+	/* Seta/Cave: the sample ROM belongs to chip_, which is the PCM chip here
+	   rather than an FM chip sitting beside a separate sampler. */
+	if (board_ == CEMU_AC_BOARD_M68K_PCM && chip_ && pcmRomSize_)
+		chip_->SetPcmRom(pcmRom_, pcmRomSize_);
 
 	/* soundlatch_w drives IRQ4 on System A/B, soundlatch_c_w drives IRQ6 on
 	   System C. Pick the level whose autovector has its own handler; every
@@ -6813,7 +7500,8 @@ int CHardAc::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode
 	const unsigned char* codeRom = NULL;
 	unsigned codeRomSize = 0;
 
-	if (board_ == CEMU_AC_BOARD_MEGASYSTEM1)
+	if (board_ == CEMU_AC_BOARD_MEGASYSTEM1
+		|| board_ == CEMU_AC_BOARD_M68K_PCM)
 		return LoadRomsMs1(fs, ge);
 	if (board_ == CEMU_AC_BOARD_KONAMI_GX)
 		return LoadRomsGx(fs, ge);
@@ -7136,6 +7824,9 @@ int CHardAc::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode
 		}
 		if (pcmRomSize_)
 			pcmTarget->SetPcmRom(pcmRom_, pcmRomSize_);
+		/* Both mystwarr K054539s address the same sample ROM region. */
+		if (pcmRomSize_ && pcm2_ && konamiPcm2Addr_)
+			pcm2_->SetPcmRom(pcmRom_, pcmRomSize_);
 		/* CPS2: force multi-meg sample banks (sfx.11 / sz3.11). */
 		if (board_ == CEMU_AC_BOARD_CPS_QS && pcmRomSize_ < 0x100000u) {
 			if (pcmRom_) { free(pcmRom_); pcmRom_ = NULL; pcmRomSize_ = 0; }

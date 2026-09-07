@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include "cemu_hard.h"
 #include "../chip/cemu_chip.h"
 #include "../cemu_zipfs.h"
@@ -24,6 +24,9 @@ public:
 	void DrainInterrupt(uint64_t budgetCycles);
 	/* DOS / general pump: IRQ delivery, trampoline DOS, idle HLT quantum. */
 	void PumpCycles(uint64_t endCycle);
+	/* Feed the OPN(A) its master clocks for a span of CPU cycles. Every path
+	   that advances cpuCycles_ must call this or the chip timers run slow. */
+	void AdvanceOpnClocks(uint64_t cpuCycles);
 
 	Ay_Cpu* Cpu() override { return NULL; }
 	uint8_t* Mem() override;

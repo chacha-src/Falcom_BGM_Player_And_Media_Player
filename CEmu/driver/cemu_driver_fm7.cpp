@@ -136,7 +136,12 @@ void CDriverFm7::DeliverIrqs(uint64_t now)
 					static const uint16_t kChannel1[3] = { 0x2E9A, 0x2EBF, 0x2EE4 };
 					static const uint16_t kChannel2[3] = { 0x3040, 0x3065, 0x308A };
 					const uint16_t* channels = man2 ? kChannel2 : kChannel1;
-					if (++m[phase] >= 3) {
+					/* The real hardware timer is 488Hz, which TTLPRG divides by 3 (~162Hz).
+					   Then MANPR divides by 3 again (~54Hz channel updates).
+					   Since we are dispatching this from vsyncDue (60Hz), we must bypass
+					   MANPR's internal divide-by-3 so the tempo runs at 60Hz instead of 20Hz. */
+					m[phase] = 3;
+					if (m[phase] >= 3) {
 						m[phase] = 0;
 						if (m[active])
 							hw_->RunSubroutine(flush);
@@ -341,7 +346,6 @@ int CDriverFm7::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned
 			   five-second settle consumed its embedded title before render. */
 			RunUntil((uint64_t)cpu->cycles + settle);
 			if (!hw_->useOpn_ && hw_->patchTableBase_ == 0xFED0
-				&& titleCode_ == 0x1000
 				&& hw_->Mem()[0xFFE2] == 0xFF && hw_->Mem()[0xFFE3] == 0xFF) {
 				/* The resident handoff initialized TTLPRG but the ripped BIOS
 				   cannot return to PATCH's final STD $FFE2.  Complete that one

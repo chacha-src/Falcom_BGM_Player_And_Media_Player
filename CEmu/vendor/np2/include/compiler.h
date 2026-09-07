@@ -1,4 +1,4 @@
-/*
+﻿/*
  * compiler.h -- HOOTRIP stub
  *
  * The vendored i286c core does `#include <compiler.h>` as its first line.

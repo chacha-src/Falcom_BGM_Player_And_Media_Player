@@ -1,4 +1,4 @@
-// CPU Byte Order Utilities
+﻿// CPU Byte Order Utilities
 
 #ifndef BLARGG_ENDIAN
 #define BLARGG_ENDIAN

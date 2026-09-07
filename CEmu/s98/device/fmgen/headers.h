@@ -1,4 +1,4 @@
-#ifndef WIN_HEADERS_H
+﻿#ifndef WIN_HEADERS_H
 #define WIN_HEADERS_H
 
 #define STRICT

@@ -1,4 +1,4 @@
-// Z80 CPU emulator
+﻿// Z80 CPU emulator
 
 // Game_Music_Emu https://bitbucket.org/mpyne/game-music-emu/
 #ifndef AY_CPU_H

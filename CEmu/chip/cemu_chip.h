@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include <stdint.h>
 
 /* 音源チップ抽象 — ym2608/2203 等 */

@@ -1,4 +1,4 @@
-static UINT32 udata32, address24;
+﻿static UINT32 udata32, address24;
 static INT32 sdata32;
 static UINT16 udata16, ext16;
 static INT16 sdata16;

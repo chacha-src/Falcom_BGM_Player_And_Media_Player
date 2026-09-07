@@ -1,4 +1,4 @@
-#ifndef CEMU_V35CORE_H
+﻿#ifndef CEMU_V35CORE_H
 #define CEMU_V35CORE_H
 
 #include <stdint.h>

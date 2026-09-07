@@ -403,12 +403,14 @@ int CHardPc98::Init(const CEmuGameEntry* ge, int sampleRate)
 	} else if (isFmp && modeMidi_) {
 		chip_->Write(0, 0x2E); /* MIDI has no audible FM pitch to preserve. */
 	}
-	/* vg2 / other FMP: keep reset ÷6 pitch (no block shift). Earlier +1
-	   octave made audio high vs FmMon F-numbers (screenshot: 440Hz=A4).
-	   ymfm reports timer durations in half-master clocks, so FMP needs ×2
-	   timer compensation — scale 1 left Timer-B ~half (~50 Hz vs ~100). */
-	else if (isFmp && !modeMidi_)
-		chip_->SetTimerClockScale(2u);
+	/* vg2 / other FMP: keep reset ÷6 pitch. The old ×2/×3 here was covering
+	   for the OPNA only receiving ~42% of its master clock; now that every
+	   cpuCycles_ path feeds AdvanceOpnClocks, ymfm's Timer-A/B durations are
+	   already in master clocks and any scale would just retune the tempo. */
+	else if (isFmp && !modeMidi_) {
+		chip_->SetTimerClockScale(1u);
+		chip_->SetCarrierFadeClamp(1); /* Prevent noise on stop */
+	}
 	else
 		chip_->SetTimerClockScale(1u);
 
@@ -821,6 +823,26 @@ int CHardPc98::DeliverIrqs()
 				/* Channel control blocks sit at CS:0003/0013/… — bit0 mute. */
 				for (unsigned ch = 0; ch < 6; ++ch) {
 					const unsigned off = b70 + 0x03u + ch * 0x10u;
+					if (off < 0x200000u && (mem[off] & 1))
+						mem[off] = (uint8_t)(mem[off] & ~1u);
+				}
+			}
+		}
+	}
+	/* 46oku / MUSIC.COM: also poke INT14 CS when keepalive is armed but
+	   INT70 was not the park vector (fakecall mirror). */
+	if (musicComKeepalive_) {
+		uint8_t* mem = np2_mem();
+		if (mem) {
+			for (unsigned vec = 0x14; vec <= 0x14; ++vec) {
+				const unsigned s = (unsigned)mem[vec * 4 + 2]
+					| ((unsigned)mem[vec * 4 + 3] << 8);
+				const unsigned b = s << 4;
+				if (b + 0x2A0u >= 0x200000u) continue;
+				if (mem[b + 0x290] != 1) continue;
+				mem[b + 0x294] = 0;
+				for (unsigned ch = 0; ch < 6; ++ch) {
+					const unsigned off = b + 0x03u + ch * 0x10u;
 					if (off < 0x200000u && (mem[off] & 1))
 						mem[off] = (uint8_t)(mem[off] & ~1u);
 				}
@@ -1594,6 +1616,12 @@ int CHardPc98::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCo
 	WolfBridgeReset();
 	dosStubReady_ = 0;
 
+	/* Rhythm ROM before the DOS branch: ADPCM-A reads of an empty ROM decode
+	   into a wrapping accumulator ramp, so FMP/PMD drum tracks came out as
+	   sawtooth noise on every pc98dos title. */
+	if (opnaMode && chip_)
+		CEmuLoadExternalYm2608Adpcm(chip_);
+
 	if (isDos_)
 		return BootDos(fs, ge, titleCode);
 
@@ -1936,8 +1964,6 @@ int CHardPc98::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCo
 	opnInService_ = 0;
 	irqEdgeSeen_ = 0;
 	irqEdgeConsumed_ = 0;
-	if (opnaMode && chip_)
-		CEmuLoadExternalYm2608Adpcm(chip_);
 	return 1;
 }
 
@@ -2462,20 +2488,19 @@ int CHardPc98::RunDosDevices(const CEmuGameEntry* ge, uint64_t budgetCycles)
 					dos_.IretReturn(mem);
 					cpuCycles_ += 50;
 					TickSide(50);
+					AdvanceOpnClocks(50);
 					continue;
 				}
 				cpuCycles_ += 200;
 				TickSide(200);
+				AdvanceOpnClocks(200);
 				continue;
 			}
 			const int32_t cyc = np2_step();
 			const uint64_t u = (cyc > 0) ? (uint64_t)cyc : 1ull;
 			cpuCycles_ += u;
 			TickSide(u);
-			if (chip_ && cpuHz_ > 0 && opnHz_ > 0) {
-				uint64_t ot = u * (uint64_t)opnHz_ / (uint64_t)cpuHz_;
-				if (ot) chip_->AdvanceClocks(ot);
-			}
+			AdvanceOpnClocks(u);
 		}
 		if (IvtHooked(0xC8, 1) || IvtHooked(0xC0, 1) || IvtHooked(0xC3, 1))
 			nOk++;
@@ -2532,20 +2557,14 @@ int CHardPc98::RunDosCommand(const char* cmdline, uint64_t budgetCycles)
 			const uint64_t q = 200;
 			cpuCycles_ += q;
 			TickSide(q);
-			if (chip_ && cpuHz_ > 0 && opnHz_ > 0) {
-				uint64_t ot = q * (uint64_t)opnHz_ / (uint64_t)cpuHz_;
-				if (ot) chip_->AdvanceClocks(ot);
-			}
+			AdvanceOpnClocks(q);
 			continue;
 		}
 		const int32_t cyc = np2_step();
 		const uint64_t u = (cyc > 0) ? (uint64_t)cyc : 1ull;
 		cpuCycles_ += u;
 		TickSide(u);
-		if (chip_ && cpuHz_ > 0 && opnHz_ > 0) {
-			uint64_t ot = u * (uint64_t)opnHz_ / (uint64_t)cpuHz_;
-			if (ot) chip_->AdvanceClocks(ot);
-		}
+		AdvanceOpnClocks(u);
 	}
 	return stubState_ == 0x81 ? 1 : 0;
 }
@@ -2925,6 +2944,20 @@ int CHardPc98::BootDos(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCod
 	return 1;
 }
 
+void CHardPc98::AdvanceOpnClocks(uint64_t cpuCycles)
+{
+	if (!chip_ || cpuCycles == 0 || cpuHz_ <= 0 || opnHz_ <= 0) return;
+	/* Residual carried across calls: the old per-call truncation threw away
+	   most of a clock per instruction, and the DOS INT service path advanced
+	   cpuCycles_ without feeding the chip at all. Together the OPNA saw ~42%
+	   of its master clock, which dragged every FM timer (and so the tempo)
+	   down by the same factor. */
+	opnPumpResidual_ += cpuCycles * (uint64_t)opnHz_;
+	const uint64_t ot = opnPumpResidual_ / (uint64_t)cpuHz_;
+	opnPumpResidual_ %= (uint64_t)cpuHz_;
+	if (ot) chip_->AdvanceClocks(ot);
+}
+
 void CHardPc98::PumpCycles(uint64_t endCycle)
 {
 	CEmuHardPc98SetActive(this);
@@ -2978,29 +3011,20 @@ void CHardPc98::PumpCycles(uint64_t endCycle)
 				const uint64_t q = 50;
 				cpuCycles_ += q;
 				TickSide(q);
+				AdvanceOpnClocks(q);
 				continue;
 			}
 			const uint64_t q = 200;
 			cpuCycles_ += q;
 			TickSide(q);
-			if (chip_ && cpuHz_ > 0 && opnHz_ > 0) {
-				opnPumpResidual_ += q * (uint64_t)opnHz_;
-				uint64_t ot = opnPumpResidual_ / (uint64_t)cpuHz_;
-				opnPumpResidual_ %= (uint64_t)cpuHz_;
-				if (ot) chip_->AdvanceClocks(ot);
-			}
+			AdvanceOpnClocks(q);
 			continue;
 		}
 		const int32_t cyc = np2_step();
 		const uint64_t u = (cyc > 0) ? (uint64_t)cyc : 1ull;
 		cpuCycles_ += u;
 		TickSide(u);
-		if (chip_ && cpuHz_ > 0 && opnHz_ > 0) {
-			opnPumpResidual_ += u * (uint64_t)opnHz_;
-			uint64_t ot = opnPumpResidual_ / (uint64_t)cpuHz_;
-			opnPumpResidual_ %= (uint64_t)cpuHz_;
-			if (ot) chip_->AdvanceClocks(ot);
-		}
+		AdvanceOpnClocks(u);
 	}
 }
 
@@ -4354,7 +4378,6 @@ void CHardPc98::DrainInterrupt(uint64_t budgetCycles)
 	   or consume budget. Also keep OPN/PIT ticking so nested timer IRQs work. */
 	const uint16_t idleCs = (uint16_t)((bootCs_ != 0 || bootIp_ != 0) ? bootCs_ : 0x0060);
 	uint64_t start = cpuCycles_;
-	uint64_t opnRes = 0;
 	while (cpuCycles_ - start < budgetCycles) {
 		uint16_t cs = np2_reg_get(NP2_R_CS);
 		uint16_t ip = np2_reg_get(NP2_R_IP);
@@ -4368,12 +4391,7 @@ void CHardPc98::DrainInterrupt(uint64_t budgetCycles)
 		const uint64_t u = (cyc > 0) ? (uint64_t)cyc : 1ull;
 		cpuCycles_ += u;
 		TickSide(u);
-		if (chip_ && cpuHz_ > 0 && opnHz_ > 0) {
-			opnRes += u * (uint64_t)opnHz_;
-			uint64_t ot = opnRes / (uint64_t)cpuHz_;
-			opnRes %= (uint64_t)cpuHz_;
-			if (ot) chip_->AdvanceClocks(ot);
-		}
+		AdvanceOpnClocks(u);
 		DeliverIrqs();
 	}
 }

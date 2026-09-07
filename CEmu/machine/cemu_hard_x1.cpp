@@ -7,6 +7,7 @@
 #include "../z80/Ay_Cpu.h"
 #include <string.h>
 #include <stdlib.h>
+#include <stdio.h>
 
 enum {
 	X1_CPU_HZ = 4000000,
@@ -194,6 +195,26 @@ void CHardX1::StageBgm(uint8_t index)
 	mem_[LOAD_FLAG] = 0xff;
 }
 
+/* CEMU_X1_CTC_TRACE=1 dumps the guest's CTC programming (both the main-board
+   CTC at 1FA0 and the CZ-8BS1 sound-board CTC at 0704) so the tick source and
+   its divider can be read off instead of guessed. */
+static void X1CtcTrace(CHardX1* hw, uint16_t port, uint8_t data)
+{
+	static int mode = -1;
+	static int left = 0;
+	if (mode < 0) {
+		const char* e = getenv("CEMU_X1_CTC_TRACE");
+		mode = (e && *e && *e != '0') ? 1 : 0;
+		left = 64;
+	}
+	if (!mode || left <= 0) return;
+	left--;
+	Ay_Cpu* cpu = hw ? hw->Cpu() : NULL;
+	printf("[ctc] port=%04X data=%02X pc=%04X%s\n", port, data,
+		cpu ? cpu->r.pc : 0,
+		(data & 0x01) ? "  ctrl" : "  vec/tc");
+}
+
 void CHardX1::CtcReset()
 {
 	ctcVectorBase_ = 0;
@@ -240,6 +261,15 @@ unsigned CHardX1::CtcTimerPeriodCycles(int channel) const
 	unsigned tc = ctcTc_[channel] ? (unsigned)ctcTc_[channel] : 256u;
 	const unsigned prescale = (ctcControl_[channel] & 0x20) ? 256u : 16u;
 	return tc * prescale;
+}
+
+unsigned CHardX1::CtcCounterTc(int channel) const
+{
+	if (channel < 0 || channel > 3) return 0;
+	if (!ctcTcValid_[channel]) return 0;
+	/* Counter mode only (bit6): the channel divides its trigger input. */
+	if (!(ctcControl_[channel] & 0x40)) return 0;
+	return ctcTc_[channel] ? (unsigned)ctcTc_[channel] : 256u;
 }
 
 uint8_t CHardX1::CtcVector(int channel) const
@@ -323,6 +353,12 @@ void CHardX1::PortOut(uint16_t port, uint8_t data)
 		chipOpm_->Write((uint32_t)(p & 1), data);
 		return;
 	}
+	/* CZ-8BS1 carries its own Z80 CTC at 0704-0707 next to the OPM. */
+	if (p >= 0x0704 && p <= 0x0707) {
+		X1CtcTrace(this, p, data);
+		ioport_[p] = data;
+		return;
+	}
 	if (p == 0x1b00) {
 		/* hoot passes port>>8 to ssAY8910: 1B is odd, therefore data. */
 		if (chipAy_) chipAy_->Write(1, data);
@@ -337,6 +373,7 @@ void CHardX1::PortOut(uint16_t port, uint8_t data)
 	}
 	/* Z80 CTC: MAME maps 1FA0-1FA3 and mirror 1FA8-1FAB. */
 	if ((p >= 0x1fa0 && p <= 0x1fa3) || (p >= 0x1fa8 && p <= 0x1fab)) {
+		X1CtcTrace(this, p, data);
 		CtcWrite((int)(p & 3), data);
 		ioport_[p] = data;
 		return;

@@ -3,6 +3,10 @@
 #include "../chip/cemu_chip.h"
 #include "../cemu_zipfs.h"
 
+extern int g_traceM68kRead;
+extern int g_m68kReadCount[0x10000];
+extern int g_m68kPcmWrites;
+
 struct V35Cpu;
 struct H6280Cpu;
 struct M6502Cpu;
@@ -59,7 +63,11 @@ enum CEmuAcBoard {
 	CEMU_AC_BOARD_ROBOKID = 43,         /* UPL robokid: Z80+dual YM2203 I/O 00/80, latch@E000 */
 	CEMU_AC_BOARD_BATTLANTIS = 44,      /* Konami battlantis: Z80+dual YM3812@A000/C000, latch@E000 */
 	CEMU_AC_BOARD_ALPHA68K2 = 45,       /* Alpha 68K-II: Z80 + YM2203 + YM2413 + DAC (skyadvnt/gangwars) */
-	CEMU_AC_BOARD_ATARI_SYS1 = 46       /* Atari System1: M6502 + YM2151 (+POKEY stub) JSA */
+	CEMU_AC_BOARD_ATARI_SYS1 = 46,      /* Atari System1: M6502 + YM2151 (+POKEY stub) JSA */
+	/* Seta/Allumer and Cave have no sound CPU: the main 68000 addresses the
+	   PCM chip directly, an X1-010 RAM window on Seta and a two-port YMZ280B
+	   on Cave. 47 is already taken by the Taito F3 path. */
+	CEMU_AC_BOARD_M68K_PCM = 48
 };
 
 class CHardAc : public CHard {
@@ -138,6 +146,8 @@ public:
 	/* K053260 SH1→NMI: FA00 arms; DeliverIrqs fires while Z80 is on HALT. */
 	int KonamiSh1NmiArm() const { return konamiSh1NmiArm_; }
 	void ClearKonamiSh1NmiArm() { konamiSh1NmiArm_ = 0; }
+	uint8_t KonamiSoundCtrl() const { return konamiSoundCtrl_; }
+	CChip* KonamiPcm2() { return konamiPcm2Addr_ ? pcm2_ : NULL; }
 	/* WSG: suppress periodic NMI until first latch (boot handshake). */
 	int WsgNmiEnable() const { return wsgNmiEnable_; }
 	void SetWsgNmiEnable(int v) { wsgNmiEnable_ = v ? 1 : 0; }
@@ -203,6 +213,8 @@ public:
 	   Driven through the shared Musashi core (cemu_m68k_bus.cpp), not the Z80. */
 	int Ms1Active() const { return ms1Rom_ != NULL; }
 	unsigned Ms1RomSize() const { return ms1RomSize_; }
+	const uint8_t* Ms1Rom() const { return ms1Rom_; }
+	unsigned PcmRom2Size() const { return pcmRom2Size_; }
 	unsigned Ms1Read8(unsigned addr);
 	unsigned Ms1Read16(unsigned addr);
 	void Ms1Write8(unsigned addr, uint8_t v);
@@ -336,6 +348,11 @@ private:
 	unsigned konamiPcmAddr_;
 	unsigned konamiBankAddr_;
 	unsigned konamiPcmWindow_; /* K053260=0x40, K054539=0x230 */
+	/* Second K054539 window on the mystwarr.cpp family (0 = single chip). */
+	unsigned konamiPcm2Addr_;
+	/* Last byte written to the bank/control port. mystwarr sound_ctrl_w uses
+	   bit 4 to gate the K054539 timer onto the Z80 NMI line. */
+	uint8_t konamiSoundCtrl_;
 	int konamiSh1NmiArm_; /* FA00 write arms one SH1 NMI (Simpsons/Punk Shot) */
 
 	/* Mega System 1 68000 sound board. */
@@ -442,6 +459,14 @@ public:
 	void SnkSetYmIrq(int which, int on);
 	/* terracreMap_: 0=terracre C000 RAM + I/O latch; 1=armedf/terraf F800 RAM + shifted latch */
 	int TerracreMap() const { return terracreMap_; }
+	int M68kPcmKind() const { return m68kPcmKind_; }
+	/* Called from the 68000 slice loop so the vblank line ticks with the CPU
+	   rather than with the audio buffer. */
+	void M68kPcmTickVblank(int cycles);
+	unsigned M68kPcmRead8(unsigned addr);
+	void M68kPcmWrite8(unsigned addr, uint8_t v);
+	uint8_t* GetMs1Ram() { return ms1Ram_; }
+	unsigned GetM68kRamSize() const { return m68kRamSize_; }
 	int FlstoryNmiEn() const { return flstoryNmiEn_; }
 	int GngGaidenMap() const { return gngGaidenMap_; }
 	H8Cpu* H8CpuPtr() { return h8_; }
@@ -499,6 +524,24 @@ private:
 	int snkMapKind_; /* 0=snk68 YM3812 I/O+NMI; 1=classic mem-map dual OPL+IRQ */
 	uint8_t snkStatus_; /* classic F800 status (ym1|ym2|busy|cmd) */
 	int terracreMap_; /* 0=terracre, 1=armedf/terraf */
+	int tecmoOpl_;    /* TECMO16 map with a YM3812 instead of a YM2151 */
+	/* M68K_PCM: 1 = Seta X1-010 RAM window, 2 = Cave YMZ280B port pair.
+	   Every one of these games decodes its chip and its work RAM at a
+	   different address, so the map comes from a per-game spec rather than
+	   one shared guess (MAME seta.cpp / seta2.cpp / cave.cpp). */
+	int m68kPcmKind_;
+	unsigned m68kPcmAddr_;
+	unsigned m68kPcmSpan_;
+	unsigned m68kRamAddr_;
+	unsigned m68kRamSize_;
+	unsigned m68kIrqAddr_;   /* Cave irq_cause window, 0 when absent */
+	unsigned ms1RamAlloc_;   /* bytes actually malloc'd for ms1Ram_ */
+	/* X1-010 word writes discard their high byte; MAME parks it here so a
+	   read-back returns the whole word the program wrote. */
+	uint8_t m68kHiWord_[0x2000];
+	uint64_t m68kVblankAcc_;
+	int m68kVblankLevel_;
+	int m68kVblankPending_;
 	int flstoryNmiEn_; /* DA00 enable gate (MAME soundnmi in_set<1>) */
 
 	HD63701Cpu* hd63701_;

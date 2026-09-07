@@ -1,4 +1,4 @@
-#ifndef _EMUTYPES_H_
+﻿#ifndef _EMUTYPES_H_
 #define _EMUTYPES_H_
 
 #if defined(_MSC_VER)

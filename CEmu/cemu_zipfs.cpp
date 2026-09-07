@@ -1,4 +1,4 @@
-#include "StdAfx.h"
+﻿#include "StdAfx.h"
 #include "cemu_zipfs.h"
 #include "minizip/unzip.h"
 #include "minizip/iowin32.h"
@@ -39,13 +39,41 @@ static void CEmuZipNameSkeleton(const char* in, char* out, int outCap)
 	out[o] = 0;
 }
 
+/* Longest consecutive digit run (e.g. epr-16720.7 → "16720"). Catalog
+   often ships "16720.epr" while MAME zips use "epr-16720.7". */
+static int CEmuZipDigitRun(const char* in, char* out, int outCap)
+{
+	if (!out || outCap <= 0) return 0;
+	out[0] = 0;
+	if (!in) return 0;
+	const char* best = NULL;
+	int bestLen = 0;
+	for (const char* p = in; *p; ) {
+		if (*p < '0' || *p > '9') { p++; continue; }
+		const char* s = p;
+		while (*p >= '0' && *p <= '9') p++;
+		const int n = (int)(p - s);
+		if (n > bestLen) { best = s; bestLen = n; }
+	}
+	if (!best || bestLen < 4 || bestLen + 1 > outCap) return 0;
+	memcpy(out, best, (size_t)bestLen);
+	out[bestLen] = 0;
+	return bestLen;
+}
+
 static int CEmuZipNameFuzzy(const char* a, const char* b)
 {
 	char sa[CEMU_ROM_NAME], sb[CEMU_ROM_NAME];
 	CEmuZipNameSkeleton(a, sa, (int)sizeof(sa));
 	CEmuZipNameSkeleton(b, sb, (int)sizeof(sb));
 	if (!sa[0] || !sb[0]) return 0;
-	return CEmuZipNameMatch(sa, sb);
+	if (CEmuZipNameMatch(sa, sb)) return 1;
+	/* Digit-core: 16720.epr ↔ epr-16720.7, 16491.mpr ↔ mpr-16491.32 */
+	char da[32], db[32];
+	if (CEmuZipDigitRun(a, da, (int)sizeof(da)) && CEmuZipDigitRun(b, db, (int)sizeof(db))
+		&& CEmuZipNameMatch(da, db))
+		return 1;
+	return 0;
 }
 
 static void CEmuZipStripExt(const char* in, char* out, int outCap)

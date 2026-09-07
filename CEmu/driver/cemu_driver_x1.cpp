@@ -44,6 +44,11 @@ CDriverX1::CDriverX1()
 	, nextVsync_(0)
 	, timerPeriod_(X1_TIMER_CYCLES)
 	, vsyncPeriod_(4000000 / 60)
+	, ctc3Div_(0)
+	, ctc3Pending_(0)
+	, cpuDebt_(0)
+	, timerIrqs_(0)
+	, vsyncIrqs_(0)
 {
 }
 
@@ -94,11 +99,46 @@ void CDriverX1::DeliverIrqs(uint64_t now)
 	SyncTimerPeriodFromCtc();
 	if (!hw_ || !hw_->Cpu()) return;
 	Ay_Cpu* cpu = hw_->Cpu();
-	int timerDue = (timerPeriod_ > 0 && now >= nextTimer_) ? 1 : 0;
-	int vsyncDue = (vsyncPeriod_ > 0 && now >= nextVsync_) ? 1 : 0;
+	/* Advance the tick schedule here and keep the number of elapsed periods:
+	   a long DI/halt gap must not multi-fire, but the ch3 cascade below still
+	   has to see every ZC0 pulse that went by. */
+	int timerDue = 0;
+	uint64_t timerTicks = 0;
+	if (timerPeriod_ > 0 && now >= nextTimer_) {
+		timerDue = 1;
+		timerTicks = 1;
+		while (nextTimer_ + timerPeriod_ <= now) {
+			nextTimer_ += timerPeriod_;
+			timerTicks++;
+		}
+		nextTimer_ += timerPeriod_;
+	}
+	const int vsyncDue = (vsyncPeriod_ > 0 && now >= nextVsync_) ? 1 : 0;
 
-	/* Decay play-cmd hold once per due VSYNC (~60Hz → 90 ≈ 1.5s). */
-	if (vsyncDue && hw_->playCmdHoldIrqs_ > 0) {
+	/* The X1 (and the CZ-8BS1 sound board) wires CTC ZC0 to TRG3, so a ch3 in
+	   counter mode divides ch0's timer output instead of being a second
+	   independent source. SORCERIAN programs ch0 = prescale 256 x TC 18
+	   (868Hz) and ch3 = counter TC 15, i.e. a 57.9Hz second interrupt — the
+	   host VSYNC is not a source at all on this board. */
+	const unsigned ctc3Count = hw_->CtcTimerPeriodCycles(0) > 0
+		? hw_->CtcCounterTc(3) : 0u;
+	int ch3Due;
+	if (ctc3Count > 0) {
+		ctc3Div_ += timerTicks;
+		if (ctc3Div_ >= ctc3Count) {
+			ctc3Div_ %= ctc3Count;
+			/* ch3 always comes due on a ZC0 edge, i.e. together with ch0.
+			   The real daisy chain services ch0 first and keeps ch3's INT
+			   asserted, so latch it instead of dropping it. */
+			ctc3Pending_ = 1;
+		}
+		ch3Due = ctc3Pending_;
+	} else {
+		ch3Due = vsyncDue;
+	}
+
+	/* Decay play-cmd hold once per due ch3/VSYNC (~60Hz → 90 ≈ 1.5s). */
+	if (ch3Due && hw_->playCmdHoldIrqs_ > 0) {
 		hw_->playCmdHoldIrqs_--;
 		if (hw_->playCmdHoldIrqs_ == 0) {
 			hw_->playCmdLatch_ = 0;
@@ -116,8 +156,21 @@ void CDriverX1::DeliverIrqs(uint64_t now)
 	uint8_t vsyncVec = hw_->CtcVector(3);
 	const int ctcProgrammed = hw_->CtcVectorProgrammed();
 
-	int timerIrq = timerDue && (!ctcProgrammed || hw_->CtcIe(0));
-	int vsyncIrq = vsyncDue && (!ctcProgrammed || hw_->CtcIe(3));
+	int timerIrq = 0;
+	int vsyncIrq = 0;
+
+	if (ctcProgrammed || hw_->CtcTimerPeriodCycles(0) > 0) {
+		/* Guest drives the CTC itself, either by rewriting the IM2 vector base
+		   or by running ch0 as a real timer. Honor each channel's IE bit;
+		   injecting both host sources regardless double-steps the driver. */
+		timerIrq = timerDue && hw_->CtcIe(0);
+		vsyncIrq = ch3Due && hw_->CtcIe(3);
+	} else {
+		/* No CTC timer programmed at all — keep the hoot-style default tick
+		   plus VSYNC, which is the only thing driving those rips. */
+		timerIrq = timerDue;
+		vsyncIrq = ch3Due;
+	}
 	if (!cpu->r.iff1) {
 		timerIrq = 0;
 		vsyncIrq = 0;
@@ -127,24 +180,20 @@ void CDriverX1::DeliverIrqs(uint64_t now)
 	}
 
 	if (timerIrq) {
+		timerIrqs_++;
 		if (cpu->r.im == 2)
 			Ay_CpuIm2InterruptTo(cpu, X1Im2Target(cpu, timerVec));
 		else
 			Ay_CpuIm1Interrupt(cpu);
 	} else if (vsyncIrq) {
+		vsyncIrqs_++;
+		ctc3Pending_ = 0;
 		if (cpu->r.im == 2)
 			Ay_CpuIm2InterruptTo(cpu, X1Im2Target(cpu, vsyncVec));
 		else
 			Ay_CpuIm1Interrupt(cpu);
 	}
 
-	/* Catch up schedules to 'now' so a long DI/halt gap does not multi-fire
-	   decay or IRQ storms on the next instructions. */
-	if (timerDue && timerPeriod_ > 0) {
-		while (nextTimer_ + timerPeriod_ <= now)
-			nextTimer_ += timerPeriod_;
-		nextTimer_ += timerPeriod_;
-	}
 	if (vsyncDue && vsyncPeriod_ > 0) {
 		while (nextVsync_ + vsyncPeriod_ <= now)
 			nextVsync_ += vsyncPeriod_;
@@ -205,6 +254,11 @@ int CDriverX1::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 	cpuAcc_ = 0;
 	booted_ = 0;
 	triggered_ = 0;
+	ctc3Div_ = 0;
+	ctc3Pending_ = 0;
+	cpuDebt_ = 0;
+	timerIrqs_ = 0;
+	vsyncIrqs_ = 0;
 
 	/* titleCode 0 is a valid hoot "main theme" — do not treat as missing. */
 	titleCode_ = titleCode;
@@ -259,8 +313,15 @@ int CDriverX1::Render(int16_t* stereo, int frames)
 		int cyclesPerSample = (int)(cpuAcc_ / (int64_t)hostRate_);
 		cpuAcc_ %= (int64_t)hostRate_;
 		if (cyclesPerSample < 1) cyclesPerSample = 1;
-		const uint64_t end = (uint64_t)cpu->time() + (uint64_t)cyclesPerSample;
-		RunUntil(end);
+		/* RunUntil finishes the instruction that crosses the deadline, so the
+		   overshoot has to be carried as debt. Dropping it ran the Z80 ~4%
+		   fast, which pushed every CTC-timed X1 tempo up by the same amount. */
+		cpuDebt_ += cyclesPerSample;
+		if (cpuDebt_ > 0) {
+			const uint64_t start = (uint64_t)cpu->time();
+			RunUntil(start + (uint64_t)cpuDebt_);
+			cpuDebt_ -= (int64_t)((uint64_t)cpu->time() - start);
+		}
 		/* Keep schedule moving if we stalled under DI. */
 		const uint64_t now = (uint64_t)cpu->time();
 		if (now >= nextTimer_ + timerPeriod_ * 4)

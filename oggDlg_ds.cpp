@@ -439,6 +439,19 @@ BOOL WaitForPlaybackNotifyThreadExit(DWORD timeoutMs)
 	return exited;
 }
 
+void KillPlaybackNotifyThread()
+{
+	CSingleLock lk(&s_playNotifyThreadCs, TRUE);
+	if (s_playNotifyThread && s_playNotifyThread->m_hThread) {
+		TerminateThread(s_playNotifyThread->m_hThread, 0);
+		delete s_playNotifyThread;
+		s_playNotifyThread = nullptr;
+	}
+	thn = TRUE;
+	syukai = 0;
+	syukai2 = 1;
+}
+
 extern int g_openDecoderMode;
 
 void BeginPlaybackNotifyThread()
@@ -861,7 +874,10 @@ UINT HandleNotifications(LPVOID)
 				// 終端直前の残り実音声に短いフェードをかけてクリック/プツ音を防ぐ。
 				const __int64 remain = g_endWrittenBytes - heard;
 				const int bpf = (g_outBytesPerFrame > 0) ? g_outBytesPerFrame : 4;
-				const __int64 fadeBytes = (__int64)bpf * (__int64)wavbit_sample_Hz * 35 / 1000; // 約35ms
+				extern int g_ds_pcm_rate;
+				const int fadeHz = (g_ds_pcm_rate >= 8000) ? g_ds_pcm_rate
+					: ((wavbit_sample_Hz > 0) ? wavbit_sample_Hz : 44100);
+				const __int64 fadeBytes = (__int64)bpf * (__int64)fadeHz * 35 / 1000; // 約35ms（DS 出力基準）
 				if (remain > 0 && remain < fadeBytes && fadeBytes > 0 && !VstLiveThruIsOn()) {
 					LONG vol = (LONG)((double)DSBVOLUME_MIN * (1.0 - (double)remain / (double)fadeBytes));
 					if (vol > 0) vol = 0;

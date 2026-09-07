@@ -833,6 +833,13 @@ void CHardFm7::TriggerPlay(unsigned titleCode)
 						mem_[shadowVolume + 1] = 0x0C;
 						mem_[shadowVolume + 2] = 0x0C;
 					}
+					/* The ripped BIOS doesn't run TTLPRG to set the ISR vector
+					   if we jump straight to MANPR. Set it manually. */
+					if (mem_[0xFFE2] == 0xFF && mem_[0xFFE3] == 0xFF) {
+						const uint16_t tick = man2 ? 0x29EC : 0x28EA;
+						mem_[0xFFE2] = (uint8_t)(tick >> 8);
+						mem_[0xFFE3] = (uint8_t)(tick & 0xFF);
+					}
 					/* The missing BIOS restore also leaves AY mixer R7 at
 					   zero, enabling zero-period noise on all three audible
 					   channels. MANPR's music is tone-based; start with only

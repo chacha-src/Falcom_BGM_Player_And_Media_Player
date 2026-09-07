@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include "cemu_types.h"
 
 struct CEmuZipFs;
@@ -44,6 +44,13 @@ int CEmuCatalogParseFile(CEmuCatalog* cat, const wchar_t* xmlPath, const char* d
 int CEmuCatalogParseBuffer(CEmuCatalog* cat, const char* xmlText, const char* dataDirHint);
 
 void CEmuCatalogAssignHwIds(CEmuGameEntry* ge);
+/* Fill ge->docChipIds from the chip names written in ge->name. */
+void CEmuCatalogAssignDocChips(CEmuGameEntry* ge);
+/* Chip ids named anywhere in text, using every spelling the rips use.
+   Returns how many were written. */
+int CEmuCatalogChipsFromText(const char* text, int* ids, int maxIds);
+/* Let duplicate rows for one archive share whichever row names the chips. */
+void CEmuCatalogShareDocChips(CEmuCatalog* cat);
 
 int CEmuArchiveStemFromPath(const wchar_t* zipPath, char* out, int outCap);
 

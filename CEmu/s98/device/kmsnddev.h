@@ -1,4 +1,4 @@
-/* libnezp by Mamiya */
+﻿/* libnezp by Mamiya */
 
 #ifndef KMSNDDEV_H__
 #define KMSNDDEV_H__

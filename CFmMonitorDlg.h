@@ -52,6 +52,7 @@ private:
 	void TickFades();
 	void InvalidateDirtyRegions();
 	uint64_t HeardSample(uint32_t sampleRate);
+	uint64_t AdvanceHeard(__int64 frames, uint32_t srDump);
 	int PcmRows() const;
 	int ExRows() const;
 	int FmRows() const;

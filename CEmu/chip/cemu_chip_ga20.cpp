@@ -1,4 +1,4 @@
-#include "StdAfx.h"
+﻿#include "StdAfx.h"
 #include "cemu_chip_ga20.h"
 #include "cemu_chip.h"
 #include "../fmmon/fmmon_shadow.h"
@@ -47,6 +47,11 @@ public:
 		regs_[off] = v;
 		FmMonShadowApplyGa20Reg(off, v);
 		const int c = (int)(off >> 3);
+        // Debug
+        {
+            FILE* f = fopen("ga20_debug.txt", "a");
+            if(f) { fprintf(f, "GA20 write %02X = %02X\n", off, v); fclose(f); }
+        }
 		switch (off & 7) {
 		case 4:
 			ch_[c].rate = v;

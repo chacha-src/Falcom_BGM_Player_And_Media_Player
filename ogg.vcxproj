@@ -418,6 +418,8 @@
     <ClCompile Include="CEmu\chip\cemu_chip_rf5c68.cpp" />
     <ClCompile Include="CEmu\chip\cemu_chip_ay.cpp" />
     <ClCompile Include="CEmu\chip\cemu_chip_opl.cpp" />
+    <ClCompile Include="CEmu\chip\cemu_chip_x1_010.cpp" />
+    <ClCompile Include="CEmu\chip\cemu_chip_ymz280b.cpp" />
     <ClCompile Include="CEmu\chip\cemu_chip_saa1099.cpp" />
     <ClCompile Include="CEmu\machine\cemu_pc88.cpp" />
     <ClCompile Include="CEmu\machine\cemu_hard_pc88.cpp" />
@@ -710,6 +712,8 @@
     <ClInclude Include="CEmu\chip\cemu_chip_rf5c68.h" />
     <ClInclude Include="CEmu\chip\cemu_chip_ay.h" />
     <ClInclude Include="CEmu\chip\cemu_chip_opl.h" />
+    <ClInclude Include="CEmu\chip\cemu_chip_x1_010.h" />
+    <ClInclude Include="CEmu\chip\cemu_chip_ymz280b.h" />
     <ClInclude Include="CEmu\chip\cemu_chip_saa1099.h" />
     <ClInclude Include="CEmu\machine\cemu_pcat.h" />
     <ClInclude Include="CEmu\machine\cemu_hard_pcat.h" />

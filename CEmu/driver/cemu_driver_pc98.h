@@ -16,6 +16,7 @@ public:
 private:
 	void RunUntil(uint64_t endCycle);
 	void TickOpn(uint64_t cpuCycles);
+	void WatchdogTick();
 
 	CHardPc98* hw_;
 	int hostRate_;
@@ -27,4 +28,11 @@ private:
 	int64_t cpuAcc_;
 	int64_t cpuDebt_;
 	unsigned titleCode_;
+	/* Stall watchdog: replays the track when the sequencer goes quiet, so a
+	   rip that does not loop on its own still loops (see WatchdogTick). */
+	uint64_t wdSamples_;
+	uint64_t wdLastActive_;
+	unsigned wdMotion_;
+	unsigned wdReplays_;
+	int wdEverActive_;
 };

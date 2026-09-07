@@ -7,6 +7,7 @@
 #include "PluginKinds.h"
 #include "resource.h"
 #include "DatArchive.h"
+#include "CEmu/fmmon/fmmon_shadow.h"
 #include <algorithm>
 #include <math.h>
 #include <string.h>
@@ -1242,7 +1243,7 @@ int CFmMonitorDlg::IsYm2610Dump() const
 int CFmMonitorDlg::IsArcadePcmDump() const
 {
 	if (!m_haveDump || m_dump.version < 6) return 0;
-	return FmIsArcadePcmProfile((unsigned)m_dump.pad6[1]);
+	return FmIsArcadePcmProfile(ChipProfile());
 }
 
 unsigned CFmMonitorDlg::MsxDevMask() const
@@ -1372,15 +1373,68 @@ static int FmPlayLooksLikeKeysOnlyXsf()
 		|| FmPlayPathHasExt(L".nsf") || FmPlayPathHasExt(L".nsfe")) ? 1 : 0;
 }
 
+/* CEmu identity / dump.titleSjis ("PC-88  OPNA", "X68000  OPM", …).
+   可聴より dump が先行する量は機種で違う。PC-98 は 950ms で一致するが、
+   サンプル同期の Z80 系 (PC-88/X1/FM-7) は同じ値だと鍵盤が遅れる。 */
+static int FmPlayCemuPlatLagMs(const char* id)
+{
+	if (!id || !id[0]) return -1;
+	char tok[24];
+	int n = 0;
+	for (; id[n] && id[n] != ' ' && n < (int)sizeof(tok) - 1; n++)
+		tok[n] = id[n];
+	tok[n] = 0;
+
+	if (_stricmp(tok, "PC-98") == 0 || _stricmp(tok, "PC/AT") == 0)
+		return 950;
+	if (_stricmp(tok, "PC-88") == 0 || _stricmp(tok, "PC-80") == 0
+		|| _stricmp(tok, "PC80SR") == 0)
+		return 950; /* 550 だと表示が ~100ms 先行 */
+	if (_stricmp(tok, "X1") == 0)
+		return 550;
+	if (_stricmp(tok, "FM-7") == 0 || _stricmp(tok, "FM7") == 0)
+		return 550;
+	if (_stricmp(tok, "MSX") == 0)
+		return 600;
+	if (_stricmp(tok, "FM") == 0 && strstr(id, "Towns"))
+		return 650;
+	if (_stricmp(tok, "X68000") == 0 || _stricmp(tok, "X68k") == 0
+		|| _stricmp(tok, "X68") == 0)
+		return 700;
+	if (_stricmp(tok, "CPS") == 0 || _stricmp(tok, "Sys16") == 0
+		|| _stricmp(tok, "Sys18") == 0 || _stricmp(tok, "Sys32") == 0
+		|| _stricmp(tok, "Sega") == 0 || _stricmp(tok, "SegaOut") == 0
+		|| _stricmp(tok, "Namco") == 0 || _stricmp(tok, "Taito") == 0
+		|| _stricmp(tok, "Konami") == 0 || _stricmp(tok, "NeoGeo") == 0
+		|| _stricmp(tok, "GNG") == 0 || _stricmp(tok, "AC") == 0
+		|| _stricmp(tok, "VSys") == 0 || _stricmp(tok, "MD") == 0
+		|| _stricmp(tok, "SC-3000") == 0)
+		return 800;
+	/* titleSjis 全文フォールバック（空白無しの古いラベル等） */
+	if (strstr(id, "PC-98") || strstr(id, "PC/AT")) return 950;
+	if (strstr(id, "PC-88") || strstr(id, "PC-80")) return 950;
+	if (strstr(id, "X68000") || strstr(id, "X68k")) return 700;
+	if (strstr(id, "FM Towns")) return 650;
+	return -1;
+}
+
 static int FmPlayHeardLagMs()
 {
+	char plat[24] = {};
+	char chip[40] = {};
+	FmMonShadowGetIdentity(plat, (unsigned)sizeof(plat), chip, (unsigned)sizeof(chip));
+	const int fromIdent = FmPlayCemuPlatLagMs(plat);
+	if (fromIdent >= 0)
+		return fromIdent;
+
 	if (FmPlayLooksLikeFpy() || FmPlayLooksLikeFmp()) return 700;
 	/* keys-only XSF 系: 600 だと表示が少し先行 → +150ms */
 	if (FmPlayLooksLikeKeysOnlyXsf()) return 750;
 	/* KSS: KPI/DS が大きな塊で playb が進むため GDI 追従だとかたまる。
 	   dump 最新−ラグで追う前提の遅延（ホスト先行分）。 */
 	if (FmPlayPathHasExt(L".kss")) return 600; /* 500 でも僅かに先行 → +100ms */
-	if (FmPlayPathHasExt(L".zip")) return 600; /* CEmu hoot archive */
+	/* CEmu zip: 機種不明時は中間値（旧一律 950 は PC-88 等で鍵盤遅れ） */
+	if (FmPlayPathHasExt(L".zip")) return 750;
 	if (FmPlayPathHasExt(L".s98") || FmPlayPathHasExt(L".vgm") || FmPlayPathHasExt(L".vgz")
 		|| FmPlayPathHasExt(L".hes") || FmPlayPathHasExt(L".gym") || FmPlayPathHasExt(L".ssl")
 		|| FmPlayPathHasExt(L".dro") || FmPlayPathHasExt(L".cym") || FmPlayPathHasExt(L".mym")
@@ -1416,6 +1470,35 @@ static int FmPlayPreferDumpClock()
 	return 0;
 }
 
+/* 可聴位置の後処理。停止時アンカー、シーク巻き戻し、微小揺らぎでノートが
+   前後して交互に見えるのを防ぐ単調化。どの計測経路からも通る。
+   ただし DS heard はプリフィル直後に queued≈0 で尖り、その後キューが立つと下がる。
+   200ms 未満の下降を全部潰すと尖りが残り、鍵盤がデコード先頭に張り付く。 */
+uint64_t CFmMonitorDlg::AdvanceHeard(__int64 frames, uint32_t srDump)
+{
+	extern int playy;
+	if (frames < 0) frames = 0;
+	uint64_t heard = (uint64_t)frames;
+
+	if (playy == 0) {
+		m_heardAnchor = heard;
+		m_lastHeardSamp = heard;
+		return heard;
+	}
+	/* シーク／DS 尖り補正: 約 20ms 超の後退は採用（旧 200ms 閾値は尖りが残った） */
+	const uint64_t catchDown = (srDump > 50u) ? (uint64_t)(srDump / 50u) : 1u;
+	if (m_lastHeardSamp > 0 && heard + catchDown < m_lastHeardSamp) {
+		m_heardAnchor = heard;
+		m_lastHeardSamp = heard;
+		return heard;
+	}
+	if (heard < m_lastHeardSamp)
+		heard = m_lastHeardSamp;
+	m_heardAnchor = heard;
+	m_lastHeardSamp = heard;
+	return heard;
+}
+
 uint64_t CFmMonitorDlg::HeardSample(uint32_t sampleRate)
 {
 	extern int playy;
@@ -1435,9 +1518,29 @@ uint64_t CFmMonitorDlg::HeardSample(uint32_t sampleRate)
 	if (useDumpClock) {
 		const int li = (m_histHead + m_histN - 1) % HIST_MAX;
 		const uint64_t latest = m_histSamp[li];
+		/* CEmu: 固定msラグは捨てる。可聴は DS g_heardBytes（OggGetHeardPcmFrames が
+		   アップスケール時もソース空間へ換算）。dump.curSample と同じ単位で比較する。 */
+		if (IsCemuMode(mode)) {
+			const int srSrc = (wavbit_sample_Hz > 0) ? wavbit_sample_Hz : (int)srDump;
+			frames = OggGetHeardPcmFrames();
+			if (frames < 0) frames = 0;
+			if (srSrc != (int)srDump && srSrc > 0)
+				frames = frames * (__int64)srDump / (__int64)srSrc;
+			return AdvanceHeard(frames, srDump);
+		}
 		unsigned lagMs = (unsigned)FmPlayHeardLagMs();
-		/* 拡張子判定漏れでも keys-only dump は同系の遅れを使う */
-		if ((lastFlags & SASAMI_FMMON_FLAG_KEYSONLY) && lagMs < 750u)
+		/* dump 側 identity が取れているときはそちらを優先（機種別補正） */
+		{
+			const int fromDump = FmPlayCemuPlatLagMs(m_hist[li].titleSjis);
+			if (fromDump >= 0)
+				lagMs = (unsigned)fromDump;
+		}
+		/* keys-only XSF 系のみ下限。CEmu OPN(A) フル dump には掛けない
+		   （PC-88 を 550 にしても 750 へ押し上げて再び遅れるのを防ぐ） */
+		if ((lastFlags & SASAMI_FMMON_FLAG_KEYSONLY)
+			&& !(lastFlags & SASAMI_FMMON_FLAG_MSX)
+			&& FmPlayLooksLikeKeysOnlyXsf()
+			&& lagMs < 750u)
 			lagMs = 750u;
 		const uint64_t lag = (uint64_t)srDump * lagMs / 1000u;
 		frames = (latest > lag) ? (__int64)(latest - lag) : 0;
@@ -1453,26 +1556,7 @@ uint64_t CFmMonitorDlg::HeardSample(uint32_t sampleRate)
 		if (srSrc != (int)srDump)
 			frames = frames * (__int64)srDump / (__int64)srSrc;
 	}
-	if (frames < 0) frames = 0;
-	uint64_t heard = (uint64_t)frames;
-
-	if (playy == 0) {
-		m_heardAnchor = heard;
-		m_lastHeardSamp = heard;
-		return heard;
-	}
-	/* シーク巻き戻し（大きく戻ったときだけ） */
-	if (m_lastHeardSamp > 0 && heard + (uint64_t)(srDump / 5) < m_lastHeardSamp) {
-		m_heardAnchor = heard;
-		m_lastHeardSamp = heard;
-		return heard;
-	}
-	/* GDI 時刻の微小揺らぎで dump が前後するとノートが交互に見える */
-	if (heard < m_lastHeardSamp)
-		heard = m_lastHeardSamp;
-	m_heardAnchor = heard;
-	m_lastHeardSamp = heard;
-	return heard;
+	return AdvanceHeard(frames, srDump);
 }
 
 int CFmMonitorDlg::ContentHeight(int dpi, int pcmRows) const
@@ -2694,11 +2778,18 @@ void CFmMonitorDlg::DrawHexArea(CDC& dc)
 	dc.FillSolidRect(m_lay.rcHex, FM_BG);
 	if (IsOpmDump() && HasViewRegs()) {
 		DrawHexBank(dc, m_lay.hexX, m_lay.gridY0, m_lay.cellW, m_lay.cellH, m_lay.gapExtra, 0x000, L"OPM $00-$FF");
-		CGdiObject* old = dc.SelectStockObject(DEFAULT_GUI_FONT);
-		dc.SetBkMode(TRANSPARENT);
-		dc.SetTextColor(RGB(120, 130, 140));
-		dc.TextOut(m_lay.hexX, m_lay.gridY1, L"(YM2151 single map)");
-		dc.SelectObject(old);
+		const int ga20 = (m_haveDump && m_dump.titleSjis[0]
+			&& strstr(m_dump.titleSjis, "GA20")) ? 1 : 0;
+		if (ga20) {
+			DrawHexBank(dc, m_lay.hexX, m_lay.gridY1, m_lay.cellW, m_lay.cellH, m_lay.gapExtra, 0x100,
+				L"GA20 $00-$1F (@$100)");
+		} else {
+			CGdiObject* old = dc.SelectStockObject(DEFAULT_GUI_FONT);
+			dc.SetBkMode(TRANSPARENT);
+			dc.SetTextColor(RGB(120, 130, 140));
+			dc.TextOut(m_lay.hexX, m_lay.gridY1, L"(YM2151 single map)");
+			dc.SelectObject(old);
+		}
 		return;
 	}
 		if (IsOplDump() && HasViewRegs()) {
@@ -3638,10 +3729,20 @@ void CFmMonitorDlg::DrawArcadePcmChPanel(CDC& dc, const CRect& rc, int ch, unsig
 		pitch = b(0x02) | (b(0x03) << 8);
 		ctl = b(0x08);
 	} else if (profile == SASAMI_FMMON_KEYS_OKI) {
-		ctl = b(0);
-		vol = b(0x10 + ch) ? 255 : 0;
-		pan = ch;
-		pitch = b(1);
+		const int ga20 = (m_haveDump && m_dump.titleSjis[0]
+			&& strstr(m_dump.titleSjis, "GA20")) ? 1 : 0;
+		if (ga20) {
+			const int base = 0x100 + ch * 8;
+			pitch = b(base + 4);
+			vol = b(base + 5);
+			ctl = b(base + 6);
+			pan = ch;
+		} else {
+			ctl = b(0);
+			vol = b(0x10 + ch) ? 255 : 0;
+			pan = ch;
+			pitch = b(1);
+		}
 	}
 
 	const int live = FmMonIsLive();
@@ -3752,8 +3853,10 @@ void CFmMonitorDlg::DrawPanelsArea(CDC& dc)
 	}
 	if (IsOpmDump() && HasViewPanels()) {
 		dc.FillSolidRect(m_lay.rcPanels, FM_BG);
+		const int ga20 = (m_haveDump && m_dump.titleSjis[0]
+			&& strstr(m_dump.titleSjis, "GA20")) ? 1 : 0;
 		const int cols = 4;
-		const int rows = 2;
+		const int rows = ga20 ? 3 : 2; /* 8 OPM + optional 4 GA20 */
 		const int gap = m_lay.gap;
 		const int pw = (m_lay.rcPanels.Width() - gap * (cols - 1) - 8) / cols;
 		const int ph = (m_lay.rcPanels.Height() - gap * (rows - 1) - 8) / rows;
@@ -3766,6 +3869,18 @@ void CFmMonitorDlg::DrawPanelsArea(CDC& dc)
 				m_lay.fmX + 4 + c * (pw + gap) + pw,
 				m_lay.topY + 4 + r * (ph + gap) + ph);
 			DrawOpmChPanel(dc, pr, i);
+		}
+		if (ga20) {
+			for (int i = 0; i < 4; i++) {
+				const int c = i % cols;
+				const int r = 2;
+				CRect pr(
+					m_lay.fmX + 4 + c * (pw + gap),
+					m_lay.topY + 4 + r * (ph + gap),
+					m_lay.fmX + 4 + c * (pw + gap) + pw,
+					m_lay.topY + 4 + r * (ph + gap) + ph);
+				DrawArcadePcmChPanel(dc, pr, i, SASAMI_FMMON_KEYS_OKI);
+			}
 		}
 		m_panelDirtyMask = 0;
 		return;
@@ -4279,6 +4394,9 @@ int CFmMonitorDlg::PollDump()
 	}
 	if (bestN < 0) {
 		if (!FmMonIsLive())
+			return m_haveDump ? 1 : 0;
+		/* CEmu は未来 dump を出さない（鍵盤先行の元）。KPI/.fpy のみ最古で始動 */
+		if (IsCemuMode(mode))
 			return m_haveDump ? 1 : 0;
 		/* 可聴より先だけ（起動直後・ラグ中）→ 最古を出して始動。出さないと .fpy が無描画 */
 		uint64_t minS = UINT64_MAX;

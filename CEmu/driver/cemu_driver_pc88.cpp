@@ -1,6 +1,7 @@
-﻿#include "StdAfx.h"
+#include "StdAfx.h"
 #include "cemu_driver_pc88.h"
 #include "../machine/cemu_hard_pc88.h"
+#include "../chip/cemu_chip_opna.h"
 #include "../z80/Ay_Cpu.h"
 #include <string.h>
 
@@ -12,7 +13,12 @@ enum {
 	VEC_RTC = 0x04,
 	VEC_SOUND = 0x08,
 	RTC_HZ = 600,
-	VRTC_MILLIHZ = 56400
+	VRTC_MILLIHZ = 56400,
+	/* Longest silence a real PC-88 track holds mid-song is well under this;
+	   past it the rip has stopped rather than resting. Players rewrite F-num
+	   for vibrato every few frames, so 2s of total register stillness is
+	   never part of a live song. */
+	WD_IDLE_MS = 2000
 };
 
 CDriverPc88::CDriverPc88()
@@ -31,6 +37,14 @@ CDriverPc88::CDriverPc88()
 	, opnResidual_(0)
 	, cpuAcc_(0)
 	, cpuCycleBudget_(0)
+	, wdSamples_(0)
+	, wdLastActive_(0)
+	, wdMotion_(0)
+	, wdTimerFires_(0)
+	, wdReplays_(0)
+	, wdEverActive_(0)
+	, wdArmedTick_(0)
+	, replayPending_(0)
 {
 }
 
@@ -57,6 +71,14 @@ int CDriverPc88::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigne
 	booted_ = 0;
 	triggered_ = 0;
 	forceEiBoot_ = 0;
+	wdSamples_ = 0;
+	wdLastActive_ = 0;
+	wdMotion_ = 0;
+	wdTimerFires_ = 0;
+	wdReplays_ = 0;
+	wdEverActive_ = 0;
+	wdArmedTick_ = 0;
+	replayPending_ = 0;
 	if (!hw_->LoadRoms(fs, ge, titleCode))
 		return 0;
 	/* Boot: let PATCH reach poll loop. Cap at ~1.0s. feris/gunyu clobber
@@ -109,7 +131,9 @@ int CDriverPc88::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigne
 			/* JR-entry: stop once poll is live, except ashe (DRIVER@7800)
 			   which needs the full ~1s settle — early exit keeps peak=0.
 			   Also: poll bytes are static in PATCH; do not stop while PC is
-			   still before the poll (lizard88/gineiden/gallforc decrypt). */
+			   still before the poll (lizard88/gineiden/gallforc decrypt).
+			   iceclimb88: VRTC during settle can enter the cmd handler
+			   (pc past FE/CP); stopping there left B816=FF forever. */
 			if (nowPoll >= 0 && cpu->r.pc < 0x80) {
 				if (jrEntry) {
 					if (mem[0x7800] == 0xC3)
@@ -118,14 +142,26 @@ int CDriverPc88::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigne
 						continue;
 					if ((int)cpu->r.pc < nowPoll)
 						continue;
+					/* Require PC exactly on IN A,(00) — JR Z disp FB must not
+					   be treated as an opcode. */
+					if ((int)cpu->r.pc != nowPoll)
+						continue;
 					break;
 				}
 				if (cpu->r.iff1)
 					break;
 			}
 		}
+		/* If settle ended mid cmd-handler, snap back to the poll wait. */
+		if (cpu && mem && pollAt >= 0 && cpu->r.pc < 0x80
+			&& (int)cpu->r.pc > pollAt) {
+			cpu->r.pc = (uint16_t)pollAt;
+			cpu->r.iff1 = 1;
+			hw_->cmd = 0;
+		}
 	}
 	hw_->FixupIm2AfterBoot();
+	hw_->PruneDeadTickSources();
 	/* Wing destge/hadou-class: still DI after settle with I=F3 + sound vec
 	   in Cxxx + high CALL under DI (NeedsBootEiPulse). Bare I=F3 (pocky2)
 	   must not match. gunyu has FB in PATCH so ends settle with iff1=1.
@@ -196,6 +232,31 @@ int CDriverPc88::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigne
 			mem[0xf0bc] = 0x44;
 			mem[0xf0bd] = 0x46;
 		}
+	}
+	/* Final park on poll wait — VRTC during settle/EI-pulse can leave PC
+	   in the cmd dispatcher (iceclimb88 B816 stuck at ROM FF). Only the
+	   IN A,(00) address is safe; sitting on the JR Z displacement (FB)
+	   executes EI as an opcode and skips the mailbox plant. */
+	{
+		Ay_Cpu* cpu = hw_->Cpu();
+		uint8_t* mem = hw_->Mem();
+		if (cpu && mem && cpu->r.pc < 0x80) {
+			for (int i = 0; i + 4 < 0x70; i++) {
+				if (mem[i] == 0xDB && mem[i + 1] == 0x00
+					&& mem[i + 2] == 0xB7 && mem[i + 3] == 0x28
+					&& (int)cpu->r.pc != i) {
+					cpu->r.pc = (uint16_t)i;
+					hw_->cmd = 0;
+					break;
+				}
+			}
+		}
+		/* lizard88's (A572) is deliberately left alone. The RET Z that reads
+		   it sits at A3A3, in A376's epilogue after CALL A3B0 has already
+		   played the song, so a zero there never blocked the player; what it
+		   does gate is the stop routine, where zero is the branch that
+		   actually writes OPN 07-0E and silences the chip. See
+		   CHardPc88::ArmLizardOpnTimer. */
 	}
 	booted_ = 1;
 	return 1;
@@ -296,15 +357,44 @@ void CDriverPc88::RunUntil(uint64_t endCycle)
 	}
 }
 
-int CDriverPc88::Render(int16_t* stereo, int frames)
+/* PATCH command poll — `IN A,(00) / OR A / JR Z,-` in the page-0 stub. */
+int CDriverPc88::FindPollLoop() const
 {
-	if (!hw_ || !stereo || frames <= 0) return 0;
-	Ay_Cpu* cpu = hw_->Cpu();
-	CChip* chip = hw_->SoundChip();
-	if (!cpu || !chip) return 0;
+	const uint8_t* mem = hw_ ? hw_->Mem() : NULL;
+	if (!mem) return -1;
+	for (int i = 0; i + 4 < 0x70; i++) {
+		if (mem[i] == 0xDB && mem[i + 1] == 0x00
+			&& mem[i + 2] == 0xB7 && mem[i + 3] == 0x28)
+			return i;
+	}
+	return -1;
+}
+
+/* A replay only lands if the guest is sitting in that poll. When a stalled rip
+   has wandered off instead — runaway PC, or a player idle loop it never leaves
+   — park it back at the poll with a usable stack first. */
+void CDriverPc88::Unwedge()
+{
+	Ay_Cpu* cpu = hw_ ? hw_->Cpu() : NULL;
+	if (!cpu || cpu->r.pc < 0x80) return;
+	const int pollAt = FindPollLoop();
+	if (pollAt < 0) return;
+	cpu->r.pc = (uint16_t)pollAt;
+	if (cpu->r.sp < 0x0200 || cpu->r.sp >= 0xF000)
+		cpu->r.sp = 0x0200;
+	cpu->r.iff1 = 1;
+	hw_->cmd = 0;
+}
+
+/* Song start. Split out of Render so the stall watchdog can re-kick a rip
+   exactly the way it was first started. */
+void CDriverPc88::TriggerPlay()
+{
+	Ay_Cpu* cpu = hw_ ? hw_->Cpu() : NULL;
+	if (!cpu) return;
 	CEmuHardPc88SetActive(hw_);
-	if (hw_->NeedsN88RtcGuard())
-		hw_->GuardN88RtcVector();
+	if (wdReplays_ > 0)
+		Unwedge();
 	if (!triggered_) {
 		/* Re-stage song at mdata/vdata in case boot clobbered it — but not
 		   when mdata sits on the PATCH/stack page. Use full titleCode_ so
@@ -383,6 +473,22 @@ int CDriverPc88::Render(int16_t* stereo, int frames)
 				if (mem)
 					mem[0x14F4] = (uint8_t)(mem[0x14F4] | 0x01);
 				cpu->r.iff1 = 1;
+			} else if (!hw_->PlayKickInitOff()
+				&& base >= 0xb000 && base < 0xe000) {
+				/* yokosuka SOUND@B5C3: PATCH cmd=1 (param!=FF) does
+				   DI; CALL SOUND+0x1BD and returns to the poll loop.
+				   Host DirectPlayKick of the same entry nested inside a
+				   short cmd RunUntil and muted FM; let PATCH finish the
+				   CALL, then EI for RTC. Effects: param=FF → (E23C). */
+				hw_->cmd = 1;
+				for (int step = 0; step < 256; step++) {
+					RunUntil((uint64_t)cpu->time() + (uint64_t)cpuHz_ / 64);
+					if (step >= 4 && cpu->r.pc < 0x80 && hw_->cmd == 0)
+						break;
+				}
+				hw_->cmd = 0;
+				if (hw_->PlayKickEi() && !cpu->r.iff1)
+					cpu->r.iff1 = 1;
 			} else {
 				hw_->cmd = 1;
 				if (hw_->PlayKickInitOff()) {
@@ -400,6 +506,21 @@ int CDriverPc88::Render(int16_t* stereo, int frames)
 				hw_->DirectPlayKick(base, hw_->PlayKickEi());
 			}
 		} else {
+			/* DI while PATCH consumes cmd=1. hangon88/iceclimb poll under EI;
+			   an RTC/VRTC tick between IN A,(01) and LD (mailbox),A clobbers
+			   A (0x8F→0x80) or skips the store (B816 stays ROM FF). Also
+			   clear B so ED 49 OUT (C),C with C=0 hits port 0. */
+			const int wantEi = cpu->r.iff1 || hw_->NeedsPlayEi();
+			uint8_t* mem = hw_->Mem();
+			/* yaksa PATCH2 polls under DI + use_vrtc; play CALL needs EI.
+			   Do NOT key this off NeedsPlayEi() — forcePlayEi titles
+			   (and makai with use_vrtc) must still drain cmd under DI or
+			   VRTC nests into the handler and parks mid-ISR. */
+			const int keepEiForVrtcLoad = hw_->useVrtc && !cpu->r.iff1
+				&& mem && mem[0] == 0x18;
+			if (!keepEiForVrtcLoad)
+				cpu->r.iff1 = 0;
+			cpu->r.b.b = 0;
 			hw_->cmd = 1;
 			if (hw_->IsSchemeOpna()) {
 				hw_->SchemePlayTrigger(hw_->titleCode_);
@@ -412,7 +533,6 @@ int CDriverPc88::Render(int16_t* stereo, int frames)
 			/* spitfl88 only: let PATCH arm A6A9, then re-assert A824 (boot
 			   CALL A826 clears it when mid-RAM 79D7 < 0x34). Must not run for
 			   Game Arts kick titles (jikochu*) — A6A9/A824 collide with music. */
-			uint8_t* mem = hw_->Mem();
 			if (mem && hw_->useRtc && mem[0xA826] == 0xF3
 				&& mem[0xA830] == 0xFE && mem[0xA831] == 0x34) {
 				RunUntil((uint64_t)cpu->time() + (uint64_t)cpuHz_ / 32);
@@ -424,6 +544,10 @@ int CDriverPc88::Render(int16_t* stereo, int frames)
 			if (hw_->NeedsGineidenArm()) {
 				RunUntil((uint64_t)cpu->time() + (uint64_t)cpuHz_ / 8);
 				hw_->ArmGineidenOpnTimer();
+			}
+			if (hw_->NeedsLizardArm()) {
+				RunUntil((uint64_t)cpu->time() + (uint64_t)cpuHz_ / 8);
+				hw_->ArmLizardOpnTimer();
 			}
 			if (hw_->NeedsNavituneArm()) {
 				/* 1) Port-play with BC=mdata binds phrase banks.
@@ -445,14 +569,159 @@ int CDriverPc88::Render(int16_t* stereo, int frames)
 				RunUntil((uint64_t)cpu->time() + (uint64_t)cpuHz_ / 8);
 				hw_->ArmYakyufanPlay();
 			}
+			/* Drain cmd under DI before sample loop re-enables IRQs. */
+			int pollAt = -1;
+			if (mem) {
+				for (int i = 0; i + 4 < 0x70; i++) {
+					if (mem[i] == 0xDB && mem[i + 1] == 0x00
+						&& mem[i + 2] == 0xB7 && mem[i + 3] == 0x28) {
+						pollAt = i;
+						break;
+					}
+				}
+			}
+			int sawDispatch = (pollAt < 0);
+			const int drainSteps = hw_->NeedsLongPlayDrain() ? 512 : 64;
+			for (int step = 0; step < drainSteps; step++) {
+				RunUntil((uint64_t)cpu->time() + (uint64_t)cpuHz_ / 64);
+				if (pollAt >= 0 && cpu->r.pc < 0x80 && (int)cpu->r.pc > pollAt + 4)
+					sawDispatch = 1;
+				/* 1942 ADEE lives at 0034 (still <0x80). Breaking on any
+				   page0 PC aborts mid-LDIR before A343 arms I+Timer. */
+				if (hw_->NeedsLongPlayDrain()) {
+					if (step >= 8 && hw_->cmd == 0 && pollAt >= 0
+						&& (int)cpu->r.pc == pollAt && sawDispatch)
+						break;
+					continue;
+				}
+				if (step >= 2 && hw_->cmd == 0 && cpu->r.pc < 0x80
+					&& sawDispatch
+					&& (pollAt < 0 || (int)cpu->r.pc <= pollAt + 4))
+					break;
+			}
+			hw_->cmd = 0;
 			hw_->FixupIm2AfterPlay();
+			if (hw_->NeedsLongPlayDrain() && hw_->SoundChip() && cpu) {
+				/* 1942 A343 ends with mode 2A; ensure Timer B is live and
+				   port32 is unmasked so AD92 can sequence FM. */
+				hw_->PortOut(0x44, 0x26);
+				hw_->PortOut(0x45, 0xCF);
+				hw_->PortOut(0x44, 0x27);
+				hw_->PortOut(0x45, 0x2A);
+				hw_->PortOut(0x32, (uint8_t)(hw_->PortIn(0x32) & 0x7F));
+				cpu->r.iff1 = 1;
+			}
 			if (hw_->NeedsDeferredRtc()) {
 				RunUntil((uint64_t)cpu->time() + (uint64_t)cpuHz_ / 8);
 				hw_->EnableDeferredRtc();
 			}
+			if (wantEi)
+				cpu->r.iff1 = 1;
 		}
 		triggered_ = 1;
 	}
+}
+
+static unsigned s_wdReplayCount = 0;
+static int s_wdEnabled = 1;
+
+unsigned CEmuPc88WatchdogReplays() { return s_wdReplayCount; }
+void CEmuPc88WatchdogResetCount() { s_wdReplayCount = 0; }
+void CEmuPc88WatchdogSetEnabled(int on) { s_wdEnabled = on ? 1 : 0; }
+
+/* Stall watchdog for a boot that left the player with no way to run: the guest
+   turned interrupts off, it masked the sound IRQ, or nothing at all is ticking.
+   Note motion (key-ons + F-num + SSG period changes) is the liveness signal —
+   idle register polling does not count as playing — and the whole thing
+   disarms itself the moment notes appear.
+
+   It deliberately will NOT restart a track that has played. Re-running the
+   play kick over a live player resumes from whatever state its RAM is in, so
+   what came out was a garbled half-restart every couple of seconds, and a
+   real defect (yokosuka: the port-70h text window went unemulated, so the
+   sequencer read its note lengths from the wrong page and died a second in)
+   sounded like a bad loop instead of showing up as the stall it was. A clean
+   restart would mean re-reading the roms, and the zip is closed once Open
+   returns, so the honest choice is to leave a finished song silent and fix
+   whatever stopped it. */
+void CDriverPc88::WatchdogTick()
+{
+	Ay_Cpu* cpu = hw_ ? hw_->Cpu() : NULL;
+	CChip* chip = hw_ ? hw_->SoundChip() : NULL;
+	if (!cpu || !chip || sampleRate_ < 1 || !s_wdEnabled) return;
+
+	unsigned w = 0, k = 0, f = 0, s = 0, m = 0;
+	CEmuChipYm2608GetPlayMetrics(chip, &w, &k, &f, &s, &m);
+	const unsigned motion = k + f + s;
+	if (motion != wdMotion_) {
+		wdMotion_ = motion;
+		wdLastActive_ = wdSamples_;
+		wdEverActive_ = 1;
+		return;
+	}
+	const uint64_t idleLimit = (uint64_t)sampleRate_ * WD_IDLE_MS / 1000u;
+	if (wdSamples_ - wdLastActive_ < idleLimit)
+		return;
+	wdLastActive_ = wdSamples_;
+
+	/* Cheap and idempotent, so apply both every time rather than spending a
+	   timeout each — the gap between loops is audible. */
+	const int haveVec = Ay_CpuIm2Target(cpu, VEC_SOUND)
+		|| Ay_CpuIm2Target(cpu, VEC_VRTC) || Ay_CpuIm2Target(cpu, VEC_RTC);
+	if (!cpu->r.iff1 && cpu->r.im == 2 && haveVec)
+		cpu->r.iff1 = 1;
+	if (hw_->soundIrqMasked && Ay_CpuIm2Target(cpu, VEC_SOUND))
+		hw_->PortOut(0x32, (uint8_t)(hw_->PortIn(0x32) & 0x7F));
+
+	unsigned fa = 0, fb = 0, ip = 0;
+	CEmuChipYm2608GetTimerDebug(chip, &fa, &fb, &ip);
+	const int ticking = (fa + fb) != wdTimerFires_;
+	wdTimerFires_ = fa + fb;
+	/* Some rips (mappy88, jikochu*) leave the play call to write the opening
+	   notes inline and never program a tick, so the sequencer advances once
+	   and stops. Give the installed vector a clock — once only, and only when
+	   the boot really left every source dead. */
+	if (!wdArmedTick_ && !ticking && !hw_->useVrtc && !hw_->useRtc) {
+		wdArmedTick_ = 1;
+		if (Ay_CpuIm2Target(cpu, VEC_SOUND)) {
+			hw_->ArmFallbackOpnTimer();
+			return;
+		}
+		if (Ay_CpuIm2Target(cpu, VEC_VRTC)) {
+			hw_->useVrtc = 1;
+			nextVrtc_ = (uint64_t)cpu->time() + vrtcPeriod_;
+			return;
+		}
+		if (Ay_CpuIm2Target(cpu, VEC_RTC)) {
+			hw_->useRtc = 1;
+			nextRtc_ = (uint64_t)cpu->time() + rtcPeriod_;
+			return;
+		}
+	}
+	/* Last resort, and only while the track has never made a note: the kick
+	   may have raced the boot. Once anything has sounded, stop interfering. */
+	if (wdEverActive_ || wdReplays_ >= 4)
+		return;
+	wdReplays_++;
+	s_wdReplayCount++;
+	replayPending_ = 1;
+}
+
+int CDriverPc88::Render(int16_t* stereo, int frames)
+{
+	if (!hw_ || !stereo || frames <= 0) return 0;
+	Ay_Cpu* cpu = hw_->Cpu();
+	CChip* chip = hw_->SoundChip();
+	if (!cpu || !chip) return 0;
+	CEmuHardPc88SetActive(hw_);
+	if (hw_->NeedsN88RtcGuard())
+		hw_->GuardN88RtcVector();
+	if (replayPending_) {
+		replayPending_ = 0;
+		triggered_ = 0;
+	}
+	if (!triggered_)
+		TriggerPlay();
 	if (hostRate_ < 1 || cpuHz_ < 1) return 0;
 	for (int i = 0; i < frames; i++) {
 		cpuAcc_ += (int64_t)cpuHz_;
@@ -494,6 +763,16 @@ int CDriverPc88::Render(int16_t* stereo, int frames)
 		if (hw_->NeedsN88RtcGuard() && (i & 63) == 0)
 			hw_->GuardN88RtcVector();
 		chip->Render(stereo + i * 2, 1);
+		if ((++wdSamples_ & 511) == 0) {
+			WatchdogTick();
+			/* Replay in place: deferring to the next Render() call would add
+			   that call's whole buffer to the gap between loops. */
+			if (replayPending_) {
+				replayPending_ = 0;
+				triggered_ = 0;
+				TriggerPlay();
+			}
+		}
 	}
 	/* FmMon AddSamples/Flush は readcemu 側のみ（二重だと curSample が 2 倍進み同期が崩れる） */
 	return frames;

@@ -1,4 +1,4 @@
-#include "s98types.h"
+﻿#include "s98types.h"
 
 #ifndef S_LOGTBL_H__
 #define S_LOGTBL_H__

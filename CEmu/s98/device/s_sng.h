@@ -1,4 +1,4 @@
-#ifndef S_SNG_H__
+﻿#ifndef S_SNG_H__
 #define S_SNG_H__
 
 #include "kmsnddev.h"

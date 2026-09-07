@@ -66,6 +66,9 @@ public:
 	}
 	/* Timer-mode ch0 period in CPU clocks (0 = not programmed / use default). */
 	unsigned CtcTimerPeriodCycles(int channel) const;
+	/* Counter-mode divider (0 = channel is not a counter). The X1 wires CTC
+	   ZC0 to TRG3, so ch3 in counter mode divides ch0's timer output. */
+	unsigned CtcCounterTc(int channel) const;
 
 	enum {
 		PLAY_FLAG = 0xC010,

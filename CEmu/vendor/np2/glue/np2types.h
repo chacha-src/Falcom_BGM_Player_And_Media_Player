@@ -1,4 +1,4 @@
-/*
+﻿/*
  * np2types.h -- HOOTRIP glue
  *
  * Minimal, self-contained replacement for Neko Project II's <compiler.h>

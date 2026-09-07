@@ -423,7 +423,7 @@ void CDriverX68k::ResumeMailboxForSong(unsigned code)
 	hw_->SetPc(poll);
 }
 
-void CDriverX68k::CallUserHook(unsigned hook)
+void CDriverX68k::CallUserHook(unsigned hook, int tickOpmDuring)
 {
 	if (!hw_ || !hook || softTimerBusy_) return;
 	const unsigned pc = (unsigned)m68k_get_reg(NULL, M68K_REG_PC) & 0xffffffu;
@@ -443,7 +443,11 @@ void CDriverX68k::CallUserHook(unsigned hook)
 	int ok = 0;
 	for (int n = 0; n < 200000; n += 64) {
 		m68k_execute(64);
-		TickOpm(64);
+		/* Soft SD_DRV IRQ6: RunCycles already TickOpm'd the quantum. Nested
+		   TickOpm here re-armed YM Timer-B during "stopped" windows and
+		   double-stepped gra268snd (~2× until HW TB took over ~16s later). */
+		if (tickOpmDuring)
+			TickOpm(64);
 		const unsigned p = (unsigned)m68k_get_reg(NULL, M68K_REG_PC) & 0xffffffu;
 		if (p == pc) { ok = 1; break; }
 	}
@@ -521,15 +525,16 @@ void CDriverX68k::ServiceSoftTimers(int cycles)
 			&& hw_->Read8(work + 0x501u) >= 0x80
 			&& hw_->Read8(work + 0x501u) <= 0x8f
 			&& irq6 != 0) {
-			/* TB=$F0: (256-$F0)*1024 / 4 MHz = 4.096 ms.
-			   Use IRQ6 RTE framing (not $10C RTS) — Soft SD_DRV's bank
-			   service is the real IRQ6 handler; RTS frames raced tempo and
-			   broke loop bookkeeping (gra268snd). */
-			const int periodCy = cpuHz_ / 244;
+			/* TB=$F0 wall period in CPU clocks: cpuHz * 16*1024 / opmHz.
+			   Do not TickOpm inside the soft IRQ6 (see CallUserHook). */
+			int periodCy = 1;
+			if (opmHz_ > 0)
+				periodCy = (int)(((int64_t)cpuHz_ * 16384) / (int64_t)opmHz_);
+			if (periodCy < 1) periodCy = 1;
 			timerDAcc_ += cycles;
 			while (periodCy > 0 && timerDAcc_ >= periodCy) {
 				timerDAcc_ -= periodCy;
-				CallUserHook(irq6);
+				CallUserHook(irq6, 0);
 			}
 		}
 		/* This ZMUSIC BOOT exposes its scheduler directly as IRQ6 but never

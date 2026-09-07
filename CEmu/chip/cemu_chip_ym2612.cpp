@@ -32,9 +32,8 @@ public:
 		ym_ = new ymfm::ym2612(*this);
 		chipRate_ = (int)ym_->sample_rate(clockHz_);
 		if (chipRate_ <= 0) chipRate_ = (int)(clockHz_ / 72);
-		/* Do not SetIdentity here: CEmuFmMonBindFromGe already labelled the
-		   board (Sys32 is YM2612+RF5C68, not a lone Arcade OPN2). */
-		FmMonShadowSetOpnaLayout(0);
+		/* Layout/identity come from CEmuFmMonBindFromGe (OPN2 vs OPN+SSG vs
+		   Sys32 composite). Do not force OPN layout 0 here. */
 		Reset();
 	}
 

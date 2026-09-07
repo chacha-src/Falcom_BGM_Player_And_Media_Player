@@ -15,6 +15,11 @@ public:
 	unsigned OpmWrites() const;
 	unsigned AyWrites() const;
 
+	/* Delivered IRQ counts by source; probes use these to check tick rate. */
+	unsigned TimerIrqs() const { return timerIrqs_; }
+	unsigned VsyncIrqs() const { return vsyncIrqs_; }
+	uint64_t TimerPeriod() const { return timerPeriod_; }
+
 private:
 	CHardX1* hw_;
 	int hostRate_;
@@ -32,6 +37,14 @@ private:
 	uint64_t nextVsync_;
 	uint64_t timerPeriod_;
 	uint64_t vsyncPeriod_;
+	/* ZC0 pulses counted toward the ch3 counter-mode time constant, plus the
+	   latched ch3 INT that ch0 outranks on the daisy chain. */
+	uint64_t ctc3Div_;
+	int ctc3Pending_;
+	/* Cycles RunUntil overshot the per-sample deadline by. */
+	int64_t cpuDebt_;
+	unsigned timerIrqs_;
+	unsigned vsyncIrqs_;
 
 	void RunUntil(uint64_t endCycle);
 	void TickChips(uint64_t cpuCycles);
