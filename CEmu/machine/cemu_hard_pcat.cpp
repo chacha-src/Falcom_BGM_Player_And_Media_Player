@@ -17,6 +17,7 @@ namespace {
 struct PcatCensus {
 	int funcVect;
 	unsigned oplWr, oplKey, saaWr, saaTone, spkTone, midi, irq0;
+	unsigned pitReload, pitHz;
 };
 
 void PcatIvtCensus(const uint8_t* mem, const PcatCensus& c, const char* phase,
@@ -29,8 +30,14 @@ void PcatIvtCensus(const uint8_t* mem, const PcatCensus& c, const char* phase,
 	FILE* f = NULL;
 	if (fopen_s(&f, path, "a") != 0 || !f) return;
 	fprintf(f, "IVT %-4s funcvect=%02X opl=%u key=%u saa=%u tone=%u spk=%u"
-		" midi=%u irq0=%u hooked=", phase, c.funcVect, c.oplWr, c.oplKey,
-		c.saaWr, c.saaTone, c.spkTone, c.midi, c.irq0);
+		" midi=%u irq0=%u pit=%u(%uHz) v08=%04X:%04X v1C=%04X:%04X hooked=",
+		phase, c.funcVect, c.oplWr, c.oplKey, c.saaWr, c.saaTone, c.spkTone,
+		c.midi, c.irq0, c.pitReload,
+		c.pitReload ? (c.pitHz / c.pitReload) : 0u,
+		(unsigned)(mem[0x08 * 4 + 2] | (mem[0x08 * 4 + 3] << 8)),
+		(unsigned)(mem[0x08 * 4 + 0] | (mem[0x08 * 4 + 1] << 8)),
+		(unsigned)(mem[0x1C * 4 + 2] | (mem[0x1C * 4 + 3] << 8)),
+		(unsigned)(mem[0x1C * 4 + 0] | (mem[0x1C * 4 + 1] << 8)));
 	for (unsigned v = 0; v < 256; v++) {
 		const unsigned off = (unsigned)mem[v * 4] | ((unsigned)mem[v * 4 + 1] << 8);
 		const unsigned seg = (unsigned)mem[v * 4 + 2] | ((unsigned)mem[v * 4 + 3] << 8);
@@ -46,6 +53,93 @@ void PcatIvtCensus(const uint8_t* mem, const PcatCensus& c, const char* phase,
 	fclose(f);
 }
 
+/* CEMU_PCAT_IPPROF=<file>: histogram of the linear PC executed during the
+   play pump. A driver that installs its ISR and then makes no sound is either
+   spinning on one wait or running somewhere it should not be, and the hot
+   address says which. */
+struct PcatIpProf {
+	enum { SLOTS = 4096 };
+	unsigned addr[SLOTS];
+	uint64_t hits[SLOTS];
+	uint64_t total;
+	const char* path;
+
+	PcatIpProf() : total(0), path(NULL)
+	{
+		memset(addr, 0xff, sizeof(addr));
+		memset(hits, 0, sizeof(hits));
+	}
+
+	void Note(unsigned lin)
+	{
+		total++;
+		const unsigned h = (lin * 2654435761u) & (SLOTS - 1);
+		for (unsigned i = 0; i < 64; i++) {
+			const unsigned s = (h + i) & (SLOTS - 1);
+			if (addr[s] == 0xffffffffu) { addr[s] = lin; hits[s] = 1; return; }
+			if (addr[s] == lin) { hits[s]++; return; }
+		}
+	}
+
+	~PcatIpProf()
+	{
+		if (!path || !total) return;
+		FILE* f = NULL;
+		if (fopen_s(&f, path, "a") != 0 || !f) return;
+		fprintf(f, "IPPROF total=%llu\n", (unsigned long long)total);
+		for (int rank = 0; rank < 20; rank++) {
+			int best = -1;
+			for (int s = 0; s < SLOTS; s++)
+				if (hits[s] && (best < 0 || hits[s] > hits[best])) best = s;
+			if (best < 0) break;
+			fprintf(f, "  %2d %05X %10llu %5.1f%%\n", rank, addr[best],
+				(unsigned long long)hits[best],
+				100.0 * (double)hits[best] / (double)total);
+			hits[best] = 0;
+		}
+		fclose(f);
+	}
+};
+
+/* CEMU_PCAT_MEMDUMP="<linhex>,<len>,<path>": hex of guest memory the first
+   time the play pump returns, for reading whatever the profiler pointed at. */
+void PcatMemDump(const uint8_t* mem)
+{
+	static const char* spec = NULL;
+	static int checked = 0;
+	if (!checked) { checked = 1; spec = getenv("CEMU_PCAT_MEMDUMP"); }
+	if (!spec || !spec[0] || !mem) return;
+	static int done = 0;
+	if (done) return;
+	done = 1;
+	unsigned lin = 0, len = 0;
+	char path[260];
+	if (sscanf_s(spec, "%x,%u,%259s", &lin, &len, path, (unsigned)sizeof(path)) != 3)
+		return;
+	if (len > 0x1000 || lin + len >= 0x200000u) return;
+	FILE* f = NULL;
+	if (fopen_s(&f, path, "w") != 0 || !f) return;
+	for (unsigned i = 0; i < len; i += 16) {
+		fprintf(f, "%05X ", lin + i);
+		for (unsigned j = 0; j < 16 && i + j < len; j++)
+			fprintf(f, "%02X ", mem[lin + i + j]);
+		fputc('\n', f);
+	}
+	fclose(f);
+}
+
+/* Resolved once: the hook is on the per-instruction path. */
+PcatIpProf* g_pcatIpProf = NULL;
+
+void PcatIpProfInit()
+{
+	const char* p = getenv("CEMU_PCAT_IPPROF");
+	if (!p || !p[0]) return;
+	static PcatIpProf inst;
+	inst.path = p;
+	g_pcatIpProf = &inst;
+}
+
 } /* namespace */
 
 #define PCAT_CENSUS(phase) do { \
@@ -54,6 +148,7 @@ void PcatIvtCensus(const uint8_t* mem, const PcatCensus& c, const char* phase,
 	c__.oplKey = oplKeyOnCount_; c__.saaWr = saaWriteCount_; \
 	c__.saaTone = saaToneOnCount_; c__.spkTone = speakerToneCount_; \
 	c__.midi = midiCount_; c__.irq0 = irq0Count_; \
+	c__.pitReload = pit0Reload_; c__.pitHz = (unsigned)pitClockHz_; \
 	PcatIvtCensus(np2_mem(), c__, (phase), dosGe_ ? dosGe_->name : NULL); \
 } while (0)
 
@@ -251,6 +346,8 @@ CHardPcat::~CHardPcat()
 int CHardPcat::Init(const CEmuGameEntry* ge, int sampleRate)
 {
 	if (!ge) return 0;
+	static int profInit = 0;
+	if (!profInit) { profInit = 1; PcatIpProfInit(); }
 	sampleRate_ = sampleRate > 0 ? sampleRate : 44100;
 	cpuHz_ = PCAT_CPU_HZ;
 	/* Catalog clockmul (often 5–8) is for DOS boot only — applying it to
@@ -823,10 +920,23 @@ void CHardPcat::RestoreHootIdleTrampoline(uint8_t* mem)
 	memcpy(mem + tb + 0x10, kBiosTick, sizeof(kBiosTick));
 }
 
+/* The API_timer signature (an INC word, an FC, and six pushes nearby) is weak
+   enough to hit ordinary code, and a hit rewrites INT 8, zeroes two bytes at
+   CS:000E and rewrites four at CS:0124. In an 8KB sequencer that is a coin
+   flip: MDI.DRV and friends were being redirected into the middle of
+   themselves and ran off into the interrupt vector table. Only go looking
+   when the archive actually booted a HOOT .ADV driver, or when AIL has
+   already been confirmed for this title. */
+int CHardPcat::HootAilPossible() const
+{
+	return (hootAdvSeg_ != 0 || hootAdvName_[0] != 0 || hootAilCs_ != 0) ? 1 : 0;
+}
+
 void CHardPcat::FixHootAilTimer()
 {
 	/* AIL hook_timer should point INT 8 at API_timer. HOOT / nested IRQ0 often
 	   leave IVT at ailCS:0000 or restore the DOS trampoline — re-check always. */
+	if (!HootAilPossible()) return;
 	uint8_t* mem = np2_mem();
 	if (!mem) return;
 	const uint16_t i8Off = (uint16_t)(mem[0x08 * 4] | (mem[0x08 * 4 + 1] << 8));
@@ -1103,6 +1213,14 @@ int CHardPcat::DeliverIrqs()
 			}
 		}
 		np2_interrupt((uint8_t)PCAT_TIMER_VEC);
+		/* An ordinary timer ISR neither needs nor survives the AIL treatment
+		   below: it is cut off after a fixed step budget and then has CS, SS
+		   and SP forced back to the idle trampoline, which throws away the
+		   stack it just switched to and the IRET frame it was going to
+		   return through. Hand it back to PumpCycles instead, which steps it
+		   like any other code and keeps TickSide in phase. */
+		if (!silpHot && !ailOwnsIrq)
+			return 1;
 		/* Run ISR to completion without TickSide (AIL switches SS:SP). */
 		{
 			const int silpIsr = silpHot;
@@ -2341,6 +2459,8 @@ void CHardPcat::PumpCycles(uint64_t endCycle)
 				}
 			}
 		}
+		if (g_pcatIpProf)
+			g_pcatIpProf->Note(phys);
 		const int32_t cyc = np2_step();
 		const uint64_t u = (cyc > 0) ? (uint64_t)cyc : 1ull;
 		cpuCycles_ += u;
@@ -2353,6 +2473,7 @@ void CHardPcat::PumpCycles(uint64_t endCycle)
 			if (ot) chip_->AdvanceClocks(ot);
 		}
 	}
+	PcatMemDump(np2_mem());
 }
 
 unsigned CHardPcat::MidiNoteOnCount() const

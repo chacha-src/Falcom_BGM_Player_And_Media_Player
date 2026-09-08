@@ -103,6 +103,7 @@ private:
 	void RepairSilpDriverFar();
 	void PreloadSilpSong(unsigned titleCode);
 	void PrepHootAilState();
+	int HootAilPossible() const;
 	void FixHootAilTimer();
 	void InstallHootAilTimbres();
 	void RestoreHootIdleTrampoline(uint8_t* mem);
