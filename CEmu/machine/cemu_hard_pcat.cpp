@@ -1722,6 +1722,60 @@ void CHardPcat::BindDosTriggerSong(const CEmuGameEntry* ge, unsigned titleCode)
 	extParam_ = (uint16_t)((titleCode >> 16) & 0xffff);
 }
 
+/* Rewrite HOOT's argv so the song file and subsong index follow the title
+   code. Songs are catalogued at offset >= 0x10; drivers and samples sit at
+   0x8/0x9 and glue at -1, so those tokens are left untouched. */
+void CHardPcat::HootSubstArgv(char* tail, int tailCap)
+{
+	char out[160];
+	char* d = out;
+	char* dend = out + tailCap - 1;
+	if (dend > out + (int)sizeof(out) - 1) dend = out + (int)sizeof(out) - 1;
+	const char* s = tail;
+	while (*s && d < dend) {
+		while (*s == ' ' || *s == '\t') {
+			*d++ = *s++;
+			if (d >= dend) break;
+		}
+		const char* tok = s;
+		while (*s && *s != ' ' && *s != '\t') s++;
+		const int len = (int)(s - tok);
+		if (len <= 0 || len >= 96) {
+			for (int i = 0; i < len && d < dend; i++) *d++ = tok[i];
+			continue;
+		}
+		char t[96];
+		memcpy(t, tok, (size_t)len);
+		t[len] = 0;
+
+		const char* rep = NULL;
+		char num[8];
+		int isNum = 1;
+		for (int i = 0; i < len; i++)
+			if (t[i] < '0' || t[i] > '9') isNum = 0;
+		if (isNum) {
+			const unsigned low = (unsigned)(extSong_ & 0xff);
+			if (low) {
+				_snprintf_s(num, _TRUNCATE, "%u", low);
+				rep = num;
+			}
+		} else {
+			for (int i = 0; i < dosGe_->romCount; i++) {
+				const CEmuRomEntry* r = &dosGe_->rom[i];
+				if (_stricmp(r->type, "file") != 0) continue;
+				if (r->offset < 0x10) continue;
+				if (_stricmp(r->name, t) != 0) continue;
+				rep = dosSong_;
+				break;
+			}
+		}
+		const char* w = rep ? rep : t;
+		while (*w && d < dend) *d++ = *w++;
+	}
+	*d = 0;
+	strncpy_s(tail, (size_t)tailCap, out, _TRUNCATE);
+}
+
 int CHardPcat::RunDosCommand(const char* cmdline, uint64_t budgetCycles, int stopWhenReady)
 {
 	char stripped[256];
@@ -1749,6 +1803,14 @@ int CHardPcat::RunDosCommand(const char* cmdline, uint64_t budgetCycles, int sto
 		*d = 0;
 		strncpy_s(tail, fixed, _TRUNCATE);
 	}
+	/* HOOT argv carries the song file for a few packs (kyrandia, roabod,
+	   stuntisland) instead of the NULL placeholder. The catalog writes one
+	   fixed name there, so leaving it alone plays that same track for every
+	   title code. Songs are the roms at offset >= 0x10; swap such a token for
+	   the code-selected song, and a bare number for the code's low byte. */
+	if (_stricmp(name, "HOOT.EXE") == 0 && tail[0] && dosGe_ && dosSong_[0])
+		HootSubstArgv(tail, (int)sizeof(tail));
+
 	const unsigned char* image = NULL;
 	unsigned imageSize = 0;
 	int isExe = 0;
@@ -2017,12 +2079,19 @@ int CHardPcat::BootDos(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCod
 	   Earlier shells only exit on DOS RESIDENT/TERMINATED; the last may
 	   stop when EXT_STATE/INT 7Fh look ready. */
 	int shellIdx = 0;
+	char ranNames[8][96];
+	int ranNameCount = 0;
 	for (int i = 0; i < ge->romCount; i++) {
 		const CEmuRomEntry* r = &ge->rom[i];
 		if (_stricmp(r->type, "shell") != 0) continue;
 		shellIdx++;
 		const int last = (shellIdx >= shellTotal) ? 1 : 0;
 		RunDosCommand(r->name, setupBudget, last);
+		if (ranNameCount < 8) {
+			char nm[96], tl[160];
+			DosSplitCmd(r->name, nm, (int)sizeof(nm), tl, (int)sizeof(tl));
+			strncpy_s(ranNames[ranNameCount++], nm, _TRUNCATE);
+		}
 		ranShell = 1;
 	}
 	/* Sierra / hoot: <rom type="file" offset="-1">silp_at.com</rom> is glue,
@@ -2032,6 +2101,13 @@ int CHardPcat::BootDos(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCod
 			const CEmuRomEntry* r = &ge->rom[i];
 			if (_stricmp(r->type, "file") != 0) continue;
 			if (r->offset >= 0) continue;
+			/* A shell already ran this program with its real arguments.
+			   Starting a second copy with none makes it fail, exit, and
+			   trample the resident state the first copy left behind. */
+			int already = 0;
+			for (int k = 0; k < ranNameCount; k++)
+				if (_stricmp(ranNames[k], r->name) == 0) already = 1;
+			if (already) continue;
 			RunDosCommand(r->name, setupBudget);
 			if (dosStubReady_ || stubState_ == 0x81 || IvtHooked(0x7F))
 				break;

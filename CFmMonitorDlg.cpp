@@ -1511,26 +1511,18 @@ uint64_t CFmMonitorDlg::HeardSample(uint32_t sampleRate)
 
 	__int64 frames = 0;
 	/* 巨大 KPI バッファ / keys-only: GDI 跳びを避け dump curSample−ラグで追う。
-	   CEmu (MODE_CEMU=-1000) の hoot zip も同様。 */
+	   CEmu も同様。DS heard 単独だと再生カーソルがスピーカより先行し、
+	   レジスタ／パネル／鍵盤が可聴より速く見える（Alpha2 で一度外して再現）。 */
 	const unsigned lastFlags = (m_histN > 0)
 		? m_hist[(m_histHead + m_histN - 1) % HIST_MAX].dumpFlags : 0u;
 	const int isKpiOrCemu = (mode == -3 || IsCemuMode(mode)) ? 1 : 0;
 	const int useDumpClock = (isKpiOrCemu && m_histN > 0
-		&& (FmPlayPreferDumpClock()
+		&& (IsCemuMode(mode)
+			|| FmPlayPreferDumpClock()
 			|| (lastFlags & (SASAMI_FMMON_FLAG_MSX | SASAMI_FMMON_FLAG_KEYSONLY)))) ? 1 : 0;
 	if (useDumpClock) {
 		const int li = (m_histHead + m_histN - 1) % HIST_MAX;
 		const uint64_t latest = m_histSamp[li];
-		/* CEmu: 固定msラグは捨てる。可聴は DS g_heardBytes（OggGetHeardPcmFrames が
-		   アップスケール時もソース空間へ換算）。dump.curSample と同じ単位で比較する。 */
-		if (IsCemuMode(mode)) {
-			const int srSrc = (wavbit_sample_Hz > 0) ? wavbit_sample_Hz : (int)srDump;
-			frames = OggGetHeardPcmFrames();
-			if (frames < 0) frames = 0;
-			if (srSrc != (int)srDump && srSrc > 0)
-				frames = frames * (__int64)srDump / (__int64)srSrc;
-			return AdvanceHeard(frames, srDump);
-		}
 		unsigned lagMs = (unsigned)FmPlayHeardLagMs();
 		/* dump 側 identity が取れているときはそちらを優先（機種別補正） */
 		{
@@ -1558,6 +1550,11 @@ uint64_t CFmMonitorDlg::HeardSample(uint32_t sampleRate)
 		if (frames < 0) frames = 0;
 		if (srSrc != (int)srDump)
 			frames = frames * (__int64)srDump / (__int64)srSrc;
+		/* CEmu が hist 未着などで dump 時計に入れないときも同じ機種別ラグ */
+		if (IsCemuMode(mode)) {
+			frames -= (__int64)srDump * FmPlayHeardLagMs() / 1000;
+			if (frames < 0) frames = 0;
+		}
 	}
 	return AdvanceHeard(frames, srDump);
 }

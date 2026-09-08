@@ -1509,10 +1509,6 @@
 #define IDC_S3R_MESH                    4334
 #define IDC_S3M_MESH_L                  4335
 #define IDC_S3M_MESH                    4336
-#define IDC_S3R_GFX_L                   4337
-#define IDC_S3R_GFX                     4338
-#define IDC_S3M_GFX_L                   4339
-#define IDC_S3M_GFX                     4340
 #define IDC_MP_BOT_CD                   4337
 #define IDC_CD_HELP                     4338
 #define IDC_CD_DRIVE                    4339
@@ -1675,6 +1671,10 @@
 #define IDC_MP_BOT_FM                   4521
 #define IDC_SASAMI_MIDI_LAYOUT          4522
 #define IDC_SASAMI_FM_LAYOUT            4523
+#define IDC_S3R_GFX_L                   4524
+#define IDC_S3R_GFX                     4525
+#define IDC_S3M_GFX_L                   4526
+#define IDC_S3M_GFX                     4527
 #define IDD_SASAMI_TEXT                 4600
 #define IDD_SASAMI_MIDI_SCORE           4601
 #define IDD_SASAMI_FM_SCORE             4602
@@ -2168,7 +2168,7 @@
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NEXT_RESOURCE_VALUE        354
 #define _APS_NEXT_COMMAND_VALUE         33288
-#define _APS_NEXT_CONTROL_VALUE         4524
+#define _APS_NEXT_CONTROL_VALUE         4528
 #define _APS_NEXT_SYMED_VALUE           104
 #endif
 #endif

@@ -90,6 +90,7 @@ private:
 	const char* SelectedDosSong(const CEmuGameEntry* ge, unsigned titleCode) const;
 	void BindDosTriggerSong(const CEmuGameEntry* ge, unsigned titleCode);
 	int RunDosCommand(const char* cmdline, uint64_t budgetCycles, int stopWhenReady = 1);
+	void HootSubstArgv(char* tail, int tailCap);
 	int BootDos(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode);
 	void PitOut(uint16_t port, uint8_t data);
 	uint8_t PitIn(uint16_t port);

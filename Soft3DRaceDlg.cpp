@@ -2267,11 +2267,12 @@ void CSoft3DRaceDlg::LayoutAll()
 	int capH = CCC_GetCustomCaptionHeight(m_hWnd); if (capH < 0) capH = 0;
 	const int m = 10, rowH = 36, btnH = 32, labH = 22;
 	int y = capH + 8;
-	float s = (float)(cx - 2 * m) / 920.f;
-	if (s < 0.70f) s = 0.70f;
-	if (s > 1.55f) s = 1.55f;
+	const float baseW = 1180.f;
+	float s = (float)(cx - 2 * m) / baseW;
+	if (s < 0.68f) s = 0.68f;
+	if (s > 1.45f) s = 1.45f;
 	auto sw = [&](int w)->int { return max(28, (int)((float)w * s + .5f)); };
-	const int gap = max(4, (int)(6.f * s + .5f));
+	const int gap = max(6, (int)(8.f * s + .5f));
 	int x = m;
 	auto placeL = [&](CWnd& w, int ww){ if(w.GetSafeHwnd()) w.SetWindowPos(NULL,x,y+6,ww,labH,SWP_NOZORDER|SWP_NOACTIVATE); x+=ww+2; };
 	auto placeC = [&](CWnd& w, int ww){ if(w.GetSafeHwnd()) w.SetWindowPos(NULL,x,y,ww,280,SWP_NOZORDER|SWP_NOACTIVATE); x+=ww+gap; };
@@ -2282,11 +2283,14 @@ void CSoft3DRaceDlg::LayoutAll()
 	placeL(m_lapsL, sw(36)); placeC(m_laps, sw(64));
 	placeL(m_themeL, sw(40)); placeC(m_theme, sw(110));
 	placeL(m_invertL, sw(36)); placeC(m_invert, sw(100));
+	placeL(m_meshL, max(36, sw(40))); placeC(m_mesh, max(88, sw(100)));
+	// 画質コンボは1行目の縦長コンボ(WS_CLIPSIBLINGS)直下に置くと選択欄が描かれない。
+	// スタート／生成の右（旧メッシュ位置）に置き、重なりを避ける。
 	y += rowH + 4;
 	x = m;
 	placeB(m_start, max(72, sw(80))); placeB(m_gen, max(72, sw(80)));
-	placeL(m_meshL, max(36, sw(40))); placeC(m_mesh, max(88, sw(100)));
-	placeL(m_gfxL, max(36, sw(40))); placeC(m_gfx, max(64, sw(72)));
+	const int gfxLW = max(40, sw(40)), gfxW = max(72, sw(80));
+	placeL(m_gfxL, gfxLW); placeC(m_gfx, gfxW);
 	if (m_hint.GetSafeHwnd()) m_hint.SetWindowPos(NULL, x, y+6, max(40, cx-x-m), labH, SWP_NOZORDER|SWP_NOACTIVATE);
 	y += rowH + 6;
 	const int btnY = cy - m - btnH;
@@ -7590,7 +7594,7 @@ BOOL CSoft3DRaceDlg::OnInitDialog()
 	m_help.SetWindowText(L"?");
 	m_help.SetFlat(TRUE);
 	m_help.SetGradation(RGB(255, 245, 220), RGB(240, 210, 160), 0, TRUE);
-	m_ai.SetAeroMode(FALSE); m_opp.SetAeroMode(FALSE); m_len.SetAeroMode(FALSE); m_laps.SetAeroMode(FALSE); m_theme.SetAeroMode(FALSE); m_invert.SetAeroMode(FALSE); m_mesh.SetAeroMode(FALSE);
+	m_ai.SetAeroMode(FALSE); m_opp.SetAeroMode(FALSE); m_len.SetAeroMode(FALSE); m_laps.SetAeroMode(FALSE); m_theme.SetAeroMode(FALSE); m_invert.SetAeroMode(FALSE); m_mesh.SetAeroMode(FALSE); m_gfx.SetAeroMode(FALSE);
 	m_start.SetAeroMode(FALSE); m_gen.SetAeroMode(FALSE); m_close.SetAeroMode(FALSE); m_view.SetAeroMode(FALSE);
 
 	if (!m_uiFont.GetSafeHandle()) {
@@ -7602,7 +7606,7 @@ BOOL CSoft3DRaceDlg::OnInitDialog()
 		CWnd* ws[] = {&m_aiL,&m_oppL,&m_lenL,&m_lapsL,&m_themeL,&m_invertL,&m_meshL,&m_gfxL,&m_hint,&m_status,&m_ai,&m_opp,&m_len,&m_laps,&m_theme,&m_invert,&m_mesh,&m_gfx,&m_start,&m_gen,&m_close};
 		for (int i=0;i<(int)(sizeof(ws)/sizeof(ws[0]));i++) if (ws[i]->GetSafeHwnd()) ws[i]->SetFont(pf);
 		CCustomComboBox* cbs[]={&m_ai,&m_opp,&m_len,&m_laps,&m_theme,&m_invert,&m_mesh,&m_gfx};
-		for (int i=0;i<7;i++){ cbs[i]->SetItemHeight(-1,28); cbs[i]->SetItemHeight(0,26); }
+		for (int i=0;i<(int)(sizeof(cbs)/sizeof(cbs[0]));i++){ cbs[i]->SetItemHeight(-1,28); cbs[i]->SetItemHeight(0,26); }
 	}
 
 	if (savedata.s3r_ai < 0 || savedata.s3r_ai >= AI_COUNT) savedata.s3r_ai = AI_NORMAL;
