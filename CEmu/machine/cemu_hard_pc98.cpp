@@ -22,6 +22,181 @@ static unsigned Pc98RomPhys(int offset)
 
 static int DosShellStarts(const CEmuGameEntry* ge, const char* const* prefixes);
 
+/* CEMU_PC98_IPPROF=<file>: histogram of the linear PC executed during the
+   play pump. A driver that loads its song and then goes mute is almost always
+   spinning on one wait condition, and the hot address names the instruction
+   to look at. */
+namespace {
+
+struct Pc98IpProf {
+	enum { SLOTS = 4096 };
+	unsigned addr[SLOTS];
+	uint64_t hits[SLOTS];
+	uint64_t total;
+	const char* path;
+
+	Pc98IpProf() : total(0), path(NULL)
+	{
+		memset(addr, 0xff, sizeof(addr));
+		memset(hits, 0, sizeof(hits));
+	}
+
+	void Note(unsigned lin)
+	{
+		total++;
+		unsigned h = (lin * 2654435761u) & (SLOTS - 1);
+		for (unsigned i = 0; i < 64; i++) {
+			const unsigned s = (h + i) & (SLOTS - 1);
+			if (addr[s] == 0xffffffffu) { addr[s] = lin; hits[s] = 1; return; }
+			if (addr[s] == lin) { hits[s]++; return; }
+		}
+	}
+
+	~Pc98IpProf()
+	{
+		if (!path || !total) return;
+		FILE* f = NULL;
+		if (fopen_s(&f, path, "a") != 0 || !f) return;
+		fprintf(f, "IPPROF total=%llu\n", (unsigned long long)total);
+		for (int rank = 0; rank < 24; rank++) {
+			int best = -1;
+			for (int s = 0; s < SLOTS; s++)
+				if (hits[s] && (best < 0 || hits[s] > hits[best])) best = s;
+			if (best < 0) break;
+			fprintf(f, "  %2d %05X %10llu %5.1f%%\n", rank, addr[best],
+				(unsigned long long)hits[best],
+				100.0 * (double)hits[best] / (double)total);
+			hits[best] = 0;
+		}
+		fclose(f);
+	}
+};
+
+/* CEMU_PC98_MEMDUMP="<linhex>,<len>,<path>": hex of guest memory as it stood
+   when the pump last returned, for reading the wait loop the profiler found. */
+void Pc98MemDump(const uint8_t* mem)
+{
+	static const char* spec = NULL;
+	static int checked = 0;
+	if (!checked) { checked = 1; spec = getenv("CEMU_PC98_MEMDUMP"); }
+	if (!spec || !spec[0] || !mem) return;
+	static int done = 0;
+	if (done) return;
+	done = 1;
+	unsigned lin = 0, len = 0;
+	char path[260];
+	if (sscanf_s(spec, "%x,%u,%259s", &lin, &len, path, (unsigned)sizeof(path)) != 3)
+		return;
+	if (len > 0x1000 || lin + len >= 0x200000u) return;
+	FILE* f = NULL;
+	if (fopen_s(&f, path, "w") != 0 || !f) return;
+	for (unsigned i = 0; i < len; i += 16) {
+		fprintf(f, "%05X ", lin + i);
+		for (unsigned j = 0; j < 16 && i + j < len; j++)
+			fprintf(f, "%02X ", mem[lin + i + j]);
+		fputc('\n', f);
+	}
+	fclose(f);
+}
+
+/* CEMU_PC98_IVT=<path>: which vectors the guest actually owns when play is
+   poked, next to the vector we are about to poke. A driver whose API sits on
+   a vector we never fire is silent no matter how healthy the rest is. */
+struct Pc98CensusPair { uint16_t a; uint8_t d; };
+
+struct Pc98CensusCounts {
+	unsigned wr, keyOn, tlLive, fnum, timer, irq, pit;
+	unsigned line, svc, noVec, masked, ifOff;
+	const Pc98CensusPair* tail;
+	unsigned tailN;
+};
+
+/* Why an asserted OPN IRQ did not reach the guest. One machine is live at a
+   time in the sweep, so file statics are enough and cost no header churn. */
+unsigned g_censLine = 0;   /* chip Irq() seen asserted */
+unsigned g_censSvc = 0;    /* ...but opnInService_ still latched */
+unsigned g_censNoVec = 0;  /* ...but nothing hooked the vector */
+unsigned g_censMasked = 0; /* ...but the PIC had the line masked */
+unsigned g_censIfOff = 0;  /* ...but the CPU had interrupts disabled */
+
+/* Last value the guest wrote to OPN reg 0x27. Bits 2/3 enable timer A/B, so
+   a value with both clear means the sequencer's clock is off and nothing more
+   will be played until someone re-arms it. */
+uint8_t g_lastTimerCtrl = 0;
+
+void Pc98IvtCensus(const uint8_t* mem, int funcVect, const Pc98CensusCounts& c,
+	const char* phase, const wchar_t* tag)
+{
+	static const char* path = NULL;
+	static int checked = 0;
+	if (!checked) { checked = 1; path = getenv("CEMU_PC98_IVT"); }
+	if (!path || !path[0] || !mem) return;
+	FILE* f = NULL;
+	if (fopen_s(&f, path, "a") != 0 || !f) return;
+	fprintf(f, "IVT %-4s funcvect=%02X wr=%u key=%u tl=%u fnum=%u tmr=%u"
+		" irq=%u pit=%u line=%u svc=%u novec=%u mask=%u ifoff=%u hooked=",
+		phase, funcVect, c.wr, c.keyOn, c.tlLive, c.fnum, c.timer, c.irq,
+		c.pit, c.line, c.svc, c.noVec, c.masked, c.ifOff);
+	for (unsigned v = 0; v < 256; v++) {
+		const unsigned off = (unsigned)mem[v * 4] | ((unsigned)mem[v * 4 + 1] << 8);
+		const unsigned seg = (unsigned)mem[v * 4 + 2] | ((unsigned)mem[v * 4 + 3] << 8);
+		if ((seg == 0 && off == 0) || seg == DOS98_TRAMP_SEG) continue;
+		fprintf(f, "%02X=%04X:%04X,", v, seg, off);
+	}
+	/* %ls aborts the whole fprintf when a wide char has no multibyte form in
+	   the C locale, which silently swallowed the newline for every Japanese
+	   title. Fold to ASCII by hand so the record always terminates. */
+	fputs(" name=", f);
+	for (const wchar_t* p = tag; p && *p; p++)
+		fputc((*p >= 0x20 && *p < 0x7f) ? (char)*p : '?', f);
+	fputc('\n', f);
+	if (c.tail) {
+		fprintf(f, "TAIL %-4s", phase);
+		for (unsigned i = 0; i < c.tailN; i++)
+			fprintf(f, " %02X:%02X", c.tail[i].a, c.tail[i].d);
+		fputc('\n', f);
+	}
+	fclose(f);
+}
+
+/* Members are private and adding a method would force a full rebuild of every
+   object in the probe link, so the snapshot reads them at the call site. */
+#define PC98_CENSUS(phase) do { \
+	Pc98CensusCounts c__; \
+	c__.wr = opnWriteCount_; c__.keyOn = opnKeyOnCount_; \
+	c__.tlLive = opnTlLiveCount_; c__.fnum = opnFnumCount_; \
+	c__.timer = opnTimerCount_; c__.irq = opnIrqDeliverCount_; \
+	c__.pit = pitTickCount_; \
+	c__.line = g_censLine; c__.svc = g_censSvc; c__.noVec = g_censNoVec; \
+	c__.masked = g_censMasked; c__.ifOff = g_censIfOff; \
+	Pc98CensusPair t__[64]; \
+	c__.tailN = opnTailCount_ < 64 ? opnTailCount_ : 64; \
+	for (unsigned i__ = 0; i__ < c__.tailN; i__++) { \
+		const unsigned s__ = (opnTailCount_ >= 64) \
+			? ((opnTailCount_ + i__) % 64) : i__; \
+		t__[i__].a = opnTailAddr_[s__]; t__[i__].d = opnTailData_[s__]; \
+	} \
+	c__.tail = t__; \
+	Pc98IvtCensus(np2_mem(), funcVect_, c__, (phase), \
+		dosGe_ ? dosGe_->name : NULL); \
+} while (0)
+
+/* Resolved once at first use and then read straight off this pointer: the
+   hook sits on the per-instruction path, so it must cost one null test when
+   profiling is off. */
+Pc98IpProf* g_ipProf = NULL;
+
+void IpProfInit()
+{
+	const char* p = getenv("CEMU_PC98_IPPROF");
+	if (!p || !p[0]) return;
+	static Pc98IpProf inst;
+	inst.path = p;
+	g_ipProf = &inst;
+}
+
+} /* namespace */
+
 /* Catalog <rom type="binary">00 a0 00 00</rom> embeds hex in the name —
    there is no zip member. type="string" is raw ASCII. */
 static int Pc98ParseInlineRom(const char* name, uint8_t* out, int outCap)
@@ -63,6 +238,9 @@ enum {
 	PC98_PIT_CLOCK_HZ = 1996800,
 	PC98_OPN_IRQ_VEC = 0x0B,
 	PC98_TIMER_VEC = 0x08,
+	/* The BIOS timer handler chains this one; drivers that want a tick and
+	   nothing else hook it instead of taking IRQ0 over. */
+	PC98_USER_TICK_VEC = 0x1C,
 	PC98_VSYNC_VEC = 0x0A,
 	OPN_ADDR0 = 0x188,
 	OPN_DATA0 = 0x18A,
@@ -198,6 +376,8 @@ CHardPc98::CHardPc98()
 	, pitClockHz_(PC98_PIT_CLOCK_HZ)
 	, pitReload_(0)
 	, pitCounter_(0)
+	, pitLatch_(0)
+	, pitLatched_(0)
 	, pitResidual_(0)
 	, pitIrqPending_(0)
 	, pitWriteHi_(0)
@@ -217,9 +397,13 @@ CHardPc98::CHardPc98()
 	, opnFnumCount_(0)
 	, opnTimerCount_(0)
 	, opnIrqDeliverCount_(0)
+	, opnKeyOnCh_()
+	, pitTickCount_(0)
+	, timerIrqCount_(0)
 	, lastSongLoadOk_(0)
 	, lastSongLoadBytes_(0)
 	, opnLogCount_(0)
+	, opnTailCount_(0)
 	, opnLatchedAddr_(0)
 	, ssgPortAJumper_(0)
 	, opnLatchedAddrHi_(0)
@@ -323,6 +507,8 @@ static int CEmuPc98IsMusicCom(const CEmuGameEntry* ge)
 
 int CHardPc98::Init(const CEmuGameEntry* ge, int sampleRate)
 {
+	static int profInit = 0;
+	if (!profInit) { profInit = 1; IpProfInit(); }
 	if (!ge) return 0;
 	sampleRate_ = sampleRate > 0 ? sampleRate : 44100;
 	opnaMode = (_stricmp(ge->subtype, "opna") == 0) ? 1 : 0;
@@ -432,6 +618,7 @@ int CHardPc98::Init(const CEmuGameEntry* ge, int sampleRate)
 
 void CHardPc98::Shutdown()
 {
+	PC98_CENSUS("end");
 	DetachIoHooks();
 	FreeBanks();
 	if (chip_) { CEmuChipYm2608Destroy(chip_); chip_ = NULL; }
@@ -581,9 +768,19 @@ void CHardPc98::HostService(uint8_t func)
 void CHardPc98::PitOut(uint16_t port, uint8_t data)
 {
 	if (port == PIT_CTRL) {
+		/* RW=00 is the counter-latch command, not a mode word: it freezes
+		   the count for reading and leaves the mode and any half-written
+		   reload alone. */
+		if ((data & 0x30) == 0x00) {
+			pitLatch_ = (uint16_t)(pitCounter_ & 0xffff);
+			pitLatched_ = 1;
+			pitReadHi_ = 0;
+			return;
+		}
 		/* control word: only ch0 modes matter for sound pacing */
 		pitWriteHi_ = 0;
 		pitReadHi_ = 0;
+		pitLatched_ = 0;
 		return;
 	}
 	if (port == PIT_CT0) {
@@ -603,12 +800,17 @@ void CHardPc98::PitOut(uint16_t port, uint8_t data)
 uint8_t CHardPc98::PitIn(uint16_t port)
 {
 	if (port != PIT_CT0) return 0xff;
-	uint16_t v = pitReload_;
+	/* The live count, not the reload: C-Class FMX loads FFFF, spins a fixed
+	   loop, latches and reads back, then divides by (FFFF − count) to get a
+	   CPU-speed constant.  Echoing the reload made that zero and the driver
+	   died in a divide-by-zero loop before it ever played a note. */
+	const uint16_t v = pitLatched_ ? pitLatch_ : (uint16_t)(pitCounter_ & 0xffff);
 	if (!pitReadHi_) {
 		pitReadHi_ = 1;
 		return (uint8_t)(v & 0xff);
 	}
 	pitReadHi_ = 0;
+	pitLatched_ = 0;
 	return (uint8_t)(v >> 8);
 }
 
@@ -628,6 +830,7 @@ void CHardPc98::PitTick(uint64_t cpuCycles)
 			ticks -= step;
 			pitCounter_ = pitReload_ ? pitReload_ : 65536u;
 			pitIrqPending_ = 1;
+			pitTickCount_++;
 		}
 	}
 }
@@ -851,14 +1054,26 @@ int CHardPc98::DeliverIrqs()
 	}
 
 	uint16_t flags = np2_reg_get(NP2_R_FLAGS);
-	if ((flags & 0x200) == 0) /* IF clear */
+	if ((flags & 0x200) == 0) { /* IF clear */
+		if (chip_ && chip_->Irq()) g_censIfOff++;
 		return 0;
+	}
+	if (chip_ && chip_->Irq()) {
+		g_censLine++;
+		if (opnInService_) g_censSvc++;
+	}
 
 	if (pitIrqPending_ && (picMask_ & 0x01) == 0 && IvtHooked(PC98_TIMER_VEC, isDos_)) {
 		pitIrqPending_ = 0;
+		timerIrqCount_++;
 		np2_interrupt((uint8_t)PC98_TIMER_VEC);
 		return 1;
 	}
+	/* Chaining IRQ0 into INT 1C the way a BIOS would looks like the missing
+	   link for the drivers that hook only the user tick, but it is not: in
+	   every one of them the driver has already taken INT 08 for itself, so
+	   the chain never applies.  Measured over the whole pc98 set it moved
+	   two archives and broke one, so IRQ0 stays with INT 08 alone. */
 	if (vsyncPending_ && (picMask_ & 0x04) == 0 && IvtHooked(PC98_VSYNC_VEC, isDos_)) {
 		vsyncPending_ = 0;
 		np2_interrupt((uint8_t)PC98_VSYNC_VEC);
@@ -890,14 +1105,19 @@ int CHardPc98::DeliverIrqs()
 		if (!IvtHooked(vec, isDos_)) {
 			/* Do not fall back to VSYNC (0x0A) or other IRQ lines — that
 			   mis-delivered OPN timer IRQs into SORC98's VSYNC stub. */
+			g_censNoVec++;
 			return 0;
 		}
 		if (IvtHooked(vec, isDos_)) {
-			if (vec >= 0x08 && vec <= 0x0F && (picMask_ & (1 << (vec - 0x08))) != 0)
+			if (vec >= 0x08 && vec <= 0x0F && (picMask_ & (1 << (vec - 0x08))) != 0) {
+				g_censMasked++;
 				return 0;
+			}
 			if (vec >= 0x10 && vec <= 0x17
-				&& (slavePicMask_ & (1 << (vec - 0x10))) != 0)
+				&& (slavePicMask_ & (1 << (vec - 0x10))) != 0) {
+				g_censMasked++;
 				return 0;
+			}
 			opnInService_ = 1;
 			irqEdgeConsumed_ = 1;
 			opnIrqDeliverCount_++;
@@ -1248,10 +1468,21 @@ uint8_t CHardPc98::PortIn(uint16_t port)
 	   resident glues synchronize command hand-off by waiting for a low->high
 	   transition (mscd_98 does this for 18 frames).  Returning the generic
 	   open-bus FF here trapped those programs in their first wait loop. */
-	if (port == 0x00A0) {
+	/* Both µPD7220s answer here: 0x60 is the text master, 0xA0 the graphic
+	   slave.  Only 0xA0 used to be answered, so a program that frame-synced
+	   off the text GDC (C-Class FMX waits for vsync to fall and rise before
+	   probing the sound board) spun in its first wait loop forever. */
+	if (port == 0x0060 || port == 0x00A0) {
 		const uint64_t halfFrame =
 			(cpuHz_ > 120) ? (uint64_t)cpuHz_ / 120ull : 1ull;
-		return ((cpuCycles_ / halfFrame) & 1ull) ? 0x20 : 0x00;
+		uint8_t s = ((cpuCycles_ / halfFrame) & 1ull) ? 0x20 : 0x00;
+		/* An idle GDC has drained its command FIFO and is not drawing; a
+		   caller that waits for FIFO-empty before writing needs to see it.
+		   Only 0x60 reports it: 0xA0 has answered bare vsync since the
+		   glues that poll it were tuned, and they mask for bit 5 anyway. */
+		if (port == 0x0060)
+			s |= 0x04;
+		return s;
 	}
 	/* PC-88VA: PC-88 OPN ports read the same chip status/data. */
 	if (pc88VaIo_) {
@@ -1446,8 +1677,13 @@ void CHardPc98::PortOut(uint16_t port, uint8_t data)
 				opnLogData_[opnLogCount_] = data;
 				opnLogCount_++;
 			}
-			if (opnLatchedAddr_ == 0x28 && (data & 0xf0) != 0)
+			opnTailAddr_[opnTailCount_ % 64] = opnLatchedAddr_;
+			opnTailData_[opnTailCount_ % 64] = data;
+			opnTailCount_++;
+			if (opnLatchedAddr_ == 0x28 && (data & 0xf0) != 0) {
 				opnKeyOnCount_++;
+				opnKeyOnCh_[data & 0x07]++;
+			}
 			if (((opnLatchedAddr_ & 0xf0) == 0x40 || (opnLatchedAddr_ & 0xf0) == 0x50) && data < 0x7f)
 				opnTlLiveCount_++;
 			if ((opnLatchedAddr_ >= 0xa0 && opnLatchedAddr_ <= 0xa2) ||
@@ -1455,6 +1691,8 @@ void CHardPc98::PortOut(uint16_t port, uint8_t data)
 				opnFnumCount_++;
 			if (opnLatchedAddr_ == 0x24 || opnLatchedAddr_ == 0x25 || opnLatchedAddr_ == 0x27)
 				opnTimerCount_++;
+			if (opnLatchedAddr_ == 0x27)
+				g_lastTimerCtrl = data;
 			if (opnLatchedAddr_ == 0x0E)
 				ssgPortAJumper_ = data;
 			opnWriteCount_++;
@@ -1477,6 +1715,9 @@ void CHardPc98::PortOut(uint16_t port, uint8_t data)
 				opnLogData_[opnLogCount_] = data;
 				opnLogCount_++;
 			}
+			opnTailAddr_[opnTailCount_ % 64] = (uint16_t)(0x100u + opnLatchedAddrHi_);
+			opnTailData_[opnTailCount_ % 64] = data;
+			opnTailCount_++;
 			if (opnLatchedAddrHi_ == 0x28 && (data & 0xf0) != 0)
 				opnKeyOnCount_++;
 			if (((opnLatchedAddrHi_ & 0xf0) == 0x40 || (opnLatchedAddrHi_ & 0xf0) == 0x50) && data < 0x7f)
@@ -2266,9 +2507,13 @@ void CHardPc98::BindDosTriggerSong(const CEmuGameEntry* ge, unsigned titleCode)
 	/* hootrip: cplay/fplay open by ASCIIZ name; mdrv_98/mddrv_98 same (INT D2 AL=2).
 	   Do NOT match bare mdrv98+mlp_hoot (content on handle 0). */
 	static const char* kCplay[] = { "cplay", "fplay", NULL };
+	/* mlalf_98 is deliberately absent: its INT 7F cmd0 reads handle 0 and
+	   hands the buffer straight to the ANNEX driver, which starts with
+	   `CMP WORD ES:[SI],1` — every .MLO song begins 01 00, so the driver
+	   wants the song bytes and rejects a filename outright. */
 	static const char* kOpenName[] = {
 		"cplay", "fplay", "musdrv", "mbmusp", "mdrv_9", "mddrv_9",
-		"mlalf", "MLALF", "mlfplay", "play5", "ibgm", NULL
+		"mlfplay", "play5", "ibgm", NULL
 	};
 	const int cplayFamily = DosShellStarts(ge, kCplay);
 	int opensByName = cplayFamily || DosShellStarts(ge, kOpenName);
@@ -2637,13 +2882,18 @@ int CHardPc98::BootDos(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCod
 	opnInService_ = 0;
 	irqEdgeSeen_ = 0;
 	irqEdgeConsumed_ = 0;
+	g_censLine = g_censSvc = g_censNoVec = g_censMasked = g_censIfOff = 0;
 	opnWriteCount_ = 0;
 	opnKeyOnCount_ = 0;
 	opnTlLiveCount_ = 0;
 	opnFnumCount_ = 0;
 	opnTimerCount_ = 0;
 	opnIrqDeliverCount_ = 0;
+	memset(opnKeyOnCh_, 0, sizeof(opnKeyOnCh_));
+	pitTickCount_ = 0;
+	timerIrqCount_ = 0;
 	opnLogCount_ = 0;
+	opnTailCount_ = 0;
 
 	/* Generous shell budget: PMDB2+PMDPCM packs need several seconds.
 	   imd_1 (PMDB2 without #/Mxx): catalog PMD→PCM→glue re-inits and drops
@@ -3020,12 +3270,15 @@ void CHardPc98::PumpCycles(uint64_t endCycle)
 			AdvanceOpnClocks(q);
 			continue;
 		}
+		if (g_ipProf)
+			g_ipProf->Note(phys);
 		const int32_t cyc = np2_step();
 		const uint64_t u = (cyc > 0) ? (uint64_t)cyc : 1ull;
 		cpuCycles_ += u;
 		TickSide(u);
 		AdvanceOpnClocks(u);
 	}
+	Pc98MemDump(np2_mem());
 }
 
 int CHardPc98::TriggerPlay(unsigned titleCode)
@@ -3037,6 +3290,7 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 	const uint64_t drainBudget = (uint64_t)cpuHz_ / 2ull;
 
 	if (isDos_) {
+		PC98_CENSUS("pre");
 		if (dosGe_)
 			BindDosTriggerSong(dosGe_, titleCode);
 		else {
@@ -3093,6 +3347,7 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 			np2_interrupt((uint8_t)funcVect_);
 			PumpCycles(cpuCycles_ + (drainBudget / 2ull));
 		}
+		PC98_CENSUS("trig");
 		/* famistava installs OPN ISR on INT14 during the play far-call — BootDos
 		   is too early. Mirror only when INT0B is still vacant. */
 		if (pc88VaIo_) {
@@ -3649,10 +3904,31 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 			static const char* kTglFmp[] = { "tglfmp", "TGLFMP", NULL };
 			if (DosShellStarts(dosGe_, kGluePlay)
 				&& !DosShellStarts(dosGe_, kTglFmp)) {
+				/* The list is matched by command prefix, and "cmd2 plays" is
+				   only true for part of it — MAKO_98 answers cmd2 with its
+				   mute-all (reg 27 timers off, every TL to 7F, SSG mixer off),
+				   which silenced a song that cmd0 had already started. Rather
+				   than keep guessing per shell, notice when the re-fire
+				   stopped the sequencer instead of starting it and put the
+				   working command back. */
+				const unsigned keyBefore = opnKeyOnCount_;
+				const int cmdBefore = extCmd_;
+				const uint8_t tmrBefore = g_lastTimerCtrl;
 				extCmd_ = 2;
 				np2_reg_set(NP2_R_FLAGS, (uint16_t)(np2_reg_get(NP2_R_FLAGS) | 0x0200));
 				np2_interrupt((uint8_t)funcVect_);
 				PumpCycles(cpuCycles_ + (drainBudget / 2ull));
+				const int wasRunning = (tmrBefore & 0x0c) != 0;
+				const int nowStopped = (g_lastTimerCtrl & 0x0c) == 0;
+				if (wasRunning && nowStopped && opnKeyOnCount_ == keyBefore) {
+					extCmd_ = cmdBefore;
+					if (dosGe_)
+						BindDosTriggerSong(dosGe_, titleCode);
+					np2_reg_set(NP2_R_FLAGS,
+						(uint16_t)(np2_reg_get(NP2_R_FLAGS) | 0x0200));
+					np2_interrupt((uint8_t)funcVect_);
+					PumpCycles(cpuCycles_ + (drainBudget / 2ull));
+				}
 			}
 			if (starPlay && IvtHooked(0x70, 1)) {
 				/* AH=2: [0290]=1 enables ISR; AL → [0292]/[0293] countdown.
@@ -4296,6 +4572,10 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 		}
 	}
 
+	/* An INT 1C driver expects the BIOS to already be ticking IRQ0; nothing
+	   here programs the PIT on its behalf, so give it the tick it is waiting
+	   for.  Only when it owns no OPN timer — a driver that runs off the chip
+	   does not need this, and an extra tick would double-drive it. */
 	extCmd_ = 0;
 	np2_interrupt((uint8_t)funcVect_);
 	DrainInterrupt(drainBudget);
