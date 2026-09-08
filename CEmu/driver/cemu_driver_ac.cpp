@@ -1,4 +1,4 @@
-#include "StdAfx.h"
+﻿#include "StdAfx.h"
 #include "cemu_driver_ac.h"
 #include "../machine/cemu_m68k_bus.h"
 #include <stdio.h>
@@ -792,6 +792,19 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 		/* Longer settle ? MultiPCM firmware clears RAM then waits on UART. */
 		Sega68RunCycles(cpuHz_);
 		Sega68RunCycles(cpuHz_ / 2);
+		if (hw_->SegaM1Audio()) {
+			/* Sega68RunCycles produces no audio, so a song started here
+			   plays its intro into nothing. Finish the same settle, then
+			   let the first rendered sample issue the select instead —
+			   otherwise daytona loses the first three quarters of a
+			   second of its opening. */
+			Sega68RunCycles(cpuHz_ / 2);
+			Sega68RunCycles(cpuHz_ / 4);
+			booted_ = 1;
+			triggered_ = 1;
+			nextCmdAt_ = (uint64_t)hw_->CpuCycles();
+			return 1;
+		}
 		TryInjectCommand();
 		Sega68RunCycles(cpuHz_ / 2);
 		TryInjectCommand();
@@ -2018,6 +2031,14 @@ void CDriverAc::TryInjectCommand()
 		   is ready; MultiPCM bank/program needs a sustained FIFO drain, and
 		   the SCSP MIDI FIFO is only drained once the firmware arms it. */
 		if (cmdIndex_ >= 4) return;
+		/* ...but only while the bytes went unread. Each inject queues Stop
+		   + song select, so repeating it after the 68000 has taken the
+		   select restarts the song: daytona retriggered its opening notes
+		   two or three times before settling. */
+		if (cmdIndex_ > 0 && hw_->SegaM1Audio() && !hw_->SegaMidiFifoPending()) {
+			cmdIndex_ = 4;
+			return;
+		}
 		const uint16_t w = songCmdWord_ ? songCmdWord_ : (uint16_t)songCmd_;
 		if (!w) return;
 		hw_->SetSoundCommandWord(w);
@@ -3325,7 +3346,18 @@ void CDriverAc::Sega68RunCycles(int cycles)
 			m68k_set_irq(M68K_IRQ_NONE);
 		m68k_execute(slice);
 		hw_->AddCpuCycles((uint64_t)slice);
-		if (chip) chip->AdvanceClocks((uint64_t)slice);
+		/* The YM runs at opmHz_ (8 MHz on segam1audio) while this 68000 runs
+		   at cpuHz_ (10 MHz). Feeding it raw CPU cycles ran its timers 25%
+		   fast, and the firmware paces the sequencer off Timer B — daytona
+		   played a quarter too quick. MultiPCM shares the 68000's 10 MHz. */
+		if (chip && cpuHz_ > 0 && opmHz_ > 0) {
+			opmResidual_ += (uint64_t)slice * (uint64_t)opmHz_;
+			const uint64_t opmTicks = opmResidual_ / (uint64_t)cpuHz_;
+			opmResidual_ %= (uint64_t)cpuHz_;
+			if (opmTicks) chip->AdvanceClocks(opmTicks);
+		} else if (chip) {
+			chip->AdvanceClocks((uint64_t)slice);
+		}
 		if (pcm) pcm->AdvanceClocks((uint64_t)slice);
 		if (pcm2) pcm2->AdvanceClocks((uint64_t)slice);
 		cycles -= slice;

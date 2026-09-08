@@ -8,6 +8,7 @@
 #include "CEmu/cemu_mgr.h"
 #include "CEmu/cemu_catalog.h"
 #include "CEmu/cemu_modepref.h"
+#include "CEmu/cemu_support.h"
 #include "CImageBase.h"
 #include <algorithm>
 #include <unordered_set>
@@ -873,6 +874,10 @@ int CEmuCatalogListDlg::BuildRowCache()
 		char stem[CEMU_ARCHIVE_NAME];
 		CEmuArchivePrimaryStem(ge->archive, stem, (int)sizeof(stem));
 		if (!stem[0] || localStems.find(stem) == localStems.end())
+			continue;
+		/* Listing an archive that plays nothing is worse than not offering
+		   it: keep the list to titles verified to play. */
+		if (!CEmuArchiveIsSupported(stem))
 			continue;
 
 		const CEmuGameEntry* pick = CEmuPickGroupRepresentative(cat, ge);

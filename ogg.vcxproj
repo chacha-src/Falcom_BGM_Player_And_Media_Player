@@ -395,6 +395,7 @@
     <ClCompile Include="CEmu\cemu_catalog.cpp" />
     <ClCompile Include="CEmu\cemu_zipfs.cpp" />
     <ClCompile Include="CEmu\cemu_modepref.cpp" />
+    <ClCompile Include="CEmu\cemu_support.cpp" />
     <ClCompile Include="CEmu\cemu_midi_live.cpp" />
     <ClCompile Include="CEmu\cemu_mgr.cpp" />
     <ClCompile Include="CEmu\cemu_session.cpp" />
@@ -688,6 +689,7 @@
     <ClInclude Include="CEmu\cemu_types.h" />
     <ClInclude Include="CEmu\cemu_catalog.h" />
     <ClInclude Include="CEmu\cemu_modepref.h" />
+    <ClInclude Include="CEmu\cemu_support.h" />
     <ClInclude Include="CEmu\cemu_midi_live.h" />
     <ClInclude Include="CEmu\cemu_zipfs.h" />
     <ClInclude Include="CEmu\cemu_mgr.h" />

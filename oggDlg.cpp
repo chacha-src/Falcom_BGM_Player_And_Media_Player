@@ -63,6 +63,7 @@ int flacmode = 0;
 #include "CEmu/cemu_mgr.h"
 #include "CEmu/cemu_modepref.h"
 #include "CEmu/cemu_midi_live.h"
+#include "CEmu/cemu_support.h"
 #include "CEmu/fmmon/fmmon_shadow.h"
 #include "CEmu/fmmon/cemu_fmmon_bind.h"
 #include "VstMidiEngine.h"
@@ -22755,6 +22756,11 @@ void COggDlg::dp(CString a)
 				wchar_t zipOut[CEMU_ZIP_PATH];
 				char dataDir[CEMU_DATA_DIR];
 				const CEmuGameEntry* ge = CEmuMgrResolveZip(CEmuMgrGet(), filen, zipOut, (int)_countof(zipOut), dataDir, (int)sizeof(dataDir));
+				if (ge && !CEmuArchiveIsSupported(ge->archive)) {
+					CemuUnsupportedResetBatch();
+					CemuWarnUnsupported();
+					return;
+				}
 				if (ge) {
 					const unsigned titleIdx = 1;
 					wchar_t virt[CEMU_ZIP_PATH];

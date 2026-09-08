@@ -26,6 +26,10 @@ CDriverNeo::CDriverNeo()
 
 	, injected_(0)
 
+	, ymIrqPending_(0)
+
+	, cpuDebt_(0)
+
 	, injectAt_(0)
 
 	, reinjected_(0)
@@ -165,7 +169,7 @@ int CDriverNeo::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned
 
 	CEmuHardNeoSetActive(hw_);
 
-	/* Early SNK: type table at (0173) — entries 1=SE, 2+=BGM. Prefer first
+	/* Early SNK: type table at (0173) ? entries 1=SE, 2+=BGM. Prefer first
 
 	   type>=2 with a live song pointer so titles don't share the flat SE
 
@@ -273,7 +277,7 @@ int CDriverNeo::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned
 
 	}
 
-	/* Boot until NMI enable (OUT $08) or ~1s — KOF M1 enables after bank init. */
+	/* Boot until NMI enable (OUT $08) or ~1s ? KOF M1 enables after bank init. */
 
 	RunUntil((uint64_t)cpuHz_ / 4);
 
@@ -291,9 +295,9 @@ int CDriverNeo::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned
 
 	 * KOF-family M1 only: cold boot sets FE34=0xFF and song entry aborts while
 
-	 * FE34!=0. Clear with $08/$07. Early drivers (mslug/bstars/…) never touch
+	 * FE34!=0. Clear with $08/$07. Early drivers (mslug/bstars/?c) never touch
 
-	 * FE34 — sending $08 there queues a bogus song and leaves them SILENT.
+	 * FE34 ? sending $08 there queues a bogus song and leaves them SILENT.
 
 	 */
 
@@ -524,23 +528,53 @@ void CDriverNeo::DeliverIrqs()
 
 		Ay_CpuNmi(cpu);
 
-	/* YM2610 timer IRQ → Z80 IM1. Prefer Irq(); also accept status timer
+	/* YM2610 timer IRQ ?? Z80 IM1. Prefer Irq(); also accept status timer
 
 	   flags so a missed ymfm_update_irq edge cannot stall the sequencer.
 
-	   Only interrupt when IFF1 is set — ForceIm1 during DI nests/breaks
+	   Only interrupt when IFF1 is set ? ForceIm1 during DI nests/breaks
 
 	   early M1 busy-waits (nam1975 @2282). */
 
-	if (!chip || cpu->r.im != 1 || !cpu->r.iff1)
+	if (!chip)
+
+		return;
+
+	/* Bank the expiries even while the ISR runs with interrupts off, so a
+
+	   tick that lands inside a DI section is delivered afterwards rather
+
+	   than lost. The cap keeps a long DI section from producing a burst. */
+
+	ymIrqPending_ += (int)chip->TakeTimerExpiries();
+
+	if (ymIrqPending_ > 2) ymIrqPending_ = 2;
+
+	/* Only interrupt when IFF1 is set ? ForceIm1 during DI nests/breaks
+
+	   early M1 busy-waits (nam1975 @2282). */
+
+	if (cpu->r.im != 1 || !cpu->r.iff1)
 
 		return;
 
 	const int st = (chip->ReadStatus() & 0x03) != 0;
 
-	if (chip->Irq() || st)
+	/* One interrupt per timer expiry. Testing the merged IRQ level instead
 
-		Ay_CpuIm1Interrupt(cpu);
+	   handed the sequencer ~11% more ticks than the programmed Timer A+B
+
+	   rate, because the line stays asserted across the ISR's EI and each
+
+	   following instruction boundary looked like a fresh request. */
+
+	if ((chip->Irq() || st) && ymIrqPending_ > 0) {
+
+		if (Ay_CpuIm1Interrupt(cpu))
+
+			ymIrqPending_--;
+
+	}
 
 }
 
@@ -644,7 +678,23 @@ int CDriverNeo::Render(int16_t* stereo, int frames)
 
 		if (cyclesPerSample < 1) cyclesPerSample = 1;
 
-		const uint64_t end = now + (uint64_t)cyclesPerSample;
+		/* Carry the overshoot. The inner loop can only stop after a whole
+
+		   instruction, so recomputing the deadline from the current time
+
+		   every sample gave each one its full budget plus whatever the
+
+		   previous sample ran over ? the Z80, and with it the YM2610's
+
+		   timers, ran about 11% fast and the sequencer with them. */
+
+		cpuDebt_ += cyclesPerSample;
+
+		const uint64_t start = (uint64_t)cpu->time();
+
+		const uint64_t end = start
+
+			+ (uint64_t)(cpuDebt_ > 0 ? cpuDebt_ : 0);
 
 		while ((uint64_t)cpu->time() < end) {
 
@@ -669,6 +719,8 @@ int CDriverNeo::Render(int16_t* stereo, int frames)
 			TickYm((uint64_t)cycles);
 
 		}
+
+		cpuDebt_ -= (int64_t)((uint64_t)cpu->time() - start);
 
 		chip->Render(stereo + i * 2, 1);
 

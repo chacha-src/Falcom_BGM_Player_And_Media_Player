@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "cemu_driver.h"
 
@@ -47,6 +47,12 @@ private:
 	uint64_t injectAt_;
 
 	int reinjected_;
+
+	/* Timer expiries taken from the YM2610 but not yet delivered as IM1. */
+	int ymIrqPending_;
+
+	/* Unspent CPU cycle budget, carried so overshoot does not add up. */
+	int64_t cpuDebt_;
 
 
 

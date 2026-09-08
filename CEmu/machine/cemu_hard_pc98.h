@@ -31,6 +31,16 @@ public:
 	Ay_Cpu* Cpu() override { return NULL; }
 	uint8_t* Mem() override;
 	CChip* SoundChip() override { return chip_; }
+	/* Second FM chip of a SOUND ORCHESTRA board, NULL on every other. */
+	CChip* OplChip() const { return opl_; }
+	int SorchMode() const { return modeSorch_; }
+	/* CEMU_PC98_IPPROF sampling for run loops outside PumpCycles (the
+	   non-DOS pc98vx path drives np2_step from the driver). */
+	void ProfSample();
+	/* Boot diagnostics: tells a guest that never ran apart from one that ran
+	   but never programmed the FM chip. */
+	uint64_t CpuCycles() const { return cpuCycles_; }
+	unsigned OpnWriteCount() const { return opnWriteCount_; }
 
 	uint8_t PortIn(uint16_t port) override;
 	void PortOut(uint16_t port, uint8_t data) override;
@@ -52,6 +62,8 @@ public:
 	int bootIp_;
 	int funcVect_;
 	int dataAddr_;
+	/* Set when the guest supplied dataAddr_ through HostService 0x10. */
+	int dataAddrHost_;
 	int fileSize_;
 	int data2Addr_;
 	int file2Size_;
@@ -207,6 +219,17 @@ private:
 	void MidiCaptureByte(uint8_t v);
 
 	CChip* chip_;
+	/* SNE SOUND ORCHESTRA: a 26K-compatible YM2203 plus a second FM chip at
+	   0x18C/0x18E, which on every other PC-98 board is the OPNA's high
+	   register bank. Non-zero switches those two ports over to opl_.
+	   1 = plain/L (YM3812), 2 = V/VS/LS (Y8950; FM part only for now). */
+	int modeSorch_;
+	CChip* opl_;
+	/* Shadow of the OPL half so its nine channels can be shown on their own
+	   monitor rows beside the OPN ones. */
+	void SorchTrackOplWrite(uint8_t reg, uint8_t data);
+	uint8_t sorchOplRegs_[256];
+	uint8_t sorchOplOn_[9];
 	int sampleRate_;
 	int active_;
 	uint8_t* midiBytes_;

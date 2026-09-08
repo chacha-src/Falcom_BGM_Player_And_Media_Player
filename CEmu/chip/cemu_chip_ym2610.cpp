@@ -1,4 +1,4 @@
-﻿#include "StdAfx.h"
+#include "StdAfx.h"
 #include "cemu_chip_ym2610.h"
 #include "cemu_chip.h"
 #include "../fmmon/fmmon_shadow.h"
@@ -23,6 +23,7 @@ public:
 		, clockHz_(clockHz ? clockHz : 8000000u)
 		, chipRate_(0)
 		, chipAcc_(0)
+		, expiries_(0)
 		, curL_(0)
 		, curR_(0)
 		, irq_(0)
@@ -67,6 +68,7 @@ public:
 		memset(reg_, 0, sizeof(reg_));
 		timerLeft_[0] = timerLeft_[1] = -1;
 		chipAcc_ = 0;
+		 expiries_ = 0;
 		curL_ = curR_ = 0;
 		irq_ = 0;
 	}
@@ -94,6 +96,7 @@ public:
 			while (timerLeft_[t] <= 0) {
 				const int64_t over = -timerLeft_[t];
 				timerLeft_[t] = -1;
+				expiries_++;
 				if (m_engine) m_engine->engine_timer_expired((uint32_t)t);
 				if (timerLeft_[t] < 0) break;
 				timerLeft_[t] -= over;
@@ -143,6 +146,13 @@ public:
 
 	bool Irq() const override { return irq_ != 0; }
 	void AckIrq() override { irq_ = 0; }
+	unsigned TakeTimerExpiries() override
+	{
+		const unsigned n = expiries_;
+		expiries_ = 0;
+		return n;
+	}
+
 	uint8_t ReadStatus() override { return ym_->read_status(); }
 	uint8_t ReadData() override { return ym_->read_data(); }
 	uint8_t ReadStatusHi() override { return ym_->read_status_hi(); }
@@ -181,6 +191,7 @@ private:
 	uint32_t clockHz_;
 	int chipRate_;
 	int64_t chipAcc_;
+	unsigned expiries_;
 	int32_t curL_, curR_;
 	int irq_;
 	int64_t timerLeft_[2];

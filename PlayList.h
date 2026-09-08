@@ -200,6 +200,11 @@ void PlMissDiskSet(LPCTSTR fol, int miss);
 void PlMissDiskForget(LPCTSTR fol);
 void PlRefreshMidiPlayModes();
 bool PlCemuAddZipAndPlay(LPCTSTR zipPhysical);
+
+/* "Not supported yet" notice for CEmu archives that do not play. Shown at
+   most once per drop; call the reset before handling a batch of files. */
+void CemuUnsupportedResetBatch();
+void CemuWarnUnsupported();
 // ジャケットサムネディスクキャッシュ(%LOCALAPPDATA%\oggYSED\jak)
 CString PlJakDiskPath(LPCTSTR fol, BOOL noneSentinel);
 void PlJakDiskForget(LPCTSTR fol);

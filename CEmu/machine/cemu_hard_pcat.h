@@ -78,6 +78,11 @@ public:
 	int modeBeep_;
 	int modeSb_;
 	int modeMidi_;
+	/* Sierra silp_at.com glue. The silp repairs poke CS:0265..027B and read
+	   a song-buffer segment from CS:0275 — offsets that mean nothing in the
+	   other INT 7Fh glues (CODE.COM, HOOT.EXE, PMDL_AT), where they smash
+	   unrelated glue data and, via the song memcpy, the loaded driver. */
+	int modeSilp_;
 	char hootAdvName_[16]; /* e.g. ADLIB.ADV / SBP2FM.ADV */
 	uint16_t hootAdvSeg_; /* resident AIL .ADV image for HOOT register_driver */
 	unsigned hootAdvSize_;

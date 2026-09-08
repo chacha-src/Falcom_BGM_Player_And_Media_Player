@@ -21,6 +21,7 @@
 #include "PluginKinds.h"
 #include "CEmu/cemu_mgr.h"
 #include "CEmu/cemu_modepref.h"
+#include "CEmu/cemu_support.h"
 #include "VstMidiEngine.h"
 #include "PluginAimp.h"
 #include "kb_sasami/source/sasami_midi.h"
@@ -6094,6 +6095,7 @@ void CPlayList::OnDropFiles(HDROP hDropInfo)
 	int playIdx = -1;       // 再生対象(新規 or 既存)
 	// 第4引数は文字数。sizeof を渡すと長いパスで filen_c を溢れさせる。
 	UINT cnt = DragQueryFile(hDropInfo, (UINT)-1, filen_c, _countof(filen_c));
+	CemuUnsupportedResetBatch();
 	TCHAR tmp[1024];
 	_tgetcwd(tmp, 1000);
 	m_lc.SetRedraw(FALSE);
@@ -11603,6 +11605,36 @@ static bool PlCemuPickModeIfNeeded(CPlayList* pl, const wchar_t* zipPhysical)
 	return true;
 }
 
+/* Dropping a dozen unsupported zips should not mean a dozen dialogs, so the
+   notice is shown once per drop; CemuUnsupportedResetBatch starts a batch. */
+static int g_cemuUnsupportedShown = 0;
+
+void CemuUnsupportedResetBatch()
+{
+	g_cemuUnsupportedShown = 0;
+}
+
+void CemuWarnUnsupported()
+{
+	if (g_cemuUnsupportedShown) return;
+	g_cemuUnsupportedShown = 1;
+	AfxMessageBox(LL14(
+		L"まだ未対応です。",
+		L"Not supported yet.",
+		L"Pas encore pris en charge.",
+		L"Non ancora supportato.",
+		L"Aun no compatible.",
+		L"아직 지원되지 않습니다.",
+		L"尚未支持。",
+		L"غير مدعوم بعد.",
+		L"Пока не поддерживается.",
+		L"Noch nicht unterstuetzt.",
+		L"Ainda nao suportado.",
+		L"Nog niet ondersteund.",
+		L"Jeszcze nieobslugiwane.",
+		L"Henuz desteklenmiyor."), MB_ICONINFORMATION);
+}
+
 static bool PlAddCemuZipEntries(CPlayList* pl, const CString& zipPath, int& syo, CString& syos, int& modesub, CString& fnn)
 {
 	if (!pl) return false;
@@ -11616,6 +11648,13 @@ static bool PlAddCemuZipEntries(CPlayList* pl, const CString& zipPath, int& syo,
 	char dataDir[CEMU_DATA_DIR];
 	const CEmuGameEntry* ge = CEmuMgrResolveZip(CEmuMgrGet(), zp, zipOut, (int)_countof(zipOut), dataDir, (int)sizeof(dataDir));
 	if (!ge || CEmuGameTitleCount(ge) <= 0) return false;
+	/* Recognised by the catalog but not verified to play — say so instead of
+	   filling the playlist with rows that stay silent. Returning true keeps
+	   the caller from falling back to a generic row for this zip. */
+	if (!CEmuArchiveIsSupported(ge->archive)) {
+		CemuWarnUnsupported();
+		return true;
+	}
 	const wchar_t* zipBase = zipOut[0] ? zipOut : (LPCTSTR)zp;
 	const int n = CEmuGameTitleCount(ge);
 	/* Prefer BGM-ish titles first (gra2 lists FADE OUT / SFX before BGM). */

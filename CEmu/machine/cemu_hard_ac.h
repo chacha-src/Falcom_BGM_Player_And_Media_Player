@@ -113,6 +113,10 @@ public:
 	int SegaM1Audio() const { return segaM1Audio_; }
 	void SegaMidiInjectSong(uint16_t cmd);
 	void SegaMidiInjectSongMode(uint16_t cmd, int hiFirst);
+	/* Host MIDI bytes still waiting for the 68000 to read them. Zero means
+	   the firmware has taken the song select, so a re-inject would only
+	   stop and restart what is already playing. */
+	int SegaMidiFifoPending() const { return segaMidiHead_ != segaMidiTail_; }
 	void SegaMidiPush(uint8_t b);
 	uint8_t SegaUartRead(unsigned reg);
 	void SegaUartWrite(unsigned reg, uint8_t data);

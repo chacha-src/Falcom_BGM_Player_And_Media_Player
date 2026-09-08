@@ -338,6 +338,17 @@ void CEmuFmMonBindFromGe(const CEmuGameEntry* ge)
 		strncpy_s(chip, "YM2610", _TRUNCATE);
 		layout = 2; /* FMx4 + SSGx3 + ADPCM-A/B */
 		FmMonShadowSetSsgClock(2000000u); /* YM2610 SSG = clock/4 at 8MHz */
+	} else if (_strnicmp(sub, "soundorchestra", 14) == 0) {
+		/* SNE SOUND ORCHESTRA: 26K-compatible YM2203 plus a second FM chip
+		   (YM3812, or Y8950 on the V/VS/LS) at 0x18C/0x18E. Keep the OPN
+		   layout so the 3 FM + 3 SSG rows stay visible — the OPL register
+		   writes reach the shadow through FmMonShadowWriteOplReg — and name
+		   the board so it is not mistaken for a plain OPN. */
+		strncpy_s(chip, (sub[14] == 'v' || sub[14] == 'V')
+			? "YM2203+Y8950" : "YM2203+OPL2", _TRUNCATE);
+		layout = 0;
+		FmMonShadowSetSsgClock(3993600u);
+		FmMonShadowSetKeysProfile(SASAMI_FMMON_KEYS_OPL2);
 	} else if (_stricmp(sub, "opna") == 0 || HasChip(ge, CEMU_CHIP_OPNA)) {
 		strncpy_s(chip, "OPNA", _TRUNCATE);
 		layout = 1;

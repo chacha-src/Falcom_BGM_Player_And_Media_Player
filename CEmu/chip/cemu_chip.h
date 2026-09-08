@@ -19,6 +19,10 @@ public:
 	virtual void SetPcmRom(const uint8_t* data, unsigned size) { (void)data; (void)size; }
 	virtual void MixAdd(int16_t* stereo, int frames, int gain) { (void)stereo; (void)frames; (void)gain; }
 	virtual unsigned GetRegSnapshot(uint8_t* buf, unsigned cap) const { (void)buf; (void)cap; return 0; }
+	/* Number of timer expiries since the last call, then zeroed. A driver
+	   that polls the merged IRQ line cannot tell one expiry from the next,
+	   so this lets it raise exactly one CPU interrupt per expiry. */
+	virtual unsigned TakeTimerExpiries() { return 0; }
 	/* allowTimerA: 0 = mucom (B only), 1 = typical PC88 (A+B). */
 	virtual void SetTimerIrqPolicy(int allowTimerA) { (void)allowTimerA; }
 	/* Scale externally supplied master clocks for timer/IRQ scheduling only.

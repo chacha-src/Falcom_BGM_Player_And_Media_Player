@@ -2,6 +2,7 @@
 #include "cemu_hard_pc98.h"
 #include "../cemu_rhythm.h"
 #include "../chip/cemu_chip_opna.h"
+#include "../chip/cemu_chip_opl.h"
 #include "../fmmon/fmmon_shadow.h"
 #include "../vendor/np2/np2ffi.h"
 #include <stdlib.h>
@@ -52,7 +53,11 @@ struct Pc98IpProf {
 		}
 	}
 
-	~Pc98IpProf()
+	~Pc98IpProf() { Dump(); }
+
+	/* Static teardown is not guaranteed to run for every host that embeds
+	   the core, so the pump's owner flushes this explicitly on Close. */
+	void Dump()
 	{
 		if (!path || !total) return;
 		FILE* f = NULL;
@@ -69,6 +74,7 @@ struct Pc98IpProf {
 			hits[best] = 0;
 		}
 		fclose(f);
+		total = 0;
 	}
 };
 
@@ -300,8 +306,40 @@ static unsigned char Pc98In8(unsigned port)
 	return hw->PortIn((uint16_t)port);
 }
 
+/* The OPL half of a SOUND ORCHESTRA gets its own nine monitor rows rather
+   than sharing the OPN ones: with s_opnaLayout held at the OPN layout the
+   shadow keeps the FM rows and appends these as extra channels. */
+void CHardPc98::SorchTrackOplWrite(uint8_t reg, uint8_t data)
+{
+	sorchOplRegs_[reg] = data;
+	if (reg < 0xA0 || reg > 0xB8) return;
+	const int ch = (int)(reg & 0x0F);
+	if (ch > 8) return;
+	const uint8_t b = sorchOplRegs_[0xB0 + ch];
+	if (!(b & 0x20)) {
+		if (sorchOplOn_[ch]) {
+			sorchOplOn_[ch] = 0;
+			FmMonShadowPcmNote(ch, -1, 0);
+		}
+		return;
+	}
+	const unsigned fnum = (unsigned)sorchOplRegs_[0xA0 + ch]
+		| ((unsigned)(b & 0x03) << 8);
+	if (!fnum) return;
+	const unsigned block = (unsigned)((b >> 2) & 0x07);
+	/* OPL2 pitch: fnum * clock / (72 * 2^(20 - block)). */
+	const double hz = (double)fnum * 3579545.0
+		/ (72.0 * (double)(1u << (20u - block)));
+	const int midi = FmMonShadowHzToMidi(hz);
+	if (midi < 0) return;
+	sorchOplOn_[ch] = 1;
+	FmMonShadowPcmNote(ch, midi, 1);
+}
+
 CHardPc98::CHardPc98()
 	: opnaMode(0)
+	, modeSorch_(0)
+	, opl_(NULL)
 	, cpuHz_(PC98_CPU_HZ)
 	, opnHz_(PC98_OPN_CLOCK_HZ)
 	, bootCs_(0)
@@ -456,9 +494,22 @@ CHardPc98::CHardPc98()
 	memset(mpuAckQ_, 0, sizeof(mpuAckQ_));
 }
 
+void CHardPc98::ProfSample()
+{
+	static int profInit = 0;
+	if (!profInit) { profInit = 1; IpProfInit(); }
+	const unsigned cs = np2_reg_get(NP2_R_CS);
+	const unsigned ip = np2_reg_get(NP2_R_IP);
+	const unsigned lin = (cs << 4) + ip;
+	if (!g_ipProf) return;
+	g_ipProf->Note(lin);
+}
+
 CHardPc98::~CHardPc98()
 {
 	Shutdown();
+	if (g_ipProf)
+		g_ipProf->Dump();
 }
 
 void CHardPc98::FreeBanks()
@@ -507,11 +558,17 @@ static int CEmuPc98IsMusicCom(const CEmuGameEntry* ge)
 
 int CHardPc98::Init(const CEmuGameEntry* ge, int sampleRate)
 {
-	static int profInit = 0;
-	if (!profInit) { profInit = 1; IpProfInit(); }
 	if (!ge) return 0;
 	sampleRate_ = sampleRate > 0 ? sampleRate : 44100;
 	opnaMode = (_stricmp(ge->subtype, "opna") == 0) ? 1 : 0;
+	/* SOUND ORCHESTRA is a 26K clone, so the OPN half stays a YM2203; what
+	   makes the board is the extra OPL chip sharing the 0x18C/0x18E pair. */
+	if (_stricmp(ge->subtype, "soundorchestrav") == 0)
+		modeSorch_ = 2;
+	else if (_stricmp(ge->subtype, "soundorchestra") == 0)
+		modeSorch_ = 1;
+	else
+		modeSorch_ = 0;
 	opnHz_ = opnaMode ? PC98_OPNA_CLOCK_HZ : PC98_OPN_CLOCK_HZ;
 	cpuHz_ = PC98_CPU_HZ;
 	int clockmul = CEmuParseOptHex(ge, "clockmul", 0);
@@ -524,6 +581,7 @@ int CHardPc98::Init(const CEmuGameEntry* ge, int sampleRate)
 	bootIp_ = CEmuParseOptHex(ge, "bootip", 0);
 	funcVect_ = CEmuParseOptHex(ge, "funcvect", 0x7f) & 0xff;
 	dataAddr_ = CEmuParseOptHex(ge, "dataaddr", 0);
+	dataAddrHost_ = 0;
 	fileSize_ = CEmuParseOptHex(ge, "filesize", 0);
 	/* Falcom SORC98 catalog uses decimal "1000" for a 0x1000 window. */
 	if (fileSize_ == 1000 && dataAddr_ == 0x3000)
@@ -566,6 +624,15 @@ int CHardPc98::Init(const CEmuGameEntry* ge, int sampleRate)
 
 	chip_ = CEmuChipYm2608Create((uint32_t)opnHz_, opnaMode, sampleRate_);
 	if (!chip_) return 0;
+	/* Both YM3812 and Y8950 run off the board's own 3.579545 MHz colour-burst
+	   crystal, not the PC-98 bus clock. The V/VS/LS variants fit a Y8950
+	   instead; its FM half is register-compatible with the YM3812, so the
+	   music plays — only its 8 KB ADPCM channel is still missing. */
+	if (modeSorch_) {
+		opl_ = CEmuChipYm3812Create(3579545u, sampleRate_);
+		memset(sorchOplRegs_, 0, sizeof(sorchOplRegs_));
+		memset(sorchOplOn_, 0, sizeof(sorchOplOn_));
+	}
 	/* Select clock behavior by driver family. MUSIC.COM relies on SOUND BIOS
 	   selecting YM2608 /2. FMP and Falcom RX program their own timer constants
 	   and stay at reset /6. ymfm reports timer durations in half master clocks,
@@ -622,6 +689,7 @@ void CHardPc98::Shutdown()
 	DetachIoHooks();
 	FreeBanks();
 	if (chip_) { CEmuChipYm2608Destroy(chip_); chip_ = NULL; }
+	if (opl_) { CEmuChipYm3812Destroy(opl_); opl_ = NULL; }
 	delete[] midiBytes_; midiBytes_ = NULL;
 	delete[] midiDelta_; midiDelta_ = NULL;
 	midiCount_ = 0;
@@ -742,8 +810,13 @@ void CHardPc98::HostService(uint8_t func)
 		   dataaddr=0 — without this, TriggerPlay never preloads / skips cmd1. */
 		{
 			const int addr = ((int)hostParam3_ << 4) + (int)hostParam2_;
-			if (addr > 0 && addr < 0x200000)
+			if (addr > 0 && addr < 0x200000) {
 				dataAddr_ = addr;
+				/* The guest named this address itself, so preloading there
+				   is not the "invent a load address" guess the family gates
+				   below exist to prevent. */
+				dataAddrHost_ = 1;
+			}
 			hostStatus_ = 0x00;
 		}
 		break;
@@ -1511,12 +1584,16 @@ uint8_t CHardPc98::PortIn(uint16_t port)
 			return ssgPortAJumper_;
 		return chip_ ? chip_->ReadData() : 0xff;
 	case OPN_ADDR1: {
+		if (modeSorch_)
+			return opl_ ? opl_->ReadStatus() : 0x06; /* OPL2 ID pattern */
 		uint8_t s = chip_ ? chip_->ReadStatusHi() : 0xff;
 		if (pc88VaIo_)
 			s = (uint8_t)(s & (uint8_t)~0x80);
 		return s;
 	}
-	case OPN_DATA1: return chip_ ? chip_->ReadDataHi() : 0xff;
+	case OPN_DATA1:
+		if (modeSorch_) return 0xff; /* OPL2 has no readable data port */
+		return chip_ ? chip_->ReadDataHi() : 0xff;
 	case EXT_CMD: return extCmd_;
 	case EXT_SONG: return (uint8_t)(extSong_ & 0xff);
 	case EXT_SONG + 1: return (uint8_t)(extSong_ >> 8);
@@ -1699,6 +1776,14 @@ void CHardPc98::PortOut(uint16_t port, uint8_t data)
 		}
 		break;
 	case OPN_ADDR1:
+		/* On a SOUND ORCHESTRA these two ports are a whole second chip, not
+		   the OPNA's high bank: sending them to the OPN is what made the
+		   board sound like a plain OPN however the mode was selected. */
+		if (modeSorch_) {
+			if (opl_) opl_->Write(0, data);
+			opnLatchedAddrHi_ = data;
+			break;
+		}
 		if (chip_) {
 			chip_->Write(0x100, data);
 			opnLatchedAddrHi_ = data;
@@ -1706,6 +1791,11 @@ void CHardPc98::PortOut(uint16_t port, uint8_t data)
 		}
 		break;
 	case OPN_DATA1:
+		if (modeSorch_) {
+			if (opl_) opl_->Write(1, data);
+			SorchTrackOplWrite(opnLatchedAddrHi_, data);
+			break;
+		}
 		if (chip_) {
 			if (pc88VaIo_)
 				chip_->Write(0x100, opnLatchedAddrHi_);
@@ -2163,6 +2253,24 @@ int CHardPc98::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCo
 		mem[0x18 * 4 + 1] = 0x05;
 		mem[0x18 * 4 + 2] = 0x00;
 		mem[0x18 * 4 + 3] = 0x00;
+		/* Same trap one vector along: a rip has no floppy, so a driver that
+		   calls the disk BIOS (Telenet VIS reads a 256-byte sector before it
+		   will start) otherwise runs the garbage IVT as code. Report "no
+		   error" — CF is cleared in the caller's pushed flags — because the
+		   callers treat a failed read as a fatal disk error. */
+		static const uint8_t kDiskStub[] = {
+			0x55,                    /* push bp                */
+			0x89, 0xE5,              /* mov  bp,sp             */
+			0x83, 0x66, 0x06, 0xFE,  /* and  word [bp+6],0FFFE */
+			0x5D,                    /* pop  bp                */
+			0x30, 0xE4,              /* xor  ah,ah             */
+			0xCF                     /* iret                   */
+		};
+		memcpy(mem + 0x512, kDiskStub, sizeof(kDiskStub));
+		mem[0x1B * 4 + 0] = 0x12;
+		mem[0x1B * 4 + 1] = 0x05;
+		mem[0x1B * 4 + 2] = 0x00;
+		mem[0x1B * 4 + 3] = 0x00;
 	}
 
 	/* Falcom 00BIOS / PR.* (ys3/xana2/…, catalog dummysndrom=1): second boot
@@ -3211,6 +3319,10 @@ void CHardPc98::AdvanceOpnClocks(uint64_t cpuCycles)
 void CHardPc98::PumpCycles(uint64_t endCycle)
 {
 	CEmuHardPc98SetActive(this);
+	{
+		static int profInit = 0;
+		if (!profInit) { profInit = 1; IpProfInit(); }
+	}
 	while (cpuCycles_ < endCycle) {
 		uint8_t* mem = np2_mem();
 		uint16_t cs = np2_reg_get(NP2_R_CS);
@@ -3248,6 +3360,12 @@ void CHardPc98::PumpCycles(uint64_t endCycle)
 		ip = np2_reg_get(NP2_R_IP);
 		mem = np2_mem();
 		const unsigned phys = ((unsigned)cs << 4) + (unsigned)ip;
+		/* Sample before the HLT handling below: a driver parked on a HLT that
+		   is not a DOS trap spins here without ever reaching np2_step, which
+		   used to leave the histogram empty for exactly the hangs it exists
+		   to diagnose. */
+		if (g_ipProf)
+			g_ipProf->Note(phys);
 		if (isDos_ && mem && phys < 0x200000 && mem[phys] == 0xF4) {
 			uint8_t vec = 0;
 			if (dos_.TrapVector(cs, ip, &vec)) {
@@ -3270,8 +3388,6 @@ void CHardPc98::PumpCycles(uint64_t endCycle)
 			AdvanceOpnClocks(q);
 			continue;
 		}
-		if (g_ipProf)
-			g_ipProf->Note(phys);
 		const int32_t cyc = np2_step();
 		const uint64_t u = (cyc > 0) ? (uint64_t)cyc : 1ull;
 		cpuCycles_ += u;
@@ -4581,9 +4697,16 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 	DrainInterrupt(drainBudget);
 	/* After cmd0, Falcom glue may HostService(0x10) a song dest — load then
 	   cmd1. Catalog dataaddr alone is also enough (no CS invent). */
-	if ((bootCs_ == 0x0160 || rx98_ || fmd98_ || prog98_)
-		&& dataAddr_ > 0 && fileSize_ > 0)
+	if ((bootCs_ == 0x0160 || rx98_ || fmd98_ || prog98_ || dataAddrHost_)
+		&& dataAddr_ > 0 && fileSize_ > 0) {
 		loaded = LoadSongToAddr(song & 0xff, dataAddr_, fileSize_, 0);
+		/* Telenet splits a song into a bgm/bgm2 pair; the driver reads both,
+		   so loading only the primary leaves it waiting on half a song.
+		   Confined to the guest-supplied case so the Falcom families above
+		   keep their existing single-file behaviour. */
+		if (loaded && dataAddrHost_ && data2Addr_ > 0 && file2Size_ > 0)
+			LoadSongToAddr(song & 0xff, data2Addr_, file2Size_, 1);
+	}
 	if (loaded || lastSongLoadOk_) {
 		extCmd_ = 1;
 		np2_interrupt((uint8_t)funcVect_);

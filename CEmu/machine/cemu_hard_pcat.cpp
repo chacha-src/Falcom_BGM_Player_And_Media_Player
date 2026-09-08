@@ -312,6 +312,7 @@ CHardPcat::CHardPcat()
 	, modeCms_(0)
 	, modeBeep_(0)
 	, modeSb_(0)
+	, modeSilp_(0)
 	, modeMidi_(0)
 	, chip_(NULL)
 	, saa1_(NULL)
@@ -610,6 +611,7 @@ void CHardPcat::TickSide(uint64_t cpuCycles)
 
 void CHardPcat::RepairSilpDriverFar()
 {
+	if (!modeSilp_) return;
 	/* silp_at.com keeps a far ptr at CS:026B (off) / CS:026D (seg) to the
 	   loaded *.DRV. Sierra drivers store their OPL base (0x220/0x388) at
 	   DS:026D when DS still points at silp — clobbering the far segment and
@@ -1093,7 +1095,7 @@ void CHardPcat::PreloadSilpSong(unsigned titleCode)
 {
 	/* silp play path: AH=3F BX=0 into DS=[0275]. If CS:0275 was clobbered or
 	   handle 0 missed the bind, seed the buffer so BP=6 sees real SCI bytes. */
-	if (!IvtHooked(0x7F)) return;
+	if (!modeSilp_ || !IvtHooked(0x7F)) return;
 	uint8_t* mem = np2_mem();
 	if (!mem) return;
 	RepairSilpDriverFar();
@@ -1986,6 +1988,14 @@ int CHardPcat::BootDos(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCod
 	if (!fs || !ge) return 0;
 	uint8_t* mem = np2_mem();
 	if (!mem) return 0;
+
+	modeSilp_ = 0;
+	for (int i = 0; i < ge->romCount; i++) {
+		if (_strnicmp(ge->rom[i].name, "SILP", 4) == 0) {
+			modeSilp_ = 1;
+			break;
+		}
+	}
 
 	const int playHz = PCAT_CPU_HZ;
 	const int bootHz = playHz * (bootClockMul_ > 1 ? bootClockMul_ : 1);

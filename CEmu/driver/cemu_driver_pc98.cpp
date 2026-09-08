@@ -93,6 +93,7 @@ void CDriverPc98::RunUntil(uint64_t endCycle)
 	}
 	CEmuHardPc98SetActive(hw_);
 	while (hw_->cpuCycles_ < endCycle) {
+		hw_->ProfSample();
 		const int32_t cyc = np2_step();
 		const uint64_t u = (cyc > 0) ? (uint64_t)cyc : 1ull;
 		hw_->cpuCycles_ += u;
@@ -133,11 +134,19 @@ void CDriverPc98::WatchdogTick()
 	hw_->TriggerPlay(titleCode_);
 }
 
+static int CEmuPc98Clamp16(int v)
+{
+	if (v > 32767) return 32767;
+	if (v < -32768) return -32768;
+	return v;
+}
+
 int CDriverPc98::Render(int16_t* stereo, int frames)
 {
 	if (!hw_ || !stereo || frames <= 0 || !booted_) return 0;
 	CChip* chip = hw_->SoundChip();
 	if (!chip) return 0;
+	CChip* const opl = hw_->OplChip();
 	CEmuHardPc98SetActive(hw_);
 	if (!triggered_) {
 		hw_->TriggerPlay(titleCode_);
@@ -158,6 +167,7 @@ int CDriverPc98::Render(int16_t* stereo, int frames)
 				hw_->PumpCycles(end);
 			} else {
 				while (hw_->cpuCycles_ < end) {
+					hw_->ProfSample();
 					const int32_t cyc = np2_step();
 					const uint64_t u = (cyc > 0) ? (uint64_t)cyc : 1ull;
 					hw_->cpuCycles_ += u;
@@ -169,6 +179,19 @@ int CDriverPc98::Render(int16_t* stereo, int frames)
 			cpuDebt_ -= (int64_t)(hw_->cpuCycles_ - start);
 		}
 		chip->Render(stereo + i * 2, 1);
+		if (opl) {
+			/* SOUND ORCHESTRA's selling point was pseudo-stereo: the OPL sits
+			   hard left and the YM2203 hard right (the manual has these
+			   swapped). The OPN render above is mono-in-both-channels, so
+			   biasing it right and the OPL left reproduces the split without
+			   needing the FM and SSG halves separated. */
+			int16_t o[2] = { 0, 0 };
+			opl->Render(o, 1);
+			int16_t* p = stereo + i * 2;
+			const int oL = o[0], pL = p[0], pR = p[1];
+			p[0] = (int16_t)CEmuPc98Clamp16(pL / 4 + oL);
+			p[1] = (int16_t)CEmuPc98Clamp16(pR - pR / 4 + o[1] / 4);
+		}
 		if ((++wdSamples_ & 511) == 0)
 			WatchdogTick();
 	}
