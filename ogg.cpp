@@ -2286,6 +2286,7 @@ BOOL COggApp::InitInstance()
 	// 更新があればそのまま適用・再起動し、なければ通常の起動を続ける。
 	RunStartupUpdateCheck();
 	OfflineHelpEnsureAvailable();
+	EnsureD3dCompilerAvailable();
 
 	// 起動時のモード選択(ファルコムbgm特化型画面 / メディアプレイヤー画面)
 	if (savedata.startupAsk) {

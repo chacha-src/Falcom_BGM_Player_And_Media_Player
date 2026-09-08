@@ -1107,6 +1107,12 @@ int CEmuCatalogListDlg::PlaySelectedRow()
 	} else if (!CEmuResolveZipForArchive(this, rowp->ge->archive, zipPath, (int)_countof(zipPath))) {
 		return 0;
 	}
+	/* 一覧で選んだ行の音源を優先（複数モードでも再選択 UI を出さない） */
+	{
+		char tag[CEMU_MODE_TAG] = {};
+		if (CEmuModeTagFromEntry(rowp->ge, tag, (int)sizeof(tag)) && tag[0])
+			CEmuModePrefSet(zipPath, tag);
+	}
 	if (!PlCemuAddZipAndPlay(zipPath)) {
 		AfxMessageBox(LL14(
 			L"プレイリストへの追加に失敗しました。",

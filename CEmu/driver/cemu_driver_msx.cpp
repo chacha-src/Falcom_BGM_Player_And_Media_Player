@@ -100,9 +100,13 @@ int CDriverMsx::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned
 
 	if (!hw_->LoadKss(fs, ge, titleCode))
 		return 0;
-	unsigned song = titleCode ? (titleCode & 0xff) : 1u;
+	/* Pass the whole code: the generic path needs the middle and top bytes to
+	   tell a bgm file apart from a song index inside it (aleste2 0x0115) and
+	   to drive the port 5 engine selector (ys2 0x010012). Masking to the low
+	   byte here collapsed every such title onto one song. */
+	unsigned song = titleCode ? titleCode : 1u;
 	if (!song && ge->titleCount > 0)
-		song = ge->title[0].code & 0xff;
+		song = ge->title[0].code;
 	if (!hw_->StartSong(song))
 		return 0;
 

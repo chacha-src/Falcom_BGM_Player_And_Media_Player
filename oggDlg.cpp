@@ -1155,6 +1155,8 @@ static int g_nCurrentKpiIndex = 0;
 static BOOL g_kpiLoadDeferredPlay = FALSE;
 // 起動時サブUI復元中(1メッセージ=1 Create)。MP Timer3 の SyncPushToggleButtons 再入を抑止。
 int g_oggSubUiRestoring = 0;
+static LONG g_silentPluginUpdateStarted = 0;
+static unsigned __stdcall OggSilentPluginUpdateThread(void*);
 
 // KPI(.kpi) + Winamp/XMPlay/AIMP 候補 DLL を同じ再帰で数える（進捗バー総量用）
 static int CountKpiFiles(CString ff)
@@ -1359,8 +1361,10 @@ public:
 	{
 		m_strText = text;
 		if (m_hWnd) {
-			Invalidate(FALSE);
+			/* TRUE: 旧文言の残像を消す。Show() でポンプして確実に描画 */
+			Invalidate(TRUE);
 			UpdateWindow();
+			Show();
 		}
 	}
 
@@ -1546,6 +1550,17 @@ void OggPluginLoadOnOneFileDone()
 #include "KpiEnumCache.h"
 
 extern void COgg_KickTimerp();
+
+/* UI 表示後のサイレント更新のみ（カタログは読込窓で同期完了させる） */
+static unsigned __stdcall OggSilentPluginUpdateThread(void*)
+{
+	BOOL upd = FALSE;
+	upd |= KpiInstall_SilentUpdateKbsasami(karento2);
+	upd |= KpiInstall_SilentUpdateFmpmd(karento2);
+	upd |= KpiInstall_SilentUpdateFmMonKpis(karento2);
+	if (upd) KpiEnumCache_Invalidate();
+	return 0;
+}
 
 static void OggKpiLoadingProgressPct(int percent, void* ctx)
 {
@@ -5308,102 +5323,35 @@ BOOL COggDlg::OnInitDialog()
 
 	ttt_ = 5;
 	//	uTimerId = timeSetEvent(1, 0, TimeCallback, NULL, TIME_PERIODIC);
-#if WIN64
-	/* x64 本体はここでの plug 無し。サイレント更新だけ先に済ませる */
-	{
-		BOOL upd = FALSE;
-		upd |= KpiInstall_SilentUpdateKbsasami(karento2);
-		upd |= KpiInstall_SilentUpdateFmpmd(karento2);
-		upd |= KpiInstall_SilentUpdateFmMonKpis(karento2);
-		if (upd) KpiEnumCache_Invalidate();
-	}
-	{
-		CKpiLoadingWnd loadingWnd;
-		loadingWnd.Create(NULL);
-		loadingWnd.Show();
-		g_pActiveLoadingWnd = &loadingWnd;
-		g_oggKpiLoading = 1;
-		loadingWnd.SetStatusText(CEmuCatalogCacheIsCurrent(CEmuMgrGet()->dataRoot) ? LL14(
-			L"アーカイブデータ読み込み中…\n（キャッシュから復元）",
-			L"Loading archive data…\n(Restoring from cache)",
-			L"Chargement des donnees archive…\n(Depuis le cache)",
-			L"Caricamento dati archivio…\n(Dalla cache)",
-			L"Cargando datos de archivo…\n(Desde la cache)",
-			L"아카이브 데이터 읽는 중…\n(캐시에서 복원)",
-			L"正在读取归档数据…\n（从缓存恢复）",
-			L"جاري تحميل بيانات الأرشيف…\n(من الذاكرة المؤقتة)",
-			L"Загрузка данных архива…\n(Из кэша)",
-			L"Archivdaten werden geladen…\n(Aus dem Cache)",
-			L"A carregar dados de arquivo…\n(Da cache)",
-			L"Archiefgegevens laden…\n(Uit cache)",
-			L"Wczytywanie danych archiwum…\n(Z cache)",
-			L"Arsiv verileri yukleniyor…\n(Onbellekten)"
-		) : LL14(
-			L"アーカイブデータ読み込み中…\n（初回のみ時間がかかります）",
-			L"Loading archive data…\n(First time may take a while)",
-			L"Chargement des donnees archive…\n(La 1re fois peut etre longue)",
-			L"Caricamento dati archivio…\n(La prima volta puo richiedere tempo)",
-			L"Cargando datos de archivo…\n(La primera vez puede tardar)",
-			L"아카이브 데이터 읽는 중…\n(처음만 시간이 걸릴 수 있습니다)",
-			L"正在读取归档数据…\n（首次可能较慢）",
-			L"جاري تحميل بيانات الأرشيف…\n(المرة الأولى قد تستغرق وقتاً)",
-			L"Загрузка данных архива…\n(В первый раз может занять время)",
-			L"Archivdaten werden geladen…\n(Beim ersten Mal kann es dauern)",
-			L"A carregar dados de arquivo…\n(A primeira vez pode demorar)",
-			L"Archiefgegevens laden…\n(De eerste keer kan langer duren)",
-			L"Wczytywanie danych archiwum…\n(Za pierwszym razem moze potrwac)",
-			L"Arsiv verileri yukleniyor…\n(Ilk seferde zaman alabilir)"
-		));
-		loadingWnd.SetRange(0, 100);
-		loadingWnd.SetPos(0);
-		struct Prog64 {
-			static void CB(int pos, int max, void* user) {
-				CKpiLoadingWnd* w = (CKpiLoadingWnd*)user;
-				if (!w || !w->GetSafeHwnd()) return;
-				if (max <= 0) max = 1;
-				if (pos < 0) pos = 0;
-				if (pos > max) pos = max;
-				w->SetRange(0, max);
-				w->SetPos(pos);
-			}
-		};
-		CEmuMgrEnsureCatalogEx(CEmuMgrGet(), &Prog64::CB, &loadingWnd);
-		g_pActiveLoadingWnd = NULL;
-		g_oggKpiLoading = 0;
-		loadingWnd.DestroyWindow();
-	}
-#else
+	/* 読込窓は plug〜カタログ〜MP/本画面 Create まで残す（途中で閉じると空白になる） */
 	CKpiLoadingWnd loadingWnd;
+	BOOL haveLoadingWnd = FALSE;
+	struct LoadProg {
+		static void CB(int pos, int max, void* user) {
+			CKpiLoadingWnd* w = (CKpiLoadingWnd*)user;
+			if (!w || !w->GetSafeHwnd()) return;
+			if (max <= 0) max = 1;
+			if (pos < 0) pos = 0;
+			if (pos > max) pos = max;
+			w->SetRange(0, max);
+			w->SetPos(pos);
+		}
+	};
+#if WIN64
+	/* x64 本体はここでの plug 無し。カタログは読込窓で表示しつつ同期完了。 */
 	loadingWnd.Create(NULL);
 	loadingWnd.Show();
 	g_pActiveLoadingWnd = &loadingWnd;
 	g_oggKpiLoading = 1;
+	haveLoadingWnd = TRUE;
+#else
+	loadingWnd.Create(NULL);
+	loadingWnd.Show();
+	g_pActiveLoadingWnd = &loadingWnd;
+	g_oggKpiLoading = 1;
+	haveLoadingWnd = TRUE;
 	g_nCurrentKpiIndex = 0;
 	if (ptl) ptl->SetProgressState(m_hWnd, TBPF_INDETERMINATE);
-	loadingWnd.SetStatusText(LL14(
-		L"プラグイン更新を確認中…\n（必要な場合のみ取得します）",
-		L"Checking for plugin updates…\n(Download only when needed)",
-		L"Verification des mises a jour plugins…\n(Telechargement seulement si besoin)",
-		L"Controllo aggiornamenti plugin…\n(Download solo se necessario)",
-		L"Comprobando actualizaciones de plugins…\n(Descarga solo si hace falta)",
-		L"플러그인 업데이트 확인 중…\n(필요할 때만 받습니다)",
-		L"正在检查插件更新…\n（仅在需要时下载）",
-		L"التحقق من تحديثات الإضافات…\n(التنزيل عند الحاجة فقط)",
-		L"Проверка обновлений плагинов…\n(Скачивание только при необходимости)",
-		L"Plugin-Updates werden geprueft…\n(Download nur bei Bedarf)",
-		L"A verificar atualizacoes de plugins…\n(Download so se necessario)",
-		L"Plugin-updates controleren…\n(Alleen downloaden indien nodig)",
-		L"Sprawdzanie aktualizacji wtyczek…\n(Pobieranie tylko gdy potrzeba)",
-		L"Eklenti guncellemeleri kontrol ediliyor…\n(Sadece gerekirse indirilir)"
-	));
-	/* KPI 読込ダイアログ表示中にサイレント更新（DLL ロック前） */
-	{
-		BOOL upd = FALSE;
-		upd |= KpiInstall_SilentUpdateKbsasami(karento2);
-		upd |= KpiInstall_SilentUpdateFmpmd(karento2);
-		upd |= KpiInstall_SilentUpdateFmMonKpis(karento2);
-		if (upd) KpiEnumCache_Invalidate();
-	}
 	loadingWnd.SetStatusText(LL14(
 		L"プラグイン読み込み中…\n（しばらく時間がかかる場合があります）",
 		L"Loading plugins…\n(This may take some time)",
@@ -5421,6 +5369,24 @@ BOOL COggDlg::OnInitDialog()
 		L"Eklentiler yükleniyor…\n(Bu biraz zaman alabilir)"
 	));
 	plug(karento2, NULL);
+#endif
+	/* 先に文言を出してから Cache 判定（判定中も「プラグイン」のままにしない） */
+	loadingWnd.SetStatusText(LL14(
+		L"アーカイブデータ読み込み中…",
+		L"Loading archive data…",
+		L"Chargement des donnees archive…",
+		L"Caricamento dati archivio…",
+		L"Cargando datos de archivo…",
+		L"아카이브 데이터 읽는 중…",
+		L"正在读取归档数据…",
+		L"جاري تحميل بيانات الأرشيف…",
+		L"Загрузка данных архива…",
+		L"Archivdaten werden geladen…",
+		L"A carregar dados de arquivo…",
+		L"Archiefgegevens laden…",
+		L"Wczytywanie danych archiwum…",
+		L"Arsiv verileri yukleniyor…"
+	));
 	loadingWnd.SetStatusText(CEmuCatalogCacheIsCurrent(CEmuMgrGet()->dataRoot) ? LL14(
 		L"アーカイブデータ読み込み中…\n（キャッシュから復元）",
 		L"Loading archive data…\n(Restoring from cache)",
@@ -5454,28 +5420,27 @@ BOOL COggDlg::OnInitDialog()
 	));
 	loadingWnd.SetRange(0, 100);
 	loadingWnd.SetPos(0);
-	{
-		struct Prog {
-			static void CB(int pos, int max, void* user) {
-				CKpiLoadingWnd* w = (CKpiLoadingWnd*)user;
-				if (!w || !w->GetSafeHwnd()) return;
-				if (max <= 0) max = 1;
-				if (pos < 0) pos = 0;
-				if (pos > max) pos = max;
-				w->SetRange(0, max);
-				w->SetPos(pos);
-			}
-		};
-		CEmuMgrEnsureCatalogEx(CEmuMgrGet(), &Prog::CB, &loadingWnd);
+	CEmuMgrEnsureCatalogEx(CEmuMgrGet(), &LoadProg::CB, &loadingWnd);
+	if (haveLoadingWnd) {
+		loadingWnd.SetStatusText(LL14(
+			L"起動処理中…\n（画面を準備しています）",
+			L"Starting up…\n(Preparing the screen)",
+			L"Demarrage…\n(Preparation de l'ecran)",
+			L"Avvio…\n(Preparazione schermo)",
+			L"Iniciando…\n(Preparando la pantalla)",
+			L"시작 중…\n(화면 준비 중)",
+			L"正在启动…\n（正在准备画面）",
+			L"جاري التشغيل…\n(تجهيز الشاشة)",
+			L"Запуск…\n(Подготовка экрана)",
+			L"Start…\n(Bildschirm wird vorbereitet)",
+			L"A iniciar…\n(A preparar o ecran)",
+			L"Bezig met starten…\n(Scherm voorbereiden)",
+			L"Uruchamianie…\n(Przygotowanie ekranu)",
+			L"Baslatiliyor…\n(Ekran hazirlaniyor)"
+		));
 	}
-	g_pActiveLoadingWnd = NULL;
-	g_oggKpiLoading = 0;
-	if (ptl) ptl->SetProgressState(m_hWnd, TBPF_NOPROGRESS);
-	loadingWnd.DestroyWindow();
-	// KPI 読み込み中の Peek が Posted tick を落としても再生 UI が死なないよう復旧
+#if !WIN64
 	COgg_KickTimerp();
-	// 読み込み中に届いた再生要求(WM_APP+1)を今から処理する。
-	// PostMessage なので OnInitDialog 完了後に通常のメッセージループで実行される。
 	if (g_kpiLoadDeferredPlay) {
 		g_kpiLoadDeferredPlay = FALSE;
 		PostMessage(WM_APP + 1, 0, 0);
@@ -5553,16 +5518,7 @@ BOOL COggDlg::OnInitDialog()
 		if (CPUInfo[1] & (1 << 5))  avx2 += "AVX2 ";
 		if (CPUInfo[1] & (1 << 16))  avx2 += "AVX512 ";
 	}
-
-	// GPU情報（プライマリモニタ側 DXGI アダプタ）を avx2 に続けて。
-	{
-		CString gpu = BuildGpuInfoString();
-		if (!gpu.IsEmpty()) {
-			avx2 += L" / GPU: ";
-			avx2 += gpu;
-		}
-	}
-
+	/* GPU(DXGI)列挙は起動をブロックするため DeferredHeavy へ。ここでは命令一覧のみ。 */
 	m_os3.SetWindowText(avx2);
 
 
@@ -5608,9 +5564,6 @@ BOOL COggDlg::OnInitDialog()
 
 	stflg = TRUE;
 
-	// ツールチップ・更新チェック・スペアナ窓関数テーブルなど、初回表示後でよい重い処理
-	PostMessage(WM_OGG_DEFERRED_HEAVY_INIT, 0, 0);
-
 #if CCUSTOM_AERO_SUPPORT
 	if (CCC_IsAeroEnabled() && savedata.playerMode != 1)
 	{
@@ -5626,6 +5579,17 @@ BOOL COggDlg::OnInitDialog()
 	// 後回しになり、KPI〜MP 間で CInvalidArgException が出る順序に変わっていた。
 	if (savedata.playerMode == 1)
 		EnterMediaPlayerMode();
+
+	/* MP/本画面の Create が終わってから読込窓を閉じる（空白を出さない） */
+	if (haveLoadingWnd) {
+		g_pActiveLoadingWnd = NULL;
+		g_oggKpiLoading = 0;
+		if (ptl) ptl->SetProgressState(m_hWnd, TBPF_NOPROGRESS);
+		loadingWnd.DestroyWindow();
+	}
+
+	/* 本画面表示後に HTTP サイレント更新・GPU列挙など（カタログは読込窓で完了済み） */
+	PostMessage(WM_OGG_DEFERRED_HEAVY_INIT, 0, 0);
 
 	// サブUI復元(EQ/ピアノ等): OnInitDialog 内で即 Post すると Create ネストの恐れがあるため
 	// タイマ経由。MP は直前で同期完了済みなので旧 500ms 待ちは不要 → 1ms で武装。
@@ -34471,6 +34435,25 @@ void COggDlg::DeferredHeavyStartupImpl()
 LRESULT COggDlg::OnDeferredHeavyStartup(WPARAM, LPARAM)
 {
 	if (!GetSafeHwnd()) return 0;
+	/* HTTP サイレント更新は表示後の裏スレッド（読込窓は止めない） */
+	if (InterlockedExchange(&g_silentPluginUpdateStarted, 1) == 0) {
+		uintptr_t th = _beginthreadex(NULL, 0, OggSilentPluginUpdateThread, NULL, 0, NULL);
+		if (th) CloseHandle((HANDLE)th);
+		else InterlockedExchange(&g_silentPluginUpdateStarted, 0);
+	}
+	/* GPU 文字列は起動同期から外した分をここで付与 */
+	if (m_os3.GetSafeHwnd()) {
+		CString cur;
+		m_os3.GetWindowText(cur);
+		if (cur.Find(L" / GPU: ") < 0) {
+			CString gpu = BuildGpuInfoString();
+			if (!gpu.IsEmpty()) {
+				cur += L" / GPU: ";
+				cur += gpu;
+				m_os3.SetWindowText(cur);
+			}
+		}
+	}
 	StartUpdateCheckThread(m_hWnd);
 	DeferredHeavyStartupImpl();
 	return 0;

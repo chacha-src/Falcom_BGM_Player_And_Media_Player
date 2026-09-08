@@ -20,6 +20,7 @@ static const TCHAR* UPDATE_URL_FALLBACK = _T("https://ppp.oohara.jp/download/ogg
 static const TCHAR* TARGET_EXE_NAME = _T("oggYSEDbgm_uni_avx2.exe");
 static const TCHAR* TARGET_HOST_EXE_NAME = _T("KpiHost64.exe");
 static const TCHAR* TARGET_CHM_NAME = _T("oggYSEDbgm_uni_avx2.chm");
+static const TCHAR* TARGET_D3D_NAME = _T("d3dcompiler_47.dll");
 
 // 配布 ZIP / 展開 EXE の下限（空・404 HTML・途中切断を弾く）
 // 本体は数MB級、KpiHost64 は ~100KB 未満もあり得るので別閾値
@@ -27,6 +28,7 @@ static const ULONGLONG UPDATE_ZIP_MIN_BYTES = 200000ULL;
 static const ULONGLONG UPDATE_MAIN_EXE_MIN_BYTES = 1000000ULL; // oggYSEDbgm_uni_avx2.exe
 static const ULONGLONG UPDATE_HOST_EXE_MIN_BYTES = 20000ULL;   // KpiHost64.exe
 static const ULONGLONG UPDATE_CHM_MIN_BYTES = 20000ULL;        // oggYSEDbgm_uni_avx2.chm（任意・無くても更新成功）
+static const ULONGLONG UPDATE_D3D_MIN_BYTES = 100000ULL;       // d3dcompiler_47.dll（任意・無くても更新成功）
 
 // コンパイル時間ではなく、現在動いている実行ファイルの実際の更新日時を取得するように変更いたしましたわ
 // これにより、ファイルの一部だけをビルドした際の「時間が過去のままになる落とし穴」を完全に回避いたします
@@ -524,6 +526,7 @@ static bool DoManualUpdateToDownloads(const CString& updateUrl, time_t serverTim
 	}
 	// ヘルプ CHM は任意（古い ZIP には無い）。あれば一緒に展開
 	ExtractZipToDir(zipPath, destDir, TARGET_CHM_NAME, UPDATE_CHM_MIN_BYTES, false);
+	ExtractZipToDir(zipPath, destDir, TARGET_D3D_NAME, UPDATE_D3D_MIN_BYTES, true);
 
 	// 展開済み EXE の時刻をサーバーに合わせ（手動コピー後の再検知用）
 	if (serverTime > 0)
@@ -925,6 +928,7 @@ bool DoUpdateAndRestart()
 	}
 	// オフラインヘルプ CHM（ZIP に含まれていれば展開。無くても更新は続行）
 	ExtractZipToDir(zipPath, extractDir, TARGET_CHM_NAME, UPDATE_CHM_MIN_BYTES, false);
+	ExtractZipToDir(zipPath, extractDir, TARGET_D3D_NAME, UPDATE_D3D_MIN_BYTES, true);
 
 	CString extractedPath;
 	extractedPath.Format(_T("%s\\%s"), extractDir, TARGET_EXE_NAME);
@@ -1015,6 +1019,7 @@ bool DoUpdateAndRestart()
 	CStringA targetExeA(TARGET_EXE_NAME);
 	CStringA targetHostExeA(TARGET_HOST_EXE_NAME);
 	CStringA targetChmA(TARGET_CHM_NAME);
+	CStringA targetD3dA(TARGET_D3D_NAME);
 	CStringA targetExePathA(targetExePath);  // 新しく作る正しい名前のファイル
 	CStringA targetHostExePathA(targetHostExePath); // 新しいホストexe
 	CStringA targetChmPathA = targetExePathA;
@@ -1024,6 +1029,14 @@ bool DoUpdateAndRestart()
 			targetChmPathA = targetChmPathA.Left(slashChm + 1) + targetChmA;
 		else
 			targetChmPathA = targetChmA;
+	}
+	CStringA targetD3dPathA = targetExePathA;
+	{
+		const int slashD3d = targetD3dPathA.ReverseFind('\\');
+		if (slashD3d >= 0)
+			targetD3dPathA = targetD3dPathA.Left(slashD3d + 1) + targetD3dA;
+		else
+			targetD3dPathA = targetD3dA;
 	}
 
 	// 実行ファイルがある正しいフォルダのパスを抜き出しますわ
@@ -1087,6 +1100,7 @@ bool DoUpdateAndRestart()
 		"copy /y \"%s\\%s\" \"%s\" >nul 2>&1\r\n"
 		"if errorlevel 1 goto retry\r\n"
 		"if exist \"%s\\%s\" copy /y \"%s\\%s\" \"%s\" >nul 2>&1\r\n"
+		"if exist \"%s\\%s\" copy /y \"%s\\%s\" \"%s\" >nul 2>&1\r\n"
 		"goto :eof\r\n"
 		":retry\r\n"
 		"set /a RETRY+=1\r\n"
@@ -1104,7 +1118,8 @@ bool DoUpdateAndRestart()
 		(LPCSTR)targetHostExeA,                                       // worker内の停止（host）
 		(LPCSTR)extractDirA, (LPCSTR)targetHostExeA, (LPCSTR)targetHostExePathA, // host 上書き
 		(LPCSTR)extractDirA, (LPCSTR)targetExeA, (LPCSTR)targetExePathA,          // 本体 上書き
-		(LPCSTR)extractDirA, (LPCSTR)targetChmA, (LPCSTR)extractDirA, (LPCSTR)targetChmA, (LPCSTR)targetChmPathA // CHM（あれば・失敗してもOK）
+		(LPCSTR)extractDirA, (LPCSTR)targetChmA, (LPCSTR)extractDirA, (LPCSTR)targetChmA, (LPCSTR)targetChmPathA, // CHM（あれば・失敗してもOK）
+		(LPCSTR)extractDirA, (LPCSTR)targetD3dA, (LPCSTR)extractDirA, (LPCSTR)targetD3dA, (LPCSTR)targetD3dPathA  // d3dcompiler（あれば）
 	);
 
 	bat.Write(batContentA, batContentA.GetLength());
@@ -1145,4 +1160,104 @@ bool DoUpdateAndRestart()
 	exit(0);
 
 	return true;
+}
+
+static bool D3dCompilerFileLooksOk(LPCTSTR path)
+{
+	return IsLikelyPeExe(path, UPDATE_D3D_MIN_BYTES);
+}
+
+static CString D3dCompilerExeBesidePath()
+{
+	TCHAR exePath[MAX_PATH] = { 0 };
+	GetModuleFileName(NULL, exePath, MAX_PATH);
+	CString dir(exePath);
+	const int slash = dir.ReverseFind(_T('\\'));
+	if (slash >= 0)
+		dir = dir.Left(slash + 1);
+	else
+		dir.Empty();
+	return dir + TARGET_D3D_NAME;
+}
+
+void EnsureD3dCompilerAvailable()
+{
+	const CString destPath = D3dCompilerExeBesidePath();
+	if (D3dCompilerFileLooksOk(destPath))
+		return;
+
+	TCHAR tempPath[MAX_PATH] = { 0 };
+	GetTempPath(MAX_PATH, tempPath);
+	CString extractDir;
+	extractDir.Format(_T("%sogg_update_extract"), tempPath);
+	CString extracted;
+	extracted.Format(_T("%s\\%s"), (LPCTSTR)extractDir, TARGET_D3D_NAME);
+
+	if (!D3dCompilerFileLooksOk(extracted)) {
+		DWORD dwFlags = 0;
+		if (!InternetGetConnectedState(&dwFlags, 0))
+			return;
+		time_t serverTime = 0;
+		const CString updateUrl = ResolveUpdateUrl(&serverTime);
+		if (updateUrl.IsEmpty())
+			return;
+		CString zipPath;
+		zipPath.Format(_T("%sogg_d3d_fetch.zip"), tempPath);
+		CreateDirectory(extractDir, NULL);
+		if (!HttpDownloadToFile(updateUrl, zipPath))
+			return;
+		ExtractZipToDir(zipPath, extractDir, TARGET_D3D_NAME, UPDATE_D3D_MIN_BYTES, true);
+		DeleteFile(zipPath);
+	}
+	if (!D3dCompilerFileLooksOk(extracted))
+		return;
+
+	/* 直接コピーできるなら先に置く（書込不可なら bat+UAC 相当は更新と同様に bat 側） */
+	CopyFile(extracted, destPath, FALSE);
+
+	TCHAR batPath[MAX_PATH] = { 0 };
+	_stprintf_s(batPath, _T("%sogg_d3d_place.bat"), tempPath);
+	CFile bat;
+	if (!bat.Open(batPath, CFile::modeCreate | CFile::modeWrite | CFile::shareExclusive))
+		return;
+
+	CStringA extractDirA(extractDir);
+	CStringA destPathA(destPath);
+	CStringA dllNameA(TARGET_D3D_NAME);
+	TCHAR exePath[MAX_PATH] = { 0 };
+	GetModuleFileName(NULL, exePath, MAX_PATH);
+	CStringA exePathA(exePath);
+	CStringA cmdArgsA;
+	{
+		CWinApp* pApp = AfxGetApp();
+		if (pApp && pApp->m_lpCmdLine && pApp->m_lpCmdLine[0])
+			cmdArgsA = CStringA(pApp->m_lpCmdLine);
+		cmdArgsA.Trim();
+		cmdArgsA.Replace("%", "%%");
+	}
+	CStringA exeDirA = destPathA;
+	{
+		const int slash = exeDirA.ReverseFind('\\');
+		if (slash >= 0)
+			exeDirA = exeDirA.Left(slash);
+	}
+
+	CStringA batContentA;
+	batContentA.Format(
+		"@echo off\r\n"
+		"ping -n 3 127.0.0.1 >nul\r\n"
+		"copy /y \"%s\\%s\" \"%s\" >nul 2>&1\r\n"
+		"cd /d \"%s\"\r\n"
+		"start \"\" \"%s\" %s\r\n"
+		"del \"%%~f0\"\r\n",
+		(LPCSTR)extractDirA, (LPCSTR)dllNameA, (LPCSTR)destPathA,
+		(LPCSTR)exeDirA,
+		(LPCSTR)exePathA, (LPCSTR)cmdArgsA);
+	bat.Write(batContentA, batContentA.GetLength());
+	bat.Close();
+
+	const HINSTANCE hShell = ShellExecute(NULL, _T("open"), batPath, NULL, tempPath, SW_HIDE);
+	if ((INT_PTR)hShell <= 32)
+		return;
+	exit(0);
 }

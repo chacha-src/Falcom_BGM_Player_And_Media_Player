@@ -1,4 +1,4 @@
-// KpiPluginInstall.cpp — Plugins.zip を公式配布から取得し exe 隣へ展開
+﻿// KpiPluginInstall.cpp — Plugins.zip を公式配布から取得し exe 隣へ展開
 #include "stdafx.h"
 #include "KpiPluginInstall.h"
 #include <wininet.h>
@@ -379,7 +379,7 @@ static time_t KpiInstallHttpLastModified(LPCTSTR url)
 	if (!url || !url[0]) return 0;
 	HINTERNET hInet = InternetOpen(L"oggKbsasamiUpdate/1.0", INTERNET_OPEN_TYPE_PRECONFIG, NULL, NULL, 0);
 	if (!hInet) return 0;
-	DWORD timeout = 8000;
+	DWORD timeout = 2000;
 	InternetSetOption(hInet, INTERNET_OPTION_CONNECT_TIMEOUT, &timeout, sizeof(timeout));
 	InternetSetOption(hInet, INTERNET_OPTION_RECEIVE_TIMEOUT, &timeout, sizeof(timeout));
 

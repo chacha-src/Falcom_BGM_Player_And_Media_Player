@@ -1,4 +1,4 @@
-// PlayList.cpp : 実装ファイル
+﻿// PlayList.cpp : 実装ファイル
 //
 
 #include "stdafx.h"
@@ -2128,8 +2128,9 @@ void PlFormatRowMarks(int row, LPCTSTR fol, CString& out)
 				CEmuParseVirtualPath(fol, phys, (int)_countof(phys), &ti);
 				if (CEmuArchiveStemFromPath(phys[0] ? phys : fol, stem, (int)sizeof(stem))) {
 					CEmuMgr* mgr = CEmuMgrGet();
-					if (mgr) {
-						CEmuMgrEnsureCatalog(mgr);
+					/* 描画パスで EnsureCatalog しない（起動時に UI が1–2秒止まる）。
+					   未読込ならタグ無し。裏先読み完了後の再描画で付く。 */
+					if (mgr && mgr->catalog.loaded) {
 						const CEmuGameEntry* ge = CEmuCatalogFindArchive(&mgr->catalog, stem, NULL);
 						CEmuModeTagFromEntry(ge, tag, (int)sizeof(tag));
 					}
@@ -4267,13 +4268,19 @@ void CPlayList::HandleTrackContextCmd(int cmd)
 				const size_t bytes = ((size_t)s.GetLength() + 1) * sizeof(TCHAR);
 				HGLOBAL h = GlobalAlloc(GMEM_MOVEABLE, bytes);
 				if (h) {
-					memcpy(GlobalLock(h), (LPCTSTR)s, bytes);
-					GlobalUnlock(h);
+					void* p = GlobalLock(h);
+					if (p) {
+						memcpy(p, (LPCTSTR)s, bytes);
+						GlobalUnlock(h);
 #ifdef _UNICODE
-					SetClipboardData(CF_UNICODETEXT, h);
+						if (!SetClipboardData(CF_UNICODETEXT, h))
 #else
-					SetClipboardData(CF_TEXT, h);
+						if (!SetClipboardData(CF_TEXT, h))
 #endif
+							GlobalFree(h);
+					}
+					else
+						GlobalFree(h);
 				}
 				CloseClipboard();
 			}
@@ -5643,7 +5650,7 @@ BOOL CPlayList::CopySelectionToClipboard()
 	std::vector<int> sel;
 	int idx = -1;
 	while ((idx = m_lc.GetNextItem(idx, LVNI_ALL | LVNI_SELECTED)) >= 0) {
-		if (idx < playcnt) sel.push_back(idx);
+		if (idx >= 0 && idx < playcnt) sel.push_back(idx);
 	}
 	if (sel.empty()) return FALSE;
 
@@ -5709,44 +5716,8 @@ BOOL CPlayList::CopySelectionToClipboard()
 		}
 	}
 
-	size_t pathChars = 1;
-	int dropN = 0;
-	for (int i = 0; i < n; ++i) {
-		CString phys = PlPhysicalMediaPath(pc[sel[i]].fol);
-		if (phys.IsEmpty() || !PathFileExists(phys)) continue;
-		pathChars += (size_t)phys.GetLength() + 1;
-		dropN++;
-	}
-	if (dropN > 0) {
-		const SIZE_T bytes = sizeof(DROPFILES) + pathChars * sizeof(TCHAR);
-		HGLOBAL hDrop = ::GlobalAlloc(GHND, bytes);
-		if (hDrop) {
-			DROPFILES* df = (DROPFILES*)::GlobalLock(hDrop);
-			if (df) {
-				df->pFiles = sizeof(DROPFILES);
-#ifdef _UNICODE
-				df->fWide = TRUE;
-#else
-				df->fWide = FALSE;
-#endif
-				TCHAR* dest = (TCHAR*)(df + 1);
-				for (int i = 0; i < n; ++i) {
-					CString phys = PlPhysicalMediaPath(pc[sel[i]].fol);
-					if (phys.IsEmpty() || !PathFileExists(phys)) continue;
-					const int len = phys.GetLength();
-					memcpy(dest, (LPCTSTR)phys, sizeof(TCHAR) * (size_t)len);
-					dest[len] = 0;
-					dest += len + 1;
-				}
-				*dest = 0;
-				::GlobalUnlock(hDrop);
-				if (!::SetClipboardData(CF_HDROP, hDrop))
-					::GlobalFree(hDrop);
-			}
-			else
-				::GlobalFree(hDrop);
-		}
-	}
+	/* CF_HDROP は載せない。Explorer のファイル Ctrl+C と衝突して自プロセスが
+	   落ちる事例がある。Explorer→本アプリへの貼付は Paste 側の CF_HDROP 読取で対応。 */
 	::CloseClipboard();
 	return TRUE;
 }
@@ -5816,29 +5787,33 @@ void CPlayList::PasteFromClipboard()
 		if (p) ::GlobalUnlock(hBin);
 	}
 
+	/* Explorer 等のファイルコピー（CF_HDROP）。ハンドルはクリップボード所有のまま（DragFinish 禁止） */
 	HDROP hDrop = (HDROP)::GetClipboardData(CF_HDROP);
 	if (hDrop) {
 		UINT cnt = DragQueryFile(hDrop, (UINT)-1, NULL, 0);
-		TCHAR path[MAX_PATH];
-		std::vector<CString> files;
-		files.reserve(cnt);
-		for (UINT i = 0; i < cnt; ++i) {
-			if (DragQueryFile(hDrop, i, path, MAX_PATH))
-				files.push_back(path);
+		if (cnt > 0 && cnt < 100000) {
+			std::vector<CString> files;
+			files.reserve(cnt);
+			TCHAR path[MAX_PATH];
+			for (UINT i = 0; i < cnt; ++i) {
+				path[0] = 0;
+				if (DragQueryFile(hDrop, i, path, MAX_PATH) && path[0])
+					files.push_back(path);
+			}
+			::CloseClipboard();
+			if (!files.empty()) {
+				TCHAR cwd[1024];
+				_tgetcwd(cwd, 1000);
+				syo = 0; syos = _T(""); syomode = 0;
+				m_lc.SetRedraw(FALSE);
+				for (size_t i = 0; i < files.size(); ++i)
+					Fol(files[i]);
+				m_lc.SetRedraw(TRUE);
+				PlRefreshAfterEdit(this);
+				_tchdir(cwd);
+			}
+			return;
 		}
-		::CloseClipboard();
-		if (!files.empty()) {
-			TCHAR cwd[1024];
-			_tgetcwd(cwd, 1000);
-			syo = 0; syos = _T(""); syomode = 0;
-			m_lc.SetRedraw(FALSE);
-			for (size_t i = 0; i < files.size(); ++i)
-				Fol(files[i]);
-			m_lc.SetRedraw(TRUE);
-			PlRefreshAfterEdit(this);
-			_tchdir(cwd);
-		}
-		return;
 	}
 
 	HANDLE hTxt = ::GetClipboardData(CF_UNICODETEXT);
@@ -5888,6 +5863,14 @@ void CPlayList::PasteFromClipboard()
 BOOL CPlayList::HandleListEditKeys(MSG* pMsg)
 {
 	if (!pMsg || pMsg->message != WM_KEYDOWN) return FALSE;
+	/* Explorer 等ほかのアプリ操作中に自前コピペへ入らない */
+	{
+		HWND fg = ::GetForegroundWindow();
+		if (!fg) return FALSE;
+		DWORD pid = 0;
+		::GetWindowThreadProcessId(fg, &pid);
+		if (pid != ::GetCurrentProcessId()) return FALSE;
+	}
 	if ((GetKeyState(VK_CONTROL) & 0x8000) == 0) return FALSE;
 	if ((GetKeyState(VK_MENU) & 0x8000) != 0) return FALSE;
 	const WPARAM k = pMsg->wParam;
@@ -11519,6 +11502,107 @@ static void PlCemuFillPlaylistRow(const CEmuGameEntry* ge, const wchar_t* zipPhy
 	}
 }
 
+/* 1 zip に複数音源モードがあるとき IDD_MP_MBPICK 風で選択。1件ならスキップ。 */
+class CPlCemuModePickDlg : public CCustomBlurDialogBase
+{
+public:
+	const CEmuArchiveMode* m_modes;
+	int m_nModes;
+	int m_sel;
+	CCustomListCtrl m_lc;
+	CCustomStandardButton m_apply, m_cancel;
+	CPlCemuModePickDlg(CWnd* p, const CEmuArchiveMode* modes, int n)
+		: CCustomBlurDialogBase(IDD_MP_MBPICK, p), m_modes(modes), m_nModes(n), m_sel(-1) {}
+	virtual void DoDataExchange(CDataExchange* pDX)
+	{
+		CCustomBlurDialogBase::DoDataExchange(pDX);
+		DDX_Control(pDX, IDC_MMP_LIST, m_lc);
+		DDX_Control(pDX, IDC_MMP_APPLY, m_apply);
+		DDX_Control(pDX, IDC_MMP_CANCEL, m_cancel);
+	}
+	virtual BOOL OnInitDialog()
+	{
+		CCustomBlurDialogBase::OnInitDialog();
+		CCC_BringDialogToForeground(this);
+		SetWindowText(LL14(L"CEmu 音源モード", L"CEmu sound mode", L"Mode son CEmu", L"Modo audio CEmu",
+			L"Modo audio CEmu", L"CEmu 음원 모드", L"CEmu 音源模式", L"وضع صوت CEmu",
+			L"Режим звука CEmu", L"CEmu-Klangmodus", L"Modo de som CEmu", L"CEmu-geluidsmodus",
+			L"Tryb dźwięku CEmu", L"CEmu ses modu"));
+		SetDlgItemText(IDC_MMP_APPLY, LL14(L"これを使う", L"Use this", L"Utiliser", L"Usa questo", L"Usar este",
+			L"이것 사용", L"使用此项", L"استخدم هذا", L"Использовать", L"Diesen nehmen",
+			L"Usar este", L"Deze gebruiken", L"Uzyj tego", L"Bunu kullan"));
+		SetDlgItemText(IDC_MMP_CANCEL, LL14(L"キャンセル", L"Cancel", L"Annuler", L"Annulla", L"Cancelar",
+			L"취소", L"取消", L"إلغاء", L"Отмена", L"Abbrechen", L"Cancelar", L"Annuleren", L"Anuluj", L"Iptal"));
+		m_apply.SetGradation(RGB(220, 245, 230), RGB(160, 220, 180), 0, TRUE);
+		m_cancel.SetGradation(RGB(235, 235, 240), RGB(200, 200, 210), 0, TRUE);
+		m_lc.SetExtendedStyle(m_lc.GetExtendedStyle() | LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER | LVS_EX_LABELTIP);
+		m_lc.InsertColumn(0, _T("#"), LVCFMT_RIGHT, 28);
+		m_lc.InsertColumn(1, LL14(L"モード", L"Mode", L"Mode", L"Modo", L"Modo", L"모드", L"模式", L"الوضع",
+			L"Режим", L"Modus", L"Modo", L"Modus", L"Tryb", L"Mod"), LVCFMT_LEFT, 100);
+		m_lc.InsertColumn(2, LL14(L"subtype", L"subtype", L"subtype", L"subtype", L"subtype", L"subtype", L"subtype", L"subtype",
+			L"subtype", L"subtype", L"subtype", L"subtype", L"subtype", L"subtype"), LVCFMT_LEFT, 160);
+		m_lc.InsertColumn(3, LL14(L"備考", L"Note", L"Note", L"Nota", L"Nota", L"비고", L"备注", L"ملاحظة",
+			L"Примечание", L"Hinweis", L"Nota", L"Opmerking", L"Uwaga", L"Not"), LVCFMT_LEFT, 120);
+		for (int i = 0; i < m_nModes; ++i) {
+			CString num; num.Format(_T("%d"), i + 1);
+			const int row = m_lc.InsertItem(i, num);
+			CString tag(m_modes[i].tag);
+			m_lc.SetItemText(row, 1, tag);
+			m_lc.SetItemText(row, 2, CString(m_modes[i].subtype));
+			m_lc.SetItemText(row, 3, m_modes[i].isMidi
+				? LL14(L"KPI/VST", L"KPI/VST", L"KPI/VST", L"KPI/VST", L"KPI/VST", L"KPI/VST", L"KPI/VST", L"KPI/VST",
+					L"KPI/VST", L"KPI/VST", L"KPI/VST", L"KPI/VST", L"KPI/VST", L"KPI/VST")
+				: CString());
+			m_lc.SetItemData(row, (DWORD_PTR)i);
+		}
+		if (m_nModes > 0) {
+			m_lc.SetItemState(0, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
+			m_sel = 0;
+		}
+		return TRUE;
+	}
+	afx_msg void OnApply()
+	{
+		POSITION pos = m_lc.GetFirstSelectedItemPosition();
+		if (!pos) { EndDialog(IDCANCEL); return; }
+		m_sel = (int)m_lc.GetItemData(m_lc.GetNextSelectedItem(pos));
+		EndDialog(IDOK);
+	}
+	afx_msg void OnCancelBtn() { EndDialog(IDCANCEL); }
+	afx_msg void OnDblClk(NMHDR*, LRESULT* p) { *p = 0; OnApply(); }
+	DECLARE_MESSAGE_MAP()
+};
+
+BEGIN_MESSAGE_MAP(CPlCemuModePickDlg, CCustomBlurDialogBase)
+	ON_BN_CLICKED(IDC_MMP_APPLY, &CPlCemuModePickDlg::OnApply)
+	ON_BN_CLICKED(IDC_MMP_CANCEL, &CPlCemuModePickDlg::OnCancelBtn)
+	ON_NOTIFY(NM_DBLCLK, IDC_MMP_LIST, &CPlCemuModePickDlg::OnDblClk)
+END_MESSAGE_MAP()
+
+/* 複数モードかつ未選択なら UI。1件は即 OK。キャンセルで false。 */
+static bool PlCemuPickModeIfNeeded(CPlayList* pl, const wchar_t* zipPhysical)
+{
+	if (!zipPhysical || !zipPhysical[0]) return false;
+	CEmuMgr* mgr = CEmuMgrGet();
+	if (!mgr) return false;
+	CEmuMgrEnsureCatalog(mgr);
+	char stem[CEMU_ARCHIVE_NAME] = {};
+	if (!CEmuArchiveStemFromPath(zipPhysical, stem, (int)sizeof(stem)))
+		return true; /* Resolve 側で判定 */
+	CEmuArchiveMode modes[CEMU_MODE_MAX];
+	const int modeN = CEmuCatalogListArchiveModes(&mgr->catalog, stem, NULL, NULL, modes, CEMU_MODE_MAX);
+	if (modeN <= 1)
+		return true;
+	char curTag[CEMU_MODE_TAG] = {};
+	if (CEmuModePrefGet(zipPhysical, curTag, (int)sizeof(curTag)) && curTag[0])
+		return true;
+	CPlCemuModePickDlg dlg(GetPlaylistModalOwner(pl), modes, modeN);
+	if (dlg.DoModal() != IDOK || dlg.m_sel < 0 || dlg.m_sel >= modeN)
+		return false;
+	CEmuModePrefSet(zipPhysical, modes[dlg.m_sel].tag);
+	return true;
+}
+
 static bool PlAddCemuZipEntries(CPlayList* pl, const CString& zipPath, int& syo, CString& syos, int& modesub, CString& fnn)
 {
 	if (!pl) return false;
@@ -11526,6 +11610,8 @@ static bool PlAddCemuZipEntries(CPlayList* pl, const CString& zipPath, int& syo,
 	const int colon = zp.Find(L"::");
 	if (colon >= 0) zp = zp.Left(colon);
 	if (zp.Right(4).CompareNoCase(L".zip") != 0) return false;
+	if (!PlCemuPickModeIfNeeded(pl, zp))
+		return false;
 	wchar_t zipOut[CEMU_ZIP_PATH];
 	char dataDir[CEMU_DATA_DIR];
 	const CEmuGameEntry* ge = CEmuMgrResolveZip(CEmuMgrGet(), zp, zipOut, (int)_countof(zipOut), dataDir, (int)sizeof(dataDir));

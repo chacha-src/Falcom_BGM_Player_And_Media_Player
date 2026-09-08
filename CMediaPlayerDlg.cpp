@@ -2528,6 +2528,11 @@ BOOL CMediaPlayerDlg::RelayPreTranslateMessage(MSG* pMsg)
 		&& pl && ::IsWindow(pl->GetSafeHwnd())
 		&& (GetKeyState(VK_CONTROL) & 0x8000) != 0
 		&& (GetKeyState(VK_MENU) & 0x8000) == 0) {
+		HWND fg = ::GetForegroundWindow();
+		DWORD fgPid = 0;
+		if (fg) ::GetWindowThreadProcessId(fg, &fgPid);
+		if (fgPid && fgPid != ::GetCurrentProcessId())
+			return FALSE;
 		const WPARAM k = pMsg->wParam;
 		if (k == 'A' || k == 'a' || k == 'C' || k == 'c' || k == 'X' || k == 'x' || k == 'V' || k == 'v'
 			|| k == 'Z' || k == 'z' || k == 'Y' || k == 'y') {

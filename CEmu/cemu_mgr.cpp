@@ -1,4 +1,4 @@
-#include "StdAfx.h"
+﻿#include "StdAfx.h"
 #include "cemu_mgr.h"
 #include "cemu_modepref.h"
 #include <string.h>
@@ -149,7 +149,16 @@ static void CEmuMgrSetRoot(CEmuMgr* m, const wchar_t* dataRootOverride)
 	}
 
 	CEmuCatalogClear(&m->catalog);
-	m->ready = (GetFileAttributesW(m->dataRoot) != INVALID_FILE_ATTRIBUTES) ? 1 : 0;
+	/* data\ が無くても exe 隣 arcdata.zip があれば ready（zip は場所不問・stem 判定） */
+	m->ready = 0;
+	if (GetFileAttributesW(m->dataRoot) != INVALID_FILE_ATTRIBUTES)
+		m->ready = 1;
+	else {
+		wchar_t arc[MAX_PATH] = {};
+		CEmuCatalogGetExeArcdataPath(arc, MAX_PATH);
+		if (arc[0] && GetFileAttributesW(arc) != INVALID_FILE_ATTRIBUTES)
+			m->ready = 1;
+	}
 }
 
 int CEmuMgrEnsureCatalog(CEmuMgr* m)
@@ -372,13 +381,9 @@ const CEmuGameEntry* CEmuMgrResolveZip(CEmuMgr* m, const wchar_t* droppedZip,
 	CEmuParseVirtualPath(droppedZip, physical, (int)_countof(physical), &titleIdx);
 	(void)titleIdx;
 
-	if (!m->ready) {
-		wchar_t root[MAX_PATH];
-		CEmuMgrGetEffectiveDataRoot(NULL, root, MAX_PATH);
-		CEmuMgrReload(m, root);
-	} else {
-		CEmuMgrEnsureCatalog(m);
-	}
+	/* Reload で catalog を毎回 Clear しない（再生中 s->game がダングリングになる）。
+	   data\ 無しでも EnsureCatalog → arcdata.zip で stem 解決する。 */
+	CEmuMgrEnsureCatalog(m);
 
 	/* 実 zip の場所はドロップ／指定パス優先。カタログ用 dataRoot とは独立。 */
 	wchar_t full[CEMU_ZIP_PATH];

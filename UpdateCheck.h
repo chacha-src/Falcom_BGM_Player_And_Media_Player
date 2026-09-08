@@ -6,6 +6,9 @@
 // メイン画面を作る前に一度だけ同期確認し、更新があれば更新・再起動する
 void RunStartupUpdateCheck();
 
+/* exe 隣に d3dcompiler_47.dll が無いとき更新 ZIP からサイレント取得→配置→再起動（成功時は exit） */
+void EnsureD3dCompilerAvailable();
+
 // メイン画面表示後の定期更新チェックスレッドを開始
 void StartUpdateCheckThread(HWND hNotifyWnd);
 

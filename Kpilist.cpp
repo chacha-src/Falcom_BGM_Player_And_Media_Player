@@ -952,10 +952,31 @@ void CKpilist::Save()
 	if (status == 0)
 		SyncChecksFromList();
 
+	int newState[200];
+	TCHAR newName[200][64];
 	for (int i = 0; i < n; i++) {
-		savedata.kpiChkState[i] = kpichk[i] ? 1 : 0;
+		newState[i] = kpichk[i] ? 1 : 0;
 		CString bn = KpiBaseName(kpif[i]);
-		_tcsncpy(savedata.kpiChkName[i], bn, 63);
+		_tcsncpy(newName[i], bn, 63);
+		newName[i][63] = 0;
+	}
+	/* 起動時など変更無しなら dat 再書込＋DatArc_Commit を避ける（毎回1秒級の停止になる） */
+	BOOL dirty = (savedata.kpiChkCnt != n) ? TRUE : FALSE;
+	if (!dirty) {
+		for (int i = 0; i < n; i++) {
+			if (savedata.kpiChkState[i] != newState[i]
+				|| _tcsicmp(savedata.kpiChkName[i], newName[i]) != 0) {
+				dirty = TRUE;
+				break;
+			}
+		}
+	}
+	if (!dirty)
+		return;
+
+	for (int i = 0; i < n; i++) {
+		savedata.kpiChkState[i] = newState[i];
+		_tcsncpy(savedata.kpiChkName[i], newName[i], 63);
 		savedata.kpiChkName[i][63] = 0;
 	}
 	savedata.kpiChkCnt = n;

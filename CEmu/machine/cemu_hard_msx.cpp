@@ -692,13 +692,30 @@ int CHardMsx::StartSongGeneric(unsigned titleCode)
 {
 	if (!cpu_) return 0;
 	titleCode_ = titleCode;
-	unsigned song = titleCode & 0xff;
-	unsigned hi = (titleCode >> 8) & 0xff;
-	/* Catalog titles sometimes pack song in high byte (aleste2 0x0115). */
-	if (hi && !bgmPresent_[song] && bgmPresent_[hi])
-		song = hi;
-	if (hi && song == 0)
-		song = hi;
+	/* Catalog codes pack up to three bytes and the width says which is which:
+	     one byte  (angelus 0x05)   — picks the bgm rom, and is the song.
+	     two bytes (aleste2 0x0115, — middle byte picks the bgm rom, low byte
+	                gshogi 0x0501)    is the song inside it. Handing the rom
+	                                  number to the driver instead made every
+	                                  such title render one song.
+	     three     (ys2 0x010112)   — low picks the rom, middle is the track,
+	                                  top is the engine read from port 5.
+	   The low byte cannot be used to tell these apart: gshogi's 0x01 track is
+	   also a valid bgm index. */
+	const unsigned low = titleCode & 0xff;
+	const unsigned mid = (titleCode >> 8) & 0xff;
+	const unsigned top = (titleCode >> 16) & 0xff;
+	unsigned song = low;   /* bgm rom to stage */
+	unsigned sel3 = low;   /* port 3 mailbox */
+	unsigned sel4 = low;   /* port 4 mailbox */
+	if (top) {
+		sel4 = mid ? mid : low;
+	} else if (mid && !bgmPresent_[low] && bgmPresent_[mid]) {
+		/* Only claim the middle byte when the low one names no rom: gshogi
+		   0x0501 and pup8 0x0201 both carry a low byte that is a real
+		   selector, and reading them as the song broke titles that worked. */
+		song = mid;
+	}
 
 	/* Defer StageBgm until after init settle when mdata overlays a code
 	   image the patch still needs (Tokuma FMPAC @A000; Telenet alba2/valis2
@@ -719,15 +736,39 @@ int CHardMsx::StartSongGeneric(unsigned titleCode)
 	/* Mailboxes used by hoot MSX patches:
 	   - BirdySoft/Compile: port2=play, port4=song (Compile copies 4→3)
 	   - Enix/Falcom-ish:   port2=play, port3=song (angelus/can3/jngolf)
-	   - Compile/jngolf:    port7 bit0 = OPLL present */
+	   - Compile/jngolf:    port7 bit0 = OPLL present
+	   - ys2/arcus:         port5 = engine/bank selector (code's top byte) */
 	ioport_[0x00] = (uint8_t)(song & 0xff);
 	ioport_[0x02] = 0x01; /* play command (seen via playCmdPending after settle) */
-	ioport_[0x03] = (uint8_t)(song & 0xff);
-	ioport_[0x04] = (uint8_t)(song & 0xff);
+	ioport_[0x03] = (uint8_t)(sel3 & 0xff);
+	ioport_[0x04] = (uint8_t)(sel4 & 0xff);
+	ioport_[0x05] = (uint8_t)(top & 0xff);
 	ioport_[0x07] = (chips_ & CHIP_FMPAC) ? 0x01 : 0x00;
-	ioport_[PLAY_CODE_PORT] = (uint8_t)(song & 0xff);
+	ioport_[PLAY_CODE_PORT] = (uint8_t)(sel3 & 0xff);
 	playCmdPending_ = 0; /* arm only after settle */
-	titleCode_ = song;
+	titleCode_ = sel4;
+
+	/* MSX BIOS IRQ @0038 → CALL H.TIMI (FD9F) → EI;RET.
+	   Plant the trampoline *before* init runs, because the patches split into
+	   two camps and both write 0038 themselves:
+	     - jesus/ankoku/columns/... store C3 + their own ISR address, so a
+	       later plant here would erase the driver's handler and leave 60 Hz
+	       interrupts calling a bare RET (music init'd, then never advanced).
+	     - ys2/arcus store only the 0039 operand, assuming 0038 already holds
+	       C3, so the byte has to be there up front.
+	   Either way our operand is only the default: whoever claims 0038 wins,
+	   and titles that claim neither reach their late H.TIMI hook via FD9F.
+	   The body starts inert (EI;RET). The Tokuma MSX-FAN patches hook
+	   H.TIMI at FMPAC BIOS 411F in their first instructions, so calling it
+	   during the settle would run the BIOS player over an unstaged song and
+	   leave it stopped; it goes live once the song is in place. */
+	if (mem_[0xFD9F] == 0x00)
+		mem_[0xFD9F] = 0xC9;
+	mem_[0x0038] = 0xC3;
+	mem_[0x0039] = 0xE0;
+	mem_[0x003A] = 0x00; /* JP 00E0 */
+	mem_[0x00E0] = 0xFB;             /* EI */
+	mem_[0x00E1] = 0xC9;             /* RET */
 
 	cpu_->reset(mem_);
 	cpu_->r.pc = initPc_;
@@ -759,17 +800,11 @@ int CHardMsx::StartSongGeneric(unsigned titleCode)
 			}
 		}
 	}
-	/* MSX BIOS IRQ @0038 → CALL H.TIMI (FD9F) → EI;RET.
-	   Some patches (rona/ryukyu/sugo8/shngh2) install the JP hook only
-	   *after* the play edge, so a one-shot "wire if already C3" misses them.
-	   Plant RET at FD9F when still zero (avoids undead NOP-sled), then always
-	   wire 0038 — late JP overwrites the RET and IRQs start ticking. Body
-	   @00E0 keeps driver@0100 free. */
+	/* Song is staged: let the trampoline body reach H.TIMI. 0038 itself is
+	   left to whoever claimed it during init. Titles that hook H.TIMI only
+	   after the play edge overwrite the RET below and start ticking then. */
 	if (mem_[0xFD9F] == 0x00)
 		mem_[0xFD9F] = 0xC9;
-	mem_[0x0038] = 0xC3;
-	mem_[0x0039] = 0xE0;
-	mem_[0x003A] = 0x00; /* JP 00E0 */
 	mem_[0x00E0] = 0xF5;             /* PUSH AF */
 	mem_[0x00E1] = 0xCD; mem_[0x00E2] = 0x9F; mem_[0x00E3] = 0xFD; /* CALL FD9F */
 	mem_[0x00E4] = 0xF1;             /* POP AF */

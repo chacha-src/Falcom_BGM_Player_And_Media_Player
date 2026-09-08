@@ -1,4 +1,4 @@
-#include	<compiler.h>
+﻿#include	<compiler.h>
 #include	<cpucore.h>
 #include	"i286c.h"
 #include	"v30patch.h"
@@ -263,6 +263,17 @@ void CPUCALL i286c_intnum(UINT vect, REG16 IP) {
 const UINT8	*ptr;
 
 	if (vect < 0x10) TRACEOUT(("i286c_intnum - %.2x", vect));
+	if (vect < 0x10 && getenv("K5_INTNUM")) {
+		static int shown = 0;
+		if (shown < 8) {
+			const UINT8* c = mem + CS_BASE + IP;
+			shown++;
+			fprintf(stderr, "INTNUM vec=%02X cs=%04X ip=%04X prefix=%u"
+				" ip_now=%04X bytes=%02X %02X %02X %02X\n",
+				vect, I286_CS, IP, (unsigned)I286_PREFIX, I286_IP,
+				c[0], c[1], c[2], c[3]);
+		}
+	}
 	REGPUSH0(REAL_FLAGREG)
 	REGPUSH0(I286_CS)
 	REGPUSH0(IP)

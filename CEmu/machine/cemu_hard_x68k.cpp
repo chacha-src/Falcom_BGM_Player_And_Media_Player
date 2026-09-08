@@ -978,7 +978,6 @@ int CHardX68k::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCo
 	}
 
 	if (!loaded) return 0;
-
 	/* X68k $10xxxx can be a separate window; if XML never filled mid_, seed
 	   from rom_[0..512K] so packs that only list low RAM still alias correctly. */
 	if (!midFilled) {
