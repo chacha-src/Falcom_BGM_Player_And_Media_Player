@@ -1,4 +1,4 @@
-﻿#include "StdAfx.h"
+#include "StdAfx.h"
 #include "cemu_driver_ac.h"
 #include "../machine/cemu_m68k_bus.h"
 #include <stdio.h>
@@ -120,6 +120,7 @@ CDriverAc::CDriverAc()
 	, pinned_(0)
 	, songCmd_(0x81)
 	, songCmdWord_(0)
+	, songCmdDword_(0)
 	, opmResidual_(0)
 	, cpuAcc_(0)
 	, cmdIndex_(0)
@@ -194,9 +195,11 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 	/* Catalog title pins the song (incl. code 0 = Stop). Without a titlelist,
 	   fall back to board defaults and optional try-table hunting. */
 	songCmdWord_ = (uint16_t)titleCode;
+	songCmdDword_ = titleCode;
 	if (ge && ge->titleCount > 0) {
 		songCmd_ = (uint8_t)(titleCode & 0xff);
 		songCmdWord_ = (uint16_t)titleCode;
+		songCmdDword_ = titleCode;
 		/* Prefer a playable BGM when the playlist hands STOP / voice / empty. */
 		if (hw_->board_ == CEMU_AC_BOARD_KONAMI_GX) {
 			int bad = (titleCode == 0 || titleCode == 0x200u || (titleCode & 0xffu) == 0);
@@ -714,21 +717,9 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 		}
 	}
 
-	/* RF5C400 / Model2A�E3 SCSP: no 68K host yet ? stay SILENT (no audition).
-	   MultiPCM model2 keeps the 68000 path below. M62/Seibu run real sequencers. */
-	hasCpu_ = !(hw_->board_ == CEMU_AC_BOARD_KONAMI_RF5C400
-		|| (hw_->board_ == CEMU_AC_BOARD_SEGA_SCSP && !hw_->SegaM1Audio()));
-
-	/* Hornet RF5C400 / Model2A�E3 SCSP: no 68K host ? open silent (no soft wave). */
-	if (hw_->board_ == CEMU_AC_BOARD_KONAMI_RF5C400
-		|| (hw_->board_ == CEMU_AC_BOARD_SEGA_SCSP && !hw_->SegaM1Audio())) {
-		hasCpu_ = 0;
-		cmdIndex_ = 0;
-		booted_ = 1;
-		triggered_ = 1;
-		nextCmdAt_ = (uint64_t)~0ull;
-		return 1;
-	}
+	/* Model 2A/3 SCSP and M62/Seibu run real sequencers. Hornet RF5C400 now
+	   runs its sound 68000 on the ms1_ path below. */
+	hasCpu_ = 1;
 
 	/* Non-HuC Data East (btime/disco): board UNKNOWN ? soft-open SILENT. */
 	if (hw_->board_ == CEMU_AC_BOARD_UNKNOWN) {
@@ -787,7 +778,9 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 		return 1;
 	}
 
-	sega68_ = (hw_->board_ == CEMU_AC_BOARD_SEGA_SCSP && hw_->SegaM1Audio()) ? 1 : 0;
+	/* Both Sega sound boards run a 68000 on the shared Musashi core: Model 1 /
+	   early Model 2 with MultiPCM+YM3438, Model 2A/3 with SCSP. */
+	sega68_ = (hw_->board_ == CEMU_AC_BOARD_SEGA_SCSP) ? 1 : 0;
 	if (sega68_) {
 		if (!hw_->Ms1Active()) return 0;
 		sega68Acc_ = 0;
@@ -809,10 +802,10 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 		return 1;
 	}
 
-	/* Mega System 1 / System GX run a second 68000 on the shared Musashi core
-	   instead of the Z80; they share the Ms1 boot/render path below. */
+	/* Mega System 1 / System GX / Hornet share the Ms1 boot/render path. */
 	ms1_ = (hw_->board_ == CEMU_AC_BOARD_MEGASYSTEM1
 		|| hw_->board_ == CEMU_AC_BOARD_KONAMI_GX
+		|| hw_->board_ == CEMU_AC_BOARD_KONAMI_RF5C400
 		|| hw_->board_ == CEMU_AC_BOARD_M68K_PCM) ? 1 : 0;
 
 	/* Data East HuC6280 / M6502, and Atari System1 JSA (same M6502 runner). */
@@ -1295,21 +1288,21 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 	if (ms1_) {
 		if (!hw_->Ms1Active()) return 0;
 		ms1Acc_ = 0;
-		if (hw_->board_ == CEMU_AC_BOARD_KONAMI_GX) {
-			/* Boot must finish the K054539 self-test and enable K056800 IRQs
-			   before any host packet is posted ? early inject is dropped. */
+		if (hw_->board_ == CEMU_AC_BOARD_KONAMI_GX
+			|| hw_->board_ == CEMU_AC_BOARD_KONAMI_RF5C400) {
+			/* Boot must finish self-test and enable K056800 IRQs before any
+			   host packet is posted ? early inject is dropped. */
 			Ms1RunCycles(cpuHz_);
 			Ms1RunCycles(cpuHz_ / 2);
-			Ms1RunCycles(cpuHz_ / 2); /* tkmmpzdm: self-test PCM settles */
-			if (!(hw_->GxSoundCtrl() & 1)) {
+			Ms1RunCycles(cpuHz_ / 2);
+			if (hw_->board_ == CEMU_AC_BOARD_KONAMI_GX
+				&& !(hw_->GxSoundCtrl() & 1)) {
 				hw_->Ms1Write8(0x500001u, 0xff);
 				Ms1RunCycles(cpuHz_ / 4);
 			}
 			booted_ = 1;
 			cmdIndex_ = 0;
 			TryInjectCommand();
-			/* Let the 68000 dequeue the K056800 packet and key K054539 before
-			   the first host Render second (otherwise chunk0 is silent �� WEAK). */
 			Ms1RunCycles(cpuHz_);
 			nextCmdAt_ = (uint64_t)~0ull;
 			return 1;
@@ -1942,6 +1935,17 @@ void CDriverAc::TryInjectCommand()
 		}
 		return;
 	}
+	if (hw_->board_ == CEMU_AC_BOARD_KONAMI_RF5C400) {
+		if (cmdIndex_ >= 1) return;
+		unsigned code = songCmdDword_;
+		if (!code && songCmdWord_)
+			code = ((unsigned)songCmdWord_ << 16);
+		if (!code) code = 0x01010000u;
+		hw_->HornetInjectSong(code);
+		cmdIndex_++;
+		triggered_ = 1;
+		return;
+	}
 	if (hw_->board_ == CEMU_AC_BOARD_IREM_M92) {
 		/* Early sets + note-list (uccops): catalog codes are raw latch values.
 		   Channel-BGM Rev 3.40 only: BGM is 0x20+index. */
@@ -2009,9 +2013,10 @@ void CDriverAc::TryInjectCommand()
 		triggered_ = 1;
 		return;
 	}
-	if (hw_->board_ == CEMU_AC_BOARD_SEGA_SCSP && hw_->SegaM1Audio()) {
-		/* Re-inject a few times ? first MIDI packet can land before UART ISR
-		   is ready; MultiPCM bank/program needs a sustained FIFO drain. */
+	if (hw_->board_ == CEMU_AC_BOARD_SEGA_SCSP) {
+		/* Re-inject a few times ? first MIDI packet can land before the ISR
+		   is ready; MultiPCM bank/program needs a sustained FIFO drain, and
+		   the SCSP MIDI FIFO is only drained once the firmware arms it. */
 		if (cmdIndex_ >= 4) return;
 		const uint16_t w = songCmdWord_ ? songCmdWord_ : (uint16_t)songCmd_;
 		if (!w) return;
@@ -2851,6 +2856,8 @@ void CDriverAc::Ms1RunCycles(int cycles)
 			m68k_set_irq(M68K_IRQ_NONE);
 		}
 		m68k_execute(slice);
+		if (hw_->board_ == CEMU_AC_BOARD_KONAMI_RF5C400)
+			hw_->HornetTickTimer(slice);
 		if (gx) {
 			/* K054539 @ 18.432 MHz, sound 68000 @ 16 MHz. */
 			const uint64_t ticks = (uint64_t)slice * 18432000ull / 16000000ull;
@@ -3357,9 +3364,12 @@ int CDriverAc::Sega68Render(int16_t* stereo, int frames)
 		if (chip) {
 			int16_t* mix = Scratch(n);
 			if (mix) {
+				/* Model 1 mixes YM3438 at 0.30 next to two MultiPCMs; on
+				   Model 2A/3 the SCSP is the whole board, so keep it full. */
+				const int g = hw_->SegaM1Audio() ? 77 : 256;
 				chip->Render(mix, n);
 				for (int i = 0; i < n * 2; i++) {
-					int s = (int)p[i] + ((int)mix[i] * 77) / 256;
+					int s = (int)p[i] + ((int)mix[i] * g) / 256;
 					if (s > 32767) s = 32767;
 					if (s < -32768) s = -32768;
 					p[i] = (int16_t)s;

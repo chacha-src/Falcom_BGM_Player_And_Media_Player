@@ -57,10 +57,16 @@ public:
 	ID3D11Texture2D* m_shadowTex;
 	ID3D11DepthStencilView* m_shadowDsv;
 	ID3D11ShaderResourceView* m_shadowSrv;
-	enum { S3M_SHADOW_SIZE = 1024 };
+	int m_shadowSize; /* runtime; 0=off */
 	// 0=壁鏡 1=床鏡 2.. =窓・アイテム等（NDC軽量なので多めに持つ）
-	enum { S3M_MIRROR_N = 20, S3M_MIRROR_SIZE = 384, S3M_MIRROR_FX0 = 2, S3M_MIRROR_FX_N = 18 };
+	enum { S3M_MIRROR_N = 20, S3M_MIRROR_FX0 = 2, S3M_MIRROR_FX_N = 18 };
 	int m_mirrorSize; // 実確保サイズ（環境により縮退）
+	int m_mirrorUseN; // 品質に応じた使用スロット数
+	float m_casStrength;
+	int m_gfxSsr;
+	int m_gfxDof;
+	int m_aniso;
+	BOOL EnsureShadowTarget(int wantSize);
 	ID3D11Texture2D* m_mirrorTex[S3M_MIRROR_N];
 	ID3D11RenderTargetView* m_mirrorRtv[S3M_MIRROR_N];
 	ID3D11ShaderResourceView* m_mirrorSrv[S3M_MIRROR_N];
@@ -149,6 +155,7 @@ public:
 	int m_calloutN;
 
 	ID3D11SamplerState* m_sampLin;
+	ID3D11SamplerState* m_sampAniso;
 	ID3D11SamplerState* m_sampPoint;
 	ID3D11SamplerState* m_sampCmp;
 	ID3D11RasterizerState* m_rsSolid;
@@ -325,6 +332,8 @@ protected:
 	void SetDifficultyToUi(int d);
 	int ReadMeshFromUi();
 	void SetMeshToUi(int v);
+	int ReadGfxFromUi();
+	void SetGfxToUi(int v);
 	void GenerateMaze();
 	void GenerateMazeWithSeed(DWORD seed, int forceSize = -1);
 	void GenerateOneFloor(int f);
@@ -429,6 +438,7 @@ public:
 	afx_msg void OnBaseChanged();
 	afx_msg void OnDiffChanged();
 	afx_msg void OnMeshChanged();
+	afx_msg void OnGfxChanged();
 	afx_msg void OnTimer(UINT_PTR);
 	afx_msg void OnSize(UINT, int, int);
 	afx_msg void OnShowWindow(BOOL bShow, UINT nStatus);
@@ -437,10 +447,11 @@ public:
 	void ShowContextMenu(CPoint screenPt);
 
 	CCustomStandardButton m_help, m_gen, m_navi, m_close;
-	CCustomStatic m_sizeL, m_baseL, m_diffL, m_meshL, m_hint, m_status;
-	CCustomComboBox m_size, m_base, m_diff, m_mesh;
+	CCustomStatic m_sizeL, m_baseL, m_diffL, m_meshL, m_gfxL, m_hint, m_status;
+	CCustomComboBox m_size, m_base, m_diff, m_mesh, m_gfx;
 	CS3mView m_view;
 	CToolTipCtrl m_tooltip;
+	void ApplyGfxQuality(BOOL rebuildRt);
 
 	BYTE* m_grids[S3M_MAX_FLOORS];
 	BYTE* m_visits[S3M_MAX_FLOORS];

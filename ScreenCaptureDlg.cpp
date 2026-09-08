@@ -6828,6 +6828,10 @@ peak_done:
 
 UINT __stdcall CScreenCaptureDlg::CaptureThread(void* p)
 {
+#if defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable: 4533)
+#endif
 	CScreenCaptureDlg* self = (CScreenCaptureDlg*)p;
 	HRESULT hrCo = CoInitializeEx(NULL, COINIT_MULTITHREADED);
 	SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_ABOVE_NORMAL);
@@ -8069,6 +8073,9 @@ done:
 	InterlockedExchange(&self->m_encodeGdi, 0);
 	InterlockedExchange(&self->m_run, 0);
 	return 0;
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#endif
 }
 
 void CScreenCaptureDlg::OnBnClickedStart()

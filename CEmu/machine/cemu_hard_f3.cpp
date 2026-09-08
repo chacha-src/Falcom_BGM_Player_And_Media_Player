@@ -68,6 +68,7 @@ CHardF3::CHardF3()
 	memset(dpram_, 0, sizeof(dpram_));
 	memset(dpramReadHits_, 0, sizeof(dpramReadHits_));
 	dpramWriteHits_ = 0;
+	dpramTraceN_ = 0;
 	memset(otisBank_, 0, sizeof(otisBank_));
 	memset(calcOtisBank_, 0, sizeof(calcOtisBank_));
 	memset(cpuBankEntry_, 0, sizeof(cpuBankEntry_));
@@ -78,6 +79,8 @@ CHardF3::CHardF3()
 	duartIsr_ = 0;
 	duartAcr_ = 0x30;
 	duartCtr_ = 0x09c4;
+	duartCounterOn_ = 0;
+	duartFires_ = 0;
 	duartTimerAcc_ = 0;
 	ringInited_ = 0;
 }
@@ -206,7 +209,26 @@ uint8_t CHardF3::Read8(unsigned addr)
 		/* DPRAM right side, umask16 0xff00 → high byte of each word. */
 		const unsigned o = (addr - 0x140000u) >> 1;
 		if (o < kDpramBytes) {
-			if (o < 32) dpramReadHits_[o]++;
+			/* 32 buckets of 64 bytes so the counter covers the whole DPRAM:
+			   host command packets land in bucket 0 and the ring head/tail
+			   longs at $900/$904 in bucket 18. Counting only the first 32
+			   bytes could not tell "never polled" from "polls the
+			   pointers but never reads the packet". */
+			dpramReadHits_[o >> 6]++;
+			if (dpramTraceN_ < 16) {
+				/* Which firmware routines touch the mailbox, so the host
+				   side can be matched to the real protocol instead of a
+				   guessed ring layout. */
+				const unsigned pc = (unsigned)m68k_get_reg(NULL, M68K_REG_PPC);
+				int seen = 0;
+				for (int t = 0; t < dpramTraceN_; t++)
+					if (dpramTracePc_[t] == pc) { seen = 1; break; }
+				if (!seen) {
+					dpramTracePc_[dpramTraceN_] = pc;
+					dpramTraceOff_[dpramTraceN_] = o;
+					dpramTraceN_++;
+				}
+			}
 			if (addr & 1) return 0xff;
 			return dpram_[o];
 		}
@@ -245,7 +267,21 @@ uint8_t CHardF3::Read8(unsigned addr)
 			return (uint8_t)(duartCtr_ & 0xff);
 		case 0xc: /* IVR */
 			return DuartIvr();
-		case 0xf: /* reading START COUNTER clears timer ready (MAME) */
+		case 0xe:
+			/* START COUNTER COMMAND. The Ensoniq calibration routine reads
+			   this and then parks in STOP #$2000, so treating 0x0E as a
+			   plain register left the counter unarmed and the sound CPU
+			   halted forever. */
+			duartCounterOn_ = 1;
+			duartTimerAcc_ = 0;
+			duartIsr_ &= (uint8_t)~0x08;
+			UpdateDuartIrq();
+			return 0x00;
+		case 0xf:
+			/* STOP COUNTER COMMAND: clears counter-ready, and in counter
+			   mode (ACR bit 6 clear) also halts the count. */
+			if (!(duartAcr_ & 0x40))
+				duartCounterOn_ = 0;
 			duartIsr_ &= (uint8_t)~0x08;
 			UpdateDuartIrq();
 			return 0x00;
@@ -315,6 +351,10 @@ void CHardF3::Write8(unsigned addr, uint8_t data)
 		duart_[reg] = data;
 		if (reg == 0x4) {
 			duartAcr_ = data;
+			/* Timer mode (bit 6) free-runs once selected; counter mode has
+			   to be armed by the start-counter read. */
+			if (duartAcr_ & 0x40)
+				duartCounterOn_ = 1;
 		}
 		if (reg == 0x5) {
 			/* IMR write (write to ISR address) */
@@ -330,11 +370,9 @@ void CHardF3::Write8(unsigned addr, uint8_t data)
 		if (reg == 0xc) {
 			duart_[0x0c] = data ? data : 0x40;
 		}
-		if (reg == 0xe || reg == 0xf) {
-			/* Start/stop counter — clear ready, re-arm. */
-			duartIsr_ &= (uint8_t)~0x08;
-			UpdateDuartIrq();
-		}
+		/* 0x0E/0x0F on write are set/reset output port bits, not the
+		   counter commands (those are the read side). Clearing ISR here
+		   would drop a counter-ready the firmware is waiting on. */
 		return;
 	}
 	if (addr >= 0x300000u && addr <= 0x30003fu) {
@@ -455,12 +493,17 @@ void CHardF3::SetSongCommand(unsigned code)
 {
 	songCode_ = code ? code : 1;
 	/*
-	 * F3 sound firmware ring (even offsets from $140000, MOVEP head/tail at $900/$904):
-	 *   packet = [len][0x80|cmd][song…]
-	 * len must match the per-cmd table (cmd0/1/2 → 0x03). See bubblem @$C12EA8.
-	 * cmd0 (0x80) → play then clr 6e1a; cmd1 (0x81) → play then tas 6e1a.
-	 * Prefer cmd0; if the prior cmd1-only path left BGM silent on some sets,
-	 * also queue cmd0. Dual back-to-back cmd0+cmd1 was worse — cmd0 only.
+	 * F3 mailbox, as read out of the arabianm firmware:
+	 *   ring at $140000, even bytes only, MOVEP head at $900 / tail at $904
+	 *   packet = [len][cmd][args…], len = 1 + number of bytes after len
+	 * The reader at $C11048 requires bit 7 set in cmd, then starts a task that
+	 * dispatches at $C12E1C: index (cmd & $7f) must be <= $10, and len must
+	 * equal the per-command entry in the table at $C131B0, else the packet is
+	 * dropped silently. Handlers come from the word table at $C1318E.
+	 * cmd $80/$81/$82 all reach the play routine at $C12B8C with one argument.
+	 *
+	 * Song ids index a table of longs at ($D404)+8; arabianm has entries for
+	 * 1, 2, 9, $0A… and zeros elsewhere, and a zero entry means "no such song".
 	 */
 	EnsureHostRing();
 	const uint8_t lo = (uint8_t)(songCode_ & 0xff);
@@ -485,6 +528,7 @@ int CHardF3::TickDuart(int cpuCycles)
 	 * Firmware loads CTR=$09C4. Period ≈ CTR * 16 / 4MHz in CPU cycles at ~15.2MHz.
 	 * Use CTR-based period clamped to a sane IRQ rate (~0.5–2 kHz).
 	 */
+	if (!duartCounterOn_) return duartIrqPending_;
 	unsigned ctr = duartCtr_ ? duartCtr_ : 0x09c4;
 	int period = (int)((int64_t)ctr * 16 * (int64_t)cpuHz_ / 4000000);
 	if (period < cpuHz_ / 2000) period = cpuHz_ / 2000;
@@ -492,7 +536,8 @@ int CHardF3::TickDuart(int cpuCycles)
 	duartTimerAcc_ += cpuCycles;
 	while (duartTimerAcc_ >= period) {
 		duartTimerAcc_ -= period;
-		duartIsr_ |= 0x08; /* timer ready */
+		duartIsr_ |= 0x08; /* counter/timer ready */
+		duartFires_++;
 		UpdateDuartIrq();
 	}
 	return duartIrqPending_;
@@ -511,11 +556,14 @@ int CHardF3::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode
 	memset(esp_, 0, sizeof(esp_));
 	memset(dpramReadHits_, 0, sizeof(dpramReadHits_));
 	dpramWriteHits_ = 0;
+	dpramTraceN_ = 0;
 	duartIrqPending_ = 0;
 	duartImr_ = 0;
 	duartIsr_ = 0;
 	duartAcr_ = 0x30;
 	duartCtr_ = 0x09c4;
+	duartCounterOn_ = 0;
+	duartFires_ = 0;
 	duartTimerAcc_ = 0;
 	duart_[0x0c] = 0x0f;
 	ringInited_ = 0;

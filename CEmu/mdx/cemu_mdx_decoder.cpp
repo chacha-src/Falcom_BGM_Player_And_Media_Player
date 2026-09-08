@@ -302,7 +302,8 @@ int CEmuMdxRender(CEmuMdxPlayer* p, short* outStereo, int sampleFrames)
 	p->curSample += want;
 
 	FmMonShadowSetSampleRate(p->sampleRate);
-	FmMonShadowAddSamples(want);
+	/* サンプル時計は readcemu が一括で進める。ここで足すと二重計上になり、
+	   dump.curSample が実時間の 2 倍で進んで鍵盤が可聴より先走る。 */
 	FmMonShadowSetKeysProfile(SASAMI_FMMON_KEYS_MDX);
 	{
 		uint8_t opm[256];

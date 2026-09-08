@@ -117,6 +117,11 @@ CHardAc::CHardAc()
 	, konamiSh1NmiArm_(0)
 	, ms1Rom_(NULL)
 	, ms1RomSize_(0)
+	, scspSampleBank_(0)
+	, hornetGti_(0)
+	, hornetTimerEn_(0)
+	, hornetTimerIrq_(0)
+	, hornetTimerAcc_(0)
 	, ms1Ram_(NULL)
 	, ms1LatchLevel_(4)
 	, ms1LatchIrq_(0)
@@ -1954,13 +1959,13 @@ int CHardAc::Init(const CEmuGameEntry* ge, int sampleRate)
 			pcmKind_ = 0;
 		}
 	} else if (board_ == CEMU_AC_BOARD_KONAMI_RF5C400) {
-		/* Hornet / GTI Club RF5C400 — wave ROM held; silent (no 68K host). */
 		cpuHz_ = 16000000;
-		opmHz_ = 18432000;
-		chip_ = CEmuChipRf5c400Create(18432000u, sampleRate_);
+		opmHz_ = 16934400;
+		chip_ = CEmuChipRf5c400Create(16934400u, sampleRate_);
 		chip2_ = NULL;
 		pcm_ = NULL;
 		pcmKind_ = 0;
+		hornetGti_ = (_stricmp(ge->subtype, "gticlub") == 0) ? 1 : 0;
 	} else if (board_ == CEMU_AC_BOARD_KONAMI_PCM) {
 		const int isK054539 = (_stricmp(ge->subtype, "054539") == 0
 			|| _stricmp(ge->subtype, "054539x2") == 0
@@ -2363,15 +2368,22 @@ unsigned CHardAc::Ms1Read16(unsigned addr)
 {
 	if (board_ == CEMU_AC_BOARD_M68K_PCM) {
 		unsigned v = (M68kPcmRead8(addr) << 8) | M68kPcmRead8(addr + 1);
+		/* The histogram only covers the first 64 KiB of the work RAM window,
+		   and atehate's window is 1 MiB, so clamp rather than index past the
+		   end of the array. */
 		if (g_traceM68kRead && m68kRamSize_ && addr >= m68kRamAddr_ && addr - m68kRamAddr_ < m68kRamSize_) {
 			unsigned off = addr - m68kRamAddr_;
-			g_m68kReadCount[off]++;
-			g_m68kReadCount[off+1]++;
+			if (off + 1 < _countof(g_m68kReadCount)) {
+				g_m68kReadCount[off]++;
+				g_m68kReadCount[off + 1]++;
+			}
 		}
 		return v;
 	}
-	if (board_ == CEMU_AC_BOARD_SEGA_SCSP && segaM1Audio_)
-		return Sega68Read16(addr);
+	if (board_ == CEMU_AC_BOARD_SEGA_SCSP)
+		return segaM1Audio_ ? Sega68Read16(addr) : Sega2ARead16(addr);
+	if (board_ == CEMU_AC_BOARD_KONAMI_RF5C400)
+		return HornetRead16(addr);
 	if (board_ == CEMU_AC_BOARD_KONAMI_GX) {
 		addr &= 0xfffffeu;
 		if (addr < 0x040000u) {
@@ -2510,12 +2522,15 @@ unsigned CHardAc::Ms1Read8(unsigned addr)
 		unsigned v = M68kPcmRead8(addr);
 		if (g_traceM68kRead && m68kRamSize_ && addr >= m68kRamAddr_ && addr - m68kRamAddr_ < m68kRamSize_) {
 			unsigned off = addr - m68kRamAddr_;
-			g_m68kReadCount[off]++;
+			if (off < _countof(g_m68kReadCount))
+				g_m68kReadCount[off]++;
 		}
 		return v;
 	}
-	if (board_ == CEMU_AC_BOARD_SEGA_SCSP && segaM1Audio_)
-		return Sega68Read8(addr);
+	if (board_ == CEMU_AC_BOARD_SEGA_SCSP)
+		return segaM1Audio_ ? Sega68Read8(addr) : Sega2ARead8(addr);
+	if (board_ == CEMU_AC_BOARD_KONAMI_RF5C400)
+		return HornetRead8(addr);
 	if (board_ == CEMU_AC_BOARD_KONAMI_GX) {
 		if (addr < 0x040000u) {
 			if (!ms1Rom_ || addr >= ms1RomSize_) return 0xff;
@@ -2553,8 +2568,15 @@ void CHardAc::Ms1Write16(unsigned addr, uint16_t v)
 		M68kPcmWrite8((addr & ~1u) | 1u, (uint8_t)v);
 		return;
 	}
-	if (board_ == CEMU_AC_BOARD_SEGA_SCSP && segaM1Audio_) {
-		Sega68Write16(addr, v);
+	if (board_ == CEMU_AC_BOARD_SEGA_SCSP) {
+		if (segaM1Audio_)
+			Sega68Write16(addr, v);
+		else
+			Sega2AWrite16(addr, v);
+		return;
+	}
+	if (board_ == CEMU_AC_BOARD_KONAMI_RF5C400) {
+		HornetWrite16(addr, v);
 		return;
 	}
 	if (board_ == CEMU_AC_BOARD_KONAMI_GX) {
@@ -2625,8 +2647,15 @@ void CHardAc::Ms1Write8(unsigned addr, uint8_t v)
 		M68kPcmWrite8(addr, v);
 		return;
 	}
-	if (board_ == CEMU_AC_BOARD_SEGA_SCSP && segaM1Audio_) {
-		Sega68Write8(addr, v);
+	if (board_ == CEMU_AC_BOARD_SEGA_SCSP) {
+		if (segaM1Audio_)
+			Sega68Write8(addr, v);
+		else
+			Sega2AWrite8(addr, v);
+		return;
+	}
+	if (board_ == CEMU_AC_BOARD_KONAMI_RF5C400) {
+		HornetWrite8(addr, v);
 		return;
 	}
 	if (board_ == CEMU_AC_BOARD_KONAMI_GX) {
@@ -2691,6 +2720,15 @@ int CHardAc::Ms1IrqLevel() const
 		return ms1LatchIrq_ ? m68kVblankLevel_ : 0;
 	if (board_ == CEMU_AC_BOARD_SEGA_SCSP && segaM1Audio_)
 		return segaMidiIrq_ ? 2 : 0; /* 8251 RxRDY → IRQ2 */
+	if (board_ == CEMU_AC_BOARD_SEGA_SCSP)
+		return CEmuChipScspIrqLevel(); /* SCSP timer A/B/C + MIDI in */
+	if (board_ == CEMU_AC_BOARD_KONAMI_RF5C400) {
+		/* Hornet: periodic timer → IRQ1, K056800 mailbox → IRQ2. */
+		int level = 0;
+		if (hornetTimerIrq_) level = 1;
+		if (k056800Irq_ && level < 2) level = 2;
+		return level;
+	}
 	if (board_ == CEMU_AC_BOARD_KONAMI_GX) {
 		int level = 0;
 		if (k056800Irq_) level = 1;
@@ -2709,11 +2747,9 @@ void CHardAc::Ms1AckIrq()
 {
 	if (board_ == CEMU_AC_BOARD_SEGA_SCSP && segaM1Audio_)
 		return; /* RxRDY cleared when UART FIFO drains */
-	if (board_ == CEMU_AC_BOARD_KONAMI_GX) {
-		/* IRQ1 (K056800) is cleared by sound_w(4); IRQ2 (K054539 timer) is
-		   cleared when the ISR writes $500001 with bit0 clear. Do not drop
-		   either line on Musashi IACK ? that stole timer IRQs while mailbox
-		   IRQs were pending. */
+	if (board_ == CEMU_AC_BOARD_KONAMI_RF5C400
+		|| board_ == CEMU_AC_BOARD_KONAMI_GX) {
+		/* IRQ lines are cleared by their own ACK ports / sound_w(4). */
 		return;
 	}
 	ms1LatchIrq_ = 0;
@@ -2854,11 +2890,12 @@ void CHardAc::SetSoundCommandWord(uint16_t cmd)
 		return;
 	}
 	if (board_ == CEMU_AC_BOARD_SEGA_SCSP && !segaM1Audio_) {
-		SoftPcmInjectSong(cmd);
+		Sega2AInjectSong(cmd);
 		return;
 	}
 	if (board_ == CEMU_AC_BOARD_KONAMI_RF5C400) {
-		SoftPcmInjectSong(cmd);
+		/* Catalog codes are 0x01xx0000; a 16-bit word is the high half. */
+		HornetInjectSong(cmd ? ((unsigned)cmd << 16) : 0u);
 		return;
 	}
 	if ((board_ == CEMU_AC_BOARD_NAMCO_SYS86
@@ -7624,11 +7661,11 @@ int CHardAc::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode
 		return LoadRomsSeibu(fs, ge);
 	if (board_ == CEMU_AC_BOARD_IREM_M62)
 		return LoadRomsM62(fs, ge);
-	if (board_ == CEMU_AC_BOARD_SEGA_SCSP && segaM1Audio_)
-		return LoadRomsSegaM1(fs, ge);
-	if (board_ == CEMU_AC_BOARD_SEGA_SCSP
-		|| board_ == CEMU_AC_BOARD_KONAMI_RF5C400)
-		return LoadRomsPcmChip(fs, ge);
+	if (board_ == CEMU_AC_BOARD_SEGA_SCSP)
+		return segaM1Audio_ ? LoadRomsSegaM1(fs, ge)
+			: LoadRomsSegaScsp(fs, ge);
+	if (board_ == CEMU_AC_BOARD_KONAMI_RF5C400)
+		return LoadRomsHornet(fs, ge);
 
 	unsigned char* m72Code = (board_ == CEMU_AC_BOARD_IREM_M72)
 		? CEmuAcM72InterleavedCode(fs, ge) : NULL;

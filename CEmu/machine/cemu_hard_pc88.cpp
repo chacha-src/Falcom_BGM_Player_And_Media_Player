@@ -1,4 +1,4 @@
-#include "StdAfx.h"
+﻿#include "StdAfx.h"
 #include "cemu_hard_pc88.h"
 #include "../cemu_zipfs.h"
 #include "../cemu_rhythm.h"
@@ -765,6 +765,50 @@ void CHardPc88::StageBanks(CEmuZipFs* fs, const CEmuGameEntry* ge)
 				chip_->SetAdpcmB(data, sz, (unsigned)r->offset);
 		}
 	}
+	DeriveMicrocabinVdata(ge);
+}
+
+/* xak_88 lists a type=voice blob per song but no vdata_addr, so the FM
+   instrument bank never reached RAM and every channel keyed on with whatever
+   was left in the operator registers — audible as "the FM part is missing"
+   while SSG carried the tune, ~4x down on its sibling xak2_88.
+
+   Microcabin's FM88/MMD driver keeps all of its state inside its own image
+   and takes only the sequence pointer, so the voice bank has to be planted at
+   the address the driver hardcodes: the block directly below mdata_addr.
+   xak2_88 spells that layout out (mdata $F800, vdata $F400) and xak_88 needs
+   the same relative placement ($F400 / $F000, confirmed by sweep).
+
+   Deliberately keyed off the driver binary rather than applied as general
+   arithmetic: across the catalog, entries that do declare vdata_addr put the
+   voice somewhere driver-specific, and only this family lands directly below
+   the sequence. */
+void CHardPc88::DeriveMicrocabinVdata(const CEmuGameEntry* ge)
+{
+	if (vdataAddr_ >= 0 || mdataAddr_ <= 0)
+		return;
+
+	int isMicrocabin = 0;
+	for (int i = 0; i < ge->romCount && !isMicrocabin; i++) {
+		const CEmuRomEntry* r = &ge->rom[i];
+		if (_stricmp(r->type, "code") != 0) continue;
+		isMicrocabin = (_stricmp(r->name, "FM88.COM") == 0
+			|| _stricmp(r->name, "MMD.COM") == 0);
+	}
+	if (!isMicrocabin)
+		return;
+
+	unsigned voiceSize = 0;
+	for (int i = 0; i < 256; i++) {
+		if (voiceBank_[i] && voiceBankSize_[i] > voiceSize)
+			voiceSize = voiceBankSize_[i];
+	}
+	if (!voiceSize || (int)voiceSize > mdataAddr_)
+		return;
+
+	vdataAddr_ = mdataAddr_ - (int)voiceSize;
+	if (vfileSize_ <= 0)
+		vfileSize_ = (int)voiceSize;
 }
 
 int CHardPc88::ShouldRestageSong() const

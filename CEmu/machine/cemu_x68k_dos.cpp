@@ -1,4 +1,4 @@
-#include "StdAfx.h"
+﻿#include "StdAfx.h"
 #include "cemu_x68k_dos.h"
 #include "cemu_hard_x68k.h"
 extern "C" {
@@ -296,7 +296,12 @@ static void emitDosImage(CHardX68k* hw, unsigned zmusicEntry, unsigned zmdBuf)
 		/* Musashi stacks REG_PPC = address of the $FFxx word. Human68k must
 		   fetch that word and advance the stacked PC by 2 before RTE, else
 		   SUPER/INTVCS loop forever (cave @ F08094, many 08=0 WEAKs). */
-		e.w16(0x2440);                         /* move.l d0,a2 */
+		/* Human68k guarantees a DOS call preserves every register but d0, so
+		   the incoming d0 is parked in memory rather than in a2. Holding it
+		   in a2 silently corrupted the caller: OPMDRV.X reads its command
+		   line through a2 across _SUPER, so it parsed junk, printed its usage
+		   text and exited without ever programming the OPM. */
+		e.w16(0x23c0); e.w32(CEMU_X68K_DOS_DATA + 0x0cu); /* move.l d0,argD0 */
 		e.w16(0x206f); e.w16(0x0002);           /* move.l 2(sp),a0 */
 		e.w16(0x3018);                         /* move.w (a0)+,d0 */
 		e.w16(0x2f48); e.w16(0x0002);           /* move.l a0,2(sp) */
@@ -363,7 +368,7 @@ static void emitDosImage(CHardX68k* hw, unsigned zmusicEntry, unsigned zmdBuf)
 
 		/* SUPER $20: d0==0 → enter (return SSP); d0!=0 → leave accept */
 		const unsigned tSuper = e.mark();
-		e.w16(0x200a); /* move.l a2,d0 */
+		e.w16(0x2039); e.w32(CEMU_X68K_DOS_DATA + 0x0cu); /* move.l argD0,d0 */
 		e.w16(0x6604); /* bne.s leave */
 		e.w16(0x200f); /* move.l a7,d0 */
 		e.w16(0x4e73);
@@ -406,10 +411,10 @@ static void emitDosImage(CHardX68k* hw, unsigned zmusicEntry, unsigned zmdBuf)
 		e.w16(0x7000);
 		e.w16(0x4e73);
 
-		/* MALLOC $48 / $58 / $88 — size was in d0, saved in a2 */
+		/* MALLOC $48 / $58 / $88 — size came in d0, parked in argD0 */
 		auto emitMalloc = [&]() -> unsigned {
 			const unsigned t = e.mark();
-			e.w16(0x200a);                     /* move.l a2,d0 */
+			e.w16(0x2039); e.w32(CEMU_X68K_DOS_DATA + 0x0cu); /* move.l argD0,d0 */
 			e.w16(0x0680); e.w32(3);           /* addi.l #3,d0 */
 			e.w16(0x0280); e.w32(0xfffffffcu); /* andi.l #~3,d0 */
 			e.w16(0x2079); e.w32(CEMU_X68K_DOS_DATA); /* move.l heapPtr,a0 */
@@ -468,11 +473,12 @@ static void emitDosImage(CHardX68k* hw, unsigned zmusicEntry, unsigned zmdBuf)
 		const unsigned tGetc = keyLeaf();
 		const unsigned tInkey = keyLeaf();
 
-		/* File ops via host mailbox: a1→$E00018, d0(a2)→$E0001C, d1→$E00014, fn→$E0001E */
+		/* File ops via host mailbox: a1→$E00018, argD0→$E0001C, d1→$E00014, fn→$E0001E */
 		auto fileOp = [&](unsigned fn) -> unsigned {
 			const unsigned t = e.mark();
 			e.w16(0x23c9); e.w32(0x00e00018u); /* move.l a1,$E00018 */
-			e.w16(0x23ca); e.w32(0x00e0001cu); /* move.l a2,$E0001C (saved d0) */
+			e.w16(0x23f9); e.w32(CEMU_X68K_DOS_DATA + 0x0cu);
+			e.w32(0x00e0001cu);                /* move.l argD0,$E0001C */
 			e.w16(0x23c1); e.w32(0x00e00014u); /* move.l d1,$E00014 */
 			e.w16(0x33fc); e.w16((uint16_t)fn); e.w32(0x00e0001eu);
 			e.w16(0x2039); e.w32(0x00e00018u); /* move.l result,d0 */
@@ -546,7 +552,7 @@ static void emitDosImage(CHardX68k* hw, unsigned zmusicEntry, unsigned zmdBuf)
 		e.w16(0x0240); e.w16(0x00ff); /* andi.w #$FF,d0 */
 
 		struct J { unsigned atBeq; };
-		unsigned at68, at6a, at6b, at6c, atf0, at86, at80, at60, at66, at67, at69, at04, at00, at01;
+		unsigned at68, at6a, at6b, at6c, atf0, at86, at80, at69, at04, at00, at01;
 		auto beq = [&](unsigned fn, unsigned& slot) {
 			e.w16(0x0c40); e.w16((uint16_t)fn);
 			slot = e.mark();
@@ -558,15 +564,62 @@ static void emitDosImage(CHardX68k* hw, unsigned zmusicEntry, unsigned zmdBuf)
 		beq(0x6c, at6c); /* VDISPST */
 		beq(0xf0, atf0);
 		beq(0x86, at86);
-		beq(0x80, at80); /* ADPCMAOT / diskred family — success */
-		beq(0x60, at60); /* TIMERSET family */
-		beq(0x66, at66); /* cave SND.X */
-		beq(0x67, at67);
-		beq(0x69, at69); /* OPMGET */
+		beq(0x80, at80); /* _B_INTVCS */
+		beq(0x69, at69); /* OPMSNS */
 		beq(0x04, at04); /* B_SUPER / common */
 		beq(0x00, at00); /* B_KEYINP */
 		beq(0x01, at01); /* B_KEYSNS */
-		/* default success */
+		/* $60..$67 are the MSM6258 calls (_ADPCMOUT.._ADPCMMOD). Drivers such
+		   as CODE-ZERO's MUCO.X install their own bodies in the IOCS jump
+		   table and program the HD63450 from them, so answering "success"
+		   here is why those rips played OPM but never a note of PCM: run the
+		   guest's handler when it owns the slot. Anything that is null, ours
+		   ($F0xxxx), or a BOOT hang stub still falls back to the canned
+		   success. Kept to the ADPCM range on purpose — dispatching every
+		   unknown fn through the table walks into BOOT code overlays. */
+		unsigned atUnder, atOver, atMask, atLow, atHigh, atStub, atGo;
+		e.w16(0x0c40); e.w16(0x0060);       /* cmpi.w #$60,d0 */
+		atUnder = e.mark(); e.w16(0x6500);  /* bcs.w fail */ e.w16(0);
+		e.w16(0x0c40); e.w16(0x0068);       /* cmpi.w #$68,d0 */
+		atOver = e.mark(); e.w16(0x6400);   /* bcc.w fail */ e.w16(0);
+		/* Install-time permission bit: hoot BOOTs that overlay runnable code
+		   on $400..$7FF have no vectors to dispatch to, and jsr'ing into that
+		   byte soup kills the rip (xenon). movem does not touch the flags, so
+		   it is what restores d0 between the btst and the branch. IOCS returns
+		   in d0 and preserves everything else, a0 included — walking the table
+		   through a0 without saving it silently broke callers (gramcat2). Park
+		   it in DOS work, not on the stack: guest handlers that return with
+		   rte instead of rts would leave the saved copy behind and walk SP
+		   down one call at a time. */
+		e.w16(0x23c8); e.w32(CEMU_X68K_DOS_DATA + 0x60u); /* move.l a0,saveA0 */
+		e.w16(0x3f00);                      /* move.w d0,-(sp) */
+		e.w16(0x0440); e.w16(0x0060);       /* subi.w #$60,d0 */
+		e.w16(0x0139); e.w32(CEMU_X68K_DOS_DATA + 0x1eu); /* btst d0,mask */
+		e.w16(0x4c9f); e.w16(0x0001);       /* movem.w (sp)+,d0 */
+		atMask = e.mark(); e.w16(0x6700);   /* beq.w fail */ e.w16(0);
+		e.w16(0x3f00);                      /* move.w d0,-(sp) */
+		e.w16(0xe548);                      /* lsl.w #2,d0 */
+		e.w16(0x207c); e.w32(0x00000400u);  /* movea.l #$400,a0 */
+		e.w16(0xd0c0);                      /* adda.w d0,a0 */
+		e.w16(0x2050);                      /* movea.l (a0),a0 */
+		e.w16(0x301f);                      /* move.w (sp)+,d0 */
+		e.w16(0xb1fc); e.w32(0x00001000u);  /* cmpa.l #$1000,a0 */
+		atLow = e.mark(); e.w16(0x6500);    /* bcs.w fail */ e.w16(0);
+		e.w16(0xb1fc); e.w32(0x00f00000u);  /* cmpa.l #$F00000,a0 */
+		atHigh = e.mark(); e.w16(0x6400);   /* bcc.w fail */ e.w16(0);
+		e.w16(0x0c50); e.w16(0x4e71);       /* cmpi.w #$4E71,(a0) */
+		atGo = e.mark(); e.w16(0x6600);     /* bne.w go */ e.w16(0);
+		e.w16(0x0c68); e.w16(0x60fc); e.w16(0x0002); /* cmpi.w #$60FC,2(a0) */
+		atStub = e.mark(); e.w16(0x6700);   /* beq.w fail */ e.w16(0);
+		const unsigned tGo = e.mark();
+		e.w16(0x4e90);                      /* jsr (a0) */
+		e.w16(0x2079); e.w32(CEMU_X68K_DOS_DATA + 0x60u); /* movea.l saveA0,a0 */
+		e.w16(0x4e73);                      /* rte */
+		/* Bailing out after a0 was parked restores it; the plain default,
+		   which every other fn falls through to, must not touch a0 at all. */
+		const unsigned tFailA0 = e.mark();
+		e.w16(0x2079); e.w32(CEMU_X68K_DOS_DATA + 0x60u); /* movea.l saveA0,a0 */
+		const unsigned tFail = e.mark();
 		e.w16(0x7000);
 		e.w16(0x4e73);
 
@@ -616,12 +669,6 @@ static void emitDosImage(CHardX68k* hw, unsigned zmusicEntry, unsigned zmdBuf)
 		/* success / key leaves */
 		const unsigned t86 = e.mark();
 		e.w16(0x7000); e.w16(0x4e73);
-		const unsigned t60 = e.mark();
-		e.w16(0x7000); e.w16(0x4e73);
-		const unsigned t66 = e.mark();
-		e.w16(0x7000); e.w16(0x4e73);
-		const unsigned t67 = e.mark();
-		e.w16(0x7000); e.w16(0x4e73);
 		const unsigned t69 = e.mark();
 		e.w16(0x7000); e.w16(0x4e73);
 		const unsigned t04 = e.mark();
@@ -641,10 +688,14 @@ static void emitDosImage(CHardX68k* hw, unsigned zmusicEntry, unsigned zmdBuf)
 		patch(atf0, tf0);
 		patch(at86, t86);
 		patch(at80, t80);
-		patch(at60, t60);
-		patch(at66, t66);
-		patch(at67, t67);
 		patch(at69, t69);
+		patch(atUnder, tFail);
+		patch(atOver, tFail);
+		patch(atMask, tFailA0);
+		patch(atLow, tFailA0);
+		patch(atHigh, tFailA0);
+		patch(atStub, tFailA0);
+		patch(atGo, tGo);
 		patch(at04, t04);
 		patch(at00, t00);
 		patch(at01, t01);
@@ -811,6 +862,20 @@ int CEmuX68kDosInstall(CHardX68k* hw)
 		/* Refresh ZMUSIC/ZMD pointers without resetting the bump heap. */
 		hw->Write32(CEMU_X68K_DOS_DATA + 0x04, zmusic);
 		hw->Write32(CEMU_X68K_DOS_DATA + 0x08, zmd);
+	}
+
+	/* Which of the MSM6258 IOCS slots ($60.._ADPCMOUT .. $67.._ADPCMMOD) our
+	   TRAP #15 may dispatch through at run time. Slots carrying a BOOT code
+	   overlay are never vectors, so they stay on the canned-success path. */
+	{
+		unsigned mask = 0xffu;
+		for (unsigned fn = 0x60u; fn <= 0x67u; fn++) {
+			/* A single slot of BOOT byte soup can still read as a plausible
+			   address (xenon $67 = $6608), so one overlay anywhere in the
+			   range means the range holds no vectors at all. */
+			if (iocsSlotIsCodeOverlay(hw, fn)) { mask = 0; break; }
+		}
+		hw->Write8(CEMU_X68K_DOS_DATA + 0x1eu, (uint8_t)mask);
 	}
 
 	if (thinF)

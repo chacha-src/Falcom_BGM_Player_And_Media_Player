@@ -1,4 +1,4 @@
-// oggDlg.cpp : インプリメンテーション ファイル
+﻿// oggDlg.cpp : インプリメンテーション ファイル
 //
 //#define _DLL
 #include "stdafx.h"
@@ -1046,192 +1046,11 @@ int ogpl0 = 0;
 // アプリケーションのバージョン情報で使われている CAboutDlg ダイアログ
 extern void DoEvent();
 #include "CCustomControl.h"
-#include <dxgi.h>
-#include <dxgi1_4.h>
-#pragma comment(lib, "dxgi.lib")
+#include "Soft3DGpuInfo.h"
 
-// 表示クラスの HardwareInformation.qwMemorySize(QWORD)。
-// x86 では DXGI DedicatedVideoMemory(SIZE_T) が 4GB 超を表せず、NVIDIA はよく 3072MB を返す。
-static UINT64 QueryGpuVramBytesFromRegistry(UINT vendorId, UINT deviceId, const wchar_t* descName)
-{
-	HKEY hClass = NULL;
-	if (::RegOpenKeyExW(HKEY_LOCAL_MACHINE,
-		L"SYSTEM\\CurrentControlSet\\Control\\Class\\{4d36e968-e325-11ce-bfc1-08002be10318}",
-		0, KEY_READ, &hClass) != ERROR_SUCCESS)
-		return 0;
-
-	wchar_t venTok[16];
-	wchar_t devTok[16];
-	_snwprintf_s(venTok, _TRUNCATE, L"VEN_%04X", vendorId & 0xffffu);
-	_snwprintf_s(devTok, _TRUNCATE, L"DEV_%04X", deviceId & 0xffffu);
-
-	UINT64 best = 0;
-	for (DWORD i = 0; ; ++i) {
-		wchar_t subName[64];
-		DWORD subLen = (DWORD)_countof(subName);
-		if (::RegEnumKeyExW(hClass, i, subName, &subLen, NULL, NULL, NULL, NULL) != ERROR_SUCCESS)
-			break;
-		BOOL digits = (subLen > 0) ? TRUE : FALSE;
-		for (DWORD c = 0; c < subLen; ++c) {
-			if (subName[c] < L'0' || subName[c] > L'9') {
-				digits = FALSE;
-				break;
-			}
-		}
-		if (!digits)
-			continue;
-
-		HKEY hSub = NULL;
-		if (::RegOpenKeyExW(hClass, subName, 0, KEY_READ, &hSub) != ERROR_SUCCESS)
-			continue;
-
-		BOOL match = FALSE;
-		wchar_t matching[256];
-		DWORD mcb = sizeof(matching);
-		DWORD type = 0;
-		if (::RegQueryValueExW(hSub, L"MatchingDeviceId", NULL, &type, (LPBYTE)matching, &mcb) == ERROR_SUCCESS
-			&& (type == REG_SZ || type == REG_EXPAND_SZ)) {
-			matching[_countof(matching) - 1] = 0;
-			_wcsupr_s(matching);
-			if (wcsstr(matching, venTok) && wcsstr(matching, devTok))
-				match = TRUE;
-		}
-		if (!match && descName && descName[0]) {
-			wchar_t driverDesc[256];
-			DWORD dcb = sizeof(driverDesc);
-			if (::RegQueryValueExW(hSub, L"DriverDesc", NULL, &type, (LPBYTE)driverDesc, &dcb) == ERROR_SUCCESS
-				&& (type == REG_SZ || type == REG_EXPAND_SZ)) {
-				driverDesc[_countof(driverDesc) - 1] = 0;
-				if (_wcsicmp(driverDesc, descName) == 0)
-					match = TRUE;
-			}
-		}
-
-		UINT64 qw = 0;
-		if (match) {
-			DWORD cb = sizeof(qw);
-			type = 0;
-			if (::RegQueryValueExW(hSub, L"HardwareInformation.qwMemorySize", NULL, &type, (LPBYTE)&qw, &cb) == ERROR_SUCCESS) {
-				if ((type == REG_QWORD || type == REG_BINARY) && cb >= sizeof(UINT64) && qw > best)
-					best = qw;
-			}
-		}
-		::RegCloseKey(hSub);
-	}
-	::RegCloseKey(hClass);
-	return best;
-}
-
-// プライマリモニタを駆動している DXGI アダプタ名（取れなければ EnumDisplayDevices）。
 static CString BuildGpuInfoString()
 {
-	CString result;
-	IDXGIFactory1* factory = NULL;
-	if (SUCCEEDED(CreateDXGIFactory1(__uuidof(IDXGIFactory1), (void**)&factory)) && factory) {
-		IDXGIAdapter1* best = NULL;
-		int bestScore = -1;
-		IDXGIAdapter1* adapter = NULL;
-		for (UINT i = 0; factory->EnumAdapters1(i, &adapter) != DXGI_ERROR_NOT_FOUND; ++i) {
-			if (!adapter)
-				continue;
-
-			DXGI_ADAPTER_DESC1 desc = {};
-			if (FAILED(adapter->GetDesc1(&desc)) || (desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE)) {
-				adapter->Release();
-				adapter = NULL;
-				continue;
-			}
-			// Microsoft Basic Render Driver 等
-			if (desc.VendorId == 0x1414 && desc.DeviceId == 0x8c) {
-				adapter->Release();
-				adapter = NULL;
-				continue;
-			}
-
-			int score = 1; // ハードウェアアダプタ
-			IDXGIOutput* output = NULL;
-			for (UINT oi = 0; adapter->EnumOutputs(oi, &output) != DXGI_ERROR_NOT_FOUND; ++oi) {
-				if (!output)
-					continue;
-				DXGI_OUTPUT_DESC od = {};
-				if (SUCCEEDED(output->GetDesc(&od)) && od.AttachedToDesktop) {
-					if (score < 2)
-						score = 2;
-					if (od.Monitor) {
-						MONITORINFO mi = { sizeof(mi) };
-						if (GetMonitorInfo(od.Monitor, &mi) && (mi.dwFlags & MONITORINFOF_PRIMARY))
-							score = 3;
-					}
-				}
-				output->Release();
-				output = NULL;
-				if (score >= 3)
-					break;
-			}
-
-			if (score > bestScore) {
-				if (best)
-					best->Release();
-				best = adapter;
-				bestScore = score;
-				adapter = NULL;
-			} else {
-				adapter->Release();
-				adapter = NULL;
-			}
-		}
-
-		if (best) {
-			DXGI_ADAPTER_DESC1 desc = {};
-			if (SUCCEEDED(best->GetDesc1(&desc))) {
-				CString name(desc.Description);
-				name.Trim();
-				// SIZE_T のまま扱うと x86 で 4GB 超が切れる。常に 64bit で集計する。
-				UINT64 vram = (UINT64)desc.DedicatedVideoMemory;
-				if (vram == 0)
-					vram = (UINT64)desc.SharedSystemMemory;
-
-				// Budget は UINT64。32bit プロセスでも実 VRAM に近い値が取れることが多い。
-				IDXGIAdapter3* a3 = NULL;
-				if (SUCCEEDED(best->QueryInterface(__uuidof(IDXGIAdapter3), (void**)&a3)) && a3) {
-					DXGI_QUERY_VIDEO_MEMORY_INFO vmi = {};
-					if (SUCCEEDED(a3->QueryVideoMemoryInfo(0, DXGI_MEMORY_SEGMENT_GROUP_LOCAL, &vmi))) {
-						if (vmi.Budget > vram)
-							vram = vmi.Budget;
-					}
-					a3->Release();
-				}
-
-				// レジストリの搭載量がより大きければそちらを採用(16GB カードで 3072MB になる対策)
-				const UINT64 regVram = QueryGpuVramBytesFromRegistry(desc.VendorId, desc.DeviceId, name);
-				if (regVram > vram)
-					vram = regVram;
-
-				const UINT64 mb64 = vram / (1024ull * 1024ull);
-				const UINT mb = (mb64 > 0xffffffffull) ? 0xffffffffu : (UINT)mb64;
-				if (!name.IsEmpty()) {
-					if (mb >= 1024)
-						result.Format(_T("%s (%u GB)"), (LPCTSTR)name, (mb + 512u) / 1024u);
-					else if (mb > 0)
-						result.Format(_T("%s (%u MB)"), (LPCTSTR)name, mb);
-					else
-						result = name;
-				}
-			}
-			best->Release();
-		}
-		factory->Release();
-	}
-
-	if (result.IsEmpty()) {
-		DISPLAY_DEVICE dd = {};
-		dd.cb = sizeof(dd);
-		if (EnumDisplayDevices(NULL, 0, &dd, 0)) {
-			result = dd.DeviceString;
-			result.Trim();
-		}
-	}
-	return result;
+	return S3GpuBuildInfoString();
 }
 
 static CString BuildCpuInstructionListString()
@@ -2280,7 +2099,9 @@ extern "C" {
 #define HIGHDIV			4
 #define BUFSZH			(BUFSZ/HIGHDIV)
 #define SQRT_BUFSZ2		64
+#ifndef M_PI
 #define M_PI			3.1415926535897932384
+#endif
 #define ABS(N)			( (N)<0 ? -(N) : (N) )
 
 int ipTab2[2 + SQRT_BUFSZ2 * 50];		// FFT sin/cos table  [ >= 2+sqrt(BUFSZH/2) ]
@@ -20528,12 +20349,32 @@ int readcemu(BYTE* bw, int cnt)
 	if (frames <= 0) return 0;
 	if (g_cemuSession.lengthSamples > 0 && g_cemuSession.curSample >= g_cemuSession.lengthSamples)
 		return 0;
-	const int got = CEmuSessionRender(&g_cemuSession, (short*)bw, frames);
-	if (got <= 0) return 0;
-	g_cemuSession.curSample += (UINT64)got;
-	FmMonShadowAddSamples((uint32_t)got);
-	FmMonShadowFlush(0);
-	return got * bpf;
+	/* FM モニタの時刻は shadow の s_cur。ブロックを丸ごと Render してから
+	   AddSamples すると、区間内の全レジスタ書込がブロック先頭のサンプル位置で
+	   刻まれ、UI（可聴位置と比較）が最大 1 ブロック早く発音を出す。さらに
+	   ShouldWrite の elapsed が区間内で常に 0 になるため Render 内 flush が
+	   全部落ち、実効解像度がブロック長になって同一ブロック内で完結する短い
+	   音符が丸ごと消える。数 ms 単位に切って Render→AddSamples→Flush を回す。 */
+	int sliceFrames = (wavbit_sample_Hz > 0 ? wavbit_sample_Hz : 44100) / 250; /* ~4ms */
+	if (sliceFrames < 64) sliceFrames = 64;
+	int done = 0;
+	while (done < frames) {
+		if (g_cemuSession.lengthSamples > 0
+			&& g_cemuSession.curSample >= g_cemuSession.lengthSamples)
+			break;
+		int want = frames - done;
+		if (want > sliceFrames) want = sliceFrames;
+		const int got = CEmuSessionRender(&g_cemuSession,
+			(short*)(bw + (size_t)done * (size_t)bpf), want);
+		if (got <= 0) break;
+		g_cemuSession.curSample += (UINT64)got;
+		FmMonShadowAddSamples((uint32_t)got);
+		FmMonShadowFlush(0);
+		done += got;
+		if (got < want) break;
+	}
+	if (done <= 0) return 0;
+	return done * bpf;
 }
 
 static void CEmuSeekLoopStart()
@@ -20545,9 +20386,14 @@ static void CEmuSeekLoopStart()
 	cnt3 = 0;
 	RubberBand_DestroyBank(0);
 	reset = TRUE;
+	/* ループは曲切替ではない。DS 側の可聴位置(g_heardBytes)は 0 に戻らないので
+	   モニタの時計まで 0 にすると、以後ずっと可聴より先の dump が採用されて
+	   鍵盤・レジスタが先走る。時計は引き継ぐ。 */
+	const uint64_t fmMonCur = FmMonShadowGetCurSample();
 	FmMonShadowReset();
 	FmMonShadowSetSource(g_cemuSession.path);
 	FmMonShadowSetSampleRate((uint32_t)wavbit_sample_Hz);
+	FmMonShadowSetCurSample(fmMonCur);
 	if (g_cemuSession.game)
 		CEmuFmMonBindFromGe(g_cemuSession.game);
 }
@@ -27292,7 +27138,7 @@ LRESULT COggDlg::OnKpiPluginMsg(WPARAM wParam, LPARAM)
 
 LRESULT COggDlg::OnCemuCatListMsg(WPARAM, LPARAM)
 {
-	CEmuCatalogListDlg::ShowModal(this);
+	CEmuCatalogListDlg::Show(this);
 	return 0;
 }
 
@@ -34126,6 +33972,7 @@ void COggDlg::OnDestroy()
 {
 	XfPreloadCancel(20000); /* 先読みスレッドを残したまま終了するとプラグイン解放中に落ちる */
 	AudioDevWatchShutdown();
+	CEmuCatalogListDlg::CloseIfOpen();
 	if (g_oggHelpDlg && ::IsWindow(g_oggHelpDlg->GetSafeHwnd()))
 		g_oggHelpDlg->DestroyWindow();
 	MpPromptFlushHistoryOnExit();

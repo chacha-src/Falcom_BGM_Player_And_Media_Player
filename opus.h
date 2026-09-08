@@ -177,15 +177,14 @@ public:
 			pOpus = pOpusDecoder;
 			return pOpus;
 		}
-		else {
-			pOpusDecoder->Close();
-		}
+		pOpusDecoder->Close();
+		return NULL;
 	}
 
 	static void WINAPI Close(HKMP hKMP)
 	{
 		if (hKMP) {
-			IOggOpusDecoder *pOpus = (IOggOpusDecoder*)pOpus;
+			IOggOpusDecoder *pOpus = (IOggOpusDecoder*)hKMP;
 			pOpus->Close();
 			delete pOpus;
 			hKMP = NULL;

@@ -13,7 +13,6 @@ public:
 		, clockHz_(clockHz ? clockHz : 2000000u)
 		, addrLatch_(0)
 		, writeCount_(0)
-		, unmuteAssist_(0)
 	{
 		/* hoot ssAY8910 Initialize(clock) then SetClock(clock/2). */
 		const int psgClk = (int)(clockHz_ / 2u);
@@ -24,7 +23,6 @@ public:
 		memset(regWriteCount_, 0, sizeof(regWriteCount_));
 	}
 
-	void SetUnmuteAssist(int enable) { unmuteAssist_ = enable ? 1 : 0; }
 	void SetPortA(uint8_t v) { portA_ = v; }
 
 	void Reset() override
@@ -58,49 +56,6 @@ public:
 	void Render(int16_t* stereo, int frames) override
 	{
 		if (!stereo || frames <= 0) return;
-		/* MSX/X1: lift leftover mute mixer/vol. Off for other platforms. */
-		if (unmuteAssist_ && writeCount_ > 4) {
-			uint8_t mix = regs_[7];
-			int lifted = 0;
-			const int noisePer = regs_[6] & 0x1f;
-			for (int ch = 0; ch < 3; ch++) {
-				const int per = regs_[ch * 2] | ((regs_[ch * 2 + 1] & 0x0f) << 8);
-				const int toneOff = (mix & (1u << ch)) != 0;
-				const int noiseOff = (mix & (8u << ch)) != 0;
-				const int vol = regs_[8 + ch] & 0x1f;
-				const int silent = vol == 0;
-				const int quiet = vol > 0 && vol < 0x08;
-				const int hasTone = per != 0;
-				const int hasNoise = !noiseOff && (noisePer != 0 || writeCount_ > 6);
-				if (!silent && !quiet && !toneOff) continue;
-				if (!hasTone && !hasNoise && writeCount_ <= 6) continue;
-				if (toneOff && (hasTone || writeCount_ > 6)) {
-					mix = (uint8_t)(mix & ~(1u << ch));
-					psg_.SetReg(7, mix);
-					regs_[7] = mix;
-				}
-				if ((silent || quiet) && (hasTone || hasNoise || writeCount_ > 6)) {
-					psg_.SetReg(8 + ch, 0x0c);
-					regs_[8 + ch] = 0x0c;
-				}
-				lifted = 1;
-			}
-			if (!lifted && writeCount_ > 6) {
-				mix = (uint8_t)(mix & ~0x01);
-				psg_.SetReg(7, mix);
-				regs_[7] = mix;
-				if ((regs_[8] & 0x1f) < 0x08) {
-					psg_.SetReg(8, 0x0c);
-					regs_[8] = 0x0c;
-				}
-				if ((regs_[0] | (regs_[1] & 0x0f)) == 0) {
-					psg_.SetReg(0, 0x5c);
-					psg_.SetReg(1, 0x00);
-					regs_[0] = 0x5c;
-					regs_[1] = 0x00;
-				}
-			}
-		}
 		while (frames > 0) {
 			const int n = frames > 64 ? 64 : frames;
 			PSG::Sample tmp[128];
@@ -150,19 +105,12 @@ private:
 	unsigned writeCount_;
 	uint8_t regs_[16];
 	unsigned regWriteCount_[16];
-	int unmuteAssist_;
 	uint8_t portA_;
 };
 
 CChip* CEmuChipAyCreate(uint32_t clockHz, int sampleRate)
 {
 	return new CChipAy(clockHz, sampleRate);
-}
-
-void CEmuChipAySetUnmuteAssist(CChip* c, int enable)
-{
-	if (!c) return;
-	static_cast<CChipAy*>(c)->SetUnmuteAssist(enable);
 }
 
 void CEmuChipAySetPortA(CChip* c, uint8_t v)

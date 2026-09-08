@@ -1,6 +1,7 @@
-﻿#include "StdAfx.h"
+#include "StdAfx.h"
 #include "cemu_chip_c30.h"
 #include "cemu_chip.h"
+#include "../fmmon/fmmon_shadow.h"
 #include <string.h>
 
 /* Namco CUS30 8-voice wavetable PSG.
@@ -49,6 +50,8 @@ public:
 		memset(wave_, 0, sizeof(wave_));
 		memset(ch_, 0, sizeof(ch_));
 		memset(pacRegs_, 0, sizeof(pacRegs_));
+		memset(monOn_, 0, sizeof(monOn_));
+		memset(monMidi_, 0, sizeof(monMidi_));
 		for (int i = 0; i < kC30Voices; i++) {
 			ch_[i].wave = wave_;
 			ch_[i].noise_seed = 1;
@@ -201,6 +204,34 @@ private:
 		int noise_seed;
 	};
 
+	/* Report the voice to the FM monitor. CUS30 has no key-on strobe: a voice
+	   sounds whenever it has volume and a non-zero divisor, which is exactly
+	   the condition MixAdd uses. The bind table already lists CUS30 as 8 PCM
+	   rows, so without this the monitor stayed blank on every WSG board while
+	   audio played (rally-x, wsg6809, nd1, wsg63701). */
+	void UpdateMon(int channel)
+	{
+		if (channel < 0 || channel >= kC30Voices) return;
+		const Channel& ch = ch_[channel];
+		const int hasVol = (ch.voll || ch.volr) ? 1 : 0;
+		const int on = ch.noise ? (hasVol && (ch.freq & 0xff))
+			: (hasVol && ch.freq);
+		int midi = 36; /* noise has no pitch; park it at the low end */
+		if (on && !ch.noise) {
+			/* MixAdd walks 32 wave steps per 2^21 of offset accumulator and
+			   incr = freq*clock*2/rate, so the tone is freq*clock/2^20 Hz. */
+			midi = FmMonShadowHzToMidi((double)ch.freq * (double)clockHz_
+				/ 1048576.0);
+			if (midi < 0) midi = 36;
+		}
+		if (monOn_[channel] == (uint8_t)on
+			&& (!on || monMidi_[channel] == (uint8_t)midi))
+			return;
+		monOn_[channel] = (uint8_t)on;
+		monMidi_[channel] = (uint8_t)midi;
+		FmMonShadowPcmNote(channel, midi, on);
+	}
+
 	void RecomputeIncr(Channel& ch)
 	{
 		/* ssC30: incr = freq * basefreq * 2 / sample_rate (truncated to int). */
@@ -218,9 +249,11 @@ private:
 		const int channel = adr >> 3;
 		Channel& ch = ch_[channel];
 		const int reg = adr & 7;
+		int alsoMon = -1;
 		switch (reg) {
 		case 4:
 			ch_[(channel + 1) % kC30Voices].noise = (uint8_t)(data & 0x80);
+			alsoMon = (channel + 1) % kC30Voices;
 			/* fall through */
 		case 0: {
 			ch.voll = (reg_[channel * 8 + 0] & 0x0f);
@@ -243,6 +276,8 @@ private:
 		default:
 			break;
 		}
+		UpdateMon(channel);
+		if (alsoMon >= 0) UpdateMon(alsoMon);
 	}
 
 	void WriteRegMappy(int adr, uint8_t data)
@@ -272,6 +307,7 @@ private:
 		default:
 			break;
 		}
+		UpdateMon(channel);
 	}
 
 	void WriteReg(int adr, uint8_t data)
@@ -324,6 +360,7 @@ private:
 		default:
 			break;
 		}
+		UpdateMon(ch);
 	}
 
 	uint32_t clockHz_;
@@ -336,6 +373,8 @@ private:
 	uint8_t pacRegs_[0x20];
 	uint8_t wave_[kC30WaveBytes];
 	Channel ch_[kC30Voices];
+	uint8_t monOn_[kC30Voices];
+	uint8_t monMidi_[kC30Voices];
 };
 
 CChip* CEmuChipC30Create(uint32_t clockHz, int sampleRate, int mode)

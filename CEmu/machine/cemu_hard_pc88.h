@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "cemu_hard.h"
 
@@ -181,6 +181,8 @@ private:
 	void FreeBanks();
 
 	void StageBanks(CEmuZipFs* fs, const CEmuGameEntry* ge);
+
+	void DeriveMicrocabinVdata(const CEmuGameEntry* ge);
 
 	void BankCopyBgm(uint8_t songIndex);
 

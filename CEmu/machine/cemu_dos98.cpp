@@ -25,6 +25,13 @@ static void Wr16(uint8_t* mem, unsigned lin, uint16_t v)
 	mem[lin + 1] = (uint8_t)(v >> 8);
 }
 
+static uint8_t Bcd8(unsigned v)
+{
+	return (uint8_t)(((v / 10u) << 4) | (v % 10u));
+}
+
+int CEmuDos98::traceDefault_ = 0;
+
 CEmuDos98::CEmuDos98()
 {
 	memset(files_, 0, sizeof(files_));
@@ -37,7 +44,16 @@ CEmuDos98::CEmuDos98()
 	memset(installed_, 0, sizeof(installed_));
 	memset(instSeg_, 0, sizeof(instSeg_));
 	memset(instOff_, 0, sizeof(instOff_));
+	memset(unhandledFn_, 0, sizeof(unhandledFn_));
+	memset(unhandledVec_, 0, sizeof(unhandledVec_));
+	memset(unhandledInt18_, 0, sizeof(unhandledInt18_));
+	traceOn_ = traceDefault_;
+	traceCount_ = 0;
 	readLogCount_ = 0;
+	findPat_[0] = 0;
+	findNext_ = 0;
+	allocStrategy_ = 0;
+	pcAtBios_ = 0;
 }
 
 CEmuDos98::~CEmuDos98()
@@ -67,7 +83,15 @@ void CEmuDos98::Reset()
 	memset(installed_, 0, sizeof(installed_));
 	memset(instSeg_, 0, sizeof(instSeg_));
 	memset(instOff_, 0, sizeof(instOff_));
+	memset(unhandledFn_, 0, sizeof(unhandledFn_));
+	memset(unhandledVec_, 0, sizeof(unhandledVec_));
+	memset(unhandledInt18_, 0, sizeof(unhandledInt18_));
+	traceOn_ = traceDefault_;
+	traceCount_ = 0;
 	readLogCount_ = 0;
+	findPat_[0] = 0;
+	findNext_ = 0;
+	allocStrategy_ = 0;
 }
 
 void CEmuDos98::UpperCopy(char* dst, int dstCap, const char* src) const
@@ -174,10 +198,18 @@ void CEmuDos98::InstallTrampolines(uint8_t* mem)
 {
 	if (!mem) return;
 	const unsigned base = DosLin(DOS98_TRAMP_SEG, 0);
+	/* One stub pair per vector, except the top eight: their paragraph is
+	   reused as the environment block's arena header, so they share the
+	   IRET of vector 0.  That makes INT F8-FF return immediately instead of
+	   trapping to this layer, which is what the trap would have done. */
+	enum { kTrapVectors = 0xF8 };
 	for (unsigned v = 0; v < 256; v++) {
-		mem[base + v * 2] = 0xF4;     /* HLT */
-		mem[base + v * 2 + 1] = 0xCF; /* IRET */
-		Wr16(mem, v * 4, (uint16_t)(v * 2));
+		const unsigned off = (v < kTrapVectors) ? v * 2 : 1;
+		if (v < kTrapVectors) {
+			mem[base + off] = 0xF4;     /* HLT */
+			mem[base + off + 1] = 0xCF; /* IRET */
+		}
+		Wr16(mem, v * 4, (uint16_t)off);
 		Wr16(mem, v * 4 + 2, DOS98_TRAMP_SEG);
 	}
 }
@@ -240,7 +272,17 @@ void CEmuDos98::InstallDosStructures(uint8_t* mem, unsigned memKb, const char* b
 		put("PATH=C:\\");
 		if (blaster && blaster[0])
 			put(blaster);
-		mem[envLin + pos] = 0;
+		mem[envLin + pos++] = 0;
+		/* The block needs an arena header: the standard TSR prologue reads
+		   the paragraph count out of it to walk the strings before freeing
+		   the block (OPNDRV.COM), and without one it read the trampoline's
+		   tail as a count and copied garbage over its own code.
+		   Size it to the strings only.  DOS also parks a count word and the
+		   program's path after the terminator, but adding those made the
+		   header cover them too, and the KOEI shrink routine then copied
+		   the slack past the buffer it had sized for the strings. */
+		WriteMcb(mem, DOS98_ENV_MCB_SEG, (uint8_t)'M', DOS98_ENV_SEG,
+			(uint16_t)((pos + 15) / 16));
 	}
 }
 
@@ -622,8 +664,20 @@ void CEmuDos98::ReadCstr(const uint8_t* mem, uint16_t seg, uint16_t off, char* o
 void CEmuDos98::Int18()
 {
 	const uint8_t f = Ah();
-	if (f == 0x00 || f == 0x01)
+	if (f == 0x00 || f == 0x01) {
 		np2_reg_set(NP2_R_AX, 0);
+		return;
+	}
+	/* AH=02 senses the shift/ctrl/caps bitmap. Nothing is held here, and
+	   leaving AL untouched made drivers read a stale register as "a modifier
+	   is down" and take their pause/step path. */
+	if (f == 0x02) {
+		np2_reg_set(NP2_R_AX, (uint16_t)(np2_reg_get(NP2_R_AX) & 0xFF00));
+		return;
+	}
+	/* AX=9801 is the glue's idle poll, not a BIOS request. */
+	if (np2_reg_get(NP2_R_AX) != 0x9801)
+		unhandledInt18_[f] = 1;
 }
 
 CEmuDos98Result CEmuDos98::Int21(uint8_t* mem)
@@ -700,8 +754,10 @@ CEmuDos98Result CEmuDos98::Int21(uint8_t* mem)
 	}
 	case 0x35: {
 		const uint8_t v = Al();
-		np2_reg_set(NP2_R_BX, Rd16(mem, (unsigned)v * 4u));
-		np2_reg_set(NP2_R_ES, Rd16(mem, (unsigned)v * 4u + 2u));
+		const uint16_t off = Rd16(mem, (unsigned)v * 4u);
+		const uint16_t seg = Rd16(mem, (unsigned)v * 4u + 2u);
+		np2_reg_set(NP2_R_BX, off);
+		np2_reg_set(NP2_R_ES, seg);
 		break;
 	}
 	case 0x30:
@@ -830,8 +886,14 @@ CEmuDos98Result CEmuDos98::Int21(uint8_t* mem)
 		break;
 	}
 	case 0x44:
-		if (Al() == 0)
-			np2_reg_set(NP2_R_DX, 0);
+		/* Get device info. Reporting DX=0 for everything made handles 0-2
+		   look like disk files, so console-driven loaders (HOOT.EXE) decided
+		   they were running redirected and bailed out before reading their
+		   .ADV driver. Standard handles are CON, the rest are files. */
+		if (Al() == 0) {
+			const uint16_t h = np2_reg_get(NP2_R_BX);
+			np2_reg_set(NP2_R_DX, h < 3 ? (uint16_t)0x80D3 : (uint16_t)0x0042);
+		}
 		SetCf(0);
 		break;
 	case 0x48: {
@@ -894,14 +956,201 @@ CEmuDos98Result CEmuDos98::Int21(uint8_t* mem)
 		}
 		break;
 	}
+	case 0x2D: /* set time — nothing keeps a clock here, just accept it */
+		SetAl(0);
+		SetCf(0);
+		break;
+	case 0x34:
+		/* InDOS flag. A driver that installs a timer hook tests it before
+		   touching DOS from the ISR; a garbage pointer reads nonzero and the
+		   hook never does anything. Sysvars 0x04 is a spare zero byte. */
+		np2_reg_set(NP2_R_ES, DOS98_SYSVARS_SEG);
+		np2_reg_set(NP2_R_BX, 0x0004);
+		mem[DosLin(DOS98_SYSVARS_SEG, 0x0004)] = 0;
+		SetCf(0);
+		break;
+	case 0x36: {
+		/* Free disk space. Reported as a 1MB-ish RAM disk: the callers only
+		   check "is there room for the log/dump file". */
+		np2_reg_set(NP2_R_AX, 4);      /* sectors per cluster */
+		np2_reg_set(NP2_R_BX, 0x0400); /* free clusters */
+		np2_reg_set(NP2_R_CX, 512);    /* bytes per sector */
+		np2_reg_set(NP2_R_DX, 0x0800); /* total clusters */
+		SetCf(0);
+		break;
+	}
+	case 0x37:
+		/* SWITCHAR. AL=0 get, AL=1 set; anything else is undefined. */
+		if (Al() == 0) {
+			np2_reg_set(NP2_R_DX, (np2_reg_get(NP2_R_DX) & 0xFF00) | '/');
+			SetAl(0);
+		} else {
+			SetAl(0);
+		}
+		SetCf(0);
+		break;
+	case 0x47: {
+		/* Get current directory into DS:SI. Everything lives in the root of
+		   the emulated drive, so the answer is the empty string — but it has
+		   to be written, or the caller appends its filename to stack junk
+		   and then cannot open it. */
+		const uint16_t seg = np2_reg_get(NP2_R_DS);
+		const uint16_t off = np2_reg_get(NP2_R_SI);
+		mem[DosLin(seg, off)] = 0;
+		np2_reg_set(NP2_R_AX, 0x0100);
+		SetCf(0);
+		break;
+	}
+	case 0x4E: {
+		char pat[DOS98_NAME];
+		ReadCstr(mem, np2_reg_get(NP2_R_DS), np2_reg_get(NP2_R_DX), pat,
+			(int)sizeof(pat));
+		/* DOS matches on the bare name; a path prefix is not interesting
+		   here because the archive is flat. */
+		const char* base = pat;
+		for (const char* p = pat; *p; p++)
+			if (*p == '\\' || *p == '/' || *p == ':') base = p + 1;
+		UpperCopy(findPat_, (int)sizeof(findPat_), base);
+		findNext_ = 0;
+		if (!FindMatch(mem)) {
+			np2_reg_set(NP2_R_AX, 0x0012); /* no more files */
+			SetCf(1);
+		} else {
+			SetCf(0);
+		}
+		break;
+	}
+	case 0x4F:
+		if (!FindMatch(mem)) {
+			np2_reg_set(NP2_R_AX, 0x0012);
+			SetCf(1);
+		} else {
+			SetCf(0);
+		}
+		break;
+	case 0x58:
+		/* Allocation strategy / UMB link. Stored but not acted on: this
+		   arena has no upper memory, so every strategy behaves the same. */
+		switch (Al()) {
+		case 0x00: np2_reg_set(NP2_R_AX, allocStrategy_); break;
+		case 0x01: allocStrategy_ = np2_reg_get(NP2_R_BX); break;
+		case 0x02: np2_reg_set(NP2_R_AX, 0); break;
+		case 0x03: break;
+		default:
+			np2_reg_set(NP2_R_AX, 0x0001);
+			SetCf(1);
+			return DOS98_CONTINUE;
+		}
+		SetCf(0);
+		break;
 	default:
+		unhandledFn_[Ah()] = 1;
 		SetCf(0);
 		break;
 	}
 	return DOS98_CONTINUE;
 }
 
+/* Wildcard match on an already-uppercased 8.3-ish name. DOS semantics: '?'
+   takes one character, '*' runs to the end of the name or extension. */
+static int Dos98NameMatch(const char* pat, const char* name)
+{
+	/* Compare field by field so "*.*" and "FOO.*" behave like DOS rather
+	   than like a shell glob. */
+	char pn[13], pe[13], nn[13], ne[13];
+	auto split = [](const char* s, char* stem, char* ext) {
+		const char* dot = strrchr(s, '.');
+		size_t n = dot ? (size_t)(dot - s) : strlen(s);
+		if (n > 12) n = 12;
+		memcpy(stem, s, n);
+		stem[n] = 0;
+		const char* e = dot ? dot + 1 : "";
+		strncpy_s(ext, 13, e, _TRUNCATE);
+	};
+	split(pat, pn, pe);
+	split(name, nn, ne);
+	auto one = [](const char* p, const char* s) {
+		for (;;) {
+			if (*p == '*') return 1;
+			if (!*p) return *s ? 0 : 1;
+			if (!*s) {
+				/* Trailing '?' matches a short name, as DOS pads to 8/3. */
+				for (; *p; p++)
+					if (*p != '?') return 0;
+				return 1;
+			}
+			if (*p != '?' && *p != *s) return 0;
+			p++;
+			s++;
+		}
+	};
+	return one(pn, nn) && one(pe, ne);
+}
+
+int CEmuDos98::FindMatch(uint8_t* mem)
+{
+	for (; findNext_ < fileCount_; findNext_++) {
+		char up[DOS98_NAME];
+		UpperCopy(up, (int)sizeof(up), files_[findNext_].name);
+		if (!Dos98NameMatch(findPat_, up)) continue;
+		const unsigned d = DosLin(dtaSeg_, dtaOff_);
+		memset(mem + d, 0, 0x2B);
+		mem[d + 0x15] = 0x20; /* archive */
+		Wr16(mem, d + 0x16, 0x6000); /* 12:00:00 */
+		Wr16(mem, d + 0x18, 0x2101); /* 1996-08-01 */
+		Wr16(mem, d + 0x1A, (uint16_t)(files_[findNext_].size & 0xFFFF));
+		Wr16(mem, d + 0x1C, (uint16_t)(files_[findNext_].size >> 16));
+		strncpy_s((char*)(mem + d + 0x1E), 13, up, _TRUNCATE);
+		findNext_++;
+		np2_reg_set(NP2_R_AX, 0);
+		return 1;
+	}
+	return 0;
+}
+
 CEmuDos98Result CEmuDos98::ServiceInt(uint8_t* mem, uint8_t vec)
+{
+	/* traceOn_ 1 keeps the newest calls, 2 the oldest: a glue that spins on a
+	   missing service floods the ring, so finding why it started spinning
+	   needs the head instead of the tail. */
+	Call* rec = NULL;
+	/* The hoot glue idles on INT 18 AX=9801 and makes that call hundreds of
+	   thousands of times, which buries everything else in the ring. */
+	const int idlePoll = (vec == 0x18 && np2_reg_get(NP2_R_AX) == 0x9801);
+	if (!idlePoll
+		&& (traceOn_ == 1 || (traceOn_ == 2 && traceCount_ < kTraceMax))) {
+		rec = &trace_[traceCount_++ % kTraceMax];
+		rec->vec = vec;
+		rec->ax = np2_reg_get(NP2_R_AX);
+		rec->bx = np2_reg_get(NP2_R_BX);
+		rec->cx = np2_reg_get(NP2_R_CX);
+		rec->dx = np2_reg_get(NP2_R_DX);
+		rec->cf = -1;
+		rec->name[0] = 0;
+		/* The trampoline's IRET frame is the caller's CS:IP. */
+		{
+			const unsigned f = DosLin(np2_reg_get(NP2_R_SS), np2_reg_get(NP2_R_SP));
+			rec->ip = Rd16(mem, f);
+			rec->cs = Rd16(mem, f + 2);
+		}
+		/* AH=3D/4B/4E name their target through DS:DX; nothing else does, and
+		   an unfiltered read there is noise. */
+		const uint8_t ah = (uint8_t)(rec->ax >> 8);
+		if (vec == 0x21 && (ah == 0x3d || ah == 0x4b || ah == 0x4e))
+			ReadCstr(mem, np2_reg_get(NP2_R_DS), rec->dx, rec->name,
+				(int)sizeof(rec->name));
+	}
+	else if (traceOn_ && !idlePoll)
+		traceCount_++;
+	const CEmuDos98Result res = ServiceIntInner(mem, vec);
+	if (rec) {
+		rec->rax = np2_reg_get(NP2_R_AX);
+		rec->cf = (np2_reg_get(NP2_R_FLAGS) & FLAG_CF) ? 1 : 0;
+	}
+	return res;
+}
+
+CEmuDos98Result CEmuDos98::ServiceIntInner(uint8_t* mem, uint8_t vec)
 {
 	switch (vec) {
 	case 0x20:
@@ -913,6 +1162,57 @@ CEmuDos98Result CEmuDos98::ServiceInt(uint8_t* mem, uint8_t vec)
 		return Int21(mem);
 	case 0x18:
 		Int18();
+		return DOS98_CONTINUE;
+	/* BIOS time-of-day. AIL/Miles (HOOT.EXE .ADV drivers) calibrates its
+	   timer by sampling INT 1Ah AH=00 across a spin loop; an IRET-only
+	   trampoline leaves CX:DX unchanged and the calibration divides by
+	   zero. The BDA counter at 0040:006C is advanced by the PIT. */
+	case 0x1A:
+		if (!pcAtBios_) {
+			unhandledVec_[vec] = 1;
+			return DOS98_CONTINUE;
+		}
+		switch (Ah()) {
+		case 0x00:
+			np2_reg_set(NP2_R_CX, Rd16(mem, 0x46E));
+			np2_reg_set(NP2_R_DX, Rd16(mem, 0x46C));
+			SetAl(mem[0x470]);
+			mem[0x470] = 0;
+			SetCf(0);
+			break;
+		case 0x01:
+			Wr16(mem, 0x46E, np2_reg_get(NP2_R_CX));
+			Wr16(mem, 0x46C, np2_reg_get(NP2_R_DX));
+			mem[0x470] = 0;
+			SetCf(0);
+			break;
+		case 0x02: {
+			/* Derive BCD wall time from the 18.2 Hz tick so repeated reads
+			   advance monotonically like real hardware. */
+			const unsigned t = ((unsigned)Rd16(mem, 0x46E) << 16)
+				| (unsigned)Rd16(mem, 0x46C);
+			const unsigned sec = (unsigned)((uint64_t)t * 10ull / 182ull);
+			const unsigned hh = (sec / 3600u) % 24u;
+			const unsigned mm = (sec / 60u) % 60u;
+			const unsigned ss = sec % 60u;
+			np2_reg_set(NP2_R_CX, (uint16_t)((Bcd8(hh) << 8) | Bcd8(mm)));
+			np2_reg_set(NP2_R_DX, (uint16_t)(Bcd8(ss) << 8));
+			SetCf(0);
+			break;
+		}
+		case 0x04:
+			np2_reg_set(NP2_R_CX, 0x1996);
+			np2_reg_set(NP2_R_DX, 0x1224);
+			SetCf(0);
+			break;
+		default:
+			SetCf(1);
+			break;
+		}
+		return DOS98_CONTINUE;
+	/* INT 05h (BOUND / print-screen): never a real service here. */
+	case 0x05:
+		SetCf(0);
 		return DOS98_CONTINUE;
 	/* PC-88VA BIOS (olteus MUSIC.EXE / MAP.EXE). Trampoline alone IRETs and
 	   leaves init half-done; stub the calls the packs actually issue. */
@@ -928,6 +1228,7 @@ CEmuDos98Result CEmuDos98::ServiceInt(uint8_t* mem, uint8_t vec)
 		SetCf(0);
 		return DOS98_CONTINUE;
 	default:
+		unhandledVec_[vec] = 1;
 		return DOS98_CONTINUE;
 	}
 }

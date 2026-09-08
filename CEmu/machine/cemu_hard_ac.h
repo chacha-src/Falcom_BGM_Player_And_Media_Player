@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include "cemu_hard.h"
 #include "../chip/cemu_chip.h"
 #include "../cemu_zipfs.h"
@@ -52,7 +52,7 @@ enum CEmuAcBoard {
 	CEMU_AC_BOARD_TECHNOS_DDRAGON2 = 32, /* DD2/chinagat: Z80 + YM2151@8800 + OKI@9800 */
 	CEMU_AC_BOARD_IREM_M62 = 33,        /* M62: M6803 + dual AY (CPU missing → silent) */
 	CEMU_AC_BOARD_SEGA_SCSP = 34,       /* Model 2/3: SCSP (no 68K host → silent) */
-	CEMU_AC_BOARD_KONAMI_RF5C400 = 35,  /* Hornet/GTI Club: RF5C400 (no 68K → silent) */
+	CEMU_AC_BOARD_KONAMI_RF5C400 = 35,  /* Hornet/GTI Club: 68000 + RF5C400 + K056800 */
 	CEMU_AC_BOARD_SNK_OPL = 36,         /* SNK68: Z80 + YM3812 I/O 00/20, latch@F800 NMI */
 	CEMU_AC_BOARD_SEIBU_OPL = 37,       /* Seibu raiden: YM3812+OKI (SEI80BU decrypt) */
 	CEMU_AC_BOARD_KONAMI_K7232 = 38,    /* Z80+YM2151+K007232 stub (scontra/crimfght/twin16) */
@@ -90,6 +90,7 @@ public:
 	int LoadRomsSys86(CEmuZipFs* fs, const CEmuGameEntry* ge);
 	int LoadRomsWsg63701(CEmuZipFs* fs, const CEmuGameEntry* ge);
 	int LoadRomsPcmChip(CEmuZipFs* fs, const CEmuGameEntry* ge);
+	int LoadRomsHornet(CEmuZipFs* fs, const CEmuGameEntry* ge);
 	int LoadRomsSeibu(CEmuZipFs* fs, const CEmuGameEntry* ge);
 	int LoadRomsM62(CEmuZipFs* fs, const CEmuGameEntry* ge);
 	int LoadRomsSegaM1(CEmuZipFs* fs, const CEmuGameEntry* ge);
@@ -119,6 +120,21 @@ public:
 	unsigned Sega68Read8(unsigned addr);
 	void Sega68Write16(unsigned addr, uint16_t v);
 	void Sega68Write8(unsigned addr, uint8_t v);
+	/* Model 2A/2B/2C/3 sound board: 68000 + SCSP (MAME model2_snd). */
+	unsigned Sega2ARead16(unsigned addr);
+	unsigned Sega2ARead8(unsigned addr);
+	void Sega2AWrite16(unsigned addr, uint16_t v);
+	void Sega2AWrite8(unsigned addr, uint8_t v);
+	unsigned Sega2ASampleOffset(unsigned addr) const;
+	int LoadRomsSegaScsp(CEmuZipFs* fs, const CEmuGameEntry* ge);
+	void Sega2AInjectSong(uint16_t cmd);
+	/* Hornet / GTI Club: 68000 + RF5C400 + K056800 (MAME hornet/gticlub). */
+	unsigned HornetRead16(unsigned addr);
+	unsigned HornetRead8(unsigned addr);
+	void HornetWrite16(unsigned addr, uint16_t v);
+	void HornetWrite8(unsigned addr, uint8_t v);
+	void HornetInjectSong(unsigned code);
+	void HornetTickTimer(int cycles);
 	int SegaMidiIrq() const { return segaMidiIrq_; }
 
 	Ay_Cpu* Cpu() override { return cpu_; }
@@ -360,6 +376,13 @@ private:
 	/* Mega System 1 68000 sound board. */
 	uint8_t* ms1Rom_;
 	unsigned ms1RomSize_;
+	/* Model 2A/3: sample bank select driven by the 0x400000 control latch. */
+	int scspSampleBank_;
+	/* Hornet vs GTI Club sound map (RAM/RF5C400 bases differ). */
+	int hornetGti_;
+	int hornetTimerEn_;   /* soundtimer_en_w: bit0 clear enables IRQ1 */
+	int hornetTimerIrq_;  /* pending periodic IRQ1 */
+	int hornetTimerAcc_;  /* CPU cycles toward the next 344.5 Hz edge */
 	uint8_t* ms1Ram_;      /* 0x20000 mapped at 0x0E0000 */
 	int ms1LatchLevel_;
 	int ms1LatchIrq_;      /* soundlatch_w asserted the IPL lines */

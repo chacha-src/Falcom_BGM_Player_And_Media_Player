@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include "cemu_hard.h"
 #include "../chip/cemu_chip.h"
 #include "../cemu_zipfs.h"
@@ -31,11 +31,24 @@ public:
 	void SetSongCommand(unsigned code);
 	unsigned SongCommand() const { return songCode_; }
 	int MusashiReady() const { return musashiReady_; }
+	/* Reads of DPRAM bucket i, each covering 64 bytes (see Read8). */
 	unsigned DpramReadHit(int i) const { return (i >= 0 && i < 32) ? dpramReadHits_[i] : 0; }
 	uint8_t DpramByte(unsigned i) const { return (i < kDpramBytes) ? dpram_[i] : 0; }
 	/* Advance DUART timer; returns 1 if IRQ6 should be asserted. */
 	int TickDuart(int cpuCycles);
 	int DuartIrqPending() const { return duartIrqPending_; }
+	/* Counter/timer state, for diagnosing a sound CPU parked in STOP #$2000. */
+	unsigned DuartDebug() const
+	{
+		return ((unsigned)duartIsr_ << 24) | ((unsigned)duartImr_ << 16)
+			| ((unsigned)duartAcr_ << 8) | (unsigned)(duartCounterOn_ & 0xff);
+	}
+	unsigned DuartFires() const { return duartFires_; }
+	unsigned AudioCpuSize() const { return audioCpuSize_; }
+	unsigned EnsoniqSize() const { return ensoniqSize_; }
+	int DpramTraceCount() const { return dpramTraceN_; }
+	unsigned DpramTracePc(int i) const { return (i >= 0 && i < dpramTraceN_) ? dpramTracePc_[i] : 0; }
+	unsigned DpramTraceOff(int i) const { return (i >= 0 && i < dpramTraceN_) ? dpramTraceOff_[i] : 0; }
 	/* MC68681 IVR — used as 68K IACK vector (MAME fc7_map). */
 	uint8_t DuartIvr() const { return duart_[0x0c] ? duart_[0x0c] : 0x40; }
 	void UpdateDuartIrq();
@@ -66,6 +79,9 @@ private:
 	uint8_t dpram_[kDpramBytes];
 	unsigned dpramReadHits_[32];
 	unsigned dpramWriteHits_;
+	unsigned dpramTracePc_[16];
+	unsigned dpramTraceOff_[16];
+	int dpramTraceN_;
 	uint16_t otisBank_[kOtisBankWords];
 	uint32_t calcOtisBank_[kOtisBankWords];
 	uint8_t* audioCpu_;
@@ -85,6 +101,8 @@ private:
 	uint8_t duartIsr_;
 	uint8_t duartAcr_;
 	uint16_t duartCtr_;
+	int duartCounterOn_;
+	unsigned duartFires_;
 	uint8_t esp_[0x200];
 	int64_t duartTimerAcc_;
 	int ringInited_;

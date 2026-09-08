@@ -94,6 +94,35 @@ void FmMonInitDump(SasamiFmMonDump* d)
 	memset(d->ssgMidi, 0xFF, sizeof(d->ssgMidi));
 }
 
+void FmMonWriteRingReset(void)
+{
+	FmMonIoInit();
+	EnterCriticalSection(&s_ioCs);
+	s_gen = 0;
+	s_liveEvery = 0;
+	HANDLE hr = FmMonOpenRing();
+	if (hr != INVALID_HANDLE_VALUE) {
+		SasamiFmMonRingHdr hdr;
+		memset(&hdr, 0, sizeof(hdr));
+		hdr.magic[0] = 'O'; hdr.magic[1] = 'P'; hdr.magic[2] = 'N'; hdr.magic[3] = 'R';
+		hdr.version = SASAMI_FMMON_RING_VERSION;
+		hdr.gen = 0;
+		DWORD wr = 0;
+		SetFilePointer(hr, 0, NULL, FILE_BEGIN);
+		WriteFile(hr, &hdr, sizeof(hdr), &wr, NULL);
+	}
+	/* live も潰す。前曲の 1 枚が残ると ring 空の間に拾われる */
+	HANDLE hl = FmMonOpenLive();
+	if (hl != INVALID_HANDLE_VALUE) {
+		SasamiFmMonDump z;
+		memset(&z, 0, sizeof(z));
+		DWORD wr = 0;
+		SetFilePointer(hl, 0, NULL, FILE_BEGIN);
+		WriteFile(hl, &z, sizeof(z), &wr, NULL);
+	}
+	LeaveCriticalSection(&s_ioCs);
+}
+
 void FmMonWriteDump(const SasamiFmMonDump* d)
 {
 	if (!d) return;

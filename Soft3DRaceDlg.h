@@ -63,9 +63,9 @@ public:
 	ID3D11Texture2D* m_shadowTex;
 	ID3D11DepthStencilView* m_shadowDsv;
 	ID3D11ShaderResourceView* m_shadowSrv;
-	enum { S3R_SHADOW_SIZE = 1024 };
-	// バックミラー／水面反射用の小RT
-	enum { S3R_REAR_W = 320, S3R_REAR_H = 180, S3R_REFLECT_SIZE = 384 };
+	int m_shadowSize; /* runtime; 0=off */
+	// バックミラー／水面反射用の小RT（0=無効）
+	int m_rearW, m_rearH, m_reflectSize;
 	ID3D11Texture2D* m_rearTex;
 	ID3D11RenderTargetView* m_rearRtv;
 	ID3D11ShaderResourceView* m_srvRear;
@@ -77,6 +77,12 @@ public:
 	ID3D11Texture2D* m_reflectDs;
 	ID3D11DepthStencilView* m_reflectDsv;
 	BOOL EnsureAuxTargets();
+	BOOL EnsureShadowTarget(int wantSize);
+	void ReleaseAuxTargets();
+	float m_casStrength;
+	int m_gfxSsr; /* 0/1/2 */
+	int m_gfxDof; /* 0/1/2 */
+	int m_aniso;
 
 	ID3D11VertexShader* m_vsTess;
 	ID3D11HullShader* m_hsTess;
@@ -196,6 +202,7 @@ public:
 	int m_itemLabN;
 
 	ID3D11SamplerState* m_sampLin;
+	ID3D11SamplerState* m_sampAniso;
 	ID3D11SamplerState* m_sampPoint;
 	ID3D11SamplerState* m_sampCmp;
 	ID3D11RasterizerState* m_rsSolid;
@@ -367,6 +374,8 @@ protected:
 	void SetInvertToUi(int v);
 	int ReadMeshFromUi();
 	void SetMeshToUi(int v);
+	int ReadGfxFromUi();
+	void SetGfxToUi(int v);
 
 	void GenerateCourse();
 	void GenerateCourseWithSeed(DWORD seed);
@@ -451,6 +460,7 @@ public:
 	afx_msg void OnThemeChanged();
 	afx_msg void OnInvertChanged();
 	afx_msg void OnMeshChanged();
+	afx_msg void OnGfxChanged();
 	afx_msg void OnTimer(UINT_PTR);
 	afx_msg void OnSize(UINT, int, int);
 	afx_msg void OnShowWindow(BOOL bShow, UINT nStatus);
@@ -458,10 +468,11 @@ public:
 	afx_msg void OnContextMenu(CWnd*, CPoint);
 
 	CCustomStandardButton m_help, m_start, m_gen, m_close;
-	CCustomStatic m_aiL, m_oppL, m_lenL, m_lapsL, m_themeL, m_invertL, m_meshL, m_hint, m_status;
-	CCustomComboBox m_ai, m_opp, m_len, m_laps, m_theme, m_invert, m_mesh;
+	CCustomStatic m_aiL, m_oppL, m_lenL, m_lapsL, m_themeL, m_invertL, m_meshL, m_gfxL, m_hint, m_status;
+	CCustomComboBox m_ai, m_opp, m_len, m_laps, m_theme, m_invert, m_mesh, m_gfx;
 	CS3rView m_view;
 	CToolTipCtrl m_tooltip;
+	void ApplyGfxQuality(BOOL rebuildRt);
 
 	struct S3rKnot { float x, y, z; };
 	struct S3rCraft {

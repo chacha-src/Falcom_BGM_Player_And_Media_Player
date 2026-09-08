@@ -441,6 +441,9 @@ BOOL COggApp::InitInstance()
 	savedata.surround = 0;
 	savedata.s3_pcm_sfx = 1;
 	savedata.s3_mesh_density = 5;
+	savedata.s3_gfx_quality = 5;
+	savedata.s3_gfx_auto = 1;
+	savedata.s3_gfx_gpu_tag[0] = 0;
 	savedata.cdWinX = savedata.cdWinY = savedata.cdWinW = savedata.cdWinH = 0;
 	savedata.cdMainLock = 0;
 	savedata.cdRipFolder[0] = 0;
@@ -818,6 +821,16 @@ BOOL COggApp::InitInstance()
 		savedata.s3_mesh_density = 5;
 	else if (savedata.s3_mesh_density < 0 || savedata.s3_mesh_density > 20)
 		savedata.s3_mesh_density = 5;
+	if (datFileSize < (int)(offsetof(save, s3_gfx_quality) + sizeof(savedata.s3_gfx_quality))) {
+		savedata.s3_gfx_quality = 5;
+		savedata.s3_gfx_auto = 1;
+		savedata.s3_gfx_gpu_tag[0] = 0;
+	} else {
+		if (savedata.s3_gfx_quality < 0 || savedata.s3_gfx_quality > 9)
+			savedata.s3_gfx_quality = 5;
+		savedata.s3_gfx_auto = savedata.s3_gfx_auto ? 1 : 0;
+		savedata.s3_gfx_gpu_tag[_countof(savedata.s3_gfx_gpu_tag) - 1] = 0;
+	}
 	if (datFileSize < (int)(offsetof(save, cdWinX) + sizeof(savedata.cdWinX))) {
 		savedata.cdWinX = savedata.cdWinY = savedata.cdWinW = savedata.cdWinH = 0;
 		savedata.cdMainLock = 0;

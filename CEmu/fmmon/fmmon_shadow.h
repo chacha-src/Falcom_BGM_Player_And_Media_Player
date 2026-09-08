@@ -11,6 +11,11 @@ void FmMonShadowReset(void);
 void FmMonShadowSetSource(const wchar_t* path);
 void FmMonShadowSetSampleRate(uint32_t sr);
 void FmMonShadowAddSamples(uint32_t n);
+/* ループ/シーク時の時計引き継ぎ用。UI は dump.curSample を DS の可聴位置
+   (g_heardBytes 由来) と比べる。可聴側はループで 0 に戻らないので、
+   Reset で時計だけ 0 にすると以後ずっと可聴より先の dump を出してしまう。 */
+uint64_t FmMonShadowGetCurSample(void);
+void FmMonShadowSetCurSample(uint64_t n);
 /* Platform + chip base label for FM monitor header (e.g. "PC-88","OPNA").
    Flush appends +EX/+ADPCM when applicable. Stored in dump.titleSjis. */
 void FmMonShadowSetIdentity(const char* platform, const char* chip);

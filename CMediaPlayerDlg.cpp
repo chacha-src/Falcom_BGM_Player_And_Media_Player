@@ -1,4 +1,4 @@
-// CMediaPlayerDlg.cpp : メディアプレイヤーモード画面(張りぼて)とモード選択ダイアログ
+﻿// CMediaPlayerDlg.cpp : メディアプレイヤーモード画面(張りぼて)とモード選択ダイアログ
 //
 // 実体は COggDlg(og->) と CPlayList(pl->)。ここは表示と操作の取り次ぎだけを行う。
 // メディアプレイヤーモード中は og / pl のウィンドウを非表示にして裏で生かしておく。
@@ -26,6 +26,7 @@
 #include "CMpQueueDlg.h"
 #include "CMpCommandPaletteDlg.h"
 #include "CMpHelpDlg.h"
+#include "CEmuCatalogListDlg.h"
 #include "CMissingFilesDlg.h"
 #include "MpSidecar.h"
 #include "CPromptDlg.h"
@@ -6536,6 +6537,8 @@ void CMediaPlayerDlg::OnDestroy()
 		if (::IsWindow(help->GetSafeHwnd()))
 			help->DestroyWindow();
 	}
+	CEmuCatalogListDlg::CloseIfOpen();
+	CMpCommandPaletteDlg::CloseIfOpen();
 	MpAddonsShutdownAll();
 	CloseDeviceRecordIfOpen();
 	AudioMicDevUnregisterCombo(&m_micdev);

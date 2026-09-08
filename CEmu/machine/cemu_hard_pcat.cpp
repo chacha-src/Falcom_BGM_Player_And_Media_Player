@@ -87,7 +87,7 @@ struct PcatIpProf {
 		FILE* f = NULL;
 		if (fopen_s(&f, path, "a") != 0 || !f) return;
 		fprintf(f, "IPPROF total=%llu\n", (unsigned long long)total);
-		for (int rank = 0; rank < 20; rank++) {
+		for (int rank = 0; rank < 80; rank++) {
 			int best = -1;
 			for (int s = 0; s < SLOTS; s++)
 				if (hits[s] && (best < 0 || hits[s] > hits[best])) best = s;
@@ -1822,6 +1822,8 @@ int CHardPcat::RunDosCommand(const char* cmdline, uint64_t budgetCycles, int sto
 			}
 			continue;
 		}
+		if (g_pcatIpProf)
+			g_pcatIpProf->Note(phys);
 		const int32_t cyc = np2_step();
 		const uint64_t u = (cyc > 0) ? (uint64_t)cyc : 1ull;
 		cpuCycles_ += u;
@@ -1983,6 +1985,7 @@ int CHardPcat::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCo
 	hootAdvIoOff_ = 0;
 	hootTimerFixed_ = 0;
 	hootAilCs_ = 0;
+	dos_.SetPcAtBios(1);
 	return BootDos(fs, ge, titleCode);
 }
 

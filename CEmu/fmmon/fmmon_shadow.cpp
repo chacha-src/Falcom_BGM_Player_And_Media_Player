@@ -32,6 +32,10 @@ static uint8_t s_pcmHit[SASAMI_FMMON_PCM_MAX];
 static uint32_t s_sr = 44100;
 static uint64_t s_cur = 0;
 static uint64_t s_lastWrite = 0;
+/* dump 識別子。s_cur 下位ビットを流用していたが、同一 s_cur で 2 枚書く
+   （Render 内 flush と readcemu 側 flush など）と (seq,curSample) が衝突し、
+   UI が「表示中と同じ dump」と見なして 2 枚目を捨てていた＝発音が出ない。 */
+static uint32_t s_seq = 0;
 static int s_dirty = 0;
 /* note-on/off 立ち上がりは minDirty を無視して即リングへ（16分の取りこぼし防止） */
 static int s_flushUrgent = 0;
@@ -207,6 +211,7 @@ void FmMonShadowReset(void)
 	s_rhyKey = s_rhyPulse = 0;
 	s_cur = 0;
 	s_lastWrite = 0;
+	s_seq = 0;
 	s_dirty = 1;
 	s_flushUrgent = 0;
 	s_keysOnly = 0;
@@ -241,6 +246,9 @@ void FmMonShadowReset(void)
 	s_okiChBits = 0;
 	s_src[0] = 0;
 	LeaveCriticalSection(&s_cs);
+	/* 前曲のスロットを残すと UI が別チップの dump を drain して
+	   type / レジスタ / 鍵盤が食い違う（CS の外で叩く: I/O ロック） */
+	FmMonWriteRingReset();
 }
 
 void FmMonShadowSetIdentity(const char* platform, const char* chip)
@@ -373,6 +381,20 @@ void FmMonShadowSetSampleRate(uint32_t sr)
 void FmMonShadowAddSamples(uint32_t n)
 {
 	s_cur += n;
+}
+
+uint64_t FmMonShadowGetCurSample(void)
+{
+	return s_cur;
+}
+
+void FmMonShadowSetCurSample(uint64_t n)
+{
+	EnsureCs();
+	EnterCriticalSection(&s_cs);
+	s_cur = n;
+	s_lastWrite = n;
+	LeaveCriticalSection(&s_cs);
 }
 
 void FmMonShadowWriteReg(unsigned addr, unsigned data)
@@ -721,7 +743,7 @@ static void FillCommon(SasamiFmMonDump* d)
 	FmMonInitDump(d);
 	d->sampleRate = s_sr;
 	d->curSample = s_cur;
-	d->seq = (uint32_t)(s_cur & 0xFFFFFFFFu);
+	d->seq = ++s_seq;
 	if (s_opnaLayout < 0) {
 		d->padHit = 2;
 		d->fm10 = 0;

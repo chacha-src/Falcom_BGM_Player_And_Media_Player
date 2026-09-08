@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include "cemu_driver.h"
 #include "../machine/cemu_hard_ac.h"
 
@@ -24,6 +24,7 @@ private:
 	int pinned_; /* playlist/catalog title — inject once, do not hunt try table */
 	uint8_t songCmd_;
 	uint16_t songCmdWord_; /* full title code for boards with 16-bit commands */
+	unsigned songCmdDword_; /* Hornet/GTI: catalog codes are 32-bit (0x01xx0000) */
 	uint64_t opmResidual_;
 	int64_t cpuAcc_;
 	int cmdIndex_;

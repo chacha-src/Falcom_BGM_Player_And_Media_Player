@@ -3,6 +3,7 @@
 #include "../cemu_mgr.h"
 #include "../cemu_zipfs.h"
 #include "../chip/cemu_chip_ay.h"
+#include "../chip/cemu_chip_scc.h"
 #include "../fmmon/fmmon_shadow.h"
 #include "../z80/cemu_z80_bus.h"
 #define BLARGG_LITTLE_ENDIAN 1
@@ -94,6 +95,7 @@ CHardMsx::CHardMsx()
 	, bankBytes_(0)
 	, cpu_(NULL)
 	, chipAy_(NULL)
+	, chipScc_(NULL)
 	, chipOpll_(NULL)
 	, sampleRate_(44100)
 	, cpuCycles_(0)
@@ -106,6 +108,8 @@ CHardMsx::CHardMsx()
 	, bankNum_(0)
 	, bank8k_(0)
 	, sccEnable_(0)
+	, sccMapped_(0)
+	, sccAccessed_(0)
 	, ayWriteCount_(0)
 	, opllWriteCount_(0)
 	, opllLatch_(0)
@@ -139,7 +143,7 @@ int CHardMsx::Init(const CEmuGameEntry* ge, int sampleRate)
 	ayHz_ = MSX_AY_HZ;
 	opllHz_ = MSX_OPLL_HZ;
 	chipAy_ = CEmuChipAyCreate((uint32_t)ayHz_, sampleRate_);
-	CEmuChipAySetUnmuteAssist(chipAy_, 1); /* MSX: 無音曲向けアシスト */
+	chipScc_ = CEmuChipSccCreate((uint32_t)MSX_CPU_HZ, sampleRate_);
 	cpu_ = new Ay_Cpu();
 	return (cpu_ && chipAy_) ? 1 : 0;
 }
@@ -164,6 +168,7 @@ void CHardMsx::Shutdown()
 	if (bank_) { free(bank_); bank_ = NULL; bankBytes_ = 0; }
 	if (cpu_) { delete cpu_; cpu_ = NULL; }
 	if (chipAy_) { CEmuChipAyDestroy(chipAy_); chipAy_ = NULL; }
+	if (chipScc_) { CEmuChipSccDestroy(chipScc_); chipScc_ = NULL; }
 	if (chipOpll_) {
 		OPLL_delete((OPLL*)chipOpll_);
 		chipOpll_ = NULL;
@@ -241,6 +246,13 @@ void CHardMsx::PortOut(uint16_t port, uint8_t data)
 {
 	const uint8_t p = (uint8_t)(port & 0xff);
 	if (p == 0x7c || p == 0x7d || p == 0xc0 || p == 0xc1 || p == 0xf0 || p == 0xf1) {
+		/* Generic patches often OUT to 7C without a catalog use_opll bit.
+		   KSS must not force-create OPLL — a stray poke would leave a drone
+		   on top of an AY/SCC tune (sorc_msx NOSEQ regression). */
+		if (genericMode_)
+			EnsureOpll(1);
+		else
+			EnsureOpll(0);
 		if (chipOpll_) {
 			OPLL* o = (OPLL*)chipOpll_;
 			if ((p & 1) == 0)
@@ -276,6 +288,54 @@ void CHardMsx::PortOut(uint16_t port, uint8_t data)
 
 void CHardMsx::MemWrite(uint16_t addr, uint8_t data)
 {
+	/* FMPAC / MSX-MUSIC memory-mapped OPLL (same latch/data as ports 7C/7D).
+	   Generic cartridge patches only — KSS drivers talk OPLL via 7C/7D, and
+	   treating 7FF4/5 as OPLL on KSS steals ordinary RAM writes (sorc NOSEQ). */
+	if (genericMode_ && (addr == 0x7ff4 || addr == 0x7ff5)) {
+		EnsureOpll(1);
+		if (chipOpll_) {
+			OPLL* o = (OPLL*)chipOpll_;
+			if (addr == 0x7ff4)
+				opllLatch_ = data;
+			else {
+				OPLL_writeReg(o, opllLatch_, data);
+				opllRegs_[opllLatch_ & 0x3f] = data;
+				FmMonShadowApplyOpllRegs(opllRegs_);
+				opllWriteCount_++;
+			}
+		}
+		return;
+	}
+
+	/* Konami SCC: KSS maps both 9800 and B800 onto the same 0x90-byte file
+	   via (addr & 0xDFFF) ^ 0x9800. On cartridge hardware the window only
+	   appears after the mapper is written with 0x3F (page2) — without that
+	   gate, ordinary RAM at 9800 would be stolen on generic titles. */
+	if (chipScc_ && (sccEnable_ || sccMapped_)) {
+		if (addr == 0x9000) {
+			sccMapped_ = ((data & 0x3fu) == 0x3fu) ? 1 : 0;
+			/* Fall through to the bank handler. */
+		} else if (addr == 0xb000) {
+			/* SCC-I / some MegaROMs expose the mirror via page3; treat the
+			   high-bit form as an enable, otherwise clear. */
+			if (data == 0x80 || (data & 0x3fu) == 0x3fu)
+				sccMapped_ = 1;
+			/* Fall through to the bank handler. */
+		} else {
+			const unsigned sccAddr = (unsigned)((addr & 0xdfffu) ^ 0x9800u);
+			if (sccAddr < 0x90u) {
+				CEmuChipSccWriteReg(chipScc_, sccAddr, data);
+				sccAccessed_ = 1;
+				return;
+			}
+		}
+	} else if (chipScc_ && (addr == 0x9000 || addr == 0xb000)) {
+		if (addr == 0x9000)
+			sccMapped_ = ((data & 0x3fu) == 0x3fu) ? 1 : 0;
+		else if (data == 0x80 || (data & 0x3fu) == 0x3fu)
+			sccMapped_ = 1;
+	}
+
 	if (bank8k_ && bank_ && bankNum_) {
 		if (addr == 0x9000 || addr == 0xb000) {
 			const int bankno = (int)data - (int)bankOfs_;
@@ -444,6 +504,12 @@ int CHardMsx::LoadGeneric(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned title
 	if (useOpll)
 		chips_ |= CHIP_FMPAC;
 	EnsureOpll(useOpll ? 1 : 0);
+	/* Generic: don't force SCC into 9800 — wait for mapper 0x3F. KSS sets
+	   sccEnable_ from the chip byte below in LoadKssImage. */
+	sccEnable_ = 0;
+	sccMapped_ = 0;
+	sccAccessed_ = 0;
+	if (chipScc_) chipScc_->Reset();
 
 	cpu_->reset(mem_);
 	cpuCycles_ = 0;
@@ -501,6 +567,9 @@ int CHardMsx::LoadKssImage(CEmuZipFs* fs, const CEmuGameEntry* ge)
 	chips_ = rom_[0x0f];
 	sccEnable_ = (!(chips_ & CHIP_SCCDISABLE)
 		&& ((chips_ & (CHIP_SNG | CHIP_GGSTEREO)) != CHIP_GGSTEREO)) ? 1 : 0;
+	sccMapped_ = 0;
+	sccAccessed_ = 0;
+	if (chipScc_) chipScc_->Reset();
 
 	if (bankNum_) {
 		bankBytes_ = 0x4000u * (unsigned)bankNum_;
@@ -605,6 +674,8 @@ int CHardMsx::StartSongKss(unsigned titleCode)
 	cpuCycles_ = 0;
 	idle_ = 0;
 	playing_ = 0;
+	sccAccessed_ = 0;
+	if (chipScc_) chipScc_->Reset();
 
 	CEmuHardMsxSetActive(this);
 	int guard = 0;
@@ -666,6 +737,9 @@ int CHardMsx::StartSongGeneric(unsigned titleCode)
 	cpuCycles_ = 0;
 	idle_ = 0;
 	playing_ = 1;
+	sccAccessed_ = 0;
+	sccMapped_ = 0;
+	if (chipScc_) chipScc_->Reset();
 
 	/* Brief settle so init installs handlers before play edge. */
 	CEmuHardMsxSetActive(this);

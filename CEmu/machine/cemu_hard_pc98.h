@@ -121,12 +121,26 @@ public:
 	unsigned opnFnumCount_; /* A0-A6 / 1A0-1A6 f-number writes */
 	unsigned opnTimerCount_; /* 24/25/27 timer regs */
 	unsigned opnIrqDeliverCount_; /* accepted OPN IRQs (INT 0Bh) */
+	/* Key-ons per reg-0x28 channel field. A driver that decided it is
+	   talking to an OPNA keys channels 4-6, which a YM2203 cannot sound —
+	   the aggregate key-on count alone cannot tell that from real music. */
+	unsigned opnKeyOnCh_[8];
+	unsigned pitTickCount_;  /* PIT ch0 wraps (an IRQ0 would have fired) */
+	unsigned timerIrqCount_; /* INT 08 deliveries — tells a driver whose ISR
+	                            never runs from one that runs and does
+	                            nothing, which look identical otherwise */
 	int lastSongLoadOk_;
 	int lastSongLoadBytes_;
 	/* Debug: last OPN addr/data pairs (addr port then data port). */
 	uint16_t opnLogAddr_[64];
 	uint8_t opnLogData_[64];
 	unsigned opnLogCount_;
+	/* The first 64 writes are always the reset/init boilerplate; what a
+	   driver writes while it is failing to make sound is at the other end,
+	   so keep a ring of the most recent ones too. */
+	uint16_t opnTailAddr_[64];
+	uint8_t opnTailData_[64];
+	unsigned opnTailCount_;
 	uint8_t opnLatchedAddr_;
 	uint8_t ssgPortAJumper_; /* soft SSG I/O A; bit7 set enables PortIn override */
 	uint8_t opnLatchedAddrHi_;
@@ -217,6 +231,10 @@ private:
 	int pitWriteHi_;
 	int pitReadHi_;
 	int pitRunning_;
+	/* Counter-latch command state. Reading the counter has to report where
+	   it actually is: drivers calibrate the CPU against it. */
+	uint16_t pitLatch_;
+	int pitLatched_;
 
 	/* VSYNC ~60 Hz */
 	uint64_t vsyncResidual_;

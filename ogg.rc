@@ -1769,7 +1769,9 @@ BEGIN
     PUSHBUTTON      "Gen",IDC_S3R_GEN,54,30,44,18
     LTEXT           "密度",IDC_S3R_MESH_L,104,32,28,10
     COMBOBOX        IDC_S3R_MESH,134,30,56,240,CBS_DROPDOWNLIST | CBS_OWNERDRAWVARIABLE | CBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP
-    LTEXT           "",IDC_S3R_HINT,196,32,354,14
+    LTEXT           "画質",IDC_S3R_GFX_L,196,32,28,10
+    COMBOBOX        IDC_S3R_GFX,226,30,48,200,CBS_DROPDOWNLIST | CBS_OWNERDRAWVARIABLE | CBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP
+    LTEXT           "",IDC_S3R_HINT,280,32,270,14
     LTEXT           "",IDC_S3R_VIEW,7,50,546,304,SS_NOTIFY | WS_BORDER
     LTEXT           "",IDC_S3R_STATUS,7,360,440,14
     PUSHBUTTON      "Close",IDC_S3R_CLOSE,460,358,80,18
@@ -1799,8 +1801,10 @@ BEGIN
     COMBOBOX        IDC_S3M_MESH,336,12,52,240,CBS_DROPDOWNLIST | CBS_OWNERDRAWVARIABLE | CBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP
     PUSHBUTTON      "生成",IDC_S3M_GEN,392,10,48,20
     PUSHBUTTON      "ナビ",IDC_S3M_NAVI,444,10,40,20
-    LTEXT           "",IDC_S3M_HINT,488,14,24,12
-    LTEXT           "",IDC_S3M_VIEW,7,36,506,300,SS_NOTIFY | WS_BORDER
+    LTEXT           "画質",IDC_S3M_GFX_L,7,34,28,10
+    COMBOBOX        IDC_S3M_GFX,36,32,52,200,CBS_DROPDOWNLIST | CBS_OWNERDRAWVARIABLE | CBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP
+    LTEXT           "",IDC_S3M_HINT,96,34,416,12
+    LTEXT           "",IDC_S3M_VIEW,7,54,506,282,SS_NOTIFY | WS_BORDER
     LTEXT           "",IDC_S3M_STATUS,7,344,400,14
     PUSHBUTTON      "閉じる",IDC_S3M_CLOSE,420,342,80,18
 END
@@ -2814,7 +2818,7 @@ END
 //
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 0,9,1,920
+ FILEVERSION 0,9,1,1000
  PRODUCTVERSION 1,0,0,1
  FILEFLAGSMASK 0x3fL
 #ifdef _DEBUG
@@ -2832,10 +2836,10 @@ BEGIN
         BEGIN
             VALUE "Comments", "Falcom BGM Player & Media Player"
             VALUE "CompanyName", "Pre Prayer Power Soft"
-            VALUE "FileDescription", "Falcom BGM Player & Media Player Ver 0.9a Rel.2026.09.07"
-            VALUE "FileVersion", "0.9.1.920"
+            VALUE "FileDescription", "Falcom BGM Player & Media Player Ver 0.9a Rel.2026.09.08"
+            VALUE "FileVersion", "0.9.1.1000"
             VALUE "InternalName", "ogg YS/ED bgm"
-            VALUE "LegalCopyright", "Copyright (C) 2026.09.07"
+            VALUE "LegalCopyright", "Copyright (C) 2026.09.08"
             VALUE "LegalTrademarks", "Pre Prayer Power Soft"
             VALUE "OriginalFilename", "oggYSEDbgm_uni_avx2.exe"
             VALUE "ProductName", "Falcom BGM Player & Media Player"

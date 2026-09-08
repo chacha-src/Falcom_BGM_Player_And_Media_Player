@@ -19,6 +19,7 @@ public:
 	uint8_t* Mem() override { return mem_; }
 	CChip* SoundChip() override { return chipAy_; }
 	CChip* ChipAy() { return chipAy_; }
+	CChip* ChipScc() { return (sccAccessed_ && chipScc_) ? chipScc_ : NULL; }
 	void* Opll() { return chipOpll_; }
 
 	uint8_t PortIn(uint16_t port) override;
@@ -78,6 +79,7 @@ private:
 	uint8_t ioport_[0x100];
 	Ay_Cpu* cpu_;
 	CChip* chipAy_;
+	CChip* chipScc_;
 	void* chipOpll_;
 	int sampleRate_;
 	uint64_t cpuCycles_;
@@ -91,6 +93,8 @@ private:
 	uint8_t bankNum_;
 	int bank8k_;
 	int sccEnable_;
+	int sccMapped_; /* Konami mapper: 0x3F→$9000 exposes SCC at $9800 */
+	int sccAccessed_; /* MixAdd only after a real SCC register write */
 	unsigned ayWriteCount_;
 	unsigned opllWriteCount_;
 	uint8_t opllLatch_;

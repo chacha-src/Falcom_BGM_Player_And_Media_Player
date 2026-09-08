@@ -16,6 +16,7 @@
 #include "Soft3DTextD2D.h"
 #include "Soft3DGameSfx.h"
 #include "Soft3DTexRes.h"
+#include "Soft3DGfxQuality.h"
 
 #ifdef _MSC_VER
 #pragma comment(lib, "d3dcompiler.lib")
@@ -900,7 +901,9 @@ CS3rView::CS3rView()
 	, m_texStand(NULL), m_srvStand(NULL), m_standTexW(0), m_standTexH(0)
 	, m_texBubble(NULL), m_srvBubble(NULL), m_bubbleTexW(0), m_bubbleTexH(0), m_bubbleN(0)
 	, m_texItemLab(NULL), m_srvItemLab(NULL), m_itemLabN(0)
-	, m_sampLin(NULL), m_sampPoint(NULL), m_sampCmp(NULL)
+	, m_sampLin(NULL), m_sampAniso(NULL), m_sampPoint(NULL), m_sampCmp(NULL)
+	, m_shadowSize(1024), m_rearW(320), m_rearH(180), m_reflectSize(384)
+	, m_casStrength(0.7f), m_gfxSsr(2), m_gfxDof(2), m_aniso(16)
 	, m_rsSolid(NULL), m_rsShadow(NULL), m_rsNoCull(NULL), m_dssWrite(NULL), m_dssRead(NULL), m_dssOff(NULL)
 	, m_bsOpaque(NULL), m_bsAlpha(NULL), m_bsAdd(NULL)
 	, m_dxFailStage(0), m_dxFailHr(S_OK)
@@ -1094,7 +1097,9 @@ BOOL CS3rView::CreateShaders()
 		"float3 x=max(c.rgb,0);c.rgb=saturate((x*(2.51*x+.03))/(x*(2.43*x+.59)+.14));"
 		"float lum=dot(c.rgb,float3(.299,.587,.114));c.rgb+=c.rgb*saturate(lum-.72)*.28;"
 		"c.rgb=lerp(c.rgb,c.rgb*c.rgb*(3.-2.*c.rgb),0.08);"
-		"if(Misc.x>0.01)c.rgb=lerp(c.rgb,1,Misc.x*.35);return c;}"
+		"if(Misc.x>0.01)c.rgb=lerp(c.rgb,1,Misc.x*.35);"
+		"float cas=saturate(Dof.w);if(cas>0.01){float2 px=Screen.zw*1.25f;float3 soft=T0.Sample(SL,i.uv+float2(px.x,0)).rgb+T0.Sample(SL,i.uv-float2(px.x,0)).rgb+T0.Sample(SL,i.uv+float2(0,px.y)).rgb+T0.Sample(SL,i.uv-float2(0,px.y)).rgb;soft*=.25;c.rgb=saturate(c.rgb+(c.rgb-soft)*cas);}"
+		"return c;}"
 		"RWTexture2D<float4> NoiseOut:register(u0);"
 		"[numthreads(8,8,1)]void CSNoise(uint3 id:SV_DispatchThreadID){"
 		"uint2 p=id.xy;if(p.x>=64||p.y>=64)return;float2 uv=(float2(p)+.5)/64.;"
@@ -1280,7 +1285,7 @@ BOOL CS3rView::CreateProcTextures()
 			pix[y*W+x]=((DWORD)a<<24)|((DWORD)r<<16)|((DWORD)g<<8)|b;
 		}
 		}
-		D3D11_SUBRESOURCE_DATA sd={pix,W*4,0};
+		D3D11_SUBRESOURCE_DATA sd={pix,(UINT)(W*4),0};
 		if(FAILED(m_dev->CreateTexture2D(&d,&sd,&m_texTheme[th]))||FAILED(m_dev->CreateShaderResourceView(m_texTheme[th],NULL,&m_srvTheme[th]))){delete[] pix;return FALSE;}
 	}
 	// 機体専用スキン（メッシュ UV 用）— パネル／ストライプ／キャノピ用グラデ
@@ -1305,7 +1310,7 @@ BOOL CS3rView::CreateProcTextures()
 		pix[y*W+x]=0xff000000|((DWORD)r<<16)|((DWORD)g<<8)|b;
 	}
 	}
-	{D3D11_SUBRESOURCE_DATA sd={pix,W*4,0}; if(FAILED(m_dev->CreateTexture2D(&d,&sd,&m_texCraft))||FAILED(m_dev->CreateShaderResourceView(m_texCraft,NULL,&m_srvCraft))){delete[] pix;return FALSE;}}
+	{D3D11_SUBRESOURCE_DATA sd={pix,(UINT)(W*4),0}; if(FAILED(m_dev->CreateTexture2D(&d,&sd,&m_texCraft))||FAILED(m_dev->CreateShaderResourceView(m_texCraft,NULL,&m_srvCraft))){delete[] pix;return FALSE;}}
 	// power band ribbon texture (glowing pastel)
 	if(!Soft3DTexLoadPngRes(IDR_S3TEX_R_BAND,pix,W,H)){
 	for(int y=0;y<H;y++)for(int x=0;x<W;x++){
@@ -1319,9 +1324,9 @@ BOOL CS3rView::CreateProcTextures()
 		pix[y*W+x]=((DWORD)a<<24)|((DWORD)r<<16)|((DWORD)g<<8)|b;
 	}
 	}
-	{D3D11_SUBRESOURCE_DATA sd={pix,W*4,0}; if(FAILED(m_dev->CreateTexture2D(&d,&sd,&m_texBand))||FAILED(m_dev->CreateShaderResourceView(m_texBand,NULL,&m_srvBand))){delete[] pix;return FALSE;}}
+	{D3D11_SUBRESOURCE_DATA sd={pix,(UINT)(W*4),0}; if(FAILED(m_dev->CreateTexture2D(&d,&sd,&m_texBand))||FAILED(m_dev->CreateShaderResourceView(m_texBand,NULL,&m_srvBand))){delete[] pix;return FALSE;}}
 	auto upload2d=[&](ID3D11Texture2D** tex, ID3D11ShaderResourceView** srv)->BOOL{
-		D3D11_SUBRESOURCE_DATA sd={pix,W*4,0};
+		D3D11_SUBRESOURCE_DATA sd={pix,(UINT)(W*4),0};
 		return SUCCEEDED(m_dev->CreateTexture2D(&d,&sd,tex)) && SUCCEEDED(m_dev->CreateShaderResourceView(*tex,NULL,srv));
 	};
 	static const int kThemeDetRes[S3R_THEME_N]={
@@ -1461,55 +1466,104 @@ BOOL CS3rView::InitDx()
 	bd.ByteWidth = sizeof(S3RInst) * (UINT)CSoft3DRaceDlg::S3R_MAX_CRAFT;
 	if (bd.ByteWidth < 256) bd.ByteWidth = 256;
 	if(FAILED(hr=m_dev->CreateBuffer(&bd,NULL,&m_vbCraftInst))){ m_dxFailStage = 9; m_dxFailHr = hr; return FALSE; }
-	D3D11_SAMPLER_DESC ss={};ss.Filter=D3D11_FILTER_MIN_MAG_MIP_LINEAR;ss.AddressU=ss.AddressV=ss.AddressW=D3D11_TEXTURE_ADDRESS_WRAP;ss.MaxLOD=D3D11_FLOAT32_MAX;m_dev->CreateSamplerState(&ss,&m_sampLin);ss.Filter=D3D11_FILTER_MIN_MAG_MIP_POINT;ss.AddressU=ss.AddressV=ss.AddressW=D3D11_TEXTURE_ADDRESS_CLAMP;m_dev->CreateSamplerState(&ss,&m_sampPoint);
+	D3D11_SAMPLER_DESC ss={};ss.Filter=D3D11_FILTER_MIN_MAG_MIP_LINEAR;ss.AddressU=ss.AddressV=ss.AddressW=D3D11_TEXTURE_ADDRESS_WRAP;ss.MaxLOD=D3D11_FLOAT32_MAX;m_dev->CreateSamplerState(&ss,&m_sampLin);ss.Filter=D3D11_FILTER_ANISOTROPIC;ss.MaxAnisotropy=16;m_dev->CreateSamplerState(&ss,&m_sampAniso);ss.Filter=D3D11_FILTER_MIN_MAG_MIP_POINT;ss.MaxAnisotropy=1;ss.AddressU=ss.AddressV=ss.AddressW=D3D11_TEXTURE_ADDRESS_CLAMP;m_dev->CreateSamplerState(&ss,&m_sampPoint);
 	ss.Filter=D3D11_FILTER_COMPARISON_MIN_MAG_LINEAR_MIP_POINT;ss.AddressU=ss.AddressV=ss.AddressW=D3D11_TEXTURE_ADDRESS_BORDER;ss.ComparisonFunc=D3D11_COMPARISON_LESS;ss.BorderColor[0]=ss.BorderColor[1]=ss.BorderColor[2]=ss.BorderColor[3]=1.f;m_dev->CreateSamplerState(&ss,&m_sampCmp);
 	D3D11_RASTERIZER_DESC rs={};rs.FillMode=D3D11_FILL_SOLID;rs.CullMode=D3D11_CULL_BACK;rs.DepthClipEnable=TRUE;m_dev->CreateRasterizerState(&rs,&m_rsSolid);
 	rs.CullMode=D3D11_CULL_NONE;m_dev->CreateRasterizerState(&rs,&m_rsNoCull);
 	D3D11_RASTERIZER_DESC rss={};rss.FillMode=D3D11_FILL_SOLID;rss.CullMode=D3D11_CULL_NONE;rss.DepthClipEnable=TRUE;rss.DepthBias=1000;rss.SlopeScaledDepthBias=1.5f;m_dev->CreateRasterizerState(&rss,&m_rsShadow);
 	D3D11_DEPTH_STENCIL_DESC ds={};ds.DepthEnable=TRUE;ds.DepthWriteMask=D3D11_DEPTH_WRITE_MASK_ALL;ds.DepthFunc=D3D11_COMPARISON_LESS_EQUAL;m_dev->CreateDepthStencilState(&ds,&m_dssWrite);ds.DepthWriteMask=D3D11_DEPTH_WRITE_MASK_ZERO;m_dev->CreateDepthStencilState(&ds,&m_dssRead);ds.DepthEnable=FALSE;m_dev->CreateDepthStencilState(&ds,&m_dssOff);
 	D3D11_BLEND_DESC bl={};bl.RenderTarget[0].RenderTargetWriteMask=D3D11_COLOR_WRITE_ENABLE_ALL;m_dev->CreateBlendState(&bl,&m_bsOpaque);bl.RenderTarget[0].BlendEnable=TRUE;bl.RenderTarget[0].SrcBlend=D3D11_BLEND_SRC_ALPHA;bl.RenderTarget[0].DestBlend=D3D11_BLEND_INV_SRC_ALPHA;bl.RenderTarget[0].BlendOp=D3D11_BLEND_OP_ADD;bl.RenderTarget[0].SrcBlendAlpha=D3D11_BLEND_ONE;bl.RenderTarget[0].DestBlendAlpha=D3D11_BLEND_INV_SRC_ALPHA;bl.RenderTarget[0].BlendOpAlpha=D3D11_BLEND_OP_ADD;m_dev->CreateBlendState(&bl,&m_bsAlpha);bl.RenderTarget[0].SrcBlend=D3D11_BLEND_SRC_ALPHA;bl.RenderTarget[0].DestBlend=D3D11_BLEND_ONE;m_dev->CreateBlendState(&bl,&m_bsAdd);
-	{
-		D3D11_TEXTURE2D_DESC td={};td.Width=S3R_SHADOW_SIZE;td.Height=S3R_SHADOW_SIZE;td.MipLevels=1;td.ArraySize=1;td.Format=DXGI_FORMAT_R24G8_TYPELESS;td.SampleDesc.Count=1;td.BindFlags=D3D11_BIND_DEPTH_STENCIL|D3D11_BIND_SHADER_RESOURCE;
-		if(FAILED(hr=m_dev->CreateTexture2D(&td,NULL,&m_shadowTex))){ m_dxFailStage = 10; m_dxFailHr = hr; return FALSE; }
-		D3D11_DEPTH_STENCIL_VIEW_DESC dd={};dd.Format=DXGI_FORMAT_D24_UNORM_S8_UINT;dd.ViewDimension=D3D11_DSV_DIMENSION_TEXTURE2D;
-		if(FAILED(hr=m_dev->CreateDepthStencilView(m_shadowTex,&dd,&m_shadowDsv))){ m_dxFailStage = 10; m_dxFailHr = hr; return FALSE; }
-		D3D11_SHADER_RESOURCE_VIEW_DESC sd={};sd.Format=DXGI_FORMAT_R24_UNORM_X8_TYPELESS;sd.ViewDimension=D3D11_SRV_DIMENSION_TEXTURE2D;sd.Texture2D.MipLevels=1;
-		if(FAILED(hr=m_dev->CreateShaderResourceView(m_shadowTex,&sd,&m_shadowSrv))){ m_dxFailStage = 10; m_dxFailHr = hr; return FALSE; }
-	}
+	if(!EnsureShadowTarget(m_shadowSize)){ m_dxFailStage = 10; m_dxFailHr = E_FAIL; return FALSE; }
 	if(!EnsureAuxTargets()){ m_dxFailStage = 10; m_dxFailHr = E_FAIL; return FALSE; }
 	CRect rc;GetClientRect(&rc);
 	if(!ResizeDx(max(8,rc.Width()),max(8,rc.Height()))){ m_dxFailStage = 11; m_dxFailHr = E_FAIL; return FALSE; }
 	return TRUE;
 }
 
+void CS3rView::ReleaseAuxTargets()
+{
+	S3R_RELEASE(m_srvRear);S3R_RELEASE(m_rearRtv);S3R_RELEASE(m_rearTex);S3R_RELEASE(m_rearDsv);S3R_RELEASE(m_rearDs);
+	S3R_RELEASE(m_srvReflect);S3R_RELEASE(m_reflectRtv);S3R_RELEASE(m_reflectTex);S3R_RELEASE(m_reflectDsv);S3R_RELEASE(m_reflectDs);
+}
+
+BOOL CS3rView::EnsureShadowTarget(int wantSize)
+{
+	if (!m_dev) return FALSE;
+	if (wantSize < 0) wantSize = 0;
+	if (wantSize > 0 && wantSize < 64) wantSize = 64;
+	if (wantSize == m_shadowSize && ((wantSize == 0 && !m_shadowTex) || (wantSize > 0 && m_shadowTex)))
+		return TRUE;
+	S3R_RELEASE(m_shadowSrv); S3R_RELEASE(m_shadowDsv); S3R_RELEASE(m_shadowTex);
+	m_shadowSize = wantSize;
+	if (wantSize <= 0) return TRUE;
+	static const int kFall[] = { 4096, 3072, 2048, 1536, 1024, 768, 512, 256 };
+	HRESULT hr = E_FAIL;
+	for (int i = 0; i < (int)_countof(kFall); i++) {
+		int sz = kFall[i];
+		if (sz > wantSize) continue;
+		D3D11_TEXTURE2D_DESC td = {};
+		td.Width = sz; td.Height = sz; td.MipLevels = 1; td.ArraySize = 1;
+		td.Format = DXGI_FORMAT_R24G8_TYPELESS; td.SampleDesc.Count = 1;
+		td.BindFlags = D3D11_BIND_DEPTH_STENCIL | D3D11_BIND_SHADER_RESOURCE;
+		if (FAILED(hr = m_dev->CreateTexture2D(&td, NULL, &m_shadowTex))) continue;
+		D3D11_DEPTH_STENCIL_VIEW_DESC dd = {};
+		dd.Format = DXGI_FORMAT_D24_UNORM_S8_UINT; dd.ViewDimension = D3D11_DSV_DIMENSION_TEXTURE2D;
+		if (FAILED(hr = m_dev->CreateDepthStencilView(m_shadowTex, &dd, &m_shadowDsv))) {
+			S3R_RELEASE(m_shadowTex); continue;
+		}
+		D3D11_SHADER_RESOURCE_VIEW_DESC sd = {};
+		sd.Format = DXGI_FORMAT_R24_UNORM_X8_TYPELESS; sd.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D; sd.Texture2D.MipLevels = 1;
+		if (FAILED(hr = m_dev->CreateShaderResourceView(m_shadowTex, &sd, &m_shadowSrv))) {
+			S3R_RELEASE(m_shadowDsv); S3R_RELEASE(m_shadowTex); continue;
+		}
+		m_shadowSize = sz;
+		return TRUE;
+	}
+	m_shadowSize = 0;
+	return FALSE;
+}
+
 BOOL CS3rView::EnsureAuxTargets()
 {
-	if(!m_dev) return FALSE;
-	auto makeColor=[&](int w,int h,ID3D11Texture2D** tex,ID3D11RenderTargetView** rtv,ID3D11ShaderResourceView** srv)->BOOL{
-		if(*tex) return TRUE;
-		D3D11_TEXTURE2D_DESC d={};d.Width=w;d.Height=h;d.MipLevels=1;d.ArraySize=1;d.Format=DXGI_FORMAT_B8G8R8A8_UNORM;d.SampleDesc.Count=1;d.BindFlags=D3D11_BIND_RENDER_TARGET|D3D11_BIND_SHADER_RESOURCE;
-		if(FAILED(m_dev->CreateTexture2D(&d,NULL,tex))) return FALSE;
-		if(FAILED(m_dev->CreateRenderTargetView(*tex,NULL,rtv))) return FALSE;
-		if(FAILED(m_dev->CreateShaderResourceView(*tex,NULL,srv))) return FALSE;
+	if (!m_dev) return FALSE;
+	auto needRecreate = [&](ID3D11Texture2D* tex, int w, int h)->BOOL {
+		if (!tex) return TRUE;
+		D3D11_TEXTURE2D_DESC d = {};
+		tex->GetDesc(&d);
+		return (int)d.Width != w || (int)d.Height != h;
+	};
+	auto makeColor = [&](int w, int h, ID3D11Texture2D** tex, ID3D11RenderTargetView** rtv, ID3D11ShaderResourceView** srv)->BOOL {
+		if (w <= 0 || h <= 0) { S3R_RELEASE(*srv); S3R_RELEASE(*rtv); S3R_RELEASE(*tex); return TRUE; }
+		if (*tex && !needRecreate(*tex, w, h)) return TRUE;
+		S3R_RELEASE(*srv); S3R_RELEASE(*rtv); S3R_RELEASE(*tex);
+		D3D11_TEXTURE2D_DESC d = {}; d.Width = w; d.Height = h; d.MipLevels = 1; d.ArraySize = 1;
+		d.Format = DXGI_FORMAT_B8G8R8A8_UNORM; d.SampleDesc.Count = 1;
+		d.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
+		if (FAILED(m_dev->CreateTexture2D(&d, NULL, tex))) return FALSE;
+		if (FAILED(m_dev->CreateRenderTargetView(*tex, NULL, rtv))) return FALSE;
+		if (FAILED(m_dev->CreateShaderResourceView(*tex, NULL, srv))) return FALSE;
 		return TRUE;
 	};
-	auto makeDepth=[&](int w,int h,ID3D11Texture2D** tex,ID3D11DepthStencilView** dsv)->BOOL{
-		if(*tex) return TRUE;
-		D3D11_TEXTURE2D_DESC d={};d.Width=w;d.Height=h;d.MipLevels=1;d.ArraySize=1;d.Format=DXGI_FORMAT_R24G8_TYPELESS;d.SampleDesc.Count=1;d.BindFlags=D3D11_BIND_DEPTH_STENCIL;
-		if(FAILED(m_dev->CreateTexture2D(&d,NULL,tex))) return FALSE;
-		D3D11_DEPTH_STENCIL_VIEW_DESC dd={};dd.Format=DXGI_FORMAT_D24_UNORM_S8_UINT;dd.ViewDimension=D3D11_DSV_DIMENSION_TEXTURE2D;
-		if(FAILED(m_dev->CreateDepthStencilView(*tex,&dd,dsv))) return FALSE;
+	auto makeDepth = [&](int w, int h, ID3D11Texture2D** tex, ID3D11DepthStencilView** dsv)->BOOL {
+		if (w <= 0 || h <= 0) { S3R_RELEASE(*dsv); S3R_RELEASE(*tex); return TRUE; }
+		if (*tex && !needRecreate(*tex, w, h)) return TRUE;
+		S3R_RELEASE(*dsv); S3R_RELEASE(*tex);
+		D3D11_TEXTURE2D_DESC d = {}; d.Width = w; d.Height = h; d.MipLevels = 1; d.ArraySize = 1;
+		d.Format = DXGI_FORMAT_R24G8_TYPELESS; d.SampleDesc.Count = 1; d.BindFlags = D3D11_BIND_DEPTH_STENCIL;
+		if (FAILED(m_dev->CreateTexture2D(&d, NULL, tex))) return FALSE;
+		D3D11_DEPTH_STENCIL_VIEW_DESC dd = {}; dd.Format = DXGI_FORMAT_D24_UNORM_S8_UINT; dd.ViewDimension = D3D11_DSV_DIMENSION_TEXTURE2D;
+		if (FAILED(m_dev->CreateDepthStencilView(*tex, &dd, dsv))) return FALSE;
 		return TRUE;
 	};
-	if(!makeColor(S3R_REAR_W,S3R_REAR_H,&m_rearTex,&m_rearRtv,&m_srvRear)) return FALSE;
-	if(!makeDepth(S3R_REAR_W,S3R_REAR_H,&m_rearDs,&m_rearDsv)) return FALSE;
-	if(!makeColor(S3R_REFLECT_SIZE,S3R_REFLECT_SIZE,&m_reflectTex,&m_reflectRtv,&m_srvReflect)) return FALSE;
-	if(!makeDepth(S3R_REFLECT_SIZE,S3R_REFLECT_SIZE,&m_reflectDs,&m_reflectDsv)) return FALSE;
+	if (!makeColor(m_rearW, m_rearH, &m_rearTex, &m_rearRtv, &m_srvRear)) return FALSE;
+	if (!makeDepth(m_rearW, m_rearH, &m_rearDs, &m_rearDsv)) return FALSE;
+	if (!makeColor(m_reflectSize, m_reflectSize, &m_reflectTex, &m_reflectRtv, &m_srvReflect)) return FALSE;
+	if (!makeDepth(m_reflectSize, m_reflectSize, &m_reflectDs, &m_reflectDsv)) return FALSE;
 	if (m_imm) {
-		float zc[4] = {0.35f,0.48f,0.62f,1.f};
-		if (m_rearRtv) { m_imm->ClearRenderTargetView(m_rearRtv, zc); }
-		float wc[4] = {0.42f,0.58f,0.72f,1.f};
-		if (m_reflectRtv) { m_imm->ClearRenderTargetView(m_reflectRtv, wc); }
+		float zc[4] = { 0.35f,0.48f,0.62f,1.f };
+		if (m_rearRtv) m_imm->ClearRenderTargetView(m_rearRtv, zc);
+		float wc[4] = { 0.42f,0.58f,0.72f,1.f };
+		if (m_reflectRtv) m_imm->ClearRenderTargetView(m_reflectRtv, wc);
 	}
 	return TRUE;
 }
@@ -1874,7 +1928,7 @@ void CS3rView::ReleaseDx()
 	S3R_RELEASE(m_srvWaterD);S3R_RELEASE(m_texWaterD);S3R_RELEASE(m_srvWater);S3R_RELEASE(m_texWater);
 	S3R_RELEASE(m_srvObsD);S3R_RELEASE(m_texObsD);S3R_RELEASE(m_srvObs);S3R_RELEASE(m_texObs);S3R_RELEASE(m_srvBand);S3R_RELEASE(m_texBand);
 	for(int i=0;i<S3R_THEME_N;i++){S3R_RELEASE(m_srvThemeD[i]);S3R_RELEASE(m_texThemeD[i]);S3R_RELEASE(m_srvTheme[i]);S3R_RELEASE(m_texTheme[i]);}
-	S3R_RELEASE(m_bsAdd);S3R_RELEASE(m_bsAlpha);S3R_RELEASE(m_bsOpaque);S3R_RELEASE(m_dssOff);S3R_RELEASE(m_dssRead);S3R_RELEASE(m_dssWrite);S3R_RELEASE(m_rsShadow);S3R_RELEASE(m_rsNoCull);S3R_RELEASE(m_rsSolid);S3R_RELEASE(m_sampCmp);S3R_RELEASE(m_sampPoint);S3R_RELEASE(m_sampLin);
+	S3R_RELEASE(m_bsAdd);S3R_RELEASE(m_bsAlpha);S3R_RELEASE(m_bsOpaque);S3R_RELEASE(m_dssOff);S3R_RELEASE(m_dssRead);S3R_RELEASE(m_dssWrite);S3R_RELEASE(m_rsShadow);S3R_RELEASE(m_rsNoCull);S3R_RELEASE(m_rsSolid);S3R_RELEASE(m_sampCmp);S3R_RELEASE(m_sampPoint);S3R_RELEASE(m_sampAniso);S3R_RELEASE(m_sampLin);
 	S3R_RELEASE(m_vbHud);
 	S3R_RELEASE(m_vbCraftInst); S3R_RELEASE(m_ibCraft); S3R_RELEASE(m_vbCraft);
 	S3R_RELEASE(m_vbObsInst); S3R_RELEASE(m_ibObs); S3R_RELEASE(m_vbObs);
@@ -2055,6 +2109,7 @@ BEGIN_MESSAGE_MAP(CSoft3DRaceDlg, CCustomBlurDialogBase)
 	ON_CBN_SELCHANGE(IDC_S3R_THEME, &CSoft3DRaceDlg::OnThemeChanged)
 	ON_CBN_SELCHANGE(IDC_S3R_INVERT, &CSoft3DRaceDlg::OnInvertChanged)
 	ON_CBN_SELCHANGE(IDC_S3R_MESH, &CSoft3DRaceDlg::OnMeshChanged)
+	ON_CBN_SELCHANGE(IDC_S3R_GFX, &CSoft3DRaceDlg::OnGfxChanged)
 	ON_WM_TIMER()
 	ON_WM_SIZE()
 	ON_WM_SHOWWINDOW()
@@ -2126,6 +2181,8 @@ void CSoft3DRaceDlg::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDC_S3R_INVERT, m_invert);
 	DDX_Control(pDX, IDC_S3R_MESH_L, m_meshL);
 	DDX_Control(pDX, IDC_S3R_MESH, m_mesh);
+	DDX_Control(pDX, IDC_S3R_GFX_L, m_gfxL);
+	DDX_Control(pDX, IDC_S3R_GFX, m_gfx);
 	DDX_Control(pDX, IDC_S3R_START, m_start);
 	DDX_Control(pDX, IDC_S3R_GEN, m_gen);
 	DDX_Control(pDX, IDC_S3R_HINT, m_hint);
@@ -2227,8 +2284,9 @@ void CSoft3DRaceDlg::LayoutAll()
 	placeL(m_invertL, sw(36)); placeC(m_invert, sw(100));
 	y += rowH + 4;
 	x = m;
-	placeB(m_start, sw(80)); placeB(m_gen, sw(80));
-	placeL(m_meshL, sw(40)); placeC(m_mesh, sw(92));
+	placeB(m_start, max(72, sw(80))); placeB(m_gen, max(72, sw(80)));
+	placeL(m_meshL, max(36, sw(40))); placeC(m_mesh, max(88, sw(100)));
+	placeL(m_gfxL, max(36, sw(40))); placeC(m_gfx, max(64, sw(72)));
 	if (m_hint.GetSafeHwnd()) m_hint.SetWindowPos(NULL, x, y+6, max(40, cx-x-m), labH, SWP_NOZORDER|SWP_NOACTIVATE);
 	y += rowH + 6;
 	const int btnY = cy - m - btnH;
@@ -2244,9 +2302,10 @@ void CSoft3DRaceDlg::LayoutAll()
 	if (m_theme.GetSafeHwnd()) {int v=savedata.s3r_theme; if(v<0)v=0; if(v>8)v=8; m_theme.CComboBox::SetCurSel(v);}
 	if (m_invert.GetSafeHwnd()) {int v=savedata.s3r_invert_y?1:0; m_invert.CComboBox::SetCurSel(v);}
 	if (m_mesh.GetSafeHwnd()) m_mesh.CComboBox::SetCurSel(S3MeshDensityLevel());
+	if (m_gfx.GetSafeHwnd()) m_gfx.CComboBox::SetCurSel(S3GfxQualityClamp(savedata.s3_gfx_quality));
 	if (m_start.GetSafeHwnd()) m_start.Invalidate();
 	if (m_gen.GetSafeHwnd()) m_gen.Invalidate();
-	CWnd* raise[] = { &m_aiL,&m_ai,&m_oppL,&m_opp,&m_lenL,&m_len,&m_lapsL,&m_laps,&m_themeL,&m_theme,&m_invertL,&m_invert,&m_start,&m_gen,&m_meshL,&m_mesh,&m_hint,&m_close,&m_status };
+	CWnd* raise[] = { &m_aiL,&m_ai,&m_oppL,&m_opp,&m_lenL,&m_len,&m_lapsL,&m_laps,&m_themeL,&m_theme,&m_invertL,&m_invert,&m_start,&m_gen,&m_meshL,&m_mesh,&m_gfxL,&m_gfx,&m_hint,&m_close,&m_status };
 	for (int i = 0; i < (int)(sizeof(raise)/sizeof(raise[0])); i++) {
 		if (raise[i]->GetSafeHwnd())
 			raise[i]->SetWindowPos(&CWnd::wndTop, 0, 0, 0, 0, SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE);
@@ -2269,6 +2328,26 @@ int CSoft3DRaceDlg::ReadInvertFromUi(){ int s=m_invert.GetSafeHwnd()?(int)m_inve
 void CSoft3DRaceDlg::SetInvertToUi(int v){ v=v?1:0; savedata.s3r_invert_y=v; if(m_invert.GetSafeHwnd()) m_invert.CComboBox::SetCurSel(v); }
 int CSoft3DRaceDlg::ReadMeshFromUi(){ int s=m_mesh.GetSafeHwnd()?(int)m_mesh.CComboBox::GetCurSel():savedata.s3_mesh_density; if(s<0||s>S3_MESH_DENSITY_MAX)s=5; return s; }
 void CSoft3DRaceDlg::SetMeshToUi(int v){ if(v<0||v>S3_MESH_DENSITY_MAX)v=5; savedata.s3_mesh_density=v; if(m_mesh.GetSafeHwnd()) m_mesh.CComboBox::SetCurSel(v); }
+int CSoft3DRaceDlg::ReadGfxFromUi(){ int s=m_gfx.GetSafeHwnd()?(int)m_gfx.CComboBox::GetCurSel():savedata.s3_gfx_quality; return S3GfxQualityClamp(s); }
+void CSoft3DRaceDlg::SetGfxToUi(int v){ v=S3GfxQualityClamp(v); savedata.s3_gfx_quality=v; if(m_gfx.GetSafeHwnd()) m_gfx.CComboBox::SetCurSel(v); }
+void CSoft3DRaceDlg::ApplyGfxQuality(BOOL rebuildRt)
+{
+	const S3GfxQualityParams& q = S3GfxQualityGet(savedata.s3_gfx_quality);
+	m_view.m_casStrength = q.casStrength;
+	m_view.m_gfxSsr = q.ssr;
+	m_view.m_gfxDof = q.dof;
+	m_view.m_aniso = q.aniso;
+	m_view.m_rearW = q.rearW;
+	m_view.m_rearH = q.rearH;
+	m_view.m_reflectSize = q.reflectSize;
+	if (rebuildRt && m_view.m_dev) {
+		m_view.EnsureShadowTarget(q.shadowSize);
+		m_view.EnsureAuxTargets();
+	} else {
+		m_view.m_shadowSize = q.shadowSize;
+	}
+}
+
 
 void CSoft3DRaceDlg::PersistUi()
 {
@@ -6688,12 +6767,12 @@ void CSoft3DRaceDlg::RenderScene()
 		unbindInst();
 	};
 	// shadow pass — VP を LightVP にして投影（カメラVPのままだと影が落ちない）
-	{
+	if (m_view.m_shadowSize > 0 && m_view.m_shadowDsv) {
 		S3RFrameCB cbSh = cb;
 		cbSh.viewProj = cb.lightVP;
 		cbSh.lightDir.w = 0.f;
 		if (SUCCEEDED(dc->Map(m_view.m_cbFrame,0,D3D11_MAP_WRITE_DISCARD,0,&map))){ memcpy(map.pData,&cbSh,sizeof(cbSh)); dc->Unmap(m_view.m_cbFrame,0); }
-		D3D11_VIEWPORT sp={0,0,(float)CS3rView::S3R_SHADOW_SIZE,(float)CS3rView::S3R_SHADOW_SIZE,0,1};
+		D3D11_VIEWPORT sp={0,0,(float)m_view.m_shadowSize,(float)m_view.m_shadowSize,0,1};
 		dc->RSSetViewports(1,&sp); dc->OMSetRenderTargets(0,NULL,m_view.m_shadowDsv); dc->ClearDepthStencilView(m_view.m_shadowDsv,D3D11_CLEAR_DEPTH,1,0);
 		dc->RSSetState(m_view.m_rsShadow); dc->OMSetDepthStencilState(m_view.m_dssWrite,0); dc->OMSetBlendState(m_view.m_bsOpaque,NULL,0xffffffff);
 		dc->VSSetShader(m_view.m_vsSolid,NULL,0); dc->PSSetShader(NULL,NULL,0); dc->IASetInputLayout(m_view.m_ilSolid);
@@ -6708,7 +6787,7 @@ void CSoft3DRaceDlg::RenderScene()
 	}
 
 	// 水面平面反射マップ（ゲーム中フル／デモは省略）
-	if (hq && m_view.m_reflectRtv && m_view.m_vbWaterParts > 0 && m_phase != PHASE_PODIUM
+	if (hq && m_view.m_reflectSize > 0 && m_view.m_reflectRtv && m_view.m_vbWaterParts > 0 && m_phase != PHASE_PODIUM
 		&& pl.y < m_waterY + 55.f) {
 		S3RFrameCB cbRef = cb;
 		cbRef.viewProj = cb.reflectVP;
@@ -6717,7 +6796,7 @@ void CSoft3DRaceDlg::RenderScene()
 		cbRef.lightDir.w = 1.f;
 		cbRef.fogParams.w = 1.f; // Fog.z=水面Y → 水面下を discard
 		if (SUCCEEDED(dc->Map(m_view.m_cbFrame,0,D3D11_MAP_WRITE_DISCARD,0,&map))){ memcpy(map.pData,&cbRef,sizeof(cbRef)); dc->Unmap(m_view.m_cbFrame,0); }
-		D3D11_VIEWPORT rvp={0,0,(float)CS3rView::S3R_REFLECT_SIZE,(float)CS3rView::S3R_REFLECT_SIZE,0,1};
+		D3D11_VIEWPORT rvp={0,0,(float)m_view.m_reflectSize,(float)m_view.m_reflectSize,0,1};
 		dc->RSSetViewports(1,&rvp);
 		float rclear[4]={clearC[0],clearC[1],clearC[2],1.f};
 		dc->OMSetRenderTargets(1,&m_view.m_reflectRtv,m_view.m_reflectDsv);
@@ -6801,7 +6880,7 @@ void CSoft3DRaceDlg::RenderScene()
 	}
 
 	// バックミラー（ゲーム中フル／デモ俯瞰は省略）
-	if (hq && m_view.m_rearRtv && !m_lookback && m_phase != PHASE_PODIUM) {
+	if (hq && m_view.m_rearW > 0 && m_view.m_rearRtv && !m_lookback && m_phase != PHASE_PODIUM) {
 		float rcx = pl.x + noseX * 2.2f;
 		float rcy = pl.y + 1.85f + noseY * 0.35f;
 		float rcz = pl.z + noseZ * 2.2f;
@@ -6810,12 +6889,12 @@ void CSoft3DRaceDlg::RenderScene()
 		float raz = pl.z - noseZ * 36.f;
 		S3RFrameCB cbRear = cb;
 		cbRear.viewProj = S3rMatMul(S3rLookAt(rcx,rcy,rcz, rax,ray,raz, 0,1,0),
-			S3rPerspective(55.f * (float)(M_PI/180.0), (float)CS3rView::S3R_REAR_W/(float)CS3rView::S3R_REAR_H, 0.45f, 520.f));
+			S3rPerspective(55.f * (float)(M_PI/180.0), (float)m_view.m_rearW/(float)max(1,m_view.m_rearH), 0.45f, 520.f));
 		cbRear.eyePos = {rcx,rcy,rcz,(float)(m_themeActive-1)};
 		cbRear.peel = {0,0,0,0};
 		cbRear.lightDir.w = 1.f;
 		if (SUCCEEDED(dc->Map(m_view.m_cbFrame,0,D3D11_MAP_WRITE_DISCARD,0,&map))){ memcpy(map.pData,&cbRear,sizeof(cbRear)); dc->Unmap(m_view.m_cbFrame,0); }
-		D3D11_VIEWPORT mvp={0,0,(float)CS3rView::S3R_REAR_W,(float)CS3rView::S3R_REAR_H,0,1};
+		D3D11_VIEWPORT mvp={0,0,(float)m_view.m_rearW,(float)m_view.m_rearH,0,1};
 		dc->RSSetViewports(1,&mvp);
 		float mclear[4]={clearC[0],clearC[1],clearC[2],1.f};
 		dc->OMSetRenderTargets(1,&m_view.m_rearRtv,m_view.m_rearDsv);
@@ -6935,7 +7014,8 @@ void CSoft3DRaceDlg::RenderScene()
 	if (SUCCEEDED(dc->Map(m_view.m_cbFrame,0,D3D11_MAP_WRITE_DISCARD,0,&map))){ memcpy(map.pData,&cb,sizeof(cb)); dc->Unmap(m_view.m_cbFrame,0); }
 
 	ID3D11Buffer* cbs[]={m_view.m_cbFrame};
-	ID3D11SamplerState* smp[]={m_view.m_sampLin,m_view.m_sampPoint,m_view.m_sampCmp};
+	ID3D11SamplerState* texS = (m_view.m_aniso >= 8 && m_view.m_sampAniso) ? m_view.m_sampAniso : m_view.m_sampLin;
+	ID3D11SamplerState* smp[]={texS,m_view.m_sampPoint,m_view.m_sampCmp};
 	dc->VSSetConstantBuffers(0,1,cbs); dc->PSSetConstantBuffers(0,1,cbs); dc->HSSetConstantBuffers(0,1,cbs); dc->DSSetConstantBuffers(0,1,cbs);
 	dc->PSSetSamplers(0,3,smp); dc->DSSetSamplers(0,1,&m_view.m_sampLin);
 	ID3D11ShaderResourceView* bandSrv=m_view.m_srvBand;
@@ -7090,17 +7170,22 @@ void CSoft3DRaceDlg::RenderScene()
 	dc->OMSetDepthStencilState(m_view.m_dssOff,0); dc->OMSetBlendState(m_view.m_bsOpaque,NULL,0xffffffff);
 	dc->VSSetShader(m_view.m_vsPost,NULL,0);
 	dc->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-	if (hq) {
+	const BOOL doDof = hq && m_view.m_gfxDof > 0;
+	if (doDof) {
 		dc->OMSetRenderTargets(1,&m_view.m_postRtv,NULL);
 		dc->PSSetShader(m_view.m_psDof,NULL,0);
 		ID3D11ShaderResourceView* p1[]={m_view.m_sceneSrv,NULL,m_view.m_dsSrv}; dc->PSSetShaderResources(0,3,p1);
 		dc->Draw(3,0);
 		dc->OMSetRenderTargets(1,&m_view.m_bbRtv,NULL); dc->PSSetShaderResources(0,6,nulls);
+		{ S3RFrameCB cbFin = cb; cbFin.dofParams.w = m_view.m_casStrength;
+		  if (SUCCEEDED(dc->Map(m_view.m_cbFrame,0,D3D11_MAP_WRITE_DISCARD,0,&map))){ memcpy(map.pData,&cbFin,sizeof(cbFin)); dc->Unmap(m_view.m_cbFrame,0); } }
 		dc->PSSetShader(m_view.m_psFinal,NULL,0);
 		ID3D11ShaderResourceView* p2[]={m_view.m_postSrv}; dc->PSSetShaderResources(0,1,p2);
 		dc->Draw(3,0);
 	} else {
 		dc->OMSetRenderTargets(1,&m_view.m_bbRtv,NULL);
+		{ S3RFrameCB cbFin = cb; cbFin.dofParams.w = m_view.m_casStrength;
+		  if (SUCCEEDED(dc->Map(m_view.m_cbFrame,0,D3D11_MAP_WRITE_DISCARD,0,&map))){ memcpy(map.pData,&cbFin,sizeof(cbFin)); dc->Unmap(m_view.m_cbFrame,0); } }
 		dc->PSSetShader(m_view.m_psFinal,NULL,0);
 		ID3D11ShaderResourceView* p2[]={m_view.m_sceneSrv}; dc->PSSetShaderResources(0,1,p2);
 		dc->Draw(3,0);
@@ -7514,9 +7599,9 @@ BOOL CSoft3DRaceDlg::OnInitDialog()
 	}
 	if (m_uiFont.GetSafeHandle()) {
 		CFont* pf = &m_uiFont;
-		CWnd* ws[] = {&m_aiL,&m_oppL,&m_lenL,&m_lapsL,&m_themeL,&m_invertL,&m_meshL,&m_hint,&m_status,&m_ai,&m_opp,&m_len,&m_laps,&m_theme,&m_invert,&m_mesh,&m_start,&m_gen,&m_close};
+		CWnd* ws[] = {&m_aiL,&m_oppL,&m_lenL,&m_lapsL,&m_themeL,&m_invertL,&m_meshL,&m_gfxL,&m_hint,&m_status,&m_ai,&m_opp,&m_len,&m_laps,&m_theme,&m_invert,&m_mesh,&m_gfx,&m_start,&m_gen,&m_close};
 		for (int i=0;i<(int)(sizeof(ws)/sizeof(ws[0]));i++) if (ws[i]->GetSafeHwnd()) ws[i]->SetFont(pf);
-		CCustomComboBox* cbs[]={&m_ai,&m_opp,&m_len,&m_laps,&m_theme,&m_invert,&m_mesh};
+		CCustomComboBox* cbs[]={&m_ai,&m_opp,&m_len,&m_laps,&m_theme,&m_invert,&m_mesh,&m_gfx};
 		for (int i=0;i<7;i++){ cbs[i]->SetItemHeight(-1,28); cbs[i]->SetItemHeight(0,26); }
 	}
 
@@ -7595,6 +7680,12 @@ BOOL CSoft3DRaceDlg::OnInitDialog()
 	SetInvertToUi(savedata.s3r_invert_y);
 
 	S3MeshFillCombo(m_mesh);
+	S3GfxQualityEnsureAutoDefault();
+	S3GfxQualityFillCombo(m_gfx);
+	SetGfxToUi(savedata.s3_gfx_quality);
+	ApplyGfxQuality(TRUE);
+	if (m_gfxL.GetSafeHwnd()) m_gfxL.SetWindowText(S3GfxQualityLabel());
+	m_gfx.SetAeroMode(FALSE);
 	SetMeshToUi(S3MeshDensityLevel());
 
 	if (m_tooltip.Create(this, TTS_ALWAYSTIP | TTS_NOPREFIX)) {
@@ -7648,6 +7739,13 @@ void CSoft3DRaceDlg::OnLenChanged() { savedata.s3r_len = ReadLenFromUi(); Persis
 void CSoft3DRaceDlg::OnLapsChanged() { savedata.s3r_laps = ReadLapsFromUi(); PersistUi(); }
 void CSoft3DRaceDlg::OnThemeChanged() { savedata.s3r_theme = ReadThemeFromUi(); PersistUi(); }
 void CSoft3DRaceDlg::OnInvertChanged() { savedata.s3r_invert_y = ReadInvertFromUi(); PersistUi(); }
+void CSoft3DRaceDlg::OnGfxChanged()
+{
+	savedata.s3_gfx_quality = ReadGfxFromUi();
+	savedata.s3_gfx_auto = 0;
+	ApplyGfxQuality(TRUE);
+	MpPersistSavedataQuick();
+}
 void CSoft3DRaceDlg::OnMeshChanged()
 {
 	savedata.s3_mesh_density = ReadMeshFromUi();

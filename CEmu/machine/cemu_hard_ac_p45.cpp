@@ -1,4 +1,4 @@
-﻿#include "StdAfx.h"
+#include "StdAfx.h"
 #include "cemu_hard_ac.h"
 #include "cemu_sei80bu.h"
 #include "cemu_m68k_bus.h"
@@ -7,6 +7,7 @@
 #include "../chip/cemu_chip_oki6295.h"
 #include "../chip/cemu_chip_ay.h"
 #include "../chip/cemu_chip_scsp.h"
+#include "../chip/cemu_chip_rf5c400.h"
 #include "../chip/cemu_chip_ym2612.h"
 #include "../chip/cemu_chip_multipcm.h"
 #define BLARGG_LITTLE_ENDIAN 1
@@ -503,6 +504,238 @@ void CHardAc::Sega68Write8(unsigned addr, uint8_t v)
 	}
 }
 
+/* ---- Sega Model 2A/2B/2C/3 sound board: 68000 + SCSP ----------------------
+
+   MAME sega/model2.cpp model2_snd:
+     000000-07FFFF  soundram — also the SCSP's whole wave space (scsp_map)
+     100000-100FFF  SCSP registers
+     400000-400001  model2snd_ctrl: sample bank select (bit 0x20)
+     600000-67FFFF  sound program ROM (audiocpu, ROM_LOAD16_WORD_SWAP)
+     800000-9FFFFF  samples +0x000000
+     A00000-DFFFFF  bank4: samples +0x200000, or +0x800000 when the latch is low
+     E00000-FFFFFF  bank5: samples +0x600000, or +0xA00000
+
+   reset_model2_scsp also copies the ROM's first 16 bytes (the 68000 vector
+   table) into soundram, which is how the CPU boots into the 0x600000 window.
+
+   soundram holds 16-bit words in host order — the vendored SCSP core follows
+   the byte-swapped-RAM convention that eng_ssf uses — so byte access from the
+   68000 side goes through addr^1. */
+
+static const unsigned kScspRegBase = 0x100000u;
+static const unsigned kScspRomBase = 0x600000u;
+
+/* Map a 68000 address in the three sample windows to a wave-ROM offset, or
+   0xffffffff when the address is outside them. */
+unsigned CHardAc::Sega2ASampleOffset(unsigned addr) const
+{
+	if (addr >= 0x800000u && addr <= 0x9fffffu)
+		return addr - 0x800000u;
+	if (addr >= 0xa00000u && addr <= 0xdfffffu)
+		return (addr - 0xa00000u) + (scspSampleBank_ ? 0x800000u : 0x200000u);
+	if (addr >= 0xe00000u && addr <= 0xffffffu)
+		return (addr - 0xe00000u) + (scspSampleBank_ ? 0xa00000u : 0x600000u);
+	return 0xffffffffu;
+}
+
+unsigned CHardAc::Sega2ARead16(unsigned addr)
+{
+	addr &= 0xfffffeu;
+	if (addr < 0x080000u) {
+		uint8_t* ram = CEmuChipScspRam();
+		if (!ram) return 0xffff;
+		/* Host-order word: read it as stored, no lane swap. */
+		return (unsigned)(((uint16_t)ram[addr + 1] << 8) | ram[addr]);
+	}
+	if (addr >= kScspRegBase && addr <= kScspRegBase + 0xffeu)
+		return CEmuChipScspReadReg(chip_, (addr - kScspRegBase) >> 1);
+	if (addr >= kScspRomBase && addr <= kScspRomBase + 0x7fffeu) {
+		const unsigned o = addr - kScspRomBase;
+		if (!ms1Rom_ || o + 1u >= ms1RomSize_) return 0xffff;
+		return ((unsigned)ms1Rom_[o] << 8) | ms1Rom_[o + 1];
+	}
+	const unsigned so = Sega2ASampleOffset(addr);
+	if (so != 0xffffffffu && pcmRom_ && so + 1u < pcmRomSize_)
+		return ((unsigned)pcmRom_[so] << 8) | pcmRom_[so + 1];
+	return 0xffff;
+}
+
+unsigned CHardAc::Sega2ARead8(unsigned addr)
+{
+	if (addr < 0x080000u) {
+		uint8_t* ram = CEmuChipScspRam();
+		return ram ? ram[addr ^ 1u] : 0xff;
+	}
+	if (addr >= kScspRegBase && addr <= kScspRegBase + 0xfffu) {
+		const unsigned v = CEmuChipScspReadReg(chip_, (addr - kScspRegBase) >> 1);
+		return (addr & 1u) ? (v & 0xffu) : ((v >> 8) & 0xffu);
+	}
+	if (addr >= kScspRomBase && addr <= kScspRomBase + 0x7ffffu) {
+		const unsigned o = addr - kScspRomBase;
+		if (!ms1Rom_ || o >= ms1RomSize_) return 0xff;
+		return ms1Rom_[o];
+	}
+	const unsigned so = Sega2ASampleOffset(addr & ~1u);
+	if (so != 0xffffffffu && pcmRom_) {
+		const unsigned b = so + (addr & 1u);
+		if (b < pcmRomSize_) return pcmRom_[b];
+	}
+	return 0xff;
+}
+
+void CHardAc::Sega2AWrite16(unsigned addr, uint16_t v)
+{
+	addr &= 0xfffffeu;
+	if (addr < 0x080000u) {
+		uint8_t* ram = CEmuChipScspRam();
+		if (!ram) return;
+		ram[addr] = (uint8_t)v;
+		ram[addr + 1] = (uint8_t)(v >> 8);
+		return;
+	}
+	if (addr >= kScspRegBase && addr <= kScspRegBase + 0xffeu) {
+		if (chip_) chip_->Write((addr - kScspRegBase) >> 1, v);
+		return;
+	}
+	if (addr == 0x400000u) {
+		/* model2snd_ctrl: bit 0x20 picks the low sample half. */
+		scspSampleBank_ = (v & 0x20u) ? 0 : 1;
+		return;
+	}
+}
+
+void CHardAc::Sega2AWrite8(unsigned addr, uint8_t v)
+{
+	if (addr < 0x080000u) {
+		uint8_t* ram = CEmuChipScspRam();
+		if (ram) ram[addr ^ 1u] = v;
+		return;
+	}
+	if (addr >= kScspRegBase && addr <= kScspRegBase + 0xfffu) {
+		if (!chip_) return;
+		/* Byte lane merge — the register file is word wide. */
+		const unsigned idx = (addr - kScspRegBase) >> 1;
+		unsigned cur = CEmuChipScspReadReg(chip_, idx);
+		if (addr & 1u)
+			cur = (cur & 0xff00u) | v;
+		else
+			cur = (cur & 0x00ffu) | ((unsigned)v << 8);
+		chip_->Write(idx, cur);
+		return;
+	}
+	if (addr == 0x400000u || addr == 0x400001u) {
+		scspSampleBank_ = (v & 0x20u) ? 0 : 1;
+		return;
+	}
+}
+
+/* Song select reaches the sound program over the SCSP MIDI input, the same
+   route the main board uses on real hardware. The catalog codes are the
+   16-bit ids the firmware expects after the 0xA0 status byte. */
+void CHardAc::Sega2AInjectSong(uint16_t cmd)
+{
+	if (!chip_) return;
+	if (cmd != 0x1000u) {
+		CEmuChipScspMidiIn(chip_, 0xa0);
+		CEmuChipScspMidiIn(chip_, 0x10);
+		CEmuChipScspMidiIn(chip_, 0x00);
+	}
+	CEmuChipScspMidiIn(chip_, 0xa0);
+	CEmuChipScspMidiIn(chip_, (uint8_t)(cmd >> 8));
+	CEmuChipScspMidiIn(chip_, (uint8_t)(cmd & 0xff));
+}
+
+int CHardAc::LoadRomsSegaScsp(CEmuZipFs* fs, const CEmuGameEntry* ge)
+{
+	if (!fs || !ge || segaM1Audio_) return 0;
+	if (ms1Rom_) { free(ms1Rom_); ms1Rom_ = NULL; ms1RomSize_ = 0; }
+	if (pcmRom_) { free(pcmRom_); pcmRom_ = NULL; pcmRomSize_ = 0; }
+	scspSampleBank_ = 0;
+
+	/* Sound program: ROM_LOAD16_WORD_SWAP into a 512KB window. The catalog
+	   keeps it at a region offset (0x80000 for Model 2A), but the CPU sees it
+	   at 0x600000, so normalise to a window-relative image. */
+	unsigned romNeed = 0x80000u;
+	uint8_t* prog = (uint8_t*)calloc(1, romNeed);
+	if (!prog) return 0;
+	int anyCode = 0;
+	for (int i = 0; i < ge->romCount; i++) {
+		const CEmuRomEntry* r = &ge->rom[i];
+		if (!CEmuAcIsCodeRomType(r->type)) continue;
+		unsigned sz = 0;
+		const unsigned char* data = CEmuZipFsFind(fs, r->name, &sz);
+		if (!data || !sz) continue;
+		unsigned n = sz < romNeed ? sz : romNeed;
+		for (unsigned j = 0; j + 1u < n; j += 2u) {
+			prog[j] = data[j + 1u];
+			prog[j + 1u] = data[j];
+		}
+		anyCode = 1;
+		break;
+	}
+	if (!anyCode) { free(prog); return 0; }
+	ms1Rom_ = prog;
+	ms1RomSize_ = romNeed;
+
+	/* Wave ROMs: ROM_REGION16_BE, each part ROM_LOAD16_WORD_SWAP at the
+	   catalog offset. Keep them big-endian so the 68000 copy loop sees the
+	   same bytes it would on hardware. */
+	unsigned pcmNeed = 0xc00000u;
+	for (int i = 0; i < ge->romCount; i++) {
+		const CEmuRomEntry* r = &ge->rom[i];
+		if (!r->type || _strnicmp(r->type, "pcm", 3) != 0) continue;
+		unsigned sz = 0;
+		if (!CEmuZipFsFind(fs, r->name, &sz) || !sz) continue;
+		const unsigned end = (unsigned)(r->offset < 0 ? 0 : r->offset) + sz;
+		if (end > pcmNeed) pcmNeed = end;
+	}
+	uint8_t* pcm = (uint8_t*)calloc(1, pcmNeed);
+	if (!pcm) return 0;
+	for (int i = 0; i < ge->romCount; i++) {
+		const CEmuRomEntry* r = &ge->rom[i];
+		if (!r->type || _strnicmp(r->type, "pcm", 3) != 0) continue;
+		unsigned sz = 0;
+		const unsigned char* data = CEmuZipFsFind(fs, r->name, &sz);
+		if (!data || !sz) continue;
+		unsigned off = (unsigned)(r->offset < 0 ? 0 : r->offset);
+		if (off >= pcmNeed) continue;
+		unsigned n = sz;
+		if (off + n > pcmNeed) n = pcmNeed - off;
+		for (unsigned j = 0; j + 1u < n; j += 2u) {
+			pcm[off + j] = data[j + 1u];
+			pcm[off + j + 1u] = data[j];
+		}
+	}
+	pcmRom_ = pcm;
+	pcmRomSize_ = pcmNeed;
+	if (chip_) chip_->SetPcmRom(pcmRom_, pcmRomSize_);
+
+	soundCmd_ = 0;
+	soundCmdWord_ = 0;
+	soundCmdPending_ = 0;
+	irqPulse_ = 0;
+	cpuCycles_ = 0;
+	if (chip_) chip_->Reset();
+
+	/* reset_model2_scsp: the vector table lives in RAM, copied from the ROM.
+	   soundram keeps host-order words, and the ROM image is already big-endian
+	   after the word swap above, so the 16 bytes go back through a swap. */
+	uint8_t* ram = CEmuChipScspRam();
+	if (ram) {
+		for (unsigned j = 0; j + 1u < 16u; j += 2u) {
+			ram[j] = ms1Rom_[j + 1u];
+			ram[j + 1u] = ms1Rom_[j];
+		}
+	}
+
+	CEmuM68kBusSetMs1(this);
+	m68k_init();
+	m68k_set_cpu_type(M68K_CPU_TYPE_68000);
+	m68k_set_int_ack_callback(NULL);
+	m68k_pulse_reset();
+	return 1;
+}
+
 int CHardAc::LoadRomsSegaM1(CEmuZipFs* fs, const CEmuGameEntry* ge)
 {
 	if (!fs || !ge || !segaM1Audio_) return 0;
@@ -593,6 +826,256 @@ int CHardAc::LoadRomsSegaM1(CEmuZipFs* fs, const CEmuGameEntry* ge)
 	if (chip_) chip_->Reset();
 	if (pcm_) pcm_->Reset();
 	if (pcm2_) pcm2_->Reset();
+
+	CEmuM68kBusSetMs1(this);
+	m68k_init();
+	m68k_set_cpu_type(M68K_CPU_TYPE_68000);
+	m68k_set_int_ack_callback(NULL);
+	m68k_pulse_reset();
+	return 1;
+}
+
+/* ---- Konami Hornet / GTI Club: 68000 + RF5C400 + K056800 -----------------
+
+   Hornet / nwk-tr (MAME hornet.cpp sound_memmap):
+     000000-07FFFF  program ROM (ROM_LOAD16_WORD_SWAP)
+     100000-10FFFF  work RAM
+     200000-200FFF  RF5C400
+     300000-30001F  K056800 sound side (umask16 0x00ff → odd bytes)
+     500000         soundtimer_en_w  (bit0 clear = enable IRQ1)
+     600000         soundtimer_ack_w (clear IRQ1)
+
+   GTI Club relocates RAM to 0x200000 and the RF5C400 to 0x400000; the
+   K056800 and timer ports stay put. Periodic IRQ1 fires at
+   16.9344MHz/384/128 ≈ 344.5 Hz while enabled; K056800 raises IRQ2. */
+
+static unsigned CEmuHornetK056800Off(unsigned addr)
+{
+	return ((addr >> 1) & 7u);
+}
+
+unsigned CHardAc::HornetRead16(unsigned addr)
+{
+	addr &= 0xfffffeu;
+	if (addr < 0x080000u) {
+		if (!ms1Rom_ || addr + 1u >= ms1RomSize_) return 0xffff;
+		return ((unsigned)ms1Rom_[addr] << 8) | ms1Rom_[addr + 1];
+	}
+	const unsigned ramBase = hornetGti_ ? 0x200000u : 0x100000u;
+	if (addr >= ramBase && addr <= ramBase + 0xfffeu) {
+		if (!ms1Ram_) return 0xffff;
+		const unsigned o = addr - ramBase;
+		return ((unsigned)ms1Ram_[o] << 8) | ms1Ram_[o + 1];
+	}
+	const unsigned chipBase = hornetGti_ ? 0x400000u : 0x200000u;
+	if (addr >= chipBase && addr <= chipBase + 0xffeu)
+		return CEmuChipRf5c400ReadReg(chip_, (addr - chipBase) >> 1);
+	/* K056800 / timer only visible on the low byte via Read8. */
+	return 0xffff;
+}
+
+unsigned CHardAc::HornetRead8(unsigned addr)
+{
+	if (addr < 0x080000u) {
+		if (!ms1Rom_ || addr >= ms1RomSize_) return 0xff;
+		return ms1Rom_[addr];
+	}
+	const unsigned ramBase = hornetGti_ ? 0x200000u : 0x100000u;
+	if (addr >= ramBase && addr <= ramBase + 0xffffu) {
+		if (!ms1Ram_) return 0xff;
+		return ms1Ram_[addr - ramBase];
+	}
+	const unsigned chipBase = hornetGti_ ? 0x400000u : 0x200000u;
+	if (addr >= chipBase && addr <= chipBase + 0xfffu) {
+		const unsigned v = CEmuChipRf5c400ReadReg(chip_, (addr - chipBase) >> 1);
+		return (addr & 1u) ? (v & 0xffu) : ((v >> 8) & 0xffu);
+	}
+	if (addr >= 0x300000u && addr <= 0x30001fu && (addr & 1u)) {
+		const unsigned r = CEmuHornetK056800Off(addr);
+		if (r < 4) return k056800Host_[r];
+		return 0;
+	}
+	return 0xff;
+}
+
+void CHardAc::HornetWrite16(unsigned addr, uint16_t v)
+{
+	addr &= 0xfffffeu;
+	const unsigned ramBase = hornetGti_ ? 0x200000u : 0x100000u;
+	if (addr >= ramBase && addr <= ramBase + 0xfffeu) {
+		if (!ms1Ram_) return;
+		const unsigned o = addr - ramBase;
+		ms1Ram_[o] = (uint8_t)(v >> 8);
+		ms1Ram_[o + 1] = (uint8_t)v;
+		return;
+	}
+	const unsigned chipBase = hornetGti_ ? 0x400000u : 0x200000u;
+	if (addr >= chipBase && addr <= chipBase + 0xffeu) {
+		if (chip_) chip_->Write((addr - chipBase) >> 1, v);
+		return;
+	}
+	if (addr == 0x500000u) {
+		/* soundtimer_en_w: bit0 clear enables the 344.5 Hz IRQ1. */
+		hornetTimerEn_ = (v & 1u) ? 0 : 1;
+		if (!hornetTimerEn_) hornetTimerIrq_ = 0;
+		return;
+	}
+	if (addr == 0x600000u) {
+		hornetTimerIrq_ = 0;
+		return;
+	}
+	/* Fall through to byte lanes for K056800 (umask 0x00ff). */
+	HornetWrite8(addr + 1, (uint8_t)v);
+}
+
+void CHardAc::HornetWrite8(unsigned addr, uint8_t v)
+{
+	const unsigned ramBase = hornetGti_ ? 0x200000u : 0x100000u;
+	if (addr >= ramBase && addr <= ramBase + 0xffffu) {
+		if (ms1Ram_) ms1Ram_[addr - ramBase] = v;
+		return;
+	}
+	if (addr < 0x080000u) return;
+	const unsigned chipBase = hornetGti_ ? 0x400000u : 0x200000u;
+	if (addr >= chipBase && addr <= chipBase + 0xfffu) {
+		if (!chip_) return;
+		const unsigned idx = (addr - chipBase) >> 1;
+		unsigned cur = CEmuChipRf5c400ReadReg(chip_, idx);
+		if (addr & 1u)
+			cur = (cur & 0xff00u) | v;
+		else
+			cur = (cur & 0x00ffu) | ((unsigned)v << 8);
+		chip_->Write(idx, cur);
+		return;
+	}
+	if (addr >= 0x300000u && addr <= 0x30001fu && (addr & 1u)) {
+		const unsigned r = CEmuHornetK056800Off(addr);
+		if (r < 2) {
+			k056800Snd_[r] = v;
+		} else if (r == 4) {
+			k056800IntEn_ = (v & 1) != 0;
+			if (k056800IntEn_) {
+				if (k056800Pending_)
+					k056800Irq_ = 1;
+			} else {
+				k056800Pending_ = 0;
+				k056800Irq_ = 0;
+			}
+		}
+		return;
+	}
+	if (addr == 0x500000u || addr == 0x500001u) {
+		hornetTimerEn_ = (v & 1u) ? 0 : 1;
+		if (!hornetTimerEn_) hornetTimerIrq_ = 0;
+		return;
+	}
+	if (addr == 0x600000u || addr == 0x600001u) {
+		hornetTimerIrq_ = 0;
+		return;
+	}
+}
+
+void CHardAc::HornetInjectSong(unsigned code)
+{
+	/* Catalog codes are 0x01xx0000-style: four host_to_snd bytes, high first. */
+	if (!code) return;
+	GxHostInject(
+		(uint8_t)(code >> 24),
+		(uint8_t)(code >> 16),
+		(uint8_t)(code >> 8),
+		(uint8_t)code);
+}
+
+void CHardAc::HornetTickTimer(int cycles)
+{
+	if (!hornetTimerEn_ || cycles <= 0) return;
+	/* 16 MHz CPU, IRQ at 16.9344MHz/384/128 ≈ 344.53125 Hz → ~46440 cycles. */
+	const int period = 46440;
+	hornetTimerAcc_ += cycles;
+	while (hornetTimerAcc_ >= period) {
+		hornetTimerAcc_ -= period;
+		hornetTimerIrq_ = 1;
+	}
+}
+
+int CHardAc::LoadRomsHornet(CEmuZipFs* fs, const CEmuGameEntry* ge)
+{
+	if (!fs || !ge) return 0;
+	if (ms1Rom_) { free(ms1Rom_); ms1Rom_ = NULL; ms1RomSize_ = 0; }
+	if (pcmRom_) { free(pcmRom_); pcmRom_ = NULL; pcmRomSize_ = 0; }
+
+	unsigned romNeed = 0x80000u;
+	uint8_t* prog = (uint8_t*)calloc(1, romNeed);
+	if (!prog) return 0;
+	int anyCode = 0;
+	for (int i = 0; i < ge->romCount; i++) {
+		const CEmuRomEntry* r = &ge->rom[i];
+		if (!CEmuAcIsCodeRomType(r->type)) continue;
+		unsigned sz = 0;
+		const unsigned char* data = CEmuZipFsFind(fs, r->name, &sz);
+		if (!data || !sz) continue;
+		unsigned n = sz < romNeed ? sz : romNeed;
+		/* ROM_LOAD16_WORD_SWAP → big-endian words for Musashi. */
+		for (unsigned j = 0; j + 1u < n; j += 2u) {
+			prog[j] = data[j + 1u];
+			prog[j + 1u] = data[j];
+		}
+		anyCode = 1;
+		break;
+	}
+	if (!anyCode) { free(prog); return 0; }
+	ms1Rom_ = prog;
+	ms1RomSize_ = romNeed;
+
+	if (!ms1Ram_) {
+		ms1Ram_ = (uint8_t*)malloc(0x10000);
+		if (!ms1Ram_) return 0;
+	}
+	memset(ms1Ram_, 0, 0x10000);
+
+	unsigned pcmNeed = 0;
+	for (int i = 0; i < ge->romCount; i++) {
+		const CEmuRomEntry* r = &ge->rom[i];
+		if (!r->type || _strnicmp(r->type, "pcm", 3) != 0) continue;
+		unsigned sz = 0;
+		if (!CEmuZipFsFind(fs, r->name, &sz) || !sz) continue;
+		const unsigned end = (unsigned)(r->offset < 0 ? 0 : r->offset) + sz;
+		if (end > pcmNeed) pcmNeed = end;
+	}
+	if (pcmNeed < 0x100000u) pcmNeed = 0x100000u;
+	uint8_t* pcm = (uint8_t*)calloc(1, pcmNeed);
+	if (!pcm) return 0;
+	for (int i = 0; i < ge->romCount; i++) {
+		const CEmuRomEntry* r = &ge->rom[i];
+		if (!r->type || _strnicmp(r->type, "pcm", 3) != 0) continue;
+		unsigned sz = 0;
+		const unsigned char* data = CEmuZipFsFind(fs, r->name, &sz);
+		if (!data || !sz) continue;
+		unsigned off = (unsigned)(r->offset < 0 ? 0 : r->offset);
+		if (off >= pcmNeed) continue;
+		unsigned n = sz;
+		if (off + n > pcmNeed) n = pcmNeed - off;
+		/* RF5C400 ROM is little-endian words (device_rom_interface LE). */
+		memcpy(pcm + off, data, n);
+	}
+	pcmRom_ = pcm;
+	pcmRomSize_ = pcmNeed;
+	if (chip_) chip_->SetPcmRom(pcmRom_, pcmRomSize_);
+
+	soundCmd_ = 0;
+	soundCmdWord_ = 0;
+	soundCmdPending_ = 0;
+	irqPulse_ = 0;
+	cpuCycles_ = 0;
+	memset(k056800Host_, 0, sizeof(k056800Host_));
+	memset(k056800Snd_, 0, sizeof(k056800Snd_));
+	k056800IntEn_ = 0;
+	k056800Pending_ = 0;
+	k056800Irq_ = 0;
+	hornetTimerEn_ = 0;
+	hornetTimerIrq_ = 0;
+	hornetTimerAcc_ = 0;
+	if (chip_) chip_->Reset();
 
 	CEmuM68kBusSetMs1(this);
 	m68k_init();

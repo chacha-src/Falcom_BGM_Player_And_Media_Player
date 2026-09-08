@@ -151,6 +151,8 @@ int CDriverMsx::Render(int16_t* stereo, int frames)
 		int16_t opllS = 0;
 		if (hw_->ChipAy())
 			hw_->ChipAy()->Render(ayBuf, 1);
+		if (hw_->ChipScc())
+			hw_->ChipScc()->MixAdd(ayBuf, 1, 256);
 		if (hw_->Opll()) {
 			OPLL* ochip = (OPLL*)hw_->Opll();
 			int32_t o = (int32_t)OPLL_calc(ochip) * 5;

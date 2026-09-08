@@ -329,6 +329,72 @@ static int CEmuNeoZ80Score(const char* name, const char* type, unsigned sz)
 	return score;
 }
 
+/* ---- NEO-PCM2 encrypted V (ADPCM) ROMs ---- */
+
+static int CEmuNeoOpt(const CEmuGameEntry* ge, const char* name, int defVal)
+{
+	if (!ge || !name) return defVal;
+	for (int i = 0; i < ge->optCount; i++) {
+		if (_stricmp(ge->opt[i].name, name) != 0) continue;
+		const char* v = ge->opt[i].value;
+		if (!v || !v[0]) return defVal;
+		return (int)strtol(v, NULL, 0);
+	}
+	return defVal;
+}
+
+/* MAME pcm2_prot_device::decrypt — address lines swapped in groups of `value`
+   bytes. Catalog spells this neo_pcm2_snk_1999 (value 4 / 8 / 16). */
+static void CEmuNeoPcm2Decrypt(uint8_t* rom, unsigned size, int value)
+{
+	if (!rom || value < 2 || (value & 3) != 0) return;
+	const unsigned words = (unsigned)value / 2u;
+	uint16_t* p = (uint16_t*)rom;
+	uint16_t buf[16];
+	if (words > (unsigned)(sizeof(buf) / sizeof(buf[0]))) return;
+	for (unsigned i = 0; i + words <= size / 2u; i += words) {
+		memcpy(buf, &p[i], (size_t)value);
+		for (unsigned j = 0; j < words; j++)
+			p[i + j] = buf[j ^ (unsigned)(value / 4)];
+	}
+}
+
+/* MAME pcm2_prot_device::swap — the later PCM2 titles add an address/data
+   scramble over a full 16MiB V ROM. Catalog spells this neo_pcm2_swap (0..6).
+   The bitswap in MAME only exchanges address bits 0 and 16. */
+static void CEmuNeoPcm2Swap(uint8_t* rom, unsigned size, int value)
+{
+	static const unsigned kAddrs[7][2] = {
+		{ 0x000000u, 0xa5000u }, { 0xffce20u, 0x01000u }, { 0xfe2cf6u, 0x4e001u },
+		{ 0xffac28u, 0xc2000u }, { 0xfeb2c0u, 0x0a000u }, { 0xff14eau, 0xa7001u },
+		{ 0xffb440u, 0x02000u }
+	};
+	static const uint8_t kXor[7][8] = {
+		{ 0xf9,0xe0,0x5d,0xf3,0xea,0x92,0xbe,0xef },
+		{ 0xc4,0x83,0xa8,0x5f,0x21,0x27,0x64,0xaf },
+		{ 0xc3,0xfd,0x81,0xac,0x6d,0xe7,0xbf,0x9e },
+		{ 0xc3,0xfd,0x81,0xac,0x6d,0xe7,0xbf,0x9e },
+		{ 0xcb,0x29,0x7d,0x43,0xd2,0x3a,0xc2,0xb4 },
+		{ 0x4b,0xa4,0x63,0x46,0xf0,0x91,0xea,0x62 },
+		{ 0x4b,0xa4,0x63,0x46,0xf0,0x91,0xea,0x62 }
+	};
+	const unsigned kSpan = 0x1000000u;
+	if (!rom || value < 0 || value > 6 || size < kSpan) return;
+
+	uint8_t* buf = (uint8_t*)malloc(kSpan);
+	if (!buf) return;
+	memcpy(buf, rom, kSpan);
+	for (unsigned i = 0; i < kSpan; i++) {
+		/* bitswap<24>(i, …,0,15..1,16): address bits 0 and 16 exchanged. */
+		unsigned j = (i & ~0x00010001u)
+			| (((i >> 0) & 1u) << 16) | (((i >> 16) & 1u) << 0);
+		j ^= kAddrs[value][1];
+		const unsigned d = (i + kAddrs[value][0]) & 0xffffffu;
+		rom[j] = buf[d] ^ kXor[value][j & 7u];
+	}
+	free(buf);
+}
+
 static int CEmuNeoAdpcmScore(const char* name, const char* type, unsigned sz)
 {
 	if (!name || !sz) return -1000;
@@ -447,6 +513,17 @@ int CHardNeo::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCod
 	/* CMC50 encrypted M1 (mslug5 / kof2000-class 512K): descramble before map. */
 	if (m1Rom_ && m1Size_ >= 0x80000u)
 		CEmuNeoCmc50M1Decrypt(m1Rom_, m1Size_);
+
+	/* NEO-PCM2 encrypted V ROMs. Left scrambled the YM2610 walks noise-shaped
+	   garbage and every one of these titles renders silent. */
+	if (adpcmA_ && adpcmASize_) {
+		const int snk1999 = CEmuNeoOpt(ge, "neo_pcm2_snk_1999", 0);
+		if (snk1999 > 0)
+			CEmuNeoPcm2Decrypt(adpcmA_, adpcmASize_, snk1999);
+		const int swapIdx = CEmuNeoOpt(ge, "neo_pcm2_swap", -1);
+		if (swapIdx >= 0)
+			CEmuNeoPcm2Swap(adpcmA_, adpcmASize_, swapIdx);
+	}
 
 	/* Fixed bank $0000-$7FFF = first 32KiB of M1 */
 	const unsigned fix = m1Size_ < 0x8000u ? m1Size_ : 0x8000u;

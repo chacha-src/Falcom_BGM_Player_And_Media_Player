@@ -1,4 +1,4 @@
-﻿/* license:BSD-3-Clause
+/* license:BSD-3-Clause
  * copyright-holders:Aaron Giles
  * Ensoniq ES5505 (OTIS) core — adapted from MAME src/devices/sound/es5506.cpp
  * for CEmu (MSVC / no MAME device framework).
@@ -6,6 +6,7 @@
 #include "StdAfx.h"
 #include "cemu_chip_es5505.h"
 #include "cemu_chip.h"
+#include "../fmmon/fmmon_shadow.h"
 #include <string.h>
 #include <stdlib.h>
 
@@ -88,6 +89,8 @@ public:
 		memset(voice_, 0, sizeof(voice_));
 		memset(voiceBank_, 0, sizeof(voiceBank_));
 		memset(volLut_, 0, sizeof(volLut_));
+		memset(monOn_, 0, sizeof(monOn_));
+		memset(monMidi_, 0xff, sizeof(monMidi_));
 		ComputeTables();
 		GetAccumMask();
 		for (int j = 0; j < kEs5505Voices; j++) {
@@ -108,6 +111,8 @@ public:
 		voiceIndex_ = 0;
 		phase_ = 0;
 		memset(voiceBank_, 0, sizeof(voiceBank_));
+		memset(monOn_, 0, sizeof(monOn_));
+		memset(monMidi_, 0xff, sizeof(monMidi_));
 		for (int j = 0; j < kEs5505Voices; j++) {
 			memset(&voice_[j], 0, sizeof(voice_[j]));
 			voice_[j].index = (uint8_t)j;
@@ -124,12 +129,15 @@ public:
 		const unsigned offset = (unsigned)(addr & 0x0f);
 		const uint16_t d = (uint16_t)(data & 0xffff);
 		Voice* voice = &voice_[page_ & 0x1f];
-		if (page_ < 0x20)
+		if (page_ < 0x20) {
 			RegWriteLow(voice, offset, d);
-		else if (page_ < 0x40)
+			UpdateMon(voice);
+		} else if (page_ < 0x40) {
 			RegWriteHigh(voice, offset, d);
-		else
+			UpdateMon(voice);
+		} else {
 			RegWriteTest(offset, d);
+		}
 	}
 
 	uint16_t ReadReg(uint32_t addr)
@@ -222,6 +230,31 @@ private:
 		uint8_t index;
 		uint8_t filtcount;
 	};
+
+	/* FM モニタ: 停止ビットが落ちて音量とレートが載っている声を発音とみなす。
+	   サンプルの原音高は不明なので、等倍再生 (accum が 1 サンプル/step) を
+	   C4 とした相対レートで音名を出す (PitchRateToMidi と同じ規約)。 */
+	void UpdateMon(const Voice* voice)
+	{
+		if (!voice) return;
+		const int v = (int)voice->index;
+		if (v < 0 || v >= kEs5505Voices) return;
+		const int on = (!(voice->control & kControlStopMask)
+			&& (voice->lvol || voice->rvol)
+			&& voice->freqcount) ? 1 : 0;
+		int midi = 60;
+		if (on) {
+			const double unity = (double)(1u << kAddrFracBit);
+			midi = FmMonShadowHzToMidi(261.6255653
+				* (double)voice->freqcount / unity);
+			if (midi < 0) midi = 60;
+		}
+		if (monOn_[v] == (uint8_t)on && (!on || monMidi_[v] == (uint8_t)midi))
+			return;
+		monOn_[v] = (uint8_t)on;
+		monMidi_[v] = (uint8_t)midi;
+		FmMonShadowPcmNote(v, midi, on);
+	}
 
 	void ComputeTables()
 	{
@@ -351,6 +384,7 @@ private:
 		case 0:
 		case kControlBle:
 			voice->control |= kControlStop0;
+			UpdateMon(voice);
 			break;
 		case kControlLpe:
 			accum = (voice->start + (accum - voice->end)) & addrAccMask_;
@@ -371,6 +405,7 @@ private:
 		case 0:
 		case kControlBle:
 			voice->control |= kControlStop0;
+			UpdateMon(voice);
 			break;
 		case kControlLpe:
 			accum = (voice->end - (voice->start - accum)) & addrAccMask_;
@@ -630,6 +665,8 @@ private:
 	uint64_t romWords_;
 	uint8_t page_;
 	uint8_t activeVoices_;
+	uint8_t monOn_[kEs5505Voices];
+	uint8_t monMidi_[kEs5505Voices];
 	uint16_t mode_;
 	uint8_t irqv_;
 	uint32_t voiceIndex_;

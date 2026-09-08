@@ -800,6 +800,10 @@ struct save{
 	int s3_pcm_sfx;             // 1=PCM合成効果音ON 0=OFF
 	// --- Soft3D メッシュ密度（末尾追記。旧.datは5）。0=軽量 1..9 10=緻密 11..19 20=美麗。描画量 1,8,..160 ---
 	int s3_mesh_density;
+	// --- Soft3D グラフィック品質 0..9（UI 1..10）。末尾追記 ---
+	int s3_gfx_quality;          // 0..9（5≒旧既定）
+	int s3_gfx_auto;             // 1=GPU自動 0=ユーザー固定
+	TCHAR s3_gfx_gpu_tag[64];    // 前回自動適用時のアダプタ名
 	// --- CDプレイヤー（末尾追記。旧.datは offsetof で初期化）---
 	int cdWinX, cdWinY, cdWinW, cdWinH;
 	int cdMainLock;

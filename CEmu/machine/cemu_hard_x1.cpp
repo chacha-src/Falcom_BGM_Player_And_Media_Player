@@ -90,7 +90,7 @@ CHardX1::CHardX1()
 	, chipAy_(NULL)
 	, sampleRate_(44100)
 	, cpuCycles_(0)
-	, stageLimit_(0x10000)
+	, stageLimit_(0x10000u)
 	, ctcVectorBase_(0)
 	, ctcVectorProgrammed_(0)
 {	hardKind = KIND_X1;
@@ -703,12 +703,12 @@ int CHardX1::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode
 			mdataSize_ = (unsigned)ms;
 		}
 		/* Nearest code blob above mdata_addr caps StageBgm writes. */
-		stageLimit_ = 0x10000;
+		stageLimit_ = 0x10000u;
 		for (int i = 0; i < ge->romCount; i++) {
 			const CEmuRomEntry* r = &ge->rom[i];
 			if (_stricmp(r->type, "code") != 0) continue;
 			if (r->offset > (int)mdataAddr_ && r->offset < (int)stageLimit_)
-				stageLimit_ = (uint16_t)r->offset;
+				stageLimit_ = (uint32_t)r->offset;
 		}
 	}
 

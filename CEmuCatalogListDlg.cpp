@@ -3,12 +3,16 @@
 #include "ogg.h"
 #include "oggDlg.h"
 #include "CEmuCatalogListDlg.h"
+#include "CMediaPlayerDlg.h"
 #include "PlayList.h"
 #include "CEmu/cemu_mgr.h"
 #include "CEmu/cemu_catalog.h"
 #include "CEmu/cemu_modepref.h"
 #include "CImageBase.h"
 #include <algorithm>
+#include <unordered_set>
+#include <unordered_map>
+#include <string>
 #include <shlobj.h>
 
 #pragma comment(lib, "shell32.lib")
@@ -16,6 +20,11 @@
 extern CPlayList* pl;
 extern int gameon;
 extern int plcnt;
+extern CMediaPlayerDlg* mp;
+
+enum { WM_CEMU_CAT_FILTER = WM_APP + 70 };
+
+static CEmuCatalogListDlg* g_cemuCatList = nullptr;
 
 namespace {
 
@@ -335,33 +344,162 @@ static void CEmuStripModeParenFromTitle(CString& name)
 	name.TrimRight();
 }
 
-static int CEmuSameArchiveGroup(const CEmuGameEntry* a, const CEmuGameEntry* b)
+static void CEmuArchivePrimaryStem(const char* archive, char* out, int outCap)
 {
-	if (!a || !b || !a->archive[0] || !b->archive[0]) return 0;
-	if (_stricmp(a->archive, b->archive) != 0) return 0;
-	if (a->dataDir[0] && b->dataDir[0] && _stricmp(a->dataDir, b->dataDir) != 0)
-		return 0;
-	return 1;
-}
-
-/* 同一 archive(+dataDir) の先頭エントリか。音源違いを1行にまとめる。 */
-static int CEmuIsFirstInArchiveGroup(const CEmuCatalog* cat, int index)
-{
-	if (!cat || index < 0 || index >= cat->count) return 0;
-	const CEmuGameEntry* ge = cat->entry[index];
-	if (!ge || !ge->archive[0]) return 0;
-	for (int j = 0; j < index; j++) {
-		const CEmuGameEntry* prev = cat->entry[j];
-		if (CEmuSameArchiveGroup(prev, ge))
-			return 0;
+	if (!out || outCap <= 0) return;
+	out[0] = 0;
+	if (!archive || !archive[0]) return;
+	strncpy_s(out, (size_t)outCap, archive, _TRUNCATE);
+	char* comma = strchr(out, ',');
+	if (comma) *comma = 0;
+	for (char* p = out; *p; p++) {
+		if (*p >= 'A' && *p <= 'Z') *p = (char)(*p - 'A' + 'a');
 	}
-	return 1;
 }
 
-static bool CatGroupMatchesFilter(const CEmuCatalog* cat, const CEmuGameEntry* ge,
-	const CString& filterRaw)
+/* Scan dir + immediate subdirs for *.zip (merge into stems / stemToPath). */
+static void CEmuScanLocalZipStemsMerge(const wchar_t* root,
+	std::unordered_set<std::string>& stems,
+	std::unordered_map<std::string, std::wstring>& stemToPath)
 {
-	if (!ge) return false;
+	if (!root || !root[0]) return;
+
+	auto addZip = [&](const wchar_t* fullPath, const wchar_t* fileName) {
+		if (!fullPath || !fileName) return;
+		wchar_t stemW[CEMU_ARCHIVE_NAME];
+		wcsncpy_s(stemW, fileName, _TRUNCATE);
+		wchar_t* dot = wcsrchr(stemW, L'.');
+		if (dot) *dot = 0;
+		if (!stemW[0]) return;
+		char stemA[CEMU_ARCHIVE_NAME];
+		WideCharToMultiByte(CP_UTF8, 0, stemW, -1, stemA, (int)sizeof(stemA), NULL, NULL);
+		for (char* p = stemA; *p; p++) {
+			if (*p >= 'A' && *p <= 'Z') *p = (char)(*p - 'A' + 'a');
+		}
+		if (!stemA[0]) return;
+		stems.insert(stemA);
+		if (stemToPath.find(stemA) == stemToPath.end())
+			stemToPath.emplace(stemA, fullPath);
+	};
+
+	auto scanDir = [&](const wchar_t* dir) {
+		wchar_t pattern[MAX_PATH];
+		_snwprintf_s(pattern, _TRUNCATE, L"%s\\*.zip", dir);
+		WIN32_FIND_DATAW fd = {};
+		HANDLE h = FindFirstFileW(pattern, &fd);
+		if (h == INVALID_HANDLE_VALUE) return;
+		do {
+			if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
+			wchar_t full[MAX_PATH];
+			_snwprintf_s(full, _TRUNCATE, L"%s\\%s", dir, fd.cFileName);
+			addZip(full, fd.cFileName);
+		} while (FindNextFileW(h, &fd));
+		FindClose(h);
+	};
+
+	scanDir(root);
+	wchar_t pattern[MAX_PATH];
+	_snwprintf_s(pattern, _TRUNCATE, L"%s\\*", root);
+	WIN32_FIND_DATAW fd = {};
+	HANDLE h = FindFirstFileW(pattern, &fd);
+	if (h == INVALID_HANDLE_VALUE) return;
+	do {
+		if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) continue;
+		if (fd.cFileName[0] == L'.' && (fd.cFileName[1] == 0
+			|| (fd.cFileName[1] == L'.' && fd.cFileName[2] == 0)))
+			continue;
+		wchar_t sub[MAX_PATH];
+		_snwprintf_s(sub, _TRUNCATE, L"%s\\%s", root, fd.cFileName);
+		scanDir(sub);
+		/* One more level (e.g. MyRoms\x68k\*.zip when user picked MyRoms). */
+		wchar_t pattern2[MAX_PATH];
+		_snwprintf_s(pattern2, _TRUNCATE, L"%s\\*", sub);
+		WIN32_FIND_DATAW fd2 = {};
+		HANDLE h2 = FindFirstFileW(pattern2, &fd2);
+		if (h2 == INVALID_HANDLE_VALUE) continue;
+		do {
+			if (!(fd2.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) continue;
+			if (fd2.cFileName[0] == L'.' && (fd2.cFileName[1] == 0
+				|| (fd2.cFileName[1] == L'.' && fd2.cFileName[2] == 0)))
+				continue;
+			wchar_t sub2[MAX_PATH];
+			_snwprintf_s(sub2, _TRUNCATE, L"%s\\%s", sub, fd2.cFileName);
+			scanDir(sub2);
+		} while (FindNextFileW(h2, &fd2));
+		FindClose(h2);
+	} while (FindNextFileW(h, &fd));
+	FindClose(h);
+}
+
+static void CEmuZipScanRootPath(wchar_t* out, int outCch)
+{
+	if (!out || outCch <= 0) return;
+	out[0] = 0;
+	wchar_t base[MAX_PATH] = {};
+	if (FAILED(SHGetFolderPathW(NULL, CSIDL_LOCAL_APPDATA, NULL, SHGFP_TYPE_CURRENT, base)) || !base[0])
+		return;
+	_snwprintf_s(out, (size_t)outCch, _TRUNCATE, L"%s\\oggYSED", base);
+	CreateDirectoryW(out, NULL);
+	wcscat_s(out, (size_t)outCch, L"\\cemu_zip_root.txt");
+}
+
+static void CEmuLoadZipScanRoot(wchar_t* out, int outCch)
+{
+	if (!out || outCch <= 0) return;
+	out[0] = 0;
+	wchar_t path[MAX_PATH] = {};
+	CEmuZipScanRootPath(path, MAX_PATH);
+	if (!path[0]) return;
+	HANDLE h = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+	if (h == INVALID_HANDLE_VALUE) return;
+	char buf[MAX_PATH * 3] = {};
+	DWORD rd = 0;
+	ReadFile(h, buf, (DWORD)sizeof(buf) - 1, &rd, NULL);
+	CloseHandle(h);
+	if (rd == 0) return;
+	buf[rd] = 0;
+	while (rd > 0 && (buf[rd - 1] == '\r' || buf[rd - 1] == '\n' || buf[rd - 1] == ' '))
+		buf[--rd] = 0;
+	MultiByteToWideChar(CP_UTF8, 0, buf, -1, out, outCch);
+	if (out[0] && GetFileAttributesW(out) == INVALID_FILE_ATTRIBUTES)
+		out[0] = 0;
+}
+
+static void CEmuSaveZipScanRoot(const wchar_t* root)
+{
+	wchar_t path[MAX_PATH] = {};
+	CEmuZipScanRootPath(path, MAX_PATH);
+	if (!path[0]) return;
+	if (!root || !root[0]) {
+		DeleteFileW(path);
+		return;
+	}
+	char utf8[MAX_PATH * 3] = {};
+	WideCharToMultiByte(CP_UTF8, 0, root, -1, utf8, (int)sizeof(utf8), NULL, NULL);
+	HANDLE h = CreateFileW(path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+	if (h == INVALID_HANDLE_VALUE) return;
+	DWORD wr = 0;
+	WriteFile(h, utf8, (DWORD)strlen(utf8), &wr, NULL);
+	CloseHandle(h);
+}
+
+static size_t CEmuCollectLocalZipStems(std::unordered_set<std::string>& stems,
+	std::unordered_map<std::string, std::wstring>& stemToPath)
+{
+	stems.clear();
+	stemToPath.clear();
+	CEmuMgr* mgr = CEmuMgrGet();
+	if (mgr && mgr->dataRoot[0])
+		CEmuScanLocalZipStemsMerge(mgr->dataRoot, stems, stemToPath);
+	wchar_t extra[MAX_PATH] = {};
+	CEmuLoadZipScanRoot(extra, MAX_PATH);
+	if (extra[0])
+		CEmuScanLocalZipStemsMerge(extra, stems, stemToPath);
+	return stems.size();
+}
+
+static bool CatRowMatchesFilter(const CString& hayLower, const CString& filterRaw)
+{
 	CString raw = filterRaw;
 	raw.Trim();
 	if (raw.IsEmpty()) return true;
@@ -370,44 +508,13 @@ static bool CatGroupMatchesFilter(const CEmuCatalog* cat, const CEmuGameEntry* g
 	raw.Replace(_T(';'), _T(' '));
 	raw.Replace(_T('/'), _T(' '));
 
-	CString hay;
-	hay.Format(L"%hs %hs %hs %hs %s",
-		ge->archive[0] ? ge->archive : "",
-		ge->platform[0] ? ge->platform : "",
-		ge->subtype[0] ? ge->subtype : "",
-		ge->dataDir[0] ? ge->dataDir : "",
-		ge->name[0] ? ge->name : L"");
-	if (cat && ge->archive[0]) {
-		CEmuArchiveMode modes[CEMU_MODE_MAX];
-		const int n = CEmuCatalogListArchiveModes(cat, ge->archive, ge->dataDir, NULL,
-			modes, CEMU_MODE_MAX);
-		for (int i = 0; i < n; i++) {
-			if (modes[i].tag[0]) {
-				hay += L' ';
-				hay += modes[i].tag;
-			}
-			if (modes[i].subtype[0]) {
-				hay += L' ';
-				hay += modes[i].subtype;
-			}
-			if (modes[i].entryIndex >= 0 && modes[i].entryIndex < cat->count) {
-				const CEmuGameEntry* e = cat->entry[modes[i].entryIndex];
-				if (e && e->name[0]) {
-					hay += L' ';
-					hay += e->name;
-				}
-			}
-		}
-	}
-	hay.MakeLower();
-
 	for (int p = 0; p < raw.GetLength(); ) {
 		while (p < raw.GetLength() && raw[p] == _T(' ')) ++p;
 		if (p >= raw.GetLength()) break;
 		const int start = p;
 		while (p < raw.GetLength() && raw[p] != _T(' ')) ++p;
 		CString t = raw.Mid(start, p - start);
-		if (!t.IsEmpty() && hay.Find(t) < 0)
+		if (!t.IsEmpty() && hayLower.Find(t) < 0)
 			return false;
 	}
 	return true;
@@ -442,6 +549,35 @@ static const CEmuGameEntry* CEmuPickGroupRepresentative(const CEmuCatalog* cat,
 	return best ? best : ge;
 }
 
+static CString CEmuBuildFilterHay(const CEmuCatalog* cat, const CEmuGameEntry* ge,
+	const CString& modes)
+{
+	CString hay;
+	hay.Format(L"%hs %hs %hs %hs %s %s",
+		ge->archive[0] ? ge->archive : "",
+		ge->platform[0] ? ge->platform : "",
+		ge->subtype[0] ? ge->subtype : "",
+		ge->dataDir[0] ? ge->dataDir : "",
+		ge->name[0] ? ge->name : L"",
+		(LPCTSTR)modes);
+	if (cat && ge->archive[0]) {
+		CEmuArchiveMode m[CEMU_MODE_MAX];
+		const int n = CEmuCatalogListArchiveModes(cat, ge->archive, ge->dataDir, NULL,
+			m, CEMU_MODE_MAX);
+		for (int i = 0; i < n; i++) {
+			if (m[i].entryIndex >= 0 && m[i].entryIndex < cat->count) {
+				const CEmuGameEntry* e = cat->entry[m[i].entryIndex];
+				if (e && e->name[0]) {
+					hay += L' ';
+					hay += e->name;
+				}
+			}
+		}
+	}
+	hay.MakeLower();
+	return hay;
+}
+
 } // namespace
 
 /* PlayList.cpp から公開 */
@@ -456,48 +592,46 @@ void CEmuCatListCtrl::BuildToolTipText(int row, int col, CString& out)
 	UNREFERENCED_PARAMETER(col);
 	out.Empty();
 	if (row < 0) return;
-	const DWORD_PTR data = GetItemData(row);
-	const CEmuGameEntry* ge = (const CEmuGameEntry*)data;
-	if (!ge) return;
-	CEmuMgr* mgr = CEmuMgrGet();
-	const CEmuCatalog* cat = mgr ? &mgr->catalog : NULL;
-	CString modes = CEmuJoinArchiveModeTags(cat, ge);
-	CString title = ge->name[0] ? ge->name : L"(no name)";
-	CEmuStripModeParenFromTitle(title);
+	const CEmuCatListRow* rowp = (const CEmuCatListRow*)GetItemData(row);
+	if (!rowp || !rowp->ge) return;
+	const CEmuGameEntry* ge = rowp->ge;
+	CString modes = rowp->modes;
+	CString title = rowp->title;
 	out.Format(LL14(
 		L"タイトル: %s\nアーカイブ: %hs\n機種: %hs\n音源: %s\ndata: %hs\n"
-		L"（音源はプレイリストの右クリックで切り替え）",
+		L"zip: %s\n（音源はプレイリストの右クリックで切り替え）",
 		L"Title: %s\nArchive: %hs\nPlatform: %hs\nSound: %s\ndata: %hs\n"
-		L"(Switch sound from the playlist right-click menu)",
+		L"zip: %s\n(Switch sound from the playlist right-click menu)",
 		L"Titre: %s\nArchive: %hs\nPlateforme: %hs\nSon: %s\ndata: %hs\n"
-		L"(Changer le son via le menu contextuel de la liste)",
+		L"zip: %s\n(Changer le son via le menu contextuel de la liste)",
 		L"Titolo: %s\nArchivio: %hs\nPiattaforma: %hs\nSuono: %s\ndata: %hs\n"
-		L"(Cambia il suono dal menu contestuale della playlist)",
+		L"zip: %s\n(Cambia il suono dal menu contestuale della playlist)",
 		L"Titulo: %s\nArchivo: %hs\nPlataforma: %hs\nSonido: %s\ndata: %hs\n"
-		L"(Cambia el sonido desde el menu contextual de la lista)",
+		L"zip: %s\n(Cambia el sonido desde el menu contextual de la lista)",
 		L"제목: %s\n아카이브: %hs\n기종: %hs\n음원: %s\ndata: %hs\n"
-		L"(음원은 플레이리스트 우클릭으로 전환)",
+		L"zip: %s\n(음원은 플레이리스트 우클릭으로 전환)",
 		L"标题：%s\n归档：%hs\n机种：%hs\n音源：%s\ndata：%hs\n"
-		L"（音源可在播放列表右键菜单切换）",
+		L"zip：%s\n（音源可在播放列表右键菜单切换）",
 		L"العنوان: %s\nالأرشيف: %hs\nالمنصة: %hs\nالصوت: %s\ndata: %hs\n"
-		L"(بدّل الصوت من قائمة التشغيل)",
+		L"zip: %s\n(بدّل الصوت من قائمة التشغيل)",
 		L"Название: %s\nАрхив: %hs\nПлатформа: %hs\nЗвук: %s\ndata: %hs\n"
-		L"(Звук переключается в меню плейлиста)",
+		L"zip: %s\n(Звук переключается в меню плейлиста)",
 		L"Titel: %s\nArchiv: %hs\nPlattform: %hs\nSound: %s\ndata: %hs\n"
-		L"(Sound per Playlist-Kontextmenu wechseln)",
+		L"zip: %s\n(Sound per Playlist-Kontextmenu wechseln)",
 		L"Titulo: %s\nArquivo: %hs\nPlataforma: %hs\nSom: %s\ndata: %hs\n"
-		L"(Troque o som no menu da playlist)",
+		L"zip: %s\n(Troque o som no menu da playlist)",
 		L"Titel: %s\nArchief: %hs\nPlatform: %hs\nGeluid: %s\ndata: %hs\n"
-		L"(Wissel geluid via playlist-snelmenu)",
+		L"zip: %s\n(Wissel geluid via playlist-snelmenu)",
 		L"Tytul: %s\nArchiwum: %hs\nPlatforma: %hs\nDzwiek: %s\ndata: %hs\n"
-		L"(Dzwiek zmienisz w menu playlisty)",
+		L"zip: %s\n(Dzwiek zmienisz w menu playlisty)",
 		L"Baslik: %s\nArsiv: %hs\nPlatform: %hs\nSes: %s\ndata: %hs\n"
-		L"(Sesi playlist sag tik menuden degistir)"),
+		L"zip: %s\n(Sesi playlist sag tik menuden degistir)"),
 		(LPCTSTR)title,
 		ge->archive[0] ? ge->archive : "-",
 		ge->platform[0] ? ge->platform : "-",
 		modes.IsEmpty() ? L"-" : (LPCTSTR)modes,
-		ge->dataDir[0] ? ge->dataDir : "-");
+		ge->dataDir[0] ? ge->dataDir : "-",
+		rowp->zipPath.IsEmpty() ? L"-" : (LPCTSTR)rowp->zipPath);
 }
 
 IMPLEMENT_DYNAMIC(CEmuCatalogListDlg, CCustomBlurDialogBase)
@@ -527,11 +661,25 @@ BEGIN_MESSAGE_MAP(CEmuCatalogListDlg, CCustomBlurDialogBase)
 	ON_BN_CLICKED(IDC_CEMU_CAT_HELP, &CEmuCatalogListDlg::OnBnClickedHelp)
 	ON_EN_CHANGE(IDC_CEMU_CAT_FILTER, &CEmuCatalogListDlg::OnEnChangeFilter)
 	ON_NOTIFY(NM_DBLCLK, IDC_CEMU_CAT_LIST, &CEmuCatalogListDlg::OnNMDblclkList)
+	ON_MESSAGE(WM_CEMU_CAT_FILTER, &CEmuCatalogListDlg::OnFilterApply)
 	ON_WM_SIZE()
 	ON_WM_GETMINMAXINFO()
 	ON_WM_DESTROY()
+	ON_WM_CLOSE()
+	ON_WM_ACTIVATE()
 cmn(CEmuCatalogListDlg);
-void CEmuCatalogListDlg::ShowModal(CWnd* pParent)
+
+void CEmuCatalogListDlg::CloseIfOpen()
+{
+	if (g_cemuCatList && ::IsWindow(g_cemuCatList->GetSafeHwnd()))
+		g_cemuCatList->DestroyWindow();
+	else if (g_cemuCatList) {
+		delete g_cemuCatList;
+		g_cemuCatList = nullptr;
+	}
+}
+
+void CEmuCatalogListDlg::Show(CWnd* pParent)
 {
 	if (!CEmuHasExeArcdata()) {
 		AfxMessageBox(LL14(
@@ -551,9 +699,80 @@ void CEmuCatalogListDlg::ShowModal(CWnd* pParent)
 			L"exe yaninda arcdata.zip yok."), MB_ICONINFORMATION);
 		return;
 	}
-	CEmuCatalogListDlg dlg(pParent);
-	dlg.DoModal();
+
+	CEmuMgrEnsureCatalog(CEmuMgrGet());
+
+	/* Prefer MP as owner so closing MP destroys this window with it. */
+	CWnd* owner = pParent;
+	if (mp && ::IsWindow(mp->GetSafeHwnd()))
+		owner = mp;
+	else if (!owner)
+		owner = AfxGetMainWnd();
+
+	std::unordered_set<std::string> stems;
+	std::unordered_map<std::string, std::wstring> stemToPath;
+	CEmuCollectLocalZipStems(stems, stemToPath);
+	if (stems.empty()) {
+		wchar_t folder[MAX_PATH] = {};
+		if (!CEmuBrowseFolder(owner, folder, MAX_PATH))
+			return;
+		CEmuSaveZipScanRoot(folder);
+		stems.clear();
+		stemToPath.clear();
+		CEmuCollectLocalZipStems(stems, stemToPath);
+		if (stems.empty()) {
+			AfxMessageBox(LL14(
+				L"選んだフォルダ配下に対応 zip が見つかりませんでした。",
+				L"No matching zips were found under the chosen folder.",
+				L"Aucun zip correspondant sous le dossier choisi.",
+				L"Nessun zip corrispondente nella cartella scelta.",
+				L"No hay zips coincidentes en la carpeta elegida.",
+				L"선택한 폴더 아래에 대응 zip이 없습니다.",
+				L"所选文件夹下没有对应的 zip。",
+				L"لا توجد ملفات zip مطابقة تحت المجلد المختار.",
+				L"В выбранной папке нет подходящих zip.",
+				L"Unter dem gewählten Ordner keine passenden Zips.",
+				L"Nenhum zip correspondente na pasta escolhida.",
+				L"Geen passende zips onder de gekozen map.",
+				L"Brak pasujacych zip w wybranym folderze.",
+				L"Secilen klasorde eslesen zip yok."), MB_ICONINFORMATION);
+			return;
+		}
+	}
+
+	if (g_cemuCatList && ::IsWindow(g_cemuCatList->GetSafeHwnd())) {
+		g_cemuCatList->BuildRowCache();
+		g_cemuCatList->ApplyFilterToList();
+		g_cemuCatList->ShowWindow(SW_SHOW);
+		g_cemuCatList->SetForegroundWindow();
+		return;
+	}
+	if (g_cemuCatList) {
+		delete g_cemuCatList;
+		g_cemuCatList = nullptr;
+	}
+
+	CEmuCatalogListDlg* dlg = new CEmuCatalogListDlg(owner);
+	if (!dlg->Create(CEmuCatalogListDlg::IDD, owner)) {
+		delete dlg;
+		return;
+	}
+	g_cemuCatList = dlg;
+	dlg->ShowWindow(SW_SHOW);
+	dlg->SetForegroundWindow();
 }
+
+void CEmuCatalogListDlg::PostNcDestroy()
+{
+	if (g_cemuCatList == this)
+		g_cemuCatList = nullptr;
+	CCustomBlurDialogBase::PostNcDestroy();
+	delete this;
+}
+
+void CEmuCatalogListDlg::OnOK() { DestroyWindow(); }
+void CEmuCatalogListDlg::OnCancel() { DestroyWindow(); }
+void CEmuCatalogListDlg::OnClose() { DestroyWindow(); }
 
 BOOL CEmuCatalogListDlg::OnInitDialog()
 {
@@ -565,20 +784,20 @@ BOOL CEmuCatalogListDlg::OnInitDialog()
 		L"Lista obslugi Cemu", L"Cemu destek listesi"));
 	if (m_desc.GetSafeHwnd())
 		m_desc.SetWindowText(LL14(
-			L"ダブルクリックでプレイリストへ追加して再生（同一zipの音源違いは1行。切替はプレイリストの右クリック）",
-			L"Double-click to add and play (sound variants share one row; switch via playlist right-click)",
-			L"Double-clic pour ajouter et lire (variantes son sur une ligne ; menu de la liste)",
-			L"Doppio clic per aggiungere e riprodurre (varianti audio in una riga; menu playlist)",
-			L"Doble clic para anadir y reproducir (variantes de sonido en una fila; menu de lista)",
-			L"더블클릭으로 추가·재생(같은 zip 음원은 한 줄. 전환은 플레이리스트 우클릭)",
-			L"双击加入并播放（同 zip 音源合并一行；播放列表右键切换）",
-			L"نقر مزدوج للإضافة والتشغيل (صف واحد للصوت؛ التبديل من القائمة)",
-			L"Двойной клик — в список (варианты звука в одной строке; меню плейлиста)",
-			L"Doppelklick: abspielen (Sound-Varianten in einer Zeile; Playlist-Menü)",
-			L"Duplo clique: tocar (variantes de som numa linha; menu da playlist)",
-			L"Dubbelklik: spelen (geluidsvarianten op één regel; playlist-menu)",
-			L"Dwuklik: odtworz (warianty dzwieku w jednym wierszu; menu playlisty)",
-			L"Cift tik: cal (ses varyantlari tek satir; playlist sag tik)"));
+			L"ダブルクリックでプレイリストへ追加して再生（手元にある zip のみ表示。同一zipの音源違いは1行）",
+			L"Double-click to add and play (local zips only; sound variants share one row)",
+			L"Double-clic pour ajouter et lire (zips locaux uniquement ; variantes son sur une ligne)",
+			L"Doppio clic per aggiungere e riprodurre (solo zip locali; varianti audio in una riga)",
+			L"Doble clic para anadir y reproducir (solo zips locales; variantes en una fila)",
+			L"더블클릭으로 추가·재생(로컬 zip만 표시. 같은 zip 음원은 한 줄)",
+			L"双击加入并播放（仅显示本地 zip；同 zip 音源合并一行）",
+			L"نقر مزدوج للإضافة والتشغيل (الملفات المحلية فقط؛ صف واحد للصوت)",
+			L"Двойной клик — в список (только локальные zip; варианты звука в одной строке)",
+			L"Doppelklick: abspielen (nur lokale Zips; Sound-Varianten in einer Zeile)",
+			L"Duplo clique: tocar (somente zips locais; variantes numa linha)",
+			L"Dubbelklik: spelen (alleen lokale zips; geluidsvarianten op één regel)",
+			L"Dwuklik: odtworz (tylko lokalne zip; warianty w jednym wierszu)",
+			L"Cift tik: cal (yalniz yerel zip; ses varyantlari tek satir)"));
 	if (m_filterLbl.GetSafeHwnd())
 		m_filterLbl.SetWindowText(LL14(L"絞り込み", L"Filter", L"Filtrer", L"Filtro", L"Filtro", L"필터", L"筛选", L"تصفية", L"Фильтр", L"Filter", L"Filtro", L"Filter", L"Filtr", L"Filtre"));
 	m_help.SetWindowText(L"?");
@@ -601,7 +820,8 @@ BOOL CEmuCatalogListDlg::OnInitDialog()
 	}
 
 	CEmuMgrEnsureCatalog(CEmuMgrGet());
-	FillList();
+	BuildRowCache();
+	ApplyFilterToList();
 
 	CRect wr;
 	GetWindowRect(&wr);
@@ -622,7 +842,57 @@ BOOL CEmuCatalogListDlg::PreTranslateMessage(MSG* pMsg)
 	return CCustomBlurDialogBase::PreTranslateMessage(pMsg);
 }
 
-void CEmuCatalogListDlg::FillList()
+int CEmuCatalogListDlg::BuildRowCache()
+{
+	m_rows.clear();
+	m_zipStemCount = 0;
+	CEmuMgr* mgr = CEmuMgrGet();
+	CEmuMgrEnsureCatalog(mgr);
+	const CEmuCatalog* cat = mgr ? &mgr->catalog : NULL;
+	if (!cat || cat->count <= 0) return 0;
+
+	std::unordered_set<std::string> localStems;
+	std::unordered_map<std::string, std::wstring> stemToPath;
+	m_zipStemCount = CEmuCollectLocalZipStems(localStems, stemToPath);
+
+	/* First pass: one row per archive(+dataDir) group — O(n) with a set. */
+	std::unordered_set<std::string> seenGroup;
+	m_rows.reserve((size_t)(cat->count / 2) + 8);
+	for (int i = 0; i < cat->count; i++) {
+		const CEmuGameEntry* ge = cat->entry[i];
+		if (!ge || !ge->archive[0]) continue;
+
+		char groupKey[CEMU_ARCHIVE_NAME + CEMU_DATA_DIR + 4];
+		_snprintf_s(groupKey, _TRUNCATE, "%s\n%s", ge->archive, ge->dataDir[0] ? ge->dataDir : "");
+		for (char* p = groupKey; *p; p++) {
+			if (*p >= 'A' && *p <= 'Z') *p = (char)(*p - 'A' + 'a');
+		}
+		if (!seenGroup.insert(groupKey).second)
+			continue;
+
+		char stem[CEMU_ARCHIVE_NAME];
+		CEmuArchivePrimaryStem(ge->archive, stem, (int)sizeof(stem));
+		if (!stem[0] || localStems.find(stem) == localStems.end())
+			continue;
+
+		const CEmuGameEntry* pick = CEmuPickGroupRepresentative(cat, ge);
+		if (!pick) pick = ge;
+
+		CEmuCatListRow row;
+		row.ge = pick;
+		row.title = pick->name[0] ? pick->name : L"(no name)";
+		CEmuStripModeParenFromTitle(row.title);
+		row.modes = CEmuJoinArchiveModeTags(cat, pick);
+		row.hayLower = CEmuBuildFilterHay(cat, pick, row.modes);
+		auto it = stemToPath.find(stem);
+		if (it != stemToPath.end())
+			row.zipPath = it->second.c_str();
+		m_rows.push_back(std::move(row));
+	}
+	return (int)m_rows.size();
+}
+
+void CEmuCatalogListDlg::ApplyFilterToList()
 {
 	if (!m_lc.GetSafeHwnd()) return;
 	m_bFilling = TRUE;
@@ -631,30 +901,17 @@ void CEmuCatalogListDlg::FillList()
 	CString filter;
 	if (m_filter.GetSafeHwnd())
 		m_filter.GetWindowText(filter);
-	CEmuMgr* mgr = CEmuMgrGet();
-	CEmuMgrEnsureCatalog(mgr);
-	const CEmuCatalog* cat = mgr ? &mgr->catalog : NULL;
+
 	int row = 0;
-	for (int i = 0; cat && i < cat->count; i++) {
-		const CEmuGameEntry* ge = cat->entry[i];
-		if (!ge || !ge->archive[0]) continue;
-		/* OPN/OPNA/MIDI など同一 zip の音源違いは1行にまとめる。 */
-		if (!CEmuIsFirstInArchiveGroup(cat, i)) continue;
-		if (!CatGroupMatchesFilter(cat, ge, filter)) continue;
-		const CEmuGameEntry* pick = CEmuPickGroupRepresentative(cat, ge);
-		if (!pick) pick = ge;
-		CString title = pick->name[0] ? pick->name : L"(no name)";
-		CEmuStripModeParenFromTitle(title);
-		const int idx = m_lc.InsertItem(row, title);
-		CString a = CString(pick->archive);
-		CString p = CString(pick->platform);
-		CString s = CEmuJoinArchiveModeTags(cat, pick);
-		CString d = CString(pick->dataDir);
-		m_lc.SetItemText(idx, 1, a);
-		m_lc.SetItemText(idx, 2, p);
-		m_lc.SetItemText(idx, 3, s);
-		m_lc.SetItemText(idx, 4, d);
-		m_lc.SetItemData(idx, (DWORD_PTR)pick);
+	for (size_t i = 0; i < m_rows.size(); i++) {
+		CEmuCatListRow& r = m_rows[i];
+		if (!CatRowMatchesFilter(r.hayLower, filter)) continue;
+		const int idx = m_lc.InsertItem(row, r.title);
+		m_lc.SetItemText(idx, 1, CString(r.ge->archive));
+		m_lc.SetItemText(idx, 2, CString(r.ge->platform));
+		m_lc.SetItemText(idx, 3, r.modes);
+		m_lc.SetItemText(idx, 4, CString(r.ge->dataDir));
+		m_lc.SetItemData(idx, (DWORD_PTR)&r);
 		row++;
 	}
 	m_lc.SetRedraw(TRUE);
@@ -743,8 +1000,33 @@ void CEmuCatalogListDlg::ShowHelpSheet()
 }
 
 void CEmuCatalogListDlg::OnBnClickedHelp() { ShowHelpSheet(); }
-void CEmuCatalogListDlg::OnBnClickedOk() { EndDialog(IDOK); }
-void CEmuCatalogListDlg::OnEnChangeFilter() { if (!m_bFilling) FillList(); }
+void CEmuCatalogListDlg::OnBnClickedOk() { DestroyWindow(); }
+void CEmuCatalogListDlg::OnActivate(UINT nState, CWnd* pWndOther, BOOL bMinimized)
+{
+	CCustomBlurDialogBase::OnActivate(nState, pWndOther, bMinimized);
+	if (nState == WA_INACTIVE || bMinimized) return;
+	/* Re-scan so newly dropped zips appear without reopening. */
+	std::unordered_set<std::string> stems;
+	std::unordered_map<std::string, std::wstring> stemToPath;
+	const size_t n = CEmuCollectLocalZipStems(stems, stemToPath);
+	if (n == m_zipStemCount) return;
+	BuildRowCache();
+	ApplyFilterToList();
+}
+void CEmuCatalogListDlg::OnEnChangeFilter()
+{
+	if (m_bFilling) return;
+	/* Debounce: coalesces rapid typing into one list rebuild. */
+	++m_filterGen;
+	PostMessage(WM_CEMU_CAT_FILTER, (WPARAM)m_filterGen, 0);
+}
+
+LRESULT CEmuCatalogListDlg::OnFilterApply(WPARAM wParam, LPARAM)
+{
+	if ((unsigned)wParam != m_filterGen) return 0;
+	ApplyFilterToList();
+	return 0;
+}
 
 void CEmuCatalogListDlg::OnSize(UINT nType, int cx, int cy)
 {
@@ -816,11 +1098,15 @@ int CEmuCatalogListDlg::PlaySelectedRow()
 	POSITION pos = m_lc.GetFirstSelectedItemPosition();
 	if (!pos) return 0;
 	const int row = m_lc.GetNextSelectedItem(pos);
-	const CEmuGameEntry* ge = (const CEmuGameEntry*)m_lc.GetItemData(row);
-	if (!ge || !ge->archive[0]) return 0;
+	const CEmuCatListRow* rowp = (const CEmuCatListRow*)m_lc.GetItemData(row);
+	if (!rowp || !rowp->ge || !rowp->ge->archive[0]) return 0;
 	wchar_t zipPath[CEMU_ZIP_PATH] = {};
-	if (!CEmuResolveZipForArchive(this, ge->archive, zipPath, (int)_countof(zipPath)))
+	if (rowp->zipPath.GetLength() > 0
+		&& GetFileAttributesW(rowp->zipPath) != INVALID_FILE_ATTRIBUTES) {
+		wcsncpy_s(zipPath, rowp->zipPath, _TRUNCATE);
+	} else if (!CEmuResolveZipForArchive(this, rowp->ge->archive, zipPath, (int)_countof(zipPath))) {
 		return 0;
+	}
 	if (!PlCemuAddZipAndPlay(zipPath)) {
 		AfxMessageBox(LL14(
 			L"プレイリストへの追加に失敗しました。",

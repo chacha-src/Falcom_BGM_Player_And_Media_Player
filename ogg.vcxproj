@@ -106,6 +106,8 @@
     <!-- Windows SDK の d3dcompiler.lib(_47) を DirectX SDK 2010(_42) より優先。WindowsSDKLibVersion は空になることがあるので TargetPlatformVersion を使う -->
     <LibraryPath>$(WindowsSdkDir)Lib\$(TargetPlatformVersion)\um\x86;$(ProjectDir);C:\DirectX SDK (February 2010)\Lib\x86;C:\DXSDK\Lib;C:\Microsoft SDKs\Windows\v6.0\Samples\Multimedia\DirectShow\BaseClasses;$(LibraryPath)</LibraryPath>
     <IncludePath>$(ProjectDir);$(ProjectDir)zstd;$(ProjectDir)third_party\aimp;$(ProjectDir)third_party\vst3sdk;$(ProjectDir)third_party\signalsmith-stretch\include;$(ProjectDir)third_party\signalsmith-linear\include;$(ProjectDir)minizip;C:\Microsoft SDKs\Windows\v6.0\Samples\Multimedia\DirectShow\BaseClasses;C:\ogg\include;C:\PROJECTS\APPLICATION3\faad2-2.7\common\mp4ff;C:\PROJECTS\APPLICATION3\faad2-2.7\include;$(VC_IncludePath);$(IncludePath)</IncludePath>
+    <TargetName>oggYSEDbgm_uni_avx2</TargetName>
+    <TargetPath>C:\PROJECTS\APPLICATION3\ogg_binary\oggYSEDbgm_uni_avx2.exe</TargetPath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='uni_2026_de|Win32'">
     <LibraryPath>$(WindowsSdkDir)Lib\$(TargetPlatformVersion)\um\x86;$(ProjectDir);C:\DirectX SDK (February 2010)\Lib\x86;C:\DXSDK\Lib;C:\Microsoft SDKs\Windows\v6.0\Samples\Multimedia\DirectShow\BaseClasses;$(LibraryPath)</LibraryPath>
@@ -155,6 +157,7 @@
       <LanguageStandard>stdcpp17</LanguageStandard>
       <LanguageStandard_C>Default</LanguageStandard_C>
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+      <DisableSpecificWarnings>4828;%(DisableSpecificWarnings)</DisableSpecificWarnings>
       <AdditionalIncludeDirectories>$(ProjectDir)CEmu;$(ProjectDir)..\kpi_sources_20240712\kpi_decoder\kbmdx\source\portable_mdx\include;..\kpi_sources_20240712\kpi_decoder\kbmdx\source\mdc;$(ProjectDir)..\kpi_sources_20240712\kpi_decoder\kbmdx\source\portable_mdx\src\mxdrv;$(ProjectDir)..\kpi_sources_20240712\kpi_decoder\kbmdx\source\portable_mdx\src\x68sound;$(ProjectDir)kb_sasami\source;$(ProjectDir)kb_sasami\source\ymfm;$(ProjectDir)CEmu\s98;$(ProjectDir)CEmu\s98\device;$(ProjectDir)CEmu\s98\device\fmgen;$(ProjectDir)CEmu\z80;$(ProjectDir)CEmu\fmmon;$(ProjectDir)CEmu\vendor\np2\glue;$(ProjectDir)CEmu\vendor\np2\include;$(ProjectDir)CEmu\vendor\np2\cpu;$(ProjectDir)CEmu\vendor\musashi;$(ProjectDir)CEmu\vendor\mc6809;$(ProjectDir)CEmu\vendor\m6502;$(ProjectDir)CEmu\vendor\h6280;$(ProjectDir)CEmu\vendor\h8;$(ProjectDir)CEmu\vendor\hd63701;$(ProjectDir)CEmu\vendor\m6803;$(ProjectDir)CEmu\vendor\multipcm;$(ProjectDir)CEmu\vendor\v35;$(ProjectDir)CEmu\vendor\m37710;$(ProjectDir)CEmu\vendor\np2;$(ProjectDir)..\kpi_sources_20240712\kpi_decoder\kbs98\source\device;$(ProjectDir)..\kpi_sources_20240712\kpi_decoder\kbs98\source\device\mame;$(ProjectDir)..\kpi_sources_20240712\kpi_decoder\kbs98\source\device\emu2413;$(ProjectDir)zstd;$(ProjectDir)third_party\signalsmith-stretch\include;$(ProjectDir)third_party\signalsmith-linear\include;$(ProjectDir)third_party\aimp;$(ProjectDir)third_party\vst3sdk;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <ResourceCompile>
@@ -172,7 +175,7 @@
       <TargetMachine>MachineX86</TargetMachine>
       <LinkTimeCodeGeneration>Default</LinkTimeCodeGeneration>
       <IgnoreSpecificDefaultLibraries>uafxcw.lib;Libcmt.lib</IgnoreSpecificDefaultLibraries>
-      <GenerateDebugInformation>DebugFastLink</GenerateDebugInformation>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
       <TurnOffAssemblyGeneration>false</TurnOffAssemblyGeneration>
       <HeapReserveSize>2097152</HeapReserveSize>
       <HeapCommitSize>
@@ -186,6 +189,7 @@
       <ModuleDefinitionFile>
       </ModuleDefinitionFile>
       <AdditionalLibraryDirectories>$(WindowsSdkDir)Lib\$(TargetPlatformVersion)\um\x86;$(ProjectDir);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalOptions>/IGNORE:4099 %(AdditionalOptions)</AdditionalOptions>
     </Link>
     <Manifest>
       <AdditionalManifestFiles>additional.manifest</AdditionalManifestFiles>
@@ -417,6 +421,7 @@
     <ClCompile Include="CEmu\chip\cemu_chip_es5505.cpp" />
     <ClCompile Include="CEmu\chip\cemu_chip_rf5c68.cpp" />
     <ClCompile Include="CEmu\chip\cemu_chip_ay.cpp" />
+    <ClCompile Include="CEmu\chip\cemu_chip_scc.cpp" />
     <ClCompile Include="CEmu\chip\cemu_chip_opl.cpp" />
     <ClCompile Include="CEmu\chip\cemu_chip_x1_010.cpp" />
     <ClCompile Include="CEmu\chip\cemu_chip_ymz280b.cpp" />
@@ -463,6 +468,9 @@
     <ClCompile Include="CEmu\vendor\hd63701\m6800.cpp" />
     <ClCompile Include="CEmu\vendor\m6803\m6803core.c" />
     <ClCompile Include="CEmu\vendor\multipcm\multipcm.c" />
+    <ClCompile Include="CEmu\vendor\scsp\scsp.c" />
+    <ClCompile Include="CEmu\vendor\scsp\scspdsp.c" />
+    <ClCompile Include="CEmu\vendor\scsp\sat_hw.c" />
     <ClCompile Include="CEmu\machine\cemu_hard_msx.cpp" />
     <ClCompile Include="CEmu\driver\cemu_driver_msx.cpp" />
     <ClCompile Include="CEmu\machine\cemu_x68k.cpp" />
@@ -592,7 +600,9 @@
     <ClCompile Include="CBlurDialogExBase.cpp" />
     <ClCompile Include="CCustomControl.cpp" />
     <ClCompile Include="CCustomPopupMenu.cpp" />
-    <ClCompile Include="CDailog1.cpp" />
+    <ClCompile Include="CDailog1.cpp">
+      <DisableSpecificWarnings Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">4335;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+    </ClCompile>
     <ClCompile Include="CEqualizer.cpp" />
     <ClCompile Include="CImageBase.cpp" />
     <ClCompile Include="codec\ag_dec.c" />
@@ -870,6 +880,8 @@
     </ClCompile>
     <ClCompile Include="TunerPracticeDlg.cpp" />
     <ClCompile Include="PhotoFrameDlg.cpp" />
+    <ClCompile Include="Soft3DGfxQuality.cpp" />
+    <ClCompile Include="Soft3DGpuInfo.cpp" />
     <ClCompile Include="Soft3DMazeDlg.cpp" />
     <ClCompile Include="Soft3DRaceDlg.cpp" />
     <ClCompile Include="Soft3DTextD2D.cpp" />
@@ -1041,6 +1053,8 @@
     <ClInclude Include="VcVocalTract.h" />
     <ClInclude Include="TunerPracticeDlg.h" />
     <ClInclude Include="PhotoFrameDlg.h" />
+    <ClInclude Include="Soft3DGfxQuality.h" />
+    <ClInclude Include="Soft3DGpuInfo.h" />
     <ClInclude Include="Soft3DMazeDlg.h" />
     <ClInclude Include="Soft3DRaceDlg.h" />
     <ClInclude Include="Soft3DGameSfx.h" />
@@ -1571,6 +1585,7 @@
     </ClCompile>
     <ClCompile Update="..\kpi_sources_20240712\kpi_decoder\kbs98\source\device\mame\fmopl.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <DisableSpecificWarnings Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">4003;%(DisableSpecificWarnings)</DisableSpecificWarnings>
     </ClCompile>
     <ClCompile Update="..\kpi_sources_20240712\kpi_decoder\kbs98\source\device\mame\ymf262.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
@@ -1640,6 +1655,18 @@
       <CompileAs Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">CompileAsC</CompileAs>
     </ClCompile>
     <ClCompile Update="CEmu\vendor\multipcm\multipcm.c">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <CompileAs Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">CompileAsC</CompileAs>
+    </ClCompile>
+    <ClCompile Update="CEmu\vendor\scsp\scsp.c">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <CompileAs Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">CompileAsC</CompileAs>
+    </ClCompile>
+    <ClCompile Update="CEmu\vendor\scsp\scspdsp.c">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <CompileAs Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">CompileAsC</CompileAs>
+    </ClCompile>
+    <ClCompile Update="CEmu\vendor\scsp\sat_hw.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
       <CompileAs Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">CompileAsC</CompileAs>
     </ClCompile>

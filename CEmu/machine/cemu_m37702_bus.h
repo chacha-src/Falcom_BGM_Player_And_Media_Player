@@ -1,5 +1,5 @@
 ﻿#pragma once
-struct CHardAc;
+class CHardAc;
 struct M37702Cpu;
 
 void CEmuM37702BusSetAc(CHardAc* hw);

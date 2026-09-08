@@ -60,6 +60,14 @@ CHardX68k::CHardX68k()
 	, adpcmPan_(0)
 	, adpcmPpi_(0x08)
 	, adpcmPhase_(0)
+	, adpcmPaused_(0)
+	, dmacMtc_(0)
+	, dmacMar_(0)
+	, dmacOcr_(0)
+	, dmacBtc_(0)
+	, dmacBar_(0)
+	, adpcmChainPtr_(0)
+	, adpcmChainLeft_(0)
 	, dosFileCount_(0)
 	, dosMbA1_(0)
 	, dosMbD0_(0)
@@ -158,9 +166,12 @@ uint8_t CHardX68k::Read8(unsigned addr)
 		const unsigned sh = (3u - (addr - 0xe00018u)) * 8u;
 		return (uint8_t)((dosMbResult_ >> sh) & 0xffu);
 	}
-	/* YM2151 status (odd ports); also alias second OPM slot $E9200x. */
-	if (addr == 0xe90003u || addr == 0xe90001u || addr == 0xe92003u || addr == 0xe92001u)
+	/* YM2151 status (odd ports). */
+	if (addr == 0xe90003u || addr == 0xe90001u)
 		return chip_ ? (uint8_t)(chip_->ReadStatus() & 0x7fu) : 0;
+	/* MSM6258V status: report idle so _ADPCMSNS spin loops always drain. */
+	if (addr == 0xe92001u || addr == 0xe92003u)
+		return 0;
 	if (addr == 0xe9a005u || addr == 0xe9a007u)
 		return adpcmPpi_;
 	if (addr == 0xe9a001u || addr == 0xe9a003u)
@@ -235,7 +246,7 @@ void CHardX68k::Write8(unsigned addr, uint8_t data)
 		mfp_[addr & 0xfffu] = data;
 		return;
 	}
-	if (addr == 0xe90001u || addr == 0xe90003u || addr == 0xe92001u || addr == 0xe92003u) {
+	if (addr == 0xe90001u || addr == 0xe90003u) {
 		if (!chip_) return;
 		const int a0 = (int)((addr >> 1) & 1);
 		chip_->Write((uint32_t)a0, data);
@@ -243,7 +254,30 @@ void CHardX68k::Write8(unsigned addr, uint8_t data)
 			opmWrites_ = CEmuChipYm2151WriteCount(chip_);
 		return;
 	}
-	/* MSM6258V / DMAC poke (hoot X68kDriver::WriteDev). */
+	/* HD63450 DMAC channel 3 is what feeds the MSM6258V. Latch the transfer
+	   count and memory address from the bytes actually written to MTC/MAR:
+	   reading them out of D2/A1 instead only works for the one driver idiom
+	   that happens to still hold them there, which is why whole families
+	   played OPM fine but never a single PCM sample. The register snoop is
+	   kept as a fallback for rips that program the channel some other way. */
+	if (addr >= 0xe840c0u && addr <= 0xe840ffu) {
+		switch (addr) {
+		case 0xe840c5u: dmacOcr_ = data; break;
+		case 0xe840cau: dmacMtc_ = (uint16_t)((dmacMtc_ & 0x00ffu) | ((unsigned)data << 8)); break;
+		case 0xe840cbu: dmacMtc_ = (uint16_t)((dmacMtc_ & 0xff00u) | data); break;
+		case 0xe840ccu: dmacMar_ = (dmacMar_ & 0x00ffffffu) | ((unsigned)data << 24); break;
+		case 0xe840cdu: dmacMar_ = (dmacMar_ & 0xff00ffffu) | ((unsigned)data << 16); break;
+		case 0xe840ceu: dmacMar_ = (dmacMar_ & 0xffff00ffu) | ((unsigned)data << 8); break;
+		case 0xe840cfu: dmacMar_ = (dmacMar_ & 0xffffff00u) | data; break;
+		case 0xe840dau: dmacBtc_ = (uint16_t)((dmacBtc_ & 0x00ffu) | ((unsigned)data << 8)); break;
+		case 0xe840dbu: dmacBtc_ = (uint16_t)((dmacBtc_ & 0xff00u) | data); break;
+		case 0xe840dcu: dmacBar_ = (dmacBar_ & 0x00ffffffu) | ((unsigned)data << 24); break;
+		case 0xe840ddu: dmacBar_ = (dmacBar_ & 0xff00ffffu) | ((unsigned)data << 16); break;
+		case 0xe840deu: dmacBar_ = (dmacBar_ & 0xffff00ffu) | ((unsigned)data << 8); break;
+		case 0xe840dfu: dmacBar_ = (dmacBar_ & 0xffffff00u) | data; break;
+		default: break;
+		}
+	}
 	if (addr == 0xe840c0u) {
 		if (data == 0xff)
 			adpcmPlaying_ = 0;
@@ -259,31 +293,80 @@ void CHardX68k::Write8(unsigned addr, uint8_t data)
 		return;
 	}
 	if (addr == 0xe840c7u) {
-		if (data == 0x88 && adpcmSize_ > 0) {
-			adpcmPlaying_ = 1;
-			adpcmPos_ = 0;
-			adpcmSignal_ = 0;
-			adpcmStep_ = 0;
-			adpcmNibble_ = 0;
-			adpcmPhase_ = 0;
-			if (musashiReady_)
-				adpcmAddr_ = (unsigned)m68k_get_reg(NULL, M68K_REG_A1) & 0xffffffu;
-			/* MSM6258 → FM monitor ADPCM key row (OPM+ADPCM). */
-			{
-				/* 15.6kHz is the native playback rate, not an audible
-				   oscillator frequency. Display it as unity pitch (C4);
-				   absolute Hz conversion incorrectly clamped to O10. */
-				const unsigned rate = (unsigned)(adpcmRateHz_ > 0 ? adpcmRateHz_ : 15600);
-				const int mid = FmMonShadowPitchRateToMidi(
-					(unsigned)(((uint64_t)rate * 4096u + 7800u) / 15600u));
-				FmMonShadowPcmNote(0, (mid >= 0) ? mid : 60, 1);
+		/* CCR: bit7 STR start, bit5 HLT halt, bit4 SAB software abort.
+		   The old exact-0x88 start test missed every driver that starts
+		   with a different byte in the low bits. */
+		if (data & 0x10u) { /* SAB */
+			adpcmPlaying_ = 0;
+			adpcmPaused_ = 0;
+			adpcmChainLeft_ = 0;
+			FmMonShadowPcmNote(0, 0, 0);
+			return;
+		}
+		if (!(data & 0x80u)) {
+			/* HLT toggles pause without dropping the block being played;
+			   MUCO's _ADPCMMOD pause/resume pair is exactly this. */
+			adpcmPaused_ = (data & 0x20u) ? 1 : 0;
+			if (!adpcmPlaying_)
+				FmMonShadowPcmNote(0, 0, 0);
+			return;
+		}
+		adpcmPaused_ = 0;
+		adpcmSignal_ = 0;
+		adpcmStep_ = 0;
+		adpcmNibble_ = 0;
+		/* OCR bits 3-2 select chaining: 10 = array chaining, where the
+		   channel walks 6-byte {address, count} descriptors at BAR instead
+		   of using MAR/MTC. Drivers that queue a short priming block ahead
+		   of the sample (CODE-ZERO) only ever use this form. */
+		if ((dmacOcr_ & 0x0cu) == 0x08u && dmacBtc_ > 0) {
+			adpcmChainPtr_ = dmacBar_ & 0xffffffu;
+			adpcmChainLeft_ = dmacBtc_;
+			if (!AdpcmLoadChainEntry()) {
+				adpcmPlaying_ = 0;
+				FmMonShadowPcmNote(0, 0, 0);
 			}
+			return;
+		}
+		adpcmChainLeft_ = 0;
+		const unsigned dmaSize = (unsigned)dmacMtc_ << 1;
+		const unsigned dmaAddr = dmacMar_ & 0xffffffu;
+		const int dmaOk = (dmaSize > 0 && dmaAddr >= 0x400u
+			&& dmaAddr < 0x1000000u);
+		if (dmaOk) {
+			AdpcmStartBlock(dmaAddr, dmacMtc_);
+		} else if (adpcmSize_ > 0) {
+			unsigned a = adpcmAddr_;
+			if (musashiReady_)
+				a = (unsigned)m68k_get_reg(NULL, M68K_REG_A1) & 0xffffffu;
+			AdpcmStartBlock(a, adpcmSize_ >> 1);
 		} else {
 			adpcmPlaying_ = 0;
 			FmMonShadowPcmNote(0, 0, 0);
 		}
 		return;
 	}
+	/* MSM6258V command register. $E9200x is the ADPCM chip on real hardware,
+	   not a second OPM window: $01 stops, $02 starts playback. $E92003 is the
+	   CPU-fed data port, which the DMA-driven rips only poke to flush. */
+	if (addr == 0xe92001u) {
+		if (data & 0x01u) {
+			adpcmPlaying_ = 0;
+			adpcmPaused_ = 0;
+			adpcmChainLeft_ = 0;
+			FmMonShadowPcmNote(0, 0, 0);
+		} else if (data & 0x02u) {
+			adpcmPaused_ = 0;
+			if (!adpcmPlaying_ && adpcmSize_ > 0) {
+				adpcmSignal_ = 0;
+				adpcmStep_ = 0;
+				AdpcmStartBlock(adpcmAddr_, adpcmSize_ >> 1);
+			}
+		}
+		return;
+	}
+	if (addr == 0xe92003u)
+		return;
 	if (addr == 0xe9a005u || addr == 0xe9a007u) {
 		adpcmPpi_ = data;
 		adpcmPan_ = data & 3;
@@ -331,9 +414,43 @@ static void CEmuX68kAdpcmInitLut()
 	kAdpcmLutReady = 1;
 }
 
+void CHardX68k::AdpcmStartBlock(unsigned addr, unsigned bytes)
+{
+	adpcmAddr_ = addr & 0xffffffu;
+	adpcmSize_ = bytes << 1; /* nibbles */
+	adpcmPos_ = 0;
+	adpcmPhase_ = 0;
+	adpcmPlaying_ = 1;
+	/* MSM6258 → FM monitor ADPCM key row (OPM+ADPCM). 15.6kHz is the native
+	   playback rate, not an audible oscillator frequency: display it as unity
+	   pitch (C4), since absolute Hz conversion incorrectly clamped to O10. */
+	const unsigned rate = (unsigned)(adpcmRateHz_ > 0 ? adpcmRateHz_ : 15600);
+	const int mid = FmMonShadowPitchRateToMidi(
+		(unsigned)(((uint64_t)rate * 4096u + 7800u) / 15600u));
+	FmMonShadowPcmNote(0, (mid >= 0) ? mid : 60, 1);
+}
+
+/* Pull the next 6-byte {address, count} descriptor of an array chain.
+   The decoder state (signal/step) carries across blocks: the chain is one
+   continuous ADPCM stream to the chip. */
+int CHardX68k::AdpcmLoadChainEntry()
+{
+	while (adpcmChainLeft_ > 0) {
+		const unsigned p = adpcmChainPtr_;
+		adpcmChainPtr_ = (p + 6u) & 0xffffffu;
+		adpcmChainLeft_--;
+		const unsigned a = Read32(p) & 0xffffffu;
+		const unsigned n = Read16(p + 4u);
+		if (n == 0 || a < 0x400u) continue;
+		AdpcmStartBlock(a, n);
+		return 1;
+	}
+	return 0;
+}
+
 void CHardX68k::MixAdpcm(int16_t* stereo, int frames)
 {
-	if (!stereo || frames <= 0 || !adpcmPlaying_ || adpcmSize_ < 1) return;
+	if (!stereo || frames <= 0 || !adpcmPlaying_ || adpcmPaused_ || adpcmSize_ < 1) return;
 	CEmuX68kAdpcmInitLut();
 	const int rate = adpcmRateHz_ > 0 ? adpcmRateHz_ : 15600;
 	const int64_t step = ((int64_t)rate << 16) / (sampleRate_ > 0 ? sampleRate_ : 44100);
@@ -342,6 +459,8 @@ void CHardX68k::MixAdpcm(int16_t* stereo, int frames)
 		while (adpcmPhase_ >= 0x10000) {
 			adpcmPhase_ -= 0x10000;
 			if (adpcmPos_ >= adpcmSize_) {
+				if (AdpcmLoadChainEntry())
+					continue;
 				adpcmPlaying_ = 0;
 				FmMonShadowPcmNote(0, 0, 0);
 				break;
@@ -366,7 +485,11 @@ void CHardX68k::MixAdpcm(int16_t* stereo, int frames)
 			adpcmStep_ = stepIdx;
 		}
 		if (!adpcmPlaying_) break;
-		int32_t s = adpcmSignal_ << 4;
+		/* 12-bit decoder output. A straight <<4 puts a single bass-drum block
+		   at digital full scale and leaves the OPM sum nowhere to go, so keep
+		   hoot's 0xF0/0xC0 PCM-to-OPM balance by attenuating the PCM side
+		   instead of turning the (unscaled) OPM down. */
+		int32_t s = adpcmSignal_ * 12;
 		int32_t l = s, r = s;
 		if (adpcmPan_ == 1) r = 0;
 		else if (adpcmPan_ == 2) l = 0;
@@ -901,6 +1024,14 @@ int CHardX68k::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCo
 	adpcmPan_ = 0;
 	adpcmPpi_ = 0x08;
 	adpcmPhase_ = 0;
+	adpcmPaused_ = 0;
+	dmacMtc_ = 0;
+	dmacMar_ = 0;
+	dmacOcr_ = 0;
+	dmacBtc_ = 0;
+	dmacBar_ = 0;
+	adpcmChainPtr_ = 0;
+	adpcmChainLeft_ = 0;
 	if (chip_) chip_->Reset();
 	opmWrites_ = 0;
 	return 1;

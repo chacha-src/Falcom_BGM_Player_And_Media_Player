@@ -502,4 +502,7 @@ void CEmuFmMonBindFromGe(const CEmuGameEntry* ge)
 		FmMonShadowSetKeysProfile(SASAMI_FMMON_KEYS_MDX);
 		FmMonShadowSetOpmRegSnapshot(z);
 	}
+	/* 確定した identity/layout で 1 枚必ず出す。最初の Render 待ちにすると
+	   その間 UI が前曲または既定 OPNA の shell を出す（type 不一致の窓） */
+	FmMonShadowFlush(1);
 }

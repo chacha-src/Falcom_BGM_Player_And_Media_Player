@@ -1,4 +1,7 @@
-﻿/*
+﻿#if defined(_MSC_VER)
+#pragma warning(disable: 4244)
+#endif
+/*
  * Sega System 32 Multi/Model 1/Model 2 custom PCM chip (315-5560) emulation.
  *
  * by Miguel Angel Horna (ElSemi) for Model 2 Emulator and MAME.

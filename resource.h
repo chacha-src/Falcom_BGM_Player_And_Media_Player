@@ -1509,6 +1509,10 @@
 #define IDC_S3R_MESH                    4334
 #define IDC_S3M_MESH_L                  4335
 #define IDC_S3M_MESH                    4336
+#define IDC_S3R_GFX_L                   4337
+#define IDC_S3R_GFX                     4338
+#define IDC_S3M_GFX_L                   4339
+#define IDC_S3M_GFX                     4340
 #define IDC_MP_BOT_CD                   4337
 #define IDC_CD_HELP                     4338
 #define IDC_CD_DRIVE                    4339

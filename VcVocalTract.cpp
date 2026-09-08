@@ -9,7 +9,14 @@
 #undef max
 #endif
 
+#if defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable: 4244 4305)
+#endif
 #include "signalsmith-stretch/signalsmith-stretch.h"
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#endif
 
 #include <math.h>
 #include <string.h>

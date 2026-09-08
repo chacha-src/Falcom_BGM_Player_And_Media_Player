@@ -92,7 +92,7 @@ private:
 	int sampleRate_;
 	uint64_t cpuCycles_;
 	/* Highest exclusive address StageBgm may write (avoid clobbering code). */
-	uint16_t stageLimit_;
+	uint32_t stageLimit_;
 
 	unsigned char* bgmBank_[128];
 	unsigned bgmBankSize_[128];

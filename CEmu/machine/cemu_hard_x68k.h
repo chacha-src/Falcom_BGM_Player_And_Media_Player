@@ -89,6 +89,19 @@ private:
 	int adpcmPan_;
 	uint8_t adpcmPpi_;
 	int64_t adpcmPhase_;
+	int adpcmPaused_;
+	/* HD63450 channel 3 (MSM6258V): transfer count and memory address as the
+	   guest actually programmed them, plus the array-chaining base. */
+	uint16_t dmacMtc_;
+	uint32_t dmacMar_;
+	uint8_t dmacOcr_;
+	uint16_t dmacBtc_;
+	uint32_t dmacBar_;
+	/* Array chaining: remaining descriptors after the one now playing. */
+	unsigned adpcmChainPtr_;
+	unsigned adpcmChainLeft_;
+	int AdpcmLoadChainEntry();
+	void AdpcmStartBlock(unsigned addr, unsigned bytes);
 	CChip* chip_;
 	int sampleRate_;
 	uint8_t ymAddr_;

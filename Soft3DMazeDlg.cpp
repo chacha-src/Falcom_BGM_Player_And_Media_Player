@@ -16,6 +16,7 @@
 #include "Soft3DTextD2D.h"
 #include "Soft3DGameSfx.h"
 #include "Soft3DTexRes.h"
+#include "Soft3DGfxQuality.h"
 
 #ifdef _MSC_VER
 #pragma comment(lib, "d3dcompiler.lib")
@@ -841,7 +842,7 @@ END_MESSAGE_MAP()
 
 CS3mView::CS3mView()
 	: m_ready(FALSE), m_vw(0), m_vh(0), m_dxFailStage(0), m_dxFailHr(S_OK)
-	, m_mirrorSize(S3M_MIRROR_SIZE)
+	, m_mirrorSize(384), m_mirrorUseN(18), m_casStrength(0.7f), m_gfxSsr(2), m_gfxDof(2), m_aniso(16), m_shadowSize(1024)
 	, m_dev(NULL), m_imm(NULL), m_swap(NULL), m_bbRtv(NULL)
 	, m_dsTex(NULL), m_dsv(NULL), m_dsSrv(NULL), m_sceneTex(NULL), m_sceneRtv(NULL), m_sceneSrv(NULL)
 	, m_postTex(NULL), m_postRtv(NULL), m_postSrv(NULL), m_shadowTex(NULL), m_shadowDsv(NULL), m_shadowSrv(NULL)
@@ -859,7 +860,7 @@ CS3mView::CS3mView()
 	, m_texClear(NULL), m_srvClear(NULL), m_clearTexW(0), m_clearTexH(0), m_texMap(NULL), m_srvMap(NULL), m_mapTexSize(S3M_MAP_SIZE), m_mapCpu(NULL), m_mapCpuCount(0), m_texTip(NULL), m_srvTip(NULL), m_tipW(0), m_tipH(0), m_texBadge(NULL), m_srvBadge(NULL), m_badgeW(0), m_badgeH(0)
 	, m_texCallout(NULL), m_srvCallout(NULL), m_calloutW(0), m_calloutH(0), m_calloutN(0)
 	, m_texFloorBar(NULL), m_srvFloorBar(NULL), m_floorBarW(0), m_floorBarH(0), m_floorBarRecX0(0), m_floorBarRecX1(0)
-	, m_sampLin(NULL), m_sampPoint(NULL), m_sampCmp(NULL)
+	, m_sampLin(NULL), m_sampAniso(NULL), m_sampPoint(NULL), m_sampCmp(NULL)
 	, m_rsSolid(NULL), m_rsShadow(NULL), m_rsNoCull(NULL), m_dssWrite(NULL), m_dssRead(NULL), m_dssOff(NULL), m_bsOpaque(NULL), m_bsAlpha(NULL)
 	, m_bsAdd(NULL), m_dragging(0), m_dragTurnAcc(0), m_dragDidTurn(0)
 {
@@ -1016,7 +1017,9 @@ BOOL CS3mView::CreateShaders()
 		"float4 FIN(Q i):SV_Target{float4 c=T0.Sample(SL,i.uv);if(Misc.z>8.f){c.a*=saturate(Misc.y);return c;}float v=saturate(1-dot((i.uv-.5)*1.05,(i.uv-.5)*1.05));c.rgb*=lerp(.92,1.08,v);"
 		"float th=Eye.w;float3 tone=float3(1.05,1.02,.98);if(th>2.5)tone=float3(1.12,1.04,.98);else if(th>1.5)tone=float3(1.10,1.05,1.00);else if(th>.5)tone=float3(1.08,1.10,1.14);"
 		"c.rgb=saturate(c.rgb*tone);float3 x=max(c.rgb,0);c.rgb=saturate((x*(2.51*x+.03))/(x*(2.43*x+.59)+.14));"
-		"float lum=dot(c.rgb,float3(.299,.587,.114));c.rgb+=c.rgb*saturate(lum-.7)*.22;return c;}";
+		"float lum=dot(c.rgb,float3(.299,.587,.114));c.rgb+=c.rgb*saturate(lum-.7)*.22;"
+		"float cas=saturate(Dof.w);if(cas>0.01){float2 px=Screen.zw*1.25f;float3 soft=T0.Sample(SL,i.uv+float2(px.x,0)).rgb+T0.Sample(SL,i.uv-float2(px.x,0)).rgb+T0.Sample(SL,i.uv+float2(0,px.y)).rgb+T0.Sample(SL,i.uv-float2(0,px.y)).rgb;soft*=.25;c.rgb=saturate(c.rgb+(c.rgb-soft)*cas);}"
+		"return c;}";
 	ID3DBlob *b[11]={0}, *err=NULL;
 	const char* entries[11]={"VST","HST","DST","PSW","VSS","PSS","VSH","PSH","VSQ","SSR","DOFP"};
 	const char* profiles[11]={"vs_5_0","hs_5_0","ds_5_0","ps_5_0","vs_5_0","ps_5_0","vs_5_0","ps_5_0","vs_5_0","ps_5_0","ps_5_0"};
@@ -1398,7 +1401,7 @@ BOOL CS3mView::InitDx()
 	}
 	bd.ByteWidth=m_vbHudBytes;
 	if(FAILED(hr=m_dev->CreateBuffer(&bd,NULL,&m_vbHud))){ m_dxFailStage = 9; m_dxFailHr = hr; return FALSE; }
-	D3D11_SAMPLER_DESC ss={};ss.Filter=D3D11_FILTER_MIN_MAG_MIP_LINEAR;ss.AddressU=ss.AddressV=ss.AddressW=D3D11_TEXTURE_ADDRESS_WRAP;ss.MaxLOD=D3D11_FLOAT32_MAX;m_dev->CreateSamplerState(&ss,&m_sampLin);ss.Filter=D3D11_FILTER_MIN_MAG_MIP_POINT;ss.AddressU=ss.AddressV=ss.AddressW=D3D11_TEXTURE_ADDRESS_CLAMP;m_dev->CreateSamplerState(&ss,&m_sampPoint);
+	D3D11_SAMPLER_DESC ss={};ss.Filter=D3D11_FILTER_MIN_MAG_MIP_LINEAR;ss.AddressU=ss.AddressV=ss.AddressW=D3D11_TEXTURE_ADDRESS_WRAP;ss.MaxLOD=D3D11_FLOAT32_MAX;m_dev->CreateSamplerState(&ss,&m_sampLin);ss.Filter=D3D11_FILTER_ANISOTROPIC;ss.MaxAnisotropy=16;m_dev->CreateSamplerState(&ss,&m_sampAniso);ss.Filter=D3D11_FILTER_MIN_MAG_MIP_POINT;ss.MaxAnisotropy=1;ss.AddressU=ss.AddressV=ss.AddressW=D3D11_TEXTURE_ADDRESS_CLAMP;m_dev->CreateSamplerState(&ss,&m_sampPoint);
 	ss.Filter=D3D11_FILTER_COMPARISON_MIN_MAG_LINEAR_MIP_POINT;ss.AddressU=ss.AddressV=ss.AddressW=D3D11_TEXTURE_ADDRESS_BORDER;ss.ComparisonFunc=D3D11_COMPARISON_LESS;ss.BorderColor[0]=ss.BorderColor[1]=ss.BorderColor[2]=ss.BorderColor[3]=1.f;m_dev->CreateSamplerState(&ss,&m_sampCmp);
 	D3D11_RASTERIZER_DESC rs={};rs.FillMode=D3D11_FILL_SOLID;rs.CullMode=D3D11_CULL_BACK;rs.DepthClipEnable=TRUE;m_dev->CreateRasterizerState(&rs,&m_rsSolid);
 	rs.CullMode=D3D11_CULL_NONE;m_dev->CreateRasterizerState(&rs,&m_rsNoCull);
@@ -1406,20 +1409,17 @@ BOOL CS3mView::InitDx()
 	rss.DepthBias=1000;rss.SlopeScaledDepthBias=1.5f;rss.DepthBiasClamp=0.f;m_dev->CreateRasterizerState(&rss,&m_rsShadow);
 	D3D11_DEPTH_STENCIL_DESC ds={};ds.DepthEnable=TRUE;ds.DepthWriteMask=D3D11_DEPTH_WRITE_MASK_ALL;ds.DepthFunc=D3D11_COMPARISON_LESS_EQUAL;m_dev->CreateDepthStencilState(&ds,&m_dssWrite);ds.DepthWriteMask=D3D11_DEPTH_WRITE_MASK_ZERO;m_dev->CreateDepthStencilState(&ds,&m_dssRead);ds.DepthEnable=FALSE;m_dev->CreateDepthStencilState(&ds,&m_dssOff);
 	D3D11_BLEND_DESC bl={};bl.RenderTarget[0].RenderTargetWriteMask=D3D11_COLOR_WRITE_ENABLE_ALL;m_dev->CreateBlendState(&bl,&m_bsOpaque);bl.RenderTarget[0].BlendEnable=TRUE;bl.RenderTarget[0].SrcBlend=D3D11_BLEND_SRC_ALPHA;bl.RenderTarget[0].DestBlend=D3D11_BLEND_INV_SRC_ALPHA;bl.RenderTarget[0].BlendOp=D3D11_BLEND_OP_ADD;bl.RenderTarget[0].SrcBlendAlpha=D3D11_BLEND_ONE;bl.RenderTarget[0].DestBlendAlpha=D3D11_BLEND_INV_SRC_ALPHA;bl.RenderTarget[0].BlendOpAlpha=D3D11_BLEND_OP_ADD;m_dev->CreateBlendState(&bl,&m_bsAlpha);bl.RenderTarget[0].SrcBlend=D3D11_BLEND_SRC_ALPHA;bl.RenderTarget[0].DestBlend=D3D11_BLEND_ONE;m_dev->CreateBlendState(&bl,&m_bsAdd);
-	{
-		D3D11_TEXTURE2D_DESC td={};td.Width=S3M_SHADOW_SIZE;td.Height=S3M_SHADOW_SIZE;td.MipLevels=1;td.ArraySize=1;td.Format=DXGI_FORMAT_R24G8_TYPELESS;td.SampleDesc.Count=1;td.BindFlags=D3D11_BIND_DEPTH_STENCIL|D3D11_BIND_SHADER_RESOURCE;
-		if(FAILED(hr=m_dev->CreateTexture2D(&td,NULL,&m_shadowTex))){ m_dxFailStage = 10; m_dxFailHr = hr; return FALSE; }
-		D3D11_DEPTH_STENCIL_VIEW_DESC dd={};dd.Format=DXGI_FORMAT_D24_UNORM_S8_UINT;dd.ViewDimension=D3D11_DSV_DIMENSION_TEXTURE2D;
-		if(FAILED(hr=m_dev->CreateDepthStencilView(m_shadowTex,&dd,&m_shadowDsv))){ m_dxFailStage = 10; m_dxFailHr = hr; return FALSE; }
-		D3D11_SHADER_RESOURCE_VIEW_DESC sd={};sd.Format=DXGI_FORMAT_R24_UNORM_X8_TYPELESS;sd.ViewDimension=D3D11_SRV_DIMENSION_TEXTURE2D;sd.Texture2D.MipLevels=1;
-		if(FAILED(hr=m_dev->CreateShaderResourceView(m_shadowTex,&sd,&m_shadowSrv))){ m_dxFailStage = 10; m_dxFailHr = hr; return FALSE; }
-	}
+	if(!EnsureShadowTarget(m_shadowSize>0?m_shadowSize:1024)){ m_dxFailStage = 10; m_dxFailHr = E_FAIL; return FALSE; }
 	{
 		// 鏡用 RT（レースに無い迷路専用）。連番 RT が弾かれる環境向けにサイズ縮退
-		static const int kMirSz[] = { S3M_MIRROR_SIZE, 256, 192, 128, 64 };
+		int wantMir = m_mirrorSize > 0 ? m_mirrorSize : 384;
+		static const int kBase[] = { 1024, 768, 512, 384, 256, 192, 128, 64 };
+		int kMirSz[8]; int kMirN=0;
+		for(int bi=0;bi<8;bi++) if(kBase[bi]<=wantMir) kMirSz[kMirN++]=kBase[bi];
+		if(kMirN==0){kMirSz[0]=64;kMirN=1;}
 		HRESULT mirHr = E_FAIL;
-		m_mirrorSize = S3M_MIRROR_SIZE;
-		for (int si = 0; si < 5; si++) {
+		m_mirrorSize = wantMir;
+		for (int si = 0; si < kMirN; si++) {
 			const int mirSz = kMirSz[si];
 			for (int i = 0; i < S3M_MIRROR_N; i++) {
 				S3M_RELEASE(m_mirrorSrv[i]); S3M_RELEASE(m_mirrorRtv[i]); S3M_RELEASE(m_mirrorTex[i]);
@@ -1445,6 +1445,40 @@ BOOL CS3mView::InitDx()
 	CRect rc;GetClientRect(&rc);
 	if(!ResizeDx(max(8,rc.Width()),max(8,rc.Height()))){ m_dxFailStage = 12; m_dxFailHr = E_FAIL; return FALSE; }
 	return TRUE;
+}
+
+
+BOOL CS3mView::EnsureShadowTarget(int wantSize)
+{
+	if (!m_dev) return FALSE;
+	if (wantSize < 0) wantSize = 0;
+	if (wantSize > 0 && wantSize < 64) wantSize = 64;
+	if (wantSize == m_shadowSize && ((wantSize == 0 && !m_shadowTex) || (wantSize > 0 && m_shadowTex)))
+		return TRUE;
+	S3M_RELEASE(m_shadowSrv); S3M_RELEASE(m_shadowDsv); S3M_RELEASE(m_shadowTex);
+	m_shadowSize = wantSize;
+	if (wantSize <= 0) return TRUE;
+	static const int kFall[] = { 4096, 3072, 2048, 1536, 1024, 768, 512, 256 };
+	HRESULT hr = E_FAIL;
+	for (int i = 0; i < (int)_countof(kFall); i++) {
+		int sz = kFall[i];
+		if (sz > wantSize) continue;
+		D3D11_TEXTURE2D_DESC td = {};
+		td.Width = sz; td.Height = sz; td.MipLevels = 1; td.ArraySize = 1;
+		td.Format = DXGI_FORMAT_R24G8_TYPELESS; td.SampleDesc.Count = 1;
+		td.BindFlags = D3D11_BIND_DEPTH_STENCIL | D3D11_BIND_SHADER_RESOURCE;
+		if (FAILED(hr = m_dev->CreateTexture2D(&td, NULL, &m_shadowTex))) continue;
+		D3D11_DEPTH_STENCIL_VIEW_DESC dd = {};
+		dd.Format = DXGI_FORMAT_D24_UNORM_S8_UINT; dd.ViewDimension = D3D11_DSV_DIMENSION_TEXTURE2D;
+		if (FAILED(hr = m_dev->CreateDepthStencilView(m_shadowTex, &dd, &m_shadowDsv))) { S3M_RELEASE(m_shadowTex); continue; }
+		D3D11_SHADER_RESOURCE_VIEW_DESC sd = {};
+		sd.Format = DXGI_FORMAT_R24_UNORM_X8_TYPELESS; sd.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D; sd.Texture2D.MipLevels = 1;
+		if (FAILED(hr = m_dev->CreateShaderResourceView(m_shadowTex, &sd, &m_shadowSrv))) { S3M_RELEASE(m_shadowDsv); S3M_RELEASE(m_shadowTex); continue; }
+		m_shadowSize = sz;
+		return TRUE;
+	}
+	m_shadowSize = 0;
+	return FALSE;
 }
 
 BOOL CS3mView::EnsureSceneTargets(int w,int h)
@@ -1677,7 +1711,7 @@ void CS3mView::ReleaseDx()
 	S3M_RELEASE(m_srvEnvIn);S3M_RELEASE(m_texEnvIn);S3M_RELEASE(m_srvEnv);S3M_RELEASE(m_texEnv);
 	S3M_RELEASE(m_srvMirrorWall);S3M_RELEASE(m_texMirrorWall);S3M_RELEASE(m_srvMirrorFloor);S3M_RELEASE(m_texMirrorFloor);
 	for(int i=0;i<S3M_THEME_N;i++){S3M_RELEASE(m_srvFloorD[i]);S3M_RELEASE(m_texFloorD[i]);S3M_RELEASE(m_srvFloor[i]);S3M_RELEASE(m_texFloor[i]);S3M_RELEASE(m_srvBrickD[i]);S3M_RELEASE(m_texBrickD[i]);S3M_RELEASE(m_srvBrick[i]);S3M_RELEASE(m_texBrick[i]);}
-	S3M_RELEASE(m_bsAdd);S3M_RELEASE(m_bsAlpha);S3M_RELEASE(m_bsOpaque);S3M_RELEASE(m_dssOff);S3M_RELEASE(m_dssRead);S3M_RELEASE(m_dssWrite);S3M_RELEASE(m_rsShadow);S3M_RELEASE(m_rsNoCull);S3M_RELEASE(m_rsSolid);S3M_RELEASE(m_sampCmp);S3M_RELEASE(m_sampPoint);S3M_RELEASE(m_sampLin);
+	S3M_RELEASE(m_bsAdd);S3M_RELEASE(m_bsAlpha);S3M_RELEASE(m_bsOpaque);S3M_RELEASE(m_dssOff);S3M_RELEASE(m_dssRead);S3M_RELEASE(m_dssWrite);S3M_RELEASE(m_rsShadow);S3M_RELEASE(m_rsNoCull);S3M_RELEASE(m_rsSolid);S3M_RELEASE(m_sampCmp);S3M_RELEASE(m_sampPoint);S3M_RELEASE(m_sampAniso);S3M_RELEASE(m_sampLin);
 	S3M_RELEASE(m_vbHud);S3M_RELEASE(m_vbDyn);S3M_RELEASE(m_cbFrame);S3M_RELEASE(m_ilHud);S3M_RELEASE(m_ilSolid);S3M_RELEASE(m_ilPatch);
 	delete[] m_cpuDynScratch; m_cpuDynScratch = NULL; m_cpuDynScratchBytes = 0;
 	delete[] m_cpuHudScratch; m_cpuHudScratch = NULL; m_cpuHudScratchBytes = 0;
@@ -1954,6 +1988,8 @@ void CSoft3DMazeDlg::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDC_S3M_DIFF, m_diff);
 	DDX_Control(pDX, IDC_S3M_MESH_L, m_meshL);
 	DDX_Control(pDX, IDC_S3M_MESH, m_mesh);
+	DDX_Control(pDX, IDC_S3M_GFX_L, m_gfxL);
+	DDX_Control(pDX, IDC_S3M_GFX, m_gfx);
 	DDX_Control(pDX, IDC_S3M_GEN, m_gen);
 	DDX_Control(pDX, IDC_S3M_NAVI, m_navi);
 	DDX_Control(pDX, IDC_S3M_HINT, m_hint);
@@ -1972,6 +2008,7 @@ BEGIN_MESSAGE_MAP(CSoft3DMazeDlg, CCustomBlurDialogBase)
 	ON_CBN_SELCHANGE(IDC_S3M_BASE, &CSoft3DMazeDlg::OnBaseChanged)
 	ON_CBN_SELCHANGE(IDC_S3M_DIFF, &CSoft3DMazeDlg::OnDiffChanged)
 	ON_CBN_SELCHANGE(IDC_S3M_MESH, &CSoft3DMazeDlg::OnMeshChanged)
+	ON_CBN_SELCHANGE(IDC_S3M_GFX, &CSoft3DMazeDlg::OnGfxChanged)
 	ON_WM_TIMER()
 	ON_WM_SIZE()
 	ON_WM_SHOWWINDOW()
@@ -2160,7 +2197,7 @@ void CSoft3DMazeDlg::LayoutAll()
 	int y = capH + 8;
 
 	// 基準幅（密度コンボ追加後）。狭いときも下限、広いほど伸ばす
-	const float baseW = 1040.f;
+	const float baseW = 1180.f;
 	float sx = (float)(cx - 2 * m) / baseW;
 	if (sx < 0.68f) sx = 0.68f;
 	if (sx > 1.45f) sx = 1.45f;
@@ -2169,7 +2206,7 @@ void CSoft3DMazeDlg::LayoutAll()
 	const int sizeLW = sw(52), sizeW = sw(96);
 	const int baseLW = sw(36), baseWgt = sw(100);
 	const int diffLW = sw(48), diffW = sw(108);
-	const int meshLW = sw(36), meshW = sw(80);
+	const int meshLW = max(36, sw(36)), meshW = max(80, sw(88));
 	const int genW = sw(80), naviW = sw(68);
 	const int gap = max(6, (int)(8.f * sx + .5f));
 
@@ -2199,11 +2236,19 @@ void CSoft3DMazeDlg::LayoutAll()
 		m_mesh.SetWindowPos(NULL, x, y, meshW, 280, SWP_NOZORDER | SWP_NOACTIVATE);
 	x += meshW + gap;
 	if (m_gen.GetSafeHwnd())
-		m_gen.SetWindowPos(NULL, x, y - 1, genW, comboH + 2, SWP_NOZORDER | SWP_NOACTIVATE);
-	x += genW + gap;
+		m_gen.SetWindowPos(NULL, x, y - 1, max(64, genW), comboH + 2, SWP_NOZORDER | SWP_NOACTIVATE);
+	x += max(64, genW) + gap;
 	if (m_navi.GetSafeHwnd())
-		m_navi.SetWindowPos(NULL, x, y - 1, naviW, comboH + 2, SWP_NOZORDER | SWP_NOACTIVATE);
-	x += naviW + gap;
+		m_navi.SetWindowPos(NULL, x, y - 1, max(56, naviW), comboH + 2, SWP_NOZORDER | SWP_NOACTIVATE);
+	y += rowH + 4;
+	x = m;
+	const int gfxLW = max(40, sw(40)), gfxW = max(72, sw(80));
+	if (m_gfxL.GetSafeHwnd())
+		m_gfxL.SetWindowPos(NULL, x, y + 6, gfxLW, labH, SWP_NOZORDER | SWP_NOACTIVATE);
+	x += gfxLW + 2;
+	if (m_gfx.GetSafeHwnd())
+		m_gfx.SetWindowPos(NULL, x, y, gfxW, 280, SWP_NOZORDER | SWP_NOACTIVATE);
+	x += gfxW + gap;
 	if (m_hint.GetSafeHwnd())
 		m_hint.SetWindowPos(NULL, x, y + 6, max(40, cx - x - m), labH, SWP_NOZORDER | SWP_NOACTIVATE);
 	y += rowH + 6;
@@ -6310,7 +6355,8 @@ void CSoft3DMazeDlg::RenderScene()
 	for(int i=1;i<nFx;i++){int q=ord[i],j=i-1;while(j>=0){
 		const BOOL prefer=((int)fxObj[ord[j]].wantMir<(int)fxObj[q].wantMir)||(fxObj[ord[j]].wantMir==fxObj[q].wantMir&&fxObj[ord[j]].d>fxObj[q].d);
 		if(!prefer)break;ord[j+1]=ord[j];j--;}ord[j+1]=q;}
-	const int nUse=min(10,min((int)CS3mView::S3M_MIRROR_FX_N,nFx));
+	const int mirCap=max(0,min((int)CS3mView::S3M_MIRROR_FX_N, m_view.m_mirrorUseN>0 ? (m_view.m_mirrorUseN>=2?m_view.m_mirrorUseN-2:0) : 0));
+	const int nUse=min(mirCap,min((int)CS3mView::S3M_MIRROR_FX_N,nFx));
 	for(int i=0;i<nUse;i++)fxMirOf[ord[i]]=CS3mView::S3M_MIRROR_FX0+i;}
 	UINT plateBeg=nFloor+nWall+nTrans;
 	// 訪問床：青の半透明板（鏡床の反射はソリッド床側）
@@ -6676,7 +6722,7 @@ void CSoft3DMazeDlg::RenderScene()
 	auto bindCB=[&](){dc->VSSetConstantBuffers(0,1,&m_view.m_cbFrame);dc->HSSetConstantBuffers(0,1,&m_view.m_cbFrame);dc->DSSetConstantBuffers(0,1,&m_view.m_cbFrame);dc->PSSetConstantBuffers(0,1,&m_view.m_cbFrame);};
 	auto drawFloorWall=[&](BOOL colorPass){
 		dc->IASetVertexBuffers(0,1,&m_view.m_vbDyn,&stride,&off);bindCB();
-		dc->PSSetSamplers(0,1,&m_view.m_sampLin);dc->DSSetSamplers(0,1,&m_view.m_sampLin);dc->OMSetDepthStencilState(m_view.m_dssWrite,0);dc->OMSetBlendState(m_view.m_bsOpaque,NULL,~0u);
+		ID3D11SamplerState* texS=(m_view.m_aniso>=8&&m_view.m_sampAniso)?m_view.m_sampAniso:m_view.m_sampLin;dc->PSSetSamplers(0,1,&texS);dc->DSSetSamplers(0,1,&texS);dc->OMSetDepthStencilState(m_view.m_dssWrite,0);dc->OMSetBlendState(m_view.m_bsOpaque,NULL,~0u);
 		if(colorPass){dc->PSSetSamplers(2,1,&m_view.m_sampCmp);dc->PSSetShaderResources(4,1,&m_view.m_shadowSrv);dc->PSSetShaderResources(3,1,&envUse);}
 		for(int li=0;li<nLay;li++){
 			const Layer& L=layers[li];
@@ -6737,9 +6783,12 @@ void CSoft3DMazeDlg::RenderScene()
 	// Eyeはカメラのまま（変位量を色パスと一致）。LightDir.w=0 でテッセだけ固定細密
 	cb.viewProj=cb.lightVP;cb.lightDir.w=0.f;
 	if(SUCCEEDED(dc->Map(m_view.m_cbFrame,0,D3D11_MAP_WRITE_DISCARD,0,&map))){memcpy(map.pData,&cb,sizeof(cb));dc->Unmap(m_view.m_cbFrame,0);}
-	D3D11_VIEWPORT svp={0,0,(float)CS3mView::S3M_SHADOW_SIZE,(float)CS3mView::S3M_SHADOW_SIZE,0,1};dc->RSSetViewports(1,&svp);dc->RSSetState(m_view.m_rsShadow);
-	dc->OMSetRenderTargets(1,&nullRtv,m_view.m_shadowDsv);dc->ClearDepthStencilView(m_view.m_shadowDsv,D3D11_CLEAR_DEPTH,1.f,0);
-	drawFloorWall(FALSE);
+	D3D11_VIEWPORT svp={0,0,(float)max(1,m_view.m_shadowSize),(float)max(1,m_view.m_shadowSize),0,1};
+	if(m_view.m_shadowSize>0&&m_view.m_shadowDsv){
+		dc->RSSetViewports(1,&svp);dc->RSSetState(m_view.m_rsShadow);
+		dc->OMSetRenderTargets(1,&nullRtv,m_view.m_shadowDsv);dc->ClearDepthStencilView(m_view.m_shadowDsv,D3D11_CLEAR_DEPTH,1.f,0);
+		drawFloorWall(FALSE);
+	}
 	// 半透明は影キャスタにしない（fill節約）
 	dc->OMSetRenderTargets(1,&nullRtv,NULL);cb.viewProj=camVP;cb.lightDir.w=1.f;
 	S3MMat idM={};idM.m[0]=idM.m[5]=idM.m[10]=idM.m[15]=1.f;cb.reflectVP=idM;cb.reflectFloorVP=idM;
@@ -6825,9 +6874,21 @@ void CSoft3DMazeDlg::RenderScene()
 	}
 	dc->PSSetShaderResources(5,2,ns+5);
 	dc->OMSetDepthStencilState(m_view.m_dssOff,0);dc->OMSetBlendState(m_view.m_bsOpaque,NULL,~0u);dc->IASetInputLayout(NULL);dc->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);dc->VSSetShader(m_view.m_vsPost,NULL,0);dc->PSSetSamplers(1,1,&m_view.m_sampPoint);
-	dc->OMSetRenderTargets(1,&m_view.m_postRtv,NULL);dc->PSSetShaderResources(0,1,&m_view.m_sceneSrv);dc->PSSetShaderResources(2,1,&m_view.m_dsSrv);dc->PSSetShader(m_view.m_psSsr,NULL,0);dc->Draw(3,0);dc->PSSetShaderResources(0,5,ns);
-	dc->OMSetRenderTargets(1,&m_view.m_sceneRtv,NULL);dc->PSSetShaderResources(0,1,&m_view.m_postSrv);dc->PSSetShaderResources(2,1,&m_view.m_dsSrv);dc->PSSetShader(m_view.m_psDof,NULL,0);dc->Draw(3,0);dc->PSSetShaderResources(0,5,ns);
-	dc->OMSetRenderTargets(1,&m_view.m_bbRtv,NULL);dc->PSSetShaderResources(0,1,&m_view.m_sceneSrv);dc->PSSetShader(m_view.m_psFinal,NULL,0);dc->Draw(3,0);dc->PSSetShaderResources(0,5,ns);
+	ID3D11ShaderResourceView* finSrc = m_view.m_sceneSrv;
+	if (m_view.m_gfxSsr > 0) {
+		dc->OMSetRenderTargets(1,&m_view.m_postRtv,NULL);dc->PSSetShaderResources(0,1,&m_view.m_sceneSrv);dc->PSSetShaderResources(2,1,&m_view.m_dsSrv);dc->PSSetShader(m_view.m_psSsr,NULL,0);dc->Draw(3,0);dc->PSSetShaderResources(0,5,ns);
+		finSrc = m_view.m_postSrv;
+		if (m_view.m_gfxDof > 0) {
+			dc->OMSetRenderTargets(1,&m_view.m_sceneRtv,NULL);dc->PSSetShaderResources(0,1,&m_view.m_postSrv);dc->PSSetShaderResources(2,1,&m_view.m_dsSrv);dc->PSSetShader(m_view.m_psDof,NULL,0);dc->Draw(3,0);dc->PSSetShaderResources(0,5,ns);
+			finSrc = m_view.m_sceneSrv;
+		}
+	} else if (m_view.m_gfxDof > 0) {
+		dc->OMSetRenderTargets(1,&m_view.m_postRtv,NULL);dc->PSSetShaderResources(0,1,&m_view.m_sceneSrv);dc->PSSetShaderResources(2,1,&m_view.m_dsSrv);dc->PSSetShader(m_view.m_psDof,NULL,0);dc->Draw(3,0);dc->PSSetShaderResources(0,5,ns);
+		finSrc = m_view.m_postSrv;
+	}
+	{ S3MFrameCB cbFin = cb; cbFin.dofParams.w = m_view.m_casStrength;
+	  if (SUCCEEDED(dc->Map(m_view.m_cbFrame,0,D3D11_MAP_WRITE_DISCARD,0,&map))){ memcpy(map.pData,&cbFin,sizeof(cbFin)); dc->Unmap(m_view.m_cbFrame,0); } }
+	dc->OMSetRenderTargets(1,&m_view.m_bbRtv,NULL);dc->PSSetShaderResources(0,1,&finSrc);dc->PSSetShader(m_view.m_psFinal,NULL,0);dc->Draw(3,0);dc->PSSetShaderResources(0,5,ns);
 	if(nTrans){
 		// --- 3パス目: 半透明（PCFでセルフシャドウ／投射影）---
 		dc->OMSetRenderTargets(1,&m_view.m_bbRtv,m_view.m_dsv);
@@ -7824,6 +7885,8 @@ BOOL CSoft3DMazeDlg::OnInitDialog()
 		if (m_base.GetSafeHwnd()) { m_base.SetFont(pf); m_base.SetItemHeight(-1, 28); m_base.SetItemHeight(0, 26); }
 		if (m_diff.GetSafeHwnd()) { m_diff.SetFont(pf); m_diff.SetItemHeight(-1, 28); m_diff.SetItemHeight(0, 26); }
 		if (m_mesh.GetSafeHwnd()) { m_mesh.SetFont(pf); m_mesh.SetItemHeight(-1, 28); m_mesh.SetItemHeight(0, 26); }
+		if (m_gfx.GetSafeHwnd()) { m_gfx.SetFont(pf); m_gfx.SetItemHeight(-1, 28); m_gfx.SetItemHeight(0, 26); }
+		if (m_gfxL.GetSafeHwnd()) m_gfxL.SetFont(pf);
 		if (m_gen.GetSafeHwnd()) m_gen.SetFont(pf);
 		if (m_navi.GetSafeHwnd()) m_navi.SetFont(pf);
 		if (m_close.GetSafeHwnd()) m_close.SetFont(pf);
@@ -7899,6 +7962,12 @@ BOOL CSoft3DMazeDlg::OnInitDialog()
 	SetDifficultyToUi(savedata.s3m_difficulty);
 
 	S3MeshFillCombo(m_mesh);
+	S3GfxQualityEnsureAutoDefault();
+	S3GfxQualityFillCombo(m_gfx);
+	SetGfxToUi(savedata.s3_gfx_quality);
+	ApplyGfxQuality(TRUE);
+	if (m_gfxL.GetSafeHwnd()) m_gfxL.SetWindowText(S3GfxQualityLabel());
+	m_gfx.SetAeroMode(FALSE);
 	SetMeshToUi(S3MeshDensityLevel());
 
 	if (m_tooltip.Create(this, TTS_ALWAYSTIP | TTS_NOPREFIX)) {
@@ -8057,6 +8126,57 @@ void CSoft3DMazeDlg::OnDiffChanged()
 	// UI→savedata を先に確定（リサイズで選択が0に戻っても値が残る）
 	savedata.s3m_difficulty = ReadDifficultyFromUi();
 	PersistUi();
+}
+int CSoft3DMazeDlg::ReadGfxFromUi(){ int s=m_gfx.GetSafeHwnd()?(int)m_gfx.CComboBox::GetCurSel():savedata.s3_gfx_quality; return S3GfxQualityClamp(s); }
+void CSoft3DMazeDlg::SetGfxToUi(int v){ v=S3GfxQualityClamp(v); savedata.s3_gfx_quality=v; if(m_gfx.GetSafeHwnd()) m_gfx.CComboBox::SetCurSel(v); }
+void CSoft3DMazeDlg::ApplyGfxQuality(BOOL rebuildRt)
+{
+	const S3GfxQualityParams& q = S3GfxQualityGet(savedata.s3_gfx_quality);
+	m_view.m_casStrength = q.casStrength;
+	m_view.m_gfxSsr = q.ssr;
+	m_view.m_gfxDof = q.dof;
+	m_view.m_aniso = q.aniso;
+	m_view.m_mirrorUseN = q.mirrorSlots;
+	m_view.m_mirrorSize = q.mirrorSize > 0 ? q.mirrorSize : 384;
+	if (rebuildRt && m_view.m_dev) {
+		m_view.EnsureShadowTarget(q.shadowSize);
+		/* recreate mirrors by re-running InitDx-style block via Ensure - call Init path mirror recreate */
+		if (m_view.m_dev) {
+			int wantMir = m_view.m_mirrorSize;
+			static const int kBase[] = { 1024, 768, 512, 384, 256, 192, 128, 64 };
+			for (int bi = 0; bi < 8; bi++) {
+				int mirSz = kBase[bi];
+				if (mirSz > wantMir) continue;
+				for (int i = 0; i < CS3mView::S3M_MIRROR_N; i++) {
+					S3M_RELEASE(m_view.m_mirrorSrv[i]); S3M_RELEASE(m_view.m_mirrorRtv[i]); S3M_RELEASE(m_view.m_mirrorTex[i]);
+				}
+				S3M_RELEASE(m_view.m_mirrorDsv); S3M_RELEASE(m_view.m_mirrorDs);
+				D3D11_TEXTURE2D_DESC td={};td.Width=mirSz;td.Height=mirSz;td.MipLevels=1;td.ArraySize=1;td.Format=DXGI_FORMAT_B8G8R8A8_UNORM;td.SampleDesc.Count=1;td.BindFlags=D3D11_BIND_RENDER_TARGET|D3D11_BIND_SHADER_RESOURCE;
+				HRESULT mirHr=S_OK;
+				for(int i=0;i<CS3mView::S3M_MIRROR_N;i++){
+					if(FAILED(mirHr=m_view.m_dev->CreateTexture2D(&td,NULL,&m_view.m_mirrorTex[i]))) break;
+					if(FAILED(mirHr=m_view.m_dev->CreateRenderTargetView(m_view.m_mirrorTex[i],NULL,&m_view.m_mirrorRtv[i]))) break;
+					if(FAILED(mirHr=m_view.m_dev->CreateShaderResourceView(m_view.m_mirrorTex[i],NULL,&m_view.m_mirrorSrv[i]))) break;
+				}
+				if(FAILED(mirHr)) continue;
+				td.Format=DXGI_FORMAT_R24G8_TYPELESS;td.BindFlags=D3D11_BIND_DEPTH_STENCIL;
+				if(FAILED(mirHr=m_view.m_dev->CreateTexture2D(&td,NULL,&m_view.m_mirrorDs))) continue;
+				D3D11_DEPTH_STENCIL_VIEW_DESC dd={};dd.Format=DXGI_FORMAT_D24_UNORM_S8_UINT;dd.ViewDimension=D3D11_DSV_DIMENSION_TEXTURE2D;
+				if(FAILED(mirHr=m_view.m_dev->CreateDepthStencilView(m_view.m_mirrorDs,&dd,&m_view.m_mirrorDsv))) continue;
+				m_view.m_mirrorSize = mirSz;
+				break;
+			}
+		}
+	} else {
+		m_view.m_shadowSize = q.shadowSize;
+	}
+}
+void CSoft3DMazeDlg::OnGfxChanged()
+{
+	savedata.s3_gfx_quality = ReadGfxFromUi();
+	savedata.s3_gfx_auto = 0;
+	ApplyGfxQuality(TRUE);
+	MpPersistSavedataQuick();
 }
 void CSoft3DMazeDlg::OnMeshChanged()
 {

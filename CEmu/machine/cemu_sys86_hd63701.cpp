@@ -91,7 +91,13 @@ void CHardAc::HD63701Write8(uint16_t addr, uint8_t v)
 			if (chip_) {
 				chip_->Write(addr & 1u, v);
 				if (addr & 1u) {
-					opmWrites_ = CEmuChipYm2151WriteCount(chip_);
+					/* Not every board that reaches here has a YM2151: with
+					   hd63701YmBase_ unset this window falls back to $2000
+					   and chip_ is the CUS30 WSG, so asking it for a YM2151
+					   write count reinterprets an unrelated object and reads
+					   off the end of it. Count locally instead - the callers
+					   only use this as a liveness signal. */
+					opmWrites_++;
 					hd63701YmWrites_++;
 				}
 			}
