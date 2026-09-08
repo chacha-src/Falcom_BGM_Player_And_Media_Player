@@ -8,6 +8,55 @@
 #include <stdlib.h>
 #include <stdio.h>
 
+/* CEMU_PCAT_IVT=<path>: one record per play poke naming the vector we fire,
+   the vectors the guest actually owns, and how much the sound hardware moved.
+   A family that is uniformly mute is either never reaching its driver API or
+   reaching it and writing nothing, and these two numbers separate those. */
+namespace {
+
+struct PcatCensus {
+	int funcVect;
+	unsigned oplWr, oplKey, saaWr, saaTone, spkTone, midi, irq0;
+};
+
+void PcatIvtCensus(const uint8_t* mem, const PcatCensus& c, const char* phase,
+	const wchar_t* tag)
+{
+	static const char* path = NULL;
+	static int checked = 0;
+	if (!checked) { checked = 1; path = getenv("CEMU_PCAT_IVT"); }
+	if (!path || !path[0] || !mem) return;
+	FILE* f = NULL;
+	if (fopen_s(&f, path, "a") != 0 || !f) return;
+	fprintf(f, "IVT %-4s funcvect=%02X opl=%u key=%u saa=%u tone=%u spk=%u"
+		" midi=%u irq0=%u hooked=", phase, c.funcVect, c.oplWr, c.oplKey,
+		c.saaWr, c.saaTone, c.spkTone, c.midi, c.irq0);
+	for (unsigned v = 0; v < 256; v++) {
+		const unsigned off = (unsigned)mem[v * 4] | ((unsigned)mem[v * 4 + 1] << 8);
+		const unsigned seg = (unsigned)mem[v * 4 + 2] | ((unsigned)mem[v * 4 + 3] << 8);
+		if ((seg == 0 && off == 0) || seg == DOS98_TRAMP_SEG) continue;
+		fprintf(f, "%02X=%04X:%04X,", v, seg, off);
+	}
+	/* %ls aborts the whole call on a wide char with no multibyte form, which
+	   would swallow the newline for every Japanese title. */
+	fputs(" name=", f);
+	for (const wchar_t* p = tag; p && *p; p++)
+		fputc((*p >= 0x20 && *p < 0x7f) ? (char)*p : '?', f);
+	fputc('\n', f);
+	fclose(f);
+}
+
+} /* namespace */
+
+#define PCAT_CENSUS(phase) do { \
+	PcatCensus c__; \
+	c__.funcVect = funcVect_; c__.oplWr = oplWriteCount_; \
+	c__.oplKey = oplKeyOnCount_; c__.saaWr = saaWriteCount_; \
+	c__.saaTone = saaToneOnCount_; c__.spkTone = speakerToneCount_; \
+	c__.midi = midiCount_; c__.irq0 = irq0Count_; \
+	PcatIvtCensus(np2_mem(), c__, (phase), dosGe_ ? dosGe_->name : NULL); \
+} while (0)
+
 enum {
 	PCAT_CPU_HZ = 8000000,
 	PCAT_OPL_HZ = 3579545,
@@ -244,6 +293,7 @@ int CHardPcat::Init(const CEmuGameEntry* ge, int sampleRate)
 
 void CHardPcat::Shutdown()
 {
+	PCAT_CENSUS("end");
 	DetachIoHooks();
 	if (chip_) { CEmuChipYm3812Destroy(chip_); chip_ = NULL; }
 	if (saa1_) { CEmuChipSaa1099Destroy(saa1_); saa1_ = NULL; }
@@ -982,7 +1032,15 @@ int CHardPcat::DeliverIrqs()
 		   Sierra silp shares INT8 CS with INT7F; its [000E] is PSP junk — do
 		   not apply the AIL guard there. */
 		const int silpOwnsIrq = silpHot;
-		if (!silpOwnsIrq && mem && i8Seg >= 0x0100 && i8Seg < 0xA000 && i8Off != 0) {
+		/* ...and so is every other PC/AT driver that is simply not AIL. Their
+		   [000E] is ordinary code or data, and a non-zero word there held the
+		   pending bit forever: CODE.COM installs its sequencer on INT 8 and
+		   never received a single tick, so it emitted an OPL init and then no
+		   notes at all. hootAilCs_ is only set once the API_timer signature
+		   has been found, so it is the right thing to key this on. */
+		const int ailOwnsIrq = (hootAilCs_ != 0 && i8Seg == hootAilCs_);
+		if (!silpOwnsIrq && ailOwnsIrq && mem
+			&& i8Seg >= 0x0100 && i8Seg < 0xA000 && i8Off != 0) {
 			const unsigned base = (unsigned)i8Seg << 4;
 			const uint16_t re = (uint16_t)(mem[base + 0x0E] | (mem[base + 0x0F] << 8));
 			const uint16_t cs = np2_reg_get(NP2_R_CS);
@@ -1061,7 +1119,8 @@ int CHardPcat::DeliverIrqs()
 				const uint16_t cs = np2_reg_get(NP2_R_CS);
 				const uint16_t re = (mem && ailBase)
 					? (uint16_t)(mem[ailBase + 0x0E] | (mem[ailBase + 0x0F] << 8)) : (uint16_t)1;
-				if (cs == (uint16_t)DOS98_TRAMP_SEG && (silpIsr || re == 0)) {
+				if (cs == (uint16_t)DOS98_TRAMP_SEG
+					&& (silpIsr || !ailOwnsIrq || re == 0)) {
 					done = 1;
 					break;
 				}
@@ -1085,7 +1144,9 @@ int CHardPcat::DeliverIrqs()
 				if (!silpIsr)
 					cpuCycles_ += (c > 0) ? (uint64_t)c : 1ull;
 			}
-			if (mem && ailBase && !silpIsr) {
+			/* Only AIL keeps a counter there — zeroing it on any other driver
+			   overwrote two bytes of the guest's own data. */
+			if (mem && ailBase && !silpIsr && ailOwnsIrq) {
 				mem[ailBase + 0x0E] = 0;
 				mem[ailBase + 0x0F] = 0;
 			}
@@ -1810,6 +1871,7 @@ int CHardPcat::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCo
 int CHardPcat::TriggerPlay(unsigned titleCode)
 {
 	const uint64_t drainBudget = (uint64_t)cpuHz_ / 2ull;
+	PCAT_CENSUS("pre");
 	if (dosGe_)
 		BindDosTriggerSong(dosGe_, titleCode);
 	else {
@@ -1854,6 +1916,7 @@ int CHardPcat::TriggerPlay(unsigned titleCode)
 			np2_interrupt((uint8_t)funcVect_);
 		PumpCycles(cpuCycles_ + drainBudget);
 	}
+	PCAT_CENSUS("trig");
 	picMask_ = (uint8_t)(picMask_ & 0xfeu);
 	if (!pit0Running_) {
 		pit0Reload_ = (uint16_t)(PCAT_PIT_HZ / 240);
