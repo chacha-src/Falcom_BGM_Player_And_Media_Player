@@ -59,7 +59,7 @@ void PcatIvtCensus(const uint8_t* mem, const PcatCensus& c, const char* phase,
    address says which. */
 struct PcatIpProf {
 	enum { SLOTS = 4096 };
-	enum { RING = 512 };
+	enum { RING = 65536 };
 	unsigned addr[SLOTS];
 	uint64_t hits[SLOTS];
 	uint64_t total;
@@ -144,6 +144,26 @@ void PcatMemDump(const uint8_t* mem)
 			fprintf(f, "%02X ", mem[lin + i + j]);
 		fputc('\n', f);
 	}
+	fclose(f);
+}
+
+/* CEMU_PCAT_IOLOG="<path>": which ports a guest touches that nothing here
+   answers. A driver that probes for its card by reading a register back is
+   indistinguishable from a silent driver without this. */
+void PcatIoLog(char dir, uint16_t port, uint8_t data)
+{
+	static const char* path = NULL;
+	static int checked = 0;
+	if (!checked) { checked = 1; path = getenv("CEMU_PCAT_IOLOG"); }
+	if (!path || !path[0]) return;
+	/* One line per port and direction: the probe loops thousands of times. */
+	static uint8_t seen[2][8192];
+	const int d = (dir == 'w') ? 1 : 0;
+	if (seen[d][port >> 3] & (1u << (port & 7))) return;
+	seen[d][port >> 3] |= (uint8_t)(1u << (port & 7));
+	FILE* f = NULL;
+	if (fopen_s(&f, path, "a") != 0 || !f) return;
+	fprintf(f, "IO %c %04X %02X\n", dir, port, data);
 	fclose(f);
 }
 
@@ -291,6 +311,7 @@ CHardPcat::CHardPcat()
 	, extParam_(0)
 	, modeCms_(0)
 	, modeBeep_(0)
+	, modeSb_(0)
 	, modeMidi_(0)
 	, chip_(NULL)
 	, saa1_(NULL)
@@ -350,6 +371,8 @@ CHardPcat::CHardPcat()
 	hootAdvIoOff_ = 0;
 	memset(mpuAckQ_, 0, sizeof(mpuAckQ_));
 	memset(sbDspQueue_, 0, sizeof(sbDspQueue_));
+	sbMixerIdx_ = 0;
+	SbMixerReset();
 	memset(saaSel_, 0, sizeof(saaSel_));
 	memset(saaAmp_, 0, sizeof(saaAmp_));
 	memset(saaFreq_, 0, sizeof(saaFreq_));
@@ -386,6 +409,9 @@ int CHardPcat::Init(const CEmuGameEntry* ge, int sampleRate)
 	}
 	if (_stricmp(ge->subtype, "midiout") == 0) modeMidi_ = 1;
 	modeBeep_ = (_stricmp(ge->subtype, "beep") == 0 && !modeMidi_) ? 1 : 0;
+	/* An AdLib card has no mixer, and answering one lets a Miles driver
+	   pick the Sound Blaster output path on a machine that is not one. */
+	modeSb_ = (_strnicmp(ge->subtype, "soundblaster", 12) == 0) ? 1 : 0;
 
 	/* Always keep OPL — AdLib/SB and MIDI soft fallback. CMS adds SAA. */
 	chip_ = CEmuChipYm3812Create((uint32_t)oplHz_, sampleRate_);
@@ -679,6 +705,17 @@ void CHardPcat::RepairSilpDriverFar()
 		return;
 	}
 	silpScanDone_ = 1;
+}
+
+void CHardPcat::SbMixerReset()
+{
+	memset(sbMixer_, 0, sizeof(sbMixer_));
+	sbMixer_[0x04] = 0xEE; /* voice   L/R */
+	sbMixer_[0x0A] = 0x06; /* mic */
+	sbMixer_[0x22] = 0xEE; /* master  L/R */
+	sbMixer_[0x26] = 0xEE; /* FM      L/R */
+	sbMixer_[0x28] = 0x00; /* CD */
+	sbMixer_[0x2E] = 0x00; /* line */
 }
 
 void CHardPcat::SbDspPush(uint8_t v)
@@ -1338,6 +1375,10 @@ uint8_t CHardPcat::PortIn(uint16_t port)
 		if (modeCms_)
 			return 0xff;
 		return oplStatus();
+	case 0x224: /* SB Pro mixer index */
+		return modeSb_ ? sbMixerIdx_ : (uint8_t)0x00;
+	case 0x225: /* SB Pro mixer data */
+		return modeSb_ ? sbMixer_[sbMixerIdx_] : (uint8_t)0x00;
 	case 0x226: /* SB DSP write-status: bit7=0 → OK to write */
 		return 0x00;
 	case 0x22A: /* SB DSP read data */
@@ -1375,6 +1416,7 @@ uint8_t CHardPcat::PortIn(uint16_t port)
 	case 0x188: case 0x18A: case 0x18C: case 0x18E:
 		return 0x00;
 	default:
+		PcatIoLog('r', port, 0);
 		return 0x00;
 	}
 }
@@ -1445,6 +1487,20 @@ void CHardPcat::PortOut(uint16_t port, uint8_t data)
 			oplData(data);
 		}
 		break;
+	/* SB Pro mixer. SBP2FM.ADV decides whether a card is present by writing
+	   a mixer register, reading it back and comparing, so the register file
+	   has to be real storage rather than a stub. */
+	case 0x224:
+		if (modeSb_) sbMixerIdx_ = data;
+		break;
+	case 0x225:
+		if (!modeSb_)
+			break;
+		if (sbMixerIdx_ == 0x00)
+			SbMixerReset();
+		else
+			sbMixer_[sbMixerIdx_] = data;
+		break;
 	case 0x226: /* SB DSP reset: 1 then 0 → DSP returns 0xAA */
 		if (data & 1) {
 			sbDspResetting_ = 1;
@@ -1514,6 +1570,7 @@ void CHardPcat::PortOut(uint16_t port, uint8_t data)
 		}
 		break;
 	default:
+		PcatIoLog('w', port, data);
 		break;
 	}
 }
@@ -1826,6 +1883,9 @@ int CHardPcat::RunDosCommand(const char* cmdline, uint64_t budgetCycles, int sto
 				CEmuDos98Result res = dos_.ServiceInt(m, vec);
 				if (res == DOS98_TERMINATED || res == DOS98_RESIDENT) {
 					if (g_pcatIpProf) g_pcatIpProf->Freeze();
+					/* Buffers a loader frees on the way out are gone by the
+					   time the play pump ends, so snapshot here instead. */
+					PcatMemDump(m);
 					return 1;
 				}
 				dos_.IretReturn(m);

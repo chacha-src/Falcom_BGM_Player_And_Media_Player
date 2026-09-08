@@ -76,6 +76,7 @@ public:
 	uint16_t extParam_;
 	int modeCms_;
 	int modeBeep_;
+	int modeSb_;
 	int modeMidi_;
 	char hootAdvName_[16]; /* e.g. ADLIB.ADV / SBP2FM.ADV */
 	uint16_t hootAdvSeg_; /* resident AIL .ADV image for HOOT register_driver */
@@ -168,12 +169,15 @@ private:
 	int sbDspReadAvail_;
 	uint8_t sbDspQueue_[4];
 	int sbDspQueueR_, sbDspQueueW_;
+	uint8_t sbMixerIdx_;
+	uint8_t sbMixer_[256];
 	uint8_t saaSel_[2];
 	uint8_t saaAmp_[2][6];
 	uint8_t saaFreq_[2][6];
 	uint8_t saaOct_[2][6];
 	uint8_t saaEn_[2];
 	void SbDspPush(uint8_t v);
+	void SbMixerReset();
 	void CmsTrackSaa(int chip, uint8_t data);
 };
 
