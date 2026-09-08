@@ -181,6 +181,21 @@ void CEmuDos98::SetHandle(uint16_t handle, const char* name)
 		nextHandle_ = (uint16_t)(handle + 1);
 }
 
+uint16_t CEmuDos98::AllocHandle()
+{
+	/* A catalogue that maps every song to its own DOS handle pushes the
+	   next free number past 20, and C runtimes (Borland's, used by AIL's
+	   HOOT.EXE) index a fixed 20-entry table by the handle and reject
+	   anything above it without ever issuing the INT 21h read. Hand out the
+	   lowest free slot inside that table first. */
+	for (uint16_t h = 5; h < 20; h++)
+		if (!handles_[h].used)
+			return h;
+	uint16_t h = nextHandle_++;
+	if (h >= DOS98_HANDLE_MAX) h = (uint16_t)(DOS98_HANDLE_MAX - 1);
+	return h;
+}
+
 void CEmuDos98::SetHandleText(uint16_t handle, const char* text)
 {
 	if (handle >= DOS98_HANDLE_MAX || !text) return;
@@ -795,8 +810,7 @@ CEmuDos98Result CEmuDos98::Int21(uint8_t* mem)
 		char name[DOS98_NAME];
 		ReadCstr(mem, np2_reg_get(NP2_R_DS), np2_reg_get(NP2_R_DX), name, (int)sizeof(name));
 		if (FindFile(name)) {
-			uint16_t h = nextHandle_++;
-			if (h >= DOS98_HANDLE_MAX) h = (uint16_t)(DOS98_HANDLE_MAX - 1);
+			const uint16_t h = AllocHandle();
 			SetHandle(h, name);
 			np2_reg_set(NP2_R_AX, h);
 			SetCf(0);

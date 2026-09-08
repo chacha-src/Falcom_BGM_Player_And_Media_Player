@@ -131,6 +131,7 @@ private:
 	void FreeFiles();
 	void UpperCopy(char* dst, int dstCap, const char* src) const;
 	CEmuDos98File* FindFileMut(const char* name);
+	uint16_t AllocHandle();
 	void WriteMcb(uint8_t* mem, uint16_t seg, uint8_t sig, uint16_t owner, uint16_t size) const;
 	uint16_t MaxFreeBlock(const uint8_t* mem) const;
 	int Alloc(uint8_t* mem, uint16_t paras, uint16_t owner, uint16_t* outSeg) const;

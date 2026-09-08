@@ -59,20 +59,31 @@ void PcatIvtCensus(const uint8_t* mem, const PcatCensus& c, const char* phase,
    address says which. */
 struct PcatIpProf {
 	enum { SLOTS = 4096 };
+	enum { RING = 512 };
 	unsigned addr[SLOTS];
 	uint64_t hits[SLOTS];
 	uint64_t total;
 	const char* path;
+	/* The histogram cannot show which of a dozen exit(1) branches a guest
+	   took, so keep the trail leading up to the moment the host freezes it
+	   (the first DOS terminate). */
+	unsigned ring[RING];
+	unsigned ringPos;
+	int frozen;
 
-	PcatIpProf() : total(0), path(NULL)
+	PcatIpProf() : total(0), path(NULL), ringPos(0), frozen(0)
 	{
 		memset(addr, 0xff, sizeof(addr));
 		memset(hits, 0, sizeof(hits));
+		memset(ring, 0, sizeof(ring));
 	}
+
+	void Freeze() { frozen = 1; }
 
 	void Note(unsigned lin)
 	{
 		total++;
+		if (!frozen) ring[ringPos++ % RING] = lin;
 		const unsigned h = (lin * 2654435761u) & (SLOTS - 1);
 		for (unsigned i = 0; i < 64; i++) {
 			const unsigned s = (h + i) & (SLOTS - 1);
@@ -97,6 +108,14 @@ struct PcatIpProf {
 				100.0 * (double)hits[best] / (double)total);
 			hits[best] = 0;
 		}
+		const unsigned n = ringPos < RING ? ringPos : (unsigned)RING;
+		fprintf(f, "IPRING n=%u (oldest first)\n", n);
+		for (unsigned i = 0; i < n; i++) {
+			const unsigned s = (ringPos >= RING)
+				? ((ringPos + i) % RING) : i;
+			fprintf(f, "%05X%s", ring[s], ((i % 8) == 7) ? "\n" : " ");
+		}
+		fputc('\n', f);
 		fclose(f);
 	}
 };
@@ -116,7 +135,7 @@ void PcatMemDump(const uint8_t* mem)
 	char path[260];
 	if (sscanf_s(spec, "%x,%u,%259s", &lin, &len, path, (unsigned)sizeof(path)) != 3)
 		return;
-	if (len > 0x1000 || lin + len >= 0x200000u) return;
+	if (len > 0x20000 || lin + len >= 0x200000u) return;
 	FILE* f = NULL;
 	if (fopen_s(&f, path, "w") != 0 || !f) return;
 	for (unsigned i = 0; i < len; i += 16) {
@@ -1805,8 +1824,10 @@ int CHardPcat::RunDosCommand(const char* cmdline, uint64_t budgetCycles, int sto
 			uint8_t vec = 0;
 			if (dos_.TrapVector(cs, ip, &vec)) {
 				CEmuDos98Result res = dos_.ServiceInt(m, vec);
-				if (res == DOS98_TERMINATED || res == DOS98_RESIDENT)
+				if (res == DOS98_TERMINATED || res == DOS98_RESIDENT) {
+					if (g_pcatIpProf) g_pcatIpProf->Freeze();
 					return 1;
+				}
 				dos_.IretReturn(m);
 				continue;
 			}
