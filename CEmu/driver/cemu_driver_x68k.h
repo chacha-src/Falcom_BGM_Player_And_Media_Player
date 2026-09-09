@@ -41,6 +41,7 @@ private:
 	int64_t timerDAcc_;
 	int64_t vdispAcc_;
 	int softTimerBusy_;
+	int opmSpinRescue_; /* one-shot $94A → mailbox after init */
 
 	void TickOpm(uint64_t cpuCycles);
 	void RunCycles(int cycles);

@@ -8,6 +8,7 @@
 #include "machine/cemu_hard_pcat.h"
 #include "machine/cemu_hard_pc98.h"
 #include <string.h>
+#include <stdlib.h>
 
 enum {
 	kLiveInjCap = 512,
@@ -492,6 +493,23 @@ void CEmuMidiLiveStop(void)
 		free(mixBuf);
 }
 
+static int MidiOutTypeFromGe(const CEmuGameEntry* e)
+{
+	if (!e) return 0;
+	for (int i = 0; i < e->optCount; i++) {
+		if (_stricmp(e->opt[i].name, "midiout_type") == 0)
+			return (int)strtoul(e->opt[i].value, NULL, 0);
+	}
+	return 0;
+}
+
+/* hoot midiout_type: 1/2 = MT-32 (LA), 4/6 = GS, 8 = GM. LA banks (CC0=127)
+   make the MIDI monitor show LAmap; GM titles must not get them. */
+static int MidiOutTypeIsLa(int t)
+{
+	return (t == 1 || t == 2) ? 1 : 0;
+}
+
 int CEmuMidiLiveStartPcat(const wchar_t* zipPath, unsigned titleCode,
 	wchar_t* outMidPath, int outCap)
 {
@@ -538,9 +556,16 @@ int CEmuMidiLiveStartPcat(const wchar_t* zipPath, unsigned titleCode,
 		return 0;
 	}
 
-	/* PCAT MT-32 → LA banks in stub; PC98 SC-55/SC-88 → GS (no LA). */
+	/* PCAT: MT-32 (type 1/2, or unlabeled) → LA banks so the MIDI monitor
+	   uses LAmap. GM (8) / GS (4,6) stay on GMmap/GSmap. PC98 SC-55 is GS. */
 	const int isPc98 = (hard->hardKind == CHard::KIND_PC98) ? 1 : 0;
-	const int laBanks = isPc98 ? 0 : 1;
+	const int midiType = MidiOutTypeFromGe(ge);
+	int laBanks = 0;
+	if (!isPc98) {
+		if (midiType == 0 || MidiOutTypeIsLa(midiType))
+			laBanks = 1;
+	}
+	const char* stubTag = isPc98 ? "GS" : (laBanks ? "MT-32" : (midiType == 8 ? "GM" : "GS"));
 	const char* song = NULL;
 	if (isPc98) {
 		CHardPc98* hw = (CHardPc98*)hard;
@@ -558,9 +583,9 @@ int CEmuMidiLiveStartPcat(const wchar_t* zipPath, unsigned titleCode,
 	GetTempPathW(MAX_PATH, tmpDir);
 	wchar_t midPath[MAX_PATH] = {};
 	_snwprintf_s(midPath, _TRUNCATE, L"%scemu_mpu_%s_%08X.mid",
-		tmpDir, isPc98 ? L"gs" : L"mt32", (unsigned)GetTickCount());
+		tmpDir, laBanks ? L"mt32" : (isPc98 ? L"gs" : L"gm"), (unsigned)GetTickCount());
 
-	if (!WriteLiveStubSmf(midPath, (song && song[0]) ? song : (isPc98 ? "GS" : "MT-32"),
+	if (!WriteLiveStubSmf(midPath, (song && song[0]) ? song : stubTag,
 		laBanks)) {
 		drv->Close();
 		CEmuDriverDestroy(drv);

@@ -120,11 +120,17 @@ static int FmMonComposeDocLabel(const CEmuGameEntry* ge, char* out,
 			haveLayout = 1;
 		}
 		if (ci->ssgHz && !ssg) ssg = ci->ssgHz;
-		/* The sample player owns the key rows when there is one, since the
-		   FM part is already described by the layout. */
-		if (!keys || (ci->isPcm && !keysFromPcm)) {
+		/* OPN-shaped boards (layout>=0): PCM owns the key-row profile and
+		   overlays the FM dump. OPM hybrids (layout -1, keys already MDX)
+		   must keep the OPM keyboard — stealing OKI/RF5C here made Raizing
+		   flicker between "Raizing  OPM+OKI" and "AC  OKI×4". */
+		if (!keys) {
 			keys = ci->keys;
 			keysFromPcm = ci->isPcm;
+		} else if (ci->isPcm && !keysFromPcm) {
+			if (layout >= 0)
+				keys = ci->keys;
+			keysFromPcm = 1;
 		}
 	}
 	if (!written) return 0;
@@ -176,6 +182,10 @@ void CEmuFmMonBindFromGe(const CEmuGameEntry* ge)
 		strncpy_s(plat, "NeoGeo", _TRUNCATE);
 	else if (_stricmp(pf, "videosystem") == 0 || _stricmp(sub, "aerofgt") == 0)
 		strncpy_s(plat, "VSys", _TRUNCATE);
+	else if (_stricmp(pf, "raizing") == 0 || _stricmp(pf, "eighting") == 0
+		|| _stricmp(sub, "mahou") == 0 || _stricmp(sub, "bgaregga") == 0
+		|| _stricmp(sub, "batrider") == 0 || _stricmp(sub, "bbakraid") == 0)
+		strncpy_s(plat, "Raizing", _TRUNCATE);
 	else if (_stricmp(dd, "ac") == 0 || _strnicmp(pf, "capcom", 6) == 0
 		|| _stricmp(pf, "sega") == 0 || _stricmp(pf, "namco") == 0
 		|| _stricmp(pf, "taito") == 0 || _strnicmp(pf, "konami", 6) == 0
@@ -226,11 +236,19 @@ void CEmuFmMonBindFromGe(const CEmuGameEntry* ge)
 		   made Quinpl look blank even while OPLL regs were streaming. */
 		const int hasOpll = HasChip(ge, CEMU_CHIP_OPLL)
 			|| _stricmp(sub, "kss") == 0 || _stricmp(sub, "opll") == 0
-			|| _stricmp(sub, "fmpac") == 0
+			|| _stricmp(sub, "fmpac") == 0 || _stricmp(sub, "ascii16") == 0
 			|| (archiveLen >= 4 && _stricmp(ge->archive + archiveLen - 4, "_msx") == 0);
-		strncpy_s(chip, hasOpll ? "OPLL+PSG" : "AY-3-8910", _TRUNCATE);
-		layout = -1;
-		FmMonShadowSetSsgClock(3579545u);
+		const int hasSng = HasChip(ge, CEMU_CHIP_SN76489);
+		if (hasSng) {
+			strncpy_s(chip, "SN76496", _TRUNCATE);
+			layout = -1;
+			FmMonShadowSetKeysProfile(SASAMI_FMMON_KEYS_MDX);
+			FmMonShadowSetSsgClock(3579545u);
+		} else {
+			strncpy_s(chip, hasOpll ? "OPLL+PSG" : "AY-3-8910", _TRUNCATE);
+			layout = -1;
+			FmMonShadowSetSsgClock(3579545u);
+		}
 	} else if (fm7Ay) {
 		strncpy_s(chip, "AY-3-8910", _TRUNCATE);
 		layout = -1;
@@ -384,6 +402,22 @@ void CEmuFmMonBindFromGe(const CEmuGameEntry* ge)
 		layout = -1;
 		FmMonShadowSetKeysProfile(SASAMI_FMMON_KEYS_RF5C);
 		FmMonShadowEnterKeysOnly(SASAMI_FMMON_KEYS_RF5C);
+	} else if (_stricmp(sub, "bbakraid") == 0
+		|| (HasChip(ge, CEMU_CHIP_YMZ280B) && !HasChip(ge, CEMU_CHIP_OPM)
+			&& (_stricmp(pf, "eighting") == 0 || _stricmp(pf, "raizing") == 0))) {
+		strncpy_s(chip, "YMZ280B", _TRUNCATE);
+		layout = -1;
+		FmMonShadowSetKeysProfile(SASAMI_FMMON_KEYS_OKI);
+		FmMonShadowEnterKeysOnly(SASAMI_FMMON_KEYS_OKI);
+	} else if (_stricmp(sub, "mahou") == 0 || _stricmp(sub, "bgaregga") == 0
+		|| _stricmp(sub, "batrider") == 0
+		|| ((HasChip(ge, CEMU_CHIP_OPM) && HasChip(ge, CEMU_CHIP_OKI6295))
+			&& (_stricmp(pf, "raizing") == 0 || _stricmp(pf, "eighting") == 0))) {
+		/* Keep OPM keys. OKI rows overlay — do not EnterKeysOnly(OKI). */
+		strncpy_s(chip, "OPM+OKI6295", _TRUNCATE);
+		layout = -1;
+		seedOpm = 1;
+		FmMonShadowSetKeysProfile(SASAMI_FMMON_KEYS_MDX);
 	} else if (_stricmp(sub, "opm") == 0 || HasChip(ge, CEMU_CHIP_OPM)
 		|| _stricmp(dd, "x68k") == 0 || _stricmp(pf, "x68k") == 0
 		|| _stricmp(pf, "x1") == 0 || _stricmp(dd, "x1") == 0
@@ -453,13 +487,23 @@ void CEmuFmMonBindFromGe(const CEmuGameEntry* ge)
 		layout = -1;
 		FmMonShadowEnterKeysOnly(SASAMI_FMMON_KEYS_MIDI);
 	} else if (_stricmp(sub, "beep") == 0) {
-		strncpy_s(chip, "BEEP", _TRUNCATE);
-		layout = -1;
-		FmMonShadowEnterKeysOnly(SASAMI_FMMON_KEYS_MIDI);
+		/* hoot XML often tags GM/MT-32 rows as type=beep + midiout=1.
+		   Those play through MPU UART → MIDI monitor, not the FM panel. */
+		int midiOut = 0;
+		for (int i = 0; i < ge->optCount; i++) {
+			if (_stricmp(ge->opt[i].name, "midiout") == 0) { midiOut = 1; break; }
+		}
+		if (midiOut) {
+			strncpy_s(chip, "MPU-401 MIDI", _TRUNCATE);
+			layout = -1;
+		} else {
+			strncpy_s(chip, "BEEP", _TRUNCATE);
+			layout = -1;
+			FmMonShadowEnterKeysOnly(SASAMI_FMMON_KEYS_MIDI);
+		}
 	} else if (_stricmp(sub, "midiout") == 0 || _stricmp(sub, "midi") == 0) {
 		strncpy_s(chip, "MPU-401 MIDI", _TRUNCATE);
 		layout = -1;
-		FmMonShadowEnterKeysOnly(SASAMI_FMMON_KEYS_MIDI);
 	} else if (sub[0]) {
 		char up[40];
 		int n = 0;

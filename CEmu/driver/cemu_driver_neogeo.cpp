@@ -287,7 +287,7 @@ int CDriverNeo::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned
 
 		for (int i = 0; i < 120 && cpu && !hw_->NmiEnabled(); i++)
 
-			RunUntil((uint64_t)cpu->time() + (uint64_t)cpuHz_ / 60);
+			RunUntil((uint64_t)cpu->time64() + (uint64_t)cpuHz_ / 60);
 
 	}
 
@@ -309,7 +309,7 @@ int CDriverNeo::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned
 
 		for (int i = 0; i < 120 && cpu; i++) {
 
-			RunUntil((uint64_t)cpu->time() + (uint64_t)cpuHz_ / 60);
+			RunUntil((uint64_t)cpu->time64() + (uint64_t)cpuHz_ / 60);
 
 			if (hw_->PeekRam(0xFE34) == 0 && !hw_->SoundCmdPending()
 
@@ -327,7 +327,7 @@ int CDriverNeo::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned
 
 		for (int i = 0; i < 60 && cpu && hw_->PeekRam(0xFE34) != 0; i++)
 
-			RunUntil((uint64_t)cpu->time() + (uint64_t)cpuHz_ / 60);
+			RunUntil((uint64_t)cpu->time64() + (uint64_t)cpuHz_ / 60);
 
 	}
 
@@ -430,7 +430,7 @@ void CDriverNeo::WaitQueueIdle(int maxFrames60)
 
 	for (int i = 0; i < maxFrames60; i++) {
 
-		RunUntil((uint64_t)cpu->time() + (uint64_t)cpuHz_ / 60);
+		RunUntil((uint64_t)cpu->time64() + (uint64_t)cpuHz_ / 60);
 
 		if (hw_->SoundCmdPending()) {
 
@@ -592,7 +592,7 @@ void CDriverNeo::RunUntil(uint64_t endCycle)
 
 	int guard = 0;
 
-	while ((uint64_t)cpu->time() < endCycle && guard++ < 2000000) {
+	while ((uint64_t)cpu->time64() < endCycle && guard++ < 2000000) {
 
 		DeliverIrqs();
 
@@ -652,7 +652,7 @@ int CDriverNeo::Render(int16_t* stereo, int frames)
 
 	for (int i = 0; i < frames; i++) {
 
-		const uint64_t now = (uint64_t)cpu->time();
+		const uint64_t now = (uint64_t)cpu->time64();
 
 		if (!injected_)
 
@@ -690,13 +690,13 @@ int CDriverNeo::Render(int16_t* stereo, int frames)
 
 		cpuDebt_ += cyclesPerSample;
 
-		const uint64_t start = (uint64_t)cpu->time();
+		const uint64_t start = (uint64_t)cpu->time64();
 
 		const uint64_t end = start
 
 			+ (uint64_t)(cpuDebt_ > 0 ? cpuDebt_ : 0);
 
-		while ((uint64_t)cpu->time() < end) {
+		while ((uint64_t)cpu->time64() < end) {
 
 			DeliverIrqs();
 
@@ -720,7 +720,7 @@ int CDriverNeo::Render(int16_t* stereo, int frames)
 
 		}
 
-		cpuDebt_ -= (int64_t)((uint64_t)cpu->time() - start);
+		cpuDebt_ -= (int64_t)((uint64_t)cpu->time64() - start);
 
 		chip->Render(stereo + i * 2, 1);
 

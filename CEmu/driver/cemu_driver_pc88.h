@@ -9,6 +9,11 @@ unsigned CEmuPc88WatchdogReplays();
 void CEmuPc88WatchdogResetCount();
 void CEmuPc88WatchdogSetEnabled(int on);
 
+/* Opening audio the last play kick recovered, and how much of its head was
+   init silence that got trimmed (frames). Same probe-only contract. */
+unsigned CEmuPc88LeadFrames();
+unsigned CEmuPc88LeadTrimmedFrames();
+
 class CDriverPc88 : public CDriver {
 public:
 	CDriverPc88();
@@ -35,6 +40,14 @@ private:
 	uint64_t opnResidual_;
 	int64_t cpuAcc_; /* fractional cpuHz/hostRate accumulator */
 	int64_t cpuCycleBudget_; /* leftover after last insn; prevents +~6% tempo */
+	/* Lead-in: audio the OPN produced while TriggerPlay was draining the
+	   PATCH command, i.e. the opening of the song. See BeginLeadCapture. */
+	int16_t* lead_;
+	int leadCap_;   /* int16_t slots */
+	int leadLen_;   /* int16_t slots in use */
+	int leadPos_;   /* int16_t read cursor */
+	int capturing_;
+	int64_t capAcc_; /* cycles*hostRate accumulator for capture pacing */
 	/* Stall watchdog: keeps a rip playing and looping (see WatchdogTick). */
 	uint64_t wdSamples_;
 	uint64_t wdLastActive_;
@@ -52,4 +65,8 @@ private:
 	void Unwedge();
 	void TriggerPlay();
 	void WatchdogTick();
+	void BeginLeadCapture();
+	void CaptureLead(uint64_t cpuCycles);
+	void EndLeadCapture();
+	int DrainLead(int16_t* stereo, int frames);
 };

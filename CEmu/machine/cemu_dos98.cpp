@@ -47,6 +47,9 @@ CEmuDos98::CEmuDos98()
 	memset(unhandledFn_, 0, sizeof(unhandledFn_));
 	memset(unhandledVec_, 0, sizeof(unhandledVec_));
 	memset(unhandledInt18_, 0, sizeof(unhandledInt18_));
+	trapVec_ = 0;
+	trapCs_ = 0;
+	trapIp_ = 0;
 	traceOn_ = traceDefault_;
 	traceCount_ = 0;
 	readLogCount_ = 0;
@@ -86,6 +89,9 @@ void CEmuDos98::Reset()
 	memset(unhandledFn_, 0, sizeof(unhandledFn_));
 	memset(unhandledVec_, 0, sizeof(unhandledVec_));
 	memset(unhandledInt18_, 0, sizeof(unhandledInt18_));
+	trapVec_ = 0;
+	trapCs_ = 0;
+	trapIp_ = 0;
 	traceOn_ = traceDefault_;
 	traceCount_ = 0;
 	readLogCount_ = 0;
@@ -227,6 +233,9 @@ void CEmuDos98::InstallTrampolines(uint8_t* mem)
 		Wr16(mem, v * 4, (uint16_t)off);
 		Wr16(mem, v * 4 + 2, DOS98_TRAMP_SEG);
 	}
+	/* Empty CG font / DBCS lead table for INT 1A (PC-98) and INT 21 AH=63.
+	   Parked past the HLT stubs and the CALL-ret slot at 0x200. */
+	memset(mem + base + 0x0210, 0, 0x40);
 }
 
 void CEmuDos98::WriteMcb(uint8_t* mem, uint16_t seg, uint8_t sig, uint16_t owner, uint16_t size) const
@@ -270,6 +279,14 @@ void CEmuDos98::InstallDosStructures(uint8_t* mem, unsigned memKb, const char* b
 	Wr16(mem, 0x463, 0x3D4);  /* CRT port */
 	Wr16(mem, 0x46C, 0);      /* timer ticks low */
 	Wr16(mem, 0x46E, 0);      /* timer ticks high */
+
+	/* PC-98 BIOS work @ 0500h shares this physical page with sysvars
+	   (segment 0050h). LOL lives at 0510h, so only the unused bytes are
+	   equipment flags — the same bits MADP/Falcom probe on a real box.
+	   0501 bit3 = 80286 (also "FM present" for QueenSoft); 0536 bit2 =
+	   sound board. */
+	mem[0x501] = (uint8_t)(mem[0x501] | 0x08);
+	mem[0x536] = (uint8_t)(mem[0x536] | 0x04);
 
 	/* PSP:002C environment — BLASTER must match emulated SB ports/IRQ. */
 	{
@@ -392,11 +409,23 @@ int CEmuDos98::Resize(uint8_t* mem, uint16_t dataSeg, uint16_t paras, uint16_t* 
 	const uint16_t owner = Rd16(mem, l + 1);
 	const uint16_t size = Rd16(mem, l + 3);
 	if (paras <= size) {
+		/* Tiny-model COM (SS=CS=PSP) AH=4A-shrinks to ~1KB then AH=48 192KB
+		   into the hole. That hole sits inside CS:0000-FFFF so near IP in
+		   the glue (gintetsu 2002:0FAD) executes the song buffer (#UD).
+		   Live CS is the INT 21 trampoline — use the IRET-frame caller. */
+		{
+			const unsigned fr = DosLin(np2_reg_get(NP2_R_SS),
+				np2_reg_get(NP2_R_SP));
+			const uint16_t callerCs = Rd16(mem, fr + 2);
+			if (dataSeg == callerCs && paras < 0x1000u && size >= 0x1000u)
+				paras = 0x1000u;
+		}
 		if (size >= (uint16_t)(paras + 1)) {
 			const uint16_t remSeg = (uint16_t)(mcb + 1 + paras);
 			const uint16_t remSize = (uint16_t)(size - paras - 1);
 			WriteMcb(mem, remSeg, sig == (uint8_t)'Z' ? (uint8_t)'Z' : (uint8_t)'M', 0, remSize);
 			WriteMcb(mem, mcb, (uint8_t)'M', owner, paras);
+			Coalesce(mem);
 		}
 		return 1;
 	}
@@ -566,7 +595,7 @@ int CEmuDos98::LoadExe(uint8_t* mem, const unsigned char* image, unsigned imageS
 }
 
 int CEmuDos98::LoadDeviceImage(uint8_t* mem, const char* name, uint16_t* outSeg,
-	uint16_t* outStratOff, uint16_t* outIntrOff) const
+	uint16_t* outStratOff, uint16_t* outIntrOff, unsigned extraParas) const
 {
 	if (!mem || !name || !outSeg) return 0;
 	*outSeg = 0;
@@ -574,15 +603,333 @@ int CEmuDos98::LoadDeviceImage(uint8_t* mem, const char* name, uint16_t* outSeg,
 	if (outIntrOff) *outIntrOff = 0;
 	const CEmuDos98File* file = FindFile(name);
 	if (!file || !file->data || file->size < 18) return 0;
-	const unsigned paras = (file->size + 15u) / 16u + 1u;
+	const unsigned char* data = file->data;
+	unsigned size = file->size;
+	/* hoot lists some char devices as type=device MDR.EXE / mmd.sys even
+	   though the zip member is MZ-wrapped. Strategy/interrupt live in the
+	   SYS header after the MZ stub; using the MZ fields CALLs into the
+	   reloc table (#UD). The EXE entry itself SETS SS=0 and INT 21 4C01. */
+	if (size >= 0x20 && data[0] == 'M' && data[1] == 'Z') {
+		const unsigned hdrSize = (unsigned)(data[8] | (data[9] << 8)) * 16u;
+		if (hdrSize >= 0x20 && hdrSize + 18u <= size) {
+			const unsigned char* sys = data + hdrSize;
+			const uint16_t attr = (uint16_t)(sys[4] | (sys[5] << 8));
+			if (attr & 0x8000) {
+				data = sys;
+				size -= hdrSize;
+			}
+		}
+	}
+	if (size < 18) return 0;
+	const uint16_t stratEarly = (uint16_t)(data[6] | (data[7] << 8));
+	const uint16_t intrEarly = (uint16_t)(data[8] | (data[9] << 8));
+	/* Tiny-model SYS (MDR.EXE): interrupt prologue MOV AX,0 / MOV SS,AX
+	   / MOV DS,AX wants a 64KB DGROUP. DEVICE= used to allocate ~19KB so
+	   CS:AE98 landed in the next AH=48 buffer and executed garbage (#BR/#UD). */
+	int tinyDs0 = 0;
+	if ((unsigned)intrEarly + 32u <= size) {
+		for (unsigned i = 0; i + 2 < 24u; i++) {
+			if (data[intrEarly + i] != 0xB8 || data[intrEarly + i + 1] != 0
+				|| data[intrEarly + i + 2] != 0)
+				continue;
+			for (unsigned j = i; j + 1 < 32u; j++) {
+				if (data[intrEarly + j] == 0x8E && data[intrEarly + j + 1] == 0xD0) {
+					tinyDs0 = 1;
+					break;
+				}
+			}
+			break;
+		}
+	}
+	/* Real DOS gives the driver all remaining memory during INIT, then
+	   shrinks to the break address. MMD2.SYS parks a 4096-byte song
+	   buffer past the image (CS+~0x25C); allocating only the file size
+	   let it smash the next MCB / trampoline. */
+	unsigned paras = (size + 15u) / 16u + 1u;
+	if (paras < 0x80u)
+		paras = 0x80u;
+	paras += 0x300u;
+	paras += extraParas;
+	if (tinyDs0 && paras < 0x1000u)
+		paras = 0x1000u;
+	/* Device CS is 16-bit; NMUSE -d8192 -k11264 still fits in 64KB. */
+	if (paras > 0x1000u)
+		paras = 0x1000u;
 	uint16_t seg = 0;
 	if (!Alloc(mem, (uint16_t)paras, 8, &seg) || !seg) return 0;
-	memcpy(mem + DosLin(seg, 0), file->data, file->size);
+	{
+		const unsigned lin = DosLin(seg, 0);
+		const unsigned allocBytes = paras * 16u;
+		memset(mem + lin, 0, allocBytes);
+		memcpy(mem + lin, data, size);
+	}
 	*outSeg = seg;
-	if (outStratOff)
-		*outStratOff = (uint16_t)(file->data[6] | (file->data[7] << 8));
-	if (outIntrOff)
-		*outIntrOff = (uint16_t)(file->data[8] | (file->data[9] << 8));
+	if (outStratOff) *outStratOff = stratEarly;
+	if (outIntrOff) *outIntrOff = intrEarly;
+
+	/* Cave / DS=CS / setvect CS patches are MDR-only. Other tiny-model
+	   SYS (none currently) must not get INT14 lock retarget or envelope
+	   clamp. 64KB DGROUP alloc above still applies to any tinyDs0. */
+	int isMdr = 0;
+	if (size >= 18) {
+		const unsigned char* nm = data + 10;
+		if ((nm[0] | 32) == 'm' && (nm[1] | 32) == 'd' && (nm[2] | 32) == 'r')
+			isMdr = 1;
+	}
+
+	if (tinyDs0 && isMdr) {
+		uint8_t* img = mem + DosLin(seg, 0);
+		/* Tiny-model MSC INT 14 / INT 40: PUSHAW then DS=CS, but SS stays
+		   the caller's (COM). Locals sit on the COM stack while near
+		   pointers use DGROUP, so C stos/malloc paint COM BSS and the CPU
+		   later executes it (#UD at 2002:0FAD). Device INIT already
+		   switches SS=CS / SP=21F0; the C handlers do not. Cave in the
+		   64KB DGROUP tail: per-site SS:SP. 		   64KB DGROUP tail: per-site SS:SP. Handler SP sits 4KB above
+		   INIT's stack. INT 14 player-loop STI is NOPed so a nested
+		   tick cannot IRET the outer frame ([1AC0] stuck at 1). */
+		{
+			unsigned proOff[4], epiOff[4], nPro = 0, nEpi = 0;
+			for (unsigned i = 0; i + 11 <= size && nPro < 4; i++) {
+				if (img[i] == 0x60 && img[i + 1] == 0x1E && img[i + 2] == 0x06
+					&& img[i + 3] == 0x8B && img[i + 4] == 0xEC
+					&& img[i + 5] == 0xB8 && img[i + 6] == 0 && img[i + 7] == 0
+					&& img[i + 8] == 0x8E && img[i + 9] == 0xD8
+					&& img[i + 10] == 0xFC)
+					proOff[nPro++] = i;
+			}
+			for (unsigned i = 0; i + 6 <= size && nEpi < 4; i++) {
+				if (img[i] == 0x8B && img[i + 1] == 0xE5 && img[i + 2] == 0x07
+					&& img[i + 3] == 0x1F && img[i + 4] == 0x61 && img[i + 5] == 0xCF)
+					epiOff[nEpi++] = i;
+			}
+			/* INIT's `MOV SP,imm / MOV SS,AX` is the C DGROUP stack. Park
+			   the cave ABOVE that top so heap (past the image) and the
+			   stack (growing down) cannot land on it. */
+			uint16_t dgroupSp = 0x21F0;
+			for (unsigned i = 0; i + 5 < 48u && (unsigned)intrEarly + i + 5 < size; i++) {
+				const unsigned o = (unsigned)intrEarly + i;
+				if (img[o] == 0xBC && img[o + 3] == 0x8E && img[o + 4] == 0xD0) {
+					dgroupSp = (uint16_t)(img[o + 1] | (img[o + 2] << 8));
+					break;
+				}
+			}
+			unsigned cave = 0xF000u;
+			const unsigned need = 0x80u * nPro + 0x40u * nPro + 0x40u;
+			if (dgroupSp >= 0xE000u)
+				cave = ((unsigned)dgroupSp + 16u) & ~15u;
+			/* INIT SP (gintetsu 0x21F0) is 52 bytes above a #UD that
+			   tracks the handler SP (21BC then 31BC). Keep the ISR stack
+			   4KB above INIT SP — parking at E000 killed the first notes
+			   (near-ptr BSS / heap walk). Heap stays under INIT SP. */
+			uint16_t handlerSp = dgroupSp;
+			if (cave >= 0xF000u && dgroupSp + 0x2000u < cave)
+				handlerSp = (uint16_t)(dgroupSp + 0x1000u);
+			if (nPro >= 1 && nEpi >= 1 && cave + need < 0x10000u && cave >= size + 16u) {
+				auto emit16 = [img](unsigned o, uint16_t v) {
+					img[o] = (uint8_t)v;
+					img[o + 1] = (uint8_t)(v >> 8);
+				};
+				/* Per-site save (ISR vs INT 40) so a nested ISR cannot
+				   overwrite the COM SS:SP INT 40 still needs for IRET. */
+				const unsigned scratch = cave + 0x80u * nPro + 0x40u * nPro;
+				const uint16_t tmpAx = (uint16_t)scratch;
+				const uint16_t tmpBx = (uint16_t)(scratch + 2);
+				for (unsigned k = 0; k < nPro; k++) {
+					const unsigned ent = cave + 0x80u * k;
+					const unsigned ex = cave + 0x80u * nPro + 0x40u * k;
+					const uint16_t saveSp = (uint16_t)(scratch + 4 + k * 8);
+					const uint16_t saveSs = (uint16_t)(saveSp + 2);
+					const uint16_t switched = (uint16_t)(saveSp + 4);
+					unsigned p = ex;
+					img[p++] = 0x8B; img[p++] = 0xE5;
+					img[p++] = 0x07; img[p++] = 0x1F; img[p++] = 0x61; img[p++] = 0xFA;
+					img[p++] = 0x2E; img[p++] = 0x80; img[p++] = 0x3E;
+					emit16(p, switched); p += 2;
+					img[p++] = 0x00;
+					const unsigned jeAt = p; img[p++] = 0x74; img[p++] = 0x00;
+					img[p++] = 0x2E; img[p++] = 0x8B; img[p++] = 0x26;
+					emit16(p, saveSp); p += 2;
+					img[p++] = 0x2E; img[p++] = 0x8E; img[p++] = 0x16;
+					emit16(p, saveSs); p += 2;
+					img[p++] = 0x2E; img[p++] = 0xC6; img[p++] = 0x06;
+					emit16(p, switched); p += 2;
+					img[p++] = 0x00;
+					const unsigned stay = p;
+					img[p++] = 0xFB; img[p++] = 0xCF;
+					img[jeAt + 1] = (uint8_t)(stay - (jeAt + 2));
+					unsigned q = ent;
+					img[q++] = 0xFA;
+					img[q++] = 0x2E; img[q++] = 0xA3; emit16(q, tmpAx); q += 2;
+					img[q++] = 0x2E; img[q++] = 0x89; img[q++] = 0x1E; emit16(q, tmpBx); q += 2;
+					img[q++] = 0x8C; img[q++] = 0xC8;
+					img[q++] = 0x8C; img[q++] = 0xD3;
+					img[q++] = 0x3B; img[q++] = 0xC3;
+					img[q++] = 0x2E; img[q++] = 0xA1; emit16(q, tmpAx); q += 2;
+					img[q++] = 0x2E; img[q++] = 0x8B; img[q++] = 0x1E; emit16(q, tmpBx); q += 2;
+					const unsigned jeAlr = q; img[q++] = 0x74; img[q++] = 0x00;
+					img[q++] = 0x2E; img[q++] = 0x89; img[q++] = 0x26;
+					emit16(q, saveSp); q += 2;
+					img[q++] = 0x2E; img[q++] = 0x8C; img[q++] = 0x16;
+					emit16(q, saveSs); q += 2;
+					img[q++] = 0x2E; img[q++] = 0xC6; img[q++] = 0x06;
+					emit16(q, switched); q += 2;
+					img[q++] = 0x01;
+					img[q++] = 0x2E; img[q++] = 0xA3; emit16(q, tmpAx); q += 2;
+					img[q++] = 0x8C; img[q++] = 0xC8;
+					img[q++] = 0x8E; img[q++] = 0xD0;
+					img[q++] = 0xBC; emit16(q, handlerSp); q += 2;
+					img[q++] = 0x2E; img[q++] = 0xA1; emit16(q, tmpAx); q += 2;
+					const unsigned already = q;
+					img[jeAlr + 1] = (uint8_t)(already - (jeAlr + 2));
+					img[q++] = 0x60; img[q++] = 0x1E; img[q++] = 0x06;
+					img[q++] = 0x8B; img[q++] = 0xEC;
+					img[q++] = 0x0E; img[q++] = 0x1F;
+					img[q++] = 0x0E; img[q++] = 0x07;
+					img[q++] = 0xFC;
+					img[q++] = 0xE9;
+					const unsigned cont = proOff[k] + 11u;
+					emit16(q, (uint16_t)(cont - (q + 2)));
+					const unsigned po = proOff[k];
+					img[po] = 0xE9;
+					emit16(po + 1, (uint16_t)(ent - (po + 3)));
+					for (unsigned z = 3; z < 11; z++)
+						img[po + z] = 0x90;
+					if (k < nEpi && epiOff[k] >= proOff[0]) {
+						const unsigned eo = epiOff[k];
+						img[eo] = 0xE9;
+						emit16(eo + 1, (uint16_t)(ex - (eo + 3)));
+						img[eo + 3] = 0x90; img[eo + 4] = 0x90; img[eo + 5] = 0x90;
+					}
+				}
+				/* INT 14 player loops STI around call 0x9d0 / 0xde6 so a
+				   nested tick can refill [1A12]. That nested IRET restores
+				   COM SS:SP (switched=1) and abandons the outer frame with
+				   [1AC0]=1. NOP the STI: this IRQ's already-added ticks
+				   still run, and the next IRQ takes the next batch. */
+				if (nPro >= 1 && epiOff[0] > proOff[0] + 11u) {
+					for (unsigned i = proOff[0] + 11u; i < epiOff[0]; i++) {
+						if (img[i] == 0xFB)
+							img[i] = 0x90;
+					}
+					/* Skip JNZs land 6 bytes past `MOV [lock],0` (PIC
+					   restore or the epilogue). A nested/abandoned frame
+					   leaves the lock set and every later tick is TAIL-only.
+					   Lock address is 1AC0 on 7KB MDR.EXE and 5FD2 on wlfpk. */
+					unsigned clrLock = 0;
+					for (unsigned i = proOff[0] + 11u; i + 6 <= epiOff[0]; i++) {
+						if (img[i] == 0xC7 && img[i + 1] == 0x06
+							&& img[i + 4] == 0 && img[i + 5] == 0)
+							clrLock = i;
+					}
+					if (clrLock) {
+						for (unsigned i = proOff[0] + 11u; i + 1 < clrLock; i++) {
+							if (img[i] != 0x75)
+								continue;
+							const unsigned dest = i + 2u + (unsigned)img[i + 1];
+							if (dest == clrLock + 6u)
+								img[i + 1] = (uint8_t)(clrLock - (i + 2u));
+						}
+					}
+				}
+				/* Envelope CALL [bx+stateTable]: slots 5-7 are BSS reused
+				   as the saved INT 14 vector (0028 / tramp 0060) and the
+				   IRQ-arm flag. A state of 5 near-calls the device INIT
+				   (`MOV SP,21F0`) and the ISR frame at handlerSp-0x34 is
+				   then fetched as code (#UD 0x64 at 31BC; wlfpk 48D6). */
+				for (unsigned i = 0; i + 9 < size; i++) {
+					if (img[i] != 0x8B || img[i + 1] != 0x5F || img[i + 2] != 0x06
+						|| img[i + 3] != 0xD1 || img[i + 4] != 0xE3
+						|| img[i + 5] != 0xFF || img[i + 6] != 0x97)
+						continue;
+					const uint16_t table = (uint16_t)(img[i + 7] | (img[i + 8] << 8));
+					const unsigned clamp = scratch + 0x20u;
+					if (clamp + 16u >= 0x10000u)
+						break;
+					unsigned c = clamp;
+					img[c++] = 0x83; img[c++] = 0xFB; img[c++] = 0x05;
+					img[c++] = 0x73; img[c++] = 0x06;
+					img[c++] = 0xD1; img[c++] = 0xE3;
+					img[c++] = 0xFF; img[c++] = 0x97;
+					emit16(c, table); c += 2;
+					img[c++] = 0xE9;
+					const unsigned back = i + 9u;
+					emit16(c, (uint16_t)(back - (c + 2)));
+					img[i + 3] = 0xE9;
+					emit16(i + 4, (uint16_t)(clamp - (i + 6)));
+					img[i + 6] = 0x90; img[i + 7] = 0x90; img[i + 8] = 0x90;
+					break;
+				}
+			}
+		}
+		for (unsigned i = 0; i + 4 < size; i++) {
+			if (img[i] != 0xB8 || img[i + 1] != 0 || img[i + 2] != 0)
+				continue;
+			if (img[i + 3] == 0x8E && img[i + 4] == 0xD8) {
+				/* MOV AX,CS; MOV ES,AX; MOV DS,AX — INT 40/14 keep the
+				   caller's ES (COM), and C stos/malloc then paint the
+				   glue (2002:0FAD) which the CPU then executes (#UD 0F).
+				   Eating the following CLD is safe: MSC memcpy STDs and
+				   CLDs around itself, and DF starts clear. */
+				if (i + 5 < size && img[i + 5] == 0xFC) {
+					img[i] = 0x8C; img[i + 1] = 0xC8;
+					img[i + 2] = 0x8E; img[i + 3] = 0xC0;
+					img[i + 4] = 0x8E; img[i + 5] = 0xD8;
+				} else {
+					img[i] = 0x8C; img[i + 1] = 0xC8; img[i + 2] = 0x90;
+				}
+				continue;
+			}
+			for (unsigned j = 3; j < 16u && i + j + 1 < size; j++) {
+				if (img[i + j] == 0x8E && img[i + j + 1] == 0xD0) {
+					img[i] = 0x8C; img[i + 1] = 0xC8; img[i + 2] = 0x90;
+					break;
+				}
+			}
+		}
+		/* C setvect(vec, MK_FP(0, off)): PUSH 0 / PUSH off / PUSH vec / CALL.
+		   INT 14 (OPN ISR) and INT 40/2F (play API) both parked the handler
+		   at 0000:offset. Glue INT 40 then executed IVT/BDA and #UD. */
+		for (unsigned i = 0; i + 10 < size; i++) {
+			if (img[i] != 0x68 || img[i + 1] != 0 || img[i + 2] != 0)
+				continue;
+			if (img[i + 3] != 0x68)
+				continue;
+			const unsigned off = (unsigned)(img[i + 4] | (img[i + 5] << 8));
+			if (off < 0x20 || off >= size)
+				continue;
+			unsigned vec = 0, after = 0;
+			if (img[i + 6] == 0x6A) {
+				vec = img[i + 7];
+				after = i + 8;
+			} else if (img[i + 6] == 0x68 && img[i + 8] == 0) {
+				vec = img[i + 7];
+				after = i + 9;
+			} else
+				continue;
+			if (vec == 0 || after >= size || img[after] != 0xE8)
+				continue;
+			img[i] = 0x0E; img[i + 1] = 0x90; img[i + 2] = 0x90;
+		}
+		/* wlfpk in-bank voice: cmd1/cmd2 write [609E]=4864 / [60A4]=5864
+		   then DS. Glue INT 2F BX=1/2 does that, but a missed magic check
+		   leaves the far ptr 0:0 and opcode 89 indexes IVT, then a later
+		   tick executes the 0F 0F bytes at 4864+0x72 (#UD 48D6). Plant the
+		   BSS words the immediates already name. */
+		for (unsigned i = 0; i + 6 <= size; i++) {
+			if (img[i] != 0xC7 || img[i + 1] != 0x06)
+				continue;
+			if (!((img[i + 4] == 0x64 && img[i + 5] == 0x48)
+				|| (img[i + 4] == 0x64 && img[i + 5] == 0x58)))
+				continue;
+			const unsigned off = (unsigned)(img[i + 2] | (img[i + 3] << 8));
+			if (off < size || off + 4u >= 0x10000u)
+				continue;
+			img[off] = img[i + 4];
+			img[off + 1] = img[i + 5];
+			img[off + 2] = (uint8_t)seg;
+			img[off + 3] = (uint8_t)(seg >> 8);
+		}
+	}
 	return 1;
 }
 
@@ -663,6 +1010,14 @@ void CEmuDos98::SetCf(int on)
 	np2_reg_set(NP2_R_FLAGS, f);
 }
 
+static void SetZf(int on)
+{
+	uint16_t f = np2_reg_get(NP2_R_FLAGS);
+	if (on) f = (uint16_t)(f | FLAG_ZF);
+	else f = (uint16_t)(f & ~FLAG_ZF);
+	np2_reg_set(NP2_R_FLAGS, f);
+}
+
 void CEmuDos98::ReadCstr(const uint8_t* mem, uint16_t seg, uint16_t off, char* out, int outCap) const
 {
 	if (!out || outCap <= 0) return;
@@ -678,21 +1033,46 @@ void CEmuDos98::ReadCstr(const uint8_t* mem, uint16_t seg, uint16_t off, char* o
 
 void CEmuDos98::Int18()
 {
-	const uint8_t f = Ah();
-	if (f == 0x00 || f == 0x01) {
-		np2_reg_set(NP2_R_AX, 0);
+	const uint16_t ax = np2_reg_get(NP2_R_AX);
+	/* AX=9801 is the glue's idle poll, not a BIOS request. */
+	if (ax == 0x9801)
 		return;
-	}
+	const uint8_t f = Ah();
+	switch (f) {
+	case 0x00:
+	case 0x01:
+		np2_reg_set(NP2_R_AX, 0);
+		SetCf(0);
+		return;
 	/* AH=02 senses the shift/ctrl/caps bitmap. Nothing is held here, and
 	   leaving AL untouched made drivers read a stale register as "a modifier
 	   is down" and take their pause/step path. */
-	if (f == 0x02) {
-		np2_reg_set(NP2_R_AX, (uint16_t)(np2_reg_get(NP2_R_AX) & 0xFF00));
+	case 0x02:
+		np2_reg_set(NP2_R_AX, (uint16_t)(ax & 0xFF00));
+		SetCf(0);
+		return;
+	/* Keyboard init / sense (SCBIOS AH=03) and the rest of the CRT/GDC
+	   surface NP2 answers with success. Callers treat CF as "BIOS missing". */
+	case 0x03:
+	case 0x04:
+	case 0x05:
+		SetAl(0);
+		SetCf(0);
+		return;
+	case 0x0A: case 0x0B: case 0x0C: case 0x0D:
+	case 0x0E: case 0x0F:
+	case 0x10: case 0x11: case 0x12: case 0x13:
+	case 0x14: case 0x15: case 0x16:
+	case 0x1A: case 0x1B:
+	case 0x21: case 0x30:
+	case 0x40: case 0x41: case 0x42: case 0x43:
+		SetCf(0);
+		return;
+	default:
+		unhandledInt18_[f] = 1;
+		SetCf(0);
 		return;
 	}
-	/* AX=9801 is the glue's idle poll, not a BIOS request. */
-	if (np2_reg_get(NP2_R_AX) != 0x9801)
-		unhandledInt18_[f] = 1;
 }
 
 CEmuDos98Result CEmuDos98::Int21(uint8_t* mem)
@@ -740,6 +1120,22 @@ CEmuDos98Result CEmuDos98::Int21(uint8_t* mem)
 		SetAl(0x24);
 		break;
 	}
+	case 0x0A: {
+		/* Buffered input. Leaving the count byte as garbage makes loaders
+		   wait on a phantom line; store "empty + CR". */
+		const unsigned a = DosLin(np2_reg_get(NP2_R_DS), np2_reg_get(NP2_R_DX));
+		if (a + 2 < 0x200000) {
+			mem[a + 1] = 0;
+			mem[a + 2] = 0x0D;
+		}
+		SetAl(0x0D);
+		SetCf(0);
+		break;
+	}
+	case 0x0E:
+		SetAl(1); /* last drive = A: */
+		SetCf(0);
+		break;
 	case 0x01:
 	case 0x07:
 	case 0x08:
@@ -865,7 +1261,16 @@ CEmuDos98Result CEmuDos98::Int21(uint8_t* mem)
 	case 0x42: {
 		const uint16_t h = np2_reg_get(NP2_R_BX);
 		const uint8_t whence = Al();
-		const uint32_t off = ((uint32_t)np2_reg_get(NP2_R_CX) << 16) | np2_reg_get(NP2_R_DX);
+		uint16_t seekCx = np2_reg_get(NP2_R_CX);
+		uint16_t seekDx = np2_reg_get(NP2_R_DX);
+		/* Linel Neverending Story II CODE.COM does IN AX,DX from the
+		   Hoot song port (07E2h) then AH=42 without zeroing DX, so an
+		   origin-0 seek lands at offset 2018 and the .BIN header is
+		   skipped. Real DOS would do the same; the port number is not a
+		   file offset. */
+		if (pcAtBios_ && whence == 0 && seekCx == 0 && seekDx == 0x07E2)
+			seekDx = 0;
+		const uint32_t off = ((uint32_t)seekCx << 16) | seekDx;
 		uint32_t len = 0;
 		if (h < DOS98_HANDLE_MAX && handles_[h].used) {
 			const CEmuDos98File* file = FindFile(handles_[h].name);
@@ -956,10 +1361,21 @@ CEmuDos98Result CEmuDos98::Int21(uint8_t* mem)
 			}
 		} else if (subfn == 0x00) {
 			/* Load-and-execute. Used by shells that spawn resident music
-			   drivers; CS:IP land on the MZ entry (incl. PACKED stub). */
+			   drivers; CS:IP land on the MZ entry (incl. PACKED stub).
+			   Returning CONTINUE made the HLT path IRET from the child's
+			   stack (LoadExe already replaced SS:SP) and #UD. */
 			const CEmuDos98File* file = FindFile(name);
-			if (file && file->data && LoadExe(mem, file->data, file->size, "")) {
+			int ok = 0;
+			if (file && file->data) {
+				const int isExe = (file->size >= 2 && file->data[0] == 'M'
+					&& file->data[1] == 'Z');
+				ok = isExe
+					? LoadExe(mem, file->data, file->size, "")
+					: LoadCom(mem, file->data, file->size, "");
+			}
+			if (ok) {
 				SetCf(0);
+				return DOS98_EXEC;
 			} else {
 				np2_reg_set(NP2_R_AX, 0x0002);
 				SetCf(1);
@@ -1041,6 +1457,29 @@ CEmuDos98Result CEmuDos98::Int21(uint8_t* mem)
 		} else {
 			SetCf(0);
 		}
+		break;
+	case 0x4D:
+		np2_reg_set(NP2_R_AX, 0);
+		SetCf(0);
+		break;
+	case 0x59:
+		np2_reg_set(NP2_R_AX, 0);
+		np2_reg_set(NP2_R_BX, 0);
+		SetCf(0);
+		break;
+	case 0x63: {
+		/* DBCS lead-byte table. Empty (00,00) = SBCS; DS:SI must be valid. */
+		const unsigned tab = DosLin(DOS98_TRAMP_SEG, 0x0230);
+		mem[tab] = 0;
+		mem[tab + 1] = 0;
+		np2_reg_set(NP2_R_DS, DOS98_TRAMP_SEG);
+		np2_reg_set(NP2_R_SI, 0x0230);
+		SetCf(0);
+		break;
+	}
+	case 0x65:
+		np2_reg_set(NP2_R_CX, 0);
+		SetCf(0);
 		break;
 	case 0x58:
 		/* Allocation strategy / UMB link. Stored but not acted on: this
@@ -1130,7 +1569,16 @@ CEmuDos98Result CEmuDos98::ServiceInt(uint8_t* mem, uint8_t vec)
 	Call* rec = NULL;
 	/* The hoot glue idles on INT 18 AX=9801 and makes that call hundreds of
 	   thousands of times, which buries everything else in the ring. */
-	const int idlePoll = (vec == 0x18 && np2_reg_get(NP2_R_AX) == 0x9801);
+	const int idlePoll = (vec == 0x18 && np2_reg_get(NP2_R_AX) == 0x9801)
+		|| (vec == 0x21 && Ah() == 0x06)
+		|| (vec == 0x06);
+	if (trapVec_ == 0 && mem
+		&& (vec <= 0x07 || vec == 0x0C || vec == 0x0D)) {
+		const unsigned f = DosLin(np2_reg_get(NP2_R_SS), np2_reg_get(NP2_R_SP));
+		trapVec_ = vec;
+		trapIp_ = Rd16(mem, f);
+		trapCs_ = Rd16(mem, f + 2);
+	}
 	if (!idlePoll
 		&& (traceOn_ == 1 || (traceOn_ == 2 && traceCount_ < kTraceMax))) {
 		rec = &trace_[traceCount_++ % kTraceMax];
@@ -1177,13 +1625,117 @@ CEmuDos98Result CEmuDos98::ServiceIntInner(uint8_t* mem, uint8_t vec)
 	case 0x18:
 		Int18();
 		return DOS98_CONTINUE;
+	/* INT 10h–16h: IBM-ish callers on PC-98 ports (FMXP INT 15, SCBIOS
+	   keyboard, AIL HOOT). Success no-ops; CF set used to mean "no BIOS". */
+	case 0x10:
+		switch (Ah()) {
+		case 0x0F:
+			np2_reg_set(NP2_R_AX, 0x5003); /* 80-col, mode 3 */
+			np2_reg_set(NP2_R_BX, (uint16_t)(np2_reg_get(NP2_R_BX) & 0x00FF));
+			break;
+		case 0x03:
+			np2_reg_set(NP2_R_CX, 0);
+			np2_reg_set(NP2_R_DX, 0);
+			break;
+		default:
+			break;
+		}
+		SetCf(0);
+		return DOS98_CONTINUE;
+	case 0x11:
+		np2_reg_set(NP2_R_AX, 0x0021);
+		SetCf(0);
+		return DOS98_CONTINUE;
+	case 0x12:
+		np2_reg_set(NP2_R_AX, 640);
+		SetCf(0);
+		return DOS98_CONTINUE;
+	case 0x15:
+		if (Ah() == 0x88)
+			np2_reg_set(NP2_R_AX, 0);
+		else
+			SetAl(0);
+		SetCf(0);
+		return DOS98_CONTINUE;
+	case 0x16:
+		if (Ah() == 0x01) {
+			SetAl(0);
+			SetZf(1);
+		} else {
+			SetAl(0);
+			SetZf(0);
+		}
+		SetCf(0);
+		return DOS98_CONTINUE;
+	/* PC-98 disk BIOS. Real media is never here; CF-clear + AH=0 matches
+	   the IRET stub BootDos parks for non-DOS packs (a failed read is fatal). */
+	case 0x1B:
+		np2_reg_set(NP2_R_AX, (uint16_t)(np2_reg_get(NP2_R_AX) & 0x00FF));
+		SetCf(0);
+		return DOS98_CONTINUE;
+	/* INT 2Fh multiplex. XMS 4300h must NOT return AL=80h without a control
+	   routine at 4310h — SCBIOS/LUDY cmp al,80 and would far-call garbage.
+	   "Not installed" lets them take the no-XMS path. */
+	case 0x2F: {
+		const uint16_t ax = np2_reg_get(NP2_R_AX);
+		if (ax == 0x4310) {
+			SetCf(1);
+			return DOS98_CONTINUE;
+		}
+		if (ax == 0x4300) {
+			SetAl(0);
+			SetCf(0);
+			return DOS98_CONTINUE;
+		}
+		if ((ax & 0xFF00) == 0x1600) {
+			SetAl(0);
+			SetCf(0);
+			return DOS98_CONTINUE;
+		}
+		SetAl(0);
+		SetCf(0);
+		return DOS98_CONTINUE;
+	}
+	case 0x08:
+		/* BIOS IRQ0 when the guest left the trampoline: bump the BDA tick.
+		   DeliverIrqs prefers a hooked INT 08 or INT 1C instead of this. */
+		{
+			uint32_t t = (uint32_t)Rd16(mem, 0x46C)
+				| ((uint32_t)Rd16(mem, 0x46E) << 16);
+			t++;
+			Wr16(mem, 0x46C, (uint16_t)(t & 0xffff));
+			Wr16(mem, 0x46E, (uint16_t)(t >> 16));
+		}
+		SetCf(0);
+		return DOS98_CONTINUE;
+	case 0x1C:
+		SetCf(0);
+		return DOS98_CONTINUE;
+	case 0x23:
+	case 0x24:
+		SetAl(0); /* ignore critical error / Ctrl-C */
+		SetCf(0);
+		return DOS98_CONTINUE;
+	case 0x29:
+		SetCf(0);
+		return DOS98_CONTINUE;
+	/* INT 30h (CP/M-style / unused) and INT 4Dh: MMD2.SYS init probes these
+	   before hooking INT D2. Trampoline-only left dosmiss=int30,intD2. */
+	case 0x30:
+	case 0x4D:
+		SetCf(0);
+		return DOS98_CONTINUE;
 	/* BIOS time-of-day. AIL/Miles (HOOT.EXE .ADV drivers) calibrates its
 	   timer by sampling INT 1Ah AH=00 across a spin loop; an IRET-only
 	   trampoline leaves CX:DX unchanged and the calibration divides by
 	   zero. The BDA counter at 0040:006C is advanced by the PIT. */
 	case 0x1A:
 		if (!pcAtBios_) {
-			unhandledVec_[vec] = 1;
+			/* PC-98 CG BIOS. Point ES:BP at a zero font so kanji probes
+			   do not walk IVT. */
+			np2_reg_set(NP2_R_ES, DOS98_TRAMP_SEG);
+			np2_reg_set(NP2_R_BP, 0x0210);
+			SetCf(0);
 			return DOS98_CONTINUE;
 		}
 		switch (Ah()) {

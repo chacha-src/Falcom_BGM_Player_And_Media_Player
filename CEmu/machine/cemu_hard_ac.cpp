@@ -175,6 +175,11 @@ CHardAc::CHardAc()
 	, snkStatus_(0)
 	, terracreMap_(0)
 	, flstoryNmiEn_(0)
+	, raizingType_(0)
+	, raizingLatchPending_(0)
+	, raizingNmiPending_(0)
+	, raizingLastKeyOns_(0)
+	, raizingIdlePolls_(0)
 	, hd63701_(NULL)
 	, hd63701Rom_(NULL)
 	, hd63701RomSize_(0)
@@ -246,6 +251,9 @@ CHardAc::CHardAc()
 	memset(seibuMain2Sub_, 0, sizeof(seibuMain2Sub_));
 	memset(seibuSub2Main_, 0, sizeof(seibuSub2Main_));
 	memset(segaMidiFifo_, 0, sizeof(segaMidiFifo_));
+	memset(raizingOkiBank_, 0, sizeof(raizingOkiBank_));
+	memset(raizingLatch_, 0, sizeof(raizingLatch_));
+	memset(raizingLatchOut_, 0, sizeof(raizingLatchOut_));
 }
 
 CHardAc::~CHardAc()
@@ -669,10 +677,10 @@ static const CEmuAcAliasEntry kAcAliases[] = {
 	{ "snowbros",   CEMU_AC_BOARD_TOAPLAN1 },
 	/* --- Toaplan 2 / Raizing: Z80 + YM2151 + OKI6295 --- */
 	{ "truxton2",   CEMU_AC_BOARD_TECMO16 },
-	{ "batrider",   CEMU_AC_BOARD_TECMO16 },
-	{ "bbakraid",   CEMU_AC_BOARD_TECMO16 },
-	{ "bgaregga",   CEMU_AC_BOARD_TECMO16 },
-	{ "mahou",      CEMU_AC_BOARD_TECMO16 },
+	{ "batrider",   CEMU_AC_BOARD_RAIZING },
+	{ "bbakraid",   CEMU_AC_BOARD_RAIZING },
+	{ "bgaregga",   CEMU_AC_BOARD_RAIZING },
+	{ "mahou",      CEMU_AC_BOARD_RAIZING },
 	/* --- Cave / Banpresto: Z80 + YM2151 + OKI6295 --- */
 	{ "agallet",    CEMU_AC_BOARD_TECMO16 },
 	{ "metmqstr",   CEMU_AC_BOARD_TECMO16 },
@@ -804,6 +812,18 @@ static int CEmuAcIsArmedfSub(const char* sub)
 		|| _stricmp(sub, "cclimbr2") == 0
 		|| _stricmp(sub, "kozure") == 0
 		|| _stricmp(sub, "legion") == 0) ? 1 : 0;
+}
+
+/* Which of the four Raizing sound-board revisions a subtype is (see the
+   CEMU_AC_BOARD_RAIZING comment); 0 for anything else. */
+static int CEmuAcRaizingType(const char* sub)
+{
+	if (!sub || !sub[0]) return 0;
+	if (_stricmp(sub, "mahou") == 0) return 1;
+	if (_stricmp(sub, "bgaregga") == 0) return 2;
+	if (_stricmp(sub, "batrider") == 0) return 3;
+	if (_stricmp(sub, "bbakraid") == 0) return 4;
+	return 0;
 }
 
 /* UPL Ninja Kid II / Atomic Robo-kid: dual YM2203 on Z80 I/O. */
@@ -1883,6 +1903,39 @@ int CHardAc::Init(const CEmuGameEntry* ge, int sampleRate)
 		chip2_ = NULL;
 		pcm_ = CEmuChipOki6295Create(1000000u / 132u, sampleRate_);
 		pcmKind_ = 2;
+	} else if (board_ == CEMU_AC_BOARD_RAIZING) {
+		/* MAME toaplan/raizing.cpp + raizing_batrider.cpp, all off one 32 MHz
+		   oscillator. The OKI chips take their output rate (clock / 132 on
+		   PIN7 high, / 165 on PIN7 low), which is what CChipOki6295 wants. */
+		raizingType_ = CEmuAcRaizingType(ge->subtype);
+		if (raizingType_ == 4) {
+			cpuHz_ = 32000000 / 6;
+			opmHz_ = 16934400;
+			chip_ = CEmuChipYmz280bCreate((uint32_t)opmHz_, sampleRate_);
+			/* Both chip outputs land on the one TA8201 (MAME add_route
+			   ALL_OUTPUTS -> "mono"), which is why the sound program is free
+			   to leave every music voice panned hard right. */
+			CEmuChipYmz280bSetMono(chip_, 1);
+			pcm_ = NULL;
+			pcmKind_ = 0;
+		} else {
+			cpuHz_ = (raizingType_ == 3) ? 32000000 / 6 : 32000000 / 8;
+			/* mahoudai clocks the OPM off the 27 MHz video crystal instead. */
+			opmHz_ = (raizingType_ == 1) ? 27000000 / 8 : 32000000 / 8;
+			chip_ = CEmuChipYm2151Create((uint32_t)opmHz_, sampleRate_);
+			const unsigned okiClock = (raizingType_ == 1) ? 32000000u / 32u
+				: (raizingType_ == 2) ? 32000000u / 16u : 32000000u / 10u;
+			pcm_ = CEmuChipOki6295Create(okiClock / 132u, sampleRate_);
+			pcmKind_ = 2;
+			if (raizingType_ == 3) {
+				/* Second OKI is strapped PIN7 low, so it runs at clock/165. */
+				pcm2_ = CEmuChipOki6295Create(okiClock / 165u, sampleRate_);
+				CEmuChipOki6295SetBankTable(pcm2_, raizingOkiBank_[1]);
+			}
+			if (raizingType_ != 1)
+				CEmuChipOki6295SetBankTable(pcm_, raizingOkiBank_[0]);
+		}
+		chip2_ = NULL;
 	} else if (board_ == CEMU_AC_BOARD_FLSTORY) {
 		/* MAME flstory: Z80 @ 4 MHz, YM2149 @ 2 MHz mapped C800.
 		   MSM5232 @ CA00 is the main melody; AY handles noise/FX/DAC traffic. */
@@ -2158,7 +2211,7 @@ uint8_t CHardAc::KonamiAyTimer() const
 	static const uint8_t kTimer[10] = {
 		0x00, 0x10, 0x20, 0x30, 0x40, 0x90, 0xa0, 0xb0, 0xa0, 0xd0
 	};
-	const uint64_t cyc = cpu_ ? (uint64_t)cpu_->time() : cpuCycles_;
+	const uint64_t cyc = cpu_ ? (uint64_t)cpu_->time64() : cpuCycles_;
 	return kTimer[(cyc / 512ull) % 10ull];
 }
 
@@ -2167,7 +2220,7 @@ uint8_t CHardAc::Gx400PortA() const
 	/* MAME gx400_state::nemesis_portA_r — bit2 toggles as the missing
 	   68000 "frame" clock so the sound mainloop (wait clear→set @029C)
 	   can run; bits4/6/7 stay high (0xD0). */
-	const uint64_t cyc = cpu_ ? (uint64_t)cpu_->time() : cpuCycles_;
+	const uint64_t cyc = cpu_ ? (uint64_t)cpu_->time64() : cpuCycles_;
 	return (uint8_t)(((cyc / 512ull) & 0x0full) | 0xd0u);
 }
 
@@ -3199,6 +3252,30 @@ void CHardAc::SetSoundCommand(uint8_t cmd)
 		irqPulse_ = 1;
 		return;
 	}
+	if (board_ == CEMU_AC_BOARD_RAIZING) {
+		soundCmd_ = cmd;
+		soundCmdPending_ = 1;
+		if (!RaizingHandshakeAcked()) {
+			RaizingPostCommand(0x55, 0x55);
+			return;
+		}
+		/* Where the catalog's song code goes differs per revision: mahoudai
+		   and Battle Garegga take it as the command itself, while Batrider
+		   and Battle Bakraid split it into a sub-command plus an index —
+		   Batrider dispatches on command & 0x1F (0 = start BGM) and Battle
+		   Bakraid on the low nibble (1 = start BGM), both with the song
+		   number in the second latch. */
+		switch (raizingType_) {
+		case 3: RaizingPostCommand(0x00, cmd); break;
+		case 4:
+			/* Catalog 0x11 "(ODYSSEY)" and every later index point at a
+			   dummy FF 0F terminator; the real Odyssey is song 0x02. */
+			RaizingPostCommand(0x01, (uint8_t)(cmd >= 0x11 ? 0x02 : cmd));
+			break;
+		default: RaizingPostCommand(cmd, 0x00); break;
+		}
+		return;
+	}
 	if (board_ == CEMU_AC_BOARD_FLSTORY) {
 		/* MAME flstory: latch pending ∧ DA00 enable → NMI (input_merger ALL_HIGH). */
 		soundCmd_ = cmd;
@@ -3364,6 +3441,8 @@ uint8_t CHardAc::PortIn(uint16_t port)
 {
 	const uint8_t p = (uint8_t)(port & 0xff);
 	switch (board_) {
+	case CEMU_AC_BOARD_RAIZING:
+		return RaizingPortIn(p);
 	case CEMU_AC_BOARD_SYS16A:
 	case CEMU_AC_BOARD_SYS16B:
 	case CEMU_AC_BOARD_SYS24:
@@ -3620,6 +3699,9 @@ void CHardAc::PortOut(uint16_t port, uint8_t data)
 	const uint8_t p = (uint8_t)(port & 0xff);
 	if (!chip_) return;
 	switch (board_) {
+	case CEMU_AC_BOARD_RAIZING:
+		RaizingPortOut(p, data);
+		return;
 	case CEMU_AC_BOARD_SYS16A:
 	case CEMU_AC_BOARD_SYS16B:
 	case CEMU_AC_BOARD_SYS24:
@@ -3897,6 +3979,225 @@ void CHardAc::PortOut(uint16_t port, uint8_t data)
 	default:
 		break;
 	}
+}
+
+/* ------------------------------------------------------------------------
+   Raizing / Eighting sound section (MAME toaplan/raizing.cpp and
+   raizing_batrider.cpp). Four revisions share one Z80 but agree on almost
+   nothing else, so raizingType_ gates each map. See CEMU_AC_BOARD_RAIZING.
+   ------------------------------------------------------------------------ */
+
+void CHardAc::RaizingSetZ80Bank(unsigned entry)
+{
+	if (!soundRom_ || raizingType_ == 1 || raizingType_ == 4) return;
+	const unsigned banks = soundRomSize_ / 0x4000u;
+	if (!banks) return;
+	/* Battle Garegga only has eight 16K banks and mirrors them across the
+	   whole 4-bit selector (MAME init_bgaregga configures 0-7 twice). */
+	const unsigned src = (entry % banks) * 0x4000u;
+	unsigned n = 0x4000u;
+	if (src + n > soundRomSize_) n = soundRomSize_ - src;
+	memset(mem_ + 0x8000, 0xff, 0x4000);
+	if (n) memcpy(mem_ + 0x8000, soundRom_ + src, n);
+	bank_ = (int)entry;
+}
+
+void CHardAc::RaizingOkiBankW(unsigned offset, uint8_t data)
+{
+	/* MAME raizing_oki_bankswitch_w: one write programs two windows — the
+	   low nibble goes to `offset`, the high nibble to `offset`+1 — and each
+	   entry lands in both a phrase-table page and its 64K data window.
+	   Offset bit 2 picks the chip, so Batrider's C0-C6 reaches both OKIs
+	   while Battle Garegga's E006-E008 only ever touches the first. */
+	for (unsigned half = 0; half < 2; half++) {
+		const unsigned o = offset + half;
+		const unsigned chip = (o & 4u) >> 2;
+		const unsigned slot = o & 3u;
+		const unsigned entry = (half ? (unsigned)(data >> 4) : data) & 0x0fu;
+		raizingOkiBank_[chip][slot] = entry;
+		raizingOkiBank_[chip][4 + slot] = entry;
+	}
+}
+
+/* MAME raizing.cpp sound_z80_mem. mahoudai: 0000-BFFF ROM, C000-DFFF RAM
+   shared with the 68000, YM2151 E000/E001, OKI E004, coin counter E00E.
+   bgaregga adds the 16K bank window at 8000 and replaces the mailbox with a
+   latch: OKI banks E006-E008, Z80 bank E00A, latch acknowledge E00C, latch
+   read E01C, pending flag E01D. Batrider and Battle Bakraid have no chips in
+   memory at all — theirs live on the I/O ports (RaizingPortOut). */
+void CHardAc::RaizingMemWrite(uint16_t addr, uint8_t data)
+{
+	const uint16_t ramEnd = (raizingType_ == 4) ? 0xffff : 0xdfff;
+	if (addr >= 0xc000 && addr <= ramEnd) {
+		mem_[addr] = data;
+		return;
+	}
+	if (raizingType_ >= 3) return; /* ROM */
+	switch (addr) {
+	case 0xe000:
+	case 0xe001:
+		if (chip_) {
+			chip_->Write(addr & 1u, data);
+			if (addr & 1) opmWrites_ = CEmuChipYm2151WriteCount(chip_);
+		}
+		return;
+	case 0xe004:
+		if (pcm_) pcm_->Write(0, data);
+		return;
+	case 0xe006:
+	case 0xe007:
+	case 0xe008:
+		if (raizingType_ == 2) RaizingOkiBankW(addr - 0xe006u, data);
+		return;
+	case 0xe00a:
+		if (raizingType_ == 2) RaizingSetZ80Bank(data & 0x0fu);
+		return;
+	case 0xe00c:
+		/* generic_latch_8 separate_acknowledge: only this write drops IRQ0. */
+		if (raizingType_ == 2) raizingLatchPending_ = 0;
+		return;
+	default:
+		return;
+	}
+}
+
+uint8_t CHardAc::RaizingMemRead(uint16_t addr)
+{
+	if (raizingType_ >= 3 || addr <= 0xdfff)
+		return mem_[addr];
+	switch (addr) {
+	case 0xe000:
+	case 0xe001:
+		return chip_ ? chip_->ReadStatus() : 0x00;
+	case 0xe004:
+		return pcm_ ? pcm_->ReadStatus() : 0x00;
+	case 0xe01c:
+		return raizingLatch_[0];
+	case 0xe01d:
+		/* MAME bgaregga_E01D_r: bit 0 clear means a command is waiting. */
+		return (uint8_t)(raizingLatchPending_ ? 0x00 : 0x01);
+	default:
+		return 0x00;
+	}
+}
+
+/* MAME batrider_sound_z80_port / bbakraid_sound_z80_port:
+     40/42  answer latches back to the 68000
+     44     assert the 68000's sound IRQ    46  clear this Z80's NMI
+     48/4A  the two host command latches
+     80/81  YM2151 (Batrider) or YMZ280B (Battle Bakraid)
+     82/84  OKI #1 / #2   88  Z80 ROM bank   C0-C6  OKI sample banks   */
+void CHardAc::RaizingPortOut(uint8_t port, uint8_t data)
+{
+	switch (port) {
+	case 0x40:
+	case 0x42:
+		raizingLatchOut_[(port >> 1) & 1] = data;
+		return;
+	case 0x44:
+		return; /* sound IRQ to the 68000 — nothing on the other end */
+	case 0x46:
+		raizingNmiPending_ = 0;
+		return;
+	case 0x80:
+	case 0x81:
+		if (!chip_) return;
+		if (raizingType_ == 4) {
+			CEmuChipYmz280bWritePort(chip_, port & 1u, data);
+			if (port & 1) opmWrites_++;
+		} else {
+			chip_->Write(port & 1u, data);
+			if (port & 1) opmWrites_ = CEmuChipYm2151WriteCount(chip_);
+		}
+		return;
+	case 0x82:
+		if (pcm_) pcm_->Write(0, data);
+		return;
+	case 0x84:
+		if (pcm2_) pcm2_->Write(0, data);
+		return;
+	case 0x88:
+		RaizingSetZ80Bank(data & 0x0fu);
+		return;
+	default:
+		if (port >= 0xc0 && port <= 0xc6)
+			RaizingOkiBankW(port - 0xc0u, data);
+		return;
+	}
+}
+
+uint8_t CHardAc::RaizingPortIn(uint8_t port)
+{
+	switch (port) {
+	case 0x48:
+	case 0x4a:
+		return raizingLatch_[(port >> 1) & 1];
+	case 0x80:
+	case 0x81:
+		if (!chip_) return 0x00;
+		return (raizingType_ == 4) ? CEmuChipYmz280bReadStatus(chip_)
+			: chip_->ReadStatus();
+	case 0x82:
+		return pcm_ ? pcm_->ReadStatus() : 0x00;
+	case 0x84:
+		return pcm2_ ? pcm2_->ReadStatus() : 0x00;
+	default:
+		return 0x00;
+	}
+}
+
+/* The 68000 always writes both latches with one move.l, so a command is a
+   (code, data) pair even on the boards that only look at one of them. */
+int CHardAc::RaizingTrackIdle()
+{
+	if (raizingType_ == 4) {
+		for (int i = 0; i < 8; i++) {
+			if (mem_[0xc000 + i * 16] & 0x80)
+				return 0;
+		}
+		if (CEmuChipYmz280bPlayingCount(chip_) > 0)
+			return 0;
+		return 1;
+	}
+	/* KeyOnCount is cumulative, so a finished jingle still looks "busy"
+	   if we only test != 0. Treat a 1 s stretch with no new key-ons and
+	   no OKI voice as the end of the track. Looping BGM keeps strobing
+	   $08, and OKI-heavy songs keep ReadStatus set, so those stay live. */
+	const unsigned keys = chip_ ? CEmuChipYm2151KeyOnCount(chip_) : 0;
+	const int oki = (pcm_ && pcm_->ReadStatus())
+		|| (pcm2_ && pcm2_->ReadStatus());
+	const int grew = keys > raizingLastKeyOns_;
+	raizingLastKeyOns_ = keys;
+	if (oki || grew) {
+		raizingIdlePolls_ = 0;
+		return 0;
+	}
+	if (raizingIdlePolls_ < 4) {
+		raizingIdlePolls_++;
+		return 0;
+	}
+	return 1;
+}
+
+void CHardAc::RaizingPostCommand(uint8_t cmd, uint8_t data)
+{
+	raizingIdlePolls_ = 0;
+	raizingLatch_[0] = cmd;
+	raizingLatch_[1] = data;
+	if (raizingType_ == 1) {
+		/* No latch on mahoudai: the mailbox is the first two bytes of shared
+		   RAM. C001 is the request type (0 = start sound) and C000 the code;
+		   write C001 first because the Z80 polls C000 to decide whether to
+		   look at all, then reports back by parking 0xFF in C000. */
+		mem_[0xc001] = data;
+		mem_[0xc000] = cmd;
+		return;
+	}
+	if (raizingType_ == 2) {
+		raizingLatchPending_ = 1; /* holds IRQ0 until the E00C acknowledge */
+		return;
+	}
+	raizingNmiPending_ = 1;
 }
 
 void CHardAc::MemWrite(uint16_t addr, uint8_t data)
@@ -4254,6 +4555,10 @@ void CHardAc::MemWrite(uint16_t addr, uint8_t data)
 		}
 		if (addr >= 0x9800)
 			return;
+		return;
+	}
+	if (board_ == CEMU_AC_BOARD_RAIZING) {
+		RaizingMemWrite(addr, data);
 		return;
 	}
 	/* MAME tecmo16 sound_map: ROM 0000-EFFF, RAM F000-FBFF,
@@ -4853,6 +5158,8 @@ uint8_t CHardAc::MemRead(uint16_t addr)
 		if (addr >= 0x8000)
 			return 0x00;
 	}
+	if (board_ == CEMU_AC_BOARD_RAIZING)
+		return RaizingMemRead(addr);
 	if (board_ == CEMU_AC_BOARD_TECMO16) {
 		if (addr == 0xfc00)
 			return pcm_ ? pcm_->ReadStatus() : 0x00;
@@ -7657,6 +7964,8 @@ int CHardAc::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode
 		return LoadRomsNamcoM6809(fs, ge);
 	if (board_ == CEMU_AC_BOARD_NAMCO_SYS86)
 		return LoadRomsSys86(fs, ge);
+	if (board_ == CEMU_AC_BOARD_RAIZING)
+		return LoadRomsRaizing(fs, ge);
 	if (board_ == CEMU_AC_BOARD_SEIBU_OPL)
 		return LoadRomsSeibu(fs, ge);
 	if (board_ == CEMU_AC_BOARD_IREM_M62)

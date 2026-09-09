@@ -167,6 +167,212 @@ void PcatIoLog(char dir, uint16_t port, uint8_t data)
 	fclose(f);
 }
 
+/* MID.DRV byte-scans every track for the next "MTrk". Type-1 files with
+   many tracks (or MTrk-like bytes in the payload) either miss the play
+   flag or walk off into the IVT. Fold to Type-0 so AH=0 sees one MTrk. */
+struct MokSmfEv {
+	uint32_t tick;
+	uint8_t n;
+	uint8_t b[3];
+};
+
+static int MokSmfEvCmp(const void* a, const void* b)
+{
+	const MokSmfEv* x = (const MokSmfEv*)a;
+	const MokSmfEv* y = (const MokSmfEv*)b;
+	if (x->tick < y->tick) return -1;
+	if (x->tick > y->tick) return 1;
+	return 0;
+}
+
+static unsigned MokReadVlq(const uint8_t* p, unsigned n, unsigned* i)
+{
+	unsigned v = 0, k = 0;
+	while (*i < n && k < 4) {
+		const uint8_t b = p[(*i)++];
+		v = (v << 7) | (unsigned)(b & 0x7f);
+		k++;
+		if ((b & 0x80) == 0) break;
+	}
+	return v;
+}
+
+static void MokWriteVlq(uint8_t* o, unsigned* p, unsigned cap, unsigned v)
+{
+	uint8_t tmp[5];
+	int n = 0;
+	tmp[n++] = (uint8_t)(v & 0x7f);
+	v >>= 7;
+	while (v) {
+		tmp[n++] = (uint8_t)((v & 0x7f) | 0x80);
+		v >>= 7;
+	}
+	while (n--) {
+		if (*p < cap)
+			o[(*p)++] = tmp[n];
+	}
+}
+
+static int MokFlattenSmfType0(const uint8_t* src, unsigned srcN,
+	uint8_t* dst, unsigned dstCap, unsigned* outN)
+{
+	if (!src || !dst || !outN || srcN < 14 || dstCap < 22) return 0;
+	*outN = 0;
+	if (src[0] != 'M' || src[1] != 'T' || src[2] != 'h' || src[3] != 'd')
+		return 0;
+	const unsigned hdrLen = ((unsigned)src[4] << 24) | ((unsigned)src[5] << 16)
+		| ((unsigned)src[6] << 8) | src[7];
+	if (hdrLen < 6 || 8 + hdrLen > srcN) return 0;
+	const unsigned fmt = ((unsigned)src[8] << 8) | src[9];
+	const unsigned ntrks = ((unsigned)src[10] << 8) | src[11];
+	const unsigned div = ((unsigned)src[12] << 8) | src[13];
+	if (div & 0x8000) return 0;
+	if (fmt == 0 && ntrks == 1) return 0;
+	if (ntrks == 0 || ntrks > 64) return 0;
+
+	enum { kMaxEv = 32768 };
+	MokSmfEv* ev = new MokSmfEv[kMaxEv];
+	unsigned nev = 0;
+	unsigned pos = 8 + hdrLen;
+	uint8_t tempo[3] = { 0x07, 0xA1, 0x20 };
+	int haveTempo = 0;
+	for (unsigned t = 0; t < ntrks && pos + 8 <= srcN; t++) {
+		if (src[pos] != 'M' || src[pos + 1] != 'T'
+			|| src[pos + 2] != 'r' || src[pos + 3] != 'k') {
+			delete[] ev;
+			return 0;
+		}
+		const unsigned ln = ((unsigned)src[pos + 4] << 24)
+			| ((unsigned)src[pos + 5] << 16)
+			| ((unsigned)src[pos + 6] << 8) | src[pos + 7];
+		pos += 8;
+		const unsigned end = pos + ln;
+		if (end > srcN) {
+			delete[] ev;
+			return 0;
+		}
+		uint32_t tick = 0;
+		uint8_t run = 0;
+		while (pos < end && nev < (unsigned)kMaxEv) {
+			tick += MokReadVlq(src, end, &pos);
+			if (pos >= end) break;
+			uint8_t st = src[pos];
+			if (st & 0x80) {
+				pos++;
+				if (st < 0xf0) run = st;
+			} else {
+				st = run;
+				if (!st) { pos++; continue; }
+			}
+			if (st == 0xff) {
+				if (pos >= end) break;
+				const uint8_t mt = src[pos++];
+				const unsigned ml = MokReadVlq(src, end, &pos);
+				if (mt == 0x2f) break;
+				if (mt == 0x51 && ml == 3 && pos + 3 <= end && !haveTempo) {
+					tempo[0] = src[pos];
+					tempo[1] = src[pos + 1];
+					tempo[2] = src[pos + 2];
+					haveTempo = 1;
+				}
+				pos += ml;
+				continue;
+			}
+			if (st == 0xf0 || st == 0xf7) {
+				const unsigned sl = MokReadVlq(src, end, &pos);
+				pos += sl;
+				continue;
+			}
+			if (st >= 0xf0) { run = 0; continue; }
+			const int need = ((st & 0xf0) == 0xc0 || (st & 0xf0) == 0xd0) ? 1 : 2;
+			if (pos + (unsigned)need > end) break;
+			MokSmfEv e;
+			e.tick = tick;
+			e.n = (uint8_t)(1 + need);
+			e.b[0] = st;
+			e.b[1] = src[pos++];
+			e.b[2] = (need == 2) ? src[pos++] : (uint8_t)0;
+			ev[nev++] = e;
+		}
+		pos = end;
+	}
+	if (nev == 0) { delete[] ev; return 0; }
+	qsort(ev, nev, sizeof(ev[0]), MokSmfEvCmp);
+
+	unsigned o = 0;
+	auto put = [&](uint8_t v) {
+		if (o < dstCap) dst[o++] = v;
+	};
+	put('M'); put('T'); put('h'); put('d');
+	put(0); put(0); put(0); put(6);
+	put(0); put(0); put(0); put(1);
+	put((uint8_t)(div >> 8)); put((uint8_t)div);
+	put('M'); put('T'); put('r'); put('k');
+	const unsigned lenAt = o;
+	put(0); put(0); put(0); put(0);
+	MokWriteVlq(dst, &o, dstCap, 0);
+	put(0xff); put(0x51); put(0x03);
+	put(tempo[0]); put(tempo[1]); put(tempo[2]);
+	uint32_t prev = 0;
+	for (unsigned i = 0; i < nev; i++) {
+		if (o + 8 >= dstCap) break;
+		const uint32_t dt = ev[i].tick - prev;
+		prev = ev[i].tick;
+		MokWriteVlq(dst, &o, dstCap, dt);
+		for (uint8_t k = 0; k < ev[i].n && k < 3; k++)
+			put(ev[i].b[k]);
+	}
+	MokWriteVlq(dst, &o, dstCap, 0);
+	put(0xff); put(0x2f); put(0x00);
+	const unsigned body = o - (lenAt + 4);
+	dst[lenAt] = (uint8_t)(body >> 24);
+	dst[lenAt + 1] = (uint8_t)(body >> 16);
+	dst[lenAt + 2] = (uint8_t)(body >> 8);
+	dst[lenAt + 3] = (uint8_t)body;
+	delete[] ev;
+	if (o < 22) return 0;
+	*outN = o;
+	return 1;
+}
+
+/* Mok SMF/HOOT CODE.COM: `call set_busy` is assembled so it lands in the
+   `int 18` / `jmp short` idle instead of `out 07E8,80; ret`. INT7F then
+   never returns. Retarget those near calls to the out-80 stub. */
+int PatchMokHootIdleCalls(uint8_t* mem, uint16_t psp, unsigned imageSize)
+{
+	if (!mem || psp < 0x0100 || imageSize < 24 || imageSize > 4096)
+		return 0;
+	const unsigned img = ((unsigned)psp << 4) + 0x100u;
+	if (img + imageSize >= 0x200000) return 0;
+	static const uint8_t kIdleOut[] = {
+		0xB8, 0x01, 0x98, 0xCD, 0x18, 0xEB, 0xF9,
+		0xBA, 0xE8, 0x07, 0xB0, 0x80, 0xEE, 0xC3
+	};
+	int found = -1;
+	for (unsigned i = 0; i + sizeof(kIdleOut) <= imageSize; i++) {
+		if (memcmp(mem + img + i, kIdleOut, sizeof(kIdleOut)) == 0) {
+			found = (int)i;
+			break;
+		}
+	}
+	if (found < 0) return 0;
+	const uint16_t idleIp = (uint16_t)(0x100u + (unsigned)found);
+	const uint16_t outIp = (uint16_t)(idleIp + 7u);
+	int n = 0;
+	for (unsigned i = 0; i + 3 <= imageSize; i++) {
+		if (mem[img + i] != 0xE8) continue;
+		const uint16_t next = (uint16_t)(0x100u + i + 3u);
+		const int16_t disp = (int16_t)(mem[img + i + 1] | (mem[img + i + 2] << 8));
+		const uint16_t tgt = (uint16_t)(next + disp);
+		if (tgt < idleIp || tgt >= outIp) continue;
+		const int16_t nd = (int16_t)(outIp - next);
+		mem[img + i + 1] = (uint8_t)(nd & 0xff);
+		mem[img + i + 2] = (uint8_t)((uint16_t)nd >> 8);
+		n++;
+	}
+	return n;
+}
+
 /* Resolved once: the hook is on the per-instruction path. */
 PcatIpProf* g_pcatIpProf = NULL;
 
@@ -197,6 +403,10 @@ enum {
 	PCAT_SAA_HZ = 7159090,
 	PCAT_PIT_HZ = 1193182,
 	PCAT_TIMER_VEC = 0x08,
+	/* Idle HLT must sit past the 0060:0000–01FF trampoline traps
+	   (TrapVector = IP/2). Parking on INT 0's HLT;IRET pops the DOS
+	   stack and CODE.COM resumes in zeroed RAM (IP 12C0). */
+	PCAT_IDLE_IP = 0x0250,
 	/* AdLib / SB OPL */
 	ADLIB_ADDR = 0x388,
 	ADLIB_DATA = 0x389,
@@ -340,6 +550,7 @@ CHardPcat::CHardPcat()
 	, spkPhase_(0)
 	, spkPhaseInc_(0)
 	, picMask_(0xff)
+	, pic0Isr_(0)
 	, picMasterIcw_(0)
 	, picMasterIcw1_(0)
 	, oplPumpResidual_(0)
@@ -355,6 +566,7 @@ CHardPcat::CHardPcat()
 	, silpSongSeg_(0)
 	, silpSongBytes_(0)
 	, silpScanDone_(0)
+	, mokDrvSeg_(0)
 	, hootTimerFixed_(0)
 	, hootAilCs_(0)
 	, sbDspResetting_(0)
@@ -496,6 +708,23 @@ int CHardPcat::IvtHooked(uint8_t vec) const
 	return 1;
 }
 
+/* DOS trampoline HLT;IRET stubs. INT 08's BIOS INT 1C chain is delivered
+   from DeliverIrqs — SOUND.COM often stops chaining the previous vector. */
+static int PcatTrampolineHlt(CEmuDos98* dos, uint8_t* mem,
+	uint16_t cs, uint16_t ip, CEmuDos98Result* outRes)
+{
+	uint8_t vec = 0;
+	if (!dos->TrapVector(cs, ip, &vec))
+		return 0;
+	const CEmuDos98Result res = dos->ServiceInt(mem, vec);
+	if (outRes)
+		*outRes = res;
+	if (res == DOS98_TERMINATED || res == DOS98_RESIDENT || res == DOS98_EXEC)
+		return 1;
+	dos->IretReturn(mem);
+	return 1;
+}
+
 void CHardPcat::PitOut(uint16_t port, uint8_t data)
 {
 	if (port == PIT_CTRL) {
@@ -559,6 +788,15 @@ uint8_t CHardPcat::PitIn(uint16_t port)
 		return (uint8_t)(v >> 8);
 	}
 	if (port == PIT_CT2) {
+		/* ADLIBM.COM (Infogrames) calibrates delays by latching PIT2 in a
+		   CLI spin. Each ISA IN burns time; kick the counter so the 0x0200
+		   countdown's high byte can reach 0 instead of timing out at CX=FFFF. */
+		if (pit2Running_ && (port61_ & 0x01) && cpuHz_ > 0 && pitClockHz_ > 0) {
+			uint64_t one = ((uint64_t)cpuHz_ + (uint64_t)pitClockHz_ - 1ull)
+				/ (uint64_t)pitClockHz_;
+			if (one < 16ull) one = 16ull;
+			PitTick(one);
+		}
 		uint16_t v = (uint16_t)(pit2Counter_ ? pit2Counter_ : pit2Reload_);
 		if (!pit2ReadHi_) { pit2ReadHi_ = 1; return (uint8_t)(v & 0xff); }
 		pit2ReadHi_ = 0;
@@ -767,13 +1005,18 @@ void CHardPcat::CmsTrackSaa(int chip, uint8_t data)
 static uint16_t FindHootAdvQuantumOff(const uint8_t* data, unsigned size)
 {
 	if (!data || size < 16) return 0;
-	uint16_t best = 0;
+	uint16_t bestLow = 0;
 	for (unsigned off = 0; off + 7 <= size; off++) {
 		if (data[off] != 0x2E || data[off + 1] != 0xC7 || data[off + 2] != 0x06)
 			continue;
 		if (data[off + 5] != 0 || data[off + 6] != 0) continue;
 		const uint16_t t = (uint16_t)(data[off + 3] | (data[off + 4] << 8));
-		if (t < 0x1800 || t > 0x3800) continue;
+		/* OPL ADVs keep the pair in 1800h–3800h (ADLIB 232Dh, SBP2FM 295Bh).
+		   MIDI.ADV is a 7KB MPU driver whose pair sits at 04BFh/04C3h — the
+		   OPL window skipped it, the 232Dh fallback wrote past the image. */
+		if (t > 0x3800) continue;
+		if (t < 0x0400) continue;
+		if (t < 0x1800 && size > 0x3000) continue;
 		int hasInc = 0;
 		for (unsigned o2 = 0; o2 + 5 <= size; o2++) {
 			if (data[o2] == 0x2E && data[o2 + 1] == 0xFF && data[o2 + 2] == 0x06
@@ -784,11 +1027,12 @@ static uint16_t FindHootAdvQuantumOff(const uint8_t* data, unsigned size)
 			}
 		}
 		if (!hasInc) continue;
-		/* Paired counters (ADLIB 232D/2331, SBP2FM 295B/295F) — feed the low one. */
-		if (!best || t < best)
-			best = t;
+		/* Paired counters (ADLIB 232D/2331) — feed the low one. MIDI.ADV
+		   serve tests 04C3h; poking that word desyncs native serve. */
+		if (!bestLow || t < bestLow)
+			bestLow = t;
 	}
-	return best;
+	return bestLow;
 }
 
 /* Runtime OPL base port lives in ADV CS (mov dx,cs:[imm]). Detect/init should
@@ -860,12 +1104,20 @@ void CHardPcat::PrepHootAilState()
 	}
 	if (!isHoot) return;
 	uint16_t ds = 0;
-	for (unsigned i = 0x18; i < 0x40 && lin + i + 4 < 0x200000; i++) {
+	for (unsigned i = 0x10; i < 0x80 && lin + i + 4 < 0x200000; i++) {
 		if (mem[lin + i] == 0xB8 && mem[lin + i + 3] == 0x8E && mem[lin + i + 4] == 0xD8) {
 			ds = (uint16_t)(mem[lin + i + 1] | (mem[lin + i + 2] << 8));
 			break;
 		}
+		/* Tiny-model HOOT: mov ax,cs / mov ds,ax — data lives in INT7F CS. */
+		if (mem[lin + i] == 0x8C && mem[lin + i + 1] == 0xC8
+			&& mem[lin + i + 2] == 0x8E && mem[lin + i + 3] == 0xD8) {
+			ds = (uint16_t)seg;
+			break;
+		}
 	}
+	if (!ds && seg >= 0x0100 && seg < 0xA000)
+		ds = (uint16_t)seg;
 	if (!ds) return;
 	const unsigned base = (unsigned)ds << 4;
 	if (base + 0x448 >= 0x200000) return;
@@ -883,11 +1135,61 @@ void CHardPcat::PrepHootAilState()
 	const uint16_t drvOff = rd(0x444);
 	const uint16_t drvSeg = rd(0x446);
 	const unsigned nameLin = ((unsigned)drvSeg << 4) + drvOff;
+	int retargetLoader = 0;
 	if (nameLin + 12 < 0x200000 && drvSeg >= 0x100 && drvSeg < 0xA000) {
 		if (mem[nameLin] == 0x2D && mem[nameLin + 1] == 0x00
 			&& mem[nameLin + 2] == 'C' && mem[nameLin + 3] == 'o') {
+			/* [0444] already points at the resident ADV image, not the
+			   filename. MIDI.ADV is 7KB; treating it as a 16KB OPL blob made
+			   the 232Dh quantum fallback write past the driver. */
 			hootAdvSeg_ = drvSeg;
-			if (!hootAdvSize_) hootAdvSize_ = 0x4000;
+			const CEmuDos98File* adv = NULL;
+			auto matchAdv = [&](const CEmuDos98File* f) -> int {
+				if (!f || !f->data || f->size < 64) return 0;
+				unsigned n = 32;
+				if (n > f->size) n = f->size;
+				if (nameLin + n >= 0x200000) return 0;
+				return memcmp(mem + nameLin, f->data, n) == 0;
+			};
+			if (dosGe_) {
+				for (int i = 0; i < dosGe_->romCount && !adv; i++) {
+					const char* nm = dosGe_->rom[i].name;
+					const char* base = nm;
+					for (const char* p = nm; *p; p++) {
+						if (*p == '\\' || *p == '/' || *p == ':')
+							base = p + 1;
+					}
+					const char* ext = strrchr(base, '.');
+					if (!ext || _stricmp(ext, ".ADV") != 0) continue;
+					const CEmuDos98File* f = dos_.FindFile(base);
+					if (matchAdv(f)) adv = f;
+				}
+			}
+			if (!adv) {
+				static const char* kAdv[] = {
+					"MIDI.ADV", "ADLIB.ADV", "SBP2FM.ADV", "MT32MPU.ADV",
+					"OPL3.ADV", "PAS.ADV", NULL
+				};
+				for (int i = 0; kAdv[i] && !adv; i++) {
+					const CEmuDos98File* f = dos_.FindFile(kAdv[i]);
+					if (matchAdv(f)) adv = f;
+				}
+			}
+			if (adv) {
+				hootAdvSize_ = adv->size;
+				strncpy_s(hootAdvName_, adv->name, _TRUNCATE);
+				if (!hootAdvQuantumOff_)
+					hootAdvQuantumOff_ = FindHootAdvQuantumOff(adv->data, adv->size);
+				if (!hootAdvIoOff_)
+					hootAdvIoOff_ = FindHootAdvIoOff(adv->data, adv->size);
+			} else {
+				unsigned cap = 0x1C00;
+				if (nameLin + cap > 0xA0000u)
+					cap = 0xA0000u - nameLin;
+				if (!hootAdvSize_) hootAdvSize_ = cap;
+				if (!hootAdvQuantumOff_)
+					hootAdvQuantumOff_ = FindHootAdvQuantumOff(mem + nameLin, cap);
+			}
 		} else {
 			char advName[16] = {};
 			int n = 0;
@@ -923,11 +1225,45 @@ void CHardPcat::PrepHootAilState()
 					} else {
 						memcpy(mem + ((unsigned)hootAdvSeg_ << 4), adv->data, adv->size);
 					}
+					retargetLoader = 1;
 				}
 			}
 		}
 	}
-	if (hootAdvSeg_) {
+	if (!hootAdvSeg_) {
+		/* INT7F play already mapped the ADV; [0444] is sometimes still a
+		   filename or 0. Locate the resident Miles header by its bytes. */
+		const CEmuDos98File* adv = dos_.FindFile("MIDI.ADV");
+		if (!adv && dosGe_) {
+			for (int i = 0; i < dosGe_->romCount; i++) {
+				const char* nm = dosGe_->rom[i].name;
+				const char* b = nm;
+				for (const char* p = nm; *p; p++) {
+					if (*p == '\\' || *p == '/' || *p == ':')
+						b = p + 1;
+				}
+				const char* ext = strrchr(b, '.');
+				if (!ext || _stricmp(ext, ".ADV") != 0) continue;
+				adv = dos_.FindFile(b);
+				if (adv) break;
+			}
+		}
+		if (adv && adv->data && adv->size >= 64) {
+			for (unsigned a = 0x10000; a + 32 < 0xA0000; a += 16) {
+				if (memcmp(mem + a, adv->data, 32) == 0) {
+					hootAdvSeg_ = (uint16_t)(a >> 4);
+					hootAdvSize_ = adv->size;
+					strncpy_s(hootAdvName_, adv->name, _TRUNCATE);
+					if (!hootAdvQuantumOff_)
+						hootAdvQuantumOff_ = FindHootAdvQuantumOff(adv->data, adv->size);
+					if (!hootAdvIoOff_)
+						hootAdvIoOff_ = FindHootAdvIoOff(adv->data, adv->size);
+					break;
+				}
+			}
+		}
+	}
+	if (hootAdvSeg_ && retargetLoader) {
 		/* HOOT play: push [446]; push [444]; CALL FAR loader.
 		   Retarget only that loader entry to return the staged ADV segment
 		   (mov dx,seg / xor ax,ax / retf) — same result as a successful load. */
@@ -953,7 +1289,8 @@ void CHardPcat::PrepHootAilState()
 			mem[tLin + 5] = 0xCB;
 		}
 	}
-	FixHootAilTimer();
+	if (!modeMidi_)
+		FixHootAilTimer();
 }
 
 void CHardPcat::RestoreHootIdleTrampoline(uint8_t* mem)
@@ -964,6 +1301,12 @@ void CHardPcat::RestoreHootIdleTrampoline(uint8_t* mem)
 		mem[tb + 0] = 0xF4;
 		mem[tb + 1] = 0xEB;
 		mem[tb + 2] = 0xFD;
+	}
+	/* Play-pump idle: not a trap vector. */
+	if (mem[tb + PCAT_IDLE_IP] != 0xF4) {
+		mem[tb + PCAT_IDLE_IP] = 0xF4;
+		mem[tb + PCAT_IDLE_IP + 1] = 0xEB;
+		mem[tb + PCAT_IDLE_IP + 2] = 0xFD;
 	}
 	/* AIL chains pushf;call far to the previous INT8 (0060:0010). Advance
 	   BDA timer ticks so ADV's XMIDI quantum [232D] is non-zero. */
@@ -990,6 +1333,159 @@ int CHardPcat::HootAilPossible() const
 	return (hootAdvSeg_ != 0 || hootAdvName_[0] != 0 || hootAilCs_ != 0) ? 1 : 0;
 }
 
+void CHardPcat::FixHootMidiInt8()
+{
+	/* Azrael already has HOOT CS:040Eh and plays. WarCraft 2 leaves CS:0000
+	   (EXE entry). Point INT8 at the existing 040Eh helper once — do not
+	   plant API_timer or rewrite AIL [000E] (hang / Death mute). */
+	if (!modeMidi_ || modeSilp_) return;
+	if (!hootAdvSeg_ && hootAdvName_[0] == 0) return;
+	uint8_t* mem = np2_mem();
+	if (!mem) return;
+	auto isHook = [&](unsigned lin) -> int {
+		if (lin + 6 >= 0x200000) return 0;
+		return (mem[lin] == 0x73 && mem[lin + 1] == 0x04
+			&& mem[lin + 2] == 0x81 && mem[lin + 3] == 0xEA
+			&& mem[lin + 4] == 0x00 && mem[lin + 5] == 0x10) ? 1 : 0;
+	};
+	const uint16_t i8Off = (uint16_t)(mem[0x08 * 4] | (mem[0x08 * 4 + 1] << 8));
+	const uint16_t i8Seg = (uint16_t)(mem[0x08 * 4 + 2] | (mem[0x08 * 4 + 3] << 8));
+	if (i8Seg >= 0x0100 && i8Seg < 0xA000 && i8Off != 0
+		&& isHook(((unsigned)i8Seg << 4) + i8Off))
+		return;
+	if (i8Off != 0) return;
+	const uint16_t hootCs = (uint16_t)(mem[0x7F * 4 + 2] | (mem[0x7F * 4 + 3] << 8));
+	if (hootCs < 0x0100 || hootCs >= 0xA000 || hootCs == hootAdvSeg_
+		|| hootCs == DOS98_TRAMP_SEG)
+		return;
+	if (!isHook(((unsigned)hootCs << 4) + 0x040Eu)) return;
+	mem[0x08 * 4] = 0x0E;
+	mem[0x08 * 4 + 1] = 0x04;
+	mem[0x08 * 4 + 2] = (uint8_t)(hootCs & 0xff);
+	mem[0x08 * 4 + 3] = (uint8_t)(hootCs >> 8);
+}
+
+void CHardPcat::RepairMokMidiPlay()
+{
+	/* Mok CODE.COM + MID.DRV: INT7F already AH=3F'd the SMF (read log matches
+	   the catalog size) but AH=0's `les si,[03A4]` often does not see MThd —
+	   nested IRQ0 during the glue call, or DS at INT 21h not the song block.
+	   Copy the catalog SMF into CS:[0200] and far-call MID.DRV AH=0 with
+	   CX:DX = song:0 on a clean stack (no TickSide / IRQ). */
+	if (!modeMidi_ || modeSilp_) return;
+	if (hootAdvSeg_ || hootAdvName_[0]) return;
+	uint8_t* mem = np2_mem();
+	if (!mem || !IvtHooked(0x7F)) return;
+	const uint16_t comCs = (uint16_t)(mem[0x7F * 4 + 2] | (mem[0x7F * 4 + 3] << 8));
+	if (comCs < 0x0100 || comCs >= 0xA000) return;
+	const unsigned com = (unsigned)comCs << 4;
+	if (com + 0x220 >= 0x200000) return;
+	if (memcmp(mem + com + 0x20A, "SMF HOOT", 8) != 0) return;
+	const uint16_t songSeg = (uint16_t)(mem[com + 0x200] | (mem[com + 0x201] << 8));
+	uint16_t drvSeg = (uint16_t)(mem[com + 0x204] | (mem[com + 0x205] << 8));
+	const uint16_t i8Off = (uint16_t)(mem[0x08 * 4] | (mem[0x08 * 4 + 1] << 8));
+	const uint16_t i8Seg = (uint16_t)(mem[0x08 * 4 + 2] | (mem[0x08 * 4 + 3] << 8));
+	if (i8Off == 0x0078 && i8Seg >= 0x0100 && i8Seg < 0xA000)
+		drvSeg = i8Seg;
+	if (songSeg < 0x0100 || songSeg >= 0xA000) return;
+	if (drvSeg < 0x0100 || drvSeg >= 0xA000) return;
+	const unsigned drv = (unsigned)drvSeg << 4;
+	if (drv + 0x3B0 >= 0x200000) return;
+	if (mem[drv + 0x78] != 0x60) return;
+	mokDrvSeg_ = 0;
+
+	const CEmuDos98File* sf = dosSong_[0] ? dos_.FindFile(dosSong_) : NULL;
+	if (!sf || !sf->data || sf->size < 14) return;
+	if (sf->data[0] != 'M' || sf->data[1] != 'T'
+		|| sf->data[2] != 'h' || sf->data[3] != 'd')
+		return;
+	uint8_t* flat = new uint8_t[0x10000];
+	unsigned flatN = 0;
+	const uint8_t* use = sf->data;
+	unsigned useN = sf->size;
+	if (MokFlattenSmfType0(sf->data, sf->size, flat, 0xFFF0u, &flatN) && flatN >= 14) {
+		use = flat;
+		useN = flatN;
+	}
+	uint16_t bufSeg = 0;
+	{
+		const uint16_t paras = (uint16_t)((useN + 32u) / 16u);
+		if (!dos_.AllocBlock(mem, paras, &bufSeg) || bufSeg < 0x0100)
+			bufSeg = 0x9000;
+	}
+	if (bufSeg < 0x0100 || bufSeg >= 0xA000) {
+		delete[] flat;
+		return;
+	}
+	const unsigned dst = (unsigned)bufSeg << 4;
+	if (dst + useN >= 0x200000) {
+		delete[] flat;
+		return;
+	}
+	memcpy(mem + dst, use, useN);
+	delete[] flat;
+	{
+		const CEmuDos98File* df = dos_.FindFile("MID.DRV");
+		if (df && df->data && df->size && drv + df->size < 0x200000)
+			memcpy(mem + drv, df->data, df->size);
+	}
+	if (mem[drv + 0x78] != 0x60) return;
+
+	mem[0x08 * 4] = 0x78;
+	mem[0x08 * 4 + 1] = 0x00;
+	mem[0x08 * 4 + 2] = (uint8_t)(drvSeg & 0xff);
+	mem[0x08 * 4 + 3] = (uint8_t)(drvSeg >> 8);
+	mem[drv + 0x3A3] = 1;
+	/* Overflow path of INT8 is `jmp far [03B0]` to the previous vector.
+	   That is our HLT trampoline, which never IRETs — stack/IVT die after
+	   ~40 ticks. Point the chain at EOI+IRET in the driver's BSS. */
+	mem[drv + 0x5C0] = 0xB0;
+	mem[drv + 0x5C1] = 0x20;
+	mem[drv + 0x5C2] = 0xE6;
+	mem[drv + 0x5C3] = 0x20;
+	mem[drv + 0x5C4] = 0xCF;
+	mem[drv + 0x3B0] = 0xC0;
+	mem[drv + 0x3B1] = 0x05;
+	mem[drv + 0x3B2] = (uint8_t)(drvSeg & 0xff);
+	mem[drv + 0x3B3] = (uint8_t)(drvSeg >> 8);
+
+	const uint16_t ss = comCs;
+	const uint16_t sp0 = 0x7E00;
+	np2_reg_set(NP2_R_SS, ss);
+	np2_reg_set(NP2_R_SP, sp0);
+	uint16_t sp = (uint16_t)(sp0 - 4);
+	{
+		const unsigned sl = ((unsigned)ss << 4) + sp;
+		mem[sl] = 0;
+		mem[sl + 1] = 0;
+		mem[sl + 2] = (uint8_t)(DOS98_TRAMP_SEG & 0xff);
+		mem[sl + 3] = (uint8_t)(DOS98_TRAMP_SEG >> 8);
+	}
+	np2_reg_set(NP2_R_SP, sp);
+	np2_reg_set(NP2_R_AX, 0x0000);
+	np2_reg_set(NP2_R_CX, bufSeg);
+	np2_reg_set(NP2_R_DX, 0);
+	np2_reg_set(NP2_R_DS, drvSeg);
+	np2_reg_set(NP2_R_ES, drvSeg);
+	np2_reg_set(NP2_R_CS, drvSeg);
+	np2_reg_set(NP2_R_IP, 0);
+	np2_reg_set(NP2_R_FLAGS, (uint16_t)(np2_reg_get(NP2_R_FLAGS) & ~0x0200));
+	const uint64_t budget = (uint64_t)cpuHz_ * 2ull;
+	const uint64_t start = cpuCycles_;
+	while (cpuCycles_ - start < budget) {
+		if (np2_reg_get(NP2_R_CS) == (uint16_t)DOS98_TRAMP_SEG)
+			break;
+		const int32_t c = np2_step();
+		const uint64_t u = (c > 0) ? (uint64_t)c : 1ull;
+		cpuCycles_ += u;
+	}
+	mem[0x08 * 4] = 0x78;
+	mem[0x08 * 4 + 1] = 0x00;
+	mem[0x08 * 4 + 2] = (uint8_t)(drvSeg & 0xff);
+	mem[0x08 * 4 + 3] = (uint8_t)(drvSeg >> 8);
+	mokDrvSeg_ = drvSeg;
+}
+
 void CHardPcat::FixHootAilTimer()
 {
 	/* AIL hook_timer should point INT 8 at API_timer. HOOT / nested IRQ0 often
@@ -1002,6 +1498,7 @@ void CHardPcat::FixHootAilTimer()
 
 	auto findApiTimer = [&](uint16_t seg) -> unsigned {
 		if (seg < 0x0100 || seg >= 0xA000) return 0;
+		if (hootAdvSeg_ && seg == hootAdvSeg_) return 0;
 		const unsigned base = (unsigned)seg << 4;
 		for (unsigned o = 0x10; o + 20 < 0x8000; o++) {
 			const unsigned a = base + o;
@@ -1070,6 +1567,7 @@ void CHardPcat::FixHootAilTimer()
 			return;
 		}
 		if (i8Off != 0) return; /* unknown non-zero handler */
+
 	}
 
 	/* Prefer known AIL CS, else current INT8 seg if it looks like AIL data/code. */
@@ -1183,13 +1681,35 @@ int CHardPcat::DeliverIrqs()
 		? (uint16_t)(memEarly[0x7F * 4 + 2] | (memEarly[0x7F * 4 + 3] << 8)) : (uint16_t)0;
 	const uint16_t i8Early = memEarly
 		? (uint16_t)(memEarly[0x08 * 4 + 2] | (memEarly[0x08 * 4 + 3] << 8)) : (uint16_t)0;
-	const int silpHot = (i7Early == i8Early && i7Early >= 0x0100);
+	/* Sierra silp_at COM uses the same CS:IP for INT 7Fh and INT 8. Matching
+	   CS alone also hits CODE.COM (same CS, different IP), which then gets
+	   the silp ISR park / 80k-step cut-off / trampoline restore and never
+	   finishes a play or a tick. Gate on modeSilp_ (rom name SILP*). */
+	const int silpHot = (modeSilp_ && i7Early == i8Early && i7Early >= 0x0100);
 	/* HOOT AIL timer repair scans guest RAM — skip on Sierra silp (INT8==INT7F). */
 	if (silpHot)
 		RepairSilpDriverFar();
-	else
+	else if (!modeMidi_)
 		FixHootAilTimer();
 	if (pit0IrqPending_ && (picMask_ & 0x01) == 0) {
+		/* Real 8259 honors IF. CODE.COM CLI around the INT 8 far-call tick;
+		   injecting anyway nested a second IRQ0 into Sound Images AH=3
+		   (re-entry byte → no-op ticks, held chords). Sierra silp is one
+		   exception: after the 80k-step ISR we force CS back to the
+		   trampoline without IRET, so IF stays clear.
+		   CODE.COM is the other: every ~4 ticks it ADD 5000h / JC and
+		   JMP FAR to the saved INT 8, which is our HLT trampoline, and
+		   never IRETs. Parked there with IF=0 we still have to accept
+		   the next IRQ0 or the song dies after the first BIOS chain. */
+		if (!silpHot && (np2_reg_get(NP2_R_FLAGS) & 0x0200) == 0) {
+			const uint16_t csIf = np2_reg_get(NP2_R_CS);
+			const uint16_t ipIf = np2_reg_get(NP2_R_IP);
+			/* Idle HLT past the trap stubs may sit with IF=0 after
+			   CODE.COM's JMP FAR chain; accept the next tick there.
+			   IP<200h is a trampoline stub — let TrapVector IRET. */
+			if (!(csIf == (uint16_t)DOS98_TRAMP_SEG && ipIf >= (uint16_t)PCAT_IDLE_IP))
+				return 0;
+		}
 		uint8_t* mem = memEarly;
 		const uint16_t i8Seg = i8Early;
 		const uint16_t i8Off = mem
@@ -1217,6 +1737,16 @@ int CHardPcat::DeliverIrqs()
 		}
 		pit0IrqPending_ = 0;
 		irq0Count_++;
+		if (mokDrvSeg_ >= 0x0100 && mokDrvSeg_ < 0xA000 && mem && !silpHot) {
+			const unsigned db = (unsigned)mokDrvSeg_ << 4;
+			if (db + 0x79 < 0x200000 && mem[db + 0x78] == 0x60
+				&& (i8Off != 0x0078 || i8Seg != mokDrvSeg_)) {
+				mem[0x08 * 4] = 0x78;
+				mem[0x08 * 4 + 1] = 0x00;
+				mem[0x08 * 4 + 2] = (uint8_t)(mokDrvSeg_ & 0xff);
+				mem[0x08 * 4 + 3] = (uint8_t)(mokDrvSeg_ >> 8);
+			}
+		}
 		/* Sierra silp_at COM ISR uses DS-relative [027B]/[026B] without
 		   reloading DS. On a real boot DS stays = CS after the COM entry;
 		   our idle trampoline often leaves DS elsewhere, so the IRQ corrupts
@@ -1258,8 +1788,10 @@ int CHardPcat::DeliverIrqs()
 			   the timer callback skips OPL voice updates. Feed primary quantum
 			   only (ADLIB=232D, SBP2FM=295B). Do NOT poke q+4 — that breaks
 			   ADLIB key-on (native serve owns the paired active counter). */
-			const uint16_t qOff = hootAdvQuantumOff_ ? hootAdvQuantumOff_ : (uint16_t)0x232D;
-			if (hootAdvSeg_ >= 0x0100 && hootAdvSeg_ < 0xA000
+			uint16_t qOff = hootAdvQuantumOff_;
+			if (!qOff && hootAdvSize_ >= 0x2330u)
+				qOff = (uint16_t)0x232D;
+			if (qOff && hootAdvSeg_ >= 0x0100 && hootAdvSeg_ < 0xA000
 				&& ((unsigned)hootAdvSeg_ << 4) + qOff + 1u < 0x200000u) {
 				const unsigned adv = (unsigned)hootAdvSeg_ << 4;
 				uint16_t q = (uint16_t)(mem[adv + qOff] | (mem[adv + qOff + 1] << 8));
@@ -1270,15 +1802,33 @@ int CHardPcat::DeliverIrqs()
 				}
 			}
 		}
-		np2_interrupt((uint8_t)PCAT_TIMER_VEC);
-		/* An ordinary timer ISR neither needs nor survives the AIL treatment
-		   below: it is cut off after a fixed step budget and then has CS, SS
-		   and SP forced back to the idle trampoline, which throws away the
-		   stack it just switched to and the IRET frame it was going to
-		   return through. Hand it back to PumpCycles instead, which steps it
-		   like any other code and keeps TickSide in phase. */
-		if (!silpHot && !ailOwnsIrq)
+		int skipMidiExeEntry = 0;
+		if (modeMidi_ && hootAdvSeg_ && i8Off == 0
+			&& i8Seg >= 0x0100 && i8Seg < 0xA000
+			&& i8Seg != (uint16_t)DOS98_TRAMP_SEG)
+			skipMidiExeEntry = 1;
+		if (!skipMidiExeEntry)
+			np2_interrupt((uint8_t)PCAT_TIMER_VEC);
+		if (skipMidiExeEntry)
+			return 0;
+		/* IBM BIOS INT 08 far-calls INT 1Ch. SOUND.COM keeps IRQ0 and
+		   stops chaining the previous vector once ROL.DRV sets a custom
+		   PIT rate, so the AdLib sequencer starves unless we deliver 1C
+		   ourselves. Skip when 1C shares INT 8's CS — that driver already
+		   owns the tick — and skip AIL/silp, whose ISR loop below is not
+		   expecting a nested 1C. */
+		if (!silpHot && !ailOwnsIrq) {
+			if (mem) {
+				const unsigned o1c = (unsigned)mem[0x1C * 4]
+					| ((unsigned)mem[0x1C * 4 + 1] << 8);
+				const unsigned s1c = (unsigned)mem[0x1C * 4 + 2]
+					| ((unsigned)mem[0x1C * 4 + 3] << 8);
+				if (!((s1c == 0 && o1c == 0) || s1c == (unsigned)DOS98_TRAMP_SEG)
+					&& s1c != (unsigned)i8Seg)
+					np2_interrupt(0x1C);
+			}
 			return 1;
+		}
 		/* Run ISR to completion without TickSide (AIL switches SS:SP). */
 		{
 			const int silpIsr = silpHot;
@@ -1346,7 +1896,7 @@ int CHardPcat::DeliverIrqs()
 				np2_reg_set(NP2_R_SP, 0xFF00);
 			}
 			np2_reg_set(NP2_R_CS, (uint16_t)DOS98_TRAMP_SEG);
-			np2_reg_set(NP2_R_IP, 0);
+			np2_reg_set(NP2_R_IP, (uint16_t)PCAT_IDLE_IP);
 			(void)done;
 		}
 		return 1;
@@ -1828,6 +2378,8 @@ int CHardPcat::RunDosCommand(const char* cmdline, uint64_t budgetCycles, int sto
 	int ok = isExe ? dos_.LoadExe(mem, image, imageSize, pspTail)
 		: dos_.LoadCom(mem, image, imageSize, pspTail);
 	if (!ok) return 0;
+	if (!isExe)
+		PatchMokHootIdleCalls(mem, dos_.PspSeg(), imageSize);
 
 	/* silp play load: mov bl,[1]; add bx,2 → offset 2 after SCI magic 84 00.
 	   Rewriting to mov bx,[0] (0x84) makes ADL.DRV BP=6 reject (es:[si]!=0/2). */
@@ -1942,9 +2494,10 @@ int CHardPcat::RunDosCommand(const char* cmdline, uint64_t budgetCycles, int sto
 		uint8_t* m = np2_mem();
 		const unsigned phys = ((unsigned)cs << 4) + (unsigned)ip;
 		if (m && phys < 0x200000 && m[phys] == 0xF4) {
-			uint8_t vec = 0;
-			if (dos_.TrapVector(cs, ip, &vec)) {
-				CEmuDos98Result res = dos_.ServiceInt(m, vec);
+			CEmuDos98Result res = DOS98_CONTINUE;
+			if (PcatTrampolineHlt(&dos_, m, cs, ip, &res)) {
+				if (res == DOS98_EXEC)
+					continue;
 				if (res == DOS98_TERMINATED || res == DOS98_RESIDENT) {
 					if (g_pcatIpProf) g_pcatIpProf->Freeze();
 					/* Buffers a loader frees on the way out are gone by the
@@ -1952,7 +2505,6 @@ int CHardPcat::RunDosCommand(const char* cmdline, uint64_t budgetCycles, int sto
 					PcatMemDump(m);
 					return 1;
 				}
-				dos_.IretReturn(m);
 				continue;
 			}
 			const uint64_t q = 200;
@@ -2145,6 +2697,7 @@ int CHardPcat::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCo
 	silpSongSeg_ = 0;
 	silpSongBytes_ = 0;
 	silpScanDone_ = 0;
+	mokDrvSeg_ = 0;
 	hootAdvSeg_ = 0;
 	hootAdvSize_ = 0;
 	hootAdvName_[0] = 0;
@@ -2160,8 +2713,12 @@ int CHardPcat::TriggerPlay(unsigned titleCode)
 {
 	const uint64_t drainBudget = (uint64_t)cpuHz_ / 2ull;
 	PCAT_CENSUS("pre");
-	if (dosGe_)
+	if (dosGe_) {
+		/* HOOT CRT may close catalog song handles (0x10+) during boot.
+		   INT7F cmd0 then AH=3F BX=title>>8 and reads 0 bytes. */
+		BindDosRomHandles(dosGe_);
 		BindDosTriggerSong(dosGe_, titleCode);
+	}
 	else {
 		extCmd_ = 0;
 		extSong_ = (uint16_t)(titleCode & 0xffff);
@@ -2191,6 +2748,21 @@ int CHardPcat::TriggerPlay(unsigned titleCode)
 	np2_reg_set(NP2_R_FLAGS, (uint16_t)(np2_reg_get(NP2_R_FLAGS) | 0x0200));
 	extCmd_ = 0;
 	RepairSilpDriverFar();
+	/* CODE.COM+ROL.DRV play waits for ten BIOS INT 1C ticks after STI.
+	   BootDos remasks PIC at the end of setup, so IRQ0 must be live
+	   before the drain or that wait never completes.
+	   Sierra silp's INT 7Fh loader is not re-entrant with its INT 8 —
+	   leave IRQ0 masked until the park below. */
+	if (!(use7f && modeSilp_))
+		picMask_ = (uint8_t)(picMask_ & 0xfeu);
+	/* Neverending Story II CODE.COM AH=42 uses leftover CX (boot AH=3F
+	   left 8000h → origin-0 offset 80000000h → EOF) and leftover DX from
+	   IN AX,7E2h (seek to 2018). Zeroing here covers CX; dos98 AH=42
+	   also treats DX=07E2h as port leftover. Hoot play pokes 7E0/7E2, not CX. */
+	if (!modeSilp_) {
+		np2_reg_set(NP2_R_CX, 0);
+		np2_reg_set(NP2_R_DX, 0);
+	}
 	if (haveVect)
 		np2_interrupt((uint8_t)funcVect_);
 	PumpCycles(cpuCycles_ + drainBudget);
@@ -2200,10 +2772,15 @@ int CHardPcat::TriggerPlay(unsigned titleCode)
 		np2_reg_set(NP2_R_FLAGS, (uint16_t)(np2_reg_get(NP2_R_FLAGS) | 0x0200));
 		extCmd_ = 1;
 		RepairSilpDriverFar();
+		if (!modeSilp_) {
+			np2_reg_set(NP2_R_CX, 0);
+			np2_reg_set(NP2_R_DX, 0);
+		}
 		if (haveVect)
 			np2_interrupt((uint8_t)funcVect_);
 		PumpCycles(cpuCycles_ + drainBudget);
 	}
+	RepairMokMidiPlay();
 	PCAT_CENSUS("trig");
 	picMask_ = (uint8_t)(picMask_ & 0xfeu);
 	if (!pit0Running_) {
@@ -2214,16 +2791,24 @@ int CHardPcat::TriggerPlay(unsigned titleCode)
 		pit0IrqPending_ = 0;
 		pit0Residual_ = 0;
 	}
-	if (!modeMidi_ && !use7f) {
+	if (!modeSilp_)
 		PrepHootAilState();
-		FixHootAilTimer();
-	}
+	if (modeMidi_ && !modeSilp_)
+		FixHootMidiInt8();
 	{
 		uint8_t* mem = np2_mem();
 		if (mem && !modeMidi_ && !use7f)
 			RestoreHootIdleTrampoline(mem);
-		/* Park on idle trampoline so IRQ0 can enter cleanly. */
-		if (use7f) {
+		/* Park on idle trampoline so IRQ0 can enter cleanly.
+		   Sierra silp's ISR is tiny-model SS=DS=CS; other INT 7Fh glues
+		   (CODE.COM) keep a normal DOS stack.
+		   Do not yank CS/SS if INT 7Fh is still inside the guest — Kingsoft
+		   CODE.COM+ROL.DRV waits for ten BIOS INT 1C ticks (~0.55s) before
+		   it even reads the .ROL, and 0.5s of drain is not always enough. */
+		RestoreHootIdleTrampoline(mem);
+		const uint16_t csNow = np2_reg_get(NP2_R_CS);
+		const int guestBusy = (csNow >= 0x0100 && csNow != (uint16_t)DOS98_TRAMP_SEG);
+		if (use7f && modeSilp_) {
 			/* Keep SS=DS=silp — same as IRQ0 path. */
 			uint16_t silpCs = (uint16_t)(mem
 				? (mem[0x7F * 4 + 2] | (mem[0x7F * 4 + 3] << 8)) : 0);
@@ -2237,12 +2822,14 @@ int CHardPcat::TriggerPlay(unsigned titleCode)
 				np2_reg_set(NP2_R_SS, 0x1000);
 				np2_reg_set(NP2_R_SP, 0xFF00);
 			}
-		} else {
+			np2_reg_set(NP2_R_CS, (uint16_t)DOS98_TRAMP_SEG);
+			np2_reg_set(NP2_R_IP, (uint16_t)PCAT_IDLE_IP);
+		} else if (!guestBusy) {
 			np2_reg_set(NP2_R_SS, 0x1000);
 			np2_reg_set(NP2_R_SP, 0xFF00);
+			np2_reg_set(NP2_R_CS, (uint16_t)DOS98_TRAMP_SEG);
+			np2_reg_set(NP2_R_IP, (uint16_t)PCAT_IDLE_IP);
 		}
-		np2_reg_set(NP2_R_CS, (uint16_t)DOS98_TRAMP_SEG);
-		np2_reg_set(NP2_R_IP, 0);
 		np2_reg_set(NP2_R_FLAGS, (uint16_t)(np2_reg_get(NP2_R_FLAGS) | 0x0200));
 	}
 	/* HOOT AIL timbres — never after Sierra silp/MT32 play (tears down song). */
@@ -2542,7 +3129,7 @@ void CHardPcat::InstallHootAilTimbres()
 	mem[dbase + 0x43F] = (uint8_t)(hDrvr >> 8);
 	RestoreHootIdleTrampoline(mem);
 	np2_reg_set(NP2_R_CS, (uint16_t)DOS98_TRAMP_SEG);
-	np2_reg_set(NP2_R_IP, 0);
+	np2_reg_set(NP2_R_IP, (uint16_t)PCAT_IDLE_IP);
 }
 
 void CHardPcat::DrainInterrupt(uint64_t budgetCycles)
@@ -2604,12 +3191,12 @@ void CHardPcat::PumpCycles(uint64_t endCycle)
 		/* DOS trampoline HLTs are real traps; do not skip 200 cycles — AIL's
 		   DDA/XMIDI timing and post-HLT IP (= next opcode) both care. */
 		if (!inAilIsr && mem && phys < 0x200000 && mem[phys] == 0xF4) {
-			uint8_t vec = 0;
-			if (dos_.TrapVector(cs, ip, &vec)) {
-				CEmuDos98Result res = dos_.ServiceInt(mem, vec);
+			CEmuDos98Result res = DOS98_CONTINUE;
+			if (PcatTrampolineHlt(&dos_, mem, cs, ip, &res)) {
 				if (res == DOS98_TERMINATED || res == DOS98_RESIDENT)
 					return;
-				dos_.IretReturn(mem);
+				if (res == DOS98_EXEC)
+					continue;
 				continue;
 			}
 			/* Batch idle HLT retires in small hops — large skips desync silp. */
@@ -2676,8 +3263,6 @@ unsigned CHardPcat::MidiNoteOnCount() const
 	return noteOns;
 }
 
-static uint8_t s_pcatMidiRun, s_pcatMidiNeed, s_pcatMidiD0;
-
 void CHardPcat::MidiCaptureReset()
 {
 	if (!midiBytes_) midiBytes_ = new uint8_t[CEMU_PCAT_MIDI_CAP];
@@ -2692,7 +3277,6 @@ void CHardPcat::MidiCaptureReset()
 	   bit6 clear (data ready) on 0x331 before the first command. */
 	if (!mpuUart_)
 		MidiPushAck(0xfe);
-	s_pcatMidiRun = s_pcatMidiNeed = s_pcatMidiD0 = 0;
 }
 
 void CHardPcat::MidiPushAck(uint8_t v)
@@ -2728,37 +3312,6 @@ void CHardPcat::MidiCaptureByte(uint8_t v)
 	midiDelta_[midiCount_] = delta;
 	midiBytes_[midiCount_] = v;
 	midiCount_++;
-
-	/* Live FM-monitor keys for MPU UART stream. */
-	if (modeMidi_) {
-		if (v & 0x80) {
-			s_pcatMidiRun = v;
-			const uint8_t hi = (uint8_t)(v & 0xf0);
-			s_pcatMidiNeed = (hi == 0xC0 || hi == 0xD0) ? 1 : 2;
-			s_pcatMidiD0 = 0;
-		} else if (s_pcatMidiRun) {
-			if (s_pcatMidiNeed == 2 && s_pcatMidiD0 == 0) {
-				s_pcatMidiD0 = v;
-			} else {
-				const uint8_t hi = (uint8_t)(s_pcatMidiRun & 0xf0);
-				const int ch = (int)(s_pcatMidiRun & 0x0f);
-				if (hi == 0x90 || hi == 0x80) {
-					const int note = (s_pcatMidiNeed == 2) ? (int)s_pcatMidiD0 : (int)v;
-					const int vel = (s_pcatMidiNeed == 2) ? (int)v : 0;
-					const int on = (hi == 0x90 && vel > 0) ? 1 : 0;
-					FmMonShadowSetKeysProfile(SASAMI_FMMON_KEYS_MIDI);
-					FmMonShadowMidiNote(ch, note, on);
-					FmMonShadowWriteAuxReg(0x10 + (unsigned)(ch & 0x0f),
-						(unsigned)(on ? (note & 0x7f) : 0));
-				}
-				s_pcatMidiD0 = 0;
-				if ((s_pcatMidiRun & 0xf0) == 0xC0 || (s_pcatMidiRun & 0xf0) == 0xD0)
-					s_pcatMidiNeed = 1;
-				else
-					s_pcatMidiNeed = 2;
-			}
-		}
-	}
 }
 
 void CHardPcat::MidiDataOut(uint8_t data)

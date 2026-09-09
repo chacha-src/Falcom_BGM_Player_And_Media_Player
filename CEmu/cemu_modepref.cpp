@@ -410,6 +410,91 @@ int CEmuZipExtractFirstMidi(const wchar_t* zipPath, wchar_t* outMidPath, int out
 	return ok;
 }
 
+static int CEmuModeIsMidiExtA(const char* name)
+{
+	if (!name) return 0;
+	const char* slash = name;
+	for (const char* p = name; *p; p++)
+		if (*p == '\\' || *p == '/') slash = p + 1;
+	const char* dot = strrchr(slash, '.');
+	if (!dot) return 0;
+	return (_stricmp(dot, ".mid") == 0
+		|| _stricmp(dot, ".midi") == 0
+		|| _stricmp(dot, ".rmi") == 0
+		|| _stricmp(dot, ".smf") == 0) ? 1 : 0;
+}
+
+static int ZipWriteTempMidi(CEmuZipFs* fs, int idx, wchar_t* outMidPath, int outCap)
+{
+	if (!fs || idx < 0 || idx >= fs->fileCount) return 0;
+	if (!fs->files[idx].data || fs->files[idx].size <= 0) return 0;
+	wchar_t tmpDir[MAX_PATH];
+	tmpDir[0] = 0;
+	GetTempPathW(MAX_PATH, tmpDir);
+	const wchar_t* base = wcsrchr(fs->files[idx].path, L'\\');
+	if (!base) base = wcsrchr(fs->files[idx].path, L'/');
+	base = base ? base + 1 : fs->files[idx].path;
+	_snwprintf_s(outMidPath, (size_t)outCap, _TRUNCATE, L"%scemu_%08X_%s",
+		tmpDir, (unsigned)GetTickCount(), base);
+	HANDLE h = CreateFileW(outMidPath, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS,
+		FILE_ATTRIBUTE_TEMPORARY, NULL);
+	if (h == INVALID_HANDLE_VALUE) return 0;
+	DWORD wr = 0;
+	WriteFile(h, fs->files[idx].data, fs->files[idx].size, &wr, NULL);
+	CloseHandle(h);
+	if (wr != fs->files[idx].size) {
+		DeleteFileW(outMidPath);
+		outMidPath[0] = 0;
+		return 0;
+	}
+	return 1;
+}
+
+int CEmuZipExtractCatalogMidi(const wchar_t* zipPath, const CEmuGameEntry* ge,
+	unsigned titleCode, wchar_t* outMidPath, int outCap)
+{
+	if (!zipPath || !ge || !outMidPath || outCap <= 0) return 0;
+	outMidPath[0] = 0;
+	const char* want = NULL;
+	const unsigned lo = titleCode & 0xffu;
+	const unsigned hi = (titleCode >> 8) & 0xffu;
+	for (int i = 0; i < ge->romCount; i++) {
+		const CEmuRomEntry* r = &ge->rom[i];
+		if (_stricmp(r->type, "file") != 0) continue;
+		if (!CEmuModeIsMidiExtA(r->name)) continue;
+		const int off = r->offset;
+		if (off == (int)lo || (hi && off == (int)hi) || off == (int)titleCode) {
+			const char* base = r->name;
+			for (const char* p = r->name; *p; p++)
+				if (*p == '\\' || *p == '/') base = p + 1;
+			want = base;
+			break;
+		}
+	}
+	if (!want) return 0;
+	CEmuZipFs* fs = (CEmuZipFs*)malloc(sizeof(CEmuZipFs));
+	if (!fs) return 0;
+	int ok = 0;
+	if (CEmuZipFsOpen(fs, zipPath)) {
+		int hit = -1;
+		for (int i = 0; i < fs->fileCount; i++) {
+			const wchar_t* p = fs->files[i].path;
+			const wchar_t* base = wcsrchr(p, L'\\');
+			if (!base) base = wcsrchr(p, L'/');
+			base = base ? base + 1 : p;
+			char name[CEMU_ROM_NAME];
+			name[0] = 0;
+			WideCharToMultiByte(CP_ACP, 0, base, -1, name, (int)sizeof(name), NULL, NULL);
+			if (_stricmp(name, want) == 0) { hit = i; break; }
+		}
+		if (hit >= 0)
+			ok = ZipWriteTempMidi(fs, hit, outMidPath, outCap);
+		CEmuZipFsClose(fs);
+	}
+	free(fs);
+	return ok;
+}
+
 int CEmuCapturePcatMidiToFile(const wchar_t* zipPath, unsigned titleCode,
 	wchar_t* outMidPath, int outCap)
 {

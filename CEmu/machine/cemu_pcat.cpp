@@ -12,7 +12,7 @@ static void CEmuPcatBindFmMon(CHardPcat* hw, const CEmuGameEntry* ge)
 	if (!hw || !ge) return;
 	CEmuFmMonBindFromGe(ge);
 	if (hw->modeMidi_) {
-		FmMonShadowEnterKeysOnly(SASAMI_FMMON_KEYS_MIDI);
+		/* UART stream belongs on the MIDI monitor (GM/GS/LA maps), not FM keys. */
 		FmMonShadowSetIdentity("PC/AT", "MPU-401 MIDI");
 	} else if (hw->modeBeep_) {
 		FmMonShadowEnterKeysOnly(SASAMI_FMMON_KEYS_MIDI);

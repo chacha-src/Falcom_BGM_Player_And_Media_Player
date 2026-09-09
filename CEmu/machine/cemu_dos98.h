@@ -31,7 +31,9 @@ enum {
 enum CEmuDos98Result {
 	DOS98_CONTINUE = 0,
 	DOS98_TERMINATED = 1,
-	DOS98_RESIDENT = 2
+	DOS98_RESIDENT = 2,
+	/* INT 21 AH=4B/00 already switched CS:IP onto the child; do not IRET. */
+	DOS98_EXEC = 3
 };
 
 struct CEmuDos98File {
@@ -67,7 +69,8 @@ public:
 	void LoadOverlay(uint8_t* mem, const unsigned char* image, unsigned imageSize, uint16_t loadSeg, uint16_t reloc) const;
 	/* Load a .SYS character device image; returns load segment (CS=loadSeg). */
 	int LoadDeviceImage(uint8_t* mem, const char* name, uint16_t* outSeg,
-		uint16_t* outStratOff, uint16_t* outIntrOff) const;
+		uint16_t* outStratOff, uint16_t* outIntrOff,
+		unsigned extraParas = 0) const;
 
 	int TrapVector(uint16_t cs, uint16_t ip, uint8_t* outVec) const;
 	CEmuDos98Result ServiceInt(uint8_t* mem, uint8_t vec);
@@ -93,6 +96,9 @@ public:
 	   the missing services by how many archives need them. */
 	uint8_t unhandledFn_[256];  /* INT 21h AH */
 	uint8_t unhandledVec_[256]; /* other INT vectors */
+	/* First CPU exception (INT 00/06/07/0C/0D) CS:IP from the IRET frame. */
+	uint8_t trapVec_;
+	uint16_t trapCs_, trapIp_;
 	/* INT 18h is the PC-98 keyboard/CRT BIOS and only AH=00/01 are answered;
 	   everything else returns whatever was in the registers. Rank the AH
 	   values that fall through the same way as the INT 21h ones. */

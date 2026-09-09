@@ -46,7 +46,7 @@ void CDriverSg1000::RunUntil(uint64_t endCycle)
 	Ay_Cpu* cpu = hw_->Cpu();
 	CEmuHardSg1000SetActive(hw_);
 	int guard = 0;
-	while ((uint64_t)cpu->time() < endCycle && guard++ < 2000000) {
+	while ((uint64_t)cpu->time64() < endCycle && guard++ < 2000000) {
 		const int cycles = Ay_CpuRunOne(cpu);
 		if (cycles <= 0) break;
 		hw_->AddCpuCycles((uint64_t)cycles);
@@ -78,7 +78,7 @@ void CDriverSg1000::CallZ80(uint16_t targetPc)
 	cpu->r.sp = sp;
 	cpu->r.pc = targetPc;
 
-	const uint64_t start = (uint64_t)cpu->time();
+	const uint64_t start = (uint64_t)cpu->time64();
 	const uint64_t limit = start + (uint64_t)cpuHz_ / 2; /* 0.5s cap */
 	int guard = 0;
 	while (guard++ < 2000000) {
@@ -86,7 +86,7 @@ void CDriverSg1000::CallZ80(uint16_t targetPc)
 			break;
 		if (mem[cpu->r.pc] == 0x76 && cpu->r.pc == ret)
 			break;
-		if ((uint64_t)cpu->time() >= limit)
+		if ((uint64_t)cpu->time64() >= limit)
 			break;
 		const int cycles = Ay_CpuRunOne(cpu);
 		if (cycles <= 0) break;
@@ -177,7 +177,7 @@ int CDriverSg1000::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsig
 	RunUntil((uint64_t)cpuHz_ / 120);
 	booted_ = 1;
 	TriggerSong();
-	nextTickAt_ = (uint64_t)hw_->Cpu()->time() + (uint64_t)cpuHz_ / 60;
+	nextTickAt_ = (uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 60;
 	return 1;
 }
 
@@ -198,11 +198,11 @@ int CDriverSg1000::Render(int16_t* stereo, int frames)
 	if (hostRate_ < 1 || cpuHz_ < 1) return 0;
 
 	for (int i = 0; i < frames; i++) {
-		const uint64_t now = (uint64_t)cpu->time();
+		const uint64_t now = (uint64_t)cpu->time64();
 		if (!toneFallback_ && knownTick_ && now >= nextTickAt_) {
 			if (hw_->soundUpdatePc_)
 				CallZ80(hw_->soundUpdatePc_);
-			nextTickAt_ = (uint64_t)cpu->time() + (uint64_t)cpuHz_ / 60;
+			nextTickAt_ = (uint64_t)cpu->time64() + (uint64_t)cpuHz_ / 60;
 		}
 		cpuAcc_ += (int64_t)cpuHz_;
 		int cyclesPerSample = (int)(cpuAcc_ / (int64_t)hostRate_);
@@ -214,9 +214,9 @@ int CDriverSg1000::Render(int16_t* stereo, int frames)
 			cpu->adjust_time(cyclesPerSample);
 			hw_->AddCpuCycles((uint64_t)cyclesPerSample);
 		} else {
-			const uint64_t end = (uint64_t)cpu->time() + (uint64_t)cyclesPerSample;
+			const uint64_t end = (uint64_t)cpu->time64() + (uint64_t)cyclesPerSample;
 			/* Idle between ticks — keep PSG clocks moving. */
-			const uint64_t cur = (uint64_t)cpu->time();
+			const uint64_t cur = (uint64_t)cpu->time64();
 			if (end > cur) {
 				cpu->adjust_time((int)(end - cur));
 				hw_->AddCpuCycles(end - cur);

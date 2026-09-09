@@ -112,6 +112,8 @@ private:
 	void PrepHootAilState();
 	int HootAilPossible() const;
 	void FixHootAilTimer();
+	void FixHootMidiInt8();
+	void RepairMokMidiPlay();
 	void InstallHootAilTimbres();
 	void RestoreHootIdleTrampoline(uint8_t* mem);
 	int FarCallAil(uint16_t api, uint16_t* stackWords, int nWords, uint64_t budget);
@@ -148,6 +150,7 @@ private:
 	uint64_t spkPhaseInc_;
 
 	uint8_t picMask_;
+	int pic0Isr_; /* unused: kept so the class layout matches already-built objs */
 	int picMasterIcw_;
 	uint8_t picMasterIcw1_;
 	uint64_t oplPumpResidual_;
@@ -166,6 +169,7 @@ private:
 	uint16_t silpSongSeg_; /* preserve song buffer seg at CS:0275 */
 	unsigned silpSongBytes_; /* SCI/song bytes; IRQ stack sits above this */
 	int silpScanDone_;    /* one-shot full-mem DRV scan */
+	uint16_t mokDrvSeg_; /* Mok MID.DRV CS — INT8 re-plant after IVT smash */
 	int hootTimerFixed_;
 	uint16_t hootAilCs_; /* AIL code segment once API_timer is known */
 

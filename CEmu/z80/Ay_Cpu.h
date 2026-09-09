@@ -26,12 +26,20 @@ public:
 	// instruction was encountered at any point during run.
 	bool run( cpu_time_t end_time );
 	
-	// Time of beginning of next instruction
+	// Time of beginning of next instruction (32-bit GME clock; see time64).
 	cpu_time_t time() const             { return state->time + state->base; }
+
+	/* Monotonic cycle count. The GME core's cpu_time_t is signed 32-bit, so
+	   time() wraps at 2^31 (~8.95 min at 4 MHz). Drivers must schedule against
+	   time64(); fold_time() keeps the 32-bit clock in range without moving
+	   time64(). */
+	int64_t time64() const              { return timeBias_ + (int64_t)time(); }
+	void fold_time();
+	void set_time64( int64_t t );
 	
 	// Alter current time. Not supported during run() call.
 	void set_time( cpu_time_t t )       { state->time = t - state->base; }
-	void adjust_time( int delta )       { state->time += delta; }
+	void adjust_time( int delta );
 	
 	#if BLARGG_BIG_ENDIAN
 		struct regs_t { uint8_t b, c, d, e, h, l, flags, a; };
@@ -75,6 +83,7 @@ public:
 public:
 	Ay_Cpu();
 private:
+	int64_t timeBias_;
 	uint8_t szpc [0x200];
 	uint8_t* mem;
 	cpu_time_t end_time_;
@@ -108,6 +117,55 @@ inline void Ay_Cpu::set_end_time( cpu_time_t t )
 	cpu_time_t delta = state->base - t;
 	state->base = t;
 	state->time += delta;
+}
+
+inline void Ay_Cpu::fold_time()
+{
+	/* Keep well below INT32_MAX so one instruction cannot wrap the GME clock. */
+	const cpu_time_t kThresh = (cpu_time_t)0x40000000;
+	const cpu_time_t kFold = (cpu_time_t)0x20000000;
+	for (;;) {
+		const cpu_time_t t = time();
+		if (t >= 0 && t < kThresh)
+			break;
+		if (t < 0) {
+			/* Already wrapped: 32-bit clock is 2^32 below the real count. */
+			timeBias_ += 0x100000000LL + (int64_t)t;
+			set_time( 0 );
+			break;
+		}
+		timeBias_ += (int64_t)kFold;
+		set_time( t - kFold );
+	}
+}
+
+inline void Ay_Cpu::set_time64( int64_t t )
+{
+	if ( t < 0 ) t = 0;
+	int64_t local = t - timeBias_;
+	if ( local < 0 || local >= 0x40000000LL ) {
+		timeBias_ = t;
+		set_time( 0 );
+		return;
+	}
+	set_time( (cpu_time_t)local );
+}
+
+inline void Ay_Cpu::adjust_time( int delta )
+{
+	fold_time();
+	const int64_t next = time64() + (int64_t)delta;
+	if ( next < 0 ) {
+		set_time64( 0 );
+		return;
+	}
+	const cpu_time_t t = time();
+	if ( delta > 0 && (int64_t)t + (int64_t)delta >= 0x40000000LL ) {
+		set_time64( next );
+		return;
+	}
+	state->time += delta;
+	fold_time();
 }
 
 #endif

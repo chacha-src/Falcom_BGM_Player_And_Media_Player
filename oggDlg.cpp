@@ -11699,8 +11699,14 @@ open_mode_kpi:
 		/* MIDI mode: extract .mid from zip and play via CRender midPlayPrefer (KPI/VST). */
 		{
 			char modeTag[CEMU_MODE_TAG] = {};
-			if (!CEmuModePrefGet(openPath, modeTag, (int)sizeof(modeTag)))
-				CEmuModeTagFromEntry(ge, modeTag, (int)sizeof(modeTag));
+			char fromEntry[CEMU_MODE_TAG] = {};
+			CEmuModeTagFromEntry(ge, fromEntry, (int)sizeof(fromEntry));
+			/* midiout rows (often XML type=beep) always open on the MIDI
+			   monitor — a stored BEEP pref must not steal them onto FM. */
+			if (CEmuModeIsMidiTag(fromEntry))
+				strncpy_s(modeTag, fromEntry, _TRUNCATE);
+			else if (!CEmuModePrefGet(openPath, modeTag, (int)sizeof(modeTag)))
+				strncpy_s(modeTag, fromEntry, _TRUNCATE);
 			if (CEmuModeIsMidiTag(modeTag)) {
 				wchar_t midPath[MAX_PATH] = {};
 				/* Prefer MIDI catalog row for title codes (Capture loads silp/MIDI). */
@@ -11713,16 +11719,19 @@ open_mode_kpi:
 						if (pick) midGe = pick;
 					}
 				}
-				if (CEmuZipExtractFirstMidi(openPath, midPath, MAX_PATH) && midPath[0]) {
+				const unsigned capTitle = CEmuGameTitleCodeForIndex(
+					midGe ? midGe : ge, titleIdx);
+				/* Catalog SMF for this title → MIDI monitor (GM/GS/LA maps).
+				   Do not extract "first/largest" .mid — that ignores song select. */
+				if (CEmuZipExtractCatalogMidi(openPath, midGe ? midGe : ge,
+					capTitle, midPath, MAX_PATH) && midPath[0]) {
 					filen = midPath;
 					kpi[0] = 0;
-					/* Stash zip so playlist keeps the CEmu row (not TEMP mid). */
 					tagfile = cemuPlZipPath;
 					if (savedata.midPlayPrefer == 1) {
 						mode = modesub = MODE_VST_MIDI;
 						goto open_mode_vst_midi;
 					}
-					/* KPI prefer: resolve mid plugin via plugs */
 					if (pl) {
 						playlistdata row = {};
 						BYTE kv = 0;
@@ -11738,10 +11747,8 @@ open_mode_kpi:
 					mode = modesub = MODE_VST_MIDI;
 					goto open_mode_vst_midi;
 				}
-				/* No .mid in zip — live MPU-401 UART stream (stub SMF + inject). */
+				/* XMI / packed MIDI — live MPU-401 UART into the MIDI monitor. */
 				{
-					const unsigned capTitle = CEmuGameTitleCodeForIndex(
-						midGe ? midGe : ge, titleIdx);
 					/* Soft CEmu and Live share one np2 — never leave both open. */
 					CEmuSessionClose(&g_cemuSession);
 					CEmuSessionInit(&g_cemuSession);

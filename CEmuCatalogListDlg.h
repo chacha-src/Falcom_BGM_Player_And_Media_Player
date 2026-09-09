@@ -9,9 +9,16 @@ class CEmuCatListCtrl : public CCustomListCtrl
 	DECLARE_DYNAMIC(CEmuCatListCtrl)
 public:
 	CEmuCatListCtrl() = default;
+	/* dir: 0=元順（印なし） / 1=昇順 ▲ / 2=降順 ▼ */
+	void SetSortState(int col, int dir);
 protected:
 	void BuildToolTipText(int row, int col, CString& out) override;
+	BOOL GetListRowTint(int row, COLORREF& tintBg, COLORREF& accent) const override;
 	DECLARE_MESSAGE_MAP()
+	void EnsureSortArrows();
+	CImageList m_sortIL;
+	CString m_colTitle[6];
+	BOOL m_colTitleReady = FALSE;
 };
 
 /* One list row = one archive group that has a local zip. */
@@ -21,6 +28,9 @@ struct CEmuCatListRow {
 	CString modes;
 	CString hayLower;
 	CString zipPath;
+	int origIndex = 0;
+	int monFm = 0;   /* FMモニタ */
+	int monMidi = 0; /* MIDIモニタ */
 };
 
 /* arcdata.zip 対応タイトル一覧（モデルレス。MP 閉じると一緒に閉じる） */
@@ -46,6 +56,7 @@ protected:
 	afx_msg void OnBnClickedHelp();
 	afx_msg void OnEnChangeFilter();
 	afx_msg void OnNMDblclkList(NMHDR* pNMHDR, LRESULT* pResult);
+	afx_msg void OnLvnColumnClick(NMHDR* pNMHDR, LRESULT* pResult);
 	afx_msg void OnSize(UINT nType, int cx, int cy);
 	afx_msg void OnGetMinMaxInfo(MINMAXINFO* lpMMI);
 	afx_msg void OnDestroy();
@@ -63,6 +74,7 @@ protected:
 	/* Returns number of rows with a local zip. Re-scans disk each call. */
 	int BuildRowCache();
 	void ApplyFilterToList();
+	void UpdateSortHeader();
 	int PlaySelectedRow();
 
 	CEmuCatListCtrl m_lc;
@@ -78,4 +90,6 @@ protected:
 	std::vector<CEmuCatListRow> m_rows;
 	unsigned m_filterGen = 0;
 	size_t m_zipStemCount = 0; /* last scan size — detect newly added zips */
+	int m_sortCol = -1; /* -1 = 元の順 */
+	int m_sortDir = 0;   /* 0=元 1=昇順 2=降順 */
 };

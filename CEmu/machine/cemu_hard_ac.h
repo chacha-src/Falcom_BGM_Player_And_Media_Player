@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include "cemu_hard.h"
 #include "../chip/cemu_chip.h"
 #include "../cemu_zipfs.h"
@@ -67,7 +67,15 @@ enum CEmuAcBoard {
 	/* Seta/Allumer and Cave have no sound CPU: the main 68000 addresses the
 	   PCM chip directly, an X1-010 RAM window on Seta and a two-port YMZ280B
 	   on Cave. 47 is already taken by the Taito F3 path. */
-	CEMU_AC_BOARD_M68K_PCM = 48
+	CEMU_AC_BOARD_M68K_PCM = 48,
+	/* Raizing / Eighting shipped four revisions of the same 68000 + Z80 sound
+	   section, and every one of them moved the chips (MAME toaplan/raizing.cpp
+	   and raizing_batrider.cpp). raizingType_ selects the map:
+	     1 mahou     Z80 + YM2151 @E000 + OKI @E004, mailbox in shared RAM
+	     2 bgaregga  + banked Z80 ROM, GAL sample banking, latch IRQ @E01C
+	     3 batrider  same section moved onto I/O ports, two OKIs, latch NMI
+	     4 bbakraid  YMZ280B on ports 80/81, latch NMI + periodic IRQ0     */
+	CEMU_AC_BOARD_RAIZING = 49
 };
 
 class CHardAc : public CHard {
@@ -94,6 +102,7 @@ public:
 	int LoadRomsSeibu(CEmuZipFs* fs, const CEmuGameEntry* ge);
 	int LoadRomsM62(CEmuZipFs* fs, const CEmuGameEntry* ge);
 	int LoadRomsSegaM1(CEmuZipFs* fs, const CEmuGameEntry* ge);
+	int LoadRomsRaizing(CEmuZipFs* fs, const CEmuGameEntry* ge);
 	void SeibuRefreshOpcodes();
 	void SeibuSetBank(unsigned bank);
 	int SeibuActive() const { return board_ == CEMU_AC_BOARD_SEIBU_OPL; }
@@ -305,7 +314,39 @@ public:
 	int GxK056800IntEn() const { return k056800IntEn_; }
 	int GxK056800Irq() const { return k056800Irq_; }
 
+	/* ---- Raizing / Eighting (mahou, bgaregga, batrider, bbakraid) ---- */
+	int RaizingType() const { return raizingType_; }
+	/* Both latches at once, the way the 68000's single move.l does it.
+	   Type 1 has no latch: the pair goes into the shared-RAM mailbox. */
+	void RaizingPostCommand(uint8_t cmd, uint8_t data);
+	/* bgaregga and batrider drop every command until they have seen 0x55 and
+	   answered 0xAA; both then park a nonzero ready flag in work RAM, which
+	   is the only place that answer survives with no 68000 listening. Type 1
+	   and Battle Bakraid boot straight into their command loop. */
+	int RaizingHandshakeAcked() const
+	{
+		if (raizingType_ == 2) return mem_[0xc011] != 0;
+		if (raizingType_ == 3) return mem_[0xc00a] != 0;
+		return 1;
+	}
+	/* Type 1 mailbox is free once the Z80 has written 0xFF back to C000. */
+	int RaizingMailboxIdle() const { return mem_[0xc000] == 0xff; }
+	/* Sequencer and chips have dropped every voice — jingles and scripts
+	   that hit their end terminator. Looping BGM stays busy. */
+	int RaizingTrackIdle();
+	/* Latch held IRQ0 (bgaregga) / latched NMI (batrider, bbakraid). */
+	int RaizingLatchPending() const { return raizingLatchPending_; }
+	int RaizingNmiPending() const { return raizingNmiPending_; }
+	void ClearRaizingNmi() { raizingNmiPending_ = 0; }
+
 private:
+	uint8_t RaizingPortIn(uint8_t port);
+	void RaizingPortOut(uint8_t port, uint8_t data);
+	uint8_t RaizingMemRead(uint16_t addr);
+	void RaizingMemWrite(uint16_t addr, uint8_t data);
+	void RaizingSetZ80Bank(unsigned entry);
+	void RaizingOkiBankW(unsigned offset, uint8_t data);
+
 	void SytMasterWriteCommand(uint8_t cmd);
 	void SytSlavePortW(uint8_t data);
 	void SytSlaveCommW(uint8_t data);
@@ -578,6 +619,18 @@ private:
 	int m68kVblankLevel_;
 	int m68kVblankPending_;
 	int flstoryNmiEn_; /* DA00 enable gate (MAME soundnmi in_set<1>) */
+
+	/* Raizing / Eighting. raizingType_ 0 = not a Raizing board. */
+	int raizingType_;
+	/* GAL sample banking, one 4-bit entry per 64K window (see
+	   CEmuChipOki6295SetBankTable). Live storage: the chips read it. */
+	unsigned raizingOkiBank_[2][8];
+	uint8_t raizingLatch_[2];  /* 68000 -> Z80, ports 48/4A or E01C */
+	uint8_t raizingLatchOut_[2]; /* Z80 -> 68000, ports 40/42 (diagnostic) */
+	int raizingLatchPending_;
+	int raizingNmiPending_;
+	unsigned raizingLastKeyOns_;
+	int raizingIdlePolls_;
 
 	HD63701Cpu* hd63701_;
 	uint8_t* hd63701Rom_;      /* 64K MCU address space image */

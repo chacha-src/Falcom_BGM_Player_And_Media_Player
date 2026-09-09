@@ -34,6 +34,11 @@ public:
 	/* Second FM chip of a SOUND ORCHESTRA board, NULL on every other. */
 	CChip* OplChip() const { return opl_; }
 	int SorchMode() const { return modeSorch_; }
+	/* PIT ch1 + PPI speaker (PC-98 beep / 1-bit DAC). Always mixed: OPN
+	   rips that also drive the speaker would otherwise stay silent there. */
+	void MixBeep(int16_t* stereo, int frames);
+	unsigned BeepActivity() const { return beepEventCount_; }
+	int ModeBeep() const { return modeBeep_; }
 	/* CEMU_PC98_IPPROF sampling for run loops outside PumpCycles (the
 	   non-DOS pc98vx path drives np2_step from the driver). */
 	void ProfSample();
@@ -85,6 +90,7 @@ public:
 	int dks98_; /* 1 if KSK DKS/FQ BGMDRV family (INT69 AH=0; host seg:off song bank) */
 	int mdplay98_; /* 1 if Glodia MDPLAY.BIN (non-D) — needs INT08 timer ISR) */
 	int musicComKeepalive_; /* 1: fakecall/music/46 — hold MUSIC.COM [0294]=0 while playing */
+	int synthIfKeepalive_; /* 1: SYNTH_98/S20 leaves IF=0 after INT60; host STI so OPN IRQs run */
 	int modeMidi_; /* catalog midiout — MPU-401 UART @ E0D0/E0D2 (FMP -m etc.) */
 	int midiCapArmed_; /* 0 during BootDos shells; 1 after — avoid 0x00 flood */
 	uint8_t sound86Mask_; /* A460 low bits: bit0=OPNA enhance, bit1=OPNA mask (MAME/NP2) */
@@ -155,6 +161,7 @@ public:
 	unsigned opnTailCount_;
 	uint8_t opnLatchedAddr_;
 	uint8_t ssgPortAJumper_; /* soft SSG I/O A; bit7 set enables PortIn override */
+	uint8_t ssgEcho_[16]; /* last SSG 00-0F DATA0 writes; detect IN-compare */
 	uint8_t opnLatchedAddrHi_;
 	/* MPU-401 UART capture (midiout / FMP3 -m → VST live inject). */
 	unsigned MidiByteCount() const { return midiCount_; }
@@ -259,9 +266,29 @@ private:
 	uint16_t pitLatch_;
 	int pitLatched_;
 
+	/* PIT ch1 = speaker square (ports 0x73 / control 0x77 ch=1). */
+	uint16_t pit1Reload_;
+	uint32_t pit1Counter_;
+	int pit1WriteHi_;
+	int pit1ReadHi_;
+	int pit1Access_; /* 8253 RW: 1=lobyte, 2=hibyte, 3=lobyte/hibyte */
+	int pit1Running_;
+	uint64_t pit1Phase_;
+	uint64_t pit1PhaseInc_;
+	void BeepCommitPit1();
+	/* PPI port C @ 0x35: bit3 clear → speaker gated on (MAME/QEMU). */
+	uint8_t ppiC_;
+	int modeBeep_;
+	unsigned beepEventCount_;
+	int beepMonOn_;
+	int beepMonMidi_;
+	void BeepMonUpdate();
+	void BeepSetGateFromPpi();
+
 	/* VSYNC ~60 Hz */
 	uint64_t vsyncResidual_;
 	int vsyncPending_;
+	uint8_t gdcA0Poll_;
 	/* OPN clock residual across PumpCycles host samples (DOS path) */
 	uint64_t opnPumpResidual_;
 

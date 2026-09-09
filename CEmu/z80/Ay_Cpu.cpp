@@ -62,6 +62,7 @@ enum {
 Ay_Cpu::Ay_Cpu()
 {
 	state = &state_;
+	timeBias_ = 0;
 	irqDelay = 0;
 	for ( int i = 0x100; --i >= 0; )
 	{
@@ -85,6 +86,7 @@ void Ay_Cpu::reset( void* m )
 	state_.time = 0;
 	state_.base = 0;
 	end_time_   = 0;
+	timeBias_ = 0;
 	
 	memset( &r, 0, sizeof r );
 	irqDelay = 0;

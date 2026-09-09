@@ -5,8 +5,11 @@ class CHardX68k;
 
 /* Human68k-ish DOS/IOCS for X68k sound rehost in $F08xxx.
    LINE-F needs ~0x400B (cmp chain + leaves); TRAP15 must NOT overlap it
-   (old $F08100 smashed leaves and broke ambi). HEAP_END $F0C000 → ≥16KB
-   stack under SP=$F0FFFE.
+   (old $F08100 smashed leaves and broke ambi). Stack lives under SP=$F0FFFE
+   ($F0C000..$F0FFFE). DOS MALLOC is NOT in that 14KB hole: OPMDRV.X's
+   M_ALLOC asks for $103FF (~64KB) of track buffer, which always failed
+   there, so KOEI-size MML compiled to nothing. Heap is extra RAM at $A00000
+   (no catalogue ROM lands in $500000..$BFFFFF).
 
    Layout:
      $F08000  LINE-F DOS (~1KB)
@@ -17,7 +20,7 @@ class CHardX68k;
      $F08720  soft $10C
      $F08740  TRAP#1 rte / IOCS ok rts
      $F08800  DOS data / PSP
-     $F08900  heap … $F0C000
+     $A00000  heap … $A40000
 
    Install when thin. No rich-BOOT plants. */
 
@@ -35,8 +38,8 @@ enum {
 	CEMU_X68K_DOS_TRAP1 = 0x00F08740u,
 	CEMU_X68K_DOS_IOCS_OK = 0x00F08744u,
 	CEMU_X68K_DOS_DATA = 0x00F08800u,
-	CEMU_X68K_DOS_HEAP = 0x00F08900u,
-	CEMU_X68K_DOS_HEAP_END = 0x00F0C000u
+	CEMU_X68K_DOS_HEAP = 0x00A00000u,
+	CEMU_X68K_DOS_HEAP_END = 0x00A40000u
 };
 
 int CEmuX68kDosInstall(CHardX68k* hw);

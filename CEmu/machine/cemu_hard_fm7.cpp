@@ -281,6 +281,10 @@ void CHardFm7::StageBgm(uint8_t index)
 	unsigned clearN = cap;
 	if (mdataAddr_ + clearN > 0x10000)
 		clearN = 0x10000u - mdataAddr_;
+	/* daiva OP.BIN @0: zeroing the full 16K window wipes INITIATE.ROM
+	   under the song. Only clear the bytes we overwrite. */
+	if (mdataAddr_ == 0 && clearN > n)
+		clearN = n;
 	if (clearN)
 		memset(mem_ + mdataAddr_, 0, clearN);
 	memcpy(mem_ + mdataAddr_, bgmBank_[use], n);
@@ -949,6 +953,8 @@ void CHardFm7::TriggerPlay(unsigned titleCode)
 		stage = bank;
 	else if (bankOk(song))
 		stage = song;
+	else if (bankOk(0))
+		stage = 0;
 
 	if (stage < 128 && bankOk(stage))
 		StageBgm(stage);
@@ -960,7 +966,8 @@ void CHardFm7::TriggerPlay(unsigned titleCode)
 	playCmdLatch_ = 0x01;
 	/* jikochu: IRQ/main can poll $FD58 many times before the play path;
 	   hold=8 cleared the cmd and left boot JSR $C000 as the only song. */
-	playCmdHold_ = (!useOpn_ && mdataAddr_ == 0xC000) ? 256 : 8;
+	playCmdHold_ = (!useOpn_ && mdataAddr_ == 0xC000) ? 256
+		: ((mdataAddr_ == 0) ? 256 : 8);
 	mem_[FM7_FD_PLAY_SONG] = playSongLatch_;
 	mem_[FM7_FD_PLAY_A] = playParamA_;
 	mem_[FM7_FD_PLAY_B] = playParamB_;

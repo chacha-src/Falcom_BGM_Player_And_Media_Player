@@ -15,6 +15,11 @@
 #include <unordered_map>
 #include <string>
 #include <shlobj.h>
+#include <commctrl.h>
+
+#ifndef I_IMAGENONE
+#define I_IMAGENONE (-2)
+#endif
 
 #pragma comment(lib, "shell32.lib")
 
@@ -118,6 +123,51 @@ void CEmuCatHelpDlg::OnPaint()
 		L"· Dubbelklik …… zip toevoegen en spelen",
 		L"· Dwuklik …… dodaj zip i odtworz",
 		L"· Cift tik …… zip ekle ve cal"));
+	body(LL14(
+		L"・絞り込み …… 空白区切りで複数指定（すべて含む）。全角空白・, / も可",
+		L"· Filter …… space-separated terms (AND). Full-width space, comma, / also split",
+		L"· Filtre …… mots separes par espace (ET). Espace pleine chasse, virgule, /",
+		L"· Filtro …… termini separati da spazio (AND). Spazio pieno, virgola, /",
+		L"· Filtro …… terminos separados por espacio (AND). Espacio ancho, coma, /",
+		L"· 필터 …… 공백으로 여러 단어(모두 포함). 전각 공백·,/ 도 가능",
+		L"· 筛选 …… 空格分隔多项（需全部匹配）。全角空格、逗号、/ 也可",
+		L"· تصفية …… افصل بمسافة (يجب أن تطابق كلها)",
+		L"· Фильтр …… слова через пробел (И). Полный пробел, запятая, /",
+		L"· Filter …… Leerzeichen trennt (UND). Vollbreite Leerzeichen, Komma, /",
+		L"· Filtro …… espacos separam (E). Espaco largo, virgula, /",
+		L"· Filter …… spaties scheiden (EN). Volledige spatie, komma, /",
+		L"· Filtr …… spacje oddzielaja (AND). Pelna spacja, przecinek, /",
+		L"· Filtre …… boslukla birden fazla (hepsi). Tam bosluk, virgul, /"));
+	body(LL14(
+		L"・見出しクリック …… 昇順 → 降順 → 元の順。▲/▼ で今の状態",
+		L"· Header click …… Asc → Desc → original. ▲/▼ shows the state",
+		L"· Clic en-tete …… Croissant → Decroissant → original. ▲/▼",
+		L"· Clic intestazione …… Crescente → Decrescente → originale. ▲/▼",
+		L"· Clic encabezado …… Asc → Desc → original. ▲/▼",
+		L"· 헤더 클릭 …… 오름차순 → 내림차순 → 원래. ▲/▼",
+		L"· 单击列头 …… 升序 → 降序 → 原始。▲/▼ 表示状态",
+		L"· نقر الرأس …… تصاعدي → تنازلي → الأصل. ▲/▼",
+		L"· Клик по заголовку …… возр. → убыв. → исходный. ▲/▼",
+		L"· Kopfklick …… Auf → Ab → Original. ▲/▼",
+		L"· Clique no cabecalho …… Asc → Desc → original. ▲/▼",
+		L"· Kopklik …… Oplopend → Aflopend → origineel. ▲/▼",
+		L"· Klik naglowka …… Rosnaco → Malejaco → oryginal. ▲/▼",
+		L"· Baslik tik …… Artan → Azalan → orijinal. ▲/▼"));
+	body(LL14(
+		L"・モニタ列 …… FM / MIDI / 両方。同じ zip に両モードがあるときは FM+MIDI",
+		L"· Monitor column …… FM / MIDI / both when the zip has both modes",
+		L"· Colonne moniteur …… FM / MIDI / les deux si le zip a les deux",
+		L"· Colonna monitor …… FM / MIDI / entrambi se lo zip ha entrambi",
+		L"· Columna monitor …… FM / MIDI / ambos si el zip tiene ambos",
+		L"· 모니터 열 …… FM / MIDI / 둘 다. zip에 둘 다 있으면 FM+MIDI",
+		L"· 监视器列 …… FM / MIDI / 两者。同一 zip 两种模式时为 FM+MIDI",
+		L"· عمود الشاشة …… FM / MIDI / كلاهما إن وُجد الاثنان",
+		L"· Столбец монитора …… FM / MIDI / оба, если в zip оба режима",
+		L"· Monitor-Spalte …… FM / MIDI / beides, wenn das Zip beides hat",
+		L"· Coluna monitor …… FM / MIDI / ambos se o zip tiver os dois",
+		L"· Monitorkolom …… FM / MIDI / beide als de zip beide heeft",
+		L"· Kolumna monitora …… FM / MIDI / oba gdy zip ma oba",
+		L"· Monitor sutunu …… FM / MIDI / ikisi de zipte varsa FM+MIDI"));
 	body(LL14(
 		L"・音源列 …… OPN/OPNA/MIDI などは同じ zip を1行にまとめ、切替はプレイリストの右クリック",
 		L"· Sound column …… OPN/OPNA/MIDI share one row; switch via playlist right-click",
@@ -499,23 +549,29 @@ static size_t CEmuCollectLocalZipStems(std::unordered_set<std::string>& stems,
 	return stems.size();
 }
 
+static bool CEmuIsFilterSep(wchar_t c)
+{
+	return c == L' ' || c == L'\t' || c == L',' || c == L';' || c == L'/'
+		|| c == 0x3000 /* 全角空白 */ || c == 0x00A0 /* NBSP */
+		|| c == 0xFF0F /* ／ */ || c == 0xFF0C /* ， */;
+}
+
 static bool CatRowMatchesFilter(const CString& hayLower, const CString& filterRaw)
 {
 	CString raw = filterRaw;
 	raw.Trim();
 	if (raw.IsEmpty()) return true;
 	raw.MakeLower();
-	raw.Replace(_T(','), _T(' '));
-	raw.Replace(_T(';'), _T(' '));
-	raw.Replace(_T('/'), _T(' '));
 
 	for (int p = 0; p < raw.GetLength(); ) {
-		while (p < raw.GetLength() && raw[p] == _T(' ')) ++p;
+		while (p < raw.GetLength() && CEmuIsFilterSep(raw[p])) ++p;
 		if (p >= raw.GetLength()) break;
 		const int start = p;
-		while (p < raw.GetLength() && raw[p] != _T(' ')) ++p;
+		while (p < raw.GetLength() && !CEmuIsFilterSep(raw[p])) ++p;
 		CString t = raw.Mid(start, p - start);
-		if (!t.IsEmpty() && hayLower.Find(t) < 0)
+		t.Trim();
+		if (t.IsEmpty()) continue;
+		if (hayLower.Find(t) < 0)
 			return false;
 	}
 	return true;
@@ -539,6 +595,207 @@ static CString CEmuJoinArchiveModeTags(const CEmuCatalog* cat, const CEmuGameEnt
 	if (out.IsEmpty() && ge->subtype[0])
 		out = ge->subtype;
 	return out;
+}
+
+static void CEmuFillMonitorFlags(const CEmuCatalog* cat, const CEmuGameEntry* ge,
+	int& monFm, int& monMidi)
+{
+	monFm = 0;
+	monMidi = 0;
+	if (cat && ge && ge->archive[0]) {
+		CEmuArchiveMode modes[CEMU_MODE_MAX];
+		const int n = CEmuCatalogListArchiveModes(cat, ge->archive, ge->dataDir, NULL,
+			modes, CEMU_MODE_MAX);
+		for (int i = 0; i < n; i++) {
+			if (!modes[i].tag[0]) continue;
+			if (modes[i].isMidi) monMidi = 1;
+			else monFm = 1;
+		}
+	}
+	if (!monFm && !monMidi && ge) {
+		char tag[CEMU_MODE_TAG] = {};
+		if (CEmuModeTagFromEntry(ge, tag, (int)sizeof(tag)) && tag[0]) {
+			if (CEmuModeIsMidiTag(tag)) monMidi = 1;
+			else monFm = 1;
+		} else {
+			monFm = 1;
+		}
+	}
+}
+
+static CString CEmuMonitorChipText(int fm, int midi)
+{
+	CString s;
+	if (fm) s += L"[FMmon]";
+	if (midi) s += L"[MIDmon]";
+	return s;
+}
+
+static CString CEmuMonitorPlainLabel(int fm, int midi)
+{
+	if (fm && midi) return L"FM+MIDI";
+	if (midi) return L"MIDI";
+	if (fm) return L"FM";
+	return L"-";
+}
+
+static CString CEmuChipWrap(const CString& tag)
+{
+	CString t = tag;
+	t.Trim();
+	if (t.IsEmpty()) return CString();
+	/* チップパーサは英数 . + - のみ。空白や / は落とす。 */
+	CString inner;
+	for (int i = 0; i < t.GetLength(); i++) {
+		const wchar_t c = t[i];
+		if ((c >= L'0' && c <= L'9') || (c >= L'A' && c <= L'Z')
+			|| (c >= L'a' && c <= L'z') || c == L'.' || c == L'+' || c == L'-')
+			inner.AppendChar(c);
+	}
+	if (inner.IsEmpty()) return CString();
+	return L"[" + inner + L"]";
+}
+
+static CString CEmuShortSoundTag(const CString& tag)
+{
+	if (tag.CompareNoCase(L"SOUNDBLASTER") == 0) return L"SB";
+	if (tag.CompareNoCase(L"GAMEBLASTER") == 0) return L"CMS";
+	return tag;
+}
+
+static CString CEmuModesChipText(const CString& modes)
+{
+	CString out;
+	CString rest = modes;
+	while (!rest.IsEmpty()) {
+		CString tok;
+		const int slash = rest.Find(L" / ");
+		if (slash >= 0) {
+			tok = rest.Left(slash);
+			rest = rest.Mid(slash + 3);
+		} else {
+			tok = rest;
+			rest.Empty();
+		}
+		tok.Trim();
+		if (tok.IsEmpty()) continue;
+		out += CEmuChipWrap(CEmuShortSoundTag(tok));
+	}
+	return out;
+}
+
+static CString CEmuPlatformChipLabel(const char* platform)
+{
+	if (!platform || !platform[0]) return L"?";
+	if (_strnicmp(platform, "pcat", 4) == 0) return L"PC-AT";
+	if (_strnicmp(platform, "pc98", 4) == 0) return L"PC-98";
+	if (_strnicmp(platform, "pc88", 4) == 0 || _stricmp(platform, "pc80sr") == 0)
+		return L"PC-88";
+	if (_stricmp(platform, "x68k") == 0) return L"X68K";
+	if (_stricmp(platform, "x1") == 0) return L"X1";
+	if (_stricmp(platform, "fmtowns") == 0) return L"TOWNS";
+	if (_strnicmp(platform, "fm7", 3) == 0 || _stricmp(platform, "mucomfm") == 0)
+		return L"FM7";
+	if (_stricmp(platform, "msx") == 0) return L"MSX";
+	if (_stricmp(platform, "sg1000") == 0) return L"SG";
+	if (_stricmp(platform, "neogeo") == 0) return L"NEO";
+	if (_stricmp(platform, "videosystem") == 0) return L"VSYS";
+	CString lab(platform);
+	lab.MakeUpper();
+	if (lab.GetLength() > 10) lab = lab.Left(10);
+	return lab;
+}
+
+static COLORREF CEmuDataKindColor(const char* dataDir)
+{
+	if (!dataDir || !dataDir[0]) return RGB(210, 210, 220);
+	if (_stricmp(dataDir, "pc") == 0) return RGB(186, 214, 255);
+	if (_stricmp(dataDir, "pc98") == 0) return RGB(210, 196, 255);
+	if (_stricmp(dataDir, "pc88") == 0) return RGB(186, 236, 200);
+	if (_stricmp(dataDir, "x68k") == 0) return RGB(255, 230, 170);
+	if (_stricmp(dataDir, "x1") == 0) return RGB(255, 200, 170);
+	if (_stricmp(dataDir, "fmtowns") == 0) return RGB(170, 230, 230);
+	if (_stricmp(dataDir, "fm7") == 0) return RGB(200, 255, 186);
+	if (_stricmp(dataDir, "msx") == 0) return RGB(255, 186, 196);
+	if (_stricmp(dataDir, "sc3000") == 0) return RGB(230, 210, 170);
+	if (_stricmp(dataDir, "ac") == 0) return RGB(200, 210, 230);
+	unsigned h = 2166136261u;
+	for (const char* p = dataDir; *p; p++) {
+		char c = *p;
+		if (c >= 'A' && c <= 'Z') c = (char)(c - 'A' + 'a');
+		h ^= (unsigned)(unsigned char)c;
+		h *= 16777619u;
+	}
+	return RGB(168 + (int)(h % 72), 168 + (int)((h >> 8) % 72), 168 + (int)((h >> 16) % 72));
+}
+
+static int CEmuCatCmpRows(const CEmuCatListRow& a, const CEmuCatListRow& b, int col)
+{
+	int c = 0;
+	const char* aa = (a.ge && a.ge->archive[0]) ? a.ge->archive : "";
+	const char* ba = (b.ge && b.ge->archive[0]) ? b.ge->archive : "";
+	const char* ap = (a.ge && a.ge->platform[0]) ? a.ge->platform : "";
+	const char* bp = (b.ge && b.ge->platform[0]) ? b.ge->platform : "";
+	const char* ad = (a.ge && a.ge->dataDir[0]) ? a.ge->dataDir : "";
+	const char* bd = (b.ge && b.ge->dataDir[0]) ? b.ge->dataDir : "";
+	switch (col) {
+	case 0: c = a.title.CompareNoCase(b.title); break;
+	case 1: c = _stricmp(aa, ba); break;
+	case 2: c = _stricmp(ap, bp); break;
+	case 3: c = a.modes.CompareNoCase(b.modes); break;
+	case 4: {
+		const int ka = (a.monFm ? 1 : 0) + (a.monMidi ? 2 : 0);
+		const int kb = (b.monFm ? 1 : 0) + (b.monMidi ? 2 : 0);
+		c = ka - kb;
+		break;
+	}
+	case 5: c = _stricmp(ad, bd); break;
+	default: break;
+	}
+	if (c == 0) c = a.origIndex - b.origIndex;
+	return c;
+}
+
+static HBITMAP CEmuMakeSortArrowBmp(BOOL up)
+{
+	const int sz = 13;
+	BITMAPINFO bi = {};
+	bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+	bi.bmiHeader.biWidth = sz;
+	bi.bmiHeader.biHeight = -sz;
+	bi.bmiHeader.biPlanes = 1;
+	bi.bmiHeader.biBitCount = 32;
+	bi.bmiHeader.biCompression = BI_RGB;
+	void* bits = nullptr;
+	HBITMAP hb = CreateDIBSection(NULL, &bi, DIB_RGB_COLORS, &bits, NULL, 0);
+	if (!hb || !bits) return NULL;
+	DWORD* px = (DWORD*)bits;
+	for (int i = 0; i < sz * sz; i++)
+		px[i] = 0x00000000;
+	const int cx = sz / 2;
+	const DWORD fill = 0xFF5A4696; /* 不透明・見出し紫 */
+	auto put = [&](int x, int y) {
+		if (x >= 0 && x < sz && y >= 0 && y < sz)
+			px[y * sz + x] = fill;
+	};
+	if (up) {
+		const int top = 2, bot = sz - 3;
+		for (int y = top; y <= bot; y++) {
+			const int t = y - top;
+			const int half = (t * (sz - 4)) / (std::max)(1, bot - top);
+			for (int x = cx - half; x <= cx + half; x++)
+				put(x, y);
+		}
+	} else {
+		const int top = 3, bot = sz - 3;
+		for (int y = top; y <= bot; y++) {
+			const int t = bot - y;
+			const int half = (t * (sz - 4)) / (std::max)(1, bot - top);
+			for (int x = cx - half; x <= cx + half; x++)
+				put(x, y);
+		}
+	}
+	return hb;
 }
 
 static const CEmuGameEntry* CEmuPickGroupRepresentative(const CEmuCatalog* cat,
@@ -573,8 +830,16 @@ static CString CEmuBuildFilterHay(const CEmuCatalog* cat, const CEmuGameEntry* g
 					hay += e->name;
 				}
 			}
+			if (m[i].tag[0]) {
+				hay += L' ';
+				hay += CEmuShortSoundTag(CString(m[i].tag));
+			}
 		}
 	}
+	hay += L' ';
+	hay += CEmuPlatformChipLabel(ge->platform[0] ? ge->platform : "");
+	hay += L' ';
+	hay += CEmuModesChipText(modes);
 	hay.MakeLower();
 	return hay;
 }
@@ -588,6 +853,81 @@ IMPLEMENT_DYNAMIC(CEmuCatListCtrl, CCustomListCtrl)
 BEGIN_MESSAGE_MAP(CEmuCatListCtrl, CCustomListCtrl)
 END_MESSAGE_MAP()
 
+void CEmuCatListCtrl::EnsureSortArrows()
+{
+	if (m_sortIL.GetSafeHandle()) return;
+	if (!m_sortIL.Create(13, 13, ILC_COLOR32, 2, 1))
+		return;
+	HBITMAP up = CEmuMakeSortArrowBmp(TRUE);
+	HBITMAP dn = CEmuMakeSortArrowBmp(FALSE);
+	if (up) {
+		ImageList_Add(m_sortIL.GetSafeHandle(), up, NULL);
+		::DeleteObject(up);
+	}
+	if (dn) {
+		ImageList_Add(m_sortIL.GetSafeHandle(), dn, NULL);
+		::DeleteObject(dn);
+	}
+	if (CHeaderCtrl* hdr = GetHeaderCtrl())
+		hdr->SetImageList(&m_sortIL);
+}
+
+void CEmuCatListCtrl::SetSortState(int col, int dir)
+{
+	CHeaderCtrl* hdr = GetHeaderCtrl();
+	if (!hdr) return;
+	EnsureSortArrows();
+	const int n = hdr->GetItemCount();
+	if (!m_colTitleReady && n >= 6) {
+		for (int i = 0; i < 6 && i < n; i++) {
+			TCHAR buf[128] = {};
+			HDITEM hi = {};
+			hi.mask = HDI_TEXT;
+			hi.pszText = buf;
+			hi.cchTextMax = (int)_countof(buf);
+			if (hdr->GetItem(i, &hi) && hi.pszText)
+				m_colTitle[i] = hi.pszText;
+		}
+		m_colTitleReady = TRUE;
+	}
+	for (int i = 0; i < n; i++) {
+		HDITEM hi = {};
+		hi.mask = HDI_FORMAT | HDI_IMAGE | HDI_TEXT;
+		TCHAR buf[160] = {};
+		hi.pszText = buf;
+		hi.cchTextMax = (int)_countof(buf);
+		hdr->GetItem(i, &hi);
+		hi.fmt &= ~(HDF_SORTUP | HDF_SORTDOWN | HDF_IMAGE | HDF_BITMAP_ON_RIGHT);
+		CString title = (i < 6 && m_colTitleReady) ? m_colTitle[i] : CString(buf);
+		if (i == col && dir == 1) {
+			hi.fmt |= HDF_IMAGE | HDF_BITMAP_ON_RIGHT;
+			hi.iImage = 0;
+			title += L"  ▲";
+		} else if (i == col && dir == 2) {
+			hi.fmt |= HDF_IMAGE | HDF_BITMAP_ON_RIGHT;
+			hi.iImage = 1;
+			title += L"  ▼";
+		} else {
+			hi.iImage = I_IMAGENONE;
+		}
+		wcsncpy_s(buf, title, _TRUNCATE);
+		hi.pszText = buf;
+		hi.mask = HDI_FORMAT | HDI_IMAGE | HDI_TEXT;
+		hdr->SetItem(i, &hi);
+	}
+}
+
+BOOL CEmuCatListCtrl::GetListRowTint(int row, COLORREF& tintBg, COLORREF& accent) const
+{
+	if (row < 0) return FALSE;
+	const CEmuCatListRow* rowp = (const CEmuCatListRow*)GetItemData(row);
+	if (!rowp || !rowp->ge) return FALSE;
+	const COLORREF c = CEmuDataKindColor(rowp->ge->dataDir);
+	tintBg = c;
+	accent = c;
+	return TRUE;
+}
+
 void CEmuCatListCtrl::BuildToolTipText(int row, int col, CString& out)
 {
 	UNREFERENCED_PARAMETER(col);
@@ -598,39 +938,41 @@ void CEmuCatListCtrl::BuildToolTipText(int row, int col, CString& out)
 	const CEmuGameEntry* ge = rowp->ge;
 	CString modes = rowp->modes;
 	CString title = rowp->title;
+	const CString monLab = CEmuMonitorPlainLabel(rowp->monFm, rowp->monMidi);
 	out.Format(LL14(
-		L"タイトル: %s\nアーカイブ: %hs\n機種: %hs\n音源: %s\ndata: %hs\n"
+		L"タイトル: %s\nアーカイブ: %hs\n機種: %hs\n音源: %s\nモニタ: %s\ndata: %hs\n"
 		L"zip: %s\n（音源はプレイリストの右クリックで切り替え）",
-		L"Title: %s\nArchive: %hs\nPlatform: %hs\nSound: %s\ndata: %hs\n"
+		L"Title: %s\nArchive: %hs\nPlatform: %hs\nSound: %s\nMonitor: %s\ndata: %hs\n"
 		L"zip: %s\n(Switch sound from the playlist right-click menu)",
-		L"Titre: %s\nArchive: %hs\nPlateforme: %hs\nSon: %s\ndata: %hs\n"
+		L"Titre: %s\nArchive: %hs\nPlateforme: %hs\nSon: %s\nMoniteur: %s\ndata: %hs\n"
 		L"zip: %s\n(Changer le son via le menu contextuel de la liste)",
-		L"Titolo: %s\nArchivio: %hs\nPiattaforma: %hs\nSuono: %s\ndata: %hs\n"
+		L"Titolo: %s\nArchivio: %hs\nPiattaforma: %hs\nSuono: %s\nMonitor: %s\ndata: %hs\n"
 		L"zip: %s\n(Cambia il suono dal menu contestuale della playlist)",
-		L"Titulo: %s\nArchivo: %hs\nPlataforma: %hs\nSonido: %s\ndata: %hs\n"
+		L"Titulo: %s\nArchivo: %hs\nPlataforma: %hs\nSonido: %s\nMonitor: %s\ndata: %hs\n"
 		L"zip: %s\n(Cambia el sonido desde el menu contextual de la lista)",
-		L"제목: %s\n아카이브: %hs\n기종: %hs\n음원: %s\ndata: %hs\n"
+		L"제목: %s\n아카이브: %hs\n기종: %hs\n음원: %s\n모니터: %s\ndata: %hs\n"
 		L"zip: %s\n(음원은 플레이리스트 우클릭으로 전환)",
-		L"标题：%s\n归档：%hs\n机种：%hs\n音源：%s\ndata：%hs\n"
+		L"标题：%s\n归档：%hs\n机种：%hs\n音源：%s\n监视器：%s\ndata：%hs\n"
 		L"zip：%s\n（音源可在播放列表右键菜单切换）",
-		L"العنوان: %s\nالأرشيف: %hs\nالمنصة: %hs\nالصوت: %s\ndata: %hs\n"
+		L"العنوان: %s\nالأرشيف: %hs\nالمنصة: %hs\nالصوت: %s\nالشاشة: %s\ndata: %hs\n"
 		L"zip: %s\n(بدّل الصوت من قائمة التشغيل)",
-		L"Название: %s\nАрхив: %hs\nПлатформа: %hs\nЗвук: %s\ndata: %hs\n"
+		L"Название: %s\nАрхив: %hs\nПлатформа: %hs\nЗвук: %s\nМонитор: %s\ndata: %hs\n"
 		L"zip: %s\n(Звук переключается в меню плейлиста)",
-		L"Titel: %s\nArchiv: %hs\nPlattform: %hs\nSound: %s\ndata: %hs\n"
+		L"Titel: %s\nArchiv: %hs\nPlattform: %hs\nSound: %s\nMonitor: %s\ndata: %hs\n"
 		L"zip: %s\n(Sound per Playlist-Kontextmenu wechseln)",
-		L"Titulo: %s\nArquivo: %hs\nPlataforma: %hs\nSom: %s\ndata: %hs\n"
+		L"Titulo: %s\nArquivo: %hs\nPlataforma: %hs\nSom: %s\nMonitor: %s\ndata: %hs\n"
 		L"zip: %s\n(Troque o som no menu da playlist)",
-		L"Titel: %s\nArchief: %hs\nPlatform: %hs\nGeluid: %s\ndata: %hs\n"
+		L"Titel: %s\nArchief: %hs\nPlatform: %hs\nGeluid: %s\nMonitor: %s\ndata: %hs\n"
 		L"zip: %s\n(Wissel geluid via playlist-snelmenu)",
-		L"Tytul: %s\nArchiwum: %hs\nPlatforma: %hs\nDzwiek: %s\ndata: %hs\n"
+		L"Tytul: %s\nArchiwum: %hs\nPlatforma: %hs\nDzwiek: %s\nMonitor: %s\ndata: %hs\n"
 		L"zip: %s\n(Dzwiek zmienisz w menu playlisty)",
-		L"Baslik: %s\nArsiv: %hs\nPlatform: %hs\nSes: %s\ndata: %hs\n"
+		L"Baslik: %s\nArsiv: %hs\nPlatform: %hs\nSes: %s\nMonitor: %s\ndata: %hs\n"
 		L"zip: %s\n(Sesi playlist sag tik menuden degistir)"),
 		(LPCTSTR)title,
 		ge->archive[0] ? ge->archive : "-",
 		ge->platform[0] ? ge->platform : "-",
 		modes.IsEmpty() ? L"-" : (LPCTSTR)modes,
+		(LPCTSTR)monLab,
 		ge->dataDir[0] ? ge->dataDir : "-",
 		rowp->zipPath.IsEmpty() ? L"-" : (LPCTSTR)rowp->zipPath);
 }
@@ -662,6 +1004,7 @@ BEGIN_MESSAGE_MAP(CEmuCatalogListDlg, CCustomBlurDialogBase)
 	ON_BN_CLICKED(IDC_CEMU_CAT_HELP, &CEmuCatalogListDlg::OnBnClickedHelp)
 	ON_EN_CHANGE(IDC_CEMU_CAT_FILTER, &CEmuCatalogListDlg::OnEnChangeFilter)
 	ON_NOTIFY(NM_DBLCLK, IDC_CEMU_CAT_LIST, &CEmuCatalogListDlg::OnNMDblclkList)
+	ON_NOTIFY(LVN_COLUMNCLICK, IDC_CEMU_CAT_LIST, &CEmuCatalogListDlg::OnLvnColumnClick)
 	ON_MESSAGE(WM_CEMU_CAT_FILTER, &CEmuCatalogListDlg::OnFilterApply)
 	ON_WM_SIZE()
 	ON_WM_GETMINMAXINFO()
@@ -808,6 +1151,38 @@ BOOL CEmuCatalogListDlg::OnInitDialog()
 	CCustomControlUtility::BeginDialogToolTip(m_tooltip, this);
 	m_tooltip.AddTool(&m_ok, LL14(L"閉じます", L"Close", L"Fermer", L"Chiudi", L"Cerrar", L"닫기", L"关闭", L"إغلاق", L"Закрыть", L"Schließen", L"Fechar", L"Sluiten", L"Zamknij", L"Kapat"));
 	m_tooltip.AddTool(&m_help, LL14(L"操作ガイドを表示", L"Show operation guide", L"Afficher le guide", L"Mostra guida", L"Mostrar guía", L"조작 가이드 표시", L"显示操作指南", L"إظهار الدليل", L"Показать руководство", L"Bedienungsanleitung", L"Mostrar guia", L"Handleiding tonen", L"Pokaż przewodnik", L"İşlem kılavuzunu göster"));
+	if (m_filter.GetSafeHwnd()) {
+		m_tooltip.AddTool(&m_filter, LL14(
+			L"タイトル・機種・音源・モニタ・data で絞り込み。空白区切りで複数指定（すべて含む）。全角空白や , / でも区切れます。空欄で全表示。",
+			L"Filter by title, platform, sound, monitor, data. Space-separated terms (AND). Full-width space, comma, / also split. Empty shows all.",
+			L"Filtrer titre/plateforme/son/data. Mots separes par espace (ET). Espace pleine chasse, virgule, / aussi.",
+			L"Filtra titolo/piattaforma/suono/data. Termini separati da spazio (AND). Spazio pieno, virgola, /.",
+			L"Filtrar titulo/plataforma/sonido/data. Terminos separados por espacio (AND). Espacio ancho, coma, /.",
+			L"제목·기종·음원·data로 필터. 공백으로 여러 단어(모두 포함). 전각 공백·,/ 도 가능. 비우면 전체.",
+			L"按标题/机种/音源/data 筛选。空格分隔多项（需全部匹配）。全角空格、逗号、/ 也可。空则全显示。",
+			L"تصفية بالعنوان والمنصة والصوت. افصل بمسافة (يجب أن تطابق كلها).",
+			L"Фильтр по названию, платформе, звуку. Слова через пробел (И).",
+			L"Nach Titel, Plattform, Sound, data filtern. Leerzeichen trennt (UND). Vollbreite Leerzeichen, Komma, /.",
+			L"Filtrar por titulo, plataforma, som, data. Espacos separam (E). Espaco largo, virgula, /.",
+			L"Filter op titel, platform, geluid, data. Spaties scheiden (EN). Volledige spatie, komma, /.",
+			L"Filtruj tytul/platforme/dzwiek/data. Spacje oddzielaja (AND). Pelna spacja, przecinek, /.",
+			L"Baslik, platform, ses, data ile filtre. Boslukla birden fazla (hepsi). Tam bosluk, virgul, /."));
+		m_filter.SendMessage(EM_SETCUEBANNER, TRUE, (LPARAM)LL14(
+			L"空白区切りで複数指定",
+			L"Space-separated terms",
+			L"Mots separes par espace",
+			L"Termini separati da spazio",
+			L"Terminos separados por espacio",
+			L"공백으로 여러 단어",
+			L"空格分隔多项",
+			L"افصل بمسافة",
+			L"Слова через пробел",
+			L"Leerzeichen trennt",
+			L"Espacos separam",
+			L"Spaties scheiden",
+			L"Spacje oddzielaja",
+			L"Boslukla birden fazla"));
+	}
 	CCustomControlUtility::FinalizeDialogToolTip(m_tooltip, 512, 10000);
 
 	if (m_lc.GetSafeHwnd()) {
@@ -817,7 +1192,9 @@ BOOL CEmuCatalogListDlg::OnInitDialog()
 		m_lc.InsertColumn(1, LL14(L"アーカイブ", L"Archive", L"Archive", L"Archivio", L"Archivo", L"아카이브", L"归档", L"الأرشيف", L"Архив", L"Archiv", L"Arquivo", L"Archief", L"Archiwum", L"Arsiv"), LVCFMT_LEFT, 100);
 		m_lc.InsertColumn(2, LL14(L"機種", L"Platform", L"Plateforme", L"Piattaforma", L"Plataforma", L"기종", L"机种", L"المنصة", L"Платформа", L"Plattform", L"Plataforma", L"Platform", L"Platforma", L"Platform"), LVCFMT_LEFT, 80);
 		m_lc.InsertColumn(3, LL14(L"音源", L"Sound", L"Son", L"Suono", L"Sonido", L"음원", L"音源", L"الصوت", L"Звук", L"Sound", L"Som", L"Geluid", L"Dzwiek", L"Ses"), LVCFMT_LEFT, 120);
-		m_lc.InsertColumn(4, L"data", LVCFMT_LEFT, 60);
+		m_lc.InsertColumn(4, LL14(L"モニタ", L"Monitor", L"Moniteur", L"Monitor", L"Monitor", L"모니터", L"监视器", L"الشاشة", L"Монитор", L"Monitor", L"Monitor", L"Monitor", L"Monitor", L"Monitor"), LVCFMT_LEFT, 100);
+		m_lc.InsertColumn(5, L"data", LVCFMT_LEFT, 60);
+		m_lc.SetSortState(-1, 0);
 	}
 
 	CEmuMgrEnsureCatalog(CEmuMgrGet());
@@ -888,10 +1265,15 @@ int CEmuCatalogListDlg::BuildRowCache()
 		row.title = pick->name[0] ? pick->name : L"(no name)";
 		CEmuStripModeParenFromTitle(row.title);
 		row.modes = CEmuJoinArchiveModeTags(cat, pick);
+		CEmuFillMonitorFlags(cat, pick, row.monFm, row.monMidi);
 		row.hayLower = CEmuBuildFilterHay(cat, pick, row.modes);
+		if (row.monFm) row.hayLower += L" fm fmmon";
+		if (row.monMidi) row.hayLower += L" midi midimon";
+		if (row.monFm && row.monMidi) row.hayLower += L" fm+midi";
 		auto it = stemToPath.find(stem);
 		if (it != stemToPath.end())
 			row.zipPath = it->second.c_str();
+		row.origIndex = (int)m_rows.size();
 		m_rows.push_back(std::move(row));
 	}
 	return (int)m_rows.size();
@@ -902,22 +1284,67 @@ void CEmuCatalogListDlg::ApplyFilterToList()
 	if (!m_lc.GetSafeHwnd()) return;
 	m_bFilling = TRUE;
 	m_lc.SetRedraw(FALSE);
+
+	CString keepKey;
+	{
+		POSITION pos = m_lc.GetFirstSelectedItemPosition();
+		if (pos) {
+			const int sel = m_lc.GetNextSelectedItem(pos);
+			const CEmuCatListRow* rowp = (const CEmuCatListRow*)m_lc.GetItemData(sel);
+			if (rowp && rowp->ge && rowp->ge->archive[0]) {
+				keepKey.Format(L"%hs\n%hs", rowp->ge->archive,
+					rowp->ge->dataDir[0] ? rowp->ge->dataDir : "");
+			}
+		}
+	}
+
 	m_lc.DeleteAllItems();
 	CString filter;
 	if (m_filter.GetSafeHwnd())
 		m_filter.GetWindowText(filter);
 
-	int row = 0;
+	std::vector<CEmuCatListRow*> vis;
+	vis.reserve(m_rows.size());
 	for (size_t i = 0; i < m_rows.size(); i++) {
 		CEmuCatListRow& r = m_rows[i];
-		if (!CatRowMatchesFilter(r.hayLower, filter)) continue;
+		if (CatRowMatchesFilter(r.hayLower, filter))
+			vis.push_back(&r);
+	}
+	if (m_sortCol >= 0 && m_sortDir != 0) {
+		const int col = m_sortCol;
+		const int dir = m_sortDir;
+		std::stable_sort(vis.begin(), vis.end(),
+			[col, dir](const CEmuCatListRow* a, const CEmuCatListRow* b) {
+				const int c = CEmuCatCmpRows(*a, *b, col);
+				return (dir == 2) ? (c > 0) : (c < 0);
+			});
+	}
+
+	int restore = -1;
+	int row = 0;
+	for (size_t i = 0; i < vis.size(); i++) {
+		CEmuCatListRow& r = *vis[i];
 		const int idx = m_lc.InsertItem(row, r.title);
 		m_lc.SetItemText(idx, 1, CString(r.ge->archive));
-		m_lc.SetItemText(idx, 2, CString(r.ge->platform));
-		m_lc.SetItemText(idx, 3, r.modes);
-		m_lc.SetItemText(idx, 4, CString(r.ge->dataDir));
+		m_lc.SetItemText(idx, 2, CEmuChipWrap(CEmuPlatformChipLabel(
+			r.ge->platform[0] ? r.ge->platform : "")));
+		CString soundChip = CEmuModesChipText(r.modes);
+		if (soundChip.IsEmpty() && r.ge->subtype[0])
+			soundChip = CEmuChipWrap(CEmuShortSoundTag(CString(r.ge->subtype)));
+		m_lc.SetItemText(idx, 3, soundChip);
+		m_lc.SetItemText(idx, 4, CEmuMonitorChipText(r.monFm, r.monMidi));
+		m_lc.SetItemText(idx, 5, CEmuChipWrap(CString(r.ge->dataDir[0] ? r.ge->dataDir : "-")));
 		m_lc.SetItemData(idx, (DWORD_PTR)&r);
+		if (restore < 0 && !keepKey.IsEmpty() && r.ge && r.ge->archive[0]) {
+			CString k;
+			k.Format(L"%hs\n%hs", r.ge->archive, r.ge->dataDir[0] ? r.ge->dataDir : "");
+			if (k == keepKey) restore = idx;
+		}
 		row++;
+	}
+	if (restore >= 0) {
+		m_lc.SetItemState(restore, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
+		m_lc.EnsureVisible(restore, FALSE);
 	}
 	m_lc.SetRedraw(TRUE);
 	m_lc.Invalidate();
@@ -968,18 +1395,19 @@ void CEmuCatalogListDlg::LayoutControls()
 void CEmuCatalogListDlg::LayoutColumns()
 {
 	if (!m_lc.GetSafeHwnd() || !m_lc.GetHeaderCtrl()) return;
-	if (m_lc.GetHeaderCtrl()->GetItemCount() < 5) return;
+	if (m_lc.GetHeaderCtrl()->GetItemCount() < 6) return;
 	CRect rc;
 	m_lc.GetClientRect(&rc);
 	const int total = rc.Width();
-	const int archW = 110, platW = 80, soundW = 120, dataW = 60;
-	int titleW = total - archW - platW - soundW - dataW;
+	const int archW = 110, platW = 88, soundW = 150, monW = 108, dataW = 64;
+	int titleW = total - archW - platW - soundW - monW - dataW;
 	if (titleW < 120) titleW = 120;
 	m_lc.SetColumnWidth(0, titleW);
 	m_lc.SetColumnWidth(1, archW);
 	m_lc.SetColumnWidth(2, platW);
 	m_lc.SetColumnWidth(3, soundW);
-	m_lc.SetColumnWidth(4, dataW);
+	m_lc.SetColumnWidth(4, monW);
+	m_lc.SetColumnWidth(5, dataW);
 }
 
 void CEmuCatalogListDlg::LayoutHelpBtn()
@@ -1137,6 +1565,30 @@ int CEmuCatalogListDlg::PlaySelectedRow()
 		return 0;
 	}
 	return 1;
+}
+
+void CEmuCatalogListDlg::UpdateSortHeader()
+{
+	m_lc.SetSortState(m_sortCol, m_sortDir);
+}
+
+void CEmuCatalogListDlg::OnLvnColumnClick(NMHDR* pNMHDR, LRESULT* pResult)
+{
+	if (pResult) *pResult = 0;
+	NMLISTVIEW* p = reinterpret_cast<NMLISTVIEW*>(pNMHDR);
+	if (!p) return;
+	const int col = p->iSubItem;
+	if (col < 0 || col > 5) return;
+	if (col == m_sortCol) {
+		m_sortDir = (m_sortDir + 1) % 3;
+		if (m_sortDir == 0)
+			m_sortCol = -1;
+	} else {
+		m_sortCol = col;
+		m_sortDir = 1;
+	}
+	UpdateSortHeader();
+	ApplyFilterToList();
 }
 
 void CEmuCatalogListDlg::OnNMDblclkList(NMHDR* pNMHDR, LRESULT* pResult)

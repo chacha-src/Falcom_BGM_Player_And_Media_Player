@@ -634,8 +634,9 @@ void FmMonShadowPcmNote(int ch, int midiNote, int on)
 	EnsureCs();
 	EnterCriticalSection(&s_cs);
 	/* Ensure arcade keys-only path stays armed (GX Reset+bind race).
-	   Skip if s_opnaLayout >= 0 (hybrid OPN+PCM like YM2203+SegaPCM) to keep FM rows. */
-	if (s_opnaLayout < 0 && (s_keysProfile == SASAMI_FMMON_KEYS_RF5C
+	   Skip if s_opnaLayout >= 0 (hybrid OPN+PCM like YM2203+SegaPCM) to keep FM rows.
+	   Same for live YM2151: OKI/YMZ pulses must not drop the OPM keyboard. */
+	if (s_opnaLayout < 0 && !s_opmRegsValid && (s_keysProfile == SASAMI_FMMON_KEYS_RF5C
 		|| s_keysProfile == SASAMI_FMMON_KEYS_C352
 		|| s_keysProfile == SASAMI_FMMON_KEYS_QSOUND
 		|| s_keysProfile == SASAMI_FMMON_KEYS_SEGAPCM
@@ -1942,7 +1943,14 @@ void FmMonShadowApplyOki6295(unsigned data8)
 {
 	EnsureCs();
 	EnterCriticalSection(&s_cs);
-	ArcEnterKeys(SASAMI_FMMON_KEYS_OKI, 4);
+	/* Hybrid OPM+OKI (Raizing mahou / CPS1 / …): never ArcEnterKeys(OKI) —
+	   that swaps the dump to keys-only OKI×4 and the header flickers
+	   against the OPM identity ("Raizing  OPM+OKI" ↔ "AC  OKI×4"). */
+	const int hybridOpm = (s_keysProfile == SASAMI_FMMON_KEYS_MDX || s_opmRegsValid);
+	if (!hybridOpm)
+		ArcEnterKeys(SASAMI_FMMON_KEYS_OKI, 4);
+	else if (s_pcmCount < 4)
+		s_pcmCount = 4;
 	data8 &= 0xFFu;
 	ArcMarkReg(0, (uint8_t)data8);
 	if (s_okiCmd) {

@@ -122,6 +122,7 @@ CDriverAc::CDriverAc()
 	, songCmdWord_(0)
 	, songCmdDword_(0)
 	, opmResidual_(0)
+	, rzOpmAcc_(0)
 	, cpuAcc_(0)
 	, cmdIndex_(0)
 	, nextCmdAt_(0)
@@ -186,6 +187,7 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 	cpuHz_ = hw_->cpuHz_ > 0 ? hw_->cpuHz_ : 4000000;
 	opmHz_ = hw_->opmHz_ > 0 ? hw_->opmHz_ : 4000000;
 	opmResidual_ = 0;
+	rzOpmAcc_ = 0;
 	cpuAcc_ = 0;
 	booted_ = 0;
 	triggered_ = 0;
@@ -222,6 +224,13 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 	} else if (titleCode && (titleCode & 0xff) != 0) {
 		songCmd_ = (uint8_t)(titleCode & 0xff);
 		pinned_ = 1;
+	} else if (hw_->board_ == CEMU_AC_BOARD_RAIZING
+		&& hw_->RaizingType() == 4) {
+		/* Battle Bakraid indexes its script table from zero, so song 0 is a
+		   BGM request like any other rather than the stop code it stands for
+		   on the boards below; without this it rendered as song 1. */
+		songCmd_ = 0x00;
+		pinned_ = 1;
 	} else if (hw_->board_ == CEMU_AC_BOARD_GNG)
 		songCmd_ = 0x2b; /* Flatland BGM */
 	else if (hw_->board_ == CEMU_AC_BOARD_ABURNER)
@@ -246,6 +255,7 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 		|| hw_->board_ == CEMU_AC_BOARD_SEGA_SYS1
 		|| hw_->board_ == CEMU_AC_BOARD_TECHNOS_DDRAGON2
 		|| hw_->board_ == CEMU_AC_BOARD_TECMO16
+		|| hw_->board_ == CEMU_AC_BOARD_RAIZING
 		|| hw_->board_ == CEMU_AC_BOARD_KONAMI_K7232
 		|| hw_->board_ == CEMU_AC_BOARD_KONAMI_HCASTLE
 		|| hw_->board_ == CEMU_AC_BOARD_ALPHA68K2
@@ -1358,11 +1368,11 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 				}
 			}
 		}
-		RunUntil((uint64_t)hw_->Cpu()->time() + (uint64_t)cpuHz_ / 2);
+		RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 2);
 		{
 			Ay_Cpu* c = hw_->Cpu();
 			for (int i = 0; i < 16 && c && !c->r.iff1; i++) {
-				RunUntil((uint64_t)c->time() + (uint64_t)cpuHz_ / 8);
+				RunUntil((uint64_t)c->time64() + (uint64_t)cpuHz_ / 8);
 				if ((unsigned)c->r.pc >= 0x0119u && !c->r.iff1) {
 					c->r.iff1 = 1;
 					c->r.iff2 = 1;
@@ -1392,7 +1402,7 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 		cmdIndex_ = 1;
 		triggered_ = 1;
 		/* Let the 0x80 scan / 054A allocate finish before Render. */
-		RunUntil((uint64_t)hw_->Cpu()->time() + (uint64_t)cpuHz_ * 2u);
+		RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ * 2u);
 		if (uint8_t* m = hw_->Mem())
 			m[0x201c] = 0xff;
 		nextCmdAt_ = (uint64_t)~0ull;
@@ -1448,7 +1458,7 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 		for (int i = 0; i < 500; i++) {
 			if (uint8_t* m = hw_->Mem())
 				m[0x8001] = 0xaa;
-			RunUntil((uint64_t)hw_->Cpu()->time() + (uint64_t)cpuHz_ / 500);
+			RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 500);
 			Ay_Cpu* c = hw_->Cpu();
 			if (!c) break;
 			const unsigned pc = (unsigned)c->r.pc;
@@ -1475,7 +1485,7 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 		   clears the test, then release the (7FFC)==4 main-CPU handshake. */
 		if (hw_->board_ == CEMU_AC_BOARD_KONAMI_GX400) {
 			for (int i = 0; i < 360; i++) {
-				RunUntil((uint64_t)hw_->Cpu()->time() + (uint64_t)cpuHz_ / 60);
+				RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 60);
 				Ay_Cpu* c = hw_->Cpu();
 				const unsigned pc = c ? (unsigned)c->r.pc : 0;
 				/* Release (7FFC)==4 only after RAM self-test (PC>=0x200).
@@ -1517,7 +1527,7 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 	if (hw_->board_ == CEMU_AC_BOARD_TAITO_OPM
 		|| hw_->board_ == CEMU_AC_BOARD_TAITO_YM2610) {
 		hw_->SetSoundCommand(0xef);
-		RunUntil((uint64_t)hw_->Cpu()->time() + (uint64_t)cpuHz_ / 10);
+		RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 10);
 		/* Rastan/Asuka gate note-start on [8F26]; F2/Bonze use [CF2C]/[CF30].
 		   Host EF can sit unread while the Z80 is in its DI;OPM window ? force
 		   the enable flags. Asuka also needs the song byte in the 8F02 ring
@@ -1554,7 +1564,7 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 						cpu->irqDelay = 0;
 						cpu->r.pc = 0x033a;
 					}
-					RunUntil((uint64_t)hw_->Cpu()->time() + (uint64_t)cpuHz_ / 30);
+					RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 30);
 					if (uint8_t* mm = hw_->Mem()) {
 						mm[0x8f25] = 0x07;
 						mm[0x8f26] = 0x01;
@@ -1594,7 +1604,7 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 				m[0xcf30] = (uint8_t)(m[0xcf30] | 0x07);
 			}
 		}
-		RunUntil((uint64_t)hw_->Cpu()->time() + (uint64_t)cpuHz_ / 20);
+		RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 20);
 	}
 	/* Irem M72: airduel-family drops latch bytes until $00 arms ready (FF56).
 	   R-Type is the opposite ? $00 is STOP and ends in DI;HALT (NMI vector is
@@ -1616,7 +1626,7 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 		}
 		if (!rtypeStopHalts && !ym40) {
 			hw_->SetSoundCommand(0x00);
-			RunUntil((uint64_t)hw_->Cpu()->time() + (uint64_t)cpuHz_ / 20);
+			RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 20);
 		}
 		/* m99 (bbmanw/poundfor): boot does XOR A at reset then PUSH AF, so the
 		   command mask (F4DC or FF56) is stored as 0. Readers then discard
@@ -1646,11 +1656,49 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 		&& hw_->board_ != CEMU_AC_BOARD_FLSTORY
 		&& hw_->board_ != CEMU_AC_BOARD_KONAMI_HCASTLE
 		&& hw_->board_ != CEMU_AC_BOARD_TOAPLAN1
+		&& hw_->board_ != CEMU_AC_BOARD_RAIZING
 		&& !(hw_->board_ == CEMU_AC_BOARD_KONAMI_PCM && hw_->PcmKind() == 3))
 		TryInjectCommand();
+	/* Raizing / Eighting: every revision boots through a RAM test that must
+	   not be interrupted (Battle Bakraid pushes to an unset SP and would fail
+	   its own test), so wait for the sound ROM to reach its command loop
+	   before posting anything. Battle Garegga and Batrider then need their
+	   0x55 / 0xAA handshake to clear before any song code is even looked at;
+	   TryInjectCommand sends the probe until RaizingHandshakeAcked flips. */
+	if (hw_->board_ == CEMU_AC_BOARD_RAIZING) {
+		const int type = hw_->RaizingType();
+		for (int i = 0; i < 400; i++) {
+			Ay_Cpu* c = hw_->Cpu();
+			if (!c) break;
+			/* mahoudai's boot parks 0xFE in the first mailbox byte and waits
+			   for the 68000 to answer 0xFE in the second before it will run
+			   its ROM checksum. The RAM test right after re-writes that same
+			   byte and verifies it, so only answer while the Z80 is actually
+			   sitting in the wait (0071-0075). */
+			if (type == 1 && (unsigned)c->r.pc >= 0x0071u
+				&& (unsigned)c->r.pc <= 0x0075u) {
+				if (uint8_t* m = hw_->Mem())
+					m[0xc001] = 0xfe;
+			}
+			RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 400);
+			c = hw_->Cpu();
+			if (!c) break;
+			/* Type 1 runs interrupts-off forever; its ready signal is the
+			   0xFF it parks in the mailbox once the loop is live. */
+			if (type == 1 ? hw_->RaizingMailboxIdle() : c->r.iff1 != 0)
+				break;
+		}
+		for (int i = 0; i < 60 && !hw_->RaizingHandshakeAcked(); i++) {
+			TryInjectCommand();
+			cmdIndex_ = 0; /* the probe is not one of the song attempts */
+			RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 200);
+		}
+		TryInjectCommand();
+		RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 5);
+	}
 	/* Let RST 18h drain the latch before the first host Render. */
 	if (hw_->board_ == CEMU_AC_BOARD_IREM_M72)
-		RunUntil((uint64_t)hw_->Cpu()->time() + (uint64_t)cpuHz_ / 20);
+		RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 20);
 	/* Konami AY: Open inject arms irqPulse_ ? run so ForceIm1 enters 0038
 	   and the music engine can claim a channel before Render hunting. */
 	if (hw_->board_ == CEMU_AC_BOARD_KONAMI_SCRAMBLE
@@ -1663,7 +1711,7 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 		|| hw_->board_ == CEMU_AC_BOARD_TERRACRE
 		|| hw_->board_ == CEMU_AC_BOARD_ROBOKID
 		|| hw_->board_ == CEMU_AC_BOARD_BATTLANTIS)
-		RunUntil((uint64_t)hw_->Cpu()->time() + (uint64_t)cpuHz_ / 5);
+		RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 5);
 	/* GX400 shared RAM (4000-7FFF) is owned by the missing 68000. Sound ROM
 	   waits on (7FFC)==4 after self-test before EI @0291 ? release it. */
 	if (hw_->board_ == CEMU_AC_BOARD_KONAMI_GX400) {
@@ -1677,23 +1725,23 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 					m[0x7ffe] = 0x02;
 				}
 			}
-			RunUntil((uint64_t)hw_->Cpu()->time() + (uint64_t)cpuHz_ / 60);
+			RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 60);
 			c = hw_->Cpu();
 			/* Mainloop @029C waits on AY timer bit2 ? no need for IFF1. */
 			if (c && (unsigned)c->r.pc >= 0x0290u && (unsigned)c->r.pc < 0x0340u)
 				break;
 		}
 		TryInjectCommand();
-		RunUntil((uint64_t)hw_->Cpu()->time() + (uint64_t)cpuHz_ / 5);
+		RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 5);
 		TryInjectCommand();
-		RunUntil((uint64_t)hw_->Cpu()->time() + (uint64_t)cpuHz_ / 5);
+		RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 5);
 	}
 	/* K053260: boot DI (ROM checksum via reg 2E / YM timer poll), then
 	   post via K053260 ports + IRQ0 once EI is live and boot left the
 	   ROM-scan / timer-wait stubs. parodius scans 8 banks (~3s). */
 	if (hw_->board_ == CEMU_AC_BOARD_KONAMI_PCM && hw_->PcmKind() == 3) {
 		for (int i = 0; i < 600; i++) {
-			RunUntil((uint64_t)hw_->Cpu()->time() + (uint64_t)cpuHz_ / 60);
+			RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 60);
 			Ay_Cpu* c = hw_->Cpu();
 			if (!c) continue;
 			const unsigned pc = (unsigned)c->r.pc;
@@ -1707,21 +1755,21 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 			Ay_Cpu* c = hw_->Cpu();
 			const unsigned pc = c ? (unsigned)c->r.pc : 0;
 			if (pc < 0x06c0u || pc >= 0x06f0u) break;
-			RunUntil((uint64_t)hw_->Cpu()->time() + (uint64_t)cpuHz_ / 60);
+			RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 60);
 		}
 		TryInjectCommand();
-		RunUntil((uint64_t)hw_->Cpu()->time() + (uint64_t)cpuHz_ / 5);
+		RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 5);
 		TryInjectCommand();
-		RunUntil((uint64_t)hw_->Cpu()->time() + (uint64_t)cpuHz_ / 5);
+		RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 5);
 	}
 	if (hw_->board_ == CEMU_AC_BOARD_FLSTORY) {
 		/* Reach idle (DA00 NMI enable @0158) then inject so NMI queues C300. */
 		for (int i = 0; i < 120 && !hw_->FlstoryNmiEn(); i++)
-			RunUntil((uint64_t)hw_->Cpu()->time() + (uint64_t)cpuHz_ / 60);
+			RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 60);
 		TryInjectCommand();
-		RunUntil((uint64_t)hw_->Cpu()->time() + (uint64_t)cpuHz_ / 5);
+		RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 5);
 		TryInjectCommand();
-		RunUntil((uint64_t)hw_->Cpu()->time() + (uint64_t)cpuHz_ / 5);
+		RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 5);
 		/* Warm until MSM speaks. Clones (40love/fieldday/victnine) often keep
 		   the catalog prefer mute ? walk kFlstoryTryCmds until a peak appears. */
 		{
@@ -1750,36 +1798,36 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 						cmdIndex_ = 0;
 						TryInjectCommand();
 					}
-					RunUntil((uint64_t)hw_->Cpu()->time() + (uint64_t)cpuHz_ / 10);
+					RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 10);
 				}
 				free(tmp);
 			}
 		}
 		cmdIndex_ = 0;
 		TryInjectCommand();
-		RunUntil((uint64_t)hw_->Cpu()->time() + (uint64_t)cpuHz_ / 10);
+		RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 10);
 		/* Keep re-arming the live song during Render so classify stays PLAY. */
 		pinned_ = 1;
 	}
 	if (hw_->board_ == CEMU_AC_BOARD_KONAMI_HCASTLE) {
 		/* Boot DI RAM-test; wait for main EI;DI poll (@03CE) before latch. */
 		for (int i = 0; i < 240; i++) {
-			RunUntil((uint64_t)hw_->Cpu()->time() + (uint64_t)cpuHz_ / 60);
+			RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 60);
 			const uint16_t pc = hw_->Cpu() ? (uint16_t)hw_->Cpu()->r.pc : 0;
 			if (pc >= 0x03c0 && pc < 0x0900)
 				break;
 		}
 		TryInjectCommand();
-		RunUntil((uint64_t)hw_->Cpu()->time() + (uint64_t)cpuHz_ / 4);
+		RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 4);
 		TryInjectCommand();
-		RunUntil((uint64_t)hw_->Cpu()->time() + (uint64_t)cpuHz_ / 4);
+		RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 4);
 	}
 	if (hw_->board_ == CEMU_AC_BOARD_SNK_OPL) {
 		if (hw_->SnkMapKind()) {
 			/* Classic SNK: latch �� IRQ0; YM timers also drive the sequencer.
 			   Boot stores 0x0C at C0A8; type-2 BGM (athena 0x53) does
 			   BIT 2,(C0A8);RET NZ at 063F ? main CPU clears that lock. */
-			RunUntil((uint64_t)hw_->Cpu()->time() + (uint64_t)cpuHz_ / 4);
+			RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 4);
 			if (uint8_t* m = hw_->Mem()) {
 				/* athena/ikari: C0A8; gwar/psychos: C100 ? same 0x0C boot lock. */
 				m[0xc0a8] = (uint8_t)(m[0xc0a8] & (uint8_t)~0x0cu);
@@ -1787,20 +1835,20 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 			}
 			TryInjectCommand();
 			nextGngIrq_ = 0;
-			RunUntil((uint64_t)hw_->Cpu()->time() + (uint64_t)cpuHz_ / 2);
+			RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 2);
 		} else {
 			/* SNK68: NMI is gated by a RAM lock (F151/F132) set during boot.
 			   Injecting before the main loop clears it drops the only edge ?
 			   streetsm hung silent while pow got lucky on timing. Boot first.
 			   Boot also stores 0x0C at F115; type-2/3 BGM (streetsm 0x47/0xBF)
 			   RET NZ on those bits and never start ? clear after settle. */
-			RunUntil((uint64_t)hw_->Cpu()->time() + (uint64_t)cpuHz_ / 2);
+			RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 2);
 			if (uint8_t* m = hw_->Mem())
 				m[0xf115] = (uint8_t)(m[0xf115] & (uint8_t)~0x0cu);
 			TryInjectCommand();
-			RunUntil((uint64_t)hw_->Cpu()->time() + (uint64_t)cpuHz_ / 4);
+			RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 4);
 			TryInjectCommand();
-			RunUntil((uint64_t)hw_->Cpu()->time() + (uint64_t)cpuHz_ / 4);
+			RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 4);
 		}
 	}
 	/* Re-assert masks after the first command drain. */
@@ -1819,7 +1867,7 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 	/* Bucky/Moo: finish K054539 self-test / F0 handshake before the first
 	   song IRQ ? an early ForceIm1 during DI boot leaves opmWrites==0. */
 	if (hw_->board_ == CEMU_AC_BOARD_KONAMI_PCM && hw_->PcmKind() == 4) {
-		RunUntil((uint64_t)hw_->Cpu()->time() + (uint64_t)cpuHz_ / 2);
+		RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 2);
 		/* Boot waits on YM2151 Timer B (EC01 bit1) after programming reg 14.
 		   If fmgen never raised the flag, poke the enable path once more. */
 		if (hw_->SoundChip() && CEmuChipYm2151WriteCount(hw_->SoundChip()) == 0) {
@@ -1827,11 +1875,11 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 			ym->Write(0, 0x14); ym->Write(1, 0x20);
 			ym->Write(0, 0x12); ym->Write(1, 0xf0);
 			ym->Write(0, 0x14); ym->Write(1, 0x0a);
-			RunUntil((uint64_t)hw_->Cpu()->time() + (uint64_t)cpuHz_ / 10);
+			RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 10);
 		}
 		cmdIndex_ = 0;
 		TryInjectCommand();
-		RunUntil((uint64_t)hw_->Cpu()->time() + (uint64_t)cpuHz_ / 5);
+		RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 5);
 		if (hw_->PcmChip())
 			hw_->PcmChip()->Write(0x22f, 0x01);
 	}
@@ -1844,7 +1892,7 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 			Ay_Cpu* c = hw_->Cpu();
 			if (c && c->r.iff1 && c->r.im == 1)
 				Ay_CpuIm1Interrupt(c);
-			RunUntil((uint64_t)hw_->Cpu()->time() + (uint64_t)cpuHz_ / 250);
+			RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 250);
 			if (hw_->PeekMem(0x8000) == 0xff)
 				break;
 		}
@@ -1863,20 +1911,20 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 			|| hw_->board_ == CEMU_AC_BOARD_TAITO_OPM
 			|| (hw_->board_ == CEMU_AC_BOARD_KONAMI_PCM
 				&& (hw_->PcmKind() == 3 || hw_->PcmKind() == 4)));
-		nextCmdAt_ = (uint64_t)hw_->Cpu()->time()
+		nextCmdAt_ = (uint64_t)hw_->Cpu()->time64()
 			+ (uint64_t)cpuHz_ * (fast ? 1ull : 3ull)
 			/ ((hw_->board_ == CEMU_AC_BOARD_IREM_M72
 				|| hw_->board_ == CEMU_AC_BOARD_SYS16B
 				|| hw_->board_ == CEMU_AC_BOARD_VSYSTEM) ? 2ull : 1ull);
 	} else
-		nextCmdAt_ = (uint64_t)hw_->Cpu()->time() + (uint64_t)cpuHz_ / 60;
+		nextCmdAt_ = (uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 60;
 	/* WSG: digdug/galaga need a couple of latch refreshes after boot. */
 	if (hw_->board_ == CEMU_AC_BOARD_NAMCO_WSG)
-		nextCmdAt_ = (uint64_t)hw_->Cpu()->time() + (uint64_t)cpuHz_ / 4;
+		nextCmdAt_ = (uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 4;
 	/* CPS2: command write releases CFFF wait; give a short run so EI/IRQs start
 	   before the first host Render callback. */
 	if (hw_->board_ == CEMU_AC_BOARD_CPS_QS)
-		RunUntil((uint64_t)hw_->Cpu()->time() + (uint64_t)cpuHz_ / 10);
+		RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 10);
 	return 1;
 }
 
@@ -1908,8 +1956,32 @@ void CDriverAc::TickOpm(uint64_t cpuCycles)
 		/* Hang-On / Space Harrier: full master clocks were ~2�~ Timer-B; half
 		   felt a touch slow. Use 3/4 so BGM tempo sits near cabinet rate
 		   without re-doubling. Pitch stays in Render (sample-driven). */
-		const uint64_t timerTicks = (hw_->board_ == CEMU_AC_BOARD_HANGON)
-			? ((opmTicks * 3u) / 4u) : opmTicks;
+		uint64_t timerTicks = opmTicks;
+		if (hw_->board_ == CEMU_AC_BOARD_HANGON) {
+			timerTicks = (opmTicks * 3u) / 4u;
+		} else if (hw_->board_ == CEMU_AC_BOARD_RAIZING
+			&& hw_->RaizingType() == 1) {
+			/* mahou polls YM Timer A with 4-12 cycle Z80 ops. Integer usec
+			   in AdvanceClocks is clocks*1e6/Hz, which is 0 for those
+			   slices (half tempo). Do not put a remainder in the chip
+			   (that raced every YM2151 board).
+			   27 clocks = 8 µs exact at 27/8 MHz, so poll slices accumulate
+			   here instead of vanishing. Full datasheet rate (TA $97:00 ≈
+			   125.6 Hz) is clearly fast vs MAME A/B on this TickOpm+fmgen
+			   path — same class as Hang-On's ~2× Timer-B. 3/4 was a touch
+			   slow, 7/8 still a little fast; 5/6 sits between them (groups
+			   of 6×27 so 5/6 is integer). */
+			rzOpmAcc_ += opmTicks;
+			const uint64_t quantum = 27ull;
+			const uint64_t group = quantum * 6ull; /* 162 clocks = 48 µs */
+			if (rzOpmAcc_ < group)
+				timerTicks = 0;
+			else {
+				const uint64_t g = rzOpmAcc_ / group;
+				timerTicks = g * (quantum * 5ull); /* 135 clocks = 40 µs */
+				rzOpmAcc_ %= group;
+			}
+		}
 		if (timerTicks)
 			hw_->SoundChip()->AdvanceClocks(timerTicks);
 		if (hw_->Chip2())
@@ -2155,6 +2227,7 @@ void CDriverAc::TryInjectCommand()
 		n = (int)(sizeof(kFlstoryTryCmds) / sizeof(kFlstoryTryCmds[0]));
 	} else if (hw_->board_ == CEMU_AC_BOARD_TECHNOS_DDRAGON2
 		|| hw_->board_ == CEMU_AC_BOARD_TECMO16
+		|| hw_->board_ == CEMU_AC_BOARD_RAIZING
 		|| hw_->board_ == CEMU_AC_BOARD_KONAMI_K7232
 		|| hw_->board_ == CEMU_AC_BOARD_KONAMI_HCASTLE
 		|| hw_->board_ == CEMU_AC_BOARD_ALPHA68K2
@@ -2165,10 +2238,16 @@ void CDriverAc::TryInjectCommand()
 		n = (int)(sizeof(kDdragon2TryCmds) / sizeof(kDdragon2TryCmds[0]));
 	}
 	uint8_t cmd;
-	if (cmdIndex_ == 0 && songCmd_) {
+	/* Battle Bakraid's script table is indexed from zero, so a pinned song
+	   code of 0 has to reach the latch rather than fall through to the try
+	   table the way an unset code does everywhere else (see Open). */
+	const int haveSong = (songCmd_ != 0)
+		|| (pinned_ && hw_->board_ == CEMU_AC_BOARD_RAIZING
+			&& hw_->RaizingType() == 4);
+	if (cmdIndex_ == 0 && haveSong) {
 		cmd = songCmd_;
 	} else {
-		const int ti = (songCmd_ ? cmdIndex_ - 1 : cmdIndex_);
+		const int ti = (haveSong ? cmdIndex_ - 1 : cmdIndex_);
 		if (ti < 0 || ti >= n) return;
 		cmd = table[ti];
 	}
@@ -2220,7 +2299,7 @@ void CDriverAc::DeliverIrqs()
 		}
 		if (!hw_->WsgNmiEnable())
 			return;
-		const uint64_t now = (uint64_t)cpu->time();
+		const uint64_t now = (uint64_t)cpu->time64();
 		const uint64_t period = (uint64_t)cpuHz_ / 240;
 		if (period > 0 && now >= nextGngIrq_) {
 			Ay_CpuNmi(cpu);
@@ -2244,7 +2323,7 @@ void CDriverAc::DeliverIrqs()
 			}
 			return;
 		}
-		const uint64_t now = (uint64_t)cpu->time();
+		const uint64_t now = (uint64_t)cpu->time64();
 		const uint64_t period = (uint64_t)cpuHz_ / 240;
 		if (period > 0 && now >= nextGngIrq_) {
 			if (cpu->r.iff1)
@@ -2273,7 +2352,7 @@ void CDriverAc::DeliverIrqs()
 				Ay_CpuNmi(cpu);
 			}
 		}
-		const uint64_t now = (uint64_t)cpu->time();
+		const uint64_t now = (uint64_t)cpu->time64();
 		const uint64_t period = (uint64_t)cpuHz_ / 250;
 		if (period > 0 && now >= nextGngIrq_) {
 			/* 250 Hz drives the Z80 soft-timers (ts2 RST38 INC F000..F003 ��
@@ -2299,7 +2378,7 @@ void CDriverAc::DeliverIrqs()
 			hw_->TakeIrqPulse();
 			Ay_CpuNmi(cpu);
 		}
-		const uint64_t now = (uint64_t)cpu->time();
+		const uint64_t now = (uint64_t)cpu->time64();
 		const uint64_t period = (uint64_t)cpuHz_ / 240;
 		if (period > 0 && now >= nextGngIrq_) {
 			if (cpu->r.iff1)
@@ -2312,7 +2391,7 @@ void CDriverAc::DeliverIrqs()
 	/* Irem M72: the sample pump NMI runs at MASTER_CLOCK/8/512 = 7812.5 Hz
 	   whether or not a song is playing; the YM2151 timer drives the sequencer. */
 	if (hw_->board_ == CEMU_AC_BOARD_IREM_M72) {
-		const uint64_t now = (uint64_t)cpu->time();
+		const uint64_t now = (uint64_t)cpu->time64();
 		const uint64_t period = ((uint64_t)cpuHz_ * 2ull) / 15625ull;
 		if (period > 0 && now >= nextM72Nmi_) {
 			if (m72FakeNmi_)
@@ -2354,7 +2433,7 @@ void CDriverAc::DeliverIrqs()
 		if (chip && cpu->r.im == 1) {
 			const int st = (chip->ReadStatus() & 0x03) != 0;
 			if (hw_->board_ == CEMU_AC_BOARD_TAITO_OPM && st) {
-				const uint64_t now = (uint64_t)cpu->time();
+				const uint64_t now = (uint64_t)cpu->time64();
 				const uint64_t period = (uint64_t)cpuHz_ / 250;
 				if (period > 0 && now >= nextGngIrq_) {
 					const unsigned pc = (unsigned)cpu->r.pc;
@@ -2386,7 +2465,7 @@ void CDriverAc::DeliverIrqs()
 			hw_->TakeIrqPulse();
 			Ay_CpuNmi(cpu);
 		}
-		const uint64_t now = (uint64_t)cpu->time();
+		const uint64_t now = (uint64_t)cpu->time64();
 		const uint64_t period = (uint64_t)cpuHz_ / 60;
 		if (period > 0 && now >= nextGngIrq_) {
 			if (cpu->r.iff1)
@@ -2419,7 +2498,7 @@ void CDriverAc::DeliverIrqs()
 			if (Ay_CpuIm1Interrupt(cpu))
 				hw_->TakeIrqPulse();
 		}
-		const uint64_t now = (uint64_t)cpu->time();
+		const uint64_t now = (uint64_t)cpu->time64();
 		const uint64_t period = (uint64_t)cpuHz_ / 60;
 		if (hw_->board_ == CEMU_AC_BOARD_KONAMI_GX400) {
 			/* MAME gx400: screen VBLANK �� audiocpu NMI. NMI sets (7FFB)=1
@@ -2451,7 +2530,7 @@ void CDriverAc::DeliverIrqs()
 			const int st = (chip->ReadStatus() & 0x03) != 0;
 			const int pend = chip->Irq() || st;
 			if (pend) {
-				const uint64_t now = (uint64_t)cpu->time();
+				const uint64_t now = (uint64_t)cpu->time64();
 				const uint64_t period = (uint64_t)cpuHz_ / 250;
 				if (period > 0 && now >= nextGngIrq_) {
 					if (cpu->r.iff1)
@@ -2470,7 +2549,7 @@ void CDriverAc::DeliverIrqs()
 	/* Alpha 68K-II: periodic NMI @ ~7614 Hz (MAME sound_nmi), gated by
 	   YM2203 port A. Latch is polled via IN 00 from the NMI/main loop. */
 	if (hw_->board_ == CEMU_AC_BOARD_ALPHA68K2) {
-		const uint64_t now = (uint64_t)cpu->time();
+		const uint64_t now = (uint64_t)cpu->time64();
 		const uint64_t period = (uint64_t)cpuHz_ / 7614;
 		if (period > 0 && now >= nextGngIrq_ && hw_->AlphaNmiMask()) {
 			Ay_CpuNmi(cpu);
@@ -2491,12 +2570,43 @@ void CDriverAc::DeliverIrqs()
 		}
 		if (chip && chip->Irq())
 			chip->AckIrq();
-		const uint64_t now = (uint64_t)cpu->time();
+		const uint64_t now = (uint64_t)cpu->time64();
 		const uint64_t period = (uint64_t)cpuHz_ / 250;
 		if (period > 0 && now >= nextGngIrq_ && !hw_->IrqPulsePending() && !inIsr) {
 			if (cpu->r.iff1)
 				Ay_CpuIm1Interrupt(cpu);
 			nextGngIrq_ = now + period;
+		}
+		return;
+	}
+
+	/* Raizing / Eighting. mahoudai never enables interrupts — its Z80 spins
+	   on the YM2151 Timer A flag and polls the shared-RAM mailbox — so type 1
+	   has nothing to deliver. */
+	if (hw_->board_ == CEMU_AC_BOARD_RAIZING) {
+		const int type = hw_->RaizingType();
+		if (type == 2) {
+			/* generic_latch_8 with separate_acknowledge holds IRQ0 until the
+			   E00C write, so re-assert while unread rather than pulsing. */
+			if (hw_->RaizingLatchPending() && cpu->r.iff1 && cpu->r.im == 1)
+				Ay_CpuIm1Interrupt(cpu);
+		} else if (type >= 3) {
+			if (hw_->RaizingNmiPending()) {
+				hw_->ClearRaizingNmi();
+				Ay_CpuNmi(cpu);
+			}
+			/* MAME bbakraid_snd_interrupt: 32MHz/6/12000 ≈ 444 Hz periodic
+			   IRQ0. The main loop counts its ticks, so without it the
+			   sequencer never advances even after a command lands. */
+			if (type == 4) {
+				const uint64_t now = (uint64_t)cpu->time64();
+				const uint64_t period = (uint64_t)cpuHz_ / 444;
+				if (period > 0 && now >= nextGngIrq_) {
+					if (cpu->r.iff1 && cpu->r.im == 1)
+						Ay_CpuIm1Interrupt(cpu);
+					nextGngIrq_ = now + period;
+				}
+			}
 		}
 		return;
 	}
@@ -2528,7 +2638,7 @@ void CDriverAc::DeliverIrqs()
 			hw_->TakeIrqPulse();
 			Ay_CpuNmi(cpu);
 		}
-		const uint64_t now = (uint64_t)cpu->time();
+		const uint64_t now = (uint64_t)cpu->time64();
 		const uint64_t period = (uint64_t)cpuHz_ / 60;
 		if (period > 0 && now >= nextGngIrq_) {
 			if (cpu->r.iff1)
@@ -2544,7 +2654,7 @@ void CDriverAc::DeliverIrqs()
 			if (Ay_CpuIm1Interrupt(cpu))
 				hw_->TakeIrqPulse();
 		}
-		const uint64_t now = (uint64_t)cpu->time();
+		const uint64_t now = (uint64_t)cpu->time64();
 		const uint64_t period = (uint64_t)cpuHz_ / 7812;
 		if (period > 0 && now >= nextGngIrq_) {
 			if (cpu->r.iff1)
@@ -2599,7 +2709,7 @@ void CDriverAc::DeliverIrqs()
 			const int st = (chip->ReadStatus() & 0x03) != 0;
 			const int pend = chip->Irq() || st;
 			if (pend && cpu->r.iff1) {
-				const uint64_t now = (uint64_t)cpu->time();
+				const uint64_t now = (uint64_t)cpu->time64();
 				const uint64_t period = (uint64_t)cpuHz_ / 250;
 				if (period > 0 && now >= nextGngIrq_) {
 					Ay_CpuIm1Interrupt(cpu);
@@ -2693,7 +2803,7 @@ void CDriverAc::DeliverIrqs()
 		const int st = (chip->ReadStatus() & 0x03) != 0;
 		const int pend = chip->Irq() || st;
 		if (pend && cpu->r.iff1 && cpu->r.im == 1) {
-			const uint64_t now = (uint64_t)cpu->time();
+			const uint64_t now = (uint64_t)cpu->time64();
 			const uint64_t period = (uint64_t)cpuHz_ / 250;
 			if (period == 0 || now >= nextGngIrq_) {
 				if (Ay_CpuIm1Interrupt(cpu)) {
@@ -2726,7 +2836,7 @@ void CDriverAc::DeliverIrqs()
 	   then runs music + command poll. Soft-pulse Timer-A after Open boot so
 	   mid-init EI cannot re-enter the music ISR before shared RAM is ready. */
 	if (hw_->board_ == CEMU_AC_BOARD_TOAPLAN1) {
-		const uint64_t now = (uint64_t)cpu->time();
+		const uint64_t now = (uint64_t)cpu->time64();
 		const uint64_t period = (uint64_t)cpuHz_ / 250;
 		/* Idle = EI;JP self, JP self, or JR Z/$-2 wait (fshark @0400). */
 		const unsigned pc = (unsigned)cpu->r.pc;
@@ -2780,7 +2890,7 @@ void CDriverAc::DeliverIrqs()
 			}
 			/* Level IRQ0 while (status & 0x0B). Only Im1Interrupt ? ForceIm1
 			   while DI (inside 04F3) nests and fills RAM with 0x39. */
-			const uint64_t now = (uint64_t)cpu->time();
+			const uint64_t now = (uint64_t)cpu->time64();
 			const uint64_t period = (uint64_t)cpuHz_ / 250;
 			if ((hw_->SnkStatus() & 0x0bu) != 0 && period > 0
 				&& now >= nextGngIrq_ && cpu->r.iff1) {
@@ -2833,17 +2943,17 @@ void CDriverAc::RunUntil(uint64_t endCycle)
 	if (!hw_ || !hw_->Cpu()) return;
 	Ay_Cpu* cpu = hw_->Cpu();
 	CEmuHardAcSetActive(hw_);
-	while ((uint64_t)cpu->time() < endCycle) {
+	while ((uint64_t)cpu->time64() < endCycle) {
 		DeliverIrqs();
 		/* HALT + IFF1 clear: Ay_Cpu HALT clears the run budget (s_time&=3), so
 		   Open's boot settle would take minutes. Leap the clock instead. */
 		if (!cpu->r.iff1 && hw_->PeekMem((uint16_t)cpu->r.pc) == 0x76) {
-			const uint64_t now = (uint64_t)cpu->time();
+			const uint64_t now = (uint64_t)cpu->time64();
 			uint64_t step = (uint64_t)cpuHz_ / 250;
 			if (step < 64) step = 64;
 			if (now + step > endCycle) step = endCycle - now;
 			if (step) {
-				cpu->set_time((cpu_time_t)(now + step));
+				cpu->set_time64((int64_t)(now + step));
 				hw_->AddCpuCycles(step);
 				TickOpm(step);
 				continue;
@@ -3656,12 +3766,16 @@ int CDriverAc::Render(int16_t* stereo, int frames)
 	   boards (MegaSystem1/DECO second OKI) whose chips are driven elsewhere,
 	   and mixing those here faulted on 57 archives. */
 	CChip* pcm2 = hw_->KonamiPcm2();
+	/* Batrider's second OKI is on this same Z80 (I/O ports 82 and 84), so it
+	   does belong in this mix. */
+	if (!pcm2 && hw_->board_ == CEMU_AC_BOARD_RAIZING)
+		pcm2 = hw_->Oki(1);
 	const int auxCount = (hw_->Chip3() ? 2 : (hw_->Chip2() ? 1 : 0));
 	int16_t* mix2 = auxCount ? Scratch(frames * auxCount) : NULL;
 	int16_t* mix3 = (mix2 && auxCount > 1) ? mix2 + (size_t)frames * 2 : NULL;
 
 	for (int i = 0; i < frames; i++) {
-		const uint64_t now = (uint64_t)cpu->time();
+		const uint64_t now = (uint64_t)cpu->time64();
 		/* Re-try song commands every ~0.25s until table exhausted (Sys16/CPS�c).
 		   After Burner / pinned playlist title: inject once only ? re-sending
 		   restarts BGM and overrides the selected track with try-table[0]. */
@@ -3688,6 +3802,7 @@ int CDriverAc::Render(int16_t* stereo, int frames)
 						|| hw_->board_ == CEMU_AC_BOARD_KONAMI_HCASTLE
 						|| hw_->board_ == CEMU_AC_BOARD_ALPHA68K2
 						|| hw_->board_ == CEMU_AC_BOARD_TECMO16
+						|| hw_->board_ == CEMU_AC_BOARD_RAIZING
 						|| hw_->board_ == CEMU_AC_BOARD_FLSTORY
 						|| hw_->board_ == CEMU_AC_BOARD_TERRACRE
 						|| hw_->board_ == CEMU_AC_BOARD_ROBOKID
@@ -3702,6 +3817,17 @@ int CDriverAc::Render(int16_t* stereo, int frames)
 					cmdIndex_ = 0;
 					TryInjectCommand();
 					nextCmdAt_ = now + (uint64_t)cpuHz_ * 4ull / 5ull;
+				} else if (hw_->board_ == CEMU_AC_BOARD_RAIZING) {
+					/* Jingles and scripts that hit the end terminator go
+					   silent. Re-post the same title once every channel has
+					   dropped; looping BGM never goes idle so it is left
+					   alone. */
+					if (heard_ && hw_->RaizingHandshakeAcked()
+						&& hw_->RaizingTrackIdle()) {
+						cmdIndex_ = 0;
+						TryInjectCommand();
+					}
+					nextCmdAt_ = now + (uint64_t)cpuHz_ / 4;
 				} else if (hw_->board_ == CEMU_AC_BOARD_KONAMI_PCM
 					&& (hw_->PcmKind() == 3 || hw_->PcmKind() == 4)) {
 					/* K054539: re-poke latch (DI can drop the first IRQ).
@@ -3757,7 +3883,7 @@ int CDriverAc::Render(int16_t* stereo, int frames)
 		cpuAcc_ %= (int64_t)hostRate_;
 		if (cyclesPerSample < 1) cyclesPerSample = 1;
 		const uint64_t end = now + (uint64_t)cyclesPerSample;
-		while ((uint64_t)cpu->time() < end) {
+		while ((uint64_t)cpu->time64() < end) {
 			DeliverIrqs();
 			const int cycles = Ay_CpuRunOne(cpu);
 			hw_->AddCpuCycles((uint64_t)cycles);

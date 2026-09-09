@@ -151,6 +151,101 @@ int CHardAc::LoadRomsSeibu(CEmuZipFs* fs, const CEmuGameEntry* ge)
 	return 1;
 }
 
+/* ---- Raizing / Eighting ---- */
+
+/* Fixed ROM window, i.e. everything below the bank window (or below RAM on
+   the two boards that have no bank window at all). */
+static unsigned CEmuRaizingFixedSize(int type)
+{
+	switch (type) {
+	case 1: return 0xc000u; /* mahoudai: 0000-BFFF ROM, C000-DFFF RAM */
+	case 4: return 0xc000u; /* bbakraid: 0000-BFFF ROM, C000-FFFF RAM */
+	default: return 0x8000u; /* bgaregga / batrider: bank window at 8000 */
+	}
+}
+
+/* The catalog parks Battle Garegga's snd.bin at offset 0x8000 because Hoot
+   describes the bank window rather than the ROM, so the recorded offset is
+   not a destination here — the image always starts at 0. */
+int CHardAc::LoadRomsRaizing(CEmuZipFs* fs, const CEmuGameEntry* ge)
+{
+	if (!fs || !ge || !cpu_ || !chip_) return 0;
+	memset(mem_, 0, sizeof(mem_));
+	if (soundRom_) { free(soundRom_); soundRom_ = NULL; soundRomSize_ = 0; }
+	if (pcmRom_) { free(pcmRom_); pcmRom_ = NULL; pcmRomSize_ = 0; }
+	if (pcmRom2_) { free(pcmRom2_); pcmRom2_ = NULL; pcmRom2Size_ = 0; }
+
+	for (int i = 0; i < ge->romCount && !soundRomSize_; i++) {
+		const CEmuRomEntry* r = &ge->rom[i];
+		if (!CEmuAcIsCodeRomType(r->type)) continue;
+		unsigned sz = 0;
+		const unsigned char* data = CEmuZipFsFind(fs, r->name, &sz);
+		if (!data || !sz) continue;
+		uint8_t* p = (uint8_t*)malloc(sz);
+		if (!p) return 0;
+		memcpy(p, data, sz);
+		soundRom_ = p;
+		soundRomSize_ = sz;
+	}
+	if (!soundRomSize_) return 0;
+
+	{
+		unsigned n = CEmuRaizingFixedSize(raizingType_);
+		if (n > soundRomSize_) n = soundRomSize_;
+		memcpy(mem_, soundRom_, n);
+	}
+
+	/* Sample ROMs. Batrider's two OKIs get one image each (catalog types
+	   adpcm1 / adpcm2); Battle Bakraid's YMZ280B takes three 4 MB banks
+	   concatenated at the offsets the catalog gives. */
+	for (int i = 0; i < ge->romCount; i++) {
+		const CEmuRomEntry* r = &ge->rom[i];
+		if (!r->type || CEmuAcIsCodeRomType(r->type)) continue;
+		unsigned sz = 0;
+		const unsigned char* data = CEmuZipFsFind(fs, r->name, &sz);
+		if (!data || !sz) continue;
+		const int second = (_stricmp(r->type, "adpcm2") == 0);
+		uint8_t** dst = second ? &pcmRom2_ : &pcmRom_;
+		unsigned* dstSize = second ? &pcmRom2Size_ : &pcmRomSize_;
+		const unsigned off = (r->offset > 0) ? (unsigned)r->offset : 0u;
+		const unsigned need = off + sz;
+		if (need > *dstSize) {
+			uint8_t* p = (uint8_t*)realloc(*dst, need);
+			if (!p) return 0;
+			memset(p + *dstSize, 0, need - *dstSize);
+			*dst = p;
+			*dstSize = need;
+		}
+		memcpy(*dst + off, data, sz);
+	}
+	if (pcmRomSize_) {
+		if (raizingType_ == 4) chip_->SetPcmRom(pcmRom_, pcmRomSize_);
+		else if (pcm_) pcm_->SetPcmRom(pcmRom_, pcmRomSize_);
+	}
+	if (pcm2_ && pcmRom2Size_)
+		pcm2_->SetPcmRom(pcmRom2_, pcmRom2Size_);
+
+	memset(raizingOkiBank_, 0, sizeof(raizingOkiBank_));
+	memset(raizingLatch_, 0, sizeof(raizingLatch_));
+	memset(raizingLatchOut_, 0, sizeof(raizingLatchOut_));
+	raizingLatchPending_ = 0;
+	raizingNmiPending_ = 0;
+	bank_ = 0;
+	RaizingSetZ80Bank(0);
+	soundCmd_ = 0;
+	soundCmdPending_ = 0;
+	irqPulse_ = 0;
+	opmWrites_ = 0;
+	cpuCycles_ = 0;
+	if (chip_) chip_->Reset();
+	if (pcm_) pcm_->Reset();
+	if (pcm2_) pcm2_->Reset();
+	cpu_->reset(mem_);
+	cpu_->r.pc = 0;
+	CEmuZ80BusSetActive(this);
+	return 1;
+}
+
 /* ---- M62 / M6803 ---- */
 
 static uint8_t M62BusRead(struct m6800* cpu, uint16_t addr)

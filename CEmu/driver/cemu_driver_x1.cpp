@@ -207,8 +207,8 @@ void CDriverX1::RunUntil(uint64_t endCycle)
 	Ay_Cpu* cpu = hw_->Cpu();
 	CEmuHardX1SetActive(hw_);
 	int guard = 0;
-	while ((uint64_t)cpu->time() < endCycle && guard++ < 4000000) {
-		const uint64_t now = (uint64_t)cpu->time();
+	while ((uint64_t)cpu->time64() < endCycle && guard++ < 4000000) {
+		const uint64_t now = (uint64_t)cpu->time64();
 		DeliverIrqs(now);
 		/* HALT: jump time to next timer/vsync/sample so IRQs stay realtime. */
 		if (cpu->get_mem() && cpu->get_mem()[cpu->r.pc] == 0x76) {
@@ -284,9 +284,9 @@ int CDriverX1::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 	{
 		Ay_Cpu* cpu = hw_->Cpu();
 		if (cpu) {
-			nextTimer_ = (uint64_t)cpu->time() + timerPeriod_;
-			nextVsync_ = (uint64_t)cpu->time() + vsyncPeriod_;
-			RunUntil((uint64_t)cpu->time() + (uint64_t)cpuHz_); /* ~1.0s boot */
+			nextTimer_ = (uint64_t)cpu->time64() + timerPeriod_;
+			nextVsync_ = (uint64_t)cpu->time64() + vsyncPeriod_;
+			RunUntil((uint64_t)cpu->time64() + (uint64_t)cpuHz_); /* ~1.0s boot */
 		}
 	}
 	booted_ = 1;
@@ -318,12 +318,12 @@ int CDriverX1::Render(int16_t* stereo, int frames)
 		   fast, which pushed every CTC-timed X1 tempo up by the same amount. */
 		cpuDebt_ += cyclesPerSample;
 		if (cpuDebt_ > 0) {
-			const uint64_t start = (uint64_t)cpu->time();
+			const uint64_t start = (uint64_t)cpu->time64();
 			RunUntil(start + (uint64_t)cpuDebt_);
-			cpuDebt_ -= (int64_t)((uint64_t)cpu->time() - start);
+			cpuDebt_ -= (int64_t)((uint64_t)cpu->time64() - start);
 		}
 		/* Keep schedule moving if we stalled under DI. */
-		const uint64_t now = (uint64_t)cpu->time();
+		const uint64_t now = (uint64_t)cpu->time64();
 		if (now >= nextTimer_ + timerPeriod_ * 4)
 			nextTimer_ = now + timerPeriod_;
 		if (now >= nextVsync_ + vsyncPeriod_ * 4)

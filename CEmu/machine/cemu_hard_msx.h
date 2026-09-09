@@ -17,9 +17,11 @@ public:
 
 	Ay_Cpu* Cpu() override { return cpu_; }
 	uint8_t* Mem() override { return mem_; }
-	CChip* SoundChip() override { return chipAy_; }
+	CChip* SoundChip() override { return chipAy_ ? (CChip*)chipAy_ : chipSng_; }
 	CChip* ChipAy() { return chipAy_; }
 	CChip* ChipScc() { return (sccAccessed_ && chipScc_) ? chipScc_ : NULL; }
+	CChip* ChipSng() { return chipSng_; }
+	CChip* ChipOpl() { return chipOpl_; }
 	void* Opll() { return chipOpll_; }
 
 	uint8_t PortIn(uint16_t port) override;
@@ -39,6 +41,7 @@ public:
 	unsigned OpllWrites() const;
 	int PlayCmdPending() const { return playCmdPending_; }
 	uint8_t IoPort(uint8_t p) const { return ioport_[p & 0xff]; }
+	int GenericMode() const { return genericMode_; }
 
 	int cpuHz_;
 	int ayHz_;
@@ -50,13 +53,18 @@ public:
 		CHIP_FMPAC = (1 << 0),
 		CHIP_SNG = (1 << 1),
 		CHIP_GGSTEREO = (1 << 2),
+		CHIP_MSXAUDIO = (1 << 3),
 		CHIP_SCCDISABLE = (1 << 7),
 		INIT_ADR = 0x0019,
 		INT_ADR = 0x003a,
 		PLAY_CODE_PORT = 0x00,
 		SKIP_PORT = 0x01,
 		BGM_BANKS = 128,
-		BGM_SIZE = 0x4000
+		BGM_SIZE = 0x4000,
+		MAP_NONE = 0,
+		MAP_ASCII16 = 1,
+		MAP_DS4 = 2,
+		MAP_ASCII8 = 3
 	};
 
 private:
@@ -65,11 +73,22 @@ private:
 	void MapDefault();
 	void FreeBanks();
 	void EnsureOpll(int force);
+	void EnsureSng();
+	void EnsureMsxAudio();
+	void PlantBiosStubs();
 	void StageBgm(unsigned index);
+	void MapAscii16(int page, uint8_t bank);
+	void MapAscii8(int page, uint8_t bank);
+	void MapDs4(int page, uint8_t bank);
+	int LoadCartRom(CEmuZipFs* fs, const CEmuGameEntry* ge, const char* type);
 	int LoadKssImage(CEmuZipFs* fs, const CEmuGameEntry* ge);
 	int LoadGeneric(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode);
+	int LoadDs4(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode);
+	int LoadAscii16(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode);
+	int LoadDq(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode);
 	int StartSongKss(unsigned titleCode);
 	int StartSongGeneric(unsigned titleCode);
+	int StartSongDs4(unsigned titleCode);
 	int IsKssMagic(const unsigned char* data, unsigned sz) const;
 
 	uint8_t mem_[0x10000];
@@ -80,6 +99,8 @@ private:
 	Ay_Cpu* cpu_;
 	CChip* chipAy_;
 	CChip* chipScc_;
+	CChip* chipSng_;
+	CChip* chipOpl_;
 	void* chipOpll_;
 	int sampleRate_;
 	uint64_t cpuCycles_;
@@ -110,6 +131,15 @@ private:
 	unsigned titleCode_;
 	const CEmuGameEntry* ge_;
 	int playCmdPending_;
+	int mapper_;
+	uint8_t* cart_;
+	unsigned cartBytes_;
+	uint8_t ttlPrg_[0x2000];
+	unsigned ttlPrgBytes_;
+	uint16_t ttlPrgAddr_;
+	uint8_t ascii16Bank_[2];
+	uint8_t ascii8Bank_[4];
+	uint8_t ds4Bank_[2];
 };
 
 void CEmuHardMsxSetActive(CHardMsx* hw);

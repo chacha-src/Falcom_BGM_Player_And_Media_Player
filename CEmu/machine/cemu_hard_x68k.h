@@ -71,11 +71,16 @@ private:
 	void DosRegisterFile(const char* name, unsigned addr, unsigned size);
 	int DosFindFile(const char* path) const;
 
-	enum { kRomBytes = 0x100000, kMidBytes = 0x80000, kRamBytes = 0x10000, kHighBytes = 0x10000, kMfpBytes = 0x1000 };
+	enum {
+		kRomBytes = 0x100000, kMidBytes = 0x80000, kRamBytes = 0x10000,
+		kHighBytes = 0x10000, kMfpBytes = 0x1000,
+		kHeapBase = 0xA00000, kHeapBytes = 0x40000
+	};
 	uint8_t rom_[kRomBytes];
 	uint8_t ram_[kRamBytes];
 	uint8_t high_[kHighBytes];
 	uint8_t mid_[kMidBytes];
+	uint8_t heap_[kHeapBytes];
 	uint8_t mfp_[kMfpBytes];
 	int softMfp_; /* catalog mfp=1: GPIP bit4 clear (arcus wait loops) */
 	int adpcmPlaying_;

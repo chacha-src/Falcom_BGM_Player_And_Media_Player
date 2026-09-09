@@ -37,6 +37,10 @@ void CEmuModePrefSet(const wchar_t* zipPath, const char* tag);
 /* First .mid/.rmi/.smf inside zip → temp file for KPI/VST MIDI play. */
 int CEmuZipExtractFirstMidi(const wchar_t* zipPath, wchar_t* outMidPath, int outCap);
 
+/* Catalog song file for this title (offset matches title code) if it is SMF. */
+int CEmuZipExtractCatalogMidi(const wchar_t* zipPath, const CEmuGameEntry* ge,
+	unsigned titleCode, wchar_t* outMidPath, int outCap);
+
 /* Boot PCAT midiout glue, capture MPU-401 UART → Type-0 SMF for KPI/VST. */
 int CEmuCapturePcatMidiToFile(const wchar_t* zipPath, unsigned titleCode,
 	wchar_t* outMidPath, int outCap);

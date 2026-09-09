@@ -151,7 +151,7 @@ static int looksCode(CHardX68k* hw, unsigned a)
 static int isrUsesRte(CHardX68k* hw, unsigned isr)
 {
 	if (!isr || isr >= 0xf00000u) return 0;
-	for (unsigned i = 0; i < 0x200u; i += 2u) {
+	for (unsigned i = 0; i < 0x800u; i += 2u) {
 		const unsigned w = hw->Read16(isr + i);
 		if (w == 0x4e73u) return 1; /* rte */
 		if (w == 0x4e75u) return 0; /* rts */
@@ -165,10 +165,23 @@ static int iocsSlotIsCodeOverlay(CHardX68k* hw, unsigned fn)
 	   table ($400..$7FF). Writing OPMSET/OPMINTST vectors at $5A0/$5A8
 	   (fn $68/$6A) smashes abtengu/albion/columns movem-search loops. */
 	const unsigned slot = 0x400u + fn * 4u;
+	/* AliceSoft OPMDRV2 BOOT: init lives in $400..$7FF and scans for
+	   $48E77FFE. $5A0/$5A8 fall in the third scan / M_INTON (dps $5A6).
+	   Bytes there can look like 00xxxxxx "vectors" (abtengu $5A0=$00010300)
+	   or $FFxxxx (dps $5A0=$FF042348) so the hi-byte test misses them. */
+	if (slot < 0x800u) {
+		for (unsigned a = 0x400u; a + 6u < 0x800u; a += 2u) {
+			if (hw->Read16(a) == 0x223Cu
+				&& hw->Read32(a + 2u) == 0x48E77FFEu)
+				return 1;
+		}
+	}
 	const unsigned raw = hw->Read32(slot);
 	/* Real IOCS vectors are 24-bit with high byte 00 (or FF for IPL). */
 	const unsigned hi = (raw >> 24) & 0xffu;
 	if (hi != 0x00u && hi != 0xffu)
+		return 1;
+	if (hi == 0xffu && slot < 0x800u && (raw & 0xff0000u) != 0xff0000u)
 		return 1;
 	return looksCode(hw, slot);
 }
@@ -181,6 +194,59 @@ static int iocsSlotThin(CHardX68k* hw, unsigned fn)
 	if (dest == 0 || dest == 0xffffffu) return 1;
 	if (dest >= 0xff0000u) return 0; /* IPL IOCS — keep */
 	return looksThinStub(hw, dest);
+}
+
+/* hoot opmdrv.bin: $400→$B06 init, then jsr ($8006) and a 1000-word scan
+   for $48E77FFE from $D200. Pre-binding OPMDRV.X's IRQ6 ISR (findOpmdrvIsr)
+   lets timer edges smash that landmark before the scan, so init spins at
+   $B32 and never reaches M_ALLOC/M_INIT. columns/comet use a different
+   glue and still need the early ISR bind. */
+static int isOpmdrvBinGlue(CHardX68k* hw)
+{
+	if ((hw->Read32(0x400) & 0xffffffu) != 0xB06u) return 0;
+	if (hw->Read16(0xB16) != 0x223Cu) return 0;
+	if (hw->Read32(0xB18) != 0x48E77FFEu) return 0;
+	return 1;
+}
+
+/* Glue init still walking OPMDRV.X for $48E77FFE. ISR must stay unbound. */
+static int opmdrvBinScanPending(CHardX68k* hw)
+{
+	if (!isOpmdrvBinGlue(hw)) return 0;
+	int k;
+	for (k = 0; k < 1000; k++) {
+		const unsigned a = 0xD200u + (unsigned)k * 2u;
+		if (hw->Read32(a) == 0x48E77FFEu) return 1;
+	}
+	return 0;
+}
+
+/* OPDRV.X (SystemSoft bltzkr/bomber/mofm2): no OPMINTST `moveq #$6A`.
+   Init does `lea ISR(pc),a0; move.l a0,$10C` (or `move.l #ISR,$10C`) and
+   waits on a BSS flag the hang $10C never clears. */
+static unsigned findOpdrvIsr(CHardX68k* hw)
+{
+	unsigned fallback = 0;
+	for (unsigned a = 0x8000u; a + 12u < 0x40000u; a += 2u) {
+		unsigned isr = 0;
+		if (hw->Read16(a) == 0x41fau && hw->Read16(a + 4u) == 0x23c8u
+			&& hw->Read32(a + 6u) == 0x10cu) {
+			/* lea d16(pc),a0; move.l a0,$10C. PC for d16 is the
+			   extension word. */
+			const int disp = (int)(int16_t)hw->Read16(a + 2u);
+			isr = (unsigned)((int)a + 2 + disp) & 0xffffffu;
+		} else if (hw->Read16(a) == 0x23fcu && hw->Read32(a + 6u) == 0x10cu) {
+			isr = hw->Read32(a + 2u) & 0xffffffu;
+		} else {
+			continue;
+		}
+		if (isr < 0x8000u || isr >= 0x40000u) continue;
+		if (!looksCode(hw, isr)) continue;
+		if (hw->Read16(isr) == 0x48e7u)
+			return isr;
+		if (!fallback) fallback = isr;
+	}
+	return fallback;
 }
 
 static unsigned findOpmdrvIsr(CHardX68k* hw)
@@ -200,7 +266,9 @@ static unsigned findOpmdrvIsr(CHardX68k* hw)
 			return isr;
 		if (!fallback) fallback = isr;
 	}
-	return fallback;
+	if (fallback)
+		return fallback;
+	return findOpdrvIsr(hw);
 }
 
 /* IOCS $F0 = _OPMDRV (not FLOAT FEFUNC) once OPMDRV*.X is resident.
@@ -816,6 +884,23 @@ static void emitIrq6Trampoline(CHardX68k* hw)
 	e.w16(0x4e73);                     /* rte */
 }
 
+/* After the $48E77FFE scan, OPMDRV fn $0D spins on a BSS flag (ayayo $243C)
+   that only the real ISR clears. Bind once the landmark is gone. */
+static int bindOpmdrvIsrIfSoft(CHardX68k* hw)
+{
+	if (opmdrvBinScanPending(hw)) return 0;
+	const unsigned h10 = hw->Read32(0x10c) & 0xffffffu;
+	const int soft = (h10 == (CEMU_X68K_DOS_SOFT10C & 0xffffffu))
+		|| isHangStub(hw, h10) || looksThinStub(hw, h10);
+	if (!soft) return 0;
+	const unsigned isr = findOpmdrvIsr(hw);
+	if (!isr) return 0;
+	hw->Write32(0x10c, isr);
+	emitIrq6Trampoline(hw);
+	hw->Write32(0x78, CEMU_X68K_DOS_IRQ6);
+	return 1;
+}
+
 } /* namespace */
 
 int CEmuX68kDosInstall(CHardX68k* hw)
@@ -842,6 +927,18 @@ int CEmuX68kDosInstall(CHardX68k* hw)
 	if (!thinF && !thin15 && !thinIocs && !thinTrap3 && !thinTrap1 && !thin10c
 		&& !soft10c && (onOsF || onOs15)) {
 		bindOpmdrvIocsF0(hw);
+		if (isOpmdrvBinGlue(hw)) {
+			bindOpmdrvIsrIfSoft(hw);
+			/* Guest M_INIT plants $10C; refresh trampoline (jmp vs jsr). */
+			const unsigned h10 = hw->Read32(0x10c) & 0xffffffu;
+			const int live10 = (h10 >= 0x400u && h10 < 0xf00000u
+				&& !isHangStub(hw, h10) && !looksThinStub(hw, h10));
+			if (live10) {
+				emitIrq6Trampoline(hw);
+				hw->Write32(0x78, CEMU_X68K_DOS_IRQ6);
+			}
+			return 1;
+		}
 		const unsigned isr = findOpmdrvIsr(hw);
 		if (!isr) return 0;
 		hw->Write32(0x10c, isr);
@@ -959,23 +1056,10 @@ int CEmuX68kDosInstall(CHardX68k* hw)
 		hw->Write16(hook10c + 2u, 0x4e73);
 	}
 
-	/* OPMDRV placed but still on Soft10C: bind its ISR so $2490 waits complete
-	   without AssistSoftWaits (driver clears the flag itself). */
-	{
-		const unsigned h10 = hw->Read32(0x10c) & 0xffffffu;
-		const int soft = (h10 == (CEMU_X68K_DOS_SOFT10C & 0xffffffu))
-			|| isHangStub(hw, h10) || looksThinStub(hw, h10);
-		if (soft) {
-			const unsigned isr = findOpmdrvIsr(hw);
-			if (isr) {
-				hw->Write32(0x10c, isr);
-				/* Always route IRQ6 through trampoline→$10C; BOOT's $4DE-style
-				   vectors never call the OPMDRV handshake ISR. */
-				emitIrq6Trampoline(hw);
-				hw->Write32(0x78, CEMU_X68K_DOS_IRQ6);
-			}
-		}
-	}
+	/* OPMDRV placed but still on Soft10C: bind its ISR so $2490 / $243C waits
+	   complete without AssistSoftWaits (driver clears the flag itself).
+	   hoot opmdrv.bin: skip while the $48E77FFE scan is still in flight. */
+	bindOpmdrvIsrIfSoft(hw);
 
 	/* Guest may install $10C without IOCS OPMINTST — still route IRQ6 through
 	   the OS trampoline so timer edges reach the sequencer (OPM_WRITES WEAK).

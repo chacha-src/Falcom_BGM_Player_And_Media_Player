@@ -1069,6 +1069,7 @@ static void CEmuCatalogParseGameBlock(CEmuCatalog* cat, const char* block, const
 				memcpy(rom.name, tc, (size_t)ln);
 				rom.name[ln] = 0;
 				CEmuTrim(rom.name);
+				CEmuDecodeXmlEntities(rom.name);
 				/* HOOT sentinel for no-GTL is NULL; catalogs often write NONE. */
 				if (_stricmp(rom.type, "shell") == 0 && rom.name[0]) {
 					char* rp = rom.name;
@@ -1184,11 +1185,35 @@ static void CEmuCatalogParseGameBlock(CEmuCatalog* cat, const char* block, const
 		CEmuGameEntryFree(slot);
 }
 
+/* hoot XML comments out unfinished titles/roms (joker68snd gun.mu, …).
+   The naive tag scan otherwise treats those as live catalog rows. */
+static void CEmuXmlStripComments(char* s)
+{
+	if (!s) return;
+	char* d = s;
+	for (const char* p = s; *p; ) {
+		if (p[0] == '<' && p[1] == '!' && p[2] == '-' && p[3] == '-') {
+			p += 4;
+			while (p[0] && !(p[0] == '-' && p[1] == '-' && p[2] == '>'))
+				p++;
+			if (p[0]) p += 3;
+			continue;
+		}
+		*d++ = *p++;
+	}
+	*d = 0;
+}
+
 int CEmuCatalogParseBuffer(CEmuCatalog* cat, const char* xmlText, const char* dataDirHint)
 {
 	if (!cat || !xmlText || !xmlText[0]) return 0;
+	const size_t nText = strlen(xmlText);
+	char* work = (char*)malloc(nText + 1);
+	if (!work) return 0;
+	memcpy(work, xmlText, nText + 1);
+	CEmuXmlStripComments(work);
 	const int before = cat->count;
-	for (const char* p = xmlText; ; ) {
+	for (const char* p = work; ; ) {
 		const char* gs = CEmuStrStr(p, "<game");
 		if (!gs) break;
 		const char* ge = CEmuStrStr(gs, "</game>");
@@ -1204,6 +1229,7 @@ int CEmuCatalogParseBuffer(CEmuCatalog* cat, const char* xmlText, const char* da
 		}
 		p = ge;
 	}
+	free(work);
 	return cat->count - before;
 }
 
@@ -1344,8 +1370,9 @@ struct CEmuCatalogFp {
 };
 
 /* 0x300: AttrValue accepts whitespace around '=' (xml2 spaced archives).
-   0x301: arcdata.zip loads xml in hoot.xml <list> order (xml2 before zzoriginal). */
-enum { CEMU_CAT_FP_PARSE_VER = 0x301 };
+   0x301: arcdata.zip loads xml in hoot.xml <list> order (xml2 before zzoriginal).
+   0x302: strip XML comments so hoot <!-- disabled titles/roms --> stay out. */
+enum { CEMU_CAT_FP_PARSE_VER = 0x302 };
 
 static int CEmuCatalogMakeFp(const wchar_t* arcZip, const wchar_t* dataRoot,
 	const wchar_t* parent, CEmuCatalogFp* fp)
@@ -1537,6 +1564,8 @@ static int CEmuCatalogLoadCache(CEmuCatalog* cat, const CEmuCatalogFp* want,
 			CEmuDecodeXmlEntitiesW(e->driverAlias);
 			for (int ti = 0; ti < e->titleCount; ++ti)
 				CEmuDecodeXmlEntitiesW(e->title[ti].label);
+			for (int ri = 0; ri < e->romCount; ++ri)
+				CEmuDecodeXmlEntities(e->rom[ri].name);
 			/* Recomputed rather than trusted: the ids are a pure function of
 			   platform/subtype/name, and re-deriving them means a cache hit
 			   and a fresh XML parse agree even when that mapping changes. */
@@ -2071,6 +2100,7 @@ const CEmuGameEntry* CEmuCatalogFindArchiveForZip(const CEmuCatalog* cat,
 	}
 	const CEmuGameEntry* best = NULL;
 	int bestRank = -1000000;
+	const CEmuGameEntry* pass0Best = NULL;
 	/* Prefer exact archive==zip stem. Only if none: allow "stem,companion"
 	   (emdr_msx,fmpac_msx). Matching comma forms in the same pass stole
 	   rank from primary-only twins and dropped MSX OK 414→403. */
@@ -2096,8 +2126,41 @@ const CEmuGameEntry* CEmuCatalogFindArchiveForZip(const CEmuCatalog* cat,
 				bestRank = rank;
 			}
 		}
-		if (best) break;
+		if (best) {
+			int bgmNeed = 0, bgmHit = 0, wantsPmus = 0;
+			if (zipFs) {
+				for (int r = 0; r < best->romCount; r++) {
+					if (_stricmp(best->rom[r].type, "bgm") != 0)
+						continue;
+					bgmNeed++;
+					unsigned sz = 0;
+					if (CEmuZipFsHas(zipFs, best->rom[r].name, &sz) && sz > 0)
+						bgmHit++;
+					if (_strnicmp(best->rom[r].name, "PMUS", 4) == 0)
+						wantsPmus = 1;
+				}
+			}
+			unsigned fmusSz = 0;
+			const int zipHasFmus = zipFs
+				&& CEmuZipFsHas(zipFs, "FMUS00.BIN", &fmusSz) && fmusSz > 0;
+			/* crimson2_msx exact row wants PMUS* but the zip ships FMUS*
+			   (OPLL companion). Fall through so "stem,fmpac_msx" can win.
+			   Same when both packs are in one zip: PSG DRIVER is mute. */
+			int skip = 0;
+			if (zipFs && bgmNeed > 0 && bgmHit == 0)
+				skip = 1;
+			if (zipFs && wantsPmus && zipHasFmus && !CEmuGameHasOpt(best, "use_opll"))
+				skip = 1;
+			if (!skip)
+				break;
+			if (!pass0Best)
+				pass0Best = best;
+			best = NULL;
+			bestRank = -1000000;
+		}
 	}
+	if (!best && pass0Best)
+		return pass0Best;
 	return best;
 }
 

@@ -44,10 +44,22 @@ void CDriverMsx::PulseVblankIrq()
 	   Dual scheduling ran Quinpl's play routine twice per frame, blew the
 	   Z80 stack into adjacent heap, and crashed on driver destroy. */
 	if (!cpu->r.iff1) return;
-	/* hoot kss.cpp Interrupt: raise_IRQ(0xff) under IM2 IPL. */
+	/* hoot kss.cpp Interrupt: raise_IRQ(0xff) under IM2 IPL.
+	   The IPL ISR lives at $0038; IM2 only works if the game filled
+	   (I<<8)|$FF with a real vector. KSS StartSong fills $0000-$3FFF
+	   with $C9, so an unset I register yields a $C9C9 target and the
+	   music ISR never runs (judo/replcart/labyr SILENT). */
 	if (cpu->r.im == 2) {
-		if (!Ay_CpuIm2Interrupt(cpu, 0xff))
-			Ay_CpuIm1Interrupt(cpu); /* IPL stub @0038 */
+		const uint16_t target = Ay_CpuIm2Target(cpu, 0xff);
+		uint8_t* mem = cpu->get_mem();
+		int useIm2 = (target != 0);
+		if (useIm2 && mem) {
+			const uint8_t op = mem[target];
+			if (op == 0xC9 || op == 0x00 || op == 0xFF)
+				useIm2 = 0;
+		}
+		if (!useIm2 || !Ay_CpuIm2Interrupt(cpu, 0xff))
+			Ay_CpuIm1Interrupt(cpu);
 	} else {
 		Ay_CpuIm1Interrupt(cpu);
 	}
@@ -60,11 +72,19 @@ void CDriverMsx::RunUntil(uint64_t endCycle)
 	Ay_Cpu* cpu = hw_->Cpu();
 	CEmuHardMsxSetActive(hw_);
 	int guard = 0;
-	while ((uint64_t)cpu->time() < endCycle && guard++ < 4000000) {
-		const uint64_t now = (uint64_t)cpu->time();
+	while ((uint64_t)cpu->time64() < endCycle && guard++ < 4000000) {
+		const uint64_t now = (uint64_t)cpu->time64();
 		/* HALT: sleep until this sample's CPU budget ends. VBlank is
-		   injected from Render on the hostRate/60 sample grid. */
+		   injected from Render on the hostRate/60 sample grid.
+		   DI;HALT (f1sp3d CALL $9003, yosikon CALL $D406) never wakes
+		   because PulseVblankIrq requires IFF1 — step past as NOP. */
 		if (cpu->get_mem() && cpu->get_mem()[cpu->r.pc] == 0x76) {
+			if (hw_->GenericMode() && !cpu->r.iff1) {
+				cpu->r.pc = (uint16_t)(cpu->r.pc + 1);
+				cpu->adjust_time(4);
+				hw_->AddCpuCycles(4);
+				continue;
+			}
 			uint64_t delta = (endCycle > now) ? (endCycle - now) : 4;
 			if (delta < 4) delta = 4;
 			if (delta > 0x7fffffff) delta = 0x7fffffff;
@@ -100,18 +120,13 @@ int CDriverMsx::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned
 
 	if (!hw_->LoadKss(fs, ge, titleCode))
 		return 0;
-	/* Pass the whole code: the generic path needs the middle and top bytes to
-	   tell a bgm file apart from a song index inside it (aleste2 0x0115) and
-	   to drive the port 5 engine selector (ys2 0x010012). Masking to the low
-	   byte here collapsed every such title onto one song. */
-	unsigned song = titleCode ? titleCode : 1u;
-	if (!song && ge->titleCount > 0)
-		song = ge->title[0].code;
-	if (!hw_->StartSong(song))
+	/* Pass the whole code, including 0 (fmpac sample 00, ds4 track 0).
+	   Forcing 0→1 collapsed two picks onto one song. */
+	if (!hw_->StartSong(titleCode))
 		return 0;
 
 	Ay_Cpu* cpu = hw_->Cpu();
-	cpuTarget_ = cpu ? (uint64_t)cpu->time() : 0;
+	cpuTarget_ = cpu ? (uint64_t)cpu->time64() : 0;
 	playing_ = 1;
 	return 1;
 }
@@ -157,12 +172,32 @@ int CDriverMsx::Render(int16_t* stereo, int frames)
 			hw_->ChipAy()->Render(ayBuf, 1);
 		if (hw_->ChipScc())
 			hw_->ChipScc()->MixAdd(ayBuf, 1, 256);
+		if (hw_->ChipSng()) {
+			int16_t snBuf[2] = { 0, 0 };
+			hw_->ChipSng()->Render(snBuf, 1);
+			int32_t sl = (int32_t)ayBuf[0] + (int32_t)snBuf[0];
+			int32_t sr = (int32_t)ayBuf[1] + (int32_t)snBuf[1];
+			if (sl > 32767) sl = 32767;
+			if (sl < -32768) sl = -32768;
+			if (sr > 32767) sr = 32767;
+			if (sr < -32768) sr = -32768;
+			ayBuf[0] = (int16_t)sl;
+			ayBuf[1] = (int16_t)sr;
+		}
 		if (hw_->Opll()) {
 			OPLL* ochip = (OPLL*)hw_->Opll();
 			int32_t o = (int32_t)OPLL_calc(ochip) * 5;
 			if (o > 32767) o = 32767;
 			if (o < -32768) o = -32768;
 			opllS = (int16_t)o;
+		}
+		if (hw_->ChipOpl()) {
+			int16_t oplBuf[2] = { 0, 0 };
+			hw_->ChipOpl()->Render(oplBuf, 1);
+			int32_t ol = (int32_t)opllS + (int32_t)oplBuf[0];
+			if (ol > 32767) ol = 32767;
+			if (ol < -32768) ol = -32768;
+			opllS = (int16_t)ol;
 		}
 		int32_t l = (int32_t)ayBuf[0] + (int32_t)opllS;
 		int32_t r = (int32_t)ayBuf[1] + (int32_t)opllS;

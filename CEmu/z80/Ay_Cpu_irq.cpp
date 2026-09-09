@@ -1,4 +1,4 @@
-#include "StdAfx.h"
+﻿#include "StdAfx.h"
 // Z80 IM2 interrupt delivery and single-instruction step (hoot pc88 Runner)
 #include "Ay_Cpu.h"
 
@@ -129,6 +129,7 @@ bool Ay_CpuNmi(Ay_Cpu* cpu)
 int Ay_CpuRunOne(Ay_Cpu* cpu)
 {
 	if (!cpu) return 0;
+	cpu->fold_time();
 	/* Consume EI delay after the instruction that followed EI completes. */
 	const uint8_t clearDelay = cpu->irqDelay;
 	const cpu_time_t start = cpu->time();

@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "stdafx.h"
 #include "afxdialogex.h"
@@ -934,6 +934,16 @@ public:
 
     // CCustomOpaqueFixer 用: 外側の BufferedPaint バッファへ直接描画
     void PaintOpaqueIntoBuffer(HDC hdcBuf);
+
+    // 行の地色を少し寄せる。accent!=CLR_NONE なら名前列左に色帯。
+    // 選択・再生行では呼び出し側が無視する。既定は何もしない。
+    virtual BOOL GetListRowTint(int row, COLORREF& tintBg, COLORREF& accent) const
+    {
+        UNREFERENCED_PARAMETER(row);
+        UNREFERENCED_PARAMETER(tintBg);
+        UNREFERENCED_PARAMETER(accent);
+        return FALSE;
+    }
 
 protected:
     BOOL m_bAutoDelete;

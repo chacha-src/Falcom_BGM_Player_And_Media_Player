@@ -4,6 +4,8 @@
 #include "../cemu_zipfs.h"
 #include "../chip/cemu_chip_ay.h"
 #include "../chip/cemu_chip_scc.h"
+#include "../chip/cemu_chip_sn76489.h"
+#include "../chip/cemu_chip_opl.h"
 #include "../fmmon/fmmon_shadow.h"
 #include "../z80/cemu_z80_bus.h"
 #define BLARGG_LITTLE_ENDIAN 1
@@ -29,6 +31,32 @@ static const uint8_t kKssIpl[] = {
 static uint16_t Rd16(const uint8_t* p)
 {
 	return (uint16_t)(p[0] | ((uint16_t)p[1] << 8));
+}
+
+/* hoot ds4.cpp IPL — IM2, map banks 2/3, CALL $48F2, poll play/skip. */
+static const uint8_t kDs4Ipl[] = {
+	0xed,0x56,0x31,0x80,0xf3,0x3e,0x02,0x32,0x00,0x70,0x3c,0x32,0x00,0x78,0xcd,0xf2,
+	0x48,0xdb,0x00,0xb7,0x20,0x04,0xdb,0x02,0x18,0xf7,0xf3,0x3e,0x02,0x32,0x00,0x70,
+	0x3c,0x32,0x00,0x78,0xdb,0x01,0x32,0x94,0xc0,0xcd,0x9d,0x72,0xfb,0x18,0xe2,0xff,
+	0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xf3,0xf5,0xc5,0xd5,0xe5,0xdd,0xe5,0xfd,
+	0xe5,0x3e,0x02,0x32,0x00,0x70,0x3c,0x32,0x00,0x78,0xcd,0x36,0x72,0xfd,0xe1,0xdd,
+	0xe1,0xe1,0xd1,0xc1,0xf1,0xfb,0xc9,
+};
+
+static void PlantPsgTrampoline(uint8_t* mem)
+{
+	if (!mem) return;
+	if (mem[0x0090] == 0x00)
+		mem[0x0090] = 0xC9; /* GICINI */
+	mem[0x0093] = 0xC3; mem[0x0094] = 0xC0; mem[0x0095] = 0x00; /* JP 00C0 */
+	mem[0x0096] = 0xC3; mem[0x0097] = 0xD0; mem[0x0098] = 0x00; /* JP 00D0 */
+	mem[0x00C0] = 0xD3; mem[0x00C1] = 0xA0;
+	mem[0x00C2] = 0x7B;
+	mem[0x00C3] = 0xD3; mem[0x00C4] = 0xA1;
+	mem[0x00C5] = 0xC9;
+	mem[0x00D0] = 0xD3; mem[0x00D1] = 0xA0;
+	mem[0x00D2] = 0xDB; mem[0x00D3] = 0xA2;
+	mem[0x00D4] = 0xC9;
 }
 
 /* archive="game,fmpac_msx": FMPAC.ROM lives in the companion zip. */
@@ -63,6 +91,31 @@ static void CEmuMsxMergeCompanions(CEmuZipFs* fs, const CEmuGameEntry* ge)
 	}
 }
 
+static const unsigned char* FindMsxCodeRom(CEmuZipFs* fs, const char* name, unsigned* sz)
+{
+	if (sz) *sz = 0;
+	if (!fs || !name || !name[0]) return NULL;
+	const unsigned char* data = CEmuZipFsFind(fs, name, sz);
+	if (data && sz && *sz) return data;
+	/* dssp1 lists ran/BSRAND.OBJ but the zip ships ran/DRIVER.BIN. */
+	const char* slash = strrchr(name, '/');
+	if (!slash) slash = strrchr(name, '\\');
+	if (!slash) {
+		data = CEmuZipFsFind(fs, "DRIVER.BIN", sz);
+		if (data && sz && *sz) return data;
+		return NULL;
+	}
+	char alt[CEMU_ROM_NAME];
+	const int n = (int)(slash - name + 1);
+	if (n <= 0 || n >= (int)sizeof(alt) - 12) return NULL;
+	memcpy(alt, name, (size_t)n);
+	strcpy_s(alt + n, sizeof(alt) - (size_t)n, "DRIVER.BIN");
+	data = CEmuZipFsFind(fs, alt, sz);
+	if (data && sz && *sz) return data;
+	strcpy_s(alt + n, sizeof(alt) - (size_t)n, "DRIVER");
+	return CEmuZipFsFind(fs, alt, sz);
+}
+
 static int IsMsxPlatform(const CEmuGameEntry* ge)
 {
 	if (!ge) return 0;
@@ -70,6 +123,8 @@ static int IsMsxPlatform(const CEmuGameEntry* ge)
 	if (_stricmp(ge->dataDir, "msx") == 0) return 1;
 	if (_stricmp(ge->subtype, "kss") == 0 || _stricmp(ge->subtype, "opll") == 0) return 1;
 	if (_stricmp(ge->subtype, "generic") == 0 && _stricmp(ge->platform, "msx") == 0) return 1;
+	if (_stricmp(ge->subtype, "ds4") == 0 || _stricmp(ge->subtype, "ascii16") == 0) return 1;
+	if (_stricmp(ge->subtype, "dq1") == 0 || _stricmp(ge->subtype, "dq2") == 0) return 1;
 	return 0;
 }
 
@@ -96,6 +151,8 @@ CHardMsx::CHardMsx()
 	, cpu_(NULL)
 	, chipAy_(NULL)
 	, chipScc_(NULL)
+	, chipSng_(NULL)
+	, chipOpl_(NULL)
 	, chipOpll_(NULL)
 	, sampleRate_(44100)
 	, cpuCycles_(0)
@@ -120,7 +177,15 @@ CHardMsx::CHardMsx()
 	, titleCode_(0)
 	, ge_(NULL)
 	, playCmdPending_(0)
+	, mapper_(MAP_NONE)
+	, cart_(NULL)
+	, cartBytes_(0)
+	, ttlPrgBytes_(0)
+	, ttlPrgAddr_(0)
 {
+	ascii16Bank_[0] = ascii16Bank_[1] = 0;
+	ascii8Bank_[0] = ascii8Bank_[1] = ascii8Bank_[2] = ascii8Bank_[3] = 0;
+	ds4Bank_[0] = ds4Bank_[1] = 0;
 	hardKind = KIND_MSX;
 	memset(mem_, 0, sizeof(mem_));
 	memset(rom_, 0, sizeof(rom_));
@@ -128,6 +193,7 @@ CHardMsx::CHardMsx()
 	memset(bgmBank_, 0, sizeof(bgmBank_));
 	memset(bgmBankSize_, 0, sizeof(bgmBankSize_));
 	memset(bgmPresent_, 0, sizeof(bgmPresent_));
+	memset(ttlPrg_, 0, sizeof(ttlPrg_));
 }
 
 CHardMsx::~CHardMsx()
@@ -169,10 +235,13 @@ void CHardMsx::Shutdown()
 	if (cpu_) { delete cpu_; cpu_ = NULL; }
 	if (chipAy_) { CEmuChipAyDestroy(chipAy_); chipAy_ = NULL; }
 	if (chipScc_) { CEmuChipSccDestroy(chipScc_); chipScc_ = NULL; }
+	if (chipSng_) { CEmuChipSn76489Destroy(chipSng_); chipSng_ = NULL; }
+	if (chipOpl_) { CEmuChipYm3812Destroy(chipOpl_); chipOpl_ = NULL; }
 	if (chipOpll_) {
 		OPLL_delete((OPLL*)chipOpll_);
 		chipOpll_ = NULL;
 	}
+	if (cart_) { free(cart_); cart_ = NULL; cartBytes_ = 0; }
 }
 
 unsigned CHardMsx::AyWrites() const
@@ -198,19 +267,160 @@ void CHardMsx::EnsureOpll(int force)
 	}
 }
 
+void CHardMsx::EnsureSng()
+{
+	if (chipSng_) return;
+	chipSng_ = CEmuChipSn76489Create((uint32_t)MSX_CPU_HZ, sampleRate_);
+}
+
+void CHardMsx::EnsureMsxAudio()
+{
+	if (chipOpl_) return;
+	if (!(chips_ & CHIP_MSXAUDIO)) return;
+	chipOpl_ = CEmuChipYm3812Create((uint32_t)MSX_OPLL_HZ, sampleRate_);
+}
+
+void CHardMsx::PlantBiosStubs()
+{
+	/* Named MSX BIOS entries only — a blanket RET-fill of 0000-03FF
+	   smashed undead's OPLLDRV @0100. Each slot is a 3-byte JP/RET
+	   that the patch may overwrite during init. */
+	static const uint16_t kRet[] = {
+		0x0008, 0x0010, 0x0018, 0x0020, 0x0028, 0x0030,
+		0x001C, /* CALSLT */
+		0x0024, /* ENASLT */
+		0x0041, 0x0044, 0x0047, 0x004A, 0x004D,
+		0x0050, 0x0053, 0x0056, 0x0059, 0x005C,
+		0x005F, 0x0062, 0x0066, 0x0069, 0x006C,
+		0x0090, /* GICINI — genghis/saziri/tantexr CALL $0090 */
+		0x0099, 0x009C, 0x009F, 0x00A2, 0x00A5,
+		0x00A8, 0x00AB, 0x00AE, 0x00B1, 0x00B4
+		/* Do not plant $0100+ — Compile/Nichibutsu DRIVER.BIN loads @0100
+		   (dsdx1/seiha). A RET at RSLREG $0138 smashed those images. */
+	};
+	for (unsigned i = 0; i < sizeof(kRet) / sizeof(kRet[0]); i++) {
+		const uint16_t a = kRet[i];
+		if (mem_[a] == 0x00)
+			mem_[a] = 0xC9;
+	}
+	/* RDSLT @000C: byte from HL, ignore slot in A. Bodies @00F0 stay
+	   below DRIVER.BIN @0100. */
+	if (mem_[0x000C] == 0x00) {
+		mem_[0x000C] = 0xC3; mem_[0x000D] = 0xF0; mem_[0x000E] = 0x00;
+		mem_[0x00F0] = 0x7E; /* LD A,(HL) */
+		mem_[0x00F1] = 0xC9;
+	}
+	/* WRSLT @0014: (HL)=E */
+	if (mem_[0x0014] == 0x00) {
+		mem_[0x0014] = 0xC3; mem_[0x0015] = 0xF2; mem_[0x0016] = 0x00;
+		mem_[0x00F2] = 0x73; /* LD (HL),E */
+		mem_[0x00F3] = 0xC9;
+	}
+	/* CP/M BDOS @0005: ROOT.COM (genghis) CALL 5. XOR A / RET = success.
+	   Body at $00B7 sits between BIOS RETs and the PSG trampoline @00C0. */
+	if (mem_[0x0005] == 0x00 || mem_[0x0005] == 0xC9) {
+		if (mem_[0x00B7] == 0x00 && mem_[0x00B8] == 0x00) {
+			mem_[0x0005] = 0xC3; mem_[0x0006] = 0xB7; mem_[0x0007] = 0x00;
+			mem_[0x00B7] = 0xAF; /* XOR A */
+			mem_[0x00B8] = 0xC9;
+		} else if (mem_[0x0005] == 0x00)
+			mem_[0x0005] = 0xC9;
+	}
+}
+
+void CHardMsx::MapAscii16(int page, uint8_t bank)
+{
+	if (!cart_ || cartBytes_ == 0) return;
+	unsigned nBanks = (cartBytes_ + 0x3FFFu) / 0x4000u;
+	if (nBanks == 0) nBanks = 1;
+	const unsigned b = (unsigned)bank % nBanks;
+	const unsigned off = b * 0x4000u;
+	const uint16_t dest = page ? 0x8000 : 0x4000;
+	unsigned n = 0x4000u;
+	if (off >= cartBytes_) return;
+	if (off + n > cartBytes_) n = cartBytes_ - off;
+	memcpy(mem_ + dest, cart_ + off, n);
+	if (n < 0x4000u)
+		memset(mem_ + dest + n, 0xFF, 0x4000u - n);
+	ascii16Bank_[page & 1] = (uint8_t)b;
+}
+
+void CHardMsx::MapAscii8(int page, uint8_t bank)
+{
+	if (!cart_ || cartBytes_ == 0) return;
+	unsigned nBanks = (cartBytes_ + 0x1FFFu) / 0x2000u;
+	if (nBanks == 0) nBanks = 1;
+	const unsigned b = (unsigned)bank % nBanks;
+	const unsigned off = b * 0x2000u;
+	const uint16_t dest = (uint16_t)(0x4000u + (unsigned)(page & 3) * 0x2000u);
+	unsigned n = 0x2000u;
+	if (off >= cartBytes_) return;
+	if (off + n > cartBytes_) n = cartBytes_ - off;
+	memcpy(mem_ + dest, cart_ + off, n);
+	if (n < 0x2000u)
+		memset(mem_ + dest + n, 0xFF, 0x2000u - n);
+	ascii8Bank_[page & 3] = (uint8_t)b;
+}
+
+void CHardMsx::MapDs4(int page, uint8_t bank)
+{
+	if (!cart_ || cartBytes_ == 0) return;
+	unsigned nBanks = (cartBytes_ + 0x1FFFu) / 0x2000u;
+	if (nBanks == 0) nBanks = 1;
+	const unsigned b = (unsigned)bank % nBanks;
+	const unsigned off = b * 0x2000u;
+	const uint16_t dest = page ? 0xA000 : 0x8000;
+	unsigned n = 0x2000u;
+	if (off >= cartBytes_) return;
+	if (off + n > cartBytes_) n = cartBytes_ - off;
+	memcpy(mem_ + dest, cart_ + off, n);
+	ds4Bank_[page & 1] = (uint8_t)b;
+}
+
+int CHardMsx::LoadCartRom(CEmuZipFs* fs, const CEmuGameEntry* ge, const char* type)
+{
+	if (!fs || !ge || !type) return 0;
+	for (int i = 0; i < ge->romCount; i++) {
+		if (_stricmp(ge->rom[i].type, type) != 0) continue;
+		unsigned sz = 0;
+		const unsigned char* data = CEmuZipFsFind(fs, ge->rom[i].name, &sz);
+		if (!data || sz < 16) continue;
+		if (cart_) { free(cart_); cart_ = NULL; cartBytes_ = 0; }
+		cart_ = (uint8_t*)malloc(sz);
+		if (!cart_) return 0;
+		memcpy(cart_, data, sz);
+		cartBytes_ = sz;
+		return 1;
+	}
+	int best = -1;
+	unsigned bestSz = 0;
+	for (int i = 0; i < fs->fileCount; i++) {
+		char pathA[CEMU_ZIP_PATH];
+		WideCharToMultiByte(932, 0, fs->files[i].path, -1, pathA, (int)sizeof(pathA), NULL, NULL);
+		if (_stricmp(pathA, "patch") == 0 || _stricmp(pathA, "fmpatch") == 0)
+			continue;
+		if (fs->files[i].size > bestSz) { bestSz = fs->files[i].size; best = i; }
+	}
+	if (best < 0 || bestSz < 16) return 0;
+	if (cart_) { free(cart_); cart_ = NULL; cartBytes_ = 0; }
+	cart_ = (uint8_t*)malloc(bestSz);
+	if (!cart_) return 0;
+	memcpy(cart_, fs->files[best].data, bestSz);
+	cartBytes_ = bestSz;
+	return 1;
+}
+
 void CHardMsx::ApplyBank(uint8_t bankSel)
 {
 	if (!bank_ || bankNum_ == 0) return;
 	const int bankno = (int)bankSel - (int)bankOfs_;
 	if (bankno < 0 || bankno >= (int)bankNum_)
 		return;
-	if (bank8k_) {
-		(void)bankno;
-	} else {
-		const unsigned off = (unsigned)bankno * 0x4000u;
-		if (off + 0x4000u <= bankBytes_)
-			memcpy(mem_ + 0x8000, bank_ + off, 0x4000);
-	}
+	/* hoot kss.cpp port $FE always maps 16K at $8000, even in 8K mode
+	   (8K pages are switched from $9000/$B000). */
+	const unsigned off = (unsigned)bankno * 0x4000u;
+	if (off + 0x4000u <= bankBytes_)
+		memcpy(mem_ + 0x8000, bank_ + off, 0x4000);
 }
 
 void CHardMsx::MapDefault()
@@ -220,6 +430,17 @@ void CHardMsx::MapDefault()
 uint8_t CHardMsx::PortIn(uint16_t port)
 {
 	const uint8_t p = (uint8_t)(port & 0xff);
+	if (mapper_ == MAP_DS4) {
+		if (p == 0x00) {
+			const uint8_t ret = ioport_[0];
+			ioport_[0] = 0;
+			return ret;
+		}
+		if (p == 0x02) {
+			idle_ = 1;
+			return 0;
+		}
+	}
 	if (p == SKIP_PORT) {
 		idle_ = 1;
 		return 0;
@@ -239,12 +460,26 @@ uint8_t CHardMsx::PortIn(uint16_t port)
 		if (chipAy_) return chipAy_->ReadData();
 		return 0xff;
 	}
+	if ((p == 0xc0 || p == 0xc1) && chipOpl_) {
+		/* Y8950 drivers spin on status bit7 (timer IRQ). YM3812's timers
+		   are not clocked here; report ready so CALL 6009 can issue FM. */
+		return (uint8_t)(chipOpl_->ReadStatus() | 0x80);
+	}
 	return ioport_[p];
 }
 
 void CHardMsx::PortOut(uint16_t port, uint8_t data)
 {
 	const uint8_t p = (uint8_t)(port & 0xff);
+	if (p == 0xc0 || p == 0xc1) {
+		if (chips_ & CHIP_MSXAUDIO)
+			EnsureMsxAudio();
+		if (chipOpl_) {
+			chipOpl_->Write((uint32_t)(p & 1), data);
+			ioport_[p] = data;
+			return;
+		}
+	}
 	if (p == 0x7c || p == 0x7d || p == 0xc0 || p == 0xc1 || p == 0xf0 || p == 0xf1) {
 		/* Generic patches often OUT to 7C without a catalog use_opll bit.
 		   KSS must not force-create OPLL — a stray poke would leave a drone
@@ -275,6 +510,13 @@ void CHardMsx::PortOut(uint16_t port, uint8_t data)
 		ioport_[p] = data;
 		return;
 	}
+	if (p == 0x7e || p == 0x7f) {
+		EnsureSng();
+		if (chipSng_)
+			chipSng_->Write(0, data);
+		ioport_[p] = data;
+		return;
+	}
 	if (p == 0xfe) {
 		ApplyBank(data);
 		ioport_[p] = data;
@@ -291,7 +533,7 @@ void CHardMsx::MemWrite(uint16_t addr, uint8_t data)
 	/* FMPAC / MSX-MUSIC memory-mapped OPLL (same latch/data as ports 7C/7D).
 	   Generic cartridge patches only — KSS drivers talk OPLL via 7C/7D, and
 	   treating 7FF4/5 as OPLL on KSS steals ordinary RAM writes (sorc NOSEQ). */
-	if (genericMode_ && (addr == 0x7ff4 || addr == 0x7ff5)) {
+	if ((genericMode_ || mapper_ != MAP_NONE) && (addr == 0x7ff4 || addr == 0x7ff5)) {
 		EnsureOpll(1);
 		if (chipOpll_) {
 			OPLL* o = (OPLL*)chipOpll_;
@@ -305,6 +547,22 @@ void CHardMsx::MemWrite(uint16_t addr, uint8_t data)
 			}
 		}
 		return;
+	}
+
+	if (mapper_ == MAP_ASCII16) {
+		if (addr >= 0x6000 && addr < 0x7000) { MapAscii16(0, data); return; }
+		if (addr >= 0x7000 && addr < 0x8000) { MapAscii16(1, data); return; }
+		if (addr >= 0x4000 && addr < 0xC000) return;
+	} else if (mapper_ == MAP_ASCII8) {
+		if (addr >= 0x6000 && addr < 0x6800) { MapAscii8(0, data); return; }
+		if (addr >= 0x6800 && addr < 0x7000) { MapAscii8(1, data); return; }
+		if (addr >= 0x7000 && addr < 0x7800) { MapAscii8(2, data); return; }
+		if (addr >= 0x7800 && addr < 0x8000) { MapAscii8(3, data); return; }
+		if (addr >= 0x4000 && addr < 0xC000) return;
+	} else if (mapper_ == MAP_DS4) {
+		if (addr == 0x7000) { MapDs4(0, data); return; }
+		if (addr == 0x7800) { MapDs4(1, data); return; }
+		if (addr >= 0x4000 && addr < 0xC000) return;
 	}
 
 	/* Konami SCC: KSS maps both 9800 and B800 onto the same 0x90-byte file
@@ -347,6 +605,10 @@ void CHardMsx::MemWrite(uint16_t addr, uint8_t data)
 			}
 			return;
 		}
+		/* hoot: fetch/read the bank, writes go to a hidden RAM. Overwriting
+		   mem_ here corrupted the mapped ROM (labyr/shiryo 8K KSS). */
+		if (addr >= 0x8000 && addr < 0xC000)
+			return;
 	}
 	mem_[addr] = data;
 }
@@ -391,33 +653,63 @@ int CHardMsx::LoadGeneric(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned title
 	idle_ = 0;
 	playing_ = 0;
 	chips_ = 0;
+	ttlPrgBytes_ = 0;
+	ttlPrgAddr_ = 0;
 
 	CEmuMsxMergeCompanions(fs, ge);
 
 	int loadedCode = 0;
 	int useOpll = ParseOptHex(ge, "use_opll", 0);
+	int useMsxa = ParseOptHex(ge, "use_msxa", 0);
 	for (int i = 0; i < ge->romCount; i++) {
 		const CEmuRomEntry* r = &ge->rom[i];
 		unsigned sz = 0;
-		const unsigned char* data = CEmuZipFsFind(fs, r->name, &sz);
+		const unsigned char* data = (_stricmp(r->type, "code") == 0)
+			? FindMsxCodeRom(fs, r->name, &sz)
+			: CEmuZipFsFind(fs, r->name, &sz);
 		if (!data || !sz) continue;
 
-		if (_stricmp(r->type, "code") == 0 || _stricmp(r->type, "fmbios") == 0) {
+		if (_stricmp(r->type, "code") == 0 || _stricmp(r->type, "fmbios") == 0
+			|| _stricmp(r->type, "rom") == 0) {
 			int off = r->offset;
-			/* winsltn FMPAC.ROM @0 clobbers page0 BIOS stubs → silent WEAK.
-			   Remap that title only; yosikon still probes the ROM near 0. */
-			if (_stricmp(r->type, "fmbios") == 0 && off <= 0
-				&& ge->archive[0] && _strnicmp(ge->archive, "winsltn", 7) == 0)
+			/* type=rom is a cartridge image — keep out of page0 BIOS. Do not
+			   flatten type=sccp here: Konami SCC+ dumps overlay GRA.BIN @4000
+			   and kgc* already PLAYS from the patch alone. */
+			if (_stricmp(r->type, "rom") == 0 && off <= 0)
+				off = 0x4000;
+			/* FMPAC.ROM @0 is a slot-1 cartridge image, not page0. Mapping it
+			   at 0 wipes BIOS stubs and the patch @0400 (yosikon/winsltn). */
+			if (_stricmp(r->type, "fmbios") == 0 && off <= 0)
 				off = 0x4000;
 			if (off < 0) off = 0;
 			if (off >= 0x10000) continue;
 			unsigned n = sz;
 			if (off + (int)n > 0x10000)
 				n = (unsigned)(0x10000 - off);
+			/* Padded 64K FMPAC.ROM @4000 must not wipe later code (yosikon
+			   DRIVER @$D400, winsltn ALL.BIN @$B9B9, rona MUSDRV @$CE00). */
+			if (_stricmp(r->type, "fmbios") == 0) {
+				for (int j = 0; j < ge->romCount; j++) {
+					if (j == i) continue;
+					const CEmuRomEntry* o = &ge->rom[j];
+					if (_stricmp(o->type, "code") != 0 && _stricmp(o->type, "rom") != 0)
+						continue;
+					int ooff = o->offset;
+					if (_stricmp(o->type, "rom") == 0 && ooff <= 0)
+						ooff = 0x4000;
+					if (ooff > off && ooff < off + (int)n)
+						n = (unsigned)(ooff - off);
+				}
+			}
 			memcpy(mem_ + off, data, n);
 			loadedCode++;
 			if (_stricmp(r->type, "fmbios") == 0)
 				chips_ |= CHIP_FMPAC;
+			if (_strnicmp(r->name, "TTLPRG", 6) == 0 && n > 0 && n <= sizeof(ttlPrg_)) {
+				memcpy(ttlPrg_, data, n);
+				ttlPrgBytes_ = n;
+				ttlPrgAddr_ = (uint16_t)off;
+			}
 		} else if (_stricmp(r->type, "bgm") == 0) {
 			int idx = r->offset;
 			if (idx < 0 || idx >= BGM_BANKS) continue;
@@ -481,6 +773,7 @@ int CHardMsx::LoadGeneric(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned title
 	mem_[0x00D0] = 0xD3; mem_[0x00D1] = 0xA0;
 	mem_[0x00D2] = 0xDB; mem_[0x00D3] = 0xA2;
 	mem_[0x00D4] = 0xC9;
+	PlantBiosStubs();
 
 	initPc_ = (uint16_t)ParseOptHex(ge, "init_pc", 0x400);
 	mdataAddr_ = (uint16_t)ParseOptHex(ge, "mdata_addr", 0xA400);
@@ -503,7 +796,16 @@ int CHardMsx::LoadGeneric(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned title
 
 	if (useOpll)
 		chips_ |= CHIP_FMPAC;
+	if (useMsxa)
+		chips_ |= CHIP_MSXAUDIO;
 	EnsureOpll(useOpll ? 1 : 0);
+	if (useMsxa)
+		EnsureMsxAudio();
+	{
+		const int useScc = ParseOptHex(ge, "use_scc", 0);
+		if (useScc)
+			sccEnable_ = 1;
+	}
 	/* Generic: don't force SCC into 9800 — wait for mapper 0x3F. KSS sets
 	   sccEnable_ from the chip byte below in LoadKssImage. */
 	sccEnable_ = 0;
@@ -565,8 +867,10 @@ int CHardMsx::LoadKssImage(CEmuZipFs* fs, const CEmuGameEntry* ge)
 	bankNum_ = (uint8_t)(rom_[0x0d] & 0x7f);
 	bank8k_ = (rom_[0x0d] & 0x80) ? 1 : 0;
 	chips_ = rom_[0x0f];
-	sccEnable_ = (!(chips_ & CHIP_SCCDISABLE)
-		&& ((chips_ & (CHIP_SNG | CHIP_GGSTEREO)) != CHIP_GGSTEREO)) ? 1 : 0;
+	/* Do not steal $9800 as SCC until the mapper is written 0x3F.
+	   hoot maps SCC from the chip byte, but several KSCC (replcart) keep
+	   work RAM there; Konami SCC titles still write 0x3F first. */
+	sccEnable_ = 0;
 	sccMapped_ = 0;
 	sccAccessed_ = 0;
 	if (chipScc_) chipScc_->Reset();
@@ -586,6 +890,10 @@ int CHardMsx::LoadKssImage(CEmuZipFs* fs, const CEmuGameEntry* ge)
 	}
 
 	EnsureOpll(0);
+	if (chips_ & CHIP_SNG)
+		EnsureSng();
+	if (chips_ & CHIP_MSXAUDIO)
+		EnsureMsxAudio();
 	MapDefault();
 	cpu_->reset(mem_);
 	cpuCycles_ = 0;
@@ -615,6 +923,19 @@ int CHardMsx::LoadKss(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode
 		OPLL_delete((OPLL*)chipOpll_);
 		chipOpll_ = NULL;
 	}
+	if (chipOpl_) {
+		CEmuChipYm3812Destroy(chipOpl_);
+		chipOpl_ = NULL;
+	}
+	if (cart_) { free(cart_); cart_ = NULL; cartBytes_ = 0; }
+	mapper_ = MAP_NONE;
+
+	if (_stricmp(ge->subtype, "ds4") == 0)
+		return LoadDs4(fs, ge, titleCode);
+	if (_stricmp(ge->subtype, "ascii16") == 0)
+		return LoadAscii16(fs, ge, titleCode);
+	if (_stricmp(ge->subtype, "dq1") == 0 || _stricmp(ge->subtype, "dq2") == 0)
+		return LoadDq(fs, ge, titleCode);
 
 	const int hasInitPc = ParseOptHex(ge, "init_pc", -1) >= 0
 		|| ParseOptHex(ge, "mdata_addr", -1) >= 0;
@@ -667,8 +988,27 @@ int CHardMsx::StartSongKss(unsigned titleCode)
 	mem_[0x97] = 0x09;
 	mem_[0x98] = 0x00;
 
-	ioport_[PLAY_CODE_PORT] = (uint8_t)(titleCode & 0xff);
+	/* Labyrinth chip-byte 0x08 is MSX-AUDIO; titles 0x80/0x81 set BIT 7 so
+	   the loader takes the Y8950 path. Without a timer-ticking Y8950 that
+	   path never keys the FM. Bit7-clear is the PSG arrangement. */
+	{
+		uint8_t play = (uint8_t)(titleCode & 0xff);
+		if ((chips_ & CHIP_MSXAUDIO) && !(chips_ & CHIP_FMPAC) && (play & 0x80))
+			play = (uint8_t)(play & 0x7f);
+		ioport_[PLAY_CODE_PORT] = play;
+	}
 	PortOut(0xfe, 0);
+	if (bank8k_ && bank_ && bankBytes_ >= 0x2000u) {
+		memcpy(mem_ + 0x8000, bank_, 0x2000);
+		if (bankNum_ > 1 && bankBytes_ >= 0x4000u)
+			memcpy(mem_ + 0xA000, bank_ + 0x2000, 0x2000);
+	}
+
+	/* Unset I + $C9 fill made IM2 vector $C9C9. Point it at the IPL ISR. */
+	if (mem_[0x00FF] == 0xC9 && mem_[0x0100] == 0xC9) {
+		mem_[0x00FF] = 0x38;
+		mem_[0x0100] = 0x00;
+	}
 
 	cpu_->reset(mem_);
 	cpuCycles_ = 0;
@@ -676,15 +1016,40 @@ int CHardMsx::StartSongKss(unsigned titleCode)
 	playing_ = 0;
 	sccAccessed_ = 0;
 	if (chipScc_) chipScc_->Reset();
+	if (chipSng_) chipSng_->Reset();
+	if (chipAy_) chipAy_->Reset();
 
 	CEmuHardMsxSetActive(this);
+	/* hoot Play() emulates with the 60 Hz timer live until SKIP. Init
+	   that EI/HALTs (or waits on vblank) never returns without IRQs. */
 	int guard = 0;
-	while (!idle_ && guard++ < 2000000) {
+	uint64_t nextIrq = (uint64_t)MSX_CPU_HZ / 60u;
+	while (!idle_ && guard++ < 4000000) {
+		uint8_t* m = cpu_->get_mem();
+		if (m && m[cpu_->r.pc] == 0x76) {
+			if (cpu_->r.iff1) {
+				if (cpu_->r.im != 2 || !Ay_CpuIm2Interrupt(cpu_, 0xff))
+					Ay_CpuIm1Interrupt(cpu_);
+			}
+			cpuCycles_ += 16;
+			cpu_->adjust_time(16);
+			if (cpuCycles_ >= nextIrq)
+				nextIrq += (uint64_t)MSX_CPU_HZ / 60u;
+			continue;
+		}
 		const int cyc = Ay_CpuRunOne(cpu_);
 		if (cyc <= 0) break;
 		cpuCycles_ += (uint64_t)cyc;
+		if (cpuCycles_ >= nextIrq) {
+			nextIrq += (uint64_t)MSX_CPU_HZ / 60u;
+			if (cpu_->r.iff1) {
+				if (cpu_->r.im != 2 || !Ay_CpuIm2Interrupt(cpu_, 0xff))
+					Ay_CpuIm1Interrupt(cpu_);
+			}
+		}
 	}
 	playing_ = 1;
+	idle_ = 0;
 	return 1;
 }
 
@@ -708,20 +1073,91 @@ int CHardMsx::StartSongGeneric(unsigned titleCode)
 	unsigned song = low;   /* bgm rom to stage */
 	unsigned sel3 = low;   /* port 3 mailbox */
 	unsigned sel4 = low;   /* port 4 mailbox */
-	if (top) {
+
+	/* herzog 0x0009/0x0109, ultima4 0x0104/0x0201, f1sp3d 0x0d09/0x0e09:
+	   two-byte codes share a bgm file in the low byte and put the track
+	   in the middle. Needs a real driver rom (not the hoot patch) so
+	   gshogi — player lives inside the bgm files — stays on the old path. */
+	int extraCode = 0;
+	if (ge_) {
+		for (int i = 0; i < ge_->romCount; i++) {
+			if (_stricmp(ge_->rom[i].type, "code") != 0)
+				continue;
+			if (ge_->rom[i].offset == (int)initPc_)
+				continue;
+			extraCode = 1;
+			break;
+		}
+	}
+	int lowFilePack = 0;
+	if (extraCode && ge_) {
+		for (int i = 0; i < ge_->titleCount && !lowFilePack; i++) {
+			const unsigned ci = ge_->title[i].code;
+			if (ci > 0xFFFFu)
+				continue;
+			const unsigned li = ci & 0xff;
+			const unsigned mi = (ci >> 8) & 0xff;
+			if (li >= BGM_BANKS || !bgmPresent_[li])
+				continue;
+			for (int j = i + 1; j < ge_->titleCount; j++) {
+				const unsigned cj = ge_->title[j].code;
+				if (cj > 0xFFFFu)
+					continue;
+				if ((cj & 0xff) == li && ((cj >> 8) & 0xff) != mi) {
+					lowFilePack = 1;
+					break;
+				}
+			}
+		}
+	}
+
+	/* saziri 0x40000100: high word is an address, low is the file.
+	   The f1sp3d `low==0 → stage mid` path would stage file 1 for both
+	   0x40000100 and 0x40000101 (SAMESONG). */
+	const unsigned hiWordEarly = titleCode >> 16;
+	const int addrBoxEarly = (hiWordEarly >= 0x1000u) ? 1 : 0;
+
+	if (lowFilePack && low < BGM_BANKS && bgmPresent_[low]) {
+		song = low;
+		sel3 = low;
+		sel4 = mid;
+	} else if (addrBoxEarly) {
+		song = low;
+		sel3 = low;
+		sel4 = low;
+	} else if (top) {
 		sel4 = mid ? mid : low;
+	} else if (mid && low == 0 && mid < BGM_BANKS && bgmPresent_[mid]) {
+		/* f1sp3d 0x0300 when the title list has no same-low pair. */
+		song = mid;
+		sel3 = 0;
+		sel4 = 0;
 	} else if (mid && !bgmPresent_[low] && bgmPresent_[mid]) {
-		/* Only claim the middle byte when the low one names no rom: gshogi
-		   0x0501 and pup8 0x0201 both carry a low byte that is a real
-		   selector, and reading them as the song broke titles that worked. */
+		/* aleste2 0x0115: middle byte picks the bgm rom, low is the song
+		   inside it. gshogi 0x0501 keeps low as the selector because 0x01
+		   is also a valid rom — staging the middle file silenced 0x0201. */
 		song = mid;
 	}
 
 	/* Defer StageBgm until after init settle when mdata overlays a code
 	   image the patch still needs (Tokuma FMPAC @A000; Telenet alba2/valis2
 	   TSTI/IPL89 @4000 with mdata_addr=4000 — early StageBgm zeroed the
-	   LDIR source and left CALL AC06 in a NOP sled → pc≈F91F). */
-	const int deferBgm = (mdataAddr_ >= 0x4000 && mdataAddr_ < 0xE000);
+	   LDIR source and left CALL AC06 in a NOP sled → pc≈F91F).
+	   ys3: mdata $0300+$0E00 overlays EFCDAT @0B00.
+	   Also defer every $4000–$E000 window: gshogi mdata @A000 is workspace
+	   during init, and staging the song first silenced both picks. */
+	int deferBgm = (mdataAddr_ >= 0x4000 && mdataAddr_ < 0xE000);
+	if (!deferBgm && ge_ && mdataSize_ > 0) {
+		const unsigned m0 = mdataAddr_;
+		const unsigned m1 = mdataAddr_ + mdataSize_;
+		for (int i = 0; i < ge_->romCount; i++) {
+			if (_stricmp(ge_->rom[i].type, "code") != 0
+				&& _stricmp(ge_->rom[i].type, "fmbios") != 0)
+				continue;
+			const unsigned off = (unsigned)(ge_->rom[i].offset < 0 ? 0 : ge_->rom[i].offset);
+			if (off >= m0 && off < m1) { deferBgm = 1; break; }
+		}
+	}
 
 	if (!deferBgm) {
 		if (song < BGM_BANKS && bgmPresent_[song])
@@ -744,6 +1180,32 @@ int CHardMsx::StartSongGeneric(unsigned titleCode)
 	ioport_[0x04] = (uint8_t)(sel4 & 0xff);
 	ioport_[0x05] = (uint8_t)(top & 0xff);
 	ioport_[0x07] = (chips_ & CHIP_FMPAC) ? 0x01 : 0x00;
+	/* KOEI 4-byte (genghis 0x01990010): patch IN A,(4)/IN A,(5) as HL into
+	   MMLDATA @8000. High word is the offset; no separate bgm roms. */
+	int anyBgm = 0;
+	for (unsigned i = 0; i < BGM_BANKS; i++) {
+		if (bgmPresent_[i]) { anyBgm = 1; break; }
+	}
+	if (!anyBgm && titleCode > 0xFFFFFFu) {
+		uint16_t hl = (uint16_t)((titleCode >> 16) + 0x8000u);
+		ioport_[0x04] = (uint8_t)(hl & 0xff);
+		ioport_[0x05] = (uint8_t)(hl >> 8);
+		ioport_[0x06] = (uint8_t)(mid & 0xff);
+		sel4 = ioport_[0x04];
+	}
+	/* saziri 0x44730002 / tantexr 0x239d0000: IN A,(5)/IN A,(6) as HL
+	   into the staged file. High word is an absolute address when it
+	   sits inside mdata, else an offset. Skip 0x01xxxx engine bytes. */
+	const unsigned hiWord = titleCode >> 16;
+	const int addrBox = (anyBgm && hiWord >= 0x1000u) ? 1 : 0;
+	if (addrBox) {
+		uint16_t hl = (uint16_t)hiWord;
+		if (!(mdataSize_ > 0 && hl >= mdataAddr_
+			&& (unsigned)hl < (unsigned)mdataAddr_ + mdataSize_))
+			hl = (uint16_t)(mdataAddr_ + hiWord);
+		ioport_[0x05] = (uint8_t)(hl & 0xff);
+		ioport_[0x06] = (uint8_t)(hl >> 8);
+	}
 	ioport_[PLAY_CODE_PORT] = (uint8_t)(sel3 & 0xff);
 	playCmdPending_ = 0; /* arm only after settle */
 	titleCode_ = sel4;
@@ -786,6 +1248,19 @@ int CHardMsx::StartSongGeneric(unsigned titleCode)
 	CEmuHardMsxSetActive(this);
 	int guard = 0;
 	while (guard++ < 200000) {
+		uint8_t* m = cpu_->get_mem();
+		if (m && m[cpu_->r.pc] == 0x76) {
+			if (!cpu_->r.iff1) {
+				cpu_->r.pc = (uint16_t)(cpu_->r.pc + 1);
+				cpuCycles_ += 4;
+				continue;
+			}
+			/* yosikon CALL $D400 waits EI;HALT; settle has no Render IRQ. */
+			if (cpu_->r.im != 2 || !Ay_CpuIm2Interrupt(cpu_, 0xff))
+				Ay_CpuIm1Interrupt(cpu_);
+			cpuCycles_ += 16;
+			continue;
+		}
 		const int cyc = Ay_CpuRunOne(cpu_);
 		if (cyc <= 0) break;
 		cpuCycles_ += (uint64_t)cyc;
@@ -800,6 +1275,14 @@ int CHardMsx::StartSongGeneric(unsigned titleCode)
 			}
 		}
 	}
+	/* ys2 title engine (port5=1): init LDIR MUSPRG→$B000 wipes TTLPRG. */
+	if (ttlPrgBytes_ && ttlPrgAddr_ && (top == 1 || ioport_[0x05] == 1)) {
+		unsigned n = ttlPrgBytes_;
+		if ((unsigned)ttlPrgAddr_ + n > 0x10000u)
+			n = 0x10000u - ttlPrgAddr_;
+		if (n > sizeof(ttlPrg_)) n = sizeof(ttlPrg_);
+		memcpy(mem_ + ttlPrgAddr_, ttlPrg_, n);
+	}
 	/* Song is staged: let the trampoline body reach H.TIMI. 0038 itself is
 	   left to whoever claimed it during init. Titles that hook H.TIMI only
 	   after the play edge overwrite the RET below and start ticking then. */
@@ -813,15 +1296,230 @@ int CHardMsx::StartSongGeneric(unsigned titleCode)
 	/* One-shot play after handlers exist (port2/3/4 mailboxes). */
 	playCmdPending_ = 8; /* a few edges; not sticky-forever */
 	ioport_[0x02] = 0x01;
-	ioport_[0x03] = (uint8_t)(song & 0xff);
-	ioport_[0x04] = (uint8_t)(song & 0xff);
+	if (!anyBgm && titleCode > 0xFFFFFFu) {
+		uint16_t hl = (uint16_t)((titleCode >> 16) + 0x8000u);
+		ioport_[0x04] = (uint8_t)(hl & 0xff);
+		ioport_[0x05] = (uint8_t)(hl >> 8);
+		titleCode_ = ioport_[0x04];
+	} else if (addrBox) {
+		uint16_t hl = (uint16_t)hiWord;
+		if (!(mdataSize_ > 0 && hl >= mdataAddr_
+			&& (unsigned)hl < (unsigned)mdataAddr_ + mdataSize_))
+			hl = (uint16_t)(mdataAddr_ + hiWord);
+		ioport_[0x03] = (uint8_t)(sel3 & 0xff);
+		ioport_[0x04] = (uint8_t)(sel4 & 0xff);
+		ioport_[0x05] = (uint8_t)(hl & 0xff);
+		ioport_[0x06] = (uint8_t)(hl >> 8);
+	} else if (top) {
+		ioport_[0x03] = (uint8_t)(sel3 & 0xff);
+		ioport_[0x04] = (uint8_t)(sel4 & 0xff);
+		ioport_[0x05] = (uint8_t)(top & 0xff);
+	} else {
+		ioport_[0x03] = (uint8_t)(song & 0xff);
+		/* herzog track lives in sel4; smashing both ports to `song`
+		   (mshpgolf) would collapse 0x0009/0x0109 onto one request. */
+		ioport_[0x04] = (uint8_t)(lowFilePack ? sel4 : song);
+	}
 	ioport_[0x07] = (chips_ & CHIP_FMPAC) ? 0x01 : 0x00;
 	idle_ = 0;
 	return 1;
 }
 
+int CHardMsx::LoadDs4(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode)
+{
+	(void)titleCode;
+	if (!LoadCartRom(fs, ge, "code"))
+		return 0;
+	mapper_ = MAP_DS4;
+	genericMode_ = 0;
+	chips_ = 0;
+	sccEnable_ = 0;
+	sccMapped_ = 0;
+	sccAccessed_ = 0;
+	memset(mem_, 0, sizeof(mem_));
+	/* Fixed 16K window at $4000 plus Konami 8K pages at $8000/$A000. */
+	{
+		unsigned n = cartBytes_;
+		if (n > 0x4000u) n = 0x4000u;
+		memcpy(mem_ + 0x4000, cart_, n);
+	}
+	MapDs4(0, 2);
+	MapDs4(1, 3);
+	memcpy(mem_, kDs4Ipl, sizeof(kDs4Ipl));
+	mem_[0x93] = 0xc3; mem_[0x94] = 0x02; mem_[0x95] = 0x11;
+	mem_[0x96] = 0xc3; mem_[0x97] = 0x0e; mem_[0x98] = 0x11;
+	mem_[0x1102] = 0xf3; mem_[0x1103] = 0xd3; mem_[0x1104] = 0xa0;
+	mem_[0x1105] = 0xf5; mem_[0x1106] = 0x7b; mem_[0x1107] = 0xd3;
+	mem_[0x1108] = 0xa1; mem_[0x1109] = 0xfb; mem_[0x110a] = 0xf1;
+	mem_[0x110b] = 0xc9;
+	mem_[0x110e] = 0xd3; mem_[0x110f] = 0xa0;
+	mem_[0x1110] = 0xdb; mem_[0x1111] = 0xa2; mem_[0x1112] = 0xc9;
+	cpu_->reset(mem_);
+	cpuCycles_ = 0;
+	idle_ = 0;
+	playing_ = 0;
+	if (chipAy_) chipAy_->Reset();
+	CEmuHardMsxSetActive(this);
+	/* Warmup must ignore SKIP/idle — IPL polls port 2 until Play. */
+	{
+		int guard = 0;
+		uint64_t cyc = 0;
+		while (cyc < 10000u && guard++ < 400000) {
+			const int c = Ay_CpuRunOne(cpu_);
+			if (c <= 0) break;
+			cyc += (uint64_t)c;
+			cpuCycles_ += (uint64_t)c;
+		}
+	}
+	idle_ = 0;
+	mem_[0xc042] = 0x02;
+	mem_[0xc043] = 0x03;
+	mem_[0xc095] = 0xff;
+	mem_[0xc098] = 0xbf;
+	return 1;
+}
+
+int CHardMsx::LoadAscii16(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode)
+{
+	titleCode_ = titleCode;
+	ge_ = ge;
+	genericMode_ = 1;
+	mapper_ = MAP_ASCII16;
+	memset(mem_, 0, sizeof(mem_));
+	memset(ioport_, 0, sizeof(ioport_));
+	FreeBanks();
+	ayWriteCount_ = 0;
+	opllWriteCount_ = 0;
+	chips_ = CHIP_FMPAC;
+	idle_ = 0;
+	playing_ = 0;
+	CEmuMsxMergeCompanions(fs, ge);
+	if (!LoadCartRom(fs, ge, "rom"))
+		return 0;
+	MapAscii16(0, 0);
+	MapAscii16(1, 1);
+	int loadedCode = 0;
+	for (int i = 0; i < ge->romCount; i++) {
+		const CEmuRomEntry* r = &ge->rom[i];
+		if (_stricmp(r->type, "rom") == 0) continue;
+		unsigned sz = 0;
+		const unsigned char* data = CEmuZipFsFind(fs, r->name, &sz);
+		if (!data || !sz) continue;
+		int off = r->offset;
+		if (off < 0) off = 0x400;
+		if (off >= 0x10000) continue;
+		unsigned n = sz;
+		if (off + (int)n > 0x10000)
+			n = (unsigned)(0x10000 - off);
+		memcpy(mem_ + off, data, n);
+		loadedCode++;
+	}
+	if (!loadedCode) {
+		for (int i = 0; i < fs->fileCount; i++) {
+			char pathA[CEMU_ZIP_PATH];
+			WideCharToMultiByte(932, 0, fs->files[i].path, -1, pathA, (int)sizeof(pathA), NULL, NULL);
+			if (_stricmp(pathA, "fmpatch") != 0 && _stricmp(pathA, "patch") != 0)
+				continue;
+			unsigned n = fs->files[i].size;
+			if (n > 0x200) n = 0x200;
+			memcpy(mem_ + 0x400, fs->files[i].data, n);
+			loadedCode++;
+			break;
+		}
+	}
+	if (!loadedCode) return 0;
+	PlantPsgTrampoline(mem_);
+	PlantBiosStubs();
+	initPc_ = (uint16_t)ParseOptHex(ge, "init_pc", 0x400);
+	mdataAddr_ = (uint16_t)ParseOptHex(ge, "mdata_addr", 0xA400);
+	mdataSize_ = 0x800;
+	EnsureOpll(1);
+	sccEnable_ = 0;
+	sccMapped_ = 0;
+	sccAccessed_ = 0;
+	cpu_->reset(mem_);
+	cpuCycles_ = 0;
+	if (chipAy_) chipAy_->Reset();
+	return 1;
+}
+
+int CHardMsx::LoadDq(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode)
+{
+	titleCode_ = titleCode;
+	ge_ = ge;
+	genericMode_ = 1;
+	memset(mem_, 0, sizeof(mem_));
+	memset(ioport_, 0, sizeof(ioport_));
+	FreeBanks();
+	ayWriteCount_ = 0;
+	opllWriteCount_ = 0;
+	chips_ = 0;
+	idle_ = 0;
+	playing_ = 0;
+	if (!LoadCartRom(fs, ge, "code"))
+		return 0;
+	/* DQ1 = ASCII8 128K; DQ2 = ASCII16 256K (MAME software list). */
+	if (_stricmp(ge->subtype, "dq2") == 0 || cartBytes_ > 0x20000u) {
+		mapper_ = MAP_ASCII16;
+		MapAscii16(0, 0);
+		MapAscii16(1, 1);
+	} else {
+		mapper_ = MAP_ASCII8;
+		MapAscii8(0, 0);
+		MapAscii8(1, 1);
+		MapAscii8(2, 2);
+		MapAscii8(3, 3);
+	}
+	PlantPsgTrampoline(mem_);
+	PlantBiosStubs();
+	/* Cart header "AB" + init at $4002. Hoot's missing dq1.cpp used a
+	   mailbox; until we have that IPL, boot the ROM init and feed song
+	   codes through the generic ports. */
+	initPc_ = 0x400;
+	if (mem_[0x4000] == 'A' && mem_[0x4001] == 'B') {
+		const uint16_t init = (uint16_t)(mem_[0x4002] | ((uint16_t)mem_[0x4003] << 8));
+		if (init >= 0x4000 && init < 0xC000)
+			initPc_ = init;
+	}
+	if (initPc_ != 0x400) {
+		mem_[0x400] = 0xFB; /* EI */
+		mem_[0x401] = 0xC3;
+		mem_[0x402] = (uint8_t)(initPc_ & 0xff);
+		mem_[0x403] = (uint8_t)(initPc_ >> 8);
+		initPc_ = 0x400;
+	}
+	mdataAddr_ = 0xC000;
+	mdataSize_ = 0x800;
+	sccEnable_ = 0;
+	sccMapped_ = 0;
+	sccAccessed_ = 0;
+	cpu_->reset(mem_);
+	cpuCycles_ = 0;
+	if (chipAy_) chipAy_->Reset();
+	return 1;
+}
+
+int CHardMsx::StartSongDs4(unsigned titleCode)
+{
+	if (!cpu_) return 0;
+	titleCode_ = titleCode;
+	idle_ = 0;
+	playing_ = 1;
+	sccAccessed_ = 0;
+	if ((titleCode & 0x80u) == 0) {
+		ioport_[0x00] = 0x01;
+		ioport_[0x01] = (uint8_t)(titleCode & 0xff);
+	} else {
+		mem_[0xc095] = (uint8_t)(titleCode & 0x7fu);
+	}
+	CEmuHardMsxSetActive(this);
+	return 1;
+}
+
 int CHardMsx::StartSong(unsigned titleCode)
 {
+	if (mapper_ == MAP_DS4)
+		return StartSongDs4(titleCode);
 	if (genericMode_)
 		return StartSongGeneric(titleCode);
 	return StartSongKss(titleCode);

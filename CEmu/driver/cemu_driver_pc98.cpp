@@ -114,7 +114,7 @@ void CDriverPc98::WatchdogTick()
 	if (!chip) return;
 	unsigned w = 0, k = 0, f = 0, s = 0, m = 0;
 	CEmuChipYm2608GetPlayMetrics(chip, &w, &k, &f, &s, &m);
-	const unsigned motion = k + f + s;
+	const unsigned motion = k + f + s + hw_->BeepActivity();
 	if (motion != wdMotion_) {
 		wdMotion_ = motion;
 		wdLastActive_ = wdSamples_;
@@ -179,6 +179,7 @@ int CDriverPc98::Render(int16_t* stereo, int frames)
 			cpuDebt_ -= (int64_t)(hw_->cpuCycles_ - start);
 		}
 		chip->Render(stereo + i * 2, 1);
+		hw_->MixBeep(stereo + i * 2, 1);
 		if (opl) {
 			/* SOUND ORCHESTRA's selling point was pseudo-stereo: the OPL sits
 			   hard left and the YM2203 hard right (the manual has these

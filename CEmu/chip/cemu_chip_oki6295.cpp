@@ -25,6 +25,8 @@ public:
 		, cmdState_(0)
 		, sampleKey_(0)
 		, lastCommand_(0)
+		, bank_(NULL)
+		, monAcc_(0)
 	{
 		BuildTables();
 		Reset();
@@ -37,6 +39,7 @@ public:
 		cmdState_ = 0;
 		sampleKey_ = 0;
 		lastCommand_ = 0;
+		monAcc_ = 0;
 	}
 
 	void Write(uint32_t addr, uint32_t data) override
@@ -60,10 +63,15 @@ public:
 			const int ch = DecodeChannel(v >> 4);
 			if (ch < 0 || !rom_) return;
 			const uint32_t table = (uint32_t)sampleKey_ * 8u;
-			if (table + 5 >= romSize_) return;
-			const uint32_t start = ((rom_[table] << 16) | (rom_[table + 1] << 8) | rom_[table + 2]) & 0x3ffffu;
-			const uint32_t end = ((rom_[table + 3] << 16) | (rom_[table + 4] << 8) | rom_[table + 5]) & 0x3ffffu;
-			if (start > end || start >= romSize_) {
+			uint8_t hdr[6];
+			for (int k = 0; k < 6; k++) {
+				const uint32_t phys = Xlat(table + (uint32_t)k);
+				if (phys >= romSize_) return;
+				hdr[k] = rom_[phys];
+			}
+			const uint32_t start = ((hdr[0] << 16) | (hdr[1] << 8) | hdr[2]) & 0x3ffffu;
+			const uint32_t end = ((hdr[3] << 16) | (hdr[4] << 8) | hdr[5]) & 0x3ffffu;
+			if (start > end || Xlat(start) >= romSize_) {
 				Stop(ch);
 			} else {
 				Play(ch, start, end - start + 1, v & 0x0f);
@@ -84,11 +92,13 @@ public:
 	void MixAdd(int16_t* stereo, int frames, int gain) override
 	{
 		if (!stereo || frames <= 0 || !rom_) return;
+		int playing = 0;
 		for (int i = 0; i < frames; i++) {
 			int mix = 0;
 			for (int ch = 0; ch < kOkiVoices; ch++) {
 				Voice& vc = voice_[ch];
 				if (!vc.playing) continue;
+				playing = 1;
 				while (vc.count >= (1 << kOkiShift)) {
 					Fetch(vc);
 					vc.count -= (1 << kOkiShift);
@@ -99,6 +109,23 @@ public:
 			const int s = mix * gain / 256;
 			stereo[i * 2] = (int16_t)CEmuOkiClamp16((int)stereo[i * 2] + s);
 			stereo[i * 2 + 1] = (int16_t)CEmuOkiClamp16((int)stereo[i * 2 + 1] + s);
+		}
+		/* One-shot samples key on before classify windows start. Pulse a
+		   hit while a voice is still decoding so looping SFX score as
+		   sequenced rather than a flat NOSEQ tone. */
+		if (playing) {
+			monAcc_ += frames;
+			const int period = sampleRate_ / 5;
+			if (period > 0 && monAcc_ >= period) {
+				monAcc_ = 0;
+				for (int ch = 0; ch < kOkiVoices; ch++) {
+					if (!voice_[ch].playing) continue;
+					FmMonShadowPcmNote(ch, 60 + ch, 0);
+					FmMonShadowPcmNote(ch, 60 + ch, 1);
+				}
+			}
+		} else {
+			monAcc_ = 0;
 		}
 		UpdateSnapshot();
 	}
@@ -114,6 +141,7 @@ public:
 	}
 
 	void SetPcmRom(const uint8_t* data, unsigned size) override { rom_ = data; romSize_ = size; }
+	void SetBankTable(const unsigned* entries) { bank_ = entries; }
 	unsigned GetRegSnapshot(uint8_t* buf, unsigned cap) const override
 	{
 		if (!buf || cap == 0) return 0;
@@ -173,16 +201,32 @@ private:
 		}
 	}
 
+	/* Logical chip address → sample-ROM offset. Identity unless a bank table
+	   is installed (see CEmuChipOki6295SetBankTable). Every window resolves to
+	   entry*0x10000 + (addr & 0xFFFF) because the NMK112 page bases and the
+	   window bases cancel out. */
+	uint32_t Xlat(uint32_t addr) const
+	{
+		if (!bank_) return addr;
+		addr &= 0x3ffffu;
+		unsigned slot;
+		if (addr < 0x400u) slot = addr >> 8;
+		else if (addr < 0x10000u) slot = 4;
+		else slot = 4 + (addr >> 16);
+		return bank_[slot] * 0x10000u + (addr & 0xffffu);
+	}
+
 	void Fetch(Voice& vc)
 	{
-		if ((vc.sample / 2) >= vc.length || vc.start + (vc.sample / 2) >= romSize_) {
+		const uint32_t phys = Xlat(vc.start + (vc.sample / 2));
+		if ((vc.sample / 2) >= vc.length || phys >= romSize_) {
 			vc.playing = 0;
 			vc.step = 0;
 			vc.signal = 0;
 			return;
 		}
 		vc.prevSignal = vc.signal;
-		const uint8_t b = rom_[vc.start + (vc.sample / 2)];
+		const uint8_t b = rom_[phys];
 		const int nib = (b >> (((vc.sample & 1) << 2) ^ 4)) & 15;
 		vc.sample++;
 		vc.signal += diffLookup_[vc.step * 16 + nib];
@@ -240,6 +284,8 @@ private:
 	uint8_t cmdState_;
 	uint8_t sampleKey_;
 	uint8_t lastCommand_;
+	const unsigned* bank_;
+	int monAcc_;
 	Voice voice_[kOkiVoices];
 	int indexShift_[8];
 	int diffLookup_[49 * 16];
@@ -255,4 +301,10 @@ CChip* CEmuChipOki6295Create(uint32_t clockHz, int sampleRate)
 void CEmuChipOki6295Destroy(CChip* c)
 {
 	delete c;
+}
+
+void CEmuChipOki6295SetBankTable(CChip* c, const unsigned* entries)
+{
+	CChipOki6295* oki = dynamic_cast<CChipOki6295*>(c);
+	if (oki) oki->SetBankTable(entries);
 }

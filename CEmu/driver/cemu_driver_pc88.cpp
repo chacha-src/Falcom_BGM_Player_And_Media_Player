@@ -4,6 +4,7 @@
 #include "../chip/cemu_chip_opna.h"
 #include "../z80/Ay_Cpu.h"
 #include <string.h>
+#include <stdlib.h>
 
 enum {
 	PC88_CPU_HZ = 4000000,
@@ -37,6 +38,12 @@ CDriverPc88::CDriverPc88()
 	, opnResidual_(0)
 	, cpuAcc_(0)
 	, cpuCycleBudget_(0)
+	, lead_(NULL)
+	, leadCap_(0)
+	, leadLen_(0)
+	, leadPos_(0)
+	, capturing_(0)
+	, capAcc_(0)
 	, wdSamples_(0)
 	, wdLastActive_(0)
 	, wdMotion_(0)
@@ -68,6 +75,10 @@ int CDriverPc88::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigne
 	opnResidual_ = 0;
 	cpuAcc_ = 0;
 	cpuCycleBudget_ = 0;
+	leadLen_ = 0;
+	leadPos_ = 0;
+	capturing_ = 0;
+	capAcc_ = 0;
 	booted_ = 0;
 	triggered_ = 0;
 	forceEiBoot_ = 0;
@@ -104,7 +115,7 @@ int CDriverPc88::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigne
 		}
 		const uint64_t chunk = (uint64_t)cpuHz_ / 32;
 		for (int step = 0; step < 32 && cpu && mem; step++) {
-			RunUntil((uint64_t)cpu->time() + chunk);
+			RunUntil((uint64_t)cpu->time64() + chunk);
 			int nowPoll = -1;
 			for (int i = 0; i + 4 < 0x70; i++) {
 				if (mem[i] == 0xDB && mem[i + 1] == 0x00
@@ -195,7 +206,7 @@ int CDriverPc88::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigne
 			const int pulseMax = hw_->IsSchemeOpna() ? 256 : 96;
 			for (int pulse = 0; pulse < pulseMax; pulse++) {
 				cpu->r.iff1 = 1;
-				RunUntil((uint64_t)cpu->time() + (uint64_t)cpuHz_ / 32);
+				RunUntil((uint64_t)cpu->time64() + (uint64_t)cpuHz_ / 32);
 				if (cpu->r.pc < 0x80)
 					break; /* reached PATCH poll @0 */
 				if (hw_->IsSchemeOpna()
@@ -267,6 +278,12 @@ void CDriverPc88::Close()
 	hw_ = NULL;
 	booted_ = 0;
 	triggered_ = 0;
+	free(lead_);
+	lead_ = NULL;
+	leadCap_ = 0;
+	leadLen_ = 0;
+	leadPos_ = 0;
+	capturing_ = 0;
 }
 
 void CDriverPc88::TickOpn(uint64_t cpuCycles)
@@ -323,15 +340,129 @@ void CDriverPc88::DeliverIrqs(uint64_t now)
 	}
 }
 
+/* TriggerPlay hands the song to the guest and then runs it for as long as the
+   PATCH command drain needs — a full second for most rips, because `cmd` is
+   only cleared by the host after the loop, so the early-out rarely fires. The
+   sequencer is live for all of it: 676 of 867 catalog titles key-on inside
+   that window. AdvanceClocks moves timers only (PCM comes from Render), so
+   every one of those notes used to be played into a chip nobody sampled, and
+   the track appeared to start ~1s in. Render the window instead of dropping
+   it, and hand it to the caller ahead of the live samples.
+
+   Silent head is trimmed in EndLeadCapture, so a rip whose kick is pure init
+   (1942_88 drains 8s without a note) does not gain a silent intro. */
+enum { LEAD_MAX_SECONDS = 16 };
+
+void CDriverPc88::BeginLeadCapture()
+{
+	if (!hw_ || !hw_->SoundChip() || hostRate_ < 1) return;
+	capturing_ = 1;
+	capAcc_ = 0;
+}
+
+void CDriverPc88::CaptureLead(uint64_t cpuCycles)
+{
+	if (!capturing_ || cpuCycles == 0) return;
+	CChip* chip = hw_ ? hw_->SoundChip() : NULL;
+	if (!chip) return;
+	capAcc_ += (int64_t)cpuCycles * (int64_t)hostRate_;
+	while (capAcc_ >= (int64_t)cpuHz_) {
+		capAcc_ -= (int64_t)cpuHz_;
+		if (leadLen_ + 2 > leadCap_) {
+			const int limit = hostRate_ * 2 * LEAD_MAX_SECONDS;
+			if (leadCap_ >= limit) {
+				capturing_ = 0; /* pathological drain: stop growing */
+				return;
+			}
+			int want = leadCap_ ? leadCap_ * 2 : hostRate_ * 2 / 4;
+			if (want > limit) want = limit;
+			int16_t* grown = (int16_t*)realloc(lead_, (size_t)want * sizeof(int16_t));
+			if (!grown) {
+				capturing_ = 0;
+				return;
+			}
+			lead_ = grown;
+			leadCap_ = want;
+		}
+		chip->Render(lead_ + leadLen_, 1);
+		leadLen_ += 2;
+	}
+}
+
+/* Last kick's recovered opening, for the head-loss probe. Global for the same
+   reason as the watchdog counters: one title renders at a time in the probes. */
+static unsigned s_leadFrames = 0;
+static unsigned s_leadTrimmed = 0;
+unsigned CEmuPc88LeadFrames() { return s_leadFrames; }
+unsigned CEmuPc88LeadTrimmedFrames() { return s_leadTrimmed; }
+
+void CDriverPc88::EndLeadCapture()
+{
+	capturing_ = 0;
+	s_leadFrames = (unsigned)(leadLen_ / 2);
+	s_leadTrimmed = 0;
+	if (leadLen_ <= 0) return;
+	/* Peak-to-peak per block, not |sample|: an SSG channel left with volume
+	   set but mixer off holds a DC offset that is inaudible but never zero,
+	   and a per-block p2p reads that plateau as the silence it sounds like.
+	   The block where such an offset steps does count as loud, so a rip can
+	   keep a fraction of a second of quiet lead — that is the deliberate
+	   direction to err in. Requiring sustained level instead threw away
+	   navitune's few-ms opening click, which is all that rip produces. */
+	const int block = 512 * 2;
+	const int thr = 96;
+	int firstLoud = -1;
+	for (int base = leadPos_; base < leadLen_; base += block) {
+		int hi = -32768, lo = 32767;
+		const int end = (base + block < leadLen_) ? base + block : leadLen_;
+		for (int i = base; i < end; i++) {
+			const int v = lead_[i];
+			if (v > hi) hi = v;
+			if (v < lo) lo = v;
+		}
+		if ((hi - lo) / 2 > thr) {
+			firstLoud = base;
+			break;
+		}
+	}
+	if (firstLoud < 0) {
+		s_leadTrimmed = (unsigned)((leadLen_ - leadPos_) / 2);
+		leadLen_ = leadPos_; /* nothing but init silence */
+		return;
+	}
+	s_leadTrimmed = (unsigned)((firstLoud - leadPos_) / 2);
+	leadPos_ = firstLoud;
+}
+
+int CDriverPc88::DrainLead(int16_t* stereo, int frames)
+{
+	if (leadPos_ >= leadLen_) {
+		if (leadLen_) {
+			leadLen_ = 0;
+			leadPos_ = 0;
+		}
+		return 0;
+	}
+	int n = (leadLen_ - leadPos_) / 2;
+	if (n > frames) n = frames;
+	memcpy(stereo, lead_ + leadPos_, (size_t)n * 2 * sizeof(int16_t));
+	leadPos_ += n * 2;
+	if (leadPos_ >= leadLen_) {
+		leadLen_ = 0;
+		leadPos_ = 0;
+	}
+	return n;
+}
+
 void CDriverPc88::RunUntil(uint64_t endCycle)
 {
 	if (!hw_ || !hw_->Cpu()) return;
 	Ay_Cpu* cpu = hw_->Cpu();
 	CEmuHardPc88SetActive(hw_);
-	while ((uint64_t)cpu->time() < endCycle) {
+	while ((uint64_t)cpu->time64() < endCycle) {
 		if (forceEiBoot_ && !cpu->r.iff1 && cpu->r.im == 2)
 			cpu->r.iff1 = 1;
-		const uint64_t now = (uint64_t)cpu->time();
+		const uint64_t now = (uint64_t)cpu->time64();
 		DeliverIrqs(now);
 		/* tf88sr PATCH play HALTs waiting for RTC; without a wake advance
 		   Ay_Cpu HALT only burns the remaining time-slice and retries the
@@ -349,11 +480,13 @@ void CDriverPc88::RunUntil(uint64_t endCycle)
 			cpu->adjust_time((int)delta);
 			hw_->AddCpuCycles(delta);
 			TickOpn(delta);
+			CaptureLead(delta);
 			continue;
 		}
 		const int cycles = Ay_CpuRunOne(cpu);
 		hw_->AddCpuCycles((uint64_t)cycles);
 		TickOpn((uint64_t)cycles);
+		CaptureLead((uint64_t)cycles);
 	}
 }
 
@@ -396,6 +529,7 @@ void CDriverPc88::TriggerPlay()
 	if (wdReplays_ > 0)
 		Unwedge();
 	if (!triggered_) {
+		BeginLeadCapture();
 		/* Re-stage song at mdata/vdata in case boot clobbered it — but not
 		   when mdata sits on the PATCH/stack page. Use full titleCode_ so
 		   packed-bank offsets survive reload. */
@@ -426,7 +560,7 @@ void CDriverPc88::TriggerPlay()
 				/* Wait until DEMOM/MUSIC play entry RETs to PATCH poll so
 				   channel/voice init finishes before the first RTC tick. */
 				for (int step = 0; step < 64; step++) {
-					RunUntil((uint64_t)cpu->time() + (uint64_t)cpuHz_ / 64);
+					RunUntil((uint64_t)cpu->time64() + (uint64_t)cpuHz_ / 64);
 					if (cpu->r.pc < 0x80)
 						break;
 				}
@@ -447,13 +581,13 @@ void CDriverPc88::TriggerPlay()
 				hw_->cmd = 0;
 				hw_->DirectPlayKick(base, 0);
 				for (int step = 0; step < 32; step++) {
-					RunUntil((uint64_t)cpu->time() + (uint64_t)cpuHz_ / 64);
+					RunUntil((uint64_t)cpu->time64() + (uint64_t)cpuHz_ / 64);
 					if (cpu->r.pc < 0x80)
 						break;
 				}
 				hw_->cmd = 1;
 				for (int step = 0; step < 128; step++) {
-					RunUntil((uint64_t)cpu->time() + (uint64_t)cpuHz_ / 64);
+					RunUntil((uint64_t)cpu->time64() + (uint64_t)cpuHz_ / 64);
 					if (step >= 8 && cpu->r.pc < 0x80 && hw_->cmd == 0)
 						break;
 				}
@@ -482,7 +616,7 @@ void CDriverPc88::TriggerPlay()
 				   CALL, then EI for RTC. Effects: param=FF → (E23C). */
 				hw_->cmd = 1;
 				for (int step = 0; step < 256; step++) {
-					RunUntil((uint64_t)cpu->time() + (uint64_t)cpuHz_ / 64);
+					RunUntil((uint64_t)cpu->time64() + (uint64_t)cpuHz_ / 64);
 					if (step >= 4 && cpu->r.pc < 0x80 && hw_->cmd == 0)
 						break;
 				}
@@ -493,13 +627,13 @@ void CDriverPc88::TriggerPlay()
 				hw_->cmd = 1;
 				if (hw_->PlayKickInitOff()) {
 					for (int step = 0; step < 16; step++) {
-						RunUntil((uint64_t)cpu->time() + (uint64_t)cpuHz_ / 64);
+						RunUntil((uint64_t)cpu->time64() + (uint64_t)cpuHz_ / 64);
 						if (step >= 2 && cpu->r.pc < 0x80)
 							break;
 					}
 				} else {
 					/* Match probe: 64 host samples at cpuHz/hostRate. */
-					RunUntil((uint64_t)cpu->time()
+					RunUntil((uint64_t)cpu->time64()
 						+ (uint64_t)cpuHz_ * 64u / (uint64_t)(hostRate_ > 0 ? hostRate_ : 44100));
 				}
 				hw_->cmd = 0;
@@ -535,38 +669,38 @@ void CDriverPc88::TriggerPlay()
 			   Game Arts kick titles (jikochu*) — A6A9/A824 collide with music. */
 			if (mem && hw_->useRtc && mem[0xA826] == 0xF3
 				&& mem[0xA830] == 0xFE && mem[0xA831] == 0x34) {
-				RunUntil((uint64_t)cpu->time() + (uint64_t)cpuHz_ / 32);
+				RunUntil((uint64_t)cpu->time64() + (uint64_t)cpuHz_ / 32);
 				if (mem[0xA6A9] == 0x20 && mem[0xA824] == 0)
 					mem[0xA824] = 1;
 			}
 			/* gineiden: let PATCH play plant vec08 / load song, then re-arm
 			   Timer B that CALL 4E2F cleared. */
 			if (hw_->NeedsGineidenArm()) {
-				RunUntil((uint64_t)cpu->time() + (uint64_t)cpuHz_ / 8);
+				RunUntil((uint64_t)cpu->time64() + (uint64_t)cpuHz_ / 8);
 				hw_->ArmGineidenOpnTimer();
 			}
 			if (hw_->NeedsLizardArm()) {
-				RunUntil((uint64_t)cpu->time() + (uint64_t)cpuHz_ / 8);
+				RunUntil((uint64_t)cpu->time64() + (uint64_t)cpuHz_ / 8);
 				hw_->ArmLizardOpnTimer();
 			}
 			if (hw_->NeedsNavituneArm()) {
 				/* 1) Port-play with BC=mdata binds phrase banks.
 				   2) Rewrite LD BC to title song and run cmd07+cmd10+cmd0E.
 				   Raise SP before EI — tick EI's under (4D59) and nests. */
-				RunUntil((uint64_t)cpu->time() + (uint64_t)cpuHz_ / 4);
+				RunUntil((uint64_t)cpu->time64() + (uint64_t)cpuHz_ / 4);
 				hw_->ApplyNavituneTitleSong();
 				const unsigned retarget = hw_->NavituneRetargetPc();
 				if (retarget) {
 					if (cpu->r.sp < 0x4000 || cpu->r.sp >= 0x7700)
 						cpu->r.sp = 0x7000;
 					hw_->DirectPlayKick(retarget, 0);
-					RunUntil((uint64_t)cpu->time() + (uint64_t)cpuHz_ / 8);
+					RunUntil((uint64_t)cpu->time64() + (uint64_t)cpuHz_ / 8);
 				}
 				hw_->FinishNavitunePlay();
 			}
 			if (hw_->NeedsYakyufanArm()) {
 				/* Let PATCH cmd=1 reach CALL play (clears 0118 via 0C5D). */
-				RunUntil((uint64_t)cpu->time() + (uint64_t)cpuHz_ / 8);
+				RunUntil((uint64_t)cpu->time64() + (uint64_t)cpuHz_ / 8);
 				hw_->ArmYakyufanPlay();
 			}
 			/* Drain cmd under DI before sample loop re-enables IRQs. */
@@ -583,7 +717,7 @@ void CDriverPc88::TriggerPlay()
 			int sawDispatch = (pollAt < 0);
 			const int drainSteps = hw_->NeedsLongPlayDrain() ? 512 : 64;
 			for (int step = 0; step < drainSteps; step++) {
-				RunUntil((uint64_t)cpu->time() + (uint64_t)cpuHz_ / 64);
+				RunUntil((uint64_t)cpu->time64() + (uint64_t)cpuHz_ / 64);
 				if (pollAt >= 0 && cpu->r.pc < 0x80 && (int)cpu->r.pc > pollAt + 4)
 					sawDispatch = 1;
 				/* 1942 ADEE lives at 0034 (still <0x80). Breaking on any
@@ -612,12 +746,13 @@ void CDriverPc88::TriggerPlay()
 				cpu->r.iff1 = 1;
 			}
 			if (hw_->NeedsDeferredRtc()) {
-				RunUntil((uint64_t)cpu->time() + (uint64_t)cpuHz_ / 8);
+				RunUntil((uint64_t)cpu->time64() + (uint64_t)cpuHz_ / 8);
 				hw_->EnableDeferredRtc();
 			}
 			if (wantEi)
 				cpu->r.iff1 = 1;
 		}
+		EndLeadCapture();
 		triggered_ = 1;
 	}
 }
@@ -689,12 +824,12 @@ void CDriverPc88::WatchdogTick()
 		}
 		if (Ay_CpuIm2Target(cpu, VEC_VRTC)) {
 			hw_->useVrtc = 1;
-			nextVrtc_ = (uint64_t)cpu->time() + vrtcPeriod_;
+			nextVrtc_ = (uint64_t)cpu->time64() + vrtcPeriod_;
 			return;
 		}
 		if (Ay_CpuIm2Target(cpu, VEC_RTC)) {
 			hw_->useRtc = 1;
-			nextRtc_ = (uint64_t)cpu->time() + rtcPeriod_;
+			nextRtc_ = (uint64_t)cpu->time64() + rtcPeriod_;
 			return;
 		}
 	}
@@ -723,7 +858,9 @@ int CDriverPc88::Render(int16_t* stereo, int frames)
 	if (!triggered_)
 		TriggerPlay();
 	if (hostRate_ < 1 || cpuHz_ < 1) return 0;
-	for (int i = 0; i < frames; i++) {
+	/* Opening bars the play kick already generated (see BeginLeadCapture). */
+	const int lead = DrainLead(stereo, frames);
+	for (int i = lead; i < frames; i++) {
 		cpuAcc_ += (int64_t)cpuHz_;
 		int cyclesPerSample = (int)(cpuAcc_ / (int64_t)hostRate_);
 		cpuAcc_ %= (int64_t)hostRate_;
@@ -733,7 +870,7 @@ int CDriverPc88::Render(int16_t* stereo, int frames)
 		   clocks) and soundtrack tempo runs fast. */
 		cpuCycleBudget_ += (int64_t)cyclesPerSample;
 		while (cpuCycleBudget_ > 0) {
-			const uint64_t now = (uint64_t)cpu->time();
+			const uint64_t now = (uint64_t)cpu->time64();
 			DeliverIrqs(now);
 			uint8_t* mem = hw_->Mem();
 			if (mem && mem[cpu->r.pc] == 0x76) {

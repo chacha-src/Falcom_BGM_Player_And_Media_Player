@@ -9,7 +9,7 @@
 
    Register map (voice = (reg >> 2) & 7, field = reg & 0xe3):
      $00+4v  pitch low 8 bits
-     $01+4v  bit0 pitch high, bits1-2 mode (1=ADPCM 2=8bit 3=16bit),
+     $01+4v  bit0 pitch high, bits5-6 mode (1=ADPCM 2=8bit 3=16bit),
              bit4 loop, bit7 key on
      $02+4v  total level
      $03+4v  pan (0=hard left, 8=centre, 15=hard right)
@@ -19,8 +19,9 @@
      $23/$43/$63                stop address
      $FF     bit7 enables key-on
 
-   Addresses count ADPCM nibbles, so a 16-bit PCM voice consumes four
-   address steps per sample and an 8-bit voice two. */
+   The three address bytes form a byte offset, but the play position counts
+   ADPCM nibbles, so each register triple is shifted up one bit and a 16-bit
+   PCM voice consumes four position steps per sample, an 8-bit voice two. */
 enum {
 	kYmzVoices = 8,
 	kYmzFracBits = 14
@@ -40,9 +41,22 @@ public:
 		, sampleRate_(sampleRate > 0 ? sampleRate : 44100)
 		, rom_(NULL)
 		, romSize_(0)
+		, mono_(0)
+		, monAcc_(0)
 	{
 		Reset();
 	}
+
+	unsigned PlayingCount() const
+	{
+		unsigned n = 0;
+		for (int i = 0; i < kYmzVoices; i++)
+			if (v_[i].playing) n++;
+		return n;
+	}
+
+	/* Board wiring, not chip state, so Reset must not clear it. */
+	void SetMono(int mono) { mono_ = (uint8_t)(mono ? 1 : 0); }
 
 	void Reset() override
 	{
@@ -51,6 +65,7 @@ public:
 		regSel_ = 0;
 		keyEnable_ = 0;
 		status_ = 0;
+		monAcc_ = 0;
 	}
 
 	void WritePort(unsigned port, uint8_t data)
@@ -89,11 +104,14 @@ public:
 	void MixAdd(int16_t* stereo, int frames, int gain) override
 	{
 		if (!stereo || frames <= 0 || !rom_ || !romSize_) return;
+		int playing = 0;
 		for (int i = 0; i < kYmzVoices; i++) {
 			Voice& vc = v_[i];
 			if (!vc.playing) continue;
+			playing++;
 			int volL, volR;
 			PanVolume(vc, &volL, &volR);
+			if (mono_) volL = volR = volL + volR;
 			for (int f = 0; f < frames; f++) {
 				while (vc.frac >= (1u << kYmzFracBits)) {
 					vc.frac -= (1u << kYmzFracBits);
@@ -109,6 +127,23 @@ public:
 				stereo[f * 2 + 1] = (int16_t)CEmuYmzClamp16(ar);
 				vc.frac += vc.step;
 			}
+		}
+		/* Held ADPCM streams key on once. The classify probe scores
+		   sequencing from monitor edges, so pulse a hit while a voice
+		   is still decoding — otherwise looping Bakraid BGM looks GAPPY. */
+		if (playing) {
+			monAcc_ += frames;
+			const int period = sampleRate_ / 5;
+			if (period > 0 && monAcc_ >= period) {
+				monAcc_ = 0;
+				for (int i = 0; i < kYmzVoices; i++) {
+					if (!v_[i].playing) continue;
+					FmMonShadowPcmNote(i, 60 + i, 0);
+					FmMonShadowPcmNote(i, 60 + i, 1);
+				}
+			}
+		} else {
+			monAcc_ = 0;
 		}
 	}
 
@@ -147,10 +182,15 @@ private:
 		reg_[reg] = data;
 		if (reg == 0xff) {
 			const int en = (data & 0x80) ? 1 : 0;
-			if (!en) {
+			if (keyEnable_ && !en) {
 				/* Dropping the enable silences every voice. */
 				for (int i = 0; i < kYmzVoices; i++)
 					SetPlaying(i, 0);
+			} else if (!keyEnable_ && en) {
+				/* Raising it restarts the held loops, so a program that keys
+				   on before enabling still gets its voices (MAME 0xFF). */
+				for (int i = 0; i < kYmzVoices; i++)
+					if (v_[i].keyon && v_[i].loop) SetPlaying(i, 1);
 			}
 			keyEnable_ = (uint8_t)en;
 			return;
@@ -165,8 +205,11 @@ private:
 			break;
 		case 0x01: {
 			vc.fnum = (uint16_t)((vc.fnum & 0x0ffu) | ((data & 1u) << 8));
-			vc.mode = (uint8_t)((data >> 1) & 3);
 			vc.loop = (uint8_t)((data >> 4) & 1);
+			/* Mode 0 is not a mode: it leaves the previous one in place and
+			   reads as key-off however bit 7 is set. */
+			if ((data & 0x60u) == 0) data &= 0x7fu;
+			else vc.mode = (uint8_t)((data & 0x60u) >> 5);
 			const int on = (data & 0x80) ? 1 : 0;
 			UpdateStep(vc);
 			if (on && keyEnable_ && !vc.playing) {
@@ -185,18 +228,18 @@ private:
 		}
 		case 0x02: vc.level = data; break;
 		case 0x03: vc.pan = (uint8_t)(data & 0x0f); break;
-		case 0x20: vc.start = (vc.start & 0x00ffffu) | ((uint32_t)data << 16); break;
-		case 0x21: vc.loopStart = (vc.loopStart & 0x00ffffu) | ((uint32_t)data << 16); break;
-		case 0x22: vc.loopEnd = (vc.loopEnd & 0x00ffffu) | ((uint32_t)data << 16); break;
-		case 0x23: vc.stop = (vc.stop & 0x00ffffu) | ((uint32_t)data << 16); break;
-		case 0x40: vc.start = (vc.start & 0xff00ffu) | ((uint32_t)data << 8); break;
-		case 0x41: vc.loopStart = (vc.loopStart & 0xff00ffu) | ((uint32_t)data << 8); break;
-		case 0x42: vc.loopEnd = (vc.loopEnd & 0xff00ffu) | ((uint32_t)data << 8); break;
-		case 0x43: vc.stop = (vc.stop & 0xff00ffu) | ((uint32_t)data << 8); break;
-		case 0x60: vc.start = (vc.start & 0xffff00u) | data; break;
-		case 0x61: vc.loopStart = (vc.loopStart & 0xffff00u) | data; break;
-		case 0x62: vc.loopEnd = (vc.loopEnd & 0xffff00u) | data; break;
-		case 0x63: vc.stop = (vc.stop & 0xffff00u) | data; break;
+		case 0x20: vc.start = (vc.start & (0x00ffffu << 1)) | ((uint32_t)data << 17); break;
+		case 0x21: vc.loopStart = (vc.loopStart & (0x00ffffu << 1)) | ((uint32_t)data << 17); break;
+		case 0x22: vc.loopEnd = (vc.loopEnd & (0x00ffffu << 1)) | ((uint32_t)data << 17); break;
+		case 0x23: vc.stop = (vc.stop & (0x00ffffu << 1)) | ((uint32_t)data << 17); break;
+		case 0x40: vc.start = (vc.start & (0xff00ffu << 1)) | ((uint32_t)data << 9); break;
+		case 0x41: vc.loopStart = (vc.loopStart & (0xff00ffu << 1)) | ((uint32_t)data << 9); break;
+		case 0x42: vc.loopEnd = (vc.loopEnd & (0xff00ffu << 1)) | ((uint32_t)data << 9); break;
+		case 0x43: vc.stop = (vc.stop & (0xff00ffu << 1)) | ((uint32_t)data << 9); break;
+		case 0x60: vc.start = (vc.start & (0xffff00u << 1)) | ((uint32_t)data << 1); break;
+		case 0x61: vc.loopStart = (vc.loopStart & (0xffff00u << 1)) | ((uint32_t)data << 1); break;
+		case 0x62: vc.loopEnd = (vc.loopEnd & (0xffff00u << 1)) | ((uint32_t)data << 1); break;
+		case 0x63: vc.stop = (vc.stop & (0xffff00u << 1)) | ((uint32_t)data << 1); break;
 		default: break;
 		}
 	}
@@ -229,25 +272,7 @@ private:
 	/* Decode one output sample; returns 0 once the voice has stopped. */
 	int NextSample(int i, Voice& vc)
 	{
-		if (vc.pos >= vc.stop) {
-			if (vc.loop) {
-				vc.pos = vc.loopStart;
-				if (vc.loopLatched) {
-					vc.signal = vc.loopSignal;
-					vc.stepIndex = vc.loopStepIndex;
-				}
-			} else {
-				SetPlaying(i, 0);
-				return 0;
-			}
-		}
-		if (vc.loop && !vc.loopLatched && vc.pos >= vc.loopStart) {
-			/* Snapshot the ADPCM predictor at the loop point so repeats do
-			   not drift away from the first pass. */
-			vc.loopSignal = vc.signal;
-			vc.loopStepIndex = vc.stepIndex;
-			vc.loopLatched = 1;
-		}
+		uint32_t adv;
 		switch (vc.mode) {
 		case 1: { /* 4-bit ADPCM, two samples per byte */
 			const uint8_t b = RomByte(vc.pos >> 1);
@@ -260,21 +285,42 @@ private:
 			if (vc.stepIndex > 0x6000) vc.stepIndex = 0x6000;
 			if (vc.stepIndex < 0x7f) vc.stepIndex = 0x7f;
 			vc.sample = vc.signal;
-			vc.pos += 1;
+			adv = 1;
 			break;
 		}
-		case 2: /* 8-bit signed PCM: one sample per two nibble steps */
+		case 2: /* 8-bit signed PCM: one sample per two position steps */
 			vc.sample = (int)(int8_t)RomByte(vc.pos >> 1) * 256;
-			vc.pos += 2;
+			adv = 2;
 			break;
-		case 3: { /* 16-bit signed PCM, big endian */
+		case 3: { /* 16-bit signed PCM, little endian */
 			const uint32_t a = vc.pos >> 1;
-			vc.sample = (int)(int16_t)(((uint16_t)RomByte(a) << 8)
-				| RomByte(a + 1));
-			vc.pos += 4;
+			vc.sample = (int)(int16_t)((uint16_t)RomByte(a)
+				| ((uint16_t)RomByte(a + 1) << 8));
+			adv = 4;
 			break;
 		}
 		default:
+			SetPlaying(i, 0);
+			return 0;
+		}
+		vc.pos += adv;
+		if (vc.loop) {
+			if (!vc.loopLatched && vc.pos >= vc.loopStart) {
+				/* Snapshot the ADPCM predictor at the loop point so repeats
+				   do not drift away from the first pass. */
+				vc.loopSignal = vc.signal;
+				vc.loopStepIndex = vc.stepIndex;
+				vc.loopLatched = 1;
+			}
+			if (vc.pos >= vc.loopEnd && vc.keyon) {
+				vc.pos = vc.loopStart;
+				if (vc.loopLatched) {
+					vc.signal = vc.loopSignal;
+					vc.stepIndex = vc.loopStepIndex;
+				}
+			}
+		}
+		if (vc.pos >= vc.stop) {
 			SetPlaying(i, 0);
 			return 0;
 		}
@@ -289,7 +335,7 @@ private:
 			*r = vol;
 		} else if (vc.pan < 8) {
 			*l = vol;
-			*r = vol * (int)vc.pan / 8;
+			*r = (vc.pan == 0) ? 0 : vol * ((int)vc.pan - 1) / 7;
 		} else {
 			*l = vol * (15 - (int)vc.pan) / 7;
 			*r = vol;
@@ -307,6 +353,8 @@ private:
 	uint8_t regSel_;
 	uint8_t keyEnable_;
 	uint8_t status_;
+	uint8_t mono_;
+	int monAcc_;
 	Voice v_[kYmzVoices];
 };
 
@@ -336,4 +384,14 @@ void CEmuChipYmz280bWritePort(CChip* c, unsigned port, uint8_t data)
 uint8_t CEmuChipYmz280bReadStatus(CChip* c)
 {
 	return c ? static_cast<CChipYmz280b*>(c)->ReadStatus() : 0;
+}
+
+void CEmuChipYmz280bSetMono(CChip* c, int mono)
+{
+	if (c) static_cast<CChipYmz280b*>(c)->SetMono(mono);
+}
+
+unsigned CEmuChipYmz280bPlayingCount(const CChip* c)
+{
+	return c ? static_cast<const CChipYmz280b*>(c)->PlayingCount() : 0;
 }

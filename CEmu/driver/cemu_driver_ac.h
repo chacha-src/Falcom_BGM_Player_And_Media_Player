@@ -26,6 +26,7 @@ private:
 	uint16_t songCmdWord_; /* full title code for boards with 16-bit commands */
 	unsigned songCmdDword_; /* Hornet/GTI: catalog codes are 32-bit (0x01xx0000) */
 	uint64_t opmResidual_;
+	uint64_t rzOpmAcc_; /* Raizing YM2151 poll boards: batched timer clocks */
 	int64_t cpuAcc_;
 	int cmdIndex_;
 	uint64_t nextCmdAt_;

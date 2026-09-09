@@ -101,6 +101,17 @@ static const CEmuAcBoardSpec kSpecs[] = {
 	  0, 0, 0, CEMU_AC_IRQ_NONE, CEMU_AC_IRQ_NONE,
 	  CEMU_AC_CHIP_RF5C400, 0, 18432000, CEMU_AC_CHIP_NONE, 0, 0, 0,
 	  "konami/hornet.cpp — needs 68K host" },
+	/* Four revisions on one board id (raizingType_ picks the map); the
+	   constants below are the mahoudai / Type 1 variant, whose Z80 takes no
+	   interrupts at all and instead polls the OPM's Timer A flag. Battle
+	   Garegga adds a 16K bank window at 8000 and a latch on IRQ0, Batrider
+	   moves the whole section onto I/O ports 80-84 with a second OKI and a
+	   latch on NMI, and Battle Bakraid swaps the OPM+OKI pair for a YMZ280B
+	   on ports 80/81 plus a 444 Hz periodic IRQ0. */
+	{ CEMU_AC_BOARD_RAIZING, "raizing", CEMU_AC_CPU_Z80, 4000000,
+	  0xC000, 0x2000, 0xC000, CEMU_AC_IRQ_NONE, CEMU_AC_IRQ_NONE,
+	  CEMU_AC_CHIP_YM2151, 0xE000, 3375000, CEMU_AC_CHIP_OKI6295, 0xE004, 1000000, 0,
+	  "toaplan/raizing.cpp + raizing_batrider.cpp sound" },
 	{ CEMU_AC_BOARD_SEIBU_OPL, "seibu_opl", CEMU_AC_CPU_Z80, 3579545,
 	  0x10000, 0x800, 0, CEMU_AC_IRQ_Z80_IM1, CEMU_AC_IRQ_Z80_NMI,
 	  CEMU_AC_CHIP_YM3812, 0, 3579545, CEMU_AC_CHIP_OKI6295, 0, 1000000, 0,

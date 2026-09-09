@@ -267,7 +267,13 @@ enum {
 	SOUND86_FIFO_DAT = 0xA46C,
 	SOUND86_MUTE = 0xA66E,
 	PIT_CT0 = 0x71,
+	PIT_CT1 = 0x73,
+	PIT_CT2 = 0x75,
 	PIT_CTRL = 0x77,
+	PPI_A = 0x31,
+	PPI_B = 0x33,
+	PPI_C = 0x35,
+	PPI_CTRL = 0x37,
 	PIC_CMD = 0x00,
 	PIC_MASK = 0x02,
 	SLAVE_PIC_CMD = 0x08,
@@ -277,6 +283,16 @@ enum {
 	WOLF_SYNC0 = 0xE0D0,
 	WOLF_SYNC1 = 0xE0D2
 };
+
+/* Later PC-9801 PIT decode at 3FD9–3FDF (odd) aliases 71/73/75/77.
+   DOSBox-X and radioc.dat; BGML_98 writes the speaker divisor to 3FDBh
+   and never touches 73h, so without this the PPI gate stays on as DC. */
+static uint16_t Pc98FoldPitAlias(uint16_t port)
+{
+	if ((port & 0xfff8u) == 0x3fd8u && (port & 1u))
+		return (uint16_t)(0x71u + (unsigned)(port - 0x3fd9u));
+	return port;
+}
 
 static CHardPc98* g_pc98Active = NULL;
 static int g_pc98Eoi = 0;
@@ -367,6 +383,7 @@ CHardPc98::CHardPc98()
 	, dks98_(0)
 	, mdplay98_(0)
 	, musicComKeepalive_(0)
+	, synthIfKeepalive_(0)
 	, modeMidi_(0)
 	, midiCapArmed_(0)
 	, sound86Mask_(0x00) /* MAME reset: ID=0x40; bit0 set by software for OPNA enhance */
@@ -421,8 +438,22 @@ CHardPc98::CHardPc98()
 	, pitWriteHi_(0)
 	, pitReadHi_(0)
 	, pitRunning_(0)
+	, pit1Reload_(0)
+	, pit1Counter_(0)
+	, pit1WriteHi_(0)
+	, pit1ReadHi_(0)
+	, pit1Access_(3)
+	, pit1Running_(0)
+	, pit1Phase_(0)
+	, pit1PhaseInc_(0)
+	, ppiC_(0x08)
+	, modeBeep_(0)
+	, beepEventCount_(0)
+	, beepMonOn_(0)
+	, beepMonMidi_(-1)
 	, vsyncResidual_(0)
 	, vsyncPending_(0)
+	, gdcA0Poll_(0)
 	, opnPumpResidual_(0)
 	, hostFunc_(0)
 	, hostParam1_(0)
@@ -444,6 +475,7 @@ CHardPc98::CHardPc98()
 	, opnTailCount_(0)
 	, opnLatchedAddr_(0)
 	, ssgPortAJumper_(0)
+	, ssgEcho_()
 	, opnLatchedAddrHi_(0)
 	, wolfCmdLogCount_(0)
 	, wolfCmdWriteCount_(0)
@@ -618,12 +650,14 @@ int CHardPc98::Init(const CEmuGameEntry* ge, int sampleRate)
 	}
 	if (_stricmp(ge->subtype, "midiout") == 0 || _stricmp(ge->subtype, "midi") == 0)
 		modeMidi_ = 1;
+	modeBeep_ = (_stricmp(ge->subtype, "beep") == 0 && !modeMidi_) ? 1 : 0;
 	mpuUart_ = 0;
 	midiCapArmed_ = 0; /* BootDos shells may OUT 0→E0D0 forever; arm after */
 	MidiCaptureReset();
 
 	chip_ = CEmuChipYm2608Create((uint32_t)opnHz_, opnaMode, sampleRate_);
 	if (!chip_) return 0;
+	memset(ssgEcho_, 0, sizeof(ssgEcho_));
 	/* Both YM3812 and Y8950 run off the board's own 3.579545 MHz colour-burst
 	   crystal, not the PC-98 bus clock. The V/VS/LS variants fit a Y8950
 	   instead; its FM half is register-compatible with the YM3812, so the
@@ -838,22 +872,122 @@ void CHardPc98::HostService(uint8_t func)
 	}
 }
 
+void CHardPc98::BeepSetGateFromPpi()
+{
+	BeepMonUpdate();
+}
+
+void CHardPc98::BeepMonUpdate()
+{
+	const int gate = ((ppiC_ & 0x08) == 0) ? 1 : 0;
+	double hz = 0;
+	if (pit1Reload_ > 0 && pitClockHz_ > 0)
+		hz = (double)pitClockHz_ / (double)pit1Reload_;
+	int mid = (hz > 0) ? FmMonShadowHzToMidi(hz) : -1;
+	if (mid < 0) {
+		/* 1-bit DAC / IRQ0 square: PPI bit3 is the waveform, PIT ch1 is idle.
+		   Rising-edge period → pitch; held gate still shows a key. */
+		static uint64_t lastRise;
+		static int prevGate = 0;
+		if (gate && !prevGate && cpuHz_ > 0) {
+			if (lastRise && cpuCycles_ > lastRise) {
+				const double thz = (double)cpuHz_
+					/ (double)(cpuCycles_ - lastRise);
+				if (thz >= 20.0 && thz <= 8000.0)
+					mid = FmMonShadowHzToMidi(thz);
+			}
+			lastRise = cpuCycles_;
+		}
+		prevGate = gate;
+		if (mid < 0 && gate)
+			mid = 60;
+	}
+	const int on = (gate && mid >= 0) ? 1 : 0;
+	if (on)
+		beepEventCount_++;
+	if (!modeBeep_)
+		return;
+	FmMonShadowWriteAuxReg(0x00, (unsigned)(pit1Reload_ & 0xff));
+	FmMonShadowWriteAuxReg(0x01, (unsigned)(pit1Reload_ >> 8));
+	FmMonShadowWriteAuxReg(0x02, (unsigned)ppiC_);
+	FmMonShadowWriteAuxReg(0x03, on ? 1u : 0u);
+	if (mid >= 0)
+		FmMonShadowWriteAuxReg(0x04, (unsigned)mid);
+	FmMonShadowSetKeysProfile(SASAMI_FMMON_KEYS_MIDI);
+	if (on != beepMonOn_ || (on && mid != beepMonMidi_)) {
+		if (beepMonOn_ && beepMonMidi_ >= 0)
+			FmMonShadowMidiNote(0, beepMonMidi_, 0);
+		if (on)
+			FmMonShadowMidiNote(0, mid, 1);
+		beepMonOn_ = on;
+		beepMonMidi_ = on ? mid : -1;
+	}
+}
+
+void CHardPc98::MixBeep(int16_t* stereo, int frames)
+{
+	if (!stereo || frames <= 0) return;
+	const int gate = ((ppiC_ & 0x08) == 0) ? 1 : 0;
+	if (!gate && pit1PhaseInc_ == 0)
+		return;
+	for (int i = 0; i < frames; i++) {
+		if (pit1PhaseInc_ > 0)
+			pit1Phase_ += pit1PhaseInc_;
+		if (!gate)
+			continue;
+		const int bit = pit1PhaseInc_ > 0 ? (int)((pit1Phase_ >> 31) & 1) : 1;
+		const int16_t s = bit ? (int16_t)5000 : (int16_t)-5000;
+		int32_t l = (int32_t)stereo[i * 2] + s;
+		int32_t r = (int32_t)stereo[i * 2 + 1] + s;
+		if (l > 32767) l = 32767; if (l < -32768) l = -32768;
+		if (r > 32767) r = 32767; if (r < -32768) r = -32768;
+		stereo[i * 2] = (int16_t)l;
+		stereo[i * 2 + 1] = (int16_t)r;
+	}
+}
+
+void CHardPc98::BeepCommitPit1()
+{
+	pit1Counter_ = pit1Reload_ ? pit1Reload_ : 65536u;
+	pit1Running_ = 1;
+	if (pit1Reload_ > 0 && sampleRate_ > 0 && pitClockHz_ > 0) {
+		const double hz = (double)pitClockHz_ / (double)pit1Reload_;
+		pit1PhaseInc_ = (uint64_t)(hz * 4294967296.0 / (double)sampleRate_);
+		if (pit1PhaseInc_ == 0) pit1PhaseInc_ = 1;
+	} else {
+		pit1PhaseInc_ = 0;
+	}
+	beepEventCount_++;
+	BeepMonUpdate();
+}
+
 void CHardPc98::PitOut(uint16_t port, uint8_t data)
 {
 	if (port == PIT_CTRL) {
+		const int ch = (data >> 6) & 3;
+		const int access = (data >> 4) & 3;
 		/* RW=00 is the counter-latch command, not a mode word: it freezes
 		   the count for reading and leaves the mode and any half-written
 		   reload alone. */
-		if ((data & 0x30) == 0x00) {
-			pitLatch_ = (uint16_t)(pitCounter_ & 0xffff);
-			pitLatched_ = 1;
-			pitReadHi_ = 0;
+		if (access == 0x00) {
+			if (ch == 0) {
+				pitLatch_ = (uint16_t)(pitCounter_ & 0xffff);
+				pitLatched_ = 1;
+				pitReadHi_ = 0;
+			} else if (ch == 1) {
+				pit1ReadHi_ = 0;
+			}
 			return;
 		}
-		/* control word: only ch0 modes matter for sound pacing */
-		pitWriteHi_ = 0;
-		pitReadHi_ = 0;
-		pitLatched_ = 0;
+		if (ch == 0) {
+			pitWriteHi_ = 0;
+			pitReadHi_ = 0;
+			pitLatched_ = 0;
+		} else if (ch == 1) {
+			pit1Access_ = access;
+			pit1WriteHi_ = 0;
+			pit1ReadHi_ = 0;
+		}
 		return;
 	}
 	if (port == PIT_CT0) {
@@ -867,11 +1001,37 @@ void CHardPc98::PitOut(uint16_t port, uint8_t data)
 			pitRunning_ = 1;
 			pitIrqPending_ = 0;
 		}
+		return;
+	}
+	if (port == PIT_CT1) {
+		if (pit1Access_ == 1) {
+			pit1Reload_ = (uint16_t)((pit1Reload_ & 0xff00) | data);
+			BeepCommitPit1();
+		} else if (pit1Access_ == 2) {
+			pit1Reload_ = (uint16_t)((pit1Reload_ & 0x00ff) | ((uint16_t)data << 8));
+			BeepCommitPit1();
+		} else if (!pit1WriteHi_) {
+			pit1Reload_ = (uint16_t)((pit1Reload_ & 0xff00) | data);
+			pit1WriteHi_ = 1;
+		} else {
+			pit1Reload_ = (uint16_t)((pit1Reload_ & 0x00ff) | ((uint16_t)data << 8));
+			pit1WriteHi_ = 0;
+			BeepCommitPit1();
+		}
 	}
 }
 
 uint8_t CHardPc98::PitIn(uint16_t port)
 {
+	if (port == PIT_CT1) {
+		const uint16_t v = (uint16_t)(pit1Counter_ ? pit1Counter_ : pit1Reload_);
+		if (!pit1ReadHi_) {
+			pit1ReadHi_ = 1;
+			return (uint8_t)(v & 0xff);
+		}
+		pit1ReadHi_ = 0;
+		return (uint8_t)(v >> 8);
+	}
 	if (port != PIT_CT0) return 0xff;
 	/* The live count, not the reload: C-Class FMX loads FFFF, spins a fixed
 	   loop, latches and reads back, then divides by (FFFF − count) to get a
@@ -1127,6 +1287,18 @@ int CHardPc98::DeliverIrqs()
 	}
 
 	uint16_t flags = np2_reg_get(NP2_R_FLAGS);
+	if (modeBeep_ && pitIrqPending_) {
+		/* Speaker rips (BGML_98) sequence notes on IRQ0. After INT 7F they
+		   often sit in a CLI wait; without IF the PIT never reaches INT08
+		   and MixBeep is a DC gate. Real BIOS would still raise IRQ0. */
+		picMask_ = (uint8_t)(picMask_ & 0xfeu);
+		flags = (uint16_t)(flags | 0x0200);
+		np2_reg_set(NP2_R_FLAGS, flags);
+	}
+	if (synthIfKeepalive_) {
+		flags = (uint16_t)(flags | 0x0200);
+		np2_reg_set(NP2_R_FLAGS, flags);
+	}
 	if ((flags & 0x200) == 0) { /* IF clear */
 		if (chip_ && chip_->Irq()) g_censIfOff++;
 		return 0;
@@ -1136,17 +1308,25 @@ int CHardPc98::DeliverIrqs()
 		if (opnInService_) g_censSvc++;
 	}
 
-	if (pitIrqPending_ && (picMask_ & 0x01) == 0 && IvtHooked(PC98_TIMER_VEC, isDos_)) {
-		pitIrqPending_ = 0;
-		timerIrqCount_++;
-		np2_interrupt((uint8_t)PC98_TIMER_VEC);
-		return 1;
+	if (pitIrqPending_ && (picMask_ & 0x01) == 0) {
+		/* BIOS INT 08 increments the timer and far-calls INT 1C.  Guest
+		   drivers that own INT 08 already do that chain themselves — firing
+		   both was measured to break titles.  When INT 08 is still the DOS
+		   trampoline, the BIOS would have delivered 1C; do that and only
+		   that. */
+		if (IvtHooked(PC98_TIMER_VEC, isDos_)) {
+			pitIrqPending_ = 0;
+			timerIrqCount_++;
+			np2_interrupt((uint8_t)PC98_TIMER_VEC);
+			return 1;
+		}
+		if (IvtHooked(PC98_USER_TICK_VEC, isDos_)) {
+			pitIrqPending_ = 0;
+			timerIrqCount_++;
+			np2_interrupt((uint8_t)PC98_USER_TICK_VEC);
+			return 1;
+		}
 	}
-	/* Chaining IRQ0 into INT 1C the way a BIOS would looks like the missing
-	   link for the drivers that hook only the user tick, but it is not: in
-	   every one of them the driver has already taken INT 08 for itself, so
-	   the chain never applies.  Measured over the whole pc98 set it moved
-	   two archives and broke one, so IRQ0 stays with INT 08 alone. */
 	if (vsyncPending_ && (picMask_ & 0x04) == 0 && IvtHooked(PC98_VSYNC_VEC, isDos_)) {
 		vsyncPending_ = 0;
 		np2_interrupt((uint8_t)PC98_VSYNC_VEC);
@@ -1158,18 +1338,38 @@ int CHardPc98::DeliverIrqs()
 		uint8_t* mem = np2_mem();
 		/* famistava plants OPN on INT14 during play — mirror only when INT0B
 		   is still vacant (rtype keeps an INT0A thunk on INT0B). */
-		if (mem && pc88VaIo_ && IvtHooked(0x14, isDos_) && !IvtHooked(PC98_OPN_IRQ_VEC, isDos_)) {
+		/* Guest OPN ISR on INT14 (MDR / famistava / MUSE-class): DeliverIrqs
+		   ticks INT0B. Mirror while 0B is still the trampoline; skip lone
+		   IRET serial stubs. */
+		if (mem && (pc88VaIo_ || isDos_) && IvtHooked(0x14, isDos_)
+			&& !IvtHooked(PC98_OPN_IRQ_VEC, isDos_)) {
 			const unsigned o14 = (unsigned)mem[0x14 * 4] | ((unsigned)mem[0x14 * 4 + 1] << 8);
 			const unsigned s14 = (unsigned)mem[0x14 * 4 + 2] | ((unsigned)mem[0x14 * 4 + 3] << 8);
-			mem[PC98_OPN_IRQ_VEC * 4 + 0] = (uint8_t)(o14 & 0xff);
-			mem[PC98_OPN_IRQ_VEC * 4 + 1] = (uint8_t)((o14 >> 8) & 0xff);
-			mem[PC98_OPN_IRQ_VEC * 4 + 2] = (uint8_t)(s14 & 0xff);
-			mem[PC98_OPN_IRQ_VEC * 4 + 3] = (uint8_t)((s14 >> 8) & 0xff);
+			const unsigned phys = (s14 << 4) + o14;
+			if (phys < 0x200000u && mem[phys] != 0xCF
+				&& !(s14 == 0 && o14 == 0x500)) {
+				mem[PC98_OPN_IRQ_VEC * 4 + 0] = (uint8_t)(o14 & 0xff);
+				mem[PC98_OPN_IRQ_VEC * 4 + 1] = (uint8_t)((o14 >> 8) & 0xff);
+				mem[PC98_OPN_IRQ_VEC * 4 + 2] = (uint8_t)(s14 & 0xff);
+				mem[PC98_OPN_IRQ_VEC * 4 + 3] = (uint8_t)((s14 >> 8) & 0xff);
+			}
 			picMask_ = (uint8_t)(picMask_ & ~(1u << 3));
 		}
 		/* mbmusp/MUSE: SSG I/O A = 0xC0 → driver hooks INT14 and EOIs the
 		   slave. Deliver there (do not mirror onto INT0B). */
 		uint8_t vec = PC98_OPN_IRQ_VEC;
+		if (IvtHooked(0x14, isDos_) && mem) {
+			const unsigned o14 = (unsigned)mem[0x14 * 4] | ((unsigned)mem[0x14 * 4 + 1] << 8);
+			const unsigned s14 = (unsigned)mem[0x14 * 4 + 2] | ((unsigned)mem[0x14 * 4 + 3] << 8);
+			const unsigned phys = (s14 << 4) + o14;
+			if (phys < 0x200000u && mem[phys] != 0xCF
+				&& !(s14 == 0 && o14 == 0x500)
+				&& s14 != DOS98_TRAMP_SEG) {
+				vec = 0x14;
+				picMask_ = (uint8_t)(picMask_ & ~(1u << 2));
+				slavePicMask_ = (uint8_t)(slavePicMask_ & ~(1u << 4));
+			}
+		}
 		if ((ssgPortAJumper_ & 0xC0) == 0xC0 && IvtHooked(0x14, isDos_)) {
 			vec = 0x14;
 			picMask_ = (uint8_t)(picMask_ & ~(1u << 2)); /* cascade */
@@ -1181,6 +1381,10 @@ int CHardPc98::DeliverIrqs()
 			g_censNoVec++;
 			return 0;
 		}
+		/* Guest ISR OUT 02h often restores a boot-time IMR that still
+		   masks IRQ3. PMD-class and INT14-mirrored drivers need the tick. */
+		if (vec == PC98_OPN_IRQ_VEC)
+			picMask_ = (uint8_t)(picMask_ & ~(1u << 3));
 		if (IvtHooked(vec, isDos_)) {
 			if (vec >= 0x08 && vec <= 0x0F && (picMask_ & (1 << (vec - 0x08))) != 0) {
 				g_censMasked++;
@@ -1537,6 +1741,7 @@ void CHardPc98::WolfCmdByte(uint8_t data)
 
 uint8_t CHardPc98::PortIn(uint16_t port)
 {
+	port = Pc98FoldPitAlias(port);
 	/* PC-98 display status: bit 5 changes across vertical retrace.  Several
 	   resident glues synchronize command hand-off by waiting for a low->high
 	   transition (mscd_98 does this for 18 frames).  Returning the generic
@@ -1546,15 +1751,24 @@ uint8_t CHardPc98::PortIn(uint16_t port)
 	   off the text GDC (C-Class FMX waits for vsync to fall and rise before
 	   probing the sound board) spun in its first wait loop forever. */
 	if (port == 0x0060 || port == 0x00A0) {
-		const uint64_t halfFrame =
-			(cpuHz_ > 120) ? (uint64_t)cpuHz_ / 120ull : 1ull;
-		uint8_t s = ((cpuCycles_ / halfFrame) & 1ull) ? 0x20 : 0x00;
-		/* An idle GDC has drained its command FIFO and is not drawing; a
-		   caller that waits for FIFO-empty before writing needs to see it.
-		   Only 0x60 reports it: 0xA0 has answered bare vsync since the
-		   glues that poll it were tuned, and they mask for bit 5 anyway. */
-		if (port == 0x0060)
+		uint8_t s;
+		if (port == 0x00A0) {
+			/* tky98 glue waits for bit5 to fall and rise 60 times before
+			   INT F1 play. A 60 Hz clock needs ~1s; DrainInterrupt is 0.5s
+			   so older TKYDRV packs never left the wait (dumps=1). Toggle
+			   every poll — OPN timers still pace the song. */
+			gdcA0Poll_ = (uint8_t)(gdcA0Poll_ + 1);
+			s = (uint8_t)((gdcA0Poll_ & 1) ? 0x20 : 0x00);
+		} else {
+			const uint64_t halfFrame =
+				(cpuHz_ > 120) ? (uint64_t)cpuHz_ / 120ull : 1ull;
+			s = ((cpuCycles_ / halfFrame) & 1ull) ? 0x20 : 0x00;
+			/* An idle GDC has drained its command FIFO and is not drawing; a
+			   caller that waits for FIFO-empty before writing needs to see it.
+			   Only 0x60 reports it: 0xA0 has answered bare vsync since the
+			   glues that poll it were tuned, and they mask for bit 5 anyway. */
 			s |= 0x04;
+		}
 		return s;
 	}
 	/* PC-88VA: PC-88 OPN ports read the same chip status/data. */
@@ -1582,6 +1796,11 @@ uint8_t CHardPc98::PortIn(uint16_t port)
 		   goes to the slave (hootrip preset_muse_irq_jumper). */
 		if (chip_ && opnLatchedAddr_ == 0x0E && (ssgPortAJumper_ & 0x80))
 			return ssgPortAJumper_;
+		/* YM2203/2608 SSG $00-$0F are readable. PLAY5 / MMD2.SYS / F.COM
+		   write a canary (0x55 or 1) and IN-compare; ymfm read_data() is
+		   status, not the register. Serve the last DATA0 write. */
+		if (opnLatchedAddr_ <= 0x0F)
+			return ssgEcho_[opnLatchedAddr_];
 		return chip_ ? chip_->ReadData() : 0xff;
 	case OPN_ADDR1: {
 		if (modeSorch_)
@@ -1641,7 +1860,15 @@ uint8_t CHardPc98::PortIn(uint16_t port)
 		return 0x00;
 	case PIC_MASK: return picMask_;
 	case SLAVE_PIC_MASK: return slavePicMask_;
-	case PIT_CT0: case PIT_CTRL: return PitIn(port);
+	case PIT_CT0: case PIT_CT1: case PIT_CTRL: return PitIn(port);
+	case PPI_A:
+		/* System PPI port A = DIP SW2. QEMU returns 0x73 in input mode. */
+		return 0x73;
+	case PPI_B:
+		/* TYP=10 (not original 9801), MOD=1 (8 MHz / 2 MHz PIT). */
+		return 0xA0;
+	case PPI_C:
+		return ppiC_;
 	case WOLF_SYNC0:
 	case 0xC0D0: /* alternate PC-98 MIDI data port */
 		if (modeMidi_ || mpuUart_)
@@ -1662,6 +1889,7 @@ uint8_t CHardPc98::PortIn(uint16_t port)
 
 void CHardPc98::PortOut(uint16_t port, uint8_t data)
 {
+	port = Pc98FoldPitAlias(port);
 	/* olteus_va: OUT 10A,0022 arms the picture/interval tick; 00/0C disarms.
 	   Capture CS as MAP seg if the far-table hook has not run yet. */
 	if (pc88VaIo_ && port == 0x10A) {
@@ -1772,6 +2000,8 @@ void CHardPc98::PortOut(uint16_t port, uint8_t data)
 				g_lastTimerCtrl = data;
 			if (opnLatchedAddr_ == 0x0E)
 				ssgPortAJumper_ = data;
+			if (opnLatchedAddr_ <= 0x0F)
+				ssgEcho_[opnLatchedAddr_] = data;
 			opnWriteCount_++;
 		}
 		break;
@@ -1884,7 +2114,26 @@ void CHardPc98::PortOut(uint16_t port, uint8_t data)
 			slavePicMask_ = data;
 		}
 		break;
-	case PIT_CT0: case PIT_CTRL: PitOut(port, data); break;
+	case PIT_CT0: case PIT_CT1: case PIT_CTRL: PitOut(port, data); break;
+	case PPI_C:
+		ppiC_ = data;
+		beepEventCount_++;
+		BeepSetGateFromPpi();
+		break;
+	case PPI_CTRL:
+		if ((data & 0x80) == 0) {
+			/* 8255 bit set/reset: 0x06 clears bit3 (speaker on), 0x07 sets it. */
+			const unsigned bit = (unsigned)((data >> 1) & 7);
+			if (data & 1)
+				ppiC_ = (uint8_t)(ppiC_ | (uint8_t)(1u << bit));
+			else
+				ppiC_ = (uint8_t)(ppiC_ & (uint8_t)~(1u << bit));
+			if (bit == 3) {
+				beepEventCount_++;
+				BeepSetGateFromPpi();
+			}
+		}
+		break;
 	case VSYNC_ACK: vsyncPending_ = 0; break;
 	case IO_DELAY: break;
 	case SOUND86_ID:
@@ -1930,6 +2179,7 @@ int CHardPc98::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCo
 	n3golf98_ = 0;
 	dks98_ = 0;
 	mdplay98_ = 0;
+	synthIfKeepalive_ = 0;
 	wolfteam98_ = 0;
 	wolfGateStop_ = 0x5B48;
 	wolfGatePlay_ = 0x5B5A;
@@ -2373,6 +2623,15 @@ void CHardPc98::MaterializeDosFiles(CEmuZipFs* fs, const CEmuGameEntry* ge)
 			continue;
 		unsigned sz = 0;
 		const unsigned char* data = CEmuZipFsFind(fs, r->name, &sz);
+		if ((!data || !sz) && r->name && r->name[0]) {
+			char stem[96];
+			int nj = 0;
+			for (const char* p = r->name; *p && *p != ' ' && *p != '\t' && nj < 95; p++)
+				stem[nj++] = *p;
+			stem[nj] = 0;
+			if (stem[0] && strcmp(stem, r->name) != 0)
+				data = CEmuZipFsFind(fs, stem, &sz);
+		}
 		unsigned char donorBuf[256 * 1024];
 		unsigned donorSz = 0;
 		/* Song-only zips (gdm_mo/guyna/kizuato/nekoex) omit PMD_98.COM even
@@ -2429,9 +2688,13 @@ void CHardPc98::BindDosRomHandles(const CEmuGameEntry* ge)
 			if (*p == '\\' || *p == '/' || *p == ':')
 				base = p + 1;
 		}
-		if (_stricmp(r->type, "conin") == 0)
+		if (_stricmp(r->type, "conin") == 0) {
 			dos_.SetHandleText((uint16_t)off, base);
-		else
+			/* hoot conin@0x10 is stdin (AH=3F BX=0), not DOS handle 0x10.
+			   cplay still binds the title-numbered handle above. */
+			if (off == 0x10)
+				dos_.SetHandleText(0, base);
+		} else
 			dos_.SetHandle((uint16_t)off, base);
 	}
 }
@@ -2606,7 +2869,55 @@ const char* CHardPc98::SelectedDosSong(const CEmuGameEntry* ge, unsigned titleCo
 			continue;
 		return base;
 	}
+	/* Bio_100%/BGML_98 and similar: one shared bank listed as conin@0x10
+	   (hoot stdin) plus type=file@-1. Title codes pick a track inside that
+	   bank, so no rom offset equals the title byte. */
+	{
+		int nConin = 0;
+		const char* only = NULL;
+		for (int i = 0; i < ge->romCount; i++) {
+			const CEmuRomEntry* r = &ge->rom[i];
+			if (_stricmp(r->type, "conin") != 0) continue;
+			const char* base = r->name;
+			for (const char* p = r->name; *p; p++) {
+				if (*p == '\\' || *p == '/' || *p == ':')
+					base = p + 1;
+			}
+			if (DosIsEngineName(base))
+				continue;
+			nConin++;
+			only = base;
+		}
+		if (nConin == 1 && only)
+			return only;
+	}
 	return NULL;
+}
+
+/* SYNTH_98 / HHD / similar: rom offset 5 is the overlay (S20.BIN), not
+   the song. Rebinding handle 5 to the PAI at TriggerPlay is harmless once
+   the overlay has TSR'd, but keep the catalog mapping for any AH=3F BX=5
+   that still runs. */
+static int DosHandleBoundToOtherFile(const CEmuGameEntry* ge, int handle, const char* songFile)
+{
+	if (!ge || handle < 0)
+		return 0;
+	for (int i = 0; i < ge->romCount; i++) {
+		const CEmuRomEntry* r = &ge->rom[i];
+		if (r->offset != handle)
+			continue;
+		if (_stricmp(r->type, "file") != 0 && _stricmp(r->type, "voice") != 0)
+			continue;
+		const char* base = r->name ? r->name : "";
+		for (const char* p = base; *p; p++) {
+			if (*p == '\\' || *p == '/' || *p == ':')
+				base = p + 1;
+		}
+		if (songFile && _stricmp(base, songFile) == 0)
+			return 0;
+		return 1;
+	}
+	return 0;
 }
 
 void CHardPc98::BindDosTriggerSong(const CEmuGameEntry* ge, unsigned titleCode)
@@ -2619,9 +2930,25 @@ void CHardPc98::BindDosTriggerSong(const CEmuGameEntry* ge, unsigned titleCode)
 	   hands the buffer straight to the ANNEX driver, which starts with
 	   `CMP WORD ES:[SI],1` — every .MLO song begins 01 00, so the driver
 	   wants the song bytes and rejects a filename outright. */
+	/* PLAY5_98 is not here: INT7F cmd0 AH=3F-reads handle 0 into a buffer
+	   and INT F2 AX=0 loads those bytes. Filename-text on handle 0 left
+	   PLAY5/PLAY3/MUSIC + PLAY5_98 silent.
+	   IBGMP.COM the same: cmd0 AH=3F-reads handle 0 then INT52 AX=200.
+	   Prefix "ibgm" also matches IBGMP, so it must not open-by-name. */
 	static const char* kOpenName[] = {
 		"cplay", "fplay", "musdrv", "mbmusp", "mdrv_9", "mddrv_9",
-		"mlfplay", "play5", "ibgm", NULL
+		"mlfplay", "bp", NULL
+	};
+	static const char* kBgmlSong[] = { "BGML_98", "bgml", NULL };
+	static const char* kLudyMagic[] = {
+		"LUDY", "ludy", "SCBIOS",
+		"MAGIC_98", "magic_98", "MAGIC_", "magic_",
+		NULL
+	};
+	static const char* kExtParamVoice[] = {
+		"mmd2", "MMD2", "mmd2va",
+		"iwaplay", "IWAPLAY",
+		NULL
 	};
 	const int cplayFamily = DosShellStarts(ge, kCplay);
 	int opensByName = cplayFamily || DosShellStarts(ge, kOpenName);
@@ -2629,20 +2956,29 @@ void CHardPc98::BindDosTriggerSong(const CEmuGameEntry* ge, unsigned titleCode)
 	   AH=3D opens the real file — must not overwrite with song bytes. */
 	if (sf && ge && !opensByName) {
 		const int low = (int)(titleCode & 0xff);
+		int nConin = 0, stdinConin = 0;
 		for (int i = 0; i < ge->romCount; i++) {
 			const CEmuRomEntry* r = &ge->rom[i];
-			if (_stricmp(r->type, "conin") != 0 || r->offset != low)
-				continue;
+			if (_stricmp(r->type, "conin") != 0) continue;
 			const char* base = r->name;
 			for (const char* p = r->name; *p; p++) {
 				if (*p == '\\' || *p == '/' || *p == ':')
 					base = p + 1;
 			}
+			if (DosIsEngineName(base))
+				continue;
+			nConin++;
+			if (r->offset == 0x10 || r->offset == 0)
+				stdinConin = 1;
+			if (r->offset != low) continue;
 			if (_stricmp(base, sf) == 0) {
 				opensByName = 1;
 				break;
 			}
 		}
+		/* Shared-bank conin@0x10 is hoot stdin (filename), not a song handle. */
+		if (!opensByName && nConin == 1 && stdinConin)
+			opensByName = 1;
 	}
 	/* usd_98 (ADVBIOS/ADVH): INT7F AH=3F reads song BYTES from BX=0
 	   (CX=4000/FFFF). ADVH packs list songs only as conin@title — the
@@ -2653,6 +2989,14 @@ void CHardPc98::BindDosTriggerSong(const CEmuGameEntry* ge, unsigned titleCode)
 		if (DosShellStarts(ge, kUsdSong))
 			opensByName = 0;
 	}
+	/* magpa_98: kOpenName includes "musdrv" (mbmusp packs need the filename
+	   on handle 0), but magpa's INT7F cmd0 is AH=3F BX=0 of song bytes then
+	   INT40 AX=2000. Filename text on handle 0 left MUSDRV reading ASCII. */
+	{
+		static const char* kMagpaBin[] = { "magpa_98", "magpa", NULL };
+		if (DosShellStarts(ge, kMagpaBin))
+			opensByName = 0;
+	}
 
 	if (sf) {
 		strncpy_s(dosSong_, sf, _TRUNCATE);
@@ -2661,11 +3005,14 @@ void CHardPc98::BindDosTriggerSong(const CEmuGameEntry* ge, unsigned titleCode)
 			dos_.SetHandleText(0, sf);
 		} else {
 			dos_.SetHandle(0, sf);
-			dos_.SetHandle(5, sf);
-			dos_.SetHandle(0x0B, sf);
+			if (!DosHandleBoundToOtherFile(ge, 5, sf))
+				dos_.SetHandle(5, sf);
+			if (!DosHandleBoundToOtherFile(ge, 0x0B, sf))
+				dos_.SetHandle(0x0B, sf);
 			/* PMD_98 reads the song handle == title low byte (pre-bound at install). */
 			const unsigned low = titleCode & 0xff;
-			if (low < (unsigned)DOS98_HANDLE_MAX)
+			if (low < (unsigned)DOS98_HANDLE_MAX
+				&& !DosHandleBoundToOtherFile(ge, (int)low, sf))
 				dos_.SetHandle((uint16_t)low, sf);
 		}
 	}
@@ -2699,6 +3046,13 @@ void CHardPc98::BindDosTriggerSong(const CEmuGameEntry* ge, unsigned titleCode)
 		/* INT 7F AH=9: in-bank index on EXT param (0x7E4). */
 		extSong_ = 0;
 		extParam_ = (uint16_t)byte2;
+	} else if (DosShellStarts(ge, kLudyMagic)) {
+		/* LUDY: IN 7E2 AX → xchg AH,BL uses AH as the .MCG handle (6) and
+		   AL as the in-pack index. MAGIC_98: AH=instrument handle (SND),
+		   AL=song handle. Low-byte-only EXT_SONG skipped the bank and left
+		   keyOn=0 / dumps=4. */
+		extSong_ = (uint16_t)(titleCode & 0xffff);
+		extParam_ = 0;
 	} else if (pacTitle) {
 		extSong_ = (uint16_t)(titleCode & 0xffff);
 		extParam_ = 0;
@@ -2706,6 +3060,12 @@ void CHardPc98::BindDosTriggerSong(const CEmuGameEntry* ge, unsigned titleCode)
 		/* MDR external-voice: EXT_PARAM = voice handle (byte2). */
 		extSong_ = (uint16_t)(titleCode & 0xff);
 		extParam_ = (uint16_t)byte2;
+	} else if (DosShellStarts(ge, kExtParamVoice)) {
+		/* mmd2/iwaplay: IN 7E4 is the voice/TON handle (catalog byte2, or
+		   handle 5 when titles are 0x10-style). byte2!=0 used to set
+		   EXT_SONG=voice and skip the bank — dumps>0 / keyOn=0. */
+		extSong_ = (uint16_t)(titleCode & 0xff);
+		extParam_ = byte2 ? (uint16_t)byte2 : 5;
 	} else if (pc88VaIo_) {
 		/* PC-88VA DOS overlay glue (tetrisva/rtypeva/shinrava/famista*):
 		   IN 7E4 reads only the low byte of EXT_PARAM as play mode.
@@ -2720,6 +3080,11 @@ void CHardPc98::BindDosTriggerSong(const CEmuGameEntry* ge, unsigned titleCode)
 		if (mode == 0)
 			mode = (titleCode >> 24) & 0xff;
 		extParam_ = (uint16_t)mode;
+	} else if (DosShellStarts(ge, kBgmlSong)) {
+		/* Bio_100% BGML_98: INT 7F cmd0 reads EXT_SONG as a 16-bit title
+		   (07E2/07E3). Catalog 0x01nn are one-shots; 0x00nn are looping BGM. */
+		extSong_ = (uint16_t)(titleCode & 0xffff);
+		extParam_ = 0;
 	} else if (byte2 != 0) {
 		extSong_ = (uint16_t)byte2;
 		extParam_ = (uint16_t)hiByte;
@@ -2740,15 +3105,72 @@ static void Pc98Wr16(uint8_t* mem, unsigned addr, uint16_t v)
 	mem[addr + 1] = (uint8_t)(v >> 8);
 }
 
+/* SYNTH_98.COM (365-byte ylz glue): INT60 AH=0x0F returns DX=destOff in
+   the overlay (S20:3088 / S20S_4:1B86). The COM did `mov ax,ds; mov es,ax;
+   mov di,dx` so PAI landed past the AH=4A-shrunk COM and AH=0 parsed the
+   overlay's leftover init. After INIT stores the overlay at CS:0260, jump
+   to a cave that loads ES from CS:0260 (DS may still be the overlay). Skip
+   when 0260 is 0 (resident SYNTHIA — crim). */
+static int PatchSynth98PaiDest(uint8_t* mem, uint16_t psp)
+{
+	if (!mem || !psp)
+		return 0;
+	const unsigned ovl = Pc98DosLin(psp, 0x260);
+	const unsigned at = Pc98DosLin(psp, 0x1A5);
+	const unsigned cave = Pc98DosLin(psp, 0x270);
+	if (ovl + 2u >= 0x200000u || at + 11u >= 0x200000u || cave + 16u >= 0x200000u)
+		return 0;
+	if (!(mem[ovl] | mem[ovl + 1]))
+		return 0;
+	static const uint8_t kOld[] = { 0x8C, 0xD8, 0x8E, 0xC0, 0x8B, 0xFA };
+	if (mem[at] == 0xE9 && mem[at + 1] == 0xC8 && mem[at + 2] == 0x00)
+		return 1;
+	if (memcmp(mem + at, kOld, 6) != 0)
+		return 0;
+	/* E9 disp16 → 0270; pad through the old mov ds,cs:[025C]. */
+	mem[at + 0] = 0xE9;
+	mem[at + 1] = 0xC8;
+	mem[at + 2] = 0x00;
+	memset(mem + at + 3, 0x90, 8);
+	/* cave@0270: mov es,[cs:0260]; mov di,dx; mov ds,[cs:025C]; jmp 01B0 */
+	static const uint8_t kCave[] = {
+		0x2E, 0x8E, 0x06, 0x60, 0x02,
+		0x8B, 0xFA,
+		0x2E, 0x8E, 0x1E, 0x5C, 0x02,
+		0xE9, 0x31, 0xFF
+	};
+	memcpy(mem + cave, kCave, sizeof(kCave));
+	return 1;
+}
+
 int CHardPc98::RunDosDevices(const CEmuGameEntry* ge, uint64_t budgetCycles)
 {
 	if (!ge) return 0;
 	uint8_t* mem = np2_mem();
 	if (!mem) return 0;
 	int nOk = 0;
+	int nDeviceRom = 0;
+	for (int i = 0; i < ge->romCount; i++) {
+		if (_stricmp(ge->rom[i].type, "device") == 0)
+			nDeviceRom++;
+	}
 	for (int i = 0; i < ge->romCount; i++) {
 		const CEmuRomEntry* r = &ge->rom[i];
-		if (_stricmp(r->type, "device") != 0) continue;
+		const int isDevice = _stricmp(r->type, "device") == 0;
+		int isLooseMmd = 0;
+		if (!isDevice && nDeviceRom == 0 && _stricmp(r->type, "file") == 0
+			&& r->offset < 0 && r->name) {
+			const char* bn = r->name;
+			for (const char* p = r->name; *p; p++) {
+				if (*p == '\\' || *p == '/' || *p == ':')
+					bn = p + 1;
+			}
+			const char* dot = strrchr(bn, '.');
+			if (dot && _stricmp(dot, ".SYS") == 0
+				&& _strnicmp(bn, "MMD", 3) == 0)
+				isLooseMmd = 1;
+		}
+		if (!isDevice && !isLooseMmd) continue;
 		const char* base = r->name ? r->name : "";
 		for (const char* p = base; *p; p++) {
 			if (*p == '\\' || *p == '/' || *p == ':')
@@ -2759,10 +3181,28 @@ int CHardPc98::RunDosDevices(const CEmuGameEntry* ge, uint64_t budgetCycles)
 		for (const char* p = base; *p && *p != ' ' && *p != '\t' && nj < DOS98_NAME - 1; p++)
 			name[nj++] = *p;
 		name[nj] = 0;
+		/* NMUSE CONFIG -d/-k sizes are byte buffers past the image.
+		   Small -d2048 -k1024 already fits the default alloc; applying
+		   it anyway moved the COM AH=48 block and GAPPY'd pod OPEN. */
+		unsigned extraParas = 0;
+		for (const char* ap = base; *ap; ap++) {
+			if ((ap[0] == '-' || ap[0] == '/')
+				&& (ap[1] == 'd' || ap[1] == 'D' || ap[1] == 'k' || ap[1] == 'K')
+				&& ap[2] >= '0' && ap[2] <= '9') {
+				unsigned v = 0;
+				for (const char* q = ap + 2; *q >= '0' && *q <= '9'; q++)
+					v = v * 10u + (unsigned)(*q - '0');
+				extraParas += (v + 15u) / 16u;
+			}
+		}
+		if (extraParas <= 0x180u)
+			extraParas = 0;
 
 		/* MUSE/SDD devices pick IRQ from SSG I/O A bits7-6; force INT14 path. */
 		if (chip_ && (strstr(name, "MUSE") || strstr(name, "muse")
-			|| strstr(name, "SDD") || strstr(name, "sdd"))) {
+			|| strstr(name, "SDD") || strstr(name, "sdd")
+			|| strstr(name, "MMD") || strstr(name, "mmd")
+			|| strstr(name, "MDR") || strstr(name, "mdr"))) {
 			ssgPortAJumper_ = 0xC0;
 			chip_->Write(0, 0x0E);
 			chip_->Write(1, 0xC0);
@@ -2770,15 +3210,41 @@ int CHardPc98::RunDosDevices(const CEmuGameEntry* ge, uint64_t budgetCycles)
 		}
 
 		uint16_t loadSeg = 0, stratOff = 0, intrOff = 0;
-		if (!dos_.LoadDeviceImage(mem, name, &loadSeg, &stratOff, &intrOff) || !loadSeg)
+		if (!dos_.LoadDeviceImage(mem, name, &loadSeg, &stratOff, &intrOff, extraParas) || !loadSeg)
 			continue;
 
-		const uint16_t reqSeg = 0x0050;
+		const uint16_t reqSeg = (uint16_t)DOS98_IDLE_SEG;
 		const uint16_t reqOff = 0x0100;
 		const unsigned req = Pc98DosLin(reqSeg, reqOff);
-		memset(mem + req, 0, 0x20);
-		mem[req + 0] = 0x16;
+		memset(mem + req, 0, 0x60);
+		mem[req + 0] = 0x22;
 		mem[req + 2] = 0x00; /* INIT */
+		/* Char-device INIT +12h is a far pointer to the CONFIG.SYS tail
+		   (space + args + CR). MMD2.SYS walks it for the 4096-byte buffer
+		   size; a NULL ptr made LDS SI from 0000:0000 and left CX=0 so
+		   mmd2.com's AH=3F song read transferred nothing (dumps=1).
+		   Packet used to live at 0050:0100 (lin 0x600) — that is the INT
+		   trampoline (0060:0000). memset 0x60 wiped INT 21's HLT stub so
+		   SYS/glue AH=25 never hooked D2/7F. */
+		{
+			char argbuf[80];
+			int ai = 0;
+			argbuf[ai++] = ' ';
+			const char* tail = base;
+			while (*tail && *tail != ' ' && *tail != '\t')
+				tail++;
+			while (*tail && ai < 76)
+				argbuf[ai++] = *tail++;
+			argbuf[ai++] = 0x0D;
+			argbuf[ai] = 0;
+			memcpy(mem + req + 0x20, argbuf, (size_t)ai + 1);
+			mem[req + 0x12] = 0x20;
+			mem[req + 0x13] = 0x01; /* reqOff+0x20 */
+			mem[req + 0x14] = (uint8_t)(reqSeg & 0xff);
+			mem[req + 0x15] = (uint8_t)(reqSeg >> 8);
+			Pc98Wr16(mem, req + 0x0E, 0);
+			Pc98Wr16(mem, req + 0x10, 0x9000);
+		}
 
 		const uint16_t launchSeg = (uint16_t)DOS98_IDLE_SEG;
 		const uint16_t stratPtr = 0x0040;
@@ -2817,43 +3283,62 @@ int CHardPc98::RunDosDevices(const CEmuGameEntry* ge, uint64_t budgetCycles)
 		Pc98Wr16(mem, Pc98DosLin(launchSeg, intrPtr), intrOff);
 		Pc98Wr16(mem, Pc98DosLin(launchSeg, intrPtr) + 2, loadSeg);
 
-		np2_reg_set(NP2_R_DS, loadSeg);
-		np2_reg_set(NP2_R_ES, reqSeg);
-		np2_set_ss_sp(launchSeg, 0xFFFE);
-		np2_set_cs_ip(launchSeg, 0x0000);
-		np2_reg_set(NP2_R_FLAGS, 0x0202);
-		stubState_ = 0;
-		const uint64_t start = cpuCycles_;
-		while (cpuCycles_ - start < budgetCycles) {
-			if (stubState_ == 0x82)
-				break;
-			if (DeliverIrqs())
-				continue;
-			uint16_t cs = np2_reg_get(NP2_R_CS);
-			uint16_t ip = np2_reg_get(NP2_R_IP);
-			const unsigned phys = ((unsigned)cs << 4) + (unsigned)ip;
-			if (phys < 0x200000 && mem[phys] == 0xF4) {
-				uint8_t vec = 0;
-				if (dos_.TrapVector(cs, ip, &vec)) {
-					CEmuDos98Result res = dos_.ServiceInt(mem, vec);
-					if (res == DOS98_TERMINATED || res == DOS98_RESIDENT)
-						break;
-					dos_.IretReturn(mem);
-					cpuCycles_ += 50;
-					TickSide(50);
-					AdvanceOpnClocks(50);
+		/* MUSE3 plants INT14 on DEVICE OPEN (cmd 0x0D), not INIT: DOS 5+
+		   INIT skips call 6cd. muse_98.com then takes IVT[0x52] as the
+		   driver CS and far-calls [CS:8]. Trampoline CS writes 0060:0012
+		   and #BRs before AH=25 INT7F. MUSIC.SYS is not this family. */
+		int museOpen = 0;
+		if (!_strnicmp(name, "muse", 4) || !_strnicmp(name, "nmuse", 5))
+			museOpen = 1;
+
+		const int nPass = museOpen ? 2 : 1;
+		for (int pass = 0; pass < nPass; pass++) {
+			if (pass) {
+				mem[req + 0] = 0x0D;
+				mem[req + 2] = 0x0D; /* OPEN */
+			}
+			np2_reg_set(NP2_R_DS, loadSeg);
+			np2_reg_set(NP2_R_ES, reqSeg);
+			np2_set_ss_sp(launchSeg, 0xFFFE);
+			np2_set_cs_ip(launchSeg, 0x0000);
+			np2_reg_set(NP2_R_FLAGS, 0x0202);
+			stubState_ = 0;
+			const uint64_t start = cpuCycles_;
+			const uint64_t passBudget = pass ? (budgetCycles / 8ull + 100000ull)
+				: budgetCycles;
+			while (cpuCycles_ - start < passBudget) {
+				if (stubState_ == 0x82)
+					break;
+				if (DeliverIrqs())
+					continue;
+				uint16_t cs = np2_reg_get(NP2_R_CS);
+				uint16_t ip = np2_reg_get(NP2_R_IP);
+				const unsigned phys = ((unsigned)cs << 4) + (unsigned)ip;
+				if (phys < 0x200000 && mem[phys] == 0xF4) {
+					uint8_t vec = 0;
+					if (dos_.TrapVector(cs, ip, &vec)) {
+						CEmuDos98Result res = dos_.ServiceInt(mem, vec);
+						if (res == DOS98_TERMINATED || res == DOS98_RESIDENT)
+							break;
+						if (res == DOS98_EXEC)
+							continue;
+						dos_.IretReturn(mem);
+						cpuCycles_ += 50;
+						TickSide(50);
+						AdvanceOpnClocks(50);
+						continue;
+					}
+					cpuCycles_ += 200;
+					TickSide(200);
+					AdvanceOpnClocks(200);
 					continue;
 				}
-				cpuCycles_ += 200;
-				TickSide(200);
-				AdvanceOpnClocks(200);
-				continue;
+				const int32_t cyc = np2_step();
+				const uint64_t u = (cyc > 0) ? (uint64_t)cyc : 1ull;
+				cpuCycles_ += u;
+				TickSide(u);
+				AdvanceOpnClocks(u);
 			}
-			const int32_t cyc = np2_step();
-			const uint64_t u = (cyc > 0) ? (uint64_t)cyc : 1ull;
-			cpuCycles_ += u;
-			TickSide(u);
-			AdvanceOpnClocks(u);
 		}
 		if (IvtHooked(0xC8, 1) || IvtHooked(0xC0, 1) || IvtHooked(0xC3, 1))
 			nOk++;
@@ -2903,10 +3388,13 @@ int CHardPc98::RunDosCommand(const char* cmdline, uint64_t budgetCycles)
 				CEmuDos98Result res = dos_.ServiceInt(m, vec);
 				if (res == DOS98_TERMINATED || res == DOS98_RESIDENT)
 					return 1;
+				if (res == DOS98_EXEC)
+					continue;
 				dos_.IretReturn(m);
 				continue;
 			}
 			/* Genuine idle HLT — advance timers. */
+			PatchSynth98PaiDest(m, dos_.PspSeg());
 			const uint64_t q = 200;
 			cpuCycles_ += q;
 			TickSide(q);
@@ -2967,6 +3455,35 @@ int CHardPc98::BootDos(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCod
 			n = 0x200000u - off;
 		memcpy(mem + off, data, n);
 	}
+	/* PC-98 BIOS ROM window + text VRAM. LoadRoms already zeroed 2MiB, then
+	   this loop overlaid SOUND.ROM / code. Fill only still-empty firmware
+	   so a far CALL F800:0000 RETFs and a stray IP IRETs; text VRAM looks
+	   like a blank 80x25 page. Equipment bits match MADP/Falcom probes. */
+	{
+		int romWin = 1;
+		for (unsigned a = 0xF8000; a < 0x100000; a++) {
+			if (mem[a]) { romWin = 0; break; }
+		}
+		if (romWin) {
+			mem[0xF8000] = 0xCB; /* RETF */
+			for (unsigned a = 0xF8001; a < 0x100000; a++)
+				mem[a] = 0xCF; /* IRET */
+		}
+		int textEmpty = 1;
+		for (unsigned i = 0; i < 16; i++) {
+			if (mem[0xA0000 + i]) { textEmpty = 0; break; }
+		}
+		if (textEmpty) {
+			for (unsigned i = 0; i < 80u * 25u * 2u; i += 2) {
+				mem[0xA0000 + i] = 0x20;
+				mem[0xA0000 + i + 1] = 0xE1;
+			}
+		}
+		mem[0x501] = (uint8_t)(mem[0x501] | 0x08);
+		mem[0x536] = (uint8_t)(mem[0x536] | 0x04);
+		if (0xA0000u + 0x3FEEu < 0x200000u)
+			mem[0xA0000u + 0x3FEEu] = (uint8_t)(mem[0xA0000u + 0x3FEEu] | 0x09);
+	}
 	MaterializeDosFiles(fs, ge);
 	BindDosRomHandles(ge);
 	dosGe_ = ge;
@@ -3010,7 +3527,11 @@ int CHardPc98::BootDos(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCod
 	const uint64_t setupBudget = (uint64_t)cpuHz_ * 8ull; /* ~8s per shell */
 	/* mbmusp/MUSDRV: SSG I/O A bits7-6 select INT14; EOI assumes slave. */
 	static const char* kSsgJumperShell[] = {
-		"mbmus", "MBMUS", "musdrv", "MUSDRV", NULL
+		"mbmus", "MBMUS", "musdrv", "MUSDRV", "muse", "MUSE",
+		"fplay", "FPLAY",
+		"mmd2", "MMD2", "mmd2va",
+		"iwaplay", "IWAPLAY",
+		NULL
 	};
 	if (chip_ && DosShellStarts(ge, kSsgJumperShell)) {
 		ssgPortAJumper_ = 0xC0;
@@ -3059,6 +3580,7 @@ int CHardPc98::BootDos(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCod
 		}
 	}
 	dosStubReady_ = (stubState_ == 0x81) ? 1 : dosStubReady_;
+	PatchSynth98PaiDest(mem, dos_.PspSeg());
 	/* PC-88VA DOS overlays (tetrisva/shinrava/famista89): OPN ISR on INT14.
 	   Mirror to INT0B when missing so DeliverIrqs can tick the sequencer. */
 	if (mem && pc88VaIo_ && !IvtHooked(PC98_OPN_IRQ_VEC, 1) && IvtHooked(0x14, 1)) {
@@ -3375,6 +3897,8 @@ void CHardPc98::PumpCycles(uint64_t endCycle)
 				if ((res == DOS98_TERMINATED || res == DOS98_RESIDENT)
 					&& !olteusMapSeg_)
 					return;
+				if (res == DOS98_EXEC)
+					continue;
 				dos_.IretReturn(mem);
 				const uint64_t q = 50;
 				cpuCycles_ += q;
@@ -3407,6 +3931,8 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 
 	if (isDos_) {
 		PC98_CENSUS("pre");
+		if (PatchSynth98PaiDest(np2_mem(), dos_.PspSeg()))
+			synthIfKeepalive_ = 1;
 		if (dosGe_)
 			BindDosTriggerSong(dosGe_, titleCode);
 		else {
@@ -3454,7 +3980,9 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 		   starts.  A second poke's shorter budget stopped the new song and
 		   stranded the CPU halfway through its wait. */
 		static const char* kMscdPlay[] = { "MSCDRV", "mscd_98", NULL };
-		const int repeatPlay = !(dosGe_ && DosShellStarts(dosGe_, kMscdPlay));
+		static const char* kBgmlOnce[] = { "BGML_98", "bgml", NULL };
+		const int repeatPlay = !(dosGe_ && (DosShellStarts(dosGe_, kMscdPlay)
+			|| DosShellStarts(dosGe_, kBgmlOnce)));
 		if (repeatPlay) {
 			if (dosGe_)
 				BindDosTriggerSong(dosGe_, titleCode);
@@ -3464,6 +3992,14 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 			PumpCycles(cpuCycles_ + (drainBudget / 2ull));
 		}
 		PC98_CENSUS("trig");
+		if (modeBeep_) {
+			/* BGML_98 (and other speaker rips) drive melody from IRQ0/INT08.
+			   BootDos starts with PIC mask 0xFF; the player may unmask in
+			   INT 7F, but IF/IRQ0 must stay live for the whole render. */
+			picMask_ = (uint8_t)(picMask_ & 0xfeu);
+			np2_reg_set(NP2_R_FLAGS,
+				(uint16_t)(np2_reg_get(NP2_R_FLAGS) | 0x0200));
+		}
 		/* famistava installs OPN ISR on INT14 during the play far-call — BootDos
 		   is too early. Mirror only when INT0B is still vacant. */
 		if (pc88VaIo_) {
@@ -3975,7 +4511,14 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 			static const char* kStarPlay[] = {
 				"fakecall", "music", "MUSIC", "46", NULL
 			};
-			const int starPlay = DosShellStarts(dosGe_, kStarPlay);
+			/* TAM PLAY5/PLAY3 shipped as MUSIC.COM + PLAY5_98; that is
+			   INT F2, not HuLinks INT70. Prefix "MUSIC" must not steal it. */
+			static const char* kPlay5Fam[] = {
+				"PLAY5", "play5", "PLAY5_98", "PLAY3", NULL
+			};
+			const int play5Family = DosShellStarts(dosGe_, kPlay5Fam);
+			const int starPlay = DosShellStarts(dosGe_, kStarPlay)
+				&& !play5Family;
 			if (starPlay)
 				musicComKeepalive_ = 1;
 			static const char* kGluePlay[] = {
@@ -3995,7 +4538,7 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 				"EXMUS", "exmus", "MARBLE98",
 				"MUSDRV", "musdrv",
 				"MDR_98", "mdr_98",
-				"BGML_98", "bgml",
+				"wlfpk_98", "wlfpk",
 				"ARTDI_98", "artdi",
 				"SYNTH_98", "synth", "SYNTHIA",
 				"ELFMUS98", "elfmus",
@@ -4015,11 +4558,67 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 				"ynsound", "YNSOUND", "yns_98", "YNS_98",
 				"mlalf", "MLALF", "mlalf_98", "mlfplay",
 				"opndrvx", "OPNDRVX",
+				"mmd2", "MMD2", "mmd2va",
+				"iwaplay", "IWAPLAY",
+				"bgmdrv98", "bgmdrv", "BGMDRV98",
+				"FMXP", "FMX", "FAKECALL", "FAKE33", "OPN2", "SPL_98",
+				"bp", "bdrv",
+				"tky98", "TKYDRV",
+				"magpa_98", "magpa",
+				"NC_98", "NC",
+				"MFD_98", "mfd",
+				"cplay98", "cplay", "bplay", "fplay",
 				NULL
 			};
-			static const char* kTglFmp[] = { "tglfmp", "TGLFMP", NULL };
+			/* TGLFMP cmd2 fades. PLAY5_98 cmd2 is INT F2 AX=2 → $4F9F
+			   mute/init; play is already cmd0 (copy + $4F9F + $4EDC).
+			   MIZ3_98 cmd2 is INT40 AH=6 stop; cmd0 already AH=6 then AH=5 play.
+			   ELFMUS98 cmd2 is INT60 AX=0 stop; cmd0 already INT60 AH=1 play.
+			   SYNTH_98 cmd2 is INT60 AH=1; play is cmd0 AH=0.
+			   MAGIC_98 cmd2 is INT EF AX=4; play is cmd0 AX=5.
+			   ARTDI_98 cmd2 is far [3da](1); load/play is cmd0 [3d6].
+			   LUDY_98 cmd2 is INT52 AX=1; play is cmd0 AX=0.
+			   MUSE_98 cmd2 far-calls stop; cmd0 already loads+plays.
+			   MDR_98 glue cmd2 INT40 BX=6 waits on [1AC2] forever; cmd0
+			   already loads and 0x127a/D78 stops busy tracks. Skip cmd2.
+			   mmd2 cmd2 INT D2 AX=608; cmd0 already AH=1 play.
+			   iwaplay cmd2 INT EB AX=308; cmd0 already AH=1 play.
+			   SPLIT_98 cmd2 INT D2 AX=100; play is AX=101.
+			   tky98 cmd2 INT F1 AL=12; play is AL=11.
+			   bgmdrv98/bp/FMXP/NC cmd2 repeats the stop half of cmd0. */
+			static const char* kSkipCmd2[] = {
+				"tglfmp", "TGLFMP",
+				"PLAY5", "play5", "PLAY5_98", "PLAY3",
+				"MIZ3", "miz3", "MIZ3_98",
+				"ELFMUS98", "elfmus", "ELFMUS",
+				"SYNTH_98", "synth", "SYNTHIA",
+				"MAGIC_98", "magic_", "MAGIC_",
+				"ARTDI_98", "artdi",
+				"LUDY_98", "ludy", "SCBIOS",
+				"IBGMP", "ibgm",
+				"muse_98", "muse", "MUSE_98",
+				"mmd2", "MMD2", "mmd2va",
+				"iwaplay", "IWAPLAY",
+				"bgmdrv98", "bgmdrv", "BGMDRV98",
+				"FMXP", "FMX", "FAKECALL", "FAKE33", "OPN2", "SPL_98",
+				"bp", "bdrv",
+				"tky98", "TKYDRV",
+				"magpa_98", "magpa",
+				"NC_98", "NC",
+				"MFD_98", "mfd",
+				"cplay98", "cplay", "bplay", "fplay",
+				"usmd_98", "usmd",
+				"VALKY_98", "valky",
+				"YOUJU_98", "youju",
+				"ABIKO", "abiko",
+				"MDR_98", "mdr_98",
+				"wlfpk_98", "wlfpk",
+				"SPLIT", "split",
+				"NTMD", "ntmd", "NTMDP",
+				NULL
+			};
 			if (DosShellStarts(dosGe_, kGluePlay)
-				&& !DosShellStarts(dosGe_, kTglFmp)) {
+				&& !DosShellStarts(dosGe_, kSkipCmd2)) {
 				/* The list is matched by command prefix, and "cmd2 plays" is
 				   only true for part of it — MAKO_98 answers cmd2 with its
 				   mute-all (reg 27 timers off, every TL to 7F, SSG mixer off),
@@ -4084,7 +4683,8 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 				/* Unmask OPN IRQ for non-star glue drivers. */
 				uint8_t* mem = np2_mem();
 				static const char* kSlave14[] = {
-					"mbmus", "MBMUS", "musdrv", "MUSDRV", "muse", "MUSE", NULL
+					"mbmus", "MBMUS", "musdrv", "MUSDRV", "muse", "MUSE",
+					"fplay", "FPLAY", NULL
 				};
 				const int slave14 = DosShellStarts(dosGe_, kSlave14)
 					|| ((ssgPortAJumper_ & 0xC0) == 0xC0);
@@ -4105,6 +4705,23 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 					}
 					if (!slave14 && IvtHooked(PC98_OPN_IRQ_VEC, 1))
 						picMask_ = (uint8_t)(picMask_ & ~(1u << 3));
+					/* S20 INT60 AH=0 returns with IF=0; SYNTH_98 IRET then
+					   leaves the render pump deaf (hsj GIRL dumps=1, ifoff). */
+					np2_reg_set(NP2_R_FLAGS,
+						(uint16_t)(np2_reg_get(NP2_R_FLAGS) | 0x0200));
+					/* ABIKO-class: hooks INT 1C, leaves INT 08 to BIOS. */
+					if (IvtHooked(PC98_USER_TICK_VEC, 1)
+						&& !IvtHooked(PC98_TIMER_VEC, 1)) {
+						picMask_ = (uint8_t)(picMask_ & ~(1u << 0));
+						if (!pitRunning_) {
+							pitReload_ = (uint16_t)(PC98_PIT_CLOCK_HZ / 60);
+							if (pitReload_ == 0) pitReload_ = 1;
+							pitCounter_ = pitReload_;
+							pitRunning_ = 1;
+							pitIrqPending_ = 0;
+							pitResidual_ = 0;
+						}
+					}
 				}
 			}
 		}

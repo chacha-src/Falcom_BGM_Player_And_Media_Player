@@ -1411,7 +1411,7 @@ static int FmPlayCemuPlatLagMs(const char* id)
 		|| _stricmp(tok, "Konami") == 0 || _stricmp(tok, "NeoGeo") == 0
 		|| _stricmp(tok, "GNG") == 0 || _stricmp(tok, "AC") == 0
 		|| _stricmp(tok, "VSys") == 0 || _stricmp(tok, "MD") == 0
-		|| _stricmp(tok, "SC-3000") == 0)
+		|| _stricmp(tok, "SC-3000") == 0 || _stricmp(tok, "Raizing") == 0)
 		return 800;
 	/* titleSjis 全文フォールバック（空白無しの古いラベル等） */
 	if (strstr(id, "PC-98") || strstr(id, "PC/AT")) return 950;
@@ -2687,7 +2687,11 @@ void CFmMonitorDlg::DrawHead(CDC& dc)
 			}
 		}
 		else if (KeysOnly()) {
-			switch (ChipProfile()) {
+			static wchar_t keysChip[96];
+			if (m_dump.titleSjis[0]) {
+				MultiByteToWideChar(CP_ACP, 0, m_dump.titleSjis, -1, keysChip, 96);
+				chip = keysChip;
+			} else switch (ChipProfile()) {
 			case SASAMI_FMMON_KEYS_SPC: chip = L"SPC  S-DSP×8"; break;
 			case SASAMI_FMMON_KEYS_NSF: chip = L"NSF  APU(+exp)"; break;
 			case SASAMI_FMMON_KEYS_SID: chip = L"SID  ×3"; break;

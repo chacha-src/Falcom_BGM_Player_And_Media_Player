@@ -2324,7 +2324,8 @@ static void DrawFittedText(CDC& dc, const CRect& rect, const CString& str, UINT 
 }
 
 // 名前列/印列の [SAV]/[LRC]/[MONO]|[LR]|[2.1]…/[16ch]/[XG] を抜き出し、色付きチップ描画用に分離する。
-static const int kCccExtraChips = 4;
+// Cemu 一覧の音源は1行に複数タグが乗るので 8 まで。
+static const int kCccExtraChips = 8;
 static void CCC_ExtractSavLrc(CString& text, BOOL& bSav, BOOL& bLrc, CString extra[], int extraMax, int& extraN)
 {
     bSav = FALSE;
@@ -2368,7 +2369,7 @@ static void CCC_ExtractSavLrc(CString& text, BOOL& bSav, BOOL& bLrc, CString ext
                         if (!((c >= _T('0') && c <= _T('9'))
                             || (c >= _T('A') && c <= _T('Z'))
                             || (c >= _T('a') && c <= _T('z'))
-                            || c == _T('.'))) {
+                            || c == _T('.') || c == _T('+') || c == _T('-'))) {
                             ok = FALSE;
                             break;
                         }
@@ -2394,7 +2395,22 @@ static void CCC_ExtractSavLrc(CString& text, BOOL& bSav, BOOL& bLrc, CString ext
     text = head + rest;
 }
 
-// 印チップの地色。16/32ch=藤、MONO/LR/数値=薄荷、その他マップ=薄金。
+// 印チップの地色。16/32ch=藤、MONO/LR/数値=薄荷、機種/data=系統色、その他マップ=薄金。
+static COLORREF CCC_HashChipBg(const CString& lab)
+{
+    unsigned h = 2166136261u;
+    for (int i = 0; i < lab.GetLength(); ++i) {
+        TCHAR c = lab[i];
+        if (c >= _T('a') && c <= _T('z')) c = (TCHAR)(c - _T('a') + _T('A'));
+        h ^= (unsigned)c;
+        h *= 16777619u;
+    }
+    const int r = 168 + (int)(h % 72);
+    const int g = 168 + (int)((h >> 8) % 72);
+    const int b = 168 + (int)((h >> 16) % 72);
+    return RGB(r, g, b);
+}
+
 static COLORREF CCC_MarkChipBg(const CString& lab)
 {
     if (lab.CompareNoCase(_T("FMmon")) == 0)
@@ -2416,12 +2432,50 @@ static COLORREF CCC_MarkChipBg(const CString& lab)
     if (lab.CompareNoCase(_T("OPM")) == 0)
         return RGB(186, 210, 255);
     if (lab.CompareNoCase(_T("OPLL")) == 0 || lab.CompareNoCase(_T("OPL2")) == 0
-        || lab.CompareNoCase(_T("OPL3")) == 0)
+        || lab.CompareNoCase(_T("OPL3")) == 0 || lab.CompareNoCase(_T("OPL")) == 0)
         return RGB(210, 255, 230);
-    if (lab.CompareNoCase(_T("MIDI")) == 0)
+    if (lab.CompareNoCase(_T("MIDI")) == 0 || lab.CompareNoCase(_T("GS")) == 0)
         return RGB(230, 176, 255);
+    if (lab.CompareNoCase(_T("ADLIB")) == 0)
+        return RGB(255, 208, 150);
+    if (lab.CompareNoCase(_T("SB")) == 0 || lab.CompareNoCase(_T("SOUNDBLASTER")) == 0)
+        return RGB(255, 186, 168);
+    if (lab.CompareNoCase(_T("CMS")) == 0 || lab.CompareNoCase(_T("GAMEBLASTER")) == 0)
+        return RGB(176, 228, 255);
+    if (lab.CompareNoCase(_T("PSG")) == 0 || lab.CompareNoCase(_T("AY")) == 0)
+        return RGB(255, 226, 150);
+    if (lab.CompareNoCase(_T("SCC")) == 0)
+        return RGB(176, 255, 210);
+    if (lab.CompareNoCase(_T("FM")) == 0)
+        return RGB(186, 220, 255);
     if (lab.CompareNoCase(_T("86")) == 0)
         return RGB(220, 230, 200);
+    /* Cemu 機種 / data */
+    if (lab.CompareNoCase(_T("PC-AT")) == 0 || lab.CompareNoCase(_T("PCAT")) == 0
+        || lab.CompareNoCase(_T("pc")) == 0 || lab.CompareNoCase(_T("pcatdos")) == 0)
+        return RGB(186, 214, 255);
+    if (lab.CompareNoCase(_T("PC-98")) == 0 || lab.CompareNoCase(_T("PC98")) == 0
+        || lab.CompareNoCase(_T("pc98")) == 0)
+        return RGB(210, 196, 255);
+    if (lab.CompareNoCase(_T("PC-88")) == 0 || lab.CompareNoCase(_T("PC88")) == 0
+        || lab.CompareNoCase(_T("pc88")) == 0)
+        return RGB(186, 236, 200);
+    if (lab.CompareNoCase(_T("X68K")) == 0 || lab.CompareNoCase(_T("x68k")) == 0)
+        return RGB(255, 230, 170);
+    if (lab.CompareNoCase(_T("X1")) == 0 || lab.CompareNoCase(_T("x1")) == 0)
+        return RGB(255, 200, 170);
+    if (lab.CompareNoCase(_T("TOWNS")) == 0 || lab.CompareNoCase(_T("fmtowns")) == 0)
+        return RGB(170, 230, 230);
+    if (lab.CompareNoCase(_T("FM7")) == 0 || lab.CompareNoCase(_T("fm7")) == 0)
+        return RGB(200, 255, 186);
+    if (lab.CompareNoCase(_T("MSX")) == 0 || lab.CompareNoCase(_T("msx")) == 0)
+        return RGB(255, 186, 196);
+    if (lab.CompareNoCase(_T("SG")) == 0 || lab.CompareNoCase(_T("SC")) == 0
+        || lab.CompareNoCase(_T("sc3000")) == 0 || lab.CompareNoCase(_T("sg1000")) == 0)
+        return RGB(230, 210, 170);
+    if (lab.CompareNoCase(_T("AC")) == 0 || lab.CompareNoCase(_T("ac")) == 0
+        || lab.CompareNoCase(_T("NEO")) == 0)
+        return RGB(200, 210, 230);
     BOOL audioNum = !lab.IsEmpty();
     for (int k = 0; k < lab.GetLength(); ++k) {
         const TCHAR c = lab[k];
@@ -2432,7 +2486,7 @@ static COLORREF CCC_MarkChipBg(const CString& lab)
     }
     if (audioNum)
         return RGB(186, 236, 210);
-    return RGB(255, 224, 168);
+    return CCC_HashChipBg(lab);
 }
 
 // 小さな色タグ（アイコン代わり）。戻り=消費幅(余白込み)
@@ -9781,6 +9835,17 @@ void CCustomListCtrl::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
             noteImg = m_mpNoteIconGet(m_mpJacketCtx, ni);
         const BOOL bPlay = (noteImg == 0 || noteImg == 2);
         COLORREF bg = bS ? COLOR_SEL_BG : (ni % 2 == 0 ? COLOR_LIST_BG : COLOR_LIST_ALT);
+        COLORREF rowAccent = CLR_NONE;
+        if (!bS && !bPlay) {
+            COLORREF tintBg = 0;
+            if (GetListRowTint(ni, tintBg, rowAccent)) {
+                const int amt = 88; /* 0=zebra, 255=tint */
+                bg = RGB(
+                    (GetRValue(bg) * (255 - amt) + GetRValue(tintBg) * amt) / 255,
+                    (GetGValue(bg) * (255 - amt) + GetGValue(tintBg) * amt) / 255,
+                    (GetBValue(bg) * (255 - amt) + GetBValue(tintBg) * amt) / 255);
+            }
+        }
         if (bPlay && !bS)
             bg = RGB(214, 186, 232); // 再生行(非選択): 選択紫より少し明るい下地
         if (bH && !bS && !bPlay) bg = RGB(210, 228, 248);
@@ -9822,6 +9887,14 @@ void CCustomListCtrl::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
                 CCC_FillRectOpaqueBits(pDC->GetSafeHdc(), rs, RGB(220, 60, 60));
             else
                 pDC->FillSolidRect(&rs, RGB(220, 60, 60));
+        }
+        else if (ns == 0 && !bS && rowAccent != CLR_NONE)
+        {
+            CRect rs(r.left, r.top, r.left + 4, r.bottom);
+            if (CCC_HostNeedsChildOpaque(m_hWnd))
+                CCC_FillRectOpaqueBits(pDC->GetSafeHdc(), rs, rowAccent);
+            else
+                pDC->FillSolidRect(&rs, rowAccent);
         }
 
         if (bHi && !bLvAero && !bOpaqueHost)
@@ -9991,6 +10064,8 @@ void CCustomListCtrl::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
             // チェックありでアイコン矩形が無い／空♪のときも、チェック右を下回らない
             if (checkPad > 0)
                 tl = (std::max)(tl, (int)r.left + checkPad);
+            if (rowAccent != CLR_NONE)
+                tl = (std::max)(tl, (int)r.left + 8);
             tl = (std::min)(tl, (int)r.right - CCC_ScaleDpi(4, dpiTxt));
             rt.left = (std::max)(tl, (int)r.left + CCC_ScaleDpi(4, dpiTxt));
             rt.DeflateRect(CCC_ScaleDpi(2, dpiTxt), 0);
