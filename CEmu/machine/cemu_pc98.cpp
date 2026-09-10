@@ -27,6 +27,7 @@ int CEmuPc98Open(CEmuPc98* m, const CEmuGameEntry* ge, const wchar_t* zipPath, u
 		CEmuPc98Close(m);
 		return 0;
 	}
+	CEmuFmMonBeginOpen(ge, zipPath, sampleRate);
 	if (!m->driver->Open(m->hard, ge, &fs, titleCode)) {
 		CEmuZipFsClose(&fs);
 		CEmuPc98Close(m);
@@ -35,9 +36,6 @@ int CEmuPc98Open(CEmuPc98* m, const CEmuGameEntry* ge, const wchar_t* zipPath, u
 	CEmuZipFsClose(&fs);
 
 	m->ready = 1;
-	FmMonShadowReset();
-	FmMonShadowSetSource(zipPath);
-	FmMonShadowSetSampleRate((uint32_t)(sampleRate > 0 ? sampleRate : 44100));
 	CEmuFmMonBindFromGe(ge);
 	return 1;
 }

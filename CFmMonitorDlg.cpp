@@ -601,7 +601,7 @@ static int FmDrainRingSlots(uint32_t* genLast,
 						skipMerged.exMidi[i] = d.exMidi[i];
 				}
 				skipMerged.rhythmPulse = (uint8_t)(skipMerged.rhythmPulse | d.rhythmPulse);
-				skipMerged.rhythmKey = (uint8_t)(skipMerged.rhythmKey | d.rhythmKey);
+				/* rhythmKey は最新のまま。OR すると $10 DUMP や昔のヒットが張り付く */
 				/* keys-only PCM: gate は OR しない（張り付き）。hit/note だけ畳む */
 				if (d.dumpFlags & SASAMI_FMMON_FLAG_KEYSONLY)
 					FmKeysOnlyMergePackedHits(skipMerged, d);
@@ -652,7 +652,6 @@ static int FmDrainRingSlots(uint32_t* genLast,
 					d.keyOnExHitCnt[i] = skipMerged.keyOnExHitCnt[i];
 			}
 			d.rhythmPulse = (uint8_t)(d.rhythmPulse | skipMerged.rhythmPulse);
-			d.rhythmKey = (uint8_t)(d.rhythmKey | skipMerged.rhythmKey);
 			if (skipMerged.dumpFlags & SASAMI_FMMON_FLAG_KEYSONLY)
 				FmKeysOnlyMergePackedHits(d, skipMerged);
 			else {
@@ -731,6 +730,7 @@ CFmMonitorDlg::CFmMonitorDlg(CWnd* pParent)
 	, m_dirtyHead(1), m_dirtyHex(1), m_dirtyPanels(1), m_dirtyKeys(1), m_fullDraw(1)
 	, m_panelDirtyMask(0x3F)
 	, m_readFail(0), m_persistAge(-1), m_userClosing(0), m_lastPollMs(0)
+	, m_inPrint(0)
 	, m_lastPlayy(-1)
 	, m_layOk(0)
 	, m_frameOld(nullptr), m_frameW(0), m_frameH(0)
@@ -773,6 +773,8 @@ void CFmMonitorDlg::DoDataExchange(CDataExchange* pDX)
 
 BEGIN_MESSAGE_MAP(CFmMonitorDlg, CCustomBlurDialogExBase)
 	ON_WM_PAINT()
+	ON_MESSAGE(WM_PRINT, OnPrint)
+	ON_MESSAGE(WM_PRINTCLIENT, OnPrintClient)
 	ON_WM_ERASEBKGND()
 	ON_WM_SIZE()
 	ON_WM_MOVE()
@@ -4025,8 +4027,14 @@ void CFmMonitorDlg::ApplyDump(const SasamiFmMonDump& d)
 				m_touched[i] = 1;
 				chgHex = 1;
 			}
-			if (d.regs[i] != 0)
+			/* 00→00 の書き込みでも一度触れれば白（writeBits / 非ゼロ） */
+			const int wrote = (d.version >= 5)
+				&& (d.regWriteBits[i >> 3] & (uint8_t)(1u << (i & 7)));
+			if (d.regs[i] != 0 || wrote) {
+				if (!m_touched[i])
+					chgHex = 1;
 				m_touched[i] = 1;
+			}
 		}
 		/* チャンネル単位: ALG(B0) / AMS·PMS·PAN(B4) / Fnum / オペレータ / keyOn */
 		const int ym2610 = (d.padHit == 6) ? 1 : 0;
@@ -4186,7 +4194,9 @@ void CFmMonitorDlg::ApplyDump(const SasamiFmMonDump& d)
 		memset(m_fadePcm, 0, sizeof(m_fadePcm));
 		memset(m_fadeRzmPad, 0, sizeof(m_fadeRzmPad));
 		for (int i = 0; i < 0x200; i++) {
-			if (d.regs[i] != 0)
+			const int wrote = (d.version >= 5)
+				&& (d.regWriteBits[i >> 3] & (uint8_t)(1u << (i & 7)));
+			if (d.regs[i] != 0 || wrote)
 				m_touched[i] = 1;
 		}
 		if (FmMonIsLive()) {
@@ -4501,7 +4511,6 @@ int CFmMonitorDlg::PollDump()
 				}
 			}
 			merged.rhythmPulse = (uint8_t)(merged.rhythmPulse | s.rhythmPulse);
-			merged.rhythmKey = (uint8_t)(merged.rhythmKey | s.rhythmKey);
 		}
 		ApplyDump(merged);
 		applied = 1;
@@ -4627,6 +4636,7 @@ void CFmMonitorDlg::PumpSyncNow()
 
 void CFmMonitorDlg::IdlePulse()
 {
+	if (m_inPrint) return;
 	if (!::IsWindow(GetSafeHwnd()) || !IsWindowVisible() || IsIconic())
 		return;
 	const ULONGLONG now = GetTickCount64();
@@ -4639,9 +4649,11 @@ void CFmMonitorDlg::IdlePulse()
 		UpdateWindow();
 }
 
-void CFmMonitorDlg::OnPaint()
+void CFmMonitorDlg::PaintClientToDC(HDC hdc, int printSafe)
 {
-	CPaintDC dc(this);
+	if (!hdc) return;
+	CDC dc;
+	dc.Attach(hdc);
 	CRect rect;
 	GetClientRect(&rect);
 	const int capH = CCC_GetCustomCaptionHeight(m_hWnd);
@@ -4649,18 +4661,28 @@ void CFmMonitorDlg::OnPaint()
 	const int h = rect.Height() - capH;
 	if (w <= 0 || h <= 0) {
 		CCC_CaptionPaintGdi(dc, m_hWnd);
+		dc.Detach();
 		return;
 	}
 
 	if (!EnsureFrameBuffer(dc, w, h) || !m_frameDC.GetSafeHdc()) {
 		dc.FillSolidRect(0, capH, w, h, FM_BG);
 		CCC_CaptionPaintGdi(dc, m_hWnd);
+		dc.Detach();
 		return;
 	}
 
 	ComposeFrame(m_frameDC, w, h);
 
-	CRect pr = dc.m_ps.rcPaint;
+	if (printSafe) {
+		::BitBlt(hdc, 0, capH, w, h, m_frameDC.GetSafeHdc(), 0, 0, SRCCOPY);
+		CCC_CaptionPaintGdi(dc, m_hWnd);
+		dc.Detach();
+		return;
+	}
+
+	CRect pr;
+	dc.GetClipBox(&pr);
 	if (pr.IsRectEmpty())
 		pr.SetRect(0, capH, w, capH + h);
 	const int paintCap = (pr.top < capH) ? 1 : 0;
@@ -4681,12 +4703,14 @@ void CFmMonitorDlg::OnPaint()
 			m_chromaCache.BlitFull(dc.GetSafeHdc(), 0, capH, w, h);
 			if (paintCap)
 				CCC_CaptionPaintGdi(dc, m_hWnd);
+			dc.Detach();
 			return;
 		}
 		CCC_BlitStretchOpaque(dc.GetSafeHdc(), 0, capH, w, h,
 			m_frameDC.GetSafeHdc(), 0, 0, w, h);
 		if (paintCap)
 			CCC_CaptionPaintGdi(dc, m_hWnd);
+		dc.Detach();
 		return;
 	}
 #endif
@@ -4702,4 +4726,34 @@ void CFmMonitorDlg::OnPaint()
 		dc.BitBlt(sx, capH + sy, sw, sh, &m_frameDC, sx, sy, SRCCOPY);
 	if (paintCap)
 		CCC_CaptionPaintGdi(dc, m_hWnd);
+	dc.Detach();
 }
+
+void CFmMonitorDlg::OnPaint()
+{
+	CPaintDC dc(this);
+	if (m_inPrint)
+		return;
+	PaintClientToDC(dc.GetSafeHdc(), 0);
+}
+
+LRESULT CFmMonitorDlg::OnPrint(WPARAM wParam, LPARAM lParam)
+{
+	(void)lParam;
+	if (m_inPrint)
+		return 0;
+	m_inPrint = 1;
+	PaintClientToDC((HDC)wParam, 1);
+	m_inPrint = 0;
+	return 0;
+}
+
+LRESULT CFmMonitorDlg::OnPrintClient(WPARAM wParam, LPARAM lParam)
+{
+	(void)lParam;
+	m_inPrint = 1;
+	PaintClientToDC((HDC)wParam, 1);
+	m_inPrint = 0;
+	return 0;
+}
+

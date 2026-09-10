@@ -57,7 +57,7 @@ struct CEmuChipOpnaImpl : ymfm::ymfm_interface {
 	uint8_t playHaveFnum[6];
 	uint8_t playHaveSsg[3];
 	uint8_t ssgRegs[16]; /* bank0 $00-$0F shadow */
-	uint8_t fmRegs[256]; /* bank0 FM/SSG register shadow for probes */
+	uint8_t fmRegs[512]; /* bank0+bank1 image for FmMon (probes use [0..255]) */
 	unsigned ssgRegWrites[16]; /* write counts per SSG reg */
 	uint8_t ssgVolCHist[64];
 	unsigned ssgVolCHistN;
@@ -110,6 +110,7 @@ struct CEmuChipOpnaImpl : ymfm::ymfm_interface {
 		memset(playHaveSsg, 0, sizeof(playHaveSsg));
 		memset(playSsgPeriodChg, 0, sizeof(playSsgPeriodChg));
 		memset(ssgRegs, 0, sizeof(ssgRegs));
+		memset(fmRegs, 0, sizeof(fmRegs));
 		memset(ssgRegWrites, 0, sizeof(ssgRegWrites));
 		memset(ssgVolCHist, 0, sizeof(ssgVolCHist));
 		ssgVolCHistN = 0;
@@ -348,6 +349,7 @@ struct CEmuChipOpnaImpl : ymfm::ymfm_interface {
 			if (tl[op] > patch->minTl[op]) {
 				WritePort(0, 0x40 + kOff[op] + ch);
 				WritePort(1, patch->minTl[op]);
+				fmRegs[0x40 + kOff[op] + ch] = patch->minTl[op];
 			}
 		}
 		/* Restore the address selected by the driver before its key-on data. */
@@ -539,8 +541,7 @@ void CEmuChipOpnaWrite(CEmuChipOpna* c, uint32_t addr, uint32_t data)
 					impl->ssgMixSeen[d >> 3] |= (uint8_t)(1u << (d & 7));
 				}
 			}
-			if (p == 0)
-				impl->fmRegs[r] = d;
+			impl->fmRegs[shadowAddr & 0x1FFu] = d;
 		}
 		FmMonShadowWriteReg(shadowAddr, rawData);
 	}
@@ -899,6 +900,10 @@ public:
 		const CEmuChipOpnaImpl* impl =
 			core_.chip ? (const CEmuChipOpnaImpl*)core_.chip : NULL;
 		if (!buf || !impl) return 0;
+		if (cap >= 512) {
+			memcpy(buf, impl->fmRegs, 512);
+			return 512;
+		}
 		if (cap >= 256) {
 			memcpy(buf, impl->fmRegs, 256);
 			return 256;

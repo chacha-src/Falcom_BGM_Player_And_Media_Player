@@ -260,6 +260,7 @@ struct CEmuGameBuild {
 	char subtype[CEMU_DRIVER_TYPE];
 	char dataDir[CEMU_DATA_DIR];
 	char archive[CEMU_ARCHIVE_NAME];
+	char genre[CEMU_GENRE_NAME];
 	int romCount;
 	int optCount;
 	int titleCount;
@@ -303,6 +304,7 @@ static CEmuGameEntry* CEmuGameEntryFromBuild(const CEmuGameBuild* b)
 	strncpy_s(ge->subtype, b->subtype, _TRUNCATE);
 	strncpy_s(ge->dataDir, b->dataDir, _TRUNCATE);
 	strncpy_s(ge->archive, b->archive, _TRUNCATE);
+	strncpy_s(ge->genre, b->genre, _TRUNCATE);
 	ge->cpuId = b->cpuId;
 	ge->chipCount = b->chipCount;
 	memcpy(ge->chipIds, b->chipIds, sizeof(ge->chipIds));
@@ -993,6 +995,10 @@ static void CEmuCatalogParseGameBlock(CEmuCatalog* cat, const char* block, const
 	CEmuTagText(block, "name", nameS, (int)sizeof(nameS));
 	CEmuSjisToWide(nameS, ge->name, CEMU_GAME_NAME);
 
+	char genreS[CEMU_GENRE_NAME];
+	CEmuTagText(block, "genre", genreS, (int)sizeof(genreS));
+	strncpy_s(ge->genre, genreS, _TRUNCATE);
+
 	char aliasS[CEMU_GAME_NAME * 2];
 	CEmuTagText(block, "driveralias", aliasS, (int)sizeof(aliasS));
 	CEmuSjisToWide(aliasS, ge->driverAlias, CEMU_GAME_NAME);
@@ -1463,8 +1469,10 @@ struct CEmuCatalogFp {
 /* 0x300: AttrValue accepts whitespace around '=' (xml2 spaced archives).
    0x301: arcdata.zip loads xml in hoot.xml <list> order (xml2 before zzoriginal).
    0x302: strip XML comments so hoot <!-- disabled titles/roms --> stay out.
-   0x303: CEMU_ROM_MAX 1024 + keep engine files on overflow (night_s USMD). */
-enum { CEMU_CAT_FP_PARSE_VER = 0x303 };
+   0x303: CEMU_ROM_MAX 1024 + keep engine files on overflow (night_s USMD).
+   0x304: <genre> tag on game entries.
+   0x305: readable genre labels (ARPG/Shooter/Adventure, 32-byte field). */
+enum { CEMU_CAT_FP_PARSE_VER = 0x305 };
 
 static int CEmuCatalogMakeFp(const wchar_t* arcZip, const wchar_t* dataRoot,
 	const wchar_t* parent, CEmuCatalogFp* fp)
@@ -1571,7 +1579,7 @@ static int CEmuCatalogSaveCache(const CEmuCatalog* cat, const CEmuCatalogFp* fp,
 		const DWORD optBytes = oc ? (DWORD)(sizeof(CEmuOptionEntry) * oc) : 0;
 		const DWORD titleBytes = tc ? (DWORD)(sizeof(CEmuTitleEntry) * tc) : 0;
 		const size_t need = sizeof(e->name) + sizeof(e->driverAlias) + sizeof(e->platform)
-			+ sizeof(e->subtype) + sizeof(e->dataDir) + sizeof(e->archive)
+			+ sizeof(e->subtype) + sizeof(e->dataDir) + sizeof(e->archive) + sizeof(e->genre)
 			+ 12 + romBytes + optBytes + titleBytes
 			+ sizeof(e->cpuId) + sizeof(e->chipIds) + sizeof(e->chipCount);
 		if (len + need > cap) {
@@ -1588,6 +1596,7 @@ static int CEmuCatalogSaveCache(const CEmuCatalog* cat, const CEmuCatalogFp* fp,
 		memcpy(mem + len, e->subtype, sizeof(e->subtype)); len += sizeof(e->subtype);
 		memcpy(mem + len, e->dataDir, sizeof(e->dataDir)); len += sizeof(e->dataDir);
 		memcpy(mem + len, e->archive, sizeof(e->archive)); len += sizeof(e->archive);
+		memcpy(mem + len, e->genre, sizeof(e->genre)); len += sizeof(e->genre);
 		memcpy(mem + len, &rc, 4); len += 4;
 		memcpy(mem + len, &oc, 4); len += 4;
 		memcpy(mem + len, &tc, 4); len += 4;
@@ -1688,7 +1697,7 @@ static int CEmuCatalogLoadCache(CEmuCatalog* cat, const CEmuCatalogFp* want,
 		CEmuGameEntry* e = (CEmuGameEntry*)calloc(1, sizeof(CEmuGameEntry));
 		if (!e) { ok = 0; break; }
 		const size_t fixed = sizeof(e->name) + sizeof(e->driverAlias) + sizeof(e->platform)
-			+ sizeof(e->subtype) + sizeof(e->dataDir) + sizeof(e->archive) + 12;
+			+ sizeof(e->subtype) + sizeof(e->dataDir) + sizeof(e->archive) + sizeof(e->genre) + 12;
 		if ((size_t)(end - cur) < fixed) { CEmuGameEntryFree(e); ok = 0; break; }
 		memcpy(e->name, cur, sizeof(e->name)); cur += sizeof(e->name);
 		memcpy(e->driverAlias, cur, sizeof(e->driverAlias)); cur += sizeof(e->driverAlias);
@@ -1696,6 +1705,8 @@ static int CEmuCatalogLoadCache(CEmuCatalog* cat, const CEmuCatalogFp* want,
 		memcpy(e->subtype, cur, sizeof(e->subtype)); cur += sizeof(e->subtype);
 		memcpy(e->dataDir, cur, sizeof(e->dataDir)); cur += sizeof(e->dataDir);
 		memcpy(e->archive, cur, sizeof(e->archive)); cur += sizeof(e->archive);
+		memcpy(e->genre, cur, sizeof(e->genre)); cur += sizeof(e->genre);
+		e->genre[CEMU_GENRE_NAME - 1] = 0;
 		DWORD rc = 0, oc = 0, tc = 0;
 		memcpy(&rc, cur, 4); cur += 4;
 		memcpy(&oc, cur, 4); cur += 4;

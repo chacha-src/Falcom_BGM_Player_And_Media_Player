@@ -552,14 +552,20 @@ void CEmuFmMonBindFromGe(const CEmuGameEntry* ge)
 			devices |= SASAMI_FMMON_DEV_OPLL;
 		FmMonShadowSetMsxDevices(devices);
 	}
-	/* Seed empty YM2151 snapshot so Flush never emits OPNA-shaped dumps. */
-	if (seedOpm) {
-		unsigned char z[256];
-		memset(z, 0, sizeof(z));
+	/* Open が既にレジスタを積んでいるときは空 snapshot で消さない。
+	   layout=-1 + KEYS_MDX だけで Flush が OPNA 形に落ちない。 */
+	if (seedOpm)
 		FmMonShadowSetKeysProfile(SASAMI_FMMON_KEYS_MDX);
-		FmMonShadowSetOpmRegSnapshot(z);
-	}
 	/* 確定した identity/layout で 1 枚必ず出す。最初の Render 待ちにすると
 	   その間 UI が前曲または既定 OPNA の shell を出す（type 不一致の窓） */
 	FmMonShadowFlush(1);
+}
+
+void CEmuFmMonBeginOpen(const CEmuGameEntry* ge, const wchar_t* zipPath, int sampleRate)
+{
+	(void)ge;
+	FmMonShadowReset();
+	if (zipPath && zipPath[0])
+		FmMonShadowSetSource(zipPath);
+	FmMonShadowSetSampleRate((uint32_t)(sampleRate > 0 ? sampleRate : 44100));
 }

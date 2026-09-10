@@ -65,6 +65,7 @@ int CEmuPcatOpen(CEmuPcat* m, const CEmuGameEntry* ge, const wchar_t* zipPath, u
 		CEmuPcatClose(m);
 		return 0;
 	}
+	CEmuFmMonBeginOpen(ge, zipPath, rate);
 	if (!m->driver->Open(m->hard, ge, &fs, titleCode)) {
 		CEmuZipFsClose(&fs);
 		CEmuPcatClose(m);
@@ -74,9 +75,6 @@ int CEmuPcatOpen(CEmuPcat* m, const CEmuGameEntry* ge, const wchar_t* zipPath, u
 
 	m->ready = 1;
 	m->sampleRate = rate;
-	FmMonShadowReset();
-	FmMonShadowSetSource(zipPath);
-	FmMonShadowSetSampleRate((uint32_t)rate);
 	CEmuPcatBindFmMon((CHardPcat*)m->hard, ge);
 	return 1;
 }

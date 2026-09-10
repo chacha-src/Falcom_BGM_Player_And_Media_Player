@@ -154,6 +154,21 @@ void CEmuCatHelpDlg::OnPaint()
 		L"· Klik naglowka …… Rosnaco → Malejaco → oryginal. ▲/▼",
 		L"· Baslik tik …… Artan → Azalan → orijinal. ▲/▼"));
 	body(LL14(
+		L"・ジャンル列 …… Shooter / Action / RPG / ARPG / SRPG / Adventure / Fighting など。絞り込み可（STG, ACT, FTG など旧略称も可）",
+		L"· Genre column …… Shooter / Action / RPG / ARPG / SRPG / Adventure / Fighting. Filterable (old STG, ACT, FTG aliases too)",
+		L"· Colonne genre …… Shooter / Action / RPG / ARPG / SRPG / Adventure / Fighting. Filtrable (alias STG, ACT, FTG)",
+		L"· Colonna genere …… Shooter / Action / RPG / ARPG / SRPG / Adventure / Fighting. Filtrabile (alias STG, ACT, FTG)",
+		L"· Columna genero …… Shooter / Action / RPG / ARPG / SRPG / Adventure / Fighting. Filtrable (alias STG, ACT, FTG)",
+		L"· 장르 열 …… Shooter / Action / RPG / ARPG / SRPG / Adventure / Fighting. 필터 가능 (STG, ACT, FTG 별칭)",
+		L"· 类型列 …… Shooter / Action / RPG / ARPG / SRPG / Adventure / Fighting。可筛选（STG, ACT, FTG 旧简称也可）",
+		L"· عمود النوع …… Shooter / Action / RPG / ARPG / SRPG. قابل للتصفية",
+		L"· Столбец жанра …… Shooter / Action / RPG / ARPG / SRPG. Фильтр",
+		L"· Genre-Spalte …… Shooter / Action / RPG / ARPG / SRPG. Filterbar",
+		L"· Coluna genero …… Shooter / Action / RPG / ARPG / SRPG. Filtravel",
+		L"· Genrekolom …… Shooter / Action / RPG / ARPG / SRPG. Filterbaar",
+		L"· Kolumna gatunku …… Shooter / Action / RPG / ARPG / SRPG. Filtrowalne",
+		L"· Tur sutunu …… Shooter / Action / RPG / ARPG / SRPG. Filtrelenebilir"));
+	body(LL14(
 		L"・モニタ列 …… FM / MIDI / 両方。同じ zip に両モードがあるときは FM+MIDI",
 		L"· Monitor column …… FM / MIDI / both when the zip has both modes",
 		L"· Colonne moniteur …… FM / MIDI / les deux si le zip a les deux",
@@ -706,6 +721,50 @@ static CString CEmuPlatformChipLabel(const char* platform)
 	return lab;
 }
 
+static CString CEmuGenreHayExtra(const char* g)
+{
+	if (!g || !g[0]) return CString();
+	CString s;
+	s.Format(L" %hs", g);
+	if (_stricmp(g, "RPG") == 0)
+		s += L" rpg ロールプレイング role-playing jrpg";
+	else if (_stricmp(g, "ARPG") == 0)
+		s += L" rpg arpg アクションRPG action-rpg action role-playing";
+	else if (_stricmp(g, "SRPG") == 0)
+		s += L" rpg srpg slg シミュレーションRPG tactical strategy-rpg";
+	else if (_stricmp(g, "Shooter") == 0)
+		s += L" stg シューティング shooter shmup shooting";
+	else if (_stricmp(g, "Action") == 0)
+		s += L" act アクション action platform beat";
+	else if (_stricmp(g, "Adventure") == 0)
+		s += L" adv アドベンチャー adventure";
+	else if (_stricmp(g, "Novel") == 0)
+		s += L" adv vn ノベル visual-novel visual novel eroge";
+	else if (_stricmp(g, "Strategy") == 0)
+		s += L" slg シミュレーション strategy wargame tactics";
+	else if (_stricmp(g, "Sim") == 0)
+		s += L" slg シミュレーション simulation sim";
+	else if (_stricmp(g, "Fighting") == 0)
+		s += L" ftg 格闘 fighting fighter vs";
+	else if (_stricmp(g, "Racing") == 0)
+		s += L" rac レース racing driving";
+	else if (_stricmp(g, "Puzzle") == 0)
+		s += L" pzl パズル puzzle";
+	else if (_stricmp(g, "Sports") == 0)
+		s += L" spt スポーツ sports";
+	else if (_stricmp(g, "Mahjong") == 0)
+		s += L" tbl 麻雀 mahjong table";
+	else if (_stricmp(g, "Quiz") == 0)
+		s += L" tbl クイズ quiz table";
+	else if (_stricmp(g, "Board") == 0)
+		s += L" tbl 将棋 テーブル board chess shogi cards table";
+	else if (_stricmp(g, "Music") == 0)
+		s += L" mus 音楽 music driver mml";
+	else if (_stricmp(g, "Other") == 0)
+		s += L" etc その他 other misc";
+	return s;
+}
+
 static COLORREF CEmuDataKindColor(const char* dataDir)
 {
 	if (!dataDir || !dataDir[0]) return RGB(210, 210, 220);
@@ -738,18 +797,21 @@ static int CEmuCatCmpRows(const CEmuCatListRow& a, const CEmuCatListRow& b, int 
 	const char* bp = (b.ge && b.ge->platform[0]) ? b.ge->platform : "";
 	const char* ad = (a.ge && a.ge->dataDir[0]) ? a.ge->dataDir : "";
 	const char* bd = (b.ge && b.ge->dataDir[0]) ? b.ge->dataDir : "";
+	const char* ag = (a.ge && a.ge->genre[0]) ? a.ge->genre : "";
+	const char* bg = (b.ge && b.ge->genre[0]) ? b.ge->genre : "";
 	switch (col) {
 	case 0: c = a.title.CompareNoCase(b.title); break;
-	case 1: c = _stricmp(aa, ba); break;
-	case 2: c = _stricmp(ap, bp); break;
-	case 3: c = a.modes.CompareNoCase(b.modes); break;
-	case 4: {
+	case 1: c = _stricmp(ag, bg); break;
+	case 2: c = _stricmp(aa, ba); break;
+	case 3: c = _stricmp(ap, bp); break;
+	case 4: c = a.modes.CompareNoCase(b.modes); break;
+	case 5: {
 		const int ka = (a.monFm ? 1 : 0) + (a.monMidi ? 2 : 0);
 		const int kb = (b.monFm ? 1 : 0) + (b.monMidi ? 2 : 0);
 		c = ka - kb;
 		break;
 	}
-	case 5: c = _stricmp(ad, bd); break;
+	case 6: c = _stricmp(ad, bd); break;
 	default: break;
 	}
 	if (c == 0) c = a.origIndex - b.origIndex;
@@ -811,11 +873,12 @@ static CString CEmuBuildFilterHay(const CEmuCatalog* cat, const CEmuGameEntry* g
 	const CString& modes)
 {
 	CString hay;
-	hay.Format(L"%hs %hs %hs %hs %s %s",
+	hay.Format(L"%hs %hs %hs %hs %hs %s %s",
 		ge->archive[0] ? ge->archive : "",
 		ge->platform[0] ? ge->platform : "",
 		ge->subtype[0] ? ge->subtype : "",
 		ge->dataDir[0] ? ge->dataDir : "",
+		ge->genre[0] ? ge->genre : "",
 		ge->name[0] ? ge->name : L"",
 		(LPCTSTR)modes);
 	if (cat && ge->archive[0]) {
@@ -840,6 +903,7 @@ static CString CEmuBuildFilterHay(const CEmuCatalog* cat, const CEmuGameEntry* g
 	hay += CEmuPlatformChipLabel(ge->platform[0] ? ge->platform : "");
 	hay += L' ';
 	hay += CEmuModesChipText(modes);
+	hay += CEmuGenreHayExtra(ge->genre[0] ? ge->genre : "");
 	hay.MakeLower();
 	return hay;
 }
@@ -878,8 +942,8 @@ void CEmuCatListCtrl::SetSortState(int col, int dir)
 	if (!hdr) return;
 	EnsureSortArrows();
 	const int n = hdr->GetItemCount();
-	if (!m_colTitleReady && n >= 6) {
-		for (int i = 0; i < 6 && i < n; i++) {
+	if (!m_colTitleReady && n >= 7) {
+		for (int i = 0; i < 7 && i < n; i++) {
 			TCHAR buf[128] = {};
 			HDITEM hi = {};
 			hi.mask = HDI_TEXT;
@@ -898,7 +962,7 @@ void CEmuCatListCtrl::SetSortState(int col, int dir)
 		hi.cchTextMax = (int)_countof(buf);
 		hdr->GetItem(i, &hi);
 		hi.fmt &= ~(HDF_SORTUP | HDF_SORTDOWN | HDF_IMAGE | HDF_BITMAP_ON_RIGHT);
-		CString title = (i < 6 && m_colTitleReady) ? m_colTitle[i] : CString(buf);
+		CString title = (i < 7 && m_colTitleReady) ? m_colTitle[i] : CString(buf);
 		if (i == col && dir == 1) {
 			hi.fmt |= HDF_IMAGE | HDF_BITMAP_ON_RIGHT;
 			hi.iImage = 0;
@@ -940,35 +1004,36 @@ void CEmuCatListCtrl::BuildToolTipText(int row, int col, CString& out)
 	CString title = rowp->title;
 	const CString monLab = CEmuMonitorPlainLabel(rowp->monFm, rowp->monMidi);
 	out.Format(LL14(
-		L"タイトル: %s\nアーカイブ: %hs\n機種: %hs\n音源: %s\nモニタ: %s\ndata: %hs\n"
+		L"タイトル: %s\nジャンル: %hs\nアーカイブ: %hs\n機種: %hs\n音源: %s\nモニタ: %s\ndata: %hs\n"
 		L"zip: %s\n（音源はプレイリストの右クリックで切り替え）",
-		L"Title: %s\nArchive: %hs\nPlatform: %hs\nSound: %s\nMonitor: %s\ndata: %hs\n"
+		L"Title: %s\nGenre: %hs\nArchive: %hs\nPlatform: %hs\nSound: %s\nMonitor: %s\ndata: %hs\n"
 		L"zip: %s\n(Switch sound from the playlist right-click menu)",
-		L"Titre: %s\nArchive: %hs\nPlateforme: %hs\nSon: %s\nMoniteur: %s\ndata: %hs\n"
+		L"Titre: %s\nGenre: %hs\nArchive: %hs\nPlateforme: %hs\nSon: %s\nMoniteur: %s\ndata: %hs\n"
 		L"zip: %s\n(Changer le son via le menu contextuel de la liste)",
-		L"Titolo: %s\nArchivio: %hs\nPiattaforma: %hs\nSuono: %s\nMonitor: %s\ndata: %hs\n"
+		L"Titolo: %s\nGenere: %hs\nArchivio: %hs\nPiattaforma: %hs\nSuono: %s\nMonitor: %s\ndata: %hs\n"
 		L"zip: %s\n(Cambia il suono dal menu contestuale della playlist)",
-		L"Titulo: %s\nArchivo: %hs\nPlataforma: %hs\nSonido: %s\nMonitor: %s\ndata: %hs\n"
+		L"Titulo: %s\nGenero: %hs\nArchivo: %hs\nPlataforma: %hs\nSonido: %s\nMonitor: %s\ndata: %hs\n"
 		L"zip: %s\n(Cambia el sonido desde el menu contextual de la lista)",
-		L"제목: %s\n아카이브: %hs\n기종: %hs\n음원: %s\n모니터: %s\ndata: %hs\n"
+		L"제목: %s\n장르: %hs\n아카이브: %hs\n기종: %hs\n음원: %s\n모니터: %s\ndata: %hs\n"
 		L"zip: %s\n(음원은 플레이리스트 우클릭으로 전환)",
-		L"标题：%s\n归档：%hs\n机种：%hs\n音源：%s\n监视器：%s\ndata：%hs\n"
+		L"标题：%s\n类型：%hs\n归档：%hs\n机种：%hs\n音源：%s\n监视器：%s\ndata：%hs\n"
 		L"zip：%s\n（音源可在播放列表右键菜单切换）",
-		L"العنوان: %s\nالأرشيف: %hs\nالمنصة: %hs\nالصوت: %s\nالشاشة: %s\ndata: %hs\n"
+		L"العنوان: %s\nالنوع: %hs\nالأرشيف: %hs\nالمنصة: %hs\nالصوت: %s\nالشاشة: %s\ndata: %hs\n"
 		L"zip: %s\n(بدّل الصوت من قائمة التشغيل)",
-		L"Название: %s\nАрхив: %hs\nПлатформа: %hs\nЗвук: %s\nМонитор: %s\ndata: %hs\n"
+		L"Название: %s\nЖанр: %hs\nАрхив: %hs\nПлатформа: %hs\nЗвук: %s\nМонитор: %s\ndata: %hs\n"
 		L"zip: %s\n(Звук переключается в меню плейлиста)",
-		L"Titel: %s\nArchiv: %hs\nPlattform: %hs\nSound: %s\nMonitor: %s\ndata: %hs\n"
+		L"Titel: %s\nGenre: %hs\nArchiv: %hs\nPlattform: %hs\nSound: %s\nMonitor: %s\ndata: %hs\n"
 		L"zip: %s\n(Sound per Playlist-Kontextmenu wechseln)",
-		L"Titulo: %s\nArquivo: %hs\nPlataforma: %hs\nSom: %s\nMonitor: %s\ndata: %hs\n"
+		L"Titulo: %s\nGenero: %hs\nArquivo: %hs\nPlataforma: %hs\nSom: %s\nMonitor: %s\ndata: %hs\n"
 		L"zip: %s\n(Troque o som no menu da playlist)",
-		L"Titel: %s\nArchief: %hs\nPlatform: %hs\nGeluid: %s\nMonitor: %s\ndata: %hs\n"
+		L"Titel: %s\nGenre: %hs\nArchief: %hs\nPlatform: %hs\nGeluid: %s\nMonitor: %s\ndata: %hs\n"
 		L"zip: %s\n(Wissel geluid via playlist-snelmenu)",
-		L"Tytul: %s\nArchiwum: %hs\nPlatforma: %hs\nDzwiek: %s\nMonitor: %s\ndata: %hs\n"
+		L"Tytul: %s\nGatunek: %hs\nArchiwum: %hs\nPlatforma: %hs\nDzwiek: %s\nMonitor: %s\ndata: %hs\n"
 		L"zip: %s\n(Dzwiek zmienisz w menu playlisty)",
-		L"Baslik: %s\nArsiv: %hs\nPlatform: %hs\nSes: %s\nMonitor: %s\ndata: %hs\n"
+		L"Baslik: %s\nTur: %hs\nArsiv: %hs\nPlatform: %hs\nSes: %s\nMonitor: %s\ndata: %hs\n"
 		L"zip: %s\n(Sesi playlist sag tik menuden degistir)"),
 		(LPCTSTR)title,
+		ge->genre[0] ? ge->genre : "-",
 		ge->archive[0] ? ge->archive : "-",
 		ge->platform[0] ? ge->platform : "-",
 		modes.IsEmpty() ? L"-" : (LPCTSTR)modes,
@@ -1153,20 +1218,20 @@ BOOL CEmuCatalogListDlg::OnInitDialog()
 	m_tooltip.AddTool(&m_help, LL14(L"操作ガイドを表示", L"Show operation guide", L"Afficher le guide", L"Mostra guida", L"Mostrar guía", L"조작 가이드 표시", L"显示操作指南", L"إظهار الدليل", L"Показать руководство", L"Bedienungsanleitung", L"Mostrar guia", L"Handleiding tonen", L"Pokaż przewodnik", L"İşlem kılavuzunu göster"));
 	if (m_filter.GetSafeHwnd()) {
 		m_tooltip.AddTool(&m_filter, LL14(
-			L"タイトル・機種・音源・モニタ・data で絞り込み。空白区切りで複数指定（すべて含む）。全角空白や , / でも区切れます。空欄で全表示。",
-			L"Filter by title, platform, sound, monitor, data. Space-separated terms (AND). Full-width space, comma, / also split. Empty shows all.",
-			L"Filtrer titre/plateforme/son/data. Mots separes par espace (ET). Espace pleine chasse, virgule, / aussi.",
-			L"Filtra titolo/piattaforma/suono/data. Termini separati da spazio (AND). Spazio pieno, virgola, /.",
-			L"Filtrar titulo/plataforma/sonido/data. Terminos separados por espacio (AND). Espacio ancho, coma, /.",
-			L"제목·기종·음원·data로 필터. 공백으로 여러 단어(모두 포함). 전각 공백·,/ 도 가능. 비우면 전체.",
-			L"按标题/机种/音源/data 筛选。空格分隔多项（需全部匹配）。全角空格、逗号、/ 也可。空则全显示。",
-			L"تصفية بالعنوان والمنصة والصوت. افصل بمسافة (يجب أن تطابق كلها).",
-			L"Фильтр по названию, платформе, звуку. Слова через пробел (И).",
-			L"Nach Titel, Plattform, Sound, data filtern. Leerzeichen trennt (UND). Vollbreite Leerzeichen, Komma, /.",
-			L"Filtrar por titulo, plataforma, som, data. Espacos separam (E). Espaco largo, virgula, /.",
-			L"Filter op titel, platform, geluid, data. Spaties scheiden (EN). Volledige spatie, komma, /.",
-			L"Filtruj tytul/platforme/dzwiek/data. Spacje oddzielaja (AND). Pelna spacja, przecinek, /.",
-			L"Baslik, platform, ses, data ile filtre. Boslukla birden fazla (hepsi). Tam bosluk, virgul, /."));
+			L"タイトル・ジャンル・機種・音源・モニタ・data で絞り込み。空白区切りで複数指定（すべて含む）。Shooter / ARPG / STG なども可。",
+			L"Filter by title, genre, platform, sound, monitor, data. Space-separated terms (AND). Shooter / ARPG / STG also work.",
+			L"Filtrer titre/genre/plateforme/son/data. Mots separes par espace (ET). Espace pleine chasse, virgule, / aussi.",
+			L"Filtra titolo/genere/piattaforma/suono/data. Termini separati da spazio (AND). Spazio pieno, virgola, /.",
+			L"Filtrar titulo/genero/plataforma/sonido/data. Terminos separados por espacio (AND). Espacio ancho, coma, /.",
+			L"제목·장르·기종·음원·data로 필터. 공백으로 여러 단어(모두 포함). 전각 공백·,/ 도 가능. 비우면 전체. RPG/STG 가능.",
+			L"按标题/类型/机种/音源/data 筛选。空格分隔多项（需全部匹配）。全角空格、逗号、/ 也可。空则全显示。RPG/STG 也可。",
+			L"تصفية بالعنوان والنوع والمنصة والصوت. افصل بمسافة (يجب أن تطابق كلها).",
+			L"Фильтр по названию, жанру, платформе, звуку. Слова через пробел (И).",
+			L"Nach Titel, Genre, Plattform, Sound, data filtern. Leerzeichen trennt (UND). Vollbreite Leerzeichen, Komma, /.",
+			L"Filtrar por titulo, genero, plataforma, som, data. Espacos separam (E). Espaco largo, virgula, /.",
+			L"Filter op titel, genre, platform, geluid, data. Spaties scheiden (EN). Volledige spatie, komma, /.",
+			L"Filtruj tytul/gatunek/platforme/dzwiek/data. Spacje oddzielaja (AND). Pelna spacja, przecinek, /.",
+			L"Baslik, tur, platform, ses, data ile filtre. Boslukla birden fazla (hepsi). Tam bosluk, virgul, /."));
 		m_filter.SendMessage(EM_SETCUEBANNER, TRUE, (LPARAM)LL14(
 			L"空白区切りで複数指定",
 			L"Space-separated terms",
@@ -1189,11 +1254,12 @@ BOOL CEmuCatalogListDlg::OnInitDialog()
 		m_lc.SetExtendedStyle(m_lc.GetExtendedStyle() | LVS_EX_FULLROWSELECT | LVS_EX_INFOTIP | LVS_EX_LABELTIP);
 		m_lc.EnableToolTips(TRUE);
 		m_lc.InsertColumn(0, LL14(L"タイトル", L"Title", L"Titre", L"Titolo", L"Titulo", L"제목", L"标题", L"العنوان", L"Название", L"Titel", L"Titulo", L"Titel", L"Tytul", L"Baslik"), LVCFMT_LEFT, 180);
-		m_lc.InsertColumn(1, LL14(L"アーカイブ", L"Archive", L"Archive", L"Archivio", L"Archivo", L"아카이브", L"归档", L"الأرشيف", L"Архив", L"Archiv", L"Arquivo", L"Archief", L"Archiwum", L"Arsiv"), LVCFMT_LEFT, 100);
-		m_lc.InsertColumn(2, LL14(L"機種", L"Platform", L"Plateforme", L"Piattaforma", L"Plataforma", L"기종", L"机种", L"المنصة", L"Платформа", L"Plattform", L"Plataforma", L"Platform", L"Platforma", L"Platform"), LVCFMT_LEFT, 80);
-		m_lc.InsertColumn(3, LL14(L"音源", L"Sound", L"Son", L"Suono", L"Sonido", L"음원", L"音源", L"الصوت", L"Звук", L"Sound", L"Som", L"Geluid", L"Dzwiek", L"Ses"), LVCFMT_LEFT, 120);
-		m_lc.InsertColumn(4, LL14(L"モニタ", L"Monitor", L"Moniteur", L"Monitor", L"Monitor", L"모니터", L"监视器", L"الشاشة", L"Монитор", L"Monitor", L"Monitor", L"Monitor", L"Monitor", L"Monitor"), LVCFMT_LEFT, 100);
-		m_lc.InsertColumn(5, L"data", LVCFMT_LEFT, 60);
+		m_lc.InsertColumn(1, LL14(L"ジャンル", L"Genre", L"Genre", L"Genere", L"Genero", L"장르", L"类型", L"النوع", L"Жанр", L"Genre", L"Genero", L"Genre", L"Gatunek", L"Tur"), LVCFMT_LEFT, 108);
+		m_lc.InsertColumn(2, LL14(L"アーカイブ", L"Archive", L"Archive", L"Archivio", L"Archivo", L"아카이브", L"归档", L"الأرشيف", L"Архив", L"Archiv", L"Arquivo", L"Archief", L"Archiwum", L"Arsiv"), LVCFMT_LEFT, 100);
+		m_lc.InsertColumn(3, LL14(L"機種", L"Platform", L"Plateforme", L"Piattaforma", L"Plataforma", L"기종", L"机种", L"المنصة", L"Платформа", L"Plattform", L"Plataforma", L"Platform", L"Platforma", L"Platform"), LVCFMT_LEFT, 80);
+		m_lc.InsertColumn(4, LL14(L"音源", L"Sound", L"Son", L"Suono", L"Sonido", L"음원", L"音源", L"الصوت", L"Звук", L"Sound", L"Som", L"Geluid", L"Dzwiek", L"Ses"), LVCFMT_LEFT, 120);
+		m_lc.InsertColumn(5, LL14(L"モニタ", L"Monitor", L"Moniteur", L"Monitor", L"Monitor", L"모니터", L"监视器", L"الشاشة", L"Монитор", L"Monitor", L"Monitor", L"Monitor", L"Monitor", L"Monitor"), LVCFMT_LEFT, 100);
+		m_lc.InsertColumn(6, L"data", LVCFMT_LEFT, 60);
 		m_lc.SetSortState(-1, 0);
 	}
 
@@ -1325,15 +1391,16 @@ void CEmuCatalogListDlg::ApplyFilterToList()
 	for (size_t i = 0; i < vis.size(); i++) {
 		CEmuCatListRow& r = *vis[i];
 		const int idx = m_lc.InsertItem(row, r.title);
-		m_lc.SetItemText(idx, 1, CString(r.ge->archive));
-		m_lc.SetItemText(idx, 2, CEmuChipWrap(CEmuPlatformChipLabel(
+		m_lc.SetItemText(idx, 1, CEmuChipWrap(CString(r.ge->genre[0] ? r.ge->genre : "-")));
+		m_lc.SetItemText(idx, 2, CString(r.ge->archive));
+		m_lc.SetItemText(idx, 3, CEmuChipWrap(CEmuPlatformChipLabel(
 			r.ge->platform[0] ? r.ge->platform : "")));
 		CString soundChip = CEmuModesChipText(r.modes);
 		if (soundChip.IsEmpty() && r.ge->subtype[0])
 			soundChip = CEmuChipWrap(CEmuShortSoundTag(CString(r.ge->subtype)));
-		m_lc.SetItemText(idx, 3, soundChip);
-		m_lc.SetItemText(idx, 4, CEmuMonitorChipText(r.monFm, r.monMidi));
-		m_lc.SetItemText(idx, 5, CEmuChipWrap(CString(r.ge->dataDir[0] ? r.ge->dataDir : "-")));
+		m_lc.SetItemText(idx, 4, soundChip);
+		m_lc.SetItemText(idx, 5, CEmuMonitorChipText(r.monFm, r.monMidi));
+		m_lc.SetItemText(idx, 6, CEmuChipWrap(CString(r.ge->dataDir[0] ? r.ge->dataDir : "-")));
 		m_lc.SetItemData(idx, (DWORD_PTR)&r);
 		if (restore < 0 && !keepKey.IsEmpty() && r.ge && r.ge->archive[0]) {
 			CString k;
@@ -1395,19 +1462,20 @@ void CEmuCatalogListDlg::LayoutControls()
 void CEmuCatalogListDlg::LayoutColumns()
 {
 	if (!m_lc.GetSafeHwnd() || !m_lc.GetHeaderCtrl()) return;
-	if (m_lc.GetHeaderCtrl()->GetItemCount() < 6) return;
+	if (m_lc.GetHeaderCtrl()->GetItemCount() < 7) return;
 	CRect rc;
 	m_lc.GetClientRect(&rc);
 	const int total = rc.Width();
-	const int archW = 110, platW = 88, soundW = 150, monW = 108, dataW = 64;
-	int titleW = total - archW - platW - soundW - monW - dataW;
+	const int genreW = 108, archW = 110, platW = 88, soundW = 150, monW = 108, dataW = 64;
+	int titleW = total - genreW - archW - platW - soundW - monW - dataW;
 	if (titleW < 120) titleW = 120;
 	m_lc.SetColumnWidth(0, titleW);
-	m_lc.SetColumnWidth(1, archW);
-	m_lc.SetColumnWidth(2, platW);
-	m_lc.SetColumnWidth(3, soundW);
-	m_lc.SetColumnWidth(4, monW);
-	m_lc.SetColumnWidth(5, dataW);
+	m_lc.SetColumnWidth(1, genreW);
+	m_lc.SetColumnWidth(2, archW);
+	m_lc.SetColumnWidth(3, platW);
+	m_lc.SetColumnWidth(4, soundW);
+	m_lc.SetColumnWidth(5, monW);
+	m_lc.SetColumnWidth(6, dataW);
 }
 
 void CEmuCatalogListDlg::LayoutHelpBtn()
@@ -1578,7 +1646,7 @@ void CEmuCatalogListDlg::OnLvnColumnClick(NMHDR* pNMHDR, LRESULT* pResult)
 	NMLISTVIEW* p = reinterpret_cast<NMLISTVIEW*>(pNMHDR);
 	if (!p) return;
 	const int col = p->iSubItem;
-	if (col < 0 || col > 5) return;
+	if (col < 0 || col > 6) return;
 	if (col == m_sortCol) {
 		m_sortDir = (m_sortDir + 1) % 3;
 		if (m_sortDir == 0)

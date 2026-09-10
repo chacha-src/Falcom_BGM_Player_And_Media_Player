@@ -25,8 +25,10 @@ void FmMonShadowGetIdentity(char* platform, unsigned platformLen,
 	char* chip, unsigned chipLen);
 /* 1=OPNA(6ch+ADPCM)  0=OPN(3ch)  2=YM2610/OPNB(4ch+SSG+ADPCM-A/B)  -1=non-OPN(A). */
 void FmMonShadowSetOpnaLayout(int layout);
-/* addr: 0x000-0x1FF (port1 = 0x100|reg). */
+/* addr: 0x000-0x1FF (port1 = 0x100|reg). 00→00 も「書いた」と記録する。 */
 void FmMonShadowWriteReg(unsigned addr, unsigned data);
+/* OPM など snapshot 経路で、実際に書いた番地だけ sticky にする（00→00 含む）。 */
+void FmMonShadowMarkRegWrite(unsigned addr);
 /* AY-3-8910 register write → SSG shadow ($00-$0F). */
 void FmMonShadowWriteAyReg(unsigned reg, unsigned data);
 /* Soft MIDI / keys-only: ch 0..15, midiNote 0..127. */

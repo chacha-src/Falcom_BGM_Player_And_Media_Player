@@ -19,7 +19,8 @@ static void FmMonKeepProbeTags()
 static CRITICAL_SECTION s_cs;
 static LONG s_once = 0;
 static uint8_t s_regs[0x200];
-static uint8_t s_bits[64];
+static uint8_t s_bits[64];     /* 直前 Flush 区間（フェード用にクリア） */
+static uint8_t s_written[64]; /* 曲開始以降に1回でも書いた番地（00→00 含む） */
 static uint8_t s_keyFm[6], s_hitFm[6], s_midiFm[6];
 static uint8_t s_keyEx[3], s_hitEx[3], s_midiEx[3];
 static uint8_t s_ssg[3], s_hitSsg[3], s_midiSsg[3];
@@ -179,7 +180,9 @@ static int MidiFromOpll(unsigned fnum, unsigned block)
 static void MarkBit(unsigned addr)
 {
 	addr &= 0x1FF;
-	s_bits[addr >> 3] |= (uint8_t)(1u << (addr & 7));
+	const uint8_t m = (uint8_t)(1u << (addr & 7));
+	s_bits[addr >> 3] |= m;
+	s_written[addr >> 3] |= m;
 }
 
 void FmMonShadowReset(void)
@@ -188,6 +191,7 @@ void FmMonShadowReset(void)
 	EnterCriticalSection(&s_cs);
 	memset(s_regs, 0, sizeof(s_regs));
 	memset(s_bits, 0, sizeof(s_bits));
+	memset(s_written, 0, sizeof(s_written));
 	memset(s_keyFm, 0, sizeof(s_keyFm));
 	memset(s_hitFm, 0, sizeof(s_hitFm));
 	memset(s_midiFm, 0xFF, sizeof(s_midiFm));
@@ -361,6 +365,18 @@ void FmMonShadowSetOpmRegSnapshotEx(const unsigned char* regs256, int keyRegOrNe
 	LeaveCriticalSection(&s_cs);
 }
 
+void FmMonShadowMarkRegWrite(unsigned addr)
+{
+	EnsureCs();
+	EnterCriticalSection(&s_cs);
+	addr &= 0x1FFu;
+	const uint8_t already = (uint8_t)(s_written[addr >> 3] & (uint8_t)(1u << (addr & 7)));
+	MarkBit(addr);
+	if (!already)
+		s_dirty = 1;
+	LeaveCriticalSection(&s_cs);
+}
+
 void FmMonShadowSetSource(const wchar_t* path)
 {
 	EnsureCs();
@@ -404,15 +420,19 @@ void FmMonShadowWriteReg(unsigned addr, unsigned data)
 	s_keysOnly = 0;
 	addr &= 0x1FF;
 	data &= 0xFF;
-	if (s_regs[addr] == (uint8_t)data
-		&& addr != 0x28 && addr != 0x10 && addr != 0x100) {
-		/* 同一値の再書き込みは dirty にしない（KSS の毎バッファ PSG ポーリング対策）
-		   KEYON(0x28)/リズム(0x10)/ADPCM-B ctrl(0x100) は同一値でも意味があるので通す */
-		LeaveCriticalSection(&s_cs);
-		return;
+	{
+		/* 00→00 も含め「一度書いた」は sticky。dirty は初回だけ（KSS の PSG ポーリング対策） */
+		const uint8_t already = (uint8_t)(s_written[addr >> 3] & (uint8_t)(1u << (addr & 7)));
+		MarkBit(addr);
+		if (s_regs[addr] == (uint8_t)data
+			&& addr != 0x28 && addr != 0x10 && addr != 0x100) {
+			if (!already)
+				s_dirty = 1;
+			LeaveCriticalSection(&s_cs);
+			return;
+		}
 	}
 	s_regs[addr] = (uint8_t)data;
-	MarkBit(addr);
 
 	if (addr == 0x28) {
 		/* KEY ON: bits 0-2 = slot ch, bit4-7 = slots; ch 0-2 bank0, 4-6 bank1 */
@@ -476,11 +496,16 @@ void FmMonShadowWriteReg(unsigned addr, unsigned data)
 		if (s_adpcmOn)
 			RefreshAdpcmMidi();
 	} else if (s_opnaLayout != 2 && addr == 0x10) {
-		const uint8_t rising = (uint8_t)(data & ~s_rhyKey);
-		s_rhyKey = (uint8_t)(data & 0x3F);
-		s_rhyPulse = (uint8_t)(s_rhyPulse | rising);
-		for (int i = 0; i < 6; i++) {
-			if (rising & (1 << i)) s_hitRhy[i]++;
+		/* YM2608 $10: D7=DUMP / D5-0=対象。0xBF は全チャンネル key-off。 */
+		const uint8_t mask = (uint8_t)(data & 0x3F);
+		if (data & 0x80) {
+			s_rhyKey = (uint8_t)(s_rhyKey & ~mask);
+		} else if (mask) {
+			s_rhyPulse = (uint8_t)(s_rhyPulse | mask);
+			s_rhyKey = (uint8_t)(s_rhyKey | mask);
+			for (int i = 0; i < 6; i++) {
+				if (mask & (1 << i)) s_hitRhy[i]++;
+			}
 		}
 	} else if (s_opnaLayout == 2 && addr == 0x100) {
 		/* YM2610 bank1 $00 = ADPCM-A key-on bits 0..5 */
@@ -587,10 +612,14 @@ void FmMonShadowWriteAuxReg(unsigned addr, unsigned data)
 	EnterCriticalSection(&s_cs);
 	addr &= 0x1FFu;
 	data &= 0xFFu;
-	if (s_regs[addr] != (uint8_t)data) {
-		s_regs[addr] = (uint8_t)data;
+	{
+		const uint8_t already = (uint8_t)(s_written[addr >> 3] & (uint8_t)(1u << (addr & 7)));
 		MarkBit(addr);
-		s_dirty = 1;
+		if (s_regs[addr] != (uint8_t)data) {
+			s_regs[addr] = (uint8_t)data;
+			s_dirty = 1;
+		} else if (!already)
+			s_dirty = 1;
 	}
 	s_auxRegsValid = 1;
 	LeaveCriticalSection(&s_cs);
@@ -830,7 +859,8 @@ void FmMonShadowFlush(int force)
 	SasamiFmMonDump d;
 	FillCommon(&d);
 	memcpy(d.regs, s_regs, sizeof(d.regs));
-	memcpy(d.regWriteBits, s_bits, sizeof(d.regWriteBits));
+	/* sticky: 00→00 も含め一度書いた番地。区間 s_bits だと Flush で消えて灰色のまま */
+	memcpy(d.regWriteBits, s_written, sizeof(d.regWriteBits));
 	memcpy(d.keyOnFm, s_keyFm, 6);
 	memcpy(d.keyOnHitCnt, s_hitFm, 6);
 	memcpy(d.keyMidi, s_midiFm, 6);
@@ -989,7 +1019,7 @@ void FmMonShadowFlushKeysOnly(int force)
 			d.dumpFlags = SASAMI_FMMON_FLAG_OPM;
 			/* Include bank1 when GA20 (or other hybrid PCM) shadowed at $100+. */
 			memcpy(d.regs, s_regs, s_ga20Seen ? 0x200 : 256);
-			memcpy(d.regWriteBits, s_bits, sizeof(d.regWriteBits));
+			memcpy(d.regWriteBits, s_written, sizeof(d.regWriteBits));
 			d.pad6[2] = (uint8_t)(SASAMI_FMMON_VIEW_KEYS
 				| SASAMI_FMMON_VIEW_REGS | SASAMI_FMMON_VIEW_PANELS);
 		} else {
@@ -1038,7 +1068,7 @@ void FmMonShadowFlushKeysOnly(int force)
 			| (softRegs ? (SASAMI_FMMON_VIEW_REGS | SASAMI_FMMON_VIEW_PANELS) : 0));
 		if (softRegs) {
 			memcpy(d.regs, s_regs, sizeof(d.regs));
-			memcpy(d.regWriteBits, s_bits, sizeof(d.regWriteBits));
+			memcpy(d.regWriteBits, s_written, sizeof(d.regWriteBits));
 		}
 		for (int i = 0; i < pcmN; i++) {
 			if (arcade) {
@@ -1562,10 +1592,16 @@ void FmMonShadowWriteOplReg(unsigned addr, unsigned data)
 	addr &= 0x1FF;
 	data &= 0xFF;
 	const unsigned r = addr & 0xFF;
-	if (s_regs[addr] == (uint8_t)data && r != 0xBD
-		&& !(r >= 0xB0 && r <= 0xB8)) {
-		LeaveCriticalSection(&s_cs);
-		return;
+	{
+		const uint8_t already = (uint8_t)(s_written[addr >> 3] & (uint8_t)(1u << (addr & 7)));
+		if (s_regs[addr] == (uint8_t)data && r != 0xBD
+			&& !(r >= 0xB0 && r <= 0xB8)) {
+			MarkBit(addr);
+			if (!already)
+				s_dirty = 1;
+			LeaveCriticalSection(&s_cs);
+			return;
+		}
 	}
 	s_regs[addr] = (uint8_t)data;
 	MarkBit(addr);

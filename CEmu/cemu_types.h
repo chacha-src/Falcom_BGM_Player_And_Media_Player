@@ -75,6 +75,7 @@ enum {
 	CEMU_CATALOG_MAX = 16384,
 	CEMU_ARCHIVE_NAME = 64,
 	CEMU_GAME_NAME = 160,
+	CEMU_GENRE_NAME = 32,
 	CEMU_DRIVER_NAME = 32,
 	CEMU_DRIVER_TYPE = 32,
 	CEMU_DATA_DIR = 16,
@@ -115,6 +116,7 @@ struct CEmuGameEntry {
 	char subtype[CEMU_DRIVER_TYPE];
 	char dataDir[CEMU_DATA_DIR];
 	char archive[CEMU_ARCHIVE_NAME];
+	char genre[CEMU_GENRE_NAME];
 	int romCount;
 	int optCount;
 	int titleCount;

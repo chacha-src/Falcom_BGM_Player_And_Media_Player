@@ -17,7 +17,7 @@ protected:
 	DECLARE_MESSAGE_MAP()
 	void EnsureSortArrows();
 	CImageList m_sortIL;
-	CString m_colTitle[6];
+	CString m_colTitle[7];
 	BOOL m_colTitleReady = FALSE;
 };
 

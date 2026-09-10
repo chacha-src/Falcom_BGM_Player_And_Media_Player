@@ -11840,7 +11840,7 @@ open_mode_kpi:
 		m_time.SetRange(0, (loop2 > 0) ? loop2 : 1, TRUE);
 		EqualiserSetFormatVolContext(1, FALSE);
 		g_openDecoderMode = mode;
-		FmMonShadowReset();
+		/* 仮想パスだけ付け替える。Reset すると Open 中にチップへ書いた音色が消える。 */
 		FmMonShadowSetSource(filen);
 		FmMonShadowSetSampleRate((uint32_t)wavbit_sample_Hz);
 		if (g_cemuSession.game)
@@ -20353,14 +20353,7 @@ static void CEmuSeekLoopStart()
 {
 	PlaybackNoteLoop(loop1);
 	kpi_silence_bytes = 0;
-	CEmuSessionSeek(&g_cemuSession, loop1 > 0 ? (UINT64)loop1 : 0);
-	poss2 = poss3 = poss4 = poss6 = 0; poss5 = loop1;
-	cnt3 = 0;
-	RubberBand_DestroyBank(0);
-	reset = TRUE;
-	/* ループは曲切替ではない。DS 側の可聴位置(g_heardBytes)は 0 に戻らないので
-	   モニタの時計まで 0 にすると、以後ずっと可聴より先の dump が採用されて
-	   鍵盤・レジスタが先走る。時計は引き継ぐ。 */
+	/* ループは曲切替ではない。DS 可聴位置は 0 に戻らないので時計だけ引き継ぐ。 */
 	const uint64_t fmMonCur = FmMonShadowGetCurSample();
 	FmMonShadowReset();
 	FmMonShadowSetSource(g_cemuSession.path);
@@ -20368,6 +20361,11 @@ static void CEmuSeekLoopStart()
 	FmMonShadowSetCurSample(fmMonCur);
 	if (g_cemuSession.game)
 		CEmuFmMonBindFromGe(g_cemuSession.game);
+	CEmuSessionSeek(&g_cemuSession, loop1 > 0 ? (UINT64)loop1 : 0);
+	poss2 = poss3 = poss4 = poss6 = 0; poss5 = loop1;
+	cnt3 = 0;
+	RubberBand_DestroyBank(0);
+	reset = TRUE;
 }
 
 static void CEmuMarkPlaybackEof()

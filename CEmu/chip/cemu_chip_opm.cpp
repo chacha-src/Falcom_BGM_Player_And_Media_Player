@@ -76,6 +76,7 @@ public:
 			keyOnCount_++;
 		/* Pass key strobe only for $08 so multi-channel gates stay latched. */
 		FmMonShadowSetOpmRegSnapshotEx(regs_, (reg == 0x08) ? (int)val : -1);
+		FmMonShadowMarkRegWrite(reg);
 	}
 
 	void AdvanceClocks(uint64_t chipCycles) override
@@ -143,6 +144,13 @@ public:
 	uint8_t ReadData() override { return 0; }
 	uint8_t ReadStatusHi() override { return ReadStatus(); }
 	uint8_t ReadDataHi() override { return 0; }
+	unsigned GetRegSnapshot(uint8_t* buf, unsigned cap) const override
+	{
+		if (!buf || cap == 0) return 0;
+		const unsigned n = cap < 256u ? cap : 256u;
+		memcpy(buf, regs_, n);
+		return n;
+	}
 
 	unsigned WriteCount() const { return writeCount_; }
 	unsigned KeyOnCount() const { return keyOnCount_; }

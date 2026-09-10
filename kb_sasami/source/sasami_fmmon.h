@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 // OPNA FM monitor dump — kbsasami (raira=1) writes, 本体 FMモニタ reads.
 #include <stdint.h>
 
@@ -28,7 +28,7 @@ struct SasamiFmMonDump {
 	wchar_t sourcePath[260];
 	uint8_t pcmOn[SASAMI_FMMON_PCM_MAX];
 	uint8_t pcmNote[SASAMI_FMMON_PCM_MAX]; // MIDI note 0..127
-	uint8_t regWriteBits[64]; /* v5: regs[i] が直前 Flush 区間に書かれたら bit i */
+	uint8_t regWriteBits[64]; /* v5: 曲開始以降に1回でも書いた番地（00→00 含む、sticky） */
 	/* v6: PMD/FMP。kbsasami は version=5 のまま（この先は 0） */
 	uint8_t keyOnEx[3];       /* FM3EX1-3 */
 	uint8_t keyOnExHitCnt[3];

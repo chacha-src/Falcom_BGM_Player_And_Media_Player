@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 // CFmMonitorDlg : SASAMI FPY / OPNA (YM2608) レジスタ・鍵盤モニタ
 // kbsasami (raira=1) が %TEMP%\ogg_kbsasami\*.opna に出す dump を同期表示。
 #include "afxdialogex.h"
@@ -30,6 +30,8 @@ protected:
 	DECLARE_MESSAGE_MAP()
 
 	afx_msg void OnPaint();
+	afx_msg LRESULT OnPrint(WPARAM wParam, LPARAM lParam);
+	afx_msg LRESULT OnPrintClient(WPARAM wParam, LPARAM lParam);
 	afx_msg BOOL OnEraseBkgnd(CDC* pDC);
 	afx_msg void OnSize(UINT nType, int cx, int cy);
 	afx_msg void OnMove(int x, int y);
@@ -72,6 +74,7 @@ private:
 	/* 起動直後／keys-only(MIDI等)でチップUIが無いとき OPNA 殻を出す */
 	int PreferOpnaShell() const;
 	bool EnsureFrameBuffer(CDC& refDC, int w, int h);
+	void PaintClientToDC(HDC hdc, int printSafe);
 	void ReleasePaintBuffers();
 	void ComputeLayout(int w, int h);
 	void DrawHead(CDC& dc);
@@ -127,6 +130,7 @@ private:
 	int m_persistAge;
 	int m_userClosing; /* 1=ユーザーが×で閉じた → fmmonwindow=0 */
 	ULONGLONG m_lastPollMs;
+	int m_inPrint; /* PrintWindow / スクショ中。CPaintDC と Poll を混ぜない */
 	int m_lastPlayy; /* FmMonIsLive() の前回値。停止遷移で鍵盤クリア */
 
 	struct Layout {
