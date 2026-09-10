@@ -34,6 +34,8 @@ public:
 	/* Reads of DPRAM bucket i, each covering 64 bytes (see Read8). */
 	unsigned DpramReadHit(int i) const { return (i >= 0 && i < 32) ? dpramReadHits_[i] : 0; }
 	uint8_t DpramByte(unsigned i) const { return (i < kDpramBytes) ? dpram_[i] : 0; }
+	unsigned RingWp() const { return DpramMovepRead(0x900); }
+	unsigned RingRp() const { return DpramMovepRead(0x904); }
 	/* Advance DUART timer; returns 1 if IRQ6 should be asserted. */
 	int TickDuart(int cpuCycles);
 	int DuartIrqPending() const { return duartIrqPending_; }
@@ -44,6 +46,7 @@ public:
 			| ((unsigned)duartAcr_ << 8) | (unsigned)(duartCounterOn_ & 0xff);
 	}
 	unsigned DuartFires() const { return duartFires_; }
+	unsigned EsWrites() const { return esWrites_; }
 	unsigned AudioCpuSize() const { return audioCpuSize_; }
 	unsigned EnsoniqSize() const { return ensoniqSize_; }
 	int DpramTraceCount() const { return dpramTraceN_; }
@@ -106,6 +109,10 @@ private:
 	uint8_t esp_[0x200];
 	int64_t duartTimerAcc_;
 	int ringInited_;
+	uint8_t duartIp_;
+	uint8_t duartIpcr_;
+	int64_t duartIpAcc_;
+	unsigned esWrites_;
 };
 
 void CEmuHardF3SetActive(CHardF3* hw);

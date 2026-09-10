@@ -6,7 +6,6 @@
 #include "ListCtrlA.h"
 #include "OSVersion.h"
 #include <map>
-#include <vector>
 #include <dwmapi.h>
 #include "DwmBlurHelper.h"
 
@@ -286,11 +285,15 @@ static inline BOOL CCC_SetWindowCompositionAccent(HWND hWnd, const ACCENT_POLICY
     HMODULE hUser = ::GetModuleHandleW(L"user32.dll");
     if (!hUser) return FALSE;
     typedef BOOL(WINAPI* pSetWindowCompositionAttribute)(HWND, WINCOMPATTRDATA*);
-    pSetWindowCompositionAttribute pfn =
-        (pSetWindowCompositionAttribute)::GetProcAddress(hUser, "SetWindowCompositionAttribute");
-    if (!pfn) return FALSE;
+    static pSetWindowCompositionAttribute s_pfn = nullptr;
+    static BOOL s_got = FALSE;
+    if (!s_got) {
+        s_pfn = (pSetWindowCompositionAttribute)::GetProcAddress(hUser, "SetWindowCompositionAttribute");
+        s_got = TRUE;
+    }
+    if (!s_pfn) return FALSE;
     WINCOMPATTRDATA data = { WCA_ACCENT_POLICY, const_cast<ACCENT_POLICY*>(&policy), sizeof(policy) };
-    return pfn(hWnd, &data);
+    return s_pfn(hWnd, &data);
 }
 
 // 子ウィンドウの WS_EX_TRANSPARENT を設定または解除
@@ -872,8 +875,11 @@ public:
 
 protected:
     CBrush m_brBackground;                  // 背景塗りつぶし用ブラシ
-    std::vector<BOOL> m_vDisabledItems;     // 各アイテムが無効化されているかどうかのフラグリスト
-    std::vector<int> m_vSelectableIndices;  // 選択可能なアイテムの物理インデックスリスト
+    BYTE* m_pDisabled = nullptr;            // 各アイテムが無効化されているかどうか（1=無効）
+    int m_nDisabledCap = 0;
+    int* m_pSelectable = nullptr;           // 選択可能なアイテムの物理インデックス
+    int m_nSelectable = 0;
+    int m_nSelectableCap = 0;
 
     COLORREF m_clrLabelText, m_clrLabelBg;  // ラベル（無効化アイテム）の文字色と背景色
     BOOL m_bAeroMode;                       // アクリルモードが有効かどうか

@@ -1,7 +1,6 @@
 ﻿#pragma once
 // Soft2D — D2D-like CPU API over GdiSoftFB (no Direct2D).
 #include "GdiSoftFB.h"
-#include <vector>
 
 namespace GdiSoft2D
 {
@@ -9,11 +8,12 @@ namespace GdiSoft2D
 
 	struct Context {
 		GdiSoftFB::Framebuffer fb;
-		std::vector<ClipRect> clipStack;
+		ClipRect clipStack[16];
+		int clipDepth = 0;
 
 		bool Create(int w, int h, bool withZ = false)
 		{
-			clipStack.clear();
+			clipDepth = 0;
 			return fb.Resize(w, h, withZ, true);
 		}
 		bool Resize(int w, int h, bool withZ = false) { return Create(w, h, withZ); }

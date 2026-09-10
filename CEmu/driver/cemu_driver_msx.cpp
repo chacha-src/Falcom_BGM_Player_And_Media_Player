@@ -44,6 +44,9 @@ void CDriverMsx::PulseVblankIrq()
 	   Dual scheduling ran Quinpl's play routine twice per frame, blew the
 	   Z80 stack into adjacent heap, and crashed on driver destroy. */
 	if (!cpu->r.iff1) return;
+	/* EI;HALT (yosikon play): HALT is the delayed insn, so accept IRQ. */
+	if (cpu->get_mem() && cpu->get_mem()[cpu->r.pc] == 0x76)
+		cpu->irqDelay = 0;
 	/* hoot kss.cpp Interrupt: raise_IRQ(0xff) under IM2 IPL.
 	   The IPL ISR lives at $0038; IM2 only works if the game filled
 	   (I<<8)|$FF with a real vector. KSS StartSong fills $0000-$3FFF
@@ -77,8 +80,11 @@ void CDriverMsx::RunUntil(uint64_t endCycle)
 		/* HALT: sleep until this sample's CPU budget ends. VBlank is
 		   injected from Render on the hostRate/60 sample grid.
 		   DI;HALT (f1sp3d CALL $9003, yosikon CALL $D406) never wakes
-		   because PulseVblankIrq requires IFF1 — step past as NOP. */
+		   because PulseVblankIrq requires IFF1 — step past as NOP.
+		   EI;HALT: irqDelay would otherwise stick — RunUntil never
+		   executes HALT as an insn, so PulseVblankIrq keeps dropping. */
 		if (cpu->get_mem() && cpu->get_mem()[cpu->r.pc] == 0x76) {
+			cpu->irqDelay = 0;
 			if (hw_->GenericMode() && !cpu->r.iff1) {
 				cpu->r.pc = (uint16_t)(cpu->r.pc + 1);
 				cpu->adjust_time(4);

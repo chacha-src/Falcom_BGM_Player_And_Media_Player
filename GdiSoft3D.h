@@ -5,7 +5,6 @@
 #include "GdiSoft2D.h"
 #include <afxwin.h>
 #include <cmath>
-#include <vector>
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -157,9 +156,11 @@ namespace GdiSoft3D
 	// ---- Device / Context (D3D-like) ----
 	struct Texture {
 		int w = 0, h = 0;
-		std::vector<DWORD> pixels; // BGRA
+		DWORD* pixels = nullptr; // BGRA
+		int pixelCap = 0;
 		bool LoadFromHdc(HDC src, int sw, int sh);
 		DWORD Sample(float u, float v) const;
+		~Texture() { delete[] pixels; pixels = nullptr; pixelCap = 0; }
 	};
 
 	struct Context {

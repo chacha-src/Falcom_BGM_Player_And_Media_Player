@@ -307,9 +307,9 @@ static unsigned findZmusicEntry(CHardX68k* hw)
 	static const unsigned kDeltas[] = {
 		0x08u, 0x10u, 0x50cu, 0x6a0u, 0x54cu, 0x400u, 0x200u, 0x100u, 0x80u
 	};
-	/* Scan low 1MB + mid window for "ZmuSiC". */
-	for (unsigned base = 0; base < 0x180000u; base += 0x80000u) {
-		const unsigned span = (base == 0) ? 0x100000u : 0x80000u;
+	/* Scan low 4MB for "ZmuSiC". */
+	for (unsigned base = 0; base < 0x400000u; base += 0x100000u) {
+		const unsigned span = 0x100000u;
 		for (unsigned a = base; a + 6u < base + span; a += 2u) {
 			if (hw->Read8(a) != 'Z' || hw->Read8(a + 1) != 'm') continue;
 			if (hw->Read8(a + 2) != 'u' || hw->Read8(a + 3) != 'S') continue;
@@ -329,7 +329,7 @@ static unsigned findZmusicEntry(CHardX68k* hw)
 /* First XML-placed ZMD in low RAM (header 'ZMD\0' or 'zmd\0'). */
 static unsigned findZmdBuffer(CHardX68k* hw)
 {
-	for (unsigned a = 0x1000u; a + 4u < 0x180000u; a += 2u) {
+	for (unsigned a = 0x1000u; a + 4u < 0x400000u; a += 2u) {
 		const unsigned b0 = hw->Read8(a);
 		if (b0 != 'Z' && b0 != 'z') continue;
 		const unsigned b1 = hw->Read8(a + 1);
@@ -903,6 +903,35 @@ static int bindOpmdrvIsrIfSoft(CHardX68k* hw)
 
 } /* namespace */
 
+/* FLOAT2.X (ARTDINK A2 / Alice rips): FPU opcodes share LINE-F with
+   Human68k DOS $FFxx. PlantDos treats every F-line as DOS, so A2.X
+   `jsr $4F38A` never returns. FLOAT2's handler is $load+0x6A; it chains
+   non-$FE opcodes (DOS $FFxx) through the previous $2C saved at $load+0x86.
+   Do not JSR the KEEPPR/EXIT entry. */
+void CEmuX68kHookFloat2(CHardX68k* hw)
+{
+	if (!hw) return;
+	static const unsigned kLoad[] = { 0x2a000u, 0x2e000u, 0xa0000u, 0xb0000u };
+	unsigned load = 0;
+	for (unsigned i = 0; i < sizeof(kLoad) / sizeof(kLoad[0]); i++) {
+		const unsigned a = kLoad[i];
+		if (hw->Read8(a + 0x0eu) == 'F' && hw->Read8(a + 0x0fu) == 'L'
+			&& hw->Read8(a + 0x10u) == 'O' && hw->Read8(a + 0x11u) == 'A'
+			&& hw->Read8(a + 0x12u) == 'T') {
+			load = a;
+			break;
+		}
+	}
+	if (!load) return;
+	const unsigned handler = load + 0x6au;
+	const unsigned slot = load + 0x86u;
+	if (hw->Read16(handler) != 0x48e7u) return;
+	const unsigned cur = hw->Read32(0x2c) & 0xffffffu;
+	if (cur == (handler & 0xffffffu)) return;
+	hw->Write32(slot, hw->Read32(0x2c));
+	hw->Write32(0x2c, handler);
+}
+
 int CEmuX68kDosInstall(CHardX68k* hw)
 {
 	if (!hw) return 0;
@@ -937,17 +966,24 @@ int CEmuX68kDosInstall(CHardX68k* hw)
 				emitIrq6Trampoline(hw);
 				hw->Write32(0x78, CEMU_X68K_DOS_IRQ6);
 			}
+			CEmuX68kHookFloat2(hw);
 			return 1;
 		}
 		const unsigned isr = findOpmdrvIsr(hw);
-		if (!isr) return 0;
+		if (!isr) {
+			CEmuX68kHookFloat2(hw);
+			return 0;
+		}
 		hw->Write32(0x10c, isr);
 		emitIrq6Trampoline(hw);
 		hw->Write32(0x78, CEMU_X68K_DOS_IRQ6);
+		CEmuX68kHookFloat2(hw);
 		return 1;
 	}
-	if (!thinF && !thin15 && !thinIocs && !thinTrap3 && !thinTrap1 && !thin10c && !soft10c)
+	if (!thinF && !thin15 && !thinIocs && !thinTrap3 && !thinTrap1 && !thin10c && !soft10c) {
+		CEmuX68kHookFloat2(hw);
 		return 0;
+	}
 
 	const unsigned zmusic = findZmusicEntry(hw);
 	const unsigned zmd = findZmdBuffer(hw);
@@ -1108,5 +1144,6 @@ int CEmuX68kDosInstall(CHardX68k* hw)
 		}
 	}
 
+	CEmuX68kHookFloat2(hw);
 	return 1;
 }

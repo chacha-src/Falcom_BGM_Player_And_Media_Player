@@ -134,7 +134,7 @@ private:
 	int mapper_;
 	uint8_t* cart_;
 	unsigned cartBytes_;
-	uint8_t ttlPrg_[0x2000];
+	uint8_t ttlPrg_[0x2C00];
 	unsigned ttlPrgBytes_;
 	uint16_t ttlPrgAddr_;
 	uint8_t ascii16Bank_[2];

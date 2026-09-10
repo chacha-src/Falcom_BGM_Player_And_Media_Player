@@ -70,6 +70,207 @@ static int X1IsYdos(CHardX1* hw)
 	return (hw && (hw->ydosRom_ || MemHasYdos(hw->Mem()))) ? 1 : 0;
 }
 
+/* Tecnosoft kugyoku: `CP FF; JR Z; LD B,A; AND 0F; CALL drv`. Port 1/F
+   carry the 0x80/0x81/0xFF command; AND 0F is the track nibble. Using lo
+   as the latch made 0x80000003 call drv with A=3 (no such track). */
+static int CEmuX1TecnoCmdHi(const uint8_t* mem, unsigned patchOff, unsigned patchLen)
+{
+	if (!mem || patchLen < 8u) return 0;
+	if (patchOff + patchLen > 0x10000u)
+		patchLen = 0x10000u - patchOff;
+	for (unsigned i = 0; i + 8u <= patchLen; i++) {
+		const uint8_t* p = mem + patchOff + i;
+		if (p[0] != 0xFE || p[1] != 0xFF)
+			continue;
+		for (unsigned j = 2; j < 12u && i + j + 1u < patchLen; j++) {
+			if (p[j] == 0xE6 && p[j + 1] == 0x0F)
+				return 1;
+		}
+	}
+	return 0;
+}
+
+/* PATCH `LD HL,4000 / LD (drv+0x0A),HL` — Telenet dds/luxsor/yakyufan. The
+   CTC ISR does `LD A,(drv+0x0F); OR A; RET Z` and skips TL programming when
+   that byte stays 0 (high keyOn, hist60=0, peak=0). */
+static uint16_t CEmuX1TelenetPlayGate(const uint8_t* mem, unsigned patchOff, unsigned patchLen)
+{
+	if (!mem || patchLen < 6u) return 0;
+	if (patchOff + patchLen > 0x10000u)
+		patchLen = 0x10000u - patchOff;
+	for (unsigned i = 0; i + 6u <= patchLen; i++) {
+		const uint8_t* p = mem + patchOff + i;
+		if (p[0] != 0x21 || p[1] != 0x00 || p[2] != 0x40 || p[3] != 0x22)
+			continue;
+		const unsigned nn = (unsigned)p[4] | ((unsigned)p[5] << 8);
+		if ((nn & 0xFFu) != 0x0Au || nn < 0xE000u)
+			continue;
+		return (uint16_t)(nn + 5u);
+	}
+	return 0;
+}
+
+/* Enix JESUS: `CP 09; JR NC` (port 1 must be 0-8) then later `CP 72`
+   (port 0F is the OPMTBL index, which is the global music id). */
+static int CEmuX1JesusSplit(const uint8_t* mem, unsigned patchOff, unsigned patchLen)
+{
+	if (!mem || patchLen < 8u) return 0;
+	if (patchOff + patchLen > 0x10000u)
+		patchLen = 0x10000u - patchOff;
+	int saw09 = 0, saw72 = 0;
+	for (unsigned i = 0; i + 2u <= patchLen; i++) {
+		const uint8_t* p = mem + patchOff + i;
+		if (p[0] == 0xFE && p[1] == 0x09 && i + 2u < patchLen && p[2] == 0x30)
+			saw09 = 1;
+		if (p[0] == 0xFE && p[1] == 0x72)
+			saw72 = 1;
+	}
+	return (saw09 && saw72) ? 1 : 0;
+}
+
+/* Herzog OPMX1: `LD DE,2802; LD L,A; ADD HL,HL; ADD HL,DE` indexes a
+   pointer table at mdata+2. revo2 DEMO: `LD A,(F5F8); CP 03; JP NC` treats
+   song >= 3 as a mute/init path (MUS103 lo=3 hit that and wrote TL=7F). */
+static int CEmuX1SongIdFromHi(const uint8_t* mem)
+{
+	if (!mem) return 0;
+	for (unsigned a = 0; a + 5u < 0x10000u; a++) {
+		if (mem[a] == 0x11 && mem[a + 1] == 0x02 && mem[a + 2] == 0x28)
+			return 1;
+		if (mem[a] == 0x3A && mem[a + 1] == 0xF8 && mem[a + 2] == 0xF5
+			&& mem[a + 3] == 0xFE && mem[a + 4] == 0x03)
+			return 1;
+	}
+	return 0;
+}
+
+/* Falcom xana2: `IN A,(0F); SUB 2` — family hi is always 0x02, track in lo.
+   Ungated, that steal turned euphory 0x02000004 (song 2, bank 4) into track 4. */
+static int CEmuX1FalcomLoTrack(const uint8_t* mem, unsigned patchOff, unsigned patchLen)
+{
+	if (!mem || patchLen < 4u) return 0;
+	if (patchOff + patchLen > 0x10000u)
+		patchLen = 0x10000u - patchOff;
+	for (unsigned i = 0; i + 4u <= patchLen; i++) {
+		const uint8_t* p = mem + patchOff + i;
+		if (p[0] == 0xDB && p[1] == 0x0F && p[2] == 0xD6 && p[3] == 0x02)
+			return 1;
+		if ((p[0] == 0x0E && p[1] == 0x0F)
+			|| (p[0] == 0x01 && p[1] == 0x0F && p[2] == 0x00)) {
+			for (unsigned j = 2; j < 12u && i + j + 1u < patchLen; j++) {
+				if (p[j] == 0xD6 && p[j + 1] == 0x02)
+					return 1;
+			}
+		}
+	}
+	return 0;
+}
+
+/* ys2: `LD HL,C000; LD DE,4000; LD BC,1000; LDIR` — songs >= $20 copy BGM
+   to $4000; songs < $20 still index a table there (mode 0). */
+static int CEmuX1Ys2Mirror4000(const uint8_t* mem, unsigned patchOff, unsigned patchLen)
+{
+	if (!mem || patchLen < 11u) return 0;
+	if (patchOff + patchLen > 0x10000u)
+		patchLen = 0x10000u - patchOff;
+	for (unsigned i = 0; i + 11u <= patchLen; i++) {
+		const uint8_t* p = mem + patchOff + i;
+		if (p[0] == 0x21 && p[1] == 0x00 && p[2] == 0xC0
+			&& p[3] == 0x11 && p[4] == 0x00 && p[5] == 0x40
+			&& p[6] == 0x01 && p[7] == 0x00 && p[8] == 0x10
+			&& p[9] == 0xED && p[10] == 0xB0)
+			return 1;
+	}
+	return 0;
+}
+
+/* Laplace: `LD C,0F; IN E,(C)` then `LD A,D5; OUT (1FA3); OUT (C),E` —
+   port F is the CTC time constant, not a track index. */
+static int CEmuX1LaplaceCtcF(const uint8_t* mem, unsigned patchOff, unsigned patchLen)
+{
+	if (!mem || patchLen < 8u) return 0;
+	if (patchOff + patchLen > 0x10000u)
+		patchLen = 0x10000u - patchOff;
+	for (unsigned i = 0; i + 4u <= patchLen; i++) {
+		const uint8_t* p = mem + patchOff + i;
+		if (p[0] != 0x0E || p[1] != 0x0F || p[2] != 0xED || p[3] != 0x58)
+			continue;
+		for (unsigned j = 4; j + 1u < 16u && i + j + 1u < patchLen; j++) {
+			if (p[j] == 0x3E && p[j + 1] == 0xD5)
+				return 1;
+		}
+	}
+	return 0;
+}
+
+/* wibarm: `LD BC,000F; IN A,(C); CP FF; CALL Z` — port F is the in-file
+   track (0 = field) or $FF for the ending overlay, not a copy of port 1. */
+static int CEmuX1WibarmPortF(const uint8_t* mem, unsigned patchOff, unsigned patchLen)
+{
+	if (!mem || patchLen < 8u) return 0;
+	if (patchOff + patchLen > 0x10000u)
+		patchLen = 0x10000u - patchOff;
+	for (unsigned i = 0; i + 8u <= patchLen; i++) {
+		const uint8_t* p = mem + patchOff + i;
+		if (p[0] != 0x01 || p[1] != 0x0F || p[2] != 0x00)
+			continue;
+		for (unsigned j = 3; j + 4u < 12u && i + j + 4u < patchLen; j++) {
+			if (p[j] == 0xFE && p[j + 1] == 0xFF && p[j + 2] == 0xCC)
+				return 1;
+		}
+	}
+	return 0;
+}
+
+/* ametruck: `IN A,(1); CP 03; JR NC` — port 1 is OPENING/HISCORE/ENDING.
+   `IN A,(0F); CALL play` — hi selects the in-file variant (ROUTE 333). */
+static int CEmuX1AmetruckPortF(const uint8_t* mem, unsigned patchOff, unsigned patchLen)
+{
+	if (!mem || patchLen < 10u) return 0;
+	if (patchOff + patchLen > 0x10000u)
+		patchLen = 0x10000u - patchOff;
+	int sawCp03 = 0, sawInF = 0;
+	for (unsigned i = 0; i + 5u <= patchLen; i++) {
+		const uint8_t* p = mem + patchOff + i;
+		if (p[0] == 0xFE && p[1] == 0x03 && p[2] == 0x30)
+			sawCp03 = 1;
+		if (p[0] == 0x01 && p[1] == 0x0F && p[2] == 0x00
+			&& p[3] == 0xED && p[4] == 0x78)
+			sawInF = 1;
+	}
+	return (sawCp03 && sawInF) ? 1 : 0;
+}
+
+static uint16_t CEmuX1TelenetPlayTempo(const uint8_t* mem, uint16_t gate)
+{
+	if (!mem || !gate) return 0;
+	const uint8_t glo = (uint8_t)gate;
+	const uint8_t ghi = (uint8_t)(gate >> 8);
+	for (unsigned a = 0xE000u; a + 10u < 0x10000u; a++) {
+		if (mem[a] == 0x3A && mem[a + 1] == glo && mem[a + 2] == ghi
+			&& mem[a + 3] == 0xB7 && mem[a + 4] == 0xC8
+			&& mem[a + 5] == 0x21 && mem[a + 8] == 0x35 && mem[a + 9] == 0xC0) {
+			const unsigned nn = (unsigned)mem[a + 6] | ((unsigned)mem[a + 7] << 8);
+			if (nn >= 0xE000u && nn < 0x10000u)
+				return (uint16_t)nn;
+		}
+	}
+	return 0;
+}
+
+void CHardX1::ArmTelenetPlayGate()
+{
+	if (!opmPlayGate_) return;
+	const unsigned ptr = (unsigned)opmPlayGate_ - 5u;
+	const unsigned bgm = (unsigned)mem_[ptr] | ((unsigned)mem_[ptr + 1] << 8);
+	if (bgm < 0x100u || bgm >= 0xE000u) return;
+	mem_[opmPlayGate_] = 1;
+	/* ISR `DEC (tempo); RET NZ` from a zeroed BSS byte waits 256 ticks
+	   (~5s) before the first TL write. Prime so the first IRQ runs. */
+	if (opmPlayTempo_ && mem_[opmPlayTempo_] == 0)
+		mem_[opmPlayTempo_] = 1;
+}
+
 CHardX1::CHardX1()
 	: cpuHz_(X1_CPU_HZ)
 	, opmHz_(X1_OPM_HZ)
@@ -81,16 +282,34 @@ CHardX1::CHardX1()
 	, titleCode_(0)
 	, playCmdLatch_(0)
 	, playSongLatch_(0)
+	, playSongLatchF_(0)
 	, playCmdHoldIrqs_(0)
 	, ydosCmdSeen_(0)
 	, ydosInhibitReentry_(0)
 	, ydosRom_(0)
+	, opmPlayGate_(0)
+	, opmPlayTempo_(0)
+	, tecnoCmdHi_(0)
+	, jesusSplitPorts_(0)
+	, songIdFromHi_(0)
+	, skipPrestageRam_(0)
+	, skipTriggerStage_(0)
+	, psgStatToggle_(0)
+	, ys2Mirror4000_(0)
+	, laplaceCtcF_(0)
+	, wibarmPortF_(0)
+	, falcomPortF_(0)
+	, ametruckPortF_(0)
+	, marsHoldIrq_(0)
+	, marsSeenProg_(0)
+	, marsPlayReady_(0)
 	, cpu_(NULL)
 	, chipOpm_(NULL)
 	, chipAy_(NULL)
 	, sampleRate_(44100)
 	, cpuCycles_(0)
 	, stageLimit_(0x10000u)
+	, bgmStageOff_(0)
 	, ctcVectorBase_(0)
 	, ctcVectorProgrammed_(0)
 {	hardKind = KIND_X1;
@@ -175,10 +394,16 @@ void CHardX1::StageBgm(uint8_t index)
 		if (n > room) n = room;
 	}
 	if (n == 0) return;
+	unsigned srcOff = bgmStageOff_;
+	if (srcOff >= bgmBankSize_[use])
+		return;
+	unsigned avail = bgmBankSize_[use] - srcOff;
+	if (n > avail) n = avail;
+	const uint8_t* src = bgmBank_[use] + srcOff;
 	/* OUT 0 path: stage into IO window @5000 (hoot mucomx1 uses 8K window). */
 	unsigned ioN = n;
 	if (ioN > 0x2000u) ioN = 0x2000u;
-	memcpy(ioport_ + 0x5000, bgmBank_[use], ioN);
+	memcpy(ioport_ + 0x5000, src, ioN);
 	if (ioN < 0x2000u)
 		memset(ioport_ + 0x5000 + ioN, 0, 0x2000u - ioN);
 	/* Mirror into RAM at mdata_addr (per-title option).
@@ -186,11 +411,17 @@ void CHardX1::StageBgm(uint8_t index)
 	   32K wiped OPMDRV@E000 (opmW=0); hayato mdata@C000 + 32K wiped top RAM.
 	   Clear only the staged bytes + a short pad (same idea as YDOS). */
 	if (mdataAddr_ + n <= 0x10000) {
-		memcpy(mem_ + mdataAddr_, bgmBank_[use], n);
+		memcpy(mem_ + mdataAddr_, src, n);
 		unsigned pad = 0x100;
 		if (n + pad > mdataSize_) pad = (mdataSize_ > n) ? (mdataSize_ - n) : 0;
 		if (pad && mdataAddr_ + n + pad <= 0x10000)
 			memset(mem_ + mdataAddr_ + n, 0, pad);
+	}
+	/* ys2 mode 0 indexes a pointer table at $4000 without the C000 LDIR. */
+	if (ys2Mirror4000_ && n) {
+		unsigned n4 = n;
+		if (n4 > 0x1000u) n4 = 0x1000u;
+		memcpy(mem_ + 0x4000, src, n4);
 	}
 	mem_[LOAD_FLAG] = 0xff;
 }
@@ -307,19 +538,34 @@ uint8_t CHardX1::PortIn(uint16_t port)
 	if (p == 0x0001)
 		return playSongLatch_;
 	/* Falcom xana2 PATCH: IN A,(0F); SUB 2 indexes the play/IRQ vector
-	   table. Mirror the song latch (hoot music id base 2). */
+	   table. Mirror the song latch (hoot music id base 2).
+	   Herzog/revo2: port 1 is a non-zero play command; port 0F is the
+	   in-file track (0 is valid — herzog PATCH `OR A; JR Z` skips play). */
 	if (p == 0x000f)
-		return playSongLatch_;
+		return (jesusSplitPorts_ || songIdFromHi_ || laplaceCtcF_ || ys2Mirror4000_
+			|| wibarmPortF_ || falcomPortF_ || ametruckPortF_)
+			? playSongLatchF_ : playSongLatch_;
 	if (!psgOnly_ && chipOpm_ && (p == 0x0700 || p == 0x0701))
 		return chipOpm_->ReadStatus();
-	if (p == 0x1a01)
-		return 0x04; /* bit2 ready — Laplace ISR / sub-CPU style polls */
+	if (p == 0x1a01) {
+		/* Bit2 = ready (Laplace / Dempa BIT 2). Bit7 must alternate:
+		   mars ISR `IN A,(1A01); JP P` waits for S=1 then `JP M` for S=0.
+		   A constant 0x04 (S=0) never leaves the first wait; 0x80 fails BIT 2. */
+		psgStatToggle_ ^= 1;
+		return psgStatToggle_ ? 0x84 : 0x04;
+	}
 	/* Microcabin msnk: busy-wait IN A,(0FF8); AND 81; JP NZ — clear = ready. */
 	if (p == 0x0ff8 || p == 0x0ff9 || p == 0x0ffc)
 		return 0x00;
-	if (p == 0x1c00 || p == 0x1b00) {
-		if (chipAy_) return chipAy_->ReadData();
-		return 0xff;
+	/* X1 PSG is decoded on the high byte. DRIVER `OUT (C),A` keeps the
+	   data in C, so the port is 1C<data> / 1B<data> not 1C00/1B00. */
+	{
+		const uint16_t ph = (uint16_t)(p & 0xff00);
+		if (ph == 0x1c00 || ph == 0x1b00 || ph == 0x1900
+			|| (ph == 0x1a00 && (p & 0xff) != 0x01)) {
+			if (chipAy_) return chipAy_->ReadData();
+			return 0xff;
+		}
 	}
 	return ioport_[p];
 }
@@ -349,27 +595,70 @@ void CHardX1::PortOut(uint16_t port, uint8_t data)
 			mem_[PLAY_FLAG] = 0x00;
 		return;
 	}
+	/* Telenet PATCH: IN A,(1); OUT (C),A echoes the song then CALL play.
+	   The cmd latch is level-high for ~1.5s; play itself takes ~1s of DI
+	   so the wait loop sees cmd=1 again and re-enters. luxsor's play
+	   XOR-clears the ISR gate and LDIRs the work RAM — GAPPY/STOPS.
+	   Consume the edge here so play is one-shot. */
+	if (p == 0x0001 && opmPlayGate_) {
+		playCmdLatch_ = 0;
+		playCmdHoldIrqs_ = 0;
+		if (mem_[PLAY_FLAG] == 0x01)
+			mem_[PLAY_FLAG] = 0x00;
+		ioport_[p] = data;
+		return;
+	}
+	/* produce: PATCH `CALL stop` at PROG1 $0285, then OUT 1,song, then
+	   `CALL play` at the overlay's $0AB8/$29AE. Overlay here, not at
+	   TriggerPlay (that would wipe stop before it runs). */
+	if (p == 0x0001 && skipTriggerStage_) {
+		StageBgm(data);
+		playCmdLatch_ = 0;
+		playCmdHoldIrqs_ = 0;
+		if (mem_[PLAY_FLAG] == 0x01)
+			mem_[PLAY_FLAG] = 0x00;
+		ioport_[p] = data;
+		return;
+	}
+	/* Laplace / wibarm: wait-loop re-entry. OUT 1 echoes then CALL play;
+	   a level-high cmd re-inits (DI) every pass. wibarm's $FF path LDDRs
+	   the song header — a second pass slides it twice and goes silent. */
+	if (p == 0x0001 && (laplaceCtcF_ || wibarmPortF_)) {
+		playCmdLatch_ = 0;
+		playCmdHoldIrqs_ = 0;
+		if (mem_[PLAY_FLAG] == 0x01)
+			mem_[PLAY_FLAG] = 0x00;
+		ioport_[p] = data;
+		return;
+	}
 	if (!psgOnly_ && chipOpm_ && (p == 0x0700 || p == 0x0701)) {
 		chipOpm_->Write((uint32_t)(p & 1), data);
 		return;
 	}
-	/* CZ-8BS1 carries its own Z80 CTC at 0704-0707 next to the OPM. */
+	/* CZ-8BS1 carries its own Z80 CTC at 0704-0707 next to the OPM.
+	   Same 4 channels as the main-board 1FA0 map — program the live CTC. */
 	if (p >= 0x0704 && p <= 0x0707) {
 		X1CtcTrace(this, p, data);
+		CtcWrite((int)(p - 0x0704), data);
 		ioport_[p] = data;
 		return;
 	}
-	if (p == 0x1b00) {
-		/* hoot passes port>>8 to ssAY8910: 1B is odd, therefore data. */
-		if (chipAy_) chipAy_->Write(1, data);
-		ioport_[p] = data;
-		return;
-	}
-	if (p == 0x1c00) {
-		/* 1C is even, therefore the AY address latch. */
-		if (chipAy_) chipAy_->Write(0, data);
-		ioport_[p] = data;
-		return;
+	{
+		const uint16_t ph = (uint16_t)(p & 0xff00);
+		if (ph == 0x1b00 || (ph == 0x1a00 && (p & 0xff) != 0x01)) {
+			/* hoot passes port>>8 to ssAY8910: 1B is odd, therefore data.
+			   mars also clocks data at 1A00 next to status 1A01.
+			   Ignore C in the low byte — Laplace 8613 leaves data there. */
+			if (chipAy_) chipAy_->Write(1, data);
+			ioport_[p] = data;
+			return;
+		}
+		if (ph == 0x1c00 || ph == 0x1900) {
+			/* 1C is even, therefore the AY address latch. mars uses 1900. */
+			if (chipAy_) chipAy_->Write(0, data);
+			ioport_[p] = data;
+			return;
+		}
 	}
 	/* Z80 CTC: MAME maps 1FA0-1FA3 and mirror 1FA8-1FAB. */
 	if ((p >= 0x1fa0 && p <= 0x1fa3) || (p >= 0x1fa8 && p <= 0x1fab)) {
@@ -391,19 +680,28 @@ uint8_t CHardX1::MemRead(uint16_t addr)
 	return mem_[addr];
 }
 
-void CHardX1::UnpackTitle(unsigned titleCode, uint8_t* songOut, uint8_t* bankOut)
+void CHardX1::UnpackTitle(unsigned titleCode, uint8_t* songOut, uint8_t* bankOut,
+	int ydos)
 {
 	/* hoot X1/NCS: 0xSS0000BB → song=SS bank=BB; 0xSS000000 → song=SS bank=0;
 	   low-only 0x000000NN → song=NN bank=NN (legacy StageBgm(song)).
 	   Extended mid!=0 codes (ishtar 0x00028408) keep lo as song/bank.
 	   Humming Bird Laplace uses hi as a flags byte (0x68..0xC0) with the
 	   real song/bank in lo — treating hi as song yielded song=0x80 and silent
-	   DRIVER calls. */
+	   DRIVER calls. Threshold is 0x60 so Falcom xanaopm 0x48000001 / 0x2C000002
+	   still unpack as song=hi (MML id) bank=lo.
+	   KOEI YDOS: 0x010000SS = looping, 0x000000SS = one-shot. hi is a play
+	   flag, not the track. Using hi as song made every 0x01****** title
+	   play track 1 (SAMESONG on sangoku/suiko/sangoku2). NCS 0x01000000
+	   really is song 1 — do not apply this unless ydos. */
 	const unsigned lo = titleCode & 0xffu;
 	const unsigned hi = (titleCode >> 24) & 0xffu;
 	const unsigned mid = (titleCode >> 8) & 0xffffu;
 	uint8_t song = 0, bank = 0;
-	if (mid == 0 && hi >= 0x40) {
+	if (ydos && mid == 0 && hi == 1) {
+		song = (uint8_t)lo;
+		bank = 0;
+	} else if (mid == 0 && hi >= 0x60) {
 		song = (uint8_t)lo;
 		bank = (uint8_t)lo;
 	} else if (mid == 0 && (hi != 0 || lo != 0)) {
@@ -431,7 +729,15 @@ void CHardX1::UnpackTitle(unsigned titleCode, uint8_t* songOut, uint8_t* bankOut
 void CHardX1::PrestageBgm(unsigned titleCode)
 {
 	uint8_t song = 0, bank = 0;
-	UnpackTitle(titleCode, &song, &bank);
+	UnpackTitle(titleCode, &song, &bank, ydosRom_);
+	bgmStageOff_ = 0;
+	if (laplaceCtcF_) {
+		const unsigned lo = titleCode & 0xffu;
+		const unsigned mid = (titleCode >> 8) & 0xffffu;
+		if (lo < 128 && bgmPresent_[lo] && bgmBank_[lo])
+			bank = (uint8_t)lo;
+		bgmStageOff_ = mid;
+	}
 	uint8_t stage = bank;
 	if (!(stage < 128 && bgmPresent_[stage] && bgmBank_[stage])) {
 		if (song < 128 && bgmPresent_[song] && bgmBank_[song])
@@ -447,11 +753,15 @@ void CHardX1::PrestageBgm(unsigned titleCode)
 			memset(mem_ + 0x4000, 0, n);
 			memcpy(mem_ + 0x4000, bgmBank_[stage], n);
 		}
-		StageBgm(stage);
+		/* Overlay-on-play: keep boot code (produce PROG1, xanaopm PR.NO0)
+		   until PATCH has inited. TriggerPlay still StageBgm. */
+		if (!skipPrestageRam_)
+			StageBgm(stage);
 	}
 	/* Keep play mailbox idle through DRIVER boot. */
 	playCmdLatch_ = 0;
 	playSongLatch_ = 0;
+	playSongLatchF_ = 0;
 	playCmdHoldIrqs_ = 0;
 	ydosCmdSeen_ = 0;
 	ydosInhibitReentry_ = 0;
@@ -462,7 +772,7 @@ void CHardX1::PrestageBgm(unsigned titleCode)
 void CHardX1::TriggerPlay(unsigned titleCode)
 {
 	uint8_t song = 0, bank = 0;
-	UnpackTitle(titleCode, &song, &bank);
+	UnpackTitle(titleCode, &song, &bank, ydosRom_);
 	/* Dual mailbox: port latch (Falcom) + C010/C011 when free (hoot Play).
 	   Stage IO@5000 always; RAM mirror only when StageBgm deems safe. */
 	playCmdLatch_ = 0x01;
@@ -471,10 +781,59 @@ void CHardX1::TriggerPlay(unsigned titleCode)
 		const unsigned lo = titleCode & 0xffu;
 		const unsigned hi = (titleCode >> 24) & 0xffu;
 		const unsigned mid = (titleCode >> 8) & 0xffffu;
-		if (mid == 0 && hi == 2)
+		if (mid == 0 && hi == 2 && falcomPortF_)
 			playSongLatch_ = lo ? (uint8_t)lo : (uint8_t)hi;
 		else
 			playSongLatch_ = song;
+		/* Tecnosoft: hi is 0x80/0x81/0xFF (play / skip-intro / with-intro).
+		   Bank is already `lo` from UnpackTitle's hi>=0x40 path. */
+		if (tecnoCmdHi_ && mid == 0 && hi >= 0x80)
+			playSongLatch_ = (uint8_t)hi;
+		/* JESUS: port 1 = copy descriptor 0-8, port 0F = OPMTBL index.
+		   Global ids >= 9 used to share port 1 and were skipped (CP 09). */
+		if (jesusSplitPorts_) {
+			playSongLatchF_ = song;
+			playSongLatch_ = (song < 9) ? song : bank;
+		}
+		if (songIdFromHi_ && mid == 0 && hi < 0x80 && !tecnoCmdHi_ && !falcomPortF_) {
+			playSongLatchF_ = (uint8_t)hi;
+			/* Herzog PATCH `IN A,(1); OR A; JR Z` skips CALL play when A=0.
+			   Track 0 still has to reach 1800 with port 0F = 0. */
+			playSongLatch_ = hi ? (uint8_t)hi : 1;
+		}
+		bgmStageOff_ = 0;
+		if (laplaceCtcF_) {
+			if (lo < 128 && bgmPresent_[lo] && bgmBank_[lo])
+				bank = (uint8_t)lo;
+			bgmStageOff_ = mid;
+			/* Port F is CTC TC (0 = 256), not the track. */
+			playSongLatchF_ = 0;
+		}
+		/* ys2: port 1 is the PATCH command (CP $20 selects mode 0/1);
+		   port F is the in-file track. 0x00000032 is mode 1 / track 0,
+		   not track $32. 0x02000030 is mode 0 / track 2. */
+		if (ys2Mirror4000_ && mid == 0 && !laplaceCtcF_) {
+			playSongLatch_ = hi ? (uint8_t)hi : (uint8_t)lo;
+			playSongLatchF_ = (uint8_t)hi;
+		}
+		if (wibarmPortF_ && mid == 0 && !laplaceCtcF_ && !ys2Mirror4000_) {
+			/* 0x00000002 field = track 0; 0x01000002 battle = track 1;
+			   0xFF000003 ending = overlay + track 0. Port 1 must stay NZ. */
+			playSongLatchF_ = (uint8_t)hi;
+			playSongLatch_ = (hi && hi != 0xFFu) ? (uint8_t)hi : 1;
+		}
+		/* xana2 PSG/OPM: port F is the PR.NOx family (hi), SUB 2 indexes
+		   the play/IRQ vectors. lo is only the staged m.000x bank. */
+		if (falcomPortF_ && mid == 0 && hi && !wibarmPortF_ && !laplaceCtcF_
+			&& !ys2Mirror4000_ && !jesusSplitPorts_) {
+			playSongLatchF_ = (uint8_t)hi;
+		}
+		if (ametruckPortF_ && mid == 0 && !wibarmPortF_ && !falcomPortF_
+			&& !laplaceCtcF_ && !ys2Mirror4000_) {
+			/* Port 1 = file 0-2 (must stay < 3); port F = variant in hi. */
+			playSongLatch_ = (uint8_t)lo;
+			playSongLatchF_ = (uint8_t)hi;
+		}
 	}
 	playCmdHoldIrqs_ = 90; /* ~1.5s hold so slow PATCH polls see cmd before OUT0/clear */
 	ydosCmdSeen_ = 0;
@@ -509,8 +868,10 @@ void CHardX1::TriggerPlay(unsigned titleCode)
 			memset(mem_ + 0x4000, 0, n);
 			memcpy(mem_ + 0x4000, bgmBank_[stage], n);
 		}
-		StageBgm(stage);
+		if (!skipTriggerStage_)
+			StageBgm(stage);
 	}
+	ArmTelenetPlayGate();
 }
 
 unsigned CHardX1::OpmWrites() const
@@ -531,6 +892,7 @@ int CHardX1::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode
 	memset(ioport_, 0, sizeof(ioport_));
 	FreeBanks();
 	CtcReset();
+	psgStatToggle_ = 0;
 	for (int i = 0; i < 4; i++)
 		xmlCtcVec_[i] = -1;
 	/* hoot X1 driver use_ctcN / game option ctcN = IM2 vector for that channel. */
@@ -547,6 +909,11 @@ int CHardX1::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode
 	}
 	int loadedCode = 0;
 	ydosRom_ = (uint8_t)(GeHasYdosRom(ge) ? 1 : 0);
+	opmPlayGate_ = 0;
+	opmPlayTempo_ = 0;
+	tecnoCmdHi_ = 0;
+	jesusSplitPorts_ = 0;
+	songIdFromHi_ = 0;
 
 	/* Resolve mdata window early so oversized code (Falcom PR.NO2 @0 with
 	   mdata@5c00) cannot spill into the music region before Prestage. */
@@ -649,7 +1016,7 @@ int CHardX1::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode
 			if (vsize <= 0) vsize = CEmuParseOptHex(ge, "vfile_size", (int)sz);
 			if (vaddr < 0) continue;
 			uint8_t song = 0, bank = 0;
-			UnpackTitle(titleCode, &song, &bank);
+			UnpackTitle(titleCode, &song, &bank, ydosRom_);
 			int idx = r->offset;
 			if (idx < 0) idx = 0;
 			if (idx != (int)song && idx != (int)bank)
@@ -702,14 +1069,104 @@ int CHardX1::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode
 			if (ms <= 0 || ms > BGM_SIZE) ms = BGM_SIZE;
 			mdataSize_ = (unsigned)ms;
 		}
-		/* Nearest code blob above mdata_addr caps StageBgm writes. */
+		/* Nearest code blob above mdata_addr caps StageBgm writes.
+		   Code sitting inside the mdata window when mdata_addr==0 is an
+		   overlay stub (xanaopm PR.NO0 @1000) — music is meant to replace
+		   it after PATCH copies the player to $F000. crimson VOICE@6200
+		   with mdata@4000 must still cap. */
 		stageLimit_ = 0x10000u;
+		skipPrestageRam_ = 0;
+		skipTriggerStage_ = 0;
+		ys2Mirror4000_ = 0;
+		laplaceCtcF_ = 0;
+		wibarmPortF_ = 0;
+		falcomPortF_ = 0;
+		ametruckPortF_ = 0;
+		marsHoldIrq_ = 0;
+		marsSeenProg_ = 0;
+		marsPlayReady_ = 0;
+		bgmStageOff_ = 0;
 		for (int i = 0; i < ge->romCount; i++) {
 			const CEmuRomEntry* r = &ge->rom[i];
 			if (_stricmp(r->type, "code") != 0) continue;
+			if (_stricmp(r->name, "PATCH") == 0) {
+				if (r->offset > (int)mdataAddr_ && r->offset < (int)stageLimit_)
+					stageLimit_ = (uint32_t)r->offset;
+				continue;
+			}
+			if (r->offset == (int)mdataAddr_ && mdataAddr_ != 0) {
+				/* produce: PROG1 at mdata is the player, not a music
+				   overlay target. Staging PROG4 here wipes JP $0285. */
+				skipPrestageRam_ = 1;
+				skipTriggerStage_ = 1;
+			}
+			if (mdataAddr_ == 0 && r->offset > 0 && r->offset < (int)mdataSize_) {
+				skipPrestageRam_ = 1;
+				continue; /* overlay stub inside the music window */
+			}
 			if (r->offset > (int)mdataAddr_ && r->offset < (int)stageLimit_)
 				stageLimit_ = (uint32_t)r->offset;
 		}
+		for (int i = 0; i < ge->romCount; i++) {
+			const CEmuRomEntry* r = &ge->rom[i];
+			if (_stricmp(r->type, "code") != 0) continue;
+			if (_stricmp(r->name, "PATCH") != 0) continue;
+			if (r->offset < 0 || r->offset >= 0x10000) break;
+			unsigned plen = 256u;
+			if (r->offset + (int)plen > 0x10000)
+				plen = (unsigned)(0x10000 - r->offset);
+			opmPlayGate_ = CEmuX1TelenetPlayGate(mem_, (unsigned)r->offset, plen);
+			opmPlayTempo_ = CEmuX1TelenetPlayTempo(mem_, opmPlayGate_);
+			tecnoCmdHi_ = (uint8_t)CEmuX1TecnoCmdHi(mem_, (unsigned)r->offset, plen);
+			jesusSplitPorts_ = (uint8_t)CEmuX1JesusSplit(mem_, (unsigned)r->offset, plen);
+			ys2Mirror4000_ = (uint8_t)CEmuX1Ys2Mirror4000(mem_, (unsigned)r->offset, plen);
+			laplaceCtcF_ = (uint8_t)CEmuX1LaplaceCtcF(mem_, (unsigned)r->offset, plen);
+			wibarmPortF_ = (uint8_t)CEmuX1WibarmPortF(mem_, (unsigned)r->offset, plen);
+			falcomPortF_ = (uint8_t)CEmuX1FalcomLoTrack(mem_, (unsigned)r->offset, plen);
+			ametruckPortF_ = (uint8_t)CEmuX1AmetruckPortF(mem_, (unsigned)r->offset, plen);
+			break;
+		}
+		songIdFromHi_ = (uint8_t)CEmuX1SongIdFromHi(mem_);
+		/* TTLPRG is 13K; mode 0 pokes $3762 in the 20K in-game player.
+		   Keep MANPR1's tail under the title program. */
+		if (ys2Mirror4000_ && vdataAddr >= 0) {
+			unsigned msz = 0;
+			const unsigned char* man = CEmuZipFsFind(fs, "MANPR1", &msz);
+			if (man && msz) {
+				unsigned n = msz;
+				if (vdataSize > 0 && (unsigned)vdataSize < n)
+					n = (unsigned)vdataSize;
+				if (vdataAddr + (int)n > 0x10000)
+					n = (unsigned)(0x10000 - vdataAddr);
+				memcpy(mem_ + vdataAddr, man, n);
+				/* Mode 0 (cmd < $20) needs the full in-game player.
+				   TTLPRG overlay is only for title-screen mode 1. */
+				const unsigned hi = (titleCode >> 24) & 0xffu;
+				const unsigned lo = titleCode & 0xffu;
+				const unsigned cmd = hi ? hi : lo;
+				if (cmd >= 0x20u) {
+					for (int i = 0; i < ge->romCount; i++) {
+						const CEmuRomEntry* r = &ge->rom[i];
+						if (_stricmp(r->type, "code") != 0) continue;
+						if (_stricmp(r->name, "TTLPRG") != 0) continue;
+						unsigned tsz = 0;
+						const unsigned char* ttl = CEmuZipFsFind(fs, r->name, &tsz);
+						if (!ttl || !tsz) break;
+						int off = r->offset;
+						if (off < 0) off = 0;
+						unsigned tn = tsz;
+						if (off + (int)tn > 0x10000)
+							tn = (unsigned)(0x10000 - off);
+						memcpy(mem_ + off, ttl, tn);
+						break;
+					}
+				}
+			}
+		}
+		/* Unpatched mars ISR: IN (1A01); JP P,$4208; IN; JP M,$420D. */
+		if (mem_[0x420A] == 0xF2 && mem_[0x420B] == 0x08 && mem_[0x420C] == 0x42
+			&& mem_[0x420F] == 0xFA && mem_[0x4210] == 0x0D && mem_[0x4211] == 0x42)
+			marsHoldIrq_ = 1;
 	}
 
 	cpu_->reset(mem_);

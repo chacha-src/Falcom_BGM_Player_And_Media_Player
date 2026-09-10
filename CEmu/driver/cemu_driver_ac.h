@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include "cemu_driver.h"
 #include "../machine/cemu_hard_ac.h"
 
@@ -31,6 +31,7 @@ private:
 	int cmdIndex_;
 	uint64_t nextCmdAt_;
 	uint64_t nextGngIrq_;
+	int alphaNmiBusy_;     /* 1 while Alpha 68K-II NMI has not RETN'd */
 	/* Last sampled K054539 timer output, for rising-edge NMI generation. */
 	int k054539TimerState_;
 	uint64_t k054539Residual_;

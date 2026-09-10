@@ -2,7 +2,7 @@
 // Soft GDI shared ARGB32 + Z framebuffer (no D3D/D2D runtime).
 #include <afxwin.h>
 #include <cstring>
-#include <vector>
+#include <new>
 
 namespace GdiSoftFB
 {
@@ -42,8 +42,10 @@ namespace GdiSoftFB
 		HDC hdc = nullptr;
 		HBITMAP dib = nullptr;
 		HBITMAP oldBmp = nullptr;
-		std::vector<DWORD> colorOwned;
-		std::vector<float> zOwned;
+		DWORD* colorOwned = nullptr;
+		float* zOwned = nullptr;
+		int colorCap = 0;
+		int zCap = 0;
 		bool useDib = true;
 
 		~Framebuffer() { Destroy(); }
@@ -58,8 +60,12 @@ namespace GdiSoftFB
 			if (hdc) { ::DeleteDC(hdc); hdc = nullptr; }
 			color = nullptr;
 			z = nullptr;
-			colorOwned.clear();
-			zOwned.clear();
+			delete[] colorOwned;
+			colorOwned = nullptr;
+			colorCap = 0;
+			delete[] zOwned;
+			zOwned = nullptr;
+			zCap = 0;
 			w = h = 0;
 		}
 
@@ -69,12 +75,36 @@ namespace GdiSoftFB
 			if (height < 1) height = 1;
 			if (w == width && h == height && color && (!withZ || z) && (preferDib == useDib || !preferDib))
 				return true;
-			Destroy();
+
+			if (hdc && oldBmp) {
+				::SelectObject(hdc, oldBmp);
+				oldBmp = nullptr;
+			}
+			if (dib) { ::DeleteObject(dib); dib = nullptr; }
+			if (hdc) { ::DeleteDC(hdc); hdc = nullptr; }
+			color = nullptr;
+			z = nullptr;
 			w = width;
 			h = height;
 			useDib = preferDib;
-			zOwned.assign((size_t)w * (size_t)h, 1e9f);
-			z = withZ ? zOwned.data() : nullptr;
+
+			const size_t n = (size_t)w * (size_t)h;
+			if (withZ) {
+				if ((int)n > zCap) {
+					int cap = zCap > 0 ? zCap : 4096;
+					while ((size_t)cap < n) {
+						if (cap > (INT_MAX / 2)) { cap = (int)n; break; }
+						cap *= 2;
+					}
+					float* nz = new (std::nothrow) float[cap];
+					if (!nz) return false;
+					delete[] zOwned;
+					zOwned = nz;
+					zCap = cap;
+				}
+				z = zOwned;
+				for (size_t i = 0; i < n; ++i) z[i] = 1e9f;
+			}
 
 			if (preferDib) {
 				BITMAPINFO bi = {};
@@ -88,7 +118,8 @@ namespace GdiSoftFB
 				hdc = ::CreateCompatibleDC(nullptr);
 				dib = ::CreateDIBSection(hdc, &bi, DIB_RGB_COLORS, &bits, nullptr, 0);
 				if (!hdc || !dib || !bits) {
-					Destroy();
+					if (dib) { ::DeleteObject(dib); dib = nullptr; }
+					if (hdc) { ::DeleteDC(hdc); hdc = nullptr; }
 					preferDib = false;
 					useDib = false;
 				} else {
@@ -97,8 +128,20 @@ namespace GdiSoftFB
 					return true;
 				}
 			}
-			colorOwned.assign((size_t)w * (size_t)h, 0);
-			color = colorOwned.data();
+			if ((int)n > colorCap) {
+				int cap = colorCap > 0 ? colorCap : 4096;
+				while ((size_t)cap < n) {
+					if (cap > (INT_MAX / 2)) { cap = (int)n; break; }
+					cap *= 2;
+				}
+				DWORD* nc = new (std::nothrow) DWORD[cap];
+				if (!nc) return false;
+				delete[] colorOwned;
+				colorOwned = nc;
+				colorCap = cap;
+			}
+			color = colorOwned;
+			for (size_t i = 0; i < n; ++i) color[i] = 0;
 			return color != nullptr;
 		}
 

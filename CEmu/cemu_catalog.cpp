@@ -42,8 +42,13 @@ static void CEmuDecodeXmlEntities(char* s)
 static const char* CEmuStrStr(const char* hay, const char* needle)
 {
 	if (!hay || !needle || !needle[0]) return hay;
-	size_t nlen = strlen(needle);
+	const unsigned char n0 = (unsigned char)needle[0];
+	const unsigned char n0l = (unsigned char)((n0 >= 'A' && n0 <= 'Z') ? (n0 + 32) : n0);
+	const unsigned char n0u = (unsigned char)((n0 >= 'a' && n0 <= 'z') ? (n0 - 32) : n0);
+	const size_t nlen = strlen(needle);
 	for (const char* p = hay; *p; p++) {
+		const unsigned char c = (unsigned char)*p;
+		if (c != n0 && c != n0l && c != n0u) continue;
 		if (_strnicmp(p, needle, nlen) == 0)
 			return p;
 	}
@@ -392,7 +397,18 @@ static const CEmuCatalogChipToken kCatalogChipTokens[] = {
    Returns the offset just past the match, or -1 when the token is absent. */
 static int CEmuCatalogNameFindToken(const char* hay, const char* needle)
 {
+	char n0 = 0;
+	for (const char* b = needle; *b; b++) {
+		if (*b == ' ' || *b == '-' || *b == '_') continue;
+		n0 = *b;
+		if (n0 >= 'a' && n0 <= 'z') n0 = (char)(n0 - 'a' + 'A');
+		break;
+	}
 	for (const char* p = hay; *p; p++) {
+		char c0 = *p;
+		if (c0 == ' ' || c0 == '-' || c0 == '_') continue;
+		if (c0 >= 'a' && c0 <= 'z') c0 = (char)(c0 - 'a' + 'A');
+		if (n0 && c0 != n0) continue;
 		const char* a = p;
 		const char* b = needle;
 		while (*b) {
@@ -460,22 +476,76 @@ void CEmuCatalogShareDocChips(CEmuCatalog* cat)
 	if (!cat || cat->count <= 0) return;
 	/* The same archive is often listed twice - one row spells the chips out,
 	   the other is just the game title. Whichever row a zip resolves to
-	   should describe the same board, so let the terse row borrow. */
+	   should describe the same board, so let the terse row borrow.
+	   Hash by archive so this stays O(n) instead of O(n^2) at catalog load. */
+	enum { kBuckets = 4096 };
+	int* head = (int*)malloc(sizeof(int) * kBuckets);
+	int* next = (int*)malloc(sizeof(int) * (size_t)cat->count);
+	if (!head || !next) {
+		free(head);
+		free(next);
+		for (int i = 0; i < cat->count; i++) {
+			CEmuGameEntry* a = cat->entry[i];
+			if (!a || a->docChipCount > 0 || !a->archive[0]) continue;
+			for (int k = 0; k < cat->count; k++) {
+				const CEmuGameEntry* b = cat->entry[k];
+				if (!b || b->docChipCount <= 0) continue;
+				if (_stricmp(b->archive, a->archive) != 0) continue;
+				memcpy(a->docChipIds, b->docChipIds, sizeof(a->docChipIds));
+				a->docChipCount = b->docChipCount;
+				CEmuCatalogAssignHwIdsFromDoc(a);
+				break;
+			}
+		}
+		return;
+	}
+	for (int bkt = 0; bkt < kBuckets; bkt++) head[bkt] = -1;
+	for (int k = 0; k < cat->count; k++) {
+		const CEmuGameEntry* b = cat->entry[k];
+		next[k] = -1;
+		if (!b || b->docChipCount <= 0 || !b->archive[0]) continue;
+		unsigned h = 2166136261u;
+		for (const char* s = b->archive; *s; s++) {
+			unsigned char c = (unsigned char)*s;
+			if (c >= 'A' && c <= 'Z') c = (unsigned char)(c + 32);
+			h ^= c;
+			h *= 16777619u;
+		}
+		const int bkt = (int)(h & (kBuckets - 1));
+		int exists = 0;
+		for (int x = head[bkt]; x >= 0; x = next[x]) {
+			const CEmuGameEntry* prev = cat->entry[x];
+			if (prev && _stricmp(prev->archive, b->archive) == 0) {
+				exists = 1;
+				break;
+			}
+		}
+		if (exists) continue;
+		next[k] = head[bkt];
+		head[bkt] = k;
+	}
 	for (int i = 0; i < cat->count; i++) {
 		CEmuGameEntry* a = cat->entry[i];
 		if (!a || a->docChipCount > 0 || !a->archive[0]) continue;
-		for (int k = 0; k < cat->count; k++) {
-			const CEmuGameEntry* b = cat->entry[k];
-			if (!b || b->docChipCount <= 0) continue;
-			if (_stricmp(b->archive, a->archive) != 0) continue;
+		unsigned h = 2166136261u;
+		for (const char* s = a->archive; *s; s++) {
+			unsigned char c = (unsigned char)*s;
+			if (c >= 'A' && c <= 'Z') c = (unsigned char)(c + 32);
+			h ^= c;
+			h *= 16777619u;
+		}
+		const int bkt = (int)(h & (kBuckets - 1));
+		for (int x = head[bkt]; x >= 0; x = next[x]) {
+			const CEmuGameEntry* b = cat->entry[x];
+			if (!b || _stricmp(b->archive, a->archive) != 0) continue;
 			memcpy(a->docChipIds, b->docChipIds, sizeof(a->docChipIds));
 			a->docChipCount = b->docChipCount;
-			/* Chip ids fall back on the documented set when the subtype
-			   table has no entry, so redo that decision with the new info. */
 			CEmuCatalogAssignHwIdsFromDoc(a);
 			break;
 		}
 	}
+	free(head);
+	free(next);
 }
 
 void CEmuCatalogAssignHwIds(CEmuGameEntry* ge)
@@ -857,6 +927,26 @@ static int CEmuRomTypePriority(const char* type)
 	return 15;
 }
 
+static int CEmuRomIsEngineFile(const CEmuRomEntry* rom)
+{
+	if (!rom || !rom->name[0]) return 0;
+	if (_stricmp(rom->type, "file") != 0 && _stricmp(rom->type, "device") != 0)
+		return 0;
+	const char* ext = strrchr(rom->name, '.');
+	if (!ext) return 0;
+	return _stricmp(ext, ".EXE") == 0
+		|| _stricmp(ext, ".COM") == 0
+		|| _stricmp(ext, ".SYS") == 0
+		|| _stricmp(ext, ".DRV") == 0;
+}
+
+static int CEmuRomEntryPriority(const CEmuRomEntry* rom)
+{
+	if (!rom) return 0;
+	if (CEmuRomIsEngineFile(rom)) return 48;
+	return CEmuRomTypePriority(rom->type);
+}
+
 static int CEmuRomTryPush(CEmuGameBuild* ge, const CEmuRomEntry* rom)
 {
 	if (!ge || !rom) return 0;
@@ -867,13 +957,18 @@ static int CEmuRomTryPush(CEmuGameBuild* ge, const CEmuRomEntry* rom)
 	int worst = -1;
 	int worstPri = 1000;
 	for (int i = 0; i < ge->romCount; i++) {
-		const int p = CEmuRomTypePriority(ge->rom[i].type);
-		if (p < worstPri) {
+		/* Never drop shells or DOS engines — overflow used to replace
+		   usmd_98.com (slot 0) with the late shell name, leaving BootDos
+		   nothing to ResolveProgram. */
+		if (_stricmp(ge->rom[i].type, "shell") == 0) continue;
+		if (CEmuRomIsEngineFile(&ge->rom[i])) continue;
+		const int p = CEmuRomEntryPriority(&ge->rom[i]);
+		if (p < worstPri || (p == worstPri && i > worst)) {
 			worstPri = p;
 			worst = i;
 		}
 	}
-	const int np = CEmuRomTypePriority(rom->type);
+	const int np = CEmuRomEntryPriority(rom);
 	if (worst >= 0 && np > worstPri) {
 		ge->rom[worst] = *rom;
 		return 1;
@@ -1213,21 +1308,17 @@ int CEmuCatalogParseBuffer(CEmuCatalog* cat, const char* xmlText, const char* da
 	memcpy(work, xmlText, nText + 1);
 	CEmuXmlStripComments(work);
 	const int before = cat->count;
-	for (const char* p = work; ; ) {
-		const char* gs = CEmuStrStr(p, "<game");
+	for (char* p = work; ; ) {
+		char* gs = (char*)CEmuStrStr(p, "<game");
 		if (!gs) break;
-		const char* ge = CEmuStrStr(gs, "</game>");
+		char* ge = (char*)CEmuStrStr(gs, "</game>");
 		if (!ge) break;
-		ge += 7;
-		int n = (int)(ge - gs);
-		char* block = (char*)malloc((size_t)n + 1);
-		if (block) {
-			memcpy(block, gs, (size_t)n);
-			block[n] = 0;
-			CEmuCatalogParseGameBlock(cat, block, dataDirHint);
-			free(block);
-		}
-		p = ge;
+		char* after = ge + 7;
+		const char saved = *after;
+		*after = 0;
+		CEmuCatalogParseGameBlock(cat, gs, dataDirHint);
+		*after = saved;
+		p = after;
 	}
 	free(work);
 	return cat->count - before;
@@ -1371,8 +1462,9 @@ struct CEmuCatalogFp {
 
 /* 0x300: AttrValue accepts whitespace around '=' (xml2 spaced archives).
    0x301: arcdata.zip loads xml in hoot.xml <list> order (xml2 before zzoriginal).
-   0x302: strip XML comments so hoot <!-- disabled titles/roms --> stay out. */
-enum { CEMU_CAT_FP_PARSE_VER = 0x302 };
+   0x302: strip XML comments so hoot <!-- disabled titles/roms --> stay out.
+   0x303: CEMU_ROM_MAX 1024 + keep engine files on overflow (night_s USMD). */
+enum { CEMU_CAT_FP_PARSE_VER = 0x303 };
 
 static int CEmuCatalogMakeFp(const wchar_t* arcZip, const wchar_t* dataRoot,
 	const wchar_t* parent, CEmuCatalogFp* fp)
@@ -1452,34 +1544,73 @@ static int CEmuCatalogSaveCache(const CEmuCatalog* cat, const CEmuCatalogFp* fp,
 	if (!CEmuCatalogCacheFilePath(path, MAX_PATH)) return 0;
 	_snwprintf_s(tmp, _TRUNCATE, L"%s.part", path);
 	DeleteFileW(tmp);
-	HANDLE h = CreateFileW(tmp, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
-	if (h == INVALID_HANDLE_VALUE) return 0;
+
+	size_t cap = 1u << 20;
+	char* mem = (char*)malloc(cap);
+	if (!mem) return 0;
+	size_t len = 0;
+	int ok = 1;
 	static const char kMagic[8] = { 'C','E','M','C', 2, 0, 0, 0 };
-	int ok = CEmuWriteBytes(h, kMagic, 8)
-		&& CEmuWriteBytes(h, fp, (DWORD)sizeof(*fp));
 	DWORD count = (DWORD)cat->count;
-	ok = ok && CEmuWriteBytes(h, &count, sizeof(count));
+	const size_t hdr = 8 + sizeof(*fp) + 4;
+	if (hdr > cap) {
+		char* neu = (char*)realloc(mem, hdr);
+		if (!neu) { free(mem); return 0; }
+		mem = neu;
+		cap = hdr;
+	}
+	memcpy(mem + len, kMagic, 8); len += 8;
+	memcpy(mem + len, fp, sizeof(*fp)); len += sizeof(*fp);
+	memcpy(mem + len, &count, 4); len += 4;
+
 	for (int i = 0; ok && i < cat->count; i++) {
 		const CEmuGameEntry* e = cat->entry[i];
 		if (!e) { ok = 0; break; }
-		ok = CEmuWriteBytes(h, e->name, sizeof(e->name))
-			&& CEmuWriteBytes(h, e->driverAlias, sizeof(e->driverAlias))
-			&& CEmuWriteBytes(h, e->platform, sizeof(e->platform))
-			&& CEmuWriteBytes(h, e->subtype, sizeof(e->subtype))
-			&& CEmuWriteBytes(h, e->dataDir, sizeof(e->dataDir))
-			&& CEmuWriteBytes(h, e->archive, sizeof(e->archive));
 		DWORD rc = (DWORD)e->romCount, oc = (DWORD)e->optCount, tc = (DWORD)e->titleCount;
-		ok = ok && CEmuWriteBytes(h, &rc, 4) && CEmuWriteBytes(h, &oc, 4) && CEmuWriteBytes(h, &tc, 4);
-		if (ok && rc) ok = CEmuWriteBytes(h, e->rom, (DWORD)(sizeof(CEmuRomEntry) * rc));
-		if (ok && oc) ok = CEmuWriteBytes(h, e->opt, (DWORD)(sizeof(CEmuOptionEntry) * oc));
-		if (ok && tc) ok = CEmuWriteBytes(h, e->title, (DWORD)(sizeof(CEmuTitleEntry) * tc));
-		ok = ok && CEmuWriteBytes(h, &e->cpuId, sizeof(e->cpuId))
-			&& CEmuWriteBytes(h, e->chipIds, sizeof(e->chipIds))
-			&& CEmuWriteBytes(h, &e->chipCount, sizeof(e->chipCount));
+		const DWORD romBytes = rc ? (DWORD)(sizeof(CEmuRomEntry) * rc) : 0;
+		const DWORD optBytes = oc ? (DWORD)(sizeof(CEmuOptionEntry) * oc) : 0;
+		const DWORD titleBytes = tc ? (DWORD)(sizeof(CEmuTitleEntry) * tc) : 0;
+		const size_t need = sizeof(e->name) + sizeof(e->driverAlias) + sizeof(e->platform)
+			+ sizeof(e->subtype) + sizeof(e->dataDir) + sizeof(e->archive)
+			+ 12 + romBytes + optBytes + titleBytes
+			+ sizeof(e->cpuId) + sizeof(e->chipIds) + sizeof(e->chipCount);
+		if (len + need > cap) {
+			size_t nc = cap * 2;
+			while (nc < len + need) nc *= 2;
+			char* neu = (char*)realloc(mem, nc);
+			if (!neu) { ok = 0; break; }
+			mem = neu;
+			cap = nc;
+		}
+		memcpy(mem + len, e->name, sizeof(e->name)); len += sizeof(e->name);
+		memcpy(mem + len, e->driverAlias, sizeof(e->driverAlias)); len += sizeof(e->driverAlias);
+		memcpy(mem + len, e->platform, sizeof(e->platform)); len += sizeof(e->platform);
+		memcpy(mem + len, e->subtype, sizeof(e->subtype)); len += sizeof(e->subtype);
+		memcpy(mem + len, e->dataDir, sizeof(e->dataDir)); len += sizeof(e->dataDir);
+		memcpy(mem + len, e->archive, sizeof(e->archive)); len += sizeof(e->archive);
+		memcpy(mem + len, &rc, 4); len += 4;
+		memcpy(mem + len, &oc, 4); len += 4;
+		memcpy(mem + len, &tc, 4); len += 4;
+		if (romBytes) { memcpy(mem + len, e->rom, romBytes); len += romBytes; }
+		if (optBytes) { memcpy(mem + len, e->opt, optBytes); len += optBytes; }
+		if (titleBytes) { memcpy(mem + len, e->title, titleBytes); len += titleBytes; }
+		memcpy(mem + len, &e->cpuId, sizeof(e->cpuId)); len += sizeof(e->cpuId);
+		memcpy(mem + len, e->chipIds, sizeof(e->chipIds)); len += sizeof(e->chipIds);
+		memcpy(mem + len, &e->chipCount, sizeof(e->chipCount)); len += sizeof(e->chipCount);
 		if ((i & 255) == 0)
 			CEmuCatalogProgress(progress, progressUser, i, cat->count);
 	}
-	CloseHandle(h);
+	if (ok && len > 0xFFFFFFFFu) ok = 0;
+	if (ok) {
+		HANDLE h = CreateFileW(tmp, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS,
+			FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, NULL);
+		if (h == INVALID_HANDLE_VALUE) ok = 0;
+		else {
+			ok = CEmuWriteBytes(h, mem, (DWORD)len);
+			CloseHandle(h);
+		}
+	}
+	free(mem);
 	if (!ok) {
 		DeleteFileW(tmp);
 		return 0;
@@ -1510,55 +1641,103 @@ static int CEmuCatalogLoadCache(CEmuCatalog* cat, const CEmuCatalogFp* want,
 	if (!cat || !want) return 0;
 	wchar_t path[MAX_PATH];
 	if (!CEmuCatalogCacheFilePath(path, MAX_PATH)) return 0;
-	HANDLE h = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+	HANDLE h = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING,
+		FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, NULL);
 	if (h == INVALID_HANDLE_VALUE) return 0;
+	LARGE_INTEGER li = {};
+	if (!GetFileSizeEx(h, &li) || li.QuadPart < 8 + (LONGLONG)sizeof(CEmuCatalogFp) + 4
+		|| li.QuadPart > 512ll * 1024 * 1024) {
+		CloseHandle(h);
+		return 0;
+	}
+	const size_t fileN = (size_t)li.QuadPart;
+	char* file = (char*)malloc(fileN);
+	if (!file) {
+		CloseHandle(h);
+		return 0;
+	}
+	DWORD rd = 0;
+	const int gotAll = ReadFile(h, file, (DWORD)fileN, &rd, NULL) && rd == (DWORD)fileN;
+	CloseHandle(h);
+	if (!gotAll) {
+		free(file);
+		return 0;
+	}
+
+	const char* cur = file;
+	const char* end = file + fileN;
+	int ok = 1;
 	char magic[8];
 	CEmuCatalogFp fp = {};
 	DWORD count = 0;
-	int ok = CEmuReadBytes(h, magic, 8)
-		&& magic[0] == 'C' && magic[1] == 'E' && magic[2] == 'M' && magic[3] == 'C' && magic[4] == 2
-		&& CEmuReadBytes(h, &fp, (DWORD)sizeof(fp))
-		&& CEmuCatalogFpMatches(&fp, want)
-		&& CEmuReadBytes(h, &count, 4)
-		&& count > 0 && count <= (DWORD)CEMU_CATALOG_MAX;
+	if ((size_t)(end - cur) < 8) ok = 0;
+	else { memcpy(magic, cur, 8); cur += 8; }
+	ok = ok && magic[0] == 'C' && magic[1] == 'E' && magic[2] == 'M' && magic[3] == 'C' && magic[4] == 2;
+	if (ok && (size_t)(end - cur) < sizeof(fp)) ok = 0;
+	else if (ok) { memcpy(&fp, cur, sizeof(fp)); cur += sizeof(fp); }
+	ok = ok && CEmuCatalogFpMatches(&fp, want);
+	if (ok && (size_t)(end - cur) < 4) ok = 0;
+	else if (ok) { memcpy(&count, cur, 4); cur += 4; }
+	ok = ok && count > 0 && count <= (DWORD)CEMU_CATALOG_MAX;
 	if (!ok) {
-		CloseHandle(h);
+		free(file);
 		return 0;
 	}
 	CEmuCatalogClear(cat);
 	for (DWORD i = 0; ok && i < count; i++) {
 		CEmuGameEntry* e = (CEmuGameEntry*)calloc(1, sizeof(CEmuGameEntry));
 		if (!e) { ok = 0; break; }
-		ok = CEmuReadBytes(h, e->name, sizeof(e->name))
-			&& CEmuReadBytes(h, e->driverAlias, sizeof(e->driverAlias))
-			&& CEmuReadBytes(h, e->platform, sizeof(e->platform))
-			&& CEmuReadBytes(h, e->subtype, sizeof(e->subtype))
-			&& CEmuReadBytes(h, e->dataDir, sizeof(e->dataDir))
-			&& CEmuReadBytes(h, e->archive, sizeof(e->archive));
+		const size_t fixed = sizeof(e->name) + sizeof(e->driverAlias) + sizeof(e->platform)
+			+ sizeof(e->subtype) + sizeof(e->dataDir) + sizeof(e->archive) + 12;
+		if ((size_t)(end - cur) < fixed) { CEmuGameEntryFree(e); ok = 0; break; }
+		memcpy(e->name, cur, sizeof(e->name)); cur += sizeof(e->name);
+		memcpy(e->driverAlias, cur, sizeof(e->driverAlias)); cur += sizeof(e->driverAlias);
+		memcpy(e->platform, cur, sizeof(e->platform)); cur += sizeof(e->platform);
+		memcpy(e->subtype, cur, sizeof(e->subtype)); cur += sizeof(e->subtype);
+		memcpy(e->dataDir, cur, sizeof(e->dataDir)); cur += sizeof(e->dataDir);
+		memcpy(e->archive, cur, sizeof(e->archive)); cur += sizeof(e->archive);
 		DWORD rc = 0, oc = 0, tc = 0;
-		ok = ok && CEmuReadBytes(h, &rc, 4) && CEmuReadBytes(h, &oc, 4) && CEmuReadBytes(h, &tc, 4);
-		if (ok && rc > (DWORD)CEMU_ROM_MAX) ok = 0;
-		if (ok && oc > (DWORD)CEMU_OPTION_MAX) ok = 0;
-		if (ok && tc > (DWORD)CEMU_TITLE_MAX) ok = 0;
+		memcpy(&rc, cur, 4); cur += 4;
+		memcpy(&oc, cur, 4); cur += 4;
+		memcpy(&tc, cur, 4); cur += 4;
+		if (rc > (DWORD)CEMU_ROM_MAX || oc > (DWORD)CEMU_OPTION_MAX || tc > (DWORD)CEMU_TITLE_MAX)
+			ok = 0;
+		const size_t romBytes = (size_t)sizeof(CEmuRomEntry) * rc;
+		const size_t optBytes = (size_t)sizeof(CEmuOptionEntry) * oc;
+		const size_t titleBytes = (size_t)sizeof(CEmuTitleEntry) * tc;
+		const size_t idsBytes = sizeof(e->cpuId) + sizeof(e->chipIds) + sizeof(e->chipCount);
+		if (ok && (size_t)(end - cur) < romBytes + optBytes + titleBytes + idsBytes) ok = 0;
 		if (ok && rc) {
-			e->rom = (CEmuRomEntry*)malloc(sizeof(CEmuRomEntry) * rc);
-			ok = e->rom && CEmuReadBytes(h, e->rom, (DWORD)(sizeof(CEmuRomEntry) * rc));
-			if (ok) e->romCount = (int)rc;
+			e->rom = (CEmuRomEntry*)malloc(romBytes);
+			ok = e->rom != NULL;
+			if (ok) {
+				memcpy(e->rom, cur, romBytes);
+				e->romCount = (int)rc;
+			}
+			cur += romBytes;
 		}
 		if (ok && oc) {
-			e->opt = (CEmuOptionEntry*)malloc(sizeof(CEmuOptionEntry) * oc);
-			ok = e->opt && CEmuReadBytes(h, e->opt, (DWORD)(sizeof(CEmuOptionEntry) * oc));
-			if (ok) e->optCount = (int)oc;
+			e->opt = (CEmuOptionEntry*)malloc(optBytes);
+			ok = e->opt != NULL;
+			if (ok) {
+				memcpy(e->opt, cur, optBytes);
+				e->optCount = (int)oc;
+			}
+			cur += optBytes;
 		}
 		if (ok && tc) {
-			e->title = (CEmuTitleEntry*)malloc(sizeof(CEmuTitleEntry) * tc);
-			ok = e->title && CEmuReadBytes(h, e->title, (DWORD)(sizeof(CEmuTitleEntry) * tc));
-			if (ok) e->titleCount = (int)tc;
+			e->title = (CEmuTitleEntry*)malloc(titleBytes);
+			ok = e->title != NULL;
+			if (ok) {
+				memcpy(e->title, cur, titleBytes);
+				e->titleCount = (int)tc;
+			}
+			cur += titleBytes;
 		}
-		ok = ok && CEmuReadBytes(h, &e->cpuId, sizeof(e->cpuId))
-			&& CEmuReadBytes(h, e->chipIds, sizeof(e->chipIds))
-			&& CEmuReadBytes(h, &e->chipCount, sizeof(e->chipCount));
 		if (ok) {
+			memcpy(&e->cpuId, cur, sizeof(e->cpuId)); cur += sizeof(e->cpuId);
+			memcpy(e->chipIds, cur, sizeof(e->chipIds)); cur += sizeof(e->chipIds);
+			memcpy(&e->chipCount, cur, sizeof(e->chipCount)); cur += sizeof(e->chipCount);
 			/* Older caches may still contain literal "&amp;" from XML. */
 			CEmuDecodeXmlEntitiesW(e->name);
 			CEmuDecodeXmlEntitiesW(e->driverAlias);
@@ -1579,7 +1758,7 @@ static int CEmuCatalogLoadCache(CEmuCatalog* cat, const CEmuCatalogFp* want,
 		if ((i & 255) == 0)
 			CEmuCatalogProgress(progress, progressUser, (int)i, (int)count);
 	}
-	CloseHandle(h);
+	free(file);
 	if (!ok) {
 		CEmuCatalogClear(cat);
 		return 0;
@@ -1658,17 +1837,30 @@ static int CEmuCatalogParseZipCurrent(CEmuCatalog* cat, unzFile uf, const char* 
 	if (fi.uncompressed_size == 0 || fi.uncompressed_size > 16 * 1024 * 1024)
 		return 0;
 	if (unzOpenCurrentFile(uf) != UNZ_OK) return 0;
-	char* buf = (char*)malloc((size_t)fi.uncompressed_size + 4);
-	int added = 0;
-	if (buf) {
-		int rd = unzReadCurrentFile(uf, buf, (unsigned)fi.uncompressed_size);
-		if (rd == (int)fi.uncompressed_size) {
-			buf[fi.uncompressed_size] = 0;
-			const char* dd = NULL;
-			CEmuCatalogXmlDataDirHint(fn && fn[0] ? fn : cur, &dd);
-			added = CEmuCatalogParseBuffer(cat, buf, dd);
+	static char* s_xmlBuf = NULL;
+	static size_t s_xmlCap = 0;
+	const size_t need = (size_t)fi.uncompressed_size + 4;
+	if (need > s_xmlCap) {
+		size_t cap = s_xmlCap ? s_xmlCap : 65536;
+		while (cap < need) {
+			if (cap > (SIZE_MAX / 2)) { cap = need; break; }
+			cap *= 2;
 		}
-		free(buf);
+		char* neu = (char*)realloc(s_xmlBuf, cap);
+		if (!neu) {
+			unzCloseCurrentFile(uf);
+			return 0;
+		}
+		s_xmlBuf = neu;
+		s_xmlCap = cap;
+	}
+	int added = 0;
+	int rd = unzReadCurrentFile(uf, s_xmlBuf, (unsigned)fi.uncompressed_size);
+	if (rd == (int)fi.uncompressed_size) {
+		s_xmlBuf[fi.uncompressed_size] = 0;
+		const char* dd = NULL;
+		CEmuCatalogXmlDataDirHint(fn && fn[0] ? fn : cur, &dd);
+		added = CEmuCatalogParseBuffer(cat, s_xmlBuf, dd);
 	}
 	unzCloseCurrentFile(uf);
 	return added;
@@ -1710,19 +1902,60 @@ static int CEmuCatalogLoadArcdataZip(CEmuCatalog* cat, const wchar_t* zipPath,
 	unzFile uf = unzOpen2_64(zipPath, &ffunc);
 	if (!uf) return 0;
 
+	/* One central-directory walk: name + unz position. ZipLocate used to
+	   rescan every hoot <list> path (O(lists × members)). */
+	struct CEmuZipXmlIx {
+		char norm[256];
+		unz64_file_pos pos;
+	};
+	int ixCap = 256;
+	int ixN = 0;
+	CEmuZipXmlIx* ix = (CEmuZipXmlIx*)malloc(sizeof(CEmuZipXmlIx) * (size_t)ixCap);
+	if (!ix) {
+		unzClose(uf);
+		return 0;
+	}
+	int hootIdx = -1;
+	if (unzGoToFirstFile(uf) == UNZ_OK) {
+		do {
+			unz_file_info64 fi;
+			char fn[512];
+			if (unzGetCurrentFileInfo64(uf, &fi, fn, sizeof(fn), NULL, 0, NULL, 0) != UNZ_OK)
+				continue;
+			const size_t fl = strlen(fn);
+			if (fl < 5 || _stricmp(fn + fl - 4, ".xml") != 0)
+				continue;
+			if (ixN >= ixCap) {
+				int nc = ixCap * 2;
+				if (nc < ixCap) break;
+				CEmuZipXmlIx* neu = (CEmuZipXmlIx*)realloc(ix, sizeof(CEmuZipXmlIx) * (size_t)nc);
+				if (!neu) break;
+				ix = neu;
+				ixCap = nc;
+			}
+			unz64_file_pos pos = {};
+			if (unzGetFilePos64(uf, &pos) != UNZ_OK)
+				continue;
+			CEmuCatalogNormZipPath(fn, ix[ixN].norm, (int)sizeof(ix[ixN].norm));
+			ix[ixN].pos = pos;
+			if (hootIdx < 0 && CEmuCatalogZipPathEq(ix[ixN].norm, "hoot.xml"))
+				hootIdx = ixN;
+			ixN++;
+		} while (unzGoToNextFile(uf) == UNZ_OK);
+	}
+
 	/* Prefer hoot.xml childlist order so xml2/sega.xml wins ties over
 	   xml/zzoriginal.xml (listed last as a fallback). Zip member order alone
 	   puts xml/ before xml2/ and picked the wrong daytona titlelist. */
 	char (*hootLists)[256] = NULL;
 	int hootN = 0;
-	char* hootBuf = NULL;
-	if (CEmuCatalogZipLocate(uf, "hoot.xml")) {
+	if (hootIdx >= 0 && unzGoToFilePos64(uf, &ix[hootIdx].pos) == UNZ_OK) {
 		unz_file_info64 fi;
 		char fn[512];
 		if (unzGetCurrentFileInfo64(uf, &fi, fn, sizeof(fn), NULL, 0, NULL, 0) == UNZ_OK
 			&& fi.uncompressed_size > 0 && fi.uncompressed_size <= 4 * 1024 * 1024
 			&& unzOpenCurrentFile(uf) == UNZ_OK) {
-			hootBuf = (char*)malloc((size_t)fi.uncompressed_size + 4);
+			char* hootBuf = (char*)malloc((size_t)fi.uncompressed_size + 4);
 			if (hootBuf) {
 				int rd = unzReadCurrentFile(uf, hootBuf, (unsigned)fi.uncompressed_size);
 				if (rd == (int)fi.uncompressed_size) {
@@ -1731,33 +1964,21 @@ static int CEmuCatalogLoadArcdataZip(CEmuCatalog* cat, const wchar_t* zipPath,
 					if (hootLists)
 						hootN = CEmuCatalogParseHootLists(hootBuf, hootLists, 1024);
 				}
+				free(hootBuf);
 			}
 			unzCloseCurrentFile(uf);
 		}
 	}
-	free(hootBuf);
 
 	int xmlN = hootN;
-	if (xmlN <= 0) {
-		xmlN = 0;
-		if (unzGoToFirstFile(uf) == UNZ_OK) {
-			do {
-				unz_file_info64 fi;
-				char fn[512];
-				if (unzGetCurrentFileInfo64(uf, &fi, fn, sizeof(fn), NULL, 0, NULL, 0) != UNZ_OK)
-					continue;
-				const size_t fl = strlen(fn);
-				if (fl >= 5 && _stricmp(fn + fl - 4, ".xml") == 0)
-					xmlN++;
-			} while (unzGoToNextFile(uf) == UNZ_OK);
-		}
-	}
+	if (xmlN <= 0)
+		xmlN = ixN;
 
 	int total = 0, done = 0;
-	char (*loaded)[256] = (char (*)[256])malloc(sizeof(*loaded) * 1024);
-	int loadedN = 0;
-	if (!loaded) {
+	unsigned char* used = (unsigned char*)calloc((size_t)ixN + 1, 1);
+	if (!used) {
 		free(hootLists);
+		free(ix);
 		unzClose(uf);
 		return 0;
 	}
@@ -1765,12 +1986,17 @@ static int CEmuCatalogLoadArcdataZip(CEmuCatalog* cat, const wchar_t* zipPath,
 	for (int i = 0; i < hootN; i++) {
 		if (!hootLists[i][0]) continue;
 		if (_stricmp(hootLists[i], "hoot.xml") == 0) continue;
-		if (!CEmuCatalogZipLocate(uf, hootLists[i])) continue;
-		total += CEmuCatalogParseZipCurrent(cat, uf, hootLists[i]);
-		if (loadedN < 1024) {
-			strncpy_s(loaded[loadedN], hootLists[i], _TRUNCATE);
-			loadedN++;
+		int found = -1;
+		for (int k = 0; k < ixN; k++) {
+			if (CEmuCatalogZipPathEq(ix[k].norm, hootLists[i])) {
+				found = k;
+				break;
+			}
 		}
+		if (found < 0) continue;
+		if (unzGoToFilePos64(uf, &ix[found].pos) != UNZ_OK) continue;
+		total += CEmuCatalogParseZipCurrent(cat, uf, hootLists[i]);
+		used[found] = 1;
 		done++;
 		CEmuCatalogProgress(progress, progressUser, done, xmlN > 0 ? xmlN : 1);
 	}
@@ -1778,33 +2004,17 @@ static int CEmuCatalogLoadArcdataZip(CEmuCatalog* cat, const wchar_t* zipPath,
 	hootLists = NULL;
 
 	/* Remainder: any .xml not already pulled via hoot order. */
-	if (unzGoToFirstFile(uf) == UNZ_OK) {
-		do {
-			unz_file_info64 fi;
-			char fn[512];
-			if (unzGetCurrentFileInfo64(uf, &fi, fn, sizeof(fn), NULL, 0, NULL, 0) != UNZ_OK)
-				continue;
-			const size_t fl = strlen(fn);
-			if (fl < 5) continue;
-			if (_stricmp(fn + fl - 4, ".xml") != 0) continue;
-			char norm[512];
-			CEmuCatalogNormZipPath(fn, norm, (int)sizeof(norm));
-			if (CEmuCatalogZipPathEq(norm, "hoot.xml"))
-				continue;
-			int already = 0;
-			for (int j = 0; j < loadedN; j++) {
-				if (CEmuCatalogZipPathEq(loaded[j], norm)) {
-					already = 1;
-					break;
-				}
-			}
-			if (already) continue;
-			total += CEmuCatalogParseZipCurrent(cat, uf, fn);
-			done++;
-			CEmuCatalogProgress(progress, progressUser, done, xmlN > 0 ? xmlN : 1);
-		} while (unzGoToNextFile(uf) == UNZ_OK);
+	for (int k = 0; k < ixN; k++) {
+		if (used[k]) continue;
+		if (CEmuCatalogZipPathEq(ix[k].norm, "hoot.xml"))
+			continue;
+		if (unzGoToFilePos64(uf, &ix[k].pos) != UNZ_OK) continue;
+		total += CEmuCatalogParseZipCurrent(cat, uf, ix[k].norm);
+		done++;
+		CEmuCatalogProgress(progress, progressUser, done, xmlN > 0 ? xmlN : 1);
 	}
-	free(loaded);
+	free(used);
+	free(ix);
 	unzClose(uf);
 	return total;
 }
@@ -1816,24 +2026,32 @@ int CEmuCatalogCacheIsCurrent(const wchar_t* dataRoot)
 	CEmuCatalogParentOf(dataRoot, parent, MAX_PATH);
 	wchar_t chosenArc[MAX_PATH] = {};
 	CEmuCatalogChooseArc(chosenArc, MAX_PATH);
+	if (!chosenArc[0]) {
+		/* exe 隣の arcdata.zip が無いのに zip 由来キャッシュが残ると古い目録のままになる */
+		CEmuCatalogInvalidateCache();
+		return 0;
+	}
 	CEmuCatalogFp want = {};
 	CEmuCatalogMakeFp(chosenArc, dataRoot, parent, &want);
 
 	wchar_t path[MAX_PATH];
 	if (!CEmuCatalogCacheFilePath(path, MAX_PATH)) return 0;
-	HANDLE h = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+	HANDLE h = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING,
+		FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, NULL);
 	if (h == INVALID_HANDLE_VALUE) return 0;
-	char magic[8];
+	char hdr[8 + sizeof(CEmuCatalogFp) + 4];
 	CEmuCatalogFp fp = {};
 	DWORD count = 0;
-	const int ok = CEmuReadBytes(h, magic, 8)
-		&& magic[0] == 'C' && magic[1] == 'E' && magic[2] == 'M' && magic[3] == 'C' && magic[4] == 2
-		&& CEmuReadBytes(h, &fp, (DWORD)sizeof(fp))
-		&& CEmuCatalogFpMatches(&fp, &want)
-		&& CEmuReadBytes(h, &count, 4)
+	const int ok = CEmuReadBytes(h, hdr, (DWORD)sizeof(hdr))
+		&& hdr[0] == 'C' && hdr[1] == 'E' && hdr[2] == 'M' && hdr[3] == 'C' && hdr[4] == 2;
+	if (ok) {
+		memcpy(&fp, hdr + 8, sizeof(fp));
+		memcpy(&count, hdr + 8 + sizeof(fp), 4);
+	}
+	const int match = ok && CEmuCatalogFpMatches(&fp, &want)
 		&& count > 0 && count <= (DWORD)CEMU_CATALOG_MAX;
 	CloseHandle(h);
-	return ok ? 1 : 0;
+	return match ? 1 : 0;
 }
 
 int CEmuCatalogLoadEx(CEmuCatalog* cat, const wchar_t* dataRoot,
@@ -1846,6 +2064,8 @@ int CEmuCatalogLoadEx(CEmuCatalog* cat, const wchar_t* dataRoot,
 	CEmuCatalogParentOf(dataRoot, parent, MAX_PATH);
 	wchar_t chosenArc[MAX_PATH] = {};
 	CEmuCatalogChooseArc(chosenArc, MAX_PATH);
+	if (!chosenArc[0])
+		CEmuCatalogInvalidateCache();
 
 	CEmuCatalogFp fp = {};
 	CEmuCatalogMakeFp(chosenArc, dataRoot, parent, &fp);
@@ -2140,6 +2360,16 @@ const CEmuGameEntry* CEmuCatalogFindArchiveForZip(const CEmuCatalog* cat,
 						wantsPmus = 1;
 				}
 			}
+			int wantsMusdrv = 0;
+			unsigned fm00Sz = 0;
+			if (zipFs) {
+				for (int r = 0; r < best->romCount; r++) {
+					if (_stricmp(best->rom[r].type, "code") != 0)
+						continue;
+					if (_stricmp(best->rom[r].name, "MUSDRV.BIN") == 0)
+						wantsMusdrv = 1;
+				}
+			}
 			unsigned fmusSz = 0;
 			const int zipHasFmus = zipFs
 				&& CEmuZipFsHas(zipFs, "FMUS00.BIN", &fmusSz) && fmusSz > 0;
@@ -2150,6 +2380,27 @@ const CEmuGameEntry* CEmuCatalogFindArchiveForZip(const CEmuCatalog* cat,
 			if (zipFs && bgmNeed > 0 && bgmHit == 0)
 				skip = 1;
 			if (zipFs && wantsPmus && zipHasFmus && !CEmuGameHasOpt(best, "use_opll"))
+				skip = 1;
+			/* rona PSG writes $FF to MUSDRV ($CE00) when port7!=OPLL, and
+			   CALL $D018 returns immediately. Zip ships FM00.BIN — use the
+			   companion row. */
+			if (zipFs && wantsMusdrv && !CEmuGameHasOpt(best, "use_opll")
+				&& CEmuZipFsHas(zipFs, "FM00.BIN", &fm00Sz) && fm00Sz > 0)
+				skip = 1;
+			/* laplace PSG (patch2/MAIN/MIPL) CALLs $4B6E with A=0 and HALTs;
+			   the zip also ships OPLL M1 + companion FMPAC. */
+			int wantsPatch2 = 0;
+			unsigned m1Sz = 0;
+			if (zipFs) {
+				for (int r = 0; r < best->romCount; r++) {
+					if (_stricmp(best->rom[r].type, "code") != 0)
+						continue;
+					if (_stricmp(best->rom[r].name, "patch2") == 0)
+						wantsPatch2 = 1;
+				}
+			}
+			if (zipFs && wantsPatch2 && !CEmuGameHasOpt(best, "use_opll")
+				&& CEmuZipFsHas(zipFs, "M1", &m1Sz) && m1Sz > 0)
 				skip = 1;
 			if (!skip)
 				break;

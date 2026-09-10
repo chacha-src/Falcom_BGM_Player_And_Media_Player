@@ -2,6 +2,7 @@
 #include "GdiSoft2D.h"
 #include <algorithm>
 #include <cmath>
+#include <new>
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -9,11 +10,18 @@
 
 namespace GdiSoft2D
 {
+	static DWORD* s_grabPix = nullptr;
+	static int s_grabCap = 0;
+	static DWORD* s_blurA = nullptr;
+	static DWORD* s_blurB = nullptr;
+	static int s_blurCap = 0;
+	static DWORD* s_post = nullptr;
+	static int s_postCap = 0;
 	void Context::PushClipRect(int l, int t, int r, int b)
 	{
 		ClipRect c{ l, t, r, b };
-		if (!clipStack.empty()) {
-			const ClipRect& p = clipStack.back();
+		if (clipDepth > 0) {
+			const ClipRect& p = clipStack[clipDepth - 1];
 			c.l = (std::max)(c.l, p.l);
 			c.t = (std::max)(c.t, p.t);
 			c.r = (std::min)(c.r, p.r);
@@ -24,17 +32,20 @@ namespace GdiSoft2D
 			c.r = (std::min)(fb.w, c.r);
 			c.b = (std::min)(fb.h, c.b);
 		}
-		clipStack.push_back(c);
+		if (clipDepth < 16)
+			clipStack[clipDepth++] = c;
+		else
+			clipStack[15] = c;
 	}
 
 	void Context::PopClip()
 	{
-		if (!clipStack.empty()) clipStack.pop_back();
+		if (clipDepth > 0) --clipDepth;
 	}
 
 	ClipRect Context::CurrentClip() const
 	{
-		if (!clipStack.empty()) return clipStack.back();
+		if (clipDepth > 0) return clipStack[clipDepth - 1];
 		return ClipRect{ 0, 0, fb.w, fb.h };
 	}
 
@@ -134,10 +145,22 @@ namespace GdiSoft2D
 		}
 	}
 
-	static bool GrabSrc(HDC src, int sx, int sy, int sw, int sh, std::vector<DWORD>& out)
+	static const DWORD* GrabSrc(HDC src, int sx, int sy, int sw, int sh)
 	{
-		if (!src || sw <= 0 || sh <= 0) return false;
-		out.assign((size_t)sw * (size_t)sh, 0);
+		if (!src || sw <= 0 || sh <= 0) return nullptr;
+		const int n = sw * sh;
+		if (n > s_grabCap) {
+			int cap = s_grabCap > 0 ? s_grabCap : 4096;
+			while (cap < n) {
+				if (cap > (INT_MAX / 2)) { cap = n; break; }
+				cap *= 2;
+			}
+			DWORD* np = new (std::nothrow) DWORD[cap];
+			if (!np) return nullptr;
+			delete[] s_grabPix;
+			s_grabPix = np;
+			s_grabCap = cap;
+		}
 		BITMAPINFO bi = {};
 		bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
 		bi.bmiHeader.biWidth = sw;
@@ -151,20 +174,20 @@ namespace GdiSoft2D
 		if (!tmp || !dib || !bits) {
 			if (dib) ::DeleteObject(dib);
 			if (tmp) ::DeleteDC(tmp);
-			return false;
+			return nullptr;
 		}
 		HGDIOBJ old = ::SelectObject(tmp, dib);
 		::BitBlt(tmp, 0, 0, sw, sh, src, sx, sy, SRCCOPY);
-		memcpy(out.data(), bits, (size_t)sw * (size_t)sh * 4);
-		// force opaque if source had 0 alpha
-		for (DWORD& p : out) {
+		memcpy(s_grabPix, bits, (size_t)n * 4);
+		for (int i = 0; i < n; ++i) {
+			DWORD& p = s_grabPix[i];
 			if (GdiSoftFB::A(p) == 0)
 				p = GdiSoftFB::PackBGRA(255, GdiSoftFB::R(p), GdiSoftFB::G(p), GdiSoftFB::B(p));
 		}
 		::SelectObject(tmp, old);
 		::DeleteObject(dib);
 		::DeleteDC(tmp);
-		return true;
+		return s_grabPix;
 	}
 
 	void Context::DrawBitmap(HDC src, int sx, int sy, int sw, int sh,
@@ -177,15 +200,15 @@ namespace GdiSoft2D
 		int dx, int dy, int dw, int dh, BYTE constAlpha)
 	{
 		if (!fb.color || dw <= 0 || dh <= 0) return;
-		std::vector<DWORD> srcPix;
-		if (!GrabSrc(src, sx, sy, sw, sh, srcPix)) return;
+		const DWORD* srcPix = GrabSrc(src, sx, sy, sw, sh);
+		if (!srcPix) return;
 		const ClipRect clip = CurrentClip();
 		for (int y = 0; y < dh; ++y) {
 			const int dyi = dy + y;
 			if (dyi < clip.t || dyi >= clip.b) continue;
 			const int syi = y * sh / dh;
 			DWORD* dstRow = fb.Row(dyi);
-			const DWORD* srcRow = srcPix.data() + (size_t)syi * (size_t)sw;
+			const DWORD* srcRow = srcPix + (size_t)syi * (size_t)sw;
 			for (int x = 0; x < dw; ++x) {
 				const int dxi = dx + x;
 				if (dxi < clip.l || dxi >= clip.r) continue;
@@ -203,8 +226,8 @@ namespace GdiSoft2D
 	void Context::DrawBitmapAffine(HDC src, int sw, int sh, const POINT p[3], BYTE constAlpha)
 	{
 		if (!fb.color || !p || sw <= 0 || sh <= 0) return;
-		std::vector<DWORD> srcPix;
-		if (!GrabSrc(src, 0, 0, sw, sh, srcPix)) return;
+		const DWORD* srcPix = GrabSrc(src, 0, 0, sw, sh);
+		if (!srcPix) return;
 		const ClipRect clip = CurrentClip();
 		// Bounding box of parallelogram
 		const int xA = p[0].x, yA = p[0].y;
@@ -262,59 +285,118 @@ namespace GdiSoft2D
 		const int y1 = (std::min)(y + h, clip.b);
 		if (x1 <= x0 || y1 <= y0) return;
 		const int bw = x1 - x0, bh = y1 - y0;
-		std::vector<DWORD> tmp((size_t)bw * (size_t)bh);
-		std::vector<DWORD> src((size_t)bw * (size_t)bh);
-		for (int yy = 0; yy < bh; ++yy)
-			memcpy(src.data() + (size_t)yy * bw, fb.Row(y0 + yy) + x0, (size_t)bw * 4);
-
-		auto blurPass = [&](const DWORD* in, DWORD* out, bool horiz) {
-			for (int yy = 0; yy < bh; ++yy) {
-				for (int xx = 0; xx < bw; ++xx) {
-					int sumA = 0, sumR = 0, sumG = 0, sumB = 0, cnt = 0;
-					for (int d = -radius; d <= radius; ++d) {
-						int sx = xx, sy = yy;
-						if (horiz) sx = xx + d; else sy = yy + d;
-						if (sx < 0 || sy < 0 || sx >= bw || sy >= bh) continue;
-						DWORD p = in[(size_t)sy * bw + sx];
-						sumA += GdiSoftFB::A(p); sumR += GdiSoftFB::R(p);
-						sumG += GdiSoftFB::G(p); sumB += GdiSoftFB::B(p);
-						++cnt;
-					}
-					if (cnt < 1) cnt = 1;
-					out[(size_t)yy * bw + xx] = GdiSoftFB::PackBGRA(
-						(BYTE)(sumA / cnt), (BYTE)(sumR / cnt), (BYTE)(sumG / cnt), (BYTE)(sumB / cnt));
-				}
+		const int n = bw * bh;
+		if (n > s_blurCap) {
+			int cap = s_blurCap > 0 ? s_blurCap : 4096;
+			while (cap < n) {
+				if (cap > (INT_MAX / 2)) { cap = n; break; }
+				cap *= 2;
 			}
-		};
-		blurPass(src.data(), tmp.data(), true);
-		blurPass(tmp.data(), src.data(), false);
+			DWORD* na = new (std::nothrow) DWORD[cap];
+			DWORD* nb = new (std::nothrow) DWORD[cap];
+			if (!na || !nb) {
+				delete[] na;
+				delete[] nb;
+				return;
+			}
+			delete[] s_blurA;
+			delete[] s_blurB;
+			s_blurA = na;
+			s_blurB = nb;
+			s_blurCap = cap;
+		}
+		DWORD* tmp = s_blurA;
+		DWORD* src = s_blurB;
 		for (int yy = 0; yy < bh; ++yy)
-			memcpy(fb.Row(y0 + yy) + x0, src.data() + (size_t)yy * bw, (size_t)bw * 4);
+			memcpy(src + (size_t)yy * bw, fb.Row(y0 + yy) + x0, (size_t)bw * 4);
+
+		for (int yy = 0; yy < bh; ++yy) {
+			for (int xx = 0; xx < bw; ++xx) {
+				int sumA = 0, sumR = 0, sumG = 0, sumB = 0, cnt = 0;
+				for (int d = -radius; d <= radius; ++d) {
+					int sx = xx + d, sy = yy;
+					if (sx < 0 || sy < 0 || sx >= bw || sy >= bh) continue;
+					DWORD p = src[(size_t)sy * bw + sx];
+					sumA += GdiSoftFB::A(p); sumR += GdiSoftFB::R(p);
+					sumG += GdiSoftFB::G(p); sumB += GdiSoftFB::B(p);
+					++cnt;
+				}
+				if (cnt < 1) cnt = 1;
+				tmp[(size_t)yy * bw + xx] = GdiSoftFB::PackBGRA(
+					(BYTE)(sumA / cnt), (BYTE)(sumR / cnt), (BYTE)(sumG / cnt), (BYTE)(sumB / cnt));
+			}
+		}
+		for (int yy = 0; yy < bh; ++yy) {
+			for (int xx = 0; xx < bw; ++xx) {
+				int sumA = 0, sumR = 0, sumG = 0, sumB = 0, cnt = 0;
+				for (int d = -radius; d <= radius; ++d) {
+					int sx = xx, sy = yy + d;
+					if (sx < 0 || sy < 0 || sx >= bw || sy >= bh) continue;
+					DWORD p = tmp[(size_t)sy * bw + sx];
+					sumA += GdiSoftFB::A(p); sumR += GdiSoftFB::R(p);
+					sumG += GdiSoftFB::G(p); sumB += GdiSoftFB::B(p);
+					++cnt;
+				}
+				if (cnt < 1) cnt = 1;
+				src[(size_t)yy * bw + xx] = GdiSoftFB::PackBGRA(
+					(BYTE)(sumA / cnt), (BYTE)(sumR / cnt), (BYTE)(sumG / cnt), (BYTE)(sumB / cnt));
+			}
+		}
+		for (int yy = 0; yy < bh; ++yy)
+			memcpy(fb.Row(y0 + yy) + x0, src + (size_t)yy * bw, (size_t)bw * 4);
 	}
 
 	void Context::GradientFillRectH(int x, int y, int w, int h, COLORREF c0, COLORREF c1, BYTE a)
 	{
-		if (w <= 0 || h <= 0) return;
-		for (int i = 0; i < w; ++i) {
+		if (w <= 0 || h <= 0 || !fb.color) return;
+		const ClipRect clip = CurrentClip();
+		const int x0 = (std::max)(x, clip.l);
+		const int y0 = (std::max)(y, clip.t);
+		const int x1 = (std::min)(x + w, clip.r);
+		const int y1 = (std::min)(y + h, clip.b);
+		if (x1 <= x0 || y1 <= y0) return;
+		const bool blend = a < 255;
+		const int r0 = GetRValue(c0), g0 = GetGValue(c0), b0 = GetBValue(c0);
+		const int r1 = GetRValue(c1), g1 = GetGValue(c1), b1 = GetBValue(c1);
+		for (int xx = x0; xx < x1; ++xx) {
+			const int i = xx - x;
 			const float t = (w <= 1) ? 0.f : (float)i / (float)(w - 1);
-			COLORREF c = RGB(
-				(int)(GetRValue(c0) + (GetRValue(c1) - GetRValue(c0)) * t + 0.5f),
-				(int)(GetGValue(c0) + (GetGValue(c1) - GetGValue(c0)) * t + 0.5f),
-				(int)(GetBValue(c0) + (GetBValue(c1) - GetBValue(c0)) * t + 0.5f));
-			FillRect(x + i, y, 1, h, c, a);
+			const DWORD p = GdiSoftFB::PackBGRA(a,
+				(BYTE)(r0 + (r1 - r0) * t + 0.5f),
+				(BYTE)(g0 + (g1 - g0) * t + 0.5f),
+				(BYTE)(b0 + (b1 - b0) * t + 0.5f));
+			for (int yy = y0; yy < y1; ++yy) {
+				DWORD* row = fb.Row(yy);
+				if (blend) row[xx] = GdiSoftFB::BlendSrcOver(row[xx], p);
+				else row[xx] = p;
+			}
 		}
 	}
 
 	void Context::GradientFillRectV(int x, int y, int w, int h, COLORREF c0, COLORREF c1, BYTE a)
 	{
-		if (w <= 0 || h <= 0) return;
-		for (int i = 0; i < h; ++i) {
+		if (w <= 0 || h <= 0 || !fb.color) return;
+		const ClipRect clip = CurrentClip();
+		const int x0 = (std::max)(x, clip.l);
+		const int y0 = (std::max)(y, clip.t);
+		const int x1 = (std::min)(x + w, clip.r);
+		const int y1 = (std::min)(y + h, clip.b);
+		if (x1 <= x0 || y1 <= y0) return;
+		const bool blend = a < 255;
+		const int r0 = GetRValue(c0), g0 = GetGValue(c0), b0 = GetBValue(c0);
+		const int r1 = GetRValue(c1), g1 = GetGValue(c1), b1 = GetBValue(c1);
+		for (int yy = y0; yy < y1; ++yy) {
+			const int i = yy - y;
 			const float t = (h <= 1) ? 0.f : (float)i / (float)(h - 1);
-			COLORREF c = RGB(
-				(int)(GetRValue(c0) + (GetRValue(c1) - GetRValue(c0)) * t + 0.5f),
-				(int)(GetGValue(c0) + (GetGValue(c1) - GetGValue(c0)) * t + 0.5f),
-				(int)(GetBValue(c0) + (GetBValue(c1) - GetBValue(c0)) * t + 0.5f));
-			FillRect(x, y + i, w, 1, c, a);
+			const DWORD p = GdiSoftFB::PackBGRA(a,
+				(BYTE)(r0 + (r1 - r0) * t + 0.5f),
+				(BYTE)(g0 + (g1 - g0) * t + 0.5f),
+				(BYTE)(b0 + (b1 - b0) * t + 0.5f));
+			DWORD* row = fb.Row(yy);
+			for (int xx = x0; xx < x1; ++xx) {
+				if (blend) row[xx] = GdiSoftFB::BlendSrcOver(row[xx], p);
+				else row[xx] = p;
+			}
 		}
 	}
 
@@ -379,11 +461,23 @@ namespace GdiSoft2D
 	void Context::GlowBloom(int radius, float amount)
 	{
 		if (!fb.color || radius < 1 || amount <= 0.f) return;
-		std::vector<DWORD> src((size_t)fb.w * (size_t)fb.h);
-		memcpy(src.data(), fb.color, src.size() * 4);
+		const int n = fb.w * fb.h;
+		if (n > s_postCap) {
+			int cap = s_postCap > 0 ? s_postCap : 4096;
+			while (cap < n) {
+				if (cap > (INT_MAX / 2)) { cap = n; break; }
+				cap *= 2;
+			}
+			DWORD* np = new (std::nothrow) DWORD[cap];
+			if (!np) return;
+			delete[] s_post;
+			s_post = np;
+			s_postCap = cap;
+		}
+		memcpy(s_post, fb.color, (size_t)n * 4);
 		BlurRect(0, 0, fb.w, fb.h, radius);
-		for (size_t i = 0; i < src.size(); ++i) {
-			DWORD a = src[i], b = fb.color[i];
+		for (int i = 0; i < n; ++i) {
+			DWORD a = s_post[i], b = fb.color[i];
 			int br = GdiSoftFB::R(b), bg = GdiSoftFB::G(b), bb = GdiSoftFB::B(b);
 			int lum = (br + bg + bb) / 3;
 			if (lum < 40) { fb.color[i] = a; continue; }
@@ -401,17 +495,29 @@ namespace GdiSoft2D
 	void Context::Emboss(float amount)
 	{
 		if (!fb.color || amount <= 0.f) return;
-		std::vector<DWORD> src((size_t)fb.w * (size_t)fb.h);
-		memcpy(src.data(), fb.color, src.size() * 4);
+		const int n = fb.w * fb.h;
+		if (n > s_postCap) {
+			int cap = s_postCap > 0 ? s_postCap : 4096;
+			while (cap < n) {
+				if (cap > (INT_MAX / 2)) { cap = n; break; }
+				cap *= 2;
+			}
+			DWORD* np = new (std::nothrow) DWORD[cap];
+			if (!np) return;
+			delete[] s_post;
+			s_post = np;
+			s_postCap = cap;
+		}
+		memcpy(s_post, fb.color, (size_t)n * 4);
 		for (int y = 1; y < fb.h - 1; ++y) {
 			for (int x = 1; x < fb.w - 1; ++x) {
-				DWORD a = src[(size_t)(y - 1) * fb.w + (x - 1)];
-				DWORD b = src[(size_t)(y + 1) * fb.w + (x + 1)];
+				DWORD a = s_post[(size_t)(y - 1) * fb.w + (x - 1)];
+				DWORD b = s_post[(size_t)(y + 1) * fb.w + (x + 1)];
 				int d = ((int)GdiSoftFB::R(b) + GdiSoftFB::G(b) + GdiSoftFB::B(b)
 					- (int)GdiSoftFB::R(a) - GdiSoftFB::G(a) - GdiSoftFB::B(a)) / 3;
 				int v = 128 + (int)(d * amount);
 				if (v < 0) v = 0; if (v > 255) v = 255;
-				DWORD o = src[(size_t)y * fb.w + x];
+				DWORD o = s_post[(size_t)y * fb.w + x];
 				fb.color[(size_t)y * fb.w + x] = GdiSoftFB::PackBGRA(GdiSoftFB::A(o), (BYTE)v, (BYTE)v, (BYTE)v);
 			}
 		}
@@ -441,15 +547,27 @@ namespace GdiSoft2D
 		if (!fb.color || shiftPx == 0) return;
 		if (shiftPx < 0) shiftPx = -shiftPx;
 		if (shiftPx > 8) shiftPx = 8;
-		std::vector<DWORD> src((size_t)fb.w * (size_t)fb.h);
-		memcpy(src.data(), fb.color, src.size() * 4);
+		const int n = fb.w * fb.h;
+		if (n > s_postCap) {
+			int cap = s_postCap > 0 ? s_postCap : 4096;
+			while (cap < n) {
+				if (cap > (INT_MAX / 2)) { cap = n; break; }
+				cap *= 2;
+			}
+			DWORD* np = new (std::nothrow) DWORD[cap];
+			if (!np) return;
+			delete[] s_post;
+			s_post = np;
+			s_postCap = cap;
+		}
+		memcpy(s_post, fb.color, (size_t)n * 4);
 		for (int y = 0; y < fb.h; ++y) {
 			for (int x = 0; x < fb.w; ++x) {
 				const int xl = (std::max)(0, x - shiftPx);
 				const int xr = (std::min)(fb.w - 1, x + shiftPx);
-				DWORD cL = src[(size_t)y * fb.w + xl];
-				DWORD cC = src[(size_t)y * fb.w + x];
-				DWORD cR = src[(size_t)y * fb.w + xr];
+				DWORD cL = s_post[(size_t)y * fb.w + xl];
+				DWORD cC = s_post[(size_t)y * fb.w + x];
+				DWORD cR = s_post[(size_t)y * fb.w + xr];
 				fb.color[(size_t)y * fb.w + x] = GdiSoftFB::PackBGRA(
 					GdiSoftFB::A(cC),
 					GdiSoftFB::R(cR),

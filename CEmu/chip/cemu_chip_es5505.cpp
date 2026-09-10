@@ -57,12 +57,23 @@ static uint64_t CEmuEsRshiftU(uint64_t val, int shift)
 
 static int32_t CEmuEsApplyLowpass(int32_t out, int32_t cutoff, int32_t in)
 {
-	return ((int32_t)(cutoff >> kFilterShift) * (out - in) / (1 << kFilterBit)) + in;
+	const int64_t c = (int64_t)((uint32_t)cutoff >> kFilterShift);
+	const int64_t d = (int64_t)out - (int64_t)in;
+	const int64_t y = (c * d) / (int64_t)(1 << kFilterBit) + (int64_t)in;
+	if (y > 2147483647ll) return 2147483647;
+	if (y < -2147483648ll) return (int32_t)(-2147483647 - 1);
+	return (int32_t)y;
 }
 
 static int32_t CEmuEsApplyHighpass(int32_t out, int32_t cutoff, int32_t in, int32_t prev)
 {
-	return out - prev + ((int32_t)(cutoff >> kFilterShift) * in) / (1 << (kFilterBit + 1)) + in / 2;
+	const int64_t c = (int64_t)((uint32_t)cutoff >> kFilterShift);
+	const int64_t y = (int64_t)out - (int64_t)prev
+		+ (c * (int64_t)in) / (int64_t)(1 << (kFilterBit + 1))
+		+ (int64_t)in / 2;
+	if (y > 2147483647ll) return 2147483647;
+	if (y < -2147483648ll) return (int32_t)(-2147483647 - 1);
+	return (int32_t)y;
 }
 
 class CChipEs5505 : public CChip {
@@ -191,6 +202,12 @@ public:
 	}
 
 	uint32_t VoiceIndex() const { return voiceIndex_; }
+
+	uint16_t PeekCr(int voice) const
+	{
+		if (voice < 0 || voice >= kEs5505Voices) return 0;
+		return (uint16_t)(voice_[voice].control | 0xf000);
+	}
 
 	unsigned GetRegSnapshot(uint8_t* buf, unsigned cap) const override
 	{
@@ -366,12 +383,19 @@ private:
 	uint16_t ReadSampleWord(Voice* voice, uint64_t wordAddr)
 	{
 		voiceIndex_ = voice->index;
-		if (!rom_ || romWords_ == 0) return 0;
-		uint64_t idx = (voiceBank_[voice->index] + wordAddr) & (romWords_ - 1ull);
+		if (!rom_ || romWords_ < 2u) return 0;
+		uint64_t idx = voiceBank_[voice->index] + wordAddr;
 		/* Also honor BS bit as second half within a 2-bank window when no otisbank. */
 		if (GetBank(voice->control) && voiceBank_[voice->index] == 0 && romWords_ > 0x100000ull)
-			idx = (idx + 0x100000ull) & (romWords_ - 1ull);
-		const uint8_t* p = rom_ + (size_t)idx * 2u;
+			idx += 0x100000ull;
+		if ((romWords_ & (romWords_ - 1ull)) == 0)
+			idx &= (romWords_ - 1ull);
+		else
+			idx %= romWords_;
+		if (idx >= romWords_) return 0;
+		const size_t byteOff = (size_t)idx * 2u;
+		if (byteOff + 1u >= (size_t)romWords_ * 2u) return 0;
+		const uint8_t* p = rom_ + byteOff;
 		return (uint16_t)((p[0] << 8) | p[1]); /* BE word */
 	}
 
@@ -461,7 +485,7 @@ private:
 	{
 		int32_t ch[8];
 		memset(ch, 0, sizeof(ch));
-		for (int v = 0; v <= activeVoices_; v++) {
+		for (int v = 0; v <= activeVoices_ && v < kEs5505Voices; v++) {
 			Voice* voice = &voice_[v];
 			const int channel = (int)(GetCa(voice->control) % 4);
 			const int l = channel << 1;
@@ -708,4 +732,10 @@ uint32_t CEmuChipEs5505GetVoiceIndex(CChip* c)
 {
 	if (!c) return 0;
 	return ((CChipEs5505*)c)->VoiceIndex();
+}
+
+uint16_t CEmuChipEs5505PeekCr(CChip* c, int voice)
+{
+	if (!c) return 0;
+	return ((CChipEs5505*)c)->PeekCr(voice);
 }

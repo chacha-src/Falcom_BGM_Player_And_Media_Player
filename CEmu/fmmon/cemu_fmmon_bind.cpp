@@ -385,6 +385,8 @@ void CEmuFmMonBindFromGe(const CEmuGameEntry* ge)
 	} else if (HasChip(ge, CEMU_CHIP_ES5505) || _stricmp(sub, "f3system") == 0) {
 		strncpy_s(chip, "ES5505", _TRUNCATE);
 		layout = -1;
+		FmMonShadowSetKeysProfile(SASAMI_FMMON_KEYS_C352);
+		FmMonShadowEnterKeysOnly(SASAMI_FMMON_KEYS_C352);
 	} else if (HasChip(ge, CEMU_CHIP_GA20) && HasChip(ge, CEMU_CHIP_OPM)) {
 		strncpy_s(chip, "OPM+GA20", _TRUNCATE);
 		layout = -1;

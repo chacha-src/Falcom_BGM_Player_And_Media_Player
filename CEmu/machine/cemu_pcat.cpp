@@ -14,10 +14,13 @@ static void CEmuPcatBindFmMon(CHardPcat* hw, const CEmuGameEntry* ge)
 	if (hw->modeMidi_) {
 		/* UART stream belongs on the MIDI monitor (GM/GS/LA maps), not FM keys. */
 		FmMonShadowSetIdentity("PC/AT", "MPU-401 MIDI");
-	} else if (hw->modeBeep_) {
-		FmMonShadowEnterKeysOnly(SASAMI_FMMON_KEYS_MIDI);
-		FmMonShadowSetIdentity("PC/AT", "BEEP");
-	} else if (hw->modeCms_) {
+	} 		else if (hw->modeBeep_) {
+			FmMonShadowEnterKeysOnly(SASAMI_FMMON_KEYS_MIDI);
+			if (hw->modePs1_)
+				FmMonShadowSetIdentity("PC/AT", "PS/1 Audio");
+			else
+				FmMonShadowSetIdentity("PC/AT", "BEEP");
+		} else if (hw->modeCms_) {
 		/* Game Blaster: SAA×2 keys; OPL may still see AdLib probes. */
 		FmMonShadowEnterKeysOnly(SASAMI_FMMON_KEYS_MIDI);
 		FmMonShadowSetIdentity("PC/AT", "GameBlaster SAAx2");

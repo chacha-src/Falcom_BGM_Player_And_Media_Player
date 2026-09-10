@@ -8,6 +8,7 @@
 CChip* CEmuChipEs5505Create(uint32_t clockHz, int sampleRate);
 void CEmuChipEs5505Destroy(CChip* c);
 uint16_t CEmuChipEs5505Read(CChip* c, uint32_t addr);
+uint16_t CEmuChipEs5505PeekCr(CChip* c, int voice);
 
 /* Optional: host sets per-voice bank base (word index; Taito uses (n&mask)<<20). */
 void CEmuChipEs5505SetVoiceBank(CChip* c, int voice, uint32_t wordBase);

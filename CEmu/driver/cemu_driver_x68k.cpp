@@ -8,6 +8,20 @@ extern "C" {
 }
 #include <string.h>
 
+static void CDriverX68kApplyIrq(CHardX68k* hw, CChip* chip, int hold)
+{
+	if (hold) {
+		m68k_set_irq(M68K_IRQ_NONE);
+		return;
+	}
+	if (chip && chip->Irq())
+		m68k_set_irq(M68K_IRQ_6);
+	else if (hw && hw->MfpIrqPending())
+		m68k_set_irq(M68K_IRQ_2);
+	else
+		m68k_set_irq(M68K_IRQ_NONE);
+}
+
 /* StarCraft compile BOOT plants $A00000 at $10A48 (low) but leaves $10A44
    at the OP.X data section (~$152D2). MML compile fills downward through
    the ISR. Move the bump to the DOS heap top once the low plant is visible. */
@@ -18,6 +32,101 @@ static void CDriverX68kRetargetOpxCompileHeap(CHardX68k* hw)
 	const unsigned bump = hw->Read32(0x10a44);
 	if (bump >= 0x8000u && bump < 0x20000u)
 		hw->Write32(0x10a44, 0x00A40000u);
+}
+
+/* ARTDINK A2.X: $4F38A is a C frame function (clr.l -4(a6)) that BOOT jsrs
+   without link. Plant a DOS-stack frame so the empty-buffer parse during
+   init cannot smash OPMDRV's ISR at $11C58. After init BOOT leaves
+   `move.w #$4E75,$4F428` in place, which skips `jsr $487A4` on every later
+   play — restore the jsr once settle has finished. */
+static int CDriverX68kIsA2Boot(CHardX68k* hw)
+{
+	if (!hw) return 0;
+	if (hw->Read16(0x4f38au) != 0x42aeu || hw->Read16(0x4f38cu) != 0xfffcu)
+		return 0;
+	if (hw->Read16(0x8c4u) != 0x2040u && hw->Read16(0x8c4u) != 0x4e71u)
+		return 0;
+	if (hw->Read16(0x8c6u) != 0x46fcu || hw->Read16(0x8c8u) != 0x2500u)
+		return 0;
+	if (hw->Read16(0x8d0u) != 0x4a39u || hw->Read32(0x8d2u) != 0x00e00000u)
+		return 0;
+	return 1;
+}
+
+static void CDriverX68kPlantA2Frame(CHardX68k* hw)
+{
+	if (!CDriverX68kIsA2Boot(hw)) return;
+	if (hw->Read16(0x8c4u) == 0x2040u)
+		hw->Write16(0x8c4u, 0x4e71u);
+	m68k_set_reg(M68K_REG_A6, 0x00F0FE00u);
+	hw->Write32(0x00F0FDF8u, 0);
+	hw->Write32(0x00F0FDFCu, 0);
+}
+
+static void CDriverX68kRestoreA2Play(CHardX68k* hw)
+{
+	if (!CDriverX68kIsA2Boot(hw)) return;
+	if (hw->Read16(0x4f428u) != 0x4e75u) return;
+	if (hw->Read32(0x4f42au) != 0x000487a4u) return;
+	hw->Write16(0x4f428u, 0x4eb9u);
+	if (hw->Read16(0x11c58u) != 0x48e7u
+		&& hw->Read16(0x11c5cu) == 0x4a39u
+		&& hw->Read32(0x11c5eu) == 0x0001243cu)
+		hw->Write32(0x11c58u, 0x48e77ffeu);
+}
+
+/* Onion SND.X (cave): DOS _INTVCS is called with C ABI
+   `pea handler; move.w #32,-(sp); FF25` while leftover d1 is $1F0, so
+   trap #0 stays a hang stub and play's `trap #0` never reaches $1021C. */
+static void CDriverX68kPlantCaveTrap0(CHardX68k* hw)
+{
+	if (!hw) return;
+	if (hw->Read16(0x950u) != 0x4a39u || hw->Read32(0x952u) != 0x00e00000u)
+		return;
+	if (hw->Read16(0x1021Cu) != 0x48e7u || hw->Read16(0x1026Eu) != 0x4e73u)
+		return;
+	hw->Write32(0x80u, 0x1021Cu);
+	if (hw->Read16(0x104A2u) == 0x48e7u && hw->Read16(0x104D6u) == 0x4e73u)
+		hw->Write32(0x10Cu, 0x104A2u);
+	if (hw->Read16(0x10150u) == 0x08f9u)
+		hw->Write32(0x7Cu, 0x10150u);
+}
+
+/* C-compiled type=x (MAIN.X / GOLF.X) uses -4(a6). BOOT clears A6 to 0. */
+static void CDriverX68kPlantCFrame(CHardX68k* hw)
+{
+	if (!hw) return;
+	int need = 0;
+	if (hw->Read16(0x910u) == 0x4eb9u && hw->Read32(0x912u) == 0x00015486u
+		&& hw->Read16(0x8d0u) == 0x4a39u) {
+		need = 1;
+		if (hw->Read16(0x8c4u) == 0x2040u)
+			hw->Write16(0x8c4u, 0x4e71u);
+	}
+	if (hw->Read16(0x4ecu) == 0x41f9u && hw->Read32(0x4eeu) == 0x00015200u
+		&& hw->Read16(0x4a4u) == 0x4a39u) {
+		need = 1;
+		if (hw->Read16(0x498u) == 0x2040u)
+			hw->Write16(0x498u, 0x4e71u);
+	}
+	if (!need) return;
+	m68k_set_reg(M68K_REG_A6, 0x00F0FE00u);
+	for (unsigned a = 0x00F0FDC0u; a < 0x00F0FE00u; a += 4u)
+		hw->Write32(a, 0);
+}
+
+/* EAST CUBE 白夜物語: BOOT writes RTS over MAIN.X play/load ($10A42 /
+   $10B02) so hoot can skip KEEPPR. The FM.DAT pointer is already in RAM
+   at $76E18 — let init's `jsr $10B02` actually load it. */
+static void CDriverX68kKeepByakuyaPlay(CHardX68k* hw)
+{
+	if (!hw) return;
+	if (hw->Read16(0x900u) != 0x33fcu || hw->Read16(0x902u) != 0x4e75u
+		|| hw->Read32(0x904u) != 0x00010a42u)
+		return;
+	unsigned a;
+	for (a = 0x900u; a < 0x910u; a += 2u)
+		hw->Write16(a, 0x4e71u);
 }
 
 CDriverX68k::CDriverX68k()
@@ -55,6 +164,32 @@ static int driverOpmGlue(CHardX68k* hw)
 	if (!hw) return 0;
 	return ((hw->Read32(0x400) & 0xffffffu) == 0xB06u
 		&& hw->Read16(0xB16) == 0x223Cu);
+}
+
+/* D.O. / 工画堂 OPMDRV2.X BOOT: `tst.b $E00000` poll plus
+   `lea $43FF0540` work pointer. Poll sits at $8B2 (dios), $8C2
+   (hsuna168), $8D0 (sabnack) — scan instead of hardcoding. Not
+   hoot opmdrv.bin, so the glue slice never runs. A2.X also polls
+   at $8D0 but has no $43FF0540 plant. */
+static unsigned driverDoOpmdrv2Poll(CHardX68k* hw)
+{
+	if (!hw) return 0;
+	unsigned poll = 0;
+	int hasLea = 0;
+	unsigned a;
+	for (a = 0x400u; a + 6u < 0xc00u; a += 2u) {
+		if (!poll && hw->Read16(a) == 0x4a39u
+			&& hw->Read32(a + 2u) == 0x00e00000u)
+			poll = a;
+		if (hw->Read16(a) == 0x41f9u && hw->Read32(a + 2u) == 0x43ff0540u)
+			hasLea = 1;
+	}
+	return (poll && hasLea) ? poll : 0;
+}
+
+static int driverDoOpmdrv2(CHardX68k* hw)
+{
+	return driverDoOpmdrv2Poll(hw) != 0;
 }
 
 /* WRITE (`lea -0x200,sp` at $808C) plus a Timer-B edge lets the ISR rte a
@@ -144,18 +279,31 @@ static void CDriverX68kPushTry(unsigned* dst, int* n, int cap, unsigned code)
 	dst[(*n)++] = code;
 }
 
-/* Konami gra2 etc.: stop=0xf0, fade=0xf9 — silent if pinned alone. */
-static int CDriverX68kIsDeadCmd(unsigned code, unsigned stopCode)
+/* Konami gra2 etc.: stop=0xf0, fade=0xf9 — silent if pinned alone.
+   0x00FF is 0xFF numerically, but Humming Bird Laplace catalogs it as
+   DOORWAY. A title-list hit is never a hunter-only dead cmd unless XML
+   stop= says so. */
+static int CDriverX68kIsDeadCmd(unsigned code, unsigned stopCode,
+	const CEmuGameEntry* ge)
 {
-	if (code == 0x5f || code == 0xf9 || code == 0xff) return 1;
+	/* Always hunter-dead, even when XML lists them (gra2 FADE 0xF9). */
+	if (code == 0x5f || code == 0xf9) return 1;
 	if (stopCode && code == stopCode) return 1;
+	if (ge) {
+		for (int i = 0; i < ge->titleCount; i++) {
+			if (ge->title[i].code == code)
+				return 0;
+		}
+	}
+	if (code == 0xff) return 1;
 	return 0;
 }
 
 /* Prefer BGM-ish codes (0xA0..0xEF) before SFX / utility. */
-static int CDriverX68kCmdPriority(unsigned code, unsigned stopCode)
+static int CDriverX68kCmdPriority(unsigned code, unsigned stopCode,
+	const CEmuGameEntry* ge)
 {
-	if (CDriverX68kIsDeadCmd(code, stopCode)) return 3;
+	if (CDriverX68kIsDeadCmd(code, stopCode, ge)) return 3;
 	if (code >= 0xa0 && code <= 0xef) return 0;
 	if (code >= 0x80 && code < 0xa0) return 1;
 	return 2;
@@ -212,7 +360,7 @@ int CDriverX68k::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigne
 	int deferredN = 0;
 	for (int i = 0; i < ge->titleCount && catalogN < (int)_countof(catalog); i++) {
 		const unsigned c = ge->title[i].code;
-		if (c == 0 || CDriverX68kIsDeadCmd(c, stopCode)) continue;
+		if (c == 0 || CDriverX68kIsDeadCmd(c, stopCode, ge)) continue;
 		char labA[CEMU_GAME_NAME];
 		WideCharToMultiByte(932, 0, ge->title[i].label, -1, labA, (int)sizeof(labA), NULL, NULL);
 		char fileTok[CEMU_GAME_NAME];
@@ -246,8 +394,8 @@ int CDriverX68k::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigne
 	/* Sort catalog: BGM (0xA0+) before SFX. */
 	for (int a = 0; a < catalogN; a++) {
 		for (int b = a + 1; b < catalogN; b++) {
-			if (CDriverX68kCmdPriority(catalog[b], stopCode)
-				< CDriverX68kCmdPriority(catalog[a], stopCode)) {
+			if (CDriverX68kCmdPriority(catalog[b], stopCode, ge)
+				< CDriverX68kCmdPriority(catalog[a], stopCode, ge)) {
 				unsigned t = catalog[a]; catalog[a] = catalog[b]; catalog[b] = t;
 			}
 		}
@@ -261,7 +409,7 @@ int CDriverX68k::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigne
 	   Open(...,1)). Dead INTRO sticks are recovered by ResumeMailboxForSong
 	   when hunting later codes (aquales 0x18). Keep 0xA0+ BGM prepend for
 	   non-catalog playlist picks. */
-	if (titleCode && !CDriverX68kIsDeadCmd(titleCode, stopCode)) {
+	if (titleCode && !CDriverX68kIsDeadCmd(titleCode, stopCode, ge)) {
 		int found = -1;
 		for (int i = 0; i < tryCount_; i++) {
 			if (tryCodes_[i] == titleCode) { found = i; break; }
@@ -271,7 +419,7 @@ int CDriverX68k::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigne
 				tryCodes_[i] = tryCodes_[i - 1];
 			tryCodes_[0] = titleCode;
 		} else if (found < 0) {
-			if (CDriverX68kCmdPriority(titleCode, stopCode) == 0
+			if (CDriverX68kCmdPriority(titleCode, stopCode, ge) == 0
 				&& tryCount_ < (int)_countof(tryCodes_)) {
 				for (int i = tryCount_; i > 0; i--)
 					tryCodes_[i] = tryCodes_[i - 1];
@@ -292,7 +440,7 @@ int CDriverX68k::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigne
 
 	/* If playlist asked for a dead cmd (FADE OUT), still try it once after BGM
 	   hunt fails — rare. Prefer putting requested dead code at end. */
-	if (titleCode && CDriverX68kIsDeadCmd(titleCode, stopCode))
+	if (titleCode && CDriverX68kIsDeadCmd(titleCode, stopCode, ge))
 		CDriverX68kPushTry(tryCodes_, &tryCount_, (int)_countof(tryCodes_), titleCode);
 
 	static const unsigned kFallback[] = {
@@ -310,7 +458,7 @@ int CDriverX68k::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigne
 		0x1e02, 0x1f02, 0x2002, 0x2102, 0x2802, 0x3002
 	};
 	for (int i = 0; i < (int)(sizeof(kFallback) / sizeof(kFallback[0])); i++) {
-		if (CDriverX68kIsDeadCmd(kFallback[i], stopCode)) continue;
+		if (CDriverX68kIsDeadCmd(kFallback[i], stopCode, NULL)) continue;
 		CDriverX68kPushTry(tryCodes_, &tryCount_, (int)_countof(tryCodes_), kFallback[i]);
 	}
 	if (tryCount_ < 1) {
@@ -322,6 +470,9 @@ int CDriverX68k::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigne
 		return 0;
 
 	CEmuHardX68kSetActive(hw_);
+	CDriverX68kPlantA2Frame(hw_);
+	CDriverX68kPlantCFrame(hw_);
+	CDriverX68kKeepByakuyaPlay(hw_);
 	/* Boot settle: multi-file / trap_f copy needs ~0.5s; single BOOT ~0.35s.
 	   Slice so OPM IRQ edges can fire from chip Irq(). */
 	const int settleHundredths = (ge->romCount > 2) ? 50 : 35;
@@ -338,6 +489,7 @@ int CDriverX68k::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigne
 		int slices = 0;
 		for (int left = total; left > 0; ) {
 			CDriverX68kRetargetOpxCompileHeap(hw_);
+			CDriverX68kPlantCFrame(hw_);
 			const int n = left > slice ? slice : left;
 			RunCycles(n);
 			left -= n;
@@ -413,7 +565,13 @@ int CDriverX68k::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigne
 				|| (((sr & 0x2000u) == 0u) && usp < 0x100u))
 			: (inDos || pc == 0x10000u || spBad
 				|| (((sr & 0x2000u) == 0u) && usp < 0x100u)));
-		if (wrecked) {
+		/* Double Eagle: poll is $4A4 like OP.X, but init jsrs $4D6 first and
+		   hits DOS (M_INTON). Jumping to $4A4 mid-init skips the GOLF.X
+		   RTS-patch and hangs the probe. Leave DOS until $5A7D8 is RTS. */
+		const int dbleagleBusy = (hw_->Read16(0x4ecu) == 0x41f9u
+			&& hw_->Read32(0x4eeu) == 0x00015200u
+			&& hw_->Read16(0x5a7d8u) != 0x4e75u);
+		if (wrecked && !dbleagleBusy) {
 			if (spBad || isp < 0xf0c000u || isp > 0xf0fffeu)
 				m68k_set_reg(M68K_REG_ISP, 0xf0fffeu);
 			sr = 0x2500u;
@@ -430,6 +588,20 @@ int CDriverX68k::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigne
 			else if (hw_->Read16(0x4b0) == 0x4a39u
 				&& hw_->Read32(0x4b2) == 0x00e00000u)
 				m68k_set_reg(M68K_REG_PC, 0x4b0);
+			else if (hw_->Read16(0x8d0) == 0x4a39u
+				&& hw_->Read32(0x8d2) == 0x00e00000u
+				&& hw_->Read16(0x4f428) == 0x4e75u) {
+				CDriverX68kPlantA2Frame(hw_);
+				m68k_set_reg(M68K_REG_PC, 0x8d0);
+			}
+			else if (driverDoOpmdrv2Poll(hw_))
+				m68k_set_reg(M68K_REG_PC, driverDoOpmdrv2Poll(hw_));
+			else if (hw_->Read16(0x950) == 0x4a39u
+				&& hw_->Read32(0x952) == 0x00e00000u
+				&& hw_->Read16(0x1021C) == 0x48e7u) {
+				CDriverX68kPlantCaveTrap0(hw_);
+				m68k_set_reg(M68K_REG_PC, 0x950);
+			}
 			else if (!opmGlue && (inDos || pc == 0x10000u || pc >= 0xf00000u)) {
 				const unsigned boot = hw_->Read32(4) & 0xffffffu;
 				if (boot >= 0x400u && boot < 0x10000u)
@@ -445,6 +617,10 @@ int CDriverX68k::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigne
 	}
 	/* BOOT settle may re-plant thin DOS/IOCS stubs — reinstall OS once if needed. */
 	CEmuX68kDosInstall(hw_);
+	CDriverX68kRestoreA2Play(hw_);
+	CDriverX68kPlantA2Frame(hw_);
+	CDriverX68kPlantCaveTrap0(hw_);
+	CDriverX68kPlantCFrame(hw_);
 	{
 		/* If PC sits on a neutralized hang stub (rte;rte) that WE wrote over
 		   nop;bra*, complete the trap RTE from the exception frame.
@@ -481,14 +657,29 @@ int CDriverX68k::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigne
 	cmdIndex_ = 1;
 	hw_->SetSongCommand(songCode_);
 	opmSpinRescue_ = 0;
-	/* hoot opmdrv.bin: $94A is the unassigned-vector spin. Snap to the mailbox
-	   only after M_INIT ($10C live) so we never skip OPMDRV bring-up. */
-	if (opmGlue) {
+	/* D.O. 星の砂物語: settle can land on the IRQ6 trampoline. Snap to the
+	   $E00000 poll. Do not pump play here — compiling FM.OPM with IRQ live
+	   overwrites OPMDRV2's ISR at $12F8A. */
+	{
+		const unsigned poll = driverDoOpmdrv2Poll(hw_);
+		if (poll) {
+			m68k_set_reg(M68K_REG_SR, 0x2500);
+			m68k_set_reg(M68K_REG_ISP, 0xf0fffeu);
+			m68k_set_reg(M68K_REG_PC, poll);
+			hw_->SetPc(poll);
+		}
+	}
+	/* $94A is the unassigned-vector hang (nop;bra*). opmdrv.bin spins there
+	   until M_INIT; Laplace / VMFA BOOTs finish init then IRQ-RTE onto the
+	   same stub and never reach the $E00000 poll, so pinned 16-bit codes stay
+	   SILENT. Snap once $10C is a live ISR. */
+	if (opmGlue)
 		driverRteIrq6(hw_, 1);
+	{
 		const unsigned pc = (unsigned)m68k_get_reg(NULL, M68K_REG_PC) & 0xffffffu;
 		const unsigned h10 = hw_->Read32(0x10c) & 0xffffffu;
 		const int inited = (h10 >= 0x8000u && h10 < 0xf00000u);
-		if (pc >= 0x94Au && pc < 0x95Au && inited)
+		if (pc >= 0x94Au && pc < 0x95Au && inited && hw_->Read16(0x94A) == 0x4e71u)
 			ResumeMailboxForSong(songCode_);
 		hw_->SetPc((unsigned)m68k_get_reg(NULL, M68K_REG_PC) & 0xffffffu);
 	}
@@ -701,7 +892,7 @@ void CDriverX68k::ServiceSoftTimers(int cycles)
 				const unsigned tcdcr = hw_->Read8(0xe8801du);
 				const unsigned tw = (tdIsr >= 0x8000u && tdIsr < 0x40000u)
 					? hw_->Read16(tdIsr) : 0;
-				const int tdLive = (tcdcr == 0x75u
+				const int tdLive = ((tcdcr & 7u) != 0
 					&& (tw == 0x4a79u || tw == 0x08b9u || tw == 0x48e7u));
 				if (tdLive && !(hw_->SoundChip() && hw_->SoundChip()->Irq())) {
 					const int periodCy = cpuHz_ / 120;
@@ -762,10 +953,33 @@ void CDriverX68k::RunCycles(int cycles)
 			(void)m68k_execute(n);
 			left -= n;
 		}
+		TickOpm((uint64_t)cycles);
+	} else if (driverDoOpmdrv2(hw_) && hw_->SoundChip()) {
+		/* Continue past $E00800 end_timeslice inside one quantum (k4 cmd6log).
+		   Hold IRQ only on this family's compile stack — not a global
+		   deep-SP hold. Poll sits on $F0FFxx and still takes Timer-B. */
+		CChip* chip = hw_->SoundChip();
+		int left = cycles;
+		while (left > 0) {
+			const unsigned pc = (unsigned)m68k_get_reg(NULL, M68K_REG_PC) & 0xffffffu;
+			const unsigned sp = (unsigned)m68k_get_reg(NULL, M68K_REG_SP) & 0xffffffu;
+			/* $13E86 busy-wait (tst.b / bne.s) is cleared by the OPM ISR.
+			   Holding IRQ here deadlocks compile at $10A60. */
+			if (!driverOpmFlagWait(hw_, pc)
+				&& sp >= 0x00F0F000u && sp < 0x00F0FEF0u)
+				CDriverX68kApplyIrq(hw_, chip, 1);
+			else
+				CDriverX68kApplyIrq(hw_, chip, 0);
+			const int n = (left > 16) ? 16 : left;
+			(void)m68k_execute(n);
+			TickOpm((uint64_t)n);
+			left -= n;
+		}
 	} else {
 		(void)m68k_execute(cycles);
+		TickOpm((uint64_t)cycles);
 	}
-	TickOpm((uint64_t)cycles);
+	hw_->TickMfp(cycles);
 	ServiceSoftTimers(cycles);
 	hw_->SetPc((unsigned)m68k_get_reg(NULL, M68K_REG_PC));
 }
@@ -830,32 +1044,31 @@ int CDriverX68k::Render(int16_t* stereo, int frames)
 			   on the stub. Finish a real frame, else resume the mailbox poll. */
 			const unsigned pc = (unsigned)m68k_get_reg(NULL, M68K_REG_PC) & 0xffffffu;
 			if (pc >= CEMU_X68K_DOS_TRAP1 && pc < (CEMU_X68K_DOS_TRAP1 + 8u)) {
-				if (!driverRteIrq6(hw_, 0))
+				if (!driverRteIrq6(hw_, 0) && !driverDoOpmdrv2(hw_))
 					ResumeMailboxForSong(songCode_);
 			}
 		}
-		if (!opmSpinRescue_ && driverOpmGlue(hw_)) {
+		if (!opmSpinRescue_) {
 			const unsigned pc = (unsigned)m68k_get_reg(NULL, M68K_REG_PC) & 0xffffffu;
 			const unsigned h10 = hw_->Read32(0x10c) & 0xffffffu;
-			if (pc >= 0x94Au && pc < 0x95Au && h10 >= 0x8000u && h10 < 0xf00000u) {
+			/* $94A hang is nop;bra* from opmdrv.bin. D.O. OPMDRV2 play lives
+			   at $950 (moveq #3,d7 / rol.l) — do not steal that as a hang. */
+			if (pc >= 0x94Au && pc < 0x95Au && h10 >= 0x8000u && h10 < 0xf00000u
+				&& hw_->Read16(0x94A) == 0x4e71u) {
 				opmSpinRescue_ = 1;
 				ResumeMailboxForSong(songCode_);
 			}
 		}
-		/* YM2151 IRQ6. CEmuX68kIntAck clears the chip's event latch, so the
-		   current level is safe even when the guest leaves YM status set.
-		   Do not edge-filter: ack+reassert can occur within RunCycles(). */
+		/* YM2151 IRQ6, else MFP Timer C/D IRQ2. */
 		{
 			const unsigned pc = (unsigned)m68k_get_reg(NULL, M68K_REG_PC) & 0xffffffu;
 			const unsigned sp = (unsigned)m68k_get_reg(NULL, M68K_REG_SP) & 0xffffffu;
-			const int hold = (driverOpmGlue(hw_) && driverOpmHoldIrq(hw_, pc, sp));
-			if (hold) {
-				m68k_set_irq(M68K_IRQ_NONE);
-			} else {
-				const int irq = chip->Irq() ? 1 : 0;
-				m68k_set_irq(irq ? M68K_IRQ_6 : M68K_IRQ_NONE);
-				irqWas_ = irq;
-			}
+			const int hold = (driverOpmGlue(hw_) && driverOpmHoldIrq(hw_, pc, sp))
+				|| (driverDoOpmdrv2(hw_)
+					&& !driverOpmFlagWait(hw_, pc)
+					&& sp >= 0x00F0F000u && sp < 0x00F0FEF0u);
+			CDriverX68kApplyIrq(hw_, chip, hold);
+			irqWas_ = chip->Irq() ? 1 : 0;
 		}
 		chip->Render(stereo + i * 2, 1);
 		hw_->MixAdpcm(stereo + i * 2, 1);

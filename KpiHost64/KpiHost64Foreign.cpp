@@ -5,6 +5,7 @@
 #include <unordered_map>
 #include <cstring>
 #include <cstdlib>
+#include <new>
 
 #include "..\kpi_host_ipc.h"
 #include "..\PluginKinds.h"
@@ -23,7 +24,8 @@ struct ForeignSession
 	Out_Module waOut{};
 	CRITICAL_SECTION cs{};
 	bool csInit = false;
-	std::vector<uint8_t> ring; // PCM リング。プラグインスレッドが書き、Render が読む
+	uint8_t* ring = nullptr; // PCM リング。プラグインスレッドが書き、Render が読む
+	int ringCap = 0;
 	int ringR = 0, ringW = 0, ringUsed = 0;
 	int rate = 44100, ch = 2, bits = 16;
 	int playing = 0;
@@ -61,7 +63,12 @@ static int __cdecl FWa_Open(int sr, int nch, int bps, int, int)
 	g_waCur->rate = sr > 0 ? sr : 44100;
 	g_waCur->ch = nch > 0 ? nch : 2;
 	g_waCur->bits = bps > 0 ? bps : 16;
-	g_waCur->ring.assign(2 * 1024 * 1024, 0);
+	if (g_waCur->ringCap < 2 * 1024 * 1024) {
+		delete[] g_waCur->ring;
+		g_waCur->ring = new (std::nothrow) uint8_t[2 * 1024 * 1024];
+		g_waCur->ringCap = g_waCur->ring ? (2 * 1024 * 1024) : 0;
+	}
+	if (!g_waCur->ring) return -1;
 	g_waCur->ringR = g_waCur->ringW = g_waCur->ringUsed = 0;
 	g_waCur->playing = 1;
 	g_waCur->written = 0;
@@ -72,12 +79,15 @@ static int __cdecl FWa_Write(char* buf, int len)
 {
 	if (!g_waCur || !buf || len <= 0) return 0;
 	EnterCriticalSection(&g_waCur->cs);
-	int freeB = (int)g_waCur->ring.size() - g_waCur->ringUsed;
-	if (len > freeB) { LeaveCriticalSection(&g_waCur->cs); return 1; }
-	for (int i = 0; i < len; ++i) {
-		g_waCur->ring[g_waCur->ringW] = (uint8_t)buf[i];
-		g_waCur->ringW = (g_waCur->ringW + 1) % (int)g_waCur->ring.size();
-	}
+	int cap = g_waCur->ringCap;
+	int freeB = cap - g_waCur->ringUsed;
+	if (len > freeB || !g_waCur->ring) { LeaveCriticalSection(&g_waCur->cs); return 1; }
+	int first = cap - g_waCur->ringW;
+	if (first > len) first = len;
+	memcpy(g_waCur->ring + g_waCur->ringW, buf, (size_t)first);
+	if (len > first)
+		memcpy(g_waCur->ring, (const uint8_t*)buf + first, (size_t)(len - first));
+	g_waCur->ringW = (g_waCur->ringW + len) % cap;
 	g_waCur->ringUsed += len;
 	g_waCur->written += len;
 	LeaveCriticalSection(&g_waCur->cs);
@@ -87,7 +97,7 @@ static int __cdecl FWa_CanWrite()
 {
 	if (!g_waCur) return 0;
 	EnterCriticalSection(&g_waCur->cs);
-	int f = (int)g_waCur->ring.size() - g_waCur->ringUsed;
+	int f = g_waCur->ringCap - g_waCur->ringUsed;
 	LeaveCriticalSection(&g_waCur->cs);
 	return f;
 }
@@ -309,7 +319,7 @@ uint32_t ForeignHost_Open(uint32_t kind, const std::wstring& dll, const std::wst
 		}
 		if (rc != 0) {
 			if (s->waIn->Quit) s->waIn->Quit();
-			FreeLibrary(s->dll); delete s; g_waCur = nullptr; return KPIHOST64_STATUS_FAIL;
+			FreeLibrary(s->dll); delete[] s->ring; delete s; g_waCur = nullptr; return KPIHOST64_STATUS_FAIL;
 		}
 		// フォーマットはデコードスレッドが outMod->Open() を呼ぶまで確定しない。
 		// Play() 直後に読むと既定値(44100/2/16)を本体へ返してしまう。
@@ -318,7 +328,7 @@ uint32_t ForeignHost_Open(uint32_t kind, const std::wstring& dll, const std::wst
 		if (!s->playing) {
 			if (s->waIn->Stop) s->waIn->Stop();
 			if (s->waIn->Quit) s->waIn->Quit();
-			FreeLibrary(s->dll); delete s; g_waCur = nullptr; return KPIHOST64_STATUS_FAIL;
+			FreeLibrary(s->dll); delete[] s->ring; delete s; g_waCur = nullptr; return KPIHOST64_STATUS_FAIL;
 		}
 		reply.sampleRate = (uint32_t)s->rate;
 		reply.channels = (uint32_t)s->ch;
@@ -337,29 +347,38 @@ uint32_t ForeignHost_Open(uint32_t kind, const std::wstring& dll, const std::wst
 	return KPIHOST64_STATUS_OK;
 }
 
-uint32_t ForeignHost_Render(uint32_t sessionId, uint32_t bytesWanted, std::vector<uint8_t>& out, uint32_t& eof)
+uint32_t ForeignHost_Render(uint32_t sessionId, uint32_t bytesWanted, uint8_t* dest, uint32_t destCap, uint32_t& gotBytes, uint32_t& eof)
 {
 	eof = 0;
-	out.clear();
+	gotBytes = 0;
 	ForeignSession* s = ForeignGet(sessionId);
 	if (!s) return KPIHOST64_STATUS_NOT_FOUND;
 	if (s->kind == PLUGKIND_WINAMP) {
-		out.resize(bytesWanted);
+		if (!dest && bytesWanted) return KPIHOST64_STATUS_BAD_REQUEST;
+		uint32_t want = bytesWanted;
+		if (want > destCap) want = destCap;
 		int got = 0;
 		DWORD t0 = GetTickCount();
-		while (got < (int)bytesWanted) {
+		while (got < (int)want) {
 			EnterCriticalSection(&s->cs);
 			int avail = s->ringUsed;
-			int take = (int)bytesWanted - got;
+			int take = (int)want - got;
 			if (take > avail) take = avail;
-			for (int i = 0; i < take; ++i) {
-				out[got + i] = s->ring[s->ringR];
-				s->ringR = (s->ringR + 1) % (int)s->ring.size();
+			int cap = s->ringCap;
+			if (take > 0 && s->ring && cap > 0) {
+				int first = cap - s->ringR;
+				if (first > take) first = take;
+				memcpy(dest + got, s->ring + s->ringR, (size_t)first);
+				if (take > first)
+					memcpy(dest + got + first, s->ring, (size_t)(take - first));
+				s->ringR = (s->ringR + take) % cap;
+				s->ringUsed -= take;
+			} else {
+				take = 0;
 			}
-			s->ringUsed -= take;
 			LeaveCriticalSection(&s->cs);
 			got += take;
-			if (got >= (int)bytesWanted) break;
+			if (got >= (int)want) break;
 			if (take > 0) { t0 = GetTickCount(); continue; }
 			// リングが空。WM_WA_MPEG_EOF 受信済み／出力クローズ済みなら本当に終端
 			if (InterlockedCompareExchange(&g_waEof, 0, 0)) { eof = 1; break; }
@@ -367,7 +386,7 @@ uint32_t ForeignHost_Render(uint32_t sessionId, uint32_t bytesWanted, std::vecto
 			if (GetTickCount() - t0 > 5000) break; // デコーダ無応答の保険
 			Sleep(1);
 		}
-		out.resize(got);
+		gotBytes = (uint32_t)got;
 		return KPIHOST64_STATUS_OK;
 	}
 	return KPIHOST64_STATUS_NOT_SUPPORTED;
@@ -397,6 +416,8 @@ uint32_t ForeignHost_Close(uint32_t sessionId)
 	if (s->dll) FreeLibrary(s->dll);
 	if (s->csInit) DeleteCriticalSection(&s->cs);
 	if (g_waCur == s) g_waCur = nullptr;
+	delete[] s->ring;
+	s->ring = nullptr;
 	delete s;
 	g_foreign.erase(it);
 	return KPIHOST64_STATUS_OK;

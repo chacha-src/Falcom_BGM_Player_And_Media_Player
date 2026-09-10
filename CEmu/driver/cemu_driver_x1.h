@@ -37,10 +37,12 @@ private:
 	uint64_t nextVsync_;
 	uint64_t timerPeriod_;
 	uint64_t vsyncPeriod_;
-	/* ZC0 pulses counted toward the ch3 counter-mode time constant, plus the
-	   latched ch3 INT that ch0 outranks on the daisy chain. */
+	/* ZC0 pulses counted toward the ch3 counter-mode time constant, plus
+	   latched INT bits (ch0-ch2 on timer edges, ch3 on ZC0/VSYNC). One
+	   channel is taken per DeliverIrqs so ch2/ch1 are not starved when
+	   they share a tick with ch0 (sc / crimson). */
 	uint64_t ctc3Div_;
-	int ctc3Pending_;
+	int ctcPending_[4];
 	/* Cycles RunUntil overshot the per-sample deadline by. */
 	int64_t cpuDebt_;
 	unsigned timerIrqs_;

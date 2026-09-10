@@ -8,7 +8,7 @@
 #include <algorithm>
 #include <cmath>
 #include <functional>
-#include <vector>
+#include <new>
 #include <psapi.h>
 #include <TlHelp32.h>
 #include <imm.h>
@@ -91,12 +91,37 @@ static void CCC_ComputeShadowPad(int nSD, int nDist, int nBlur, BOOL bSE, UINT d
 // 子の透過判定（CCC_UseTransPaint）と OpaqueFixer 要否の入口。
 BOOL CCC_IsBlurDialogChild(HWND hWnd)
 {
+    static HWND s_child = NULL;
+    static HWND s_dlg = NULL;
+    static int s_kind = 0; /* 0=none 1=CCustomDialog 2=CCustomDialogEx */
+    if (!hWnd) return FALSE;
+    if (hWnd == s_child) {
+        if (s_kind == 0) return FALSE;
+        CWnd* pw = CWnd::FromHandlePermanent(s_dlg);
+        if (pw) {
+            if (s_kind == 1 && pw->IsKindOf(RUNTIME_CLASS(CCustomDialog)))
+                return ((CCustomDialog*)pw)->IsAeroEnabled();
+            if (s_kind == 2 && pw->IsKindOf(RUNTIME_CLASS(CCustomDialogEx)))
+                return ((CCustomDialogEx*)pw)->IsAeroEnabled();
+        }
+    }
+    s_child = hWnd;
+    s_dlg = NULL;
+    s_kind = 0;
     for (HWND h = hWnd; h; h = ::GetParent(h))
     {
         CWnd* pw = CWnd::FromHandlePermanent(h);
         if (!pw) continue;
-        if (auto* p = dynamic_cast<CCustomDialog*>(pw)) return p->IsAeroEnabled();
-        if (auto* p = dynamic_cast<CCustomDialogEx*>(pw)) return p->IsAeroEnabled();
+        if (pw->IsKindOf(RUNTIME_CLASS(CCustomDialog))) {
+            s_dlg = h;
+            s_kind = 1;
+            return ((CCustomDialog*)pw)->IsAeroEnabled();
+        }
+        if (pw->IsKindOf(RUNTIME_CLASS(CCustomDialogEx))) {
+            s_dlg = h;
+            s_kind = 2;
+            return ((CCustomDialogEx*)pw)->IsAeroEnabled();
+        }
     }
     return FALSE;
 }
@@ -104,13 +129,31 @@ BOOL CCC_IsBlurDialogChild(HWND hWnd)
 // CCustomPopupMenu 配下（不透明ストライプ）。親ダイアログがアクリルでも子は透過描画しない。
 static BOOL CCC_IsCustomPopupChild(HWND hWnd)
 {
-    for (HWND h = hWnd ? ::GetParent(hWnd) : NULL; h; h = ::GetParent(h))
+    static HWND s_hwnd = NULL;
+    static BOOL s_yes = FALSE;
+    static ATOM s_atomPopup = 0;
+    static ATOM s_atomChip = 0;
+    if (!hWnd) return FALSE;
+    if (hWnd == s_hwnd) return s_yes;
+    s_hwnd = hWnd;
+    s_yes = FALSE;
+    for (HWND h = ::GetParent(hWnd); h; h = ::GetParent(h))
     {
+        const ATOM atom = (ATOM)::GetClassLongPtr(h, GCW_ATOM);
+        if (s_atomPopup && atom == s_atomPopup) { s_yes = TRUE; return TRUE; }
+        if (s_atomChip && atom == s_atomChip) { s_yes = TRUE; return TRUE; }
         TCHAR cls[64];
         if (::GetClassName(h, cls, _countof(cls)) <= 0) continue;
-        if (_tcscmp(cls, _T("CCustomPopupMenuClass")) == 0
-            || _tcscmp(cls, _T("CCustomPopupMenuChipClass")) == 0)
+        if (_tcscmp(cls, _T("CCustomPopupMenuClass")) == 0) {
+            s_atomPopup = atom;
+            s_yes = TRUE;
             return TRUE;
+        }
+        if (_tcscmp(cls, _T("CCustomPopupMenuChipClass")) == 0) {
+            s_atomChip = atom;
+            s_yes = TRUE;
+            return TRUE;
+        }
     }
     return FALSE;
 }
@@ -787,35 +830,49 @@ void CCC_FillRectAlpha(HDC hdc, const RECT& rc, COLORREF clr, BYTE alpha)
 		return;
 	}
 
-	BITMAPINFO bi = {};
-	bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-	bi.bmiHeader.biWidth = w;
-	bi.bmiHeader.biHeight = -h;
-	bi.bmiHeader.biPlanes = 1;
-	bi.bmiHeader.biBitCount = 32;
-	bi.bmiHeader.biCompression = BI_RGB;
-	void* pBits = nullptr;
-	HBITMAP hDib = ::CreateDIBSection(hdc, &bi, DIB_RGB_COLORS, &pBits, nullptr, 0);
-	if (!hDib || !pBits) {
-		CCC_FillRectOpaqueBits(hdc, rc, clr);
+	static CCC_ChromaBlitCache s_aCaches[4];
+	static COLORREF s_aClr[4] = { 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu };
+	static unsigned s_aNext = 0;
+	CCC_ChromaBlitCache* pCache = nullptr;
+	unsigned hit = 0;
+	for (unsigned i = 0; i < 4; ++i) {
+		if (s_aCaches[i].pBits && s_aCaches[i].dibW == w && s_aCaches[i].dibH == h) {
+			pCache = &s_aCaches[i];
+			hit = i;
+			break;
+		}
+	}
+	if (!pCache) {
+		hit = (s_aNext++) % 4;
+		pCache = &s_aCaches[hit];
+		if (!pCache->Ensure(hdc, w, h))
+			pCache = nullptr;
+		else
+			s_aClr[hit] = 0xFFFFFFFFu;
+	}
+	if (pCache && pCache->pBits && pCache->hdcDib) {
+		if (s_aClr[hit] != clr) {
+			const UINT32 px = 0xFF000000u
+				| ((UINT32)GetRValue(clr) << 16)
+				| ((UINT32)GetGValue(clr) << 8)
+				| (UINT32)GetBValue(clr);
+			UINT32* p = (UINT32*)pCache->pBits;
+			const int n = w * h;
+			int i = 0;
+			for (; i + 3 < n; i += 4) {
+				p[i] = px; p[i + 1] = px; p[i + 2] = px; p[i + 3] = px;
+			}
+			for (; i < n; ++i)
+				p[i] = px;
+			s_aClr[hit] = clr;
+		}
+		const BLENDFUNCTION bf = { AC_SRC_OVER, 0, alpha, 0 };
+		if (::GdiAlphaBlend(hdc, rc.left, rc.top, w, h, pCache->hdcDib, 0, 0, w, h, bf))
+			return;
 		return;
 	}
-	HDC hdcMem = ::CreateCompatibleDC(hdc);
-	HGDIOBJ old = ::SelectObject(hdcMem, hDib);
-	HBRUSH br = ::CreateSolidBrush(clr);
-	RECT zr = { 0, 0, w, h };
-	::FillRect(hdcMem, &zr, br);
-	::DeleteObject(br);
-	// プレマルチプライ不要: SourceConstantAlpha のみで合成
-	UINT32* px = (UINT32*)pBits;
-	const int n = w * h;
-	for (int i = 0; i < n; ++i)
-		px[i] |= 0xFF000000u;
-	const BLENDFUNCTION bf = { AC_SRC_OVER, 0, alpha, 0 };
-	::GdiAlphaBlend(hdc, rc.left, rc.top, w, h, hdcMem, 0, 0, w, h, bf);
-	::SelectObject(hdcMem, old);
-	::DeleteDC(hdcMem);
-	::DeleteObject(hDib);
+
+	CCC_FillRectOpaqueBits(hdc, rc, clr);
 }
 
 // 子の隙間だけガラス（α=0）。親 OnPaint から。pPreserveRect はバナー等を残す除外。
@@ -847,19 +904,15 @@ void CCC_ClipNoChildren(CDC& dc, CWnd* pWnd)
     if (!pWnd || !pWnd->GetSafeHwnd()) return;
     CRect cr;
     pWnd->GetClientRect(&cr);
-    CRgn rgn;
-    rgn.CreateRectRgnIndirect(&cr);
+    dc.IntersectClipRect(&cr);
     for (HWND h = ::GetWindow(pWnd->m_hWnd, GW_CHILD); h; h = ::GetWindow(h, GW_HWNDNEXT))
     {
         if (!::IsWindowVisible(h)) continue;
         CRect r;
         ::GetWindowRect(h, &r);
         pWnd->ScreenToClient(&r);
-        CRgn rc;
-        rc.CreateRectRgnIndirect(&r);
-        rgn.CombineRgn(&rgn, &rc, RGN_DIFF);
+        dc.ExcludeClipRect(&r);
     }
-    dc.SelectClipRgn(&rgn, RGN_AND);
 }
 
 // キャプション常時アクリル(dffb3db〜)下の不透明Blit。毎フレ BeginBufferedPaint すると
@@ -1480,10 +1533,11 @@ static void DrawTextShadow(CDC* pDC, const CRect& rect, const CString& str, UINT
     UINT32* px = (UINT32*)pBits;
     const int nPx = bw * bh;
     // キャッシュは cap より大きいことがあるので使用矩形だけクリア
+    const UINT32 kClear = 0x00FFFFFFu;
     for (int y = 0; y < bh; ++y) {
         UINT32* row = px + y * s_shadowCache.capW;
         for (int x = 0; x < bw; ++x)
-            row[x] = 0x00FFFFFFu;
+            row[x] = kClear;
     }
 
     CFont* pOldFont = dcShadow.SelectObject(pDC->GetCurrentFont());
@@ -3997,15 +4051,16 @@ static const UINT kIwResId[IW_COUNT] = {
 };
 
 // RCDATA の IWJ1 ジャムを PNG バイト列へ。ヘルプ非掲載の裏リソース。
-static BOOL CCC_IwUnjam(const BYTE* src, DWORD n, std::vector<BYTE>& out)
+static BOOL CCC_IwUnjam(const BYTE* src, DWORD n, BYTE* out, DWORD outn)
 {
-    if (!src || n < 8 || memcmp(src, "IWJ1", 4) != 0)
+    if (!src || !out || n < 8 || memcmp(src, "IWJ1", 4) != 0)
         return FALSE;
     DWORD sz = 0;
     memcpy(&sz, src + 4, 4);
     if (sz == 0 || sz > 8 * 1024 * 1024 || 8 + sz > n) // 8MB 上限（壊れたリソース対策）
         return FALSE;
-    out.resize(sz);
+    if (sz > outn)
+        return FALSE;
     const BYTE* p = src + 8;
     for (DWORD i = 0; i < sz; ++i)
         out[i] = (BYTE)(p[i] ^ kIwJamKey[i % 32] ^ ((i * 13 + 7) & 0xFF));
@@ -4096,10 +4151,22 @@ static BOOL CCC_IwEnsure(int idx)
     const BYTE* mem = (const BYTE*)::LockResource(hg);
     if (!mem || n < 8)
         return FALSE;
-    std::vector<BYTE> png;
-    if (!CCC_IwUnjam(mem, n, png))
+    if (n < 8 || memcmp(mem, "IWJ1", 4) != 0)
         return FALSE;
-    return CCC_IwDecodePng(png.data(), (DWORD)png.size(), b);
+    DWORD sz = 0;
+    memcpy(&sz, mem + 4, 4);
+    if (sz == 0 || sz > 8 * 1024 * 1024 || 8 + sz > n)
+        return FALSE;
+    BYTE* png = new (std::nothrow) BYTE[sz];
+    if (!png)
+        return FALSE;
+    if (!CCC_IwUnjam(mem, n, png, sz)) {
+        delete[] png;
+        return FALSE;
+    }
+    BOOL ok = CCC_IwDecodePng(png, sz, b);
+    delete[] png;
+    return ok;
 }
 
 // 裏スチルを定数αで拡縮合成。alpha<8 は無視（ノイズ防止）。
@@ -6755,6 +6822,11 @@ CCustomComboBox::CCustomComboBox()
 CCustomComboBox::~CCustomComboBox()
 {
     if (m_brBackground.GetSafeHandle()) m_brBackground.DeleteObject();
+    delete[] m_pDisabled;
+    m_pDisabled = nullptr;
+    delete[] m_pSelectable;
+    m_pSelectable = nullptr;
+    m_nDisabledCap = m_nSelectableCap = m_nSelectable = 0;
 }
 
 // サブクラス解放後。EnableAutoDelete 時のみ delete this（ダイアログスタック配置では使わない）。
@@ -6765,16 +6837,44 @@ void CCustomComboBox::PostNcDestroy()
 }
 
 // 物理行を追加し、bD なら無効ラベルとして記録する。
-// 有効行だけ m_vSelectableIndices に積み、Get/SetCurSel の論理インデックスになる。
+// 有効行だけ m_pSelectable に積み、Get/SetCurSel の論理インデックスになる。
 // 途中挿入はしない（常に末尾追加）。途中へ入れると論理/物理がずれる。
 int CCustomComboBox::AddString(LPCTSTR lp, BOOL bD)
 {
     int n = CComboBox::AddString(lp);
     if (n >= 0)
     {
-        if (n >= (int)m_vDisabledItems.size()) m_vDisabledItems.resize(n + 1, FALSE);
-        m_vDisabledItems[n] = bD;
-        if (!bD) m_vSelectableIndices.push_back(n);
+        if (n >= m_nDisabledCap) {
+            int cap = m_nDisabledCap > 0 ? m_nDisabledCap : 16;
+            while (cap < n + 1) {
+                if (cap > (INT_MAX / 2)) { cap = n + 1; break; }
+                cap *= 2;
+            }
+            BYTE* nd = new BYTE[cap];
+            memset(nd, 0, (size_t)cap);
+            if (m_pDisabled && m_nDisabledCap > 0)
+                memcpy(nd, m_pDisabled, (size_t)m_nDisabledCap);
+            delete[] m_pDisabled;
+            m_pDisabled = nd;
+            m_nDisabledCap = cap;
+        }
+        m_pDisabled[n] = bD ? 1 : 0;
+        if (!bD) {
+            if (m_nSelectable >= m_nSelectableCap) {
+                int cap = m_nSelectableCap > 0 ? m_nSelectableCap : 16;
+                while (cap < m_nSelectable + 1) {
+                    if (cap > (INT_MAX / 2)) { cap = m_nSelectable + 1; break; }
+                    cap *= 2;
+                }
+                int* ns = new int[cap];
+                if (m_pSelectable && m_nSelectable > 0)
+                    memcpy(ns, m_pSelectable, (size_t)m_nSelectable * sizeof(int));
+                delete[] m_pSelectable;
+                m_pSelectable = ns;
+                m_nSelectableCap = cap;
+            }
+            m_pSelectable[m_nSelectable++] = n;
+        }
     }
     return n;
 }
@@ -6782,8 +6882,9 @@ int CCustomComboBox::AddString(LPCTSTR lp, BOOL bD)
 void CCustomComboBox::ResetContent()
 {
     CComboBox::ResetContent();
-    m_vDisabledItems.clear();
-    m_vSelectableIndices.clear();
+    m_nSelectable = 0;
+    if (m_pDisabled && m_nDisabledCap > 0)
+        memset(m_pDisabled, 0, (size_t)m_nDisabledCap);
 }
 
 // 論理インデックスを返す。無効行は飛ばす。未選択・無効行選択中は -1。
@@ -6792,8 +6893,8 @@ int CCustomComboBox::GetCurSel() const
 {
     int np = CComboBox::GetCurSel();
     if (np < 0) return -1;
-    for (int i = 0; i < (int)m_vSelectableIndices.size(); i++)
-        if (m_vSelectableIndices[i] == np) return i;
+    for (int i = 0; i < m_nSelectable; i++)
+        if (m_pSelectable[i] == np) return i;
     return -1;
 }
 
@@ -6808,12 +6909,12 @@ int CCustomComboBox::SetCurSel(int n)
         if (m_hWnd) ::PostMessage(m_hWnd, CCC_WM_POST_OPAQUE_PAINT, 0, 0);
         return r;
     }
-    if (n >= (int)m_vSelectableIndices.size())
+    if (n >= m_nSelectable)
     {
-        if (m_vSelectableIndices.empty()) return CB_ERR;
-        n = (int)m_vSelectableIndices.size() - 1;
+        if (m_nSelectable <= 0) return CB_ERR;
+        n = m_nSelectable - 1;
     }
-    const int r = CComboBox::SetCurSel(m_vSelectableIndices[n]);
+    const int r = CComboBox::SetCurSel(m_pSelectable[n]);
     if (m_hWnd) ::PostMessage(m_hWnd, CCC_WM_POST_OPAQUE_PAINT, 0, 0);
     return r;
 }
@@ -6836,15 +6937,15 @@ void CCustomComboBox::GetLabelColor(COLORREF* pct, COLORREF* pcb) const
 // 論理→物理。無効行を除いた n 番目の実インデックス。範囲外は -1。
 int CCustomComboBox::LogicalToPhysical(int n) const
 {
-    if (n < 0 || n >= (int)m_vSelectableIndices.size()) return -1;
-    return m_vSelectableIndices[n];
+    if (n < 0 || n >= m_nSelectable) return -1;
+    return m_pSelectable[n];
 }
 
 // 物理→論理。無効行や欠番は -1（選択対象ではない）。
 int CCustomComboBox::PhysicalToLogical(int n) const
 {
-    for (int i = 0; i < (int)m_vSelectableIndices.size(); i++)
-        if (m_vSelectableIndices[i] == n) return i;
+    for (int i = 0; i < m_nSelectable; i++)
+        if (m_pSelectable[i] == n) return i;
     return -1;
 }
 
@@ -7027,7 +7128,7 @@ void CCustomComboBox::PaintClient(CDC& dc)
     rt.left += CCC_ScaleDpi(12, dpi);
     rt.right = rB.left - btnPad;
 
-    BOOL bIL = (nPS >= 0 && nPS < (int)m_vDisabledItems.size() && m_vDisabledItems[nPS]);
+    BOOL bIL = (nPS >= 0 && nPS < m_nDisabledCap && m_pDisabled && m_pDisabled[nPS]);
     if (nPS != CB_ERR && !bIL)
     {
         int cs = max(4, (rt.Height() - CCC_ScaleDpi(8, dpi)) / 2);
@@ -7140,7 +7241,7 @@ void CCustomComboBox::DrawItem(LPDRAWITEMSTRUCT lp)
     }
 
     CRect r = lp->rcItem;
-    BOOL bD = (lp->itemID < (UINT)m_vDisabledItems.size()) && m_vDisabledItems[lp->itemID];
+    BOOL bD = (lp->itemID < (UINT)m_nDisabledCap) && m_pDisabled && m_pDisabled[lp->itemID];
     BOOL bS = !bD && (lp->itemState & ODS_SELECTED);
     COLORREF bg = bD ? m_clrLabelBg : (bS ? COLOR_SEL_BG : (lp->itemID % 2 == 0 ? COLOR_COMBO_BG : RGB(255, 232, 220)));
 
@@ -7259,14 +7360,14 @@ BOOL CCustomComboBox::OnCommand(WPARAM wP, LPARAM lP)
         int n = CComboBox::GetCurSel();
         if (n >= 0)
         {
-            BOOL bD = (n < (int)m_vDisabledItems.size() && m_vDisabledItems[n]);
+            BOOL bD = (n < m_nDisabledCap && m_pDisabled && m_pDisabled[n]);
             if (bD)
             {
                 int cnt = CComboBox::GetCount();
                 // 無効アイテムが選ばれた場合、次の有効アイテムへスキップ
                 for (int i = n + 1; i < cnt; i++)
                 {
-                    if (!(i < (int)m_vDisabledItems.size() && m_vDisabledItems[i]))
+                    if (!(i < m_nDisabledCap && m_pDisabled && m_pDisabled[i]))
                     {
                         CComboBox::SetCurSel(i);
                         return TRUE;
@@ -7274,7 +7375,7 @@ BOOL CCustomComboBox::OnCommand(WPARAM wP, LPARAM lP)
                 }
                 for (int i = n - 1; i >= 0; i--)
                 {
-                    if (!(i < (int)m_vDisabledItems.size() && m_vDisabledItems[i]))
+                    if (!(i < m_nDisabledCap && m_pDisabled && m_pDisabled[i]))
                     {
                         CComboBox::SetCurSel(i);
                         return TRUE;
@@ -9596,42 +9697,88 @@ void CCustomListCtrl::FillEmptyBelowVisible(HDC hdc, BOOL belowItemsOnly)
         return;
     }
 
-    BITMAPINFO bi = {};
-    bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-    bi.bmiHeader.biWidth = fw;
-    bi.bmiHeader.biHeight = -fh;
-    bi.bmiHeader.biPlanes = 1;
-    bi.bmiHeader.biBitCount = 32;
-    bi.bmiHeader.biCompression = BI_RGB;
-    void* pBits = nullptr;
-    HBITMAP hDib = ::CreateDIBSection(hdc, &bi, DIB_RGB_COLORS, &pBits, nullptr, 0);
-    if (hDib && pBits) {
-        RGBQUAD* pq = static_cast<RGBQUAD*>(pBits);
-        RGBQUAD c0 = { GetBValue(alt0), GetGValue(alt0), GetRValue(alt0), 255 };
-        RGBQUAD c1 = { GetBValue(alt1), GetGValue(alt1), GetRValue(alt1), 255 };
-        const int nPix = fw * fh;
-        for (int i = 0; i < nPix; ++i) pq[i] = c0;
+    static HBITMAP s_hDib = NULL;
+    static void* s_bits = nullptr;
+    static HDC s_mem = NULL;
+    static HGDIOBJ s_old = NULL;
+    static int s_capW = 0, s_capH = 0;
+    if (!s_hDib || !s_bits || !s_mem || s_capW < fw || s_capH < fh) {
+        if (s_mem) {
+            if (s_old) ::SelectObject(s_mem, s_old);
+            ::DeleteDC(s_mem);
+            s_mem = NULL;
+            s_old = NULL;
+        }
+        if (s_hDib) { ::DeleteObject(s_hDib); s_hDib = NULL; }
+        s_bits = nullptr;
+        int capW = s_capW > 0 ? s_capW : 64;
+        int capH = s_capH > 0 ? s_capH : 64;
+        while (capW < fw) {
+            if (capW > 16384) { capW = fw; break; }
+            capW *= 2;
+        }
+        while (capH < fh) {
+            if (capH > 16384) { capH = fh; break; }
+            capH *= 2;
+        }
+        BITMAPINFO bi = {};
+        bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+        bi.bmiHeader.biWidth = capW;
+        bi.bmiHeader.biHeight = -capH;
+        bi.bmiHeader.biPlanes = 1;
+        bi.bmiHeader.biBitCount = 32;
+        bi.bmiHeader.biCompression = BI_RGB;
+        s_hDib = ::CreateDIBSection(hdc, &bi, DIB_RGB_COLORS, &s_bits, nullptr, 0);
+        if (s_hDib && s_bits) {
+            s_mem = ::CreateCompatibleDC(hdc);
+            if (s_mem) {
+                s_old = ::SelectObject(s_mem, s_hDib);
+                s_capW = capW;
+                s_capH = capH;
+            }
+        }
+        if (!s_hDib || !s_bits || !s_mem) {
+            if (s_mem) {
+                if (s_old) ::SelectObject(s_mem, s_old);
+                ::DeleteDC(s_mem);
+            }
+            if (s_hDib) ::DeleteObject(s_hDib);
+            s_hDib = NULL;
+            s_mem = NULL;
+            s_old = NULL;
+            s_bits = nullptr;
+            s_capW = s_capH = 0;
+            if (saved) ::RestoreDC(hdc, saved);
+            else ::SelectClipRgn(hdc, NULL);
+            return;
+        }
+    }
+
+    UINT32* pq = (UINT32*)s_bits;
+    const UINT32 c0 = 0xFF000000u | (GetBValue(alt0)) | ((UINT32)GetGValue(alt0) << 8) | ((UINT32)GetRValue(alt0) << 16);
+    const UINT32 c1 = 0xFF000000u | (GetBValue(alt1)) | ((UINT32)GetGValue(alt1) << 8) | ((UINT32)GetRValue(alt1) << 16);
+    for (int yy = 0; yy < fh; ++yy) {
+        UINT32* row = pq + yy * s_capW;
+        for (int x = 0; x < fw; ++x) row[x] = c0;
+    }
+    if (rowH > 0) {
         for (int y = stripeY, idx = stripeIdx; y < rcClient.bottom; y += rowH, ++idx) {
             int rowStart = y - dibTop;
             int rowEnd = rowStart + rowH;
             if (rowStart < 0) rowStart = 0;
             if (rowEnd > fh) rowEnd = fh;
             if (rowStart >= rowEnd) continue;
-            const RGBQUAD c = (idx % 2 == 0) ? c0 : c1;
+            const UINT32 c = (idx % 2 == 0) ? c0 : c1;
+            if (c == c0) continue;
             for (int yy = rowStart; yy < rowEnd; ++yy) {
-                RGBQUAD* row = pq + yy * fw;
+                UINT32* row = pq + yy * s_capW;
                 for (int x = 0; x < fw; ++x) row[x] = c;
             }
         }
-        HDC hdcMem = ::CreateCompatibleDC(hdc);
-        if (hdcMem) {
-            HGDIOBJ old = ::SelectObject(hdcMem, hDib);
-            const BLENDFUNCTION bf = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
-            ::GdiAlphaBlend(hdc, rcClient.left, dibTop, fw, fh, hdcMem, 0, 0, fw, fh, bf);
-            ::SelectObject(hdcMem, old);
-            ::DeleteDC(hdcMem);
-        }
-        ::DeleteObject(hDib);
+    }
+    {
+        const BLENDFUNCTION bf = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
+        ::GdiAlphaBlend(hdc, rcClient.left, dibTop, fw, fh, s_mem, 0, 0, fw, fh, bf);
     }
 
     if (saved)
@@ -9715,64 +9862,87 @@ static void CCC_DrawListCheckBox(CDC* pDC, const CRect& rc, bool checked)
     HDC hdcDst = pDC->GetSafeHdc();
     if (!hdcDst) return;
 
-    BITMAPINFO bi;
-    ZeroMemory(&bi, sizeof(bi));
-    bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-    bi.bmiHeader.biWidth = w;
-    bi.bmiHeader.biHeight = -h; // top-down
-    bi.bmiHeader.biPlanes = 1;
-    bi.bmiHeader.biBitCount = 32;
-    bi.bmiHeader.biCompression = BI_RGB;
-    void* bits = NULL;
-    HBITMAP dib = ::CreateDIBSection(hdcDst, &bi, DIB_RGB_COLORS, &bits, NULL, 0);
-    if (!dib || !bits) {
-        // 最低限の不透明白だけでも文字との区別は付く
-        CCC_FillRectOpaqueBits(hdcDst, rc, RGB(255, 255, 255));
-        return;
+    static HBITMAP s_dib[2] = {};
+    static void* s_bits[2] = {};
+    static HDC s_mem[2] = {};
+    static HGDIOBJ s_old[2] = {};
+    static int s_w = 0, s_h = 0;
+    const int slot = checked ? 1 : 0;
+    if (s_w != w || s_h != h) {
+        for (int i = 0; i < 2; ++i) {
+            if (s_mem[i]) {
+                if (s_old[i]) ::SelectObject(s_mem[i], s_old[i]);
+                ::DeleteDC(s_mem[i]);
+                s_mem[i] = NULL;
+                s_old[i] = NULL;
+            }
+            if (s_dib[i]) { ::DeleteObject(s_dib[i]); s_dib[i] = NULL; }
+            s_bits[i] = NULL;
+        }
+        s_w = s_h = 0;
+    }
+    if (!s_dib[slot] || !s_bits[slot] || !s_mem[slot]) {
+        BITMAPINFO bi;
+        ZeroMemory(&bi, sizeof(bi));
+        bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+        bi.bmiHeader.biWidth = w;
+        bi.bmiHeader.biHeight = -h;
+        bi.bmiHeader.biPlanes = 1;
+        bi.bmiHeader.biBitCount = 32;
+        bi.bmiHeader.biCompression = BI_RGB;
+        s_dib[slot] = ::CreateDIBSection(hdcDst, &bi, DIB_RGB_COLORS, &s_bits[slot], NULL, 0);
+        if (!s_dib[slot] || !s_bits[slot]) {
+            CCC_FillRectOpaqueBits(hdcDst, rc, RGB(255, 255, 255));
+            return;
+        }
+        s_mem[slot] = ::CreateCompatibleDC(hdcDst);
+        if (!s_mem[slot]) {
+            ::DeleteObject(s_dib[slot]);
+            s_dib[slot] = NULL;
+            s_bits[slot] = NULL;
+            CCC_FillRectOpaqueBits(hdcDst, rc, RGB(255, 255, 255));
+            return;
+        }
+        s_old[slot] = ::SelectObject(s_mem[slot], s_dib[slot]);
+        RECT zr = { 0, 0, w, h };
+        HBRUSH brFill = ::CreateSolidBrush(RGB(255, 255, 255));
+        ::FillRect(s_mem[slot], &zr, brFill);
+        ::DeleteObject(brFill);
+
+        HPEN penBorder = ::CreatePen(PS_SOLID, 1, RGB(70, 70, 78));
+        HGDIOBJ oldPen = ::SelectObject(s_mem[slot], penBorder);
+        HGDIOBJ oldBr = ::SelectObject(s_mem[slot], ::GetStockObject(NULL_BRUSH));
+        ::Rectangle(s_mem[slot], 0, 0, w, h);
+        ::SelectObject(s_mem[slot], oldBr);
+
+        if (checked)
+        {
+            const int penW = (std::max)(2, w / 7);
+            HPEN penChk = ::CreatePen(PS_SOLID, penW, RGB(0, 140, 40));
+            ::SelectObject(s_mem[slot], penChk);
+            ::MoveToEx(s_mem[slot], w * 22 / 100, h * 52 / 100, NULL);
+            ::LineTo(s_mem[slot], w * 42 / 100, h * 72 / 100);
+            ::LineTo(s_mem[slot], w * 80 / 100, h * 26 / 100);
+            ::SelectObject(s_mem[slot], penBorder);
+            ::DeleteObject(penChk);
+        }
+
+        ::SelectObject(s_mem[slot], oldPen);
+        ::DeleteObject(penBorder);
+
+        {
+            DWORD* px = (DWORD*)s_bits[slot];
+            const int n = w * h;
+            for (int i = 0; i < n; ++i)
+                px[i] |= 0xFF000000u;
+        }
+        s_w = w;
+        s_h = h;
     }
 
-    HDC mem = ::CreateCompatibleDC(hdcDst);
-    HGDIOBJ oldBmp = ::SelectObject(mem, dib);
-    RECT zr = { 0, 0, w, h };
-    HBRUSH brFill = ::CreateSolidBrush(RGB(255, 255, 255));
-    ::FillRect(mem, &zr, brFill);
-    ::DeleteObject(brFill);
-
-    HPEN penBorder = ::CreatePen(PS_SOLID, 1, RGB(70, 70, 78));
-    HGDIOBJ oldPen = ::SelectObject(mem, penBorder);
-    HGDIOBJ oldBr = ::SelectObject(mem, ::GetStockObject(NULL_BRUSH));
-    ::Rectangle(mem, 0, 0, w, h);
-    ::SelectObject(mem, oldBr);
-
-    if (checked)
-    {
-        const int penW = (std::max)(2, w / 7);
-        HPEN penChk = ::CreatePen(PS_SOLID, penW, RGB(0, 140, 40));
-        ::SelectObject(mem, penChk);
-        ::MoveToEx(mem, w * 22 / 100, h * 52 / 100, NULL);
-        ::LineTo(mem, w * 42 / 100, h * 72 / 100);
-        ::LineTo(mem, w * 80 / 100, h * 26 / 100);
-        ::SelectObject(mem, penBorder);
-        ::DeleteObject(penChk);
-    }
-
-    ::SelectObject(mem, oldPen);
-    ::DeleteObject(penBorder);
-
-    // 全画素 α=255（透過禁止）
-    {
-        DWORD* px = (DWORD*)bits;
-        const int n = w * h;
-        for (int i = 0; i < n; ++i)
-            px[i] |= 0xFF000000u;
-    }
     const BLENDFUNCTION bf = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
-    if (!::GdiAlphaBlend(hdcDst, rc.left, rc.top, w, h, mem, 0, 0, w, h, bf))
+    if (!::GdiAlphaBlend(hdcDst, rc.left, rc.top, w, h, s_mem[slot], 0, 0, w, h, bf))
         CCC_FillRectOpaqueBits(hdcDst, rc, RGB(255, 255, 255));
-
-    ::SelectObject(mem, oldBmp);
-    ::DeleteDC(mem);
-    ::DeleteObject(dib);
 }
 
 // SUBITEM でセル全面を自前描画し CDRF_SKIPDEFAULT。
@@ -14867,7 +15037,9 @@ class CCustomOpaqueFixer
 public:
     // ガラス上の子 HWND を不透明面にする。clrBg は穴埋め、bChroma はキー抜き。
     // Install で SetWindowSubclass。親の ExtendFrame(-1) があると GDI が消えるため必須。
-    CCustomOpaqueFixer(COLORREF clrBg, BOOL bChroma = FALSE) : m_hWnd(NULL), m_bPrinting(FALSE), m_clrBg(clrBg), m_bChroma(bChroma) {}
+    CCustomOpaqueFixer(COLORREF clrBg, BOOL bChroma = FALSE)
+        : m_hWnd(NULL), m_bPrinting(FALSE), m_clrBg(clrBg), m_bChroma(bChroma)
+        , m_clsKind(0), m_ncOpaque(FALSE) {}
     // サブクラスと DIB キャッシュを外す。ダイアログ OnDestroy からも呼ばれる。
     ~CCustomOpaqueFixer() { Uninstall(); }
 
@@ -14878,6 +15050,19 @@ public:
         if (m_hWnd) return FALSE;
         if (!::IsWindow(hWnd)) return FALSE;
         m_hWnd = hWnd;
+        {
+            wchar_t cls[32] = {};
+            ::GetClassNameW(hWnd, cls, 32);
+            if (::_wcsicmp(cls, L"Edit") == 0) m_clsKind = 1;
+            else if (::_wcsicmp(cls, L"ListBox") == 0) m_clsKind = 2;
+            else if (::_wcsicmp(cls, L"ComboBox") == 0) m_clsKind = 3;
+            else if (::_wcsicmp(cls, L"SysListView32") == 0) m_clsKind = 4;
+            else if (::_wcsicmp(cls, L"SysTreeView32") == 0) m_clsKind = 5;
+            else if (::_wcsicmp(cls, L"SysTabControl32") == 0) m_clsKind = 6;
+            else if (::_wcsicmp(cls, L"SysHeader32") == 0) m_clsKind = 7;
+            else m_clsKind = 0;
+            m_ncOpaque = CCC_FixerNeedsNcOpaque(hWnd);
+        }
         return ::SetWindowSubclass(hWnd, SubclassProc, (UINT_PTR)this, (DWORD_PTR)this);
     }
 
@@ -14896,6 +15081,8 @@ private:
     BOOL m_bPrinting;      // WM_PRINTCLIENT 再入中。PaintOpaque を重ねない
     COLORREF m_clrBg;      // 穴埋め色（リスト交互色の下地）
     BOOL m_bChroma;        // TRUE=キー抜き（ラベル等）。FALSE=全面 α=255
+    int m_clsKind;         // 1 Edit 2 ListBox 3 Combo 4 LV 5 Tree 6 Tab 7 Header
+    BOOL m_ncOpaque;       // WM_NCPAINT で全面 PaintOpaque が必要
     CCC_ChromaBlitCache m_dib;
 
     // ガラス上では子の GDI が α=0 のまま DWM 合成され消える。
@@ -14947,7 +15134,7 @@ private:
         {
             // スクロールバー/枠付きだけ NC 不透明化。Button/Slider まで全面 PaintOpaque
             // すると最大化で子が1個ずつ描画されて見える。
-            if (!CCC_FixerNeedsNcOpaque(hWnd))
+            if (!pThis->m_ncOpaque)
                 return ::DefSubclassProc(hWnd, uMsg, wParam, lParam);
             LRESULT lRes = ::DefSubclassProc(hWnd, uMsg, wParam, lParam);
             HDC hDC = ::GetDC(hWnd);
@@ -14967,12 +15154,7 @@ private:
         case WM_NCMOUSEMOVE:
         case WM_NCMOUSELEAVE:
         {
-            wchar_t cls[32];
-            cls[0] = 0;
-            ::GetClassNameW(hWnd, cls, 32);
-            if (::_wcsicmp(cls, L"Edit") != 0
-                && ::_wcsicmp(cls, L"ListBox") != 0
-                && ::_wcsicmp(cls, L"ComboBox") != 0)
+            if (pThis->m_clsKind != 1 && pThis->m_clsKind != 2 && pThis->m_clsKind != 3)
                 break;
             LRESULT lRes = ::DefSubclassProc(hWnd, uMsg, wParam, lParam);
             // 連続 WM_MOUSEMOVE は Post でまとめて再不透明化
@@ -14986,16 +15168,12 @@ private:
         case WM_LBUTTONDBLCLK:
         case WM_LBUTTONUP:
         {
-            wchar_t cls[32];
-            cls[0] = 0;
-            ::GetClassNameW(hWnd, cls, 32);
-            if (::_wcsicmp(cls, L"SysListView32") == 0
-                || ::_wcsicmp(cls, L"SysTreeView32") == 0) {
+            if (pThis->m_clsKind == 4 || pThis->m_clsKind == 5) {
                 LRESULT lRes = ::DefSubclassProc(hWnd, uMsg, wParam, lParam);
                 ::PostMessage(hWnd, CCC_WM_POST_OPAQUE_PAINT, 0, 0);
                 return lRes;
             }
-            if (::_wcsicmp(cls, L"ListBox") != 0)
+            if (pThis->m_clsKind != 2)
                 break;
             ::SendMessage(hWnd, WM_SETREDRAW, FALSE, 0);
             LRESULT lRes = ::DefSubclassProc(hWnd, uMsg, wParam, lParam);
@@ -15019,10 +15197,7 @@ private:
         case WM_CLEAR:
         case WM_UNDO:
         {
-            wchar_t cls[32];
-            cls[0] = 0;
-            ::GetClassNameW(hWnd, cls, 32);
-            if (::_wcsicmp(cls, L"Edit") != 0)
+            if (pThis->m_clsKind != 1)
                 break;
             ::SendMessage(hWnd, WM_SETREDRAW, FALSE, 0);
             LRESULT lRes = ::DefSubclassProc(hWnd, uMsg, wParam, lParam);
@@ -15038,13 +15213,9 @@ private:
         }
         case WM_KEYDOWN:
         {
-            wchar_t cls[32];
-            cls[0] = 0;
-            ::GetClassNameW(hWnd, cls, 32);
             // ListBox: 矢印等で選択が動くときも α=0 部分描画になる
             // ListView: SETREDRAW せず Post(ホバーと同じ)。Combo キーボードは DrawItem 側。
-            if (::_wcsicmp(cls, L"SysListView32") == 0
-                || ::_wcsicmp(cls, L"SysTreeView32") == 0) {
+            if (pThis->m_clsKind == 4 || pThis->m_clsKind == 5) {
                 const WPARAM vk = wParam;
                 const BOOL nav = (vk == VK_UP || vk == VK_DOWN || vk == VK_LEFT || vk == VK_RIGHT
                     || vk == VK_PRIOR || vk == VK_NEXT || vk == VK_HOME || vk == VK_END
@@ -15055,7 +15226,7 @@ private:
                 ::PostMessage(hWnd, CCC_WM_POST_OPAQUE_PAINT, 0, 0);
                 return lRes;
             }
-            if (::_wcsicmp(cls, L"ListBox") == 0) {
+            if (pThis->m_clsKind == 2) {
                 const WPARAM vk = wParam;
                 const BOOL nav = (vk == VK_UP || vk == VK_DOWN || vk == VK_LEFT || vk == VK_RIGHT
                     || vk == VK_PRIOR || vk == VK_NEXT || vk == VK_HOME || vk == VK_END
@@ -15074,7 +15245,7 @@ private:
                 ::ValidateRect(hWnd, NULL);
                 return lRes;
             }
-            if (::_wcsicmp(cls, L"Edit") != 0)
+            if (pThis->m_clsKind != 1)
                 break;
             const WPARAM vk = wParam;
             const BOOL ctrl = (::GetKeyState(VK_CONTROL) & 0x8000) != 0;
@@ -15096,10 +15267,7 @@ private:
         }
         case WM_IME_STARTCOMPOSITION:
         {
-            wchar_t cls[32];
-            cls[0] = 0;
-            ::GetClassNameW(hWnd, cls, 32);
-            if (::_wcsicmp(cls, L"Edit") != 0)
+            if (pThis->m_clsKind != 1)
                 break;
             LRESULT lRes = ::DefSubclassProc(hWnd, uMsg, wParam, lParam);
             if (CWnd* pw = CWnd::FromHandlePermanent(hWnd)) {
@@ -15110,10 +15278,7 @@ private:
         }
         case WM_IME_COMPOSITION:
         {
-            wchar_t cls[32];
-            cls[0] = 0;
-            ::GetClassNameW(hWnd, cls, 32);
-            if (::_wcsicmp(cls, L"Edit") != 0)
+            if (pThis->m_clsKind != 1)
                 break;
             // 変換中も IME 位置をキャレットへ追従。確定時は不透明再描画。
             LRESULT lRes = ::DefSubclassProc(hWnd, uMsg, wParam, lParam);
@@ -15141,11 +15306,8 @@ private:
             // キャプション常時アクリル下では、ListView の中間描画(ジャケ/♪の透明画素)が
             // α=0 のまま画面に載り一瞬ガラスが見える=ちらつき。描画を止めてから
             // 全面 MakeOpaque 1回だけ出す。部分 MakeOpaque は本文透過になるので使わない。
-            wchar_t cls[32];
-            cls[0] = 0;
-            ::GetClassNameW(hWnd, cls, 32);
-            const BOOL bList = (::_wcsicmp(cls, L"SysListView32") == 0);
-            const BOOL bTree = (::_wcsicmp(cls, L"SysTreeView32") == 0);
+            const BOOL bList = (pThis->m_clsKind == 4);
+            const BOOL bTree = (pThis->m_clsKind == 5);
             if (bList || bTree)
                 ::SendMessage(hWnd, WM_SETREDRAW, FALSE, 0);
             LRESULT lRes = ::DefSubclassProc(hWnd, uMsg, wParam, lParam);

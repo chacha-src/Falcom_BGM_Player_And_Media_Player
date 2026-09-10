@@ -6,7 +6,8 @@
 
 /* PC/AT hard: NP2 i286 + DOS + AdLib/SB OPL @0x388 + CMS SAA @0x220 +
    PC speaker (PIT2+0x61) + MPU-401 UART @0x330 + hoot EXT.
-   Subtypes: adlib/opl/sb16, gameblaster/cms, beep, midiout (MPU capture). */
+   Subtypes: adlib/opl/sb16, gameblaster/cms, beep, tandy (SN76496 @0xC0),
+   ps1 (IBM PS/1 Audio SN @0x200), midiout (MPU capture). */
 
 enum { CEMU_PCAT_MIDI_CAP = 256000 };
 
@@ -83,6 +84,7 @@ public:
 	   other INT 7Fh glues (CODE.COM, HOOT.EXE, PMDL_AT), where they smash
 	   unrelated glue data and, via the song memcpy, the loaded driver. */
 	int modeSilp_;
+	int modePs1_; /* IBM PS/1 Audio Card (IBMCARD.DRV, ports 0x200-0x206) */
 	char hootAdvName_[16]; /* e.g. ADLIB.ADV / SBP2FM.ADV */
 	uint16_t hootAdvSeg_; /* resident AIL .ADV image for HOOT register_driver */
 	unsigned hootAdvSize_;
@@ -121,6 +123,7 @@ private:
 	CChip* chip_;
 	CChip* saa1_;
 	CChip* saa2_;
+	CChip* sn764_;
 	int sampleRate_;
 	int active_;
 	CEmuDos98 dos_;

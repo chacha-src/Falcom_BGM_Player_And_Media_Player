@@ -268,15 +268,25 @@ void CEmuDos98::InstallDosStructures(uint8_t* mem, unsigned memKb, const char* b
 	Wr16(mem, DosLin(seg, 0x42), seg);
 	Wr16(mem, DosLin(seg, 0x44), 0x0001);
 
-	/* IBM PC BIOS data area @ 0040:0000 — HOOT/AIL divide by memsize. */
+	/* IBM PC BIOS data area @ 0040:0000 — HOOT/AIL divide by memsize.
+	   Keep serial/parallel counts at 0 (and COM/LPT base words 0) so a
+	   MIDI stack does not walk 3F8h instead of the MPU at 330h. */
 	memset(mem + 0x400, 0, 0x100);
-	Wr16(mem, 0x410, 0x0021); /* equipment: diskette + 80x25 + game port */
+	Wr16(mem, 0x410, 0x0021); /* equipment: diskette + 80x25 color */
 	if (memKb < 64) memKb = 64;
 	if (memKb > 640) memKb = 640;
 	Wr16(mem, 0x413, (uint16_t)memKb);
+	/* Keyboard ring must sit inside 0040:001E..003D. Head=tail=0 made
+	   INT 16 walk the IVT as if it were the type-ahead buffer. */
+	Wr16(mem, 0x41A, 0x001E);
+	Wr16(mem, 0x41C, 0x001E);
+	Wr16(mem, 0x480, 0x001E);
+	Wr16(mem, 0x482, 0x003E);
 	mem[0x449] = 0x03;        /* video mode 80x25 color */
 	Wr16(mem, 0x44A, 80);     /* columns */
 	Wr16(mem, 0x463, 0x3D4);  /* CRT port */
+	mem[0x484] = 24;          /* EGA rows-1; 0 looks like a 1-line screen */
+	Wr16(mem, 0x485, 16);     /* character height */
 	Wr16(mem, 0x46C, 0);      /* timer ticks low */
 	Wr16(mem, 0x46E, 0);      /* timer ticks high */
 
@@ -662,6 +672,40 @@ int CEmuDos98::LoadDeviceImage(uint8_t* mem, const char* name, uint16_t* outSeg,
 		const unsigned allocBytes = paras * 16u;
 		memset(mem + lin, 0, allocBytes);
 		memcpy(mem + lin, data, size);
+		uint8_t* img = mem + lin;
+		/* Patch by the SYS header name so catalog spelling cannot miss. */
+		if (size > 18) {
+			if (memcmp(img + 10, "$MUSE2$", 7) == 0) {
+				if (size > 0xE4u && img[0xE2] == 0xBC && img[0xE3] == 0x5F
+					&& img[0xE4] == 0x00) {
+					img[0xE3] = 0x00;
+					img[0xE4] = 0x3E;
+				}
+				if (size > 0x555u && img[0x553] == 0xBC && img[0x554] == 0x9F
+					&& img[0x555] == 0x00) {
+					img[0x554] = 0x00;
+					img[0x555] = 0x2E;
+				}
+			}
+			if (memcmp(img + 10, "$NMUSE$", 7) == 0
+				&& size > 0x648u && img[0x647] == 0xFF && img[0x648] == 0xFF) {
+				/* rakuichi: unprobed port sentinel. Preset 188h / INT14
+				   slot so INIT does not skip plant when IN 288/088/188
+				   all look like open-bus. NOP the ymfm busy spin. */
+				img[0x647] = 0x88;
+				img[0x648] = 0x01;
+				if (size > 0x654u && img[0x653] == 0 && img[0x654] == 0)
+					img[0x653] = 0x50;
+				for (unsigned i = 0; i + 4 < size && i + 4 < 0x1200u; i++) {
+					if (img[i] == 0xEC && img[i + 1] == 0xD0 && img[i + 2] == 0xD0
+						&& img[i + 3] == 0x72 && img[i + 4] == 0xFB) {
+						img[i + 3] = 0x90;
+						img[i + 4] = 0x90;
+						break;
+					}
+				}
+			}
+		}
 	}
 	*outSeg = seg;
 	if (outStratOff) *outStratOff = stratEarly;
@@ -1002,6 +1046,12 @@ void CEmuDos98::SetAl(uint8_t v)
 	np2_reg_set(NP2_R_AX, (uint16_t)((ax & 0xff00) | v));
 }
 
+static void SetAh(uint8_t v)
+{
+	uint16_t ax = np2_reg_get(NP2_R_AX);
+	np2_reg_set(NP2_R_AX, (uint16_t)((ax & 0x00ff) | ((uint16_t)v << 8)));
+}
+
 void CEmuDos98::SetCf(int on)
 {
 	uint16_t f = np2_reg_get(NP2_R_FLAGS);
@@ -1063,7 +1113,15 @@ void CEmuDos98::Int18()
 	case 0x0E: case 0x0F:
 	case 0x10: case 0x11: case 0x12: case 0x13:
 	case 0x14: case 0x15: case 0x16:
+		SetCf(0);
+		return;
 	case 0x1A: case 0x1B:
+		/* Kanji/CG: same empty font INT 1Ah parks. Stale ES:BP here
+		   walked into the next COM (rakuichi INT6 @ 1F07:xxxx). */
+		np2_reg_set(NP2_R_ES, DOS98_TRAMP_SEG);
+		np2_reg_set(NP2_R_BP, 0x0210);
+		SetCf(0);
+		return;
 	case 0x21: case 0x30:
 	case 0x40: case 0x41: case 0x42: case 0x43:
 		SetCf(0);
@@ -1578,6 +1636,13 @@ CEmuDos98Result CEmuDos98::ServiceInt(uint8_t* mem, uint8_t vec)
 		trapVec_ = vec;
 		trapIp_ = Rd16(mem, f);
 		trapCs_ = Rd16(mem, f + 2);
+		/* IBM BIOS IRET of #UD/#DE back onto the same IP livelocks the
+		   CPU (s201 CODE.COM dosmiss=int06). Skip the faulting opcode
+		   like a DOS abort stub that resumes after the bad byte. */
+		if (pcAtBios_ && (vec == 0x06 || vec == 0x00)) {
+			const uint16_t skip = (vec == 0x00) ? 2u : 1u;
+			Wr16(mem, f, (uint16_t)(trapIp_ + skip));
+		}
 	}
 	if (!idlePoll
 		&& (traceOn_ == 1 || (traceOn_ == 2 && traceCount_ < kTraceMax))) {
@@ -1643,29 +1708,140 @@ CEmuDos98Result CEmuDos98::ServiceIntInner(uint8_t* mem, uint8_t vec)
 		SetCf(0);
 		return DOS98_CONTINUE;
 	case 0x11:
-		np2_reg_set(NP2_R_AX, 0x0021);
+		np2_reg_set(NP2_R_AX, Rd16(mem, 0x410));
 		SetCf(0);
 		return DOS98_CONTINUE;
 	case 0x12:
-		np2_reg_set(NP2_R_AX, 640);
+		np2_reg_set(NP2_R_AX, Rd16(mem, 0x413));
 		SetCf(0);
 		return DOS98_CONTINUE;
-	case 0x15:
-		if (Ah() == 0x88)
+	case 0x13:
+		/* IBM disk BIOS. PC-98 uses INT 1Bh; answering 13h there would
+		   surprise glue that left the vector on the trampoline. */
+		if (!pcAtBios_) {
+			unhandledVec_[vec] = 1;
+			return DOS98_CONTINUE;
+		}
+		switch (Ah()) {
+		case 0x00:
+		case 0x01:
+			SetAh(0);
+			SetCf(0);
+			break;
+		case 0x08:
 			np2_reg_set(NP2_R_AX, 0);
-		else
-			SetAl(0);
-		SetCf(0);
+			np2_reg_set(NP2_R_BX, 0x0004); /* 1.44M type */
+			np2_reg_set(NP2_R_CX, 0x4F12); /* 80 cyl, 18 sec */
+			np2_reg_set(NP2_R_DX, 0x0101); /* 2 heads, 1 drive */
+			SetCf(0);
+			break;
+		case 0x15:
+			SetAh(0); /* no DASD */
+			SetCf(0);
+			break;
+		default:
+			SetAh(0x01);
+			SetCf(1);
+			break;
+		}
+		return DOS98_CONTINUE;
+	case 0x14:
+		if (!pcAtBios_) {
+			unhandledVec_[vec] = 1;
+			return DOS98_CONTINUE;
+		}
+		/* 8250 BIOS. No COM bases in the BDA, so status looks idle and
+		   a receive times out instead of spinning on 3F8h. */
+		switch (Ah()) {
+		case 0x02:
+			SetAh(0x80);
+			SetCf(1);
+			break;
+		default:
+			SetAh(0x20);
+			SetAl(0x10);
+			SetCf(0);
+			break;
+		}
+		return DOS98_CONTINUE;
+	case 0x15:
+		if (!pcAtBios_) {
+			if (Ah() == 0x88)
+				np2_reg_set(NP2_R_AX, 0);
+			else
+				SetAl(0);
+			SetCf(0);
+			return DOS98_CONTINUE;
+		}
+		switch (Ah()) {
+		case 0x88:
+			np2_reg_set(NP2_R_AX, 0); /* 1 MB ISA, no extended */
+			SetCf(0);
+			break;
+		case 0xC0:
+			/* System config. Returning CF=0 with ES:BX untouched made
+			   wibarm/tfatman read a random word as the model/submodel. */
+			np2_reg_set(NP2_R_ES, 0xF000);
+			np2_reg_set(NP2_R_BX, 0xE000);
+			SetAh(0);
+			SetCf(0);
+			break;
+		case 0x86: {
+			const uint32_t us = ((uint32_t)np2_reg_get(NP2_R_CX) << 16)
+				| (uint32_t)np2_reg_get(NP2_R_DX);
+			uint32_t add = us / 54925u;
+			if (add == 0) add = 1;
+			uint32_t t = (uint32_t)Rd16(mem, 0x46C)
+				| ((uint32_t)Rd16(mem, 0x46E) << 16);
+			t += add;
+			Wr16(mem, 0x46C, (uint16_t)t);
+			Wr16(mem, 0x46E, (uint16_t)(t >> 16));
+			SetAh(0);
+			SetCf(0);
+			break;
+		}
+		default:
+			SetAh(0x86);
+			SetCf(1);
+			break;
+		}
 		return DOS98_CONTINUE;
 	case 0x16:
 		if (Ah() == 0x01) {
 			SetAl(0);
 			SetZf(1);
+		} else if (Ah() == 0x02) {
+			SetAl(mem[0x417]);
+			SetZf(0);
 		} else {
 			SetAl(0);
 			SetZf(0);
 		}
 		SetCf(0);
+		return DOS98_CONTINUE;
+	case 0x17:
+		if (!pcAtBios_) {
+			unhandledVec_[vec] = 1;
+			return DOS98_CONTINUE;
+		}
+		SetAh(0x90); /* selected, no error */
+		SetCf(0);
+		return DOS98_CONTINUE;
+	case 0x33:
+		/* Mouse. HOOT does AX=0 / CMP AX,FFFF; "not installed" is AX=0. */
+		np2_reg_set(NP2_R_AX, 0);
+		np2_reg_set(NP2_R_BX, 0);
+		SetCf(0);
+		return DOS98_CONTINUE;
+	case 0x67:
+		if (!pcAtBios_) {
+			unhandledVec_[vec] = 1;
+			return DOS98_CONTINUE;
+		}
+		/* EMS not present. Leaving AH unchanged after AH=40h looks like
+		   "status OK" and the next EMM call then far-calls the HLT stub. */
+		SetAh(0x80);
+		SetCf(1);
 		return DOS98_CONTINUE;
 	/* PC-98 disk BIOS. Real media is never here; CF-clear + AH=0 matches
 	   the IRET stub BootDos parks for non-DOS packs (a failed read is fatal). */
@@ -1705,6 +1881,12 @@ CEmuDos98Result CEmuDos98::ServiceIntInner(uint8_t* mem, uint8_t vec)
 			t++;
 			Wr16(mem, 0x46C, (uint16_t)(t & 0xffff));
 			Wr16(mem, 0x46E, (uint16_t)(t >> 16));
+			/* PC-98 BIOS daily timer at 0000:05A0 (not IBM 0040:006C). */
+			uint32_t t98 = (uint32_t)Rd16(mem, 0x5A0)
+				| ((uint32_t)Rd16(mem, 0x5A2) << 16);
+			t98++;
+			Wr16(mem, 0x5A0, (uint16_t)(t98 & 0xffff));
+			Wr16(mem, 0x5A2, (uint16_t)(t98 >> 16));
 		}
 		SetCf(0);
 		return DOS98_CONTINUE;
@@ -1766,9 +1948,16 @@ CEmuDos98Result CEmuDos98::ServiceIntInner(uint8_t* mem, uint8_t vec)
 			SetCf(0);
 			break;
 		}
+		case 0x03:
+		case 0x05:
+			SetCf(0);
+			break;
 		case 0x04:
 			np2_reg_set(NP2_R_CX, 0x1996);
 			np2_reg_set(NP2_R_DX, 0x1224);
+			SetCf(0);
+			break;
+		case 0x07:
 			SetCf(0);
 			break;
 		default:

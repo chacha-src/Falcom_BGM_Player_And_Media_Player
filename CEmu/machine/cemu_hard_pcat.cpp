@@ -2,11 +2,13 @@
 #include "cemu_hard_pcat.h"
 #include "../chip/cemu_chip_opl.h"
 #include "../chip/cemu_chip_saa1099.h"
+#include "../chip/cemu_chip_sn76489.h"
 #include "../fmmon/fmmon_shadow.h"
 #include "../vendor/np2/np2ffi.h"
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <stdarg.h>
 
 /* CEMU_PCAT_IVT=<path>: one record per play poke naming the vector we fire,
    the vectors the guest actually owns, and how much the sound hardware moved.
@@ -373,6 +375,239 @@ int PatchMokHootIdleCalls(uint8_t* mem, uint16_t psp, unsigned imageSize)
 	return n;
 }
 
+/* Infogrames code.com MZ load: `minalloc - header_paras` extra. Real DOS
+   adds minalloc paragraphs after the image. ASOUND.DRV BSS (play-enable at
+   DGROUP:19AAh, voice tables) sits in that extra; the subtract leaves only
+   48 bytes and the tick path sees [19AA]==0 → keys=0. NOP the subtract so
+   extra is minalloc*16 (and SS:SP at 0x30A still fits). */
+void PatchInfogramesMzExtra(uint8_t* mem, uint16_t psp, CEmuDos98& dos)
+{
+	(void)dos;
+	if (!mem || psp < 0x0100) return;
+	const unsigned img = ((unsigned)psp << 4) + 0x100u;
+	if (img + 8 >= 0x200000) return;
+	/* `sub cx,[033F]` — header paras. Scan the tiny COM; zip/XML spelling
+	   of ASOUND.DRV must not gate this. */
+	for (unsigned i = 0; i + 4 < 0x400 && img + i + 4 < 0x200000; i++) {
+		if (mem[img + i] == 0x2B && mem[img + i + 1] == 0x0E
+			&& mem[img + i + 2] == 0x3F && mem[img + i + 3] == 0x03) {
+			mem[img + i] = 0x90;
+			mem[img + i + 1] = 0x90;
+			mem[img + i + 2] = 0x90;
+			mem[img + i + 3] = 0x90;
+			break;
+		}
+	}
+}
+
+static uint16_t PcatMem16(const uint8_t* mem, unsigned addr)
+{
+	if (addr + 1 >= 0x200000) return 0;
+	return (uint16_t)(mem[addr] | (mem[addr + 1] << 8));
+}
+
+static void PcatPut16(uint8_t* mem, unsigned addr, uint16_t v)
+{
+	if (addr + 1 >= 0x200000) return;
+	mem[addr] = (uint8_t)(v & 0xff);
+	mem[addr + 1] = (uint8_t)(v >> 8);
+}
+
+/* Sword of the Samurai ASOUND.DRV (vtable play=0868 tick=0886): CODE.COM
+   copies the MZ header+image to one alloc and applies relocs with that
+   base, so image-relative relocs land 512 bytes early and INT 7Fh reads
+   the reloc table as the vtable (play offset 0008 → keys=0). tf1942 uses
+   a different vtable (10A8/10FD) and already plays — do not touch it.
+   Retarget CS:0349/0354/0358 to the image and slide those relocs. */
+void RepairAsoundPlayEnable(uint8_t* mem)
+{
+	if (!mem) return;
+	const uint16_t comCs = (uint16_t)(mem[0x7F * 4 + 2] | (mem[0x7F * 4 + 3] << 8));
+	if (comCs < 0x0100 || comCs >= 0xA000 || comCs == DOS98_TRAMP_SEG)
+		return;
+	const unsigned com = (unsigned)comCs << 4;
+	if (com + 0x35A >= 0x200000) return;
+	/* CODE.COM [0349] often lands on the MZ header or on zeroed extra, not
+	   the image. Scan for the play prologue at image+0868 (swords-only). */
+	uint16_t imgCs = 0, fileCs = 0, hdrParas = 0;
+	for (unsigned s = 0x0100; s < 0xA000; s++) {
+		const unsigned a = s << 4;
+		if (a + 0x874 >= 0x200000) break;
+		if (mem[a + 0x868] != 0x55 || mem[a + 0x869] != 0x8B || mem[a + 0x86A] != 0xEC)
+			continue;
+		if (mem[a + 0x86E] != 0x83 || mem[a + 0x86F] != 0xFB || mem[a + 0x870] != 0x5C)
+			continue;
+		imgCs = (uint16_t)s;
+		if (s >= 0x20) {
+			const unsigned mz = (s - 0x20) << 4;
+			if (mz + 0x1C < 0x200000 && mem[mz] == 'M' && mem[mz + 1] == 'Z'
+				&& PcatMem16(mem, mz + 8) == 0x20) {
+				fileCs = (uint16_t)(s - 0x20);
+				hdrParas = 0x20;
+			}
+		}
+		break;
+	}
+	if (!imgCs) {
+		const uint16_t cell = PcatMem16(mem, com + 0x349);
+		if (cell < 0x0100 || cell >= 0xA000) return;
+		imgCs = cell;
+	}
+	if (!imgCs || imgCs < 0x0100 || imgCs >= 0xA000) return;
+	{
+		const char* dbg = getenv("CEMU_ASOUND_DBG");
+		if (dbg && dbg[0]) {
+			FILE* df = NULL;
+			if (fopen_s(&df, dbg, "a") == 0 && df) {
+				const unsigned ia = (unsigned)imgCs << 4;
+				fprintf(df, "scan img=%04X file=%04X [349]=%04X play=%04X tick=%04X dg=%04X\n",
+					imgCs, fileCs, PcatMem16(mem, com + 0x349),
+					PcatMem16(mem, ia + 0x34), PcatMem16(mem, ia + 0x36),
+					PcatMem16(mem, ia + 0x2A));
+				fclose(df);
+			}
+		}
+	}
+	const unsigned file = (unsigned)fileCs << 4;
+	const unsigned img = (unsigned)imgCs << 4;
+	if (img + 0x38 >= 0x200000) return;
+	if (PcatMem16(mem, img + 0x34) != 0x0868 || PcatMem16(mem, img + 0x36) != 0x0886)
+		return;
+	/* Image DGROUP word still 014Fh → relocs were applied 512 bytes early. */
+	if (fileCs && hdrParas && PcatMem16(mem, img + 0x2A) == 0x014F) {
+		const uint16_t nreloc = PcatMem16(mem, file + 6);
+		const uint16_t relOff = PcatMem16(mem, file + 0x18);
+		const unsigned hdrBytes = (unsigned)hdrParas << 4;
+		uint16_t relOffs[32];
+		uint16_t nkeep = 0;
+		if (nreloc && nreloc <= 32 && relOff + (unsigned)nreloc * 4u <= hdrBytes) {
+			for (uint16_t i = 0; i < nreloc && nkeep < 32; i++) {
+				const unsigned ent = file + relOff + (unsigned)i * 4u;
+				relOffs[nkeep++] = PcatMem16(mem, ent);
+			}
+			for (uint16_t i = 0; i < nkeep; i++) {
+				const uint16_t off = relOffs[i];
+				const unsigned wrong = file + off;
+				PcatPut16(mem, wrong, (uint16_t)(PcatMem16(mem, wrong) - fileCs));
+				const unsigned right = file + hdrBytes + off;
+				PcatPut16(mem, right, (uint16_t)(PcatMem16(mem, right) + imgCs));
+			}
+		}
+	}
+	PcatPut16(mem, com + 0x349, imgCs);
+	PcatPut16(mem, com + 0x354, imgCs);
+	PcatPut16(mem, com + 0x358, imgCs);
+	uint16_t dgroup = PcatMem16(mem, img + 0x2A);
+	if (dgroup < 0x0100 || dgroup >= 0xA000)
+		dgroup = (uint16_t)(imgCs + 0x14F);
+	for (unsigned o = 0; o + 3 < 0x3000 && img + o + 2 < 0x200000; o++) {
+		if (mem[img + o] == 0xB8 && PcatMem16(mem, img + o + 1) == 0x014F)
+			PcatPut16(mem, img + o + 1, dgroup);
+	}
+	const unsigned aa = ((unsigned)dgroup << 4) + 0x19AAu;
+	if (aa < 0x200000)
+		mem[aa] = 0xFF;
+}
+
+/* Pacific Islands ADLIB.BIN: INT 8 far-calls [21A] (tick=0000, CS at [21C])
+   but INT 7Fh song select uses ES=[218]. If the loader only filled the tick
+   pointer, [218] stays 0, ES writes hit BIOS, and 0x10/0x11 stay the boot
+   default (SAMESONG). volfied's BIN does not contain "Pacific". */
+static int PacificBinAt(const uint8_t* mem, unsigned a)
+{
+	if (a + 0x30 >= 0x200000) return 0;
+	static const char kType[] = "Type : AdLib";
+	static const char kName[] = "Pacific";
+	for (int i = 0; kType[i]; i++) {
+		if (mem[a + 0x12 + (unsigned)i] != (uint8_t)kType[i])
+			return 0;
+	}
+	for (int i = 0; kName[i]; i++) {
+		if (mem[a + 0x28 + (unsigned)i] != (uint8_t)kName[i])
+			return 0;
+	}
+	return 1;
+}
+
+static void RepairPacificIslandsSong(uint8_t* mem, uint16_t extSong)
+{
+	if (!mem) return;
+	const uint16_t comCs = (uint16_t)(mem[0x7F * 4 + 2] | (mem[0x7F * 4 + 3] << 8));
+	if (comCs < 0x0100 || comCs >= 0xA000 || comCs == DOS98_TRAMP_SEG)
+		return;
+	const unsigned com = (unsigned)comCs << 4;
+	if (com + 0x21E >= 0x200000) return;
+	uint16_t drvCs = 0;
+	for (unsigned s = 0x0100; s < 0xA000; s++) {
+		const unsigned a = s << 4;
+		if (PacificBinAt(mem, a)) {
+			drvCs = (uint16_t)s;
+			break;
+		}
+	}
+	if (!drvCs) {
+		drvCs = PcatMem16(mem, com + 0x21C);
+		if (drvCs < 0x0100 || drvCs >= 0xA000)
+			drvCs = PcatMem16(mem, com + 0x218);
+	}
+	if (drvCs < 0x0100 || drvCs >= 0xA000) return;
+	const unsigned drv = (unsigned)drvCs << 4;
+	if (!PacificBinAt(mem, drv) && drv + 0x40 < 0x200000) {
+		int hit = 0;
+		for (unsigned i = 0; i + 7 < 0x80 && drv + i + 7 < 0x200000; i++) {
+			if (mem[drv + i] == 'P' && mem[drv + i + 1] == 'a'
+				&& mem[drv + i + 2] == 'c' && mem[drv + i + 3] == 'i'
+				&& mem[drv + i + 4] == 'f' && mem[drv + i + 5] == 'i'
+				&& mem[drv + i + 6] == 'c') {
+				hit = 1;
+				break;
+			}
+		}
+		if (!hit) return;
+	}
+	/* Point both far pointers at the image before INT 7Fh uses [218]. */
+	PcatPut16(mem, com + 0x216, 0x0004);
+	PcatPut16(mem, com + 0x218, drvCs);
+	PcatPut16(mem, com + 0x21A, 0x0000);
+	PcatPut16(mem, com + 0x21C, drvCs);
+	if (extSong < 0x10 || extSong > 0x20) return;
+	const uint8_t idx = (uint8_t)(extSong - 0x0F);
+	mem[drv + 8] = idx;
+	mem[drv + 9] = 0;
+	mem[drv + 0x5E] = 0;
+	mem[drv + 0x62] = 0;
+	/* 0x41d may ignore [8] and keep table slot 1 (boot default). Point
+	   every used slot at the title's blob so 0x10 and 0x11 diverge. */
+	if (drv + 0x9A8 < 0x200000 && idx >= 1 && idx <= 3) {
+		const uint16_t blob = PcatMem16(mem, drv + 0x9A0 + (unsigned)idx * 2u);
+		if (blob) {
+			for (unsigned i = 0; i <= 3; i++)
+				PcatPut16(mem, drv + 0x9A0 + i * 2u, blob);
+		}
+	}
+	/* 0x41d skips reading [8] while [9]!=0, then sees [5e]==0 and keeps
+	   the boot voices (SAMESONG). Always sample [8]. */
+	if (drv + 0x425 < 0x200000
+		&& mem[drv + 0x423] == 0x75 && mem[drv + 0x424] == 0x06) {
+		mem[drv + 0x423] = 0x90;
+		mem[drv + 0x424] = 0x90;
+	}
+	{
+		const char* dbg = getenv("CEMU_PACI_DBG");
+		if (dbg && dbg[0]) {
+			FILE* df = NULL;
+			if (fopen_s(&df, dbg, "a") == 0 && df) {
+				fprintf(df, "ext=%04X idx=%u drv=%04X [8]=%02X [9]=%02X [5e]=%02X 423=%02X%02X play=%04X\n",
+					extSong, (unsigned)idx, drvCs,
+					mem[drv + 8], mem[drv + 9], mem[drv + 0x5E],
+					mem[drv + 0x423], mem[drv + 0x424],
+					PcatMem16(mem, drv + 0x9A0 + (unsigned)idx * 2u));
+				fclose(df);
+			}
+		}
+	}
+}
+
 /* Resolved once: the hook is on the per-instruction path. */
 PcatIpProf* g_pcatIpProf = NULL;
 
@@ -385,7 +620,215 @@ void PcatIpProfInit()
 	g_pcatIpProf = &inst;
 }
 
+/* HOOT's own INT8 helper: jnb +4 / sub dx,1000h. Azrael/kyrandia already
+   point INT8 here and play; WarCraft 2 / Blackthorne leave AIL CS:0000. */
+int PcatHootInt8Sig(const uint8_t* mem, unsigned lin)
+{
+	if (!mem || lin + 6 >= 0x200000) return 0;
+	return (mem[lin] == 0x73 && mem[lin + 1] == 0x04
+		&& mem[lin + 2] == 0x81 && mem[lin + 3] == 0xEA
+		&& mem[lin + 4] == 0x00 && mem[lin + 5] == 0x10) ? 1 : 0;
+}
+
+void PcatAilTrace(const char* fmt, ...);
+
+int PcatFindHootInt8(const uint8_t* mem, uint16_t* segOut, uint16_t* offOut)
+{
+	if (!mem || !segOut || !offOut) return 0;
+	auto csHasHootIo = [&](uint16_t seg) -> int {
+		if (seg < 0x0100 || seg >= 0xA000) return 0;
+		const unsigned lin = (unsigned)seg << 4;
+		for (unsigned i = 0; i < 0x4000 && lin + i + 3 < 0x200000; i++) {
+			if (mem[lin + i] == 0xBA && mem[lin + i + 1] == 0xE0
+				&& mem[lin + i + 2] == 0x07 && mem[lin + i + 3] == 0xEC)
+				return 1;
+		}
+		return 0;
+	};
+	static const uint16_t kOff[] = { 0x040E, 0x0411, 0x0417, 0x0400, 0 };
+	auto trySeg = [&](uint16_t seg) -> int {
+		for (int i = 0; kOff[i]; i++) {
+			if (!PcatHootInt8Sig(mem, ((unsigned)seg << 4) + kOff[i]))
+				continue;
+			if (!csHasHootIo(seg))
+				continue;
+			*segOut = seg;
+			*offOut = kOff[i];
+			return 1;
+		}
+		return 0;
+	};
+	const uint16_t i7f = (uint16_t)(mem[0x7F * 4 + 2] | (mem[0x7F * 4 + 3] << 8));
+	if (trySeg(i7f)) return 1;
+	/* Blackthorne's HOOT.EXE keeps `in al,07E0h` at CS:~1FD4h. A match
+	   below 1200h (1011:040E) is DOS residue and mutes MPU packs. */
+	for (unsigned s = 0x1200; s < 0x4000; s++) {
+		if ((uint16_t)s == i7f) continue;
+		if (trySeg((uint16_t)s)) return 1;
+	}
+	return 0;
+}
+
+/* AIL2 API stub: `mov ax,APIh / jmp`. HOOT CS:040E is not AIL; FarCallAil
+   that lands there hangs (Hanse irq0 stays at boot count). */
+int PcatSegHasAilApi(const uint8_t* mem, uint16_t seg, uint16_t api)
+{
+	if (!mem || seg < 0x0100 || seg >= 0xA000) return 0;
+	const unsigned base = (unsigned)seg << 4;
+	for (unsigned o = 0; o + 4 < 0x4000; o++) {
+		const unsigned a = base + o;
+		if (a + 4 >= 0x200000) break;
+		if (mem[a] == 0xB8 && mem[a + 1] == (uint8_t)(api & 0xff)
+			&& mem[a + 2] == (uint8_t)(api >> 8) && mem[a + 3] == 0xE9)
+			return 1;
+	}
+	return 0;
+}
+
+int PcatApiTimerAt(const uint8_t* mem, unsigned a)
+{
+	/* AIL2 API_timer: `inc word [CS:0006]` (Hanse/Omar) or `[CS:000E]`
+	   (Lost Vikings) / cld / 6+ register pushes. */
+	if (!mem || a + 24 >= 0x200000) return 0;
+	unsigned s = 0;
+	if (mem[a] == 0xFF && mem[a + 1] == 0x06 && mem[a + 4] == 0xFC
+		&& mem[a + 3] == 0x00 && (mem[a + 2] == 0x06 || mem[a + 2] == 0x0E))
+		s = 5;
+	else
+		return 0;
+	int pushes = 0;
+	for (unsigned i = s; i < s + 16; i++) {
+		if (mem[a + i] >= 0x50 && mem[a + i] <= 0x57)
+			pushes++;
+	}
+	return (pushes >= 6) ? 1 : 0;
+}
+
+unsigned PcatFindApiTimerOff(const uint8_t* mem, uint16_t seg)
+{
+	if (!mem || seg < 0x0100 || seg >= 0xA000) return 0;
+	const unsigned base = (unsigned)seg << 4;
+	for (unsigned o = 0x10; o + 24 < 0x8000; o++) {
+		if (o == 0x040E || o == 0x040F) continue;
+		if (PcatApiTimerAt(mem, base + o))
+			return o;
+	}
+	return 0;
+}
+
+int PcatSegHasApiTimer(const uint8_t* mem, uint16_t seg)
+{
+	return PcatFindApiTimerOff(mem, seg) != 0;
+}
+
+uint16_t PcatFindAilApiCs(const uint8_t* mem, uint16_t skipSeg)
+{
+	if (!mem) return 0;
+	const uint16_t i8Seg = (uint16_t)(mem[0x08 * 4 + 2] | (mem[0x08 * 4 + 3] << 8));
+	const uint16_t i8Off = (uint16_t)(mem[0x08 * 4] | (mem[0x08 * 4 + 1] << 8));
+	/* Hanse/Omar: AIL stubs live in HOOT CS (INT8 = CS:040E). A low-memory
+	   false match at 1200h FarCalls into INT6 and starves IRQ0. */
+	PcatAilTrace("findenter i8=%04X:%04X skip=%04X sig=%d\n",
+		i8Seg, i8Off, skipSeg,
+		PcatHootInt8Sig(mem, ((unsigned)i8Seg << 4) + i8Off));
+	if (i8Seg >= 0x1200 && i8Seg < 0xA000 && i8Seg != skipSeg) {
+		const unsigned base = (unsigned)i8Seg << 4;
+		unsigned hit150 = 0, hit151 = 0;
+		for (unsigned o = 0; o + 4 < 0x8000; o++) {
+			const unsigned a = base + o;
+			if (a + 4 >= 0x200000) break;
+			if (mem[a] != 0xB8 || mem[a + 2] != 0 || mem[a + 3] != 0xE9)
+				continue;
+			if (mem[a + 1] == 150 && !hit150) hit150 = o;
+			if (mem[a + 1] == 151 && !hit151) hit151 = o;
+		}
+		PcatAilTrace("findhits i8=%04X hit150=%04X hit151=%04X off=%04X\n",
+			i8Seg, hit150, hit151, i8Off);
+		if (hit150 && hit151)
+			return i8Seg;
+	}
+	for (unsigned s = 0x1200; s < 0x2000; s++) {
+		if ((uint16_t)s == skipSeg) continue;
+		if ((uint16_t)s == 0x1200 && i8Seg != 0x1200)
+			continue;
+		if (!PcatSegHasApiTimer(mem, (uint16_t)s)) continue;
+		if (PcatSegHasAilApi(mem, (uint16_t)s, 150)
+			&& PcatSegHasAilApi(mem, (uint16_t)s, 151))
+			return (uint16_t)s;
+	}
+	return 0;
+}
+
+/* XMIDI TIMB: count, then {patch,bank}*. Hanse/Lost Vikings GTL files have
+   100+ entries; dumping the first 24 never reaches the patches the song uses. */
+int PcatXmiTimbList(const uint8_t* d, unsigned n, uint16_t* out, int maxn)
+{
+	if (!d || n < 16 || !out || maxn <= 0) return 0;
+	for (unsigned i = 0; i + 12 < n; i++) {
+		if (d[i] != 'F' || d[i + 1] != 'O' || d[i + 2] != 'R' || d[i + 3] != 'M')
+			continue;
+		if (d[i + 8] != 'X' || d[i + 9] != 'M' || d[i + 10] != 'I' || d[i + 11] != 'D')
+			continue;
+		const unsigned formLn = ((unsigned)d[i + 4] << 24) | ((unsigned)d[i + 5] << 16)
+			| ((unsigned)d[i + 6] << 8) | (unsigned)d[i + 7];
+		const unsigned formEnd = i + 8 + formLn;
+		if (formEnd > n) continue;
+		for (unsigned t = i + 12; t + 10 < formEnd && t + 10 < n; t++) {
+			if (d[t] != 'T' || d[t + 1] != 'I' || d[t + 2] != 'M' || d[t + 3] != 'B')
+				continue;
+			const unsigned ln = ((unsigned)d[t + 4] << 24) | ((unsigned)d[t + 5] << 16)
+				| ((unsigned)d[t + 6] << 8) | (unsigned)d[t + 7];
+			if (ln < 2 || t + 8 + ln > n) continue;
+			const unsigned cnt = (unsigned)d[t + 8] | ((unsigned)d[t + 9] << 8);
+			if (cnt == 0 || cnt > 256 || 2u + cnt * 2u > ln) continue;
+			int k = 0;
+			for (unsigned j = 0; j < cnt && k < maxn; j++) {
+				const unsigned pe = d[t + 10 + j * 2];
+				const unsigned be = d[t + 11 + j * 2];
+				out[k++] = (uint16_t)((be << 8) | pe);
+			}
+			return k;
+		}
+	}
+	return 0;
+}
+
+/* Hanse XMI EVNT starts with FF 01 08 "*MERGED*" / "*UNDO*". AIL's XMIDI
+   parser does not skip generic MIDI text metas, so the rest of the track
+   never yields note-ons (OPL writes from 156, keys=0). Zero the tag; XMIDI
+   delay-0 bytes are harmless. Omar/LV have no such tag. */
+void PcatXmiWipeSeqTextMeta(uint8_t* d, unsigned n)
+{
+	static const char* tags[] = { "*MERGED*", "*UNDO*", NULL };
+	if (!d || n < 16) return;
+	for (int t = 0; tags[t]; t++) {
+		const unsigned L = (unsigned)strlen(tags[t]);
+		if (n < 3 + L) continue;
+		for (unsigned p = 0; p + 3 + L <= n; p++) {
+			if (d[p] == 0xFF && d[p + 1] >= 1 && d[p + 1] <= 7
+				&& d[p + 2] == (uint8_t)L
+				&& memcmp(d + p + 3, tags[t], L) == 0)
+				memset(d + p, 0, 3 + L);
+		}
+	}
+}
+
+void PcatAilTrace(const char* fmt, ...)
+{
+	const char* p = getenv("CEMU_PCAT_AIL");
+	if (!p || !p[0]) return;
+	FILE* f = fopen(p, "a");
+	if (!f) return;
+	va_list ap;
+	va_start(ap, fmt);
+	vfprintf(f, fmt, ap);
+	va_end(ap);
+	fclose(f);
+}
+
 } /* namespace */
+
+static int s_pcatHootNullGtl = 0;
 
 #define PCAT_CENSUS(phase) do { \
 	PcatCensus c__; \
@@ -407,6 +850,12 @@ enum {
 	   (TrapVector = IP/2). Parking on INT 0's HLT;IRET pops the DOS
 	   stack and CODE.COM resumes in zeroed RAM (IP 12C0). */
 	PCAT_IDLE_IP = 0x0250,
+	PIC_SLAVE_CMD = 0xA0,
+	PIC_SLAVE_MASK = 0xA1,
+	KBC_DATA = 0x60,
+	KBC_STAT = 0x64,
+	CMOS_ADDR = 0x70,
+	CMOS_DATA = 0x71,
 	/* AdLib / SB OPL */
 	ADLIB_ADDR = 0x388,
 	ADLIB_DATA = 0x389,
@@ -434,6 +883,70 @@ enum {
 
 static CHardPcat* g_pcatActive = NULL;
 static int g_pcatEoi = 0;
+
+/* IBM AT CMOS / slave 8259 / 8042. File-static so CHardPcat stays unchanged
+   (any new member forces a full k2 rebuild of every object that includes the
+   header). */
+static uint8_t s_cmosIdx;
+static uint8_t s_cmos[128];
+static uint8_t s_picSlaveMask;
+static uint8_t s_picSlaveIcw;
+static uint8_t s_picSlaveIcw1;
+
+static void PcatCmosInit()
+{
+	memset(s_cmos, 0, sizeof(s_cmos));
+	s_cmosIdx = 0;
+	s_picSlaveMask = 0xFF;
+	s_picSlaveIcw = 0;
+	s_picSlaveIcw1 = 0;
+	s_cmos[0x0A] = 0x26; /* 32.768 kHz, rate 6 */
+	s_cmos[0x0B] = 0x02; /* 24-hour */
+	s_cmos[0x0D] = 0x80; /* battery good */
+	s_cmos[0x10] = 0x40; /* 1.44M floppy */
+	s_cmos[0x14] = 0x21; /* match BDA equipment */
+	s_cmos[0x15] = 0x80; /* base 640K */
+	s_cmos[0x16] = 0x02;
+	s_cmos[0x32] = 0x19; /* century BCD */
+	s_cmos[0x07] = 0x24;
+	s_cmos[0x08] = 0x12;
+	s_cmos[0x09] = 0x96;
+	uint16_t sum = 0;
+	for (unsigned i = 0x10; i <= 0x2D; i++)
+		sum = (uint16_t)(sum + s_cmos[i]);
+	s_cmos[0x2E] = (uint8_t)(sum >> 8);
+	s_cmos[0x2F] = (uint8_t)sum;
+}
+
+static void PlantAtBiosRom(uint8_t* mem)
+{
+	if (!mem) return;
+	/* INT 15h AH=C0 table at F000:E000 — model FC / submodel 01 (5170).
+	   Feature 0x74 = 2nd 8259 + RTC + wait; no EBDA bit. */
+	mem[0xFE000] = 8;
+	mem[0xFE001] = 0;
+	mem[0xFE002] = 0xFC;
+	mem[0xFE003] = 0x01;
+	mem[0xFE004] = 0x00;
+	mem[0xFE005] = 0x74;
+	mem[0xFE006] = 0;
+	mem[0xFE007] = 0;
+	mem[0xFE008] = 0;
+	mem[0xFE009] = 0;
+	/* Dummy POST so a far jump through the reset vector does not fetch 00. */
+	mem[0xFE05B] = 0xFB; /* STI */
+	mem[0xFE05C] = 0xF4; /* HLT */
+	mem[0xFE05D] = 0xEB;
+	mem[0xFE05E] = 0xFD;
+	mem[0xFFFF0] = 0xEA; /* JMP F000:E05B */
+	mem[0xFFFF1] = 0x5B;
+	mem[0xFFFF2] = 0xE0;
+	mem[0xFFFF3] = 0x00;
+	mem[0xFFFF4] = 0xF0;
+	memcpy(mem + 0xFFFF5, "01/01/88", 8);
+	mem[0xFFFFE] = 0xFC; /* IBM AT */
+	mem[0xFFFFF] = 0x00;
+}
 
 static void PcatOut8(unsigned port, unsigned char val)
 {
@@ -523,10 +1036,12 @@ CHardPcat::CHardPcat()
 	, modeBeep_(0)
 	, modeSb_(0)
 	, modeSilp_(0)
+	, modePs1_(0)
 	, modeMidi_(0)
 	, chip_(NULL)
 	, saa1_(NULL)
 	, saa2_(NULL)
+	, sn764_(NULL)
 	, sampleRate_(44100)
 	, active_(0)
 	, dosGe_(NULL)
@@ -621,7 +1136,10 @@ int CHardPcat::Init(const CEmuGameEntry* ge, int sampleRate)
 		if (_stricmp(ge->opt[i].name, "midiout") == 0) { modeMidi_ = 1; break; }
 	}
 	if (_stricmp(ge->subtype, "midiout") == 0) modeMidi_ = 1;
-	modeBeep_ = (_stricmp(ge->subtype, "beep") == 0 && !modeMidi_) ? 1 : 0;
+	modePs1_ = (_stricmp(ge->subtype, "ps1") == 0) ? 1 : 0;
+	modeBeep_ = ((_stricmp(ge->subtype, "beep") == 0
+		|| _stricmp(ge->subtype, "tandy") == 0
+		|| modePs1_) && !modeMidi_) ? 1 : 0;
 	/* An AdLib card has no mixer, and answering one lets a Miles driver
 	   pick the Sound Blaster output path on a machine that is not one. */
 	modeSb_ = (_strnicmp(ge->subtype, "soundblaster", 12) == 0) ? 1 : 0;
@@ -639,6 +1157,13 @@ int CHardPcat::Init(const CEmuGameEntry* ge, int sampleRate)
 			return 0;
 		}
 	}
+	if (_stricmp(ge->subtype, "tandy") == 0 || modePs1_) {
+		sn764_ = CEmuChipSn76489Create((uint32_t)PCAT_OPL_HZ, sampleRate_);
+		if (!sn764_) {
+			CEmuChipYm3812Destroy(chip_); chip_ = NULL;
+			return 0;
+		}
+	}
 	MidiCaptureReset();
 	np2_init();
 	active_ = 1;
@@ -653,6 +1178,7 @@ void CHardPcat::Shutdown()
 	if (chip_) { CEmuChipYm3812Destroy(chip_); chip_ = NULL; }
 	if (saa1_) { CEmuChipSaa1099Destroy(saa1_); saa1_ = NULL; }
 	if (saa2_) { CEmuChipSaa1099Destroy(saa2_); saa2_ = NULL; }
+	if (sn764_) { CEmuChipSn76489Destroy(sn764_); sn764_ = NULL; }
 	delete[] midiBytes_; midiBytes_ = NULL;
 	delete[] midiDelta_; midiDelta_ = NULL;
 	midiCount_ = 0;
@@ -1335,34 +1861,40 @@ int CHardPcat::HootAilPossible() const
 
 void CHardPcat::FixHootMidiInt8()
 {
-	/* Azrael already has HOOT CS:040Eh and plays. WarCraft 2 leaves CS:0000
-	   (EXE entry). Point INT8 at the existing 040Eh helper once — do not
+	/* Azrael already has HOOT CS:040Eh and plays. WarCraft 2 / Blackthorne
+	   leave AIL CS:0000 (EXE entry) and INT 7Fh is often the AIL CS, so the
+	   old 7Fh:040Eh-only plant never fired. Scan for the helper. Do not
 	   plant API_timer or rewrite AIL [000E] (hang / Death mute). */
 	if (!modeMidi_ || modeSilp_) return;
 	if (!hootAdvSeg_ && hootAdvName_[0] == 0) return;
 	uint8_t* mem = np2_mem();
 	if (!mem) return;
-	auto isHook = [&](unsigned lin) -> int {
-		if (lin + 6 >= 0x200000) return 0;
-		return (mem[lin] == 0x73 && mem[lin + 1] == 0x04
-			&& mem[lin + 2] == 0x81 && mem[lin + 3] == 0xEA
-			&& mem[lin + 4] == 0x00 && mem[lin + 5] == 0x10) ? 1 : 0;
-	};
 	const uint16_t i8Off = (uint16_t)(mem[0x08 * 4] | (mem[0x08 * 4 + 1] << 8));
 	const uint16_t i8Seg = (uint16_t)(mem[0x08 * 4 + 2] | (mem[0x08 * 4 + 3] << 8));
 	if (i8Seg >= 0x0100 && i8Seg < 0xA000 && i8Off != 0
-		&& isHook(((unsigned)i8Seg << 4) + i8Off))
+		&& PcatHootInt8Sig(mem, ((unsigned)i8Seg << 4) + i8Off))
 		return;
+	/* Azrael already parked a working helper at a non-zero offset. Only
+	   retarget the EXE-entry leftover (CS:0000) so we do not steal INT8
+	   from a live sequence. */
 	if (i8Off != 0) return;
-	const uint16_t hootCs = (uint16_t)(mem[0x7F * 4 + 2] | (mem[0x7F * 4 + 3] << 8));
-	if (hootCs < 0x0100 || hootCs >= 0xA000 || hootCs == hootAdvSeg_
-		|| hootCs == DOS98_TRAMP_SEG)
+	/* Blackthorne / WarCraft 2 leave INT8 at HOOT CS:0000 (MZ CS:IP). The
+	   helper is the same CS:040Eh; INT 7Fh often points at AIL instead. */
+	if (i8Seg >= 0x1200 && i8Seg < 0xA000
+		&& PcatHootInt8Sig(mem, ((unsigned)i8Seg << 4) + 0x040Eu)) {
+		mem[0x08 * 4] = 0x0E;
+		mem[0x08 * 4 + 1] = 0x04;
+		mem[0x08 * 4 + 2] = (uint8_t)(i8Seg & 0xff);
+		mem[0x08 * 4 + 3] = (uint8_t)(i8Seg >> 8);
 		return;
-	if (!isHook(((unsigned)hootCs << 4) + 0x040Eu)) return;
-	mem[0x08 * 4] = 0x0E;
-	mem[0x08 * 4 + 1] = 0x04;
-	mem[0x08 * 4 + 2] = (uint8_t)(hootCs & 0xff);
-	mem[0x08 * 4 + 3] = (uint8_t)(hootCs >> 8);
+	}
+	uint16_t hs = 0, ho = 0;
+	if (!PcatFindHootInt8(mem, &hs, &ho)) return;
+	if (hs == hootAdvSeg_ || hs == DOS98_TRAMP_SEG) return;
+	mem[0x08 * 4] = (uint8_t)(ho & 0xff);
+	mem[0x08 * 4 + 1] = (uint8_t)(ho >> 8);
+	mem[0x08 * 4 + 2] = (uint8_t)(hs & 0xff);
+	mem[0x08 * 4 + 3] = (uint8_t)(hs >> 8);
 }
 
 void CHardPcat::RepairMokMidiPlay()
@@ -1497,23 +2029,8 @@ void CHardPcat::FixHootAilTimer()
 	const uint16_t i8Seg = (uint16_t)(mem[0x08 * 4 + 2] | (mem[0x08 * 4 + 3] << 8));
 
 	auto findApiTimer = [&](uint16_t seg) -> unsigned {
-		if (seg < 0x0100 || seg >= 0xA000) return 0;
 		if (hootAdvSeg_ && seg == hootAdvSeg_) return 0;
-		const unsigned base = (unsigned)seg << 4;
-		for (unsigned o = 0x10; o + 20 < 0x8000; o++) {
-			const unsigned a = base + o;
-			if (a + 20 >= 0x200000) break;
-			if (mem[a] != 0xFF || mem[a + 1] != 0x06) continue;
-			if (mem[a + 4] != 0xFC) continue;
-			int pushes = 0;
-			for (int i = 5; i < 20; i++) {
-				if (mem[a + i] >= 0x50 && mem[a + i] <= 0x57)
-					pushes++;
-			}
-			if (pushes < 6) continue;
-			return o;
-		}
-		return 0;
+		return PcatFindApiTimerOff(mem, seg);
 	};
 
 	auto plant = [&](uint16_t seg, unsigned found) {
@@ -1549,20 +2066,26 @@ void CHardPcat::FixHootAilTimer()
 		hootTimerFixed_ = 1;
 	};
 
-	/* Already a plausible ISR? Keep it (but heal a stuck re-entry word). */
+	/* Already a plausible ISR? Keep it (but heal a stuck re-entry word).
+	   Do not replace API_timer with a HOOT 040Eh helper: Lost Vikings clocks
+	   AIL CS:0417 and a swap to a false 040Eh made it SILENT. */
 	if (i8Seg >= 0x0100 && i8Seg < 0xA000 && i8Seg != DOS98_TRAMP_SEG && i8Off != 0) {
 		const unsigned cur = ((unsigned)i8Seg << 4) + i8Off;
-		if (cur + 16 < 0x200000 && mem[cur] == 0xFF && mem[cur + 1] == 0x06) {
+		const int looksInc = (cur + 16 < 0x200000 && mem[cur] == 0xFF && mem[cur + 1] == 0x06);
+		if (looksInc) {
 			const unsigned base = (unsigned)i8Seg << 4;
 			const uint16_t re = (uint16_t)(mem[base + 0x0E] | (mem[base + 0x0F] << 8));
-			/* Only heal when clearly wedged (nested fault left counter high and
-			   we are not currently inside this CS). */
 			if (re > 1 && np2_reg_get(NP2_R_CS) != i8Seg) {
 				mem[base + 0x0E] = 0;
 				mem[base + 0x0F] = 0;
 			}
 			RestoreHootIdleTrampoline(mem);
 			hootAilCs_ = i8Seg;
+			hootTimerFixed_ = 1;
+			return;
+		}
+		if (PcatHootInt8Sig(mem, cur)) {
+			RestoreHootIdleTrampoline(mem);
 			hootTimerFixed_ = 1;
 			return;
 		}
@@ -1784,23 +2307,11 @@ int CHardPcat::DeliverIrqs()
 				mem[0x46E] = (uint8_t)(t2 & 0xff);
 				mem[0x46F] = (uint8_t)(t2 >> 8);
 			}
-			/* ADV XMIDI quantum: AIL should inc this via serve; if it stays 0,
-			   the timer callback skips OPL voice updates. Feed primary quantum
-			   only (ADLIB=232D, SBP2FM=295B). Do NOT poke q+4 — that breaks
-			   ADLIB key-on (native serve owns the paired active counter). */
-			uint16_t qOff = hootAdvQuantumOff_;
-			if (!qOff && hootAdvSize_ >= 0x2330u)
-				qOff = (uint16_t)0x232D;
-			if (qOff && hootAdvSeg_ >= 0x0100 && hootAdvSeg_ < 0xA000
-				&& ((unsigned)hootAdvSeg_ << 4) + qOff + 1u < 0x200000u) {
-				const unsigned adv = (unsigned)hootAdvSeg_ << 4;
-				uint16_t q = (uint16_t)(mem[adv + qOff] | (mem[adv + qOff + 1] << 8));
-				if (q < 8) {
-					q = (uint16_t)(q + 1);
-					mem[adv + qOff] = (uint8_t)(q & 0xff);
-					mem[adv + qOff + 1] = (uint8_t)(q >> 8);
-				}
-			}
+			/* ADLIB [232D] is the registered-sequence count (inc at 151,
+			   loop CX in serve), not an XMIDI quantum. Host-bumping it to 8
+			   made serve walk empty 230Dh slots; leftover BSS there is not
+			   always 230F==0 and corrupts the voice allocator (Hanse keys=0
+			   with seq PLAYING). Do not poke 2331 either (serve reentry). */
 		}
 		int skipMidiExeEntry = 0;
 		if (modeMidi_ && hootAdvSeg_ && i8Off == 0
@@ -1907,6 +2418,9 @@ int CHardPcat::DeliverIrqs()
 
 uint8_t CHardPcat::PortIn(uint16_t port)
 {
+	/* IBM PS/1 Audio: detect reads 0203h/0205h/0206h as 0. */
+	if (modePs1_ && port >= 0x200 && port <= 0x206)
+		return 0x00;
 	/* AdLib detect uses `in al,dx` / `loop` busy-waits. Each IN on real ISA
 	   burns time; advance OPL clocks so timer flags appear without needing
 	   host wall-clock. ~80 chip clocks ≈ one classic poll step. */
@@ -1914,7 +2428,12 @@ uint8_t CHardPcat::PortIn(uint16_t port)
 		if (!chip_) return 0x00;
 		if (oplHz_ > 0)
 			chip_->AdvanceClocks(80);
-		return chip_->ReadStatus();
+		/* MAME YM3812Read ORs 0x06 (unused bits stuck high). Real ISA AdLib
+		   reads 0 when timers are idle. Silky's MUSICV.COM does
+		   `in al,388h / or al,al / jnz fail` and otherwise never sets the
+		   INT D0 "board present" flag — PLAY5_AT loads the .M/.WM and stays
+		   silent. Mask those ID bits; timer/IRQ flags (0xE0) stay intact. */
+		return (uint8_t)(chip_->ReadStatus() & (uint8_t)~0x06);
 	};
 	switch (port) {
 	case ADLIB_ADDR:
@@ -1963,6 +2482,17 @@ uint8_t CHardPcat::PortIn(uint16_t port)
 			| (((cpuCycles_ >> 15) & 1) ? 0x10 : 0));
 	case PIC_MASK: return picMask_;
 	case PIC_CMD: return 0x00;
+	case PIC_SLAVE_MASK: return s_picSlaveMask;
+	case PIC_SLAVE_CMD: return 0x00;
+	case KBC_STAT:
+		/* bit0=0 no scancode, bit1=0 input empty, bit4=1 keyboard enabled */
+		return 0x10;
+	case KBC_DATA:
+		return 0x00;
+	case CMOS_DATA:
+		return s_cmos[s_cmosIdx & 0x7F];
+	case CMOS_ADDR:
+		return s_cmosIdx;
 	case MPU_DATA: return MidiDataIn();
 	case MPU_STAT: return MidiStatusIn();
 	case 0x188: case 0x18A: case 0x18C: case 0x18E:
@@ -1975,6 +2505,14 @@ uint8_t CHardPcat::PortIn(uint16_t port)
 
 void CHardPcat::PortOut(uint16_t port, uint8_t data)
 {
+	if (sn764_ && modePs1_ && (port == 0x200 || port == 0x205)) {
+		sn764_->Write(0, data);
+		return;
+	}
+	if (sn764_ && !modePs1_ && (port & 0xFFE0) == 0x00C0) {
+		sn764_->Write(0, data);
+		return;
+	}
 	auto oplAddr = [this](uint8_t d) {
 		if (chip_) chip_->Write(0, d);
 	};
@@ -2121,6 +2659,31 @@ void CHardPcat::PortOut(uint16_t port, uint8_t data)
 			picMask_ = data;
 		}
 		break;
+	case PIC_SLAVE_CMD:
+		if ((data & 0x10) != 0) {
+			s_picSlaveMask = 0xFF;
+			s_picSlaveIcw1 = data;
+			s_picSlaveIcw = 1;
+		}
+		break;
+	case PIC_SLAVE_MASK:
+		if (s_picSlaveIcw) {
+			s_picSlaveIcw++;
+			if (s_picSlaveIcw >= 3 + (s_picSlaveIcw1 & 1))
+				s_picSlaveIcw = 0;
+		} else {
+			s_picSlaveMask = data;
+		}
+		break;
+	case KBC_STAT:
+	case KBC_DATA:
+		break;
+	case CMOS_ADDR:
+		s_cmosIdx = (uint8_t)(data & 0x7F);
+		break;
+	case CMOS_DATA:
+		s_cmos[s_cmosIdx & 0x7F] = data;
+		break;
 	default:
 		PcatIoLog('w', port, data);
 		break;
@@ -2197,6 +2760,34 @@ void CHardPcat::MaterializeDosFiles(CEmuZipFs* fs, const CEmuGameEntry* ge)
 				base = p + 1;
 		}
 		if (!base[0]) continue;
+		/* Zip extras exist so shell-resolved COMs / songs resolve. Do not
+		   also dump every .ADV in the archive: hanse/bchess OPL catalogs
+		   list ADLIB.ADV, but the same zip carries MIDI.ADV for the SC-55
+		   sibling, and HOOT then registers the MPU driver on an OPL machine
+		   (irq0 stays in the dozens, keys=0). Once the romlist named an ADV,
+		   only those ADVs belong on the DOS disk. */
+		{
+			const char* ext = strrchr(base, '.');
+			if (ext && _stricmp(ext, ".ADV") == 0) {
+				int romHasAdv = 0, inRom = 0;
+				for (int j = 0; j < ge->romCount; j++) {
+					const CEmuRomEntry* r = &ge->rom[j];
+					if (_stricmp(r->type, "file") != 0) continue;
+					const char* b = r->name;
+					for (const char* p = r->name; *p; p++) {
+						if (*p == '\\' || *p == '/' || *p == ':')
+							b = p + 1;
+					}
+					const char* e = strrchr(b, '.');
+					if (e && _stricmp(e, ".ADV") == 0)
+						romHasAdv = 1;
+					if (_stricmp(b, base) == 0)
+						inRom = 1;
+				}
+				if (romHasAdv && !inRom)
+					continue;
+			}
+		}
 		addMaybeAdv(base, fs->files[i].data, fs->files[i].size);
 	}
 	/* Do NOT materialize a fake NULL/NONE file — HOOT treats open-failure as
@@ -2216,6 +2807,18 @@ void CHardPcat::BindDosRomHandles(const CEmuGameEntry* ge)
 		for (const char* p = r->name; *p; p++) {
 			if (*p == '\\' || *p == '/' || *p == ':')
 				base = p + 1;
+		}
+		/* Battle Chess 4000 lists ADLIB.ADV at offset 9 and SAMPLE.AD at 10.
+		   Those are catalog slots, not DOS handles. Pre-opening them as
+		   handles 9/10 makes HOOT inherit a GTL it was told to skip (NULL),
+		   and detect/init then leaves hDrvr=FFFF. Omar Sharif uses offset -1
+		   for the same files and plays. */
+		if (off < 0x10) {
+			const char* ext = strrchr(base, '.');
+			if (ext && _stricmp(ext, ".ADV") == 0)
+				continue;
+			if (_strnicmp(base, "SAMPLE.", 7) == 0)
+				continue;
 		}
 		if (_stricmp(r->type, "conin") == 0)
 			dos_.SetHandleText((uint16_t)off, base);
@@ -2362,6 +2965,12 @@ int CHardPcat::RunDosCommand(const char* cmdline, uint64_t budgetCycles, int sto
 	   the code-selected song, and a bare number for the code's low byte. */
 	if (_stricmp(name, "HOOT.EXE") == 0 && tail[0] && dosGe_ && dosSong_[0])
 		HootSubstArgv(tail, (int)sizeof(tail));
+	if (_stricmp(name, "HOOT.EXE") == 0) {
+		const char* t = tail;
+		while (*t == ' ' || *t == '\t') t++;
+		if (_strnicmp(t, "NULL", 4) == 0 && (t[4] == 0 || t[4] == ' ' || t[4] == '\t'))
+			s_pcatHootNullGtl = 1;
+	}
 
 	const unsigned char* image = NULL;
 	unsigned imageSize = 0;
@@ -2378,8 +2987,10 @@ int CHardPcat::RunDosCommand(const char* cmdline, uint64_t budgetCycles, int sto
 	int ok = isExe ? dos_.LoadExe(mem, image, imageSize, pspTail)
 		: dos_.LoadCom(mem, image, imageSize, pspTail);
 	if (!ok) return 0;
-	if (!isExe)
+	if (!isExe) {
 		PatchMokHootIdleCalls(mem, dos_.PspSeg(), imageSize);
+		PatchInfogramesMzExtra(mem, dos_.PspSeg(), dos_);
+	}
 
 	/* silp play load: mov bl,[1]; add bx,2 → offset 2 after SCI magic 84 00.
 	   Rewriting to mov bx,[0] (0x84) makes ADL.DRV BP=6 reject (es:[si]!=0/2). */
@@ -2388,6 +2999,7 @@ int CHardPcat::RunDosCommand(const char* cmdline, uint64_t budgetCycles, int sto
 	silpDrvSeg_ = 0;
 	silpSongSeg_ = 0;
 	silpSongBytes_ = 0;
+	int swordsHold = 0;
 	const uint64_t start = cpuCycles_;
 	while (cpuCycles_ - start < budgetCycles) {
 		RepairSilpDriverFar();
@@ -2477,11 +3089,32 @@ int CHardPcat::RunDosCommand(const char* cmdline, uint64_t budgetCycles, int sto
 					return 1;
 				}
 				/* Fall through and keep running HOOT init. */
-			} else {
+				} else {
 				/* HOOT/AIL leaves EXT_STATE=0x80. Wait until the timer (IRQ0 /
 				   INT 8) or AIL (INT 66h) is also hooked — otherwise we stop
-				   mid-install and XMI never clocks. */
-				if (IvtHooked(PCAT_TIMER_VEC) || IvtHooked(0x66)) {
+				   mid-install and XMI never clocks.
+				   Sword of the Samurai CODE.COM hooks 7Fh then far-calls
+				   ASOUND init (es:[3Ch]) before INT 18h. INT 8 is already
+				   live, so a naive ready-check skips that init (keys=0). */
+				uint8_t* sm = np2_mem();
+				int swordsInit = 0;
+				if (sm) {
+					const uint16_t csS = np2_reg_get(NP2_R_CS);
+					const uint16_t ipS = np2_reg_get(NP2_R_IP);
+					const unsigned physS = ((unsigned)csS << 4) + (unsigned)ipS;
+					if (physS + 5 < 0x200000
+						&& sm[physS] == 0x2E && sm[physS + 1] == 0x8E
+						&& sm[physS + 2] == 0x06 && sm[physS + 3] == 0x49
+						&& sm[physS + 4] == 0x03)
+						swordsInit = 1;
+				}
+				if (swordsInit)
+					swordsHold = 1;
+				if (swordsHold) {
+					/* Stay in the pump until ASOUND init returns and
+					   CODE.COM writes EXT_STATE=0x81 (then the 0x81
+					   branch above accepts). */
+				} else if (IvtHooked(PCAT_TIMER_VEC) || IvtHooked(0x66)) {
 					dosStubReady_ = 1;
 					return 1;
 				}
@@ -2558,6 +3191,12 @@ int CHardPcat::BootDos(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCod
 	np2_setextsize(0);
 	np2_set_v30(0);
 	memset(mem, 0, 0xA0000);
+	/* Tandy 1000: wibarmat.com does `cmp es:[C000h], 21h` with ES=F000h
+	   before enabling SN76496 outs. F000:C000 is outside the 640K clear. */
+	if (_stricmp(ge->subtype, "tandy") == 0)
+		mem[0xFC000] = 0x21;
+	PcatCmosInit();
+	PlantAtBiosRom(mem);
 
 	dos_.Reset();
 	dos_.InitArena(mem);
@@ -2615,7 +3254,13 @@ int CHardPcat::BootDos(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCod
 	stubState_ = 0;
 	cpuCycles_ = 0;
 	oplPumpResidual_ = 0;
-	picMask_ = 0xff;
+	/* Keep IRQ0 live for the shells. TIMER.COM+CMD.COM (kinbaku/kurodan)
+	   INT 61 fn5 spins on a tick counter decremented from INT 8; masking
+	   here left INT 60 unhooked (dosmiss=int60) and CMDP silent.
+	   HOOT/AIL also calibrates against IRQ0 during ADV install.
+	   Sierra silp's INT 7Fh loader is not re-entrant with its INT 8 —
+	   leave IRQ0 masked for that family (TriggerPlay unmasks after park). */
+	picMask_ = modeSilp_ ? (uint8_t)0xff : (uint8_t)0xfe;
 	picMasterIcw_ = 0;
 	oplWriteCount_ = 0;
 	oplKeyOnCount_ = 0;
@@ -2629,6 +3274,7 @@ int CHardPcat::BootDos(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCod
 	hootAdvIoOff_ = 0;
 	hootTimerFixed_ = 0;
 	hootAilCs_ = 0;
+	s_pcatHootNullGtl = 0;
 
 	const uint64_t setupBudget = (uint64_t)cpuHz_ * 8ull;
 	int ranShell = 0;
@@ -2763,9 +3409,26 @@ int CHardPcat::TriggerPlay(unsigned titleCode)
 		np2_reg_set(NP2_R_CX, 0);
 		np2_reg_set(NP2_R_DX, 0);
 	}
+	{
+		uint8_t* mem = np2_mem();
+		if (mem && use7f && !modeSilp_ && !modeMidi_) {
+			RepairAsoundPlayEnable(mem);
+			RepairPacificIslandsSong(mem, extSong_);
+		}
+	}
 	if (haveVect)
 		np2_interrupt((uint8_t)funcVect_);
+	{
+		uint8_t* mem = np2_mem();
+		if (mem && use7f && !modeSilp_ && !modeMidi_)
+			RepairPacificIslandsSong(mem, extSong_);
+	}
 	PumpCycles(cpuCycles_ + drainBudget);
+	{
+		uint8_t* mem = np2_mem();
+		if (mem && use7f && !modeSilp_ && !modeMidi_)
+			RepairPacificIslandsSong(mem, extSong_);
+	}
 	if (!cmd0Only) {
 		if (dosGe_)
 			BindDosTriggerSong(dosGe_, titleCode);
@@ -2781,6 +3444,11 @@ int CHardPcat::TriggerPlay(unsigned titleCode)
 		PumpCycles(cpuCycles_ + drainBudget);
 	}
 	RepairMokMidiPlay();
+	{
+		uint8_t* mem = np2_mem();
+		if (mem && use7f && !modeSilp_ && !modeMidi_)
+			RepairAsoundPlayEnable(mem);
+	}
 	PCAT_CENSUS("trig");
 	picMask_ = (uint8_t)(picMask_ & 0xfeu);
 	if (!pit0Running_) {
@@ -2832,10 +3500,28 @@ int CHardPcat::TriggerPlay(unsigned titleCode)
 		}
 		np2_reg_set(NP2_R_FLAGS, (uint16_t)(np2_reg_get(NP2_R_FLAGS) | 0x0200));
 	}
-	/* HOOT AIL timbres — never after Sierra silp/MT32 play (tears down song). */
-	if (!modeMidi_ && !use7f) {
+	/* HOOT AIL timbres — never after Sierra silp/MT32 play (tears down song).
+	   HOOT.EXE uses INT 7Fh, so the old `!use7f` skip never ran NULL-GTL
+	   packs. Restrict to argv NULL so already-playing ADV packs (exassault /
+	   privateer) are not given a second sequence. */
+	if (!modeMidi_ && !modeSilp_ && s_pcatHootNullGtl
+		&& (hootAdvSeg_ || hootAdvName_[0])) {
+		/* Lost Vikings keys one note during INT 7Fh, so oplKeyOnCount_ is
+		   already 1 here. Skipping the GTL install left seq=1 / STOPS.
+		   Omar Sharif still has keys=0 at this point; a second 170 is a
+		   restart of the same XMI, not a different song. */
 		InstallHootAilTimbres();
 		FixHootAilTimer();
+		if (oplKeyOnCount_ == 0) {
+			const uint16_t cs = np2_reg_get(NP2_R_CS);
+			if (cs != (uint16_t)DOS98_TRAMP_SEG && cs != 0x0060) {
+				uint8_t* mem = np2_mem();
+				if (mem) RestoreHootIdleTrampoline(mem);
+				np2_reg_set(NP2_R_CS, (uint16_t)DOS98_TRAMP_SEG);
+				np2_reg_set(NP2_R_IP, (uint16_t)PCAT_IDLE_IP);
+				np2_reg_set(NP2_R_FLAGS, (uint16_t)(np2_reg_get(NP2_R_FLAGS) | 0x0200));
+			}
+		}
 	}
 	return 1;
 }
@@ -2844,24 +3530,82 @@ int CHardPcat::FarCallAil(uint16_t api, uint16_t* stackWords, int nWords, uint64
 {
 	uint8_t* mem = np2_mem();
 	if (!mem || nWords < 0 || nWords > 16) return 0;
-	/* Prefer known AIL CS; INT8 may briefly point at API_timer offset in same CS. */
+	/* Prefer known AIL CS; INT8 may be HOOT CS:040E (Hanse / Omar Sharif).
+	   Calling AIL APIs in HOOT hangs inside the helper and starves IRQ0. */
 	uint16_t ailCs = hootAilCs_;
+	if (ailCs < 0x1200)
+		ailCs = 0;
+	if (ailCs && PcatHootInt8Sig(mem, ((unsigned)ailCs << 4) + 0x040Eu)
+		&& !PcatSegHasAilApi(mem, ailCs, 151))
+		ailCs = 0;
 	if (!ailCs || ailCs < 0x0100 || ailCs >= 0xA000 || ailCs == DOS98_TRAMP_SEG) {
-		ailCs = (uint16_t)(mem[0x08 * 4 + 2] | (mem[0x08 * 4 + 3] << 8));
-		if (ailCs < 0x0100 || ailCs >= 0xA000 || ailCs == DOS98_TRAMP_SEG)
-			ailCs = (uint16_t)0x1272;
+		const uint16_t i8Seg = (uint16_t)(mem[0x08 * 4 + 2] | (mem[0x08 * 4 + 3] << 8));
+		const uint16_t i8Off = (uint16_t)(mem[0x08 * 4] | (mem[0x08 * 4 + 1] << 8));
+		const int i8IsHoot = (i8Off == 0x040E) || PcatHootInt8Sig(mem, ((unsigned)i8Seg << 4) + i8Off);
+		if (i8Seg >= 0x0100 && i8Seg < 0xA000 && i8Seg != DOS98_TRAMP_SEG
+			&& !i8IsHoot
+			&& PcatSegHasAilApi(mem, i8Seg, 150)
+			&& PcatSegHasAilApi(mem, i8Seg, 151))
+			ailCs = i8Seg;
+		else
+			ailCs = PcatFindAilApiCs(mem, hootAdvSeg_);
+		if (ailCs >= 0x1200 && ailCs < 0xA000 && ailCs != DOS98_TRAMP_SEG)
+			hootAilCs_ = ailCs;
 	}
+	if (!ailCs || ailCs < 0x0100 || ailCs >= 0xA000 || ailCs == DOS98_TRAMP_SEG)
+		return 0;
 	const unsigned base = (unsigned)ailCs << 4;
-	unsigned wrapOff = 0;
-	for (unsigned o = 0; o + 5 < 0x8000; o++) {
-		if (mem[base + o] == 0xB8 && mem[base + o + 1] == (uint8_t)(api & 0xff)
-			&& mem[base + o + 2] == (uint8_t)(api >> 8)
-			&& mem[base + o + 3] == 0xE9) {
-			wrapOff = o;
+	unsigned wrap151 = 0;
+	for (unsigned o = 0; o + 4 < 0x8000; o++) {
+		if (mem[base + o] == 0xB8 && mem[base + o + 1] == 151
+			&& mem[base + o + 2] == 0 && mem[base + o + 3] == 0xE9) {
+			wrap151 = o;
 			break;
 		}
 	}
-	if (!wrapOff) return 0;
+	unsigned wrapOff = 0;
+	int foundWrap = 0;
+	/* HOOT CS thunks: 151 at ~0CC0h, 150/156/170 sit at fixed deltas from it
+	   (file 3640h table). First-match 170 can be a decoy that does not start. */
+	if (wrap151) {
+		unsigned rel = 0;
+		int haveRel = 0;
+		if (api == 150) { rel = wrap151 - 6u; haveRel = wrap151 >= 6u; }
+		else if (api == 151) { rel = wrap151; haveRel = 1; }
+		else if (api == 152) { rel = wrap151 + 0x06u; haveRel = 1; }
+		else if (api == 153) { rel = wrap151 + 0x0Cu; haveRel = 1; }
+		else if (api == 154) { rel = wrap151 + 0x12u; haveRel = 1; }
+		else if (api == 155) { rel = wrap151 + 0x18u; haveRel = 1; }
+		else if (api == 156) { rel = wrap151 + 0x1Eu; haveRel = 1; }
+		else if (api == 159) { rel = wrap151 + 0x30u; haveRel = 1; }
+		else if (api == 170) { rel = wrap151 + 0x36u; haveRel = 1; }
+		else if (api == 171) { rel = wrap151 + 0x3Cu; haveRel = 1; }
+		else if (api == 174) { rel = wrap151 + 0x48u; haveRel = 1; }
+		if (haveRel && rel + 4 < 0x8000
+			&& mem[base + rel] == 0xB8 && mem[base + rel + 1] == (uint8_t)(api & 0xff)
+			&& mem[base + rel + 2] == (uint8_t)(api >> 8) && mem[base + rel + 3] == 0xE9) {
+			wrapOff = rel;
+			foundWrap = 1;
+		}
+	}
+	if (!foundWrap) {
+		for (unsigned o = 0; o + 5 < 0x8000; o++) {
+			if (mem[base + o] == 0xB8 && mem[base + o + 1] == (uint8_t)(api & 0xff)
+				&& mem[base + o + 2] == (uint8_t)(api >> 8)
+				&& mem[base + o + 3] == 0xE9) {
+				wrapOff = o;
+				foundWrap = 1;
+				break;
+			}
+		}
+	}
+	if (!foundWrap) {
+		if (api == 151)
+			PcatAilTrace("far151 miss cs=%04X\n", ailCs);
+		return 0;
+	}
+	if (api == 151 || api == 170)
+		PcatAilTrace("far%u cs=%04X wrap=%04X\n", api, ailCs, wrapOff);
 	uint16_t ss = 0x1000, sp = 0xFE00;
 	np2_reg_set(NP2_R_SS, ss);
 	np2_reg_set(NP2_R_SP, sp);
@@ -2899,6 +3643,9 @@ int CHardPcat::FarCallAil(uint16_t api, uint16_t* stackWords, int nWords, uint64
 			if (ot) chip_->AdvanceClocks(ot);
 		}
 	}
+	if (api == 151)
+		PcatAilTrace("far%u done ok=%d ax=%04X cs=%04X ip=%04X\n",
+			api, ok, np2_reg_get(NP2_R_AX), np2_reg_get(NP2_R_CS), np2_reg_get(NP2_R_IP));
 	return ok;
 }
 
@@ -2930,125 +3677,228 @@ void CHardPcat::InstallHootAilTimbres()
 	if (!gtl || !gtl->data || gtl->size < 16)
 		return;
 
-	uint16_t dsHoot = 0x14A3;
+	uint16_t dsHoot = 0;
 	{
 		const unsigned off = (unsigned)mem[0x7F * 4] | ((unsigned)mem[0x7F * 4 + 1] << 8);
 		const unsigned seg = (unsigned)mem[0x7F * 4 + 2] | ((unsigned)mem[0x7F * 4 + 3] << 8);
 		const unsigned lin = (seg << 4) + off;
-		for (unsigned i = 0x18; i < 0x40 && lin + i + 4 < 0x200000; i++) {
+		for (unsigned i = 0x10; i < 0x80 && lin + i + 4 < 0x200000; i++) {
 			if (mem[lin + i] == 0xB8 && mem[lin + i + 3] == 0x8E && mem[lin + i + 4] == 0xD8) {
 				dsHoot = (uint16_t)(mem[lin + i + 1] | (mem[lin + i + 2] << 8));
 				break;
 			}
+			if (mem[lin + i] == 0x8C && mem[lin + i + 1] == 0xC8
+				&& mem[lin + i + 2] == 0x8E && mem[lin + i + 3] == 0xD8) {
+				dsHoot = (uint16_t)seg;
+				break;
+			}
 		}
+		if (!dsHoot && seg >= 0x0100 && seg < 0xA000)
+			dsHoot = (uint16_t)seg;
 	}
+	if (!dsHoot) return;
 	const unsigned dbase = (unsigned)dsHoot << 4;
 	uint16_t hDrvr = (uint16_t)(mem[dbase + 0x43E] | (mem[dbase + 0x43F] << 8));
 	const uint64_t budget = (uint64_t)cpuHz_ / 2ull;
+	const uint64_t tbudget = (uint64_t)cpuHz_ / 16ull;
 	uint16_t words[8];
 
-	/* Handle 0 is a valid AIL handle; only FFFF means unused. */
-	if (hDrvr == 0xFFFF)
+	/* Capture AIL CS before register_driver — FarCallAil scans that CS. */
+	FixHootAilTimer();
+	/* Handle 0 is a valid AIL handle; only FFFF means unused. Battle Chess
+	   often never finishes AIL_register_driver (hDrvr stays FFFF). */
+	if (hDrvr == 0xFFFF && hootAdvSeg_) {
+		words[0] = hootAdvSeg_;
+		words[1] = 0;
+		if (FarCallAil(100, words, 2, budget)) {
+			const uint16_t ax = np2_reg_get(NP2_R_AX);
+			if (ax != 0xFFFF) {
+				hDrvr = ax;
+				mem[dbase + 0x43E] = (uint8_t)(hDrvr & 0xff);
+				mem[dbase + 0x43F] = (uint8_t)(hDrvr >> 8);
+			}
+		}
+	}
+	if (hDrvr == 0xFFFF) {
+		PcatAilTrace("ail song=%s no-hDrvr ds=%04X\n",
+			dosSong_[0] ? dosSong_ : "-", dsHoot);
 		return;
+	}
 
-	/* Ensure detect+init even when HOOT 0383 aborted after register. */
+	/* Ensure detect+init even when HOOT 0383 aborted after register.
+	   Skip when INT8 is already HOOT CS:040E — FarCall 101 hits a decoy
+	   stub that wipes AIL 151 (Hanse / Omar). */
 	{
-		uint16_t ailCs = hootAilCs_ ? hootAilCs_ : (uint16_t)0x1272;
-		uint16_t io = 0x388, irq = 0xFFFF, dma = 0xFFFF, drq = 0xFFFF;
-		if (hootAdvIoOff_ && hootAdvSeg_) {
-			const unsigned ol = ((unsigned)hootAdvSeg_ << 4) + hootAdvIoOff_;
-			if (ol + 1 < 0x200000) {
-				uint16_t v = (uint16_t)(mem[ol] | (mem[ol + 1] << 8));
-				if (v == 0x220 || v == 0x240 || v == 0x388) io = v;
-			}
-		}
-		words[0] = drq; words[1] = dma; words[2] = irq; words[3] = io; words[4] = hDrvr;
-		FarCallAil(101, words, 5, budget);
-		uint16_t ini = 0;
-		const unsigned ab = (unsigned)ailCs << 4;
-		for (unsigned o = 0; o + 5 < 0x8000; o++) {
-			if (mem[ab + o] == 0xB8 && mem[ab + o + 1] == 102 && mem[ab + o + 2] == 0
-				&& mem[ab + o + 3] == 0xE9) {
-				ini = (uint16_t)o;
-				break;
-			}
-		}
-		if (ini) {
-			FarCallAil(102, words, 5, budget);
-		} else {
-			uint16_t ss = 0x1000, sp = 0xFE00;
-			np2_reg_set(NP2_R_SS, ss);
-			np2_reg_set(NP2_R_SP, sp);
-			for (int i = 0; i < 5; i++) {
-				sp = (uint16_t)(sp - 2);
-				const unsigned sl = ((unsigned)ss << 4) + sp;
-				mem[sl] = (uint8_t)(words[i] & 0xff);
-				mem[sl + 1] = (uint8_t)(words[i] >> 8);
-			}
-			sp = (uint16_t)(sp - 4);
-			{
-				const unsigned sl = ((unsigned)ss << 4) + sp;
-				mem[sl] = 0; mem[sl + 1] = 0; mem[sl + 2] = 0x60; mem[sl + 3] = 0;
-			}
-			np2_reg_set(NP2_R_SP, sp);
-			np2_reg_set(NP2_R_CS, ailCs);
-			np2_reg_set(NP2_R_IP, 0x0B83);
-			np2_reg_set(NP2_R_DS, ailCs);
-			np2_reg_set(NP2_R_FLAGS, (uint16_t)(np2_reg_get(NP2_R_FLAGS) | 0x0200));
-			const uint64_t start = cpuCycles_;
-			while (cpuCycles_ - start < budget) {
-				if (np2_reg_get(NP2_R_CS) == 0x0060 && np2_reg_get(NP2_R_IP) == 0)
-					break;
-				const int32_t c = np2_step();
-				const uint64_t u = (c > 0) ? (uint64_t)c : 1ull;
-				cpuCycles_ += u;
-				if (chip_ && cpuHz_ > 0 && oplHz_ > 0) {
-					oplPumpResidual_ += u * (uint64_t)oplHz_;
-					uint64_t ot = oplPumpResidual_ / (uint64_t)cpuHz_;
-					oplPumpResidual_ %= (uint64_t)cpuHz_;
-					if (ot) chip_->AdvanceClocks(ot);
+		const uint16_t i8OffNow = (uint16_t)(mem[0x08 * 4] | (mem[0x08 * 4 + 1] << 8));
+		if (i8OffNow != 0x040E) {
+			uint16_t ailCs = hootAilCs_ ? hootAilCs_ : (uint16_t)0x1272;
+			uint16_t io = 0x388, irq = 0xFFFF, dma = 0xFFFF, drq = 0xFFFF;
+			if (hootAdvIoOff_ && hootAdvSeg_) {
+				const unsigned ol = ((unsigned)hootAdvSeg_ << 4) + hootAdvIoOff_;
+				if (ol + 1 < 0x200000) {
+					uint16_t v = (uint16_t)(mem[ol] | (mem[ol + 1] << 8));
+					if (v == 0x220 || v == 0x240 || v == 0x388) io = v;
 				}
 			}
+			words[0] = drq; words[1] = dma; words[2] = irq; words[3] = io; words[4] = hDrvr;
+			FarCallAil(101, words, 5, budget);
+			uint16_t ini = 0;
+			const unsigned ab = (unsigned)ailCs << 4;
+			for (unsigned o = 0; o + 5 < 0x8000; o++) {
+				if (mem[ab + o] == 0xB8 && mem[ab + o + 1] == 102 && mem[ab + o + 2] == 0
+					&& mem[ab + o + 3] == 0xE9) {
+					ini = (uint16_t)o;
+					break;
+				}
+			}
+			if (ini) {
+				FarCallAil(102, words, 5, budget);
+			} else {
+				uint16_t ss = 0x1000, sp = 0xFE00;
+				np2_reg_set(NP2_R_SS, ss);
+				np2_reg_set(NP2_R_SP, sp);
+				for (int i = 0; i < 5; i++) {
+					sp = (uint16_t)(sp - 2);
+					const unsigned sl = ((unsigned)ss << 4) + sp;
+					mem[sl] = (uint8_t)(words[i] & 0xff);
+					mem[sl + 1] = (uint8_t)(words[i] >> 8);
+				}
+				sp = (uint16_t)(sp - 4);
+				{
+					const unsigned sl = ((unsigned)ss << 4) + sp;
+					mem[sl] = 0; mem[sl + 1] = 0; mem[sl + 2] = 0x60; mem[sl + 3] = 0;
+				}
+				np2_reg_set(NP2_R_SP, sp);
+				np2_reg_set(NP2_R_CS, ailCs);
+				np2_reg_set(NP2_R_IP, 0x0B83);
+				np2_reg_set(NP2_R_DS, ailCs);
+				np2_reg_set(NP2_R_FLAGS, (uint16_t)(np2_reg_get(NP2_R_FLAGS) | 0x0200));
+				const uint64_t start = cpuCycles_;
+				while (cpuCycles_ - start < budget) {
+					if (np2_reg_get(NP2_R_CS) == 0x0060 && np2_reg_get(NP2_R_IP) == 0)
+						break;
+					const int32_t c = np2_step();
+					const uint64_t u = (c > 0) ? (uint64_t)c : 1ull;
+					cpuCycles_ += u;
+					if (chip_ && cpuHz_ > 0 && oplHz_ > 0) {
+						oplPumpResidual_ += u * (uint64_t)oplHz_;
+						uint64_t ot = oplPumpResidual_ / (uint64_t)cpuHz_;
+						oplPumpResidual_ %= (uint64_t)cpuHz_;
+						if (ot) chip_->AdvanceClocks(ot);
+					}
+				}
+			}
+			FixHootAilTimer();
 		}
-		FixHootAilTimer();
+	}
+
+	uint16_t timb[64];
+	int nTimb = 0;
+	if (dosSong_[0]) {
+		const CEmuDos98File* xf = dos_.FindFile(dosSong_);
+		if (xf && xf->data && xf->size >= 12)
+			nTimb = PcatXmiTimbList(xf->data, xf->size, timb, 64);
+	}
+	/* Privateer .ADL and other non-XMI HOOT songs already play via INT 7Fh.
+	   151/170 on a dummy FORM restarted them into SILENT/STOPS. */
+	if (nTimb <= 0) {
+		RestoreHootIdleTrampoline(mem);
+		np2_reg_set(NP2_R_CS, (uint16_t)DOS98_TRAMP_SEG);
+		np2_reg_set(NP2_R_IP, (uint16_t)PCAT_IDLE_IP);
+		return;
 	}
 
 	uint16_t hSeqUse = 0xFFFF;
+	unsigned xmidLin = 0;
 	{
-		unsigned xmidLin = 0;
-		for (unsigned a = 0x10000; a + 12 < 0xA0000; a++) {
-			if (mem[a] == 'F' && mem[a + 1] == 'O' && mem[a + 2] == 'R' && mem[a + 3] == 'M'
-				&& mem[a + 8] == 'X' && mem[a + 9] == 'M' && mem[a + 10] == 'I' && mem[a + 11] == 'D') {
-				xmidLin = a;
-				break;
+		auto injectSong = [&]() {
+			if (!dosSong_[0]) return;
+			const CEmuDos98File* xf = dos_.FindFile(dosSong_);
+			if (!xf || !xf->data || xf->size < 12) return;
+			const uint16_t put = 0x9A00;
+			const unsigned n = xf->size < 0x4000u ? xf->size : 0x4000u;
+			memcpy(mem + ((unsigned)put << 4), xf->data, n);
+			PcatXmiWipeSeqTextMeta(mem + ((unsigned)put << 4), n);
+			for (unsigned o = 0; o + 12 < n; o++) {
+				if (xf->data[o] == 'F' && xf->data[o + 1] == 'O'
+					&& xf->data[o + 2] == 'R' && xf->data[o + 3] == 'M'
+					&& xf->data[o + 8] == 'X' && xf->data[o + 9] == 'M'
+					&& xf->data[o + 10] == 'I' && xf->data[o + 11] == 'D') {
+					xmidLin = ((unsigned)put << 4) + o;
+					break;
+				}
+			}
+		};
+		auto inAdv = [&](unsigned lin) -> int {
+			if (!hootAdvSeg_ || !hootAdvSize_) return 0;
+			const unsigned a0 = (unsigned)hootAdvSeg_ << 4;
+			return (lin >= a0 && lin < a0 + hootAdvSize_) ? 1 : 0;
+		};
+		/* NULL-GTL packs often never map the XMI into 0x10000+, so the
+		   RAM scan hits a dummy FORM in the ADV and play stays silent. */
+		if (s_pcatHootNullGtl)
+			injectSong();
+		if (!xmidLin) {
+			for (unsigned a = 0x10000; a + 12 < 0xA0000; a++) {
+				if (mem[a] == 'F' && mem[a + 1] == 'O' && mem[a + 2] == 'R' && mem[a + 3] == 'M'
+					&& mem[a + 8] == 'X' && mem[a + 9] == 'M' && mem[a + 10] == 'I' && mem[a + 11] == 'D') {
+					if (inAdv(a)) continue;
+					xmidLin = a;
+					break;
+				}
 			}
 		}
-		if (!xmidLin) return;
-		words[0] = hDrvr;
-		if (!FarCallAil(150, words, 1, budget)) return;
-		uint16_t stSize = np2_reg_get(NP2_R_AX);
-		if (stSize < 16 || stSize > 0x4000) stSize = 520;
-		uint16_t stSeg = 0x8F00;
-		uint16_t ctSeg = 0x8E80;
-		memset(mem + ((unsigned)stSeg << 4), 0, ((stSize + 15u) / 16u) * 16u);
-		memset(mem + ((unsigned)ctSeg << 4), 0, 512);
-		const uint16_t formSeg = (uint16_t)(xmidLin >> 4);
-		const uint16_t formOff = (uint16_t)(xmidLin & 0xF);
-		words[0] = ctSeg; words[1] = 0;
-		words[2] = stSeg; words[3] = 0;
-		words[4] = 0;
-		words[5] = formSeg; words[6] = formOff;
-		words[7] = hDrvr;
-		if (!FarCallAil(151, words, 8, budget)) return;
-		uint16_t ns = np2_reg_get(NP2_R_AX);
-		if (ns == 0xFFFF) return;
-		hSeqUse = ns;
+		if (xmidLin && inAdv(xmidLin))
+			xmidLin = 0;
+		if (!xmidLin)
+			injectSong();
+		if (xmidLin && !inAdv(xmidLin))
+			PcatXmiWipeSeqTextMeta(mem + xmidLin, 0x4000u);
+		/* HOOT's own XMI buffer (handle 10) still has the tag; native seq 0
+		   uses that copy. */
+		if (s_pcatHootNullGtl) {
+			for (unsigned a = 0x10000; a + 16 < 0xA0000; a++) {
+				if (mem[a] != 0xFF || mem[a + 1] < 1 || mem[a + 1] > 7)
+					continue;
+				if (inAdv(a)) continue;
+				PcatXmiWipeSeqTextMeta(mem + a, 16);
+			}
+		}
+		if (xmidLin) {
+			/* AIL 150 in HOOT CS hits a decoy at 0CBAh that does not RETF.
+			   520 bytes was under ADLIB's state table (~590+); seq 4 then
+			   reports PLAYING with no note-ons (Hanse). Omar keys on seq 0. */
+			uint16_t stSize = 2048;
+			uint16_t stSeg = 0x8F00;
+			uint16_t ctSeg = 0x8E80;
+			memset(mem + ((unsigned)stSeg << 4), 0, ((stSize + 15u) / 16u) * 16u);
+			memset(mem + ((unsigned)ctSeg << 4), 0, 1024);
+			const uint16_t formSeg = (uint16_t)(xmidLin >> 4);
+			const uint16_t formOff = (uint16_t)(xmidLin & 0xF);
+			words[0] = ctSeg; words[1] = 0;
+			words[2] = stSeg; words[3] = 0;
+			words[4] = 0;
+			words[5] = formSeg; words[6] = formOff;
+			words[7] = hDrvr;
+			if (FarCallAil(151, words, 8, budget)) {
+				const uint16_t ns = np2_reg_get(NP2_R_AX);
+				if (ns != 0xFFFF)
+					hSeqUse = ns;
+			}
+		}
+	}
+	if (hSeqUse == 0xFFFF) {
+		const uint16_t exist = (uint16_t)(mem[dbase + 0x43C] | (mem[dbase + 0x43D] << 8));
+		if (exist && exist != 0xFFFF)
+			hSeqUse = exist;
 	}
 
 	words[0] = hDrvr;
-	if (!FarCallAil(153, words, 1, budget)) return;
-	uint16_t tcSize = np2_reg_get(NP2_R_AX);
-	if (tcSize < 16 || tcSize > 0x8000) tcSize = 4096;
+	uint16_t tcSize = 4096;
+	if (FarCallAil(153, words, 1, budget)) {
+		tcSize = np2_reg_get(NP2_R_AX);
+		if (tcSize < 16 || tcSize > 0x8000) tcSize = 4096;
+	}
 	uint16_t tcSeg = 0;
 	const uint16_t tcParas = (uint16_t)((tcSize + 15u) / 16u + 1u);
 	if (!dos_.AllocBlock(mem, tcParas, &tcSeg) || !tcSeg) {
@@ -3091,23 +3941,32 @@ void CHardPcat::InstallHootAilTimbres()
 		words[2] = (uint16_t)patch;
 		words[3] = (uint16_t)bank;
 		words[4] = hDrvr;
-		FarCallAil(156, words, 5, budget);
+		FarCallAil(156, words, 5, tbudget);
 		return 1;
 	};
 
 	int installed = 0;
-	for (int n = 0; n < 128; n++) {
-		words[0] = hSeqUse;
-		words[1] = hDrvr;
-		if (!FarCallAil(155, words, 2, budget)) break;
-		const uint16_t treq = np2_reg_get(NP2_R_AX);
-		if (treq == 0xFFFF) break;
-		if (loadTimbre(treq >> 8, treq & 0xff))
+	for (int i = 0; i < nTimb; i++) {
+		if (loadTimbre(timb[i] >> 8, timb[i] & 0xff))
 			installed++;
+	}
+	uint16_t lastTreq = 0xFFFF;
+	if (hSeqUse != 0xFFFF) {
+		for (int n = 0; n < 32; n++) {
+			words[0] = hSeqUse;
+			words[1] = hDrvr;
+			if (!FarCallAil(155, words, 2, tbudget)) break;
+			const uint16_t treq = np2_reg_get(NP2_R_AX);
+			if (treq == 0xFFFF) break;
+			if (treq == lastTreq) break;
+			lastTreq = treq;
+			if (loadTimbre(treq >> 8, treq & 0xff))
+				installed++;
+		}
 	}
 	if (installed == 0) {
 		unsigned p = 0;
-		while (p + 6 <= gtl->size && installed < 128) {
+		while (p + 6 <= gtl->size && installed < 24) {
 			const int pe = (int8_t)gtl->data[p];
 			const int be = (int8_t)gtl->data[p + 1];
 			p += 6;
@@ -3117,16 +3976,61 @@ void CHardPcat::InstallHootAilTimbres()
 		}
 	}
 	(void)installed;
-	words[0] = hSeqUse;
-	words[1] = hDrvr;
-	FarCallAil(171, words, 2, budget);
-	words[0] = hSeqUse;
-	words[1] = hDrvr;
-	FarCallAil(170, words, 2, budget);
-	mem[dbase + 0x43C] = (uint8_t)(hSeqUse & 0xff);
-	mem[dbase + 0x43D] = (uint8_t)(hSeqUse >> 8);
+	/* Skip 101/102 when INT8 is already CS:040E (Omar). Hanse takes that
+	   path too, so detect never writes the ADV IO word and serve_driver
+	   OUTs DX=0. Fill default 388/220 here; a live Omar word is already
+	   388 and is left alone. */
+	if (hootAdvIoOff_ && hootAdvSeg_ >= 0x0100 && hootAdvSeg_ < 0xA000) {
+		const unsigned ol = ((unsigned)hootAdvSeg_ << 4) + hootAdvIoOff_;
+		if (ol + 1 < 0x200000) {
+			uint16_t v = (uint16_t)(mem[ol] | (mem[ol + 1] << 8));
+			if (v != 0x220 && v != 0x240 && v != 0x388) {
+				const uint16_t io = isSb ? (uint16_t)0x220 : (uint16_t)0x388;
+				mem[ol] = (uint8_t)(io & 0xff);
+				mem[ol + 1] = (uint8_t)(io >> 8);
+				PcatAilTrace("ail poke io %04X:%04X %04X->%04X\n",
+					hootAdvSeg_, hootAdvIoOff_, v, io);
+			}
+		}
+	}
+	PcatAilTrace("ail song=%s hDrvr=%04X hSeq=%04X xmid=%05X nTimb=%d inst=%d ailCs=%04X keys=%u wr=%u\n",
+		dosSong_[0] ? dosSong_ : "-", hDrvr, hSeqUse, xmidLin, nTimb, installed,
+		hootAilCs_, oplKeyOnCount_, oplWriteCount_);
+	if (hSeqUse != 0xFFFF) {
+		words[0] = hSeqUse;
+		words[1] = hDrvr;
+		FarCallAil(171, words, 2, budget);
+		words[0] = hSeqUse;
+		words[1] = hDrvr;
+		FarCallAil(170, words, 2, budget);
+		words[0] = hSeqUse;
+		words[1] = hDrvr;
+		if (FarCallAil(174, words, 2, tbudget))
+			PcatAilTrace("ail 174 h=%u ax=%04X wr=%u keys=%u\n",
+				hSeqUse, np2_reg_get(NP2_R_AX), oplWriteCount_, oplKeyOnCount_);
+		mem[dbase + 0x43C] = (uint8_t)(hSeqUse & 0xff);
+		mem[dbase + 0x43D] = (uint8_t)(hSeqUse >> 8);
+	}
 	mem[dbase + 0x43E] = (uint8_t)(hDrvr & 0xff);
 	mem[dbase + 0x43F] = (uint8_t)(hDrvr >> 8);
+	/* Hanse copies API_timer onto CS:040Eh (`2E FF 06 06 00 FC` / pushes).
+	   INT8 already points there — do not plant a second ISR over it. */
+	if (oplKeyOnCount_ == 0 && hootAilCs_ >= 0x1200 && hootAilCs_ < 0xA000) {
+		const uint16_t i8Off = (uint16_t)(mem[0x08 * 4] | (mem[0x08 * 4 + 1] << 8));
+		const unsigned base = (unsigned)hootAilCs_ << 4;
+		const int already = PcatApiTimerAt(mem, base + i8Off);
+		const unsigned tOff = already ? 0 : ((i8Off == 0x040E || i8Off == 0)
+			? PcatFindApiTimerOff(mem, hootAilCs_) : 0);
+		if (tOff) {
+			mem[0x08 * 4] = (uint8_t)(tOff & 0xff);
+			mem[0x08 * 4 + 1] = (uint8_t)(tOff >> 8);
+			mem[0x08 * 4 + 2] = (uint8_t)(hootAilCs_ & 0xff);
+			mem[0x08 * 4 + 3] = (uint8_t)(hootAilCs_ >> 8);
+			mem[base + 0x0E] = 0;
+			mem[base + 0x0F] = 0;
+			PcatAilTrace("ail plant timer %04X:%04X\n", hootAilCs_, tOff);
+		}
+	}
 	RestoreHootIdleTrampoline(mem);
 	np2_reg_set(NP2_R_CS, (uint16_t)DOS98_TRAMP_SEG);
 	np2_reg_set(NP2_R_IP, (uint16_t)PCAT_IDLE_IP);
@@ -3391,6 +4295,24 @@ void CHardPcat::MuteAllSound()
 void CHardPcat::MixExtra(int16_t* stereo, int frames)
 {
 	if (!stereo || frames <= 0) return;
+	if (sn764_) {
+		enum { kChunk = 512 };
+		int16_t tmp[kChunk * 2];
+		for (int off = 0; off < frames; ) {
+			const int n = (frames - off > kChunk) ? kChunk : (frames - off);
+			int16_t* dst = stereo + off * 2;
+			sn764_->Render(tmp, n);
+			for (int i = 0; i < n; i++) {
+				int32_t l = (int32_t)dst[i * 2] + tmp[i * 2];
+				int32_t r = (int32_t)dst[i * 2 + 1] + tmp[i * 2 + 1];
+				if (l > 32767) l = 32767; if (l < -32768) l = -32768;
+				if (r > 32767) r = 32767; if (r < -32768) r = -32768;
+				dst[i * 2] = (int16_t)l;
+				dst[i * 2 + 1] = (int16_t)r;
+			}
+			off += n;
+		}
+	}
 	if (saa1_ || saa2_) {
 		enum { kChunk = 512 };
 		int16_t tmp[kChunk * 2];

@@ -10,6 +10,7 @@
 #include <uxtheme.h>
 #include <math.h>
 #include <algorithm>
+#include <stdlib.h>
 #pragma comment(lib, "uxtheme.lib")
 
 // ============================================================================
@@ -102,16 +103,11 @@ namespace {
 		lf.lfCharSet = DEFAULT_CHARSET;
 		::EnumFontFamiliesExW(hdc, &lf, EnumFaceProc, 0, 0);
 		::ReleaseDC(NULL, hdc);
-		// 名前順（簡易）
-		for (int i = 0; i < s_faceCount; ++i) {
-			for (int j = i + 1; j < s_faceCount; ++j) {
-				if (_wcsicmp(s_faces[j], s_faces[i]) < 0) {
-					wchar_t t[LF_FACESIZE];
-					lstrcpynW(t, s_faces[i], LF_FACESIZE);
-					lstrcpynW(s_faces[i], s_faces[j], LF_FACESIZE);
-					lstrcpynW(s_faces[j], t, LF_FACESIZE);
-				}
-			}
+		if (s_faceCount > 1) {
+			qsort(s_faces, (size_t)s_faceCount, sizeof(s_faces[0]),
+				[](const void* a, const void* b) {
+					return _wcsicmp((const wchar_t*)a, (const wchar_t*)b);
+				});
 		}
 	}
 
@@ -148,8 +144,21 @@ namespace {
 	}
 	static UINT PopupDpiFromHwnd(HWND hWnd)
 	{
-		UINT dpi = 96;
 		HWND h = hWnd ? hWnd : ::GetDesktopWindow();
+		typedef UINT(WINAPI* PFN_GetDpiForWindow)(HWND);
+		static PFN_GetDpiForWindow s_fn = nullptr;
+		static BOOL s_got = FALSE;
+		if (!s_got) {
+			HMODULE hUser = ::GetModuleHandleW(L"user32.dll");
+			if (hUser)
+				s_fn = (PFN_GetDpiForWindow)::GetProcAddress(hUser, "GetDpiForWindow");
+			s_got = TRUE;
+		}
+		if (s_fn && h) {
+			const UINT dpi = s_fn(h);
+			if (dpi > 0) return dpi;
+		}
+		UINT dpi = 96;
 		if (HDC hdc = ::GetDC(h)) {
 			dpi = (UINT)::GetDeviceCaps(hdc, LOGPIXELSX);
 			::ReleaseDC(h, hdc);

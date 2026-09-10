@@ -1,6 +1,5 @@
 ﻿#pragma once
 #include <stdint.h>
-#include <vector>
 
 // ============================================================================
 // KpiHost64 曲ファイル用 VST MIDI（スロット 0 / 1）
@@ -14,7 +13,7 @@
 // 戻り: KPIHOST64_STATUS_*
 uint32_t VstHost64_Open(int slot, const wchar_t* midPath, const wchar_t* vstDllPath, const wchar_t* extraScanPath);
 // PCM を読む。eof には KPIHOST64_EOF_* を OR する（短い読み／MIDI 未消化／SysEx・CC）。
-uint32_t VstHost64_Render(int slot, uint32_t bytesWanted, std::vector<uint8_t>& out, uint32_t& eof);
+uint32_t VstHost64_Render(int slot, uint32_t bytesWanted, uint8_t* dest, uint32_t destCap, uint32_t& gotBytes, uint32_t& eof);
 uint32_t VstHost64_Seek(int slot, uint64_t posSample); // サンプル絶対位置
 uint32_t VstHost64_Close(int slot);                   // 片方だけ閉じる
 uint32_t VstHost64_CloseAll();                        // クロスフェード両スロット

@@ -23,6 +23,115 @@ static unsigned Pc98RomPhys(int offset)
 
 static int DosShellStarts(const CEmuGameEntry* ge, const char* const* prefixes);
 
+/* Last OPN DATA0 write. YM2203 FM regs are write-only; PC-98 boards bus-hold
+   the byte so OPNDRV can IN-compare a 27h/40h canary (c2gp / dynamo98). */
+static uint8_t g_opnDataLatch = 0;
+static int g_opnBusHold = 0;
+/* MMD2.SYS INT14 ISR: OCW3 0Bh / IN 00h / TEST 80h, then slave EOI.
+   Soft-PIC used to return 0 so it skipped OUT 08h,20h and IRQ12 stuck. */
+static int g_mmdPicIsr = 0;
+/* MMD.SYS (header "MMD200  ", not MMD2 "MMD200OR"): 07FF copies [si+3]
+   into duration. Parse leaves gate 0, so the first note stores duration 0
+   and 0732 RETs the channel forever (sbr_98 SILENT with song resident). */
+static int g_mmdClassic = 0;
+static unsigned g_mmdLoadSeg = 0;
+static int g_mmdPlayAssist = 0;
+static const uint8_t* g_mmd2FnSrc = NULL;
+/* MMD2 0x654 writes A0/A4 then never 28h|F0, so F-num slides on mute ops.
+   First A0 per channel latches 28h|F0 until a real key-off. */
+static uint8_t g_mmdKeyOn = 0;
+static unsigned g_sddLoadSeg = 0;
+static unsigned g_muse2Seg = 0;
+static uint16_t g_muse2Intr = 0;
+
+static void MmdPlayAssist(uint8_t* mem)
+{
+	if (!mem || !g_mmdLoadSeg) return;
+	const unsigned lin = (unsigned)g_mmdLoadSeg << 4;
+	if (lin >= 0x200000u) return;
+	if (g_mmdClassic) {
+		if (lin + 0x154Du < 0x200000u) {
+			mem[lin + 0x154A] = 0x88;
+			mem[lin + 0x154B] = 0x01;
+			mem[lin + 0x154C] = 0x8A;
+			mem[lin + 0x154D] = 0x01;
+		}
+		const unsigned base = lin + 0x180Fu;
+		for (unsigned ch = 0; ch < 6u; ch++) {
+			const unsigned p = base + ch * 0x33u;
+			if (p + 3u < 0x200000u && mem[p + 2] != 0 && mem[p + 3] == 0)
+				mem[p + 3] = 1;
+		}
+	}
+	/* 4655 overlay: COM parks far ptrs at CS:09D0. File F-num writer is
+	   still CALLed there, so IP=09D7 hits 0F (#UD). DF is at 09D6. */
+	if (g_mmdPlayAssist && g_mmd2FnSrc && lin + 0x9E0u < 0x200000u
+		&& mem[lin + 0x9D6] == 0xDF && mem[lin + 0x9D7] == 0x0F)
+		memcpy(mem + lin + 0x9C0, g_mmd2FnSrc, 32);
+}
+
+/* Real PC-98: ITF @ F000-F7FF, N88 BIOS @ F800-FFFF, text VRAM @ A000,
+   attribute VRAM @ A200, DIP/MEMSW in the text page, BIOS work @ 0000:0500.
+   Empty F000:0000 used to be 00h (ADD [BX+SI],AL) and F800:0001 was IRET, so a
+   far CALL into firmware popped the wrong frame and later hit INT6. */
+static void PlantPc98BiosMap(uint8_t* mem)
+{
+	if (!mem) return;
+	auto fillRetf = [&](unsigned lo, unsigned hi) {
+		int empty = 1;
+		for (unsigned a = lo; a < hi; a++) {
+			if (mem[a]) { empty = 0; break; }
+		}
+		if (!empty) return;
+		memset(mem + lo, 0xCB, hi - lo); /* RETF — far CALL firmware */
+	};
+	fillRetf(0xF0000u, 0xF8000u);
+	/* F800 BIOS window: byte0 RETF for far CALL F800:0000; the rest IRET so
+	   a corrupt IVT that landed in high ROM still returns from INT. */
+	{
+		int empty = 1;
+		for (unsigned a = 0xF8000u; a < 0x100000u; a++) {
+			if (mem[a]) { empty = 0; break; }
+		}
+		if (empty) {
+			mem[0xF8000u] = 0xCB;
+			memset(mem + 0xF8001u, 0xCF, 0x100000u - 0xF8001u);
+		}
+	}
+
+	auto fillText = [&](unsigned base) {
+		int empty = 1;
+		for (unsigned i = 0; i < 16; i++) {
+			if (mem[base + i]) { empty = 0; break; }
+		}
+		if (!empty) return;
+		for (unsigned i = 0; i < 80u * 25u * 2u; i += 2) {
+			mem[base + i] = 0x20;
+			mem[base + i + 1] = 0xE1;
+		}
+	};
+	fillText(0xA0000u);
+	fillText(0xA2000u);
+
+	/* MEMSW (NP2 A000:3FE2, 16 bytes). Bit0/bit3 at 3FEE = 286 + FM board. */
+	if (0xA0000u + 0x3FEFu < 0x200000u) {
+		if (mem[0xA0000u + 0x3FE2u] == 0)
+			mem[0xA0000u + 0x3FE2u] = 0x48;
+		mem[0xA0000u + 0x3FEEu] = (uint8_t)(mem[0xA0000u + 0x3FEEu] | 0x09);
+	}
+
+	/* BIOS work: skip 0510-0544 (DOS LOL / non-DOS INT18 stub). */
+	mem[0x501] = (uint8_t)(mem[0x501] | 0x08); /* 80286 / QueenSoft FM */
+	if (mem[0x504] == 0 && mem[0x505] == 0) {
+		mem[0x504] = 0x80; /* conventional 640 KB */
+		mem[0x505] = 0x02;
+	}
+	mem[0x536] = (uint8_t)(mem[0x536] | 0x04); /* sound board present */
+	/* Expansion-memory KB at 0584; daily timer at 05A0 (INT 08 trampoline). */
+	if (mem[0x584] == 0 && mem[0x585] == 0)
+		mem[0x584] = 0;
+}
+
 /* CEMU_PC98_IPPROF=<file>: histogram of the linear PC executed during the
    play pump. A driver that loads its song and then goes mute is almost always
    spinning on one wait condition, and the hot address names the instruction
@@ -86,9 +195,6 @@ void Pc98MemDump(const uint8_t* mem)
 	static int checked = 0;
 	if (!checked) { checked = 1; spec = getenv("CEMU_PC98_MEMDUMP"); }
 	if (!spec || !spec[0] || !mem) return;
-	static int done = 0;
-	if (done) return;
-	done = 1;
 	unsigned lin = 0, len = 0;
 	char path[260];
 	if (sscanf_s(spec, "%x,%u,%259s", &lin, &len, path, (unsigned)sizeof(path)) != 3)
@@ -658,6 +764,21 @@ int CHardPc98::Init(const CEmuGameEntry* ge, int sampleRate)
 	chip_ = CEmuChipYm2608Create((uint32_t)opnHz_, opnaMode, sampleRate_);
 	if (!chip_) return 0;
 	memset(ssgEcho_, 0, sizeof(ssgEcho_));
+	g_opnDataLatch = 0;
+	/* Old OPNDRV.EXE (md5 b5c63c42) is only c2gp/dynamo98. Echoing 27h/FFh
+	   DATA0 globally moved bny's OPNA fingerprint; gate the bus-hold. */
+	g_opnBusHold = (ge && ge->archive
+		&& (!_stricmp(ge->archive, "c2gp") || !_stricmp(ge->archive, "dynamo98")))
+		? 1 : 0;
+	g_mmdPicIsr = 0;
+	g_mmdClassic = 0;
+	g_mmdLoadSeg = 0;
+	g_mmdPlayAssist = 0;
+	g_mmd2FnSrc = NULL;
+	g_mmdKeyOn = 0;
+	g_sddLoadSeg = 0;
+	g_muse2Seg = 0;
+	g_muse2Intr = 0;
 	/* Both YM3812 and Y8950 run off the board's own 3.579545 MHz colour-burst
 	   crystal, not the PC-98 bus clock. The V/VS/LS variants fit a Y8950
 	   instead; its FM half is register-compatible with the YM3812, so the
@@ -1236,10 +1357,16 @@ int CHardPc98::DeliverIrqs()
 {
 	if (g_pc98Eoi) {
 		g_pc98Eoi = 0;
-		/* Do not clear opnInService_ on PIC EOI alone. YM2608 IRQs are
-		   level-triggered; clearing here before the ISR acks timer status
-		   (reg 0x27 / status read) re-enters forever and hangs PumpCycles
-		   (pc88vados tetrisva/shinrava long renders). */
+		/* MMD2 acks YM (27h=2Ah) then PIC EOI. Level-triggered ymfm
+		   re-asserts before IRET; keeping opnInService_ latched then
+		   starves AH=3's STI wait and the HLT idle (michael pick 1
+		   line/svc tens of millions, irq frozen). */
+		if (g_mmdPicIsr)
+			opnInService_ = 0;
+		/* Do not clear opnInService_ on PIC EOI alone for other cores.
+		   YM2608 IRQs are level-triggered; clearing here before the ISR
+		   acks timer status (reg 0x27 / status read) re-enters forever
+		   and hangs PumpCycles (pc88vados tetrisva/shinrava). */
 	}
 	/* NOPNDRV acks via OPN reg 0x27, not always PIC OCW2 — release when line drops. */
 	if (chip_ && !chip_->Irq())
@@ -1285,7 +1412,6 @@ int CHardPc98::DeliverIrqs()
 			}
 		}
 	}
-
 	uint16_t flags = np2_reg_get(NP2_R_FLAGS);
 	if (modeBeep_ && pitIrqPending_) {
 		/* Speaker rips (BGML_98) sequence notes on IRQ0. After INT 7F they
@@ -1303,6 +1429,10 @@ int CHardPc98::DeliverIrqs()
 		if (chip_ && chip_->Irq()) g_censIfOff++;
 		return 0;
 	}
+	/* MMD2 ISR never STI. IF set means it IRET'd; ymfm may still hold
+	   the level line so the old latch starved the HLT idle. */
+	if (g_mmdPicIsr)
+		opnInService_ = 0;
 	if (chip_ && chip_->Irq()) {
 		g_censLine++;
 		if (opnInService_) g_censSvc++;
@@ -1374,6 +1504,46 @@ int CHardPc98::DeliverIrqs()
 			vec = 0x14;
 			picMask_ = (uint8_t)(picMask_ & ~(1u << 2)); /* cascade */
 			slavePicMask_ = (uint8_t)(slavePicMask_ & ~(1u << 4)); /* IRQ12 */
+		}
+		/* USMD overlay plants the YM sequencer on INT15 (IRQ13). INT14 is
+		   only a master-PIC chain stub (IN AL,2 / far old 14); delivering
+		   there left keyOn=0 with opnInService stuck on the level line.
+		   Unpacked titles sit overlay at CS+0x470/471; PIYO+EXEPACK packs
+		   leave INT7E and INT15 on different load copies (es95: +0x772). */
+		if (mem && IvtHooked(0x15, isDos_) && IvtHooked(0x7E, isDos_)) {
+			const unsigned o7e = (unsigned)mem[0x7E * 4]
+				| ((unsigned)mem[0x7E * 4 + 1] << 8);
+			const unsigned s7e = (unsigned)mem[0x7E * 4 + 2]
+				| ((unsigned)mem[0x7E * 4 + 3] << 8);
+			const unsigned o15 = (unsigned)mem[0x15 * 4]
+				| ((unsigned)mem[0x15 * 4 + 1] << 8);
+			const unsigned s15 = (unsigned)mem[0x15 * 4 + 2]
+				| ((unsigned)mem[0x15 * 4 + 3] << 8);
+			const unsigned isr7e = ((unsigned)s7e << 4) + o7e;
+			static const uint8_t kUsmd7e[] = {
+				0x51, 0x52, 0x53, 0x55, 0x56, 0x57, 0x06, 0x1E, 0xBB
+			};
+			int usmd7e = 0;
+			if (s7e && o7e == 0x0005 && isr7e + sizeof(kUsmd7e) < 0x200000u
+				&& memcmp(mem + isr7e, kUsmd7e, sizeof(kUsmd7e)) == 0)
+				usmd7e = 1;
+			if (usmd7e && s15) {
+				const unsigned phys = ((unsigned)s15 << 4) + o15;
+				int hasIn0A = 0;
+				if (phys + 24u < 0x200000u && mem[phys] == 0x50) {
+					for (unsigned k = 1; k < 24; k++) {
+						if (mem[phys + k] == 0xE4 && mem[phys + k + 1] == 0x0A) {
+							hasIn0A = 1;
+							break;
+						}
+					}
+				}
+				if (hasIn0A) {
+					vec = 0x15;
+					picMask_ = (uint8_t)(picMask_ & ~(1u << 2));
+					slavePicMask_ = (uint8_t)(slavePicMask_ & ~(1u << 5));
+				}
+			}
 		}
 		if (!IvtHooked(vec, isDos_)) {
 			/* Do not fall back to VSYNC (0x0A) or other IRQ lines — that
@@ -1788,6 +1958,11 @@ uint8_t CHardPc98::PortIn(uint16_t port)
 		   unless clocks advance between OUT and IN — mask for VA play. */
 		if (pc88VaIo_)
 			s = (uint8_t)(s & (uint8_t)~0x80);
+		/* MMD2.SYS ISR 0x3ff / 0x4a3: OUT addr / IN 188h / TEST 80h.
+		   Nested INT14 has IF clear, so a sticky ymfm busy bit parks the
+		   ISR forever (opnInService stuck, key-on 0x28 never written). */
+		if (g_mmdPicIsr)
+			s = (uint8_t)(s & (uint8_t)~0x80);
 		return s;
 	}
 	case OPN_DATA0:
@@ -1801,6 +1976,14 @@ uint8_t CHardPc98::PortIn(uint16_t port)
 		   status, not the register. Serve the last DATA0 write. */
 		if (opnLatchedAddr_ <= 0x0F)
 			return ssgEcho_[opnLatchedAddr_];
+		/* Old TKY/OPNDRV (c2gp, dynamo98) probes YM by OUT 27h/40h then
+		   IN DATA expecting 0x40, then OUT addr FFh / IN DATA not-1.
+		   Real YM2203 27h is write-only; PC-98 boards bus-hold the last
+		   data-port write. Newer OPNDRV NOPs both compares (rolling95).
+		   Only those two latched addrs echo: a blanket DATA0 latch moved
+		   rolling95's first audible window (SIL.MDT fp). */
+		if (g_opnBusHold && (opnLatchedAddr_ == 0x27 || opnLatchedAddr_ == 0xFF))
+			return g_opnDataLatch;
 		return chip_ ? chip_->ReadData() : 0xff;
 	case OPN_ADDR1: {
 		if (modeSorch_)
@@ -1846,7 +2029,11 @@ uint8_t CHardPc98::PortIn(uint16_t port)
 		   timer B). Unhandled reads were 0xFF and spun forever (opnW
 		   hundreds of thousands, key=0). Soft-PIC has no latched ISR.
 		   PC-88VA MAP (olteus CS:0C50): when DS:[00C0]!=0 wait for bit6
-		   then clear; when [00C0]==0 bit6 must be clear or it re-spins. */
+		   then clear; when [00C0]==0 bit6 must be clear or it re-spins.
+		   MMD2 INT14: IN master ISR bit7 decides whether to EOI the slave.
+		   Returning 0 skipped OUT 08h,20h and left IRQ12 in-service. */
+		if (port == PIC_CMD && g_mmdPicIsr && opnInService_)
+			return 0x80;
 		if (pc88VaIo_ && port == SLAVE_PIC_CMD && olteusDataSeg_) {
 			uint8_t* mem = np2_mem();
 			const unsigned a = ((unsigned)olteusDataSeg_ << 4) + 0xC0u;
@@ -1869,6 +2056,12 @@ uint8_t CHardPc98::PortIn(uint16_t port)
 		return 0xA0;
 	case PPI_C:
 		return ppiC_;
+	case 0x41:
+		/* Keyboard 8251 data. No scan code queued. */
+		return 0x00;
+	case 0x43:
+		/* 8251 status (TxRDY|TxEMPTY) / system port: printer not busy. */
+		return 0x06;
 	case WOLF_SYNC0:
 	case 0xC0D0: /* alternate PC-98 MIDI data port */
 		if (modeMidi_ || mpuUart_)
@@ -1985,9 +2178,28 @@ void CHardPc98::PortOut(uint16_t port, uint8_t data)
 			opnTailAddr_[opnTailCount_ % 64] = opnLatchedAddr_;
 			opnTailData_[opnTailCount_ % 64] = data;
 			opnTailCount_++;
-			if (opnLatchedAddr_ == 0x28 && (data & 0xf0) != 0) {
-				opnKeyOnCount_++;
-				opnKeyOnCh_[data & 0x07]++;
+			if (opnLatchedAddr_ == 0x28) {
+				if ((data & 0xf0) != 0) {
+					opnKeyOnCount_++;
+					opnKeyOnCh_[data & 0x07]++;
+					g_mmdKeyOn |= (uint8_t)(1u << (data & 7));
+				} else
+					g_mmdKeyOn &= (uint8_t)~(1u << (data & 7));
+			} else if (g_mmdPicIsr
+				&& ((opnLatchedAddr_ >= 0xA0 && opnLatchedAddr_ <= 0xA2)
+					|| (opnLatchedAddr_ >= 0xA4 && opnLatchedAddr_ <= 0xA6))) {
+				const uint8_t ch = (uint8_t)(opnLatchedAddr_ >= 0xA4
+					? (opnLatchedAddr_ - 0xA4) : (opnLatchedAddr_ - 0xA0));
+				if (ch < 3 && (g_mmdKeyOn & (1u << ch)) == 0) {
+					const uint8_t saved = opnLatchedAddr_;
+					chip_->Write(0, 0x28);
+					chip_->Write(1, (uint8_t)(0xF0 | ch));
+					opnKeyOnCount_++;
+					opnKeyOnCh_[ch]++;
+					g_mmdKeyOn |= (uint8_t)(1u << ch);
+					chip_->Write(0, saved);
+					opnLatchedAddr_ = saved;
+				}
 			}
 			if (((opnLatchedAddr_ & 0xf0) == 0x40 || (opnLatchedAddr_ & 0xf0) == 0x50) && data < 0x7f)
 				opnTlLiveCount_++;
@@ -2002,6 +2214,7 @@ void CHardPc98::PortOut(uint16_t port, uint8_t data)
 				ssgPortAJumper_ = data;
 			if (opnLatchedAddr_ <= 0x0F)
 				ssgEcho_[opnLatchedAddr_] = data;
+			g_opnDataLatch = data;
 			opnWriteCount_++;
 		}
 		break;
@@ -2487,6 +2700,8 @@ int CHardPc98::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCo
 		}
 	}
 
+	PlantPc98BiosMap(mem);
+
 	/* QueenSoft MADP: INT40 is an AL-indexed API (not the OPN ISR). Boot
 	   glue INT40 AL=19 TESTs ES:[0501] bit3 (FM present) before programming
 	   YM — plant before CPU start. Play INT7F maps cmd→AL=1D/1B. */
@@ -2602,10 +2817,34 @@ static void DosSplitCmd(const char* cmd, char* name, int nameCap, char* tail, in
 		strncpy_s(tail, (size_t)tailCap, t, _TRUNCATE);
 }
 
+/* CONFIG `mmd.sys /f12 4096` — `/f` is a switch, not a path separator.
+   Stem is the first whitespace token; only then take the last \/: in it. */
+static void DosCfgFileStem(const char* in, char* out, int outCap)
+{
+	if (!out || outCap <= 0) return;
+	out[0] = 0;
+	if (!in) return;
+	const char* end = in;
+	while (*end && *end != ' ' && *end != '\t')
+		end++;
+	const char* base = in;
+	for (const char* p = in; p < end; p++) {
+		if (*p == '\\' || *p == '/' || *p == ':')
+			base = p + 1;
+	}
+	int n = (int)(end - base);
+	if (n <= 0) return;
+	if (n >= outCap) n = outCap - 1;
+	memcpy(out, base, (size_t)n);
+	out[n] = 0;
+}
+
 static int DosIsEngineName(const char* name)
 {
-	if (!name || !name[0]) return 0;
-	const char* ext = strrchr(name, '.');
+	char stem[DOS98_NAME];
+	DosCfgFileStem(name, stem, (int)sizeof(stem));
+	if (!stem[0]) return 0;
+	const char* ext = strrchr(stem, '.');
 	if (!ext) return 0;
 	return _stricmp(ext, ".EXE") == 0
 		|| _stricmp(ext, ".COM") == 0
@@ -2616,32 +2855,36 @@ static int DosIsEngineName(const char* name)
 void CHardPc98::MaterializeDosFiles(CEmuZipFs* fs, const CEmuGameEntry* ge)
 {
 	if (!fs || !ge) return;
+	/* Engines first so a 256+ song list cannot fill files_[] before the
+	   glue COM/EXE is copied (night_s USMD: 132 files + 130 conin). */
+	for (int pass = 0; pass < 2; pass++) {
 	for (int i = 0; i < ge->romCount; i++) {
 		const CEmuRomEntry* r = &ge->rom[i];
 		if (_stricmp(r->type, "file") != 0 && _stricmp(r->type, "conin") != 0
 			&& _stricmp(r->type, "device") != 0)
 			continue;
+		const int eng = DosIsEngineName(r->name);
+		if (pass == 0 && !eng) continue;
+		if (pass == 1 && eng) continue;
 		unsigned sz = 0;
-		const unsigned char* data = CEmuZipFsFind(fs, r->name, &sz);
-		if ((!data || !sz) && r->name && r->name[0]) {
-			char stem[96];
-			int nj = 0;
-			for (const char* p = r->name; *p && *p != ' ' && *p != '\t' && nj < 95; p++)
-				stem[nj++] = *p;
-			stem[nj] = 0;
-			if (stem[0] && strcmp(stem, r->name) != 0)
-				data = CEmuZipFsFind(fs, stem, &sz);
-		}
+		char stem[96];
+		DosCfgFileStem(r->name, stem, (int)sizeof(stem));
+		/* Stem first: `MMD2.SYS 4096` used to ZipFsFind the CONFIG string
+		   and the no-ext fallback returned mmd2.com (same stem, earlier
+		   zip member), clobbering the type=file SYS image. */
+		const unsigned char* data = NULL;
+		if (stem[0])
+			data = CEmuZipFsFind(fs, stem, &sz);
+		if ((!data || !sz) && r->name && r->name[0]
+			&& (!stem[0] || strcmp(stem, r->name) != 0))
+			data = CEmuZipFsFind(fs, r->name, &sz);
 		unsigned char donorBuf[256 * 1024];
 		unsigned donorSz = 0;
 		/* Song-only zips (gdm_mo/guyna/kizuato/nekoex) omit PMD_98.COM even
 		   though the catalog lists it — pull the driver from a sibling pack. */
 		if ((!data || !sz) && fs->zipPath[0] && DosIsEngineName(r->name)) {
-			const char* base = r->name;
-			for (const char* p = r->name; *p; p++) {
-				if (*p == '\\' || *p == '/' || *p == ':')
-					base = p + 1;
-			}
+			char base[DOS98_NAME];
+			DosCfgFileStem(r->name, base, (int)sizeof(base));
 			static const wchar_t* kDonors[] = {
 				L"xenon_98.zip", L"eveppz8_98.zip", L"chobaku_98.zip",
 				L"frnunv98.zip", NULL
@@ -2664,12 +2907,11 @@ void CHardPc98::MaterializeDosFiles(CEmuZipFs* fs, const CEmuGameEntry* ge)
 			}
 		}
 		if (!data || !sz) continue;
-		const char* base = r->name;
-		for (const char* p = r->name; *p; p++) {
-			if (*p == '\\' || *p == '/' || *p == ':')
-				base = p + 1;
-		}
-		dos_.AddFile(base, data, sz);
+		char addName[DOS98_NAME];
+		DosCfgFileStem(r->name, addName, (int)sizeof(addName));
+		if (addName[0])
+			dos_.AddFile(addName, data, sz);
+	}
 	}
 }
 
@@ -2841,8 +3083,11 @@ const char* CHardPc98::SelectedDosSong(const CEmuGameEntry* ge, unsigned titleCo
 	}
 	const int low = (int)(titleCode & 0xff);
 	const int full = (int)titleCode;
-	for (int pass = 0; pass < 2; pass++) {
-		const int want = pass == 0 ? full : low;
+	const int hi = (int)((titleCode >> 8) & 0xff);
+	for (int pass = 0; pass < 3; pass++) {
+		const int want = pass == 0 ? full : (pass == 1 ? low : hi);
+		if (pass == 2 && (hi == 0 || hi == low || titleCode <= 0xffu))
+			continue;
 		for (int i = 0; i < ge->romCount; i++) {
 			const CEmuRomEntry* r = &ge->rom[i];
 			if (_stricmp(r->type, "file") != 0) continue;
@@ -2950,6 +3195,10 @@ void CHardPc98::BindDosTriggerSong(const CEmuGameEntry* ge, unsigned titleCode)
 		"iwaplay", "IWAPLAY",
 		NULL
 	};
+	static const char* kElfMus[] = {
+		"ELFMUS98", "elfmus", "ELFMUS",
+		NULL
+	};
 	const int cplayFamily = DosShellStarts(ge, kCplay);
 	int opensByName = cplayFamily || DosShellStarts(ge, kOpenName);
 	/* famistava conin: INT7F AH=3F reads the ASCIIZ name from handle 0, then
@@ -2983,9 +3232,15 @@ void CHardPc98::BindDosTriggerSong(const CEmuGameEntry* ge, unsigned titleCode)
 	/* usd_98 (ADVBIOS/ADVH): INT7F AH=3F reads song BYTES from BX=0
 	   (CX=4000/FFFF). ADVH packs list songs only as conin@title — the
 	   famistava heuristic above would bind the filename text (len=10 for
-	   "DC_02P.USO") and leave keyOn=0. Always use binary handles. */
+	   "DC_02P.USO") and leave keyOn=0. Always use binary handles.
+	   usmd_98 is NOT here: glue AH=3F-reads the title handle then INT 7D
+	   AH=3D-opens DS:SI as an ASCIIZ .USO name. Binary on that handle
+	   made Open AX=0002. */
 	{
-		static const char* kUsdSong[] = { "usd_98", "usd98", NULL };
+		static const char* kUsdSong[] = {
+			"usd_98", "usd98",
+			NULL
+		};
 		if (DosShellStarts(ge, kUsdSong))
 			opensByName = 0;
 	}
@@ -3060,6 +3315,13 @@ void CHardPc98::BindDosTriggerSong(const CEmuGameEntry* ge, unsigned titleCode)
 		/* MDR external-voice: EXT_PARAM = voice handle (byte2). */
 		extSong_ = (uint16_t)(titleCode & 0xff);
 		extParam_ = (uint16_t)byte2;
+	} else if (DosShellStarts(ge, kElfMus)) {
+		/* ELFMUS98 cmd0 `IN AX,7E2`: AH>=0x0A is the packed-bank DOS
+		   handle (aress BGM.MDT titles 0x10nn / SE.MDT 0x06nn). Low-byte
+		   EXT_SONG left BX=0 and AH=3F transferred 0. 8-bit titles
+		   (birthd 0x23) keep AH=0 and still read handle 0. */
+		extSong_ = (uint16_t)(titleCode & 0xffff);
+		extParam_ = 0;
 	} else if (DosShellStarts(ge, kExtParamVoice)) {
 		/* mmd2/iwaplay: IN 7E4 is the voice/TON handle (catalog byte2, or
 		   handle 5 when titles are 0x10-style). byte2!=0 used to set
@@ -3143,6 +3405,58 @@ static int PatchSynth98PaiDest(uint8_t* mem, uint16_t psp)
 	return 1;
 }
 
+/* SS_98.COM cmd0 AH=3F-reads the ASCIIZ name at CS:0196 then INT 41 AH=1.
+   The glue does `mov si,ds / xor di,dx` (DX=0196) so SI:DI is a far pointer
+   to that name — xor assumes DI=0. BootDos leaves DI dirty, FindFirst at
+   the driver's DS:260A then misses TITLE.DAT (AX=0012). `mov di,dx` keeps
+   the pointer on the name. */
+static void PatchSs98SongPtr(uint8_t* mem)
+{
+	if (!mem) return;
+	const unsigned seg = (unsigned)mem[0x7F * 4 + 2]
+		| ((unsigned)mem[0x7F * 4 + 3] << 8);
+	if (!seg || seg == (unsigned)DOS98_TRAMP_SEG)
+		return;
+	static const uint8_t kOld[] = { 0x8C, 0xDE, 0x31, 0xD7, 0xB4, 0x01, 0xCD, 0x41 };
+	const unsigned cs0 = Pc98DosLin((uint16_t)seg, 0x100);
+	for (unsigned d = 0; d + 8u < 0xA0u; d++) {
+		const unsigned at = cs0 + d;
+		if (at + 8u >= 0x200000u)
+			break;
+		if (memcmp(mem + at, kOld, 8) != 0)
+			continue;
+		mem[at + 2] = 0x8B;
+		mem[at + 3] = 0xFA;
+		return;
+	}
+}
+
+/* USMD.EXE plants INT 7E at CS:0005 then AH=31 TSR. The insn after that
+   INT21 is the "already loaded" uninstaller (pushf; mov ax,3; int 7e…).
+   feti puts it at 0270; hhg shifted it to 027C. Leaving CS:IP on the
+   INT21 trampoline with AX=3100 made TriggerPlay's PumpCycles abort on
+   RESIDENT before glue INT 7D opened the .USO. IRET onto the uninstaller
+   and park there. */
+static int PatchUsmdUnloadHalt(uint8_t* mem, uint16_t cs, uint16_t ip)
+{
+	if (!mem || !cs || cs == (uint16_t)DOS98_TRAMP_SEG)
+		return 0;
+	const unsigned isr = Pc98DosLin(cs, 0x0005);
+	const unsigned at = Pc98DosLin(cs, ip);
+	if (isr + 9u >= 0x200000u || at + 4u >= 0x200000u)
+		return 0;
+	static const uint8_t kIsr[] = { 0x51, 0x52, 0x53, 0x55, 0x56, 0x57, 0x06, 0x1E, 0xBB };
+	if (memcmp(mem + isr, kIsr, sizeof(kIsr)) != 0)
+		return 0;
+	if (mem[at] != 0x9C || mem[at + 1] != 0xB8
+		|| mem[at + 2] != 0x03 || mem[at + 3] != 0x00)
+		return 0;
+	mem[at] = 0xF4;
+	mem[at + 1] = 0xEB;
+	mem[at + 2] = 0xFD;
+	return 1;
+}
+
 int CHardPc98::RunDosDevices(const CEmuGameEntry* ge, uint64_t budgetCycles)
 {
 	if (!ge) return 0;
@@ -3160,31 +3474,30 @@ int CHardPc98::RunDosDevices(const CEmuGameEntry* ge, uint64_t budgetCycles)
 		int isLooseMmd = 0;
 		if (!isDevice && nDeviceRom == 0 && _stricmp(r->type, "file") == 0
 			&& r->offset < 0 && r->name) {
-			const char* bn = r->name;
-			for (const char* p = r->name; *p; p++) {
-				if (*p == '\\' || *p == '/' || *p == ':')
-					bn = p + 1;
-			}
+			char bn[DOS98_NAME];
+			DosCfgFileStem(r->name, bn, (int)sizeof(bn));
 			const char* dot = strrchr(bn, '.');
 			if (dot && _stricmp(dot, ".SYS") == 0
 				&& _strnicmp(bn, "MMD", 3) == 0)
 				isLooseMmd = 1;
 		}
 		if (!isDevice && !isLooseMmd) continue;
+		/* Keep the full CONFIG string for extraParas / INIT packet.
+		   Stem-only name is for LoadDeviceImage — last-slash on
+		   `mmd.sys /f12 4096` used to look up "f12" (sbr_98 SILENT). */
 		const char* base = r->name ? r->name : "";
-		for (const char* p = base; *p; p++) {
-			if (*p == '\\' || *p == '/' || *p == ':')
-				base = p + 1;
-		}
 		char name[DOS98_NAME];
-		int nj = 0;
-		for (const char* p = base; *p && *p != ' ' && *p != '\t' && nj < DOS98_NAME - 1; p++)
-			name[nj++] = *p;
-		name[nj] = 0;
+		DosCfgFileStem(base, name, (int)sizeof(name));
+		if (!name[0]) continue;
 		/* NMUSE CONFIG -d/-k sizes are byte buffers past the image.
 		   Small -d2048 -k1024 already fits the default alloc; applying
 		   it anyway moved the COM AH=48 block and GAPPY'd pod OPEN. */
 		unsigned extraParas = 0;
+		const int isMmd = (_strnicmp(name, "mmd", 3) == 0);
+		if (isMmd)
+			g_mmdPicIsr = 1;
+		if (isMmd && _strnicmp(name, "mmd2", 4) != 0)
+			g_mmdClassic = 1;
 		for (const char* ap = base; *ap; ap++) {
 			if ((ap[0] == '-' || ap[0] == '/')
 				&& (ap[1] == 'd' || ap[1] == 'D' || ap[1] == 'k' || ap[1] == 'K')
@@ -3195,7 +3508,28 @@ int CHardPc98::RunDosDevices(const CEmuGameEntry* ge, uint64_t budgetCycles)
 				extraParas += (v + 15u) / 16u;
 			}
 		}
-		if (extraParas <= 0x180u)
+		/* MMD2.SYS 4096 — bare decimal is the work-buffer size, not -d/-k.
+		   Without extra paras the next COM (mmd2.com) lands on CS:0xFBA
+		   (voice+song copy dest) and INT D2 AH=10 copies into overwritten RAM. */
+		if (isMmd && extraParas == 0) {
+			for (const char* ap = base; *ap; ) {
+				if (*ap >= '0' && *ap <= '9') {
+					unsigned v = 0;
+					while (*ap >= '0' && *ap <= '9')
+						v = v * 10u + (unsigned)(*ap++ - '0');
+					if (v >= 64u)
+						extraParas += (v + 15u) / 16u;
+					continue;
+				}
+				ap++;
+			}
+			if (extraParas)
+				/* 4096 buffer + 0x400 work + 0x200 IRQ SP at [c7c]+0x200.
+				   0x40 paras stopped at image+0x1400 (0x23BA) while ISR SP
+				   is 0x25BA, so the stack landed in the next COM. */
+				extraParas += 0xA0u;
+		}
+		if (extraParas <= 0x180u && !isMmd)
 			extraParas = 0;
 
 		/* MUSE/SDD devices pick IRQ from SSG I/O A bits7-6; force INT14 path. */
@@ -3212,6 +3546,35 @@ int CHardPc98::RunDosDevices(const CEmuGameEntry* ge, uint64_t budgetCycles)
 		uint16_t loadSeg = 0, stratOff = 0, intrOff = 0;
 		if (!dos_.LoadDeviceImage(mem, name, &loadSeg, &stratOff, &intrOff, extraParas) || !loadSeg)
 			continue;
+		if (isMmd)
+			g_mmdLoadSeg = loadSeg;
+		/* Classic MMD.SYS: OPN ports are filled by AH=0 detect (1a38).
+		   mmd2.com never sends AH=0, so 154A stays 0 and every 05d9/048a
+		   write hits port 0 (PIC) instead of 188h. */
+		if (g_mmdClassic && mem && loadSeg) {
+			const unsigned lin = Pc98DosLin(loadSeg, 0);
+			if (lin + 0x154Du < 0x200000u) {
+				mem[lin + 0x154A] = 0x88;
+				mem[lin + 0x154B] = 0x01;
+				mem[lin + 0x154C] = 0x8A;
+				mem[lin + 0x154D] = 0x01;
+			}
+		}
+		/* wiz6 $MUSE2$ keeps `MOV SP,005Fh` at CS:E2 (derby's image does
+		   not). Raise it in the loaded copy even if the SYS-name patch missed. */
+		if (mem && loadSeg) {
+			const unsigned lin = Pc98DosLin(loadSeg, 0);
+			if (lin + 0xE4u < 0x200000u && mem[lin + 0xE2] == 0xBC
+				&& mem[lin + 0xE3] == 0x5F && mem[lin + 0xE4] == 0x00) {
+				mem[lin + 0xE3] = 0x00;
+				mem[lin + 0xE4] = 0x3E;
+			}
+			if (lin + 0x555u < 0x200000u && mem[lin + 0x553] == 0xBC
+				&& mem[lin + 0x554] == 0x9F && mem[lin + 0x555] == 0x00) {
+				mem[lin + 0x554] = 0x00;
+				mem[lin + 0x555] = 0x2E;
+			}
+		}
 
 		const uint16_t reqSeg = (uint16_t)DOS98_IDLE_SEG;
 		const uint16_t reqOff = 0x0100;
@@ -3244,6 +3607,17 @@ int CHardPc98::RunDosDevices(const CEmuGameEntry* ge, uint64_t budgetCycles)
 			mem[req + 0x15] = (uint8_t)(reqSeg >> 8);
 			Pc98Wr16(mem, req + 0x0E, 0);
 			Pc98Wr16(mem, req + 0x10, 0x9000);
+			/* MMD2.SYS INIT does LDS SI,ES:[2C] then LDS SI,[SI+12] to reach
+			   the CONFIG tail (4026-byte: orangerd/michael). Newer 4655-byte
+			   (mjclnc/sbp/shikinjo) uses ES:[34] the same way. When ES is
+			   still the packet segment the far pointer at packet+2C/+34
+			   must be the packet itself so [SI+12] is the CONFIG ptr. */
+			if (isMmd) {
+				Pc98Wr16(mem, req + 0x2C, reqOff);
+				Pc98Wr16(mem, req + 0x2E, reqSeg);
+				Pc98Wr16(mem, req + 0x34, reqOff);
+				Pc98Wr16(mem, req + 0x36, reqSeg);
+			}
 		}
 
 		const uint16_t launchSeg = (uint16_t)DOS98_IDLE_SEG;
@@ -3288,7 +3662,8 @@ int CHardPc98::RunDosDevices(const CEmuGameEntry* ge, uint64_t budgetCycles)
 		   driver CS and far-calls [CS:8]. Trampoline CS writes 0060:0012
 		   and #BRs before AH=25 INT7F. MUSIC.SYS is not this family. */
 		int museOpen = 0;
-		if (!_strnicmp(name, "muse", 4) || !_strnicmp(name, "nmuse", 5))
+		if (!_strnicmp(name, "muse", 4) || !_strnicmp(name, "nmuse", 5)
+			|| !_strnicmp(name, "sdd", 3))
 			museOpen = 1;
 
 		const int nPass = museOpen ? 2 : 1;
@@ -3309,7 +3684,11 @@ int CHardPc98::RunDosDevices(const CEmuGameEntry* ge, uint64_t budgetCycles)
 			while (cpuCycles_ - start < passBudget) {
 				if (stubState_ == 0x82)
 					break;
-				if (DeliverIrqs())
+				/* MUSE/NMUSE/SDD/MUSE2 device stacks are tiny; a nested
+				   INT14 tick during INIT/OPEN re-enters the ISR on the same SP.
+				   MMD2 plants INT14 then STI before RETF — skip nested IRQ
+				   the same way. */
+				if (!museOpen && !isMmd && DeliverIrqs())
 					continue;
 				uint16_t cs = np2_reg_get(NP2_R_CS);
 				uint16_t ip = np2_reg_get(NP2_R_IP);
@@ -3338,6 +3717,100 @@ int CHardPc98::RunDosDevices(const CEmuGameEntry* ge, uint64_t budgetCycles)
 				cpuCycles_ += u;
 				TickSide(u);
 				AdvanceOpnClocks(u);
+			}
+		}
+		/* wiz6 MUSE2 OPEN `MOV SP,005Fh` can smash the header including
+		   the interrupt pointer at [CS:8]; muse_98 then far-calls 0014.
+		   Re-raise SP in case INIT/OPEN ran before the first patch. */
+		if (mem && loadSeg) {
+			const unsigned lin = Pc98DosLin(loadSeg, 0);
+			if (lin + 0xE4u < 0x200000u && mem[lin + 0xE2] == 0xBC
+				&& mem[lin + 0xE3] == 0x5F && mem[lin + 0xE4] == 0x00) {
+				mem[lin + 0xE3] = 0x00;
+				mem[lin + 0xE4] = 0x3E;
+			}
+			if (lin + 0x555u < 0x200000u && mem[lin + 0x553] == 0xBC
+				&& mem[lin + 0x554] == 0x9F && mem[lin + 0x555] == 0x00) {
+				mem[lin + 0x554] = 0x00;
+				mem[lin + 0x555] = 0x2E;
+			}
+			if (!_strnicmp(name, "muse2", 5) && intrOff) {
+				Pc98Wr16(mem, lin + 8u, intrOff);
+				g_muse2Seg = loadSeg;
+				g_muse2Intr = intrOff;
+				/* muse_98 far-calls 0014 when OPEN smashed [CS:8].
+				   Near JMP to the interrupt routine (header name+4). */
+				if (lin + 0x17u < 0x200000u && intrOff > 0x17u) {
+					mem[lin + 0x14] = 0xE9;
+					Pc98Wr16(mem, lin + 0x15u,
+						(uint16_t)(intrOff - 0x17u));
+				}
+			}
+		}
+		/* MMD.SYS (sbr): parse 0619 sets duration [ch+2]=1 but never gate
+		   [ch+3]. Note 0849 copies gate→duration; gate 0 makes 0732 RET
+		   the channel forever (keys=1 from the A0 assist, then SILENT).
+		   AH=3 at 0143 also `rep stos` from 17F4 and wipes this poke —
+		   MmdPlayAssist re-applies after parse. */
+		if (g_mmdClassic && mem && loadSeg) {
+			const unsigned lin = Pc98DosLin(loadSeg, 0);
+			const unsigned base = lin + 0x180Fu;
+			for (unsigned ch = 0; ch < 6u; ch++) {
+				const unsigned gate = base + ch * 0x33u + 3u;
+				if (gate < 0x200000u && mem[gate] == 0)
+					mem[gate] = 1;
+			}
+			/* Classic INIT does not AH=25 the YM ISR (that is AH=0 /
+			   1d1b). mmd2.com glue never sends AH=0, so INT0B/14 stay
+			   trampolines and AH=3 spins on [17F4] (sbr SILENT). */
+			if (lin + 0x396u < 0x200000u && mem[lin + 0x392] == 0x2E
+				&& mem[lin + 0x393] == 0x8C) {
+				if (!IvtHooked(0x14, 1)) {
+					Pc98Wr16(mem, 0x14u * 4u, 0x0392);
+					Pc98Wr16(mem, 0x14u * 4u + 2u, loadSeg);
+				}
+				if (!IvtHooked(PC98_OPN_IRQ_VEC, 1)) {
+					Pc98Wr16(mem, PC98_OPN_IRQ_VEC * 4u, 0x0392);
+					Pc98Wr16(mem, PC98_OPN_IRQ_VEC * 4u + 2u, loadSeg);
+				}
+			}
+		}
+		if (!_strnicmp(name, "muse2", 5) && mem && loadSeg) {
+			const unsigned lin = Pc98DosLin(loadSeg, 0);
+			if (lin + 0x538u < 0x200000u && mem[lin + 0x535] == 0x9C
+				&& mem[lin + 0x536] == 0xFA) {
+				Pc98Wr16(mem, 0x14u * 4u, 0x0535);
+				Pc98Wr16(mem, 0x14u * 4u + 2u, loadSeg);
+				if (!IvtHooked(PC98_OPN_IRQ_VEC, 1)) {
+					Pc98Wr16(mem, PC98_OPN_IRQ_VEC * 4u, 0x0535);
+					Pc98Wr16(mem, PC98_OPN_IRQ_VEC * 4u + 2u, loadSeg);
+				}
+				if (lin + 0x4B4u < 0x200000u)
+					Pc98Wr16(mem, lin + 0x4B3u, 0x0050);
+			}
+		}
+		if (!_strnicmp(name, "nmuse", 5) && mem && !IvtHooked(0x14, 1)) {
+			const unsigned lin = Pc98DosLin(loadSeg, 0);
+			if (lin + 0x6D8u < 0x200000u && mem[lin + 0x6D6] == 0x9C
+				&& mem[lin + 0x6D7] == 0xFA) {
+				Pc98Wr16(mem, 0x14u * 4u, 0x06D6);
+				Pc98Wr16(mem, 0x14u * 4u + 2u, loadSeg);
+			}
+		}
+		/* SDD 26 + DOS 5: INIT skips plant and OPEN's [152E]==0 path
+		   never writes IVT 14 (ishido dumps=1). ISR lives at CS:09BF.
+		   Force-plant even if INT14 already has a stub — IvtHooked
+		   skipped the real 09BF and left dumps=1. */
+		if (!_strnicmp(name, "sdd", 3) && mem && loadSeg) {
+			const unsigned lin = Pc98DosLin(loadSeg, 0);
+			if (lin + 0x9C2u < 0x200000u && mem[lin + 0x9BF] == 0xFA) {
+				Pc98Wr16(mem, 0x14u * 4u, 0x09BF);
+				Pc98Wr16(mem, 0x14u * 4u + 2u, loadSeg);
+				if (!IvtHooked(PC98_OPN_IRQ_VEC, 1)) {
+					Pc98Wr16(mem, PC98_OPN_IRQ_VEC * 4u, 0x09BF);
+					Pc98Wr16(mem, PC98_OPN_IRQ_VEC * 4u + 2u, loadSeg);
+				}
+				g_sddLoadSeg = loadSeg;
 			}
 		}
 		if (IvtHooked(0xC8, 1) || IvtHooked(0xC0, 1) || IvtHooked(0xC3, 1))
@@ -3386,8 +3859,22 @@ int CHardPc98::RunDosCommand(const char* cmdline, uint64_t budgetCycles)
 			uint8_t vec = 0;
 			if (dos_.TrapVector(cs, ip, &vec)) {
 				CEmuDos98Result res = dos_.ServiceInt(m, vec);
-				if (res == DOS98_TERMINATED || res == DOS98_RESIDENT)
+				if (res == DOS98_TERMINATED)
 					return 1;
+				if (res == DOS98_RESIDENT) {
+					const uint16_t ss = np2_reg_get(NP2_R_SS);
+					const uint16_t sp = np2_reg_get(NP2_R_SP);
+					const unsigned fr = ((unsigned)ss << 4) + (unsigned)sp;
+					if (fr + 4u < 0x200000u) {
+						const uint16_t retIp = (uint16_t)(m[fr] | (m[fr + 1] << 8));
+						const uint16_t retCs = (uint16_t)(m[fr + 2] | (m[fr + 3] << 8));
+						if (PatchUsmdUnloadHalt(m, retCs, retIp)) {
+							dos_.IretReturn(m);
+							return 1;
+						}
+					}
+					return 1;
+				}
 				if (res == DOS98_EXEC)
 					continue;
 				dos_.IretReturn(m);
@@ -3455,35 +3942,8 @@ int CHardPc98::BootDos(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCod
 			n = 0x200000u - off;
 		memcpy(mem + off, data, n);
 	}
-	/* PC-98 BIOS ROM window + text VRAM. LoadRoms already zeroed 2MiB, then
-	   this loop overlaid SOUND.ROM / code. Fill only still-empty firmware
-	   so a far CALL F800:0000 RETFs and a stray IP IRETs; text VRAM looks
-	   like a blank 80x25 page. Equipment bits match MADP/Falcom probes. */
-	{
-		int romWin = 1;
-		for (unsigned a = 0xF8000; a < 0x100000; a++) {
-			if (mem[a]) { romWin = 0; break; }
-		}
-		if (romWin) {
-			mem[0xF8000] = 0xCB; /* RETF */
-			for (unsigned a = 0xF8001; a < 0x100000; a++)
-				mem[a] = 0xCF; /* IRET */
-		}
-		int textEmpty = 1;
-		for (unsigned i = 0; i < 16; i++) {
-			if (mem[0xA0000 + i]) { textEmpty = 0; break; }
-		}
-		if (textEmpty) {
-			for (unsigned i = 0; i < 80u * 25u * 2u; i += 2) {
-				mem[0xA0000 + i] = 0x20;
-				mem[0xA0000 + i + 1] = 0xE1;
-			}
-		}
-		mem[0x501] = (uint8_t)(mem[0x501] | 0x08);
-		mem[0x536] = (uint8_t)(mem[0x536] | 0x04);
-		if (0xA0000u + 0x3FEEu < 0x200000u)
-			mem[0xA0000u + 0x3FEEu] = (uint8_t)(mem[0xA0000u + 0x3FEEu] | 0x09);
-	}
+	/* PC-98 BIOS ROM window + text VRAM + MEMSW + BIOS work. */
+	PlantPc98BiosMap(mem);
 	MaterializeDosFiles(fs, ge);
 	BindDosRomHandles(ge);
 	dosGe_ = ge;
@@ -3849,6 +4309,26 @@ void CHardPc98::PumpCycles(uint64_t endCycle)
 		uint8_t* mem = np2_mem();
 		uint16_t cs = np2_reg_get(NP2_R_CS);
 		uint16_t ip = np2_reg_get(NP2_R_IP);
+		if (g_muse2Seg && g_muse2Intr
+			&& cs == (uint16_t)g_muse2Seg && ip == 0x0014)
+			np2_reg_set(NP2_R_IP, g_muse2Intr);
+		if (g_mmdLoadSeg)
+			MmdPlayAssist(mem);
+		if (g_muse2Seg && g_muse2Intr && mem) {
+			const unsigned lin = (unsigned)g_muse2Seg << 4;
+			if (lin + 10u < 0x200000u)
+				Pc98Wr16(mem, lin + 8u, g_muse2Intr);
+		}
+		if (g_mmdClassic && g_mmdLoadSeg && chip_ && mem) {
+			const unsigned lin = (unsigned)g_mmdLoadSeg << 4;
+			if (lin + 0x17F5u < 0x200000u && mem[lin + 0x17F4]
+				&& (g_lastTimerCtrl & 0x0C) == 0) {
+				chip_->Write(0, 0x27);
+				chip_->Write(1, 0x15);
+				opnLatchedAddr_ = 0x27;
+				g_lastTimerCtrl = 0x15;
+			}
+		}
 
 		/* olteus: after handshake, pulse real IRQ0 → IVT08 trampoline at
 		   MAP:FE86 (PUSH DS; DS=CS; CALL 09BC; POP DS; IRET). Soft near-call
@@ -3894,9 +4374,26 @@ void CHardPc98::PumpCycles(uint64_t endCycle)
 				CEmuDos98Result res = dos_.ServiceInt(mem, vec);
 				/* olteus MAP music keeps ticking after COM/EXE TSR or "exit";
 				   aborting PumpCycles froze host timer assist. */
-				if ((res == DOS98_TERMINATED || res == DOS98_RESIDENT)
-					&& !olteusMapSeg_)
+				if (res == DOS98_TERMINATED && !olteusMapSeg_)
 					return;
+				if (res == DOS98_RESIDENT && !olteusMapSeg_) {
+					const uint16_t ss = np2_reg_get(NP2_R_SS);
+					const uint16_t sp = np2_reg_get(NP2_R_SP);
+					const unsigned fr = ((unsigned)ss << 4) + (unsigned)sp;
+					if (fr + 4u < 0x200000u) {
+						const uint16_t retIp = (uint16_t)(mem[fr] | (mem[fr + 1] << 8));
+						const uint16_t retCs = (uint16_t)(mem[fr + 2] | (mem[fr + 3] << 8));
+						if (PatchUsmdUnloadHalt(mem, retCs, retIp)) {
+							dos_.IretReturn(mem);
+							const uint64_t q = 50;
+							cpuCycles_ += q;
+							TickSide(q);
+							AdvanceOpnClocks(q);
+							continue;
+						}
+					}
+					return;
+				}
 				if (res == DOS98_EXEC)
 					continue;
 				dos_.IretReturn(mem);
@@ -3912,13 +4409,18 @@ void CHardPc98::PumpCycles(uint64_t endCycle)
 			AdvanceOpnClocks(q);
 			continue;
 		}
+		if (g_muse2Seg && g_muse2Intr) {
+			cs = np2_reg_get(NP2_R_CS);
+			ip = np2_reg_get(NP2_R_IP);
+			if (cs == (uint16_t)g_muse2Seg && ip == 0x0014)
+				np2_reg_set(NP2_R_IP, g_muse2Intr);
+		}
 		const int32_t cyc = np2_step();
 		const uint64_t u = (cyc > 0) ? (uint64_t)cyc : 1ull;
 		cpuCycles_ += u;
 		TickSide(u);
 		AdvanceOpnClocks(u);
 	}
-	Pc98MemDump(np2_mem());
 }
 
 int CHardPc98::TriggerPlay(unsigned titleCode)
@@ -3933,6 +4435,7 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 		PC98_CENSUS("pre");
 		if (PatchSynth98PaiDest(np2_mem(), dos_.PspSeg()))
 			synthIfKeepalive_ = 1;
+		PatchSs98SongPtr(np2_mem());
 		if (dosGe_)
 			BindDosTriggerSong(dosGe_, titleCode);
 		else {
@@ -3971,6 +4474,63 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 				}
 			}
 		}
+		g_mmdPlayAssist = 1;
+		g_mmd2FnSrc = NULL;
+		{
+			const CEmuDos98File* sys = dos_.FindFile("MMD2.SYS");
+			if (sys && sys->data
+				&& (sys->size == 4655u || sys->size == 4688u)
+				&& sys->size > 0x9E0u)
+				g_mmd2FnSrc = sys->data + 0x9C0;
+		}
+		/* mmd2.com may AH=25 INT0B to the 03EC IRET stub after SYS INIT
+		   planted 0392. Re-raise the sequencer before the AH=3 wait. */
+		if (g_mmdClassic && g_mmdLoadSeg) {
+			uint8_t* mem = np2_mem();
+			if (mem) {
+				const unsigned lin = (unsigned)g_mmdLoadSeg << 4;
+				if (lin + 0x396u < 0x200000u && mem[lin + 0x392] == 0x2E
+					&& mem[lin + 0x393] == 0x8C) {
+					Pc98Wr16(mem, 0x14u * 4u, 0x0392);
+					Pc98Wr16(mem, 0x14u * 4u + 2u, (uint16_t)g_mmdLoadSeg);
+					Pc98Wr16(mem, PC98_OPN_IRQ_VEC * 4u, 0x0392);
+					Pc98Wr16(mem, PC98_OPN_IRQ_VEC * 4u + 2u,
+						(uint16_t)g_mmdLoadSeg);
+				}
+			}
+		}
+		/* Classic ISR 03CE is the only 27h=15h arm; mmd2.com skips AH=0
+		   so the timer never starts and AH=3 spins on [17F4] forever. */
+		if (g_mmdClassic && chip_) {
+			chip_->Write(0, 0x27);
+			chip_->Write(1, 0x15);
+			opnLatchedAddr_ = 0x27;
+		}
+		if (g_sddLoadSeg) {
+			uint8_t* mem = np2_mem();
+			const unsigned lin = (unsigned)g_sddLoadSeg << 4;
+			if (mem && lin + 0x9C2u < 0x200000u && mem[lin + 0x9BF] == 0xFA) {
+				Pc98Wr16(mem, 0x14u * 4u, 0x09BF);
+				Pc98Wr16(mem, 0x14u * 4u + 2u, (uint16_t)g_sddLoadSeg);
+				if (!IvtHooked(PC98_OPN_IRQ_VEC, 1)) {
+					Pc98Wr16(mem, PC98_OPN_IRQ_VEC * 4u, 0x09BF);
+					Pc98Wr16(mem, PC98_OPN_IRQ_VEC * 4u + 2u,
+						(uint16_t)g_sddLoadSeg);
+				}
+			}
+		}
+		if (g_muse2Seg && g_muse2Intr) {
+			uint8_t* mem = np2_mem();
+			const unsigned lin = (unsigned)g_muse2Seg << 4;
+			if (mem && lin + 10u < 0x200000u)
+				Pc98Wr16(mem, lin + 8u, g_muse2Intr);
+			if (mem && lin + 0x538u < 0x200000u && mem[lin + 0x535] == 0x9C
+				&& mem[lin + 0x536] == 0xFA) {
+				Pc98Wr16(mem, 0x14u * 4u, 0x0535);
+				Pc98Wr16(mem, 0x14u * 4u + 2u, (uint16_t)g_muse2Seg);
+			}
+		}
+		MmdPlayAssist(np2_mem());
 		np2_reg_set(NP2_R_FLAGS, (uint16_t)(np2_reg_get(NP2_R_FLAGS) | 0x0200));
 		np2_interrupt((uint8_t)funcVect_);
 		PumpCycles(cpuCycles_ + drainBudget);
@@ -3981,8 +4541,15 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 		   stranded the CPU halfway through its wait. */
 		static const char* kMscdPlay[] = { "MSCDRV", "mscd_98", NULL };
 		static const char* kBgmlOnce[] = { "BGML_98", "bgml", NULL };
+		static const char* kSs98Once[] = { "SS_98", "ss_98", NULL };
+		/* MMD2 glue cmd0 INT D2 AH=3 STI-waits [f8f] then loads+AH=1.
+		   A second INT 7F re-enters AH=3 (which does not reprogram 0x27)
+		   and the render pump never leaves that wait (michael/orangerd). */
+		static const char* kMmdOnce[] = { "mmd2", "MMD2", "mmd2va", NULL };
 		const int repeatPlay = !(dosGe_ && (DosShellStarts(dosGe_, kMscdPlay)
-			|| DosShellStarts(dosGe_, kBgmlOnce)));
+			|| DosShellStarts(dosGe_, kBgmlOnce)
+			|| DosShellStarts(dosGe_, kSs98Once)
+			|| DosShellStarts(dosGe_, kMmdOnce)));
 		if (repeatPlay) {
 			if (dosGe_)
 				BindDosTriggerSong(dosGe_, titleCode);
@@ -3992,6 +4559,7 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 			PumpCycles(cpuCycles_ + (drainBudget / 2ull));
 		}
 		PC98_CENSUS("trig");
+		Pc98MemDump(np2_mem());
 		if (modeBeep_) {
 			/* BGML_98 (and other speaker rips) drive melody from IRQ0/INT08.
 			   BootDos starts with PIC mask 0xFF; the player may unmask in

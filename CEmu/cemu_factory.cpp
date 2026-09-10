@@ -1,4 +1,4 @@
-#include "StdAfx.h"
+﻿#include "StdAfx.h"
 #include "driver/cemu_driver.h"
 #include "driver/cemu_driver_pc88.h"
 #include "driver/cemu_driver_pc98.h"
@@ -208,7 +208,9 @@ static int IsPcatAdlibPlatform(const CEmuGameEntry* ge)
 		|| _stricmp(sub, "soundblaster") == 0 || _stricmp(sub, "sbpro") == 0
 		|| _stricmp(sub, "sb") == 0
 		|| _stricmp(sub, "gameblaster") == 0 || _stricmp(sub, "cms") == 0
-		|| _stricmp(sub, "beep") == 0 || _stricmp(sub, "midiout") == 0)
+		|| _stricmp(sub, "beep") == 0 || _stricmp(sub, "tandy") == 0
+		|| _stricmp(sub, "ps1") == 0
+		|| _stricmp(sub, "midiout") == 0)
 		return 1;
 	return 0;
 }

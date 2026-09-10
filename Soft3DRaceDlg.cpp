@@ -932,8 +932,7 @@ BOOL CS3rView::CreateShaders()
 		"struct D{float4 p:SV_POSITION;float3 w:TEXCOORD0;float3 n:TEXCOORD1;float2 uv:TEXCOORD2;float4 c:TEXCOORD3;};"
 		"P VST(V x){P o;o.p=x.p;o.n=x.n;o.uv=x.uv;o.c=x.c;return o;}"
 		"struct HC{float e[4]:SV_TessFactor;float i[2]:SV_InsideTessFactor;};"
-		"HC HPC(InputPatch<P,4> p,uint id:SV_PrimitiveID){HC o;float3 c=(p[0].p+p[1].p+p[2].p+p[3].p)*.25;float d=distance(c,Eye.xyz);"
-		"float tf=(LightDir.w<.5)?64.:lerp(64.,2.,saturate((d-2.)/18.));tf=clamp(tf,1.,64.);"
+		"HC HPC(InputPatch<P,4> p,uint id:SV_PrimitiveID){HC o;float tf=1.;"
 		"o.e[0]=o.e[1]=o.e[2]=o.e[3]=tf;o.i[0]=o.i[1]=tf;return o;}"
 		"[domain(\"quad\")][partitioning(\"fractional_even\")][outputtopology(\"triangle_cw\")][outputcontrolpoints(4)][patchconstantfunc(\"HPC\")]"
 		"P HST(InputPatch<P,4> p,uint i:SV_OutputControlPointID,uint id:SV_PrimitiveID){return p[i];}"
@@ -948,10 +947,7 @@ BOOL CS3rView::CreateShaders()
 		"P a,b,o;a.p=lerp(p[0].p,p[1].p,q.x);b.p=lerp(p[3].p,p[2].p,q.x);o.p=lerp(a.p,b.p,q.y);"
 		"a.n=lerp(p[0].n,p[1].n,q.x);b.n=lerp(p[3].n,p[2].n,q.x);o.n=normalize(lerp(a.n,b.n,q.y));"
 		"a.uv=lerp(p[0].uv,p[1].uv,q.x);b.uv=lerp(p[3].uv,p[2].uv,q.x);o.uv=lerp(a.uv,b.uv,q.y);o.c=p[0].c;"
-		"float nse=fbm(o.uv*6.+Misc.w*.02);float bump=(nse-.45);"
-		"float d=distance(o.p,Eye.xyz);float amp=lerp(.18,.02,saturate((d-3.)/20.));"
-		"o.p+=o.n*bump*amp;float3 nn=normalize(o.n+float3(bump,bump*.5,bump)*.8*amp);"
-		"D z;z.w=o.p;z.n=nn;z.uv=o.uv;z.c=o.c;z.p=mul(float4(o.p,1),VP);return z;}"
+		"D z;z.w=o.p;z.n=o.n;z.uv=o.uv;z.c=o.c;z.p=mul(float4(o.p,1),VP);return z;}"
 		"float ShadowAt(float3 w,float3 n){float3 nn=normalize(n);float3 l=normalize(LightDir.xyz);float ndl=saturate(dot(nn,l));"
 		"w+=nn*(0.02+(1-ndl)*0.03);float4 sp=mul(float4(w,1),LightVP);float iw=1.0/max(sp.w,1e-5);"
 		"float2 uv=sp.xy*iw*float2(.5,-.5)+.5;uv+=float2(2,-2)/1024.;float z=sp.z*iw-0.003;"
@@ -963,8 +959,10 @@ BOOL CS3rView::CreateShaders()
 		"float3 env=Env.Sample(SL,reflect(-v,n)).rgb;float pulse=.55+.45*sin(Misc.w*2.+i.uv.x*12.);"
 		"float3 col=a.rgb*nd+env*(.06+F*.28)+float3(1,.95,.8)*pow(saturate(dot(reflect(-l,n),v)),48)*sh*.45;"
 		"col*=lerp(0.55,1.0,sh);col+=a.rgb*pulse*.12;col=lerp(col,env*1.05,F*.22);"
+		"float glassT=saturate(1.-abs(Eye.w-4.));"
+		"col=lerp(col,env*1.22+col*.28+float3(.45,.85,1.05)*F*.55,glassT*saturate(.28+F));"
 		"float d=length(Eye.xyz-i.w),fg=saturate((d-Fog.x)/max(.01,Fog.y-Fog.x));fg=fg*fg*(3-2*fg);"
-		"float al=saturate(.22+a.a*.45+F*.18);float nw=saturate((5.-abs(i.w.y-Fog.z))/5.);al=saturate(lerp(al,max(al,.88),nw));"
+		"float al=saturate(.22+a.a*.45+F*.18);al=lerp(al,saturate(.38+F*.55),glassT*.75);float nw=saturate((5.-abs(i.w.y-Fog.z))/5.);al=saturate(lerp(al,max(al,.88),nw));"
 		"if(Dof.w>0.5){col+=a.rgb*(.08+.10*pulse)+env*F*.12;al=saturate(al+.06);}"
 		"return float4(lerp(col,float3(.55,.72,.95),fg*.55),al);}"
 		"D VSS(V x){D o;o.w=x.p;o.n=x.n;o.uv=x.uv;o.c=x.c;o.p=mul(float4(x.p,1),VP);return o;}"
@@ -1005,10 +1003,10 @@ BOOL CS3rView::CreateShaders()
 		"float3 sunC=float3(1.05,.93,.78);float3 skyC=float3(.52,.68,.95);"
 		"float3 amb=lerp(skyC,sunC,nl*.55+.25);"
 		"float3 c=albedo*amb*(.55+.55*nl);"
-		"c+=sunC*powder*1.55*(.4+nl*.6);c+=sunC*silver*1.1;"
+		"c+=sunC*powder*.85*(.4+nl*.6);c+=sunC*silver*.55;"
 		"c*=lerp(float3(.88,.92,1.06),float3(1.06,.98,.90),saturate((i.w.y-Eye.y)*.015+.5));"
 		"float d=length(Eye.xyz-i.w),fg=saturate((d-Fog.x)/max(.01,Fog.y-Fog.x));fg=fg*fg*(3-2*fg);"
-		"float al=saturate(dens*1.05);return float4(lerp(c,float3(.55,.7,.92),fg*.32),al);}"
+		"float al=saturate(dens*0.62);return float4(lerp(c,float3(.55,.7,.92),fg*.32),al);}"
 		"float4 PlanarMir(float3 w){float4 rp=mul(float4(w,1),ReflectVP);float iw=max(rp.w,1e-5);float2 muv=rp.xy/iw*float2(.5,-.5)+.5;"
 		"float mb=(rp.w>0)*saturate(min(min(muv.x,1.-muv.x),min(muv.y,1.-muv.y))*8.);"
 		"return float4(ReflectMap.Sample(SL,saturate(muv)).rgb,mb);}"
@@ -1058,6 +1056,7 @@ BOOL CS3rView::CreateShaders()
 		"float waterL=Fog.z;float low=saturate((waterL+6.-h)/10.);"
 		"base=lerp(base,wet,low*(1.-slope)*0.88);"
 		"if(th>6.5) base=lerp(base,float3(.93,.95,1),saturate((h-24.)/18.)*0.55);"
+		"if(th>2.5&&th<3.6) base=lerp(base,float3(.88,.92,1),saturate(n.y+.15)*.42);"
 		"if(th>5.5&&th<6.6) base=lerp(base,float3(.95,.72,.48),saturate((h-28.)/22.)*0.35);"
 		"float sp=pow(saturate(dot(reflect(-l,n),v)),40)*sh*lerp(.08,.28,slope);"
 		"float3 env=Env.Sample(SL,reflect(-v,n)).rgb;float fr=pow(1-saturate(dot(n,v)),2.4);"
@@ -1083,7 +1082,19 @@ BOOL CS3rView::CreateShaders()
 		"float d=length(Eye.xyz-i.w),fg=saturate((d-Fog.x)/max(.01,Fog.y-Fog.x));fg=fg*fg*(3-2*fg);"
 		"return float4(lerp(c,float3(.55,.7,.92),fg*.3),saturate(i.c.a));}"
 		"struct Q{float4 p:SV_POSITION;float2 uv:TEXCOORD0;};Q VSQ(uint id:SV_VertexID){Q o;float2 p=float2((id==2)?3:-1,(id==1)?3:-1);o.p=float4(p,0,1);o.uv=float2((p.x+1)*.5,(1-p.y)*.5);return o;}"
-		"float4 SSR(Q i):SV_Target{return T0.Sample(SL,i.uv);}"
+		"float4 SSR(Q i):SV_Target{float4 c=T0.Sample(SL,i.uv);float z=Depth.Sample(SP,i.uv).r;"
+		"float4 fx=NoiseMap.Sample(SL,i.uv+float2(0,frac(Misc.w*.18)));float th=Eye.w;"
+		"float2 oc=i.uv+float2(.0016,-.0024);float cs=saturate((Depth.Sample(SP,oc).r-z)*62.);c.rgb*=lerp(.66,1.,1.-cs*.48);"
+		"float2 sun=float2(.62,.15);float2 dir=sun-i.uv;float rays=0;float2 p=i.uv;"
+		"[unroll]for(int k=0;k<14;k++){p+=dir*.02;if(any(p<0)||any(p>1))break;rays+=saturate(.14-Depth.Sample(SP,p).r)*exp(-k*.13);}"
+		"c.rgb+=(th>3.5&&th<4.6?float3(.45,.8,1):float3(1,.92,.7))*rays*(th>3.5&&th<4.6?.14:.26);"
+		"if(th>6.4||(th>2.5&&th<3.6)){float s=fx.b*smoothstep(.1,.92,1.-z);c.rgb=lerp(c.rgb,float3(.92,.96,1),s*.16);"
+		"c.rgb+=float3(.8,.88,1)*fx.b*fx.g*.10;float2 st=i.uv+float2(fx.r*.05-.025,-frac(Misc.w*1.15+i.uv.x*9.)*.09);"
+		"c.rgb+=NoiseMap.Sample(SL,st).b*float3(.85,.9,1)*smoothstep(.18,1.,1.-z)*.08;}"
+		"if(th>3.5&&th<4.6){float g=fx.a;c.rgb=lerp(c.rgb,c.rgb*float3(.68,1.08,1.24)+fx.rgb*.14,g*.14);"
+		"c.rgb+=float3(.32,.7,1)*pow(saturate(1.-z),2.)*g*.06;}"
+		"float3 bl=T0.Sample(SL,i.uv+Screen.zw*5.).rgb+T0.Sample(SL,i.uv-Screen.zw*5.).rgb;c.rgb=lerp(c.rgb,max(c.rgb,bl*.5),.15);"
+		"return float4(c.rgb,1);}"
 		"float4 DOFP(Q i):SV_Target{float zd=Depth.Sample(SP,i.uv).r;const float zn=.08,zf=220.;"
 		"float eyeZ=zn*zf/max(1e-4,zf-zd*(zf-zn));float coc=saturate((eyeZ-Dof.x)/max(.05,Dof.y));coc=coc*coc*(3.-2.*coc);"
 		"float b=coc*Dof.z*(1.+Dof.w);if(b<1.15)return T0.Sample(SL,i.uv);float2 px=float2(b,b)*Screen.zw;"
@@ -1099,13 +1110,17 @@ BOOL CS3rView::CreateShaders()
 		"c.rgb=lerp(c.rgb,c.rgb*c.rgb*(3.-2.*c.rgb),0.08);"
 		"if(Misc.x>0.01)c.rgb=lerp(c.rgb,1,Misc.x*.35);"
 		"float cas=saturate(Dof.w);if(cas>0.01){float2 px=Screen.zw*1.25f;float3 soft=T0.Sample(SL,i.uv+float2(px.x,0)).rgb+T0.Sample(SL,i.uv-float2(px.x,0)).rgb+T0.Sample(SL,i.uv+float2(0,px.y)).rgb+T0.Sample(SL,i.uv-float2(0,px.y)).rgb;soft*=.25;c.rgb=saturate(c.rgb+(c.rgb-soft)*cas);}"
+		"float4 nx=NoiseMap.Sample(SL,i.uv*float2(2.2,1.7)+float2(Misc.w*.28,-Misc.w*.52));"
+		"if(th>6.4||(th>2.5&&th<3.6)){float snow=smoothstep(.42,1.,nx.b)*smoothstep(.08,.95,i.uv.y);c.rgb=lerp(c.rgb,float3(.93,.96,1),snow*.14);c.rgb+=float3(.82,.9,1)*nx.g*nx.b*.07;}"
+		"if(th>3.5&&th<4.6)c.rgb=lerp(c.rgb,c.rgb*float3(.72,1.06,1.22)+float3(.18,.42,.55),nx.a*.10);"
 		"return c;}"
 		"RWTexture2D<float4> NoiseOut:register(u0);"
 		"[numthreads(8,8,1)]void CSNoise(uint3 id:SV_DispatchThreadID){"
-		"uint2 p=id.xy;if(p.x>=64||p.y>=64)return;float2 uv=(float2(p)+.5)/64.;"
-		"float n=fbm(uv*6.+Misc.w*0.2);"
-		"float n2=fbm(uv*12.-Misc.w*0.3);"
-		"float d=length(uv-.5);NoiseOut[p]=float4(n,n2,saturate(1.-d*1.4),1);}";
+		"uint2 p=id.xy;if(p.x>=256||p.y>=256)return;float2 uv=(float2(p)+.5)/256.;"
+		"float n=fbm(uv*8.+Misc.w*.22);float n2=fbm(uv*22.-Misc.w*.48);"
+		"float snow=smoothstep(.48,1.,frac(uv.x*48.+uv.y*14.-Misc.w*1.55+n*2.));"
+		"float frost=saturate(n*n2*1.05+pow(saturate(1.-length(uv-.5)*1.6),2.)*.08);"
+		"NoiseOut[p]=float4(n,n2,snow,frost);}";
 
 	ID3DBlob *b[12]={0}, *err=NULL;
 	const char* entries[12]={"VST","HST","DST","PSB","VSS","PSS","VSH","PSH","VSQ","SSR","DOFP","FIN"};
@@ -1390,9 +1405,9 @@ BOOL CS3rView::CreateProcTextures()
 	if(Soft3DTexLoadPngRes(IDR_S3TEX_R_ITEM,pix,W,H)){ if(!upload2d(&m_texItem,&m_srvItem)){delete[] pix;return FALSE;} }
 	if(Soft3DTexLoadPngRes(IDR_S3TEX_R_WOOD,pix,W,H)){ if(!upload2d(&m_texWood,&m_srvWood)){delete[] pix;return FALSE;} }
 	delete[] pix;
-	// noise UAV target 64x64
+	// noise UAV target 256x64 相当の天気マップ（毎フレ CS）
 	{
-		D3D11_TEXTURE2D_DESC nd={}; nd.Width=64; nd.Height=64; nd.MipLevels=1; nd.ArraySize=1;
+		D3D11_TEXTURE2D_DESC nd={}; nd.Width=256; nd.Height=256; nd.MipLevels=1; nd.ArraySize=1;
 		nd.Format=DXGI_FORMAT_R8G8B8A8_UNORM; nd.SampleDesc.Count=1;
 		nd.Usage=D3D11_USAGE_DEFAULT; nd.BindFlags=D3D11_BIND_SHADER_RESOURCE|D3D11_BIND_UNORDERED_ACCESS;
 		if(FAILED(m_dev->CreateTexture2D(&nd,NULL,&m_texNoise))) return FALSE;
@@ -1412,7 +1427,7 @@ BOOL CS3rView::BakeNoiseCS()
 	m_imm->CSSetShader(m_csNoise,NULL,0);
 	m_imm->CSSetConstantBuffers(0,1,&m_cbFrame);
 	m_imm->CSSetUnorderedAccessViews(0,1,&m_uavNoise,NULL);
-	m_imm->Dispatch(8,8,1);
+	m_imm->Dispatch(32,32,1);
 	ID3D11UnorderedAccessView* nullu=NULL; m_imm->CSSetUnorderedAccessViews(0,1,&nullu,NULL);
 	m_imm->CSSetShader(NULL,NULL,0);
 	return TRUE;
@@ -1614,7 +1629,7 @@ BOOL CS3rView::BakeClearTexture(const wchar_t* text,float /*alpha*/)
 	if (tlen > 10) fontPx = (float)max(32, h / 3);
 	if (tlen > 16) fontPx = (float)max(26, h / 4);
 	Soft3DTextD2D_DrawTextShadow(cv, text, 6.f, 6.f, (float)(w - 12), (float)(h - 12),
-		fontPx, 1, 1, 1, 255, 255, 236, 150, 3.f, 3.f, 200, 0, 0, 0);
+		fontPx, 1, 1, 1, 255, 255, 236, 110, 3.f, 3.f, 140, 0, 0, 0);
 	const BYTE* bits = NULL; UINT stride = 0;
 	if (!Soft3DTextD2D_End(cv, &bits, &stride) || !bits) { Soft3DTextD2D_Release(cv); return FALSE; }
 	D3D11_TEXTURE2D_DESC d = {};
@@ -3633,7 +3648,7 @@ void CSoft3DRaceDlg::BeginDemoPreview()
 	m_playerSpdEma = RaceSpeedCap(0) * 0.55f;
 	m_clearBakeText = LL14(L"スタートで開始", L"Press Start", L"Démarrer", L"Avvia", L"Iniciar",
 		L"시작", L"按开始", L"Start", L"Старт", L"Start", L"Iniciar", L"Start", L"Start", L"Başlat");
-	m_clearBakeA = 1.f; m_clearDirty = 1; m_standDirty = 1;
+	m_clearBakeA = 0.62f; m_clearDirty = 1; m_standDirty = 1;
 }
 
 void CSoft3DRaceDlg::StartRace()
@@ -5461,12 +5476,12 @@ void CSoft3DRaceDlg::TickDemo(float dt)
 	TickPhysics(dt);
 	TickItems(dt);
 	// デモ表示は薄く維持（スタート誘導）— 文字は一度だけ焼き、αはシェーダ Misc.y
-	if (m_clearBakeA < 0.70f) {
+	if (m_clearBakeA < 0.42f) {
 		m_clearBakeText = LL14(L"スタートで開始", L"Press Start", L"Démarrer", L"Avvia", L"Iniciar",
 			L"시작", L"按开始", L"Start", L"Старт", L"Start", L"Iniciar", L"Start", L"Start", L"Başlat");
-		m_clearBakeA = 0.95f; m_clearDirty = 1;
+		m_clearBakeA = 0.62f; m_clearDirty = 1;
 	} else {
-		m_clearBakeA = max(0.70f, m_clearBakeA - dt * 0.08f);
+		m_clearBakeA = max(0.42f, m_clearBakeA - dt * 0.08f);
 	}
 }
 
@@ -6286,6 +6301,15 @@ void CSoft3DRaceDlg::RenderScene()
 	D3D11_MAPPED_SUBRESOURCE map={};
 	if (FAILED(dc->Map(m_view.m_cbFrame,0,D3D11_MAP_WRITE_DISCARD,0,&map))) return;
 	memcpy(map.pData,&cb,sizeof(cb)); dc->Unmap(m_view.m_cbFrame,0);
+	if (m_view.m_csNoise && m_view.m_uavNoise) {
+		ID3D11ShaderResourceView* n5=NULL; dc->PSSetShaderResources(5,1,&n5); dc->DSSetShaderResources(5,1,&n5);
+		dc->CSSetShader(m_view.m_csNoise,NULL,0);
+		dc->CSSetConstantBuffers(0,1,&m_view.m_cbFrame);
+		dc->CSSetUnorderedAccessViews(0,1,&m_view.m_uavNoise,NULL);
+		dc->Dispatch(32,32,1);
+		ID3D11UnorderedAccessView* nu=NULL; dc->CSSetUnorderedAccessViews(0,1,&nu,NULL);
+		dc->CSSetShader(NULL,NULL,0);
+	}
 
 	UINT maxV = m_view.m_vbDynBytes / sizeof(S3RVertex);
 	if (maxV < 65536u) maxV = 65536u;
@@ -6369,6 +6393,8 @@ void CSoft3DRaceDlg::RenderScene()
 			put(x0,y0,z0, -rx,-ry,-rz, 0,0, r,g,b,a); put(x2,y2,z2, -rx,-ry,-rz, 1,1, r,g,b,a); put(x3,y3,z3, -rx,-ry,-rz, 0,1, r,g,b,a);
 		};
 		const BOOL liteSky = (m_phase == PHASE_DEMO || m_phase == PHASE_PODIUM);
+		// 俯瞰だと雲カードがコース手前の巨大な半透明円になるので薄くする
+		const float skyA = liteSky ? 0.22f : 1.f;
 		const int nCard1 = liteSky ? S3MeshScaleCount(4, 6) : S3MeshScaleCount(10, 12);
 		const int nCard2 = liteSky ? S3MeshScaleCount(3, 4) : S3MeshScaleCount(8, 10);
 		const int nCard3 = liteSky ? S3MeshScaleCount(2, 3) : S3MeshScaleCount(6, 8);
@@ -6381,7 +6407,7 @@ void CSoft3DRaceDlg::RenderScene()
 			float bz0 = pl.z + sinf(ang)*dist;
 			float hs = 38.f + 22.f*(float)(bi%5);
 			float vs = 14.f + 10.f*(float)((bi*3)%4);
-			card(bx0,by0,bz0, hs, vs, br,bg,bb,.90f);
+			card(bx0,by0,bz0, hs, vs, br,bg,bb,.90f*skyA);
 		}
 		nSky = nTrans;
 		for (int bi=0;bi<nCard2;bi++){
@@ -6392,7 +6418,7 @@ void CSoft3DRaceDlg::RenderScene()
 			float bz0 = pl.z + sinf(ang)*dist;
 			float hs = 48.f + 18.f*(float)(bi%3);
 			float vs = 9.f + 6.f*(float)(bi%4);
-			card(bx0,by0,bz0, hs, vs, br,bg,bb,.82f);
+			card(bx0,by0,bz0, hs, vs, br,bg,bb,.82f*skyA);
 		}
 		nSky2 = nTrans - nSky;
 		for (int bi=0;bi<nCard3;bi++){
@@ -6403,7 +6429,7 @@ void CSoft3DRaceDlg::RenderScene()
 			float bz0 = pl.z + sinf(ang)*dist;
 			float hs = 52.f + 16.f*(float)(bi%4);
 			float vs = 16.f + 8.f*(float)(bi%3);
-			card(bx0,by0,bz0, hs, vs, br,bg,bb,.86f);
+			card(bx0,by0,bz0, hs, vs, br,bg,bb,.86f*skyA);
 		}
 		nSky3 = nTrans - nSky - nSky2;
 		for (int bi=0;bi<nCard4;bi++){
@@ -7169,31 +7195,43 @@ void CSoft3DRaceDlg::RenderScene()
 		}
 	}
 
-	// post: デモはDOF省略、ゲーム中はDOF→FIN（god rayはFIN側）
+	// post: 天気・ゴッドレイ（旧SSRスロット）→DOF→FIN
 	ID3D11ShaderResourceView* nulls[6]={}; dc->PSSetShaderResources(0,6,nulls);
 	dc->OMSetDepthStencilState(m_view.m_dssOff,0); dc->OMSetBlendState(m_view.m_bsOpaque,NULL,0xffffffff);
 	dc->VSSetShader(m_view.m_vsPost,NULL,0);
 	dc->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 	const BOOL doDof = hq && m_view.m_gfxDof > 0;
-	if (doDof) {
+	const BOOL doFx = hq && m_view.m_gfxSsr > 0 && m_view.m_psSsr;
+	ID3D11ShaderResourceView* fxSrc = m_view.m_sceneSrv;
+	if (doFx) {
 		dc->OMSetRenderTargets(1,&m_view.m_postRtv,NULL);
-		dc->PSSetShader(m_view.m_psDof,NULL,0);
-		ID3D11ShaderResourceView* p1[]={m_view.m_sceneSrv,NULL,m_view.m_dsSrv}; dc->PSSetShaderResources(0,3,p1);
+		dc->PSSetShader(m_view.m_psSsr,NULL,0);
+		ID3D11ShaderResourceView* p0[]={m_view.m_sceneSrv,NULL,m_view.m_dsSrv,NULL,NULL,m_view.m_srvNoise};
+		dc->PSSetShaderResources(0,6,p0);
 		dc->Draw(3,0);
-		dc->OMSetRenderTargets(1,&m_view.m_bbRtv,NULL); dc->PSSetShaderResources(0,6,nulls);
-		{ S3RFrameCB cbFin = cb; cbFin.dofParams.w = m_view.m_casStrength;
-		  if (SUCCEEDED(dc->Map(m_view.m_cbFrame,0,D3D11_MAP_WRITE_DISCARD,0,&map))){ memcpy(map.pData,&cbFin,sizeof(cbFin)); dc->Unmap(m_view.m_cbFrame,0); } }
-		dc->PSSetShader(m_view.m_psFinal,NULL,0);
-		ID3D11ShaderResourceView* p2[]={m_view.m_postSrv}; dc->PSSetShaderResources(0,1,p2);
-		dc->Draw(3,0);
-	} else {
-		dc->OMSetRenderTargets(1,&m_view.m_bbRtv,NULL);
-		{ S3RFrameCB cbFin = cb; cbFin.dofParams.w = m_view.m_casStrength;
-		  if (SUCCEEDED(dc->Map(m_view.m_cbFrame,0,D3D11_MAP_WRITE_DISCARD,0,&map))){ memcpy(map.pData,&cbFin,sizeof(cbFin)); dc->Unmap(m_view.m_cbFrame,0); } }
-		dc->PSSetShader(m_view.m_psFinal,NULL,0);
-		ID3D11ShaderResourceView* p2[]={m_view.m_sceneSrv}; dc->PSSetShaderResources(0,1,p2);
-		dc->Draw(3,0);
+		dc->PSSetShaderResources(0,6,nulls);
+		fxSrc = m_view.m_postSrv;
 	}
+	ID3D11ShaderResourceView* finSrc = fxSrc;
+	if (doDof) {
+		ID3D11RenderTargetView* dofRtv = (fxSrc==m_view.m_postSrv) ? m_view.m_sceneRtv : m_view.m_postRtv;
+		ID3D11ShaderResourceView* dofOut = (fxSrc==m_view.m_postSrv) ? m_view.m_sceneSrv : m_view.m_postSrv;
+		dc->OMSetRenderTargets(1,&dofRtv,NULL);
+		dc->PSSetShader(m_view.m_psDof,NULL,0);
+		ID3D11ShaderResourceView* p1[]={fxSrc,NULL,m_view.m_dsSrv};
+		dc->PSSetShaderResources(0,3,p1);
+		dc->Draw(3,0);
+		dc->PSSetShaderResources(0,6,nulls);
+		finSrc = dofOut;
+	}
+	dc->OMSetRenderTargets(1,&m_view.m_bbRtv,NULL);
+	{ S3RFrameCB cbFin = cb; cbFin.dofParams.w = m_view.m_casStrength;
+	  if (SUCCEEDED(dc->Map(m_view.m_cbFrame,0,D3D11_MAP_WRITE_DISCARD,0,&map))){ memcpy(map.pData,&cbFin,sizeof(cbFin)); dc->Unmap(m_view.m_cbFrame,0); } }
+	dc->PSSetShader(m_view.m_psFinal,NULL,0);
+	ID3D11ShaderResourceView* p2[]={finSrc,NULL,NULL,NULL,NULL,m_view.m_srvNoise};
+	dc->PSSetShaderResources(0,6,p2);
+	dc->Draw(3,0);
+	dc->PSSetShaderResources(0,6,nulls);
 
 	// HUD quads + baked countdown / status textures
 	{

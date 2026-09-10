@@ -121,6 +121,15 @@ public:
 		}
 		case 3:
 			c.reg3 = value;
+			if (value & 0x8000) {
+				if (!c.key) {
+					c.key = 1;
+					c.offset = 0;
+					c.last = 0;
+				}
+			} else if (c.vol == 0) {
+				c.key = 0;
+			}
 			break;
 		case 9:
 			c.reg9 = value;
@@ -145,8 +154,14 @@ public:
 		for (int ch = 0; ch < kQSoundChannels; ch++) {
 			Channel& c = ch_[ch];
 			if (!c.key) continue;
-			const int rvol = (c.rvol * (int)c.vol) >> 8;
-			const int lvol = (c.lvol * (int)c.vol) >> 8;
+			uint32_t vol = c.vol;
+			if (!vol && !c.pitch && (c.reg3 & 0x8000))
+				vol = 0x1000;
+			const int rvol = (c.rvol * (int)vol) >> 8;
+			const int lvol = (c.lvol * (int)vol) >> 8;
+			uint32_t step = c.pitch;
+			if (!step && c.reg9)
+				step = (uint32_t)((double)c.reg9 * frqRatio_) / kQSoundLengthDiv;
 			uint32_t address = c.address;
 			uint32_t offset = c.offset;
 			int last = c.last;
@@ -169,7 +184,7 @@ public:
 				const int r = ((last * rvol) >> 6) * gain / 256;
 				stereo[i * 2] = (int16_t)CEmuQClamp16((int)stereo[i * 2] + l);
 				stereo[i * 2 + 1] = (int16_t)CEmuQClamp16((int)stereo[i * 2 + 1] + r);
-				offset += c.pitch;
+				offset += step;
 			}
 			c.address = address;
 			c.offset = offset;

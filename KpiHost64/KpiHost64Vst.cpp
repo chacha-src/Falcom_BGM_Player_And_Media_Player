@@ -3,7 +3,6 @@
 #include "../kpi_host_ipc.h"
 #include "../VstMidiEngine.h"
 
-#include <vector>
 #include <string>
 
 static int g_vstOpen[2] = { 0, 0 }; // スロットが SMF+VSTi を開いていれば 1
@@ -51,21 +50,22 @@ uint32_t VstHost64_Open(int slot, const wchar_t* midPath, const wchar_t* vstDllP
 }
 
 // PCM を読む。短い読み・MIDI 未消化・この塊の SysEx/CC を eof ビットに載せる。
-uint32_t VstHost64_Render(int slot, uint32_t bytesWanted, std::vector<uint8_t>& out, uint32_t& eof)
+uint32_t VstHost64_Render(int slot, uint32_t bytesWanted, uint8_t* dest, uint32_t destCap, uint32_t& gotBytes, uint32_t& eof)
 {
 	slot = ClampSlot(slot);
-	out.clear();
+	gotBytes = 0;
 	eof = 0;
 	if (!g_vstOpen[slot]) return KPIHOST64_STATUS_FAIL;
 	if (bytesWanted == 0) return KPIHOST64_STATUS_OK;
+	if (!dest) return KPIHOST64_STATUS_BAD_REQUEST;
+	uint32_t want = bytesWanted;
+	if (want > destCap) want = destCap;
 	VstMidiSetIoSlot(slot);
-	out.resize(bytesWanted);
-	int got = VstMidiRead(out.data(), (int)bytesWanted);
+	int got = VstMidiRead(dest, (int)want);
 	if (got < 0) got = 0;
-	if ((uint32_t)got < bytesWanted) {
-		out.resize((size_t)got);
+	gotBytes = (uint32_t)got;
+	if (gotBytes < want)
 		eof |= KPIHOST64_EOF_SHORT;
-	}
 	if (VstMidiEventsPending())
 		eof |= KPIHOST64_EOF_MIDI_PENDING;
 	if (VstMidiTakeKeepAlive())

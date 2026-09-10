@@ -214,7 +214,7 @@ CHardAc::CHardAc()
 	, alphaOpll_(NULL)
 	, alphaYmAddr_(0)
 	, alphaOpllAddr_(0)
-	, alphaNmiMask_(1)
+	, alphaNmiMask_(0)
 	, alphaPaLatch_(0)
 	, sjLatchFlag_(0)
 	, sjSemaphore2_(0)
@@ -1834,7 +1834,9 @@ int CHardAc::Init(const CEmuGameEntry* ge, int sampleRate)
 		bankSize_ = 0x4000;
 		alphaYmAddr_ = 0;
 		alphaOpllAddr_ = 0;
-		alphaNmiMask_ = 1;
+		/* MAME m_sound_nmi_mask starts 0; YM2203 port A bit0 low enables.
+		   Mask=1 at reset nested-NMI'd the Z80 (dumps=1). */
+		alphaNmiMask_ = 0;
 		alphaPaLatch_ = 0;
 		if (alphaOpll_) {
 			OPLL_delete((OPLL*)alphaOpll_);
@@ -3629,8 +3631,9 @@ uint8_t CHardAc::PortIn(uint16_t port)
 			return chip2_ ? chip2_->ReadStatus() : 0x00;
 		return 0xff;
 	case CEMU_AC_BOARD_ALPHA68K2:
-		/* MAME sound_portmap: global_mask 0x0f; latch read @00 (any). */
-		soundCmdPending_ = 0;
+		/* MAME generic_latch_8 read: data only. Ack is clear_w @ OUT 00.
+		   Clearing here made two IN 00 differ from a post-ack 0 and also
+		   retriggered command 0x1x every poll (RST 30 mode 3 never settled). */
 		return soundCmd_;
 	case CEMU_AC_BOARD_CPS1:
 		if (p == 0x00 || p == 0x01)
@@ -3916,7 +3919,11 @@ void CHardAc::PortOut(uint16_t port, uint8_t data)
 		{
 			const uint8_t lo = (uint8_t)(p & 0x0f);
 			if (lo <= 0x01) {
+				/* MAME soundlatch clear_w: pending+data. Boot OUT 00 at C088
+				   runs before inject; song ack after 0x1x must not leave the
+				   catalog byte stuck or the poll loop restarts BGM forever. */
 				soundCmdPending_ = 0;
+				soundCmd_ = 0;
 			} else if (lo == 0x08 || lo == 0x09) {
 				if (pcm_) pcm_->Write(0, data);
 			} else if (lo == 0x0a) {
@@ -3932,14 +3939,14 @@ void CHardAc::PortOut(uint16_t port, uint8_t data)
 					chip_->Write(1, data);
 					opmWrites_++;
 				}
-				/* YM2203 SSG port A (reg 0x0E) gates the periodic NMI. */
+				/* MAME porta_w: skip 0xFF (unused YM port). Enable is
+				   active-low on bit0. Edge-only 1→0 missed the first
+				   OUT 0D,0 while pa_latch still reset to 0. */
 				if (alphaYmAddr_ == 0x0e) {
-					const uint8_t bit = (uint8_t)(data & 1);
-					if (bit == 0 && alphaPaLatch_)
-						alphaNmiMask_ = 1;
-					if (bit != 0 && alphaPaLatch_ == 0)
-						alphaNmiMask_ = 0;
-					alphaPaLatch_ = bit;
+					if (data != 0xffu) {
+						alphaNmiMask_ = (uint8_t)((data & 1) ? 0 : 1);
+						alphaPaLatch_ = (uint8_t)(data & 1);
+					}
 				}
 			} else if (lo == 0x0e || lo == 0x0f) {
 				SetBank(data & 0x1f);
@@ -6619,8 +6626,9 @@ int CHardAc::LoadRomsNamcoM6809(CEmuZipFs* fs, const CEmuGameEntry* ge)
 		if (!data || sz < 0x4000u) continue;
 		CEmuAcAppendPcm(&soundRom_, &soundRomSize_, data, sz);
 	}
-	/* If catalog only listed s0 (64K), still pull sibling s1/snd from the zip. */
-	if (soundRomSize_ > 0 && soundRomSize_ <= 0x10000u) {
+	/* If catalog only listed s0, still pull sibling s1. Sys2 C68-era sets
+	   ship two 128KiB banks (dsaber snd0+snd1); a 64KiB cap left bank 8+ as FF. */
+	if (soundRomSize_ > 0 && soundRomSize_ <= 0x20000u) {
 		for (int i = 0; i < fs->fileCount; i++) {
 			char pathA[CEMU_ZIP_PATH];
 			WideCharToMultiByte(CP_ACP, 0, fs->files[i].path, -1, pathA, (int)sizeof(pathA), NULL, NULL);
@@ -7899,6 +7907,20 @@ int CHardAc::LoadRomsPcmChip(CEmuZipFs* fs, const CEmuGameEntry* ge)
 		|| board_ == CEMU_AC_BOARD_KONAMI_RF5C400) ? 1 : 0;
 }
 
+/* QSound 1.04 table walk mixes opcode fetches with immediate/displacement
+   reads. Kabuki decrypts those onto separate planes, so a plaintext memcmp
+   of 21 00 90 never matches dino/wof. isImm[i]==1 compares the data plane. */
+static int QsMatchMixed(const uint8_t* op, const uint8_t* dt, unsigned a,
+	const uint8_t* pat, const uint8_t* isImm, unsigned n)
+{
+	if (!op || !dt) return 0;
+	for (unsigned i = 0; i < n; i++) {
+		const uint8_t got = isImm[i] ? dt[a + i] : op[a + i];
+		if (got != pat[i]) return 0;
+	}
+	return 1;
+}
+
 int CHardAc::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode)
 {
 	(void)titleCode;
@@ -8099,25 +8121,49 @@ int CHardAc::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode
 		   HL=code<<8 folds onto the wrong (often empty) entry �� SILENT while
 		   the idle loop still ticks (pc~0180). */
 		if (soundRom_ && soundRomSize_ >= 0x8000u) {
-			static const uint8_t kQsLookup[] = {
-				0x21, 0x00, 0x90, /* LD HL,9000   */
-				0x56, 0x23, 0x5e, /* LD D,(HL) / INC HL / LD E,(HL) */
-				0xfd, 0x66, 0x00, /* LD H,(IY+0)  */
-				0xfd, 0x6e, 0x01, /* LD L,(IY+1)  */
-				0xb7, 0xed, 0x52, /* OR A / SBC HL,DE */
-				0x30, 0xfb,       /* JR NC,-5     */
-				0x19,             /* ADD HL,DE    */
-				0x29, 0x29,       /* ADD HL,HL x2 */
-				0x11, 0x06, 0x90, /* LD DE,9006   */
+			/* Immediate/displacement bytes (1) vs opcodes (0). Same layout
+			   for table $9000 (CPS2) and $8000 (CPS1 Kabuki 1.04). */
+			static const uint8_t kQsIsImm[] = {
+				0, 1, 1,
+				0, 0, 0,
+				0, 0, 1,
+				0, 0, 1,
+				0, 0, 0,
+				0, 1,
+				0,
+				0, 0,
+				0, 1, 1,
+			};
+			static const uint8_t kQsPat9000[] = {
+				0x21, 0x00, 0x90,
+				0x56, 0x23, 0x5e,
+				0xfd, 0x66, 0x00,
+				0xfd, 0x6e, 0x01,
+				0xb7, 0xed, 0x52,
+				0x30, 0xfb,
+				0x19,
+				0x29, 0x29,
+				0x11, 0x06, 0x90,
+			};
+			static const uint8_t kQsPat8000[] = {
+				0x21, 0x00, 0x80,
+				0x56, 0x23, 0x5e,
+				0xfd, 0x66, 0x00,
+				0xfd, 0x6e, 0x01,
+				0xb7, 0xed, 0x52,
+				0x30, 0xfb,
+				0x19,
+				0x29, 0x29,
+				0x11, 0x06, 0x80,
 			};
 			static const uint8_t kQsIdx[] = {
 				0xfd, 0x6e, 0x00, /* LD L,(IY+0) */
 				0x26, 0x00,       /* LD H,0 */
 				0x29,             /* ADD HL,HL */
 				0x29,             /* ADD HL,HL */
-				0x18, 0x0b,       /* JR +11 �� LD DE,9006 */
+				0x18, 0x0b,       /* JR +11 → LD DE,xx06 */
 			};
-			/* LD H,(IY+0) / LD L,(IY+1) / LD DE,(F010) ? later QSound engines. */
+			/* LD H,(IY+0) / LD L,(IY+1) / LD DE,(F010) — later QSound engines. */
 			static const uint8_t kQsLookupF010[] = {
 				0xfd, 0x66, 0x00,
 				0xfd, 0x6e, 0x01,
@@ -8129,15 +8175,20 @@ int CHardAc::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode
 				0x00,             /* NOP pads the removed 3rd IY opcode byte */
 				0xed, 0x5b, 0x10, 0xf0,
 			};
-			/* Capcom ZN keeps real 16-bit song words via latch+NMI ? do not
+			/* Capcom ZN keeps real 16-bit song words via latch+NMI — do not
 			   collapse to an 8-bit index (that silenced ts2). */
 			if (!qsZn_) {
+				const uint8_t* op = mem_;
+				const uint8_t* dt = (qsKabuki_ && qsKabukiData_) ? qsKabukiData_ : mem_;
 				int patched = 0;
-				for (unsigned a = 0x0100u; a + sizeof(kQsLookup) <= 0x0800u; a++) {
-					if (memcmp(soundRom_ + a, kQsLookup, sizeof(kQsLookup)) != 0)
+				for (unsigned a = 0x0100u; a + sizeof(kQsPat9000) <= 0x0800u; a++) {
+					if (!QsMatchMixed(op, dt, a, kQsPat9000, kQsIsImm, sizeof(kQsPat9000))
+						&& !QsMatchMixed(op, dt, a, kQsPat8000, kQsIsImm, sizeof(kQsPat8000)))
 						continue;
 					memcpy(soundRom_ + a, kQsIdx, sizeof(kQsIdx));
 					memcpy(mem_ + a, kQsIdx, sizeof(kQsIdx));
+					if (qsKabukiData_ && a + sizeof(kQsIdx) <= 0x8000u)
+						memcpy(qsKabukiData_ + a, kQsIdx, sizeof(kQsIdx));
 					patched = 1;
 					break;
 				}
@@ -8479,6 +8530,83 @@ int CHardAc::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode
 	   Local cotton.zip: epr13860.a10 duplicates s-prog; opr13893.a11 is
 	   speech/PCM (not a Z80 song table). Leave 8A00 empty �� REGSONLY. */
 
+	if (board_ == CEMU_AC_BOARD_ALPHA68K2 && fs && fs->fileCount > 0) {
+		/* MAME audiocpu is a 512KiB window with each 64K image at
+		   0x20000*n (holes in between). Boot is
+		     DI / LD SP,$87FF / JP $0021 / OUT ($0E),2 / JP $C000
+		   so C000 must be bank 2 (ROM+0x8000), not a 64K 1:1 memcpy. */
+		int idx[8];
+		int nIdx = 0;
+		for (int i = 0; i < fs->fileCount && nIdx < (int)_countof(idx); i++) {
+			const unsigned sz = fs->files[i].size;
+			if (sz < 0x4000u || sz > 0x10000u) continue;
+			idx[nIdx++] = i;
+		}
+		for (int a = 0; a < nIdx; a++) {
+			for (int b = a + 1; b < nIdx; b++) {
+				char pa[CEMU_ZIP_PATH], pb[CEMU_ZIP_PATH];
+				WideCharToMultiByte(CP_ACP, 0, fs->files[idx[a]].path, -1,
+					pa, (int)sizeof(pa), NULL, NULL);
+				WideCharToMultiByte(CP_ACP, 0, fs->files[idx[b]].path, -1,
+					pb, (int)sizeof(pb), NULL, NULL);
+				int na = -1, nb = -1, ca = -1, cb = -1;
+				for (const char* p = pa; *p; p++) {
+					if (*p >= '0' && *p <= '9') {
+						if (ca < 0) ca = 0;
+						ca = ca * 10 + (*p - '0');
+						na = ca;
+					} else ca = -1;
+				}
+				for (const char* p = pb; *p; p++) {
+					if (*p >= '0' && *p <= '9') {
+						if (cb < 0) cb = 0;
+						cb = cb * 10 + (*p - '0');
+						nb = cb;
+					} else cb = -1;
+				}
+				if (na > nb || (na == nb && _stricmp(pa, pb) > 0)) {
+					int t = idx[a]; idx[a] = idx[b]; idx[b] = t;
+				}
+			}
+		}
+		if (nIdx > 1) {
+			int boot = -1;
+			for (int i = 0; i < nIdx; i++) {
+				const unsigned char* d = fs->files[idx[i]].data;
+				if (fs->files[idx[i]].size >= 4u && d && d[0] == 0xf3 && d[1] == 0x31) {
+					boot = i;
+					break;
+				}
+			}
+			if (boot > 0) {
+				const int t = idx[0];
+				idx[0] = idx[boot];
+				idx[boot] = t;
+			}
+		}
+		if (nIdx > 0) {
+			if (soundRom_) { free(soundRom_); soundRom_ = NULL; soundRomSize_ = 0; }
+			const unsigned need = 0x80000u;
+			uint8_t* p = (uint8_t*)calloc(1, need);
+			if (p) {
+				soundRom_ = p;
+				soundRomSize_ = need;
+				for (int i = 0; i < nIdx; i++) {
+					unsigned off = (unsigned)i * 0x20000u;
+					if (off >= need) break;
+					unsigned n = fs->files[idx[i]].size;
+					if (off + n > need) n = need - off;
+					memcpy(soundRom_ + off, fs->files[idx[i]].data, n);
+				}
+				memset(mem_, 0, 0x10000);
+				memcpy(mem_, soundRom_, 0x8000);
+				loaded = 1;
+				codeRom = soundRom_;
+				codeRomSize = need;
+			}
+		}
+	}
+
 	cpu_->reset(mem_);
 	cpu_->r.pc = 0;
 	/* Real Z80 power-on leaves A?0xFF. Ay_Cpu::reset zeroes regs; m99-family
@@ -8530,6 +8658,14 @@ int CHardAc::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode
 	memset(ayAddr_, 0, sizeof(ayAddr_));
 	bank_ = 0;
 	bankLoaded_ = 0;
+	if (board_ == CEMU_AC_BOARD_ALPHA68K2) {
+		alphaNmiMask_ = 0;
+		alphaPaLatch_ = 0;
+		alphaYmAddr_ = 0;
+		alphaOpllAddr_ = 0;
+		if (alphaOpll_)
+			OPLL_reset((OPLL*)alphaOpll_);
+	}
 	SetBank(0);
 	if (chip_) chip_->Reset();
 	if (chip2_) chip2_->Reset();

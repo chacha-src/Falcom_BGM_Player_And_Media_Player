@@ -270,12 +270,16 @@ static void ResetInterrupts(struct _SCSP *SCSP)
 
 static void CheckPendingIRQ(struct _SCSP *SCSP)
 {
+	/* Match MAME scsp_device::CheckPendingIRQ: MIDI pending sets SCIPD bit 3,
+	   then timers are ranked above MIDI, and a zero-level MIDI vector must
+	   not CLEAR_LINE the 68000 (the old Int68kCB(IrqMidi) with IrqMidi==0
+	   wiped Timer A/B while the FIFO sat unread). */
 	UINT32 pend=SCSP->udata.data[0x20/2];
 	UINT32 en=SCSP->udata.data[0x1e/2];
 	if(SCSP->MidiW!=SCSP->MidiR)
 	{
-		SCSP->Int68kCB(SCSP->IrqMidi);
-		return;
+		SCSP->udata.data[0x20/2] |= 8;
+		pend |= 8;
 	}
 	if(!pend)
 		return;
@@ -295,6 +299,13 @@ static void CheckPendingIRQ(struct _SCSP *SCSP)
 		if(en&0x100)
 		{
 			SCSP->Int68kCB(SCSP->IrqTimBC);
+			return;
+		}
+	if(pend&8)
+		if(en&8)
+		{
+			if (SCSP->IrqMidi)
+				SCSP->Int68kCB((int)SCSP->IrqMidi);
 			return;
 		}
 
@@ -1415,9 +1426,13 @@ WRITE16_HANDLER( SCSP_0_w )
 
 WRITE16_HANDLER( SCSP_MidiIn )
 {
-	struct _SCSP *SCSP = AllocedSCSP; 
+	struct _SCSP *SCSP = AllocedSCSP;
+	if (!SCSP) return;
 	SCSP->MidiStack[SCSP->MidiW++]=data;
 	SCSP->MidiW &= 15;
+	/* MAME scsp_device::midi_in raises SCIPD/MIDI immediately so the 68000
+	   sees the byte without waiting for the next generated sample. */
+	CheckPendingIRQ(SCSP);
 }
 
 READ16_HANDLER( SCSP_MidiOutR )

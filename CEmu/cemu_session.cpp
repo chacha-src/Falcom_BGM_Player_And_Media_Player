@@ -1,4 +1,4 @@
-#include "StdAfx.h"
+﻿#include "StdAfx.h"
 #include "cemu_session.h"
 #include "cemu_mgr.h"
 #include "cemu_zipfs.h"
@@ -422,6 +422,7 @@ static int CEmuSessionTryHardGe(CEmuSession* s, const CEmuGameEntry* ge,
 			|| _stricmp(ge->subtype, "gameblaster") == 0
 			|| _stricmp(ge->subtype, "cms") == 0
 			|| _stricmp(ge->subtype, "beep") == 0
+			|| _stricmp(ge->subtype, "tandy") == 0
 			|| _stricmp(ge->subtype, "midiout") == 0)) {
 		/* midiout uses MPU-401 UART capture → SMF for KPI/VST when possible. */
 		if (CEmuPcatOpen(&s->pcat, ge, zipPath, titleCode, s->sampleRate)) {

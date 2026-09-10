@@ -54,6 +54,7 @@ public:
 		, rom_(NULL)
 		, romSize_(0)
 		, started_(0)
+		, clockAcc_(0)
 	{
 		memset(reg_, 0, sizeof(reg_));
 		memset(monOn_, 0, sizeof(monOn_));
@@ -89,7 +90,26 @@ public:
 		UpdateMon();
 	}
 
-	void AdvanceClocks(uint64_t) override {}
+	void AdvanceClocks(uint64_t clocks) override
+	{
+		/* Model 2A/3 boot runs the 68000 for ~1.5 s before the first mix.
+		   The firmware programs SCSP timers and then waits on them; a no-op
+		   here left Timer A/B and MIDI SCIPD frozen, so every SCSP title
+		   stayed silent even though MIDI was queued. 512 chip clocks = one
+		   44.1 kHz sample (22.5792 MHz / 44100). */
+		if (!Live() || clocks == 0) return;
+		clockAcc_ += clocks;
+		uint64_t samples = clockAcc_ / 512u;
+		clockAcc_ %= 512u;
+		while (samples) {
+			int n = (samples > (uint64_t)kScspBlock) ? kScspBlock : (int)samples;
+			memset(bufL_, 0, sizeof(bufL_));
+			memset(bufR_, 0, sizeof(bufR_));
+			INT16* buf[2] = { bufL_, bufR_ };
+			SCSP_Update(NULL, NULL, buf, n);
+			samples -= (uint64_t)n;
+		}
+	}
 
 	void Render(int16_t* stereo, int frames) override
 	{
@@ -165,6 +185,7 @@ private:
 		intf.mixing_level[0] = 0;
 		intf.irq_callback[0] = CEmuScspIrqCb;
 		g_scspIrqLevel = 0;
+		clockAcc_ = 0;
 		sat_hw_init();
 		started_ = scsp_start(&intf) ? 1 : 0;
 		g_scspOwner = started_ ? this : NULL;
@@ -200,6 +221,7 @@ private:
 	const uint8_t* rom_;
 	unsigned romSize_;
 	int started_;
+	uint64_t clockAcc_;
 	uint16_t reg_[0x800];
 	uint8_t monOn_[kScspSlots];
 	uint8_t monMidi_[kScspSlots];

@@ -6,7 +6,8 @@
 /* Thin X68k sound hard (hoot x68k.cpp): 68000 + YM2151 @ e90001 + song mailbox @ e00000.
    trap_f.bin is the 64K IPL/IOCS image; BOOT copies 1F0000→FF0000 then JSR FF0B86.
    When romlist includes trap_f, LoadRoms runs that IPL sub once (real code, not PlantDos).
-   CLEAN: XML-accurate ROM placement + hardware MMIO/IRQ + real IPL call only. */
+   Main RAM is 4MB ($000000..$3FFFFF); $E00000..$E7FFFF is extra RAM for ADPCM.
+   MFP Timer C/D at $E88000 raises vectored IRQ2 (vector $110/$114 when VR=$40). */
 class CHardX68k : public CHard {
 public:
 	CHardX68k();
@@ -33,6 +34,13 @@ public:
 	uint8_t SongFlag() const { return songFlag_; }
 	/* Mix MSM6258V ADPCM into stereo buffer (hoot x68k.cpp path). */
 	void MixAdpcm(int16_t* stereo, int frames);
+
+	/* MC68901 Timer C/D → IRQ2 (vectored). Call once per CPU quantum. */
+	void TickMfp(int cpuCycles);
+	int MfpIrqPending() const { return mfpIrqPending_; }
+	int AckMfpIrq();
+	/* IERB+IMRB Timer D armed — driver must not also software-pulse $110. */
+	int MfpTimerDIrqArmed() const;
 
 	/* XML-placed files for Human68k OPEN/READ (ZMUSIC etc.). */
 	enum { kDosFiles = 64, kDosHandles = 8 };
@@ -72,17 +80,24 @@ private:
 	int DosFindFile(const char* path) const;
 
 	enum {
-		kRomBytes = 0x100000, kMidBytes = 0x80000, kRamBytes = 0x10000,
+		/* 4MB main RAM: XML code/x at $180000+ (bonnou OPM, Wolfteam, Dempa)
+		   was skipped when this was 1MB + a 512KB $10xxxx window. */
+		kRomBytes = 0x400000, kRamBytes = 0x10000,
 		kHighBytes = 0x10000, kMfpBytes = 0x1000,
-		kHeapBase = 0xA00000, kHeapBytes = 0x40000
+		kHeapBase = 0xA00000, kHeapBytes = 0x40000,
+		kExtBase = 0xE00000, kExtBytes = 0x80000
 	};
 	uint8_t rom_[kRomBytes];
 	uint8_t ram_[kRamBytes];
 	uint8_t high_[kHighBytes];
-	uint8_t mid_[kMidBytes];
 	uint8_t heap_[kHeapBytes];
+	uint8_t ext_[kExtBytes]; /* $E00000..$E7FFFF ADPCM / expansion */
 	uint8_t mfp_[kMfpBytes];
 	int softMfp_; /* catalog mfp=1: GPIP bit4 clear (arcus wait loops) */
+	int64_t mfpTdAcc_;
+	int64_t mfpTcAcc_;
+	int mfpIrqPending_;
+	uint8_t mfpIrqVec_;
 	int adpcmPlaying_;
 	unsigned adpcmAddr_;
 	unsigned adpcmSize_;

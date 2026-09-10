@@ -95,7 +95,11 @@ void Ay_Cpu::reset( void* m )
 #define TIME                        (s_time + s.base)
 #define READ_PROG( addr )           (mem [addr])
 #define INSTR( offset )             READ_PROG( pc + (offset) )
-#define GET_ADDR()                  GET_LE16( &READ_PROG( pc ) )
+/* Immediates are not M1: Kabuki (dino/wof) data-decrypts them. Opcode fetch
+   stays READ_PROG / mem_ (opcode plane). */
+#define GET_ADDR()                  ( (uint16_t)ay_cpu_read( this, (unsigned)(uint16_t)(pc) ) | \
+	( (uint16_t)ay_cpu_read( this, (unsigned)(uint16_t)((pc) + 1) ) << 8 ) )
+#define TAKE_IMM8()                 ((uint8_t)ay_cpu_read( this, (unsigned)(uint16_t)(pc) ))
 /* Data READ/WRITE go through bus (CPS1 mem-mapped YM2151); fetch stays direct. */
 #define READ( addr )                ay_cpu_read( this, (unsigned)(uint16_t)(addr) )
 #define WRITE( addr, data )         ay_cpu_write( this, (unsigned)(uint16_t)(addr), (int)(data) )
@@ -254,16 +258,19 @@ possibly_out_of_time:
 	}
 	
 	case 0xD3: // OUT (imm),A
+		data = TAKE_IMM8();
 		pc++;
 		OUT( data + rg.a * 0x100, rg.a );
 		goto loop;
 		
 	case 0x2E: // LD L,imm
+		data = TAKE_IMM8();
 		pc++;
 		rg.l = data;
 		goto loop;
 	
 	case 0x3E: // LD A,imm
+		data = TAKE_IMM8();
 		pc++;
 		rg.a = data;
 		goto loop;
@@ -284,7 +291,7 @@ possibly_out_of_time:
 
 // JR
 #define JR( cond ) {\
-	int disp = (int8_t) data;\
+	int disp = (int8_t) TAKE_IMM8();\
 	pc++;\
 	if ( !(cond) )\
 		goto jr_not_taken;\
@@ -416,6 +423,7 @@ possibly_out_of_time:
 		flags &= ~C01; /* fallthrough */
 	case 0xDE: // SBC A,imm
 	case 0xCE: // ADC imm
+		data = TAKE_IMM8();
 		pc++;
 		goto adc_data;
 	
@@ -446,6 +454,7 @@ possibly_out_of_time:
 		goto cp_data;
 	
 	case 0xFE: // CP imm
+		data = TAKE_IMM8();
 		pc++;
 		goto cp_data;
 	
@@ -582,6 +591,7 @@ possibly_out_of_time:
 		goto and_data;
 	
 	case 0xE6: // AND imm
+		data = TAKE_IMM8();
 		pc++;
 		goto and_data;
 	
@@ -598,6 +608,7 @@ possibly_out_of_time:
 		goto or_data;
 	
 	case 0xF6: // OR imm
+		data = TAKE_IMM8();
 		pc++;
 		goto or_data;
 	
@@ -614,6 +625,7 @@ possibly_out_of_time:
 		goto xor_data;
 	
 	case 0xEE: // XOR imm
+		data = TAKE_IMM8();
 		pc++;
 		goto xor_data;
 	
@@ -640,13 +652,13 @@ possibly_out_of_time:
 		goto loop;
 	
 	CASE5( 06, 0E, 16, 1E, 26 ): // LD r,imm
-		R8( opcode >> 3, 0 ) = data;
+		R8( opcode >> 3, 0 ) = TAKE_IMM8();
 		pc++;
 		goto loop;
 	
 	case 0x36: // LD (HL),imm
+		WRITE( rp.hl, TAKE_IMM8() );
 		pc++;
-		WRITE( rp.hl, data );
 		goto loop;
 	
 	CASE7( 46, 4E, 56, 5E, 66, 6E, 7E ): // LD r,(HL)
@@ -762,6 +774,7 @@ possibly_out_of_time:
 		goto loop;
 	
 	case 0xDB: // IN A,(imm)
+		data = TAKE_IMM8();
 		pc++;
 		rg.a = IN( data + rg.a * 0x100 );
 		goto loop;
@@ -1310,7 +1323,7 @@ possibly_out_of_time:
 		ixy = iy;
 	ix_prefix:
 		pc++;
-		unsigned data2 = READ_PROG( pc );
+		unsigned data2 = TAKE_IMM8();
 		s_time += ed_dd_timing [data] & 0x0F;
 		switch ( data )
 		{
@@ -1434,8 +1447,8 @@ possibly_out_of_time:
 		CASE7( 70, 71, 72, 73, 74, 75, 77 ): // LD (IXY+disp),r
 			data = R8( data, 0x70 );
 			if ( 0 )
-		case 0x36: // LD (IXY+disp),imm
-				pc++, data = READ_PROG( pc );
+		case 0x36: // LD (IXY+disp),imm — Kabuki: n is data-plane, not M1
+				pc++, data = TAKE_IMM8();
 			pc++;
 			WRITE( IXY_DISP( ixy, (int8_t) data2 ), data );
 			goto loop;

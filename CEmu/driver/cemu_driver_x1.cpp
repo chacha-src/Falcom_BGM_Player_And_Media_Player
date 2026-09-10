@@ -45,11 +45,11 @@ CDriverX1::CDriverX1()
 	, timerPeriod_(X1_TIMER_CYCLES)
 	, vsyncPeriod_(4000000 / 60)
 	, ctc3Div_(0)
-	, ctc3Pending_(0)
 	, cpuDebt_(0)
 	, timerIrqs_(0)
 	, vsyncIrqs_(0)
 {
+	memset(ctcPending_, 0, sizeof(ctcPending_));
 }
 
 CDriverX1::~CDriverX1()
@@ -89,15 +89,20 @@ void CDriverX1::TickChips(uint64_t cpuCycles)
 void CDriverX1::SyncTimerPeriodFromCtc()
 {
 	if (!hw_) return;
-	const unsigned p = hw_->CtcTimerPeriodCycles(0);
-	if (p > 0)
-		timerPeriod_ = (uint64_t)p;
+	for (int ch = 0; ch < 3; ch++) {
+		const unsigned p = hw_->CtcTimerPeriodCycles(ch);
+		if (p > 0) {
+			timerPeriod_ = (uint64_t)p;
+			return;
+		}
+	}
 }
 
 void CDriverX1::DeliverIrqs(uint64_t now)
 {
 	SyncTimerPeriodFromCtc();
 	if (!hw_ || !hw_->Cpu()) return;
+	hw_->ArmTelenetPlayGate();
 	Ay_Cpu* cpu = hw_->Cpu();
 	/* Advance the tick schedule here and keep the number of elapsed periods:
 	   a long DI/halt gap must not multi-fire, but the ch3 cascade below still
@@ -122,20 +127,20 @@ void CDriverX1::DeliverIrqs(uint64_t now)
 	   host VSYNC is not a source at all on this board. */
 	const unsigned ctc3Count = hw_->CtcTimerPeriodCycles(0) > 0
 		? hw_->CtcCounterTc(3) : 0u;
-	int ch3Due;
 	if (ctc3Count > 0) {
 		ctc3Div_ += timerTicks;
 		if (ctc3Div_ >= ctc3Count) {
 			ctc3Div_ %= ctc3Count;
 			/* ch3 always comes due on a ZC0 edge, i.e. together with ch0.
-			   The real daisy chain services ch0 first and keeps ch3's INT
-			   asserted, so latch it instead of dropping it. */
-			ctc3Pending_ = 1;
+			   The real daisy chain keeps ch3's INT asserted, so latch it
+			   instead of dropping it. */
+			ctcPending_[3] = 1;
 		}
-		ch3Due = ctc3Pending_;
-	} else {
-		ch3Due = vsyncDue;
+	} else if (vsyncDue) {
+		/* Host VSYNC path stays one-shot per period. */
 	}
+
+	const int ch3Due = (ctc3Count > 0) ? ctcPending_[3] : vsyncDue;
 
 	/* Decay play-cmd hold once per due ch3/VSYNC (~60Hz → 90 ≈ 1.5s). */
 	if (ch3Due && hw_->playCmdHoldIrqs_ > 0) {
@@ -151,45 +156,101 @@ void CDriverX1::DeliverIrqs(uint64_t now)
 
 	/* CTC-programmed IM2 vectors (hoot mucomx1: ch0→TIMER, ch3→VSYNC).
 	   Once the guest programs the CTC, honor each channel's IE bit. Injecting
-	   both host sources regardless of IE double-steps Falcom music drivers. */
-	uint8_t timerVec = hw_->CtcVector(0);
-	uint8_t vsyncVec = hw_->CtcVector(3);
+	   both host sources regardless of IE double-steps Falcom music drivers.
+	   sc enables ch0+ch2; crimson enables ch1 only — those channels used
+	   to be dropped because only ch0/ch3 were ever injected.
+	   Do not inject ch1/ch2 while the Falcom-style ch0+ch3 pair is live:
+	   xana2's stray ch2 vector stole ticks (picks 1/4 STOPS/SILENT).
+	   sc is ch0+ch2 (ch3 IE may still be set); crimson is ch1-only. */
 	const int ctcProgrammed = hw_->CtcVectorProgrammed();
+	const int guestCtc = ctcProgrammed
+		|| hw_->CtcTimerPeriodCycles(0) > 0
+		|| hw_->CtcTimerPeriodCycles(1) > 0
+		|| hw_->CtcTimerPeriodCycles(2) > 0
+		|| hw_->CtcIe(1) || hw_->CtcIe(2);
+	const int extraCtc = guestCtc && !(hw_->CtcIe(0) && hw_->CtcIe(3));
 
-	int timerIrq = 0;
-	int vsyncIrq = 0;
-
-	if (ctcProgrammed || hw_->CtcTimerPeriodCycles(0) > 0) {
-		/* Guest drives the CTC itself, either by rewriting the IM2 vector base
-		   or by running ch0 as a real timer. Honor each channel's IE bit;
-		   injecting both host sources regardless double-steps the driver. */
-		timerIrq = timerDue && hw_->CtcIe(0);
-		vsyncIrq = ch3Due && hw_->CtcIe(3);
-	} else {
-		/* No CTC timer programmed at all — keep the hoot-style default tick
-		   plus VSYNC, which is the only thing driving those rips. */
-		timerIrq = timerDue;
-		vsyncIrq = ch3Due;
+	/* ch0 stays edge-triggered (not sticky) so a coincident ch3 tick still
+	   drops that ch0 the way Telenet/Falcom already do. ch1/ch2 are sticky
+	   so sc/crimson are not starved when they share the timer edge. */
+	if (timerDue && extraCtc) {
+		if (hw_->CtcIe(1)) ctcPending_[1] = 1;
+		if (hw_->CtcIe(2)) ctcPending_[2] = 1;
 	}
-	if (!cpu->r.iff1) {
-		timerIrq = 0;
-		vsyncIrq = 0;
+
+	int irq[4];
+	irq[0] = timerDue && (guestCtc ? hw_->CtcIe(0) : 1);
+	irq[1] = extraCtc ? (ctcPending_[1] && hw_->CtcIe(1)) : 0;
+	irq[2] = extraCtc ? (ctcPending_[2] && hw_->CtcIe(2)) : 0;
+	irq[3] = guestCtc ? (ch3Due && hw_->CtcIe(3)) : ch3Due;
+
+	/* euphory EI's at $112 before IM 2; page 0 is JP $100 restart stubs.
+	   Host ticks as IM0 RST 38 never leave init. Drop queued ticks too so
+	   they cannot become IM2 jumps into those stubs a few instructions later. */
+	if (cpu->r.im == 0) {
+		memset(ctcPending_, 0, sizeof(ctcPending_));
+		irq[0] = irq[1] = irq[2] = irq[3] = 0;
+	} else if (!cpu->r.iff1) {
+		irq[0] = irq[1] = irq[2] = irq[3] = 0;
 	} else if (cpu->r.im == 2) {
-		if (timerIrq && X1Im2Target(cpu, timerVec) == 0) timerIrq = 0;
-		if (vsyncIrq && X1Im2Target(cpu, vsyncVec) == 0) vsyncIrq = 0;
+		for (int ch = 0; ch < 4; ch++) {
+			if (!irq[ch]) continue;
+			const uint16_t tgt = X1Im2Target(cpu, hw_->CtcVector(ch));
+			/* euphory page-0 IM2 follows JP $100 (PROG00 restart).
+			   Do not skip the whole <$200 range — JESUS parks ISRs there. */
+			if (tgt == 0 || tgt == 0x0100)
+				irq[ch] = 0;
+		}
 	}
 
-	if (timerIrq) {
-		timerIrqs_++;
-		if (cpu->r.im == 2)
-			Ay_CpuIm2InterruptTo(cpu, X1Im2Target(cpu, timerVec));
-		else
-			Ay_CpuIm1Interrupt(cpu);
-	} else if (vsyncIrq) {
-		vsyncIrqs_++;
-		ctc3Pending_ = 0;
-		if (cpu->r.im == 2)
-			Ay_CpuIm2InterruptTo(cpu, X1Im2Target(cpu, vsyncVec));
+	/* Laplace init leaves $9BC4 durations at 0. DEC wraps to $FF and the
+	   first F0 event waits 256 ticks (~4s at 60Hz, ~8s at the 30Hz we
+	   actually deliver). Prime active channels so the first ISR fetches. */
+	if (hw_->laplaceCtcF_ && cpu->r.iff1) {
+		uint8_t* mem = hw_->Mem();
+		if (mem && mem[0x8709] && mem[0x80A2] == 0 && mem[0x80A3] == 0) {
+			const uint8_t mask = mem[0x8709];
+			for (int ch = 0; ch < 6; ch++) {
+				if ((mask & (uint8_t)(1u << ch)) && mem[0x9BC4 + ch] == 0)
+					mem[0x9BC4 + ch] = 1;
+			}
+		}
+	}
+
+	/* mars: boot EI's then busy-waits the mailbox. Hold ticks until PATCH
+	   has CALLed play in PROG and returned, otherwise the first vsync
+	   enters $41FF from inside $4A6B and never RETI's. */
+	if (hw_->marsHoldIrq_) {
+		const uint16_t pc = cpu->r.pc;
+		if (triggered_ && pc >= 0x4100u && pc < 0x6000u)
+			hw_->marsSeenProg_ = 1;
+		if (hw_->marsSeenProg_ && pc < 0x100u)
+			hw_->marsPlayReady_ = 1;
+		if (!hw_->marsPlayReady_) {
+			memset(ctcPending_, 0, sizeof(ctcPending_));
+			irq[0] = irq[1] = irq[2] = irq[3] = 0;
+		}
+	}
+
+	/* Service ZC0→TRG3 first (Telenet ch3 sequencer), then ch2 (sc), then
+	   ch0 (Falcom ys2 sequencer at $2713) before ch1. ys2 enables ch0+ch1;
+	   taking ch1 first ran only the $2704 countdown and starved music. */
+	int take = -1;
+	if (irq[3]) take = 3;
+	else if (irq[2]) take = 2;
+	else if (irq[0]) take = 0;
+	else if (irq[1]) take = 1;
+	if (take >= 0) {
+		ctcPending_[take] = 0;
+		if (take == 3) vsyncIrqs_++;
+		else timerIrqs_++;
+		if (cpu->r.im == 2) {
+			/* Laplace wait-loop EI leaves irqDelay set; vsync in that
+			   one-instruction window would drop the only tick source. */
+			if (hw_->laplaceCtcF_ && take == 3)
+				cpu->irqDelay = 0;
+			Ay_CpuIm2InterruptTo(cpu, X1Im2Target(cpu, hw_->CtcVector(take)));
+		}
 		else
 			Ay_CpuIm1Interrupt(cpu);
 	}
@@ -255,7 +316,7 @@ int CDriverX1::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 	booted_ = 0;
 	triggered_ = 0;
 	ctc3Div_ = 0;
-	ctc3Pending_ = 0;
+	memset(ctcPending_, 0, sizeof(ctcPending_));
 	cpuDebt_ = 0;
 	timerIrqs_ = 0;
 	vsyncIrqs_ = 0;
@@ -264,7 +325,7 @@ int CDriverX1::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 	titleCode_ = titleCode;
 	{
 		uint8_t song = 0, bank = 0;
-		CHardX1::UnpackTitle(titleCode_, &song, &bank);
+		CHardX1::UnpackTitle(titleCode_, &song, &bank, hw_->ydosRom_);
 		(void)bank;
 		songCode_ = song;
 	}

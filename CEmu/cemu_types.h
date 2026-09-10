@@ -80,8 +80,10 @@ enum {
 	CEMU_DATA_DIR = 16,
 	CEMU_ROM_NAME = 128,
 	/* Fixed slot budget: parse prefers code/bgm/voice over adpcm when full.
-	   arcus2 OPNA has 103 rows — without priority, late BGM banks are dropped. */
-	CEMU_ROM_MAX = 128,
+	   arcus2 OPNA has 103 rows — without priority, late BGM banks are dropped.
+	   DOS packs list every song as file+conin (night_s USMD is 264 rows;
+	   metajo2 is 833). 128 evicted the glue COM/EXE in favor of late shells. */
+	CEMU_ROM_MAX = 1024,
 	CEMU_TITLE_MAX = 256,
 	CEMU_OPTION_MAX = 32,
 	CEMU_ZIP_PATH = 520

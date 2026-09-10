@@ -12,8 +12,12 @@ extern "C" {
 
 static int CEmuX68kIntAck(int level)
 {
-	(void)level;
 	CHardX68k* hw = CEmuM68kBusGetX68k();
+	if (level == 2) {
+		const int vec = hw ? hw->AckMfpIrq() : M68K_INT_ACK_AUTOVECTOR;
+		m68k_set_irq(M68K_IRQ_NONE);
+		return vec;
+	}
 	if (hw && hw->SoundChip())
 		hw->SoundChip()->AckIrq();
 	/* Pulse: drop the Musashi line on ack. Holding IRQ6 through the
@@ -74,13 +78,17 @@ CHardX68k::CHardX68k()
 	, dosMbD1_(0)
 	, dosMbResult_(0)
 	, softMfp_(0)
+	, mfpTdAcc_(0)
+	, mfpTcAcc_(0)
+	, mfpIrqPending_(0)
+	, mfpIrqVec_(0)
 {
 	hardKind = KIND_X68K;
 	memset(rom_, 0, sizeof(rom_));
 	memset(ram_, 0, sizeof(ram_));
 	memset(high_, 0, sizeof(high_));
-	memset(mid_, 0, sizeof(mid_));
 	memset(heap_, 0, sizeof(heap_));
+	memset(ext_, 0, sizeof(ext_));
 	memset(mfp_, 0, sizeof(mfp_));
 	memset(dosFiles_, 0, sizeof(dosFiles_));
 	memset(dosHandles_, 0, sizeof(dosHandles_));
@@ -150,8 +158,6 @@ uint8_t CHardX68k::Read8(unsigned addr)
 	addr &= 0xffffffu;
 	if (addr < (unsigned)kRomBytes)
 		return rom_[addr];
-	if (addr >= 0x100000u && addr < 0x100000u + (unsigned)kMidBytes)
-		return mid_[addr - 0x100000u];
 	if (addr >= (unsigned)kHeapBase && addr < (unsigned)kHeapBase + (unsigned)kHeapBytes)
 		return heap_[addr - (unsigned)kHeapBase];
 	if (addr >= 0xf00000u && addr <= 0xf0ffffu)
@@ -184,18 +190,24 @@ uint8_t CHardX68k::Read8(unsigned addr)
 			m68k_end_timeslice();
 		return 0;
 	}
-	/* Soft MFP ($E88000 / $E8A000) — optional. */
+	/* Soft MFP ($E88000 / $E8A000). Do not remap 0→$FF: IER/IMR/TCDCR
+	   reset to 0 (disabled/stopped). Open-bus $FF hid "timer already on". */
 	if ((addr >= 0xe88000u && addr <= 0xe88fffu) || (addr >= 0xe8a000u && addr <= 0xe8afffu)) {
 		const unsigned off = addr & 0xfffu;
 		uint8_t v = mfp_[off];
-		if (v == 0) v = 0xff;
-		/* GPIP ($E88001): arcus/others btst #4 / bne-wait until clear.
-		   Soft-MFP defaults were 0xFF → eternal spin before OPM key-ons. */
-		if (off == 0x001u)
+		/* GPIP ($E88001): default open-bus high, bit4 (VDISP) clear so
+		   arcus `btst #4 / bne` can leave the wait. Other bits stay set:
+		   `tst.b / bmi` on bit7 must not hang. */
+		if (off == 0x001u) {
+			if (v == 0) v = 0xff;
 			v = (uint8_t)(v & (uint8_t)~0x10);
+		}
 		(void)softMfp_;
 		return v;
 	}
+	/* $E00000..$E7FFFF extra RAM after mailbox / timeslice MMIO. */
+	if (addr >= (unsigned)kExtBase && addr < (unsigned)kExtBase + (unsigned)kExtBytes)
+		return ext_[addr - (unsigned)kExtBase];
 	if (addr >= 0xe80000u && addr <= 0xefffffu)
 		return 0xff;
 	return 0;
@@ -218,10 +230,6 @@ void CHardX68k::Write8(unsigned addr, uint8_t data)
 	addr &= 0xffffffu;
 	if (addr < (unsigned)kRomBytes) {
 		rom_[addr] = data;
-		return;
-	}
-	if (addr >= 0x100000u && addr < 0x100000u + (unsigned)kMidBytes) {
-		mid_[addr - 0x100000u] = data;
 		return;
 	}
 	if (addr >= (unsigned)kHeapBase && addr < (unsigned)kHeapBase + (unsigned)kHeapBytes) {
@@ -251,6 +259,10 @@ void CHardX68k::Write8(unsigned addr, uint8_t data)
 	}
 	if ((addr >= 0xe88000u && addr <= 0xe88fffu) || (addr >= 0xe8a000u && addr <= 0xe8afffu)) {
 		mfp_[addr & 0xfffu] = data;
+		return;
+	}
+	if (addr >= (unsigned)kExtBase && addr < (unsigned)kExtBase + (unsigned)kExtBytes) {
+		ext_[addr - (unsigned)kExtBase] = data;
 		return;
 	}
 	if (addr == 0xe90001u || addr == 0xe90003u) {
@@ -473,11 +485,7 @@ void CHardX68k::MixAdpcm(int16_t* stereo, int frames)
 				break;
 			}
 			unsigned byteAddr = adpcmAddr_ + (adpcmPos_ >> 1);
-			uint8_t b = 0x80;
-			if (byteAddr < (unsigned)kRomBytes)
-				b = rom_[byteAddr];
-			else if (byteAddr >= 0x100000u && byteAddr < 0x100000u + (unsigned)kMidBytes)
-				b = mid_[byteAddr - 0x100000u];
+			uint8_t b = Read8(byteAddr);
 			const int nib = (adpcmPos_ & 1) ? ((b >> 4) & 0x0f) : (b & 0x0f);
 			adpcmPos_++;
 			int stepIdx = adpcmStep_;
@@ -509,6 +517,73 @@ void CHardX68k::MixAdpcm(int16_t* stereo, int frames)
 		if (orr < -32768) orr = -32768;
 		stereo[i * 2] = (int16_t)ol;
 		stereo[i * 2 + 1] = (int16_t)orr;
+	}
+}
+
+int CHardX68k::AckMfpIrq()
+{
+	const int vec = mfpIrqVec_ ? (int)mfpIrqVec_ : M68K_INT_ACK_AUTOVECTOR;
+	mfpIrqPending_ = 0;
+	mfpIrqVec_ = 0;
+	return vec;
+}
+
+int CHardX68k::MfpTimerDIrqArmed() const
+{
+	/* IERB bit4 + IMRB bit4 + TCDCR Timer-D delay != stop. */
+	return ((mfp_[0x09] & 0x10u) && (mfp_[0x15] & 0x10u) && (mfp_[0x1d] & 7u)) ? 1 : 0;
+}
+
+void CHardX68k::TickMfp(int cpuCycles)
+{
+	if (cpuCycles <= 0 || cpuHz_ <= 0 || mfpIrqPending_) return;
+	static const int kPre[8] = { 0, 4, 10, 16, 50, 64, 100, 200 };
+	const unsigned tcdcr = mfp_[0x1d];
+	const unsigned ierb = mfp_[0x09];
+	const unsigned imrb = mfp_[0x15];
+	const unsigned vr = mfp_[0x17] ? mfp_[0x17] : 0x40u;
+	const int mfpClk = 4000000;
+	int minPeriod = cpuHz_ / 4000;
+	if (minPeriod < 1) minPeriod = 1;
+
+	/* Timer D source 4 → vec (VR&F0)|4 → $110 when VR=$40.
+	   Timer C source 5 → $114. */
+	const int preD = kPre[tcdcr & 7u];
+	const int preC = kPre[(tcdcr >> 4) & 7u];
+	if ((ierb & 0x10u) && (imrb & 0x10u) && preD > 0) {
+		unsigned count = mfp_[0x25] ? (unsigned)mfp_[0x25] : 256u;
+		int periodCy = (int)(((int64_t)cpuHz_ * (int64_t)count * (int64_t)preD) / mfpClk);
+		if (periodCy < minPeriod) periodCy = minPeriod;
+		mfpTdAcc_ += cpuCycles;
+		if (mfpTdAcc_ >= periodCy) {
+			mfpTdAcc_ -= periodCy;
+			const unsigned vec = (vr & 0xf0u) | 4u;
+			const unsigned isr = Read32(vec * 4u) & 0xffffffu;
+			if (isr >= 0x400u && isr < 0x00f00000u) {
+				mfpIrqPending_ = 1;
+				mfpIrqVec_ = (uint8_t)vec;
+			}
+		}
+	} else {
+		mfpTdAcc_ = 0;
+	}
+	if (mfpIrqPending_) return;
+	if ((ierb & 0x20u) && (imrb & 0x20u) && preC > 0) {
+		unsigned count = mfp_[0x23] ? (unsigned)mfp_[0x23] : 256u;
+		int periodCy = (int)(((int64_t)cpuHz_ * (int64_t)count * (int64_t)preC) / mfpClk);
+		if (periodCy < minPeriod) periodCy = minPeriod;
+		mfpTcAcc_ += cpuCycles;
+		if (mfpTcAcc_ >= periodCy) {
+			mfpTcAcc_ -= periodCy;
+			const unsigned vec = (vr & 0xf0u) | 5u;
+			const unsigned isr = Read32(vec * 4u) & 0xffffffu;
+			if (isr >= 0x400u && isr < 0x00f00000u) {
+				mfpIrqPending_ = 1;
+				mfpIrqVec_ = (uint8_t)vec;
+			}
+		}
+	} else {
+		mfpTcAcc_ = 0;
 	}
 }
 
@@ -616,6 +691,29 @@ static int CEmuX68kLoadHumanX(uint8_t* dst, unsigned dstCap, unsigned loadAddr,
 		}
 	}
 	return 1;
+}
+
+/* ARTDINK maps FLOAT2.X at $2E000 and A2.X at $30000, but FLOAT2's text is
+   $2F80 and KEEPPR never runs, so A2.X overwrites the FPU op table. Slide
+   FLOAT2 into the hole below A2.X ($2A000+$2F80=$2CF80). */
+static unsigned CEmuX68kFloat2LoadAddr(const CEmuGameEntry* ge, unsigned xmlOff,
+	const unsigned char* data, unsigned sz)
+{
+	if (!ge || xmlOff != 0x2e000u || !data || sz < 0x14u) return xmlOff;
+	if (data[0] != 'H' || data[1] != 'U') return xmlOff;
+	const unsigned text = ((unsigned)data[0x0c] << 24) | ((unsigned)data[0x0d] << 16)
+		| ((unsigned)data[0x0e] << 8) | (unsigned)data[0x0f];
+	const unsigned datasz = ((unsigned)data[0x10] << 24) | ((unsigned)data[0x11] << 16)
+		| ((unsigned)data[0x12] << 8) | (unsigned)data[0x13];
+	const unsigned end = xmlOff + text + datasz;
+	int clash = 0;
+	for (int i = 0; i < ge->romCount; i++) {
+		const int o = ge->rom[i].offset;
+		if (o <= 0) continue;
+		const unsigned u = (unsigned)o;
+		if (u > xmlOff && u < end) { clash = 1; break; }
+	}
+	return clash ? 0x2a000u : xmlOff;
 }
 
 /* hoot opmdrv.bin: a second pass through init (BOOT restarted from $F08xxx
@@ -788,64 +886,13 @@ static void CEmuX68kFixOpxTrackHeap(uint8_t* rom, unsigned n, uint8_t* heapRam, 
 			pool = dest;
 		}
 	}
-	if (poolHits < 2 || !pool) return;
-
-	/* Trailing zeros of the HU data section (OP.X body ends ~$164A4). */
-	unsigned slot = 0;
-	const unsigned lo = load + 0x5000u;
-	const unsigned hi = (load + 0x7000u < n) ? (load + 0x7000u) : n;
-	for (unsigned a = (hi - 4u) & ~3u; a > lo; a -= 4u) {
-		if (rom[a] == 0 && rom[a + 1] == 0 && rom[a + 2] == 0 && rom[a + 3] == 0
-			&& rom[a - 4] == 0 && rom[a - 3] == 0 && rom[a - 2] == 0 && rom[a - 1] == 0) {
-			slot = a;
-			break;
-		}
-	}
-	if (!slot) return;
-
-	const unsigned heap = CEMU_X68K_DOS_HEAP;
-	rom[slot] = (uint8_t)(heap >> 24);
-	rom[slot + 1] = (uint8_t)(heap >> 16);
-	rom[slot + 2] = (uint8_t)(heap >> 8);
-	rom[slot + 3] = (uint8_t)heap;
-
-	for (unsigned a = load; a + 6u < load + 0x8000u && a + 6u < n; a += 2u) {
-		if (rom[a] == 0x41 && rom[a + 1] == 0xf9) {
-			const unsigned dest = ((unsigned)rom[a + 2] << 24)
-				| ((unsigned)rom[a + 3] << 16)
-				| ((unsigned)rom[a + 4] << 8) | (unsigned)rom[a + 5];
-			if (dest != pool) continue;
-			rom[a + 2] = (uint8_t)(heap >> 24);
-			rom[a + 3] = (uint8_t)(heap >> 16);
-			rom[a + 4] = (uint8_t)(heap >> 8);
-			rom[a + 5] = (uint8_t)heap;
-			continue;
-		}
-		/* lea disp(pc),a0/a1 → move.l disp(pc),a0/a1 when the lea targeted the pool. */
-		if ((rom[a] == 0x41 || rom[a] == 0x43) && rom[a + 1] == 0xfa) {
-			int disp = (int)(((unsigned)rom[a + 2] << 8) | (unsigned)rom[a + 3]);
-			if (disp >= 0x8000) disp -= 0x10000;
-			const unsigned tgt = (unsigned)((int)a + 2 + disp);
-			if (tgt != pool) continue;
-			const int nd = (int)slot - (int)(a + 2u);
-			if (nd < -32768 || nd > 32767) continue;
-			rom[a] = (rom[a] == 0x41) ? 0x20 : 0x22; /* a0 / a1 */
-			rom[a + 1] = 0x7a;
-			rom[a + 2] = (uint8_t)(((unsigned)nd >> 8) & 0xff);
-			rom[a + 3] = (uint8_t)(nd & 0xff);
-		}
-	}
-
-	/* M_ALLOC cmp.l #79,d0 — 80×320B slots cannot hold $103FF. */
-	for (unsigned a = load; a + 6u < load + 0x2000u && a + 6u < n; a += 2u) {
-		if (rom[a] == 0xb0 && rom[a + 1] == 0xbc
-			&& rom[a + 2] == 0 && rom[a + 3] == 0
-			&& rom[a + 4] == 0 && rom[a + 5] == 0x4f) {
-			rom[a + 4] = 0x01;
-			rom[a + 5] = 0xff;
-			break;
-		}
-	}
+	/* Do not retarget the 41F9/41FA M_ALLOC pointer table to $A00000.
+	   Play cmd 1 indexes that same table (`lea table(pc)` then mulu #4);
+	   stealing it leaves every mailbox in an empty heap slot and all three
+	   compile-family rips (identical KIM/P4/QS.OPM) render one drone.
+	   Compile workspace still lives on the DOS heap via $10A44/$10A48. */
+	(void)pool;
+	(void)poolHits;
 
 	/* M_INIT stores data-section $152D2 / driver $10000 into $10A44/$10A48.
 	   Compile then fills downward through TEXT (ISR at $11C58). Point the
@@ -1069,8 +1116,8 @@ static int CEmuX68kFillMissingOpmSlots(CHardX68k* hw, CEmuZipFs* fs,
 		CEmuX68kSkipBareOpmInit(&data, &sz);
 		unsigned n = sz;
 		const unsigned off = miss[i].off;
-		if (off + n > 0x100000u)
-			n = 0x100000u - off;
+		if (off + n > 0x400000u)
+			n = 0x400000u - off;
 		if (!n) continue;
 		memcpy(hw->Mem() + off, data, n);
 		filled++;
@@ -1327,9 +1374,14 @@ int CHardX68k::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCo
 	memset(rom_, 0, sizeof(rom_));
 	memset(ram_, 0, sizeof(ram_));
 	memset(high_, 0, sizeof(high_));
-	memset(mid_, 0, sizeof(mid_));
 	memset(heap_, 0, sizeof(heap_));
-	memset(mfp_, 0xff, sizeof(mfp_));
+	memset(ext_, 0, sizeof(ext_));
+	memset(mfp_, 0, sizeof(mfp_));
+	mfp_[0x17] = 0x40; /* VR: Timer D → vec $44 → $110 */
+	mfpTdAcc_ = 0;
+	mfpTcAcc_ = 0;
+	mfpIrqPending_ = 0;
+	mfpIrqVec_ = 0;
 	dosFileCount_ = 0;
 	memset(dosFiles_, 0, sizeof(dosFiles_));
 	for (int i = 0; i < kDosHandles; i++) {
@@ -1337,7 +1389,6 @@ int CHardX68k::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCo
 		dosHandles_[i].pos = 0;
 	}
 	int loaded = 0;
-	int midFilled = 0;
 	int trapFLoaded = 0;
 	CEmuX68kOpmSlot miss[64];
 	const unsigned char* usedPtr[128];
@@ -1350,7 +1401,7 @@ int CHardX68k::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCo
 			continue;
 		unsigned sz = 0;
 		const unsigned char* data = CEmuZipFsFind(fs, r->name, &sz);
-		const unsigned off = (r->offset < 0) ? 0u : (unsigned)r->offset;
+		unsigned off = (r->offset < 0) ? 0u : (unsigned)r->offset;
 		if (!data || !sz) {
 			if (off >= 0x20000u && off < (unsigned)kRomBytes && missN < 64) {
 				memset(&miss[missN], 0, sizeof(miss[0]));
@@ -1375,27 +1426,22 @@ int CHardX68k::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCo
 			continue;
 		}
 
-		/* Mid window $100000..$17FFFF */
-		if (off >= 0x100000u && off < 0x100000u + (unsigned)kMidBytes) {
-			const unsigned local = off - 0x100000u;
-			if (isTypeX && CEmuX68kLoadHumanX(mid_, (unsigned)kMidBytes, local, data, sz)) {
-				DosRegisterFile(r->name, off, sz > 0x40u ? sz - 0x40u : sz);
-				midFilled = 1;
-				loaded++;
-				continue;
-			}
+		/* $E00000..$E7FFFF extra RAM (ADPCM / expansion; mailbox is MMIO). */
+		if (off >= (unsigned)kExtBase && off < (unsigned)kExtBase + (unsigned)kExtBytes) {
+			const unsigned local = off - (unsigned)kExtBase;
 			unsigned n = sz;
-			if (local + n > (unsigned)kMidBytes)
-				n = (unsigned)kMidBytes - local;
-			memcpy(mid_ + local, data, n);
+			if (local + n > (unsigned)kExtBytes)
+				n = (unsigned)kExtBytes - local;
+			memcpy(ext_ + local, data, n);
 			DosRegisterFile(r->name, off, n);
-			midFilled = 1;
 			loaded++;
 			continue;
 		}
 
-		/* Low RAM / BOOT image $000000..$0FFFFF */
+		/* Main RAM $000000..$3FFFFF (4MB). Former mid window $10xxxx is here. */
 		if (off < (unsigned)kRomBytes) {
+			if (isTypeX)
+				off = CEmuX68kFloat2LoadAddr(ge, off, data, sz);
 			if (isTypeX && CEmuX68kLoadHumanX(rom_, (unsigned)kRomBytes, off, data, sz)) {
 				const unsigned text = ((unsigned)data[0x0c] << 24)
 					| ((unsigned)data[0x0d] << 16)
@@ -1433,20 +1479,10 @@ int CHardX68k::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCo
 	}
 
 	if (!loaded) return 0;
-	CEmuX68kFixOpmdrvBinInit(rom_, (unsigned)kRomBytes);
-	CEmuX68kFixAliceOpmScan(rom_, (unsigned)kRomBytes);
-	CEmuX68kFixOpxTrackHeap(rom_, (unsigned)kRomBytes, heap_, (unsigned)kHeapBytes);
-	CEmuX68kFixOpxCompileBoot(rom_, (unsigned)kRomBytes, heap_, (unsigned)kHeapBytes);
-	/* X68k $10xxxx can be a separate window; if XML never filled mid_, seed
-	   from rom_[0..512K] so packs that only list low RAM still alias correctly. */
-	if (!midFilled) {
-		int any = 0;
-		for (unsigned i = 0; i < (unsigned)kMidBytes; i++) {
-			if (mid_[i]) { any = 1; break; }
-		}
-		if (!any)
-			memcpy(mid_, rom_, sizeof(mid_));
-	}
+	CEmuX68kFixOpmdrvBinInit(rom_, 0x100000u);
+	CEmuX68kFixAliceOpmScan(rom_, 0x100000u);
+	CEmuX68kFixOpxTrackHeap(rom_, 0x20000u, heap_, (unsigned)kHeapBytes);
+	CEmuX68kFixOpxCompileBoot(rom_, 0x20000u, heap_, (unsigned)kHeapBytes);
 
 	CEmuHardX68kSetActive(this);
 	m68k_init();
@@ -1467,6 +1503,7 @@ int CHardX68k::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCo
 		BootIplFf0b86();
 	/* Coherent Human68k DOS/IOCS at $F08000 when BOOT left thin stubs. */
 	CEmuX68kDosInstall(this);
+	CEmuX68kHookFloat2(this);
 	fetchCount_ = 0;
 	songFlag_ = 0;
 	songCode_ = 0;

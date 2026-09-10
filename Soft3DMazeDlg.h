@@ -16,6 +16,8 @@ struct ID3D11VertexShader;
 struct ID3D11HullShader;
 struct ID3D11DomainShader;
 struct ID3D11PixelShader;
+struct ID3D11ComputeShader;
+struct ID3D11UnorderedAccessView;
 struct ID3D11InputLayout;
 struct ID3D11Buffer;
 struct ID3D11SamplerState;
@@ -67,6 +69,7 @@ public:
 	int m_gfxDof;
 	int m_aniso;
 	BOOL EnsureShadowTarget(int wantSize);
+	BOOL EnsureMirrorTargets(int wantSize);
 	ID3D11Texture2D* m_mirrorTex[S3M_MIRROR_N];
 	ID3D11RenderTargetView* m_mirrorRtv[S3M_MIRROR_N];
 	ID3D11ShaderResourceView* m_mirrorSrv[S3M_MIRROR_N];
@@ -87,6 +90,10 @@ public:
 	ID3D11PixelShader* m_psSsr;
 	ID3D11PixelShader* m_psDof;
 	ID3D11PixelShader* m_psFinal;
+	ID3D11ComputeShader* m_csFx;
+	ID3D11Texture2D* m_texFx;
+	ID3D11ShaderResourceView* m_srvFx;
+	ID3D11UnorderedAccessView* m_uavFx;
 	ID3D11InputLayout* m_ilPatch;
 	ID3D11InputLayout* m_ilSolid;
 	ID3D11InputLayout* m_ilHud;

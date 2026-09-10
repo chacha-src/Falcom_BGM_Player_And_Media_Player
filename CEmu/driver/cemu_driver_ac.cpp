@@ -127,6 +127,7 @@ CDriverAc::CDriverAc()
 	, cmdIndex_(0)
 	, nextCmdAt_(0)
 	, nextGngIrq_(0)
+	, alphaNmiBusy_(0)
 	, k054539TimerState_(0)
 	, k054539Residual_(0)
 	, nextM72Nmi_(0)
@@ -194,6 +195,7 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 	pinned_ = 0;
 	cmdIndex_ = 0;
 	nextGngIrq_ = 0;
+	alphaNmiBusy_ = 0;
 	/* Catalog title pins the song (incl. code 0 = Stop). Without a titlelist,
 	   fall back to board defaults and optional try-table hunting. */
 	songCmdWord_ = (uint16_t)titleCode;
@@ -1428,6 +1430,8 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 	uint64_t bootCycles = (uint64_t)cpuHz_ / 2;
 	if (hw_->board_ == CEMU_AC_BOARD_CPS_QS)
 		nextGngIrq_ = (uint64_t)cpuHz_ / 250; /* MAME: 8MHz/32000 ? 250 Hz */
+	else if (hw_->board_ == CEMU_AC_BOARD_ALPHA68K2)
+		nextGngIrq_ = 0; /* NMI as soon as port A enables (boot OUT 0E,0) */
 	else
 		nextGngIrq_ = (uint64_t)cpuHz_ / 240;
 	/* CPS1/2 QSound: init spins/HALTs until shared CFFF==0xFF (68K ready).
@@ -1712,6 +1716,13 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 		|| hw_->board_ == CEMU_AC_BOARD_ROBOKID
 		|| hw_->board_ == CEMU_AC_BOARD_BATTLANTIS)
 		RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 5);
+	/* Alpha: latch is polled from the main loop (IN 00), not the NMI.
+	   Inject after bank2 BIOS is in the poll so RST 30 mode 3 can load
+	   the song before the first host Render. */
+	if (hw_->board_ == CEMU_AC_BOARD_ALPHA68K2) {
+		TryInjectCommand();
+		RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 5);
+	}
 	/* GX400 shared RAM (4000-7FFF) is owned by the missing 68000. Sound ROM
 	   waits on (7FFC)==4 after self-test before EI @0291 ? release it. */
 	if (hw_->board_ == CEMU_AC_BOARD_KONAMI_GX400) {
@@ -2547,12 +2558,24 @@ void CDriverAc::DeliverIrqs()
 	}
 
 	/* Alpha 68K-II: periodic NMI @ ~7614 Hz (MAME sound_nmi), gated by
-	   YM2203 port A. Latch is polled via IN 00 from the NMI/main loop. */
+	   YM2203 port A. Latch is polled via IN 00 from the NMI/main loop.
+	   Ay_CpuNmi always re-enters 0066; a real Z80 NMI latch does not nest
+	   until RETN. Re-pulsing every 787 cycles during the handler wrecked
+	   the stack (dumps=1). Release the lock on ED45/ED4D in the fetch. */
 	if (hw_->board_ == CEMU_AC_BOARD_ALPHA68K2) {
+		const uint16_t pc = (uint16_t)cpu->r.pc;
+		uint8_t* mem = cpu->get_mem();
+		if (mem && mem[pc] == 0xedu
+			&& (mem[(uint16_t)(pc + 1)] == 0x45u || mem[(uint16_t)(pc + 1)] == 0x4du)) {
+			alphaNmiBusy_ = 0;
+			return; /* let RETN finish before the next pulse */
+		}
 		const uint64_t now = (uint64_t)cpu->time64();
 		const uint64_t period = (uint64_t)cpuHz_ / 7614;
-		if (period > 0 && now >= nextGngIrq_ && hw_->AlphaNmiMask()) {
+		if (period > 0 && now >= nextGngIrq_ && hw_->AlphaNmiMask()
+			&& !alphaNmiBusy_ && pc != 0x0066u) {
 			Ay_CpuNmi(cpu);
+			alphaNmiBusy_ = 1;
 			nextGngIrq_ = now + period;
 		}
 		return;
@@ -2946,8 +2969,11 @@ void CDriverAc::RunUntil(uint64_t endCycle)
 	while ((uint64_t)cpu->time64() < endCycle) {
 		DeliverIrqs();
 		/* HALT + IFF1 clear: Ay_Cpu HALT clears the run budget (s_time&=3), so
-		   Open's boot settle would take minutes. Leap the clock instead. */
-		if (!cpu->r.iff1 && hw_->PeekMem((uint16_t)cpu->r.pc) == 0x76) {
+		   Open's boot settle would take minutes. Leap the clock instead.
+		   Alpha 68K-II music is periodic NMI (IFF1 stays 0); leaping past
+		   HALT skips DeliverIrqs at 7614 Hz and the sequencer never keys. */
+		if (!cpu->r.iff1 && hw_->PeekMem((uint16_t)cpu->r.pc) == 0x76
+			&& hw_->board_ != CEMU_AC_BOARD_ALPHA68K2) {
 			const uint64_t now = (uint64_t)cpu->time64();
 			uint64_t step = (uint64_t)cpuHz_ / 250;
 			if (step < 64) step = 64;
@@ -3904,6 +3930,8 @@ int CDriverAc::Render(int16_t* stereo, int frames)
 			pcm->MixAdd(stereo + i * 2, 1, 256);
 		if (pcm2)
 			pcm2->MixAdd(stereo + i * 2, 1, 256);
+		if (hw_->board_ == CEMU_AC_BOARD_ALPHA68K2)
+			hw_->AlphaMixOpll(stereo + i * 2, 1);
 		if (mix2)
 			hw_->Chip2()->Render(mix2 + i * 2, 1);
 		if (mix3)

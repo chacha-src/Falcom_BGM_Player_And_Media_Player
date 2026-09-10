@@ -43,3 +43,4 @@ enum {
 };
 
 int CEmuX68kDosInstall(CHardX68k* hw);
+void CEmuX68kHookFloat2(CHardX68k* hw);

@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <new>
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -14,7 +15,6 @@ namespace GdiSoft3D
 	bool Texture::LoadFromHdc(HDC src, int sw, int sh)
 	{
 		w = h = 0;
-		pixels.clear();
 		if (!src || sw <= 0 || sh <= 0) return false;
 		BITMAPINFO bi = {};
 		bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
@@ -33,11 +33,37 @@ namespace GdiSoft3D
 		}
 		HGDIOBJ old = ::SelectObject(tmp, dib);
 		::BitBlt(tmp, 0, 0, sw, sh, src, 0, 0, SRCCOPY);
-		pixels.resize((size_t)sw * (size_t)sh);
-		memcpy(pixels.data(), bits, pixels.size() * 4);
-		for (DWORD& p : pixels) {
+		const int n = sw * sh;
+		if (n > pixelCap) {
+			int cap = pixelCap > 0 ? pixelCap : 256;
+			while (cap < n) {
+				if (cap > (INT_MAX / 2)) { cap = n; break; }
+				cap *= 2;
+			}
+			DWORD* np = new (std::nothrow) DWORD[cap];
+			if (!np) {
+				::SelectObject(tmp, old);
+				::DeleteObject(dib);
+				::DeleteDC(tmp);
+				return false;
+			}
+			delete[] pixels;
+			pixels = np;
+			pixelCap = cap;
+		}
+		memcpy(pixels, bits, (size_t)n * 4);
+		auto lift = [](BYTE v) -> BYTE {
+			const float t = (float)v / 255.f;
+			const float g = powf(t, 0.85f);
+			int o = (int)(g * 255.f + 0.5f);
+			if (o < 0) o = 0; if (o > 255) o = 255;
+			return (BYTE)o;
+		};
+		for (int i = 0; i < n; ++i) {
+			DWORD& p = pixels[i];
 			if (GdiSoftFB::A(p) == 0)
 				p = GdiSoftFB::PackBGRA(255, GdiSoftFB::R(p), GdiSoftFB::G(p), GdiSoftFB::B(p));
+			p = GdiSoftFB::PackBGRA(GdiSoftFB::A(p), lift(GdiSoftFB::R(p)), lift(GdiSoftFB::G(p)), lift(GdiSoftFB::B(p)));
 		}
 		::SelectObject(tmp, old);
 		::DeleteObject(dib);
@@ -48,8 +74,7 @@ namespace GdiSoft3D
 
 	DWORD Texture::Sample(float u, float v) const
 	{
-		if (w <= 0 || h <= 0 || pixels.empty()) return 0xFFFFFFFFu;
-		// タイルラップ（ワールド UV でレンガを繰り返す）
+		if (w <= 0 || h <= 0 || !pixels) return 0xFFFFFFFFu;
 		u = u - floorf(u);
 		v = v - floorf(v);
 		if (u < 0.f) u += 1.f;
@@ -58,16 +83,7 @@ namespace GdiSoft3D
 		if (v >= 1.f) v = 0.f;
 		const int x = (int)(u * (float)(w - 1) + 0.5f);
 		const int y = (int)(v * (float)(h - 1) + 0.5f);
-		DWORD c = pixels[(size_t)y * (size_t)w + (size_t)x];
-		// 軽いガンマ寄り（中間調を持ち上げて潰れた感じを緩和）
-		auto lift = [](BYTE p) -> BYTE {
-			const float t = (float)p / 255.f;
-			const float g = powf(t, 0.85f);
-			int o = (int)(g * 255.f + 0.5f);
-			if (o < 0) o = 0; if (o > 255) o = 255;
-			return (BYTE)o;
-		};
-		return GdiSoftFB::PackBGRA(GdiSoftFB::A(c), lift(GdiSoftFB::R(c)), lift(GdiSoftFB::G(c)), lift(GdiSoftFB::B(c)));
+		return pixels[(size_t)y * (size_t)w + (size_t)x];
 	}
 
 	bool Context::Create(int w, int h)
@@ -86,13 +102,13 @@ namespace GdiSoft3D
 		PostEdge();
 		PostDof();
 		if ((postVignette || postGlow || postSaturate) && fb.color && fb.w > 0) {
-			GdiSoft2D::Context s2;
-			if (s2.Create(fb.w, fb.h, false)) {
-				memcpy(s2.fb.color, fb.color, (size_t)fb.w * (size_t)fb.h * 4);
-				if (postSaturate) s2.Saturate(postSatAmount);
-				if (postGlow) s2.GlowBloom(2, 0.28f);
-				if (postVignette) s2.Vignette(postVignetteStr);
-				memcpy(fb.color, s2.fb.color, (size_t)fb.w * (size_t)fb.h * 4);
+			static GdiSoft2D::Context s_post2d;
+			if (s_post2d.Create(fb.w, fb.h, false)) {
+				memcpy(s_post2d.fb.color, fb.color, (size_t)fb.w * (size_t)fb.h * 4);
+				if (postSaturate) s_post2d.Saturate(postSatAmount);
+				if (postGlow) s_post2d.GlowBloom(2, 0.28f);
+				if (postVignette) s_post2d.Vignette(postVignetteStr);
+				memcpy(fb.color, s_post2d.fb.color, (size_t)fb.w * (size_t)fb.h * 4);
 			}
 		}
 	}
@@ -200,6 +216,15 @@ namespace GdiSoft3D
 			if (fabsf(area) < 1e-6f) return;
 			const float invA = 1.f / area;
 
+			const bool useTex = ctx.texture && ctx.texture->w > 0;
+			const float oow0 = useTex ? (1.f / (ctx.view.camD + ad)) : 0.f;
+			const float oow1 = useTex ? (1.f / (ctx.view.camD + bd)) : 0.f;
+			const float oow2 = useTex ? (1.f / (ctx.view.camD + cd)) : 0.f;
+			const int ar = GdiSoftFB::R(a.color), ag = GdiSoftFB::G(a.color), ab = GdiSoftFB::B(a.color), aa = GdiSoftFB::A(a.color);
+			const int br = GdiSoftFB::R(b.color), bg = GdiSoftFB::G(b.color), bb = GdiSoftFB::B(b.color), ba = GdiSoftFB::A(b.color);
+			const int cr = GdiSoftFB::R(c.color), cg = GdiSoftFB::G(c.color), cb = GdiSoftFB::B(c.color), ca = GdiSoftFB::A(c.color);
+			const bool doFog = (ctx.fogMode != FogNone);
+
 			for (int y = minY; y <= maxY; ++y) {
 				DWORD* row = ctx.fb.Row(y);
 				float* zrow = ctx.fb.ZRow(y);
@@ -215,29 +240,20 @@ namespace GdiSoft3D
 					if (ctx.depthWrite && zrow) zrow[x] = depth;
 
 					DWORD col;
-					if (ctx.texture && ctx.texture->w > 0) {
-						const float wEye0 = ctx.view.camD + ad;
-						const float wEye1 = ctx.view.camD + bd;
-						const float wEye2 = ctx.view.camD + cd;
-						const float oow0 = 1.f / wEye0;
-						const float oow1 = 1.f / wEye1;
-						const float oow2 = 1.f / wEye2;
+					if (useTex) {
 						const float oow = w0 * oow0 + w1 * oow1 + w2 * oow2;
 						const float inv = (oow > 1e-8f) ? (1.f / oow) : 0.f;
 						const float u = (w0 * a.u * oow0 + w1 * b.u * oow1 + w2 * c.u * oow2) * inv;
 						const float v = (w0 * a.v * oow0 + w1 * b.v * oow1 + w2 * c.v * oow2) * inv;
 						col = ctx.texture->Sample(u, v);
 					} else {
-						const int ar = GdiSoftFB::R(a.color), ag = GdiSoftFB::G(a.color), ab = GdiSoftFB::B(a.color), aa = GdiSoftFB::A(a.color);
-						const int br = GdiSoftFB::R(b.color), bg = GdiSoftFB::G(b.color), bb = GdiSoftFB::B(b.color), ba = GdiSoftFB::A(b.color);
-						const int cr = GdiSoftFB::R(c.color), cg = GdiSoftFB::G(c.color), cb = GdiSoftFB::B(c.color), ca = GdiSoftFB::A(c.color);
 						col = GdiSoftFB::PackBGRA(
 							(BYTE)(aa * w0 + ba * w1 + ca * w2 + 0.5f),
 							(BYTE)(ar * w0 + br * w1 + cr * w2 + 0.5f),
 							(BYTE)(ag * w0 + bg * w1 + cg * w2 + 0.5f),
 							(BYTE)(ab * w0 + bb * w1 + cb * w2 + 0.5f));
 					}
-					col = ctx.ApplyFog(col, depth);
+					if (doFog) col = ctx.ApplyFog(col, depth);
 					if (ctx.alphaBlend && GdiSoftFB::A(col) < 255)
 						row[x] = GdiSoftFB::BlendSrcOver(row[x], col);
 					else
@@ -269,10 +285,8 @@ namespace GdiSoft3D
 			return;
 		}
 
-		ClipV tmp[8], vout[8];
-		int n = ClipPolyNear(vin, 3, kNearZ, tmp);
-		if (n < 3) return;
-		n = ClipPolyNear(tmp, n, kNearZ, vout);
+		ClipV vout[8];
+		int n = ClipPolyNear(vin, 3, kNearZ, vout);
 		if (n < 3) return;
 
 		for (int i = 1; i + 1 < n; ++i)
@@ -647,8 +661,22 @@ namespace GdiSoft3D
 	void Context::PostEdge()
 	{
 		if (!edgeOverlay || !fb.color || !fb.z) return;
-		std::vector<DWORD> out((size_t)fb.w * (size_t)fb.h);
-		memcpy(out.data(), fb.color, out.size() * 4);
+		const int n = fb.w * fb.h;
+		static DWORD* s_edge = nullptr;
+		static int s_edgeCap = 0;
+		if (n > s_edgeCap) {
+			int cap = s_edgeCap > 0 ? s_edgeCap : 4096;
+			while (cap < n) {
+				if (cap > (INT_MAX / 2)) { cap = n; break; }
+				cap *= 2;
+			}
+			DWORD* np = new (std::nothrow) DWORD[cap];
+			if (!np) return;
+			delete[] s_edge;
+			s_edge = np;
+			s_edgeCap = cap;
+		}
+		memcpy(s_edge, fb.color, (size_t)n * 4);
 		const DWORD ec = GdiSoftFB::PackColorref(edgeColor, 255);
 		for (int y = 1; y < fb.h - 1; ++y) {
 			float* zrow = fb.ZRow(y);
@@ -660,25 +688,45 @@ namespace GdiSoft3D
 				const float gx = fabsf(zrow[x + 1] - zrow[x - 1]);
 				const float gy = fabsf(zdn[x] - zup[x]);
 				if (gx + gy > 0.045f)
-					out[(size_t)y * fb.w + x] = ec;
+					s_edge[(size_t)y * fb.w + x] = ec;
 			}
 		}
-		memcpy(fb.color, out.data(), out.size() * 4);
+		memcpy(fb.color, s_edge, (size_t)n * 4);
 	}
 
 	void Context::PostDof()
 	{
 		if (!dofEnable || !fb.color || !fb.z || dofMaxRadius < 1) return;
-		// Build 3 blur mips via Soft2D box blur, then lerp by depth
-		GdiSoft2D::Context soft;
-		if (!soft.Create(fb.w, fb.h, false)) return;
-		memcpy(soft.fb.color, fb.color, (size_t)fb.w * (size_t)fb.h * 4);
-		soft.BlurRect(0, 0, fb.w, fb.h, (std::max)(1, dofMaxRadius / 2));
-		std::vector<DWORD> blur1((size_t)fb.w * (size_t)fb.h);
-		memcpy(blur1.data(), soft.fb.color, blur1.size() * 4);
-		soft.BlurRect(0, 0, fb.w, fb.h, (std::max)(1, dofMaxRadius));
-		std::vector<DWORD> blur2((size_t)fb.w * (size_t)fb.h);
-		memcpy(blur2.data(), soft.fb.color, blur2.size() * 4);
+		static GdiSoft2D::Context s_dofSoft;
+		if (!s_dofSoft.Create(fb.w, fb.h, false)) return;
+		memcpy(s_dofSoft.fb.color, fb.color, (size_t)fb.w * (size_t)fb.h * 4);
+		s_dofSoft.BlurRect(0, 0, fb.w, fb.h, (std::max)(1, dofMaxRadius / 2));
+		const int n = fb.w * fb.h;
+		static DWORD* s_blur1 = nullptr;
+		static DWORD* s_blur2 = nullptr;
+		static int s_dofCap = 0;
+		if (n > s_dofCap) {
+			int cap = s_dofCap > 0 ? s_dofCap : 4096;
+			while (cap < n) {
+				if (cap > (INT_MAX / 2)) { cap = n; break; }
+				cap *= 2;
+			}
+			DWORD* n1 = new (std::nothrow) DWORD[cap];
+			DWORD* n2 = new (std::nothrow) DWORD[cap];
+			if (!n1 || !n2) {
+				delete[] n1;
+				delete[] n2;
+				return;
+			}
+			delete[] s_blur1;
+			delete[] s_blur2;
+			s_blur1 = n1;
+			s_blur2 = n2;
+			s_dofCap = cap;
+		}
+		memcpy(s_blur1, s_dofSoft.fb.color, (size_t)n * 4);
+		s_dofSoft.BlurRect(0, 0, fb.w, fb.h, (std::max)(1, dofMaxRadius));
+		memcpy(s_blur2, s_dofSoft.fb.color, (size_t)n * 4);
 
 		const float span = (std::max)(1e-4f, dofFar - dofNear);
 		for (int y = 0; y < fb.h; ++y) {
@@ -688,8 +736,8 @@ namespace GdiSoft3D
 				float t = (zrow[x] - dofNear) / span;
 				if (t < 0.f) t = 0.f; if (t > 1.f) t = 1.f;
 				DWORD sharp = row[x];
-				DWORD b1 = blur1[(size_t)y * fb.w + x];
-				DWORD b2 = blur2[(size_t)y * fb.w + x];
+				DWORD b1 = s_blur1[(size_t)y * fb.w + x];
+				DWORD b2 = s_blur2[(size_t)y * fb.w + x];
 				DWORD mid = (t < 0.5f) ? sharp : b1;
 				DWORD farp = (t < 0.5f) ? b1 : b2;
 				float u = (t < 0.5f) ? (t * 2.f) : ((t - 0.5f) * 2.f);

@@ -227,7 +227,12 @@ static int CEmuZipFsFindIndex(const CEmuZipFs* fs, const char* name)
 		WideCharToMultiByte(932, 0, fs->files[i].path, -1, pathA, (int)sizeof(pathA), NULL, NULL);
 		CEmuZipBaseName(pathA, fn, (int)sizeof(fn));
 		CEmuZipStripExt(fn, fnNoExt, (int)sizeof(fnNoExt));
-		if ((baseNoExt[0] && CEmuZipNameMatch(fnNoExt, baseNoExt))
+		/* No-ext fallback is for catalog names without a suffix ("MMD2").
+		   `MMD2.SYS 4096` (CONFIG tail) stripped to "MMD2" and hit mmd2.com
+		   first in the zip, then AddFile overwrote the real SYS (orangerd
+		   device INIT ran the COM: FA/CLI at CS:0, pic=FF, dosmiss=intD2). */
+		const int queryHasExt = (strchr(base, '.') != NULL);
+		if ((!queryHasExt && baseNoExt[0] && CEmuZipNameMatch(fnNoExt, baseNoExt))
 			|| CEmuZipNameFuzzy(fn, base))
 			return i;
 	}

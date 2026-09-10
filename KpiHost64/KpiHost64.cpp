@@ -19,6 +19,7 @@
 #include <unordered_map>
 #include <algorithm>
 #include <cstdlib>
+#include <new>
 
 #include "kpihost_stdafx.h"
 #include "..\kpi_decoder.h"
@@ -681,6 +682,8 @@ struct Session
 	DWORD bps = 16;                      // 絶対値（float は nBitsPerSample が負）
 	uint32_t zeroRenderStreak = 0;       // 連続 0 サンプル。ループ無し曲の EOF 判定
 	std::wstring mediaPath;              // MIDI なら Seek を「先頭＋破棄再生」にする
+	uint8_t* pcmBuf = nullptr;           // Render/Seek 再利用。伸長のみ（vector 断片化回避）
+	size_t pcmCap = 0;
 };
 
 static uint32_t g_nextSessionId = 1;
@@ -915,29 +918,41 @@ static uint32_t Cmd_Render(uint32_t sessionId, uint32_t bytesWanted, std::vector
 	if (samplesWanted == 0) return KPIHOST64_STATUS_BAD_REQUEST;
 	if (samplesWanted > 65536) samplesWanted = 65536;
 
-	std::vector<uint8_t> pcm;
+	const size_t pcmNeed = (size_t)samplesWanted * (size_t)bytesPerFrame;
+	if (pcmNeed > s.pcmCap) {
+		size_t cap = s.pcmCap ? s.pcmCap : 65536;
+		while (cap < pcmNeed) {
+			if (cap > (SIZE_MAX / 2)) { cap = pcmNeed; break; }
+			cap *= 2;
+		}
+		uint8_t* nb = new (std::nothrow) uint8_t[cap];
+		if (!nb) return KPIHOST64_STATUS_FAIL;
+		delete[] s.pcmBuf;
+		s.pcmBuf = nb;
+		s.pcmCap = cap;
+	}
+
 	uint32_t gotBytes = 0;
 	DWORD gotSamples = 0;
 	bool hadRenderException = false;
-	pcm.reserve((size_t)samplesWanted * bytesPerFrame);
 	DWORD remain = samplesWanted;
 	const DWORD kChunkSamples = 576; // 小さめに切って KPI の内部バッファ溢れを避ける
 
 	while (remain > 0) {
 		const DWORD ask = (remain > kChunkSamples) ? kChunkSamples : remain;
-		std::vector<uint8_t> part;
-		part.resize((size_t)ask * bytesPerFrame);
-		DWORD got = SafeDecoderRender(s.dec, part.data(), ask, &hadRenderException);
+		uint8_t* part = s.pcmBuf + gotBytes;
+		const size_t partCap = (size_t)ask * (size_t)bytesPerFrame;
+		if (gotBytes + partCap > s.pcmCap) break;
+		DWORD got = SafeDecoderRender(s.dec, part, ask, &hadRenderException);
 		if (got == 0 && hadRenderException && s.selected.qwLoop == (UINT64)-1) {
 			// 無限ループ曲で SEH したら先頭へ戻して一度だけリトライ。
 			bool seekEx = false;
 			SafeDecoderSeek(s.dec, 0, 0, &seekEx);
-			got = SafeDecoderRender(s.dec, part.data(), ask, &hadRenderException);
+			got = SafeDecoderRender(s.dec, part, ask, &hadRenderException);
 		}
 		if (got == 0) break;
 		uint32_t partBytes = got * bytesPerFrame;
-		if (partBytes > part.size()) partBytes = (uint32_t)part.size();
-		pcm.insert(pcm.end(), part.begin(), part.begin() + partBytes);
+		if ((size_t)partBytes > partCap) partBytes = (uint32_t)partCap;
 		gotSamples += got;
 		gotBytes += partBytes;
 		remain -= got;
@@ -952,7 +967,7 @@ static uint32_t Cmd_Render(uint32_t sessionId, uint32_t bytesWanted, std::vector
 
 	out.resize(sizeof(rep) + gotBytes);
 	memcpy(out.data(), &rep, sizeof(rep));
-	if (gotBytes) memcpy(out.data() + sizeof(rep), pcm.data(), gotBytes);
+	if (gotBytes) memcpy(out.data() + sizeof(rep), s.pcmBuf, gotBytes);
 	return KPIHOST64_STATUS_OK;
 }
 
@@ -990,19 +1005,31 @@ static uint32_t Cmd_Seek(uint32_t sessionId, uint64_t posSample, uint32_t flag, 
 		const DWORD ch = s.channels ? s.channels : 2;
 		const int srcBits = s.sourceBitsPerSample;
 		const DWORD chunk = 8192;
-		std::vector<uint8_t> junk;
 		while (left > 0) {
 			DWORD ask = (DWORD)((left > chunk) ? chunk : left);
+			size_t junkNeed = 0;
 			if (srcBits == -32) {
-				junk.resize((size_t)ask * ch * sizeof(float));
+				junkNeed = (size_t)ask * ch * sizeof(float);
 			} else if (srcBits == -64) {
-				junk.resize((size_t)ask * ch * sizeof(double));
+				junkNeed = (size_t)ask * ch * sizeof(double);
 			} else {
 				DWORD bps = s.bps ? s.bps : 16;
-				junk.resize((size_t)ask * ch * ((bps ? bps : 16) / 8));
+				junkNeed = (size_t)ask * ch * ((bps ? bps : 16) / 8);
+			}
+			if (junkNeed > s.pcmCap) {
+				size_t cap = s.pcmCap ? s.pcmCap : 65536;
+				while (cap < junkNeed) {
+					if (cap > (SIZE_MAX / 2)) { cap = junkNeed; break; }
+					cap *= 2;
+				}
+				uint8_t* nb = new (std::nothrow) uint8_t[cap];
+				if (!nb) break;
+				delete[] s.pcmBuf;
+				s.pcmBuf = nb;
+				s.pcmCap = cap;
 			}
 			bool hadEx = false;
-			DWORD got = SafeDecoderRender(s.dec, junk.data(), ask, &hadEx);
+			DWORD got = SafeDecoderRender(s.dec, s.pcmBuf, ask, &hadEx);
 			(void)hadEx;
 			if (got == 0) break;
 			if ((uint64_t)got > left) got = (DWORD)left;
@@ -1034,34 +1061,51 @@ static uint32_t Cmd_Close(uint32_t sessionId)
 	if (s.folder) s.folder->Release();
 	if (s.mod) s.mod->Release();
 	if (s.hDll) FreeLibrary(s.hDll);
+	delete[] s.pcmBuf;
+	s.pcmBuf = nullptr;
+	s.pcmCap = 0;
 	return KPIHOST64_STATUS_OK;
 }
 
 // 1 クライアント接続のあいだ、ヘッダ＋ペイロードを読んで応答する。切断で抜ける。
 static void ServeOnce(HANDLE pipe)
 {
+	// 接続中は payload/reply を伸長のみ再利用（毎リクエスト vector new/delete しない）
+	static uint8_t* s_payload = nullptr;
+	static size_t s_payloadCap = 0;
+	static std::vector<uint8_t> reply;
 	for (;;) {
 		KPIHOST64_MsgHeader h{};
 		// バイトモードなのでヘッダが分割到着する。短い読みで切ると曲の途中で落ちる。
 		if (!ReadExact(pipe, &h, sizeof(h))) break;
 
-		std::vector<uint8_t> payload;
-		payload.resize(h.payloadBytes);
+		if (h.payloadBytes > s_payloadCap) {
+			size_t cap = s_payloadCap ? s_payloadCap : 4096;
+			while (cap < (size_t)h.payloadBytes) {
+				if (cap > (SIZE_MAX / 2)) { cap = h.payloadBytes; break; }
+				cap *= 2;
+			}
+			uint8_t* nb = new (std::nothrow) uint8_t[cap];
+			if (!nb) break;
+			delete[] s_payload;
+			s_payload = nb;
+			s_payloadCap = cap;
+		}
 		if (h.payloadBytes) {
-			if (!ReadExact(pipe, payload.data(), h.payloadBytes)) break;
+			if (!ReadExact(pipe, s_payload, h.payloadBytes)) break;
 		}
 
-		std::vector<uint8_t> reply;
+		reply.clear();
 		uint32_t status = KPIHOST64_STATUS_FAIL;
 
-		const uint8_t* p = payload.data();
-		const uint8_t* end = payload.data() + payload.size();
+		const uint8_t* p = s_payload;
+		const uint8_t* end = s_payload + h.payloadBytes;
 
 		switch (h.cmd) {
 		case KPIHOST64_CMD_PING:
 			// 任意ペイロード: u32 lang。ホスト側 VST メッセージの言語に使う。
-			if (payload.size() >= sizeof(uint32_t)) {
-				int lang = (int)*(const uint32_t*)payload.data();
+			if (h.payloadBytes >= sizeof(uint32_t) && s_payload) {
+				int lang = (int)*(const uint32_t*)s_payload;
 				if (lang < 0 || lang > 13) lang = 1;
 				savedata.lang = lang;
 			}
@@ -1140,17 +1184,20 @@ static void ServeOnce(HANDLE pipe)
 		case KPIHOST64_CMD_FOREIGN_RENDER: {
 			if ((size_t)(end - p) != sizeof(KPIHOST64_RenderReq)) { status = KPIHOST64_STATUS_BAD_REQUEST; break; }
 			auto* rr = (const KPIHOST64_RenderReq*)p;
-			std::vector<uint8_t> pcm;
 			uint32_t eof = 0;
-			status = ForeignHost_Render(rr->sessionId, rr->bytesWanted, pcm, eof);
+			uint32_t gotBytes = 0;
+			reply.resize(sizeof(KPIHOST64_RenderReply) + rr->bytesWanted);
+			status = ForeignHost_Render(rr->sessionId, rr->bytesWanted,
+				reply.data() + sizeof(KPIHOST64_RenderReply), rr->bytesWanted, gotBytes, eof);
 			if (status == KPIHOST64_STATUS_OK) {
 				KPIHOST64_RenderReply rrep{};
 				rrep.sessionId = rr->sessionId;
-				rrep.bytesReturned = (uint32_t)pcm.size();
+				rrep.bytesReturned = gotBytes;
 				rrep.eof = eof;
-				reply.resize(sizeof(rrep) + pcm.size());
+				reply.resize(sizeof(rrep) + gotBytes);
 				memcpy(reply.data(), &rrep, sizeof(rrep));
-				if (!pcm.empty()) memcpy(reply.data() + sizeof(rrep), pcm.data(), pcm.size());
+			} else {
+				reply.clear();
 			}
 			break;
 		}
@@ -1227,18 +1274,20 @@ static void ServeOnce(HANDLE pipe)
 					q += sizeof(KPIHOST64_VstLiveMidiReq);
 				}
 			}
-			std::vector<uint8_t> pcm;
 			uint32_t eof = 0;
-			status = VstHost64_Render(slot, rr->bytesWanted, pcm, eof);
+			uint32_t gotBytes = 0;
+			reply.resize(sizeof(KPIHOST64_RenderReply) + rr->bytesWanted);
+			status = VstHost64_Render(slot, rr->bytesWanted,
+				reply.data() + sizeof(KPIHOST64_RenderReply), rr->bytesWanted, gotBytes, eof);
 			if (status == KPIHOST64_STATUS_OK) {
 				KPIHOST64_RenderReply rrep{};
 				rrep.sessionId = rr->sessionId;
-				rrep.bytesReturned = (uint32_t)pcm.size();
+				rrep.bytesReturned = gotBytes;
 				rrep.eof = eof;
-				reply.resize(sizeof(rrep) + pcm.size());
+				reply.resize(sizeof(rrep) + gotBytes);
 				memcpy(reply.data(), &rrep, sizeof(rrep));
-				if (!pcm.empty())
-					memcpy(reply.data() + sizeof(rrep), pcm.data(), pcm.size());
+			} else {
+				reply.clear();
 			}
 			break;
 		}

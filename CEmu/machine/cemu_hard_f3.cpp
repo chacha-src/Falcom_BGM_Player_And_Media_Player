@@ -83,6 +83,10 @@ CHardF3::CHardF3()
 	duartFires_ = 0;
 	duartTimerAcc_ = 0;
 	ringInited_ = 0;
+	duartIp_ = 0x83; /* IP0/IP1 strapped high, bit7 always 1 (MAME mc68681) */
+	duartIpcr_ = 0x03;
+	duartIpAcc_ = 0;
+	esWrites_ = 0;
 }
 
 CHardF3::~CHardF3()
@@ -108,6 +112,7 @@ void CHardF3::Shutdown()
 	if (CEmuHardF3GetActive() == this)
 		CEmuHardF3SetActive(NULL);
 	if (chip_) {
+		chip_->SetPcmRom(NULL, 0);
 		CEmuChipEs5505Destroy(chip_);
 		chip_ = NULL;
 	}
@@ -202,7 +207,9 @@ static int CEmuF3EnsoniqScore(const char* name, const char* type, unsigned sz)
 uint8_t CHardF3::Read8(unsigned addr)
 {
 	addr &= 0xffffffu;
-	if (addr < 0x10000u || (addr >= 0xff0000u && addr <= 0xffffffu)) {
+	/* MAME taito_en: OSRAM 64KB at 0-0xFFFF, mirror(0x30000) → 0-0x3FFFF,
+	   plus the high mirror at 0xFF0000. Firmware (SD-1 derived) uses both. */
+	if (addr < 0x40000u || (addr >= 0xff0000u && addr <= 0xffffffu)) {
 		return osram_[addr & 0xffffu];
 	}
 	if (addr >= 0x140000u && addr <= 0x140fffu) {
@@ -252,34 +259,35 @@ uint8_t CHardF3::Read8(unsigned addr)
 			return 0x01 | 0x04 | 0x08;
 		case 0x3: /* do not mirror SRA onto CRA readback */
 			return duart_[reg];
-		case 0x5: /* ISR — reading clears timer IRQ pending (ack) */
+		case 0x5: /* ISR — MAME returns the register; Counter Ready is acked
+			   only by Stop Counter (0x0F), not by this read. */
+			return duartIsr_;
+		case 0x4: /* IPCR: bits 0-3 = IP0-3, bits 4-7 = change-of-state.
+			   Reading clears the COS bits and ISR bit 7 (MAME mc68681). */
 			{
-				const uint8_t v = duartIsr_;
-				duartIsr_ &= (uint8_t)~0x08;
+				const uint8_t v = duartIpcr_;
+				duartIpcr_ &= 0x0f;
+				duartIsr_ &= (uint8_t)~0x80;
 				UpdateDuartIrq();
 				return v;
 			}
-		case 0x4: /* IPCR (read) */
-			return 0x00;
 		case 0x6: /* CTUR */
 			return (uint8_t)(duartCtr_ >> 8);
 		case 0x7: /* CTLR */
 			return (uint8_t)(duartCtr_ & 0xff);
 		case 0xc: /* IVR */
 			return DuartIvr();
+		case 0xd: /* IP — Gun Buster straps IP0/IP1 high; IP2=1MHz, IP3=0.5MHz */
+			return (uint8_t)(duartIp_ | 0x80);
 		case 0xe:
-			/* START COUNTER COMMAND. The Ensoniq calibration routine reads
-			   this and then parks in STOP #$2000, so treating 0x0E as a
-			   plain register left the counter unarmed and the sound CPU
-			   halted forever. */
+			/* START COUNTER COMMAND. Timer mode (ACR bit 6) restarts the
+			   count; Counter Ready stays set until Stop Counter (MAME). */
 			duartCounterOn_ = 1;
 			duartTimerAcc_ = 0;
-			duartIsr_ &= (uint8_t)~0x08;
-			UpdateDuartIrq();
 			return 0x00;
 		case 0xf:
-			/* STOP COUNTER COMMAND: clears counter-ready, and in counter
-			   mode (ACR bit 6 clear) also halts the count. */
+			/* STOP COUNTER COMMAND: clears Counter Ready. In counter mode
+			   (ACR bit 6 clear) also halts the count. */
 			if (!(duartAcr_ & 0x40))
 				duartCounterOn_ = 0;
 			duartIsr_ &= (uint8_t)~0x08;
@@ -323,7 +331,7 @@ uint32_t CHardF3::Read32(unsigned addr)
 void CHardF3::Write8(unsigned addr, uint8_t data)
 {
 	addr &= 0xffffffu;
-	if (addr < 0x10000u || (addr >= 0xff0000u && addr <= 0xffffffu)) {
+	if (addr < 0x40000u || (addr >= 0xff0000u && addr <= 0xffffffu)) {
 		osram_[addr & 0xffffu] = data;
 		return;
 	}
@@ -339,6 +347,7 @@ void CHardF3::Write8(unsigned addr, uint8_t data)
 		if (addr & 1) cur = (uint16_t)((cur & 0xff00) | data);
 		else cur = (uint16_t)((cur & 0x00ff) | (data << 8));
 		chip_->Write(reg, cur);
+		esWrites_++;
 		return;
 	}
 	if (addr >= 0x260000u && addr <= 0x2601ffu) {
@@ -355,6 +364,11 @@ void CHardF3::Write8(unsigned addr, uint8_t data)
 			   to be armed by the start-counter read. */
 			if (duartAcr_ & 0x40)
 				duartCounterOn_ = 1;
+			/* ACR bits 0-3 enable IP0-3 change-of-state IRQs (MAME). */
+			if ((duartIpcr_ >> 4) & (data & 0x0f)) {
+				duartIsr_ |= 0x80;
+				UpdateDuartIrq();
+			}
 		}
 		if (reg == 0x5) {
 			/* IMR write (write to ISR address) */
@@ -394,6 +408,7 @@ void CHardF3::Write16(unsigned addr, uint16_t data)
 	addr &= 0xffffffu;
 	if (addr >= 0x200000u && addr <= 0x20001fu && !(addr & 1) && chip_) {
 		chip_->Write((addr - 0x200000u) >> 1, data);
+		esWrites_++;
 		return;
 	}
 	if (addr >= 0x300000u && addr <= 0x30003fu && !(addr & 1)) {
@@ -468,15 +483,11 @@ void CHardF3::EnqueueRingPacket(const uint8_t* bytes, int nbytes)
 void CHardF3::EnsureHostRing()
 {
 	/*
-	 * Firmware has C11074 (write ready 03008100 + MOVEP wp=6) but nothing in the
-	 * audiocpu image calls it — the main CPU normally waits on that handshake.
-	 * Without a main CPU we must plant the same state so host packets start at
-	 * offset 6 and do not overwrite the signature the player may rely on.
+	 * Firmware C10FFA writes 03008100 + MOVEP.W wp=6. If that already ran,
+	 * do not touch the read pointer at $904 — planting rp=wp makes the ring
+	 * look empty and orphans any packet we just queued.
 	 */
 	if (dpram_[0] == 0x03 && dpram_[1] == 0x81) {
-		unsigned wp = DpramMovepRead(0x900);
-		if (wp == 0)
-			DpramMovepWrite(0x900, 6);
 		ringInited_ = 1;
 		return;
 	}
@@ -485,7 +496,8 @@ void CHardF3::EnsureHostRing()
 	dpram_[2] = 0x00;
 	dpram_[3] = 0x00;
 	DpramMovepWrite(0x900, 6);
-	DpramMovepWrite(0x904, 6);
+	/* Leave $904 (read pointer) at 0 so a late handshake consume still
+	   walks into the packet we place at offset 6. */
 	ringInited_ = 1;
 }
 
@@ -523,6 +535,32 @@ void CHardF3::SetSongCommand(unsigned code)
 int CHardF3::TickDuart(int cpuCycles)
 {
 	if (cpuCycles <= 0) return duartIrqPending_;
+	/*
+	 * Gun Buster: IP2/IP5 = 1 MHz, IP3/IP4 = 0.5 MHz. Ensoniq calibration
+	 * and IPCR COS IRQs (ACR bits 0-3) watch these edges.
+	 */
+	duartIpAcc_ += cpuCycles;
+	{
+		const int hz = cpuHz_ > 0 ? cpuHz_ : 15238100;
+		const int64_t step = (int64_t)hz / 2000000; /* 1 MHz edges */
+		if (step < 1) {
+			/* keep previous IP */
+		} else {
+			const unsigned edges = (unsigned)(duartIpAcc_ / step);
+			uint8_t ip = 0x83;
+			if (edges & 1u) ip |= 0x24;       /* IP2 + IP5 */
+			if ((edges >> 1) & 1u) ip |= 0x18; /* IP3 + IP4 */
+			if (ip != duartIp_) {
+				const uint8_t changed = (uint8_t)((ip ^ duartIp_) & 0x0f);
+				duartIpcr_ = (uint8_t)((ip & 0x0f) | (changed << 4));
+				duartIp_ = ip;
+				if (duartAcr_ & changed) {
+					duartIsr_ |= 0x80;
+					UpdateDuartIrq();
+				}
+			}
+		}
+	}
 	/*
 	 * Timer rate: DUART clock 16/4=4MHz, ACR=$30 → X1/CLK/16 mode bits.
 	 * Firmware loads CTR=$09C4. Period ≈ CTR * 16 / 4MHz in CPU cycles at ~15.2MHz.
@@ -567,6 +605,10 @@ int CHardF3::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode
 	duartTimerAcc_ = 0;
 	duart_[0x0c] = 0x0f;
 	ringInited_ = 0;
+	duartIp_ = 0x83;
+	duartIpcr_ = 0x03;
+	duartIpAcc_ = 0;
+	esWrites_ = 0;
 
 	struct Cand { int idx; int score; unsigned size; int fromGe; char name[CEMU_ROM_NAME]; };
 	Cand cpuC[64]; int cpuN = 0;
@@ -818,9 +860,12 @@ int CHardF3::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode
 		memcpy(osram_, audioCpu_ + 0x100000, 8);
 	}
 
-	/* Patch STOP/MOVE-to-SR that lock IPL=7 — without main CPU we need DUART IRQ6. */
-	if (audioCpu_ && audioCpuSize_ >= 4) {
-		for (unsigned i = 0; i + 3 < audioCpuSize_; i += 2) {
+	/* Patch STOP/MOVE-to-SR that lock IPL=7 — without main CPU we need DUART IRQ6.
+	   Leave TRAP #9's BCLR D0,2(A1) alone: it clears TCB+2 bit7, which is the
+	   wait flag TRAP #6 set. Pointing it at +3 instead puts a running mailbox
+	   (flags 0080) to sleep the next time IRQ delivers a packet. */
+	if (audioCpu_ && audioCpuSize_ >= 8) {
+		for (unsigned i = 0; i + 7 < audioCpuSize_; i += 2) {
 			if (audioCpu_[i] == 0x4e && audioCpu_[i + 1] == 0x72
 				&& audioCpu_[i + 2] == 0x27 && audioCpu_[i + 3] == 0x00) {
 				audioCpu_[i + 2] = 0x20; /* STOP #$2000 */
@@ -828,6 +873,207 @@ int CHardF3::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode
 			if (audioCpu_[i] == 0x4e && audioCpu_[i + 1] == 0x7c
 				&& audioCpu_[i + 2] == 0x27 && audioCpu_[i + 3] == 0x00) {
 				audioCpu_[i + 2] = 0x20; /* MOVE #$2000,SR */
+			}
+		}
+	}
+
+	/* C10FEE is a boot spin-wait, not the 60Hz tick. After Open the CPU
+	   parks in scheduler STOP. C1490A has no firmware callers — do not
+	   jsr it from IRQ or idle STOP (A-line/trap#3 empties the free list
+	   and 2610-fills). NOP parser `move.w #0; A-line`; opcode-0 A-line
+	   becomes MOVE SR. Host drops IPL after #$2700. */
+	if (audioCpu_ && audioCpuSize_ > 0x10000Cu) {
+		static const uint8_t kDelayTail[8] = {
+			0x4e, 0x71, 0x4e, 0x71, 0x4e, 0x71, 0x53, 0x83
+		};
+		static const uint8_t kPushD0f4[4] = { 0x3f, 0x38, 0xd0, 0xf4 };
+		static const uint8_t kAlineUser[6] = { 0x30, 0x3c, 0x00, 0x00, 0xa0, 0x00 };
+		const unsigned win0 = 0x100000u;
+		const unsigned win1 = (audioCpuSize_ < 0x120000u) ? audioCpuSize_ : 0x120000u;
+		unsigned delayOff = 0, tickOff = 0, playOff = 0, holeOff = 0;
+		if (win1 > win0 + 16u) {
+			for (unsigned i = win0; i + 10u <= win1; i += 2) {
+				/* Callers bsr to the 3-nop body (C10FEE), not the dead move.l. */
+				if (!delayOff && memcmp(audioCpu_ + i, kDelayTail, 8) == 0)
+					delayOff = i;
+				if (!tickOff && i >= win0 + 4u && i + 4u <= win1
+					&& memcmp(audioCpu_ + i, kPushD0f4, 4) == 0
+					&& audioCpu_[i - 4] == 0x61 && audioCpu_[i - 3] == 0x00)
+					tickOff = i - 4u;
+			}
+			if (tickOff) {
+				for (unsigned i = win0; i + 4u <= win1; i += 2) {
+					if (audioCpu_[i] != 0x61 || audioCpu_[i + 1] != 0x00)
+						continue;
+					const int disp = (int16_t)(((unsigned)audioCpu_[i + 2] << 8)
+						| (unsigned)audioCpu_[i + 3]);
+					if ((unsigned)(i + 2 + disp) == tickOff) {
+						playOff = i;
+						break;
+					}
+				}
+			}
+			const unsigned nop0 = win0 + 0x13600u;
+			const unsigned nop1 = win0 + 0x15200u;
+			static const uint8_t kLoadD0e8Ble[8] = {
+				0x2a, 0x38, 0xd0, 0xe8, 0x6f, 0x00, 0x00, 0x74
+			};
+			static const uint8_t kLoadD0e8[4] = { 0x2a, 0x38, 0xd0, 0xe8 };
+			for (unsigned i = nop0; i + 8u <= nop1 && i + 8u <= win1; i += 2) {
+				if (memcmp(audioCpu_ + i, kLoadD0e8Ble, 8) == 0) {
+					memset(audioCpu_ + i, 0x4e, 8);
+					audioCpu_[i + 1] = audioCpu_[i + 3] = audioCpu_[i + 5] = audioCpu_[i + 7] = 0x71;
+				}
+			}
+			for (unsigned i = nop0; i + 4u <= nop1 && i + 4u <= win1; i += 2) {
+				if (memcmp(audioCpu_ + i, kLoadD0e8, 4) == 0) {
+					audioCpu_[i] = 0x4e; audioCpu_[i + 1] = 0x71;
+					audioCpu_[i + 2] = 0x4e; audioCpu_[i + 3] = 0x71;
+				}
+			}
+			for (unsigned i = nop0; i + 6u <= nop1 && i + 6u <= win1; i += 2) {
+				if (memcmp(audioCpu_ + i, kAlineUser, 6) == 0) {
+					audioCpu_[i] = 0x4e; audioCpu_[i + 1] = 0x71;
+					audioCpu_[i + 2] = 0x4e; audioCpu_[i + 3] = 0x71;
+					audioCpu_[i + 4] = 0x4e; audioCpu_[i + 5] = 0x71;
+				}
+			}
+			/* Mailbox type $E (C12D94 tempo → C14884 → C1490A) does
+			   `move.w #0; A-line` at C13238, outside the parser window.
+			   That RTE-to-user is the same smash as the parser drop. */
+			const unsigned mb0 = win0 + 0x13200u;
+			const unsigned mb1 = win0 + 0x13600u;
+			for (unsigned i = mb0; i + 6u <= mb1 && i + 6u <= win1; i += 2) {
+				if (memcmp(audioCpu_ + i, kAlineUser, 6) == 0) {
+					audioCpu_[i] = 0x4e; audioCpu_[i + 1] = 0x71;
+					audioCpu_[i + 2] = 0x4e; audioCpu_[i + 3] = 0x71;
+					audioCpu_[i + 4] = 0x4e; audioCpu_[i + 5] = 0x71;
+				}
+			}
+			static const uint8_t kAlineIpl7[6] = { 0x30, 0x3c, 0x27, 0x00, 0xa0, 0x00 };
+			for (unsigned i = mb0; i + 6u <= mb1 && i + 6u <= win1; i += 2) {
+				if (memcmp(audioCpu_ + i, kAlineIpl7, 6) == 0) {
+					audioCpu_[i] = 0x46; audioCpu_[i + 1] = 0xfc;
+					audioCpu_[i + 2] = 0x27; audioCpu_[i + 3] = 0x00;
+					audioCpu_[i + 4] = 0x4e; audioCpu_[i + 5] = 0x71;
+				}
+			}
+			/* Type $E: skip C12A14 (catalog reload). Packet+6 as song id
+			   rewrites D0F4/D09A and arabianm 0x21 ended with d0f4=0.
+			   Match bsr.w / movea.w (sp)+,a5 — A-line at +6 is already
+			   MOVE SR from the loop above. C12B8C A-lines are OS calls;
+			   do not rewrite them. */
+			for (unsigned i = mb0; i + 6u <= mb1 && i + 6u <= win1; i += 2) {
+				if (audioCpu_[i] == 0x61 && audioCpu_[i + 1] == 0x00
+					&& audioCpu_[i + 4] == 0x3a && audioCpu_[i + 5] == 0x5f) {
+					audioCpu_[i] = 0x4e; audioCpu_[i + 1] = 0x71;
+					audioCpu_[i + 2] = 0x4e; audioCpu_[i + 3] = 0x71;
+					break;
+				}
+			}
+			/* C14884→C149E4 copies mailbox 4(a5) into D4A6 then trap#4.
+			   Type $E stores d3 (often 0) there, so C14A10 subtracts ~0.
+			   ~138 ticks in 12s cannot eat a 0x2100 wait at quantum 1.
+			   Use 0x40 so first waits expire; do not NOP trap#4. */
+			{
+				const unsigned q0 = win0 + 0x149E0u;
+				const unsigned q1 = win0 + 0x14A10u;
+				for (unsigned i = q0; i + 8u <= q1 && i + 8u <= win1; i += 2) {
+					if (audioCpu_[i] == 0x30 && audioCpu_[i + 1] == 0x2d
+						&& audioCpu_[i + 2] == 0x00 && audioCpu_[i + 3] == 0x04
+						&& audioCpu_[i + 4] == 0x31 && audioCpu_[i + 5] == 0xc0) {
+						audioCpu_[i] = 0x30; audioCpu_[i + 1] = 0x3c;
+						audioCpu_[i + 2] = 0x00; audioCpu_[i + 3] = 0x01;
+						break;
+					}
+				}
+			}
+			/* Type 1 with 4(a5)<0 loops bsr C12B8C for songs 0..$62 (stop-all)
+			   then RTS. That path kills arabianm 0x21 D0F4. NOP only the bsr;
+			   do not bra into the play path (C12E08 6A→60 smashed boot). */
+			{
+				const unsigned p0 = win0 + 0x12E00u;
+				const unsigned p1 = win0 + 0x12E20u;
+				for (unsigned i = p0; i + 8u <= p1 && i + 8u <= win1; i += 2) {
+					if (audioCpu_[i] == 0x70 && audioCpu_[i + 1] == 0x00
+						&& audioCpu_[i + 2] == 0x61 && audioCpu_[i + 3] == 0x00) {
+						audioCpu_[i + 2] = 0x4e; audioCpu_[i + 3] = 0x71;
+						audioCpu_[i + 4] = 0x4e; audioCpu_[i + 5] = 0x71;
+						break;
+					}
+				}
+			}
+			/* Only opcode-0 (trap #3 then A-line). Other 2700 A-lines
+			   are OS calls — replacing them all broke boot. */
+			static const uint8_t kOp0Aline[8] = {
+				0x4e, 0x43, 0x30, 0x3c, 0x27, 0x00, 0xa0, 0x00
+			};
+			for (unsigned i = nop0; i + 8u <= nop1 && i + 8u <= win1; i += 2) {
+				if (memcmp(audioCpu_ + i, kOp0Aline, 8) == 0) {
+					audioCpu_[i + 2] = 0x46; audioCpu_[i + 3] = 0xfc;
+					audioCpu_[i + 4] = 0x27; audioCpu_[i + 5] = 0x00;
+					audioCpu_[i + 6] = 0x4e; audioCpu_[i + 7] = 0x71;
+				}
+			}
+			if (tickOff + 0x80u <= win1) {
+				for (unsigned i = tickOff + 0x60u; i + 8u <= tickOff + 0x80u; i += 2) {
+					if (audioCpu_[i] == 0x64 && audioCpu_[i + 1] == 0x06) {
+						for (unsigned j = i + 2; j + 2 <= i + 10 && j + 1 < win1; j += 2) {
+							if (audioCpu_[j] == 0x66 && audioCpu_[j + 1] == 0x08) {
+								audioCpu_[j] = 0x6e;
+								break;
+							}
+						}
+						break;
+					}
+				}
+			}
+			const unsigned hole0 = win0 + 0x1C000u;
+			for (unsigned i = (hole0 < win1 ? hole0 : win0); i + 40u <= win1; i++) {
+				int ok = 1;
+				for (int k = 0; k < 40; k++) {
+					if (audioCpu_[i + k] != 0xff) { ok = 0; break; }
+				}
+				if (ok) { holeOff = i; break; }
+			}
+		}
+		if (delayOff && tickOff && holeOff) {
+			const unsigned holeCpu = 0xC00000u + (holeOff - win0);
+			const unsigned callOff = playOff ? playOff : tickOff;
+			const unsigned callCpu = 0xC00000u + (callOff - win0);
+			const unsigned backCpu = 0xC00000u + (delayOff - win0) + 6u; /* subq */
+			uint8_t tr[36];
+			tr[0] = 0x4a; tr[1] = 0x78; tr[2] = 0xd4; tr[3] = 0xa6;
+			tr[4] = 0x67; tr[5] = 0x12;
+			tr[6] = 0x2f; tr[7] = 0x0e;
+			tr[8] = 0x3c; tr[9] = 0x78; tr[10] = 0xd0; tr[11] = 0xf4;
+			tr[12] = 0x4e; tr[13] = 0xb9;
+			tr[14] = (uint8_t)(callCpu >> 24); tr[15] = (uint8_t)(callCpu >> 16);
+			tr[16] = (uint8_t)(callCpu >> 8); tr[17] = (uint8_t)callCpu;
+			tr[18] = 0x2c; tr[19] = 0x5f;
+			tr[20] = 0x42; tr[21] = 0x78; tr[22] = 0xd4; tr[23] = 0xa6;
+			tr[24] = 0x4e; tr[25] = 0xf9;
+			tr[26] = (uint8_t)(backCpu >> 24); tr[27] = (uint8_t)(backCpu >> 16);
+			tr[28] = (uint8_t)(backCpu >> 8); tr[29] = (uint8_t)backCpu;
+			memcpy(audioCpu_ + holeOff, tr, 30);
+			audioCpu_[delayOff + 0] = 0x4e;
+			audioCpu_[delayOff + 1] = 0xf9;
+			audioCpu_[delayOff + 2] = (uint8_t)(holeCpu >> 24);
+			audioCpu_[delayOff + 3] = (uint8_t)(holeCpu >> 16);
+			audioCpu_[delayOff + 4] = (uint8_t)(holeCpu >> 8);
+			audioCpu_[delayOff + 5] = (uint8_t)holeCpu;
+			/* C10CE0: movea.w #0,a7 / jsr C17A80 is a fatal reset that
+			   copies STOP template onto every OTIS voice. Boot uses
+			   C1090A/C109CC; nop only this late jsr. */
+			for (unsigned i = win0 + 0x10C00u; i + 6u <= win0 + 0x10D80u && i + 6u <= win1; i += 2) {
+				if (audioCpu_[i] == 0x4e && audioCpu_[i + 1] == 0xb9
+					&& audioCpu_[i + 2] == 0x00 && audioCpu_[i + 3] == 0xc1
+					&& audioCpu_[i + 4] == 0x7a && audioCpu_[i + 5] == 0x80) {
+					audioCpu_[i] = 0x4e; audioCpu_[i + 1] = 0x71;
+					audioCpu_[i + 2] = 0x4e; audioCpu_[i + 3] = 0x71;
+					audioCpu_[i + 4] = 0x4e; audioCpu_[i + 5] = 0x71;
+					break;
+				}
 			}
 		}
 	}
