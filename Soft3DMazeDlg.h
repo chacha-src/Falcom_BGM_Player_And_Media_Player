@@ -79,9 +79,12 @@ public:
 	ID3D11VertexShader* m_vsTess;
 	ID3D11HullShader* m_hsTess;
 	ID3D11DomainShader* m_dsTess;
+	ID3D11GeometryShader* m_gsWind; // 壁・小物の風揺れ
 	ID3D11PixelShader* m_psWall;
 	ID3D11VertexShader* m_vsSolid;
+	ID3D11VertexShader* m_vsSkin; // 壁から伸びる枝の GPU スキニング
 	ID3D11PixelShader* m_psSolid;
+	ID3D11PixelShader* m_psMirF; // 鏡床：反射RTを床面に出す
 	ID3D11PixelShader* m_psCloud; // 雲・VFXビルボード（安価）
 	ID3D11VertexShader* m_vsHud;
 	ID3D11PixelShader* m_psHud;
@@ -96,16 +99,22 @@ public:
 	ID3D11UnorderedAccessView* m_uavFx;
 	ID3D11InputLayout* m_ilPatch;
 	ID3D11InputLayout* m_ilSolid;
+	ID3D11InputLayout* m_ilSkin;
 	ID3D11InputLayout* m_ilHud;
 
 	ID3D11Buffer* m_cbFrame;
+	ID3D11Buffer* m_cbSkin; // GPU スキニング骨行列 16 本
 	ID3D11Buffer* m_vbDyn;
 	ID3D11Buffer* m_vbHud;
+	ID3D11Buffer* m_vbSkin;
 	UINT m_vbDynBytes;
 	UINT m_vbHudBytes;
+	UINT m_vbSkinBytes;
 	// RenderScene 毎フレ new 回避（大マップで歩くほど遅くならないよう再利用）
 	BYTE* m_cpuDynScratch;
 	UINT m_cpuDynScratchBytes;
+	BYTE* m_cpuSkinScratch;
+	UINT m_cpuSkinScratchBytes;
 	BYTE* m_cpuHudScratch;
 	UINT m_cpuHudScratchBytes;
 
@@ -283,6 +292,8 @@ public:
 		PORTALFX_IDLE = 0,
 		PORTALFX_OUT = 1,
 		PORTALFX_IN = 2,
+		DOORFX_IDLE = 0,
+		DOORFX_OPEN = 1,
 		DIFF_VERY_EASY = 0,
 		DIFF_EASY = 1,
 		DIFF_NORMAL = 2,
@@ -373,6 +384,9 @@ protected:
 	void ResetPortalFx();
 	void BeginPortalWarp(int toX, int toZ);
 	void TickPortalFx(float dt);
+	void ResetDoorFx();
+	void BeginDoorOpen(int x, int z, int pendTx, int pendTz, int hasPend);
+	void TickDoorFx(float dt);
 	void SpawnFxBurst(int kind, float x, float y, float z, float nx, float ny, float nz, int count, float speed, float r, float g, float b);
 	void TickFx(float dt);
 	void PulseEventFlash(float r, float g, float b, float a);
@@ -420,8 +434,8 @@ public:
 	void ClampMapPan(int viewW, int viewH, float side);
 	void TickFrame(); // timerp から呼ばれる 1フレーム更新＋描画
 	void PumpQueued(BOOL input);
-	BOOL InputTurn(int dir) { return IsOverviewActive() || m_floorFx == FLOORFX_IN || m_portalFx != PORTALFX_IDLE ? FALSE : TryTurn(dir); }
-	BOOL InputStep(int mx, int mz) { return IsOverviewActive() || m_floorFx == FLOORFX_IN || m_portalFx != PORTALFX_IDLE ? FALSE : TryStep(mx, mz); }
+	BOOL InputTurn(int dir) { return IsOverviewActive() || m_floorFx == FLOORFX_IN || m_portalFx != PORTALFX_IDLE || m_doorFx != DOORFX_IDLE ? FALSE : TryTurn(dir); }
+	BOOL InputStep(int mx, int mz) { return IsOverviewActive() || m_floorFx == FLOORFX_IN || m_portalFx != PORTALFX_IDLE || m_doorFx != DOORFX_IDLE ? FALSE : TryStep(mx, mz); }
 	void InputOverviewFloorDelta(int d) { OverviewFloorDelta(d); }
 	void InputFovZoom(int dir);
 	void InputMapZoom(int dir);
@@ -481,6 +495,7 @@ public:
 	int m_moveHeld;
 	float m_bob;
 	float m_anim;
+	float m_windX, m_windZ, m_windGust; // 通路を流れる風（壁・雲・小物）
 	int m_won;
 	int m_clearPhase;
 	float m_clearT;
@@ -538,6 +553,13 @@ public:
 	float m_portalToX, m_portalToZ;
 	int m_portalIgnoreX, m_portalIgnoreZ;
 	float m_portalFlashA;
+	int m_doorFx;
+	float m_doorFxT;
+	int m_doorFxX, m_doorFxZ, m_doorFxF;
+	int m_doorPendTx, m_doorPendTz;
+	int m_doorPendMx, m_doorPendMz;
+	int m_doorHasPend;
+	int m_doorThinX;
 	enum { S3M_NAV_MAX = 52 }; // 現在地＋最大50歩
 	struct S3mNavPt { short x, z, f; };
 	S3mNavPt m_navPath[S3M_NAV_MAX];

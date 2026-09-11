@@ -36,7 +36,7 @@ public:
 	void ReleaseDx();
 	void ClearTerrMesh();
 	void ClearStaticMeshes();
-	BOOL UploadDefaultVB(ID3D11Buffer** dst, UINT* nOut, const void* verts, UINT nVerts);
+	BOOL UploadDefaultVB(ID3D11Buffer** dst, UINT* nOut, const void* verts, UINT nVerts, UINT stride = 0);
 	BOOL PushDefaultVBPart(ID3D11Buffer** arr, UINT* nArr, int& parts, const void* verts, UINT nVerts);
 	BOOL UploadDefaultIB(ID3D11Buffer** dst, UINT* nOut, const UINT* idx, UINT nIdx);
 	BOOL ResizeDx(int w, int h);
@@ -44,6 +44,7 @@ public:
 	HRESULT m_dxFailHr;
 	BOOL EnsureSceneTargets(int w, int h);
 	void PresentFrame();
+	void NoteContextLost(HRESULT hr);
 	BOOL m_ready;
 	int m_vw, m_vh;
 
@@ -87,6 +88,7 @@ public:
 	ID3D11VertexShader* m_vsTess;
 	ID3D11HullShader* m_hsTess;
 	ID3D11DomainShader* m_dsTess;
+	ID3D11GeometryShader* m_gsWind; // 情景の風揺れ（テッセ後／ソリッド）
 	ID3D11PixelShader* m_psBand;
 	ID3D11VertexShader* m_vsSolid;
 	ID3D11VertexShader* m_vsInst; // 機体・障害の GPU インスタンス
@@ -109,6 +111,7 @@ public:
 	ID3D11InputLayout* m_ilHud;
 
 	ID3D11Buffer* m_cbFrame;
+	ID3D11Buffer* m_cbSkin; // GPU スキニング骨行列 16 本
 	ID3D11Buffer* m_vbDyn;
 	enum { S3R_MESH_PARTS = 4096 };
 	ID3D11Buffer* m_vbTerr[S3R_MESH_PARTS];
@@ -477,7 +480,8 @@ public:
 	struct S3rKnot { float x, y, z; };
 	struct S3rCraft {
 		float x, y, z;
-		float yaw, pitch;
+		float yaw, pitch, roll;
+		float yawRate; // 旋回慣性（急カーブ不可）
 		float vx, vy, vz;
 		float fuel, hp;
 		float throttle; // 0..1 ペダル（平滑）
@@ -586,10 +590,10 @@ public:
 	int m_itemN;
 
 	// Procedural craft base mesh (instance via color)
-	float m_craftVert[S3R_CRAFT_VMAX * 12];
+	float m_craftVert[S3R_CRAFT_VMAX * 16];
 	UINT m_craftIdx[S3R_CRAFT_IMAX];
 	int m_craftNv, m_craftNi;
-	float m_obsVert[S3R_OBS_VMAX * 12];
+	float m_obsVert[S3R_OBS_VMAX * 16];
 	UINT m_obsIdx[S3R_OBS_IMAX];
 	int m_obsNv, m_obsNi;
 
@@ -623,6 +627,7 @@ public:
 	CPoint m_lastMouse;
 	DWORD m_lastTick;
 	int m_inTick;
+	int m_dxRecoverTries;
 	DWORD m_rng;
 	DWORD m_genSeed;
 	DWORD m_spaceToggleTick;
@@ -644,6 +649,9 @@ public:
 	int m_standDirty;
 	float m_reverbFogBoost;
 	float m_eqDofBoost;
+	float m_windX, m_windY, m_windZ, m_windGust; // 空力：風（自機・AI共通）
+	float SkyYawRateCap(const S3rCraft& c) const;
+	void TickSkyWind(float dt);
 	float m_podiumBaseX, m_podiumBaseY, m_podiumBaseZ;
 	float m_demoCamT; // 俯瞰オービット角
 	float m_demoCamElev; // 俯瞰の高さバイアス
@@ -651,7 +659,9 @@ public:
 	float m_hm[S3R_HM_N * S3R_HM_N];
 	float m_hmRaw[S3R_HM_N * S3R_HM_N];
 	float m_hmPathDist[S3R_HM_N * S3R_HM_N];
+	float m_hmPathY[S3R_HM_N * S3R_HM_N];
 	unsigned char m_pathDeep[S3R_PATH_SAMPLES];
+	unsigned char m_pathWet[S3R_PATH_SAMPLES];
 	float m_hmX0, m_hmZ0, m_hmStep;
 	int m_hmReady;
 	float m_waterY;

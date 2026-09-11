@@ -43,13 +43,17 @@ namespace {
 struct S3RFloat4 { float x, y, z, w; };
 struct S3RMat { float m[16]; };
 struct S3RVertex { float x,y,z, nx,ny,nz, u,v, r,g,b,a; };
-struct S3RInst { float x,y,z,yaw, sx,sy,sz,pitch, r,g,b,a; };
+struct S3RSkinVertex { float x,y,z, nx,ny,nz, u,v, r,g,b,a, bi,bw,bi2,bw2; };
+struct S3RInst { float x,y,z,yaw, sx,sy,sz,pitch, r,g,b,a, roll, pad0, pad1, pad2; };
+enum { S3R_SKIN_BONES = 16 };
+struct S3RSkinCB { S3RMat bones[S3R_SKIN_BONES]; };
 struct S3RHudVertex { float x,y, u,v, r,g,b,a; }; // uv.x<0 = solid color only
 struct S3RFrameCB {
 	S3RMat viewProj;
 	S3RMat lightVP;
 	S3RFloat4 eyePos, fogParams, dofParams, screenSize, misc, lightDir, peel;
 	S3RMat reflectVP; // 水面平面反射（未使用時は単位）
+	S3RFloat4 wind;   // xyz=風速, w=突風
 };
 
 static S3RMat S3rMatMul(const S3RMat& a, const S3RMat& b)
@@ -88,6 +92,45 @@ static S3RMat S3rLookAt(float ex,float ey,float ez,float ax,float ay,float az,fl
 	r.m[13]=-(ex*yx+ey*yy+ez*yz);
 	r.m[14]=-(ex*zx+ey*zy+ez*zz); r.m[15]=1.f;
 	return r;
+}
+static void S3rMatIdent(S3RMat& r)
+{
+	memset(&r, 0, sizeof(r));
+	r.m[0] = r.m[5] = r.m[10] = r.m[15] = 1.f;
+}
+static S3RMat S3rMatHinge(float hx, float hy, float hz, float ax, float ay, float az, float ang)
+{
+	float al = sqrtf(ax * ax + ay * ay + az * az);
+	S3RMat I; S3rMatIdent(I);
+	if (al < 1e-8f) return I;
+	ax /= al; ay /= al; az /= al;
+	const float c = cosf(ang), s = sinf(ang), t = 1.f - c;
+	S3RMat R; memset(&R, 0, sizeof(R));
+	R.m[0] = c + ax * ax * t; R.m[1] = ax * ay * t + az * s; R.m[2] = ax * az * t - ay * s;
+	R.m[4] = ay * ax * t - az * s; R.m[5] = c + ay * ay * t; R.m[6] = ay * az * t + ax * s;
+	R.m[8] = az * ax * t + ay * s; R.m[9] = az * ay * t - ax * s; R.m[10] = c + az * az * t;
+	R.m[15] = 1.f;
+	S3RMat tNeg, tPos;
+	S3rMatIdent(tNeg); tNeg.m[12] = -hx; tNeg.m[13] = -hy; tNeg.m[14] = -hz;
+	S3rMatIdent(tPos); tPos.m[12] = hx; tPos.m[13] = hy; tPos.m[14] = hz;
+	return S3rMatMul(S3rMatMul(tNeg, R), tPos);
+}
+static void S3rFillSkinCB(S3RSkinCB& cb, float t, float windX, float windY, float windZ, float gust, float flap)
+{
+	for (int i = 0; i < S3R_SKIN_BONES; i++) S3rMatIdent(cb.bones[i]);
+	cb.bones[1] = S3rMatHinge(0.25f, -0.05f, 0.02f, 0.f, 0.f, 1.f, flap);
+	cb.bones[2] = S3rMatHinge(-0.25f, -0.05f, 0.02f, 0.f, 0.f, 1.f, -flap);
+	cb.bones[3] = S3rMatHinge(0.f, 0.05f, -0.35f, 1.f, 0.f, 0.f, 0.12f * sinf(t * 9.5f) + 0.06f * flap);
+	const float gx = windX * (0.55f + 0.45f * gust);
+	const float gz = windZ * (0.55f + 0.45f * gust);
+	const float gy = windY * 0.35f;
+	for (int i = 0; i < 8; i++) {
+		const float ph = (float)i * 0.79f;
+		const float ay = 0.10f * gx * sinf(t * 1.35f + ph) + 0.04f * gy * cosf(t * 1.1f + ph * 1.3f);
+		const float ax = 0.08f * gz * cosf(t * 1.22f + ph * 0.9f);
+		const float az = 0.05f * gx * sinf(t * 0.95f + ph * 1.7f);
+		cb.bones[4 + i] = S3rMatHinge(0.f, 0.15f, 0.f, ax + 0.15f, 1.f, az, ay);
+	}
 }
 
 #define S3R_RELEASE(p) do { if (p) { (p)->Release(); (p)=NULL; } } while(0)
@@ -415,7 +458,9 @@ static void S3rEnsureJoypad()
 	g_s3rDi->EnumDevices(DI8DEVCLASS_GAMECTRL, S3rEnumPads, NULL, DIEDFL_ATTACHEDONLY);
 	if (!g_s3rPad) return;
 	g_s3rPad->SetDataFormat(&c_dfDIJoystick2);
-	HWND hw = AfxGetMainWnd() ? AfxGetMainWnd()->GetSafeHwnd() : NULL; g_s3rPad->SetCooperativeLevel(hw, DISCL_BACKGROUND | DISCL_NONEXCLUSIVE);
+	HWND hw = AfxGetMainWnd() ? AfxGetMainWnd()->GetSafeHwnd() : NULL;
+	if (!hw) hw = ::GetDesktopWindow();
+	g_s3rPad->SetCooperativeLevel(hw, DISCL_BACKGROUND | DISCL_NONEXCLUSIVE);
 	DIPROPRANGE range = {};
 	range.diph.dwSize = sizeof(range);
 	range.diph.dwHeaderSize = sizeof(range.diph);
@@ -760,8 +805,22 @@ void CS3rHelpDlg::OnPaint()
 		L"Stand onder minimap; nitro-iconen onder; jouw rij gekleurd. Daarna podium 1–3.",
 		L"Tabela pod minimapą; ikony nitro poniżej; Twój wiersz wyróżniony. Potem podium 1–3.",
 		L"Minimapi altında sıralama; altta nitro ikonları; satırın farklı. Bitince podyum 1–3."));
-	line(LL14(L"カメラは左右・上下とも遅れて追従し、3D酔いを抑えます。急坂では視点が徐々に下から見上げるようになります。トンネル前では視点が低くなりますが、MMB後方視はそのときも優先されます。画面上中央にバックミラー（後方カメラ）、水面には平面反射があります。地形は丘・谷・川があり、巨大な山は外側が固体のままトンネルで通ります。カメラとコースの間の壁や天井は透けます。木や建物は帯にめり込んでよく、通れる隙間を抜けます。",
-		L"Camera lags on both axes to reduce motion sickness. On steep climbs it eases to a look-up from below. Near tunnels the view dips, but MMB lookback still wins. Top-center rearview mirror (rear camera); water uses a planar reflection. Hills/valleys/rivers; mountains stay solid outside with a tunnel for the band. Walls between camera and the course fade. Trees and buildings may clip into the band; fly the gaps.",
+	line(LL14(L"空力は自機もAIも同じです。タイヤグリップはなく空気抵抗・風・迎え角の揚力と誘導抗力・高速時の回頭慣性があります。左右に舵を切ると機体がバンク（斜め）し、強風では流されます。急カーブは速度が上がるほど切れません。",
+		L"The same aero applies to you and the AI: no tire grip, but air drag, wind drift, angle-of-attack lift with induced drag, and yaw inertia. Steering banks the craft; gusts push you off line. High speed makes sharp turns harder.",
+		L"Même aéro pour vous et l'IA: pas de grip, traînée, vent, portance, inertie. Le virage couche l'appareil; le vent déporte. À haute vitesse les virages serrés sont difficiles.",
+		L"Stessa aero per te e l'IA: niente grip, resistenza, vento, portanza, inerzia. Sterzando si inclina; il vento sposta. Ad alta velocità le curve strette sono dure.",
+		L"Misma aero para ti y la IA: sin grip, resistencia, viento, sustentación, inercia. Al girar se inclina; el viento empuja. A alta velocidad cuesta cerrar curvas.",
+		L"공력은 자기·AI 공통. 타이어 그립 없이 공기저항·바람·받음각 양력·유도항력·선회 관성. 좌우 조향 시 뱅크, 강풍에 밀림. 고속일수록 급커브가 어렵다.",
+		L"空气动力对自机和AI相同：无轮胎抓地，有空气阻力、风、迎角升力与诱导阻力、转向惯性。左右打舵会横倾，强风会推偏。速度越高越难急转。",
+		L"Same aero for you and AI: no grip, drag, wind, lift, yaw inertia. Steering banks the craft; wind drifts you. Fast = harder sharp turns.",
+		L"Та же аэродинамика у вас и ИИ: без сцепления, сопротивление, ветер, подъём, инерция. Крен при повороте; ветер сносит. На скорости крутые виражи труднее.",
+		L"Gleiche Aero für Sie und KI: kein Grip, Widerstand, Wind, Auftrieb, Trägheit. Lenken neigt; Wind treibt ab. Bei Tempo enge Kurven schwerer.",
+		L"Mesma aero para você e a IA: sem grip, arrasto, vento, sustentação, inércia. Ao virar a nave inclina; o vento empurra. Em alta velocidade curvas fechadas são difíceis.",
+		L"Zelfde aero voor jou en AI: geen grip, weerstand, wind, lift, traagheid. Sturen helt; wind drijft af. Bij hoge snelheid scherpe bochten lastiger.",
+		L"Ta sama aero dla ciebie i SI: bez przyczepności, opór, wiatr, siła nośna, bezwładność. Skręt przechyla; wiatr znosi. Przy prędkości ostre zakręty trudniejsze.",
+		L"Aynı aero sizin ve AI için: tutunma yok, sürükleme, rüzgar, kaldırma, eylemsizlik. Dönünce yatış; rüzgar savurur. Yüksek hızda sert viraj zor."));
+	line(LL14(L"カメラは左右・上下とも遅れて追従し、3D酔いを抑えます。急坂では視点が徐々に下から見上げるようになります。トンネル前では視点が低くなりますが、MMB後方視はそのときも優先されます。画面上中央にバックミラー（後方カメラ）、水面には平面反射があります。地形は丘・谷・川に加え、高い位置から水面下や地中へ落ちる区間もあります。トンネル坑口にはシャッター、LAP位置には格子旗が風で揺れます。巨大な山は外側が固体のままトンネルで通ります。カメラとコースの間の壁や天井は透けます。木や建物は帯にめり込んでよく、通れる隙間を抜けます。",
+		L"Camera lags on both axes to reduce motion sickness. On steep climbs it eases to a look-up from below. Near tunnels the view dips, but MMB lookback still wins. Top-center rearview mirror (rear camera); water uses a planar reflection. Hills/valleys/rivers plus mild elevation; some stretches dive underwater or underground from a high ridge. Tunnel mouths have shutters; chequered LAP flags wave at the start/lap line. Mountains stay solid outside with a tunnel for the band. Walls between camera and the course fade. Trees and buildings may clip into the band; fly the gaps.",
 		L"Caméra en retard. En montée contre-plongée. Près des tunnels la vue baisse, mais MMB recul prime. Rétroviseur en haut; réflexion plane sur l'eau. Collines/vallées/rivières; montagnes tunnélées. Arbres et bâtiments peuvent s'enfoncer dans la bande; passez les trous.",
 		L"Camera in ritardo. In salita dal basso. Vicino ai tunnel la vista scende, ma MMB dietro ha priorità. Specchietto in alto; riflessione planare sull'acqua. Colline/valli/fiumi; montagne con tunnel. Alberi ed edifici possono entrare nella fascia; passa i varchi.",
 		L"Cámara con retraso. En subida contrapicado. Cerca de túneles baja la vista, pero MMB atrás manda. Retrovisor arriba; reflexión planar en el agua. Colinas/valles/ríos; montañas con túnel. Árboles y edificios pueden meterse en la banda; pasa los huecos.",
@@ -878,10 +937,10 @@ CS3rView::CS3rView()
 	, m_postTex(NULL), m_postRtv(NULL), m_postSrv(NULL), m_shadowTex(NULL), m_shadowDsv(NULL), m_shadowSrv(NULL)
 	, m_rearTex(NULL), m_rearRtv(NULL), m_srvRear(NULL), m_rearDs(NULL), m_rearDsv(NULL)
 	, m_reflectTex(NULL), m_reflectRtv(NULL), m_srvReflect(NULL), m_reflectDs(NULL), m_reflectDsv(NULL)
-	, m_vsTess(NULL), m_hsTess(NULL), m_dsTess(NULL)
+	, m_vsTess(NULL), m_hsTess(NULL), m_dsTess(NULL), m_gsWind(NULL)
 	, m_psBand(NULL), m_vsSolid(NULL), m_vsInst(NULL), m_psSolid(NULL), m_psCloud(NULL), m_psWater(NULL), m_psTerr(NULL), m_psCraft(NULL), m_vsHud(NULL), m_psHud(NULL), m_psHudLine(NULL), m_vsPost(NULL)
-	, m_psSsr(NULL), m_psDof(NULL), m_psFinal(NULL), m_csNoise(NULL), m_ilPatch(NULL), m_ilSolid(NULL), m_ilInst(NULL), m_ilHud(NULL)
-	, m_cbFrame(NULL), m_vbDyn(NULL)
+	, m_psSsr(NULL), m_psDof(NULL), m_psFinal(NULL), m_csNoise(NULL)	, m_ilPatch(NULL), m_ilSolid(NULL), m_ilInst(NULL), m_ilHud(NULL)
+	, m_cbFrame(NULL), m_cbSkin(NULL), m_vbDyn(NULL)
 	, m_vbTerrParts(0), m_vbBandParts(0), m_vbWaterParts(0), m_vbSceneryParts(0)
 	, m_vbObs(NULL), m_ibObs(NULL), m_vbObsInst(NULL), m_vbCraft(NULL), m_ibCraft(NULL), m_vbCraftInst(NULL), m_vbHud(NULL)
 	, m_vbDynBytes(4*1024*1024), m_vbHudBytes(512*1024)
@@ -924,7 +983,8 @@ CS3rView::~CS3rView() { ReleaseDx(); }
 BOOL CS3rView::CreateShaders()
 {
 	static const char* hlsl =
-		"cbuffer F:register(b0){row_major float4x4 VP;row_major float4x4 LightVP;float4 Eye;float4 Fog;float4 Dof;float4 Screen;float4 Misc;float4 LightDir;float4 Peel;row_major float4x4 ReflectVP;}"
+		"cbuffer F:register(b0){row_major float4x4 VP;row_major float4x4 LightVP;float4 Eye;float4 Fog;float4 Dof;float4 Screen;float4 Misc;float4 LightDir;float4 Peel;row_major float4x4 ReflectVP;float4 Wind;}"
+		"cbuffer Skin:register(b1){row_major float4x4 Bones[16];}"
 		"Texture2D T0:register(t0);Texture2D T1:register(t1);Texture2D Depth:register(t2);TextureCube Env:register(t3);Texture2D ShadowMap:register(t4);Texture2D NoiseMap:register(t5);Texture2D ReflectMap:register(t6);"
 		"SamplerState SL:register(s0);SamplerState SP:register(s1);SamplerComparisonState SCmp:register(s2);"
 		"struct V{float3 p:POSITION;float3 n:NORMAL;float2 uv:TEXCOORD0;float4 c:TEXCOORD1;};"
@@ -932,7 +992,8 @@ BOOL CS3rView::CreateShaders()
 		"struct D{float4 p:SV_POSITION;float3 w:TEXCOORD0;float3 n:TEXCOORD1;float2 uv:TEXCOORD2;float4 c:TEXCOORD3;};"
 		"P VST(V x){P o;o.p=x.p;o.n=x.n;o.uv=x.uv;o.c=x.c;return o;}"
 		"struct HC{float e[4]:SV_TessFactor;float i[2]:SV_InsideTessFactor;};"
-		"HC HPC(InputPatch<P,4> p,uint id:SV_PrimitiveID){HC o;float tf=1.;"
+		"HC HPC(InputPatch<P,4> p,uint id:SV_PrimitiveID){HC o;float3 c=(p[0].p+p[1].p+p[2].p+p[3].p)*.25;"
+		"float d=distance(c,Eye.xyz);float tf=(LightDir.w<.5)?2.:lerp(8.,1.8,saturate((d-10.)/85.));tf=clamp(tf,1.5,9.);"
 		"o.e[0]=o.e[1]=o.e[2]=o.e[3]=tf;o.i[0]=o.i[1]=tf;return o;}"
 		"[domain(\"quad\")][partitioning(\"fractional_even\")][outputtopology(\"triangle_cw\")][outputcontrolpoints(4)][patchconstantfunc(\"HPC\")]"
 		"P HST(InputPatch<P,4> p,uint i:SV_OutputControlPointID,uint id:SV_PrimitiveID){return p[i];}"
@@ -947,7 +1008,13 @@ BOOL CS3rView::CreateShaders()
 		"P a,b,o;a.p=lerp(p[0].p,p[1].p,q.x);b.p=lerp(p[3].p,p[2].p,q.x);o.p=lerp(a.p,b.p,q.y);"
 		"a.n=lerp(p[0].n,p[1].n,q.x);b.n=lerp(p[3].n,p[2].n,q.x);o.n=normalize(lerp(a.n,b.n,q.y));"
 		"a.uv=lerp(p[0].uv,p[1].uv,q.x);b.uv=lerp(p[3].uv,p[2].uv,q.x);o.uv=lerp(a.uv,b.uv,q.y);o.c=p[0].c;"
+		"float disp=(fbm(o.p.xz*0.05+Misc.w*0.018)-.48)*0.62+(fbm(o.p.xz*0.18+o.p.y*0.04)-.5)*0.16;"
+		"float wgv=sin(Misc.w*1.12+o.p.x*0.035+o.p.z*0.028)*Wind.w;"
+		"o.p+=o.n*disp*0.48;o.p.xz+=Wind.xz*wgv*saturate((o.p.y-Fog.z)*0.03)*0.38;"
 		"D z;z.w=o.p;z.n=o.n;z.uv=o.uv;z.c=o.c;z.p=mul(float4(o.p,1),VP);return z;}"
+		"[maxvertexcount(3)]void GSW(triangle D i[3],inout TriangleStream<D> s){"
+		"[unroll]for(int k=0;k<3;k++){D o=i[k];float h=saturate((o.w.y-Fog.z)*0.035);"
+		"float sway=sin(Misc.w*1.25+o.w.x*0.06+o.w.z*0.05)*Wind.w*h;o.w.xz+=Wind.xz*sway*0.52;o.w.y+=sway*Wind.y*0.12;o.p=mul(float4(o.w,1),VP);s.Append(o);}s.RestartStrip();}"
 		"float ShadowAt(float3 w,float3 n){float3 nn=normalize(n);float3 l=normalize(LightDir.xyz);float ndl=saturate(dot(nn,l));"
 		"w+=nn*(0.02+(1-ndl)*0.03);float4 sp=mul(float4(w,1),LightVP);float iw=1.0/max(sp.w,1e-5);"
 		"float2 uv=sp.xy*iw*float2(.5,-.5)+.5;uv+=float2(2,-2)/1024.;float z=sp.z*iw-0.003;"
@@ -966,10 +1033,17 @@ BOOL CS3rView::CreateShaders()
 		"if(Dof.w>0.5){col+=a.rgb*(.08+.10*pulse)+env*F*.12;al=saturate(al+.06);}"
 		"return float4(lerp(col,float3(.55,.72,.95),fg*.55),al);}"
 		"D VSS(V x){D o;o.w=x.p;o.n=x.n;o.uv=x.uv;o.c=x.c;o.p=mul(float4(x.p,1),VP);return o;}"
-		"D VSSI(V x,float4 iw:TEXCOORD2,float4 isc:TEXCOORD3,float4 ic:TEXCOORD4){"
-		"float cy=cos(iw.w),sy=sin(iw.w),cp=cos(isc.w),sp=sin(isc.w);float3 p=x.p*isc.xyz;"
+		"D VSSI(V x,float4 iw:TEXCOORD2,float4 isc:TEXCOORD3,float4 ic:TEXCOORD4,float4 iex:TEXCOORD5,float4 sk:TEXCOORD6){"
+		"float3 lp=x.p;float3 ln=x.n;uint i0=min((uint)sk.x,15);uint i1=min((uint)sk.z,15);"
+		"float amp=((sk.x>=0.5&&sk.x<4.)?(0.22+0.78*saturate(iex.y)):1);"
+		"float w0=saturate(sk.y)*amp;float w1=saturate(sk.w)*amp;float wI=saturate(1-w0-w1);"
+		"float4 hp=float4(lp,1);lp=mul(hp,Bones[0]).xyz*wI+mul(hp,Bones[i0]).xyz*w0+mul(hp,Bones[i1]).xyz*w1;"
+		"ln=normalize(mul(ln,(float3x3)Bones[0])*wI+mul(ln,(float3x3)Bones[i0])*w0+mul(ln,(float3x3)Bones[i1])*w1);"
+		"float cy=cos(iw.w),sy=sin(iw.w),cp=cos(isc.w),sp=sin(isc.w),cr=cos(iex.x),sr=sin(iex.x);float3 p=lp*isc.xyz;"
+		"float x1=p.x*cr-p.y*sr,y1=p.x*sr+p.y*cr;p.x=x1;p.y=y1;"
 		"float y2=p.y*cp-p.z*sp,z2=p.y*sp+p.z*cp;float3 w=float3(iw.x+p.x*cy+z2*sy,iw.y+y2,iw.z-p.x*sy+z2*cy);"
-		"float ny2=x.n.y*cp-x.n.z*sp,nz2=x.n.y*sp+x.n.z*cp;float3 n=float3(x.n.x*cy+nz2*sy,ny2,-x.n.x*sy+nz2*cy);"
+		"float nx1=ln.x*cr-ln.y*sr,ny1=ln.x*sr+ln.y*cr;float ny2=ny1*cp-ln.z*sp,nz2=ny1*sp+ln.z*cp;"
+		"float3 n=float3(nx1*cy+nz2*sy,ny2,-nx1*sy+nz2*cy);"
 		"D o;o.w=w;o.n=n;o.uv=x.uv;o.c=x.c*ic;o.p=mul(float4(w,1),VP);return o;}"
 		"struct HV{float2 p:POSITION;float2 uv:TEXCOORD0;float4 c:TEXCOORD1;};struct HO{float4 p:SV_POSITION;float2 uv:TEXCOORD0;float4 c:TEXCOORD1;};"
 		"HO VSH(HV x){HO o;o.p=float4(x.p,0,1);o.uv=x.uv;o.c=x.c;return o;}"
@@ -1085,11 +1159,16 @@ BOOL CS3rView::CreateShaders()
 		"float4 SSR(Q i):SV_Target{float4 c=T0.Sample(SL,i.uv);float z=Depth.Sample(SP,i.uv).r;"
 		"float4 fx=NoiseMap.Sample(SL,i.uv+float2(0,frac(Misc.w*.18)));float th=Eye.w;"
 		"float2 oc=i.uv+float2(.0016,-.0024);float cs=saturate((Depth.Sample(SP,oc).r-z)*62.);c.rgb*=lerp(.66,1.,1.-cs*.48);"
+		"float ao=1;const float2 aoO[6]={float2(.004,.002),float2(-.0035,.003),float2(.0025,-.004),float2(-.004,-.002),float2(.0055,0),float2(0,.005)};"
+		"[unroll]for(int a=0;a<6;a++){float zd=Depth.Sample(SP,saturate(i.uv+aoO[a])).r;ao-=saturate((z-zd)*22.)*0.07;}c.rgb*=lerp(.72,1.,saturate(ao));"
+		"float2 rp=i.uv;float2 rd=float2((i.uv.x-.5)*.035,.022);float3 rc=c.rgb;float rk=0;"
+		"[unroll]for(int s=0;s<10;s++){rp+=rd;if(any(rp<0)||any(rp>1))break;float dz=Depth.Sample(SP,rp).r;if(dz<z-0.0018){rc=T0.Sample(SL,rp).rgb;rk=exp(-s*.14);break;}}"
+		"c.rgb=lerp(c.rgb,rc,rk*0.28*smoothstep(.12,.82,z));"
 		"float2 sun=float2(.62,.15);float2 dir=sun-i.uv;float rays=0;float2 p=i.uv;"
 		"[unroll]for(int k=0;k<14;k++){p+=dir*.02;if(any(p<0)||any(p>1))break;rays+=saturate(.14-Depth.Sample(SP,p).r)*exp(-k*.13);}"
 		"c.rgb+=(th>3.5&&th<4.6?float3(.45,.8,1):float3(1,.92,.7))*rays*(th>3.5&&th<4.6?.14:.26);"
 		"if(th>6.4||(th>2.5&&th<3.6)){float s=fx.b*smoothstep(.1,.92,1.-z);c.rgb=lerp(c.rgb,float3(.92,.96,1),s*.16);"
-		"c.rgb+=float3(.8,.88,1)*fx.b*fx.g*.10;float2 st=i.uv+float2(fx.r*.05-.025,-frac(Misc.w*1.15+i.uv.x*9.)*.09);"
+		"c.rgb+=float3(.8,.88,1)*fx.b*fx.g*.10;float2 st=i.uv+float2(fx.r*.05-.025,-frac(Misc.w*1.15+i.uv.x*9.)*.09)+Wind.xz*.002;"
 		"c.rgb+=NoiseMap.Sample(SL,st).b*float3(.85,.9,1)*smoothstep(.18,1.,1.-z)*.08;}"
 		"if(th>3.5&&th<4.6){float g=fx.a;c.rgb=lerp(c.rgb,c.rgb*float3(.68,1.08,1.24)+fx.rgb*.14,g*.14);"
 		"c.rgb+=float3(.32,.7,1)*pow(saturate(1.-z),2.)*g*.06;}"
@@ -1113,6 +1192,8 @@ BOOL CS3rView::CreateShaders()
 		"float4 nx=NoiseMap.Sample(SL,i.uv*float2(2.2,1.7)+float2(Misc.w*.28,-Misc.w*.52));"
 		"if(th>6.4||(th>2.5&&th<3.6)){float snow=smoothstep(.42,1.,nx.b)*smoothstep(.08,.95,i.uv.y);c.rgb=lerp(c.rgb,float3(.93,.96,1),snow*.14);c.rgb+=float3(.82,.9,1)*nx.g*nx.b*.07;}"
 		"if(th>3.5&&th<4.6)c.rgb=lerp(c.rgb,c.rgb*float3(.72,1.06,1.22)+float3(.18,.42,.55),nx.a*.10);"
+		"float2 ca=Screen.zw*(1.15+2.6*length(i.uv-.5));c.r=lerp(c.r,T0.Sample(SL,saturate(i.uv+ca)).r,.16);c.b=lerp(c.b,T0.Sample(SL,saturate(i.uv-ca)).b,.16);"
+		"c.rgb+=(nx.r-.5)*0.02;"
 		"return c;}"
 		"RWTexture2D<float4> NoiseOut:register(u0);"
 		"[numthreads(8,8,1)]void CSNoise(uint3 id:SV_DispatchThreadID){"
@@ -1125,61 +1206,60 @@ BOOL CS3rView::CreateShaders()
 	ID3DBlob *b[12]={0}, *err=NULL;
 	const char* entries[12]={"VST","HST","DST","PSB","VSS","PSS","VSH","PSH","VSQ","SSR","DOFP","FIN"};
 	const char* profiles[12]={"vs_5_0","hs_5_0","ds_5_0","ps_5_0","vs_5_0","ps_5_0","vs_5_0","ps_5_0","vs_5_0","ps_5_0","ps_5_0","ps_5_0"};
-	for(int i=0;i<12;i++){
-		if(FAILED(D3DCompile(hlsl,(SIZE_T)strlen(hlsl),NULL,NULL,NULL,entries[i],profiles[i],D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&b[i],&err))){
-			if (err) {
-				OutputDebugStringA((const char*)err->GetBufferPointer());
-				OutputDebugStringA("\n");
-			}
-			m_dxFailHr = E_FAIL;
-			S3R_RELEASE(err); for(int j=0;j<12;j++) S3R_RELEASE(b[j]); return FALSE;
-		}
+	auto compile=[&](const char* entry,const char* prof,ID3DBlob** out)->HRESULT{
 		S3R_RELEASE(err);
+		HRESULT chr=D3DCompile(hlsl,(SIZE_T)strlen(hlsl),NULL,NULL,NULL,entry,prof,D3DCOMPILE_OPTIMIZATION_LEVEL3,0,out,&err);
+		if(FAILED(chr)){
+			if(err){ OutputDebugStringA((const char*)err->GetBufferPointer()); OutputDebugStringA("\n"); }
+			S3R_RELEASE(err);
+			chr=D3DCompile(hlsl,(SIZE_T)strlen(hlsl),NULL,NULL,NULL,entry,prof,D3DCOMPILE_OPTIMIZATION_LEVEL1,0,out,&err);
+		}
+		if(FAILED(chr)) m_dxFailHr=chr;
+		S3R_RELEASE(err);
+		return chr;
+	};
+	for(int i=0;i<12;i++){
+		if(FAILED(compile(entries[i],profiles[i],&b[i]))){
+			for(int j=0;j<12;j++) S3R_RELEASE(b[j]); return FALSE;
+		}
 	}
 	ID3DBlob* bcs=NULL;
-	if(FAILED(D3DCompile(hlsl,(SIZE_T)strlen(hlsl),NULL,NULL,NULL,"CSNoise","cs_5_0",D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&bcs,&err))){
-		m_dxFailHr = E_FAIL;
-		for(int i=0;i<12;i++) S3R_RELEASE(b[i]); S3R_RELEASE(err); return FALSE;
+	if(FAILED(compile("CSNoise","cs_5_0",&bcs))){
+		for(int i=0;i<12;i++) S3R_RELEASE(b[i]); return FALSE;
 	}
 	ID3DBlob* bcraft=NULL;
-	if(FAILED(D3DCompile(hlsl,(SIZE_T)strlen(hlsl),NULL,NULL,NULL,"PSC","ps_5_0",D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&bcraft,&err))){
-		m_dxFailHr = E_FAIL;
-		for(int i=0;i<12;i++) S3R_RELEASE(b[i]); S3R_RELEASE(bcs); S3R_RELEASE(err); return FALSE;
+	if(FAILED(compile("PSC","ps_5_0",&bcraft))){
+		for(int i=0;i<12;i++) S3R_RELEASE(b[i]); S3R_RELEASE(bcs); return FALSE;
 	}
 	ID3DBlob* bline=NULL;
-	if(FAILED(D3DCompile(hlsl,(SIZE_T)strlen(hlsl),NULL,NULL,NULL,"PSLINE","ps_5_0",D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&bline,&err))){
-		m_dxFailHr = E_FAIL;
-		for(int i=0;i<12;i++) S3R_RELEASE(b[i]); S3R_RELEASE(bcs); S3R_RELEASE(bcraft); S3R_RELEASE(err); return FALSE;
+	if(FAILED(compile("PSLINE","ps_5_0",&bline))){
+		for(int i=0;i<12;i++) S3R_RELEASE(b[i]); S3R_RELEASE(bcs); S3R_RELEASE(bcraft); return FALSE;
 	}
-	S3R_RELEASE(err);
 	ID3DBlob* bterr=NULL;
-	if(FAILED(D3DCompile(hlsl,(SIZE_T)strlen(hlsl),NULL,NULL,NULL,"PST","ps_5_0",D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&bterr,&err))){
-		m_dxFailHr = E_FAIL;
-		for(int i=0;i<12;i++) S3R_RELEASE(b[i]); S3R_RELEASE(bcs); S3R_RELEASE(bcraft); S3R_RELEASE(bline); S3R_RELEASE(err); return FALSE;
+	if(FAILED(compile("PST","ps_5_0",&bterr))){
+		for(int i=0;i<12;i++) S3R_RELEASE(b[i]); S3R_RELEASE(bcs); S3R_RELEASE(bcraft); S3R_RELEASE(bline); return FALSE;
 	}
-	S3R_RELEASE(err);
 	ID3DBlob* binst=NULL;
-	if(FAILED(D3DCompile(hlsl,(SIZE_T)strlen(hlsl),NULL,NULL,NULL,"VSSI","vs_5_0",D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&binst,&err))){
-		m_dxFailHr = E_FAIL;
-		for(int i=0;i<12;i++) S3R_RELEASE(b[i]); S3R_RELEASE(bcs); S3R_RELEASE(bcraft); S3R_RELEASE(bline); S3R_RELEASE(bterr); S3R_RELEASE(err); return FALSE;
+	if(FAILED(compile("VSSI","vs_5_0",&binst))){
+		for(int i=0;i<12;i++) S3R_RELEASE(b[i]); S3R_RELEASE(bcs); S3R_RELEASE(bcraft); S3R_RELEASE(bline); S3R_RELEASE(bterr); return FALSE;
 	}
-	S3R_RELEASE(err);
 	ID3DBlob* bwater=NULL;
-	if(FAILED(D3DCompile(hlsl,(SIZE_T)strlen(hlsl),NULL,NULL,NULL,"PSW","ps_5_0",D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&bwater,&err))){
-		m_dxFailHr = E_FAIL;
-		for(int i=0;i<12;i++) S3R_RELEASE(b[i]); S3R_RELEASE(bcs); S3R_RELEASE(bcraft); S3R_RELEASE(bline); S3R_RELEASE(bterr); S3R_RELEASE(binst); S3R_RELEASE(err); return FALSE;
+	if(FAILED(compile("PSW","ps_5_0",&bwater))){
+		for(int i=0;i<12;i++) S3R_RELEASE(b[i]); S3R_RELEASE(bcs); S3R_RELEASE(bcraft); S3R_RELEASE(bline); S3R_RELEASE(bterr); S3R_RELEASE(binst); return FALSE;
 	}
-	S3R_RELEASE(err);
 	ID3DBlob* bcloud=NULL;
-	if(FAILED(D3DCompile(hlsl,(SIZE_T)strlen(hlsl),NULL,NULL,NULL,"PSCLoud","ps_5_0",D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&bcloud,&err))){
-		m_dxFailHr = E_FAIL;
-		for(int i=0;i<12;i++) S3R_RELEASE(b[i]); S3R_RELEASE(bcs); S3R_RELEASE(bcraft); S3R_RELEASE(bline); S3R_RELEASE(bterr); S3R_RELEASE(binst); S3R_RELEASE(bwater); S3R_RELEASE(err); return FALSE;
+	if(FAILED(compile("PSCLoud","ps_5_0",&bcloud))){
+		for(int i=0;i<12;i++) S3R_RELEASE(b[i]); S3R_RELEASE(bcs); S3R_RELEASE(bcraft); S3R_RELEASE(bline); S3R_RELEASE(bterr); S3R_RELEASE(binst); S3R_RELEASE(bwater); return FALSE;
 	}
-	S3R_RELEASE(err);
+	ID3DBlob* bgs=NULL;
+	if(FAILED(compile("GSW","gs_5_0",&bgs))){
+		for(int i=0;i<12;i++) S3R_RELEASE(b[i]); S3R_RELEASE(bcs); S3R_RELEASE(bcraft); S3R_RELEASE(bline); S3R_RELEASE(bterr); S3R_RELEASE(binst); S3R_RELEASE(bwater); S3R_RELEASE(bcloud); return FALSE;
+	}
 	HRESULT hr=S_OK;
 	if(FAILED(hr=m_dev->CreateVertexShader(b[0]->GetBufferPointer(),b[0]->GetBufferSize(),NULL,&m_vsTess))) goto fail_sh;
 	if(FAILED(hr=m_dev->CreateHullShader(b[1]->GetBufferPointer(),b[1]->GetBufferSize(),NULL,&m_hsTess))) goto fail_sh;
 	if(FAILED(hr=m_dev->CreateDomainShader(b[2]->GetBufferPointer(),b[2]->GetBufferSize(),NULL,&m_dsTess))) goto fail_sh;
+	if(FAILED(hr=m_dev->CreateGeometryShader(bgs->GetBufferPointer(),bgs->GetBufferSize(),NULL,&m_gsWind))) goto fail_sh;
 	if(FAILED(hr=m_dev->CreatePixelShader(b[3]->GetBufferPointer(),b[3]->GetBufferSize(),NULL,&m_psBand))) goto fail_sh;
 	if(FAILED(hr=m_dev->CreateVertexShader(b[4]->GetBufferPointer(),b[4]->GetBufferSize(),NULL,&m_vsSolid))) goto fail_sh;
 	if(FAILED(hr=m_dev->CreateVertexShader(binst->GetBufferPointer(),binst->GetBufferSize(),NULL,&m_vsInst))) goto fail_sh;
@@ -1210,16 +1290,18 @@ BOOL CS3rView::CreateShaders()
 		{"TEXCOORD",1,DXGI_FORMAT_R32G32B32A32_FLOAT,0,32,D3D11_INPUT_PER_VERTEX_DATA,0},
 		{"TEXCOORD",2,DXGI_FORMAT_R32G32B32A32_FLOAT,1,0,D3D11_INPUT_PER_INSTANCE_DATA,1},
 		{"TEXCOORD",3,DXGI_FORMAT_R32G32B32A32_FLOAT,1,16,D3D11_INPUT_PER_INSTANCE_DATA,1},
-		{"TEXCOORD",4,DXGI_FORMAT_R32G32B32A32_FLOAT,1,32,D3D11_INPUT_PER_INSTANCE_DATA,1}};
+		{"TEXCOORD",4,DXGI_FORMAT_R32G32B32A32_FLOAT,1,32,D3D11_INPUT_PER_INSTANCE_DATA,1},
+		{"TEXCOORD",5,DXGI_FORMAT_R32G32B32A32_FLOAT,1,48,D3D11_INPUT_PER_INSTANCE_DATA,1},
+		{"TEXCOORD",6,DXGI_FORMAT_R32G32B32A32_FLOAT,0,48,D3D11_INPUT_PER_VERTEX_DATA,0}};
 	if(FAILED(hr=m_dev->CreateInputLayout(il,4,b[0]->GetBufferPointer(),b[0]->GetBufferSize(),&m_ilPatch))) goto fail_sh;
 	if(FAILED(hr=m_dev->CreateInputLayout(il,4,b[4]->GetBufferPointer(),b[4]->GetBufferSize(),&m_ilSolid))) goto fail_sh;
-	if(FAILED(hr=m_dev->CreateInputLayout(ii,7,binst->GetBufferPointer(),binst->GetBufferSize(),&m_ilInst))) goto fail_sh;
+	if(FAILED(hr=m_dev->CreateInputLayout(ii,9,binst->GetBufferPointer(),binst->GetBufferSize(),&m_ilInst))) goto fail_sh;
 	if(FAILED(hr=m_dev->CreateInputLayout(ih,3,b[6]->GetBufferPointer(),b[6]->GetBufferSize(),&m_ilHud))) goto fail_sh;
-	for(int i=0;i<12;i++) S3R_RELEASE(b[i]); S3R_RELEASE(bcs); S3R_RELEASE(bcraft); S3R_RELEASE(bline); S3R_RELEASE(bterr); S3R_RELEASE(binst); S3R_RELEASE(bwater); S3R_RELEASE(bcloud);
+	for(int i=0;i<12;i++) S3R_RELEASE(b[i]); S3R_RELEASE(bcs); S3R_RELEASE(bcraft); S3R_RELEASE(bline); S3R_RELEASE(bterr); S3R_RELEASE(binst); S3R_RELEASE(bwater); S3R_RELEASE(bcloud); S3R_RELEASE(bgs);
 	return TRUE;
 fail_sh:
 	m_dxFailHr = hr;
-	for(int i=0;i<12;i++) S3R_RELEASE(b[i]); S3R_RELEASE(bcs); S3R_RELEASE(bcraft); S3R_RELEASE(bline); S3R_RELEASE(bterr); S3R_RELEASE(binst); S3R_RELEASE(bwater); S3R_RELEASE(bcloud);
+	for(int i=0;i<12;i++) S3R_RELEASE(b[i]); S3R_RELEASE(bcs); S3R_RELEASE(bcraft); S3R_RELEASE(bline); S3R_RELEASE(bterr); S3R_RELEASE(binst); S3R_RELEASE(bwater); S3R_RELEASE(bcloud); S3R_RELEASE(bgs);
 	return FALSE;
 }
 
@@ -1444,15 +1526,21 @@ BOOL CS3rView::InitDx()
 #endif
 	D3D_FEATURE_LEVEL req=D3D_FEATURE_LEVEL_11_0, got=(D3D_FEATURE_LEVEL)0;
 	HRESULT hr=D3D11CreateDevice(NULL,D3D_DRIVER_TYPE_HARDWARE,NULL,flags,&req,1,D3D11_SDK_VERSION,&m_dev,&got,&m_imm);
+	if(FAILED(hr) && (flags & D3D11_CREATE_DEVICE_DEBUG)) {
+		flags &= ~D3D11_CREATE_DEVICE_DEBUG;
+		hr=D3D11CreateDevice(NULL,D3D_DRIVER_TYPE_HARDWARE,NULL,flags,&req,1,D3D11_SDK_VERSION,&m_dev,&got,&m_imm);
+	}
 	if(FAILED(hr)) hr=D3D11CreateDevice(NULL,D3D_DRIVER_TYPE_WARP,NULL,flags&~D3D11_CREATE_DEVICE_DEBUG,&req,1,D3D11_SDK_VERSION,&m_dev,&got,&m_imm);
 	if(FAILED(hr) || got < D3D_FEATURE_LEVEL_11_0) { m_dxFailStage = 2; m_dxFailHr = hr; return FALSE; }
 	IDXGIDevice* xd=NULL;IDXGIAdapter* xa=NULL;IDXGIFactory2* f2=NULL;IDXGIFactory* f1=NULL;
 	if(FAILED(hr=m_dev->QueryInterface(__uuidof(IDXGIDevice),(void**)&xd))||FAILED(hr=xd->GetAdapter(&xa))) { m_dxFailStage = 3; m_dxFailHr = hr; S3R_RELEASE(xd); return FALSE; }
 	xa->GetParent(__uuidof(IDXGIFactory2),(void**)&f2);
-	// Width/Height=0: DXGI が HWND クライアントサイズを使う（迷路側と同じ）
-	DXGI_SWAP_CHAIN_DESC1 s={};s.Width=0;s.Height=0;s.Format=DXGI_FORMAT_B8G8R8A8_UNORM;s.SampleDesc.Count=1;s.BufferUsage=DXGI_USAGE_RENDER_TARGET_OUTPUT;s.BufferCount=2;s.SwapEffect=DXGI_SWAP_EFFECT_FLIP_DISCARD;s.AlphaMode=DXGI_ALPHA_MODE_IGNORE;s.Scaling=DXGI_SCALING_STRETCH;
+	CRect crc; GetClientRect(&crc);
+	const UINT scW = (UINT)max(8, crc.Width());
+	const UINT scH = (UINT)max(8, crc.Height());
+	DXGI_SWAP_CHAIN_DESC1 s={};s.Width=scW;s.Height=scH;s.Format=DXGI_FORMAT_B8G8R8A8_UNORM;s.SampleDesc.Count=1;s.BufferUsage=DXGI_USAGE_RENDER_TARGET_OUTPUT;s.BufferCount=2;s.SwapEffect=DXGI_SWAP_EFFECT_FLIP_DISCARD;s.AlphaMode=DXGI_ALPHA_MODE_IGNORE;s.Scaling=DXGI_SCALING_STRETCH;
 	if(f2){IDXGISwapChain1* sc1=NULL;hr=f2->CreateSwapChainForHwnd(m_dev,m_hWnd,&s,NULL,NULL,&sc1);if(FAILED(hr)){s.SwapEffect=DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL;hr=f2->CreateSwapChainForHwnd(m_dev,m_hWnd,&s,NULL,NULL,&sc1);}if(FAILED(hr)){s.SwapEffect=DXGI_SWAP_EFFECT_DISCARD;s.BufferCount=1;hr=f2->CreateSwapChainForHwnd(m_dev,m_hWnd,&s,NULL,NULL,&sc1);}if(SUCCEEDED(hr))m_swap=sc1;}else hr=E_FAIL;
-	if(FAILED(hr)){xa->GetParent(__uuidof(IDXGIFactory),(void**)&f1);DXGI_SWAP_CHAIN_DESC o={};o.BufferDesc.Format=DXGI_FORMAT_B8G8R8A8_UNORM;o.SampleDesc.Count=1;o.BufferUsage=DXGI_USAGE_RENDER_TARGET_OUTPUT;o.BufferCount=1;o.OutputWindow=m_hWnd;o.Windowed=TRUE;o.SwapEffect=DXGI_SWAP_EFFECT_DISCARD;hr=f1?f1->CreateSwapChain(m_dev,&o,&m_swap):E_FAIL;}
+	if(FAILED(hr)){xa->GetParent(__uuidof(IDXGIFactory),(void**)&f1);DXGI_SWAP_CHAIN_DESC o={};o.BufferDesc.Width=scW;o.BufferDesc.Height=scH;o.BufferDesc.Format=DXGI_FORMAT_B8G8R8A8_UNORM;o.SampleDesc.Count=1;o.BufferUsage=DXGI_USAGE_RENDER_TARGET_OUTPUT;o.BufferCount=1;o.OutputWindow=m_hWnd;o.Windowed=TRUE;o.SwapEffect=DXGI_SWAP_EFFECT_DISCARD;hr=f1?f1->CreateSwapChain(m_dev,&o,&m_swap):E_FAIL;}
 	S3R_RELEASE(f1);S3R_RELEASE(f2);S3R_RELEASE(xa);S3R_RELEASE(xd);
 	if(FAILED(hr)||!m_swap){ m_dxFailStage = 4; m_dxFailHr = hr; return FALSE; }
 	{
@@ -1464,6 +1552,8 @@ BOOL CS3rView::InitDx()
 	}
 	D3D11_BUFFER_DESC bd={};bd.ByteWidth=((sizeof(S3RFrameCB)+15)/16)*16;bd.Usage=D3D11_USAGE_DYNAMIC;bd.BindFlags=D3D11_BIND_CONSTANT_BUFFER;bd.CPUAccessFlags=D3D11_CPU_ACCESS_WRITE;
 	if(FAILED(hr=m_dev->CreateBuffer(&bd,NULL,&m_cbFrame))){ m_dxFailStage = 5; m_dxFailHr = hr; return FALSE; }
+	bd.ByteWidth=((sizeof(S3RSkinCB)+15)/16)*16;
+	if(FAILED(hr=m_dev->CreateBuffer(&bd,NULL,&m_cbSkin))){ m_dxFailStage = 5; m_dxFailHr = hr; return FALSE; }
 	if(!CreateShaders()){ m_dxFailStage = 6; if(m_dxFailHr==S_OK) m_dxFailHr = E_FAIL; return FALSE; }
 	if(!CreateProcTextures()){ m_dxFailStage = 7; m_dxFailHr = E_FAIL; return FALSE; }
 	bd.ByteWidth=m_vbDynBytes;bd.BindFlags=D3D11_BIND_VERTEX_BUFFER;bd.CPUAccessFlags=D3D11_CPU_ACCESS_WRITE;
@@ -1585,6 +1675,7 @@ BOOL CS3rView::EnsureAuxTargets()
 
 BOOL CS3rView::EnsureSceneTargets(int w,int h)
 {
+	if(!m_dev||!m_imm||w<1||h<1)return FALSE;
 	if(m_sceneTex&&w==m_vw&&h==m_vh)return TRUE;
 	ID3D11RenderTargetView* nullrt=NULL;m_imm->OMSetRenderTargets(1,&nullrt,NULL);
 	S3R_RELEASE(m_dsSrv);S3R_RELEASE(m_dsv);S3R_RELEASE(m_dsTex);S3R_RELEASE(m_sceneSrv);S3R_RELEASE(m_sceneRtv);S3R_RELEASE(m_sceneTex);S3R_RELEASE(m_postSrv);S3R_RELEASE(m_postRtv);S3R_RELEASE(m_postTex);
@@ -1598,11 +1689,29 @@ BOOL CS3rView::EnsureSceneTargets(int w,int h)
 }
 BOOL CS3rView::ResizeDx(int w,int h)
 {
-	if(!m_swap||w<1||h<1)return FALSE;m_ready=FALSE;m_imm->OMSetRenderTargets(0,NULL,NULL);S3R_RELEASE(m_bbRtv);
+	if(!m_swap||!m_dev||!m_imm||w<1||h<1)return FALSE;m_ready=FALSE;m_imm->OMSetRenderTargets(0,NULL,NULL);S3R_RELEASE(m_bbRtv);
 	HRESULT hr=m_swap->ResizeBuffers(0,w,h,DXGI_FORMAT_UNKNOWN,0);if(FAILED(hr))return FALSE;ID3D11Texture2D* bb=NULL;hr=m_swap->GetBuffer(0,__uuidof(ID3D11Texture2D),(void**)&bb);if(SUCCEEDED(hr))hr=m_dev->CreateRenderTargetView(bb,NULL,&m_bbRtv);S3R_RELEASE(bb);
 	if(FAILED(hr)||!EnsureSceneTargets(w,h))return FALSE;m_ready=TRUE;return TRUE;
 }
-void CS3rView::PresentFrame(){if(m_swap&&m_ready)m_swap->Present(0,0);}
+void CS3rView::NoteContextLost(HRESULT hr)
+{
+	if (hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_RESET) {
+		m_ready = FALSE;
+		return;
+	}
+	if (m_dev) {
+		const HRESULT why = m_dev->GetDeviceRemovedReason();
+		if (FAILED(why))
+			m_ready = FALSE;
+	}
+}
+void CS3rView::PresentFrame()
+{
+	if (!m_swap || !m_ready) return;
+	if (!IsWindowVisible()) return;
+	const HRESULT hr = m_swap->Present(0, 0);
+	if (FAILED(hr)) NoteContextLost(hr);
+}
 void CS3rView::ReleaseClearTexture(){S3R_RELEASE(m_srvClear);S3R_RELEASE(m_texClear);m_clearTexW=m_clearTexH=0;}
 void CS3rView::ReleaseHudTexture(){S3R_RELEASE(m_srvHud);S3R_RELEASE(m_texHud);m_hudTexW=m_hudTexH=0;}
 void CS3rView::ReleaseGaugeTexture(){S3R_RELEASE(m_srvGauge);S3R_RELEASE(m_texGauge);m_gaugeTexW=m_gaugeTexH=0;}
@@ -1953,11 +2062,11 @@ void CS3rView::ReleaseDx()
 	}
 	m_vbTerrParts = m_vbBandParts = m_vbWaterParts = m_vbSceneryParts = 0;
 	m_obsNvGpu=m_obsNiGpu=m_obsInstN=0; m_craftNvGpu=m_craftNiGpu=0;
-	S3R_RELEASE(m_vbDyn);S3R_RELEASE(m_cbFrame);S3R_RELEASE(m_ilHud);S3R_RELEASE(m_ilInst);S3R_RELEASE(m_ilSolid);S3R_RELEASE(m_ilPatch);
+	S3R_RELEASE(m_vbDyn);S3R_RELEASE(m_cbSkin);S3R_RELEASE(m_cbFrame);S3R_RELEASE(m_ilHud);S3R_RELEASE(m_ilInst);S3R_RELEASE(m_ilSolid);S3R_RELEASE(m_ilPatch);
 	delete[] m_cpuDynScratch; m_cpuDynScratch=NULL; m_cpuDynScratchBytes=0;
 	delete[] m_cpuHudScratch; m_cpuHudScratch=NULL; m_cpuHudScratchBytes=0;
 	delete[] m_cpuBakeScratch; m_cpuBakeScratch=NULL; m_cpuBakeScratchBytes=0;
-	S3R_RELEASE(m_csNoise);S3R_RELEASE(m_psFinal);S3R_RELEASE(m_psDof);S3R_RELEASE(m_psSsr);S3R_RELEASE(m_vsPost);S3R_RELEASE(m_psHudLine);S3R_RELEASE(m_psHud);S3R_RELEASE(m_vsHud);S3R_RELEASE(m_psCraft);S3R_RELEASE(m_psTerr);S3R_RELEASE(m_psWater);S3R_RELEASE(m_psCloud);S3R_RELEASE(m_psSolid);S3R_RELEASE(m_vsInst);S3R_RELEASE(m_vsSolid);S3R_RELEASE(m_psBand);S3R_RELEASE(m_dsTess);S3R_RELEASE(m_hsTess);S3R_RELEASE(m_vsTess);
+	S3R_RELEASE(m_csNoise);S3R_RELEASE(m_psFinal);S3R_RELEASE(m_psDof);S3R_RELEASE(m_psSsr);S3R_RELEASE(m_vsPost);S3R_RELEASE(m_psHudLine);S3R_RELEASE(m_psHud);S3R_RELEASE(m_vsHud);S3R_RELEASE(m_psCraft);S3R_RELEASE(m_psTerr);S3R_RELEASE(m_psWater);S3R_RELEASE(m_psCloud);S3R_RELEASE(m_psSolid);S3R_RELEASE(m_vsInst);S3R_RELEASE(m_vsSolid);S3R_RELEASE(m_psBand);S3R_RELEASE(m_gsWind);S3R_RELEASE(m_dsTess);S3R_RELEASE(m_hsTess);S3R_RELEASE(m_vsTess);
 	S3R_RELEASE(m_shadowSrv);S3R_RELEASE(m_shadowDsv);S3R_RELEASE(m_shadowTex);
 	S3R_RELEASE(m_srvRear);S3R_RELEASE(m_rearRtv);S3R_RELEASE(m_rearTex);S3R_RELEASE(m_rearDsv);S3R_RELEASE(m_rearDs);
 	S3R_RELEASE(m_srvReflect);S3R_RELEASE(m_reflectRtv);S3R_RELEASE(m_reflectTex);S3R_RELEASE(m_reflectDsv);S3R_RELEASE(m_reflectDs);
@@ -1985,11 +2094,11 @@ void CS3rView::ClearStaticMeshes()
 	S3R_RELEASE(m_ibObs); S3R_RELEASE(m_vbObs); m_obsNvGpu = m_obsNiGpu = 0;
 	S3R_RELEASE(m_ibCraft); S3R_RELEASE(m_vbCraft); m_craftNvGpu = m_craftNiGpu = 0;
 }
-BOOL CS3rView::UploadDefaultVB(ID3D11Buffer** dst, UINT* nOut, const void* verts, UINT nVerts)
+BOOL CS3rView::UploadDefaultVB(ID3D11Buffer** dst, UINT* nOut, const void* verts, UINT nVerts, UINT stride)
 {
 	if (!dst || !nOut) return FALSE;
 	if (!m_dev || !verts || nVerts < 1) return FALSE;
-	const UINT stride = (UINT)sizeof(S3RVertex);
+	if (stride < 1) stride = (UINT)sizeof(S3RVertex);
 	if (stride < 1) return FALSE;
 	if (nVerts > kS3rMaxVbBytes / stride) nVerts = kS3rMaxVbBytes / stride;
 	UINT bytes = nVerts * stride;
@@ -2145,11 +2254,12 @@ CSoft3DRaceDlg::CSoft3DRaceDlg(CWnd* p)
 	, m_camYawOff(0), m_camPitchOff(0.22f), m_camZoom(1.f)
 	, m_camSx(0), m_camSy(0), m_camSz(0), m_camAx(0), m_camAy(0), m_camAz(0), m_camSmoothInit(0), m_camTunnelT(0), m_frameDt(1.f/60.f)
 	, m_lookback(0), m_accelHeld(0), m_brakeHeld(0), m_nitroBtnHeld(0), m_mouseLook(0)
-	, m_lastTick(0), m_inTick(0), m_rng(1), m_genSeed(1), m_spaceToggleTick(0)
+	, m_lastTick(0), m_inTick(0), m_dxRecoverTries(0), m_rng(1), m_genSeed(1), m_spaceToggleTick(0)
 	, m_baseTempoPos(100), m_basePitchPos(200), m_anim(0), m_raceClock(0), m_playerSpdEma(0), m_playerAccel(0)
 	, m_wrongWay(0), m_overlayHold(0), m_sfxHitCool(0)
 	, m_clearBakeA(0), m_hudDirty(1), m_gaugeKmhQ(-1), m_gaugeRpmQ(-1), m_clearDirty(1), m_standDirty(1)
 	, m_reverbFogBoost(0), m_eqDofBoost(0)
+	, m_windX(0), m_windY(0), m_windZ(0), m_windGust(0)
 	, m_podiumBaseX(0), m_podiumBaseY(0), m_podiumBaseZ(0)
 {
 	memset(m_knots,0,sizeof(m_knots));
@@ -2171,6 +2281,8 @@ CSoft3DRaceDlg::CSoft3DRaceDlg(CWnd* p)
 	memset(m_hmRaw,0,sizeof(m_hmRaw));
 	memset(m_hmPathDist,0,sizeof(m_hmPathDist));
 	memset(m_pathDeep,0,sizeof(m_pathDeep));
+	memset(m_pathWet,0,sizeof(m_pathWet));
+	memset(m_hmPathY,0,sizeof(m_hmPathY));
 	memset(m_carveX0,0,sizeof(m_carveX0)); memset(m_carveY0,0,sizeof(m_carveY0)); memset(m_carveZ0,0,sizeof(m_carveZ0));
 	memset(m_carveX1,0,sizeof(m_carveX1)); memset(m_carveY1,0,sizeof(m_carveY1)); memset(m_carveZ1,0,sizeof(m_carveZ1));
 	memset(m_carveCeil,0,sizeof(m_carveCeil));
@@ -2889,7 +3001,7 @@ void CSoft3DRaceDlg::GenerateCourseWithSeed(DWORD seed)
 		float riverA = S3rRand01(nr) * (float)(M_PI * 2.0);
 		float riverOff = (S3rRand01(nr) - 0.5f) * 40.f * sc;
 		m_waterY = 6.5f * sc;
-		if (m_themeActive == THEME_UNDER) m_waterY = 2.5f * sc;
+		if (m_themeActive == THEME_UNDER) m_waterY = 11.5f * sc;
 		if (m_themeActive == THEME_CLOUD) m_waterY = 14.f * sc;
 		if (m_themeActive == THEME_MESA) m_waterY = 5.0f * sc;
 		if (m_themeActive == THEME_NIGHT) m_waterY = 5.5f * sc;
@@ -2990,18 +3102,18 @@ void CSoft3DRaceDlg::GenerateCourseWithSeed(DWORD seed)
 		if (m_themeActive == THEME_MESA) follow = 3.8f * sc;
 		for (int i = 0; i < knots; i++) {
 			float a = (float)i / (float)knots * (float)(M_PI * 2.0);
-			float local = gyK[i] + follow + 1.6f * sc * sinf(a * 2.f);
+			float local = gyK[i] + follow + 2.4f * sc * sinf(a * 2.f);
 			float region = cruise[i] + follow;
 			// 鋭い峰はコースを上げず貫通（後でcarve）
 			if (gyK[i] > cruise[i] + 8.f * sc) m_knots[i].y = region;
 			else m_knots[i].y = local * 0.72f + region * 0.28f;
 		}
-		// 急坂 1〜2 箇所（地形の丘を登る）
+		// 急坂 1〜2 箇所（地形の丘を登る）。酔わない程度に抑える
 		int nSteep = 1 + ((S3rRand01(m_rng) > 0.40f) ? 1 : 0);
 		for (int s = 0; s < nSteep; s++) {
 			int center = (int)(S3rRand01(m_rng) * (float)knots) % knots;
-			float width = 2.2f + S3rRand01(m_rng) * 2.0f;
-			float amp = (10.f + S3rRand01(m_rng) * 14.f) * sc;
+			float width = 2.6f + S3rRand01(m_rng) * 2.2f;
+			float amp = (8.f + S3rRand01(m_rng) * 10.f) * sc;
 			if (S3rRand01(m_rng) < 0.30f) amp = -amp;
 			for (int i = 0; i < knots; i++) {
 				int d = i - center;
@@ -3011,20 +3123,66 @@ void CSoft3DRaceDlg::GenerateCourseWithSeed(DWORD seed)
 				m_knots[i].y += amp * expf(-0.5f * u * u);
 			}
 		}
+		unsigned char allowLow[S3R_SPLINE_MAX];
+		memset(allowLow, 0, sizeof(allowLow));
+		auto bumpY = [&](int center, float width, float amp, int markLow) {
+			for (int i = 0; i < knots; i++) {
+				int d = i - center;
+				if (d > knots / 2) d -= knots;
+				if (d < -knots / 2) d += knots;
+				float u = (float)d / width;
+				float w = expf(-0.5f * u * u);
+				m_knots[i].y += amp * w;
+				if (markLow && w > 0.18f) allowLow[i] = 1;
+			}
+		};
+		int ridgeC = (int)(S3rRand01(m_rng) * (float)knots) % knots;
+		bumpY(ridgeC, 3.4f + S3rRand01(m_rng) * 1.6f, (10.f + S3rRand01(m_rng) * 8.f) * sc, 0);
+		int diveC = (ridgeC + knots / 6 + 1) % knots;
+		if (m_themeActive != THEME_UNDER) {
+			const float diveW = 4.2f + S3rRand01(m_rng) * 1.4f;
+			for (int i = 0; i < knots; i++) {
+				int d = i - diveC;
+				if (d > knots / 2) d -= knots;
+				if (d < -knots / 2) d += knots;
+				float u = (float)d / diveW;
+				float w = expf(-0.5f * u * u);
+				if (w > 0.12f) {
+					float tgt = m_waterY - (2.2f + 2.8f * w) * sc;
+					m_knots[i].y = m_knots[i].y * (1.f - w) + tgt * w;
+					allowLow[i] = 1;
+				}
+			}
+		}
+		int underC = (ridgeC + knots / 2) % knots;
+		bumpY(underC, 3.0f + S3rRand01(m_rng) * 1.8f, -(8.f + S3rRand01(m_rng) * 7.f) * sc, 1);
 		{
 			float tmp[S3R_SPLINE_MAX];
-			for (int i = 0; i < knots; i++) {
-				float ym = m_knots[(i - 1 + knots) % knots].y;
-				float y0 = m_knots[i].y;
-				float yp = m_knots[(i + 1) % knots].y;
-				tmp[i] = ym * 0.12f + y0 * 0.76f + yp * 0.12f;
+			for (int pass = 0; pass < 2; pass++) {
+				for (int i = 0; i < knots; i++) {
+					float ym = m_knots[(i - 1 + knots) % knots].y;
+					float y0 = m_knots[i].y;
+					float yp = m_knots[(i + 1) % knots].y;
+					tmp[i] = ym * 0.16f + y0 * 0.68f + yp * 0.16f;
+				}
+				for (int i = 0; i < knots; i++) m_knots[i].y = tmp[i];
 			}
-			for (int i = 0; i < knots; i++) m_knots[i].y = tmp[i];
+		}
+		const float maxDy = 4.2f * sc;
+		for (int i = 0; i < knots; i++) {
+			int ip = (i + 1) % knots;
+			float dy = m_knots[ip].y - m_knots[i].y;
+			if (dy > maxDy) m_knots[ip].y = m_knots[i].y + maxDy;
+			if (dy < -maxDy) m_knots[ip].y = m_knots[i].y - maxDy;
 		}
 		for (int i = 0; i < knots; i++) {
 			float gy = gyK[i];
-			if (m_knots[i].y < gy + 2.4f * sc && gy <= cruise[i] + 12.f * sc)
-				m_knots[i].y = gy + 2.4f * sc;
+			float minAir = gy + 1.6f * sc;
+			if (allowLow[i]) {
+				if (m_knots[i].y < 0.8f * sc) m_knots[i].y = 0.8f * sc;
+			} else if (m_knots[i].y < minAir && gy <= cruise[i] + 12.f * sc) {
+				m_knots[i].y = minAir;
+			}
 		}
 		// 八の字：交差を高低で分け、平面ショートカットを封じる（cos で t=0 と t=π が逆符号）
 		if (m_layoutKind == 1) {
@@ -3053,6 +3211,8 @@ void CSoft3DRaceDlg::GenerateCourseWithSeed(DWORD seed)
 	{
 		for (int i = 0; i < S3R_HM_N * S3R_HM_N; i++) m_hmPathDist[i] = 1e8f;
 		memset(m_pathDeep, 0, sizeof(m_pathDeep));
+		memset(m_pathWet, 0, sizeof(m_pathWet));
+		for (int i = 0; i < S3R_HM_N * S3R_HM_N; i++) m_hmPathY[i] = 0.f;
 		const float grooveR = m_bandHalf * 1.85f;
 		const float tunR0 = S3rTunR(m_bandHalf);
 		const float outerR = max(grooveR, tunR0 * 1.42f);
@@ -3072,6 +3232,7 @@ void CSoft3DRaceDlg::GenerateCourseWithSeed(DWORD seed)
 				gq = r00 + (r10 - r00) * fu + ((r01 + (r11 - r01) * fu) - (r00 + (r10 - r00) * fu)) * fv;
 			}
 			m_pathDeep[i] = (gq > qy + 1.8f * sc) ? 1 : 0;
+			m_pathWet[i] = (qy < m_waterY - 0.35f * sc) ? 1 : 0;
 		}
 		for (int i = 0; i < S3R_PATH_SAMPLES; i++) {
 			float qx = m_pathSampleXYZ[i][0], qy = m_pathSampleXYZ[i][1], qz = m_pathSampleXYZ[i][2];
@@ -3098,7 +3259,7 @@ void CSoft3DRaceDlg::GenerateCourseWithSeed(DWORD seed)
 					float dx = wx - qx, dz = wz - qz;
 					float dd = sqrtf(dx * dx + dz * dz);
 					int idx = jz * S3R_HM_N + ix;
-					if (dd < m_hmPathDist[idx]) m_hmPathDist[idx] = dd;
+					if (dd < m_hmPathDist[idx]) { m_hmPathDist[idx] = dd; m_hmPathY[idx] = qy; }
 					if (dd > outR) continue;
 					float cut;
 					if (deep) {
@@ -3189,10 +3350,11 @@ void CSoft3DRaceDlg::BuildCraftMeshes()
 {
 	// Cute bird-ship: lathe body + wings + canopy. High subdivision.
 	m_craftNv = 0; m_craftNi = 0;
-	auto emitV = [&](float x,float y,float z,float nx,float ny,float nz,float u,float v,float r,float g,float b,float a){
+	auto emitV = [&](float x,float y,float z,float nx,float ny,float nz,float u,float v,float r,float g,float b,float a,float bi=0.f,float bw=0.f,float bi2=0.f,float bw2=0.f){
 		if (m_craftNv >= S3R_CRAFT_VMAX) return;
-		float* p = m_craftVert + m_craftNv * 12;
+		float* p = m_craftVert + m_craftNv * 16;
 		p[0]=x;p[1]=y;p[2]=z;p[3]=nx;p[4]=ny;p[5]=nz;p[6]=u;p[7]=v;p[8]=r;p[9]=g;p[10]=b;p[11]=a;
+		p[12]=bi;p[13]=bw;p[14]=bi2;p[15]=bw2;
 		m_craftNv++;
 	};
 	auto emitTri = [&](UINT a,UINT b,UINT c){
@@ -3212,7 +3374,8 @@ void CSoft3DRaceDlg::BuildCraftMeshes()
 			float x = cosf(a) * rad, z = sinf(a) * rad;
 			float dx = cosf(a) * rad; float dz = sinf(a) * rad;
 			float nx=cosf(a), ny=(t<0.5f?0.35f:-0.15f), nz=sinf(a); S3rNorm3(nx,ny,nz);
-			emitV(x, yy, z, nx, ny, nz, (float)j/segs, t, 1,1,1,1);
+			float tailW = (t > 0.78f) ? S3rSaturate((t - 0.78f) / 0.22f) : 0.f;
+			emitV(x, yy, z, nx, ny, nz, (float)j/segs, t, 1,1,1,1, 3.f, tailW * tailW, 0.f, 0.f);
 		}
 	}
 	for (int i = 0; i < rings; i++) for (int j = 0; j < segs; j++) {
@@ -3230,7 +3393,9 @@ void CSoft3DRaceDlg::BuildCraftMeshes()
 			float y = -0.05f + vv * 0.12f + sinf(uu*(float)M_PI)*0.08f;
 			float z = (uu-0.2f)*0.55f + (vv-0.5f)*0.08f;
 			float nx=0,ny=1,nz=0;
-			emitV(x,y,z,nx,ny,nz,uu,vv,1,1,1,1);
+			float bone = (side > 0.f) ? 1.f : 2.f;
+			float bw = uu * uu * (0.55f + 0.45f * uu);
+			emitV(x,y,z,nx,ny,nz,uu,vv,1,1,1,1, bone, bw, 0.f, 0.f);
 		}
 		for (int v=0;v<wv;v++) for (int u=0;u<wu;u++) {
 			UINT a=w0+(UINT)(v*(wu+1)+u), b=a+1, c=a+(UINT)(wu+1), d=c+1;
@@ -3261,11 +3426,17 @@ void CSoft3DRaceDlg::BuildCraftMeshes()
 void CSoft3DRaceDlg::BuildObstacleMesh(int theme)
 {
 	m_obsNv=0; m_obsNi=0;
-	auto emitV=[&](float x,float y,float z,float nx,float ny,float nz,float u,float v,float r,float g,float b,float a){
-		if(m_obsNv>=S3R_OBS_VMAX)return; float* p=m_obsVert+m_obsNv*12;
-		p[0]=x;p[1]=y;p[2]=z;p[3]=nx;p[4]=ny;p[5]=nz;p[6]=u;p[7]=v;p[8]=r;p[9]=g;p[10]=b;p[11]=a; m_obsNv++;
+	auto emitV=[&](float x,float y,float z,float nx,float ny,float nz,float u,float v,float r,float g,float b,float a,float bi=0.f,float bw=0.f,float bi2=0.f,float bw2=0.f){
+		if(m_obsNv>=S3R_OBS_VMAX)return; float* p=m_obsVert+m_obsNv*16;
+		p[0]=x;p[1]=y;p[2]=z;p[3]=nx;p[4]=ny;p[5]=nz;p[6]=u;p[7]=v;p[8]=r;p[9]=g;p[10]=b;p[11]=a;
+		p[12]=bi;p[13]=bw;p[14]=bi2;p[15]=bw2; m_obsNv++;
 	};
 	auto emitTri=[&](UINT a,UINT b,UINT c){ if(m_obsNi+3>S3R_OBS_IMAX)return; m_obsIdx[m_obsNi++]=a;m_obsIdx[m_obsNi++]=b;m_obsIdx[m_obsNi++]=c; };
+	auto heightSkin=[&](float y, float& bi, float& bw){
+		float h=S3rSaturate((y-0.12f)/4.8f);
+		bi=4.f+(float)((int)(h*6.9f)%8);
+		bw=h*h*(0.45f+0.55f*h);
+	};
 	auto cyl=[&](float y0,float y1,float rad,float rr,float gg,float bb,int segsN,float ox,float oz){
 		segsN = S3MeshScaleCount(segsN, 256);
 		if (segsN < 3) segsN = 3;
@@ -3273,8 +3444,9 @@ void CSoft3DRaceDlg::BuildObstacleMesh(int theme)
 		for(int k=0;k<=segsN;k++){
 			float a=(float)k/segsN*(float)(M_PI*2);
 			float x=ox+cosf(a)*rad, z=oz+sinf(a)*rad, nx=cosf(a), nz=sinf(a);
-			emitV(x,y0,z,nx,0,nz,(float)k/segsN,0,rr,gg,bb,1);
-			emitV(x,y1,z,nx,0,nz,(float)k/segsN,1,rr,gg,bb,1);
+			float bi0,bw0,bi1,bw1; heightSkin(y0,bi0,bw0); heightSkin(y1,bi1,bw1);
+			emitV(x,y0,z,nx,0,nz,(float)k/segsN,0,rr,gg,bb,1,bi0,bw0);
+			emitV(x,y1,z,nx,0,nz,(float)k/segsN,1,rr,gg,bb,1,bi1,bw1);
 		}
 		for(int k=0;k<segsN;k++){
 			UINT a=baseV+(UINT)(k*2), b=a+1, c=a+2, d=c+1;
@@ -3292,8 +3464,33 @@ void CSoft3DRaceDlg::BuildObstacleMesh(int theme)
 			float ny = -sqrtf(dx*dx+dz*dz)/dy;
 			float nx=c, nz=s;
 			float nl=sqrtf(nx*nx+ny*ny+nz*nz); nx/=nl; ny/=nl; nz/=nl;
-			emitV(c*rad0,y0,s*rad0,nx,ny,nz,(float)k/segsN,0,rr,gg,bb,1);
-			emitV(c*rad1,y1,s*rad1,nx,ny,nz,(float)k/segsN,1,rr,gg,bb,1);
+			float bi0,bw0,bi1,bw1; heightSkin(y0,bi0,bw0); heightSkin(y1,bi1,bw1);
+			emitV(c*rad0,y0,s*rad0,nx,ny,nz,(float)k/segsN,0,rr,gg,bb,1,bi0,bw0);
+			emitV(c*rad1,y1,s*rad1,nx,ny,nz,(float)k/segsN,1,rr,gg,bb,1,bi1,bw1);
+		}
+		for(int k=0;k<segsN;k++){
+			UINT a=baseV+(UINT)(k*2), b=a+1, c=a+2, d=c+1;
+			emitTri(a,c,b); emitTri(b,c,d);
+		}
+	};
+	auto stick=[&](float x0,float y0,float z0,float x1,float y1,float z1,float rad0,float rad1,float rr,float gg,float bb,int segsN,float bi,float bw0,float bw1){
+		segsN = S3MeshScaleCount(segsN, 24);
+		if (segsN < 5) segsN = 5;
+		float dx=x1-x0, dy=y1-y0, dz=z1-z0;
+		float len=sqrtf(dx*dx+dy*dy+dz*dz); if(len<1e-4f) return;
+		dx/=len; dy/=len; dz/=len;
+		float ux,uy,uz;
+		if (fabsf(dy)<0.92f) { ux=dy*0.f-dz*1.f; uy=dz*0.f-dx*0.f; uz=dx*1.f-dy*0.f; }
+		else { ux=1.f; uy=0.f; uz=0.f; }
+		float ul=sqrtf(ux*ux+uy*uy+uz*uz); if(ul<1e-4f) return; ux/=ul; uy/=ul; uz/=ul;
+		float vx=dy*uz-dz*uy, vy=dz*ux-dx*uz, vz=dx*uy-dy*ux;
+		UINT baseV=(UINT)m_obsNv;
+		for(int k=0;k<=segsN;k++){
+			float a=(float)k/segsN*(float)(M_PI*2);
+			float ca=cosf(a), sa=sinf(a);
+			float px=ux*ca+vx*sa, py=uy*ca+vy*sa, pz=uz*ca+vz*sa;
+			emitV(x0+px*rad0,y0+py*rad0,z0+pz*rad0,px,py,pz,(float)k/segsN,0,rr,gg,bb,1,bi,bw0);
+			emitV(x1+px*rad1,y1+py*rad1,z1+pz*rad1,px,py,pz,(float)k/segsN,1,rr,gg,bb,1,bi,bw1);
 		}
 		for(int k=0;k<segsN;k++){
 			UINT a=baseV+(UINT)(k*2), b=a+1, c=a+2, d=c+1;
@@ -3314,7 +3511,10 @@ void CSoft3DRaceDlg::BuildObstacleMesh(int theme)
 		float ya=(y0<y1)?y0:y1, yb=(y0<y1)?y1:y0;
 		float za=(z0<z1)?z0:z1, zb=(z0<z1)?z1:z0;
 		if (xb-xa < 1e-4f || yb-ya < 1e-4f || zb-za < 1e-4f) return;
-		auto v=[&](float x,float y,float z,float nx,float ny,float nz){emitV(x,y,z,nx,ny,nz,0,0,rr,gg,bb,1);};
+		auto v=[&](float x,float y,float z,float nx,float ny,float nz){
+			float bi,bw; heightSkin(y,bi,bw);
+			emitV(x,y,z,nx,ny,nz,0,0,rr,gg,bb,1,bi,bw);
+		};
 		
 		auto face=[&](float x0,float y0,float z0, float x1,float y1,float z1, float x2,float y2,float z2, float x3,float y3,float z3, float nx,float ny,float nz) {
 			for(int j=0;j<sub;j++)for(int i=0;i<sub;i++){
@@ -3346,6 +3546,19 @@ void CSoft3DRaceDlg::BuildObstacleMesh(int theme)
 		box(-2.15f,2.15f,-0.11f,2.15f,2.42f,0.11f,0.38f,0.24f,0.12f, 2);
 		box(-0.11f,2.55f,-1.85f,0.11f,2.82f,1.85f,0.40f,0.26f,0.12f, 2);
 		box(-1.55f,3.15f,-0.09f,1.55f,3.38f,0.09f,0.34f,0.22f,0.10f, 2);
+		box(-0.11f,3.55f,-1.45f,0.11f,3.78f,1.45f,0.36f,0.23f,0.11f, 2);
+		for (int i=0;i<6;i++) {
+			float a=(float)i/6.f*(float)(M_PI*2)+0.22f;
+			float ca=cosf(a), sa=sinf(a);
+			float yb=1.55f+0.35f*(float)(i%3);
+			float len=1.05f+0.22f*(float)((i*3)%4);
+			float bi=4.f+(float)(i%8);
+			stick(ca*0.28f, yb, sa*0.28f, ca*(0.28f+len), yb+0.45f+0.12f*(float)(i%3), sa*(0.28f+len),
+				0.07f, 0.028f, 0.36f, 0.22f, 0.10f, 10, bi, 0.35f, 0.95f);
+			stick(ca*(0.28f+len*0.55f), yb+0.22f, sa*(0.28f+len*0.55f),
+				ca*(0.28f+len)+sa*0.35f, yb+0.55f, sa*(0.28f+len)-ca*0.35f,
+				0.04f, 0.016f, 0.32f, 0.72f, 0.28f, 8, bi, 0.55f, 1.f);
+		}
 	} else if (theme == THEME_RUINS) {
 		// 細切れアーチは非等方スケールで針状になるので、塔＋梁のソリッドに変更
 		box(-0.85f,0,-0.85f,0.85f,0.35f,0.85f,0.62f,0.56f,0.46f, 2);
@@ -3389,6 +3602,13 @@ void CSoft3DRaceDlg::BuildObstacleMesh(int theme)
 		cone(0.55f, 2.7f, 1.15f, 0.12f, 0.5f, 0.9f, 0.32f, 32);
 		cone(1.4f, 3.2f, 0.8f, 0.08f, 0.45f, 0.85f, 0.3f, 32);
 		box(-0.9f,0,-0.9f,0.9f,0.18f,0.9f,0.65f,0.82f,0.38f, 2);
+		for (int i=0;i<5;i++) {
+			float a=(float)i/5.f*(float)(M_PI*2)+0.4f;
+			float ca=cosf(a), sa=sinf(a);
+			float yb=0.85f+0.18f*(float)(i%3);
+			stick(ca*0.18f, yb, sa*0.18f, ca*1.15f, yb+0.42f, sa*1.15f,
+				0.055f, 0.02f, 0.48f, 0.36f, 0.16f, 10, 4.f+(float)(i%8), 0.3f, 0.92f);
+		}
 	} else if (theme == THEME_MESA) {
 		// 段丘は太いブロックのみ（薄い板や針を作らない）
 		box(-1.4f,0,-1.4f,1.4f,0.7f,1.4f,1.f,0.52f,0.28f, 3);
@@ -3776,8 +3996,12 @@ void CSoft3DRaceDlg::InputSteerDelta(float dyaw, float dpitch)
 		return;
 	}
 	float ag = (pl.agilityT > 0.f) ? 1.45f : 1.f;
-	pl.yaw = S3rNormAngle(pl.yaw + dyaw * ag);
+	float yawCap = SkyYawRateCap(pl);
+	float step = S3rClamp(dyaw * ag, -yawCap * 0.08f, yawCap * 0.08f);
+	pl.yawRate = S3rLerp(pl.yawRate, step * 18.f, 0.45f);
+	pl.yaw = S3rNormAngle(pl.yaw + step);
 	pl.pitch = S3rClamp(pl.pitch + dpitch * ag, -1.05f, 1.05f);
+	pl.roll = S3rLerp(pl.roll, S3rClamp(-pl.yawRate * 0.55f, -0.72f, 0.72f), 0.28f);
 	m_camYawOff *= 0.85f;
 	m_camPitchOff = S3rLerp(m_camPitchOff, 0.22f, 0.12f);
 }
@@ -4584,9 +4808,15 @@ void CSoft3DRaceDlg::TickAi(float dt)
 		float wantPitch = S3rLerp(aimPitch, tangPitch, tangBlend);
 		float turnRate = (1.1f + sk * 1.8f) * (c.agilityT > 0 ? 1.25f : 1.f);
 		if (c.offBand && !cutting) turnRate *= 1.4f;
-		c.yaw = S3rNormAngle(c.yaw + S3rNormAngle(wantYaw - c.yaw) * min(1.f, turnRate * dt));
+		float yawCap = SkyYawRateCap(c);
+		if (turnRate > yawCap) turnRate = yawCap;
+		float dyaw = S3rNormAngle(wantYaw - c.yaw);
+		c.yawRate = S3rLerp(c.yawRate, dyaw * turnRate, min(1.f, 6.5f * dt));
+		c.yaw = S3rNormAngle(c.yaw + S3rClamp(c.yawRate, -yawCap, yawCap) * dt);
 		c.pitch = S3rLerp(c.pitch, wantPitch, min(1.f, turnRate * dt));
 		c.pitch = S3rClamp(c.pitch, -1.05f, 1.05f);
+		float wantRoll = S3rClamp(-c.yawRate * 0.58f, -0.74f, 0.74f);
+		c.roll = S3rLerp(c.roll, wantRoll, min(1.f, 5.8f * dt));
 
 		float raceCap = RaceSpeedCap(c.boostT > 0.f ? 1 : 0) * NitroSpeedMul(c);
 		float indep = finishRush ? 0.92f : AiPaceIndep(sk);
@@ -4758,11 +4988,33 @@ void CSoft3DRaceDlg::TickItems(float dt)
 	if (m_eqDofBoost>0) m_eqDofBoost=max(0.f,m_eqDofBoost-dt*0.05f);
 }
 
+float CSoft3DRaceDlg::SkyYawRateCap(const S3rCraft& c) const
+{
+	float spd = sqrtf(c.vx * c.vx + c.vy * c.vy + c.vz * c.vz);
+	float ag = (c.agilityT > 0.f) ? 1.28f : 1.f;
+	// 高速ほど回頭が鈍い（空力：急カーブ不可）
+	return (1.05f * ag) / (1.f + spd * 0.042f);
+}
+
+void CSoft3DRaceDlg::TickSkyWind(float dt)
+{
+	(void)dt;
+	const float t = m_anim;
+	m_windX = 2.6f * sinf(t * 0.17f) + 1.15f * sinf(t * 0.41f + 1.3f);
+	m_windZ = 2.4f * cosf(t * 0.14f) + 0.95f * sinf(t * 0.33f + 0.4f);
+	m_windY = 0.28f * sinf(t * 0.22f + 0.8f);
+	m_windGust = 0.55f + 0.45f * (0.5f + 0.5f * sinf(t * 0.51f));
+	if (m_themeActive == THEME_CLOUD) { m_windX *= 1.35f; m_windZ *= 1.35f; m_windGust = min(1.f, m_windGust + 0.18f); }
+	else if (m_themeActive == THEME_MESA) { m_windX *= 1.22f; m_windZ *= 1.10f; }
+	else if (m_themeActive == THEME_NIGHT || m_themeActive == THEME_UNDER) { m_windX *= 0.62f; m_windZ *= 0.62f; m_windY *= 0.4f; }
+}
+
 void CSoft3DRaceDlg::TickPhysics(float dt)
 {
 	if (m_phase != PHASE_RACE && m_phase != PHASE_FINISH && m_phase != PHASE_DEMO) return;
 	const int demo = (m_phase == PHASE_DEMO) ? 1 : 0;
 	if (m_sfxHitCool > 0.f) m_sfxHitCool = max(0.f, m_sfxHitCool - dt);
+	TickSkyWind(dt);
 
 	// player input + joypad（デモ中はAI任せ）
 	S3rJoyState joy={}; UpdateJoypadState(joy);
@@ -4782,8 +5034,13 @@ void CSoft3DRaceDlg::TickPhysics(float dt)
 		}
 		if (savedata.s3r_invert_y) steerY = -steerY;
 		float ag = (pl.agilityT>0)?1.45f:1.f;
-		pl.yaw = S3rNormAngle(pl.yaw + steerX * 1.9f * ag * dt);
-		pl.pitch = S3rClamp(pl.pitch + steerY * 2.15f * ag * dt, -1.05f, 1.05f);
+		float yawCap = SkyYawRateCap(pl);
+		float wantYawRate = S3rClamp(steerX * 1.85f * ag, -yawCap, yawCap);
+		pl.yawRate = S3rLerp(pl.yawRate, wantYawRate, min(1.f, 7.2f * dt));
+		pl.yaw = S3rNormAngle(pl.yaw + pl.yawRate * dt);
+		pl.pitch = S3rClamp(pl.pitch + steerY * 1.65f * ag * dt, -1.05f, 1.05f);
+		float wantRoll = S3rClamp(-pl.yawRate * 0.62f - steerX * 0.28f, -0.78f, 0.78f);
+		pl.roll = S3rLerp(pl.roll, wantRoll, min(1.f, 6.5f * dt));
 		// 入力が弱いときはコース接線へ追従（急勾配は許容。真下張り付きだけ防ぐ）
 		if (fabsf(steerX) < 0.12f && fabsf(steerY) < 0.12f) {
 			float px,py,pz,tx,ty,tz,nx,ny,nz,bx,by,bz; SplineFrame(pl.pathT+0.02f,px,py,pz,tx,ty,tz,nx,ny,nz,bx,by,bz);
@@ -4885,11 +5142,12 @@ void CSoft3DRaceDlg::TickPhysics(float dt)
 			c.x = rcx; c.y = rcy; c.z = rcz;
 			c.yaw = atan2f(rtx, rtz);
 			c.pitch = S3rClamp(asinf(S3rClamp(rty, -1.f, 1.f)), -0.55f, 0.55f);
+			c.roll = 0.f; c.yawRate = 0.f;
 			float railCap = FinishSimRailSpeed(c);
 			c.vx = rtx * railCap; c.vy = rty * railCap; c.vz = rtz * railCap;
 		}
 
-		// 進行方向へのグリップ＋横滑り抵抗（カーブで速度が流れる）
+		// 進行方向への空気抵抗（タイヤグリップなし。横滑りは残し、形状抵抗だけ効かせる）
 		float fx=sinf(c.yaw)*cosf(c.pitch), fy=sinf(c.pitch), fz=cosf(c.yaw)*cosf(c.pitch);
 		float spd=sqrtf(c.vx*c.vx+c.vy*c.vy+c.vz*c.vz);
 		float along=0.f, latSpd=0.f;
@@ -4897,20 +5155,41 @@ void CSoft3DRaceDlg::TickPhysics(float dt)
 			along=c.vx*fx+c.vy*fy+c.vz*fz;
 			float lx=c.vx-fx*along, ly=c.vy-fy*along, lz=c.vz-fz*along;
 			latSpd=sqrtf(lx*lx+ly*ly+lz*lz);
-			// 完全固定せず、ある程度スライドを残す
-			float grip=(c.offBand?0.55f:1.45f)*(c.agilityT>0?1.35f:1.f);
-			if (c.craftKnockT > 0.f) grip *= 0.12f;
-			c.vx-=lx*min(1.f,grip*dt); c.vy-=ly*min(1.f,grip*dt); c.vz-=lz*min(1.f,grip*dt);
+			float form=(c.offBand?0.28f:0.42f)*(c.agilityT>0?1.15f:1.f);
+			if (c.craftKnockT > 0.f) form *= 0.18f;
+			c.vx-=lx*min(1.f,form*dt); c.vy-=ly*min(1.f,form*dt); c.vz-=lz*min(1.f,form*dt);
 			along=c.vx*fx+c.vy*fy+c.vz*fz;
 			lx=c.vx-fx*along; ly=c.vy-fy*along; lz=c.vz-fz*along;
 			latSpd=sqrtf(lx*lx+ly*ly+lz*lz);
-			// 横速度が大きいほど前方速度が削られる（カーブ抵抗）
 			if (along > 0.f && latSpd > 0.5f) {
 				float slip = latSpd / (fabsf(along) + latSpd + 1.f);
-				float cornerBleed = (0.7f + 0.012f * fabsf(along)) * slip * slip * (c.offBand?1.6f:1.f);
-				along *= (1.f - min(0.85f, cornerBleed * dt * 3.2f));
+				float cornerBleed = (0.45f + 0.010f * fabsf(along)) * slip * slip * (c.offBand?1.4f:1.f);
+				along *= (1.f - min(0.72f, cornerBleed * dt * 2.4f));
 				c.vx = fx*along + lx; c.vy = fy*along + ly; c.vz = fz*along + lz;
 			}
+		}
+		// 風に流される（自機・AI共通）
+		{
+			float sail = 0.85f + 0.35f * m_windGust;
+			c.vx += m_windX * sail * dt;
+			c.vy += m_windY * 0.45f * sail * dt;
+			c.vz += m_windZ * sail * dt;
+		}
+		// バンク側へ滑る（空力：翼を傾けた方向へ流される）
+		{
+			float rx = cosf(c.yaw), rz = -sinf(c.yaw);
+			float bankSlip = -c.roll * (1.55f + 0.035f * spd);
+			c.vx += rx * bankSlip * dt;
+			c.vz += rz * bankSlip * dt;
+		}
+		// 迎え角の揚力と誘導抗力（機首上げで浮くが速度が削れる）
+		{
+			float aoa = c.pitch;
+			c.vy += aoa * (2.8f + 0.12f * spd) * dt;
+			float ind = (fabsf(aoa) * 0.55f + fabsf(c.roll) * 0.38f + fabsf(c.yawRate) * 0.22f);
+			c.vx *= (1.f - ind * dt);
+			c.vy *= (1.f - ind * 0.55f * dt);
+			c.vz *= (1.f - ind * dt);
 		}
 		// 空気抵抗＋コース曲率による衰退（自機・敵共通。難所で 70→30km/h 付近まで落ちる）
 		{
@@ -5996,6 +6275,98 @@ void CSoft3DRaceDlg::BakeStaticMeshes()
 		float my = (ly + ry) * 0.5f + postH - 0.18f;
 		float span = half + 0.28f;
 		gateBox(mx, my, mz, span, 0.16f, 0.16f, 0.88f, 0.16f, 0.18f);
+		for (int g = 1; g < 12; g++) {
+			float t = (float)g / 12.f;
+			float qx,qy,qz,qtx,qty,qtz,qnx,qny,qnz,qbx,qby,qbz;
+			SplineFrame(t, qx,qy,qz, qtx,qty,qtz, qnx,qny,qnz, qbx,qby,qbz);
+			float side = ((g & 1) ? 1.f : -1.f) * (half + 1.15f);
+			float fx = qx + qbx * side, fy = GroundY(qx + qbx * side, qz + qbz * side), fz = qz + qbz * side;
+			float poleH = 2.4f + 0.55f * (float)(g % 3);
+			gateBox(fx, fy, fz, 0.06f, poleH, 0.06f, 0.55f, 0.48f, 0.38f);
+			float fr = (m_themeActive==THEME_FOREST)?0.28f:((m_themeActive==THEME_MESA)?0.92f:0.82f);
+			float fg = (m_themeActive==THEME_FOREST)?0.62f:((m_themeActive==THEME_NIGHT)?0.32f:0.18f);
+			float fb = (m_themeActive==THEME_UNDER)?0.78f:0.22f;
+			float hx = -qbx * 0.95f, hz = -qbz * 0.95f;
+			float y0 = fy + poleH * 0.42f, y1 = fy + poleH * 0.96f;
+			auto flagTri=[&](float ax,float ay,float az,float bx2,float by2,float bz2,float cx2,float cy2,float cz2){
+				if (!need(3)) return;
+				put(ax,ay,az,qtx,qty,qtz,0,0,fr,fg,fb,1.f);
+				put(bx2,by2,bz2,qtx,qty,qtz,1,0,fr,fg,fb,1.f);
+				put(cx2,cy2,cz2,qtx,qty,qtz,1,1,fr,fg,fb,1.f);
+			};
+			flagTri(fx,y0,fz, fx+hx,y0,fz+hz, fx+hx,y1,fz+hz);
+			flagTri(fx,y0,fz, fx+hx,y1,fz+hz, fx,y1,fz);
+		}
+		// LAP 旗（スタート／周回線）：チェックの布を高くして風で揺れる
+		{
+			auto chkFlag=[&](float ox,float oy,float oz, float wx,float wy,float wz, float hx,float hy,float hz){
+				const int nx=4, ny=3;
+				for (int iy=0; iy<ny; iy++) for (int ix=0; ix<nx; ix++) {
+					float u0=(float)ix/(float)nx, u1=(float)(ix+1)/(float)nx;
+					float v0=(float)iy/(float)ny, v1=(float)(iy+1)/(float)ny;
+					int chk=(ix+iy)&1;
+					float cr=chk?0.96f:0.10f, cg=chk?0.96f:0.10f, cb=chk?0.92f:0.12f;
+					float ax=ox+wx*u0+hx*v0, ay=oy+wy*u0+hy*v0, az=oz+wz*u0+hz*v0;
+					float bx2=ox+wx*u1+hx*v0, by2=oy+wy*u1+hy*v0, bz2=oz+wz*u1+hz*v0;
+					float cx2=ox+wx*u1+hx*v1, cy2=oy+wy*u1+hy*v1, cz2=oz+wz*u1+hz*v1;
+					float dx=ox+wx*u0+hx*v1, dy=oy+wy*u0+hy*v1, dz=oz+wz*u0+hz*v1;
+					if (!need(6)) return;
+					put(ax,ay,az,tx,ty,tz,0,0,cr,cg,cb,1.f);
+					put(bx2,by2,bz2,tx,ty,tz,1,0,cr,cg,cb,1.f);
+					put(cx2,cy2,cz2,tx,ty,tz,1,1,cr,cg,cb,1.f);
+					put(ax,ay,az,tx,ty,tz,0,0,cr,cg,cb,1.f);
+					put(cx2,cy2,cz2,tx,ty,tz,1,1,cr,cg,cb,1.f);
+					put(dx,dy,dz,tx,ty,tz,0,1,cr,cg,cb,1.f);
+				}
+			};
+			float flagW = half * 0.55f; if (flagW < 1.4f) flagW = 1.4f;
+			float flagH = postH * 0.72f;
+			for (int s = 0; s < 2; s++) {
+				float side = (s ? 1.f : -1.f);
+				float fx = px + bx * side * (half * 0.92f) - tx * 0.15f;
+				float fy = py + by * side * (half * 0.92f) - ty * 0.15f;
+				float fz = pz + bz * side * (half * 0.92f) - tz * 0.15f;
+				gateBox(fx, fy, fz, 0.07f, postH * 1.15f, 0.07f, 0.88f, 0.86f, 0.82f);
+				float ox = fx, oy = fy + postH * 0.42f, oz = fz;
+				float wx = -bx * side * flagW, wy = -by * side * flagW, wz = -bz * side * flagW;
+				chkFlag(ox, oy, oz, wx, wy, wz, nx * flagH, ny * flagH, nz * flagH);
+			}
+		}
+		// トンネル坑口のシャッター（吊り下げ。GSW で揺れる）
+		{
+			const float tunR = S3rTunR(m_bandHalf);
+			int lastDeep = m_pathDeep[0] ? 1 : 0;
+			int nShut = 0;
+			for (int i = 8; i < S3R_PATH_SAMPLES && nShut < 8; i += 8) {
+				int d = m_pathDeep[i] ? 1 : 0;
+				if (d == lastDeep) continue;
+				lastDeep = d;
+				float t = (float)i / (float)S3R_PATH_SAMPLES;
+				float qx,qy,qz,qtx,qty,qtz,qnx,qny,qnz,qbx,qby,qbz;
+				SplineFrame(t, qx,qy,qz, qtx,qty,qtz, qnx,qny,qnz, qbx,qby,qbz);
+				float hw = tunR * 0.92f;
+				float hh = tunR * 1.05f;
+				float lx = qx - qbx * hw, ly = qy - qby * hw, lz = qz - qbz * hw;
+				float rx = qx + qbx * hw, ry = qy + qby * hw, rz = qz + qbz * hw;
+				gateBox(lx, ly, lz, 0.10f, hh, 0.10f, 0.42f, 0.40f, 0.38f);
+				gateBox(rx, ry, rz, 0.10f, hh, 0.10f, 0.42f, 0.40f, 0.38f);
+				float mx = (lx + rx) * 0.5f, mz = (lz + rz) * 0.5f;
+				float my = (ly + ry) * 0.5f + hh - 0.12f;
+				gateBox(mx, my, mz, hw + 0.12f, 0.10f, 0.10f, 0.38f, 0.36f, 0.34f);
+				// 2枚の吊り戸（中央が少し開く）
+				float gap = hw * 0.16f;
+				float panel = hw - gap * 0.5f;
+				float drop = hh * 0.78f;
+				float py0 = (ly + ry) * 0.5f + hh * 0.18f;
+				float slx = qx - qbx * (gap * 0.5f + panel * 0.5f);
+				float srx = qx + qbx * (gap * 0.5f + panel * 0.5f);
+				float slz = qz - qbz * (gap * 0.5f + panel * 0.5f);
+				float srz = qz + qbz * (gap * 0.5f + panel * 0.5f);
+				gateBox(slx, py0, slz, panel * 0.48f, drop, 0.05f, 0.55f, 0.52f, 0.48f);
+				gateBox(srx, py0, srz, panel * 0.48f, drop, 0.05f, 0.55f, 0.52f, 0.48f);
+				nShut++;
+			}
+		}
 	}
 	beginMesh(m_view.m_vbWater, m_view.m_vbWaterN, &m_view.m_vbWaterParts, 3);
 	{
@@ -6022,7 +6393,10 @@ void CSoft3DRaceDlg::BakeStaticMeshes()
 				float pd1 = pathD(xb, za); if (pd1 < pd) pd = pd1;
 				float pd2 = pathD(xb, zb); if (pd2 < pd) pd = pd2;
 				float pd3 = pathD(xa, zb); if (pd3 < pd) pd = pd3;
-				if (pd < m_bandHalf * 1.35f) continue;
+				if (pd < m_bandHalf * 1.35f) {
+					float py = sampHm(m_hmPathY, mx, mz, m_waterY + 8.f);
+					if (py > wy + 0.6f) continue;
+				}
 			}
 			if (!need(6)) continue;
 			put(xa,wy,za,0,1,0,0,0,wr,wg,wb,wa);
@@ -6046,7 +6420,7 @@ void CSoft3DRaceDlg::BakeStaticMeshes()
 	}
 
 	if (m_obsNv > 0 && m_obsNi >= 3)
-		m_view.UploadDefaultVB(&m_view.m_vbObs, &m_view.m_obsNvGpu, m_obsVert, (UINT)m_obsNv);
+		m_view.UploadDefaultVB(&m_view.m_vbObs, &m_view.m_obsNvGpu, m_obsVert, (UINT)m_obsNv, (UINT)sizeof(S3RSkinVertex));
 	if (m_obsNi >= 3)
 		m_view.UploadDefaultIB(&m_view.m_ibObs, &m_view.m_obsNiGpu, m_obsIdx, (UINT)m_obsNi);
 	m_view.m_obsInstN = 0;
@@ -6057,7 +6431,7 @@ void CSoft3DRaceDlg::BakeStaticMeshes()
 		if (nInst > S3R_MAX_OBS) nInst = S3R_MAX_OBS;
 		for (int i = 0; i < nInst; i++) {
 			S3rObs& o = m_obs[i];
-			inst[i] = {o.x, o.y, o.z, o.yaw, o.sx, o.sy, o.sz, 0.f, 1.f, 1.f, 1.f, 1.f};
+			inst[i] = {o.x, o.y, o.z, o.yaw, o.sx, o.sy, o.sz, 0.f, 1.f, 1.f, 1.f, 1.f, 0.f, 0.55f + 0.45f * ((float)((i * 37 + 11) & 255) / 255.f), 0.f, 0.f};
 		}
 		UINT ibytes = (UINT)nInst * (UINT)sizeof(S3RInst);
 		if (m_view.m_vbObsInst && m_view.m_imm) {
@@ -6101,6 +6475,7 @@ void CSoft3DRaceDlg::RenderScene()
 	if (!m_view.m_ready || m_knotN < 4) return;
 	if (m_view.m_vbTerrParts < 1 && m_hmReady) BakeStaticMeshes();
 	ID3D11DeviceContext* dc = m_view.m_imm;
+	if (!dc || !m_view.m_cbFrame) return;
 	const int w = m_view.m_vw, h = m_view.m_vh; if (w < 8 || h < 8) return;
 	if (m_clearDirty) {
 		if (!m_clearBakeText.IsEmpty()) m_view.BakeClearTexture(m_clearBakeText, m_clearBakeA);
@@ -6258,8 +6633,18 @@ void CSoft3DRaceDlg::RenderScene()
 	cb.eyePos = {cx,cy,cz, (float)(m_themeActive-1)};
 	float fogNear=70.f, fogFar=320.f;
 	if (m_themeActive==THEME_UNDER||m_themeActive==THEME_NIGHT){ fogNear=40.f; fogFar=200.f; }
+	const int playerWet = (pl.y < m_waterY - 0.35f) ? 1 : 0;
+	int playerUnder = 0;
+	{
+		int pi = S3rPathIdx(pl.pathT);
+		if (pi < 0) pi = 0;
+		if (pi >= S3R_PATH_SAMPLES) pi = S3R_PATH_SAMPLES - 1;
+		if (m_pathDeep[pi]) playerUnder = 1;
+	}
 	fogNear *= (1.f - 0.4f * m_reverbFogBoost - 0.25f * (pl.fogT>0?1.f:0.f));
 	fogFar *= (1.f - 0.35f * m_reverbFogBoost);
+	if (playerWet) { fogNear *= 0.38f; fogFar *= 0.42f; }
+	else if (playerUnder) { fogNear *= 0.55f; fogFar *= 0.60f; }
 	cb.fogParams = {fogNear, fogFar, m_waterY, 0.f};
 	float dofStart=38.f, dofRise=55.f, dofAmp=1.6f + 2.5f*m_eqDofBoost + (pl.dofT>0?2.2f:0.f);
 	const BOOL hq = (m_phase == PHASE_RACE || m_phase == PHASE_COUNTDOWN || m_phase == PHASE_FINISH);
@@ -6279,6 +6664,7 @@ void CSoft3DRaceDlg::RenderScene()
 			flash = max(flash, 0.18f + 0.12f * (0.5f + 0.5f * sinf(m_anim * 14.f)));
 		cb.misc = {flash, m_clearBakeA, 1.f/tanf(fov*.5f), m_anim};
 	}
+	cb.wind = {m_windX, m_windY, m_windZ, m_windGust};
 	{
 		float pr = m_bandHalf * 1.85f;
 		if (pr < 10.f) pr = 10.f;
@@ -6301,6 +6687,18 @@ void CSoft3DRaceDlg::RenderScene()
 	D3D11_MAPPED_SUBRESOURCE map={};
 	if (FAILED(dc->Map(m_view.m_cbFrame,0,D3D11_MAP_WRITE_DISCARD,0,&map))) return;
 	memcpy(map.pData,&cb,sizeof(cb)); dc->Unmap(m_view.m_cbFrame,0);
+	if (m_view.m_cbSkin) {
+		float spd = sqrtf(pl.vx * pl.vx + pl.vy * pl.vy + pl.vz * pl.vz);
+		float flap = (0.16f + 0.14f * pl.throttle + 0.07f * S3rSaturate(spd / 90.f)) * (0.55f + 0.45f * sinf(m_anim * 11.2f));
+		flap += 0.045f * sinf(m_anim * 23.f);
+		if (pl.nitroT > 0.f) flap += 0.05f;
+		S3RSkinCB sk = {};
+		S3rFillSkinCB(sk, m_anim, m_windX, m_windY, m_windZ, m_windGust, flap);
+		if (SUCCEEDED(dc->Map(m_view.m_cbSkin,0,D3D11_MAP_WRITE_DISCARD,0,&map))) {
+			memcpy(map.pData,&sk,sizeof(sk)); dc->Unmap(m_view.m_cbSkin,0);
+		}
+		dc->VSSetConstantBuffers(1,1,&m_view.m_cbSkin);
+	}
 	if (m_view.m_csNoise && m_view.m_uavNoise) {
 		ID3D11ShaderResourceView* n5=NULL; dc->PSSetShaderResources(5,1,&n5); dc->DSSetShaderResources(5,1,&n5);
 		dc->CSSetShader(m_view.m_csNoise,NULL,0);
@@ -6630,6 +7028,32 @@ void CSoft3DRaceDlg::RenderScene()
 				put(px-s,py,pz,0,1,0,0,0,.45f,.18f,.75f,aa); put(px+s,py,pz,0,1,0,1,0,.45f,.18f,.75f,aa); put(px,py+s,pz,0,1,0,.5f,1,.45f,.18f,.75f,aa);
 			}
 		}
+		if (c.alive && !c.retired && c.y < m_waterY - 0.35f) {
+			for (int k = 0; k < 7; k++) {
+				float t = fmodf(m_anim * 0.55f + (float)k * 0.17f + (float)i * 0.09f, 1.f);
+				float ang = (float)k * 0.95f + m_anim * 0.7f;
+				float px = c.x + cosf(ang) * (0.18f + t * 0.45f);
+				float py = c.y + t * 1.35f;
+				float pz = c.z + sinf(ang) * (0.18f + t * 0.45f);
+				float s = 0.05f + (1.f - t) * 0.10f;
+				float aa = (1.f - t) * 0.38f;
+				put(px-s,py,pz,0,1,0,0,0,.55f,.85f,1.f,aa); put(px+s,py,pz,0,1,0,1,0,.55f,.85f,1.f,aa); put(px,py+s,pz,0,1,0,.5f,1,.55f,.85f,1.f,aa);
+			}
+		} else if (c.alive && !c.retired) {
+			int pi = S3rPathIdx(c.pathT);
+			if (pi >= 0 && pi < S3R_PATH_SAMPLES && m_pathDeep[pi]) {
+				for (int k = 0; k < 4; k++) {
+					float t = fmodf(m_anim * 0.8f + (float)k * 0.23f + (float)i * 0.11f, 1.f);
+					float ang = (float)k * 1.4f + m_anim * 1.1f;
+					float px = c.x + cosf(ang) * (0.22f + t * 0.35f);
+					float py = c.y - t * 0.45f;
+					float pz = c.z + sinf(ang) * (0.22f + t * 0.35f);
+					float s = 0.08f + t * 0.10f;
+					float aa = (1.f - t) * 0.22f;
+					put(px-s,py,pz,0,1,0,0,0,.38f,.32f,.26f,aa); put(px+s,py,pz,0,1,0,1,0,.38f,.32f,.26f,aa); put(px,py+s,pz,0,1,0,.5f,1,.38f,.32f,.26f,aa);
+				}
+			}
+		}
 		// 機動バフの黄スパーク
 		if (c.agilityT > 0.f && c.alive && !c.retired) {
 			float life = S3rSaturate(c.agilityT / 5.f);
@@ -6681,6 +7105,13 @@ void CSoft3DRaceDlg::RenderScene()
 
 	UINT craftDrawN = 0;
 	{
+		auto craftFlap=[&](const S3rCraft& c)->float{
+			float spd=sqrtf(c.vx*c.vx+c.vy*c.vy+c.vz*c.vz);
+			float f=0.38f+0.42f*c.throttle+0.22f*S3rSaturate(spd/85.f);
+			if(c.nitroT>0.f) f+=0.18f;
+			if(!c.alive||c.retired) f=0.22f;
+			return S3rSaturate(f);
+		};
 		S3RInst ci[S3R_MAX_CRAFT];
 		if (m_phase == PHASE_PODIUM) {
 			for (int s = 0; s < 3 && craftDrawN < (UINT)S3R_MAX_CRAFT; s++) {
@@ -6688,7 +7119,7 @@ void CSoft3DRaceDlg::RenderScene()
 				if (idx < 0 || idx >= m_craftN) continue;
 				S3rCraft& c = m_crafts[idx];
 				float cr = kCraftColors[c.colorIdx][0], cg = kCraftColors[c.colorIdx][1], cb = kCraftColors[c.colorIdx][2];
-				ci[craftDrawN++] = {c.x, c.y, c.z, c.yaw, 1.25f, 1.25f, 1.25f, c.pitch, cr, cg, cb, 1.f};
+				ci[craftDrawN++] = {c.x, c.y, c.z, c.yaw, 1.25f, 1.25f, 1.25f, c.pitch, cr, cg, cb, 1.f, c.roll, 0.48f, 0.f, 0.f};
 			}
 		} else {
 			for (int i = 0; i < m_craftN && craftDrawN < (UINT)S3R_MAX_CRAFT; i++) {
@@ -6719,7 +7150,7 @@ void CSoft3DRaceDlg::RenderScene()
 					cg *= 1.f - 0.52f * soot;
 					cb *= 1.f - 0.50f * soot;
 				}
-				ci[craftDrawN++] = {c.x, c.y, c.z, c.yaw, sc, sc, sc, c.pitch, cr, cg, cb, a};
+				ci[craftDrawN++] = {c.x, c.y, c.z, c.yaw, sc, sc, sc, c.pitch, cr, cg, cb, a, c.roll, craftFlap(c), 0.f, 0.f};
 			}
 		}
 		if (craftDrawN && m_view.m_vbCraftInst) {
@@ -6746,6 +7177,16 @@ void CSoft3DRaceDlg::RenderScene()
 	else if (m_themeActive==THEME_FOREST){clearC[0]=.42f;clearC[1]=.62f;clearC[2]=.48f;}
 	else if (m_themeActive==THEME_GRASS){clearC[0]=.55f;clearC[1]=.72f;clearC[2]=.55f;}
 	else if (m_themeActive==THEME_RUINS){clearC[0]=.55f;clearC[1]=.52f;clearC[2]=.48f;}
+	if (m_crafts[0].y < m_waterY - 0.35f) {
+		clearC[0] = clearC[0] * 0.35f + 0.08f;
+		clearC[1] = clearC[1] * 0.42f + 0.22f;
+		clearC[2] = clearC[2] * 0.48f + 0.38f;
+	} else {
+		int pi = S3rPathIdx(m_crafts[0].pathT);
+		if (pi >= 0 && pi < S3R_PATH_SAMPLES && m_pathDeep[pi]) {
+			clearC[0] *= 0.55f; clearC[1] *= 0.52f; clearC[2] *= 0.48f;
+		}
+	}
 
 	const UINT nSolid = nWorld + nCraft;
 	auto bindMesh=[&](ID3D11Buffer* vb){
@@ -6764,12 +7205,13 @@ void CSoft3DRaceDlg::RenderScene()
 	};
 	auto bindInst=[&](ID3D11Buffer* vb, ID3D11Buffer* ib, ID3D11Buffer* inst){
 		ID3D11Buffer* b[2]={vb,inst};
-		UINT st[2]={sizeof(S3RVertex), sizeof(S3RInst)};
+		UINT st[2]={sizeof(S3RSkinVertex), sizeof(S3RInst)};
 		UINT of[2]={0,0};
 		dc->IASetVertexBuffers(0,2,b,st,of);
 		dc->IASetIndexBuffer(ib, DXGI_FORMAT_R32_UINT, 0);
 		dc->IASetInputLayout(m_view.m_ilInst);
 		dc->VSSetShader(m_view.m_vsInst,NULL,0);
+		if (m_view.m_cbSkin) dc->VSSetConstantBuffers(1,1,&m_view.m_cbSkin);
 	};
 	auto unbindInst=[&](){
 		ID3D11Buffer* z[2]={NULL,NULL};
@@ -7046,7 +7488,7 @@ void CSoft3DRaceDlg::RenderScene()
 	ID3D11Buffer* cbs[]={m_view.m_cbFrame};
 	ID3D11SamplerState* texS = (m_view.m_aniso >= 8 && m_view.m_sampAniso) ? m_view.m_sampAniso : m_view.m_sampLin;
 	ID3D11SamplerState* smp[]={texS,m_view.m_sampPoint,m_view.m_sampCmp};
-	dc->VSSetConstantBuffers(0,1,cbs); dc->PSSetConstantBuffers(0,1,cbs); dc->HSSetConstantBuffers(0,1,cbs); dc->DSSetConstantBuffers(0,1,cbs);
+	dc->VSSetConstantBuffers(0,1,cbs); dc->PSSetConstantBuffers(0,1,cbs); dc->HSSetConstantBuffers(0,1,cbs); dc->DSSetConstantBuffers(0,1,cbs); dc->GSSetConstantBuffers(0,1,cbs);
 	dc->PSSetSamplers(0,3,smp); dc->DSSetSamplers(0,1,&m_view.m_sampLin);
 	ID3D11ShaderResourceView* bandSrv=m_view.m_srvBand;
 	ID3D11ShaderResourceView* noiseSrv=m_view.m_srvNoise;
@@ -7066,6 +7508,7 @@ void CSoft3DRaceDlg::RenderScene()
 	dc->IASetInputLayout(m_view.m_ilSolid); dc->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 	dc->VSSetShader(m_view.m_vsSolid,NULL,0); dc->HSSetShader(NULL,NULL,0); dc->DSSetShader(NULL,NULL,0);
 	if (m_view.m_vbTerrParts > 0){
+		dc->GSSetShader(NULL,NULL,0);
 		dc->PSSetShader(m_view.m_psTerr,NULL,0);
 		ID3D11ShaderResourceView* srvs[]={themeSrv,themeDet,NULL,envSrv,shSrv,noiseSrv};
 		dc->PSSetShaderResources(0,6,srvs);
@@ -7077,7 +7520,9 @@ void CSoft3DRaceDlg::RenderScene()
 		ID3D11ShaderResourceView* srvs[]={themeSrv,scenT1,NULL,envSrv,shSrv,noiseSrv};
 		dc->PSSetShaderResources(0,6,srvs);
 		if (m_view.m_vbSceneryParts > 0) {
+			dc->GSSetShader(m_view.m_gsWind,NULL,0);
 			drawParts(m_view.m_vbScenery, m_view.m_vbSceneryN, m_view.m_vbSceneryParts, 3);
+			dc->GSSetShader(NULL,NULL,0);
 		}
 		{
 			ID3D11ShaderResourceView* osrvs[]={obsSrv,obsDet,NULL,envSrv,shSrv,noiseSrv};
@@ -7157,16 +7602,16 @@ void CSoft3DRaceDlg::RenderScene()
 		if (m_view.m_vbBandParts > 0){
 			dc->RSSetState(m_view.m_rsNoCull); dc->OMSetDepthStencilState(m_view.m_dssRead,0); dc->OMSetBlendState(m_view.m_bsAlpha,NULL,0xffffffff);
 			dc->IASetInputLayout(m_view.m_ilPatch); dc->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_4_CONTROL_POINT_PATCHLIST);
-			dc->VSSetShader(m_view.m_vsTess,NULL,0); dc->HSSetShader(m_view.m_hsTess,NULL,0); dc->DSSetShader(m_view.m_dsTess,NULL,0); dc->PSSetShader(m_view.m_psBand,NULL,0);
+			dc->VSSetShader(m_view.m_vsTess,NULL,0); dc->HSSetShader(m_view.m_hsTess,NULL,0); dc->DSSetShader(m_view.m_dsTess,NULL,0); dc->GSSetShader(m_view.m_gsWind,NULL,0); dc->PSSetShader(m_view.m_psBand,NULL,0);
 			ID3D11ShaderResourceView* srvs[]={bandSrv,themeSrv,NULL,envSrv,shSrv,noiseSrv};
 			dc->PSSetShaderResources(0,6,srvs); dc->DSSetShaderResources(5,1,&noiseSrv); dc->DSSetShaderResources(0,1,&bandSrv);
 			drawParts(m_view.m_vbBand, m_view.m_vbBandN, m_view.m_vbBandParts, 4);
-			dc->HSSetShader(NULL,NULL,0); dc->DSSetShader(NULL,NULL,0);
+			dc->HSSetShader(NULL,NULL,0); dc->DSSetShader(NULL,NULL,0); dc->GSSetShader(NULL,NULL,0);
 		}
 	}
 	dc->IASetInputLayout(m_view.m_ilSolid); dc->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 	dc->VSSetShader(m_view.m_vsSolid,NULL,0);
-	dc->HSSetShader(NULL,NULL,0); dc->DSSetShader(NULL,NULL,0);
+	dc->HSSetShader(NULL,NULL,0); dc->DSSetShader(NULL,NULL,0); dc->GSSetShader(NULL,NULL,0);
 	if (nTrans){
 		bindMesh(m_view.m_vbDyn);
 		const UINT t0 = nBand+nWorld+nCraft;
@@ -7199,6 +7644,7 @@ void CSoft3DRaceDlg::RenderScene()
 	ID3D11ShaderResourceView* nulls[6]={}; dc->PSSetShaderResources(0,6,nulls);
 	dc->OMSetDepthStencilState(m_view.m_dssOff,0); dc->OMSetBlendState(m_view.m_bsOpaque,NULL,0xffffffff);
 	dc->VSSetShader(m_view.m_vsPost,NULL,0);
+	dc->HSSetShader(NULL,NULL,0); dc->DSSetShader(NULL,NULL,0); dc->GSSetShader(NULL,NULL,0);
 	dc->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 	const BOOL doDof = hq && m_view.m_gfxDof > 0;
 	const BOOL doFx = hq && m_view.m_gfxSsr > 0 && m_view.m_psSsr;
@@ -7742,7 +8188,9 @@ BOOL CSoft3DRaceDlg::OnInitDialog()
 	CaptureAudioBaseline();
 	ApplySavedWindowRect();
 	LayoutAll();
+	m_inTick = 1;
 	if (!m_view.InitDx()) {
+		m_inTick = 0;
 		CString msg;
 		msg.Format(L"%s\n(stage=%d hr=0x%08X)",
 			LL14(L"DirectX 11 の初期化に失敗しました。",L"DirectX 11 initialization failed.",L"Échec de l'initialisation de DirectX 11.",L"Inizializzazione DirectX 11 non riuscita.",L"Error al iniciar DirectX 11.",L"DirectX 11 초기화에 실패했습니다.",L"DirectX 11 初始化失败。",L"فشل تهيئة DirectX 11.",L"Не удалось инициализировать DirectX 11.",L"DirectX 11 konnte nicht initialisiert werden.",L"Falha ao iniciar o DirectX 11.",L"Initialisatie van DirectX 11 mislukt.",L"Nie udało się zainicjować DirectX 11.",L"DirectX 11 başlatılamadı."),
@@ -7754,6 +8202,7 @@ BOOL CSoft3DRaceDlg::OnInitDialog()
 	GenerateCourse();
 	Soft3DSfxEnsure(m_hWnd);
 	m_lastTick = GetTickCount();
+	m_inTick = 0;
 	// 描画・更新は og の timerp 経由。独自 SetTimer は使わない
 	return TRUE;
 }
@@ -7815,7 +8264,20 @@ void CSoft3DRaceDlg::TickFrame()
 		m_inTick = 0;
 		if (pend) DestroyWindow();
 	};
-	if (!GetSafeHwnd() || !m_view.m_ready) { endTick(); return; }
+	if (!GetSafeHwnd()) { endTick(); return; }
+	if (!m_view.m_ready) {
+		if (!IsWindowVisible()) { endTick(); return; }
+		if (m_dxRecoverTries < 2 && m_view.GetSafeHwnd()) {
+			m_dxRecoverTries++;
+			if (m_view.InitDx()) {
+				m_dxRecoverTries = 0;
+				if (m_knotN >= 4) BakeStaticMeshes();
+			}
+		}
+		endTick();
+		return;
+	}
+	m_dxRecoverTries = 0;
 	PumpQueued(TRUE);
 	if (!GetSafeHwnd() || !m_view.m_ready) { endTick(); return; }
 	const DWORD now = GetTickCount();
