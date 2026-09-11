@@ -141,6 +141,15 @@ void CDriverF3::Close()
 	booted_ = 0;
 }
 
+int CDriverF3::OverlayTitle(unsigned titleCode)
+{
+	if (!hw_) return 0;
+	songCode_ = titleCode;
+	locked_ = 1;
+	hw_->SetSongCommand(songCode_);
+	return 1;
+}
+
 void CDriverF3::ArmKeyOnGates()
 {
 	if (!hw_) return;

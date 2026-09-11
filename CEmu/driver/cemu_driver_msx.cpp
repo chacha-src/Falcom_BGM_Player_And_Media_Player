@@ -143,6 +143,12 @@ void CDriverMsx::Close()
 	playing_ = 0;
 }
 
+int CDriverMsx::OverlayTitle(unsigned titleCode)
+{
+	if (!hw_) return 0;
+	return hw_->StartSong(titleCode) ? 1 : 0;
+}
+
 int CDriverMsx::Render(int16_t* stereo, int frames)
 {
 	if (!hw_ || !stereo || frames <= 0) return 0;

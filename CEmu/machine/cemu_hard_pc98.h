@@ -3,9 +3,10 @@
 #include "../chip/cemu_chip.h"
 #include "../cemu_zipfs.h"
 #include "cemu_dos98.h"
+#include "cemu_np2ctx.h"
 
 /* PC-98 hard: NP2 i286 + OPN(A) @ 0x188 + PIT/PIC + hoot EXT ports.
-   Global NP2 core — only one instance active. */
+   Live NP2 core is process-global; BindNp2 swaps this instance's RAM/CPU. */
 
 enum { CEMU_PC98_MIDI_CAP = 256000 };
 
@@ -16,7 +17,11 @@ public:
 
 	int Init(const CEmuGameEntry* ge, int sampleRate);
 	void Shutdown();
+	int EnsureNp2Ram();
+	void BindNp2();
 	int SampleRate() const { return sampleRate_; }
+	int PmdOpnIrq() const { return pmdOpnIrq_; }
+	int PmdPlayArmed() const { return pmdPlayArmed_; }
 	int LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode);
 	int TriggerPlay(unsigned titleCode);
 	int TriggerStop();
@@ -320,6 +325,12 @@ private:
 	void BindDosTriggerSong(const CEmuGameEntry* ge, unsigned titleCode);
 	const char* SelectedDosSong(const CEmuGameEntry* ge, unsigned titleCode) const;
 	int RunDosDevices(const CEmuGameEntry* ge, uint64_t budgetCycles);
+
+	uint8_t* np2Ram_;
+	uint8_t np2Cpu_[CEMU_NP2_CPU_SIZE];
+	int np2HaveCpu_;
+	int pmdOpnIrq_; /* PMD*: music clock is OPN Timer B — do not deliver INT08 */
+	int pmdPlayArmed_; /* 1 after TriggerPlay — BootDos still needs INT08 */
 };
 
 void CEmuHardPc98SetActive(CHardPc98* hw);

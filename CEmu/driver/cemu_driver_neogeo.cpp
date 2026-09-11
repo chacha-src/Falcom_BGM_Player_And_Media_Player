@@ -20,6 +20,8 @@ CDriverNeo::CDriverNeo()
 
 	, songCmd_(0x01)
 
+	, songCmdHi_(0)
+
 	, ymResidual_(0)
 
 	, cpuAcc_(0)
@@ -76,19 +78,27 @@ int CDriverNeo::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned
 
 	/*
 
-	 * Fixed pick: host title if in M1 range, else first catalog code 0x01..0x3F
+	 * Fixed pick: host title if nonzero (Neo Geo user cmds are 0x20-0xFF),
 
-	 * (prefer 0x21+). No try-table / peak hunt.
+	 * else first catalog code 0x01..0x3F (prefer 0x21+). No try-table / peak hunt.
 
 	 */
 
 	songCmd_ = 0x20;
 
+	songCmdHi_ = 0;
+
 	{
 
 		const uint8_t t = (uint8_t)(titleCode & 0xff);
 
-		if (titleCode && t >= 0x01 && t <= 0x3f)
+		if (titleCode > 0xffu) {
+
+			songCmdHi_ = (uint8_t)((titleCode >> 8) & 0xff);
+
+			songCmd_ = t;
+
+		} else if (titleCode && t >= 0x01)
 
 			songCmd_ = t;
 
@@ -130,7 +140,7 @@ int CDriverNeo::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned
 
 	   onto the first 0x21..0x3F BGM when present - keep 0x02 logo (mslug). */
 
-	if (songCmd_ == 0x01 || songCmd_ == 0x20) {
+	if (!titleCode && (songCmd_ == 0x01 || songCmd_ == 0x20)) {
 
 		uint8_t pick = 0;
 
@@ -168,6 +178,54 @@ int CDriverNeo::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned
 
 
 	CEmuHardNeoSetActive(hw_);
+
+	/* ADK OS 8.8 table at (2E0C): empty slots are 10 00 00 00 (mosyougi
+
+	   0x04). Skip the hole and the next live 0x20 so even/odd catalog
+
+	   picks don't both land on the following BGM. */
+
+	if (!songCmdHi_) {
+
+		uint8_t* mAdk = hw_->Mem();
+
+		if (mAdk) {
+
+			const uint16_t tab = (uint16_t)(mAdk[0x2E0C] | ((uint16_t)mAdk[0x2E0D] << 8));
+
+			const unsigned off = (unsigned)songCmd_ * 4u;
+
+			if (tab >= 0x1000u && (unsigned)tab + off + 4u < 0xF800u
+
+				&& mAdk[tab + 8] == 0x40
+
+				&& mAdk[tab + off] == 0x10 && mAdk[tab + off + 1] == 0
+
+				&& mAdk[tab + off + 2] == 0 && mAdk[tab + off + 3] == 0) {
+
+				uint8_t live1 = 0, live2 = 0;
+
+				for (unsigned c = (unsigned)songCmd_ + 1u; c < 0x40u; c++) {
+
+					if (mAdk[tab + c * 4u] == 0x20) {
+
+						if (!live1) live1 = (uint8_t)c;
+
+						else { live2 = (uint8_t)c; break; }
+
+					}
+
+				}
+
+				if (live2) songCmd_ = live2;
+
+				else if (live1) songCmd_ = live1;
+
+			}
+
+		}
+
+	}
 
 	/* Early SNK: type table at (0173) ? entries 1=SE, 2+=BGM. Prefer first
 
@@ -263,11 +321,11 @@ int CDriverNeo::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned
 
 				const int curLive = (songCmd_ >= 0x20) ? songLive(songCmd_) : 0;
 
-				if (bgm && (curTy < 2 || curTy > 5 || !curLive))
+				/* Host catalog pick is authoritative. Only remap empty/SE slots
 
-					songCmd_ = bgm;
+				   when Open had no title (zip drop without a titlelist). */
 
-				else if (bgm && titleCode && ((titleCode & 0xff) == 0x02u))
+				if (!titleCode && bgm && songCmd_ < 0x40 && (curTy < 2 || curTy > 5 || !curLive))
 
 					songCmd_ = bgm;
 
@@ -291,17 +349,49 @@ int CDriverNeo::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned
 
 	}
 
+	int snkDrv = 0;
+
+	int makoto = 0;
+
+	uint8_t* mBoot = hw_->Mem();
+
+	if (mBoot) {
+
+		for (unsigned i = 0; i + 12u < 0x80u; i++) {
+
+			if (mBoot[i] == (uint8_t)'S' && memcmp(mBoot + i, "Sound Driver", 12) == 0) {
+
+				snkDrv = 1; break;
+
+			}
+
+		}
+
+		for (unsigned i = 0; i + 6u < 0x80u; i++) {
+
+			if (memcmp(mBoot + i, "MAKOTO", 6) == 0) {
+
+				makoto = 1; break;
+
+			}
+
+		}
+
+	}
+
 	/*
 
-	 * KOF-family M1 only: cold boot sets FE34=0xFF and song entry aborts while
+	 * KOF-family / SNK Sound Driver only: cold boot sets FE34=0xFF and song
 
-	 * FE34!=0. Clear with $08/$07. Early drivers (mslug/bstars/?c) never touch
+	 * entry aborts while FE34!=0. Clear with $08/$07. MAKOTO queues $08 as a
 
-	 * FE34 ? sending $08 there queues a bogus song and leaves them SILENT.
+	 * regular command and never clears FE34, which skipped the FE30 poke and
+
+	 * left type-3 slots (ganryu 0xF4) locked via FE35=FF.
 
 	 */
 
-	if (hw_->PeekRam(0xFE34) != 0) {
+	if (snkDrv && hw_->PeekRam(0xFE34) != 0) {
 
 		SendZ80Command(0x08, 90);
 
@@ -331,76 +421,45 @@ int CDriverNeo::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned
 
 	}
 
-	/* Early SNK: boot latches FE30=FF as a BGM lock; type-2+ song start at
+	if (mBoot) {
 
-	   $0F04 does JP NZ,$119F (POP/RET) while set. 68K clears it in-game -
+		if (mBoot[0xFE30] == 0xff) { mBoot[0xFE30] = 0; mBoot[0xFE31] = 0; }
 
-	   host poke so real BGM slots (0x20+) can run. Do not require the
+		if (mBoot[0xFE21] == 0xff) { mBoot[0xFE21] = 0; mBoot[0xFE22] = 0; }
 
-	   (0172)==LD HL marker - viewpoin/mutnat/pbobblen use other prologues
+		if (mBoot[0xFE1C] == 0xff) { mBoot[0xFE1C] = 0; mBoot[0xFE1D] = 0; }
 
-	   but still park the FF lock at FE30. */
+		if (makoto) {
 
-	/* Early SNK: boot latches FE30=FF as a BGM lock; type-2+ song start at
+			if (mBoot[0xFE34] == 0xff) { mBoot[0xFE34] = 0; mBoot[0xFE35] = 0; }
 
-	   \ does JP NZ,\ (POP/RET) while set. 68K clears it in-game -
+		}
 
-	   host poke so real BGM slots (0x20+) can run. Do not require the
+		if (snkDrv) {
 
-	   (0172)==LD HL marker - viewpoin/mutnat/pbobblen use other prologues
+			if (mBoot[0xFDE1] == 0xff) { mBoot[0xFDE1] = 0; mBoot[0xFDE2] = 0; }
 
-	   but still park the FF lock at FE30. */
+			if (mBoot[0xFD11] == 0xff) { mBoot[0xFD11] = 0; mBoot[0xFD12] = 0; }
 
-	if (hw_->PeekRam(0xFE34) == 0 && hw_->PeekRam(0xFE30) == 0xff) {
+		}
 
-		uint8_t* m = hw_->Mem();
+		/* Psikyo (s1945p): BGM 0x20..0x3F returns while F902!=0. */
 
-		if (m) {
+		if (mBoot[0x66] == 0x08 && mBoot[0x67] == 0xd9
 
-			m[0xFE30] = 0;
+			&& mBoot[0x68] == 0xdb && mBoot[0x69] == 0x00) {
 
-			m[0xFE31] = 0;
+			mBoot[0xF900] = 0;
+
+			mBoot[0xF902] = 0;
 
 		}
 
 	}
 
-	/* AOF3/KOF95-class: boot DEC A;LD (FE21)/(FE22),A leaves FF. BGM entry
+	if (songCmdHi_)
 
-	   at \ does OR A;RET NZ on FE21 - without a 68K enable every 0x20+
-
-	   command returns before bank/song setup (only cmd 0x02 logo still plays). */
-
-	if (hw_->PeekRam(0xFE21) == 0xff) {
-
-		uint8_t* m = hw_->Mem();
-
-		if (m) {
-
-			m[0xFE21] = 0;
-
-			m[0xFE22] = 0;
-
-		}
-
-	}
-
-	/* Mag Drop 3-class: same boot DEC A lock at FE1C/FE1D; BGM entry OR A;RET NZ. */
-
-	if (hw_->PeekRam(0xFE1C) == 0xff) {
-
-		uint8_t* m = hw_->Mem();
-
-		if (m) {
-
-			m[0xFE1C] = 0;
-
-			m[0xFE1D] = 0;
-
-		}
-
-	}
-
+		SendZ80Command(songCmdHi_, 120);
 
 	SendZ80Command(songCmd_, 120);
 
@@ -489,6 +548,26 @@ void CDriverNeo::Close()
 {
 
 	hw_ = NULL;
+
+}
+
+
+
+int CDriverNeo::OverlayTitle(unsigned titleCode)
+
+{
+
+	const uint8_t t = (uint8_t)(titleCode & 0xff);
+
+	if (!hw_ || !t) return 0;
+
+	songCmd_ = t;
+
+	hw_->SetSoundCommand(t);
+
+	injected_ = 1;
+
+	return 1;
 
 }
 

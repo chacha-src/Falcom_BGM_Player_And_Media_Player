@@ -709,6 +709,17 @@ void CDriverX68k::Close()
 	booted_ = 0;
 }
 
+int CDriverX68k::OverlayTitle(unsigned titleCode)
+{
+	if (!hw_) return 0;
+	songCode_ = titleCode ? titleCode : 1;
+	pinned_ = 1;
+	locked_ = 1;
+	hw_->SetSongCommand(songCode_);
+	ResumeMailboxForSong(songCode_);
+	return 1;
+}
+
 void CDriverX68k::TickOpm(uint64_t cpuCycles)
 {
 	if (!hw_ || !hw_->SoundChip() || cpuCycles == 0) return;

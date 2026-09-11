@@ -1089,6 +1089,8 @@ CHardPcat::CHardPcat()
 	, sbDspReadAvail_(0)
 	, sbDspQueueR_(0)
 	, sbDspQueueW_(0)
+	, np2Ram_(NULL)
+	, np2HaveCpu_(0)
 {
 	hardKind = KIND_PCAT;
 	dosSong_[0] = 0;
@@ -1165,16 +1167,33 @@ int CHardPcat::Init(const CEmuGameEntry* ge, int sampleRate)
 		}
 	}
 	MidiCaptureReset();
-	np2_init();
+	if (!EnsureNp2Ram())
+		return 0;
+	{
+		CEmuNp2Guard np2;
+		BindNp2();
+		np2_init();
+		np2HaveCpu_ = 1;
+		np2_save_cpu(np2Cpu_, CEMU_NP2_CPU_SIZE);
+		AttachIoHooks();
+	}
 	active_ = 1;
-	AttachIoHooks();
 	return 1;
 }
 
 void CHardPcat::Shutdown()
 {
 	PCAT_CENSUS("end");
-	DetachIoHooks();
+	{
+		CEmuNp2Guard np2;
+		CEmuNp2Unbind(this);
+		DetachIoHooks();
+	}
+	if (np2Ram_) {
+		free(np2Ram_);
+		np2Ram_ = NULL;
+	}
+	np2HaveCpu_ = 0;
 	if (chip_) { CEmuChipYm3812Destroy(chip_); chip_ = NULL; }
 	if (saa1_) { CEmuChipSaa1099Destroy(saa1_); saa1_ = NULL; }
 	if (saa2_) { CEmuChipSaa1099Destroy(saa2_); saa2_ = NULL; }
@@ -1188,7 +1207,32 @@ void CHardPcat::Shutdown()
 
 uint8_t* CHardPcat::Mem()
 {
-	return np2_mem();
+	if (CEmuNp2IsOwner(this)) {
+		uint8_t* live = np2_mem();
+		if (live)
+			return live;
+	}
+	return np2Ram_ ? np2Ram_ : np2_mem();
+}
+
+int CHardPcat::EnsureNp2Ram()
+{
+	if (np2Ram_)
+		return 1;
+	np2Ram_ = (uint8_t*)malloc(CEMU_NP2_MEM_SIZE);
+	if (!np2Ram_)
+		return 0;
+	memset(np2Ram_, 0, CEMU_NP2_MEM_SIZE);
+	memset(np2Cpu_, 0, sizeof(np2Cpu_));
+	np2HaveCpu_ = 0;
+	return 1;
+}
+
+void CHardPcat::BindNp2()
+{
+	if (!EnsureNp2Ram())
+		return;
+	CEmuNp2Bind(this, np2Ram_, np2Cpu_, np2HaveCpu_);
 }
 
 void CHardPcat::AttachIoHooks()
@@ -1217,6 +1261,7 @@ void CEmuHardPcatSetActive(CHardPcat* hw)
 		}
 		return;
 	}
+	hw->BindNp2();
 	g_pcatActive = hw;
 	hootrip_out8 = PcatOut8;
 	hootrip_inp8 = PcatIn8;
@@ -2933,6 +2978,8 @@ void CHardPcat::HootSubstArgv(char* tail, int tailCap)
 
 int CHardPcat::RunDosCommand(const char* cmdline, uint64_t budgetCycles, int stopWhenReady)
 {
+	CEmuNp2Guard np2;
+	CEmuHardPcatSetActive(this);
 	char stripped[256];
 	char name[96];
 	char tail[160];
@@ -3171,6 +3218,8 @@ int CHardPcat::RunDosCommand(const char* cmdline, uint64_t budgetCycles, int sto
 int CHardPcat::BootDos(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode)
 {
 	if (!fs || !ge) return 0;
+	CEmuNp2Guard np2;
+	CEmuHardPcatSetActive(this);
 	uint8_t* mem = np2_mem();
 	if (!mem) return 0;
 
@@ -3335,6 +3384,8 @@ int CHardPcat::BootDos(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCod
 int CHardPcat::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode)
 {
 	if (!fs || !ge) return 0;
+	CEmuNp2Guard np2;
+	BindNp2();
 	uint8_t* mem = np2_mem();
 	if (!mem) return 0;
 	memset(mem, 0, 0x200000);
@@ -4038,6 +4089,8 @@ void CHardPcat::InstallHootAilTimbres()
 
 void CHardPcat::DrainInterrupt(uint64_t budgetCycles)
 {
+	CEmuNp2Guard np2;
+	CEmuHardPcatSetActive(this);
 	const uint16_t idleCs = 0x0060;
 	uint64_t start = cpuCycles_;
 	while (cpuCycles_ - start < budgetCycles) {
@@ -4066,6 +4119,7 @@ void CHardPcat::DrainInterrupt(uint64_t budgetCycles)
 
 void CHardPcat::PumpCycles(uint64_t endCycle)
 {
+	CEmuNp2Guard np2;
 	CEmuHardPcatSetActive(this);
 	while (cpuCycles_ < endCycle) {
 		uint8_t* mem = np2_mem();

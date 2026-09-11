@@ -58,3 +58,6 @@ int CEmuGameTitleCount(const CEmuGameEntry* ge);
 int CEmuGameTitleAt(const CEmuGameEntry* ge, int index0, unsigned* outCode,
 	wchar_t* outLabel, int outLabelChars);
 unsigned CEmuGameTitleCodeForIndex(const CEmuGameEntry* ge, unsigned titleIndex1);
+/* hoot titlelist: SE / 効果音 / SFX / Sound Effect. STOP は含めない。 */
+int CEmuTitleLooksLikeSfx(const wchar_t* label);
+int CEmuGameTitleLooksLikeSfx(const CEmuGameEntry* ge, unsigned titleIndex1);

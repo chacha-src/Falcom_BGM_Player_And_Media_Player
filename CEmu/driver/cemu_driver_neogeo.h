@@ -23,6 +23,7 @@ public:
 	int Render(int16_t* stereo, int frames) override;
 
 	int Seek(uint64_t sample) override;
+	int OverlayTitle(unsigned titleCode) override;
 
 
 
@@ -37,6 +38,8 @@ private:
 	int ymHz_;
 
 	uint8_t songCmd_;
+
+	uint8_t songCmdHi_;
 
 	uint64_t ymResidual_;
 

@@ -1951,6 +1951,19 @@ void CDriverAc::Close()
 	}
 }
 
+int CDriverAc::OverlayTitle(unsigned titleCode)
+{
+	if (!hw_) return 0;
+	songCmd_ = (uint8_t)(titleCode & 0xff);
+	songCmdWord_ = (uint16_t)(titleCode & 0xffff);
+	songCmdDword_ = titleCode;
+	cmdIndex_ = 0;
+	triggered_ = 0;
+	heard_ = 0;
+	TryInjectCommand();
+	return 1;
+}
+
 unsigned CDriverAc::OpmWrites() const
 {
 	return hw_ ? hw_->opmWrites_ : 0;

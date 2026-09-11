@@ -61,6 +61,7 @@ int flacmode = 0;
 #include "PluginKinds.h"
 #include "CEmu/cemu_session.h"
 #include "CEmu/cemu_mgr.h"
+#include "CEmu/cemu_catalog.h"
 #include "CEmu/cemu_modepref.h"
 #include "CEmu/cemu_midi_live.h"
 #include "CEmu/cemu_support.h"
@@ -808,6 +809,7 @@ static void SetOpenDecoderMode(int m)
 void ReleaseOggVorbis(char** pOggBuf);
 void XfCloseSlotDecodersImpl(int slot); /* 定義は adbuf2_arr 宣言後 */
 static void CloseVstMidiSessionSlot(int slot);
+static void CloseCemuSlot(int slot);
 
 int XfStartCrossfadeFromNotify(); /* 定義は mode/filen 宣言後 — int 戻り */
 static void XfSaveUiMetaFromGlobals(int slot);
@@ -2571,6 +2573,9 @@ void XfCloseSlotDecodersImpl(int slot)
 	else if (m == MODE_VST_MIDI) {
 		CloseVstMidiSessionSlot(slot);
 	}
+	else if (m == MODE_CEMU) {
+		CloseCemuSlot(slot);
+	}
 	if (ogg_arr[slot]) {
 		ReleaseOggVorbis(&ogg_arr[slot]);
 		ogg_arr[slot] = NULL;
@@ -3415,22 +3420,152 @@ static HWND ShowVstWaitPopup(HWND owner)
 	return wnd;
 }
 static KpiHost64Session g_kpiSession;
-static CEmuSession g_cemuSession;
+static CEmuSession g_cemuSessionSlot[XF_SLOTS];
 static std::vector<uint8_t> g_kpiRemoteCache;
 static size_t g_kpiRemoteCachePos = 0;
 static bool g_kpiRemoteEof = false;
 
+static CEmuSession& CemuSessSlot(int slot)
+{
+	if (slot < 0 || slot >= XF_SLOTS)
+		slot = 0;
+	return g_cemuSessionSlot[slot];
+}
+static CEmuSession& CemuSess()
+{
+	return CemuSessSlot(XfDecSlot());
+}
+static int CemuAnyKind()
+{
+	for (int i = 0; i < XF_SLOTS; i++) {
+		if (g_cemuSessionSlot[i].kind)
+			return 1;
+	}
+	return 0;
+}
+static void CloseCemuSlot(int slot)
+{
+	CEmuSessionClose(&CemuSessSlot(slot));
+	CEmuSessionInit(&CemuSessSlot(slot));
+}
+
 /* Stop/exit must tear down CEmu hard+driver (and MIDI live) after the audio
    thread has joined. Leaving MODE_CEMU open caused MP Exit crashes (np2/IO
-   hooks still live while the UI destroyed). Also closes an orphaned soft
-   session before MIDI LiveStart so two PC98 hards never share one np2. */
+   hooks still live while the UI destroyed). Two slots keep their own NP2
+   RAM so a crossfade can hold CEmu on both A and B. */
 static void CloseCemuPlaybackResources()
 {
 	g_cemuLiveKeepAcrossClose = 0;
 	CEmuMidiLiveStop();
-	CEmuSessionClose(&g_cemuSession);
-	CEmuSessionInit(&g_cemuSession);
+	for (int i = 0; i < XF_SLOTS; i++)
+		CloseCemuSlot(i);
 	FmMonShadowReset();
+}
+
+/* Same-zip SE while BGM is live: inject the command, do not stop(). Other zip → exclusive. */
+static int CEmuTryOverlayMidiSfxFromFilen(const wchar_t* openPhys, unsigned titleIdx)
+{
+	extern CString tagfile;
+	if (!openPhys || !openPhys[0])
+		return 0;
+	if (playf == 0)
+		return 0;
+	const int midiPlaying = CEmuMidiLiveActive()
+		|| mode == MODE_VST_MIDI || modesub == MODE_VST_MIDI;
+	if (!midiPlaying)
+		return 0;
+
+	wchar_t zipOut[CEMU_ZIP_PATH];
+	char dataDir[CEMU_DATA_DIR];
+	CEmuMgr* mgr = CEmuMgrGet();
+	const CEmuGameEntry* ge = CEmuMgrResolveZip(mgr, openPhys, zipOut,
+		(int)_countof(zipOut), dataDir, (int)sizeof(dataDir));
+	const wchar_t* zip = zipOut[0] ? zipOut : openPhys;
+
+	char stem[CEMU_ARCHIVE_NAME] = {};
+	const CEmuGameEntry* midGe = ge;
+	if (CEmuArchiveStemFromPath(zip, stem, (int)sizeof(stem))) {
+		const CEmuGameEntry* pick = CEmuCatalogFindArchiveForZipMode(
+			&mgr->catalog, stem, NULL, NULL, "MIDI");
+		if (pick) midGe = pick;
+	}
+	if (!CEmuGameTitleLooksLikeSfx(midGe, titleIdx)
+		&& !CEmuGameTitleLooksLikeSfx(ge, titleIdx))
+		return 0;
+
+	const unsigned titleCode = CEmuGameTitleCodeForIndex(
+		midGe ? midGe : ge, titleIdx);
+
+	if (CEmuMidiLiveActive()) {
+		if (!CEmuMidiLiveSameZip(openPhys) && !CEmuMidiLiveSameZip(zip))
+			return 0;
+		return CEmuMidiLiveOverlayTitle(titleCode);
+	}
+
+	/* Catalog SMF BGM on VST: boot live MPU only to inject SE notes on top. */
+	if (tagfile.IsEmpty())
+		return 0;
+	if (_wcsicmp(tagfile, openPhys) != 0 && _wcsicmp(tagfile, zip) != 0)
+		return 0;
+	return CEmuMidiLiveStartOverlayPcat(zip, titleCode);
+}
+
+static int CEmuTryOverlaySfxFromFilen()
+{
+	extern CString filen;
+	if (InterlockedCompareExchange(&g_xfInProgress, 0, 0)
+		|| InterlockedCompareExchange(&g_xfOpening, 0, 0))
+		return 0;
+
+	wchar_t phys[CEMU_ZIP_PATH];
+	unsigned titleIdx = 1;
+	CEmuParseVirtualPath(filen, phys, (int)_countof(phys), &titleIdx);
+	const wchar_t* openPhys = phys[0] ? phys : (const wchar_t*)filen;
+	if (!openPhys[0])
+		return 0;
+
+	if (CEmuTryOverlayMidiSfxFromFilen(openPhys, titleIdx))
+		return 1;
+
+	if (CemuSess().kind == 0)
+		return 0;
+	if (CemuSess().kind == CEMU_KIND_S98 || CemuSess().kind == CEMU_KIND_MDX
+		|| CemuSess().kind == CEMU_KIND_PMD)
+		return 0;
+	if (!IsCemuMode(mode) && mode != MODE_CEMU)
+		return 0;
+	if (playf == 0 && ActiveDecodeMode() != MODE_CEMU)
+		return 0;
+	if (CemuSess().endedBySilence)
+		return 0;
+	if (CemuSess().lengthSamples > 0
+		&& CemuSess().curSample >= CemuSess().lengthSamples)
+		return 0;
+
+	if (!CemuSess().path[0])
+		return 0;
+	if (_wcsicmp(openPhys, CemuSess().path) != 0)
+		return 0;
+
+	wchar_t zipOut[CEMU_ZIP_PATH];
+	char dataDir[CEMU_DATA_DIR];
+	const CEmuGameEntry* ge = CEmuMgrResolveZip(CEmuMgrGet(), openPhys, zipOut,
+		(int)_countof(zipOut), dataDir, (int)sizeof(dataDir));
+	if (!CEmuGameTitleLooksLikeSfx(ge, titleIdx))
+		return 0;
+
+	char fromEntry[CEMU_MODE_TAG] = {};
+	char modeTag[CEMU_MODE_TAG] = {};
+	CEmuModeTagFromEntry(ge, fromEntry, (int)sizeof(fromEntry));
+	if (CEmuModeIsMidiTag(fromEntry))
+		return 0;
+	if (CEmuModePrefGet(openPhys, modeTag, (int)sizeof(modeTag)) && CEmuModeIsMidiTag(modeTag))
+		return 0;
+
+	const unsigned titleCode = CEmuGameTitleCodeForIndex(ge, titleIdx);
+	if (!CEmuSessionOverlayTitle(&CemuSess(), titleCode))
+		return 0;
+	return 1;
 }
 
 static void ResetKpiRemoteCache()
@@ -4448,7 +4583,16 @@ int current_section;
 long whsize;
 int ret2;
 
-/* 次曲が VST MIDI のとき、指定秒より十分前に B を開き始めるか判定 */
+/* 次曲が SoftOpen 可能なとき、指定秒より十分前に B を開き始めるか判定 */
+static int XfModeCanSoftOpen(int m)
+{
+	if (m == MODE_VST_MIDI || m == MODE_CEMU || IsCemuMode(m))
+		return 1;
+	if (m == -8 || m == -9 || m == -10)
+		return 1;
+	return 0;
+}
+
 int XfShouldPreloadNext()
 {
 	if (!XfEnabled())
@@ -4475,29 +4619,42 @@ int XfShouldPreloadNext()
 	if (nextIdx < 0) return 0;
 	nextIdx = XfFindNextAudioPlIndex(nextIdx);
 	if (nextIdx < 0) return 0;
-	if (pl->pc[nextIdx].sub != MODE_VST_MIDI)
+	const int nextMode = pl->pc[nextIdx].sub;
+	if (!XfModeCanSoftOpen(nextMode))
 		return 0;
 	const __int64 endRef = XfTrackEndRefBytes(g_endWrittenBytes);
-	if (endRef <= 0)
-		return 0;
 	const __int64 xfBytes = XfCrossfadeWindowBytes();
 	if (xfBytes <= 0)
 		return 0;
 	const int bpf = XfDsOutBpf();
 	const int sr = XfDsOutRate();
-	/* VST(SC-VA 等)の Open はプラグイン走査込みで数十秒かかることがある */
+	/* VST Open は数十秒。CEmu DOS boot も数秒〜十数秒。flac/mp3 は窓幅で足りる。 */
 	__int64 loadBytes = xfBytes;
-	if (bpf > 0 && sr > 0)
-		loadBytes = (__int64)(45.0 * (double)sr + 0.5) * (__int64)bpf;
+	if (bpf > 0 && sr > 0) {
+		double leadSec = 0.0;
+		if (nextMode == MODE_VST_MIDI)
+			leadSec = 45.0;
+		else if (nextMode == MODE_CEMU || IsCemuMode(nextMode))
+			leadSec = 12.0;
+		if (leadSec > 0.0)
+			loadBytes = (__int64)(leadSec * (double)sr + 0.5) * (__int64)bpf;
+	}
 	if (loadBytes < xfBytes)
 		loadBytes = xfBytes;
-	const __int64 startAt = XfFadeEndRefBytes(g_endWrittenBytes) - xfBytes - loadBytes;
-	const __int64 pos = XfPlayPosBytes();
-	if (pos <= 0)
-		return 0;
-	if (startAt <= 0)
+	if (endRef > 0) {
+		const __int64 startAt = XfFadeEndRefBytes(g_endWrittenBytes) - xfBytes - loadBytes;
+		const __int64 pos = XfPlayPosBytes();
+		if (pos <= 0)
+			return 0;
+		if (startAt <= 0)
+			return 1;
+		return (pos >= startAt && pos < endRef) ? 1 : 0;
+	}
+	/* CEmu 等はカタログ長が無い。A が鳴り始めたら B を先に Boot しておかないと
+	   窓に間に合わずクロスフェードの意味が無い。 */
+	if (bpf > 0 && sr > 0 && g_heardBytes >= ((__int64)3 * (int64_t)sr * (int64_t)bpf))
 		return 1;
-	return (pos >= startAt && pos < endRef) ? 1 : 0;
+	return 0;
 }
 
 static int XfOpenNextSlotForCrossfade(int* outCur, int* outNxt)
@@ -4748,8 +4905,6 @@ int XfStartCrossfadeFromNotify()
 		return 0;
 	if (InterlockedCompareExchange(&g_xfInProgress, 0, 0))
 		return 0;
-	if (InterlockedCompareExchange(&g_xfOpening, 0, 0))
-		return 0;
 
 	const int cur = XfActiveSlot();
 	if (InterlockedCompareExchange(&g_xfPrepared, 0, 0)
@@ -4757,6 +4912,9 @@ int XfStartCrossfadeFromNotify()
 		XfBeginMixNow(cur);
 		return 1;
 	}
+	if (InterlockedCompareExchange(&g_xfOpening, 0, 0)
+		|| InterlockedCompareExchange(&g_xfPreloadBusy, 0, 0))
+		return 1;
 
 	int dummyCur = 0, dummyNxt = 0;
 	if (!XfOpenNextSlotForCrossfade(&dummyCur, &dummyNxt))
@@ -6775,7 +6933,10 @@ static int s_xfSikpiValid[XF_SLOTS] = { 0, 0 };
 static bool XfSlotUsesDecodeRing(int slot)
 {
 	if (slot < 0 || slot >= XF_SLOTS) return true;
-	return g_openDecoderModeSlot[slot] != MODE_VST_MIDI;
+	const int m = g_openDecoderModeSlot[slot];
+	if (m == MODE_VST_MIDI || m == MODE_CEMU || IsCemuMode(m))
+		return false;
+	return true;
 }
 
 void XfSyncSlotDecodeRingSave(int slot)
@@ -7048,6 +7209,40 @@ static int XfSoftOpenSlot(int slot, const CString& path, int openMode)
 		timeMax = (loop3v > 0) ? loop3v : 1;
 		const int bps = bits / 8;
 		const __int64 bytesTotal = (__int64)loop3v * (__int64)ch * (__int64)bps;
+		oggsz = dsz = (bytesTotal > 0 && bytesTotal < (__int64)0x7fffffff) ? (int)bytesTotal : 0;
+	}
+	else if (openMode == MODE_CEMU || IsCemuMode(openMode)) {
+		CString zipPath = path;
+		uint32_t titleIdx = 1;
+		SplitKpiSubsongPath(path, zipPath, titleIdx);
+		wchar_t zipOut[CEMU_ZIP_PATH];
+		char dataDir[CEMU_DATA_DIR];
+		const CEmuGameEntry* ge = CEmuMgrResolveZip(CEmuMgrGet(), zipPath, zipOut,
+			(int)_countof(zipOut), dataDir, (int)sizeof(dataDir));
+		const wchar_t* openPath = zipOut[0] ? zipOut : (LPCTSTR)zipPath;
+		char modeTag[CEMU_MODE_TAG] = {};
+		char fromEntry[CEMU_MODE_TAG] = {};
+		CEmuModeTagFromEntry(ge, fromEntry, (int)sizeof(fromEntry));
+		if (CEmuModeIsMidiTag(fromEntry))
+			strncpy_s(modeTag, fromEntry, _TRUNCATE);
+		else if (!CEmuModePrefGet(openPath, modeTag, (int)sizeof(modeTag)))
+			strncpy_s(modeTag, fromEntry, _TRUNCATE);
+		/* MIDI-pref zip is a VST/live path; SoftOpen that as VST instead. */
+		if (CEmuModeIsMidiTag(modeTag))
+			return 0;
+		const unsigned titleCode = CEmuGameTitleCodeForIndex(ge, titleIdx);
+		CEmuSession* sess = &CemuSessSlot(slot);
+		CEmuSessionClose(sess);
+		CEmuSessionInit(sess);
+		const DWORD rate = savedata.samples ? savedata.samples : 44100;
+		if (!CEmuSessionOpen(sess, openPath, titleCode, rate))
+			return 0;
+		si.dwSamplesPerSec = (DWORD)(sess->sampleRate > 0 ? sess->sampleRate : rate);
+		si.dwChannels = 2;
+		si.dwBitsPerSample = 16;
+		loop3v = (sess->lengthSamples > 0) ? (int)sess->lengthSamples : 0;
+		timeMax = (loop3v > 0) ? loop3v : 1;
+		const __int64 bytesTotal = (__int64)loop3v * 2 * 2;
 		oggsz = dsz = (bytesTotal > 0 && bytesTotal < (__int64)0x7fffffff) ? (int)bytesTotal : 0;
 	}
 	else {
@@ -11381,8 +11576,10 @@ void COggDlg::play()
 open_mode_kpi:
 		ret2 = 0;
 		g_kpiRemote = false;
-		/* CEmu→KPI 切替で C352 リングが残ると FM モニタが前基板のままになる */
-		if (g_cemuSession.kind != 0 || CEmuMidiLiveActive())
+		/* CEmu→KPI: xfade の副スロットだけ閉じる（A の CEmu を殺さない） */
+		if (xfSoftOpen)
+			CloseCemuSlot(XfDecSlot());
+		else if (CemuAnyKind() || CEmuMidiLiveActive())
 			CloseCemuPlaybackResources();
 		else
 			FmMonShadowReset();
@@ -11781,9 +11978,9 @@ open_mode_kpi:
 				}
 				/* XMI / packed MIDI — live MPU-401 UART into the MIDI monitor. */
 				{
-					/* Soft CEmu and Live share one np2 — never leave both open. */
-					CEmuSessionClose(&g_cemuSession);
-					CEmuSessionInit(&g_cemuSession);
+					/* Slot-local CEmu; LiveStart binds NP2. Leave the other xfade slot. */
+					CEmuSessionClose(&CemuSess());
+					CEmuSessionInit(&CemuSess());
 					if (CEmuMidiLiveStartPcat(openPath, capTitle, midPath, MAX_PATH)
 						&& midPath[0]) {
 						filen = midPath;
@@ -11817,9 +12014,9 @@ open_mode_kpi:
 			}
 		}
 		const unsigned titleCode = CEmuGameTitleCodeForIndex(ge, titleIdx);
-		CEmuSessionClose(&g_cemuSession);
-		CEmuSessionInit(&g_cemuSession);
-		if (!CEmuSessionOpen(&g_cemuSession, openPath, titleCode, savedata.samples ? savedata.samples : 44100)) {
+		CEmuSessionClose(&CemuSess());
+		CEmuSessionInit(&CemuSess());
+		if (!CEmuSessionOpen(&CemuSess(), openPath, titleCode, savedata.samples ? savedata.samples : 44100)) {
 			CString why;
 			if (ge) {
 				why.Format(
@@ -11862,12 +12059,12 @@ open_mode_kpi:
 				fnn = ge->name;
 		}
 		ret2 = (int)titleIdx;
-		wavbit_sample_Hz = g_cemuSession.sampleRate;
+		wavbit_sample_Hz = CemuSess().sampleRate;
 		wavchannel = 2;
 		wavsam_src = 16;
 		wavsam_depth = 16;
 		loop1 = 0;
-		loop2 = (g_cemuSession.lengthSamples > 0) ? (int)g_cemuSession.lengthSamples : 0;
+		loop2 = (CemuSess().lengthSamples > 0) ? (int)CemuSess().lengthSamples : 0;
 		SetPcmByteLengthFromSamples(loop2, wavsam_depth, wavchannel);
 		m_time.SetRange(0, (loop2 > 0) ? loop2 : 1, TRUE);
 		EqualiserSetFormatVolContext(1, FALSE);
@@ -11875,8 +12072,8 @@ open_mode_kpi:
 		/* 仮想パスだけ付け替える。Reset すると Open 中にチップへ書いた音色が消える。 */
 		FmMonShadowSetSource(filen);
 		FmMonShadowSetSampleRate((uint32_t)wavbit_sample_Hz);
-		if (g_cemuSession.game)
-			CEmuFmMonBindFromGe(g_cemuSession.game);
+		if (CemuSess().game)
+			CEmuFmMonBindFromGe(CemuSess().game);
 		wav_start();
 	}
 	else if (mode == MODE_VST_MIDI) {
@@ -20346,34 +20543,36 @@ int playwavvst(BYTE* bw, int old, int l1, int l2)
 
 int readcemu(BYTE* bw, int cnt)
 {
-	if (!bw || cnt <= 0 || g_cemuSession.kind == 0) return 0;
+	if (!bw || cnt <= 0 || CemuSess().kind == 0) return 0;
 	const int bpf = PcmOutBytesPerFrame();
 	if (bpf <= 0) return 0;
 	const int frames = cnt / bpf;
 	if (frames <= 0) return 0;
-	if (g_cemuSession.lengthSamples > 0 && g_cemuSession.curSample >= g_cemuSession.lengthSamples)
+	if (CemuSess().lengthSamples > 0 && CemuSess().curSample >= CemuSess().lengthSamples)
 		return 0;
-	/* FM モニタの時刻は shadow の s_cur。ブロックを丸ごと Render してから
-	   AddSamples すると、区間内の全レジスタ書込がブロック先頭のサンプル位置で
-	   刻まれ、UI（可聴位置と比較）が最大 1 ブロック早く発音を出す。さらに
-	   ShouldWrite の elapsed が区間内で常に 0 になるため Render 内 flush が
-	   全部落ち、実効解像度がブロック長になって同一ブロック内で完結する短い
-	   音符が丸ごと消える。数 ms 単位に切って Render→AddSamples→Flush を回す。 */
+	/* FM モニタの時刻は shadow の s_cur。ハード系は数 ms 単位に切る。
+	   PMDWin は getpcmdata 末尾で自分の dump を書くので、4ms スライスすると
+	   55k 補間なしでも呼び出し回数が跳ねて重い。 */
 	int sliceFrames = (wavbit_sample_Hz > 0 ? wavbit_sample_Hz : 44100) / 250; /* ~4ms */
 	if (sliceFrames < 64) sliceFrames = 64;
+	const int pmdNative = (CemuSess().kind == CEMU_KIND_PMD);
+	if (pmdNative)
+		sliceFrames = frames;
 	int done = 0;
 	while (done < frames) {
-		if (g_cemuSession.lengthSamples > 0
-			&& g_cemuSession.curSample >= g_cemuSession.lengthSamples)
+		if (CemuSess().lengthSamples > 0
+			&& CemuSess().curSample >= CemuSess().lengthSamples)
 			break;
 		int want = frames - done;
 		if (want > sliceFrames) want = sliceFrames;
-		const int got = CEmuSessionRender(&g_cemuSession,
+		const int got = CEmuSessionRender(&CemuSess(),
 			(short*)(bw + (size_t)done * (size_t)bpf), want);
 		if (got <= 0) break;
-		g_cemuSession.curSample += (UINT64)got;
-		FmMonShadowAddSamples((uint32_t)got);
-		FmMonShadowFlush(0);
+		CemuSess().curSample += (UINT64)got;
+		if (!pmdNative) {
+			FmMonShadowAddSamples((uint32_t)got);
+			FmMonShadowFlush(0);
+		}
 		done += got;
 		if (got < want) break;
 	}
@@ -20388,12 +20587,12 @@ static void CEmuSeekLoopStart()
 	/* ループは曲切替ではない。DS 可聴位置は 0 に戻らないので時計だけ引き継ぐ。 */
 	const uint64_t fmMonCur = FmMonShadowGetCurSample();
 	FmMonShadowReset();
-	FmMonShadowSetSource(g_cemuSession.path);
+	FmMonShadowSetSource(CemuSess().path);
 	FmMonShadowSetSampleRate((uint32_t)wavbit_sample_Hz);
 	FmMonShadowSetCurSample(fmMonCur);
-	if (g_cemuSession.game)
-		CEmuFmMonBindFromGe(g_cemuSession.game);
-	CEmuSessionSeek(&g_cemuSession, loop1 > 0 ? (UINT64)loop1 : 0);
+	if (CemuSess().game)
+		CEmuFmMonBindFromGe(CemuSess().game);
+	CEmuSessionSeek(&CemuSess(), loop1 > 0 ? (UINT64)loop1 : 0);
 	poss2 = poss3 = poss4 = poss6 = 0; poss5 = loop1;
 	cnt3 = 0;
 	RubberBand_DestroyBank(0);
@@ -20413,15 +20612,15 @@ int playwavcemu(BYTE* bw, int old, int l1, int l2)
 	EqualiserSetFormatVolContext(1, FALSE);
 	const bool exporting = (wavExportPath.GetLength() > 0 || g_isWavExportRendering);
 	const bool doLoop = WantPlaybackLoop() && !exporting
-		&& !g_cemuSession.endedBySilence; /* 無音終端の非ループ曲は Seek しても再開できない */
+		&& !CemuSess().endedBySilence; /* 無音終端の非ループ曲は Seek しても再開できない */
 	auto cemuHitEnd = [&](int got) -> bool {
 		if (exporting) return false;
-		if (g_cemuSession.endedBySilence
-			&& g_cemuSession.lengthSamples > 0
-			&& g_cemuSession.curSample >= g_cemuSession.lengthSamples)
+		if (CemuSess().endedBySilence
+			&& CemuSess().lengthSamples > 0
+			&& CemuSess().curSample >= CemuSess().lengthSamples)
 			return true;
-		if (g_cemuSession.lengthSamples == 0) return false;
-		if (g_cemuSession.lengthSamples > 0 && g_cemuSession.curSample >= g_cemuSession.lengthSamples)
+		if (CemuSess().lengthSamples == 0) return false;
+		if (CemuSess().lengthSamples > 0 && CemuSess().curSample >= CemuSess().lengthSamples)
 			return true;
 		if (got <= 0) return PlaybackShortMeansEof(got);
 		return false;
@@ -20503,6 +20702,31 @@ int playwavcemu(BYTE* bw, int old, int l1, int l2)
 			else CEmuMarkPlaybackEof();
 		}
 		rrr += r2;
+	}
+	{
+		CEmuSession& s = CemuSess();
+		if (s.lengthSamples > 0 && s.lengthSamples <= (UINT64)0x7fffffff) {
+			const int ls = (int)s.lengthSamples;
+			const LONG fill = InterlockedCompareExchange(&g_xfFillSlot, 0, 0);
+			if ((fill < 0 || fill == XfActiveSlot()) && loop2 != ls) {
+				loop2 = ls;
+				if (loop3 < ls)
+					loop3 = ls;
+				SetPcmByteLengthFromSamples(ls, wavsam_depth, wavchannel);
+				extern int g_ds_pcm_rate, g_ds_pcm_ch, g_ds_pcm_bits;
+				const int srcRate = (wavbit_sample_Hz > 0) ? wavbit_sample_Hz : 44100;
+				const int dsRate = (g_ds_pcm_rate > 0) ? g_ds_pcm_rate : srcRate;
+				const int dsCh = (g_ds_pcm_ch > 0) ? g_ds_pcm_ch : 2;
+				const int dsBits = (g_ds_pcm_bits >= 8) ? g_ds_pcm_bits : 16;
+				const int dsBpf = dsCh * (dsBits / 8);
+				if (dsRate > 0 && dsBpf > 0 && srcRate > 0) {
+					__int64 outFrames = ls;
+					if (dsRate != srcRate)
+						outFrames = ((__int64)ls * (int64_t)dsRate + srcRate / 2) / srcRate;
+					g_expectedDsBytes = outFrames * (__int64)dsBpf;
+				}
+			}
+		}
 	}
 	return rrr;
 }
@@ -23515,7 +23739,7 @@ void COggDlg::stop()
 		if (stoppingMode == MODE_VST_MIDI) CloseVstMidiSession();
 		if (stoppingMode == MODE_CEMU
 			|| stoppingMode == MODE_VST_MIDI
-			|| g_cemuSession.kind != 0)
+			|| CemuAnyKind())
 			CloseCemuPlaybackResources();
 		if (stoppingMode == MODE_PLUGIN_WINAMP) PluginWinamp_Close();
 		if (stoppingMode == MODE_PLUGIN_XMPLAY) PluginXmplay_Close();
@@ -23563,7 +23787,7 @@ void COggDlg::stop()
 	/* notify 未稼働でも xfade チェック WAV を確定 */
 	PlaybackCcCloseIfNeeded(true);
 	/* Notify thread already gone (auto-stop / pause) still leaves CEmu open. */
-	if (g_cemuSession.kind != 0 || CEmuMidiLiveActive())
+	if (CemuAnyKind() || CEmuMidiLiveActive())
 		CloseCemuPlaybackResources();
 }
 
@@ -23708,7 +23932,7 @@ BOOL COggDlg::stop1()
 	if (stoppingMode == MODE_VST_MIDI) CloseVstMidiSession();
 	if (stoppingMode == MODE_CEMU
 		|| stoppingMode == MODE_VST_MIDI
-		|| g_cemuSession.kind != 0)
+		|| CemuAnyKind())
 		CloseCemuPlaybackResources();
 	if (stoppingMode == MODE_PLUGIN_WINAMP) PluginWinamp_Close();
 	if (stoppingMode == MODE_PLUGIN_XMPLAY) PluginXmplay_Close();
@@ -25118,8 +25342,8 @@ void COggDlg::timerp()
 			return title;
 		};
 		CString workTitle;
-		if (g_cemuSession.game && g_cemuSession.game->name[0])
-			workTitle = cemuBannerCleanGameName(CString(g_cemuSession.game->name));
+		if (CemuSess().game && CemuSess().game->name[0])
+			workTitle = cemuBannerCleanGameName(CString(CemuSess().game->name));
 		if (workTitle.IsEmpty()) {
 			CString fileName = filen;
 			const int slash = max(fileName.ReverseFind(_T('\\')), fileName.ReverseFind(_T('/')));
@@ -25242,10 +25466,10 @@ void COggDlg::timerp()
 			return true;
 		};
 		CString songTitle = stitle;
-		if (!cemuSongTitleOk(songTitle) && g_cemuSession.game) {
+		if (!cemuSongTitleOk(songTitle) && CemuSess().game) {
 			wchar_t songLabel[CEMU_GAME_NAME] = {};
 			const unsigned titleIdx = (ret2 > 0) ? (unsigned)ret2 : 1u;
-			CEmuGameTitleAt(g_cemuSession.game, (int)titleIdx - 1, NULL, songLabel, (int)_countof(songLabel));
+			CEmuGameTitleAt(CemuSess().game, (int)titleIdx - 1, NULL, songLabel, (int)_countof(songLabel));
 			if (songLabel[0] == L'<' || wcsncmp(songLabel, L"<title", 6) == 0)
 				songLabel[0] = 0;
 			songTitle = songLabel;
@@ -26747,15 +26971,20 @@ void timerog1(UINT nIDEvent)
 		// 連続再生: 曲末で次曲へ（レガシー単一ストリーム）
 		if (savedata.saverenzoku == 1) {
 			const int xms = ProAudio_XfadeMs();
-			if (!atEof && !inXfadeWindow)
+			const int xfPrepared = (int)InterlockedCompareExchange(&g_xfPrepared, 0, 0);
+			const int xfBusy = (int)InterlockedCompareExchange(&g_xfOpening, 0, 0)
+				|| (int)InterlockedCompareExchange(&g_xfPreloadBusy, 0, 0);
+			if (!atEof && !inXfadeWindow && !xfPrepared)
 				return;
-			if (xms <= 0 && endflg != 1 && !inXfadeWindow)
+			if (xms <= 0 && endflg != 1 && !inXfadeWindow && !xfPrepared)
 				return;
-			/* ライブ xfade: 終端 xfWin 秒前の窓。曲末到達後は開始しない */
-			if (XfEnabled() && inXfadeWindow) {
+			/* ライブ xfade: 終端 xfWin 秒前の窓。B が先読み済みなら EOF でも混合する。
+			   CEmu Open 中なら A を止めて切らない。 */
+			if (XfEnabled() && (inXfadeWindow || xfPrepared || (atEof && xfBusy))) {
 				if (XfStartCrossfadeFromNotify())
 					return;
-				/* Open 失敗 → 下のレガシーへ */
+				if (xfBusy)
+					return;
 			}
 			ProAudio_OnSongBoundary();
 			endflg = 0;
@@ -27106,7 +27335,7 @@ LRESULT COggDlg::OnPlaybackAutoStopped(WPARAM, LPARAM)
 	if (stoppingMode == MODE_VST_MIDI) CloseVstMidiSession();
 	if (stoppingMode == MODE_CEMU
 		|| stoppingMode == MODE_VST_MIDI
-		|| g_cemuSession.kind != 0
+		|| CemuAnyKind()
 		|| CEmuMidiLiveActive())
 		CloseCemuPlaybackResources();
 	if (stoppingMode == MODE_PLUGIN_WINAMP) PluginWinamp_Close();
@@ -29505,6 +29734,9 @@ void COggDlg::OnRestart()
 		InteractiveTrackGuard() { InterlockedExchange(&g_interactiveTrackChange, 1); }
 		~InteractiveTrackGuard() { InterlockedExchange(&g_interactiveTrackChange, 0); }
 	} interactiveTrackGuard;
+
+	if (CEmuTryOverlaySfxFromFilen())
+		return;
 
 	// TODO: この位置にコントロール通知ハンドラ用のコードを追加してください
 	CString ti;

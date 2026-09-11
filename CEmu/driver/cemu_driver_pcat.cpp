@@ -3,6 +3,7 @@
 #include "../machine/cemu_hard_pcat.h"
 #include "../chip/cemu_chip_opl.h"
 #include "../vendor/np2/np2ffi.h"
+#include "../machine/cemu_np2ctx.h"
 
 CDriverPcat::CDriverPcat()
 	: hw_(NULL)
@@ -40,10 +41,12 @@ int CDriverPcat::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigne
 	triggered_ = 0;
 	titleCode_ = titleCode;
 
-	if (!hw_->LoadRoms(fs, ge, titleCode))
-		return 0;
-
-	CEmuHardPcatSetActive(hw_);
+	{
+		CEmuNp2Guard np2;
+		CEmuHardPcatSetActive(hw_);
+		if (!hw_->LoadRoms(fs, ge, titleCode))
+			return 0;
+	}
 	booted_ = 1;
 	return 1;
 }
@@ -55,11 +58,23 @@ void CDriverPcat::Close()
 	triggered_ = 0;
 }
 
+int CDriverPcat::OverlayTitle(unsigned titleCode)
+{
+	if (!hw_) return 0;
+	CEmuNp2Guard np2;
+	CEmuHardPcatSetActive(hw_);
+	titleCode_ = titleCode;
+	const int ok = hw_->TriggerPlay(titleCode_) ? 1 : 0;
+	if (ok) triggered_ = 1;
+	return ok;
+}
+
 int CDriverPcat::Render(int16_t* stereo, int frames)
 {
 	if (!hw_ || !stereo || frames <= 0 || !booted_) return 0;
 	CChip* chip = hw_->SoundChip();
 	if (!chip) return 0;
+	CEmuNp2Guard np2;
 	CEmuHardPcatSetActive(hw_);
 	if (!triggered_) {
 		hw_->TriggerPlay(titleCode_);

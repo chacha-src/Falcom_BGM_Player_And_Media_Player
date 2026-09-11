@@ -362,6 +362,16 @@ void CDriverX1::Close()
 	triggered_ = 0;
 }
 
+int CDriverX1::OverlayTitle(unsigned titleCode)
+{
+	if (!hw_) return 0;
+	titleCode_ = titleCode;
+	songCode_ = (uint8_t)(titleCode & 0xff);
+	hw_->TriggerPlay(titleCode_ ? titleCode_ : (unsigned)songCode_);
+	triggered_ = 1;
+	return 1;
+}
+
 int CDriverX1::Render(int16_t* stereo, int frames)
 {
 	if (!hw_ || !stereo || frames <= 0) return 0;

@@ -12,6 +12,7 @@
 #include "machine/cemu_f3.h"
 #include "machine/cemu_msx.h"
 #include "machine/cemu_fm7.h"
+#include "pmd/cemu_pmd.h"
 
 enum {
 	CEMU_KIND_NONE = 0,
@@ -26,7 +27,8 @@ enum {
 	CEMU_KIND_PCAT = 9,
 	CEMU_KIND_F3 = 10,
 	CEMU_KIND_MSX = 11,
-	CEMU_KIND_FM7 = 12
+	CEMU_KIND_FM7 = 12,
+	CEMU_KIND_PMD = 13
 };
 
 struct CEmuSession {
@@ -54,6 +56,9 @@ struct CEmuSession {
 	CEmuF3 f3;
 	CEmuMsx msx;
 	CEmuFm7 fm7;
+	CEmuPmdPlayer pmd;
+	unsigned overlayCode;
+	volatile long overlayPend;
 };
 
 void CEmuSessionInit(CEmuSession* s);
@@ -61,3 +66,7 @@ void CEmuSessionClose(CEmuSession* s);
 int CEmuSessionOpen(CEmuSession* s, const wchar_t* path, unsigned titleCode, DWORD sampleRate);
 int CEmuSessionRender(CEmuSession* s, short* stereo, int frames);
 int CEmuSessionSeek(CEmuSession* s, UINT64 sample);
+/* Same-zip SE: queue OverlayTitle on the live driver (one instance, no mix). */
+int CEmuSessionUsesGlobalNp2(const CEmuSession* s);
+int CEmuSessionOverlayTitle(CEmuSession* s, unsigned titleCode);
+void CEmuSessionMixStereo(short* dst, const short* add, int frames);

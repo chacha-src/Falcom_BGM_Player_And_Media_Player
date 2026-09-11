@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 /* Shared OPNA/OPN2/MSX register shadow + dump writer for KPI FM monitor. */
 #include "sasami_fmmon.h"
 #include "fmmon/fmmon_write.h"
@@ -8,6 +8,9 @@ extern "C" {
 #endif
 
 void FmMonShadowReset(void);
+/* Overlay SE open/render: keep BGM monitor. Nested. */
+void FmMonShadowHold(int on);
+int FmMonShadowIsHeld(void);
 void FmMonShadowSetSource(const wchar_t* path);
 void FmMonShadowSetSampleRate(uint32_t sr);
 void FmMonShadowAddSamples(uint32_t n);

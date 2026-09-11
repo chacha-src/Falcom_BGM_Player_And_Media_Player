@@ -1,4 +1,4 @@
-/*
+﻿/*
  * np2mem.c -- HOOTRIP glue
  *
  * Flat real-mode memory back-end for the vendored i286c core. Replaces

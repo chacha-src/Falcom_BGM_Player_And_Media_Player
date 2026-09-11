@@ -1,4 +1,4 @@
-/*
+﻿/*
  * np2ffi.c -- hootrip FFI shim over the vendored NP2 i286c core.
  *
  * Provides clean C accessors so the Rust `Np2Cpu` never has to mirror the
@@ -10,6 +10,7 @@
 
 #include <np2types.h>
 #include <cpucore.h>
+#include <string.h>
 
 /* Register indices -- MUST match Rust `hoot_cpu::Reg16` discriminant order. */
 enum {
@@ -82,6 +83,7 @@ void np2_set_adrsmask(UINT32 m) { i286core.s.adrsmask = m; }
 /* V30 vs 286 opcode semantics: selects which single-step entry np2_step uses. */
 static int s_v30 = 0;
 void np2_set_v30(int on) { s_v30 = on ? 1 : 0; }
+int np2_get_v30(void) { return s_v30 ? 1 : 0; }
 
 void np2_init(void) { i286c_initialize(); }
 void np2_reset(void) { i286c_reset(); }
@@ -102,5 +104,29 @@ SINT32 np2_step(void) {
     return -i286core.s.remainclock;
 }
 
-/* Pointer to the flat 2 MB physical memory image (mem[0x200000]). */
+/* Pointer to the live 2 MB physical memory image. */
 UINT8 *np2_mem(void) { return mem; }
+
+void np2_save_cpu(void *dst, int dstBytes)
+{
+	if (!dst || dstBytes < (int)sizeof(i286core))
+		return;
+	memcpy(dst, &i286core, sizeof(i286core));
+	if (dstBytes >= (int)sizeof(i286core) + (int)sizeof(int))
+		*(int *)((UINT8 *)dst + sizeof(i286core)) = s_v30;
+}
+
+void np2_load_cpu(const void *src, int srcBytes)
+{
+	if (!src || srcBytes < (int)sizeof(i286core))
+		return;
+	memcpy(&i286core, src, sizeof(i286core));
+	if (srcBytes >= (int)sizeof(i286core) + (int)sizeof(int))
+		s_v30 = *(const int *)((const UINT8 *)src + sizeof(i286core)) ? 1 : 0;
+	if (mem) {
+		i286core.e.ems[0] = mem + 0xc0000;
+		i286core.e.ems[1] = mem + 0xc4000;
+		i286core.e.ems[2] = mem + 0xc8000;
+		i286core.e.ems[3] = mem + 0xcc000;
+	}
+}

@@ -16,6 +16,13 @@ int CEmuMidiLiveStartPcat(const wchar_t* zipPath, unsigned titleCode,
 
 void CEmuMidiLiveStop(void);
 
+/* Same-zip SE while live UART BGM is running: inject title, do not restart. */
+int CEmuMidiLiveSameZip(const wchar_t* zipPath);
+int CEmuMidiLiveOverlayTitle(unsigned titleCode);
+
+/* SMF BGM already on VST: boot live MPU and inject SE without replacing the SMF. */
+int CEmuMidiLiveStartOverlayPcat(const wchar_t* zipPath, unsigned titleCode);
+
 /* Advance emu by frames @ session rate; queue shorts for Steal. */
 int CEmuMidiLivePump(int frames);
 

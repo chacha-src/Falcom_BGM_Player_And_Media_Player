@@ -188,6 +188,17 @@ void CDriverSg1000::Close()
 	triggered_ = 0;
 }
 
+int CDriverSg1000::OverlayTitle(unsigned titleCode)
+{
+	if (!hw_) return 0;
+	songCmd_ = (uint8_t)(titleCode & 0xff);
+	if (!songCmd_)
+		songCmd_ = 1;
+	TriggerSong();
+	triggered_ = 1;
+	return 1;
+}
+
 int CDriverSg1000::Render(int16_t* stereo, int frames)
 {
 	if (!hw_ || !stereo || frames <= 0) return 0;

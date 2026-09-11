@@ -18,6 +18,7 @@ static void FmMonKeepProbeTags()
 
 static CRITICAL_SECTION s_cs;
 static LONG s_once = 0;
+static volatile LONG s_hold = 0;
 static uint8_t s_regs[0x200];
 static uint8_t s_bits[64];     /* 直前 Flush 区間（フェード用にクリア） */
 static uint8_t s_written[64]; /* 曲開始以降に1回でも書いた番地（00→00 含む） */
@@ -185,8 +186,23 @@ static void MarkBit(unsigned addr)
 	s_written[addr >> 3] |= m;
 }
 
+void FmMonShadowHold(int on)
+{
+	if (on)
+		InterlockedIncrement(&s_hold);
+	else if (InterlockedCompareExchange(&s_hold, 0, 0) > 0)
+		InterlockedDecrement(&s_hold);
+}
+
+int FmMonShadowIsHeld(void)
+{
+	return InterlockedCompareExchange(&s_hold, 0, 0) != 0;
+}
+
 void FmMonShadowReset(void)
 {
+	if (FmMonShadowIsHeld())
+		return;
 	EnsureCs();
 	EnterCriticalSection(&s_cs);
 	memset(s_regs, 0, sizeof(s_regs));
@@ -415,6 +431,8 @@ void FmMonShadowSetCurSample(uint64_t n)
 
 void FmMonShadowWriteReg(unsigned addr, unsigned data)
 {
+	if (FmMonShadowIsHeld())
+		return;
 	EnsureCs();
 	EnterCriticalSection(&s_cs);
 	s_keysOnly = 0;
@@ -627,6 +645,8 @@ void FmMonShadowWriteAuxReg(unsigned addr, unsigned data)
 
 void FmMonShadowMidiNote(int ch, int midiNote, int on)
 {
+	if (FmMonShadowIsHeld())
+		return;
 	if (ch < 0 || ch >= 16) return;
 	EnsureCs();
 	EnterCriticalSection(&s_cs);

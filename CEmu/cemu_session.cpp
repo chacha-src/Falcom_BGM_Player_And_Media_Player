@@ -3,8 +3,11 @@
 #include "cemu_mgr.h"
 #include "cemu_zipfs.h"
 #include "cemu_mdx.h"
+#include "pmd/cemu_pmd.h"
 #include "cemu_modepref.h"
+#include "driver/cemu_driver.h"
 #include "machine/cemu_hard_pcat.h"
+#include "machine/cemu_hard_pc98.h"
 #include "machine/cemu_hard_ac.h"
 #include <string.h>
 #include <stdlib.h>
@@ -21,6 +24,7 @@ void CEmuSessionClose(CEmuSession* s)
 	if (!s) return;
 	CEmuS98Close(&s->s98);
 	CEmuMdxClose(&s->mdx);
+	CEmuPmdClose(&s->pmd);
 	CEmuPc88Close(&s->pc88);
 	CEmuPc98Close(&s->pc98);
 	CEmuAcClose(&s->ac);
@@ -351,9 +355,16 @@ static int CEmuSessionTryS98InZip(CEmuSession* s, CEmuZipFs* fs, const wchar_t* 
 }
 
 static int CEmuSessionTryHardGe(CEmuSession* s, const CEmuGameEntry* ge,
-	const wchar_t* zipPath, unsigned titleCode)
+	const wchar_t* zipPath, unsigned titleCode, CEmuZipFs* fs)
 {
 	if (!s || !ge || !zipPath) return 0;
+	if (CEmuPmdOpen(&s->pmd, ge, zipPath, titleCode, s->sampleRate, fs)) {
+		s->kind = CEMU_KIND_PMD;
+		if (s->pmd.sampleRate > 0)
+			s->sampleRate = s->pmd.sampleRate;
+		s->lengthSamples = CEmuPmdLengthSamples(&s->pmd);
+		return 1;
+	}
 	/* Non-MDX X68k ROM zips (BOOT.BIN / Musashi hard) after MDX miss. */
 	if (_stricmp(ge->platform, "x68k") == 0 || _stricmp(ge->dataDir, "x68k") == 0) {
 		if (CEmuX68kOpen(&s->x68k, ge, zipPath, titleCode, s->sampleRate)) {
@@ -579,7 +590,7 @@ int CEmuSessionOpen(CEmuSession* s, const wchar_t* path, unsigned titleCode, DWO
 	}
 
 	for (int i = 0; i < nc; i++) {
-		if (!CEmuSessionTryHardGe(s, cands[i], zipPath, titleCode))
+		if (!CEmuSessionTryHardGe(s, cands[i], zipPath, titleCode, &fs))
 			continue;
 		s->game = cands[i];
 		CEmuZipFsClose(&fs);
@@ -602,15 +613,18 @@ static void CEmuSessionWatchHardSilence(CEmuSession* s, short* stereo, int frame
 		&& s->kind != CEMU_KIND_PCAT && s->kind != CEMU_KIND_F3
 		&& s->kind != CEMU_KIND_MSX && s->kind != CEMU_KIND_FM7)
 		return;
-	if (s->lengthSamples > 0 || s->endedBySilence)
+	if (s->endedBySilence)
 		return;
 
 	const int rate = s->sampleRate > 0 ? s->sampleRate : 44100;
 	/* 起動・曲頭の無音を誤判定しない。鳴った後 5 秒無音で終了。
-	   一度も鳴らない壊れたタイトルは 25 秒で打ち切り。 */
+	   一度も鳴らない壊れたタイトルは 25 秒で打ち切り。
+	   クロスフェードは終端が先に要るので、2 秒無音が続いた時点で
+	   残り無音分を length として公開する（曲が戻れば取り消す）。 */
 	const uint32_t settleNeed = (uint32_t)rate * 4u;
 	const uint32_t silenceNeed = (uint32_t)rate * 5u;
 	const uint32_t neverHeardNeed = (uint32_t)rate * 25u;
+	const uint32_t xfadeArmNeed = (uint32_t)rate * 2u;
 	const int heardThresh = 500; /* 実曲。超低音ハミングはこれ未満 */
 	const int noiseFloor = 80;
 
@@ -627,6 +641,8 @@ static void CEmuSessionWatchHardSilence(CEmuSession* s, short* stereo, int frame
 	if (peak >= heardThresh) {
 		s->silenceHeard = 1;
 		s->silenceRun = 0;
+		if (s->lengthSamples > 0)
+			s->lengthSamples = 0;
 		return;
 	}
 
@@ -648,6 +664,13 @@ static void CEmuSessionWatchHardSilence(CEmuSession* s, short* stereo, int frame
 
 	/* After real music: near-silence OR stuck ultra-low hum. */
 	s->silenceRun += (uint32_t)frames;
+	if (s->lengthSamples == 0 && s->silenceRun >= xfadeArmNeed) {
+		uint32_t remain = (silenceNeed > s->silenceRun)
+			? (silenceNeed - s->silenceRun) : (uint32_t)(rate / 2);
+		if (remain < (uint32_t)rate / 2)
+			remain = (uint32_t)rate / 2;
+		s->lengthSamples = s->curSample + (UINT64)remain;
+	}
 	if (s->silenceRun >= silenceNeed) {
 		s->endedBySilence = 1;
 		s->lengthSamples = s->curSample + (UINT64)frames;
@@ -673,10 +696,29 @@ static void CEmuSessionWatchHardSilence(CEmuSession* s, short* stereo, int frame
 int CEmuSessionRender(CEmuSession* s, short* stereo, int frames)
 {
 	if (!s || !stereo || frames <= 0) return 0;
+	if (InterlockedExchange((LONG*)&s->overlayPend, 0)) {
+		CDriver* drv = NULL;
+		switch (s->kind) {
+		case CEMU_KIND_PC88: drv = s->pc88.driver; break;
+		case CEMU_KIND_PC98: drv = s->pc98.driver; break;
+		case CEMU_KIND_AC: drv = s->ac.driver; break;
+		case CEMU_KIND_X68K: drv = s->x68k.driver; break;
+		case CEMU_KIND_SG1000: drv = s->sg1000.driver; break;
+		case CEMU_KIND_X1: drv = s->x1.driver; break;
+		case CEMU_KIND_PCAT: drv = s->pcat.driver; break;
+		case CEMU_KIND_F3: drv = s->f3.driver; break;
+		case CEMU_KIND_MSX: drv = s->msx.driver; break;
+		case CEMU_KIND_FM7: drv = s->fm7.driver; break;
+		default: break;
+		}
+		if (drv)
+			drv->OverlayTitle(s->overlayCode);
+	}
 	int got = 0;
 	switch (s->kind) {
 	case CEMU_KIND_S98: got = CEmuS98Render(&s->s98, stereo, frames); break;
 	case CEMU_KIND_MDX: got = CEmuMdxRender(&s->mdx, stereo, frames); break;
+	case CEMU_KIND_PMD: got = CEmuPmdRender(&s->pmd, stereo, frames); break;
 	case CEMU_KIND_PC88: got = CEmuPc88Render(&s->pc88, stereo, frames); break;
 	case CEMU_KIND_PC98: got = CEmuPc98Render(&s->pc98, stereo, frames); break;
 	case CEMU_KIND_AC: got = CEmuAcRender(&s->ac, stereo, frames); break;
@@ -707,6 +749,7 @@ int CEmuSessionSeek(CEmuSession* s, UINT64 sample)
 	switch (s->kind) {
 	case CEMU_KIND_S98: return CEmuS98Seek(&s->s98, sample, 0);
 	case CEMU_KIND_MDX: return CEmuMdxSeek(&s->mdx, sample, 0);
+	case CEMU_KIND_PMD: return CEmuPmdSeek(&s->pmd, sample, 0);
 	case CEMU_KIND_PC88: return CEmuPc88Seek(&s->pc88, sample);
 	case CEMU_KIND_PC98: return CEmuPc98Seek(&s->pc98, sample);
 	case CEMU_KIND_AC: return CEmuAcSeek(&s->ac, sample);
@@ -718,5 +761,35 @@ int CEmuSessionSeek(CEmuSession* s, UINT64 sample)
 	case CEMU_KIND_MSX: return CEmuMsxSeek(&s->msx, sample);
 	case CEMU_KIND_FM7: return CEmuFm7Seek(&s->fm7, sample);
 	default: return 0;
+	}
+}
+
+int CEmuSessionUsesGlobalNp2(const CEmuSession* s)
+{
+	if (!s) return 0;
+	/* NP2 core is still process-global, but each hard now has its own RAM
+	   and CPU snapshot so two PC-98/PC-AT sessions can crossfade. */
+	return (s->kind == CEMU_KIND_PC98 || s->kind == CEMU_KIND_PCAT) ? 1 : 0;
+}
+
+int CEmuSessionOverlayTitle(CEmuSession* s, unsigned titleCode)
+{
+	if (!s || s->kind == 0) return 0;
+	if (s->kind == CEMU_KIND_S98 || s->kind == CEMU_KIND_MDX || s->kind == CEMU_KIND_PMD)
+		return 0;
+	s->overlayCode = titleCode;
+	InterlockedExchange((LONG*)&s->overlayPend, 1);
+	return 1;
+}
+
+void CEmuSessionMixStereo(short* dst, const short* add, int frames)
+{
+	if (!dst || !add || frames <= 0) return;
+	const int n = frames * 2;
+	for (int i = 0; i < n; i++) {
+		int v = (int)dst[i] + (int)add[i];
+		if (v > 32767) v = 32767;
+		if (v < -32768) v = -32768;
+		dst[i] = (short)v;
 	}
 }

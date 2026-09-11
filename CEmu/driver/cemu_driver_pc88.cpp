@@ -286,6 +286,15 @@ void CDriverPc88::Close()
 	capturing_ = 0;
 }
 
+int CDriverPc88::OverlayTitle(unsigned titleCode)
+{
+	if (!hw_) return 0;
+	hw_->titleCode_ = titleCode;
+	triggered_ = 0;
+	TriggerPlay();
+	return 1;
+}
+
 void CDriverPc88::TickOpn(uint64_t cpuCycles)
 {
 	if (!hw_ || !hw_->SoundChip() || cpuCycles == 0) return;

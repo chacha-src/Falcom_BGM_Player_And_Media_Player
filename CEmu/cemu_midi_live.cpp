@@ -1,5 +1,6 @@
 ﻿#include "StdAfx.h"
 #include "cemu_midi_live.h"
+#include "cemu_types.h"
 #include "cemu_modepref.h"
 #include "cemu_mgr.h"
 #include "cemu_zipfs.h"
@@ -52,6 +53,18 @@ struct CEmuMidiLive {
 	int cc111StartSent;
 	int sawNotes;
 	int noteOns;
+	wchar_t zipPath[CEMU_ZIP_PATH];
+	/* Same-zip SE overlay: tag NoteOns in a short capture window, then
+	   Note Off only those keys when the SE ends (do not CC123 the BGM). */
+	unsigned overlayCode;
+	volatile long overlayPend;
+	int ovlPhase; /* 0 idle, 1 capture, 2 wait for SE end */
+	int ovlSeHeld;
+	uint32_t seBits[16][4];
+	__int64 ovlCapEnd;
+	__int64 ovlMaxEnd;
+	__int64 ovlHang;
+	__int64 ovlLastSe;
 	/* inject ring (ready for this audio block) */
 	CEmuMidiLiveShort inj[kLiveInjCap];
 	LONG injW;
@@ -64,6 +77,7 @@ struct CEmuMidiLive {
 };
 
 static CEmuMidiLive g_live;
+static int g_liveBootAsSfx;
 
 static int LiveModeEntryIsMidi(const CEmuGameEntry* e)
 {
@@ -186,6 +200,116 @@ static void LiveHoldPushAbs(DWORD msg, __int64 dueAbs)
 	g_live.holdN++;
 }
 
+static int LiveSeBitTest(int ch, int key)
+{
+	if ((unsigned)ch > 15u || (unsigned)key > 127u) return 0;
+	return (g_live.seBits[ch][key >> 5] >> (key & 31)) & 1u;
+}
+
+static void LiveSeBitOn(int ch, int key)
+{
+	if ((unsigned)ch > 15u || (unsigned)key > 127u) return;
+	const uint32_t m = 1u << (key & 31);
+	uint32_t* w = &g_live.seBits[ch][key >> 5];
+	if (!(*w & m)) {
+		*w |= m;
+		g_live.ovlSeHeld++;
+	}
+}
+
+static void LiveSeBitOff(int ch, int key)
+{
+	if ((unsigned)ch > 15u || (unsigned)key > 127u) return;
+	const uint32_t m = 1u << (key & 31);
+	uint32_t* w = &g_live.seBits[ch][key >> 5];
+	if (*w & m) {
+		*w &= ~m;
+		if (g_live.ovlSeHeld > 0)
+			g_live.ovlSeHeld--;
+	}
+}
+
+static void LiveKillSeNotes(void)
+{
+	if (g_live.ovlSeHeld > 0) {
+		for (int ch = 0; ch < 16; ch++) {
+			for (int wi = 0; wi < 4; wi++) {
+				uint32_t bits = g_live.seBits[ch][wi];
+				if (!bits) continue;
+				for (int b = 0; b < 32; b++) {
+					if (!(bits & (1u << b))) continue;
+					const int key = wi * 32 + b;
+					if (key > 127) continue;
+					LivePushShort((DWORD)(0x80 | ch) | ((DWORD)key << 8), 0);
+					LivePushShort((DWORD)(0x90 | ch) | ((DWORD)key << 8), 0);
+				}
+			}
+		}
+	}
+	memset(g_live.seBits, 0, sizeof(g_live.seBits));
+	g_live.ovlSeHeld = 0;
+	g_live.ovlPhase = 0;
+}
+
+static void LiveArmSfxCapture(void)
+{
+	LiveKillSeNotes();
+	g_live.ovlPhase = 1;
+	const int rate = g_live.sampleRate > 0 ? g_live.sampleRate : kLiveRate;
+	g_live.ovlCapEnd = g_live.audioSample + ((__int64)rate * 400) / 1000;
+	g_live.ovlMaxEnd = g_live.audioSample + ((__int64)rate * 8000) / 1000;
+	g_live.ovlHang = ((__int64)rate * 2500) / 1000;
+	g_live.ovlLastSe = g_live.audioSample;
+}
+
+static void LiveTrackMsg(DWORD msg)
+{
+	if (g_live.ovlPhase <= 0) return;
+	const int st = (int)(msg & 0xf0);
+	const int ch = (int)(msg & 0x0f);
+	const int d0 = (int)((msg >> 8) & 0x7f);
+	const int d1 = (int)((msg >> 16) & 0x7f);
+	if (st == 0x90) {
+		if (d1 > 0) {
+			if (g_live.ovlPhase == 1)
+				LiveSeBitOn(ch, d0);
+			if (LiveSeBitTest(ch, d0))
+				g_live.ovlLastSe = g_live.audioSample;
+		} else if (LiveSeBitTest(ch, d0)) {
+			LiveSeBitOff(ch, d0);
+			g_live.ovlLastSe = g_live.audioSample;
+		}
+	} else if (st == 0x80) {
+		if (LiveSeBitTest(ch, d0)) {
+			LiveSeBitOff(ch, d0);
+			g_live.ovlLastSe = g_live.audioSample;
+		}
+	} else if (st == 0xb0 && (d0 == 120 || d0 == 121 || d0 == 123)) {
+		for (int key = 0; key < 128; key++)
+			LiveSeBitOff(ch, key);
+		g_live.ovlLastSe = g_live.audioSample;
+	}
+}
+
+static void LiveOvlTick(void)
+{
+	if (g_live.ovlPhase <= 0) return;
+	const __int64 now = g_live.audioSample;
+	if (g_live.ovlPhase == 1 && now >= g_live.ovlCapEnd)
+		g_live.ovlPhase = 2;
+	if (g_live.ovlSeHeld <= 0 && g_live.ovlPhase >= 2) {
+		g_live.ovlPhase = 0;
+		return;
+	}
+	if (now >= g_live.ovlMaxEnd) {
+		LiveKillSeNotes();
+		return;
+	}
+	if (g_live.ovlPhase == 2 && g_live.ovlSeHeld > 0
+		&& (now - g_live.ovlLastSe) >= g_live.ovlHang)
+		LiveKillSeNotes();
+}
+
 static void LiveAdvanceMidiClock(void)
 {
 	const int rate = g_live.sampleRate > 0 ? g_live.sampleRate : kLiveRate;
@@ -217,6 +341,16 @@ static void LiveEmitTimed(DWORD msg, int frames)
 		LivePushShort(msg, (int)ofs64);
 	} else {
 		LiveHoldPushAbs(msg, g_live.midiSample);
+	}
+}
+
+static void LiveFinishShort(DWORD msg, int frames)
+{
+	LiveEmitTimed(msg, frames);
+	LiveTrackMsg(msg);
+	if (((msg & 0xf0) == 0x90) && ((msg >> 16) & 0x7f) > 0) {
+		g_live.noteOns++;
+		g_live.sawNotes = 1;
 	}
 }
 
@@ -336,12 +470,7 @@ static void LiveConsumeUart(CHardPcat* hw, int frames)
 		DWORD msg = (DWORD)g_live.run | ((DWORD)data[0] << 8);
 		if (nData > 1)
 			msg |= ((DWORD)data[1] << 16);
-		LiveEmitTimed(msg, frames);
-
-		if (hi == 0x90 && nData == 2 && data[1] > 0) {
-			g_live.noteOns++;
-			g_live.sawNotes = 1;
-		}
+		LiveFinishShort(msg, frames);
 	}
 
 	/* Do NOT advance pendingTicks here — incomplete messages must keep their
@@ -420,12 +549,7 @@ static void LiveConsumeUartPc98(CHardPc98* hw, int frames)
 		DWORD msg = (DWORD)g_live.run | ((DWORD)data[0] << 8);
 		if (nData > 1)
 			msg |= ((DWORD)data[1] << 16);
-		LiveEmitTimed(msg, frames);
-
-		if (hi == 0x90 && nData == 2 && data[1] > 0) {
-			g_live.noteOns++;
-			g_live.sawNotes = 1;
-		}
+		LiveFinishShort(msg, frames);
 	}
 
 	if (n >= (unsigned)CEMU_PC98_MIDI_CAP - 64) {
@@ -443,6 +567,31 @@ int CEmuMidiLiveActive(void)
 int CEmuMidiLiveHasNotes(void)
 {
 	return g_live.sawNotes ? 1 : 0;
+}
+
+int CEmuMidiLiveSameZip(const wchar_t* zipPath)
+{
+	if (!zipPath || !zipPath[0]) return 0;
+	LiveEnsureCs();
+	EnterCriticalSection(&g_live.cs);
+	const int ok = (g_live.active && g_live.zipPath[0]
+		&& _wcsicmp(g_live.zipPath, zipPath) == 0) ? 1 : 0;
+	LeaveCriticalSection(&g_live.cs);
+	return ok;
+}
+
+int CEmuMidiLiveOverlayTitle(unsigned titleCode)
+{
+	LiveEnsureCs();
+	EnterCriticalSection(&g_live.cs);
+	if (!g_live.active || !g_live.drv) {
+		LeaveCriticalSection(&g_live.cs);
+		return 0;
+	}
+	g_live.overlayCode = titleCode;
+	LeaveCriticalSection(&g_live.cs);
+	InterlockedExchange((LONG*)&g_live.overlayPend, 1);
+	return 1;
 }
 
 void CEmuMidiLiveStop(void)
@@ -477,6 +626,12 @@ void CEmuMidiLiveStop(void)
 	g_live.cc111StartSent = 0;
 	g_live.sawNotes = 0;
 	g_live.noteOns = 0;
+	g_live.zipPath[0] = 0;
+	g_live.overlayCode = 0;
+	g_live.ovlPhase = 0;
+	g_live.ovlSeHeld = 0;
+	memset(g_live.seBits, 0, sizeof(g_live.seBits));
+	InterlockedExchange((LONG*)&g_live.overlayPend, 0);
 	g_live.injR = g_live.injW;
 	LeaveCriticalSection(&g_live.cs);
 	if (drv) {
@@ -508,6 +663,16 @@ static int MidiOutTypeFromGe(const CEmuGameEntry* e)
 static int MidiOutTypeIsLa(int t)
 {
 	return (t == 1 || t == 2) ? 1 : 0;
+}
+
+int CEmuMidiLiveStartOverlayPcat(const wchar_t* zipPath, unsigned titleCode)
+{
+	g_liveBootAsSfx = 1;
+	wchar_t dummy[MAX_PATH] = {};
+	const int ok = CEmuMidiLiveStartPcat(zipPath, titleCode, dummy, MAX_PATH);
+	if (!ok)
+		g_liveBootAsSfx = 0;
+	return (ok && dummy[0]) ? 1 : 0;
 }
 
 int CEmuMidiLiveStartPcat(const wchar_t* zipPath, unsigned titleCode,
@@ -602,6 +767,7 @@ int CEmuMidiLiveStartPcat(const wchar_t* zipPath, unsigned titleCode,
 	g_live.drv = drv;
 	g_live.ge = ge;
 	wcsncpy_s(g_live.midPath, midPath, _TRUNCATE);
+	wcsncpy_s(g_live.zipPath, openZip, _TRUNCATE);
 	g_live.sampleRate = rate;
 	g_live.midiCursor = 0;
 	g_live.run = 0;
@@ -617,6 +783,17 @@ int CEmuMidiLiveStartPcat(const wchar_t* zipPath, unsigned titleCode,
 	g_live.cc111StartSent = 1;
 	g_live.sawNotes = 0;
 	g_live.noteOns = 0;
+	g_live.overlayCode = 0;
+	g_live.ovlPhase = 0;
+	g_live.ovlSeHeld = 0;
+	memset(g_live.seBits, 0, sizeof(g_live.seBits));
+	if (g_liveBootAsSfx) {
+		g_live.overlayCode = titleCode;
+		InterlockedExchange((LONG*)&g_live.overlayPend, 1);
+		g_liveBootAsSfx = 0;
+	} else {
+		InterlockedExchange((LONG*)&g_live.overlayPend, 0);
+	}
 	g_live.injR = g_live.injW = 0;
 	g_live.active = 1;
 	LeaveCriticalSection(&g_live.cs);
@@ -648,12 +825,18 @@ int CEmuMidiLivePump(int frames)
 		LeaveCriticalSection(&g_live.cs);
 		return 0;
 	}
+	if (InterlockedExchange((LONG*)&g_live.overlayPend, 0)) {
+		LiveArmSfxCapture();
+		if (g_live.drv)
+			g_live.drv->OverlayTitle(g_live.overlayCode);
+	}
 	g_live.drv->Render(g_live.mixBuf, frames);
 	if (kind == CHard::KIND_PC98)
 		LiveConsumeUartPc98((CHardPc98*)g_live.hard, frames);
 	else
 		LiveConsumeUart((CHardPcat*)g_live.hard, frames);
 	g_live.audioSample += (__int64)frames;
+	LiveOvlTick();
 	LeaveCriticalSection(&g_live.cs);
 	return 1;
 }

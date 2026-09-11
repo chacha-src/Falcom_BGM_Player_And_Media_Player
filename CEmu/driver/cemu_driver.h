@@ -13,6 +13,8 @@ public:
 	virtual void Close() = 0;
 	virtual int Render(int16_t* stereo, int frames) = 0;
 	virtual int Seek(uint64_t sample) = 0;
+	/* Same-zip SE while BGM plays: poke the live mailbox / command. 0 = unsupported. */
+	virtual int OverlayTitle(unsigned titleCode) { (void)titleCode; return 0; }
 };
 
 CHard* CEmuHardCreate(const CEmuGameEntry* ge, int sampleRate);

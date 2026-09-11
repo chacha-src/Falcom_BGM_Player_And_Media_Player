@@ -12,6 +12,7 @@ public:
 	void Close() override;
 	int Render(int16_t* stereo, int frames) override;
 	int Seek(uint64_t sample) override;
+	int OverlayTitle(unsigned titleCode) override;
 
 private:
 	void RunUntil(uint64_t endCycle);

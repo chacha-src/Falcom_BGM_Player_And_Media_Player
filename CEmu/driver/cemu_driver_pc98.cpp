@@ -3,6 +3,7 @@
 #include "../machine/cemu_hard_pc98.h"
 #include "../chip/cemu_chip_opna.h"
 #include "../vendor/np2/np2ffi.h"
+#include "../machine/cemu_np2ctx.h"
 
 enum {
 	/* Matches the Z80 PC-88 watchdog: 2s of total register stillness is never
@@ -53,14 +54,16 @@ int CDriverPc98::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigne
 	wdReplays_ = 0;
 	wdEverActive_ = 0;
 
-	if (!hw_->LoadRoms(fs, ge, titleCode))
-		return 0;
-
-	CEmuHardPc98SetActive(hw_);
-	if (!hw_->isDos_) {
-		/* Bootcs: settle ~1s */
-		const uint64_t bootCycles = (uint64_t)cpuHz_;
-		RunUntil(hw_->cpuCycles_ + bootCycles);
+	{
+		CEmuNp2Guard np2;
+		CEmuHardPc98SetActive(hw_);
+		if (!hw_->LoadRoms(fs, ge, titleCode))
+			return 0;
+		if (!hw_->isDos_) {
+			/* Bootcs: settle ~1s */
+			const uint64_t bootCycles = (uint64_t)cpuHz_;
+			RunUntil(hw_->cpuCycles_ + bootCycles);
+		}
 	}
 
 	booted_ = 1;
@@ -72,6 +75,17 @@ void CDriverPc98::Close()
 	hw_ = NULL;
 	booted_ = 0;
 	triggered_ = 0;
+}
+
+int CDriverPc98::OverlayTitle(unsigned titleCode)
+{
+	if (!hw_) return 0;
+	CEmuNp2Guard np2;
+	CEmuHardPc98SetActive(hw_);
+	titleCode_ = titleCode;
+	const int ok = hw_->TriggerPlay(titleCode_) ? 1 : 0;
+	if (ok) triggered_ = 1;
+	return ok;
 }
 
 void CDriverPc98::TickOpn(uint64_t cpuCycles)
@@ -87,6 +101,8 @@ void CDriverPc98::TickOpn(uint64_t cpuCycles)
 void CDriverPc98::RunUntil(uint64_t endCycle)
 {
 	if (!hw_) return;
+	CEmuNp2Guard np2;
+	CEmuHardPc98SetActive(hw_);
 	if (hw_->isDos_) {
 		hw_->PumpCycles(endCycle);
 		return;
@@ -146,6 +162,7 @@ int CDriverPc98::Render(int16_t* stereo, int frames)
 	if (!hw_ || !stereo || frames <= 0 || !booted_) return 0;
 	CChip* chip = hw_->SoundChip();
 	if (!chip) return 0;
+	CEmuNp2Guard np2;
 	CChip* const opl = hw_->OplChip();
 	CEmuHardPc98SetActive(hw_);
 	if (!triggered_) {

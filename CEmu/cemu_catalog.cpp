@@ -2543,3 +2543,73 @@ unsigned CEmuGameTitleCodeForIndex(const CEmuGameEntry* ge, unsigned titleIndex1
 	/* code 0 is valid (arcus2 first track). Do not coerce to idx+1. */
 	return ge->title[idx].code;
 }
+
+static wchar_t CEmuTitleFoldAscii(wchar_t c)
+{
+	if (c >= L'a' && c <= L'z')
+		return (wchar_t)(c - L'a' + L'A');
+	return c;
+}
+
+int CEmuTitleLooksLikeSfx(const wchar_t* label)
+{
+	if (!label || !label[0])
+		return 0;
+	if (CEmuTitleLabelLooksLikeStop(label))
+		return 0;
+	const wchar_t* s = label;
+	while (*s == L' ' || *s == L'\t' || *s == L'　')
+		s++;
+	if (!s[0])
+		return 0;
+	/* [SE] / [SFX] / 【SE】 */
+	if (s[0] == L'[' || s[0] == 0x3010) {
+		const wchar_t a = CEmuTitleFoldAscii(s[1]);
+		const wchar_t b = CEmuTitleFoldAscii(s[2]);
+		const wchar_t c = CEmuTitleFoldAscii(s[3]);
+		if (a == L'S' && b == L'E' && (c == L']' || c == 0x3011 || c == L' ' || c == 0))
+			return 1;
+		if (a == L'S' && b == L'F' && c == L'X')
+			return 1;
+	}
+	/* Fullwidth ＳＥ */
+	if (s[0] == 0xFF33 && s[1] == 0xFF25)
+		return 1;
+	/* "SE …" but not SEGA / SECTOR / SEND */
+	if (CEmuTitleFoldAscii(s[0]) == L'S' && CEmuTitleFoldAscii(s[1]) == L'E') {
+		const wchar_t n = CEmuTitleFoldAscii(s[2]);
+		if (n != L'G' && n != L'C' && n != L'N' && n != L'L' && n != L'A') {
+			if (n == 0 || n == L' ' || n == L'"' || n == L'\'' || n == L':'
+				|| n == L'[' || n == L'/' || n == L'-' || n == L'(' || n == L'.')
+				return 1;
+		}
+	}
+	if (CEmuTitleFoldAscii(s[0]) == L'S' && CEmuTitleFoldAscii(s[1]) == L'F'
+		&& CEmuTitleFoldAscii(s[2]) == L'X')
+		return 1;
+	for (const wchar_t* p = s; *p; p++) {
+		/* 効果音 (covers 効果音楽) */
+		if (p[0] == 0x52B9 && p[1] == 0x679C && p[2] == 0x97F3)
+			return 1;
+		if (CEmuTitleFoldAscii(p[0]) == L'S' && CEmuTitleFoldAscii(p[1]) == L'F'
+			&& CEmuTitleFoldAscii(p[2]) == L'X')
+			return 1;
+		if (CEmuTitleFoldAscii(p[0]) == L'S' && CEmuTitleFoldAscii(p[1]) == L'O'
+			&& CEmuTitleFoldAscii(p[2]) == L'U' && CEmuTitleFoldAscii(p[3]) == L'N'
+			&& CEmuTitleFoldAscii(p[4]) == L'D' && p[5]
+			&& CEmuTitleFoldAscii(p[6]) == L'E' && CEmuTitleFoldAscii(p[7]) == L'F'
+			&& CEmuTitleFoldAscii(p[8]) == L'F')
+			return 1;
+	}
+	return 0;
+}
+
+int CEmuGameTitleLooksLikeSfx(const CEmuGameEntry* ge, unsigned titleIndex1)
+{
+	wchar_t lab[CEMU_GAME_NAME];
+	lab[0] = 0;
+	if (titleIndex1 == 0)
+		titleIndex1 = 1;
+	CEmuGameTitleAt(ge, (int)titleIndex1 - 1, NULL, lab, (int)_countof(lab));
+	return CEmuTitleLooksLikeSfx(lab);
+}

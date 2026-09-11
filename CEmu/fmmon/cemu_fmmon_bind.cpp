@@ -564,6 +564,8 @@ void CEmuFmMonBindFromGe(const CEmuGameEntry* ge)
 void CEmuFmMonBeginOpen(const CEmuGameEntry* ge, const wchar_t* zipPath, int sampleRate)
 {
 	(void)ge;
+	if (FmMonShadowIsHeld())
+		return;
 	FmMonShadowReset();
 	if (zipPath && zipPath[0])
 		FmMonShadowSetSource(zipPath);

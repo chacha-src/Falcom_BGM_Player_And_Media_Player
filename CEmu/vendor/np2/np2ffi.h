@@ -25,6 +25,9 @@ uint32_t np2_pc_phys(void);
 void np2_interrupt(uint8_t vect);
 int32_t np2_step(void);
 uint8_t* np2_mem(void);
+int np2_get_v30(void);
+void np2_save_cpu(void* dst, int dstBytes);
+void np2_load_cpu(const void* src, int srcBytes);
 
 /* From glue/np2io.c */
 extern void (*hootrip_out8)(unsigned port, unsigned char val);

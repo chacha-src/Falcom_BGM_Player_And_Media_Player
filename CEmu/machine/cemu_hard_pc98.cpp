@@ -612,6 +612,10 @@ CHardPc98::CHardPc98()
 	, picMasterIcw1_(0)
 	, picSlaveIcw1_(0)
 	, dosGe_(NULL)
+	, np2Ram_(NULL)
+	, np2HaveCpu_(0)
+	, pmdOpnIrq_(0)
+	, pmdPlayArmed_(0)
 {
 	hardKind = KIND_PC98;
 	dosSong_[0] = 0;
@@ -662,7 +666,32 @@ void CHardPc98::FreeBanks()
 
 uint8_t* CHardPc98::Mem()
 {
-	return np2_mem();
+	if (CEmuNp2IsOwner(this)) {
+		uint8_t* live = np2_mem();
+		if (live)
+			return live;
+	}
+	return np2Ram_ ? np2Ram_ : np2_mem();
+}
+
+int CHardPc98::EnsureNp2Ram()
+{
+	if (np2Ram_)
+		return 1;
+	np2Ram_ = (uint8_t*)malloc(CEMU_NP2_MEM_SIZE);
+	if (!np2Ram_)
+		return 0;
+	memset(np2Ram_, 0, CEMU_NP2_MEM_SIZE);
+	memset(np2Cpu_, 0, sizeof(np2Cpu_));
+	np2HaveCpu_ = 0;
+	return 1;
+}
+
+void CHardPc98::BindNp2()
+{
+	if (!EnsureNp2Ram())
+		return;
+	CEmuNp2Bind(this, np2Ram_, np2Cpu_, np2HaveCpu_);
 }
 
 static int CEmuPc98IsFmp(const CEmuGameEntry* ge)
@@ -689,6 +718,50 @@ static int CEmuPc98IsMusicCom(const CEmuGameEntry* ge)
 		if (!base || (back && back > base)) base = back;
 		base = base ? base + 1 : s;
 		if (_stricmp(base, "MUSIC.COM") == 0 || _stricmp(base, "46.com") == 0)
+			return 1;
+	}
+	return 0;
+}
+
+static int CEmuPc98NameLooksPmd(const char* name)
+{
+	if (!name || !name[0]) return 0;
+	const char* base = name;
+	for (const char* p = name; *p; ++p) {
+		if (*p == '/' || *p == '\\' || *p == ':')
+			base = p + 1;
+	}
+	while (*base == '#' || *base == ' ' || *base == '\t')
+		++base;
+	if (_strnicmp(base, "PMD", 3) == 0)
+		return 1;
+	const char* n = name;
+	while (*n == '#' || *n == ' ' || *n == '\t')
+		++n;
+	return _strnicmp(n, "PMD", 3) == 0;
+}
+
+static int CEmuPc98GeIsPmd(const CEmuGameEntry* ge)
+{
+	if (!ge) return 0;
+	if (CEmuPc98NameLooksPmd(ge->archive))
+		return 1;
+	for (int i = 0; i < ge->romCount; i++) {
+		if (CEmuPc98NameLooksPmd(ge->rom[i].name))
+			return 1;
+	}
+	return 0;
+}
+
+static int CEmuPc98DosHasPmd(const CEmuDos98& dos)
+{
+	static const char* kNames[] = {
+		"PMD.COM", "PMD_98.COM", "PMDB2.COM", "PMD86.COM", "PMD86B.COM",
+		"PMDA.COM", "PMDB.COM", "PMDPPZ.COM", "PMDPPZE.COM", "PMD86L.COM",
+		NULL
+	};
+	for (int i = 0; kNames[i]; i++) {
+		if (dos.FindFile(kNames[i]))
 			return 1;
 	}
 	return 0;
@@ -747,6 +820,8 @@ int CHardPc98::Init(const CEmuGameEntry* ge, int sampleRate)
 	isDos_ = ((_stricmp(ge->platform, "pc98dos") == 0
 		|| _stricmp(ge->platform, "pc9821") == 0
 		|| _stricmp(ge->platform, "pc88vados") == 0) && bootCs_ == 0) ? 1 : 0;
+	pmdOpnIrq_ = CEmuPc98GeIsPmd(ge);
+	pmdPlayArmed_ = 0;
 	modeMidi_ = 0;
 	for (int i = 0; i < ge->optCount; i++) {
 		if (_stricmp(ge->opt[i].name, "midiout") == 0) {
@@ -822,18 +897,25 @@ int CHardPc98::Init(const CEmuGameEntry* ge, int sampleRate)
 	else
 		chip_->SetTimerClockScale(1u);
 
-	np2_init();
-	np2_reset();
-	np2_setextsize(0);
-	np2_set_adrsmask(0x000FFFFFu);
-	/* PC-88VA CPU is V30; keep i286 for classic PC-98.
-	   V30 patch is opt-in after bootcs VA probes stabilize — i286 runs
-	   the Falcom SORC stub (same as SORC98) reliably. */
-	np2_set_v30(0);
-	uint8_t* mem = np2_mem();
-	if (mem) memset(mem, 0, 0x200000);
-
-	AttachIoHooks();
+	if (!EnsureNp2Ram())
+		return 0;
+	{
+		CEmuNp2Guard np2;
+		BindNp2();
+		np2_init();
+		np2_reset();
+		np2_setextsize(0);
+		np2_set_adrsmask(0x000FFFFFu);
+		/* PC-88VA CPU is V30; keep i286 for classic PC-98.
+		   V30 patch is opt-in after bootcs VA probes stabilize — i286 runs
+		   the Falcom SORC stub (same as SORC98) reliably. */
+		np2_set_v30(0);
+		uint8_t* mem = np2_mem();
+		if (mem) memset(mem, 0, 0x200000);
+		np2HaveCpu_ = 1;
+		np2_save_cpu(np2Cpu_, CEMU_NP2_CPU_SIZE);
+		AttachIoHooks();
+	}
 	active_ = 1;
 	return 1;
 }
@@ -841,7 +923,16 @@ int CHardPc98::Init(const CEmuGameEntry* ge, int sampleRate)
 void CHardPc98::Shutdown()
 {
 	PC98_CENSUS("end");
-	DetachIoHooks();
+	{
+		CEmuNp2Guard np2;
+		CEmuNp2Unbind(this);
+		DetachIoHooks();
+	}
+	if (np2Ram_) {
+		free(np2Ram_);
+		np2Ram_ = NULL;
+	}
+	np2HaveCpu_ = 0;
 	FreeBanks();
 	if (chip_) { CEmuChipYm2608Destroy(chip_); chip_ = NULL; }
 	if (opl_) { CEmuChipYm3812Destroy(opl_); opl_ = NULL; }
@@ -1345,6 +1436,10 @@ static int IvtHooked(uint8_t vec, int dosMode)
 	if (seg == 0 && off == 0) return 0;
 	if (seg >= 0xF000) return 0;
 	if (dosMode && seg == DOS98_TRAMP_SEG) return 0;
+	/* DOS INT08 into the BIOS work page is not a PIT ISR. Treating 0000:05xx
+	   as hooked fires IRQ0 at PIT rate and starves PMD's OPN Timer B. */
+	if (dosMode && vec == 0x08 && seg == 0 && off < 0x800)
+		return 0;
 	return 1;
 }
 
@@ -1421,7 +1516,7 @@ int CHardPc98::DeliverIrqs()
 		flags = (uint16_t)(flags | 0x0200);
 		np2_reg_set(NP2_R_FLAGS, flags);
 	}
-	if (synthIfKeepalive_) {
+	if (synthIfKeepalive_ || (pmdOpnIrq_ && pmdPlayArmed_)) {
 		flags = (uint16_t)(flags | 0x0200);
 		np2_reg_set(NP2_R_FLAGS, flags);
 	}
@@ -1439,18 +1534,17 @@ int CHardPc98::DeliverIrqs()
 	}
 
 	if (pitIrqPending_ && (picMask_ & 0x01) == 0) {
-		/* BIOS INT 08 increments the timer and far-calls INT 1C.  Guest
-		   drivers that own INT 08 already do that chain themselves — firing
-		   both was measured to break titles.  When INT 08 is still the DOS
-		   trampoline, the BIOS would have delivered 1C; do that and only
-		   that. */
-		if (IvtHooked(PC98_TIMER_VEC, isDos_)) {
+		/* PMD's clock is OPN Timer B (IRQ3). A guest-programmed PIT plus a
+		   real INT08 CS starves that ISR (~3kHz IRQ0 in 250ms) and leaves
+		   IF=0, so key-ons freeze. Drop IRQ0 once the OPN vector is live. */
+		if (pmdOpnIrq_ && pmdPlayArmed_) {
+			pitIrqPending_ = 0;
+		} else if (IvtHooked(PC98_TIMER_VEC, isDos_)) {
 			pitIrqPending_ = 0;
 			timerIrqCount_++;
 			np2_interrupt((uint8_t)PC98_TIMER_VEC);
 			return 1;
-		}
-		if (IvtHooked(PC98_USER_TICK_VEC, isDos_)) {
+		} else if (IvtHooked(PC98_USER_TICK_VEC, isDos_)) {
 			pitIrqPending_ = 0;
 			timerIrqCount_++;
 			np2_interrupt((uint8_t)PC98_USER_TICK_VEC);
@@ -1472,7 +1566,7 @@ int CHardPc98::DeliverIrqs()
 		   ticks INT0B. Mirror while 0B is still the trampoline; skip lone
 		   IRET serial stubs. */
 		if (mem && (pc88VaIo_ || isDos_) && IvtHooked(0x14, isDos_)
-			&& !IvtHooked(PC98_OPN_IRQ_VEC, isDos_)) {
+			&& !IvtHooked(PC98_OPN_IRQ_VEC, isDos_) && !pmdOpnIrq_) {
 			const unsigned o14 = (unsigned)mem[0x14 * 4] | ((unsigned)mem[0x14 * 4 + 1] << 8);
 			const unsigned s14 = (unsigned)mem[0x14 * 4 + 2] | ((unsigned)mem[0x14 * 4 + 3] << 8);
 			const unsigned phys = (s14 << 4) + o14;
@@ -1488,6 +1582,9 @@ int CHardPc98::DeliverIrqs()
 		/* mbmusp/MUSE: SSG I/O A = 0xC0 → driver hooks INT14 and EOIs the
 		   slave. Deliver there (do not mirror onto INT0B). */
 		uint8_t vec = PC98_OPN_IRQ_VEC;
+		/* PMD owns IRQ3/INT0B (Timer B). INT14 is a DOS/MUSE hook — sending
+		   OPN there runs the wrong ISR, 30 IRQs then silence. */
+		if (!pmdOpnIrq_) {
 		if (IvtHooked(0x14, isDos_) && mem) {
 			const unsigned o14 = (unsigned)mem[0x14 * 4] | ((unsigned)mem[0x14 * 4 + 1] << 8);
 			const unsigned s14 = (unsigned)mem[0x14 * 4 + 2] | ((unsigned)mem[0x14 * 4 + 3] << 8);
@@ -1545,6 +1642,7 @@ int CHardPc98::DeliverIrqs()
 				}
 			}
 		}
+		} /* !pmdOpnIrq_ — keep PMD on INT0B */
 		if (!IvtHooked(vec, isDos_)) {
 			/* Do not fall back to VSYNC (0x0A) or other IRQ lines — that
 			   mis-delivered OPN timer IRQs into SORC98's VSYNC stub. */
@@ -3900,6 +3998,7 @@ int CHardPc98::RunDosCommand(const char* cmdline, uint64_t budgetCycles)
 int CHardPc98::BootDos(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode)
 {
 	if (!fs || !ge) return 0;
+	pmdOpnIrq_ = CEmuPc98GeIsPmd(ge);
 	uint8_t* mem = np2_mem();
 	if (!mem) return 0;
 
@@ -4432,6 +4531,10 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 	const uint64_t drainBudget = (uint64_t)cpuHz_ / 2ull;
 
 	if (isDos_) {
+		if (!pmdOpnIrq_ && (CEmuPc98GeIsPmd(dosGe_) || CEmuPc98DosHasPmd(dos_)))
+			pmdOpnIrq_ = 1;
+		if (pmdOpnIrq_)
+			pmdPlayArmed_ = 1;
 		PC98_CENSUS("pre");
 		if (PatchSynth98PaiDest(np2_mem(), dos_.PspSeg()))
 			synthIfKeepalive_ = 1;
@@ -6001,6 +6104,7 @@ void CEmuHardPc98SetActive(CHardPc98* hw)
 		}
 		return;
 	}
+	hw->BindNp2();
 	g_pc98Active = hw;
 	hootrip_out8 = Pc98Out8;
 	hootrip_inp8 = Pc98In8;
