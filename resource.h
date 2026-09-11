@@ -29,6 +29,7 @@
 #define IDD_SENTAKU5                    136
 #define IDD_SENTAKU6                    137
 #define IDD_Render                      138
+#define IDD_UPDATE_ASK                  355
 #define IDD_SENTAKU7                    139
 #define IDD_SENTAKU8                    140
 #define IDD_SENTAKU9                    141
@@ -1487,6 +1488,17 @@
 #define IDC_VST_WAIT_TXT                4313
 #define IDC_MID_PREFER_KPI              4314
 #define IDC_MID_PREFER_VST              4315
+#define IDC_UPDASK_MSG                  4528
+#define IDC_UPDASK_DONTASK              4529
+#define IDC_UPD_DONTASK                 4530
+#define IDC_UPD_AUTO_YES                4531
+#define IDC_UPD_AUTO_NO                 4532
+#define IDC_UPD_CHECKNOW                4533
+#define IDC_UPD_AVAIL                   4534
+#define ID_RD_UPD_DONTASK               33288
+#define ID_RD_UPD_AUTO_YES              33289
+#define ID_RD_UPD_AUTO_NO               33290
+#define ID_RD_UPD_CHECKNOW              33291
 #define IDC_STATIC_MID_PREFER           4316
 #define IDC_STATIC_VST_MULTI            4317
 #define IDC_VST_MULTI_COMBO             4318
@@ -2166,9 +2178,9 @@
 // 
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
-#define _APS_NEXT_RESOURCE_VALUE        354
-#define _APS_NEXT_COMMAND_VALUE         33288
-#define _APS_NEXT_CONTROL_VALUE         4528
+#define _APS_NEXT_RESOURCE_VALUE        356
+#define _APS_NEXT_COMMAND_VALUE         33292
+#define _APS_NEXT_CONTROL_VALUE         4535
 #define _APS_NEXT_SYMED_VALUE           104
 #endif
 #endif

@@ -1,4 +1,4 @@
-﻿#include "StdAfx.h"
+#include "StdAfx.h"
 #include "cemu_chip_opna.h"
 #include "cemu_chip.h"
 #include "../fmmon/fmmon_shadow.h"

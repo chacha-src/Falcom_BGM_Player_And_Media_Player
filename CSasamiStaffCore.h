@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 /* Shared staff-score geometry / paint / hit-test for SASAMI MIDI & FM score dialogs. */
 #include "SasamiComposerDoc.h"
 
@@ -401,7 +401,7 @@ int ScStaffTempoTFromBpm(int bpm);
 int ScStaffStripKindEmitMml(const ScEvent& e, wchar_t* out, int outCch);
 double ScStaffSecFromTick(uint32_t tick, int tempoT);
 uint32_t ScStaffTickFromSec(double sec, int tempoT);
-/* Build temp already written: add to playlist and start playback. Returns 1 on start. */
+/* Bake already written: play as ephemeral temp (not added to playlist, selection unchanged). */
 int ScStaffStartHostPreview(LPCTSTR path, const ScStaffUi* u, int tempoT);
 /* Stop host preview (Space toggle / dialog close). */
 void ScStaffStopHostPreview(ScStaffUi* u);

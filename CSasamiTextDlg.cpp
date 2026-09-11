@@ -1,4 +1,4 @@
-#include "stdafx.h"
+﻿#include "stdafx.h"
 #include "ogg.h"
 #include "CSasamiMidiScoreDlg.h"
 #include "CSasamiFmScoreDlg.h"
@@ -7,11 +7,9 @@
 #include "CCustomPopupMenu.h"
 #include "OfflineHelp.h"
 #include "CSasamiCmdHelpDlg.h"
-#include "PlayList.h"
+#include "CSasamiStaffCore.h"
 #include "kb_sasami/source/sasami_write.h"
 #include <shlobj.h>
-
-extern CPlayList* pl;
 
 CSasamiTextDlg* CSasamiTextDlg::s_inst = NULL;
 
@@ -686,12 +684,16 @@ void CSasamiTextDlg::OnBnClickedPlay()
 	wchar_t path[MAX_PATH];
 	int isFm = 0;
 	if (!CompileAndBuild(path, MAX_PATH, &isFm)) return;
-	if (!pl) {
-		m_status.SetWindowText(LL14(L"プレイリスト未初期化", L"Playlist not ready", L"Liste non prête", L"Lista non pronta", L"Lista no lista", L"목록 없음", L"列表未就绪", L"القائمة غير جاهزة", L"Плейлист не готов", L"Playlist nicht bereit", L"Lista não pronta", L"Afspeellijst niet klaar", L"Lista niegotowa", L"Liste hazır değil"));
+	const int tempoT = isFm ? m_fm.tempoT : m_midi.tempoT;
+	if (!ScStaffStartHostPreview(path, NULL, tempoT)) {
+		m_status.SetWindowText(LL14(L"一時再生に失敗しました", L"Temp preview failed", L"Échec aperçu temporaire", L"Anteprima temporanea non riuscita", L"Falló la vista previa temporal",
+			L"임시 미리듣기 실패", L"临时预览失败", L"فشل المعاينة المؤقتة", L"Временное превью не удалось", L"Temporaere Vorschau fehlgeschlagen", L"Falha na prévia temporária", L"Tijdelijke preview mislukt", L"Podgląd tymczasowy nieudany", L"Geçici önizleme başarısız"));
+		RefreshChromeOpaque();
 		return;
 	}
-	pl->AddFilePath(path);
-	m_status.SetWindowText(LL14(L"プレイリストに追加しました", L"Added to playlist", L"Ajouté à la liste", L"Aggiunto alla lista", L"Añadido a la lista", L"목록에 추가됨", L"已加入列表", L"أُضيف للقائمة", L"Добавлено в плейлист", L"Zur Playlist hinzugefügt", L"Adicionado à lista", L"Toegevoegd aan lijst", L"Dodano do listy", L"Listeye eklendi"));
+	m_status.SetWindowText(LL14(L"一時再生（プレイリストには載せません）", L"Temp preview (not added to playlist)", L"Aperçu temporaire (pas dans la liste)", L"Anteprima temporanea (non in lista)", L"Vista previa temporal (no se añade a la lista)",
+		L"임시 재생(목록에 넣지 않음)", L"临时播放（不加入播放列表）", L"تشغيل مؤقت (لا يُضاف للقائمة)", L"Временное превью (не в плейлист)", L"Temporaere Wiedergabe (nicht in Playlist)", L"Prévia temporária (não entra na lista)", L"Tijdelijke weergave (niet in playlist)", L"Odtwarzanie tymczasowe (bez listy)", L"Geçici çalma (listeye eklenmez)"));
+	RefreshChromeOpaque();
 }
 
 void CSasamiTextDlg::OnBnClickedHelp()

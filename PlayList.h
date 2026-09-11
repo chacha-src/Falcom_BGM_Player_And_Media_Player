@@ -188,6 +188,8 @@ public:
 };
 
 CString NormalizePlaylistPath(LPCTSTR fol);
+/* %TEMP% の ogg_sasami_* 発音確認ファイル。プレイリストへ載せない。 */
+int PlIsSasamiTempPreviewPath(LPCTSTR path);
 CString PlPhysicalMediaPath(LPCTSTR fol);
 CString PlStorePlaylistFol(LPCTSTR fol, int sub);
 // Falcom ゲームBGM等: fol は basename のみで play() 時に解決するため、パス存在では欠損判定しない。

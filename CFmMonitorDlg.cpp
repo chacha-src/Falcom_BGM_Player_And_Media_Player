@@ -30,199 +30,43 @@ static void FmPathStem(const wchar_t* path, wchar_t* stem, int n)
 	for (const wchar_t* p = path; *p; p++)
 		if (*p == L'\\' || *p == L'/') base = p + 1;
 	wcsncpy_s(stem, n, base, _TRUNCATE);
+	/* kss::0001 / zip::track — 拡張子種は見ない */
+	wchar_t* cut = wcsstr(stem, L"::");
+	if (cut) *cut = 0;
 	wchar_t* dot = wcsrchr(stem, L'.');
 	if (dot && dot != stem) *dot = 0;
 }
 
-/* KPI dump stem match: .fpy / PMD / FMP / MSX */
-static int FmExtBoundaryOk(wchar_t c)
-{
-	/* ".kss::0001" / ".kss)" / 終端を許す（旧実装は :: で拡張子判定が死んでいた） */
-	return (c == 0 || c == L')' || c == L' ' || c == L':' || c == L'/' || c == L'\\') ? 1 : 0;
-}
-
-static int FmIsMonExtSuffix(const wchar_t* p)
-{
-	if (!p || !*p) return 0;
-	static const wchar_t* kExt[] = {
-		L".fpy2", L".fpy", L".m2", L".mz", L".mp", L".ms", L".m",
-		L".opi", L".ovi", L".ozi",
-		L".s98", L".vgm", L".vgz", L".gym", L".ssl", L".dro", L".cym", L".mym", L".x1f",
-		L".mdx", L".mdc", L".cmf", L".laa",
-		L".sc68", L".sndh",
-		/* 長い拡張子を先に（.psf が .psf2/.minipsf を食わない） */
-		L".minipsf2", L".psf2", L".minipsf", L".psf",
-		L".minigsf", L".gsf", L".nsfe", L".nsf", L".ncsf", L".spc", L".sid",
-		L".midi", L".mid", L".rmi",
-		L".kss", L".hes", L".mgs", L".bgm", L".opx", L".mpk", L".mbm"
-	};
-	for (int i = 0; i < (int)(sizeof(kExt)/sizeof(kExt[0])); i++) {
-		const size_t el = wcslen(kExt[i]);
-		if (_wcsnicmp(p, kExt[i], el) != 0) continue;
-		if (FmExtBoundaryOk(p[el])) return 1;
-	}
-	const size_t len = wcslen(p);
-	for (int i = 0; i < (int)(sizeof(kExt)/sizeof(kExt[0])); i++) {
-		const size_t el = wcslen(kExt[i]);
-		if (len >= el && _wcsnicmp(p + len - el, kExt[i], el) == 0)
-			return 1;
-	}
-	return 0;
-}
-
+/* 表示名 "Title (file.xxx)" も、拡張子ホワイトリスト無しで stem を取る */
 static void FmExtractBestMonStem(const wchar_t* path, wchar_t* stem, int n)
 {
 	if (!stem || n < 2) return;
 	stem[0] = 0;
 	if (!path || !path[0]) return;
-	const wchar_t* best = NULL;
-	int bestLen = 0;
-	static const wchar_t* kExt[] = {
-		L".fpy2", L".fpy", L".m2", L".mz", L".mp", L".ms", L".m",
-		L".opi", L".ovi", L".ozi",
-		L".s98", L".vgm", L".vgz", L".gym", L".ssl",
-		L".mdx", L".mdc", L".cmf", L".laa",
-		L".sc68", L".sndh",
-		/* 長い拡張子を先に（.psf が .psf2/.minipsf を食わない） */
-		L".minipsf2", L".psf2", L".minipsf", L".psf",
-		L".minigsf", L".gsf", L".nsfe", L".nsf", L".ncsf", L".spc", L".sid",
-		L".midi", L".mid", L".rmi",
-		L".kss", L".hes", L".mgs", L".bgm", L".opx", L".mpk", L".mbm"
-	};
-	for (const wchar_t* p = path; *p; p++) {
-		if (*p != L'(') continue;
-		const wchar_t* start = p + 1;
-		const wchar_t* close = wcschr(start, L')');
-		if (!close || close <= start + 2) continue;
-		for (int e = 0; e < (int)(sizeof(kExt)/sizeof(kExt[0])); e++) {
-			const size_t el = wcslen(kExt[e]);
-			if ((size_t)(close - start) > el && _wcsnicmp(close - (int)el, kExt[e], el) == 0) {
-				best = start;
-				bestLen = (int)(close - start - (int)el);
-				break;
+	const wchar_t* lastOpen = NULL;
+	for (const wchar_t* p = path; *p; p++)
+		if (*p == L'(') lastOpen = p + 1;
+	if (lastOpen) {
+		const wchar_t* close = wcschr(lastOpen, L')');
+		if (close && close > lastOpen + 1) {
+			wchar_t inner[260];
+			const int il = (int)(close - lastOpen);
+			if (il < 260) {
+				for (int i = 0; i < il; i++) inner[i] = lastOpen[i];
+				inner[il] = 0;
+				FmPathStem(inner, stem, n);
+				if (stem[0]) return;
 			}
 		}
-	}
-	if (best && bestLen > 0 && bestLen < n) {
-		for (int i = 0; i < bestLen; i++) stem[i] = best[i];
-		stem[bestLen] = 0;
-		return;
 	}
 	FmPathStem(path, stem, n);
 }
 
-static int FmIsKpiAliasPath(const wchar_t* p)
-{
-	if (!p || !p[0]) return 1;
-	return (_wcsicmp(p, L"C:\\MUSIC_DIR\\MUSIC_FILE.xxx") == 0
-		|| _wcsicmp(p, L"MUSIC_FILE.xxx") == 0) ? 1 : 0;
-}
-
-static int FmPlayHasMonHint()
-{
-	const wchar_t* hints[4] = { (LPCWSTR)filen, (LPCWSTR)fnn, NULL, NULL };
-	if (pl && pl->pc && plcnt >= 0 && plcnt < pl->playcnt) {
-		hints[2] = pl->pc[plcnt].fol;
-		hints[3] = pl->pc[plcnt].name;
-	}
-	for (int i = 0; i < 4; i++) {
-		const wchar_t* h = hints[i];
-		if (!h || !h[0]) continue;
-		if (FmIsMonExtSuffix(h)) return 1;
-		for (const wchar_t* q = h; *q; q++) {
-			if (*q == L'.' && FmIsMonExtSuffix(q)) return 1;
-		}
-	}
-	return 0;
-}
-
-/* KPI 再生パスに拡張子があるか */
-static int FmPlayPathHasExt(const wchar_t* ext)
-{
-	if (!ext || !ext[0]) return 0;
-	const size_t el = wcslen(ext);
-	const wchar_t* hints[4] = { (LPCWSTR)filen, (LPCWSTR)fnn, NULL, NULL };
-	if (pl && pl->pc && plcnt >= 0 && plcnt < pl->playcnt) {
-		hints[2] = pl->pc[plcnt].fol;
-		hints[3] = pl->pc[plcnt].name;
-	}
-	for (int i = 0; i < 4; i++) {
-		const wchar_t* h = hints[i];
-		if (!h || !h[0]) continue;
-		const size_t len = wcslen(h);
-		/* 末尾一致（"song.psf"）。".psf2" の末尾4文字は "psf2" なので ".psf" には当たらない */
-		if (len >= el && _wcsnicmp(h + len - (int)el, ext, el) == 0) return 1;
-		for (const wchar_t* q = h; *q; q++) {
-			if (*q != L'.') continue;
-			if (_wcsnicmp(q, ext, el) != 0) continue;
-			if (FmExtBoundaryOk(q[el])) return 1;
-		}
-	}
-	return 0;
-}
-
-static int FmPlayLooksLikeMsx()
-{
-	return (FmPlayPathHasExt(L".kss") || FmPlayPathHasExt(L".hes")
-		|| FmPlayPathHasExt(L".mgs") || FmPlayPathHasExt(L".bgm")
-		|| FmPlayPathHasExt(L".opx") || FmPlayPathHasExt(L".mpk")
-		|| FmPlayPathHasExt(L".mbm")) ? 1 : 0;
-}
-
+/* フォルダが mode で分かれている。中身の解釈は dumpFlags/pad6 のみ */
 static int FmDumpMatchesPlay(const SasamiFmMonDump& d)
 {
-	if (mode != -3)
-		return 1;
-	/* MSX KPI dump は path 表記ゆれが激しいので KPI 再生中は常に受け入れる */
-	if (d.version >= 6 && (d.dumpFlags & SASAMI_FMMON_FLAG_MSX))
-		return 1;
-	/* keys-only（PSF/SID/GSF/NCSF 等）も path 表記ゆれで捨てない */
-	if (d.version >= 6 && (d.dumpFlags & SASAMI_FMMON_FLAG_KEYSONLY)
-		&& FmPlayHasMonHint())
-		return 1;
-	/* PMDWin 直書き / KPI エイリアス path は実曲名と一致しないので、
-	   再生中が PMD/FMP/FPY なら受け入れる。 */
-	if (FmIsKpiAliasPath(d.sourcePath))
-		return FmPlayHasMonHint();
-
-	wchar_t dumpStem[260];
-	FmPathStem(d.sourcePath, dumpStem, 260);
-	if (!dumpStem[0])
-		return FmPlayHasMonHint();
-
-	auto tryRaw = [&](const wchar_t* raw) -> int {
-		if (!raw || !raw[0]) return 0;
-		wchar_t playStem[260];
-		FmExtractBestMonStem(raw, playStem, 260);
-		if (playStem[0] && _wcsicmp(playStem, dumpStem) == 0)
-			return 1;
-		const size_t sl = wcslen(dumpStem);
-		for (const wchar_t* p = raw; *p; p++) {
-			if (_wcsnicmp(p, dumpStem, sl) != 0) continue;
-			const wchar_t* after = p + sl;
-			if (*after == L'.' || *after == L')' || *after == 0 || *after == L':')
-				return 1;
-		}
-		return 0;
-	};
-
-	if (tryRaw((LPCWSTR)filen)) return 1;
-	if (tryRaw((LPCWSTR)fnn)) return 1;
-	if (pl && pl->pc && plcnt >= 0 && plcnt < pl->playcnt) {
-		if (tryRaw(pl->pc[plcnt].fol)) return 1;
-		if (tryRaw(pl->pc[plcnt].name)) return 1;
-	}
-
-	/* SASAMI v5: path 表記ゆれでも .fpy 再生中なら受け入れる（無描画防止） */
-	if (d.version >= 2 && d.version <= 5 && FmPlayPathHasExt(L".fpy2"))
-		return 1;
-	if (d.version >= 2 && d.version <= 5 && FmPlayPathHasExt(L".fpy"))
-		return 1;
-
-	if (FmPlayLooksLikeMsx())
-		return 1;
-
-	return FmPlayHasMonHint() ? 0 : 1;
+	(void)d;
+	return 1;
 }
 
 /* 再生中ファイルの stem。曲切替検知用 */
@@ -375,40 +219,25 @@ static void FmMonLivePath(wchar_t* out, int n)
 {
 	wchar_t tmp[MAX_PATH];
 	GetTempPathW(MAX_PATH, tmp);
-	_snwprintf_s(out, n, _TRUNCATE, L"%sogg_kbsasami\\fmmon_live.opna", tmp);
+	if (IsCemuMode(mode))
+		_snwprintf_s(out, n, _TRUNCATE, L"%sogg_cemu\\fmmon_live.opna", tmp);
+	else
+		_snwprintf_s(out, n, _TRUNCATE, L"%sogg_kbsasami\\fmmon_live.opna", tmp);
 }
 
 static void FmMonRingPath(wchar_t* out, int n)
 {
 	wchar_t tmp[MAX_PATH];
 	GetTempPathW(MAX_PATH, tmp);
-	_snwprintf_s(out, n, _TRUNCATE, L"%sogg_kbsasami\\fmmon_ring.opna", tmp);
+	if (IsCemuMode(mode))
+		_snwprintf_s(out, n, _TRUNCATE, L"%sogg_cemu\\fmmon_ring.opna", tmp);
+	else
+		_snwprintf_s(out, n, _TRUNCATE, L"%sogg_kbsasami\\fmmon_ring.opna", tmp);
 }
 
 static HANDLE s_hLiveRd = INVALID_HANDLE_VALUE;
 static HANDLE s_hRingRd = INVALID_HANDLE_VALUE;
-
-static HANDLE FmOpenLiveRd()
-{
-	if (s_hLiveRd != INVALID_HANDLE_VALUE)
-		return s_hLiveRd;
-	wchar_t path[MAX_PATH];
-	FmMonLivePath(path, MAX_PATH);
-	s_hLiveRd = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-		NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
-	return s_hLiveRd;
-}
-
-static HANDLE FmOpenRingRd()
-{
-	if (s_hRingRd != INVALID_HANDLE_VALUE)
-		return s_hRingRd;
-	wchar_t path[MAX_PATH];
-	FmMonRingPath(path, MAX_PATH);
-	s_hRingRd = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-		NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
-	return s_hRingRd;
-}
+static int s_rdCemu = -1; /* 開いているのが CEmu 側か。切替でハンドルを捨てる */
 
 static void FmInvalidateRdHandles()
 {
@@ -420,6 +249,134 @@ static void FmInvalidateRdHandles()
 		CloseHandle(s_hRingRd);
 		s_hRingRd = INVALID_HANDLE_VALUE;
 	}
+}
+
+static void FmSelectRdFamily()
+{
+	const int want = IsCemuMode(mode) ? 1 : 0;
+	if (s_rdCemu == want)
+		return;
+	FmInvalidateRdHandles();
+	s_rdCemu = want;
+}
+
+static HANDLE FmOpenLiveRd()
+{
+	FmSelectRdFamily();
+	if (s_hLiveRd != INVALID_HANDLE_VALUE)
+		return s_hLiveRd;
+	wchar_t path[MAX_PATH];
+	FmMonLivePath(path, MAX_PATH);
+	s_hLiveRd = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+		NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+	return s_hLiveRd;
+}
+
+static HANDLE FmOpenRingRd()
+{
+	FmSelectRdFamily();
+	if (s_hRingRd != INVALID_HANDLE_VALUE)
+		return s_hRingRd;
+	wchar_t path[MAX_PATH];
+	FmMonRingPath(path, MAX_PATH);
+	s_hRingRd = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+		NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+	return s_hRingRd;
+}
+
+/* PCM_MAX 16→32 で dumpFlags 以降が 32 バイト後ろへ。旧 KPI/SASAMI は 16ch のまま書く */
+static const DWORD kFmDumpSize32 = (DWORD)sizeof(SasamiFmMonDump);
+static const DWORD kFmDumpSize16 = (DWORD)sizeof(SasamiFmMonDump) - 32u;
+
+static DWORD FmDumpNeedBytes(uint32_t version, int pcm16)
+{
+	DWORD need = (DWORD)offsetof(SasamiFmMonDump, regWriteBits);
+	if (version >= 6)
+		need = (DWORD)offsetof(SasamiFmMonDump, dumpFlags) + 1;
+	else if (version >= 5)
+		need = (DWORD)offsetof(SasamiFmMonDump, keyOnEx);
+	if (pcm16 && need >= 32u)
+		need -= 32u;
+	return need;
+}
+
+static int FmDumpPayloadOk(const SasamiFmMonDump& d, DWORD rd)
+{
+	if (rd == 0 || !SasamiFmMonMagicOk(d)) return 0;
+	if (rd >= FmDumpNeedBytes(d.version, 0))
+		return 1;
+	if (rd >= kFmDumpSize16 && rd < kFmDumpSize32
+		&& rd >= FmDumpNeedBytes(d.version, 1))
+		return 1;
+	return 0;
+}
+
+static void FmWidenPcm16Dump(SasamiFmMonDump* d)
+{
+	if (!d) return;
+	uint8_t* base = (uint8_t*)d;
+	const size_t pcmOff = offsetof(SasamiFmMonDump, pcmOn);
+	uint8_t pcm16[16], note16[16];
+	memcpy(pcm16, base + pcmOff, 16);
+	memcpy(note16, base + pcmOff + 16, 16);
+	const size_t tailOff32 = pcmOff + 64;
+	const size_t tailLen = sizeof(SasamiFmMonDump) - tailOff32;
+	uint8_t tail[256];
+	if (tailLen > sizeof(tail)) return;
+	memcpy(tail, base + pcmOff + 32, tailLen);
+	memset(base + pcmOff, 0, 64);
+	memcpy(d->pcmOn, pcm16, 16);
+	memcpy(d->pcmNote, note16, 16);
+	memcpy(base + tailOff32, tail, tailLen);
+}
+
+static void FmNormalizeDump(SasamiFmMonDump* d, DWORD rd)
+{
+	if (!d) return;
+	if (rd >= kFmDumpSize16 && rd < kFmDumpSize32)
+		FmWidenPcm16Dump(d);
+}
+
+static size_t FmDumpSlotSize(HANDLE h)
+{
+	const size_t z32 = sizeof(SasamiFmMonDump);
+	const size_t z16 = z32 - 32;
+	LARGE_INTEGER sz;
+	sz.QuadPart = 0;
+	if (!h || h == INVALID_HANDLE_VALUE || !GetFileSizeEx(h, &sz))
+		return z32;
+	ULONGLONG body = (ULONGLONG)sz.QuadPart;
+	if (body <= sizeof(SasamiFmMonRingHdr))
+		return z32;
+	body -= sizeof(SasamiFmMonRingHdr);
+	if (z16 && (body % z16) == 0
+		&& (body / z16) == (ULONGLONG)SASAMI_FMMON_RING)
+		return z16;
+	if ((body % z32) == 0
+		&& (body / z32) == (ULONGLONG)SASAMI_FMMON_RING)
+		return z32;
+	if (z16 && (body % z16) == 0)
+		return z16;
+	return z32;
+}
+
+static int FmReadRingSlot(HANDLE h, uint32_t idx, size_t slotSz, SasamiFmMonDump* out)
+{
+	if (!out || slotSz == 0) return 0;
+	LARGE_INTEGER off;
+	off.QuadPart = (LONGLONG)offsetof(SasamiFmMonRing, slot)
+		+ (LONGLONG)idx * (LONGLONG)slotSz;
+	if (!SetFilePointerEx(h, off, NULL, FILE_BEGIN))
+		return 0;
+	SasamiFmMonDump d;
+	memset(&d, 0, sizeof(d));
+	DWORD rd = 0;
+	const DWORD want = (slotSz < sizeof(d)) ? (DWORD)slotSz : (DWORD)sizeof(d);
+	if (!ReadFile(h, &d, want, &rd, NULL) || !FmDumpPayloadOk(d, rd))
+		return 0;
+	FmNormalizeDump(&d, rd);
+	*out = d;
+	return 1;
 }
 
 static int FmReadDump(SasamiFmMonDump* out)
@@ -439,15 +396,8 @@ static int FmReadDump(SasamiFmMonDump* out)
 			FmInvalidateRdHandles();
 			continue;
 		}
-		if (SasamiFmMonMagicOk(tmp)) {
-			const DWORD minPreV5 = (DWORD)offsetof(SasamiFmMonDump, regWriteBits);
-			const DWORD minV5 = (DWORD)offsetof(SasamiFmMonDump, keyOnEx);
-			const DWORD minV6 = (DWORD)sizeof(SasamiFmMonDump);
-			DWORD need = minPreV5;
-			if (tmp.version >= 6) need = minV6;
-			else if (tmp.version >= 5) need = minV5;
-			if (rd < need)
-				continue;
+		if (FmDumpPayloadOk(tmp, rd)) {
+			FmNormalizeDump(&tmp, rd);
 			*out = tmp;
 			return 1;
 		}
@@ -471,16 +421,9 @@ static int FmReadLatestRingDump(SasamiFmMonDump* out)
 		return 0;
 	}
 	const uint32_t idx = (hdr.gen - 1u) % SASAMI_FMMON_RING;
-	LARGE_INTEGER off;
-	off.QuadPart = (LONGLONG)offsetof(SasamiFmMonRing, slot)
-		+ (LONGLONG)idx * (LONGLONG)sizeof(SasamiFmMonDump);
-	if (!SetFilePointerEx(h, off, NULL, FILE_BEGIN))
+	const size_t slotSz = FmDumpSlotSize(h);
+	if (!FmReadRingSlot(h, idx, slotSz, out))
 		return 0;
-	SasamiFmMonDump d;
-	rd = 0;
-	if (!ReadFile(h, &d, sizeof(d), &rd, NULL) || rd != sizeof(d) || !SasamiFmMonMagicOk(d))
-		return 0;
-	*out = d;
 	return 1;
 }
 
@@ -510,6 +453,21 @@ static void FmKeysOnlyMergePackedHits(SasamiFmMonDump& dst, const SasamiFmMonDum
 		if (src.pcmOn[i] && src.pcmNote[i] != 0xFF)
 			dst.pcmNote[i] = src.pcmNote[i];
 	}
+}
+
+static int FmRegWrote(const SasamiFmMonDump& d, int i)
+{
+	if (i < 0 || i >= 0x200) return 0;
+	if (d.version < 5) return 1;
+	return (d.regWriteBits[i >> 3] & (uint8_t)(1u << (i & 7))) ? 1 : 0;
+}
+
+/* FMP は ymfm ADPCM-B 影を Bank1 $00-$10 に重ねる。未使用でも内部値が毎フレーム変わる */
+static int FmHexIsFmpAdpcmNoise(const SasamiFmMonDump& d, int i)
+{
+	if (d.version < 6 || !(d.dumpFlags & SASAMI_FMMON_FLAG_FMP)) return 0;
+	if (d.dumpFlags & SASAMI_FMMON_FLAG_ADPCM) return 0;
+	return (i >= 0x100 && i <= 0x110) ? 1 : 0;
 }
 
 /* リング全体(~320KB)を毎回読まず、未消費スロットだけ読む */
@@ -556,112 +514,16 @@ static int FmDrainRingSlots(uint32_t* genLast,
 	}
 	if (to - from > SASAMI_FMMON_RING)
 		from = to - SASAMI_FMMON_RING;
-	/* 遅れ時は中間を OR マージしてから最新帯を読む（飛ばすと 16 分パルスが消える） */
-	enum { kMaxDrain = 24 };
-	SasamiFmMonDump skipMerged;
-	int haveSkip = 0;
-	if ((to - from) > (uint32_t)kMaxDrain) {
-		const uint32_t skipTo = to - (uint32_t)kMaxDrain;
-		memset(&skipMerged, 0, sizeof(skipMerged));
-		for (uint32_t g = from; g < skipTo; g++) {
-			const uint32_t idx = g % SASAMI_FMMON_RING;
-			LARGE_INTEGER off;
-			off.QuadPart = (LONGLONG)offsetof(SasamiFmMonRing, slot)
-				+ (LONGLONG)idx * (LONGLONG)sizeof(SasamiFmMonDump);
-			if (!SetFilePointerEx(h, off, NULL, FILE_BEGIN))
-				continue;
-			SasamiFmMonDump d;
-			rd = 0;
-			if (!ReadFile(h, &d, sizeof(d), &rd, NULL) || rd != sizeof(d))
-				continue;
-			if (!SasamiFmMonMagicOk(d)) continue;
-			if (!haveSkip) {
-				skipMerged = d;
-				haveSkip = 1;
-			} else {
-				for (int i = 0; i < 6; i++) {
-					skipMerged.keyOnFm[i] = (uint8_t)(skipMerged.keyOnFm[i] | d.keyOnFm[i]);
-					if (d.keyOnHitCnt[i] > skipMerged.keyOnHitCnt[i])
-						skipMerged.keyOnHitCnt[i] = d.keyOnHitCnt[i];
-					if (d.keyMidi[i] != 0xFF && d.keyOnFm[i])
-						skipMerged.keyMidi[i] = d.keyMidi[i];
-					skipMerged.rhythmHitCnt[i] = (d.rhythmHitCnt[i] > skipMerged.rhythmHitCnt[i])
-						? d.rhythmHitCnt[i] : skipMerged.rhythmHitCnt[i];
-				}
-				for (int i = 0; i < 3; i++) {
-					skipMerged.ssgOn[i] = (uint8_t)(skipMerged.ssgOn[i] | d.ssgOn[i]);
-					if (d.ssgHitCnt[i] > skipMerged.ssgHitCnt[i])
-						skipMerged.ssgHitCnt[i] = d.ssgHitCnt[i];
-					if (d.ssgMidi[i] != 0xFF && d.ssgOn[i])
-						skipMerged.ssgMidi[i] = d.ssgMidi[i];
-					skipMerged.keyOnEx[i] = (uint8_t)(skipMerged.keyOnEx[i] | d.keyOnEx[i]);
-					if (d.keyOnExHitCnt[i] > skipMerged.keyOnExHitCnt[i])
-						skipMerged.keyOnExHitCnt[i] = d.keyOnExHitCnt[i];
-					if (d.exMidi[i] != 0xFF && d.keyOnEx[i])
-						skipMerged.exMidi[i] = d.exMidi[i];
-				}
-				skipMerged.rhythmPulse = (uint8_t)(skipMerged.rhythmPulse | d.rhythmPulse);
-				/* rhythmKey は最新のまま。OR すると $10 DUMP や昔のヒットが張り付く */
-				/* keys-only PCM: gate は OR しない（張り付き）。hit/note だけ畳む */
-				if (d.dumpFlags & SASAMI_FMMON_FLAG_KEYSONLY)
-					FmKeysOnlyMergePackedHits(skipMerged, d);
-				else {
-					for (int i = 0; i < SASAMI_FMMON_PCM_MAX; i++) {
-						if (d.pcmOn[i] && d.pcmNote[i] != 0xFF)
-							skipMerged.pcmNote[i] = d.pcmNote[i];
-					}
-				}
-				if (d.curSample >= skipMerged.curSample) {
-					skipMerged.curSample = d.curSample;
-					skipMerged.seq = d.seq;
-					memcpy(skipMerged.regs, d.regs, sizeof(d.regs));
-				}
-			}
-		}
-		from = skipTo;
-	}
+	const uint32_t kMaxDrain = 320u;
+	if ((to - from) > kMaxDrain)
+		from = to - kMaxDrain;
+	const size_t slotSz = FmDumpSlotSize(h);
 	int any = 0;
 	for (uint32_t g = from; g < to; g++) {
 		const uint32_t idx = g % SASAMI_FMMON_RING;
-		LARGE_INTEGER off;
-		off.QuadPart = (LONGLONG)offsetof(SasamiFmMonRing, slot)
-			+ (LONGLONG)idx * (LONGLONG)sizeof(SasamiFmMonDump);
-		if (!SetFilePointerEx(h, off, NULL, FILE_BEGIN))
-			continue;
 		SasamiFmMonDump d;
-		rd = 0;
-		if (!ReadFile(h, &d, sizeof(d), &rd, NULL) || rd != sizeof(d))
+		if (!FmReadRingSlot(h, idx, slotSz, &d))
 			continue;
-		if (!SasamiFmMonMagicOk(d)) continue;
-		if (haveSkip) {
-			for (int i = 0; i < 6; i++) {
-				d.keyOnFm[i] = (uint8_t)(d.keyOnFm[i] | skipMerged.keyOnFm[i]);
-				if (skipMerged.keyOnHitCnt[i] > d.keyOnHitCnt[i])
-					d.keyOnHitCnt[i] = skipMerged.keyOnHitCnt[i];
-				if (!d.keyOnFm[i] && skipMerged.keyOnFm[i] && skipMerged.keyMidi[i] != 0xFF)
-					d.keyMidi[i] = skipMerged.keyMidi[i];
-				d.rhythmHitCnt[i] = (skipMerged.rhythmHitCnt[i] > d.rhythmHitCnt[i])
-					? skipMerged.rhythmHitCnt[i] : d.rhythmHitCnt[i];
-			}
-			for (int i = 0; i < 3; i++) {
-				d.ssgOn[i] = (uint8_t)(d.ssgOn[i] | skipMerged.ssgOn[i]);
-				if (skipMerged.ssgHitCnt[i] > d.ssgHitCnt[i])
-					d.ssgHitCnt[i] = skipMerged.ssgHitCnt[i];
-				d.keyOnEx[i] = (uint8_t)(d.keyOnEx[i] | skipMerged.keyOnEx[i]);
-				if (skipMerged.keyOnExHitCnt[i] > d.keyOnExHitCnt[i])
-					d.keyOnExHitCnt[i] = skipMerged.keyOnExHitCnt[i];
-			}
-			d.rhythmPulse = (uint8_t)(d.rhythmPulse | skipMerged.rhythmPulse);
-			if (skipMerged.dumpFlags & SASAMI_FMMON_FLAG_KEYSONLY)
-				FmKeysOnlyMergePackedHits(d, skipMerged);
-			else {
-				for (int i = 0; i < SASAMI_FMMON_PCM_MAX; i++) {
-					if (skipMerged.pcmNote[i] != 0xFF && skipMerged.pcmNote[i] != 0)
-						d.pcmNote[i] = skipMerged.pcmNote[i];
-				}
-			}
-			haveSkip = 0;
-		}
 		onSlot(d, ctx);
 		any = 1;
 	}
@@ -731,6 +593,7 @@ CFmMonitorDlg::CFmMonitorDlg(CWnd* pParent)
 	, m_panelDirtyMask(0x3F)
 	, m_readFail(0), m_persistAge(-1), m_userClosing(0), m_lastPollMs(0)
 	, m_inPrint(0)
+	, m_inPump(0)
 	, m_lastPlayy(-1)
 	, m_layOk(0)
 	, m_frameOld(nullptr), m_frameW(0), m_frameH(0)
@@ -1273,7 +1136,8 @@ unsigned CFmMonitorDlg::ChipProfile() const
 unsigned CFmMonitorDlg::ViewCaps() const
 {
 	if (!m_haveDump || m_dump.version < 6) return 0;
-	unsigned c = (unsigned)m_dump.pad6[2];
+	unsigned c = (unsigned)m_dump.pad6[2] & (unsigned)(
+		SASAMI_FMMON_VIEW_KEYS | SASAMI_FMMON_VIEW_REGS | SASAMI_FMMON_VIEW_PANELS);
 	if (c) {
 		/* UI can draw MSX regs/panels even if older KPI omitted caps */
 		if (IsMsxDump()) {
@@ -1352,32 +1216,6 @@ int CFmMonitorDlg::PreferOpnaShell() const
 	return 0;
 }
 
-/* KPI(FPY) は MIDI モニタと同じ可聴補正を使う。
-   OggGetHeardPcmFrames / GDI 時刻だけだとデコード側に近く、常に最新 dump を即表示 →
-   スタンプやリングを直しても見た目が一切変わらない。mode==-3 は遅延補正が本体の正解。
-   SASAMI/FMP 700 / PMD 550。 */
-static int FmPlayLooksLikeFpy()
-{
-	return FmPlayPathHasExt(L".fpy2") || FmPlayPathHasExt(L".fpy") ? 1 : 0;
-}
-
-static int FmPlayLooksLikeFmp()
-{
-	return (FmPlayPathHasExt(L".opi") || FmPlayPathHasExt(L".ovi")
-		|| FmPlayPathHasExt(L".ozi")) ? 1 : 0;
-}
-
-static int FmPlayLooksLikeKeysOnlyXsf()
-{
-	/* PSF/SPC/GSF/NCSF/SID/NSF keys-only。細分化後にモニタが僅かに先行しやすい */
-	return (FmPlayPathHasExt(L".psf2") || FmPlayPathHasExt(L".minipsf2")
-		|| FmPlayPathHasExt(L".psf") || FmPlayPathHasExt(L".minipsf")
-		|| FmPlayPathHasExt(L".spc")
-		|| FmPlayPathHasExt(L".gsf") || FmPlayPathHasExt(L".minigsf")
-		|| FmPlayPathHasExt(L".ncsf") || FmPlayPathHasExt(L".sid")
-		|| FmPlayPathHasExt(L".nsf") || FmPlayPathHasExt(L".nsfe")) ? 1 : 0;
-}
-
 /* CEmu identity / dump.titleSjis ("PC-88  OPNA", "X68000  OPM", …).
    可聴より dump が先行する量は機種で違う。PC-98 は 950ms で一致するが、
    サンプル同期の Z80 系 (PC-88/X1/FM-7) は同じ値だと鍵盤が遅れる。 */
@@ -1423,56 +1261,27 @@ static int FmPlayCemuPlatLagMs(const char* id)
 	return -1;
 }
 
-static int FmPlayHeardLagMs()
+/* 可聴ラグは dump 自己記述。mode/拡張子では分けない */
+static int FmPlayHeardLagMs(const SasamiFmMonDump* d)
 {
-	char plat[24] = {};
-	char chip[40] = {};
-	FmMonShadowGetIdentity(plat, (unsigned)sizeof(plat), chip, (unsigned)sizeof(chip));
-	const int fromIdent = FmPlayCemuPlatLagMs(plat);
-	if (fromIdent >= 0)
-		return fromIdent;
-
-	if (FmPlayLooksLikeFpy() || FmPlayLooksLikeFmp()) return 700;
-	/* keys-only XSF 系: 600 だと表示が少し先行 → +150ms */
-	if (FmPlayLooksLikeKeysOnlyXsf()) return 750;
-	/* KSS: KPI/DS が大きな塊で playb が進むため GDI 追従だとかたまる。
-	   dump 最新−ラグで追う前提の遅延（ホスト先行分）。 */
-	if (FmPlayPathHasExt(L".kss")) return 600; /* 500 でも僅かに先行 → +100ms */
-	/* CEmu zip: 機種不明時は中間値（旧一律 950 は PC-88 等で鍵盤遅れ） */
-	if (FmPlayPathHasExt(L".zip")) return 750;
-	if (FmPlayPathHasExt(L".s98") || FmPlayPathHasExt(L".vgm") || FmPlayPathHasExt(L".vgz")
-		|| FmPlayPathHasExt(L".hes") || FmPlayPathHasExt(L".gym") || FmPlayPathHasExt(L".ssl")
-		|| FmPlayPathHasExt(L".dro") || FmPlayPathHasExt(L".cym") || FmPlayPathHasExt(L".mym")
-		|| FmPlayPathHasExt(L".mdx") || FmPlayPathHasExt(L".mdc")
-		|| FmPlayPathHasExt(L".cmf") || FmPlayPathHasExt(L".laa")
-		|| FmPlayPathHasExt(L".sc68") || FmPlayPathHasExt(L".sndh")
-		|| FmPlayPathHasExt(L".mid") || FmPlayPathHasExt(L".midi")
-		|| FmPlayLooksLikeMsx())
+	const unsigned dumpFlags = d ? d->dumpFlags : 0u;
+	if (d && SasamiFmMonDumpClock(*d)) {
+		const int fromDump = FmPlayCemuPlatLagMs(d->titleSjis);
+		if (fromDump >= 0)
+			return fromDump;
+		if (dumpFlags & SASAMI_FMMON_FLAG_FMP)
+			return 700;
+		if (dumpFlags & (SASAMI_FMMON_FLAG_MSX | SASAMI_FMMON_FLAG_OPM))
+			return 600;
+		if (dumpFlags & SASAMI_FMMON_FLAG_KEYSONLY)
+			return 750;
+		return 550;
+	}
+	if (dumpFlags & SASAMI_FMMON_FLAG_FMP)
+		return 700;
+	if (dumpFlags & (SASAMI_FMMON_FLAG_MSX | SASAMI_FMMON_FLAG_OPM))
 		return 600;
-	return 550; /* PMD ほか */
-}
-
-/* dump 側 curSample で追う形式（巨大 KPI バッファ / keys-only 含む） */
-static int FmPlayPreferDumpClock()
-{
-	if (FmPlayLooksLikeMsx()) return 1;
-	/* CEmu hoot zip（arcus2.zip::0001 等）も dump.curSample で追う */
-	if (FmPlayPathHasExt(L".zip")) return 1;
-	if (FmPlayPathHasExt(L".kss") || FmPlayPathHasExt(L".hes")
-		|| FmPlayPathHasExt(L".vgm") || FmPlayPathHasExt(L".vgz")
-		|| FmPlayPathHasExt(L".gym") || FmPlayPathHasExt(L".ssl")
-		|| FmPlayPathHasExt(L".s98")
-		|| FmPlayPathHasExt(L".mdx") || FmPlayPathHasExt(L".mdc")
-		|| FmPlayPathHasExt(L".cmf") || FmPlayPathHasExt(L".laa")
-		|| FmPlayPathHasExt(L".sc68") || FmPlayPathHasExt(L".sndh")
-		|| FmPlayPathHasExt(L".nsf") || FmPlayPathHasExt(L".nsfe")
-		|| FmPlayPathHasExt(L".spc") || FmPlayPathHasExt(L".psf") || FmPlayPathHasExt(L".minipsf")
-		|| FmPlayPathHasExt(L".psf2") || FmPlayPathHasExt(L".minipsf2")
-		|| FmPlayPathHasExt(L".gsf") || FmPlayPathHasExt(L".minigsf")
-		|| FmPlayPathHasExt(L".ncsf") || FmPlayPathHasExt(L".sid")
-		|| FmPlayPathHasExt(L".mid") || FmPlayPathHasExt(L".midi"))
-		return 1;
-	return 0;
+	return 550;
 }
 
 /* 可聴位置の後処理。停止時アンカー、シーク巻き戻し、微小揺らぎでノートが
@@ -1507,56 +1316,27 @@ uint64_t CFmMonitorDlg::AdvanceHeard(__int64 frames, uint32_t srDump)
 uint64_t CFmMonitorDlg::HeardSample(uint32_t sampleRate)
 {
 	extern int playy;
-	extern int mode;
 	extern int wavbit_sample_Hz;
 	const uint32_t srDump = sampleRate > 0 ? sampleRate : 44100;
 
 	__int64 frames = 0;
-	/* 巨大 KPI バッファ / keys-only: GDI 跳びを避け dump curSample−ラグで追う。
-	   CEmu も同様。DS heard 単独だと再生カーソルがスピーカより先行し、
-	   レジスタ／パネル／鍵盤が可聴より速く見える（Alpha2 で一度外して再現）。 */
-	const unsigned lastFlags = (m_histN > 0)
-		? m_hist[(m_histHead + m_histN - 1) % HIST_MAX].dumpFlags : 0u;
-	const int isKpiOrCemu = (mode == -3 || IsCemuMode(mode)) ? 1 : 0;
-	const int useDumpClock = (isKpiOrCemu && m_histN > 0
-		&& (IsCemuMode(mode)
-			|| FmPlayPreferDumpClock()
-			|| (lastFlags & (SASAMI_FMMON_FLAG_MSX | SASAMI_FMMON_FLAG_KEYSONLY)))) ? 1 : 0;
+	const SasamiFmMonDump* lastD = (m_histN > 0)
+		? &m_hist[(m_histHead + m_histN - 1) % HIST_MAX] : NULL;
+	const int useDumpClock = (lastD && SasamiFmMonDumpClock(*lastD)) ? 1 : 0;
 	if (useDumpClock) {
 		const int li = (m_histHead + m_histN - 1) % HIST_MAX;
 		const uint64_t latest = m_histSamp[li];
-		unsigned lagMs = (unsigned)FmPlayHeardLagMs();
-		/* dump 側 identity が取れているときはそちらを優先（機種別補正） */
-		{
-			const int fromDump = FmPlayCemuPlatLagMs(m_hist[li].titleSjis);
-			if (fromDump >= 0)
-				lagMs = (unsigned)fromDump;
-		}
-		/* keys-only XSF 系のみ下限。CEmu OPN(A) フル dump には掛けない
-		   （PC-88 を 550 にしても 750 へ押し上げて再び遅れるのを防ぐ） */
-		if ((lastFlags & SASAMI_FMMON_FLAG_KEYSONLY)
-			&& !(lastFlags & SASAMI_FMMON_FLAG_MSX)
-			&& FmPlayLooksLikeKeysOnlyXsf()
-			&& lagMs < 750u)
-			lagMs = 750u;
+		unsigned lagMs = (unsigned)FmPlayHeardLagMs(lastD);
 		const uint64_t lag = (uint64_t)srDump * lagMs / 1000u;
 		frames = (latest > lag) ? (__int64)(latest - lag) : 0;
-	} else if (mode == -3) {
-		const double sec = OggGetGdiPlaybackTimeSec();
-		frames = (__int64)(sec * (double)srDump + 0.5);
-		const int lagMs = FmPlayHeardLagMs();
-		frames -= (__int64)srDump * lagMs / 1000;
 	} else {
 		const int srSrc = (wavbit_sample_Hz > 0) ? wavbit_sample_Hz : (int)srDump;
 		frames = OggGetHeardPcmFrames();
 		if (frames < 0) frames = 0;
 		if (srSrc != (int)srDump)
 			frames = frames * (__int64)srDump / (__int64)srSrc;
-		/* CEmu が hist 未着などで dump 時計に入れないときも同じ機種別ラグ */
-		if (IsCemuMode(mode)) {
-			frames -= (__int64)srDump * FmPlayHeardLagMs() / 1000;
-			if (frames < 0) frames = 0;
-		}
+		frames -= (__int64)srDump * FmPlayHeardLagMs(lastD) / 1000;
+		if (frames < 0) frames = 0;
 	}
 	return AdvanceHeard(frames, srDump);
 }
@@ -1738,7 +1518,8 @@ void CFmMonitorDlg::DrawHexBank(CDC& dc, int x, int y, int cellW, int cellH, int
 	const COLORREF baseDark = RGB(24, 28, 32);
 	const COLORREF baseGroup = RGB(36, 52, 44);   /* 薄緑系グループ */
 	const COLORREF baseTouched = RGB(48, 72, 58);
-	const COLORREF hi = RGB(80, 200, 120);
+	/* 値変化フラッシュは鍵盤と同じ緑系（白 hi だと常時振動で真っ白に見える） */
+	const COLORREF hi = RGB(80, 220, 120);
 
 	for (int row = 0; row < rowCount; row++) {
 		_snwprintf_s(hdr, _TRUNCATE, L"%X", row);
@@ -1755,8 +1536,6 @@ void CFmMonitorDlg::DrawHexBank(CDC& dc, int x, int y, int cellW, int cellH, int
 			const int inGroup = FmHexColInOpGroup(col);
 			COLORREF base = baseDark;
 			if (inGroup && opsRow)
-				base = m_touched[idx] ? baseTouched : baseGroup;
-			else if (inGroup && (m_touched[idx] || (m_haveDump && m_dump.regs[idx] != 0)))
 				base = m_touched[idx] ? baseTouched : baseGroup;
 			else if (m_touched[idx])
 				base = baseTouched;
@@ -2346,11 +2125,13 @@ void CFmMonitorDlg::DrawChannelKeys(CDC& dc, int x, int y, int w, int rowH, int 
 		const int keyLit = gate || (live && fade >= 40);
 		int midi = -1;
 		if (keyLit && m_haveDump) {
-			if (m_dump.version >= 6 && m_dump.keyMidi[ch] != 0xFF)
-				midi = (int)m_dump.keyMidi[ch];
-			else if (!KeysOnly() && !msx && !opm && gate)
-				/* FMP 鍵盤のみは regs が空/ゴミ。休符中の fnum フォールバックで偽ノートが出る */
+			/* レジスタ dump はパネルと同じ fnum。FMP keyMidi は o4c→60 固定になりやすい */
+			if (!KeysOnly() && !msx && !opm && !opl) {
 				midi = ApproxMidiFromFnum(a4, a0);
+				if (midi < 0 && m_dump.version >= 6 && m_dump.keyMidi[ch] != 0xFF)
+					midi = (int)m_dump.keyMidi[ch];
+			} else if (m_dump.version >= 6 && m_dump.keyMidi[ch] != 0xFF)
+				midi = (int)m_dump.keyMidi[ch];
 		}
 
 		wchar_t note[16];
@@ -2380,13 +2161,14 @@ void CFmMonitorDlg::DrawChannelKeys(CDC& dc, int x, int y, int w, int rowH, int 
 		const int keyLit = gate || (live && fade >= 40);
 		int midi = -1;
 		if (keyLit && m_haveDump) {
-			if (m_dump.exMidi[i] != 0xFF) midi = (int)m_dump.exMidi[i];
-			else if (!KeysOnly() && !msx && !opm && gate) {
-				/* EX fnum: EX1 AC/A8, EX2 AE/AA, EX3 AD/A9 */
+			if (!KeysOnly() && !msx && !opm && !opl) {
 				static const int kA4[3] = { 0xAC, 0xAE, 0xAD };
 				static const int kA0[3] = { 0xA8, 0xAA, 0xA9 };
 				midi = ApproxMidiFromFnum(m_dump.regs[kA4[i]], m_dump.regs[kA0[i]]);
-			}
+				if (midi < 0 && m_dump.exMidi[i] != 0xFF)
+					midi = (int)m_dump.exMidi[i];
+			} else if (m_dump.exMidi[i] != 0xFF)
+				midi = (int)m_dump.exMidi[i];
 		}
 		wchar_t note[16];
 		FmFormatNoteName(midi, note, 16);
@@ -2427,10 +2209,10 @@ void CFmMonitorDlg::DrawChannelKeys(CDC& dc, int x, int y, int w, int rowH, int 
 		const int keyLit = gate || (live && fade >= 40);
 		int midi = -1;
 		if (keyLit && m_haveDump) {
-			if (m_dump.version >= 6 && m_dump.ssgMidi[i] != 0xFF)
-				midi = (int)m_dump.ssgMidi[i];
-			else if (!KeysOnly() && gate)
+			if (!KeysOnly())
 				midi = ApproxMidiFromSsg(period);
+			else if (m_dump.version >= 6 && m_dump.ssgMidi[i] != 0xFF)
+				midi = (int)m_dump.ssgMidi[i];
 		}
 
 		wchar_t note[16];
@@ -2730,17 +2512,28 @@ void CFmMonitorDlg::DrawHead(CDC& dc)
 					(m & SASAMI_FMMON_DEV_SCC) ? L"SCC" : L"");
 			chip = msxChip;
 		}
-		else if (m_dump.version >= 6 && ExRows() > 0
+		else if (m_dump.version >= 6
+			&& (m_dump.dumpFlags & SASAMI_FMMON_FLAG_FMP)
 			&& !(m_dump.dumpFlags & SASAMI_FMMON_FLAG_KEYSONLY)
 			&& !IsOpmDump() && !IsMsxDump()) {
-			const int isFmp = (m_dump.dumpFlags & SASAMI_FMMON_FLAG_FMP) ? 1 : 0;
 			static wchar_t opnaChip[96];
-			const wchar_t* base = isFmp ? L"FMP  OPNA+EX" : L"PMD  OPNA+EX";
+			const wchar_t* base = (ExRows() > 0) ? L"FMP  OPNA+EX" : L"FMP  OPNA";
 			const wchar_t* pcm =
 				(m_dump.dumpFlags & SASAMI_FMMON_FLAG_PCM86) ? L"+86PCM" :
 				(m_dump.dumpFlags & SASAMI_FMMON_FLAG_ADPCM) ? L"+ADPCM" : L"";
 			const wchar_t* ppz = (m_dump.dumpFlags & SASAMI_FMMON_FLAG_PPZ) ? L"/PPZ" : L"";
 			_snwprintf_s(opnaChip, _TRUNCATE, L"%s%s%s", base, pcm, ppz);
+			chip = opnaChip;
+		}
+		else if (m_dump.version >= 6 && ExRows() > 0
+			&& !(m_dump.dumpFlags & SASAMI_FMMON_FLAG_KEYSONLY)
+			&& !IsOpmDump() && !IsMsxDump()) {
+			static wchar_t opnaChip[96];
+			const wchar_t* pcm =
+				(m_dump.dumpFlags & SASAMI_FMMON_FLAG_PCM86) ? L"+86PCM" :
+				(m_dump.dumpFlags & SASAMI_FMMON_FLAG_ADPCM) ? L"+ADPCM" : L"";
+			const wchar_t* ppz = (m_dump.dumpFlags & SASAMI_FMMON_FLAG_PPZ) ? L"/PPZ" : L"";
+			_snwprintf_s(opnaChip, _TRUNCATE, L"PMD  OPNA+EX%s%s", pcm, ppz);
 			chip = opnaChip;
 		}
 		else if (m_dump.padHit == 5)
@@ -3990,9 +3783,14 @@ void CFmMonitorDlg::ComposeFrame(CDC& dc, int w, int h)
 
 void CFmMonitorDlg::ApplyDump(const SasamiFmMonDump& d)
 {
-	const int songChanged = (m_lastSong[0] == 0)
-		|| (wcscmp(m_lastSong, d.sourcePath) != 0)
-		|| (m_haveDump && d.curSample + 10000 < m_lastCurSample);
+	/* 空 sourcePath を「曲切替」にすると FMP 等で毎 dump 触れ色が落ちる。
+	   実パスが来たときだけ比較。巻き戻しは従来どおり。曲切替は playIdent 側。 */
+	int songChanged = 0;
+	if (d.sourcePath[0]
+		&& (m_lastSong[0] == 0 || wcscmp(m_lastSong, d.sourcePath) != 0))
+		songChanged = 1;
+	if (m_haveDump && d.curSample + 10000 < m_lastCurSample)
+		songChanged = 1;
 	if (songChanged) {
 		memset(m_touched, 0, sizeof(m_touched));
 		memset(m_fadeKey, 0, sizeof(m_fadeKey));
@@ -4019,18 +3817,22 @@ void CFmMonitorDlg::ApplyDump(const SasamiFmMonDump& d)
 		&& ((unsigned)d.pad6[2] & SASAMI_FMMON_VIEW_REGS)
 		&& d.titleSjis[0] && strstr(d.titleSjis, "PC/AT")) ? 1 : 0;
 	const int softRegs = (arcadeRegs || pcatAuxRegs) ? 1 : 0;
+	/* 鍵盤-only でも VIEW_REGS / OPNA 殻なら hex を追う（FMP は KEYSONLY を落として来る） */
+	const int trackHex = (!keysOnly || softRegs
+		|| ((unsigned)d.pad6[2] & SASAMI_FMMON_VIEW_REGS)
+		|| d.padHit == 1 || d.padHit == 2) ? 1 : 0;
 	if (m_haveDump) {
-		if (!keysOnly || softRegs) for (int i = 0; i < 0x200; i++) {
-			/* 値変化した番地だけフェード（同一値の sticky writeBits では光らせない） */
-			if (d.regs[i] != m_dump.regs[i]) {
+		if (trackHex) for (int i = 0; i < 0x200; i++) {
+			if (FmHexIsFmpAdpcmNoise(d, i))
+				continue;
+			const int wrote = FmRegWrote(d, i);
+			const int changed = (d.regs[i] != m_dump.regs[i]) ? 1 : 0;
+			/* 未書き込みのスナップショットゆれは点滅させない。書いた番地の値変化だけフェード */
+			if (wrote && changed) {
 				FmBump(m_fade[i]);
 				m_touched[i] = 1;
 				chgHex = 1;
-			}
-			/* 00→00 の書き込みでも一度触れれば白（writeBits / 非ゼロ） */
-			const int wrote = (d.version >= 5)
-				&& (d.regWriteBits[i >> 3] & (uint8_t)(1u << (i & 7)));
-			if (d.regs[i] != 0 || wrote) {
+			} else if (wrote) {
 				if (!m_touched[i])
 					chgHex = 1;
 				m_touched[i] = 1;
@@ -4194,9 +3996,11 @@ void CFmMonitorDlg::ApplyDump(const SasamiFmMonDump& d)
 		memset(m_fadePcm, 0, sizeof(m_fadePcm));
 		memset(m_fadeRzmPad, 0, sizeof(m_fadeRzmPad));
 		for (int i = 0; i < 0x200; i++) {
-			const int wrote = (d.version >= 5)
-				&& (d.regWriteBits[i >> 3] & (uint8_t)(1u << (i & 7)));
-			if (d.regs[i] != 0 || wrote)
+			if (FmHexIsFmpAdpcmNoise(d, i))
+				continue;
+			const int wrote = FmRegWrote(d, i);
+			/* 非ゼロだけでは触った扱いにしない（未使用の初期値が全部白になる） */
+			if (wrote || (d.version < 5 && d.regs[i] != 0))
 				m_touched[i] = 1;
 		}
 		if (FmMonIsLive()) {
@@ -4225,12 +4029,22 @@ void CFmMonitorDlg::ApplyDump(const SasamiFmMonDump& d)
 		m_fullDraw = 1;
 	}
 
+	const int hadDump = m_haveDump;
 	m_prev = m_dump;
 	m_dump = d;
+	if (trackHex) {
+		for (int i = 0; i < 0x200; i++) {
+			if (FmHexIsFmpAdpcmNoise(d, i)) {
+				m_dump.regs[i] = hadDump ? m_prev.regs[i] : (uint8_t)0;
+				m_touched[i] = 0;
+				m_fade[i] = 0;
+			}
+		}
+	}
 	m_lastSeq = d.seq;
 	m_lastCurSample = d.curSample;
 	m_haveDump = 1;
-	if ((!keysOnly || softRegs) && chgHex) m_dirtyHex = 1;
+	if (trackHex && chgHex) m_dirtyHex = 1;
 	if (!keysOnly && panelMask) {
 		m_panelDirtyMask = (BYTE)(m_panelDirtyMask | panelMask);
 		m_dirtyPanels = 1;
@@ -4254,6 +4068,7 @@ void CFmMonitorDlg::ResetDumpSync()
 {
 	/* 曲切替で writer が live/ring を作り直すと、常駐ハンドルは旧 inode のまま */
 	FmInvalidateRdHandles();
+	s_rdCemu = -1;
 	m_histN = 0;
 	m_histHead = 0;
 	m_ringGenLast = 0;
@@ -4336,6 +4151,22 @@ void CFmMonitorDlg::TrimHistForHeard(uint64_t heard, uint32_t rate)
 
 int CFmMonitorDlg::PollDump()
 {
+	/* 差し替え inode を拾う。SASAMI が CREATE_ALWAYS していた頃の常駐ハンドルずれ対策 */
+	{
+		static DWORD s_reopenTick = 0;
+		const DWORD now = GetTickCount();
+		if (s_reopenTick == 0 || (now - s_reopenTick) > 250u) {
+			s_reopenTick = now;
+			FmInvalidateRdHandles();
+		}
+	}
+	/* live を先に（SASAMI/PMD/CEmu 共通）。フォルダは FmSelectRdFamily */
+	{
+		SasamiFmMonDump live;
+		if (FmReadDump(&live) && FmDumpMatchesPlay(live))
+			PushHistDump(live);
+	}
+
 	struct Cb { CFmMonitorDlg* self; int got; int seen; } cb = { this, 0, 0 };
 	auto thunk = [](const SasamiFmMonDump& d, void* p) {
 		Cb* c = (Cb*)p;
@@ -4409,10 +4240,11 @@ int CFmMonitorDlg::PollDump()
 	if (bestN < 0) {
 		if (!FmMonIsLive())
 			return m_haveDump ? 1 : 0;
-		/* CEmu は未来 dump を出さない（鍵盤先行の元）。KPI/.fpy のみ最古で始動 */
-		if (IsCemuMode(mode))
+		/* dump 時計（CEmu / keys-only）は未来を出さない。レジスタ dump は最古で始動 */
+		const int li = (m_histHead + m_histN - 1) % HIST_MAX;
+		if (SasamiFmMonDumpClock(m_hist[li]))
 			return m_haveDump ? 1 : 0;
-		/* 可聴より先だけ（起動直後・ラグ中）→ 最古を出して始動。出さないと .fpy が無描画 */
+		/* 可聴より先だけ（起動直後・ラグ中）→ 最古を出して始動。出さないと無描画 */
 		uint64_t minS = UINT64_MAX;
 		for (int n = 0; n < m_histN; n++) {
 			const int i = (m_histHead + n) % HIST_MAX;
@@ -4460,6 +4292,8 @@ int CFmMonitorDlg::PollDump()
 		SasamiFmMonDump merged = m_hist[(m_histHead + nextN) % HIST_MAX];
 		for (int n = fromN; n < nextN; n++) {
 			const SasamiFmMonDump& s = m_hist[(m_histHead + n) % HIST_MAX];
+			for (int b = 0; b < 64; b++)
+				merged.regWriteBits[b] = (uint8_t)(merged.regWriteBits[b] | s.regWriteBits[b]);
 			for (int i = 0; i < 6; i++) {
 				if (s.keyOnHitCnt[i] > merged.keyOnHitCnt[i])
 					merged.keyOnHitCnt[i] = s.keyOnHitCnt[i];
@@ -4592,8 +4426,11 @@ void CFmMonitorDlg::InvalidateDirtyRegions()
 
 void CFmMonitorDlg::PumpSyncNow()
 {
+	if (m_inPrint || m_inPump) return;
 	if (!::IsWindow(GetSafeHwnd()) || !IsWindowVisible() || IsIconic())
 		return;
+	m_inPump = 1;
+	struct PumpDone { int* p; ~PumpDone() { *p = 0; } } done{ &m_inPump };
 	const int live = FmMonIsLive();
 	if (m_lastPlayy != 0 && live == 0) {
 		memset(m_fadeKey, 0, sizeof(m_fadeKey));
@@ -4636,7 +4473,7 @@ void CFmMonitorDlg::PumpSyncNow()
 
 void CFmMonitorDlg::IdlePulse()
 {
-	if (m_inPrint) return;
+	if (m_inPrint || m_inPump) return;
 	if (!::IsWindow(GetSafeHwnd()) || !IsWindowVisible() || IsIconic())
 		return;
 	const ULONGLONG now = GetTickCount64();
@@ -4644,12 +4481,9 @@ void CFmMonitorDlg::IdlePulse()
 		return;
 	m_lastPollMs = now;
 	PumpSyncNow();
-	CRect ur;
-	if (GetUpdateRect(&ur, FALSE))
-		UpdateWindow();
 }
 
-void CFmMonitorDlg::PaintClientToDC(HDC hdc, int printSafe)
+void CFmMonitorDlg::PaintClientToDC(HDC hdc)
 {
 	if (!hdc) return;
 	CDC dc;
@@ -4673,13 +4507,6 @@ void CFmMonitorDlg::PaintClientToDC(HDC hdc, int printSafe)
 	}
 
 	ComposeFrame(m_frameDC, w, h);
-
-	if (printSafe) {
-		::BitBlt(hdc, 0, capH, w, h, m_frameDC.GetSafeHdc(), 0, 0, SRCCOPY);
-		CCC_CaptionPaintGdi(dc, m_hWnd);
-		dc.Detach();
-		return;
-	}
 
 	CRect pr;
 	dc.GetClipBox(&pr);
@@ -4729,31 +4556,64 @@ void CFmMonitorDlg::PaintClientToDC(HDC hdc, int printSafe)
 	dc.Detach();
 }
 
+void CFmMonitorDlg::BlitCachedFrameToPrintDC(HDC hdc)
+{
+	if (!hdc || !m_hWnd) return;
+	RECT rc = {};
+	::GetClientRect(m_hWnd, &rc);
+	const int capH = CCC_GetCustomCaptionHeight(m_hWnd);
+	const int w = rc.right - rc.left;
+	const int h = (rc.bottom - rc.top) - capH;
+	if (w <= 0 || h <= 0)
+		return;
+	HDC src = m_frameDC.GetSafeHdc();
+	if (src && m_frameW == w && m_frameH == h)
+		::BitBlt(hdc, 0, capH, w, h, src, 0, 0, SRCCOPY);
+	else {
+		HBRUSH br = ::CreateSolidBrush(FM_BG);
+		RECT r = { 0, capH, w, capH + h };
+		::FillRect(hdc, &r, br);
+		if (br) ::DeleteObject(br);
+	}
+}
+
 void CFmMonitorDlg::OnPaint()
 {
-	CPaintDC dc(this);
-	if (m_inPrint)
+	if (m_inPrint) {
+		ValidateRect(NULL);
 		return;
-	PaintClientToDC(dc.GetSafeHdc(), 0);
+	}
+	CPaintDC dc(this);
+	PaintClientToDC(dc.GetSafeHdc());
 }
 
 LRESULT CFmMonitorDlg::OnPrint(WPARAM wParam, LPARAM lParam)
 {
 	(void)lParam;
-	if (m_inPrint)
+	HDC hdc = (HDC)wParam;
+	if (!hdc || m_inPrint)
 		return 0;
+	CCC_PrintEnter();
 	m_inPrint = 1;
-	PaintClientToDC((HDC)wParam, 1);
+	/* BitBlt すらスクショ経路で落ちる事例あり → 単色のみ */
+	__try {
+		RECT rc = {};
+		::GetClientRect(m_hWnd, &rc);
+		HBRUSH br = ::CreateSolidBrush(FM_BG);
+		if (br) {
+			::FillRect(hdc, &rc, br);
+			::DeleteObject(br);
+		}
+	}
+	__except (EXCEPTION_EXECUTE_HANDLER) {
+	}
 	m_inPrint = 0;
+	CCC_PrintLeave();
 	return 0;
 }
 
 LRESULT CFmMonitorDlg::OnPrintClient(WPARAM wParam, LPARAM lParam)
 {
-	(void)lParam;
-	m_inPrint = 1;
-	PaintClientToDC((HDC)wParam, 1);
-	m_inPrint = 0;
-	return 0;
+	return OnPrint(wParam, lParam);
 }
 

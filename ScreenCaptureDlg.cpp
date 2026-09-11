@@ -5,6 +5,7 @@
 #include "stdafx.h"
 #include "ogg.h"
 #include "oggDlg.h"
+#include "CCustomControl.h"
 #include "ScreenCaptureDlg.h"
 #include "ScLiveSettingsDlg.h"
 #include "AudioDevSync.h"
@@ -301,6 +302,8 @@ static BOOL ScFrameAlloc(ScFrameBuf& fb, int w, int h)
 {
 	ScFrameFree(fb);
 	if (w < 2 || h < 2) return FALSE;
+	/* 8K 超は拒否。巨大 DIB の CreateDIBSection / PrintWindow で落ちる */
+	if (w > 7680 || h > 4320) return FALSE;
 	w &= ~1;
 	h &= ~1;
 	BITMAPINFO bmi = {};
@@ -362,6 +365,7 @@ static BOOL ScIsExcludedHwnd(HWND hwnd, HWND excludeHwnd)
 static BOOL ScPrintWindowViaCompat(HWND hwnd, int ww, int wh, ScFrameBuf& outTopDown)
 {
 	if (!hwnd || ww < 2 || wh < 2) return FALSE;
+	if (ww > 7680 || wh > 4320) return FALSE;
 	ww &= ~1; wh &= ~1;
 	if (!outTopDown.bits || outTopDown.w != ww || outTopDown.h != wh) {
 		if (!ScFrameAlloc(outTopDown, ww, wh))
@@ -376,9 +380,12 @@ static BOOL ScPrintWindowViaCompat(HWND hwnd, int ww, int wh, ScFrameBuf& outTop
 	if (hdcMem && hbmp) {
 		HGDIOBJ old = ::SelectObject(hdcMem, hbmp);
 		::PatBlt(hdcMem, 0, 0, ww, wh, BLACKNESS);
+		/* アクリル MP 等の子 OnPaint/BufferedPaint 再入を抑止 */
+		CCC_PrintEnter();
 		ok = ::PrintWindow(hwnd, hdcMem, PW_RENDERFULLCONTENT);
 		if (!ok)
 			ok = ::PrintWindow(hwnd, hdcMem, 0);
+		CCC_PrintLeave();
 		if (ok)
 			ok = ::BitBlt(outTopDown.hdc, 0, 0, ww, wh, hdcMem, 0, 0, SRCCOPY);
 		::SelectObject(hdcMem, old);
@@ -493,6 +500,16 @@ static BOOL ScCaptureWindowScaled(HWND hwnd, ScFrameBuf& fb, int dstW, int dstH,
 	}
 
 	::SetStretchBltMode(fb.hdc, COLORONCOLOR);
+
+	/*
+	 * WGC/画面取り込みは WM_PAINT を止めない（PrintEnter するとリストが点滅する）。
+	 * BeginBufferedPaint だけ CCC_CaptureEnter で抑止する。
+	 * PrintWindow 再入は従来どおり ScPrintWindowViaCompat 内の CCC_PrintEnter。
+	 */
+	struct ScCaptureGuard {
+		ScCaptureGuard() { CCC_CaptureEnter(); }
+		~ScCaptureGuard() { CCC_CaptureLeave(); }
+	} captureGuard;
 
 	// 1) Windows.Graphics.Capture（前面UIでも可）※録画中は固着するためスキップ
 	if (!forceGdi) {

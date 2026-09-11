@@ -1,10 +1,11 @@
-// Render.cpp : インプリメンテーション ファイル
+﻿// Render.cpp : インプリメンテーション ファイル
 //
 
 #include "stdafx.h"
 #include "ogg.h"
 #include "OSVersion.h"
 #include "Render.h"
+#include "UpdateCheck.h"
 #include "Graph.h"
 #include "dsound.h"
 #include "ZeroFol.h"
@@ -298,6 +299,21 @@ void CRdHelpDlg::OnPaint()
 		L"· MIDI …… KPI/VST. Lege DLL = MIDI-outcombo (standaard: MIDI Mapper).",
 		L"· MIDI …… KPI/VST. Pusty DLL = combo MIDI out (domyslnie MIDI Mapper).",
 		L"· MIDI …… KPI/VST. Bos DLL = MIDI cikis combo (varsayilan: MIDI Mapper).")); y += lh;
+	body(L, y, LL14(
+		L"・自動アップデート …… 次回から尋ねない／はい・いいえ。確認ボタンは今すぐ公式ZIPを見る",
+		L"· Auto-update …… Don't ask / Yes·No. Check button looks at the official ZIP now",
+		L"· Mise a jour auto …… Ne plus demander / Oui·Non. Le bouton verifie le ZIP maintenant",
+		L"· Aggiornamento auto …… Non chiedere / Si·No. Il pulsante controlla lo ZIP ora",
+		L"· Actualizacion auto …… No preguntar / Si·No. El boton mira el ZIP ahora",
+		L"· 자동 업데이트 …… 다음부터 묻지 않기/예·아니요. 확인 버튼은 지금 공식 ZIP을 봅니다",
+		L"· 自动更新 …… 下次不再询问／是·否。确认按钮立即查看官方 ZIP",
+		L"· تحديث تلقائي …… عدم السؤال / نعم·لا. الزر يتحقق من ZIP الآن",
+		L"· Автообновление …… не спрашивать / Да·Нет. Кнопка сразу смотрит официальный ZIP",
+		L"· Auto-Update …… Nicht fragen / Ja·Nein. Die Schaltflaeche prueft das ZIP jetzt",
+		L"· Atualizacao auto …… Nao perguntar / Sim·Nao. O botao verifica o ZIP agora",
+		L"· Auto-update …… Niet vragen / Ja·Nee. De knop kijkt nu naar het ZIP",
+		L"· Auto-aktualizacja …… Nie pytaj / Tak·Nie. Przycisk teraz sprawdza ZIP",
+		L"· Otomatik guncelleme …… Bir daha sorma / Evet·Hayir. Dugme resmi ZIP'i simdi bakar")); y += lh;
 	muted(L, y, LL14(
 		L"OKで保存して閉じる。キャンセルは変更を破棄。各項目の細かい注意はツールチップにあります。",
 		L"OK saves and closes. Cancel discards changes. Fine print is in the tooltips.",
@@ -447,6 +463,18 @@ void MpRecreatePlaybackOutput()
 
 CRender* g_renderDlg = nullptr;
 
+static DWORD WINAPI RenderUpdatePeekProc(LPVOID param)
+{
+	HWND h = (HWND)param;
+	if (!h || !::IsWindow(h))
+		return 0;
+	__int64 sm = 0;
+	const WPARAM newer = UpdateCheckIsNewerAvailable(&sm) ? 1 : 0;
+	if (::IsWindow(h))
+		::PostMessage(h, WM_APP_UPDATE_PEEK, newer, 0);
+	return 0;
+}
+
 void CloseRenderIfOpen()
 {
 	if (g_renderDlg && ::IsWindow(g_renderDlg->GetSafeHwnd()))
@@ -536,6 +564,11 @@ void CRender::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDC_VST_MULTI_BROWSE, m_vstMultiBrowse);
 	DDX_Control(pDX, IDC_VST_SCAN_NOW, m_vstScanNow);
 	DDX_Control(pDX, IDC_COMBO_SPEAKER, m_speaker);
+	DDX_Control(pDX, IDC_UPD_DONTASK, m_updDontAsk);
+	DDX_Control(pDX, IDC_UPD_AUTO_YES, m_updAutoYes);
+	DDX_Control(pDX, IDC_UPD_AUTO_NO, m_updAutoNo);
+	DDX_Control(pDX, IDC_UPD_CHECKNOW, m_updCheckNow);
+	DDX_Control(pDX, IDC_UPD_AVAIL, m_updAvail);
 }
 
 
@@ -595,6 +628,13 @@ BEGIN_MESSAGE_MAP(CRender, CCustomBlurDialogExBase)
 	ON_CBN_EDITCHANGE(IDC_COMBO4, &CRender::OnCbnEditchangeCombo4)
 	ON_CBN_SELCHANGE(IDC_COMBO4, &CRender::OnCbnSelchangeCombo4)
 	ON_BN_CLICKED(IDCANCEL5, &CRender::OnBnClickedCancel5)
+	ON_BN_CLICKED(IDC_UPD_DONTASK, &CRender::OnUpdDontAsk)
+	ON_BN_CLICKED(IDC_UPD_AUTO_YES, &CRender::OnUpdAutoYes)
+	ON_BN_CLICKED(IDC_UPD_AUTO_NO, &CRender::OnUpdAutoNo)
+	ON_BN_CLICKED(IDC_UPD_CHECKNOW, &CRender::OnUpdCheckNow)
+	ON_MESSAGE(WM_APP_UPDATE_PEEK, &CRender::OnUpdatePeek)
+	ON_MESSAGE(WM_APP_UPDATE_PREFS, &CRender::OnUpdatePrefs)
+	ON_WM_CONTEXTMENU()
 END_MESSAGE_MAP()
 
 /////////////////////////////////////////////////////////////////////////////
@@ -635,6 +675,11 @@ BOOL CRender::OnInitDialog()
 	SetDlgItemText(IDC_KPI_PLUGIN_RELOAD, LL14(L"プラグイン再読込", L"Reload plugins", L"Relire plugins", L"Ricarica plugin", L"Recargar plugins", L"플러그인 다시 읽기", L"重新加载插件", L"إعادة الإضافات", L"Перечитать плагины", L"Plugins neu laden", L"Recarregar plugins", L"Plugins herladen", L"Wczytaj wtyczki", L"Eklentileri yeniden"));
 	SetDlgItemText(ID_EmuDL, LL14(L"Emu Xml DL", L"Emu Xml DL", L"Emu Xml DL", L"Emu Xml DL", L"Emu Xml DL", L"Emu Xml DL", L"Emu Xml DL", L"Emu Xml DL", L"Emu Xml DL", L"Emu Xml DL", L"Emu Xml DL", L"Emu Xml DL", L"Emu Xml DL", L"Emu Xml DL"));
 	SetDlgItemText(IDCANCEL5, LL14(L"関連付け", L"File Association", L"Association de fichiers", L"Associazione file", L"Asociación de archivos", L"파일 연결", L"文件关联", L"ربط الملفات", L"Связь файлов", L"Dateizuordnung", L"Associação de ficheiros", L"Bestandskoppeling", L"Powiazanie plików", L"Dosya ilişkilendirme"));
+	SetDlgItemText(IDC_UPD_DONTASK, LL14(L"次回から尋ねない", L"Don't ask again", L"Ne plus demander", L"Non chiedere piu", L"No preguntar mas", L"다음부터 묻지 않기", L"下次不再询问", L"عدم السؤال لاحقاً", L"Больше не спрашивать", L"Nicht mehr fragen", L"Nao perguntar mais", L"Niet meer vragen", L"Nie pytaj wiecej", L"Bir daha sorma"));
+	SetDlgItemText(IDC_UPD_AUTO_YES, LL14(L"はい", L"Yes", L"Oui", L"Si", L"Si", L"예", L"是", L"نعم", L"Да", L"Ja", L"Sim", L"Ja", L"Tak", L"Evet"));
+	SetDlgItemText(IDC_UPD_AUTO_NO, LL14(L"いいえ", L"No", L"Non", L"No", L"No", L"아니요", L"否", L"لا", L"Нет", L"Nein", L"Nao", L"Nee", L"Nie", L"Hayir"));
+	SetDlgItemText(IDC_UPD_CHECKNOW, LL14(L"アップデート確認", L"Check for update", L"Verifier la mise a jour", L"Controlla aggiornamento", L"Comprobar actualizacion", L"업데이트 확인", L"检查更新", L"تحقق من التحديث", L"Проверить обновление", L"Update pruefen", L"Verificar atualizacao", L"Update controleren", L"Sprawdz aktualizacje", L"Guncelleme denetle"));
+	OnUpdatePrefs(0, 0);
 	SetDlgItemText(IDC_CHECK1, LL14(L"デフォルトでEVR使用(Vista以降)", L"Default EVR use (Vista+)", L"EVR par défaut (Vista+)", L"Uso EVR predefinito (Vista+)", L"Uso EVR predeterminado (Vista+)", L"기본 EVR 사용(Vista+)", L"默认使用 EVR（Vista+）", L"استخدام EVR افتراضي (Vista+)", L"Использовать EVR по умолчанию (Vista+)", L"EVR standardmäßig (Vista+)", L"Usar EVR por defeito (Vista+)", L"Standaard EVR (Vista+)", L"Domyślne EVR (Vista+)", L"Varsayılan EVR kullan (Vista+)"));
 	SetDlgItemText(IDC_CHECK2, LL14(L"デスクトップコンポジションを使用する", L"Use desktop composition", L"Utiliser la composition du bureau", L"Usa composizione desktop", L"Usar composición de escritorio", L"데스크톱 컴포지션 사용", L"使用桌面合成", L"استخدام تركيب سطح المكتب", L"Использовать композицию рабочего стола", L"Desktop-Komposition verwenden", L"Usar composição do ambiente de trabalho", L"Bureaubladcompositie gebruiken", L"Użyj kompozycji pulpitu", L"Masaüstü birleşimini kullan"));
 	SetDlgItemText(IDC_CHECK3, LL14(L"アクリルモードを使用する", L"Use acrylic mode", L"Utiliser le mode acrylique", L"Usa modalità acrilica", L"Usar modo acrílico", L"아크릴 모드 사용", L"使用亚克力模式", L"استخدام وضع الأكريليك", L"Использовать акриловый режим", L"Akrylmodus verwenden", L"Usar modo acrílico", L"Acrylmodus gebruiken", L"Użyj trybu akrylowego", L"Akrilik modu kullan"));
@@ -933,9 +978,74 @@ BOOL CRender::OnInitDialog()
 	m_tooltip.AddTool(GetDlgItem(IDC_SLIDER_EQCODE), LL14(L"EQコード表示の更新間隔を設定します。\n短くすると追従が速く、長くすると負荷が下がります。", L"Set EQ chord display update interval.\nShorter = faster tracking; longer = lower load.", L"Intervalle de maj des accords EQ.\nPlus court = plus reactif; plus long = moins de charge.", L"Intervallo aggiornamento accordi EQ.\nPiu corto = piu reattivo; piu lungo = meno carico.", L"Intervalo de actualizacion de acordes EQ.\nMas corto = mas reactivo; mas largo = menos carga.", L"EQ 코드 표시 갱신 간격.\n짧을수록 빠른 추종, 길수록 부하 감소.", L"设置 EQ 和弦显示更新间隔。\n越短跟随越快，越长负载越低。", L"ضبط فاصل تحديث أكورد EQ.\nأقصر=تتبع أسرع؛ أطول=حمل أقل.", L"Интервал обновления аккордов EQ.\nКороче — быстрее; дольше — меньше нагрузка.", L"Update-Intervall der EQ-Akkorde.\nKuerzer = schneller; laenger = weniger Last.", L"Intervalo de atualizacao dos acordes EQ.\nMais curto = mais rapido; mais longo = menos carga.", L"Update-interval EQ-akkoorden.\nKorter = sneller; langer = minder belasting.", L"Interwal odswiezania akordow EQ.\nKrotszy = szybciej; dluzszy = mniejsze obciazenie.", L"EQ akor guncelleme araligi.\nKisa = daha hizli; uzun = daha az yuk."));
 	m_tooltip.AddTool(GetDlgItem(IDC_SLIDER6), LL14(L"スペアナの表示倍率を設定します。", L"Set spectrum display scale.", L"Regler l'echelle d'affichage du spectre.", L"Imposta scala visualizzazione spettro.", L"Ajustar escala de visualizacion del espectro.", L"스펙트럼 표시 배율 설정.", L"设置频谱显示倍率。", L"ضبط مقياس عرض الطيف.", L"Задать масштаб отображения спектра.", L"Spektrum-Anzeigeskala einstellen.", L"Definir escala de exibicao do espectro.", L"Spectrumweergaveschaal instellen.", L"Ustaw skale wyswietlania spektrum.", L"Spektrum gosterim olcegini ayarla."));
 
+	m_tooltip.AddTool(&m_updDontAsk, LL14(
+		L"オンのままはい／いいえすると、次の起動ではこの確認を出さず、選んだほう（更新する／しない）を使います。外すと次の起動でまた尋ねます。",
+		L"If on, later launches skip this prompt and use Yes (auto-update) or No (skip). Uncheck to ask again next launch.",
+		L"Si coche, le prochain demarrage n'affiche plus cette demande et utilise Oui ou Non. Decochez pour redemander.",
+		L"Se attivo, il prossimo avvio non chiede e usa Si o No. Togli per chiedere di nuovo.",
+		L"Si esta marcado, el proximo inicio no pregunta y usa Si o No. Desmarque para volver a preguntar.",
+		L"켜 두면 다음 실행에서 확인을 생략하고 예/아니요를 씁니다. 끄면 다음 실행에서 다시 묻습니다.",
+		L"勾选后点是/否，下次启动不再询问。取消勾选则下次再问。",
+		L"إذا كان محدداً يُتخطى السؤال في التشغيل التالي ويُستخدم نعم أو لا. ألغِ التحديد ليسأل مجدداً.",
+		L"Если включено, при следующем запуске окно не показывается. Снимите, чтобы спросить снова.",
+		L"Wenn an, fragt der naechste Start nicht und nutzt Ja oder Nein. Abhaken zum erneuten Fragen.",
+		L"Se ligado, a proxima inicializacao nao pergunta e usa Sim ou Nao. Desmarque para perguntar de novo.",
+		L"Aan: volgende start vraagt niet en gebruikt Ja of Nee. Uit om opnieuw te vragen.",
+		L"Gdy wlaczone, nastepne uruchomienie nie pyta i uzywa Tak lub Nie. Odznacz, by pytac znow.",
+		L"Aciksa sonraki acilista sorulmaz, Evet veya Hayir kullanilir. Kapatirsaniz tekrar sorulur."));
+	m_tooltip.AddTool(&m_updAutoYes, LL14(
+		L"自動更新「はい」。次回から尋ねないがオンなら、次の起動で新しい版があれば自動で入れます。演奏中の定期確認では入れません。",
+		L"Auto-update Yes. If Don't ask is on, the next launch installs a newer build. Periodic checks never install while playing.",
+		L"Oui = mise a jour auto au prochain demarrage si Ne plus demander est coche. Pas pendant la lecture.",
+		L"Si = aggiorna da solo al prossimo avvio se Non chiedere e attivo. Non durante la riproduzione.",
+		L"Si = actualiza solo en el proximo inicio si No preguntar esta marcado. No durante la reproduccion.",
+		L"자동 업데이트 예. 다음부터 묻지 않기가 켜져 있으면 다음 실행에서 새 버전이 있으면 자동 설치. 재생 중 정기 확인에서는 설치하지 않습니다.",
+		L"自动更新“是”。若勾选下次不再询问，下次启动发现新版会自动安装。播放中的定期检查不会安装。",
+		L"نعم للتحديث التلقائي عند التشغيل التالي إن كان عدم السؤال مفعّلاً. لا أثناء التشغيل.",
+		L"Да — автообновление при следующем запуске, если «не спрашивать» включено. Во время воспроизведения не ставится.",
+		L"Ja: beim naechsten Start automatisch, wenn Nicht mehr fragen an ist. Nicht waehrend der Wiedergabe.",
+		L"Sim: na proxima inicializacao se Nao perguntar estiver ligado. Nao durante a reproducao.",
+		L"Ja: bij de volgende start als Niet meer vragen aan staat. Niet tijdens afspelen.",
+		L"Tak: przy nastepnym uruchomieniu, gdy Nie pytaj jest wlaczone. Nie podczas odtwarzania.",
+		L"Evet: bir daha sorma aciksa sonraki acilista yeni surum varsa otomatik kurulur. Calma sirasinda kurulmaz."));
+	m_tooltip.AddTool(&m_updAutoNo, LL14(
+		L"自動更新「いいえ」。次回から尋ねないがオンなら、次の起動でも更新しません。演奏中の定期確認でも入れません。",
+		L"Auto-update No. If Don't ask is on, later launches skip updates. Periodic checks never install while playing.",
+		L"Non = ignorer aussi au prochain demarrage si Ne plus demander est coche.",
+		L"No = ignora anche al prossimo avvio se Non chiedere e attivo.",
+		L"No = tambien omite en el proximo inicio si No preguntar esta marcado.",
+		L"자동 업데이트 아니요. 다음부터 묻지 않기가 켜져 있으면 다음 실행에서도 건너뜁니다.",
+		L"自动更新“否”。若勾选下次不再询问，下次启动也不更新。",
+		L"لا: إن كان عدم السؤال مفعّلاً فلن يُحدَّث عند التشغيل التالي أيضاً.",
+		L"Нет — следующие запуски тоже пропустят обновление, если «не спрашивать» включено.",
+		L"Nein: beim naechsten Start ebenfalls nicht, wenn Nicht mehr fragen an ist.",
+		L"Nao: a proxima inicializacao tambem ignora se Nao perguntar estiver ligado.",
+		L"Nee: de volgende start slaat ook over als Niet meer vragen aan staat.",
+		L"Nie: nastepne uruchomienie tez pominie, gdy Nie pytaj jest wlaczone.",
+		L"Hayir: bir daha sorma aciksa sonraki acilista da guncellenmez."));
+	m_tooltip.AddTool(&m_updCheckNow, LL14(
+		L"今すぐ公式 ZIP を見に行きます。新しいものがあれば確認ダイアログを出します（次回から尋ねないのオン／オフは関係ありません）。",
+		L"Check the official ZIP now. If a newer build exists, the Yes/No dialog appears regardless of Don't ask.",
+		L"Verifier le ZIP officiel maintenant. S'il y a plus recent, la demande apparait meme si Ne plus demander est coche.",
+		L"Controlla ora lo ZIP ufficiale. Se c'e una versione nuova, chiede anche se Non chiedere e attivo.",
+		L"Comprobar ahora el ZIP oficial. Si hay uno mas nuevo, pregunta aunque No preguntar este marcado.",
+		L"지금 공식 ZIP을 확인합니다. 새 버전이 있으면 다음부터 묻지 않기와 관계없이 확인 대화상자를 냅니다.",
+		L"立即查看官方 ZIP。若有新版，无论是否勾选下次不再询问都会弹出确认。",
+		L"تحقق الآن من أرشيف ZIP الرسمي. إن وُجد إصدار أحدث يظهر الحوار بغض النظر عن عدم السؤال.",
+		L"Сейчас проверить официальный ZIP. Если есть новее — диалог появится независимо от «не спрашивать».",
+		L"Jetzt offizielles ZIP pruefen. Ist eine neuere Version da, erscheint der Dialog unabhängig von Nicht mehr fragen.",
+		L"Verificar agora o ZIP oficial. Se houver mais novo, o dialogo aparece mesmo com Nao perguntar.",
+		L"Nu het officiële ZIP controleren. Is er nieuwer, dan verschijnt de dialoog ongeacht Niet meer vragen.",
+		L"Sprawdz teraz oficjalne ZIP. Jesli jest nowsze, okno zapyta niezaleznie od Nie pytaj.",
+		L"Resmi ZIP'i simdi denetle. Daha yenisi varsa Bir daha sorma acik olsa da soru cikar."));
 	CCustomControlUtility::FinalizeDialogToolTip(m_tooltip, 512, 10000);
 	CCC_CaptionLayout(m_hWnd);
 	LayoutHelpBtn();
+	{
+		HANDLE th = CreateThread(NULL, 0, RenderUpdatePeekProc, m_hWnd, 0, NULL);
+		if (th)
+			CloseHandle(th);
+	}
 
 	m_ms.SetMode(1);	m_hyouji2.SetMode(1);
 	m_eqCode.SetMode(1);
@@ -2353,6 +2463,213 @@ void CRender::OnBnClickedCheck3()
 	::SetForegroundWindow(m_hWnd);
 	if (renderbase && renderbase->GetSafeHwnd())
 		::SetWindowPos(renderbase->m_hWnd, m_hWnd, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+}
+
+void CRender::OnUpdDontAsk()
+{
+	savedata.updateDontAsk = m_updDontAsk.GetCheck() ? 1 : 0;
+	MpPersistSavedataQuick();
+}
+
+void CRender::OnUpdAutoYes()
+{
+	savedata.updateAutoYes = 1;
+	MpPersistSavedataQuick();
+}
+
+void CRender::OnUpdAutoNo()
+{
+	savedata.updateAutoYes = 0;
+	MpPersistSavedataQuick();
+}
+
+void CRender::OnUpdCheckNow()
+{
+	__int64 sm = 0;
+	bool newer = false;
+	{
+		CWaitCursor wait;
+		newer = UpdateCheckIsNewerAvailable(&sm);
+	}
+	if (newer) {
+		m_updAvail.SetWindowText(LL14(
+			L"(アップデートあり)", L"(update available)", L"(mise a jour dispo.)", L"(aggiornamento disponibile)",
+			L"(actualizacion disponible)", L"(업데이트 있음)", L"(有更新)", L"(يتوفر تحديث)",
+			L"(есть обновление)", L"(Update vorhanden)", L"(atualizacao disponivel)", L"(update beschikbaar)",
+			L"(jest aktualizacja)", L"(guncelleme var)"));
+		m_updAvail.Invalidate(FALSE);
+		if (UpdateCheckAskUser(this, sm) == IDYES)
+			DoUpdateAndRestart();
+	} else {
+		m_updAvail.SetWindowText(LL14(
+			L"最新です", L"Up to date", L"A jour", L"Aggiornato", L"Actualizado",
+			L"최신입니다", L"已是最新", L"محدَّث", L"Актуально", L"Aktuell",
+			L"Atualizado", L"Bijgewerkt", L"Aktualne", L"Guncel"));
+		m_updAvail.Invalidate(FALSE);
+	}
+}
+
+LRESULT CRender::OnUpdatePeek(WPARAM wParam, LPARAM)
+{
+	if (!m_updAvail.GetSafeHwnd())
+		return 0;
+	if (wParam) {
+		m_updAvail.SetWindowText(LL14(
+			L"(アップデートあり)", L"(update available)", L"(mise a jour dispo.)", L"(aggiornamento disponibile)",
+			L"(actualizacion disponible)", L"(업데이트 있음)", L"(有更新)", L"(يتوفر تحديث)",
+			L"(есть обновление)", L"(Update vorhanden)", L"(atualizacao disponivel)", L"(update beschikbaar)",
+			L"(jest aktualizacja)", L"(guncelleme var)"));
+	} else {
+		m_updAvail.SetWindowText(L"");
+	}
+	m_updAvail.Invalidate(FALSE);
+	return 0;
+}
+
+LRESULT CRender::OnUpdatePrefs(WPARAM, LPARAM)
+{
+	if (!m_updDontAsk.GetSafeHwnd())
+		return 0;
+	m_updDontAsk.SetCheck(savedata.updateDontAsk ? BST_CHECKED : BST_UNCHECKED);
+	m_updAutoYes.SetCheck(savedata.updateAutoYes ? BST_CHECKED : BST_UNCHECKED);
+	m_updAutoNo.SetCheck(savedata.updateAutoYes ? BST_UNCHECKED : BST_CHECKED);
+	m_updDontAsk.Invalidate(FALSE);
+	m_updAutoYes.Invalidate(FALSE);
+	m_updAutoNo.Invalidate(FALSE);
+	return 0;
+}
+
+void CRender::OnContextMenu(CWnd* pWnd, CPoint point)
+{
+	if (pWnd &&
+		(pWnd->IsKindOf(RUNTIME_CLASS(CCustomEdit)) ||
+		 pWnd->IsKindOf(RUNTIME_CLASS(CCustomComboBox)) ||
+		 pWnd->IsKindOf(RUNTIME_CLASS(CCustomSliderCtrl))))
+		return;
+	CPoint sp = point;
+	if (sp.x == -1 && sp.y == -1) {
+		CRect wr;
+		GetWindowRect(&wr);
+		sp.x = wr.left + 40;
+		sp.y = wr.top + 40;
+	} else {
+		CPoint cl = sp;
+		ScreenToClient(&cl);
+		if (cl.y < 0)
+			return;
+	}
+	CCustomPopupMenu menu;
+	menu.AddCommand(IDC_RD_HELP,
+		LL14(L"操作ガイド", L"Operation guide", L"Guide d'utilisation", L"Guida operativa", L"Guia de operacion",
+			L"조작 가이드", L"操作指南", L"دليل التشغيل", L"Руководство", L"Bedienungsanleitung",
+			L"Guia de operacao", L"Handleiding", L"Przewodnik", L"Islem kilavuzu"),
+		LL14(L"この画面の操作ガイドを開きます。", L"Open the operation guide for this window.",
+			L"Ouvrir le guide de cette fenetre.", L"Apri la guida di questa finestra.",
+			L"Abrir la guia de esta ventana.", L"이 화면의 조작 가이드를 엽니다.",
+			L"打开本窗口的操作指南。", L"فتح دليل هذه النافذة.",
+			L"Открыть руководство этого окна.", L"Anleitung dieses Fensters oeffnen.",
+			L"Abrir o guia desta janela.", L"Handleiding van dit venster openen.",
+			L"Otworz przewodnik tego okna.", L"Bu pencerenin kilavuzunu ac."));
+	CCustomPopupMenu* upd = menu.AddSubMenu(
+		LL14(L"アップデート", L"Update", L"Mise a jour", L"Aggiornamento", L"Actualizacion",
+			L"업데이트", L"更新", L"تحديث", L"Обновление", L"Aktualisierung",
+			L"Atualizacao", L"Update", L"Aktualizacja", L"Guncelleme"),
+		LL14(L"次回から尋ねない、自動更新のはい／いいえ、今すぐ確認。",
+			L"Don't ask, auto-update Yes/No, and check now.",
+			L"Ne plus demander, Oui/Non auto, et verifier maintenant.",
+			L"Non chiedere, Si/No auto, e controlla ora.",
+			L"No preguntar, Si/No auto, y comprobar ahora.",
+			L"다음부터 묻지 않기, 자동 예/아니요, 지금 확인.",
+			L"下次不再询问、自动是/否、立即检查。",
+			L"عدم السؤال، نعم/لا تلقائي، والتحقق الآن.",
+			L"Не спрашивать, Да/Нет авто, проверить сейчас.",
+			L"Nicht fragen, Ja/Nein auto, jetzt pruefen.",
+			L"Nao perguntar, Sim/Nao auto, e verificar agora.",
+			L"Niet vragen, Ja/Nee auto, en nu controleren.",
+			L"Nie pytaj, Tak/Nie auto, sprawdz teraz.",
+			L"Bir daha sorma, otomatik Evet/Hayir, simdi denetle."));
+	if (upd) {
+		upd->AddCheck(ID_RD_UPD_DONTASK,
+			LL14(L"次回から尋ねない", L"Don't ask again", L"Ne plus demander", L"Non chiedere piu", L"No preguntar mas",
+				L"다음부터 묻지 않기", L"下次不再询问", L"عدم السؤال لاحقاً", L"Больше не спрашивать", L"Nicht mehr fragen",
+				L"Nao perguntar mais", L"Niet meer vragen", L"Nie pytaj wiecej", L"Bir daha sorma"),
+			savedata.updateDontAsk != 0,
+			LL14(L"オンだと次の起動で確認を出さず、はい／いいえの選択を使います。",
+				L"When on, the next launch skips the prompt and uses Yes or No.",
+				L"Si coche, le prochain demarrage n'affiche plus la demande.",
+				L"Se attivo, il prossimo avvio non chiede.",
+				L"Si esta marcado, el proximo inicio no pregunta.",
+				L"켜져 있으면 다음 실행에서 확인을 생략합니다.",
+				L"开启后下次启动不再询问。",
+				L"إذا كان محدداً يُتخطى السؤال في التشغيل التالي.",
+				L"Если включено, следующий запуск не спрашивает.",
+				L"Wenn an, fragt der naechste Start nicht.",
+				L"Se ligado, a proxima inicializacao nao pergunta.",
+				L"Aan: volgende start vraagt niet.",
+				L"Gdy wlaczone, nastepne uruchomienie nie pyta.",
+				L"Aciksa sonraki acilista sorulmaz."));
+		CCustomPopupMenu* autoSub = upd->AddSubMenu(
+			LL14(L"自動更新", L"Auto-update", L"Mise a jour auto", L"Aggiornamento auto", L"Actualizacion auto",
+				L"자동 업데이트", L"自动更新", L"تحديث تلقائي", L"Автообновление", L"Auto-Update",
+				L"Atualizacao auto", L"Auto-update", L"Auto-aktualizacja", L"Otomatik guncelleme"),
+			LL14(L"次の起動で新しい版があれば入れるか（はい）、入れないか（いいえ）。演奏中はどちらでも入れません。",
+				L"Next launch: install a newer build (Yes) or skip (No). Never installs while playing.",
+				L"Prochain demarrage: installer (Oui) ou ignorer (Non). Jamais pendant la lecture.",
+				L"Prossimo avvio: installa (Si) o ignora (No). Mai durante la riproduzione.",
+				L"Proximo inicio: instalar (Si) u omitir (No). Nunca durante la reproduccion.",
+				L"다음 실행에서 새 버전을 설치(예)하거나 건너뛰기(아니요). 재생 중에는 설치하지 않습니다.",
+				L"下次启动安装新版（是）或跳过（否）。播放中绝不安装。",
+				L"التشغيل التالي: تثبيت (نعم) أو تخطي (لا). لا أثناء التشغيل.",
+				L"Следующий запуск: ставить (Да) или пропустить (Нет). Не во время воспроизведения.",
+				L"Naechster Start: installieren (Ja) oder ueberspringen (Nein). Nicht waehrend der Wiedergabe.",
+				L"Proxima inicializacao: instalar (Sim) ou ignorar (Nao). Nunca durante a reproducao.",
+				L"Volgende start: installeren (Ja) of overslaan (Nee). Niet tijdens afspelen.",
+				L"Nastepne uruchomienie: zainstaluj (Tak) lub pomin (Nie). Nie podczas odtwarzania.",
+				L"Sonraki acilis: kur (Evet) veya atla (Hayir). Calma sirasinda kurulmaz."));
+		if (autoSub) {
+			autoSub->AddCheck(ID_RD_UPD_AUTO_YES,
+				LL14(L"はい", L"Yes", L"Oui", L"Si", L"Si", L"예", L"是", L"نعم", L"Да", L"Ja", L"Sim", L"Ja", L"Tak", L"Evet"),
+				savedata.updateAutoYes != 0);
+			autoSub->AddCheck(ID_RD_UPD_AUTO_NO,
+				LL14(L"いいえ", L"No", L"Non", L"No", L"No", L"아니요", L"否", L"لا", L"Нет", L"Nein", L"Nao", L"Nee", L"Nie", L"Hayir"),
+				savedata.updateAutoYes == 0);
+		}
+		upd->AddCommand(ID_RD_UPD_CHECKNOW,
+			LL14(L"アップデート確認", L"Check for update", L"Verifier la mise a jour", L"Controlla aggiornamento", L"Comprobar actualizacion",
+				L"업데이트 확인", L"检查更新", L"تحقق من التحديث", L"Проверить обновление", L"Update pruefen",
+				L"Verificar atualizacao", L"Update controleren", L"Sprawdz aktualizacje", L"Guncelleme denetle"),
+			LL14(L"今すぐ公式 ZIP を見に行き、新しいものがあれば確認ダイアログを出します。",
+				L"Look at the official ZIP now and prompt if a newer build exists.",
+				L"Verifier le ZIP officiel maintenant et demander s'il y a plus recent.",
+				L"Controlla ora lo ZIP ufficiale e chiedi se c'e una versione nuova.",
+				L"Mirar ahora el ZIP oficial y preguntar si hay uno mas nuevo.",
+				L"지금 공식 ZIP을 보고 새 버전이 있으면 확인합니다.",
+				L"立即查看官方 ZIP，若有新版则弹出确认。",
+				L"انظر إلى ZIP الرسمي الآن واسأل إن وُجد إصدار أحدث.",
+				L"Сейчас посмотреть официальный ZIP и спросить, если есть новее.",
+				L"Jetzt offizielles ZIP pruefen und fragen, wenn neuer.",
+				L"Verificar agora o ZIP oficial e perguntar se houver mais novo.",
+				L"Nu het officiële ZIP bekijken en vragen als er nieuwer is.",
+				L"Sprawdz teraz oficjalne ZIP i zapytaj, jesli jest nowsze.",
+				L"Resmi ZIP'e simdi bak, daha yenisi varsa sor."));
+	}
+	const UINT c = menu.Track(sp, this);
+	if (c == IDC_RD_HELP)
+		ShowHelpSheet();
+	else if (c == ID_RD_UPD_DONTASK) {
+		savedata.updateDontAsk = savedata.updateDontAsk ? 0 : 1;
+		MpPersistSavedataQuick();
+		OnUpdatePrefs(0, 0);
+	} else if (c == ID_RD_UPD_AUTO_YES) {
+		savedata.updateAutoYes = 1;
+		MpPersistSavedataQuick();
+		OnUpdatePrefs(0, 0);
+	} else if (c == ID_RD_UPD_AUTO_NO) {
+		savedata.updateAutoYes = 0;
+		MpPersistSavedataQuick();
+		OnUpdatePrefs(0, 0);
+	} else if (c == ID_RD_UPD_CHECKNOW)
+		OnUpdCheckNow();
 }
 
 void CRender::OnBnClickedCancel()

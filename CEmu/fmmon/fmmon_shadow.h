@@ -1,7 +1,7 @@
-﻿#pragma once
+#pragma once
 /* Shared OPNA/OPN2/MSX register shadow + dump writer for KPI FM monitor. */
 #include "sasami_fmmon.h"
-#include "fmmon_write.h"
+#include "fmmon/fmmon_write.h"
 
 #ifdef __cplusplus
 extern "C" {

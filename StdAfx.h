@@ -862,6 +862,13 @@ struct save{
 	TCHAR cemuDataPath[1024];
 	/* Cemu対応一覧ウィンドウ。W==0 は未保存 */
 	int cemuListX, cemuListY, cemuListW, cemuListH;
+
+	// --- 自動アップデート確認(末尾追記。旧.datは0=毎回尋ねる) ---
+	// updateDontAsk: 1=次回から尋ねない（起動時はダイアログを出さない）
+	// updateAutoYes: 1=はい（起動時に新しい版があれば自動更新） 0=いいえ（起動時も更新しない）
+	// 定期チェックからは、このフラグが立っていても更新しない（演奏中の勝手な更新を避ける）。
+	int updateDontAsk;
+	int updateAutoYes;
 };
 extern save savedata;
 

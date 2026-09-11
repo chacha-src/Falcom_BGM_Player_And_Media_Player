@@ -1,4 +1,4 @@
-﻿#include "StdAfx.h"
+#include "StdAfx.h"
 #include "cemu_fm7.h"
 #include "../cemu_zipfs.h"
 #include "../driver/cemu_driver.h"

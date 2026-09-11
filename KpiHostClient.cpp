@@ -1,4 +1,4 @@
-﻿#include "stdafx.h"
+#include "stdafx.h"
 
 #include "KpiHostClient.h"
 #include <tlhelp32.h>
@@ -231,6 +231,11 @@ bool KpiHost64Client::SyncHostLang()
 bool KpiHost64Client::EnsureConnected()
 {
 	if (m_hPipe == INVALID_HANDLE_VALUE) {
+		if (ConnectPipe(false)) {
+			/* 既存ホストは古い KPI を握ったまま。プラグイン差し替え後は起こし直す */
+			KillStaleKpiHost64();
+			Disconnect();
+		}
 		if (!ConnectPipe(false)) {
 			StartHostProcess();
 			if (!ConnectPipe(true)) {

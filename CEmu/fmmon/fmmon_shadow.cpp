@@ -1,4 +1,4 @@
-﻿#include <windows.h>
+#include <windows.h>
 #include <string.h>
 #include <stdio.h>
 #include <math.h>

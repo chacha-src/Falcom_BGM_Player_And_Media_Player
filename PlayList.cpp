@@ -1,4 +1,4 @@
-﻿// PlayList.cpp : 実装ファイル
+// PlayList.cpp : 実装ファイル
 //
 
 #include "stdafx.h"
@@ -1261,6 +1261,18 @@ CString NormalizePlaylistPath(LPCTSTR fol)
 	CString s = (n > 0 && n < MAX_PATH) ? CString(full) : CString(fol);
 	s.Replace(_T('/'), _T('\\'));
 	return s;
+}
+
+int PlIsSasamiTempPreviewPath(LPCTSTR path)
+{
+	if (!path || !path[0]) return 0;
+	const TCHAR* base = path;
+	for (const TCHAR* p = path; *p; ++p) {
+		if (*p == _T('\\') || *p == _T('/'))
+			base = p + 1;
+	}
+	/* ogg_sasami_score*.mpsmv / ogg_sasami_preview.mpy / ogg_sasami_fm.fpy 等 */
+	return (_tcsnicmp(base, _T("ogg_sasami_"), 11) == 0) ? 1 : 0;
 }
 
 CString PlPhysicalMediaPath(LPCTSTR fol)
@@ -5174,6 +5186,8 @@ static void PlSasamiMaybeTags(CString& name, CString& art, CString& alb, const C
 
 int CPlayList::Add(CString name,int sub,int loop1,int loop2,CString art,CString alb,CString fol,int ret,int time,BOOL f,BOOL ff)
 {
+	if (PlIsSasamiTempPreviewPath(fol))
+		return -1;
 	// 旧プレイリストに KPI 再生として保存された動画も CDouga 再生へ移行する。
 	if (sub == -3 && IsDougaVideoFile(fol))
 		sub = -2;
@@ -5645,19 +5659,43 @@ void CPlayList::DelByIndices(const std::vector<int>& indices)
 	PlRefreshAfterEdit(this);
 }
 
+static LONG s_plClipBusy = 0;
+
+static int PlClipEnter()
+{
+	if (CCC_PrintBusy())
+		return 0;
+	return (InterlockedCompareExchange(&s_plClipBusy, 1, 0) == 0) ? 1 : 0;
+}
+
+static void PlClipLeave()
+{
+	InterlockedExchange(&s_plClipBusy, 0);
+}
+
 BOOL CPlayList::CopySelectionToClipboard()
 {
-	if (!pc || playcnt <= 0 || !::IsWindow(m_lc.GetSafeHwnd())) return FALSE;
+	if (!PlClipEnter()) return FALSE;
+	if (!pc || playcnt <= 0 || !::IsWindow(m_lc.GetSafeHwnd())) {
+		PlClipLeave();
+		return FALSE;
+	}
 	std::vector<int> sel;
 	int idx = -1;
 	while ((idx = m_lc.GetNextItem(idx, LVNI_ALL | LVNI_SELECTED)) >= 0) {
 		if (idx >= 0 && idx < playcnt) sel.push_back(idx);
 	}
-	if (sel.empty()) return FALSE;
+	if (sel.empty()) {
+		PlClipLeave();
+		return FALSE;
+	}
 
 	HWND hOwner = GetSafeHwnd();
 	if (!hOwner) hOwner = AfxGetMainWnd() ? AfxGetMainWnd()->GetSafeHwnd() : NULL;
-	if (!::OpenClipboard(hOwner)) return FALSE;
+	if (!::OpenClipboard(hOwner)) {
+		PlClipLeave();
+		return FALSE;
+	}
 	::EmptyClipboard();
 
 	const int n = (int)sel.size();
@@ -5720,6 +5758,7 @@ BOOL CPlayList::CopySelectionToClipboard()
 	/* CF_HDROP は載せない。Explorer のファイル Ctrl+C と衝突して自プロセスが
 	   落ちる事例がある。Explorer→本アプリへの貼付は Paste 側の CF_HDROP 読取で対応。 */
 	::CloseClipboard();
+	PlClipLeave();
 	return TRUE;
 }
 
@@ -5743,7 +5782,18 @@ void CPlayList::PasteFromClipboard()
 	}
 	HWND hOwner = GetSafeHwnd();
 	if (!hOwner) hOwner = AfxGetMainWnd() ? AfxGetMainWnd()->GetSafeHwnd() : NULL;
-	if (!::OpenClipboard(hOwner)) return;
+	if (!PlClipEnter()) return;
+	struct PlClipDone { ~PlClipDone() { PlClipLeave(); } } clipDone;
+	/* 自前形式（oggYSED_PlaylistTracks）以外は拒否。スクショ DIB や Explorer テキストで落ちない */
+	const UINT fmt = PlTracksClipFormat();
+	if (!fmt || !::IsClipboardFormatAvailable(fmt))
+		return;
+	if (!::OpenClipboard(hOwner))
+		return;
+	if (!::IsClipboardFormatAvailable(fmt)) {
+		::CloseClipboard();
+		return;
+	}
 
 	int at = playcnt;
 	if (::IsWindow(m_lc.GetSafeHwnd())) {
@@ -5757,108 +5807,44 @@ void CPlayList::PasteFromClipboard()
 	if (at < 0) at = 0;
 	if (at > playcnt) at = playcnt;
 
-	const UINT fmt = PlTracksClipFormat();
-	HANDLE hBin = fmt ? ::GetClipboardData(fmt) : NULL;
-	if (hBin) {
-		const SIZE_T sz = ::GlobalSize(hBin);
-		BYTE* p = (BYTE*)::GlobalLock(hBin);
-		if (p && sz >= sizeof(DWORD) * 2 + sizeof(int)) {
-			DWORD magic = 0, recSize = 0;
-			int n = 0;
-			memcpy(&magic, p, sizeof(DWORD));
-			memcpy(&recSize, p + sizeof(DWORD), sizeof(DWORD));
-			memcpy(&n, p + sizeof(DWORD) * 2, sizeof(int));
-			if (magic == PL_CLIP_MAGIC && recSize == (DWORD)sizeof(playlistdata0)
-				&& n > 0 && n < 100000
-				&& sz >= sizeof(DWORD) * 2 + sizeof(int) + sizeof(playlistdata0) * (size_t)n) {
-				playlistdata0* rec = (playlistdata0*)malloc(sizeof(playlistdata0) * (size_t)n);
-				if (rec) {
-					memcpy(rec, p + sizeof(DWORD) * 2 + sizeof(int), sizeof(playlistdata0) * (size_t)n);
-					::GlobalUnlock(hBin);
-					::CloseClipboard();
-					if (PlInsertTracksRaw(this, at, rec, n)) {
-						PlUndoPush(kPlUndoIns, at, rec, n);
-						PlRefreshAfterEdit(this);
-					}
-					free(rec);
-					return;
-				}
-			}
-		}
+	HANDLE hBin = ::GetClipboardData(fmt);
+	if (!hBin) {
+		::CloseClipboard();
+		return;
+	}
+	const SIZE_T sz = ::GlobalSize(hBin);
+	BYTE* p = (BYTE*)::GlobalLock(hBin);
+	if (!p || sz < sizeof(DWORD) * 2 + sizeof(int)) {
 		if (p) ::GlobalUnlock(hBin);
+		::CloseClipboard();
+		return;
 	}
-
-	/* Explorer 等のファイルコピー（CF_HDROP）。ハンドルはクリップボード所有のまま（DragFinish 禁止） */
-	HDROP hDrop = (HDROP)::GetClipboardData(CF_HDROP);
-	if (hDrop) {
-		UINT cnt = DragQueryFile(hDrop, (UINT)-1, NULL, 0);
-		if (cnt > 0 && cnt < 100000) {
-			std::vector<CString> files;
-			files.reserve(cnt);
-			TCHAR path[MAX_PATH];
-			for (UINT i = 0; i < cnt; ++i) {
-				path[0] = 0;
-				if (DragQueryFile(hDrop, i, path, MAX_PATH) && path[0])
-					files.push_back(path);
-			}
-			::CloseClipboard();
-			if (!files.empty()) {
-				TCHAR cwd[1024];
-				_tgetcwd(cwd, 1000);
-				syo = 0; syos = _T(""); syomode = 0;
-				m_lc.SetRedraw(FALSE);
-				for (size_t i = 0; i < files.size(); ++i)
-					Fol(files[i]);
-				m_lc.SetRedraw(TRUE);
-				PlRefreshAfterEdit(this);
-				_tchdir(cwd);
-			}
-			return;
-		}
+	DWORD magic = 0, recSize = 0;
+	int n = 0;
+	memcpy(&magic, p, sizeof(DWORD));
+	memcpy(&recSize, p + sizeof(DWORD), sizeof(DWORD));
+	memcpy(&n, p + sizeof(DWORD) * 2, sizeof(int));
+	if (magic != PL_CLIP_MAGIC || recSize != (DWORD)sizeof(playlistdata0)
+		|| n <= 0 || n >= 100000
+		|| sz < sizeof(DWORD) * 2 + sizeof(int) + sizeof(playlistdata0) * (size_t)n) {
+		::GlobalUnlock(hBin);
+		::CloseClipboard();
+		return;
 	}
-
-	HANDLE hTxt = ::GetClipboardData(CF_UNICODETEXT);
-	CString text;
-	if (hTxt) {
-		const wchar_t* p = (const wchar_t*)::GlobalLock(hTxt);
-		if (p) {
-			text = p;
-			::GlobalUnlock(hTxt);
-		}
+	playlistdata0* rec = (playlistdata0*)malloc(sizeof(playlistdata0) * (size_t)n);
+	if (!rec) {
+		::GlobalUnlock(hBin);
+		::CloseClipboard();
+		return;
 	}
+	memcpy(rec, p + sizeof(DWORD) * 2 + sizeof(int), sizeof(playlistdata0) * (size_t)n);
+	::GlobalUnlock(hBin);
 	::CloseClipboard();
-	if (text.IsEmpty()) return;
-
-	TCHAR cwd[1024];
-	_tgetcwd(cwd, 1000);
-	syo = 0; syos = _T(""); syomode = 0;
-	BOOL any = FALSE;
-	m_lc.SetRedraw(FALSE);
-	int start = 0;
-	while (start < text.GetLength()) {
-		int end = text.Find(_T('\n'), start);
-		if (end < 0) end = text.GetLength();
-		CString line = text.Mid(start, end - start);
-		line.Trim();
-		if (!line.IsEmpty() && line[line.GetLength() - 1] == _T('\r'))
-			line = line.Left(line.GetLength() - 1);
-		line.Trim();
-		int tab = line.ReverseFind(_T('\t'));
-		if (tab >= 0)
-			line = line.Mid(tab + 1);
-		line.Trim();
-		if (line.GetLength() >= 2 && line[0] == _T('"') && line[line.GetLength() - 1] == _T('"'))
-			line = line.Mid(1, line.GetLength() - 2);
-		if (PlIsAbsoluteMediaPath(line) || PathFileExists(line)) {
-			Fol(line);
-			any = TRUE;
-		}
-		start = end + 1;
-	}
-	m_lc.SetRedraw(TRUE);
-	if (any)
+	if (PlInsertTracksRaw(this, at, rec, n)) {
+		PlUndoPush(kPlUndoIns, at, rec, n);
 		PlRefreshAfterEdit(this);
-	_tchdir(cwd);
+	}
+	free(rec);
 }
 
 BOOL CPlayList::HandleListEditKeys(MSG* pMsg)
@@ -6192,14 +6178,18 @@ extern ov_callbacks callbacks;
 void CPlayList::AddFilePath(LPCTSTR path)
 {
 	if (!path || !*path) return;
+	if (PlIsSasamiTempPreviewPath(path)) return;
 	const CString norm = NormalizePlaylistPath(path);
 	if (norm.IsEmpty()) return;
+	if (PlIsSasamiTempPreviewPath(norm)) return;
 	if (FindByPath(norm) >= 0) return;
 	Fol(norm);
 }
 
 void CPlayList::Fol(CString fname)
 {
+	if (PathIsDirectory(fname) == FALSE && PlIsSasamiTempPreviewPath(fname))
+		return;
 	CString fname_full = fname;
 	CString fname1 = fname;
 	CString ft; 
@@ -6231,6 +6221,8 @@ void CPlayList::Fol(CString fname)
 			b = f.FindNextFile();
 			s = f.GetFileName();
 			if (f.IsDirectory() == 0) {
+				if (PlIsSasamiTempPreviewPath(s))
+					continue;
 				fname = fname1;
 				BOOL a1 = PathIsDirectory(fname);
 				if (a1) {

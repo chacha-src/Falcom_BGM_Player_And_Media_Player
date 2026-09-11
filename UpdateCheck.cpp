@@ -2,6 +2,9 @@
 #include "stdafx.h"
 #include "UpdateCheck.h"
 #include "oggDlg.h"
+#include "Render.h"
+#include "CCustomControl.h"
+#include "CCustomPopupMenu.h"
 #include <wininet.h>
 #include <ShlObj.h>
 #include <ctime>
@@ -620,6 +623,291 @@ static volatile LONG g_updatePromptOpen = 0;
 static volatile LONG g_updateMsgQueued = 0;
 static volatile __int64 g_updateDismissedVersion = 0;
 
+// 更新確認の簡易ダイアログ。MessageBox 相当＋次回から尋ねない。
+class CUpdateAskDlg : public CCustomBlurDialogExBase
+{
+	DECLARE_DYNAMIC(CUpdateAskDlg)
+public:
+	enum { IDD = IDD_UPDATE_ASK };
+	explicit CUpdateAskDlg(CWnd* pParent, bool prevFailed)
+		: CCustomBlurDialogExBase(IDD, pParent), m_prevFailed(prevFailed) {}
+	CCustomStatic m_msg;
+	CCustomCheckBox m_dontAsk;
+	CCustomStandardButton m_yes;
+	CCustomStandardButton m_no;
+	CToolTipCtrl m_tooltip;
+protected:
+	virtual void DoDataExchange(CDataExchange* pDX);
+	virtual BOOL OnInitDialog();
+	virtual BOOL PreTranslateMessage(MSG* pMsg);
+	virtual void OnCancel();
+	afx_msg void OnYes();
+	afx_msg void OnNo();
+	afx_msg void OnContextMenu(CWnd* pWnd, CPoint point);
+	DECLARE_MESSAGE_MAP()
+private:
+	bool m_prevFailed;
+};
+
+IMPLEMENT_DYNAMIC(CUpdateAskDlg, CCustomBlurDialogExBase)
+
+void CUpdateAskDlg::DoDataExchange(CDataExchange* pDX)
+{
+	CCustomBlurDialogExBase::DoDataExchange(pDX);
+	DDX_Control(pDX, IDC_UPDASK_MSG, m_msg);
+	DDX_Control(pDX, IDC_UPDASK_DONTASK, m_dontAsk);
+	DDX_Control(pDX, IDYES, m_yes);
+	DDX_Control(pDX, IDNO, m_no);
+}
+
+BEGIN_MESSAGE_MAP(CUpdateAskDlg, CCustomBlurDialogExBase)
+	ON_BN_CLICKED(IDYES, &CUpdateAskDlg::OnYes)
+	ON_BN_CLICKED(IDNO, &CUpdateAskDlg::OnNo)
+	ON_WM_CONTEXTMENU()
+END_MESSAGE_MAP()
+
+BOOL CUpdateAskDlg::OnInitDialog()
+{
+	CCustomBlurDialogExBase::OnInitDialog();
+	SetWindowText(LL14(L"更新", L"Update", L"Mise a jour", L"Aggiornamento", L"Actualizacion",
+		L"업데이트", L"更新", L"تحديث", L"Обновление", L"Aktualisierung", L"Atualizacao",
+		L"Update", L"Aktualizacja", L"Guncelleme"));
+	if (m_prevFailed) {
+		m_msg.SetWindowText(LL14(
+			L"前回の自動更新が完了していないようです。\n更新ファイルを「ダウンロード」フォルダへ展開し、手動で上書きしますか？",
+			L"The previous automatic update does not appear to have completed.\nExtract the update files to Downloads for a manual overwrite?",
+			L"La precedente mise a jour automatique ne semble pas terminee.\nExtraire les fichiers vers Telechargements pour un remplacement manuel ?",
+			L"Il precedente aggiornamento automatico non sembra completato.\nEstrarre i file in Download per la sovrascrittura manuale?",
+			L"La actualizacion automatica anterior no parece haberse completado.\n¿Extraer los archivos en Descargas para sobrescribir manualmente?",
+			L"이전 자동 업데이트가 완료되지 않은 것 같습니다.\n다운로드 폴더에 풀어 수동으로 덮어쓰시겠습니까?",
+			L"上次自动更新似乎未完成。\n是否解压到“下载”文件夹以便手动覆盖？",
+			L"يبدو أن التحديث التلقائي السابق لم يكتمل.\nهل تريد استخراج الملفات إلى التنزيلات للكتابة اليدوية؟",
+			L"Предыдущее автообновление, похоже, не завершилось.\nРаспаковать файлы в Загрузки для ручной замены?",
+			L"Das vorherige automatische Update scheint nicht abgeschlossen.\nDateien nach Downloads entpacken und manuell uberschreiben?",
+			L"A atualizacao automatica anterior parece nao ter sido concluida.\nExtrair os arquivos em Downloads para substituir manualmente?",
+			L"De vorige automatische update lijkt niet voltooid.\nBestanden uitpakken naar Downloads voor handmatig overschrijven?",
+			L"Poprzednia automatyczna aktualizacja wyglada na niedokonczona.\nRozpakowac pliki do Pobrane w celu recznego nadpisania?",
+			L"Onceki otomatik guncelleme tamamlanmamis gorunuyor.\nManuel uzerine yazma icin Indirilenler klasorune acilsin mi?"));
+	} else {
+		m_msg.SetWindowText(LL14(
+			L"アップデートファイルがあります。\n今すぐ更新しますか？",
+			L"An update file is available.\nWould you like to update now?",
+			L"Un fichier de mise a jour est disponible.\nMettre a jour maintenant ?",
+			L"E disponibile un file di aggiornamento.\nAggiornare ora?",
+			L"Hay un archivo de actualizacion disponible.\n¿Actualizar ahora?",
+			L"업데이트 파일이 있습니다.\n지금 업데이트하시겠습니까?",
+			L"有更新文件。\n是否立即更新？",
+			L"يتوفر ملف تحديث.\nهل تريد التحديث الآن؟",
+			L"Доступен файл обновления.\nОбновить сейчас?",
+			L"Eine Aktualisierungsdatei ist verfugbar.\nJetzt aktualisieren?",
+			L"Um arquivo de atualizacao esta disponivel.\nAtualizar agora?",
+			L"Er is een updatebestand beschikbaar.\nNu bijwerken?",
+			L"Dostepny jest plik aktualizacji.\nCzy zaktualizowac teraz?",
+			L"Guncelleme dosyasi mevcut.\nSimdi guncellemek istiyor musunuz?"));
+	}
+	m_dontAsk.SetWindowText(LL14(
+		L"次回から尋ねない", L"Don't ask next time", L"Ne plus demander", L"Non chiedere la prossima volta",
+		L"No preguntar la proxima vez", L"다음부터 묻지 않기", L"下次不再询问", L"عدم السؤال في المرة القادمة",
+		L"Больше не спрашивать", L"Nicht mehr nachfragen", L"Nao perguntar da proxima vez",
+		L"Niet meer vragen", L"Nie pytaj nastepnym razem", L"Bir daha sorma"));
+	m_yes.SetWindowText(LL14(L"はい", L"Yes", L"Oui", L"Si", L"Si", L"예", L"是", L"نعم", L"Да", L"Ja", L"Sim", L"Ja", L"Tak", L"Evet"));
+	m_no.SetWindowText(LL14(L"いいえ", L"No", L"Non", L"No", L"No", L"아니요", L"否", L"لا", L"Нет", L"Nein", L"Nao", L"Nee", L"Nie", L"Hayir"));
+	m_dontAsk.SetCheck(BST_CHECKED);
+	CCustomControlUtility::BeginDialogToolTip(m_tooltip, this);
+	m_tooltip.AddTool(&m_dontAsk, LL14(
+		L"オンのままはい／いいえすると、次の起動からはこの確認を出さず、選んだほう（更新する／しない）を使います。",
+		L"If left on, Yes/No is remembered and this prompt is skipped on later launches.",
+		L"Si coche, Oui/Non est memorise et cette demande n'apparait plus au prochain demarrage.",
+		L"Se attivo, Si/No viene ricordato e al prossimo avvio non chiede.",
+		L"Si esta marcado, Si/No se recuerda y no pregunta en el proximo inicio.",
+		L"켜 둔 채 예/아니요를 고르면 다음 실행부터 이 확인을 생략하고 선택한 쪽을 씁니다.",
+		L"勾选后点是/否，下次启动不再询问，沿用这次的选择（更新或不更新）。",
+		L"إذا بقي محدداً يُحفظ نعم/لا ولا يظهر هذا السؤال عند التشغيل التالي.",
+		L"Если включено, Да/Нет запоминается, и при следующем запуске окно не показывается.",
+		L"Wenn an: Ja/Nein merken, beim naechsten Start nicht mehr fragen.",
+		L"Se ligado, Sim/Nao fica guardado e nao pergunta na proxima inicializacao.",
+		L"Aan laten: Ja/Nee onthouden, bij volgende start niet meer vragen.",
+		L"Gdy wlaczone, Tak/Nie zostaje zapamietane i nastepne uruchomienie nie pyta.",
+		L"Acik birakilirsa Evet/Hayir hatirlanir, sonraki acilista sorulmaz."));
+	m_tooltip.AddTool(&m_yes, LL14(
+		L"今すぐ更新します。次回から尋ねないがオンなら、次の起動では新しい版があれば自動で更新します。",
+		L"Update now. If Don't ask is on, later launches update automatically when a newer build exists.",
+		L"Mettre a jour maintenant. Si Ne plus demander est coche, les prochains demarrages mettent a jour tout seuls.",
+		L"Aggiorna ora. Se Non chiedere e attivo, i prossimi avvii aggiornano da soli.",
+		L"Actualizar ahora. Si No preguntar esta marcado, los proximos inicios actualizan solos.",
+		L"지금 업데이트합니다. 다음부터 묻지 않기가 켜져 있으면 다음 실행에서 새 버전이 있으면 자동 업데이트합니다.",
+		L"立即更新。若勾选下次不再询问，下次启动发现新版会自动更新。",
+		L"حدّث الآن. إذا كان عدم السؤال مفعّلاً فسيُحدَّث تلقائياً عند التشغيل التالي إن وُجد إصدار أحدث.",
+		L"Обновить сейчас. Если «не спрашивать» включено, при следующем запуске обновление пройдёт само.",
+		L"Jetzt aktualisieren. Wenn Nicht mehr nachfragen an ist, wird beim naechsten Start automatisch aktualisiert.",
+		L"Atualizar agora. Se Nao perguntar estiver ligado, a proxima inicializacao atualiza sozinha.",
+		L"Nu bijwerken. Als Niet meer vragen aan staat, werkt de volgende start automatisch bij.",
+		L"Zaktualizuj teraz. Gdy Nie pytaj jest wlaczone, nastepne uruchomienie zaktualizuje samo.",
+		L"Simdi guncelle. Bir daha sorma aciksa sonraki acilista yeni surum varsa otomatik guncellenir."));
+	m_tooltip.AddTool(&m_no, LL14(
+		L"今回は更新しません。次回から尋ねないがオンなら、次の起動でも更新しません。",
+		L"Skip this update. If Don't ask is on, later launches also skip updates.",
+		L"Ne pas mettre a jour. Si Ne plus demander est coche, les prochains demarrages ignorent aussi.",
+		L"Non aggiornare. Se Non chiedere e attivo, i prossimi avvii ignorano anch'essi.",
+		L"No actualizar. Si No preguntar esta marcado, los proximos inicios tambien omiten.",
+		L"이번에는 업데이트하지 않습니다. 다음부터 묻지 않기가 켜져 있으면 다음 실행에서도 건너뜁니다.",
+		L"这次不更新。若勾选下次不再询问，下次启动也不更新。",
+		L"تخطَّ التحديث. إذا كان عدم السؤال مفعّلاً فلن يُحدَّث أيضاً عند التشغيل التالي.",
+		L"Не обновлять. Если «не спрашивать» включено, следующие запуски тоже пропустят обновление.",
+		L"Diesmal nicht. Wenn Nicht mehr nachfragen an ist, wird beim naechsten Start ebenfalls nicht aktualisiert.",
+		L"Nao atualizar agora. Se Nao perguntar estiver ligado, a proxima inicializacao tambem ignora.",
+		L"Nu niet bijwerken. Als Niet meer vragen aan staat, slaat de volgende start ook over.",
+		L"Nie aktualizuj. Gdy Nie pytaj jest wlaczone, nastepne uruchomienie tez pominie.",
+		L"Bu kez guncelleme. Bir daha sorma aciksa sonraki acilista da guncellenmez."));
+	CCustomControlUtility::FinalizeDialogToolTip(m_tooltip, 512, 10000);
+	CCC_CaptionLayout(m_hWnd);
+	return TRUE;
+}
+
+void CUpdateAskDlg::OnYes()
+{
+	extern save savedata;
+	savedata.updateDontAsk = m_dontAsk.GetCheck() ? 1 : 0;
+	savedata.updateAutoYes = 1;
+	MpPersistSavedataQuick();
+	EndDialog(IDYES);
+}
+
+void CUpdateAskDlg::OnNo()
+{
+	extern save savedata;
+	savedata.updateDontAsk = m_dontAsk.GetCheck() ? 1 : 0;
+	savedata.updateAutoYes = 0;
+	MpPersistSavedataQuick();
+	EndDialog(IDNO);
+}
+
+void CUpdateAskDlg::OnCancel()
+{
+	OnNo();
+}
+
+BOOL CUpdateAskDlg::PreTranslateMessage(MSG* pMsg)
+{
+	if (m_tooltip.GetSafeHwnd())
+		m_tooltip.RelayEvent(pMsg);
+	return CCustomBlurDialogExBase::PreTranslateMessage(pMsg);
+}
+
+void CUpdateAskDlg::OnContextMenu(CWnd*, CPoint point)
+{
+	CPoint sp = point;
+	if (sp.x == -1 && sp.y == -1) {
+		CRect wr;
+		GetWindowRect(&wr);
+		sp.x = wr.left + 40;
+		sp.y = wr.top + 40;
+	} else {
+		CPoint cl = sp;
+		ScreenToClient(&cl);
+		if (cl.y < 0)
+			return;
+	}
+	CCustomPopupMenu menu;
+	menu.AddCommand(IDYES,
+		LL14(L"はい", L"Yes", L"Oui", L"Si", L"Si", L"예", L"是", L"نعم", L"Да", L"Ja", L"Sim", L"Ja", L"Tak", L"Evet"),
+		LL14(L"今すぐ更新します。", L"Update now.", L"Mettre a jour maintenant.", L"Aggiorna ora.", L"Actualizar ahora.",
+			L"지금 업데이트합니다.", L"立即更新。", L"حدّث الآن.", L"Обновить сейчас.", L"Jetzt aktualisieren.",
+			L"Atualizar agora.", L"Nu bijwerken.", L"Zaktualizuj teraz.", L"Simdi guncelle."));
+	menu.AddCommand(IDNO,
+		LL14(L"いいえ", L"No", L"Non", L"No", L"No", L"아니요", L"否", L"لا", L"Нет", L"Nein", L"Nao", L"Nee", L"Nie", L"Hayir"),
+		LL14(L"今回は更新しません。", L"Skip this update.", L"Ne pas mettre a jour.", L"Non aggiornare.", L"No actualizar.",
+			L"이번에는 업데이트하지 않습니다.", L"这次不更新。", L"تخطَّ التحديث.", L"Не обновлять.", L"Diesmal nicht.",
+			L"Nao atualizar agora.", L"Nu niet bijwerken.", L"Nie aktualizuj.", L"Bu kez guncelleme."));
+	menu.AddCheck(IDC_UPDASK_DONTASK,
+		LL14(L"次回から尋ねない", L"Don't ask next time", L"Ne plus demander", L"Non chiedere la prossima volta",
+			L"No preguntar la proxima vez", L"다음부터 묻지 않기", L"下次不再询问", L"عدم السؤال في المرة القادمة",
+			L"Больше не спрашивать", L"Nicht mehr nachfragen", L"Nao perguntar da proxima vez",
+			L"Niet meer vragen", L"Nie pytaj nastepnym razem", L"Bir daha sorma"),
+		m_dontAsk.GetCheck() == BST_CHECKED,
+		LL14(L"オンのままはい／いいえすると、次の起動からはこの確認を出さず、選んだほうを使います。",
+			L"If left on, Yes/No is remembered and this prompt is skipped on later launches.",
+			L"Si coche, Oui/Non est memorise et cette demande n'apparait plus au prochain demarrage.",
+			L"Se attivo, Si/No viene ricordato e al prossimo avvio non chiede.",
+			L"Si esta marcado, Si/No se recuerda y no pregunta en el proximo inicio.",
+			L"켜 둔 채 예/아니요를 고르면 다음 실행부터 이 확인을 생략하고 선택한 쪽을 씁니다.",
+			L"勾选后点是/否，下次启动不再询问，沿用这次的选择。",
+			L"إذا بقي محدداً يُحفظ نعم/لا ولا يظهر هذا السؤال عند التشغيل التالي.",
+			L"Если включено, Да/Нет запоминается, и при следующем запуске окно не показывается.",
+			L"Wenn an: Ja/Nein merken, beim naechsten Start nicht mehr fragen.",
+			L"Se ligado, Sim/Nao fica guardado e nao pergunta na proxima inicializacao.",
+			L"Aan laten: Ja/Nee onthouden, bij volgende start niet meer vragen.",
+			L"Gdy wlaczone, Tak/Nie zostaje zapamietane i nastepne uruchomienie nie pyta.",
+			L"Acik birakilirsa Evet/Hayir hatirlanir, sonraki acilista sorulmaz."));
+	const UINT c = menu.Track(sp, this);
+	if (c == IDYES)
+		OnYes();
+	else if (c == IDNO)
+		OnNo();
+	else if (c == IDC_UPDASK_DONTASK) {
+		m_dontAsk.SetCheck(m_dontAsk.GetCheck() == BST_CHECKED ? BST_UNCHECKED : BST_CHECKED);
+		m_dontAsk.Invalidate(FALSE);
+	}
+}
+
+bool UpdateCheckIsNewerAvailable(__int64* outServerModified)
+{
+	if (outServerModified)
+		*outServerModified = 0;
+	DWORD dwFlags = 0;
+	if (!InternetGetConnectedState(&dwFlags, 0))
+		return false;
+	const time_t exeTime = GetExecutableModificationTimeUtc();
+	if (exeTime == 0)
+		return false;
+	time_t serverModified = 0;
+	const CString updateUrl = ResolveUpdateUrl(&serverModified);
+	if (updateUrl.IsEmpty() || serverModified == 0 || serverModified <= exeTime + 120)
+		return false;
+	if (outServerModified)
+		*outServerModified = (__int64)serverModified;
+	return true;
+}
+
+int UpdateCheckAskUser(CWnd* parent, __int64 serverModified)
+{
+	extern save savedata;
+	bool prevFailed = false;
+	if (savedata.updateAttemptExeTime != 0) {
+		TCHAR exePath[MAX_PATH] = { 0 };
+		GetModuleFileName(NULL, exePath, MAX_PATH);
+		HANDLE hFile = CreateFile(exePath, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
+		if (hFile != INVALID_HANDLE_VALUE) {
+			FILETIME ftWrite;
+			if (GetFileTime(hFile, NULL, NULL, &ftWrite)) {
+				ULARGE_INTEGER ull;
+				ull.LowPart = ftWrite.dwLowDateTime;
+				ull.HighPart = ftWrite.dwHighDateTime;
+				const __int64 exeTime = (__int64)((ull.QuadPart - 116444736000000000ULL) / 10000000ULL);
+				if (exeTime == savedata.updateAttemptExeTime)
+					prevFailed = true;
+				else {
+					savedata.updateAttemptExeTime = 0;
+					MpPersistSavedataQuick();
+				}
+			}
+			CloseHandle(hFile);
+		}
+	}
+
+	UpdateCheckBeginPrompt();
+	if (serverModified > 0)
+		UpdateCheckDismissVersion(serverModified);
+
+	CUpdateAskDlg dlg(parent, prevFailed);
+	const INT_PTR ret = dlg.DoModal();
+	UpdateCheckEndPrompt(ret == IDNO, serverModified);
+
+	if (g_renderDlg && ::IsWindow(g_renderDlg->GetSafeHwnd()))
+		g_renderDlg->SendMessage(WM_APP_UPDATE_PREFS, 0, 0);
+	return (int)ret;
+}
+
 void RunStartupUpdateCheck()
 {
 	extern save savedata;
@@ -634,88 +922,27 @@ void RunStartupUpdateCheck()
 		return;
 
 	// 前回試行後に exe が新しくなっていれば成功扱い。同一なら失敗フラグを残す。
-	const bool prevFailed = UpdateAttemptStillFailed(exeTime);
+	UpdateAttemptStillFailed(exeTime);
 
 	time_t serverModified = 0;
 	const CString updateUrl = ResolveUpdateUrl(&serverModified);
 	if (updateUrl.IsEmpty() ||
 		serverModified == 0 ||
-		serverModified <= exeTime + 120 ||
-		(__int64)serverModified <= savedata.lastUpdateCheck)
+		serverModified <= exeTime + 120)
 	{
 		return;
 	}
 
-	// 「いいえ」でも「はい」(失敗時)でも、この起動中は定期チェックから再通知しない。
-	// 保存データには書かないため、次回起動時には再度確認メッセージが出る。
-	UpdateCheckDismissVersion((__int64)serverModified);
-
-	const wchar_t* msg;
-	if (prevFailed) {
-		msg = LL14(
-			L"前回の自動更新が完了していないようです。\n"
-			L"更新ファイルを「ダウンロード」フォルダへ展開し、手動で上書きしますか？\n"
-			L"(いいえ = 次回起動時まで保留)",
-			L"The previous automatic update does not appear to have completed.\n"
-			L"Extract the update files to Downloads for a manual overwrite?\n"
-			L"(No = postpone until next launch)",
-			L"La precedente mise a jour automatique ne semble pas terminee.\n"
-			L"Extraire les fichiers vers Telechargements pour un remplacement manuel ?\n"
-			L"(Non = reporter au prochain demarrage)",
-			L"Il precedente aggiornamento automatico non sembra completato.\n"
-			L"Estrarre i file in Download per la sovrascrittura manuale?\n"
-			L"(No = rimanda al prossimo avvio)",
-			L"La actualizacion automatica anterior no parece haberse completado.\n"
-			L"¿Extraer los archivos en Descargas para sobrescribir manualmente?\n"
-			L"(No = posponer hasta el proximo inicio)",
-			L"이전 자동 업데이트가 완료되지 않은 것 같습니다.\n"
-			L"다운로드 폴더에 풀어 수동으로 덮어쓰시겠습니까?\n"
-			L"(아니요 = 다음 실행 시까지 보류)",
-			L"上次自动更新似乎未完成。\n"
-			L"是否解压到“下载”文件夹以便手动覆盖？\n"
-			L"(否 = 推迟到下次启动)",
-			L"يبدو أن التحديث التلقائي السابق لم يكتمل.\n"
-			L"هل تريد استخراج الملفات إلى التنزيلات للكتابة اليدوية؟\n"
-			L"(لا = التأجيل حتى التشغيل التالي)",
-			L"Предыдущее автообновление, похоже, не завершилось.\n"
-			L"Распаковать файлы в Загрузки для ручной замены?\n"
-			L"(Нет = отложить до следующего запуска)",
-			L"Das vorherige automatische Update scheint nicht abgeschlossen.\n"
-			L"Dateien nach Downloads entpacken und manuell uberschreiben?\n"
-			L"(Nein = bis zum nachsten Start aufschieben)",
-			L"A atualizacao automatica anterior parece nao ter sido concluida.\n"
-			L"Extrair os arquivos em Downloads para substituir manualmente?\n"
-			L"(Nao = adiar ate a proxima inicializacao)",
-			L"De vorige automatische update lijkt niet voltooid.\n"
-			L"Bestanden uitpakken naar Downloads voor handmatig overschrijven?\n"
-			L"(Nee = uitstellen tot volgende start)",
-			L"Poprzednia automatyczna aktualizacja wyglada na niedokonczona.\n"
-			L"Rozpakowac pliki do Pobrane w celu recznego nadpisania?\n"
-			L"(Nie = odloz do nastepnego uruchomienia)",
-			L"Onceki otomatik guncelleme tamamlanmamis gorunuyor.\n"
-			L"Manuel uzerine yazma icin Indirilenler klasorune acilsin mi?\n"
-			L"(Hayir = sonraki baslatmaya ertele)");
-	} else {
-		msg = LL14(
-			L"アップデートファイルがあります。\n今すぐ更新しますか？\n(いいえ = 次回起動時まで保留)",
-			L"An update file is available.\nWould you like to update now?\n(No = postpone until next launch)",
-			L"Un fichier de mise a jour est disponible.\nMettre a jour maintenant ?\n(Non = reporter au prochain demarrage)",
-			L"E disponibile un file di aggiornamento.\nAggiornare ora?\n(No = rimanda al prossimo avvio)",
-			L"Hay un archivo de actualizacion disponible.\n¿Actualizar ahora?\n(No = posponer hasta el proximo inicio)",
-			L"업데이트 파일이 있습니다.\n지금 업데이트하시겠습니까?\n(아니요 = 다음 실행 시까지 보류)",
-			L"有更新文件。\n是否立即更新？\n(否 = 推迟到下次启动)",
-			L"يتوفر ملف تحديث.\nهل تريد التحديث الآن؟\n(لا = التأجيل حتى التشغيل التالي)",
-			L"Доступен файл обновления.\nОбновить сейчас?\n(Нет = отложить до следующего запуска)",
-			L"Eine Aktualisierungsdatei ist verfugbar.\nJetzt aktualisieren?\n(Nein = bis zum nachsten Start aufschieben)",
-			L"Um arquivo de atualizacao esta disponivel.\nAtualizar agora?\n(Nao = adiar ate a proxima inicializacao)",
-			L"Er is een updatebestand beschikbaar.\nNu bijwerken?\n(Nee = uitstellen tot volgende start)",
-			L"Dostepny jest plik aktualizacji.\nCzy zaktualizowac teraz?\n(Nie = odloz do nastepnego uruchomienia)",
-			L"Guncelleme dosyasi mevcut.\nSimdi guncellemek istiyor musunuz?\n(Hayir = sonraki baslatmaya ertele)");
+	// 次回から尋ねない: 起動時だけ自動更新／スキップ。定期チェックでは走らせない。
+	if (savedata.updateDontAsk) {
+		UpdateCheckDismissVersion((__int64)serverModified);
+		if (savedata.updateAutoYes)
+			DoUpdateAndRestart();
+		return;
 	}
-	const int ret = AfxMessageBox(msg, MB_YESNO);
 
-	if (ret == IDYES)
-		DoUpdateAndRestart();  // 成功時はプロセス終了、手動展開時/失敗時はそのまま通常起動を続ける
+	if (UpdateCheckAskUser(NULL, (__int64)serverModified) == IDYES)
+		DoUpdateAndRestart();
 }
 
 void UpdateCheckDismissVersion(__int64 serverModified)
@@ -776,7 +1003,8 @@ static DWORD WINAPI UpdateCheckThreadProc(LPVOID param)
 		// 「保存データに記録された前回の更新時間」よりも新しい場合のみ更新通知を出しますわ
 		// 09a 優先・なければ 08g。08g 適用後に 09a が出れば、その Last-Modified で再通知する。
 		const __int64 dismissed = InterlockedCompareExchange64(&g_updateDismissedVersion, 0, 0);
-		if (!updateUrl.IsEmpty() && serverModified != 0 && serverModified > threshold &&
+		if (!savedata.updateDontAsk &&
+			!updateUrl.IsEmpty() && serverModified != 0 && serverModified > threshold &&
 			(__int64)serverModified > savedata.lastUpdateCheck &&
 			(__int64)serverModified > dismissed &&
 			InterlockedCompareExchange(&g_updatePromptOpen, 0, 0) == 0 &&

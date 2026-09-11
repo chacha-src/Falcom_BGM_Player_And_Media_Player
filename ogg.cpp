@@ -2112,6 +2112,16 @@ BOOL COggApp::InitInstance()
 		savedata.cemuListX = savedata.cemuListY = 0;
 		savedata.cemuListW = savedata.cemuListH = 0;
 	}
+	if (datFileSize < (int)(offsetof(save, updateDontAsk) + sizeof(savedata.updateDontAsk))) {
+		savedata.updateDontAsk = 0;
+		savedata.updateAutoYes = 0;
+	} else {
+		savedata.updateDontAsk = savedata.updateDontAsk ? 1 : 0;
+		if (datFileSize < (int)(offsetof(save, updateAutoYes) + sizeof(savedata.updateAutoYes)))
+			savedata.updateAutoYes = 0;
+		else
+			savedata.updateAutoYes = savedata.updateAutoYes ? 1 : 0;
+	}
 	/* UI パス欄は廃止。常に exe\\data（なければ hoot）。
 	   ルートは InitInstance 冒頭の CEmuMgrInit 済み。ここで Reload すると
 	   arcdata 全読込が起動を再度ブロックするため呼ばない。 */

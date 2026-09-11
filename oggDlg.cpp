@@ -2671,6 +2671,7 @@ void CCC_NotifyAeroSettingChanged()
 void MpPushPlayHistory(LPCTSTR path, LPCTSTR displayName)
 {
 	if (!path || !*path) return;
+	if (PlIsSasamiTempPreviewPath(path)) return;
 	CString p = NormalizePlaylistPath(path);
 	if (p.IsEmpty()) p = path;
 	p.Trim();
@@ -2884,6 +2885,22 @@ static int PlaylistResolveNextIndex(int nextBtn, int apply)
 static int PlaylistGoNext(int doRestart, int nextBtn)
 {
 	extern CMediaPlayerDlg* mp;
+	extern CString filen, fnn;
+	extern int modesub, mode, loop1, loop2, ret2;
+	if (!nextBtn && PlIsSasamiTempPreviewPath(filen)) {
+		if (doRestart && og && ::IsWindow(og->GetSafeHwnd()))
+			og->SendMessage(WM_COMMAND, MAKEWPARAM(IDC_BUTTON1, BN_CLICKED), 0);
+		if (pl && pl->pc && plcnt >= 0 && plcnt < pl->playcnt) {
+			fnn = pl->pc[plcnt].name;
+			filen = pl->pc[plcnt].fol;
+			modesub = pl->pc[plcnt].sub;
+			mode = modesub;
+			loop1 = pl->pc[plcnt].loop1;
+			loop2 = pl->pc[plcnt].loop2;
+			ret2 = pl->pc[plcnt].ret2;
+		}
+		return 0;
+	}
 	if (doRestart && mp && ::IsWindow(mp->GetSafeHwnd()) && mp->TryPlayFromQueue())
 		return 1;
 	int next = PlaylistResolveNextIndex(nextBtn, 1);
@@ -2911,6 +2928,8 @@ static const DWORD KPI_RENZOKU_LIMIT_MS = 300000;
 
 static void RenzokuFadeOrXfade()
 {
+	extern CString filen;
+	if (PlIsSasamiTempPreviewPath(filen)) return;
 	if (fadeadd != 0.0f) return;
 	if (InterlockedCompareExchange(&g_xfInProgress, 0, 0)) return;
 	g_kpiRenzokuTick = 0;
@@ -3411,6 +3430,7 @@ static void CloseCemuPlaybackResources()
 	CEmuMidiLiveStop();
 	CEmuSessionClose(&g_cemuSession);
 	CEmuSessionInit(&g_cemuSession);
+	FmMonShadowReset();
 }
 
 static void ResetKpiRemoteCache()
@@ -4448,6 +4468,9 @@ int XfShouldPreloadNext()
 		return 0;
 	if (!pl || !pl->pc || pl->playcnt <= 0)
 		return 0;
+	extern CString filen;
+	if (PlIsSasamiTempPreviewPath(filen))
+		return 0;
 	int nextIdx = PlaylistResolveNextIndex(0, 0);
 	if (nextIdx < 0) return 0;
 	nextIdx = XfFindNextAudioPlIndex(nextIdx);
@@ -4480,6 +4503,9 @@ int XfShouldPreloadNext()
 static int XfOpenNextSlotForCrossfade(int* outCur, int* outNxt)
 {
 	if (!og || !pl || !XfEnabled())
+		return 0;
+	extern CString filen;
+	if (PlIsSasamiTempPreviewPath(filen))
 		return 0;
 	if (InterlockedCompareExchange(&g_xfInProgress, 0, 0))
 		return 0;
@@ -11355,6 +11381,12 @@ void COggDlg::play()
 open_mode_kpi:
 		ret2 = 0;
 		g_kpiRemote = false;
+		/* CEmu→KPI 切替で C352 リングが残ると FM モニタが前基板のままになる */
+		if (g_cemuSession.kind != 0 || CEmuMidiLiveActive())
+			CloseCemuPlaybackResources();
+		else
+			FmMonShadowReset();
+		/* KPI の dump はプラグインが ogg_kbsasami へ書く。CEmu shadow には載せない */
 		g_kpiPlaybackArch = ResolveKpiArchBits(CString(kpi), filen);
 		ZeroMemory(&g_kpiSession, sizeof(g_kpiSession));
 		const WORD km = GetPeMachine(kpi);
@@ -23368,7 +23400,8 @@ void COggDlg::stop()
 	// 曲切替時は stop1() 側で保存しない（プレイリストTipの仕様どおり）。
 	const BOOL wantResumeSave =
 		(savedata.savecheck == 1 || savedata.savecheck_mp3 == 1 || savedata.savecheck_dshow == 1)
-		&& (ResumeModeUsesPlayb(mode) || ResumeDshowApplies(mode, filen));
+		&& (ResumeModeUsesPlayb(mode) || ResumeDshowApplies(mode, filen))
+		&& !PlIsSasamiTempPreviewPath(filen);
 	if (wantResumeSave) {
 		try {
 			int flg = 0;
@@ -27119,79 +27152,10 @@ LRESULT COggDlg::OnCemuCatListMsg(WPARAM, LPARAM)
 
 LRESULT COggDlg::OnUpdateAvailable(WPARAM wParam, LPARAM)
 {
-	UpdateCheckBeginPrompt();
-	// 前回自動更新の上書きが失敗したまま（試行時 exe 日時 == 現在）なら手動展開向け文言
-	bool prevFailed = false;
-	if (savedata.updateAttemptExeTime != 0) {
-		TCHAR exePath[MAX_PATH] = { 0 };
-		GetModuleFileName(NULL, exePath, MAX_PATH);
-		HANDLE hFile = CreateFile(exePath, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
-		if (hFile != INVALID_HANDLE_VALUE) {
-			FILETIME ftWrite;
-			if (GetFileTime(hFile, NULL, NULL, &ftWrite)) {
-				ULARGE_INTEGER ull;
-				ull.LowPart = ftWrite.dwLowDateTime;
-				ull.HighPart = ftWrite.dwHighDateTime;
-				const __int64 exeTime = (__int64)((ull.QuadPart - 116444736000000000ULL) / 10000000ULL);
-				if (exeTime == savedata.updateAttemptExeTime)
-					prevFailed = true;
-				else {
-					savedata.updateAttemptExeTime = 0;
-					MpPersistSavedataQuick();
-				}
-			}
-			CloseHandle(hFile);
-		}
-	}
-	const wchar_t* updMsg;
-	if (prevFailed) {
-		updMsg = LL14(
-			L"前回の自動更新が完了していないようです。\n更新ファイルを「ダウンロード」フォルダへ展開し、手動で上書きしますか？",
-			L"The previous automatic update does not appear to have completed.\nExtract the update files to Downloads for a manual overwrite?",
-			L"La precedente mise a jour automatique ne semble pas terminee.\nExtraire les fichiers vers Telechargements pour un remplacement manuel ?",
-			L"Il precedente aggiornamento automatico non sembra completato.\nEstrarre i file in Download per la sovrascrittura manuale?",
-			L"La actualizacion automatica anterior no parece haberse completado.\n¿Extraer los archivos en Descargas para sobrescribir manualmente?",
-			L"이전 자동 업데이트가 완료되지 않은 것 같습니다.\n다운로드 폴더에 풀어 수동으로 덮어쓰시겠습니까?",
-			L"上次自动更新似乎未完成。\n是否解压到“下载”文件夹以便手动覆盖？",
-			L"يبدو أن التحديث التلقائي السابق لم يكتمل.\nهل تريد استخراج الملفات إلى التنزيلات للكتابة اليدوية؟",
-			L"Предыдущее автообновление, похоже, не завершилось.\nРаспаковать файлы в Загрузки для ручной замены?",
-			L"Das vorherige automatische Update scheint nicht abgeschlossen.\nDateien nach Downloads entpacken und manuell uberschreiben?",
-			L"A atualizacao automatica anterior parece nao ter sido concluida.\nExtrair os arquivos em Downloads para substituir manualmente?",
-			L"De vorige automatische update lijkt niet voltooid.\nBestanden uitpakken naar Downloads voor handmatig overschrijven?",
-			L"Poprzednia automatyczna aktualizacja wyglada na niedokonczona.\nRozpakowac pliki do Pobrane w celu recznego nadpisania?",
-			L"Onceki otomatik guncelleme tamamlanmamis gorunuyor.\nManuel uzerine yazma icin Indirilenler klasorune acilsin mi?");
-	} else {
-		updMsg = LL14(
-		L"アップデートファイルがあります。\n今すぐ更新しますか？", /* 日本語 */
-		L"An update file is available.\nWould you like to update now?", /* 英語 */
-		L"Un fichier de mise à jour est disponible.\nMettre à jour maintenant ?", /* フランス語 */
-		L"È disponibile un file di aggiornamento.\nAggiornare ora?", /* イタリア語 */
-		L"Hay un archivo de actualización disponible.\n¿Actualizar ahora?", /* スペイン語 */
-		L"업데이트 파일이 있습니다.\n지금 업데이트하시겠습니까?", /* 韓国語 */
-		L"有更新文件。\n是否立即更新？", /* 中国語 */
-		L"يتوفر ملف تحديث.\nهل تريد التحديث الآن؟", /* アラビア語 */
-		L"Доступен файл обновления.\nОбновить сейчас?", /* ロシア語 */
-		L"Eine Aktualisierungsdatei ist verfügbar.\nJetzt aktualisieren?", /* ドイツ語 */
-		L"Um arquivo de atualização está disponível.\nAtualizar agora?", /* ポルトガル語 */
-		L"Er is een updatebestand beschikbaar.\nNu bijwerken?", /* オランダ語 */
-		L"Dostępny jest plik aktualizacji.\nCzy zaktualizować teraz?", /* ポーランド語 */
-		L"Güncelleme dosyası mevcut.\nŞimdi güncellemek istiyor musunuz?" /* トルコ語 */
-		);
-	}
-	int ret = AfxMessageBox(updMsg, MB_YESNO);
+	const int ret = UpdateCheckAskUser(this, (__int64)wParam);
 	if (ret == IDYES && DoUpdateAndRestart())
 	{
-		UpdateCheckEndPrompt(false, 0);
 		OnOK();  // ダイアログを閉じてアプリ終了
-	}
-	else
-	{
-		const bool dismissed = (ret == IDNO);
-		if (dismissed && wParam != 0)
-			savedata.lastUpdateCheck = (__int64)wParam;
-		UpdateCheckEndPrompt(dismissed, (__int64)wParam);
-		if (dismissed && wParam != 0)
-			MpPersistSavedataQuick();
 	}
 	return 0;
 }

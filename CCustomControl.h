@@ -116,6 +116,14 @@ void CCC_DrawInwoman(CDC* pDC, const CRect& rc, BOOL bAeroTrans);
 void CCC_DrawInwomanOnRect(CDC* pDC, const CRect& rc);
 void CCC_DrawInwomanOnClient(CDC* pDC, HWND hWnd);
 void CCC_CaptionPaintGdi(CDC& dc, HWND hDlg);
+void CCC_PrintEnter();
+void CCC_PrintLeave();
+int CCC_PrintBusy();
+/* WGC/画面取り込み中。BeginBufferedPaint だけ止める（WM_PAINT は通す＝リスト点滅防止） */
+void CCC_CaptureEnter();
+void CCC_CaptureLeave();
+int CCC_CaptureBusy();
+int CCC_AvoidBufferedPaint();
 // ピクン時の控件全体シェイク量(非淫女/静止時は 0,0)
 void CCC_InwomanGetShake(int& dx, int& dy);
 // コンテキストメニューからアクリルON/OFFしたとき全UIへ再適用
@@ -1498,8 +1506,8 @@ protected:
 
     DECLARE_MESSAGE_MAP()
 
-private:
-    void OnDrawLayer(CDC* pDC, CRect rect); // 実際の描画処理
+protected:
+    virtual void OnDrawLayer(CDC* pDC, CRect rect); // 実際の描画処理（ラジオが円に差し替え）
     void StartCheckBounce();                // チェックON時のぷるんバウンス開始
 
     // 状態保持用メンバ変数
@@ -1510,6 +1518,25 @@ private:
     int m_nCheck;        // チェック状態 (BST_CHECKED / BST_UNCHECKED)
     BOOL m_bAeroMode;    // アクリルモードが有効かどうか
     int m_nBounce;       // チェックON時のバウンス残りフレーム
+};
+
+// ============================================================================
+// カスタムラジオボタン (オーナー描画・アクリル透過 / 淫女モード対応)
+// CCustomRadioButton
+// ============================================================================
+// 丸枠＋内側ドット。クリックで ON のまま（OFF へはトグルしない）。
+// 同じ親の他 CCustomRadioButton を外す。CCustomCheckBox と同じガラス経路。
+class CCustomRadioButton : public CCustomCheckBox
+{
+    DECLARE_DYNAMIC(CCustomRadioButton)
+public:
+    CCustomRadioButton();
+    virtual ~CCustomRadioButton();
+
+protected:
+    virtual void OnDrawLayer(CDC* pDC, CRect rect);
+    afx_msg void OnLButtonUp(UINT nFlags, CPoint point);
+    DECLARE_MESSAGE_MAP()
 };
 
 // ============================================================================
@@ -1807,6 +1834,8 @@ protected:
     afx_msg HBRUSH OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor);
     afx_msg BOOL OnEraseBkgnd(CDC* pDC);
     afx_msg void OnPaint();
+    afx_msg LRESULT OnPrint(WPARAM, LPARAM);
+    afx_msg LRESULT OnPrintClient(WPARAM, LPARAM);
     afx_msg LRESULT OnSubclassControls(WPARAM, LPARAM);
 
     DECLARE_MESSAGE_MAP()
@@ -1854,6 +1883,8 @@ protected:
     // savedata.aero==1 のとき DWM ぼかしを適用（既適用なら no-op）
     virtual void ApplyDwmBlur();
     afx_msg void OnPaint();
+    afx_msg LRESULT OnPrint(WPARAM, LPARAM);
+    afx_msg LRESULT OnPrintClient(WPARAM, LPARAM);
     afx_msg void OnSize(UINT nType, int cx, int cy);
     afx_msg void OnShowWindow(BOOL bShow, UINT nStatus);
     afx_msg void OnWindowPosChanged(WINDOWPOS* lpwndpos);
@@ -1914,6 +1945,8 @@ protected:
     afx_msg HBRUSH OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor);
     afx_msg BOOL OnEraseBkgnd(CDC* pDC);
     afx_msg void OnPaint();
+    afx_msg LRESULT OnPrint(WPARAM, LPARAM);
+    afx_msg LRESULT OnPrintClient(WPARAM, LPARAM);
     afx_msg LRESULT OnSubclassControls(WPARAM, LPARAM);
 
     DECLARE_MESSAGE_MAP()
@@ -1960,6 +1993,8 @@ protected:
     // savedata.aero==1 のとき DWM ぼかしを適用（既適用なら no-op）
     virtual void ApplyDwmBlur();
     afx_msg void OnPaint();
+    afx_msg LRESULT OnPrint(WPARAM, LPARAM);
+    afx_msg LRESULT OnPrintClient(WPARAM, LPARAM);
     afx_msg void OnSize(UINT nType, int cx, int cy);
     afx_msg void OnShowWindow(BOOL bShow, UINT nStatus);
     afx_msg void OnWindowPosChanged(WINDOWPOS* lpwndpos);

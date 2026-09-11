@@ -1,4 +1,4 @@
-﻿// CEmuCatalogListDlg.cpp — Cemu対応一覧（arcdata.zip）
+// CEmuCatalogListDlg.cpp — Cemu対応一覧（arcdata.zip）
 #include "stdafx.h"
 #include "ogg.h"
 #include "oggDlg.h"

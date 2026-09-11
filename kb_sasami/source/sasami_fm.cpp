@@ -1,4 +1,4 @@
-﻿#include "sasami_fm.h"
+#include "sasami_fm.h"
 #include "sasami_misao.h"
 #include "sasami_fmmon.h"
 #include <windows.h>
@@ -11,6 +11,7 @@
 #include <string.h>
 #include <math.h>
 #include <stdio.h>
+#include <stddef.h>
 #include <mutex>
 
 #include "sasami_neiro.inc"
@@ -224,6 +225,9 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 	uint32_t dumpSeq;
 	wchar_t dumpSrc[MAX_PATH];
 	wchar_t dumpNamedDone[MAX_PATH]; /* 曲名.opna は曲ごと1回だけ（毎 Flush はオーディオを詰まらせる） */
+	HANDLE dumpLiveH;
+	HANDLE dumpRingH;
+	int dumpRingReady;
 
 	Impl() : chip(*this), playFmMode(2)
 	{
@@ -263,6 +267,9 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 		dumpSeq = 0;
 		dumpSrc[0] = 0;
 		dumpNamedDone[0] = 0;
+		dumpLiveH = INVALID_HANDLE_VALUE;
+		dumpRingH = INVALID_HANDLE_VALUE;
+		dumpRingReady = 0;
 		chCount = 6;
 		fm10 = 0;
 		measureLen = 0;
@@ -300,6 +307,8 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 			rhythm[i].level = 0;
 		}
 	}
+
+	~Impl() { CloseDumpFiles(); }
 
 	uint8_t ymfm_external_read(ymfm::access_class type, uint32_t address) override
 	{
@@ -394,6 +403,97 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 		CreateDirectoryW(dir, NULL);
 	}
 
+	void CloseDumpFiles()
+	{
+		if (dumpLiveH != INVALID_HANDLE_VALUE) {
+			CloseHandle(dumpLiveH);
+			dumpLiveH = INVALID_HANDLE_VALUE;
+		}
+		if (dumpRingH != INVALID_HANDLE_VALUE) {
+			CloseHandle(dumpRingH);
+			dumpRingH = INVALID_HANDLE_VALUE;
+		}
+		dumpRingReady = 0;
+	}
+
+	BOOL EnsureDumpRingSized(HANDLE h)
+	{
+		LARGE_INTEGER sz;
+		sz.QuadPart = 0;
+		if (!GetFileSizeEx(h, &sz)) return FALSE;
+		const ULONGLONG need = (ULONGLONG)sizeof(SasamiFmMonRing);
+		if ((ULONGLONG)sz.QuadPart >= need)
+			return TRUE;
+		SasamiFmMonRingHdr hdr;
+		memset(&hdr, 0, sizeof(hdr));
+		hdr.magic[0] = 'O'; hdr.magic[1] = 'P'; hdr.magic[2] = 'N'; hdr.magic[3] = 'R';
+		hdr.version = SASAMI_FMMON_RING_VERSION;
+		DWORD wr = 0;
+		SetFilePointer(h, 0, NULL, FILE_BEGIN);
+		if (!WriteFile(h, &hdr, sizeof(hdr), &wr, NULL) || wr != sizeof(hdr))
+			return FALSE;
+		LARGE_INTEGER end;
+		end.QuadPart = (LONGLONG)need;
+		if (!SetFilePointerEx(h, end, NULL, FILE_BEGIN))
+			return FALSE;
+		return SetEndOfFile(h) ? TRUE : FALSE;
+	}
+
+	HANDLE OpenDumpLive()
+	{
+		if (dumpLiveH != INVALID_HANDLE_VALUE)
+			return dumpLiveH;
+		wchar_t dir[MAX_PATH], path[MAX_PATH];
+		EnsureDumpDir(dir, MAX_PATH);
+		_snwprintf_s(path, _TRUNCATE, L"%s\\fmmon_live.opna", dir);
+		dumpLiveH = CreateFileW(path, GENERIC_WRITE,
+			FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+			NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+		return dumpLiveH;
+	}
+
+	HANDLE OpenDumpRing()
+	{
+		if (dumpRingH != INVALID_HANDLE_VALUE)
+			return dumpRingH;
+		wchar_t dir[MAX_PATH], path[MAX_PATH];
+		EnsureDumpDir(dir, MAX_PATH);
+		_snwprintf_s(path, _TRUNCATE, L"%s\\fmmon_ring.opna", dir);
+		dumpRingH = CreateFileW(path, GENERIC_READ | GENERIC_WRITE,
+			FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+			NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+		if (dumpRingH != INVALID_HANDLE_VALUE) {
+			dumpRingReady = EnsureDumpRingSized(dumpRingH) ? 1 : 0;
+			if (!dumpRingReady) {
+				CloseHandle(dumpRingH);
+				dumpRingH = INVALID_HANDLE_VALUE;
+			}
+		}
+		return dumpRingH;
+	}
+
+	void ResetDumpFiles()
+	{
+		HANDLE hr = OpenDumpRing();
+		if (hr != INVALID_HANDLE_VALUE) {
+			SasamiFmMonRingHdr hdr;
+			memset(&hdr, 0, sizeof(hdr));
+			hdr.magic[0] = 'O'; hdr.magic[1] = 'P'; hdr.magic[2] = 'N'; hdr.magic[3] = 'R';
+			hdr.version = SASAMI_FMMON_RING_VERSION;
+			DWORD wr = 0;
+			SetFilePointer(hr, 0, NULL, FILE_BEGIN);
+			WriteFile(hr, &hdr, sizeof(hdr), &wr, NULL);
+		}
+		HANDLE hl = OpenDumpLive();
+		if (hl != INVALID_HANDLE_VALUE) {
+			SasamiFmMonDump z;
+			memset(&z, 0, sizeof(z));
+			DWORD wr = 0;
+			SetFilePointer(hl, 0, NULL, FILE_BEGIN);
+			WriteFile(hl, &z, sizeof(z), &wr, NULL);
+		}
+	}
+
 	void WriteBlobFile(const wchar_t* path, const void* data, DWORD bytes)
 	{
 		HANDLE h = CreateFileW(path, GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE,
@@ -421,7 +521,7 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 		SasamiFmMonDump d;
 		memset(&d, 0, sizeof(d));
 		d.magic[0] = 'O'; d.magic[1] = 'P'; d.magic[2] = 'N'; d.magic[3] = 'A';
-		d.version = SASAMI_FMMON_VERSION;
+		d.version = SASAMI_FMMON_VERSION_V6;
 		d.seq = dumpSeq;
 		d.sampleRate = hostRate;
 		d.curSample = curSample;
@@ -461,44 +561,36 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 			misao.FillMonitor(d.pcmOn, d.pcmNote, SASAMI_FMMON_PCM_MAX, &n);
 			d.pcmCount = (uint8_t)((n > 0 && n <= SASAMI_FMMON_PCM_MAX) ? n : 0);
 		}
+		memset(d.keyMidi, 0xFF, sizeof(d.keyMidi));
+		memset(d.exMidi, 0xFF, sizeof(d.exMidi));
+		memset(d.ssgMidi, 0xFF, sizeof(d.ssgMidi));
+		d.pad6[2] = (uint8_t)(SASAMI_FMMON_VIEW_KEYS
+			| SASAMI_FMMON_VIEW_REGS | SASAMI_FMMON_VIEW_PANELS
+			| SASAMI_FMMON_CLOCK_DUMP);
 		strncpy_s(d.titleSjis, song.titleSjis, _TRUNCATE);
 		wcsncpy_s(d.sourcePath, dumpSrc, _TRUNCATE);
 
 		wchar_t dir[MAX_PATH];
 		EnsureDumpDir(dir, MAX_PATH);
-		wchar_t live[MAX_PATH];
-		_snwprintf_s(live, _TRUNCATE, L"%s\\fmmon_live.opna", dir);
-		WriteDumpFile(live, d);
-		/* リング: 未読 live 上書きでも Flush 履歴を残す（スロット1個だけ更新） */
+		/* live/ring は inode を作り直さない（ホスト常駐ハンドルが旧ファイルに残る） */
+		{
+			HANDLE hl = OpenDumpLive();
+			if (hl != INVALID_HANDLE_VALUE) {
+				DWORD wr = 0;
+				SetFilePointer(hl, 0, NULL, FILE_BEGIN);
+				WriteFile(hl, &d, sizeof(d), &wr, NULL);
+			}
+		}
 		{
 			const uint32_t idx = dumpRingGen % SASAMI_FMMON_RING;
 			dumpRingSlot[idx] = d;
 			dumpRingGen++;
-			wchar_t ringPath[MAX_PATH];
-			_snwprintf_s(ringPath, _TRUNCATE, L"%s\\fmmon_ring.opna", dir);
-			HANDLE h = CreateFileW(ringPath, GENERIC_READ | GENERIC_WRITE,
-				FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+			HANDLE h = OpenDumpRing();
 			if (h != INVALID_HANDLE_VALUE) {
-				LARGE_INTEGER sz;
-				sz.QuadPart = 0;
-				GetFileSizeEx(h, &sz);
-				if ((ULONGLONG)sz.QuadPart < sizeof(SasamiFmMonRing)) {
-					/* リング全体(~320KB)をスタックに置かない */
-					SasamiFmMonRingHdr blank;
-					memset(&blank, 0, sizeof(blank));
-					blank.magic[0] = 'O'; blank.magic[1] = 'P'; blank.magic[2] = 'N'; blank.magic[3] = 'R';
-					blank.version = SASAMI_FMMON_RING_VERSION;
-					DWORD wr = 0;
-					SetFilePointer(h, 0, NULL, FILE_BEGIN);
-					WriteFile(h, &blank, sizeof(blank), &wr, NULL);
-					LARGE_INTEGER end;
-					end.QuadPart = (LONGLONG)sizeof(SasamiFmMonRing);
-					SetFilePointerEx(h, end, NULL, FILE_BEGIN);
-					SetEndOfFile(h);
-				}
 				DWORD wr = 0;
 				LARGE_INTEGER off;
-				off.QuadPart = (LONGLONG)offsetof(SasamiFmMonRing, slot) + (LONGLONG)idx * (LONGLONG)sizeof(SasamiFmMonDump);
+				off.QuadPart = (LONGLONG)offsetof(SasamiFmMonRing, slot)
+					+ (LONGLONG)idx * (LONGLONG)sizeof(SasamiFmMonDump);
 				SetFilePointerEx(h, off, NULL, FILE_BEGIN);
 				WriteFile(h, &d, sizeof(d), &wr, NULL);
 				SasamiFmMonRingHdr hdr;
@@ -509,7 +601,6 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 				off.QuadPart = 0;
 				SetFilePointerEx(h, off, NULL, FILE_BEGIN);
 				WriteFile(h, &hdr, sizeof(hdr), &wr, NULL);
-				CloseHandle(h);
 			}
 		}
 		if (dumpSrc[0] && wcscmp(dumpNamedDone, dumpSrc) != 0) {
@@ -1534,18 +1625,12 @@ void SasamiFmPlayer::SetFmMonDump(int enable, const wchar_t* sourcePath)
 	else
 		m->dumpSrc[0] = 0;
 	if (m->dumpEnable) {
-		/* 曲切替: 古い live/ring（前曲の DO-- など）を消してから書き直す */
-		wchar_t dir[MAX_PATH];
-		m->EnsureDumpDir(dir, MAX_PATH);
-		wchar_t live[MAX_PATH], ring[MAX_PATH];
-		_snwprintf_s(live, _TRUNCATE, L"%s\\fmmon_live.opna", dir);
-		_snwprintf_s(ring, _TRUNCATE, L"%s\\fmmon_ring.opna", dir);
-		DeleteFileW(live);
-		DeleteFileW(ring);
+		/* 曲切替: inode は消さず上書き（ホストが旧ファイルを握ったまま無描画になる） */
 		m->dumpSeq = 0;
 		m->dumpRingGen = 0;
 		m->dumpDirty = 1;
 		m->dumpLastFlushSample = 0; /* 有効化時は即1枚 */
+		m->ResetDumpFiles();
 		m->FlushDump(m_curSample);
 	}
 }

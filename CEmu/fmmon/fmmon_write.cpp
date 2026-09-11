@@ -1,4 +1,4 @@
-﻿#include <windows.h>
+#include <windows.h>
 #include <stdio.h>
 #include <string.h>
 #include "fmmon_write.h"
@@ -7,7 +7,8 @@ static void FmMonEnsureDir(wchar_t* dir, int n)
 {
 	wchar_t tmp[MAX_PATH];
 	GetTempPathW(MAX_PATH, tmp);
-	_snwprintf_s(dir, n, _TRUNCATE, L"%sogg_kbsasami", tmp);
+	/* KPI/SASAMI は %TEMP%\ogg_kbsasami。CEmu は混ぜない */
+	_snwprintf_s(dir, n, _TRUNCATE, L"%sogg_cemu", tmp);
 	CreateDirectoryW(dir, NULL);
 }
 
@@ -92,6 +93,9 @@ void FmMonInitDump(SasamiFmMonDump* d)
 	memset(d->keyMidi, 0xFF, sizeof(d->keyMidi));
 	memset(d->exMidi, 0xFF, sizeof(d->exMidi));
 	memset(d->ssgMidi, 0xFF, sizeof(d->ssgMidi));
+	d->pad6[2] = (uint8_t)(SASAMI_FMMON_VIEW_KEYS
+		| SASAMI_FMMON_VIEW_REGS | SASAMI_FMMON_VIEW_PANELS
+		| SASAMI_FMMON_CLOCK_DUMP);
 }
 
 void FmMonWriteRingReset(void)
@@ -120,12 +124,24 @@ void FmMonWriteRingReset(void)
 		SetFilePointer(hl, 0, NULL, FILE_BEGIN);
 		WriteFile(hl, &z, sizeof(z), &wr, NULL);
 	}
+	if (s_hRing != INVALID_HANDLE_VALUE) {
+		CloseHandle(s_hRing);
+		s_hRing = INVALID_HANDLE_VALUE;
+		s_ringReady = 0;
+	}
+	if (s_hLive != INVALID_HANDLE_VALUE) {
+		CloseHandle(s_hLive);
+		s_hLive = INVALID_HANDLE_VALUE;
+	}
 	LeaveCriticalSection(&s_ioCs);
 }
 
 void FmMonWriteDump(const SasamiFmMonDump* d)
 {
 	if (!d) return;
+	SasamiFmMonDump stamped = *d;
+	stamped.pad6[2] = (uint8_t)(stamped.pad6[2] | SASAMI_FMMON_CLOCK_DUMP);
+	d = &stamped;
 	FmMonIoInit();
 	EnterCriticalSection(&s_ioCs);
 

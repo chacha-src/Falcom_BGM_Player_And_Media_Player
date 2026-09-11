@@ -190,6 +190,18 @@ public:
 	TCHAR m_bakFont2[1024];
 	int m_bakAero;
 	afx_msg void OnBnClickedCheck3();
+	CCustomCheckBox m_updDontAsk;
+	CCustomRadioButton m_updAutoYes;
+	CCustomRadioButton m_updAutoNo;
+	CCustomStandardButton m_updCheckNow;
+	CCustomStatic m_updAvail;
+	afx_msg void OnUpdDontAsk();
+	afx_msg void OnUpdAutoYes();
+	afx_msg void OnUpdAutoNo();
+	afx_msg void OnUpdCheckNow();
+	afx_msg LRESULT OnUpdatePeek(WPARAM wParam, LPARAM lParam);
+	afx_msg LRESULT OnUpdatePrefs(WPARAM wParam, LPARAM lParam);
+	afx_msg void OnContextMenu(CWnd* pWnd, CPoint point);
 };
 
 extern CRender* g_renderDlg;

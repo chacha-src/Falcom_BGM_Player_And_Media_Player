@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include "afxcmn.h"
 #include "CCustomControl.h"
 #include "cemu_types.h"

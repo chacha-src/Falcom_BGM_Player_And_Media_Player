@@ -300,8 +300,57 @@ static BOOL DlgOnEraseBkgnd(CDC* pDC, CBrush& brDlg, BOOL bAeroEnabled, HWND hWn
 
 // ダイアログ WM_PAINT のアクリル側。Win11 は薄いグレーで隙間だけ（子は ClipChildren）。
 // 実体のガラスは DWM。ここをべた塗りするとアクリルが死ぬので BeginPaint だけでも可。
+/* PrintWindow / WM_PRINT 中。CPaintDC(BeginPaint) と BeginBufferedPaint は落ちる */
+static __declspec(thread) int s_cccPrintDepth = 0;
+/* WGC/BitBlt 取り込み中（プロセス全体）。Paint 自体は止めない */
+static volatile LONG s_cccCaptureDepth = 0;
+/* PaintOpaqueIntoBuffer など内部の WM_PRINTCLIENT。Fixer の「外部は下地だけ」を通す */
+static __declspec(thread) int s_cccInternalPrintClient = 0;
+
+void CCC_PrintEnter()
+{
+    s_cccPrintDepth++;
+}
+
+void CCC_PrintLeave()
+{
+    if (s_cccPrintDepth > 0)
+        s_cccPrintDepth--;
+}
+
+int CCC_PrintBusy()
+{
+    return s_cccPrintDepth > 0 ? 1 : 0;
+}
+
+void CCC_CaptureEnter()
+{
+    InterlockedIncrement(&s_cccCaptureDepth);
+}
+
+void CCC_CaptureLeave()
+{
+    if (InterlockedCompareExchange(&s_cccCaptureDepth, 0, 0) > 0)
+        InterlockedDecrement(&s_cccCaptureDepth);
+}
+
+int CCC_CaptureBusy()
+{
+    return InterlockedCompareExchange(&s_cccCaptureDepth, 0, 0) > 0 ? 1 : 0;
+}
+
+int CCC_AvoidBufferedPaint()
+{
+    return (s_cccPrintDepth > 0 || CCC_CaptureBusy()) ? 1 : 0;
+}
+
 static void DlgOnPaintAero(CWnd* pWnd, BOOL bAeroEnabled)
 {
+    if (s_cccPrintDepth > 0) {
+        if (pWnd && pWnd->GetSafeHwnd())
+            pWnd->ValidateRect(NULL);
+        return;
+    }
 #if CCUSTOM_AERO_SUPPORT
     if (bAeroEnabled && CCC_IsWin11())
     {
@@ -381,6 +430,9 @@ static void CCC_FillRectOpaqueBits(HDC hdc, const RECT& rc, COLORREF clr)
                 return;
         }
     }
+
+    if (CCC_AvoidBufferedPaint())
+        return;
 
     BP_PAINTPARAMS params = { sizeof(BP_PAINTPARAMS) };
     params.dwFlags = BPPF_ERASE;
@@ -3431,6 +3483,7 @@ static BOOL CALLBACK CCC_InwomanInvalidateChild(HWND hChild, LPARAM)
     if (p && ::IsWindowVisible(hChild) &&
         (p->IsKindOf(RUNTIME_CLASS(CCustomStandardButton)) ||
          p->IsKindOf(RUNTIME_CLASS(CCustomCheckBox)) ||
+         p->IsKindOf(RUNTIME_CLASS(CCustomRadioButton)) ||
          p->IsKindOf(RUNTIME_CLASS(CCustomSliderCtrl)) ||
          p->IsKindOf(RUNTIME_CLASS(CCustomRangeSliderCtrl)) ||
          p->IsKindOf(RUNTIME_CLASS(CCustomComboBox)) ||
@@ -4522,6 +4575,13 @@ static void DoSubclassChildControls(DlgBase* pDlg)
             {
                 CCustomStandardButton* p = new CCustomStandardButton();
                 p->EnableAutoDelete();
+                p->SubclassWindow(hc);
+            }
+            else if (nt == BS_RADIOBUTTON || nt == BS_AUTORADIOBUTTON)
+            {
+                CCustomRadioButton* p = new CCustomRadioButton();
+                p->EnableAutoDelete();
+                p->SetAeroMode(FALSE);
                 p->SubclassWindow(hc);
             }
             else
@@ -9413,22 +9473,31 @@ HBRUSH CCustomListCtrl::CtlColor(CDC* pDC, UINT)
 }
 
 // SubItemHitTest でホバー行更新。LEAVE を張り、♡タイマは CustomDraw が必要なら開始。
+// ガラス親: 行 blit 後、既定 OnMouseMove の Invalidate だけ Validate で捨てる。
+// ※ SETREDRAW TRUE は ListView 内部の空/α=0 バッファを先に出して「だんだん消える」ので禁止。
 void CCustomListCtrl::OnMouseMove(UINT f, CPoint p)
 {
     LVHITTESTINFO h;
     h.pt = p;
     UpdateHotItem(SubItemHitTest(&h));
-
+    CListCtrl::OnMouseMove(f, p);
+#if CCUSTOM_AERO_SUPPORT
+    if (CCC_HostNeedsChildOpaque(m_hWnd))
+        ::ValidateRect(m_hWnd, NULL);
+#endif
     TRACKMOUSEEVENT t = { sizeof(t), TME_LEAVE, m_hWnd, 0 };
     TrackMouseEvent(&t);
-    CListCtrl::OnMouseMove(f, p);
 }
 
-// ホバー解除。Opaque ホストでは UpdateHotItem が POST_OPAQUE_PAINT する。
+// ホバー解除。行 blit 後、既定 Leave の Invalidate を Validate で捨てる（SETREDRAW 禁止）。
 void CCustomListCtrl::OnMouseLeave()
 {
     UpdateHotItem(-1);
     CListCtrl::OnMouseLeave();
+#if CCUSTOM_AERO_SUPPORT
+    if (CCC_HostNeedsChildOpaque(m_hWnd))
+        ::ValidateRect(m_hWnd, NULL);
+#endif
 }
 // CCC_WM_POST_OPAQUE_PAINT を Post。Send 同期再入禁止。キューに1回まとまる。
 void CCustomListCtrl::ScheduleOpaqueRepaint()
@@ -9479,7 +9548,59 @@ BOOL CCustomListCtrl::OnMouseWheel(UINT n, short z, CPoint p)
     return r;
 }
 
-// kListSoftTimerId: 選択/ホバー♡の矩形だけ Invalidate（30ms）。両方空なら Kill。
+// オフスクリーン全面描画 → 指定矩形だけ α=255 blit。
+// ホバーで POST_OPAQUE（全面）すると全体が点滅する。Invalidate は Fixer が全面描画するので使わない。
+static void CCC_ListPaintOpaqueRects(CCustomListCtrl* pList, const RECT* rects, int nRects)
+{
+    if (!pList || !pList->GetSafeHwnd() || !rects || nRects <= 0) return;
+    if (CCC_AvoidBufferedPaint()) {
+        pList->PostMessage(CCC_WM_POST_OPAQUE_PAINT);
+        return;
+    }
+    CRect rc;
+    pList->GetClientRect(&rc);
+    const int cw = rc.Width();
+    const int ch = rc.Height();
+    if (cw <= 0 || ch <= 0) return;
+
+    CClientDC dc(pList);
+    HDC hdc = dc.GetSafeHdc();
+    if (!hdc) return;
+
+    static CCC_ChromaBlitCache s_hover;
+    if (!s_hover.Ensure(hdc, cw, ch) || !s_hover.hdcDib || !s_hover.pBits) {
+        pList->PostMessage(CCC_WM_POST_OPAQUE_PAINT);
+        return;
+    }
+    pList->PaintOpaqueIntoBuffer(s_hover.hdcDib);
+    s_hover.MakeRectOpaque(0, 0, cw, ch);
+
+    CRect uni = rects[0];
+    for (int i = 1; i < nRects; ++i)
+        uni.UnionRect(&uni, &rects[i]);
+    /* 隣接行はまとめて1 blit（行間チラつき防止） */
+    const int rowH0 = rects[0].bottom - rects[0].top;
+    const BOOL bClose = (nRects <= 2 && rowH0 > 0 && uni.Height() <= rowH0 * 3);
+
+    const BLENDFUNCTION bf = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
+    if (bClose) {
+        const int x = uni.left, y = uni.top, w = uni.Width(), h = uni.Height();
+        if (w > 0 && h > 0 && x >= 0 && y >= 0 && x + w <= cw && y + h <= ch)
+            ::GdiAlphaBlend(hdc, x, y, w, h, s_hover.hdcDib, x, y, w, h, bf);
+    } else {
+        for (int i = 0; i < nRects; ++i) {
+            const int x = rects[i].left;
+            const int y = rects[i].top;
+            const int w = rects[i].right - rects[i].left;
+            const int h = rects[i].bottom - rects[i].top;
+            if (w <= 0 || h <= 0) continue;
+            if (x < 0 || y < 0 || x + w > cw || y + h > ch) continue;
+            ::GdiAlphaBlend(hdc, x, y, w, h, s_hover.hdcDib, x, y, w, h, bf);
+        }
+    }
+}
+
+// kListSoftTimerId: 選択/ホバー♡の矩形だけ更新（30ms）。両方空なら Kill。
 // kListScrollOpaqueTimerId: スクロール後の遅延不透明塗り。
 void CCustomListCtrl::OnTimer(UINT_PTR nIDEvent)
 {
@@ -9493,6 +9614,18 @@ void CCustomListCtrl::OnTimer(UINT_PTR nIDEvent)
             KillTimer(kListSoftTimerId);
             return;
         }
+#if CCUSTOM_AERO_SUPPORT
+        /* ガラス親: Invalidate→Fixer 全面 PaintOpaque で全体点滅。♡矩形だけ blit */
+        if (CCC_HostNeedsChildOpaque(m_hWnd)) {
+            RECT rs[2];
+            int nr = 0;
+            if (!m_heartRcSel.IsRectEmpty()) rs[nr++] = m_heartRcSel;
+            if (!m_heartRcHot.IsRectEmpty()) rs[nr++] = m_heartRcHot;
+            if (nr > 0)
+                CCC_ListPaintOpaqueRects(this, rs, nr);
+            return;
+        }
+#endif
         if (!m_heartRcSel.IsRectEmpty())
             InvalidateRect(&m_heartRcSel, FALSE);
         if (!m_heartRcHot.IsRectEmpty())
@@ -9514,18 +9647,8 @@ void CCustomListCtrl::OnTimer(UINT_PTR nIDEvent)
     CListCtrl::OnTimer(nIDEvent);
 }
 
-// サイズ変化でアクリル穴が残ることがあるので遅延 Opaque。
-void CCustomListCtrl::OnWindowPosChanged(WINDOWPOS* lpwndpos)
-{
-    CListCtrl::OnWindowPosChanged(lpwndpos);
-#if CCUSTOM_AERO_SUPPORT
-    if (CCC_IsAeroEnabled() && CCC_IsWin11())
-        ScheduleOpaqueRepaint();
-#endif
-}
-
 // ホバー行切替。古い♡矩形は捨てる（前の行を回し続けない）。
-// ガラス親は部分 Invalidate が α=0 穴になるので POST_OPAQUE_PAINT のみ。
+// ガラス親: 全面 POST_OPAQUE は全体点滅の元 → 旧/新行だけオフスクリーン blit。
 void CCustomListCtrl::UpdateHotItem(int n)
 {
     if (m_nHotItem == n) return;
@@ -9533,11 +9656,18 @@ void CCustomListCtrl::UpdateHotItem(int n)
     m_nHotItem = n;
     /* 前の行の♡はもう無い。古い矩形を回し続けない */
     m_heartRcHot.SetRectEmpty();
-    // アクリル/キャプションガラス: 部分 Invalidate の素塗りは α=0 穴→ホバーで透過。
-    // 連続ホバー行変更は Post でキューに載せ、OpaqueFixer が全面不透明再描画する。
-    // 旧: ジャケ/♪リストはここで return し、♪点滅(SIconTimer)まで見た目が止まっていた。
     if (CCC_HostNeedsChildOpaque(m_hWnd)) {
-        PostMessage(CCC_WM_POST_OPAQUE_PAINT);
+        RECT rs[2];
+        int nr = 0;
+        CRect rr;
+        if (o >= 0 && GetItemRect(o, &rr, LVIR_BOUNDS))
+            rs[nr++] = rr;
+        if (m_nHotItem >= 0 && GetItemRect(m_nHotItem, &rr, LVIR_BOUNDS))
+            rs[nr++] = rr;
+        if (nr > 0)
+            CCC_ListPaintOpaqueRects(this, rs, nr);
+        else
+            PostMessage(CCC_WM_POST_OPAQUE_PAINT);
         return;
     }
     if (o >= 0) {
@@ -9554,6 +9684,16 @@ void CCustomListCtrl::UpdateHotItem(int n)
         else
             RedrawItems(m_nHotItem, m_nHotItem);
     }
+}
+
+// サイズ変化でアクリル穴が残ることがあるので遅延 Opaque。
+void CCustomListCtrl::OnWindowPosChanged(WINDOWPOS* lpwndpos)
+{
+    CListCtrl::OnWindowPosChanged(lpwndpos);
+#if CCUSTOM_AERO_SUPPORT
+    if (CCC_IsAeroEnabled() && CCC_IsWin11())
+        ScheduleOpaqueRepaint();
+#endif
 }
 
 // カーソル位置からホット行を取り直す（外部から呼ぶ用）。
@@ -9789,6 +9929,8 @@ void CCustomListCtrl::FillEmptyBelowVisible(HDC hdc, BOOL belowItemsOnly)
 
 // Fixer バッファへ Fill + WM_PRINTCLIENT。PrintClient が空きを黒くしクリップを残す →
 // クリップ解除して FillEmptyBelowVisible で交互色に塗り直す。
+// ※ Fixer は外部 PrintClient を下地だけにする。内部描画は s_cccInternalPrintClient で通す。
+//   （通さないとホバー行 blit が空行を塗り「だんだん消える」）
 void CCustomListCtrl::PaintOpaqueIntoBuffer(HDC hdcBuf)
 {
     if (!hdcBuf || !m_hWnd) return;
@@ -9801,39 +9943,60 @@ void CCustomListCtrl::PaintOpaqueIntoBuffer(HDC hdcBuf)
         ::FillRect(hdcBuf, &r, (HBRUSH)m_brBackground.GetSafeHandle());
         if (saved) ::RestoreDC(hdcBuf, saved);
     }
+    s_cccInternalPrintClient++;
     ::SendMessage(m_hWnd, WM_PRINTCLIENT, (WPARAM)hdcBuf, PRF_CLIENT | PRF_ERASEBKGND);
+    s_cccInternalPrintClient--;
     // PrintClient が空きを黒くしクリップを残すことがある → 解除して交互色で塗り直す
     FillEmptyBelowVisible(hdcBuf);
 }
 
-// BufferedPaint 内で PrintClient。失敗時 Default + FillEmpty。
-// OnPrintClient は DefWindowProc のみ（ここへ戻ると無限再入）。
+// Fixer 未装着時用。画面を消す BPPF_ERASE は禁止（消えてから出る隙間の元）。
+// DIB に描いて α=255 blit のみ（OpaqueFixer::PaintOpaque と同じ考え方）。
 void CCustomListCtrl::PaintOpaqueClient(CDC& dc)
 {
     CRect r;
     GetClientRect(&r);
-    if (r.Width() <= 0 || r.Height() <= 0) return;
+    const int w = r.Width();
+    const int h = r.Height();
+    if (w <= 0 || h <= 0) return;
+    HDC hdc = dc.GetSafeHdc();
+    if (!hdc) return;
 
-    BP_PAINTPARAMS params = { sizeof(BP_PAINTPARAMS) };
-    params.dwFlags = BPPF_ERASE;
-    HDC hdcBuf = NULL;
-    HPAINTBUFFER hBP = ::BeginBufferedPaint(dc.GetSafeHdc(), &r, BPBF_TOPDOWNDIB, &params, &hdcBuf);
-    if (!hdcBuf || !hBP)
-    {
+    static CCC_ChromaBlitCache s_listPaint;
+    if (s_listPaint.Ensure(hdc, w, h) && s_listPaint.hdcDib && s_listPaint.pBits) {
+        PaintOpaqueIntoBuffer(s_listPaint.hdcDib);
+        s_listPaint.MakeRectOpaque(0, 0, w, h);
+        const BLENDFUNCTION bf = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
+        if (::GdiAlphaBlend(hdc, 0, 0, w, h, s_listPaint.hdcDib, 0, 0, w, h, bf))
+            return;
+    }
+
+    if (CCC_AvoidBufferedPaint()) {
         Default();
-        FillEmptyBelowVisible(dc.GetSafeHdc());
+        FillEmptyBelowVisible(hdc);
         return;
     }
+    BP_PAINTPARAMS params = { sizeof(BP_PAINTPARAMS) };
+    /* BPPF_ERASE 禁止 */
+    HDC hdcBuf = NULL;
+    HPAINTBUFFER hBP = ::BeginBufferedPaint(hdc, &r, BPBF_TOPDOWNDIB, &params, &hdcBuf);
+    if (!hdcBuf || !hBP) {
+        Default();
+        FillEmptyBelowVisible(hdc);
+        return;
+    }
+    ::BitBlt(hdcBuf, 0, 0, w, h, hdc, 0, 0, SRCCOPY);
     ::FillRect(hdcBuf, &r, (HBRUSH)m_brBackground.GetSafeHandle());
     ::SendMessage(m_hWnd, WM_PRINTCLIENT, (WPARAM)hdcBuf, PRF_CLIENT | PRF_ERASEBKGND);
     FillEmptyBelowVisible(hdcBuf);
-    ::BufferedPaintMakeOpaque(hBP, &r);
+    ::BufferedPaintMakeOpaque(hBP, NULL);
     ::EndBufferedPaint(hBP, TRUE);
 }
 
 // Default（NM_CUSTOMDRAW）のあと空きを FillEmpty。CPaintDC を自前で取らない。
 // WM_PRINTCLIENT は OnPrintClient。OnPaint から Print を呼ぶと二重描画。
 // 横スクロールバーは出さない（最終列を右端まで伸ばしている）。
+// ガラス親の実描画は OpaqueFixer::WM_PAINT / PaintOpaque（ここは非ガラス or Fixer 未装着時）。
 void CCustomListCtrl::OnPaint()
 {
     Default(); // NM_CUSTOMDRAW。PrintClient は別経路（ここから送ると二重）
@@ -10279,7 +10442,7 @@ void CCustomListCtrl::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
         // 装飾線: アクリル上の素 Pen/Ellipse は α=0 で黒線・透けになる → 不透明1px塗りに置換
         if (nCols > 0 && ns == nCols - 1) {
 #if CCUSTOM_AERO_SUPPORT
-            if (bCapGlass)
+            if (bOpaqueHost)
                 CCC_FillRectOpaqueBits(pDC->GetSafeHdc(),
                     CRect(r.left + 10, r.bottom - 1, r.right - 10, r.bottom), RGB(200, 180, 220));
             else
@@ -10289,7 +10452,7 @@ void CCustomListCtrl::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
         if (GetExtendedStyle() & LVS_EX_GRIDLINES)
         {
 #if CCUSTOM_AERO_SUPPORT
-            if (bCapGlass)
+            if (bOpaqueHost)
                 CCC_FillRectOpaqueBits(pDC->GetSafeHdc(),
                     CRect(r.left, r.bottom - 1, r.right, r.bottom), RGB(220, 220, 230));
             else
@@ -10417,23 +10580,40 @@ void CCustomTreeCtrl::PaintOpaqueIntoBuffer(HDC hdcBuf)
 	GetClientRect(&r);
 	if (r.Width() <= 0 || r.Height() <= 0) return;
 	::FillRect(hdcBuf, &r, (HBRUSH)m_brBackground.GetSafeHandle());
+	s_cccInternalPrintClient++;
 	::SendMessage(m_hWnd, WM_PRINTCLIENT, (WPARAM)hdcBuf, PRF_CLIENT | PRF_ERASEBKGND);
+	s_cccInternalPrintClient--;
 }
 
-// BufferedPaint+MakeOpaque。失敗時 Default。クロマ blit は使わない。
+// Fixer 未装着時用。BPPF_ERASE 禁止（画面を先に消すと隙間になる）。
 void CCustomTreeCtrl::PaintOpaqueClient(CDC& dc)
 {
 	CRect r;
 	GetClientRect(&r);
-	if (r.Width() <= 0 || r.Height() <= 0) return;
+	const int w = r.Width();
+	const int h = r.Height();
+	if (w <= 0 || h <= 0) return;
+	HDC hdc = dc.GetSafeHdc();
+	if (!hdc) return;
+
+	static CCC_ChromaBlitCache s_treePaint;
+	if (s_treePaint.Ensure(hdc, w, h) && s_treePaint.hdcDib && s_treePaint.pBits) {
+		PaintOpaqueIntoBuffer(s_treePaint.hdcDib);
+		s_treePaint.MakeRectOpaque(0, 0, w, h);
+		const BLENDFUNCTION bf = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
+		if (::GdiAlphaBlend(hdc, 0, 0, w, h, s_treePaint.hdcDib, 0, 0, w, h, bf))
+			return;
+	}
+
+	if (CCC_AvoidBufferedPaint()) { Default(); return; }
 	BP_PAINTPARAMS params = { sizeof(BP_PAINTPARAMS) };
-	params.dwFlags = BPPF_ERASE;
 	HDC hdcBuf = NULL;
-	HPAINTBUFFER hBP = ::BeginBufferedPaint(dc.GetSafeHdc(), &r, BPBF_TOPDOWNDIB, &params, &hdcBuf);
+	HPAINTBUFFER hBP = ::BeginBufferedPaint(hdc, &r, BPBF_TOPDOWNDIB, &params, &hdcBuf);
 	if (!hdcBuf || !hBP) { Default(); return; }
+	::BitBlt(hdcBuf, 0, 0, w, h, hdc, 0, 0, SRCCOPY);
 	::FillRect(hdcBuf, &r, (HBRUSH)m_brBackground.GetSafeHandle());
 	::SendMessage(m_hWnd, WM_PRINTCLIENT, (WPARAM)hdcBuf, PRF_CLIENT | PRF_ERASEBKGND);
-	::BufferedPaintMakeOpaque(hBP, &r);
+	::BufferedPaintMakeOpaque(hBP, NULL);
 	::EndBufferedPaint(hBP, TRUE);
 }
 
@@ -12700,6 +12880,153 @@ void CCustomCheckBox::OnDrawLayer(CDC* pDC, CRect rect)
 }
 
 // ============================================================================
+// CCustomRadioButton
+// ============================================================================
+IMPLEMENT_DYNAMIC(CCustomRadioButton, CCustomCheckBox)
+
+BEGIN_MESSAGE_MAP(CCustomRadioButton, CCustomCheckBox)
+    ON_WM_LBUTTONUP()
+END_MESSAGE_MAP()
+
+// CCustomRadioButton のコンストラクタ。描画は OnDrawLayer。HWND はまだ無い。
+CCustomRadioButton::CCustomRadioButton() {}
+CCustomRadioButton::~CCustomRadioButton() {}
+
+// クリックで ON のまま。同じ親の他ラジオを外し、親へ BN_CLICKED。
+void CCustomRadioButton::OnLButtonUp(UINT n, CPoint p)
+{
+    if (m_bIsPressed)
+    {
+        m_bIsPressed = FALSE;
+        ReleaseCapture();
+        CRect r;
+        GetClientRect(&r);
+        if (r.PtInRect(p))
+        {
+            const BOOL wasOn = (m_nCheck == BST_CHECKED);
+            m_nCheck = BST_CHECKED;
+            CButton::SetCheck(BST_CHECKED);
+            if (!wasOn) StartCheckBounce();
+            CWnd* pPar = GetParent();
+            if (pPar && pPar->GetSafeHwnd())
+            {
+                HWND h = ::GetWindow(pPar->m_hWnd, GW_CHILD);
+                while (h)
+                {
+                    if (h != m_hWnd)
+                    {
+                        CWnd* pw = CWnd::FromHandlePermanent(h);
+                        CCustomRadioButton* pr = dynamic_cast<CCustomRadioButton*>(pw);
+                        if (pr && pr->GetCheck() == BST_CHECKED)
+                            pr->SetCheck(BST_UNCHECKED);
+                    }
+                    h = ::GetWindow(h, GW_HWNDNEXT);
+                }
+            }
+            if (pPar)
+                pPar->SendMessage(WM_COMMAND, MAKEWPARAM(GetDlgCtrlID(), BN_CLICKED), (LPARAM)m_hWnd);
+        }
+        Invalidate();
+    }
+}
+
+// 丸枠＋内側ドット。チェックと同じガラス／淫女／バウンス経路。
+void CCustomRadioButton::OnDrawLayer(CDC* pDC, CRect rect)
+{
+    const int rw = rect.Width();
+    const int rh = rect.Height();
+    if (rw <= 0 || rh <= 0) return;
+
+    CCC_CompositeTrans(m_hWnd, m_bAeroMode, *pDC, rect, [&](CDC& dc)
+    {
+        BOOL bC = (m_nCheck == BST_CHECKED); BOOL bD = !IsWindowEnabled(); BOOL bP = m_bIsPressed && m_bIsHot;
+        dc.SelectObject(GetFont() ? GetFont() : (CFont*)dc.SelectStockObject(DEFAULT_GUI_FONT));
+
+        if (m_bIsFlatStyle)
+        {
+            BOOL s = bC || bP;
+            COLORREF bg = s ? COLOR_BUTTON_PUSHED : (m_bIsHot ? COLOR_BUTTON_HOVER : COLOR_BUTTON_BG);
+            if (bD) bg = CCC_Desaturate(bg, 68);
+            dc.FillSolidRect(0, 0, rw, rh, bg);
+            DrawDecorations(&dc, CRect(0, 0, rw, rh), 0, s);
+            if (bD) FillRectAlpha(&dc, CRect(0, 0, rw, rh), RGB(232, 232, 232), 122);
+            dc.Draw3dRect(CRect(0, 0, rw, rh), s ? RGB(100, 100, 100) : RGB(255, 255, 255), s ? RGB(255, 255, 255) : RGB(100, 100, 100));
+            CString t; GetWindowText(t);
+            DrawSmartText(&dc, CRect(0, 0, rw, rh), t, bD, s);
+        }
+        else
+        {
+            const BOOL bTrans = CCC_UseTransPaint(m_hWnd, m_bAeroMode);
+            if (!bTrans) dc.FillSolidRect(0, 0, rw, rh, COLOR_DIALOG_BG);
+            int s = rh - 4;
+            if (s > 18) s = 18;
+            if (s < 14) s = 14;
+            int cy2 = rh / 2;
+            CRect rcB(0, cy2 - s / 2, s, cy2 + s / 2);
+            COLORREF clrFrame = bC ? RGB(255, 120, 165) : RGB(255, 156, 184);
+            COLORREF clrBox = RGB(255, 249, 252);
+            if (bD) { clrFrame = CCC_Desaturate(clrFrame, 62); clrBox = CCC_Desaturate(clrBox, 62); }
+            CPen p2(PS_SOLID, 2, clrFrame);
+            CBrush b2(clrBox);
+            CPen* op = dc.SelectObject(&p2); CBrush* ob = dc.SelectObject(&b2);
+            dc.Ellipse(&rcB);
+            dc.SelectObject(op); dc.SelectObject(ob);
+            DrawGlossHighlight(&dc, rcB, 4);
+            DrawJellyEdges(&dc, rcB, 4, RGB(120, 40, 80));
+            {
+                CRect chip = rcB;
+                chip.DeflateRect(1, 1);
+                const int tick = (int)(::GetTickCount64() / 50);
+                if (m_bIsHot || bC)
+                    DrawSoftJkThumb(&dc, chip, tick, TRUE, m_bIsHot ? 12.f : 4.f);
+                else
+                    DrawSoftJkChip(&dc, chip, tick / 4, FALSE);
+            }
+            if (rcB.bottom + 5 < rh)
+            {
+                DrawLaceLine(&dc, rcB.left + 1, rcB.bottom + 2, rcB.right - 1, rcB.bottom + 2, RGB(60, 40, 55));
+                DrawLaceScallop(&dc, rcB.left, rcB.bottom + 4, rcB.right, 3, COLOR_LACE);
+            }
+            CString t;
+            GetWindowText(t);
+            if (!t.IsEmpty())
+            {
+                CRect rt(rcB.right + 8, 0, rw, rh);
+                DrawSmartText2(&dc, rt, t, DT_LEFT | DT_VCENTER | DT_NOPREFIX, bD, FALSE);
+            }
+            if (bC)
+            {
+                CRect rk = rcB;
+                rk.DeflateRect(s / 4, s / 4);
+                if (m_nBounce > 0)
+                {
+                    const double bf = sin(3.14159265 * (8 - m_nBounce) / 8.0);
+                    rk.InflateRect((int)(rk.Width() * 0.20 * bf), (int)(rk.Height() * 0.20 * bf));
+                }
+                if (rk.left < 0)     rk.left = 0;
+                if (rk.top < 0)      rk.top = 0;
+                if (rk.right > rw)   rk.right = rw;
+                if (rk.bottom > rh)  rk.bottom = rh;
+                COLORREF dot = bD ? CCC_Desaturate(COLOR_CHECK, 62) : COLOR_CHECK;
+                CBrush bDot(dot);
+                CPen pDot(PS_SOLID, 1, dot);
+                CPen* op2 = dc.SelectObject(&pDot); CBrush* ob2 = dc.SelectObject(&bDot);
+                dc.Ellipse(&rk);
+                dc.SelectObject(op2); dc.SelectObject(ob2);
+                DrawSparkle(&dc, rk.left + 2, rk.top + 1, 2, COLOR_SPARKLE);
+            }
+        }
+        if (GetFocus() == this)
+        {
+            CRect rf(0, 0, rw, rh);
+            if (!m_bIsFlatStyle) rf.left += 20; else rf.DeflateRect(3, 3);
+            dc.DrawFocusRect(&rf);
+        }
+        CCC_DrawInwoman(&dc, CRect(0, 0, rw, rh), CCC_UseTransPaint(m_hWnd, m_bAeroMode));
+    });
+}
+
+// ============================================================================
 // CCustomLevelMeter
 // ============================================================================
 IMPLEMENT_DYNAMIC(CCustomLevelMeter, CStatic)
@@ -14790,12 +15117,116 @@ void CCustomGroupBox::DrawGroupBox(CDC* pDC, CRect& rect)
 // ============================================================================
 // カスタムダイアログクラス基底 (CDialog版)
 // ============================================================================
+
+static void CCC_PrintChildrenToDc(HWND hParent, HDC hdc)
+{
+	/* Win+Shift+S / PrintWindow 経路で子へ WM_PRINT を流すと OpaqueFixer の
+	   BufferedPaint 経由で落ちる。ダイアログ Print は塗りつぶしのみ。 */
+	(void)hParent;
+	(void)hdc;
+}
+
+static void CCC_PaintPlainDialogToDc(CWnd* pWnd, HDC hdc, BOOL aero, CBrush& brDialog)
+{
+    if (!pWnd || !hdc) return;
+    CDC dc;
+    dc.Attach(hdc);
+    CRect rc;
+    pWnd->GetClientRect(&rc);
+    if (!rc.IsRectEmpty()) {
+        CRgn rgn;
+        rgn.CreateRectRgnIndirect(&rc);
+        dc.SelectClipRgn(&rgn);
+        if (aero)
+            dc.FillSolidRect(&rc, RGB(250, 250, 250));
+        else if (brDialog.GetSafeHandle())
+            dc.FillRect(&rc, &brDialog);
+        else
+            dc.FillSolidRect(&rc, COLOR_DIALOG_BG);
+    }
+    dc.Detach();
+}
+
+static void CCC_PaintBlurChromeToDc(CWnd* pWnd, HDC hdc, BOOL aero, CBrush& brDialog, int* pMainLockSave)
+{
+    (void)brDialog;
+    if (!pWnd || !hdc) return;
+    CDC dc;
+    dc.Attach(hdc);
+    CRect rc;
+    pWnd->GetClientRect(&rc);
+    if (!rc.IsRectEmpty()) {
+        CRgn rgn;
+        rgn.CreateRectRgnIndirect(&rc);
+        dc.SelectClipRgn(&rgn);
+        if (!aero)
+            dc.FillSolidRect(&rc, COLOR_DIALOG_BG);
+    }
+#if CCUSTOM_AERO_SUPPORT
+    if (aero && CCC_IsWin11()) {
+        CCC_PaintAeroGaps(dc, pWnd, nullptr);
+        CCC_CaptionPaintGdi(dc, pWnd->m_hWnd);
+        if (pMainLockSave)
+            CCC_MainLockPaintClient(dc, pWnd->m_hWnd);
+        dc.Detach();
+        return;
+    }
+    if (aero)
+        dc.FillSolidRect(&rc, RGB(250, 250, 250));
+#endif
+    CCC_CaptionPaintGdi(dc, pWnd->m_hWnd);
+    if (pMainLockSave)
+        CCC_MainLockPaintClient(dc, pWnd->m_hWnd);
+    dc.Detach();
+}
+
+static LRESULT CCC_HandlePlainPrint(CWnd* pWnd, WPARAM wParam, LPARAM lParam, BOOL aero, CBrush& brDialog)
+{
+    (void)aero;
+    (void)brDialog;
+    (void)lParam;
+    HDC hdc = (HDC)wParam;
+    if (!hdc || !pWnd || !pWnd->m_hWnd) return 0;
+    s_cccPrintDepth++;
+    RECT rc = {};
+    ::GetClientRect(pWnd->m_hWnd, &rc);
+    HBRUSH br = ::CreateSolidBrush(COLOR_DIALOG_BG);
+    if (br) {
+        ::FillRect(hdc, &rc, br);
+        ::DeleteObject(br);
+    }
+    s_cccPrintDepth--;
+    return 0;
+}
+
+static LRESULT CCC_HandleBlurPrint(CWnd* pWnd, WPARAM wParam, LPARAM lParam, BOOL aero, CBrush& brDialog, int* pMainLockSave)
+{
+    (void)aero;
+    (void)brDialog;
+    (void)pMainLockSave;
+    (void)lParam;
+    HDC hdc = (HDC)wParam;
+    if (!hdc || !pWnd || !pWnd->m_hWnd) return 0;
+    s_cccPrintDepth++;
+    RECT rc = {};
+    ::GetClientRect(pWnd->m_hWnd, &rc);
+    HBRUSH br = ::CreateSolidBrush(COLOR_DIALOG_BG);
+    if (br) {
+        ::FillRect(hdc, &rc, br);
+        ::DeleteObject(br);
+    }
+    s_cccPrintDepth--;
+    return 0;
+}
+
 IMPLEMENT_DYNAMIC(CCustomDialog, CDialog)
 
 BEGIN_MESSAGE_MAP(CCustomDialog, CDialogEx)
     ON_WM_CTLCOLOR()
     ON_WM_ERASEBKGND()
     ON_WM_PAINT()
+    ON_MESSAGE(WM_PRINT, OnPrint)
+    ON_MESSAGE(WM_PRINTCLIENT, OnPrintClient)
     ON_MESSAGE(WM_USER + 1000, OnSubclassControls)
 END_MESSAGE_MAP()
 
@@ -14881,12 +15312,26 @@ BOOL CCustomDialog::OnEraseBkgnd(CDC* pDC)
 // CPaintDC。経路分岐は aero / ホストガラス / 通常。
 void CCustomDialog::OnPaint()
 {
+    if (s_cccPrintDepth > 0) {
+        ValidateRect(NULL);
+        return;
+    }
     if (m_bAeroEnabled)
         DlgOnPaintAero(this, m_bAeroEnabled);
     else if (CCC_IsInwoman())
         DlgPaintSolidInwoman(this);
     else
         CDialogEx::OnPaint();
+}
+
+LRESULT CCustomDialog::OnPrint(WPARAM wParam, LPARAM lParam)
+{
+    return CCC_HandlePlainPrint(this, wParam, lParam, m_bAeroEnabled, m_brDialog);
+}
+
+LRESULT CCustomDialog::OnPrintClient(WPARAM wParam, LPARAM lParam)
+{
+    return CCC_HandlePlainPrint(this, wParam, lParam | PRF_CLIENT, m_bAeroEnabled, m_brDialog);
 }
 
 // CCC_GroupBoxesBack: カスタム UI / アクリル補助。
@@ -15110,12 +15555,53 @@ private:
                 return TRUE;
             }
             return ::DefSubclassProc(hWnd, uMsg, wParam, lParam);
+        case WM_PRINT:
+        {
+            /* 外部 PrintWindow / スクショ: BufferedPaint 禁止（落ちる） */
+            HDC hdc = (HDC)wParam;
+            if (!hdc) return 0;
+            RECT rc = {};
+            ::GetClientRect(hWnd, &rc);
+            HBRUSH br = ::CreateSolidBrush(pThis->m_clrBg);
+            if (br) {
+                ::FillRect(hdc, &rc, br);
+                ::DeleteObject(br);
+            }
+            return 0;
+        }
         case WM_PRINTCLIENT:
-            if (pThis->m_bPrinting)
+            if (pThis->m_bPrinting || s_cccInternalPrintClient > 0)
                 return ::DefSubclassProc(hWnd, uMsg, wParam, lParam);
-            break;
+            /* 外部からの PrintClient も BufferedPaint しない */
+            {
+                HDC hdc = (HDC)wParam;
+                if (!hdc) return 0;
+                RECT rc = {};
+                ::GetClientRect(hWnd, &rc);
+                HBRUSH br = ::CreateSolidBrush(pThis->m_clrBg);
+                if (br) {
+                    ::FillRect(hdc, &rc, br);
+                    ::DeleteObject(br);
+                }
+            }
+            return 0;
         case WM_PAINT:
         {
+            if (pThis->m_bPrinting || s_cccPrintDepth > 0) {
+                ::ValidateRect(hWnd, NULL);
+                return 0;
+            }
+            // SysListView32/Tree のクラス背景ブラシは BeginPaint で更新領域を塗る。
+            // その一瞬が「消えてから PaintOpaque」の隙間。GetDC で上書きして Validate のみ。
+            if (pThis->m_clsKind == 4 || pThis->m_clsKind == 5) {
+                HDC hDC = ::GetDC(hWnd);
+                if (hDC) {
+                    pThis->PaintOpaque(hWnd, hDC);
+                    ::ReleaseDC(hWnd, hDC);
+                }
+                ::ValidateRect(hWnd, NULL);
+                return 0;
+            }
             // BeginPaint の DC は更新矩形でクリップされるため、最終行より下の空きが
             // 矩形外だと BPPF_ERASE の黒のまま残る。検証は BeginPaint で行い、
             // 実描画はクリップ無しの GetDC へフルクライアントを描く。
@@ -15136,6 +15622,8 @@ private:
             // すると最大化で子が1個ずつ描画されて見える。
             if (!pThis->m_ncOpaque)
                 return ::DefSubclassProc(hWnd, uMsg, wParam, lParam);
+            if (s_cccPrintDepth > 0)
+                return ::DefSubclassProc(hWnd, uMsg, wParam, lParam);
             LRESULT lRes = ::DefSubclassProc(hWnd, uMsg, wParam, lParam);
             HDC hDC = ::GetDC(hWnd);
             if (hDC) {
@@ -15148,7 +15636,7 @@ private:
         // Edit/ListBox/ComboBox: マウス進入/移動でテーマ NC や既定描画が α=0 を載せる → 透過に見える
         // ListBox は項目切替(LBUTTON)の部分描画でも同様。離脱で WM_PAINT が来ると直る。
         // ComboBox は CBN 選択後の ODS_COMBOBOXEDIT 素塗りも同様(DrawItem 側でも抑止)。
-        // SysListView32 は毎 MOVE の全面再描画だと重いので UpdateHotItem 側の Post に任せる。
+        // SysListView32 / Tree: ホバーは UpdateHotItem の行 Invalidate のみ（全面 Post 禁止）
         case WM_MOUSEMOVE:
         case WM_MOUSELEAVE:
         case WM_NCMOUSEMOVE:
@@ -15192,6 +15680,7 @@ private:
         case WM_CHAR:
         case WM_DEADCHAR:
         case WM_IME_CHAR:
+        case WM_COPY:
         case WM_PASTE:
         case WM_CUT:
         case WM_CLEAR:
@@ -15199,6 +15688,8 @@ private:
         {
             if (pThis->m_clsKind != 1)
                 break;
+            if (pThis->m_bPrinting || s_cccPrintDepth > 0)
+                return ::DefSubclassProc(hWnd, uMsg, wParam, lParam);
             ::SendMessage(hWnd, WM_SETREDRAW, FALSE, 0);
             LRESULT lRes = ::DefSubclassProc(hWnd, uMsg, wParam, lParam);
             HDC hDC = ::GetDC(hWnd);
@@ -15303,27 +15794,41 @@ private:
         case WM_HSCROLL:
         case WM_MOUSEWHEEL:
         {
-            // キャプション常時アクリル下では、ListView の中間描画(ジャケ/♪の透明画素)が
-            // α=0 のまま画面に載り一瞬ガラスが見える=ちらつき。描画を止めてから
-            // 全面 MakeOpaque 1回だけ出す。部分 MakeOpaque は本文透過になるので使わない。
+            // キャプション常時アクリル下: DefSubclass の α=0 中間描画を画面に出さない。
+            // FALSE で状態更新 → Lock 中に TRUE → PaintOpaque → Unlock。
+            // Lock 無しだと TRUE が空バッファを一瞬出して点滅する。
+            // MakeWindowOpaque はスクロールでは点滅元なので List/Tree では呼ばない。
             const BOOL bList = (pThis->m_clsKind == 4);
             const BOOL bTree = (pThis->m_clsKind == 5);
             if (bList || bTree)
                 ::SendMessage(hWnd, WM_SETREDRAW, FALSE, 0);
             LRESULT lRes = ::DefSubclassProc(hWnd, uMsg, wParam, lParam);
-            if (bList || bTree)
+            if (bList || bTree) {
+                ::LockWindowUpdate(hWnd);
                 ::SendMessage(hWnd, WM_SETREDRAW, TRUE, 0);
-            ::ValidateRect(hWnd, NULL);
-            HDC hDC = ::GetDC(hWnd);
-            if (hDC) {
-                pThis->PaintOpaque(hWnd, hDC);
-                ::ReleaseDC(hWnd, hDC);
+                ::ValidateRect(hWnd, NULL);
+                HDC hDC = ::GetDC(hWnd);
+                if (hDC) {
+                    pThis->PaintOpaque(hWnd, hDC);
+                    ::ReleaseDC(hWnd, hDC);
+                }
+                ::LockWindowUpdate(NULL);
+                ::ValidateRect(hWnd, NULL);
+            } else {
+                ::ValidateRect(hWnd, NULL);
+                HDC hDC = ::GetDC(hWnd);
+                if (hDC) {
+                    pThis->PaintOpaque(hWnd, hDC);
+                    ::ReleaseDC(hWnd, hDC);
+                }
+                pThis->MakeWindowOpaque(hWnd);
             }
-            pThis->MakeWindowOpaque(hWnd);
             return lRes;
         }
         case CCC_WM_POST_OPAQUE_PAINT:
         {
+            if (pThis->m_bPrinting || s_cccPrintDepth > 0)
+                return 0;
             HDC hDC = ::GetDC(hWnd);
             if (hDC)
             {
@@ -15363,11 +15868,15 @@ private:
     void MakeWindowOpaque(HWND hWnd)
     {
         if (!::IsWindow(hWnd)) return;
+        /* PrintWindow / WGC 取り込み中の BeginBufferedPaint は EXECUTE AV の典型 */
+        if (CCC_AvoidBufferedPaint()) return;
         RECT wr = {};
         ::GetWindowRect(hWnd, &wr);
         const int w = wr.right - wr.left;
         const int h = wr.bottom - wr.top;
         if (w <= 0 || h <= 0) return;
+        /* 異常に大きい NC 面は拒否（マルチモニタ合成の暴走防止） */
+        if (w > 7680 || h > 4320) return;
         HDC hdcWin = ::GetWindowDC(hWnd);
         if (!hdcWin) return;
         RECT rc = { 0, 0, w, h };
@@ -15444,16 +15953,19 @@ private:
         }
 
         BP_PAINTPARAMS params = { sizeof(BP_PAINTPARAMS) };
-        params.dwFlags = BPPF_ERASE;
+        /* BPPF_ERASE 禁止: 対象 DC を先に消すと List/Tree で「消えてから描画」になる */
         HDC hdcBuf = NULL;
-        HPAINTBUFFER hBufferedPaint = ::BeginBufferedPaint(hDestDC, &rect, BPBF_TOPDOWNDIB, &params, &hdcBuf);
+        HPAINTBUFFER hBufferedPaint = NULL;
+        if (!CCC_AvoidBufferedPaint())
+            hBufferedPaint = ::BeginBufferedPaint(hDestDC, &rect, BPBF_TOPDOWNDIB, &params, &hdcBuf);
 
         if (hdcBuf && hBufferedPaint)
         {
+            ::BitBlt(hdcBuf, 0, 0, width, height, hDestDC, 0, 0, SRCCOPY);
             CBrush brush(m_clrBg);
             ::FillRect(hdcBuf, &rect, (HBRUSH)brush.GetSafeHandle());
             PaintClientIntoBuffer(hWnd, hdcBuf);
-            ::BufferedPaintMakeOpaque(hBufferedPaint, &rect);
+            ::BufferedPaintMakeOpaque(hBufferedPaint, NULL);
             ::EndBufferedPaint(hBufferedPaint, TRUE);
             return;
         }
@@ -15517,6 +16029,7 @@ static BOOL CCC_IsBlurControl(HWND hWnd)
         if (dynamic_cast<CCustomRangeSliderCtrl*>(pw)) return TRUE;
         if (dynamic_cast<CCustomGroupBox*>(pw)) return TRUE;
         if (dynamic_cast<CCustomCheckBox*>(pw)) return TRUE;
+        if (dynamic_cast<CCustomRadioButton*>(pw)) return TRUE;
         if (dynamic_cast<CCustomProgressCtrl*>(pw)) return TRUE;
         if (dynamic_cast<CCustomLevelMeter*>(pw)) return TRUE;
         if (dynamic_cast<CCustomSysPerfCtrl*>(pw)) return TRUE;
@@ -15591,6 +16104,7 @@ static BOOL CCC_ShouldOpaqueFix(HWND hWnd)
             if (dynamic_cast<CCustomSliderCtrl*>(pw)) return TRUE;
             if (dynamic_cast<CCustomRangeSliderCtrl*>(pw)) return TRUE;
             if (dynamic_cast<CCustomCheckBox*>(pw)) return TRUE;
+            if (dynamic_cast<CCustomRadioButton*>(pw)) return TRUE;
             if (dynamic_cast<CCustomProgressCtrl*>(pw)) return TRUE;
             if (dynamic_cast<CCustomLevelMeter*>(pw)) return TRUE;
             if (dynamic_cast<CCustomSysPerfCtrl*>(pw)) return TRUE;
@@ -16404,13 +16918,16 @@ static void CCC_MakeRectOpaquePreserve(HDC hdc, const RECT& rc)
     const int w = rc.right - rc.left;
     const int h = rc.bottom - rc.top;
     if (w <= 0 || h <= 0 || !hdc) return;
+    /* Print/WGC 中の BeginBufferedPaint は再入 AV */
+    if (CCC_AvoidBufferedPaint()) return;
 
     BP_PAINTPARAMS params = { sizeof(BP_PAINTPARAMS) };
     HDC hdcBuf = NULL;
     HPAINTBUFFER hBP = ::BeginBufferedPaint(hdc, &rc, BPBF_TOPDOWNDIB, &params, &hdcBuf);
     if (hdcBuf && hBP) {
-        ::BitBlt(hdcBuf, rc.left, rc.top, w, h, hdc, rc.left, rc.top, SRCCOPY);
-        ::BufferedPaintMakeOpaque(hBP, &rc);
+        /* hdcBuf の (0,0) = 対象矩形の左上。rc.left/top へ書くと枠外へずれる */
+        ::BitBlt(hdcBuf, 0, 0, w, h, hdc, rc.left, rc.top, SRCCOPY);
+        ::BufferedPaintMakeOpaque(hBP, NULL);
         RGBQUAD* pPixels = nullptr;
         int rowLength = 0;
         if (SUCCEEDED(::GetBufferedPaintBits(hBP, &pPixels, &rowLength)) && pPixels && rowLength > 0) {
@@ -16915,7 +17432,7 @@ UINT CCC_IconIdForDialogTemplate(UINT idd)
 		{ IDD_FMMONITOR, IDI_UI_PIANO }, { IDD_FM_HELP, IDI_UI_PIANO },
 		{ IDD_EQUALIZER, IDI_UI_EQ }, { IDD_EQ_HELP, IDI_UI_EQ },
 		{ IDD_PROTOOLS, IDI_UI_TUNE }, { IDD_PT_HELP, IDI_UI_TUNE },
-		{ IDD_Render, IDI_UI_RENDER }, { IDD_RD_HELP, IDI_UI_RENDER },
+		{ IDD_Render, IDI_UI_RENDER }, { IDD_RD_HELP, IDI_UI_RENDER }, { IDD_UPDATE_ASK, IDI_UI_SYNC },
 		{ IDD_WAVEXPORT, IDI_UI_EXPORT }, { IDD_WE_HELP, IDI_UI_EXPORT },
 		{ IDD_TRANSCODE, IDI_UI_EXPORT }, { IDD_TC_HELP, IDI_UI_EXPORT },
 		{ IDD_TAGEDIT, IDI_UI_TAG }, { IDD_TE_HELP, IDI_UI_TAG },
@@ -17345,13 +17862,17 @@ void CCC_CaptionPaint(CDC& dc, HWND hDlg)
             // ClearRect 済みの帯へ直接合成（第2 BeginBufferedPaint を避ける）
             const BLENDFUNCTION bf = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
             if (!::GdiAlphaBlend(dc.GetSafeHdc(), 0, 0, w, h, hdcMem, 0, 0, w, h, bf)) {
-                BP_PAINTPARAMS params = { sizeof(BP_PAINTPARAMS) };
-                HDC hdcBuf = NULL;
-                HPAINTBUFFER hBP = ::BeginBufferedPaint(dc.GetSafeHdc(), &rcBar, BPBF_TOPDOWNDIB, &params, &hdcBuf);
-                if (hdcBuf && hBP) {
-                    CCC_InitBPClear(hBP, w, h);
-                    ::GdiAlphaBlend(hdcBuf, rcBar.left, rcBar.top, w, h, hdcMem, 0, 0, w, h, bf);
-                    ::EndBufferedPaint(hBP, TRUE);
+                if (!CCC_AvoidBufferedPaint()) {
+                    BP_PAINTPARAMS params = { sizeof(BP_PAINTPARAMS) };
+                    HDC hdcBuf = NULL;
+                    HPAINTBUFFER hBP = ::BeginBufferedPaint(dc.GetSafeHdc(), &rcBar, BPBF_TOPDOWNDIB, &params, &hdcBuf);
+                    if (hdcBuf && hBP) {
+                        CCC_InitBPClear(hBP, w, h);
+                        ::GdiAlphaBlend(hdcBuf, rcBar.left, rcBar.top, w, h, hdcMem, 0, 0, w, h, bf);
+                        ::EndBufferedPaint(hBP, TRUE);
+                    }
+                } else {
+                    ::BitBlt(dc.GetSafeHdc(), 0, 0, w, h, hdcMem, 0, 0, SRCCOPY);
                 }
             }
             CCC_CaptionPaintChromeNow(hDlg);
@@ -19579,6 +20100,8 @@ IMPLEMENT_DYNAMIC(CCustomBlurDialogBase, CCustomDialog)
 
 BEGIN_MESSAGE_MAP(CCustomBlurDialogBase, CCustomDialog)
     ON_WM_PAINT()
+    ON_MESSAGE(WM_PRINT, OnPrint)
+    ON_MESSAGE(WM_PRINTCLIENT, OnPrintClient)
     ON_WM_SIZE()
     ON_WM_SHOWWINDOW()
     ON_WM_WINDOWPOSCHANGED()
@@ -19818,6 +20341,10 @@ void CCustomBlurDialogBase::OnShowWindow(BOOL bShow, UINT nStatus)
 // EnsureBackdrop(ExtendFrame) が本文 α をガラスに戻すため順序が重要。
 void CCustomBlurDialogBase::OnPaint()
 {
+    if (s_cccPrintDepth > 0) {
+        ValidateRect(NULL);
+        return;
+    }
     CPaintDC dc(this);
 #if CCUSTOM_AERO_SUPPORT
     if (m_bAeroEnabled && CCC_IsWin11())
@@ -19844,6 +20371,16 @@ void CCustomBlurDialogBase::OnPaint()
 #endif
     if (m_pMainLockSave)
         CCC_MainLockPaintClient(dc, m_hWnd);
+}
+
+LRESULT CCustomBlurDialogBase::OnPrint(WPARAM wParam, LPARAM lParam)
+{
+    return CCC_HandleBlurPrint(this, wParam, lParam, m_bAeroEnabled, m_brDialog, m_pMainLockSave);
+}
+
+LRESULT CCustomBlurDialogBase::OnPrintClient(WPARAM wParam, LPARAM lParam)
+{
+    return CCC_HandleBlurPrint(this, wParam, (lParam | PRF_CLIENT) & ~PRF_CHILDREN, m_bAeroEnabled, m_brDialog, m_pMainLockSave);
 }
 
 // キャプション／追従エントリ解除、fixer 破棄。
@@ -20063,6 +20600,8 @@ BEGIN_MESSAGE_MAP(CCustomDialogEx, CDialogEx)
     ON_WM_CTLCOLOR()
     ON_WM_ERASEBKGND()
     ON_WM_PAINT()
+    ON_MESSAGE(WM_PRINT, OnPrint)
+    ON_MESSAGE(WM_PRINTCLIENT, OnPrintClient)
     ON_MESSAGE(WM_USER + 1000, OnSubclassControls)
 END_MESSAGE_MAP()
 
@@ -20148,12 +20687,26 @@ BOOL CCustomDialogEx::OnEraseBkgnd(CDC* pDC)
 // CPaintDC。経路分岐は aero / ホストガラス / 通常。
 void CCustomDialogEx::OnPaint()
 {
+    if (s_cccPrintDepth > 0) {
+        ValidateRect(NULL);
+        return;
+    }
     if (m_bAeroEnabled)
         DlgOnPaintAero(this, m_bAeroEnabled);
     else if (CCC_IsInwoman())
         DlgPaintSolidInwoman(this);
     else
         CDialogEx::OnPaint();
+}
+
+LRESULT CCustomDialogEx::OnPrint(WPARAM wParam, LPARAM lParam)
+{
+    return CCC_HandlePlainPrint(this, wParam, lParam, m_bAeroEnabled, m_brDialog);
+}
+
+LRESULT CCustomDialogEx::OnPrintClient(WPARAM wParam, LPARAM lParam)
+{
+    return CCC_HandlePlainPrint(this, wParam, lParam | PRF_CLIENT, m_bAeroEnabled, m_brDialog);
 }
 
 // CCC_CaptionTrackContextMenu: カスタム UI / アクリル補助。
@@ -20417,6 +20970,8 @@ IMPLEMENT_DYNAMIC(CCustomBlurDialogExBase, CCustomDialogEx)
 
 BEGIN_MESSAGE_MAP(CCustomBlurDialogExBase, CCustomDialogEx)
     ON_WM_PAINT()
+    ON_MESSAGE(WM_PRINT, OnPrint)
+    ON_MESSAGE(WM_PRINTCLIENT, OnPrintClient)
     ON_WM_SIZE()
     ON_WM_SHOWWINDOW()
     ON_WM_WINDOWPOSCHANGED()
@@ -20639,6 +21194,10 @@ void CCustomBlurDialogExBase::OnShowWindow(BOOL bShow, UINT nStatus)
 // CPaintDC。経路分岐は aero / ホストガラス / 通常。
 void CCustomBlurDialogExBase::OnPaint()
 {
+    if (s_cccPrintDepth > 0) {
+        ValidateRect(NULL);
+        return;
+    }
     CPaintDC dc(this);
 #if CCUSTOM_AERO_SUPPORT
     if (m_bAeroEnabled && CCC_IsWin11())
@@ -20664,6 +21223,16 @@ void CCustomBlurDialogExBase::OnPaint()
 #endif
     if (m_pMainLockSave)
         CCC_MainLockPaintClient(dc, m_hWnd);
+}
+
+LRESULT CCustomBlurDialogExBase::OnPrint(WPARAM wParam, LPARAM lParam)
+{
+    return CCC_HandleBlurPrint(this, wParam, lParam, m_bAeroEnabled, m_brDialog, m_pMainLockSave);
+}
+
+LRESULT CCustomBlurDialogExBase::OnPrintClient(WPARAM wParam, LPARAM lParam)
+{
+    return CCC_HandleBlurPrint(this, wParam, (lParam | PRF_CLIENT) & ~PRF_CHILDREN, m_bAeroEnabled, m_brDialog, m_pMainLockSave);
 }
 
 // キャプション／追従エントリ解除、fixer 破棄。

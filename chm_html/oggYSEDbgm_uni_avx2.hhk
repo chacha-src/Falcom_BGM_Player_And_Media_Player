@@ -107,6 +107,13 @@
 		<param name="Local" value="en\export.htm">
 		</OBJECT>
 	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="auto update">
+		<param name="Name" value="English: Update checks">
+		<param name="Local" value="en\update.htm">
+		<param name="Name" value="English: Rendering settings">
+		<param name="Local" value="en\render.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
 		<param name="Name" value="Automating a performance with prompts">
 		<param name="Name" value="English: Automating a performance with prompts">
 		<param name="Local" value="en\prompt.htm">
@@ -247,6 +254,13 @@
 		<param name="Name" value="Changing tempo and pitch">
 		<param name="Name" value="English: Changing tempo and pitch">
 		<param name="Local" value="en\tempo-pitch.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="check for update">
+		<param name="Name" value="English: Update checks">
+		<param name="Local" value="en\update.htm">
+		<param name="Name" value="English: Rendering settings">
+		<param name="Local" value="en\render.htm">
 		</OBJECT>
 	<LI> <OBJECT type="text/sitemap">
 		<param name="Name" value="chip sound">
@@ -391,6 +405,13 @@
 		<param name="Name" value="DJパッドで遊ぶ">
 		<param name="Name" value="日本語: DJパッドで遊ぶ">
 		<param name="Local" value="ja\djpad.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="don't ask">
+		<param name="Name" value="English: Update checks">
+		<param name="Local" value="en\update.htm">
+		<param name="Name" value="English: Rendering settings">
+		<param name="Local" value="en\render.htm">
 		</OBJECT>
 	<LI> <OBJECT type="text/sitemap">
 		<param name="Name" value="DSD">
@@ -1830,6 +1851,13 @@
 		<param name="Local" value="ja\acrylic.htm">
 		</OBJECT>
 	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="アップデート確認">
+		<param name="Name" value="日本語: 更新のチェック">
+		<param name="Local" value="ja\update.htm">
+		<param name="Name" value="日本語: レンダリング設定">
+		<param name="Local" value="ja\render.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
 		<param name="Name" value="アナライザー">
 		<param name="Name" value="日本語: 波形・周波数アナライザー">
 		<param name="Local" value="ja\analyzer.htm">
@@ -2514,6 +2542,13 @@
 		<param name="Local" value="ja\tips.htm">
 		</OBJECT>
 	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="次回から尋ねない">
+		<param name="Name" value="日本語: 更新のチェック">
+		<param name="Local" value="ja\update.htm">
+		<param name="Name" value="日本語: レンダリング設定">
+		<param name="Local" value="ja\render.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
 		<param name="Name" value="歌詞">
 		<param name="Name" value="日本語: 歌詞を表示する">
 		<param name="Local" value="ja\lyrics.htm">
@@ -2576,6 +2611,13 @@
 		<param name="Local" value="ja\tuner.htm">
 		<param name="Name" value="日本語: テンポとピッチを変える">
 		<param name="Local" value="ja\tempo-pitch.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="自動アップデート">
+		<param name="Name" value="日本語: 更新のチェック">
+		<param name="Local" value="ja\update.htm">
+		<param name="Name" value="日本語: レンダリング設定">
+		<param name="Local" value="ja\render.htm">
 		</OBJECT>
 	<LI> <OBJECT type="text/sitemap">
 		<param name="Name" value="言語">

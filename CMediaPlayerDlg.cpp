@@ -1,4 +1,4 @@
-﻿// CMediaPlayerDlg.cpp : メディアプレイヤーモード画面(張りぼて)とモード選択ダイアログ
+// CMediaPlayerDlg.cpp : メディアプレイヤーモード画面(張りぼて)とモード選択ダイアログ
 //
 // 実体は COggDlg(og->) と CPlayList(pl->)。ここは表示と操作の取り次ぎだけを行う。
 // メディアプレイヤーモード中は og / pl のウィンドウを非表示にして裏で生かしておく。
@@ -6328,6 +6328,11 @@ BOOL CMediaPlayerDlg::OnEraseBkgnd(CDC* pDC)
 
 void CMediaPlayerDlg::OnPaint()
 {
+	/* PrintWindow / スクショ再入で CPaintDC・BeginBufferedPaint すると EXECUTE AV になる */
+	if (CCC_PrintBusy()) {
+		ValidateRect(NULL);
+		return;
+	}
 	extern void COgg_ClearGdiPaintPending();
 #if CCUSTOM_AERO_SUPPORT
 	// アクリル(Win11) パス

@@ -1,4 +1,4 @@
-#include "stdafx.h"
+﻿#include "stdafx.h"
 #include "ogg.h"
 #include "CSasamiStaffCore.h"
 #include "CSasamiScoreArrange.h"
@@ -16,7 +16,20 @@ extern COggDlg* og;
 extern CMediaPlayerDlg* mp;
 extern int plcnt;
 extern int gameon;
-extern void MpPushPlayHistory(LPCTSTR path, LPCTSTR displayName);
+extern CString filen, fnn;
+extern int mode, modesub, loop1, loop2, ret2;
+
+static void ScStaffRestorePlaylistGlobals(void)
+{
+	if (!pl || !pl->pc || plcnt < 0 || plcnt >= pl->playcnt) return;
+	fnn = pl->pc[plcnt].name;
+	filen = pl->pc[plcnt].fol;
+	modesub = pl->pc[plcnt].sub;
+	mode = modesub;
+	loop1 = pl->pc[plcnt].loop1;
+	loop2 = pl->pc[plcnt].loop2;
+	ret2 = pl->pc[plcnt].ret2;
+}
 
 int ScStaffLineGap(const ScStaffUi* u)
 {
@@ -5964,17 +5977,27 @@ int ScStaffTrackRowTop(const CRect& trackRc, const ScStaffUi* u, int track)
 int ScStaffStartHostPreview(LPCTSTR path, const ScStaffUi* u, int tempoT)
 {
 	if (!path || !path[0] || !pl) return 0;
-	pl->AddFilePath(path);
-	int idx = pl->FindByPath(path);
-	if (idx < 0) {
-		/* AddFilePath may normalize; scan last entries */
-		for (int i = pl->playcnt - 1; i >= 0 && i >= pl->playcnt - 8; --i) {
-			if (_tcsicmp(pl->pc[i].fol, path) == 0) { idx = i; break; }
-		}
+	playlistdata tmp;
+	memset(&tmp, 0, sizeof(tmp));
+	_tcsncpy_s(tmp.fol, path, _TRUNCATE);
+	{
+		const wchar_t* slash = wcsrchr(path, L'\\');
+		if (!slash) slash = wcsrchr(path, L'/');
+		_tcsncpy_s(tmp.name, slash ? slash + 1 : path, _TRUNCATE);
 	}
-	if (idx < 0 || idx >= pl->playcnt) return 0;
-	pl->Get(idx);
-	plcnt = idx;
+	TCHAR kpiBuf[MAX_PATH];
+	kpiBuf[0] = 0;
+	BYTE kv = 0;
+	pl->plugs(CString(path), &tmp, kpiBuf, kv);
+	if (tmp.fol[0] == 0)
+		_tcsncpy_s(tmp.fol, path, _TRUNCATE);
+	filen = tmp.fol;
+	fnn = tmp.name;
+	modesub = tmp.sub;
+	mode = modesub;
+	loop1 = tmp.loop1;
+	loop2 = tmp.loop2;
+	ret2 = tmp.ret2;
 	gameon = 0;
 	if (mp) {
 		mp->m_abApos = -1;
@@ -5983,15 +6006,11 @@ int ScStaffStartHostPreview(LPCTSTR path, const ScStaffUi* u, int tempoT)
 		if (mp->m_seek.GetSafeHwnd())
 			mp->m_seek.SetAB(-1, -1);
 	}
+	(void)tempoT;
 	if (u && u->loopATick >= 0 && u->loopBTick > u->loopATick && mp && og && ::IsWindow(og->GetSafeHwnd())) {
 		/* defer A-B until duration known — mark intent via slider later in Sync */
-		(void)tempoT;
 	}
-	MpPushPlayHistory(pl->pc[idx].fol, pl->pc[idx].name);
-	/* Temp score bakes must not block on resume-prompt (returns FALSE = deferred). */
-	const int tempScore = (wcsstr(path, L"ogg_sasami_score") != NULL) ? 1 : 0;
-	if (!tempScore && !OggPrepareResumeBeforePlayback(pl->pc[idx].fol))
-		return 0;
+	/* %TEMP% bake: do not add to playlist, do not move the list cursor, no resume prompt. */
 	if (og && ::IsWindow(og->GetSafeHwnd()))
 		RequestPlaybackRestart(og->GetSafeHwnd());
 	return 1;
@@ -6009,6 +6028,7 @@ void ScStaffStopHostPreview(ScStaffUi* u)
 	endflg = 1;
 	if (og && ::IsWindow(og->GetSafeHwnd()))
 		og->stop1();
+	ScStaffRestorePlaylistGlobals();
 }
 
 int ScStaffCopyEventsFromMarker(const ScEvent* src, int srcN, uint32_t marker,

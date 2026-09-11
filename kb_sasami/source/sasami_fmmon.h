@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 // OPNA FM monitor dump — kbsasami (raira=1) writes, 本体 FMモニタ reads.
 #include <stdint.h>
 
@@ -36,7 +36,7 @@ struct SasamiFmMonDump {
 	uint8_t exMidi[3];
 	uint8_t ssgMidi[3];
 	uint8_t dumpFlags;        /* bit0=keys-only bit1=PPZ bit2=FM3EX bit3=MSX bit4=FMP bit5=OPM */
-	uint8_t pad6[3];          /* [0]=MSX deviceMask  [1]=chip profile  [2]=VIEW_* caps */
+	uint8_t pad6[3];          /* [0]=MSX deviceMask  [1]=chip profile  [2]=VIEW_* | CLOCK_DUMP */
 };
 
 /* リングヘッダのみ（slot 全体 ~320KB をスタックに置かないこと） */
@@ -100,10 +100,18 @@ enum {
 enum {
 	SASAMI_FMMON_VIEW_KEYS = 1,
 	SASAMI_FMMON_VIEW_REGS = 2,
-	SASAMI_FMMON_VIEW_PANELS = 4
+	SASAMI_FMMON_VIEW_PANELS = 4,
+	/* pad6[2]: VIEW_* | CLOCK_DUMP。CLOCK_DUMP なら可聴位置は dump.curSample−ラグ */
+	SASAMI_FMMON_CLOCK_DUMP = 8
 };
 
 #ifdef __cplusplus
+inline bool SasamiFmMonDumpClock(const SasamiFmMonDump& d)
+{
+	if (d.version < 6) return false;
+	if (d.dumpFlags & SASAMI_FMMON_FLAG_KEYSONLY) return true;
+	return (d.pad6[2] & SASAMI_FMMON_CLOCK_DUMP) != 0;
+}
 inline bool SasamiFmMonMagicOk(const SasamiFmMonDump& d)
 {
 	return d.magic[0] == 'O' && d.magic[1] == 'P' && d.magic[2] == 'N' && d.magic[3] == 'A'

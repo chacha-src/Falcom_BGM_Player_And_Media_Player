@@ -41,6 +41,7 @@
 #include <vector>
 
 #include "ScWgcCapture.h"
+#include "CCustomControl.h"
 
 #pragma comment(lib, "d3d11.lib")
 #pragma comment(lib, "dxgi.lib")
@@ -808,17 +809,26 @@ BOOL ScWgcCaptureWindowBgraCrop(HWND hwnd, BYTE* dstBgra, int dstW, int dstH, in
 	int cropX, int cropY, int cropW, int cropH)
 {
 	if (!hwnd || !dstBgra || !IsWindow(hwnd)) return FALSE;
+	/* PrintEnter 禁止（ライブ取り込み中に WM_PAINT を潰すとリスト点滅）。BufferedPaint のみ抑止 */
+	CCC_CaptureEnter();
+	BOOL ok = FALSE;
 	std::shared_ptr<WgcSession> s = EnsureWindowSession(hwnd);
-	if (!s || s->closed) return FALSE;
-	return CaptureSessionToBgra(s.get(), dstBgra, dstW, dstH, dstStride, cropX, cropY, cropW, cropH);
+	if (s && !s->closed)
+		ok = CaptureSessionToBgra(s.get(), dstBgra, dstW, dstH, dstStride, cropX, cropY, cropW, cropH);
+	CCC_CaptureLeave();
+	return ok;
 }
 
 BOOL ScWgcCaptureMonitorBgra(HMONITOR mon, BYTE* dstBgra, int dstW, int dstH, int dstStride)
 {
 	if (!mon || !dstBgra) return FALSE;
+	CCC_CaptureEnter();
+	BOOL ok = FALSE;
 	std::shared_ptr<WgcSession> s = EnsureMonitorSession(mon);
-	if (!s || s->closed) return FALSE;
-	return CaptureSessionToBgra(s.get(), dstBgra, dstW, dstH, dstStride, 0, 0, 0, 0);
+	if (s && !s->closed)
+		ok = CaptureSessionToBgra(s.get(), dstBgra, dstW, dstH, dstStride, 0, 0, 0, 0);
+	CCC_CaptureLeave();
+	return ok;
 }
 
 static void ScFxCpuGray(BYTE* bgra, int w, int h, int stride)
