@@ -186,6 +186,13 @@ public:
 	int Wsg63701() const { return wsg63701_; }
 	unsigned Sys16RomBoard() const { return sys16RomBoard_; }
 	uint8_t ToaplanYmPort() const { return toaplanYmPort_; }
+	int ToaplanKaneko() const { return toaplanKaneko_ == 1; }
+	int SlapfghtAy() const { return toaplanKaneko_ == 3; }
+	uint16_t ToaplanMail() const { return toaplanKaneko_ == 2 ? 0xc000u : 0x8000u; }
+	uint16_t ToaplanReady() const { return toaplanKaneko_ == 2 ? 0xc002u : 0x8001u; }
+	int TecmoOpl() const { return tecmoOpl_; }
+	/* Sailor Moon / Air Gallet: a 0 latch NMI is the main-loop tick. */
+	void CaveEmptyLatch() { soundCmd_ = 0; soundCmdWord_ = 0; }
 	int QsZn() const { return qsZn_; }
 	/* True once when a deferred ZN second-byte NMI should be pulsed. */
 	int ZnTakeDeferredNmi()
@@ -496,14 +503,18 @@ public:
 	struct mc6809* NamcoM6809Cpu() { return namcoM6809_; }
 	uint8_t NamcoM6809Read8(uint16_t addr);
 	void NamcoM6809Write8(uint16_t addr, uint8_t v);
+	/* digdug2/todruaga/toypop/motos IRQ copies from $80 (LDU #$0080). */
+	int WsgMail80();
 	void NamcoM6809SyncIrqs();
 	void NamcoM6809SetBank(unsigned bank);
 	unsigned NamcoM6809Bank() const { return namcoBank_; }
 	void SetNamcoMailFlag(uint8_t f);
 	uint8_t NamcoMailFlag() const;
 	unsigned NamcoMailOff() const { return namcoMailOff_; }
-	/* Sys2 song-table record type ($20=BGM gate, $64=alt, $21=variant). */
+	/* Sys2 song-table record type ($20=BGM gate, $64=alt, $21=variant).
+	   Sys2SongInfo also returns the record address and a header peek. */
 	int Sys2SongRecType(unsigned songLo) const;
+	int Sys2SongInfo(unsigned songLo, unsigned* recAddr, uint8_t* hdr, unsigned hdrCap) const;
 	const uint8_t* NamcoTriRam() const { return namcoTriRam_; }
 
 	/* ---- Namco C352 + H8/3002 (System 12 / ND-1) ----
@@ -523,11 +534,18 @@ public:
 	int M37702C140() const { return m37702C140_; }
 	int SnkMapKind() const { return snkMapKind_; } /* 0=snk68 I/O, 1=classic dual OPL mem */
 	int KonamiK7232Map() const { return konamiK7232Map_; }
+	/* 0 = Rastan/Asuka (YM @9000, PC060HA @A000)
+	   1 = darius (YM2203 @9000 + YM2203 #2 @A000, PC060HA @B000)
+	   2 = kikikai (YM2203 @C000, song byte in shared RAM 9FFF, vblank IRQ)
+	   3 = tokio (YM2203 @B000, latch @9000, NMI A800/A000)
+	   4 = bublbobl (YM2203 @9000, YM3526 @A000, latch @B000, NMI B001/B002) */
+	int TaitoOpmMap() const { return taitoOpmMap_; }
 	int AlphaNmiMask() const { return alphaNmiMask_; }
+	unsigned AlphaOpllWrites() const;
 	void AlphaMixOpll(int16_t* stereo, int frames);
 	uint8_t SnkStatus() const { return snkStatus_; }
 	void SnkSetYmIrq(int which, int on);
-	/* terracreMap_: 0=terracre C000 RAM + I/O latch; 1=armedf/terraf F800 RAM + shifted latch */
+	/* terracreMap_: 0=terracre C000 RAM; 1=armedf/terraf F800; 2=cclimbr2/legion C000-FFFF */
 	int TerracreMap() const { return terracreMap_; }
 	int M68kPcmKind() const { return m68kPcmKind_; }
 	/* Called from the 68000 slice loop so the vblank line ticks with the CPU
@@ -599,8 +617,12 @@ private:
 	int m37702C140_; /* NA-1/NB-1: C219/C140 stand-in (not C352) */
 	int snkMapKind_; /* 0=snk68 YM3812 I/O+NMI; 1=classic mem-map dual OPL+IRQ */
 	uint8_t snkStatus_; /* classic F800 status (ym1|ym2|busy|cmd) */
-	int terracreMap_; /* 0=terracre, 1=armedf/terraf */
-	int tecmoOpl_;    /* TECMO16 map with a YM3812 instead of a YM2151 */
+	int terracreMap_; /* 0=terracre, 1=armedf/terraf, 2=cclimbr2/legion */
+	int tecmoOpl_;    /* 0=YM2151 FC04; 1=rygar YM3526@8000 RAM@4000 latch@C000
+	                     2=gemini YM3812@A000 RAM@8000 latch@C000
+	                     3=spbactn YM3812 FC04; 4=tbowl YM3812 D000+D800 RAM@C000 latch@E010
+	                     5=Cave agallet/sailormn: I/O YM50 + OKI60/80, latch NMI
+	                     6=wc90 YM2608 @F800, RAM F000, latch FC10 NMI */
 	/* M68K_PCM: 1 = Seta X1-010 RAM window, 2 = Cave YMZ280B port pair.
 	   Every one of these games decodes its chip and its work RAM at a
 	   different address, so the map comes from a per-game spec rather than
@@ -691,8 +713,10 @@ private:
 	   2 = fromanc/welltris (YM@08), 3 = Psikyo gunbird (YM@04, latch@08). */
 	int vsIoKind_;
 	/* Konami K007232-era YM2151 map: 0 = scontra/twin16 (latch A000, YM C000),
-	   1 = crimfght/aliens (latch C000, YM A000). */
+	   1 = crimfght/aliens (latch C000, YM A000),
+	   2 = gradius3 (latch F010, YM F030, RAM F800). */
 	int konamiK7232Map_;
+	int taitoOpmMap_;
 	/* Alpha 68K-II: emu2413 OPLL + YM2203 port-A NMI gate. */
 	void* alphaOpll_;
 	uint8_t alphaYmAddr_;
@@ -707,6 +731,7 @@ private:
 	uint8_t sjNmiMaskSeen_;
 	uint8_t toaplanTimerA_; /* soft Timer-A doorbell for ISR music path */
 	uint8_t toaplanYmPort_; /* YM3812 base port: 00/60/70/A8 */
+	uint8_t toaplanKaneko_; /* 1 = snowbros Kaneko I/O; 2 = Wardner C000 mailbox; 3 = slapfght dual AY */
 	uint8_t ayAddr_[3];
 
 	/* Seibu SEI80BU encrypted Z80 + YM3812 + OKI. */

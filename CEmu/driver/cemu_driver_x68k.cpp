@@ -253,6 +253,22 @@ static int driverRteIrq6(CHardX68k* hw, int skipSpin)
 	return 1;
 }
 
+/* MIDI_DRV.68K waits `tst.b (a4) / bpl` with A4=$EAFA09 (YM3802 DSR).
+   Uninstall / BOOT jsr the wait without reloading A4, so A4=0 reads ROM
+   byte 0 and the branch never retires. */
+static void CDriverX68kFixMidiA4(CHardX68k* hw)
+{
+	if (!hw) return;
+	const unsigned pc = (unsigned)m68k_get_reg(NULL, M68K_REG_PC) & 0xffffffu;
+	if (hw->Read16(pc) != 0x4a14u) return;
+	if (hw->Read32((pc + 2u) & 0xffffffu) != 0x6a00fffcu) return;
+	const unsigned a4 = (unsigned)m68k_get_reg(NULL, M68K_REG_A4) & 0xffffffu;
+	if ((a4 >= 0xeafa00u && a4 <= 0xeafa0fu)
+		|| (a4 >= 0xefa000u && a4 <= 0xefa00fu))
+		return;
+	m68k_set_reg(M68K_REG_A4, 0x00eafa09u);
+}
+
 CDriverX68k::~CDriverX68k()
 {
 	Close();
@@ -948,6 +964,7 @@ void CDriverX68k::RunCycles(int cycles)
 {
 	if (!hw_ || cycles <= 0) return;
 	CEmuHardX68kSetActive(hw_);
+	CDriverX68kFixMidiA4(hw_);
 	/* Always advance OPM by the full wall-time quantum. m68k_execute may
 	   return early on $E00800 idle / end_timeslice — tying chip time to
 	   `got` made Timer B (and music) run ~half speed while audio kept

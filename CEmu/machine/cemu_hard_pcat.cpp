@@ -509,6 +509,63 @@ void RepairAsoundPlayEnable(uint8_t* mem)
 		mem[aa] = 0xFF;
 }
 
+/* MicroProse RSOUND.DRV (Ultimate NFL / GMRESET family): song 0x0A is
+   `lea bx, start / mov [732h], bx / ret` and the INT 8 dispatcher only
+   calls that ptr after [730h] counts down. Cold DGROUP leaves [730h]=0,
+   so the title stays SysEx/CC. ASOUND/GSOUND start the same song
+   immediately — retarget every deferred jump-table slot at `start`. */
+static int RepairMpsDeferredSong(uint8_t* mem)
+{
+	if (!mem) return 0;
+	const uint16_t comOff = (uint16_t)(mem[0x7F * 4] | (mem[0x7F * 4 + 1] << 8));
+	const uint16_t comCs = (uint16_t)(mem[0x7F * 4 + 2] | (mem[0x7F * 4 + 3] << 8));
+	if (comOff != 0x01B9) return 0;
+	if (comCs < 0x0100 || comCs >= 0xA000 || comCs == DOS98_TRAMP_SEG)
+		return 0;
+	const unsigned com = (unsigned)comCs << 4;
+	if (com + 0x331 >= 0x200000) return 0;
+	if (mem[com + 0x1B9] != 0xFA || mem[com + 0x1BA] != 0x60)
+		return 0;
+	const uint16_t imgCs = PcatMem16(mem, com + 0x32F);
+	if (imgCs < 0x0100 || imgCs >= 0xA000) return 0;
+	const unsigned img = (unsigned)imgCs << 4;
+	if (img + 0x3A >= 0x200000) return 0;
+	const uint16_t playOff = PcatMem16(mem, img + 0x34);
+	if (playOff < 0x40 || playOff > 0x4000) return 0;
+	const unsigned play = img + playOff;
+	if (play + 0x20 >= 0x200000) return 0;
+	if (mem[play] != 0xC8 || mem[play + 1] != 0 || mem[play + 2] != 0
+		|| mem[play + 3] != 0)
+		return 0;
+	uint16_t tabOff = 0;
+	for (unsigned o = 0; o + 5 < 0x30; o++) {
+		if (mem[play + o] == 0xD1 && mem[play + o + 1] == 0xE3
+			&& mem[play + o + 2] == 0x2E && mem[play + o + 3] == 0xFF
+			&& mem[play + o + 4] == 0x97) {
+			tabOff = PcatMem16(mem, play + o + 5);
+			break;
+		}
+	}
+	if (tabOff < 0x100 || tabOff > 0x7000) return 0;
+	if (img + tabOff + 0x30 >= 0x200000) return 0;
+	int n = 0;
+	for (unsigned i = 0; i <= 0x17; i++) {
+		const unsigned slot = img + tabOff + i * 2u;
+		const uint16_t tgt = PcatMem16(mem, slot);
+		if (tgt < 0x100 || tgt > 0x7000) continue;
+		if (img + tgt + 9 >= 0x200000) continue;
+		if (mem[img + tgt] != 0x8D || mem[img + tgt + 1] != 0x1E) continue;
+		const uint16_t start = PcatMem16(mem, img + tgt + 2);
+		if (start != (uint16_t)(tgt + 9)) continue;
+		if (mem[img + tgt + 4] != 0x89 || mem[img + tgt + 5] != 0x1E) continue;
+		if (PcatMem16(mem, img + tgt + 6) != 0x0732) continue;
+		if (mem[img + tgt + 8] != 0xC3) continue;
+		PcatPut16(mem, slot, start);
+		n++;
+	}
+	return n;
+}
+
 /* Pacific Islands ADLIB.BIN: INT 8 far-calls [21A] (tick=0000, CS at [21C])
    but INT 7Fh song select uses ES=[218]. If the loader only filled the tick
    pointer, [218] stays 0, ES writes hit BIOS, and 0x10/0x11 stay the boot
@@ -635,22 +692,18 @@ void PcatAilTrace(const char* fmt, ...);
 int PcatFindHootInt8(const uint8_t* mem, uint16_t* segOut, uint16_t* offOut)
 {
 	if (!mem || !segOut || !offOut) return 0;
-	auto csHasHootIo = [&](uint16_t seg) -> int {
-		if (seg < 0x0100 || seg >= 0xA000) return 0;
+	auto looksHootEntry = [&](uint16_t seg) -> int {
+		if (seg < 0x1200 || seg >= 0xA000) return 0;
 		const unsigned lin = (unsigned)seg << 4;
-		for (unsigned i = 0; i < 0x4000 && lin + i + 3 < 0x200000; i++) {
-			if (mem[lin + i] == 0xBA && mem[lin + i + 1] == 0xE0
-				&& mem[lin + i + 2] == 0x07 && mem[lin + i + 3] == 0xEC)
-				return 1;
-		}
-		return 0;
+		if (lin + 3 >= 0x200000) return 0;
+		/* HOOT.EXE CS:IP 0000:0000 is `mov dx,0492h`. */
+		return (mem[lin] == 0xBA && mem[lin + 1] == 0x92 && mem[lin + 2] == 0x04) ? 1 : 0;
 	};
-	static const uint16_t kOff[] = { 0x040E, 0x0411, 0x0417, 0x0400, 0 };
+	static const uint16_t kOff[] = { 0x040E, 0x0411, 0x0417, 0x0400, 0x080E, 0 };
 	auto trySeg = [&](uint16_t seg) -> int {
+		if (seg < 0x1200 || seg >= 0xA000) return 0;
 		for (int i = 0; kOff[i]; i++) {
 			if (!PcatHootInt8Sig(mem, ((unsigned)seg << 4) + kOff[i]))
-				continue;
-			if (!csHasHootIo(seg))
 				continue;
 			*segOut = seg;
 			*offOut = kOff[i];
@@ -660,11 +713,20 @@ int PcatFindHootInt8(const uint8_t* mem, uint16_t* segOut, uint16_t* offOut)
 	};
 	const uint16_t i7f = (uint16_t)(mem[0x7F * 4 + 2] | (mem[0x7F * 4 + 3] << 8));
 	if (trySeg(i7f)) return 1;
-	/* Blackthorne's HOOT.EXE keeps `in al,07E0h` at CS:~1FD4h. A match
-	   below 1200h (1011:040E) is DOS residue and mutes MPU packs. */
-	for (unsigned s = 0x1200; s < 0x4000; s++) {
-		if ((uint16_t)s == i7f) continue;
+	/* Prefer a real HOOT.EXE image (entry + helper). The old 0x4000 cap
+	   missed images loaded high; the 07E0 scan was O(n*16K) per IRQ0. */
+	for (unsigned s = 0x1200; s < 0xA000; s++) {
+		if (!looksHootEntry((uint16_t)s)) continue;
 		if (trySeg((uint16_t)s)) return 1;
+	}
+	/* Helper only: derive CS from a CS:040Eh hit. */
+	for (unsigned a = 0x12000u + 0x040Eu; a + 6 < 0xA0000u; a += 0x10u) {
+		if (!PcatHootInt8Sig(mem, a)) continue;
+		const uint16_t seg = (uint16_t)((a - 0x040Eu) >> 4);
+		if (seg < 0x1200) continue;
+		*segOut = seg;
+		*offOut = 0x040E;
+		return 1;
 	}
 	return 0;
 }
@@ -688,12 +750,20 @@ int PcatSegHasAilApi(const uint8_t* mem, uint16_t seg, uint16_t api)
 int PcatApiTimerAt(const uint8_t* mem, unsigned a)
 {
 	/* AIL2 API_timer: `inc word [CS:0006]` (Hanse/Omar) or `[CS:000E]`
-	   (Lost Vikings) / cld / 6+ register pushes. */
+	   (Lost Vikings / HOOT v1.1) / cld / 6+ register pushes.
+	   v1.1 is `2E FF 06 0E 00 FC` at CS:0416h — matching at 0417h (the FF)
+	   ran one byte into the instruction and hung Blackthorne. */
 	if (!mem || a + 24 >= 0x200000) return 0;
+	if (a >= 1 && mem[a - 1] == 0x2E) return 0;
 	unsigned s = 0;
-	if (mem[a] == 0xFF && mem[a + 1] == 0x06 && mem[a + 4] == 0xFC
-		&& mem[a + 3] == 0x00 && (mem[a + 2] == 0x06 || mem[a + 2] == 0x0E))
-		s = 5;
+	unsigned p = a;
+	if (mem[a] == 0x2E) {
+		p = a + 1;
+		if (p + 24 >= 0x200000) return 0;
+	}
+	if (mem[p] == 0xFF && mem[p + 1] == 0x06 && mem[p + 4] == 0xFC
+		&& mem[p + 3] == 0x00 && (mem[p + 2] == 0x06 || mem[p + 2] == 0x0E))
+		s = (unsigned)(p - a) + 5;
 	else
 		return 0;
 	int pushes = 0;
@@ -704,12 +774,30 @@ int PcatApiTimerAt(const uint8_t* mem, unsigned a)
 	return (pushes >= 6) ? 1 : 0;
 }
 
+static int PcatI8LooksLikeHootAil(const uint8_t* mem)
+{
+	if (!mem) return 0;
+	const uint16_t off = (uint16_t)(mem[0x08 * 4] | (mem[0x08 * 4 + 1] << 8));
+	const uint16_t seg = (uint16_t)(mem[0x08 * 4 + 2] | (mem[0x08 * 4 + 3] << 8));
+	if (seg < 0x0100 || seg >= 0xA000 || seg == DOS98_TRAMP_SEG)
+		return 0;
+	if (off == 0x040E || off == 0x0416)
+		return 1;
+	const unsigned lin = ((unsigned)seg << 4) + off;
+	return PcatApiTimerAt(mem, lin) || PcatHootInt8Sig(mem, lin);
+}
+
 unsigned PcatFindApiTimerOff(const uint8_t* mem, uint16_t seg)
 {
 	if (!mem || seg < 0x0100 || seg >= 0xA000) return 0;
 	const unsigned base = (unsigned)seg << 4;
+	static const unsigned kFirst[] = { 0x040E, 0x0416, 0x0417, 0 };
+	for (int i = 0; kFirst[i]; i++) {
+		if (PcatApiTimerAt(mem, base + kFirst[i]))
+			return kFirst[i];
+	}
 	for (unsigned o = 0x10; o + 24 < 0x8000; o++) {
-		if (o == 0x040E || o == 0x040F) continue;
+		if (o == 0x040E || o == 0x040F || o == 0x0416 || o == 0x0417) continue;
 		if (PcatApiTimerAt(mem, base + o))
 			return o;
 	}
@@ -892,6 +980,19 @@ static uint8_t s_cmos[128];
 static uint8_t s_picSlaveMask;
 static uint8_t s_picSlaveIcw;
 static uint8_t s_picSlaveIcw1;
+/* MPU-401 intelligent CTH — file-static so CHardPcat layout stays put. */
+static int s_mpuClockToHost;
+static int s_mpuCthArmed;
+static int s_mpuPlay;
+/* Mok .RLP wants DATA REQUEST F0; KAJA MMD.COM INT 71 ISR only clocks on FD. */
+static int s_mpuMokDataReq;
+static int s_ailFarCli;
+static uint8_t s_mpuTempo = 0x40;
+static unsigned s_mpuTimebase = 120;
+static uint64_t s_mpuCthResidual;
+static int s_mpuInService;
+static uint16_t s_mpuIsrSs;
+static uint16_t s_mpuIsrSp;
 
 static void PcatCmosInit()
 {
@@ -900,6 +1001,14 @@ static void PcatCmosInit()
 	s_picSlaveMask = 0xFF;
 	s_picSlaveIcw = 0;
 	s_picSlaveIcw1 = 0;
+	s_mpuClockToHost = 0;
+	s_mpuCthArmed = 0;
+	s_mpuPlay = 0;
+	s_mpuMokDataReq = 0;
+	s_mpuTempo = 0x40;
+	s_mpuTimebase = 120;
+	s_mpuCthResidual = 0;
+	s_mpuInService = 0;
 	s_cmos[0x0A] = 0x26; /* 32.768 kHz, rate 6 */
 	s_cmos[0x0B] = 0x02; /* 24-hour */
 	s_cmos[0x0D] = 0x80; /* battery good */
@@ -1074,6 +1183,7 @@ CHardPcat::CHardPcat()
 	, mpuRxFull_(0)
 	, mpuAckR_(0)
 	, mpuAckW_(0)
+	, mpuCmdByte_(0)
 	, midiBytes_(NULL)
 	, midiDelta_(NULL)
 	, midiLastCycle_(0)
@@ -1416,6 +1526,21 @@ void CHardPcat::PitTick(uint64_t cpuCycles)
 void CHardPcat::TickSide(uint64_t cpuCycles)
 {
 	PitTick(cpuCycles);
+	if (s_mpuCthArmed && s_mpuClockToHost && !mpuUart_ && cpuHz_ > 0) {
+		unsigned hz = (unsigned)s_mpuTempo * s_mpuTimebase;
+		hz /= 60u;
+		if (hz < 60u) hz = 60u;
+		if (hz > 4000u) hz = 4000u;
+		s_mpuCthResidual += cpuCycles * (uint64_t)hz;
+		while (s_mpuCthResidual >= (uint64_t)cpuHz_) {
+			if (mpuAckR_ != mpuAckW_ || mpuRxFull_)
+				break;
+			s_mpuCthResidual -= (uint64_t)cpuHz_;
+			/* Hired Guns Mok CODE.COM streams .RLP on DATA REQUEST (F0).
+			   AT MMD.COM's INT 71 ISR only sequences on FD (`cmp al,0FDh`). */
+			MidiPushAck((s_mpuPlay && s_mpuMokDataReq) ? (uint8_t)0xf0 : (uint8_t)0xfd);
+		}
+	}
 }
 
 void CHardPcat::RepairSilpDriverFar()
@@ -1911,7 +2036,6 @@ void CHardPcat::FixHootMidiInt8()
 	   old 7Fh:040Eh-only plant never fired. Scan for the helper. Do not
 	   plant API_timer or rewrite AIL [000E] (hang / Death mute). */
 	if (!modeMidi_ || modeSilp_) return;
-	if (!hootAdvSeg_ && hootAdvName_[0] == 0) return;
 	uint8_t* mem = np2_mem();
 	if (!mem) return;
 	const uint16_t i8Off = (uint16_t)(mem[0x08 * 4] | (mem[0x08 * 4 + 1] << 8));
@@ -1919,19 +2043,44 @@ void CHardPcat::FixHootMidiInt8()
 	if (i8Seg >= 0x0100 && i8Seg < 0xA000 && i8Off != 0
 		&& PcatHootInt8Sig(mem, ((unsigned)i8Seg << 4) + i8Off))
 		return;
-	/* Azrael already parked a working helper at a non-zero offset. Only
-	   retarget the EXE-entry leftover (CS:0000) so we do not steal INT8
-	   from a live sequence. */
-	if (i8Off != 0) return;
-	/* Blackthorne / WarCraft 2 leave INT8 at HOOT CS:0000 (MZ CS:IP). The
-	   helper is the same CS:040Eh; INT 7Fh often points at AIL instead. */
-	if (i8Seg >= 0x1200 && i8Seg < 0xA000
-		&& PcatHootInt8Sig(mem, ((unsigned)i8Seg << 4) + 0x040Eu)) {
-		mem[0x08 * 4] = 0x0E;
-		mem[0x08 * 4 + 1] = 0x04;
-		mem[0x08 * 4 + 2] = (uint8_t)(i8Seg & 0xff);
-		mem[0x08 * 4 + 3] = (uint8_t)(i8Seg >> 8);
+	const int tramp = (i8Seg == (uint16_t)DOS98_TRAMP_SEG) || (i8Seg < 0x0100);
+	const int exeEntry = (i8Off == 0 && i8Seg >= 0x0100 && i8Seg < 0xA000);
+	/* Live non-entry ISR (Azrael 040Eh, silp, CODE.COM). Do not steal.
+	   Trampoline at Fix time used to return here; HOOT then AH=25s CS:0000
+	   and DeliverIrqs skips EXE-entry, so Blackthorne never saw IRQ0. */
+	if (!tramp && !exeEntry)
 		return;
+	/* Blackthorne / WarCraft 2 leave INT8 at HOOT CS:0000 (MZ CS:IP). The
+	   helper is the same CS:040Eh; INT 7Fh often points at AIL instead.
+	   Do not require PrepHootAilState's ADV name — INT 7Fh may be AIL. */
+	if (exeEntry && i8Seg >= 0x1200 && i8Seg < 0xA000) {
+		const unsigned base = (unsigned)i8Seg << 4;
+		static const uint16_t kTry[] = { 0x040E, 0x0416, 0x080E, 0x0411, 0x0417, 0 };
+		for (int t = 0; kTry[t]; t++) {
+			if (PcatApiTimerAt(mem, base + kTry[t])) {
+				mem[0x08 * 4] = (uint8_t)(kTry[t] & 0xff);
+				mem[0x08 * 4 + 1] = (uint8_t)(kTry[t] >> 8);
+				mem[0x08 * 4 + 2] = (uint8_t)(i8Seg & 0xff);
+				mem[0x08 * 4 + 3] = (uint8_t)(i8Seg >> 8);
+				return;
+			}
+			if (!PcatHootInt8Sig(mem, base + kTry[t]))
+				continue;
+			mem[0x08 * 4] = (uint8_t)(kTry[t] & 0xff);
+			mem[0x08 * 4 + 1] = (uint8_t)(kTry[t] >> 8);
+			mem[0x08 * 4 + 2] = (uint8_t)(i8Seg & 0xff);
+			mem[0x08 * 4 + 3] = (uint8_t)(i8Seg >> 8);
+			return;
+		}
+		for (unsigned o = 0; o + 6 < 0x2000u && base + o + 6 < 0x200000u; o++) {
+			if (!PcatHootInt8Sig(mem, base + o))
+				continue;
+			mem[0x08 * 4] = (uint8_t)(o & 0xff);
+			mem[0x08 * 4 + 1] = (uint8_t)(o >> 8);
+			mem[0x08 * 4 + 2] = (uint8_t)(i8Seg & 0xff);
+			mem[0x08 * 4 + 3] = (uint8_t)(i8Seg >> 8);
+			return;
+		}
 	}
 	uint16_t hs = 0, ho = 0;
 	if (!PcatFindHootInt8(mem, &hs, &ho)) return;
@@ -1940,6 +2089,140 @@ void CHardPcat::FixHootMidiInt8()
 	mem[0x08 * 4 + 1] = (uint8_t)(ho >> 8);
 	mem[0x08 * 4 + 2] = (uint8_t)(hs & 0xff);
 	mem[0x08 * 4 + 3] = (uint8_t)(hs >> 8);
+}
+
+void CHardPcat::StartHootMidiSequence()
+{
+	/* Mok OPL HOOT-driver v1.1 plants API_timer at CS:0416h. Seed MIDI.ADV
+	   IO=330 if detect left it 0. Do not FarCall AIL 100/151/170 — those
+	   thunks hang on this image and burn the IRQ0 budget. */
+	if (!modeMidi_ || modeSilp_) return;
+	uint8_t* mem = np2_mem();
+	if (!mem || !hootAdvSeg_) return;
+	const uint16_t i8Off = (uint16_t)(mem[0x08 * 4] | (mem[0x08 * 4 + 1] << 8));
+	if (i8Off != 0x0416) return;
+	const unsigned a0 = (unsigned)hootAdvSeg_ << 4;
+	auto pokeIo = [&](uint16_t o, uint16_t port) {
+		if (!hootAdvSize_ || (unsigned)o + 1u >= hootAdvSize_) return;
+		if (a0 + o + 1 >= 0x200000) return;
+		const uint16_t v = (uint16_t)(mem[a0 + o] | (mem[a0 + o + 1] << 8));
+		if (v == port) return;
+		if (v != 0 && v != 0x388 && v != 0x220 && v != 0x330 && v != 0x331)
+			return;
+		mem[a0 + o] = (uint8_t)(port & 0xff);
+		mem[a0 + o + 1] = (uint8_t)(port >> 8);
+	};
+	pokeIo(0x119, 0x330);
+	pokeIo(0x11B, 0x331);
+	if (hootAdvIoOff_ && hootAdvIoOff_ != 0x11B)
+		pokeIo(hootAdvIoOff_, 0x330);
+	/* v1.1 API_timer does `cmp word [si+0076h],2`. HOOT often leaves
+	   registered timers stopped (status=1). */
+	const uint16_t i8Seg = (uint16_t)(mem[0x08 * 4 + 2] | (mem[0x08 * 4 + 3] << 8));
+	if (i8Seg >= 0x1200 && i8Seg < 0xA000) {
+		const unsigned b = (unsigned)i8Seg << 4;
+		for (int i = 0; i < 17; i++) {
+			const unsigned a = b + 0x76u + (unsigned)i * 2u;
+			if (a + 1 >= 0x200000) break;
+			const uint16_t st = (uint16_t)(mem[a] | (mem[a + 1] << 8));
+			if (st == 1) {
+				mem[a] = 2;
+				mem[a + 1] = 0;
+			}
+		}
+	}
+	/* MIDI.ADV [04BF] is the registered-sequence count. v1.02 HOOT fills it
+	   via INT 7Fh; v1.1 inits the MPU (GM reset) but never calls AIL 151. */
+	if (!hootAdvSeg_ || hootAdvSize_ < 0x04C4u) return;
+	const unsigned adv = (unsigned)hootAdvSeg_ << 4;
+	if (adv + 0x04C3u >= 0x200000) return;
+	if ((uint16_t)(mem[adv + 0x04BF] | (mem[adv + 0x04C0] << 8)) != 0)
+		return;
+	unsigned xmidLin = 0;
+	auto inAdv = [&](unsigned lin) -> int {
+		return (lin >= adv && lin < adv + hootAdvSize_) ? 1 : 0;
+	};
+	for (unsigned a = 0x10000; a + 12 < 0xA0000; a++) {
+		if (mem[a] == 'F' && mem[a + 1] == 'O' && mem[a + 2] == 'R'
+			&& mem[a + 3] == 'M'
+			&& mem[a + 8] == 'X' && mem[a + 9] == 'M' && mem[a + 10] == 'I'
+			&& mem[a + 11] == 'D') {
+			if (inAdv(a)) continue;
+			xmidLin = a;
+			break;
+		}
+	}
+	if (!xmidLin && dosSong_[0]) {
+		const CEmuDos98File* xf = dos_.FindFile(dosSong_);
+		if (xf && xf->data && xf->size >= 12) {
+			const uint16_t put = 0x9A00;
+			const unsigned n = xf->size < 0x4000u ? xf->size : 0x4000u;
+			memcpy(mem + ((unsigned)put << 4), xf->data, n);
+			PcatXmiWipeSeqTextMeta(mem + ((unsigned)put << 4), n);
+			for (unsigned o = 0; o + 12 < n; o++) {
+				if (xf->data[o] == 'F' && xf->data[o + 1] == 'O'
+					&& xf->data[o + 2] == 'R' && xf->data[o + 3] == 'M'
+					&& xf->data[o + 8] == 'X' && xf->data[o + 9] == 'M'
+					&& xf->data[o + 10] == 'I' && xf->data[o + 11] == 'D') {
+					xmidLin = ((unsigned)put << 4) + o;
+					break;
+				}
+			}
+		}
+	}
+	if (!xmidLin || inAdv(xmidLin)) return;
+	PcatXmiWipeSeqTextMeta(mem + xmidLin, 0x4000u);
+	s_ailFarCli = 1;
+	uint16_t stSeg = 0x8F00, ctSeg = 0x8E80;
+	memset(mem + ((unsigned)stSeg << 4), 0, 2048);
+	memset(mem + ((unsigned)ctSeg << 4), 0, 1024);
+	const uint16_t formSeg = (uint16_t)(xmidLin >> 4);
+	const uint16_t formOff = (uint16_t)(xmidLin & 0xF);
+	const uint64_t budget = (uint64_t)cpuHz_ / 2ull;
+	uint16_t words[8];
+	uint16_t hSeq = 0xFFFF;
+	uint16_t hDrvr = 0;
+	for (int h = 0; h < 4 && hSeq == 0xFFFF; h++) {
+		words[0] = ctSeg; words[1] = 0;
+		words[2] = stSeg; words[3] = 0;
+		words[4] = 0;
+		words[5] = formSeg; words[6] = formOff;
+		words[7] = (uint16_t)h;
+		if (!FarCallAil(151, words, 8, budget))
+			continue;
+		const uint16_t ax = np2_reg_get(NP2_R_AX);
+		if (ax != 0xFFFF) {
+			hSeq = ax;
+			hDrvr = (uint16_t)h;
+		}
+	}
+	if (hSeq == 0xFFFF) {
+		s_ailFarCli = 0;
+		return;
+	}
+	words[0] = hSeq;
+	words[1] = hDrvr;
+	FarCallAil(170, words, 2, budget);
+	s_ailFarCli = 0;
+	/* Nested IRQ0 during 151/170 can leave MIDI.ADV [04C3] stuck (re-entry
+	   skip without the matching DEC) so later ticks never serve. */
+	mem[adv + 0x04C3] = 0;
+	mem[adv + 0x04C4] = 0;
+	{
+		const unsigned stLin = ((unsigned)stSeg << 4) + 0x1Au;
+		if (stLin + 1 < 0x200000 && mem[stLin] == 0 && mem[stLin + 1] == 0) {
+			mem[stLin] = 1;
+			mem[stLin + 1] = 0;
+		}
+	}
+	if (i8Seg >= 0x1200 && i8Seg < 0xA000)
+		hootAilCs_ = i8Seg;
+	RestoreHootIdleTrampoline(mem);
+	np2_reg_set(NP2_R_CS, (uint16_t)DOS98_TRAMP_SEG);
+	np2_reg_set(NP2_R_IP, (uint16_t)PCAT_IDLE_IP);
+	np2_reg_set(NP2_R_SS, 0x1000);
+	np2_reg_set(NP2_R_SP, 0xFF00);
+	np2_reg_set(NP2_R_FLAGS, (uint16_t)(np2_reg_get(NP2_R_FLAGS) | 0x0200));
 }
 
 void CHardPcat::RepairMokMidiPlay()
@@ -2063,6 +2346,107 @@ void CHardPcat::RepairMokMidiPlay()
 	mokDrvSeg_ = drvSeg;
 }
 
+void CHardPcat::RepairMokIntelMpu(int armCth)
+{
+	/* Hired Guns / Laser Squad / Sabre Team / Shadow Worlds: Mok CODE.COM
+	   is an intelligent MPU conductor (IRQ9 / INT 71h). INT 7Fh cmd0 STOPs,
+	   AH=3F's the .RLP into handle 0, then selects song 0 without START.
+	   Far-call CS:02DDh so B8h/0Ah + INT 71 hook run after the load. */
+	if (!modeMidi_ || modeSilp_) return;
+	if (hootAdvSeg_ || hootAdvName_[0]) return;
+	uint8_t* mem = np2_mem();
+	if (!mem) return;
+	uint16_t comCs = 0;
+	if (IvtHooked(0x7F))
+		comCs = (uint16_t)(mem[0x7F * 4 + 2] | (mem[0x7F * 4 + 3] << 8));
+	auto looksMok = [&](uint16_t cs) -> int {
+		if (cs < 0x0100 || cs >= 0xA000) return 0;
+		const unsigned com = (unsigned)cs << 4;
+		if (com + 0x333 >= 0x200000) return 0;
+		if (mem[com + 0x2DD] != 0x9C || mem[com + 0x333] != 0xCB)
+			return 0;
+		for (unsigned i = 0x100; i + 11 < 0x1800 && com + i + 11 < 0x200000; i++) {
+			if (memcmp(mem + com + i, "HOOT-driver", 11) == 0)
+				return 1;
+		}
+		return 0;
+	};
+	if (!looksMok(comCs)) {
+		comCs = 0;
+		for (uint16_t s = 0x0100; s < 0x4000; s++) {
+			if (looksMok(s)) { comCs = s; break; }
+		}
+	}
+	if (!comCs) return;
+	const unsigned com = (unsigned)comCs << 4;
+	if (!IvtHooked(0x7F) && mem[com + 0x184] == 0x60) {
+		mem[0x7F * 4 + 0] = 0x84;
+		mem[0x7F * 4 + 1] = 0x01;
+		mem[0x7F * 4 + 2] = (uint8_t)(comCs & 0xff);
+		mem[0x7F * 4 + 3] = (uint8_t)(comCs >> 8);
+	}
+
+	mpuAckR_ = mpuAckW_ = 0;
+	s_mpuClockToHost = 0;
+	s_mpuPlay = 0;
+	s_mpuCthArmed = 0;
+	s_mpuMokDataReq = 1;
+	s_mpuCthResidual = 0;
+	s_mpuInService = 0;
+
+	const uint16_t ss = comCs;
+	const uint16_t sp0 = 0x7E00;
+	np2_reg_set(NP2_R_SS, ss);
+	uint16_t sp = (uint16_t)(sp0 - 4);
+	{
+		const unsigned sl = ((unsigned)ss << 4) + sp;
+		mem[sl] = (uint8_t)(PCAT_IDLE_IP & 0xff);
+		mem[sl + 1] = (uint8_t)(PCAT_IDLE_IP >> 8);
+		mem[sl + 2] = (uint8_t)(DOS98_TRAMP_SEG & 0xff);
+		mem[sl + 3] = (uint8_t)(DOS98_TRAMP_SEG >> 8);
+	}
+	np2_reg_set(NP2_R_SP, sp);
+	np2_reg_set(NP2_R_DS, comCs);
+	np2_reg_set(NP2_R_ES, comCs);
+	np2_reg_set(NP2_R_CS, comCs);
+	np2_reg_set(NP2_R_IP, 0x02DD);
+	np2_reg_set(NP2_R_FLAGS, (uint16_t)(np2_reg_get(NP2_R_FLAGS) & ~0x0200));
+	const uint64_t budget = (uint64_t)cpuHz_ * 2ull;
+	const uint64_t start = cpuCycles_;
+	while (cpuCycles_ - start < budget) {
+		const uint16_t cs = np2_reg_get(NP2_R_CS);
+		const uint16_t ip = np2_reg_get(NP2_R_IP);
+		if (cs == (uint16_t)DOS98_TRAMP_SEG && ip >= (uint16_t)PCAT_IDLE_IP)
+			break;
+		const unsigned phys = ((unsigned)cs << 4) + ip;
+		if (mem && phys < 0x200000 && mem[phys] == 0xF4) {
+			CEmuDos98Result res = DOS98_CONTINUE;
+			if (PcatTrampolineHlt(&dos_, mem, cs, ip, &res))
+				continue;
+		}
+		const int32_t c = np2_step();
+		cpuCycles_ += (c > 0) ? (uint64_t)c : 1ull;
+	}
+	/* 02DDh ends with [14FB]=1, which makes the first F0 plant a dummy FE
+	   track. Clear it so 0565h uses the .RLP pointers INT 7Fh just filled. */
+	mem[com + 0x14F5] = 1;
+	mem[com + 0x10A5] = 0;
+	mem[com + 0x14FB] = 0;
+	s_picSlaveMask = (uint8_t)(s_picSlaveMask & (uint8_t)~0x02);
+	picMask_ = (uint8_t)(picMask_ & (uint8_t)~0x04);
+	/* 02DD may OUT FFh then B8h/0Ah. MidiCmdOut FFh must not drop the Mok
+	   F0-vs-FD classification; re-assert after the far-call. */
+	s_mpuMokDataReq = 1;
+	/* 02DD may OUT B8h/0Ah, which now arms CTH in MidiCmdOut. Keep the
+	   pre-load pass (armCth=0) quiet until the .RLP is in handle 0. */
+	s_mpuCthArmed = armCth ? 1 : 0;
+	np2_reg_set(NP2_R_CS, (uint16_t)DOS98_TRAMP_SEG);
+	np2_reg_set(NP2_R_IP, (uint16_t)PCAT_IDLE_IP);
+	np2_reg_set(NP2_R_SS, 0x1000);
+	np2_reg_set(NP2_R_SP, 0xFF00);
+	np2_reg_set(NP2_R_FLAGS, (uint16_t)(np2_reg_get(NP2_R_FLAGS) | 0x0200));
+}
+
 void CHardPcat::FixHootAilTimer()
 {
 	/* AIL hook_timer should point INT 8 at API_timer. HOOT / nested IRQ0 often
@@ -2153,6 +2537,39 @@ void CHardPcat::FixHootAilTimer()
 		if (found) {
 			plant(trySeg, found);
 			return;
+		}
+		if (PcatApiTimerAt(mem, ((unsigned)trySeg << 4) + 0x040Eu)) {
+			plant(trySeg, 0x040E);
+			return;
+		}
+		if (PcatApiTimerAt(mem, ((unsigned)trySeg << 4) + 0x0416u)) {
+			plant(trySeg, 0x0416);
+			return;
+		}
+	}
+	/* MIDI HOOT (Blackthorne) leaves INT8 at a data CS:0000. INT 7Fh is the
+	   HOOT stub; AIL API_timer lives in a nearby CS (Azrael 1269:040E). */
+	if (modeMidi_ && i8Off == 0) {
+		uint16_t extra[4];
+		int n = 0;
+		if (IvtHooked(0x7F)) {
+			const uint16_t s7 = (uint16_t)(mem[0x7F * 4 + 2] | (mem[0x7F * 4 + 3] << 8));
+			if (s7 >= 0x0100 && s7 < 0xA000) extra[n++] = s7;
+		}
+		const uint16_t acs = PcatFindAilApiCs(mem, hootAdvSeg_);
+		if (acs >= 0x1200 && acs < 0xA000) extra[n++] = acs;
+		for (int i = 0; i < n; i++) {
+			unsigned found = findApiTimer(extra[i]);
+			if (!found && PcatApiTimerAt(mem, ((unsigned)extra[i] << 4) + 0x040Eu))
+				found = 0x040E;
+			if (!found && PcatHootInt8Sig(mem, ((unsigned)extra[i] << 4) + 0x040Eu))
+				found = 0x040E;
+			if (!found && PcatHootInt8Sig(mem, ((unsigned)extra[i] << 4) + 0x080Eu))
+				found = 0x080E;
+			if (found) {
+				plant(extra[i], found);
+				return;
+			}
 		}
 	}
 }
@@ -2257,8 +2674,38 @@ int CHardPcat::DeliverIrqs()
 	/* HOOT AIL timer repair scans guest RAM — skip on Sierra silp (INT8==INT7F). */
 	if (silpHot)
 		RepairSilpDriverFar();
-	else if (!modeMidi_)
+	else
 		FixHootAilTimer();
+	if (s_mpuInService) {
+		const uint16_t ss = np2_reg_get(NP2_R_SS);
+		const uint16_t sp = np2_reg_get(NP2_R_SP);
+		if (ss == s_mpuIsrSs && sp == s_mpuIsrSp)
+			s_mpuInService = 0;
+	}
+	if (modeMidi_ && !modeSilp_ && !mpuUart_ && !s_mpuInService) {
+		int wantMpuIrq = 0;
+		if (mpuAckR_ != mpuAckW_) {
+			const uint8_t front = mpuAckQ_[mpuAckR_ & 7];
+			if (front != (uint8_t)0xfe)
+				wantMpuIrq = 1;
+		} else if (mpuRxFull_) {
+			wantMpuIrq = 1;
+		}
+		if (wantMpuIrq && (np2_reg_get(NP2_R_FLAGS) & 0x0200)) {
+			uint8_t vec = 0;
+			if (IvtHooked(0x71))
+				vec = 0x71;
+			else if (IvtHooked(0x0A))
+				vec = 0x0A;
+			if (vec) {
+				s_mpuInService = 1;
+				s_mpuIsrSs = np2_reg_get(NP2_R_SS);
+				s_mpuIsrSp = np2_reg_get(NP2_R_SP);
+				np2_interrupt(vec);
+				return 1;
+			}
+		}
+	}
 	if (pit0IrqPending_ && (picMask_ & 0x01) == 0) {
 		/* Real 8259 honors IF. CODE.COM CLI around the INT 8 far-call tick;
 		   injecting anyway nested a second IRQ0 into Sound Images AH=3
@@ -2359,10 +2806,19 @@ int CHardPcat::DeliverIrqs()
 			   with seq PLAYING). Do not poke 2331 either (serve reentry). */
 		}
 		int skipMidiExeEntry = 0;
-		if (modeMidi_ && hootAdvSeg_ && i8Off == 0
+		if (modeMidi_ && i8Off == 0
 			&& i8Seg >= 0x0100 && i8Seg < 0xA000
-			&& i8Seg != (uint16_t)DOS98_TRAMP_SEG)
-			skipMidiExeEntry = 1;
+			&& i8Seg != (uint16_t)DOS98_TRAMP_SEG) {
+			FixHootMidiInt8();
+			FixHootAilTimer();
+			if (mem) {
+				const uint16_t o2 = (uint16_t)(mem[0x08 * 4] | (mem[0x08 * 4 + 1] << 8));
+				if (o2 == 0)
+					skipMidiExeEntry = 1;
+			} else {
+				skipMidiExeEntry = 1;
+			}
+		}
 		if (!skipMidiExeEntry)
 			np2_interrupt((uint8_t)PCAT_TIMER_VEC);
 		if (skipMidiExeEntry)
@@ -2396,7 +2852,7 @@ int CHardPcat::DeliverIrqs()
 			int done = 0;
 			/* silp far-calls ADL.DRV; needs a generous step budget. Do not
 			   charge those steps to cpuCycles_ (below) or PIT/audio crawl. */
-			const int guardMax = silpIsr ? 80000 : 4000;
+			const int guardMax = (silpIsr || (modeMidi_ && hootAdvSeg_)) ? 80000 : 4000;
 			for (int guard = 0; guard < guardMax; guard++) {
 				const uint16_t cs = np2_reg_get(NP2_R_CS);
 				const uint16_t re = (mem && ailBase)
@@ -2774,6 +3230,21 @@ void CHardPcat::MaterializeDosFiles(CEmuZipFs* fs, const CEmuGameEntry* ge)
 			if (copy) {
 				memcpy(copy, data, sz);
 				repairMilesAdv(copy, sz);
+				/* MIDI.ADV CS:[0119]=data, CS:[011B]=status (base+1). The
+				   image stores 0 until detect; v1.1 HOOT never writes them.
+				   Seeding both as 0x330 made status reads hit the data port. */
+				if (modeMidi_ && _stricmp(base, "MIDI.ADV") == 0 && sz > 0x11Cu) {
+					const uint16_t dport = (uint16_t)(copy[0x119] | (copy[0x11A] << 8));
+					const uint16_t sport = (uint16_t)(copy[0x11B] | (copy[0x11C] << 8));
+					if (dport == 0) {
+						copy[0x119] = 0x30;
+						copy[0x11A] = 0x03;
+					}
+					if (sport == 0 || sport == dport || sport == 0x330) {
+						copy[0x11B] = 0x31;
+						copy[0x11C] = 0x03;
+					}
+				}
 				dos_.AddFile(base, copy, sz);
 				free(copy);
 				return;
@@ -2968,6 +3439,17 @@ void CHardPcat::HootSubstArgv(char* tail, int tailCap)
 				rep = dosSong_;
 				break;
 			}
+			/* Lost Vikings MT-32: argv is `MT.XMI MT32MPU.ADV`. MT.XMI is
+			   catalogued at offset -1 (init), so the >=0x10 match never
+			   fires and every title plays the 420-byte stub. */
+			if (!rep && dosSong_[0]) {
+				const char* ext = strrchr(t, '.');
+				const char* songExt = strrchr(dosSong_, '.');
+				if (ext && songExt
+					&& (_stricmp(ext, ".xmi") == 0 || _stricmp(ext, ".mid") == 0)
+					&& (_stricmp(songExt, ".xmi") == 0 || _stricmp(songExt, ".mid") == 0))
+					rep = dosSong_;
+			}
 		}
 		const char* w = rep ? rep : t;
 		while (*w && d < dend) *d++ = *w++;
@@ -3062,8 +3544,8 @@ int CHardPcat::RunDosCommand(const char* cmdline, uint64_t budgetCycles, int sto
 			   finishing DS handle init — only accept if INT 7Fh is not HOOT
 			   or HOOT handles are no longer 0/0. */
 			int accept = 1;
+			uint8_t* hm = np2_mem();
 			if (IvtHooked(0x7F)) {
-				uint8_t* hm = np2_mem();
 				if (hm) {
 					const unsigned o7 = (unsigned)hm[0x7F * 4] | ((unsigned)hm[0x7F * 4 + 1] << 8);
 					const unsigned s7 = (unsigned)hm[0x7F * 4 + 2] | ((unsigned)hm[0x7F * 4 + 3] << 8);
@@ -3096,6 +3578,11 @@ int CHardPcat::RunDosCommand(const char* cmdline, uint64_t budgetCycles, int sto
 							accept = 1;
 					}
 				}
+			} else if (modeMidi_ && hm && PcatI8LooksLikeHootAil(hm)) {
+				/* Lost Vikings MT32MPU: HOOT writes 0x81 after API_timer
+				   (CS:0416) but before INT 7Fh. Accepting here left the
+				   trampoline on 7Fh so 01MT.XMI never registered. */
+				accept = 0;
 			}
 			if (accept) {
 				dosStubReady_ = 1;
@@ -3429,6 +3916,7 @@ int CHardPcat::TriggerPlay(unsigned titleCode)
 				dos_.SetHandle((uint16_t)song, dosSong_);
 		}
 	}
+	RepairMokIntelMpu(0);
 	/* PMD_98 glue: cmd0 then cmd1 (load/play).
 	   KOEI FMDRV_AT / Infogrames CODE.COM (INT 7Fh): cmd0=play, cmd2=stop;
 	   CODE.COM treats any other cmd as teardown — do not issue cmd1.
@@ -3462,9 +3950,12 @@ int CHardPcat::TriggerPlay(unsigned titleCode)
 	}
 	{
 		uint8_t* mem = np2_mem();
-		if (mem && use7f && !modeSilp_ && !modeMidi_) {
-			RepairAsoundPlayEnable(mem);
-			RepairPacificIslandsSong(mem, extSong_);
+		if (mem && use7f && !modeSilp_) {
+			if (!modeMidi_) {
+				RepairAsoundPlayEnable(mem);
+				RepairPacificIslandsSong(mem, extSong_);
+			}
+			RepairMpsDeferredSong(mem);
 		}
 	}
 	if (haveVect)
@@ -3477,8 +3968,11 @@ int CHardPcat::TriggerPlay(unsigned titleCode)
 	PumpCycles(cpuCycles_ + drainBudget);
 	{
 		uint8_t* mem = np2_mem();
-		if (mem && use7f && !modeSilp_ && !modeMidi_)
-			RepairPacificIslandsSong(mem, extSong_);
+		if (mem && use7f && !modeSilp_) {
+			if (!modeMidi_)
+				RepairPacificIslandsSong(mem, extSong_);
+			RepairMpsDeferredSong(mem);
+		}
 	}
 	if (!cmd0Only) {
 		if (dosGe_)
@@ -3495,6 +3989,7 @@ int CHardPcat::TriggerPlay(unsigned titleCode)
 		PumpCycles(cpuCycles_ + drainBudget);
 	}
 	RepairMokMidiPlay();
+	RepairMokIntelMpu(1);
 	{
 		uint8_t* mem = np2_mem();
 		if (mem && use7f && !modeSilp_ && !modeMidi_)
@@ -3512,8 +4007,20 @@ int CHardPcat::TriggerPlay(unsigned titleCode)
 	}
 	if (!modeSilp_)
 		PrepHootAilState();
-	if (modeMidi_ && !modeSilp_)
+	if (modeMidi_ && !modeSilp_) {
 		FixHootMidiInt8();
+		FixHootAilTimer();
+		StartHootMidiSequence();
+		/* MMD.COM may have issued B8h during boot; CTH must keep ticking
+		   after we park on the idle trampoline. Skip Mok (F0 data-req). */
+		if (!mpuUart_ && !s_mpuMokDataReq && IvtHooked(0x71)
+			&& (s_mpuClockToHost || s_mpuCthArmed)) {
+			s_mpuClockToHost = 1;
+			s_mpuCthArmed = 1;
+			if (s_mpuCthResidual == 0)
+				s_mpuCthResidual = (cpuHz_ > 0) ? (uint64_t)cpuHz_ : 1ull;
+		}
+	}
 	{
 		uint8_t* mem = np2_mem();
 		if (mem && !modeMidi_ && !use7f)
@@ -3676,7 +4183,14 @@ int CHardPcat::FarCallAil(uint16_t api, uint16_t* stackWords, int nWords, uint64
 	np2_reg_set(NP2_R_CS, ailCs);
 	np2_reg_set(NP2_R_IP, (uint16_t)wrapOff);
 	np2_reg_set(NP2_R_DS, ailCs);
-	np2_reg_set(NP2_R_FLAGS, (uint16_t)(np2_reg_get(NP2_R_FLAGS) | 0x0200));
+	{
+		uint16_t fl = np2_reg_get(NP2_R_FLAGS);
+		if (s_ailFarCli)
+			fl = (uint16_t)(fl & ~0x0200);
+		else
+			fl = (uint16_t)(fl | 0x0200);
+		np2_reg_set(NP2_R_FLAGS, fl);
+	}
 	const uint64_t start = cpuCycles_;
 	int ok = 0;
 	while (cpuCycles_ - start < budget) {
@@ -4231,6 +4745,9 @@ void CHardPcat::MidiCaptureReset()
 	   DOS/MT32 boot made Capture miss note traffic / confuse the driver. */
 	mpuRxFull_ = 0;
 	mpuAckR_ = mpuAckW_ = 0;
+	mpuCmdByte_ = 0;
+	/* Do not drop intelligent CTH here — probe/export reset the SMF buffer
+	   after TriggerPlay has already STARTed the Mok conductor. */
 	/* Power-on / reset ACK only when not yet in UART — MT32.DRV waits for
 	   bit6 clear (data ready) on 0x331 before the first command. */
 	if (!mpuUart_)
@@ -4274,6 +4791,11 @@ void CHardPcat::MidiCaptureByte(uint8_t v)
 
 void CHardPcat::MidiDataOut(uint8_t data)
 {
+	if (mpuCmdByte_ && !mpuUart_) {
+		mpuCmdByte_ = 0;
+		(void)data;
+		return;
+	}
 	/* Capture in UART mode; also accept post-reset traffic once any ACK
 	   handshake started (Sierra MT32.DRV may stream after 0x3F). */
 	if (mpuUart_ || modeMidi_)
@@ -4282,18 +4804,82 @@ void CHardPcat::MidiDataOut(uint8_t data)
 
 void CHardPcat::MidiCmdOut(uint8_t data)
 {
+	auto cmdAck = [this]() {
+		/* Command ACK must be the next data byte. Drop raced CTH FD/F0. */
+		mpuAckR_ = mpuAckW_;
+		MidiPushAck(0xfe);
+	};
 	if (data == 0xff) {
 		mpuUart_ = 0;
-		MidiPushAck(0xfe);
+		mpuCmdByte_ = 0;
+		s_mpuClockToHost = 0;
+		s_mpuPlay = 0;
+		s_mpuCthArmed = 0;
+		cmdAck();
 		return;
 	}
 	if (data == 0x3f) {
 		mpuUart_ = 1;
-		MidiPushAck(0xfe);
+		mpuCmdByte_ = 0;
+		s_mpuClockToHost = 0;
+		s_mpuPlay = 0;
+		s_mpuCthArmed = 0;
+		cmdAck();
 		return;
 	}
-	/* Ignore other intelligent-mode cmds; ACK so detect loops proceed. */
-	MidiPushAck(0xfe);
+	if (mpuUart_) {
+		cmdAck();
+		return;
+	}
+	if (data == 0xac) {
+		cmdAck();
+		MidiPushAck(0x15);
+		return;
+	}
+	if (data == 0xad) {
+		cmdAck();
+		MidiPushAck(0x01);
+		return;
+	}
+	if (data == 0xaf) {
+		cmdAck();
+		MidiPushAck((uint8_t)(s_mpuTempo ? s_mpuTempo : 0x40));
+		return;
+	}
+	if (data == 0x94 || data == 0x0c || data == 0x01) {
+		s_mpuClockToHost = 0;
+		s_mpuPlay = 0;
+		s_mpuCthArmed = 0;
+	} else if (data == 0xb8 || data == 0xb9 || data == 0x95) {
+		/* Same as PC-98: B8h/B9h turn CTH on. AT used to wait for Mok's
+		   RepairMokIntelMpu to set s_mpuCthArmed, so KAJA MMD.COM never
+		   saw FD on INT 71. Mok still arms only from RepairMokIntelMpu
+		   so F0 does not start during INT 7Fh load. */
+		s_mpuClockToHost = 1;
+		if (!s_mpuMokDataReq)
+			s_mpuCthArmed = 1;
+		/* Start the CTH period from zero. Seeding residual=cpuHz made the
+		   next TickSide push FD as soon as the command ACK was consumed,
+		   so Bitmap Brothers PLAYER.BIN `cmp al,0FEh` after B9h/3Fh read
+		   FD and CODE.COM deadlooped (AX=DEAD) before INT 7Fh. */
+		s_mpuCthResidual = 0;
+	} else if (data == 0x0a || data == 0x02) {
+		s_mpuPlay = 1;
+		s_mpuClockToHost = 1;
+		if (!s_mpuMokDataReq)
+			s_mpuCthArmed = 1;
+		s_mpuCthResidual = 0;
+	} else if (data == 0xc2) s_mpuTimebase = 48;
+	else if (data == 0xc3) s_mpuTimebase = 72;
+	else if (data == 0xc4) s_mpuTimebase = 96;
+	else if (data == 0xc5) s_mpuTimebase = 120;
+	else if (data == 0xc6) s_mpuTimebase = 144;
+	else if (data == 0xc7) s_mpuTimebase = 168;
+	else if (data == 0xc8) s_mpuTimebase = 192;
+	if (data == 0xe0 || data == 0xe1 || data == 0xe7
+		|| data == 0xec || data == 0xed || data == 0xee || data == 0xef)
+		mpuCmdByte_ = data;
+	cmdAck();
 }
 
 uint8_t CHardPcat::MidiStatusIn()
@@ -4304,7 +4890,11 @@ uint8_t CHardPcat::MidiStatusIn()
 	   and never reach note-ons (capture was init sysex + "THANKS" only). */
 	if (mpuAckR_ != mpuAckW_ || mpuRxFull_)
 		return 0x00;
-	return 0x40;
+	/* Empty = 0x80 (bit7=no RX, bit6=ready to write). Idle 0x40 made
+	   Sound Images hang on `add al,al / js` (waits for bit6 clear) after
+	   it had already consumed the detect ACK, so INT 8 was never hooked.
+	   MT32.DRV / Sierra silp were re-checked after this polarity change. */
+	return 0x80;
 }
 
 uint8_t CHardPcat::MidiDataIn()

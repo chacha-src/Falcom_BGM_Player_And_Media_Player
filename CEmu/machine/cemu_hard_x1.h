@@ -17,7 +17,7 @@ public:
 
 	Ay_Cpu* Cpu() override { return cpu_; }
 	uint8_t* Mem() override { return mem_; }
-	CChip* SoundChip() override { return chipOpm_; }
+	CChip* SoundChip() override { return chipOpn_ ? chipOpn_ : chipOpm_; }
 	CChip* ChipAy() { return chipAy_; }
 
 	uint8_t PortIn(uint16_t port) override;
@@ -44,6 +44,7 @@ public:
 	int opmHz_;
 	int ayHz_;
 	int psgOnly_; /* subtype=psg / x1psg */
+	int opnMode_; /* subtype=opn — YM2203 at E0/E1, not CZ-8BS1 OPM */
 	uint16_t initPc_;
 	uint16_t mdataAddr_; /* BGM stage in RAM; default 0x4000 */
 	unsigned mdataSize_; /* bytes to stage; default BGM_SIZE */
@@ -134,6 +135,7 @@ private:
 	uint8_t ioport_[0x10000];
 	Ay_Cpu* cpu_;
 	CChip* chipOpm_;
+	CChip* chipOpn_; /* YM2203 (ishtar OPN). NULL on OPM/PSG rows. */
 	CChip* chipAy_;
 	int sampleRate_;
 	uint64_t cpuCycles_;

@@ -226,9 +226,15 @@ void CEmuFmMonBindFromGe(const CEmuGameEntry* ge)
 		|| _stricmp(pf, "fm77av") == 0 || _stricmp(pf, "mucomfm") == 0);
 	const int isMsx = (_stricmp(dd, "msx") == 0 || _stricmp(pf, "msx") == 0);
 	const size_t archiveLen = strlen(ge->archive);
-	const int fm7Ay = isFm7 && (_stricmp(sub, "psg") == 0 || _stricmp(sub, "ys") == 0
-		|| _stricmp(sub, "xanadu2") == 0
-		|| (archiveLen >= 4 && _stricmp(ge->archive + archiveLen - 4, "_fm7") == 0));
+	/* Platform wins: the same *_fm7 zip has PSG (fm7) and OPN (fm77av) rows.
+	   Catalog chipIds can still list AY from the zip stem; do not let that
+	   pick the AY keyboard for an fm77av session (monitor went MON_DEAD). */
+	const int fm7Opn = isFm7 && (
+		_stricmp(pf, "fm77av") == 0 || _stricmp(sub, "opn") == 0
+		|| _stricmp(sub, "ysav") == 0
+		|| (_stricmp(pf, "mucomfm") == 0 && _stricmp(sub, "ys") != 0)
+		|| HasChip(ge, CEMU_CHIP_OPN));
+	const int fm7Ay = isFm7 && !fm7Opn;
 	if (isMsx) {
 		/* KSS/FMPAC titles often omit <chip type=OPLL>; runtime always has
 		   YM2413 when subtype is kss/opll. Keep layout non-OPNA so the MSX
@@ -420,6 +426,12 @@ void CEmuFmMonBindFromGe(const CEmuGameEntry* ge)
 		layout = -1;
 		seedOpm = 1;
 		FmMonShadowSetKeysProfile(SASAMI_FMMON_KEYS_MDX);
+	} else if (_stricmp(sub, "kikikai") == 0) {
+		/* Catalog xml2 tags this as OPM; the Z80 program is YM2203 @C000. */
+		strncpy_s(chip, "YM2203", _TRUNCATE);
+		layout = 0;
+		FmMonShadowSetSsgClock(3000000u);
+		FmMonShadowSetKeysProfile(SASAMI_FMMON_KEYS_MDX);
 	} else if (_stricmp(sub, "opm") == 0 || HasChip(ge, CEMU_CHIP_OPM)
 		|| _stricmp(dd, "x68k") == 0 || _stricmp(pf, "x68k") == 0
 		|| _stricmp(pf, "x1") == 0 || _stricmp(dd, "x1") == 0
@@ -465,6 +477,13 @@ void CEmuFmMonBindFromGe(const CEmuGameEntry* ge)
 		strncpy_s(chip, "YM2203", _TRUNCATE);
 		layout = 0;
 		FmMonShadowSetSsgClock(1500000u);
+	} else if (_stricmp(sub, "68k2") == 0) {
+		/* BGM 0x1x is YM2413. OPN layout let YM2203 dumps zero the FM keys
+		   while OPLL streamed, so the probe stayed MON_DEAD / keys=0. */
+		strncpy_s(chip, "YM2203+OPLL", _TRUNCATE);
+		layout = -1;
+		FmMonShadowSetSsgClock(1500000u);
+		FmMonShadowSetKeysProfile(SASAMI_FMMON_KEYS_OPL2);
 	} else if (_stricmp(sub, "86") == 0 || HasChip(ge, CEMU_CHIP_PCM86)) {
 		strncpy_s(chip, "OPNA+86PCM", _TRUNCATE);
 		layout = 1;
@@ -526,7 +545,7 @@ void CEmuFmMonBindFromGe(const CEmuGameEntry* ge)
 	   catalog documents the chip set and the chain's label leaves one out,
 	   the catalog wins - it is the only per-archive record of the real
 	   hardware. Boards the chain does recognise keep their tuned labels. */
-	if (!FmMonLabelCoversDocChips(ge, chip)) {
+	if (!isFm7 && !FmMonLabelCoversDocChips(ge, chip)) {
 		char docLabel[48];
 		int docLayout = layout;
 		unsigned docSsg = 0, docKeys = 0;
@@ -551,6 +570,8 @@ void CEmuFmMonBindFromGe(const CEmuGameEntry* ge)
 			|| _stricmp(sub, "fmpac") == 0)
 			devices |= SASAMI_FMMON_DEV_OPLL;
 		FmMonShadowSetMsxDevices(devices);
+	} else if (_stricmp(sub, "68k2") == 0) {
+		FmMonShadowSetMsxDevices(SASAMI_FMMON_DEV_PSG | SASAMI_FMMON_DEV_OPLL);
 	}
 	/* Open が既にレジスタを積んでいるときは空 snapshot で消さない。
 	   layout=-1 + KEYS_MDX だけで Flush が OPNA 形に落ちない。 */

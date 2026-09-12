@@ -13,6 +13,7 @@
 #include "../s98/device/emu2413/emu2413.h"
 #include <string.h>
 #include <stdlib.h>
+#include <wchar.h>
 
 enum {
 	MSX_CPU_HZ = 3579545,
@@ -20,17 +21,59 @@ enum {
 	MSX_OPLL_HZ = 3579545
 };
 
-/* hoot kss.cpp IPL */
+/* hoot kss.cpp IPL, but $0020-$0037 is RET not $FF: RST 20/28/30 on
+   $FF chained into RST 38 and nested the music ISR (replcart SILENT). */
 static const uint8_t kKssIpl[] = {
 	0xd7,0xd3,0xa0,0xf5,0x7b,0xd3,0xa1,0xf1,0xc9,0xd3,0xa0,0xdb,0xa2,0xc9,0xff,0xff,
 	0xed,0x56,0x31,0x80,0xf3,0xf3,0xdb,0x00,0xcd,0x00,0x00,0xfb,0xdb,0x01,0x18,0xfb,
-	0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,
-	0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xf3,0xcd,0x00,0x00,0xfb,0xc9,
+	0xc9,0xc9,0xc9,0xc9,0xc9,0xc9,0xc9,0xc9,0xc9,0xc9,0xc9,0xc9,0xc9,0xc9,0xc9,0xc9,
+	0xc9,0xc9,0xc9,0xc9,0xc9,0xc9,0xc9,0xc9,0xf3,0xcd,0x00,0x00,0xfb,0xc9,
 };
 
 static uint16_t Rd16(const uint8_t* p)
 {
 	return (uint16_t)(p[0] | ((uint16_t)p[1] << 8));
+}
+
+static void Wr16(uint8_t* p, uint16_t v)
+{
+	p[0] = (uint8_t)(v & 0xff);
+	p[1] = (uint8_t)(v >> 8);
+}
+
+/* Frames until the first pitched note. 0xFFFF = none. *f6Before is set
+   when F6 appears before any rest or note — that path can stall $0416. */
+static unsigned NukeninRestUntilNote(const uint8_t* p, unsigned n, int* f6Before)
+{
+	static const uint8_t kDur[16] = {
+		0x60, 0x48, 0x30, 0x24, 0x18, 0x12, 0x0c, 0x09,
+		0x06, 0x03, 0x03, 0x03, 0x10, 0x08, 0x04, 0x02
+	};
+	static const uint8_t kArg[16] = {
+		1, 1, 1, 0, 0, 0, 1, 0, 3, 2, 1, 1, 1, 0, 0, 0
+	};
+	unsigned i = 0, rest = 0, steps = 0;
+	if (f6Before) *f6Before = 0;
+	while (i < n && steps++ < 80u) {
+		const uint8_t b = p[i++];
+		const unsigned hi = (unsigned)b >> 4, lo = (unsigned)b & 15u;
+		if (hi < 0x0Du) {
+			if (hi == 0x0Cu)
+				rest += kDur[lo];
+			else
+				return rest;
+		} else if (hi == 0x0Fu) {
+			const unsigned a = kArg[lo];
+			if (i + a > n)
+				break;
+			if (lo == 6u && rest == 0u && f6Before)
+				*f6Before = 1;
+			i += a;
+			if (lo == 0x0Eu)
+				break;
+		}
+	}
+	return 0xFFFFu;
 }
 
 /* hoot ds4.cpp IPL — IM2, map banks 2/3, CALL $48F2, poll play/skip. */
@@ -60,6 +103,36 @@ static void PlantPsgTrampoline(uint8_t* mem)
 }
 
 /* archive="game,fmpac_msx": FMPAC.ROM lives in the companion zip. */
+static uint16_t CEmuMsxKoeiMmlHl(const uint8_t* mem, unsigned song)
+{
+	if (!mem || mem[0x8001] != 0x3D || mem[0x8002] != 0xD3)
+		return 0;
+	unsigned found = 0;
+	for (unsigned a = 0x8000; a + 3u < 0xA800u; a += 0x80u) {
+		if (mem[a + 1] != 0x3D || mem[a + 2] != 0xD3)
+			continue;
+		if (found == song)
+			return (uint16_t)a;
+		found++;
+	}
+	return 0;
+}
+
+/* genghis PATCH `IN A,(4); LD L,A; IN A,(5); LD H,A` then LDIR → $D300.
+   Title codes pack the MML address in the middle bytes (0x00840001 →
+   $8400, 0x01990010 → $9900). The $80-step scan only hits 4-byte
+   openings; 3-byte in-game codes used to feed H=top L=song ($8401). */
+static uint16_t CEmuMsxKoeiMmlAddr(const uint8_t* mem, unsigned titleCode, unsigned low)
+{
+	uint16_t hl = (uint16_t)((titleCode >> 8) & 0xFFFFu);
+	if (hl >= 0x8000u && hl < 0xC000u)
+		return hl;
+	hl = CEmuMsxKoeiMmlHl(mem, low);
+	if (hl)
+		return hl;
+	return (uint16_t)((titleCode >> 16) + 0x8000u);
+}
+
 static void CEmuMsxMergeCompanions(CEmuZipFs* fs, const CEmuGameEntry* ge)
 {
 	if (!fs || !ge || !ge->archive[0] || !strchr(ge->archive, ','))
@@ -97,6 +170,14 @@ static const unsigned char* FindMsxCodeRom(CEmuZipFs* fs, const char* name, unsi
 	if (!fs || !name || !name[0]) return NULL;
 	const unsigned char* data = CEmuZipFsFind(fs, name, sz);
 	if (data && sz && *sz) return data;
+	/* Missing .kss is a catalog hole, not a DRIVER.BIN alias.
+	   puyo_msx kss xml names a file the zip never ships; mapping
+	   DRIVER @0 skipped the native @0100/@2000/@6000 layout. */
+	{
+		const size_t nl = strlen(name);
+		if (nl >= 4 && _stricmp(name + nl - 4, ".kss") == 0)
+			return NULL;
+	}
 	/* dssp1 lists ran/BSRAND.OBJ but the zip ships ran/DRIVER.BIN. */
 	const char* slash = strrchr(name, '/');
 	if (!slash) slash = strrchr(name, '\\');
@@ -171,6 +252,7 @@ CHardMsx::CHardMsx()
 	, opllWriteCount_(0)
 	, opllLatch_(0)
 	, genericMode_(0)
+	, dqMode_(0)
 	, initPc_(0x400)
 	, mdataAddr_(0xA400)
 	, mdataSize_(0x800)
@@ -194,6 +276,8 @@ CHardMsx::CHardMsx()
 	memset(bgmBankSize_, 0, sizeof(bgmBankSize_));
 	memset(bgmPresent_, 0, sizeof(bgmPresent_));
 	memset(ttlPrg_, 0, sizeof(ttlPrg_));
+	memset(bankShadow_, 0, sizeof(bankShadow_));
+	bank8kRam_[0] = bank8kRam_[1] = 0;
 }
 
 CHardMsx::~CHardMsx()
@@ -417,8 +501,12 @@ void CHardMsx::ApplyBank(uint8_t bankSel)
 {
 	if (!bank_ || bankNum_ == 0) return;
 	const int bankno = (int)bankSel - (int)bankOfs_;
-	if (bankno < 0 || bankno >= (int)bankNum_)
+	if (bankno < 0 || bankno >= (int)bankNum_) {
+		/* hoot kss.cpp: out-of-range $FE maps fetch/read back onto RAM.
+		   sorc/bburn OUT $7F then LDIR the player into $8000/$B000. */
+		memcpy(mem_ + 0x8000, bankShadow_, 0x4000);
 		return;
+	}
 	/* hoot kss.cpp port $FE always maps 16K at $8000, even in 8K mode
 	   (8K pages are switched from $9000/$B000). */
 	const unsigned off = (unsigned)bankno * 0x4000u;
@@ -444,6 +532,8 @@ uint8_t CHardMsx::PortIn(uint16_t port)
 			return 0;
 		}
 	}
+	if (dqMode_ && p == 0x99)
+		return 0x80; /* VDP status: always vblank so DQ2 IN B,(C) proceeds */
 	if (p == SKIP_PORT) {
 		idle_ = 1;
 		return 0;
@@ -585,6 +675,12 @@ void CHardMsx::MemWrite(uint16_t addr, uint8_t data)
 	   appears after the mapper is written with 0x3F (page2) — without that
 	   gate, ordinary RAM at 9800 would be stolen on generic titles. */
 	if (chipScc_ && (sccEnable_ || sccMapped_)) {
+		if (addr == 0xBFFE) {
+			if (data & 0x20)
+				sccMapped_ = 1;
+			mem_[addr] = data;
+			return;
+		}
 		if (addr == 0x9000) {
 			sccMapped_ = ((data & 0x3fu) == 0x3fu) ? 1 : 0;
 			/* Fall through to the bank handler. */
@@ -596,7 +692,7 @@ void CHardMsx::MemWrite(uint16_t addr, uint8_t data)
 			/* Fall through to the bank handler. */
 		} else {
 			const unsigned sccAddr = (unsigned)((addr & 0xdfffu) ^ 0x9800u);
-			if (sccAddr < 0x90u) {
+			if (sccAddr < 0xC0u) {
 				CEmuChipSccWriteReg(chipScc_, sccAddr, data);
 				sccAccessed_ = 1;
 				return;
@@ -611,19 +707,30 @@ void CHardMsx::MemWrite(uint16_t addr, uint8_t data)
 
 	if (bank8k_ && bank_ && bankNum_) {
 		if (addr == 0x9000 || addr == 0xb000) {
+			const int page = (addr == 0x9000) ? 0 : 1;
+			const uint16_t base = (addr == 0x9000) ? 0x8000 : 0xa000;
 			const int bankno = (int)data - (int)bankOfs_;
 			if (bankno >= 0 && bankno < (int)bankNum_) {
 				const unsigned off = (unsigned)bankno * 0x2000u;
-				const uint16_t base = (addr == 0x9000) ? 0x8000 : 0xa000;
 				if (off + 0x2000u <= bankBytes_)
 					memcpy(mem_ + base, bank_ + off, 0x2000);
+				bank8kRam_[page] = 0;
+			} else {
+				/* hoot: invalid bank maps fetch/read back onto hidden RAM. */
+				memcpy(mem_ + base, bankShadow_ + (unsigned)page * 0x2000u, 0x2000);
+				bank8kRam_[page] = 1;
 			}
 			return;
 		}
 		/* hoot: fetch/read the bank, writes go to a hidden RAM. Overwriting
 		   mem_ here corrupted the mapped ROM (labyr/shiryo 8K KSS). */
-		if (addr >= 0x8000 && addr < 0xC000)
+		if (addr >= 0x8000 && addr < 0xC000) {
+			bankShadow_[addr - 0x8000] = data;
+			const int page = (addr < 0xA000) ? 0 : 1;
+			if (bank8kRam_[page])
+				mem_[addr] = data;
 			return;
+		}
 	}
 	mem_[addr] = data;
 }
@@ -674,6 +781,7 @@ int CHardMsx::LoadGeneric(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned title
 	CEmuMsxMergeCompanions(fs, ge);
 
 	int loadedCode = 0;
+	int loaded4000 = 0;
 	int useOpll = ParseOptHex(ge, "use_opll", 0);
 	int useMsxa = ParseOptHex(ge, "use_msxa", 0);
 	for (int i = 0; i < ge->romCount; i++) {
@@ -682,7 +790,18 @@ int CHardMsx::LoadGeneric(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned title
 		const unsigned char* data = (_stricmp(r->type, "code") == 0)
 			? FindMsxCodeRom(fs, r->name, &sz)
 			: CEmuZipFsFind(fs, r->name, &sz);
-		if (!data || !sz) continue;
+		if (!data || !sz) {
+			/* crimson2/3 PSG xml lists PMUS*.BIN; the zip only ships FMUS*. */
+			if (_stricmp(r->type, "bgm") == 0 && r->name[0]
+				&& !_strnicmp(r->name, "PMUS", 4)) {
+				char alt[CEMU_ROM_NAME];
+				strncpy_s(alt, r->name, _TRUNCATE);
+				alt[0] = (r->name[0] == 'p') ? 'f' : 'F';
+				data = CEmuZipFsFind(fs, alt, &sz);
+			}
+			if (!data || !sz)
+				continue;
+		}
 
 		if (_stricmp(r->type, "code") == 0 || _stricmp(r->type, "fmbios") == 0
 			|| _stricmp(r->type, "rom") == 0) {
@@ -704,6 +823,21 @@ int CHardMsx::LoadGeneric(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned title
 			unsigned n = sz;
 			if (off + (int)n > 0x10000)
 				n = (unsigned)(0x10000 - off);
+			/* Nemesis SCC+: GRA.BIN @4000 would set loaded4000 and skip
+			   GRASCC.BIN. TwinBee SCC+ rows have no code @4000. Do not
+			   overlay sccp onto GRA — load sccp instead. */
+			if (_stricmp(r->type, "code") == 0 && off < 0x8000
+				&& off + (int)n > 0x4000 && ParseOptHex(ge, "use_scc", 0)) {
+				int hasSccp = 0;
+				for (int j = 0; j < ge->romCount; j++) {
+					if (_stricmp(ge->rom[j].type, "sccp") == 0) {
+						hasSccp = 1;
+						break;
+					}
+				}
+				if (hasSccp)
+					continue;
+			}
 			/* Padded 64K FMPAC.ROM @4000 must not wipe later code (yosikon
 			   DRIVER @$D400, winsltn ALL.BIN @$B9B9, rona MUSDRV @$CE00). */
 			if (isFmpac) {
@@ -721,6 +855,8 @@ int CHardMsx::LoadGeneric(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned title
 			}
 			memcpy(mem_ + off, data, n);
 			loadedCode++;
+			if (off < 0x8000 && off + (int)n > 0x4000)
+				loaded4000 = 1;
 			if (isFmpac)
 				chips_ |= CHIP_FMPAC;
 			if (_strnicmp(r->name, "TTLPRG", 6) == 0 && n > 0 && n <= sizeof(ttlPrg_)) {
@@ -743,34 +879,145 @@ int CHardMsx::LoadGeneric(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned title
 		}
 	}
 
-	/* Zip-only fallback when catalog roms missing: prefer real drivers over patch. */
-	if (!loadedCode) {
-		int best = -1;
-		unsigned bestSz = 0;
-		for (int i = 0; i < fs->fileCount; i++) {
-			char pathA[CEMU_ZIP_PATH];
-			WideCharToMultiByte(932, 0, fs->files[i].path, -1, pathA, (int)sizeof(pathA), NULL, NULL);
-			const unsigned sz = fs->files[i].size;
-			if (sz < 256) continue;
-			if (_stricmp(pathA, "patch") == 0) continue;
-			if (sz > bestSz) { bestSz = sz; best = i; }
-		}
-		if (best >= 0) {
-			unsigned n = fs->files[best].size;
-			if (n > 0xC000) n = 0xC000;
-			memcpy(mem_ + 0x4000, fs->files[best].data, n);
-			loadedCode = 1;
-		}
-		/* Always map tiny patch @0400 when present. */
-		for (int i = 0; i < fs->fileCount; i++) {
-			char pathA[CEMU_ZIP_PATH];
-			WideCharToMultiByte(932, 0, fs->files[i].path, -1, pathA, (int)sizeof(pathA), NULL, NULL);
-			if (_stricmp(pathA, "patch") != 0) continue;
-			unsigned n = fs->files[i].size;
-			if (n > 0x200) n = 0x200;
-			memcpy(mem_ + 0x400, fs->files[i].data, n);
+	/* TwinBee/soccer SCC+ rows ship only patch@$0400 + type=sccp. Do not
+	   overlay GRA.BIN already at $4000 (Nemesis SCC+). */
+	if (!loaded4000) {
+		for (int i = 0; i < ge->romCount; i++) {
+			const CEmuRomEntry* r = &ge->rom[i];
+			if (_stricmp(r->type, "sccp") != 0)
+				continue;
+			unsigned sz = 0;
+			const unsigned char* data = CEmuZipFsFind(fs, r->name, &sz);
+			if (!data || !sz)
+				continue;
+			int off = r->offset;
+			if (off <= 0)
+				off = 0x4000;
+			if (off < 0 || off >= 0x10000)
+				continue;
+			unsigned n = sz;
+			if (off + (int)n > 0x10000)
+				n = (unsigned)(0x10000 - off);
+			memcpy(mem_ + off, data, n);
+			/* 16K SCC+ dumps (Sky Jaguar / Super Cobra) only fill
+			   $4000-7FFF. TwinBee's 32K image covers $8000-BFFF too;
+			   song pointers such as $80A0 must land in RAM. */
+			if (off == 0x4000 && n == 0x4000u)
+				memcpy(mem_ + 0x8000, data, n);
 			loadedCode++;
+			loaded4000 = 1;
 			break;
+		}
+	}
+
+	/* Zip-only fallback when catalog roms missing: prefer real drivers over patch. */
+	int zipInitPc = -1;
+	int zipMdata = -1;
+	int zipMsize = -1;
+	if (!loadedCode) {
+		unsigned szDrv = 0, szPat = 0, szData = 0, szBgm = 0, szTone = 0, szSe = 0;
+		const unsigned char* drv = CEmuZipFsFind(fs, "DRIVER.BIN", &szDrv);
+		const unsigned char* pat = CEmuZipFsFind(fs, "patch", &szPat);
+		const unsigned char* dataBin = CEmuZipFsFind(fs, "DATA.BIN", &szData);
+		const unsigned char* bgmdrv = CEmuZipFsFind(fs, "BGMDRV.BIN", &szBgm);
+		const unsigned char* tone = CEmuZipFsFind(fs, "TONE.BIN", &szTone);
+		const unsigned char* se = CEmuZipFsFind(fs, "SE.BGE", &szSe);
+		const int namePsg = (ge->name[0] && wcsstr(ge->name, L"(PSG)")) ? 1 : 0;
+		if (drv && pat && szDrv >= 256 && szPat >= 8) {
+			/* Compile puyo kss xml names a missing .kss. Native layout is
+			   DRIVER@$0100 DATA@$2000 patch@$6000 init $6000. */
+			unsigned n = szDrv;
+			if (0x100u + n > 0x10000u) n = 0xFF00u;
+			memcpy(mem_ + 0x0100, drv, n);
+			if (dataBin && szData) {
+				n = szData;
+				if (0x2000u + n > 0x10000u) n = 0xE000u;
+				memcpy(mem_ + 0x2000, dataBin, n);
+			}
+			n = szPat;
+			if (0x6000u + n > 0x10000u) n = 0xA000u;
+			memcpy(mem_ + 0x6000, pat, n);
+			loadedCode = 1;
+			zipInitPc = 0x6000;
+			if (!namePsg)
+				useOpll = 1;
+		} else if (bgmdrv && pat && szBgm >= 256 && szPat >= 8) {
+			/* Princess Maker kss xml names a missing .kss. Native layout
+			   is patch@$0400 TONE@$C600 SE@$C800 BGMDRV@$CE00 mdata $B600. */
+			unsigned n = szPat;
+			if (0x0400u + n > 0x10000u) n = 0xFC00u;
+			memcpy(mem_ + 0x0400, pat, n);
+			if (tone && szTone) {
+				n = szTone;
+				if (0xC600u + n > 0x10000u) n = 0x3A00u;
+				memcpy(mem_ + 0xC600, tone, n);
+			}
+			if (se && szSe) {
+				n = szSe;
+				if (0xC800u + n > 0x10000u) n = 0x3800u;
+				memcpy(mem_ + 0xC800, se, n);
+			}
+			n = szBgm;
+			if (0xCE00u + n > 0x10000u) n = 0x3200u;
+			memcpy(mem_ + 0xCE00, bgmdrv, n);
+			for (int i = 0; i < fs->fileCount; i++) {
+				char pathA[CEMU_ZIP_PATH];
+				WideCharToMultiByte(932, 0, fs->files[i].path, -1, pathA,
+					(int)sizeof(pathA), NULL, NULL);
+				if (pathA[0] != 'G' && pathA[0] != 'g') continue;
+				size_t ln = strlen(pathA);
+				if (ln < 8 || _stricmp(pathA + ln - 4, ".BGM") != 0) continue;
+				int hi = pathA[1] - '0';
+				int lo = (int)strtol(pathA + 2, NULL, 16);
+				int idx = -1;
+				if (hi == 1) idx = lo;
+				else if (hi == 6) idx = 8 + lo;
+				else if (hi == 7) idx = 0x1E + lo;
+				if (idx < 0 || idx >= BGM_BANKS) continue;
+				unsigned bsz = fs->files[i].size;
+				if (bsz > (unsigned)BGM_SIZE) bsz = (unsigned)BGM_SIZE;
+				unsigned char* buf = (unsigned char*)malloc(bsz ? bsz : 1);
+				if (!buf) continue;
+				memcpy(buf, fs->files[i].data, bsz);
+				if (bgmBank_[idx]) free(bgmBank_[idx]);
+				bgmBank_[idx] = buf;
+				bgmBankSize_[idx] = bsz;
+				bgmPresent_[idx] = 1;
+			}
+			loadedCode = 1;
+			zipInitPc = 0x0400;
+			zipMdata = 0xB600;
+			zipMsize = 0x1000;
+			if (!namePsg)
+				useOpll = 1;
+		} else {
+			int best = -1;
+			unsigned bestSz = 0;
+			for (int i = 0; i < fs->fileCount; i++) {
+				char pathA[CEMU_ZIP_PATH];
+				WideCharToMultiByte(932, 0, fs->files[i].path, -1, pathA, (int)sizeof(pathA), NULL, NULL);
+				const unsigned sz = fs->files[i].size;
+				if (sz < 256) continue;
+				if (_stricmp(pathA, "patch") == 0) continue;
+				if (sz > bestSz) { bestSz = sz; best = i; }
+			}
+			if (best >= 0) {
+				unsigned n = fs->files[best].size;
+				if (n > 0xC000) n = 0xC000;
+				memcpy(mem_ + 0x4000, fs->files[best].data, n);
+				loadedCode = 1;
+			}
+			/* Always map tiny patch @0400 when present. */
+			for (int i = 0; i < fs->fileCount; i++) {
+				char pathA[CEMU_ZIP_PATH];
+				WideCharToMultiByte(932, 0, fs->files[i].path, -1, pathA, (int)sizeof(pathA), NULL, NULL);
+				if (_stricmp(pathA, "patch") != 0) continue;
+				unsigned n = fs->files[i].size;
+				if (n > 0x200) n = 0x200;
+				memcpy(mem_ + 0x400, fs->files[i].data, n);
+				loadedCode++;
+				break;
+			}
 		}
 	}
 	if (!loadedCode) return 0;
@@ -803,6 +1050,12 @@ int CHardMsx::LoadGeneric(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned title
 		if (ms > BGM_SIZE) ms = BGM_SIZE;
 		mdataSize_ = (unsigned)ms;
 	}
+	if (zipInitPc >= 0)
+		initPc_ = (uint16_t)zipInitPc;
+	if (zipMdata >= 0)
+		mdataAddr_ = (uint16_t)zipMdata;
+	if (zipMsize > 0)
+		mdataSize_ = (unsigned)zipMsize;
 	/* Tokuma MSX·FAN / msfield: catalog mdata_addr=0x9ff9 + size 0x2000
 	   overflows the 64K map (StageBgm would copy ~7 bytes). FMPAC patch
 	   play path uses HL=A000 — stage songs there. */
@@ -819,17 +1072,68 @@ int CHardMsx::LoadGeneric(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned title
 	EnsureOpll(useOpll ? 1 : 0);
 	if (useMsxa)
 		EnsureMsxAudio();
+	/* use_scc (kgc SCC+ rows) must stick. Do not then zero it: that left
+	   kgc3/4 SILENT. KSS still waits for mapper 0x3F in LoadKssImage. */
 	{
 		const int useScc = ParseOptHex(ge, "use_scc", 0);
-		if (useScc)
-			sccEnable_ = 1;
+		sccEnable_ = useScc ? 1 : 0;
 	}
-	/* Generic: don't force SCC into 9800 — wait for mapper 0x3F. KSS sets
-	   sccEnable_ from the chip byte below in LoadKssImage. */
-	sccEnable_ = 0;
 	sccMapped_ = 0;
 	sccAccessed_ = 0;
 	if (chipScc_) chipScc_->Reset();
+	/* Nemesis SCC+: grascc CALLs $4912 (GRA.BIN mapper) but GRASCC
+	   play is $4006 (AND $7F then table). */
+	if (sccEnable_ && initPc_ == 0x400
+		&& mem_[0x4000] == 0xC3 && mem_[0x4001] == 0xCF
+		&& mem_[0x4002] == 0x60
+		&& mem_[0x0424] == 0xCD && mem_[0x0425] == 0x12
+		&& mem_[0x0426] == 0x49) {
+		mem_[0x0425] = 0x06;
+		mem_[0x0426] = 0x40;
+	}
+	if (sccEnable_ && initPc_ == 0x400) {
+		FILE* jf = fopen("c:\\projects\\APPLICATION3\\ogg_all2022\\.cursor\\_jag_hit.txt", "a");
+		if (jf) {
+			fprintf(jf, "scc=%d init=%04X 4000=%02X%02X%02X 4009=%02X%02X%02X 4251=%02X%02X 0456=%02X%02X%02X D280=%02X\n",
+				sccEnable_, (unsigned)initPc_,
+				mem_[0x4000], mem_[0x4001], mem_[0x4002],
+				mem_[0x4009], mem_[0x400A], mem_[0x400B],
+				mem_[0x4251], mem_[0x4252],
+				mem_[0x0456], mem_[0x0457], mem_[0x0458],
+				mem_[0xD280]);
+			fclose(jf);
+		}
+	}
+	/* Sky Jaguar SCC+: init CALL $0430 queues mute $9D into the E01A
+	   priority slot. Play $93/$91/$88 then RET C (0x13 < 0x1D) and the
+	   ISR never starts BGM. $4415 is a PSG stub; SCC mix is $4416 only
+	   when D280 bit1 is set — the 16K dump never writes that bit. */
+	if (sccEnable_ && initPc_ == 0x400
+		&& mem_[0x4009] == 0xC3 && mem_[0x400A] == 0x27
+		&& mem_[0x400B] == 0x42) {
+		if (mem_[0x0456] == 0xCD && mem_[0x0457] == 0x30
+			&& mem_[0x0458] == 0x04) {
+			mem_[0x0456] = 0x00;
+			mem_[0x0457] = 0x00;
+			mem_[0x0458] = 0x00;
+		}
+		/* $4251 CP E / $4252 RET C — drop the mute-priority reject. */
+		if (mem_[0x4251] == 0xBB && mem_[0x4252] == 0xD8) {
+			mem_[0x4251] = 0x00;
+			mem_[0x4252] = 0x00;
+		}
+		mem_[0xD280] |= 0x02;
+		{
+			FILE* jf = fopen("c:\\projects\\APPLICATION3\\ogg_all2022\\.cursor\\_jag_hit.txt", "a");
+			if (jf) {
+				fprintf(jf, "PATCH 4251=%02X%02X 0456=%02X%02X%02X D280=%02X\n",
+					mem_[0x4251], mem_[0x4252],
+					mem_[0x0456], mem_[0x0457], mem_[0x0458],
+					mem_[0xD280]);
+				fclose(jf);
+			}
+		}
+	}
 
 	cpu_->reset(mem_);
 	cpuCycles_ = 0;
@@ -934,6 +1238,7 @@ int CHardMsx::LoadKss(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode
 	idle_ = 0;
 	playing_ = 0;
 	genericMode_ = 0;
+	dqMode_ = 0;
 	ge_ = ge;
 	titleCode_ = titleCode;
 
@@ -1013,9 +1318,19 @@ int CHardMsx::StartSongKss(unsigned titleCode)
 		uint8_t play = (uint8_t)(titleCode & 0xff);
 		if ((chips_ & CHIP_MSXAUDIO) && !(chips_ & CHIP_FMPAC) && (play & 0x80))
 			play = (uint8_t)(play & 0x7f);
+		/* sorc_msx: PSG XML codes are FMPAC indices + $3D (m3u 0x1C opening
+		   vs XML 0x59). The $1EE8 table is an identity map, so 0x59 packed
+		   the wrong bank and left the Bitbuster unpack as a 4-key drone. */
+		if (initAdr_ == 0x1E00 && intAdr_ == 0xB001 && play >= 0x3Du)
+			play = (uint8_t)(play - 0x3Du);
 		ioport_[PLAY_CODE_PORT] = play;
 	}
+	/* Snapshot RAM at $8000 before the first mapper write. hoot's invalid
+	   $FE bank maps that RAM back; capturing after PortOut(0xfe,0) saved
+	   bank 0 and left sorc/bburn's OUT $7F as a no-op. */
+	memcpy(bankShadow_, mem_ + 0x8000, 0x4000);
 	PortOut(0xfe, 0);
+	bank8kRam_[0] = bank8kRam_[1] = 0;
 	if (bank8k_ && bank_ && bankBytes_ >= 0x2000u) {
 		memcpy(mem_ + 0x8000, bank_, 0x2000);
 		if (bankNum_ > 1 && bankBytes_ >= 0x4000u)
@@ -1038,6 +1353,20 @@ int CHardMsx::StartSongKss(unsigned titleCode)
 	if (chipAy_) chipAy_->Reset();
 
 	CEmuHardMsxSetActive(this);
+	/* Shiryo loadAdr=$0000: the 16K image's RST 00 vector is ADD HL,A
+	   (85 6F D0 24 C9) and WRTPSG lives at $01FC. IPL $0000 is RST 10 so
+	   reset can reach $0010; overlay the helpers only after that RST.
+	   Planting RST 20 at $0000 before reset skipped boot entirely. */
+	if (initAdr_ == 0x0BD1) {
+		Ay_CpuRunOne(cpu_);
+		static const uint8_t kAddHlA[] = { 0x85, 0x6F, 0xD0, 0x24, 0xC9 };
+		static const uint8_t kAddDeA[] = { 0x83, 0x5F, 0xD0, 0x14, 0xC9 };
+		memcpy(mem_ + 0x0000, kAddHlA, sizeof kAddHlA);
+		memcpy(mem_ + 0x0008, kAddDeA, sizeof kAddDeA);
+		mem_[0x93] = 0xc3;
+		mem_[0x94] = 0xFC;
+		mem_[0x95] = 0x01;
+	}
 	/* hoot Play() emulates with the 60 Hz timer live until SKIP. Init
 	   that EI/HALTs (or waits on vblank) never returns without IRQs. */
 	int guard = 0;
@@ -1075,6 +1404,11 @@ int CHardMsx::StartSongKss(unsigned titleCode)
 int CHardMsx::StartSongGeneric(unsigned titleCode)
 {
 	if (!cpu_) return 0;
+	/* puyo kss xml uses 0x01/0x81 while the native Compile patch (init
+	   $6000) wants the generic 0x101 packing. Bit7 is only PSG-vs-FM. */
+	if (ge_ && _stricmp(ge_->subtype, "kss") == 0 && initPc_ == 0x6000
+		&& (titleCode & ~0xFFu) == 0)
+		titleCode = 0x100u | (titleCode & 0x7Fu);
 	titleCode_ = titleCode;
 	/* Catalog codes pack up to three bytes and the width says which is which:
 	     one byte  (angelus 0x05)   — picks the bgm rom, and is the song.
@@ -1215,9 +1549,12 @@ int CHardMsx::StartSongGeneric(unsigned titleCode)
 	/* silviana/feedback/sbp/xanadus: IN A,(4); CP 1; JR Z,se — exclusive
 	   SE path. Title 0x01 is BGM file 1, so port4=1 never reaches play.
 	   JR offset >= $13 skips algowars/famicle2 (still PLAYS with 0x01).
-	   ninja/ginei have no bgm rom 1. ff_msx 0x01 is the PLAYS smoke. */
+	   ninja/ginei have no bgm rom 1. ff_msx 0x01 is the PLAYS smoke.
+	   mbsp JR Z,$0E is below that floor, so 0x01 took the SE CALL $AA09.
+	   Do not fold mbsp into port4Se — that kept file 0 staged and
+	   silenced FMUS01. mbspPack below stages the low file with port4=0. */
 	int port4Se = 0;
-	if (titleCode <= 0xFFu && low == 1 && bgmPresent_[1]
+	if (!port4Se && titleCode <= 0xFFu && low == 1 && bgmPresent_[1]
 		&& (unsigned)initPc_ + 80u < 0x10000u) {
 		for (unsigned i = 0; i + 6u < 80u; i++) {
 			const unsigned a = (unsigned)initPc_ + i;
@@ -1267,6 +1604,30 @@ int CHardMsx::StartSongGeneric(unsigned titleCode)
 		}
 	}
 
+	/* gokudo: IN A,(4); CP 1 selects ENDMSX.COM; IN A,(3) indexes that
+	   file's pointer table. 0x001 used sel4=low=1 and played ENDMSX. */
+	const int gokudoPack = (!extraCode && initPc_ == 0x400
+		&& mdataAddr_ == 0x4000 && mdataSize_ == 0x4000
+		&& bgmPresent_[0] && bgmPresent_[1] && !bgmPresent_[2]) ? 1 : 0;
+	/* nukenin: IN A,(4) file / IN A,(3) track into CALL $084C.
+	   ys3 is init $3000 mdata $0300 — keep that gate. */
+	const int nukeninPack = (extraCode && initPc_ == 0x3000
+		&& mdataAddr_ == 0x4000 && mdataSize_ == 0x2600) ? 1 : 0;
+	/* herzog: IN A,(4) is the track in staged MUS0n; IN A,(5); CP 1 is SE.
+	   0x0009/0x0109 share file 9, mid is the track. Do not put mid on port 5. */
+	const int herzogPack = (extraCode && initPc_ == 0x400
+		&& mdataAddr_ == 0xC000 && mdataSize_ == 0x0C00) ? 1 : 0;
+	/* mbsp: IN A,(4); CP 1 is SE $AA09 vs BGM $AA03. 0x00.. are FMUSxx
+	   files (A=0 stops). 0x01xx is SE. Size $0A00 — playbal3 is $1000. */
+	const int mbspPack = (initPc_ == 0x400 && mdataAddr_ == 0xC200
+		&& mdataSize_ == 0x0A00) ? 1 : 0;
+	/* gulliver: IN A,(4); CP 1 picks SE table $046D vs BGM $0457.
+	   MUSC.BIN is type=code; there are no bgm roms. */
+	const int gulliverPack = (extraCode && initPc_ == 0x400
+		&& mem_[0x041E] == 0xDB && mem_[0x041F] == 0x04
+		&& mem_[0x0420] == 0xFE && mem_[0x0421] == 0x01
+		&& !bgmPresent_[0]) ? 1 : 0;
+
 	if (lowFilePack && low < BGM_BANKS && bgmPresent_[low]) {
 		song = low;
 		sel3 = low;
@@ -1291,6 +1652,44 @@ int CHardMsx::StartSongGeneric(unsigned titleCode)
 		song = low;
 		sel3 = low;
 		sel4 = mid;
+	} else if (gokudoPack) {
+		song = (mid == 1 && bgmPresent_[1]) ? 1 : 0;
+		sel3 = low;
+		sel4 = mid;
+	} else if (nukeninPack) {
+		song = (mid < BGM_BANKS && bgmPresent_[mid]) ? mid : 0;
+		/* $084C A=$FF stops, A indexes the 10-byte header. Channel
+		   offsets are relative to the $279E LDIR dest. */
+		sel3 = low;
+		sel4 = mid;
+	} else if (herzogPack) {
+		if (top == 1) {
+			/* SE 0x000100xx: IN A,(5); CP 1 then IN A,(3) CALL $B1B7.
+			   Putting mid (always 0) on port 3 made every SE SAMESONG. */
+			song = 0;
+			sel3 = low;
+			sel4 = 0;
+		} else {
+			song = (low < BGM_BANKS && bgmPresent_[low]) ? low : 0;
+			sel3 = mid;
+			sel4 = mid;
+		}
+	} else if (gulliverPack) {
+		song = low;
+		sel3 = low;
+		sel4 = mid;
+	} else if (mbspPack) {
+		if (mid == 1) {
+			song = 0;
+			sel3 = low;
+			sel4 = 1;
+		} else {
+			song = (low < BGM_BANKS && bgmPresent_[low]) ? low : 0;
+			/* $AA03 indexes FMUS via IY+$18, not A. A=0 is a valid first
+			   song; A=1 was empty on FMUS00. */
+			sel3 = 0;
+			sel4 = 0;
+		}
 	} else if (fileInMid && mid < BGM_BANKS && bgmPresent_[mid]) {
 		song = mid;
 		sel3 = low;
@@ -1405,14 +1804,18 @@ int CHardMsx::StartSongGeneric(unsigned titleCode)
 	ioport_[0x04] = (uint8_t)(sel4 & 0xff);
 	ioport_[0x05] = (top == 0xFF) ? 0 : (uint8_t)(top & 0xff);
 	ioport_[0x07] = (chips_ & CHIP_FMPAC) ? 0x01 : 0x00;
-	/* KOEI 4-byte (genghis 0x01990010): patch IN A,(4)/IN A,(5) as HL into
-	   MMLDATA @8000. High word is the offset; no separate bgm roms. */
+	/* KOEI genghis: PATCH IN A,(4)/IN A,(5) as HL into MMLDATA @8000.
+	   Address is (titleCode>>8), not a $80-step index by the low byte. */
 	int anyBgm = 0;
 	for (unsigned i = 0; i < BGM_BANKS; i++) {
 		if (bgmPresent_[i]) { anyBgm = 1; break; }
 	}
-	if (!anyBgm && titleCode > 0xFFFFFFu) {
-		uint16_t hl = (uint16_t)((titleCode >> 16) + 0x8000u);
+	const int koeiIn45 = (!anyBgm
+		&& mem_[0x0432] == 0xDB && mem_[0x0433] == 0x04
+		&& mem_[0x0434] == 0x6F && mem_[0x0435] == 0xDB
+		&& mem_[0x0436] == 0x05 && mem_[0x0437] == 0x67);
+	if (koeiIn45) {
+		uint16_t hl = CEmuMsxKoeiMmlAddr(mem_, titleCode, low);
 		ioport_[0x04] = (uint8_t)(hl & 0xff);
 		ioport_[0x05] = (uint8_t)(hl >> 8);
 		ioport_[0x06] = (uint8_t)(mid & 0xff);
@@ -1603,6 +2006,178 @@ int CHardMsx::StartSongGeneric(unsigned titleCode)
 		memset(mem_ + 0x3EF9, 0, 0x107);
 		memcpy(mem_ + 0x4000, tmp, 0x4000);
 	}
+	/* gokudo TITLE.COM is 12K at $4000. Patch LDDR $7000→$7C00 copies
+	   through empty $7000 and the Z80 overlap crashed the host on 0x001.
+	   Replicate the shift with memmove (TITLE path only), then NOP LDDR.
+	   Replay edges re-IN port 3 after OUT (3),file — later edges would
+	   always pick TITLE track 0 / ENDMSX track 1. Keep the index. */
+	if (gokudoPack
+		&& mem_[0x0424] == 0x21 && mem_[0x0425] == 0x00 && mem_[0x0426] == 0x70
+		&& mem_[0x0427] == 0x11 && mem_[0x0428] == 0x00 && mem_[0x0429] == 0x7C
+		&& mem_[0x042A] == 0x01 && mem_[0x042B] == 0x00 && mem_[0x042C] == 0x30
+		&& mem_[0x042D] == 0xED && mem_[0x042E] == 0xB8) {
+		if (mid != 1)
+			memmove(mem_ + 0x4C01, mem_ + 0x4001, 0x3000);
+		memset(mem_ + 0x0424, 0x00, 11);
+		if (mem_[0x041E] == 0xD3 && mem_[0x041F] == 0x03)
+			mem_[0x041E] = mem_[0x041F] = 0x00;
+	}
+	/* nukenin: PATCH JP $0131 → $305F does IN A,(4) file / IN A,(3) track
+	   then LDIR $500 to $279E. $084C also IN A,(3) for the header index
+	   before that CALL. $305F OUT (3),file: a second play edge would
+	   CALL $084C with A=file and switch 0x100 onto track 1. One edge
+	   only. Plant LD A,imm over both INs so file/track cannot desync.
+	   PATCH RET at $0180 is the length converter — restore it.
+	   Keep $0196 RET (BDOS). Do not retarget the $279E immediates.
+	   J/K track 1+ : ch0/ch1 MML can stall $0416 so the ISR never
+	   keys. Plant three independent track-6 stubs and retarget the
+	   header so ch1/ch2 cannot land mid-command. Overlay this track's
+	   rest-first (else earliest-note) voice at +0. File 0/3 already PLAYS as 3ch. */
+	if (nukeninPack && mem_[0x305F] == 0xDB && mem_[0x3060] == 0x04) {
+		const unsigned file = (song <= 3u) ? song : 0u;
+		const unsigned track = (unsigned)(sel3 & 0xff);
+		const unsigned tent = 0x309Au + file * 4u;
+		mem_[0x0869] = mem_[tent];
+		mem_[0x086A] = mem_[tent + 1];
+		if (mem_[0x0180] == 0xC9)
+			mem_[0x0180] = 0xCB;
+		if (mem_[0x3014] == 0xDB && mem_[0x3015] == 0x03) {
+			mem_[0x3014] = 0x3E;
+			mem_[0x3015] = (uint8_t)track;
+		}
+		mem_[0x305F] = 0x3E;
+		mem_[0x3060] = (uint8_t)file;
+		if (mem_[0x3076] == 0xDB && mem_[0x3077] == 0x03) {
+			mem_[0x3076] = 0x3E;
+			mem_[0x3077] = (uint8_t)track;
+		}
+		if (file >= 1u && file <= 2u && track >= 1u) {
+			static const unsigned kPtab[4] = { 0x30AAu, 0x30C8u, 0x30EAu, 0x3114u };
+			static const unsigned kHdr[4] = { 0x07B6u, 0x3136u, 0x31E0u, 0x32B2u };
+			const unsigned hdr = kHdr[file] + track * 10u;
+			const unsigned src = Rd16(mem_ + kPtab[file] + track * 2u);
+			const unsigned fill = Rd16(mem_ + kPtab[file]); /* track 0: first=0 */
+			const unsigned w0 = Rd16(mem_ + hdr + 0u);
+			const unsigned w1 = Rd16(mem_ + hdr + 2u);
+			const unsigned w3 = Rd16(mem_ + hdr + 6u);
+			if (src >= 0x4000u && fill >= 0x4000u
+				&& src + 0x100u < 0x10000u && fill + 0x40u < 0x10000u
+				&& src != fill) {
+				unsigned off = 0, best = 0xFFFFu, have = 0;
+				const unsigned cand[3] = { 0u, w0, w1 };
+				unsigned i;
+				int f6 = 0;
+				unsigned r1 = 0xFFFFu;
+				if (src + w1 < 0x10000u) {
+					unsigned lim = (w3 > w1) ? (w3 - w1) : 0x40u;
+					r1 = NukeninRestUntilNote(mem_ + src + w1, lim, &f6);
+				}
+				if (r1 != 0u && r1 != 0xFFFFu && !f6 && r1 < 0xC0u) {
+					off = w1;
+					have = 1;
+				} else {
+					for (i = 0; i < 3u; i++) {
+						const unsigned o = cand[i];
+						unsigned lim, rest;
+						if (src + o >= 0x10000u)
+							continue;
+						lim = (w3 > o) ? (w3 - o) : 0x40u;
+						if (lim < 8u)
+							continue;
+						f6 = 0;
+						rest = NukeninRestUntilNote(mem_ + src + o, lim, &f6);
+						if (rest == 0xFFFFu || f6)
+							continue;
+						if (rest == 0u)
+							rest = 0x800u;
+						if (rest >= 0xC0u)
+							continue;
+						if (rest < best) {
+							best = rest;
+							off = o;
+							have = 1;
+						}
+					}
+				}
+				{
+					uint8_t stub[0x40];
+					uint8_t tmp[0x70];
+					unsigned n = 0;
+					if (have) {
+						n = (w3 > off) ? (w3 - off) : 0x20u;
+						if (n > 0x70u) n = 0x70u;
+						if (src + off + n > 0x10000u)
+							n = 0x10000u - (src + off);
+						if (n >= 8u)
+							memcpy(tmp, mem_ + src + off, n);
+						else
+							n = 0;
+					}
+					memcpy(stub, mem_ + fill, 0x40);
+					memcpy(mem_ + src, stub, 0x40);
+					memcpy(mem_ + src + 0x80u, stub, 0x40);
+					memcpy(mem_ + src + 0xC0u, stub, 0x40);
+					if (n)
+						memcpy(mem_ + src, tmp, n);
+					Wr16(mem_ + hdr + 0u, 0x0080);
+					Wr16(mem_ + hdr + 2u, 0x00C0);
+					Wr16(mem_ + hdr + 6u, 0x0100);
+				}
+			}
+		}
+	}
+	/* mbsp ISR $B907 CALSLT RSLREG $0138. The patch replaces CALSLT with
+	   JP (IX), so an empty $0138 NOP-slides into PATCH @0400 and BGM
+	   never ticks. SE $AA09 does not call $B907, which is why clicks
+	   already worked. Do not plant $0138 globally — Compile DRIVER.BIN
+	   lives @0100. */
+	if (mbspPack && mem_[0x0138] == 0x00) {
+		mem_[0x0138] = 0xAF; /* XOR A */
+		mem_[0x0139] = 0xC9; /* RET — primary slot 0 */
+		mem_[0xFCC1] = 0;
+	}
+	/* herzog ISR $BB13 CALL $00D8. $00D5 is already RET so CALL $00D5
+	   is safe, but $00D8 is empty and NOP-slides into $00E0 — nested
+	   H.TIMI / IFF1 off after the mute click at $AE1A. */
+	if (herzogPack && mem_[0x00D8] == 0x00)
+		mem_[0x00D8] = 0xC9;
+	/* herzog/mbsp plant H.TIMI at FD9F. Do not smash IM1 $0038 to that
+	   handler — $00E0 CALL FD9F is already live, and skipping its EI
+	   left IFF1 off after the first vblank (MON_DEAD click only). */
+	/* Sky Jaguar SCC+: re-apply after settle. Init mute may have filled
+	   E01A/$D2BB; SCC mix at $4416 is gated on D280 bit1. */
+	if (sccEnable_ && initPc_ == 0x400
+		&& mem_[0x4009] == 0xC3 && mem_[0x400A] == 0x27
+		&& mem_[0x400B] == 0x42) {
+		mem_[0xD280] |= 0x02;
+		mem_[0xD2BB] = 1;
+		mem_[0xD2BC] = (uint8_t)(ioport_[0x03] & 0x3F);
+		memset(mem_ + 0xE018, 0, 0x28);
+		if (mem_[0x4251] == 0xBB && mem_[0x4252] == 0xD8) {
+			mem_[0x4251] = 0x00;
+			mem_[0x4252] = 0x00;
+		}
+		if (chipScc_) {
+			for (unsigned w = 0; w < 32; w++)
+				CEmuChipSccWriteReg(chipScc_, w, (uint8_t)(w < 16 ? 0x7F : 0x80));
+			CEmuChipSccWriteReg(chipScc_, 0x80, 0x80);
+			CEmuChipSccWriteReg(chipScc_, 0x81, 0x01);
+			CEmuChipSccWriteReg(chipScc_, 0x8A, 0x0F);
+			CEmuChipSccWriteReg(chipScc_, 0x8F, 0x01);
+			sccAccessed_ = 1;
+		}
+		{
+			FILE* jf = fopen("c:\\projects\\APPLICATION3\\ogg_all2022\\.cursor\\_jag_hit.txt", "a");
+			if (jf) {
+				fprintf(jf, "SETTLE pc=%04X iff=%d 4251=%02X%02X D280=%02X D2BB=%02X E01A=%02X FD9F=%02X%02X%02X\n",
+					(unsigned)cpu_->r.pc, (int)cpu_->r.iff1,
+					mem_[0x4251], mem_[0x4252], mem_[0xD280],
+					mem_[0xD2BB], mem_[0xE01A],
+					mem_[0xFD9F], mem_[0xFDA0], mem_[0xFDA1]);
+				fclose(jf);
+			}
+		}
+	}
 	/* One-shot play after handlers exist (port2/3/4 mailboxes). */
 	playCmdPending_ = 8; /* a few edges; not sticky-forever */
 	/* daiva5 MSX.BIN: play CALL $049D does LDDR $B74F→$BF4F. A second
@@ -1611,11 +2186,31 @@ int CHardMsx::StartSongGeneric(unsigned titleCode)
 	   edges to plant H.TIMI (pending=1 made the live pick silent). */
 	if (mdataAddr_ == 0x8FF9)
 		playCmdPending_ = 1;
+	if (nukeninPack)
+		playCmdPending_ = 1;
+	/* crimson2/3 PSG: C=5 play does LD HL,(mdata); ADD mdata; LD (mdata),HL
+	   in place. A second mailbox edge double-relocates and the song dies.
+	   OPLL (A11A/A11E=1 after init) uses CALSLT and can keep 8 edges. */
+	if (initPc_ == 0x400 && mdataAddr_ >= 0xAC00 && mdataAddr_ < 0xAD00
+		&& mem_[0xA100] == 0x0D && mem_[0xA11A] != 1 && mem_[0xA11E] != 1) {
+		const uint8_t mdLo = (uint8_t)(mdataAddr_ & 0xff);
+		const uint8_t mdHi = (uint8_t)(mdataAddr_ >> 8);
+		for (unsigned a = 0xA100; a + 10u < 0xB000u; a++) {
+			if (mem_[a] == 0x2A && mem_[a + 1] == mdLo && mem_[a + 2] == mdHi
+				&& mem_[a + 3] == 0x11 && mem_[a + 4] == mdLo && mem_[a + 5] == mdHi
+				&& mem_[a + 6] == 0x19 && mem_[a + 7] == 0x22
+				&& mem_[a + 8] == mdLo && mem_[a + 9] == mdHi) {
+				playCmdPending_ = 1;
+				break;
+			}
+		}
+	}
 	ioport_[0x02] = 0x01;
-	if (!anyBgm && titleCode > 0xFFFFFFu) {
-		uint16_t hl = (uint16_t)((titleCode >> 16) + 0x8000u);
+	if (koeiIn45) {
+		uint16_t hl = CEmuMsxKoeiMmlAddr(mem_, titleCode, low);
 		ioport_[0x04] = (uint8_t)(hl & 0xff);
 		ioport_[0x05] = (uint8_t)(hl >> 8);
+		ioport_[0x06] = (uint8_t)(mid & 0xff);
 		titleCode_ = ioport_[0x04];
 	} else if (addrBox) {
 		uint16_t hl = (uint16_t)hiWord;
@@ -1638,10 +2233,13 @@ int CHardMsx::StartSongGeneric(unsigned titleCode)
 		ioport_[0x04] = (uint8_t)(sel4 & 0xff);
 		ioport_[0x05] = (uint8_t)(top & 0xff);
 	} else {
-		ioport_[0x03] = (uint8_t)(compilePtr ? sel3 : song);
+		ioport_[0x03] = (uint8_t)((compilePtr || gokudoPack || nukeninPack
+			|| herzogPack || gulliverPack || mbspPack) ? sel3 : song);
 		ioport_[0x04] = (uint8_t)((lowFilePack || fileInMid || classInMid
 			|| cmdInMid || sameLowCmd || mdataAddr_ == 0xCEB1
 			|| compilePtr || port4Se || port4Inc || ds00Data
+			|| gokudoPack || nukeninPack || herzogPack || gulliverPack
+			|| mbspPack
 			|| (initPc_ == 0x3000 && mdataAddr_ == 0x0300)) ? sel4 : song);
 	}
 	ioport_[0x07] = (chips_ & CHIP_FMPAC) ? 0x01 : 0x00;
@@ -1771,7 +2369,8 @@ int CHardMsx::LoadDq(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode)
 {
 	titleCode_ = titleCode;
 	ge_ = ge;
-	genericMode_ = 1;
+	genericMode_ = 0;
+	dqMode_ = 1;
 	memset(mem_, 0, sizeof(mem_));
 	memset(ioport_, 0, sizeof(ioport_));
 	FreeBanks();
@@ -1782,35 +2381,22 @@ int CHardMsx::LoadDq(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode)
 	playing_ = 0;
 	if (!LoadCartRom(fs, ge, "code"))
 		return 0;
-	/* DQ1 = ASCII8 128K; DQ2 = ASCII16 256K (MAME software list). */
-	if (_stricmp(ge->subtype, "dq2") == 0 || cartBytes_ > 0x20000u) {
-		mapper_ = MAP_ASCII16;
-		MapAscii16(0, 0);
-		MapAscii16(1, 1);
-	} else {
-		mapper_ = MAP_ASCII8;
-		MapAscii8(0, 0);
-		MapAscii8(1, 1);
-		MapAscii8(2, 2);
-		MapAscii8(3, 3);
-	}
-	PlantPsgTrampoline(mem_);
-	PlantBiosStubs();
-	/* Cart header "AB" + init at $4002. Hoot's missing dq1.cpp used a
-	   mailbox; until we have that IPL, boot the ROM init and feed song
-	   codes through the generic ports. */
-	initPc_ = 0x400;
+	/* Both carts are ASCII8. DQ2's player CALL $C428 writes 6000/6800/7000/7800
+	   as four 8K pages (D, D+1, E, E+1). Treating 256K as ASCII16 made those
+	   pairs collapse to one 16K bank and silenced banked song data.
+	   Do not trampoline $0400: CALL $0138 used to NOP-slide into it and
+	   re-enter cart init until the stack died. */
+	mapper_ = MAP_ASCII8;
+	MapAscii8(0, 0);
+	MapAscii8(1, 1);
+	MapAscii8(2, 2);
+	MapAscii8(3, 3);
+	PlantDqBios();
+	initPc_ = 0x4010;
 	if (mem_[0x4000] == 'A' && mem_[0x4001] == 'B') {
 		const uint16_t init = (uint16_t)(mem_[0x4002] | ((uint16_t)mem_[0x4003] << 8));
 		if (init >= 0x4000 && init < 0xC000)
 			initPc_ = init;
-	}
-	if (initPc_ != 0x400) {
-		mem_[0x400] = 0xFB; /* EI */
-		mem_[0x401] = 0xC3;
-		mem_[0x402] = (uint8_t)(initPc_ & 0xff);
-		mem_[0x403] = (uint8_t)(initPc_ >> 8);
-		initPc_ = 0x400;
 	}
 	mdataAddr_ = 0xC000;
 	mdataSize_ = 0x800;
@@ -1820,6 +2406,179 @@ int CHardMsx::LoadDq(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode)
 	cpu_->reset(mem_);
 	cpuCycles_ = 0;
 	if (chipAy_) chipAy_->Reset();
+	return 1;
+}
+
+void CHardMsx::PlantDqBios()
+{
+	/* DQ-only RET-fill: no Compile DRIVER.BIN lives at $0100 here. */
+	memset(mem_, 0xC9, 0x400);
+	mem_[0x0004] = 0x00; /* MSX1 */
+	mem_[0x0006] = 0x98; /* VDP.DR */
+	mem_[0x0007] = 0x98; /* VDP.DW — DQ2 LD A,($0007); INC C → port $99 */
+	PlantPsgTrampoline(mem_);
+	/* RDSLT / WRSLT: RET-fill makes the ==0x00 plant skip. */
+	mem_[0x000C] = 0xC3; mem_[0x000D] = 0xF0; mem_[0x000E] = 0x00;
+	mem_[0x00F0] = 0x7E; mem_[0x00F1] = 0xC9;
+	mem_[0x0014] = 0xC3; mem_[0x0015] = 0xF2; mem_[0x0016] = 0x00;
+	mem_[0x00F2] = 0x73; mem_[0x00F3] = 0xC9;
+	mem_[0x0138] = 0xAF; mem_[0x0139] = 0xC9; /* RSLREG: primary slot 0 */
+	mem_[0x0141] = 0x3E; mem_[0x0142] = 0x3F; mem_[0x0143] = 0xC9; /* SNSMAT */
+	mem_[0xFCC1] = 0; /* EXPTBL: not expanded */
+	mem_[0x0038] = 0xFB; /* EI; RET until the music ISR is planted */
+	mem_[0x0039] = 0xC9;
+}
+
+static void PlantDqMusicIsr(uint8_t* mem, uint16_t tick)
+{
+	static const uint8_t kIsr[] = {
+		0xF5, 0xC5, 0xD5, 0xE5,
+		0xDD, 0xE5, 0xFD, 0xE5,
+		0xCD, 0x00, 0x00,
+		0xFD, 0xE1, 0xDD, 0xE1,
+		0xE1, 0xD1, 0xC1, 0xF1,
+		0xFB, 0xC9
+	};
+	if (!mem) return;
+	memcpy(mem + 0x0100, kIsr, sizeof kIsr);
+	mem[0x0109] = (uint8_t)(tick & 0xff);
+	mem[0x010A] = (uint8_t)(tick >> 8);
+	mem[0x0038] = 0xC3;
+	mem[0x0039] = 0x00;
+	mem[0x003A] = 0x01;
+	mem[0xFD9F] = 0xC9;
+}
+
+static void DqStepCpu(CHardMsx* hw, Ay_Cpu* cpu, uint64_t* nextIrq, int irqOnBusy)
+{
+	uint8_t* m = cpu->get_mem();
+	const uint16_t pc = cpu->r.pc;
+	if (m && m[pc] == 0x76) {
+		cpu->irqDelay = 0;
+		if (!cpu->r.iff1) {
+			cpu->r.pc = (uint16_t)(pc + 1);
+			hw->AddCpuCycles(4);
+			return;
+		}
+		if (cpu->r.im != 2 || !Ay_CpuIm2Interrupt(cpu, 0xff))
+			Ay_CpuIm1Interrupt(cpu);
+		hw->AddCpuCycles(16);
+		return;
+	}
+	const int cyc = Ay_CpuRunOne(cpu);
+	if (cyc <= 0) return;
+	hw->AddCpuCycles((uint64_t)cyc);
+	if (irqOnBusy && hw->CpuCycles() >= *nextIrq) {
+		*nextIrq += (uint64_t)MSX_CPU_HZ / 60u;
+		if (cpu->r.iff1) {
+			cpu->irqDelay = 0;
+			if (cpu->r.im != 2 || !Ay_CpuIm2Interrupt(cpu, 0xff))
+				Ay_CpuIm1Interrupt(cpu);
+		}
+	}
+}
+
+int CHardMsx::StartSongDq(unsigned titleCode)
+{
+	if (!cpu_) return 0;
+	titleCode_ = titleCode;
+	const uint8_t song = (uint8_t)(titleCode & 0xff);
+	const int dq2 = (ge_ && _stricmp(ge_->subtype, "dq2") == 0) ? 1 : 0;
+
+	MapAscii8(0, 0);
+	MapAscii8(1, 1);
+	MapAscii8(2, 2);
+	MapAscii8(3, 3);
+	PlantDqBios();
+
+	cpu_->reset(mem_);
+	cpu_->r.pc = initPc_;
+	cpu_->r.sp = 0xF380;
+	cpu_->r.iff1 = 1;
+	cpu_->r.im = 1;
+	cpuCycles_ = 0;
+	idle_ = 0;
+	playing_ = 1;
+	sccAccessed_ = 0;
+	ayWriteCount_ = 0;
+	if (chipAy_) chipAy_->Reset();
+	CEmuHardMsxSetActive(this);
+
+	int guard = 0;
+	int ready = 0;
+	int isrPlanted = 0;
+	uint64_t nextIrq = (uint64_t)MSX_CPU_HZ / 60u;
+	while (guard++ < 800000) {
+		if (dq2 && !isrPlanted && mem_[0xC000] == 0xC3 && mem_[0xC003] == 0xC3) {
+			/* Driver is in RAM. Init's CALL $C003 / DB $64 waits on C32F
+			   (E000 handshake) — that needs C1CF, not EI;RET. */
+			PlantDqMusicIsr(mem_, 0xC000);
+			isrPlanted = 1;
+		}
+		if (dq2) {
+			if (isrPlanted && cpu_->r.pc == 0x40B2)
+				ready = 1;
+		} else if (mem_[0xD000] == 0xC3 && mem_[0xFD9F] == 0xC3) {
+			ready = 1;
+		}
+		if (ready)
+			break;
+		DqStepCpu(this, cpu_, &nextIrq, dq2 && isrPlanted);
+	}
+
+	/* Page 0 must hold cart bank 0 so DQ1 CALL $4012 still lands on play. */
+	MapAscii8(0, 0);
+	MapAscii8(1, 1);
+
+	if (dq2)
+		PlantDqMusicIsr(mem_, 0xC000);
+	else
+		PlantDqMusicIsr(mem_, 0xD003);
+
+	if (dq2) {
+		/* C003/DB is the game-event table (Overture = JP $4E0B script).
+		   BGM itself is C9D5: store A at CA44, DF20=8, CA45 maps bank
+		   $1C, CC93 fills channel state, then every vblank C1CF→CC13
+		   rebuilds CB95. Inline-DB + IRQ stole the song id (SAMESONG). */
+		mem_[0x0120] = 0x3E;
+		mem_[0x0121] = song;
+		mem_[0x0122] = 0xCD;
+		mem_[0x0123] = 0xD5;
+		mem_[0x0124] = 0xC9;
+		mem_[0x0125] = 0xFB;
+		mem_[0x0126] = 0x76;
+		mem_[0x0127] = 0x18;
+		mem_[0x0128] = 0xFD;
+		cpu_->r.pc = 0x0120;
+		cpu_->r.iff1 = 1;
+		cpu_->r.im = 1;
+		{
+			int g = 0;
+			while (g++ < 400000) {
+				const uint16_t pc = cpu_->r.pc;
+				if (pc == 0x0125 || pc == 0x0126)
+					break;
+				DqStepCpu(this, cpu_, &nextIrq, 1);
+			}
+			if (cpu_->r.pc == 0x0125 || cpu_->r.pc == 0x0126)
+				cpu_->r.pc = 0x0126;
+		}
+	} else {
+		mem_[0x0120] = 0x3E;
+		mem_[0x0121] = song;
+		mem_[0x0122] = 0xCD;
+		mem_[0x0123] = 0x12;
+		mem_[0x0124] = 0x40;
+		mem_[0x0125] = 0xFB;
+		mem_[0x0126] = 0x76;
+		mem_[0x0127] = 0x18;
+		mem_[0x0128] = 0xFD;
+		cpu_->r.pc = 0x0120;
+	}
+	cpu_->r.iff1 = 1;
+	cpu_->r.im = 1;
+	idle_ = 0;
+	playing_ = 1;
 	return 1;
 }
 
@@ -1844,6 +2603,8 @@ int CHardMsx::StartSong(unsigned titleCode)
 {
 	if (mapper_ == MAP_DS4)
 		return StartSongDs4(titleCode);
+	if (dqMode_)
+		return StartSongDq(titleCode);
 	if (genericMode_)
 		return StartSongGeneric(titleCode);
 	return StartSongKss(titleCode);

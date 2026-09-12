@@ -1,4 +1,4 @@
-#include "StdAfx.h"
+﻿#include "StdAfx.h"
 #include "cemu_modepref.h"
 #include "cemu_mgr.h"
 #include "cemu_zipfs.h"
@@ -43,7 +43,26 @@ int CEmuModeTagFromEntry(const CEmuGameEntry* e, char* tag, int tagCap)
 		strncpy_s(tag, (size_t)tagCap, "MIDI", _TRUNCATE);
 		return 1;
 	}
-	const char* s = e->subtype;
+	if (CEmuModeEntryHasOpt(e, "use_opll")) {
+		strncpy_s(tag, (size_t)tagCap, "OPLL", _TRUNCATE);
+		return 1;
+	}
+	if (CEmuModeEntryHasOpt(e, "use_scc")) {
+		strncpy_s(tag, (size_t)tagCap, "SCC", _TRUNCATE);
+		return 1;
+	}
+	const char* plat = e->platform ? e->platform : "";
+	const char* s = e->subtype ? e->subtype : "";
+	if (_stricmp(plat, "fm77av") == 0 || _stricmp(s, "ysav") == 0
+		|| (_stricmp(plat, "mucomfm") == 0 && _stricmp(s, "ys") != 0)) {
+		strncpy_s(tag, (size_t)tagCap, "OPN", _TRUNCATE);
+		return 1;
+	}
+	if (_stricmp(plat, "fm7") == 0 || _stricmp(s, "psg") == 0
+		|| _stricmp(s, "ys") == 0) {
+		strncpy_s(tag, (size_t)tagCap, "PSG", _TRUNCATE);
+		return 1;
+	}
 	if (!s || !s[0]) {
 		strncpy_s(tag, (size_t)tagCap, "FM", _TRUNCATE);
 		return 1;
@@ -95,8 +114,10 @@ static int CEmuModeTagPreferRank(const char* tag)
 	if (!tag || !tag[0]) return 0;
 	if (_stricmp(tag, "OPNA") == 0) return 40;
 	if (_stricmp(tag, "OPN") == 0) return 30;
+	if (_stricmp(tag, "PSG") == 0) return 8;
 	if (_stricmp(tag, "OPM") == 0) return 28;
 	if (_stricmp(tag, "OPL3") == 0) return 26;
+	if (_stricmp(tag, "SCC") == 0) return 23;
 	if (_stricmp(tag, "SOUNDBLASTER") == 0 || _stricmp(tag, "ADLIB") == 0
 		|| _stricmp(tag, "OPLL") == 0 || _stricmp(tag, "OPL2") == 0) return 24;
 	if (_stricmp(tag, "GAMEBLASTER") == 0) return 22;
@@ -126,7 +147,11 @@ int CEmuCatalogListArchiveModes(const CEmuCatalog* cat, const char* archive,
 	for (int i = 0; i < cat->count; i++) {
 		const CEmuGameEntry* e = cat->entry[i];
 		if (!e) continue;
-		if (_stricmp(e->archive, key) != 0) continue;
+		const char* a = e->archive;
+		const size_t klen = strlen(key);
+		if (_stricmp(a, key) != 0
+			&& !(_strnicmp(a, key, (unsigned)klen) == 0 && a[klen] == ','))
+			continue;
 		if (dataDirHint && dataDirHint[0] && _stricmp(e->dataDir, dataDirHint) != 0)
 			continue;
 		char tag[CEMU_MODE_TAG];

@@ -15484,7 +15484,7 @@ public:
     // Install で SetWindowSubclass。親の ExtendFrame(-1) があると GDI が消えるため必須。
     CCustomOpaqueFixer(COLORREF clrBg, BOOL bChroma = FALSE)
         : m_hWnd(NULL), m_bPrinting(FALSE), m_clrBg(clrBg), m_bChroma(bChroma)
-        , m_clsKind(0), m_ncOpaque(FALSE) {}
+        , m_clsKind(0), m_ncOpaque(FALSE), m_bDeferPaint(FALSE) {}
     // サブクラスと DIB キャッシュを外す。ダイアログ OnDestroy からも呼ばれる。
     ~CCustomOpaqueFixer() { Uninstall(); }
 
@@ -15528,13 +15528,73 @@ private:
     BOOL m_bChroma;        // TRUE=キー抜き（ラベル等）。FALSE=全面 α=255
     int m_clsKind;         // 1 Edit 2 ListBox 3 Combo 4 LV 5 Tree 6 Tab 7 Header
     BOOL m_ncOpaque;       // WM_NCPAINT で全面 PaintOpaque が必要
+    BOOL m_bDeferPaint;    // Unlock 中の空 WM_PAINT を捨て、直後の PaintOpaque に任せる
     CCC_ChromaBlitCache m_dib;
+
+    // LockWindowUpdate 中の素 GetDC は可視領域が空（何も描かれない）。
+    // DCX_LOCKWINDOWUPDATE ならロック中でもクライアントへ出せる。
+    HDC GetOpaqueDestDC(HWND hWnd)
+    {
+        HDC hDC = ::GetDCEx(hWnd, NULL,
+            DCX_CACHE | DCX_LOCKWINDOWUPDATE | DCX_CLIPSIBLINGS | DCX_CLIPCHILDREN);
+        return hDC ? hDC : ::GetDC(hWnd);
+    }
+
+    // 描き済み DIB を可視 DC へ載せる。失敗時だけ PaintOpaque。
+    void PresentCachedOpaque(HWND hWnd, HDC hDestDC)
+    {
+        RECT rc = {};
+        ::GetClientRect(hWnd, &rc);
+        const int w = rc.right - rc.left;
+        const int h = rc.bottom - rc.top;
+        if (w <= 0 || h <= 0) return;
+        if (m_dib.hdcDib && m_dib.BlitFull(hDestDC, 0, 0, w, h))
+            return;
+        PaintOpaque(hWnd, hDestDC);
+    }
+
+    // SETREDRAW 禁止: FALSE はアクリル下で子が穴になり親ガラスが一瞬見える。
+    // 先に Lock して最後の良いフレームを残し、Def の α=0 はクリップ。
+    // 重い PrintClient は Lock 中に DIB へ描き、Unlock 直後は Blit だけにする。
+    LRESULT FrozenDefThenPaint(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
+    {
+        const BOOL locked = ::LockWindowUpdate(hWnd);
+        m_bDeferPaint = TRUE;
+        LRESULT lRes = ::DefSubclassProc(hWnd, uMsg, wParam, lParam);
+        m_bDeferPaint = FALSE;
+        HDC hDC = GetOpaqueDestDC(hWnd);
+        if (hDC) {
+            PaintOpaque(hWnd, hDC);
+            ::ReleaseDC(hWnd, hDC);
+        }
+        m_bDeferPaint = TRUE;
+        if (locked)
+            ::LockWindowUpdate(NULL);
+        m_bDeferPaint = FALSE;
+        hDC = ::GetDC(hWnd);
+        if (hDC) {
+            PresentCachedOpaque(hWnd, hDC);
+            ::ReleaseDC(hWnd, hDC);
+        }
+        ::ValidateRect(hWnd, NULL);
+        return lRes;
+    }
+
+    void PaintOpaqueNow(HWND hWnd)
+    {
+        HDC hDC = GetOpaqueDestDC(hWnd);
+        if (hDC) {
+            PaintOpaque(hWnd, hDC);
+            ::ReleaseDC(hWnd, hDC);
+        }
+        ::ValidateRect(hWnd, NULL);
+    }
 
     // ガラス上では子の GDI が α=0 のまま DWM 合成され消える。
     // WM_PAINT は BeginPaint のクリップを捨て、GetDC で全面 PaintOpaque。
     // 部分 MakeOpaque は本文が透過して見えるので禁止。
     // ERASE は更新矩形があるとき二重描画を避けて空返し。
-    // Edit/List のキー・クリックは SETREDRAW で既定の α=0 描画を止めてから載せる。
+    // リストのスクロール/キーは Lock+DIB 差し替え（SETREDRAW は穴になるので使わない）。
     // WM_PRINTCLIENT 再入は Def へ（再帰 PaintOpaque は全面透過になる）。
     static LRESULT CALLBACK SubclassProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam,
         UINT_PTR uIdSubclass, DWORD_PTR dwRefData)
@@ -15543,18 +15603,18 @@ private:
         switch (uMsg)
         {
         case WM_ERASEBKGND:
-            // 空返しだと α=0 のまま残り完全透過になる（ホバーで WM_PAINT すると戻る）。
-            // ただし更新矩形があるときは直後の WM_PAINT が全面 PaintOpaque するので、
-            // ここで描くとリスト等で 2 回分の不透明化になる。
-            if (!pThis->m_bPrinting) {
+            // Print/Unlock 中の既定消去はリストを穴にする。更新矩形があるときは
+            // 直後の PaintOpaque に任せ、ここで描くと二重になる。
+            if (pThis->m_bPrinting || pThis->m_bDeferPaint)
+                return TRUE;
+            {
                 RECT ur = {};
                 if (::GetUpdateRect(hWnd, &ur, FALSE) && (ur.right > ur.left) && (ur.bottom > ur.top))
                     return TRUE;
                 if (wParam)
                     pThis->PaintOpaque(hWnd, (HDC)wParam);
-                return TRUE;
             }
-            return ::DefSubclassProc(hWnd, uMsg, wParam, lParam);
+            return TRUE;
         case WM_PRINT:
         {
             /* 外部 PrintWindow / スクショ: BufferedPaint 禁止（落ちる） */
@@ -15587,14 +15647,14 @@ private:
             return 0;
         case WM_PAINT:
         {
-            if (pThis->m_bPrinting || s_cccPrintDepth > 0) {
+            if (pThis->m_bPrinting || pThis->m_bDeferPaint || s_cccPrintDepth > 0) {
                 ::ValidateRect(hWnd, NULL);
                 return 0;
             }
-            // SysListView32/Tree のクラス背景ブラシは BeginPaint で更新領域を塗る。
+            // ListBox/ListView/Tree: クラス背景ブラシは BeginPaint で更新領域を塗る。
             // その一瞬が「消えてから PaintOpaque」の隙間。GetDC で上書きして Validate のみ。
-            if (pThis->m_clsKind == 4 || pThis->m_clsKind == 5) {
-                HDC hDC = ::GetDC(hWnd);
+            if (pThis->m_clsKind == 2 || pThis->m_clsKind == 4 || pThis->m_clsKind == 5) {
+                HDC hDC = pThis->GetOpaqueDestDC(hWnd);
                 if (hDC) {
                     pThis->PaintOpaque(hWnd, hDC);
                     ::ReleaseDC(hWnd, hDC);
@@ -15608,7 +15668,7 @@ private:
             // ※部分 MakeOpaque はキャプション常時アクリル時に本文が透過して見えるので禁止。
             PAINTSTRUCT ps = {};
             ::BeginPaint(hWnd, &ps);
-            HDC hDC = ::GetDC(hWnd);
+            HDC hDC = pThis->GetOpaqueDestDC(hWnd);
             if (hDC) {
                 pThis->PaintOpaque(hWnd, hDC);
                 ::ReleaseDC(hWnd, hDC);
@@ -15625,7 +15685,7 @@ private:
             if (s_cccPrintDepth > 0)
                 return ::DefSubclassProc(hWnd, uMsg, wParam, lParam);
             LRESULT lRes = ::DefSubclassProc(hWnd, uMsg, wParam, lParam);
-            HDC hDC = ::GetDC(hWnd);
+            HDC hDC = pThis->GetOpaqueDestDC(hWnd);
             if (hDC) {
                 pThis->PaintOpaque(hWnd, hDC);
                 ::ReleaseDC(hWnd, hDC);
@@ -15663,20 +15723,10 @@ private:
             }
             if (pThis->m_clsKind != 2)
                 break;
-            ::SendMessage(hWnd, WM_SETREDRAW, FALSE, 0);
-            LRESULT lRes = ::DefSubclassProc(hWnd, uMsg, wParam, lParam);
-            HDC hDC = ::GetDC(hWnd);
-            if (hDC) {
-                pThis->PaintOpaque(hWnd, hDC);
-                ::ReleaseDC(hWnd, hDC);
-            }
-            ::ValidateRect(hWnd, NULL);
-            ::SendMessage(hWnd, WM_SETREDRAW, TRUE, 0);
-            ::ValidateRect(hWnd, NULL);
-            return lRes;
+            return pThis->FrozenDefThenPaint(hWnd, uMsg, wParam, lParam);
         }
         // Edit: キー入力の既定描画が α=0 で先に載り一瞬アクリルが見える。
-        // 描画停止中に不透明を載せ、SETREDRAW TRUE の Invalidate はすぐ潰す。
+        // Lock 中に状態更新し、Unlock 後は描き済み DIB を載せる。
         case WM_CHAR:
         case WM_DEADCHAR:
         case WM_IME_CHAR:
@@ -15690,51 +15740,20 @@ private:
                 break;
             if (pThis->m_bPrinting || s_cccPrintDepth > 0)
                 return ::DefSubclassProc(hWnd, uMsg, wParam, lParam);
-            ::SendMessage(hWnd, WM_SETREDRAW, FALSE, 0);
-            LRESULT lRes = ::DefSubclassProc(hWnd, uMsg, wParam, lParam);
-            HDC hDC = ::GetDC(hWnd);
-            if (hDC) {
-                pThis->PaintOpaque(hWnd, hDC);
-                ::ReleaseDC(hWnd, hDC);
-            }
-            ::ValidateRect(hWnd, NULL);
-            ::SendMessage(hWnd, WM_SETREDRAW, TRUE, 0);
-            ::ValidateRect(hWnd, NULL);
-            return lRes;
+            return pThis->FrozenDefThenPaint(hWnd, uMsg, wParam, lParam);
         }
         case WM_KEYDOWN:
         {
-            // ListBox: 矢印等で選択が動くときも α=0 部分描画になる
-            // ListView: SETREDRAW せず Post(ホバーと同じ)。Combo キーボードは DrawItem 側。
-            if (pThis->m_clsKind == 4 || pThis->m_clsKind == 5) {
+            // ListBox / ListView / Tree: 矢印等で選択・スクロールが動くとき α=0 部分描画になる。
+            // Combo キーボードは DrawItem 側。
+            if (pThis->m_clsKind == 2 || pThis->m_clsKind == 4 || pThis->m_clsKind == 5) {
                 const WPARAM vk = wParam;
                 const BOOL nav = (vk == VK_UP || vk == VK_DOWN || vk == VK_LEFT || vk == VK_RIGHT
                     || vk == VK_PRIOR || vk == VK_NEXT || vk == VK_HOME || vk == VK_END
                     || vk == VK_SPACE || vk == VK_RETURN);
                 if (!nav)
                     break;
-                LRESULT lRes = ::DefSubclassProc(hWnd, uMsg, wParam, lParam);
-                ::PostMessage(hWnd, CCC_WM_POST_OPAQUE_PAINT, 0, 0);
-                return lRes;
-            }
-            if (pThis->m_clsKind == 2) {
-                const WPARAM vk = wParam;
-                const BOOL nav = (vk == VK_UP || vk == VK_DOWN || vk == VK_LEFT || vk == VK_RIGHT
-                    || vk == VK_PRIOR || vk == VK_NEXT || vk == VK_HOME || vk == VK_END
-                    || vk == VK_SPACE || vk == VK_RETURN);
-                if (!nav)
-                    break;
-                ::SendMessage(hWnd, WM_SETREDRAW, FALSE, 0);
-                LRESULT lRes = ::DefSubclassProc(hWnd, uMsg, wParam, lParam);
-                HDC hDC = ::GetDC(hWnd);
-                if (hDC) {
-                    pThis->PaintOpaque(hWnd, hDC);
-                    ::ReleaseDC(hWnd, hDC);
-                }
-                ::ValidateRect(hWnd, NULL);
-                ::SendMessage(hWnd, WM_SETREDRAW, TRUE, 0);
-                ::ValidateRect(hWnd, NULL);
-                return lRes;
+                return pThis->FrozenDefThenPaint(hWnd, uMsg, wParam, lParam);
             }
             if (pThis->m_clsKind != 1)
                 break;
@@ -15744,17 +15763,7 @@ private:
                 || (ctrl && (vk == 'V' || vk == 'X' || vk == 'Z' || vk == 'Y')));
             if (!mut)
                 break;
-            ::SendMessage(hWnd, WM_SETREDRAW, FALSE, 0);
-            LRESULT lRes = ::DefSubclassProc(hWnd, uMsg, wParam, lParam);
-            HDC hDC = ::GetDC(hWnd);
-            if (hDC) {
-                pThis->PaintOpaque(hWnd, hDC);
-                ::ReleaseDC(hWnd, hDC);
-            }
-            ::ValidateRect(hWnd, NULL);
-            ::SendMessage(hWnd, WM_SETREDRAW, TRUE, 0);
-            ::ValidateRect(hWnd, NULL);
-            return lRes;
+            return pThis->FrozenDefThenPaint(hWnd, uMsg, wParam, lParam);
         }
         case WM_IME_STARTCOMPOSITION:
         {
@@ -15777,59 +15786,36 @@ private:
                 if (CCustomEdit* e = dynamic_cast<CCustomEdit*>(pw))
                     e->SyncImePos();
             }
-            if (lParam & GCS_RESULTSTR) {
-                ::SendMessage(hWnd, WM_SETREDRAW, FALSE, 0);
-                HDC hDC = ::GetDC(hWnd);
-                if (hDC) {
-                    pThis->PaintOpaque(hWnd, hDC);
-                    ::ReleaseDC(hWnd, hDC);
-                }
-                ::ValidateRect(hWnd, NULL);
-                ::SendMessage(hWnd, WM_SETREDRAW, TRUE, 0);
-                ::ValidateRect(hWnd, NULL);
-            }
+            if (lParam & GCS_RESULTSTR)
+                pThis->PaintOpaqueNow(hWnd);
             return lRes;
         }
         case WM_VSCROLL:
         case WM_HSCROLL:
         case WM_MOUSEWHEEL:
+        case WM_MOUSEHWHEEL:
         {
-            // キャプション常時アクリル下: DefSubclass の α=0 中間描画を画面に出さない。
-            // FALSE で状態更新 → Lock 中に TRUE → PaintOpaque → Unlock。
-            // Lock 無しだと TRUE が空バッファを一瞬出して点滅する。
-            // MakeWindowOpaque はスクロールでは点滅元なので List/Tree では呼ばない。
-            const BOOL bList = (pThis->m_clsKind == 4);
-            const BOOL bTree = (pThis->m_clsKind == 5);
-            if (bList || bTree)
-                ::SendMessage(hWnd, WM_SETREDRAW, FALSE, 0);
+            // SETREDRAW 禁止（FALSE はアクリル下でリストが穴になり点滅する）。
+            // Lock で最後のフレームを残し、PrintClient は凍っているあいだ DIB へ。
+            // Unlock 直後は Blit だけなので「消えてから描く」隙間が無い。
+            const BOOL bListLike = (pThis->m_clsKind == 2 || pThis->m_clsKind == 4 || pThis->m_clsKind == 5);
+            if (bListLike)
+                return pThis->FrozenDefThenPaint(hWnd, uMsg, wParam, lParam);
             LRESULT lRes = ::DefSubclassProc(hWnd, uMsg, wParam, lParam);
-            if (bList || bTree) {
-                ::LockWindowUpdate(hWnd);
-                ::SendMessage(hWnd, WM_SETREDRAW, TRUE, 0);
-                ::ValidateRect(hWnd, NULL);
-                HDC hDC = ::GetDC(hWnd);
-                if (hDC) {
-                    pThis->PaintOpaque(hWnd, hDC);
-                    ::ReleaseDC(hWnd, hDC);
-                }
-                ::LockWindowUpdate(NULL);
-                ::ValidateRect(hWnd, NULL);
-            } else {
-                ::ValidateRect(hWnd, NULL);
-                HDC hDC = ::GetDC(hWnd);
-                if (hDC) {
-                    pThis->PaintOpaque(hWnd, hDC);
-                    ::ReleaseDC(hWnd, hDC);
-                }
-                pThis->MakeWindowOpaque(hWnd);
+            ::ValidateRect(hWnd, NULL);
+            HDC hDC = pThis->GetOpaqueDestDC(hWnd);
+            if (hDC) {
+                pThis->PaintOpaque(hWnd, hDC);
+                ::ReleaseDC(hWnd, hDC);
             }
+            pThis->MakeWindowOpaque(hWnd);
             return lRes;
         }
         case CCC_WM_POST_OPAQUE_PAINT:
         {
             if (pThis->m_bPrinting || s_cccPrintDepth > 0)
                 return 0;
-            HDC hDC = ::GetDC(hWnd);
+            HDC hDC = pThis->GetOpaqueDestDC(hWnd);
             if (hDC)
             {
                 pThis->PaintOpaque(hWnd, hDC);
@@ -16188,6 +16174,13 @@ static BOOL CCC_PaintChildDirect(HWND hWnd, HDC hdcBuf)
             dc.FillRect(&r, &br);
         }
         pEdit->DrawClientText(dc, r);
+        dc.Detach();
+        return TRUE;
+    }
+    else if (auto* pBox = dynamic_cast<CCustomListBox*>(pw))
+    {
+        UNREFERENCED_PARAMETER(pBox);
+        ::SendMessage(hWnd, WM_PRINTCLIENT, (WPARAM)hdcBuf, PRF_CLIENT | PRF_ERASEBKGND);
         dc.Detach();
         return TRUE;
     }

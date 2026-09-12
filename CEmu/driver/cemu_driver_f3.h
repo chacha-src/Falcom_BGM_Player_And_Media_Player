@@ -18,6 +18,7 @@ private:
 	void TryInjectCommand();
 	void WakeMailboxIfQueued();
 	void KickMailboxOnce();
+	void PostTypeE();
 	void ArmKeyOnGates();
 	void LogState(const char* tag);
 

@@ -126,10 +126,15 @@ static void S3rFillSkinCB(S3RSkinCB& cb, float t, float windX, float windY, floa
 	const float gy = windY * 0.35f;
 	for (int i = 0; i < 8; i++) {
 		const float ph = (float)i * 0.79f;
-		const float ay = 0.10f * gx * sinf(t * 1.35f + ph) + 0.04f * gy * cosf(t * 1.1f + ph * 1.3f);
-		const float ax = 0.08f * gz * cosf(t * 1.22f + ph * 0.9f);
-		const float az = 0.05f * gx * sinf(t * 0.95f + ph * 1.7f);
-		cb.bones[4 + i] = S3rMatHinge(0.f, 0.15f, 0.f, ax + 0.15f, 1.f, az, ay);
+		const float k = 0.38f + 0.62f * ((float)i / 7.f);
+		const float leanZ = -k * (0.11f * gx * sinf(t * 1.12f + ph) + 0.035f * gy * cosf(t * 0.95f + ph * 1.2f));
+		const float leanX = k * (0.11f * gz * cosf(t * 1.05f + ph * 0.92f) + 0.03f * gy * sinf(t * 1.22f + ph));
+		const float twist = k * 0.035f * gx * sinf(t * 0.88f + ph * 1.65f);
+		const float gustJ = k * 0.028f * gust * sinf(t * 2.35f + ph * 2.1f);
+		S3RMat rx = S3rMatHinge(0.f, 0.08f, 0.f, 1.f, 0.f, 0.f, leanX + gustJ);
+		S3RMat rz = S3rMatHinge(0.f, 0.08f, 0.f, 0.f, 0.f, 1.f, leanZ);
+		S3RMat ry = S3rMatHinge(0.f, 0.08f, 0.f, 0.f, 1.f, 0.f, twist);
+		cb.bones[4 + i] = S3rMatMul(rx, S3rMatMul(rz, ry));
 	}
 }
 
@@ -938,7 +943,7 @@ CS3rView::CS3rView()
 	, m_rearTex(NULL), m_rearRtv(NULL), m_srvRear(NULL), m_rearDs(NULL), m_rearDsv(NULL)
 	, m_reflectTex(NULL), m_reflectRtv(NULL), m_srvReflect(NULL), m_reflectDs(NULL), m_reflectDsv(NULL)
 	, m_vsTess(NULL), m_hsTess(NULL), m_dsTess(NULL), m_gsWind(NULL)
-	, m_psBand(NULL), m_vsSolid(NULL), m_vsInst(NULL), m_psSolid(NULL), m_psCloud(NULL), m_psWater(NULL), m_psTerr(NULL), m_psCraft(NULL), m_vsHud(NULL), m_psHud(NULL), m_psHudLine(NULL), m_vsPost(NULL)
+	, m_psBand(NULL), m_vsSolid(NULL), m_vsWater(NULL), m_vsInst(NULL), m_psSolid(NULL), m_psCloud(NULL), m_psWater(NULL), m_psTerr(NULL), m_psCraft(NULL), m_vsHud(NULL), m_psHud(NULL), m_psHudLine(NULL), m_vsPost(NULL)
 	, m_psSsr(NULL), m_psDof(NULL), m_psFinal(NULL), m_csNoise(NULL)	, m_ilPatch(NULL), m_ilSolid(NULL), m_ilInst(NULL), m_ilHud(NULL)
 	, m_cbFrame(NULL), m_cbSkin(NULL), m_vbDyn(NULL)
 	, m_vbTerrParts(0), m_vbBandParts(0), m_vbWaterParts(0), m_vbSceneryParts(0)
@@ -1010,11 +1015,13 @@ BOOL CS3rView::CreateShaders()
 		"a.uv=lerp(p[0].uv,p[1].uv,q.x);b.uv=lerp(p[3].uv,p[2].uv,q.x);o.uv=lerp(a.uv,b.uv,q.y);o.c=p[0].c;"
 		"float disp=(fbm(o.p.xz*0.05+Misc.w*0.018)-.48)*0.62+(fbm(o.p.xz*0.18+o.p.y*0.04)-.5)*0.16;"
 		"float wgv=sin(Misc.w*1.12+o.p.x*0.035+o.p.z*0.028)*Wind.w;"
-		"o.p+=o.n*disp*0.48;o.p.xz+=Wind.xz*wgv*saturate((o.p.y-Fog.z)*0.03)*0.38;"
+		"o.p+=o.n*(disp*0.48+wgv*0.10);"
 		"D z;z.w=o.p;z.n=o.n;z.uv=o.uv;z.c=o.c;z.p=mul(float4(o.p,1),VP);return z;}"
 		"[maxvertexcount(3)]void GSW(triangle D i[3],inout TriangleStream<D> s){"
-		"[unroll]for(int k=0;k<3;k++){D o=i[k];float h=saturate((o.w.y-Fog.z)*0.035);"
-		"float sway=sin(Misc.w*1.25+o.w.x*0.06+o.w.z*0.05)*Wind.w*h;o.w.xz+=Wind.xz*sway*0.52;o.w.y+=sway*Wind.y*0.12;o.p=mul(float4(o.w,1),VP);s.Append(o);}s.RestartStrip();}"
+		"float y0=min(i[0].w.y,min(i[1].w.y,i[2].w.y));"
+		"[unroll]for(int k=0;k<3;k++){D o=i[k];float h=saturate((o.w.y-y0)*0.62);h=h*h;"
+		"float sway=sin(Misc.w*1.12+o.w.x*0.048+o.w.z*0.041)*Wind.w;float gust=sin(Misc.w*2.28+o.w.x*0.11)*Wind.w*0.32;"
+		"o.w.xz+=Wind.xz*(sway*0.42+gust)*h;o.w.y+=sway*h*0.06;o.p=mul(float4(o.w,1),VP);s.Append(o);}s.RestartStrip();}"
 		"float ShadowAt(float3 w,float3 n){float3 nn=normalize(n);float3 l=normalize(LightDir.xyz);float ndl=saturate(dot(nn,l));"
 		"w+=nn*(0.02+(1-ndl)*0.03);float4 sp=mul(float4(w,1),LightVP);float iw=1.0/max(sp.w,1e-5);"
 		"float2 uv=sp.xy*iw*float2(.5,-.5)+.5;uv+=float2(2,-2)/1024.;float z=sp.z*iw-0.003;"
@@ -1023,7 +1030,7 @@ BOOL CS3rView::CreateShaders()
 		"float s=0;const float t=2./1024.;[unroll]for(int k=0;k<8;k++)s+=ShadowMap.SampleCmpLevelZero(SCmp,uv+o[k]*t,z);return pow(saturate(s*.125),1.25);}"
 		"float4 PSB(D i):SV_Target{if(Fog.w>0.5&&i.w.y<Fog.z+0.08)discard;float4 a=T0.Sample(SL,i.uv)*i.c;float3 n=normalize(i.n);float3 l=normalize(LightDir.xyz);float sh=ShadowAt(i.w,n);"
 		"float nd=lerp(.12,max(saturate(dot(n,l)),.2),sh);float3 v=normalize(Eye.xyz-i.w);float F=0.06+(1.-0.06)*pow(1.-saturate(dot(n,v)),4.2);"
-		"float3 env=Env.Sample(SL,reflect(-v,n)).rgb;float pulse=.55+.45*sin(Misc.w*2.+i.uv.x*12.);"
+		"float3 env=Env.Sample(SL,reflect(-v,n)).rgb;float pulse=.55+.45*sin(i.uv.x*22.-Misc.w*2.4);"
 		"float3 col=a.rgb*nd+env*(.06+F*.28)+float3(1,.95,.8)*pow(saturate(dot(reflect(-l,n),v)),48)*sh*.45;"
 		"col*=lerp(0.55,1.0,sh);col+=a.rgb*pulse*.12;col=lerp(col,env*1.05,F*.22);"
 		"float glassT=saturate(1.-abs(Eye.w-4.));"
@@ -1033,6 +1040,12 @@ BOOL CS3rView::CreateShaders()
 		"if(Dof.w>0.5){col+=a.rgb*(.08+.10*pulse)+env*F*.12;al=saturate(al+.06);}"
 		"return float4(lerp(col,float3(.55,.72,.95),fg*.55),al);}"
 		"D VSS(V x){D o;o.w=x.p;o.n=x.n;o.uv=x.uv;o.c=x.c;o.p=mul(float4(x.p,1),VP);return o;}"
+		"float3 WavP(float3 p){float t=Misc.w;float3 o=p;"
+		"float2 d1=float2(.64,.77);float ph1=.085*dot(d1,p.xz)-1.18*t;o.xz+=.082*d1*cos(ph1);o.y+=.15*sin(ph1);"
+		"float2 d2=float2(-.82,.57);float ph2=.13*dot(d2,p.xz)-1.62*t;o.xz+=.04*d2*cos(ph2);o.y+=.08*sin(ph2);"
+		"float2 d3=float2(.35,-.94);float ph3=.21*dot(d3,p.xz)-2.2*t;o.xz+=.02*d3*cos(ph3);o.y+=.045*sin(ph3);return o;}"
+		"D VSW(V x){float3 p=WavP(x.p);float3 tX=WavP(x.p+float3(.4,0,0))-WavP(x.p-float3(.4,0,0));float3 tZ=WavP(x.p+float3(0,0,.4))-WavP(x.p-float3(0,0,.4));"
+		"float3 n=normalize(cross(tZ,tX));if(n.y<0)n=-n;D o;o.w=p;o.n=n;o.uv=x.uv;o.c=x.c;o.p=mul(float4(p,1),VP);return o;}"
 		"D VSSI(V x,float4 iw:TEXCOORD2,float4 isc:TEXCOORD3,float4 ic:TEXCOORD4,float4 iex:TEXCOORD5,float4 sk:TEXCOORD6){"
 		"float3 lp=x.p;float3 ln=x.n;uint i0=min((uint)sk.x,15);uint i1=min((uint)sk.z,15);"
 		"float amp=((sk.x>=0.5&&sk.x<4.)?(0.22+0.78*saturate(iex.y)):1);"
@@ -1044,6 +1057,8 @@ BOOL CS3rView::CreateShaders()
 		"float y2=p.y*cp-p.z*sp,z2=p.y*sp+p.z*cp;float3 w=float3(iw.x+p.x*cy+z2*sy,iw.y+y2,iw.z-p.x*sy+z2*cy);"
 		"float nx1=ln.x*cr-ln.y*sr,ny1=ln.x*sr+ln.y*cr;float ny2=ny1*cp-ln.z*sp,nz2=ny1*sp+ln.z*cp;"
 		"float3 n=float3(nx1*cy+nz2*sy,ny2,-nx1*sy+nz2*cy);"
+		"float hgt=saturate(x.p.y*0.17);float fl=sin(Misc.w*1.62+iw.x*0.07+iw.z*0.055+sk.x)*Wind.w*hgt*hgt;"
+		"w.xz+=Wind.xz*fl*0.40;w.y+=fl*Wind.y*0.08;"
 		"D o;o.w=w;o.n=n;o.uv=x.uv;o.c=x.c*ic;o.p=mul(float4(w,1),VP);return o;}"
 		"struct HV{float2 p:POSITION;float2 uv:TEXCOORD0;float4 c:TEXCOORD1;};struct HO{float4 p:SV_POSITION;float2 uv:TEXCOORD0;float4 c:TEXCOORD1;};"
 		"HO VSH(HV x){HO o;o.p=float4(x.p,0,1);o.uv=x.uv;o.c=x.c;return o;}"
@@ -1064,6 +1079,7 @@ BOOL CS3rView::CreateShaders()
 		"float3 c=base*ndc+env*(.12+fr*.28)*(1.-uvk*.7)+float3(1,.96,.88)*sp*.42*(1.-uvk);"
 		"float d=length(Eye.xyz-i.w),fg=saturate((d-Fog.x)/max(.01,Fog.y-Fog.x));fg=fg*fg*(3-2*fg);"
 		"float al=saturate(i.c.a*lerp(1,tex4.a*tex4.a,uvk));if(al<0.08&&uvk>0.5)discard;"
+		"float nw=saturate((Fog.z+1.4-i.w.y)/2.6)*(1.-uvk);c=lerp(c,c*float3(.78,.88,.92)+float3(.08,.14,.16)*pow(saturate(dot(reflect(-l,n),v)),28)*sh,nw*.5);"
 		"float pe=PeelAmt(i.w);if(Peel.w>=0){if(pe>0.16)discard;return float4(lerp(c,float3(.55,.7,.92),fg*.45),al);}"
 		"if(pe<0.16)discard;return float4(lerp(c,float3(.55,.7,.92),fg*.45),al*(1.-pe*0.86));}"
 		"float4 PSCLoud(D i):SV_Target{"
@@ -1085,27 +1101,25 @@ BOOL CS3rView::CreateShaders()
 		"float mb=(rp.w>0)*saturate(min(min(muv.x,1.-muv.x),min(muv.y,1.-muv.y))*8.);"
 		"return float4(ReflectMap.Sample(SL,saturate(muv)).rgb,mb);}"
 		"float4 PSW(D i):SV_Target{float3 n=normalize(i.n);float3 l=normalize(LightDir.xyz);"
-		"float2 wp=i.w.xz*0.085+Misc.w*float2(.031,-.024);float w1=fbm(wp),w2=fbm(wp.yx*1.7+float2(Misc.w*.05,0));"
-		"n=normalize(n+float3((w1-.5)*1.15+(w2-.5)*.45,0,(w2-.5)*1.05+(w1-.5)*.35)*.55);"
-		"float sh=ShadowAt(i.w,n);float3 v=normalize(Eye.xyz-i.w);float ndl=saturate(dot(n,l));float wrap=saturate(dot(n,l)*.5+.5);"
-		"float nd=lerp(.32,max(ndl,.26),sh);nd=saturate(nd*.52+wrap*wrap*.52);"
-		"float3 tex=T0.Sample(SL,i.w.xz*0.0045+Misc.w*0.001+n.xz*0.012).rgb;"
-		"float3 det=T1.Sample(SL,i.w.xz*0.018+n.xz*0.04).rgb;"
-		"float3 deep=float3(.08,.22,.32);float3 shallow=float3(.32,.58,.62);"
-		"float depthK=saturate((Fog.z+2.5-i.w.y)*.18);float3 waterAlb=lerp(shallow,deep,depthK);"
-		"float3 base=saturate(tex*lerp(float3(1,1,1),det*1.25,0.42))*waterAlb;"
+		"float2 wp=i.w.xz*0.065+Misc.w*float2(.025,-.02);float w1=fbm(wp),w2=fbm(wp.yx*1.5+float2(Misc.w*.045,0));"
+		"n=normalize(n+float3((w1-.5)*1.2,0,(w2-.5)*1.15)*.5);"
+		"float sh=ShadowAt(i.w,n);float3 v=normalize(Eye.xyz-i.w);float ndv=saturate(dot(n,v));float F=0.02+0.98*pow(1.-ndv,5.);"
+		"float depth=saturate(i.c.a);float3 shallow=saturate(i.c.rgb*float3(1.15,1.28,1.2));float3 deepC=float3(.02,.09,.14);"
+		"float3 waterAlb=lerp(shallow,deepC,smoothstep(.05,.8,depth));"
+		"float2 suv=i.p.xy*Screen.zw;float2 ruv=saturate(suv+n.xz*lerp(.008,.035,depth)*(1.05-ndv));"
+		"float3 refr=Depth.Sample(SL,ruv).rgb;float hasR=saturate(dot(refr,1)*2.2);"
+		"float3 beer=exp(-float3(.18,.08,.05)*lerp(.8,3.2,depth));float3 under=lerp(waterAlb,refr*beer*1.4,hasR);"
 		"float3 env=Env.Sample(SL,reflect(-v,n)).rgb;"
-		"float4 mir=PlanarMir(i.w+float3(n.x,0,n.z)*6.5);"
-		"float4 mirB=PlanarMir(i.w+float3(n.z,-0.05,-n.x)*3.2);if(mirB.a>mir.a*.85)mir=lerp(mir,mirB,.45);"
-		"float ndv=saturate(dot(n,v));float F=0.02+0.98*pow(1.-ndv,5.);"
-		"float mk=mir.a*saturate(0.12+F*0.92);"
-		"float3 c=base*nd*(1.-F*.55)+env*(.06+F*.18);"
-		"c=lerp(c,mir.rgb,mk*F);"
-		"float glitter=pow(saturate(dot(reflect(-l,n),v)),90)*sh;"
-		"c+=float3(.75,.9,1.)*glitter*(.22+F*.45);"
-		"c+=float3(.55,.75,.9)*pow(saturate(dot(reflect(-l,n),v)),28)*sh*.18;"
+		"float4 mir=PlanarMir(i.w+float3(n.x,0,n.z)*7.);"
+		"float4 mirB=PlanarMir(i.w+float3(n.z,-.04,-n.x)*3.4);if(mirB.a>mir.a*.8)mir=lerp(mir,mirB,.4);"
+		"float3 c=under*(.42+.42*saturate(dot(n,l)*.5+.5)*lerp(.6,1.,sh));"
+		"c=lerp(c,env,F*.62);c=lerp(c,mir.rgb,mir.a*saturate(.14+F*.9));"
+		"float gl=pow(saturate(dot(reflect(-l,n),v)),108)*sh;c+=float3(.82,.94,1)*gl*(.15+F*.5);"
+		"float foam=saturate(1.-depth*3.2)*smoothstep(.2,.85,w1)*(.45+.55*saturate(F+.2));"
+		"c=lerp(c,float3(.88,.93,.97),foam);"
 		"float d=length(Eye.xyz-i.w),fg=saturate((d-Fog.x)/max(.01,Fog.y-Fog.x));fg=fg*fg*(3-2*fg);"
-		"return float4(lerp(c,float3(.42,.60,.80),fg*.28),saturate(0.62+F*.34));}"
+		"float al=lerp(lerp(.52,.97,hasR),1.,saturate(depth*.35+F*.22+foam));"
+		"return float4(lerp(c,float3(.42,.60,.80),fg*.26),saturate(al));}"
 		"float4 PST(D i):SV_Target{if(Fog.w>0.5&&i.w.y<Fog.z+0.08)discard;float3 n=normalize(i.n);float3 l=normalize(LightDir.xyz);float sh=ShadowAt(i.w,n);"
 		"float slope=saturate(1.-n.y);float h=i.w.y;float th=Eye.w;"
 		"float nLo=fbm(i.w.xz*0.028), nHi=fbm(i.w.xz*0.11);"
@@ -1127,8 +1141,9 @@ BOOL CS3rView::CreateShaders()
 		"else if(th<6.5){rock=float3(.62,.38,.24);wet=float3(.28,.18,.12);}"
 		"else {rock=float3(.78,.80,.88);wet=float3(.55,.62,.78);}"
 		"float3 base=lerp(dirt,rock,saturate(slope*2.5+nHi*0.18));"
-		"float waterL=Fog.z;float low=saturate((waterL+6.-h)/10.);"
-		"base=lerp(base,wet,low*(1.-slope)*0.88);"
+		"float waterL=Fog.z;float low=saturate((waterL+1.6-h)/2.2);float submerged=saturate((waterL-h)/3.5);"
+		"base=lerp(base,wet,low*(1.-slope)*0.72);"
+		"base=lerp(base,lerp(wet,float3(.05,.12,.16),.62),submerged);"
 		"if(th>6.5) base=lerp(base,float3(.93,.95,1),saturate((h-24.)/18.)*0.55);"
 		"if(th>2.5&&th<3.6) base=lerp(base,float3(.88,.92,1),saturate(n.y+.15)*.42);"
 		"if(th>5.5&&th<6.6) base=lerp(base,float3(.95,.72,.48),saturate((h-28.)/22.)*0.35);"
@@ -1137,6 +1152,7 @@ BOOL CS3rView::CreateShaders()
 		"float hemi=saturate(n.y*.5+.5);float3 hemiC=lerp(float3(.55,.48,.42),float3(.72,.82,.98),hemi);"
 		"float3 c=base*nd*lerp(float3(1,1,1),hemiC,0.22)+env*(.10+fr*.26)+float3(1,.97,.9)*sp;"
 		"float specW=saturate(low*(1.-slope)*0.65);c+=float3(.25,.4,.5)*pow(saturate(dot(reflect(-l,n),v)),24)*specW*sh;"
+		"if(submerged>0.04){float2 cu=i.w.xz*.09+Misc.w*float2(.05,-.04);float cau=pow(saturate(fbm(cu)*fbm(cu.yx+.31)),2.4);c+=float3(.28,.5,.42)*cau*submerged*sh*saturate(n.y);}"
 		"float d=length(Eye.xyz-i.w),fg=saturate((d-Fog.x)/max(.01,Fog.y-Fog.x));fg=fg*fg*(3-2*fg);"
 		"float hFog=saturate((Fog.z+18.-h)/28.);c=lerp(c,float3(.62,.74,.92),hFog*fg*.25);"
 		"float pe=PeelAmt(i.w);if(Peel.w>=0){if(pe>0.16)discard;return float4(lerp(c,float3(.55,.7,.92),fg*.42),1);}"
@@ -1153,6 +1169,7 @@ BOOL CS3rView::CreateShaders()
 		"float3 env=Env.Sample(SL,reflect(-v,n)).rgb;float fr=pow(1-saturate(dot(n,v)),2.4);"
 		"float sp=pow(saturate(dot(reflect(-l,n),v)),52)*sh;"
 		"float3 c=base*(0.38+0.62*nd)+env*(.16+fr*.34)+float3(1,.96,.9)*sp*.62;"
+		"if(i.w.y<Fog.z){float uw=saturate((Fog.z-i.w.y)*.15);c=lerp(c,c*float3(.42,.7,.86),uw*.62);}"
 		"float d=length(Eye.xyz-i.w),fg=saturate((d-Fog.x)/max(.01,Fog.y-Fog.x));fg=fg*fg*(3-2*fg);"
 		"return float4(lerp(c,float3(.55,.7,.92),fg*.3),saturate(i.c.a));}"
 		"struct Q{float4 p:SV_POSITION;float2 uv:TEXCOORD0;};Q VSQ(uint id:SV_VertexID){Q o;float2 p=float2((id==2)?3:-1,(id==1)?3:-1);o.p=float4(p,0,1);o.uv=float2((p.x+1)*.5,(1-p.y)*.5);return o;}"
@@ -1164,7 +1181,7 @@ BOOL CS3rView::CreateShaders()
 		"float2 rp=i.uv;float2 rd=float2((i.uv.x-.5)*.035,.022);float3 rc=c.rgb;float rk=0;"
 		"[unroll]for(int s=0;s<10;s++){rp+=rd;if(any(rp<0)||any(rp>1))break;float dz=Depth.Sample(SP,rp).r;if(dz<z-0.0018){rc=T0.Sample(SL,rp).rgb;rk=exp(-s*.14);break;}}"
 		"c.rgb=lerp(c.rgb,rc,rk*0.28*smoothstep(.12,.82,z));"
-		"float2 sun=float2(.62,.15);float2 dir=sun-i.uv;float rays=0;float2 p=i.uv;"
+		"float3 ld=normalize(LightDir.xyz);float2 sun=saturate(float2(.5,.2)+float2(ld.x,-ld.y)*.34);float2 dir=sun-i.uv;float rays=0;float2 p=i.uv;"
 		"[unroll]for(int k=0;k<14;k++){p+=dir*.02;if(any(p<0)||any(p>1))break;rays+=saturate(.14-Depth.Sample(SP,p).r)*exp(-k*.13);}"
 		"c.rgb+=(th>3.5&&th<4.6?float3(.45,.8,1):float3(1,.92,.7))*rays*(th>3.5&&th<4.6?.14:.26);"
 		"if(th>6.4||(th>2.5&&th<3.6)){float s=fx.b*smoothstep(.1,.92,1.-z);c.rgb=lerp(c.rgb,float3(.92,.96,1),s*.16);"
@@ -1194,6 +1211,8 @@ BOOL CS3rView::CreateShaders()
 		"if(th>3.5&&th<4.6)c.rgb=lerp(c.rgb,c.rgb*float3(.72,1.06,1.22)+float3(.18,.42,.55),nx.a*.10);"
 		"float2 ca=Screen.zw*(1.15+2.6*length(i.uv-.5));c.r=lerp(c.r,T0.Sample(SL,saturate(i.uv+ca)).r,.16);c.b=lerp(c.b,T0.Sample(SL,saturate(i.uv-ca)).b,.16);"
 		"c.rgb+=(nx.r-.5)*0.02;"
+		"if(Eye.y<Fog.z){float uw=saturate((Fog.z-Eye.y)*.1);c.rgb*=lerp(1,float3(.48,.74,.9),uw*.72);"
+		"float cau=pow(saturate(nx.g*nx.b),1.7);c.rgb+=float3(.18,.42,.38)*cau*uw*.2;c.rgb=lerp(c.rgb,float3(.07,.16,.2),uw*.2);}"
 		"return c;}"
 		"RWTexture2D<float4> NoiseOut:register(u0);"
 		"[numthreads(8,8,1)]void CSNoise(uint3 id:SV_DispatchThreadID){"
@@ -1255,6 +1274,10 @@ BOOL CS3rView::CreateShaders()
 	if(FAILED(compile("GSW","gs_5_0",&bgs))){
 		for(int i=0;i<12;i++) S3R_RELEASE(b[i]); S3R_RELEASE(bcs); S3R_RELEASE(bcraft); S3R_RELEASE(bline); S3R_RELEASE(bterr); S3R_RELEASE(binst); S3R_RELEASE(bwater); S3R_RELEASE(bcloud); return FALSE;
 	}
+	ID3DBlob* bvsW=NULL;
+	if(FAILED(compile("VSW","vs_5_0",&bvsW))){
+		for(int i=0;i<12;i++) S3R_RELEASE(b[i]); S3R_RELEASE(bcs); S3R_RELEASE(bcraft); S3R_RELEASE(bline); S3R_RELEASE(bterr); S3R_RELEASE(binst); S3R_RELEASE(bwater); S3R_RELEASE(bcloud); S3R_RELEASE(bgs); S3R_RELEASE(bvsW); return FALSE;
+	}
 	HRESULT hr=S_OK;
 	if(FAILED(hr=m_dev->CreateVertexShader(b[0]->GetBufferPointer(),b[0]->GetBufferSize(),NULL,&m_vsTess))) goto fail_sh;
 	if(FAILED(hr=m_dev->CreateHullShader(b[1]->GetBufferPointer(),b[1]->GetBufferSize(),NULL,&m_hsTess))) goto fail_sh;
@@ -1262,6 +1285,7 @@ BOOL CS3rView::CreateShaders()
 	if(FAILED(hr=m_dev->CreateGeometryShader(bgs->GetBufferPointer(),bgs->GetBufferSize(),NULL,&m_gsWind))) goto fail_sh;
 	if(FAILED(hr=m_dev->CreatePixelShader(b[3]->GetBufferPointer(),b[3]->GetBufferSize(),NULL,&m_psBand))) goto fail_sh;
 	if(FAILED(hr=m_dev->CreateVertexShader(b[4]->GetBufferPointer(),b[4]->GetBufferSize(),NULL,&m_vsSolid))) goto fail_sh;
+	if(FAILED(hr=m_dev->CreateVertexShader(bvsW->GetBufferPointer(),bvsW->GetBufferSize(),NULL,&m_vsWater))) goto fail_sh;
 	if(FAILED(hr=m_dev->CreateVertexShader(binst->GetBufferPointer(),binst->GetBufferSize(),NULL,&m_vsInst))) goto fail_sh;
 	if(FAILED(hr=m_dev->CreatePixelShader(b[5]->GetBufferPointer(),b[5]->GetBufferSize(),NULL,&m_psSolid))) goto fail_sh;
 	if(FAILED(hr=m_dev->CreatePixelShader(bcloud->GetBufferPointer(),bcloud->GetBufferSize(),NULL,&m_psCloud))) goto fail_sh;
@@ -1297,11 +1321,11 @@ BOOL CS3rView::CreateShaders()
 	if(FAILED(hr=m_dev->CreateInputLayout(il,4,b[4]->GetBufferPointer(),b[4]->GetBufferSize(),&m_ilSolid))) goto fail_sh;
 	if(FAILED(hr=m_dev->CreateInputLayout(ii,9,binst->GetBufferPointer(),binst->GetBufferSize(),&m_ilInst))) goto fail_sh;
 	if(FAILED(hr=m_dev->CreateInputLayout(ih,3,b[6]->GetBufferPointer(),b[6]->GetBufferSize(),&m_ilHud))) goto fail_sh;
-	for(int i=0;i<12;i++) S3R_RELEASE(b[i]); S3R_RELEASE(bcs); S3R_RELEASE(bcraft); S3R_RELEASE(bline); S3R_RELEASE(bterr); S3R_RELEASE(binst); S3R_RELEASE(bwater); S3R_RELEASE(bcloud); S3R_RELEASE(bgs);
+	for(int i=0;i<12;i++) S3R_RELEASE(b[i]); S3R_RELEASE(bcs); S3R_RELEASE(bcraft); S3R_RELEASE(bline); S3R_RELEASE(bterr); S3R_RELEASE(binst); S3R_RELEASE(bwater); S3R_RELEASE(bcloud); S3R_RELEASE(bgs); S3R_RELEASE(bvsW);
 	return TRUE;
 fail_sh:
 	m_dxFailHr = hr;
-	for(int i=0;i<12;i++) S3R_RELEASE(b[i]); S3R_RELEASE(bcs); S3R_RELEASE(bcraft); S3R_RELEASE(bline); S3R_RELEASE(bterr); S3R_RELEASE(binst); S3R_RELEASE(bwater); S3R_RELEASE(bcloud); S3R_RELEASE(bgs);
+	for(int i=0;i<12;i++) S3R_RELEASE(b[i]); S3R_RELEASE(bcs); S3R_RELEASE(bcraft); S3R_RELEASE(bline); S3R_RELEASE(bterr); S3R_RELEASE(binst); S3R_RELEASE(bwater); S3R_RELEASE(bcloud); S3R_RELEASE(bgs); S3R_RELEASE(bvsW);
 	return FALSE;
 }
 
@@ -2066,7 +2090,7 @@ void CS3rView::ReleaseDx()
 	delete[] m_cpuDynScratch; m_cpuDynScratch=NULL; m_cpuDynScratchBytes=0;
 	delete[] m_cpuHudScratch; m_cpuHudScratch=NULL; m_cpuHudScratchBytes=0;
 	delete[] m_cpuBakeScratch; m_cpuBakeScratch=NULL; m_cpuBakeScratchBytes=0;
-	S3R_RELEASE(m_csNoise);S3R_RELEASE(m_psFinal);S3R_RELEASE(m_psDof);S3R_RELEASE(m_psSsr);S3R_RELEASE(m_vsPost);S3R_RELEASE(m_psHudLine);S3R_RELEASE(m_psHud);S3R_RELEASE(m_vsHud);S3R_RELEASE(m_psCraft);S3R_RELEASE(m_psTerr);S3R_RELEASE(m_psWater);S3R_RELEASE(m_psCloud);S3R_RELEASE(m_psSolid);S3R_RELEASE(m_vsInst);S3R_RELEASE(m_vsSolid);S3R_RELEASE(m_psBand);S3R_RELEASE(m_gsWind);S3R_RELEASE(m_dsTess);S3R_RELEASE(m_hsTess);S3R_RELEASE(m_vsTess);
+	S3R_RELEASE(m_csNoise);S3R_RELEASE(m_psFinal);S3R_RELEASE(m_psDof);S3R_RELEASE(m_psSsr);S3R_RELEASE(m_vsPost);S3R_RELEASE(m_psHudLine);S3R_RELEASE(m_psHud);S3R_RELEASE(m_vsHud);S3R_RELEASE(m_psCraft);S3R_RELEASE(m_psTerr);S3R_RELEASE(m_psWater);S3R_RELEASE(m_psCloud);S3R_RELEASE(m_psSolid);S3R_RELEASE(m_vsInst);S3R_RELEASE(m_vsWater);S3R_RELEASE(m_vsSolid);S3R_RELEASE(m_psBand);S3R_RELEASE(m_gsWind);S3R_RELEASE(m_dsTess);S3R_RELEASE(m_hsTess);S3R_RELEASE(m_vsTess);
 	S3R_RELEASE(m_shadowSrv);S3R_RELEASE(m_shadowDsv);S3R_RELEASE(m_shadowTex);
 	S3R_RELEASE(m_srvRear);S3R_RELEASE(m_rearRtv);S3R_RELEASE(m_rearTex);S3R_RELEASE(m_rearDsv);S3R_RELEASE(m_rearDs);
 	S3R_RELEASE(m_srvReflect);S3R_RELEASE(m_reflectRtv);S3R_RELEASE(m_reflectTex);S3R_RELEASE(m_reflectDsv);S3R_RELEASE(m_reflectDs);
@@ -3432,10 +3456,16 @@ void CSoft3DRaceDlg::BuildObstacleMesh(int theme)
 		p[12]=bi;p[13]=bw;p[14]=bi2;p[15]=bw2; m_obsNv++;
 	};
 	auto emitTri=[&](UINT a,UINT b,UINT c){ if(m_obsNi+3>S3R_OBS_IMAX)return; m_obsIdx[m_obsNi++]=a;m_obsIdx[m_obsNi++]=b;m_obsIdx[m_obsNi++]=c; };
-	auto heightSkin=[&](float y, float& bi, float& bw){
-		float h=S3rSaturate((y-0.12f)/4.8f);
-		bi=4.f+(float)((int)(h*6.9f)%8);
-		bw=h*h*(0.45f+0.55f*h);
+	auto heightSkin=[&](float y, float& bi, float& bw, float& bi2, float& bw2){
+		float h=S3rSaturate((y-0.08f)/5.4f);
+		float slot=h*7.f;
+		int i=(int)slot; if(i<0)i=0; if(i>7)i=7;
+		float f=slot-(float)i;
+		float mag=h*h*(0.48f+0.52f*h);
+		bi=4.f+(float)i;
+		bw=mag*(0.28f+0.72f*f);
+		bi2=4.f+(float)(i>0?i-1:0);
+		bw2=mag*(1.f-f)*0.88f;
 	};
 	auto cyl=[&](float y0,float y1,float rad,float rr,float gg,float bb,int segsN,float ox,float oz){
 		segsN = S3MeshScaleCount(segsN, 256);
@@ -3444,9 +3474,9 @@ void CSoft3DRaceDlg::BuildObstacleMesh(int theme)
 		for(int k=0;k<=segsN;k++){
 			float a=(float)k/segsN*(float)(M_PI*2);
 			float x=ox+cosf(a)*rad, z=oz+sinf(a)*rad, nx=cosf(a), nz=sinf(a);
-			float bi0,bw0,bi1,bw1; heightSkin(y0,bi0,bw0); heightSkin(y1,bi1,bw1);
-			emitV(x,y0,z,nx,0,nz,(float)k/segsN,0,rr,gg,bb,1,bi0,bw0);
-			emitV(x,y1,z,nx,0,nz,(float)k/segsN,1,rr,gg,bb,1,bi1,bw1);
+			float bi0,bw0,bi0b,bw0b,bi1,bw1,bi1b,bw1b; heightSkin(y0,bi0,bw0,bi0b,bw0b); heightSkin(y1,bi1,bw1,bi1b,bw1b);
+			emitV(x,y0,z,nx,0,nz,(float)k/segsN,0,rr,gg,bb,1,bi0,bw0,bi0b,bw0b);
+			emitV(x,y1,z,nx,0,nz,(float)k/segsN,1,rr,gg,bb,1,bi1,bw1,bi1b,bw1b);
 		}
 		for(int k=0;k<segsN;k++){
 			UINT a=baseV+(UINT)(k*2), b=a+1, c=a+2, d=c+1;
@@ -3464,9 +3494,9 @@ void CSoft3DRaceDlg::BuildObstacleMesh(int theme)
 			float ny = -sqrtf(dx*dx+dz*dz)/dy;
 			float nx=c, nz=s;
 			float nl=sqrtf(nx*nx+ny*ny+nz*nz); nx/=nl; ny/=nl; nz/=nl;
-			float bi0,bw0,bi1,bw1; heightSkin(y0,bi0,bw0); heightSkin(y1,bi1,bw1);
-			emitV(c*rad0,y0,s*rad0,nx,ny,nz,(float)k/segsN,0,rr,gg,bb,1,bi0,bw0);
-			emitV(c*rad1,y1,s*rad1,nx,ny,nz,(float)k/segsN,1,rr,gg,bb,1,bi1,bw1);
+			float bi0,bw0,bi0b,bw0b,bi1,bw1,bi1b,bw1b; heightSkin(y0,bi0,bw0,bi0b,bw0b); heightSkin(y1,bi1,bw1,bi1b,bw1b);
+			emitV(c*rad0,y0,s*rad0,nx,ny,nz,(float)k/segsN,0,rr,gg,bb,1,bi0,bw0,bi0b,bw0b);
+			emitV(c*rad1,y1,s*rad1,nx,ny,nz,(float)k/segsN,1,rr,gg,bb,1,bi1,bw1,bi1b,bw1b);
 		}
 		for(int k=0;k<segsN;k++){
 			UINT a=baseV+(UINT)(k*2), b=a+1, c=a+2, d=c+1;
@@ -3497,6 +3527,31 @@ void CSoft3DRaceDlg::BuildObstacleMesh(int theme)
 			emitTri(a,c,b); emitTri(b,c,d);
 		}
 	};
+	auto card=[&](float px,float py,float pz,float dx,float dy,float dz,float s,float rr,float gg,float bb,float bi,float bw){
+		if(m_obsNv+8>=S3R_OBS_VMAX)return;
+		float dl=sqrtf(dx*dx+dy*dy+dz*dz); if(dl<1e-4f)return;
+		dx/=dl; dy/=dl; dz/=dl;
+		float ux,uy,uz;
+		if(fabsf(dy)<0.92f){ ux=-dz; uy=0.f; uz=dx; }
+		else { ux=1.f; uy=0.f; uz=0.f; }
+		float ul=sqrtf(ux*ux+uy*uy+uz*uz); if(ul<1e-4f)return; ux/=ul; uy/=ul; uz/=ul;
+		float vx=dy*uz-dz*uy, vy=dz*ux-dx*uz, vz=dx*uy-dy*ux;
+		auto quad=[&](float ax,float ay,float az,float bx,float by,float bz,float cx,float cy,float cz,float dx2,float dy2,float dz2,float nx,float ny,float nz){
+			UINT b0=(UINT)m_obsNv;
+			emitV(ax,ay,az,nx,ny,nz,0,0,rr,gg,bb,0.97f,bi,bw);
+			emitV(bx,by,bz,nx,ny,nz,1,0,rr,gg,bb,0.97f,bi,bw);
+			emitV(cx,cy,cz,nx,ny,nz,1,1,rr,gg,bb,0.97f,bi,bw);
+			emitV(dx2,dy2,dz2,nx,ny,nz,0,1,rr,gg,bb,0.97f,bi,bw);
+			emitTri(b0,b0+1,b0+2); emitTri(b0,b0+2,b0+3);
+		};
+		float hx=ux*s, hy=uy*s, hz=uz*s;
+		float wx=vx*s*0.7f+dx*s*0.2f, wy=vy*s*0.7f+dy*s*0.2f, wz=vz*s*0.7f+dz*s*0.2f;
+		quad(px-hx-wx,py-hy-wy,pz-hz-wz, px+hx-wx,py+hy-wy,pz+hz-wz, px+hx+wx,py+hy+wy,pz+hz+wz, px-hx+wx,py-hy+wy,pz-hz+wz, vx,vy,vz);
+		quad(px-vx*s-ux*s*0.7f-dx*s*0.2f,py-vy*s-uy*s*0.7f-dy*s*0.2f,pz-vz*s-uz*s*0.7f-dz*s*0.2f,
+			px+vx*s-ux*s*0.7f-dx*s*0.2f,py+vy*s-uy*s*0.7f-dy*s*0.2f,pz+vz*s-uz*s*0.7f-dz*s*0.2f,
+			px+vx*s+ux*s*0.7f+dx*s*0.2f,py+vy*s+uy*s*0.7f+dy*s*0.2f,pz+vz*s+uz*s*0.7f+dz*s*0.2f,
+			px-vx*s+ux*s*0.7f+dx*s*0.2f,py-vy*s+uy*s*0.7f+dy*s*0.2f,pz-vz*s+uz*s*0.7f+dz*s*0.2f, ux,uy,uz);
+	};
 	// AABB は常に min/max 正規化（逆転座標で長針ポリゴンが出ないように）
 	auto box=[&](float x0,float y0,float z0,float x1,float y1,float z1,float rr,float gg,float bb, int sub=1){
 		{
@@ -3512,8 +3567,8 @@ void CSoft3DRaceDlg::BuildObstacleMesh(int theme)
 		float za=(z0<z1)?z0:z1, zb=(z0<z1)?z1:z0;
 		if (xb-xa < 1e-4f || yb-ya < 1e-4f || zb-za < 1e-4f) return;
 		auto v=[&](float x,float y,float z,float nx,float ny,float nz){
-			float bi,bw; heightSkin(y,bi,bw);
-			emitV(x,y,z,nx,ny,nz,0,0,rr,gg,bb,1,bi,bw);
+			float bi,bw,bi2,bw2; heightSkin(y,bi,bw,bi2,bw2);
+			emitV(x,y,z,nx,ny,nz,0,0,rr,gg,bb,1,bi,bw,bi2,bw2);
 		};
 		
 		auto face=[&](float x0,float y0,float z0, float x1,float y1,float z1, float x2,float y2,float z2, float x3,float y3,float z3, float nx,float ny,float nz) {
@@ -3552,12 +3607,16 @@ void CSoft3DRaceDlg::BuildObstacleMesh(int theme)
 			float ca=cosf(a), sa=sinf(a);
 			float yb=1.55f+0.35f*(float)(i%3);
 			float len=1.05f+0.22f*(float)((i*3)%4);
-			float bi=4.f+(float)(i%8);
+			float tbi,tbw,tbi2,tbw2; heightSkin(yb,tbi,tbw,tbi2,tbw2); (void)tbi2; (void)tbw2;
 			stick(ca*0.28f, yb, sa*0.28f, ca*(0.28f+len), yb+0.45f+0.12f*(float)(i%3), sa*(0.28f+len),
-				0.07f, 0.028f, 0.36f, 0.22f, 0.10f, 10, bi, 0.35f, 0.95f);
+				0.07f, 0.028f, 0.36f, 0.22f, 0.10f, 10, tbi, tbw*0.45f, S3rSaturate(tbw+0.42f));
 			stick(ca*(0.28f+len*0.55f), yb+0.22f, sa*(0.28f+len*0.55f),
 				ca*(0.28f+len)+sa*0.35f, yb+0.55f, sa*(0.28f+len)-ca*0.35f,
-				0.04f, 0.016f, 0.32f, 0.72f, 0.28f, 8, bi, 0.55f, 1.f);
+				0.04f, 0.016f, 0.32f, 0.72f, 0.28f, 8, tbi, S3rSaturate(tbw+0.15f), S3rSaturate(tbw+0.5f));
+			card(ca*(0.28f+len), yb+0.45f+0.12f*(float)(i%3), sa*(0.28f+len),
+				ca, 0.35f, sa, 0.22f, 0.22f, 0.62f, 0.18f, tbi, S3rSaturate(tbw+0.42f));
+			card(ca*(0.28f+len)+sa*0.35f, yb+0.55f, sa*(0.28f+len)-ca*0.35f,
+				ca+sa*0.4f, 0.4f, sa-ca*0.4f, 0.16f, 0.20f, 0.70f, 0.22f, tbi, S3rSaturate(tbw+0.5f));
 		}
 	} else if (theme == THEME_RUINS) {
 		// 細切れアーチは非等方スケールで針状になるので、塔＋梁のソリッドに変更
@@ -3608,6 +3667,7 @@ void CSoft3DRaceDlg::BuildObstacleMesh(int theme)
 			float yb=0.85f+0.18f*(float)(i%3);
 			stick(ca*0.18f, yb, sa*0.18f, ca*1.15f, yb+0.42f, sa*1.15f,
 				0.055f, 0.02f, 0.48f, 0.36f, 0.16f, 10, 4.f+(float)(i%8), 0.3f, 0.92f);
+			card(ca*1.15f, yb+0.42f, sa*1.15f, ca, 0.4f, sa, 0.18f, 0.32f, 0.78f, 0.22f, 4.f+(float)(i%8), 0.92f);
 		}
 	} else if (theme == THEME_MESA) {
 		// 段丘は太いブロックのみ（薄い板や針を作らない）
@@ -5954,7 +6014,7 @@ void CSoft3DRaceDlg::BakeStaticMeshes()
 	const int segs = S3MeshScaleCount(220, 4096);
 	const int gN = S3MeshScaleCount(72, 1200);
 	const int tSegs = S3MeshScaleCount(220, 4096);
-	const int wN = S3MeshScaleCount(28, 512);
+	const int wN = S3MeshScaleCount(40, 512);
 	UINT bakeMax = m_view.m_cpuBakeScratchBytes / (UINT)sizeof(S3RVertex);
 	bakeMax = (bakeMax / 12u) * 12u;
 	if (bakeMax < 12u) {
@@ -6375,36 +6435,32 @@ void CSoft3DRaceDlg::BakeStaticMeshes()
 		if (wExt > 420.f) wExt = 420.f;
 		float wStep = wExt * 2.f / (float)wN;
 		float wx0 = m_demoMidX - wExt, wz0 = m_demoMidZ - wExt;
-		float wr=.22f,wg=.42f,wb=.58f,wa=.42f;
+		float wr=.22f,wg=.42f,wb=.58f;
 		if (m_themeActive==THEME_FOREST){wr=.16f;wg=.38f;wb=.32f;}
-		else if (m_themeActive==THEME_MESA){wr=.35f;wg=.28f;wb=.18f;wa=.38f;}
-		else if (m_themeActive==THEME_UNDER){wr=.12f;wg=.40f;wb=.62f;wa=.35f;}
+		else if (m_themeActive==THEME_MESA){wr=.35f;wg=.28f;wb=.18f;}
+		else if (m_themeActive==THEME_UNDER){wr=.12f;wg=.40f;wb=.62f;}
 		else if (m_themeActive==THEME_NIGHT){wr=.10f;wg=.16f;wb=.28f;}
 		float wy = m_waterY + 0.18f;
+		const float depthRef = 9.f * max(1.f, m_bandHalf / 7.2f);
 		for (int gz=0; gz<wN; gz++) for (int gx=0; gx<wN; gx++) {
 			float xa = wx0 + gx * wStep, za = wz0 + gz * wStep;
 			float xb = xa + wStep, zb = za + wStep;
 			float y00=GroundY(xa,za), y10=GroundY(xb,za), y11=GroundY(xb,zb), y01=GroundY(xa,zb);
-			if (y00>wy+0.9f || y10>wy+0.9f || y11>wy+0.9f || y01>wy+0.9f) continue;
-			{
-				float mx = (xa + xb) * 0.5f, mz = (za + zb) * 0.5f;
-				float pd = pathD(mx, mz);
-				float pd0 = pathD(xa, za); if (pd0 < pd) pd = pd0;
-				float pd1 = pathD(xb, za); if (pd1 < pd) pd = pd1;
-				float pd2 = pathD(xb, zb); if (pd2 < pd) pd = pd2;
-				float pd3 = pathD(xa, zb); if (pd3 < pd) pd = pd3;
-				if (pd < m_bandHalf * 1.35f) {
-					float py = sampHm(m_hmPathY, mx, mz, m_waterY + 8.f);
-					if (py > wy + 0.6f) continue;
-				}
-			}
+			float ymin = y00; if (y10 < ymin) ymin = y10; if (y11 < ymin) ymin = y11; if (y01 < ymin) ymin = y01;
+			if (ymin > wy + 0.08f) continue;
+			auto dep=[&](float gy)->float{
+				float d = (wy - gy) / depthRef;
+				if (d < 0.f) d = 0.f; if (d > 1.f) d = 1.f;
+				return d;
+			};
+			float a00=dep(y00), a10=dep(y10), a11=dep(y11), a01=dep(y01);
 			if (!need(6)) continue;
-			put(xa,wy,za,0,1,0,0,0,wr,wg,wb,wa);
-			put(xb,wy,za,0,1,0,1,0,wr,wg,wb,wa);
-			put(xb,wy,zb,0,1,0,1,1,wr,wg,wb,wa);
-			put(xa,wy,za,0,1,0,0,0,wr,wg,wb,wa);
-			put(xb,wy,zb,0,1,0,1,1,wr,wg,wb,wa);
-			put(xa,wy,zb,0,1,0,0,1,wr,wg,wb,wa);
+			put(xa,wy,za,0,1,0,0,0,wr,wg,wb,a00);
+			put(xb,wy,za,0,1,0,1,0,wr,wg,wb,a10);
+			put(xb,wy,zb,0,1,0,1,1,wr,wg,wb,a11);
+			put(xa,wy,za,0,1,0,0,0,wr,wg,wb,a00);
+			put(xb,wy,zb,0,1,0,1,1,wr,wg,wb,a11);
+			put(xa,wy,zb,0,1,0,0,1,wr,wg,wb,a01);
 		}
 	}
 	flush();
@@ -7429,8 +7485,8 @@ void CSoft3DRaceDlg::RenderScene()
 			drawCraftGpu();
 		}
 		dc->IASetInputLayout(m_view.m_ilSolid); dc->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-		dc->VSSetShader(m_view.m_vsSolid,NULL,0);
-		dc->PSSetShader((m_view.m_psWater && m_view.m_srvReflect) ? m_view.m_psWater : m_view.m_psSolid,NULL,0);
+		dc->VSSetShader(m_view.m_vsWater ? m_view.m_vsWater : m_view.m_vsSolid,NULL,0);
+		dc->PSSetShader(m_view.m_psWater ? m_view.m_psWater : m_view.m_psSolid,NULL,0);
 		dc->RSSetState(m_view.m_rsNoCull);
 		dc->OMSetBlendState(m_view.m_bsAlpha,NULL,0xffffffff); dc->OMSetDepthStencilState(m_view.m_dssRead,0);
 		{
@@ -7581,12 +7637,22 @@ void CSoft3DRaceDlg::RenderScene()
 		if (SUCCEEDED(dc->Map(m_view.m_cbFrame,0,D3D11_MAP_WRITE_DISCARD,0,&map))){ memcpy(map.pData,&cb,sizeof(cb)); dc->Unmap(m_view.m_cbFrame,0); }
 	}
 	dc->IASetInputLayout(m_view.m_ilSolid); dc->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-	dc->VSSetShader(m_view.m_vsSolid,NULL,0);
-	dc->PSSetShader((m_view.m_psWater && m_view.m_srvReflect) ? m_view.m_psWater : m_view.m_psSolid,NULL,0);
+	dc->VSSetShader(m_view.m_vsWater ? m_view.m_vsWater : m_view.m_vsSolid,NULL,0);
+	dc->PSSetShader(m_view.m_psWater ? m_view.m_psWater : m_view.m_psSolid,NULL,0);
 	dc->RSSetState(m_view.m_rsNoCull);
 	dc->OMSetBlendState(m_view.m_bsAlpha,NULL,0xffffffff); dc->OMSetDepthStencilState(m_view.m_dssRead,0);
+	ID3D11ShaderResourceView* waterScene = NULL;
+	if (m_view.m_vbWaterParts > 0 && m_view.m_postTex && m_view.m_sceneTex && m_view.m_postSrv) {
+		ID3D11ShaderResourceView* unbind[7]={};
+		dc->PSSetShaderResources(0,7,unbind);
+		ID3D11RenderTargetView* nullrt=NULL;
+		dc->OMSetRenderTargets(1,&nullrt,m_view.m_dsv);
+		dc->CopyResource(m_view.m_postTex, m_view.m_sceneTex);
+		dc->OMSetRenderTargets(1,&m_view.m_sceneRtv,m_view.m_dsv);
+		waterScene = m_view.m_postSrv;
+	}
 	{
-		ID3D11ShaderResourceView* srvs[]={waterSrv,waterDet,NULL,envSrv,shSrv,noiseSrv};
+		ID3D11ShaderResourceView* srvs[]={waterSrv,waterDet,waterScene,envSrv,shSrv,noiseSrv};
 		dc->PSSetShaderResources(0,6,srvs);
 		if (m_view.m_srvReflect) dc->PSSetShaderResources(6,1,&m_view.m_srvReflect);
 	}
@@ -7595,7 +7661,9 @@ void CSoft3DRaceDlg::RenderScene()
 	}
 	{
 		ID3D11ShaderResourceView* nullR = NULL;
+		dc->PSSetShaderResources(2,1,&nullR);
 		dc->PSSetShaderResources(6,1,&nullR);
+		dc->VSSetShader(m_view.m_vsSolid,NULL,0);
 		dc->PSSetShader(m_view.m_psSolid,NULL,0);
 	}
 	{

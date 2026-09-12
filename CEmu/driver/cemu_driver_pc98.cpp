@@ -130,7 +130,8 @@ void CDriverPc98::WatchdogTick()
 	if (!chip) return;
 	unsigned w = 0, k = 0, f = 0, s = 0, m = 0;
 	CEmuChipYm2608GetPlayMetrics(chip, &w, &k, &f, &s, &m);
-	const unsigned motion = k + f + s + hw_->BeepActivity();
+	const unsigned motion = k + f + s + hw_->BeepActivity()
+		+ hw_->MidiByteCount() + hw_->MidiNoteOnCount();
 	if (motion != wdMotion_) {
 		wdMotion_ = motion;
 		wdLastActive_ = wdSamples_;

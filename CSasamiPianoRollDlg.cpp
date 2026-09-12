@@ -1,4 +1,4 @@
-#include "stdafx.h"
+﻿#include "stdafx.h"
 #include "ogg.h"
 #include "CSasamiPianoRollDlg.h"
 #include "CSasamiMidiScoreDlg.h"
@@ -7,8 +7,10 @@
 #include "CSasamiLayoutPaletteDlg.h"
 #include "CSasamiScoreArrange.h"
 #include "CSasamiCmdHelpDlg.h"
+#include "CSasamiSimpleInputDlg.h"
 #include "CCustomPopupMenu.h"
 #include "OfflineHelp.h"
+#include "VstMidiEngine.h"
 #include "resource.h"
 
 CSasamiPianoRollDlg* CSasamiPianoRollDlg::s_midi = NULL;
@@ -22,6 +24,7 @@ CSasamiPianoRollDlg::CSasamiPianoRollDlg(CWnd* pParent)
 	, m_midiScore(NULL), m_fmScore(NULL)
 	, m_dragMode(0), m_dragLastX(0), m_dragLastY(0), m_histDragPushed(0)
 	, m_resizeEv(-1), m_marquee(0), m_bInLayout(FALSE)
+	, m_sbDrag(0), m_sbDragScroll0(0), m_sbDragAnchor(0)
 {
 	ScPianoRollInit(&m_roll);
 	m_marquee0 = m_marquee1 = CPoint(0, 0);
@@ -140,9 +143,12 @@ BEGIN_MESSAGE_MAP(CSasamiPianoRollDlg, CCustomBlurDialogExBase)
 	ON_WM_SIZE()
 	ON_WM_CLOSE()
 	ON_WM_LBUTTONDOWN()
+	ON_WM_LBUTTONDBLCLK()
 	ON_WM_LBUTTONUP()
 	ON_WM_MOUSEMOVE()
 	ON_WM_MOUSEWHEEL()
+	ON_WM_HSCROLL()
+	ON_WM_VSCROLL()
 	ON_WM_TIMER()
 	ON_WM_CONTEXTMENU()
 	ON_WM_KEYDOWN()
@@ -186,7 +192,7 @@ void CSasamiPianoRollDlg::CreateChrome()
 {
 	auto mkBtn = [&](CCustomStandardButton& b, UINT id, LPCWSTR t) {
 		if (!b.GetSafeHwnd())
-			b.Create(t, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, CRect(0, 0, 40, 22), this, id);
+			b.Create(t, WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | BS_PUSHBUTTON, CRect(8, 8, 88, 36), this, id);
 		FlatBtn(b);
 	};
 	mkBtn(m_btnOpen, IDC_SASAMI_ROLL_OPEN, L"Open");
@@ -210,8 +216,8 @@ void CSasamiPianoRollDlg::CreateChrome()
 	mkBtn(m_btnScore, IDC_SASAMI_ROLL_SCORE, L"Score");
 	auto mkCb = [&](CCustomComboBox& c, UINT id) {
 		if (!c.GetSafeHwnd())
-			c.Create(WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP,
-				CRect(0, 0, 80, 120), this, id);
+			c.Create(WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP,
+				CRect(8, 400, 88, 432), this, id);
 		c.SetAeroMode(FALSE);
 	};
 	mkCb(m_ch, IDC_SASAMI_ROLL_CH);
@@ -235,39 +241,101 @@ void CSasamiPianoRollDlg::LayoutChrome()
 	m_bInLayout = TRUE;
 	CRect rc; GetClientRect(&rc);
 	const int cap = CCC_GetCustomCaptionHeight(m_hWnd);
-	int x = 6, y = cap + 4;
-	const int bh = 22, gap = 2, bw = 44;
-	auto place = [&](CWnd& w, int wdt) {
-		if (w.GetSafeHwnd()) { w.MoveWindow(x, y, wdt, bh); x += wdt + gap; }
-	};
-	place(m_btnOpen, bw); place(m_btnSave, bw); place(m_btnNew, bw);
-	place(m_btnPlay, bw + 8); place(m_btnExport, bw + 8);
-	place(m_btnPencil, bw); place(m_btnErase, bw); place(m_btnSel, bw);
-	place(m_btnPal, bw); place(m_btnTempo, bw);
-	place(m_btnText, bw); place(m_btnLayout, bw); place(m_btnArr, bw);
-	if (!m_isFm) { place(m_btnChord, bw); place(m_btnPatt, bw); place(m_btnFx, bw); }
-	else place(m_btnVoice, bw);
-	place(m_btnScore, bw + 8); place(m_btnHelp, 28);
-	place(m_ch, 72); place(m_pasteMode, 90); place(m_follow, 90);
-	const int row1 = y + bh + 4;
-	x = 6; y = row1;
-	place(m_stripLanes, 80); place(m_stripKind0, 110); place(m_stripDraw, 90); place(m_stripStep, 80);
-	const int toolBottom = y + bh + 4;
-	m_toolbarRc = CRect(0, cap, rc.right, toolBottom);
-	const int helpH = 40, statusH = 20, stripH = 72;
-	const int bottom = rc.bottom;
-	if (m_helpBar.GetSafeHwnd())
-		m_helpBar.MoveWindow(6, bottom - helpH - 2, rc.Width() - 12, helpH);
-	if (m_status.GetSafeHwnd())
-		m_status.MoveWindow(6, bottom - helpH - statusH - 4, rc.Width() - 12, statusH);
-	m_stripRc = CRect(6, bottom - helpH - statusH - stripH - 8, rc.right - 6, bottom - helpH - statusH - 6);
-	m_gridRc = CRect(0, toolBottom, rc.right, m_stripRc.top - 2);
-	m_bodyRc = m_gridRc;
+	const int pad = 8, btnH = 28, cbH = 32, gap = 4;
 	if (m_btnChord.GetSafeHwnd()) m_btnChord.ShowWindow(m_isFm ? SW_HIDE : SW_SHOW);
 	if (m_btnPatt.GetSafeHwnd()) m_btnPatt.ShowWindow(m_isFm ? SW_HIDE : SW_SHOW);
 	if (m_btnFx.GetSafeHwnd()) m_btnFx.ShowWindow(m_isFm ? SW_HIDE : SW_SHOW);
 	if (m_btnVoice.GetSafeHwnd()) m_btnVoice.ShowWindow(m_isFm ? SW_SHOW : SW_HIDE);
 	if (m_btnNew.GetSafeHwnd()) m_btnNew.ShowWindow(m_isFm ? SW_HIDE : SW_SHOW);
+	int x = pad, y = cap + pad;
+	const int maxX = max(pad + 80, rc.right - pad);
+	CDC* pdc = GetDC();
+	auto textW = [&](CWnd& w, int minW) -> int {
+		if (!w.GetSafeHwnd() || !pdc) return minW;
+		CString t; w.GetWindowText(t);
+		CFont* f = w.GetFont();
+		CFont* old = f ? pdc->SelectObject(f) : NULL;
+		CSize sz = pdc->GetTextExtent(t.IsEmpty() ? L"W" : t);
+		if (old) pdc->SelectObject(old);
+		return max(minW, sz.cx + 24);
+	};
+	int rowBottom = y;
+	auto endRow = [&]() {
+		y = rowBottom + 8;
+		x = pad;
+		rowBottom = y;
+	};
+	auto placeBtn = [&](CWnd& w, int minW) {
+		if (!w.GetSafeHwnd() || !w.IsWindowVisible()) return;
+		const int ww = textW(w, minW);
+		if (x > pad && x + ww > maxX) { y = rowBottom + 6; x = pad; }
+		w.MoveWindow(x, y, ww, btnH);
+		rowBottom = max(rowBottom, y + btnH);
+		x += ww + gap;
+	};
+	auto layoutCombo = [&](CCustomComboBox& c, int ww, int dropW) {
+		if (!c.GetSafeHwnd()) return;
+		if (x > pad && x + ww > maxX) { y = rowBottom + 6; x = pad; }
+		const int closedH = (cbH - 4 > 22) ? (cbH - 4) : 22;
+		const int dropH = (closedH > 28) ? closedH : 28;
+		c.SetItemHeight(-1, closedH);
+		c.SetItemHeight(0, dropH);
+		if (dropW > 0) c.SetDroppedWidth(dropW);
+		c.MoveWindow(x, y, ww, cbH);
+		rowBottom = max(rowBottom, y + cbH);
+		x += ww + gap;
+	};
+	placeBtn(m_btnOpen, 56);
+	placeBtn(m_btnSave, 56);
+	placeBtn(m_btnNew, 56);
+	placeBtn(m_btnPlay, 88);
+	placeBtn(m_btnExport, 72);
+	endRow();
+	placeBtn(m_btnPencil, 56);
+	placeBtn(m_btnErase, 80);
+	placeBtn(m_btnSel, 56);
+	placeBtn(m_btnPal, 56);
+	placeBtn(m_btnTempo, 64);
+	placeBtn(m_btnText, 72);
+	placeBtn(m_btnLayout, 56);
+	placeBtn(m_btnArr, 72);
+	placeBtn(m_btnChord, 56);
+	placeBtn(m_btnPatt, 80);
+	placeBtn(m_btnFx, 96);
+	placeBtn(m_btnVoice, 56);
+	placeBtn(m_btnScore, 56);
+	placeBtn(m_btnHelp, 56);
+	endRow();
+	layoutCombo(m_ch, 104, 140);
+	layoutCombo(m_pasteMode, 108, 140);
+	layoutCombo(m_follow, 108, 140);
+	endRow();
+	layoutCombo(m_stripLanes, 120, 160);
+	layoutCombo(m_stripKind0, 140, 180);
+	layoutCombo(m_stripDraw, 108, 140);
+	layoutCombo(m_stripStep, 88, 120);
+	endRow();
+	if (pdc) ReleaseDC(pdc);
+	int toolBottom = rowBottom;
+	m_toolbarRc = CRect(0, cap, rc.right, toolBottom);
+	const int helpH = 36, statusH = 18;
+	const int sbW = ScStaffScrollGutterW();
+	const int sbH = ScStaffScrollGutterH();
+	const int stripH = (m_ui && m_ui->stripCount > 0) ? max(48, ScStaffStripTotalH(m_ui)) : 0;
+	const int bottom = rc.bottom;
+	if (m_helpBar.GetSafeHwnd())
+		m_helpBar.MoveWindow(8, bottom - helpH - 2, max(40, rc.Width() - 16), helpH);
+	if (m_status.GetSafeHwnd())
+		m_status.MoveWindow(8, bottom - helpH - statusH - 4, max(40, rc.Width() - 16), statusH);
+	const int aboveStatus = bottom - helpH - statusH - 6;
+	if (stripH > 0)
+		m_stripRc = CRect(0, aboveStatus - stripH, rc.right, aboveStatus);
+	else
+		m_stripRc.SetRect(0, aboveStatus, rc.right, aboveStatus);
+	m_gridRc = CRect(0, toolBottom, max(sbW + 40, rc.right - sbW), max(toolBottom + 40, m_stripRc.top - sbH));
+	m_bodyRc = CRect(m_gridRc.left, m_gridRc.top, rc.right, m_gridRc.bottom + sbH);
+	FitRollKeys();
+	UpdateScrollBars();
 	m_bInLayout = FALSE;
 }
 
@@ -375,8 +443,23 @@ void CSasamiPianoRollDlg::SetupTooltips()
 void CSasamiPianoRollDlg::UpdateHelpBar()
 {
 	if (!m_helpBar.GetSafeHwnd() || !m_ui) return;
-	wchar_t buf[512];
+	wchar_t buf[768];
 	ScStaffFormatHelpBar(buf, 512, m_ui, m_isFm, m_curPart ? *m_curPart : 0);
+	wcsncat_s(buf, LL14(
+		L"  Shift+ホイール=鍵盤高さ  Ctrl+ホイール=横  鍵盤クリック=試聴  Ctrl+鍵盤=赤バー配置",
+		L"  Shift+wheel=key height  Ctrl+wheel=horizontal  click keys=audition  Ctrl+key=place at marker",
+		L"  Shift+molette=hauteur  Ctrl+molette=horiz.  clic clavier=audition",
+		L"  Shift+rotella=altezza  Ctrl+rotella=oriz.  clic tasti=audizione",
+		L"  Shift+rueda=altura  Ctrl+rueda=horiz.  clic teclas=audicion",
+		L"  Shift+휠=건반높이  Ctrl+휠=가로  건반클릭=시청  Ctrl+건반=적바 배치",
+		L"  Shift+滚轮=琴键高度  Ctrl+滚轮=横向  点击琴键=试听  Ctrl+琴键=红条放置",
+		L"  Shift+wheel=key height  Ctrl+wheel=h-scroll",
+		L"  Shift+колесо=высота  Ctrl+колесо=гориз.",
+		L"  Shift+Rad=Tastenhoehe  Strg+Rad=horizontal",
+		L"  Shift+roda=altura  Ctrl+roda=horiz.",
+		L"  Shift+wiel=toetshoogte  Ctrl+wiel=horiz.",
+		L"  Shift+kolo=wysokosc  Ctrl+kolo=poziomo",
+		L"  Shift+teker=tus yuksekligi  Ctrl+teker=yatay"), _TRUNCATE);
 	m_helpBar.SetWindowText(buf);
 }
 
@@ -434,8 +517,11 @@ void CSasamiPianoRollDlg::SyncStripCombos()
 			if (nm && nm[0] && wcscmp(nm, L"?") != 0)
 				m_stripKind0.AddString(nm);
 		}
+		int sk = m_ui->stripKind[0];
+		if (sk < 0) sk = 0;
+		if (sk >= m_stripKind0.GetCount()) sk = 0;
 		if (m_stripKind0.GetCount() > 0)
-			m_stripKind0.SetCurSel(0);
+			m_stripKind0.SetCurSel(sk);
 	}
 	if (m_stripDraw.GetSafeHwnd()) {
 		m_stripDraw.ResetContent();
@@ -449,6 +535,11 @@ void CSasamiPianoRollDlg::SyncStripCombos()
 		const wchar_t* steps[] = { L"1/4", L"1/8", L"1/16", L"1/32", L"1/64" };
 		for (int i = 0; i < 5; i++) m_stripStep.AddString(steps[i]);
 		m_stripStep.SetCurSel(1);
+		static const int kSteps[] = { SC_PPQN, SC_PPQN / 2, SC_PPQN / 4, SC_PPQN / 8, SC_PPQN / 16 };
+		int stepSel = 1;
+		for (int i = 0; i < 5; i++)
+			if (m_ui->stripStepTicks == kSteps[i]) { stepSel = i; break; }
+		m_stripStep.SetCurSel(stepSel);
 	}
 }
 
@@ -471,6 +562,7 @@ void CSasamiPianoRollDlg::AfterEdit()
 		m_fmScore->Invalidate(FALSE);
 	Refresh();
 	UpdateHelpBar();
+	UpdateScrollBars();
 }
 
 void CSasamiPianoRollDlg::HistPushOwner()
@@ -622,19 +714,35 @@ void CSasamiPianoRollDlg::OnCbnStrip()
 		int s = m_stripLanes.GetCurSel();
 		if (s >= 0) m_ui->stripCount = s;
 	}
+	if (m_stripKind0.GetSafeHwnd()) {
+		int s = m_stripKind0.GetCurSel();
+		if (s >= 0) m_ui->stripKind[0] = s;
+	}
 	if (m_stripDraw.GetSafeHwnd()) {
 		int s = m_stripDraw.GetCurSel();
 		if (s >= 0) m_ui->stripDraw = s;
 	}
+	if (m_stripStep.GetSafeHwnd()) {
+		static const int kSteps[] = { SC_PPQN, SC_PPQN / 2, SC_PPQN / 4, SC_PPQN / 8, SC_PPQN / 16 };
+		int stepSel = m_stripStep.GetCurSel();
+		if (stepSel >= 0 && stepSel < 5)
+			m_ui->stripStepTicks = kSteps[stepSel];
+		ScStaffNormalizeStripStep(m_ui);
+	}
+	if (m_curPart) ScStaffSavePartStrip(m_ui, *m_curPart);
+	m_ui->helpTopic = SC_HELP_STRIP;
+	LayoutChrome();
 	Refresh();
+	UpdateHelpBar();
 }
 
 LRESULT CSasamiPianoRollDlg::OnPalDur(WPARAM w, LPARAM l)
 {
-	CWnd* sc = m_isFm ? (CWnd*)CSasamiFmScoreDlg::Instance() : (CWnd*)CSasamiMidiScoreDlg::Instance();
-	if (sc) sc->SendMessage(WM_SASAMI_PAL_DUR, w, l);
-	UpdateHelpBar();
-	Refresh();
+	if ((l & SASAMI_PAL_CMD) == SASAMI_PAL_CMD) {
+		HandlePalCmd((int)(l & 0xFF));
+		return 0;
+	}
+	ApplyDurationPal(w, l);
 	return 0;
 }
 LRESULT CSasamiPianoRollDlg::OnPalQueryState(WPARAM w, LPARAM l)
@@ -651,10 +759,338 @@ LRESULT CSasamiPianoRollDlg::OnPalLayout(WPARAM w, LPARAM l)
 	return 0;
 }
 
+int CSasamiPianoRollDlg::CurCh() const
+{
+	return m_curPart ? *m_curPart : 0;
+}
+
+void CSasamiPianoRollDlg::FitRollKeys()
+{
+	if (m_gridRc.Height() > 8)
+		ScPianoRollFit(&m_roll, max(1, m_gridRc.Height() - SC_ROLL_MARK_H));
+}
+
+CRect CSasamiPianoRollDlg::ScrollOuter() const
+{
+	return CRect(m_gridRc.left, m_gridRc.top, m_bodyRc.right, m_bodyRc.bottom);
+}
+
+void CSasamiPianoRollDlg::UpdateScrollBars()
+{
+	if (!::IsWindow(m_hWnd) || !m_ui) return;
+	const int pageW = ScPianoRollTimePageW(m_gridRc);
+	const int keysH = max(1, m_gridRc.Height() - SC_ROLL_MARK_H);
+	const int contentW = ScPianoRollContentWidthPx(m_ui, m_ev, m_evCount ? *m_evCount : 0);
+	const int contentH = ScPianoRollContentHeightPx(&m_roll);
+	int maxX = max(0, contentW - pageW);
+	if (m_ui->scrollX > maxX) m_ui->scrollX = maxX;
+	if (m_ui->scrollX < 0) m_ui->scrollX = 0;
+	int maxY = ScPianoRollMaxScrollY(&m_roll, keysH);
+	if (m_roll.scrollY > maxY) m_roll.scrollY = maxY;
+	if (m_roll.scrollY < 0) m_roll.scrollY = 0;
+
+	SCROLLINFO si = {};
+	si.cbSize = sizeof(si);
+	si.fMask = SIF_RANGE | SIF_PAGE | SIF_POS | SIF_DISABLENOSCROLL;
+	si.nMin = 0;
+	si.nMax = max(0, contentW);
+	si.nPage = (UINT)max(1, pageW);
+	si.nPos = m_ui->scrollX;
+	SetScrollInfo(SB_HORZ, &si, TRUE);
+	si.nMax = max(0, contentH);
+	si.nPage = (UINT)max(1, keysH);
+	si.nPos = m_roll.scrollY;
+	SetScrollInfo(SB_VERT, &si, TRUE);
+}
+
+void CSasamiPianoRollDlg::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
+{
+	(void)nPos; (void)pScrollBar;
+	if (m_sbDrag || !m_ui) return;
+	SCROLLINFO si = { sizeof(si), SIF_ALL };
+	GetScrollInfo(SB_HORZ, &si);
+	int pos = si.nPos;
+	const int pxBeat = m_ui->pxBeat > 0 ? m_ui->pxBeat : SC_PX_BEAT_DEFAULT;
+	switch (nSBCode) {
+	case SB_LEFT: pos = si.nMin; break;
+	case SB_RIGHT: pos = max(0, (int)si.nMax - (int)si.nPage + 1); break;
+	case SB_LINELEFT: pos -= pxBeat; break;
+	case SB_LINERIGHT: pos += pxBeat; break;
+	case SB_PAGELEFT: pos -= (int)si.nPage; break;
+	case SB_PAGERIGHT: pos += (int)si.nPage; break;
+	case SB_THUMBTRACK:
+	case SB_THUMBPOSITION: {
+		SCROLLINFO ti = { sizeof(ti), SIF_TRACKPOS };
+		GetScrollInfo(SB_HORZ, &ti);
+		pos = ti.nTrackPos;
+		break;
+	}
+	default: break;
+	}
+	int maxPos = max(0, (int)si.nMax - (int)si.nPage + 1);
+	if (pos < si.nMin) pos = si.nMin;
+	if (pos > maxPos) pos = maxPos;
+	m_ui->scrollX = pos;
+	si.fMask = SIF_POS;
+	si.nPos = pos;
+	SetScrollInfo(SB_HORZ, &si, TRUE);
+	if (m_midiScore) m_midiScore->Invalidate(FALSE);
+	if (m_fmScore) m_fmScore->Invalidate(FALSE);
+	Refresh();
+}
+
+void CSasamiPianoRollDlg::OnVScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
+{
+	(void)nPos; (void)pScrollBar;
+	if (m_sbDrag) return;
+	SCROLLINFO si = { sizeof(si), SIF_ALL };
+	GetScrollInfo(SB_VERT, &si);
+	int pos = si.nPos;
+	const int rowH = max(1, m_roll.rowH);
+	switch (nSBCode) {
+	case SB_TOP: pos = si.nMin; break;
+	case SB_BOTTOM: pos = max(0, (int)si.nMax - (int)si.nPage + 1); break;
+	case SB_LINEUP: pos -= rowH; break;
+	case SB_LINEDOWN: pos += rowH; break;
+	case SB_PAGEUP: pos -= (int)si.nPage; break;
+	case SB_PAGEDOWN: pos += (int)si.nPage; break;
+	case SB_THUMBTRACK:
+	case SB_THUMBPOSITION: {
+		SCROLLINFO ti = { sizeof(ti), SIF_TRACKPOS };
+		GetScrollInfo(SB_VERT, &ti);
+		pos = ti.nTrackPos;
+		break;
+	}
+	default: break;
+	}
+	int maxPos = max(0, (int)si.nMax - (int)si.nPage + 1);
+	if (pos < si.nMin) pos = si.nMin;
+	if (pos > maxPos) pos = maxPos;
+	m_roll.scrollY = pos;
+	FitRollKeys();
+	si.fMask = SIF_POS;
+	si.nPos = m_roll.scrollY;
+	SetScrollInfo(SB_VERT, &si, TRUE);
+	Refresh();
+}
+
+void CSasamiPianoRollDlg::ApplyDurationPal(WPARAM w, LPARAM l)
+{
+	if (!m_ui) return;
+	m_ui->tool = SC_TOOL_PENCIL;
+	m_ui->placeRest = (int)(l & 1);
+	m_ui->dotted = (l & 2) ? 1 : 0;
+	m_ui->tuplet = (int)((l >> 4) & 0xF);
+	if (m_ui->tuplet != 3 && m_ui->tuplet != 5 && m_ui->tuplet != 6 && m_ui->tuplet != 8)
+		m_ui->tuplet = 0;
+	m_ui->triplet = (m_ui->tuplet == 3) ? 1 : 0;
+	m_ui->placeAccidental = (int)(signed char)((l >> 8) & 0xFF);
+	int base = (int)((l >> 16) & 0xFFFF);
+	if (base > 0) m_ui->baseDur = base;
+	ScStaffRecomputePlaceDur(m_ui);
+	if ((int)w > 0) m_ui->placeDur = (int)w;
+	if (m_ui->placeDur < 1) m_ui->placeDur = 1;
+	m_ui->helpTopic = m_ui->placeRest ? SC_HELP_REST : SC_HELP_PAL_NOTE;
+	UpdateHelpBar();
+	if (m_status.GetSafeHwnd()) {
+		CString s;
+		s.Format(L"Dur=%d%s", m_ui->placeDur, m_ui->placeRest ? L" rest" : L"");
+		m_status.SetWindowText(s);
+	}
+	Refresh();
+}
+
+void CSasamiPianoRollDlg::HandlePalCmd(int cmdId)
+{
+	if (!m_ui) return;
+	if ((cmdId >= SASAMI_PAL_CMD_METER_24 && cmdId <= SASAMI_PAL_CMD_TR_ALL_MINUS)
+		|| (cmdId >= SASAMI_PAL_CMD_METER_14 && cmdId <= SASAMI_PAL_CMD_METER_74)
+		|| (cmdId >= SASAMI_PAL_CMD_KEY_BASE && cmdId < SASAMI_PAL_CMD_KEY_BASE + 15)) {
+		CWnd* sc = m_isFm ? (CWnd*)m_fmScore : (CWnd*)m_midiScore;
+		if (!sc) sc = m_isFm ? (CWnd*)CSasamiFmScoreDlg::Instance() : (CWnd*)CSasamiMidiScoreDlg::Instance();
+		if (sc && ::IsWindow(sc->GetSafeHwnd()))
+			sc->SendMessage(WM_SASAMI_PAL_DUR, 0, (LPARAM)(SASAMI_PAL_CMD | cmdId));
+		Refresh();
+		return;
+	}
+	const int ch = CurCh();
+	const uint32_t atTick = m_ui->markerTick;
+	const int stack = m_ui->markStack;
+	const int eraser = (m_ui->tool == SC_TOOL_ERASER) ? 1 : 0;
+	switch (cmdId) {
+	case SASAMI_PAL_CMD_FIT:
+		m_ui->snapFit ^= 1;
+		UpdateHelpBar();
+		Refresh();
+		return;
+	case SASAMI_PAL_CMD_TEMPO:
+		OnBnTempo();
+		return;
+	case SASAMI_PAL_CMD_PENCIL: OnBnPencil(); return;
+	case SASAMI_PAL_CMD_ERASE: OnBnErase(); return;
+	case SASAMI_PAL_CMD_SEL: OnBnSel(); return;
+	case SASAMI_PAL_CMD_TIE:
+		m_ui->tool = SC_TOOL_TIE;
+		m_ui->helpTopic = SC_HELP_TIE;
+		if (m_ev && m_evCount) {
+			HistPushOwner();
+			ScStaffTieSelected(m_ev, *m_evCount, m_ui);
+			AfterEdit();
+		}
+		UpdateHelpBar();
+		return;
+	case SASAMI_PAL_CMD_LOOP_A: ProxyScoreCommand(m_isFm ? IDC_SASAMI_FM_LOOPA : IDC_SASAMI_MIDI_LOOPA); return;
+	case SASAMI_PAL_CMD_LOOP_B: ProxyScoreCommand(m_isFm ? IDC_SASAMI_FM_LOOPB : IDC_SASAMI_MIDI_LOOPB); return;
+	case SASAMI_PAL_CMD_LOOP_CLR: ProxyScoreCommand(m_isFm ? IDC_SASAMI_FM_LOOPCLR : IDC_SASAMI_MIDI_LOOPCLR); return;
+	case SASAMI_PAL_CMD_MARK_REPLACE: m_ui->markStack = 0; UpdateHelpBar(); return;
+	case SASAMI_PAL_CMD_MARK_STACK: m_ui->markStack = 1; UpdateHelpBar(); return;
+	case SASAMI_PAL_CMD_LOOP_START:
+	case SASAMI_PAL_CMD_LOOP_END:
+	case SASAMI_PAL_CMD_PED_ON:
+	case SASAMI_PAL_CMD_PED_OFF: {
+		if (!m_ev || !m_evCount) return;
+		uint8_t kind = SC_EV_FM_LOOP_START;
+		if (cmdId == SASAMI_PAL_CMD_LOOP_END) kind = SC_EV_FM_LOOP_END;
+		else if (cmdId == SASAMI_PAL_CMD_PED_ON) kind = SC_EV_PEDAL_ON;
+		else if (cmdId == SASAMI_PAL_CMD_PED_OFF) kind = SC_EV_PEDAL_OFF;
+		if (eraser) {
+			HistPushOwner();
+			ScDeleteMarksAt(m_ev, m_evCount, atTick, ch, kind);
+			AfterEdit();
+			return;
+		}
+		int ok = 0;
+		if (cmdId == SASAMI_PAL_CMD_LOOP_START) {
+			int n = 2;
+			const int toggling = (!stack && ScMarkKindExists(m_ev, *m_evCount, atTick, (uint8_t)ch, SC_EV_FM_LOOP_START));
+			if (!toggling) {
+				if (CSasamiSimpleInputDlg::AskNumber(this, L"ループ開始 |:", L"繰り返し回数 (1–99)", 2, 1, 99, &n) != IDOK)
+					return;
+			}
+			HistPushOwner();
+			ok = m_isFm && m_fmScore
+				? ScFmAddLoopStart(m_fmScore->DocMutable(), atTick, ch, toggling ? 2 : n, toggling ? 0 : stack)
+				: (m_midiScore ? ScMidiAddLoopStart(m_midiScore->Doc(), atTick, ch, toggling ? 2 : n, toggling ? 0 : stack) : 0);
+		} else if (cmdId == SASAMI_PAL_CMD_LOOP_END) {
+			HistPushOwner();
+			ok = m_isFm && m_fmScore
+				? ScFmAddLoopEnd(m_fmScore->DocMutable(), atTick, ch, stack)
+				: (m_midiScore ? ScMidiAddLoopEnd(m_midiScore->Doc(), atTick, ch, stack) : 0);
+		} else if (!m_isFm && m_midiScore) {
+			HistPushOwner();
+			ok = (cmdId == SASAMI_PAL_CMD_PED_ON)
+				? ScMidiAddPedalOn(m_midiScore->Doc(), atTick, ch, stack)
+				: ScMidiAddPedalOff(m_midiScore->Doc(), atTick, ch, stack);
+		}
+		if (ok) AfterEdit();
+		else Refresh();
+		return;
+	}
+	case SASAMI_PAL_CMD_OTTAVA_8VA:
+	case SASAMI_PAL_CMD_OTTAVA_8VB:
+	case SASAMI_PAL_CMD_OTTAVA_16VA:
+	case SASAMI_PAL_CMD_OTTAVA_16VB:
+	case SASAMI_PAL_CMD_OTTAVA_32VA:
+	case SASAMI_PAL_CMD_OTTAVA_32VB:
+	case SASAMI_PAL_CMD_OTTAVA_LOCO: {
+		if (!m_ev || !m_evCount) return;
+		int oct = 0;
+		if (cmdId == SASAMI_PAL_CMD_OTTAVA_8VA) oct = 1;
+		else if (cmdId == SASAMI_PAL_CMD_OTTAVA_8VB) oct = -1;
+		else if (cmdId == SASAMI_PAL_CMD_OTTAVA_16VA) oct = 2;
+		else if (cmdId == SASAMI_PAL_CMD_OTTAVA_16VB) oct = -2;
+		else if (cmdId == SASAMI_PAL_CMD_OTTAVA_32VA) oct = 3;
+		else if (cmdId == SASAMI_PAL_CMD_OTTAVA_32VB) oct = -3;
+		HistPushOwner();
+		if (eraser) {
+			ScDeleteMarksAt(m_ev, m_evCount, atTick, ch, SC_EV_OTTAVA);
+			ScDeleteMarksAt(m_ev, m_evCount, atTick, ch, SC_EV_OTTAVA_END);
+			AfterEdit();
+			return;
+		}
+		int ok = 0;
+		if (m_isFm && m_fmScore)
+			ok = (oct == 0) ? ScFmAddOttavaEnd(m_fmScore->DocMutable(), atTick, ch, stack)
+				: ScFmAddOttava(m_fmScore->DocMutable(), atTick, ch, oct, stack);
+		else if (m_midiScore)
+			ok = (oct == 0) ? ScMidiAddOttavaEnd(m_midiScore->Doc(), atTick, ch, stack)
+				: ScMidiAddOttava(m_midiScore->Doc(), atTick, ch, oct, stack);
+		if (ok) AfterEdit();
+		return;
+	}
+	case SASAMI_PAL_CMD_SVIB:
+	case SASAMI_PAL_CMD_STREM:
+	case SASAMI_PAL_CMD_SPAN:
+	case SASAMI_PAL_CMD_SPORTA:
+	case SASAMI_PAL_CMD_SVIB_OFF:
+		if (!m_ev || !m_evCount) return;
+		HistPushOwner();
+		if (ScStaffAskAndPlaceSoftFx(this, m_ev, m_evCount, atTick, ch, cmdId, stack, eraser))
+			AfterEdit();
+		else
+			Refresh();
+		return;
+	default:
+		return;
+	}
+}
+
+void CSasamiPianoRollDlg::AuditionKey(int note)
+{
+	m_roll.hoverNote = note;
+	int part = CurCh() + 1;
+	if (part < 1) part = 1;
+	if (part > 32) part = 32;
+	VstLiveAuditionNote(part, note, 100, 280);
+	wchar_t nm[16];
+	ScPianoRollNoteName(note, nm, 16);
+	if (m_status.GetSafeHwnd()) {
+		CString s;
+		s.Format(L"%s  (%d)", nm, note);
+		m_status.SetWindowText(s);
+	}
+	Refresh();
+}
+
+void CSasamiPianoRollDlg::PlaceNotePitchAtMarker(int note)
+{
+	if (!m_ev || !m_evCount || !m_ui || !m_curPart) return;
+	uint32_t tick = m_ui->markerTick;
+	const uint32_t q = (uint32_t)ScStaffPlaceQuant(m_ui);
+	if (q) tick = (tick / q) * q;
+	const int dur = m_ui->placeDur > 0 ? m_ui->placeDur : SC_PPQN / 4;
+	HistPushOwner();
+	if (m_isFm && m_fmScore)
+		ScFmAddNote(m_fmScore->DocMutable(), tick, *m_curPart, CSasamiFmScoreDlg::MidiToFmNoteByte(note), dur);
+	else if (m_midiScore)
+		ScMidiAddNote(m_midiScore->Doc(), tick, *m_curPart, note, dur, 100);
+	m_ui->markerTick = tick + (uint32_t)dur;
+	AfterEdit();
+}
+
+void CSasamiPianoRollDlg::ApplyStripAt(CPoint pt, int erase)
+{
+	if (!m_ui || m_ui->stripCount <= 0) return;
+	int lane = 0, col = 0, val = 0;
+	if (!ScStaffHitStrip(m_stripRc, m_ui, pt, &lane, &col, &val)) return;
+	if (erase)
+		m_ui->strip[lane][col] = (uint8_t)((m_ui->stripKind[lane] == SC_STRIP_PITCH) ? 64 : 0);
+	else {
+		if (val < 0) val = 0;
+		if (val > 127) val = 127;
+		m_ui->strip[lane][col] = (uint8_t)val;
+	}
+	if (m_midiScore) ScStaffApplyStripToDocMidi(m_midiScore->Doc(), CurCh(), m_ui);
+	else if (m_fmScore) ScStaffApplyStripToDocFm(m_fmScore->DocMutable(), CurCh(), m_ui);
+	if (m_gridRc.Width() > 8)
+		m_ui->markerTick = ScPianoRollXToTick(&m_roll, m_gridRc, m_ui, pt.x);
+	InvalidateRect(m_stripRc, FALSE);
+}
+
 void CSasamiPianoRollDlg::PlaceNoteAt(CPoint pt)
 {
 	if (!m_ev || !m_evCount || !m_ui || !m_curPart) return;
-	if (pt.x < m_gridRc.left + SC_ROLL_KEY_W) return;
+	if (ScPianoRollPtInKeys(m_gridRc, pt) || pt.y < m_gridRc.top + SC_ROLL_MARK_H) return;
 	uint32_t tick = ScPianoRollXToTick(&m_roll, m_gridRc, m_ui, pt.x);
 	tick = (tick / (uint32_t)ScStaffPlaceQuant(m_ui)) * (uint32_t)ScStaffPlaceQuant(m_ui);
 	int note = ScPianoRollYToNote(&m_roll, m_gridRc, pt.y);
@@ -672,7 +1108,8 @@ void CSasamiPianoRollDlg::PlaceNoteAt(CPoint pt)
 void CSasamiPianoRollDlg::EraseAt(CPoint pt)
 {
 	if (!m_ev || !m_evCount || !m_ui || !m_curPart) return;
-	int hit = ScPianoRollHitResize(&m_roll, m_gridRc, m_ev, *m_evCount, m_ui, *m_curPart, pt);
+	int hit = ScPianoRollHitMark(&m_roll, m_gridRc, m_ev, *m_evCount, m_ui, *m_curPart, pt);
+	if (hit < 0) hit = ScPianoRollHitResize(&m_roll, m_gridRc, m_ev, *m_evCount, m_ui, *m_curPart, pt);
 	if (hit < 0) hit = ScPianoRollHitNote(&m_roll, m_gridRc, m_ev, *m_evCount, m_ui, *m_curPart, pt);
 	if (hit < 0) return;
 	HistPushOwner();
@@ -685,6 +1122,15 @@ void CSasamiPianoRollDlg::EraseAt(CPoint pt)
 void CSasamiPianoRollDlg::BeginSelectOrDrag(CPoint pt, UINT nFlags)
 {
 	if (!m_ev || !m_evCount || !m_ui || !m_curPart) return;
+	int mk = ScPianoRollHitMark(&m_roll, m_gridRc, m_ev, *m_evCount, m_ui, *m_curPart, pt);
+	if (mk >= 0) {
+		if (!(nFlags & MK_CONTROL)) {
+			if (!ScStaffSelHas(m_ui, mk)) { ScStaffSelClear(m_ui); ScStaffSelAdd(m_ui, mk); }
+		} else ScStaffSelAdd(m_ui, mk);
+		m_ui->markerTick = m_ev[mk].tick;
+		Refresh();
+		return;
+	}
 	int rz = ScPianoRollHitResize(&m_roll, m_gridRc, m_ev, *m_evCount, m_ui, *m_curPart, pt);
 	int hit = ScPianoRollHitNote(&m_roll, m_gridRc, m_ev, *m_evCount, m_ui, *m_curPart, pt);
 	m_histDragPushed = 0;
@@ -734,6 +1180,8 @@ void CSasamiPianoRollDlg::OnPaint()
 			ScPianoRollPaintSelectionMarquee(dc, mr);
 		}
 	}
+	if (m_ui && m_bodyRc.Width() > 24)
+		ScPianoRollPaintBars(dc, ScrollOuter(), &m_roll, m_ui, m_ev, m_evCount ? *m_evCount : 0);
 	if (m_stripRc.Height() >= 8 && m_ui && m_ev && m_evCount) {
 		CDC mem;
 		if (mem.CreateCompatibleDC(&dc)) {
@@ -755,18 +1203,75 @@ void CSasamiPianoRollDlg::OnPaint()
 void CSasamiPianoRollDlg::OnLButtonDown(UINT nFlags, CPoint point)
 {
 	CCustomBlurDialogExBase::OnLButtonDown(nFlags, point);
-	if (!m_ev || !m_evCount || !m_ui || !m_curPart) return;
+	if (!m_ui) return;
+	int sbPos = 0;
+	const int sbHit = ScPianoRollHitBar(ScrollOuter(), &m_roll, m_ui, m_ev, m_evCount ? *m_evCount : 0, point, &sbPos);
+	if (sbHit == 3) { ScStaffZoomPxBeat(m_ui, -8); UpdateScrollBars(); Refresh(); if (m_midiScore) m_midiScore->Invalidate(FALSE); if (m_fmScore) m_fmScore->Invalidate(FALSE); return; }
+	if (sbHit == 4) { ScStaffZoomPxBeat(m_ui, 8); UpdateScrollBars(); Refresh(); if (m_midiScore) m_midiScore->Invalidate(FALSE); if (m_fmScore) m_fmScore->Invalidate(FALSE); return; }
+	if (sbHit == 5) {
+		if (m_roll.zoomH <= 0) m_roll.zoomH = m_roll.rowH;
+		m_roll.zoomH = max(SC_ROLL_ROW_H_MIN, m_roll.zoomH - 2);
+		FitRollKeys(); UpdateScrollBars(); Refresh(); return;
+	}
+	if (sbHit == 6) {
+		if (m_roll.zoomH <= 0) m_roll.zoomH = m_roll.rowH;
+		m_roll.zoomH = min(48, m_roll.zoomH + 2);
+		FitRollKeys(); UpdateScrollBars(); Refresh(); return;
+	}
+	if (sbHit == 1) {
+		m_sbDrag = 1;
+		m_sbDragScroll0 = m_roll.scrollY;
+		m_sbDragAnchor = point.y;
+		m_roll.scrollY = sbPos;
+		FitRollKeys(); UpdateScrollBars(); Refresh(); SetCapture();
+		return;
+	}
+	if (sbHit == 2) {
+		m_sbDrag = 2;
+		m_sbDragScroll0 = m_ui->scrollX;
+		m_sbDragAnchor = point.x;
+		m_ui->scrollX = sbPos;
+		UpdateScrollBars(); Refresh(); SetCapture();
+		return;
+	}
+	if (!m_ev || !m_evCount || !m_curPart) return;
 	if (!m_gridRc.PtInRect(point)) {
-		if (m_stripRc.PtInRect(point) && m_ui->stripCount > 0) {
-			/* strip edit delegated: set marker from x */
-			m_ui->markerTick = ScPianoRollXToTick(&m_roll, m_gridRc, m_ui, point.x);
-			Refresh();
+		if (m_stripRc.Height() > 4 && m_stripRc.PtInRect(point) && m_ui->stripCount > 0) {
+			if (!m_histDragPushed) { HistPushOwner(); m_histDragPushed = 1; }
+			ApplyStripAt(point, m_ui->tool == SC_TOOL_ERASER ? 1 : 0);
+			m_dragMode = 5;
+			SetCapture();
 		}
+		return;
+	}
+	if (ScPianoRollPtInKeys(m_gridRc, point)) {
+		int note = ScPianoRollYToNote(&m_roll, m_gridRc, point.y);
+		AuditionKey(note);
+		if (nFlags & MK_CONTROL)
+			PlaceNotePitchAtMarker(note);
+		return;
+	}
+	if (ScPianoRollPtInMarkLane(m_gridRc, point)) {
+		m_ui->markerTick = ScPianoRollXToTick(&m_roll, m_gridRc, m_ui, point.x);
+		if (m_ui->tool == SC_TOOL_ERASER) { EraseAt(point); return; }
+		BeginSelectOrDrag(point, nFlags);
 		return;
 	}
 	if (m_ui->tool == SC_TOOL_PENCIL) { PlaceNoteAt(point); return; }
 	if (m_ui->tool == SC_TOOL_ERASER) { EraseAt(point); m_dragMode = 4; SetCapture(); return; }
 	BeginSelectOrDrag(point, nFlags);
+}
+
+void CSasamiPianoRollDlg::OnLButtonDblClk(UINT nFlags, CPoint point)
+{
+	CCustomBlurDialogExBase::OnLButtonDblClk(nFlags, point);
+	if (!m_ev || !m_evCount || !m_ui || !m_curPart) return;
+	if (m_gridRc.PtInRect(point) && ScPianoRollPtInKeys(m_gridRc, point)) {
+		int note = ScPianoRollYToNote(&m_roll, m_gridRc, point.y);
+		AuditionKey(note);
+		PlaceNotePitchAtMarker(note);
+	}
+	(void)nFlags;
 }
 
 void CSasamiPianoRollDlg::OnLButtonUp(UINT nFlags, CPoint point)
@@ -786,6 +1291,8 @@ void CSasamiPianoRollDlg::OnLButtonUp(UINT nFlags, CPoint point)
 		}
 	}
 	m_dragMode = 0; m_marquee = 0; m_resizeEv = -1;
+	m_histDragPushed = 0;
+	m_sbDrag = 0;
 	ReleaseCapture();
 	Refresh();
 	(void)point;
@@ -795,6 +1302,31 @@ void CSasamiPianoRollDlg::OnMouseMove(UINT nFlags, CPoint point)
 {
 	CCustomBlurDialogExBase::OnMouseMove(nFlags, point);
 	if (!m_ui || !m_ev || !m_evCount) return;
+	if (m_sbDrag && (nFlags & MK_LBUTTON)) {
+		const CRect outer = ScrollOuter();
+		if (m_sbDrag == 1) {
+			m_roll.scrollY = ScPianoRollMapVertDrag(outer, &m_roll, max(1, m_gridRc.Height() - SC_ROLL_MARK_H),
+				point.y, m_sbDragAnchor, m_sbDragScroll0);
+			FitRollKeys();
+		} else {
+			m_ui->scrollX = ScPianoRollMapHorzDrag(outer, m_ui, m_ev, *m_evCount,
+				ScPianoRollTimePageW(m_gridRc), point.x, m_sbDragAnchor, m_sbDragScroll0);
+		}
+		UpdateScrollBars();
+		Refresh();
+		return;
+	}
+	if (m_dragMode == 5 && (nFlags & MK_LBUTTON)) {
+		ApplyStripAt(point, m_ui->tool == SC_TOOL_ERASER ? 1 : 0);
+		return;
+	}
+	if (m_dragMode == 0 && m_gridRc.PtInRect(point) && ScPianoRollPtInKeys(m_gridRc, point)) {
+		int note = ScPianoRollYToNote(&m_roll, m_gridRc, point.y);
+		if (note != m_roll.hoverNote) { m_roll.hoverNote = note; Refresh(); }
+	} else if (m_dragMode == 0 && m_roll.hoverNote >= 0) {
+		m_roll.hoverNote = -1;
+		Refresh();
+	}
 	if (m_dragMode == 4 && (nFlags & MK_LBUTTON)) { EraseAt(point); return; }
 	if (m_dragMode == 3) { m_marquee1 = point; Refresh(); return; }
 	if (m_dragMode == 1 && (nFlags & MK_LBUTTON)) {
@@ -825,17 +1357,24 @@ void CSasamiPianoRollDlg::OnMouseMove(UINT nFlags, CPoint point)
 
 BOOL CSasamiPianoRollDlg::OnMouseWheel(UINT nFlags, short zDelta, CPoint pt)
 {
-	if (nFlags & MK_CONTROL && m_ui) {
+	if (nFlags & MK_SHIFT) {
+		if (m_roll.zoomH <= 0) m_roll.zoomH = m_roll.rowH;
+		m_roll.zoomH += (zDelta > 0) ? 2 : -2;
+		if (m_roll.zoomH < SC_ROLL_ROW_H_MIN) m_roll.zoomH = SC_ROLL_ROW_H_MIN;
+		if (m_roll.zoomH > 48) m_roll.zoomH = 48;
+		FitRollKeys();
+	} else if (nFlags & MK_CONTROL && m_ui) {
 		m_ui->scrollX -= (zDelta / 4);
 		if (m_ui->scrollX < 0) m_ui->scrollX = 0;
 		if (m_midiScore) m_midiScore->Invalidate(FALSE);
 		if (m_fmScore) m_fmScore->Invalidate(FALSE);
 	} else {
-		m_roll.scrollY -= (zDelta / 30) * m_roll.rowH;
-		if (m_roll.scrollY < 0) m_roll.scrollY = 0;
+		m_roll.scrollY -= (zDelta / 30) * max(1, m_roll.rowH);
+		FitRollKeys();
 	}
 	Refresh();
 	(void)pt;
+	UpdateScrollBars();
 	return TRUE;
 }
 
@@ -849,15 +1388,39 @@ void CSasamiPianoRollDlg::OnTimer(UINT_PTR nIDEvent)
 void CSasamiPianoRollDlg::OnContextMenu(CWnd* pWnd, CPoint point)
 {
 	(void)pWnd;
-	if (!m_ui || m_ui->tool != SC_TOOL_SELECT) return;
+	if (!m_ui) return;
+	if (m_ui->tool == SC_TOOL_PENCIL || m_ui->tool == SC_TOOL_TEMPO)
+		ScStaffEnterSelectTool(m_ui);
 	CPoint pt = point;
-	if (pt.x < 0) { pt = CPoint(0, 0); ClientToScreen(&pt); }
+	CPoint client = point;
+	if (pt.x < 0) { pt = CPoint(0, 0); ClientToScreen(&pt); client = CPoint(0, 0); }
+	else ScreenToClient(&client);
+	if (m_gridRc.PtInRect(client) && client.x >= m_gridRc.left + SC_ROLL_KEY_W)
+		m_ui->markerTick = ScPianoRollXToTick(&m_roll, m_gridRc, m_ui, client.x);
 	CCustomPopupMenu menu;
+	menu.SetAeroMode(FALSE);
 	menu.AddCommand(9001, LL14(L"コピー\tCtrl+C", L"Copy\tCtrl+C", L"Copier", L"Copia", L"Copiar", L"복사", L"复制", L"نسخ", L"Копировать", L"Kopieren", L"Copiar", L"Kopiëren", L"Kopiuj", L"Kopyala"));
 	menu.AddCommand(9002, LL14(L"切り取り\tCtrl+X", L"Cut\tCtrl+X", L"Couper", L"Taglia", L"Cortar", L"잘라내기", L"剪切", L"قص", L"Вырезать", L"Ausschneiden", L"Recortar", L"Knippen", L"Wytnij", L"Kes"));
 	menu.AddCommand(9003, LL14(L"貼り付け\tCtrl+V", L"Paste\tCtrl+V", L"Coller", L"Incolla", L"Pegar", L"붙여넣기", L"粘贴", L"لصق", L"Вставить", L"Einfügen", L"Colar", L"Plakken", L"Wklej", L"Yapıştır"));
 	menu.AddCommand(9060, LL14(L"範囲に空白を挿入\tCtrl+Shift+I", L"Insert blank in range\tCtrl+Shift+I", L"Insérer vide", L"Inserisci vuoto", L"Insertar vacío", L"빈 구간 삽입", L"插入空白", L"إدراج فراغ", L"Вставить пустоту", L"Leerraum", L"Inserir vazio", L"Leeg invoegen", L"Wstaw pustkę", L"Boş ekle"));
 	menu.AddCommand(9004, LL14(L"削除\tDelete", L"Delete\tDelete", L"Supprimer", L"Elimina", L"Eliminar", L"삭제", L"删除", L"حذف", L"Удалить", L"Löschen", L"Apagar", L"Verwijderen", L"Usuń", L"Sil"));
+	menu.AddCommand(9005, LL14(L"タイ\tCtrl+T", L"Tie\tCtrl+T", L"Liaison", L"Legatura", L"Ligadura", L"타이", L"连音", L"ربط", L"Лига", L"Bindebogen", L"Ligadura", L"Boog", L"Łuk", L"Bağ"));
+	menu.AddSeparator();
+	menu.AddCommand(9101, LL14(L"ループ開始 (|:n)…", L"Loop start (|:n)…", L"Début de boucle", L"Inizio loop", L"Inicio de bucle", L"루프 시작", L"循环开始", L"بداية الحلقة", L"Начало цикла", L"Schleifenstart", L"Início do loop", L"Lusbegin", L"Początek pętli", L"Döngü başlangıcı"));
+	menu.AddCommand(9102, LL14(L"ループ終了 (:|)", L"Loop end (:|)", L"Fin de boucle", L"Fine loop", L"Fin de bucle", L"루프 끝", L"循环结束", L"نهاية الحلقة", L"Конец цикла", L"Schleifenende", L"Fim do loop", L"Luseinde", L"Koniec pętli", L"Döngü sonu"));
+	if (!m_isFm) {
+		menu.AddCommand(9103, LL14(L"ペダルON (Ped.)", L"Pedal ON", L"Pédale ON", L"Pedale ON", L"Pedal ON", L"페달 ON", L"踏板ON", L"دواسة ON", L"Педаль ON", L"Pedal ON", L"Pedal ON", L"Pedaal ON", L"Pedał ON", L"Pedal ON"));
+		menu.AddCommand(9104, LL14(L"ペダルOFF (＊)", L"Pedal OFF", L"Pédale OFF", L"Pedale OFF", L"Pedal OFF", L"페달 OFF", L"踏板OFF", L"دواسة OFF", L"Педаль OFF", L"Pedal OFF", L"Pedal OFF", L"Pedaal OFF", L"Pedał OFF", L"Pedal OFF"));
+	}
+	menu.AddCommand(9105, LL14(L"8va", L"8va", L"8va", L"8va", L"8va", L"8va", L"8va", L"8va", L"8va", L"8va", L"8va", L"8va", L"8va", L"8va"));
+	menu.AddCommand(9106, LL14(L"8vb", L"8vb", L"8vb", L"8vb", L"8vb", L"8vb", L"8vb", L"8vb", L"8vb", L"8vb", L"8vb", L"8vb", L"8vb", L"8vb"));
+	menu.AddCommand(9107, LL14(L"loco", L"loco", L"loco", L"loco", L"loco", L"loco", L"loco", L"loco", L"loco", L"loco", L"loco", L"loco", L"loco", L"loco"));
+	menu.AddSeparator();
+	menu.AddCommand(9110, LL14(L"@SVIB ビブラート…", L"@SVIB vibrato…", L"@SVIB vibrato…", L"@SVIB vibrato…", L"@SVIB vibrato…", L"@SVIB 비브라토…", L"@SVIB 颤音…", L"@SVIB", L"@SVIB", L"@SVIB Vibrato…", L"@SVIB vibrato…", L"@SVIB vibrato…", L"@SVIB wibrato…", L"@SVIB vibrato…"));
+	menu.AddCommand(9111, LL14(L"@STREM トレモロ…", L"@STREM tremolo…", L"@STREM tremolo…", L"@STREM tremolo…", L"@STREM trémolo…", L"@STREM 트레몰로…", L"@STREM 震音…", L"@STREM", L"@STREM", L"@STREM Tremolo…", L"@STREM tremolo…", L"@STREM tremolo…", L"@STREM tremolo…", L"@STREM tremolo…"));
+	menu.AddCommand(9112, LL14(L"@SPAN パンLFO…", L"@SPAN pan LFO…", L"@SPAN pan LFO…", L"@SPAN pan LFO…", L"@SPAN pan LFO…", L"@SPAN 팬 LFO…", L"@SPAN 声像LFO…", L"@SPAN", L"@SPAN", L"@SPAN Pan-LFO…", L"@SPAN pan LFO…", L"@SPAN pan-LFO…", L"@SPAN pan LFO…", L"@SPAN pan LFO…"));
+	menu.AddCommand(9113, LL14(L"@SPORTA ポルタメント…", L"@SPORTA portamento…", L"@SPORTA portamento…", L"@SPORTA portamento…", L"@SPORTA portamento…", L"@SPORTA 포르타멘토…", L"@SPORTA 滑音…", L"@SPORTA", L"@SPORTA", L"@SPORTA Portamento…", L"@SPORTA portamento…", L"@SPORTA portamento…", L"@SPORTA portamento…", L"@SPORTA portamento…"));
+	menu.AddCommand(9114, LL14(L"ソフトFXオフ", L"Soft FX off", L"FX off", L"FX off", L"FX off", L"소프트 FX 끔", L"软效果关", L"FX off", L"FX выкл", L"FX aus", L"FX off", L"FX uit", L"FX wył", L"FX kapalı"));
 	const UINT cmd = menu.Track(pt, this);
 	if (!cmd || !m_ev || !m_evCount) return;
 	ScEvent* clip = ClipBuf();
@@ -883,7 +1446,22 @@ void CSasamiPianoRollDlg::OnContextMenu(CWnd* pWnd, CPoint point)
 		HistPushOwner();
 		ScStaffSelDelete(m_ev, m_evCount, m_ui);
 		AfterEdit();
-	}
+	} else if (cmd == 9005) {
+		HistPushOwner();
+		ScStaffTieSelected(m_ev, *m_evCount, m_ui);
+		AfterEdit();
+	} else if (cmd == 9101) HandlePalCmd(SASAMI_PAL_CMD_LOOP_START);
+	else if (cmd == 9102) HandlePalCmd(SASAMI_PAL_CMD_LOOP_END);
+	else if (cmd == 9103) HandlePalCmd(SASAMI_PAL_CMD_PED_ON);
+	else if (cmd == 9104) HandlePalCmd(SASAMI_PAL_CMD_PED_OFF);
+	else if (cmd == 9105) HandlePalCmd(SASAMI_PAL_CMD_OTTAVA_8VA);
+	else if (cmd == 9106) HandlePalCmd(SASAMI_PAL_CMD_OTTAVA_8VB);
+	else if (cmd == 9107) HandlePalCmd(SASAMI_PAL_CMD_OTTAVA_LOCO);
+	else if (cmd == 9110) HandlePalCmd(SASAMI_PAL_CMD_SVIB);
+	else if (cmd == 9111) HandlePalCmd(SASAMI_PAL_CMD_STREM);
+	else if (cmd == 9112) HandlePalCmd(SASAMI_PAL_CMD_SPAN);
+	else if (cmd == 9113) HandlePalCmd(SASAMI_PAL_CMD_SPORTA);
+	else if (cmd == 9114) HandlePalCmd(SASAMI_PAL_CMD_SVIB_OFF);
 }
 
 void CSasamiPianoRollDlg::OnKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags)

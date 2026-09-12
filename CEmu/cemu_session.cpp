@@ -9,6 +9,7 @@
 #include "machine/cemu_hard_pcat.h"
 #include "machine/cemu_hard_pc98.h"
 #include "machine/cemu_hard_ac.h"
+#include "fmmon/fmmon_shadow.h"
 #include <string.h>
 #include <stdlib.h>
 
@@ -518,6 +519,7 @@ int CEmuSessionOpen(CEmuSession* s, const wchar_t* path, unsigned titleCode, DWO
 	const wchar_t* openPath = physical[0] ? physical : path;
 	wcsncpy_s(s->path, openPath, _TRUNCATE);
 	s->sampleRate = sampleRate ? sampleRate : 44100;
+	s->titleCode = titleCode;
 
 	wchar_t zipOut[CEMU_ZIP_PATH];
 	char dataDir[CEMU_DATA_DIR];
@@ -713,6 +715,8 @@ int CEmuSessionRender(CEmuSession* s, short* stereo, int frames)
 		}
 		if (drv)
 			drv->OverlayTitle(s->overlayCode);
+		if (s->overlayCode)
+			s->titleCode = s->overlayCode;
 	}
 	int got = 0;
 	switch (s->kind) {
@@ -731,36 +735,104 @@ int CEmuSessionRender(CEmuSession* s, short* stereo, int frames)
 	case CEMU_KIND_FM7: got = CEmuFm7Render(&s->fm7, stereo, frames); break;
 	default: return 0;
 	}
-	if (got > 0)
+	if (got > 0 && !s->seekRender)
 		CEmuSessionWatchHardSilence(s, stereo, got);
 	return got;
+}
+
+static CDriver* CEmuSessionDriver(CEmuSession* s)
+{
+	if (!s) return NULL;
+	switch (s->kind) {
+	case CEMU_KIND_PC88: return s->pc88.driver;
+	case CEMU_KIND_PC98: return s->pc98.driver;
+	case CEMU_KIND_AC: return s->ac.driver;
+	case CEMU_KIND_X68K: return s->x68k.driver;
+	case CEMU_KIND_SG1000: return s->sg1000.driver;
+	case CEMU_KIND_X1: return s->x1.driver;
+	case CEMU_KIND_PCAT: return s->pcat.driver;
+	case CEMU_KIND_F3: return s->f3.driver;
+	case CEMU_KIND_MSX: return s->msx.driver;
+	case CEMU_KIND_FM7: return s->fm7.driver;
+	default: return NULL;
+	}
+}
+
+/* PC-88/98/X68/AC 等: Seek が空だったのでスライダーで 26 秒へ進めても
+   エミュは頭のまま、FM モニタの seq/レジスタが歯抜けになっていた。
+   巻き戻しは OverlayTitle で曲を撃ち直し、目標までダミー Render する。 */
+static int CEmuSessionSeekHard(CEmuSession* s, UINT64 sample)
+{
+	if (!s || s->kind == 0)
+		return 0;
+	if (sample < s->curSample) {
+		CDriver* drv = CEmuSessionDriver(s);
+		const unsigned tc = s->titleCode ? s->titleCode : s->overlayCode;
+		if (drv)
+			drv->OverlayTitle(tc);
+		s->curSample = 0;
+		s->silenceFrames = 0;
+		s->silenceRun = 0;
+		s->silenceHeard = 0;
+		s->endedBySilence = 0;
+	}
+	if (sample <= s->curSample) {
+		FmMonShadowSetCurSample(s->curSample);
+		FmMonShadowFlush(1);
+		return 1;
+	}
+	short junk[4096 * 2];
+	s->seekRender = 1;
+	while (s->curSample < sample) {
+		UINT64 left = sample - s->curSample;
+		int want = (left > 4096ull) ? 4096 : (int)left;
+		int got = CEmuSessionRender(s, junk, want);
+		if (got <= 0)
+			break;
+		s->curSample += (UINT64)got;
+		FmMonShadowSetCurSample(s->curSample);
+		FmMonShadowFlush(0);
+	}
+	s->seekRender = 0;
+	FmMonShadowFlush(1);
+	return 1;
 }
 
 int CEmuSessionSeek(CEmuSession* s, UINT64 sample)
 {
 	if (!s) return 0;
-	s->curSample = sample;
-	/* ループ先頭へ戻すときは無音ウォッチをリセット（再トリガは各 Seek 実装任せ） */
-	if (sample == 0 && !s->endedBySilence) {
-		s->silenceFrames = 0;
-		s->silenceRun = 0;
-		s->silenceHeard = 0;
-	}
 	switch (s->kind) {
-	case CEMU_KIND_S98: return CEmuS98Seek(&s->s98, sample, 0);
-	case CEMU_KIND_MDX: return CEmuMdxSeek(&s->mdx, sample, 0);
-	case CEMU_KIND_PMD: return CEmuPmdSeek(&s->pmd, sample, 0);
-	case CEMU_KIND_PC88: return CEmuPc88Seek(&s->pc88, sample);
-	case CEMU_KIND_PC98: return CEmuPc98Seek(&s->pc98, sample);
-	case CEMU_KIND_AC: return CEmuAcSeek(&s->ac, sample);
-	case CEMU_KIND_X68K: return CEmuX68kSeek(&s->x68k, sample);
-	case CEMU_KIND_SG1000: return CEmuSg1000Seek(&s->sg1000, sample);
-	case CEMU_KIND_X1: return CEmuX1Seek(&s->x1, sample);
-	case CEMU_KIND_PCAT: return CEmuPcatSeek(&s->pcat, sample);
-	case CEMU_KIND_F3: return CEmuF3Seek(&s->f3, sample);
-	case CEMU_KIND_MSX: return CEmuMsxSeek(&s->msx, sample);
-	case CEMU_KIND_FM7: return CEmuFm7Seek(&s->fm7, sample);
-	default: return 0;
+	case CEMU_KIND_S98:
+		s->curSample = sample;
+		if (!CEmuS98Seek(&s->s98, sample, 0))
+			return 0;
+		FmMonShadowSetCurSample(sample);
+		FmMonShadowFlush(1);
+		return 1;
+	case CEMU_KIND_MDX:
+		s->curSample = sample;
+		if (!CEmuMdxSeek(&s->mdx, sample, 0))
+			return 0;
+		FmMonShadowSetCurSample(sample);
+		FmMonShadowFlush(1);
+		return 1;
+	case CEMU_KIND_PMD:
+		s->curSample = sample;
+		return CEmuPmdSeek(&s->pmd, sample, 0);
+	case CEMU_KIND_PC88:
+	case CEMU_KIND_PC98:
+	case CEMU_KIND_AC:
+	case CEMU_KIND_X68K:
+	case CEMU_KIND_SG1000:
+	case CEMU_KIND_X1:
+	case CEMU_KIND_PCAT:
+	case CEMU_KIND_F3:
+	case CEMU_KIND_MSX:
+	case CEMU_KIND_FM7:
+		return CEmuSessionSeekHard(s, sample);
+	default:
+		s->curSample = sample;
+		return 0;
 	}
 }
 

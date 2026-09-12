@@ -524,8 +524,9 @@ void CSasamiCmdHelpDlg::PaintChapter(CDC& dc, int chapter, int maxTextW, int& ou
 		y = SchDrawCmd(dc, accentFont, L, y, lh, L"@PEDON / @PEDOFF", L"… サスティンペダル（@PEDALON/OFF も可）。");
 		y = SchDrawCmd(dc, accentFont, L, y, lh, L"@CC n,v", L"… 汎用 CC（.mpsmv）。");
 		y = SchDrawCmd(dc, accentFont, L, y, lh, L"@MOD @SOFT @SOST @REV @CHO", L"… CC1/67/66/91/93（.mpsmv）。");
-		y = SchDrawCmd(dc, accentFont, L, y, lh, L"@SVIB mode,delay,depth", L"… 遅延後スムーズビブラート/トレモロ（KPI内補間）。");
-		y = SchDrawCmd(dc, accentFont, L, y, lh, L"@SPORTA semi,delay,glide", L"… スムーズポルタメント。");
+		y = SchDrawCmd(dc, accentFont, L, y, lh, L"@SVIB mode,delay,depth[,step,period]", L"… 0=pitch 1=vol 2=pan 3=矩形。delay=開始tick、depth=幅、step=更新(省略1)、period=周期tick(省略24=8分)。.mpy/.fpy は {: :} 相当に展開。");
+		y = SchDrawCmd(dc, accentFont, L, y, lh, L"@STREM / @SPAN / @SVIBOFF", L"… トレモロ / パンLFO / 解除。");
+		y = SchDrawCmd(dc, accentFont, L, y, lh, L"@SPORTA semi,delay,glide", L"… スムーズポルタメント（旧形式はピッチ細分化）。");
 		y = SchDrawCmd(dc, accentFont, L, y, lh, L"@MACRO name {…}", L"… マクロ定義（mpsmv ver2 フッタ）。");
 		y = SchDrawCmd(dc, accentFont, L, y, lh, L"@CALL name", L"… マクロ呼び出し。");
 		y = SchDrawCmd(dc, accentFont, L, y, lh, L"@TS 4/4", L"… 拍子（@METER の別名）。");
@@ -556,9 +557,10 @@ void CSasamiCmdHelpDlg::PaintChapter(CDC& dc, int chapter, int maxTextW, int& ou
 			const wchar_t* ln[] = {
 				L"  @VST あり → .mpsmv（VST ライブ再生・状態 B64 保存）。",
 				L"  ループ 2 段以上 → .mpw2。1 段 → .mpy。",
+				L"  @SVIB/@STREM/@SPAN/@SPORTA は .mpy/.mpw2/.fpy へ {: :} 相当に展開（新opcodeなし）。",
 				L"  コンパイル／再生確認で自動判定。Save As でも同じ規則。"
 			};
-			y = SchLines(dc, L, maxTextW, lh, y, ln, 3);
+			y = SchLines(dc, L, maxTextW, lh, y, ln, 4);
 		}
 	} else if (chapter == kTabFm1) {
 		y = SchTitle(dc, boldFont, L, titleLh, y, L"FM / OPNA テキスト（FPY）— 基本（FM1）");
@@ -603,7 +605,7 @@ void CSasamiCmdHelpDlg::PaintChapter(CDC& dc, int chapter, int maxTextW, int& ou
 		y = SchDrawCmd(dc, accentFont, L, y, lh, L"@FLR mask", L"… ステレオ B4。");
 		y = SchDrawCmd(dc, accentFont, L, y, lh, L"@FSLR len", L"… キーオフなしウェイト。");
 		y = SchDrawCmd(dc, accentFont, L, y, lh, L"@LEGATO", L"… 次音符 fhokry（cmd24）。");
-		y = SchDrawCmd(dc, accentFont, L, y, lh, L"@SVIB @SPORTA", L"… ソフトFX（KPI内補間）。");
+		y = SchDrawCmd(dc, accentFont, L, y, lh, L"@SVIB @STREM @SPAN @SPORTA", L"… ソフトFX。クラシック .fpy は内部でピッチ/音量に展開。");
 		y = SchTitle(dc, boldFont, L, titleLh, y, L"FPY と FPY2");
 		{
 			const wchar_t* ln[] = {
@@ -626,7 +628,7 @@ void CSasamiCmdHelpDlg::PaintChapter(CDC& dc, int chapter, int maxTextW, int& ou
 		y = SchTitle(dc, boldFont, L, titleLh, y, L"出力形式（コンパイル時の自動選択）");
 		y = SchDrawCmd(dc, accentFont, L, y, lh, L".mpy", L"… クラシック MICP。ループ 1 段、VST なし。");
 		y = SchDrawCmd(dc, accentFont, L, y, lh, L".mpw2", L"… ループネスト 2 段以上。SMF 変換向け。");
-		y = SchDrawCmd(dc, accentFont, L, y, lh, L".mpsmv", L"… VST / CC / @SVIB / {: :} / @MACRO 等 MPW3。");
+		y = SchDrawCmd(dc, accentFont, L, y, lh, L".mpsmv", L"… VST / CC / {: :} / @MACRO 等 MPW3。");
 		y = SchDrawCmd(dc, accentFont, L, y, lh, L".fpy", L"… FM OPNA、ループ 1 段。");
 		y = SchDrawCmd(dc, accentFont, L, y, lh, L".fpy2", L"… Misao PCM / 新命令 / ネスト / {: :} 非展開。");
 		y = SchTitle(dc, boldFont, L, titleLh, y, L"テキスト ↔ 譜面");
@@ -739,6 +741,7 @@ void CSasamiCmdHelpDlg::CopyChapterText(int chapter)
 		cmd(L"@V / @P / @METER", L"volume / pitch / time sig");
 		cmd(L"@VST / @VSTSTATEB64 / @VSTFX", L"VST instrument & insert FX");
 		cmd(L"@RPN / @NRPN / @EX", L"RPN / NRPN / SysEx");
+		cmd(L"@SVIB / @STREM / @SPAN / @SPORTA", L"soft FX — classic .mpy/.fpy unroll");
 		cmd(L"|:n … :| / {:n … }:", L"native loop / text loop");
 		cmd(L"Q / J / q", L"soft loop / jump / gate %");
 	} else if (chapter == kTabFm1) {
@@ -751,6 +754,7 @@ void CSasamiCmdHelpDlg::CopyChapterText(int chapter)
 		add(L"[FM2 — loops]");
 		cmd(L"|:n … :|", L"PMD native loop → .fpy2 if nested");
 		cmd(L"{:n … }:", L"MICP text loop");
+		cmd(L"@SVIB @STREM @SPAN @SPORTA", L"soft FX — classic .fpy unroll");
 		cmd(L"Q / J", L"soft loop mark / FJUMP");
 	} else if (chapter == kTabCommon) {
 		add(L"[Common — output formats]");

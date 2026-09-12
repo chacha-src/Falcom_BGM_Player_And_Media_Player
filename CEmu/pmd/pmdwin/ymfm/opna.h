@@ -1,4 +1,4 @@
-// BSD 3-Clause License
+﻿// BSD 3-Clause License
 //
 // Copyright (c) 2021, Aaron Giles
 // All rights reserved.
@@ -209,6 +209,7 @@ namespace FM
 
 		uint8_t fmmonRegs[0x200];
 		uint8_t fmmonWriteBits[64];
+		uint8_t fmmonWritten[64]; /* 曲開始以降に1回でも書いた番地（sticky） */
 		uint8_t fmmonKeyOn[6];
 		uint8_t fmmonKeyHit[6];
 		uint8_t fmmonSsgOn[3];

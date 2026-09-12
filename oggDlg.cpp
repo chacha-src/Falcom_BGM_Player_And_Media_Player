@@ -20593,10 +20593,17 @@ static void CEmuSeekLoopStart()
 	if (CemuSess().game)
 		CEmuFmMonBindFromGe(CemuSess().game);
 	CEmuSessionSeek(&CemuSess(), loop1 > 0 ? (UINT64)loop1 : 0);
+	FmMonShadowSetCurSample(fmMonCur);
 	poss2 = poss3 = poss4 = poss6 = 0; poss5 = loop1;
 	cnt3 = 0;
 	RubberBand_DestroyBank(0);
 	reset = TRUE;
+}
+
+static void CemuSeekToPlayb(__int64 samplePos)
+{
+	if (samplePos < 0) samplePos = 0;
+	CEmuSessionSeek(&CemuSess(), (UINT64)samplePos);
 }
 
 static void CEmuMarkPlaybackEof()
@@ -23510,6 +23517,10 @@ static void ResumeApplyPlaybSeek(__int64 pb)
 	}
 	if (mode == MODE_VST_MIDI) {
 		VstSeekToPlayb(playb);
+		return;
+	}
+	if (mode == MODE_CEMU || IsCemuMode(mode)) {
+		CemuSeekToPlayb(playb);
 		return;
 	}
 	if (!og) return;
@@ -31552,6 +31563,10 @@ void COggDlg::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
 					pla = (pla / (wavchannel * 2) * (wavchannel * 2));
 					m4a_.SetPosition(kmp, pla);
 				}
+			}
+			else if (mode == MODE_CEMU || IsCemuMode(mode)) {
+				CemuSeekToPlayb((__int64)srcCur);
+				m_time.SetPos(curpos);
 			}
 			else { // OGG / Others
 				SeekAndWarmupRubberBand((int)srcCur, false);

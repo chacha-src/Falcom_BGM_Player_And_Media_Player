@@ -49,9 +49,22 @@ public:
 	/* Run mc6809_step until at least `cycles` elapsed; returns cycles consumed. */
 	uint64_t RunCpu(uint64_t cycles);
 	/* JSR helper for Falcom table init vectors (no live sub-CPU). */
-	void RunSubroutine(uint16_t addr);
+	void RunSubroutine(uint16_t addr, int maxSteps = 200000, int clockChips = 0);
 
 	void TriggerPlay(unsigned titleCode);
+	/* If PATCH's boot JSR never returns (albatrss DRIVER / ishtar MUSIC.P),
+	   land back on the $FD58 poll with IRQ unmasked. */
+	void UnwindStuckBootJsr();
+	void ParkAlbatrssIfStuck();
+	void ArmLaydockChannels();
+	void FinishDaivaOpPlay();
+	void FinishDaivaEdPlay();
+	void FinishSharrierPlay();
+	void FinishXana2PsgPlay();
+	int IsXana2PsgPlayer() const;
+	uint16_t Xana2Tick() const { return xana2Tick_; }
+	uint16_t Xana2Tempo() const { return xana2Tempo_; }
+	int UnwindMissingBios();
 	unsigned OpnWrites() const;
 	unsigned AyWrites() const;
 
@@ -81,6 +94,7 @@ public:
 	uint8_t fd03_;
 	uint8_t fd05_; /* sub-CPU interface: bit7 busy */
 	uint8_t fd05HaltSticky_; /* keep busy until main clears halt req */
+	uint8_t ymIrqSeen_; /* YM2203 IRQ sticky for $FD17 (MAME fmirq_r bit3) */
 	/* Vsync IRQ status polarity (PATCH ISRs disagree on bit0/2/3). */
 	uint8_t fd03VsyncSet_;
 	uint8_t fd03VsyncClr_;
@@ -95,12 +109,10 @@ public:
 	int falcomMode_; /* prog banks / FD80 mailbox */
 	int vdataAddr_;
 	int vdataSize_;
-	/* Highest exclusive address of loaded code (not irom). StageBgm must
-	   not expand past mdata_size into this — laydock DRIVER voice tables
-	   live in $4200..$42B8 while mdata window is only $4000+$200. */
+	/* Highest exclusive address of loaded code (not irom). */
 	uint16_t codeHighWater_;
 
-	enum { BGM_SIZE = 64 * 1024, PROG_BANKS = 32 };
+	enum { BGM_SIZE = 64 * 1024, PROG_BANKS = 32, MMR_PAGES = 64 };
 
 private:
 	void FreeBanks();
@@ -109,8 +121,36 @@ private:
 	void StageVoice(uint8_t index);
 	void BindCpuCallbacks();
 	int HasProgBanks() const;
+	void MmrInit();
+	void MmrCommit(uint16_t addr, unsigned n);
+	uint8_t* MmrPhys(uint16_t addr);
+	uint8_t MmrReadReg(uint16_t addr);
+	void MmrWriteReg(uint16_t addr, uint8_t data);
+	void FinishAlbatrssPlay();
+	void FinishAsteka2Play();
+	void FinishWibarmPlay();
+	void SeedTandeFmVoices();
+	int IsAsteka2Patch() const;
+	int IsDaivaPatch() const;
+	int IsWibarmPatch() const;
+	int IsTelenetMusFile() const;
+	int IsSharrierPatch() const;
+	void ArmSharrierSeq();
 
 	uint8_t mem_[0x10000];
+	/* FM77AV 256KB main RAM. MMR disabled maps CPU $0000-$FBFF to
+	   physical $30000 (pages $30-$3F); pages $00-$0F hold an identity
+	   copy so rips that enable MMR with low page numbers still see code. */
+	uint8_t mmrRam_[MMR_PAGES * 0x1000];
+	uint8_t mmrBank_[8][16];
+	uint8_t mmrSeg_;
+	uint8_t mmrWin_;
+	uint8_t mmrMode_;
+	int mmrAvail_;
+	int mmrOn_;
+	int mmrTouched_;
+	int albatrssMode_;
+	uint16_t albatrssPoll_;
 	mc6809__t cpu_;
 	CChip* chipOpn_;
 	CChip* chipAy_;
@@ -128,6 +168,8 @@ private:
 	unsigned char* voiceBank_[128];
 	unsigned voiceBankSize_[128];
 	int voicePresent_[128];
+	uint16_t xana2Tick_;
+	uint16_t xana2Tempo_;
 };
 
 void CEmuHardFm7SetActive(CHardFm7* hw);

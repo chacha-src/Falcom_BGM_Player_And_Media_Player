@@ -12,7 +12,7 @@
 namespace {
 const int kSccChannels = 5;
 const int kSccWave = 32;
-const int kSccRegs = 0x90;
+const int kSccRegs = 0xC0; /* SCC-I also uses $A0-$BF (ch5 wave / test) */
 } /* namespace */
 
 class CChipScc : public CChip {
@@ -112,9 +112,9 @@ private:
 
 	const int8_t* Wave(int ch) const
 	{
-		int idx = ch;
-		if (idx >= 4) idx = 3; /* ch4 shares ch3 wave on original SCC */
-		return (const int8_t*)(regs_ + idx * kSccWave);
+		if (ch >= 4)
+			return (const int8_t*)(regs_ + 0xA0); /* SCC-I ch5 wave */
+		return (const int8_t*)(regs_ + ch * kSccWave);
 	}
 
 	void UpdateMon()

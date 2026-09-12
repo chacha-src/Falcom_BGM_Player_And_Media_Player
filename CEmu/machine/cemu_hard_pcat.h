@@ -118,7 +118,9 @@ private:
 	int HootAilPossible() const;
 	void FixHootAilTimer();
 	void FixHootMidiInt8();
+	void StartHootMidiSequence();
 	void RepairMokMidiPlay();
+	void RepairMokIntelMpu(int armCth);
 	void InstallHootAilTimbres();
 	void RestoreHootIdleTrampoline(uint8_t* mem);
 	int FarCallAil(uint16_t api, uint16_t* stackWords, int nWords, uint64_t budget);
@@ -167,6 +169,7 @@ private:
 	int mpuRxFull_;
 	uint8_t mpuAckQ_[8];
 	int mpuAckR_, mpuAckW_;
+	uint8_t mpuCmdByte_;
 
 	uint8_t* midiBytes_;   /* heap CEMU_PCAT_MIDI_CAP */
 	uint32_t* midiDelta_;  /* heap CEMU_PCAT_MIDI_CAP */

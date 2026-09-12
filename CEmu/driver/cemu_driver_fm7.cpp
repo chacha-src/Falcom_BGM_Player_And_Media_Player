@@ -23,6 +23,7 @@ CDriverFm7::CDriverFm7()
 	, vsyncPeriod_(2000000 / 60)
 	, irqPulses_(0)
 	, prevChipIrq_(0)
+	, chipIrqSeen_(0)
 	, lastFd03IrqVec_(0xFFFF)
 {
 }
@@ -72,6 +73,8 @@ void CDriverFm7::DeliverIrqs(uint64_t now)
 	int chipIrq = 0;
 	if (hw_->ChipOpn() && hw_->ChipOpn()->Irq())
 		chipIrq = 1;
+	if (chipIrq)
+		hw_->ymIrqSeen_ = 1;
 
 	/* ISR-sniffed polarity: laydock needs bit2; reviver bit0+bit3; default clear bit3.
 	   Re-sniff when $FFF8 remounts after play (asteka2 PATCH: $20D1 stub → $A1C9). */
@@ -100,14 +103,42 @@ void CDriverFm7::DeliverIrqs(uint64_t now)
 	const uint16_t firqVec = (uint16_t)(((uint16_t)hw_->Mem()[0xFFF6] << 8) | hw_->Mem()[0xFFF7]);
 	const int irqStub = isFd03Stub(irqVec);
 	const int firqStub = isFd03Stub(firqVec);
+	/* kohaku PATCH $103F and albatrss PATCH $005D are lone RTI. FIRQ into
+	   them mid-IRQ (I set, F clear) pulls only CC+PC and smashes the frame. */
+	const int firqIsRti = (firqVec != 0 && firqVec != 0xFFFF && firqVec < 0xFE00
+		&& hw_->Mem()[firqVec] == 0x3B) ? 1 : 0;
+	/* albatrss DRIVER hang loop keeps ORCC #$10; drop I on the vsync that
+	   must reach OP.BIN $87CA or the ISR never runs. Do not unmask while
+	   PC is inside DRIVER $F000–$F8FF (SWI $F819 lives at $F819) or the
+	   OP.BIN ISR: a nested IRQ corrupts Y in $F48F and never RTIs. */
+	if (vsyncDue && irqVec == 0x87CA) {
+		const uint16_t pc = cpu->pc.w;
+		if (pc < 0x0080) {
+			cpu->cc.i = false;
+			cpu->cwai = false;
+		}
+		hw_->ParkAlbatrssIfStuck();
+	}
+	if (vsyncDue && irqVec == 0x2B3A) {
+		cpu->cc.i = false;
+		cpu->cwai = false;
+	}
 
 	int raiseFromChip = 0;
 	int raiseFromVsync = 0;
 	int ranHostTick = 0;
 	if (hw_->useOpn_ && hw_->ChipOpn()) {
 		raiseFromChip = chipIrqEdge;
-		/* Before Timer B arms, still allow a few vsync ticks so PATCH can run. */
-		if (!raiseFromChip && vsyncDue && irqPulses_ < 8)
+		if (chipIrqEdge)
+			chipIrqSeen_ = 1;
+		/* YM2203 Timer B is the music clock once it arms (ys2_fmav). Until
+		   then keep the board's 60 Hz timer so PATCH/DRIVER ISRs still tick.
+		   Cap-at-8 left most OPN titles silent after the boot burst. */
+		if (!raiseFromChip && vsyncDue && !chipIrqSeen_)
+			raiseFromVsync = 1;
+		/* daiva OP.BIN $2B3A: BITA #1 then poll YM timer B. Chip-timer
+		   takeover left FD03 bit0 clear so the ISR only re-inits timers. */
+		if (vsyncDue && irqVec == 0x2B3A)
 			raiseFromVsync = 1;
 	} else {
 		raiseFromVsync = vsyncDue;
@@ -133,6 +164,7 @@ void CDriverFm7::DeliverIrqs(uint64_t now)
 					const uint16_t gate = man2 ? 0x2985 : 0x2883;
 					const uint16_t gateReload = man2 ? 0x2984 : 0x2882;
 					const uint16_t parser = man2 ? 0x2A98 : 0x293D;
+					const uint16_t shadowVolume = man2 ? 0x2EB5 : 0x2D50;
 					static const uint16_t kChannel1[3] = { 0x2E9A, 0x2EBF, 0x2EE4 };
 					static const uint16_t kChannel2[3] = { 0x3040, 0x3065, 0x308A };
 					const uint16_t* channels = man2 ? kChannel2 : kChannel1;
@@ -146,33 +178,169 @@ void CDriverFm7::DeliverIrqs(uint64_t now)
 						if (m[active])
 							hw_->RunSubroutine(flush);
 						m[gate] = 0;
+						const unsigned mdataEnd = (unsigned)hw_->mdataAddr_
+							+ (unsigned)hw_->mdataSize_;
 						for (int ch = 0; ch < 3; ++ch) {
 							const uint16_t base = channels[ch];
 							const uint8_t count = m[base];
 							const uint16_t oldPtr = (uint16_t)(((uint16_t)m[base + 2] << 8)
 								| m[base + 3]);
-							cpu->index[0].w = base;
-							hw_->RunSubroutine(parser);
+							unsigned origin = oldPtr;
+							if (origin >= 0x4D00u && origin < 0x4F00u)
+								origin += 0x200u;
+							if (origin < hw_->mdataAddr_ || origin >= mdataEnd) {
+								origin = (unsigned)(((uint16_t)m[base + 4] << 8) | m[base + 5]);
+								if (origin >= 0x4D00u && origin < 0x4F00u)
+									origin += 0x200u;
+							}
+							/* Terminator 00: F6 inner-loop or phrase loop.
+							   Native fetch would wrap here, but the host skips
+							   the parser on 00 (F8 mute / $4Fxx smash-restore).
+							   Short loops like Devil's wind then die in window 0. */
+							if (origin >= hw_->mdataAddr_ && origin < mdataEnd
+								&& m[origin] == 0) {
+								const uint8_t f6left = m[base + 18];
+								const unsigned f6end = (unsigned)(((uint16_t)m[base + 19] << 8)
+									| m[base + 20]);
+								const unsigned f6ret = (unsigned)(((uint16_t)m[base + 21] << 8)
+									| m[base + 22]);
+								unsigned restart = 0;
+								if (f6left && origin == f6end
+									&& f6ret >= hw_->mdataAddr_ && f6ret < mdataEnd) {
+									restart = f6ret;
+									m[base + 18] = (uint8_t)(f6left - 1);
+								} else if (!f6left) {
+									unsigned songLoop = (unsigned)(((uint16_t)m[base + 4] << 8)
+										| m[base + 5]);
+									if (songLoop >= 0x4D00u && songLoop < 0x4F00u)
+										songLoop += 0x200u;
+									if (songLoop >= hw_->mdataAddr_ && songLoop < mdataEnd
+										&& songLoop != 0x0200u)
+										restart = songLoop;
+								}
+								if (restart) {
+									m[base + 2] = (uint8_t)(restart >> 8);
+									m[base + 3] = (uint8_t)restart;
+									origin = restart;
+								}
+							}
+							/* Native FE/F6 never STU 2,X, so LDU 2,X / LBRA
+							   $2960 can spin ~200k steps and stomp $4F00.
+							   Dispatch F-cmds on the host, plant the duration,
+							   then parse once with a short step cap.
+							   MANPR2 (MUSD10B/DKMUS) also opens with F7/F8/F9
+							   mixer ops; running the parser on those leftover
+							   F-cmds left one stuck AY tone (seq=1 keys=1). */
+							unsigned keepPtr = origin;
+							if (origin >= hw_->mdataAddr_ && origin < mdataEnd
+								&& m[origin] >= 0xF0) {
+								unsigned p = origin;
+								for (int command = 0; command < 12 && p < mdataEnd; ++command) {
+									const uint8_t op = m[p];
+									uint16_t handler = 0;
+									unsigned fallback = 0;
+									if (!man2) {
+										if (op == 0xFC) { handler = 0x2A86; fallback = 7; }
+										else if (op == 0xFD) { handler = 0x2A81; fallback = 3; }
+										else if (op == 0xFE) { handler = 0x2A6C; fallback = 2; }
+										else if (op == 0xF6 && p + 4 <= mdataEnd) {
+											handler = 0x2B10; fallback = 4;
+										}
+										else if (op == 0xF9) { handler = 0x2AB6; fallback = 1; }
+										else if (op == 0xF7 || op == 0xF8) { fallback = 2; }
+										else if (op == 0xFA || op == 0xFB) {
+											/* PULS Y / LBRA parser — do not JSR.
+											   FA nn [note] then F6... (First step ch2). */
+											fallback = 2;
+											if (p + 2 < mdataEnd && m[p + 2] && m[p + 2] < 0xF0)
+												fallback = 3;
+										}
+									} else {
+										/* Phrase arm now plants 4Fxx streams.
+										   JSR FC/FD/FE/F6 (tone flags + loops).
+										   Skip F7/F8 — those call $2E58/$2EBB
+										   and a 400-step cap muted the mixer. */
+										switch (op) {
+										case 0xF4: handler = 0x2F1B; fallback = 1; break;
+										case 0xF5: handler = 0x2F09; fallback = 5; break;
+										case 0xF6: handler = 0x2C75; fallback = 4; break;
+										case 0xF7:
+										case 0xF8: fallback = 2; break;
+										case 0xF9: handler = 0x2C1B; fallback = 1; break;
+										case 0xFC: handler = 0x2BEB; fallback = 7; break;
+										case 0xFD: handler = 0x2BE6; fallback = 3; break;
+										case 0xFE: handler = 0x2BD1; fallback = 2; break;
+										case 0xFF: handler = 0x2BD0; fallback = 1; break;
+										default: break;
+										}
+									}
+									if (!handler && !fallback)
+										break;
+									if (!handler) {
+										p += fallback;
+										continue;
+									}
+									cpu->index[0].w = base;
+									cpu->index[2].w = (uint16_t)(p + 1);
+									hw_->RunSubroutine(handler, 400);
+									if (op == 0xF6) {
+										const unsigned nu = cpu->index[2].w;
+										if (nu > p && nu < mdataEnd)
+											p = nu;
+										else
+											p += fallback;
+									} else {
+										p += fallback;
+									}
+								}
+								if (p >= hw_->mdataAddr_ && p < mdataEnd && m[p] < 0xF0) {
+									m[base + 2] = (uint8_t)(p >> 8);
+									m[base + 3] = (uint8_t)p;
+									keepPtr = p;
+								}
+							}
+							const uint16_t livePtr = (uint16_t)(((uint16_t)m[base + 2] << 8)
+								| m[base + 3]);
+							const uint16_t playFlag = man2 ? (uint16_t)0x2982 : (uint16_t)0x2880;
+							const uint8_t playSave = m[playFlag];
+							if (livePtr >= hw_->mdataAddr_ && livePtr < mdataEnd
+								&& m[livePtr] != 0 && m[livePtr] < 0xF0) {
+								cpu->index[0].w = base;
+								hw_->RunSubroutine(parser, 8000);
+							}
+							if (playSave && m[playFlag] == 0)
+								m[playFlag] = playSave;
+							if (man2 && m[active] == 0)
+								m[active] = 1;
 							const uint16_t newPtr = (uint16_t)(((uint16_t)m[base + 2] << 8)
 								| m[base + 3]);
-							uint16_t parsedPtr = cpu->index[2].w;
-							if (parsedPtr < hw_->mdataAddr_
-								|| parsedPtr >= hw_->mdataAddr_ + hw_->mdataSize_) {
-								unsigned p = oldPtr;
-								const unsigned end = (unsigned)hw_->mdataAddr_ + hw_->mdataSize_;
-								for (int command = 0; command < 8 && p < end; ++command) {
-									if (m[p] == 0xFC) p += 7;
-									else if (m[p] == 0xFD || m[p] == 0xFE) p += 3;
-									else break;
+							if (newPtr < hw_->mdataAddr_ || newPtr >= mdataEnd
+								|| (keepPtr >= hw_->mdataAddr_ && keepPtr < mdataEnd
+									&& newPtr + 0x80u < keepPtr
+									&& newPtr < hw_->mdataAddr_ + 0x80u)) {
+								if (keepPtr >= hw_->mdataAddr_ && keepPtr < mdataEnd) {
+									m[base + 2] = (uint8_t)(keepPtr >> 8);
+									m[base + 3] = (uint8_t)keepPtr;
 								}
-								if (p + 1 < end && m[p] < 0xF0)
-									parsedPtr = (uint16_t)(p + 2);
 							}
-							if (count == 1 && newPtr == oldPtr
-								&& parsedPtr >= hw_->mdataAddr_
-								&& parsedPtr < hw_->mdataAddr_ + hw_->mdataSize_) {
-								m[base + 2] = (uint8_t)(parsedPtr >> 8);
-								m[base + 3] = (uint8_t)parsedPtr;
+							else if (count == 1 && newPtr == livePtr
+								&& livePtr >= hw_->mdataAddr_ && livePtr < mdataEnd
+								&& m[livePtr] != 0 && m[livePtr] < 0xF0
+								&& livePtr + 2u < mdataEnd) {
+								m[base + 2] = (uint8_t)((livePtr + 2u) >> 8);
+								m[base + 3] = (uint8_t)(livePtr + 2u);
+							}
+							/* Keep AY R8+ch in sync with the shadow.  $2C4E is
+							   a 4D00→4F00 reloc, not an AY dump, so ch0 can
+							   sit at vol 0 while its period walks the melody. */
+							if (m[base] > 0 && hw_->ChipAy()) {
+								uint8_t vol = m[shadowVolume + ch];
+								if (vol == 0) {
+									vol = 0x0C;
+									m[shadowVolume + ch] = vol;
+								}
+								hw_->ChipAy()->Write(0, (uint32_t)(8 + ch));
+								hw_->ChipAy()->Write(1, vol);
 							}
 						}
 						m[gate] = m[gateReload];
@@ -192,22 +360,56 @@ void CDriverFm7::DeliverIrqs(uint64_t now)
 		}
 	}
 
+	/* XA2PSGPATCH tick (bank-relocated). Native IRQ $FF94 is a trampoline;
+	   the tempo reload is /8 for the AV timer, so force /1 at 60 Hz. */
+	if (vsyncDue && !ranHostTick && hw_->Xana2Tick() && hw_->Xana2Tempo()) {
+		hw_->Mem()[hw_->Xana2Tempo()] = 1;
+		hw_->RunSubroutine(hw_->Xana2Tick(), 80000, 1);
+		hw_->Mem()[0xFC00] = 0x20;
+		hw_->Mem()[0xFC01] = 0xFE;
+		cpu->pc.w = 0xFC00;
+		cpu->cc.i = false;
+		cpu->cc.f = true;
+		irqPulses_++;
+		ranHostTick = 1;
+		raiseFromVsync = 0;
+	}
+
 	if (!ranHostTick && (raiseFromChip || raiseFromVsync)) {
 		/* A vsync source is wired to one 6809 line, not both.  When exactly
 		   one vector is the $FD03 handler, use that line; firing the other
 		   vector on Ys jumps into PATCH data at $FF00 and destroys the RTI
 		   frame before MANPR can produce its first note. */
+		const int ysPsg = (!hw_->useOpn_ && hw_->patchTableBase_ == 0xFED0) ? 1 : 0;
 		const int routeFd03 = (raiseFromVsync && !raiseFromChip
 			&& (irqStub != firqStub)) ? 1 : 0;
-		if (!cpu->cc.i && (!routeFd03 || irqStub)
-			&& !(raiseFromChip && !raiseFromVsync && irqStub)) {
-			cpu->irq = true;
-			irqPulses_++;
-		}
-		if (!cpu->cc.f && (!routeFd03 || firqStub)
-			&& !(raiseFromChip && !raiseFromVsync && firqStub)) {
-			cpu->firq = true;
-			irqPulses_++;
+		const uint16_t pcNow = cpu->pc.w;
+		const int inAlbDrv = (irqVec == 0x87CA
+			&& ((pcNow >= 0xF000 && pcNow < 0xF900)
+				|| (pcNow >= 0x8500 && pcNow < 0xC500)));
+		if (!inAlbDrv) {
+			if (hw_->useOpn_) {
+				/* Dual IRQ+FIRQ (I and F both clear) stormed kohaku: 4000+
+				   pulses and almost no YM writes. One line, IRQ first. */
+				if (!cpu->cc.i) {
+					cpu->irq = true;
+					irqPulses_++;
+				} else if (!cpu->cc.f && !firqIsRti) {
+					cpu->firq = true;
+					irqPulses_++;
+				}
+			} else {
+				if (!cpu->cc.i && (!routeFd03 || irqStub)
+					&& !(ysPsg && raiseFromChip && !raiseFromVsync && irqStub)) {
+					cpu->irq = true;
+					irqPulses_++;
+				}
+				if (!cpu->cc.f && !firqIsRti && (!routeFd03 || firqStub)
+					&& !(ysPsg && raiseFromChip && !raiseFromVsync && firqStub)) {
+					cpu->firq = true;
+					irqPulses_++;
+				}
+			}
 		}
 	}
 
@@ -252,6 +454,7 @@ void CDriverFm7::RunUntil(uint64_t endCycle)
 		TickChips(ran);
 		if (rc != 0)
 			break;
+		hw_->UnwindMissingBios();
 	}
 }
 
@@ -286,6 +489,7 @@ int CDriverFm7::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned
 	booted_ = 0;
 	triggered_ = 0;
 	prevChipIrq_ = 0;
+	chipIrqSeen_ = 0;
 	irqPulses_ = 0;
 	lastFd03IrqVec_ = 0xFFFF;
 
@@ -327,6 +531,7 @@ int CDriverFm7::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned
 			nextVsync_ = (uint64_t)cpu->cycles + vsyncPeriod_;
 			/* ~1.0s boot so PATCH installs vectors and reaches FD58 poll. */
 			RunUntil((uint64_t)cpu->cycles + (uint64_t)cpuHz_);
+			hw_->UnwindStuckBootJsr();
 		}
 	}
 	booted_ = 1;
@@ -345,6 +550,10 @@ int CDriverFm7::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned
 			/* PATCH now sees TTLPRG row zero immediately; the former
 			   five-second settle consumed its embedded title before render. */
 			RunUntil((uint64_t)cpu->cycles + settle);
+			hw_->FinishDaivaOpPlay();
+			hw_->FinishDaivaEdPlay();
+			hw_->FinishSharrierPlay();
+			hw_->ArmLaydockChannels();
 			if (!hw_->useOpn_ && hw_->patchTableBase_ == 0xFED0
 				&& hw_->Mem()[0xFFE2] == 0xFF && hw_->Mem()[0xFFE3] == 0xFF) {
 				/* The resident handoff initialized TTLPRG but the ripped BIOS
@@ -362,6 +571,24 @@ int CDriverFm7::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned
 	}
 	/* Vectors / DRIVER may remount after play — refresh once more. */
 	hw_->RefreshFd03Polarity();
+	hw_->FinishXana2PsgPlay();
+	/* albatrss: PATCH JSR $F000/$F004 never returns (I stays set) so the
+	   OP.BIN ISR at $87CA never runs despite tens of thousands of mute
+	   writes. Unmask when the installed vector is a real $FD03 handler. */
+	{
+		mc6809__t* cpu = hw_->Mc6809();
+		if (cpu && cpu->cc.i) {
+			uint8_t* m = hw_->Mem();
+			const uint16_t irq = (uint16_t)(((uint16_t)m[0xFFF8] << 8) | m[0xFFF9]);
+			if (irq >= 0x0100 && irq < 0xFE00
+				&& ((m[irq] == 0xB6 && m[irq + 1] == 0xFD && m[irq + 2] == 0x03)
+					|| (m[irq] == 0x96 && m[irq + 1] == 0x03))) {
+				cpu->cc.i = false;
+				cpu->cwai = false;
+			}
+		}
+		hw_->ParkAlbatrssIfStuck();
+	}
 	/* jikochu: PATCH clears $0614 after consuming $FD58; re-arm PSG gate.
 	   Also re-apply song entry — play does JSR $C006 before reading $FD59,
 	   so a short settle can leave boot init as the only active song. */
@@ -407,6 +634,7 @@ int CDriverFm7::OverlayTitle(unsigned titleCode)
 	if (!hw_) return 0;
 	titleCode_ = titleCode;
 	songCode_ = (uint8_t)(titleCode & 0xff);
+	chipIrqSeen_ = 0;
 	hw_->TriggerPlay(titleCode_ ? titleCode_ : (unsigned)songCode_);
 	triggered_ = 1;
 	return 1;

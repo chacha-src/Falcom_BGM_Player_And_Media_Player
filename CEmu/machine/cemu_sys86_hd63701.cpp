@@ -35,22 +35,33 @@ uint8_t CHardAc::HD63701Read8(uint16_t addr)
 		return (uint8_t)m6803_internal_registers_r((unsigned short)(addr & 0x1fu));
 	if ((addr & 0xff80u) == 0x0080u)
 		return hd63701Ram_[addr & 0xffu];
-	if ((addr & 0xfc00u) == 0x1000u)
-		return namcoCus30_[addr & 0x3ffu];
+	if ((addr & 0xfc00u) == 0x1000u) {
+		const unsigned off = addr & 0x3ffu;
+		/* CUS60 F0DC waits for $1181=$A6 after ringing $1180. */
+		if (wsg63701_ && off == 0x181u && namcoCus30_[0x180u] == 0xa6u)
+			return 0xa6u;
+		return namcoCus30_[off];
+	}
 	if (wsg63701_ && addr <= 0x03ffu)
 		return chip_ ? CEmuChipC30Read(chip_, addr) : namcoCus30_[addr];
 
-	if (addr >= 0x1400u && addr <= 0x1fffu)
+	/* skykid.cpp mcu_map: work RAM $C000-C7FF (drgnbstr/pacland/skykid). */
+	if (wsg63701_ && addr >= 0xc000u && addr <= 0xc7ffu && hd63701Rom_)
+		return hd63701Rom_[addr];
+
+	if (!wsg63701_ && addr >= 0x1400u && addr <= 0x1fffu)
 		return hd63701Ram_[0x100u + (addr - 0x1400u)];
-	/* CUS60 library uses YM @2000; game subprograms use map-specific bases. */
-	const uint16_t ym0 = hd63701YmBase_ ? hd63701YmBase_ : (uint16_t)0x2000u;
-	if (addr == 0x2000u || addr == 0x2001u || addr == ym0 || addr == (uint16_t)(ym0 + 1u))
-		return chip_ ? chip_->ReadStatus() : 0x80;
-	/* Inputs / DSW — idle highs so attract can run. */
-	if (addr == 0x2020u || addr == 0x2021u || addr == 0x2030u || addr == 0x2031u
-		|| addr == (uint16_t)(ym0 + 0x20u) || addr == (uint16_t)(ym0 + 0x21u)
-		|| addr == (uint16_t)(ym0 + 0x30u) || addr == (uint16_t)(ym0 + 0x31u))
-		return 0xff;
+	/* YM lives only at hd63701YmBase_ (default $2000). roishtar maps ROM at
+	   $2000-3FFF and YM at $6000 — do not alias $2000 as YM or punch $2020
+	   as ports into that ROM window. wsg63701 has no YM2151. */
+	if (!wsg63701_) {
+		const uint16_t ym0 = hd63701YmBase_ ? hd63701YmBase_ : (uint16_t)0x2000u;
+		if (addr == ym0 || addr == (uint16_t)(ym0 + 1u))
+			return chip_ ? chip_->ReadStatus() : 0x80;
+		if (addr == (uint16_t)(ym0 + 0x20u) || addr == (uint16_t)(ym0 + 0x21u)
+			|| addr == (uint16_t)(ym0 + 0x30u) || addr == (uint16_t)(ym0 + 0x31u))
+			return 0xff;
+	}
 	if (hd63701Rom_ && addr < 0x10000u)
 		return hd63701Rom_[addr];
 	return 0xff;
@@ -69,9 +80,10 @@ void CHardAc::HD63701Write8(uint16_t addr, uint8_t v)
 	if ((addr & 0xfc00u) == 0x1000u) {
 		/* $1182=$A6 is required: IRQ vector [AE+8] only runs the AE+20..+28
 		   music chain while the doorbell is A6 (else RTI after AA/+2C). */
-		namcoCus30_[addr & 0x3ffu] = v;
+		const unsigned off = addr & 0x3ffu;
+		namcoCus30_[off] = v;
 		CChip* c30 = pcm_ ? pcm_ : (wsg63701_ ? chip_ : NULL);
-		if (c30) c30->Write(addr & 0x3ffu, v);
+		if (c30) c30->Write(off, v);
 		if (wsg63701_) opmWrites_++;
 		return;
 	}
@@ -81,22 +93,20 @@ void CHardAc::HD63701Write8(uint16_t addr, uint8_t v)
 		if (chip_) { chip_->Write(addr, v); opmWrites_++; }
 		return;
 	}
-	if (addr >= 0x1400u && addr <= 0x1fffu) {
+	if (wsg63701_ && addr >= 0xc000u && addr <= 0xc7ffu && hd63701Rom_) {
+		hd63701Rom_[addr] = v;
+		return;
+	}
+	if (!wsg63701_ && addr >= 0x1400u && addr <= 0x1fffu) {
 		hd63701Ram_[0x100u + (addr - 0x1400u)] = v;
 		return;
 	}
-	{
+	if (!wsg63701_) {
 		const uint16_t ym0 = hd63701YmBase_ ? hd63701YmBase_ : (uint16_t)0x2000u;
-		if (addr == 0x2000u || addr == 0x2001u || addr == ym0 || addr == (uint16_t)(ym0 + 1u)) {
+		if (addr == ym0 || addr == (uint16_t)(ym0 + 1u)) {
 			if (chip_) {
 				chip_->Write(addr & 1u, v);
 				if (addr & 1u) {
-					/* Not every board that reaches here has a YM2151: with
-					   hd63701YmBase_ unset this window falls back to $2000
-					   and chip_ is the CUS30 WSG, so asking it for a YM2151
-					   write count reinterprets an unrelated object and reads
-					   off the end of it. Count locally instead - the callers
-					   only use this as a liveness signal. */
 					opmWrites_++;
 					hd63701YmWrites_++;
 				}
@@ -145,14 +155,6 @@ void CHardAc::HD63701InjectSong(uint8_t cmd)
 			c30->Write(0x183, 0);
 			c30->Write(0x191, 0);
 		}
-		if (wsg63701_ && chip_) {
-			static const uint16_t kSlots[] = {
-				0x40, 0x41, 0x50, 0x55, 0x60, 0x80, 0x81,
-				0xa0, 0xa1, 0xaf, 0xb0, 0xb1, 0xc0, 0xc8, 0xc9, 0xce
-			};
-			for (unsigned i = 0; i < sizeof(kSlots) / sizeof(kSlots[0]); i++)
-				chip_->Write(kSlots[i], 0);
-		}
 	} else {
 		/* Host doorbell: $1183=cmd, $B0=0, $1182=$A6. F4B1 consumes A6 and
 		   starts the song (then SEI). Sys86RunCycles re-asserts A6 + CLI and
@@ -160,23 +162,15 @@ void CHardAc::HD63701InjectSong(uint8_t cmd)
 		hd63701Ram_[0xb0u] = 0;
 		namcoCus30_[0x183] = cmd;
 		namcoCus30_[0x182] = 0xa6;
-		if (cmd <= 7u)
-			namcoCus30_[0x191] = cmd;
+		/* $1191 is the CUS60 SFX table (1-7). Index 6 JSRs RESET (F4AE).
+		   BGM stays in $1183 for F4B1; do not mirror the song id here. */
 		CChip* c30 = pcm_ ? pcm_ : (wsg63701_ ? chip_ : NULL);
 		if (c30) {
 			c30->Write(0x183, cmd);
 			c30->Write(0x182, 0xa6);
-			if (cmd <= 7u) c30->Write(0x191, cmd);
 		}
-		if (wsg63701_ && chip_) {
+		if (wsg63701_ && chip_)
 			CEmuChipC30SetEnable(chip_, 1);
-			static const uint16_t kSlots[] = {
-				0x40, 0x41, 0x50, 0x55, 0x60, 0x80, 0x81,
-				0xa0, 0xa1, 0xaf, 0xb0, 0xb1, 0xc0, 0xc8, 0xc9, 0xce
-			};
-			for (unsigned i = 0; i < sizeof(kSlots) / sizeof(kSlots[0]); i++)
-				chip_->Write(kSlots[i], cmd);
-		}
 	}
 	if (hd63701_)
 		HD63701SetInputLine(hd63701_, HD63701_LINE_IRQ, HD63701_CLEAR_LINE);
@@ -245,10 +239,17 @@ int CHardAc::LoadRomsSys86(CEmuZipFs* fs, const CEmuGameEntry* ge)
 		else if (sz <= 0x4000u)
 			base = 0x8000u;
 		const unsigned n = (sz > (0x10000u - base)) ? (0x10000u - base) : sz;
-		memcpy(hd63701Rom_ + base, data, n);
-		/* Mirror first 16K like FBNeo (DrvMCUROM, DrvMCUROM+0x4000, 0x4000). */
-		if (n >= 0x4000u)
-			memcpy(hd63701Rom_, hd63701Rom_ + 0x4000u, 0x4000u);
+		if (hd63701MapKind_ == 1 && sz >= 0x8000u) {
+			/* MAME roishtar_mcu_map: mcusub+2000 at $2000, mcusub+4000 at $8000.
+			   YM @6000 overlays; do not paint the 32K image from $4000. */
+			memcpy(hd63701Rom_ + 0x2000, data + 0x2000, 0x2000);
+			memcpy(hd63701Rom_ + 0x8000, data + 0x4000, 0x4000);
+		} else {
+			memcpy(hd63701Rom_ + base, data, n);
+			/* Mirror first 16K like FBNeo (DrvMCUROM, DrvMCUROM+0x4000, 0x4000). */
+			if (n >= 0x4000u)
+				memcpy(hd63701Rom_, hd63701Rom_ + 0x4000u, 0x4000u);
+		}
 		gotExt = 1;
 		break;
 	}
@@ -296,13 +297,8 @@ int CHardAc::LoadRomsWsg63701(CEmuZipFs* fs, const CEmuGameEntry* ge)
 	   wave PROM to the C30 chip. */
 	if (!hd63701_ || !chip_ || !fs || !ge) return 0;
 	if (!LoadRomsSys86(fs, ge)) return 0;
-	/* Wave PROM (256/512). */
-	for (int i = 0; i < fs->fileCount; i++) {
-		const unsigned sz = fs->files[i].size;
-		if (sz != 256u && sz != 512u) continue;
-		chip_->SetPcmRom(fs->files[i].data, sz);
-		break;
-	}
+	/* CUS30 wave RAM is filled by the MCU. Do not attach the first 256-byte
+	   member (usually a color PROM) as a waveform table. */
 	CEmuChipC30SetEnable(chip_, 1);
 	return 1;
 }

@@ -7,8 +7,89 @@
 extern "C" {
 #include "../vendor/musashi/m68k.h"
 }
+#include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+
+static uint8_t g_x68MidiAck;
+static uint8_t g_x68MidiIer;
+static uint8_t g_x68MidiRun, g_x68MidiNeed, g_x68MidiD0;
+static unsigned g_x68MidiN, g_x68MidiNotes, g_x68MidiWr, g_x68MidiRd;
+static unsigned g_x68GpipPhase;
+enum { CEMU_X68_MIDI_CAP = 65536 };
+static uint8_t g_x68MidiBuf[CEMU_X68_MIDI_CAP];
+
+static unsigned g_x68MidiOff[16];
+
+static void X68MidiReset()
+{
+	g_x68MidiAck = 0;
+	g_x68MidiIer = 0;
+	g_x68MidiRun = g_x68MidiNeed = g_x68MidiD0 = 0;
+	g_x68MidiN = g_x68MidiNotes = g_x68MidiWr = g_x68MidiRd = 0;
+	g_x68GpipPhase = 0;
+	memset(g_x68MidiOff, 0, sizeof(g_x68MidiOff));
+}
+
+static void X68MidiCapture(uint8_t v)
+{
+	if (g_x68MidiN < (unsigned)CEMU_X68_MIDI_CAP)
+		g_x68MidiBuf[g_x68MidiN++] = v;
+	if (v == 0xF0) { g_x68MidiRun = 0xF0; g_x68MidiNeed = 0; g_x68MidiD0 = 0; return; }
+	if (v == 0xF7) { g_x68MidiRun = 0; g_x68MidiNeed = 0; g_x68MidiD0 = 0; return; }
+	if (v >= 0xF8) return;
+	if (g_x68MidiRun == 0xF0) return;
+	if (v & 0x80) {
+		g_x68MidiRun = v;
+		const uint8_t hi = (uint8_t)(v & 0xf0);
+		g_x68MidiNeed = (hi == 0xC0 || hi == 0xD0) ? 1 : 2;
+		g_x68MidiD0 = 0;
+	} else if (g_x68MidiRun) {
+		if (g_x68MidiNeed == 2 && g_x68MidiD0 == 0) {
+			g_x68MidiD0 = v;
+		} else {
+			const uint8_t hi = (uint8_t)(g_x68MidiRun & 0xf0);
+			if (hi == 0x90 && v > 0)
+				g_x68MidiNotes++;
+			g_x68MidiD0 = 0;
+			g_x68MidiNeed = ((g_x68MidiRun & 0xf0) == 0xC0
+				|| (g_x68MidiRun & 0xf0) == 0xD0) ? 1 : 2;
+		}
+	}
+}
+
+extern "C" unsigned CEmuX68kMidiByteCount() { return g_x68MidiN; }
+extern "C" unsigned CEmuX68kMidiNoteOnCount() { return g_x68MidiNotes; }
+extern "C" unsigned CEmuX68kMidiPortWrites() { return g_x68MidiWr; }
+extern "C" void CEmuX68kMidiDump(FILE* f)
+{
+	if (!f) return;
+	fprintf(f, "    offs");
+	for (int i = 0; i < 16; i++) {
+		if (g_x68MidiOff[i])
+			fprintf(f, " +%X=%u", i, g_x68MidiOff[i]);
+	}
+	fprintf(f, " rd=%u ier=%02X head", g_x68MidiRd, g_x68MidiIer);
+	for (unsigned i = 0; i < g_x68MidiN && i < 24; i++)
+		fprintf(f, " %02X", g_x68MidiBuf[i]);
+	fprintf(f, "\n");
+}
+
+extern "C" void CEmuX68kMidiDumpRegs(FILE* f)
+{
+	if (!f) return;
+	CHardX68k* hw = CEmuHardX68kGetActive();
+	const unsigned a4 = (unsigned)m68k_get_reg(NULL, M68K_REG_A4) & 0xffffffu;
+	const unsigned d0 = (unsigned)m68k_get_reg(NULL, M68K_REG_D0);
+	const unsigned sr = (unsigned)m68k_get_reg(NULL, M68K_REG_SR) & 0xffffu;
+	const unsigned pc = (unsigned)m68k_get_reg(NULL, M68K_REG_PC) & 0xffffffu;
+	const unsigned sp = (unsigned)m68k_get_reg(NULL, M68K_REG_SP) & 0xffffffu;
+	const unsigned rdA4 = hw ? (unsigned)hw->Read8(a4) : 0xffu;
+	const unsigned dsr = hw ? (unsigned)hw->Read8(0xeafa09u) : 0xffu;
+	const unsigned gpip = hw ? (unsigned)hw->Read8(0xe88001u) : 0xffu;
+	fprintf(f, "    pc=%06X sr=%04X sp=%06X d0=%08X a4=%06X (a4)=%02X dsr=%02X gpip=%02X\n",
+		pc, sr, sp, d0, a4, rdA4, dsr, gpip);
+}
 
 static int CEmuX68kIntAck(int level)
 {
@@ -117,6 +198,7 @@ int CHardX68k::Init(const CEmuGameEntry* ge, int sampleRate)
 	chip_ = CEmuChipYm2151Create((uint32_t)opmHz_, sampleRate_);
 	opmWrites_ = 0;
 	musashiReady_ = 0;
+	X68MidiReset();
 	return chip_ ? 1 : 0;
 }
 
@@ -195,15 +277,35 @@ uint8_t CHardX68k::Read8(unsigned addr)
 	if ((addr >= 0xe88000u && addr <= 0xe88fffu) || (addr >= 0xe8a000u && addr <= 0xe8afffu)) {
 		const unsigned off = addr & 0xfffu;
 		uint8_t v = mfp_[off];
-		/* GPIP ($E88001): default open-bus high, bit4 (VDISP) clear so
-		   arcus `btst #4 / bne` can leave the wait. Other bits stay set:
-		   `tst.b / bmi` on bit7 must not hang. */
+		/* GPIP ($E88001): open-bus high, bit7 set so `tst.b / bmi` cannot
+		   hang. Bit4 is VDISP — arcus waits for it clear (`btst #4 / bne`),
+		   MIDI_DRV.68K waits for set then clear (`btst #4 / beq` then bne).
+		   Toggle every read so both two-phase waits retire. */
 		if (off == 0x001u) {
 			if (v == 0) v = 0xff;
-			v = (uint8_t)(v & (uint8_t)~0x10);
+			g_x68GpipPhase++;
+			if (g_x68GpipPhase & 1u)
+				v = (uint8_t)(v | 0x10u);
+			else
+				v = (uint8_t)(v & (uint8_t)~0x10);
 		}
 		(void)softMfp_;
 		return v;
+	}
+	/* CZ-6BM1 / YM3802 MIDI. Open-bus $FF looks busy-forever.
+	   DSR ($EAFA09): bit7 IRQ, bit2 TxEMPTY, bit1 TxRDY. MIDI_DRV waits
+	   `tst.b (a4) / bpl` with A4=$EAFA09, then writes Tx data at +4. */
+	if ((addr >= 0xeafa00u && addr <= 0xeafa0fu)
+		|| (addr >= 0xefa000u && addr <= 0xefa00fu)) {
+		g_x68MidiRd++;
+		const unsigned r = addr & 0x0fu;
+		uint8_t st = (uint8_t)(0x80u | 0x04u | 0x02u);
+		if (g_x68MidiAck) {
+			g_x68MidiAck = 0;
+			st = (uint8_t)(st | 0x80u);
+		}
+		if (r == 0x03u) return g_x68MidiIer;
+		return st;
 	}
 	/* $E00000..$E7FFFF extra RAM after mailbox / timeslice MMIO. */
 	if (addr >= (unsigned)kExtBase && addr < (unsigned)kExtBase + (unsigned)kExtBytes)
@@ -400,6 +502,19 @@ void CHardX68k::Write8(unsigned addr, uint8_t data)
 				(unsigned)(((uint64_t)rate * 4096u + 7800u) / 15600u));
 			FmMonShadowPcmNote(0, (mid >= 0) ? mid : 60, 1);
 		}
+		return;
+	}
+	if ((addr >= 0xeafa00u && addr <= 0xeafa0fu)
+		|| (addr >= 0xefa000u && addr <= 0xefa00fu)) {
+		const unsigned r = addr & 0x0fu;
+		g_x68MidiWr++;
+		g_x68MidiOff[r]++;
+		if (r == 0x03u)
+			g_x68MidiIer = data;
+		/* Odd-byte YM3802: +9 TxD, +B/+D also used by some MIDI_DRV.68K builds. */
+		if (r == 0x09u || r == 0x0Bu || r == 0x0Du)
+			X68MidiCapture(data);
+		g_x68MidiAck = 1;
 		return;
 	}
 }

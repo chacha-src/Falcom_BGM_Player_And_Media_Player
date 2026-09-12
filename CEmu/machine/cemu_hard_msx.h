@@ -89,6 +89,8 @@ private:
 	int StartSongKss(unsigned titleCode);
 	int StartSongGeneric(unsigned titleCode);
 	int StartSongDs4(unsigned titleCode);
+	int StartSongDq(unsigned titleCode);
+	void PlantDqBios();
 	int IsKssMagic(const unsigned char* data, unsigned sz) const;
 
 	uint8_t mem_[0x10000];
@@ -113,6 +115,8 @@ private:
 	uint8_t bankOfs_;
 	uint8_t bankNum_;
 	int bank8k_;
+	uint8_t bankShadow_[0x4000];
+	int bank8kRam_[2];
 	int sccEnable_;
 	int sccMapped_; /* Konami mapper: 0x3F→$9000 exposes SCC at $9800 */
 	int sccAccessed_; /* MixAdd only after a real SCC register write */
@@ -122,6 +126,7 @@ private:
 	uint8_t opllRegs_[64];
 
 	int genericMode_;
+	int dqMode_;
 	uint16_t initPc_;
 	uint16_t mdataAddr_;
 	unsigned mdataSize_;

@@ -91,10 +91,11 @@ public:
 	ID3D11GeometryShader* m_gsWind; // 情景の風揺れ（テッセ後／ソリッド）
 	ID3D11PixelShader* m_psBand;
 	ID3D11VertexShader* m_vsSolid;
+	ID3D11VertexShader* m_vsWater; // 水面ウェーブ変位
 	ID3D11VertexShader* m_vsInst; // 機体・障害の GPU インスタンス
 	ID3D11PixelShader* m_psSolid;
 	ID3D11PixelShader* m_psCloud; // 雲カード専用（影・fbmなし）
-	ID3D11PixelShader* m_psWater; // 水面＋平面反射
+	ID3D11PixelShader* m_psWater; // 水面＋平面反射（反射RT無しでもcubemap）
 	ID3D11PixelShader* m_psTerr; // 地形専用（傾斜・河川・テーマ着色）
 	ID3D11PixelShader* m_psCraft; // 機体専用（キャラテクスチャ）
 	ID3D11VertexShader* m_vsHud;

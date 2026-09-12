@@ -104,26 +104,13 @@ int CDriverPc88::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigne
 		int hadPoll = 0, pollAt = -1;
 		if (mem) {
 			memcpy(page0, mem, sizeof(page0));
-			for (int i = 0; i + 4 < 0x70; i++) {
-				if (mem[i] == 0xDB && mem[i + 1] == 0x00
-					&& mem[i + 2] == 0xB7 && mem[i + 3] == 0x28) {
-					hadPoll = 1;
-					pollAt = i;
-					break;
-				}
-			}
+			pollAt = hw_->CmdPollPc();
+			hadPoll = pollAt >= 0;
 		}
 		const uint64_t chunk = (uint64_t)cpuHz_ / 32;
 		for (int step = 0; step < 32 && cpu && mem; step++) {
 			RunUntil((uint64_t)cpu->time64() + chunk);
-			int nowPoll = -1;
-			for (int i = 0; i + 4 < 0x70; i++) {
-				if (mem[i] == 0xDB && mem[i + 1] == 0x00
-					&& mem[i + 2] == 0xB7 && mem[i + 3] == 0x28) {
-					nowPoll = i;
-					break;
-				}
-			}
+			int nowPoll = hw_->CmdPollPc();
 			if (hadPoll && nowPoll < 0) {
 				/* Only Wing-class (I=F3 + snd Cxxx + high CALL, or mugen3 I=01).
 				   Bare I=F3 restore false-triggered pocky2 and left it at poll
@@ -145,6 +132,10 @@ int CDriverPc88::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigne
 			   still before the poll (lizard88/gineiden/gallforc decrypt).
 			   iceclimb88: VRTC during settle can enter the cmd handler
 			   (pc past FE/CP); stopping there left B816=FF forever. */
+			if (nowPoll >= 0x80
+				&& cpu->r.pc >= (unsigned)nowPoll
+				&& cpu->r.pc < (unsigned)nowPoll + 8)
+				break;
 			if (nowPoll >= 0 && cpu->r.pc < 0x80) {
 				if (jrEntry) {
 					if (mem[0x7800] == 0xC3)
@@ -164,7 +155,13 @@ int CDriverPc88::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigne
 			}
 		}
 		/* If settle ended mid cmd-handler, snap back to the poll wait. */
-		if (cpu && mem && pollAt >= 0 && cpu->r.pc < 0x80
+		if (cpu && mem && pollAt >= 0x80
+			&& cpu->r.pc > (unsigned)pollAt + 4
+			&& cpu->r.pc < (unsigned)pollAt + 0x60) {
+			cpu->r.pc = (uint16_t)pollAt;
+			cpu->r.iff1 = 1;
+			hw_->cmd = 0;
+		} else if (cpu && mem && pollAt >= 0 && cpu->r.pc < 0x80
 			&& (int)cpu->r.pc > pollAt) {
 			cpu->r.pc = (uint16_t)pollAt;
 			cpu->r.iff1 = 1;
@@ -173,6 +170,11 @@ int CDriverPc88::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigne
 	}
 	hw_->FixupIm2AfterBoot();
 	hw_->PruneDeadTickSources();
+	/* lizard88: PATCH plants JP 00B2 at A3DF after decrypt. Re-assert
+	   before cmd=1 or A3B0 consumes the song in one CALL. */
+	if (hw_->NeedsLizardArm())
+		hw_->ArmLizardOpnTimer();
+	hw_->ArmPwmajan2();
 	/* Wing destge/hadou-class: still DI after settle with I=F3 + sound vec
 	   in Cxxx + high CALL under DI (NeedsBootEiPulse). Bare I=F3 (pocky2)
 	   must not match. gunyu has FB in PATCH so ends settle with iff1=1.
@@ -188,7 +190,8 @@ int CDriverPc88::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigne
 			&& cpu->r.i == 0x80 && cpu->r.pc >= 0x80;
 		int didEiPulse = 0;
 		if (cpu && !cpu->r.iff1 && cpu->r.im == 2
-			&& ((snd != 0 && cpu->r.i == 0xF3 && snd >= 0xC000
+			&& (hw_->NeedsBootEiPulse()
+				|| (snd != 0 && cpu->r.i == 0xF3 && snd >= 0xC000
 					&& hw_->NeedsBootEiPulse())
 				|| (snd != 0 && cpu->r.i == 0x01 && cpu->r.pc >= 0x200 && cpu->r.pc < 0x1000)
 				|| schemeBootEi)) {
@@ -502,14 +505,7 @@ void CDriverPc88::RunUntil(uint64_t endCycle)
 /* PATCH command poll — `IN A,(00) / OR A / JR Z,-` in the page-0 stub. */
 int CDriverPc88::FindPollLoop() const
 {
-	const uint8_t* mem = hw_ ? hw_->Mem() : NULL;
-	if (!mem) return -1;
-	for (int i = 0; i + 4 < 0x70; i++) {
-		if (mem[i] == 0xDB && mem[i + 1] == 0x00
-			&& mem[i + 2] == 0xB7 && mem[i + 3] == 0x28)
-			return i;
-	}
-	return -1;
+	return hw_ ? hw_->CmdPollPc() : -1;
 }
 
 /* A replay only lands if the guest is sitting in that poll. When a stalled rip
@@ -518,9 +514,15 @@ int CDriverPc88::FindPollLoop() const
 void CDriverPc88::Unwedge()
 {
 	Ay_Cpu* cpu = hw_ ? hw_->Cpu() : NULL;
-	if (!cpu || cpu->r.pc < 0x80) return;
+	if (!cpu) return;
 	const int pollAt = FindPollLoop();
 	if (pollAt < 0) return;
+	/* Already in the page-0 stub or sitting on the Falcom E027 poll. */
+	if (pollAt < 0x80 && cpu->r.pc < 0x80) return;
+	if (pollAt >= 0x80 && (int)cpu->r.pc >= pollAt && (int)cpu->r.pc < pollAt + 8)
+		return;
+	if (hw_->SkipUnwedge())
+		return;
 	cpu->r.pc = (uint16_t)pollAt;
 	if (cpu->r.sp < 0x0200 || cpu->r.sp >= 0xF000)
 		cpu->r.sp = 0x0200;
@@ -544,6 +546,7 @@ void CDriverPc88::TriggerPlay()
 		   packed-bank offsets survive reload. */
 		if (hw_->ShouldRestageSong())
 			hw_->LoadSongData(hw_->titleCode_);
+		hw_->ApplyFalcomPlay();
 		/* KOEI FMDRV: BGM uses play index 0 (packed CIM @4000). PCM SE
 		   titles (valis2 PCM00.. = code>=0xE0) must pass the raw code so
 		   PATCH's CP E0 path runs — forcing 0 muted ADPCM and left the
@@ -578,14 +581,31 @@ void CDriverPc88::TriggerPlay()
 					cpu->r.iff1 = 1;
 			} else if (base == 0x1000) {
 				/* castle/castleex: PROG2@1000 init then PATCH cmd=1 song arm.
-				   105D ends in CALL 1374 which LD SP,$FE80 and PUSH-wipes
-				   MUSIC@F800 — NOP that CALL, keep the SSG/port bring-up. */
+				   105D ends in CALL wipe (LD SP,$FE80 + PUSH MUSIC@F800).
+				   castle: CALL 1374 / ISR 154E / tick 1669 / enable 14F4
+				   castleex PROG2 is relocated: CALL 12DE / ISR 14B8 /
+				   tick 15D3 / enable 145E — match those by opcode, not
+				   hardcoded RAM. */
 				uint8_t* mem = hw_->Mem();
-				if (mem && mem[0x1082] == 0xCD && mem[0x1083] == 0x74
-					&& mem[0x1084] == 0x13) {
-					mem[0x1082] = 0x00;
-					mem[0x1083] = 0x00;
-					mem[0x1084] = 0x00;
+				if (mem && mem[0x1082] == 0xCD) {
+					const unsigned tgt = (unsigned)mem[0x1083]
+						| ((unsigned)mem[0x1084] << 8);
+					int wipe = 0;
+					if (tgt + 48u < 0x10000u) {
+						for (unsigned k = 0; k < 40; k++) {
+							if (mem[tgt + k] == 0x31
+								&& mem[tgt + k + 1] == 0x80
+								&& mem[tgt + k + 2] == 0xFE) {
+								wipe = 1;
+								break;
+							}
+						}
+					}
+					if (wipe) {
+						mem[0x1082] = 0x00;
+						mem[0x1083] = 0x00;
+						mem[0x1084] = 0x00;
+					}
 				}
 				hw_->cmd = 0;
 				hw_->DirectPlayKick(base, 0);
@@ -601,20 +621,42 @@ void CDriverPc88::TriggerPlay()
 						break;
 				}
 				hw_->cmd = 0;
-				if (mem && mem[0x154F] == 0xF5) {
+				unsigned isr = 0, tick = 0, enable = 0;
+				if (mem) {
+					for (unsigned a = 0x1400; a + 8u < 0x1800u; a++) {
+						if (mem[a] == 0xF3 && mem[a + 1] == 0xF5
+							&& mem[a + 2] == 0x3A && mem[a + 5] == 0x3D
+							&& mem[a + 6] == 0x20) {
+							isr = a;
+							tick = (unsigned)mem[a + 3]
+								| ((unsigned)mem[a + 4] << 8);
+							break;
+						}
+					}
+					for (unsigned a = 0x1400; a + 7u < 0x1600u; a++) {
+						if (mem[a] == 0x3A && mem[a + 3] == 0xF6
+							&& mem[a + 4] == 0x01 && mem[a + 5] == 0xD3
+							&& mem[a + 6] == 0xE6) {
+							enable = (unsigned)mem[a + 1]
+								| ((unsigned)mem[a + 2] << 8);
+							break;
+						}
+					}
+				}
+				if (mem && isr) {
 					const uint8_t ip = (cpu->r.i != 0) ? cpu->r.i : 0x1a;
 					cpu->r.i = ip;
 					const unsigned v4 = ((unsigned)ip << 8) | 0x04u;
 					const unsigned v8 = ((unsigned)ip << 8) | 0x08u;
-					mem[v4] = 0x4E;
-					mem[v4 + 1] = 0x15;
-					mem[v8] = 0x4F;
-					mem[v8 + 1] = 0x15;
+					mem[v4] = (uint8_t)(isr & 0xff);
+					mem[v4 + 1] = (uint8_t)(isr >> 8);
+					mem[v8] = (uint8_t)((isr + 1u) & 0xff);
+					mem[v8 + 1] = (uint8_t)((isr + 1u) >> 8);
+					if (tick < 0x10000u && mem[tick] == 0 && hw_->param)
+						mem[tick] = 1;
 				}
-				if (mem && mem[0x1669] == 0 && hw_->param)
-					mem[0x1669] = 1;
-				if (mem)
-					mem[0x14F4] = (uint8_t)(mem[0x14F4] | 0x01);
+				if (mem && enable && enable < 0x10000u)
+					mem[enable] = (uint8_t)(mem[enable] | 0x01);
 				cpu->r.iff1 = 1;
 			} else if (!hw_->PlayKickInitOff()
 				&& base >= 0xb000 && base < 0xe000) {
@@ -689,22 +731,20 @@ void CDriverPc88::TriggerPlay()
 				hw_->ArmGineidenOpnTimer();
 			}
 			if (hw_->NeedsLizardArm()) {
+				hw_->ArmLizardOpnTimer();
 				RunUntil((uint64_t)cpu->time64() + (uint64_t)cpuHz_ / 8);
 				hw_->ArmLizardOpnTimer();
 			}
+			hw_->ArmPwmajan2();
+			hw_->ArmYaksaPlay();
 			if (hw_->NeedsNavituneArm()) {
-				/* 1) Port-play with BC=mdata binds phrase banks.
-				   2) Rewrite LD BC to title song and run cmd07+cmd10+cmd0E.
-				   Raise SP before EI — tick EI's under (4D59) and nests. */
+				/* Plant list ptr at 7700 before cmd=1 LDIR/cmd10. SP=$0200
+				   would clobber a $01E0 plant; park below navimus. */
+				if (cpu->r.sp < 0x4000 || cpu->r.sp >= 0x7700)
+					cpu->r.sp = 0x7000;
+				hw_->ApplyNavituneTitleSong();
 				RunUntil((uint64_t)cpu->time64() + (uint64_t)cpuHz_ / 4);
 				hw_->ApplyNavituneTitleSong();
-				const unsigned retarget = hw_->NavituneRetargetPc();
-				if (retarget) {
-					if (cpu->r.sp < 0x4000 || cpu->r.sp >= 0x7700)
-						cpu->r.sp = 0x7000;
-					hw_->DirectPlayKick(retarget, 0);
-					RunUntil((uint64_t)cpu->time64() + (uint64_t)cpuHz_ / 8);
-				}
 				hw_->FinishNavitunePlay();
 			}
 			if (hw_->NeedsYakyufanArm()) {
@@ -713,37 +753,36 @@ void CDriverPc88::TriggerPlay()
 				hw_->ArmYakyufanPlay();
 			}
 			/* Drain cmd under DI before sample loop re-enables IRQs. */
-			int pollAt = -1;
-			if (mem) {
-				for (int i = 0; i + 4 < 0x70; i++) {
-					if (mem[i] == 0xDB && mem[i + 1] == 0x00
-						&& mem[i + 2] == 0xB7 && mem[i + 3] == 0x28) {
-						pollAt = i;
-						break;
-					}
-				}
-			}
+			const int pollAt = FindPollLoop();
 			int sawDispatch = (pollAt < 0);
 			const int drainSteps = hw_->NeedsLongPlayDrain() ? 512 : 64;
 			for (int step = 0; step < drainSteps; step++) {
 				RunUntil((uint64_t)cpu->time64() + (uint64_t)cpuHz_ / 64);
-				if (pollAt >= 0 && cpu->r.pc < 0x80 && (int)cpu->r.pc > pollAt + 4)
+				const int pc = (int)cpu->r.pc;
+				int atPoll = 0;
+				if (pollAt >= 0x80)
+					atPoll = (pc >= pollAt && pc < pollAt + 8);
+				else if (pollAt >= 0)
+					atPoll = (pc < 0x80 && pc <= pollAt + 4);
+				if (pollAt >= 0x80) {
+					if (!atPoll)
+						sawDispatch = 1;
+				} else if (pollAt >= 0 && pc < 0x80 && pc > pollAt + 4)
 					sawDispatch = 1;
 				/* 1942 ADEE lives at 0034 (still <0x80). Breaking on any
 				   page0 PC aborts mid-LDIR before A343 arms I+Timer. */
 				if (hw_->NeedsLongPlayDrain()) {
 					if (step >= 8 && hw_->cmd == 0 && pollAt >= 0
-						&& (int)cpu->r.pc == pollAt && sawDispatch)
+						&& pc == pollAt && sawDispatch)
 						break;
 					continue;
 				}
-				if (step >= 2 && hw_->cmd == 0 && cpu->r.pc < 0x80
-					&& sawDispatch
-					&& (pollAt < 0 || (int)cpu->r.pc <= pollAt + 4))
+				if (step >= 2 && hw_->cmd == 0 && atPoll && sawDispatch)
 					break;
 			}
 			hw_->cmd = 0;
 			hw_->FixupIm2AfterPlay();
+			hw_->ArmYaksaPlay();
 			if (hw_->NeedsLongPlayDrain() && hw_->SoundChip() && cpu) {
 				/* 1942 A343 ends with mode 2A; ensure Timer B is live and
 				   port32 is unmasked so AD92 can sequence FM. */
@@ -843,9 +882,16 @@ void CDriverPc88::WatchdogTick()
 		}
 	}
 	/* Last resort, and only while the track has never made a note: the kick
-	   may have raced the boot. Once anything has sounded, stop interfering. */
+	   may have raced the boot. Once anything has sounded, stop interfering.
+	   gra88 / gallforc need ~3s of DRIVER init before the first note —
+	   don't count that lead-in as a stall. */
 	if (wdEverActive_ || wdReplays_ >= 4)
 		return;
+	if (!wdEverActive_) {
+		const uint64_t bootGrace = (uint64_t)sampleRate_ * 4000u / 1000u;
+		if (wdSamples_ < bootGrace)
+			return;
+	}
 	wdReplays_++;
 	s_wdReplayCount++;
 	replayPending_ = 1;

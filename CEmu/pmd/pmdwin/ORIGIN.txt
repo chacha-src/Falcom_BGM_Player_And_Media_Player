@@ -1,0 +1,3 @@
+﻿Vendored PMDWin 0.52 core (C60) plus its ymfm OPNA wrapper (BSD-3, Aaron Giles).
+Copied into this tree so the player builds without kpi_sources_20240712.
+DLL glue (pmdwin.cpp) is omitted; CEmu/pmd/cemu_pmd.cpp calls class PMDWIN directly.

@@ -36,6 +36,7 @@ private:
 	uint64_t vsyncPeriod_;
 	unsigned irqPulses_;
 	int prevChipIrq_;
+	int chipIrqSeen_;
 	uint16_t lastFd03IrqVec_;
 
 	void RunUntil(uint64_t endCycle);

@@ -864,17 +864,22 @@ static void CEmuCatalogAssignHwIdsFromDoc(CEmuGameEntry* ge)
 		|| _stricmp(plat, "mucomfm") == 0
 		|| _stricmp(ge->dataDir, "fm7") == 0) {
 		ge->cpuId = CEMU_CPU_M6809;
-		/* mucomfm = Falcom Ys FM-7 family; *_fm7 / type=ys → PSG, else OPN. */
+		/* Platform is the authority: fm7 = AY, fm77av/ysav = OPN.
+		   Do not let a *_fm7 zip stem override an fm77av session — the same
+		   archive often ships both PSG and OPN rips. */
 		int psg = 0;
 		if (_stricmp(plat, "fm7") == 0 || _stricmp(sub, "psg") == 0
 			|| _stricmp(sub, "ys") == 0)
 			psg = 1;
-		if (ge->archive[0]) {
+		if (_stricmp(plat, "fm77av") == 0 || _stricmp(sub, "opn") == 0
+			|| _stricmp(sub, "ysav") == 0)
+			psg = 0;
+		else if (_stricmp(plat, "fm7") != 0 && ge->archive[0]) {
 			const size_t n = strlen(ge->archive);
-			if (n >= 4 && _stricmp(ge->archive + n - 4, "_fm7") == 0)
-				psg = 1;
 			if (n >= 5 && _stricmp(ge->archive + n - 5, "_fmav") == 0)
 				psg = 0;
+			else if (n >= 4 && _stricmp(ge->archive + n - 4, "_fm7") == 0)
+				psg = 1;
 		}
 		if (psg)
 			ge->chipIds[ge->chipCount++] = CEMU_CHIP_AY;
@@ -2188,10 +2193,21 @@ static int CEmuCatalogArchiveRank(const CEmuGameEntry* e, const CEmuZipFs* zipFs
 	   variants. Prefer the non-MIDI entry so 000_BOOT drives OPN, not E0Dx
 	   MIDI UART traffic we don't bridge. */
 	int rank = CEmuSubtypePreferRank(e->subtype) * 100000;
+	/* FM-7 zip often lists PSG (fm7) and OPN (fm77av) twins. Prefer OPN. */
+	if (_stricmp(e->platform, "fm77av") == 0)
+		rank += 50000;
+	else if (_stricmp(e->platform, "mucomfm") == 0)
+		rank += 40000;
+	else if (_stricmp(e->platform, "fm7") == 0)
+		rank += 10000;
 	/* Sharp X1 hard is OPM+AY only — never prefer catalog OPN twins (ishtar). */
 	if ((_stricmp(e->platform, "x1") == 0 || _stricmp(e->dataDir, "x1") == 0)
 		&& e->subtype[0] && _stricmp(e->subtype, "opn") == 0)
 		rank -= 2500000;
+	/* famistava OPNA twin is the same FS.EXE/BGM.BIN as OPN but mixes mute. */
+	if (e->archive[0] && _stricmp(e->archive, "famistava") == 0
+		&& e->subtype[0] && _strnicmp(e->subtype, "opna", 4) == 0)
+		rank -= 2000000;
 	if (CEmuGameHasOpt(e, "midiout"))
 		rank -= 800000;
 	/* undine: three twins share type=opna; demote PSG (.P) and bare OPN (.M)
@@ -2438,7 +2454,9 @@ int CEmuCatalogCollectArchiveForZip(const CEmuCatalog* cat,
 	}
 	int ranks[64];
 	int n = 0;
-	for (int pass = 0; pass < 2 && n == 0; pass++) {
+	/* Pass 0: exact stem. Pass 1: "stem,fmpac_msx" companions. Always both
+	   so OPLL/FMPAC rows are not dropped when a mute PSG exact row exists. */
+	for (int pass = 0; pass < 2; pass++) {
 		for (int i = 0; i < cat->count && n < outCap && n < (int)_countof(ranks); i++) {
 			const CEmuGameEntry* e = cat->entry[i];
 			if (!e) continue;
@@ -2452,6 +2470,10 @@ int CEmuCatalogCollectArchiveForZip(const CEmuCatalog* cat,
 					hit = 1;
 			}
 			if (!hit) continue;
+			int dup = 0;
+			for (int j = 0; j < n; j++)
+				if (out[j] == e) { dup = 1; break; }
+			if (dup) continue;
 			out[n] = e;
 			ranks[n] = CEmuCatalogArchiveRank(e, zipFs);
 			n++;

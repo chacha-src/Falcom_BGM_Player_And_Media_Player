@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include "afxdialogex.h"
 #include "CCustomControl.h"
 #include "CSasamiPianoRollView.h"
@@ -44,6 +44,7 @@ protected:
 	afx_msg void OnSize(UINT nType, int cx, int cy);
 	afx_msg void OnClose();
 	afx_msg void OnLButtonDown(UINT nFlags, CPoint point);
+	afx_msg void OnLButtonDblClk(UINT nFlags, CPoint point);
 	afx_msg void OnLButtonUp(UINT nFlags, CPoint point);
 	afx_msg void OnMouseMove(UINT nFlags, CPoint point);
 	afx_msg BOOL OnMouseWheel(UINT nFlags, short zDelta, CPoint pt);
@@ -76,6 +77,8 @@ protected:
 	afx_msg LRESULT OnPalDur(WPARAM w, LPARAM l);
 	afx_msg LRESULT OnPalQueryState(WPARAM w, LPARAM l);
 	afx_msg LRESULT OnPalLayout(WPARAM w, LPARAM l);
+	afx_msg void OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar);
+	afx_msg void OnVScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar);
 
 	void LayoutChrome();
 	void CreateChrome();
@@ -85,8 +88,17 @@ protected:
 	void Undo();
 	void Redo();
 	void PlaceNoteAt(CPoint pt);
+	void PlaceNotePitchAtMarker(int note);
 	void EraseAt(CPoint pt);
 	void BeginSelectOrDrag(CPoint pt, UINT nFlags);
+	void HandlePalCmd(int cmdId);
+	void ApplyDurationPal(WPARAM w, LPARAM l);
+	void AuditionKey(int note);
+	void ApplyStripAt(CPoint pt, int erase);
+	int CurCh() const;
+	void FitRollKeys();
+	void UpdateScrollBars();
+	CRect ScrollOuter() const;
 	void SyncPartCombo();
 	void SyncPasteFollow();
 	void SyncStripCombos();
@@ -114,13 +126,15 @@ protected:
 	CCustomComboBox m_stripKind0, m_stripLanes, m_stripDraw, m_stripStep;
 	CCustomStatic m_status, m_helpBar;
 	CToolTipCtrl m_tooltip;
-	int m_dragMode; /* 0 none, 1 move, 2 resize, 3 marquee, 4 pencil-drag erase */
+	int m_dragMode; /* 0 none, 1 move, 2 resize, 3 marquee, 4 pencil-drag erase, 5 strip */
 	int m_dragLastX, m_dragLastY;
 	int m_histDragPushed;
 	int m_resizeEv;
 	int m_marquee;
 	CPoint m_marquee0, m_marquee1;
 	BOOL m_bInLayout;
+	int m_sbDrag; /* 0 none, 1 vert, 2 horz */
+	int m_sbDragScroll0, m_sbDragAnchor;
 	static CSasamiPianoRollDlg* s_midi;
 	static CSasamiPianoRollDlg* s_fm;
 };

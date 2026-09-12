@@ -63,6 +63,7 @@ OPNA::OPNA(IFILEIO* pfileio) :
 	rhythmkey(0),
 	fmmonRegs{},
 	fmmonWriteBits{},
+	fmmonWritten{},
 	fmmonKeyOn{},
 	fmmonKeyHit{},
 	fmmonSsgOn{},
@@ -291,7 +292,9 @@ void OPNA::Reset()
 void OPNA::FmMonMarkWrite(uint32_t addr)
 {
 	if (addr >= 0x200) return;
-	fmmonWriteBits[addr >> 3] |= (uint8_t)(1u << (addr & 7));
+	const uint8_t m = (uint8_t)(1u << (addr & 7));
+	fmmonWriteBits[addr >> 3] |= m;
+	fmmonWritten[addr >> 3] |= m;
 	fmmonSeq++;
 }
 
@@ -314,6 +317,7 @@ void OPNA::FmMonResetShadow()
 {
 	memset(fmmonRegs, 0, sizeof(fmmonRegs));
 	memset(fmmonWriteBits, 0, sizeof(fmmonWriteBits));
+	memset(fmmonWritten, 0, sizeof(fmmonWritten));
 	memset(fmmonKeyOn, 0, sizeof(fmmonKeyOn));
 	memset(fmmonKeyHit, 0, sizeof(fmmonKeyHit));
 	memset(fmmonSsgOn, 0, sizeof(fmmonSsgOn));
@@ -344,7 +348,9 @@ void OPNA::FmMonSnapshot(uint8_t regs[0x200], uint8_t writeBits[64],
 			regs[0x100 + i] = m_chip.read_adpcm_b_reg(i);
 	}
 	if (writeBits) {
-		memcpy(writeBits, fmmonWriteBits, 64);
+		/* sticky: 00→00 も含め一度書いた番地。区間ビットだと
+		   未 dirty スキップで消えて hex が歯抜けになる */
+		memcpy(writeBits, fmmonWritten, 64);
 		memset(fmmonWriteBits, 0, sizeof(fmmonWriteBits));
 	}
 	if (keyOnFm) memcpy(keyOnFm, fmmonKeyOn, 6);

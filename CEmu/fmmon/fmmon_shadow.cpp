@@ -471,6 +471,7 @@ void FmMonShadowWriteReg(unsigned addr, unsigned data)
 		if (fm >= 0 && fm < 6) {
 			if (on && !s_keyFm[fm]) s_hitFm[fm]++;
 			s_keyFm[fm] = (uint8_t)(on ? 1 : 0);
+			s_flushUrgent = 1;
 			if (on) {
 				int bank, slot;
 				if (s_opnaLayout == 2) {
@@ -778,14 +779,16 @@ static int ShouldWrite(int force)
 		if (s_dirty) return 1;
 		return (elapsed >= heartbeat) ? 1 : 0;
 	}
-	/* MSX / OPL: dirty だけだと張り付き → 心拍。通常 OPNA は dirty+4ms */
-	const unsigned ms = (s_msxDevMask || s_oplMode) ? 10u : 4u;
-	const uint64_t minStep = (uint64_t)s_sr * ms / 1000u;
-	if (elapsed < minStep)
+	/* dirty は 4ms。変化が途切れても 10ms 心拍を出す。
+	   OPNA を dirty 専用にするとシーク後・長音で seq が伸びず
+	   レジスタ／鍵盤が歯抜けに見える。 */
+	const uint64_t minDirty = (uint64_t)s_sr * 4u / 1000u;
+	const uint64_t heartbeat = (uint64_t)s_sr * 10u / 1000u;
+	if (elapsed < minDirty)
 		return 0;
-	if (s_msxDevMask || s_oplMode)
+	if (s_dirty)
 		return 1;
-	return s_dirty ? 1 : 0;
+	return (elapsed >= heartbeat) ? 1 : 0;
 }
 
 static void FillCommon(SasamiFmMonDump* d)

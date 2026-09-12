@@ -109,7 +109,8 @@ static const int kPalKind[CSasamiNotePaletteDlg::kCellCount] = {
 	-30, -31, -32, -33,
 	-40, -41, -42, -43,
 	-44, -45, -46, -10,
-	-53, -6, 0, 0
+	-53, -6, -60, -61,
+	-62, -63, -64, 0
 };
 
 static const wchar_t* ScPalTip(int i)
@@ -155,6 +156,11 @@ static const wchar_t* ScPalTip(int i)
 	case 37: return LL14(L"32vb を赤バーに", L"32vb at red bar", L"32vb sur barre rouge", L"32vb sulla barra rossa", L"32vb en barra roja", L"32vb 빨간 바에", L"32vb 在红条", L"32vb عند الشريط الأحمر", L"32vb на красной метке", L"32vb an roter Markierung", L"32vb na barra vermelha", L"32vb op rode balk", L"32vb na czerwonym pasku", L"32vb kırmızı çubukta");
 	case 38: return LL14(L"loco を赤バーに（オッターバ解除）", L"loco at red bar (cancels ottava)", L"loco sur barre rouge (annule ottava)", L"loco sulla barra rossa (annulla ottava)", L"loco en barra roja (cancela ottava)", L"loco 빨간 바에 (옥타바 해제)", L"loco 在红条（取消八度）", L"loco عند الشريط الأحمر (يلغي الأوكتافا)", L"loco на красной метке (снимает оттаву)", L"loco an roter Markierung (hebt Ottava auf)", L"loco na barra vermelha (cancela ottava)", L"loco op rode balk (heft ottava op)", L"loco na czerwonym pasku (anuluje ottavę)", L"loco kırmızı çubukta (ottavayı kaldırır)");
 	case 39: return L"·";
+	case 46: return LL14(L"ビブラート @SVIB（赤バー）", L"Vibrato @SVIB at red bar", L"Vibrato @SVIB", L"Vibrato @SVIB", L"Vibrato @SVIB", L"비브라토 @SVIB", L"颤音 @SVIB", L"فيبراتو @SVIB", L"Вибрато @SVIB", L"Vibrato @SVIB", L"Vibrato @SVIB", L"Vibrato @SVIB", L"Wibrato @SVIB", L"Vibrato @SVIB");
+	case 47: return LL14(L"トレモロ @STREM（赤バー）", L"Tremolo @STREM at red bar", L"Tremolo @STREM", L"Tremolo @STREM", L"Tremolo @STREM", L"트레몰로 @STREM", L"震音 @STREM", L"tremolo @STREM", L"Тремоло @STREM", L"Tremolo @STREM", L"Tremolo @STREM", L"Tremolo @STREM", L"Tremolo @STREM", L"Tremolo @STREM");
+	case 48: return LL14(L"パンLFO @SPAN（赤バー）", L"Pan LFO @SPAN at red bar", L"Pan LFO @SPAN", L"Pan LFO @SPAN", L"Pan LFO @SPAN", L"팬 LFO @SPAN", L"声像LFO @SPAN", L"بان LFO @SPAN", L"Пан LFO @SPAN", L"Pan-LFO @SPAN", L"Pan LFO @SPAN", L"Pan-LFO @SPAN", L"Pan LFO @SPAN", L"Pan LFO @SPAN");
+	case 49: return LL14(L"ポルタメント @SPORTA（赤バー）", L"Portamento @SPORTA at red bar", L"Portamento @SPORTA", L"Portamento @SPORTA", L"Portamento @SPORTA", L"포르타멘토 @SPORTA", L"滑音 @SPORTA", L"بورتامنتو @SPORTA", L"Портаменто @SPORTA", L"Portamento @SPORTA", L"Portamento @SPORTA", L"Portamento @SPORTA", L"Portamento @SPORTA", L"Portamento @SPORTA");
+	case 50: return LL14(L"ソフトFXオフ", L"Soft FX off", L"FX off", L"FX off", L"FX off", L"소프트 FX 끔", L"软效果关", L"إيقاف FX", L"FX выкл.", L"FX aus", L"FX off", L"FX uit", L"FX wył.", L"FX kapalı");
 	default: return L"";
 	}
 }
@@ -214,7 +220,7 @@ void CSasamiNotePaletteDlg::LayoutChrome()
 {
 	CRect rc; GetClientRect(&rc);
 	const int cap = CCC_GetCustomCaptionHeight(m_hWnd);
-	const int pad = 5, cols = 6, rows = 8;
+	const int pad = 5, cols = 6, rows = 9;
 	const int cw = (rc.Width() - pad * 2) / cols;
 	const int ch = max(24, (rc.Height() - cap - pad * 2) / rows);
 	int i = 0;
@@ -318,6 +324,11 @@ void CSasamiNotePaletteDlg::OnPaint()
 			else if (k == -44) lab = L"32va";
 			else if (k == -45) lab = L"32vb";
 			else if (k == -46) lab = L"loco";
+			else if (k == -60) lab = L"vib";
+			else if (k == -61) lab = L"trem";
+			else if (k == -62) lab = L"pan~";
+			else if (k == -63) lab = L"porta";
+			else if (k == -64) lab = L"fx×";
 			mem.DrawText(lab, c, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
 			mem.SelectObject(of);
 		}
@@ -384,6 +395,11 @@ void CSasamiNotePaletteDlg::OnLButtonDown(UINT nFlags, CPoint point)
 		else if (k == -44) ScPalPostCmd(m_notify, SASAMI_PAL_CMD_OTTAVA_32VA);
 		else if (k == -45) ScPalPostCmd(m_notify, SASAMI_PAL_CMD_OTTAVA_32VB);
 		else if (k == -46) ScPalPostCmd(m_notify, SASAMI_PAL_CMD_OTTAVA_LOCO);
+		else if (k == -60) ScPalPostCmd(m_notify, SASAMI_PAL_CMD_SVIB);
+		else if (k == -61) ScPalPostCmd(m_notify, SASAMI_PAL_CMD_STREM);
+		else if (k == -62) ScPalPostCmd(m_notify, SASAMI_PAL_CMD_SPAN);
+		else if (k == -63) ScPalPostCmd(m_notify, SASAMI_PAL_CMD_SPORTA);
+		else if (k == -64) ScPalPostCmd(m_notify, SASAMI_PAL_CMD_SVIB_OFF);
 		Invalidate(FALSE);
 		break;
 	}

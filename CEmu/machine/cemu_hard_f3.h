@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include "cemu_hard.h"
 #include "../chip/cemu_chip.h"
 #include "../cemu_zipfs.h"
@@ -29,6 +29,7 @@ public:
 	void Write32(unsigned addr, uint32_t data);
 
 	void SetSongCommand(unsigned code);
+	void DisableDelaySeqTick();
 	unsigned SongCommand() const { return songCode_; }
 	int MusashiReady() const { return musashiReady_; }
 	/* Reads of DPRAM bucket i, each covering 64 bytes (see Read8). */

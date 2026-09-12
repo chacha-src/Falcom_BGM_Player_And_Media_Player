@@ -233,6 +233,10 @@ void CEmuDos98::InstallTrampolines(uint8_t* mem)
 		Wr16(mem, v * 4, (uint16_t)off);
 		Wr16(mem, v * 4 + 2, DOS98_TRAMP_SEG);
 	}
+	/* BIOS default INT 1Ch is IRET, not HLT. INT 08 chains here; HLT with
+	   IF=0 on the nested frame never wakes. */
+	mem[base + 0x1C * 2] = 0x90;
+	mem[base + 0x1C * 2 + 1] = 0xCF;
 	/* Empty CG font / DBCS lead table for INT 1A (PC-98) and INT 21 AH=63.
 	   Parked past the HLT stubs and the CALL-ret slot at 0x200. */
 	memset(mem + base + 0x0210, 0, 0x40);
@@ -661,6 +665,11 @@ int CEmuDos98::LoadDeviceImage(uint8_t* mem, const char* name, uint16_t* outSeg,
 	paras += 0x300u;
 	paras += extraParas;
 	if (tinyDs0 && paras < 0x1000u)
+		paras = 0x1000u;
+	/* maesta7 DBOOT.SYS (header "MIDIdriv"): INT F1 AH=80 reads the DAT
+	   bank into CS:1330 (CX=0xDEA8). Default image+0x300 paras is ~18KB
+	   so a 27KB bank smashed D98M and left only CC all-notes-off. */
+	if (size > 18u && memcmp(data + 10, "MIDIdriv", 8) == 0 && paras < 0x1000u)
 		paras = 0x1000u;
 	/* Device CS is 16-bit; NMUSE -d8192 -k11264 still fits in 64KB. */
 	if (paras > 0x1000u)
@@ -1283,7 +1292,13 @@ CEmuDos98Result CEmuDos98::Int21(uint8_t* mem)
 	}
 	case 0x3F: {
 		const uint16_t h = np2_reg_get(NP2_R_BX);
-		const unsigned count = np2_reg_get(NP2_R_CX);
+		unsigned count = np2_reg_get(NP2_R_CX);
+		/* 16-bit `SHL CX,4` of 1000h paragraphs wraps to 0 (= 64KB).
+		   fgplay_h / OPNDRV then AH=3F-reads CX bytes into the song buffer;
+		   treating 0 as "read nothing" left the interpreter running uninit
+		   memory at 9A00 with the first FM note stuck on. */
+		if (count == 0)
+			count = 0x10000u;
 		const unsigned dst = DosLin(np2_reg_get(NP2_R_DS), np2_reg_get(NP2_R_DX));
 		unsigned n = 0;
 		if (h < DOS98_HANDLE_MAX && handles_[h].used) {
@@ -1872,6 +1887,26 @@ CEmuDos98Result CEmuDos98::ServiceIntInner(uint8_t* mem, uint8_t vec)
 		SetCf(0);
 		return DOS98_CONTINUE;
 	}
+	case 0x09:
+		/* Keyboard IRQ1 / BIOS key sense. No scancode queued. */
+		SetAl(0);
+		SetCf(0);
+		return DOS98_CONTINUE;
+	case 0x0A: case 0x0B: case 0x0C: case 0x0D:
+	case 0x0E: case 0x0F:
+		/* Master PIC IRQs 2–7. Software INT into the trampoline: succeed
+		   so a missing board ISR is not "BIOS absent". Hardware delivery
+		   still requires IvtHooked (segment != 0060). */
+		SetCf(0);
+		return DOS98_CONTINUE;
+	case 0x19:
+		/* Bootstrap. There is no IPL disk; treat as a no-op return. */
+		SetCf(0);
+		return DOS98_CONTINUE;
+	case 0x1D: case 0x1E: case 0x1F:
+		/* Video/disk parameter tables — not callable services. */
+		SetCf(0);
+		return DOS98_CONTINUE;
 	case 0x08:
 		/* BIOS IRQ0 when the guest left the trampoline: bump the BDA tick.
 		   DeliverIrqs prefers a hooked INT 08 or INT 1C instead of this. */

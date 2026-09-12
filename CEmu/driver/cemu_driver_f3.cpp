@@ -230,6 +230,40 @@ void CDriverF3::WakeMailboxIfQueued()
 		hw_->Write8(tcb + 2u, (uint8_t)(b2 ^ 0x80u));
 }
 
+void CDriverF3::PostTypeE()
+{
+	/* C12D94 trap#3-allocs a type-$E packet and trap#9-posts it to FB3E.
+	   Doing that from the timer IRQ runs C14884 on SSP and hangs. Do the
+	   same alloc+wake from the host so the mailbox task runs it on USP.
+	   A static $EE20 is fatal: C149E4 trap#4 frees A5 onto $136. */
+	if (!hw_) return;
+	const unsigned tcb = 0xFB3Eu;
+	const uint8_t b2 = hw_->Read8(tcb + 2u);
+	const uint8_t b3 = hw_->Read8(tcb + 3u);
+	if (b2 != b3)
+		return;
+	/* 0000 is the scheduler's "currently dispatched" paint, not asleep.
+	   Waking it nests RTE into C14884 and smashes USP. 8080/0101 sleep. */
+	if (b2 != 0x80u && b2 != 0x01u)
+		return;
+	const unsigned pc = hw_->Read32(tcb + 4u);
+	if (pc < 0xC131C0u || pc >= 0xC13320u)
+		return;
+	const unsigned msg = hw_->Read16(0x0136u);
+	if ((msg & 1u) || msg < 0x200u || msg >= 0xFF00u)
+		return;
+	if (msg >= 0xFB00u && msg < 0xFC00u)
+		return;
+	hw_->Write16(0x0136u, hw_->Read16(msg));
+	hw_->Write8(0x014Du, (uint8_t)(hw_->Read8(0x014Du) + 1u));
+	hw_->Write16(msg, 0);
+	hw_->Write16(msg + 2u, 0x000Eu);
+	hw_->Write16(msg + 4u, 1);
+	hw_->Write16(msg + 6u, 0);
+	hw_->Write16(tcb + 0x0Au, (uint16_t)msg);
+	hw_->Write8(tcb + 2u, (uint8_t)(b2 ^ 0x80u));
+}
+
 void CDriverF3::LogState(const char* tag)
 {
 	if (!hw_ || !tag) return;
@@ -240,13 +274,15 @@ void CDriverF3::LogState(const char* tag)
 		hw_->SoundChip()->GetRegSnapshot(snap, 4);
 	const unsigned mq = hw_->Read16(0xFB3Eu + 0x0Eu);
 	fprintf(log,
-		"%s code=%04X PC=%06X SR=%04X USP=%08X SSP=%08X A5=%08X fires=%u hits0=%u hits18=%u wp=%04X rp=%04X esW=%u live=%u d404=%08X v28=%08X v8C=%08X vA4=%08X v100=%08X cur=%04X flist=%04X ack=%d ivr=%02X idle=%u irq=%u t0=%u mail=%u play=%u disp=%u tick=%u t9=%04X ee=%04X %04X %04X mh=%04X %04X %04X cr=%04X %04X %04X %04X seqc=%u\n",
+		"%s code=%04X PC=%06X SR=%04X USP=%08X SSP=%08X A5=%08X A6=%08X A0=%08X fires=%u hits0=%u hits18=%u wp=%04X rp=%04X esW=%u live=%u d404=%08X v28=%08X v8C=%08X vA4=%08X v100=%08X cur=%04X flist=%04X ack=%d ivr=%02X idle=%u irq=%u t0=%u mail=%u play=%u disp=%u tick=%u t9=%04X ee=%04X %04X %04X mh=%04X %04X %04X cr=%04X %04X %04X %04X seqc=%u\n",
 		tag, songCode_,
 		(unsigned)m68k_get_reg(NULL, M68K_REG_PC),
 		(unsigned)m68k_get_reg(NULL, M68K_REG_SR),
 		(unsigned)m68k_get_reg(NULL, M68K_REG_USP),
 		(unsigned)m68k_get_reg(NULL, M68K_REG_ISP),
 		(unsigned)m68k_get_reg(NULL, M68K_REG_A5),
+		(unsigned)m68k_get_reg(NULL, M68K_REG_A6),
+		(unsigned)m68k_get_reg(NULL, M68K_REG_A0),
 		hw_->DuartFires(), hw_->DpramReadHit(0), hw_->DpramReadHit(18),
 		hw_->RingWp(), hw_->RingRp(),
 		hw_->EsWrites(), (unsigned)snap[2],
@@ -262,11 +298,18 @@ void CDriverF3::LogState(const char* tag)
 		CEmuChipEs5505PeekCr(hw_->SoundChip(), 2),
 		CEmuChipEs5505PeekCr(hw_->SoundChip(), 3),
 		seqCalls_);
-	fprintf(log, "  list 6DFC=%04X %04X %04X %04X ch=%04X d40e=%04X d4c0=%02X d0f4=%04X d414=%08X d408=%08X loop=%04X %04X hole=%04X %04X\n",
-		hw_->Read16(0x6DFCu), hw_->Read16(0x6DFEu), hw_->Read16(0x6E00u), hw_->Read16(0x6E02u),
-		0x5E5Cu + (songCode_ & 0xffu) * 0x28u, hw_->Read16(0xD40Eu),
-		hw_->Read8(0xD4C0u), hw_->Read16(0xD0F4u), hw_->Read32(0xD414u), hw_->Read32(0xD408u),
-		hw_->Read16(0xC14A74u), hw_->Read16(0xC14A76u), hw_->Read16(0xC14A78u), hw_->Read16(0xC14A7Cu));
+	{
+		const unsigned obj = hw_->Read16(0x6DFCu);
+		fprintf(log, "  list 6DFC=%04X %04X %04X %04X ch=%04X obj=%04X w0=%04X w2=%04X w4=%04X w6=%04X w1c=%04X d40e=%04X d4c0=%02X d0f4=%04X d414=%08X d408=%08X loop=%04X %04X hole=%04X %04X\n",
+			hw_->Read16(0x6DFCu), hw_->Read16(0x6DFEu), hw_->Read16(0x6E00u), hw_->Read16(0x6E02u),
+			0x5E5Cu + (songCode_ & 0xffu) * 0x28u, obj,
+			obj ? hw_->Read16(obj) : 0u, obj ? hw_->Read16(obj + 2u) : 0u,
+			obj ? hw_->Read16(obj + 4u) : 0u, obj ? hw_->Read16(obj + 6u) : 0u,
+			obj ? hw_->Read16(obj + 0x1Cu) : 0u,
+			hw_->Read16(0xD40Eu),
+			hw_->Read8(0xD4C0u), hw_->Read16(0xD0F4u), hw_->Read32(0xD414u), hw_->Read32(0xD408u),
+			hw_->Read16(0xC14A74u), hw_->Read16(0xC14A76u), hw_->Read16(0xC14A78u), hw_->Read16(0xC14A7Cu));
+	}
 	{
 		unsigned best = 0, besta = 0, run = 0, runa = 0;
 		for (unsigned a = 0x200u; a < 0xD000u; a += 2u) {
@@ -437,7 +480,7 @@ int CDriverF3::Render(int16_t* stereo, int frames)
 			if (head >= 0xD000u && head < 0xEE00u) {
 				hw_->Write16(0xD4A6u, 1);
 				seqCalls_++;
-				if (seqCalls_ <= 4u)
+				if (seqCalls_ <= 8u)
 					ArmKeyOnGates();
 				{
 					const unsigned ssp = (unsigned)m68k_get_reg(NULL, M68K_REG_ISP);

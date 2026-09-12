@@ -1,4 +1,4 @@
-#include "stdafx.h"
+﻿#include "stdafx.h"
 #include "SasamiComposerDoc.h"
 #include "DatArchive.h"
 #include <string.h>
@@ -785,16 +785,69 @@ int ScFmAddFlr(ScFmDoc* d, uint32_t tick, int ch, int lrMask)
 	return ScPush(d->ev, &d->evCount, tick, (uint8_t)ch, SC_EV_FM_FLR, (uint8_t)(lrMask & 0xC0), 0, 0, 0);
 }
 
-int ScAddSoftVib(ScEvent* ev, int* n, uint32_t tick, int ch, int mode, int delayLen, int depth)
+int ScAddSoftVib(ScEvent* ev, int* n, uint32_t tick, int ch, int mode, int delayLen, int depth, int step, int period)
 {
 	if (!ev || !n) return 0;
 	if (mode < 0) mode = 0;
-	if (mode > 1) mode = 1;
+	if (mode > 3) mode = 3;
 	if (delayLen < 0) delayLen = 0;
 	if (delayLen > 255) delayLen = 255;
 	if (depth < 0) depth = 0;
 	if (depth > 127) depth = 127;
-	return ScPush(ev, n, tick, (uint8_t)ch, SC_EV_SOFT_VIB, (uint8_t)mode, (uint8_t)delayLen, (uint8_t)depth, 0);
+	if (step < 1) step = 1;
+	if (step > 255) step = 255;
+	if (period < 2) period = 24;
+	if (period > 4095) period = 4095;
+	if (!ScPush(ev, n, tick, (uint8_t)ch, SC_EV_SOFT_VIB, (uint8_t)mode, (uint8_t)delayLen, (uint8_t)depth, (uint16_t)period))
+		return 0;
+	ev[*n - 1].flags = (uint8_t)step;
+	return 1;
+}
+
+int ScParseSoftFxCsv(const wchar_t* s, int* mode, int* delay, int* depth, int* step, int* period)
+{
+	if (!s) return 0;
+	const wchar_t* p = s;
+	auto skipSep = [&]() {
+		while (*p == L' ' || *p == L'\t' || *p == L',' || *p == L':' || *p == L';') p++;
+	};
+	auto one = [&](int* dst) {
+		skipSep();
+		int neg = 0, any = 0, v = 0;
+		if (*p == L'-') { neg = 1; p++; }
+		else if (*p == L'+') p++;
+		while (*p >= L'0' && *p <= L'9') { v = v * 10 + (*p - L'0'); p++; any = 1; }
+		if (!any) return 0;
+		if (dst) *dst = neg ? -v : v;
+		return 1;
+	};
+	int n = 0;
+	if (one(mode)) n++; else return n;
+	if (one(delay)) n++; else return n;
+	if (one(depth)) n++; else return n;
+	if (one(step)) n++; else return n;
+	if (one(period)) n++;
+	return n;
+}
+
+int ScPlaceSoftVibAt(ScEvent* ev, int* n, uint32_t tick, int ch, int mode, int delayLen, int depth, int step, int period, int stack)
+{
+	if (!ev || !n || ch < 0) return 0;
+	if (!stack && ScMarkKindExists(ev, *n, tick, (uint8_t)ch, SC_EV_SOFT_VIB)) {
+		ScRemoveMarkKindAt(ev, n, tick, (uint8_t)ch, SC_EV_SOFT_VIB);
+		return 1;
+	}
+	return ScAddSoftVib(ev, n, tick, ch, mode, delayLen, depth, step, period);
+}
+
+int ScPlaceSoftPortaAt(ScEvent* ev, int* n, uint32_t tick, int ch, int semiDelta, int delayLen, int glideLen, int stack)
+{
+	if (!ev || !n || ch < 0) return 0;
+	if (!stack && ScMarkKindExists(ev, *n, tick, (uint8_t)ch, SC_EV_SOFT_PORTA)) {
+		ScRemoveMarkKindAt(ev, n, tick, (uint8_t)ch, SC_EV_SOFT_PORTA);
+		return 1;
+	}
+	return ScAddSoftPorta(ev, n, tick, ch, semiDelta, delayLen, glideLen);
 }
 
 int ScAddSoftPorta(ScEvent* ev, int* n, uint32_t tick, int ch, int semiDelta, int delayLen, int glideLen)
@@ -817,8 +870,6 @@ int ScTextNeedsMpsmv(const wchar_t* text)
 		return 1;
 	if (ContainsIW(text, L"@MACRO") || ContainsIW(text, L"@CALL"))
 		return 1;
-	if (ContainsIW(text, L"@SVIB") || ContainsIW(text, L"@SPORTA"))
-		return 1;
 	if (ContainsIW(text, L"@CC") || ContainsIW(text, L"@MOD") || ContainsIW(text, L"@SOFT")
 		|| ContainsIW(text, L"@SOST") || ContainsIW(text, L"@REV") || ContainsIW(text, L"@CHO")
 		|| ContainsIW(text, L"@CHORUS") || ContainsIW(text, L"@REVERB"))
@@ -834,8 +885,6 @@ int ScTextNeedsFpy2(const wchar_t* text)
 {
 	if (!text || !text[0]) return 0;
 	if (ContainsIW(text, L"@MACRO") || ContainsIW(text, L"@CALL"))
-		return 1;
-	if (ContainsIW(text, L"@SVIB") || ContainsIW(text, L"@SPORTA"))
 		return 1;
 	if (ContainsIW(text, L"@PCM") || ContainsIW(text, L"@LFO") || ContainsIW(text, L"@DETUNE")
 		|| ContainsIW(text, L"@DETUN") || ContainsIW(text, L"@FSLR") || ContainsIW(text, L"@FLR")
@@ -859,7 +908,7 @@ int ScMidiDocNeedsMpsmv(const ScMidiDoc* d)
 			return 1;
 	for (int i = 0; i < d->evCount; i++) {
 		const uint8_t k = d->ev[i].kind;
-		if (k == SC_EV_CC || k == SC_EV_SOFT_VIB || k == SC_EV_SOFT_PORTA)
+		if (k == SC_EV_CC)
 			return 1;
 	}
 	return 0;
@@ -877,7 +926,7 @@ int ScFmDocNeedsFpy2(const ScFmDoc* d)
 		const uint8_t k = d->ev[i].kind;
 		if (k == SC_EV_PCM_SAMPLE || k == SC_EV_FM_EX || k == SC_EV_FM_LFO
 			|| k == SC_EV_FM_DETUNE || k == SC_EV_FM_LEGATO || k == SC_EV_FM_FSLR
-			|| k == SC_EV_FM_FLR || k == SC_EV_SOFT_VIB || k == SC_EV_SOFT_PORTA)
+			|| k == SC_EV_FM_FLR)
 			return 1;
 	}
 	return 0;
@@ -966,6 +1015,25 @@ static int ParseInt(const wchar_t** pp)
 	while (IsDigit(*p)) { v = v * 10 + (*p - L'0'); p++; any = 1; }
 	*pp = p;
 	return any ? v : -1;
+}
+
+/* mode,delay,depth[,step[,period]] — missing fields keep defs. */
+static void ParseSoftFx5(const wchar_t** pp, int* mode, int* delay, int* depth, int* step, int* period,
+	int defMode, int defDelay, int defDepth, int defStep, int defPeriod)
+{
+	const wchar_t* p = *pp;
+	auto skipSep = [&]() { while (IsWs(*p) || *p == L',' || *p == L':') p++; };
+	skipSep();
+	int m = ParseInt(&p); *mode = (m < 0) ? defMode : m;
+	skipSep();
+	int d = ParseInt(&p); *delay = (d < 0) ? defDelay : d;
+	skipSep();
+	int dp = ParseInt(&p); *depth = (dp < 0) ? defDepth : dp;
+	skipSep();
+	int st = ParseInt(&p); *step = (st < 0) ? defStep : st;
+	skipSep();
+	int pr = ParseInt(&p); *period = (pr < 0) ? defPeriod : pr;
+	*pp = p;
 }
 
 static int ParseMidiTriplet(const wchar_t** pp, int* a, int* b, int* c)
@@ -1418,26 +1486,46 @@ int ScCompileMidiMml(const wchar_t* text, ScMidiDoc* out, int* errLine, wchar_t*
 				gatePct = val;
 				continue;
 			}
+			if (_wcsnicmp(p, L"SVIBOFF", 7) == 0) {
+				p += 7;
+				if (!ScAddSoftVib(out->ev, &out->evCount, tick[ch], ch, 0, 0, 0, 1, 24)) return fail(L"overflow");
+				continue;
+			}
 			if (_wcsnicmp(p, L"SVIB", 4) == 0) {
-				p += 4; while (IsWs(*p) || *p == L',' || *p == L':') p++;
-				int mode = ParseInt(&p); if (mode < 0) mode = 0;
-				while (IsWs(*p) || *p == L',' || *p == L':') p++;
-				int delay = ParseInt(&p); if (delay < 0) delay = 24;
-				while (IsWs(*p) || *p == L',' || *p == L':') p++;
-				int depth = ParseInt(&p); if (depth < 0) depth = 40;
-				out->needMpsmv = 1; out->bind.isMpw3 = 1;
-				if (!ScAddSoftVib(out->ev, &out->evCount, tick[ch], ch, mode, delay, depth)) return fail(L"overflow");
+				p += 4;
+				int mode = 0, delay = 0, depth = 40, step = 1, period = 24;
+				ParseSoftFx5(&p, &mode, &delay, &depth, &step, &period, 0, 0, 40, 1, 24);
+				if (!ScAddSoftVib(out->ev, &out->evCount, tick[ch], ch, mode, delay, depth, step, period)) return fail(L"overflow");
+				continue;
+			}
+			if (_wcsnicmp(p, L"STREM", 5) == 0) {
+				p += 5;
+				int mode = 1, delay = 0, depth = 40, step = 1, period = 24;
+				ParseSoftFx5(&p, &mode, &delay, &depth, &step, &period, 1, 0, 40, 1, 24);
+				if (mode == 0) mode = 1;
+				if (!ScAddSoftVib(out->ev, &out->evCount, tick[ch], ch, mode, delay, depth, step, period)) return fail(L"overflow");
+				continue;
+			}
+			if (_wcsnicmp(p, L"SPAN", 4) == 0 && !((p[4] >= L'A' && p[4] <= L'Z') || (p[4] >= L'a' && p[4] <= L'z'))) {
+				p += 4;
+				int mode = 2, delay = 0, depth = 32, step = 2, period = 48;
+				ParseSoftFx5(&p, &mode, &delay, &depth, &step, &period, 2, 0, 32, 2, 48);
+				if (mode == 0) mode = 2;
+				if (!ScAddSoftVib(out->ev, &out->evCount, tick[ch], ch, mode, delay, depth, step, period)) return fail(L"overflow");
 				continue;
 			}
 			if (_wcsnicmp(p, L"SPORTA", 6) == 0) {
 				p += 6; while (IsWs(*p) || *p == L',' || *p == L':') p++;
-				int semi = ParseInt(&p); if (semi < -64) semi = -64; if (semi > 63) semi = 63;
-				/* allow leading + */
+				int neg = 0;
+				if (*p == L'-') { neg = 1; p++; }
+				else if (*p == L'+') p++;
+				int semi = ParseInt(&p); if (semi < 0) semi = 2;
+				if (neg) semi = -semi;
+				if (semi < -64) semi = -64; if (semi > 63) semi = 63;
 				while (IsWs(*p) || *p == L',' || *p == L':') p++;
 				int delay = ParseInt(&p); if (delay < 0) delay = 0;
 				while (IsWs(*p) || *p == L',' || *p == L':') p++;
 				int glide = ParseInt(&p); if (glide < 0) glide = 24;
-				out->needMpsmv = 1; out->bind.isMpw3 = 1;
 				if (!ScAddSoftPorta(out->ev, &out->evCount, tick[ch], ch, semi, delay, glide)) return fail(L"overflow");
 				continue;
 			}
@@ -2336,15 +2424,32 @@ int ScCompileFmText(const wchar_t* text, ScFmDoc* out, int* errLine, wchar_t* er
 					return fail(L"overflow");
 				continue;
 			}
+			if (_wcsnicmp(p, L"SVIBOFF", 7) == 0) {
+				p += 7;
+				if (!ScAddSoftVib(out->ev, &out->evCount, tick[ch], ch, 0, 0, 0, 1, 24)) return fail(L"overflow");
+				continue;
+			}
 			if (_wcsnicmp(p, L"SVIB", 4) == 0) {
-				p += 4; while (IsWs(*p) || *p == L',' || *p == L':') p++;
-				int mode = ParseInt(&p); if (mode < 0) mode = 0;
-				while (IsWs(*p) || *p == L',' || *p == L':') p++;
-				int delay = ParseInt(&p); if (delay < 0) delay = 24;
-				while (IsWs(*p) || *p == L',' || *p == L':') p++;
-				int depth = ParseInt(&p); if (depth < 0) depth = 40;
-				out->needFpy2 = 1;
-				if (!ScAddSoftVib(out->ev, &out->evCount, tick[ch], ch, mode, delay, depth)) return fail(L"overflow");
+				p += 4;
+				int mode = 0, delay = 0, depth = 40, step = 1, period = 24;
+				ParseSoftFx5(&p, &mode, &delay, &depth, &step, &period, 0, 0, 40, 1, 24);
+				if (!ScAddSoftVib(out->ev, &out->evCount, tick[ch], ch, mode, delay, depth, step, period)) return fail(L"overflow");
+				continue;
+			}
+			if (_wcsnicmp(p, L"STREM", 5) == 0) {
+				p += 5;
+				int mode = 1, delay = 0, depth = 40, step = 1, period = 24;
+				ParseSoftFx5(&p, &mode, &delay, &depth, &step, &period, 1, 0, 40, 1, 24);
+				if (mode == 0) mode = 1;
+				if (!ScAddSoftVib(out->ev, &out->evCount, tick[ch], ch, mode, delay, depth, step, period)) return fail(L"overflow");
+				continue;
+			}
+			if (_wcsnicmp(p, L"SPAN", 4) == 0 && !((p[4] >= L'A' && p[4] <= L'Z') || (p[4] >= L'a' && p[4] <= L'z'))) {
+				p += 4;
+				int mode = 2, delay = 0, depth = 32, step = 2, period = 48;
+				ParseSoftFx5(&p, &mode, &delay, &depth, &step, &period, 2, 0, 32, 2, 48);
+				if (mode == 0) mode = 2;
+				if (!ScAddSoftVib(out->ev, &out->evCount, tick[ch], ch, mode, delay, depth, step, period)) return fail(L"overflow");
 				continue;
 			}
 			if (_wcsnicmp(p, L"SPORTA", 6) == 0) {
@@ -2352,13 +2457,12 @@ int ScCompileFmText(const wchar_t* text, ScFmDoc* out, int* errLine, wchar_t* er
 				int neg = 0;
 				if (*p == L'-') { neg = 1; p++; }
 				else if (*p == L'+') p++;
-				int semi = ParseInt(&p); if (semi < 0) semi = 0;
+				int semi = ParseInt(&p); if (semi < 0) semi = 2;
 				if (neg) semi = -semi;
 				while (IsWs(*p) || *p == L',' || *p == L':') p++;
 				int delay = ParseInt(&p); if (delay < 0) delay = 0;
 				while (IsWs(*p) || *p == L',' || *p == L':') p++;
 				int glide = ParseInt(&p); if (glide < 0) glide = 24;
-				out->needFpy2 = 1;
 				if (!ScAddSoftPorta(out->ev, &out->evCount, tick[ch], ch, semi, delay, glide)) return fail(L"overflow");
 				continue;
 			}
@@ -3014,6 +3118,288 @@ int ScDocMaxLoopNest(const ScEvent* ev, int n, int chMax)
 	return maxD;
 }
 
+/* Internal {: :} expand: unroll LFO into classic pitch/vol/pan + wait so mpy/mpw2/fpy play. */
+struct ScSoftSt {
+	int mode;   /* -1 off, 0 pitch Δ, 1 vol, 2 pan, 3 square pitch */
+	int delay, depth, step, period;
+	int portaSemi, portaDelay, portaGlide;
+	int lastVol, lastPan, lastTl;
+	int noteOn;
+	int tCur;
+};
+
+static void ScSoftStInit(ScSoftSt* st, int midi)
+{
+	memset(st, 0, sizeof(*st));
+	st->mode = -1;
+	st->step = 1;
+	st->period = 24;
+	st->lastVol = midi ? 117 : 8;
+	st->lastPan = 64;
+	st->lastTl = 8;
+}
+
+static int ScSoftStepOf(const ScEvent* e)
+{
+	int s = e->flags;
+	return s > 0 ? s : 1;
+}
+static int ScSoftPeriodOf(const ScEvent* e)
+{
+	int p = (int)e->dur;
+	return p > 0 ? p : 24;
+}
+
+static void ScSoftApplyEv(ScSoftSt* st, const ScEvent* e)
+{
+	if (e->kind == SC_EV_SOFT_VIB) {
+		st->delay = (int)e->b;
+		st->depth = (int)e->c;
+		st->step = ScSoftStepOf(e);
+		st->period = ScSoftPeriodOf(e);
+		st->mode = (st->depth > 0) ? (int)e->a : -1;
+		return;
+	}
+	if (e->kind == SC_EV_SOFT_PORTA) {
+		st->portaSemi = (int)e->a - 64;
+		st->portaDelay = (int)e->b;
+		st->portaGlide = e->c ? (int)e->c : 24;
+		return;
+	}
+	if (e->kind == SC_EV_VOL) st->lastVol = (int)e->a;
+	if (e->kind == SC_EV_PAN) st->lastPan = (int)e->a;
+	if (e->kind == SC_EV_FM_VOL) st->lastTl = (int)e->a;
+}
+
+static int ScSoftActive(const ScSoftSt* st)
+{
+	return (st->mode >= 0 && st->depth > 0) || st->portaSemi != 0;
+}
+
+/* Triangle ±depth (mode 3 = square). t is ticks since note-on. */
+static int ScSoftLfoAmt(const ScSoftSt* st, int t)
+{
+	if (st->mode < 0 || st->depth <= 0) return 0;
+	if (t < st->delay) return 0;
+	int per = st->period > 1 ? st->period : 24;
+	int u = (t - st->delay) % per;
+	if (u < 0) u = 0;
+	int half = per / 2;
+	if (half < 1) half = 1;
+	if (st->mode == 3)
+		return (u < half) ? st->depth : -st->depth;
+	int tri = (u < half) ? u : (per - u);
+	return (tri * 2 * st->depth) / half - st->depth;
+}
+
+static int ScSoftPortaAmt(const ScSoftSt* st, int t)
+{
+	if (st->portaSemi == 0 || st->portaGlide < 1) return 0;
+	if (t < st->portaDelay) return 0;
+	int done = t - st->portaDelay;
+	if (done >= st->portaGlide) return st->portaSemi;
+	return (st->portaSemi * done) / st->portaGlide;
+}
+
+static int ScPutMidiPitch14(SasamiTrackStream* s, int bend)
+{
+	if (bend < 0) bend = 0;
+	if (bend > 0x3FFF) bend = 0x3FFF;
+	return SasamiStreamPut3(s, 11, (uint8_t)(bend & 0x7F), (uint8_t)((bend >> 7) & 0x7F));
+}
+
+static int ScSoftPutMidiMod(SasamiTrackStream* s, const ScSoftSt* st, int t)
+{
+	const int vib = ScSoftLfoAmt(st, t);
+	const int porta = ScSoftPortaAmt(st, t);
+	const int tgt = (st->mode == 1 || st->mode == 2) ? st->mode : 0;
+	if (tgt == 0 || porta != 0) {
+		int bend = 0x2000 + vib * 8 + porta * 0x200;
+		if (!ScPutMidiPitch14(s, bend)) return 0;
+	}
+	if (tgt == 1) {
+		int v = st->lastVol - (vib < 0 ? -vib : vib) / 2;
+		if (v < 1) v = 1;
+		if (v > 127) v = 127;
+		if (!SasamiStreamPut3(s, 5, (uint8_t)v, (uint8_t)v)) return 0;
+	} else if (tgt == 2) {
+		int p = 64 + vib;
+		if (p < 0) p = 0;
+		if (p > 127) p = 127;
+		if (!SasamiStreamPut3(s, 0x0C, (uint8_t)p, (uint8_t)p)) return 0;
+	}
+	return 1;
+}
+
+static int ScSoftPutMidiRestore(SasamiTrackStream* s, const ScSoftSt* st)
+{
+	if (st->mode == 0 || st->mode == 3 || st->portaSemi != 0) {
+		if (!ScPutMidiPitch14(s, 0x2000)) return 0;
+	}
+	if (st->mode == 1) {
+		int v = st->lastVol;
+		if (v < 1) v = 1;
+		if (!SasamiStreamPut3(s, 5, (uint8_t)v, (uint8_t)v)) return 0;
+	}
+	if (st->mode == 2) {
+		int p = st->lastPan;
+		if (!SasamiStreamPut3(s, 0x0C, (uint8_t)p, (uint8_t)p)) return 0;
+	}
+	return 1;
+}
+
+static int ScPutWait8(SasamiTrackStream* s, int cmd, int b1, int wait)
+{
+	while (wait > 0) {
+		uint8_t w8 = (wait > 255) ? 255 : (uint8_t)wait;
+		if (!SasamiStreamPut3(s, (uint8_t)cmd, (uint8_t)b1, w8)) return 0;
+		wait -= (int)w8;
+	}
+	return 1;
+}
+
+static int ScSoftEmitMidiNote(SasamiTrackStream* s, ScSoftSt* st, int note, int sounding, int firstOn)
+{
+	if (sounding < 1) sounding = 1;
+	int step = st->step > 0 ? st->step : 1;
+	if (step > 255) step = 255;
+	if (sounding / step > 2048) {
+		step = sounding / 2048;
+		if (step < 1) step = 1;
+	}
+	int t = st->tCur;
+	int first = firstOn;
+	int remain = sounding;
+	while (remain > 0) {
+		int w = step;
+		if (w > remain) w = remain;
+		if (w < 1) w = 1;
+		if (!ScSoftPutMidiMod(s, st, t)) return 0;
+		if (first) {
+			int w1 = (w > 255) ? 255 : w;
+			if (!SasamiStreamPut3(s, 1, (uint8_t)note, (uint8_t)w1)) return 0;
+			if (w > w1 && !ScPutWait8(s, 3, 0, w - w1)) return 0;
+			first = 0;
+		} else {
+			if (!ScPutWait8(s, 3, 0, w)) return 0;
+		}
+		t += w;
+		remain -= w;
+	}
+	st->tCur = t;
+	st->noteOn = 1;
+	return 1;
+}
+
+static int ScPutFmDetune(SasamiTrackStream* s, int amt)
+{
+	int raw = 0x8000 + amt;
+	if (raw < 0) raw = 0;
+	if (raw > 0xFFFF) raw = 0xFFFF;
+	return SasamiStreamPut3(s, 18, (uint8_t)(raw & 0xFF), (uint8_t)(raw >> 8));
+}
+
+static int ScSoftPutFmMod(SasamiTrackStream* s, const ScSoftSt* st, int t, int ch)
+{
+	const int vib = ScSoftLfoAmt(st, t);
+	const int porta = ScSoftPortaAmt(st, t);
+	const int tgt = (st->mode == 1 || st->mode == 2) ? st->mode : 0;
+	const int ssg = IsSsgCh(ch);
+	if (tgt == 0 || porta != 0) {
+		int det = vib;
+		if (ssg) det = vib / 2;
+		det += porta * 64;
+		if (!ScPutFmDetune(s, det)) return 0;
+	}
+	if (tgt == 1) {
+		int down = (vib < 0 ? -vib : vib);
+		if (ssg) {
+			int base = st->lastTl;
+			if (base < 0) base = 0;
+			if (base > 15) base = 15;
+			int v = base - (down * base) / (st->depth * 2 + 1);
+			if (v < 0) v = 0;
+			if (v > 15) v = 15;
+			if (!SasamiStreamPut3(s, 4, (uint8_t)v, 0)) return 0;
+		} else {
+			int tl = st->lastTl + down / 2;
+			if (tl < 0) tl = 0;
+			if (tl > 127) tl = 127;
+			if (!SasamiStreamPut3(s, 11, (uint8_t)tl, 0)) return 0;
+		}
+	} else if (tgt == 2 && !ssg && ch != 6) {
+		uint8_t lr = 0xC0;
+		if (vib < -(st->depth / 3)) lr = 0x80;
+		else if (vib > (st->depth / 3)) lr = 0x40;
+		if (!SasamiStreamPut3(s, 16, lr, 0)) return 0;
+	}
+	return 1;
+}
+
+static int ScSoftPutFmRestore(SasamiTrackStream* s, const ScSoftSt* st, int ch)
+{
+	const int ssg = IsSsgCh(ch);
+	if (st->mode == 0 || st->mode == 3 || st->portaSemi != 0) {
+		if (!ScPutFmDetune(s, 0)) return 0;
+	}
+	if (st->mode == 1) {
+		if (ssg) {
+			int v = st->lastTl;
+			if (v < 0) v = 0;
+			if (v > 15) v = 15;
+			if (!SasamiStreamPut3(s, 4, (uint8_t)v, 0)) return 0;
+		} else {
+			if (!SasamiStreamPut3(s, 11, (uint8_t)st->lastTl, 0)) return 0;
+		}
+	}
+	if (st->mode == 2 && !ssg && ch != 6) {
+		if (!SasamiStreamPut3(s, 16, 0xC0, 0)) return 0;
+	}
+	return 1;
+}
+
+static int ScSoftEmitFmNote(SasamiTrackStream* s, ScSoftSt* st, int ch, int noteByte, int sounding, int legato)
+{
+	if (sounding < 2) sounding = 2;
+	int step = st->step > 0 ? st->step : 1;
+	if (step < 2) step = 2; /* FPY waitb >= 2 */
+	if (step > 255) step = 255;
+	if (sounding / step > 2048) {
+		step = sounding / 2048;
+		if (step < 2) step = 2;
+	}
+	int t = st->tCur;
+	int first = 1;
+	int remain = sounding;
+	while (remain > 0) {
+		int w = step;
+		if (w > remain) w = remain;
+		/* FPY waitb < 2 is a no-op — never leave a 1-tick tail. */
+		if (remain - w == 1 && remain >= 3) w = remain;
+		if (w < 2) {
+			if (remain >= 2) w = remain;
+			else if (first) w = 2;
+			else break;
+		}
+		if (!ScSoftPutFmMod(s, st, t, ch)) return 0;
+		if (first) {
+			const int cmd = legato ? 24 : 0;
+			int w1 = (w > 255) ? 255 : w;
+			if (w1 < 2 && sounding >= 2) w1 = 2;
+			if (!SasamiStreamPut3(s, (uint8_t)cmd, (uint8_t)noteByte, (uint8_t)w1)) return 0;
+			if (w > w1 && !ScPutWait8(s, 10, 0, w - w1)) return 0;
+			first = 0;
+		} else {
+			if (!ScPutWait8(s, 10, 0, w)) return 0;
+		}
+		t += w;
+		remain -= w;
+	}
+	st->tCur = t;
+	st->noteOn = 1;
+	return 1;
+}
+
 int ScMidiDocToWrite(const ScMidiDoc* d, SasamiWriteMidi* w)
 {
 	s_scLastWriteErr[0] = 0;
@@ -3055,7 +3441,8 @@ int ScMidiDocToWrite(const ScMidiDoc* d, SasamiWriteMidi* w)
 	memset(lastTick, 0, sizeof(lastTick));
 	int vel[SC_MIDI_CH];
 	int preambleDone[SC_MIDI_CH];
-	for (int i = 0; i < SC_MIDI_CH; i++) { vel[i] = 105; preambleDone[i] = 0; }
+	ScSoftSt softM[SC_MIDI_CH];
+	for (int i = 0; i < SC_MIDI_CH; i++) { vel[i] = 105; preambleDone[i] = 0; ScSoftStInit(&softM[i], 1); }
 	uint32_t loopBodyOff[SC_MIDI_CH][SC_LOOP_NEST_MAX];
 	int loopWrSp[SC_MIDI_CH];
 	uint32_t chStreamJump[SC_MIDI_CH];
@@ -3179,9 +3566,11 @@ int ScMidiDocToWrite(const ScMidiDoc* d, SasamiWriteMidi* w)
 			break;
 		}
 		case SC_EV_VOL:
+			softM[ch].lastVol = (int)e->a;
 			if (!SasamiStreamPut3(s, 5, e->a, e->b)) return 0;
 			break;
 		case SC_EV_PAN:
+			softM[ch].lastPan = (int)e->a;
 			if (!SasamiStreamPut3(s, 0x0C, e->a, e->a)) return 0;
 			break;
 		case SC_EV_PITCH: {
@@ -3277,40 +3666,57 @@ int ScMidiDocToWrite(const ScMidiDoc* d, SasamiWriteMidi* w)
 		case SC_EV_CC:
 			if (!SasamiStreamPut3(s, 41, e->a, e->b)) return 0;
 			break;
-		case SC_EV_SOFT_VIB: {
-			uint8_t t[4] = { 46, e->a, e->b, e->c };
-			if (!SasamiStreamPut(s, t, 4)) return 0;
+		case SC_EV_SOFT_VIB:
+			ScSoftApplyEv(&softM[ch], e);
 			break;
-		}
-		case SC_EV_SOFT_PORTA: {
-			uint8_t t[4] = { 47, e->a, e->b, e->c };
-			if (!SasamiStreamPut(s, t, 4)) return 0;
+		case SC_EV_SOFT_PORTA:
+			ScSoftApplyEv(&softM[ch], e);
 			break;
-		}
 		case SC_EV_NOTE: {
 			int gate = (e->c >= 1 && e->c <= 100) ? e->c : 100;
 			uint32_t sounding = ((uint32_t)(e->dur ? e->dur : 1) * (uint32_t)gate) / 100u;
 			if (sounding < 1) sounding = 1;
-			uint8_t wait = (sounding > 255) ? 255 : (uint8_t)sounding;
-			if (!SasamiStreamPut3(s, 1, e->a, wait)) return 0;
-			/* advance by full step so rhythm stays on grid */
-			lastTick[ch] += e->dur ? e->dur : wait;
+			if (ScSoftActive(&softM[ch])) {
+				if (softM[ch].noteOn && !ScSoftPutMidiRestore(s, &softM[ch])) return 0;
+				softM[ch].tCur = 0;
+				if (!ScSoftEmitMidiNote(s, &softM[ch], (int)e->a, (int)sounding, 1)) return 0;
+			} else {
+				if (softM[ch].noteOn && !ScSoftPutMidiRestore(s, &softM[ch])) return 0;
+				softM[ch].noteOn = 0;
+				uint8_t wait = (sounding > 255) ? 255 : (uint8_t)sounding;
+				if (!SasamiStreamPut3(s, 1, e->a, wait)) return 0;
+			}
+			lastTick[ch] += e->dur ? e->dur : sounding;
 			break;
 		}
 		case SC_EV_REST: {
+			if (softM[ch].noteOn) {
+				if (!ScSoftPutMidiRestore(s, &softM[ch])) return 0;
+				softM[ch].noteOn = 0;
+				softM[ch].tCur = 0;
+			}
 			uint8_t wait = (e->dur > 255) ? 255 : (uint8_t)(e->dur ? e->dur : 1);
 			if (!SasamiStreamPut3(s, 8, 0, wait)) return 0;
 			lastTick[ch] += e->dur ? e->dur : wait;
 			break;
 		}
 		case SC_EV_TIE: {
-			uint8_t wait = (e->dur > 255) ? 255 : (uint8_t)(e->dur ? e->dur : 1);
-			if (!SasamiStreamPut3(s, 3, 0, wait)) return 0;
-			lastTick[ch] += e->dur ? e->dur : wait;
+			uint32_t sounding = e->dur ? e->dur : 1;
+			if (ScSoftActive(&softM[ch]) && softM[ch].noteOn) {
+				if (!ScSoftEmitMidiNote(s, &softM[ch], (int)e->a, (int)sounding, 0)) return 0;
+			} else {
+				uint8_t wait = (sounding > 255) ? 255 : (uint8_t)sounding;
+				if (!SasamiStreamPut3(s, 3, 0, wait)) return 0;
+			}
+			lastTick[ch] += e->dur ? e->dur : sounding;
 			break;
 		}
 		default: break;
 		}
+	}
+	for (int ch = 0; ch < SC_MIDI_CH; ch++) {
+		if (softM[ch].noteOn)
+			ScSoftPutMidiRestore(&w->tr[ch], &softM[ch]);
 	}
 	/* VST-bound parts with no notes still need a live stream so SMF convert
 	   keeps nAlive>0 and preview can open the host. Keep rest minimal. */
@@ -3392,6 +3798,8 @@ int ScFmDocToWrite(const ScFmDoc* d, SasamiWriteFm* w)
 	memset(loopWrSp, 0, sizeof(loopWrSp));
 	memset(chStreamJump, 0, sizeof(chStreamJump));
 	memset(chJumpSet, 0, sizeof(chJumpSet));
+	ScSoftSt softF[SC_FM_TOTAL];
+	for (int ci = 0; ci < SC_FM_TOTAL; ci++) ScSoftStInit(&softF[ci], 0);
 	int misaoMax = 0;
 	int tempoWritten = 0;
 	int misaoHasPcmEv[SC_FM_MISAO];
@@ -3508,6 +3916,7 @@ int ScFmDocToWrite(const ScFmDoc* d, SasamiWriteFm* w)
 		}
 		case SC_EV_FM_VOL:
 			/* b==1 or SSG ch: PSGVOL cmd4 (0..15). Else FVOL cmd11 (YM TL). */
+			softF[ch].lastTl = (int)e->a;
 			if (IsSsgCh(ch) || e->b == 1) {
 				if (!SasamiStreamPut3(s, 4, e->a, 0)) return 0;
 			} else {
@@ -3519,6 +3928,7 @@ int ScFmDocToWrite(const ScFmDoc* d, SasamiWriteFm* w)
 			int tl = 127 - (int)e->a;
 			if (tl < 0) tl = 0;
 			if (tl > 127) tl = 127;
+			softF[ch].lastTl = tl;
 			if (!SasamiStreamPut3(s, 11, (uint8_t)tl, 0)) return 0;
 			chHadVol[ch] = 1;
 			break;
@@ -3560,17 +3970,12 @@ int ScFmDocToWrite(const ScFmDoc* d, SasamiWriteFm* w)
 		case SC_EV_FM_LEGATO:
 			chHadVoice[ch] = chHadVoice[ch] | 0x80; /* high bit = legato pending */
 			break;
-		case SC_EV_SOFT_VIB: {
-			/* 3-byte: cmd25 — b1=(mode<<7)|depth, b2=delay (FM+Misao; Misao PCM is cmd26) */
-			uint8_t packed = (uint8_t)(((e->a & 1) << 7) | (e->c & 0x7F));
-			if (!SasamiStreamPut3(s, 25, packed, e->b)) return 0;
+		case SC_EV_SOFT_VIB:
+			ScSoftApplyEv(&softF[ch], e);
 			break;
-		}
-		case SC_EV_SOFT_PORTA: {
-			/* cmd 29 free on both: b1=semi+64, b2=max(delay,glide) approx; depth=glide in unused — use b2=glide, delay ignored if 0 */
-			if (!SasamiStreamPut3(s, 29, e->a, e->c ? e->c : e->b)) return 0;
+		case SC_EV_SOFT_PORTA:
+			ScSoftApplyEv(&softF[ch], e);
 			break;
-		}
 		case SC_EV_FM_NOTE: {
 			if (ch == 6) {
 				int pad = e->a & 0x0F;
@@ -3611,10 +4016,12 @@ int ScFmDocToWrite(const ScFmDoc* d, SasamiWriteFm* w)
 				}
 				if (!chHadVol[ch]) {
 					if (!SasamiStreamPut3(s, 11, 8, 0)) return 0;
+					softF[ch].lastTl = 8;
 					chHadVol[ch] = 1;
 				}
 			} else if (!chHadVol[ch]) {
 				if (!SasamiStreamPut3(s, 4, 15, 0)) return 0; /* PSGVOL max */
+				softF[ch].lastTl = 15;
 				chHadVol[ch] = 1;
 			}
 			uint32_t totalDur = e->dur ? e->dur : 2;
@@ -3632,14 +4039,19 @@ int ScFmDocToWrite(const ScFmDoc* d, SasamiWriteFm* w)
 			if (e->c >= 1 && e->c <= 100)
 				sounding = (totalDur * (uint32_t)e->c) / 100u;
 			if (sounding < 2) sounding = 2;
-			uint8_t wait = (sounding > 255) ? 255 : (uint8_t)sounding;
 			{
 				const int legato = (chHadVoice[ch] & 0x80) ? 1 : 0;
 				chHadVoice[ch] = (uint8_t)(chHadVoice[ch] & 0x7F);
-				if (legato) {
-					if (!SasamiStreamPut3(s, 24, e->a, wait)) return 0; /* fhokry */
+				if (ch != 6 && ScSoftActive(&softF[ch])) {
+					softF[ch].tCur = 0;
+					if (!ScSoftEmitFmNote(s, &softF[ch], ch, (int)e->a, (int)sounding, legato)) return 0;
 				} else {
-					if (!SasamiStreamPut3(s, 0, e->a, wait)) return 0;
+					uint8_t wait = (sounding > 255) ? 255 : (uint8_t)sounding;
+					if (legato) {
+						if (!SasamiStreamPut3(s, 24, e->a, wait)) return 0;
+					} else {
+						if (!SasamiStreamPut3(s, 0, e->a, wait)) return 0;
+					}
 				}
 			}
 			lastTick[ch] += totalDur;
@@ -3671,6 +4083,11 @@ int ScFmDocToWrite(const ScFmDoc* d, SasamiWriteFm* w)
 			break;
 		}
 		case SC_EV_FM_REST: {
+			if (softF[ch].noteOn) {
+				if (!ScSoftPutFmRestore(s, &softF[ch], ch)) return 0;
+				softF[ch].noteOn = 0;
+				softF[ch].tCur = 0;
+			}
 			uint8_t wait = (e->dur > 255) ? 255 : (uint8_t)(e->dur < 2 ? 2 : e->dur);
 			if (!SasamiStreamPut3(s, 1, 0, wait)) return 0;
 			lastTick[ch] += e->dur ? e->dur : wait;
@@ -3678,6 +4095,11 @@ int ScFmDocToWrite(const ScFmDoc* d, SasamiWriteFm* w)
 		}
 		default: break;
 		}
+	}
+	for (int ch = 0; ch < SC_FM_TOTAL; ch++) {
+		if (!softF[ch].noteOn) continue;
+		SasamiTrackStream* rs = (ch < SC_FM_CH) ? &w->tr[ch] : &w->misao[ch - SC_FM_CH];
+		ScSoftPutFmRestore(rs, &softF[ch], ch);
 	}
 	for (int ch = 0; ch < SC_FM_CH; ch++) {
 		if (w->tr[ch].used)
@@ -3896,6 +4318,23 @@ static void ScAppendF(wchar_t* out, int outCch, int* len, const wchar_t* fmt, ..
 	_vsnwprintf_s(buf, _TRUNCATE, fmt, ap);
 	va_end(ap);
 	ScAppend(out, outCch, len, buf);
+}
+
+static void ScAppendSoftVibMml(wchar_t* out, int outCch, int* len, const ScEvent& e)
+{
+	if (e.c == 0) {
+		ScAppend(out, outCch, len, L"@SVIBOFF ");
+		return;
+	}
+	const wchar_t* tag = L"@SVIB";
+	if (e.a == 1) tag = L"@STREM";
+	else if (e.a == 2) tag = L"@SPAN";
+	const int step = e.flags > 0 ? (int)e.flags : 1;
+	const int period = e.dur > 0 ? (int)e.dur : 24;
+	if (step == 1 && period == 24)
+		ScAppendF(out, outCch, len, L"%s %d,%d,%d ", tag, (int)e.a, (int)e.b, (int)e.c);
+	else
+		ScAppendF(out, outCch, len, L"%s %d,%d,%d,%d,%d ", tag, (int)e.a, (int)e.b, (int)e.c, step, period);
 }
 
 static void ScAppendB64Lines(wchar_t* out, int outCch, int* len,
@@ -4315,7 +4754,8 @@ static int ScMidiDocToMmlImpl(const ScMidiDoc* d, wchar_t* out, int outCch, int 
 			}
 			if (e.kind == SC_EV_JUMP_MARK || e.kind == SC_EV_FM_JUMP ||
 				e.kind == SC_EV_FM_LOOP_START || e.kind == SC_EV_FM_LOOP_END ||
-				e.kind == SC_EV_PEDAL_ON || e.kind == SC_EV_PEDAL_OFF) {
+				e.kind == SC_EV_PEDAL_ON || e.kind == SC_EV_PEDAL_OFF ||
+				e.kind == SC_EV_SOFT_VIB || e.kind == SC_EV_SOFT_PORTA) {
 				emitGap(e.tick);
 				if (e.kind == SC_EV_JUMP_MARK) ScAppend(out, outCch, &len, L"Q ");
 				else if (e.kind == SC_EV_FM_JUMP) ScAppend(out, outCch, &len, L"J ");
@@ -4323,7 +4763,13 @@ static int ScMidiDocToMmlImpl(const ScMidiDoc* d, wchar_t* out, int outCch, int 
 					ScAppendF(out, outCch, &len, L"|:%d ", e.a ? (int)e.a : 2);
 				else if (e.kind == SC_EV_FM_LOOP_END) ScAppend(out, outCch, &len, L":| ");
 				else if (e.kind == SC_EV_PEDAL_ON) ScAppend(out, outCch, &len, L"@PEDON ");
-				else ScAppend(out, outCch, &len, L"@PEDOFF ");
+				else if (e.kind == SC_EV_PEDAL_OFF) ScAppend(out, outCch, &len, L"@PEDOFF ");
+				else if (e.kind == SC_EV_SOFT_VIB) {
+					ScAppendSoftVibMml(out, outCch, &len, e);
+				} else {
+					const int semi = (int)e.a - 64;
+					ScAppendF(out, outCch, &len, L"@SPORTA %d,%d,%d ", semi, (int)e.b, (int)e.c);
+				}
 				continue;
 			}
 
@@ -4682,7 +5128,7 @@ int ScFmDocToMml(const ScFmDoc* d, wchar_t* out, int outCch)
 			}
 			if (e.kind == SC_EV_SOFT_VIB) {
 				emitGap(e.tick);
-				ScAppendF(out, outCch, &len, L"@SVIB %d,%d,%d ", (int)e.a, (int)e.b, (int)e.c);
+				ScAppendSoftVibMml(out, outCch, &len, e);
 				continue;
 			}
 			if (e.kind == SC_EV_SOFT_PORTA) {

@@ -100,6 +100,7 @@ CHardPc88::CHardPc88()
 	, n88RtcIsr_(0)
 	, n88RtcThrottleAddr_(0)
 	, schemeMode_(0)
+	, falcomType_(0)
 	, playKickBase_(0)
 	, playKickInitOff_(0)
 	, playKickEi_(1)
@@ -180,16 +181,24 @@ static int CEmuPc88InferMusLinkAddr(const unsigned char* data, unsigned len)
 	unsigned hist[256];
 	memset(hist, 0, sizeof(hist));
 	unsigned hits = 0;
+	unsigned minP = 0xFFFF, maxP = 0;
 	for (unsigned i = 0; i < nch; i++) {
 		const unsigned ptr = (unsigned)data[1 + i * 4]
 			| ((unsigned)data[2 + i * 4] << 8);
 		if (ptr < 0x2000 || ptr >= 0xE000)
 			return -1;
+		if (ptr < minP) minP = ptr;
+		if (ptr > maxP) maxP = ptr;
 		hist[ptr >> 8]++;
 		hits++;
 	}
 	if (hits < 3)
 		return -1;
+	/* MUS00 spreads six ch ptrs across A0/A1/A2 (2 each) so a per-page
+	   majority never forms; the phrases still sit in one 8K window.
+	   Align to 256B (MUS10 is linked at 9300, not 4K-rounded 9000). */
+	if (maxP >= minP && (maxP - minP) < 0x2000)
+		return (int)(minP & 0xFF00);
 	unsigned bestPage = 0, bestCount = 0;
 	for (unsigned p = 0; p < 256; p++) {
 		if (hist[p] > bestCount) {
@@ -199,8 +208,112 @@ static int CEmuPc88InferMusLinkAddr(const unsigned char* data, unsigned len)
 	}
 	if (bestCount * 2 < hits)
 		return -1;
-	/* Align down to 4K so MUS00 (0xA0xx) and MUS09 (0x93xx) share a window. */
-	return (int)((bestPage << 8) & 0xF000);
+	return (int)(bestPage << 8);
+}
+
+/* ashe 93xx banks stage at titleMdata (DRIVER occupies native 9000). Header
+   reloc fixes the 4-byte ch ptrs. 8188 then reads a word at that ptr:
+   bit7-of-hi = in-place command stream; else a phrase-list (absolute 93xx
+   at the record, or a small offset to a list). Reloc the list (and FFFF
+   loop word) too. MUS00 is native A000 — skipped when loadAddr==linkBase. */
+static void CEmuPc88AsheRelocPhrases(uint8_t* mem, int loadAddr, unsigned n,
+	unsigned linkBase)
+{
+	if (!mem || loadAddr < 0 || n < 8 || linkBase < 0x2000
+		|| linkBase >= 0xE000)
+		return;
+	const unsigned nch = mem[loadAddr];
+	if (nch < 1 || nch > 16 || 1 + nch * 4 > n)
+		return;
+	unsigned hdrEnd = 1 + nch * 4;
+	if (n >= 0x19 + 5
+		&& mem[loadAddr + 0x19] >= 3 && mem[loadAddr + 0x19] <= 16) {
+		const unsigned n2 = mem[loadAddr + 0x19];
+		const unsigned e2 = 0x19 + 1 + n2 * 4;
+		if (e2 > hdrEnd && e2 <= n)
+			hdrEnd = e2;
+	}
+	unsigned chPtr[16];
+	unsigned chOff[16];
+	unsigned nList = 0;
+	for (unsigned c = 0; c < nch && nList < 16; c++) {
+		const unsigned po = 1 + c * 4;
+		unsigned w = (unsigned)mem[loadAddr + (int)po]
+			| ((unsigned)mem[loadAddr + (int)po + 1] << 8);
+		if (w >= (unsigned)loadAddr && w < (unsigned)loadAddr + n) {
+			chOff[nList] = po;
+			chPtr[nList] = w;
+			nList++;
+		}
+	}
+	for (unsigned i = 0; i < nList; i++) {
+		const unsigned p = chPtr[i];
+		if (p + 1 >= (unsigned)loadAddr + n)
+			continue;
+		unsigned w = (unsigned)mem[p]
+			| ((unsigned)mem[p + 1] << 8);
+		/* 93xx/94xx phrase ptrs have bit15 set — that is not an in-place
+		   C1..FE command stream (those sit outside the link window). */
+		unsigned list = 0;
+		if (w >= linkBase && w < linkBase + n) {
+			/* Channel record is already the phrase list (MUS09/10 @ 9300). */
+			list = p;
+		} else if (w >= hdrEnd && w < n) {
+			const unsigned dest = (unsigned)loadAddr + w;
+			if (dest + 1 >= (unsigned)loadAddr + n)
+				continue;
+			const unsigned peek = (unsigned)mem[dest]
+				| ((unsigned)mem[dest + 1] << 8);
+			if (peek >= linkBase && peek < linkBase + n) {
+				list = dest;
+				mem[loadAddr + (int)chOff[i]] = (uint8_t)(dest & 0xff);
+				mem[loadAddr + (int)chOff[i] + 1] = (uint8_t)((dest >> 8) & 0xff);
+			} else if (p + 5 < (unsigned)loadAddr + n) {
+				mem[p] = (uint8_t)(dest & 0xff);
+				mem[p + 1] = (uint8_t)((dest >> 8) & 0xff);
+				mem[p + 2] = 0xFF;
+				mem[p + 3] = 0xFF;
+				mem[p + 4] = (uint8_t)(p & 0xff);
+				mem[p + 5] = (uint8_t)((p >> 8) & 0xff);
+				continue;
+			}
+		}
+		if (!list)
+			continue;
+		for (unsigned q = list; q + 1 < (unsigned)loadAddr + n; q += 2) {
+			unsigned v = (unsigned)mem[q]
+				| ((unsigned)mem[q + 1] << 8);
+			if (v == 0)
+				break;
+			if (v == 0xFFFF) {
+				if (q + 3 < (unsigned)loadAddr + n) {
+					unsigned lp = (unsigned)mem[q + 2]
+						| ((unsigned)mem[q + 3] << 8);
+					if (lp >= linkBase && lp < linkBase + n)
+						lp = lp - linkBase + (unsigned)loadAddr;
+					else if (lp >= hdrEnd && lp < n)
+						lp = (unsigned)loadAddr + lp;
+					if (lp + 1 < (unsigned)loadAddr + n) {
+						const unsigned peek = (unsigned)mem[lp]
+							| ((unsigned)mem[lp + 1] << 8);
+						const int ok = (peek >= (unsigned)loadAddr
+								&& peek < (unsigned)loadAddr + n)
+							|| (peek >= linkBase && peek < linkBase + n);
+						if (!ok)
+							lp = list;
+					}
+					mem[q + 2] = (uint8_t)(lp & 0xff);
+					mem[q + 3] = (uint8_t)((lp >> 8) & 0xff);
+				}
+				break;
+			}
+			if (v >= linkBase && v < linkBase + n) {
+				v = v - linkBase + (unsigned)loadAddr;
+				mem[q] = (uint8_t)(v & 0xff);
+				mem[q + 1] = (uint8_t)((v >> 8) & 0xff);
+			}
+		}
+	}
 }
 
 static int CEmuPc88PatchSongShift8(const uint8_t* mem);
@@ -211,6 +324,16 @@ static unsigned CEmuPc88FalcomYs2MusDest(const uint8_t* mem, unsigned bank);
 static void CEmuPc88FalcomYs2PlantTable(uint8_t* mem, unsigned bank);
 static int CEmuPc88AshePlayHi(const uint8_t* mem);
 static void CEmuPc88PlantAsheSongTable(uint8_t* mem, unsigned songNum, int mdataAddr);
+static int CEmuPc88PatchManreq(const uint8_t* mem);
+static int CEmuPc88PatchGandhara(const uint8_t* mem);
+static int CEmuPc88PatchGinei2(const uint8_t* mem);
+static int CEmuPc88PatchXzrA4(const uint8_t* mem);
+static int CEmuPc88PatchXzr2VoiceF000(const uint8_t* mem);
+static int CEmuPc88PatchSmd8A00(const uint8_t* mem);
+static int CEmuPc88PatchAfHl4400(const uint8_t* mem);
+static int CEmuPc88PatchRomanciaSr(const uint8_t* mem, int initPc);
+static int CEmuPc88PatchRobowr(const uint8_t* mem);
+static void CEmuPc88PlantIceclimbTitleLoop(uint8_t* mem);
 
 /* JR/JR cc displacement 0xFB is not the EI opcode — p1demo/castle poll with
    `JR Z,$` encodes FB as the offset and was aborting NeedsBootEiPulse. */
@@ -285,6 +408,7 @@ int CHardPc88::Init(const CEmuGameEntry* ge, int sampleRate)
 	}
 	initPc_ = CEmuParseOptHex(ge, "init_pc", 0);
 	schemeMode_ = 0;
+	falcomType_ = 0;
 	yaksaPatch2_ = 0;
 	armLizardTimer_ = 0;
 	longPlayDrain_ = 0;
@@ -464,7 +588,8 @@ int CHardPc88::Init(const CEmuGameEntry* ge, int sampleRate)
 			if (r->offset == 0xf000 && _strnicmp(r->name, "PATCH", 5) == 0)
 				patchF000 = 1;
 		}
-		if (prog0 && patchF000) {
+		if (prog0 && patchF000 && mdataAddr_ == 0x8000
+			&& CEmuPc88HasSongBank(ge)) {
 			useRtc = 0;
 			deferRtcAfterPlay_ = 1;
 			forcePlayEi_ = 1;
@@ -765,6 +890,26 @@ void CHardPc88::StageBanks(CEmuZipFs* fs, const CEmuGameEntry* ge)
 				chip_->SetAdpcmB(data, sz, (unsigned)r->offset);
 		}
 	}
+	/* Catalog bgm offset 0 can miss the first ZipFind. Fill empty slots. */
+	for (int i = 0; i < ge->romCount; i++) {
+		const CEmuRomEntry* r = &ge->rom[i];
+		if (_stricmp(r->type, "bgm") != 0 || r->offset < 0 || r->offset >= 256)
+			continue;
+		if (bgmBank_[r->offset] && bgmBankSize_[r->offset] >= 16)
+			continue;
+		unsigned sz = 0;
+		const unsigned char* data = CEmuPc88ZipFind(fs, r->name, &sz, r->offset, preferMdatN);
+		if (!data || sz < 16) continue;
+		if (bgmBank_[r->offset]) {
+			free(bgmBank_[r->offset]);
+			bgmBank_[r->offset] = NULL;
+		}
+		bgmBank_[r->offset] = (unsigned char*)malloc(sz);
+		if (bgmBank_[r->offset]) {
+			memcpy(bgmBank_[r->offset], data, sz);
+			bgmBankSize_[r->offset] = sz;
+		}
+	}
 	DeriveMicrocabinVdata(ge);
 }
 
@@ -818,6 +963,10 @@ int CHardPc88::ShouldRestageSong() const
 	/* Scheme OPNA: C000 is live driver (MS0A) + BGM window; restaging the
 	   song over it from Render clobbers MUS2. BGM loads via OUT (0),bank. */
 	if (schemeMode_)
+		return 0;
+	/* Falcom E000: prog image occupies 0000..5FFF; restaging mdata@5C00
+	   before ApplyFalcomPlay is wiped, and OUT(02) / Apply copies BGM. */
+	if (falcomType_)
 		return 0;
 	/* PATCH at 0 + SP=0x0100: restaging mdata into page 0 clobbers the stack
 	   and the poll loop (albatrss mdata=0x100). High init_pc (PATCH elsewhere)
@@ -900,10 +1049,37 @@ void CHardPc88::LoadSongData(unsigned titleCode)
 		   fileOff skips the whole bank (MUS09@0x1100 on a 0xC00 file). */
 		fileOff = 0;
 	}
+	/* ashe MUS00 is catalog offset 0; if that slot is empty or not the
+	   A000-linked opening (ch0 ptr A0A1), recover the bank by signature. */
+	if (CEmuPc88AshePlayHi(mem_) && songNum == 0
+		&& (!bgmBank_[0] || bgmBankSize_[0] < 25
+			|| ((unsigned)bgmBank_[0][1] | ((unsigned)bgmBank_[0][2] << 8)) != 0xA0A1u)) {
+		for (int i = 1; i < 256; i++) {
+			if (!bgmBank_[i] || bgmBankSize_[i] < 25 || bgmBank_[i][0] != 6)
+				continue;
+			const unsigned p = (unsigned)bgmBank_[i][1]
+				| ((unsigned)bgmBank_[i][2] << 8);
+			if (p != 0xA0A1u)
+				continue;
+			unsigned char* copy = (unsigned char*)malloc(bgmBankSize_[i]);
+			if (!copy)
+				break;
+			memcpy(copy, bgmBank_[i], bgmBankSize_[i]);
+			if (bgmBank_[0])
+				free(bgmBank_[0]);
+			bgmBank_[0] = copy;
+			bgmBankSize_[0] = bgmBankSize_[i];
+			break;
+		}
+	}
 	/* Voice before BGM: ys2 END/TTL images end on the music staging page
 	   (ENDPRG@0100..20FF overlaps mus@2000; TTLPRG overlaps @3000). Planting
 	   voice last used to clobber the mirrored *MUS blob. */
-	if (voiceBank_[songNum] && vdataAddr_ >= 0) {
+	/* ginei2: OPENING0 at vdata 0400 wipes ITEST (CALL 52FA). GEDS uses the
+	   same 06-channel player as BGM_* — keep ITEST and skip the overlay. */
+	if (CEmuPc88PatchGinei2(mem_) && vdataAddr_ == 0x400)
+		;
+	else if (voiceBank_[songNum] && vdataAddr_ >= 0) {
 		unsigned n = voiceBankSize_[songNum];
 		if (vfileSize_ > 0 && (unsigned)vfileSize_ < n)
 			n = (unsigned)vfileSize_;
@@ -911,6 +1087,13 @@ void CHardPc88::LoadSongData(unsigned titleCode)
 			n = (unsigned)(0x10000 - vdataAddr_);
 		if (n > 0)
 			memcpy(mem_ + vdataAddr_, voiceBank_[songNum], n);
+		/* manreq88 A9C: LD A,$D0 / LD (A2C0),A. D0=RET NC returns from the
+		   live trampoline when carry is clear (M's BOOGIE silent). Voice
+		   banks 3–6 plant D1 there from PATCH; do the same in the image. */
+		if (CEmuPc88PatchManreq(mem_) && vdataAddr_ >= 0
+			&& vdataAddr_ + 7 < 0x10000
+			&& mem_[vdataAddr_ + 6] == 0x3E && mem_[vdataAddr_ + 7] == 0xD0)
+			mem_[vdataAddr_ + 7] = 0xD1;
 	}
 	if (bgmBank_[songNum] && mdataAddr_ >= 0) {
 		unsigned avail = bgmBankSize_[songNum];
@@ -945,6 +1128,21 @@ void CHardPc88::LoadSongData(unsigned titleCode)
 			if (asheHi && titleMdata >= 0) {
 				linkBase = CEmuPc88InferMusLinkAddr(
 					bgmBank_[songNum] + stageOff, avail - stageOff);
+				/* MUS00/01 are linked at A000, flush against DRIVER@7800.
+				   Staging at titleMdata 1000 leaves 1xxx ptrs (bit7 clear)
+				   on a page the PATCH stack/IM2 can clobber. 93xx banks
+				   overlap DRIVER — park them in the same A000 window. */
+				if (linkBase >= 0xA000) {
+					unsigned native = (unsigned)linkBase;
+					if (native + n > 0x10000u)
+						n = 0x10000u - native;
+					if (n > 0)
+						loadAddr = (int)native;
+				} else if (linkBase >= 0x7800 && linkBase < 0xA000) {
+					loadAddr = 0xA000;
+					if ((unsigned)loadAddr + n > 0x10000u)
+						n = 0x10000u - (unsigned)loadAddr;
+				}
 			}
 			if (loadAddr + (int)n > 0x10000)
 				n = (unsigned)(0x10000 - loadAddr);
@@ -968,30 +1166,30 @@ void CHardPc88::LoadSongData(unsigned titleCode)
 			/* ApplyNavituneTitleSong runs after the first port-play (driver). */
 			if (asheHi && n > 0 && loadAddr >= 0 && linkBase >= 0x2000
 				&& linkBase != loadAddr) {
-				/* Relocate absolute ptrs. Blind every-byte scans corrupt
-				   ashe MUS headers (attr_hi||next_ptr_lo → false 0x9A01).
-				   1) ashe-style headers (nch + ptr/attr×nch)
-				   2) remaining even offsets only (phrase tables). */
+				/* Relocate only the ashe header(s) at the staged base.
+				   Walking every offset + even-word phrase scans hit
+				   attr_hi||next_ptr_lo (false 0x9A01) and A0xx note
+				   bytes (MUS00 6.5K silent). MUS09 survived by luck. */
 				const unsigned lb = (unsigned)linkBase;
-				for (unsigned off = 0; off + 5 < n; off++) {
+				unsigned heads[2] = { 0, 0 };
+				unsigned nHeads = 1;
+				if (n >= 0x19 + 5
+					&& mem_[loadAddr + 0x19] >= 3
+					&& mem_[loadAddr + 0x19] <= 16)
+					heads[nHeads++] = 0x19;
+				for (unsigned h = 0; h < nHeads; h++) {
+					const unsigned off = heads[h];
 					const unsigned nch = mem_[loadAddr + (int)off];
-					if (nch < 3 || nch > 16 || off + 1 + nch * 4 > n)
+					if (nch < 1 || nch > 16 || off + 1 + nch * 4 > n)
 						continue;
-					unsigned pageHits[256];
-					memset(pageHits, 0, sizeof(pageHits));
 					int ok = 1;
 					for (unsigned c = 0; c < nch; c++) {
 						const unsigned po = off + 1 + c * 4;
 						const unsigned w = (unsigned)mem_[loadAddr + (int)po]
 							| ((unsigned)mem_[loadAddr + (int)po + 1] << 8);
 						if (w < lb || w >= lb + n) { ok = 0; break; }
-						pageHits[w >> 8]++;
 					}
 					if (!ok) continue;
-					unsigned best = 0;
-					for (unsigned p = 0; p < 256; p++)
-						if (pageHits[p] > best) best = pageHits[p];
-					if (best * 2 < nch) continue;
 					for (unsigned c = 0; c < nch; c++) {
 						const unsigned po = off + 1 + c * 4;
 						unsigned w = (unsigned)mem_[loadAddr + (int)po]
@@ -1001,16 +1199,8 @@ void CHardPc88::LoadSongData(unsigned titleCode)
 						mem_[loadAddr + (int)po] = (uint8_t)(w & 0xff);
 						mem_[loadAddr + (int)po + 1] = (uint8_t)((w >> 8) & 0xff);
 					}
-					off += nch * 4;
 				}
-				for (unsigned i = 0; i + 1 < n; i += 2) {
-					unsigned w = (unsigned)mem_[loadAddr + (int)i]
-						| ((unsigned)mem_[loadAddr + (int)i + 1] << 8);
-					if (w < lb || w >= lb + n) continue;
-					w = w - lb + (unsigned)loadAddr;
-					mem_[loadAddr + (int)i] = (uint8_t)(w & 0xff);
-					mem_[loadAddr + (int)i + 1] = (uint8_t)((w >> 8) & 0xff);
-				}
+				CEmuPc88AsheRelocPhrases(mem_, loadAddr, n, lb);
 			}
 			/* song<<8 + HL=4000: LDIR copies 4000 → titlepage. Mirror bank. */
 			if (n > 0 && titleMdata >= 0 && CEmuPc88PatchLdirFrom4000(mem_)) {
@@ -1038,6 +1228,28 @@ void CHardPc88::LoadSongData(unsigned titleCode)
 				if (n4 > 0)
 					memcpy(mem_ + 0x4000, mem_ + loadAddr, n4);
 			}
+		}
+	}
+	/* manreq88/kissof88: vdata sits inside the mdata window (A9C @AD4E is
+	   in A9A's 8D77..CA77 copy), so the BGM memcpy wipes the overlay that
+	   actually selects M's BOOGIE / SILVER KNIFE. Voice-first is still
+	   required for ys2 (voice BELOW mdata; music must win the overlap). */
+	if (voiceBank_[songNum] && vdataAddr_ >= 0 && mdataAddr_ >= 0
+		&& vdataAddr_ >= mdataAddr_) {
+		const int mend = mdataAddr_
+			+ (mdataSize_ > 0 ? mdataSize_
+				: (mfileSize_ > 0 ? mfileSize_ : 0x1000));
+		if (vdataAddr_ < mend) {
+			unsigned n = voiceBankSize_[songNum];
+			if (vfileSize_ > 0 && (unsigned)vfileSize_ < n)
+				n = (unsigned)vfileSize_;
+			if (vdataAddr_ + (int)n > 0x10000)
+				n = (unsigned)(0x10000 - vdataAddr_);
+			if (n > 0)
+				memcpy(mem_ + vdataAddr_, voiceBank_[songNum], n);
+			if (CEmuPc88PatchManreq(mem_) && vdataAddr_ + 7 < 0x10000
+				&& mem_[vdataAddr_ + 6] == 0x3E && mem_[vdataAddr_ + 7] == 0xD0)
+				mem_[vdataAddr_ + 7] = 0xD1;
 		}
 	}
 }
@@ -1101,6 +1313,55 @@ static int CEmuPc88PatchPort80GateParam(const uint8_t* mem)
 	return 0;
 }
 
+/* 100yen4 (onion split@9000): IN A,(80); LD (9006),A; CALL 9000.
+   Title hi24 is the in-bank song ('1'..); low byte is the MUS bank.
+   HootCmd01 does not match (CALL 9007 sits between JR NZ and IN (01)),
+   so PlaySongIndex used to return the bank id and every god2 title
+   played song 3. The IN (80) lands at $25, not $26. */
+static int CEmuPc88PatchOnion9006(const uint8_t* mem)
+{
+	if (!mem || mem[0] != 0xF3)
+		return 0;
+	for (int i = 0; i + 7 < 0x40; i++) {
+		if (mem[i] == 0xDB && mem[i + 1] == 0x80
+			&& mem[i + 2] == 0x32 && mem[i + 3] == 0x06 && mem[i + 4] == 0x90
+			&& mem[i + 5] == 0xCD && mem[i + 6] == 0x00 && mem[i + 7] == 0x90)
+			return 1;
+	}
+	return 0;
+}
+
+/* pwmajan2: PATCH@F000 plants C9 over PROG4's EI at 9038 so CALL 9019
+   returns before the disk loader. Port 01 is the MUS bank, port 80 the
+   in-bank song (0 is a real opening). Poll stays DI — host must EI.
+   LoadRoms NOPs CALL 9019; keep matching that form so PlaySongIndex,
+   NeedsPlayEi and ArmPwmajan2 still see the title after the plant. */
+static int CEmuPc88PatchPwmajan2(const uint8_t* mem)
+{
+	if (!mem || mem[0xF000] != 0xF3)
+		return 0;
+	if (!(mem[0xF00D] == 0x3E && mem[0xF00E] == 0xC9
+		&& mem[0xF00F] == 0x32 && mem[0xF010] == 0x38 && mem[0xF011] == 0x90))
+		return 0;
+	if (mem[0xF012] == 0xCD && mem[0xF013] == 0x19 && mem[0xF014] == 0x90)
+		return 1;
+	if (mem[0xF012] == 0x00 && mem[0xF013] == 0x00 && mem[0xF014] == 0x00)
+		return 1;
+	return 0;
+}
+
+/* gandhara: IN (01) indexes 8-byte rows at 00BD; IN (80)==1 is a special
+   LDIR and ==2 skips CALL 8C3D (muted). Port 80 must stay the title high
+   byte (0 for 01/02/03 BGM) so every row takes LDDR + CALL 8C3D. */
+static int CEmuPc88PatchGandhara(const uint8_t* mem)
+{
+	if (!mem || mem[0] != 0xF3)
+		return 0;
+	return (mem[6] == 0x3E && mem[7] == 0x86
+		&& mem[0x21] == 0xCD && mem[0x22] == 0x1E && mem[0x23] == 0x8C
+		&& mem[0x2F] == 0x11 && mem[0x30] == 0xBD && mem[0x31] == 0x00) ? 1 : 0;
+}
+
 static int CEmuPc88PatchHootCmd01At(const uint8_t* mem, unsigned base)
 {
 	/* IN A,(0); OR A; JR Z,poll; CP 1; JR NZ,stop; IN A,(1)
@@ -1121,6 +1382,57 @@ static int CEmuPc88PatchHootCmd01At(const uint8_t* mem, unsigned base)
 			return 1;
 	}
 	return 0;
+}
+
+/* iceclimb88: JR $10 PATCH, CALL B323, mailbox B816. */
+static int CEmuPc88PatchIceclimb(const uint8_t* mem)
+{
+	if (!mem) return 0;
+	return (mem[0] == 0x18 && mem[0x10] == 0xF3 && mem[0x11] == 0xED
+		&& mem[0x16] == 0xCD && mem[0x17] == 0x23 && mem[0x18] == 0xB3
+		&& mem[0x35] == 0x32 && mem[0x36] == 0x16 && mem[0x37] == 0xB8) ? 1 : 0;
+}
+
+/* Title (song 5) shares phrase bytes with looping boss (song 4) but the
+   5-byte table flag is 00 so it plays once. NES title loops — same flag as
+   通常BGM/boss. Round intro (song 1) stays finite. */
+static void CEmuPc88PlantIceclimbTitleLoop(uint8_t* mem)
+{
+	if (!mem || !CEmuPc88PatchIceclimb(mem))
+		return;
+	if (mem[0xBB41] == 0x5F && mem[0xBB42] == 0xBB
+		&& mem[0xBB55] == 0xE7 && mem[0xBB56] == 0xBD
+		&& mem[0xBB59] == 0x00)
+		mem[0xBB59] = 0x01;
+}
+
+/* manreq88: plant RET over disk hooks at 8892/92EA, I=BF. */
+static int CEmuPc88PatchManreq(const uint8_t* mem)
+{
+	if (!mem) return 0;
+	return (mem[0] == 0xF3 && mem[0x0B] == 0x3E && mem[0x0C] == 0xBF
+		&& mem[0x0F] == 0x3E && mem[0x10] == 0xC9
+		&& mem[0x11] == 0x32 && mem[0x12] == 0x92 && mem[0x13] == 0x88
+		&& mem[0x14] == 0x32 && mem[0x15] == 0xEA && mem[0x16] == 0x92) ? 1 : 0;
+}
+
+/* d': IN (80) is 0-based phrase index; CALL 17B3. PATCH plants mdata at (808e). */
+static int CEmuPc88PatchDprime(const uint8_t* mem)
+{
+	if (!mem) return 0;
+	return (mem[0] == 0xF3 && mem[0x11] == 0x22
+		&& mem[0x12] == 0x8E && mem[0x13] == 0x80
+		&& mem[0x3F] == 0xCD && mem[0x40] == 0xB3 && mem[0x41] == 0x17) ? 1 : 0;
+}
+
+/* adrnalin: IN (80); CALL 9106. Driver DEC A then indexes word[9e00]. Title
+   hi24 is the 1-based play id; the low byte only selects MUS0n. */
+static int CEmuPc88PatchAdrnalin(const uint8_t* mem)
+{
+	if (!mem) return 0;
+	return (mem[0] == 0x18 && mem[0x10] == 0xF3
+		&& mem[0x2C] == 0xDB && mem[0x2D] == 0x80
+		&& mem[0x2E] == 0xCD && mem[0x2F] == 0x06 && mem[0x30] == 0x91) ? 1 : 0;
 }
 
 static int CEmuPc88PatchHootCmd01(const uint8_t* mem, int initPc)
@@ -1144,6 +1456,193 @@ static int CEmuPc88PatchHootCmd01(const uint8_t* mem, int initPc)
 	return 0;
 }
 
+/* HootCmd01 requires IN (01) immediately after JR NZ. Many rips CALL stop
+   first (xzr/xzr2/jikochu2/vaxol/wibarm/romanciasr). Port 01 is still the
+   bank and port 80 the in-file index (title high byte). Without this, both
+   ports got the low byte and disk-twin titles (00000001 vs 01000001) were
+   SAMESONG / silent OOB seeks. */
+static int CEmuPc88PatchPort01Then80(const uint8_t* mem, int initPc)
+{
+	if (!mem) return 0;
+	auto scan = [](const uint8_t* mem, unsigned base) -> int {
+		for (unsigned i = base; i + 12 < base + 0x70 && i + 12 < 0x10000u; i++) {
+			if (mem[i] != 0xDB || mem[i + 1] != 0x00 || mem[i + 2] != 0xB7
+				|| mem[i + 3] != 0x28 || mem[i + 5] != 0xFE || mem[i + 6] != 0x01
+				|| mem[i + 7] != 0x20)
+				continue;
+			int saw01 = 0;
+			const unsigned end = i + 8 + 56;
+			for (unsigned k = i + 8; k + 1 < end && k + 1 < 0x10000u; k++) {
+				if (mem[k] == 0xDB && mem[k + 1] == 0x01)
+					saw01 = 1;
+				if (saw01 && mem[k] == 0xDB && mem[k + 1] == 0x80)
+					return 1;
+			}
+		}
+		return 0;
+	};
+	if (scan(mem, 0))
+		return 1;
+	if (initPc > 0)
+		return scan(mem, (unsigned)initPc);
+	return 0;
+}
+
+/* mule: IN (01) indexes page table 004E (B0/B9/BB/BC); IN (80) is only
+   RRA selecting ISR 8FE5 vs 8B51. High-byte-only titles handed port80=1
+   (MAIN 01000000) and every song took the 8B51 path / same page. */
+static int CEmuPc88PatchMulePages(const uint8_t* mem)
+{
+	if (!mem || mem[0] != 0xF3 || mem[1] != 0xED || mem[2] != 0x5E)
+		return 0;
+	if (!(mem[0x1C] == 0xDB && mem[0x1D] == 0x01
+		&& mem[0x1E] == 0xFE && mem[0x1F] == 0x05))
+		return 0;
+	return (mem[0x25] == 0xDB && mem[0x26] == 0x80 && mem[0x27] == 0x1F) ? 1 : 0;
+}
+
+/* blmnstry/hchaser/rouge88/pias88: PATCH plants HL=4000 at the PMD mailbox
+   (xx0F). Each bgm file is one MML staged at 4000; port 01 must stay 0 so
+   PMD plays that file instead of seeking an in-file song index. */
+static int CEmuPc88PatchPmdHl4000(const uint8_t* mem, int initPc)
+{
+	if (!mem) return 0;
+	int pc = initPc;
+	if (pc < 0) pc = 0;
+	if (pc + 1 < 0x10000 && mem[pc] == 0x18)
+		pc = pc + 2 + (int)(int8_t)mem[pc + 1];
+	for (int i = pc; i + 5 < pc + 0x40 && i + 5 < 0x10000; i++) {
+		if (mem[i] == 0x21 && mem[i + 1] == 0x00 && mem[i + 2] == 0x40
+			&& mem[i + 3] == 0x22 && mem[i + 4] == 0x0F)
+			return 1;
+	}
+	return 0;
+}
+
+/* lvaccus: XOR A; CALL 9800 (stop); IN (01)=bank; IN (80)=in-bank id;
+   CALL 9800 play. PATCH never EI — VRTC must come from the host. */
+static int CEmuPc88PatchLvaccus9800(const uint8_t* mem)
+{
+	if (!mem || mem[0] != 0xF3 || mem[1] != 0xED || mem[2] != 0x5E)
+		return 0;
+	return (mem[0x18] == 0xCD && mem[0x19] == 0x00 && mem[0x1A] == 0x98
+		&& mem[0x1B] == 0xDB && mem[0x1C] == 0x01
+		&& mem[0x1F] == 0xDB && mem[0x20] == 0x80
+		&& mem[0x21] == 0xCD && mem[0x22] == 0x00 && mem[0x23] == 0x98) ? 1 : 0;
+}
+
+/* xzr/xzr2: I=A4, IN (80); CALL A410. Each MA/MB file is one song staged at
+   4000. Port01Then80 would hand the title high byte as the in-file index
+   (MA000 01000015 → A=1 OOB; MA* headers are 01 42 = 1 song). */
+static int CEmuPc88PatchXzrA4(const uint8_t* mem)
+{
+	if (!mem || mem[0] != 0xF3 || mem[1] != 0xED || mem[2] != 0x5E)
+		return 0;
+	if (!(mem[6] == 0x3E && mem[7] == 0xA4 && mem[8] == 0xED && mem[9] == 0x47))
+		return 0;
+	for (int i = 0x20; i + 4 < 0x50; i++) {
+		if (mem[i] == 0xDB && mem[i + 1] == 0x80
+			&& mem[i + 2] == 0xCD && mem[i + 3] == 0x10 && mem[i + 4] == 0xA4)
+			return 1;
+	}
+	return 0;
+}
+
+/* xzr2: LDIR F000 → (A449) copies the 0x200 voice bank before CALL A410.
+   Catalog has no vdata_addr, so VD* never reached F000 and MA* peaked 0. */
+static int CEmuPc88PatchXzr2VoiceF000(const uint8_t* mem)
+{
+	if (!mem || !CEmuPc88PatchXzrA4(mem))
+		return 0;
+	for (int i = 0x20; i + 10 < 0x50; i++) {
+		if (mem[i] == 0x21 && mem[i + 1] == 0x00 && mem[i + 2] == 0xF0
+			&& mem[i + 3] == 0xED && mem[i + 4] == 0x5B
+			&& mem[i + 9] == 0xED && mem[i + 10] == 0xB0)
+			return 1;
+	}
+	return 0;
+}
+
+/* ginei2: CP 40 / CP 20 select ITEST opening vs BGM. Each GEDS/BGM file is
+   one song at 6390 with the same 06-channel header. Openings passed 0x21
+   into CALL 159F after OPENING0 wiped ITEST@0400. Param 0 keeps CALL 52FA. */
+static int CEmuPc88PatchGinei2(const uint8_t* mem)
+{
+	if (!mem || mem[0] != 0x18)
+		return 0;
+	return (mem[0x3D] == 0xFE && mem[0x3E] == 0x40
+		&& mem[0x41] == 0xFE && mem[0x42] == 0x20
+		&& mem[0xB5] == 0x21 && mem[0xB6] == 0x90 && mem[0xB7] == 0x63) ? 1 : 0;
+}
+
+/* hardrank SMD-88: IN (01); CALL 8A00. Driver reads the header at 9300, not
+   the catalog mdata 9200. Port 01 is unused (one file per song). */
+static int CEmuPc88PatchSmd8A00(const uint8_t* mem)
+{
+	if (!mem || mem[0] != 0xF3)
+		return 0;
+	if (!(mem[0x13] == 0xDB && mem[0x14] == 0x01
+		&& mem[0x18] == 0xCD && mem[0x19] == 0x00 && mem[0x1A] == 0x8A))
+		return 0;
+	return (mem[0x8A00] == 0xF3) ? 1 : 0;
+}
+
+/* af ENDING/OPENING: param>=0x20 copies opdrv then IN (80); OR A; LD HL,4400
+   / LD H,A. Title 00000021 put 0x21 on both ports → play at 2100. */
+static int CEmuPc88PatchAfHl4400(const uint8_t* mem)
+{
+	if (!mem || mem[0] != 0xF3 || mem[1] != 0xED || mem[2] != 0x5E)
+		return 0;
+	if (!(mem[0x5D] == 0xFE && mem[0x5E] == 0x20))
+		return 0;
+	return (mem[0xB1] == 0xDB && mem[0xB2] == 0x80
+		&& mem[0xB3] == 0xB7
+		&& mem[0xB4] == 0x21 && mem[0xB5] == 0x00 && mem[0xB6] == 0x44) ? 1 : 0;
+}
+
+/* romanciasr: JP NZ (not JR) so Port01Then80 misses it. IN (80); LD (HL),A
+   is the in-bank song id (00000001 vs 01000001). */
+static int CEmuPc88PatchRomanciaSr(const uint8_t* mem, int initPc)
+{
+	if (!mem || initPc != 0xf000)
+		return 0;
+	if (!(mem[0xF024] == 0xDB && mem[0xF025] == 0x01))
+		return 0;
+	return (mem[0xF04D] == 0xDB && mem[0xF04E] == 0x80
+		&& mem[0xF04F] == 0x77) ? 1 : 0;
+}
+
+/* robowr88: JR $10, IN (C=01), 6-byte rows at 005F. PROG2's play (CB5A)
+   gates on (000A)==1; PATCH leftover is 02 so game-start stays mute. */
+static int CEmuPc88PatchRobowr(const uint8_t* mem)
+{
+	if (!mem || mem[0] != 0x18)
+		return 0;
+	return (mem[0x29] == 0x0E && mem[0x2A] == 0x01
+		&& mem[0x2B] == 0xED && mem[0x2C] == 0x78
+		&& mem[0x51] == 0xCD && mem[0x52] == 0x4A && mem[0x53] == 0xBA) ? 1 : 0;
+}
+
+/* arcus88demo (wolfteam 88/87 @B000): PATCH plants HL=4000 at (B000) and
+   IN A,(80) into (B003). ISR ticks only while (B003)==0 or (B007)==0;
+   FFFF phrase-end sets (B007)=FF, so a nonzero port 80 (title low byte)
+   kills the player after the first loop — C5 silent after a short pass,
+   C6 STOPS ~40s. Each bgm file is one song; port 80 must stay 0. */
+static int CEmuPc88PatchArcusB000(const uint8_t* mem)
+{
+	if (!mem || mem[0] != 0x18)
+		return 0;
+	if (!(mem[0x19] == 0x21 && mem[0x1A] == 0x00 && mem[0x1B] == 0x40
+		&& mem[0x1C] == 0x22 && mem[0x1D] == 0x00 && mem[0x1E] == 0xB0))
+		return 0;
+	for (int i = 0x20; i + 5 < 0x50; i++) {
+		if (mem[i] == 0xDB && mem[i + 1] == 0x80
+			&& mem[i + 2] == 0x32 && mem[i + 3] == 0x03 && mem[i + 4] == 0xB0)
+			return 1;
+	}
+	return 0;
+}
+
 /* yaksa PATCH2: plant (0575)=0x21; play does IN (01)/OR A/JR Z skip.
    Falcom-style vdata+voiceBank path must NOT force port01=0 (mute). */
 int CEmuPc88PatchYaksa2(const uint8_t* mem)
@@ -1162,18 +1661,61 @@ static int CEmuPc88PatchLizardTimer(const uint8_t* mem)
 	return (mem[0x9C] == 0xF5 && mem[0x9F00] == 0xC3) ? 1 : 0;
 }
 
+/* Three channels of 4-byte period/dur/wait events, FF-terminated, table
+   at A576. One event per channel is a one-shot; two+ distinct periods on
+   two+ channels is BGM. Same-pitch stings (0x41) must not JR 0051 or they
+   become a held-tone drone. */
+static int CEmuPc88LizardSongIsBgm(const uint8_t* mem, unsigned song)
+{
+	if (!mem || song > 0x4Cu)
+		return 0;
+	const unsigned tab = 0xA576u + song * 6u;
+	if (tab + 6u >= 0x10000u)
+		return 0;
+	int variedCh = 0;
+	for (int ch = 0; ch < 3; ch++) {
+		unsigned p = (unsigned)mem[tab + (unsigned)ch * 2u]
+			| ((unsigned)mem[tab + (unsigned)ch * 2u + 1u] << 8);
+		if (p < 0x9F00u || p >= 0xC000u)
+			continue;
+		int n = 0, nSeen = 0;
+		unsigned seen[8];
+		while (n + 3 < 256 && p + (unsigned)n + 3u < 0x10000u
+			&& mem[p + (unsigned)n] != 0xFF) {
+			const unsigned per = (unsigned)mem[p + (unsigned)n]
+				| ((unsigned)mem[p + (unsigned)n + 1u] << 8);
+			int k = 0;
+			for (; k < nSeen; k++) {
+				if (seen[k] == per)
+					break;
+			}
+			if (k == nSeen && nSeen < 8)
+				seen[nSeen++] = per;
+			n += 4;
+		}
+		if (n > 4 && nSeen >= 2)
+			variedCh++;
+	}
+	return variedCh >= 2;
+}
+
 /* 1942_88: cmd=1 → CALL ADEE (LDIR MUSIC) then CALL A343 (I=80+Timer). */
 static int CEmuPc88Patch1942LongPlay(const uint8_t* mem)
 {
 	if (!mem)
 		return 0;
-	/* CD 34 00 … CD 43 A3 inside the cmd=1 handler. */
-	for (int i = 0; i + 8 < 0x40; i++) {
-		if (mem[i] == 0xCD && mem[i + 1] == 0x34 && mem[i + 2] == 0x00
-			&& mem[i + 6] == 0xCD && mem[i + 7] == 0x43 && mem[i + 8] == 0xA3)
-			return 1;
+	/* PATCH plants C9 at A375 then CALL 0034 (ADEE) / CALL A343. */
+	int sawRetPlant = 0, sawAdeee = 0, sawA343 = 0;
+	for (int i = 0; i + 3 < 0x40; i++) {
+		if (mem[i] == 0x3E && mem[i + 1] == 0xC9
+			&& mem[i + 2] == 0x32 && mem[i + 3] == 0x75 && mem[i + 4] == 0xA3)
+			sawRetPlant = 1;
+		if (mem[i] == 0xCD && mem[i + 1] == 0x34 && mem[i + 2] == 0x00)
+			sawAdeee = 1;
+		if (mem[i] == 0xCD && mem[i + 1] == 0x43 && mem[i + 2] == 0xA3)
+			sawA343 = 1;
 	}
-	return 0;
+	return sawRetPlant && sawAdeee && sawA343;
 }
 
 /* makai88: LD IX,0274 / LD IY,0276. Play does IN A,(80); OR A; IN A,(01);
@@ -1384,10 +1926,34 @@ uint8_t CHardPc88::PlaySongIndex() const
 			return (uint8_t)songNum;
 		return 1;
 	}
+	/* mule: IN (80)/RRA patches CALL 8D05. Odd (MAIN 01000000) keeps
+	   CALL 8B51; even leaves CALL 8FE5 which OR 80's port 32 (IRQ mask).
+	   Page select is port 01 = title low byte, not this. */
+	if (CEmuPc88PatchMulePages(mem_))
+		return (uint8_t)((titleCode_ >> 24) & 0xff);
+	/* PMD@4000: one MML per file. */
+	if (CEmuPc88PatchPmdHl4000(mem_, initPc_))
+		return 0;
+	if (CEmuPc88PatchXzrA4(mem_))
+		return 0;
+	if (CEmuPc88PatchGinei2(mem_))
+		return 0;
+	if (CEmuPc88PatchAfHl4400(mem_) || CEmuPc88PatchRomanciaSr(mem_, initPc_))
+		return (uint8_t)((titleCode_ >> 24) & 0xff);
+	if (CEmuPc88PatchLvaccus9800(mem_))
+		return (uint8_t)((titleCode_ >> 24) & 0xff);
 	/* Stock hoot PATCH: port 80 is the byte passed to the driver's play
 	   entry, which these rips encode as the title high byte (triton2 effect
 	   id, goonies88 song, valis opening variant). */
 	if (CEmuPc88PatchHootCmd01(mem_, initPc_))
+		return (uint8_t)((titleCode_ >> 24) & 0xff);
+	if (CEmuPc88PatchDprime(mem_) || CEmuPc88PatchAdrnalin(mem_))
+		return (uint8_t)((titleCode_ >> 24) & 0xff);
+	if (CEmuPc88PatchOnion9006(mem_))
+		return (uint8_t)((titleCode_ >> 24) & 0xff);
+	if (CEmuPc88PatchPwmajan2(mem_))
+		return (uint8_t)((titleCode_ >> 24) & 0xff);
+	if (CEmuPc88PatchGandhara(mem_))
 		return (uint8_t)((titleCode_ >> 24) & 0xff);
 	/* makai88: port80 = BGM/SE select (title hi24), not the song number. */
 	if (CEmuPc88PatchMakaiIxIy(mem_))
@@ -1403,11 +1969,15 @@ uint8_t CHardPc88::PlaySongIndex() const
 	   must be 0 or play skips into the channel table and stays mute. */
 	if (armGineidenTimer_)
 		return 0;
+	if (CEmuPc88PatchArcusB000(mem_))
+		return 0;
 	/* yakyufan: each MUS* is one bank staged at 0x4000; (010B)/port80 is an
 	   in-file song index. Passing the bank id (0..0x0A) seeks past the only
 	   phrase table → key-ons with muted TL. */
 	if (NeedsYakyufanArm())
 		return 0;
+	if (CEmuPc88PatchPort01Then80(mem_, initPc_))
+		return (uint8_t)((titleCode_ >> 24) & 0xff);
 	if (packedKoei_) {
 		/* valis2 OPNA: PATCH routes param>=0xE0 to ADPCM voice (PCM00..).
 		   BGM still plays with index 0 into the packed CIM at 0x4000. */
@@ -1499,10 +2069,33 @@ uint8_t CHardPc88::PlaySongIndex() const
 
 uint8_t CHardPc88::PlayParamIndex() const
 {
+	if (CEmuPc88PatchMulePages(mem_) || CEmuPc88PatchLvaccus9800(mem_))
+		return (uint8_t)(titleCode_ & 0xff);
+	/* PMD mailbox at 4000: catalog low byte already selected the staged file. */
+	if (CEmuPc88PatchPmdHl4000(mem_, initPc_))
+		return 0;
+	if (CEmuPc88PatchGinei2(mem_) || CEmuPc88PatchXzrA4(mem_))
+		return 0;
+	if (CEmuPc88PatchAfHl4400(mem_) || CEmuPc88PatchRomanciaSr(mem_, initPc_))
+		return (uint8_t)(titleCode_ & 0xff);
 	/* Stock hoot PATCH: port 01 is the song/bank number it echoes to the
 	   driver mailbox. Falling through to PlaySongIndex() here handed every
 	   one of those rips the port-80 play byte instead of the song. */
 	if (CEmuPc88PatchHootCmd01(mem_, initPc_))
+		return (uint8_t)(titleCode_ & 0xff);
+	if (CEmuPc88PatchPort01Then80(mem_, initPc_))
+		return (uint8_t)(titleCode_ & 0xff);
+	/* 1942_88: IN A,(01) → (829C) song id. HootCmd01 does not match
+	   (CALL ADEE between JR NZ and IN 01). */
+	if (CEmuPc88Patch1942LongPlay(mem_))
+		return (uint8_t)(titleCode_ & 0xff);
+	if (CEmuPc88PatchDprime(mem_) || CEmuPc88PatchAdrnalin(mem_))
+		return (uint8_t)(titleCode_ & 0xff);
+	if (CEmuPc88PatchOnion9006(mem_))
+		return (uint8_t)(titleCode_ & 0xff);
+	if (CEmuPc88PatchPwmajan2(mem_))
+		return (uint8_t)(titleCode_ & 0xff);
+	if (CEmuPc88PatchGandhara(mem_))
 		return (uint8_t)(titleCode_ & 0xff);
 	/* makai88: port01 = song id written to (0274) BGM or (0276) SE. */
 	if (CEmuPc88PatchMakaiIxIy(mem_))
@@ -1577,6 +2170,16 @@ void CHardPc88::PruneDeadTickSources()
 
 void CHardPc88::FixupIm2AfterPlay()
 {
+	/* lvaccus play plants I=1 / vec02=$9803. VRTC was held off through
+	   settle so I=0 would not fetch 0002 (ED 5E) and wander into PROG. */
+	if (CEmuPc88PatchLvaccus9800(mem_) && cpu_ && cpu_->r.i == 1)
+		useVrtc = 1;
+	/* mule 8B01 plants I=5F / vec02=8EB5 (SSG) / vec08=8B9E (FM). Timer B
+	   is the FM clock; VRTC still drives 8EB5. Held off through settle. */
+	if (CEmuPc88PatchMulePages(mem_) && cpu_ && cpu_->r.i == 0x5F)
+		useVrtc = 1;
+	if (CEmuPc88PatchXzrA4(mem_) && cpu_ && cpu_->r.i == 0xA4)
+		useVrtc = 1;
 	if (!mirrorSoundToRtc_ || !cpu_ || !mem_)
 		return;
 	const unsigned iBase = ((unsigned)cpu_->r.i) << 8;
@@ -1647,6 +2250,25 @@ void CHardPc88::ArmLizardOpnTimer()
 {
 	if (!armLizardTimer_ || !chip_ || !cpu_)
 		return;
+	/* PATCH@002A (after XOR-decrypt MAIN) plants JP 00B2 over A3DF so
+	   the duration loop waits on Timer B via (00B1). Without that JP
+	   A3B0 burns the whole song in one CALL and PATCH hits STOP. */
+	if (mem_ && mem_[0x9F00] == 0xC3 && mem_[0x00B2] == 0xF3
+		&& mem_[0x00B3] == 0x3E) {
+		mem_[0xA3DF] = 0xC3;
+		mem_[0xA3E0] = 0xB2;
+		mem_[0xA3E1] = 0x00;
+	}
+	/* PATCH play: CALL 9F0F then a busy delay and CALL 9F12 STOP.
+	   BGM streams end with FF so A3B0 returns after one pass — JR 0051
+	   at 0061 (over LD B,2 delay) replays them. One-tick SFX (4 bytes
+	   per channel) must keep STOP or they become a held-tone drone. */
+	if (mem_ && mem_[0x0051] == 0xD5 && mem_[0x0052] == 0xCD
+		&& mem_[0x0061] == 0x06 && mem_[0x0062] == 0x02
+		&& CEmuPc88LizardSongIsBgm(mem_, titleCode_ & 0xffu)) {
+		mem_[0x0061] = 0x18;
+		mem_[0x0062] = 0xEE; /* JR 0051 */
+	}
 	/* Match PATCH@0077: Timer B load 0x69, mode 0x3A, unmask port32, EI. */
 	PortOut(0x44, 0x26);
 	PortOut(0x45, 0x69);
@@ -1661,6 +2283,38 @@ void CHardPc88::ArmLizardOpnTimer()
 	   it to 1 here is what left every lizard88 title droning after its last
 	   note — 63 of the 211 stuck-note failures in the sweep. */
 	cpu_->r.iff1 = 1;
+}
+
+void CHardPc88::ArmYaksaPlay()
+{
+	if (!mem_ || !(yaksaPatch2_ || CEmuPc88PatchYaksa2(mem_)))
+		return;
+	/* 0C6A: LD A,1 / LD (37D1),A — sequencer enable for CALL 3556. */
+	mem_[0x37D1] = 1;
+}
+
+void CHardPc88::ArmPwmajan2()
+{
+	if (!mem_ || !cpu_ || !CEmuPc88PatchPwmajan2(mem_))
+		return;
+	/* 9019: I=0, IM2 word 0004 = 2060 (PROG2 ISR), IRQ level 1. */
+	mem_[0x0004] = 0x60;
+	mem_[0x0005] = 0x20;
+	cpu_->r.i = 0;
+	cpu_->r.im = 2;
+	cpu_->r.iff1 = 1;
+	/* 9019 OR 80 masks sound IRQ for the disk loader; we need it live.
+	   Plant the same ISR on the OPN slot — 1072 never arms Timer B. */
+	mem_[0x0008] = 0x60;
+	mem_[0x0009] = 0x20;
+	PortOut(0x32, (uint8_t)(PortIn(0x32) & 0x5F));
+	PortOut(0xE6, 1);
+	PortOut(0xE4, 3);
+	PortOut(0x44, 0x26);
+	PortOut(0x45, 0xCF);
+	PortOut(0x44, 0x27);
+	PortOut(0x45, 0x2A);
+	soundIrqMasked = 0;
 }
 
 void CHardPc88::PrepareNavitunePatch()
@@ -1680,11 +2334,70 @@ void CHardPc88::PrepareNavitunePatch()
 			break;
 		}
 	}
+	/* Play LDIR DE=4D00 BC=3000 copies C000/1000 onto 4D00-7CFF. naviprg is
+	   2C00 bytes so dest 7700-78FF is the driver/music overlap and 7900-7CFF
+	   is unmapped source — BGM 00/01 headers and 79xx phrases die, BGM 03
+	   (813A) survives. Stop at 7700 (navimus). */
+	for (unsigned a = base; a + 8u < end && a + 8u < 0x10000u; a++) {
+		if (mem_[a] == 0x11 && mem_[a + 1] == 0x00 && mem_[a + 2] == 0x4D
+			&& mem_[a + 3] == 0x01 && mem_[a + 4] == 0x00 && mem_[a + 5] == 0x30
+			&& mem_[a + 6] == 0xED && mem_[a + 7] == 0xB0) {
+			mem_[a + 4] = 0x00;
+			mem_[a + 5] = 0x2A;
+			break;
+		}
+	}
+	/* F2 with empty return stack (5752) zeros (52CF) and the tick at 4EC0
+	   skips the sequencer. BGM 01's list points a channel at a bare F2
+	   (7777, one byte before the next phrase) so the whole song dies after
+	   the initial IX+6 delay. End that channel only. Patch both copies;
+	   play LDIR refreshes 4D00 from C000. */
+	if (mem_[0x576E] == 0x21 && mem_[0x576F] == 0x00 && mem_[0x5770] == 0x00
+		&& mem_[0x5771] == 0x22 && mem_[0x5772] == 0xCF && mem_[0x5773] == 0x52) {
+		memset(mem_ + 0x576E, 0x00, 6);
+		if (mem_[0xCA6E] == 0x21)
+			memset(mem_ + 0xCA6E, 0x00, 6);
+		if (mem_[0x1A6E] == 0x21)
+			memset(mem_ + 0x1A6E, 0x00, 6);
+	}
 	for (unsigned a = base; a + 2u < end && a + 2u < 0x10000u; a++) {
 		if (mem_[a] == 0x21 && mem_[a + 1] == 0x7D && mem_[a + 2] == 0x01) {
 			mem_[a + 1] = 0xFF;
 			break;
 		}
+	}
+	ApplyNavituneTitleSong();
+	/* After dedicated cmd10 play, JR poll without clearing port 00 retriggers
+	   play every tight loop and the song never stays in the ISR. Plant XOR A;
+	   OUT (00),A then JR poll in the old 017D counter byte (INC moved to 01FF). */
+	for (unsigned a = base; a + 6u < end && a + 6u < 0x10000u; a++) {
+		if (!(mem_[a] == 0x3E && mem_[a + 1] == 0x10
+			&& mem_[a + 2] == 0xCD && mem_[a + 3] == 0x00 && mem_[a + 4] == 0x4D
+			&& mem_[a + 5] == 0x18))
+			continue;
+		const unsigned cave = base + 0x7Du;
+		if (cave + 5u >= 0x10000u)
+			break;
+		const int toCave = (int)cave - (int)(a + 5u + 2u);
+		const int toPoll = (int)(base + 0x29u) - (int)(cave + 5u);
+		if (toCave < -128 || toCave > 127 || toPoll < -128 || toPoll > 127)
+			break;
+		mem_[a + 6] = (uint8_t)toCave;
+		mem_[cave] = 0xAF;
+		mem_[cave + 1] = 0xD3;
+		mem_[cave + 2] = 0x00;
+		mem_[cave + 3] = 0x18;
+		mem_[cave + 4] = (uint8_t)toPoll;
+		break;
+	}
+	/* Play path already LD A,10 / CALL 4D00 then JR poll. Splicing cmd10
+	   into init (cmd07 + LD BC,song + cmd0E) starts the song and cmd0E
+	   immediately stops it — the only audible result was a few-ms click.
+	   DirectPlayKick of that same init is also skipped (NavituneRetargetPc). */
+	for (unsigned a = base; a + 4u < end && a + 4u < 0x10000u; a++) {
+		if (mem_[a] == 0x3E && mem_[a + 1] == 0x10
+			&& mem_[a + 2] == 0xCD && mem_[a + 3] == 0x00 && mem_[a + 4] == 0x4D)
+			return;
 	}
 	for (unsigned a = base; a + 20u < end && a + 20u < 0x10000u; a++) {
 		if (!(mem_[a] == 0x3E && mem_[a + 1] == 0x07 && mem_[a + 2] == 0x01
@@ -1733,21 +2446,26 @@ void CHardPc88::PrepareNavitunePatch()
 
 void CHardPc88::ApplyNavituneTitleSong()
 {
-	if (!armNavituneTimer_ || !mem_ || !naviSongAddr_)
+	if (!armNavituneTimer_ || !mem_)
 		return;
-	const uint8_t lo = (uint8_t)(naviSongAddr_ & 0xff);
-	const uint8_t hi = (uint8_t)(naviSongAddr_ >> 8);
-	const unsigned base = (initPc_ > 0) ? (unsigned)initPc_ : 0;
-	const unsigned end = base + 0x100u;
-	for (unsigned a = base; a + 8u < end && a + 8u < 0x10000u; a++) {
-		if (mem_[a] == 0x3E && mem_[a + 1] == 0x07
-			&& mem_[a + 2] == 0x01
-			&& mem_[a + 5] == 0xCD && mem_[a + 6] == 0x00 && mem_[a + 7] == 0x4D) {
-			mem_[a + 3] = lo;
-			mem_[a + 4] = hi;
-			return;
-		}
+	if (!naviSongAddr_ && mdataAddr_ >= 0) {
+		const unsigned fileOff = (titleCode_ >> 8) & 0xffffu;
+		naviSongAddr_ = (uint16_t)((unsigned)mdataAddr_ + fileOff);
 	}
+	if (!naviSongAddr_)
+		return;
+	/* Header is 06 77 F5 F5 F2 00 then id/ptr triplets ending FF.
+	   cmd07 stores BC to (52D9); cmd10/532E does word[(52D9)+A*2] as the
+	   list pointer. Pointing BC at the header makes every song read 7706
+	   (the first word of every header) and play BGM 00. Plant the list
+	   address at mdata (7700) so stock LD BC,$7700 still works. Do not
+	   use $01E0 — PATCH SP=$0200 grows down into that cell. */
+	const unsigned body = (unsigned)naviSongAddr_ + 6u;
+	if (body < 6u || body >= 0x10000u)
+		return;
+	const unsigned slot = (mdataAddr_ >= 0) ? (unsigned)mdataAddr_ : 0x7700u;
+	mem_[slot] = (uint8_t)(body & 0xff);
+	mem_[slot + 1] = (uint8_t)((body >> 8) & 0xff);
 }
 
 unsigned CHardPc88::NavituneRetargetPc() const
@@ -1756,6 +2474,14 @@ unsigned CHardPc88::NavituneRetargetPc() const
 		return 0;
 	const unsigned base = (initPc_ > 0) ? (unsigned)initPc_ : 0;
 	const unsigned end = base + 0x100u;
+	/* Dedicated cmd10 play already ran via port 1. Kicking cmd07+cmd0E
+	   after that stops the song (cmd0E) — both titles then look like a
+	   2s click of song 0. */
+	for (unsigned a = base; a + 4u < end && a + 4u < 0x10000u; a++) {
+		if (mem_[a] == 0x3E && mem_[a + 1] == 0x10
+			&& mem_[a + 2] == 0xCD && mem_[a + 3] == 0x00 && mem_[a + 4] == 0x4D)
+			return 0;
+	}
 	for (unsigned a = base; a + 8u < end && a + 8u < 0x10000u; a++) {
 		if (mem_[a] == 0x3E && mem_[a + 1] == 0x07
 			&& mem_[a + 2] == 0x01
@@ -1779,6 +2505,19 @@ void CHardPc88::FinishNavitunePlay()
 	cpu_->r.iff1 = 1;
 	if (cpu_->r.sp < 0x4000 || cpu_->r.sp >= 0x7700)
 		cpu_->r.sp = 0x7000;
+	if (mem_ && naviSongAddr_) {
+		const unsigned body = (unsigned)naviSongAddr_ + 6u;
+		if (body < 0x10000u) {
+			const unsigned slot = (mdataAddr_ >= 0) ? (unsigned)mdataAddr_ : 0x7700u;
+			mem_[slot] = (uint8_t)(body & 0xff);
+			mem_[slot + 1] = (uint8_t)((body >> 8) & 0xff);
+			mem_[0x52D9] = (uint8_t)(slot & 0xff);
+			mem_[0x52DA] = (uint8_t)((slot >> 8) & 0xff);
+		}
+	}
+	if (mem_[0x576E] == 0x21 && mem_[0x5771] == 0x22
+		&& mem_[0x5772] == 0xCF && mem_[0x5773] == 0x52)
+		memset(mem_ + 0x576E, 0x00, 6);
 }
 
 int CHardPc88::NeedsYakyufanArm() const
@@ -1873,6 +2612,8 @@ int CHardPc88::NeedsPlayEi() const
 		return 1;
 	/* ashe DRIVER@7800: OPN write path DIs; without host EI, key-ons stay silent. */
 	if (CEmuPc88AshePlayHi(mem_))
+		return 1;
+	if (CEmuPc88PatchPwmajan2(mem_))
 		return 1;
 	/* Falcom specialty PATCH at E000: JR + IM2 table, DI on play. */
 	if (mem_[0xE000] == 0x18 && mem_[0xE017] == 0xF3 && mem_[0xE018] == 0xED)
@@ -1987,12 +2728,224 @@ void CHardPc88::DirectPlayKick(unsigned addr, int ei)
 	cpu_->r.iff1 = ei ? 1 : 0;
 }
 
+int CHardPc88::SkipUnwedge() const
+{
+	if (!cpu_ || !mem_)
+		return 0;
+	/* mule CALL 8B01 lives in PROG@6000. Yanking PC back to page-0 poll
+	   aborts Timer/I plant and leaves MAIN silent. */
+	if (CEmuPc88PatchMulePages(mem_)
+		&& cpu_->r.pc >= 0x6000 && cpu_->r.pc < 0xA000)
+		return 1;
+	return 0;
+}
+
 int CHardPc88::IgnoreSoundIrqMask() const
 {
 	/* Falcom OUT (32),OR 80 around JP (HL) into type=prog at 0000. */
 	if (!cpu_ || mem_[0xE000] != 0x18 || mem_[0xE017] != 0xF3)
 		return 0;
 	return cpu_->r.pc < 0xE000 ? 1 : 0;
+}
+
+int CHardPc88::CmdPollPc() const
+{
+	if (!mem_)
+		return -1;
+	/* Falcom specialty PATCH: IN A,(00) / OR A / JR Z at E027. */
+	if (mem_[0xE000] == 0x18 && mem_[0xE027] == 0xDB && mem_[0xE028] == 0x00
+		&& mem_[0xE029] == 0xB7 && mem_[0xE02A] == 0x28)
+		return 0xE027;
+	auto findAt = [this](unsigned base) -> int {
+		const unsigned end = base + 0x70;
+		for (unsigned i = base; i + 4 < end && i + 4 < 0x10000u; i++) {
+			if (mem_[i] == 0xDB && mem_[i + 1] == 0x00
+				&& mem_[i + 2] == 0xB7 && mem_[i + 3] == 0x28)
+				return (int)i;
+		}
+		return -1;
+	};
+	int p = findAt(0);
+	if (p >= 0)
+		return p;
+	/* blmnstry/hchaser/rouge88/pias88: PATCH lives at init_pc (often $1000
+	   after a JR), not page 0. mappy88 is at $F000. */
+	if (initPc_ >= 0x80 && initPc_ < 0xFF80) {
+		unsigned pc = (unsigned)initPc_;
+		p = findAt(pc);
+		if (p >= 0)
+			return p;
+		if (mem_[pc] == 0x18) {
+			const int rel = (int)(int8_t)mem_[pc + 1];
+			const unsigned jr = (unsigned)((int)pc + 2 + rel);
+			if (jr >= 0x80 && jr < 0xFF80) {
+				p = findAt(jr);
+				if (p >= 0)
+					return p;
+			}
+		}
+	}
+	return -1;
+}
+
+/* hoot oldfalcom.cpp sndadr[] — planted at E00E/E010/E012/E014 before play.
+   Index: Romancia 0-1, Xanadu 2-7, Xanadu2 8-12, Asteka2 13. */
+enum {
+	FALCOM_NONE = 0,
+	FALCOM_XANADU = 1,
+	FALCOM_XANADU2 = 2,
+	FALCOM_ASTEKA2 = 3
+};
+
+static const uint16_t kFalcomSndadr[][5] = {
+	{0x1056, 0x103a, 0xa000, 0x0000, 0x1043}, /*  0 ROMANCIA Opening */
+	{0x3a39, 0x3bee, 0x3b98, 0x3db5, 0x0000}, /*  1 |        Main */
+	{0x1b67, 0x1c41, 0x1c0a, 0x0000, 0x1c49}, /*  2 XANADU Training */
+	{0x4351, 0x443b, 0x43f5, 0x0000, 0x4443}, /*  3 |      Main */
+	{0x168a, 0x1762, 0x172b, 0x0000, 0x176a}, /*  4 |      Boss */
+	{0x16b5, 0x178d, 0x1756, 0x0000, 0x1795}, /*  5 |      King Dragon */
+	{0x03d6, 0x0495, 0x0489, 0x0000, 0x049d}, /*  6 |      Ending 1 */
+	{0x03d6, 0x053d, 0x0489, 0x0000, 0x0545}, /*  7 |      Ending 2 */
+	{0x0160, 0x03dc, 0xa000, 0x0000, 0x0000}, /*  8 XANADU2 Opening */
+	{0x431c, 0x4466, 0x4417, 0x6067, 0x0000}, /*  9 |       Main */
+	{0x1563, 0x16a9, 0x165a, 0x6067, 0x0000}, /* 10 |       Boss */
+	{0x159c, 0x16e2, 0x1693, 0x6067, 0x0000}, /* 11 |       King Dragon */
+	{0x03d5, 0x05d6, 0xa000, 0x0000, 0x0000}, /* 12 |       Ending */
+	{0xaeb7, 0xb103, 0xb05b, 0x7eec, 0x0000}, /* 13 ASTEKA2 APRG */
+	{0x029a, 0x0119, 0xa000, 0x0000, 0x0000}, /* 14 XANADU2 IPL (drv 6); keep I=01 */
+	{0xb02a, 0xb00c, 0xb02a, 0x0000, 0x0000}, /* 15 ASTEKA2 SOUND (drv 2) */
+};
+
+static void CEmuPc88Poke16(uint8_t* mem, unsigned addr, uint16_t v)
+{
+	mem[addr] = (uint8_t)(v & 0xff);
+	mem[addr + 1] = (uint8_t)((v >> 8) & 0xff);
+}
+
+static int CEmuPc88DetectFalcom(const CEmuGameEntry* ge, const uint8_t* mem)
+{
+	if (!ge || !mem)
+		return FALCOM_NONE;
+	if (mem[0xE000] != 0x18 || mem[0xE017] != 0xF3 || mem[0xE027] != 0xDB)
+		return FALCOM_NONE;
+	int hasAprg = 0, hasSound = 0, hasPrno = 0, hasBgm = 0, hasIpl = 0;
+	for (int i = 0; i < ge->romCount; i++) {
+		const char* t = ge->rom[i].type;
+		const char* n = ge->rom[i].name;
+		if (!t)
+			continue;
+		if (_stricmp(t, "bgm") == 0)
+			hasBgm = 1;
+		if (_stricmp(t, "prog") != 0 || !n)
+			continue;
+		if (_stricmp(n, "APRG") == 0)
+			hasAprg = 1;
+		else if (_stricmp(n, "SOUND") == 0)
+			hasSound = 1;
+		else if (_stricmp(n, "IPL") == 0)
+			hasIpl = 1;
+		else if (_strnicmp(n, "PR.NO", 5) == 0)
+			hasPrno = 1;
+	}
+	if (hasAprg || hasSound)
+		return FALCOM_ASTEKA2;
+	if (hasPrno && hasBgm)
+		return FALCOM_XANADU2;
+	if (hasPrno || hasIpl)
+		return FALCOM_XANADU;
+	return FALCOM_NONE;
+}
+
+void CHardPc88::ApplyFalcomPlay()
+{
+	if (!falcomType_)
+		return;
+	/* Title 0x12xx / 0x13xx / 0x14xx: same driver as 0x02/03/04, food empty. */
+	const unsigned drvHi = (titleCode_ >> 8) & 0xffu;
+	const int foodEmpty = (drvHi & 0xF0) != 0;
+	const unsigned drv = drvHi & 0x0Fu;
+	int ind = -1;
+	unsigned load = 0;
+
+	switch (falcomType_) {
+	case FALCOM_XANADU:
+		ind = (int)drv + 1; /* drv 1..6 → rows 2..7 */
+		if (ind < 2 || ind > 7)
+			ind = -1;
+		load = 0;
+		break;
+	case FALCOM_XANADU2:
+		if (drv == 6)
+			ind = 14; /* IPL arranged opening */
+		else
+			ind = (int)drv + 7; /* drv 1..5 → rows 8..12 */
+		if (drv != 6 && (ind < 8 || ind > 12))
+			ind = -1;
+		load = 0;
+		break;
+	case FALCOM_ASTEKA2:
+		if (drv == 2) {
+			ind = 15; /* SOUND @ B000 */
+			load = 0xB000;
+		} else {
+			ind = 13;
+			load = 0x8000;
+		}
+		break;
+	default:
+		break;
+	}
+	/* Prog first — volume/food sit inside the 0000..5FFF window. */
+	if (drv < 256 && progBank_[drv] && progBankSize_[drv] > 0) {
+		unsigned n = progBankSize_[drv];
+		if (load + n > 0xE000)
+			n = 0xE000 - load;
+		if (n > 0)
+			memcpy(mem_ + load, progBank_[drv], n);
+	}
+	if (falcomType_ == FALCOM_XANADU) {
+		mem_[0x617a] = 0x09; /* volume */
+		if (!foodEmpty && (drv == 2 || drv == 3 || drv == 4)) {
+			mem_[0x60a7] = 0xff; /* food != 0 */
+			mem_[0x607d] = 0x00;
+			mem_[0x6170] = 0x00;
+		}
+		if (drv == 6) {
+			CEmuPc88Poke16(mem_, 0x06af, 0x0001);
+			CEmuPc88Poke16(mem_, 0x06b8, 0x0001);
+			CEmuPc88Poke16(mem_, 0x06c1, 0x0001);
+			CEmuPc88Poke16(mem_, 0x06b1, 0x09e2);
+			CEmuPc88Poke16(mem_, 0x06b3, 0x09e2);
+			CEmuPc88Poke16(mem_, 0x06ba, 0x0b2f);
+			CEmuPc88Poke16(mem_, 0x06bc, 0x0b2f);
+			CEmuPc88Poke16(mem_, 0x06c3, 0x0ca3);
+			CEmuPc88Poke16(mem_, 0x06c5, 0x0ca3);
+			mem_[0x0226] = 0x0c;
+			mem_[0x0227] = 0xaa;
+		}
+	}
+	if (ind >= 0 && ind < (int)(sizeof(kFalcomSndadr) / sizeof(kFalcomSndadr[0]))) {
+		CEmuPc88Poke16(mem_, 0xE00E, kFalcomSndadr[ind][0]);
+		CEmuPc88Poke16(mem_, 0xE010, kFalcomSndadr[ind][1]);
+		CEmuPc88Poke16(mem_, 0xE012, kFalcomSndadr[ind][2]);
+		CEmuPc88Poke16(mem_, 0xE014, kFalcomSndadr[ind][3]);
+		const uint16_t iffadr = kFalcomSndadr[ind][4];
+		if (iffadr)
+			mem_[iffadr] = 0xE0;
+	}
+	if (falcomType_ == FALCOM_XANADU2) {
+		const unsigned song = titleCode_ & 0xffu;
+		if (song < 256 && bgmBank_[song] && bgmBankSize_[song] >= 16) {
+			unsigned n = bgmBankSize_[song];
+			if (n > 13u * 1024u)
+				n = 13u * 1024u;
+			if (0x5C00 + n > 0xE000)
+				n = 0xE000 - 0x5C00;
+			memcpy(mem_ + 0x5C00, bgmBank_[song], n);
+		}
+		if (drv != 5 && !foodEmpty)
+			mem_[0x60a5] = 0xff;
+	}
 }
 
 void CHardPc88::BankCopyBgm(uint8_t songIndex)
@@ -2106,7 +3059,28 @@ void CHardPc88::PortOut(uint16_t port, uint8_t data)
 		break;
 	case 0x01: param = data; break;
 	case 0x02:
-		/* Falcom E000 PATCH: OUT (02),song maps type=prog bank
+		/* hoot oldfalcom: OUT (02) is Xanadu2 BGM window only. Prog and
+		   E00E..E014 were planted by ApplyFalcomPlay — rewriting them here
+		   clobbered the start address after PATCH had already copied E00E
+		   (still 0) into the IM2 sound vector. */
+		if (falcomType_ == FALCOM_XANADU2) {
+			if (data < 256 && bgmBank_[data] && bgmBankSize_[data] >= 16) {
+				unsigned n = bgmBankSize_[data];
+				if (n > 13u * 1024u)
+					n = 13u * 1024u;
+				if (0x5C00 + n > 0xE000)
+					n = 0xE000 - 0x5C00;
+				memcpy(mem_ + 0x5C00, bgmBank_[data], n);
+			}
+			const unsigned drv = (titleCode_ >> 8) & 0x0Fu;
+			const int foodEmpty = ((titleCode_ >> 8) & 0xF0) != 0;
+			if (drv != 5 && !foodEmpty)
+				mem_[0x60a5] = 0xff;
+			break;
+		}
+		if (falcomType_)
+			break;
+		/* Other type=prog PATCHes: OUT (02),song maps the bank
 		   (title bits 8..15). Load address follows the bank's own
 		   `LD A,n; LD I,A` (asteka2 APRG→8000, SOUND→B000); plain
 		   xana PR.NO* fall back to 0000.
@@ -2268,6 +3242,7 @@ int CHardPc88::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCo
 		if (initPc_ == 0 && _stricmp(r->name, "PATCH") == 0 && off == 0xE000)
 			initPc_ = 0xE000;
 	}
+	falcomType_ = CEmuPc88DetectFalcom(ge, mem_);
 	CEmuPc88MirrorDriverPage20(mem_);
 	/* Incomplete rips (e.g. p1demo1 DRIVER EOF before song RAM) are not
 	   repaired here — inventing trampolines hides missing payload. */
@@ -2302,6 +3277,11 @@ int CHardPc88::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCo
 		if (titleMdata >= 0)
 			mdataAddr_ = titleMdata;
 	}
+	if (CEmuPc88PatchXzr2VoiceF000(mem_)) {
+		vdataAddr_ = 0xF000;
+		if (vfileSize_ <= 0)
+			vfileSize_ = 0x200;
+	}
 	const int overlapsCode = CEmuPc88SongOverlapsCode(fs, ge, mdataAddr_, mdataSize_);
 	/* Overlapping mdata (sorc88 SEDAT, kbreed TRPSCR, …): keep code intact
 	   through boot; LoadSongData runs again on the play trigger. */
@@ -2330,6 +3310,18 @@ int CHardPc88::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCo
 			if (n > 0)
 				memcpy(mem_ + mdataAddr_, data, n);
 		}
+	}
+	/* harakiri: boot CALL C009 is FMDRV init. MPLAY/FMDRV2 voice overlays
+	   leave C009 as data (NOP/RST) — CALL C000, the JP table's init. */
+	if (mem_[0x0B] == 0xCD && mem_[0x0C] == 0x09 && mem_[0x0D] == 0xC0
+		&& mem_[0xC000] == 0xC3 && mem_[0xC009] != 0xC3)
+		mem_[0x0C] = 0x00;
+	if (CEmuPc88PatchRobowr(mem_) && (titleCode & 0xffu) == 1
+		&& mem_[0xCB5A] == 0xF3 && mem_[0xCB63] == 0xFE && mem_[0xCB64] == 0x01
+		&& mem_[0xCB65] == 0x20) {
+		mem_[0x0A] = 1;
+		mem_[0xCB65] = 0x00;
+		mem_[0xCB66] = 0x00;
 	}
 	if (armNavituneTimer_)
 		PrepareNavitunePatch();
@@ -2374,6 +3366,34 @@ int CHardPc88::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCo
 		/* A572 song-gate is planted after XOR-decrypt in the driver —
 		   LoadRoms runs before PATCH decrypts MAIN@9F00. */
 	}
+	/* pwmajan2: PATCH CALL 9019 inits I/IRQ then CALL 0184/0178 and was
+	   meant to RET at the C9 planted over EI+disk. Boot never reached poll.
+	   Skip 9019; ArmPwmajan2 plants the IM2 vec + unmask after settle. */
+	if (CEmuPc88PatchPwmajan2(mem_)
+		&& mem_[0xF012] == 0xCD && mem_[0xF013] == 0x19 && mem_[0xF014] == 0x90) {
+		mem_[0xF012] = 0x00;
+		mem_[0xF013] = 0x00;
+		mem_[0xF014] = 0x00;
+	}
+	CEmuPc88PlantIceclimbTitleLoop(mem_);
+	if (CEmuPc88PatchYaksa2(mem_))
+		mem_[0x37D1] = 1;
+	/* mule 8B01 EI's while I is still 0, then LD I,5F. Catalog VRTC in
+	   that window vectors through 0004 into the stack page. OPN Timer B
+	   is armed by 8B01 itself. */
+	if (CEmuPc88PatchMulePages(mem_))
+		useVrtc = 0;
+	/* lvaccus: PATCH is DI/IM2 with I=0. Catalog VRTC during settle reads
+	   vec 0002 (ED 5E) and runs into empty RAM then PROG. Play plants
+	   I=1 / (0102)=$9803 and EI's — re-enable VRTC after that. */
+	if (CEmuPc88PatchLvaccus9800(mem_))
+		useVrtc = 0;
+	/* xzr I=A4 vectors are planted at boot, but catalog VRTC during settle
+	   still hits A86F (SP swap to BD4B) before A416 EI's. */
+	if (CEmuPc88PatchXzrA4(mem_))
+		useVrtc = 0;
+	if (falcomType_)
+		ApplyFalcomPlay();
 	/* f_crisis MMLEX@9A00 + bare DI PATCH: EI alone does not unlock audio
 	   (play wanders into MMLEX). Keep forcePlayEi_ clear until the MUSIC.OBJ
 	   protocol is understood. castle keeps forcePlayEi_ from Init (OPN IM2).

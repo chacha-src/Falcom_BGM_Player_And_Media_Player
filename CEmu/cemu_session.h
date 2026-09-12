@@ -42,6 +42,7 @@ struct CEmuSession {
 	uint32_t silenceRun;      /* 連続無音フレーム */
 	uint8_t silenceHeard;     /* 一度でも音が出た */
 	uint8_t endedBySilence;   /* 無音判定で lengthSamples を確定した */
+	uint8_t seekRender;       /* シーク中のダミー Render — 無音終端判定しない */
 	wchar_t path[CEMU_ZIP_PATH];
 	const CEmuGameEntry* game;
 	CEmuS98Player s98;
@@ -58,6 +59,7 @@ struct CEmuSession {
 	CEmuFm7 fm7;
 	CEmuPmdPlayer pmd;
 	unsigned overlayCode;
+	unsigned titleCode;
 	volatile long overlayPend;
 };
 

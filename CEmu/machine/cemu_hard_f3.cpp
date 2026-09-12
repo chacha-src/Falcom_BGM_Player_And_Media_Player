@@ -1,4 +1,4 @@
-#include "StdAfx.h"
+﻿#include "StdAfx.h"
 #include "cemu_hard_f3.h"
 #include "cemu_m68k_bus.h"
 #include "../chip/cemu_chip_es5505.h"
@@ -532,6 +532,23 @@ void CHardF3::SetSongCommand(unsigned code)
 	}
 }
 
+void CHardF3::DisableDelaySeqTick()
+{
+	/* After Open the delay trampoline's jsr C1490A is ~14Hz on SSP. Mailbox
+	   type-$E on USP is the same C1490A without a second envelope clock.
+	   Bra over the jsr; keep the subq so boot-style callers still return. */
+	if (!audioCpu_ || audioCpuSize_ < 0x100010u) return;
+	const unsigned win0 = 0x100000u;
+	const unsigned win1 = audioCpuSize_ < 0x120000u ? audioCpuSize_ : 0x120000u;
+	static const uint8_t k[8] = { 0x4a, 0x78, 0xd4, 0xa6, 0x67, 0x12, 0x2f, 0x0e };
+	for (unsigned i = win0; i + 8u <= win1; i += 2) {
+		if (memcmp(audioCpu_ + i, k, 8) == 0) {
+			audioCpu_[i + 4] = 0x60;
+			return;
+		}
+	}
+}
+
 int CHardF3::TickDuart(int cpuCycles)
 {
 	if (cpuCycles <= 0) return duartIrqPending_;
@@ -878,9 +895,9 @@ int CHardF3::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode
 	}
 
 	/* C10FEE is a boot spin-wait, not the 60Hz tick. After Open the CPU
-	   parks in scheduler STOP. C1490A has no firmware callers — do not
-	   jsr it from IRQ or idle STOP (A-line/trap#3 empties the free list
-	   and 2610-fills). NOP parser `move.w #0; A-line`; opcode-0 A-line
+	   parks in scheduler STOP. C14884 is the type-$E mailbox handler
+	   (D098+$0E). Do not jsr C1490A from idle STOP — that empties the
+	   free list. NOP parser `move.w #0; A-line`; opcode-0 A-line
 	   becomes MOVE SR. Host drops IPL after #$2700. */
 	if (audioCpu_ && audioCpuSize_ > 0x10000Cu) {
 		static const uint8_t kDelayTail[8] = {
@@ -938,9 +955,12 @@ int CHardF3::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode
 					audioCpu_[i + 4] = 0x4e; audioCpu_[i + 5] = 0x71;
 				}
 			}
-			/* Mailbox type $E (C12D94 tempo → C14884 → C1490A) does
-			   `move.w #0; A-line` at C13238, outside the parser window.
-			   That RTE-to-user is the same smash as the parser drop. */
+			/* Mailbox type $E raises IPL7 for the catalog reload, then
+			   `move.w #0; A-line` to drop back to user IPL0 before
+			   jsr C14884. The A-line RTE smashed USP; MOVE SR does the
+			   drop without leaving the mailbox task. NOP here left IPL7
+			   through C146AE and the skip-positive-words loop never
+			   yielded. */
 			const unsigned mb0 = win0 + 0x13200u;
 			const unsigned mb1 = win0 + 0x13600u;
 			for (unsigned i = mb0; i + 6u <= mb1 && i + 6u <= win1; i += 2) {
@@ -953,8 +973,11 @@ int CHardF3::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode
 			static const uint8_t kAlineIpl7[6] = { 0x30, 0x3c, 0x27, 0x00, 0xa0, 0x00 };
 			for (unsigned i = mb0; i + 6u <= mb1 && i + 6u <= win1; i += 2) {
 				if (memcmp(audioCpu_ + i, kAlineIpl7, 6) == 0) {
-					audioCpu_[i] = 0x46; audioCpu_[i + 1] = 0xfc;
-					audioCpu_[i + 2] = 0x27; audioCpu_[i + 3] = 0x00;
+					/* Stay at the mailbox task SR (user IPL0). MOVE SR
+					   #$2700 left C146AE uninterruptible and the first
+					   stream word was never consumed. */
+					audioCpu_[i] = 0x4e; audioCpu_[i + 1] = 0x71;
+					audioCpu_[i + 2] = 0x4e; audioCpu_[i + 3] = 0x71;
 					audioCpu_[i + 4] = 0x4e; audioCpu_[i + 5] = 0x71;
 				}
 			}
@@ -969,6 +992,24 @@ int CHardF3::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode
 					audioCpu_[i] = 0x4e; audioCpu_[i + 1] = 0x71;
 					audioCpu_[i + 2] = 0x4e; audioCpu_[i + 3] = 0x71;
 					break;
+				}
+			}
+			/* Type $E: C13306(D098+$E) yields C1100B (odd). jsr (a0) falls
+			   into C146AE and never returns. C1490A is the proven sequencer
+			   (delay trampoline). Replace bsr C13306 / jsr (a0) — 6 bytes. */
+			if (playOff) {
+				const unsigned playCpu = 0xC00000u + (playOff - win0);
+				for (unsigned i = mb0; i + 6u <= mb1 && i + 6u <= win1; i += 2) {
+					if (audioCpu_[i] == 0x61 && audioCpu_[i + 1] == 0x00
+						&& audioCpu_[i + 4] == 0x4e && audioCpu_[i + 5] == 0x90) {
+						audioCpu_[i] = 0x4e;
+						audioCpu_[i + 1] = 0xb9;
+						audioCpu_[i + 2] = (uint8_t)(playCpu >> 24);
+						audioCpu_[i + 3] = (uint8_t)(playCpu >> 16);
+						audioCpu_[i + 4] = (uint8_t)(playCpu >> 8);
+						audioCpu_[i + 5] = (uint8_t)playCpu;
+						break;
+					}
 				}
 			}
 			/* C14884→C149E4 copies mailbox 4(a5) into D4A6 then trap#4.
@@ -1029,7 +1070,7 @@ int CHardF3::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode
 				}
 			}
 			const unsigned hole0 = win0 + 0x1C000u;
-			for (unsigned i = (hole0 < win1 ? hole0 : win0); i + 40u <= win1; i++) {
+			for (unsigned i = (hole0 < win1 ? hole0 : win0); i + 40u <= win1; i += 2) {
 				int ok = 1;
 				for (int k = 0; k < 40; k++) {
 					if (audioCpu_[i + k] != 0xff) { ok = 0; break; }

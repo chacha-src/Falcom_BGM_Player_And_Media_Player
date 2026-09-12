@@ -229,6 +229,9 @@ private:
 	uint8_t MidiDataIn();
 	void MidiPushAck(uint8_t v);
 	void MidiCaptureByte(uint8_t v);
+	/* MPU-401 intelligent: clock-to-host / play step on PIT wraps. */
+	void MpuClockTick();
+	void MpuFinishReset();
 
 	CChip* chip_;
 	/* SNE SOUND ORCHESTRA: a 26K-compatible YM2203 plus a second FM chip at
@@ -251,11 +254,21 @@ private:
 	unsigned midiPortOutCount_; /* E0D0 OUTs even when capture disarmed */
 	uint64_t midiLastCycle_;
 	int mpuUart_;
-	uint8_t mpuAckQ_[8];
+	uint8_t mpuAckQ_[32];
 	unsigned mpuAckR_;
 	unsigned mpuAckW_;
 	uint8_t mpuRx_;
 	int mpuRxFull_;
+	/* Intelligent-mode firmware (FMD / MPU-401, not UART 3Fh). */
+	uint8_t mpuCmdByte_;
+	uint8_t mpuTempo_;
+	uint8_t mpuTimebase_;
+	uint8_t mpuCthRate_;
+	int mpuClockToHost_;
+	int mpuWsdChan_;
+	uint64_t mpuCthResidual_;
+	int mpuResetBusy_;
+	uint64_t mpuResetUntil_;
 
 	/* PIT ch0 */
 	uint32_t pitClockHz_;

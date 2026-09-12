@@ -8,7 +8,7 @@ class CSasamiNotePaletteDlg : public CCustomBlurDialogExBase
 public:
 	CSasamiNotePaletteDlg(CWnd* pParent = nullptr);
 	enum { IDD = IDD_SASAMI_NOTE_PAL };
-	enum { kCellCount = 48 };
+	enum { kCellCount = 54 };
 	int m_baseDur;
 	int m_durTicks;
 	int m_rest;
@@ -77,6 +77,11 @@ enum {
 	SASAMI_PAL_CMD_OTTAVA_32VA = 22,
 	SASAMI_PAL_CMD_OTTAVA_32VB = 23,
 	SASAMI_PAL_CMD_OTTAVA_LOCO = 24,
+	SASAMI_PAL_CMD_SVIB = 25,
+	SASAMI_PAL_CMD_STREM = 26,
+	SASAMI_PAL_CMD_SPAN = 27,
+	SASAMI_PAL_CMD_SPORTA = 28,
+	SASAMI_PAL_CMD_SVIB_OFF = 29,
 	SASAMI_PAL_CMD_METER_24 = 30,
 	SASAMI_PAL_CMD_METER_34 = 31,
 	SASAMI_PAL_CMD_METER_44 = 32,

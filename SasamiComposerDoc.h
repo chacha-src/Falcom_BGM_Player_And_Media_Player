@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 /* Shared SASAMI Composer document: score events + text MML compile (fixed arrays, no std). */
 #include <stdint.h>
 #include <windows.h>
@@ -59,7 +59,8 @@ enum ScEvKind : uint8_t {
 	SC_EV_FM_LEGATO = 38,     /* note without key-off: a=noteByte, dur=wait → cmd24 */
 	SC_EV_FM_FSLR = 39,       /* wait without key-off: dur=wait → cmd10 */
 	SC_EV_FM_FLR = 40,        /* stereo B4 high bits: a=LR mask → cmd16 */
-	SC_EV_SOFT_VIB = 41,      /* a=mode(0=vib,1=trem), b=delayLen, c=depth */
+	SC_EV_SOFT_VIB = 41,      /* a=mode 0=pitch 1=vol 2=pan 3=sq-pitch; b=delay; c=depth;
+	                            dur=period ticks (0=24=eighth); flags=step ticks (0=1) */
 	SC_EV_SOFT_PORTA = 42,    /* a=semitone delta+64, b=delayLen, c=glideLen */
 	SC_EV_METER = 43,         /* time signature change: a=numer, b=denom (global, ch=0) */
 	SC_EV_CLEF = 44,          /* clef change (display): ch=part, a=0G 1F 2grand 3drum */
@@ -227,8 +228,12 @@ int ScFmAddEx(ScFmDoc* d, uint32_t tick, int ch, int exN, int data);
 int ScFmAddLfo(ScFmDoc* d, uint32_t tick, int ch, int amsPms, int enable);
 int ScFmAddDetune(ScFmDoc* d, uint32_t tick, int ch, int rawCentered);
 int ScFmAddFlr(ScFmDoc* d, uint32_t tick, int ch, int lrMask);
-int ScAddSoftVib(ScEvent* ev, int* n, uint32_t tick, int ch, int mode, int delayLen, int depth);
+int ScAddSoftVib(ScEvent* ev, int* n, uint32_t tick, int ch, int mode, int delayLen, int depth, int step = 1, int period = 24);
 int ScAddSoftPorta(ScEvent* ev, int* n, uint32_t tick, int ch, int semiDelta, int delayLen, int glideLen);
+/* "mode,delay,depth[,step[,period]]" — omitted fields keep the pointed-to defaults. */
+int ScParseSoftFxCsv(const wchar_t* s, int* mode, int* delay, int* depth, int* step, int* period);
+int ScPlaceSoftVibAt(ScEvent* ev, int* n, uint32_t tick, int ch, int mode, int delayLen, int depth, int step, int period, int stack);
+int ScPlaceSoftPortaAt(ScEvent* ev, int* n, uint32_t tick, int ch, int semiDelta, int delayLen, int glideLen, int stack);
 
 /* Format gate: scan text/doc for dedicated features. */
 int ScTextNeedsMpsmv(const wchar_t* text);

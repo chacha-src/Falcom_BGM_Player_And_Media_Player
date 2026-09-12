@@ -6,6 +6,8 @@
 #include "VstMidiEngine.h"
 #include "PlayList.h"
 #include "CPromptDlg.h"
+#include "CSasamiSimpleInputDlg.h"
+#include "CSasamiNotePaletteDlg.h"
 #include "CPromptEngine.h"
 #include "CMediaPlayerDlg.h"
 #include "oggDlg.h"
@@ -1786,6 +1788,74 @@ void ScStaffFormatHelpBar(wchar_t* out, int cch, const ScStaffUi* u, int isFm, i
 			L"【＊ Pedaal OFF】MIDI-sustain CC64=0. Gebruik met Ped. ON.",
 			L"【＊ Pedal OFF】MIDI sustain CC64=0. Używać z Ped. ON.",
 			L"【＊ Pedal OFF】MIDI sustain CC64=0. Ped. ON ile birlikte."));
+		break;
+	case SC_HELP_SVIB:
+		wcscpy_s(out, cch, LL14(
+			L"【vib @SVIB】mode,delay,depth[,step,period]。0=ピッチ 1=音量 2=パン 3=矩形。delay=効き始めるtick、depth=幅、step=更新間隔(省略1)、period=1周期tick(省略24=8分)。.mpy/.fpy では {: :} 相当に展開。",
+			L"[vib @SVIB] mode,delay,depth[,step,period]. 0=pitch 1=vol 2=pan 3=square. delay=ticks until start, depth=amount, step=update (def 1), period=cycle ticks (def 24=eighth). Classic .mpy/.fpy unroll like {: :}.",
+			L"[vib @SVIB] mode,delay,depth[,step,period]. Classic .mpy/.fpy unroll.",
+			L"[vib @SVIB] mode,delay,depth[,step,period]. Classic .mpy/.fpy unroll.",
+			L"[vib @SVIB] mode,delay,depth[,step,period]. Classic .mpy/.fpy unroll.",
+			L"[vib @SVIB] mode,delay,depth[,step,period]. .mpy/.fpy 는 {: :}처럼 전개.",
+			L"[vib @SVIB] mode,delay,depth[,step,period]。旧 .mpy/.fpy 按 {: :} 展开。",
+			L"[vib @SVIB] mode,delay,depth[,step,period].",
+			L"[vib @SVIB] mode,delay,depth[,step,period].",
+			L"[vib @SVIB] mode,delay,depth[,step,period].",
+			L"[vib @SVIB] mode,delay,depth[,step,period].",
+			L"[vib @SVIB] mode,delay,depth[,step,period].",
+			L"[vib @SVIB] mode,delay,depth[,step,period].",
+			L"[vib @SVIB] mode,delay,depth[,step,period]."));
+		break;
+	case SC_HELP_STREM:
+		wcscpy_s(out, cch, LL14(
+			L"【trem @STREM】音量トレモロ。引数は @SVIB と同じ（mode省略時1）。",
+			L"[trem @STREM] Volume tremolo. Same args as @SVIB (mode defaults to 1).",
+			L"[trem @STREM] Tremolo. Meme args que @SVIB.",
+			L"[trem @STREM] Tremolo. Stessi args di @SVIB.",
+			L"[trem @STREM] Tremolo. Mismos args que @SVIB.",
+			L"[trem @STREM] 볼륨 트레몰로. @SVIB와 동일(mode 기본 1).",
+			L"[trem @STREM] 音量震音。参数同 @SVIB（mode 默认 1）。",
+			L"[trem @STREM] Tremolo. Same as @SVIB.",
+			L"[trem @STREM] Тремоло. Как @SVIB.",
+			L"[trem @STREM] Tremolo. Wie @SVIB.",
+			L"[trem @STREM] Tremolo. Como @SVIB.",
+			L"[trem @STREM] Tremolo. Zelfde als @SVIB.",
+			L"[trem @STREM] Tremolo. Jak @SVIB.",
+			L"[trem @STREM] Tremolo. @SVIB ile aynı."));
+		break;
+	case SC_HELP_SPAN:
+		wcscpy_s(out, cch, LL14(
+			L"【pan~ @SPAN】パンLFO。MIDIはCC10、FMはFLR。引数は @SVIB と同じ（mode省略時2）。",
+			L"[pan~ @SPAN] Pan LFO. MIDI CC10, FM FLR. Same args as @SVIB (mode defaults to 2).",
+			L"[pan~ @SPAN] LFO panoramique.",
+			L"[pan~ @SPAN] LFO pan.",
+			L"[pan~ @SPAN] LFO panoramico.",
+			L"[pan~ @SPAN] 팬 LFO.",
+			L"[pan~ @SPAN] 声像 LFO。",
+			L"[pan~ @SPAN] Pan LFO.",
+			L"[pan~ @SPAN] Пан LFO.",
+			L"[pan~ @SPAN] Pan-LFO.",
+			L"[pan~ @SPAN] LFO pan.",
+			L"[pan~ @SPAN] Pan-LFO.",
+			L"[pan~ @SPAN] Pan LFO.",
+			L"[pan~ @SPAN] Pan LFO."));
+		break;
+	case SC_HELP_SPORTA:
+		wcscpy_s(out, cch, LL14(
+			L"【porta @SPORTA】semi,delay,glide。半音、遅延tick、到達tick。旧形式ではピッチを細分化。",
+			L"[porta @SPORTA] semi,delay,glide. Semitones, delay ticks, glide ticks. Classic formats unroll pitch.",
+			L"[porta @SPORTA] semi,delay,glide.",
+			L"[porta @SPORTA] semi,delay,glide.",
+			L"[porta @SPORTA] semi,delay,glide.",
+			L"[porta @SPORTA] semi,delay,glide.",
+			L"[porta @SPORTA] semi,delay,glide。",
+			L"[porta @SPORTA] semi,delay,glide.",
+			L"[porta @SPORTA] semi,delay,glide.",
+			L"[porta @SPORTA] semi,delay,glide.",
+			L"[porta @SPORTA] semi,delay,glide.",
+			L"[porta @SPORTA] semi,delay,glide.",
+			L"[porta @SPORTA] semi,delay,glide.",
+			L"[porta @SPORTA] semi,delay,glide."));
 		break;
 	case SC_HELP_ERASER:
 		wcscpy_s(out, cch, LL14(
@@ -4360,6 +4430,18 @@ void ScStaffPaintStaves(CDC& dc, const CRect& grid, const ScStaffUi* u,
 					lane = 0;
 					_snwprintf_s(label, _TRUNCATE, L"%s loco", tpos);
 					bg = RGB(255, 250, 210); fg = RGB(100, 70, 10); edge = RGB(180, 140, 40);
+				} else if (e.kind == SC_EV_SOFT_VIB) {
+					lane = 0;
+					if (e.c == 0) _snwprintf_s(label, _TRUNCATE, L"%s fx×", tpos);
+					else if (e.a == 1) _snwprintf_s(label, _TRUNCATE, L"%s trem", tpos);
+					else if (e.a == 2) _snwprintf_s(label, _TRUNCATE, L"%s pan~", tpos);
+					else if (e.a == 3) _snwprintf_s(label, _TRUNCATE, L"%s sqvib", tpos);
+					else _snwprintf_s(label, _TRUNCATE, L"%s vib", tpos);
+					bg = RGB(220, 245, 240); fg = RGB(20, 90, 80); edge = RGB(60, 150, 140);
+				} else if (e.kind == SC_EV_SOFT_PORTA) {
+					lane = 0;
+					_snwprintf_s(label, _TRUNCATE, L"%s porta %+d", tpos, (int)e.a - 64);
+					bg = RGB(220, 245, 240); fg = RGB(20, 90, 80); edge = RGB(60, 150, 140);
 				} else
 					continue;
 				int x = ScStaffTickToX(e.tick, u->scrollX, gridLeft, pxBeat, u, ev, evCount);
@@ -4504,6 +4586,17 @@ void ScStaffPaintStaves(CDC& dc, const CRect& grid, const ScStaffUi* u,
 				} else if (e.kind == SC_EV_PEDAL_OFF) {
 					dc.SetTextColor(RGB(90, 40, 120));
 					dc.TextOut(x - 2, y1 - 2, L"＊");
+				} else if (e.kind == SC_EV_SOFT_VIB) {
+					const wchar_t* lab = L"vib";
+					if (e.c == 0) lab = L"fx×";
+					else if (e.a == 1) lab = L"trem";
+					else if (e.a == 2) lab = L"pan~";
+					else if (e.a == 3) lab = L"sqvib";
+					dc.SetTextColor(RGB(30, 100, 90));
+					dc.TextOut(x - 2, y1 + 10, lab);
+				} else if (e.kind == SC_EV_SOFT_PORTA) {
+					dc.SetTextColor(RGB(30, 100, 90));
+					dc.TextOut(x - 2, y1 + 10, L"porta");
 				} else if (e.kind == SC_EV_OTTAVA || e.kind == SC_EV_OTTAVA_END) {
 					const int oct = (e.kind == SC_EV_OTTAVA_END) ? 0 : (int)(int8_t)e.a;
 					const wchar_t* lab = ScStaffOttavaLabel(oct);
@@ -4851,6 +4944,69 @@ int ScStaffHitNote(const CRect& grid, const ScStaffUi* u, const ScEvent* ev, int
 	return -1;
 }
 
+int ScStaffAskAndPlaceSoftFx(CWnd* owner, ScEvent* ev, int* n, uint32_t tick, int ch,
+	int palCmd, int stack, int eraser)
+{
+	if (!ev || !n || ch < 0) return 0;
+	uint8_t kind = SC_EV_SOFT_VIB;
+	if (palCmd == SASAMI_PAL_CMD_SPORTA) kind = SC_EV_SOFT_PORTA;
+	if (eraser) {
+		int gone = ScDeleteMarksAt(ev, n, tick, ch, kind);
+		if (palCmd == SASAMI_PAL_CMD_SVIB_OFF)
+			gone += ScDeleteMarksAt(ev, n, tick, ch, SC_EV_SOFT_PORTA);
+		return gone > 0 ? 1 : 0;
+	}
+	if (palCmd == SASAMI_PAL_CMD_SVIB_OFF)
+		return ScPlaceSoftVibAt(ev, n, tick, ch, 0, 0, 0, 1, 24, stack);
+
+	wchar_t buf[80];
+	if (palCmd == SASAMI_PAL_CMD_SPORTA) {
+		wcsncpy_s(buf, L"2,0,24", _TRUNCATE);
+		if (CSasamiSimpleInputDlg::AskText(owner,
+			LL14(L"@SPORTA", L"@SPORTA", L"@SPORTA", L"@SPORTA", L"@SPORTA",
+				L"@SPORTA", L"@SPORTA", L"@SPORTA", L"@SPORTA", L"@SPORTA",
+				L"@SPORTA", L"@SPORTA", L"@SPORTA", L"@SPORTA"),
+			LL14(L"半音,遅延tick,到達tick", L"semitones,delay ticks,glide ticks",
+				L"demi-tons,delai,gliss", L"semitoni,delay,glide", L"semitonos,delay,glide",
+				L"반음,delay,glide", L"半音,延迟,滑音", L"semitones,delay,glide",
+				L"полутона,delay,glide", L"Halbtone,Delay,Glide", L"semitons,delay,glide",
+				L"halve tonen,delay,glide", L"poltony,delay,glide", L"yarim ses,delay,glide"),
+			buf, 80) != IDOK)
+			return 0;
+		int semi = 2, delay = 0, glide = 24, dummy = 0, dummy2 = 24;
+		ScParseSoftFxCsv(buf, &semi, &delay, &glide, &dummy, &dummy2);
+		return ScPlaceSoftPortaAt(ev, n, tick, ch, semi, delay, glide, stack);
+	}
+
+	int mode = 0, delay = 0, depth = 40, step = 1, period = 24;
+	const wchar_t* def = L"0,0,40,1,24";
+	const wchar_t* title = L"@SVIB";
+	if (palCmd == SASAMI_PAL_CMD_STREM) { mode = 1; def = L"1,0,40,1,24"; title = L"@STREM"; }
+	if (palCmd == SASAMI_PAL_CMD_SPAN) { mode = 2; delay = 0; depth = 32; step = 2; period = 48; def = L"2,0,32,2,48"; title = L"@SPAN"; }
+	wcsncpy_s(buf, def, _TRUNCATE);
+	if (CSasamiSimpleInputDlg::AskText(owner, title,
+		LL14(L"mode,delay,depth[,step,period]  0=pitch 1=vol 2=pan / delay tick / 幅 / 更新間隔(省略1) / 周期(省略24=8分)",
+			L"mode,delay,depth[,step,period]  0=pitch 1=vol 2=pan / delay ticks / depth / step (def 1) / cycle ticks (def 24=eighth)",
+			L"mode,delay,depth[,step,period]",
+			L"mode,delay,depth[,step,period]",
+			L"mode,delay,depth[,step,period]",
+			L"mode,delay,depth[,step,period]",
+			L"mode,delay,depth[,step,period]",
+			L"mode,delay,depth[,step,period]",
+			L"mode,delay,depth[,step,period]",
+			L"mode,delay,depth[,step,period]",
+			L"mode,delay,depth[,step,period]",
+			L"mode,delay,depth[,step,period]",
+			L"mode,delay,depth[,step,period]",
+			L"mode,delay,depth[,step,period]"),
+		buf, 80) != IDOK)
+		return 0;
+	ScParseSoftFxCsv(buf, &mode, &delay, &depth, &step, &period);
+	if (palCmd == SASAMI_PAL_CMD_STREM && mode == 0) mode = 1;
+	if (palCmd == SASAMI_PAL_CMD_SPAN && mode == 0) mode = 2;
+	return ScPlaceSoftVibAt(ev, n, tick, ch, mode, delay, depth, step, period, stack);
+}
+
 int ScStaffIsStaffMarkKind(uint8_t kind, int isFm)
 {
 	(void)isFm;
@@ -4860,6 +5016,8 @@ int ScStaffIsStaffMarkKind(uint8_t kind, int isFm)
 	if (kind == SC_EV_PEDAL_ON || kind == SC_EV_PEDAL_OFF)
 		return 1;
 	if (kind == SC_EV_OTTAVA || kind == SC_EV_OTTAVA_END)
+		return 1;
+	if (kind == SC_EV_SOFT_VIB || kind == SC_EV_SOFT_PORTA)
 		return 1;
 	if (kind == SC_EV_SLUR_START || kind == SC_EV_SLUR_END
 		|| kind == SC_EV_CRESC || kind == SC_EV_DIM)
@@ -4917,6 +5075,8 @@ int ScStaffHitStaffMark(const CRect& grid, const ScStaffUi* u, const ScEvent* ev
 				hr.SetRect(x - 20, y0 - 8, x + 28, y1 + 8);
 			else if (e.kind == SC_EV_PEDAL_ON || e.kind == SC_EV_PEDAL_OFF)
 				hr.SetRect(x - 4, y1 - 6, x + 32, y1 + 22);
+			else if (e.kind == SC_EV_SOFT_VIB || e.kind == SC_EV_SOFT_PORTA)
+				hr.SetRect(x - 4, y1 + 6, x + 44, y1 + 28);
 			else if (e.kind == SC_EV_OTTAVA || e.kind == SC_EV_OTTAVA_END) {
 				const int oct = (e.kind == SC_EV_OTTAVA_END) ? 0 : (int)(int8_t)e.a;
 				const int above = (oct >= 0);
@@ -4971,6 +5131,8 @@ int ScStaffCollectStaffMarksAt(const CRect& grid, const ScStaffUi* u, const ScEv
 				hr.SetRect(x - 20, y0 - 8, x + 28, y1 + 8);
 			else if (e.kind == SC_EV_PEDAL_ON || e.kind == SC_EV_PEDAL_OFF)
 				hr.SetRect(x - 4, y1 - 6, x + 32, y1 + 22);
+			else if (e.kind == SC_EV_SOFT_VIB || e.kind == SC_EV_SOFT_PORTA)
+				hr.SetRect(x - 4, y1 + 6, x + 44, y1 + 28);
 			else if (e.kind == SC_EV_OTTAVA || e.kind == SC_EV_OTTAVA_END) {
 				const int oct = (e.kind == SC_EV_OTTAVA_END) ? 0 : (int)(int8_t)e.a;
 				const int above = (oct >= 0);
@@ -5057,6 +5219,16 @@ int ScStaffHitScoreCtrl(const CRect& grid, const ScStaffUi* u, const ScEvent* ev
 			} else if (e.kind == SC_EV_OTTAVA_END) {
 				lane = 0;
 				_snwprintf_s(label, _TRUNCATE, L"%s loco", tpos);
+			} else if (e.kind == SC_EV_SOFT_VIB) {
+				lane = 0;
+				if (e.c == 0) _snwprintf_s(label, _TRUNCATE, L"%s fx×", tpos);
+				else if (e.a == 1) _snwprintf_s(label, _TRUNCATE, L"%s trem", tpos);
+				else if (e.a == 2) _snwprintf_s(label, _TRUNCATE, L"%s pan~", tpos);
+				else if (e.a == 3) _snwprintf_s(label, _TRUNCATE, L"%s sqvib", tpos);
+				else _snwprintf_s(label, _TRUNCATE, L"%s vib", tpos);
+			} else if (e.kind == SC_EV_SOFT_PORTA) {
+				lane = 0;
+				_snwprintf_s(label, _TRUNCATE, L"%s porta %+d", tpos, (int)e.a - 64);
 			} else if (!isFm && (e.kind == SC_EV_VOL || e.kind == SC_EV_PAN || e.kind == SC_EV_VELO)) {
 				lane = 1;
 				_snwprintf_s(label, _TRUNCATE, L"%s X", tpos);
@@ -6575,7 +6747,8 @@ int ScStaffIsNoteLike(uint8_t kind, int isFm)
 int ScStaffIsCtrlAttachKind(uint8_t kind, int isFm)
 {
 	if (kind == SC_EV_VOL || kind == SC_EV_VELO || kind == SC_EV_PAN || kind == SC_EV_PITCH
-		|| kind == SC_EV_CC || kind == SC_EV_SLUR_START || kind == SC_EV_SLUR_END)
+		|| kind == SC_EV_CC || kind == SC_EV_SLUR_START || kind == SC_EV_SLUR_END
+		|| kind == SC_EV_SOFT_VIB || kind == SC_EV_SOFT_PORTA)
 		return 1;
 	if (isFm && (kind == SC_EV_FM_VOL || kind == SC_EV_FM_PITCH))
 		return 1;
@@ -6584,6 +6757,8 @@ int ScStaffIsCtrlAttachKind(uint8_t kind, int isFm)
 
 uint32_t ScStaffEvEndTick(const ScEvent& e)
 {
+	if (e.kind == SC_EV_SOFT_VIB || e.kind == SC_EV_SOFT_PORTA)
+		return e.tick;
 	uint32_t d = e.dur ? e.dur : (uint32_t)(SC_PPQN / 4);
 	return e.tick + d;
 }
@@ -7169,6 +7344,13 @@ int ScStaffNoteHasFx(const ScEvent* ev, int evCount, int noteIdx, int isFm,
 			if (outVol) *outVol = 1; any = 1;
 		} else if (k == SC_EV_VELO || (k == SC_EV_CC && ev[i].a == 11)) {
 			if (outExpr) *outExpr = 1; any = 1;
+		} else if (k == SC_EV_SOFT_VIB && ev[i].c > 0) {
+			if (ev[i].a == 1) { if (outVol) *outVol = 1; }
+			else if (ev[i].a == 2) { if (outPan) *outPan = 1; }
+			else { if (outPitch) *outPitch = 1; }
+			any = 1;
+		} else if (k == SC_EV_SOFT_PORTA) {
+			if (outPitch) *outPitch = 1; any = 1;
 		}
 	}
 	return any;

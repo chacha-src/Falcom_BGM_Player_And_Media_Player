@@ -61,6 +61,11 @@ public:
 	/* lizard88: re-arm Timer B + unmask after play CALL 9F0F. */
 	void ArmLizardOpnTimer();
 	void ArmFallbackOpnTimer();
+	void ArmPwmajan2();
+	/* yaksa PATCH2: ISR@086A CALL 3556 RET Z unless (37D1)!=0. Play
+	   CALL 0774/07A7 never arms that gate, so BGM dies after the 3CA4
+	   opener. */
+	void ArmYaksaPlay();
 	/* navitune-class: title bits 8..23 select song inside code@mdata.
 	   Rewrite PATCH's LD BC,mdata for cmd07 before retarget play (no host stubs). */
 	void ApplyNavituneTitleSong();
@@ -77,6 +82,7 @@ public:
 	int NeedsLizardArm() const { return armLizardTimer_; }
 	int NeedsLongPlayDrain() const { return longPlayDrain_; }
 	int NeedsNavituneArm() const { return armNavituneTimer_; }
+	int SkipUnwedge() const;
 	int NeedsDeferredRtc() const { return deferRtcAfterPlay_; }
 	void EnableDeferredRtc()
 	{
@@ -122,6 +128,12 @@ public:
 	/* Falcom masks port-32 sound IRQ around JP into type=prog; the prog still
 	   needs OPN timer IRQs or it never returns to the PATCH unmask. */
 	int IgnoreSoundIrqMask() const;
+
+	/* hoot oldfalcom Play(): copy type=prog, plant E00E..E014, RAM flags. */
+	void ApplyFalcomPlay();
+
+	/* PATCH command poll PC (page0 stub or Falcom E027). -1 if none. */
+	int CmdPollPc() const;
 
 	/* Game Arts / castle: port cmd arms IRQ-driven play, but ISR lives on
 	   RTC vector 04 (or castle needs PROG2 entry). Host CALL init then base. */
@@ -262,6 +274,9 @@ private:
 
 	/* Scheme OPNA specialty (PATCH@9000, BGM via port0 → C000). */
 	int schemeMode_;
+
+	/* hoot OldFalcomDriver: 0 none, 1 XANADU, 2 XANADU2, 3 ASTEKA2. */
+	int falcomType_;
 
 	/* Direct CALL play: base address (PLAY88/C000/PROG2), optional +init
 	   offset (Game Arts +6), and whether to EI after the base CALL. */

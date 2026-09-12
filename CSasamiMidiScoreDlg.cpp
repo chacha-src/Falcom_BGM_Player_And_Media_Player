@@ -1,4 +1,4 @@
-#include "stdafx.h"
+﻿#include "stdafx.h"
 #include "ogg.h"
 #include "CSasamiMidiScoreDlg.h"
 #include "CSasamiNotePaletteDlg.h"
@@ -1688,6 +1688,12 @@ void CSasamiMidiScoreDlg::OnLButtonDown(UINT nFlags, CPoint point)
 	}
 	/* Embedded piano-roll split: same tools as floating roll */
 	if (m_ui.showRollSplit && m_rollRc.PtInRect(point)) {
+		if (ScPianoRollPtInKeys(m_rollRc, point) || ScPianoRollPtInMarkLane(m_rollRc, point)) {
+			if (ScPianoRollPtInMarkLane(m_rollRc, point))
+				m_ui.markerTick = ScPianoRollXToTick(&m_rollView, m_rollRc, &m_ui, point.x);
+			InvalidateRect(m_rollRc, FALSE);
+			return;
+		}
 		if (m_ui.tool == SC_TOOL_PENCIL) {
 			uint32_t tick = ScPianoRollXToTick(&m_rollView, m_rollRc, &m_ui, point.x);
 			tick = (tick / (uint32_t)ScStaffPlaceQuant(&m_ui)) * (uint32_t)ScStaffPlaceQuant(&m_ui);
@@ -2383,6 +2389,11 @@ LRESULT CSasamiMidiScoreDlg::OnPalDur(WPARAM w, LPARAM l)
 		case SASAMI_PAL_CMD_LOOP_END: m_ui.helpTopic = SC_HELP_LOOP_END; break;
 		case SASAMI_PAL_CMD_PED_ON: m_ui.helpTopic = SC_HELP_PED_ON; break;
 		case SASAMI_PAL_CMD_PED_OFF: m_ui.helpTopic = SC_HELP_PED_OFF; break;
+		case SASAMI_PAL_CMD_SVIB: m_ui.helpTopic = SC_HELP_SVIB; break;
+		case SASAMI_PAL_CMD_STREM: m_ui.helpTopic = SC_HELP_STREM; break;
+		case SASAMI_PAL_CMD_SPAN: m_ui.helpTopic = SC_HELP_SPAN; break;
+		case SASAMI_PAL_CMD_SPORTA: m_ui.helpTopic = SC_HELP_SPORTA; break;
+		case SASAMI_PAL_CMD_SVIB_OFF: m_ui.helpTopic = SC_HELP_SVIB; break;
 		case SASAMI_PAL_CMD_MARK_REPLACE: m_ui.helpTopic = SC_HELP_REPLACE; break;
 		case SASAMI_PAL_CMD_MARK_STACK: m_ui.helpTopic = SC_HELP_NEST; break;
 		case SASAMI_PAL_CMD_OTTAVA_LOCO: m_ui.helpTopic = SC_HELP_LOCO; break;
@@ -2555,6 +2566,28 @@ LRESULT CSasamiMidiScoreDlg::OnPalDur(WPARAM w, LPARAM l)
 				else
 					st.Format(L"MIDI %d %s @ red bar tick %u", ch + 1, ScStaffOttavaLabel(oct), (unsigned)atTick);
 				m_status.SetWindowText(st);
+			}
+			return 0;
+		}
+		case SASAMI_PAL_CMD_SVIB:
+		case SASAMI_PAL_CMD_STREM:
+		case SASAMI_PAL_CMD_SPAN:
+		case SASAMI_PAL_CMD_SPORTA:
+		case SASAMI_PAL_CMD_SVIB_OFF: {
+			const int ch = m_curCh;
+			uint32_t atTick = m_ui.markerTick;
+			const int ok = ScStaffAskAndPlaceSoftFx(this, m_doc.ev, &m_doc.evCount, atTick, ch,
+				(int)(l & 0xFF), m_ui.markStack, m_ui.tool == SC_TOOL_ERASER);
+			if (ok) {
+				m_ui.visible[ch] = 1;
+				RefreshStrip();
+				PushDocToText();
+				InvalidateRect(m_bodyRc, FALSE);
+				m_status.SetWindowText(LL14(L"ソフトFXを赤バーに配置/更新しました", L"Soft FX placed/updated at red bar",
+					L"FX place a la barre rouge", L"FX sulla barra rossa", L"FX en barra roja",
+					L"빨간 바에 소프트 FX", L"已在红条放置软效果", L"FX عند الشريط الأحمر",
+					L"FX на красной метке", L"FX an roter Markierung", L"FX na barra vermelha",
+					L"FX op rode balk", L"FX na czerwonym pasku", L"FX kırmızı çubukta"));
 			}
 			return 0;
 		}

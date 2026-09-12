@@ -1,6 +1,7 @@
 ﻿#pragma once
 /* Shared staff-score geometry / paint / hit-test for SASAMI MIDI & FM score dialogs. */
 #include "SasamiComposerDoc.h"
+class CWnd;
 
 enum {
 	SC_STAFF_LINE_GAP0 = 6,
@@ -112,6 +113,10 @@ enum ScHelpTopic : int {
 	SC_HELP_LOOP_END,
 	SC_HELP_PED_ON,
 	SC_HELP_PED_OFF,
+	SC_HELP_SVIB,
+	SC_HELP_STREM,
+	SC_HELP_SPAN,
+	SC_HELP_SPORTA,
 	SC_HELP_OTTAVA,
 	SC_HELP_LOCO,
 	SC_HELP_TIE,
@@ -504,6 +509,9 @@ int ScStaffTieSelected(ScEvent* ev, int evCount, ScStaffUi* u);
 int ScStaffCopyMeasure(const ScEvent* ev, int evCount, int track, uint32_t measTicks, int measIndex, int allTracks,
 	ScEvent* out, int outMax, uint32_t* outBaseTick);
 void ScStaffPaintMarquee(CDC& dc, const ScStaffUi* u);
+/* Palette vib/trem/pan/porta at red bar. Returns 1 if doc changed. */
+int ScStaffAskAndPlaceSoftFx(CWnd* owner, ScEvent* ev, int* n, uint32_t tick, int ch,
+	int palCmd, int stack, int eraser);
 
 /* SSW-like edit helpers */
 int ScStaffIsNoteLike(uint8_t kind, int isFm);
