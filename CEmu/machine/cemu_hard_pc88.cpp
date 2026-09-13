@@ -99,6 +99,7 @@ CHardPc88::CHardPc88()
 	, deferRtcAfterPlay_(0)
 	, n88RtcIsr_(0)
 	, n88RtcThrottleAddr_(0)
+	, hardrankSb2_(0)
 	, schemeMode_(0)
 	, falcomType_(0)
 	, playKickBase_(0)
@@ -329,10 +330,14 @@ static int CEmuPc88PatchGandhara(const uint8_t* mem);
 static int CEmuPc88PatchGinei2(const uint8_t* mem);
 static int CEmuPc88PatchXzrA4(const uint8_t* mem);
 static int CEmuPc88PatchXzr2VoiceF000(const uint8_t* mem);
-static int CEmuPc88PatchSmd8A00(const uint8_t* mem);
 static int CEmuPc88PatchAfHl4400(const uint8_t* mem);
 static int CEmuPc88PatchRomanciaSr(const uint8_t* mem, int initPc);
 static int CEmuPc88PatchRobowr(const uint8_t* mem);
+static void CEmuPc88PlantRobowrSong1(uint8_t* mem);
+static int CEmuPc88PatchHarakiriMplay(const uint8_t* mem);
+static int CEmuPc88PatchXanadu80sr(const uint8_t* mem, int initPc);
+static int CEmuPc88PatchHardrankSb2(const uint8_t* mem);
+static void CEmuPc88SkipHardrankLeadRest(uint8_t* mem);
 static void CEmuPc88PlantIceclimbTitleLoop(uint8_t* mem);
 
 /* JR/JR cc displacement 0xFB is not the EI opcode — p1demo/castle poll with
@@ -1079,21 +1084,35 @@ void CHardPc88::LoadSongData(unsigned titleCode)
 	   same 06-channel player as BGM_* — keep ITEST and skip the overlay. */
 	if (CEmuPc88PatchGinei2(mem_) && vdataAddr_ == 0x400)
 		;
-	else if (voiceBank_[songNum] && vdataAddr_ >= 0) {
-		unsigned n = voiceBankSize_[songNum];
-		if (vfileSize_ > 0 && (unsigned)vfileSize_ < n)
-			n = (unsigned)vfileSize_;
-		if (vdataAddr_ + (int)n > 0x10000)
-			n = (unsigned)(0x10000 - vdataAddr_);
-		if (n > 0)
-			memcpy(mem_ + vdataAddr_, voiceBank_[songNum], n);
-		/* manreq88 A9C: LD A,$D0 / LD (A2C0),A. D0=RET NC returns from the
-		   live trampoline when carry is clear (M's BOOGIE silent). Voice
-		   banks 3–6 plant D1 there from PATCH; do the same in the image. */
-		if (CEmuPc88PatchManreq(mem_) && vdataAddr_ >= 0
-			&& vdataAddr_ + 7 < 0x10000
-			&& mem_[vdataAddr_ + 6] == 0x3E && mem_[vdataAddr_ + 7] == 0xD0)
-			mem_[vdataAddr_ + 7] = 0xD1;
+	else if (vdataAddr_ >= 0) {
+		unsigned vnum = songNum;
+		if (voiceBank_[vnum]) {
+			unsigned n = voiceBankSize_[vnum];
+			if (vfileSize_ > 0 && (unsigned)vfileSize_ < n)
+				n = (unsigned)vfileSize_;
+			if (vdataAddr_ + (int)n > 0x10000)
+				n = (unsigned)(0x10000 - vdataAddr_);
+			if (n > 0) {
+				memcpy(mem_ + vdataAddr_, voiceBank_[vnum], n);
+				if (CEmuPc88PatchXzr2VoiceF000(mem_)) {
+					const unsigned dest = (unsigned)mem_[0xA449]
+						| ((unsigned)mem_[0xA44A] << 8);
+					if (dest >= 0x100u && dest + n <= 0x10000u
+						&& dest != (unsigned)vdataAddr_)
+						memcpy(mem_ + dest, voiceBank_[vnum], n);
+					mem_[0xA445] |= 1;
+					/* Do not write dest+0x200: DRIVER already has voice 16
+					   at BA8E+0x200. Overwriting it silenced MA001. */
+				}
+			}
+			/* manreq88 A9C: LD A,$D0 / LD (A2C0),A. D0=RET NC returns from the
+			   live trampoline when carry is clear (M's BOOGIE silent). Voice
+			   banks 3–6 plant D1 there from PATCH; do the same in the image. */
+			if (CEmuPc88PatchManreq(mem_) && vdataAddr_ >= 0
+				&& vdataAddr_ + 7 < 0x10000
+				&& mem_[vdataAddr_ + 6] == 0x3E && mem_[vdataAddr_ + 7] == 0xD0)
+				mem_[vdataAddr_ + 7] = 0xD1;
+		}
 	}
 	if (bgmBank_[songNum] && mdataAddr_ >= 0) {
 		unsigned avail = bgmBankSize_[songNum];
@@ -1148,6 +1167,13 @@ void CHardPc88::LoadSongData(unsigned titleCode)
 				n = (unsigned)(0x10000 - loadAddr);
 			if (n > 0 && loadAddr >= 0)
 				memcpy(mem_ + loadAddr, bgmBank_[songNum] + stageOff, n);
+			/* xanadu_80sr: PR.NO3/4/5 are 0x1400..0x3000. The player still
+			   reads 5Cxx work RAM that lives in the 0x6000 Main image
+			   (PR.NO2). Zero-fill muted Boss; copy Main's tail instead. */
+			if (n > 0 && loadAddr == 0 && n < 0x6000u
+				&& CEmuPc88PatchXanadu80sr(mem_, initPc_)
+				&& bgmBank_[1] && bgmBankSize_[1] >= 0x6000u)
+				memcpy(mem_ + n, bgmBank_[1] + n, 0x6000u - n);
 			/* ys2_88: also plant at PATCH LDIR dest (4D00/3000/2000) so
 			   MANPR/TTL absolute phrase ptrs resolve before/without relying
 			   solely on the guest C000→dest copy. */
@@ -1235,7 +1261,8 @@ void CHardPc88::LoadSongData(unsigned titleCode)
 	   actually selects M's BOOGIE / SILVER KNIFE. Voice-first is still
 	   required for ys2 (voice BELOW mdata; music must win the overlap). */
 	if (voiceBank_[songNum] && vdataAddr_ >= 0 && mdataAddr_ >= 0
-		&& vdataAddr_ >= mdataAddr_) {
+		&& vdataAddr_ >= mdataAddr_
+		&& !CEmuPc88PatchXzr2VoiceF000(mem_)) {
 		const int mend = mdataAddr_
 			+ (mdataSize_ > 0 ? mdataSize_
 				: (mfileSize_ > 0 ? mfileSize_ : 0x1000));
@@ -1250,6 +1277,90 @@ void CHardPc88::LoadSongData(unsigned titleCode)
 			if (CEmuPc88PatchManreq(mem_) && vdataAddr_ + 7 < 0x10000
 				&& mem_[vdataAddr_ + 6] == 0x3E && mem_[vdataAddr_ + 7] == 0xD0)
 				mem_[vdataAddr_ + 7] = 0xD1;
+		}
+	}
+	if (CEmuPc88PatchHarakiriMplay(mem_)) {
+		const int md = (mdataAddr_ >= 0) ? mdataAddr_ : 0x4000;
+		mem_[0xC003] = 0x21;
+		mem_[0xC004] = (uint8_t)(md & 0xff);
+		mem_[0xC005] = (uint8_t)((md >> 8) & 0xff);
+		mem_[0xC006] = 0xC3;
+		mem_[0xC007] = 0xD7;
+		mem_[0xC008] = 0xC0;
+		if (mem_[0x11] == 0xCD && mem_[0x12] == 0x09 && mem_[0x13] == 0xC0)
+			mem_[0x12] = 0x03;
+		if (mem_[0x25] == 0xCD && mem_[0x26] == 0x06 && mem_[0x27] == 0xC0)
+			mem_[0x26] = 0x03;
+		/* C0D7 EI's before PATCH CALL 09F5 sets I=7; I=0 IM2 then hits
+		   garbage at 0004. Host NeedsPlayEi also misses once C003 is ld hl. */
+		if (mem_[0xC12D] == 0xFB)
+			mem_[0xC12D] = 0x00;
+	}
+	/* robowr88 song 1 is PROG2. Overlap defer leaves PROG1 (no CB5A). Copy
+	   the bank here (offset 1, or any image with CB5A=IM2), then plant.
+	   Kick $C0 so cmd=1 never hits BA41 zeros. */
+	if (CEmuPc88PatchRobowr(mem_) && (titleCode & 0xffu) == 1) {
+		const int dst = (mdataAddr_ >= 0) ? mdataAddr_ : 0x818B;
+		const unsigned char* src = NULL;
+		unsigned n = 0;
+		if (bgmBank_[1] && bgmBankSize_[1] >= 16) {
+			src = bgmBank_[1];
+			n = bgmBankSize_[1];
+		} else {
+			const unsigned mark = 0xCB5A - 0x818B;
+			for (int i = 0; i < 256; i++) {
+				if (!bgmBank_[i] || bgmBankSize_[i] <= mark + 1)
+					continue;
+				if (bgmBank_[i][mark] == 0xF3 && bgmBank_[i][mark + 1] == 0xED) {
+					src = bgmBank_[i];
+					n = bgmBankSize_[i];
+					break;
+				}
+			}
+		}
+		if (src && n && dst >= 0) {
+			if (dst + (int)n > 0x10000)
+				n = (unsigned)(0x10000 - dst);
+			if (n > 0)
+				memcpy(mem_ + dst, src, n);
+		}
+		CEmuPc88PlantRobowrSong1(mem_);
+		if (mem_[0xCB5A] == 0xF3 && mem_[0xCB5B] == 0xED) {
+			playKickBase_ = 0xC0;
+			playKickInitOff_ = 0;
+			playKickEi_ = 0;
+			if (cpu_)
+				cpu_->r.sp = 0xFF00;
+		}
+	}
+	if (CEmuPc88PatchHardrankSb2(mem_)) {
+		hardrankSb2_ = 1;
+		if (mem_[0x79D7] < 0x38)
+			mem_[0x79D7] = 0x40;
+		CEmuPc88SkipHardrankLeadRest(mem_);
+		/* PATCH cmd=1 path never clears port 0, so drain re-CALLs 8A00
+		   and wipes 9130 back to the header ptr (Stage 1 stuck chord). */
+		if (mem_[0x18] == 0xCD && mem_[0x19] == 0x00 && mem_[0x1A] == 0x8A
+			&& mem_[0x1B] == 0x18 && mem_[0x1C] == 0xE9) {
+			mem_[0x1B] = 0xAF;
+			mem_[0x1C] = 0xD3;
+			mem_[0x1D] = 0x00;
+			mem_[0x1E] = 0x18;
+			mem_[0x1F] = 0xE6;
+		}
+	}
+	if (CEmuPc88PatchXanadu80sr(mem_, initPc_)) {
+		mem_[0x606A] = 0;
+		/* Boss play@174D OUT E6,0 masks IM2; Main has the same OUT but a
+		   0x6000 image. Unmask + don't skip the 1675 tick on (617A). */
+		if ((titleCode & 0xffu) == 2 && mem_[0x174D] == 0xF3) {
+			if (mem_[0x175C] == 0x3E && mem_[0x175D] == 0x00
+				&& mem_[0x175E] == 0xD3 && mem_[0x175F] == 0xE6)
+				mem_[0x175D] = 0x03;
+			if (mem_[0x167F] == 0xA7 && mem_[0x1680] == 0x20 && mem_[0x1681] == 0x1B)
+				mem_[0x167F] = mem_[0x1680] = mem_[0x1681] = 0x00;
+			if (mem_[0x1685] == 0xA7 && mem_[0x1686] == 0x28 && mem_[0x1687] == 0x15)
+				mem_[0x1685] = mem_[0x1686] = mem_[0x1687] = 0x00;
 		}
 	}
 }
@@ -1540,7 +1651,7 @@ static int CEmuPc88PatchXzrA4(const uint8_t* mem)
 		return 0;
 	if (!(mem[6] == 0x3E && mem[7] == 0xA4 && mem[8] == 0xED && mem[9] == 0x47))
 		return 0;
-	for (int i = 0x20; i + 4 < 0x50; i++) {
+	for (int i = 0x20; i + 4 < 0x80; i++) {
 		if (mem[i] == 0xDB && mem[i + 1] == 0x80
 			&& mem[i + 2] == 0xCD && mem[i + 3] == 0x10 && mem[i + 4] == 0xA4)
 			return 1;
@@ -1549,15 +1660,22 @@ static int CEmuPc88PatchXzrA4(const uint8_t* mem)
 }
 
 /* xzr2: LDIR F000 → (A449) copies the 0x200 voice bank before CALL A410.
-   Catalog has no vdata_addr, so VD* never reached F000 and MA* peaked 0. */
+   Catalog has no vdata_addr, so VD* never reached F000 and e0 loaded a
+   zeroed patch (AR=0 → key-on, peak 0). PATCH is
+   `ld hl,F000 / ld de,(A449) / ld bc,0200 / ldir` — the ld bc sits
+   between ld de and ldir, so a 11-byte "ED B0 at +9" match misses it. */
 static int CEmuPc88PatchXzr2VoiceF000(const uint8_t* mem)
 {
 	if (!mem || !CEmuPc88PatchXzrA4(mem))
 		return 0;
-	for (int i = 0x20; i + 10 < 0x50; i++) {
-		if (mem[i] == 0x21 && mem[i + 1] == 0x00 && mem[i + 2] == 0xF0
-			&& mem[i + 3] == 0xED && mem[i + 4] == 0x5B
-			&& mem[i + 9] == 0xED && mem[i + 10] == 0xB0)
+	for (int i = 0x20; i + 12 < 0x80; i++) {
+		if (!(mem[i] == 0x21 && mem[i + 1] == 0x00 && mem[i + 2] == 0xF0
+			&& mem[i + 3] == 0xED && mem[i + 4] == 0x5B))
+			continue;
+		/* ld de,(nn) is 4 bytes; optional ld bc,nn then ldir. */
+		if (mem[i + 7] == 0x01 && mem[i + 10] == 0xED && mem[i + 11] == 0xB0)
+			return 1;
+		if (mem[i + 9] == 0xED && mem[i + 10] == 0xB0)
 			return 1;
 	}
 	return 0;
@@ -1573,18 +1691,6 @@ static int CEmuPc88PatchGinei2(const uint8_t* mem)
 	return (mem[0x3D] == 0xFE && mem[0x3E] == 0x40
 		&& mem[0x41] == 0xFE && mem[0x42] == 0x20
 		&& mem[0xB5] == 0x21 && mem[0xB6] == 0x90 && mem[0xB7] == 0x63) ? 1 : 0;
-}
-
-/* hardrank SMD-88: IN (01); CALL 8A00. Driver reads the header at 9300, not
-   the catalog mdata 9200. Port 01 is unused (one file per song). */
-static int CEmuPc88PatchSmd8A00(const uint8_t* mem)
-{
-	if (!mem || mem[0] != 0xF3)
-		return 0;
-	if (!(mem[0x13] == 0xDB && mem[0x14] == 0x01
-		&& mem[0x18] == 0xCD && mem[0x19] == 0x00 && mem[0x1A] == 0x8A))
-		return 0;
-	return (mem[0x8A00] == 0xF3) ? 1 : 0;
 }
 
 /* af ENDING/OPENING: param>=0x20 copies opdrv then IN (80); OR A; LD HL,4400
@@ -1613,14 +1719,140 @@ static int CEmuPc88PatchRomanciaSr(const uint8_t* mem, int initPc)
 }
 
 /* robowr88: JR $10, IN (C=01), 6-byte rows at 005F. PROG2's play (CB5A)
-   gates on (000A)==1; PATCH leftover is 02 so game-start stays mute. */
+   gates on (000A)==1; leftover 000A is 02 so it takes the skip path. PATCH
+   CALL BA4A is PROG1; song 1 must CALL CB5A (PROG2 zeros BA4A). */
 static int CEmuPc88PatchRobowr(const uint8_t* mem)
 {
 	if (!mem || mem[0] != 0x18)
 		return 0;
-	return (mem[0x29] == 0x0E && mem[0x2A] == 0x01
+	if (!(mem[0x29] == 0x0E && mem[0x2A] == 0x01
 		&& mem[0x2B] == 0xED && mem[0x2C] == 0x78
-		&& mem[0x51] == 0xCD && mem[0x52] == 0x4A && mem[0x53] == 0xBA) ? 1 : 0;
+		&& mem[0x51] == 0xCD))
+		return 0;
+	return ((mem[0x52] == 0x4A && mem[0x53] == 0xBA)
+		|| (mem[0x52] == 0x5A && mem[0x53] == 0xCB)) ? 1 : 0;
+}
+
+/* PROG2 live: skip path plants vec8=8DAB which walks 8FD4 (CC09 fills those
+   ptrs). Do not retarget 9013 — that engine's IX+1 ptrs stay F000.
+   cmd=1 CALL $005B is still JP BA41 (zeros in PROG2). NOP that; trampoline
+   at $C0 CALL CB5A then JP CB48. Leave (000A)==02 so skip keeps OPN 44/45. */
+static void CEmuPc88PlantRobowrSong1(uint8_t* mem)
+{
+	if (!mem || mem[0xCB5A] != 0xF3 || mem[0xCB5B] != 0xED)
+		return;
+	if (mem[0x51] == 0xCD && mem[0x52] == 0x4A && mem[0x53] == 0xBA
+		&& mem[0x54] == 0xC3 && mem[0x55] == 0x38 && mem[0x56] == 0xBA) {
+		mem[0x52] = 0x5A;
+		mem[0x53] = 0xCB;
+		mem[0x55] = 0x48;
+		mem[0x56] = 0xCB;
+	}
+	if (mem[0x25] == 0xCD && mem[0x26] == 0x5B && mem[0x27] == 0x00)
+		mem[0x25] = mem[0x26] = mem[0x27] = 0x00;
+	if (mem[0x5B] == 0xC3)
+		mem[0x5B] = 0xC9;
+	if (mem[0x11] == 0x31 && mem[0x12] == 0x00 && mem[0x13] == 0x01)
+		mem[0x13] = 0xFF;
+	if (mem[0xCC86] == 0xF5 && mem[0xCC87] == 0xDB && mem[0xCC8B] == 0x20)
+		mem[0xCC8B] = mem[0xCC8C] = 0x00;
+	if (mem[0x8F73] == 0xF5 && mem[0x8F74] == 0xDB && mem[0x8F78] == 0x20)
+		mem[0x8F78] = mem[0x8F79] = 0x00;
+	mem[0xC0] = 0xCD;
+	mem[0xC1] = 0x5A;
+	mem[0xC2] = 0xCB;
+	mem[0xC3] = 0xC3;
+	mem[0xC4] = 0x48;
+	mem[0xC5] = 0xCB;
+}
+
+/* harakiri MPLAY overlay: C000=tick, C003=load HL, C006=stop. PATCH still
+   CALL C009 (FMDRV init) / C006 (play). C0D7 needs HL=mdata and clears
+   (C00A); C006 would set it back to 3F. After the trampoline C003 is ld hl
+   (not JP C0D7) — still this overlay. */
+static int CEmuPc88PatchHarakiriMplay(const uint8_t* mem)
+{
+	if (!mem)
+		return 0;
+	if (!(mem[0xC000] == 0xC3 && mem[0xC001] == 0x9A && mem[0xC002] == 0xC1
+		&& mem[0xC0D7] == 0xF3 && mem[0xC162] == 0xF3
+		&& mem[0xC009] != 0xC3))
+		return 0;
+	if (mem[0xC003] == 0xC3 && mem[0xC004] == 0xD7 && mem[0xC005] == 0xC0
+		&& mem[0xC006] == 0xC3)
+		return 1;
+	if (mem[0xC003] == 0x21 && mem[0xC006] == 0xC3 && mem[0xC007] == 0xD7
+		&& mem[0xC008] == 0xC0)
+		return 1;
+	return 0;
+}
+
+/* xanadu_80sr PATCH@F000: IN (01), CP 6, 6-byte rows at F0BC. */
+static int CEmuPc88PatchXanadu80sr(const uint8_t* mem, int initPc)
+{
+	if (!mem || initPc != 0xf000)
+		return 0;
+	if (!(mem[0xF000] == 0xF3 && mem[0xF004] == 0xED && mem[0xF005] == 0x5E))
+		return 0;
+	return (mem[0xF014] == 0xDB && mem[0xF015] == 0x01
+		&& mem[0xF032] == 0xFE && mem[0xF033] == 0x06) ? 1 : 0;
+}
+
+/* hardrank SMD-88.sb2@8A00: (79D7)<$38 swaps OPNA work $4446 for $A8AC. */
+static int CEmuPc88PatchHardrankSb2(const uint8_t* mem)
+{
+	if (!mem || mem[0x8A00] != 0xF3)
+		return 0;
+	return (mem[0x8A07] == 0x3A && mem[0x8A08] == 0xD7 && mem[0x8A09] == 0x79
+		&& mem[0x8A35] == 0x21 && mem[0x8A36] == 0x00 && mem[0x8A37] == 0x93) ? 1 : 0;
+}
+
+/* SMD-88 duration-0 command operand sizes (bytes after the cmd id). */
+static const uint8_t kHardrankSmdOps[32] = {
+	1, 1, 0, 0, 1, 1, 1, 1,
+	1, 1, 0, 0, 1, 1, 2, 1,
+	2, 2, 1, 1, 0, 1, 0, 1,
+	1, 1, 2, 1, 1, 1, 0, 0
+};
+
+/* MA103/MA108/MA200 open with 00 0D nn. Rest RETURNs from 8B26 (keyoff
+   via 8FD4) instead of jp 8BA7, so a nested RTC during that wait resets
+   9130 and the channel never leaves the rest — SILENT/NOSEQ. Rewrite to
+   00 00 05 (same 3-byte slot, chains like MA102). MA105 ch2-5 put a
+   second $40 rest after cmd01; rewrite those too so the first ISR reaches
+   the 0x026A notes. MA101's $40 rest sits after setup cmds — same pass.
+   Do not touch short musical rests (<$20) further down the stream. */
+static void CEmuPc88SkipHardrankLeadRest(uint8_t* mem)
+{
+	int i, n;
+	if (!mem)
+		return;
+	if (mem[0x9301] > 0x0B)
+		mem[0x9301] = 0x0B;
+	for (i = 0; i < 6; i++) {
+		unsigned p = (unsigned)mem[0x9302 + i * 2]
+			| ((unsigned)mem[0x9303 + i * 2] << 8);
+		if (p < 0x9200u || p + 3u >= 0xA200u)
+			continue;
+		for (n = 0; n < 8 && p + 2u < 0xA200u; n++) {
+			if (mem[p] != 0)
+				break;
+			{
+				const unsigned cmd = mem[p + 1];
+				const unsigned opsz = (cmd < 32u) ? kHardrankSmdOps[cmd] : 1u;
+				if (cmd == 0x0Du) {
+					const unsigned dur = mem[p + 2];
+					if (n == 0 || dur >= 0x20u) {
+						mem[p + 1] = 0x00;
+						mem[p + 2] = 0x05;
+					}
+					p += 3u;
+					continue;
+				}
+				p += 2u + opsz;
+			}
+		}
+	}
 }
 
 /* arcus88demo (wolfteam 88/87 @B000): PATCH plants HL=4000 at (B000) and
@@ -1934,6 +2166,8 @@ uint8_t CHardPc88::PlaySongIndex() const
 	/* PMD@4000: one MML per file. */
 	if (CEmuPc88PatchPmdHl4000(mem_, initPc_))
 		return 0;
+	if (CEmuPc88PatchRobowr(mem_))
+		return (uint8_t)(titleCode_ & 0xff);
 	if (CEmuPc88PatchXzrA4(mem_))
 		return 0;
 	if (CEmuPc88PatchGinei2(mem_))
@@ -2074,6 +2308,8 @@ uint8_t CHardPc88::PlayParamIndex() const
 	/* PMD mailbox at 4000: catalog low byte already selected the staged file. */
 	if (CEmuPc88PatchPmdHl4000(mem_, initPc_))
 		return 0;
+	if (CEmuPc88PatchRobowr(mem_))
+		return (uint8_t)(titleCode_ & 0xff);
 	if (CEmuPc88PatchGinei2(mem_) || CEmuPc88PatchXzrA4(mem_))
 		return 0;
 	if (CEmuPc88PatchAfHl4400(mem_) || CEmuPc88PatchRomanciaSr(mem_, initPc_))
@@ -2615,6 +2851,9 @@ int CHardPc88::NeedsPlayEi() const
 		return 1;
 	if (CEmuPc88PatchPwmajan2(mem_))
 		return 1;
+	if (mem_[0xC000] == 0xC3 && mem_[0xC001] == 0x9A && mem_[0xC002] == 0xC1
+		&& mem_[0xC0D7] == 0xF3)
+		return 1;
 	/* Falcom specialty PATCH at E000: JR + IM2 table, DI on play. */
 	if (mem_[0xE000] == 0x18 && mem_[0xE017] == 0xF3 && mem_[0xE018] == 0xED)
 		return 1;
@@ -2630,12 +2869,18 @@ int CHardPc88::NeedsPlayEi() const
 		if (slot + 1 < 0x10000) {
 			const unsigned isr = (unsigned)mem_[slot]
 				| ((unsigned)mem_[slot + 1] << 8);
-			if (isr >= 0x40 && isr < 0x10000 && mem_[isr] == 0xF5
+			if (isr >= 0x40 && isr + 1 < 0x10000
+				&& (mem_[isr] == 0xF5
+					|| (mem_[isr] == 0xF3 && mem_[isr + 1] == 0xF5))
 				&& (isr < 0x200 || cpu_->r.i == 0))
 				return 1;
 		}
 	}
 	if (armLizardTimer_)
+		return 1;
+	if (CEmuPc88PatchXanadu80sr(mem_, initPc_))
+		return 1;
+	if (CEmuPc88PatchRobowr(mem_))
 		return 1;
 	return 0;
 }
@@ -2737,7 +2982,64 @@ int CHardPc88::SkipUnwedge() const
 	if (CEmuPc88PatchMulePages(mem_)
 		&& cpu_->r.pc >= 0x6000 && cpu_->r.pc < 0xA000)
 		return 1;
+	if (CEmuPc88PatchRobowr(mem_)
+		&& cpu_->r.pc >= 0x818B && cpu_->r.pc < 0xE000)
+		return 1;
 	return 0;
+}
+
+void CHardPc88::GuardHardrankPc()
+{
+	if (!cpu_ || !mem_)
+		return;
+	if (hardrankSb2_) {
+		/* SMD-88.sb2 parks I=$91 / vec04@9104=8AC9. If I or the vector wander,
+		   RTC lands in the $28..$89FF NOP hole, fall-through re-enters 8A00,
+		   reloads 90B2, and MA102 never ticks 8B26 again. */
+		cpu_->r.i = 0x91;
+		mem_[0x9104] = 0xC9;
+		mem_[0x9105] = 0x8A;
+		/* MA204 main-thread PC walks the NOP hole (2295..883A) and falls
+		   into 8A00, wiping 9130. Yank only while EI (8A00 stays DI until
+		   8AC7) with PATCH-side SP. A $28..$8A00 window aborted 8A00. */
+		{
+			const unsigned pc = cpu_->r.pc;
+			if (cpu_->r.iff1
+				&& pc >= 0x2000u && pc < 0x8A00u
+				&& cpu_->r.sp >= 0x00F8u) {
+				cpu_->r.pc = 0x0006;
+				cpu_->r.sp = 0x0100;
+			}
+		}
+	}
+	/* harakiri MPLAY: I=7 / IM2 table @0700 (RTC 0704=0A15). MMAIN climbs
+	   SP from $0100 into $0712, ISR pushes smash the table, and the next
+	   SOUND/RTC vector jumps into 3xxx RAM — C19A freezes (MON_THIN).
+	   Reset SP+table only while parked in the PATCH poll with SP in the
+	   vector page. If PC has already escaped into song RAM, yank back. */
+	if (CEmuPc88PatchHarakiriMplay(mem_)) {
+		static const uint8_t kIm2[16] = {
+			0x0B, 0x0A, 0x56, 0x0A, 0x15, 0x0A, 0x0B, 0x0A,
+			0x0B, 0x0A, 0x0B, 0x0A, 0x0B, 0x0A, 0x0B, 0x0A
+		};
+		const unsigned pc = cpu_->r.pc;
+		const unsigned sp = cpu_->r.sp;
+		const int inPatch = (pc < 0x40u);
+		const int inProg = (pc >= 0x0710u && pc < 0x1B00u);
+		const int inPlay = (pc >= 0xC000u && pc < 0xC700u);
+		if (inPatch && sp >= 0x0700u && sp < 0x0800u) {
+			cpu_->r.i = 7;
+			cpu_->r.sp = 0x0100;
+			cpu_->r.iff1 = 1;
+			memcpy(mem_ + 0x0700, kIm2, 16);
+		} else if (!inPatch && !inProg && !inPlay && pc >= 0x3000u) {
+			cpu_->r.i = 7;
+			cpu_->r.pc = 0x001B;
+			cpu_->r.sp = 0x0100;
+			cpu_->r.iff1 = 1;
+			memcpy(mem_ + 0x0700, kIm2, 16);
+		}
+	}
 }
 
 int CHardPc88::IgnoreSoundIrqMask() const
@@ -3212,6 +3514,7 @@ int CHardPc88::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCo
 	const unsigned songNum = titleCode & 0xff;
 	const int isMucom = (_stricmp(ge->subtype, "muco") == 0 || _stricmp(ge->subtype, "mucom88") == 0);
 	titleCode_ = titleCode;
+	hardrankSb2_ = 0;
 	memset(mem_, 0, sizeof(mem_));
 	textWinHi_ = 0x80;
 	memset(textWinShadow_, 0, sizeof(textWinShadow_));
@@ -3244,6 +3547,22 @@ int CHardPc88::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCo
 	}
 	falcomType_ = CEmuPc88DetectFalcom(ge, mem_);
 	CEmuPc88MirrorDriverPage20(mem_);
+	/* robowr88: PROG2 is catalog bgm@1. If StageBanks missed it, keep a
+	   copy for restage — do not overlay PROG1 during boot (B545 ISR). */
+	if (CEmuPc88PatchRobowr(mem_) && (titleCode & 0xffu) == 1
+		&& (!bgmBank_[1] || bgmBankSize_[1] < 16)) {
+		unsigned sz = 0;
+		const unsigned char* data = CEmuPc88ZipFind(fs, "PROG2", &sz, 1, 0);
+		if (data && sz >= 16) {
+			if (bgmBank_[1])
+				free(bgmBank_[1]);
+			bgmBank_[1] = (unsigned char*)malloc(sz);
+			if (bgmBank_[1]) {
+				memcpy(bgmBank_[1], data, sz);
+				bgmBankSize_[1] = sz;
+			}
+		}
+	}
 	/* Incomplete rips (e.g. p1demo1 DRIVER EOF before song RAM) are not
 	   repaired here — inventing trampolines hides missing payload. */
 	/* yakyufan: play@02A0 does XOR A; LD (0115),A then never sets the flag.
@@ -3311,18 +3630,64 @@ int CHardPc88::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCo
 				memcpy(mem_ + mdataAddr_, data, n);
 		}
 	}
-	/* harakiri: boot CALL C009 is FMDRV init. MPLAY/FMDRV2 voice overlays
-	   leave C009 as data (NOP/RST) — CALL C000, the JP table's init. */
-	if (mem_[0x0B] == 0xCD && mem_[0x0C] == 0x09 && mem_[0x0D] == 0xC0
+	/* harakiri MPLAY: boot CALL C009 / play CALL C006 are FMDRV vectors.
+	   MPLAY's load is C0D7 (needs HL=song); C006 is stop (sets C00A=3F).
+	   Plant ld hl,mdata / jp C0D7 on the surviving JP-table bytes. */
+	if (CEmuPc88PatchHarakiriMplay(mem_)) {
+		const int md = (mdataAddr_ >= 0) ? mdataAddr_ : 0x4000;
+		mem_[0xC003] = 0x21;
+		mem_[0xC004] = (uint8_t)(md & 0xff);
+		mem_[0xC005] = (uint8_t)((md >> 8) & 0xff);
+		mem_[0xC006] = 0xC3;
+		mem_[0xC007] = 0xD7;
+		mem_[0xC008] = 0xC0;
+		if (mem_[0x11] == 0xCD && mem_[0x12] == 0x09 && mem_[0x13] == 0xC0)
+			mem_[0x12] = 0x03;
+		if (mem_[0x25] == 0xCD && mem_[0x26] == 0x06 && mem_[0x27] == 0xC0)
+			mem_[0x26] = 0x03;
+		if (mem_[0xC12D] == 0xFB)
+			mem_[0xC12D] = 0x00;
+	} else if (mem_[0x0B] == 0xCD && mem_[0x0C] == 0x09 && mem_[0x0D] == 0xC0
 		&& mem_[0xC000] == 0xC3 && mem_[0xC009] != 0xC3)
 		mem_[0x0C] = 0x00;
-	if (CEmuPc88PatchRobowr(mem_) && (titleCode & 0xffu) == 1
-		&& mem_[0xCB5A] == 0xF3 && mem_[0xCB63] == 0xFE && mem_[0xCB64] == 0x01
-		&& mem_[0xCB65] == 0x20) {
-		mem_[0x0A] = 1;
-		mem_[0xCB65] = 0x00;
-		mem_[0xCB66] = 0x00;
+	/* Do not stage PROG2 at boot — that wipes PROG1's B545 ISR. Restage on
+	   play copies it via LoadSongData. */
+	if (CEmuPc88PatchHardrankSb2(mem_)) {
+		hardrankSb2_ = 1;
+		if (mem_[0x79D7] < 0x38)
+			mem_[0x79D7] = 0x40;
+		CEmuPc88SkipHardrankLeadRest(mem_);
+		/* PATCH cmd=1 path never clears port 0, so drain re-CALLs 8A00
+		   and wipes 9130 back to the header ptr (Stage 1 stuck chord). */
+		if (mem_[0x18] == 0xCD && mem_[0x19] == 0x00 && mem_[0x1A] == 0x8A
+			&& mem_[0x1B] == 0x18 && mem_[0x1C] == 0xE9) {
+			mem_[0x1B] = 0xAF;
+			mem_[0x1C] = 0xD3;
+			mem_[0x1D] = 0x00;
+			mem_[0x1E] = 0x18;
+			mem_[0x1F] = 0xE6;
+		}
 	}
+	if (CEmuPc88PatchXanadu80sr(mem_, initPc_)) {
+		mem_[0x606A] = 0;
+		if ((titleCode & 0xffu) == 2 && mem_[0x174D] == 0xF3) {
+			if (mem_[0x175C] == 0x3E && mem_[0x175D] == 0x00
+				&& mem_[0x175E] == 0xD3 && mem_[0x175F] == 0xE6)
+				mem_[0x175D] = 0x03;
+			if (mem_[0x167F] == 0xA7 && mem_[0x1680] == 0x20 && mem_[0x1681] == 0x1B)
+				mem_[0x167F] = mem_[0x1680] = mem_[0x1681] = 0x00;
+			if (mem_[0x1685] == 0xA7 && mem_[0x1686] == 0x28 && mem_[0x1687] == 0x15)
+				mem_[0x1685] = mem_[0x1686] = mem_[0x1687] = 0x00;
+		}
+	}
+	/* archon: OUT (C=0),A writes the song id into the command latch so
+	   title 02 takes the stop path (CALL A000 A=4) after one play. */
+	if (mem_[0] == 0xF3 && mem_[0x13] == 0x3E && mem_[0x14] == 0x04
+		&& mem_[0x15] == 0xCD && mem_[0x16] == 0x00 && mem_[0x17] == 0xA0
+		&& mem_[0x18] == 0xDB && mem_[0x19] == 0x01
+		&& mem_[0x1A] == 0x0E && mem_[0x1B] == 0x00
+		&& mem_[0x1C] == 0xED && mem_[0x1D] == 0x49)
+		mem_[0x1C] = mem_[0x1D] = 0x00;
 	if (armNavituneTimer_)
 		PrepareNavitunePatch();
 	if (isMucom) {

@@ -1,4 +1,4 @@
-#include "StdAfx.h"
+﻿#include "StdAfx.h"
 #include "cemu_hard_ac.h"
 #include "cemu_sei80bu.h"
 #include "cemu_m68k_bus.h"
@@ -738,6 +738,11 @@ void CHardAc::Sega2AInjectSong(uint16_t cmd)
 	CEmuChipScspMidiIn(chip_, 0xa0);
 	CEmuChipScspMidiIn(chip_, (uint8_t)(cmd >> 8));
 	CEmuChipScspMidiIn(chip_, (uint8_t)(cmd & 0xff));
+}
+
+int CHardAc::SegaScspMidiPending() const
+{
+	return CEmuChipScspMidiPending();
 }
 
 int CHardAc::LoadRomsSegaScsp(CEmuZipFs* fs, const CEmuGameEntry* ge)

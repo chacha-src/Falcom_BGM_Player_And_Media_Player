@@ -1,4 +1,4 @@
-﻿// oggDlg.h : ヘッダー ファイル
+// oggDlg.h : ヘッダー ファイル
 //
 #include "afxmt.h"
 //#include "afxcmn.h"
@@ -126,6 +126,8 @@ public:
 	void ToggleAnalyzer();
 	void ToggleMidiMonitor();
 	void ToggleFmMonitor();
+	int MidiMonitorIsVisible() const;
+	int FmMonitorIsVisible() const;
 	void HideMidiMonitorForMinimize(); /* FM/MIDI モニタ・譜面・VSTホスト等も隠す */
 	void RestoreMidiMonitorAfterMinimize();
 	void ShowPianoRollTune();
@@ -499,6 +501,10 @@ void MpTaskbarPrevTrack();
 double OggGetGdiPlaybackTimeSec();
 /* バナーと同じ可聴 PCM フレーム（playb − DS 書込先行）。FM モニタ同期用 */
 __int64 OggGetHeardPcmFrames();
+/* CEmu ライブ MPU の可聴フレーム。エンジンが描画済みのフレーム数から
+   「先読みリング + DS キュー」を引いた値で、どちらも差分なのでクロスフェード中に
+   g_heardBytes が曲を跨いで走り続けても基準がずれない。MIDI モニタ同期用 */
+__int64 OggGetCemuLiveHeardFrames();
 // テンポ/ピッチ スライダー(0..400, 200=100%) → 表示% / RB 換算（MP と本体で共通）
 float TempoPercentFromPos(int tempoPos);
 double TempoPlaybackRateFromPos(int tempoPos);

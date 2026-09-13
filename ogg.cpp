@@ -1,4 +1,4 @@
-﻿// ogg.cpp : アプリケーション用クラスの定義を行います。
+// ogg.cpp : アプリケーション用クラスの定義を行います。
 //
 
 #include "stdafx.h"
@@ -190,13 +190,22 @@ LRESULT COggApp::ProcessWndProcException(CException* e, const MSG* pMsg)
 	return CWinApp::ProcessWndProcException(e, pMsg);
 }
 
-// MIDI モニタの追加同期。TRUE は返さない（メッセージループを独占する）。
+// MIDI/FM モニタの追加同期。TRUE は返さない（メッセージループを独占する）。
+// 再生中に両方開いているときは timerp が PumpSyncNow するので、ここでの
+// IdlePulse は鍵盤描画を二重に走らせて遅らせるだけになる。
 BOOL COggApp::OnIdle(LONG lCount)
 {
-	if (og && og->m_MidiMonitorDlg && ::IsWindow(og->m_MidiMonitorDlg->GetSafeHwnd()))
-		og->m_MidiMonitorDlg->IdlePulse();
-	if (og && og->m_FmMonitorDlg && ::IsWindow(og->m_FmMonitorDlg->GetSafeHwnd()))
-		og->m_FmMonitorDlg->IdlePulse();
+	extern COggDlg* og;
+	extern int playy;
+	extern int plf;
+	const int timerpOwns = (playy != 0 && plf == 1
+		&& og && og->MidiMonitorIsVisible() && og->FmMonitorIsVisible()) ? 1 : 0;
+	if (!timerpOwns) {
+		if (og && og->m_MidiMonitorDlg && ::IsWindow(og->m_MidiMonitorDlg->GetSafeHwnd()))
+			og->m_MidiMonitorDlg->IdlePulse();
+		if (og && og->m_FmMonitorDlg && ::IsWindow(og->m_FmMonitorDlg->GetSafeHwnd()))
+			og->m_FmMonitorDlg->IdlePulse();
+	}
 	return CWinApp::OnIdle(lCount); // TRUE を返すと OnIdle が回り続けて他の UI を食う
 }
 

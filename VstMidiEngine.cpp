@@ -7249,8 +7249,14 @@ static void LiveActReset()
 		for (int b = 0; b < 4; ++b) InterlockedExchange(&g_liveAct[i].down[b], 0);
 }
 
-enum { LIVE_TAP_SHORT_N = 2048, LIVE_TAP_SX_N = 32, LIVE_TAP_SX_B = 1024 };
-struct LiveTapShort { BYTE port; DWORD msg; };
+/* Timed taps sit here for the whole prefetch depth (seconds, not milliseconds),
+   so the FIFO has to hold a dense song's events for that long or Note Offs get
+   dropped on the floor. */
+enum { LIVE_TAP_SHORT_N = 8192, LIVE_TAP_SX_N = 32, LIVE_TAP_SX_B = 1024 };
+/* due < 0 = play-as-soon-as-seen (hardware MIDI in / monitor keyboard).
+   due >= 0 = the frame this message is heard at, so a renderer that runs
+   seconds ahead of the speakers can still be drawn in time. */
+struct LiveTapShort { BYTE port; DWORD msg; __int64 due; };
 static LiveTapShort g_liveTapShort[LIVE_TAP_SHORT_N];
 static volatile LONG g_liveTapShortW = 0;
 static volatile LONG g_liveTapShortR = 0;
@@ -7259,7 +7265,7 @@ static LiveTapSx g_liveTapSx[LIVE_TAP_SX_N];
 static volatile LONG g_liveTapSxW = 0;
 static volatile LONG g_liveTapSxR = 0;
 
-extern "C" void VstLiveTapPushShort(int portIndex0to2, DWORD shortMsg)
+extern "C" void VstLiveTapPushShortAt(int portIndex0to2, DWORD shortMsg, __int64 dueFrame)
 {
 	if (portIndex0to2 < 0) portIndex0to2 = 0;
 	if (portIndex0to2 > 2) portIndex0to2 = 2;
@@ -7268,8 +7274,20 @@ extern "C" void VstLiveTapPushShort(int portIndex0to2, DWORD shortMsg)
 	const int i = (int)(w & (LIVE_TAP_SHORT_N - 1));
 	g_liveTapShort[i].port = (BYTE)portIndex0to2;
 	g_liveTapShort[i].msg = shortMsg;
+	g_liveTapShort[i].due = dueFrame;
 	MemoryBarrier();
 	g_liveTapShortW = w + 1;
+}
+
+extern "C" void VstLiveTapPushShort(int portIndex0to2, DWORD shortMsg)
+{
+	VstLiveTapPushShortAt(portIndex0to2, shortMsg, -1);
+}
+
+/* Timed entries whose frame never arrives (stop/seek) would wedge the FIFO. */
+extern "C" void VstLiveTapFlush(void)
+{
+	g_liveTapShortR = g_liveTapShortW;
 }
 
 extern "C" void VstLiveTapPushSysex(int portIndex0to2, const unsigned char* data, int bytes)
@@ -7288,7 +7306,7 @@ extern "C" void VstLiveTapPushSysex(int portIndex0to2, const unsigned char* data
 	g_liveTapSxW = w + 1;
 }
 
-extern "C" int VstLiveTapStealShorts(BYTE* ports, DWORD* msgs, int maxCount)
+extern "C" int VstLiveTapStealShortsDue(__int64 nowFrame, BYTE* ports, DWORD* msgs, int maxCount)
 {
 	if (!ports || !msgs || maxCount < 1) return 0;
 	int n = 0;
@@ -7296,6 +7314,10 @@ extern "C" int VstLiveTapStealShorts(BYTE* ports, DWORD* msgs, int maxCount)
 	const LONG w = g_liveTapShortW;
 	while (n < maxCount && r != w) {
 		const int i = (int)(r & (LIVE_TAP_SHORT_N - 1));
+		const __int64 due = g_liveTapShort[i].due;
+		/* FIFO order is also chronological, so the first not-yet-audible
+		   entry ends this drain — later ones cannot be due either. */
+		if (due >= 0 && nowFrame >= 0 && due > nowFrame) break;
 		ports[n] = g_liveTapShort[i].port;
 		msgs[n] = g_liveTapShort[i].msg;
 		++n;
@@ -7304,6 +7326,11 @@ extern "C" int VstLiveTapStealShorts(BYTE* ports, DWORD* msgs, int maxCount)
 	MemoryBarrier();
 	g_liveTapShortR = r;
 	return n;
+}
+
+extern "C" int VstLiveTapStealShorts(BYTE* ports, DWORD* msgs, int maxCount)
+{
+	return VstLiveTapStealShortsDue(-1, ports, msgs, maxCount);
 }
 
 extern "C" int VstLiveTapStealSysex(int* portIndex0to2, unsigned char* data, int maxBytes)

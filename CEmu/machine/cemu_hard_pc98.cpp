@@ -1,4 +1,4 @@
-﻿#include "StdAfx.h"
+#include "StdAfx.h"
 #include "cemu_hard_pc98.h"
 #include "../cemu_rhythm.h"
 #include "../chip/cemu_chip_opna.h"
@@ -33,6 +33,17 @@ static int g_opnBusHold = 0;
 static int g_mmdPicIsr = 0;
 /* VALKY/SSCP sequencer is INT 08. Guest OUT 02h = F7 remasks IRQ0. */
 static int s_valkyKeepIrq0 = 0;
+int CEmuPc98ValkyKeepIrq0()
+{
+	return s_valkyKeepIrq0;
+}
+/* FairyDust FMX 3.10 (lemmona) same: one-shot INT08 @3660 masks IRQ0
+   after PIT calib, so the real sequencer at CS:1D60 never ticks. */
+static int s_fmxKeepIrq0 = 0;
+/* FMX 3.10 spins on CS:[3B84] after planting a one-shot INT08. IRQ0
+   would CALL FAR [3B6C] (still 0000:0000) so we poke a nonzero count
+   the first time the wait opcode is at CS:IP. */
+static int s_fmxCalibAssist = 0;
 /* SS:SP before np2_interrupt(OPN). Soft-PIC used to drop opnInService_ as
    soon as the YM line acked, so OPNDRV's STI-before-EOI re-entered INT0B
    on the private CS:24E4 stack (tlove12_98: 40 IRQs, then IF=0 at 9A00).
@@ -1312,7 +1323,14 @@ void CHardPc98::PitOut(uint16_t port, uint8_t data)
 		   reload alone. */
 		if (access == 0x00) {
 			if (ch == 0) {
-				pitLatch_ = (uint16_t)(pitCounter_ & 0xffff);
+				uint16_t lat = (uint16_t)(pitCounter_ & 0xffff);
+				/* FMX 3.10 waits until CS:[3B84] != 0 then NOT/MUL/DIV.
+				   A 0 latch (IRQ at terminal count) spins until the 8s
+				   shell budget; 0xFFFF makes NOT AX = 0 and a later DIV
+				   takes INT 00. C-Class FMX divides by (FFFF−count). */
+				if (lat == 0) lat = 1;
+				else if (lat == 0xFFFFu) lat = 0xFFFE;
+				pitLatch_ = lat;
 				pitLatched_ = 1;
 				pitReadHi_ = 0;
 			} else if (ch == 1) {
@@ -1378,7 +1396,10 @@ uint8_t CHardPc98::PitIn(uint16_t port)
 	   loop, latches and reads back, then divides by (FFFF − count) to get a
 	   CPU-speed constant.  Echoing the reload made that zero and the driver
 	   died in a divide-by-zero loop before it ever played a note. */
-	const uint16_t v = pitLatched_ ? pitLatch_ : (uint16_t)(pitCounter_ & 0xffff);
+	const uint16_t raw = pitLatched_ ? pitLatch_ : (uint16_t)(pitCounter_ & 0xffff);
+	uint16_t v = raw;
+	if (v == 0) v = 1;
+	else if (v == 0xFFFFu) v = 0xFFFE;
 	if (!pitReadHi_) {
 		pitReadHi_ = 1;
 		return (uint8_t)(v & 0xff);
@@ -2544,6 +2565,10 @@ uint8_t CHardPc98::PortIn(uint16_t port)
 		   ISR forever (opnInService stuck, key-on 0x28 never written). */
 		if (g_mmdPicIsr)
 			s = (uint8_t)(s & (uint8_t)~0x80);
+		/* FMX 3.10 cmd16 (186F) near-calls CS:22C7 which IN 188h / TEST 80h.
+		   ymfm can stick busy across that fill so 196D never arms [2822]. */
+		if (s_fmxKeepIrq0)
+			s = (uint8_t)(s & (uint8_t)~0x80);
 		return s;
 	}
 	case OPN_DATA0:
@@ -2572,6 +2597,8 @@ uint8_t CHardPc98::PortIn(uint16_t port)
 		uint8_t s = chip_ ? chip_->ReadStatusHi() : 0xff;
 		if (pc88VaIo_)
 			s = (uint8_t)(s & (uint8_t)~0x80);
+		if (s_fmxKeepIrq0)
+			s = (uint8_t)(s & (uint8_t)~0x80);
 		return s;
 	}
 	case OPN_DATA1:
@@ -2596,6 +2623,12 @@ uint8_t CHardPc98::PortIn(uint16_t port)
 		if (!opnaMode)
 			return 0xff; /* 26K / OPN-only: port absent */
 		return (uint8_t)(0x40 | (sound86Mask_ & 0x03));
+	case SOUND86_FIFO_CTL:
+		/* FMX 3.10 INT14 1BB4: if [2849]==2, IN A468h / TEST 10h spins
+		   CALL 011C. Open-bus FF never clears bit4. */
+		if (s_fmxKeepIrq0)
+			return 0;
+		return 0xff;
 	/* A466–A66E: leave open-bus unless a title needs soft 86PCM.
 	   Stubbing empty-FIFO here made FMP3 take a silent PCM path (vg2). */
 	case 0x506:
@@ -2888,7 +2921,7 @@ void CHardPc98::PortOut(uint16_t port, uint8_t data)
 				picMasterIcw_ = 0;
 		} else {
 			picMask_ = data;
-			if (s_valkyKeepIrq0)
+			if (s_valkyKeepIrq0 || s_fmxKeepIrq0)
 				picMask_ = (uint8_t)(picMask_ & 0xfeu);
 		}
 		break;
@@ -3545,6 +3578,185 @@ static int DosShellStarts(const CEmuGameEntry* ge, const char* const* prefixes)
 	return 0;
 }
 
+static int FmxDosShell(const CEmuGameEntry* ge)
+{
+	static const char* kFmx[] = { "FMX", "fmx", NULL };
+	return DosShellStarts(ge, kFmx);
+}
+
+/* FMX 3.10 (lemmona Ver3.10L) plants a one-shot INT08 at CS:3660 that
+   measures PIT then OUT 02h |= 1. IRQ0 is masked at BootDos (0xFF), so
+   that ISR never runs, the swap to the real sequencer at CS:1D60 never
+   happens, and play is FM_TONE dumps with keyOn=0. Keep IRQ0 live for
+   FMX shells. FMX 3.91 (v_btr CS:2470) already PLAYS with IRQ0 masked
+   — drop the keep after shells so its tempo/window stay as they were. */
+static void FmxArmPitIrq0(const CEmuGameEntry* ge, int dropIf391)
+{
+	s_fmxKeepIrq0 = 0;
+	if (!FmxDosShell(ge))
+		return;
+	s_fmxKeepIrq0 = 1;
+	if (!dropIf391)
+		return;
+	uint8_t* mem = np2_mem();
+	if (!mem)
+		return;
+	const unsigned off = (unsigned)mem[0x08 * 4]
+		| ((unsigned)mem[0x08 * 4 + 1] << 8);
+	if (off == 0x2470)
+		s_fmxKeepIrq0 = 0;
+}
+
+static void FmxKick310Play(uint8_t* mem, CEmuDos98* dos, const char* song)
+{
+	if (!mem || !s_fmxKeepIrq0)
+		return;
+	const unsigned off = (unsigned)mem[0x08 * 4]
+		| ((unsigned)mem[0x08 * 4 + 1] << 8);
+	const unsigned seg = (unsigned)mem[0x08 * 4 + 2]
+		| ((unsigned)mem[0x08 * 4 + 3] << 8);
+	if (off != 0x1D60 || !seg || seg == (unsigned)DOS98_TRAMP_SEG)
+		return;
+	const unsigned b = seg << 4;
+	if (b + 0x2EC2u >= 0x200000u)
+		return;
+	if (dos && song && song[0]) {
+		const CEmuDos98File* f = dos->FindFile(song);
+		if (f && f->data && f->size) {
+			unsigned n = f->size;
+			if (b + 0x2EC0u + n > 0x200000u)
+				n = 0x200000u - (b + 0x2EC0u);
+			memcpy(mem + b + 0x2EC0, f->data, n);
+		}
+	}
+	mem[b + 0x281C] = 0;
+	mem[b + 0x2849] = 2;
+	/* 18E5/cmd16 walk [2868] as the song base. File BSS is 0 until init
+	   `MOV [2868],2EC0` at CS:3398; force it to the Kick buffer. */
+	mem[b + 0x2868] = 0xC0;
+	mem[b + 0x2869] = 0x2E;
+	/* Init 30E2 stores YM2608 188h/18Ah here. File BSS is 0, so 1A40
+	   OUT DX,[2862] hits port 0 (PIC) and cmd16 never reaches the chip. */
+	mem[b + 0x2860] = 0x88;
+	mem[b + 0x2861] = 0x01;
+	mem[b + 0x2862] = 0x8A;
+	mem[b + 0x2863] = 0x01;
+	/* INT08 1D60 is the beep PIT seq (1F08 / OUT 37h). FM is INT14 1BB4
+	   (AH=25 AL=[0118]=14h) calling 1D88 on YM Timer B. */
+	if (mem[b + 0x1BB4] == 0x60) {
+		mem[0x14 * 4 + 0] = 0xB4;
+		mem[0x14 * 4 + 1] = 0x1B;
+		mem[0x14 * 4 + 2] = (uint8_t)(seg & 0xff);
+		mem[0x14 * 4 + 3] = (uint8_t)(seg >> 8);
+	}
+	mem[b + 0x281B] = (uint8_t)(mem[b + 0x281B] | 1u);
+	mem[b + 0x281F] = 0x80;
+	/* FMXP.COM INT 60: dispatcher `MOV AX,[BP+12]` is already AX
+	   (PUSHA/DS/ES). Do not patch that to [BP+18] (FLAGS). */
+	mem[0x60 * 4 + 0] = 0x4E;
+	mem[0x60 * 4 + 1] = 0x16;
+	mem[0x60 * 4 + 2] = (uint8_t)(seg & 0xff);
+	mem[0x60 * 4 + 3] = (uint8_t)(seg >> 8);
+}
+
+static void Fmx310EnableYmTimer(CChip* chip)
+{
+	if (!chip)
+		return;
+	/* 3310: YM 24h=5, 25h=0, 27h=3Fh (Timer A+B load/IRQ). FM seq 1D88
+	   runs on Timer B (status bit1); also program 26h so bit1 actually
+	   rises. */
+	chip->Write(0, 0x25);
+	chip->Write(1, 0x00);
+	chip->Write(0, 0x24);
+	chip->Write(1, 0x05);
+	chip->Write(0, 0x26);
+	chip->Write(1, 0xC0);
+	chip->Write(0, 0x27);
+	chip->Write(1, 0x3F);
+}
+
+static void FmxPlantInt60FromPit(uint8_t* mem)
+{
+	if (!mem || !s_fmxKeepIrq0)
+		return;
+	const unsigned off = (unsigned)mem[0x08 * 4]
+		| ((unsigned)mem[0x08 * 4 + 1] << 8);
+	const unsigned seg = (unsigned)mem[0x08 * 4 + 2]
+		| ((unsigned)mem[0x08 * 4 + 3] << 8);
+	if (off != 0x1D60 || !seg || seg == (unsigned)DOS98_TRAMP_SEG)
+		return;
+	mem[0x60 * 4 + 0] = 0x4E;
+	mem[0x60 * 4 + 1] = 0x16;
+	mem[0x60 * 4 + 2] = (uint8_t)(seg & 0xff);
+	mem[0x60 * 4 + 3] = (uint8_t)(seg >> 8);
+}
+
+static void Fmx310ArmSeq(uint8_t* mem, uint8_t latch281c, uint16_t ax)
+{
+	if (!mem || !s_fmxKeepIrq0)
+		return;
+	const unsigned off = (unsigned)mem[0x08 * 4]
+		| ((unsigned)mem[0x08 * 4 + 1] << 8);
+	const unsigned seg = (unsigned)mem[0x08 * 4 + 2]
+		| ((unsigned)mem[0x08 * 4 + 3] << 8);
+	if (off != 0x1D60 || !seg || seg == (unsigned)DOS98_TRAMP_SEG)
+		return;
+	const unsigned b = seg << 4;
+	if (b + 0x2EC2u >= 0x200000u)
+		return;
+	/* Song at CS:2EC0 (Kick memcpy / FMXP AH=3F).
+	   cmd16 186F: instruments via 22C7 / 1A40 (needs [2860]=188h).
+	   cmd21 18E5: fills ISR 2A40 pointers then 196D arms PIT beep.
+	   After cmd21, clear [2822] so INT08 1F08 stays quiet; FM is INT14. */
+	if (mem[b + 0x2EC0] == 0xff && mem[b + 0x2EC1] == 0xff)
+		return;
+	mem[b + 0x281C] = latch281c;
+	mem[b + 0x2868] = 0xC0;
+	mem[b + 0x2869] = 0x2E;
+	FmxPlantInt60FromPit(mem);
+	np2_reg_set(NP2_R_FLAGS,
+		(uint16_t)(np2_reg_get(NP2_R_FLAGS) | 0x0200));
+	np2_reg_set(NP2_R_DS, (uint16_t)seg);
+	np2_reg_set(NP2_R_ES, (uint16_t)seg);
+	np2_reg_set(NP2_R_AX, ax);
+	np2_reg_set(NP2_R_BX, ax);
+	np2_interrupt(0x60);
+	if (ax == 0x1500)
+		mem[b + 0x2822] = 0;
+}
+
+static int Fmx310Int60Play()
+{
+	uint8_t* mem = np2_mem();
+	if (!mem || !s_fmxKeepIrq0)
+		return 0;
+	const unsigned off08 = (unsigned)mem[0x08 * 4]
+		| ((unsigned)mem[0x08 * 4 + 1] << 8);
+	if (off08 != 0x1D60)
+		return 0;
+	/* 3.10 INT 60 was BH (saved BX); Kick patches that to AH. AX=0 is play. */
+	np2_reg_set(NP2_R_FLAGS,
+		(uint16_t)(np2_reg_get(NP2_R_FLAGS) | 0x0200));
+	np2_reg_set(NP2_R_DX, 0x2EC0);
+	np2_reg_set(NP2_R_AX, 0);
+	np2_reg_set(NP2_R_BX, 0);
+	np2_interrupt(0x60);
+	return 1;
+}
+
+static int ValkyWantArm(const CEmuGameEntry* ge, CEmuDos98* dos)
+{
+	static const char* kValky[] = { "VALKY_98", "valky", NULL };
+	if (DosShellStarts(ge, kValky))
+		return 1;
+	if (dos && (dos->FindFile("VALKY_98.COM") || dos->FindFile("VALKY_98")))
+		return 1;
+	return 0;
+}
+
+static void ValkyReplantIsr(uint8_t* mem);
+static void ValkyFixFarApiFromGlue(uint8_t* mem);
 
 /* Name-load ADVH (EB 06 USDdrv, no "03 30"): install writes mov ax,CS+0x33
    for bind/data while the OEM ISR keeps mov ds,cs. watagolf finishes a
@@ -4266,17 +4478,13 @@ static int MfdSmfLooksStatus(const uint8_t* p, unsigned n, unsigned i)
 	return 1;
 }
 
-/* SYNUPS .MDI: after 6xFF or 01 00, 9x is a channel prefix with one
-   parameter, then (note, duration) pairs. Duration ticks the capture clock
-   so VST/KPI tempo is not a zero-delta cluster. SYNUP_98 hits #UD before
-   it can OUT E0D0, so TriggerPlay walks the resident song. */
+/* SYNUP_98 hits #UD before it can OUT E0D0, so TriggerPlay walks the resident
+   song instead. Last resort for layouts the track walker below cannot read:
+   one stream, 9x as a channel prefix with one parameter, then (note, duration)
+   pairs whose duration ticks the capture clock. */
 template<typename Cap, typename Tick>
-static void HostWalkSynupsMdi(Cap cap, Tick tick, const uint8_t* p, unsigned n)
+static void HostWalkSynupsMdiFlat(Cap cap, Tick tick, const uint8_t* p, unsigned n)
 {
-	if (!p || n < 40u)
-		return;
-	if (memcmp(p, "SYNUPS", 6) != 0)
-		return;
 	unsigned start = 0;
 	const unsigned hdrLim = (n < 256u) ? n : 256u;
 	for (unsigned k = 8; k + 8u < hdrLim; k++) {
@@ -4331,6 +4539,173 @@ static void HostWalkSynupsMdi(Cap cap, Tick tick, const uint8_t* p, unsigned n)
 			tick(dur);
 		}
 	}
+}
+
+/* One decoded message, positioned on the merged timeline. */
+struct SynupsEv {
+	unsigned tick;
+	unsigned seq;
+	uint8_t st;
+	uint8_t d1;
+	uint8_t d2;
+	uint8_t nd;
+};
+
+static int SynupsEvCmp(const void* a, const void* b)
+{
+	const SynupsEv* x = (const SynupsEv*)a;
+	const SynupsEv* y = (const SynupsEv*)b;
+	if (x->tick != y->tick)
+		return (x->tick < y->tick) ? -1 : 1;
+	if (x->seq != y->seq)
+		return (x->seq < y->seq) ? -1 : 1;
+	return 0;
+}
+
+/* GM/GS reserve 9 for drums and the melodic blocks must step over it. */
+static uint8_t SynupsChanForTrack(unsigned partId)
+{
+	unsigned ch = partId;
+	if (ch >= 9u)
+		ch++;
+	return (uint8_t)(ch & 15u);
+}
+
+/* Byte 9 is the block count and the header ends at a run of six 0xFF. Each
+   block is then [partId, NUL-terminated name, events] and closes on 0xFF —
+   which may be a lone one, because the byte before it can be a command
+   operand of 0xFF (BGM203B "A0 FF"). Inside a block a byte < 0x80 is a note
+   followed by its gate in 48-per-quarter ticks, 0x80/0x81 rest, 0x90 picks the
+   part's tone, and every other 0x8x/0x9x command takes one operand.
+   Blocks each restart at tick 0, so they have to be merged before streaming:
+   reading the file as one stream played the parts one after another (a 32s
+   song ran for two minutes), put every note on one channel, and emitted
+   neither a Note Off nor a program change. */
+template<typename Cap, typename Tick>
+static int HostWalkSynupsTracks(Cap cap, Tick tick, const uint8_t* p, unsigned n)
+{
+	const unsigned blocks = p[9];
+	if (blocks < 1u || blocks > 32u)
+		return 0;
+	unsigned pos = 0;
+	for (unsigned k = 8; k + 6u <= n; k++) {
+		unsigned run = 0;
+		while (run < 6u && p[k + run] == 0xff)
+			run++;
+		if (run >= 6u) {
+			pos = k + 6u;
+			break;
+		}
+	}
+	if (!pos)
+		return 0;
+
+	enum { kEvMax = 16384 };
+	SynupsEv* ev = (SynupsEv*)malloc(sizeof(SynupsEv) * kEvMax);
+	if (!ev)
+		return 0;
+	unsigned evN = 0;
+	unsigned seq = 0;
+	for (unsigned blk = 0; blk < blocks && pos + 1u < n; blk++) {
+		const uint8_t partId = p[pos];
+		unsigned i = pos + 1u;
+		while (i < n && p[i] != 0)
+			i++;
+		i++;
+		/* Rhythm blocks (id bit 7, named DRUMS) open with a key table and
+		   index a drum map this walker has no equivalent for. */
+		const int rhythm = (partId & 0x80) ? 1 : 0;
+		const uint8_t ch = SynupsChanForTrack((unsigned)(partId & 0x7f));
+		unsigned t = 0;
+		unsigned next = n;
+		int closed = 0;
+		int seenNote = 0;
+		while (i < n && evN + 2u < kEvMax) {
+			if (p[i] == 0xff) {
+				closed = 1;
+				next = (i + 1u < n && p[i + 1] == 0xff) ? i + 2u : i + 1u;
+				break;
+			}
+			const uint8_t b = p[i];
+			if (b >= 0x80) {
+				if (i + 1u >= n)
+					break;
+				const uint8_t arg = p[i + 1];
+				i += 2;
+				if (b == 0x80 || b == 0x81)
+					t += arg;
+				else if (b == 0x90 && !rhythm && !seenNote) {
+					/* Only the block's opening tone: files like hypersec
+					   MAIN.MDI repeat 0x90 per phrase with values that are not
+					   patch numbers, and honouring those churned the part. */
+					ev[evN].tick = t;
+					ev[evN].seq = seq++;
+					ev[evN].st = (uint8_t)(0xc0 | ch);
+					ev[evN].d1 = (uint8_t)(arg & 0x7f);
+					ev[evN].d2 = 0;
+					ev[evN].nd = 1;
+					evN++;
+				}
+				continue;
+			}
+			const uint8_t note = b;
+			i++;
+			unsigned dur = 0;
+			if (i < n && p[i] < 0x80)
+				dur = p[i++];
+			seenNote = 1;
+			if (!rhythm && note >= 12u && note <= 108u) {
+				const unsigned gate = dur ? dur : 12u;
+				ev[evN].tick = t;
+				ev[evN].seq = seq;
+				ev[evN].st = (uint8_t)(0x90 | ch);
+				ev[evN].d1 = note;
+				ev[evN].d2 = 0x40;
+				ev[evN].nd = 2;
+				evN++;
+				ev[evN].tick = t + gate;
+				ev[evN].seq = seq + 1;
+				ev[evN].st = (uint8_t)(0x80 | ch);
+				ev[evN].d1 = note;
+				ev[evN].d2 = 0x40;
+				ev[evN].nd = 2;
+				evN++;
+			}
+			seq += 2;
+			t += dur;
+		}
+		if (!closed)
+			break;
+		pos = next;
+	}
+
+	if (evN > 1)
+		qsort(ev, evN, sizeof(SynupsEv), SynupsEvCmp);
+	unsigned last = 0;
+	for (unsigned k = 0; k < evN; k++) {
+		if (ev[k].tick > last) {
+			tick(ev[k].tick - last);
+			last = ev[k].tick;
+		}
+		cap(ev[k].st);
+		cap(ev[k].d1);
+		if (ev[k].nd > 1)
+			cap(ev[k].d2);
+	}
+	free(ev);
+	return (evN > 0) ? 1 : 0;
+}
+
+template<typename Cap, typename Tick>
+static void HostWalkSynupsMdi(Cap cap, Tick tick, const uint8_t* p, unsigned n)
+{
+	if (!p || n < 40u)
+		return;
+	if (memcmp(p, "SYNUPS", 6) != 0)
+		return;
+	if (HostWalkSynupsTracks(cap, tick, p, n))
+		return;
+	HostWalkSynupsMdiFlat(cap, tick, p, n);
 }
 
 /* Recomposer RCP v2. Event is [cmd, delay, p1, p2]; cmd<0x80 is a note
@@ -4426,37 +4801,293 @@ static void MfdRestoreInt42Trampoline(uint8_t* mem)
 }
 
 /* VALKY/SSCP: cmd8 tests CS:[384B]/[384D] then INT 50 AH=3 for the song
-   buffer segment. SSCP never hooks INT 50. */
-static void ValkyArmSscpPlay(uint8_t* mem, uint16_t songHandle)
+   buffer segment. SSCP never hooks INT 50. CSCP init can skip INT 7F
+   setvec; plant CS:0210 when the glue CS is still visible on INT 21/B0. */
+static unsigned ValkyIvtSeg(const uint8_t* mem, uint8_t vec, uint16_t wantOff)
+{
+	if (!mem) return 0;
+	const unsigned off = (unsigned)mem[vec * 4]
+		| ((unsigned)mem[vec * 4 + 1] << 8);
+	const unsigned seg = (unsigned)mem[vec * 4 + 2]
+		| ((unsigned)mem[vec * 4 + 3] << 8);
+	if (!seg || seg == (unsigned)DOS98_TRAMP_SEG || seg >= 0xF000u)
+		return 0;
+	if (wantOff && off != (unsigned)wantOff)
+		return 0;
+	return seg;
+}
+
+static void ValkyArmSscpPlay(uint8_t* mem, uint16_t songHandle,
+	CEmuDos98* dos, const char* song)
 {
 	if (!mem)
 		return;
+	unsigned glueCs = ValkyIvtSeg(mem, 0x7F, 0x0210);
+	if (!glueCs)
+		glueCs = ValkyIvtSeg(mem, 0x21, 0x02FA);
+	if (!glueCs)
+		glueCs = ValkyIvtSeg(mem, 0xB0, 0x030A);
+	if (!glueCs) {
+		for (unsigned s = 0x00C0u; s < 0xA000u; s++) {
+			const unsigned p = (s << 4) + 0x100u;
+			const unsigned h = (s << 4) + 0x210u;
+			if (h + 6u >= 0x200000u)
+				break;
+			if (mem[p] == 0xFA && mem[p + 1] == 0xBA
+				&& mem[p + 2] == 0xE8 && mem[p + 3] == 0x07
+				&& mem[h] == 0x06 && mem[h + 1] == 0x1E
+				&& mem[h + 2] == 0x60 && mem[h + 3] == 0xBA) {
+				glueCs = s;
+				break;
+			}
+		}
+	}
+	{
+		const unsigned s7 = (unsigned)mem[0x7F * 4 + 2]
+			| ((unsigned)mem[0x7F * 4 + 3] << 8);
+		/* Live VALKY (scan hit 1001:0100) already did AH=48 and AH=3F
+		   SSCP into [041E]. Overlaying 9100 copies the COM BSS ([041E]=0)
+		   and INT 7F then CALL FARs ES=0. Only plant 9100 when no image. */
+		if (!glueCs && (s7 == 0 || s7 == (unsigned)DOS98_TRAMP_SEG)) {
+			const CEmuDos98File* vf = dos ? dos->FindFile("VALKY_98.COM") : NULL;
+			if (!vf)
+				vf = dos ? dos->FindFile("VALKY_98") : NULL;
+			if (!vf)
+				vf = dos ? dos->FindFile("VALKY.COM") : NULL;
+			if (vf && vf->data && vf->size >= 0x220u) {
+				const unsigned cs = 0x9100u;
+				const unsigned dst = (cs << 4) + 0x100u;
+				if (dst + vf->size < 0x200000u)
+					memcpy(mem + dst, vf->data, vf->size);
+				glueCs = cs;
+				for (unsigned s = 0x0100u; s < 0x9000u; s++) {
+					if (s == cs)
+						continue;
+					const unsigned p = (s << 4) + 0x100u;
+					const unsigned h = (s << 4) + 0x210u;
+					if (h + 6u >= 0x200000u)
+						break;
+					if (mem[p] == 0xFA && mem[p + 1] == 0xBA
+						&& mem[p + 2] == 0xE8 && mem[p + 3] == 0x07
+						&& mem[h] == 0x06 && mem[h + 1] == 0x1E
+						&& mem[h + 2] == 0x60 && mem[h + 3] == 0xBA) {
+						const unsigned src = (s << 4) + 0x41Cu;
+						const unsigned gb = (cs << 4) + 0x41Cu;
+						if (src + 10u < 0x200000u && gb + 10u < 0x200000u)
+							memcpy(mem + gb, mem + src, 10u);
+						break;
+					}
+				}
+			}
+		}
+	}
+	/* CSCP/SSCP is the sequencer (INT08). VALKY CALL FAR ES:[000C] with
+	   ES=[041E]. valkyrie never finishes that install (INT 7F stays the
+	   trampoline) so host-map the blob and the far ptr. Do not overlay a
+	   live SSCP (hinadori INT08=2002:0DB5). */
+	const unsigned s08Now = (unsigned)mem[0x08 * 4 + 2]
+		| ((unsigned)mem[0x08 * 4 + 3] << 8);
+	if (dos && (!s08Now || s08Now == (unsigned)DOS98_TRAMP_SEG)) {
+		const CEmuDos98File* drv = dos->FindFile("CSCP.BIN");
+		if (!drv)
+			drv = dos->FindFile("SSCP.BIN");
+		if (drv && drv->data && drv->size >= 0x80u) {
+			const unsigned dcs = 0x2800u;
+			const unsigned dst = dcs << 4;
+			unsigned n = drv->size;
+			if (dst + n >= 0x200000u)
+				n = 0x200000u - dst;
+			memcpy(mem + dst, drv->data, n);
+			const unsigned api = (unsigned)mem[dst + 0x0C]
+				| ((unsigned)mem[dst + 0x0D] << 8);
+			unsigned entry = (api >= 0x20u && api < 0x200u) ? api : 0x78u;
+			mem[dst + 0x0C] = (uint8_t)(entry & 0xff);
+			mem[dst + 0x0D] = (uint8_t)(entry >> 8);
+			mem[dst + 0x0E] = (uint8_t)(dcs & 0xff);
+			mem[dst + 0x0F] = (uint8_t)(dcs >> 8);
+			unsigned isr = 0;
+			const unsigned scanN = (n < 0x8000u) ? n : 0x8000u;
+			for (unsigned o = 0; o + 8u < scanN; o++) {
+				if (mem[dst + o] == 0xFC && mem[dst + o + 1] == 0x2E
+					&& mem[dst + o + 2] == 0xF6 && mem[dst + o + 3] == 0x06) {
+					isr = o;
+					break;
+				}
+			}
+			if (!isr) {
+				for (unsigned o = 0; o + 8u < scanN; o++) {
+					if (mem[dst + o] == 0x2E && mem[dst + o + 1] == 0xF6
+						&& mem[dst + o + 2] == 0x06) {
+						isr = o;
+						break;
+					}
+				}
+			}
+			if (isr) {
+				mem[0x08 * 4 + 0] = (uint8_t)(isr & 0xff);
+				mem[0x08 * 4 + 1] = (uint8_t)(isr >> 8);
+				mem[0x08 * 4 + 2] = (uint8_t)(dcs & 0xff);
+				mem[0x08 * 4 + 3] = (uint8_t)(dcs >> 8);
+			}
+		}
+	}
+	/* VALKY `MOV ES,CS:[041E] / CALL FAR ES:[000C]`. File [000C] is a
+	   near API (RETF at 0078/0060). [000E]==0 makes that CALL 0000:0078.
+	   Plant a far ptr only when the live image still has the API opcode. */
+	{
+		const unsigned s08 = (unsigned)mem[0x08 * 4 + 2]
+			| ((unsigned)mem[0x08 * 4 + 3] << 8);
+		if (glueCs) {
+			unsigned api = 0x78u;
+			if (dos) {
+				const CEmuDos98File* drv = dos->FindFile("CSCP.BIN");
+				if (!drv)
+					drv = dos->FindFile("SSCP.BIN");
+				if (drv && drv->data && drv->size >= 0x10u)
+					api = (unsigned)drv->data[0x0C]
+						| ((unsigned)drv->data[0x0D] << 8);
+			}
+			if (s08 >= 0x1000u && s08 < 0xA000u) {
+				const unsigned dst = s08 << 4;
+				if (api >= 0x20u && api < 0x200u
+					&& dst + api + 4u < 0x200000u
+					&& mem[dst + api] == 0xFC
+					&& mem[dst + api + 1] == 0x32
+					&& mem[dst + api + 2] == 0xE4) {
+					mem[dst + 0x0C] = (uint8_t)(api & 0xff);
+					mem[dst + 0x0D] = (uint8_t)(api >> 8);
+					mem[dst + 0x0E] = (uint8_t)(s08 & 0xff);
+					mem[dst + 0x0F] = (uint8_t)(s08 >> 8);
+				}
+			}
+			/* [041E] is VALKY's AH=48 SSCP block, not INT08 CS. A 9100
+			   overlay left it 0 — point at the live CSCP/SSCP CS so
+			   CALL FAR ES:[000C] hits the RETF API. */
+			const unsigned gb = glueCs << 4;
+			if (gb + 0x422u < 0x200000u) {
+			unsigned es = (unsigned)mem[gb + 0x41E]
+				| ((unsigned)mem[gb + 0x41F] << 8);
+			if (!es || es == (unsigned)DOS98_TRAMP_SEG) {
+				if (s08 >= 0x1000u && s08 < 0xA000u
+					&& api >= 0x20u && api < 0x200u) {
+					const unsigned ad = s08 << 4;
+					if (ad + api + 4u < 0x200000u
+						&& mem[ad + api] == 0xFC
+						&& mem[ad + api + 1] == 0x32
+						&& mem[ad + api + 2] == 0xE4) {
+						mem[gb + 0x41E] = (uint8_t)(s08 & 0xff);
+						mem[gb + 0x41F] = (uint8_t)(s08 >> 8);
+						es = s08;
+					}
+				}
+			}
+			/* AH=3F BX=5/6 into the AH=48 block can fail. Host-map
+			   SSCP/CSCP so CALL FAR ES:[000C] is the RETF API. */
+			if (dos && es >= 0x1000u && es < 0xA000u) {
+				const unsigned dst = es << 4;
+				int have = (dst + 0x80u < 0x200000u
+					&& mem[dst] == 0xF1 && mem[dst + 1] == 0x11);
+				if (!have) {
+					const CEmuDos98File* drv = dos->FindFile("CSCP.BIN");
+					if (!drv)
+						drv = dos->FindFile("SSCP.BIN");
+					if (drv && drv->data && drv->size >= 0x80u) {
+						unsigned n = drv->size;
+						if (dst + n >= 0x200000u)
+							n = 0x200000u - dst;
+						memcpy(mem + dst, drv->data, n);
+						have = 1;
+					}
+				}
+				if (have && api >= 0x20u && api < 0x200u
+					&& dst + api + 4u < 0x200000u
+					&& mem[dst + api] == 0xFC
+					&& mem[dst + api + 1] == 0x32
+					&& mem[dst + api + 2] == 0xE4) {
+					mem[dst + 0x0C] = (uint8_t)(api & 0xff);
+					mem[dst + 0x0D] = (uint8_t)(api >> 8);
+					mem[dst + 0x0E] = (uint8_t)(es & 0xff);
+					mem[dst + 0x0F] = (uint8_t)(es >> 8);
+				}
+			}
+		}
+		}
+	}
+	if (glueCs) {
+		mem[0x7F * 4 + 0] = 0x10;
+		mem[0x7F * 4 + 1] = 0x02;
+		mem[0x7F * 4 + 2] = (uint8_t)(glueCs & 0xff);
+		mem[0x7F * 4 + 3] = (uint8_t)(glueCs >> 8);
+	}
+	/* cmd8 INT 50 AH=3 → DS for AH=3F CX=400 into DS:0000. That buffer is
+	   VALKY [0420] (128K), not INT08/SSCP (writing SSCP:0000 smashes 0078). */
 	unsigned songSeg = 0;
 	const unsigned s7f = (unsigned)mem[0x7F * 4 + 2]
 		| ((unsigned)mem[0x7F * 4 + 3] << 8);
-	if (s7f && s7f != (unsigned)DOS98_TRAMP_SEG) {
-		const unsigned vb = s7f << 4;
-		if (vb + 0x422u < 0x200000u)
-			songSeg = (unsigned)mem[vb + 0x420]
-				| ((unsigned)mem[vb + 0x421] << 8);
+	auto take420 = [&](unsigned cs) {
+		if (!cs || cs == (unsigned)DOS98_TRAMP_SEG)
+			return;
+		const unsigned vb = cs << 4;
+		if (vb + 0x422u >= 0x200000u)
+			return;
+		const unsigned s = (unsigned)mem[vb + 0x420]
+			| ((unsigned)mem[vb + 0x421] << 8);
+		if (s && s != (unsigned)DOS98_TRAMP_SEG && s < 0xF000u)
+			songSeg = s;
+	};
+	take420(glueCs);
+	if (!songSeg)
+		take420(s7f);
+	if (!songSeg)
+		songSeg = 0x4000u;
+	if (glueCs) {
+		const unsigned gb = glueCs << 4;
+		if (gb + 0x422u < 0x200000u) {
+			mem[gb + 0x420] = (uint8_t)(songSeg & 0xff);
+			mem[gb + 0x421] = (uint8_t)(songSeg >> 8);
+		}
+	}
+	if (dos && song && song[0] && songSeg) {
+		const CEmuDos98File* f = dos->FindFile(song);
+		if (f && f->data && f->size) {
+			const unsigned dst = songSeg << 4;
+			unsigned n = f->size;
+			if (n > 0xFFF0u)
+				n = 0xFFF0u;
+			if (dst + n < 0x200000u)
+				memcpy(mem + dst, f->data, n);
+		}
 	}
 	mem[0x600] = 0x80;
 	mem[0x601] = 0xFC;
 	mem[0x602] = 0x03;
-	mem[0x603] = 0x75;
-	mem[0x604] = 0x04;
-	mem[0x605] = 0xB8;
-	mem[0x606] = (uint8_t)(songSeg & 0xff);
-	mem[0x607] = (uint8_t)((songSeg >> 8) & 0xff);
-	mem[0x608] = 0xCF;
-	mem[0x609] = 0xB8;
-	mem[0x60A] = (uint8_t)(songHandle & 0xff);
-	mem[0x60B] = (uint8_t)((songHandle >> 8) & 0xff);
+	mem[0x603] = 0x74;
+	mem[0x604] = 0x0C;
+	mem[0x605] = 0x80;
+	mem[0x606] = 0xFC;
+	mem[0x607] = 0x02;
+	mem[0x608] = 0x75;
+	mem[0x609] = 0x03;
+	mem[0x60A] = 0x33;
+	mem[0x60B] = 0xC0;
 	mem[0x60C] = 0xCF;
+	mem[0x60D] = 0xB8;
+	mem[0x60E] = (uint8_t)(songHandle & 0xff);
+	mem[0x60F] = (uint8_t)((songHandle >> 8) & 0xff);
+	mem[0x610] = 0xCF;
+	mem[0x611] = 0xB8;
+	mem[0x612] = (uint8_t)(songSeg & 0xff);
+	mem[0x613] = (uint8_t)((songSeg >> 8) & 0xff);
+	mem[0x614] = 0xCF;
 	mem[0x50 * 4 + 0] = 0x00;
 	mem[0x50 * 4 + 1] = 0x06;
 	mem[0x50 * 4 + 2] = 0x00;
 	mem[0x50 * 4 + 3] = 0x00;
+	/* #UD must HLT through the trampoline so ServiceInt can skip. */
+	mem[0x06 * 4 + 0] = 0x0C;
+	mem[0x06 * 4 + 1] = 0x00;
+	mem[0x06 * 4 + 2] = (uint8_t)(DOS98_TRAMP_SEG & 0xff);
+	mem[0x06 * 4 + 3] = (uint8_t)((DOS98_TRAMP_SEG >> 8) & 0xff);
 	unsigned cands[4];
 	unsigned nc = 0;
 	auto add = [&](unsigned s) {
@@ -4477,12 +5108,180 @@ static void ValkyArmSscpPlay(uint8_t* mem, uint16_t songHandle)
 			add((unsigned)mem[vb + 0x41E]
 				| ((unsigned)mem[vb + 0x41F] << 8));
 	}
+	if (glueCs)
+		add(glueCs);
 	for (unsigned i = 0; i < nc; i++) {
 		const unsigned base = cands[i] << 4;
-		if (base + 0x390Au < 0x200000u) {
+		if (base + 0x4000u >= 0x200000u)
+			continue;
+		int has384b = 0;
+		for (unsigned o = 0; o + 7 < 0x8000u && base + o + 7 < 0x200000u; o++) {
+			if (mem[base + o] == 0x2E && mem[base + o + 1] == 0xF6
+				&& mem[base + o + 2] == 0x06 && mem[base + o + 3] == 0x4B
+				&& mem[base + o + 4] == 0x38)
+				has384b = 1;
+			/* cmd8 `TEST CS:[imm],1 / JNZ` — hinadori 384B, CSCP 3EB1. */
+			if (mem[base + o] == 0x2E && mem[base + o + 1] == 0xF6
+				&& mem[base + o + 2] == 0x06 && mem[base + o + 5] == 0x01
+				&& mem[base + o + 6] == 0x75) {
+				const unsigned addr = (unsigned)mem[base + o + 3]
+					| ((unsigned)mem[base + o + 4] << 8);
+				if (addr >= 0x2000u && addr < 0x5000u
+					&& base + addr < 0x200000u)
+					mem[base + addr] = 1;
+			}
+			/* cmd8 `TEST CS:[imm],FF / JZ` — hinadori 384D, CSCP 3EB4. */
+			if (mem[base + o] == 0x2E && mem[base + o + 1] == 0xF6
+				&& mem[base + o + 2] == 0x06 && mem[base + o + 5] == 0xFF
+				&& (mem[base + o + 6] == 0x74 || mem[base + o + 6] == 0x75)) {
+				const unsigned addr = (unsigned)mem[base + o + 3]
+					| ((unsigned)mem[base + o + 4] << 8);
+				if (addr >= 0x2000u && addr < 0x5000u
+					&& base + addr < 0x200000u)
+					mem[base + addr] = 1;
+			}
+		}
+		if (has384b) {
 			mem[base + 0x384B] = 1;
 			mem[base + 0x384D] = 1;
-			mem[base + 0x390A] = 1;
+			/* ISR 0DD2 remasks IRQ0 unless [38A9] is set. */
+			if (base + 0x38A9u < 0x200000u)
+				mem[base + 0x38A9] = 1;
+			/* CS:[390A] is the INT08 busy latch: TEST/JNZ IRETs
+			   without sequencing. File default is 0. Do not set it. */
+		}
+	}
+	ValkyReplantIsr(mem);
+}
+
+static int ValkyLooksIsr(const uint8_t* mem, unsigned p)
+{
+	if (!mem || p + 6u >= 0x200000u)
+		return 0;
+	if (mem[p] == 0xFC && mem[p + 1] == 0x2E && mem[p + 2] == 0xF6)
+		return 1;
+	if (mem[p] == 0x1E && mem[p + 1] == 0x06 && mem[p + 2] == 0x60)
+		return 1;
+	if (mem[p] == 0x2E && mem[p + 1] == 0xF6 && mem[p + 2] == 0x06)
+		return 1;
+	return 0;
+}
+
+static void ValkyReplantIsr(uint8_t* mem)
+{
+	if (!mem || !s_valkyKeepIrq0)
+		return;
+	const unsigned cs = (unsigned)mem[0x08 * 4 + 2]
+		| ((unsigned)mem[0x08 * 4 + 3] << 8);
+	const unsigned off = (unsigned)mem[0x08 * 4]
+		| ((unsigned)mem[0x08 * 4 + 1] << 8);
+	if (cs >= 0x1000u && cs < 0xA000u && off != 0
+		&& ValkyLooksIsr(mem, (cs << 4) + off))
+		return;
+	unsigned cands[6];
+	unsigned nc = 0;
+	auto add = [&](unsigned s) {
+		if (!s || s < 0x1000u || s >= 0xA000u)
+			return;
+		for (unsigned i = 0; i < nc; i++)
+			if (cands[i] == s)
+				return;
+		if (nc < 6)
+			cands[nc++] = s;
+	};
+	const unsigned glue = (unsigned)mem[0x7F * 4 + 2]
+		| ((unsigned)mem[0x7F * 4 + 3] << 8);
+	if (glue && glue != (unsigned)DOS98_TRAMP_SEG) {
+		const unsigned gb = glue << 4;
+		if (gb + 0x420u < 0x200000u)
+			add((unsigned)mem[gb + 0x41E]
+				| ((unsigned)mem[gb + 0x41F] << 8));
+	}
+	add(0x2002u);
+	add(0x2800u);
+	static const unsigned kOff[] = { 0x0DB5u, 0x2DABu, 0x3151u, 0x3090u, 0x0DD2u };
+	for (unsigned i = 0; i < nc; i++) {
+		const unsigned dst = cands[i] << 4;
+		for (unsigned k = 0; k < 5; k++) {
+			if (ValkyLooksIsr(mem, dst + kOff[k])) {
+				mem[0x08 * 4 + 0] = (uint8_t)(kOff[k] & 0xff);
+				mem[0x08 * 4 + 1] = (uint8_t)(kOff[k] >> 8);
+				mem[0x08 * 4 + 2] = (uint8_t)(cands[i] & 0xff);
+				mem[0x08 * 4 + 3] = (uint8_t)(cands[i] >> 8);
+				if (dst + 0x38A9u < 0x200000u)
+					mem[dst + 0x38A9] = 1;
+				return;
+			}
+		}
+		for (unsigned o = 0; o + 6u < 0x8000u && dst + o + 6u < 0x200000u; o++) {
+			if (ValkyLooksIsr(mem, dst + o)) {
+				mem[0x08 * 4 + 0] = (uint8_t)(o & 0xff);
+				mem[0x08 * 4 + 1] = (uint8_t)(o >> 8);
+				mem[0x08 * 4 + 2] = (uint8_t)(cands[i] & 0xff);
+				mem[0x08 * 4 + 3] = (uint8_t)(cands[i] >> 8);
+				if (dst + 0x38A9u < 0x200000u)
+					mem[dst + 0x38A9] = 1;
+				return;
+			}
+		}
+	}
+	for (unsigned s = 0x1000u; s < 0xA000u; s++) {
+		for (unsigned i = 0; i < 5; i++) {
+			if (ValkyLooksIsr(mem, (s << 4) + kOff[i])) {
+				mem[0x08 * 4 + 0] = (uint8_t)(kOff[i] & 0xff);
+				mem[0x08 * 4 + 1] = (uint8_t)(kOff[i] >> 8);
+				mem[0x08 * 4 + 2] = (uint8_t)(s & 0xff);
+				mem[0x08 * 4 + 3] = (uint8_t)(s >> 8);
+				if (((s << 4) + 0x38A9u) < 0x200000u)
+					mem[(s << 4) + 0x38A9] = 1;
+				return;
+			}
+		}
+	}
+}
+
+static void ValkyFixFarApiFromGlue(uint8_t* mem)
+{
+	if (!mem || !s_valkyKeepIrq0)
+		return;
+	unsigned glue = (unsigned)mem[0x7F * 4 + 2]
+		| ((unsigned)mem[0x7F * 4 + 3] << 8);
+	if (!glue || glue == (unsigned)DOS98_TRAMP_SEG)
+		return;
+	const unsigned gb = glue << 4;
+	if (gb + 0x422u >= 0x200000u)
+		return;
+	unsigned cands[3];
+	unsigned nc = 0;
+	auto add = [&](unsigned s) {
+		if (!s || s < 0x1000u || s >= 0xA000u)
+			return;
+		for (unsigned i = 0; i < nc; i++)
+			if (cands[i] == s)
+				return;
+		if (nc < 3)
+			cands[nc++] = s;
+	};
+	add((unsigned)mem[gb + 0x41E] | ((unsigned)mem[gb + 0x41F] << 8));
+	add((unsigned)mem[0x08 * 4 + 2] | ((unsigned)mem[0x08 * 4 + 3] << 8));
+	add(0x2002u);
+	for (unsigned i = 0; i < nc; i++) {
+		const unsigned dst = cands[i] << 4;
+		static const unsigned kApi[] = { 0x78u, 0x60u };
+		for (unsigned a = 0; a < 2; a++) {
+			const unsigned api = kApi[a];
+			if (dst + api + 4u >= 0x200000u)
+				continue;
+			if (mem[dst + api] != 0xFC || mem[dst + api + 1] != 0x32
+				|| mem[dst + api + 2] != 0xE4)
+				continue;
+			mem[dst + 0x0C] = (uint8_t)(api & 0xff);
+			mem[dst + 0x0D] = (uint8_t)(api >> 8);
+			mem[dst + 0x0E] = (uint8_t)(cands[i] & 0xff);
+			mem[dst + 0x0F] = (uint8_t)(cands[i] >> 8);
+			mem[gb + 0x41E] = (uint8_t)(cands[i] & 0xff);
+			mem[gb + 0x41F] = (uint8_t)(cands[i] >> 8);
+			return;
 		}
 	}
 }
@@ -4493,11 +5292,42 @@ static void ValkyRewindCmd8Read(CEmuDos98& dos, const char* song, uint8_t vec)
 		return;
 	if ((uint8_t)(np2_reg_get(NP2_R_AX) >> 8) != 0x3F)
 		return;
-	if (np2_reg_get(NP2_R_CX) != 0x400)
+	if (np2_reg_get(NP2_R_CX) < 0x100)
 		return;
 	const uint16_t bx = np2_reg_get(NP2_R_BX);
-	if (bx)
-		dos.SetHandle(bx, song);
+	dos.SetHandle(bx, song);
+	/* cmd8 AH=3F CX=400 into DS:0000. If DS is still SSCP (F1 11 / API
+	   FC 32 E4), that 1K header lands on CS:01A1 and INT 06 livelocks. */
+	uint8_t* mem = np2_mem();
+	if (!mem)
+		return;
+	const uint16_t ds = np2_reg_get(NP2_R_DS);
+	const unsigned db = (unsigned)ds << 4;
+	if (db + 0x10u >= 0x200000u)
+		return;
+	int smash = 0;
+	if (mem[db] == 0xF1 && mem[db + 1] == 0x11)
+		smash = 1;
+	const unsigned api = (unsigned)mem[db + 0x0C]
+		| ((unsigned)mem[db + 0x0D] << 8);
+	if (api && db + api + 2u < 0x200000u
+		&& mem[db + api] == 0xFC && mem[db + api + 1] == 0x32
+		&& mem[db + api + 2] == 0xE4)
+		smash = 1;
+	if (!smash)
+		return;
+	unsigned songSeg = 0;
+	const unsigned glue = (unsigned)mem[0x7F * 4 + 2]
+		| ((unsigned)mem[0x7F * 4 + 3] << 8);
+	if (glue && glue != (unsigned)DOS98_TRAMP_SEG) {
+		const unsigned gb = glue << 4;
+		if (gb + 0x422u < 0x200000u)
+			songSeg = (unsigned)mem[gb + 0x420]
+				| ((unsigned)mem[gb + 0x421] << 8);
+	}
+	if (!songSeg || songSeg == (unsigned)DOS98_TRAMP_SEG || songSeg >= 0xF000u)
+		songSeg = 0x4000u;
+	np2_reg_set(NP2_R_DS, (uint16_t)songSeg);
 }
 
 /* FairyDust MFD.EXE (koukan2/madol MIDI): Borland TSR. */
@@ -4950,6 +5780,23 @@ int CHardPc98::RunDosCommand(const char* cmdline, uint64_t budgetCycles)
 	int ok = isExe ? dos_.LoadExe(mem, image, imageSize, pspTail)
 		: dos_.LoadCom(mem, image, imageSize, pspTail);
 	if (!ok) return 0;
+	if (s_fmxCalibAssist && !isExe && imageSize == 14984u) {
+		const uint16_t psp = dos_.PspSeg();
+		const unsigned base = (unsigned)psp << 4;
+		const unsigned slot = base + 0x3B84u;
+		if (slot + 1u < 0x200000u) {
+			mem[slot] = 0x00;
+			mem[slot + 1] = 0x80;
+		}
+		/* One-shot INT08 CALL FAR [3B6C] — BSS is 0000:0000. */
+		if (base + 0x3B71u < 0x200000u) {
+			mem[base + 0x3B6C] = 0x70;
+			mem[base + 0x3B6D] = 0x3B;
+			mem[base + 0x3B6E] = (uint8_t)(psp & 0xff);
+			mem[base + 0x3B6F] = (uint8_t)(psp >> 8);
+			mem[base + 0x3B70] = 0xCB;
+		}
+	}
 	if (isExe && image && imageSize >= 32) {
 		int isMfd = 0;
 		for (unsigned i = 0; i + 18u < imageSize; i++) {
@@ -4979,6 +5826,19 @@ int CHardPc98::RunDosCommand(const char* cmdline, uint64_t budgetCycles)
 		if (s_mfd98GlueCs && cs == s_mfd98GlueCs && ip == 0x112)
 			return 1;
 		uint8_t* m = np2_mem();
+		if (s_fmxCalibAssist && m) {
+			const unsigned physWait = ((unsigned)cs << 4) + (unsigned)ip;
+			if (physWait + 6u < 0x200000u
+				&& m[physWait] == 0xF7 && m[physWait + 1] == 0x06
+				&& m[physWait + 2] == 0x84 && m[physWait + 3] == 0x3B) {
+				const unsigned slot = ((unsigned)cs << 4) + 0x3B84u;
+				if (slot + 1u < 0x200000u
+					&& m[slot] == 0 && m[slot + 1] == 0) {
+					m[slot] = 0x00;
+					m[slot + 1] = 0x80;
+				}
+			}
+		}
 		const unsigned phys = ((unsigned)cs << 4) + (unsigned)ip;
 		if (m && phys < 0x200000 && m[phys] == 0xF4) {
 			uint8_t vec = 0;
@@ -5146,6 +6006,8 @@ int CHardPc98::BootDos(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCod
 	picMask_ = 0xff;
 	slavePicMask_ = 0xff;
 	s_valkyKeepIrq0 = 0;
+	s_fmxKeepIrq0 = 0;
+	s_fmxCalibAssist = FmxDosShell(ge) ? 1 : 0;
 	{
 		static const char* kValkyPitBoot[] = { "VALKY_98", "valky", NULL };
 		if (DosShellStarts(ge, kValkyPitBoot)) {
@@ -5507,6 +6369,11 @@ int CHardPc98::BootDos(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCod
 			picMask_ = (uint8_t)(picMask_ & ~(1u << 3));
 		}
 	}
+	FmxArmPitIrq0(ge, 1);
+	if (s_fmxKeepIrq0) {
+		picMask_ = (uint8_t)(picMask_ & 0xfeu);
+		FmxPlantInt60FromPit(np2_mem());
+	}
 	/* BIOS PIT always counts. IRQ0 stays masked unless midi/beep/INT 1C. */
 	if (!pitRunning_) {
 		pitReload_ = (uint16_t)(PC98_PIT_CLOCK_HZ / 60);
@@ -5567,9 +6434,9 @@ int CHardPc98::BootDos(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCod
 			g_fmdLoadedSong[0] = 0;
 	}
 	{
-		static const char* kValkyArm[] = { "VALKY_98", "valky", NULL };
-		if (DosShellStarts(ge, kValkyArm))
-			ValkyArmSscpPlay(np2_mem(), (uint16_t)(titleCode & 0xffff));
+		if (ValkyWantArm(ge, &dos_))
+			ValkyArmSscpPlay(np2_mem(), (uint16_t)(titleCode & 0xffff),
+				&dos_, dosSong_);
 	}
 	return 1;
 }
@@ -5684,6 +6551,16 @@ void CHardPc98::PumpCycles(uint64_t endCycle)
 							AdvanceOpnClocks(q);
 							continue;
 						}
+					}
+					/* FMX 3.10 ArmSeq INT 60 must run to 196D after FMXP
+					   IRETs into the HLT TSR. Aborting here leaves seq=0. */
+					if (s_fmxKeepIrq0 || s_valkyKeepIrq0) {
+						dos_.IretReturn(mem);
+						const uint64_t q = 50;
+						cpuCycles_ += q;
+						TickSide(q);
+						AdvanceOpnClocks(q);
+						continue;
 					}
 					return;
 				}
@@ -5905,12 +6782,26 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 				s_midiDrvHostSmf = 1;
 		}
 		{
-			static const char* kValkyArm[] = { "VALKY_98", "valky", NULL };
-			if (dosGe_ && DosShellStarts(dosGe_, kValkyArm)) {
+			if (ValkyWantArm(dosGe_, &dos_)) {
 				s_valkyKeepIrq0 = 1;
 				picMask_ = (uint8_t)(picMask_ & 0xfeu);
-				ValkyArmSscpPlay(np2_mem(), (uint16_t)(titleCode & 0xffff));
+				extCmd_ = 0;
+				ValkyArmSscpPlay(np2_mem(), (uint16_t)(titleCode & 0xffff),
+					&dos_, dosSong_[0] ? dosSong_
+					: SelectedDosSong(dosGe_, titleCode));
 			}
+		}
+		FmxArmPitIrq0(dosGe_, 1);
+		if (s_fmxKeepIrq0 && !modeMidi_) {
+			picMask_ = (uint8_t)(picMask_ & 0xfau); /* IRQ0 + cascade */
+			slavePicMask_ = (uint8_t)(slavePicMask_ & ~(1u << 4));
+			const char* nm = dosSong_[0] ? dosSong_
+				: SelectedDosSong(dosGe_, titleCode);
+			FmxKick310Play(np2_mem(), &dos_, nm);
+			Fmx310EnableYmTimer(chip_);
+			/* FMXP INT 60 indexes BH of saved BX; AX=0600 is set-buffer.
+			   3.10 Kick also patches [BP+12]→[BP+18] (AH). Set both. */
+			np2_reg_set(NP2_R_BX, 0x0600);
 		}
 		np2_reg_set(NP2_R_FLAGS, (uint16_t)(np2_reg_get(NP2_R_FLAGS) | 0x0200));
 		np2_interrupt((uint8_t)funcVect_);
@@ -5924,14 +6815,26 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 				playDrain = (uint64_t)cpuHz_ / 20ull;
 		}
 		PumpCycles(cpuCycles_ + playDrain);
+		if (s_valkyKeepIrq0) {
+			ValkyReplantIsr(np2_mem());
+			ValkyFixFarApiFromGlue(np2_mem());
+		}
+		if (s_fmxKeepIrq0 && !modeMidi_) {
+			Fmx310ArmSeq(np2_mem(), 0, 0x1000);
+			PumpCycles(cpuCycles_ + playDrain);
+			Fmx310ArmSeq(np2_mem(), 0, 0x1500);
+			PumpCycles(cpuCycles_ + playDrain);
+		}
 		{
-			static const char* kValkyArm[] = { "VALKY_98", "valky", NULL };
-			if (dosGe_ && DosShellStarts(dosGe_, kValkyArm)
+			if (ValkyWantArm(dosGe_, &dos_)
 				&& opnKeyOnCount_ == 0) {
 				s_valkyKeepIrq0 = 1;
 				picMask_ = (uint8_t)(picMask_ & 0xfeu);
+				extCmd_ = 0;
 				uint8_t* vmem = np2_mem();
-				ValkyArmSscpPlay(vmem, (uint16_t)(titleCode & 0xffff));
+				ValkyArmSscpPlay(vmem, (uint16_t)(titleCode & 0xffff),
+					&dos_, dosSong_[0] ? dosSong_
+					: SelectedDosSong(dosGe_, titleCode));
 				{
 					const char* nm = dosSong_[0] ? dosSong_
 						: SelectedDosSong(dosGe_, titleCode);
@@ -5942,6 +6845,25 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 				np2_reg_set(NP2_R_FLAGS,
 					(uint16_t)(np2_reg_get(NP2_R_FLAGS) | 0x0200));
 				np2_interrupt((uint8_t)funcVect_);
+				PumpCycles(cpuCycles_ + playDrain);
+				ValkyReplantIsr(vmem);
+				ValkyFixFarApiFromGlue(vmem);
+			}
+		}
+		if (FmxDosShell(dosGe_) && opnKeyOnCount_ == 0 && !modeMidi_) {
+			FmxArmPitIrq0(dosGe_, 1);
+			if (s_fmxKeepIrq0) {
+				picMask_ = (uint8_t)(picMask_ & 0xfau);
+				slavePicMask_ = (uint8_t)(slavePicMask_ & ~(1u << 4));
+				const char* nm = dosSong_[0] ? dosSong_
+					: SelectedDosSong(dosGe_, titleCode);
+				FmxKick310Play(np2_mem(), &dos_, nm);
+				Fmx310EnableYmTimer(chip_);
+				if (Fmx310Int60Play())
+					PumpCycles(cpuCycles_ + playDrain);
+				Fmx310ArmSeq(np2_mem(), 0, 0x1000);
+				PumpCycles(cpuCycles_ + playDrain);
+				Fmx310ArmSeq(np2_mem(), 0, 0x1500);
 				PumpCycles(cpuCycles_ + playDrain);
 			}
 		}
@@ -6922,7 +7844,9 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 						if (DosShellStarts(dosGe_, kValkyPit)
 							&& IvtHooked(PC98_TIMER_VEC, 1)) {
 							picMask_ = (uint8_t)(picMask_ & 0xfeu);
-							ValkyArmSscpPlay(mem, (uint16_t)(titleCode & 0xffff));
+							ValkyArmSscpPlay(mem, (uint16_t)(titleCode & 0xffff),
+								&dos_, dosSong_[0] ? dosSong_
+								: SelectedDosSong(dosGe_, titleCode));
 							if (!pitRunning_) {
 								pitReload_ = (uint16_t)(PC98_PIT_CLOCK_HZ / 60);
 								if (pitReload_ == 0) pitReload_ = 1;
@@ -6931,6 +7855,19 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 								pitIrqPending_ = 0;
 								pitResidual_ = 0;
 							}
+						}
+					}
+					FmxArmPitIrq0(dosGe_, 1);
+					if (s_fmxKeepIrq0) {
+						picMask_ = (uint8_t)(picMask_ & 0xfeu);
+						FmxPlantInt60FromPit(mem);
+						if (!pitRunning_) {
+							pitReload_ = (uint16_t)(PC98_PIT_CLOCK_HZ / 60);
+							if (pitReload_ == 0) pitReload_ = 1;
+							pitCounter_ = pitReload_;
+							pitRunning_ = 1;
+							pitIrqPending_ = 0;
+							pitResidual_ = 0;
 						}
 					}
 				}

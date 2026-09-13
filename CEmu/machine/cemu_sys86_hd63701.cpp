@@ -33,12 +33,17 @@ uint8_t CHardAc::HD63701Read8(uint16_t addr)
 {
 	if ((addr & 0xffe0u) == 0x0000u)
 		return (uint8_t)m6803_internal_registers_r((unsigned short)(addr & 0x1fu));
-	if ((addr & 0xff80u) == 0x0080u)
-		return hd63701Ram_[addr & 0xffu];
+	/* HD63701V0: 128B at $80-FF (MAME hd6801_mem). CUS60 also RAM-tests
+	   through $017F on song-start (F2E3 from [AE+33]); keep $40-$1FF as
+	   internal RAM so that compare-back does not fall into F33F/F0DC. */
+	if (addr >= 0x0040u && addr <= 0x01ffu)
+		return hd63701Ram_[addr];
 	if ((addr & 0xfc00u) == 0x1000u) {
 		const unsigned off = addr & 0x3ffu;
-		/* CUS60 F0DC waits for $1181=$A6 after ringing $1180. */
-		if (wsg63701_ && off == 0x181u && namcoCus30_[0x180u] == 0xa6u)
+		/* CUS60 F0DC: wait $1181=$A6 after $1180=$A6 (main 6809 doorbell).
+		   No host CPU here — return A6 so the wait completes. IRQ nesting
+		   was what turned F33F's follow-up JSR [AE+4] into a reboot storm. */
+		if (off == 0x181u && namcoCus30_[0x180u] == 0xa6u)
 			return 0xa6u;
 		return namcoCus30_[off];
 	}
@@ -50,17 +55,29 @@ uint8_t CHardAc::HD63701Read8(uint16_t addr)
 		return hd63701Rom_[addr];
 
 	if (!wsg63701_ && addr >= 0x1400u && addr <= 0x1fffu)
-		return hd63701Ram_[0x100u + (addr - 0x1400u)];
-	/* YM lives only at hd63701YmBase_ (default $2000). roishtar maps ROM at
-	   $2000-3FFF and YM at $6000 — do not alias $2000 as YM or punch $2020
-	   as ports into that ROM window. wsg63701 has no YM2151. */
+		return hd63701Ram_[0x200u + (addr - 0x1400u)];
+	/* MAME hopmappy YM $2000, genpeitd $2800, wndrmomo $3800, roishtar $6000.
+	   CUS60 STA $2000 stub stays on non-roishtar maps. Do not decode $6000
+	   as YM when that byte is MCU ROM ($4000-$BFFF on expanded games). */
 	if (!wsg63701_) {
-		const uint16_t ym0 = hd63701YmBase_ ? hd63701YmBase_ : (uint16_t)0x2000u;
-		if (addr == ym0 || addr == (uint16_t)(ym0 + 1u))
-			return chip_ ? chip_->ReadStatus() : 0x80;
-		if (addr == (uint16_t)(ym0 + 0x20u) || addr == (uint16_t)(ym0 + 0x21u)
-			|| addr == (uint16_t)(ym0 + 0x30u) || addr == (uint16_t)(ym0 + 0x31u))
-			return 0xff;
+		/* MAME: one YM pair per game. FBNeo's write handler lists all four
+		   but MapMemory ROM at $4000-7FFF wins, so wndrmomo checksums
+		   $4000-$BFFF as ROM (including $6000). Decoding every pair here
+		   made F124 sum fail (fault 3) and 80A9 reboot forever. CUS60's
+		   STA $2000 stub stays live except on roishtar (ROM $2000-3FFF). */
+		const uint16_t ymEven = (uint16_t)(addr & 0xfffeu);
+		const uint16_t ymBase = hd63701YmBase_ ? hd63701YmBase_ : 0x2000u;
+		const int roishtarRom = (hd63701MapKind_ == 1
+			&& addr >= 0x2000u && addr <= 0x3fffu);
+		if (!roishtarRom && (ymEven == ymBase || ymEven == 0x2000u))
+			return chip_ ? chip_->ReadStatus() : 0;
+		if (!roishtarRom) {
+			const uint16_t blk = (uint16_t)(addr & 0xff00u);
+			const uint16_t off = (uint16_t)(addr & 0x00ffu);
+			if ((blk == ymBase || blk == 0x2000u)
+				&& (off == 0x20u || off == 0x21u || off == 0x30u || off == 0x31u))
+				return 0xff;
+		}
 	}
 	if (hd63701Rom_ && addr < 0x10000u)
 		return hd63701Rom_[addr];
@@ -73,8 +90,8 @@ void CHardAc::HD63701Write8(uint16_t addr, uint8_t v)
 		m6803_internal_registers_w((unsigned short)(addr & 0x1fu), v);
 		return;
 	}
-	if ((addr & 0xff80u) == 0x0080u) {
-		hd63701Ram_[addr & 0xffu] = v;
+	if (addr >= 0x0040u && addr <= 0x01ffu) {
+		hd63701Ram_[addr] = v;
 		return;
 	}
 	if ((addr & 0xfc00u) == 0x1000u) {
@@ -98,12 +115,24 @@ void CHardAc::HD63701Write8(uint16_t addr, uint8_t v)
 		return;
 	}
 	if (!wsg63701_ && addr >= 0x1400u && addr <= 0x1fffu) {
-		hd63701Ram_[0x100u + (addr - 0x1400u)] = v;
+		/* 8259 packs DSW/IN at $1400 (32 bytes). If $C8 is left at the
+		   F20A dest ($14F0) the bit-unpack at 8287 walks into the vector
+		   table (14F8=478F → TRAP → FF78 fault 8). Keep $14F0-$156B for
+		   F14A/F20A (PC $F364) and the 813E wipe (PC $814D). */
+		if (addr >= 0x14f0u && addr < 0x156cu && hd63701_) {
+			const uint16_t pc = HD63701Pc(hd63701_);
+			if (pc >= 0x8240u && pc < 0x82f0u)
+				return;
+		}
+		hd63701Ram_[0x200u + (addr - 0x1400u)] = v;
 		return;
 	}
 	if (!wsg63701_) {
-		const uint16_t ym0 = hd63701YmBase_ ? hd63701YmBase_ : (uint16_t)0x2000u;
-		if (addr == ym0 || addr == (uint16_t)(ym0 + 1u)) {
+		const uint16_t ymEven = (uint16_t)(addr & 0xfffeu);
+		const uint16_t ymBase = hd63701YmBase_ ? hd63701YmBase_ : 0x2000u;
+		const int roishtarRom = (hd63701MapKind_ == 1
+			&& addr >= 0x2000u && addr <= 0x3fffu);
+		if (!roishtarRom && (ymEven == ymBase || ymEven == 0x2000u)) {
 			if (chip_) {
 				chip_->Write(addr & 1u, v);
 				if (addr & 1u) {
@@ -168,7 +197,9 @@ void CHardAc::HD63701InjectSong(uint8_t cmd)
 		if (c30) {
 			c30->Write(0x183, cmd);
 			c30->Write(0x182, 0xa6);
+			c30->Write(0x380, cmd); /* $1380: YM request latch (846B) */
 		}
+		namcoCus30_[0x380u] = cmd;
 		if (wsg63701_ && chip_)
 			CEmuChipC30SetEnable(chip_, 1);
 	}
@@ -246,9 +277,10 @@ int CHardAc::LoadRomsSys86(CEmuZipFs* fs, const CEmuGameEntry* ge)
 			memcpy(hd63701Rom_ + 0x8000, data + 0x4000, 0x4000);
 		} else {
 			memcpy(hd63701Rom_ + base, data, n);
-			/* Mirror first 16K like FBNeo (DrvMCUROM, DrvMCUROM+0x4000, 0x4000). */
-			if (n >= 0x4000u)
-				memcpy(hd63701Rom_, hd63701Rom_ + 0x4000u, 0x4000u);
+			/* FBNeo memcpy(DrvMCUROM, +0x4000, 0x4000) fills the image only —
+			   CPU reads at $0000-$3FFF go through the YM/port handler, not ROM.
+			   Painting that mirror into the executable image made $2000/$2800
+			   look like program bytes (wndrmomo $FF → YM busy-wait forever). */
 		}
 		gotExt = 1;
 		break;
@@ -271,8 +303,6 @@ int CHardAc::LoadRomsSys86(CEmuZipFs* fs, const CEmuGameEntry* ge)
 				? 0x4000u : 0x8000u;
 			const unsigned n = (bestSz > (0x10000u - base)) ? (0x10000u - base) : bestSz;
 			memcpy(hd63701Rom_ + base, fs->files[best].data, n);
-			if (n >= 0x4000u)
-				memcpy(hd63701Rom_, hd63701Rom_ + 0x4000u, 0x4000u);
 			gotExt = 1;
 		}
 	}
@@ -287,6 +317,8 @@ int CHardAc::LoadRomsSys86(CEmuZipFs* fs, const CEmuGameEntry* ge)
 	CEmuHD63701BusSetAc(this);
 	CEmuHD63701BusAttach(hd63701_, this);
 	HD63701Reset(hd63701_);
+	if (pcm_)
+		CEmuChipC30SetEnable(pcm_, 1);
 	return 1;
 }
 

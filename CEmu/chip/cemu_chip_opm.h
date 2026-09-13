@@ -13,3 +13,6 @@ int CEmuChipYm2151PeekRegs(const CChip* c, unsigned char* out256);
 unsigned CEmuChipYm2151KeyOnCount(const CChip* c);
 /* No-op API kept for X68k/X1 compile compat — does not rewrite TL/KeyOn. */
 void CEmuChipYm2151SetAudibleAssist(CChip* c, int enable);
+/* X1: fmgen Mix discards pan==0 (ibuf[0]). KOEI/KSK FB bytes often leave
+   RL=0, which keys the monitor but peak stays 0. Map RL=0 to L+R. */
+void CEmuChipYm2151SetRlZeroAsLr(CChip* c, int enable);

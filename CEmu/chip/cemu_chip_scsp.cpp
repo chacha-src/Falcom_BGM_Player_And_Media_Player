@@ -1,4 +1,4 @@
-#include "StdAfx.h"
+﻿#include "StdAfx.h"
 #include "cemu_chip_scsp.h"
 #include "cemu_chip.h"
 #include "../fmmon/fmmon_shadow.h"
@@ -247,4 +247,9 @@ unsigned CEmuChipScspReadReg(CChip* c, unsigned wordIndex)
 void CEmuChipScspMidiIn(CChip* c, uint8_t data)
 {
 	if (c) static_cast<CChipScsp*>(c)->MidiIn(data);
+}
+
+int CEmuChipScspMidiPending()
+{
+	return SCSP_MidiPending();
 }

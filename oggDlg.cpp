@@ -1,4 +1,4 @@
-﻿// oggDlg.cpp : インプリメンテーション ファイル
+// oggDlg.cpp : インプリメンテーション ファイル
 //
 //#define _DLL
 #include "stdafx.h"
@@ -3378,8 +3378,10 @@ static void CloseVstMidiSession()
 	   while Host64 waits in Pump / UI waits on Host64). */
 	CloseVstMidiSessionSlot(0);
 	CloseVstMidiSessionSlot(1);
-	if (!keepLive)
+	if (!keepLive) {
 		CEmuMidiLiveStop();
+		VstLiveTapFlush();
+	}
 }
 
 static HWND ShowVstWaitPopup(HWND owner)
@@ -3457,6 +3459,7 @@ static void CloseCemuPlaybackResources()
 {
 	g_cemuLiveKeepAcrossClose = 0;
 	CEmuMidiLiveStop();
+	VstLiveTapFlush();
 	for (int i = 0; i < XF_SLOTS; i++)
 		CloseCemuSlot(i);
 	FmMonShadowReset();
@@ -5089,6 +5092,180 @@ DWORD COgg_GetGdiPaintPendingAgeMs()
 	if (since == 0)
 		return 0;
 	return GetTickCount() - since;
+}
+
+/* timerp が FM/MIDI モニタを毎ティック同期している間も、MP のボタンきらめき／
+   ツールチップと、EQ コード・ピアノロール・アナライザが止まらないようにする。
+   モニタの PumpSyncNow / UpdateWindow は間引かない（描画精度はそのまま）。
+   WM_TIMER は低優先度で、VSYNC の PostMessage が続くと合成されない。
+   NULL 宛 Peek(WM_TIMER) は EQ/ピアノ/アナライザのタイマーを奪って末尾へ回し
+   飢餓させるので使わない。chrome / viz は HWND 指定 Peek でのみ取り出す。 */
+static volatile LONG s_inChromePump = 0;
+
+static int OggIsChromeAnimHwnd(HWND h)
+{
+	if (!h || !::IsWindow(h)) return 0;
+	TCHAR cls[40];
+	if (!::GetClassName(h, cls, 40)) return 0;
+	if (_tcsicmp(cls, TOOLTIPS_CLASS) == 0) return 1;
+	if (_tcsicmp(cls, _T("Button")) == 0) return 1;
+	if (_tcsicmp(cls, TRACKBAR_CLASS) == 0) return 1;
+	return 0;
+}
+
+static int OggIsMouseChromeMsg(UINT m)
+{
+	if (m >= WM_MOUSEFIRST && m <= WM_MOUSELAST) return 1;
+	if (m >= WM_NCMOUSEMOVE && m <= WM_NCMBUTTONDBLCLK) return 1;
+	if (m == WM_MOUSEHOVER || m == WM_MOUSELEAVE) return 1;
+	if (m == WM_NCMOUSEHOVER || m == WM_NCMOUSELEAVE) return 1;
+	return 0;
+}
+
+static int OggDispatchHwndTimers(HWND h, int maxN)
+{
+	if (!h || !::IsWindow(h) || maxN <= 0) return 0;
+	MSG msg;
+	int n = 0;
+	while (n < maxN && ::PeekMessage(&msg, h, WM_TIMER, WM_TIMER, PM_REMOVE)) {
+		::DispatchMessage(&msg);
+		++n;
+	}
+	return n;
+}
+
+static int OggDispatchHwndRange(HWND h, UINT lo, UINT hi, int maxN)
+{
+	if (!h || !::IsWindow(h) || maxN <= 0) return 0;
+	MSG msg;
+	int n = 0;
+	while (n < maxN && ::PeekMessage(&msg, h, lo, hi, PM_REMOVE)) {
+		if (msg.message == WM_QUIT) {
+			::PostQuitMessage((int)msg.wParam);
+			break;
+		}
+		::DispatchMessage(&msg);
+		++n;
+	}
+	return n;
+}
+
+static BOOL CALLBACK OggChromeTimerEnumChild(HWND h, LPARAM)
+{
+	if (OggIsChromeAnimHwnd(h))
+		OggDispatchHwndTimers(h, 4);
+	return TRUE;
+}
+
+static BOOL CALLBACK OggChromeTimerEnumTop(HWND h, LPARAM)
+{
+	if (OggIsChromeAnimHwnd(h))
+		OggDispatchHwndTimers(h, 4);
+	::EnumChildWindows(h, OggChromeTimerEnumChild, 0);
+	return TRUE;
+}
+
+static void OggUpdateVisibleHwnd(HWND h)
+{
+	if (h && ::IsWindow(h) && ::IsWindowVisible(h) && !::IsIconic(h))
+		::UpdateWindow(h);
+}
+
+/* CPianoRoll / CAnalyzerDlg の WM_APP 番号と同じ。HWND 指定 Peek するだけ。 */
+enum {
+	OGG_WM_PIANOROLL_SYNC = WM_APP + 420,
+	OGG_WM_PIANOROLL_ANALYSIS_DONE = WM_APP + 421,
+	OGG_WM_ANALYZER_SPEC_DONE = WM_APP + 510,
+	OGG_WM_ANALYZER_PRESENT = WM_APP + 511,
+	OGG_WM_ANALYZER_SYNC = WM_APP + 512
+};
+
+static void OggDispatchVizWindows()
+{
+	if (!og)
+		return;
+	if (og->m_EqualizerDlg) {
+		HWND h = og->m_EqualizerDlg->GetSafeHwnd();
+		if (h && ::IsWindow(h) && ::IsWindowVisible(h) && !::IsIconic(h)) {
+			const int nT = OggDispatchHwndTimers(h, 2);
+			const int nKey = OggDispatchHwndRange(h, WM_EQ_KEY_UPDATE, WM_EQ_KEY_UPDATE, 4);
+			if (nT > 0 || nKey > 0) {
+				OggUpdateVisibleHwnd(og->m_EqualizerDlg->m_keyLow.GetSafeHwnd());
+				OggUpdateVisibleHwnd(og->m_EqualizerDlg->m_keyMid.GetSafeHwnd());
+				OggUpdateVisibleHwnd(og->m_EqualizerDlg->m_keyHigh.GetSafeHwnd());
+				OggUpdateVisibleHwnd(og->m_EqualizerDlg->m_keyAll.GetSafeHwnd());
+			}
+		}
+	}
+	if (og->m_PianoRollDlg) {
+		HWND h = og->m_PianoRollDlg->GetSafeHwnd();
+		if (h && ::IsWindow(h) && ::IsWindowVisible(h) && !::IsIconic(h)) {
+			OggDispatchHwndTimers(h, 2);
+			const int nPost = OggDispatchHwndRange(h,
+				OGG_WM_PIANOROLL_SYNC, OGG_WM_PIANOROLL_ANALYSIS_DONE, 8);
+			if (nPost > 0)
+				OggUpdateVisibleHwnd(h);
+		}
+	}
+	if (og->m_AnalyzerDlg) {
+		HWND h = og->m_AnalyzerDlg->GetSafeHwnd();
+		if (h && ::IsWindow(h) && ::IsWindowVisible(h) && !::IsIconic(h)) {
+			const int nT = OggDispatchHwndTimers(h, 2);
+			const int nPost = OggDispatchHwndRange(h,
+				OGG_WM_ANALYZER_SPEC_DONE, OGG_WM_ANALYZER_SYNC, 8);
+			if (nT > 0 || nPost > 0)
+				OggUpdateVisibleHwnd(h);
+		}
+	}
+}
+
+static void OggDispatchChromeMessages()
+{
+	if (g_oggUiThreadId != 0 && GetCurrentThreadId() != g_oggUiThreadId)
+		return;
+	if (InterlockedCompareExchange(&s_inChromePump, 1, 0) != 0)
+		return;
+
+	::EnumThreadWindows(GetCurrentThreadId(), OggChromeTimerEnumTop, 0);
+	OggDispatchVizWindows();
+
+	CWinThread* th = AfxGetThread();
+	MSG msg;
+	int n = 0;
+	while (n < 16) {
+		BOOL got = FALSE;
+		if (::PeekMessage(&msg, NULL, WM_MOUSEFIRST, WM_MOUSELAST, PM_REMOVE))
+			got = TRUE;
+		else if (::PeekMessage(&msg, NULL, WM_MOUSEHOVER, WM_MOUSELEAVE, PM_REMOVE))
+			got = TRUE;
+		else if (::PeekMessage(&msg, NULL, WM_NCMOUSEMOVE, WM_NCMBUTTONDBLCLK, PM_REMOVE))
+			got = TRUE;
+		else if (::PeekMessage(&msg, NULL, WM_NCMOUSEHOVER, WM_NCMOUSELEAVE, PM_REMOVE))
+			got = TRUE;
+		if (!got)
+			break;
+		if (msg.message == WM_QUIT) {
+			::PostQuitMessage((int)msg.wParam);
+			break;
+		}
+		if (!OggIsMouseChromeMsg(msg.message)) {
+			::TranslateMessage(&msg);
+			::DispatchMessage(&msg);
+			++n;
+			continue;
+		}
+		/* PreTranslate 経由で CToolTipCtrl::RelayEvent が走る。Dispatch だけだと出が遅れる。 */
+		if (th && th->PreTranslateMessage(&msg)) {
+			++n;
+			continue;
+		}
+		::TranslateMessage(&msg);
+		::DispatchMessage(&msg);
+		if (OggIsChromeAnimHwnd(msg.hwnd) && msg.hwnd && ::IsWindow(msg.hwnd))
+			::UpdateWindow(msg.hwnd);
+		++n;
+	}
+	InterlockedExchange(&s_inChromePump, 0);
 }
 
 static DWORD g_timerpLastPostTick = 0;
@@ -11978,9 +12155,16 @@ open_mode_kpi:
 				}
 				/* XMI / packed MIDI — live MPU-401 UART into the MIDI monitor. */
 				{
-					/* Slot-local CEmu; LiveStart binds NP2. Leave the other xfade slot. */
-					CEmuSessionClose(&CemuSess());
-					CEmuSessionInit(&CemuSess());
+					/* LiveStart binds the process-global NP2 core, so an FM
+					   title left open in the other slot would keep swapping 2MB
+					   of RAM against it. Outside a crossfade nothing needs the
+					   old session, and stop() can skip its own teardown when the
+					   DS notify thread misses the join deadline — hence the same
+					   three-way close the KPI path uses. */
+					if (xfSoftOpen)
+						CloseCemuSlot(XfDecSlot());
+					else if (CemuAnyKind() || CEmuMidiLiveActive())
+						CloseCemuPlaybackResources();
 					if (CEmuMidiLiveStartPcat(openPath, capTitle, midPath, MAX_PATH)
 						&& midPath[0]) {
 						filen = midPath;
@@ -12014,6 +12198,16 @@ open_mode_kpi:
 			}
 		}
 		const unsigned titleCode = CEmuGameTitleCodeForIndex(ge, titleIdx);
+		/* A live MPU session from the previous MIDI title still owns the
+		   process-global NP2 core. Booting a second PC98 hard next to it makes
+		   both sides swap 2MB of RAM on every bind and the UI stops answering,
+		   so the MIDI→FM zip switch must close it here (stop() can skip its
+		   own teardown when the DS notify thread misses the join deadline). */
+		if (CEmuMidiLiveActive()) {
+			g_cemuLiveKeepAcrossClose = 0;
+			CEmuMidiLiveStop();
+			VstLiveTapFlush();
+		}
 		CEmuSessionClose(&CemuSess());
 		CEmuSessionInit(&CemuSess());
 		if (!CEmuSessionOpen(&CemuSess(), openPath, titleCode, savedata.samples ? savedata.samples : 44100)) {
@@ -20050,6 +20244,42 @@ static int VstMidiHoldFromFlags(uint32_t f)
 	return (f & (KPIHOST64_EOF_MIDI_PENDING | KPIHOST64_EOF_MIDI_KEEPALIVE)) ? 1 : 0;
 }
 
+/* Frames the engine has rendered but the speakers have not reached yet: what is
+ * still sitting in the prefetch ring plus what DirectSound has queued. Both are
+ * differences, so this does not care that g_heardBytes counts from the first
+ * play() of the crossfade chain while the live session counts from its own
+ * start — mixing those two origins made the MIDI monitor run the whole
+ * prefetch depth early on any track change. */
+__int64 OggGetCemuLiveHeardFrames()
+{
+	extern __int64 OggGetDsQueuedFrames();
+	__int64 lag = 0;
+	int slot = XfActiveSlot();
+	if (slot < 0 || slot >= XF_SLOTS) slot = 0;
+	VstPrefetch& pf = g_vstPf[slot];
+	if (pf.csReady) {
+		EnterCriticalSection(&pf.cs);
+		const size_t used = pf.used;
+		const int bpf = (pf.bpf > 0) ? pf.bpf : 4;
+		LeaveCriticalSection(&pf.cs);
+		lag += (__int64)(used / (size_t)bpf);
+	}
+	const __int64 q = OggGetDsQueuedFrames();
+	if (q > 0)
+		lag += q;
+	/* Injecting at frame N does not sound at frame N: the plug-in reports its own
+	 * latency, and DS reaches the analog output ~700ms before it is audible. Same
+	 * two terms CMidiMonitorDlg::SyncFromPlayback applies to a plain SMF. */
+	const int sr = (wavbit_sample_Hz > 0) ? wavbit_sample_Hz : 44100;
+	const int plug = VstMidiGetLatencySamples();
+	if (plug > 0)
+		lag += plug;
+	lag += (__int64)sr * 700 / 1000;
+	__int64 heard = CEmuMidiLiveAudioFrames() - lag;
+	if (heard < 0) heard = 0;
+	return heard;
+}
+
 /* CEmu MPU live: advance emu in lockstep with VST PCM, inject shorts + monitor tap. */
 static int CEmuMidiLiveFramesFromBytes(uint32_t bytes)
 {
@@ -20070,6 +20300,9 @@ static void CEmuMidiLivePumpAndInject(int frames)
 	int base = 0;
 	CEmuMidiLiveShort sh[512];
 	int total = 0;
+	/* Prefetch renders up to VST_PF_SECONDS ahead of the speakers, so the
+	 * monitor tap needs the absolute frame each event is heard at. */
+	const __int64 winStart = CEmuMidiLiveAudioFrames();
 	while (base < frames) {
 		int n = frames - base;
 		if (n > kStep) n = kStep;
@@ -20086,7 +20319,7 @@ static void CEmuMidiLivePumpAndInject(int frames)
 	}
 	for (int i = 0; i < total; ++i) {
 		VstMidiInjectShort(0, sh[i].msg, sh[i].sampleOfs);
-		VstLiveTapPushShort(0, sh[i].msg);
+		VstLiveTapPushShortAt(0, sh[i].msg, winStart + sh[i].sampleOfs);
 	}
 }
 
@@ -23724,6 +23957,15 @@ void COggDlg::stop()
 				thn1 = FALSE;
 				stf = 0;
 				SongParams_OnSongStopped();
+				/* The notify/prefetch threads outlived the join, so the normal
+				   teardown below is skipped. The live MPU must still go: it
+				   holds the global NP2 core the next CEmu title needs, and
+				   Pump turns into a no-op once the session is detached. */
+				if (CEmuMidiLiveActive()) {
+					g_cemuLiveKeepAcrossClose = 0;
+					CEmuMidiLiveStop();
+					VstLiveTapFlush();
+				}
 				return;
 			}
 		}
@@ -24779,6 +25021,8 @@ void COggDlg::timerp()
 	}
 	if (playy == 0)return;
 
+	OggDispatchChromeMessages();
+
 	if (s_lastMs2DrawMs != savedata.ms2) {
 		s_lastMs2DrawMs = savedata.ms2;
 		ms2 = 0;
@@ -25274,19 +25518,21 @@ void COggDlg::timerp()
 
 
 	// ピアノ/アナライザは Speana より前に同期する。
-	// PostMessage だと Speana(TRUE)/Soft3D バナーFFT が終わるまでキューに残り、
-	// 履歴スクロール・dB だけ「間隔が長い」体感になる（リサイズが軽い理由と同根）。
-	// Invalidate だけだと描画も Speana 後になるので、ここで UpdateWindow まで消化する。
-	if (plf == 1 && ::IsWindow(m_PianoRollDlg->GetSafeHwnd()) && Ms2DrawDue(ms2)) {
+	// 同期は MIDI と同様に毎ティック（Ms2DrawDue だけだとモニタ UpdateWindow が
+	// 長いとき供給が間引きされ、履歴/スペクトラムが遅く見える）。
+	// UpdateWindow だけ Ms2DrawDue。
+	if (plf == 1 && m_PianoRollDlg && ::IsWindow(m_PianoRollDlg->GetSafeHwnd())) {
 		m_PianoRollDlg->PumpSyncNow();
 		if (::IsWindow(m_PianoRollDlg->GetSafeHwnd())
-			&& m_PianoRollDlg->IsWindowVisible() && !m_PianoRollDlg->IsIconic())
+			&& m_PianoRollDlg->IsWindowVisible() && !m_PianoRollDlg->IsIconic()
+			&& Ms2DrawDue(ms2))
 			m_PianoRollDlg->UpdateWindow();
 	}
-	if (plf == 1 && ::IsWindow(m_AnalyzerDlg->GetSafeHwnd()) && Ms2DrawDue(ms2)) {
+	if (plf == 1 && m_AnalyzerDlg && ::IsWindow(m_AnalyzerDlg->GetSafeHwnd())) {
 		m_AnalyzerDlg->PumpSyncNow();
 		if (::IsWindow(m_AnalyzerDlg->GetSafeHwnd())
-			&& m_AnalyzerDlg->IsWindowVisible() && !m_AnalyzerDlg->IsIconic())
+			&& m_AnalyzerDlg->IsWindowVisible() && !m_AnalyzerDlg->IsIconic()
+			&& Ms2DrawDue(ms2))
 			m_AnalyzerDlg->UpdateWindow();
 	}
 	// MIDI モニタ: 同期は毎ティック。UpdateWindow だけ Ms2DrawDue（鍵盤が間引きで止まるのを防ぐ）
@@ -25305,6 +25551,8 @@ void COggDlg::timerp()
 			&& Ms2DrawDue(ms2))
 			m_FmMonitorDlg->UpdateWindow();
 	}
+
+	OggDispatchChromeMessages();
 
 	// スペアナは不透明で先に描く（ピーク／現在を保持）。バナー文字は後から SRCINVERT（XOR）。
 	// コンテキストメニュー Track 中もスペアナ／EQコード供給は止めない（見た目とコード更新を維持）。
@@ -26661,6 +26909,7 @@ LRESULT COggDlg::OnTimerpVsyncTick(WPARAM, LPARAM)
 	if (!IsWindow(GetSafeHwnd()))
 		return 0;
 	timerp();
+	OggDispatchChromeMessages();
 	return 0;
 }
 
@@ -34507,6 +34756,18 @@ void COggDlg::RestoreMidiMonitorAfterMinimize()
 	restore(g_vstHostDlg, kHideFmMidi_VstHost, mask);
 	if ((mask & kHideFmMidi_PrTune) && savedata.prTunewindow == 1)
 		restore(m_PianoRollTuneDlg, kHideFmMidi_PrTune, mask);
+}
+
+int COggDlg::MidiMonitorIsVisible() const
+{
+	HWND h = (m_MidiMonitorDlg) ? m_MidiMonitorDlg->GetSafeHwnd() : NULL;
+	return (h && ::IsWindow(h) && ::IsWindowVisible(h) && !::IsIconic(h)) ? 1 : 0;
+}
+
+int COggDlg::FmMonitorIsVisible() const
+{
+	HWND h = (m_FmMonitorDlg) ? m_FmMonitorDlg->GetSafeHwnd() : NULL;
+	return (h && ::IsWindow(h) && ::IsWindowVisible(h) && !::IsIconic(h)) ? 1 : 0;
 }
 
 void COggDlg::ToggleMidiMonitor()

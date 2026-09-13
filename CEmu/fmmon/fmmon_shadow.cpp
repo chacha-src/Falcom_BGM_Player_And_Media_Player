@@ -27,6 +27,8 @@ static uint8_t s_keyEx[3], s_hitEx[3], s_midiEx[3];
 static uint8_t s_ssg[3], s_hitSsg[3], s_midiSsg[3];
 static uint8_t s_rhyKey, s_rhyPulse, s_hitRhy[6];
 static uint8_t s_adpcmOn, s_adpcmMidi, s_adpcmHit; /* OPNA ADPCM-B (delta-T) */
+static uint8_t s_adpcmPulse; /* Flush 区間の ADPCM-B execute（同一 0x80 連打用） */
+static uint8_t s_adpcmAPulse; /* YM2610 ADPCM-A bits 0-5（リズム行を使わない） */
 static uint8_t s_midiChOn[16], s_midiChNote[16], s_midiHit[16];
 static uint8_t s_pcmOn[SASAMI_FMMON_PCM_MAX], s_pcmNote[SASAMI_FMMON_PCM_MAX];
 static uint8_t s_pcmCount = 0;
@@ -221,6 +223,8 @@ void FmMonShadowReset(void)
 	s_adpcmOn = 0;
 	s_adpcmMidi = 0xFF;
 	s_adpcmHit = 0;
+	s_adpcmPulse = 0;
+	s_adpcmAPulse = 0;
 	memset(s_midiChOn, 0, sizeof(s_midiChOn));
 	memset(s_midiChNote, 0xFF, sizeof(s_midiChNote));
 	memset(s_midiHit, 0, sizeof(s_midiHit));
@@ -373,7 +377,8 @@ void FmMonShadowSetOpmRegSnapshotEx(const unsigned char* regs256, int keyRegOrNe
 		const uint8_t k = (uint8_t)(keyRegOrNeg1 & 0xff);
 		const int ch = k & 7;
 		const int on = (k & 0x78) != 0;
-		if (on && !s_midiChOn[ch]) s_midiHit[ch]++;
+		if (on)
+			s_midiHit[ch]++;
 		s_midiChOn[ch] = (uint8_t)(on ? 1 : 0);
 	}
 	RefreshOpmKeysFromRegs();
@@ -439,11 +444,14 @@ void FmMonShadowWriteReg(unsigned addr, unsigned data)
 	addr &= 0x1FF;
 	data &= 0xFF;
 	{
-		/* 00→00 も含め「一度書いた」は sticky。dirty は初回だけ（KSS の PSG ポーリング対策） */
+		/* 00→00 も含め「一度書いた」は sticky。dirty は初回だけ（KSS の PSG ポーリング対策）。
+		   キー系（$28 / $10 / $100 / SSG mixer·level·env）は同一値でも EG/発音の再トリガ。
+		   周期 $00-$06 のポーリングは落とす。 */
 		const uint8_t already = (uint8_t)(s_written[addr >> 3] & (uint8_t)(1u << (addr & 7)));
 		MarkBit(addr);
-		if (s_regs[addr] == (uint8_t)data
-			&& addr != 0x28 && addr != 0x10 && addr != 0x100) {
+		const int keyEvt = (addr == 0x28 || addr == 0x10 || addr == 0x100
+			|| (addr >= 0x07 && addr <= 0x0D)) ? 1 : 0;
+		if (s_regs[addr] == (uint8_t)data && !keyEvt) {
 			if (!already)
 				s_dirty = 1;
 			LeaveCriticalSection(&s_cs);
@@ -469,7 +477,9 @@ void FmMonShadowWriteReg(unsigned addr, unsigned data)
 			fm = ch - 1; /* 4,5,6 -> 3,4,5 */
 		}
 		if (fm >= 0 && fm < 6) {
-			if (on && !s_keyFm[fm]) s_hitFm[fm]++;
+			/* $28 はチップ上エッジ。同一値の再書き込みも EG 再トリガ */
+			if (on)
+				s_hitFm[fm]++;
 			s_keyFm[fm] = (uint8_t)(on ? 1 : 0);
 			s_flushUrgent = 1;
 			if (on) {
@@ -500,6 +510,7 @@ void FmMonShadowWriteReg(unsigned addr, unsigned data)
 			s_flushUrgent = 1;
 		} else if (on) {
 			s_adpcmHit++;
+			s_adpcmPulse = 1;
 			s_adpcmSeen = 1;
 			s_adpcmOn = 1;
 			RefreshAdpcmMidi();
@@ -530,7 +541,10 @@ void FmMonShadowWriteReg(unsigned addr, unsigned data)
 		/* YM2610 bank1 $00 = ADPCM-A key-on bits 0..5 */
 		for (int i = 0; i < 6; i++) {
 			const int on = (data >> i) & 1;
-			if (on && !s_pcmOn[i]) s_pcmHit[i]++;
+			if (on) {
+				s_pcmHit[i]++;
+				s_adpcmAPulse = (uint8_t)(s_adpcmAPulse | (1 << i));
+			}
 			s_pcmOn[i] = (uint8_t)(on ? 1 : 0);
 			s_pcmNote[i] = on ? (uint8_t)60 : (uint8_t)0xFF;
 			if (on) s_adpcmASeen = 1;
@@ -552,6 +566,7 @@ void FmMonShadowWriteReg(unsigned addr, unsigned data)
 				/* Re-key with same 0x80/0xA0 still counts — drivers often
 				   rewrite execute without clearing first. */
 				s_adpcmHit++;
+				s_adpcmPulse = 1;
 				s_adpcmSeen = 1;
 				s_adpcmOn = 1;
 				RefreshAdpcmMidi();
@@ -579,7 +594,14 @@ void FmMonShadowWriteReg(unsigned addr, unsigned data)
 			const int env = (amp & 0x10) != 0;
 			const int level = env || ((amp & 0x0F) != 0);
 			const int on = (((!toneOff && per != 0) || !noiseOff) && level) ? 1 : 0;
-			if (on && !s_ssg[i]) s_hitSsg[i]++;
+			const int was = s_ssg[i] ? 1 : 0;
+			if (on && !was)
+				s_hitSsg[i]++;
+			else if (on && was && (addr == (unsigned)(8 + i) || addr == 0x0D)) {
+				/* 同一音程のレベル／エンベロープ再書き込み = 発音再トリガ */
+				s_hitSsg[i]++;
+				s_flushUrgent = 1;
+			}
 			s_ssg[i] = (uint8_t)on;
 			s_midiSsg[i] = (on && mid >= 0) ? (uint8_t)mid : (uint8_t)0xFF;
 		}
@@ -655,13 +677,11 @@ void FmMonShadowMidiNote(int ch, int midiNote, int on)
 	int urgent = 0;
 	if (on && midiNote >= 0 && midiNote <= 127) {
 		const uint8_t n = (uint8_t)midiNote;
-		if (!s_midiChOn[ch] || s_midiChNote[ch] != n) {
-			s_midiHit[ch]++;
-			s_dirty = 1;
-			/* 立ち上がり／ノート変更は即書き（minDirty 内の on→off で ON が消えないように） */
-			s_flushUrgent = 1;
-			urgent = 1;
-		}
+		/* 同一ノートの NoteOn 再書き込みも発音フェード（キーホールド連打ではない） */
+		s_midiHit[ch]++;
+		s_dirty = 1;
+		s_flushUrgent = 1;
+		urgent = 1;
 		s_midiChOn[ch] = 1;
 		s_midiChNote[ch] = n;
 	} else {
@@ -697,11 +717,9 @@ void FmMonShadowPcmNote(int ch, int midiNote, int on)
 	}
 	if (on && midiNote >= 0 && midiNote <= 127) {
 		const uint8_t nm = (uint8_t)midiNote;
-		if (!s_pcmOn[ch] || s_pcmNote[ch] != nm) {
-			if (!s_pcmOn[ch]) s_pcmHit[ch]++;
-			s_dirty = 1;
-			s_flushUrgent = 1;
-		}
+		s_pcmHit[ch]++;
+		s_dirty = 1;
+		s_flushUrgent = 1;
 		s_pcmOn[ch] = 1;
 		s_pcmNote[ch] = nm;
 		if (s_pcmCount < (uint8_t)(ch + 1))
@@ -984,8 +1002,18 @@ void FmMonShadowFlush(int force)
 				d.pcmCount = 8;
 		}
 	}
+	if (s_opnaLayout == 2) {
+		d.rhythmPulse = (uint8_t)(s_adpcmAPulse
+			| (s_adpcmPulse ? SASAMI_FMMON_ADPCM_PULSE : 0));
+	} else if (s_adpcmPulse) {
+		d.rhythmPulse = (uint8_t)(d.rhythmPulse | SASAMI_FMMON_ADPCM_PULSE);
+	}
+	if (d.dumpFlags & SASAMI_FMMON_FLAG_ADPCM)
+		d.pcmNote[SASAMI_FMMON_ADPCM_HIT_SLOT] = s_adpcmHit;
 	FillIdentityTitle(&d, extras);
 	s_rhyPulse = 0;
+	s_adpcmPulse = 0;
+	s_adpcmAPulse = 0;
 	s_dirty = 0;
 	s_lastWrite = s_cur;
 	/* 区間内の書込ビットはダンプへ渡したらクリア。残すと UI が全レジスタ常時フェードになる */
@@ -1520,22 +1548,22 @@ static int MidiFromOpl(unsigned fnum, unsigned block)
 	return MidiFromHz(freq);
 }
 
-static void OplApplyChannelSlot(int idx, int on, int mid)
+static void OplApplyChannelSlot(int idx, int on, int mid, int retrig)
 {
 	const uint8_t nk = (uint8_t)(on ? 1 : 0);
 	const uint8_t nm = (on && mid >= 0) ? (uint8_t)mid : (uint8_t)0xFF;
 	if (idx < 6) {
-		if (on && !s_keyFm[idx]) s_hitFm[idx]++;
+		if (on && (!s_keyFm[idx] || retrig)) s_hitFm[idx]++;
 		s_keyFm[idx] = nk;
 		s_midiFm[idx] = nm;
 	} else if (idx < 9) {
 		const int ex = idx - 6;
-		if (on && !s_keyEx[ex]) s_hitEx[ex]++;
+		if (on && (!s_keyEx[ex] || retrig)) s_hitEx[ex]++;
 		s_keyEx[ex] = nk;
 		s_midiEx[ex] = nm;
 	} else if (idx < 18) {
 		const int pcm = idx - 9;
-		if (on && !s_pcmOn[pcm]) s_pcmHit[pcm]++;
+		if (on && (!s_pcmOn[pcm] || retrig)) s_pcmHit[pcm]++;
 		s_pcmOn[pcm] = nk;
 		s_pcmNote[pcm] = nm;
 		if (s_pcmCount < (uint8_t)(pcm + 1))
@@ -1543,7 +1571,7 @@ static void OplApplyChannelSlot(int idx, int on, int mid)
 	}
 }
 
-static void OplRefreshKeysFromRegs(void)
+static void OplRefreshKeysFromRegs(int retrigIdx)
 {
 	const int banks = (s_oplMode >= 2) ? 2 : 1;
 	for (int b = 0; b < banks; b++) {
@@ -1559,7 +1587,8 @@ static void OplRefreshKeysFromRegs(void)
 			if (rhythm && ch >= 6)
 				on = 0;
 			const int mid = on ? MidiFromOpl(fnum, block) : -1;
-			OplApplyChannelSlot(b * 9 + ch, on, mid);
+			const int idx = b * 9 + ch;
+			OplApplyChannelSlot(idx, on, mid, retrigIdx == idx);
 		}
 		if (rhythm) {
 			const uint8_t rk = (uint8_t)(bd & 0x1F);
@@ -1628,8 +1657,12 @@ void FmMonShadowWriteOplReg(unsigned addr, unsigned data)
 	}
 	s_regs[addr] = (uint8_t)data;
 	MarkBit(addr);
-	if ((r >= 0xA0 && r <= 0xB8) || r == 0xBD)
-		OplRefreshKeysFromRegs();
+	if ((r >= 0xA0 && r <= 0xB8) || r == 0xBD) {
+		int retrigIdx = -1;
+		if (r >= 0xB0 && r <= 0xB8)
+			retrigIdx = ((addr & 0x100) ? 9 : 0) + (int)(r - 0xB0);
+		OplRefreshKeysFromRegs(retrigIdx);
+	}
 	s_dirty = 1;
 	LeaveCriticalSection(&s_cs);
 }

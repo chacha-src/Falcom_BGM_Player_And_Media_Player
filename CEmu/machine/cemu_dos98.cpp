@@ -1,8 +1,10 @@
-﻿#include "StdAfx.h"
+#include "StdAfx.h"
 #include "cemu_dos98.h"
 #include "../vendor/np2/np2ffi.h"
 #include <stdlib.h>
 #include <string.h>
+
+extern int CEmuPc98ValkyKeepIrq0();
 
 enum {
 	FLAG_CF = 0x0001,
@@ -1645,7 +1647,7 @@ CEmuDos98Result CEmuDos98::ServiceInt(uint8_t* mem, uint8_t vec)
 	const int idlePoll = (vec == 0x18 && np2_reg_get(NP2_R_AX) == 0x9801)
 		|| (vec == 0x21 && Ah() == 0x06)
 		|| (vec == 0x06);
-	if (trapVec_ == 0 && mem
+		if (trapVec_ == 0 && mem
 		&& (vec <= 0x07 || vec == 0x0C || vec == 0x0D)) {
 		const unsigned f = DosLin(np2_reg_get(NP2_R_SS), np2_reg_get(NP2_R_SP));
 		trapVec_ = vec;
@@ -1658,6 +1660,22 @@ CEmuDos98Result CEmuDos98::ServiceInt(uint8_t* mem, uint8_t vec)
 			const uint16_t skip = (vec == 0x00) ? 2u : 1u;
 			Wr16(mem, f, (uint16_t)(trapIp_ + skip));
 		}
+	}
+	if (!pcAtBios_ && vec == 0x06 && CEmuPc98ValkyKeepIrq0() && mem) {
+		/* Every #UD: first-only skip left the next prefix (GMD 64h) looping. */
+		const unsigned f = DosLin(np2_reg_get(NP2_R_SS), np2_reg_get(NP2_R_SP));
+		const uint16_t ip = Rd16(mem, f);
+		const uint16_t cs = Rd16(mem, f + 2);
+		uint16_t skip = 1;
+		const unsigned lin = DosLin(cs, ip);
+		if (lin < 0x200000u) {
+			const uint8_t op = mem[lin];
+			if (op == 0xC0 || op == 0xC1 || op == 0xE8 || op == 0xE9)
+				skip = 3;
+			else if (op == 0x0F)
+				skip = 2;
+		}
+		Wr16(mem, f, (uint16_t)(ip + skip));
 	}
 	if (!idlePoll
 		&& (traceOn_ == 1 || (traceOn_ == 2 && traceCount_ < kTraceMax))) {

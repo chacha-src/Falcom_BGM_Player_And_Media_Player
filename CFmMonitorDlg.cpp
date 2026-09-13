@@ -470,6 +470,37 @@ static int FmHexIsFmpAdpcmNoise(const SasamiFmMonDump& d, int i)
 	return (i >= 0x100 && i <= 0x110) ? 1 : 0;
 }
 
+static void FmBumpHex(BYTE fade[0x200], uint8_t touched[0x200], int idx, int* chgHex)
+{
+	if (idx < 0 || idx >= 0x200) return;
+	FmBump(fade[idx]);
+	touched[idx] = 1;
+	if (chgHex) *chgHex = 1;
+}
+
+static int FmAdpcmKeyRow(const SasamiFmMonDump& d)
+{
+	if (!(d.dumpFlags & (SASAMI_FMMON_FLAG_ADPCM | SASAMI_FMMON_FLAG_PCM86)))
+		return -1;
+	if (d.padHit == 6)
+		return (d.pcmCount > 6) ? 6 : 0;
+	if (d.dumpFlags & SASAMI_FMMON_FLAG_PPZ)
+		return 8;
+	return 0;
+}
+
+static int FmAdpcmCtrlReg(const SasamiFmMonDump& d)
+{
+	return (d.padHit == 6) ? 0x10 : 0x100;
+}
+
+static uint8_t FmAdpcmHitOf(const SasamiFmMonDump& d)
+{
+	if (d.version < 6 || !(d.dumpFlags & SASAMI_FMMON_FLAG_ADPCM))
+		return 0;
+	return d.pcmNote[SASAMI_FMMON_ADPCM_HIT_SLOT];
+}
+
 /* リング全体(~320KB)を毎回読まず、未消費スロットだけ読む */
 static int FmDrainRingSlots(uint32_t* genLast,
 	void (*onSlot)(const SasamiFmMonDump&, void*), void* ctx)
@@ -857,7 +888,13 @@ void CFmMonitorDlg::OnTimer(UINT_PTR nIDEvent)
 			PersistGeom();
 			m_persistAge = -1; /* 次の OnSize/OnMove まで休止 */
 		}
-		IdlePulse();
+		/* 再生中は timerp が PumpSyncNow する。MIDI モニタ同時表示では
+		   こちらの 16ms パルスを重ねると鍵盤が遅れる。 */
+		extern int playy;
+		extern int plf;
+		extern COggDlg* og;
+		if (!(playy != 0 && plf == 1 && og && og->MidiMonitorIsVisible()))
+			IdlePulse();
 	}
 	CCustomBlurDialogExBase::OnTimer(nIDEvent);
 }
@@ -1808,12 +1845,16 @@ void CFmMonitorDlg::DrawFmChPanel(CDC& dc, const CRect& rc, int ch)
 	const int savedDC = dc.SaveDC();
 	dc.IntersectClipRect(rc);
 
-	const COLORREF headBg = RGB(40, 64, 52);
+	const COLORREF headBase = RGB(40, 64, 52);
 	const COLORREF bodyBg = RGB(28, 36, 40);
 	const COLORREF rowBg = RGB(32, 42, 38);
 	const int pad = (std::max)(3, rc.Width() / 90);
 	/* ヘッダは高さの 30%、最低 72 */
 	const int headH = (std::max)(72, rc.Height() * 30 / 100);
+	const int keyed = FmMonIsLive() && m_haveDump && m_dump.keyOnFm[ch];
+	const BYTE fade = (FmMonIsLive() && ch >= 0 && ch < 6) ? m_fadeKey[ch] : (BYTE)0;
+	/* ヘッダ背景はフェードしない。緑は SLOT 1..4 とレジスタ／鍵盤だけ */
+	const COLORREF headBg = headBase;
 	dc.FillSolidRect(rc.left, rc.top, rc.Width(), headH, headBg);
 	dc.FillSolidRect(rc.left, rc.top + headH, rc.Width(), rc.Height() - headH, bodyBg);
 	FmFrameRect(dc, rc, RGB(100, 160, 130));
@@ -1829,10 +1870,8 @@ void CFmMonitorDlg::DrawFmChPanel(CDC& dc, const CRect& rc, int ch)
 	const int ams = (b4 >> 4) & 3;
 	const int pms = b4 & 7;
 	const int pan = (panL && panR) ? 3 : (panL ? 1 : (panR ? 2 : 0));
-	const int midi = ApproxMidiFromFnum(a4, a0);
 	const double hz = ApproxHzFromFnum(a4, a0);
-	extern int playy;
-	const int keyed = FmMonIsLive() && m_haveDump && m_dump.keyOnFm[ch];
+	const int midi = ApproxMidiFromFnum(a4, a0);
 
 	/* ---- ヘッダ: 左 ALGO / 中央ノブ / 右 NOTE ---- */
 	const int titlePx = (std::max)(11, headH / 8);
@@ -1895,7 +1934,9 @@ void CFmMonitorDlg::DrawFmChPanel(CDC& dc, const CRect& rc, int ch)
 		const int box = (std::max)(12, (std::min)(infoPx + 2, (infoRc.Width() - 8) / 4 - 2));
 		for (int s = 0; s < 4; s++) {
 			const int sx = infoRc.left + 2 + s * (box + 2);
-			dc.FillSolidRect(sx, iy, box, box, keyed ? RGB(70, 200, 120) : RGB(40, 50, 44));
+			dc.FillSolidRect(sx, iy, box, box,
+				FmMixFade(keyed ? RGB(70, 200, 120) : RGB(40, 50, 44),
+					RGB(180, 255, 190), fade));
 			FmFrameRect(dc, CRect(sx, iy, sx + box, iy + box), RGB(90, 140, 110));
 			wchar_t sn[4];
 			_snwprintf_s(sn, _TRUNCATE, L"%d", s + 1);
@@ -2759,6 +2800,8 @@ void CFmMonitorDlg::DrawOpmChPanel(CDC& dc, const CRect& rc, int ch)
 			if (m_dump.exMidi[ch - 6] != 0xFF) midi = (int)m_dump.exMidi[ch - 6];
 		}
 	}
+	const BYTE fade = !FmMonIsLive() ? (BYTE)0
+		: (ch < 6 ? m_fadeKey[ch] : m_fadeEx[ch - 6]);
 
 	const int titlePx = (std::max)(11, headH / 8);
 	HFONT titleFont = FmMakeFont(titlePx);
@@ -2819,7 +2862,9 @@ void CFmMonitorDlg::DrawOpmChPanel(CDC& dc, const CRect& rc, int ch)
 		const int box = (std::max)(12, (std::min)(infoPx + 2, (infoRc.Width() - 8) / 4 - 2));
 		for (int s = 0; s < 4; s++) {
 			const int sx = infoRc.left + 2 + s * (box + 2);
-			dc.FillSolidRect(sx, iy, box, box, keyed ? RGB(90, 160, 220) : RGB(40, 48, 58));
+			dc.FillSolidRect(sx, iy, box, box,
+				FmMixFade(keyed ? RGB(90, 160, 220) : RGB(40, 48, 58),
+					RGB(180, 220, 255), fade));
 			FmFrameRect(dc, CRect(sx, iy, sx + box, iy + box), RGB(100, 140, 180));
 			wchar_t sn[4];
 			_snwprintf_s(sn, _TRUNCATE, L"%d", s + 1);
@@ -3554,6 +3599,8 @@ void CFmMonitorDlg::DrawArcadePcmChPanel(CDC& dc, const CRect& rc, int ch, unsig
 	wchar_t note[16];
 	FmFormatNoteName(midi, note, 16);
 
+	dc.FillSolidRect(rc.left, rc.top, rc.Width(), headH, headBg);
+
 	const int titlePx = (std::max)(9, (std::min)(13, headH - 6));
 	HFONT titleFont = FmMakeFont(titlePx);
 	HFONT oldf = (HFONT)dc.SelectObject(titleFont);
@@ -3868,6 +3915,9 @@ void CFmMonitorDlg::ApplyDump(const SasamiFmMonDump& d)
 			/* v4: key-on 書き込み累積（同一状態の再トリガも拾う） */
 			if (d.version >= 4 && d.keyOnHitCnt[ch] != m_dump.keyOnHitCnt[ch]) {
 				FmBump(m_fadeKey[ch]);
+				FmBumpHex(m_fade, m_touched, 0x28, &chgHex);
+				FmBumpHex(m_fade, m_touched, bank + 0xA4 + slot, &chgHex);
+				FmBumpHex(m_fade, m_touched, bank + 0xA0 + slot, &chgHex);
 				dirty = 1;
 				chgKeys = 1;
 			}
@@ -3906,6 +3956,9 @@ void CFmMonitorDlg::ApplyDump(const SasamiFmMonDump& d)
 			if (d.version >= 6 && d.keyOnExHitCnt[i] != m_dump.keyOnExHitCnt[i]) {
 				FmBump(m_fadeEx[i]);
 				chgKeys = 1;
+				/* FM3EX fnum $A8/$AC 系 */
+				FmBumpHex(m_fade, m_touched, 0xA8 + i, &chgHex);
+				FmBumpHex(m_fade, m_touched, 0xAC + i, &chgHex);
 			}
 		}
 		for (int i = 0; i < 3; i++) {
@@ -3916,6 +3969,10 @@ void CFmMonitorDlg::ApplyDump(const SasamiFmMonDump& d)
 			if (d.version >= 4 && d.ssgHitCnt[i] != m_dump.ssgHitCnt[i]) {
 				FmBump(m_fadeSsg[i]);
 				chgKeys = 1;
+				FmBumpHex(m_fade, m_touched, i * 2, &chgHex);
+				FmBumpHex(m_fade, m_touched, i * 2 + 1, &chgHex);
+				FmBumpHex(m_fade, m_touched, 8 + i, &chgHex);
+				FmBumpHex(m_fade, m_touched, 0x0D, &chgHex);
 			}
 			if (d.version >= 6 && d.ssgMidi[i] != m_dump.ssgMidi[i]) {
 				FmBump(m_fadeSsg[i]);
@@ -3965,25 +4022,54 @@ void CFmMonitorDlg::ApplyDump(const SasamiFmMonDump& d)
 				}
 			}
 		}
-		/* 同一 0x10 値の連打 / 区間 pulse */
-		if (hitBump || (d.rhythmPulse & 0x3F)) {
-			FmBump(m_fade[0x10]);
-			m_touched[0x10] = 1;
-			chgHex = 1;
-			chgKeys = 1;
-			if (!hitBump) {
+		const int ym2610Dump = (d.padHit == 6) ? 1 : 0;
+		if (!ym2610Dump) {
+			if (hitBump || (d.rhythmPulse & 0x3F)) {
+				FmBump(m_fade[0x10]);
+				m_touched[0x10] = 1;
+				chgHex = 1;
+				chgKeys = 1;
+				if (!hitBump) {
+					for (int i = 0; i < 6; i++) {
+						if (d.rhythmPulse & (1 << i))
+							FmBump(m_fadeRzmPad[i]);
+					}
+				}
+			} else if (d.regs[0x10] != m_dump.regs[0x10] && !(d.regs[0x10] & 0x80)) {
 				for (int i = 0; i < 6; i++) {
-					if (d.rhythmPulse & (1 << i))
+					if (d.regs[0x10] & (1 << i))
 						FmBump(m_fadeRzmPad[i]);
 				}
+				chgKeys = 1;
+				chgHex = 1;
 			}
-		} else if (d.regs[0x10] != m_dump.regs[0x10] && !(d.regs[0x10] & 0x80)) {
+		} else if (d.rhythmPulse & 0x3F) {
+			/* YM2610: pulse 0-5 = ADPCM-A 再トリガ（リズム行は出さない） */
+			FmBumpHex(m_fade, m_touched, 0x100, &chgHex);
 			for (int i = 0; i < 6; i++) {
-				if (d.regs[0x10] & (1 << i))
-					FmBump(m_fadeRzmPad[i]);
+				if (d.rhythmPulse & (1 << i))
+					FmBump(m_fadePcm[i]);
 			}
 			chgKeys = 1;
-			chgHex = 1;
+		}
+		{
+			const int adpRow = FmAdpcmKeyRow(d);
+			const int adpReg = FmAdpcmCtrlReg(d);
+			const int adpPulse = (d.rhythmPulse & SASAMI_FMMON_ADPCM_PULSE) ? 1 : 0;
+			const int adpHit = (FmAdpcmHitOf(d) != FmAdpcmHitOf(m_dump)) ? 1 : 0;
+			if (adpPulse || adpHit) {
+				if (adpRow >= 0 && adpRow < SASAMI_FMMON_PCM_MAX)
+					FmBump(m_fadePcm[adpRow]);
+				FmBumpHex(m_fade, m_touched, adpReg, &chgHex);
+				if (adpReg == 0x100) {
+					FmBumpHex(m_fade, m_touched, 0x109, &chgHex);
+					FmBumpHex(m_fade, m_touched, 0x10A, &chgHex);
+				} else {
+					FmBumpHex(m_fade, m_touched, 0x19, &chgHex);
+					FmBumpHex(m_fade, m_touched, 0x1A, &chgHex);
+				}
+				chgKeys = 1;
+			}
 		}
 		if (d.seq != m_dump.seq || d.sampleRate != m_dump.sampleRate)
 			m_dirtyHead = 1;
@@ -4345,6 +4431,9 @@ int CFmMonitorDlg::PollDump()
 				}
 			}
 			merged.rhythmPulse = (uint8_t)(merged.rhythmPulse | s.rhythmPulse);
+			if ((s.dumpFlags & SASAMI_FMMON_FLAG_ADPCM)
+				&& s.pcmNote[SASAMI_FMMON_ADPCM_HIT_SLOT] != m_dump.pcmNote[SASAMI_FMMON_ADPCM_HIT_SLOT])
+				merged.pcmNote[SASAMI_FMMON_ADPCM_HIT_SLOT] = s.pcmNote[SASAMI_FMMON_ADPCM_HIT_SLOT];
 		}
 		ApplyDump(merged);
 		applied = 1;
@@ -4373,7 +4462,6 @@ int CFmMonitorDlg::PollDump()
 
 void CFmMonitorDlg::TickFades()
 {
-	/* フェードは hex/鍵盤のみ。パネルはフェードを使わないので触らない */
 	auto tickQ = [](BYTE& g) -> int {
 		if (!g) return 0;
 		const BYTE before = (BYTE)(g >> 4);
@@ -4381,21 +4469,22 @@ void CFmMonitorDlg::TickFades()
 		const BYTE after = (BYTE)(g >> 4);
 		return before != after || g == 0;
 	};
-	int hex = 0, keys = 0;
+	int hex = 0, keys = 0, panels = 0;
 	for (int i = 0; i < 0x200; i++)
 		if (tickQ(m_fade[i])) hex = 1;
 	for (int i = 0; i < 6; i++)
-		if (tickQ(m_fadeKey[i])) keys = 1;
+		if (tickQ(m_fadeKey[i])) { keys = 1; panels = 1; }
 	for (int i = 0; i < 3; i++)
-		if (tickQ(m_fadeEx[i])) keys = 1;
+		if (tickQ(m_fadeEx[i])) { keys = 1; panels = 1; }
 	for (int i = 0; i < 3; i++)
 		if (tickQ(m_fadeSsg[i])) keys = 1;
 	for (int i = 0; i < SASAMI_FMMON_PCM_MAX; i++)
-		if (tickQ(m_fadePcm[i])) keys = 1;
+		if (tickQ(m_fadePcm[i])) { keys = 1; panels = 1; }
 	for (int i = 0; i < 6; i++)
 		if (tickQ(m_fadeRzmPad[i])) keys = 1;
 	if (hex) m_dirtyHex = 1;
 	if (keys) m_dirtyKeys = 1;
+	if (panels) m_dirtyPanels = 1;
 }
 
 void CFmMonitorDlg::InvalidateDirtyRegions()
@@ -4477,7 +4566,9 @@ void CFmMonitorDlg::IdlePulse()
 	if (!::IsWindow(GetSafeHwnd()) || !IsWindowVisible() || IsIconic())
 		return;
 	const ULONGLONG now = GetTickCount64();
-	if (now - m_lastPollMs < 8)
+	extern COggDlg* og;
+	const ULONGLONG minMs = (og && og->MidiMonitorIsVisible()) ? 16ull : 8ull;
+	if (now - m_lastPollMs < minMs)
 		return;
 	m_lastPollMs = now;
 	PumpSyncNow();

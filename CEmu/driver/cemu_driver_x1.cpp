@@ -290,6 +290,10 @@ void CDriverX1::RunUntil(uint64_t endCycle)
 		if (cycles <= 0) break;
 		hw_->AddCpuCycles((uint64_t)cycles);
 		TickChips((uint64_t)cycles);
+		/* sghost PATCH: CALL INIT ($F072) returns here. Reload $B030
+		   instruments after INIT so a late MA00x overlay still hits OPM. */
+		if (triggered_ && !hw_->psgOnly_ && cpu->r.pc == 0xF05Au)
+			hw_->LoadSghostOpmPatches();
 	}
 }
 

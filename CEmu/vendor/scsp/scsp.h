@@ -1,4 +1,4 @@
-/*
+﻿/*
 
 	SCSP (YMF292-F) header
 */
@@ -39,6 +39,7 @@ WRITE16_HANDLER( SCSP_1_w );
 // MIDI I/O access (used for comms on Model 2/3)
 WRITE16_HANDLER( SCSP_MidiIn );
 READ16_HANDLER( SCSP_MidiOutR );
+int SCSP_MidiPending(void);
 
 void scsp_term(void);
 

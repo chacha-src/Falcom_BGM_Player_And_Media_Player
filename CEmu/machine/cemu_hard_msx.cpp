@@ -93,13 +93,77 @@ static void PlantPsgTrampoline(uint8_t* mem)
 		mem[0x0090] = 0xC9; /* GICINI */
 	mem[0x0093] = 0xC3; mem[0x0094] = 0xC0; mem[0x0095] = 0x00; /* JP 00C0 */
 	mem[0x0096] = 0xC3; mem[0x0097] = 0xD0; mem[0x0098] = 0x00; /* JP 00D0 */
-	mem[0x00C0] = 0xD3; mem[0x00C1] = 0xA0;
-	mem[0x00C2] = 0x7B;
-	mem[0x00C3] = 0xD3; mem[0x00C4] = 0xA1;
-	mem[0x00C5] = 0xC9;
+	/* BIOS WRTPSG keeps A as the register. diskng Bosconian ISR does
+	   LD E,(HL); CALL $0093; INC L; INC A; CP $0D — destroying A made
+	   the count never hit $0D (ayW hundreds of thousands, 1 IRQ). */
+	mem[0x00C0] = 0xD3; mem[0x00C1] = 0xA0; /* OUT (A0),A */
+	mem[0x00C2] = 0xF5;                     /* PUSH AF */
+	mem[0x00C3] = 0x7B;                     /* LD A,E */
+	mem[0x00C4] = 0xD3; mem[0x00C5] = 0xA1; /* OUT (A1),A */
+	mem[0x00C6] = 0xF1;                     /* POP AF */
+	mem[0x00C7] = 0xC9;                     /* RET */
 	mem[0x00D0] = 0xD3; mem[0x00D1] = 0xA0;
 	mem[0x00D2] = 0xDB; mem[0x00D3] = 0xA2;
 	mem[0x00D4] = 0xC9;
+}
+
+/* PATCH2 @400 CALL $9003 / LD HL,$A000 (play). $4B6E may be NOPed. */
+static int IsLaplacePsgPatch(const uint8_t* mem)
+{
+	return mem
+		&& mem[0x046F] == 0xCD && mem[0x0470] == 0x03 && mem[0x0471] == 0x90
+		&& mem[0x0431] == 0x21 && mem[0x0432] == 0x00 && mem[0x0433] == 0xA0;
+}
+
+/* $7F00 POP IX then LD ($BC33),IX. Play CALL $4B6E can arrive with
+   HL=0 (wait-loop $04EC still empty), so channel 0's track word is
+   $0000 and $7CF1 fetches BIOS instead of P1_ @A000. Drop that overlay
+   (POP HL to keep the stack) and leave the stub words as $A000 — hoot
+   stages one file there; ADD HL,DE is already NOPed. */
+static void PlantLaplacePsgPlay(uint8_t* mem)
+{
+	if (!mem || !IsLaplacePsgPatch(mem))
+		return;
+	if (mem[0x0434] == 0x19)
+		mem[0x0434] = 0x00; /* NOP ADD HL,DE */
+	if (mem[0x6E61] == 0x38 && mem[0x6E62] == 0xF7) {
+		mem[0x6E61] = 0x00;
+		mem[0x6E62] = 0x00;
+	}
+	if (mem[0x7F00] == 0xE5 && mem[0x7F2A] == 0xCD && mem[0x7F2B] == 0x30) {
+		/* POP HL (balance PUSH HL); do not overlay $BC33 from IX. */
+		mem[0x7F0C] = 0xE1;
+		memset(mem + 0x7F0D, 0x00, (size_t)(0x7F2A - 0x7F0D));
+		uint16_t p = 0xA000;
+		uint16_t ptrs[4];
+		int i;
+		if (mem[0xA000] == 0xFD) {
+			for (i = 0; i < 4; i++) {
+				ptrs[i] = p;
+				p = (uint16_t)(p + Rd16(mem + p + 4));
+			}
+		} else {
+			for (i = 0; i < 4; i++)
+				ptrs[i] = 0xA000;
+		}
+		for (i = 0; i < 4; i++)
+			Wr16(mem + 0x7F31 + i * 2, ptrs[i]);
+		/* $7F00 never ran (wait loop sits in $7043). Seed the PSG
+		   work page so H.TIMI $77C6 can fetch P1_ without CALL $4B6E. */
+		memcpy(mem + 0xBC00, mem + 0x7FA2, 0x20);
+		for (i = 0; i < 4; i++) {
+			uint8_t* ix = mem + 0xBC40 + i * 0x30;
+			memcpy(ix, mem + 0x7E60, 0x30);
+			ix[0] = ix[2] = ix[4] = (uint8_t)(ptrs[i] & 0xff);
+			ix[1] = ix[3] = ix[5] = (uint8_t)(ptrs[i] >> 8);
+			ix[0x26] = 0x4E;
+		}
+	}
+	/* Do not STOP ($7EBC sets IX+0x0C and mutes) or PLAY ($4B6E). */
+	if (mem[0x0419] == 0xCD && mem[0x041A] == 0x4B && mem[0x041B] == 0x04)
+		memset(mem + 0x0419, 0x00, 3);
+	if (mem[0x0436] == 0xCD && mem[0x0437] == 0x6E && mem[0x0438] == 0x4B)
+		memset(mem + 0x0436, 0x00, 3);
 }
 
 /* archive="game,fmpac_msx": FMPAC.ROM lives in the companion zip. */
@@ -413,6 +477,40 @@ void CHardMsx::PlantBiosStubs()
 		} else if (mem_[0x0005] == 0x00)
 			mem_[0x0005] = 0xC9;
 	}
+	/* SNSMAT $0141. Warp & Warp ISR CALL $0141 (row 5/8) then AND into
+	   the PSG mixer; a 0-fill slides into PATCH @0400 and leaves vols 0.
+	   Only plant when the three bytes are empty — Compile DRIVER.BIN
+	   @0100 (puyo/dsdx1) must not see this. */
+	if (mem_[0x0141] == 0 && mem_[0x0142] == 0 && mem_[0x0143] == 0) {
+		mem_[0x0141] = 0x3E; /* LD A,$FF */
+		mem_[0x0142] = 0xFF;
+		mem_[0x0143] = 0xC9;
+	}
+}
+
+void CHardMsx::KeepCompileRan2Alive()
+{
+	if (!genericMode_ || !cpu_) return;
+	/* Sky Jaguar SCC+: mix at $4416 is gated on D280 bit1. The 16K dump
+	   never writes that bit; play/ISR can clear it after the settle plant. */
+	if (sccEnable_
+		&& mem_[0x4009] == 0xC3 && mem_[0x400A] == 0x27 && mem_[0x400B] == 0x42)
+		mem_[0xD280] |= 0x02;
+	if (mem_[0x0418] != 0xFE || mem_[0x0419] != 0x65) return;
+	if (mem_[0x041E] != 0xCD || mem_[0x041F] != 0x7D || mem_[0x0420] != 0x53)
+		return;
+	if (mem_[0x0038] != 0xC3) {
+		mem_[0x0038] = 0xC3; mem_[0x0039] = 0xE0; mem_[0x003A] = 0x00;
+		mem_[0x00E0] = 0xF5;
+		mem_[0x00E1] = 0xCD; mem_[0x00E2] = 0x9F; mem_[0x00E3] = 0xFD;
+		mem_[0x00E4] = 0xF1; mem_[0x00E5] = 0xFB; mem_[0x00E6] = 0xC9;
+		PlantPsgTrampoline(mem_);
+	}
+	if (mem_[0xFD9F] != 0xC3 || mem_[0xFDA0] != 0xF9 || mem_[0xFDA1] != 0x44) {
+		mem_[0xFD9F] = 0xC3;
+		mem_[0xFDA0] = 0xF9;
+		mem_[0xFDA1] = 0x44;
+	}
 }
 
 void CHardMsx::MapAscii16(int page, uint8_t bank)
@@ -676,13 +774,24 @@ void CHardMsx::MemWrite(uint16_t addr, uint8_t data)
 	   gate, ordinary RAM at 9800 would be stolen on generic titles. */
 	if (chipScc_ && (sccEnable_ || sccMapped_)) {
 		if (addr == 0xBFFE) {
-			if (data & 0x20)
+			if (data & 0x20) {
 				sccMapped_ = 1;
+				/* SCC-I plus window lives in the mapper latch, not RAM.
+				   Bank copies overwrite $BFFE; sccEnable_ keeps $B800
+				   routed after $9000/$B000 switch away from 0x3F
+				   (gradius enhanced-SCC keys $B8A0). */
+				sccEnable_ = 1;
+				CEmuChipSccSetPlusMode(chipScc_, 1);
+			} else {
+				sccEnable_ = 0;
+				CEmuChipSccSetPlusMode(chipScc_, 0);
+			}
 			mem_[addr] = data;
 			return;
 		}
 		if (addr == 0x9000) {
-			sccMapped_ = ((data & 0x3fu) == 0x3fu) ? 1 : 0;
+			if (!sccEnable_)
+				sccMapped_ = ((data & 0x3fu) == 0x3fu) ? 1 : 0;
 			/* Fall through to the bank handler. */
 		} else if (addr == 0xb000) {
 			/* SCC-I / some MegaROMs expose the mirror via page3; treat the
@@ -691,6 +800,11 @@ void CHardMsx::MemWrite(uint16_t addr, uint8_t data)
 				sccMapped_ = 1;
 			/* Fall through to the bank handler. */
 		} else {
+			/* $B800-B8BF is the SCC-I plus window (freq/vol at $B8A0).
+			   $9800-98BF is classic SCC. The XOR alias is the same offset
+			   but plus mode keys $AF rather than $8F. */
+			if (addr >= 0xB800 && addr < 0xB8C0)
+				CEmuChipSccSetPlusMode(chipScc_, 1);
 			const unsigned sccAddr = (unsigned)((addr & 0xdfffu) ^ 0x9800u);
 			if (sccAddr < 0xC0u) {
 				CEmuChipSccWriteReg(chipScc_, sccAddr, data);
@@ -698,7 +812,27 @@ void CHardMsx::MemWrite(uint16_t addr, uint8_t data)
 				return;
 			}
 		}
-	} else if (chipScc_ && (addr == 0x9000 || addr == 0xb000)) {
+	} else if (chipScc_ && !genericMode_
+		&& (addr == 0x9000 || addr == 0xb000 || addr == 0xBFFE)) {
+		/* KSS mapper probe only. Generic Falcom BIOS (sor/sorpyr/sorsen)
+		   stores the play/stop flag at $B000 ($FF / $00). $FF & $3F == $3F
+		   used to latch sccMapped_ and MemRead then stole $B800-B8BF from
+		   the BIOS image (AY freq writes, volume 0). */
+		if (addr == 0xBFFE) {
+			/* Snatcher init LD ($BFFE),$20 before any $9000=3F. The
+			   mapped-window path never saw that write, so SCC-I titles
+			   that never latch 3F stayed on PSG (7C/7D/86 SILENT). */
+			if (data & 0x20) {
+				sccMapped_ = 1;
+				sccEnable_ = 1;
+				CEmuChipSccSetPlusMode(chipScc_, 1);
+			} else {
+				sccEnable_ = 0;
+				CEmuChipSccSetPlusMode(chipScc_, 0);
+			}
+			mem_[addr] = data;
+			return;
+		}
 		if (addr == 0x9000)
 			sccMapped_ = ((data & 0x3fu) == 0x3fu) ? 1 : 0;
 		else if (data == 0x80 || (data & 0x3fu) == 0x3fu)
@@ -737,6 +871,15 @@ void CHardMsx::MemWrite(uint16_t addr, uint8_t data)
 
 uint8_t CHardMsx::MemRead(uint16_t addr)
 {
+	/* Cartridge SCC window (generic + mapper 0x3F). KSS must read the
+	   backing ROM: hoot maps fetch/read to ram[], and Snatcher stores
+	   song headers at $98A6 / $B84A / $B7FA — XOR-aliasing those as
+	   chip regs left 6B/72/7E SILENT. */
+	if (chipScc_ && sccMapped_ && genericMode_) {
+		const unsigned sccAddr = (unsigned)((addr & 0xdfffu) ^ 0x9800u);
+		if (sccAddr < 0xC0u)
+			return CEmuChipSccReadReg(chipScc_, sccAddr);
+	}
 	return mem_[addr];
 }
 
@@ -782,6 +925,8 @@ int CHardMsx::LoadGeneric(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned title
 
 	int loadedCode = 0;
 	int loaded4000 = 0;
+	int catalogDirMiss = 0;
+	int catalogKss = 0;
 	int useOpll = ParseOptHex(ge, "use_opll", 0);
 	int useMsxa = ParseOptHex(ge, "use_msxa", 0);
 	for (int i = 0; i < ge->romCount; i++) {
@@ -799,8 +944,16 @@ int CHardMsx::LoadGeneric(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned title
 				alt[0] = (r->name[0] == 'p') ? 'f' : 'F';
 				data = CEmuZipFsFind(fs, alt, &sz);
 			}
-			if (!data || !sz)
+			if (!data || !sz) {
+				if (_stricmp(r->type, "code") == 0 && r->name[0]) {
+					const size_t nl = strlen(r->name);
+					if (nl >= 4 && _stricmp(r->name + nl - 4, ".kss") == 0)
+						catalogKss = 1;
+					if (strchr(r->name, '/') || strchr(r->name, '\\'))
+						catalogDirMiss = 1;
+				}
 				continue;
+			}
 		}
 
 		if (_stricmp(r->type, "code") == 0 || _stricmp(r->type, "fmbios") == 0
@@ -914,6 +1067,12 @@ int CHardMsx::LoadGeneric(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned title
 	int zipInitPc = -1;
 	int zipMdata = -1;
 	int zipMsize = -1;
+	/* dssp1 usajan/fuku/heian xml names dir-qualified dumps the zip never
+	   shipped. Falling through stole ran/DRIVER.BIN via basename and
+	   Open'd those titles as SILENT. puyo .kss xml still needs the
+	   DRIVER@$0100 layout below. */
+	if (!loadedCode && catalogDirMiss && !catalogKss)
+		return 0;
 	if (!loadedCode) {
 		unsigned szDrv = 0, szPat = 0, szData = 0, szBgm = 0, szTone = 0, szSe = 0;
 		const unsigned char* drv = CEmuZipFsFind(fs, "DRIVER.BIN", &szDrv);
@@ -1027,17 +1186,7 @@ int CHardMsx::LoadGeneric(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned title
 	   (pc≈01AB). Plant RET at GICINI and WRTPSG/RDPSG trampolines only —
 	   do NOT RET-fill all of 0..0x3FF (breaks undead ENASLT CALL 0024).
 	   Impl bodies @00C0/00D0 stay below undead OPLLDRV@0100. */
-	if (mem_[0x0090] == 0x00)
-		mem_[0x0090] = 0xC9; /* GICINI */
-	mem_[0x0093] = 0xC3; mem_[0x0094] = 0xC0; mem_[0x0095] = 0x00; /* JP 00C0 */
-	mem_[0x0096] = 0xC3; mem_[0x0097] = 0xD0; mem_[0x0098] = 0x00; /* JP 00D0 */
-	mem_[0x00C0] = 0xD3; mem_[0x00C1] = 0xA0;
-	mem_[0x00C2] = 0x7B;
-	mem_[0x00C3] = 0xD3; mem_[0x00C4] = 0xA1;
-	mem_[0x00C5] = 0xC9;
-	mem_[0x00D0] = 0xD3; mem_[0x00D1] = 0xA0;
-	mem_[0x00D2] = 0xDB; mem_[0x00D3] = 0xA2;
-	mem_[0x00D4] = 0xC9;
+	PlantPsgTrampoline(mem_);
 	PlantBiosStubs();
 
 	initPc_ = (uint16_t)ParseOptHex(ge, "init_pc", 0x400);
@@ -1091,19 +1240,6 @@ int CHardMsx::LoadGeneric(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned title
 		mem_[0x0425] = 0x06;
 		mem_[0x0426] = 0x40;
 	}
-	if (sccEnable_ && initPc_ == 0x400) {
-		FILE* jf = fopen("c:\\projects\\APPLICATION3\\ogg_all2022\\.cursor\\_jag_hit.txt", "a");
-		if (jf) {
-			fprintf(jf, "scc=%d init=%04X 4000=%02X%02X%02X 4009=%02X%02X%02X 4251=%02X%02X 0456=%02X%02X%02X D280=%02X\n",
-				sccEnable_, (unsigned)initPc_,
-				mem_[0x4000], mem_[0x4001], mem_[0x4002],
-				mem_[0x4009], mem_[0x400A], mem_[0x400B],
-				mem_[0x4251], mem_[0x4252],
-				mem_[0x0456], mem_[0x0457], mem_[0x0458],
-				mem_[0xD280]);
-			fclose(jf);
-		}
-	}
 	/* Sky Jaguar SCC+: init CALL $0430 queues mute $9D into the E01A
 	   priority slot. Play $93/$91/$88 then RET C (0x13 < 0x1D) and the
 	   ISR never starts BGM. $4415 is a PSG stub; SCC mix is $4416 only
@@ -1117,23 +1253,41 @@ int CHardMsx::LoadGeneric(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned title
 			mem_[0x0457] = 0x00;
 			mem_[0x0458] = 0x00;
 		}
-		/* $4251 CP E / $4252 RET C — drop the mute-priority reject. */
 		if (mem_[0x4251] == 0xBB && mem_[0x4252] == 0xD8) {
 			mem_[0x4251] = 0x00;
 			mem_[0x4252] = 0x00;
 		}
 		mem_[0xD280] |= 0x02;
-		{
-			FILE* jf = fopen("c:\\projects\\APPLICATION3\\ogg_all2022\\.cursor\\_jag_hit.txt", "a");
-			if (jf) {
-				fprintf(jf, "PATCH 4251=%02X%02X 0456=%02X%02X%02X D280=%02X\n",
-					mem_[0x4251], mem_[0x4252],
-					mem_[0x0456], mem_[0x0457], mem_[0x0458],
-					mem_[0xD280]);
-				fclose(jf);
-			}
-		}
+		if (chipScc_)
+			CEmuChipSccSetPlusMode(chipScc_, 1);
 	}
+
+	/* dante OPLL: RSLREG $0138 is empty so $D2EA NOP-slides into PATCH
+	   @0400 and $D37B never plants H.TIMI. Plant like mbsp (Compile
+	   DRIVER.BIN @0100 must not see this). FMPAC.ROM id at $4018 is
+	   PAC2OPLL while INIOPL compares APRLOPLL — patch the BIOS string
+	   so the slot scan succeeds and the work pointer lands in $FD09. */
+	if (initPc_ == 0x400
+		&& mem_[0x0454] == 0xCD && mem_[0x0455] == 0x7B && mem_[0x0456] == 0xD3
+		&& mem_[0x0413] == 0xCD && mem_[0x0414] == 0xE4 && mem_[0x0415] == 0xD2) {
+		if (mem_[0x0138] == 0x00) {
+			mem_[0x0138] = 0xAF; /* XOR A */
+			mem_[0x0139] = 0xC9; /* RET — primary slot 0 */
+			mem_[0xFCC1] = 0;
+		}
+		if (mem_[0x4018] == 'P' && mem_[0x4019] == 'A' && mem_[0x401C] == 'O'
+			&& mem_[0x42BE] == 'A' && mem_[0x42BF] == 'P' && mem_[0x42C2] == 'O') {
+			memcpy(mem_ + 0x42BE, mem_ + 0x4018, 8);
+		}
+		mem_[0xFD0B] = 0xA0;
+		mem_[0xFD0C] = 0xD7;
+	}
+
+	/* laplace PSG PATCH2: hoot stages one file at $A000 so ADD HL,DE
+	   (port4<<8) aims past mdata. Do not plant BC06 — it is the tempo
+	   reload; a 1 makes $7E1C hit $7EBC mute after 12 ticks. */
+	if (initPc_ == 0x400)
+		PlantLaplacePsgPlay(mem_);
 
 	cpu_->reset(mem_);
 	cpuCycles_ = 0;
@@ -1311,6 +1465,21 @@ int CHardMsx::StartSongKss(unsigned titleCode)
 	mem_[0x97] = 0x09;
 	mem_[0x98] = 0x00;
 
+	/* King Kong 2 KSS initAdr is play $6032. The cart cold-init at $6000
+	   (mixer $C081=$BC, four channel slots $C010-$C016 = $6299) never
+	   runs, so the ISR tail JP ($C016) hits $0000 and re-enters IPL. */
+	if (initAdr_ == 0x6032 && intAdr_ == 0x6228 && loadAdr_ == 0x6000
+		&& mem_[0x6000] == 0x3E && mem_[0x6001] == 0xBC
+		&& mem_[0x6022] == 0x21 && mem_[0x6023] == 0x99 && mem_[0x6024] == 0x62
+		&& mem_[0x602E] == 0x22 && mem_[0x602F] == 0x16 && mem_[0x6030] == 0xC0) {
+		static const uint8_t kKkon2Cold[] = {
+			0xF5, 0xCD, 0x00, 0x60, 0xF1, 0xC3, 0x32, 0x60
+		};
+		memcpy(mem_ + 0x0020, kKkon2Cold, sizeof kKkon2Cold);
+		mem_[INIT_ADR] = 0x20;
+		mem_[INIT_ADR + 1] = 0x00;
+	}
+
 	/* Labyrinth chip-byte 0x08 is MSX-AUDIO; titles 0x80/0x81 set BIT 7 so
 	   the loader takes the Y8950 path. Without a timer-ticking Y8950 that
 	   path never keys the FM. Bit7-clear is the PSG arrangement. */
@@ -1331,10 +1500,75 @@ int CHardMsx::StartSongKss(unsigned titleCode)
 	memcpy(bankShadow_, mem_ + 0x8000, 0x4000);
 	PortOut(0xfe, 0);
 	bank8kRam_[0] = bank8kRam_[1] = 0;
-	if (bank8k_ && bank_ && bankBytes_ >= 0x2000u) {
-		memcpy(mem_ + 0x8000, bank_, 0x2000);
-		if (bankNum_ > 1 && bankBytes_ >= 0x4000u)
-			memcpy(mem_ + 0xA000, bank_ + 0x2000, 0x2000);
+	{
+		const unsigned loadEnd = ((unsigned)loadAdr_ + (unsigned)loadSize_ > 0x10000u)
+			? 0x10000u : ((unsigned)loadAdr_ + (unsigned)loadSize_);
+		/* 8K KSS bank0→$8000. Skip when the payload already filled that
+		   window: gradius enhanced-SCC loads $3FC0+$8040 through $BFFF,
+		   and the overlay left init jumping into zeros (pc≈07xx, irq=0). */
+		const int covers8000 = (loadAdr_ < 0xA000 && loadEnd > 0x8000) ? 1 : 0;
+		if (bank8k_ && bank_ && bankBytes_ >= 0x2000u && !covers8000) {
+			memcpy(mem_ + 0x8000, bank_, 0x2000);
+			if (bankNum_ > 1 && bankBytes_ >= 0x4000u)
+				memcpy(mem_ + 0xA000, bank_ + 0x2000, 0x2000);
+		}
+	}
+
+	/* Konami KSS unpacker (f1s3d): 0xC2/0xAA stub at $4000 CALLs $4077
+	   which OUT $FE's 16K pages then LDIR into $8000/$B000. Running that
+	   via the Z80 left $9000 as NOPs (pc in the $92xx table) and IFF1
+	   off, so the IPL ISR never ticked. Stage the player and the selected
+	   song from bank_ the same way $4077 would, then CALL $9000 / JP $9003. */
+	if (bank_ && bankBytes_ >= 0x2000u
+		&& loadAdr_ == 0x4000 && initAdr_ == 0x4003 && intAdr_ == 0x4000
+		&& loadSize_ <= 0x100u
+		&& mem_[0x4000] == 0xC3 && mem_[0x4001] == 0x06 && mem_[0x4002] == 0x90
+		&& mem_[0x4077] == 0xC5 && mem_[0x4083] == 0xD3 && mem_[0x4084] == 0xFE
+		&& mem_[0x4029] == 0x2E && mem_[0x406B] == 0x11) {
+		const unsigned page0 = mem_[0x402A];
+		const uint16_t songDest = (uint16_t)(mem_[0x406C] | ((uint16_t)mem_[0x406D] << 8));
+		unsigned playerBytes = page0 * 256u;
+		if (playerBytes > bankBytes_)
+			playerBytes = bankBytes_;
+		if (playerBytes > 0x4000u)
+			playerBytes = 0x4000u;
+		memcpy(mem_ + 0x8000, bank_, playerBytes);
+		uint8_t play = ioport_[PLAY_CODE_PORT];
+		const uint8_t* ix = mem_ + 0x4099;
+		unsigned page = page0;
+		int found = 0;
+		int guard = 0;
+		while (guard++ < 32 && ix + 4 <= mem_ + 0x4100) {
+			if (ix[0] & 0x80)
+				break;
+			if (play < ix[2]) {
+				const unsigned nPages = ix[0];
+				uint16_t dest = songDest;
+				for (unsigned i = 0; i < nPages; i++) {
+					const unsigned p = page + i;
+					const unsigned src = ((p >> 6) * 0x4000u) + ((p & 63u) * 256u);
+					if (src + 256u > bankBytes_ || (unsigned)dest + 256u > 0x10000u)
+						break;
+					memcpy(mem_ + dest, bank_ + src, 256);
+					dest = (uint16_t)(dest + 256);
+				}
+				ioport_[PLAY_CODE_PORT] = (uint8_t)(play + ix[3]);
+				found = 1;
+				break;
+			}
+			play = (uint8_t)(play - ix[2]);
+			page += ix[0];
+			ix += 4;
+		}
+		if (found) {
+			mem_[0x4003] = 0xF5;
+			mem_[0x4004] = 0xCD; mem_[0x4005] = 0x00; mem_[0x4006] = 0x90;
+			mem_[0x4007] = 0xF1;
+			mem_[0x4008] = 0xC3; mem_[0x4009] = 0x03; mem_[0x400A] = 0x90;
+		} else {
+			mem_[0x4000] = 0xC9;
+			mem_[0x4003] = 0xC9;
+		}
 	}
 
 	/* Unset I + $C9 fill made IM2 vector $C9C9. Point it at the IPL ISR. */
@@ -1347,10 +1581,24 @@ int CHardMsx::StartSongKss(unsigned titleCode)
 	cpuCycles_ = 0;
 	idle_ = 0;
 	playing_ = 0;
+	sccEnable_ = 0;
+	sccMapped_ = 0;
 	sccAccessed_ = 0;
 	if (chipScc_) chipScc_->Reset();
 	if (chipSng_) chipSng_->Reset();
 	if (chipAy_) chipAy_->Reset();
+	/* Space Manbow KSS patches CALL $4C15 ($9000=3F) to RET, then
+	   writes wave/key at $9860/$988F. hoot maps SCC from chips=0;
+	   without that window those pokes hit bank shadow and SFX $4E
+	   stays SILENT (BGM still has PSG). */
+	if (initAdr_ == 0x5F00 && intAdr_ == 0x5F80 && loadAdr_ == 0x5F00
+		&& bank8k_ && bankNum_ == 4
+		&& mem_[0x5F07] == 0x3E && mem_[0x5F08] == 0xC9
+		&& mem_[0x5F09] == 0x32 && mem_[0x5F0A] == 0x30
+		&& mem_[0x5F0B] == 0x64 && mem_[0x642E] == 0x3E
+		&& mem_[0x642F] == 0x3F) {
+		sccEnable_ = 1;
+	}
 
 	CEmuHardMsxSetActive(this);
 	/* Shiryo loadAdr=$0000: the 16K image's RST 00 vector is ADD HL,A
@@ -1367,8 +1615,12 @@ int CHardMsx::StartSongKss(unsigned titleCode)
 		mem_[0x94] = 0xFC;
 		mem_[0x95] = 0x01;
 	}
-	/* hoot Play() emulates with the 60 Hz timer live until SKIP. Init
-	   that EI/HALTs (or waits on vblank) never returns without IRQs. */
+	/* hoot Play() does not raise the 60 Hz IRQ until SKIP (m_playing).
+	   Gradius enhanced-SCC EI's at $493D then LDIRs 16K; a vblank in
+	   that copy remaps $8000 mid-transfer and the ISR JP $4000 never
+	   returns (pc≈07xx, 0038 wiped). HALT still gets an IRQ so inits
+	   that wait on vblank can reach SKIP. f1s3d is host-unpacked and
+	   must not see a vblank either (WRTPSG EI → CALL $4000). */
 	int guard = 0;
 	uint64_t nextIrq = (uint64_t)MSX_CPU_HZ / 60u;
 	while (!idle_ && guard++ < 4000000) {
@@ -1388,13 +1640,8 @@ int CHardMsx::StartSongKss(unsigned titleCode)
 		const int cyc = Ay_CpuRunOne(cpu_);
 		if (cyc <= 0) break;
 		cpuCycles_ += (uint64_t)cyc;
-		if (cpuCycles_ >= nextIrq) {
+		if (cpuCycles_ >= nextIrq)
 			nextIrq += (uint64_t)MSX_CPU_HZ / 60u;
-			if (cpu_->r.iff1) {
-				if (cpu_->r.im != 2 || !Ay_CpuIm2Interrupt(cpu_, 0xff))
-					Ay_CpuIm1Interrupt(cpu_);
-			}
-		}
 	}
 	playing_ = 1;
 	idle_ = 0;
@@ -1627,8 +1874,93 @@ int CHardMsx::StartSongGeneric(unsigned titleCode)
 		&& mem_[0x041E] == 0xDB && mem_[0x041F] == 0x04
 		&& mem_[0x0420] == 0xFE && mem_[0x0421] == 0x01
 		&& !bgmPresent_[0]) ? 1 : 0;
+	/* dssp3 ran2/mzz: IN A,(3) track, IN A,(4); CP $65; CALL NZ LDIR
+	   $9800→$4000. File is mid, track is low. song=low staged BASAM
+	   index 4 on 0x004 and missed file 0 tracks 0x003/0x00f. */
+	const int compileCp65 = (initPc_ == 0x400
+		&& mem_[0x0416] == 0xDB && mem_[0x0417] == 0x04
+		&& mem_[0x0418] == 0xFE && mem_[0x0419] == 0x65) ? 1 : 0;
+	/* ds13 Blaster Burn Gallery: IN A,(4); ADD A,A; LD HL,$0462 table.
+	   Mid indexes the 7-word bank table, low is the track. song=low
+	   made every 0x..01 title hit table[1] and silenced 0x302/0x304. */
+	const int compileTbl4 = (initPc_ == 0x400
+		&& mem_[0x0419] == 0xDB && mem_[0x041A] == 0x04
+		&& mem_[0x041B] == 0x87
+		&& mem_[0x041F] == 0x21 && mem_[0x0420] == 0x62
+		&& mem_[0x0421] == 0x04) ? 1 : 0;
+	/* fuunroku: IN A,(4); CP 1 selects MMLDATA @8000 vs MUSIC2.
+	   0x000103 used sel4=low=3 and took the MUSIC2 table. */
+	const int fuunrokuPack = (initPc_ == 0x400
+		&& mem_[0x0452] == 0xDB && mem_[0x0453] == 0x03
+		&& mem_[0x0483] == 0xDB && mem_[0x0484] == 0x04
+		&& mem_[0x0485] == 0xFE && mem_[0x0486] == 0x01) ? 1 : 0;
+	/* pup8 R-Police patch2: IN A,(4); CP 2 is DRIVER2 (title/SFX).
+	   BGM 0x01–0x08 live in DRIVER3 @1000. song=low staged missing
+	   banks as DRIVER2 and CALL $1C1D ran on the wrong image. */
+	const int pup8Rp = (initPc_ == 0x400 && mdataAddr_ == 0x1000
+		&& bgmPresent_[0] && bgmPresent_[1]
+		&& mem_[0x0416] == 0xDB && mem_[0x0417] == 0x04
+		&& mem_[0x0418] == 0xFE && mem_[0x0419] == 0x02
+		&& mem_[0x041C] == 0xDB && mem_[0x041D] == 0x03) ? 1 : 0;
+	/* ankoku: IN A,(3)*4 indexes $D048 records [file, skip, ptr].
+	   song=low staged STORY1 for BATTLE 0x03. Byte0 is the bgm bank. */
+	const int ankokuPack = (initPc_ == 0xD000 && mdataAddr_ == 0x0100
+		&& mem_[0xD013] == 0xDB && mem_[0xD014] == 0x03
+		&& mem_[0xD017] == 0x21 && mem_[0xD018] == 0x48
+		&& mem_[0xD019] == 0xD0) ? 1 : 0;
+	/* gshogi 0xMMTT: IN A,(3)→$D600 is the track; host stages file MM.
+	   song=low treated 0x0203 as RMSC and silenced MMSC 03/04/05. */
+	const int gshogiPack = (initPc_ == 0x400 && mdataAddr_ == 0xA000
+		&& mdataSize_ == 0x3000
+		&& mem_[0x0414] == 0xDB && mem_[0x0415] == 0x03
+		&& mem_[0x0416] == 0x32 && mem_[0x0417] == 0x00
+		&& mem_[0x0418] == 0xD6) ? 1 : 0;
+	/* f1douchu DATA2/3/4 are 2-channel (02 AA) menu jingles. Port7=1
+	   takes CALL $A306 / $C040=0 and the OPLL path keys a mute patch
+	   (MON_THIN, peak=0). The PSG game plays those files. */
+	const int f1douchuPsgJingle = (initPc_ == 0x400 && mdataAddr_ == 0xAA00
+		&& mdataSize_ == 0x1600
+		&& mem_[0x041C] == 0xC6 && mem_[0x041D] == 0x80
+		&& mem_[0xA000] == 0xC3 && mem_[0xA001] == 0x0C
+		&& mem_[0xA002] == 0xA1
+		&& low >= 2u && low <= 4u) ? 1 : 0;
 
-	if (lowFilePack && low < BGM_BANKS && bgmPresent_[low]) {
+	if (compileTbl4) {
+		song = 0;
+		sel3 = low;
+		sel4 = mid;
+	} else if (compileCp65) {
+		song = (mid < BGM_BANKS && bgmPresent_[mid]) ? mid : 0;
+		sel3 = low;
+		sel4 = mid;
+	} else if (fuunrokuPack) {
+		song = 0;
+		sel3 = low;
+		sel4 = mid;
+	} else if (pup8Rp) {
+		if (mid == 2 || low >= 0x20u) {
+			song = 0;
+			sel3 = low;
+			sel4 = 2;
+		} else {
+			song = bgmPresent_[1] ? 1 : 0;
+			sel3 = low;
+			sel4 = 0;
+		}
+	} else if (ankokuPack) {
+		unsigned file = 0;
+		if (low < 64u) {
+			const unsigned rec = 0xD048u + low * 4u;
+			file = mem_[rec];
+		}
+		song = (file < BGM_BANKS && bgmPresent_[file]) ? file : 0;
+		sel3 = low;
+		sel4 = 0;
+	} else if (gshogiPack) {
+		song = (mid < BGM_BANKS && bgmPresent_[mid]) ? mid : 0;
+		sel3 = low;
+		sel4 = low;
+	} else if (lowFilePack && low < BGM_BANKS && bgmPresent_[low]) {
 		song = low;
 		sel3 = low;
 		sel4 = mid;
@@ -1645,8 +1977,12 @@ int CHardMsx::StartSongGeneric(unsigned titleCode)
 		sel3 = low;
 		sel4 = 0;
 	} else if (ds00Data) {
+		/* DATA2 @7228 relocates LD HL,nn to the first pointer $729B.
+		   That table only has two real songs (A=0 $7451, A=1 $7468).
+		   0x0102..04 indexed A=2+ into leftover header bytes and
+		   either silenced or smashed RAM with $03. */
 		song = low;
-		sel3 = low;
+		sel3 = (mid && low >= 2u) ? 0 : low;
 		sel4 = (mid == 0) ? 1 : 0;
 	} else if (port4Inc) {
 		song = low;
@@ -1747,6 +2083,15 @@ int CHardMsx::StartSongGeneric(unsigned titleCode)
 		song = low;
 		sel3 = low;
 		sel4 = 0;
+	} else if (initPc_ == 0x400 && mdataAddr_ == 0xC200 && mdataSize_ == 0x1000
+		&& top >= 1u && top <= 5u && top < BGM_BANKS && bgmPresent_[top]) {
+		/* playbal3 0x010202: port4=2 LDIRs FM0 @8000 then play $043C
+		   uses port5 as the FMn table and port3 as the track. File is
+		   top, track is low, bank is 2. song=low staged the wrong
+		   bgm; mid happens to be 2 on every in-game row. */
+		song = top;
+		sel3 = low;
+		sel4 = 2;
 	} else if (top == 0xFF) {
 		/* lenam 0xFF000A: Hertz BGMDRV CALL $0B06 does LD A,C; OR A;
 		   JP Z skip. C comes from IN A,(5). Port5=0 was a hard stop.
@@ -1804,6 +2149,8 @@ int CHardMsx::StartSongGeneric(unsigned titleCode)
 	ioport_[0x04] = (uint8_t)(sel4 & 0xff);
 	ioport_[0x05] = (top == 0xFF) ? 0 : (uint8_t)(top & 0xff);
 	ioport_[0x07] = (chips_ & CHIP_FMPAC) ? 0x01 : 0x00;
+	if (f1douchuPsgJingle)
+		ioport_[0x07] = 0;
 	/* KOEI genghis: PATCH IN A,(4)/IN A,(5) as HL into MMLDATA @8000.
 	   Address is (titleCode>>8), not a $80-step index by the low byte. */
 	int anyBgm = 0;
@@ -1919,6 +2266,73 @@ int CHardMsx::StartSongGeneric(unsigned titleCode)
 			}
 		}
 	}
+	/* dssp3 ran2: after LDIR the player CALL $410D copies RST 30
+	   (F7 slot addr) over H.TIMI. $0030 is a BIOS RET so the ISR
+	   never runs (ayW=0, 0038/WRTPSG trampolines get smashed).
+	   Keep the IPL JP $44F9/$48D8. RSLREG/EXTBIO must RET — CALL
+	   $0138 otherwise NOP-slides into PATCH @0400. */
+	if (compileCp65) {
+		if (mem_[0x0138] == 0x00) {
+			mem_[0x0138] = 0xAF;
+			mem_[0x0139] = 0xC9;
+			mem_[0xFCC1] = 0;
+		}
+		if (mem_[0xFFCA] == 0x00)
+			mem_[0xFFCA] = 0xC9;
+		const int ran2 = (mem_[0x0438] == 0x21 && mem_[0x0439] == 0xF9
+			&& mem_[0x043A] == 0x44) ? 1 : 0;
+		if (ran2) {
+			/* Host-copy the player before play. BRN2-2 is ~7K so the
+			   IPL LDIR $3E00 would zero $5CEC–$7E00 (BSS + extra
+			   channels). Overlay the selected bank without clipping
+			   the tail of bank 0. Skip the IPL LDIR; keep CALL $5278. */
+			if (bgmPresent_[0] && bgmBank_[0] && bgmBankSize_[0] > 0x107u) {
+				unsigned n = bgmBankSize_[0] - 0x107u;
+				if (n > 0x3E00u) n = 0x3E00u;
+				memcpy(mem_ + 0x4000, bgmBank_[0] + 0x107u, n);
+			}
+			if (song != 0 && song < BGM_BANKS && bgmPresent_[song]
+				&& bgmBank_[song] && bgmBankSize_[song] > 0x107u) {
+				unsigned n = bgmBankSize_[song] - 0x107u;
+				if (n > 0x3E00u) n = 0x3E00u;
+				memcpy(mem_ + 0x4000, bgmBank_[song] + 0x107u, n);
+			}
+			if (mem_[0x0442] == 0x21 && mem_[0x0443] == 0x00
+				&& mem_[0x0444] == 0x98)
+				memset(mem_ + 0x0442, 0x00, 11);
+			/* $C0 (bit6) takes a 9-ch $C0-port path; mzz uses $80 / $7C
+			   and PLAYS. Same player, same BIOS stubs. */
+			if (mem_[0x0458] == 0x3E && mem_[0x0459] == 0xC0)
+				mem_[0x0459] = 0x80;
+			for (unsigned a = 0x0100; a < 0x0400; a++) {
+				if (mem_[a] == 0x00)
+					mem_[a] = 0xC9;
+			}
+			/* WRTPSG body in the patch gap so CALL $0093 can slide. */
+			mem_[0x0466] = 0xD3; mem_[0x0467] = 0xA0;
+			mem_[0x0468] = 0x7B;
+			mem_[0x0469] = 0xD3; mem_[0x046A] = 0xA1;
+			mem_[0x046B] = 0xC9;
+			static const unsigned kWrt[] = { 0x492A, 0x4942, 0x4949, 0x4950 };
+			for (unsigned i = 0; i < 4; i++) {
+				const unsigned a = kWrt[i];
+				if ((mem_[a] == 0xCD || mem_[a] == 0xC3)
+					&& mem_[a + 1] == 0x93 && mem_[a + 2] == 0x00) {
+					mem_[a + 1] = 0x66; mem_[a + 2] = 0x04;
+				}
+			}
+		}
+		/* Both CALL $410D sites (install RST 30 over H.TIMI). Patch the
+		   resident player ($4000) and the staged copy ($9800). */
+		for (unsigned a = 0x4000; a + 2u < 0x5C00u; a++) {
+			if (mem_[a] == 0xCD && mem_[a + 1] == 0x0D && mem_[a + 2] == 0x41)
+				memset(mem_ + a, 0, 3);
+		}
+		for (unsigned a = 0x9800; a + 2u < 0x9C00u; a++) {
+			if (mem_[a] == 0xCD && mem_[a + 1] == 0x0D && mem_[a + 2] == 0x41)
+				memset(mem_ + a, 0, 3);
+		}
+	}
 	/* yosikon: FMPAC ID match on slot 0 stores A=0 in $D50E; play/ISR
 	   treat 0 as "not found". Detect did succeed (OPLL @401C). */
 	if (mem_[0xD400] == 0xC3 && mem_[0xD401] == 0x78 && mem_[0xD402] == 0xD5
@@ -1976,6 +2390,16 @@ int CHardMsx::StartSongGeneric(unsigned titleCode)
 	mem_[0x00E4] = 0xF1;             /* POP AF */
 	mem_[0x00E5] = 0xFB;             /* EI */
 	mem_[0x00E6] = 0xC9;             /* RET */
+	/* Warp & Warp ISR CALL $0141 (SNSMAT). Load-time plant is lost if a
+	   later 0100-03FF RET-fill ran, and a lone C9 returns the row id so
+	   the mixer AND goes to 0. Empty or RET-only — not Compile @0100. */
+	if ((mem_[0x0141] == 0x00 || mem_[0x0141] == 0xC9)
+		&& (mem_[0x0142] == 0x00 || mem_[0x0142] == 0xC9)
+		&& (mem_[0x0143] == 0x00 || mem_[0x0143] == 0xC9)) {
+		mem_[0x0141] = 0x3E; /* LD A,$FF */
+		mem_[0x0142] = 0xFF;
+		mem_[0x0143] = 0xC9;
+	}
 	/* ultima4 MUSICMSX: play stores ($0105) into CE48; ISR skips if 0.
 	   Compile DRIVER.BIN lives @0100 so this is empty only here. */
 	if (mdataAddr_ == 0xCEB1 && mem_[0xCA80] == 0x18 && mem_[0x0105] == 0)
@@ -2144,40 +2568,160 @@ int CHardMsx::StartSongGeneric(unsigned titleCode)
 	/* herzog/mbsp plant H.TIMI at FD9F. Do not smash IM1 $0038 to that
 	   handler — $00E0 CALL FD9F is already live, and skipping its EI
 	   left IFF1 off after the first vblank (MON_DEAD click only). */
-	/* Sky Jaguar SCC+: re-apply after settle. Init mute may have filled
-	   E01A/$D2BB; SCC mix at $4416 is gated on D280 bit1. */
+	/* Sky Jaguar SCC+: re-apply after settle. SCC mix at $4416 is gated
+	   on D280 bit1. Clear leftover mute so play $93 is not RET C. */
 	if (sccEnable_ && initPc_ == 0x400
 		&& mem_[0x4009] == 0xC3 && mem_[0x400A] == 0x27
 		&& mem_[0x400B] == 0x42) {
 		mem_[0xD280] |= 0x02;
+		mem_[0xD2BC] = (uint8_t)(low & 0x3Fu);
 		mem_[0xD2BB] = 1;
-		mem_[0xD2BC] = (uint8_t)(ioport_[0x03] & 0x3F);
 		memset(mem_ + 0xE018, 0, 0x28);
 		if (mem_[0x4251] == 0xBB && mem_[0x4252] == 0xD8) {
 			mem_[0x4251] = 0x00;
 			mem_[0x4252] = 0x00;
 		}
-		if (chipScc_) {
-			for (unsigned w = 0; w < 32; w++)
-				CEmuChipSccWriteReg(chipScc_, w, (uint8_t)(w < 16 ? 0x7F : 0x80));
-			CEmuChipSccWriteReg(chipScc_, 0x80, 0x80);
-			CEmuChipSccWriteReg(chipScc_, 0x81, 0x01);
-			CEmuChipSccWriteReg(chipScc_, 0x8A, 0x0F);
-			CEmuChipSccWriteReg(chipScc_, 0x8F, 0x01);
-			sccAccessed_ = 1;
+		if (chipScc_)
+			CEmuChipSccSetPlusMode(chipScc_, 1);
+		playCmdPending_ = 1;
+	}
+	/* Super Cobra SCC+: same mute slot RET C. Play $8B CLEAR is
+	   CP (HL); RET C against leftover $D0 from init CALL $0430. */
+	if (sccEnable_ && initPc_ == 0x400
+		&& mem_[0x4003] == 0xC3 && mem_[0x4004] == 0xC4 && mem_[0x4005] == 0x41
+		&& mem_[0x41FA] == 0xBE && mem_[0x41FB] == 0xD8) {
+		mem_[0x41FB] = 0x00;
+		memset(mem_ + 0xE012, 0, 0x28);
+		playCmdPending_ = 1;
+	}
+	/* ds13 OPLL blizzard/dangerous: mixer JP Z $1AF3 dumps AY forever
+	   (pc=1AFE, ayW=170k) when $147A is 0. Keep the FM path. */
+	if (compileTbl4 && (chips_ & CHIP_FMPAC)
+		&& low == 3 && (mid == 5 || mid == 6)) {
+		mem_[0x1493] = 0x80;
+		mem_[0x147A] = 0x20;
+		/* Mixer always JP $1AF3 after the FM block. That AY dump EI's
+		   per register and never leaves $1AFE on these two packs. */
+		if (mem_[0x1A0A] == 0xC3 && mem_[0x1A0B] == 0xF3 && mem_[0x1A0C] == 0x1A)
+			mem_[0x1A0A] = 0xC9;
+		if (mem_[0x1AFE] == 0xFB)
+			mem_[0x1AFE] = 0x00;
+	}
+	/* dante OPLL PATCH: keep the CPU on the wait loop. Re-plant RSLREG
+	   in case init wiped $0138. */
+	if (initPc_ == 0x400 && cpu_
+		&& mem_[0x0413] == 0xCD && mem_[0x0414] == 0xE4 && mem_[0x0415] == 0xD2
+		&& mem_[0x0416] == 0x76) {
+		cpu_->r.pc = 0x040A;
+		cpu_->r.sp = 0xF380;
+		cpu_->r.iff1 = 1;
+		cpu_->r.iff2 = 1;
+		cpu_->r.im = 1;
+		cpu_->irqDelay = 0;
+		if (mem_[0x0138] == 0x00) {
+			mem_[0x0138] = 0xAF;
+			mem_[0x0139] = 0xC9;
+			mem_[0xFCC1] = 0;
 		}
-		{
-			FILE* jf = fopen("c:\\projects\\APPLICATION3\\ogg_all2022\\.cursor\\_jag_hit.txt", "a");
-			if (jf) {
-				fprintf(jf, "SETTLE pc=%04X iff=%d 4251=%02X%02X D280=%02X D2BB=%02X E01A=%02X FD9F=%02X%02X%02X\n",
-					(unsigned)cpu_->r.pc, (int)cpu_->r.iff1,
-					mem_[0x4251], mem_[0x4252], mem_[0xD280],
-					mem_[0xD2BB], mem_[0xE01A],
-					mem_[0xFD9F], mem_[0xFDA0], mem_[0xFDA1]);
-				fclose(jf);
-			}
+		if (mem_[0x4018] == 'P' && mem_[0x4019] == 'A' && mem_[0x401C] == 'O'
+			&& mem_[0x42BE] == 'A' && mem_[0x42BF] == 'P' && mem_[0x42C2] == 'O') {
+			memcpy(mem_ + 0x42BE, mem_ + 0x4018, 8);
 		}
 	}
+	/* laplace PSG PATCH2: keep wait-loop PC; H.TIMI JP $77C6. */
+	if (initPc_ == 0x400 && cpu_ && IsLaplacePsgPatch(mem_)) {
+		PlantLaplacePsgPlay(mem_);
+		cpu_->r.pc = 0x0448; /* HALT after play; do not re-enter $7043 */
+		cpu_->r.sp = 0xF380;
+		cpu_->r.iff1 = 1;
+		cpu_->r.iff2 = 1;
+		cpu_->r.im = 1;
+		cpu_->irqDelay = 0;
+		/* $4BC3 copies $4BE7→H.TIMI. Point it at the PSG tick, not $BD80
+		   (RETI wrapper / RST 30). Skip wait-loop CALL $0492 ($4B9A RETI). */
+		if (mem_[0x4BE7] == 0xC3 && mem_[0x4BE8] == 0x80 && mem_[0x4BE9] == 0xBD) {
+			mem_[0x4BE8] = 0xC6;
+			mem_[0x4BE9] = 0x77;
+		}
+		if (mem_[0x040D] == 0xCD && mem_[0x040E] == 0x92 && mem_[0x040F] == 0x04) {
+			mem_[0x040D] = 0x00;
+			mem_[0x040E] = 0x00;
+			mem_[0x040F] = 0x00;
+		}
+		mem_[0xFD9F] = 0xC3;
+		mem_[0xFDA0] = 0xC6;
+		mem_[0xFDA1] = 0x77;
+	}
+	/* dante PSG PATCH2: play is CALL $DA43 after IN A,(2)/IN A,(3). */
+	if (initPc_ == 0x400 && cpu_
+		&& mem_[0x043E] == 0xCD && mem_[0x043F] == 0x43 && mem_[0x0440] == 0xDA
+		&& mem_[0x0415] == 0xDB && mem_[0x0416] == 0x03) {
+		mem_[0xFD9F] = 0xC9;
+		mem_[0xDC8A] = 0xC9;
+		cpu_->r.pc = 0x040A;
+		cpu_->r.sp = 0xF380;
+		cpu_->r.iff1 = 1;
+		cpu_->r.iff2 = 1;
+		cpu_->r.im = 1;
+		cpu_->irqDelay = 0;
+	}
+	/* playbal3 in-game: bank 2 LDIRs FM0 $8000→$AB80 then zeros
+	   $C000–$DFFF (BSS), wiping the FMn stubs at $C200. Title needs
+	   that fill; in-game copies the staged file to $1000 and restores
+	   $C200 after the wipe. */
+	if (initPc_ == 0x400 && mdataAddr_ == 0xC200 && mdataSize_ == 0x1000
+		&& top >= 1u && top <= 5u
+		&& mem_[0x0407] == 0xDB && mem_[0x0408] == 0x02
+		&& mem_[0x04B6] == 0x21 && mem_[0x04B7] == 0x00 && mem_[0x04B8] == 0xC0
+		&& mem_[0x04BC] == 0x01 && mem_[0x04BD] == 0x00 && mem_[0x04BE] == 0x20) {
+		memcpy(mem_ + 0x1000, mem_ + 0xC200, 0x1000);
+		static const uint8_t kPlaybal3Cave[] = {
+			0xAF,                   /* xor a */
+			0x21, 0x00, 0xC0,       /* ld hl,$C000 */
+			0x11, 0x01, 0xC0,       /* ld de,$C001 */
+			0x01, 0x00, 0x20,       /* ld bc,$2000 */
+			0x77,                   /* ld (hl),a */
+			0xED, 0xB0,             /* ldir */
+			0x21, 0x00, 0x10,       /* ld hl,$1000 */
+			0x11, 0x00, 0xC2,       /* ld de,$C200 */
+			0x01, 0x00, 0x10,       /* ld bc,$1000 */
+			0xED, 0xB0,             /* ldir */
+			0xFB,                   /* ei */
+			0xC9                    /* ret */
+		};
+		memcpy(mem_ + 0x0600, kPlaybal3Cave, sizeof(kPlaybal3Cave));
+		mem_[0x04B5] = 0xC3;
+		mem_[0x04B6] = 0x00;
+		mem_[0x04B7] = 0x06; /* jp $0600 */
+		if (mem_[0xC200] == 0xF3)
+			mem_[0xC200] = 0x00;
+		if (mem_[0x1000] == 0xF3)
+			mem_[0x1000] = 0x00;
+		/* Track-0 stubs DI; the wait loop JR Z $0407 skips EI. */
+		if (mem_[0x042A] == 0x18 && mem_[0x042B] == 0xDB)
+			mem_[0x042B] = 0xDA; /* jr $0406 */
+		mem_[0x0038] = 0xC3;
+		mem_[0x0039] = 0xE0;
+		mem_[0x003A] = 0x00;
+		PlantPsgTrampoline(mem_);
+	}
+	/* sdgundam PSG: ISR IN A,($99); JP P skips $20DA (status=0) so
+	   $217D never advances after $2104 (seq=1 STOPS). Tick every IM1
+	   and skip the EI that sits before the ISR pops. */
+	if (initPc_ == 0x600 && mdataAddr_ == 0xCEEF
+		&& mem_[0x060A] == 0xDB && mem_[0x060B] == 0x02
+		&& mem_[0x0620] == 0x21 && mem_[0x0621] == 0xEF && mem_[0x0622] == 0xCE
+		&& mem_[0x06DE] == 0xB7 && mem_[0x06DF] == 0xF2) {
+		mem_[0x06DE] = 0xCD;
+		mem_[0x06DF] = 0xDA;
+		mem_[0x06E0] = 0x20;
+		mem_[0x06E1] = 0x18;
+		mem_[0x06E2] = 0x03;
+		mem_[0x06E3] = 0x00;
+		mem_[0x06E4] = 0x00;
+		mem_[0x06E5] = 0x00;
+	}
+
 	/* One-shot play after handlers exist (port2/3/4 mailboxes). */
 	playCmdPending_ = 8; /* a few edges; not sticky-forever */
 	/* daiva5 MSX.BIN: play CALL $049D does LDDR $B74F→$BF4F. A second
@@ -2188,6 +2732,38 @@ int CHardMsx::StartSongGeneric(unsigned titleCode)
 		playCmdPending_ = 1;
 	if (nukeninPack)
 		playCmdPending_ = 1;
+	if (initPc_ == 0x400 && mdataAddr_ == 0xC200 && mdataSize_ == 0x1000
+		&& top >= 1u && top <= 5u
+		&& mem_[0x04B5] == 0xC3 && mem_[0x04B6] == 0x00 && mem_[0x04B7] == 0x06)
+		playCmdPending_ = 1;
+	if (initPc_ == 0x600 && mdataAddr_ == 0xCEEF
+		&& mem_[0x060A] == 0xDB && mem_[0x060B] == 0x02
+		&& mem_[0x0620] == 0x21 && mem_[0x0621] == 0xEF && mem_[0x0622] == 0xCE)
+		playCmdPending_ = 1;
+	if (initPc_ == 0xD000 && mdataAddr_ == 0x0100
+		&& mem_[0xD013] == 0xDB && mem_[0xD014] == 0x03
+		&& mem_[0xD017] == 0x21 && mem_[0xD018] == 0x48 && mem_[0xD019] == 0xD0)
+		playCmdPending_ = 1;
+	/* dssp3 ran2/mzz: play LDIR OUT (3),file. A second edge IN A,(3)
+	   then indexes that file as a track. One copy + play is enough. */
+	if (compileCp65) {
+		playCmdPending_ = 1;
+		if (mem_[0x0440] == 0xD3 && mem_[0x0441] == 0x03)
+			mem_[0x0440] = mem_[0x0441] = 0x00;
+	}
+	if (sccEnable_ && initPc_ == 0x400
+		&& ((mem_[0x4009] == 0xC3 && mem_[0x400A] == 0x27 && mem_[0x400B] == 0x42)
+			|| (mem_[0x4003] == 0xC3 && mem_[0x4004] == 0xC4 && mem_[0x4005] == 0x41)))
+		playCmdPending_ = 1;
+	/* dante OPLL: each extra port2 edge CALL $D2E4 restores H.TIMI from
+	   the empty $D852 backup (init $D37B was skipped) then mutes via
+	   CALSLT $4119. One edge is enough to LDIR the song and CALL $D2DE. */
+	if (initPc_ == 0x400
+		&& mem_[0x0413] == 0xCD && mem_[0x0414] == 0xE4 && mem_[0x0415] == 0xD2
+		&& mem_[0x0416] == 0x76)
+		playCmdPending_ = 1;
+	if (initPc_ == 0x400 && IsLaplacePsgPatch(mem_))
+		playCmdPending_ = 0;
 	/* crimson2/3 PSG: C=5 play does LD HL,(mdata); ADD mdata; LD (mdata),HL
 	   in place. A second mailbox edge double-relocates and the song dies.
 	   OPLL (A11A/A11E=1 after init) uses CALSLT and can keep 8 edges. */
@@ -2233,16 +2809,23 @@ int CHardMsx::StartSongGeneric(unsigned titleCode)
 		ioport_[0x04] = (uint8_t)(sel4 & 0xff);
 		ioport_[0x05] = (uint8_t)(top & 0xff);
 	} else {
-		ioport_[0x03] = (uint8_t)((compilePtr || gokudoPack || nukeninPack
-			|| herzogPack || gulliverPack || mbspPack) ? sel3 : song);
+		ioport_[0x03] = (uint8_t)((compilePtr || compileCp65 || compileTbl4
+			|| fuunrokuPack || pup8Rp
+			|| gokudoPack || nukeninPack
+			|| herzogPack || gulliverPack || mbspPack || ds00Data
+			|| ankokuPack || gshogiPack) ? sel3 : song);
 		ioport_[0x04] = (uint8_t)((lowFilePack || fileInMid || classInMid
 			|| cmdInMid || sameLowCmd || mdataAddr_ == 0xCEB1
-			|| compilePtr || port4Se || port4Inc || ds00Data
+			|| compilePtr || compileCp65 || compileTbl4
+			|| fuunrokuPack || pup8Rp
+			|| port4Se || port4Inc || ds00Data
 			|| gokudoPack || nukeninPack || herzogPack || gulliverPack
-			|| mbspPack
+			|| mbspPack || gshogiPack
 			|| (initPc_ == 0x3000 && mdataAddr_ == 0x0300)) ? sel4 : song);
 	}
 	ioport_[0x07] = (chips_ & CHIP_FMPAC) ? 0x01 : 0x00;
+	if (f1douchuPsgJingle)
+		ioport_[0x07] = 0;
 	idle_ = 0;
 	return 1;
 }
@@ -2282,11 +2865,17 @@ int CHardMsx::LoadDs4(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode
 	playing_ = 0;
 	if (chipAy_) chipAy_->Reset();
 	CEmuHardMsxSetActive(this);
-	/* Warmup must ignore SKIP/idle — IPL polls port 2 until Play. */
+	/* $48F2 LDIR copies the SFX pointer table $7806→$E100 (BC=$059A,
+	   ~60k T-states).  hoot's 10000-cycle warmup is too short for that
+	   last copy; stop at the IPL poll ($0011) instead.  Port 2 idle is
+	   ignored — IPL sits there until Play. */
 	{
 		int guard = 0;
 		uint64_t cyc = 0;
-		while (cyc < 10000u && guard++ < 400000) {
+		while (cyc < 200000u && guard++ < 2000000) {
+			const uint16_t pc = cpu_->r.pc;
+			if (pc >= 0x0011u && pc <= 0x0018u)
+				break;
 			const int c = Ay_CpuRunOne(cpu_);
 			if (c <= 0) break;
 			cyc += (uint64_t)c;
@@ -2593,7 +3182,11 @@ int CHardMsx::StartSongDs4(unsigned titleCode)
 		ioport_[0x00] = 0x01;
 		ioport_[0x01] = (uint8_t)(titleCode & 0xff);
 	} else {
+		/* IPL only EI after BGM CALL $729D.  SFX is $C095 + ISR $732F;
+		   PulseVblankIrq needs iff1 or $0038 never runs. */
 		mem_[0xc095] = (uint8_t)(titleCode & 0x7fu);
+		cpu_->r.iff1 = 1;
+		cpu_->r.iff2 = 1;
 	}
 	CEmuHardMsxSetActive(this);
 	return 1;

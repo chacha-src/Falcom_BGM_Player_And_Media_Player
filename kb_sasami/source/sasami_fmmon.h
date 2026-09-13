@@ -70,6 +70,10 @@ enum {
 	SASAMI_FMMON_FLAG_ADPCM = 64, /* pcm[8]=OPNA ADPCM (PMD/FMP part K) */
 	SASAMI_FMMON_FLAG_PCM86 = 128 /* pcm[8]=PC-98 86PCM (PMD use_p86) */
 };
+/* rhythmPulse bit6: OPNA/OPNB ADPCM-B の同一 execute 再トリガ（リズムは bit0-5） */
+enum { SASAMI_FMMON_ADPCM_PULSE = 0x40 };
+/* FLAG_ADPCM 時、pcmNote[31] に ADPCM-B 累積ヒット（pcmCount 外なので行に出ない） */
+enum { SASAMI_FMMON_ADPCM_HIT_SLOT = 31 };
 enum {
 	SASAMI_FMMON_DEV_PSG = 1,
 	SASAMI_FMMON_DEV_OPLL = 2,

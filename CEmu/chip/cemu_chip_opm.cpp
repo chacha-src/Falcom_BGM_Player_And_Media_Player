@@ -1,4 +1,4 @@
-#include "StdAfx.h"
+﻿#include "StdAfx.h"
 #include "cemu_chip_opm.h"
 #include "cemu_chip.h"
 #include "../fmmon/fmmon_shadow.h"
@@ -20,6 +20,7 @@ public:
 		, keyOnCount_(0)
 		, timerUsec_(0)
 		, irqLatch_(0)
+		, rlZeroAsLr_(0)
 	{
 		memset(regs_, 0, sizeof(regs_));
 		opm_.Init(clockHz_, (uint)sampleRate_, false);
@@ -36,6 +37,7 @@ public:
 
 	/* Kept for X68k/X1 API compat — no register rewrite. */
 	void SetAudibleAssist(int /*enable*/) {}
+	void SetRlZeroAsLr(int enable) { rlZeroAsLr_ = enable ? 1 : 0; }
 
 	void Reset() override
 	{
@@ -61,7 +63,11 @@ public:
 			return;
 		}
 		const uint8_t reg = addrLatch_;
-		const uint8_t val = (uint8_t)(data & 0xff);
+		uint8_t val = (uint8_t)(data & 0xff);
+		/* fmgen Mix: pan==0 → ibuf[0] is never summed. Real YM2151 RL=0 is
+		   mute, but X1 KOEI/KSK MML often programs FB with RL bits clear. */
+		if (rlZeroAsLr_ && reg >= 0x20 && reg <= 0x27 && (val & 0xC0) == 0)
+			val = (uint8_t)(val | 0xC0);
 		opm_.SetReg(reg, val);
 		regs_[reg] = val;
 		writeCount_++;
@@ -170,6 +176,7 @@ private:
 	unsigned keyOnCount_;
 	__int64 timerUsec_;
 	int irqLatch_;
+	int rlZeroAsLr_;
 	uint8_t regs_[256];
 };
 
@@ -187,6 +194,12 @@ void CEmuChipYm2151SetAudibleAssist(CChip* c, int enable)
 {
 	if (!c) return;
 	static_cast<CChipYm2151*>(c)->SetAudibleAssist(enable);
+}
+
+void CEmuChipYm2151SetRlZeroAsLr(CChip* c, int enable)
+{
+	if (!c) return;
+	static_cast<CChipYm2151*>(c)->SetRlZeroAsLr(enable);
 }
 
 unsigned CEmuChipYm2151WriteCount(const CChip* c)

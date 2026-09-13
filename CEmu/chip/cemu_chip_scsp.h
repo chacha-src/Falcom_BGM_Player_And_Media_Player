@@ -21,6 +21,7 @@ unsigned CEmuChipScspReadReg(CChip* c, unsigned wordIndex);
 
 /* Song select arrives on the SCSP MIDI input, same as on real hardware. */
 void CEmuChipScspMidiIn(CChip* c, uint8_t data);
+int CEmuChipScspMidiPending();
 
 /* Pending IPL for the sound 68000 (timer A/B/C and MIDI), 0 when idle. */
 int CEmuChipScspIrqLevel();

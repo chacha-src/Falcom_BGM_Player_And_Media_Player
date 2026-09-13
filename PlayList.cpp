@@ -3061,7 +3061,9 @@ static void PlApplyCemuModeTag(CPlayList* pl, const char* tag)
 	if (!pl || !tag || !tag[0]) return;
 	extern COggDlg* og;
 	extern CString filen;
+	extern CString tagfile;
 	int touchPlaying = 0;
+	int touchRow = -1;
 	std::vector<int> selected;
 	int focus = pl->m_lc.GetNextItem(-1, LVNI_FOCUSED);
 	int top = pl->m_lc.GetTopIndex();
@@ -3088,22 +3090,40 @@ static void PlApplyCemuModeTag(CPlayList* pl, const char* tag)
 			else if (ge->platform[0] && ge->subtype[0])
 				_snwprintf_s(pl->pc[i].alb, _TRUNCATE, L"%hs (%hs)", ge->platform, ge->subtype);
 		}
-		if (filen.GetLength() > 0) {
+		/* A MIDI-mode CEmu title plays a temp stub .mid, so filen no longer names
+		   the zip while tagfile still does — without that second compare the
+		   MIDI→FM direction never noticed it was retagging the playing title. */
+		for (int pass = 0; pass < 2 && !touchPlaying; pass++) {
+			const CString& playing = pass ? tagfile : filen;
+			if (playing.GetLength() <= 0) continue;
 			wchar_t physSel[CEMU_ZIP_PATH], physPlay[CEMU_ZIP_PATH];
 			unsigned t1 = 1, t2 = 1;
 			CEmuParseVirtualPath(pl->pc[i].fol, physSel, (int)_countof(physSel), &t1);
-			CEmuParseVirtualPath(filen, physPlay, (int)_countof(physPlay), &t2);
+			CEmuParseVirtualPath(playing, physPlay, (int)_countof(physPlay), &t2);
 			(void)t1; (void)t2;
-			if (physSel[0] && physPlay[0] && _wcsicmp(physSel, physPlay) == 0)
+			if (physSel[0] && physPlay[0] && _wcsicmp(physSel, physPlay) == 0) {
 				touchPlaying = 1;
+				touchRow = i;
+			}
 		}
 		RECT r;
 		pl->m_lc.GetItemRect(i, &r, LVIR_BOUNDS);
 		pl->m_lc.RedrawWindow(&r);
 	}
 	PlMidNotifyMarkViews();
+	/* alb holds "platform (TAG)"; without a save the next launch reloads the
+	   old chip name next to the new mode. */
+	if (!selected.empty())
+		pl->Save();
 	if (touchPlaying) {
 		extern CString filen;
+		/* OnRestart rebuilds the decoder from mode/filen/ret2, and it only reaches
+		   its playlist lookup for mode -2/-3/foreign — a CEmu row sits at -1000,
+		   so without loading the row first the restart fell through to DirectShow
+		   and playback simply stopped. Every other "play this row" caller does
+		   the same Get() before asking for the restart. */
+		if (touchRow >= 0)
+			pl->Get(touchRow);
 		if (OggPrepareResumeBeforePlayback(filen) && og && ::IsWindow(og->GetSafeHwnd())) {
 			s_cemuModeRestoreOwner = pl;
 			s_cemuModeRestoreSel.swap(selected);

@@ -62,6 +62,8 @@ extern "C" {
 static unsigned CEmuAcOptionValue(const CEmuGameEntry* ge, const char* name, unsigned dflt);
 
 static mc6809__t* NamcoCpuRaw(struct mc6809* p) { return (mc6809__t*)p; }
+/* SYS2: post $7200 twin mailbox (assault/dirtfox/finallap/mirninja). */
+static uint8_t s_acSys2TwinMail = 0;
 
 CHardAc::CHardAc()
 	: board_(CEMU_AC_BOARD_UNKNOWN)
@@ -447,7 +449,9 @@ static int CEmuAcIsTaitoYm2203Sub(const char* sub)
 		|| _stricmp(sub, "volfied") == 0
 		|| _stricmp(sub, "kageki") == 0
 		|| _stricmp(sub, "darius") == 0
-		|| _stricmp(sub, "tokio") == 0) ? 1 : 0;
+		|| _stricmp(sub, "tokio") == 0
+		|| _stricmp(sub, "lsasquad") == 0
+		|| _stricmp(sub, "kage") == 0) ? 1 : 0;
 }
 
 /* Konami Z80 + YM2151 + K007232 (PCM stubbed; FM is the BGM path).
@@ -639,9 +643,9 @@ static const CEmuAcAliasEntry kAcAliases[] = {
 	{ "godzilla",   CEMU_AC_BOARD_TAITO_YM2610 },
 	{ "enmadaio",   CEMU_AC_BOARD_TAITO_YM2610 },
 	/* --- Z80 + AY + MSM5232 (flstory sound board) --- */
-	{ "lsasquad",   CEMU_AC_BOARD_FLSTORY },
+	{ "lsasquad",   CEMU_AC_BOARD_TAITO_OPM },
 	{ "msisaac",    CEMU_AC_BOARD_FLSTORY },
-	{ "kage",       CEMU_AC_BOARD_FLSTORY },
+	{ "kage",       CEMU_AC_BOARD_TAITO_OPM },
 	{ "equites",    CEMU_AC_BOARD_FLSTORY },
 	/* --- Z80 + multiple AY-3-8910 --- */
 	{ "chaknpop",   CEMU_AC_BOARD_TAITO_SJ },
@@ -674,7 +678,7 @@ static const CEmuAcAliasEntry kAcAliases[] = {
 	{ "argus",      CEMU_AC_BOARD_TERRACRE },
 	{ "valtric",    CEMU_AC_BOARD_TERRACRE },
 	{ "butasan",    CEMU_AC_BOARD_TERRACRE },
-	{ "cop01",      CEMU_AC_BOARD_TERRACRE },
+	{ "cop01",      CEMU_AC_BOARD_TAITO_SJ },
 	{ "terracra",   CEMU_AC_BOARD_TERRACRE },
 	{ "ginganin",   CEMU_AC_BOARD_TERRACRE },
 	/* --- Toaplan: Z80 + YM3812 --- */
@@ -744,7 +748,7 @@ static const CEmuAcAliasEntry kAcAliases[] = {
 	{ "eropnx2",    CEMU_AC_BOARD_OUTRUN },
 	/* --- Sega System 1/2-class Z80 + SN --- */
 	{ "angelkds",   CEMU_AC_BOARD_SEGA_SYS1 },
-	{ "calorie",    CEMU_AC_BOARD_SEGA_SYS1 },
+	{ "calorie",    CEMU_AC_BOARD_TAITO_SJ },
 	{ "perfrman",   CEMU_AC_BOARD_SEGA_SYS1 },
 	/* --- Banpresto on Sega System 16B / 24 --- */
 	{ "gundamex",   CEMU_AC_BOARD_SYS16B },
@@ -769,6 +773,87 @@ static CEmuAcBoard CEmuAcAliasBoard(const char* sub)
 		if (_stricmp(sub, kAcAliases[i].sub) == 0)
 			return kAcAliases[i].board;
 	return CEMU_AC_BOARD_UNKNOWN;
+}
+
+/* Sega Pengo: catalog plat=sega sub=pengo lists OPM+CUS30, which would
+   otherwise take NAMCO_SYS1 before the "pengo" WSG alias. Archive pengo2
+   is the 315-5010 World set. */
+static int CEmuAcIsPengo(const CEmuGameEntry* ge)
+{
+	if (!ge) return 0;
+	if (ge->subtype[0] && _stricmp(ge->subtype, "pengo") == 0)
+		return 1;
+	if (ge->archive && (_stricmp(ge->archive, "pengo") == 0
+		|| _stricmp(ge->archive, "pengo2") == 0))
+		return 1;
+	return 0;
+}
+
+/* MAME src/devices/machine/segacrpt_device.cpp sega 315-5010. */
+static const uint8_t kSega3155010Conv[32][4] = {
+	{ 0xa0,0x80,0xa8,0x88 }, { 0x28,0xa8,0x08,0x88 },
+	{ 0x28,0xa8,0x08,0x88 }, { 0xa0,0x80,0xa8,0x88 },
+	{ 0xa0,0x80,0x20,0x00 }, { 0xa0,0x80,0x20,0x00 },
+	{ 0x08,0x28,0x88,0xa8 }, { 0xa0,0x80,0xa8,0x88 },
+	{ 0x08,0x00,0x88,0x80 }, { 0x28,0xa8,0x08,0x88 },
+	{ 0xa0,0x80,0x20,0x00 }, { 0x08,0x00,0x88,0x80 },
+	{ 0xa0,0x80,0x20,0x00 }, { 0xa0,0x80,0x20,0x00 },
+	{ 0xa0,0x80,0x20,0x00 }, { 0x00,0x08,0x20,0x28 },
+	{ 0x88,0x80,0x08,0x00 }, { 0xa0,0x80,0x20,0x00 },
+	{ 0x88,0x80,0x08,0x00 }, { 0x00,0x08,0x20,0x28 },
+	{ 0x08,0x28,0x88,0xa8 }, { 0x08,0x28,0x88,0xa8 },
+	{ 0xa0,0x80,0xa8,0x88 }, { 0xa0,0x80,0x20,0x00 },
+	{ 0x08,0x00,0x88,0x80 }, { 0x88,0x80,0x08,0x00 },
+	{ 0x00,0x08,0x20,0x28 }, { 0x88,0x80,0x08,0x00 },
+	{ 0x08,0x28,0x88,0xa8 }, { 0x08,0x28,0x88,0xa8 },
+	{ 0x08,0x00,0x88,0x80 }, { 0xa0,0x80,0x20,0x00 }
+};
+
+static void CEmuAcSega3155010Decode(const uint8_t* encIn, uint8_t* opOut, uint8_t* dataOut, unsigned n)
+{
+	for (unsigned addr = 0; addr < n; addr++) {
+		const uint8_t src = encIn[addr];
+		const int row = (int)((addr & 1u) + (((addr >> 4) & 1u) << 1)
+			+ (((addr >> 8) & 1u) << 2) + (((addr >> 12) & 1u) << 3));
+		int col = (int)(((src >> 3) & 1) + (((src >> 5) & 1) << 1));
+		uint8_t xorval = 0;
+		if (src & 0x80) {
+			col = 3 - col;
+			xorval = 0xa8;
+		}
+		opOut[addr] = (uint8_t)((src & (uint8_t)~0xa8) | (uint8_t)(kSega3155010Conv[2 * row][col] ^ xorval));
+		dataOut[addr] = (uint8_t)((src & (uint8_t)~0xa8) | (uint8_t)(kSega3155010Conv[2 * row + 1][col] ^ xorval));
+	}
+}
+
+/* Pengo CPU 4K EPROMs: IC8/7/15/14/21/20/32/31 at 0000-7FFF. */
+static int CEmuAcPengoIcOff(const char* name)
+{
+	if (!name || !name[0]) return -1;
+	int ic = -1;
+	for (const char* p = name; *p; p++) {
+		if ((p[0] == 'i' || p[0] == 'I') && (p[1] == 'c' || p[1] == 'C')
+			&& p[2] >= '0' && p[2] <= '9') {
+			ic = atoi(p + 2);
+			break;
+		}
+	}
+	if (ic < 0) {
+		const char* dot = strrchr(name, '.');
+		if (dot && dot[1] >= '0' && dot[1] <= '9')
+			ic = atoi(dot + 1);
+	}
+	switch (ic) {
+	case 8: return 0x0000;
+	case 7: return 0x1000;
+	case 15: return 0x2000;
+	case 14: return 0x3000;
+	case 21: return 0x4000;
+	case 20: return 0x5000;
+	case 32: return 0x6000;
+	case 31: return 0x7000;
+	default: return -1;
+	}
 }
 
 /* Konami Z80 + YM2151 + K053260 sound boards under per-game driver names. */
@@ -1152,6 +1237,8 @@ CEmuAcBoard CEmuAcResolveBoard(const CEmuGameEntry* ge)
 			|| _stricmp(ge->subtype, "cus30") == 0))
 		|| (hasC30 && !hasOpm))
 		board = CEMU_AC_BOARD_NAMCO_WSG;
+	else if (CEmuAcIsPengo(ge))
+		board = CEMU_AC_BOARD_NAMCO_WSG;
 	else if (hasC30 && hasOpm)
 		board = CEMU_AC_BOARD_NAMCO_SYS1;
 	else if ((_stricmp(ge->platform, "namco") == 0
@@ -1388,6 +1475,8 @@ int CHardAc::Init(const CEmuGameEntry* ge, int sampleRate)
 	konamiPcm2Addr_ = 0u;
 	konamiSoundCtrl_ = 0;
 	sys16RomBoard_ = (board_ == CEMU_AC_BOARD_SYS16A) ? 0x5358u : 0x5797u;
+	if (board_ == CEMU_AC_BOARD_NAMCO_WSG && CEmuAcIsPengo(ge))
+		sys16RomBoard_ = 0x5047u;
 
 	if (board_ == CEMU_AC_BOARD_GNG) {
 		/* Commando (and lookalikes): RAM 4000, latch 6000, YM 8000 ? not GNG's
@@ -1517,14 +1606,34 @@ int CHardAc::Init(const CEmuGameEntry* ge, int sampleRate)
 		const int bublbobl = (!tokio && ge
 			&& ((ge->subtype[0] && _stricmp(ge->subtype, "bubblebobble") == 0)
 				|| (ge->archive[0] && _strnicmp(ge->archive, "bublbobl", 8) == 0))) ? 1 : 0;
-		taitoOpmMap_ = darius ? 1 : (kikikai ? 2 : (tokio ? 3 : (bublbobl ? 4 : 0)));
+		const int lsasquad = (ge && ((ge->subtype[0] && _stricmp(ge->subtype, "lsasquad") == 0)
+			|| (ge->archive[0] && _stricmp(ge->archive, "lsasquad") == 0))) ? 1 : 0;
+		const int lkage = (ge && ((ge->subtype[0] && _stricmp(ge->subtype, "kage") == 0)
+			|| (ge->archive[0] && _stricmp(ge->archive, "lkage") == 0))) ? 1 : 0;
+		/* Old TNZS board (tnzs_mcu / kageki / chukatai): YM2203 on the SUB Z80
+		   @B000, RAM D000, shared E000. Catalog archive is tnzsjo, not tnzsb. */
+		const int tnzsOld = (ge && (
+			(ge->archive[0] && (_stricmp(ge->archive, "tnzsjo") == 0
+				|| _stricmp(ge->archive, "tnzso") == 0
+				|| _stricmp(ge->archive, "kageki") == 0
+				|| _stricmp(ge->archive, "chukatai") == 0
+				|| _stricmp(ge->archive, "extrmatn") == 0))
+			|| (ge->subtype[0] && (_stricmp(ge->subtype, "kageki") == 0
+				|| _stricmp(ge->subtype, "chukatai") == 0
+				|| _stricmp(ge->subtype, "extrmatn") == 0)))) ? 1 : 0;
+		taitoOpmMap_ = darius ? 1 : (kikikai ? 2 : (tokio ? 3 : (bublbobl ? 4
+			: (lsasquad ? 5 : (lkage ? 6 : (tnzsOld ? 7 : 0))))));
+		/* 0 rastan/asuka OPM, 1 darius dual OPN, 2 kikikai, 3 tokio,
+		   4 bublbobl YM2203+YM3526, 5 lsasquad YM2203+AY,
+		   6 lkage dual YM2203 (bublbobl map, YM2203 @A000),
+		   7 old TNZS YM2203 @B000 (no PC060HA). */
 		/* MAME masterw: Z80B @ 24/4 = 6 MHz, YM2203 @ 24/8 = 3 MHz.
-		   darius: both Z80 and YM2203 at 8/2 = 4 MHz.
-		   tokio/bublbobl: Z80+YM @ 24/8 = 3 MHz (bublbobl also YM3526). */
-		cpuHz_ = (taitoOpmMap_ == 3 || taitoOpmMap_ == 4) ? 3000000
-			: (darius ? 4000000 : (ym2203 ? 6000000 : 4000000));
-		opmHz_ = (taitoOpmMap_ == 3 || taitoOpmMap_ == 4) ? 3000000
-			: (darius ? 4000000 : (ym2203 ? 3000000 : 4000000));
+		   darius/lkage: Z80 and YM2203 at 4 MHz.
+		   tokio/bublbobl/lsasquad: Z80+YM @ 24/8 = 3 MHz (bublbobl also YM3526). */
+		cpuHz_ = (taitoOpmMap_ == 3 || taitoOpmMap_ == 4 || taitoOpmMap_ == 5) ? 3000000
+			: ((darius || taitoOpmMap_ == 6) ? 4000000 : (ym2203 ? 6000000 : 4000000));
+		opmHz_ = (taitoOpmMap_ == 3 || taitoOpmMap_ == 4 || taitoOpmMap_ == 5) ? 3000000
+			: ((darius || taitoOpmMap_ == 6) ? 4000000 : (ym2203 ? 3000000 : 4000000));
 		if (ym2203) {
 			chip_ = CEmuChipYm2608Create((uint32_t)opmHz_, 0 /* OPN */, sampleRate_);
 			mainIsYm2203_ = 1;
@@ -1538,6 +1647,14 @@ int CHardAc::Init(const CEmuGameEntry* ge, int sampleRate)
 			} else if (taitoOpmMap_ == 4) {
 				chip2_ = CEmuChipYm3812Create((uint32_t)opmHz_, sampleRate_);
 				auxKind_ = 3; /* YM3526 via OPL2 core */
+			} else if (taitoOpmMap_ == 5) {
+				/* MAME lsasquad: YM2203 @A000 + AY/YM2149 @C000. */
+				chip2_ = CEmuChipAyCreate((uint32_t)opmHz_, sampleRate_);
+				auxKind_ = 2;
+			} else if (taitoOpmMap_ == 6) {
+				/* MAME lkage: dual YM2203 @9000 / @A000 (bublbobl map). */
+				chip2_ = CEmuChipYm2608Create((uint32_t)opmHz_, 0 /* OPN */, sampleRate_);
+				auxKind_ = 0;
 			} else {
 				chip2_ = NULL;
 			}
@@ -1547,11 +1664,15 @@ int CHardAc::Init(const CEmuGameEntry* ge, int sampleRate)
 		}
 		bankBase_ = 0x4000u;
 		bankSize_ = 0x4000u;
-		if (kikikai || taitoOpmMap_ == 3 || taitoOpmMap_ == 4) {
+		if (kikikai || taitoOpmMap_ == 3 || taitoOpmMap_ == 4
+			|| taitoOpmMap_ == 5 || taitoOpmMap_ == 6 || taitoOpmMap_ == 7) {
 			/* Linear 32K at 0000-7FFF. SetBank(0) would blit ROM[0:4000]
-			   over 4000-7FFF and the boot checksum hangs at 007C. */
+			   over 4000-7FFF and the boot checksum hangs at 007C.
+			   Map 7 banks 8K at 8000 from ROM+0x8000; skip the 16K blit. */
 			bankBase_ = 0;
 			bankSize_ = 0x8000u;
+			if (taitoOpmMap_ == 7)
+				bankLoaded_ = 1;
 		}
 	} else if (board_ == CEMU_AC_BOARD_SEGA_SYS1) {
 		/* MAME sega_system1: SOUND_CLOCK 8 MHz; Z80 /2, SN1 /4, SN2 /2. */
@@ -1561,13 +1682,36 @@ int CHardAc::Init(const CEmuGameEntry* ge, int sampleRate)
 		chip2_ = CEmuChipSn76489Create(4000000u, sampleRate_);
 		auxKind_ = 1;
 	} else if (board_ == CEMU_AC_BOARD_TAITO_SJ) {
-		/* MAME taito_taitosj: Z80 12/4 = 3 MHz, AY-3-8910 12/8 = 1.5 MHz. */
-		cpuHz_ = 3000000;
-		opmHz_ = 1500000;
-		chip_ = CEmuChipAyCreate(1500000u, sampleRate_);
-		chip2_ = CEmuChipAyCreate(1500000u, sampleRate_);
-		chip3_ = CEmuChipAyCreate(1500000u, sampleRate_);
+		/* MAME taito_taitosj: Z80 12/4 = 3 MHz, AY-3-8910 12/8 = 1.5 MHz.
+		   MAME cop01: Z80 20/8 = 2.5 MHz, triple AY I/O 20/16 = 1.25 MHz. */
+		const int cop01 = (ge && ((ge->subtype[0] && _stricmp(ge->subtype, "cop01") == 0)
+			|| (ge->archive[0] && _stricmp(ge->archive, "cop01") == 0))) ? 1 : 0;
+		const int magmax = (ge && ((ge->subtype[0] && _stricmp(ge->subtype, "magmax") == 0)
+			|| (ge->archive[0] && _stricmp(ge->archive, "magmax") == 0))) ? 1 : 0;
+		const int bombjack = (ge && ((ge->subtype[0] && _stricmp(ge->subtype, "bombjack") == 0)
+			|| (ge->archive[0] && _stricmp(ge->archive, "bombjack") == 0))) ? 1 : 0;
+		const int calorie = (ge && ((ge->subtype[0] && _stricmp(ge->subtype, "calorie") == 0)
+			|| (ge->archive[0] && _stricmp(ge->archive, "calorie") == 0))) ? 1 : 0;
+		const int solomon = (ge && ((ge->subtype[0] && _stricmp(ge->subtype, "solomon") == 0)
+			|| (ge->archive[0] && _stricmp(ge->archive, "solomon") == 0))) ? 1 : 0;
+		const int halleys = (ge && ((ge->subtype[0] && _stricmp(ge->subtype, "halleysc") == 0)
+			|| (ge->archive[0] && (_stricmp(ge->archive, "halleys") == 0
+				|| _stricmp(ge->archive, "benberob") == 0)))) ? 1 : 0;
+		const int pbaction = (ge && ((ge->subtype[0] && _stricmp(ge->subtype, "pbaction") == 0)
+			|| (ge->archive[0] && _stricmp(ge->archive, "pbaction") == 0))) ? 1 : 0;
+		const int chaknpop = (ge && ((ge->subtype[0] && _stricmp(ge->subtype, "chaknpop") == 0)
+			|| (ge->archive[0] && _stricmp(ge->archive, "chaknpop") == 0))) ? 1 : 0;
+		vsIoKind_ = cop01 ? 4 : (magmax ? 5 : (bombjack ? 6 : (calorie ? 7 : (solomon ? 8 : (halleys ? 9 : (pbaction ? 10 : (chaknpop ? 11 : 0)))))));
+		cpuHz_ = (cop01 || magmax) ? 2500000 : (solomon ? 3072000 : 3000000);
+		opmHz_ = (cop01 || magmax) ? 1250000 : 1500000;
+		chip_ = CEmuChipAyCreate((uint32_t)opmHz_, sampleRate_);
+		chip2_ = CEmuChipAyCreate((uint32_t)opmHz_, sampleRate_);
+		chip3_ = CEmuChipAyCreate((uint32_t)opmHz_, sampleRate_);
 		auxKind_ = 2;
+		if (cop01 || magmax || bombjack || calorie || solomon || halleys || pbaction || chaknpop) {
+			bankBase_ = 0;
+			bankSize_ = (magmax || bombjack || calorie || solomon || halleys || pbaction || chaknpop) ? 0x4000u : 0x8000u;
+		}
 	} else if (board_ == CEMU_AC_BOARD_KONAMI_SCRAMBLE) {
 		/* MAME galaxian/scramble: Z80+AY @ 14318000/8 ? 1.789772 MHz.
 		   Do not enable AY unmute-assist ? it forces a constant tone that
@@ -1825,6 +1969,9 @@ int CHardAc::Init(const CEmuGameEntry* ge, int sampleRate)
 		cpuHz_ = 1536000;
 		opmHz_ = 3579545;
 		chip_ = CEmuChipYm2151Create((uint32_t)opmHz_, sampleRate_);
+		/* CUS60 847A mute writes RL=$00; roishtar KeyOns with TL live
+		   but RL still 0 (fmgen silent). Treat RL=0 as L+R. */
+		CEmuChipYm2151SetRlZeroAsLr(chip_, 1);
 		chip2_ = NULL;
 		pcm_ = CEmuChipC30Create(24000u, sampleRate_, CEMU_C30_STEREO);
 		pcmKind_ = 9;
@@ -2111,15 +2258,34 @@ int CHardAc::Init(const CEmuGameEntry* ge, int sampleRate)
 		chip2_ = NULL;
 	} else if (board_ == CEMU_AC_BOARD_FLSTORY) {
 		/* MAME flstory: Z80 @ 4 MHz, YM2149 @ 2 MHz mapped C800.
-		   MSM5232 @ CA00 is the main melody; AY handles noise/FX/DAC traffic. */
+		   MSM5232 @ CA00 is the main melody; AY handles noise/FX/DAC traffic.
+		   MAME msisaac: dual AY @8000/@8002 + MSM @8010, latch C000, NMI C001/C002.
+		   Packed as taitoOpmMap_=1 on this board (not TAITO_OPM). */
 		cpuHz_ = 4000000;
 		opmHz_ = 2000000;
 		chip_ = CEmuChipAyCreate(2000000u, sampleRate_);
 		chip2_ = CEmuChipMsm5232Create(2000000u, sampleRate_);
 		pcm_ = NULL;
 		pcmKind_ = 0;
-		auxKind_ = 4; /* MSM5232 destroy */
+		auxKind_ = 4; /* MSM5232 destroy for chip2 */
 		flstoryNmiEn_ = 0;
+		if (ge && ((ge->subtype[0] && _stricmp(ge->subtype, "msisaac") == 0)
+			|| (ge->archive[0] && _stricmp(ge->archive, "msisaac") == 0))) {
+			taitoOpmMap_ = 1;
+			chip3_ = CEmuChipAyCreate(2000000u, sampleRate_);
+			bankBase_ = 0;
+			bankSize_ = 0x4000u;
+		} else if (ge && ((ge->subtype[0] && _stricmp(ge->subtype, "nycaptor") == 0)
+			|| (ge->archive[0] && (_stricmp(ge->archive, "nycaptor") == 0
+				|| _stricmp(ge->archive, "cyclshtg") == 0
+				|| _stricmp(ge->archive, "wyvernf0") == 0)))) {
+			/* MAME nycaptor: dual AY @C800/@C802, MSM @C900, latch D000,
+			   NMI D200/D400. Do not use taitoOpmMap_=2 (kikikai 9FFF poke). */
+			taitoOpmMap_ = 3;
+			chip3_ = CEmuChipAyCreate(2000000u, sampleRate_);
+			bankBase_ = 0;
+			bankSize_ = 0xc000u;
+		}
 	} else if (board_ == CEMU_AC_BOARD_TERRACRE) {
 		/* terracre: YM3526 @4 MHz, RAM C000, latch I/O 04/06.
 		   armedf/terraf: YM3812 @4 MHz, RAM F800-FFFF, same I/O ports.
@@ -2318,7 +2484,9 @@ void CHardAc::Shutdown()
 		pcm_ = NULL;
 	}
 	if (chip3_) {
-		CEmuAcDestroyAuxChip(this, chip3_);
+		/* chip3 is always AY (SJ #3 / msisaac AY2). Do not use auxKind_
+		   (FLSTORY msisaac keeps auxKind_=4 for MSM chip2). */
+		CEmuChipAyDestroy(chip3_);
 		chip3_ = NULL;
 	}
 	if (chip2_) {
@@ -2567,8 +2735,17 @@ void CHardAc::SetBank(int bank)
 	const unsigned src = (unsigned)bank_ * bankSize_;
 	unsigned n = bankSize_;
 	if (src + n > soundRomSize_) n = soundRomSize_ - src;
+	/* Psikyo gunbird: RAM 8000-81FF overlays the 32K bank window (MAME
+	   gunbird_sound_map). Restoring it keeps the sequencer BSS across
+	   OUT (00) bank writes; blit-over turned every song into the same drone. */
+	uint8_t ramKeep[0x200];
+	const int keepGunbirdRam = (board_ == CEMU_AC_BOARD_VSYSTEM && vsIoKind_ == 3);
+	if (keepGunbirdRam)
+		memcpy(ramKeep, mem_ + 0x8000, sizeof(ramKeep));
 	memset(mem_ + bankBase_, 0xff, bankSize_);
 	if (n) memcpy(mem_ + bankBase_, soundRom_ + src, n);
+	if (keepGunbirdRam)
+		memcpy(mem_ + 0x8000, ramKeep, sizeof(ramKeep));
 }
 
 void CHardAc::M72PumpSample()
@@ -3290,6 +3467,11 @@ void CHardAc::SetSoundCommand(uint8_t cmd)
 		} else {
 			namcoTriRam_[mail + 1u] = (uint8_t)((w & 0x7fu) | 0x60u);
 		}
+		if (board_ == CEMU_AC_BOARD_NAMCO_SYS2 && s_acSys2TwinMail
+			&& mail <= 0x1feu && (mail + 0x100u + 1u) < 0x800u) {
+			namcoTriRam_[mail + 0x100u] = namcoTriRam_[mail];
+			namcoTriRam_[mail + 0x101u] = namcoTriRam_[mail + 1u];
+		}
 		/* Also seed Sys2 work-RAM mirror some titles poll after DPRAM copy. */
 		if (board_ == CEMU_AC_BOARD_NAMCO_SYS2) {
 			namcoWorkRam_[0x1016 & 0x1fff] = (uint8_t)(w & 0xffu);
@@ -3319,35 +3501,53 @@ void CHardAc::SetSoundCommand(uint8_t cmd)
 		   $8Axx on Dig Dug/Galaga — those bytes are digdug work/SE state. */
 		soundCmd_ = cmd;
 		soundCmdPending_ = 1;
-		if (!cmd) cmd = 1;
+		if (sys16RomBoard_ == 0x5047u) {
+			/* Pengo: 1C4B indexes the $7000 pointer table with (IX+1).
+			   Catalog 0x28 (main BGM) is past the 8-word header — slot 8
+			   is $7800. Jingles 01/02/04 stay in 1..4. */
+			if (chip_)
+				CEmuChipC30SetEnable(chip_, 1);
+			mem_[0x9040] = 1;
+			uint8_t idx = cmd;
+			if (cmd == 0x08 || cmd == 0x18 || cmd == 0x28)
+				idx = 8;
+			else if (cmd > 9)
+				idx = (uint8_t)((cmd % 6u) + 1u);
+			static const uint16_t kVoices[] = { 0x8c60, 0x8c70, 0x8c80 };
+			for (unsigned i = 0; i < 3; i++) {
+				const uint16_t b = kVoices[i];
+				mem_[b] = cmd ? 1 : 0;
+				mem_[(uint16_t)(b + 1)] = cmd ? idx : 0;
+			}
+			wsgNmiEnable_ = 0;
+			return;
+		}
 		if (wsgMappy_) {
-			/* MAME mappy/superpac: main CPU posts song id into namco_15xx
-			   shared RAM (amap $040-$3FF). Slot differs by title — seed the
-			   common poll addresses used across the Super Pac / Mappy set. */
-			/* mappy IRQ copies $C0→$03; do not stuff $80 there (vblank).
-			   digdug2/todruaga/toypop/motos IRQ: LDU #$80 / LDA ,U+ then
-			   CLR $80-$9F. One edge only — holding/re-posting $80 recopies
-			   the song id onto 15XX voice regs and pitch-bends the default
-			   BGM (fake uniqueness). gaplus/liblrabl LDX #$80 is a different
-			   copy; those stay on the $40 poll slots. */
-			static const uint16_t kSlots[] = {
-				0x40, 0x41, 0x50, 0x55, 0x60, 0x61
-			};
+			/* MAME 15xx shared RAM $40+n is a flag, not a song-number byte.
+			   Sound CPUs walk $40,$41,$42… (mappy/gaplus unrolled; digdug2
+			   LDA ,X from #$40) and JSR play with index n. Writing the
+			   catalog id into $40 left handshake $11/"GO" asserting song 0
+			   for every title (SAMESONG). Do not plant $80: digdug2 IRQ
+			   copies that bounce buffer onto 15XX voice regs then CLRs it. */
 			CEmuChipC30SetEnable(chip_, 1);
 			if (chip_) {
-				if (WsgMail80()) {
-					chip_->Write(0x80, cmd);
-					chip_->Write(0x81, 0);
-					chip_->Write(0x82, 0);
-					chip_->Write(0x83, 0);
+				const unsigned slot = 0x40u + ((unsigned)cmd & 0x3fu);
+				if (!wsgNmiEnable_) {
+					for (unsigned a = 0x40u; a < 0x80u; a++)
+						chip_->Write(a, 0);
 				}
-				for (unsigned i = 0; i < sizeof(kSlots) / sizeof(kSlots[0]); i++)
-					chip_->Write(kSlots[i], cmd);
+				chip_->Write(slot, 1);
 			}
 			wsgNmiEnable_ = 1;
 			namcoIrqAssert_ = 1;
-			if (namcoM6809_ && !NamcoCpuRaw(namcoM6809_)->cc.i)
-				NamcoCpuRaw(namcoM6809_)->irq = true;
+			if (namcoM6809_ && !NamcoCpuRaw(namcoM6809_)->cc.i) {
+				const uint16_t irqv = (uint16_t)(((unsigned)NamcoM6809Read8(0xfff8) << 8)
+					| NamcoM6809Read8(0xfff9));
+				const uint16_t rstv = (uint16_t)(((unsigned)NamcoM6809Read8(0xfffe) << 8)
+					| NamcoM6809Read8(0xffff));
+				if (irqv != rstv)
+					NamcoCpuRaw(namcoM6809_)->irq = true;
+			}
 			return;
 		}
 		if (!cmd) cmd = 1;
@@ -3405,7 +3605,8 @@ void CHardAc::SetSoundCommand(uint8_t cmd)
 			irqPulse_ = 1;
 			return;
 		}
-		if (taitoOpmMap_ == 3 || taitoOpmMap_ == 4) {
+		if (taitoOpmMap_ == 3 || taitoOpmMap_ == 4 || taitoOpmMap_ == 5
+			|| taitoOpmMap_ == 6) {
 			/* tokio/bublbobl: latch + NMI gated by A800/B001 enable. */
 			soundCmd_ = cmd;
 			soundCmdPending_ = 1;
@@ -3413,10 +3614,92 @@ void CHardAc::SetSoundCommand(uint8_t cmd)
 				irqPulse_ = 1;
 			return;
 		}
+		if (taitoOpmMap_ == 7) {
+			/* Old TNZS: no sound latch. Sub CPU polls shared RAM.
+			   tnzsjo EF10 (FF=idle), chukatai 16-byte queue E005, kageki E03E. */
+			soundCmd_ = cmd;
+			soundCmdPending_ = 1;
+			if (mem_[3] == 0x31 && mem_[5] == 0xd7) {
+				/* kageki: DI;IM1;LD SP,D700 */
+				mem_[0xe03e] = cmd;
+			} else if (mem_[3] == 0x21 && mem_[4] == 0x00 && mem_[5] == 0xd0) {
+				/* chukatai: DI;IM1;LD HL,D000 */
+				mem_[0xe005] = cmd;
+			} else {
+				mem_[0xef10] = cmd;
+				mem_[0xef28] = 0x80; /* 024B JP P skips the voice walk if signed+ */
+				memset(mem_ + 0xe600, 0, 0x200); /* 044A IX=E603 objects */
+				/* Mirror into the DF80 ring 06CD fills, in case 008F already
+				   drained EF10 during the DI idle. */
+				{
+					uint8_t rd = (uint8_t)(mem_[0xdf81] & 0x0f);
+					uint8_t wr = (uint8_t)((mem_[0xdf80] + 1) & 0x0f);
+					if (wr == rd)
+						rd = (uint8_t)((rd + 1) & 0x0f);
+					mem_[0xdf80] = wr;
+					mem_[0xdf81] = rd;
+					mem_[0xdf82 + wr] = cmd;
+				}
+			}
+			irqPulse_ = 1;
+			return;
+		}
 		SytMasterWriteCommand(cmd);
 		return;
 	}
 	if (board_ == CEMU_AC_BOARD_TAITO_SJ) {
+		if (vsIoKind_ == 4 || vsIoKind_ == 5) {
+			/* cop01/magmax: latch pending → IRQ0, not SJ NMI. */
+			soundCmd_ = cmd;
+			soundCmdPending_ = 1;
+			irqPulse_ = 1;
+			return;
+		}
+		if (vsIoKind_ == 6 || vsIoKind_ == 7) {
+			/* bombjack/calorie: latch polled in memory; vblank NMI/IRQ0. */
+			soundCmd_ = cmd;
+			soundCmdPending_ = 1;
+			return;
+		}
+		if (vsIoKind_ == 8) {
+			/* solomon: latch @8000, NMI on write, 120 Hz IRQ0 sequencer. */
+			soundCmd_ = cmd;
+			soundCmdPending_ = 1;
+			irqPulse_ = 1;
+			return;
+		}
+		if (vsIoKind_ == 10) {
+			/* pbaction: latch @8000, CTC TRG0 pulse → IM2 vec 0 (not NMI). */
+			soundCmd_ = cmd;
+			soundCmdPending_ = 1;
+			irqPulse_ = 1;
+			return;
+		}
+		if (vsIoKind_ == 11) {
+			/* chaknpop: no latch. RST 20 queues via A000 into ring 8590.
+			   Boot's rst $20 / A=0x50 is a >=$50 mute that sets 85A0 bit7;
+			   A0CA then takes the script path for the next command. Wipe
+			   that flag and both AY voice blocks, then queue one BGM. */
+			soundCmd_ = cmd;
+			soundCmdPending_ = 1;
+			memset(mem_ + 0x8500, 0, 0xA8);
+			{
+				uint8_t a = 1;
+				mem_[0x85A5] = a;
+				mem_[0x85A6] = 0;
+				mem_[0x8590u + a] = cmd;
+				mem_[0x85A8] = 0xff;
+			}
+			return;
+		}
+		if (vsIoKind_ == 9) {
+			/* halleys: latch @5000, NMI on write (AY I/O is not the SJ NMI mask). */
+			soundCmd_ = cmd;
+			soundCmdPending_ = 1;
+			sjLatchFlag_ = 1;
+			irqPulse_ = 1;
+			return;
+		}
 		soundCmd_ = cmd;
 		soundCmdPending_ = 1;
 		sjLatchFlag_ = 1;
@@ -3644,6 +3927,20 @@ void CHardAc::SetSoundCommand(uint8_t cmd)
 			CEmuChipK053260MainWrite(pcm, 0, cmd);
 			CEmuChipK053260MainWrite(pcm, 1, 0x00);
 		}
+		irqPulse_ = 1;
+		return;
+	}
+	if (board_ == CEMU_AC_BOARD_VSYSTEM && vsIoKind_ == 3) {
+		/* Psikyo gunbird NMI copies IN A,(08) into a 16-byte ring at $8006
+		   (index $8002). The main loop drains that ring in CALL $0633;
+		   BGM $20-$3F then jumps $1FAC. Plant the byte here so a missed
+		   NMI edge (Timer-A ISR) cannot leave every title on the boot $40
+		   SFX drone. */
+		soundCmd_ = cmd;
+		soundCmdPending_ = 1;
+		const unsigned idx = (unsigned)mem_[0x8002] & 0x0fu;
+		mem_[0x8006u + idx] = cmd;
+		mem_[0x8002] = (uint8_t)((idx + 1u) & 0x0fu);
 		irqPulse_ = 1;
 		return;
 	}
@@ -3950,6 +4247,23 @@ uint8_t CHardAc::PortIn(uint16_t port)
 			return chip2_ ? chip2_->ReadData() : 0xff;
 		}
 		return 0xff;
+	case CEMU_AC_BOARD_TAITO_SJ:
+		if ((vsIoKind_ == 4 || vsIoKind_ == 5) && p == 0x06) {
+			/* MAME cop01/magmax sound_command_r: (latch << 1) | timer Q. */
+			sjSemaphore2_ ^= 1;
+			return (uint8_t)((soundCmd_ << 1) | (sjSemaphore2_ & 1u));
+		}
+		if (vsIoKind_ == 6 || vsIoKind_ == 7) {
+			const uint8_t q = (uint8_t)(p & (uint8_t)~0x6e);
+			CChip* ay = NULL;
+			if (q <= 0x01) ay = chip_;
+			else if (q == 0x10 || q == 0x11) ay = chip2_;
+			else if (q == 0x80 || q == 0x81) ay = chip3_;
+			if (ay && (q & 1))
+				return ay->ReadData();
+			return 0xff;
+		}
+		return 0xff;
 	case CEMU_AC_BOARD_NAMCO_C352:
 		return chip_ ? chip_->ReadStatus() : 0x00;
 	default:
@@ -3962,6 +4276,48 @@ void CHardAc::PortOut(uint16_t port, uint8_t data)
 	const uint8_t p = (uint8_t)(port & 0xff);
 	if (!chip_) return;
 	switch (board_) {
+	case CEMU_AC_BOARD_TAITO_SJ:
+		if (vsIoKind_ == 8 || vsIoKind_ == 10) {
+			/* MAME solomon / pbaction: AY1 10-11, AY2 20-21, AY3 30-31.
+			   pbaction also has CTC @00-03; those writes are ignored here
+			   (Tick synthesizes TRG0 + the 126 Hz timer from firmware). */
+			CChip* ay = NULL;
+			if (p == 0x10 || p == 0x11) ay = chip_;
+			else if (p == 0x20 || p == 0x21) ay = chip2_;
+			else if (p == 0x30 || p == 0x31) ay = chip3_;
+			if (ay) {
+				ay->Write(p & 1, data);
+				if (p & 1) opmWrites_++;
+			}
+			return;
+		}
+		if (vsIoKind_ == 6 || vsIoKind_ == 7) {
+			/* MAME bombjack/calorie audio_portmap: AY0 00-01, AY1 10-11, AY2 80-81,
+			   mirror 0x6E. */
+			const uint8_t q = (uint8_t)(p & (uint8_t)~0x6e);
+			CChip* ay = NULL;
+			if (q <= 0x01) ay = chip_;
+			else if (q == 0x10 || q == 0x11) ay = chip2_;
+			else if (q == 0x80 || q == 0x81) ay = chip3_;
+			if (ay) {
+				ay->Write(q & 1, data);
+				if (q & 1) opmWrites_++;
+			}
+			return;
+		}
+		if (vsIoKind_ != 4 && vsIoKind_ != 5)
+			return;
+		{
+			CChip* ay = NULL;
+			if (p <= 0x01) ay = chip_;
+			else if (p <= 0x03) ay = chip2_;
+			else if (p <= 0x05) ay = chip3_;
+			if (ay) {
+				ay->Write(p & 1, data);
+				if (p & 1) opmWrites_++;
+			}
+		}
+		return;
 	case CEMU_AC_BOARD_RAIZING:
 		RaizingPortOut(p, data);
 		return;
@@ -4111,9 +4467,18 @@ void CHardAc::PortOut(uint16_t port, uint8_t data)
 				else if (p == 0x00 || p == 0x18) SetBank(data & 0x03);
 				else if (p == 0x0c || p == 0x04) ClearSoundCmdPending();
 			} else if (vsIoKind_ == 3) {
+				/* MAME gunbird_sound_io_map: bank @00 is (data>>4)&3, YM @04-07,
+				   latch @08, ack @0c. Do not fall through to the aerofgt
+				   cross-wire: that treated bank writes as YM address and ACK
+				   as SetBank(cmd), which pinned every title on bank 0. */
 				if (p >= 0x04 && p <= 0x07) ymOff = (int)(p - 0x04);
-				else if (p == 0x00) SetBank(data & 0x0f);
-				else if (p == 0x0c) ClearSoundCmdPending();
+				else if (p == 0x00) {
+					SetBank((data >> 4) & 0x03);
+					break;
+				} else if (p == 0x0c) {
+					ClearSoundCmdPending();
+					break;
+				}
 			} else {
 				if (p <= 0x03) ymOff = (int)(p & 3);
 				else if (p == 0x04) SetBank(data & 0x03);
@@ -4721,9 +5086,9 @@ void CHardAc::MemWrite(uint16_t addr, uint8_t data)
 			}
 			return;
 		}
-		if (taitoOpmMap_ == 4) {
-			/* MAME bublbobl sound_map: RAM 8000-8FFF, YM2203 9000, YM3526 A000,
-			   latch B000, NMI en B001, NMI dis B002. */
+		if (taitoOpmMap_ == 4 || taitoOpmMap_ == 6) {
+			/* MAME bublbobl / lkage sound_map: RAM 8000, YM @9000, chip2 @A000,
+			   latch B000, NMI en B001, NMI dis B002. lkage chip2 is YM2203. */
 			if (addr >= 0x8000 && addr <= 0x8fff) {
 				mem_[addr] = data;
 				return;
@@ -4754,6 +5119,75 @@ void CHardAc::MemWrite(uint16_t addr, uint8_t data)
 			}
 			if ((addr & ~0x0ffcu) == 0xb002) {
 				flstoryNmiEn_ = 0;
+				return;
+			}
+			return;
+		}
+		if (taitoOpmMap_ == 5) {
+			/* MAME lsasquad_sound_map: RAM 8000-87FF, YM2203 A000, AY C000,
+			   latch D000, NMI dis D400, NMI en D800. */
+			if (addr >= 0x8000 && addr <= 0x87ff) {
+				mem_[addr] = data;
+				return;
+			}
+			if (addr == 0xa000 || addr == 0xa001) {
+				if (chip_) {
+					chip_->Write(addr & 1, data);
+					if (addr & 1)
+						opmWrites_++;
+					else
+						ymAddr_ = data;
+				}
+				return;
+			}
+			if (addr == 0xc000 || addr == 0xc001) {
+				if (chip2_) {
+					chip2_->Write(addr & 1, data);
+					if (addr & 1)
+						opmWrites_++;
+				}
+				return;
+			}
+			if (addr == 0xd400) {
+				flstoryNmiEn_ = 0;
+				return;
+			}
+			if (addr == 0xd800) {
+				flstoryNmiEn_ = 1;
+				if (soundCmdPending_)
+					irqPulse_ = 1;
+				return;
+			}
+			return;
+		}
+		if (taitoOpmMap_ == 7) {
+			/* MAME tnzs base_sub_map: ROM 0000-7FFF, bank 8000-9FFF via A000,
+			   YM2203 B000-B001, MCU/IN C000, RAM D000, shared E000. */
+			if (addr == 0xa000) {
+				if (soundRom_ && soundRomSize_ > 0x8000u) {
+					const unsigned src = 0x8000u + (unsigned)(data & 3) * 0x2000u;
+					unsigned n = 0x2000u;
+					if (src < soundRomSize_) {
+						if (src + n > soundRomSize_)
+							n = soundRomSize_ - src;
+						memset(mem_ + 0x8000, 0xff, 0x2000);
+						memcpy(mem_ + 0x8000, soundRom_ + src, n);
+					}
+				}
+				return;
+			}
+			if (addr == 0xb000 || addr == 0xb001) {
+				if (chip_) {
+					chip_->Write(addr & 1, data);
+					if (addr & 1)
+						opmWrites_++;
+					else
+						ymAddr_ = data;
+				}
+				return;
+			}
+			if (addr >= 0xd000 && addr <= 0xefff) {
+				mem_[addr] = data;
 				return;
 			}
 			return;
@@ -4861,7 +5295,72 @@ void CHardAc::MemWrite(uint16_t addr, uint8_t data)
 	/* MAME taito_taitosj audio map: 0000-3FFF ROM, 4000-43FF RAM,
 	   4800/4802/4804 AY address+data, 5000/5001 soundlatch semaphores. */
 	if (board_ == CEMU_AC_BOARD_TAITO_SJ) {
-		if (addr >= 0x4000 && addr <= 0x43ff) {
+		if (vsIoKind_ == 4) {
+			if (addr >= 0xc000 && addr <= 0xc7ff) {
+				mem_[addr] = data;
+				return;
+			}
+			if (addr == 0x8000) {
+				soundCmdPending_ = 0;
+				irqPulse_ = 0;
+				return;
+			}
+			return;
+		}
+		if (vsIoKind_ == 5) {
+			/* MAME magmax: A15 open, ack @4000 mirror 1FFF, RAM 6000-67FF. */
+			addr = (uint16_t)(addr & 0x7fffu);
+			if (addr >= 0x6000) {
+				mem_[0x6000u + (addr & 0x07ffu)] = data;
+				return;
+			}
+			if (addr >= 0x4000) {
+				soundCmdPending_ = 0;
+				irqPulse_ = 0;
+				return;
+			}
+			return;
+		}
+		if (vsIoKind_ == 6) {
+			/* MAME bombjack: A15 open, RAM 4000-47FF, latch read @6000. */
+			addr = (uint16_t)(addr & 0x7fffu);
+			if (addr >= 0x4000 && addr < 0x6000)
+				mem_[0x4000u + (addr & 0x07ffu)] = data;
+			return;
+		}
+		if (vsIoKind_ == 7) {
+			/* MAME calorie: ROM 0000-3FFF mirror 4000, RAM 8000-87FF, latch C000. */
+			if (addr >= 0x8000 && addr < 0xc000)
+				mem_[0x8000u + (addr & 0x07ffu)] = data;
+			return;
+		}
+		if (vsIoKind_ == 8 || vsIoKind_ == 10) {
+			/* MAME solomon / pbaction: RAM 4000-47FF, latch @8000, ack FFFF. */
+			if (addr >= 0x4000 && addr < 0x4800)
+				mem_[addr] = data;
+			return;
+		}
+		if (vsIoKind_ == 11) {
+			/* MAME chaknpop: RAM 8000-87FF, AY 8804-8807, MCU 8800. */
+			if (addr >= 0x8000 && addr < 0x8800)
+				mem_[addr] = data;
+			else if (addr == 0x8804 && chip_)
+				chip_->Write(0, data);
+			else if (addr == 0x8805 && chip_) {
+				chip_->Write(1, data);
+				opmWrites_++;
+			} else if (addr == 0x8806 && chip2_)
+				chip2_->Write(0, data);
+			else if (addr == 0x8807 && chip2_) {
+				chip2_->Write(1, data);
+				opmWrites_++;
+			} else if (addr >= 0x9000 && addr < 0xa000)
+				mem_[addr] = data;
+			else if (addr >= 0xc000)
+				mem_[addr] = data;
+			return;
+		}
+		if (addr >= 0x4000 && addr < (vsIoKind_ == 9 ? 0x4800u : 0x4400u)) {
 			mem_[addr] = data;
 			return;
 		}
@@ -4876,7 +5375,7 @@ void CHardAc::MemWrite(uint16_t addr, uint8_t data)
 					ay->Write(1, data);
 					opmWrites_++;
 					/* AY#4 (slot 2 here) port B bit0 = sound NMI mask, low = on. */
-					if (slot == 2 && ayAddr_[2] == 0x0f) {
+					if (slot == 2 && ayAddr_[2] == 0x0f && vsIoKind_ != 9) {
 						sjNmiMask_ = (uint8_t)((~data) & 1);
 						sjNmiMaskSeen_ = 1;
 					}
@@ -5160,8 +5659,88 @@ void CHardAc::MemWrite(uint16_t addr, uint8_t data)
 	}
 	/* MAME flstory sound_map: RAM C000-C7FF, AY C800, MSM CA00-CA0D,
 	   volume CC00/CE00, latch D800, NMI enable DA00, clear DC00, DAC DE00.
-	   E000-EFFF is optional diagnostics ROM (absent → open bus 0x00). */
+	   E000-EFFF is optional diagnostics ROM (absent → open bus 0x00).
+	   msisaac (taitoOpmMap_=1): RAM 4000-47FF, AY 8000/8002, MSM 8010,
+	   latch C000, NMI en C001 / dis C002. */
 	if (board_ == CEMU_AC_BOARD_FLSTORY) {
+		if (taitoOpmMap_ == 1) {
+			if (addr >= 0x4000 && addr <= 0x47ff) {
+				mem_[addr] = data;
+				return;
+			}
+			if (addr == 0x8000 || addr == 0x8001) {
+				if (chip_) {
+					chip_->Write(addr & 1, data);
+					if (addr & 1) opmWrites_++;
+				}
+				return;
+			}
+			if (addr == 0x8002 || addr == 0x8003) {
+				if (chip3_) {
+					chip3_->Write(addr & 1, data);
+					if (addr & 1) opmWrites_++;
+				}
+				return;
+			}
+			if (addr >= 0x8010 && addr <= 0x801d) {
+				if (chip2_) {
+					chip2_->Write(addr - 0x8010u, data);
+					opmWrites_++;
+				}
+				return;
+			}
+			if (addr == 0xc001) {
+				flstoryNmiEn_ = 1;
+				if (soundCmdPending_)
+					irqPulse_ = 1;
+				return;
+			}
+			if (addr == 0xc002) {
+				flstoryNmiEn_ = 0;
+				return;
+			}
+			return;
+		}
+		if (taitoOpmMap_ == 3) {
+			/* MAME nycaptor sound_map: dual AY @C800/@C802, MSM @C900,
+			   latch D000, NMI en D200 / dis D400, DAC D600. */
+			if (addr >= 0xc000 && addr <= 0xc7ff) {
+				mem_[addr] = data;
+				return;
+			}
+			if (addr == 0xc800 || addr == 0xc801) {
+				if (chip_) {
+					chip_->Write(addr & 1, data);
+					if (addr & 1) opmWrites_++;
+				}
+				return;
+			}
+			if (addr == 0xc802 || addr == 0xc803) {
+				if (chip3_) {
+					chip3_->Write(addr & 1, data);
+					if (addr & 1) opmWrites_++;
+				}
+				return;
+			}
+			if (addr >= 0xc900 && addr <= 0xc90d) {
+				if (chip2_) {
+					chip2_->Write(addr - 0xc900u, data);
+					opmWrites_++;
+				}
+				return;
+			}
+			if (addr == 0xd200) {
+				flstoryNmiEn_ = 1;
+				if (soundCmdPending_)
+					irqPulse_ = 1;
+				return;
+			}
+			if (addr == 0xd400) {
+				flstoryNmiEn_ = 0;
+				return;
+			}
+			return;
+		}
 		if (addr >= 0xc000 && addr <= 0xc7ff) {
 			mem_[addr] = data;
 			return;
@@ -5432,8 +6011,19 @@ void CHardAc::MemWrite(uint16_t addr, uint8_t data)
 		return;
 	}
 	/* WSG: Pac-Man/Galaga 3-voice regs @6800-681F; shared RAM 8000-9FFF;
-	   $6822 sound-enable pulse. */
+	   $6822 sound-enable pulse. Pengo moves the same nibble map to $9000. */
 	if (board_ == CEMU_AC_BOARD_NAMCO_WSG && chip_) {
+		if (sys16RomBoard_ == 0x5047u && addr >= 0x9000 && addr <= 0x901f) {
+			chip_->Write(addr & 0x1f, data & 0x0f);
+			opmWrites_++;
+			return;
+		}
+		if (sys16RomBoard_ == 0x5047u && addr >= 0x9040 && addr <= 0x9047) {
+			mem_[addr] = (uint8_t)(data & 1u);
+			if (addr == 0x9041)
+				CEmuChipC30SetEnable(chip_, data & 1);
+			return;
+		}
 		if (addr >= 0x6800 && addr <= 0x681f) {
 			chip_->Write(addr & 0x1f, data & 0x0f);
 			opmWrites_++;
@@ -5554,6 +6144,18 @@ void CHardAc::MemWrite(uint16_t addr, uint8_t data)
 
 uint8_t CHardAc::MemRead(uint16_t addr)
 {
+	if (board_ == CEMU_AC_BOARD_NAMCO_WSG && sys16RomBoard_ == 0x5047u) {
+		/* 315-5010: opcode plane is mem_ (Z80 fetch); data plane here. */
+		if (qsKabuki_ && qsKabukiData_ && addr < 0x8000u)
+			return qsKabukiData_[addr];
+		if (addr >= 0x9000 && addr <= 0x903f)
+			return 0xff; /* DSW2 */
+		if (addr >= 0x9040 && addr <= 0x907f)
+			return 0x00; /* DSW1: Demo Sounds on (bit1=0) */
+		if (addr >= 0x9080 && addr <= 0x90ff)
+			return 0xff; /* IN0/IN1 active-low idle */
+		return mem_[addr];
+	}
 	if (board_ == CEMU_AC_BOARD_TOAPLAN1 && toaplanKaneko_ == 3) {
 		if (addr == 0xa081)
 			return chip_ ? chip_->ReadData() : 0xff;
@@ -5661,7 +6263,7 @@ uint8_t CHardAc::MemRead(uint16_t addr)
 			if (addr < 0x8000)
 				return mem_[addr];
 			return 0xff;
-		} else if (taitoOpmMap_ == 4) {
+		} else if (taitoOpmMap_ == 4 || taitoOpmMap_ == 6) {
 			if (chip_ && addr >= 0x9000 && addr <= 0x9fff) {
 				if (addr & 1) {
 					if (ymAddr_ == 0x0e || ymAddr_ == 0x0f)
@@ -5670,9 +6272,14 @@ uint8_t CHardAc::MemRead(uint16_t addr)
 				}
 				return (uint8_t)((chip_->ReadStatus() & 0x03) | 0x01);
 			}
-			if (chip2_ && addr >= 0xa000 && addr <= 0xafff)
-				return (addr & 1) ? chip2_->ReadData()
-					: (uint8_t)(chip2_->ReadStatus() | 0x80);
+			if (chip2_ && addr >= 0xa000 && addr <= 0xafff) {
+				if (addr & 1)
+					return chip2_->ReadData();
+				/* bublbobl OPL2 ISR waits BIT 7. lkage YM2203 ISR AND 01. */
+				if (taitoOpmMap_ == 6)
+					return (uint8_t)((chip2_->ReadStatus() & 0x03) | 0x01);
+				return (uint8_t)(chip2_->ReadStatus() | 0x80);
+			}
 			if ((addr & ~0x0ffcu) == 0xb000) {
 				soundCmdPending_ = 0;
 				return soundCmd_;
@@ -5682,6 +6289,51 @@ uint8_t CHardAc::MemRead(uint16_t addr)
 			if (addr >= 0x8000 && addr <= 0x8fff)
 				return mem_[addr];
 			if (addr < 0x8000)
+				return mem_[addr];
+			return 0xff;
+		} else if (taitoOpmMap_ == 5) {
+			if (addr == 0xd000) {
+				soundCmdPending_ = 0;
+				return soundCmd_;
+			}
+			if (addr == 0xd800)
+				return (uint8_t)(soundCmdPending_ ? 1 : 0);
+			if (chip_ && (addr == 0xa000 || addr == 0xa001)) {
+				if (addr & 1) {
+					if (ymAddr_ == 0x0e || ymAddr_ == 0x0f)
+						return 0xff;
+					return chip_->ReadData();
+				}
+				/* ISR @0182 AND 01 / JR Z spin — keep Timer A set. */
+				return (uint8_t)((chip_->ReadStatus() & 0x03) | 0x01);
+			}
+			if (addr >= 0x8000 && addr <= 0x87ff)
+				return mem_[addr];
+			if (addr < 0x8000)
+				return mem_[addr];
+			return 0xff;
+		} else if (taitoOpmMap_ == 7) {
+			if (chip_ && (addr == 0xb000 || addr == 0xb001)) {
+				if (addr & 1) {
+					if (ymAddr_ == 0x0e || ymAddr_ == 0x0f)
+						return 0xff;
+					return chip_->ReadData();
+				}
+				return (uint8_t)((chip_->ReadStatus() & 0x03) | 0x01);
+			}
+			if (addr == 0xc000 || addr == 0xc001) {
+				/* kageki: IN0/IN1 idle = active-low 0xFF.
+				   tnzs 5FAC: CALL MCU, CP 55 / JP NZ error (can spin).
+				   chukatai: status bit0=IBF, bit1=busy. */
+				if (mem_[3] == 0x31 && mem_[5] == 0xd7)
+					return 0xff;
+				if (mem_[3] == 0xfd && addr == 0xc000)
+					return 0x55;
+				return 0x01;
+			}
+			if (addr >= 0xd000 && addr <= 0xefff)
+				return mem_[addr];
+			if (addr < 0xa000)
 				return mem_[addr];
 			return 0xff;
 		} else if (taitoOpmMap_ == 1) {
@@ -5708,6 +6360,84 @@ uint8_t CHardAc::MemRead(uint16_t addr)
 		if (addr >= 0xa000) return 0xff; /* write-only PSG ports */
 	}
 	if (board_ == CEMU_AC_BOARD_TAITO_SJ) {
+		if (vsIoKind_ == 4) {
+			if (addr == 0x8000) {
+				const uint8_t v = (uint8_t)(soundCmdPending_ ? 1 : 0);
+				soundCmdPending_ = 0;
+				irqPulse_ = 0;
+				return v;
+			}
+			if (addr >= 0xc000 && addr <= 0xc7ff)
+				return mem_[addr];
+			if (addr < 0x8000)
+				return mem_[addr];
+			return 0xff;
+		}
+		if (vsIoKind_ == 5) {
+			addr = (uint16_t)(addr & 0x7fffu);
+			if (addr >= 0x4000 && addr < 0x6000) {
+				const uint8_t v = (uint8_t)(soundCmdPending_ ? 1 : 0);
+				soundCmdPending_ = 0;
+				irqPulse_ = 0;
+				return v;
+			}
+			if (addr >= 0x6000)
+				return mem_[0x6000u + (addr & 0x07ffu)];
+			return mem_[addr];
+		}
+		if (vsIoKind_ == 6) {
+			addr = (uint16_t)(addr & 0x7fffu);
+			if (addr >= 0x6000) {
+				if (soundCmdPending_) {
+					soundCmdPending_ = 0;
+					return soundCmd_;
+				}
+				return 0x00;
+			}
+			if (addr >= 0x4000)
+				return mem_[0x4000u + (addr & 0x07ffu)];
+			return mem_[addr];
+		}
+		if (vsIoKind_ == 7) {
+			if (addr >= 0xc000) {
+				if (soundCmdPending_) {
+					soundCmdPending_ = 0;
+					return soundCmd_;
+				}
+				return 0x00;
+			}
+			if (addr >= 0x8000)
+				return mem_[0x8000u + (addr & 0x07ffu)];
+			if (addr >= 0x4000)
+				return mem_[addr & 0x3fffu];
+			return mem_[addr];
+		}
+		if (vsIoKind_ == 8 || vsIoKind_ == 10) {
+			if (addr == 0x8000)
+				return soundCmd_;
+			if (addr >= 0x4000 && addr < 0x4800)
+				return mem_[addr];
+			return mem_[addr];
+		}
+		if (vsIoKind_ == 11) {
+			if (addr == 0x8800)
+				return 0x00; /* MCU data: 0 → ROM checksum path (sum is 0). */
+			if (addr == 0x8801)
+				return 0x03; /* bit0 host-ready, bit1 MCU-has-data */
+			if (addr >= 0x8808 && addr <= 0x880b)
+				return 0xff; /* DSW/P1/SYSTEM/P2 idle; 880A bit7 must stay 1 */
+			if (chip_ && addr == 0x8804)
+				return chip_->ReadStatus();
+			if (chip_ && addr == 0x8805)
+				return chip_->ReadData();
+			if (chip2_ && addr == 0x8806)
+				return chip2_->ReadStatus();
+			if (chip2_ && addr == 0x8807)
+				return chip2_->ReadData();
+			return mem_[addr];
+		}
+		if (vsIoKind_ == 9 && addr >= 0x4000 && addr < 0x4800)
+			return mem_[addr];
 		if (addr >= 0x4800 && addr <= 0x4fff) {
 			const unsigned slot = (addr & 0x07) >> 1;
 			CChip* ay = (slot == 0) ? chip_ : (slot == 1 ? chip2_ : chip3_);
@@ -5896,6 +6626,30 @@ uint8_t CHardAc::MemRead(uint16_t addr)
 		}
 	}
 	if (board_ == CEMU_AC_BOARD_FLSTORY) {
+		if (taitoOpmMap_ == 1) {
+			if (addr == 0xc000) {
+				soundCmdPending_ = 0;
+				return soundCmd_;
+			}
+			if (addr == 0xc001)
+				return (uint8_t)(soundCmdPending_ ? 1 : 0);
+			if (addr >= 0x4000 && addr <= 0x47ff)
+				return mem_[addr];
+			if (addr < 0x4000)
+				return mem_[addr];
+			return 0xff;
+		}
+		if (taitoOpmMap_ == 3) {
+			if (addr == 0xd000) {
+				soundCmdPending_ = 0;
+				return soundCmd_;
+			}
+			if (addr >= 0xc000 && addr <= 0xc7ff)
+				return mem_[addr];
+			if (addr < 0xc000)
+				return mem_[addr];
+			return 0xff;
+		}
 		if (addr >= 0xc000 && addr <= 0xc7ff)
 			return mem_[addr];
 		if (addr == 0xd800) {
@@ -7078,25 +7832,6 @@ void CHardAc::NamcoM6809SetBank(unsigned bank)
 	namcoBank_ = bank;
 }
 
-int CHardAc::WsgMail80()
-{
-	if (board_ != CEMU_AC_BOARD_NAMCO_WSG || !wsgMappy_ || !soundRom_)
-		return 0;
-	const uint16_t irq = (uint16_t)(((unsigned)NamcoM6809Read8(0xfff8) << 8)
-		| NamcoM6809Read8(0xfff9));
-	if (irq < 0xe000u)
-		return 0;
-	for (int i = 0; i < 16; i++) {
-		const uint8_t a = NamcoM6809Read8((uint16_t)(irq + (unsigned)i));
-		const uint8_t b = NamcoM6809Read8((uint16_t)(irq + (unsigned)i + 1u));
-		const uint8_t c = NamcoM6809Read8((uint16_t)(irq + (unsigned)i + 2u));
-		/* LDU #$0080 only (CE 00 80). LDX #$0080 (8E 00 80) is gaplus. */
-		if (a == 0xCE && b == 0x00 && c == 0x80)
-			return 1;
-	}
-	return 0;
-}
-
 uint8_t CHardAc::NamcoM6809Read8(uint16_t addr)
 {
 	/* Mappy / Dig Dug 2 / Super Pac-Man: M6809 + namco_15xx amap @0000-03FF,
@@ -7270,7 +8005,12 @@ void CHardAc::NamcoM6809SyncIrqs()
 		/* Deferred song IRQ once I is clear (SetSoundCommand may fire
 		   during boot with I=1 and must not be lost). */
 		if (namcoIrqAssert_ && !cpu->cc.i) {
-			cpu->irq = true;
+			const uint16_t irqv = (uint16_t)(((unsigned)NamcoM6809Read8(0xfff8) << 8)
+				| NamcoM6809Read8(0xfff9));
+			const uint16_t rstv = (uint16_t)(((unsigned)NamcoM6809Read8(0xfffe) << 8)
+				| NamcoM6809Read8(0xffff));
+			if (irqv != rstv)
+				cpu->irq = true;
 			namcoIrqAssert_ = 0;
 		}
 		/* MAME mappy: vblank asserts sound CPU IRQ0 when sub_irq_mask is set.
@@ -7278,7 +8018,13 @@ void CHardAc::NamcoM6809SyncIrqs()
 		if ((uint64_t)cpu->cycles >= namcoNextVblank_) {
 			namcoNextVblank_ = (uint64_t)cpu->cycles + (uint64_t)cpuHz_ / 60u;
 			g_namcoVblank++;
-			if (!cpu->cc.i)
+			/* superpac: IRQ vector == RESET. A vblank pulse re-enters boot
+			   (LDS #$0400) every frame and the $40 song id never sticks. */
+			const uint16_t irqv = (uint16_t)(((unsigned)NamcoM6809Read8(0xfff8) << 8)
+				| NamcoM6809Read8(0xfff9));
+			const uint16_t rstv = (uint16_t)(((unsigned)NamcoM6809Read8(0xfffe) << 8)
+				| NamcoM6809Read8(0xffff));
+			if (!cpu->cc.i && irqv != rstv)
 				cpu->irq = true;
 		}
 		return;
@@ -7341,6 +8087,7 @@ int CHardAc::LoadRomsNamcoM6809(CEmuZipFs* fs, const CEmuGameEntry* ge)
 	/* Sys2 mailbox hi: bit6 set (0x40/0x60) selects assault D27D channel-init
 	   (writes $902B gate). bit6 clear takes the empty $9352 path → SILENT. */
 	s_acNamcoMailFlag = 0x60;
+	s_acSys2TwinMail = 0;
 
 	/* ---- Mappy-era WSG6809: 4K/8K sound CPU + 256B wave PROM ---- */
 	if (board_ == CEMU_AC_BOARD_NAMCO_WSG && wsgMappy_) {
@@ -7546,6 +8293,13 @@ int CHardAc::LoadRomsNamcoM6809(CEmuZipFs* fs, const CEmuGameEntry* ge)
 			if (bestN)
 				namcoMailOff_ = 0x100u + bestLo;
 		}
+		if (ge && ge->archive
+			&& (_stricmp(ge->archive, "assault") == 0
+				|| _stricmp(ge->archive, "dirtfoxj") == 0
+				|| _stricmp(ge->archive, "finallap") == 0
+				|| _stricmp(ge->archive, "mirninja") == 0
+				|| _stricmp(ge->archive, "sws92") == 0))
+			s_acSys2TwinMail = 1;
 		/* fourtrax C68: FIRQ RTIs unless $75FF==$65 (MCU). High bit of
 		   namcoMailOff_ tags that path without growing CHardAc. */
 		if (CEmuAcOptionValue(ge, "foutrax", 0)) {
@@ -8208,7 +8962,34 @@ int CHardAc::LoadRomsM37702(CEmuZipFs* fs, const CEmuGameEntry* ge)
 	   offset 1 entry actually exists, so a lone offset 0 ROM is placed instead
 	   of being held back as the even half of a pair that never arrives. */
 	if (pcmRom_) { free(pcmRom_); pcmRom_ = NULL; pcmRomSize_ = 0; }
-	{
+	if (m37702MapKind_ == 1) {
+		/* NA-1/NA-2: every PCM listing is ROM_LOAD16_BYTE. Offset 0/1, 100000/
+		   100001, 200000/200001 are separate interleaved pairs. Treating only
+		   offset==0/1 as a pair and then free()ing pcmRom_ dropped the rest. */
+		for (int i = 0; i < ge->romCount; i++) {
+			const CEmuRomEntry* r = &ge->rom[i];
+			if (_stricmp(r->type, "pcm") != 0 && _stricmp(r->type, "voice") != 0
+				&& _stricmp(r->type, "sample") != 0 && _stricmp(r->type, "adpcm") != 0)
+				continue;
+			unsigned sz = 0;
+			const unsigned char* data = CEmuZipFsFind(fs, r->name, &sz);
+			if (!data || !sz) continue;
+			int off = r->offset;
+			if (off < 0) off = 0;
+			const unsigned dest = (unsigned)off & ~1u;
+			const unsigned odd = (unsigned)off & 1u;
+			const unsigned need = dest + sz * 2u;
+			uint8_t* p = (uint8_t*)realloc(pcmRom_, need > pcmRomSize_ ? need : pcmRomSize_);
+			if (!p) continue;
+			if (need > pcmRomSize_) {
+				memset(p + pcmRomSize_, 0, need - pcmRomSize_);
+				pcmRomSize_ = need;
+			}
+			pcmRom_ = p;
+			for (unsigned n = 0; n < sz; n++)
+				pcmRom_[dest + n * 2u + odd] = data[n];
+		}
+	} else {
 		const unsigned char* evenData = NULL;
 		const unsigned char* oddData = NULL;
 		unsigned evenSz = 0, oddSz = 0;
@@ -8785,6 +9566,62 @@ int CHardAc::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode
 	const unsigned char* codeRom = NULL;
 	unsigned codeRomSize = 0;
 
+	if (board_ == CEMU_AC_BOARD_NAMCO_WSG && sys16RomBoard_ == 0x5047u && fs) {
+		memset(mem_, 0, 0x10000);
+		const uint8_t* prom = NULL;
+		unsigned promSz = 0;
+		for (int i = 0; i < fs->fileCount; i++) {
+			char pathA[CEMU_ZIP_PATH];
+			WideCharToMultiByte(CP_ACP, 0, fs->files[i].path, -1,
+				pathA, (int)sizeof(pathA), NULL, NULL);
+			const unsigned sz = fs->files[i].size;
+			const uint8_t* d = fs->files[i].data;
+			if (!d) continue;
+			if (sz == 256u || sz == 512u) {
+				prom = d;
+				promSz = sz;
+				continue;
+			}
+			if (sz != 0x1000u) continue;
+			const int off = CEmuAcPengoIcOff(pathA);
+			if (off < 0) continue;
+			memcpy(mem_ + off, d, 0x1000u);
+			loaded = 1;
+		}
+		if (loaded && mem_[0] != 0x31) {
+			uint8_t* enc = (uint8_t*)malloc(0x8000u);
+			uint8_t* dataPlane = (uint8_t*)malloc(0x8000u);
+			if (enc && dataPlane) {
+				memcpy(enc, mem_, 0x8000u);
+				CEmuAcSega3155010Decode(enc, mem_, dataPlane, 0x8000u);
+				if (qsKabukiData_) {
+					free(qsKabukiData_);
+					qsKabukiData_ = NULL;
+				}
+				qsKabukiData_ = dataPlane;
+				qsKabuki_ = 1;
+				dataPlane = NULL;
+			}
+			free(enc);
+			free(dataPlane);
+		}
+		if (loaded) {
+			uint8_t* p = (uint8_t*)malloc(0x8000u);
+			if (p) {
+				memcpy(p, mem_, 0x8000u);
+				if (soundRom_) free(soundRom_);
+				soundRom_ = p;
+				soundRomSize_ = 0x8000u;
+			}
+			if (chip_ && prom && promSz)
+				chip_->SetPcmRom(prom, promSz);
+			if (chip_)
+				CEmuChipC30SetEnable(chip_, 1);
+			codeRom = mem_;
+			codeRomSize = 0x8000u;
+		}
+	}
+
 	if (board_ == CEMU_AC_BOARD_MEGASYSTEM1
 		|| board_ == CEMU_AC_BOARD_M68K_PCM)
 		return LoadRomsMs1(fs, ge);
@@ -9027,7 +9864,7 @@ int CHardAc::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode
 				}
 			}
 		}
-	} else if (!m72Code) {
+	} else if (!m72Code && !(board_ == CEMU_AC_BOARD_NAMCO_WSG && sys16RomBoard_ == 0x5047u && loaded)) {
 	for (int i = 0; i < ge->romCount; i++) {
 		const CEmuRomEntry* r = &ge->rom[i];
 		if (!CEmuAcIsCodeRomType(r->type))
@@ -9532,7 +10369,7 @@ int CHardAc::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode
 	soundCmdPending_ = 0;
 	irqPulse_ = 0;
 	wsgNmiEnable_ = 0;
-	if (board_ == CEMU_AC_BOARD_NAMCO_WSG) {
+	if (board_ == CEMU_AC_BOARD_NAMCO_WSG && sys16RomBoard_ != 0x5047u) {
 		mem_[0x9101] = 0;
 		mem_[0x8c01] = 0;
 		/* Dig Dug (LD SP,$8B80): needs NMI during boot; Galaga/Bosco must
@@ -9592,10 +10429,92 @@ int CHardAc::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode
 		bankSize_ = 0x8000u;
 		bankLoaded_ = 1;
 	}
-	if (taitoOpmMap_ != 2 && taitoOpmMap_ != 3 && taitoOpmMap_ != 4)
+	if (!(board_ == CEMU_AC_BOARD_FLSTORY && (taitoOpmMap_ == 1 || taitoOpmMap_ == 3))
+		&& !(board_ == CEMU_AC_BOARD_TAITO_SJ
+			&& (vsIoKind_ == 4 || vsIoKind_ == 5 || vsIoKind_ == 6
+				|| vsIoKind_ == 7 || vsIoKind_ == 8 || vsIoKind_ == 9
+				|| vsIoKind_ == 10 || vsIoKind_ == 11))
+		&& taitoOpmMap_ != 2 && taitoOpmMap_ != 3 && taitoOpmMap_ != 4
+		&& taitoOpmMap_ != 5 && taitoOpmMap_ != 6 && taitoOpmMap_ != 7)
 		SetBank(0);
-	if (taitoOpmMap_ == 2)
+	if (board_ == CEMU_AC_BOARD_FLSTORY && taitoOpmMap_ == 1)
+		memset(mem_ + 0x4000, 0, 0x800);
+	if (board_ == CEMU_AC_BOARD_FLSTORY && taitoOpmMap_ == 3)
+		memset(mem_ + 0xc000, 0, 0x800);
+	if (board_ == CEMU_AC_BOARD_TAITO_SJ && vsIoKind_ == 4)
+		memset(mem_ + 0xc000, 0, 0x800);
+	if (board_ == CEMU_AC_BOARD_TAITO_SJ && vsIoKind_ == 5)
+		memset(mem_ + 0x6000, 0, 0x800);
+	if (board_ == CEMU_AC_BOARD_TAITO_SJ && vsIoKind_ == 6)
+		memset(mem_ + 0x4000, 0, 0x800);
+	if (board_ == CEMU_AC_BOARD_TAITO_SJ && vsIoKind_ == 7)
+		memset(mem_ + 0x8000, 0, 0x800);
+	if (board_ == CEMU_AC_BOARD_TAITO_SJ && vsIoKind_ == 8)
+		memset(mem_ + 0x4000, 0, 0x800);
+	if (board_ == CEMU_AC_BOARD_TAITO_SJ && vsIoKind_ == 9)
+		memset(mem_ + 0x4000, 0, 0x800);
+	if (board_ == CEMU_AC_BOARD_TAITO_SJ && vsIoKind_ == 10)
+		memset(mem_ + 0x4000, 0, 0x800);
+	if (board_ == CEMU_AC_BOARD_TAITO_SJ && vsIoKind_ == 11) {
+		/* Catalog concatenates five 8K code ROMs; the 5th belongs at A000
+		   (MAME 0000-7FFF + A000-BFFF). 8000-87FF is work RAM. */
+		if (soundRom_) {
+			unsigned n = (soundRomSize_ < 0x8000u) ? soundRomSize_ : 0x8000u;
+			memcpy(mem_, soundRom_, n);
+			if (soundRomSize_ > 0x8000u) {
+				unsigned b = soundRomSize_ - 0x8000u;
+				if (b > 0x2000u) b = 0x2000u;
+				memcpy(mem_ + 0xa000, soundRom_ + 0x8000u, b);
+			}
+		}
+		memset(mem_ + 0x8000, 0, 0x800);
+		mem_[0x85A8] = 0xff;
+		/* Do not NOP $073F (ld a,$50 / rst $20). 0000-7FFF checksum is 0;
+		   patching those three bytes fails the sum and hangs at $06E8. */
+	}
+	if (board_ == CEMU_AC_BOARD_TAITO_OPM && taitoOpmMap_ == 2)
 		mem_[0x9fff] = 0xff;
+	if (board_ == CEMU_AC_BOARD_TAITO_OPM && taitoOpmMap_ == 7) {
+		/* Fixed 32K + 8K bank at 8000. D000/E000 are RAM, not ROM. */
+		if (soundRom_) {
+			unsigned n = (soundRomSize_ < 0x8000u) ? soundRomSize_ : 0x8000u;
+			memcpy(mem_, soundRom_, n);
+			if (soundRomSize_ > 0x8000u) {
+				unsigned b = 0x2000u;
+				if (0x8000u + b > soundRomSize_)
+					b = soundRomSize_ - 0x8000u;
+				memset(mem_ + 0x8000, 0xff, 0x2000);
+				memcpy(mem_ + 0x8000, soundRom_ + 0x8000u, b);
+			}
+		}
+		memset(mem_ + 0xd000, 0, 0x1000);
+		memset(mem_ + 0xe000, 0, 0x1000);
+		if (mem_[3] == 0x31 && mem_[5] == 0xd7) {
+			mem_[0xe03e] = 0xff;
+			mem_[0xe0fc] = 0;
+		} else if (mem_[3] == 0x21 && mem_[4] == 0x00 && mem_[5] == 0xd0) {
+			mem_[0xe003] = 0x55;
+			for (int i = 0; i < 16; i++)
+				mem_[0xe005 + i] = 0xff;
+		} else {
+			mem_[0xef10] = 0xff;
+			mem_[0xef11] = 1;
+			/* ISR CALL 0082 walks main-CPU object lists; NOP it so music
+			   (CALL 006D) can run without a 68000 filling E603/ED00. */
+			if (mem_[0x55] == 0xcd && mem_[0x56] == 0x82 && mem_[0x57] == 0x00) {
+				mem_[0x55] = 0x00;
+				mem_[0x56] = 0x00;
+				mem_[0x57] = 0x00;
+			}
+			/* 00E9 CALL 0666 is an 8-bit ROM checksum that JR $ on this dump. */
+			if (mem_[0xe9] == 0xcd && mem_[0xea] == 0x66 && mem_[0xeb] == 0x06) {
+				mem_[0xe9] = 0x00;
+				mem_[0xea] = 0x00;
+				mem_[0xeb] = 0x00;
+			}
+		}
+		bankLoaded_ = 1;
+	}
 	if (chip_) chip_->Reset();
 	if (chip2_) chip2_->Reset();
 	if (chip3_) chip3_->Reset();

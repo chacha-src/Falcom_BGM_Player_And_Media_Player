@@ -1,4 +1,4 @@
-﻿#include "stdafx.h"
+#include "stdafx.h"
 #include "CCustomControl.h"
 #include "resource.h"
 #include "CImageBase.h"
@@ -7598,6 +7598,7 @@ void CCustomSliderCtrl::OnTimer(UINT_PTR nIDEvent)
         if (!m_bHover && m_nSparkleN <= 0)
             KillTimer(kSliderShimmerTimerId);
         Invalidate(FALSE);
+        UpdateWindow();
         return;
     }
     CSliderCtrl::OnTimer(nIDEvent);
@@ -11802,6 +11803,7 @@ void CCustomStandardButton::OnTimer(UINT_PTR nIDEvent)
         SparkleTick(m_bMouseOver && !m_bFlat);
         UpdateAnimTimer(); // 残点ゼロ＆非ホバーなら停止
         Invalidate(FALSE);
+        UpdateWindow();
         return;
     }
     CButton::OnTimer(nIDEvent);
@@ -12544,13 +12546,15 @@ void CCustomCheckBox::OnTimer(UINT_PTR nIDEvent)
     if (nIDEvent == kCheckBounceTimerId)
     {
         if (--m_nBounce <= 0) { m_nBounce = 0; KillTimer(kCheckBounceTimerId); }
-        Invalidate();
+        Invalidate(FALSE);
+        UpdateWindow();
         return;
     }
     if (nIDEvent == kCheckHoverTimerId)
     {
         if (!m_bIsHot) { KillTimer(kCheckHoverTimerId); return; }
         Invalidate(FALSE);
+        UpdateWindow();
         return;
     }
     CButton::OnTimer(nIDEvent);
@@ -20385,6 +20389,9 @@ void CCustomBlurDialogBase::OnDestroy()
 #if CCUSTOM_AERO_SUPPORT
     CCC_ClearOpaqueFixerList(m_opaqueFixers);
 #endif
+    /* Create/Destroy を同じ C++ オブジェクトで繰り返す窓は、ここを落とさないと
+       次の HWND で ApplyDwmBlur が「既適用」と誤認してガラスだけが残る。 */
+    m_bBlurApplied = FALSE;
     CCustomDialog::OnDestroy();
 }
 
@@ -21237,6 +21244,9 @@ void CCustomBlurDialogExBase::OnDestroy()
 #if CCUSTOM_AERO_SUPPORT
     CCC_ClearOpaqueFixerList(m_opaqueFixers);
 #endif
+    /* Create/Destroy を同じ C++ オブジェクトで繰り返す窓は、ここを落とさないと
+       次の HWND で ApplyDwmBlur が「既適用」と誤認してガラスだけが残る。 */
+    m_bBlurApplied = FALSE;
     CCustomDialogEx::OnDestroy();
 }
 

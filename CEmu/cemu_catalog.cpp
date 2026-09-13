@@ -2474,6 +2474,40 @@ int CEmuCatalogCollectArchiveForZip(const CEmuCatalog* cat,
 			for (int j = 0; j < n; j++)
 				if (out[j] == e) { dup = 1; break; }
 			if (dup) continue;
+			/* dssp1 lists usajan/fuku/heian but the zip only ships ran/.
+			   ZipRomHits uses HasExact basename, so usajan/patch counted
+			   ran/patch (+3) and Collect still probed those rows. Require
+			   a slash-preserving Has() (or dir/DRIVER.BIN alias). .kss
+			   holes (puyo) still need the zip-fallback Open path. */
+			if (zipFs) {
+				int dirWant = 0, dirHit = 0, kss = 0;
+				for (int r = 0; r < e->romCount; r++) {
+					const char* nm = e->rom[r].name;
+					if (!nm || !nm[0]) continue;
+					const size_t nl = strlen(nm);
+					if (nl >= 4 && _stricmp(nm + nl - 4, ".kss") == 0)
+						kss = 1;
+					const char* slash = strrchr(nm, '/');
+					if (!slash) slash = strrchr(nm, '\\');
+					if (!slash) continue;
+					dirWant = 1;
+					unsigned sz = 0;
+					if (CEmuZipFsHas(zipFs, nm, &sz) && sz > 0)
+						dirHit = 1;
+					else {
+						char alt[CEMU_ROM_NAME];
+						const int pref = (int)(slash - nm + 1);
+						if (pref > 0 && pref < (int)sizeof(alt) - 12) {
+							memcpy(alt, nm, (size_t)pref);
+							strcpy_s(alt + pref, sizeof(alt) - (size_t)pref, "DRIVER.BIN");
+							if (CEmuZipFsHas(zipFs, alt, &sz) && sz > 0)
+								dirHit = 1;
+						}
+					}
+				}
+				if (dirWant && !dirHit && !kss)
+					continue;
+			}
 			out[n] = e;
 			ranks[n] = CEmuCatalogArchiveRank(e, zipFs);
 			n++;

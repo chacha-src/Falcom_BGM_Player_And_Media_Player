@@ -87,8 +87,10 @@ extern "C" void CEmuX68kMidiDumpRegs(FILE* f)
 	const unsigned rdA4 = hw ? (unsigned)hw->Read8(a4) : 0xffu;
 	const unsigned dsr = hw ? (unsigned)hw->Read8(0xeafa09u) : 0xffu;
 	const unsigned gpip = hw ? (unsigned)hw->Read8(0xe88001u) : 0xffu;
-	fprintf(f, "    pc=%06X sr=%04X sp=%06X d0=%08X a4=%06X (a4)=%02X dsr=%02X gpip=%02X\n",
-		pc, sr, sp, d0, a4, rdA4, dsr, gpip);
+	fprintf(f, "    pc=%06X sr=%04X sp=%06X d0=%08X a4=%06X (a4)=%02X dsr=%02X gpip=%02X v78=%06X v10c=%06X\n",
+		pc, sr, sp, d0, a4, rdA4, dsr, gpip,
+		hw ? (hw->Read32(0x78u) & 0xffffffu) : 0u,
+		hw ? (hw->Read32(0x10cu) & 0xffffffu) : 0u);
 }
 
 static int CEmuX68kIntAck(int level)
@@ -293,13 +295,14 @@ uint8_t CHardX68k::Read8(unsigned addr)
 		return v;
 	}
 	/* CZ-6BM1 / YM3802 MIDI. Open-bus $FF looks busy-forever.
-	   DSR ($EAFA09): bit7 IRQ, bit2 TxEMPTY, bit1 TxRDY. MIDI_DRV waits
+	   DSR ($EAFA09): bit7 IRQ, bit6 TxRDY (ZMUSIC `btst #6,(a4)` /
+	   set_a3a4 in zmusic2 macro.mac), bit2 TxEMPTY, bit1 TxRDY. MIDI_DRV waits
 	   `tst.b (a4) / bpl` with A4=$EAFA09, then writes Tx data at +4. */
 	if ((addr >= 0xeafa00u && addr <= 0xeafa0fu)
 		|| (addr >= 0xefa000u && addr <= 0xefa00fu)) {
 		g_x68MidiRd++;
 		const unsigned r = addr & 0x0fu;
-		uint8_t st = (uint8_t)(0x80u | 0x04u | 0x02u);
+		uint8_t st = (uint8_t)(0x80u | 0x40u | 0x04u | 0x02u);
 		if (g_x68MidiAck) {
 			g_x68MidiAck = 0;
 			st = (uint8_t)(st | 0x80u);

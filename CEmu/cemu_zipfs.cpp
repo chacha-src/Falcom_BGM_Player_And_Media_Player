@@ -217,7 +217,12 @@ static int CEmuZipFsFindIndex(const CEmuZipFs* fs, const char* name)
 		char pathA[CEMU_ZIP_PATH];
 		WideCharToMultiByte(932, 0, fs->files[i].path, -1, pathA, (int)sizeof(pathA), NULL, NULL);
 		CEmuZipBaseName(pathA, fn, (int)sizeof(fn));
-		if (CEmuZipNameMatch(fn, base) || CEmuZipNameMatch(pathA, name))
+		/* Directory-qualified names (ran2/patch vs mzz/patch) must not
+		   collapse to the first basename hit in the zip. */
+		if (CEmuZipNameMatch(pathA, name))
+			return i;
+		if (!strchr(name, '/') && !strchr(name, '\\')
+			&& CEmuZipNameMatch(fn, base))
 			return i;
 	}
 	for (int i = 0; i < fs->fileCount; i++) {
@@ -231,6 +236,8 @@ static int CEmuZipFsFindIndex(const CEmuZipFs* fs, const char* name)
 		   `MMD2.SYS 4096` (CONFIG tail) stripped to "MMD2" and hit mmd2.com
 		   first in the zip, then AddFile overwrote the real SYS (orangerd
 		   device INIT ran the COM: FA/CLI at CS:0, pic=FF, dosmiss=intD2). */
+		if (strchr(name, '/') || strchr(name, '\\'))
+			continue;
 		const int queryHasExt = (strchr(base, '.') != NULL);
 		if ((!queryHasExt && baseNoExt[0] && CEmuZipNameMatch(fnNoExt, baseNoExt))
 			|| CEmuZipNameFuzzy(fn, base))

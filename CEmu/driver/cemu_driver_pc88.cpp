@@ -474,6 +474,7 @@ void CDriverPc88::RunUntil(uint64_t endCycle)
 	while ((uint64_t)cpu->time64() < endCycle) {
 		if (forceEiBoot_ && !cpu->r.iff1 && cpu->r.im == 2)
 			cpu->r.iff1 = 1;
+		hw_->GuardHardrankPc();
 		const uint64_t now = (uint64_t)cpu->time64();
 		DeliverIrqs(now);
 		/* tf88sr PATCH play HALTs waiting for RTC; without a wake advance
@@ -577,6 +578,20 @@ void CDriverPc88::TriggerPlay()
 						break;
 				}
 				hw_->EnableDeferredRtc();
+				if (hw_->NeedsPlayEi() && !cpu->r.iff1)
+					cpu->r.iff1 = 1;
+			} else if (base >= 0x40 && base < 0x100 && !hw_->PlayKickInitOff()) {
+				/* robowr88 song 1: page-0 trampoline CALL CB5A / JP CB48.
+				   cmd=1 still CALL $005B → PROG1 BA41 (zeros once PROG2 is
+				   staged). Kick only; wait until PC is back in the poll
+				   (below the trampoline at $C0), no RTC enable. */
+				hw_->cmd = 0;
+				hw_->DirectPlayKick(base, hw_->PlayKickEi());
+				for (int step = 0; step < 64; step++) {
+					RunUntil((uint64_t)cpu->time64() + (uint64_t)cpuHz_ / 64);
+					if (cpu->r.pc < 0x40)
+						break;
+				}
 				if (hw_->NeedsPlayEi() && !cpu->r.iff1)
 					cpu->r.iff1 = 1;
 			} else if (base == 0x1000) {
@@ -924,6 +939,7 @@ int CDriverPc88::Render(int16_t* stereo, int frames)
 		   runs past the budget by ~half an instruction (~5–6% extra Z80/OPN
 		   clocks) and soundtrack tempo runs fast. */
 		cpuCycleBudget_ += (int64_t)cyclesPerSample;
+		hw_->GuardHardrankPc();
 		while (cpuCycleBudget_ > 0) {
 			const uint64_t now = (uint64_t)cpu->time64();
 			DeliverIrqs(now);

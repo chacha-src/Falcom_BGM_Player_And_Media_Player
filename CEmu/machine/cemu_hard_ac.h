@@ -141,6 +141,7 @@ public:
 	unsigned Sega2ASampleOffset(unsigned addr) const;
 	int LoadRomsSegaScsp(CEmuZipFs* fs, const CEmuGameEntry* ge);
 	void Sega2AInjectSong(uint16_t cmd);
+	int SegaScspMidiPending() const;
 	/* Hornet / GTI Club: 68000 + RF5C400 + K056800 (MAME hornet/gticlub). */
 	unsigned HornetRead16(unsigned addr);
 	unsigned HornetRead8(unsigned addr);
@@ -184,6 +185,9 @@ public:
 	/* Mappy-era 15XX: M6809 sound CPU (subtype wsg6809), not Z80 Pac-Man WSG. */
 	int WsgMappy() const { return wsgMappy_; }
 	int Wsg63701() const { return wsg63701_; }
+	/* Pengo / Pengo2: main Z80 + Namco 3-voice WSG @9000 (not Galaga NMI).
+	   Marker lives in unused-on-WSG sys16RomBoard_ — no extra CHardAc field. */
+	int PengoWsg() const { return sys16RomBoard_ == 0x5047u; }
 	unsigned Sys16RomBoard() const { return sys16RomBoard_; }
 	uint8_t ToaplanYmPort() const { return toaplanYmPort_; }
 	int ToaplanKaneko() const { return toaplanKaneko_ == 1; }
@@ -503,8 +507,6 @@ public:
 	struct mc6809* NamcoM6809Cpu() { return namcoM6809_; }
 	uint8_t NamcoM6809Read8(uint16_t addr);
 	void NamcoM6809Write8(uint16_t addr, uint8_t v);
-	/* digdug2/todruaga/toypop/motos IRQ copies from $80 (LDU #$0080). */
-	int WsgMail80();
 	void NamcoM6809SyncIrqs();
 	void NamcoM6809SetBank(unsigned bank);
 	unsigned NamcoM6809Bank() const { return namcoBank_; }
@@ -538,8 +540,23 @@ public:
 	   1 = darius (YM2203 @9000 + YM2203 #2 @A000, PC060HA @B000)
 	   2 = kikikai (YM2203 @C000, song byte in shared RAM 9FFF, vblank IRQ)
 	   3 = tokio (YM2203 @B000, latch @9000, NMI A800/A000)
-	   4 = bublbobl (YM2203 @9000, YM3526 @A000, latch @B000, NMI B001/B002) */
+	   4 = bublbobl (YM2203 @9000, YM3526 @A000, latch @B000, NMI B001/B002)
+	   5 = lsasquad (YM2203 @A000 + AY @C000, latch D000, NMI D400/D800)
+	   6 = lkage (dual YM2203 @9000/@A000, latch B000, NMI B001/B002)
+	   On FLSTORY: 1 = msisaac dual AY+MSM; 3 = nycaptor dual AY+MSM. */
 	int TaitoOpmMap() const { return taitoOpmMap_; }
+	int MsisaacMap() const { return (board_ == CEMU_AC_BOARD_FLSTORY && taitoOpmMap_ == 1) ? 1 : 0; }
+	int NycaptorMap() const { return (board_ == CEMU_AC_BOARD_FLSTORY && taitoOpmMap_ == 3) ? 1 : 0; }
+	int Cop01Ay() const { return (board_ == CEMU_AC_BOARD_TAITO_SJ && vsIoKind_ == 4) ? 1 : 0; }
+	int VsIoKind() const { return vsIoKind_; }
+	int MagmaxAy() const { return (board_ == CEMU_AC_BOARD_TAITO_SJ && vsIoKind_ == 5) ? 1 : 0; }
+	int BombjackAy() const { return (board_ == CEMU_AC_BOARD_TAITO_SJ && vsIoKind_ == 6) ? 1 : 0; }
+	int CalorieAy() const { return (board_ == CEMU_AC_BOARD_TAITO_SJ && vsIoKind_ == 7) ? 1 : 0; }
+	int SolomonAy() const { return (board_ == CEMU_AC_BOARD_TAITO_SJ && vsIoKind_ == 8) ? 1 : 0; }
+	int HalleysAy() const { return (board_ == CEMU_AC_BOARD_TAITO_SJ && vsIoKind_ == 9) ? 1 : 0; }
+	int PbactionAy() const { return (board_ == CEMU_AC_BOARD_TAITO_SJ && vsIoKind_ == 10) ? 1 : 0; }
+	int ChaknpopAy() const { return (board_ == CEMU_AC_BOARD_TAITO_SJ && vsIoKind_ == 11) ? 1 : 0; }
+	int NbAyIo() const { return Cop01Ay() || MagmaxAy(); }
 	int AlphaNmiMask() const { return alphaNmiMask_; }
 	unsigned AlphaOpllWrites() const;
 	void AlphaMixOpll(int16_t* stereo, int frames);

@@ -10,6 +10,7 @@
 #include "PluginKinds.h"
 #include "SasamiToneNames.h"
 #include "kb_sasami/source/sasami_midi.h"
+#include "CEmu/cemu_midi_live.h"
 #include <math.h>
 #include <mmsystem.h>
 
@@ -2995,9 +2996,15 @@ void CMidiMonitorDlg::SyncFromPlayback()
 			pbHeard = m_loopStartSample + ((pbHeard - m_loopEndSample - 1) % span);
 	}
 	if (pbRaw < m_lastPlayb || (m_hearPlayb >= 0 && pbHeard < m_hearPlayb)) {
-		ResetParts();
-		m_evPos = 0;
-		m_hadNote = 0;
+		/* A live MPU session's programs and CCs arrive once over the tap and are
+		   not in the stub SMF, so there is nothing to replay them from: wiping
+		   the parts here left every row back on the default piano for the rest
+		   of the song. Only the SMF cursor is rewound. */
+		if (!CEmuMidiLiveActive()) {
+			ResetParts();
+			m_evPos = 0;
+			m_hadNote = 0;
+		}
 		m_pbAnchor = 0;
 		m_pbQpc = 0;
 	}
@@ -4011,8 +4018,14 @@ void CMidiMonitorDlg::DrainLiveTap()
 	BYTE ports[64];
 	DWORD msgs[64];
 	int applied = 0;
+	/* CEmu live MPU stamps each tap with the frame it is heard at, and the VST
+	   prefetch renders seconds ahead of the speakers, so hold the taps back to
+	   the play cursor instead of applying them at render time. */
+	__int64 nowFrame = -1;
+	if (CEmuMidiLiveActive())
+		nowFrame = OggGetCemuLiveHeardFrames();
 	for (;;) {
-		const int n = VstLiveTapStealShorts(ports, msgs, 64);
+		const int n = VstLiveTapStealShortsDue(nowFrame, ports, msgs, 64);
 		if (n <= 0) break;
 		if (!m_frozen) {
 			for (int i = 0; i < n; ++i) {
@@ -4465,6 +4478,10 @@ void CMidiMonitorDlg::DrawMonitor3D(CDC& dc, int w, int h)
 
 BOOL CMidiMonitorDlg::OnInitDialog()
 {
+	/* DetachForDestroy が立てたまま残ると、2回目の Create で OnPaint が即 return し
+	   Aero のガラスだけが残って中身が全部消える。ピアノロールは既に同じリセットがある。 */
+	m_paintDisabled = false;
+	m_fullDraw = true;
 	CCustomBlurDialogExBase::OnInitDialog();
 	SetWindowText(LL14(
 		L"MIDIモニタ", L"MIDI Monitor", L"Moniteur MIDI", L"Monitor MIDI", L"Monitor MIDI",
@@ -4650,7 +4667,11 @@ void CMidiMonitorDlg::OnTimer(UINT_PTR nIDEvent)
 			PersistPos();
 			m_persistAge = 0;
 		}
-		PumpIdle();
+		/* 再生中は timerp が PumpSyncNow する。FM モニタも開いていると
+		   16ms タイマと二重になり鍵盤描画が遅れるので本体は任せる。 */
+		extern int plf;
+		if (!(playy != 0 && plf == 1 && og && og->FmMonitorIsVisible()))
+			PumpIdle();
 	} else if (nIDEvent == 2) {
 		IdlePulse();
 	}
@@ -4812,7 +4833,10 @@ void CMidiMonitorDlg::IdlePulse()
 	if (fg)
 		::GetWindowThreadProcessId(fg, &fgPid);
 	const int ours = (fgPid == GetCurrentProcessId()) ? 1 : 0;
-	const int minMs = ours ? 4 : 16;
+	const int peer = (og && og->FmMonitorIsVisible()) ? 1 : 0;
+	/* 前面でも 4ms 強制 UpdateWindow は FM モニタの鍵盤と UI スレッドを奪い合う。
+	   同時表示中は 16ms に落とし、描画は WM_PAINT に任せる。 */
+	const int minMs = (peer || !ours) ? 16 : 4;
 
 	LONGLONG now = 0;
 	MmQpcPair(m_pbFreq, now);
@@ -4826,9 +4850,11 @@ void CMidiMonitorDlg::IdlePulse()
 
 	m_idleLastQpc = now;
 	PumpIdle();
-	CRect ur;
-	if (GetUpdateRect(&ur, FALSE))
-		UpdateWindow();
+	if (!peer) {
+		CRect ur;
+		if (GetUpdateRect(&ur, FALSE))
+			UpdateWindow();
+	}
 	SwitchToThread();
 }
 

@@ -83,6 +83,7 @@ public:
 	int NeedsLongPlayDrain() const { return longPlayDrain_; }
 	int NeedsNavituneArm() const { return armNavituneTimer_; }
 	int SkipUnwedge() const;
+	void GuardHardrankPc();
 	int NeedsDeferredRtc() const { return deferRtcAfterPlay_; }
 	void EnableDeferredRtc()
 	{
@@ -271,6 +272,9 @@ private:
 	/* N88 thexder/bokosuka: RTC ISR address DEMOM/MUSIC would LD (F304),HL. */
 	unsigned n88RtcIsr_;
 	unsigned n88RtcThrottleAddr_;
+
+	/* hardrank SMD-88.sb2: keep I=$91 / vec04@9104 on the player ISR. */
+	int hardrankSb2_;
 
 	/* Scheme OPNA specialty (PATCH@9000, BGM via port0 → C000). */
 	int schemeMode_;

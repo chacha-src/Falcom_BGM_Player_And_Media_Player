@@ -304,26 +304,43 @@ static void bindOpmdrvIocsF0(CHardX68k* hw)
 
 static unsigned findZmusicEntry(CHardX68k* hw)
 {
-	static const unsigned kDeltas[] = {
-		0x08u, 0x10u, 0x50cu, 0x6a0u, 0x54cu, 0x400u, 0x200u, 0x100u, 0x80u
-	};
-	/* Scan low 4MB for "ZmuSiC". */
+	/* Official Z-MUSIC v2 resident check (libzm2internal.h / zmusic2 README):
+	     move.l $8c,a0 / subq.w #8,a0 / cmpi.l #'ZmuS' / cmpi.w #'iC'
+	     version word at entry-2 must be < $3000 (exclude ZMSC3.X).
+	   So trap #3 is ident+8. ZMD songs are "\x10ZmuSiC" — skip those.
+	   ZMSC.X file layout still uses ident at entry+$50C / +$6A0. */
+	static const unsigned kFileDeltas[] = { 0x50cu, 0x6a0u, 0x54cu };
+	unsigned fileHit = 0;
 	for (unsigned base = 0; base < 0x400000u; base += 0x100000u) {
 		const unsigned span = 0x100000u;
-		for (unsigned a = base; a + 6u < base + span; a += 2u) {
+		for (unsigned a = base; a + 8u < base + span; a += 2u) {
 			if (hw->Read8(a) != 'Z' || hw->Read8(a + 1) != 'm') continue;
 			if (hw->Read8(a + 2) != 'u' || hw->Read8(a + 3) != 'S') continue;
 			if (hw->Read8(a + 4) != 'i' || hw->Read8(a + 5) != 'C') continue;
-			for (unsigned di = 0; di < sizeof(kDeltas) / sizeof(kDeltas[0]); di++) {
-				if (a < kDeltas[di]) continue;
-				const unsigned e = a - kDeltas[di];
-				if (looksCode(hw, e)) return e;
+			if (a >= 1u && hw->Read8(a - 1u) == 0x10u)
+				continue;
+			const unsigned ver = hw->Read16(a + 6u);
+			if (ver >= 0x3000u)
+				continue;
+			const unsigned e = a + 8u;
+			if (hw->Read16(e) == 0x48e7u)
+				return e;
+			if (!fileHit) {
+				for (unsigned di = 0; di < sizeof(kFileDeltas) / sizeof(kFileDeltas[0]); di++) {
+					if (a < kFileDeltas[di]) continue;
+					const unsigned fe = a - kFileDeltas[di];
+					const unsigned w = hw->Read16(fe);
+					if (w == 0x4e75u)
+						continue;
+					if (looksCode(hw, fe)) {
+						fileHit = fe;
+						break;
+					}
+				}
 			}
-			/* Signature itself sometimes sits at entry+0 (rare). */
-			if (looksCode(hw, a)) return a;
 		}
 	}
-	return 0;
+	return fileHit;
 }
 
 /* First XML-placed ZMD in low RAM (header 'ZMD\0' or 'zmd\0'). */
@@ -948,13 +965,15 @@ int CEmuX68kDosInstall(CHardX68k* hw)
 	const int thinIocs = iocsSlotThin(hw, 0x68) || iocsSlotThin(hw, 0x6a);
 	const unsigned trap1 = hw->Read32(0x84) & 0xffffffu;
 	const int thinTrap1 = isHangStub(hw, trap1);
+	const int mailboxTrap3 = (trap3 >= 0x1040u && trap3 < 0x1080u
+		&& hw->Read16(0x1040u) == 0x60FEu);
 	const int thinTrap3 = isHangStub(hw, trap3);
 	const int thin10c = isHangStub(hw, hook10c);
 	const int soft10c = ((hook10c & 0xffffffu) == (CEMU_X68K_DOS_SOFT10C & 0xffffffu));
 
 	/* Nothing to emit/retarget — still allow OPMDRV Soft10C→ISR upgrade + $F0. */
 	if (!thinF && !thin15 && !thinIocs && !thinTrap3 && !thinTrap1 && !thin10c
-		&& !soft10c && (onOsF || onOs15)) {
+		&& !soft10c && !mailboxTrap3 && (onOsF || onOs15)) {
 		bindOpmdrvIocsF0(hw);
 		if (isOpmdrvBinGlue(hw)) {
 			bindOpmdrvIsrIfSoft(hw);
@@ -980,7 +999,8 @@ int CEmuX68kDosInstall(CHardX68k* hw)
 		CEmuX68kHookFloat2(hw);
 		return 1;
 	}
-	if (!thinF && !thin15 && !thinIocs && !thinTrap3 && !thinTrap1 && !thin10c && !soft10c) {
+	if (!thinF && !thin15 && !thinIocs && !thinTrap3 && !thinTrap1 && !thin10c
+		&& !soft10c && !mailboxTrap3) {
 		CEmuX68kHookFloat2(hw);
 		return 0;
 	}
@@ -1072,13 +1092,21 @@ int CEmuX68kDosInstall(CHardX68k* hw)
 	}
 
 	/* Thin TRAP#3 is often nop;bra* (BOOT hang). Always retarget — gate no-ops
-	   if ZMUSIC was not found. Settle may re-plant this after Line-F is on OS. */
+	   if ZMUSIC was not found. Settle may re-plant this after Line-F is on OS.
+	   Real ZMUSIC (ident at entry-8) must own $8C: the handler RTEs, so the
+	   DOS trampoline's jsr would smash the exception frame. */
 	if (thinTrap3) {
-		/* Gate already in image from first emit; do not re-emit (resets heap). */
-		hw->Write32(0x8c, CEMU_X68K_DOS_TRAP3);
+		hw->Write32(0x8c, zmusic ? zmusic : CEMU_X68K_DOS_TRAP3);
 		/* nop;bra* → rte so a trap that races into the old stub returns. */
 		hw->Write16(trap3, 0x4e73);
 		hw->Write16(trap3 + 2u, 0x4e73);
+	}
+	/* angdive/bfighter reset trap3 is $1042 (BSR into the $1040 bra.s *
+	   island). Do not overlay RTE on $1040/$1042 — retarget $8C only. */
+	if (mailboxTrap3) {
+		hw->Write32(0x8c, zmusic ? zmusic : CEMU_X68K_DOS_TRAP3);
+		if (lineF >= 0x1040u && lineF < 0x1080u)
+			hw->Write32(0x2c, CEMU_X68K_DOS_LINEF);
 	}
 
 	/* Soft OPM hook $10C: only retarget nop;bra* hang to OS RTS stub

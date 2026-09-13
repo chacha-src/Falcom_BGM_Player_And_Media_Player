@@ -8,5 +8,8 @@
 CChip* CEmuChipSccCreate(uint32_t clockHz, int sampleRate);
 void CEmuChipSccDestroy(CChip* c);
 
-/* Write one SCC register (0x00-0x8F). Also updates the FM monitor. */
+/* Write one SCC register (0x00-0xBF). Also updates the FM monitor. */
 void CEmuChipSccWriteReg(CChip* c, unsigned reg, uint8_t data);
+uint8_t CEmuChipSccReadReg(CChip* c, unsigned reg);
+/* SCC-I plus mode: waves at $B800, freq/vol/on at $B8A0-$B8AF. */
+void CEmuChipSccSetPlusMode(CChip* c, int plus);

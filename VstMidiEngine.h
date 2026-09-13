@@ -248,8 +248,13 @@ int VstLiveSysexInfo(wchar_t* out, int chars, int* ageMs);
 // ハードウェア／PC 鍵盤から VST ホストが実際に送った MIDI（SMF thru ではない）。
 // MIDI モニタが UI タイマーで Drain する。
 void VstLiveTapPushShort(int portIndex0to2, DWORD shortMsg);
+/* dueFrame = audible frame this message belongs to (-1 = as soon as seen).
+   Renderers that run seconds ahead of the speakers must stamp their taps. */
+void VstLiveTapPushShortAt(int portIndex0to2, DWORD shortMsg, __int64 dueFrame);
+void VstLiveTapFlush(void);
 void VstLiveTapPushSysex(int portIndex0to2, const unsigned char* data, int bytes);
 int VstLiveTapStealShorts(BYTE* ports, DWORD* msgs, int maxCount);
+int VstLiveTapStealShortsDue(__int64 nowFrame, BYTE* ports, DWORD* msgs, int maxCount);
 int VstLiveTapStealSysex(int* portIndex0to2, unsigned char* data, int maxBytes);
 
 #ifdef __cplusplus

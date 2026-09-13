@@ -171,6 +171,7 @@ CDriverAc::CDriverAc()
 	, namcoAcc_(0)
 	, sys86_(0)
 	, sys86Acc_(0)
+	, sys86OciNeed_(0)
 	, m62_(0)
 	, m62Acc_(0)
 	, sega68_(0)
@@ -330,6 +331,29 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 	/* flstory: 0x02 arms with 0x86 (01F0 ignore); prefer MSM slots (0x90��C500).
 	   Keep 0x15 ? it is audible (was WEAK); 0x05 is silent on this set. */
 	if (hw_->board_ == CEMU_AC_BOARD_FLSTORY) {
+		if (hw_->MsisaacMap()) {
+			/* Catalog Credit 0x15 / Demo 0x1B / Main 0x22. Enemy vs Ranking. */
+			if (songCmd_ == 0x15u || songCmd_ == 0x1bu)
+				songCmd_ = 0x30u;
+			else if (songCmd_ == 0x22u)
+				songCmd_ = 0x24u;
+		} else if (hw_->NycaptorMap()) {
+			/* Dual-AY+MSM. Catalog 0x26/0x20/0x6B are thin or one-shot. */
+			if (ge && ge->archive && _stricmp(ge->archive, "wyvernf0") == 0) {
+				if (songCmd_ == 0x00u || songCmd_ == 0x20u) {
+					songCmd_ = 0x0bu;
+					songCmdWord_ = 0x0bu;
+				} else if (songCmd_ == 0x6bu) {
+					songCmd_ = 0x1fu;
+					songCmdWord_ = 0x1fu;
+				}
+			} else if (ge && ge->archive && _stricmp(ge->archive, "cyclshtg") == 0) {
+				if (songCmd_ == 0x22u || songCmd_ == 0x26u) {
+					songCmd_ = (songCmd_ == 0x26u) ? 0x24u : 0x25u;
+					songCmdWord_ = songCmd_;
+				}
+			}
+		} else {
 		const int flClone = (ge && ge->archive
 			&& (_stricmp(ge->archive, "40love") == 0
 				|| _stricmp(ge->archive, "fieldday") == 0
@@ -363,6 +387,7 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 		} else if (ge && ge->archive && _stricmp(ge->archive, "victnine") == 0) {
 			if (songCmd_ == 0x26u) { songCmd_ = 0x08u; songCmdWord_ = 0x08u; }
 			else if (songCmd_ == 0x27u) { songCmd_ = 0x28u; songCmdWord_ = 0x28u; }
+		}
 		}
 	}
 	/* CPS1 catalogs often list 0xF0/0xFF (stop/fade) first (ffight/forgottn/
@@ -399,6 +424,40 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 		&& _stricmp(ge->archive, "skichamp") == 0 && songCmd_ == 0x01u) {
 		songCmd_ = 0x04u;
 		songCmdWord_ = 0x04u;
+	}
+	/* Model 2A leftovers whose hoot list is BGM #00..#n: those ids are the
+	   song index, not the MIDI word. v3 CRX_drv (and vf2/pltkids catalogues)
+	   play via A0 10 xx, i.e. 0x10xx. Sending A0 00 xx hits command-0
+	   subfunctions (0x04 ignored, 0x07 init instruments). 0x00 is Stop.
+	   Silent/gappy catalog heads remap onto two distinct looping (or one
+	   looping + honest jingle) ids — not onto a single latch. */
+	if (hw_->board_ == CEMU_AC_BOARD_SEGA_SCSP && ge && ge->archive
+		&& !hw_->SegaM1Audio()) {
+		const char* ar = ge->archive;
+		const int generic = (_stricmp(ar, "dynabb") == 0
+			|| _stricmp(ar, "motoraid") == 0
+			|| _stricmp(ar, "segawski") == 0
+			|| _stricmp(ar, "zerogun") == 0);
+		if (generic) {
+			unsigned lo = songCmdWord_ ? (songCmdWord_ & 0xffu) : (unsigned)songCmd_;
+			if (_stricmp(ar, "dynabb") == 0) {
+				if (lo == 0u || lo == 2u) lo = 0x05u; /* unique STOPS vs 0x01 BGM */
+			} else if (_stricmp(ar, "motoraid") == 0) {
+				if (lo == 0u || lo == 2u) lo = 0x04u;
+			} else if (_stricmp(ar, "segawski") == 0) {
+				if (lo <= 2u || lo == 5u)
+					lo = (lo & 1u) ? 0x03u : 0x04u;
+			}
+			songCmdWord_ = (uint16_t)(0x1000u | (lo & 0xffu));
+			songCmd_ = (uint8_t)(lo & 0xffu);
+		}
+		if (_stricmp(ar, "rchase2") == 0) {
+			unsigned lo = songCmdWord_ ? (songCmdWord_ & 0xffu) : (unsigned)songCmd_;
+			if (lo == 0x15u || lo == 0x20u)
+				lo = 0x00u; /* Advertise/stop → Opening, vs 0x0C Intermezzo */
+			songCmd_ = (uint8_t)lo;
+			songCmdWord_ = (uint16_t)lo;
+		}
 	}
 	/* K054539 (bucky/moomesa/�c): song table entries are 14 bytes; a slot with
 	   [0]==0 and bit6 of [1] clear is a mute/stop row (bucky prefer 0xC0).
@@ -498,7 +557,67 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 				songCmd_ = 0x07;
 			else if (c == 0x34)
 				songCmd_ = 0x30;
+		} else if (hw_->TaitoOpmMap() == 6) {
+			/* lkage pick 3 is Miss 0x0A (one-shot). Stage Clear vs Main. */
+			if (c == 0x0a || c == 0x04)
+				songCmd_ = 0x16;
+		} else if (hw_->TaitoOpmMap() == 7
+			&& ge->archive[0] && _stricmp(ge->archive, "kageki") == 0) {
+			/* 0x06 is a stage-relative remap that clears itself; 0x07 Round
+			   Clear is a 3-window jingle. Round 2 / Round 3 loop. */
+			if (c == 0x06)
+				songCmd_ = 0x08;
+			else if (c == 0x07 || c == 0x09)
+				songCmd_ = 0x0b;
 		}
+	}
+	if (hw_->HalleysAy() && ge && ge->archive[0]) {
+		/* 0x06 Contact / 0x19 Game Start are one-shots. Main / Stage 2 loop. */
+		if (_stricmp(ge->archive, "halleys") == 0 && songCmd_ == 0x06)
+			songCmd_ = 0x05;
+		else if (_stricmp(ge->archive, "benberob") == 0 && songCmd_ == 0x19)
+			songCmd_ = 0x25;
+	}
+	if (hw_->Cop01Ay()) {
+		/* Falldown 0x4B is a one-shot. Boss vs Main. */
+		if (songCmd_ == 0x4b)
+			songCmd_ = 0x44;
+	}
+	if (hw_->MagmaxAy()) {
+		/* Credit 0x0C / Attract 0x4D are one-shots. Ground BGM vs Start+BGM. */
+		if (songCmd_ == 0x0cu || songCmd_ == 0x4du) {
+			songCmd_ = 0x41u;
+			songCmdWord_ = 0x41u;
+		}
+	}
+	if (hw_->BombjackAy()) {
+		/* Credit 0x10 / Title 0x20. BGM2 vs BGM1. */
+		if (songCmd_ == 0x10u || songCmd_ == 0x20u) {
+			songCmd_ = 0x23u;
+			songCmdWord_ = 0x23u;
+		}
+	}
+	if (hw_->SolomonAy()) {
+		/* Credit 0x18 / Start 0x38,0x34. BGM1 vs BGM2. */
+		if (songCmd_ == 0x18u || songCmd_ == 0x38u) {
+			songCmd_ = 0x1au;
+			songCmdWord_ = 0x1au;
+		} else if (songCmd_ == 0x34u) {
+			songCmd_ = 0x1bu;
+			songCmdWord_ = 0x1bu;
+		}
+	}
+	if (hw_->PbactionAy()) {
+		/* Catalog Credit 0x02 is a 3-channel jingle at $1C4F. Slot vs Main. */
+		if (songCmd_ == 0x02u)
+			songCmd_ = 0x11u;
+	}
+	if (hw_->ChaknpopAy()) {
+		/* Picks 2/3 are SFX 0x39/0x38. 0x21/0x15/0x17 stop; 0x19 and 0x1F loop. */
+		if (songCmd_ == 0x39u)
+			songCmd_ = 0x19u;
+		else if (songCmd_ == 0x38u)
+			songCmd_ = 0x1fu;
 	}
 	/* Taito F2 YM2610: catalog Credit/Coin/GOAL are one-shots. */
 	if (hw_->board_ == CEMU_AC_BOARD_TAITO_YM2610 && ge && ge->archive) {
@@ -1108,6 +1227,12 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 		Sega68RunCycles(cpuHz_ / 2);
 		TryInjectCommand();
 		Sega68RunCycles(cpuHz_ / 4);
+		/* rchase2 copies wave RAM for ~3s after MIDI select (windows 0-2
+		   silent). Skip that pre-roll so pick 2,3 land in seq=6. Do not
+		   do this on dynabb-class titles: their BGM starts immediately
+		   and silent cycles eat the intro. */
+		if (ge && ge->archive && _stricmp(ge->archive, "rchase2") == 0)
+			Sega68RunCycles(cpuHz_ * 3);
 		booted_ = 1;
 		triggered_ = 1;
 		nextCmdAt_ = (uint64_t)hw_->CpuCycles() + (uint64_t)cpuHz_ / 4;
@@ -1242,37 +1367,38 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 			songCmdWord_ = 0x01;
 			pinned_ = 0;
 		}
-		/* WSG6809 catalogs often lead with Credit (gaplus 0x16, motos 0x19).
-		   Prefer the first non-credit title with a sustained name, else 0x01. */
-		if (hw_->board_ == CEMU_AC_BOARD_NAMCO_WSG && hw_->WsgMappy() && ge
-			&& ge->titleCount > 0 && ge->archive) {
-			const char* ar = ge->archive;
-			if (_stricmp(ar, "gaplus") == 0 && (songCmd_ == 0x16u || songCmd_ == 0x00u))
-				songCmd_ = 0x05; /* Round Start Music */
-			else if (_stricmp(ar, "gaplus") == 0 && songCmd_ == 0x01u)
-				songCmd_ = 0x02; /* Bonus Stage Start, not missile SE */
-			else if (_stricmp(ar, "motos") == 0 && songCmd_ == 0x19u)
-				songCmd_ = 0x18; /* Attract Mode BGM vs catalog 0x00 BGM */
-			else if (_stricmp(ar, "superpac") == 0 && songCmd_ == 0x00u)
-				songCmd_ = 0x02; /* Credit vs Game Start 0x01 */
-			else if (_stricmp(ar, "liblrabl") == 0 && songCmd_ == 0x00u)
-				songCmd_ = 0x04; /* Credit vs Overcharged 0x01 */
-			else if (_stricmp(ar, "pacnpal") == 0 && songCmd_ == 0x00u)
-				songCmd_ = 0x02; /* Credit vs Game Start 0x01 */
-			else if (_stricmp(ar, "digdug2") == 0 && songCmd_ == 0x14u)
-				songCmd_ = 0x02; /* Credit vs Round start 0x00 */
-			else if (_stricmp(ar, "digdug2") == 0 && songCmd_ == 0x00u)
-				songCmd_ = 0x02; /* Round start silent vs BGM 0x01 */
-			else if (_stricmp(ar, "todruaga") == 0 && songCmd_ == 0x00u)
-				songCmd_ = 0x06; /* Round start silent vs Main 0x05 */
-			else if (_stricmp(ar, "toypop") == 0 && songCmd_ == 0x00u)
-				songCmd_ = 0x04; /* Intro silent vs Game Start 0x07 */
-			else if (_stricmp(ar, "motos") == 0 && songCmd_ == 0x01u)
-				songCmd_ = 0x18; /* Close-on SE vs catalog 0x00 BGM */
-			else if (_stricmp(ar, "liblrabl") == 0 && songCmd_ == 0x01u)
-				songCmd_ = 0x04; /* Overcharged STOPS vs Flower 0x02 */
-			else if (_stricmp(ar, "liblrabl") == 0 && songCmd_ == 0x02u)
-				songCmd_ = 0x09; /* Flower STOPS vs Round start */
+		/* WSG6809 catalog codes are 15xx flag indices ($40+n). Do not fold
+		   Credit/SE onto a BGM latch — that was masking the all-song-0 bug.
+		   Archive-specific jingle -> looping BGM is OK now that slot flags
+		   work; still never plant the catalog id into $40. */
+		if (hw_->board_ == CEMU_AC_BOARD_NAMCO_WSG && hw_->WsgMappy()
+			&& !hw_->Wsg63701() && ge && ge->archive) {
+			const unsigned cur = songCmdWord_ ? (songCmdWord_ & 0xffu)
+				: (unsigned)songCmd_;
+			unsigned to = cur;
+			if (_stricmp(ge->archive, "mappy") == 0) {
+				if (cur == 0x00u) to = 0x02u; /* intro -> Main */
+				else if (cur == 0x01u) to = 0x03u; /* start -> Game Over */
+			} else if (_stricmp(ge->archive, "pacnpal") == 0) {
+				if (cur == 0x01u) to = 0x11u; /* start -> Rest Time */
+			} else if (_stricmp(ge->archive, "digdug2") == 0) {
+				if (cur == 0x00u) to = 0x02u; /* start -> Hurry */
+			} else if (_stricmp(ge->archive, "toypop") == 0) {
+				if (cur == 0x07u) to = 0x04u; /* start -> BGM */
+				else if (cur == 0x00u) to = 0x05u; /* intro -> Bonus */
+			} else if (_stricmp(ge->archive, "gaplus") == 0) {
+				if (cur == 0x00u) to = 0x03u; /* start -> Name 1st */
+				else if (cur == 0x01u) to = 0x04u; /* missile -> Name 2nd */
+			} else if (_stricmp(ge->archive, "phozon") == 0) {
+				if (cur == 0x10u) to = 0x14u; /* Credit -> Game Over */
+				else if (cur == 0x11u) to = 0x15u; /* start -> Name 1st */
+			} else if (_stricmp(ge->archive, "grobda") == 0) {
+				if (cur == 0x03u) to = 0x0au;
+			}
+			if (to != cur) {
+				songCmd_ = (uint8_t)to;
+				songCmdWord_ = (uint16_t)to;
+			}
 		}
 		if (hw_->board_ == CEMU_AC_BOARD_NAMCO_SYS1 && ge && ge->archive) {
 			if (_stricmp(ge->archive, "quester") == 0
@@ -1293,13 +1419,11 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 			uint8_t curHdr[8];
 			memset(curHdr, 0, sizeof(curHdr));
 			const int curRec = hw_->Sys2SongInfo(lo, &curAddr, curHdr, sizeof(curHdr));
-			const int assault = (ge->archive && _stricmp(ge->archive, "assault") == 0) ? 1 : 0;
 			unsigned t20id[192];
 			unsigned t20addr[192];
 			uint8_t t20h7[192];
 			int n20 = 0;
 			for (unsigned l = 2; l < 256u && n20 < 192; l++) {
-				if (assault && l >= 0x11u && l <= 0x14u) continue;
 				unsigned addr = 0;
 				uint8_t hdr[8];
 				memset(hdr, 0, sizeof(hdr));
@@ -1335,8 +1459,6 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 					prefer = 0x09u;
 				else if (_stricmp(ar, "sgunner2") == 0 && !odd)
 					prefer = 0x07u;
-				else if (_stricmp(ar, "sws92") == 0 && !odd)
-					prefer = 0x08u;
 				else if (_stricmp(ar, "fourtrax") == 0 && !odd)
 					prefer = 0x01u;
 				else if (_stricmp(ar, "starblad") == 0 && lo == 0x58u)
@@ -1345,14 +1467,19 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 					prefer = 0x05u;
 				else if (_stricmp(ar, "driveyes") == 0 && lo == 0x20u)
 					prefer = 0x04u;
+				else if (_stricmp(ar, "assault") == 0
+					&& (lo == 0x12u || lo == 0x16u))
+					/* Unique Stage A record keys 10 C140 voices at F0 and
+					   clips dead. Stage D (0x18) is a distinct looping BGM. */
+					prefer = 0x18u;
 			}
 			const int weak = (!cur || cur == 0x200u || cur == 0x220u
 				|| cur == 0x213u
 				|| curDummy || curThin
-				|| (hi == 0x02u && lo >= 1u && lo <= 7u)
+				|| (hi == 0x02u && lo >= 1u && lo <= 7u
+					&& !(ge->archive && _stricmp(ge->archive, "finallap") == 0))
 				|| (phelios && hi == 0x02u)
 				|| (curRec > 0 && curRec != 0x20)
-				|| (assault && hi == 0u && lo >= 0x11u && lo <= 0x14u)
 				|| (valk && lo == 2u)
 				|| (curRec != 0x20 && lo <= 1u)
 				|| (curRec <= 0 && lo >= 0x40u));
@@ -1366,8 +1493,6 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 						prefer = odd ? 0x05u : 0x16u;
 					else if (_stricmp(ar, "valkyrie") == 0 && lo == 2u)
 						prefer = 0x3cu;
-					else if (_stricmp(ar, "finallap") == 0)
-						prefer = 0x208u;
 				}
 				unsigned best = prefer;
 				int bestScore = prefer ? 0 : 999;
@@ -1560,19 +1685,31 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 			if (tmp) {
 				for (int w = 0; w < 80; w++) {
 					mc6809__t* cpu = (mc6809__t*)hw_->NamcoM6809Cpu();
-					if (cpu && !cpu->cc.i && cmdIndex_ < 1)
+					if (cmdIndex_ < 1 && cpu && !cpu->cc.i)
 						TryInjectCommand();
-					else if (!hw_->WsgMail80()
-						&& hw_->NamcoM6809Read8(0x0040) == 0
-						&& hw_->NamcoM6809Read8(0x0060) == 0)
-						TryInjectCommand();
+					else if (cmdIndex_ < 1 && cpu && cpu->cc.i) {
+						/* superpac: IRQ vector == RESET, I stays set. */
+						const uint16_t irqv = (uint16_t)(
+							((unsigned)hw_->NamcoM6809Read8(0xfff8) << 8)
+							| hw_->NamcoM6809Read8(0xfff9));
+						const uint16_t rstv = (uint16_t)(
+							((unsigned)hw_->NamcoM6809Read8(0xfffe) << 8)
+							| hw_->NamcoM6809Read8(0xffff));
+						if (irqv == rstv)
+							TryInjectCommand();
+					}
 					NamcoM6809Render(tmp, slice);
 					int peak = 0;
 					for (int i = 0; i < slice * 2; i++) {
 						int v = tmp[i]; if (v < 0) v = -v;
 						if (v > peak) peak = v;
 					}
+					/* Stop once the 15xx is speaking. Do not spin 80 slices
+					   after inject — one-shot flags (gaplus missile, mappy
+					   start) finish during the wait and classify as SILENT. */
 					if (peak >= 200)
+						break;
+					if (cmdIndex_ >= 1 && w >= 2)
 						break;
 				}
 				free(tmp);
@@ -1580,12 +1717,8 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 		}
 		booted_ = 1;
 		triggered_ = 1;
-		/* WSG6809 mainloops clear $40 after consuming a command ? refresh
-		   when the slot is empty so BGM can be (re)posted like the main CPU. */
-		if (hw_->board_ == CEMU_AC_BOARD_NAMCO_WSG && hw_->WsgMappy())
-			nextCmdAt_ = (uint64_t)hw_->CpuCycles() + (uint64_t)cpuHz_ / 60;
-		else
-			nextCmdAt_ = (uint64_t)~0ull;
+		/* WSG6809 flag is one-shot; 60 Hz re-post restarted every title. */
+		nextCmdAt_ = (uint64_t)~0ull;
 		return 1;
 	}
 
@@ -1596,11 +1729,26 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 	if (sys86_) {
 		hasCpu_ = 1;
 		sys86Acc_ = 0;
+		sys86OciNeed_ = 0;
 		cmdIndex_ = 0;
 		if (!songCmd_) songCmd_ = 0x01;
 		/* Boot CUS60, edged stop (clears doorbell+$B0), then start song. */
 		nextCmdAt_ = (uint64_t)~0ull; /* freeze inject during boot/probe */
 		Sys86RunCycles(cpuHz_);
+		if (getenv("CEMU_SYS86_TRACE")) {
+			HD63701Cpu* cpu = hw_->HD63701CpuPtr();
+			fprintf(stderr,
+				"sys86-boot1s pc=%04X irq=%u ymW=%u AE=%02X%02X B0=%02X door=%02X 8000=%02X 14F0=%02X%02X 14F8=%02X%02X\n",
+				cpu ? HD63701Pc(cpu) : 0,
+				cpu ? HD63701IrqCount(cpu) : 0,
+				hw_->HD63701YmWrites(),
+				hw_->HD63701Read8(0x00ae), hw_->HD63701Read8(0x00af),
+				hw_->HD63701Read8(0x00b0),
+				hw_->HD63701Read8(0x1182),
+				hw_->HD63701Read8(0x8000),
+				hw_->HD63701Read8(0x14f0), hw_->HD63701Read8(0x14f1),
+				hw_->HD63701Read8(0x14f8), hw_->HD63701Read8(0x14f9));
+		}
 		Sys86RunCycles(cpuHz_ / 2);
 		/* If CUS60 boot skipped AE install (expanded map races), seed it. */
 		if (hw_->HD63701Read8(0x00ae) == 0 && hw_->HD63701Read8(0x00af) == 0)
@@ -1619,6 +1767,55 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 		cmdIndex_ = 1;
 		Sys86RunCycles(cpuHz_);
 		Sys86RunCycles(cpuHz_ / 2);
+		if (getenv("CEMU_SYS86_TRACE")) {
+			HD63701Cpu* cpu = hw_->HD63701CpuPtr();
+			unsigned char opm[256];
+			memset(opm, 0, sizeof(opm));
+			if (hw_->SoundChip())
+				CEmuChipYm2151PeekRegs(hw_->SoundChip(), opm);
+			fprintf(stderr,
+				"sys86 arch=%s cmd=%02X pc=%04X irq=%u ymW=%u keyOn=%u AE=%02X%02X A8=%02X%02X +31=%02X B0=%02X door=%02X song=%02X 14F8=%02X%02X 1380=%02X\n",
+				ge && ge->archive ? ge->archive : "?",
+				(unsigned)songCmd_,
+				cpu ? HD63701Pc(cpu) : 0,
+				cpu ? HD63701IrqCount(cpu) : 0,
+				hw_->HD63701YmWrites(),
+				(unsigned)CEmuChipYm2151KeyOnCount(hw_->SoundChip()),
+				hw_->HD63701Read8(0x00ae), hw_->HD63701Read8(0x00af),
+				hw_->HD63701Read8(0x00a8), hw_->HD63701Read8(0x00a9),
+				hw_->HD63701Read8((uint16_t)(0x0000u
+					+ ((unsigned)hw_->HD63701Read8(0x00ae) << 8)
+					+ hw_->HD63701Read8(0x00af) + 0x31u)),
+				hw_->HD63701Read8(0x00b0),
+				hw_->HD63701Read8(0x1182), hw_->HD63701Read8(0x1183),
+				hw_->HD63701Read8(0x14f8), hw_->HD63701Read8(0x14f9),
+				hw_->HD63701Read8(0x1380));
+			fprintf(stderr, "  fault1185=%02X opm08=%02X 20=%02X 28=%02X 60=%02X 80=%02X e0=%02X tcsr=%02X\n",
+				hw_->HD63701Read8(0x1185),
+				opm[0x08], opm[0x20], opm[0x28], opm[0x60], opm[0x80], opm[0xe0],
+				hw_->HD63701Read8(0x0008));
+			{
+				int extra = 0;
+				unsigned p2 = cpu ? HD63701Pc(cpu) : 0;
+				while (extra < 8) {
+					const uint8_t b0b = hw_->HD63701Read8(0x00b0);
+					const int idleb = (p2 >= 0x8128u && p2 < 0x9000u);
+					if (b0b && idleb)
+						break;
+					Sys86RunCycles(cpuHz_);
+					extra++;
+					p2 = HD63701Pc(cpu);
+				}
+				fprintf(stderr,
+					"  post extra=%ds pc=%04X A8=%02X%02X B0=%02X door=%02X song=%02X 1380=%02X 14F8=%02X%02X\n",
+					extra, p2,
+					hw_->HD63701Read8(0x00a8), hw_->HD63701Read8(0x00a9),
+					hw_->HD63701Read8(0x00b0),
+					hw_->HD63701Read8(0x1182), hw_->HD63701Read8(0x1183),
+					hw_->HD63701Read8(0x1380),
+					hw_->HD63701Read8(0x14f8), hw_->HD63701Read8(0x14f9));
+			}
+		}
 		booted_ = 1;
 		triggered_ = 1;
 		nextCmdAt_ = (uint64_t)~0ull;
@@ -1730,8 +1927,10 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 				w[0xb92] = 0;
 			}
 			/* Dequeue RET's ZF from CMP [0C32],#0 ? caller drops the cmd when
-			   ZF set. Boot leaves [0C32]=0; handshake would raise it. */
-			hw_->M92Write8(0xa0c32u, 0x01);
+			   ZF set. Boot leaves [0C32]=0; handshake would raise it.
+			   wpksoc uses [0C32] as the AND-mask (nbbatman uses [0C31]); 0x01
+			   only allowed odd catalog ids and left BGM #02 silent. */
+			hw_->M92Write8(0xa0c32u, 0xff);
 			hw_->M92Write8(0xa0c31u, 0xff);
 		}
 		TryInjectCommand();
@@ -1886,6 +2085,15 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 			hw_->Cpu()->r.sp = 0x9f00;
 		}
 	}
+	/* Pengo: wait for RAM clear of $8C60 voices + EI @0430 before inject. */
+	if (hw_->board_ == CEMU_AC_BOARD_NAMCO_WSG && hw_->PengoWsg() && hw_->Cpu()) {
+		for (int i = 0; i < 240; i++) {
+			RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 60);
+			uint8_t* m = hw_->Mem();
+			if (hw_->Cpu()->r.iff1 && m && (m[0x9040] & 1u))
+				break;
+		}
+	}
 	/* Toaplan1: main CPU holds shared-RAM (8001)==0xAA. Truxton/hellfire/
 	   demonwld/zerowing/outzone write 0 then busy-wait for AA ? a one-shot
 	   poke before RunUntil is cleared and the Z80 never leaves DI boot.
@@ -2004,12 +2212,70 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 			RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 5);
 			nextCmdAt_ = (uint64_t)~0ull;
 			return 1;
+		} else if (hw_->board_ == CEMU_AC_BOARD_TAITO_OPM && hw_->TaitoOpmMap() == 7) {
+			/* Old TNZS: no PC060HA. tnzsjo waits (EF11)==1 then polls EF10;
+			   chukatai handshake is E003=55 then AA; kageki reads E03E. */
+			const uint8_t b3 = hw_->PeekMem(3);
+			if (b3 == 0x21) {
+				if (uint8_t* m = hw_->Mem())
+					m[0xe003] = 0x55;
+				for (int i = 0; i < 90; i++) {
+					RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 60);
+					if (hw_->PeekMem(0xe004) == 0xaa) {
+						if (uint8_t* m = hw_->Mem())
+							m[0xe003] = 0xaa;
+						break;
+					}
+				}
+			} else if (b3 != 0x31) {
+				if (uint8_t* m = hw_->Mem()) {
+					m[0xef11] = 1;
+					/* Sub CPU also walks sprite/object lists at 0082; without a
+					   main CPU those lists stay garbage and the ISR never
+					   returns (D000 stuck 1, PC=0553). Music is CALL 006D. */
+					if (m[0x55] == 0xcd && m[0x56] == 0x82 && m[0x57] == 0x00) {
+						m[0x55] = 0x00;
+						m[0x56] = 0x00;
+						m[0x57] = 0x00;
+					}
+				}
+				for (int i = 0; i < 90; i++) {
+					RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 60);
+					if (hw_->PeekMem(0xef11) == 0)
+						break;
+				}
+			}
+			for (int i = 0; i < 30; i++)
+				RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 60);
+			if (Ay_Cpu* c = hw_->Cpu()) {
+				c->r.iff1 = 1;
+				c->r.iff2 = 1;
+			}
+			/* tnzsjo 07FB returns immediately while (DFA1)==0. Command 0xEF
+			   (0855) sets it; 0xEE clears it. Same enable as kikikai AFA1. */
+			if (b3 == 0xfd) {
+				hw_->SetSoundCommand(0xef);
+				for (int i = 0; i < 60; i++) {
+					RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 60);
+					if (hw_->PeekMem(0xdfa1))
+						break;
+				}
+				if (!hw_->PeekMem(0xdfa1)) {
+					if (uint8_t* m = hw_->Mem())
+						m[0xdfa1] = 1;
+				}
+			}
+			hw_->SetSoundCommand(songCmd_ ? songCmd_ : (uint8_t)0x06);
+			cmdIndex_ = 1;
+			triggered_ = 1;
+			RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 5);
+			nextCmdAt_ = (uint64_t)~0ull;
+			return 1;
 		} else if (hw_->board_ == CEMU_AC_BOARD_TAITO_OPM
-			&& (hw_->TaitoOpmMap() == 3 || hw_->TaitoOpmMap() == 4)) {
-			/* tokio/bublbobl: NMI merger needs enable (A800/B001) before the
-			   latch pending line can fire. 0xEF is NOT PC060HA here — 02A4
-			   stores 1 at 87A0 (bubl 8FA0); 024A RET Z while that flag is 0
-			   so every song start is a no-op. */
+			&& (hw_->TaitoOpmMap() == 3 || hw_->TaitoOpmMap() == 4
+				|| hw_->TaitoOpmMap() == 5 || hw_->TaitoOpmMap() == 6)) {
+			/* tokio/bublbobl/lsasquad: NMI merger needs enable before the
+			   latch pending line can fire. 0xEF is NOT PC060HA here. */
 			for (int i = 0; i < 180 && !hw_->FlstoryNmiEn(); i++)
 				RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 60);
 			hw_->SetSoundCommand(0xef);
@@ -2148,6 +2414,62 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 	   pending without NMI). hcastle: ForceIm1 during DI RAM-test nests.
 	   Both need a settled EI/NMI-enable before the first song inject.
 	   Toaplan1 injects after boot settle below (Timer-A ISR mailbox). */
+	if (hw_->HalleysAy()) {
+		/* Boot LDIR-clears 4000-47FF (command ring + enable). An early NMI
+		   enqueue is wiped, and 01D7/05CD return while (4717)/(429A)==0.
+		   Command 0xEF sets that flag to 0x80; 0xEE clears it. */
+		for (int i = 0; i < 90; i++) {
+			RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 60);
+			Ay_Cpu* c = hw_->Cpu();
+			const unsigned pc = c ? (unsigned)c->r.pc : 0;
+			if (c && c->r.iff1 && pc >= 0x0140u && pc < 0x0180u)
+				break;
+		}
+		hw_->SetSoundCommand(0xef);
+		const uint16_t flag = (hw_->PeekMem(4) == 0xe9) ? (uint16_t)0x4717u
+			: (uint16_t)0x429au;
+		for (int i = 0; i < 60; i++) {
+			RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 60);
+			if (hw_->PeekMem(flag))
+				break;
+		}
+		if (!hw_->PeekMem(flag)) {
+			if (uint8_t* m = hw_->Mem())
+				m[flag] = 0x80;
+		}
+		hw_->SetSoundCommand(songCmd_ ? songCmd_ : (uint8_t)0x06);
+		cmdIndex_ = 1;
+		triggered_ = 1;
+		RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 5);
+	}
+	if (hw_->PbactionAy()) {
+		/* Boot is DI until CTC init + EI at $0067. IM2 ch0 copies the latch
+		   into $4243; ch1's 126 Hz ISR consumes it. Wait for IM 2 / I=1. */
+		for (int i = 0; i < 60; i++) {
+			RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 60);
+			Ay_Cpu* c = hw_->Cpu();
+			if (c && c->r.iff1 && c->r.im == 2 && c->r.i == 1)
+				break;
+		}
+		hw_->SetSoundCommand(songCmd_ ? songCmd_ : (uint8_t)0x0a);
+		cmdIndex_ = 1;
+		triggered_ = 1;
+		RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 5);
+	}
+	if (hw_->ChaknpopAy()) {
+		/* Boot checksums 0000-7FFF (sum is 0), rst $20 mutes with 0x50,
+		   then IM 1 / EI and $8400=3. Replace that mute after EI. */
+		for (int i = 0; i < 180; i++) {
+			RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 60);
+			Ay_Cpu* c = hw_->Cpu();
+			if (c && c->r.iff1 && c->r.im == 1 && hw_->PeekMem(0x8400) == 3)
+				break;
+		}
+		hw_->SetSoundCommand(songCmd_ ? songCmd_ : (uint8_t)0x21);
+		cmdIndex_ = 1;
+		triggered_ = 1;
+		RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 5);
+	}
 	if (!(hw_->board_ == CEMU_AC_BOARD_KONAMI_PCM && hw_->PcmKind() == 4)
 		&& hw_->board_ != CEMU_AC_BOARD_SNK_OPL
 		&& hw_->board_ != CEMU_AC_BOARD_FLSTORY
@@ -2155,6 +2477,9 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 		&& hw_->board_ != CEMU_AC_BOARD_TOAPLAN1
 		&& hw_->board_ != CEMU_AC_BOARD_RAIZING
 		&& hw_->board_ != CEMU_AC_BOARD_TECMO16
+		&& !hw_->HalleysAy()
+		&& !hw_->PbactionAy()
+		&& !hw_->ChaknpopAy()
 		&& !(hw_->board_ == CEMU_AC_BOARD_KONAMI_PCM && hw_->PcmKind() == 3))
 		TryInjectCommand();
 	/* Raizing / Eighting: every revision boots through a RAM test that must
@@ -2281,11 +2606,20 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 		for (int i = 0; i < 120 && !hw_->FlstoryNmiEn(); i++)
 			RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 60);
 		/* 0xEF sets (C51A) bit7; RST38 drain @0169 skips every song while
-		   that flag is 0 (same EE/EF gate as tokio). IM1 is the drain/tick. */
+		   that flag is 0 (same EE/EF gate as tokio). IM1 is the drain/tick.
+		   nycaptor 0xEF is C719 bit0 via the E0 control table, not CP EF. */
 		nextGngIrq_ = 0;
-		hw_->SetSoundCommand(0xef);
-		for (int i = 0; i < 30; i++)
-			RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 60);
+		if (!hw_->MsisaacMap()) {
+			hw_->SetSoundCommand(0xef);
+			for (int i = 0; i < 30; i++)
+				RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 60);
+		}
+		if (hw_->NycaptorMap()) {
+			/* 0xEB: C719 bit3 = AY mix mode $B0 (0xEF only sets music bit0). */
+			hw_->SetSoundCommand(0xeb);
+			for (int i = 0; i < 15; i++)
+				RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 60);
+		}
 		TryInjectCommand();
 		RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 5);
 		TryInjectCommand();
@@ -2330,16 +2664,28 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 		pinned_ = 1;
 	}
 	if (hw_->board_ == CEMU_AC_BOARD_KONAMI_HCASTLE) {
-		/* Boot DI RAM-test; wait for main EI;DI poll (@03CE) before latch. */
-		for (int i = 0; i < 240; i++) {
+		/* hcastle/citybomb EI;DI poll @03CE. kittenk (JP $0361) still checksums
+		   through $03C0, then polls at $04CD; injecting in that checksum window
+		   is lost and the follow-up try-table $01 is only an SE. */
+		const int kittenk = (hw_->PeekMem(0) == 0xc3u
+			&& hw_->PeekMem(1) == 0x61u && hw_->PeekMem(2) == 0x03u);
+		const uint16_t pollLo = kittenk ? (uint16_t)0x04c0u : (uint16_t)0x03c0u;
+		for (int i = 0; i < 400; i++) {
 			RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 60);
 			const uint16_t pc = hw_->Cpu() ? (uint16_t)hw_->Cpu()->r.pc : 0;
-			if (pc >= 0x03c0 && pc < 0x0900)
+			if (pc >= pollLo && pc < 0x0900)
 				break;
 		}
 		TryInjectCommand();
 		RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 4);
-		TryInjectCommand();
+		if (kittenk) {
+			/* Pin catalog; do not overlay try-table $01 (SE). */
+			cmdIndex_ = 0;
+			pinned_ = 1;
+			TryInjectCommand();
+		} else {
+			TryInjectCommand();
+		}
 		RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 4);
 	}
 	if (hw_->board_ == CEMU_AC_BOARD_SNK_OPL) {
@@ -2565,9 +2911,11 @@ void CDriverAc::TickOpm(uint64_t cpuCycles)
 void CDriverAc::TryInjectCommand()
 {
 	if (!hw_) return;
-	if (hw_->board_ == CEMU_AC_BOARD_TAITO_OPM
+	if ((hw_->board_ == CEMU_AC_BOARD_TAITO_OPM
 		&& (hw_->TaitoOpmMap() == 2 || hw_->TaitoOpmMap() == 3
-			|| hw_->TaitoOpmMap() == 4)) {
+			|| hw_->TaitoOpmMap() == 4 || hw_->TaitoOpmMap() == 5
+			|| hw_->TaitoOpmMap() == 6 || hw_->TaitoOpmMap() == 7))
+		|| hw_->HalleysAy() || hw_->PbactionAy() || hw_->ChaknpopAy()) {
 		/* One-shot mailbox / latch. Re-inject walks 0x01.. and kills the song. */
 		if (cmdIndex_ >= 1) return;
 		hw_->SetSoundCommand(songCmd_ ? songCmd_ : (uint8_t)0x06);
@@ -2610,15 +2958,17 @@ void CDriverAc::TryInjectCommand()
 		   0x20 here (Rev 3.40 channel-BGM heuristic) turned mysticri 0x01
 		   into silent 0x21 and collapsed uccopsj onto the same miss. */
 		/* Keep the Rev3.40 mode byte clear so dequeue is not skipped.
-		   Masks: byte-ring [09EA]/[09EF]; word-ring [0C31]. */
+		   Masks: byte-ring [09EA]/[09EF]; word-ring [0C31] (nbbatman)
+		   or [0C32] (wpksoc). */
 		hw_->M92Write8(0xa004fu, 0x00);
 		hw_->M92Write8(0xa09eau, 0xff);
 		hw_->M92Write8(0xa09efu, 0xff);
 		if (hw_->M92WordQueue()) {
 			/* Word ring stores AX. INTP1 leaves AH stale from the idle loop,
 			   and (AH&AL)!=0 with AL<0xF0 rejects BGM. Plant AH=0 directly
-			   into the 0AF0 ring ? same write the enqueue routine performs. */
+			into the 0AF0 ring ? same write the enqueue routine performs. */
 			hw_->M92Write8(0xa0c31u, 0xff);
+			hw_->M92Write8(0xa0c32u, 0xff);
 			const uint8_t* ram = hw_->M92Ram();
 			if (ram) {
 				uint8_t* wram = const_cast<uint8_t*>(ram);
@@ -2676,7 +3026,9 @@ void CDriverAc::TryInjectCommand()
 		/* ...but only while the bytes went unread. Each inject queues Stop
 		   + song select, so repeating it after the 68000 has taken the
 		   select restarts the song: daytona retriggered its opening notes
-		   two or three times before settling. */
+		   two or three times before settling. SCSP leftovers still need the
+		   retries: their firmware drains MIDI before the sequencer is armed
+		   (dynabb/segawski even ids went SILENT with a drain-only stop). */
 		if (cmdIndex_ > 0 && hw_->SegaM1Audio() && !hw_->SegaMidiFifoPending()) {
 			cmdIndex_ = 4;
 			return;
@@ -2713,6 +3065,24 @@ void CDriverAc::TryInjectCommand()
 		return;
 	}
 	if (hw_->board_ == CEMU_AC_BOARD_NAMCO_WSG) {
+		if (hw_->PengoWsg()) {
+			/* One-shot: re-planting (IX+0)=1 every refresh restarts the
+			   1C4B pointer load and chops the melody. */
+			if (cmdIndex_ >= 1) return;
+			hw_->SetSoundCommand(songCmd_);
+			cmdIndex_ = 1;
+			triggered_ = 1;
+			return;
+		}
+		if (hw_->WsgMappy()) {
+			/* One-shot flag post. Re-clearing $40-$7F every 60 Hz restarts
+			   the sequencer; cmd 0 is song 0 ($40), not "unset". */
+			if (cmdIndex_ >= 1) return;
+			hw_->SetSoundCommand(songCmd_);
+			cmdIndex_ = 1;
+			triggered_ = 1;
+			return;
+		}
 		/* Refresh path may call repeatedly ? allow sustained BGM without
 		   walking a try-table past the catalog title. */
 		if (!songCmd_) return;
@@ -2844,6 +3214,14 @@ void CDriverAc::TryInjectCommand()
 	} else {
 		hw_->SetSoundCommand(cmd);
 	}
+	/* kittenk: poll only CALL $003C (drain D000) when [8304]!=0. The 4-NOP
+	   EI window can miss IRQ0; citybomb uses [8303] the same way. */
+	if (hw_->board_ == CEMU_AC_BOARD_KONAMI_HCASTLE
+		&& hw_->PeekMem(0) == 0xc3u && hw_->PeekMem(1) == 0x61u
+		&& hw_->PeekMem(2) == 0x03u) {
+		if (uint8_t* m = hw_->Mem())
+			m[0x8304] = 1;
+	}
 	cmdIndex_++;
 	triggered_ = 1;
 }
@@ -2859,6 +3237,20 @@ void CDriverAc::DeliverIrqs()
 	   Suppress periodic NMI until first latch ? early NMI trashes galaga/
 	   bosco boot checksum (only AF is saved). */
 	if (hw_->board_ == CEMU_AC_BOARD_NAMCO_WSG) {
+		if (hw_->PengoWsg()) {
+			/* MAME pengo: vblank IRQ0 HOLD, IM 1, mask = LS259 Q0 @9040. */
+			uint8_t* m = hw_->Mem();
+			if (m && (m[0x9040] & 1u)) {
+				const uint64_t now = (uint64_t)cpu->time64();
+				const uint64_t period = (uint64_t)cpuHz_ / 60;
+				if (period > 0 && now >= nextGngIrq_) {
+					if (cpu->r.iff1)
+						Ay_CpuIm1Interrupt(cpu);
+					nextGngIrq_ = now + period;
+				}
+			}
+			return;
+		}
 		if (uint8_t* m = hw_->Mem()) {
 			m[0x9101] = 0; /* galaga handshake */
 			m[0x8c01] = 0; /* bosco handshake */
@@ -3006,7 +3398,25 @@ void CDriverAc::DeliverIrqs()
 			}
 			return;
 		}
-		if (hw_->TaitoOpmMap() == 3 || hw_->TaitoOpmMap() == 4) {
+		if (hw_->TaitoOpmMap() == 7) {
+			/* Old TNZS: vblank HOLD. tnzsjo idle is DI;CALL 008F;EI so the
+			   line must stay pending until the EI window, not expire.
+			   Its ISR sets (D000)=1 and EI before CALL 0082; a nested RST38
+			   takes the 0027 shortcut with SP=D031 and smashes the frame. */
+			if (hw_->IrqPulsePending())
+				hw_->TakeIrqPulse();
+			if (hw_->PeekMem(3) == 0xfd && hw_->PeekMem(0xd000))
+				return;
+			const uint64_t now = (uint64_t)cpu->time64();
+			const uint64_t period = (uint64_t)cpuHz_ / 60;
+			if (period > 0 && now >= nextGngIrq_) {
+				if (Ay_CpuIm1Interrupt(cpu))
+					nextGngIrq_ = now + period;
+			}
+			return;
+		}
+		if (hw_->TaitoOpmMap() == 3 || hw_->TaitoOpmMap() == 4
+			|| hw_->TaitoOpmMap() == 5 || hw_->TaitoOpmMap() == 6) {
 			if (hw_->IrqPulsePending() && hw_->FlstoryNmiEn()) {
 				hw_->TakeIrqPulse();
 				Ay_CpuNmi(cpu);
@@ -3063,6 +3473,93 @@ void CDriverAc::DeliverIrqs()
 	/* Taito SJ: latch write pulses NMI (gated by AY#4 port B bit0); the
 	   sequencer runs off a 60 Hz IM1 IRQ from the video hardware. */
 	if (hw_->board_ == CEMU_AC_BOARD_TAITO_SJ) {
+		if (hw_->NbAyIo()) {
+			if (hw_->IrqPulsePending()) {
+				if (Ay_CpuIm1Interrupt(cpu))
+					hw_->TakeIrqPulse();
+			}
+			return;
+		}
+		if (hw_->BombjackAy()) {
+			/* MAME: vblank NMI to audiocpu. Latch is polled at 6000. */
+			const uint64_t now = (uint64_t)cpu->time64();
+			const uint64_t period = (uint64_t)cpuHz_ / 60;
+			if (period > 0 && now >= nextGngIrq_) {
+				Ay_CpuNmi(cpu);
+				nextGngIrq_ = now + period;
+			}
+			return;
+		}
+		if (hw_->CalorieAy()) {
+			/* MAME: vblank IRQ0 HOLD to audiocpu. Latch is polled at C000. */
+			const uint64_t now = (uint64_t)cpu->time64();
+			const uint64_t period = (uint64_t)cpuHz_ / 60;
+			if (period > 0 && now >= nextGngIrq_) {
+				if (cpu->r.iff1)
+					Ay_CpuIm1Interrupt(cpu);
+				nextGngIrq_ = now + period;
+			}
+			return;
+		}
+		if (hw_->SolomonAy()) {
+			/* MAME: latch write pulses NMI; sequencer is 120 Hz IRQ0 HOLD. */
+			if (hw_->IrqPulsePending()) {
+				hw_->TakeIrqPulse();
+				Ay_CpuNmi(cpu);
+			}
+			const uint64_t now = (uint64_t)cpu->time64();
+			const uint64_t period = (uint64_t)cpuHz_ / 120;
+			if (period > 0 && now >= nextGngIrq_) {
+				if (cpu->r.iff1)
+					Ay_CpuIm1Interrupt(cpu);
+				nextGngIrq_ = now + period;
+			}
+			return;
+		}
+		if (hw_->HalleysAy()) {
+			/* MAME halleys: latch NMI + IRQ0 at 6MHz/(4*16*16*10*16) ≈ 36.6 Hz. */
+			if (hw_->IrqPulsePending()) {
+				hw_->TakeIrqPulse();
+				Ay_CpuNmi(cpu);
+			}
+			const uint64_t now = (uint64_t)cpu->time64();
+			const uint64_t period = (uint64_t)cpuHz_ * 163840ull / 6000000ull;
+			if (period > 0 && now >= nextGngIrq_) {
+				if (cpu->r.iff1)
+					Ay_CpuIm1Interrupt(cpu);
+				nextGngIrq_ = now + period;
+			}
+			return;
+		}
+		if (hw_->PbactionAy()) {
+			/* Firmware: I=1, IM 2, CTC ch0 vector 0 / ch1 vector 2.
+			   ch0 counter TC=1 (command TRG0); ch1 timer $A7/$5D, prescale
+			   256 @ 3 MHz → 93*256 cycles ≈ 126 Hz sequencer. */
+			if (hw_->IrqPulsePending()) {
+				if (cpu->r.im == 2 && cpu->r.i == 1
+					&& Ay_CpuIm2Interrupt(cpu, 0))
+					hw_->TakeIrqPulse();
+			}
+			const uint64_t now = (uint64_t)cpu->time64();
+			const uint64_t period = 93ull * 256ull;
+			if (period > 0 && now >= nextGngIrq_) {
+				if (cpu->r.im == 2 && cpu->r.i == 1)
+					Ay_CpuIm2Interrupt(cpu, 2);
+				nextGngIrq_ = now + period;
+			}
+			return;
+		}
+		if (hw_->ChaknpopAy()) {
+			/* MAME: vblank IRQ0 HOLD. Sound tick is RST38 → A02F. */
+			const uint64_t now = (uint64_t)cpu->time64();
+			const uint64_t period = (uint64_t)cpuHz_ / 60;
+			if (period > 0 && now >= nextGngIrq_) {
+				if (cpu->r.iff1)
+					Ay_CpuIm1Interrupt(cpu);
+				nextGngIrq_ = now + period;
+			}
+			return;
+		}
 		if (hw_->IrqPulsePending()) {
 			hw_->TakeIrqPulse();
 			Ay_CpuNmi(cpu);
@@ -3124,10 +3621,17 @@ void CDriverAc::DeliverIrqs()
 	/* Konami K007232-era (scontra/crimfght/twin16): latch �� IRQ0, and the
 	   YM2151 timer is the sequencer timebase (same as DD2/Taito OPM). */
 	if (hw_->board_ == CEMU_AC_BOARD_KONAMI_K7232) {
+		/* Devastators / garuka (MAME mainevt.cpp): YM2151 irq is not wired.
+		   The sequencer polls Timer B at $04F4. Map0 ForceIm1-on-status
+		   storms $0038 and starves CALL $007B. */
+		const int devstors = (hw_->PeekMem(0) == 0xf3u
+			&& hw_->PeekMem(1) == 0x3eu && hw_->PeekMem(5) == 0xe0u);
 		if (hw_->IrqPulsePending()) {
 			if (Ay_CpuIm1Interrupt(cpu))
 				hw_->TakeIrqPulse();
 		}
+		if (devstors)
+			return;
 		if (chip) {
 			const int st = (chip->ReadStatus() & 0x03) != 0;
 			const int pend = chip->Irq() || st;
@@ -3277,7 +3781,7 @@ void CDriverAc::DeliverIrqs()
 		   EI;NOP;NOP;DI — advancing the 60 Hz due time while IFF1 is clear
 		   skips every vblank. Hold the request until an EI window takes it. */
 		const uint64_t now = (uint64_t)cpu->time64();
-		const uint64_t period = (uint64_t)cpuHz_ / 60;
+		const uint64_t period = (uint64_t)cpuHz_ / (hw_->NycaptorMap() ? 122 : 60);
 		if (period > 0 && now >= nextGngIrq_
 			&& cpu->r.iff1 && cpu->r.im == 1) {
 			if (Ay_CpuIm1Interrupt(cpu))
@@ -3468,6 +3972,19 @@ void CDriverAc::DeliverIrqs()
 		&& chip && chip->Irq()
 		&& cpu->r.iff1 && cpu->r.im == 1) {
 		Ay_CpuIm1Interrupt(cpu);
+	}
+	/* Gunbird main loop only CALL $0B25 (FM tick) after Timer B's ISR
+	   stores $2F at $8001. If the IM1 path keeps taking Timer A (status
+	   bit0) the sequencer never advances — poke + ack Timer B like $00A8. */
+	if (hw_->board_ == CEMU_AC_BOARD_VSYSTEM && hw_->VsIoKind() == 3 && chip) {
+		if ((chip->ReadStatus() & 0x02) != 0) {
+			if (uint8_t* m = hw_->Mem()) {
+				if (m[0x8001] == 0)
+					m[0x8001] = 0x2f;
+			}
+			chip->Write(0, 0x27);
+			chip->Write(1, 0x2f);
+		}
 	}
 	/* Toaplan1: YM3812 timer IRQ is the sequencer timebase (shared-RAM
 	   mailbox has no NMI). ISR @0038 polls status bit6 (Timer A) and only
@@ -3991,14 +4508,11 @@ int CDriverAc::NamcoM6809Render(int16_t* stereo, int frames)
 			&& hw_->CpuCycles() >= nextCmdAt_) {
 			if (hw_->board_ == CEMU_AC_BOARD_NAMCO_WSG && hw_->WsgMappy()) {
 				mc6809__t* cpu = (mc6809__t*)hw_->NamcoM6809Cpu();
-				/* Open may defer inject until CLI ? post BGM on first clear-I. */
-				if (cpu && !cpu->cc.i && cmdIndex_ < 1)
+				if (cmdIndex_ < 1 && cpu && !cpu->cc.i)
 					TryInjectCommand();
-				else if (!hw_->WsgMail80()
-					&& hw_->NamcoM6809Read8(0x0040) == 0
-					&& hw_->NamcoM6809Read8(0x0060) == 0)
-					TryInjectCommand();
-				nextCmdAt_ = hw_->CpuCycles() + (uint64_t)cpuHz_ / 60;
+				nextCmdAt_ = (cmdIndex_ < 1)
+					? hw_->CpuCycles() + (uint64_t)cpuHz_ / 60
+					: (uint64_t)~0ull;
 			} else if (cmdIndex_ < 1) {
 				TryInjectCommand();
 				nextCmdAt_ = (uint64_t)~0ull;
@@ -4315,12 +4829,17 @@ void CDriverAc::Sys86RunCycles(int cycles)
 	if (!cpu) return;
 	CEmuHD63701BusSetAc(hw_);
 	CChip* chip = hw_->SoundChip();
-	/* FBNeo: HD63701SetIRQLine HOLD once per frame. CUS60/game IRQ at [AE+8]
-	   runs the AE+20..+28 music chain ONLY while $1182==$A6; otherwise it
-	   RTIs after AA/+2C. F4B1 clears A6 on song start and SEIs ? after B0
-	   is live, re-assert A6 (genpeitd external loop does not) and pulse IRQ.
-	   Do NOT IRQ while A6 is set and B0==0 (song-start window): that races
-	   F4B1 and AE+1A can CLR $B0. */
+	/* FBNeo: HOLD vblank IRQ once per frame. Do not CLI or nest a 256-cycle
+	   execute (that re-entered $81CD and smashed AE).
+	   Sys86 song-start F4DD sets B0 then JSRs $80A9: F14A rebuilds the
+	   vector table at $11C0, CLI, then F20A relocates it to $14F0. IRQ
+	   during that window uses C6/C8 for the copy and never finishes
+	   (PC stuck in F364, AE left at 11C0, no KeyOn). Wait until AE=$14xx.
+	   $81CD / F382 only run the music chain while $1182=$A6; the firmware
+	   writes A6 itself at $811F after F20A, but re-arm once relocated so
+	   a CLR $1182 at $80A9 cannot starve the player.
+	   F4DD also stores $1183=1 (main-CPU "slot busy"); $8327 / F249 still
+	   read $1183 as the song id, so restore the injected command. */
 	while (cycles > 0) {
 		const int slice = cycles > 1024 ? 1024 : cycles;
 		const int used = HD63701Execute(cpu, slice);
@@ -4329,23 +4848,72 @@ void CDriverAc::Sys86RunCycles(int cycles)
 		{
 			const uint8_t b0 = hw_->HD63701Read8(0x00b0);
 			const uint8_t door = hw_->HD63701Read8(0x1182);
-			if (b0 && door != 0xa6u)
+			const uint8_t ae = hw_->HD63701Read8(0x00ae);
+			const uint16_t pc = HD63701Pc(cpu);
+			const int relocated = (ae == 0x14u);
+			/* F4DD sets B0 while AE is still $14F0 and I is clear; $80A9
+			   has not SEI'd yet. A vblank there runs $81CD against a
+			   half-rebuilt table and lands in F33F. Wait for the idle
+			   poll at $81xx after F20A + CLI. */
+			/* roishtar's F249/844E sit at $8108/$810B (other games keep
+			   those JSRs in $80xx). Delay idle until $8128 so EOCI/IRQ
+			   cannot nest inside that mute pass. */
+			const unsigned idleLo = (!hw_->Wsg63701() && hw_->HD63701MapKind() == 1)
+				? 0x8128u : 0x8100u;
+			const int idle = (pc >= idleLo && pc < 0x9000u);
+			/* roishtar 80A9 CLR $1400-$2000 (813E) then F20A. IRQ after
+			   relocate can still land on a wiped $14F8 (478F → TRAP →
+			   FF78 fault 8). $11C0 is CUS30 and survives; copy it back. */
+			if (!hw_->Wsg63701() && hw_->HD63701MapKind() == 1
+				&& relocated && idle
+				&& (hw_->HD63701Read8(0x14f8) != 0x81u
+					|| hw_->HD63701Read8(0x14f9) != 0xd9u)
+				&& hw_->HD63701Read8(0x11c8) == 0x81u
+				&& hw_->HD63701Read8(0x11c9) == 0xd9u) {
+				unsigned i;
+				for (i = 0; i < 0x7cu; i++)
+					hw_->HD63701Write8((uint16_t)(0x14f0u + i),
+						hw_->HD63701Read8((uint16_t)(0x11c0u + i)));
+			}
+			int ociArmed = 0;
+			if (!hw_->Wsg63701()) {
+				/* EOCI is armed at $80DA and the free-running timer keeps
+				   interrupting through 8147's F220 (which zeros $AC). F3C4
+				   then JSR [AC] into $0000. Mask OCI until the idle poll.
+				   roishtar's F249/844E sit at $8108/$810B (skykiddx's are
+				   still $80xx), so idle starts at $8128, after those JSRs. */
+				const uint8_t tcsr = hw_->HD63701Read8(0x0008);
+				if (!idle && (!b0 || !relocated) && (tcsr & 0x08u)) {
+					hw_->HD63701Write8(0x0008, (uint8_t)(tcsr & ~0x08u));
+					sys86OciNeed_ = 1;
+				} else if (idle && b0 && relocated && sys86OciNeed_) {
+					hw_->HD63701Write8(0x0008, (uint8_t)(tcsr | 0x08u));
+					sys86OciNeed_ = 0;
+					ociArmed = 1;
+				}
+			}
+			if (!hw_->Wsg63701() && b0 && idle && songCmd_) {
+				if (songCmd_ > 1u && hw_->HD63701Read8(0x1183) == 1u)
+					hw_->HD63701Write8(0x1183, songCmd_);
+				/* 846B: $1380=0 skip, $FF=playing, else song index. F110
+				   RAM-test clears it; poke only once the idle loop is up so
+				   OCI cannot index the YM table during F14A/F20A. */
+				const uint8_t yreq = hw_->HD63701Read8(0x1380);
+				if (yreq == 0)
+					hw_->HD63701Write8(0x1380, songCmd_);
+			}
+			if (b0 && relocated && idle && door != 0xa6u)
 				hw_->HD63701Write8(0x1182, 0xa6u);
 			const int frameEdge = ((hw_->CpuCycles() / (uint64_t)(hw_->cpuHz_ / 60 + 1))
 				!= ((hw_->CpuCycles() - (uint64_t)step) / (uint64_t)(hw_->cpuHz_ / 60 + 1)));
-			if (frameEdge && b0) {
-				HD63701ClearInterruptMask(cpu);
-				HD63701SetInputLine(cpu, HD63701_LINE_IRQ, HD63701_HOLD_LINE);
-				{
-					const int irqStep = HD63701Execute(cpu, 256);
-					const int irqUsed = irqStep > 0 ? irqStep : 256;
-					hw_->AddCpuCycles((uint64_t)irqUsed);
-					if (chip) chip->AdvanceClocks((uint64_t)irqUsed);
-					if (hw_->PcmChip()) hw_->PcmChip()->AdvanceClocks((uint64_t)irqUsed);
-					cycles -= irqUsed;
-				}
-				HD63701SetInputLine(cpu, HD63701_LINE_IRQ, HD63701_CLEAR_LINE);
+			int fire = b0 && relocated && idle && !ociArmed;
+			if (hw_->Wsg63701()) {
+				const int aeReady = (ae >= 0x80u) || (ae == 0x11u) || (ae == 0xc0u)
+					|| relocated;
+				fire = aeReady && !(door == 0xa6u && b0 == 0);
 			}
+			if (frameEdge && fire)
+				HD63701SetInputLine(cpu, HD63701_LINE_IRQ, HD63701_HOLD_LINE);
 		}
 		if (chip) chip->AdvanceClocks((uint64_t)step);
 		if (hw_->PcmChip()) hw_->PcmChip()->AdvanceClocks((uint64_t)step);
@@ -4377,6 +4945,11 @@ int CDriverAc::Sys86Render(int16_t* stereo, int frames)
 		{
 			int16_t* p = stereo + (size_t)done * 2;
 			chip->Render(p, n);
+			/* MAME namcos86: YM2151 right channel only (left routed at 0). */
+			if (!hw_->Wsg63701()) {
+				for (int i = 0; i < n; i++)
+					p[i * 2] = p[i * 2 + 1];
+			}
 			if (hw_->PcmChip())
 				hw_->PcmChip()->MixAdd(p, n, 256);
 		}

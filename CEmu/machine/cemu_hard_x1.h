@@ -65,6 +65,8 @@ public:
 	uint16_t opmPlayGate_;
 	uint16_t opmPlayTempo_;
 	void ArmTelenetPlayGate();
+	/* sghost: host copy of OPMDRV $4595. PATCH CALL INIT returns at $F05A. */
+	void LoadSghostOpmPatches();
 	/* Tecnosoft OPMDRV: PATCH does `IN A,(1); … CP FF; AND 0F; CALL drv`.
 	   Port 1 is the 0x80/0x81/0xFF command, not the bank index. */
 	uint8_t tecnoCmdHi_;

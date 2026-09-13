@@ -1435,6 +1435,13 @@ WRITE16_HANDLER( SCSP_MidiIn )
 	CheckPendingIRQ(SCSP);
 }
 
+int SCSP_MidiPending(void)
+{
+	struct _SCSP *SCSP = AllocedSCSP;
+	if (!SCSP) return 0;
+	return (SCSP->MidiW != SCSP->MidiR) ? 1 : 0;
+}
+
 READ16_HANDLER( SCSP_MidiOutR )
 {
 	struct _SCSP *SCSP = AllocedSCSP; 

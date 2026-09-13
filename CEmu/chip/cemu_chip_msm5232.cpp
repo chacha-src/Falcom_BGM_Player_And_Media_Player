@@ -1,6 +1,7 @@
 ﻿#include "StdAfx.h"
 #include "cemu_chip_msm5232.h"
 #include "cemu_chip.h"
+#include "../fmmon/fmmon_shadow.h"
 #include <string.h>
 
 /* Compact MSM5232: pitch ROM + square TG + simple AR/DR envelopes.
@@ -76,6 +77,8 @@ public:
 		for (int i = 0; i < 4; i++)
 			enOut16_[i] = enOut8_[i] = enOut4_[i] = enOut2_[i] = 0;
 		memset(voi_, 0, sizeof(voi_));
+		memset(monOn_, 0, sizeof(monOn_));
+		memset(monMidi_, 0, sizeof(monMidi_));
 		InitTables();
 		Reset();
 	}
@@ -87,6 +90,10 @@ public:
 		noiseRng_ = 1;
 		noiseClocks_ = 0;
 		for (int i = 0; i < 8; i++) {
+			if (monOn_[i])
+				FmMonShadowPcmNote(i, monMidi_[i], 0);
+			monOn_[i] = 0;
+			monMidi_[i] = 0;
 			memset(&voi_[i], 0, sizeof(voi_[i]));
 			voi_[i].pitch = -1;
 			voi_[i].egSect = -1;
@@ -256,6 +263,24 @@ private:
 		} else {
 			v->egSect = v->egArm ? 1 : 2;
 		}
+		UpdateMon(ch);
+	}
+
+	/* Pitch writes are the MSM key strobe. Without this the FM monitor stays
+	   blank on nycaptor/msisaac/40love while the square melody is audible. */
+	void UpdateMon(int ch)
+	{
+		if (ch < 0 || ch >= 8) return;
+		const MsmVoice* v = &voi_[ch];
+		const int on = (v->gf && v->egSect >= 0) ? 1 : 0;
+		int midi = 36;
+		if (on && v->mode == 0 && v->pitch >= 0)
+			midi = 24 + (v->pitch % 48);
+		if (monOn_[ch] == (uint8_t)on && (!on || monMidi_[ch] == (uint8_t)midi))
+			return;
+		monOn_[ch] = (uint8_t)on;
+		monMidi_[ch] = (uint8_t)midi;
+		FmMonShadowPcmNote(ch, midi, on);
 	}
 
 	void AdvanceEg()
@@ -375,6 +400,8 @@ private:
 	uint8_t control1_;
 	uint8_t control2_;
 	MsmVoice voi_[8];
+	uint8_t monOn_[8];
+	uint8_t monMidi_[8];
 	int enOut16_[2], enOut8_[2], enOut4_[2], enOut2_[2];
 	int arTbl_[8];
 	int drTbl_[16];

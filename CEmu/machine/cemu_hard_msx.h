@@ -42,6 +42,7 @@ public:
 	int PlayCmdPending() const { return playCmdPending_; }
 	uint8_t IoPort(uint8_t p) const { return ioport_[p & 0xff]; }
 	int GenericMode() const { return genericMode_; }
+	void KeepCompileRan2Alive();
 
 	int cpuHz_;
 	int ayHz_;
@@ -60,7 +61,8 @@ public:
 		PLAY_CODE_PORT = 0x00,
 		SKIP_PORT = 0x01,
 		BGM_BANKS = 128,
-		BGM_SIZE = 0x4000,
+		/* ankoku BTL.COM is 26K; 16K clipped $60AD play records to 0. */
+		BGM_SIZE = 0x8000,
 		MAP_NONE = 0,
 		MAP_ASCII16 = 1,
 		MAP_DS4 = 2,

@@ -40,6 +40,9 @@ void CDriverMsx::PulseVblankIrq()
 {
 	if (!hw_ || !hw_->Cpu() || !playing_) return;
 	Ay_Cpu* cpu = hw_->Cpu();
+	/* ran2 play LDIR/WRTPSG can smash page0 and drop IFF1. Replant before
+	   the IFF1 gate so the next vblank can reach H.TIMI again. */
+	hw_->KeepCompileRan2Alive();
 	/* Sample-timeline VBlank only (not CPU-cycle DeliverIrq inside RunUntil).
 	   Dual scheduling ran Quinpl's play routine twice per frame, blew the
 	   Z80 stack into adjacent heap, and crashed on driver destroy. */

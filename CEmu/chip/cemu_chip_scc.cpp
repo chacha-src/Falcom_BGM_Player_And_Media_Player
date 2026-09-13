@@ -20,6 +20,7 @@ public:
 	CChipScc(uint32_t clockHz, int sampleRate)
 		: clockHz_(clockHz ? clockHz : 3579545u)
 		, sampleRate_(sampleRate > 0 ? sampleRate : 44100)
+		, plusMode_(0)
 	{
 		Reset();
 	}
@@ -29,7 +30,10 @@ public:
 		memset(regs_, 0, sizeof(regs_));
 		memset(phase_, 0, sizeof(phase_));
 		memset(acc_, 0, sizeof(acc_));
+		plusMode_ = 0;
 	}
+
+	void SetPlusMode(int plus) { plusMode_ = plus ? 1 : 0; }
 
 	void Write(uint32_t addr, uint32_t data) override
 	{
@@ -42,6 +46,12 @@ public:
 		regs_[reg] = data;
 		if (reg >= 0x80u)
 			UpdateMon();
+	}
+
+	uint8_t ReadReg(unsigned reg) const
+	{
+		if (reg >= (unsigned)kSccRegs) return 0xFFu;
+		return regs_[reg];
 	}
 
 	void AdvanceClocks(uint64_t) override {}
@@ -64,8 +74,10 @@ public:
 			int32_t mix = 0;
 			for (int ch = 0; ch < kSccChannels; ch++) {
 				const unsigned period = Period(ch);
-				const int on = (regs_[0x8f] & (1u << ch)) != 0;
-				const int vol = on ? (regs_[0x8a + ch] & 0x0f) : 0;
+				const unsigned onMask = plusMode_ ? regs_[0xaf] : regs_[0x8f];
+				const unsigned volBase = plusMode_ ? 0xaau : 0x8au;
+				const int on = (onMask & (1u << ch)) != 0;
+				const int vol = on ? (regs_[volBase + ch] & 0x0f) : 0;
 				if (vol && period > 1) {
 					const int8_t* wave = Wave(ch);
 					mix += (int32_t)wave[phase_[ch]] * vol;
@@ -106,12 +118,15 @@ public:
 private:
 	unsigned Period(int ch) const
 	{
-		return ((unsigned)regs_[0x80 + ch * 2]
-			| (((unsigned)regs_[0x81 + ch * 2] & 0x0fu) << 8)) + 1u;
+		const unsigned base = plusMode_ ? 0xA0u : 0x80u;
+		return ((unsigned)regs_[base + (unsigned)ch * 2u]
+			| (((unsigned)regs_[base + 1u + (unsigned)ch * 2u] & 0x0fu) << 8)) + 1u;
 	}
 
 	const int8_t* Wave(int ch) const
 	{
+		if (plusMode_)
+			return (const int8_t*)(regs_ + ch * kSccWave);
 		if (ch >= 4)
 			return (const int8_t*)(regs_ + 0xA0); /* SCC-I ch5 wave */
 		return (const int8_t*)(regs_ + ch * kSccWave);
@@ -120,16 +135,19 @@ private:
 	void UpdateMon()
 	{
 		unsigned freq[5], vol[5];
+		const unsigned volBase = plusMode_ ? 0xaau : 0x8au;
+		const unsigned onMask = plusMode_ ? regs_[0xaf] : regs_[0x8f];
 		for (int i = 0; i < 5; i++) {
 			freq[i] = Period(i) - 1u;
-			vol[i] = (unsigned)regs_[0x8a + i] & 0x0fu;
+			vol[i] = (unsigned)regs_[volBase + i] & 0x0fu;
 		}
 		FmMonShadowSetMsxDevices(SASAMI_FMMON_DEV_PSG | SASAMI_FMMON_DEV_SCC);
-		FmMonShadowApplyScc(freq, vol, (unsigned)regs_[0x8f] & 0x1fu);
+		FmMonShadowApplyScc(freq, vol, onMask & 0x1fu);
 	}
 
 	uint32_t clockHz_;
 	int sampleRate_;
+	int plusMode_;
 	uint8_t regs_[kSccRegs];
 	int phase_[kSccChannels];
 	uint32_t acc_[kSccChannels];
@@ -144,4 +162,14 @@ void CEmuChipSccDestroy(CChip* c) { delete c; }
 void CEmuChipSccWriteReg(CChip* c, unsigned reg, uint8_t data)
 {
 	if (c) static_cast<CChipScc*>(c)->WriteReg(reg, data);
+}
+
+uint8_t CEmuChipSccReadReg(CChip* c, unsigned reg)
+{
+	return c ? static_cast<CChipScc*>(c)->ReadReg(reg) : 0xFFu;
+}
+
+void CEmuChipSccSetPlusMode(CChip* c, int plus)
+{
+	if (c) static_cast<CChipScc*>(c)->SetPlusMode(plus);
 }

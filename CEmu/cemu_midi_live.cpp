@@ -1,4 +1,4 @@
-﻿#include "StdAfx.h"
+#include "StdAfx.h"
 #include "cemu_midi_live.h"
 #include "cemu_types.h"
 #include "cemu_modepref.h"
@@ -13,7 +13,10 @@
 
 enum {
 	kLiveInjCap = 512,
-	kLiveHoldCap = 512,
+	/* PC98 host-walk fallbacks hand the whole song to the capture buffer
+	   during boot, so the first pump defers every event past its 512-frame
+	   window. At 512 slots that silently dropped most Note Offs. */
+	kLiveHoldCap = 16384,
 	kLiveRate = 44100,
 	/* SMF div 480 @ tempo 500000µs → 960 ticks/sec.
 	   ReadVar in VstMidiEngine accepts at most 4 MIDI varlen bytes
@@ -74,6 +77,11 @@ struct CEmuMidiLive {
 	int holdN;
 	int16_t* mixBuf;
 	int mixCap;
+	/* Ring pressure. A silent drop here loses program changes / note offs. */
+	unsigned injDropped;
+	unsigned holdDropped;
+	unsigned injPeak;
+	unsigned holdPeak;
 };
 
 static CEmuMidiLive g_live;
@@ -184,7 +192,12 @@ static void LiveEnsureCs(void)
 static void LivePushShort(DWORD msg, int sampleOfs)
 {
 	const LONG w = g_live.injW;
-	if ((w - g_live.injR) >= (kLiveInjCap - 1)) return;
+	const unsigned used = (unsigned)(w - g_live.injR);
+	if (used > g_live.injPeak) g_live.injPeak = used;
+	if (used >= (unsigned)(kLiveInjCap - 1)) {
+		g_live.injDropped++;
+		return;
+	}
 	const int i = (int)(w & (kLiveInjCap - 1));
 	g_live.inj[i].msg = msg;
 	g_live.inj[i].sampleOfs = sampleOfs;
@@ -194,7 +207,11 @@ static void LivePushShort(DWORD msg, int sampleOfs)
 
 static void LiveHoldPushAbs(DWORD msg, __int64 dueAbs)
 {
-	if (g_live.holdN >= kLiveHoldCap) return;
+	if (g_live.holdN > (int)g_live.holdPeak) g_live.holdPeak = (unsigned)g_live.holdN;
+	if (g_live.holdN >= kLiveHoldCap) {
+		g_live.holdDropped++;
+		return;
+	}
 	g_live.hold[g_live.holdN].msg = msg;
 	g_live.hold[g_live.holdN].dueAbs = dueAbs;
 	g_live.holdN++;
@@ -569,6 +586,68 @@ int CEmuMidiLiveHasNotes(void)
 	return g_live.sawNotes ? 1 : 0;
 }
 
+/* Walk a capture buffer as a UART stream (running status, SysEx skipped). */
+template <class T>
+static void LiveScanCapture(const T* hw, CEmuMidiLiveDiag* d)
+{
+	const unsigned n = hw->MidiByteCount();
+	d->hwBytes = n;
+	uint8_t run = 0;
+	int need = 0, haveD0 = 0;
+	uint8_t d0 = 0;
+	int inSysex = 0;
+	for (unsigned i = 0; i < n; i++) {
+		const uint8_t v = hw->MidiByteAt(i);
+		if (v >= 0xf8) continue;
+		if (v == 0xf0) { inSysex = 1; run = 0; need = 0; haveD0 = 0; continue; }
+		if (v == 0xf7) { inSysex = 0; continue; }
+		if (v & 0x80) {
+			inSysex = 0;
+			haveD0 = 0;
+			if ((v & 0xf0) == 0xf0) { run = 0; need = 0; continue; }
+			run = v;
+			need = ((v & 0xf0) == 0xc0 || (v & 0xf0) == 0xd0) ? 1 : 2;
+			continue;
+		}
+		if (inSysex || !run || need <= 0) continue;
+		if (need == 2 && !haveD0) { d0 = v; haveD0 = 1; continue; }
+		haveD0 = 0;
+		const uint8_t hi = (uint8_t)(run & 0xf0);
+		if (hi == 0x90)
+			(v > 0) ? d->hwNoteOn++ : d->hwNoteOff++;
+		else if (hi == 0x80)
+			d->hwNoteOff++;
+		else if (hi == 0xc0)
+			d->hwProgram++;
+		else if (hi == 0xb0)
+			d->hwControl++;
+		(void)d0;
+	}
+}
+
+int CEmuMidiLiveGetDiag(CEmuMidiLiveDiag* out)
+{
+	if (!out) return 0;
+	memset(out, 0, sizeof(*out));
+	LiveEnsureCs();
+	EnterCriticalSection(&g_live.cs);
+	const int ok = (g_live.active && g_live.hard) ? 1 : 0;
+	if (ok) {
+		out->injDropped = g_live.injDropped;
+		out->holdDropped = g_live.holdDropped;
+		out->injPeak = g_live.injPeak;
+		out->holdPeak = g_live.holdPeak;
+		out->midiSample = g_live.midiSample;
+		out->audioSample = g_live.audioSample;
+		if (g_live.hard->hardKind == CHard::KIND_PC98)
+			LiveScanCapture((const CHardPc98*)g_live.hard, out);
+		else if (g_live.hard->hardKind == CHard::KIND_PCAT)
+			LiveScanCapture((const CHardPcat*)g_live.hard, out);
+	}
+	LeaveCriticalSection(&g_live.cs);
+	return ok;
+}
+
 int CEmuMidiLiveSameZip(const wchar_t* zipPath)
 {
 	if (!zipPath || !zipPath[0]) return 0;
@@ -630,6 +709,10 @@ void CEmuMidiLiveStop(void)
 	g_live.overlayCode = 0;
 	g_live.ovlPhase = 0;
 	g_live.ovlSeHeld = 0;
+	g_live.injDropped = 0;
+	g_live.holdDropped = 0;
+	g_live.injPeak = 0;
+	g_live.holdPeak = 0;
 	memset(g_live.seBits, 0, sizeof(g_live.seBits));
 	InterlockedExchange((LONG*)&g_live.overlayPend, 0);
 	g_live.injR = g_live.injW;
@@ -721,16 +804,16 @@ int CEmuMidiLiveStartPcat(const wchar_t* zipPath, unsigned titleCode,
 		return 0;
 	}
 
-	/* PCAT: MT-32 (type 1/2, or unlabeled) → LA banks so the MIDI monitor
-	   uses LAmap. GM (8) / GS (4,6) stay on GMmap/GSmap. PC98 SC-55 is GS. */
+	/* MT-32 (type 1/2) → LA banks, so the monitor names the parts from LAmap
+	   and the plug-in reads the program numbers as MT-32 timbres. GM (8) /
+	   GS (4,6) stay on GMmap/GSmap. An unlabeled row is MT-32 on PCAT but
+	   SC-55 on PC98, matching what those drivers shipped against. */
 	const int isPc98 = (hard->hardKind == CHard::KIND_PC98) ? 1 : 0;
 	const int midiType = MidiOutTypeFromGe(ge);
-	int laBanks = 0;
-	if (!isPc98) {
-		if (midiType == 0 || MidiOutTypeIsLa(midiType))
-			laBanks = 1;
-	}
-	const char* stubTag = isPc98 ? "GS" : (laBanks ? "MT-32" : (midiType == 8 ? "GM" : "GS"));
+	int laBanks = MidiOutTypeIsLa(midiType);
+	if (!isPc98 && midiType == 0)
+		laBanks = 1;
+	const char* stubTag = laBanks ? "MT-32" : (midiType == 8 ? "GM" : "GS");
 	const char* song = NULL;
 	if (isPc98) {
 		CHardPc98* hw = (CHardPc98*)hard;
@@ -786,6 +869,10 @@ int CEmuMidiLiveStartPcat(const wchar_t* zipPath, unsigned titleCode,
 	g_live.overlayCode = 0;
 	g_live.ovlPhase = 0;
 	g_live.ovlSeHeld = 0;
+	g_live.injDropped = 0;
+	g_live.holdDropped = 0;
+	g_live.injPeak = 0;
+	g_live.holdPeak = 0;
 	memset(g_live.seBits, 0, sizeof(g_live.seBits));
 	if (g_liveBootAsSfx) {
 		g_live.overlayCode = titleCode;
@@ -839,6 +926,15 @@ int CEmuMidiLivePump(int frames)
 	LiveOvlTick();
 	LeaveCriticalSection(&g_live.cs);
 	return 1;
+}
+
+__int64 CEmuMidiLiveAudioFrames(void)
+{
+	LiveEnsureCs();
+	EnterCriticalSection(&g_live.cs);
+	const __int64 n = g_live.active ? g_live.audioSample : 0;
+	LeaveCriticalSection(&g_live.cs);
+	return n;
 }
 
 int CEmuMidiLiveStealShorts(CEmuMidiLiveShort* out, int maxCount)

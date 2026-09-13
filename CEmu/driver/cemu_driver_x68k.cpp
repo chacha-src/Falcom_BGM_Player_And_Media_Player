@@ -8,6 +8,257 @@ extern "C" {
 }
 #include <string.h>
 
+/* angdive/bfighter BOOT: after IPL they plant RTE on $100.. then bra.s *
+   at $1040 (SR unmasked, MFP IER=0). Real bring-up is
+   `move #$2500,sr / jsr init / tst.b $E00000` just below. Do not overlay
+   RTE on $1040 and do not snap to the poll (that skips the jsr). */
+static int CDriverX68kIs1040MailboxHang(CHardX68k* hw, unsigned pc)
+{
+	if (!hw) return 0;
+	if (pc != 0x1040u && pc != 0x1042u)
+		return 0;
+	if (hw->Read16(0x1040u) != 0x60FEu)
+		return 0;
+	return 1;
+}
+
+static unsigned CDriverX68kFindZmusicBootJsr(CHardX68k* hw)
+{
+	if (!hw) return 0;
+	for (unsigned a = 0x1080u; a + 16u < 0x1400u; a += 2u) {
+		if (hw->Read16(a) != 0x46FCu || hw->Read16(a + 2u) != 0x2500u)
+			continue;
+		if (hw->Read16(a + 4u) != 0x4EB9u)
+			continue;
+		if (hw->Read16(a + 10u) != 0x4A39u)
+			continue;
+		if (hw->Read32(a + 12u) != 0x00E00000u)
+			continue;
+		return a;
+	}
+	return 0;
+}
+
+static unsigned CDriverX68kResidentZmusic(CHardX68k* hw)
+{
+	if (!hw) return 0;
+	static unsigned s_key = 0;
+	static unsigned s_ent = 0;
+	const unsigned key = hw->Read32(0x100u) ^ hw->Read32(0x1F4Eu);
+	if (key != s_key) {
+		s_key = key;
+		s_ent = 0;
+	}
+	if (s_ent)
+		return s_ent;
+	/* libzm2internal.h: trap #3 is ident+8, version < $3000, skip ZMD. */
+	for (unsigned a = 0; a + 10u < 0x400000u; a += 2u) {
+		if (hw->Read8(a) != 'Z' || hw->Read8(a + 1) != 'm') continue;
+		if (hw->Read8(a + 2) != 'u' || hw->Read8(a + 3) != 'S') continue;
+		if (hw->Read8(a + 4) != 'i' || hw->Read8(a + 5) != 'C') continue;
+		if (a >= 1u && hw->Read8(a - 1u) == 0x10u)
+			continue;
+		if (hw->Read16(a + 6u) >= 0x3000u)
+			continue;
+		if (hw->Read16(a + 8u) == 0x48e7u) {
+			s_ent = a + 8u;
+			return s_ent;
+		}
+	}
+	return 0;
+}
+
+static unsigned CDriverX68kZmusicIntEntry(CHardX68k* hw, unsigned zmusic)
+{
+	if (!hw || !zmusic)
+		return 0;
+	const unsigned hi = (zmusic + 0x20000u < 0x800000u)
+		? (zmusic + 0x20000u) : 0x800000u;
+	/* zmsc_int.s int_entry: opmwait; move.b #$14,$E90001; move.b #$35,$E90003.
+	   First 48E7 FEFE after ident is some other movem (angdive $1E092). */
+	for (unsigned a = zmusic; a + 12u < hi; a += 2u) {
+		if (hw->Read16(a) != 0x13FCu || hw->Read16(a + 2u) != 0x0014u)
+			continue;
+		if (hw->Read32(a + 4u) != 0x00E90001u)
+			continue;
+		unsigned entry = a;
+		if (a >= 4u && (hw->Read16(a - 4u) & 0xFF00u) == 0x6100u)
+			entry = a - 4u;
+		else if (a >= 2u && (hw->Read16(a - 2u) & 0xFF00u) == 0x6100u)
+			entry = a - 2u;
+		return entry;
+	}
+	return 0;
+}
+
+static void CDriverX68kBindZmusicIsr(CHardX68k* hw)
+{
+	if (!hw)
+		return;
+	const unsigned zmusic = CDriverX68kResidentZmusic(hw);
+	if (!zmusic)
+		return;
+	const unsigned isr = CDriverX68kZmusicIntEntry(hw, zmusic);
+	if (!isr)
+		return;
+	hw->Write32(0x10cu, isr);
+	hw->Write16(CEMU_X68K_DOS_IRQ6 + 0u, 0x2078u);
+	hw->Write16(CEMU_X68K_DOS_IRQ6 + 2u, 0x010Cu);
+	hw->Write16(CEMU_X68K_DOS_IRQ6 + 4u, 0x4ED0u);
+	hw->Write32(0x78u, CEMU_X68K_DOS_IRQ6);
+}
+
+static void CDriverX68kResume1040Hang(CHardX68k* hw, unsigned code)
+{
+	if (!hw) return;
+	/* TRAP#3 vector $xx001042 wraps to the $1040 hang island. Real ZMUSIC
+	   RTEs; the DOS trampoline jsrs and smashes that frame (PC=$1ED2).
+	   Point $8C at ident+8. Do not overlay RTE on $1040/$1042. */
+	if (hw->Read16(0x1040u) == 0x60FEu) {
+		const unsigned zmusic = CDriverX68kResidentZmusic(hw);
+		if (zmusic)
+			hw->Write32(0x8cu, zmusic);
+		else {
+			const unsigned t3 = hw->Read32(0x8cu) & 0xffffffu;
+			if (t3 >= 0x1040u && t3 < 0x1080u) {
+				const unsigned stub = CEMU_X68K_DOS_TRAP3;
+				if (hw->Read16(stub) != 0x2079u && hw->Read16(stub) != 0x7000u) {
+					hw->Write16(stub, 0x7000);
+					hw->Write16(stub + 2u, 0x4e73u);
+				}
+				hw->Write32(0x8cu, stub);
+			}
+		}
+		const unsigned lf = hw->Read32(0x2cu) & 0xffffffu;
+		if (lf >= 0x1040u && lf < 0x1080u)
+			hw->Write32(0x2cu, CEMU_X68K_DOS_LINEF);
+		unsigned zmd = 0;
+		for (unsigned a = 0x1000u; a + 8u < 0x80000u; a++) {
+			if (hw->Read8(a) != 0x10u) continue;
+			if (hw->Read8(a + 1u) != 'Z' || hw->Read8(a + 2u) != 'm') continue;
+			if (hw->Read8(a + 3u) != 'u' || hw->Read8(a + 4u) != 'S') continue;
+			if (hw->Read8(a + 5u) != 'i' || hw->Read8(a + 6u) != 'C') continue;
+			zmd = a + 7u;
+			break;
+		}
+		if (zmusic && zmd) {
+			unsigned isr = CDriverX68kZmusicIntEntry(hw, zmusic);
+			if (!isr) {
+				const unsigned hi = (zmusic + 0x10000u < 0x800000u)
+					? (zmusic + 0x10000u) : 0x800000u;
+				for (unsigned a = zmusic; a + 4u < hi; a += 2u) {
+					if (hw->Read16(a) == 0x48e7u && hw->Read16(a + 2u) == 0xfefeu) {
+						isr = a;
+						break;
+					}
+				}
+			}
+			if (isr) {
+				hw->Write32(0x10cu, isr);
+				hw->Write16(CEMU_X68K_DOS_IRQ6 + 0u, 0x2078u); /* move.l $10C,a0 */
+				hw->Write16(CEMU_X68K_DOS_IRQ6 + 2u, 0x010Cu);
+				hw->Write16(CEMU_X68K_DOS_IRQ6 + 4u, 0x4ED0u); /* jmp (a0) */
+				hw->Write32(0x78u, CEMU_X68K_DOS_IRQ6);
+			}
+			CDriverX68kBindZmusicIsr(hw);
+			const unsigned stub = 0x00F08780u;
+			static unsigned s_stubKey = 0;
+			static int s_stubOnce = 0;
+			const unsigned playKey = zmusic ^ zmd ^ (code & 0xffffu);
+			if (s_stubKey != playKey) {
+				s_stubKey = playKey;
+				s_stubOnce = 0;
+			}
+			if (s_stubOnce) {
+				const unsigned boot2 = CDriverX68kFindZmusicBootJsr(hw);
+				m68k_set_reg(M68K_REG_SR, 0x2500);
+				if (boot2) {
+					m68k_set_reg(M68K_REG_PC, boot2 + 10u);
+					hw->SetPc(boot2 + 10u);
+				}
+				hw->SetSongCommand(code);
+				return;
+			}
+			s_stubOnce = 1;
+			hw->Write16(stub + 0u, 0x7200u); /* moveq #0,d1  m_init */
+			hw->Write16(stub + 2u, 0x4E43u);
+			hw->Write16(stub + 4u, 0x227Cu); /* move.l #zmd,a1 */
+			hw->Write32(stub + 6u, zmd);
+			hw->Write16(stub + 10u, 0x7400u); /* moveq #0,d2 */
+			hw->Write16(stub + 12u, 0x7211u); /* moveq #$11,d1 play_cnv_data */
+			hw->Write16(stub + 14u, 0x4E43u);
+			/* m_play00 `ori #$0700,sr` / t_dat_ok RTS. If the trap RTE
+			   keeps IPL7, YM Timer A never preempts. Drop it here. */
+			hw->Write16(stub + 16u, 0x027Cu); /* andi.w #$F8FF,sr */
+			hw->Write16(stub + 18u, 0xF8FFu);
+			const unsigned boot = CDriverX68kFindZmusicBootJsr(hw);
+			if (boot) {
+				hw->Write16(stub + 20u, 0x4EF9u);
+				hw->Write32(stub + 22u, boot + 10u);
+			} else {
+				hw->Write16(stub + 20u, 0x60FEu);
+			}
+			m68k_set_reg(M68K_REG_SR, 0x2500);
+			m68k_set_reg(M68K_REG_PC, stub);
+			hw->SetPc(stub);
+			hw->SetSongCommand(code);
+			return;
+		}
+	}
+	hw->SetSongCommand(code);
+	const unsigned boot = CDriverX68kFindZmusicBootJsr(hw);
+	if (boot) {
+		m68k_set_reg(M68K_REG_SR, 0x2500);
+		m68k_set_reg(M68K_REG_PC, boot);
+		hw->SetPc(boot);
+	}
+}
+
+static void CDriverX68kSkipDmacScan(CHardX68k* hw)
+{
+	if (!hw || hw->Read16(0x1040u) != 0x60FEu)
+		return;
+	if (hw->Read16(0x1556u) == 0x60FEu)
+		hw->Write16(0x1556u, 0x4E75u);
+	/* BOOT `move.l #$14E6,$2C / $F000 / rts` steals LINE-F back onto the
+	   $14E6 Human68k cmp chain (PC=$1ED2). Leave $2C on the OS image. */
+	for (unsigned a = 0x1400u; a + 12u < 0x1600u; a += 2u) {
+		if (hw->Read16(a) != 0x23FCu)
+			continue;
+		if (hw->Read32(a + 6u) != 0x0000002cu)
+			continue;
+		if (hw->Read16(a) != 0x4E75u)
+			hw->Write16(a, 0x4E75u);
+		break;
+	}
+	const unsigned lf = hw->Read32(0x2cu) & 0xffffffu;
+	if (lf >= 0x1040u && lf < 0x1080u)
+		hw->Write32(0x2cu, CEMU_X68K_DOS_LINEF);
+	/* $1F16/$243C jsr $15B0/$15A0 (Human68k/DMAC + trap #3 play). Keep
+	   that init; the $1D42 `cmpi.b #$6B,2(A5) / bne` never sees a PSP.
+	   NOP the branch so bring-up can reach play_cnv_data. */
+	for (unsigned a = 0x1C00u; a + 8u < 0x1E80u; a += 2u) {
+		const unsigned op = hw->Read16(a);
+		if (op != 0x0C2Du && op != 0x0C6Du)
+			continue;
+		if (hw->Read16(a + 2u) != 0x006Bu)
+			continue;
+		if (hw->Read16(a + 4u) != 0x0002u)
+			continue;
+		if ((hw->Read16(a + 6u) & 0xFF00u) == 0x6600u)
+			hw->Write16(a + 6u, 0x4E71u);
+		break;
+	}
+	const unsigned pc = (unsigned)m68k_get_reg(NULL, M68K_REG_PC) & 0xffffffu;
+	if (pc < 0x15F0u || pc >= 0x1720u)
+		return;
+	if (hw->Read16(0x1600u) != 0xB1C9u && hw->Read16(0x1648u) != 0x5488u
+		&& hw->Read16(0x1648u) != 0xB1C9u && hw->Read16(0x16B8u) != 0xB1C9u)
+		return;
+	const unsigned a1 = (unsigned)m68k_get_reg(NULL, M68K_REG_A1) & 0xffffffu;
+	m68k_set_reg(M68K_REG_A0, a1);
+}
+
 static void CDriverX68kApplyIrq(CHardX68k* hw, CChip* chip, int hold)
 {
 	if (hold) {
@@ -508,6 +759,7 @@ int CDriverX68k::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigne
 			CDriverX68kPlantCFrame(hw_);
 			const int n = left > slice ? slice : left;
 			RunCycles(n);
+			CDriverX68kSkipDmacScan(hw_);
 			left -= n;
 			slices++;
 			const int holdScan = (opmGlue && opmLandmark
@@ -692,11 +944,14 @@ int CDriverX68k::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigne
 	if (opmGlue)
 		driverRteIrq6(hw_, 1);
 	{
-		const unsigned pc = (unsigned)m68k_get_reg(NULL, M68K_REG_PC) & 0xffffffu;
+		unsigned pc = (unsigned)m68k_get_reg(NULL, M68K_REG_PC) & 0xffffffu;
 		const unsigned h10 = hw_->Read32(0x10c) & 0xffffffu;
 		const int inited = (h10 >= 0x8000u && h10 < 0xf00000u);
 		if (pc >= 0x94Au && pc < 0x95Au && inited && hw_->Read16(0x94A) == 0x4e71u)
 			ResumeMailboxForSong(songCode_);
+		pc = (unsigned)m68k_get_reg(NULL, M68K_REG_PC) & 0xffffffu;
+		if (CDriverX68kIs1040MailboxHang(hw_, pc))
+			CDriverX68kResume1040Hang(hw_, songCode_);
 		hw_->SetPc((unsigned)m68k_get_reg(NULL, M68K_REG_PC) & 0xffffffu);
 	}
 	/* A playlist/catalog pick must never be replaced by the loudness hunter.
@@ -1067,6 +1322,7 @@ int CDriverX68k::Render(int16_t* stereo, int frames)
 		cpuAcc_ %= (int64_t)hostRate_;
 		if (cyclesPerSample < 1) cyclesPerSample = 1;
 		RunCycles(cyclesPerSample);
+		CDriverX68kSkipDmacScan(hw_);
 		{
 			/* OP.X/rougea: nest RTE lands on TRAP#1 ($F08740) with PC looping
 			   on the stub. Finish a real frame, else resume the mailbox poll. */
@@ -1085,6 +1341,8 @@ int CDriverX68k::Render(int16_t* stereo, int frames)
 				&& hw_->Read16(0x94A) == 0x4e71u) {
 				opmSpinRescue_ = 1;
 				ResumeMailboxForSong(songCode_);
+			} else if (CDriverX68kIs1040MailboxHang(hw_, pc)) {
+				CDriverX68kResume1040Hang(hw_, songCode_);
 			}
 		}
 		/* YM2151 IRQ6, else MFP Timer C/D IRQ2. */

@@ -56,6 +56,7 @@ private:
 	int64_t namcoAcc_;
 	int sys86_;             /* Namco Sys86: HD63701 path */
 	int64_t sys86Acc_;
+	int sys86OciNeed_;      /* re-arm EOCI once after song-start idle */
 	int m62_;              /* Irem M62: M6803 path */
 	int64_t m62Acc_;
 	int sega68_;           /* Model1 MultiPCM / Model2 SCSP: 68000 path */
