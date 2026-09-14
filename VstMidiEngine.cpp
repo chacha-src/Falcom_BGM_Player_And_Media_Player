@@ -26,6 +26,8 @@
 #include "KpiHostClient.h"
 #include "resource.h"
 #include "VstHostDlg.h"
+#include "ComposerConvert.h"
+#include "MidiPack.h"
 #else
 #include "KpiHost64VstLive.h"
 #endif
@@ -488,6 +490,7 @@ struct EngineState {
 	DWORD fileBytes;
 	MidiItem* events;
 	int eventCount;
+	int smfDiv;            // SMF PPQN（VstMidiTickAtSample と同系）
 	int eventPos;          // 次に送るイベント。シークで巻き戻す
 	__int64 playSample;
 	__int64 lengthSamples;
@@ -2541,6 +2544,7 @@ static int LoadSmf(const wchar_t* path)
 	g_eng.sysexBytes = sxUsed;
 	g_eng.events = ev;
 	g_eng.eventCount = count;
+	g_eng.smfDiv = division;
 	if (gs32 && maxPort < 1) maxPort = 1;
 	g_eng.maxMidiPort = maxPort;
 	g_eng.mirrorToB = (gs32 && !sawFf21) ? 1 : 0;
@@ -5022,6 +5026,7 @@ static void FreeSong()
 	g_eng.mirrorToB = 0;
 	RxListenInit();
 	g_eng.eventCount = g_eng.eventPos = 0;
+	g_eng.smfDiv = 0;
 	g_eng.playSample = g_eng.lengthSamples = 0;
 	g_eng.ringRead = g_eng.ringCount = 0;
 	ZeroMemory(g_eng.voices, sizeof(g_eng.voices));
@@ -5472,8 +5477,14 @@ extern "C" int VstHasX64Instruments(void)
 
 extern "C" int VstIsMidiExt(const wchar_t* path)
 {
-	return EqExt(path, L".mid") || EqExt(path, L".midi") || EqExt(path, L".kar") || EqExt(path, L".rmi")
-		|| EqExt(path, L".mpy") || EqExt(path, L".mpw2") || EqExt(path, L".mpsmv");
+	if (EqExt(path, L".mid") || EqExt(path, L".midi") || EqExt(path, L".kar") || EqExt(path, L".rmi")
+		|| EqExt(path, L".mpy") || EqExt(path, L".mpw2") || EqExt(path, L".mpsmv"))
+		return 1;
+#ifndef KPIHOST64_BUILD
+	if (ComposerIsSeqExt(path))
+		return 1;
+#endif
+	return 0;
 }
 
 extern "C" int VstIsProjectExt(const wchar_t* path)
@@ -5500,10 +5511,24 @@ extern "C" int VstResolvePlayPath(const wchar_t* inPath, wchar_t* outMid,
 		/* Convert failed (corrupt/empty) — accept sibling .mid if present. */
 		return FindSidecar(inPath, outMid, outMidChars);
 	}
+#ifndef KPIHOST64_BUILD
+	{
+		wchar_t pack[VST_PATH_CHARS];
+		if (MidiPackMaterialize(inPath, pack, VST_PATH_CHARS))
+			inPath = pack;
+	}
+#endif
 	if (EqExt(inPath, L".mid") || EqExt(inPath, L".midi") || EqExt(inPath, L".kar") || EqExt(inPath, L".rmi")) {
 		SafeCopy(outMid, outMidChars, inPath);
 		return 1;
 	}
+#ifndef KPIHOST64_BUILD
+	if (ComposerIsSeqExt(inPath)) {
+		if (ComposerConvertToMidi(inPath, outMid, outMidChars))
+			return 1;
+		return 0;
+	}
+#endif
 	if (!VstIsProjectExt(inPath)) return 0;
 	if (hints && maxHints > 0) ExtractHints(inPath, hints, maxHints, hc);
 	if (outHintCount) *outHintCount = hc;
@@ -6596,6 +6621,15 @@ extern "C" int VstMidiTickAtSample(__int64 sample, unsigned* outTick)
 	*outTick = VstMidiTickAtSampleUnlocked(sample);
 	LeaveCriticalSection(&g_eng.cs);
 	return 1;
+}
+
+extern "C" int VstMidiGetDivision(void)
+{
+	int d = 0;
+	EnterCriticalSection(&g_eng.cs);
+	d = g_eng.smfDiv;
+	LeaveCriticalSection(&g_eng.cs);
+	return d;
 }
 
 extern "C" __int64 VstMidiGetPlaySample(void)

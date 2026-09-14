@@ -1,4 +1,4 @@
-// CMediaPlayerDlg.h : メディアプレイヤーモード画面(張りぼて)とモード選択ダイアログ
+﻿// CMediaPlayerDlg.h : メディアプレイヤーモード画面(張りぼて)とモード選択ダイアログ
 //
 // このソフトは元々ファルコム特化型再生ソフトだが、メディアプレイヤーの側面も持つ。
 // CMediaPlayerDlg は「張りぼて(ファサード)」であり、実体は COggDlg(og->) と
@@ -519,6 +519,7 @@ protected:
 	afx_msg void OnPiano();
 	afx_msg void OnAnalyzer();
 	afx_msg void OnMidiMonitor();
+	afx_msg void OnWrdView();
 	afx_msg void OnFmMonitor();
 	afx_msg void OnProTools();
 	afx_msg void OnFadeout();

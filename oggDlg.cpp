@@ -31,6 +31,8 @@ int flacmode = 0;
 #include "CAnalyzerDlg.h"
 #include "CMidiMonitorDlg.h"
 #include "CFmMonitorDlg.h"
+#include "CWrdViewDlg.h"
+#include "MidiPack.h"
 #include "CSasamiMidiScoreDlg.h"
 #include "CSasamiFmScoreDlg.h"
 #include "CSasamiTextDlg.h"
@@ -1879,6 +1881,7 @@ COggDlg::COggDlg(CWnd* pParent /*=NULL*/)
 	m_AnalyzerDlg = new CAnalyzerDlg();
 	m_MidiMonitorDlg = new CMidiMonitorDlg();
 	m_FmMonitorDlg = new CFmMonitorDlg();
+	m_WrdViewDlg = new CWrdViewDlg();
 }
 
 void COggDlg::DoDataExchange(CDataExchange* pDX)
@@ -9970,6 +9973,12 @@ void COggDlg::play()
 		slash = filen.ReverseFind(_T('/'));
 		if (slash >= 0)
 			filen = filen.Mid(slash + 1);
+	}
+
+	{
+		wchar_t mat[MIDIPACK_PATH];
+		if (MidiPackMaterialize(filen, mat, MIDIPACK_PATH))
+			filen = mat;
 	}
 
 	CWaitCursor rrr1;
@@ -23568,7 +23577,10 @@ static bool IsMidiLikePath(const CString& path)
 	if (d < 0) return false;
 	e = e.Mid(d);
 	e.MakeLower();
-	return e == _T(".mid") || e == _T(".midi") || e == _T(".kar") || e == _T(".rmi");
+	return e == _T(".mid") || e == _T(".midi") || e == _T(".kar") || e == _T(".rmi")
+		|| e == _T(".rcp") || e == _T(".r36") || e == _T(".g36") || e == _T(".g18")
+		|| e == _T(".mcp") || e == _T(".mtd") || e == _T(".mff")
+		|| e == _T(".seq");
 }
 
 // MIDI KPI: Seek だけでは音色/CC/ノートが復元されない。先頭→目標まで Render 破棄。
@@ -24296,6 +24308,11 @@ BOOL COggDlg::DestroyWindow()
 		m_FmMonitorDlg->DetachForDestroy();
 		m_FmMonitorDlg->DestroyWindow();
 	}
+	if (m_WrdViewDlg && ::IsWindow(m_WrdViewDlg->GetSafeHwnd())) {
+		savedata.wrdwindow = 1;
+		m_WrdViewDlg->DetachForDestroy();
+		m_WrdViewDlg->DestroyWindow();
+	}
 	if (::IsWindow(m_PianoRollTuneDlg->GetSafeHwnd())) {
 		m_PianoRollTuneDlg->DestroyWindow();
 	}
@@ -24305,6 +24322,7 @@ BOOL COggDlg::DestroyWindow()
 	delete m_AnalyzerDlg; m_AnalyzerDlg = nullptr;
 	delete m_MidiMonitorDlg; m_MidiMonitorDlg = nullptr;
 	delete m_FmMonitorDlg; m_FmMonitorDlg = nullptr;
+	delete m_WrdViewDlg; m_WrdViewDlg = nullptr;
 	if (m_pDlgColor)delete m_pDlgColor;
 	if (ptl) ptl->Release();
 	if (pcdl) pcdl->Release();
@@ -24972,6 +24990,24 @@ double OggGetGdiPlaybackTimeSec()
 	return t3;
 }
 
+__int64 OggGetUiSourcePcmFrames()
+{
+	/* バナー time: は TempoPredWallNow()／g_tpSrcSec。OggGetHeardPcmFrames() は
+	   VST x64 で g_heardBytes を bpf で割り過ぎて約 1/4（56秒地点で 14秒）になる。 */
+	if (wavbit_sample_Hz < 8000)
+		return 0;
+	const double sr = (double)wavbit_sample_Hz;
+	if (g_tpUiValid && g_tpSrcSec > 0.0)
+		return (__int64)(g_tpSrcSec * sr + 0.5);
+	const double wall = TempoPredWallNow();
+	if (wall > 0.0) {
+		double rate = TempoPlaybackRateFromPos(tempo);
+		if (rate < 0.05) rate = 1.0;
+		return (__int64)(wall * rate * sr + 0.5);
+	}
+	return 0;
+}
+
 static void SecToMinSecCentis(double sec, int& minutes, int& seconds, int& centis)
 {
 	if (sec < 0.0) sec = 0.0;
@@ -25550,6 +25586,13 @@ void COggDlg::timerp()
 			&& m_FmMonitorDlg->IsWindowVisible() && !m_FmMonitorDlg->IsIconic()
 			&& Ms2DrawDue(ms2))
 			m_FmMonitorDlg->UpdateWindow();
+	}
+	if (plf == 1 && m_WrdViewDlg && ::IsWindow(m_WrdViewDlg->GetSafeHwnd())) {
+		m_WrdViewDlg->PumpSyncNow();
+		if (::IsWindow(m_WrdViewDlg->GetSafeHwnd())
+			&& m_WrdViewDlg->IsWindowVisible() && !m_WrdViewDlg->IsIconic()
+			&& Ms2DrawDue(ms2))
+			m_WrdViewDlg->UpdateWindow();
 	}
 
 	OggDispatchChromeMessages();
@@ -32137,6 +32180,8 @@ void COggDlg::RefreshAllAeroWindows()
 	refreshMode(m_PianoRollDlg);
 	refreshMode(m_AnalyzerDlg);
 	refreshMode(m_MidiMonitorDlg);
+	refreshMode(m_FmMonitorDlg);
+	refreshMode(m_WrdViewDlg);
 	if (pl) refreshMode(pl);
 	{
 		extern CMediaPlayerDlg* mp;
@@ -32440,9 +32485,11 @@ LRESULT COggDlg::OnToggleSubUiMsg(WPARAM wParam, LPARAM)
 		ToggleMidiMonitor();
 	else if (wParam == 4)
 		ToggleFmMonitor();
-	else if (wParam >= 10 && wParam <= 18) {
+	else if (wParam == 5)
+		ToggleWrdView();
+	else if (wParam >= 10 && wParam <= 19) {
 		// 起動時サブUI復元: 開くだけ(トグルしない)。1メッセージ=最大1 Create。
-		// 10=EQ .. 17=MIDIモニタ 18=FMモニタ
+		// 10=EQ .. 17=MIDIモニタ 18=FMモニタ 19=WRD
 		// SW_SHOWNOACTIVATE でフォーカス奪取・ちらつきを抑える。
 		g_oggSubUiRestoring = 1;
 		try {
@@ -32532,6 +32579,16 @@ LRESULT COggDlg::OnToggleSubUiMsg(WPARAM wParam, LPARAM)
 				}
 			}
 		}
+		else if (wParam == 19) {
+			if (savedata.wrdwindow == 1 && m_WrdViewDlg) {
+				if (!::IsWindow(m_WrdViewDlg->GetSafeHwnd())) {
+					if (!m_WrdViewDlg->Create(IDD_WRDVIEW, this))
+						savedata.wrdwindow = 0;
+				}
+				if (savedata.wrdwindow == 1 && ::IsWindow(m_WrdViewDlg->GetSafeHwnd()))
+					m_WrdViewDlg->ShowWindow(SW_SHOWNOACTIVATE);
+			}
+		}
 		}
 		catch (CException* e) {
 			e->Delete();
@@ -32539,7 +32596,7 @@ LRESULT COggDlg::OnToggleSubUiMsg(WPARAM wParam, LPARAM)
 		g_oggSubUiRestoring = 0;
 		// 閉じている窓の空メッセージを飛ばし、次に復元が要る番号へ
 		WPARAM next = wParam + 1;
-		while (next <= 18) {
+		while (next <= 19) {
 			BOOL need = FALSE;
 			if (next == 10)
 				need = (savedata.eqwindow == 1 && m_EqualizerDlg);
@@ -32559,10 +32616,12 @@ LRESULT COggDlg::OnToggleSubUiMsg(WPARAM wParam, LPARAM)
 				need = (savedata.midimonwindow == 1 && m_MidiMonitorDlg);
 			else if (next == 18)
 				need = (savedata.fmmonwindow == 1 && m_FmMonitorDlg);
+			else if (next == 19)
+				need = (savedata.wrdwindow == 1 && m_WrdViewDlg);
 			if (need) break;
 			++next;
 		}
-		if (next <= 18)
+		if (next <= 19)
 			PostMessage(WM_OGG_TOGGLE_SUBUI, next, 0);
 		else {
 			// 復元完了: 押下見た目を一度だけ同期(復元中は抑止していた)
@@ -34695,6 +34754,7 @@ enum {
 	kHideFmMidi_LayoutPal = 1 << 9,
 	kHideFmMidi_MidiRoll = 1 << 10,
 	kHideFmMidi_FmRoll = 1 << 11,
+	kHideFmMidi_Wrd = 1 << 12,
 };
 
 static void HideFmMidiToolWnd(CWnd* w, int bit, int& mask)
@@ -34723,6 +34783,7 @@ void COggDlg::HideMidiMonitorForMinimize()
 	HideFmMidiToolWnd(CSasamiNotePropsDlg::Instance(), kHideFmMidi_NoteProps, m_fmMidiToolsHiddenMask);
 	HideFmMidiToolWnd(g_vstHostDlg, kHideFmMidi_VstHost, m_fmMidiToolsHiddenMask);
 	HideFmMidiToolWnd(m_PianoRollTuneDlg, kHideFmMidi_PrTune, m_fmMidiToolsHiddenMask);
+	HideFmMidiToolWnd(m_WrdViewDlg, kHideFmMidi_Wrd, m_fmMidiToolsHiddenMask);
 }
 
 // 本体復帰時: 最小化で隠した FM/MIDI 系だけ戻す（閉じ済みは出さない）。
@@ -34756,6 +34817,8 @@ void COggDlg::RestoreMidiMonitorAfterMinimize()
 	restore(g_vstHostDlg, kHideFmMidi_VstHost, mask);
 	if ((mask & kHideFmMidi_PrTune) && savedata.prTunewindow == 1)
 		restore(m_PianoRollTuneDlg, kHideFmMidi_PrTune, mask);
+	if ((mask & kHideFmMidi_Wrd) && savedata.wrdwindow == 1)
+		restore(m_WrdViewDlg, kHideFmMidi_Wrd, mask);
 }
 
 int COggDlg::MidiMonitorIsVisible() const
@@ -34830,6 +34893,80 @@ void COggDlg::ToggleFmMonitor()
 		m_FmMonitorDlg->DestroyWindow();
 		OggPersistSaveDatNow();
 	}
+	extern CMediaPlayerDlg* mp;
+	if (mp && ::IsWindow(mp->GetSafeHwnd()))
+		mp->SyncPushToggleButtons();
+}
+
+int COggDlg::WrdViewIsVisible() const
+{
+	HWND h = (m_WrdViewDlg) ? m_WrdViewDlg->GetSafeHwnd() : NULL;
+	return (h && ::IsWindow(h) && ::IsWindowVisible(h) && !::IsIconic(h)) ? 1 : 0;
+}
+
+void COggDlg::EnsureMidiMonitor()
+{
+	if (!m_MidiMonitorDlg)
+		return;
+	if (!::IsWindow(m_MidiMonitorDlg->GetSafeHwnd())) {
+		if (!m_MidiMonitorDlg->Create(IDD_MIDIMONITOR, this)) {
+			savedata.midimonwindow = 0;
+			extern CMediaPlayerDlg* mp;
+			if (mp && ::IsWindow(mp->GetSafeHwnd()))
+				mp->SyncPushToggleButtons();
+			return;
+		}
+	}
+	savedata.midimonwindow = 1;
+	m_fmMidiToolsHiddenMask &= ~kHideFmMidi_MidiMon;
+	if (::IsWindow(m_MidiMonitorDlg->GetSafeHwnd()))
+		m_MidiMonitorDlg->ShowWindow(SW_SHOWNOACTIVATE);
+	extern CMediaPlayerDlg* mp;
+	if (mp && ::IsWindow(mp->GetSafeHwnd()))
+		mp->SyncPushToggleButtons();
+}
+
+void COggDlg::ShowWrdView(const wchar_t* wrdPath)
+{
+	if (!m_WrdViewDlg)
+		return;
+	if (!::IsWindow(m_WrdViewDlg->GetSafeHwnd())) {
+		if (!m_WrdViewDlg->Create(IDD_WRDVIEW, this)) {
+			savedata.wrdwindow = 0;
+			extern CMediaPlayerDlg* mp;
+			if (mp && ::IsWindow(mp->GetSafeHwnd()))
+				mp->SyncPushToggleButtons();
+			return;
+		}
+	}
+	savedata.wrdwindow = 1;
+	m_fmMidiToolsHiddenMask &= ~kHideFmMidi_Wrd;
+	if (wrdPath && wrdPath[0])
+		m_WrdViewDlg->LoadWrdPath(wrdPath);
+	else
+		m_WrdViewDlg->ReloadCurrent();
+	if (::IsWindow(m_WrdViewDlg->GetSafeHwnd())) {
+		m_WrdViewDlg->ShowWindow(SW_SHOW);
+		m_WrdViewDlg->SetFocus();
+	}
+	extern CMediaPlayerDlg* mp;
+	if (mp && ::IsWindow(mp->GetSafeHwnd()))
+		mp->SyncPushToggleButtons();
+}
+
+void COggDlg::ToggleWrdView()
+{
+	if (!m_WrdViewDlg)
+		return;
+	if (!::IsWindow(m_WrdViewDlg->GetSafeHwnd())) {
+		ShowWrdView(NULL);
+		return;
+	}
+	m_fmMidiToolsHiddenMask &= ~kHideFmMidi_Wrd;
+	savedata.wrdwindow = 0;
+	m_WrdViewDlg->DetachForDestroy();
+	m_WrdViewDlg->DestroyWindow();
+	OggPersistSaveDatNow();
 	extern CMediaPlayerDlg* mp;
 	if (mp && ::IsWindow(mp->GetSafeHwnd()))
 		mp->SyncPushToggleButtons();

@@ -30,10 +30,14 @@
 #include "CMidiMonitorDlg.h"
 #include "CFmMonitorDlg.h"
 #include "CMediaPlayerDlg.h"
+#include "ComposerConvert.h"
+#include "MidiPack.h"
 
 static void PlCemuFillPlaylistRow(const CEmuGameEntry* ge, const wchar_t* zipPhysical,
 	unsigned titleIndex1, playlistdata* p);
 static bool PlAddCemuZipEntries(CPlayList* pl, const CString& zipPath, int& syo, CString& syos, int& modesub, CString& fnn);
+static bool PlAddMidiPackEntries(CPlayList* pl, const CString& arcPath, int& syo, CString& syos, int& modesub, CString& fnn);
+static void RequestPlaylistRestartAsync();
 #include "CMissingFilesDlg.h"
 #include "MpPlayerAddons.h"
 #include "CDesktopLyricsWnd.h"
@@ -1256,11 +1260,16 @@ static bool PlIsAbsoluteMediaPath(LPCTSTR p)
 CString NormalizePlaylistPath(LPCTSTR fol)
 {
 	if (!fol || !*fol) return CString();
+	CString in(fol);
+	in.Replace(_T('/'), _T('\\'));
+	const int gt = in.Find(_T('>'));
+	CString phys = (gt >= 0) ? in.Left(gt) : in;
+	const CString inner = (gt >= 0) ? in.Mid(gt) : CString();
 	TCHAR full[MAX_PATH];
-	DWORD n = GetFullPathName(fol, MAX_PATH, full, NULL);
-	CString s = (n > 0 && n < MAX_PATH) ? CString(full) : CString(fol);
+	DWORD n = GetFullPathName(phys, MAX_PATH, full, NULL);
+	CString s = (n > 0 && n < MAX_PATH) ? CString(full) : phys;
 	s.Replace(_T('/'), _T('\\'));
-	return s;
+	return s + inner;
 }
 
 int PlIsSasamiTempPreviewPath(LPCTSTR path)
@@ -1279,6 +1288,9 @@ CString PlPhysicalMediaPath(LPCTSTR fol)
 {
 	if (!fol || !*fol) return CString();
 	CString in(fol);
+	const int gt = in.Find(_T('>'));
+	if (gt >= 0)
+		return in.Left(gt);
 	const int len = in.GetLength();
 	// KPI subsong: path::0001 (4-digit track number)
 	if (len >= 6 && in.GetAt(len - 5) == L':') {
@@ -1503,6 +1515,55 @@ int PlLrcProbe(LPCTSTR fol)
 	const int none = (!lrc.IsEmpty() && ::PathFileExists(lrc)) ? 0 : 1;
 	PlLrcDiskSet(fol, none);
 	return none;
+}
+
+int PlWrdDiskGet(LPCTSTR fol)
+{
+	if (!fol || !fol[0]) return 1;
+	CString dir = PlYsedCacheDir(_T("wrdflag"));
+	if (dir.IsEmpty()) return -1;
+	CString path;
+	path.Format(_T("%s\\%016I64X"), (LPCTSTR)dir, PlCacheHashPath(fol));
+	HANDLE h = ::CreateFile(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL,
+		OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+	if (h == INVALID_HANDLE_VALUE) return -1;
+	BYTE b = 0;
+	DWORD rd = 0;
+	const BOOL ok = ::ReadFile(h, &b, 1, &rd, NULL);
+	::CloseHandle(h);
+	if (!ok || rd != 1) return -1;
+	return b ? 1 : 0;
+}
+
+void PlWrdDiskSet(LPCTSTR fol, int none)
+{
+	if (!fol || !fol[0]) return;
+	CString dir = PlYsedCacheDir(_T("wrdflag"));
+	if (dir.IsEmpty()) return;
+	CString path;
+	path.Format(_T("%s\\%016I64X"), (LPCTSTR)dir, PlCacheHashPath(fol));
+	HANDLE h = ::CreateFile(path, GENERIC_WRITE, FILE_SHARE_READ, NULL,
+		CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+	if (h == INVALID_HANDLE_VALUE) return;
+	BYTE b = none ? 1 : 0;
+	DWORD wr = 0;
+	::WriteFile(h, &b, 1, &wr, NULL);
+	::CloseHandle(h);
+}
+
+int PlWrdProbe(LPCTSTR fol)
+{
+	if (!fol || !fol[0]) return -1;
+	const int cached = PlWrdDiskGet(fol);
+	if (cached >= 0) return cached;
+	int has = 0;
+#ifndef _UNICODE
+	has = ComposerHasSidecarWrd(CStringW(fol)) ? 1 : 0;
+#else
+	has = ComposerHasSidecarWrd(fol) ? 1 : 0;
+#endif
+	PlWrdDiskSet(fol, has ? 0 : 1);
+	return has ? 0 : 1;
 }
 
 int PlChDiskGet(LPCTSTR fol)
@@ -2054,12 +2115,15 @@ void PlFormatRowMarks(int row, LPCTSTR fol, CString& out)
 	out.Empty();
 	const BOOL sav = SongParams_HasEntryForRow(row);
 	BOOL lrc = FALSE;
+	BOOL wrd = FALSE;
 	int ch = 0;
 	int midCh32 = -1, midKind = 0, midSys = 0, midForce = 0;
 	BOOL midOk = FALSE;
 	if (fol && fol[0]) {
 		const int c = PlLrcDiskGet(fol);
 		lrc = (c == 0);
+		const int w = PlWrdDiskGet(fol);
+		wrd = (w == 0);
 		const int cc = PlChDiskGet(fol);
 		if (cc > 0) ch = cc;
 #ifndef _UNICODE
@@ -2076,6 +2140,7 @@ void PlFormatRowMarks(int row, LPCTSTR fol, CString& out)
 	// [SAV]=曲ごと保存 / [LRC]=歌詞 / [MONO]|[LR]|[2.1]…=チャンネル / MIDI 16ch·マップ
 	if (sav) out += _T("[SAV]");
 	if (lrc) out += _T("[LRC]");
+	if (wrd) out += _T("[WRD]");
 	if (ch > 0) {
 		CString lab;
 		PlChFormatLabel(ch, lab);
@@ -3251,6 +3316,7 @@ int CPlayList::ShowTrackContextMenu(CPoint pt, CWnd* pOwner)
 	BOOL anySasamiFm = FALSE;
 	BOOL anyOtherMidi = FALSE;
 	BOOL anyCemu = FALSE;
+	BOOL anyWrd = FALSE;
 	CString cemuFol;
 	{
 		int i = -1;
@@ -3261,10 +3327,14 @@ int CPlayList::ShowTrackContextMenu(CPoint pt, CWnd* pOwner)
 				if (cemuFol.IsEmpty()) cemuFol = pc[i].fol;
 			}
 #ifndef _UNICODE
+			if (ComposerHasSidecarWrd(CStringW(pc[i].fol)))
+				anyWrd = TRUE;
 			const int isSas = SasamiExtIsMidi(CStringW(pc[i].fol)) ? 1 : 0;
 			const int isFm = SasamiExtIsFm(CStringW(pc[i].fol)) ? 1 : 0;
 			const int isMid = VstIsMidiExt(CStringW(pc[i].fol)) ? 1 : 0;
 #else
+			if (ComposerHasSidecarWrd(pc[i].fol))
+				anyWrd = TRUE;
 			const int isSas = SasamiExtIsMidi(pc[i].fol) ? 1 : 0;
 			const int isFm = SasamiExtIsFm(pc[i].fol) ? 1 : 0;
 			const int isMid = VstIsMidiExt(pc[i].fol) ? 1 : 0;
@@ -3345,6 +3415,49 @@ int CPlayList::ShowTrackContextMenu(CPoint pt, CWnd* pOwner)
 			LL14(L"この MIDI の印（16ch/32ch と XG/88 など）。自動判定か 55map 等を選べます", L"MIDI badges (16ch/32ch and XG/88…). Auto-detect or pick 55map etc.", L"Badges MIDI (16ch/32ch et XG/88…). Auto ou 55map…", L"Badge MIDI (16ch/32ch e XG/88…). Auto o 55map…", L"Insignias MIDI (16ch/32ch y XG/88…). Auto o 55map…", L"이 MIDI 표시(16ch/32ch와 XG/88 등). 자동 또는 55map 등", L"此 MIDI 标记（16ch/32ch 与 XG/88 等）。可自动判定或选 55map 等", L"شارات MIDI (16ch/32ch و XG/88…). تلقائي أو 55map…", L"Значки MIDI (16ch/32ch и XG/88…). Авто или 55map…", L"MIDI-Abzeichen (16ch/32ch und XG/88…). Auto oder 55map…", L"Selos MIDI (16ch/32ch e XG/88…). Auto ou 55map…", L"MIDI-badges (16ch/32ch en XG/88…). Auto of 55map…", L"Odznaki MIDI (16ch/32ch i XG/88…). Auto lub 55map…", L"MIDI rozetleri (16ch/32ch ve XG/88…). Otomatik veya 55map…"));
 		if (map)
 			PlAddMapForceItems(map, PL_CTX_MIDMAP_BASE, midiForce);
+	}
+	if (anyWrd) {
+		menu.AddSeparator();
+		CCustomPopupMenu* wrd = menu.AddSubMenu(
+			LL14(L"WRD画面", L"WRD screen", L"Ecran WRD", L"Schermo WRD",
+				L"Pantalla WRD", L"WRD 화면", L"WRD画面", L"شاشة WRD",
+				L"Экран WRD", L"WRD-Bildschirm", L"Tela WRD", L"WRD-scherm",
+				L"Ekran WRD", L"WRD ekrani"),
+			LL14(L"同名の .wrd（PC-98 MIMPI 歌詞）を開き、演奏とMIDIモニタに同期します",
+				L"Open the sidecar .wrd (PC-98 MIMPI lyrics) and sync with playback and the MIDI monitor",
+				L"Ouvre le .wrd associe (paroles MIMPI PC-98) et synchronise lecture et moniteur MIDI",
+				L"Apre il .wrd associato (testi MIMPI PC-98) e sincronizza riproduzione e monitor MIDI",
+				L"Abre el .wrd asociado (letra MIMPI PC-98) y sincroniza reproduccion y monitor MIDI",
+				L"같은 이름의 .wrd(PC-98 MIMPI 가사)를 열고 재생·MIDI 모니터와 동기화",
+				L"打开同名 .wrd（PC-98 MIMPI 歌词），并与演奏及 MIDI 监视器同步",
+				L"يفتح ملف .wrd المرافق ويزامن التشغيل ومراقب MIDI",
+				L"Открывает одноимённый .wrd и синхронизирует воспроизведение и MIDI-монитор",
+				L"Oeffnet die gleichnamige .wrd und synchronisiert Wiedergabe und MIDI-Monitor",
+				L"Abre o .wrd de mesmo nome e sincroniza reproducao e monitor MIDI",
+				L"Opent de gelijknamige .wrd en synchroniseert afspelen en MIDI-monitor",
+				L"Otwiera .wrd o tej samej nazwie i synchronizuje odtwarzanie z monitorem MIDI",
+				L"Ayni addaki .wrd dosyasini acar, calma ve MIDI izleyici ile eszamanlar"));
+		if (wrd) {
+			wrd->AddCommand(PL_CTX_WRD,
+				LL14(L"WRD画面を開く", L"Open WRD screen", L"Ouvrir WRD", L"Apri WRD",
+					L"Abrir WRD", L"WRD 화면 열기", L"打开WRD画面", L"فتح WRD",
+					L"Открыть WRD", L"WRD oeffnen", L"Abrir WRD", L"WRD openen",
+					L"Otworz WRD", L"WRD ac"),
+				LL14(L"WRD画面とMIDIモニタを同期して開きます（再生はしません）",
+					L"Open the WRD screen synced with the MIDI monitor (does not start playback)",
+					L"Ouvre WRD synchronise avec le moniteur MIDI (sans lancer la lecture)",
+					L"Apre WRD sincronizzato con il monitor MIDI (non avvia la riproduzione)",
+					L"Abre WRD sincronizado con el monitor MIDI (no inicia la reproduccion)",
+					L"WRD 화면과 MIDI 모니터를 동기화해 엽니다 (재생하지 않음)",
+					L"同步打开 WRD 画面与 MIDI 监视器（不开始播放）",
+					L"يفتح شاشة WRD متزامنة مع مراقب MIDI (دون التشغيل)",
+					L"Открывает WRD синхронно с MIDI-монитором (без запуска воспроизведения)",
+					L"Oeffnet WRD synchron zum MIDI-Monitor (startet keine Wiedergabe)",
+					L"Abre WRD sincronizado com o monitor MIDI (nao inicia a reproducao)",
+					L"Opent WRD gesynchroniseerd met de MIDI-monitor (start geen afspelen)",
+					L"Otwiera WRD zsynchronizowany z monitorem MIDI (nie uruchamia odtwarzania)",
+					L"WRD ekranini MIDI izleyici ile acar (calmayi baslatmaz)"));
+		}
 	}
 	if (anyCemu && !cemuFol.IsEmpty()) {
 		wchar_t zipOut[CEMU_ZIP_PATH];
@@ -3671,6 +3784,16 @@ int CPlayList::ShowTrackContextMenu(CPoint pt, CWnd* pOwner)
 					L"Muestra u oculta el monitor MIDI de 32 partes", L"MIDI 32파트 모니터를 열거나 닫습니다", L"打开或关闭 MIDI 32 声部监视器", L"يظهر أو يخفي مراقب MIDI ذا 32 جزءاً",
 					L"Показывает или скрывает MIDI-монитор на 32 партии", L"Blendet den 32-Part-MIDI-Monitor ein oder aus", L"Mostra ou oculta o monitor MIDI de 32 partes", L"Toont of verbergt de MIDI-monitor met 32 partijen",
 					L"Pokazuje lub ukrywa monitor MIDI 32 partii", L"32 part MIDI izleyiciyi acar veya kapatir"));
+		subWin->AddCheck(PL_CTX_WRD_WIN,
+				LL14(L"WRD画面を開く", L"Open WRD screen", L"Ouvrir ecran WRD", L"Apri schermo WRD",
+					L"Abrir pantalla WRD", L"WRD 화면 열기", L"打开WRD画面", L"فتح شاشة WRD",
+					L"Открыть экран WRD", L"WRD-Bildschirm oeffnen", L"Abrir tela WRD", L"WRD-scherm openen",
+					L"Otworz ekran WRD", L"WRD ekranini ac"),
+				savedata.wrdwindow ? TRUE : FALSE,
+				LL14(L"PC-98 MIMPI 歌詞・画面（.wrd）を開く／閉じる", L"Show or hide the PC-98 MIMPI WRD lyric screen", L"Affiche ou masque l'ecran WRD MIMPI PC-98", L"Mostra o nasconde lo schermo WRD MIMPI PC-98",
+					L"Muestra u oculta la pantalla WRD MIMPI PC-98", L"PC-98 MIMPI WRD 가사 화면을 열거나 닫습니다", L"打开或关闭 PC-98 MIMPI WRD 歌词画面", L"يظهر أو يخفي شاشة كلمات WRD MIMPI لـ PC-98",
+					L"Показывает или скрывает экран текстов WRD MIMPI PC-98", L"Blendet den PC-98-MIMPI-WRD-Textschirm ein oder aus", L"Mostra ou oculta a tela de letra WRD MIMPI PC-98", L"Toont of verbergt het PC-98 MIMPI WRD-lyricsscherm",
+					L"Pokazuje lub ukrywa ekran tekstow WRD MIMPI PC-98", L"PC-98 MIMPI WRD soz ekranini acar veya kapatir"));
 		if (hasMp) {
 			subWin->AddCheck(PL_CTX_DESK_LRC,
 						LL14(L"歌詞ウィンドウを表示", L"Show lyrics window", L"Afficher fenetre paroles", L"Mostra finestra testi", L"Mostrar ventana de letra",
@@ -4031,6 +4154,7 @@ int CPlayList::ShowTrackContextMenu(CPoint pt, CWnd* pOwner)
 void CPlayList::HandleTrackContextCmd(int cmd)
 {
 	extern CMediaPlayerDlg* mp;
+	extern COggDlg* og;
 	if (cmd != 0 && CMediaPlayerDlg::IsSeekExtrasCommand((UINT)cmd)) {
 		if (mp && ::IsWindow(mp->GetSafeHwnd()))
 			mp->SendMessage(WM_COMMAND, (WPARAM)cmd, 0);
@@ -4236,6 +4360,25 @@ void CPlayList::HandleTrackContextCmd(int cmd)
 	}
 	else if (cmd == PL_CTX_MIDIMON) {
 		if (og && ::IsWindow(og->GetSafeHwnd())) og->ToggleMidiMonitor();
+	}
+	else if (cmd == PL_CTX_WRD_WIN) {
+		if (og && ::IsWindow(og->GetSafeHwnd())) og->ToggleWrdView();
+	}
+	else if (cmd == PL_CTX_WRD) {
+		int Lindex = m_lc.GetNextItem(-1, LVNI_ALL | LVNI_SELECTED);
+		if (Lindex >= 0 && Lindex < playcnt) {
+			wchar_t wrd[MAX_PATH];
+			wrd[0] = 0;
+#ifndef _UNICODE
+			ComposerFindSidecarWrd(CStringW(pc[Lindex].fol), wrd, MAX_PATH);
+#else
+			ComposerFindSidecarWrd(pc[Lindex].fol, wrd, MAX_PATH);
+#endif
+			if (og && ::IsWindow(og->GetSafeHwnd())) {
+				og->ShowWrdView(wrd[0] ? wrd : NULL);
+				og->EnsureMidiMonitor();
+			}
+		}
 	}
 	else if (cmd == PL_CTX_FMMON) {
 		if (og && ::IsWindow(og->GetSafeHwnd())) og->ToggleFmMonitor();
@@ -4767,7 +4910,7 @@ static bool IsPlaylistDropAllowedExt(const CString& pathOrName)
 		// チップ / マルチ曲ヘルパ
 		_T(".kss"), _T(".nsf"), _T(".nsfe"), _T(".gbs"), _T(".hes"), _T(".nes"),
 		_T(".spc"), _T(".vgm"), _T(".vgz"), _T(".gym"), _T(".s98"),
-		_T(".zip"),
+		_T(".zip"), _T(".lzh"), _T(".lha"), _T(".lzs"), _T(".pma"), _T(".7z"), _T(".cab"),
 		_T(".ovi"), _T(".opi"), _T(".ozi"), _T(".m"), _T(".m2"), _T(".mz"), _T(".mp"), _T(".ms"),
 		_T(".psf"), _T(".minipsf"), _T(".psf2"), _T(".minipsf2"),
 		_T(".ssf"), _T(".dsf"), _T(".usf"), _T(".gsf"), _T(".minigsf"), _T(".2sf"),
@@ -4775,7 +4918,9 @@ static bool IsPlaylistDropAllowedExt(const CString& pathOrName)
 		_T(".adx"), _T(".ahx"), _T(".hca"), _T(".awb"), _T(".acb"),
 		_T(".at3"), _T(".at9"), _T(".vag"), _T(".xa"), _T(".nub"),
 		_T(".bgm"), _T(".bms"), _T(".bme"), _T(".bml"),
-		_T(".mid"), _T(".midi"), _T(".kar"),
+		_T(".mid"), _T(".midi"), _T(".kar"), _T(".rmi"),
+		_T(".rcp"), _T(".r36"), _T(".g36"), _T(".g18"),
+		_T(".mcp"), _T(".mtd"), _T(".eup"), _T(".mff"), _T(".seq"),
 		_T(".cpr"), _T(".lt10"), _T(".ss10"), _T(".ssw"), _T(".lt9"),
 		_T(".rpp"), _T(".als"), _T(".musicxml"), _T(".mxl"),
 		// ゲーム系コンテナ（ISO/IMG 系は不可。KPI 宣言分は下で許可）
@@ -11333,6 +11478,14 @@ if (fff == 0)
 						if (PlAddCemuZipEntries(this, zp, syo, syos, modesub, fnn))
 							continue;
 					}
+					{
+						CString ap = p.fol[0] ? CString(p.fol) : fname1;
+						if (PlAddMidiPackEntries(this, ap, syo, syos, modesub, fnn)) {
+							if (PathIsDirectory(fname_full) == FALSE)
+								return;
+							continue;
+						}
+					}
 					if (syo == 0) {
 						syo = 1; syos = p.fol; modesub = p.sub; fnn = sL;
 					}
@@ -11647,6 +11800,46 @@ void CemuWarnUnsupported()
 		L"Henuz desteklenmiyor."), MB_ICONINFORMATION);
 }
 
+static bool PlAddMidiPackEntries(CPlayList* pl, const CString& arcPath, int& syo, CString& syos, int& modesub, CString& fnn)
+{
+	if (!pl) return false;
+	CString ap = arcPath;
+	wchar_t phys[MIDIPACK_PATH], inner[MIDIPACK_INNER];
+	if (MidiPackParseVirtual(ap, phys, MIDIPACK_PATH, inner, MIDIPACK_INNER) && inner[0])
+		ap = phys;
+	if (!MidiPackIsArchiveExt(ap)) return false;
+	if (MidiPackIsCemuZip(ap)) return false;
+	MidiPackSeq seqs[MIDIPACK_MAX_SEQ];
+	const int n = MidiPackListSeq(ap, seqs, MIDIPACK_MAX_SEQ);
+	if (n <= 0) return false;
+	for (int i = 0; i < n; i++) {
+		wchar_t virt[MIDIPACK_PATH];
+		if (!MidiPackFormatVirtual(ap, seqs[i].inner, virt, MIDIPACK_PATH))
+			continue;
+		playlistdata row;
+		ZeroMemory(&row, sizeof(row));
+		_tcscpy(row.fol, virt);
+		_tcscpy(row.name, seqs[i].name[0] ? seqs[i].name : seqs[i].inner);
+		TCHAR kpiBuf[512]; kpiBuf[0] = 0;
+		BYTE kv = 0;
+		pl->plugs(virt, &row, kpiBuf, kv);
+		if (row.sub == 0 || row.sub == -2) {
+			if (VstIsMidiExt(virt) || MidiPackIsSeqExt(virt))
+				row.sub = MODE_VST_MIDI;
+		}
+		if (syo == 0) {
+			syo = 1;
+			syos = row.fol;
+			modesub = row.sub;
+			fnn = row.name;
+		}
+		pl->Add(row.name, row.sub, row.loop1, row.loop2, row.art, row.alb, row.fol, row.ret2, 0);
+		if (seqs[i].hasWrd)
+			PlWrdDiskSet(row.fol, 0);
+	}
+	return true;
+}
+
 static bool PlAddCemuZipEntries(CPlayList* pl, const CString& zipPath, int& syo, CString& syos, int& modesub, CString& fnn)
 {
 	if (!pl) return false;
@@ -11768,6 +11961,19 @@ void CPlayList::plugs(CString fff, playlistdata *p,TCHAR* kpi, BYTE& kv)
 		}
 	}
 
+	if (p && MidiPackIsVirtualPath(fff) && (VstIsMidiExt(fff) || MidiPackIsSeqExt(fff))) {
+		_tcscpy(p->fol, fff);
+		p->sub = MODE_VST_MIDI;
+		CString ft = fff.Right(fff.GetLength() - fff.ReverseFind(L'>') - 1);
+		const int sl = ft.ReverseFind(L'\\');
+		if (sl >= 0) ft = ft.Mid(sl + 1);
+		_tcscpy(p->name, ft);
+		p->alb[0] = 0; p->art[0] = 0; p->loop1 = p->loop2 = p->ret2 = 0;
+		if (kpi) kpi[0] = 0;
+		kv = 0;
+		return;
+	}
+
 	// MIDI/プロジェクト: 動画(-2)にはしない。VST優先なら -30。でなければ KPI、最後に VST へフォールバック。
 	const int isMidiOrProj = (VstIsMidiExt(fff) || VstIsProjectExt(fff)) ? 1 : 0;
 	if (p && isMidiOrProj) {
@@ -11862,6 +12068,9 @@ void CPlayList::plugs(CString fff, playlistdata *p,TCHAR* kpi, BYTE& kv)
 	for(int i=0;i<kpicnt;i++){
 		if (plugkind[i] != PLUGKIND_KPI) continue;
 		if (wantExt == L".mpy" || wantExt == L".mpw2" || wantExt == L".mpsmv") continue;
+		if (wantExt == L".rcp" || wantExt == L".r36" || wantExt == L".g36"
+			|| wantExt == L".g18" || wantExt == L".mcp" || wantExt == L".mtd"
+			|| wantExt == L".mff" || wantExt == L".seq") continue;
 		for(int j=0;;j++){
 			if(ext[i][j]=="") break;
 			if(ext[i][j]==wantExt){
@@ -12514,6 +12723,12 @@ void CPlayList::OnTimer(UINT nIDEvent)
 			BOOL midDirty = FALSE;
 			const int nDisp = m_lc.GetItemCount();
 			for (int disp = t; budget > 0 && disp < t + pg && disp < nDisp && disp < playcnt; ++disp) {
+				if (PlWrdDiskGet(pc[disp].fol) < 0) {
+					PlWrdProbe(pc[disp].fol);
+					midDirty = TRUE;
+					--budget;
+					if (budget <= 0) break;
+				}
 				if (PlMidProbeIfNeeded(pc[disp].fol)) {
 					midDirty = TRUE;
 					--budget;

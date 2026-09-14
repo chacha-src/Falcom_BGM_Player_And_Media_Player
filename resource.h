@@ -152,6 +152,7 @@
 #define IDD_VST_WAIT                    276
 #define IDD_MIDIMONITOR                 277
 #define IDD_MM_HELP                     278
+#define IDD_WRDVIEW                     356
 #define IDR_SASAMI_GS                   279
 #define IDR_SASAMI_XG                   280
 #define IDR_S3TEX_R_FOREST              281
@@ -1511,6 +1512,7 @@
 #define IDC_VST_SCAN_NOW                4325
 #define IDC_MM_HELP                     4326
 #define IDC_FM_HELP                     4327
+#define IDC_WRD_HELP                    4535
 #define IDC_SLIDER_SURROUND             4327
 #define IDC_STATIC_R_SURROUND           4328
 #define IDC_STATIC_SURROUND_VAL         4329
@@ -2059,6 +2061,7 @@
 #define ID_MP_SASAMI_FM                 33287
 #define ID_MP_SASAMI_MIDI_ROLL          33288
 #define ID_MP_SASAMI_FM_ROLL            33289
+#define ID_MP_OPEN_WRD                  33298
 #define ID_SC_LAYER_HIDE                39001
 #define ID_SC_LAYER_FIT                 39002
 #define ID_SC_LAYER_SCALE50             39003
@@ -2178,9 +2181,9 @@
 // 
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
-#define _APS_NEXT_RESOURCE_VALUE        356
-#define _APS_NEXT_COMMAND_VALUE         33292
-#define _APS_NEXT_CONTROL_VALUE         4535
+#define _APS_NEXT_RESOURCE_VALUE        357
+#define _APS_NEXT_COMMAND_VALUE         33299
+#define _APS_NEXT_CONTROL_VALUE         4536
 #define _APS_NEXT_SYMED_VALUE           104
 #endif
 #endif

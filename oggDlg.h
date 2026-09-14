@@ -28,9 +28,9 @@ void OggPersistSaveDatNow();
 #define WM_OGG_ENTER_MP_MODE (WM_APP + 101)
 #endif
 // MP から EQ/ピアノ/アナの開閉を遅延実行(ボタンハンドラ内 Create/Destroy 回避)
-// wParam: 1=piano toggle, 2=analyzer toggle, 3=MIDI monitor toggle, 4=FM monitor toggle
-//         10..18=起動時サブUI復元(1メッセージ=1 Create、次を PostMessage)
-//         10=EQ 11=ピアノ 12=Tune 13=アナライザ 14=プロンプト 15=ロール 16=DJパッド 17=MIDIモニタ 18=FMモニタ
+// wParam: 1=piano toggle, 2=analyzer toggle, 3=MIDI monitor toggle, 4=FM monitor toggle, 5=WRD toggle
+//         10..19=起動時サブUI復元(1メッセージ=1 Create、次を PostMessage)
+//         10=EQ 11=ピアノ 12=Tune 13=アナライザ 14=プロンプト 15=ロール 16=DJパッド 17=MIDIモニタ 18=FMモニタ 19=WRD
 #ifndef WM_OGG_TOGGLE_SUBUI
 #define WM_OGG_TOGGLE_SUBUI (WM_APP + 102)
 #endif
@@ -96,6 +96,7 @@ class CPianoRollTuneDlg;
 class CAnalyzerDlg;
 class CMidiMonitorDlg;
 class CFmMonitorDlg;
+class CWrdViewDlg;
 class CDouga;
 class CPlayList;
 class CRender;
@@ -126,8 +127,12 @@ public:
 	void ToggleAnalyzer();
 	void ToggleMidiMonitor();
 	void ToggleFmMonitor();
+	void ToggleWrdView();
+	void ShowWrdView(const wchar_t* wrdPath);
+	void EnsureMidiMonitor();
 	int MidiMonitorIsVisible() const;
 	int FmMonitorIsVisible() const;
+	int WrdViewIsVisible() const;
 	void HideMidiMonitorForMinimize(); /* FM/MIDI モニタ・譜面・VSTホスト等も隠す */
 	void RestoreMidiMonitorAfterMinimize();
 	void ShowPianoRollTune();
@@ -188,6 +193,7 @@ public:
 	CAnalyzerDlg* m_AnalyzerDlg = nullptr;
 	CMidiMonitorDlg* m_MidiMonitorDlg = nullptr;
 	CFmMonitorDlg* m_FmMonitorDlg = nullptr;
+	CWrdViewDlg* m_WrdViewDlg = nullptr;
 	/* 本体最小化で隠した FM/MIDI 系（bit: 下記 kHideFmMidi*） */
 	int m_fmMidiToolsHiddenMask = 0;
 	bool m_cascadePrevValid = false;
@@ -501,6 +507,8 @@ void MpTaskbarPrevTrack();
 double OggGetGdiPlaybackTimeSec();
 /* バナーと同じ可聴 PCM フレーム（playb − DS 書込先行）。FM モニタ同期用 */
 __int64 OggGetHeardPcmFrames();
+/* バナー経過(0:56.52)と同じソース PCM。VST MIDI の heard が 1/4 に落ちても WRD/@WAIT は壁時計に揃える */
+__int64 OggGetUiSourcePcmFrames();
 /* CEmu ライブ MPU の可聴フレーム。エンジンが描画済みのフレーム数から
    「先読みリング + DS キュー」を引いた値で、どちらも差分なのでクロスフェード中に
    g_heardBytes が曲を跨いで走り続けても基準がずれない。MIDI モニタ同期用 */

@@ -217,6 +217,10 @@ void PlLrcDiskForget(LPCTSTR fol);
 CString PlLrcSidecarPath(LPCTSTR fol);
 // 未キャッシュならサイドカーを見て登録。戻り: 0=あり 1=なし (-1はfol不正)
 int PlLrcProbe(LPCTSTR fol);
+// WRD(PC-98 MIMPI)サイドカー有無。-1=未 / 0=あり / 1=なし
+int PlWrdDiskGet(LPCTSTR fol);
+void PlWrdDiskSet(LPCTSTR fol, int none);
+int PlWrdProbe(LPCTSTR fol);
 // チャンネル数キャッシュ(%LOCALAPPDATA%\oggYSED\chflag2)。-1=未 / 0=不明 / 1..8=ch
 int PlChDiskGet(LPCTSTR fol);
 void PlChDiskSet(LPCTSTR fol, int ch);
@@ -300,6 +304,8 @@ enum {
 	PL_CTX_SASAMIFM_LAST = PL_CTX_SASAMIFM_BASE + 2,
 	PL_CTX_CEMUMODE_BASE = 98, // CEmu zip 音源モード (XML subtype: OPN/OPNA/MIDI…)
 	PL_CTX_CEMUMODE_LAST = PL_CTX_CEMUMODE_BASE + 23, // up to 24 modes
+	PL_CTX_WRD = 122, // sidecar .wrd がある曲: WRD画面を開く（再生はしない）
+	PL_CTX_WRD_WIN = 123, // ウィンドウメニュー: WRD画面トグル
 	PL_CTX_MOVE_BASE = 42500,
 	PL_CTX_COPY_BASE = 43500,
 	PL_CTX_MOVE_MAX = PL_CTX_MOVE_BASE + 999,

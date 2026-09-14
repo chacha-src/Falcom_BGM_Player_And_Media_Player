@@ -869,6 +869,12 @@ struct save{
 	// 定期チェックからは、このフラグが立っていても更新しない（演奏中の勝手な更新を避ける）。
 	int updateDontAsk;
 	int updateAutoYes;
+
+	// --- WRD画面 (PC-98 MIMPI 歌詞。末尾追記) ---
+	int wrdwindow;
+	int wrdx, wrdy, wrdw, wrdh;
+	int wrdMainLock;
+	int wrdtopmost;
 };
 extern save savedata;
 

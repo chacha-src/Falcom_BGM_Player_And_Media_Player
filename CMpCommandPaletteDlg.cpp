@@ -1,4 +1,4 @@
-#include "stdafx.h"
+﻿#include "stdafx.h"
 #include "ogg.h"
 #include "CMpCommandPaletteDlg.h"
 #include "CMediaPlayerDlg.h"
@@ -56,6 +56,7 @@ enum {
 	PAL_WIN_PIANO,
 	PAL_WIN_ANALYZER,
 	PAL_WIN_MIDIMON,
+	PAL_WIN_WRD,
 	PAL_WIN_PROTOOLS,
 	PAL_WIN_PROMPT,
 	PAL_WIN_CMDROLL,
@@ -130,6 +131,7 @@ const MpPalCmd kCmds[] = {
 	{ PAL_WIN_PIANO,        3 },
 	{ PAL_WIN_ANALYZER,     3 },
 	{ PAL_WIN_MIDIMON,      3 },
+	{ PAL_WIN_WRD,          3 },
 	{ PAL_WIN_PROTOOLS,     3 },
 	{ PAL_WIN_PROMPT,       3 },
 	{ PAL_WIN_CMDROLL,      3 },
@@ -330,6 +332,10 @@ const wchar_t* PalCmdName(int id)
 		return LL14(L"MIDIモニタ", L"MIDI monitor", L"Moniteur MIDI", L"Monitor MIDI", L"Monitor MIDI",
 			L"MIDI 모니터", L"MIDI监视器", L"مراقب MIDI", L"MIDI-монитор", L"MIDI-Monitor",
 			L"Monitor MIDI", L"MIDI-monitor", L"Monitor MIDI", L"MIDI izleyici");
+	case PAL_WIN_WRD:
+		return LL14(L"WRD画面", L"WRD screen", L"Ecran WRD", L"Schermo WRD", L"Pantalla WRD",
+			L"WRD 화면", L"WRD画面", L"شاشة WRD", L"Экран WRD", L"WRD-Bildschirm",
+			L"Tela WRD", L"WRD-scherm", L"Ekran WRD", L"WRD ekrani");
 	case PAL_WIN_ANALYZER:
 		return LL14(L"アナライザー", L"Analyzer", L"Analyseur", L"Analizzatore", L"Analizador",
 			L"애널라이저", L"分析器", L"المحلل", L"Анализатор", L"Analyzer",
@@ -919,6 +925,7 @@ void CMpCommandPaletteDlg::ExecCommand(int id)
 	case PAL_WIN_EQ:        PalPostToMp(ID_MP_OPEN_EQ); return;
 	case PAL_WIN_PIANO:     PalPostToMp(ID_MP_OPEN_PIANOROLL); return;
 	case PAL_WIN_MIDIMON:   PalPostToMp(ID_MP_OPEN_MIDIMON); return;
+	case PAL_WIN_WRD:       PalPostToMp(ID_MP_OPEN_WRD); return;
 	case PAL_WIN_ANALYZER:  PalPostToMp(ID_MP_OPEN_ANALYZER); return;
 	case PAL_WIN_PROTOOLS:  PalPostToMp(ID_MP_OPEN_PROTOOLS); return;
 	case PAL_WIN_PROMPT:    PalPostToMp(IDC_MP_PROMPT); return;

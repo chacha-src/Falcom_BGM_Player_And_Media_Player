@@ -418,6 +418,13 @@ BOOL COggApp::InitInstance()
 	savedata.fmmony = 0;
 	savedata.fmmonw = 0;
 	savedata.fmmonh = 0;
+	savedata.wrdwindow = 0;
+	savedata.wrdx = -1;
+	savedata.wrdy = 0;
+	savedata.wrdw = 0;
+	savedata.wrdh = 0;
+	savedata.wrdMainLock = 0;
+	savedata.wrdtopmost = 0;
 	savedata.sasamiMidiW = savedata.sasamiMidiH = 0;
 	savedata.sasamiMidiPxBeat = 0;
 	savedata.sasamiMidiStaffScale = 0;
@@ -2130,6 +2137,15 @@ BOOL COggApp::InitInstance()
 			savedata.updateAutoYes = 0;
 		else
 			savedata.updateAutoYes = savedata.updateAutoYes ? 1 : 0;
+	}
+	if (datFileSize < (int)(offsetof(save, wrdwindow) + sizeof(savedata.wrdwindow))) {
+		savedata.wrdwindow = 0;
+		savedata.wrdx = -1;
+		savedata.wrdy = 0;
+		savedata.wrdw = 0;
+		savedata.wrdh = 0;
+		savedata.wrdMainLock = 0;
+		savedata.wrdtopmost = 0;
 	}
 	/* UI パス欄は廃止。常に exe\\data（なければ hoot）。
 	   ルートは InitInstance 冒頭の CEmuMgrInit 済み。ここで Reload すると

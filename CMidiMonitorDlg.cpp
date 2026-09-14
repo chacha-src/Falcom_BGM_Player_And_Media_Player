@@ -5032,6 +5032,7 @@ void CMidiMonitorDlg::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
 		openSub->AddCommand(ID_MP_OPEN_PIANOROLL, LL14(L"ピアノロールを開く", L"Open piano roll", L"Ouvrir le piano roll", L"Apri piano roll", L"Abrir piano roll", L"피아노 롤 열기", L"打开钢琴卷帘", L"فتح لفافة البيانو", L"Открыть пианоролл", L"Piano-Roll öffnen", L"Abrir piano roll", L"Piano-roll openen", L"Otworz piano roll", L"Piyano rolunu ac"));
 		openSub->AddCommand(ID_MP_OPEN_ANALYZER, LL14(L"アナライザを開く", L"Open analyzer", L"Ouvrir l'analyseur", L"Apri analizzatore", L"Abrir analizador", L"분석기 열기", L"打开分析器", L"فتح المحلل", L"Открыть анализатор", L"Analyzer öffnen", L"Abrir analisador", L"Analyzer openen", L"Otworz analizator", L"Analizoru ac"));
 		openSub->AddCommand(ID_MP_OPEN_VSTHOST, LL14(L"VSTホストを開く", L"Open VST host", L"Ouvrir l'hote VST", L"Apri host VST", L"Abrir host VST", L"VST 호스트 열기", L"打开 VST 主机", L"فتح مضيف VST", L"Открыть хост VST", L"VST-Host öffnen", L"Abrir host VST", L"VST-host openen", L"Otworz host VST", L"VST hostu ac"));
+		openSub->AddCommand(ID_MP_OPEN_WRD, LL14(L"WRD画面を開く", L"Open WRD screen", L"Ouvrir ecran WRD", L"Apri schermo WRD", L"Abrir pantalla WRD", L"WRD 화면 열기", L"打开WRD画面", L"فتح شاشة WRD", L"Открыть экран WRD", L"WRD-Bildschirm öffnen", L"Abrir tela WRD", L"WRD-scherm openen", L"Otworz ekran WRD", L"WRD ekranini ac"));
 		openSub->AddCommand(ID_HELP_SHOWSHEET, LL14(L"操作ガイド", L"Operation guide", L"Guide d'utilisation", L"Guida operativa", L"Guía de operación", L"조작 가이드", L"操作指南", L"دليل التشغيل", L"Руководство", L"Bedienungsanleitung", L"Guia de operação", L"Handleiding", L"Przewodnik", L"İşlem kılavuzu"));
 	}
 
@@ -5187,6 +5188,12 @@ void CMidiMonitorDlg::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
 		extern CMediaPlayerDlg* mp;
 		CWnd* parent = (mp && ::IsWindow(mp->GetSafeHwnd())) ? (CWnd*)mp : this;
 		OpenVstHostModeless(parent);
+	} else if (cmd == ID_MP_OPEN_WRD) {
+		extern CMediaPlayerDlg* mp;
+		if (mp && ::IsWindow(mp->GetSafeHwnd()))
+			mp->PostMessage(WM_COMMAND, cmd);
+		else if (og && ::IsWindow(og->GetSafeHwnd()))
+			og->PostMessage(WM_OGG_TOGGLE_SUBUI, 5, 0);
 	} else if (cmd == ID_HELP_SHOWSHEET) {
 		ShowHelpSheet();
 	}

@@ -1395,6 +1395,7 @@ BEGIN_MESSAGE_MAP(CMediaPlayerDlg, CCustomBlurDialogExBase)
 	ON_COMMAND(ID_MP_OPEN_ANALYZER, &CMediaPlayerDlg::OnAnalyzer)
 	ON_COMMAND(ID_MP_OPEN_PIANOROLL, &CMediaPlayerDlg::OnPiano)
 	ON_COMMAND(ID_MP_OPEN_MIDIMON, &CMediaPlayerDlg::OnMidiMonitor)
+	ON_COMMAND(ID_MP_OPEN_WRD, &CMediaPlayerDlg::OnWrdView)
 	ON_COMMAND(ID_MP_SASAMI_TEXT, &CMediaPlayerDlg::OnMpSasamiText)
 	ON_COMMAND(ID_MP_SASAMI_MIDI, &CMediaPlayerDlg::OnMpSasamiMidi)
 	ON_COMMAND(ID_MP_SASAMI_FM, &CMediaPlayerDlg::OnMpSasamiFm)
@@ -4294,6 +4295,10 @@ void CMediaPlayerDlg::RefreshList(BOOL bForce)
 				PlLrcProbe(path);
 				did = TRUE;
 			}
+			if (PlWrdDiskGet(path) < 0) {
+				PlWrdProbe(path);
+				did = TRUE;
+			}
 			if (PlChDiskGet(path) < 0) {
 				PlChProbe(path);
 				did = TRUE;
@@ -6797,6 +6802,12 @@ void CMediaPlayerDlg::OnMidiMonitor()
 {
 	if (og && ::IsWindow(og->GetSafeHwnd()))
 		og->PostMessage(WM_OGG_TOGGLE_SUBUI, 3, 0);  // 3=MIDI モニタ
+}
+
+void CMediaPlayerDlg::OnWrdView()
+{
+	if (og && ::IsWindow(og->GetSafeHwnd()))
+		og->PostMessage(WM_OGG_TOGGLE_SUBUI, 5, 0);  // 5=WRD
 }
 
 void CMediaPlayerDlg::OnFmMonitor()
@@ -10183,6 +10194,10 @@ void CMediaPlayerDlg::OnRButtonUp(UINT nFlags, CPoint point)
 						LL14(L"MIDIモニタ...", L"MIDI monitor...", L"Moniteur MIDI...", L"Monitor MIDI...", L"Monitor MIDI...", L"MIDI 모니터...", L"MIDI监视器...", L"مراقب MIDI...", L"MIDI-монитор...", L"MIDI-Monitor...", L"Monitor MIDI...", L"MIDI-monitor...", L"Monitor MIDI...", L"MIDI izleyici..."),
 						savedata.midimonwindow != 0,
 						LL14(L"MIDI 32パート・モニタを開閉します（.mid の GS/XG 演奏状態）", L"Open or close the 32-part MIDI monitor (GS/XG state of the playing .mid)", L"Ouvrir/fermer le moniteur MIDI 32 parties (etat GS/XG du .mid)", L"Apri/chiudi il monitor MIDI a 32 parti (stato GS/XG del .mid)", L"Abrir/cerrar el monitor MIDI de 32 partes (estado GS/XG del .mid)", L"MIDI 32파트 모니터를 여닫기(재생 중 .mid의 GS/XG 상태)", L"打开或关闭 MIDI 32 声部监视器（正在播放的 .mid 的 GS/XG 状态）", L"فتح/إغلاق مراقب MIDI ذا 32 جزءاً", L"Открыть/закрыть MIDI-монитор на 32 партии (состояние GS/XG у .mid)", L"32-Part-MIDI-Monitor oeffnen/schliessen (GS/XG des .mid)", L"Abrir/fechar o monitor MIDI de 32 partes (estado GS/XG do .mid)", L"MIDI-monitor met 32 partijen openen/sluiten (GS/XG van .mid)", L"Otworz/zamknij monitor MIDI 32 partii (stan GS/XG pliku .mid)", L"32 part MIDI izleyiciyi ac/kapat (.mid GS/XG durumu)"));
+					wins->AddCheck(ID_MP_OPEN_WRD,
+						LL14(L"WRD画面...", L"WRD screen...", L"Ecran WRD...", L"Schermo WRD...", L"Pantalla WRD...", L"WRD 화면...", L"WRD画面...", L"شاشة WRD...", L"Экран WRD...", L"WRD-Bildschirm...", L"Tela WRD...", L"WRD-scherm...", L"Ekran WRD...", L"WRD ekrani..."),
+						savedata.wrdwindow != 0,
+						LL14(L"PC-98 MIMPI 歌詞・画面（.wrd）を開閉します", L"Open or close the PC-98 MIMPI WRD lyric screen", L"Ouvrir/fermer l'ecran WRD MIMPI PC-98", L"Apri/chiudi lo schermo WRD MIMPI PC-98", L"Abrir/cerrar la pantalla WRD MIMPI PC-98", L"PC-98 MIMPI WRD 가사 화면을 여닫기", L"打开或关闭 PC-98 MIMPI WRD 歌词画面", L"فتح/إغلاق شاشة كلمات WRD MIMPI لـ PC-98", L"Открыть/закрыть экран текстов WRD MIMPI PC-98", L"PC-98-MIMPI-WRD-Textschirm oeffnen/schliessen", L"Abrir/fechar a tela de letra WRD MIMPI PC-98", L"PC-98 MIMPI WRD-lyricsscherm openen/sluiten", L"Otworz/zamknij ekran tekstow WRD MIMPI PC-98", L"PC-98 MIMPI WRD soz ekranini ac/kapat"));
 					wins->AddCheck(ID_MP_OPEN_EQ,
 						LL14(L"イコライザー...", L"Equalizer...", L"Egaliseur...", L"Equalizzatore...", L"Ecualizador...",
 							L"이퀄라이저...", L"均衡器...", L"المعادل...", L"Эквалайзер...", L"Equalizer...",
@@ -13562,10 +13577,10 @@ void CMpCheatSheetDlg::OnPaint()
 		L"· m3u / Buscar / Filtro / Regex / ▾ …… orden y Folder+", L"· m3u / 검색 / 필터 / 정규식 / ▾ …… 정렬·Folder+", L"· m3u / 搜索 / 筛选 / 正则 / ▾ …… 排序与 Folder+", L"· m3u / بحث / تصفية / Regex / ▾ …… فرز و Folder+",
 		L"· m3u / Поиск / Фильтр / Regex / ▾ …… сорт и Folder+", L"· m3u / Suche / Filter / Regex / ▾ …… Sort und Folder+", L"· m3u / Busca / Filtro / Regex / ▾ …… ordem e Folder+", L"· m3u / Zoeken / Filter / Regex / ▾ …… sorteren en Folder+",
 		L"· m3u / Szukaj / Filtr / Regex / ▾ …… sort i Folder+", L"· m3u / Ara / Filtre / Regex / ▾ …… sırala ve Folder+")); yR += lh;
-	body(R, yR, LL14(L"・名前の印 …… 橙SAV=曲ごと保存 / 青LRC=歌詞 / 緑MONO·LR·2.1…=ch / 藤16ch·32ch=MIDI / 金XG·88…=マップ。色タグ（PLの印列も同じ）", L"· Name marks …… amber SAV=per-song / blue LRC=lyrics / green MONO·LR·2.1…=ch / lavender 16ch·32ch=MIDI / gold XG·88…=map (same in PL Mark col)", L"· Marques …… orange SAV / bleu LRC / vert ch / parme 16ch·32ch=MIDI / or XG·88…=carte", L"· Segni …… arancio SAV / blu LRC / verde ch / lilla 16ch·32ch=MIDI / oro XG·88…=mappa",
-		L"· Marcas …… naranja SAV / azul LRC / verde ch / lila 16ch·32ch=MIDI / oro XG·88…=mapa", L"· 이름 표시 …… 주황 SAV / 파랑 LRC / 초록 ch / 연보라 16ch·32ch=MIDI / 금 XG·88…=맵", L"· 名称标记 …… 橙SAV / 蓝LRC / 绿ch / 藤16ch·32ch=MIDI / 金XG·88…=映射", L"· علامات …… برتقالي SAV / أزرق LRC / أخضر ch / بنفسجي 16ch·32ch=MIDI / ذهبي XG·88…=خريطة",
-		L"· Метки …… оранж. SAV / син. LRC / зел. ch / сирен. 16ch·32ch=MIDI / зол. XG·88…=карта", L"· Zeichen …… orange SAV / blau LRC / gruen ch / lila 16ch·32ch=MIDI / gold XG·88…=Karte", L"· Marcas …… laranja SAV / azul LRC / verde ch / lilas 16ch·32ch=MIDI / ouro XG·88…=mapa", L"· Tekens …… oranje SAV / blauw LRC / groen ch / lila 16ch·32ch=MIDI / goud XG·88…=kaart",
-		L"· Znaki …… pomarańcz. SAV / nieb. LRC / ziel. ch / fiolet. 16ch·32ch=MIDI / złote XG·88…=mapa", L"· İşaret …… turuncu SAV / mavi LRC / yeşil ch / eflatun 16ch·32ch=MIDI / altın XG·88…=harita")); yR += lh + 2;
+	body(R, yR, LL14(L"・名前の印 …… 橙SAV=曲ごと保存 / 青LRC=歌詞 / 桃WRD=MIMPI画面 / 緑MONO·LR·2.1…=ch / 藤16ch·32ch=MIDI / 金XG·88…=マップ。色タグ（PLの印列も同じ）", L"· Name marks …… amber SAV=per-song / blue LRC=lyrics / pink WRD=MIMPI screen / green MONO·LR·2.1…=ch / lavender 16ch·32ch=MIDI / gold XG·88…=map (same in PL Mark col)", L"· Marques …… orange SAV / bleu LRC / rose WRD=MIMPI / vert ch / parme 16ch·32ch=MIDI / or XG·88…=carte", L"· Segni …… arancio SAV / blu LRC / rosa WRD=MIMPI / verde ch / lilla 16ch·32ch=MIDI / oro XG·88…=mappa",
+		L"· Marcas …… naranja SAV / azul LRC / rosa WRD=MIMPI / verde ch / lila 16ch·32ch=MIDI / oro XG·88…=mapa", L"· 이름 표시 …… 주황 SAV / 파랑 LRC / 분홍 WRD=MIMPI / 초록 ch / 연보라 16ch·32ch=MIDI / 금 XG·88…=맵", L"· 名称标记 …… 橙SAV / 蓝LRC / 桃WRD=MIMPI画面 / 绿ch / 藤16ch·32ch=MIDI / 金XG·88…=映射", L"· علامات …… برتقالي SAV / أزرق LRC / وردي WRD=MIMPI / أخضر ch / بنفسجي 16ch·32ch=MIDI / ذهبي XG·88…=خريطة",
+		L"· Метки …… оранж. SAV / син. LRC / роз. WRD=MIMPI / зел. ch / сирен. 16ch·32ch=MIDI / зол. XG·88…=карта", L"· Zeichen …… orange SAV / blau LRC / rosa WRD=MIMPI / gruen ch / lila 16ch·32ch=MIDI / gold XG·88…=Karte", L"· Marcas …… laranja SAV / azul LRC / rosa WRD=MIMPI / verde ch / lilas 16ch·32ch=MIDI / ouro XG·88…=mapa", L"· Tekens …… oranje SAV / blauw LRC / roze WRD=MIMPI / groen ch / lila 16ch·32ch=MIDI / goud XG·88…=kaart",
+		L"· Znaki …… pomarańcz. SAV / nieb. LRC / róż. WRD=MIMPI / ziel. ch / fiolet. 16ch·32ch=MIDI / złote XG·88…=mapa", L"· İşaret …… turuncu SAV / mavi LRC / pembe WRD=MIMPI / yeşil ch / eflatun 16ch·32ch=MIDI / altın XG·88…=harita")); yR += lh + 2;
 
 	y = max(yL, yR) + 2;
 	yL = y; yR = y;

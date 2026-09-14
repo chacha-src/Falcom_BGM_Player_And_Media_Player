@@ -2519,6 +2519,8 @@ static COLORREF CCC_HashChipBg(const CString& lab)
 
 static COLORREF CCC_MarkChipBg(const CString& lab)
 {
+    if (lab.CompareNoCase(_T("WRD")) == 0)
+        return RGB(255, 150, 210); /* PC-98 MIMPI 画面 */
     if (lab.CompareNoCase(_T("FMmon")) == 0)
         return RGB(186, 220, 255); /* OPN 寄り・FM モニタ */
     if (lab.CompareNoCase(_T("MIDmon")) == 0)

@@ -2530,6 +2530,15 @@ BEGIN
     DEFPUSHBUTTON   "閉じる",IDOK,663,399,50,14,NOT WS_VISIBLE
 END
 
+IDD_WRDVIEW DIALOGEX 0, 0, 640, 420
+STYLE DS_SETFONT | WS_MAXIMIZEBOX | WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME
+CAPTION "WRD画面"
+FONT 9, "メイリオ", 400, 0, 0x80
+BEGIN
+    PUSHBUTTON      "?",IDC_WRD_HELP,608,2,24,16
+    DEFPUSHBUTTON   "閉じる",IDOK,583,399,50,14,NOT WS_VISIBLE
+END
+
 IDD_ANALYZER DIALOGEX 0, 0, 360, 210
 STYLE DS_SETFONT | WS_MAXIMIZEBOX | WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME
 EXSTYLE WS_EX_ACCEPTFILES
@@ -2834,7 +2843,7 @@ END
 //
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 0,9,1,1011
+ FILEVERSION 0,9,1,1012
  PRODUCTVERSION 1,0,0,1
  FILEFLAGSMASK 0x3fL
 #ifdef _DEBUG
@@ -2852,10 +2861,10 @@ BEGIN
         BEGIN
             VALUE "Comments", "Falcom BGM Player & Media Player"
             VALUE "CompanyName", "Pre Prayer Power Soft"
-            VALUE "FileDescription", "Falcom BGM Player & Media Player Ver 0.9a Rel.2026.09.13 v1011"
-            VALUE "FileVersion", "0.9.1.1011"
+            VALUE "FileDescription", "Falcom BGM Player & Media Player Ver 0.9a Rel.2026.09.14 v1012"
+            VALUE "FileVersion", "0.9.1.1012"
             VALUE "InternalName", "ogg YS/ED bgm"
-            VALUE "LegalCopyright", "Copyright (C) 2026.09.13 v1011"
+            VALUE "LegalCopyright", "Copyright (C) 2026.09.14 v1012"
             VALUE "LegalTrademarks", "Pre Prayer Power Soft"
             VALUE "OriginalFilename", "oggYSEDbgm_uni_avx2.exe"
             VALUE "ProductName", "Falcom BGM Player & Media Player"
@@ -3342,6 +3351,10 @@ BEGIN
     BEGIN
     END
 
+    IDD_WRDVIEW, DIALOG
+    BEGIN
+    END
+
     IDD_ANALYZER, DIALOG
     BEGIN
     END
@@ -3710,6 +3723,11 @@ BEGIN
 END
 
 IDD_FMMONITOR AFX_DIALOG_LAYOUT
+BEGIN
+    0
+END
+
+IDD_WRDVIEW AFX_DIALOG_LAYOUT
 BEGIN
     0
 END

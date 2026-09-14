@@ -396,6 +396,11 @@
     <ClCompile Include="CPianoRoll.cpp" />
     <ClCompile Include="CMidiMonitorDlg.cpp" />
     <ClCompile Include="CFmMonitorDlg.cpp" />
+    <ClCompile Include="CWrdViewDlg.cpp" />
+    <ClCompile Include="WrdEngine.cpp" />
+    <ClCompile Include="MagImage.cpp" />
+    <ClCompile Include="ComposerConvert.cpp" />
+    <ClCompile Include="MidiPack.cpp" />
     <ClCompile Include="CEmu\cemu_catalog.cpp" />
     <ClCompile Include="CEmu\cemu_zipfs.cpp" />
     <ClCompile Include="CEmu\cemu_modepref.cpp" />
@@ -826,6 +831,11 @@
     <ClInclude Include="CPianoRoll.h" />
     <ClInclude Include="CMidiMonitorDlg.h" />
     <ClInclude Include="CFmMonitorDlg.h" />
+    <ClInclude Include="CWrdViewDlg.h" />
+    <ClInclude Include="WrdEngine.h" />
+    <ClInclude Include="MagImage.h" />
+    <ClInclude Include="ComposerConvert.h" />
+    <ClInclude Include="MidiPack.h" />
     <ClInclude Include="CEmu\cemu_types.h" />
     <ClInclude Include="CEmu\cemu_catalog.h" />
     <ClInclude Include="CEmu\cemu_modepref.h" />

@@ -83,6 +83,364 @@ static bool IsLikelyPeExe(LPCTSTR path, ULONGLONG minBytes)
 	return ok && rd == 2 && mz[0] == 'M' && mz[1] == 'Z';
 }
 
+// 確認省略の自動更新はダイアログが無いので、DL〜展開〜再起動の待ちを
+// 「固まった起動」に見せない。プロセス終了（exit）で窓は OS が消す。
+class CUpdateBusyWnd : public CWnd
+{
+public:
+	CCustomProgressCtrl m_progress;
+
+	CUpdateBusyWnd()
+		: m_bAero(FALSE)
+	{
+	}
+
+	virtual ~CUpdateBusyWnd()
+	{
+		if (m_hWnd != NULL)
+			DestroyWindow();
+	}
+
+	BOOL Create()
+	{
+		CCC_StartInwomanTimer();
+#if CCUSTOM_AERO_SUPPORT
+		m_bAero = CCC_IsAeroEnabled();
+#else
+		m_bAero = FALSE;
+#endif
+		CString strWndClass = AfxRegisterWndClass(
+			CS_HREDRAW | CS_VREDRAW,
+			::LoadCursor(NULL, IDC_WAIT),
+			m_bAero ? (HBRUSH)NULL : (HBRUSH)(COLOR_WINDOW + 1),
+			NULL);
+
+		UINT dpi = GetDpi(NULL);
+		int width = Scale(320, dpi);
+		int height = Scale(120, dpi);
+		int x = (GetSystemMetrics(SM_CXSCREEN) - width) / 2;
+		int y = (GetSystemMetrics(SM_CYSCREEN) - height) / 2;
+
+		BOOL result = CreateEx(
+			WS_EX_TOPMOST | WS_EX_TOOLWINDOW,
+			strWndClass,
+			_T(""),
+			WS_POPUP | WS_BORDER | (m_bAero ? (WS_CLIPCHILDREN | WS_CLIPSIBLINGS) : 0),
+			x, y, width, height,
+			NULL,
+			NULL);
+		if (!result)
+			return FALSE;
+
+#if CCUSTOM_AERO_SUPPORT
+		if (m_bAero) {
+			::SetClassLongPtr(m_hWnd, GCLP_HBRBACKGROUND, 0);
+			CCC_ApplyAero(m_hWnd, TRUE);
+			CCC_PrepareDialogSurface(m_hWnd, TRUE);
+		}
+#endif
+		if (m_font.GetSafeHandle() == NULL)
+			m_font.CreatePointFont(110, _T("MS UI Gothic"));
+		CRect progressRect(Scale(20, dpi), Scale(82, dpi), width - Scale(20, dpi), Scale(104, dpi));
+		m_progress.Create(WS_CHILD | WS_VISIBLE, progressRect, this, 1);
+		m_progress.SetRange(0, 100);
+		m_progress.SetPos(0);
+		m_progress.SetShowPercent(TRUE);
+		m_progress.SetColors(RGB(255, 236, 246), RGB(255, 170, 200), RGB(200, 120, 220));
+		m_progress.SetAeroMode(m_bAero);
+		SetWindowPos(&wndTopMost, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+		return TRUE;
+	}
+
+	void SetPos(int nPos)
+	{
+		if (m_progress.GetSafeHwnd()) {
+			m_progress.SetPos(nPos);
+			m_progress.UpdateWindow();
+			UpdateWindow();
+			Pump();
+		}
+	}
+
+	void SetStatusText(const CString& text)
+	{
+		m_strText = text;
+		if (m_hWnd) {
+			Invalidate(TRUE);
+			UpdateWindow();
+			Show();
+		}
+	}
+
+	void Show()
+	{
+		if (m_hWnd != NULL) {
+#if CCUSTOM_AERO_SUPPORT
+			if (m_bAero)
+				CCC_RefreshDwmBlur(m_hWnd);
+#endif
+			ShowWindow(SW_SHOW);
+			UpdateWindow();
+			Pump();
+		}
+	}
+
+	void Pump()
+	{
+		MSG msg;
+		while (::PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
+			if (msg.message == WM_QUIT) {
+				::PostQuitMessage((int)msg.wParam);
+				break;
+			}
+			if (msg.message == WM_TIMER)
+				continue;
+			::TranslateMessage(&msg);
+			::DispatchMessage(&msg);
+		}
+	}
+
+protected:
+	CString m_strText;
+	CFont m_font;
+	BOOL m_bAero;
+
+	static int Scale(int value, UINT dpi)
+	{
+		return (int)(((float)value) * ((float)dpi) / 96.0f);
+	}
+
+	static UINT GetDpi(HWND hWnd)
+	{
+		HDC hdc = ::GetDC(hWnd);
+		UINT dpi = GetDeviceCaps(hdc, LOGPIXELSX);
+		::ReleaseDC(hWnd, hdc);
+		return dpi;
+	}
+
+	afx_msg void OnPaint()
+	{
+		CPaintDC dc(this);
+		CRect clientRect;
+		GetClientRect(&clientRect);
+
+#if CCUSTOM_AERO_SUPPORT
+		if (m_bAero && CCC_IsWin11())
+			CCC_PaintAeroGaps(dc, this, nullptr);
+		else if (m_bAero)
+			dc.FillSolidRect(&clientRect, RGB(250, 250, 250));
+		else
+#endif
+		{
+			dc.FillSolidRect(&clientRect, COLOR_DIALOG_BG);
+		}
+
+		CPen pen(PS_SOLID, 2, RGB(232, 170, 198));
+		CPen* pOldPen = dc.SelectObject(&pen);
+		CBrush* pOldBr = (CBrush*)dc.SelectStockObject(NULL_BRUSH);
+		dc.Rectangle(&clientRect);
+		dc.SelectObject(pOldBr);
+		dc.SelectObject(pOldPen);
+
+		CFont* pOldFont = dc.SelectObject(&m_font);
+		dc.SetBkMode(TRANSPARENT);
+		dc.SetTextColor(RGB(140, 60, 100));
+
+		UINT dpi = GetDpi(m_hWnd);
+		const int hPad = Scale(16, dpi);
+		const int textAreaBottom = Scale(78, dpi);
+
+		CString title = m_strText;
+		CString subtitle;
+		const int nl = m_strText.Find(L'\n');
+		if (nl >= 0) {
+			title = m_strText.Left(nl);
+			subtitle = m_strText.Mid(nl + 1);
+		}
+
+		CSize titleSize = dc.GetTextExtent(title);
+		const int titleX = (clientRect.Width() - titleSize.cx) / 2;
+		const int titleY = Scale(10, dpi);
+		dc.TextOut(titleX, titleY, title);
+
+		if (!subtitle.IsEmpty()) {
+			const int wrapWidth = clientRect.Width() - hPad * 2;
+			CRect calcRect(0, 0, wrapWidth, 0);
+			dc.DrawText(subtitle, &calcRect, DT_WORDBREAK | DT_CALCRECT | DT_NOPREFIX);
+			CRect subRect(
+				hPad,
+				titleY + titleSize.cy + Scale(4, dpi),
+				clientRect.right - hPad,
+				titleY + titleSize.cy + Scale(4, dpi) + calcRect.Height());
+			if (subRect.bottom > textAreaBottom)
+				subRect.bottom = textAreaBottom;
+			dc.DrawText(subtitle, &subRect, DT_WORDBREAK | DT_CENTER | DT_NOPREFIX);
+		}
+
+		dc.SelectObject(pOldFont);
+	}
+
+	afx_msg BOOL OnEraseBkgnd(CDC* pDC)
+	{
+#if CCUSTOM_AERO_SUPPORT
+		if (m_bAero && CCC_IsWin11())
+			return TRUE;
+		if (m_bAero && pDC) {
+			CRect r;
+			GetClientRect(&r);
+			pDC->FillSolidRect(&r, RGB(248, 248, 248));
+			return TRUE;
+		}
+#else
+		UNREFERENCED_PARAMETER(pDC);
+#endif
+		return TRUE;
+	}
+
+	DECLARE_MESSAGE_MAP()
+};
+
+BEGIN_MESSAGE_MAP(CUpdateBusyWnd, CWnd)
+	ON_WM_PAINT()
+	ON_WM_ERASEBKGND()
+END_MESSAGE_MAP()
+
+static CUpdateBusyWnd* g_updateBusy = NULL;
+static int g_updateBusyLastPct = -2;
+static DWORD g_updateBusyLastTick = 0;
+
+static CString UpdateBusyDlWaitText()
+{
+	return LL14(
+		L"更新をダウンロードしています…\n（完了までしばらくかかります）",
+		L"Downloading the update…\n(This may take a moment)",
+		L"Telechargement de la mise a jour…\n(Cela peut prendre un moment)",
+		L"Download dell'aggiornamento…\n(Potrebbe richiedere un attimo)",
+		L"Descargando la actualizacion…\n(Puede tardar un momento)",
+		L"업데이트를 다운로드하는 중…\n(잠시 걸릴 수 있습니다)",
+		L"正在下载更新…\n（可能需要一些时间）",
+		L"جارٍ تنزيل التحديث…\n(قد يستغرق هذا بعض الوقت)",
+		L"Загрузка обновления…\n(Это может занять некоторое время)",
+		L"Update wird heruntergeladen…\n(Dies kann einen Moment dauern)",
+		L"A descarregar a atualizacao…\n(Isto pode demorar um pouco)",
+		L"Update downloaden…\n(Dit kan even duren)",
+		L"Pobieranie aktualizacji…\n(To moze chwile zajac)",
+		L"Guncelleme indiriliyor…\n(Bu biraz zaman alabilir)");
+}
+
+static CString UpdateBusyExtractText()
+{
+	return LL14(
+		L"更新を展開しています…",
+		L"Extracting the update…",
+		L"Extraction de la mise a jour…",
+		L"Estrazione dell'aggiornamento…",
+		L"Extrayendo la actualizacion…",
+		L"업데이트를 압축 해제하는 중…",
+		L"正在解压更新…",
+		L"جارٍ استخراج التحديث…",
+		L"Распаковка обновления…",
+		L"Update wird entpackt…",
+		L"A extrair a atualizacao…",
+		L"Update uitpakken…",
+		L"Rozpakowywanie aktualizacji…",
+		L"Guncelleme aciliyor…");
+}
+
+static CString UpdateBusyRestartText()
+{
+	return LL14(
+		L"再起動しています…",
+		L"Restarting…",
+		L"Redemarrage…",
+		L"Riavvio…",
+		L"Reiniciando…",
+		L"다시 시작하는 중…",
+		L"正在重新启动…",
+		L"جارٍ إعادة التشغيل…",
+		L"Перезапуск…",
+		L"Neustart…",
+		L"A reiniciar…",
+		L"Opnieuw starten…",
+		L"Ponowne uruchamianie…",
+		L"Yeniden baslatiliyor…");
+}
+
+static void UpdateBusyClose()
+{
+	g_updateBusyLastPct = -2;
+	g_updateBusyLastTick = 0;
+	if (!g_updateBusy)
+		return;
+	if (g_updateBusy->GetSafeHwnd())
+		g_updateBusy->DestroyWindow();
+	delete g_updateBusy;
+	g_updateBusy = NULL;
+}
+
+static void UpdateBusyShow(const CString& text, int pct)
+{
+	if (!g_updateBusy)
+		g_updateBusy = new CUpdateBusyWnd();
+	if (!g_updateBusy->GetSafeHwnd()) {
+		if (!g_updateBusy->Create()) {
+			delete g_updateBusy;
+			g_updateBusy = NULL;
+			return;
+		}
+	}
+	g_updateBusy->SetStatusText(text);
+	if (pct >= 0)
+		g_updateBusy->SetPos(pct);
+	else
+		g_updateBusy->Show();
+}
+
+static void UpdateBusyAlert(const CString& msg)
+{
+	UpdateBusyClose();
+	AfxMessageBox(msg);
+}
+
+static void UpdateBusyDlProgress(ULONGLONG done, ULONGLONG total)
+{
+	if (!g_updateBusy || !g_updateBusy->GetSafeHwnd())
+		return;
+	int pct = -1;
+	if (total > 0) {
+		pct = (int)((done * 100ULL) / total);
+		if (pct > 100)
+			pct = 100;
+	}
+	const DWORD now = GetTickCount();
+	if (pct == g_updateBusyLastPct && (now - g_updateBusyLastTick) < 120)
+		return;
+	g_updateBusyLastPct = pct;
+	g_updateBusyLastTick = now;
+	if (pct >= 0) {
+		CString t;
+		t.Format(LL14(
+			L"更新をダウンロードしています…\n%d%%",
+			L"Downloading the update…\n%d%%",
+			L"Telechargement de la mise a jour…\n%d%%",
+			L"Download dell'aggiornamento…\n%d%%",
+			L"Descargando la actualizacion…\n%d%%",
+			L"업데이트를 다운로드하는 중…\n%d%%",
+			L"正在下载更新…\n%d%%",
+			L"جارٍ تنزيل التحديث…\n%d%%",
+			L"Загрузка обновления…\n%d%%",
+			L"Update wird heruntergeladen…\n%d%%",
+			L"A descarregar a atualizacao…\n%d%%",
+			L"Update downloaden…\n%d%%",
+			L"Pobieranie aktualizacji…\n%d%%",
+			L"Guncelleme indiriliyor…\n%d%%"), pct);
+		g_updateBusy->SetStatusText(t);
+		g_updateBusy->SetPos(pct);
+	} else {
+		g_updateBusy->SetStatusText(UpdateBusyDlWaitText());
+	}
+}
+
 // HTTP HEAD で Last-Modified を取得、失敗時は 0
 static time_t HttpGetLastModified(const CString& url)
 {
@@ -330,6 +688,7 @@ static bool HttpDownloadToFile(const CString& url, const CString& localPath)
 			break;
 		}
 		total += bytesRead;
+		UpdateBusyDlProgress(total, contentLen);
 	}
 
 	f.Close();
@@ -489,7 +848,7 @@ static bool DoManualUpdateToDownloads(const CString& updateUrl, time_t serverTim
 
 	if (!HttpDownloadToFile(updateUrl, zipPath))
 	{
-		AfxMessageBox(LL14(
+		UpdateBusyAlert(LL14(
 			L"ダウンロードに失敗しました。\nネットワーク接続を確認してください。",
 			L"Download failed.\nPlease check your network connection.",
 			L"Telechargement echoue.\nVerifiez votre connexion reseau.",
@@ -507,10 +866,12 @@ static bool DoManualUpdateToDownloads(const CString& updateUrl, time_t serverTim
 		return false;
 	}
 
+	UpdateBusyShow(UpdateBusyExtractText(), 100);
+
 	if (!ExtractZipToDir(zipPath, destDir, TARGET_EXE_NAME, UPDATE_MAIN_EXE_MIN_BYTES)
 		|| !ExtractZipToDir(zipPath, destDir, TARGET_HOST_EXE_NAME, UPDATE_HOST_EXE_MIN_BYTES))
 	{
-		AfxMessageBox(LL14(
+		UpdateBusyAlert(LL14(
 			L"ZIPの展開に失敗しました。\nダウンロードフォルダのファイルを確認してください。",
 			L"Failed to extract the ZIP.\nPlease check the files in the Downloads folder.",
 			L"Echec de l'extraction du ZIP.\nVerifiez les fichiers du dossier Telechargements.",
@@ -557,7 +918,7 @@ static bool DoManualUpdateToDownloads(const CString& updateUrl, time_t serverTim
 
 	ShellExecute(NULL, _T("open"), destDir, NULL, NULL, SW_SHOWNORMAL);
 
-	AfxMessageBox(LL14(
+	UpdateBusyAlert(LL14(
 		L"自動更新に失敗したため、更新ファイルを「ダウンロード」フォルダへ展開しました。\n"
 		L"本プログラムを終了し、展開先の oggYSEDbgm_uni_avx2.exe と KpiHost64.exe\n"
 		L"（あれば oggYSEDbgm_uni_avx2.chm も）をインストールフォルダへ上書きコピーしてください。\n"
@@ -1036,6 +1397,8 @@ bool DoUpdateAndRestart()
 	extern TCHAR karento2[1024];
 	extern save savedata;
 
+	UpdateBusyShow(UpdateBusyDlWaitText(), 0);
+
 	const time_t exeTimeNow = GetExecutableModificationTimeUtc();
 	const bool prevFailed = (savedata.updateAttemptExeTime != 0
 		&& exeTimeNow != 0
@@ -1079,7 +1442,7 @@ bool DoUpdateAndRestart()
 	const CString updateUrl = ResolveUpdateUrl(&serverTime);
 	if (updateUrl.IsEmpty())
 	{
-		AfxMessageBox(LL14(
+		UpdateBusyAlert(LL14(
 			L"ダウンロードに失敗しました。\nネットワーク接続を確認してください。",
 			L"Download failed.\nPlease check your network connection.",
 			L"Telechargement echoue.\nVerifiez votre connexion reseau.",
@@ -1101,6 +1464,7 @@ bool DoUpdateAndRestart()
 	if (prevFailed)
 	{
 		DoManualUpdateToDownloads(updateUrl, serverTime);
+		UpdateBusyClose();
 		return false;
 	}
 
@@ -1114,7 +1478,7 @@ bool DoUpdateAndRestart()
 
 	if (!HttpDownloadToFile(updateUrl, zipPath))
 	{
-		AfxMessageBox(LL14(
+		UpdateBusyAlert(LL14(
 			L"ダウンロードに失敗しました。\nネットワーク接続を確認してください。",
 			L"Download failed.\nPlease check your network connection.",
 			L"Telechargement echoue.\nVerifiez votre connexion reseau.",
@@ -1132,12 +1496,14 @@ bool DoUpdateAndRestart()
 		return false;
 	}
 
+	UpdateBusyShow(UpdateBusyExtractText(), 100);
+
 	// 終了前に展開して内容を確認（ZIP破損・サイズ不一致・非PEはここで弾く）
 	if (!ExtractZipToDir(zipPath, extractDir, TARGET_EXE_NAME, UPDATE_MAIN_EXE_MIN_BYTES)
 		|| !ExtractZipToDir(zipPath, extractDir, TARGET_HOST_EXE_NAME, UPDATE_HOST_EXE_MIN_BYTES))
 	{
 		DeleteFile(zipPath);
-		AfxMessageBox(LL14(
+		UpdateBusyAlert(LL14(
 			L"ZIPの展開に失敗しました。\n一時フォルダへの書き込み権限やディスク容量を確認してください。",
 			L"Failed to extract the ZIP.\nCheck write permission and disk space in the temp folder.",
 			L"Echec de l'extraction du ZIP.\nVerifiez les droits d'ecriture et l'espace disque du dossier temporaire.",
@@ -1170,7 +1536,7 @@ bool DoUpdateAndRestart()
 		DeleteFile(zipPath);
 		DeleteFile(extractedPath);
 		DeleteFile(extractedHostPath);
-		AfxMessageBox(LL14(
+		UpdateBusyAlert(LL14(
 			L"展開した更新ファイルが不正です。\nもう一度更新を試すか、ネットワークを確認してください。",
 			L"The extracted update files are invalid.\nPlease retry the update or check your network.",
 			L"Les fichiers extraits sont invalides.\nReessayez la mise a jour ou verifiez le reseau.",
@@ -1224,7 +1590,7 @@ bool DoUpdateAndRestart()
 	CFile bat;
 	if (!bat.Open(batPath, CFile::modeCreate | CFile::modeWrite | CFile::shareExclusive))
 	{
-		AfxMessageBox(LL14(
+		UpdateBusyAlert(LL14(
 			L"更新用スクリプトの作成に失敗しました。\n一時フォルダへの書き込み権限を確認してください。",
 			L"Failed to create the update script.\nCheck write permission in the temp folder.",
 			L"Echec de la creation du script de mise a jour.\nVerifiez les droits d'ecriture du dossier temporaire.",
@@ -1361,12 +1727,13 @@ bool DoUpdateAndRestart()
 	}
 
 	// 命令書（バッチファイル）の実行
+	UpdateBusyShow(UpdateBusyRestartText(), 100);
 	const HINSTANCE hShell = ShellExecute(NULL, _T("open"), batPath, NULL, tempPath, SW_HIDE);
 	if ((INT_PTR)hShell <= 32)
 	{
 		savedata.updateAttemptExeTime = 0;
 		MpPersistSavedataQuick();
-		AfxMessageBox(LL14(
+		UpdateBusyAlert(LL14(
 			L"更新用スクリプトの起動に失敗しました。",
 			L"Failed to start the update script.",
 			L"Echec du demarrage du script de mise a jour.",
